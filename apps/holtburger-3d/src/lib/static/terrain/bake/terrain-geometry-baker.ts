@@ -17,6 +17,7 @@ import type {
 	TerrainTextureUseFacts,
 } from "../../contracts";
 import { uniqueSortedStaticTextureUseOwners } from "../../contracts";
+import { createLayerOwnerKeyId } from "../../layer-owners";
 import { classifyTerrainMaterialFamily } from "./terrain-material-family-classifier";
 import { buildTerrainMaterialLayerPlan } from "./terrain-material-layer-planner";
 
@@ -114,8 +115,9 @@ function bakeTerrainGeometryItem(
 		);
 	}
 
+	const textureUseScopeId = createLayerOwnerKeyId(item.targetOwnerKey);
 	const drawUnits = createTerrainGeometryDrawUnits(
-		item.work.workId,
+		textureUseScopeId,
 		item.payload.scope,
 		input.staticBatchId,
 	);
@@ -127,13 +129,13 @@ function bakeTerrainGeometryItem(
 }
 
 function createTerrainGeometryDrawUnits(
-	workId: string,
+	textureUseScopeId: string,
 	payload: TerrainStaticScopePayload,
 	staticBatchId: string,
 ): readonly TerrainGeometryStaticDrawUnit[] {
 	const terrainMaterialPlan = buildTerrainMaterialLayerPlan({
 		createTextureUseId: (textureUse) =>
-			createTerrainTextureUseId(workId, textureUse),
+			createTerrainTextureUseId(textureUseScopeId, textureUse),
 		payload,
 	});
 	const slices = createTerrainGeometrySlices(payload, terrainMaterialPlan);
@@ -148,8 +150,8 @@ function createTerrainGeometryDrawUnits(
 		createTerrainGeometryDrawUnit({
 			drawUnitId:
 				slices.length === 1
-					? `${workId}:terrain-geometry`
-					: `${workId}:terrain-geometry:${slice.slice.sliceId.replaceAll("/", "-")}`,
+					? `${textureUseScopeId}:terrain-geometry`
+					: `${textureUseScopeId}:terrain-geometry:${slice.slice.sliceId.replaceAll("/", "-")}`,
 			landblockId: payload.landblock.landblockId,
 			pcodeByQuadIndex,
 			quadByIndex,
@@ -404,7 +406,7 @@ function createTerrainBakeTextureUses(
 				continue;
 			}
 			const textureUseId = createTerrainTextureUseId(
-				item.work.workId,
+				createLayerOwnerKeyId(item.targetOwnerKey),
 				textureUse,
 			);
 			if (!boundTextureUseIds.has(textureUseId)) {
@@ -437,7 +439,7 @@ function createTerrainBakeTextureUses(
 }
 
 function createTerrainTextureUseId(
-	workId: string,
+	textureUseScopeId: string,
 	textureUse: TerrainTextureUseFacts,
 ): string {
 	if (!textureUse.preparedTextureUse) {
@@ -445,7 +447,7 @@ function createTerrainTextureUseId(
 	}
 
 	return [
-		workId,
+		textureUseScopeId,
 		"prepared-texture",
 		textureUse.role,
 		textureUse.preparedTextureUse.usage,

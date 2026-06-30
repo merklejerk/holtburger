@@ -2197,7 +2197,7 @@ Decisions and course corrections:
 
 ### Phase 15: Scheduler Terminology Cleanup
 
-Status: pending.
+Status: completed on 2026-06-30.
 
 Goal: make transient static scheduling identifiers read like scheduler state instead of lifecycle/resource ownership.
 
@@ -2220,19 +2220,25 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Classify each `desiredKey`, `activeWork`, and `workId` surface as internal scheduler state, resource-id input, public diagnostics, test helper, or removable confusion.
-- [ ] Record `demandKey`, `inFlightStaticWork`, and `staticWorkId` as the default replacement names unless implementation evidence proves a narrower name is clearer.
-- [ ] Rename coordinator, demand planner, diagnostics, fake-worker, runtime, and test usages.
-- [ ] Refactor resource-id construction that currently treats scheduler work ids as durable owner ids.
-- [ ] Run targeted static coordinator/runtime tests plus broad TypeScript validation.
-- [ ] Run zero-reference audits for names this phase removes.
-- [ ] Audit for and delete any old-name alias, fallback, compatibility wrapper, or test shim introduced during the rename.
-- [ ] Record any intentionally retained diagnostic terminology with rationale.
+- [x] Classify each `desiredKey`, `activeWork`, and `workId` surface as internal scheduler state, resource-id input, public diagnostics, test helper, or removable confusion.
+- [x] Record `demandKey`, `inFlightStaticWork`, and `staticWorkId` as the default replacement names unless implementation evidence proves a narrower name is clearer.
+- [x] Rename coordinator, demand planner, diagnostics, fake-worker, runtime, and test usages.
+- [x] Refactor resource-id construction that currently treats scheduler work ids as durable owner ids.
+- [x] Run targeted static coordinator/runtime tests plus broad TypeScript validation.
+- [x] Run zero-reference audits for names this phase removes.
+- [x] Audit for and delete any old-name alias, fallback, compatibility wrapper, or test shim introduced during the rename.
+- [x] Record any intentionally retained diagnostic terminology with rationale.
 
 Decisions and course corrections:
 
 - Phase 12 proved these fields are not lifecycle owners. This phase exists because even correctly classified scheduler names can keep causing review friction if they still sound like parallel ownership.
 - Dry run on 2026-06-30 found `workId` has the highest blast radius because it is used both for scheduler correlation and as a baked resource id prefix. Do not solve this with a cosmetic field rename that leaves resource ownership semantics muddy.
+- Renamed scheduler state and snapshots from `activeWork` to `inFlightStaticWork`, desired-work matching from `desiredKey` to `demandKey`, and scheduler correlation fields from `workId` to `staticWorkId`.
+- Refactored terrain draw-unit IDs, terrain texture-use IDs, static-object draw-unit IDs, static-object texture-use IDs, and structured-interior texture-use IDs to derive from layer-owner/resource scope ids instead of scheduler `staticWorkId`.
+- Kept `staticWorkId` only for scheduler correlation, fake worker completion lookup, diagnostics, and warning context. Those retained uses are intentionally not resource ownership.
+- No old-name getters, aliases, snapshot compatibility fields, or fallback branches were added.
+- Validation passed: `npm run lint:ts`; `npm run check`; focused `npm run test:ts -- src/lib/static/coordinator/static-coordinator.test.ts src/lib/static/demand-planner.test.ts src/lib/static/terrain/bake/terrain-geometry-baker.test.ts src/lib/static/objects/bake/static-object-compatibility-partitioner.test.ts src/lib/static/objects/bake/static-object-bake-attachments.test.ts src/lib/static/env-cells/bake/env-cell-system-baker.test.ts src/lib/static/bake/static-material-texture-policy.test.ts src/lib/runtime/client-runtime.test.ts`; full `npm run test:ts` passed 68 files / 568 tests.
+- Zero-reference audit passed for executable bare `activeWork`, `ActiveWork`, `desiredKey`, `DesiredWorkKey`, `DesiredKey`, `workId`, `WorkId`, and accidental `staticStaticWorkId` under `apps/holtburger-3d/src/lib/static` and `apps/holtburger-3d/src/lib/runtime`.
 
 ### Phase 16: Static Object Bake Naming Cleanup
 

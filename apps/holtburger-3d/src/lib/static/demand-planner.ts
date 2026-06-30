@@ -159,7 +159,7 @@ function createScheduledStaticWork(input: {
 	return {
 		job: input.job,
 		priority: input.priority,
-		workId: `${input.revision}:${scopeKey}:${input.job.domain}`,
+		staticWorkId: `${input.revision}:${scopeKey}:${input.job.domain}`,
 		revision: input.revision,
 	};
 }
@@ -291,7 +291,7 @@ function compareScheduledStaticWork(
 		return left.priority - right.priority;
 	}
 
-	return left.workId.localeCompare(right.workId);
+	return left.staticWorkId.localeCompare(right.staticWorkId);
 }
 
 function normalizeRadius(value: number): number {

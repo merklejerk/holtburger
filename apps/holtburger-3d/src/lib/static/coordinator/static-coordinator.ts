@@ -85,7 +85,7 @@ export class StaticCoordinator {
 	readonly #commitListeners = new Set<StaticCoordinatorCommitListener>();
 	readonly #sourcePayloadListeners =
 		new Set<StaticCoordinatorSourcePayloadListener>();
-	readonly #activeWork = new Map<string, MutableScheduledStaticWorkStatus>();
+	readonly #inFlightStaticWork = new Map<string, MutableScheduledStaticWorkStatus>();
 	readonly #pendingBatches = new Map<string, PendingStaticBakeBatch>();
 	readonly #residentDrawUnitIds = new Set<string>();
 	readonly #residentResourcesByOwnerId = new Map<
@@ -109,7 +109,7 @@ export class StaticCoordinator {
 		StaticObjectBakeDiagnostics
 	>();
 	readonly #recentTiming: StaticCoordinatorTimingDiagnostics[] = [];
-	readonly #resolverMsByWorkId = new Map<string, number>();
+	readonly #resolverMsByStaticWorkId = new Map<string, number>();
 	readonly #latestMaterialCoverageByKey = new Map<
 		string,
 		StaticMaterialCoverageReport
@@ -143,15 +143,15 @@ export class StaticCoordinator {
 		this.#assertActive();
 		this.#revision += 1;
 		const demandPlan = planStaticDemand(demand, this.#revision);
-		const desiredKeys = new Set(demandPlan.work.map(createDesiredWorkKey));
+		const demandKeys = new Set(demandPlan.work.map(createDemandWorkKey));
 		const desiredOwnerIds = new Set(
 			demandPlan.work.map((work) => createLayerOwnerKeyIdForWork(work)),
 		);
 		const newWorkItems: ScheduledStaticWork[] = [];
 
-		for (const status of Array.from(this.#activeWork.values())) {
-			if (!desiredKeys.has(status.desiredKey)) {
-				this.#activeWork.delete(status.workId);
+		for (const status of Array.from(this.#inFlightStaticWork.values())) {
+			if (!demandKeys.has(status.demandKey)) {
+				this.#inFlightStaticWork.delete(status.staticWorkId);
 			}
 		}
 		const removedResources = this.#evictResidentResourcesExcept(desiredOwnerIds);
@@ -162,20 +162,20 @@ export class StaticCoordinator {
 		this.#pruneStaticObjectBakeDiagnosticsByOwnerIds(desiredOwnerIds);
 
 		for (const work of demandPlan.work) {
-			const desiredKey = createDesiredWorkKey(work);
-			const existing = this.#findActiveWorkByDesiredKey(desiredKey);
+			const demandKey = createDemandWorkKey(work);
+			const existing = this.#findInFlightStaticWorkByDemandKey(demandKey);
 			if (existing && existing.status !== "failed") {
 				continue;
 			}
 			if (existing) {
-				this.#activeWork.delete(existing.workId);
+				this.#inFlightStaticWork.delete(existing.staticWorkId);
 			}
-			this.#activeWork.set(work.workId, {
-				desiredKey,
+			this.#inFlightStaticWork.set(work.staticWorkId, {
+				demandKey,
 				domain: work.job.domain,
 				ownerId: createLayerOwnerKeyIdForWork(work),
 				ownerKey: createLayerOwnerKeyForWork(work),
-				workId: work.workId,
+				staticWorkId: work.staticWorkId,
 				revision: work.revision,
 				scopeKey: describeStaticScopeKey(work.job.scope),
 				status: "requested",
@@ -197,9 +197,9 @@ export class StaticCoordinator {
 			void this.#resolveSourceThenBake(sourceRequest);
 		}
 
-		const activeWork = demandPlan.work
+		const inFlightStaticWork = demandPlan.work
 			.map((work) =>
-				this.#findActiveWorkByDesiredKey(createDesiredWorkKey(work)),
+				this.#findInFlightStaticWorkByDemandKey(createDemandWorkKey(work)),
 			)
 			.filter((status): status is MutableScheduledStaticWorkStatus =>
 				Boolean(status),
@@ -207,7 +207,7 @@ export class StaticCoordinator {
 			.map((status) => status.work);
 
 		return {
-			activeWork,
+			inFlightStaticWork,
 			removedResources,
 			retainedLayerOwners: demandPlan.retainedLayerOwners,
 		};
@@ -241,14 +241,14 @@ export class StaticCoordinator {
 	}
 
 	createSnapshot(): StaticCoordinatorSnapshot {
-		const activeWork = Array.from(this.#activeWork.values()).map(
+		const inFlightStaticWork = Array.from(this.#inFlightStaticWork.values()).map(
 			toScheduledStaticWorkStatus,
 		);
 		const ownerStates = this.#createOwnerStates();
 
 		return {
-			activeWork,
-			baking: countStatus(activeWork, "baking"),
+			inFlightStaticWork,
+			baking: countStatus(inFlightStaticWork, "baking"),
 			committed: this.#committed,
 			committedDrawUnits: this.#committedDrawUnits,
 			failed: this.#failed,
@@ -261,8 +261,8 @@ export class StaticCoordinator {
 			latestTerrainPayload: this.#latestTerrainPayload,
 			ownerStates,
 			recentTiming: [...this.#recentTiming],
-			requested: activeWork.length,
-			resolving: countStatus(activeWork, "resolving"),
+			requested: inFlightStaticWork.length,
+			resolving: countStatus(inFlightStaticWork, "resolving"),
 			revision: this.#revision,
 			staleBakeResults: this.#staleBakeResults,
 			staleResolverResults: this.#staleResolverResults,
@@ -273,14 +273,14 @@ export class StaticCoordinator {
 	}
 
 	createOverviewSnapshot(): StaticCoordinatorOverviewSnapshot {
-		const activeWork = Array.from(this.#activeWork.values());
+		const inFlightStaticWork = Array.from(this.#inFlightStaticWork.values());
 		return {
-			baking: activeWork.filter((work) => work.status === "baking").length,
+			baking: inFlightStaticWork.filter((work) => work.status === "baking").length,
 			committed: this.#committed,
 			latestEnvCellSystemPayload: this.#latestEnvCellSystemPayload,
 			latestTerrainPayload: this.#latestTerrainPayload,
-			requested: activeWork.length,
-			resolving: activeWork.filter((work) => work.status === "resolving")
+			requested: inFlightStaticWork.length,
+			resolving: inFlightStaticWork.filter((work) => work.status === "resolving")
 				.length,
 			revision: this.#revision,
 		};
@@ -294,7 +294,7 @@ export class StaticCoordinator {
 		this.#disposed = true;
 		disposeIfAvailable(this.#resolver);
 		disposeIfAvailable(this.#baker);
-		this.#activeWork.clear();
+		this.#inFlightStaticWork.clear();
 		for (const pendingBatch of this.#pendingBatches.values()) {
 			if (pendingBatch.timeoutId) {
 				clearTimeout(pendingBatch.timeoutId);
@@ -312,8 +312,8 @@ export class StaticCoordinator {
 		sourceRequest: StaticLandblockSceneLodSourceRequest,
 	): Promise<void> {
 		const works = sourceRequest.requestedLayers.flatMap((layer) => {
-			const work = this.#findActiveWorkByDesiredKey(
-				createDesiredWorkKeyForSourceLayer(sourceRequest.landblockId, layer),
+			const work = this.#findInFlightStaticWorkByDemandKey(
+				createDemandWorkKeyForSourceLayer(sourceRequest.landblockId, layer),
 			)?.work;
 			return work ? [work] : [];
 		});
@@ -335,8 +335,8 @@ export class StaticCoordinator {
 		const resolverMs = nowMs() - resolverStartedAt;
 
 		for (const recipe of resolution.recipes) {
-			const work = this.#findActiveWorkByDesiredKey(
-				createDesiredWorkKeyForJob(recipe.payload.job),
+			const work = this.#findInFlightStaticWorkByDemandKey(
+				createDemandWorkKeyForJob(recipe.payload.job),
 			)?.work;
 			if (
 				!work ||
@@ -348,7 +348,7 @@ export class StaticCoordinator {
 				continue;
 			}
 
-			this.#resolverMsByWorkId.set(work.workId, resolverMs);
+			this.#resolverMsByStaticWorkId.set(work.staticWorkId, resolverMs);
 
 			this.#recordResolvedPayload(recipe.payload);
 			this.#emitSourcePayloadDelta({
@@ -490,7 +490,7 @@ export class StaticCoordinator {
 				bakeMs,
 				resolverMs: sumNullableNumbers(
 					currentWorks.map(
-						(work) => this.#resolverMsByWorkId.get(work.workId) ?? null,
+						(work) => this.#resolverMsByStaticWorkId.get(work.staticWorkId) ?? null,
 					),
 				),
 			});
@@ -516,7 +516,7 @@ export class StaticCoordinator {
 		const resourcesByOwnerId = collectCommittedResourceKeysByOwnerId(result);
 
 		for (const work of result.works) {
-			const status = this.#activeWork.get(work.workId);
+			const status = this.#inFlightStaticWork.get(work.staticWorkId);
 			if (!status) {
 				continue;
 			}
@@ -547,7 +547,7 @@ export class StaticCoordinator {
 		}
 		this.#committedDrawUnits = this.#residentDrawUnitIds.size;
 		for (const work of result.works) {
-			this.#resolverMsByWorkId.delete(work.workId);
+			this.#resolverMsByStaticWorkId.delete(work.staticWorkId);
 		}
 		this.#recordTiming({
 			attachmentMs: timing.attachmentMs,
@@ -625,11 +625,11 @@ export class StaticCoordinator {
 		});
 	}
 
-	#findActiveWorkByDesiredKey(
-		desiredKey: string,
+	#findInFlightStaticWorkByDemandKey(
+		demandKey: string,
 	): MutableScheduledStaticWorkStatus | null {
-		for (const status of this.#activeWork.values()) {
-			if (status.desiredKey === desiredKey) {
+		for (const status of this.#inFlightStaticWork.values()) {
+			if (status.demandKey === demandKey) {
 				return status;
 			}
 		}
@@ -692,13 +692,13 @@ export class StaticCoordinator {
 			return;
 		}
 
-		const status = this.#activeWork.get(work.workId);
+		const status = this.#inFlightStaticWork.get(work.staticWorkId);
 
 		if (status) {
 			status.status = "failed";
 			this.#failed += 1;
 			console.error(
-				`static resolver work ${work.workId} failed; static content for ${describeStaticScopeKey(work.job.scope)}/${work.job.domain} was not resolved.`,
+				`static resolver work ${work.staticWorkId} failed; static content for ${describeStaticScopeKey(work.job.scope)}/${work.job.domain} was not resolved.`,
 				{
 					message,
 					revision: work.revision,
@@ -765,7 +765,7 @@ export class StaticCoordinator {
 			return;
 		}
 
-		const current = this.#activeWork.get(work.workId);
+		const current = this.#inFlightStaticWork.get(work.staticWorkId);
 
 		if (!current) {
 			return;
@@ -776,7 +776,7 @@ export class StaticCoordinator {
 	}
 
 	#createOwnerStates(): readonly LayerOwnerState[] {
-		return Array.from(this.#activeWork.values())
+		return Array.from(this.#inFlightStaticWork.values())
 			.map((status) => ({
 				key: status.ownerKey,
 				lifecycle: createLayerOwnerLifecycle(
@@ -793,7 +793,7 @@ export class StaticCoordinator {
 	}
 
 	#isCurrent(work: ScheduledStaticWork): boolean {
-		return !this.#disposed && this.#activeWork.has(work.workId);
+		return !this.#disposed && this.#inFlightStaticWork.has(work.staticWorkId);
 	}
 
 	#isWorkOwnerDemanded(work: ScheduledStaticWork): boolean {
@@ -828,7 +828,7 @@ export class StaticCoordinator {
 
 	#isLayerOwnerDemanded(ownerKey: LayerOwnerState["key"]): boolean {
 		const ownerId = createLayerOwnerKeyId(ownerKey);
-		for (const status of this.#activeWork.values()) {
+		for (const status of this.#inFlightStaticWork.values()) {
 			if (status.ownerId === ownerId) {
 				return true;
 			}
@@ -840,7 +840,7 @@ export class StaticCoordinator {
 type MutableScheduledStaticWorkStatus = {
 	-readonly [Key in keyof ScheduledStaticWorkStatus]: ScheduledStaticWorkStatus[Key];
 } & {
-	readonly desiredKey: string;
+	readonly demandKey: string;
 	readonly ownerId: string;
 	readonly ownerKey: LayerOwnerState["key"];
 	readonly work: ScheduledStaticWork;
@@ -894,15 +894,15 @@ function createPendingBatchKey(work: ScheduledStaticWork): string {
 	return [work.revision.toString(), work.job.domain].join(":");
 }
 
-function createDesiredWorkKey(work: ScheduledStaticWork): string {
+function createDemandWorkKey(work: ScheduledStaticWork): string {
 	return `${describeStaticScopeKey(work.job.scope)}:${work.job.domain}`;
 }
 
-function createDesiredWorkKeyForJob(job: ScheduledStaticWork["job"]): string {
+function createDemandWorkKeyForJob(job: ScheduledStaticWork["job"]): string {
 	return `${describeStaticScopeKey(job.scope)}:${job.domain}`;
 }
 
-function createDesiredWorkKeyForSourceLayer(
+function createDemandWorkKeyForSourceLayer(
 	landblockId: number,
 	layer: StaticLandblockSceneLodLayerRequest,
 ): string {
@@ -913,11 +913,11 @@ function createSourceRequestsForNewWork(
 	sourceRequests: readonly StaticLandblockSceneLodSourceRequest[],
 	newWorkItems: readonly ScheduledStaticWork[],
 ): readonly StaticLandblockSceneLodSourceRequest[] {
-	const newDesiredKeys = new Set(newWorkItems.map(createDesiredWorkKey));
+	const newDemandKeys = new Set(newWorkItems.map(createDemandWorkKey));
 	return sourceRequests.flatMap((sourceRequest) => {
 		const requestedLayers = sourceRequest.requestedLayers.filter((layer) =>
-			newDesiredKeys.has(
-				createDesiredWorkKeyForSourceLayer(sourceRequest.landblockId, layer),
+			newDemandKeys.has(
+				createDemandWorkKeyForSourceLayer(sourceRequest.landblockId, layer),
 			),
 		);
 		if (requestedLayers.length === 0) {
@@ -984,20 +984,20 @@ function formatHex32(value: number): string {
 	return (value >>> 0).toString(16).padStart(8, "0");
 }
 
-function createDesiredKeyForDrawUnit(input: {
+function createDemandKeyForDrawUnit(input: {
 	readonly domain: StaticDomain;
 	readonly landblockId: number;
 }): string {
 	return `landblock:${(input.landblockId >>> 0).toString(16).padStart(8, "0")}:${input.domain}`;
 }
 
-function getDrawUnitDesiredKey(drawUnit: StaticDrawUnit): string {
+function getDrawUnitDemandKey(drawUnit: StaticDrawUnit): string {
 	if (
 		drawUnit.kind === "terrain-geometry" ||
 		drawUnit.kind === "static-object-geometry" ||
 		drawUnit.kind === "structured-interior-geometry"
 	) {
-		return createDesiredKeyForDrawUnit({
+		return createDemandKeyForDrawUnit({
 			domain: drawUnit.domain,
 			landblockId: drawUnit.landblockId,
 		});
@@ -1165,18 +1165,18 @@ function filterStaticBakeResultForWorks(
 	result: StaticBakeBatchResult,
 	works: readonly ScheduledStaticWork[],
 ): StaticBakeBatchResult {
-	const desiredKeys = new Set(works.map(createDesiredWorkKey));
+	const demandKeys = new Set(works.map(createDemandWorkKey));
 	const ownerIds = new Set(works.map(createLayerOwnerKeyIdForWork));
 	const drawUnitIds = new Set(
 		result.drawUnits
-			.filter((drawUnit) => desiredKeys.has(getDrawUnitDesiredKey(drawUnit)))
+			.filter((drawUnit) => demandKeys.has(getDrawUnitDemandKey(drawUnit)))
 			.map((drawUnit) => drawUnit.drawUnitId),
 	);
 	const retainedPortalApertureResourceIds = new Set(
 		result.portalApertureResources
 			.filter((resource) =>
-				desiredKeys.has(
-					createDesiredKeyForDrawUnit({
+				demandKeys.has(
+					createDemandKeyForDrawUnit({
 						domain: resource.sourceDomain,
 						landblockId: resource.landblockId,
 					}),
@@ -1186,8 +1186,8 @@ function filterStaticBakeResultForWorks(
 	);
 	const retainedStaticObjectRenderInstances =
 		result.staticObjectRenderInstances.filter((instance) =>
-			desiredKeys.has(
-				createDesiredKeyForDrawUnit({
+			demandKeys.has(
+				createDemandKeyForDrawUnit({
 					domain: instance.domain,
 					landblockId: instance.landblockId,
 				}),
@@ -1204,8 +1204,8 @@ function filterStaticBakeResultForWorks(
 		),
 		staticObjectBakeDiagnostics: result.staticObjectBakeDiagnostics.filter(
 			(diagnostics) =>
-				desiredKeys.has(
-					createDesiredKeyForDrawUnit({
+				demandKeys.has(
+					createDemandKeyForDrawUnit({
 						domain: diagnostics.domain,
 						landblockId: diagnostics.landblockId,
 					}),
@@ -1292,7 +1292,7 @@ function toScheduledStaticWorkStatus(
 		revision: status.revision,
 		scopeKey: status.scopeKey,
 		status: status.status,
-		workId: status.workId,
+		staticWorkId: status.staticWorkId,
 	};
 }
 
@@ -1325,7 +1325,7 @@ function createEvictionStaticBatchId(revision: number): string {
 function createStaticObjectBakeDiagnosticsKey(
 	diagnostics: StaticObjectBakeDiagnostics,
 ): string {
-	return createDesiredKeyForDrawUnit({
+	return createDemandKeyForDrawUnit({
 		domain: diagnostics.domain,
 		landblockId: diagnostics.landblockId,
 	});

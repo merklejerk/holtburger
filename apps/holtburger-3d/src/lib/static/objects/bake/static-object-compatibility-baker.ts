@@ -32,7 +32,10 @@ import type {
 	StaticObjectDynamicSeedClassificationReasonCounts,
 } from "../../contracts";
 import { uniqueSortedStaticTextureUseOwners } from "../../contracts";
-import { createLayerPeerRecordOwnerForStaticWork } from "../../layer-owners";
+import {
+	createLayerOwnerKeyId,
+	createLayerPeerRecordOwnerForStaticWork,
+} from "../../layer-owners";
 import { createBuildingTransitionStaticPortalGraph } from "../../portal-graphs";
 import {
 	AC_UNIT_SCALE,
@@ -274,6 +277,7 @@ function bakeStaticObjectCompatibilityItem(
 			: null;
 	const partitionPlan = partitionStaticObjectCompatibility(scope);
 	const sourceIndex = new StaticObjectBakeSourceIndex(scope, input.attachments);
+	const resourceIdPrefix = createLayerOwnerKeyId(item.targetOwnerKey);
 	const renderablePartitions = partitionPlan.partitions.filter((partition) => {
 		if (isRenderableStaticObjectPartition(partition)) {
 			return true;
@@ -285,6 +289,7 @@ function bakeStaticObjectCompatibilityItem(
 	const instancedOutput = createStaticObjectInstancedOutput({
 		partitions: renderablePartitions,
 		payload: scope,
+		resourceIdPrefix,
 		sourceIndex,
 		staticBatchId: input.staticBatchId,
 		work: item.work,
@@ -297,6 +302,7 @@ function bakeStaticObjectCompatibilityItem(
 		createStaticObjectGeometryBakeOutput({
 			partition,
 			payload: scope,
+			resourceIdPrefix,
 			sourceIndex,
 			work: item.work,
 		}),
@@ -366,6 +372,7 @@ function bakeStaticObjectCompatibilityItem(
 		staticObjectVisualResources: instancedOutput.resources,
 		textureUses: createStaticObjectBakeTextureUses({
 			partitions: bakedPartitions,
+			resourceIdPrefix,
 			staticBatchId: input.staticBatchId,
 			work: item.work,
 		}).concat(instancedOutput.textureUses),
@@ -720,6 +727,7 @@ function sumNumbers(values: readonly number[]): number {
 function createStaticObjectInstancedOutput(options: {
 	readonly partitions: readonly StaticObjectCompatibilityPartition[];
 	readonly payload: StaticObjectCompatibilityPayload;
+	readonly resourceIdPrefix: string;
 	readonly sourceIndex: StaticObjectBakeSourceIndex;
 	readonly staticBatchId: string;
 	readonly work: ScheduledStaticWork;
@@ -754,7 +762,7 @@ function createStaticObjectInstancedOutput(options: {
 		);
 		const materialEntries = createStaticObjectMaterialTableEntries({
 			partition,
-			work: options.work,
+			textureUseScopeId: options.resourceIdPrefix,
 		});
 		const materialEntryByKey = new Map(
 			partition.coarseTablePlan.entries.map((entry, index) => [
@@ -923,7 +931,7 @@ function createStaticObjectInstancedOutput(options: {
 				createTextureUseId: (dataUse, wrapMode) =>
 					createStaticObjectTextureUseId({
 						dataUse,
-						work: options.work,
+						textureUseScopeId: options.resourceIdPrefix,
 						wrapMode,
 					}),
 				domain: options.payload.domain,
@@ -1338,7 +1346,7 @@ function warnAboutSkippedStaticObjectPartition(
 			reason: partition.reason,
 			renderCoverage: partition.renderCoverage,
 			triangleCount: partition.triangleCount,
-			workId: work.workId,
+			staticWorkId: work.staticWorkId,
 		},
 	);
 }
@@ -1352,9 +1360,13 @@ function createStaticObjectGeometryBakeOutput(options: {
 	readonly work: ScheduledStaticWork;
 	readonly payload: StaticObjectCompatibilityPayload;
 	readonly partition: StaticObjectCompatibilityPartition;
+	readonly resourceIdPrefix: string;
 	readonly sourceIndex: StaticObjectBakeSourceIndex;
 }): StaticObjectGeometryBakeOutput {
-	const materialEntries = createStaticObjectMaterialTableEntries(options);
+	const materialEntries = createStaticObjectMaterialTableEntries({
+		partition: options.partition,
+		textureUseScopeId: options.resourceIdPrefix,
+	});
 	const materialSlotByEntryKey = new Map<string, number>(
 		options.partition.coarseTablePlan.entries.map((entry, index) => [
 			entry.materialEntryKey,
@@ -1382,7 +1394,7 @@ function createStaticObjectGeometryBakeOutput(options: {
 			`Renderable static object partition ${options.partition.sliceId} has no material table entries.`,
 		);
 	}
-	const drawUnitId = `${options.work.workId}:static-object-partition:${options.partition.sliceId.replaceAll("/", "-")}`;
+	const drawUnitId = `${options.resourceIdPrefix}:static-object-partition:${options.partition.sliceId.replaceAll("/", "-")}`;
 
 	const drawUnit: StaticObjectGeometryStaticDrawUnit = {
 		coordinateSpace: "landblock-render-local",
@@ -1471,15 +1483,15 @@ function createLayerPeerRecordOwner(
 }
 
 function createStaticObjectMaterialTableEntries(options: {
-	readonly work: ScheduledStaticWork;
 	readonly partition: StaticObjectCompatibilityPartition;
+	readonly textureUseScopeId: string;
 }): readonly StaticMaterialTableEntry[] {
 	return options.partition.coarseTablePlan.entries.map((entry, slot) =>
 		createStaticMaterialTableEntry({
 			createTextureUseId: (dataUse, wrapMode) =>
 				createStaticObjectTextureUseId({
 					dataUse,
-					work: options.work,
+					textureUseScopeId: options.textureUseScopeId,
 					wrapMode,
 				}),
 			materialIds: entry.materialIds,
@@ -1776,6 +1788,7 @@ function bakeStaticObjectPartitionGeometry(
 
 function createStaticObjectBakeTextureUses(options: {
 	readonly work: ScheduledStaticWork;
+	readonly resourceIdPrefix: string;
 	readonly staticBatchId: string;
 	readonly partitions: readonly StaticObjectCompatibilityPartition[];
 }): readonly StaticBakeTextureUse[] {
@@ -1783,7 +1796,7 @@ function createStaticObjectBakeTextureUses(options: {
 		createTextureUseId: (dataUse, wrapMode) =>
 			createStaticObjectTextureUseId({
 				dataUse,
-				work: options.work,
+				textureUseScopeId: options.resourceIdPrefix,
 				wrapMode,
 			}),
 		domain: options.work.job.domain,
@@ -1793,7 +1806,7 @@ function createStaticObjectBakeTextureUses(options: {
 			if (partition.renderCoverage !== "classified-render-candidate") {
 				return [];
 			}
-			const drawUnitOwnerId = `${options.work.workId}:static-object-partition:${partition.sliceId.replaceAll("/", "-")}`;
+			const drawUnitOwnerId = `${options.resourceIdPrefix}:static-object-partition:${partition.sliceId.replaceAll("/", "-")}`;
 			return partition.coarseTablePlan.entries.map((entry) => ({
 				owners: [{ drawUnitId: drawUnitOwnerId, kind: "draw-unit" as const }],
 				textureDataUses: entry.textureDataUses,
@@ -1805,13 +1818,13 @@ function createStaticObjectBakeTextureUses(options: {
 
 function createStaticObjectTextureUseId(options: {
 	readonly dataUse: MaterialTextureDataUseIdentity;
-	readonly work: ScheduledStaticWork;
+	readonly textureUseScopeId: string;
 	readonly wrapMode: StaticObjectCompatibilityPartition["textureWrapMode"];
 }): string {
 	return createStaticMaterialTextureUseId({
 		dataUse: options.dataUse,
 		textureUseNamespace: "static-object-texture",
-		workId: options.work.workId,
+		textureUseScopeId: options.textureUseScopeId,
 		wrapMode: options.wrapMode,
 	});
 }

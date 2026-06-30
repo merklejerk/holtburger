@@ -107,7 +107,7 @@ function createInput(): StaticBakeBatchInput {
 		},
 		priority: 0,
 		revision: 1,
-		workId: "1:landblock:da55ffff:outdoor-terrain",
+		staticWorkId: "1:landblock:da55ffff:outdoor-terrain",
 	};
 
 	return {

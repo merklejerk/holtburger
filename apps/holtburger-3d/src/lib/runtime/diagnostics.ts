@@ -184,7 +184,7 @@ interface StaticCoordinatorDiagnosticsSummary {
 }
 
 interface StaticCoordinatorWorkDiagnostics {
-	readonly workId: string;
+	readonly staticWorkId: string;
 	readonly revision: number;
 	readonly domain: StaticDomain;
 	readonly scopeKey: string;

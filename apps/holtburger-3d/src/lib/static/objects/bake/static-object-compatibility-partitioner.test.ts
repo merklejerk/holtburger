@@ -119,13 +119,13 @@ describe("static object compatibility partitioner", () => {
 		expect(result.drawUnits).toEqual([
 			expect.objectContaining({
 				drawUnitId:
-					"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0",
+					"outdoor-buildings:0xda55ffff:static-object-partition:slice-0-0",
 				kind: "static-object-geometry",
 				materialFamily: "texture-rgba",
 				materialEntries: [
 					expect.objectContaining({
 						primaryTextureUseId:
-							"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
+							"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
 					}),
 				],
 				materialPass: "opaque",
@@ -164,7 +164,7 @@ describe("static object compatibility partitioner", () => {
 				paletteFirstIndex: 0,
 				paletteTextureUseId: null,
 				primaryTextureUseId:
-					"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
+					"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
 				primaryTextureWrapMode: "clamp",
 				renderState: {
 					blend: {
@@ -185,7 +185,7 @@ describe("static object compatibility partitioner", () => {
 				owners: [
 					{
 						drawUnitId:
-							"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0",
+							"outdoor-buildings:0xda55ffff:static-object-partition:slice-0-0",
 						kind: "draw-unit",
 					},
 				],
@@ -222,11 +222,11 @@ describe("static object compatibility partitioner", () => {
 		expect(result.staticSpatialRecords).toEqual([
 			{
 				drawUnitId:
-					"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0",
+					"outdoor-buildings:0xda55ffff:static-object-partition:slice-0-0",
 				kind: "draw-unit-bounds",
 				owner: {
 					drawUnitId:
-						"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0",
+						"outdoor-buildings:0xda55ffff:static-object-partition:slice-0-0",
 					kind: "draw-unit",
 				},
 				triangleCount: 1,
@@ -275,7 +275,7 @@ describe("static object compatibility partitioner", () => {
 		).toEqual([
 			{
 				drawUnitId:
-					"1:landblock:da55ffff:env-cell-system:static-object-partition:slice-0-0",
+					"env-cell-system:0xda55ffff:static-object-partition:slice-0-0",
 				ownership: {
 					envCellIds: [0xda550100],
 					kind: "env-cell-static-object-seeds",
@@ -288,7 +288,7 @@ describe("static object compatibility partitioner", () => {
 			},
 			{
 				drawUnitId:
-					"1:landblock:da55ffff:env-cell-system:static-object-partition:slice-1-0",
+					"env-cell-system:0xda55ffff:static-object-partition:slice-1-0",
 				ownership: {
 					envCellIds: [0xda550101],
 					kind: "env-cell-static-object-seeds",
@@ -424,14 +424,14 @@ describe("static object compatibility partitioner", () => {
 		expect(drawUnit).toMatchObject({
 			kind: "static-object-geometry",
 			textureUseIds: [
-				"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
-				"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000030:rgba-detail:sampling:wrap=repeat,repeat",
+				"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
+				"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000030:rgba-detail:sampling:wrap=repeat,repeat",
 			],
 		});
 		expect(drawUnit.materialEntries[0]).toMatchObject({
 			detailTextureTiling: 7,
 			detailTextureUseId:
-				"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000030:rgba-detail:sampling:wrap=repeat,repeat",
+				"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000030:rgba-detail:sampling:wrap=repeat,repeat",
 		});
 		expect(
 			result.textureUses.map((textureUse) => ({
@@ -441,10 +441,10 @@ describe("static object compatibility partitioner", () => {
 			})),
 		).toEqual([
 			expect.objectContaining({
-				id: "1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
+				id: "outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
 			}),
 			{
-				id: "1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000030:rgba-detail:sampling:wrap=repeat,repeat",
+				id: "outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000030:rgba-detail:sampling:wrap=repeat,repeat",
 				samplingPolicy: {
 					wrapS: "repeat",
 					wrapT: "repeat",
@@ -977,15 +977,15 @@ describe("static object compatibility partitioner", () => {
 		expect(
 			drawUnit.materialEntries.map((entry) => entry.primaryTextureUseId),
 		).toEqual([
-			"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
-			"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000011:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
+			"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
+			"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000011:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
 		]);
 		expect(Array.from(drawUnit.materialSlotIndices)).toEqual([
 			0, 0, 0, 1, 1, 1,
 		]);
 		expect(drawUnit.textureUseIds).toEqual([
-			"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
-			"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000011:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
+			"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
+			"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000011:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
 		]);
 	});
 
@@ -1373,7 +1373,7 @@ describe("static object compatibility partitioner", () => {
 			})),
 		).toEqual([
 			{
-				id: "1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
+				id: "outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
 				samplingPolicy: {
 					wrapS: "clamp-to-edge",
 					wrapT: "clamp-to-edge",
@@ -1381,7 +1381,7 @@ describe("static object compatibility partitioner", () => {
 				usage: "rgba-color",
 			},
 			{
-				id: "1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
+				id: "outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
 				samplingPolicy: {
 					wrapS: "repeat",
 					wrapT: "repeat",
@@ -1557,7 +1557,7 @@ function createEnvCellStaticBakeInput(): StaticBakeBatchInput {
 		},
 		priority: 0,
 		revision: 1,
-		workId: "1:landblock:da55ffff:env-cell-system",
+		staticWorkId: "1:landblock:da55ffff:env-cell-system",
 	};
 
 	return {
@@ -1590,6 +1590,10 @@ function createEnvCellStaticBakeInput(): StaticBakeBatchInput {
 					job: work.job,
 					scope: payload,
 					sourceRevision: 1,
+				},
+				targetOwnerKey: {
+					kind: "env-cell-system" as const,
+					landblockId: 0xda55ffff,
 				},
 				work,
 			},
@@ -1946,7 +1950,7 @@ function createBakeInput(
 		},
 		priority: 0,
 		revision: 1,
-		workId: `1:landblock:da55ffff:${domain}`,
+		staticWorkId: `1:landblock:da55ffff:${domain}`,
 	};
 
 	return {
@@ -1980,12 +1984,29 @@ function createBakeInput(
 					scope: payload,
 					sourceRevision: 1,
 				},
+				targetOwnerKey: {
+					kind: staticObjectLayerOwnerKindForDomain(domain),
+					landblockId: payload.landblock.landblockId,
+				},
 				work,
 			},
 		],
 		revision: 1,
 		staticBatchId: "static-batch:objects",
 	};
+}
+
+function staticObjectLayerOwnerKindForDomain(
+	domain: OutdoorStaticObjectsScopePayload["domain"],
+) {
+	switch (domain) {
+		case "outdoor-buildings":
+			return "outdoor-buildings" as const;
+		case "outdoor-explicit-objects":
+			return "outdoor-explicit-objects" as const;
+		case "outdoor-generated-scenery":
+			return "outdoor-generated-scenery" as const;
+	}
 }
 
 function createSolidMaterial(

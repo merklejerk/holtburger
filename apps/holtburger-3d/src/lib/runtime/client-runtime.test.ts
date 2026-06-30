@@ -219,9 +219,9 @@ describe("browser client runtime", () => {
 		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
 		await flushPromises();
 
-		const workId = "1:landblock:da55ffff:outdoor-buildings";
-		baker.complete(workId, {
-			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord(workId)],
+		const staticWorkId = "1:landblock:da55ffff:outdoor-buildings";
+		baker.complete(staticWorkId, {
+			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
 		});
 		await flushRuntimeWork();
 
@@ -367,9 +367,9 @@ describe("browser client runtime", () => {
 		});
 		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
 		await flushPromises();
-		const workId = "1:landblock:da55ffff:outdoor-buildings";
-		baker.complete(workId, {
-			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord(workId)],
+		const staticWorkId = "1:landblock:da55ffff:outdoor-buildings";
+		baker.complete(staticWorkId, {
+			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
 		});
 		await flushPromises();
 
@@ -441,9 +441,9 @@ describe("browser client runtime", () => {
 		});
 		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
 		await flushPromises();
-		const workId = "1:landblock:da55ffff:outdoor-buildings";
-		baker.complete(workId, {
-			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord(workId)],
+		const staticWorkId = "1:landblock:da55ffff:outdoor-buildings";
+		baker.complete(staticWorkId, {
+			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
 		});
 		await flushRuntimeWork();
 
@@ -915,9 +915,9 @@ describe("browser client runtime", () => {
 		});
 		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
 		await flushPromises();
-		const workId = "1:landblock:da55ffff:outdoor-buildings";
-		baker.complete(workId, {
-			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord(workId)],
+		const staticWorkId = "1:landblock:da55ffff:outdoor-buildings";
+		baker.complete(staticWorkId, {
+			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
 		});
 		await flushRuntimeWork();
 
@@ -961,9 +961,9 @@ describe("browser client runtime", () => {
 		});
 		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
 		await flushPromises();
-		const workId = "1:landblock:da55ffff:outdoor-buildings";
-		baker.complete(workId, {
-			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord(workId)],
+		const staticWorkId = "1:landblock:da55ffff:outdoor-buildings";
+		baker.complete(staticWorkId, {
+			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
 		});
 		await flushRuntimeWork();
 
@@ -1005,11 +1005,11 @@ describe("browser client runtime", () => {
 		completeResolverRequest(resolver, "env-cell-system", 0xda55ffff);
 		await flushPromises();
 
-		const workId = "1:landblock:da55ffff:env-cell-system";
-		baker.complete(workId, {
+		const staticWorkId = "1:landblock:da55ffff:env-cell-system";
+		baker.complete(staticWorkId, {
 			staticAuthoredDynamicSeeds: [
-				createEnvCellStaticSeedRecord(workId),
-				createEnvCellDynamicSeedRecord(workId),
+				createEnvCellStaticSeedRecord(),
+				createEnvCellDynamicSeedRecord(),
 			],
 		});
 		await flushRuntimeWork();
@@ -2627,7 +2627,7 @@ function completeBakerWork(
 			item.work.job.scope.kind === "landblock" &&
 			item.work.job.scope.landblockId === landblockId,
 	);
-	baker.complete(work?.work.workId ?? failKey(), result);
+	baker.complete(work?.work.staticWorkId ?? failKey(), result);
 }
 
 function createPortalInteriorRecord(options: {
@@ -2844,9 +2844,7 @@ function createOutdoorLayerOwner(
 	};
 }
 
-function createOutdoorDynamicSeedRecord(
-	workId: string,
-): StaticAuthoredDynamicSeedRecord {
+function createOutdoorDynamicSeedRecord(): StaticAuthoredDynamicSeedRecord {
 	return {
 		kind: "outdoor-static-object-dynamic-seed",
 		owner: createOutdoorLayerOwner(0xda55ffff),
@@ -2879,9 +2877,7 @@ function createOutdoorDynamicSeedRecord(
 	};
 }
 
-function createEnvCellStaticSeedRecord(
-	workId: string,
-): StaticAuthoredDynamicSeedRecord {
+function createEnvCellStaticSeedRecord(): StaticAuthoredDynamicSeedRecord {
 	return {
 		envCellId: 0xda550100,
 		kind: "env-cell-static-object-seed",
@@ -2907,9 +2903,7 @@ function createEnvCellStaticSeedRecord(
 	};
 }
 
-function createEnvCellDynamicSeedRecord(
-	workId: string,
-): StaticAuthoredDynamicSeedRecord {
+function createEnvCellDynamicSeedRecord(): StaticAuthoredDynamicSeedRecord {
 	return {
 		kind: "env-cell-static-object-dynamic-seed",
 		owner: createEnvCellLayerOwner(0xda55ffff),

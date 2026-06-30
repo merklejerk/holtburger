@@ -108,7 +108,7 @@ function createAttachmentRequest(
 		job,
 		priority: 0,
 		revision: 1,
-		workId: "work:env-cell-geometry-attachments",
+		staticWorkId: "work:env-cell-geometry-attachments",
 	};
 
 	return {

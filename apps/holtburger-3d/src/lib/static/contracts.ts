@@ -149,7 +149,7 @@ export interface StaticLandblockSceneLodSourceResolver {
 }
 
 export interface StaticRetentionReconciliation {
-	readonly activeWork: readonly ScheduledStaticWork[];
+	readonly inFlightStaticWork: readonly ScheduledStaticWork[];
 	readonly retainedLayerOwners: readonly LayerOwnerKey[];
 	readonly removedResources: readonly StaticResourceKey[];
 }
@@ -230,7 +230,7 @@ export function uniqueSortedStaticTextureUseOwners(
 }
 
 export interface ScheduledStaticWork {
-	readonly workId: string;
+	readonly staticWorkId: string;
 	readonly revision: number;
 	readonly job: StaticResolverJob;
 	readonly priority: number;
@@ -1836,7 +1836,7 @@ export interface StaticCoordinatorSnapshot {
 	readonly staleBakeResults: number;
 	readonly committedDrawUnits: number;
 	readonly ownerStates: readonly LayerOwnerState[];
-	readonly activeWork: readonly ScheduledStaticWorkStatus[];
+	readonly inFlightStaticWork: readonly ScheduledStaticWorkStatus[];
 	readonly latestTerrainPayload: TerrainStaticScopePayloadSummary | null;
 	readonly latestOutdoorStaticObjectsPayload: OutdoorStaticObjectsPayloadSummary | null;
 	readonly latestEnvCellSystemPayload: EnvCellSystemPayloadSummary | null;
@@ -1961,7 +1961,7 @@ export interface StaticCoordinatorSourcePayloadDelta {
 }
 
 export interface ScheduledStaticWorkStatus {
-	readonly workId: string;
+	readonly staticWorkId: string;
 	readonly revision: number;
 	readonly domain: StaticDomain;
 	readonly scopeKey: string;

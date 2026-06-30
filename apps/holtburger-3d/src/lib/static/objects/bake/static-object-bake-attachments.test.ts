@@ -120,7 +120,7 @@ function createAttachmentRequest(
 		job,
 		priority: 0,
 		revision: 1,
-		workId: "work:static-object-attachments",
+		staticWorkId: "work:static-object-attachments",
 	};
 
 	return {
@@ -155,7 +155,7 @@ function createEnvCellAttachmentRequest(
 		job,
 		priority: 0,
 		revision: 1,
-		workId: "work:env-cell-static-object-attachments",
+		staticWorkId: "work:env-cell-static-object-attachments",
 	};
 
 	return {

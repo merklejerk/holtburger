@@ -117,22 +117,6 @@ describe("host asset preparation", () => {
 		}
 	});
 
-	it("does not prepare old broad landblock route payloads", () => {
-		for (const assetId of [
-			"landblock/da55ffff/outdoor",
-			"landblock/da55ffff/env-cells",
-		]) {
-			expect(() =>
-				prepareV2AssetPayload({
-					assetId,
-					payload: { kind: "definitely-wrong" },
-					payloadKind: "json",
-					requestId: "request-1",
-				}),
-			).toThrow(`asset preparation does not support host asset route ${assetId}.`);
-		}
-	});
-
 	it("prepares animation payloads with typed SetOmega hook bytes intact", () => {
 		const payload = createAnimationPayload();
 

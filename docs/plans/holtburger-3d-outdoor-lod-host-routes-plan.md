@@ -1677,7 +1677,7 @@ Decisions and course corrections:
 
 ### Phase 11A4: Frontend Old Route Audit And Commit Gate
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: prove the frontend outdoor/env-cell old-route cutover is complete before moving to Rust/Tauri route deletion.
 
@@ -1697,14 +1697,18 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Run zero-reference searches for old frontend outdoor/env-cell route surfaces.
-- [ ] Classify or delete every surviving reference.
-- [ ] Update Phase 11A1 through 11A4 decisions and validation notes.
-- [ ] Commit the completed frontend cutover phase set.
+- [x] Run zero-reference searches for old frontend outdoor/env-cell route surfaces.
+- [x] Classify or delete every surviving reference.
+- [x] Update Phase 11A1 through 11A4 decisions and validation notes.
+- [x] Commit the completed frontend cutover phase set.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Deleted hollow tests that existed only to assert old outdoor/env-cell host routes are unsupported. Positive LoD route/key/preparation tests and zero-reference audits now carry the proof without preserving deleted behavior as a test fixture.
+- Zero-reference audit found no executable frontend asset key, route payload parser, route DTO schema, or resolver request for `landblock-outdoor`, route-facing `landblock-env-cells`, `LandblockOutdoorPayloadDto`, or `LandblockEnvCellsPayloadDto`.
+- Surviving `landblock-env-cells` references are internal env-cell-system static domain, layer owner, bake/materialization, renderer, texture, dynamic-resource, and scene-query vocabulary. They are not host route DTO/key/preparation surfaces.
+- Surviving `landblock/{id}/outdoor`, `landblock/{id}/env-cells`, and `landblock/{id}/topology` strings are isolated to `host/tauri.ts`, `host/tauri.test.ts`, `host/binary-asset-envelope.test.ts`, and topology helpers in `landblocks.ts`/`landblocks.test.ts`; those are Phase 11B Rust/Tauri route cleanup targets.
+- Validation: `npm run check`; `npm run test:ts -- src/lib/assets/keys.test.ts src/lib/assets/preparation.test.ts src/lib/static/resolver/asset-bridge.test.ts src/lib/static/env-cells/bake/landblock-env-cell-geometry-attachments.test.ts src/lib/static/resolver/landblock-scene-lod-source-resolver.test.ts`; audit searches for old DTO/schema/helper names, direct old route `createHostAssetKey` calls, and old landblock outdoor/env-cell route strings.
 
 ### Phase 11B: Rust And Tauri Old Route Cleanup
 

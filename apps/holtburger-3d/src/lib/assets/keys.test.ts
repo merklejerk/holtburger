@@ -26,15 +26,6 @@ describe("host asset keys", () => {
 		);
 	});
 
-	it("does not recognize old broad landblock routes as typed host keys", () => {
-		expect(parseHostAssetId("landblock/da55ffff/outdoor")).toEqual(
-			createRawHostAssetKey("landblock/da55ffff/outdoor"),
-		);
-		expect(parseHostAssetId("landblock/da55ffff/env-cells")).toEqual(
-			createRawHostAssetKey("landblock/da55ffff/env-cells"),
-		);
-	});
-
 	it("normalizes resolver-local LoD layer source keys without formatting host routes", () => {
 		const outdoorKey = createHostAssetKey(
 			"landblock-scene-lod-outdoor-layer",

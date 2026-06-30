@@ -199,7 +199,7 @@ describe("static demand planner", () => {
 				},
 			},
 			priority: 10,
-			workId: "4:landblock:da55ffff:env-cell-system",
+			staticWorkId: "4:landblock:da55ffff:env-cell-system",
 		});
 		expect(retainedLayerOwners).toContainEqual({
 			kind: "env-cell-system",
@@ -236,7 +236,7 @@ describe("static demand planner", () => {
 				},
 				priority: 5,
 				revision: 12,
-				workId: "12:landblock:da55ffff:outdoor-buildings",
+				staticWorkId: "12:landblock:da55ffff:outdoor-buildings",
 			},
 			{
 				job: {
@@ -248,7 +248,7 @@ describe("static demand planner", () => {
 				},
 				priority: 10,
 				revision: 12,
-				workId: "12:landblock:da55ffff:env-cell-system",
+				staticWorkId: "12:landblock:da55ffff:env-cell-system",
 			},
 		]);
 		expect(retainedLayerOwners).toEqual([

@@ -249,7 +249,7 @@ export class DeferredStaticBaker implements StaticBaker {
 		const input = this.#pending.find(
 			(candidate) =>
 				candidate.staticBatchId === staticBatchId ||
-				candidate.items.some((item) => item.work.workId === staticBatchId),
+				candidate.items.some((item) => item.work.staticWorkId === staticBatchId),
 		);
 		const resolver = input ? this.#resolvers.get(input.staticBatchId) : null;
 
@@ -265,7 +265,7 @@ export class DeferredStaticBaker implements StaticBaker {
 		const input = this.#pending.find(
 			(candidate) =>
 				candidate.staticBatchId === staticBatchId ||
-				candidate.items.some((item) => item.work.workId === staticBatchId),
+				candidate.items.some((item) => item.work.staticWorkId === staticBatchId),
 		);
 		const resolver = input ? this.#resolvers.get(input.staticBatchId) : null;
 

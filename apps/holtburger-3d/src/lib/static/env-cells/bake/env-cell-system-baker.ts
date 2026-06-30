@@ -451,7 +451,7 @@ function warnAboutStructuredInteriorMaterialOmissions(options: {
 			domain: options.work.job.domain,
 			groups,
 			landblockId: formatHex32(options.payload.landblock.landblockId),
-			workId: options.work.workId,
+			staticWorkId: options.work.staticWorkId,
 		},
 	);
 }
@@ -473,7 +473,7 @@ function warnAboutStructuredInteriorGeometrySurfaceOmissions(options: {
 				options.omissions,
 			),
 			landblockId: formatHex32(options.payload.landblock.landblockId),
-			workId: options.work.workId,
+			staticWorkId: options.work.staticWorkId,
 		},
 	);
 }
@@ -980,7 +980,7 @@ function createStructuredInteriorDrawUnitId(
 	sliceId: string,
 ): string {
 	return [
-		work.workId,
+		work.staticWorkId,
 		"structured-interior",
 		formatHex32(envCell.identity.envCellId),
 		formatHex32(envCell.cellStructure.cellStructureId),

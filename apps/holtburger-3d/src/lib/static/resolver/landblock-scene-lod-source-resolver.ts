@@ -8,7 +8,6 @@ import type {
 	PreparedAssetReader,
 } from "../../assets/contracts";
 import {
-	createHostAssetKey,
 	createLandblockSceneLodHostAssetKey,
 	describeHostAssetKey,
 } from "../../assets/keys";

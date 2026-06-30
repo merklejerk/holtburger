@@ -28,7 +28,7 @@ export function createMaterialTextureDataUseKey(
 export function createStaticMaterialTextureUseId(options: {
 	readonly dataUse: MaterialTextureDataUseIdentity;
 	readonly textureUseNamespace: string;
-	readonly workId: string;
+	readonly textureUseScopeId: string;
 	readonly wrapMode: StaticMaterialTextureWrapMode;
 }): string {
 	const samplingPolicy = createStaticMaterialTextureSamplingPolicy({
@@ -37,7 +37,7 @@ export function createStaticMaterialTextureUseId(options: {
 	});
 
 	return [
-		options.workId,
+		options.textureUseScopeId,
 		options.textureUseNamespace,
 		createMaterialTextureDataUseKey(options.dataUse),
 		createStaticMaterialTextureSamplingPolicyKey(samplingPolicy),

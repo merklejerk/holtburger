@@ -55,21 +55,21 @@ describe("static material texture policy", () => {
 			createStaticMaterialTextureUseId({
 				dataUse,
 				textureUseNamespace: "static-object-texture",
-				workId: "work-a",
+				textureUseScopeId: "static-object-layer-a",
 				wrapMode: "clamp",
 			}),
 		).toBe(
-			"work-a:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
+			"static-object-layer-a:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
 		);
 		expect(
 			createStaticMaterialTextureUseId({
 				dataUse,
 				textureUseNamespace: "static-object-texture",
-				workId: "work-a",
+				textureUseScopeId: "static-object-layer-a",
 				wrapMode: "repeat",
 			}),
 		).toBe(
-			"work-a:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
+			"static-object-layer-a:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
 		);
 	});
 });

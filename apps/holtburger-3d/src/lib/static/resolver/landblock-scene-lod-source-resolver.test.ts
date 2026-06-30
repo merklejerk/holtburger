@@ -215,7 +215,7 @@ function createBakeInput(recipe: StaticLayerRecipe): StaticBakeBatchInput {
 					job: recipe.payload.job,
 					priority: 0,
 					revision: 1,
-					workId: `work:${recipe.payload.job.domain}`,
+					staticWorkId: `work:${recipe.payload.job.domain}`,
 				},
 			},
 		],

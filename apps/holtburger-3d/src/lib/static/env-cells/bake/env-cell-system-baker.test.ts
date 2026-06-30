@@ -691,12 +691,12 @@ describe("browser landblock env-cell baker", () => {
 					family: "texture-rgba",
 					outcome: "rendered",
 					textureUseIds: [
-						"7:landblock:da55ffff:env-cell-system:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
+						"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
 					],
 				}),
 			],
 			textureUseIds: [
-				"7:landblock:da55ffff:env-cell-system:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
+				"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
 			],
 		});
 		expect(result.textureUses).toEqual([
@@ -717,7 +717,7 @@ describe("browser landblock env-cell baker", () => {
 				},
 				staticBatchId: "env-batch-a",
 				textureUseId:
-					"7:landblock:da55ffff:env-cell-system:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
+					"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
 			}),
 		]);
 	});
@@ -756,11 +756,11 @@ describe("browser landblock env-cell baker", () => {
 		expect(drawUnit.materialEntries[0]).toMatchObject({
 			detailTextureTiling: 8,
 			detailTextureUseId:
-				"7:landblock:da55ffff:env-cell-system:structured-interior-texture:prepared-render-surface-texture-use:06000020:rgba-detail:sampling:wrap=repeat,repeat",
+				"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000020:rgba-detail:sampling:wrap=repeat,repeat",
 		});
 		expect(drawUnit.textureUseIds).toEqual([
-			"7:landblock:da55ffff:env-cell-system:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
-			"7:landblock:da55ffff:env-cell-system:structured-interior-texture:prepared-render-surface-texture-use:06000020:rgba-detail:sampling:wrap=repeat,repeat",
+			"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
+			"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000020:rgba-detail:sampling:wrap=repeat,repeat",
 		]);
 		expect(result.textureUses).toEqual(
 			expect.arrayContaining([
@@ -778,7 +778,7 @@ describe("browser landblock env-cell baker", () => {
 						usage: "rgba-detail",
 					},
 					textureUseId:
-						"7:landblock:da55ffff:env-cell-system:structured-interior-texture:prepared-render-surface-texture-use:06000020:rgba-detail:sampling:wrap=repeat,repeat",
+						"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000020:rgba-detail:sampling:wrap=repeat,repeat",
 				}),
 			]),
 		);
@@ -866,7 +866,7 @@ describe("browser landblock env-cell baker", () => {
 			vertexCount: 3,
 		});
 		expect(drawUnit.drawUnitId).toContain(
-			"7:landblock:da55ffff:env-cell-system:static-object-partition:",
+			"env-cell-system:0xda55ffff:static-object-partition:",
 		);
 		expect(Array.from(drawUnit.positions.slice(0, 9))).toEqual([
 			1, 3, -2, 2, 3, -2, 1, 4, -2,
@@ -1479,7 +1479,7 @@ function createInput(
 		},
 		priority: 5,
 		revision: 7,
-		workId: "7:landblock:da55ffff:env-cell-system",
+		staticWorkId: "7:landblock:da55ffff:env-cell-system",
 	};
 
 	return {
@@ -1615,6 +1615,10 @@ function createInput(
 						visibilityDiagnostics: [],
 					},
 					sourceRevision: 42,
+				},
+				targetOwnerKey: {
+					kind: "env-cell-system" as const,
+					landblockId: 0xda55ffff,
 				},
 				work,
 			},

@@ -16,7 +16,7 @@ describe("terrain geometry baker", () => {
 		expect(drawUnit).toMatchObject({
 			coordinateSpace: "landblock-render-local",
 			domain: "outdoor-terrain",
-			drawUnitId: "7:landblock:da55ffff:outdoor-terrain:terrain-geometry",
+			drawUnitId: "terrain:0xda55ffff:terrain-geometry",
 			indexType: "uint16",
 			kind: "terrain-geometry",
 			landblockId: 0xda55ffff,
@@ -57,10 +57,10 @@ describe("terrain geometry baker", () => {
 			staticPortalInteriorRecords: [],
 			staticSpatialRecords: [
 				{
-					drawUnitId: "7:landblock:da55ffff:outdoor-terrain:terrain-geometry",
+					drawUnitId: "terrain:0xda55ffff:terrain-geometry",
 					kind: "draw-unit-bounds",
 					owner: {
-						drawUnitId: "7:landblock:da55ffff:outdoor-terrain:terrain-geometry",
+						drawUnitId: "terrain:0xda55ffff:terrain-geometry",
 						kind: "draw-unit",
 					},
 					triangleCount: 2,
@@ -72,19 +72,19 @@ describe("terrain geometry baker", () => {
 		});
 		expect(result.staticSourceMappings).toEqual([
 			{
-				drawUnitId: "7:landblock:da55ffff:outdoor-terrain:terrain-geometry",
+				drawUnitId: "terrain:0xda55ffff:terrain-geometry",
 				kind: "terrain-source-triangle",
 				owner: {
-					drawUnitId: "7:landblock:da55ffff:outdoor-terrain:terrain-geometry",
+					drawUnitId: "terrain:0xda55ffff:terrain-geometry",
 					kind: "draw-unit",
 				},
 				sourceTriangleId: "t0",
 			},
 			{
-				drawUnitId: "7:landblock:da55ffff:outdoor-terrain:terrain-geometry",
+				drawUnitId: "terrain:0xda55ffff:terrain-geometry",
 				kind: "terrain-source-triangle",
 				owner: {
-					drawUnitId: "7:landblock:da55ffff:outdoor-terrain:terrain-geometry",
+					drawUnitId: "terrain:0xda55ffff:terrain-geometry",
 					kind: "draw-unit",
 				},
 				sourceTriangleId: "t1",
@@ -130,12 +130,12 @@ describe("terrain geometry baker", () => {
 
 		expect(drawUnit).toMatchObject({
 			materialBucketKey:
-				"shader:terrain-single-base-color|domain:outdoor-terrain|sampler:color-repeat-filterable|batch:batch-a|texture:7:landblock:da55ffff:outdoor-terrain:prepared-texture:terrain-base:rgba-color:06000010",
+				"shader:terrain-single-base-color|domain:outdoor-terrain|sampler:color-repeat-filterable|batch:batch-a|texture:terrain:0xda55ffff:prepared-texture:terrain-base:rgba-color:06000010",
 			materialFamily: "terrain-single-base-color",
 			primaryTextureUseId:
-				"7:landblock:da55ffff:outdoor-terrain:prepared-texture:terrain-base:rgba-color:06000010",
+				"terrain:0xda55ffff:prepared-texture:terrain-base:rgba-color:06000010",
 			textureUseIds: [
-				"7:landblock:da55ffff:outdoor-terrain:prepared-texture:terrain-base:rgba-color:06000010",
+				"terrain:0xda55ffff:prepared-texture:terrain-base:rgba-color:06000010",
 			],
 		});
 		expect(drawUnit.terrainMaterialPlan?.layerEntries).toEqual([
@@ -144,7 +144,7 @@ describe("terrain geometry baker", () => {
 				base: expect.objectContaining({
 					role: "terrain-base",
 					textureUseId:
-						"7:landblock:da55ffff:outdoor-terrain:prepared-texture:terrain-base:rgba-color:06000010",
+						"terrain:0xda55ffff:prepared-texture:terrain-base:rgba-color:06000010",
 					wrap: "repeat",
 				}),
 				pcode: 33825,
@@ -165,7 +165,7 @@ describe("terrain geometry baker", () => {
 					usage: "rgba-color",
 				},
 				textureUseId:
-					"7:landblock:da55ffff:outdoor-terrain:prepared-texture:terrain-base:rgba-color:06000010",
+					"terrain:0xda55ffff:prepared-texture:terrain-base:rgba-color:06000010",
 			},
 		]);
 		expect(JSON.stringify(result)).not.toContain("texture-ref");
@@ -185,8 +185,8 @@ describe("terrain geometry baker", () => {
 
 		expect(drawUnits).toHaveLength(2);
 		expect(drawUnits.map((drawUnit) => drawUnit.drawUnitId)).toEqual([
-			"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-0",
-			"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-1",
+			"terrain:0xda55ffff:terrain-geometry:slice-0",
+			"terrain:0xda55ffff:terrain-geometry:slice-1",
 		]);
 		expect(drawUnits.map((drawUnit) => drawUnit.triangleCount)).toEqual([
 			16, 2,
@@ -226,8 +226,8 @@ describe("terrain geometry baker", () => {
 		const result = bakeTerrainGeometry(input);
 
 		expect(result.drawUnits.map((drawUnit) => drawUnit.drawUnitId)).toEqual([
-			"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-0",
-			"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-1",
+			"terrain:0xda55ffff:terrain-geometry:slice-0",
+			"terrain:0xda55ffff:terrain-geometry:slice-1",
 		]);
 		expect(result.textureUses).toHaveLength(9);
 		expect(
@@ -236,7 +236,7 @@ describe("terrain geometry baker", () => {
 			Array.from({ length: 8 }, () => [
 				{
 					drawUnitId:
-						"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-0",
+						"terrain:0xda55ffff:terrain-geometry:slice-0",
 					kind: "draw-unit",
 				},
 			]),
@@ -245,7 +245,7 @@ describe("terrain geometry baker", () => {
 			owners: [
 				{
 					drawUnitId:
-						"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-1",
+						"terrain:0xda55ffff:terrain-geometry:slice-1",
 					kind: "draw-unit",
 				},
 			],
@@ -263,13 +263,13 @@ describe("terrain geometry baker", () => {
 		const result = bakeTerrainGeometry(input);
 
 		expect(result.staticBatchId).toBe("batch-a");
-		expect(result.works.map((work) => work.workId)).toEqual([
+		expect(result.works.map((work) => work.staticWorkId)).toEqual([
 			"7:landblock:da55ffff:outdoor-terrain",
 			"7:landblock:da56ffff:outdoor-terrain",
 		]);
 		expect(result.drawUnits.map((drawUnit) => drawUnit.drawUnitId)).toEqual([
-			"7:landblock:da55ffff:outdoor-terrain:terrain-geometry",
-			"7:landblock:da56ffff:outdoor-terrain:terrain-geometry",
+			"terrain:0xda55ffff:terrain-geometry",
+			"terrain:0xda56ffff:terrain-geometry",
 		]);
 		expect(
 			new Set(result.textureUses.map((textureUse) => textureUse.staticBatchId)),
@@ -313,6 +313,10 @@ function createTerrainBakeInput(
 				scope: payload,
 				sourceRevision: 42,
 			},
+			targetOwnerKey: {
+				kind: "terrain" as const,
+				landblockId: 0xda55ffff,
+			},
 			work,
 		},
 	];
@@ -323,6 +327,10 @@ function createTerrainBakeInput(
 				job: secondWork.job,
 				scope: createTerrainPayload(options, 0xda56ffff),
 				sourceRevision: 43,
+			},
+			targetOwnerKey: {
+				kind: "terrain" as const,
+				landblockId: 0xda56ffff,
 			},
 			work: secondWork,
 		});
@@ -354,7 +362,7 @@ function createTerrainWork(landblockId: number) {
 		},
 		priority: 0,
 		revision: 7,
-		workId: `7:landblock:${landblockHex}:outdoor-terrain`,
+		staticWorkId: `7:landblock:${landblockHex}:outdoor-terrain`,
 	};
 }
 

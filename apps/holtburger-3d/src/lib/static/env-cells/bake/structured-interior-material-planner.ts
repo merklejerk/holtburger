@@ -24,6 +24,10 @@ import {
 	type StaticMaterialPlan,
 } from "../../objects/bake/static-object-material-planner";
 import { isRenderableStaticMaterialPlan } from "../../objects/bake/static-object-renderability";
+import {
+	createLayerOwnerKeyForStaticScope,
+	createLayerOwnerKeyId,
+} from "../../layer-owners";
 
 export interface StructuredInteriorCellMaterialPlan {
 	readonly entries: readonly StructuredInteriorMaterialPlanEntry[];
@@ -128,9 +132,19 @@ export function createStructuredInteriorTextureUseId(options: {
 	return createStaticMaterialTextureUseId({
 		dataUse: options.dataUse,
 		textureUseNamespace: "structured-interior-texture",
-		workId: options.work.workId,
+		textureUseScopeId: createLayerOwnerKeyId(
+			createLayerOwnerKeyForStaticScope({
+				domain: options.work.job.domain,
+				scope: options.work.job.scope,
+				scopeKey: describeStructuredInteriorScopeKey(options.work),
+			}),
+		),
 		wrapMode: options.wrapMode,
 	});
+}
+
+function describeStructuredInteriorScopeKey(work: ScheduledStaticWork): string {
+	return `landblock:${(work.job.scope.landblockId >>> 0).toString(16).padStart(8, "0")}`;
 }
 
 export function resolveStructuredInteriorPlanTextureWrapMode(

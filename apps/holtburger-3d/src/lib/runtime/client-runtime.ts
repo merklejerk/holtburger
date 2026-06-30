@@ -3648,10 +3648,10 @@ function getSceneInterestSource(
 function createStaticCoordinatorDiagnosticsReport(
 	snapshot: StaticCoordinatorSnapshot,
 ): Omit<StaticCoordinatorDiagnosticsReport, "kind"> {
-	const inFlightWork = snapshot.activeWork
+	const inFlightWork = snapshot.inFlightStaticWork
 		.filter(isInFlightStaticWorkStatus)
 		.map((work) => createStaticCoordinatorWorkDiagnostics(work));
-	const recentFailures = snapshot.activeWork
+	const recentFailures = snapshot.inFlightStaticWork
 		.filter(isFailedStaticWorkStatus)
 		.slice(-STATIC_DIAGNOSTICS_FAILURE_LIMIT)
 		.map((work) => createStaticCoordinatorWorkDiagnostics(work));
@@ -4513,7 +4513,7 @@ function createStaticCoordinatorWorkDiagnostics(
 		revision: work.revision,
 		scopeKey: work.scopeKey,
 		status: work.status,
-		workId: work.workId,
+		staticWorkId: work.staticWorkId,
 	};
 }
 

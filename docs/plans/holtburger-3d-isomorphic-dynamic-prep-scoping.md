@@ -1336,7 +1336,41 @@ Acceptance criteria:
 
 Decisions and course corrections:
 
-- Pending.
+- Completed during Phase 5.
+
+Implemented runtime-authored cutover:
+
+- `ClientRuntime.createRuntimeSpawn(...)` now starts a scoped runtime-authored dynamic visual prep
+  closure:
+  `resolve dynamic recipe -> apply resolved setup/animation -> collect source geometry -> bake
+  dynamic visual -> currentness check -> apply baked or skipped visual result`.
+- Browser runtime now instantiates worker-backed dynamic visual recipe resolution and dynamic visual
+  baking for host-backed runtime mode:
+  `createWorkerDynamicVisualRecipeResolver(...)` plus `createWorkerDynamicVisualBaker(...)`.
+- `DynamicEntityController` no longer starts `DynamicEntityResourceManager` visual prep for
+  runtime-authored spawns. Runtime-authored records accept explicit recipe and bake results through
+  `applyResolvedDynamicRecipe(...)`, `applyBakedDynamicVisual(...)`, and
+  `skipDynamicVisual(...)`.
+- `DynamicEntityResourceState.visual` remains the renderer-facing ready state, so renderer visual
+  resource conversion, dynamic texture-use commits, and dynamic instance commits did not need to
+  change in this phase.
+- Added `createDynamicVisualBakeSourceGeometry(...)` to collect the `sourceGeometry` attachments
+  required by the worker-backed visual baker. This keeps the baker asset-fetch-free while avoiding
+  raw geometry inside recipe records.
+
+Course corrections:
+
+- `createClientRuntime(...)` keeps a direct in-process resolver/baker default for tests and
+  non-browser construction. Browser runtime passes worker-backed implementations. The direct default
+  is not the target browser path and should not be used to justify main-thread runtime visual prep.
+- Static-authored dynamics still use `DynamicEntityResourceManager` until Phases 6-8 move their
+  recipe/bake products into the static prep closure.
+
+Verification:
+
+- `npm run test:ts -- src/lib/runtime/client-runtime.test.ts src/lib/browser/create-browser-runtime.test.ts src/lib/dynamic/dynamic-entity-controller.test.ts`
+- `npm run check`
+- `npm run lint:ts`
 
 ### Resteer 1: Runtime Cutover Review
 

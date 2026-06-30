@@ -145,13 +145,27 @@ import {
 	type RuntimeDynamicSpawnRequest,
 } from "../dynamic/dynamic-entity-controller";
 import { DynamicEntityResourceManager } from "../dynamic/dynamic-entity-resource-manager";
-import { createDynamicVisualResourceId } from "../dynamic/contracts";
+import {
+	createDynamicVisualResourceId,
+	createRuntimeDynamicTextureBatchId,
+} from "../dynamic/contracts";
 import type {
 	DynamicEntitySummaryDto,
 	DynamicEntityId,
 	DynamicEntityRenderResidence,
 	DynamicRuntimeSnapshot,
+	DynamicVisualBakeProduct,
 } from "../dynamic/contracts";
+import {
+	resolveDynamicVisualRecipe,
+	type DynamicVisualRecipeResolutionPayload,
+	type DynamicVisualRecipeResolver,
+} from "../dynamic/visual-recipe-resolver";
+import {
+	LocalDynamicVisualBaker,
+	type DynamicVisualBaker,
+} from "../dynamic/visual-baker";
+import { createDynamicVisualBakeSourceGeometry } from "../dynamic/visual-bake-attachments";
 import type { PlacementTransformDto } from "../host/contracts";
 import { translateBounds } from "./scene-query/geometry";
 
@@ -753,6 +767,8 @@ export interface ClientRuntimeOptions {
 	readonly assetService?: AssetService;
 	readonly assetMaintenanceIntervalMs?: number;
 	readonly diagnostics?: RuntimeDiagnostics;
+	readonly dynamicVisualBaker?: DynamicVisualBaker;
+	readonly dynamicVisualRecipeResolver?: DynamicVisualRecipeResolver;
 	readonly staticCoordinator?: StaticCoordinator;
 	readonly texturePacker?: TexturePacker;
 }
@@ -775,9 +791,24 @@ export function createClientRuntime(
 		assetService,
 		staticCoordinator,
 		options.texturePacker,
+		options.dynamicVisualRecipeResolver ??
+			createDirectDynamicVisualRecipeResolver(assetService),
+		options.dynamicVisualBaker ?? new LocalDynamicVisualBaker(),
 		options.assetMaintenanceIntervalMs ?? DEFAULT_ASSET_MAINTENANCE_INTERVAL_MS,
 		options.diagnostics ?? createConsoleRuntimeDiagnostics(),
 	);
+}
+
+function createDirectDynamicVisualRecipeResolver(
+	assetReader: AssetService,
+): DynamicVisualRecipeResolver {
+	return {
+		resolveRecipe: (request) =>
+			resolveDynamicVisualRecipe({
+				...request,
+				assetReader,
+			}),
+	};
 }
 
 class ClientRuntimeImpl implements ClientRuntime {
@@ -818,8 +849,10 @@ class ClientRuntimeImpl implements ClientRuntime {
 	#lastFrameState: FrameState | null = null;
 	#renderAnchorLandblockId: number | null = null;
 	#staticMaterializationQueue: Promise<void> = Promise.resolve();
-	readonly #staticMaterializationCommits =
-		new Map<string, MutableStaticMaterializationCommit>();
+	readonly #staticMaterializationCommits = new Map<
+		string,
+		MutableStaticMaterializationCommit
+	>();
 	#committedStaticMaterializations: StaticMaterializationCommitSnapshot[] = [];
 	#materializedDrawUnitIdsBySourceDrawUnitId = new Map<
 		string,
@@ -837,9 +870,15 @@ class ClientRuntimeImpl implements ClientRuntime {
 	readonly #textureBatchIdByStaticLayerOwner = new Map<string, string>();
 	#envCellResourceMembershipRevision = 0;
 	readonly #dynamicEntityController: DynamicEntityController;
+	readonly #dynamicVisualBaker: DynamicVisualBaker;
+	readonly #dynamicVisualRecipeResolver: DynamicVisualRecipeResolver;
 	readonly #committedDynamicVisualResourceIds = new Set<string>();
 	#dynamicRendererResourceQueue: Promise<void> = Promise.resolve();
 	#dynamicRendererResourceRevision = 0;
+	readonly #runtimeDynamicVisualPrepRevisions = new Map<
+		DynamicEntityId,
+		number
+	>();
 	#envCellAabbDebugOverlayVisible = false;
 	#envCellPortalDebugOverlayVisible = false;
 	#flatVisionModeEnabled = false;
@@ -852,6 +891,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 		assetService: AssetService,
 		staticCoordinator: StaticCoordinator,
 		texturePacker: TexturePacker | undefined,
+		dynamicVisualRecipeResolver: DynamicVisualRecipeResolver,
+		dynamicVisualBaker: DynamicVisualBaker,
 		assetMaintenanceIntervalMs: number,
 		diagnostics: RuntimeDiagnostics,
 	) {
@@ -863,6 +904,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#host = host;
 		this.#assetService = assetService;
 		this.#diagnostics = diagnostics;
+		this.#dynamicVisualRecipeResolver = dynamicVisualRecipeResolver;
+		this.#dynamicVisualBaker = dynamicVisualBaker;
 		this.#dynamicEntityController = new DynamicEntityController({
 			onResourcesChanged: () => {
 				if (!this.#disposed) {
@@ -918,6 +961,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	createRuntimeSpawn(request: RuntimeDynamicSpawnRequest): DynamicEntityId {
 		this.#assertActive();
 		const entityId = this.#dynamicEntityController.createRuntimeSpawn(request);
+		this.#prepareRuntimeAuthoredDynamicVisual(entityId);
 		this.#enqueueDynamicRendererResourceSync();
 		this.#refreshSceneDebugOverlay();
 		return entityId;
@@ -927,6 +971,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#assertActive();
 		const removed = this.#dynamicEntityController.removeRuntimeSpawn(entityId);
 		if (removed) {
+			this.#invalidateRuntimeDynamicVisualPrep(entityId);
 			this.#enqueueDynamicRendererResourceSync();
 			this.#refreshSceneDebugOverlay();
 		}
@@ -948,6 +993,132 @@ class ClientRuntimeImpl implements ClientRuntime {
 			this.#refreshSceneDebugOverlay();
 		}
 		return updated;
+	}
+
+	#prepareRuntimeAuthoredDynamicVisual(entityId: DynamicEntityId): void {
+		const request =
+			this.#dynamicEntityController.createRuntimeVisualRecipeRequest(entityId);
+		if (request === null) {
+			return;
+		}
+		const revision = this.#nextRuntimeDynamicVisualPrepRevision(entityId);
+		void this.#runRuntimeAuthoredDynamicVisualPrep({
+			entityId,
+			request,
+			revision,
+		});
+	}
+
+	async #runRuntimeAuthoredDynamicVisualPrep(options: {
+		readonly entityId: DynamicEntityId;
+		readonly request: DynamicVisualRecipeResolutionPayload;
+		readonly revision: number;
+	}): Promise<void> {
+		try {
+			const recipe = await this.#dynamicVisualRecipeResolver.resolveRecipe({
+				...options.request,
+				assetReader: this.#assetService,
+			});
+			if (!this.#isCurrentRuntimeDynamicVisualPrep(options)) {
+				return;
+			}
+			if (!this.#dynamicEntityController.applyResolvedDynamicRecipe(recipe)) {
+				return;
+			}
+
+			const sourceGeometry = await createDynamicVisualBakeSourceGeometry(
+				this.#assetService,
+				[recipe],
+			);
+			if (!this.#isCurrentRuntimeDynamicVisualPrep(options)) {
+				return;
+			}
+
+			const result = await this.#dynamicVisualBaker.bake({
+				batchId: createRuntimeDynamicTextureBatchId(options.entityId),
+				recipes: [recipe],
+				revision: options.revision,
+				sourceGeometry,
+			});
+			if (!this.#isCurrentRuntimeDynamicVisualPrep(options)) {
+				return;
+			}
+			this.#applyRuntimeAuthoredDynamicVisualBakeResult(
+				options.entityId,
+				result.products,
+			);
+			for (const failure of result.failures) {
+				console.error(
+					`[holtburger-3d][runtime-dynamic] ${options.entityId} visual bake failed: ${failure.message}`,
+				);
+			}
+			if (result.failures.length > 0 && result.products.length === 0) {
+				this.#dynamicEntityController.skipDynamicVisual(options.entityId, {
+					kind: "invalid-recipe",
+					message: result.failures.map((failure) => failure.message).join("; "),
+				});
+			}
+		} catch (error: unknown) {
+			if (!this.#isCurrentRuntimeDynamicVisualPrep(options)) {
+				return;
+			}
+			const message = error instanceof Error ? error.message : String(error);
+			console.error(
+				`[holtburger-3d][runtime-dynamic] ${options.entityId} visual prep failed: ${message}`,
+			);
+			this.#dynamicEntityController.skipDynamicVisual(options.entityId, {
+				kind: "invalid-recipe",
+				message,
+			});
+		}
+	}
+
+	#applyRuntimeAuthoredDynamicVisualBakeResult(
+		entityId: DynamicEntityId,
+		products: readonly DynamicVisualBakeProduct[],
+	): void {
+		const product = products.find((candidate) =>
+			candidate.kind === "baked"
+				? candidate.resource.entityId === entityId
+				: candidate.entityId === entityId,
+		);
+		if (!product) {
+			this.#dynamicEntityController.skipDynamicVisual(entityId, {
+				kind: "invalid-recipe",
+				message: "Dynamic visual bake did not return a product for entity.",
+			});
+			return;
+		}
+		if (product.kind === "baked") {
+			this.#dynamicEntityController.applyBakedDynamicVisual(product.resource);
+			return;
+		}
+		this.#dynamicEntityController.skipDynamicVisual(entityId, product.reason);
+	}
+
+	#nextRuntimeDynamicVisualPrepRevision(entityId: DynamicEntityId): number {
+		const revision =
+			(this.#runtimeDynamicVisualPrepRevisions.get(entityId) ?? 0) + 1;
+		this.#runtimeDynamicVisualPrepRevisions.set(entityId, revision);
+		return revision;
+	}
+
+	#invalidateRuntimeDynamicVisualPrep(entityId: DynamicEntityId): void {
+		this.#nextRuntimeDynamicVisualPrepRevision(entityId);
+	}
+
+	#isCurrentRuntimeDynamicVisualPrep(options: {
+		readonly entityId: DynamicEntityId;
+		readonly revision: number;
+	}): boolean {
+		return (
+			!this.#disposed &&
+			this.#runtimeDynamicVisualPrepRevisions.get(options.entityId) ===
+				options.revision &&
+			this.#dynamicEntityController.createRuntimeVisualRecipeRequest(
+				options.entityId,
+			) !== null
+		);
 	}
 
 	updateSceneInterest(interest: RuntimeSceneInterest): void {
@@ -1296,6 +1467,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#renderer.setDebugOverlayPrimitives([]);
 		this.#staticCoordinator.dispose();
 		this.#dynamicEntityController.dispose();
+		disposeIfAvailable(this.#dynamicVisualRecipeResolver);
+		disposeIfAvailable(this.#dynamicVisualBaker);
 		this.#textureManager.dispose();
 		this.#renderer.dispose();
 		this.#frameTelemetryListeners.clear();
@@ -1326,7 +1499,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 		const reconciliation = this.#staticCoordinator.reconcileStaticDemand(
 			createStaticDemandFromSceneInterest(interest),
 		);
-		this.#staticSceneQuery.retainLayerOwners(reconciliation.retainedLayerOwners);
+		this.#staticSceneQuery.retainLayerOwners(
+			reconciliation.retainedLayerOwners,
+		);
 		this.#updateRenderPassPlan();
 		return reconciliation;
 	}
@@ -1646,9 +1821,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 				committedCommits: this.#committedStaticMaterializations,
 				envCellResourceMembershipRevision:
 					this.#envCellResourceMembershipRevision,
-				failedCommits: this.#createStaticMaterializationCommitSnapshots(
-					"failed",
-				),
+				failedCommits:
+					this.#createStaticMaterializationCommitSnapshots("failed"),
 				materializedDrawUnits: countMaterializedDrawUnits(
 					this.#materializedDrawUnitIdsBySourceDrawUnitId,
 				),
@@ -2021,7 +2195,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 		}
 	}
 
-	#retainStaticLayerOwnerTextureBatchIds(layerOwners: readonly LayerOwnerKey[]): void {
+	#retainStaticLayerOwnerTextureBatchIds(
+		layerOwners: readonly LayerOwnerKey[],
+	): void {
 		const retainedOwnerIds = new Set(layerOwners.map(createLayerOwnerKeyId));
 		for (const key of this.#textureBatchIdByStaticLayerOwner.keys()) {
 			if (!retainedOwnerIds.has(getTextureBatchLookupLayerOwnerId(key))) {
@@ -2155,10 +2331,16 @@ class ClientRuntimeImpl implements ClientRuntime {
 				this.#renderer.setOutdoorBuildingsLayer(payload.landblockId, null);
 				break;
 			case "outdoor-explicit-objects":
-				this.#renderer.setOutdoorExplicitObjectsLayer(payload.landblockId, null);
+				this.#renderer.setOutdoorExplicitObjectsLayer(
+					payload.landblockId,
+					null,
+				);
 				break;
 			case "outdoor-generated-scenery":
-				this.#renderer.setOutdoorGeneratedSceneryLayer(payload.landblockId, null);
+				this.#renderer.setOutdoorGeneratedSceneryLayer(
+					payload.landblockId,
+					null,
+				);
 				break;
 			case "env-cell-system":
 				this.#renderer.setEnvCellSystemLayer(payload.landblockId, null);
@@ -4428,7 +4610,9 @@ function createStaticObjectBakeSummary(
 		),
 		reportCount: diagnostics.length,
 		retainedTransparentOutdoorGeneratedSceneryPartitionReasons:
-			sumRetainedTransparentOutdoorGeneratedSceneryPartitionReasons(diagnostics),
+			sumRetainedTransparentOutdoorGeneratedSceneryPartitionReasons(
+				diagnostics,
+			),
 		uniqueSourceCount: sumNumbers(
 			diagnostics.map((entry) => entry.uniqueSourceCount),
 		),
@@ -4448,7 +4632,8 @@ function sumRetainedTransparentOutdoorGeneratedSceneryPartitionReasons(
 		explicitObject: sumNumbers(
 			diagnostics.map(
 				(entry) =>
-					entry.retainedTransparentOutdoorGeneratedSceneryPartitionReasons.explicitObject,
+					entry.retainedTransparentOutdoorGeneratedSceneryPartitionReasons
+						.explicitObject,
 			),
 		),
 		missingInstanceBounds: sumNumbers(
@@ -4687,4 +4872,15 @@ function createLegacyDetailLodRadius(
 		? (interest.lod?.detail ?? 0)
 		: -1;
 	return Math.max(explicitObjectRadius, generatedSceneryRadius);
+}
+
+function disposeIfAvailable(value: unknown): void {
+	if (
+		typeof value === "object" &&
+		value !== null &&
+		"dispose" in value &&
+		typeof value.dispose === "function"
+	) {
+		value.dispose();
+	}
 }

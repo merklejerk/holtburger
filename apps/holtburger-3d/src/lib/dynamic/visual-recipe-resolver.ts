@@ -26,6 +26,11 @@ export interface DynamicVisualRecipeResolutionRequest {
 	readonly source: DynamicEntityRecipeSource;
 }
 
+export type DynamicVisualRecipeResolutionPayload = Omit<
+	DynamicVisualRecipeResolutionRequest,
+	"assetReader"
+>;
+
 export interface DynamicVisualRecipeResolver {
 	resolveRecipe(
 		request: DynamicVisualRecipeResolutionRequest,

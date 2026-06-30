@@ -1,6 +1,7 @@
 import type {
 	StaticBounds,
 	StaticAuthoredDynamicSeedRecord,
+	StaticResourceIdentity,
 	OutdoorStaticObjectDomain,
 	StaticLayerPeerRecordOwner,
 	LayerOwnerKey,
@@ -8,6 +9,7 @@ import type {
 } from "../static/contracts";
 import {
 	createDynamicVisualResourceId,
+	type BakedDynamicVisualResource,
 	type DynamicEntityCurrentBounds,
 	type DynamicEntityAnimationSelection,
 	type DynamicEntityAnimationState,
@@ -22,6 +24,9 @@ import {
 	type DynamicEntityRenderability,
 	type DynamicEntityRenderabilityReason,
 	type DynamicEntityResourceState,
+	type DynamicEntityResourceFailure,
+	type DynamicEntityResourceKey,
+	type DynamicEntityRequiredResource,
 	type DynamicEntityServerInstanceMetadata,
 	type DynamicEntitySetupAnimationResourceState,
 	type DynamicEntitySummaryDto,
@@ -31,10 +36,13 @@ import {
 	type DynamicEntityPresentation,
 	type DynamicEntityTransformState,
 	type DynamicVisualObjectIdentity,
+	type DynamicVisualSkipReason,
 	type DynamicVisualSource,
 	type StaticAuthoredDynamicSeedFacts,
 	type DynamicRuntimeSnapshot,
+	type DynamicEntityRecipe,
 } from "./contracts";
+import type { DynamicVisualRecipeResolutionPayload } from "./visual-recipe-resolver";
 import { createLayerOwnerKeyId } from "../static/layer-owners";
 import { DynamicAnimationPlayer } from "./dynamic-animation-player";
 import { DynamicEntityStore } from "./dynamic-entity-store";
@@ -53,6 +61,14 @@ import {
 import type { OutdoorDynamicSpatialIndexRecord } from "./outdoor-dynamic-spatial-index";
 
 const FIRST_SLICE_REQUIRED_RESOURCES = ["setup-model", "animation"] as const;
+const VISUAL_REQUIRED_RESOURCES = [
+	"setup-appearance",
+	"gfx",
+	"material",
+	"palette",
+	"render-surface",
+	"prepared-texture",
+] as const;
 const RUNTIME_SPAWN_ID_PREFIX = "runtime-spawn";
 type DynamicEntityTextureDomain = VisualTextureDomain;
 
@@ -142,7 +158,6 @@ export class DynamicEntityController {
 		const id = this.#allocateRuntimeSpawnId();
 		const record = createRuntimeDynamicEntityRecord(id, request);
 		this.#store.upsert(record);
-		this.#trackRecordResources(record);
 		return id;
 	}
 
@@ -167,7 +182,6 @@ export class DynamicEntityController {
 		this.#releaseRecordState(record);
 		const updatedRecord = createRuntimeDynamicEntityRecord(entityId, request);
 		this.#store.upsert(updatedRecord);
-		this.#trackRecordResources(updatedRecord);
 		return true;
 	}
 
@@ -196,7 +210,10 @@ export class DynamicEntityController {
 			if (
 				record.source.kind !== "runtime-spawn" ||
 				record.effectiveResidence.kind === "no-residence" ||
-				isRenderResidenceRetained(record.effectiveResidence, retainedLayerOwners)
+				isRenderResidenceRetained(
+					record.effectiveResidence,
+					retainedLayerOwners,
+				)
 			) {
 				continue;
 			}
@@ -220,6 +237,125 @@ export class DynamicEntityController {
 			this.#upsertPlacementUpdate(updated);
 			this.#onResourcesChanged();
 		}
+	}
+
+	createRuntimeVisualRecipeRequest(
+		entityId: DynamicEntityId,
+	): DynamicVisualRecipeResolutionPayload | null {
+		const record = this.#store.get(entityId);
+		if (record === null || record.source.kind !== "runtime-spawn") {
+			return null;
+		}
+		const materialPlanningIdentity =
+			record.presentation.policy.materialPlanningIdentity;
+		if (materialPlanningIdentity.kind !== "setup-backed-visual") {
+			throw new Error(
+				`Runtime dynamic ${entityId} cannot resolve visual recipe with material planning identity ${materialPlanningIdentity.kind}.`,
+			);
+		}
+		return {
+			animationSelection: record.source.animationSelection,
+			baseTransform: record.baseTransform,
+			entityId,
+			materialPolicy: {
+				detailRolePolicy: record.presentation.policy.materialDetailRolePolicy,
+				materialPlanningDomain:
+					record.presentation.policy.materialPlanningDomain,
+				visualObject: materialPlanningIdentity.visualObject,
+			},
+			modelData: record.source.modelData,
+			setupModelId: record.source.setupModelId,
+			source: {
+				kind: "runtime-authored",
+				runtimeEntityId: entityId,
+				sourceResidence: record.sourceResidence,
+			},
+		};
+	}
+
+	applyResolvedDynamicRecipe(recipe: DynamicEntityRecipe): boolean {
+		const updated = this.#store.update(recipe.entityId, (record) => {
+			if (record.source.kind !== "runtime-spawn") {
+				return record;
+			}
+			const resources = createResourcesWithResolvedRecipe(
+				record.resources,
+				recipe,
+			);
+			return {
+				...record,
+				animation: createAnimationStateFromSetupAnimationResource(
+					record.animation,
+					resources.setupAnimation,
+				),
+				renderability: createRenderability(
+					resources,
+					record.effectiveResidence,
+				),
+				resources,
+			};
+		});
+		if (updated === null || updated.source.kind !== "runtime-spawn") {
+			return false;
+		}
+		this.#upsertPlacementUpdate(updated);
+		this.#onResourcesChanged();
+		return true;
+	}
+
+	applyBakedDynamicVisual(resource: BakedDynamicVisualResource): boolean {
+		const updated = this.#store.update(resource.entityId, (record) => {
+			if (record.source.kind !== "runtime-spawn") {
+				return record;
+			}
+			const resources = createResourcesWithBakedVisual(
+				record.resources,
+				resource,
+			);
+			return {
+				...record,
+				renderability: createRenderability(
+					resources,
+					record.effectiveResidence,
+				),
+				resources,
+			};
+		});
+		if (updated === null || updated.source.kind !== "runtime-spawn") {
+			return false;
+		}
+		this.#upsertPlacementUpdate(updated);
+		this.#onResourcesChanged();
+		return true;
+	}
+
+	skipDynamicVisual(
+		entityId: DynamicEntityId,
+		reason: DynamicVisualSkipReason,
+	): boolean {
+		const updated = this.#store.update(entityId, (record) => {
+			if (record.source.kind !== "runtime-spawn") {
+				return record;
+			}
+			const resources = createResourcesWithSkippedVisual(
+				record.resources,
+				reason,
+			);
+			return {
+				...record,
+				renderability: createRenderability(
+					resources,
+					record.effectiveResidence,
+				),
+				resources,
+			};
+		});
+		if (updated === null || updated.source.kind !== "runtime-spawn") {
+			return false;
+		}
+		this.#upsertPlacementUpdate(updated);
+		this.#onResourcesChanged();
+		return true;
 	}
 
 	tick(timeSeconds: number, options: DynamicEntityTickOptions = {}): boolean {
@@ -263,12 +399,14 @@ export class DynamicEntityController {
 			.map((ownerId) =>
 				createStaticAuthoredDynamicPreparationStatus(
 					ownerId,
-					this.#store.records().filter(
-						(record) =>
-							record.source.kind === "static-authored" &&
-							record.provenance.kind !== "runtime-spawn" &&
-							record.provenance.layerOwnerId === ownerId,
-					),
+					this.#store
+						.records()
+						.filter(
+							(record) =>
+								record.source.kind === "static-authored" &&
+								record.provenance.kind !== "runtime-spawn" &&
+								record.provenance.layerOwnerId === ownerId,
+						),
 				),
 			);
 	}
@@ -424,7 +562,9 @@ function createRuntimeDynamicEntityRecord(
 		kind: "setup-default" as const,
 	};
 	const defaultAnimationId =
-		animationSelection.kind === "explicit" ? animationSelection.animationId : null;
+		animationSelection.kind === "explicit"
+			? animationSelection.animationId
+			: null;
 	const source = {
 		animationSelection,
 		kind: "runtime-spawn" as const,
@@ -683,9 +823,205 @@ function applyResourceChange(
 
 	return {
 		...record,
-		renderability: createRenderability(change.resources, record.effectiveResidence),
+		renderability: createRenderability(
+			change.resources,
+			record.effectiveResidence,
+		),
 		resources: change.resources,
 	};
+}
+
+function createResourcesWithResolvedRecipe(
+	current: DynamicEntityResourceState,
+	recipe: DynamicEntityRecipe,
+): DynamicEntityResourceState {
+	const setupAnimation = createSetupAnimationStateFromRecipe(recipe);
+	return {
+		...current,
+		required: createRequiredResourcesForSetupAnimation(setupAnimation),
+		setupAnimation,
+		status:
+			current.visual.status === "ready"
+				? "ready"
+				: current.visual.status === "failed"
+					? "failed"
+					: "setup-animation-ready",
+	};
+}
+
+function createSetupAnimationStateFromRecipe(
+	recipe: DynamicEntityRecipe,
+): Extract<
+	DynamicEntitySetupAnimationResourceState,
+	{ readonly status: "not-required" | "ready" }
+> {
+	const setupModelKey: DynamicEntityResourceKey = {
+		id: recipe.visual.setupModel.identity.sourceDid,
+		kind: "setup-model",
+	};
+	if (recipe.visual.animation === null) {
+		return {
+			reason:
+				recipe.animationSelection.kind === "none"
+					? "animation-not-selected"
+					: "setup-default-animation-missing",
+			setupModelKey,
+			status: "not-required",
+		};
+	}
+	return {
+		animation: recipe.visual.animation,
+		animationKey: {
+			id: recipe.visual.animation.payload.animationId,
+			kind: "animation",
+		},
+		setupModelKey,
+		status: "ready",
+	};
+}
+
+function createResourcesWithBakedVisual(
+	current: DynamicEntityResourceState,
+	resource: BakedDynamicVisualResource,
+): DynamicEntityResourceState {
+	return {
+		required: [
+			...createRequiredResourcesForSetupAnimation(current.setupAnimation),
+			...VISUAL_REQUIRED_RESOURCES,
+		],
+		setupAnimation: current.setupAnimation,
+		status: "ready",
+		visual: {
+			materialSlots: resource.materialSlots,
+			materialSources: resource.materialSources,
+			paletteSources: resource.paletteSources,
+			renderParts: resource.renderParts,
+			sourceAssets: resource.sourceAssets,
+			status: "ready",
+			textureRefs: resource.textureRefs,
+			textureRequirements: resource.textureRequirements,
+		},
+	};
+}
+
+function createResourcesWithSkippedVisual(
+	current: DynamicEntityResourceState,
+	reason: DynamicVisualSkipReason,
+): DynamicEntityResourceState {
+	return {
+		required: [
+			...createRequiredResourcesForSetupAnimation(current.setupAnimation),
+			...VISUAL_REQUIRED_RESOURCES,
+		],
+		setupAnimation: current.setupAnimation,
+		status: "failed",
+		visual: {
+			failures: createFailuresFromVisualSkipReason(reason),
+			missingRefs:
+				reason.kind === "missing-dependencies" ? reason.missingRefs : [],
+			status: "failed",
+			unsupportedReasons:
+				reason.kind === "unsupported-materials"
+					? reason.unsupportedReasons
+					: [],
+		},
+	};
+}
+
+function createRequiredResourcesForSetupAnimation(
+	setupAnimation: DynamicEntitySetupAnimationResourceState,
+): readonly DynamicEntityRequiredResource[] {
+	return setupAnimation.status === "not-required"
+		? ["setup-model"]
+		: FIRST_SLICE_REQUIRED_RESOURCES;
+}
+
+function createFailuresFromVisualSkipReason(
+	reason: DynamicVisualSkipReason,
+): readonly DynamicEntityResourceFailure[] {
+	if (reason.kind === "missing-dependencies") {
+		return reason.missingRefs.map(createMissingRefFailure);
+	}
+	if (reason.kind === "invalid-recipe") {
+		return [
+			{
+				message: reason.message,
+				resource: "gfx",
+				resourceKey: {
+					id: "dynamic-visual-recipe",
+					kind: "gfx",
+				},
+			},
+		];
+	}
+	return [];
+}
+
+function createMissingRefFailure(
+	ref: StaticResourceIdentity,
+): DynamicEntityResourceFailure {
+	const resourceKey = createResourceKeyFromMissingRef(ref);
+	return {
+		message: `Missing dynamic visual resource ${formatMissingRef(ref)}.`,
+		resource: resourceKey.kind,
+		resourceKey,
+	};
+}
+
+function createResourceKeyFromMissingRef(
+	ref: StaticResourceIdentity,
+): DynamicEntityResourceKey {
+	switch (ref.kind) {
+		case "static-object-source":
+			return {
+				id: ref.sourceDid,
+				kind: ref.sourceAssetKind === "gfx-obj" ? "gfx" : ref.sourceAssetKind,
+			};
+		case "static-material-source":
+			return {
+				id: ref.materialId,
+				kind: "material",
+			};
+		case "surface-texture":
+			return {
+				id: ref.surfaceTextureId,
+				kind: "prepared-texture",
+			};
+		case "render-surface":
+			return {
+				id: ref.renderSurfaceId,
+				kind: "render-surface",
+			};
+		case "palette":
+			return {
+				id: ref.paletteId,
+				kind: "palette",
+			};
+		default:
+			return {
+				id: formatMissingRef(ref),
+				kind: "prepared-texture",
+			};
+	}
+}
+
+function formatMissingRef(ref: StaticResourceIdentity): string {
+	if (ref.kind === "static-object-source") {
+		return `${ref.sourceAssetKind}:${formatHex32(ref.sourceDid)}`;
+	}
+	if (ref.kind === "static-material-source") {
+		return `material:${formatHex32(ref.materialId)}`;
+	}
+	if (ref.kind === "surface-texture") {
+		return `surface-texture:${formatHex32(ref.surfaceTextureId)}`;
+	}
+	if (ref.kind === "render-surface") {
+		return `render-surface:${formatHex32(ref.renderSurfaceId)}`;
+	}
+	if (ref.kind === "palette") {
+		return `palette:${formatHex32(ref.paletteId)}`;
+	}
+	return ref.kind;
 }
 
 function createStaticAuthoredDynamicPreparationStatus(

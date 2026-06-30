@@ -6,6 +6,11 @@ import type {
 	DynamicVisualBakeWorkerThreadMessage,
 } from "../dynamic/visual-bake-protocol";
 import type {
+	DynamicVisualRecipeWorkerMainMessage,
+	DynamicVisualRecipeWorkerPort,
+	DynamicVisualRecipeWorkerThreadMessage,
+} from "../dynamic/visual-recipe-protocol";
+import type {
 	StaticResolverWorkerMainMessage,
 	StaticResolverWorkerPort,
 	StaticResolverWorkerThreadMessage,
@@ -16,6 +21,7 @@ import type {
 } from "../static/contracts";
 import {
 	createWorkerDynamicVisualBaker,
+	createWorkerDynamicVisualRecipeResolver,
 	createWorkerStaticResolver,
 	shouldUseBrowserWorkerBaker,
 } from "./create-browser-runtime";
@@ -118,6 +124,46 @@ describe("browser runtime routing", () => {
 		disposeResolver(resolver);
 	});
 
+	it("backs dynamic visual recipe resolver workers with the supplied asset reader", () => {
+		const assetReader: PreparedAssetReader = {
+			requestPreparedAsset: () =>
+				Promise.reject(new Error("test asset reader should not be called")),
+		};
+		const workers = [
+			new FixtureDynamicVisualRecipeWorker(),
+			new FixtureDynamicVisualRecipeWorker(),
+		];
+		const pendingWorkers = [...workers];
+		const bridgedReaders: PreparedAssetReader[] = [];
+		let disposedBridges = 0;
+		const resolver = createWorkerDynamicVisualRecipeResolver(
+			assetReader,
+			workers.length,
+			{
+				createBridge: (_port, bridgedAssetReader) => {
+					bridgedReaders.push(bridgedAssetReader);
+					return {
+						dispose: () => {
+							disposedBridges += 1;
+						},
+					};
+				},
+				createWorker: () => {
+					const worker = pendingWorkers.shift();
+					if (!worker) {
+						throw new Error("No fixture dynamic visual recipe worker left.");
+					}
+					return worker;
+				},
+			},
+		);
+
+		expect(bridgedReaders).toEqual([assetReader, assetReader]);
+		disposeResolver(resolver);
+		expect(disposedBridges).toBe(2);
+		expect(workers.map((worker) => worker.terminated)).toEqual([true, true]);
+	});
+
 	it("creates a separate dynamic visual bake worker pool", async () => {
 		const workers = [
 			new FixtureDynamicVisualBakeWorker(),
@@ -208,6 +254,40 @@ class FixtureStaticResolverWorker implements StaticResolverWorkerPort {
 		for (const listener of this.#listeners) {
 			listener(event);
 		}
+	}
+}
+
+class FixtureDynamicVisualRecipeWorker implements DynamicVisualRecipeWorkerPort {
+	readonly messages: DynamicVisualRecipeWorkerMainMessage[] = [];
+	readonly #listeners = new Set<
+		(event: MessageEvent<DynamicVisualRecipeWorkerThreadMessage>) => void
+	>();
+	terminated = false;
+
+	postMessage(message: DynamicVisualRecipeWorkerMainMessage): void {
+		this.messages.push(message);
+	}
+
+	addEventListener(
+		_type: "message",
+		listener: (
+			event: MessageEvent<DynamicVisualRecipeWorkerThreadMessage>,
+		) => void,
+	): void {
+		this.#listeners.add(listener);
+	}
+
+	removeEventListener(
+		_type: "message",
+		listener: (
+			event: MessageEvent<DynamicVisualRecipeWorkerThreadMessage>,
+		) => void,
+	): void {
+		this.#listeners.delete(listener);
+	}
+
+	terminate(): void {
+		this.terminated = true;
 	}
 }
 

@@ -23,6 +23,14 @@ import {
 } from "../browser/runtime-spawn-form";
 import { DYNAMIC_ANIMATION_FRAME_RATE_FPS } from "../dynamic/dynamic-animation-player";
 import type {
+	DynamicEntityId,
+	DynamicEntityRecipe,
+	DynamicVisualBakeInput,
+	DynamicVisualBakeResult,
+} from "../dynamic/contracts";
+import type { DynamicVisualRecipeResolver } from "../dynamic/visual-recipe-resolver";
+import type { DynamicVisualBaker } from "../dynamic/visual-baker";
+import type {
 	DebugOverlayPrimitive,
 	Renderer,
 	RendererFrameTelemetry,
@@ -492,6 +500,39 @@ describe("browser client runtime", () => {
 		expect(runtime.createDiagnosticsSnapshot().renderer).toMatchObject({
 			dynamicInstances: 1,
 			dynamicVisualResources: 1,
+		});
+
+		runtime.dispose();
+	});
+
+	it("rejects stale runtime-authored visual prep after spawn removal", async () => {
+		const renderer = new FakeRenderer();
+		const recipeResolver = new DeferredDynamicRecipeResolver();
+		const visualBaker = new RecordingDynamicVisualBaker();
+		const runtime = createClientRuntime({
+			assetService: createResolvingAssetService(),
+			diagnostics: silentDiagnostics,
+			dynamicVisualBaker: visualBaker,
+			dynamicVisualRecipeResolver: recipeResolver,
+			host: new FakeRuntimeHost(),
+			renderer,
+		});
+
+		const entityId = runtime.createRuntimeSpawn(
+			createFirstRuntimeSpawnFixtureRequest(),
+		);
+		expect(runtime.removeRuntimeSpawn(entityId)).toBe(true);
+		recipeResolver.resolveNext(createRuntimeRecipe(entityId));
+		await flushRuntimeWork();
+
+		expect(visualBaker.inputs).toEqual([]);
+		expect(runtime.createDiagnosticsSnapshot().dynamic).toMatchObject({
+			activeEntityCount: 0,
+			runtimeSpawnCount: 0,
+		});
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			dynamicInstances: 0,
+			dynamicVisualResources: 0,
 		});
 
 		runtime.dispose();
@@ -3511,6 +3552,38 @@ interface DeferredAssetRequest {
 	readonly reject: (error: Error) => void;
 }
 
+class DeferredDynamicRecipeResolver implements DynamicVisualRecipeResolver {
+	#pendingResolve: ((recipe: DynamicEntityRecipe) => void) | null = null;
+
+	resolveRecipe(): Promise<DynamicEntityRecipe> {
+		return new Promise((resolve) => {
+			this.#pendingResolve = resolve;
+		});
+	}
+
+	resolveNext(recipe: DynamicEntityRecipe): void {
+		if (!this.#pendingResolve) {
+			throw new Error("No pending dynamic recipe request to resolve.");
+		}
+		this.#pendingResolve(recipe);
+		this.#pendingResolve = null;
+	}
+}
+
+class RecordingDynamicVisualBaker implements DynamicVisualBaker {
+	readonly inputs: DynamicVisualBakeInput[] = [];
+
+	bake(input: DynamicVisualBakeInput): Promise<DynamicVisualBakeResult> {
+		this.inputs.push(input);
+		return Promise.resolve({
+			batchId: input.batchId,
+			failures: [],
+			products: [],
+			revision: input.revision,
+		});
+	}
+}
+
 function createResolvingAssetService(): HostBackedAssetService {
 	return new HostBackedAssetService({
 		host: new ResolvingAssetRuntimeHost(),
@@ -3521,6 +3594,60 @@ function createResolvingSetOmegaAssetService(): HostBackedAssetService {
 	return new HostBackedAssetService({
 		host: new ResolvingSetOmegaAssetRuntimeHost(),
 	});
+}
+
+function createRuntimeRecipe(entityId: DynamicEntityId): DynamicEntityRecipe {
+	return {
+		animationSelection: { kind: "none" },
+		baseTransform: {
+			baseLocalPlacement: createPlacement(),
+			sourceScale: { x: 1, y: 1, z: 1 },
+		},
+		entityId,
+		source: {
+			kind: "runtime-authored",
+			runtimeEntityId: entityId,
+			sourceResidence: {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			},
+		},
+		visual: {
+			animation: null,
+			materialPolicy: {
+				detailRolePolicy: { kind: "runtime-authored-none" },
+				materialPlanningDomain: "runtime-authored-dynamic-object-material",
+				visualObject: {
+					entityId,
+					kind: "dynamic-visual-object",
+					resourceId: `dynamic-visual-resource:${entityId}`,
+				},
+			},
+			materialSources: [],
+			missingRefs: [],
+			paletteSources: [],
+			setupModel: {
+				bounds: null,
+				debug: { sourceAssetId: "setup-model/020003e5" },
+				defaultAnimation: null,
+				identity: {
+					kind: "static-object-source",
+					sourceAssetKind: "setup-model",
+					sourceDid: 0x020003e5,
+				},
+				invalidPolygonCount: 0,
+				materialSlotCount: 0,
+				partCount: 0,
+				parts: [],
+				physicsPolygonCount: 0,
+				renderTriangleCount: 0,
+				skippedPolygonCount: 0,
+				sourceAssetKind: "setup-model",
+			},
+			sourceAssets: [],
+			textureRefs: [],
+		},
+	};
 }
 
 function createOutdoorStaticObjectsPayload(

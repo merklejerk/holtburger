@@ -6,6 +6,14 @@ import {
 	WorkerPoolDynamicVisualBaker,
 } from "../dynamic/visual-bake-worker-client";
 import type { DynamicVisualBakeWorkerPort } from "../dynamic/visual-bake-protocol";
+import {
+	createDynamicVisualRecipeMainAssetBridge,
+	DynamicVisualRecipeWorkerClient,
+	type DynamicVisualRecipeMainAssetBridge,
+	WorkerPoolDynamicVisualRecipeResolver,
+} from "../dynamic/visual-recipe-worker-client";
+import type { DynamicVisualRecipeResolver } from "../dynamic/visual-recipe-resolver";
+import type { DynamicVisualRecipeWorkerPort } from "../dynamic/visual-recipe-protocol";
 import { createBrowserRuntimeHost } from "../host/runtime-host";
 import { createWebgl2Renderer } from "../renderer/webgl2/webgl2-renderer";
 import {
@@ -49,6 +57,8 @@ import {
 
 const DEFAULT_STATIC_RESOLVER_WORKER_COUNT = 2;
 const DEFAULT_STATIC_BAKER_WORKER_COUNT = 2;
+const DEFAULT_DYNAMIC_VISUAL_RECIPE_RESOLVER_WORKER_COUNT = 1;
+const DEFAULT_DYNAMIC_VISUAL_BAKER_WORKER_COUNT = 1;
 const DEFAULT_TEXTURE_PACKING_WORKER_COUNT = 2;
 
 export function createBrowserRuntime(canvas: HTMLCanvasElement): ClientRuntime {
@@ -62,10 +72,21 @@ export function createBrowserRuntime(canvas: HTMLCanvasElement): ClientRuntime {
 	const texturePacker = hostSnapshot.isAvailable
 		? createWorkerTexturePacker(DEFAULT_TEXTURE_PACKING_WORKER_COUNT)
 		: undefined;
+	const dynamicVisualRecipeResolver = hostSnapshot.isAvailable
+		? createWorkerDynamicVisualRecipeResolver(
+				assetService,
+				DEFAULT_DYNAMIC_VISUAL_RECIPE_RESOLVER_WORKER_COUNT,
+			)
+		: undefined;
+	const dynamicVisualBaker = hostSnapshot.isAvailable
+		? createWorkerDynamicVisualBaker(DEFAULT_DYNAMIC_VISUAL_BAKER_WORKER_COUNT)
+		: undefined;
 
 	return createClientRuntime({
 		host,
 		assetService,
+		dynamicVisualBaker,
+		dynamicVisualRecipeResolver,
 		renderer,
 		staticCoordinator,
 		texturePacker,
@@ -104,6 +125,10 @@ function createTauriStaticCoordinator(
 }
 
 interface StaticResolverBrowserWorker extends StaticResolverWorkerPort {
+	terminate(): void;
+}
+
+interface DynamicVisualRecipeBrowserWorker extends DynamicVisualRecipeWorkerPort {
 	terminate(): void;
 }
 
@@ -146,6 +171,50 @@ function createStaticResolverBrowserWorker(): StaticResolverBrowserWorker {
 		new URL("../static/resolver/static-resolver.worker.ts", import.meta.url),
 		{ type: "module" },
 	) as StaticResolverBrowserWorker;
+}
+
+export interface WorkerDynamicVisualRecipeResolverFactories {
+	readonly createBridge?: (
+		port: DynamicVisualRecipeWorkerPort,
+		assetReader: PreparedAssetReader,
+	) => DynamicVisualRecipeMainAssetBridge;
+	readonly createWorker?: () => DynamicVisualRecipeBrowserWorker;
+}
+
+export function createWorkerDynamicVisualRecipeResolver(
+	assetReader: PreparedAssetReader,
+	workerCount: number,
+	factories: WorkerDynamicVisualRecipeResolverFactories = {},
+): DynamicVisualRecipeResolver {
+	assertPositiveInteger(
+		workerCount,
+		"dynamic visual recipe resolver worker count",
+	);
+	const createWorker =
+		factories.createWorker ?? createDynamicVisualRecipeBrowserWorker;
+	const createBridge =
+		factories.createBridge ?? createDynamicVisualRecipeMainAssetBridge;
+
+	const resolvers = Array.from({ length: workerCount }, () => {
+		const worker = createWorker();
+		const bridge = createBridge(worker, assetReader);
+
+		return new DynamicVisualRecipeWorkerClient(worker, {
+			disposePort: () => {
+				bridge.dispose();
+				worker.terminate();
+			},
+		});
+	});
+
+	return new WorkerPoolDynamicVisualRecipeResolver(resolvers);
+}
+
+function createDynamicVisualRecipeBrowserWorker(): DynamicVisualRecipeBrowserWorker {
+	return new Worker(
+		new URL("../dynamic/visual-recipe.worker.ts", import.meta.url),
+		{ type: "module" },
+	) as DynamicVisualRecipeBrowserWorker;
 }
 
 function createWorkerStaticBaker(workerCount: number): StaticBaker {

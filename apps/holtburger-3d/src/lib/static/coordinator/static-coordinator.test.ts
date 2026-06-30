@@ -60,7 +60,7 @@ describe("static coordinator", () => {
 		});
 	});
 
-	it("rejects stale bake results after a newer demand revision supersedes them", async () => {
+	it("ignores stale bake results after a newer demand revision supersedes them", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
@@ -84,7 +84,7 @@ describe("static coordinator", () => {
 
 		expect(coordinator.createSnapshot()).toMatchObject({
 			committed: 0,
-			staleBakeResults: 1,
+			committedDrawUnits: 0,
 		});
 	});
 
@@ -1444,9 +1444,6 @@ describe("static coordinator", () => {
 		});
 		await flushPromises();
 
-		expect(coordinator.createSnapshot().staleBakeResults).toBe(
-			envCellBatch.items.length - 1,
-		);
 		expect(deltas.at(-1)).toMatchObject({
 			staticSpatialRecords: [
 				{

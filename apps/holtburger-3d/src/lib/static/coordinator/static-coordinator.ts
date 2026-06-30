@@ -97,7 +97,6 @@ export class StaticCoordinator {
 	#disposed = false;
 	#committed = 0;
 	#failed = 0;
-	#staleBakeResults = 0;
 	#committedDrawUnits = 0;
 	#latestTerrainPayload: TerrainStaticScopePayloadSummary | null = null;
 	#latestOutdoorStaticObjectsPayload: OutdoorStaticObjectsPayloadSummary | null =
@@ -268,7 +267,6 @@ export class StaticCoordinator {
 			requested: layerTasks.length,
 			resolving: countPhase(layerTasks, "resolving"),
 			revision: this.#revision,
-			staleBakeResults: this.#staleBakeResults,
 			staticObjectBakeDiagnostics: Array.from(
 				this.#latestStaticObjectBakeDiagnosticsByKey.values(),
 			).sort(compareStaticObjectBakeDiagnostics),
@@ -497,8 +495,7 @@ export class StaticCoordinator {
 			(task) => this.#isBakeTaskCurrent(task) && this.#isLayerOwnerDemanded(task.ownerKey),
 		);
 		if (currentTasks.length !== result.tasks.length) {
-			this.#staleBakeResults += result.tasks.length - currentTasks.length;
-			result = filterStaticBakeResultForTasks(result, currentTasks);
+			result = filterStaticBakeResultForCurrentTasks(result, currentTasks);
 			if (currentTasks.length === 0) {
 				this.#emit();
 				return;
@@ -1093,30 +1090,6 @@ function formatHex32(value: number): string {
 	return (value >>> 0).toString(16).padStart(8, "0");
 }
 
-function createDemandKeyForDrawUnit(input: {
-	readonly domain: StaticDomain;
-	readonly landblockId: number;
-}): string {
-	return `landblock:${(input.landblockId >>> 0).toString(16).padStart(8, "0")}:${input.domain}`;
-}
-
-function getDrawUnitDemandKey(drawUnit: StaticDrawUnit): string {
-	if (
-		drawUnit.kind === "terrain-geometry" ||
-		drawUnit.kind === "static-object-geometry" ||
-		drawUnit.kind === "structured-interior-geometry"
-	) {
-		return createDemandKeyForDrawUnit({
-			domain: drawUnit.domain,
-			landblockId: drawUnit.landblockId,
-		});
-	}
-
-	throw new Error(
-		`Static coordinator cannot commit ownerless draw unit ${String((drawUnit as { drawUnitId?: unknown }).drawUnitId ?? "unknown")}.`,
-	);
-}
-
 function getDrawUnitOwnerId(drawUnit: StaticDrawUnit): string {
 	if (
 		drawUnit.kind === "terrain-geometry" ||
@@ -1270,33 +1243,31 @@ function compareMaterialCoverageReports(
 	);
 }
 
-function filterStaticBakeResultForTasks(
+function filterStaticBakeResultForCurrentTasks(
 	result: StaticBakeBatchResult,
 	tasks: readonly StaticBakeTask[],
 ): StaticBakeBatchResult {
-	const demandKeys = new Set(tasks.map(createDemandKeyForTask));
 	const ownerIds = new Set(tasks.map((task) => task.ownerId));
 	const drawUnitIds = new Set(
 		result.drawUnits
-			.filter((drawUnit) => demandKeys.has(getDrawUnitDemandKey(drawUnit)))
+			.filter((drawUnit) => ownerIds.has(getDrawUnitOwnerId(drawUnit)))
 			.map((drawUnit) => drawUnit.drawUnitId),
 	);
 	const retainedPortalApertureResourceIds = new Set(
 		result.portalApertureResources
-			.filter((resource) =>
-				demandKeys.has(
-					createDemandKeyForDrawUnit({
-						domain: resource.sourceDomain,
-						landblockId: resource.landblockId,
-					}),
-				),
+			.filter((resource) => ownerIds.has(
+				createLayerOwnerIdForDomainLandblock({
+					domain: resource.sourceDomain,
+					landblockId: resource.landblockId,
+				}),
+			),
 			)
 			.map((resource) => resource.apertureResourceId),
 	);
 	const retainedStaticObjectRenderInstances =
 		result.staticObjectRenderInstances.filter((instance) =>
-			demandKeys.has(
-				createDemandKeyForDrawUnit({
+			ownerIds.has(
+				createLayerOwnerIdForDomainLandblock({
 					domain: instance.domain,
 					landblockId: instance.landblockId,
 				}),
@@ -1313,8 +1284,8 @@ function filterStaticBakeResultForTasks(
 		),
 		staticObjectBakeDiagnostics: result.staticObjectBakeDiagnostics.filter(
 			(diagnostics) =>
-				demandKeys.has(
-					createDemandKeyForDrawUnit({
+				ownerIds.has(
+					createLayerOwnerIdForDomainLandblock({
 						domain: diagnostics.domain,
 						landblockId: diagnostics.landblockId,
 					}),
@@ -1378,10 +1349,6 @@ function filterStaticBakeResultForTasks(
 		),
 		tasks,
 	};
-}
-
-function createDemandKeyForTask(task: StaticBakeTask): string {
-	return `${task.scopeKey}:${task.domain}`;
 }
 
 function isPeerRecordOwnedByRetainedWork(
@@ -1455,10 +1422,11 @@ function createEvictionStaticBatchId(revision: number): string {
 function createStaticObjectBakeDiagnosticsKey(
 	diagnostics: StaticObjectBakeDiagnostics,
 ): string {
-	return createDemandKeyForDrawUnit({
-		domain: diagnostics.domain,
-		landblockId: diagnostics.landblockId,
-	});
+	return [
+		"static-object-bake-diagnostics",
+		diagnostics.domain,
+		formatHex32(diagnostics.landblockId),
+	].join(":");
 }
 
 function compareStaticObjectBakeDiagnostics(

@@ -178,7 +178,6 @@ interface StaticCoordinatorDiagnosticsSummary {
 	readonly baking: number;
 	readonly committed: number;
 	readonly failed: number;
-	readonly staleBakeResults: number;
 	readonly committedDrawUnits: number;
 }
 

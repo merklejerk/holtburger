@@ -33,9 +33,6 @@ describe("static demand planner", () => {
 		expect(buildingWork).toHaveLength(9);
 		expect(explicitObjectWork).toHaveLength(9);
 		expect(generatedSceneryWork).toHaveLength(9);
-		expect(work.some((item) => item.job.domain === "outdoor-detail")).toBe(
-			false,
-		);
 		expect(work.every((item) => item.revision === 7)).toBe(true);
 		expect(work.every((item) => item.job.scope.kind === "landblock")).toBe(
 			true,

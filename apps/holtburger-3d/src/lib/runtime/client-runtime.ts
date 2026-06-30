@@ -22,7 +22,6 @@ import type {
 	OutdoorBuildingsLayerPayload,
 	OutdoorExplicitObjectsLayerPayload,
 	OutdoorGeneratedSceneryLayerPayload,
-	OutdoorDetailsLayerPayload,
 	StaticObjectUploadDiagnostics,
 	DynamicRendererResourceCommit,
 	DynamicRendererVisualResource,
@@ -2037,9 +2036,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 					payload,
 				);
 				break;
-			case "outdoor-detail":
-				this.#renderer.setOutdoorDetailsLayer(payload.landblockId, payload);
-				break;
 			case "env-cell-system":
 				this.#renderer.setEnvCellSystemLayer(payload.landblockId, payload);
 				break;
@@ -2081,9 +2077,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 				break;
 			case "outdoor-generated-scenery":
 				this.#renderer.setOutdoorGeneratedSceneryLayer(payload.landblockId, null);
-				break;
-			case "outdoor-detail":
-				this.#renderer.setOutdoorDetailsLayer(payload.landblockId, null);
 				break;
 			case "env-cell-system":
 				this.#renderer.setEnvCellSystemLayer(payload.landblockId, null);
@@ -3033,14 +3026,12 @@ function createMaterializedLandblockLayerPayloads(
 	| OutdoorBuildingsLayerPayload
 	| OutdoorExplicitObjectsLayerPayload
 	| OutdoorGeneratedSceneryLayerPayload
-	| OutdoorDetailsLayerPayload
 )[] {
 	const payloads: (
 		| TerrainLayerPayload
 		| OutdoorBuildingsLayerPayload
 		| OutdoorExplicitObjectsLayerPayload
 		| OutdoorGeneratedSceneryLayerPayload
-		| OutdoorDetailsLayerPayload
 	)[] = [];
 	const terrainByLandblock = new Map<
 		number,
@@ -3049,10 +3040,6 @@ function createMaterializedLandblockLayerPayloads(
 	const buildingsByLandblock = new Map<
 		number,
 		OutdoorBuildingsLayerPayload["drawUnits"]
-	>();
-	const detailByLandblock = new Map<
-		number,
-		OutdoorDetailsLayerPayload["drawUnits"]
 	>();
 	const explicitObjectsByLandblock = new Map<
 		number,
@@ -3081,13 +3068,6 @@ function createMaterializedLandblockLayerPayloads(
 			]);
 			continue;
 		}
-		if (drawUnit.domain === "outdoor-detail") {
-			detailByLandblock.set(drawUnit.landblockId, [
-				...(detailByLandblock.get(drawUnit.landblockId) ?? []),
-				drawUnit as OutdoorDetailsLayerPayload["drawUnits"][number],
-			]);
-			continue;
-		}
 		if (drawUnit.domain === "outdoor-explicit-objects") {
 			explicitObjectsByLandblock.set(drawUnit.landblockId, [
 				...(explicitObjectsByLandblock.get(drawUnit.landblockId) ?? []),
@@ -3103,11 +3083,6 @@ function createMaterializedLandblockLayerPayloads(
 		}
 	}
 	for (const instance of materialized.staticObjectRenderInstances) {
-		if (instance.domain === "outdoor-detail") {
-			if (!detailByLandblock.has(instance.landblockId)) {
-				detailByLandblock.set(instance.landblockId, []);
-			}
-		}
 		if (instance.domain === "outdoor-generated-scenery") {
 			if (!generatedSceneryByLandblock.has(instance.landblockId)) {
 				generatedSceneryByLandblock.set(instance.landblockId, []);
@@ -3263,52 +3238,6 @@ function createMaterializedLandblockLayerPayloads(
 			),
 		});
 	}
-	for (const [landblockId, drawUnits] of detailByLandblock) {
-		payloads.push({
-			drawUnits,
-			generationId: createStaticLandblockLayerGenerationIdForRuntime(
-				"outdoor-detail",
-				landblockId,
-				delta.revision,
-			),
-			instancedObjectInstances: materialized.staticObjectRenderInstances.filter(
-				(instance) =>
-					instance.domain === "outdoor-detail" &&
-					instance.landblockId === landblockId,
-			),
-			instancedObjectResources: materialized.staticObjectVisualResources.filter(
-				(resource) =>
-					materialized.staticObjectRenderInstances.some(
-						(instance) =>
-							instance.landblockId === landblockId &&
-							instance.resourceId === resource.resourceId,
-					),
-			),
-			kind: "outdoor-detail",
-			landblockId,
-			materialCoverage: delta.materialCoverage.filter(
-				(coverage) =>
-					coverage.domain === "outdoor-detail" &&
-					coverage.landblockId === landblockId,
-			),
-			sourceMappingRecords: materialized.staticSourceMappings.filter(
-				(record) =>
-					record.owner.kind === "layer-owner" &&
-					record.owner.domain === "outdoor-detail" &&
-					record.owner.key.landblockId === landblockId,
-			),
-			spatialRecords: materialized.staticSpatialRecords.filter(
-				(record) =>
-					record.owner.kind === "layer-owner" &&
-					record.owner.domain === "outdoor-detail" &&
-					record.owner.key.landblockId === landblockId,
-			),
-			textureUses: delta.textureUses.filter(
-				(textureUse) => textureUse.domain === "outdoor-detail",
-			),
-		});
-	}
-
 	return payloads;
 }
 
@@ -3333,7 +3262,6 @@ function collectStaticLayerResourceIds(
 		case "outdoor-explicit-objects":
 			return payload.drawUnits.map((drawUnit) => drawUnit.drawUnitId);
 		case "outdoor-generated-scenery":
-		case "outdoor-detail":
 			return [
 				...payload.drawUnits.map((drawUnit) => drawUnit.drawUnitId),
 				...payload.instancedObjectResources.map(
@@ -3731,7 +3659,8 @@ function createStaticCoordinatorDiagnosticsReport(
 	const targetStaticObjectBakeDiagnostics =
 		snapshot.staticObjectBakeDiagnostics.filter(
 			(diagnostics) =>
-				diagnostics.domain === "outdoor-detail" && diagnostics.objectCount > 0,
+				diagnostics.domain === "outdoor-generated-scenery" &&
+				diagnostics.objectCount > 0,
 		);
 
 	const report: Omit<StaticCoordinatorDiagnosticsReport, "kind"> = {
@@ -3777,18 +3706,18 @@ function createRendererDiagnosticsSummary(
 		frameCount: snapshot.frameCount,
 		frameHandlerMs: snapshot.frameHandlerMs,
 		isRunning: snapshot.isRunning,
-		outdoorDetailStaticObjectResources:
-			snapshot.outdoorDetailStaticObjectResources,
-		outdoorDetailStaticObjectBakedDirectDrawCalls:
-			snapshot.outdoorDetailStaticObjectBakedDirectDrawCalls,
-		outdoorDetailStaticObjectBakedDirectDrawCallsByPass:
-			snapshot.outdoorDetailStaticObjectBakedDirectDrawCallsByPass,
-		outdoorDetailStaticObjectRenderInstances:
-			snapshot.outdoorDetailStaticObjectRenderInstances,
-		outdoorDetailStaticObjectVisualResources:
-			snapshot.outdoorDetailStaticObjectVisualResources,
-		outdoorDetailStaticObjectUploadedBufferBytes:
-			snapshot.outdoorDetailStaticObjectUploadedBufferBytes,
+		outdoorGeneratedSceneryStaticObjectResources:
+			snapshot.outdoorGeneratedSceneryStaticObjectResources,
+		outdoorGeneratedSceneryStaticObjectBakedDirectDrawCalls:
+			snapshot.outdoorGeneratedSceneryStaticObjectBakedDirectDrawCalls,
+		outdoorGeneratedSceneryStaticObjectBakedDirectDrawCallsByPass:
+			snapshot.outdoorGeneratedSceneryStaticObjectBakedDirectDrawCallsByPass,
+		outdoorGeneratedSceneryStaticObjectRenderInstances:
+			snapshot.outdoorGeneratedSceneryStaticObjectRenderInstances,
+		outdoorGeneratedSceneryStaticObjectVisualResources:
+			snapshot.outdoorGeneratedSceneryStaticObjectVisualResources,
+		outdoorGeneratedSceneryStaticObjectUploadedBufferBytes:
+			snapshot.outdoorGeneratedSceneryStaticObjectUploadedBufferBytes,
 		renderedTriangles: snapshot.renderedTriangles,
 		renderPassKind: snapshot.renderPassPlan.kind,
 		staticDrawUnits: snapshot.staticDrawUnits,
@@ -4406,8 +4335,8 @@ function createStaticObjectBakeSummary(
 			diagnostics.map((entry) => entry.partitionCount),
 		),
 		reportCount: diagnostics.length,
-		retainedTransparentOutdoorDetailPartitionReasons:
-			sumRetainedTransparentOutdoorDetailPartitionReasons(diagnostics),
+		retainedTransparentOutdoorGeneratedSceneryPartitionReasons:
+			sumRetainedTransparentOutdoorGeneratedSceneryPartitionReasons(diagnostics),
 		uniqueSourceCount: sumNumbers(
 			diagnostics.map((entry) => entry.uniqueSourceCount),
 		),
@@ -4420,48 +4349,48 @@ function createStaticObjectBakeSummary(
 	};
 }
 
-function sumRetainedTransparentOutdoorDetailPartitionReasons(
+function sumRetainedTransparentOutdoorGeneratedSceneryPartitionReasons(
 	diagnostics: readonly StaticObjectBakeDiagnostics[],
-): StaticObjectBakeDiagnostics["retainedTransparentOutdoorDetailPartitionReasons"] {
+): StaticObjectBakeDiagnostics["retainedTransparentOutdoorGeneratedSceneryPartitionReasons"] {
 	return {
 		explicitObject: sumNumbers(
 			diagnostics.map(
 				(entry) =>
-					entry.retainedTransparentOutdoorDetailPartitionReasons.explicitObject,
+					entry.retainedTransparentOutdoorGeneratedSceneryPartitionReasons.explicitObject,
 			),
 		),
 		missingInstanceBounds: sumNumbers(
 			diagnostics.map(
 				(entry) =>
-					entry.retainedTransparentOutdoorDetailPartitionReasons
+					entry.retainedTransparentOutdoorGeneratedSceneryPartitionReasons
 						.missingInstanceBounds,
 			),
 		),
 		nonRenderableOrDeferredMaterialBucket: sumNumbers(
 			diagnostics.map(
 				(entry) =>
-					entry.retainedTransparentOutdoorDetailPartitionReasons
+					entry.retainedTransparentOutdoorGeneratedSceneryPartitionReasons
 						.nonRenderableOrDeferredMaterialBucket,
 			),
 		),
 		oneOffGeneratedSource: sumNumbers(
 			diagnostics.map(
 				(entry) =>
-					entry.retainedTransparentOutdoorDetailPartitionReasons
+					entry.retainedTransparentOutdoorGeneratedSceneryPartitionReasons
 						.oneOffGeneratedSource,
 			),
 		),
 		repeatedGeneratedSourceRetainedByPartitionPolicy: sumNumbers(
 			diagnostics.map(
 				(entry) =>
-					entry.retainedTransparentOutdoorDetailPartitionReasons
+					entry.retainedTransparentOutdoorGeneratedSceneryPartitionReasons
 						.repeatedGeneratedSourceRetainedByPartitionPolicy,
 			),
 		),
 		unsupportedMaterialBucket: sumNumbers(
 			diagnostics.map(
 				(entry) =>
-					entry.retainedTransparentOutdoorDetailPartitionReasons
+					entry.retainedTransparentOutdoorGeneratedSceneryPartitionReasons
 						.unsupportedMaterialBucket,
 			),
 		),

@@ -21,7 +21,6 @@ const domainPriorities: Record<StaticDomain, number> = {
 	"outdoor-explicit-objects": 15,
 	"outdoor-generated-scenery": 20,
 	"landblock-env-cells": 10,
-	"outdoor-detail": 20,
 };
 
 export function planStaticDemand(
@@ -243,8 +242,6 @@ function landblockSceneLodLayerKindForStaticDomain(
 			return "outdoor-generated-scenery";
 		case "landblock-env-cells":
 			return "env-cell-system";
-		case "outdoor-detail":
-			return "outdoor-generated-scenery";
 	}
 }
 

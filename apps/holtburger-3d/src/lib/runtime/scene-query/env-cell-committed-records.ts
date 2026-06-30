@@ -1108,7 +1108,7 @@ function getCommittedRecordDomain(
 	if (isTerrainSourceMappingRecord(record)) {
 		return "outdoor-terrain";
 	}
-	return "outdoor-detail";
+	return "outdoor-generated-scenery";
 }
 
 function getCommittedRecordLandblockId(

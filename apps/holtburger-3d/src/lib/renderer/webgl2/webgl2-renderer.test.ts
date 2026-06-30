@@ -17,7 +17,7 @@ import type {
 	EnvCellSystemLayerPayload,
 	DynamicRendererResourceCommit,
 	DynamicRendererInstance,
-	OutdoorDetailsLayerPayload,
+	OutdoorGeneratedSceneryLayerPayload,
 	PortalBaseOverlapPlan,
 	PortalFrameWorkPlan,
 	TerrainLayerPayload,
@@ -1487,7 +1487,7 @@ describe("WebGL2 structured interior rendering", () => {
 		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
 			dynamicVisualResourceTextureUses: 1,
 			dynamicVisualResources: 1,
-			outdoorDetailStaticObjectResources: 0,
+			outdoorGeneratedSceneryStaticObjectResources: 0,
 			staticDrawUnits: 0,
 			staticObjectRenderInstances: 0,
 			staticObjectVisualResources: 0,
@@ -1517,14 +1517,14 @@ describe("WebGL2 structured interior rendering", () => {
 			type: gl.UNSIGNED_SHORT,
 		});
 
-		renderer.setOutdoorDetailsLayer(
+		renderer.setOutdoorGeneratedSceneryLayer(
 			0xda55ffff,
-			createOutdoorDetailsLayerPayload(),
+			createOutdoorGeneratedSceneryLayerPayload(),
 		);
-		renderer.setOutdoorDetailsLayer(0xda55ffff, null);
+		renderer.setOutdoorGeneratedSceneryLayer(0xda55ffff, null);
 		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
 			dynamicVisualResources: 1,
-			outdoorDetailStaticObjectResources: 0,
+			outdoorGeneratedSceneryStaticObjectResources: 0,
 			staticDrawUnits: 0,
 			staticObjectRenderInstances: 0,
 			staticObjectVisualResources: 0,
@@ -1660,7 +1660,7 @@ describe("WebGL2 structured interior rendering", () => {
 		renderer.dispose();
 	});
 
-	it("reports outdoor-detail static object upload diagnostics", () => {
+	it("reports outdoor-generated-scenery static object upload diagnostics", () => {
 		const gl = createFakeWebgl2Context();
 		const canvas = createFakeCanvas(gl);
 		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
@@ -1671,19 +1671,19 @@ describe("WebGL2 structured interior rendering", () => {
 		vi.stubGlobal("window", { devicePixelRatio: 1 });
 		const renderer = createWebgl2Renderer(canvas);
 
-		renderer.setOutdoorDetailsLayer(
+		renderer.setOutdoorGeneratedSceneryLayer(
 			0xda55ffff,
-			createOutdoorDetailsLayerPayload(),
+			createOutdoorGeneratedSceneryLayerPayload(),
 		);
 
 		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
-			outdoorDetailStaticObjectResources: 1,
-			outdoorDetailStaticObjectUploadedBufferBytes: 78,
+			outdoorGeneratedSceneryStaticObjectResources: 1,
+			outdoorGeneratedSceneryStaticObjectUploadedBufferBytes: 78,
 			staticObjectResources: 1,
 			staticObjectUploadedBufferBytes: 78,
 			recentStaticObjectUploads: [
 				expect.objectContaining({
-					domain: "outdoor-detail",
+					domain: "outdoor-generated-scenery",
 					drawUnitCount: 1,
 					kind: "static-object-upload-diagnostics",
 					landblockId: 0xda55ffff,
@@ -1695,7 +1695,7 @@ describe("WebGL2 structured interior rendering", () => {
 		renderer.dispose();
 	});
 
-	it("uses instanced draws for compatible shared outdoor-detail render instances", () => {
+	it("uses instanced draws for compatible shared outdoor-generated-scenery render instances", () => {
 		const gl = createFakeWebgl2Context();
 		const canvas = createFakeCanvas(gl);
 		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
@@ -1705,19 +1705,19 @@ describe("WebGL2 structured interior rendering", () => {
 		vi.stubGlobal("cancelAnimationFrame", () => {});
 		vi.stubGlobal("window", { devicePixelRatio: 1 });
 		const renderer = createWebgl2Renderer(canvas);
-		const visualResource = createOutdoorDetailStaticObjectVisualResource(
+		const visualResource = createOutdoorGeneratedSceneryStaticObjectVisualResource(
 			"static-object-visual-resource:test",
 		);
 
-		renderer.setOutdoorDetailsLayer(0xda55ffff, {
-			...createOutdoorDetailsLayerPayload(),
+		renderer.setOutdoorGeneratedSceneryLayer(0xda55ffff, {
+			...createOutdoorGeneratedSceneryLayerPayload(),
 			drawUnits: [],
 			instancedObjectInstances: [
-				createOutdoorDetailStaticObjectRenderInstance({
+				createOutdoorGeneratedSceneryStaticObjectRenderInstance({
 					instanceId: "instance-a",
 					resourceId: visualResource.resourceId,
 				}),
-				createOutdoorDetailStaticObjectRenderInstance({
+				createOutdoorGeneratedSceneryStaticObjectRenderInstance({
 					instanceId: "instance-b",
 					resourceId: visualResource.resourceId,
 				}),
@@ -1743,7 +1743,7 @@ describe("WebGL2 structured interior rendering", () => {
 		renderer.dispose();
 	});
 
-	it("uses instanced draws for far transparent shared outdoor-detail render instances", () => {
+	it("uses instanced draws for far transparent shared outdoor-generated-scenery render instances", () => {
 		const gl = createFakeWebgl2Context();
 		const canvas = createFakeCanvas(gl);
 		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
@@ -1753,21 +1753,21 @@ describe("WebGL2 structured interior rendering", () => {
 		vi.stubGlobal("cancelAnimationFrame", () => {});
 		vi.stubGlobal("window", { devicePixelRatio: 1 });
 		const renderer = createWebgl2Renderer(canvas);
-		const visualResource = createOutdoorDetailStaticObjectVisualResource(
+		const visualResource = createOutdoorGeneratedSceneryStaticObjectVisualResource(
 			"static-object-visual-resource:transparent-test",
 			{ materialPass: "transparent" },
 		);
 
-		renderer.setOutdoorDetailsLayer(0xda55ffff, {
-			...createOutdoorDetailsLayerPayload(),
+		renderer.setOutdoorGeneratedSceneryLayer(0xda55ffff, {
+			...createOutdoorGeneratedSceneryLayerPayload(),
 			drawUnits: [],
 			instancedObjectInstances: [
-				createOutdoorDetailStaticObjectRenderInstance({
+				createOutdoorGeneratedSceneryStaticObjectRenderInstance({
 					instanceId: "far-transparent-a",
 					resourceId: visualResource.resourceId,
 					transparency: "transparent",
 				}),
-				createOutdoorDetailStaticObjectRenderInstance({
+				createOutdoorGeneratedSceneryStaticObjectRenderInstance({
 					instanceId: "far-transparent-b",
 					resourceId: visualResource.resourceId,
 					transparency: "transparent",
@@ -1798,7 +1798,7 @@ describe("WebGL2 structured interior rendering", () => {
 		renderer.dispose();
 	});
 
-	it("reports baked outdoor-detail direct draw calls by material pass", () => {
+	it("reports baked outdoor-generated-scenery direct draw calls by material pass", () => {
 		const gl = createFakeWebgl2Context();
 		const canvas = createFakeCanvas(gl);
 		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
@@ -1809,15 +1809,15 @@ describe("WebGL2 structured interior rendering", () => {
 		vi.stubGlobal("window", { devicePixelRatio: 1 });
 		const renderer = createWebgl2Renderer(canvas);
 
-		renderer.setOutdoorDetailsLayer(
+		renderer.setOutdoorGeneratedSceneryLayer(
 			0xda55ffff,
-			createOutdoorDetailsLayerPayload(),
+			createOutdoorGeneratedSceneryLayerPayload(),
 		);
 		pendingFrame?.(16);
 
 		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
-			outdoorDetailStaticObjectBakedDirectDrawCalls: 1,
-			outdoorDetailStaticObjectBakedDirectDrawCallsByPass: {
+			outdoorGeneratedSceneryStaticObjectBakedDirectDrawCalls: 1,
+			outdoorGeneratedSceneryStaticObjectBakedDirectDrawCallsByPass: {
 				additive: 0,
 				alphaTest: 0,
 				opaque: 1,
@@ -2174,9 +2174,9 @@ function createEnvCellStaticObjectDrawUnit(
 	};
 }
 
-function createOutdoorDetailStaticObjectDrawUnit(
+function createOutdoorGeneratedSceneryStaticObjectDrawUnit(
 	drawUnitId: string,
-): OutdoorDetailsLayerPayload["drawUnits"][number] {
+): OutdoorGeneratedSceneryLayerPayload["drawUnits"][number] {
 	const base = createEnvCellStaticObjectDrawUnit(drawUnitId, []);
 	const object = {
 		...base.sourceMappingCoverage[0]!.object,
@@ -2186,9 +2186,9 @@ function createOutdoorDetailStaticObjectDrawUnit(
 
 	return {
 		...base,
-		domain: "outdoor-detail",
+		domain: "outdoor-generated-scenery",
 		ownership: {
-			domain: "outdoor-detail",
+			domain: "outdoor-generated-scenery",
 			kind: "outdoor-static-objects",
 			landblockId: base.landblockId,
 		},
@@ -2215,13 +2215,13 @@ function createTerrainLayerPayload(
 	};
 }
 
-function createOutdoorDetailsLayerPayload(): OutdoorDetailsLayerPayload {
+function createOutdoorGeneratedSceneryLayerPayload(): OutdoorGeneratedSceneryLayerPayload {
 	return {
-		drawUnits: [createOutdoorDetailStaticObjectDrawUnit("outdoor-detail-a")],
-		generationId: "outdoor-detail:a",
+		drawUnits: [createOutdoorGeneratedSceneryStaticObjectDrawUnit("outdoor-generated-scenery-a")],
+		generationId: "outdoor-generated-scenery:a",
 		instancedObjectInstances: [],
 		instancedObjectResources: [],
-		kind: "outdoor-detail",
+		kind: "outdoor-generated-scenery",
 		landblockId: 0xda55ffff,
 		materialCoverage: [],
 		sourceMappingRecords: [],
@@ -2235,7 +2235,7 @@ function createDynamicResourceCommit(options: {
 	readonly revision: number;
 	readonly textureUseIds: readonly string[];
 }): DynamicRendererResourceCommit {
-	const drawUnit = createOutdoorDetailStaticObjectDrawUnit(
+	const drawUnit = createOutdoorGeneratedSceneryStaticObjectDrawUnit(
 		"dynamic-visual-source",
 	);
 	return {
@@ -2308,14 +2308,14 @@ function createDynamicRendererInstance(
 	};
 }
 
-function createOutdoorDetailStaticObjectVisualResource(
+function createOutdoorGeneratedSceneryStaticObjectVisualResource(
 	resourceId: string,
 	options: {
 		readonly materialPass?: StaticObjectVisualResource["materialPass"];
 	} = {},
 ): StaticObjectVisualResource {
-	const drawUnit = createOutdoorDetailStaticObjectDrawUnit(
-		"outdoor-detail-visual-source",
+	const drawUnit = createOutdoorGeneratedSceneryStaticObjectDrawUnit(
+		"outdoor-generated-scenery-visual-source",
 	);
 	const materialPass = options.materialPass ?? drawUnit.materialPass;
 	const renderState =
@@ -2382,7 +2382,7 @@ function createOutdoorDetailStaticObjectVisualResource(
 	};
 }
 
-function createOutdoorDetailStaticObjectRenderInstance(options: {
+function createOutdoorGeneratedSceneryStaticObjectRenderInstance(options: {
 	readonly instanceId: string;
 	readonly resourceId: string;
 	readonly transparency?: "depth-writing" | "transparent";
@@ -2392,7 +2392,7 @@ function createOutdoorDetailStaticObjectRenderInstance(options: {
 			max: { x: 1, y: 1, z: 0 },
 			min: { x: 0, y: 0, z: 0 },
 		},
-		domain: "outdoor-detail",
+		domain: "outdoor-generated-scenery",
 		generated: {
 			sceneId: 1,
 			sceneTemplateIndex: 0,

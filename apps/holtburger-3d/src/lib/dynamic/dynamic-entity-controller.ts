@@ -614,8 +614,7 @@ function createStaticAuthoredObjectMaterialDomain(
 	if (
 		owner.domain === "outdoor-buildings" ||
 		owner.domain === "outdoor-explicit-objects" ||
-		owner.domain === "outdoor-generated-scenery" ||
-		owner.domain === "outdoor-detail"
+		owner.domain === "outdoor-generated-scenery"
 	) {
 		return owner.domain;
 	}

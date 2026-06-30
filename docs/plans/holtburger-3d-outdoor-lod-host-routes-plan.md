@@ -1843,18 +1843,111 @@ Decisions and course corrections:
 - Validation: `npm run check`; `npm run test:ts -- src/lib/static/env-cells/landblock-env-cells-resolver.test.ts src/lib/static/resolver/landblock-scene-lod-source-resolver.test.ts src/lib/host/tauri.test.ts src/lib/host/binary-asset-envelope.test.ts src/lib/landblocks.test.ts`; `cargo fmt --check`; `cargo clippy -p holtburger-core -p holtburger-3d -p holtburger-debug-harness --tests -- -D warnings`; `cargo test -p holtburger-core -p holtburger-3d -p holtburger-debug-harness --tests`.
 - Validation note: the first combined Rust test rerun exhausted local disk space after a linker bus error. Ran `cargo clean` with approval, freed local build artifacts, and reran the Rust gates successfully from a clean target.
 
-### Phase 11C: Outdoor Detail Domain Cleanup
+### Phase 11C1: Outdoor Detail Static Contract Pruning
 
-Status: pending.
+Status: completed on 2026-06-30.
 
-Goal: remove the old unsplit `outdoor-detail` static/render domain now that explicit objects and generated scenery have separate domains/layers.
+Goal: remove `outdoor-detail` from static domain contracts, layer-owner mapping, demand planning, resolver worker routing, and static coordinator scheduling.
 
 Deliverables:
 
-- Remove `outdoor-detail` as a renderer/static domain and replace it with the split explicit-object and generated-scenery domains everywhere.
-- Remove Phase 5A compatibility surfaces that still accept or emit executable `outdoor-detail` domains, including demand scheduling, resolver/baker branching, renderer `OutdoorDetailsLayerPayload`/`setOutdoorDetailsLayer`, generated-instance inventory naming, runtime tests, diagnostics counters, and WebGL2 resource paths after Phase 5B/5C and layer-owner cutover replace them.
-- Remove route-specific diagnostics, snapshots, UI counters, and test helpers that mention the old domain unless they describe an intentionally retained material/detail texture concept.
-- Delete obsolete `outdoor-detail` fixtures, compatibility helpers, and hollow tests.
+- Remove `outdoor-detail` from `StaticDomain`, `ManualStaticDomain`, layer-owner mapping, and demand planner radius/default handling.
+- Remove static resolver worker and coordinator branches that accept or dispatch `outdoor-detail`.
+- Delete or retarget tests that only prove `outdoor-detail` is not scheduled.
+
+Acceptance criteria:
+
+- Static demand and resolver scheduling can emit only `outdoor-explicit-objects` and `outdoor-generated-scenery` for outdoor object layers.
+- `StaticDomain` and layer-owner helpers no longer accept `outdoor-detail`.
+- Focused static planner/coordinator/resolver TypeScript tests pass.
+
+Task checklist:
+
+- [x] Remove `outdoor-detail` from static contract domain unions and layer-owner mapping.
+- [x] Delete demand-planner `outdoor-detail` defaults/branches and stale negative tests.
+- [x] Delete static resolver worker and coordinator `outdoor-detail` compatibility branches.
+- [x] Run focused static scheduling validation.
+
+Decisions and course corrections:
+
+- Removing `outdoor-detail` from `StaticDomain` intentionally forced downstream renderer/runtime/bake code to stop accepting the old domain. The slices landed together instead of restoring a compatibility union.
+- Demand planning, resolver worker routing, static bake worker routing, static coordinator owner mapping, and layer-owner mapping now use only `outdoor-explicit-objects` and `outdoor-generated-scenery` for outdoor object work.
+- Deleted old negative tests that only asserted `outdoor-detail` was not scheduled.
+
+### Phase 11C2: Outdoor Detail Renderer API Deletion
+
+Status: completed on 2026-06-30.
+
+Goal: remove the renderer/runtime API surface for the old unsplit outdoor details layer.
+
+Deliverables:
+
+- Delete `OutdoorDetailsLayerPayload` and `setOutdoorDetailsLayer`.
+- Remove runtime install/clear dispatch for `outdoor-detail`.
+- Remove WebGL2 `outdoor-detail` upload paths and counters, replacing any useful diagnostics with split explicit/generated domain handling.
+
+Acceptance criteria:
+
+- No renderer type or renderer implementation exposes `OutdoorDetailsLayerPayload` or `setOutdoorDetailsLayer`.
+- Runtime install/clear paths dispatch only explicit-object and generated-scenery outdoor object layers.
+- Focused runtime and renderer tests pass.
+
+Task checklist:
+
+- [x] Delete renderer type/API definitions for outdoor details.
+- [x] Delete runtime dispatch and helper branches for outdoor details.
+- [x] Delete WebGL2 old detail counters/upload paths or fold them into split-domain logic.
+- [x] Retarget/delete runtime and renderer tests.
+
+Decisions and course corrections:
+
+- Deleted `OutdoorDetailsLayerPayload` and `setOutdoorDetailsLayer` from renderer contracts, WebGL2 renderer, runtime dispatch, and test doubles.
+- Runtime materialization no longer synthesizes a separate detail payload; generated-scenery payloads carry generated draw units plus generated instanced resources.
+- WebGL2 diagnostics that previously counted outdoor-detail static object resources now count generated-scenery static object resources.
+
+### Phase 11C3: Outdoor Detail Bake, Texture, And Diagnostics Cleanup
+
+Status: completed on 2026-06-30.
+
+Goal: remove old `outdoor-detail` bake/texture/diagnostic naming after renderer and static scheduling no longer accept the domain.
+
+Deliverables:
+
+- Remove `outdoor-detail` from static-object bake attachments, compatibility baker/partitioner, texture manager grouping, static-scene query records, dynamic-resource filters, and browser diagnostics.
+- Rename or delete diagnostics such as retained transparent outdoor detail partition reasons if they now describe split explicit/generated behavior.
+- Delete stale test fixtures that preserve `outdoor-detail` as a valid object-domain example.
+
+Acceptance criteria:
+
+- Bake, texture, dynamic, and scene-query paths no longer accept `outdoor-detail` as an executable domain.
+- Diagnostics use split-domain or neutral object-layer terminology.
+- Focused bake/texture/runtime diagnostics tests pass.
+
+Task checklist:
+
+- [x] Remove bake and partitioner `outdoor-detail` compatibility branches.
+- [x] Remove texture manager and static-scene-query `outdoor-detail` branches.
+- [x] Rename/delete stale outdoor-detail diagnostics and fixtures.
+- [x] Run focused bake, texture, scene-query, and dynamic validation.
+
+Decisions and course corrections:
+
+- Static-object bake attachments, compatibility baker, partitioner tests, texture manager tests, dynamic static-authored material-domain filters, static-scene query readiness, and env-cell committed-record domain fallback no longer accept `outdoor-detail`.
+- Split outdoor object domains now use independent role-page texture packing. This preserves the old object-detail packing behavior for generated scenery and explicit objects instead of regressing atlas packing when the domain was renamed.
+- Renamed retained transparent and renderer static-object diagnostics from outdoor-detail terminology to generated-scenery terminology.
+
+### Phase 11C4: Outdoor Detail Audit And Commit Gate
+
+Status: completed on 2026-06-30.
+
+Goal: prove the unsplit `outdoor-detail` domain is gone from executable code and classify any surviving material-detail prose.
+
+Deliverables:
+
+- Run zero-reference searches for old `outdoor-detail`, `OutdoorDetails`, `outdoorDetails`, and `setOutdoorDetailsLayer` names.
+- Classify surviving references as historical plan prose or unrelated material detail texture vocabulary.
+- Record validation commands and audit results in this plan.
+- Commit the completed Phase 11C split.
 
 Acceptance criteria:
 
@@ -1865,15 +1958,17 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Delete old `outdoor-detail` layer/domain naming and diagnostics after explicit/generated layers replace it.
-- [ ] Remove old renderer/runtime `OutdoorDetailsLayerPayload` and `setOutdoorDetailsLayer` surfaces.
-- [ ] Remove old demand-planner/static resolver/baker `outdoor-detail` branches.
-- [ ] Run zero-reference searches for old `outdoor-detail` domain names; classify any surviving material detail texture vocabulary in this plan.
-- [ ] Run required frontend validation commands.
+- [x] Run zero-reference searches for old `outdoor-detail` domain names; classify any surviving material detail texture vocabulary in this plan.
+- [x] Delete obsolete fixtures and hollow tests.
+- [x] Run required frontend validation commands.
+- [x] Update Phase 11C1 through 11C4 decisions and validation notes.
+- [x] Commit the completed outdoor-detail cleanup phase set.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Zero-reference audit found no executable `outdoor-detail`, `OutdoorDetailsLayerPayload`, `setOutdoorDetailsLayer`, `OutdoorDetail`, `outdoorDetails`, or `outdoorDetail` references under `apps/holtburger-3d/src/lib`, `apps/holtburger-3d/src-tauri/src`, or `crates`.
+- Remaining `outdoor-detail` references are historical prose in this plan.
+- Validation: `npm run check`; `npm run test:ts -- src/lib/renderer/static-layer-contracts.test.ts src/lib/static/demand-planner.test.ts src/lib/static/coordinator/static-coordinator.test.ts src/lib/static/objects/static-object-visual-resource-key.test.ts src/lib/static/objects/bake/static-object-compatibility-partitioner.test.ts src/lib/runtime/static-scene-query.test.ts src/lib/runtime/client-runtime.test.ts src/lib/renderer/webgl2/webgl2-renderer.test.ts src/lib/textures/texture-manager.test.ts`.
 
 ### Phase 11D: Old Compatibility Resteer And Final Cleanup
 

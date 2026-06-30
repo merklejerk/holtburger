@@ -392,7 +392,7 @@ export class StaticSceneQuery {
 						landblockId,
 					),
 					detail: this.#hasRetainedOutdoorStaticDomain(
-						"outdoor-detail",
+						"outdoor-generated-scenery",
 						landblockId,
 					),
 					envCells:

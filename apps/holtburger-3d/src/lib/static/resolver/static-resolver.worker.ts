@@ -49,8 +49,7 @@ class StaticResolverRouter
 		if (
 			job.domain === "outdoor-buildings" ||
 			job.domain === "outdoor-explicit-objects" ||
-			job.domain === "outdoor-generated-scenery" ||
-			job.domain === "outdoor-detail"
+			job.domain === "outdoor-generated-scenery"
 		) {
 			return this.#outdoorStaticObjectsResolver.resolve(job);
 		}

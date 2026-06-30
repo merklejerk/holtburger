@@ -42,8 +42,6 @@ export function layerOwnerKindForStaticDomain(
 			return "outdoor-generated-scenery";
 		case "landblock-env-cells":
 			return "env-cell-system";
-		case "outdoor-detail":
-			return "outdoor-generated-scenery";
 	}
 }
 

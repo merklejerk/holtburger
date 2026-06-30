@@ -1369,7 +1369,8 @@ function shouldUseIndependentRolePagePacking(
 			(group.pagePolicy.sampleClass === "rgba-color" ||
 				group.pagePolicy.sampleClass === "rgba-mask")) ||
 		group.domain === "outdoor-buildings" ||
-		group.domain === "outdoor-detail" ||
+		group.domain === "outdoor-explicit-objects" ||
+		group.domain === "outdoor-generated-scenery" ||
 		group.domain === "landblock-env-cells" ||
 		group.domain === "runtime-object-material"
 	);

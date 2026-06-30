@@ -274,7 +274,6 @@ export function shouldUseBrowserWorkerBaker(
 		domain === "outdoor-buildings" ||
 		domain === "outdoor-explicit-objects" ||
 		domain === "outdoor-generated-scenery" ||
-		domain === "outdoor-detail" ||
 		domain === "landblock-env-cells"
 	);
 }

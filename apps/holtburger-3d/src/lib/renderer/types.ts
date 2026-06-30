@@ -46,7 +46,6 @@ export type StaticLandblockLayerKind =
 	| "terrain"
 	| "outdoor-buildings"
 	| OutdoorStaticObjectLayerDomain
-	| "outdoor-detail"
 	| "env-cell-system";
 
 export interface StaticLandblockLayerOwnershipKey {
@@ -61,7 +60,6 @@ export type StaticLandblockLayerPayload =
 	| OutdoorBuildingsLayerPayload
 	| OutdoorExplicitObjectsLayerPayload
 	| OutdoorGeneratedSceneryLayerPayload
-	| OutdoorDetailsLayerPayload
 	| EnvCellSystemLayerPayload;
 
 interface StaticLandblockLayerPayloadBase {
@@ -97,15 +95,6 @@ export interface OutdoorGeneratedSceneryLayerPayload
 	extends StaticLandblockLayerPayloadBase {
 	readonly kind: "outdoor-generated-scenery";
 	readonly drawUnits: readonly OutdoorStaticObjectLayerDrawUnit<"outdoor-generated-scenery">[];
-	readonly instancedObjectInstances: readonly StaticObjectRenderInstance[];
-	readonly instancedObjectResources: readonly StaticObjectVisualResource[];
-	readonly sourceMappingRecords: readonly StaticSourceMappingRecord[];
-	readonly spatialRecords: readonly StaticSpatialRecord[];
-}
-
-export interface OutdoorDetailsLayerPayload extends StaticLandblockLayerPayloadBase {
-	readonly kind: "outdoor-detail";
-	readonly drawUnits: readonly OutdoorStaticObjectLayerDrawUnit<"outdoor-detail">[];
 	readonly instancedObjectInstances: readonly StaticObjectRenderInstance[];
 	readonly instancedObjectResources: readonly StaticObjectVisualResource[];
 	readonly sourceMappingRecords: readonly StaticSourceMappingRecord[];
@@ -168,8 +157,6 @@ export function staticLayerKindForStaticDomain(
 			return "outdoor-explicit-objects";
 		case "outdoor-generated-scenery":
 			return "outdoor-generated-scenery";
-		case "outdoor-detail":
-			return "outdoor-detail";
 		case "landblock-env-cells":
 			return "env-cell-system";
 	}
@@ -425,13 +412,13 @@ export interface RendererSnapshot {
 	readonly staticObjectFarTransparentDirectRenderInstanceDrawCalls: number;
 	readonly staticObjectFarTransparentInstancedRenderInstanceDrawCalls: number;
 	readonly staticObjectFarTransparentInstancedRenderInstances: number;
-	readonly outdoorDetailStaticObjectResources: number;
-	readonly outdoorDetailStaticObjectBakedDirectDrawCalls: number;
-	readonly outdoorDetailStaticObjectBakedDirectDrawCallsByPass: StaticObjectMaterialPassDrawCallCounts;
-	readonly outdoorDetailStaticObjectVisualResources: number;
-	readonly outdoorDetailStaticObjectRenderInstances: number;
+	readonly outdoorGeneratedSceneryStaticObjectResources: number;
+	readonly outdoorGeneratedSceneryStaticObjectBakedDirectDrawCalls: number;
+	readonly outdoorGeneratedSceneryStaticObjectBakedDirectDrawCallsByPass: StaticObjectMaterialPassDrawCallCounts;
+	readonly outdoorGeneratedSceneryStaticObjectVisualResources: number;
+	readonly outdoorGeneratedSceneryStaticObjectRenderInstances: number;
 	readonly staticObjectUploadedBufferBytes: number;
-	readonly outdoorDetailStaticObjectUploadedBufferBytes: number;
+	readonly outdoorGeneratedSceneryStaticObjectUploadedBufferBytes: number;
 	readonly recentStaticObjectUploads: readonly StaticObjectUploadDiagnostics[];
 	readonly terrainDrawUnits: number;
 	readonly directEnvCellDrawCalls: number;
@@ -715,10 +702,6 @@ export interface Renderer {
 	setOutdoorGeneratedSceneryLayer(
 		landblockId: number,
 		payload: OutdoorGeneratedSceneryLayerPayload | null,
-	): void;
-	setOutdoorDetailsLayer(
-		landblockId: number,
-		payload: OutdoorDetailsLayerPayload | null,
 	): void;
 	setEnvCellSystemLayer(
 		landblockId: number,

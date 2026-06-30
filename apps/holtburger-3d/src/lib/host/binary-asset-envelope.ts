@@ -187,7 +187,7 @@ function decodeBinarySection(
 		}));
 	}
 	if (section.role === "landblockTerrain.triangles") {
-		const landblockId = landblockIdForTerrainTriangleSection(
+		const terrainSourceAssetId = sourceAssetIdForTerrainTriangleSection(
 			responseRoot,
 			section.path,
 		);
@@ -207,9 +207,7 @@ function decodeBinarySection(
 				maxY,
 				maxZ,
 			]) => ({
-				terrainTriangleId: `landblock/${formatHex32(
-					landblockId,
-				)}/outdoor/terrain/triangle/${formatHex16(triangleIndex)}`,
+				terrainTriangleId: `${terrainSourceAssetId}/terrain/triangle/${formatHex16(triangleIndex)}`,
 				quadIndex,
 				triangleInQuad,
 				vertexIndices: [vertexIndexA, vertexIndexB, vertexIndexC],
@@ -293,31 +291,22 @@ function decodeMaterialVariantSignature(code: number): string | null {
 	return null;
 }
 
-function landblockIdForTerrainTriangleSection(
+function sourceAssetIdForTerrainTriangleSection(
 	responseRoot: { responses: AssetLookupResponseDto[] },
 	path: string,
-): number {
+): string {
 	const match = /^responses\.(\d+)\.payload\.terrain\.triangles$/.exec(path);
 	if (!match) {
 		throw new Error(`Terrain triangle section path ${path} is not supported.`);
 	}
 	const responseIndex = Number.parseInt(match[1] as string, 10);
-	const payload = responseRoot.responses[responseIndex]?.payload;
-	if (
-		typeof payload !== "object" ||
-		payload === null ||
-		!("landblockId" in payload) ||
-		typeof payload.landblockId !== "number"
-	) {
+	const assetId = responseRoot.responses[responseIndex]?.assetId;
+	if (!assetId) {
 		throw new Error(
-			`Terrain triangle section path ${path} could not resolve a landblock id.`,
+			`Terrain triangle section path ${path} could not resolve a source asset id.`,
 		);
 	}
-	return payload.landblockId;
-}
-
-function formatHex32(value: number): string {
-	return value.toString(16).padStart(8, "0");
+	return assetId;
 }
 
 function formatHex16(value: number): string {

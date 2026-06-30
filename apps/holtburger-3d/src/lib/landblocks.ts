@@ -91,10 +91,6 @@ export function formatLandblockLabel(landblockId: number): string {
 	return `0x${formatHex32(landblockId)}`;
 }
 
-export function formatLandblockTopologyAssetId(landblockId: number): string {
-	return `landblock/${formatHex32(normalizeOutdoorLandblockId(landblockId))}/topology`;
-}
-
 export function formatEnvCellAssetId(envCellId: number): string {
 	return `env-cell/${formatHex32(envCellId)}`;
 }
@@ -105,11 +101,6 @@ export function formatTerrainMaterialAssetId(regionNumber: number): string {
 
 export function formatRegionRenderProfileAssetId(regionNumber: number): string {
 	return `region-render-profile/${formatUnsignedRouteNumber(regionNumber)}`;
-}
-
-export function parseLandblockTopologyAssetId(assetId: string): number | null {
-	const match = /^landblock\/([0-9a-fA-F]{8})\/topology$/.exec(assetId);
-	return match ? Number.parseInt(match[1], 16) >>> 0 : null;
 }
 
 export function parseEnvCellAssetId(assetId: string): number | null {

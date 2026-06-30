@@ -2,7 +2,10 @@ use anyhow::Result;
 use clap::Parser;
 use holtburger_content::{
     ContentDecodeCache, ContentRepository, LandblockEnvCellsAssetAssembler,
-    LandblockOutdoorAssetAssembler, PreparedAabb, PreparedVec3, normalize_landblock_id,
+    LandblockOutdoorStaticMember, LandblockSceneLodAsset, LandblockSceneLodAssetAssembler,
+    LandblockSceneLodContext, LandblockSceneLodLayer, LandblockSceneLodLevel,
+    LandblockSceneLodRequest, PreparedAabb, PreparedBuildingTransitionAperture, PreparedVec3,
+    normalize_landblock_id,
 };
 use holtburger_dat::graphics::Frame;
 use std::collections::{BTreeMap, BTreeSet};
@@ -29,10 +32,14 @@ fn main() -> Result<()> {
     )?);
     let content = ContentRepository::from_hba_path(args.dats)?;
     let cache = ContentDecodeCache::new();
-    let outdoor = LandblockOutdoorAssetAssembler::new().assemble_landblock_with_cache(
+    let scene_lod = LandblockSceneLodAssetAssembler::new().assemble_landblock_with_cache(
         &content,
         &cache,
-        landblock_id,
+        LandblockSceneLodRequest {
+            landblock_id,
+            level: LandblockSceneLodLevel::Level4,
+            context: LandblockSceneLodContext::Outdoor,
+        },
     );
     let env_asset = LandblockEnvCellsAssetAssembler::new().assemble_landblock_with_cache(
         &content,
@@ -57,11 +64,8 @@ fn main() -> Result<()> {
         .collect::<BTreeMap<_, _>>();
     let env_apertures_by_cell_and_index = build_env_apertures_by_cell_and_index(&env_asset);
 
-    let building_members = outdoor
-        .statics
-        .iter()
-        .filter(|member| member.building.is_some())
-        .collect::<Vec<_>>();
+    let (building_members, building_transition_apertures) =
+        collect_building_layer_sources(&scene_lod);
     let building_portal_count = building_members
         .iter()
         .filter_map(|member| member.building.as_ref())
@@ -73,10 +77,10 @@ fn main() -> Result<()> {
     println!("landblock=0x{landblock_id:08x}");
     println!(
         "outdoorStatics={} buildings={} buildingPortals={} buildingTransitionApertures={}",
-        outdoor.statics.len(),
+        count_outdoor_statics(&scene_lod),
         building_members.len(),
         building_portal_count,
-        outdoor.building_transition_apertures.len()
+        building_transition_apertures.len()
     );
 
     let mut linked_env_cell_ids = BTreeSet::new();
@@ -118,7 +122,7 @@ fn main() -> Result<()> {
     if args.portal_duplicates {
         report_duplicate_building_transition_apertures(
             landblock_id,
-            &outdoor.building_transition_apertures,
+            &building_transition_apertures,
         );
         report_duplicate_transition_portal_linkage(
             landblock_id,
@@ -129,7 +133,7 @@ fn main() -> Result<()> {
     if args.aperture_alignment {
         report_building_transition_aperture_alignment(
             landblock_id,
-            &outdoor.building_transition_apertures,
+            &building_transition_apertures,
             &env_apertures_by_cell_and_index,
         );
     }
@@ -142,6 +146,42 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn collect_building_layer_sources(
+    asset: &LandblockSceneLodAsset,
+) -> (
+    Vec<&LandblockOutdoorStaticMember>,
+    Vec<PreparedBuildingTransitionAperture>,
+) {
+    let mut building_members = Vec::new();
+    let mut building_transition_apertures = Vec::new();
+    for layer in &asset.layers {
+        if let LandblockSceneLodLayer::OutdoorBuildings(layer) = layer {
+            building_members.extend(
+                layer
+                    .statics
+                    .iter()
+                    .filter(|member| member.building.is_some()),
+            );
+            building_transition_apertures
+                .extend(layer.building_transition_apertures.iter().cloned());
+        }
+    }
+    (building_members, building_transition_apertures)
+}
+
+fn count_outdoor_statics(asset: &LandblockSceneLodAsset) -> usize {
+    asset
+        .layers
+        .iter()
+        .map(|layer| match layer {
+            LandblockSceneLodLayer::OutdoorBuildings(layer) => layer.statics.len(),
+            LandblockSceneLodLayer::OutdoorExplicitObjects(layer)
+            | LandblockSceneLodLayer::OutdoorGeneratedScenery(layer) => layer.statics.len(),
+            LandblockSceneLodLayer::Terrain(_) | LandblockSceneLodLayer::EnvCellSystem(_) => 0,
+        })
+        .sum()
 }
 
 fn build_building_portals_by_target(

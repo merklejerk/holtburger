@@ -510,10 +510,7 @@ impl HostBoundaryAdapter {
             ContentAssetRequest::SurfaceTexture(surface_texture_id) => {
                 self.build_surface_texture_lookup_response(request, surface_texture_id, asset)?
             }
-            ContentAssetRequest::LandblockOutdoor(_)
-            | ContentAssetRequest::LandblockTopology(_)
-            | ContentAssetRequest::LandblockEnvCells(_)
-            | ContentAssetRequest::LandblockSceneLod(_)
+            ContentAssetRequest::LandblockSceneLod(_)
             | ContentAssetRequest::EnvCell(_)
             | ContentAssetRequest::GfxObj(_)
             | ContentAssetRequest::RenderSurface(_)
@@ -761,18 +758,6 @@ fn binary_asset_lookup_required_message(
     content_request: &ContentAssetRequest,
 ) -> Option<String> {
     match content_request {
-        ContentAssetRequest::LandblockOutdoor(landblock_id) => Some(format!(
-            "landblock outdoor 0x{:08X} for {asset_id} requires binary asset lookup",
-            holtburger_content::normalize_landblock_id(*landblock_id)
-        )),
-        ContentAssetRequest::LandblockTopology(landblock_id) => Some(format!(
-            "landblock topology 0x{:08X} for {asset_id} requires binary asset lookup",
-            holtburger_content::normalize_landblock_id(*landblock_id)
-        )),
-        ContentAssetRequest::LandblockEnvCells(landblock_id) => Some(format!(
-            "landblock env-cells 0x{:08X} for {asset_id} requires binary asset lookup",
-            holtburger_content::normalize_landblock_id(*landblock_id)
-        )),
         ContentAssetRequest::LandblockSceneLod(request) => Some(format!(
             "landblock scene LoD {} 0x{:08X} for {asset_id} requires binary asset lookup",
             request.level.as_u8(),
@@ -845,9 +830,6 @@ mod tests {
     fn direct_json_lookup_rejects_binary_routed_assets() {
         let runtime = HostRuntimeService::new(false);
         let cases = [
-            ("landblock/da55ffff/outdoor", "landblock outdoor"),
-            ("landblock/da55ffff/topology", "landblock topology"),
-            ("landblock/da55ffff/env-cells", "landblock env-cells"),
             ("landblock/da55ffff/lod/2", "landblock scene LoD"),
             ("env-cell/da550100", "env-cell"),
             ("gfx-obj/01000001", "gfx-obj"),
@@ -931,14 +913,9 @@ mod tests {
     }
 
     #[test]
-    fn granular_terrain_and_env_cell_binary_lookup_moves_bulk_arrays_into_sections() {
+    fn env_cell_binary_lookup_moves_bulk_arrays_into_sections() {
         let adapter = HostBoundaryAdapter::new(false);
         let bytes = tauri::async_runtime::block_on(adapter.asset_lookup_binary_batch(vec![
-            AssetLookupRequestDto {
-                request_id: "test-landblock-outdoor-binary".to_string(),
-                asset_id: "landblock/da55ffff/outdoor".to_string(),
-                priority: crate::contracts::AssetPriorityDto::Bootstrap,
-            },
             AssetLookupRequestDto {
                 request_id: "test-env-cell-binary".to_string(),
                 asset_id: "env-cell/da550100".to_string(),
@@ -954,41 +931,17 @@ mod tests {
         assert!(
             sections
                 .iter()
-                .any(|section| section["path"] == "responses.0.payload.terrain.vertices")
-        );
-        assert!(
-            sections
-                .iter()
-                .any(|section| section["path"] == "responses.0.payload.terrain.triangles")
-        );
-        assert!(
-            sections
-                .iter()
-                .any(|section| section["path"] == "responses.1.payload.renderGeometry.positions")
+                .any(|section| section["path"] == "responses.0.payload.renderGeometry.positions")
         );
         assert_eq!(
-            manifest["responses"][0]["payload"]["terrain"]["vertices"]
-                .as_array()
-                .expect("terrain binary payload should leave JSON vertex placeholder")
-                .len(),
-            0
-        );
-        assert_eq!(
-            manifest["responses"][0]["payload"]["terrain"]["triangles"]
-                .as_array()
-                .expect("terrain binary payload should leave JSON triangle placeholder")
-                .len(),
-            0
-        );
-        assert_eq!(
-            manifest["responses"][1]["payload"]["renderGeometry"]["positions"]
+            manifest["responses"][0]["payload"]["renderGeometry"]["positions"]
                 .as_array()
                 .expect("env-cell binary payload should leave JSON render positions placeholder")
                 .len(),
             0
         );
         assert_eq!(
-            manifest["responses"][1]["payload"]["surfaces"][0]["slotId"],
+            manifest["responses"][0]["payload"]["surfaces"][0]["slotId"],
             serde_json::json!(0),
             "env-cell surface slots must stay zero-based because CellStruct polygon PosSurface indexes the texture list"
         );
@@ -997,19 +950,7 @@ mod tests {
     #[test]
     fn terrain_material_lookup_returns_region_table_payload() {
         let runtime = HostRuntimeService::new(false);
-        let outdoor_bytes =
-            tauri::async_runtime::block_on(runtime.asset_lookup_binary_batch(vec![
-                AssetLookupRequestDto {
-                    request_id: "test-landblock-terrain-region".to_string(),
-                    asset_id: "landblock/da55ffff/outdoor".to_string(),
-                    priority: crate::contracts::AssetPriorityDto::Bootstrap,
-                },
-            ]))
-            .expect("binary outdoor lookup should expose region number");
-        let (outdoor_manifest, _) = decode_binary_manifest(&outdoor_bytes);
-        let region_number = outdoor_manifest["responses"][0]["payload"]["regionNumber"]
-            .as_u64()
-            .expect("terrain route should expose region number");
+        let region_number = 1_u64;
         let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
             request_id: "test-terrain-material".to_string(),
             asset_id: format!("terrain-material/{region_number}"),
@@ -1121,82 +1062,39 @@ mod tests {
     }
 
     #[test]
-    fn landblock_outdoor_binary_lookup_reports_cd57_contract_shape() {
+    fn env_cell_binary_lookup_reports_render_geometry_counts() {
         let adapter = HostBoundaryAdapter::new(false);
         let bytes = tauri::async_runtime::block_on(adapter.asset_lookup_binary_batch(vec![
             AssetLookupRequestDto {
-                request_id: "test-cd57-outdoor-binary".to_string(),
-                asset_id: "landblock/cd57ffff/outdoor".to_string(),
-                priority: crate::contracts::AssetPriorityDto::Streaming,
-            },
-        ]))
-        .expect("binary cd57 outdoor lookup should succeed");
-
-        let (manifest, _) = decode_binary_manifest(&bytes);
-        assert_eq!(
-            manifest["responses"][0]["payload"]["kind"],
-            "landblock-outdoor"
-        );
-        assert_eq!(
-            manifest["responses"][0]["payload"]["landblockId"],
-            0xcd57ffffu32
-        );
-        assert!(manifest["responses"][0]["payload"]["terrain"].is_object());
-    }
-
-    #[test]
-    fn env_cell_binary_lookup_allows_real_renderless_cell_structures() {
-        let adapter = HostBoundaryAdapter::new(false);
-        let bytes = tauri::async_runtime::block_on(adapter.asset_lookup_binary_batch(vec![
-            AssetLookupRequestDto {
-                request_id: "test-renderless-env-cell-binary".to_string(),
+                request_id: "test-env-cell-geometry-counts".to_string(),
                 asset_id: "env-cell/da560109".to_string(),
                 priority: crate::contracts::AssetPriorityDto::Streaming,
             },
         ]))
-        .expect("binary renderless env-cell lookup should succeed");
+        .expect("binary env-cell lookup should succeed");
 
         let (manifest, _) = decode_binary_manifest(&bytes);
         let payload = &manifest["responses"][0]["payload"];
         assert_eq!(payload["kind"], "env-cell");
         assert_eq!(payload["envCellId"], 0xda560109u32);
-        assert_eq!(payload["renderGeometry"]["vertexCount"], 0);
-        assert_eq!(payload["renderGeometry"]["triangleCount"], 0);
-    }
-
-    #[test]
-    fn landblock_outdoor_binary_lookup_moves_bulk_arrays_into_sections() {
-        let adapter = HostBoundaryAdapter::new(false);
-        let bytes = tauri::async_runtime::block_on(adapter.asset_lookup_binary_batch(vec![
-            AssetLookupRequestDto {
-                request_id: "test-landblock-outdoor-binary".to_string(),
-                asset_id: "landblock/da55012e/outdoor".to_string(),
-                priority: crate::contracts::AssetPriorityDto::Bootstrap,
-            },
-        ]))
-        .expect("binary landblock outdoor lookup should succeed");
-
-        let (manifest, manifest_len) = decode_binary_manifest(&bytes);
-
-        assert_eq!(manifest["transport"], "holtburger-asset-binary");
-        assert_eq!(
-            manifest["responses"][0]["payload"]["terrain"]["vertices"]
-                .as_array()
-                .expect("bulk terrain vertices should be manifest placeholders")
-                .len(),
-            0
-        );
         let sections = manifest["sections"]
             .as_array()
             .expect("binary manifest should expose sections");
-        assert!(
-            sections
-                .iter()
-                .any(|section| section["path"] == "responses.0.payload.terrain.vertices")
+        let position_section = sections
+            .iter()
+            .find(|section| section["path"] == "responses.0.payload.renderGeometry.positions")
+            .expect("env-cell positions should move into a binary section");
+        let triangle_section = sections
+            .iter()
+            .find(|section| section["path"] == "responses.0.payload.renderGeometry.triangles")
+            .expect("env-cell triangles should move into a binary section");
+        assert_eq!(
+            payload["renderGeometry"]["vertexCount"],
+            position_section["elementCount"]
         );
-        assert!(
-            bytes.len() > ASSET_BINARY_HEADER_LEN + manifest_len,
-            "binary envelope should contain section data"
+        assert_eq!(
+            payload["renderGeometry"]["triangleCount"],
+            triangle_section["elementCount"]
         );
     }
 

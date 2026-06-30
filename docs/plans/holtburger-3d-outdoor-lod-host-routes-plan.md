@@ -1710,36 +1710,138 @@ Decisions and course corrections:
 - Surviving `landblock/{id}/outdoor`, `landblock/{id}/env-cells`, and `landblock/{id}/topology` strings are isolated to `host/tauri.ts`, `host/tauri.test.ts`, `host/binary-asset-envelope.test.ts`, and topology helpers in `landblocks.ts`/`landblocks.test.ts`; those are Phase 11B Rust/Tauri route cleanup targets.
 - Validation: `npm run check`; `npm run test:ts -- src/lib/assets/keys.test.ts src/lib/assets/preparation.test.ts src/lib/static/resolver/asset-bridge.test.ts src/lib/static/env-cells/bake/landblock-env-cell-geometry-attachments.test.ts src/lib/static/resolver/landblock-scene-lod-source-resolver.test.ts`; audit searches for old DTO/schema/helper names, direct old route `createHostAssetKey` calls, and old landblock outdoor/env-cell route strings.
 
-### Phase 11B: Rust And Tauri Old Route Cleanup
+### Phase 11B1: Tauri Caller Old Route Pruning
 
-Status: pending.
+Status: completed on 2026-06-30.
 
-Goal: delete old broad route support from Rust content/core and the Tauri adapter after the frontend no longer uses those routes.
+Goal: remove remaining frontend/Tauri caller surfaces that can still classify old landblock routes as valid host lookups.
 
 Deliverables:
 
-- Remove `landblock/{id}/topology` route support, helpers, serializers, and tests.
-- Remove `landblock/{id}/outdoor` and `landblock/{id}/env-cells` route support, helpers, serializers, and tests.
-- Remove old route-facing `ContentAssetRequest` and `ContentAsset` variants for `LandblockOutdoor`, `LandblockTopology`, and `LandblockEnvCells`.
+- Remove TypeScript topology route helpers and tests from `landblocks.ts`.
+- Narrow Tauri host binary lookup detection so landblock binary routing only accepts `landblock/{id}/lod/{level}`.
+- Update binary-envelope fixtures and route tests so old outdoor/topology/env-cell routes are not retained as valid examples.
+
+Acceptance criteria:
+
+- No TypeScript helper formats or parses `landblock/{id}/topology`.
+- Tauri host lookup routing no longer treats `landblock/{id}/outdoor`, `landblock/{id}/env-cells`, or `landblock/{id}/topology` as binary asset lookup routes.
+- Frontend/Tauri TypeScript tests pass for touched files.
+
+Task checklist:
+
+- [x] Delete topology helper exports/imports/tests from `apps/holtburger-3d/src/lib/landblocks.ts` and related tests.
+- [x] Narrow `usesBinaryAssetLookup` in `apps/holtburger-3d/src/lib/host/tauri.ts` to LoD landblock routes and non-landblock granular assets.
+- [x] Update binary-envelope and host route tests to use LoD route examples, not old broad route examples.
+- [x] Run focused TypeScript validation for touched host/landblock files.
+
+Decisions and course corrections:
+
+- Removed TypeScript topology route helpers entirely instead of preserving a helper for a route the frontend no longer consumes.
+- Landblock binary lookup detection now accepts `landblock/{id}/lod/{level}` only; old outdoor, topology, and env-cell landblock routes no longer get special Tauri binary routing.
+- Retargeted binary-envelope and host route fixtures to LoD route ids so tests no longer preserve removed broad route strings as supported examples.
+
+### Phase 11B2: Core Content Asset Variant Deletion
+
+Status: completed on 2026-06-30.
+
+Goal: delete old route-facing Rust content request/asset variants so old routes cannot survive below the adapter.
+
+Deliverables:
+
+- Remove `ContentAssetRequest::LandblockOutdoor`, `ContentAssetRequest::LandblockTopology`, and `ContentAssetRequest::LandblockEnvCells`.
+- Remove matching old route-facing `ContentAsset` variants.
+- Remove `ContentAssetService::load` arms that served the old broad routes.
 - Keep internal source structs/functions only where they are still used by `landblock-scene-lod`; rename or document them if route-facing names become misleading.
 
 Acceptance criteria:
 
-- Topology route parsing/serialization is gone from production code.
-- Old outdoor/env-cell route parsing/serialization is gone from production code.
-- No executable Rust/Tauri code path can request or serve `landblock/{id}/outdoor`, `landblock/{id}/env-cells`, or `landblock/{id}/topology`.
-- Rust tests and clippy pass for touched areas.
+- Rust core has no route-facing request or asset variant for `landblock/{id}/outdoor`, `landblock/{id}/env-cells`, or `landblock/{id}/topology`.
+- `landblock-scene-lod` remains the only landblock-owned scene route request shape in `ContentAssetRequest`.
+- Rust format/check validation passes for touched crates.
 
 Task checklist:
 
-- [ ] Delete topology route implementation and frontend/Tauri helpers/tests.
-- [ ] Delete old outdoor/env-cell route implementations and Tauri helpers/tests.
-- [ ] Delete old `ContentAssetRequest` and `ContentAsset` variants or rename surviving internal source structs so they are not route-facing compatibility surfaces.
-- [ ] Run Rust validation commands for touched crates.
+- [x] Delete old `ContentAssetRequest` variants.
+- [x] Delete old `ContentAsset` variants.
+- [x] Delete old `ContentAssetService::load` branches and now-unused imports.
+- [x] Run focused Rust validation for `holtburger-core` and downstream adapter compile.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Removed `LandblockOutdoor`, `LandblockTopology`, and `LandblockEnvCells` route-facing request/asset variants from `holtburger-core`; `LandblockSceneLod` is now the only landblock-owned scene content route.
+- Deleted the standalone topology content asset and assembler from `holtburger-content` after audit showed they were exported but unused by LoD assembly.
+- Deleted the standalone outdoor asset assembler and converted debug harness callers to `LandblockSceneLodAssetAssembler`; the `LandblockOutdoorAsset` source struct remains only for component serializer tests/helpers, not as a route loader.
+- Collapsed `StaticOutdoorSceneAssembler::assemble_from_loaded` source arguments into `LoadedStaticOutdoorSceneSources` while resolving clippy's `too_many_arguments` gate. This also makes LoD source-family callsites less positional and less goofy.
+
+### Phase 11B3: Tauri Adapter Old Route Serving Deletion
+
+Status: completed on 2026-06-30.
+
+Goal: delete Tauri route parsers, JSON serializers, binary serializers, and tests that can still serve old broad landblock routes.
+
+Deliverables:
+
+- Remove `landblock/{id}/topology` route parsing, serializers, and tests.
+- Remove `landblock/{id}/outdoor` and `landblock/{id}/env-cells` route parsing, serializers, and tests.
+- Remove old-route binary dispatch and direct JSON guard cases.
+- Retarget any still-useful component serializer tests away from route payload wrappers.
+
+Acceptance criteria:
+
+- No Tauri adapter production code path can parse, request, serialize, or serve `landblock/{id}/outdoor`, `landblock/{id}/env-cells`, or `landblock/{id}/topology`.
+- Tests no longer preserve removed routes as supported behavior.
+- Rust adapter tests compile for touched areas.
+
+Task checklist:
+
+- [x] Delete old route parser functions and id tests from `src-tauri/src/adapter/ids.rs`.
+- [x] Delete old route binary response dispatch and broad env-cell bundle serialization from `src-tauri/src/adapter/binary.rs`.
+- [x] Delete route-only JSON serializers and topology helpers from `src-tauri/src/adapter/json.rs`.
+- [x] Remove old broad route cases from adapter service tests and error-message routing.
+- [x] Run focused Rust validation for `holtburger-3d` adapter tests.
+
+Decisions and course corrections:
+
+- Deleted Tauri parsers for `landblock/{id}/outdoor`, `landblock/{id}/env-cells`, and `landblock/{id}/topology`; route parsing now goes through LoD or granular assets.
+- Removed old broad-route binary response dispatch and route-only JSON serializers, including the old env-cell landblock bundle wrapper.
+- Retargeted useful serializer tests to component serializers and LoD/granular payloads. Deleted tests that only proved old outdoor/topology/env-cell broad routes still worked.
+- Replaced a brittle env-cell binary fixture assertion that expected a renderless cell with a consistency check between payload geometry counts and binary section metadata.
+
+### Phase 11B4: Rust/Tauri Old Route Audit And Commit Gate
+
+Status: completed on 2026-06-30.
+
+Goal: prove the old broad landblock routes are gone from executable Rust/Tauri code and classify any surviving internal source vocabulary.
+
+Deliverables:
+
+- Run zero-reference searches for old route parser/variant/helper names and route strings.
+- Classify surviving `LandblockOutdoorAsset`, `LandblockEnvCellsAsset`, or `landblock/{id}/outdoor/...` references as internal LoD source facts, or rename/delete them if they are still route-facing.
+- Record validation commands and audit results in this plan.
+- Commit the completed Phase 11B split.
+
+Acceptance criteria:
+
+- No executable Rust/Tauri code path can request or serve `landblock/{id}/outdoor`, `landblock/{id}/env-cells`, or `landblock/{id}/topology`.
+- Any surviving old wording is historical prose or internal source vocabulary used by LoD assembly, not a host route contract.
+- TypeScript and Rust validation pass for touched files/crates.
+
+Task checklist:
+
+- [x] Run old route zero-reference audits across `crates`, `apps/holtburger-3d/src-tauri`, and touched frontend host files.
+- [x] Classify or delete every surviving executable reference.
+- [x] Run required Rust and TypeScript validation commands.
+- [x] Update Phase 11B1 through 11B4 decisions and validation notes.
+- [x] Commit the completed Rust/Tauri cutover phase set.
+
+Decisions and course corrections:
+
+- Audit found no remaining `ContentAssetRequest::LandblockOutdoor`, `ContentAssetRequest::LandblockTopology`, `ContentAssetRequest::LandblockEnvCells`, matching `ContentAsset` variants, old route parser functions, topology TypeScript helpers, or old route-serving Tauri paths.
+- Remaining `landblock/{id}/outdoor/...` strings in `holtburger-content` are source/provenance ids for outdoor static and terrain source facts, not host routes. Remaining `landblock-outdoor-terrain-local` strings are coordinate-space labels used by terrain payload contracts and tests.
+- Removed stale frontend test references to `landblock-outdoor` that existed only as negative assertions or wrong-payload fixtures.
+- Validation: `npm run check`; `npm run test:ts -- src/lib/static/env-cells/landblock-env-cells-resolver.test.ts src/lib/static/resolver/landblock-scene-lod-source-resolver.test.ts src/lib/host/tauri.test.ts src/lib/host/binary-asset-envelope.test.ts src/lib/landblocks.test.ts`; `cargo fmt --check`; `cargo clippy -p holtburger-core -p holtburger-3d -p holtburger-debug-harness --tests -- -D warnings`; `cargo test -p holtburger-core -p holtburger-3d -p holtburger-debug-harness --tests`.
+- Validation note: the first combined Rust test rerun exhausted local disk space after a linker bus error. Ran `cargo clean` with approval, freed local build artifacts, and reran the Rust gates successfully from a clean target.
 
 ### Phase 11C: Outdoor Detail Domain Cleanup
 

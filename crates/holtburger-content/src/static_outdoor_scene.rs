@@ -34,6 +34,20 @@ pub struct StaticOutdoorSceneSourceFamilies {
     pub generated_scenery: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LoadedStaticOutdoorSceneSources<'a> {
+    /// Cell landblock source used by generated scenery for terrain-aware placement.
+    pub landblock: Option<&'a CellLandblock>,
+    /// Landblock info source used by explicit outdoor objects and buildings.
+    pub landblock_info: Option<&'a LandblockInfo>,
+    /// Decode failure detail when landblock info was requested but unavailable.
+    pub landblock_info_error: Option<&'a str>,
+    /// Region scene table source required only for generated scenery.
+    pub region: Option<&'a RegionDesc>,
+    /// Source families requested by the caller's LoD contract.
+    pub families: StaticOutdoorSceneSourceFamilies,
+}
+
 impl StaticOutdoorSceneSourceFamilies {
     pub const ALL: Self = Self {
         explicit_objects: true,
@@ -248,14 +262,17 @@ impl StaticOutdoorSceneAssembler {
         let landblock_info = match source.landblock_info(landblock_info_id) {
             Ok(info) => Some(info),
             Err(error) => {
+                let landblock_info_error = error.to_string();
                 return self.assemble_from_loaded(
                     source,
                     landblock_id,
-                    landblock.as_ref(),
-                    None,
-                    Some(error.to_string()),
-                    None,
-                    families,
+                    LoadedStaticOutdoorSceneSources {
+                        landblock: landblock.as_ref(),
+                        landblock_info: None,
+                        landblock_info_error: Some(&landblock_info_error),
+                        region: None,
+                        families,
+                    },
                 );
             }
         };
@@ -268,11 +285,13 @@ impl StaticOutdoorSceneAssembler {
         self.assemble_from_loaded(
             source,
             landblock_id,
-            landblock.as_ref(),
-            landblock_info.as_ref(),
-            None,
-            region.as_ref(),
-            families,
+            LoadedStaticOutdoorSceneSources {
+                landblock: landblock.as_ref(),
+                landblock_info: landblock_info.as_ref(),
+                landblock_info_error: None,
+                region: region.as_ref(),
+                families,
+            },
         )
     }
 
@@ -280,40 +299,44 @@ impl StaticOutdoorSceneAssembler {
         &self,
         source: &mut ContentSourceReader<'_>,
         landblock_id: u32,
-        landblock: Option<&CellLandblock>,
-        landblock_info: Option<&LandblockInfo>,
-        landblock_info_error: Option<String>,
-        region: Option<&RegionDesc>,
-        families: StaticOutdoorSceneSourceFamilies,
+        loaded: LoadedStaticOutdoorSceneSources<'_>,
     ) -> Result<StaticOutdoorScene> {
         let mut diagnostics = StaticOutdoorSceneDiagnostics {
-            landblock_info_available: landblock_info.is_some(),
-            landblock_info_error,
+            landblock_info_available: loaded.landblock_info.is_some(),
+            landblock_info_error: loaded.landblock_info_error.map(str::to_owned),
             ..StaticOutdoorSceneDiagnostics::default()
         };
 
-        let explicit_objects = if families.explicit_objects {
-            derive_explicit_objects(landblock_id, landblock_info, &mut diagnostics.explicit)
+        let explicit_objects = if loaded.families.explicit_objects {
+            derive_explicit_objects(
+                landblock_id,
+                loaded.landblock_info,
+                &mut diagnostics.explicit,
+            )
         } else {
             Vec::new()
         };
-        let buildings = if families.buildings {
-            derive_buildings(landblock_id, landblock_info, &mut diagnostics.buildings)
+        let buildings = if loaded.families.buildings {
+            derive_buildings(
+                landblock_id,
+                loaded.landblock_info,
+                &mut diagnostics.buildings,
+            )
         } else {
             Vec::new()
         };
-        let generated_scenery = if families.generated_scenery {
-            let Some(landblock) = landblock else {
+        let generated_scenery = if loaded.families.generated_scenery {
+            let Some(landblock) = loaded.landblock else {
                 anyhow::bail!("generated scenery source requires CellLandblock");
             };
-            let Some(region) = region else {
+            let Some(region) = loaded.region else {
                 anyhow::bail!("generated scenery source requires RegionDesc");
             };
             derive_generated_scenery(
                 source,
                 landblock_id,
                 landblock,
-                landblock_info,
+                loaded.landblock_info,
                 region,
                 &mut diagnostics.generated,
             )?
@@ -1018,11 +1041,13 @@ mod tests {
             .assemble_from_loaded(
                 &mut source,
                 0xda55ffff,
-                None,
-                Some(&landblock_info),
-                None,
-                None,
-                StaticOutdoorSceneSourceFamilies::new(false, false, false),
+                LoadedStaticOutdoorSceneSources {
+                    landblock: None,
+                    landblock_info: Some(&landblock_info),
+                    landblock_info_error: None,
+                    region: None,
+                    families: StaticOutdoorSceneSourceFamilies::new(false, false, false),
+                },
             )
             .expect("empty static family set should assemble without source reads");
         assert!(level_0.explicit_objects.is_empty());
@@ -1036,11 +1061,13 @@ mod tests {
             .assemble_from_loaded(
                 &mut source,
                 0xda55ffff,
-                None,
-                Some(&landblock_info),
-                None,
-                None,
-                StaticOutdoorSceneSourceFamilies::new(false, true, false),
+                LoadedStaticOutdoorSceneSources {
+                    landblock: None,
+                    landblock_info: Some(&landblock_info),
+                    landblock_info_error: None,
+                    region: None,
+                    families: StaticOutdoorSceneSourceFamilies::new(false, true, false),
+                },
             )
             .expect(
                 "building-only static family set should assemble without generated source reads",
@@ -1056,11 +1083,13 @@ mod tests {
             .assemble_from_loaded(
                 &mut source,
                 0xda55ffff,
-                None,
-                Some(&landblock_info),
-                None,
-                None,
-                StaticOutdoorSceneSourceFamilies::new(true, true, false),
+                LoadedStaticOutdoorSceneSources {
+                    landblock: None,
+                    landblock_info: Some(&landblock_info),
+                    landblock_info_error: None,
+                    region: None,
+                    families: StaticOutdoorSceneSourceFamilies::new(true, true, false),
+                },
             )
             .expect(
                 "object/building static family set should assemble without generated source reads",

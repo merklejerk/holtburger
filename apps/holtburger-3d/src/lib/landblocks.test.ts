@@ -7,13 +7,11 @@ import {
 	deriveLandblockEnvCellIds,
 	formatEnvCellAssetId,
 	formatLandblockLabel,
-	formatLandblockTopologyAssetId,
 	formatTerrainMaterialAssetId,
 	getOutdoorLandblockCoords,
 	makeOutdoorLandblockId,
 	normalizeOutdoorLandblockId,
 	parseEnvCellAssetId,
-	parseLandblockTopologyAssetId,
 	parseTerrainMaterialAssetId,
 } from "./landblocks";
 
@@ -24,9 +22,6 @@ describe("outdoor landblock helpers", () => {
 		expect(landblockId).toBe(0xda55ffff);
 		expect(landblockId).toBeGreaterThan(0);
 		expect(formatLandblockLabel(landblockId)).toBe("0xda55ffff");
-		expect(formatLandblockTopologyAssetId(landblockId)).toBe(
-			"landblock/da55ffff/topology",
-		);
 	});
 
 	it("normalizes raw landblock ids to outdoor xxyyffff ids", () => {
@@ -57,18 +52,12 @@ describe("outdoor landblock helpers", () => {
 	});
 
 	it("formats and parses granular scene asset ids", () => {
-		expect(parseLandblockTopologyAssetId("landblock/da550123/topology")).toBe(
-			0xda550123,
-		);
 		expect(formatEnvCellAssetId(0xda550123)).toBe("env-cell/da550123");
 		expect(parseEnvCellAssetId("env-cell/da550123")).toBe(0xda550123);
 		expect(formatTerrainMaterialAssetId(1)).toBe("terrain-material/1");
 		expect(parseTerrainMaterialAssetId("terrain-material/1")).toEqual({
 			regionNumber: 1,
 		});
-		expect(
-			parseLandblockTopologyAssetId("landblock/da55ffff/terrain"),
-		).toBeNull();
 		expect(parseTerrainMaterialAssetId("terrain-material/1/123456")).toBeNull();
 		expect(
 			parseTerrainMaterialAssetId("terrain-material/1/not-a-number"),

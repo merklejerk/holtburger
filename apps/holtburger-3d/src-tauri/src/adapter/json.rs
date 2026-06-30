@@ -431,7 +431,7 @@ pub fn serialize_landblock_terrain(
         "triangles": build_landblock_terrain_triangles(mesh).iter().map(serialize_landblock_terrain_triangle).collect::<Vec<_>>(),
         "quads": mesh.quads.iter().map(serialize_landblock_terrain_quad).collect::<Vec<_>>(),
         "terrainBvh": {
-            "coordinateSpace": "landblock-outdoor-terrain-local",
+            "coordinateSpace": "landblock-terrain-local",
             "nodes": mesh.terrain_bvh.as_ref().map(|bvh| bvh.nodes.iter().map(serialize_prepared_bvh_node).collect::<Vec<_>>()).unwrap_or_default(),
             "items": mesh.terrain_bvh_items.iter().map(serialize_landblock_terrain_bvh_item).collect::<Vec<_>>(),
         },
@@ -449,7 +449,7 @@ pub fn empty_landblock_terrain() -> serde_json::Value {
         "triangles": [],
         "quads": [],
         "terrainBvh": {
-            "coordinateSpace": "landblock-outdoor-terrain-local",
+            "coordinateSpace": "landblock-terrain-local",
             "nodes": [],
             "items": [],
         },

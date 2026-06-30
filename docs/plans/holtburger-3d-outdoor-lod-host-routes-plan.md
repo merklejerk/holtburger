@@ -2155,7 +2155,7 @@ Decisions and course corrections:
 
 ### Phase 14: Route-Shaped Source Vocabulary Cleanup
 
-Status: pending.
+Status: completed on 2026-06-30.
 
 Goal: remove route-shaped outdoor naming from content source/provenance IDs and coordinate-space labels where the string now describes source identity or coordinate basis, not a host route.
 
@@ -2176,19 +2176,24 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Record `landblock-terrain-local` as the final terrain coordinate-space label.
-- [ ] Choose and record the final route-neutral content source/provenance ID pattern.
-- [ ] Rename content source/provenance ID construction in `holtburger-content`.
-- [ ] Update Tauri JSON serialization and frontend host contracts/tests.
-- [ ] Update resolver, terrain, object, and source-identity tests.
-- [ ] Run Rust and TypeScript validation for touched areas.
-- [ ] Run zero-reference audits for executable old coordinate-space/source ID strings.
-- [ ] Audit for and delete any old-name alias, fallback, compatibility wrapper, or test shim introduced during the rename.
+- [x] Record `landblock-terrain-local` as the final terrain coordinate-space label.
+- [x] Choose and record the final route-neutral content source/provenance ID pattern.
+- [x] Rename content source/provenance ID construction in `holtburger-content`.
+- [x] Update Tauri JSON serialization and frontend host contracts/tests.
+- [x] Update resolver, terrain, object, and source-identity tests.
+- [x] Run Rust and TypeScript validation for touched areas.
+- [x] Run zero-reference audits for executable old coordinate-space/source ID strings.
+- [x] Audit for and delete any old-name alias, fallback, compatibility wrapper, or test shim introduced during the rename.
 
 Decisions and course corrections:
 
 - Added after Phase 12 closeout at user request. Phase 12 classified these strings as non-route source vocabulary; this phase exists because non-route but route-shaped vocabulary still makes future audits and code review noisier than necessary.
 - Dry run on 2026-06-30 found this phase is fairly contained: source/provenance ID construction lives in `crates/holtburger-content/src/landblock_scene_assets.rs`, the coordinate-space label is serialized in the Tauri JSON adapter and validated by frontend host contracts/tests. Expect Rust content tests, Tauri JSON tests, and focused frontend preparation/resolver tests to move together.
+- Selected `landblock-terrain-local` as the final terrain coordinate-space label.
+- Selected `landblock-scene/{id}/terrain/quad/{row}/{col}` for terrain source/provenance IDs and `landblock-scene/{id}/static/spatial/{index}` for static source/provenance IDs.
+- Renamed the executable content constructors, Tauri JSON serializer output, frontend Zod contract expectations, preparation tests, terrain resolver tests, and outdoor static object resolver expectations in one cut. No old-name parser, alias, fixture shim, or compatibility path was added.
+- Validation passed: `npm run check`; `npm run test:ts -- src/lib/assets/preparation.test.ts src/lib/static/terrain/terrain-resolver.test.ts src/lib/static/objects/outdoor-static-objects-resolver.test.ts`; `cargo fmt --check`; `cargo clippy -p holtburger-content -p holtburger-3d --tests -- -D warnings`; `cargo test -p holtburger-content -p holtburger-3d --tests`.
+- Zero-reference audit passed for executable `landblock-outdoor-terrain-local` and `landblock/{...}/outdoor/...` source ID strings under `crates/holtburger-content/src`, `apps/holtburger-3d/src-tauri/src`, and `apps/holtburger-3d/src`. Remaining hits are historical plan prose.
 
 ### Phase 15: Scheduler Terminology Cleanup
 

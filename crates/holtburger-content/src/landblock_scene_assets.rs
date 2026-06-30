@@ -2225,7 +2225,7 @@ fn build_outdoor_member_spatial_items(
             let bounds = member.instance_bounds?;
             Some(PreparedSpatialItem {
                 id: format!(
-                    "landblock/{landblock_id:08x}/outdoor/spatial/static/{}",
+                    "landblock-scene/{landblock_id:08x}/static/spatial/{}",
                     member.instance.instance_id
                 ),
                 kind: match member.instance.kind {
@@ -2910,7 +2910,7 @@ fn build_terrain_mesh(cell_landblock: &CellLandblockFact) -> PreparedTerrainMesh
                 let corner_road_codes = raw_corners.map(road_code_from_cell_terrain);
                 quads.push(PreparedTerrainQuad {
                     terrain_quad_id: format!(
-                        "landblock/{:08x}/outdoor/terrain/quad/{row:02x}/{col:02x}",
+                        "landblock-scene/{:08x}/terrain/quad/{row:02x}/{col:02x}",
                         cell_landblock.id
                     ),
                     row,
@@ -2952,7 +2952,7 @@ fn build_terrain_mesh(cell_landblock: &CellLandblockFact) -> PreparedTerrainMesh
         .collect::<Vec<_>>();
     let terrain_bvh = build_prepared_bvh_with_scope(
         cell_landblock.id,
-        "landblock-outdoor-terrain-local",
+        "landblock-terrain-local",
         PreparedBvhScope::OutdoorTerrain,
         &terrain_spatial_items,
     );
@@ -4858,7 +4858,7 @@ mod tests {
         assert_eq!(
             spatial_items[0].id,
             format!(
-                "landblock/{source_landblock_id:08x}/outdoor/spatial/static/{}",
+                "landblock-scene/{source_landblock_id:08x}/static/spatial/{}",
                 instance.instance_id
             )
         );

@@ -277,7 +277,7 @@ const preparedTerrainBvhItemDtoSchema = z.object({
 });
 
 const preparedTerrainBvhDtoSchema = z.object({
-	coordinateSpace: z.literal("landblock-outdoor-terrain-local"),
+	coordinateSpace: z.literal("landblock-terrain-local"),
 	nodes: z.array(preparedLandblockBvhNodeDtoSchema),
 	items: z.array(preparedTerrainBvhItemDtoSchema),
 });

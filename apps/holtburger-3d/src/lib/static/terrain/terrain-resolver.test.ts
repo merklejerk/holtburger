@@ -364,7 +364,7 @@ function createLandblockOutdoorPayload(): LandblockOutdoorLayerSourcePayloadDto 
 				},
 			],
 			terrainBvh: {
-				coordinateSpace: "landblock-outdoor-terrain-local",
+				coordinateSpace: "landblock-terrain-local",
 				items: [
 					{
 						col: 0,

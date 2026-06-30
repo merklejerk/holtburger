@@ -33,7 +33,7 @@ export function createEnvCellResourceMembershipSnapshot(
 
 		if (
 			drawUnit.kind === "static-object-geometry" &&
-			drawUnit.ownership.kind === "env-cell-static-object-seeds"
+			drawUnit.ownership.kind === "env-cell-static-object-placements"
 		) {
 			for (const envCellId of drawUnit.ownership.envCellIds) {
 				const membership = getOrCreateMembership(

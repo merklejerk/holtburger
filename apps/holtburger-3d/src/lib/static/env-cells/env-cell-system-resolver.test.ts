@@ -32,7 +32,7 @@ import { selectVisibleEnvCells } from "./env-cell-visibility";
 import { EnvCellSystemResolver } from "./env-cell-system-resolver";
 
 describe("browser landblock env-cell resolver", () => {
-	it("resolves env-cell static seed source closure without cell-structure vertex buffers", async () => {
+	it("resolves env-cell static placement source closure without cell-structure vertex buffers", async () => {
 		const assetService = new FixtureAssetService(createResolverAssets());
 
 		const payload = await new EnvCellSystemResolver({
@@ -140,7 +140,7 @@ describe("browser landblock env-cell resolver", () => {
 				envCellId: 0xda550100,
 				kind: "env-cell-source",
 			},
-			staticObjectSeeds: [
+			staticObjectPlacements: [
 				{
 					identity: {
 						instanceId: "da550100:static-0",
@@ -185,7 +185,7 @@ describe("browser landblock env-cell resolver", () => {
 		const setupCell = payload.scope.envCells.find(
 			(cell) => cell.identity.envCellId === 0xda550101,
 		);
-		expect(setupCell?.staticObjectSeeds).toEqual([]);
+		expect(setupCell?.staticObjectPlacements).toEqual([]);
 		expect(setupCell?.authoredDynamicPlacements).toEqual([
 			expect.objectContaining({
 				classificationReason: "setup-default-animation",
@@ -200,7 +200,7 @@ describe("browser landblock env-cell resolver", () => {
 		]);
 	});
 
-	it("requests resolver metadata for static seeds but not standalone env-cell assets", async () => {
+	it("requests resolver metadata for static placements but not standalone env-cell assets", async () => {
 		const assetService = new FixtureAssetService(createResolverAssets());
 
 		await new EnvCellSystemResolver({ assetService }).resolve(
@@ -212,7 +212,7 @@ describe("browser landblock env-cell resolver", () => {
 		).not.toContain("env-cell:da550100");
 	});
 
-	it("records missing static seed sources without dropping cell-structure facts", async () => {
+	it("records missing static placement sources without dropping cell-structure facts", async () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
 				createHostAssetKey("landblock-scene-lod-env-cell-layer", 0xda55ffff),
@@ -236,7 +236,7 @@ describe("browser landblock env-cell resolver", () => {
 			kind: "cell-structure",
 		});
 		expect(
-			payload.scope.envCells.flatMap((cell) => cell.staticObjectSeeds),
+			payload.scope.envCells.flatMap((cell) => cell.staticObjectPlacements),
 		).toEqual([]);
 		expect(payload.scope.sourceAssets).toEqual([]);
 		expect(payload.scope.missingRefs).toEqual([
@@ -257,7 +257,7 @@ describe("browser landblock env-cell resolver", () => {
 		]);
 	});
 
-	it("resolves cell-structure material closure without static seed sources", async () => {
+	it("resolves cell-structure material closure without static placement sources", async () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
 				createHostAssetKey("landblock-scene-lod-env-cell-layer", 0xda55ffff),
@@ -302,7 +302,7 @@ describe("browser landblock env-cell resolver", () => {
 		]);
 		expect(payload.scope.sourceAssets).toEqual([]);
 		expect(
-			payload.scope.envCells.flatMap((cell) => cell.staticObjectSeeds),
+			payload.scope.envCells.flatMap((cell) => cell.staticObjectPlacements),
 		).toEqual([]);
 		expect(
 			payload.scope.materialSources.map((source) => source.identity),
@@ -320,7 +320,7 @@ describe("browser landblock env-cell resolver", () => {
 		expect(payload.scope.missingRefs).toEqual([]);
 	});
 
-	it("deduplicates repeated env-cell static seed source closure", async () => {
+	it("deduplicates repeated env-cell static placement source closure", async () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
 				createHostAssetKey("landblock-scene-lod-env-cell-layer", 0xda55ffff),
@@ -375,7 +375,7 @@ describe("browser landblock env-cell resolver", () => {
 		).toEqual(["material:08000010"]);
 		expect(payload.scope.sourceAssets).toHaveLength(1);
 		expect(
-			payload.scope.envCells.flatMap((cell) => cell.staticObjectSeeds),
+			payload.scope.envCells.flatMap((cell) => cell.staticObjectPlacements),
 		).toHaveLength(2);
 	});
 
@@ -501,7 +501,7 @@ describe("browser landblock env-cell resolver", () => {
 				payload.scope.kind === "env-cell-system"
 					? payload.scope.envCells.map((cell) => ({
 							...cell,
-							staticObjectSeeds: cell.staticObjectSeeds.map((seed) => ({
+							staticObjectPlacements: cell.staticObjectPlacements.map((seed) => ({
 								...seed,
 								debug: null,
 							})),
@@ -795,7 +795,7 @@ function createRuntimeEnvCell(
 		renderGeometry: createRenderGeometry(envCellId),
 		restrictionObjectId: null,
 		seenOutside: null,
-		staticObjectSeeds: [],
+		staticObjectPlacements: [],
 		surfaces: [],
 		visibleEnvCellIds,
 	};

@@ -58,6 +58,7 @@ export class LandblockSceneLodSourceResolver implements StaticLandblockSceneLodS
 		const scenePayload = requireLandblockSceneLodPayload(sceneAsset);
 		validateScenePayloadForRequest(scenePayload, request);
 		const recipes = [];
+		const dynamicPlacements = [];
 		const dynamicRecipes = [];
 
 		for (const layerRequest of request.requestedLayers) {
@@ -73,6 +74,15 @@ export class LandblockSceneLodSourceResolver implements StaticLandblockSceneLodS
 				payload,
 				targetOwnerKey: layerRequest.targetOwnerKey,
 			});
+			dynamicPlacements.push(
+				...createStaticAuthoredDynamicPlacementRecords({
+					owner: createStaticAuthoredDynamicPlacementOwner({
+						domain: job.domain,
+						targetOwnerKey: layerRequest.targetOwnerKey,
+					}),
+					payload,
+				}),
+			);
 			dynamicRecipes.push(
 				...(await this.#resolveStaticAuthoredDynamicRecipes({
 					job,
@@ -82,7 +92,7 @@ export class LandblockSceneLodSourceResolver implements StaticLandblockSceneLodS
 			);
 		}
 
-		return { dynamicRecipes, recipes, request };
+		return { dynamicPlacements, dynamicRecipes, recipes, request };
 	}
 
 	async #resolveStaticAuthoredDynamicRecipes(options: {

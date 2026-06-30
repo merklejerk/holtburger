@@ -14,7 +14,7 @@ import type {
 	StaticObjectInstanceFacts,
 	StaticObjectInstanceIdentity,
 	StaticObjectMaterialSlotFacts,
-	OutdoorStaticObjectDynamicSeedFacts,
+	OutdoorStaticObjectDynamicPlacementFacts,
 	OutdoorStaticBvhFacts,
 	StaticObjectPartIdentity,
 	RegionDetailRoleFacts,
@@ -164,7 +164,7 @@ export class OutdoorStaticObjectsResolver {
 				};
 			})
 			.filter((object) => sourceByKey.has(createSourceCacheKey(object.source)));
-		const dynamicSeedFacts = createOutdoorDynamicSeedFacts({
+		const dynamicPlacements = createOutdoorDynamicPlacementFacts({
 			domain,
 			landblockId: landblock.payload.landblockId,
 			landblockSource: {
@@ -176,7 +176,9 @@ export class OutdoorStaticObjectsResolver {
 			sourceByKey,
 		});
 		const dynamicObjectKeys = new Set(
-			dynamicSeedFacts.map((seed) => createObjectInstanceKey(seed.object)),
+			dynamicPlacements.map((placement) =>
+				createObjectInstanceKey(placement.object),
+			),
 		);
 		const objects = allObjects.filter(
 			(object) =>
@@ -190,8 +192,7 @@ export class OutdoorStaticObjectsResolver {
 			sourceByKey,
 		});
 		const scope: OutdoorStaticObjectsScopePayload = {
-			authoredDynamicPlacements: dynamicSeedFacts,
-			authoredDynamicSeeds: dynamicSeedFacts,
+			authoredDynamicPlacements: dynamicPlacements,
 			buildingTransitionApertures:
 				domain === "outdoor-buildings"
 					? landblock.payload.buildingTransitionApertures
@@ -280,13 +281,13 @@ export class OutdoorStaticObjectsResolver {
 	}
 }
 
-function createOutdoorDynamicSeedFacts(options: {
+function createOutdoorDynamicPlacementFacts(options: {
 	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
 	readonly landblockId: number;
 	readonly landblockSource: OutdoorStaticObjectsScopePayload["landblock"];
 	readonly objects: readonly StaticObjectInstanceFacts[];
 	readonly sourceByKey: ReadonlyMap<string, StaticObjectSourceAssetFacts>;
-}): readonly OutdoorStaticObjectDynamicSeedFacts[] {
+}): readonly OutdoorStaticObjectDynamicPlacementFacts[] {
 	return options.objects.flatMap((object) => {
 		const source = options.sourceByKey.get(createSourceCacheKey(object.source));
 		if (

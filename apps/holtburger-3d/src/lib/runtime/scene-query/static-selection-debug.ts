@@ -112,13 +112,13 @@ export function queryEnvCellStaticObjectDetails(
 	for (const item of root.items) {
 		if (
 			item.kind === "static" &&
-			item.seed.seed.identity.instanceId === options.instanceId
+			item.placement.placement.identity.instanceId === options.instanceId
 		) {
 			return {
 				envCellId: options.envCellId,
 				instanceId: options.instanceId,
 				landblockId: options.landblockId,
-				seed: item.seed.seed,
+				placement: item.placement.placement,
 			};
 		}
 	}
@@ -231,11 +231,11 @@ export function querySelectionDebugBounds(
 	for (const item of root.items) {
 		if (
 			item.kind === "static" &&
-			item.seed.seed.identity.instanceId === selectionKey.instanceId
+			item.placement.placement.identity.instanceId === selectionKey.instanceId
 		) {
-			const bounds = state.envCellCommittedRecords.getEnvCellStaticSeedBounds(
+			const bounds = state.envCellCommittedRecords.getEnvCellStaticPlacementBounds(
 				root,
-				item.seed,
+				item.placement,
 			);
 			if (!bounds) {
 				return null;

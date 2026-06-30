@@ -1,5 +1,6 @@
 import type {
 	StaticAtlasBatchSnapshot,
+	StaticAuthoredDynamicPlacementRecord,
 	StaticAuthoredDynamicRecipe,
 	StaticBakeAttachmentProvider,
 	StaticBakeBatchInput,
@@ -384,6 +385,9 @@ export class StaticCoordinator {
 		const dynamicRecipesByOwnerId = groupDynamicRecipesByOwnerId(
 			resolution.dynamicRecipes,
 		);
+		const dynamicPlacementsByOwnerId = groupDynamicPlacementsByOwnerId(
+			resolution.dynamicPlacements,
+		);
 
 		for (const recipe of resolution.recipes) {
 			const ownerId = createLayerOwnerKeyId(recipe.targetOwnerKey);
@@ -409,6 +413,7 @@ export class StaticCoordinator {
 				task,
 				recipe.payload,
 				resolverMs,
+				dynamicPlacementsByOwnerId.get(ownerId) ?? [],
 				dynamicRecipesByOwnerId.get(ownerId) ?? [],
 			);
 		}
@@ -418,6 +423,7 @@ export class StaticCoordinator {
 		taskStatus: MutableStaticLayerTaskState,
 		payload: StaticScopePayload,
 		resolverMs: number,
+		dynamicPlacements: readonly StaticAuthoredDynamicPlacementRecord[],
 		dynamicRecipes: readonly DynamicEntityRecipe[],
 	): void {
 		let pendingBatch = this.#findPendingBatchForTask(taskStatus);
@@ -447,6 +453,7 @@ export class StaticCoordinator {
 		pendingBatch.items.push({
 			ownerId: task.ownerId,
 			ownerKey: task.ownerKey,
+			dynamicPlacements,
 			dynamicRecipes,
 			payload,
 			resolverMs,
@@ -539,6 +546,8 @@ export class StaticCoordinator {
 		}
 		const bakeMs = nowMs() - bakeStartedAt;
 		let dynamicVisualBake: DynamicVisualBakeResult | null;
+		let dynamicPlacements: readonly StaticAuthoredDynamicPlacementRecord[] =
+			pendingItems.flatMap((item) => item.dynamicPlacements);
 		let dynamicRecipes: readonly DynamicEntityRecipe[] = pendingItems.flatMap(
 			(item) => item.dynamicRecipes,
 		);
@@ -563,6 +572,10 @@ export class StaticCoordinator {
 		);
 		if (currentTasks.length !== result.tasks.length) {
 			result = filterStaticBakeResultForCurrentTasks(result, currentTasks);
+			dynamicPlacements = filterDynamicPlacementsForCurrentTasks(
+				pendingItems,
+				currentTasks,
+			);
 			dynamicRecipes = filterDynamicRecipesForCurrentTasks(
 				pendingItems,
 				currentTasks,
@@ -582,6 +595,7 @@ export class StaticCoordinator {
 			this.#commit(result, {
 				attachmentMs,
 				bakeMs,
+				dynamicPlacements,
 				dynamicRecipes,
 				dynamicVisualBake,
 				resolverMs: sumNullableNumbers(
@@ -635,6 +649,7 @@ export class StaticCoordinator {
 			readonly resolverMs: number | null;
 			readonly attachmentMs: number | null;
 			readonly bakeMs: number | null;
+			readonly dynamicPlacements: readonly StaticAuthoredDynamicPlacementRecord[];
 			readonly dynamicRecipes: readonly DynamicEntityRecipe[];
 			readonly dynamicVisualBake: DynamicVisualBakeResult | null;
 		},
@@ -685,6 +700,7 @@ export class StaticCoordinator {
 			staticBatchId: result.staticBatchId,
 		});
 		this.#emitCommit({
+			dynamicPlacements: timing.dynamicPlacements,
 			dynamicRecipes: timing.dynamicRecipes,
 			dynamicVisualBake: timing.dynamicVisualBake,
 			staticCommit: {
@@ -694,7 +710,8 @@ export class StaticCoordinator {
 				materialCoverage: result.materialCoverage,
 				removedResources: [],
 				revision: result.revision,
-				staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds,
+				envCellStaticObjectPlacementRecords:
+					result.envCellStaticObjectPlacementRecords,
 				staticBatchId: result.staticBatchId,
 				staticObjectRenderInstances: result.staticObjectRenderInstances,
 				staticObjectVisualResources: result.staticObjectVisualResources,
@@ -738,6 +755,7 @@ export class StaticCoordinator {
 	}): void {
 		const staticBatchId = createEvictionStaticBatchId(this.#revision);
 		this.#emitCommit({
+			dynamicPlacements: [],
 			dynamicRecipes: [],
 			dynamicVisualBake: null,
 			staticCommit: {
@@ -747,7 +765,7 @@ export class StaticCoordinator {
 				materialCoverage: [],
 				removedResources: options.removedResources,
 				revision: this.#revision,
-				staticAuthoredDynamicSeeds: [],
+				envCellStaticObjectPlacementRecords: [],
 				staticBatchId,
 				staticObjectRenderInstances: [],
 				staticObjectVisualResources: [],
@@ -902,8 +920,8 @@ export class StaticCoordinator {
 					0,
 				),
 				portalLinkCount: payload.scope.portalLinks.length,
-				staticObjectSeedCount: payload.scope.envCells.reduce(
-					(count, envCell) => count + envCell.staticObjectSeeds.length,
+				staticObjectPlacementCount: payload.scope.envCells.reduce(
+					(count, envCell) => count + envCell.staticObjectPlacements.length,
 					0,
 				),
 				visibilityDiagnosticCount: payload.scope.visibilityDiagnostics.length,
@@ -1050,6 +1068,8 @@ interface PendingStaticBakeBatchItem {
 	readonly ownerId: string;
 	/** Layer owner identity that owns any resources produced by this item. */
 	readonly ownerKey: LayerOwnerState["key"];
+	/** Static-authored dynamic placements discovered from the same source fanout. */
+	readonly dynamicPlacements: readonly StaticAuthoredDynamicPlacementRecord[];
 	/** Static-authored dynamic recipes discovered from the same source fanout. */
 	readonly dynamicRecipes: readonly DynamicEntityRecipe[];
 	readonly payload: StaticScopePayload;
@@ -1162,6 +1182,19 @@ function groupDynamicRecipesByOwnerId(
 	return byOwnerId;
 }
 
+function groupDynamicPlacementsByOwnerId(
+	placements: readonly StaticAuthoredDynamicPlacementRecord[],
+): ReadonlyMap<string, readonly StaticAuthoredDynamicPlacementRecord[]> {
+	const byOwnerId = new Map<string, StaticAuthoredDynamicPlacementRecord[]>();
+	for (const placement of placements) {
+		const ownerId = createLayerOwnerKeyId(placement.owner.key);
+		const ownerPlacements = byOwnerId.get(ownerId) ?? [];
+		ownerPlacements.push(placement);
+		byOwnerId.set(ownerId, ownerPlacements);
+	}
+	return byOwnerId;
+}
+
 function filterDynamicVisualBakeResultForCurrentTasks(
 	result: DynamicVisualBakeResult | null,
 	pendingItems: readonly PendingStaticBakeBatchItem[],
@@ -1186,6 +1219,16 @@ function filterDynamicVisualBakeResultForCurrentTasks(
 			currentEntityIds.has(getDynamicVisualBakeProductEntityId(product)),
 		),
 	};
+}
+
+function filterDynamicPlacementsForCurrentTasks(
+	pendingItems: readonly PendingStaticBakeBatchItem[],
+	currentTasks: readonly StaticBakeTask[],
+): readonly StaticAuthoredDynamicPlacementRecord[] {
+	const currentTaskIds = new Set(currentTasks.map((task) => task.taskId));
+	return pendingItems
+		.filter((item) => currentTaskIds.has(item.taskId))
+		.flatMap((item) => item.dynamicPlacements);
 }
 
 function filterDynamicRecipesForCurrentTasks(
@@ -1455,13 +1498,13 @@ function filterStaticBakeResultForCurrentTasks(
 		portalApertureResources: result.portalApertureResources.filter((resource) =>
 			retainedPortalApertureResourceIds.has(resource.apertureResourceId),
 		),
-		staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds.filter(
-			(record) =>
+		envCellStaticObjectPlacementRecords:
+			result.envCellStaticObjectPlacementRecords.filter((record) =>
 				isPeerRecordOwnedByRetainedWork(record.owner, {
 					drawUnitIds,
 					ownerIds,
 				}),
-		),
+			),
 		staticObjectRenderInstances: retainedStaticObjectRenderInstances,
 		staticObjectVisualResources: result.staticObjectVisualResources.filter(
 			(resource) =>

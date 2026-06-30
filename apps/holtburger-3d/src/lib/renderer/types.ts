@@ -1,5 +1,5 @@
 import type {
-	StaticAuthoredDynamicSeedRecord,
+	EnvCellStaticObjectPlacementRecord,
 	StaticBakeTextureUse,
 	StaticDomain,
 	OutdoorStaticObjectLayerDomain,
@@ -103,7 +103,7 @@ export interface OutdoorGeneratedSceneryLayerPayload
 
 export interface EnvCellSystemLayerPayload extends StaticLandblockLayerPayloadBase {
 	readonly kind: "env-cell-system";
-	readonly authoredDynamicSeedRecords: readonly StaticAuthoredDynamicSeedRecord[];
+	readonly envCellStaticObjectPlacementRecords: readonly EnvCellStaticObjectPlacementRecord[];
 	readonly envCellStaticObjectDrawUnits: readonly OutdoorStaticObjectLayerDrawUnit<"env-cell-system">[];
 	readonly portalApertureResources: readonly StaticPortalApertureResource[];
 	readonly portalGraphRecords: readonly StaticPortalGraphRecord[];

@@ -1,9 +1,9 @@
 import type {
-	EnvCellStaticObjectDynamicSeedFacts,
+	EnvCellStaticObjectDynamicPlacementFacts,
 	MaterialTextureDataUseIdentity,
-	OutdoorStaticObjectDynamicSeedFacts,
+	OutdoorStaticObjectDynamicPlacementFacts,
 	StaticBakeTextureSamplingPolicy,
-	StaticAuthoredDynamicSeedRecord,
+	StaticAuthoredDynamicPlacementRecord,
 	StaticBounds,
 	StaticObjectSourceGeometryAttachment,
 	StaticObjectMaterialSourceFacts,
@@ -51,10 +51,10 @@ export function createRuntimeDynamicTextureBatchId(
 	return `runtime-dynamic:${entityId}`;
 }
 
-/** Static-authored seed fact shapes that can become dynamic runtime records. */
-export type StaticAuthoredDynamicSeedFacts =
-	| EnvCellStaticObjectDynamicSeedFacts
-	| OutdoorStaticObjectDynamicSeedFacts;
+/** Static-authored placement fact shapes that can become dynamic runtime records. */
+export type StaticAuthoredDynamicPlacementFacts =
+	| EnvCellStaticObjectDynamicPlacementFacts
+	| OutdoorStaticObjectDynamicPlacementFacts;
 
 export interface DynamicEntityRecord {
 	readonly animation: DynamicEntityAnimationState;
@@ -412,7 +412,7 @@ interface RuntimeSpawnDynamicEntitySourceFacts {
 
 interface StaticAuthoredDynamicEntitySourceFacts {
 	readonly kind: "static-authored";
-	readonly seed: StaticAuthoredDynamicSeedFacts;
+	readonly placement: StaticAuthoredDynamicPlacementFacts;
 }
 
 export type DynamicEntitySourceFacts =
@@ -499,8 +499,8 @@ export interface DynamicAnimationHookFrameKey {
 }
 
 export interface DynamicEntityTransformState {
-	readonly baseLocalPlacement: StaticAuthoredDynamicSeedFacts["localPlacement"];
-	readonly sourceScale: StaticAuthoredDynamicSeedFacts["sourceScale"];
+	readonly baseLocalPlacement: StaticAuthoredDynamicPlacementFacts["localPlacement"];
+	readonly sourceScale: StaticAuthoredDynamicPlacementFacts["sourceScale"];
 }
 
 export type DynamicEntityBoundsPrecision =
@@ -720,7 +720,6 @@ export interface DynamicRuntimeSnapshot {
 	readonly records: readonly DynamicEntitySummaryDto[];
 	readonly runtimeSpawnCount: number;
 	readonly staticAuthoredCount: number;
-	readonly staticSeedCount: number;
 }
 
 export interface DynamicEntitySummaryDto {
@@ -826,7 +825,7 @@ export type DynamicEntitySourceSummaryDto =
 	| {
 			readonly defaultAnimationId: number;
 			readonly kind: "static-authored";
-			readonly object: StaticAuthoredDynamicSeedFacts["object"];
+			readonly object: StaticAuthoredDynamicPlacementFacts["object"];
 			readonly setupModelId: number;
 			readonly sourceAssetId: string;
 	  }
@@ -840,20 +839,20 @@ export type DynamicEntitySourceSummaryDto =
 			readonly sourceKind: "browser-authored-server-shaped";
 	  };
 
-export function isOutdoorDynamicSeedRecord(
-	record: StaticAuthoredDynamicSeedRecord,
+export function isOutdoorDynamicPlacementRecord(
+	record: StaticAuthoredDynamicPlacementRecord,
 ): record is Extract<
-	StaticAuthoredDynamicSeedRecord,
-	{ readonly kind: "outdoor-static-object-dynamic-seed" }
+	StaticAuthoredDynamicPlacementRecord,
+	{ readonly kind: "outdoor-static-object-dynamic-placement" }
 > {
-	return record.kind === "outdoor-static-object-dynamic-seed";
+	return record.kind === "outdoor-static-object-dynamic-placement";
 }
 
-export function isEnvCellDynamicSeedRecord(
-	record: StaticAuthoredDynamicSeedRecord,
+export function isEnvCellDynamicPlacementRecord(
+	record: StaticAuthoredDynamicPlacementRecord,
 ): record is Extract<
-	StaticAuthoredDynamicSeedRecord,
-	{ readonly kind: "env-cell-static-object-dynamic-seed" }
+	StaticAuthoredDynamicPlacementRecord,
+	{ readonly kind: "env-cell-static-object-dynamic-placement" }
 > {
-	return record.kind === "env-cell-static-object-dynamic-seed";
+	return record.kind === "env-cell-static-object-dynamic-placement";
 }

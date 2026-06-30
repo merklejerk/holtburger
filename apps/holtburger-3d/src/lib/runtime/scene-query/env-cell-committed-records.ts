@@ -5,7 +5,7 @@ import {
 } from "../../math/ac-placement-transform";
 import type { EnvCellSystemLayerPayload } from "../../renderer/types";
 import type {
-	StaticAuthoredDynamicSeedRecord,
+	EnvCellStaticObjectPlacementRecord,
 	StaticBounds,
 	StaticDomain,
 	StaticEnvCellSpatialRecord,
@@ -31,7 +31,7 @@ import type {
 	EnvCellLandblockBvhRoot,
 	EnvCellLandblockBvhRuntimeItem,
 	EnvCellResidencyGraphEvidence,
-	EnvCellStaticSeedRuntimeRecord,
+	EnvCellStaticPlacementRuntimeRecord,
 } from "./static-query-state";
 
 export interface EnvCellCommittedRecordSnapshot {
@@ -46,9 +46,9 @@ export interface EnvCellCommittedRecordSnapshot {
 
 /** Owns committed env-cell records and the runtime roots derived from them. */
 export class EnvCellCommittedRecordStore {
-	readonly #authoredDynamicSeedRecordsByKey = new Map<
+	readonly #envCellStaticObjectPlacementRecordsByKey = new Map<
 		string,
-		CommittedRecordEntry<StaticAuthoredDynamicSeedRecord>
+		CommittedRecordEntry<EnvCellStaticObjectPlacementRecord>
 	>();
 	readonly #envCellRootsByLandblockId = new Map<
 		number,
@@ -87,7 +87,7 @@ export class EnvCellCommittedRecordStore {
 	>();
 
 	applyStaticPeerRecords(options: {
-		readonly authoredDynamicSeeds?: readonly StaticAuthoredDynamicSeedRecord[];
+		readonly envCellStaticObjectPlacementRecords?: readonly EnvCellStaticObjectPlacementRecord[];
 		readonly outdoorAnchorLandblockId: number | null;
 		readonly portalGraphs?: readonly StaticPortalGraphRecord[];
 		readonly portalInteriorRecords?: readonly StaticPortalInteriorRecord[];
@@ -102,14 +102,14 @@ export class EnvCellCommittedRecordStore {
 		);
 		this.#upsertCommittedPortalGraphs(options.portalGraphs ?? []);
 		this.#upsertCommittedSourceMappings(options.sourceMappings ?? []);
-		this.#upsertCommittedAuthoredDynamicSeedRecords(
-			options.authoredDynamicSeeds ?? [],
+		this.#upsertCommittedEnvCellStaticObjectPlacementRecords(
+			options.envCellStaticObjectPlacementRecords ?? [],
 		);
 		this.rebuildRoots(options.outdoorAnchorLandblockId);
 	}
 
 	clear(): void {
-		this.#authoredDynamicSeedRecordsByKey.clear();
+		this.#envCellStaticObjectPlacementRecordsByKey.clear();
 		this.#envCellRootsByLandblockId.clear();
 		this.#envCellStaticBoundsOverridesByKey.clear();
 		this.#envCellSystemLayersByLandblockId.clear();
@@ -157,15 +157,15 @@ export class EnvCellCommittedRecordStore {
 			: null;
 	}
 
-	getEnvCellStaticSeedBounds(
+	getEnvCellStaticPlacementBounds(
 		root: EnvCellBvhRoot,
-		record: EnvCellStaticSeedRuntimeRecord,
+		record: EnvCellStaticPlacementRuntimeRecord,
 	): StaticBounds | null {
 		return (
 			this.#envCellStaticBoundsOverridesByKey.get(
 				createEnvCellStaticObjectBoundsKey({
 					envCellId: record.envCellId,
-					instanceId: record.seed.identity.instanceId,
+					instanceId: record.placement.identity.instanceId,
 					landblockId: root.landblockId,
 				}),
 			)?.bounds ?? null
@@ -231,13 +231,13 @@ export class EnvCellCommittedRecordStore {
 			this.#visibilityRecordsByKey,
 			options.landblockId,
 		);
-		const authoredDynamicSeeds = collectCommittedRecordsByLandblock(
-			this.#authoredDynamicSeedRecordsByKey,
+		const envCellStaticObjectPlacementRecords = collectCommittedRecordsByLandblock(
+			this.#envCellStaticObjectPlacementRecordsByKey,
 			options.landblockId,
 		);
 
 		if (
-			authoredDynamicSeeds.length === 0 &&
+			envCellStaticObjectPlacementRecords.length === 0 &&
 			portalGraphs.length === 0 &&
 			portalInteriorRecords.length === 0 &&
 			sourceMappings.length === 0 &&
@@ -248,7 +248,7 @@ export class EnvCellCommittedRecordStore {
 		}
 
 		return {
-			authoredDynamicSeeds,
+			envCellStaticObjectPlacementRecords,
 			landblockId: options.landblockId,
 			portalGraphs,
 			portalInteriorRecords,
@@ -383,8 +383,8 @@ export class EnvCellCommittedRecordStore {
 		const spatialRecordsByLandblock = groupEnvCellSpatialRecordsByLandblock(
 			this.#spatialRecordsByKey,
 		);
-		const seedsByLandblockAndEnvCell = groupEnvCellSeedsByLandblockAndEnvCell(
-			this.#authoredDynamicSeedRecordsByKey,
+		const placementsByLandblockAndEnvCell = groupEnvCellPlacementsByLandblockAndEnvCell(
+			this.#envCellStaticObjectPlacementRecordsByKey,
 		);
 
 		for (const [landblockId, spatialRecords] of spatialRecordsByLandblock) {
@@ -402,18 +402,18 @@ export class EnvCellCommittedRecordStore {
 				);
 			const cellsByEnvCellId = new Map<number, EnvCellBvhRoot>();
 			for (const record of spatialRecords) {
-				const seeds =
-					seedsByLandblockAndEnvCell.get(landblockId)?.get(record.envCellId) ??
+				const placements =
+					placementsByLandblockAndEnvCell.get(landblockId)?.get(record.envCellId) ??
 					[];
 				cellsByEnvCellId.set(record.envCellId, {
 					envCellId: record.envCellId,
-					items: seeds.map((seedRecord): EnvCellBvhRuntimeItem => {
-						const seed = seedRecord.seed;
+					items: placements.map((placementRecord): EnvCellBvhRuntimeItem => {
+						const placement = placementRecord.placement;
 						return {
 							kind: "static",
-							seed: {
+							placement: {
 								envCellId: record.envCellId,
-								seed,
+								placement,
 							},
 						};
 					}),
@@ -474,7 +474,7 @@ export class EnvCellCommittedRecordStore {
 		this.#clearEnvCellSystemLayerRecords(landblockId);
 		this.#envCellSystemLayersByLandblockId.set(landblockId, payload);
 		this.applyStaticPeerRecords({
-			authoredDynamicSeeds: payload.authoredDynamicSeedRecords,
+			envCellStaticObjectPlacementRecords: payload.envCellStaticObjectPlacementRecords,
 			outdoorAnchorLandblockId,
 			portalGraphs: payload.portalGraphRecords,
 			portalInteriorRecords: payload.portalInteriorRecords,
@@ -505,7 +505,7 @@ export class EnvCellCommittedRecordStore {
 				this.#portalInteriorRecordsByKey,
 				this.#portalGraphsByKey,
 				this.#sourceMappingsByKey,
-				this.#authoredDynamicSeedRecordsByKey,
+				this.#envCellStaticObjectPlacementRecordsByKey,
 			]),
 			committedEnvCellPortalGraphRecordCount: this.#portalGraphsByKey.size,
 			committedEnvCellPortalInteriorRecordCount:
@@ -530,7 +530,7 @@ export class EnvCellCommittedRecordStore {
 			this.#portalInteriorRecordsByKey,
 			this.#portalGraphsByKey,
 			this.#sourceMappingsByKey,
-			this.#authoredDynamicSeedRecordsByKey,
+			this.#envCellStaticObjectPlacementRecordsByKey,
 		]) {
 			for (const [key, entry] of recordsByKey) {
 				if (
@@ -608,7 +608,7 @@ export class EnvCellCommittedRecordStore {
 			this.#portalInteriorRecordsByKey,
 			this.#portalGraphsByKey,
 			this.#sourceMappingsByKey,
-			this.#authoredDynamicSeedRecordsByKey,
+			this.#envCellStaticObjectPlacementRecordsByKey,
 		]) {
 			for (const [key, entry] of recordsByKey) {
 				const owner = entry.record.owner;
@@ -745,17 +745,17 @@ export class EnvCellCommittedRecordStore {
 		this.#portalProjectionCache.invalidate(affectedPortalLandblockIds);
 	}
 
-	#upsertCommittedAuthoredDynamicSeedRecords(
-		records: readonly StaticAuthoredDynamicSeedRecord[],
+	#upsertCommittedEnvCellStaticObjectPlacementRecords(
+		records: readonly EnvCellStaticObjectPlacementRecord[],
 	): void {
 		this.#deleteCommittedRecordsForOwners(
-			this.#authoredDynamicSeedRecordsByKey,
+			this.#envCellStaticObjectPlacementRecordsByKey,
 			records,
 		);
 
 		for (const record of records) {
-			this.#authoredDynamicSeedRecordsByKey.set(
-				createCommittedAuthoredDynamicSeedRecordKey(record),
+			this.#envCellStaticObjectPlacementRecordsByKey.set(
+				createCommittedEnvCellStaticObjectPlacementRecordKey(record),
 				{
 					ownerKey: createStaticPeerOwnerKey(record.owner),
 					record,
@@ -929,7 +929,7 @@ function countCommittedEnvCellLandblocks(
 			| StaticPortalGraphRecord
 			| StaticSourceMappingRecord
 			| StaticSpatialRecord
-			| StaticAuthoredDynamicSeedRecord
+			| EnvCellStaticObjectPlacementRecord
 			| StaticVisibilityRecord
 		>
 	>[],
@@ -949,16 +949,12 @@ function countCommittedEnvCellLandblocks(
 	return landblockIds.size;
 }
 
-function createCommittedAuthoredDynamicSeedRecordKey(
-	record: StaticAuthoredDynamicSeedRecord,
+function createCommittedEnvCellStaticObjectPlacementRecordKey(
+	record: EnvCellStaticObjectPlacementRecord,
 ): string {
 	switch (record.kind) {
-		case "env-cell-static-object-seed":
-			return `env-cell-static-object-seed:${record.landblockId >>> 0}:${record.envCellId >>> 0}:${record.seed.identity.instanceId}`;
-		case "env-cell-static-object-dynamic-seed":
-			return `env-cell-static-object-dynamic-seed:${record.seed.landblockId >>> 0}:${record.seed.envCellId >>> 0}:${record.seed.object.instanceId}`;
-		case "outdoor-static-object-dynamic-seed":
-			return `outdoor-static-object-dynamic-seed:${record.seed.landblockId >>> 0}:${record.seed.domain}:${record.seed.object.instanceId}`;
+		case "env-cell-static-object-placement":
+			return `env-cell-static-object-placement:${record.landblockId >>> 0}:${record.envCellId >>> 0}:${record.placement.identity.instanceId}`;
 	}
 }
 
@@ -1033,10 +1029,9 @@ function createCommittedRecordSortKey(record: unknown): string {
 			return createCommittedSourceMappingRecordKey(
 				record as StaticSourceMappingRecord,
 			);
-		case "env-cell-static-object-dynamic-seed":
-		case "env-cell-static-object-seed":
-			return createCommittedAuthoredDynamicSeedRecordKey(
-				record as StaticAuthoredDynamicSeedRecord,
+		case "env-cell-static-object-placement":
+			return createCommittedEnvCellStaticObjectPlacementRecordKey(
+				record as EnvCellStaticObjectPlacementRecord,
 			);
 		default:
 			throw new Error(
@@ -1118,7 +1113,7 @@ function getCommittedRecordDomain(
 		| StaticPortalGraphRecord
 		| StaticSourceMappingRecord
 		| StaticSpatialRecord
-		| StaticAuthoredDynamicSeedRecord
+		| EnvCellStaticObjectPlacementRecord
 		| StaticVisibilityRecord
 		| unknown,
 ): StaticDomain {
@@ -1140,7 +1135,7 @@ function getCommittedRecordLandblockId(
 		| StaticPortalGraphRecord
 		| StaticSourceMappingRecord
 		| StaticSpatialRecord
-		| StaticAuthoredDynamicSeedRecord
+		| EnvCellStaticObjectPlacementRecord
 		| StaticVisibilityRecord
 		| unknown,
 ): number | null {
@@ -1150,37 +1145,37 @@ function getCommittedRecordLandblockId(
 	return null;
 }
 
-function groupEnvCellSeedsByLandblockAndEnvCell(
+function groupEnvCellPlacementsByLandblockAndEnvCell(
 	recordsByKey: ReadonlyMap<
 		string,
-		CommittedRecordEntry<StaticAuthoredDynamicSeedRecord>
+		CommittedRecordEntry<EnvCellStaticObjectPlacementRecord>
 	>,
 ): ReadonlyMap<
 	number,
 	ReadonlyMap<
 		number,
 		readonly Extract<
-			StaticAuthoredDynamicSeedRecord,
-			{ readonly kind: "env-cell-static-object-seed" }
+			EnvCellStaticObjectPlacementRecord,
+			{ readonly kind: "env-cell-static-object-placement" }
 		>[]
 	>
 > {
-	type EnvCellSeedRecord = Extract<
-		StaticAuthoredDynamicSeedRecord,
-		{ readonly kind: "env-cell-static-object-seed" }
+	type EnvCellPlacementRecord = Extract<
+		EnvCellStaticObjectPlacementRecord,
+		{ readonly kind: "env-cell-static-object-placement" }
 	>;
 	const recordsByLandblockAndEnvCell = new Map<
 		number,
-		Map<number, EnvCellSeedRecord[]>
+		Map<number, EnvCellPlacementRecord[]>
 	>();
 	for (const entry of recordsByKey.values()) {
 		const record = entry.record;
-		if (record.kind !== "env-cell-static-object-seed") {
+		if (record.kind !== "env-cell-static-object-placement") {
 			continue;
 		}
 		let recordsByEnvCell = recordsByLandblockAndEnvCell.get(record.landblockId);
 		if (!recordsByEnvCell) {
-			recordsByEnvCell = new Map<number, EnvCellSeedRecord[]>();
+			recordsByEnvCell = new Map<number, EnvCellPlacementRecord[]>();
 			recordsByLandblockAndEnvCell.set(record.landblockId, recordsByEnvCell);
 		}
 		const records = recordsByEnvCell.get(record.envCellId) ?? [];

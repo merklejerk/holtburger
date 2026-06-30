@@ -161,7 +161,7 @@ function createResult(input: StaticBakeBatchInput): StaticBakeBatchResult {
 		materialCoverage: [],
 		portalApertureResources: [],
 		revision: input.revision,
-		staticAuthoredDynamicSeeds: [],
+		envCellStaticObjectPlacementRecords: [],
 		staticPortalGraphs: [],
 		staticPortalInteriorRecords: [],
 		staticSourceMappings: [],

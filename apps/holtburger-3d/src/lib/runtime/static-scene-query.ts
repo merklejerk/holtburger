@@ -1,7 +1,7 @@
 import type {
 	EnvCellSystemStaticScopePayload,
 	OutdoorStaticObjectsScopePayload,
-	StaticAuthoredDynamicSeedRecord,
+	EnvCellStaticObjectPlacementRecord,
 	StaticPortalProjectionRecord,
 	StaticPortalGraphRecord,
 	StaticPortalInteriorRecord,
@@ -166,7 +166,7 @@ export class StaticSceneQuery {
 	}
 
 	applyStaticPeerRecords(options: {
-		readonly authoredDynamicSeeds?: readonly StaticAuthoredDynamicSeedRecord[];
+		readonly envCellStaticObjectPlacementRecords?: readonly EnvCellStaticObjectPlacementRecord[];
 		readonly portalGraphs?: readonly StaticPortalGraphRecord[];
 		readonly portalInteriorRecords?: readonly StaticPortalInteriorRecord[];
 		readonly sourceMappings?: readonly StaticSourceMappingRecord[];

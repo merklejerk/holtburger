@@ -1,6 +1,6 @@
 import type {
 	StaticBounds,
-	StaticAuthoredDynamicSeedRecord,
+	StaticAuthoredDynamicPlacementRecord,
 	StaticResourceIdentity,
 	OutdoorStaticObjectDomain,
 	StaticLayerPeerRecordOwner,
@@ -14,8 +14,6 @@ import {
 	type DynamicEntityAnimationSelection,
 	type DynamicEntityAnimationState,
 	type DynamicEntityAppearanceOverride,
-	isEnvCellDynamicSeedRecord,
-	isOutdoorDynamicSeedRecord,
 	RUNTIME_AUTHORED_DYNAMIC_DETAIL_ROLE_POLICY,
 	RUNTIME_AUTHORED_DYNAMIC_DIAGNOSTICS_BUCKET,
 	RUNTIME_AUTHORED_DYNAMIC_RESOURCE_FAMILY,
@@ -38,18 +36,16 @@ import {
 	type DynamicVisualObjectIdentity,
 	type DynamicVisualSkipReason,
 	type DynamicVisualSource,
-	type StaticAuthoredDynamicSeedFacts,
+	type StaticAuthoredDynamicPlacementFacts,
 	type DynamicRuntimeSnapshot,
 	type DynamicEntityRecipe,
+	isEnvCellDynamicPlacementRecord,
+	isOutdoorDynamicPlacementRecord,
 } from "./contracts";
 import type { DynamicVisualRecipeResolutionPayload } from "./visual-recipe-resolver";
 import { createLayerOwnerKeyId } from "../static/layer-owners";
 import { DynamicAnimationPlayer } from "./dynamic-animation-player";
 import { DynamicEntityStore } from "./dynamic-entity-store";
-import {
-	DynamicEntityResourceManager,
-	type DynamicEntityResourceChange,
-} from "./dynamic-entity-resource-manager";
 import {
 	shouldUpdateDynamicAnimationForCadence,
 	type DynamicAnimationUpdateCadenceContext,
@@ -75,7 +71,6 @@ type DynamicEntityTextureDomain = VisualTextureDomain;
 export interface DynamicEntityControllerOptions {
 	readonly onResourcesChanged?: () => void;
 	readonly placementTracker?: DynamicPlacementTracker;
-	readonly resourceManager?: DynamicEntityResourceManager;
 	readonly store?: DynamicEntityStore;
 }
 
@@ -109,7 +104,6 @@ export class DynamicEntityController {
 		number
 	>();
 	readonly #placementTracker: DynamicPlacementTracker;
-	readonly #resourceManager: DynamicEntityResourceManager | null;
 	readonly #store: DynamicEntityStore;
 	readonly #onResourcesChanged: () => void;
 	#nextRuntimeSpawnOrdinal = 1;
@@ -117,22 +111,18 @@ export class DynamicEntityController {
 	constructor(options: DynamicEntityControllerOptions = {}) {
 		this.#placementTracker =
 			options.placementTracker ?? new DynamicPlacementTracker();
-		this.#resourceManager = options.resourceManager ?? null;
 		this.#store = options.store ?? new DynamicEntityStore();
 		this.#onResourcesChanged = options.onResourcesChanged ?? (() => {});
-		this.#resourceManager?.setResourceChangeListener((change) => {
-			this.applyResourceChange(change);
-		});
 	}
 
-	ingestStaticSeeds(
-		records: readonly StaticAuthoredDynamicSeedRecord[],
+	ingestStaticPlacements(
+		records: readonly StaticAuthoredDynamicPlacementRecord[],
 		textureBatchIdsByStaticLayerOwner: ReadonlyMap<string, string> = new Map(),
 	): void {
 		for (const record of records) {
 			if (
-				!isOutdoorDynamicSeedRecord(record) &&
-				!isEnvCellDynamicSeedRecord(record)
+				!isOutdoorDynamicPlacementRecord(record) &&
+				!isEnvCellDynamicPlacementRecord(record)
 			) {
 				continue;
 			}
@@ -226,16 +216,6 @@ export class DynamicEntityController {
 			}
 		}
 		return changed;
-	}
-
-	applyResourceChange(change: DynamicEntityResourceChange): void {
-		const updated = this.#store.update(change.entityId, (record) =>
-			applyResourceChange(record, change),
-		);
-		if (updated) {
-			this.#upsertPlacementUpdate(updated);
-			this.#onResourcesChanged();
-		}
 	}
 
 	createRuntimeVisualRecipeRequest(
@@ -381,7 +361,6 @@ export class DynamicEntityController {
 	dispose(): void {
 		this.#lastAnimationUpdateAtSecondsByEntityId.clear();
 		this.#placementTracker.releaseAll();
-		this.#resourceManager?.releaseAll();
 	}
 
 	createSnapshot(): DynamicRuntimeSnapshot {
@@ -448,7 +427,6 @@ export class DynamicEntityController {
 	#releaseRecordState(record: DynamicEntityRecord): void {
 		this.#lastAnimationUpdateAtSecondsByEntityId.delete(record.id);
 		this.#placementTracker.release(record.id);
-		this.#resourceManager?.releaseEntity(record.id);
 	}
 
 	#upsertPlacementUpdate(record: DynamicEntityRecord): void {
@@ -475,26 +453,26 @@ export class DynamicEntityController {
 
 function createDynamicEntityRecord(
 	record: Extract<
-		StaticAuthoredDynamicSeedRecord,
+		StaticAuthoredDynamicPlacementRecord,
 		{
 			readonly kind:
-				| "env-cell-static-object-dynamic-seed"
-				| "outdoor-static-object-dynamic-seed";
+				| "env-cell-static-object-dynamic-placement"
+				| "outdoor-static-object-dynamic-placement";
 		}
 	>,
 	textureBatchIdsByStaticLayerOwner: ReadonlyMap<string, string>,
 ): DynamicEntityRecord {
 	const layerOwnerId = createStaticLayerOwnerId(record.owner);
 	const sourceResidence =
-		record.kind === "env-cell-static-object-dynamic-seed"
+		record.kind === "env-cell-static-object-dynamic-placement"
 			? {
 					kind: "env-cell" as const,
-					envCellId: record.seed.envCellId,
-					landblockId: record.seed.landblockId,
+					envCellId: record.placement.envCellId,
+					landblockId: record.placement.landblockId,
 				}
 			: {
 					kind: "outdoor-landblock" as const,
-					landblockId: record.seed.sourceResidence.landblockId,
+					landblockId: record.placement.sourceResidence.landblockId,
 				};
 	const id = createDynamicEntityId(record, layerOwnerId);
 	const presentation = createStaticAuthoredPresentation({
@@ -512,11 +490,11 @@ function createDynamicEntityRecord(
 	return {
 		animation: createInitialAnimationState({
 			animationSelection: presentation.visualSource.animationSelection,
-			defaultAnimationId: record.seed.defaultAnimationId,
+			defaultAnimationId: record.placement.defaultAnimationId,
 		}),
 		baseTransform: {
-			baseLocalPlacement: record.seed.localPlacement,
-			sourceScale: record.seed.sourceScale,
+			baseLocalPlacement: record.placement.localPlacement,
+			sourceScale: record.placement.sourceScale,
 		},
 		bounds: {
 			currentBounds: null,
@@ -529,7 +507,7 @@ function createDynamicEntityRecord(
 		presentation,
 		provenance: {
 			kind:
-				record.kind === "env-cell-static-object-dynamic-seed"
+				record.kind === "env-cell-static-object-dynamic-placement"
 					? "static-authored-env-cell"
 					: "static-authored-outdoor",
 			layerOwnerId,
@@ -544,7 +522,7 @@ function createDynamicEntityRecord(
 		},
 		source: {
 			kind: "static-authored",
-			seed: record.seed,
+			placement: record.placement,
 		},
 		sourceResidence,
 	};
@@ -654,11 +632,11 @@ function createStaticAuthoredPresentation(options: {
 	readonly id: DynamicEntityId;
 	readonly layerOwnerId: string;
 	readonly record: Extract<
-		StaticAuthoredDynamicSeedRecord,
+		StaticAuthoredDynamicPlacementRecord,
 		{
 			readonly kind:
-				| "env-cell-static-object-dynamic-seed"
-				| "outdoor-static-object-dynamic-seed";
+				| "env-cell-static-object-dynamic-placement"
+				| "outdoor-static-object-dynamic-placement";
 		}
 	>;
 	readonly sourceResidence: DynamicEntityResidence;
@@ -666,7 +644,7 @@ function createStaticAuthoredPresentation(options: {
 }): DynamicEntityPresentation {
 	const { id, layerOwnerId, record, sourceResidence, textureBatchId } = options;
 	const animationSelection = {
-		animationId: record.seed.defaultAnimationId,
+		animationId: record.placement.defaultAnimationId,
 		kind: "explicit" as const,
 	};
 	const visualObject = createDynamicVisualObjectIdentity(id);
@@ -704,8 +682,8 @@ function createStaticAuthoredPresentation(options: {
 		visualSource: {
 			animationSelection,
 			modelData: null,
-			setupModelId: record.seed.setupModelId,
-			sourceAssetIds: [record.seed.sourceAssetId],
+			setupModelId: record.placement.setupModelId,
+			sourceAssetIds: [record.placement.sourceAssetId],
 			sourceResidence,
 		},
 	};
@@ -802,46 +780,6 @@ function createStaticAuthoredObjectMaterialDomain(
 
 function createRuntimeSpawnTextureDomain(): DynamicEntityTextureDomain {
 	return "runtime-object-material";
-}
-
-function applyResourceChange(
-	record: DynamicEntityRecord,
-	change: DynamicEntityResourceChange,
-): DynamicEntityRecord {
-	if (change.kind === "setup-animation-ready") {
-		return {
-			...record,
-			animation: createAnimationStateFromSetupAnimationResource(
-				record.animation,
-				change.resources.setupAnimation,
-			),
-			renderability: createRenderability(
-				change.resources,
-				record.effectiveResidence,
-			),
-			resources: change.resources,
-		};
-	}
-
-	if (change.kind === "visual-resources-ready") {
-		return {
-			...record,
-			renderability: createRenderability(
-				change.resources,
-				record.effectiveResidence,
-			),
-			resources: change.resources,
-		};
-	}
-
-	return {
-		...record,
-		renderability: createRenderability(
-			change.resources,
-			record.effectiveResidence,
-		),
-		resources: change.resources,
-	};
 }
 
 function createResourcesWithResolvedRecipe(
@@ -1200,32 +1138,32 @@ function createRenderabilityReasons(
 
 function createDynamicEntityId(
 	record: Extract<
-		StaticAuthoredDynamicSeedRecord,
+		StaticAuthoredDynamicPlacementRecord,
 		{
 			readonly kind:
-				| "env-cell-static-object-dynamic-seed"
-				| "outdoor-static-object-dynamic-seed";
+				| "env-cell-static-object-dynamic-placement"
+				| "outdoor-static-object-dynamic-placement";
 		}
 	>,
 	layerOwnerId: string,
 ): DynamicEntityId {
-	if (record.kind === "env-cell-static-object-dynamic-seed") {
-		const seed = record.seed;
+	if (record.kind === "env-cell-static-object-dynamic-placement") {
+		const placement = record.placement;
 		return [
 			"static-authored-env-cell",
 			layerOwnerId,
-			`env-cell:${formatHex32(seed.envCellId)}`,
-			`object:${seed.object.objectKind}:${seed.object.instanceId}`,
-			`setup:${formatHex32(seed.setupModelId)}`,
+			`env-cell:${formatHex32(placement.envCellId)}`,
+			`object:${placement.object.objectKind}:${placement.object.instanceId}`,
+			`setup:${formatHex32(placement.setupModelId)}`,
 		].join(":");
 	}
 
-	const seed: StaticAuthoredDynamicSeedFacts = record.seed;
+	const placement: StaticAuthoredDynamicPlacementFacts = record.placement;
 	return [
 		"static-authored-outdoor",
 		layerOwnerId,
-		`object:${seed.object.objectKind}:${seed.object.instanceId}`,
-		`setup:${formatHex32(seed.setupModelId)}`,
+		`object:${placement.object.objectKind}:${placement.object.instanceId}`,
+		`setup:${formatHex32(placement.setupModelId)}`,
 	].join(":");
 }
 

@@ -636,7 +636,7 @@ describe("static coordinator", () => {
 				materialCoverage: [],
 				removedResources: [],
 				revision: 1,
-				staticAuthoredDynamicSeeds: [],
+				envCellStaticObjectPlacementRecords: [],
 				staticBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:1",
 				staticObjectRenderInstances: [],
 				staticObjectVisualResources: [],
@@ -668,7 +668,7 @@ describe("static coordinator", () => {
 			materialCoverage: [],
 			removedResources: [{ drawUnitId: "terrain-a", kind: "draw-unit" }],
 			revision: 2,
-			staticAuthoredDynamicSeeds: [],
+			envCellStaticObjectPlacementRecords: [],
 			staticBatchId: "static-batch:2:evict",
 			staticObjectRenderInstances: [],
 			staticObjectVisualResources: [],
@@ -720,6 +720,7 @@ describe("static coordinator", () => {
 		]);
 		expect(commits).toEqual([
 			{
+				dynamicPlacements: [],
 				dynamicRecipes: [expect.objectContaining({ entityId: "static-dynamic:1" })],
 				dynamicVisualBake: {
 					batchId:
@@ -1364,7 +1365,7 @@ describe("static coordinator", () => {
 				}),
 				createMaterialCoverage("env-cell-system", {
 					coverageKey: "env-cell-system:static-objects",
-					coverageKind: "env-cell-static-object-seeds",
+					coverageKind: "env-cell-static-object-placements",
 				}),
 			],
 		});
@@ -1448,7 +1449,7 @@ describe("static coordinator", () => {
 				acceptedEnvCellCount: 1,
 				envCellCount: 1,
 				landblockId: 0xda55ffff,
-				staticObjectSeedCount: 0,
+				staticObjectPlacementCount: 0,
 			},
 		});
 
@@ -1748,6 +1749,7 @@ class DynamicRecipeSourceResolver
 		const layer = request.requestedLayers[0];
 		if (!layer) {
 			return Promise.resolve({
+				dynamicPlacements: [],
 				dynamicRecipes: [],
 				recipes: [],
 				request,
@@ -1761,6 +1763,7 @@ class DynamicRecipeSourceResolver
 			},
 		};
 		return Promise.resolve({
+			dynamicPlacements: [],
 			dynamicRecipes: [
 				{
 					recipe: createDynamicRecipe(request),
@@ -2008,7 +2011,7 @@ function createEnvCellSystemResolverPayload(landblockId = 0xda55ffff): {
 					},
 					restrictionObjectId: null,
 					seenOutside: null,
-					staticObjectSeeds: [],
+					staticObjectPlacements: [],
 					surfaces: [],
 					visibleEnvCellIds: [],
 				},

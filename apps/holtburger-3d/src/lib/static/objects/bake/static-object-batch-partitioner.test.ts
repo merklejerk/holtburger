@@ -279,7 +279,7 @@ describe("static object batch partitioner", () => {
 					"env-cell-system:0xda55ffff:static-object-partition:slice-0-0",
 				ownership: {
 					envCellIds: [0xda550100],
-					kind: "env-cell-static-object-seeds",
+					kind: "env-cell-static-object-placements",
 					landblockId: 0xda55ffff,
 					seedIdentities: [
 						createObjectIdentity({ instanceId: "da550100:seed-0" }),
@@ -292,7 +292,7 @@ describe("static object batch partitioner", () => {
 					"env-cell-system:0xda55ffff:static-object-partition:slice-1-0",
 				ownership: {
 					envCellIds: [0xda550101],
-					kind: "env-cell-static-object-seeds",
+					kind: "env-cell-static-object-placements",
 					landblockId: 0xda55ffff,
 					seedIdentities: [
 						createObjectIdentity({ instanceId: "da550101:seed-0" }),
@@ -479,7 +479,7 @@ describe("static object batch partitioner", () => {
 		expect(result.textureUses).toHaveLength(1);
 	});
 
-	it("forwards outdoor authored dynamic seeds without baking static geometry", () => {
+	it("does not emit outdoor dynamic activation records from static bake", () => {
 		const basePayload = createPayload({
 			materials: [createSolidMaterial(0x08000010)],
 		});
@@ -503,7 +503,7 @@ describe("static object batch partitioner", () => {
 		};
 		const payload = {
 			...basePayload,
-			authoredDynamicSeeds: [dynamicSeed],
+			authoredDynamicPlacements: [dynamicSeed],
 			materialSlots: [],
 			objects: [],
 		} satisfies OutdoorStaticObjectsScopePayload;
@@ -512,22 +512,12 @@ describe("static object batch partitioner", () => {
 
 		expect(result.drawUnits).toEqual([]);
 		expect(result.staticObjectRenderInstances).toEqual([]);
-		expect(result.staticAuthoredDynamicSeeds).toEqual([
-			{
-				kind: "outdoor-static-object-dynamic-seed",
-				owner: expect.objectContaining({
-					domain: "outdoor-buildings",
-					kind: "layer-owner",
-					ownerId: "outdoor-buildings:0xda55ffff",
-				}),
-				seed: dynamicSeed,
-			},
-		]);
+		expect(result.envCellStaticObjectPlacementRecords).toEqual([]);
 		expect(result.staticObjectBakeDiagnostics[0]).toMatchObject({
-			authoredDynamicSeedClassificationReasons: {
+			authoredDynamicPlacementClassificationReasons: {
 				setupDefaultAnimation: 1,
 			},
-			authoredDynamicSeedCount: 1,
+			authoredDynamicPlacementCount: 1,
 			drawUnitCount: 0,
 			objectCount: 0,
 		});
@@ -1605,7 +1595,7 @@ function createEnvCellStaticScopeEnvCell(
 		},
 		restrictionObjectId: null,
 		seenOutside: null,
-		staticObjectSeeds: [
+		staticObjectPlacements: [
 			{
 				debug: object.debug,
 				identity: object.identity,
@@ -1741,7 +1731,7 @@ function createPayload(options: {
 	});
 
 	return {
-		authoredDynamicSeeds: [],
+		authoredDynamicPlacements: [],
 		buildingTransitionApertures: options.buildingTransitionApertures ?? [],
 		domain,
 		kind: "outdoor-static-objects",

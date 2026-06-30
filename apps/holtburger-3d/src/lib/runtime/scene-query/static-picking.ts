@@ -312,9 +312,9 @@ function pickEnvCellStaticObjects(
 	let nearestHit = currentNearestHit;
 	for (const item of root.items) {
 		const bounds =
-			dependencies.envCellCommittedRecords.getEnvCellStaticSeedBounds(
+			dependencies.envCellCommittedRecords.getEnvCellStaticPlacementBounds(
 				root,
-				item.seed,
+				item.placement,
 			);
 		if (!bounds) {
 			continue;
@@ -330,8 +330,8 @@ function pickEnvCellStaticObjects(
 			hitPoint: pointOnRay(renderRay, distance),
 			kind: "static-scene-pick-hit",
 			selectionKey: createEnvCellStaticObjectSelectionKey({
-				envCellId: item.seed.envCellId,
-				instanceId: item.seed.seed.identity.instanceId,
+				envCellId: item.placement.envCellId,
+				instanceId: item.placement.placement.identity.instanceId,
 				landblockId: root.landblockId,
 			}),
 		};

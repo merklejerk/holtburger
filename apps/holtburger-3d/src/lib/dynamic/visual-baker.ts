@@ -33,7 +33,11 @@ import {
 	type StaticMaterialPlan,
 	type StaticMaterialPlanningSlotFacts,
 } from "../static/objects/bake/static-object-material-planner";
-import { describeStaticObjectSourceGeometryIdentity } from "../static/objects/static-object-source-assets";
+import {
+	describeStaticObjectCanonicalGeometryIdentity,
+	describeStaticObjectSourceGeometryIdentity,
+	getStaticObjectCanonicalGeometryIdentity,
+} from "../static/objects/static-object-source-assets";
 
 export interface DynamicVisualBaker {
 	bake(input: DynamicVisualBakeInput): Promise<DynamicVisualBakeResult>;
@@ -179,7 +183,7 @@ function createSourceGeometryIndex(
 ): ReadonlyMap<string, StaticObjectSourceGeometryAttachment> {
 	return new Map(
 		attachments.map((attachment) => [
-			describeStaticObjectSourceGeometryIdentity(attachment.identity),
+			describeStaticObjectCanonicalGeometryIdentity(attachment.identity),
 			attachment,
 		]),
 	);
@@ -379,12 +383,17 @@ function createDynamicRenderParts(options: {
 	const parts: DynamicEntityRenderPart[] = [];
 	for (const sourceAsset of options.sourceAssets) {
 		for (const part of sourceAsset.parts) {
+			const canonical = getStaticObjectCanonicalGeometryIdentity(
+				part.geometry,
+			);
 			const attachment = options.sourceGeometryByKey.get(
-				describeStaticObjectSourceGeometryIdentity(part.geometry),
+				describeStaticObjectCanonicalGeometryIdentity(canonical),
 			);
 			if (!attachment) {
 				throw new Error(
-					`Dynamic render part ${part.partIndex} missing source geometry ${describeStaticObjectSourceGeometryIdentity(
+					`Dynamic render part ${part.partIndex} missing source geometry ${describeStaticObjectCanonicalGeometryIdentity(
+						canonical,
+					)} for source part ${describeStaticObjectSourceGeometryIdentity(
 						part.geometry,
 					)}.`,
 				);

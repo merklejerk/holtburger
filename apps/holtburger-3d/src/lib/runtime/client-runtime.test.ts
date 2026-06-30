@@ -3062,9 +3062,12 @@ function createBakedDynamicVisualSourceAsset() {
 				bounds: createBounds(),
 				defaultPlacements: [createPlacement()],
 				geometry: {
-					gfxObj: gfxSource,
+					canonical: {
+						gfxObj: gfxSource,
+						kind: "static-object-canonical-geometry" as const,
+						partIndex: 0,
+					},
 					kind: "static-object-source-geometry" as const,
-					partIndex: 0,
 					source: setupSource,
 				},
 				gfxObj: gfxSource,
@@ -4341,9 +4344,12 @@ function createStaticObjectVisualResource(options: {
 	};
 	const drawUnit = createStaticObjectDrawUnit(`${options.resourceId}:source`);
 	const geometry = {
-		gfxObj,
+		canonical: {
+			gfxObj,
+			kind: "static-object-canonical-geometry" as const,
+			partIndex: 0,
+		},
 		kind: "static-object-source-geometry" as const,
-		partIndex: 0,
 		source,
 	};
 

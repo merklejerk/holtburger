@@ -1,5 +1,6 @@
 import type { PreparedGfxObjPayloadDto } from "../../assets/preparation/prepared-render-geometry";
 import type {
+	StaticObjectCanonicalGeometryIdentity,
 	StaticObjectSourceGeometryAttachment,
 	StaticObjectSourceGeometryIdentity,
 	StaticObjectSourceIdentity,
@@ -11,11 +12,27 @@ export function createStaticObjectSourceGeometryIdentity(options: {
 	readonly partIndex: number;
 }): StaticObjectSourceGeometryIdentity {
 	return {
-		gfxObj: options.gfxObj,
+		canonical: createStaticObjectCanonicalGeometryIdentity(options),
 		kind: "static-object-source-geometry",
-		partIndex: options.partIndex,
 		source: options.source,
 	};
+}
+
+export function createStaticObjectCanonicalGeometryIdentity(options: {
+	readonly gfxObj: StaticObjectSourceIdentity;
+	readonly partIndex: number;
+}): StaticObjectCanonicalGeometryIdentity {
+	return {
+		gfxObj: options.gfxObj,
+		kind: "static-object-canonical-geometry",
+		partIndex: options.partIndex,
+	};
+}
+
+export function getStaticObjectCanonicalGeometryIdentity(
+	identity: StaticObjectSourceGeometryIdentity,
+): StaticObjectCanonicalGeometryIdentity {
+	return identity.canonical;
 }
 
 export function describeStaticObjectSourceGeometryIdentity(
@@ -24,13 +41,22 @@ export function describeStaticObjectSourceGeometryIdentity(
 	return [
 		identity.kind,
 		describeStaticObjectSourceIdentity(identity.source),
+		describeStaticObjectCanonicalGeometryIdentity(identity.canonical),
+	].join("|");
+}
+
+export function describeStaticObjectCanonicalGeometryIdentity(
+	identity: StaticObjectCanonicalGeometryIdentity,
+): string {
+	return [
+		identity.kind,
 		describeStaticObjectSourceIdentity(identity.gfxObj),
 		`part:${identity.partIndex}`,
 	].join("|");
 }
 
 export function createStaticObjectSourceGeometryAttachment(options: {
-	readonly identity: StaticObjectSourceGeometryIdentity;
+	readonly identity: StaticObjectCanonicalGeometryIdentity;
 	readonly gfxObj: PreparedGfxObjPayloadDto;
 }): StaticObjectSourceGeometryAttachment {
 	return {

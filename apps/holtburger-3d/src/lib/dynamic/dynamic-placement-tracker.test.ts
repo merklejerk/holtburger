@@ -548,9 +548,12 @@ function createSourceAsset(
 				},
 				defaultPlacements: [],
 				geometry: {
-					gfxObj,
+					canonical: {
+						gfxObj,
+						kind: "static-object-canonical-geometry",
+						partIndex: 0,
+					},
 					kind: "static-object-source-geometry",
-					partIndex: 0,
 					source,
 				},
 				gfxObj,

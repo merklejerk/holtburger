@@ -558,24 +558,32 @@ function createStaticObjectVisualResource(
 	resourceId: string,
 	drawUnit: StaticObjectGeometryStaticDrawUnit,
 ): StaticObjectVisualResource {
+	const source = {
+		kind: "static-object-source" as const,
+		sourceAssetKind: "setup-model" as const,
+		sourceDid: 0x02000010,
+	};
+	const geometry = {
+		canonical: {
+			gfxObj: {
+				kind: "static-object-source" as const,
+				sourceAssetKind: "gfx-obj" as const,
+				sourceDid: 0x01000020,
+			},
+			kind: "static-object-canonical-geometry" as const,
+			partIndex: 0,
+		},
+		kind: "static-object-source-geometry" as const,
+		source,
+	};
 	return {
 		bounds: null,
 		coordinateSpace: "static-object-source-local",
-		geometry: {
-			gfxObjDid: 0x01000020,
-			kind: "static-object-source-geometry",
-			partIndex: 0,
-			setupModelDid: 0x02000010,
-		},
+		geometry,
 		indexType: drawUnit.indexType,
 		indices: drawUnit.indices,
 		key: {
-			geometry: {
-				gfxObjDid: 0x01000020,
-				kind: "static-object-source-geometry",
-				partIndex: 0,
-				setupModelDid: 0x02000010,
-			},
+			geometry,
 			indexType: drawUnit.indexType,
 			kind: "static-object-visual-resource-key",
 			materialEntries: drawUnit.materialEntries,

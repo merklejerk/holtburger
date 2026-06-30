@@ -43,11 +43,46 @@ describe("static object bake attachments", () => {
 		]);
 		expect(attachments.staticObjectSourceGeometry).toEqual([
 			expect.objectContaining({
-				identity: geometry,
+				identity: geometry.canonical,
 				positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
 				texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
 			}),
 		]);
+	});
+
+	it("dedupes distinct source parts that reference the same canonical gfx geometry", async () => {
+		const firstSource = createSourceIdentity("setup-model", 0x02000010);
+		const secondSource = createSourceIdentity("setup-model", 0x02000011);
+		const gfxObj = createSourceIdentity("gfx-obj", 0x01000020);
+		const firstGeometry = createStaticObjectSourceGeometryIdentity({
+			gfxObj,
+			partIndex: 0,
+			source: firstSource,
+		});
+		const secondGeometry = createStaticObjectSourceGeometryIdentity({
+			gfxObj,
+			partIndex: 0,
+			source: secondSource,
+		});
+		const assetReader = new FixturePreparedAssetReader([
+			createPreparedAsset(createHostAssetKey("gfx-obj", 0x01000020)),
+		]);
+		const provider = new StaticObjectBakeAttachmentProvider({ assetReader });
+
+		const attachments = await provider.createAttachments(
+			createAttachmentRequest([
+				createPart({ geometry: firstGeometry, gfxObj, source: firstSource }),
+				createPart({ geometry: secondGeometry, gfxObj, source: secondSource }),
+			]),
+		);
+
+		expect(assetReader.requests).toEqual([
+			createHostAssetKey("gfx-obj", 0x01000020),
+		]);
+		expect(attachments.staticObjectSourceGeometry).toHaveLength(1);
+		expect(attachments.staticObjectSourceGeometry[0]).toMatchObject({
+			identity: firstGeometry.canonical,
+		});
 	});
 
 	it("attaches env-cell static placement source geometry for landblock env-cell batches", async () => {
@@ -74,7 +109,7 @@ describe("static object bake attachments", () => {
 		]);
 		expect(attachments.staticObjectSourceGeometry).toEqual([
 			expect.objectContaining({
-				identity: geometry,
+				identity: geometry.canonical,
 				positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
 				texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
 			}),
@@ -287,7 +322,7 @@ function createPart(options: {
 		invalidPolygonCount: 0,
 		materialSlotCount: 0,
 		materialSlots: [],
-		partIndex: options.geometry.partIndex,
+		partIndex: options.geometry.canonical.partIndex,
 		physicsPolygonCount: 0,
 		renderTriangleCount: 0,
 		scale: { x: 1, y: 1, z: 1 },

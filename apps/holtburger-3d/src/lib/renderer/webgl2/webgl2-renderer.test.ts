@@ -2336,13 +2336,16 @@ function createOutdoorGeneratedSceneryStaticObjectVisualResource(
 		renderState,
 	}));
 	const geometry = {
-		gfxObj: {
-			kind: "static-object-source" as const,
-			sourceAssetKind: "gfx-obj" as const,
-			sourceDid: 0x01000020,
+		canonical: {
+			gfxObj: {
+				kind: "static-object-source" as const,
+				sourceAssetKind: "gfx-obj" as const,
+				sourceDid: 0x01000020,
+			},
+			kind: "static-object-canonical-geometry" as const,
+			partIndex: 0,
 		},
 		kind: "static-object-source-geometry" as const,
-		partIndex: 0,
 		source: {
 			kind: "static-object-source" as const,
 			sourceAssetKind: "setup-model" as const,

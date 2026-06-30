@@ -121,7 +121,7 @@ describe("dynamic visual baker", () => {
 			{
 				entityId: "runtime:test",
 				message:
-					"Dynamic render part 0 missing source geometry static-object-source-geometry|setup-model:33555429|gfx-obj:16777217|part:0.",
+					"Dynamic render part 0 missing source geometry static-object-canonical-geometry|gfx-obj:16777217|part:0 for source part static-object-source-geometry|setup-model:33555429|static-object-canonical-geometry|gfx-obj:16777217|part:0.",
 				stage: "render-part-extraction",
 			},
 		]);
@@ -181,9 +181,12 @@ function createSourceAsset(): StaticObjectSourceAssetFacts {
 				bounds: null,
 				defaultPlacements: [],
 				geometry: {
-					gfxObj,
+					canonical: {
+						gfxObj,
+						kind: "static-object-canonical-geometry",
+						partIndex: 0,
+					},
 					kind: "static-object-source-geometry",
-					partIndex: 0,
 					source,
 				},
 				gfxObj,
@@ -230,9 +233,8 @@ function createGeometryAttachment(): StaticObjectSourceGeometryAttachment {
 	return {
 		identity: {
 			gfxObj: createGfxObjSourceIdentity(),
-			kind: "static-object-source-geometry",
+			kind: "static-object-canonical-geometry",
 			partIndex: 0,
-			source: createSetupSourceIdentity(),
 		},
 		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
 		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),

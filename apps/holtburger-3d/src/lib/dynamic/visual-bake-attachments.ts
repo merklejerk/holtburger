@@ -6,22 +6,23 @@ import {
 } from "../assets/preparation/prepared-render-geometry";
 import type { GfxObjPayloadDto } from "../host/contracts";
 import type { DynamicEntityRecipe, DynamicVisualBakeInput } from "./contracts";
-import type { StaticObjectSourceGeometryIdentity } from "../static/contracts";
+import type { StaticObjectCanonicalGeometryIdentity } from "../static/contracts";
 import {
 	createStaticObjectSourceGeometryAttachment,
-	describeStaticObjectSourceGeometryIdentity,
+	describeStaticObjectCanonicalGeometryIdentity,
+	getStaticObjectCanonicalGeometryIdentity,
 } from "../static/objects/static-object-source-assets";
 
 export async function createDynamicVisualBakeSourceGeometry(
 	assetReader: PreparedAssetReader,
 	recipes: readonly DynamicEntityRecipe[],
 ): Promise<DynamicVisualBakeInput["sourceGeometry"]> {
-	const identities = collectDynamicVisualGeometryIdentities(recipes);
+	const identities = collectDynamicVisualCanonicalGeometryIdentities(recipes);
 	return Promise.all(
 		identities.map(async (identity) => {
 			if (identity.gfxObj.sourceAssetKind !== "gfx-obj") {
 				throw new Error(
-					`Dynamic visual geometry attachment ${describeStaticObjectSourceGeometryIdentity(
+					`Dynamic visual geometry attachment ${describeStaticObjectCanonicalGeometryIdentity(
 						identity,
 					)} expected gfx-obj source, got ${identity.gfxObj.sourceAssetKind}.`,
 				);
@@ -38,25 +39,28 @@ export async function createDynamicVisualBakeSourceGeometry(
 	);
 }
 
-function collectDynamicVisualGeometryIdentities(
+function collectDynamicVisualCanonicalGeometryIdentities(
 	recipes: readonly DynamicEntityRecipe[],
-): readonly StaticObjectSourceGeometryIdentity[] {
-	const byKey = new Map<string, StaticObjectSourceGeometryIdentity>();
+): readonly StaticObjectCanonicalGeometryIdentity[] {
+	const byKey = new Map<string, StaticObjectCanonicalGeometryIdentity>();
 
 	for (const recipe of recipes) {
 		for (const source of recipe.visual.sourceAssets) {
 			for (const part of source.parts) {
-				byKey.set(
-					describeStaticObjectSourceGeometryIdentity(part.geometry),
+				const canonical = getStaticObjectCanonicalGeometryIdentity(
 					part.geometry,
+				);
+				byKey.set(
+					describeStaticObjectCanonicalGeometryIdentity(canonical),
+					canonical,
 				);
 			}
 		}
 	}
 
 	return [...byKey.values()].sort((left, right) =>
-		describeStaticObjectSourceGeometryIdentity(left).localeCompare(
-			describeStaticObjectSourceGeometryIdentity(right),
+		describeStaticObjectCanonicalGeometryIdentity(left).localeCompare(
+			describeStaticObjectCanonicalGeometryIdentity(right),
 		),
 	);
 }

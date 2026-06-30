@@ -1494,7 +1494,7 @@ function createEnvCellStaticBakeInput(): StaticBakeBatchInput {
 						readonly texCoords: Float32Array;
 					};
 					return {
-						identity: part.geometry,
+						identity: part.geometry.canonical,
 						positions: fixturePart.positions,
 						texCoords: fixturePart.texCoords,
 					};
@@ -1890,7 +1890,7 @@ function createBakeInput(
 						readonly texCoords: Float32Array;
 					};
 					return {
-						identity: part.geometry,
+						identity: part.geometry.canonical,
 						positions: fixturePart.positions,
 						texCoords: fixturePart.texCoords,
 					};

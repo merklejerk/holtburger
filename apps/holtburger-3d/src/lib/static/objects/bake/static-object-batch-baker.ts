@@ -45,7 +45,11 @@ import {
 	createStaticMaterialTextureUses,
 } from "../../bake/static-material-adapter";
 import { createStaticMaterialTextureUseId } from "../../bake/static-material-texture-policy";
-import { describeStaticObjectSourceGeometryIdentity } from "../static-object-source-assets";
+import {
+	describeStaticObjectCanonicalGeometryIdentity,
+	describeStaticObjectSourceGeometryIdentity,
+	getStaticObjectCanonicalGeometryIdentity,
+} from "../static-object-source-assets";
 import {
 	partitionStaticObjectBatches,
 	type StaticObjectBatchPayload,
@@ -927,8 +931,8 @@ function createStaticObjectInstancedOutput(options: {
 
 		const part = options.sourceIndex.getPart(
 			group.geometry.source,
-			group.geometry.gfxObj,
-			group.geometry.partIndex,
+			group.geometry.canonical.gfxObj,
+			group.geometry.canonical.partIndex,
 		);
 		for (const candidate of cutoverCandidates) {
 			instances.push({
@@ -938,7 +942,7 @@ function createStaticObjectInstancedOutput(options: {
 				instanceId: [
 					"static-object-render-instance",
 					candidate.object.identity.instanceId,
-					`part:${group.geometry.partIndex}`,
+					`part:${group.geometry.canonical.partIndex}`,
 					`slot:${group.materialEntry.slot}`,
 				].join(":"),
 				kind: "static-object-render-instance",
@@ -1604,7 +1608,7 @@ class StaticObjectBakeSourceIndex {
 		}
 		for (const geometry of attachments.staticObjectSourceGeometry) {
 			this.#geometryByKey.set(
-				describeStaticObjectSourceGeometryIdentity(geometry.identity),
+				describeStaticObjectCanonicalGeometryIdentity(geometry.identity),
 				geometry,
 			);
 		}
@@ -1652,12 +1656,15 @@ class StaticObjectBakeSourceIndex {
 	getGeometry(
 		part: StaticObjectPartSourceFacts,
 	): StaticObjectSourceGeometryAttachment {
+		const canonical = getStaticObjectCanonicalGeometryIdentity(part.geometry);
 		const geometry = this.#geometryByKey.get(
-			describeStaticObjectSourceGeometryIdentity(part.geometry),
+			describeStaticObjectCanonicalGeometryIdentity(canonical),
 		);
 		if (!geometry) {
 			throw new Error(
-				`Static object geometry partition references missing geometry attachment ${describeStaticObjectSourceGeometryIdentity(
+				`Static object geometry partition references missing geometry attachment ${describeStaticObjectCanonicalGeometryIdentity(
+					canonical,
+				)} for source part ${describeStaticObjectSourceGeometryIdentity(
 					part.geometry,
 				)}.`,
 			);

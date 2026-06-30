@@ -78,8 +78,8 @@ function createStaticObjectSourceGeometryKey(
 	geometry: StaticObjectSourceGeometryIdentity,
 ) {
 	return {
-		gfxObj: createStaticObjectSourceKey(geometry.gfxObj),
-		partIndex: geometry.partIndex,
+		gfxObj: createStaticObjectSourceKey(geometry.canonical.gfxObj),
+		partIndex: geometry.canonical.partIndex,
 		source: createStaticObjectSourceKey(geometry.source),
 	};
 }

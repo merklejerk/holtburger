@@ -9,12 +9,13 @@ import type {
 	StaticBakeAttachmentProvider,
 	StaticBakeAttachmentRequest,
 	StaticBakeBatchAttachments,
-	StaticObjectSourceGeometryIdentity,
+	StaticObjectCanonicalGeometryIdentity,
 } from "../../contracts";
 import { createEmptyStaticBakeAttachments } from "../../bake/attachments";
 import {
 	createStaticObjectSourceGeometryAttachment,
-	describeStaticObjectSourceGeometryIdentity,
+	describeStaticObjectCanonicalGeometryIdentity,
+	getStaticObjectCanonicalGeometryIdentity,
 } from "../static-object-source-assets";
 
 export class StaticObjectBakeAttachmentProvider implements StaticBakeAttachmentProvider {
@@ -36,12 +37,12 @@ export class StaticObjectBakeAttachmentProvider implements StaticBakeAttachmentP
 			return createEmptyStaticBakeAttachments();
 		}
 
-		const identities = collectStaticObjectGeometryIdentities(request);
+		const identities = collectStaticObjectCanonicalGeometryIdentities(request);
 		const staticObjectSourceGeometry = await Promise.all(
 			identities.map(async (identity) => {
 				if (identity.gfxObj.sourceAssetKind !== "gfx-obj") {
 					throw new Error(
-						`Static object geometry attachment ${describeStaticObjectSourceGeometryIdentity(
+						`Static object geometry attachment ${describeStaticObjectCanonicalGeometryIdentity(
 							identity,
 						)} expected gfx-obj source, got ${identity.gfxObj.sourceAssetKind}.`,
 					);
@@ -64,10 +65,10 @@ export class StaticObjectBakeAttachmentProvider implements StaticBakeAttachmentP
 	}
 }
 
-function collectStaticObjectGeometryIdentities(
+function collectStaticObjectCanonicalGeometryIdentities(
 	request: StaticBakeAttachmentRequest,
-): readonly StaticObjectSourceGeometryIdentity[] {
-	const byKey = new Map<string, StaticObjectSourceGeometryIdentity>();
+): readonly StaticObjectCanonicalGeometryIdentity[] {
+	const byKey = new Map<string, StaticObjectCanonicalGeometryIdentity>();
 
 	for (const item of request.items) {
 		if (
@@ -79,17 +80,20 @@ function collectStaticObjectGeometryIdentities(
 
 		for (const source of item.payload.scope.sourceAssets) {
 			for (const part of source.parts) {
-				byKey.set(
-					describeStaticObjectSourceGeometryIdentity(part.geometry),
+				const canonical = getStaticObjectCanonicalGeometryIdentity(
 					part.geometry,
+				);
+				byKey.set(
+					describeStaticObjectCanonicalGeometryIdentity(canonical),
+					canonical,
 				);
 			}
 		}
 	}
 
 	return [...byKey.values()].sort((left, right) =>
-		describeStaticObjectSourceGeometryIdentity(left).localeCompare(
-			describeStaticObjectSourceGeometryIdentity(right),
+		describeStaticObjectCanonicalGeometryIdentity(left).localeCompare(
+			describeStaticObjectCanonicalGeometryIdentity(right),
 		),
 	);
 }

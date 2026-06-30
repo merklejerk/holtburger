@@ -109,7 +109,6 @@ export class StaticCoordinator {
 		StaticObjectBakeDiagnostics
 	>();
 	readonly #recentTiming: StaticCoordinatorTimingDiagnostics[] = [];
-	readonly #resolverMsByTaskId = new Map<string, number>();
 	readonly #latestMaterialCoverageByKey = new Map<
 		string,
 		StaticMaterialCoverageReport
@@ -360,7 +359,6 @@ export class StaticCoordinator {
 			}
 
 			task.status = "source-committed";
-			this.#resolverMsByTaskId.set(task.staticWorkId, resolverMs);
 
 			this.#recordResolvedPayload(recipe.payload);
 			this.#emitSourcePayloadDelta({
@@ -368,67 +366,74 @@ export class StaticCoordinator {
 				revision: task.revision,
 				task: toStaticLayerTaskStatus(task),
 			});
-			this.#enqueueBakePayload(task, recipe.payload);
+			this.#enqueueBakePayload(task, recipe.payload, resolverMs);
 		}
 	}
 
 	#enqueueBakePayload(
 		taskStatus: MutableScheduledStaticWorkStatus,
 		payload: StaticScopePayload,
+		resolverMs: number,
 	): void {
-		const { work } = taskStatus;
-		const batchKey = createPendingBatchKey(work);
-		let pendingBatch = this.#pendingBatches.get(batchKey);
+		let pendingBatch = this.#findPendingBatchForTask(taskStatus);
 		if (!pendingBatch) {
+			const pendingBatchId = createPendingStaticBakeBatchId(taskStatus);
 			const timeoutId =
 				this.#batching.maxWaitMs > 0
 					? setTimeout(
-							() => this.#flushPendingBatch(batchKey),
+							() => this.#flushPendingBatch(pendingBatchId),
 							this.#batching.maxWaitMs,
 						)
 					: null;
 			if (!timeoutId) {
-				queueMicrotask(() => void this.#flushPendingBatch(batchKey));
+				queueMicrotask(() => void this.#flushPendingBatch(pendingBatchId));
 			}
 			pendingBatch = {
-				domain: work.job.domain,
+				batchId: pendingBatchId,
+				domain: taskStatus.domain,
 				items: [],
-				revision: work.revision,
+				revision: taskStatus.revision,
 				timeoutId,
 			};
-			this.#pendingBatches.set(batchKey, pendingBatch);
+			this.#pendingBatches.set(pendingBatchId, pendingBatch);
 		}
 
+		const task = createStaticBakeTask(taskStatus);
 		pendingBatch.items.push({
+			ownerId: task.ownerId,
+			ownerKey: task.ownerKey,
 			payload,
-			task: createStaticBakeTask(taskStatus),
+			resolverMs,
+			task,
+			taskId: task.taskId,
 		});
 		if (pendingBatch.items.length >= this.#batching.maxPayloadsPerBatch) {
-			this.#flushPendingBatch(batchKey);
+			this.#flushPendingBatch(pendingBatch.batchId);
 		}
 	}
 
-	async #flushPendingBatch(batchKey: string): Promise<void> {
-		const pendingBatch = this.#pendingBatches.get(batchKey);
+	async #flushPendingBatch(pendingBatchId: string): Promise<void> {
+		const pendingBatch = this.#pendingBatches.get(pendingBatchId);
 		if (!pendingBatch) {
 			return;
 		}
 
-		this.#pendingBatches.delete(batchKey);
+		this.#pendingBatches.delete(pendingBatchId);
 		if (pendingBatch.timeoutId) {
 			clearTimeout(pendingBatch.timeoutId);
 		}
 
-		const items = pendingBatch.items.filter(
+		const pendingItems = pendingBatch.items.filter(
 			(item) => {
-				const task = this.#inFlightStaticWork.get(item.task.taskId);
+				const task = this.#inFlightStaticWork.get(item.taskId);
 				return (
 					task !== undefined &&
 					this.#isTaskCurrent(task) &&
-					this.#isLayerOwnerDemanded(item.task.ownerKey)
+					this.#isLayerOwnerDemanded(item.ownerKey)
 				);
 			},
 		);
+		const items = pendingItems.map(toStaticBakeBatchItem);
 		if (items.length === 0) {
 			return;
 		}
@@ -505,8 +510,8 @@ export class StaticCoordinator {
 				attachmentMs,
 				bakeMs,
 				resolverMs: sumNullableNumbers(
-					currentTasks.map(
-						(task) => this.#resolverMsByTaskId.get(task.taskId) ?? null,
+					currentTasks.map((task) =>
+						findPendingStaticBakeItemResolverMs(pendingItems, task.taskId),
 					),
 				),
 			});
@@ -562,9 +567,6 @@ export class StaticCoordinator {
 			);
 		}
 		this.#committedDrawUnits = this.#residentDrawUnitIds.size;
-		for (const task of result.tasks) {
-			this.#resolverMsByTaskId.delete(task.taskId);
-		}
 		this.#recordTiming({
 			attachmentMs: timing.attachmentMs,
 			bakeMs: timing.bakeMs,
@@ -857,6 +859,20 @@ export class StaticCoordinator {
 		return current !== undefined && this.#isTaskCurrent(current);
 	}
 
+	#findPendingBatchForTask(
+		task: MutableScheduledStaticWorkStatus,
+	): PendingStaticBakeBatch | null {
+		for (const pendingBatch of this.#pendingBatches.values()) {
+			if (
+				pendingBatch.domain === task.domain &&
+				pendingBatch.revision === task.revision
+			) {
+				return pendingBatch;
+			}
+		}
+		return null;
+	}
+
 	#assertActive(): void {
 		if (this.#disposed) {
 			throw new Error("StaticCoordinator has been disposed.");
@@ -917,10 +933,25 @@ interface StaticReconciliationRunState {
 }
 
 interface PendingStaticBakeBatch {
+	/** Opaque id for one open coordinator-side bake batch. */
+	readonly batchId: string;
 	readonly domain: ScheduledStaticWork["job"]["domain"];
 	readonly revision: number;
-	readonly items: StaticBakeBatchItem[];
+	readonly items: PendingStaticBakeBatchItem[];
 	readonly timeoutId: ReturnType<typeof setTimeout> | null;
+}
+
+interface PendingStaticBakeBatchItem {
+	/** Stable layer owner id for diagnostics and demand checks. */
+	readonly ownerId: string;
+	/** Layer owner identity that owns any resources produced by this item. */
+	readonly ownerKey: LayerOwnerState["key"];
+	readonly payload: StaticScopePayload;
+	/** Source-resolution duration captured with the task instead of a side map. */
+	readonly resolverMs: number;
+	readonly task: StaticBakeTask;
+	/** Stable task id used for currentness checks at async boundaries. */
+	readonly taskId: string;
 }
 
 function createEmptyAtlasSnapshotForPayload(
@@ -960,8 +991,16 @@ function createStaticBatchId(input: {
 	].join(":");
 }
 
-function createPendingBatchKey(work: ScheduledStaticWork): string {
-	return [work.revision.toString(), work.job.domain].join(":");
+function createPendingStaticBakeBatchId(
+	task: MutableScheduledStaticWorkStatus,
+): string {
+	return [
+		"pending-static-batch",
+		task.revision.toString(),
+		task.domain,
+		task.scopeKey,
+		task.staticWorkId,
+	].join(":");
 }
 
 function createStaticReconciliationRunId(revision: number): string {
@@ -980,6 +1019,22 @@ function createStaticBakeTask(
 		scopeKey: status.scopeKey,
 		taskId: status.staticWorkId,
 	};
+}
+
+function toStaticBakeBatchItem(
+	item: PendingStaticBakeBatchItem,
+): StaticBakeBatchItem {
+	return {
+		payload: item.payload,
+		task: item.task,
+	};
+}
+
+function findPendingStaticBakeItemResolverMs(
+	items: readonly PendingStaticBakeBatchItem[],
+	taskId: string,
+): number | null {
+	return items.find((item) => item.taskId === taskId)?.resolverMs ?? null;
 }
 
 function createSourceRequestsForNewWork(

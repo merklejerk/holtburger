@@ -2283,7 +2283,7 @@ Decisions and course corrections:
 
 ### Phase 17: Follow-Up Cleanup Verification
 
-Status: pending.
+Status: completed on 2026-06-30.
 
 Goal: prove the follow-up naming cleanup phases did not leave new aliases, compatibility shims, or misleading historical terminology in executable code.
 
@@ -2302,16 +2302,19 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Run `npm run check` and broad `npm run test:ts`.
-- [ ] Run relevant Rust format, clippy, and tests if content/Tauri/Rust contracts were touched.
-- [ ] Run final zero-reference audits for all names removed by Phases 13 through 16.
-- [ ] Run final shim audits for alias maps, fallback branches, compatibility wrappers, dual-name tests, and old-name fixture acceptance.
-- [ ] Record final validation and surviving-term classifications.
+- [x] Run `npm run check` and broad `npm run test:ts`.
+- [x] Run relevant Rust format, clippy, and tests if content/Tauri/Rust contracts were touched.
+- [x] Run final zero-reference audits for all names removed by Phases 13 through 16.
+- [x] Run final shim audits for alias maps, fallback branches, compatibility wrappers, dual-name tests, and old-name fixture acceptance.
+- [x] Record final validation and surviving-term classifications.
 
 Decisions and course corrections:
 
 - Dry run on 2026-06-30 found the phase order is sound with one important constraint: keep Phase 16 after Phase 13 so static object bake files are not renamed while still carrying old `landblock-env-cells` domain/scope vocabulary. Phase 14 is mostly independent and Rust/Tauri-heavy; Phase 15 is TypeScript-heavy and should happen after Phase 13 so env-cell work ids are not renamed twice.
 - Final shim audits should include searches for `compat`, `legacy`, `fallback`, `alias`, old fixture strings, and old-name acceptance tests, not only the specific removed identifiers.
+- Validation passed: `npm run lint:ts`; `npm run check`; full `npm run test:ts` passed 68 files / 568 tests; `cargo fmt --check`; `cargo clippy -p holtburger-content -p holtburger-3d -p holtburger-debug-harness --tests -- -D warnings`; `cargo test -p holtburger-content -p holtburger-3d -p holtburger-debug-harness --tests`.
+- Final zero-reference audit passed for executable old env-cell route/domain names, old env-cell provider name, old route-shaped outdoor source IDs, old terrain coordinate-space label, removed scheduler names, accidental `staticStaticWorkId`, and removed static-object/material compatibility bake names under `apps/holtburger-3d/src`, `apps/holtburger-3d/src-tauri/src`, `crates/holtburger-content/src`, and `crates/holtburger-debug-harness/src`.
+- Final shim-smell audit hits are classified as unrelated retained vocabulary: retail legacy sampler/material/render-pass terminology, material/terrain fallback diagnostics, texture wrap aliases, dynamic/browser fallback services, and `compatible` wording for current batching/material coalescing tests. No hit preserves a removed Phase 13-16 name, old route, old domain, dual-read path, compatibility wrapper, or old-name fixture acceptance.
 
 ## Source Assembly Requirements
 

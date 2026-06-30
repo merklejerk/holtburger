@@ -1086,7 +1086,42 @@ Acceptance criteria:
 
 Decisions and course corrections:
 
-- Pending.
+- Completed during Phase 2.
+
+Implemented recipe-resolution surface:
+
+- `resolveDynamicVisualRecipe(...)` now requests and validates setup/default or explicit animation
+  assets through `PreparedAssetReader`, resolves setup-backed source closure through
+  `resolveStaticObjectSourceClosure(...)`, and emits a `DynamicEntityRecipe` with the shared
+  `DynamicVisualRecipe` shape.
+- Runtime-authored and static-authored sources use the same resolver request shape. Authorship is
+  retained only in `DynamicEntityRecipeSource`; setup model, animation, material source, palette
+  source, texture ref, and missing-ref facts are not authorship-specific.
+- Runtime-authored recipe resolution now has a dedicated worker transport:
+  `visual-recipe-protocol.ts`, `visual-recipe-worker-client.ts`,
+  `visual-recipe-worker-handler.ts`, and `visual-recipe.worker.ts`.
+- The dynamic recipe worker bridge reuses resolver-light prepared asset shaping for env-cell,
+  gfx-obj, and render-surface payloads. Runtime-authored recipe resolution can therefore cross the
+  worker boundary without passing `AssetService` or prepared asset leases into runtime code.
+
+Behavior notes and debt:
+
+- `resolveStaticObjectSourceClosure(...)` currently attempts a default `setup-appearance` request
+  for setup-backed objects. Existing dynamic prep treated missing setup appearance as optional, so
+  `resolveDynamicVisualRecipe(...)` filters missing `setup-appearance` refs before returning the
+  recipe. Phase 3 must preserve this rule when converting `missingRefs` into skip/failure results;
+  optional appearance absence must not become a hard bake failure.
+- The Phase 2 worker transport proves the runtime-authored recipe resolver path, but it is not yet
+  wired into browser runtime creation. That cutover remains Phase 5 after the visual baker and bake
+  worker contract exist.
+- The recipe worker uses a dedicated worker module/protocol. This keeps the runtime-authored
+  resolver boundary explicit while still reusing static resolver asset-view helpers. Do not fold
+  dynamic recipe requests into static demand just to reuse a pool.
+
+Verification:
+
+- `npm run test:ts -- src/lib/dynamic/visual-recipe-resolver.test.ts src/lib/dynamic/visual-recipe-worker-client.test.ts`
+- `npm run check`
 
 ### Phase 3: Build The Dynamic Visual Baker
 

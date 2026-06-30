@@ -167,8 +167,8 @@ export interface StaticCoordinatorDiagnosticsReport {
 	readonly materialCoverageSummary: StaticMaterialCoverageSummaryDiagnostics;
 	readonly staticObjectBakeSummary: StaticObjectBakeSummaryDiagnostics;
 	readonly timingSummary: StaticCoordinatorTimingSummaryDiagnostics;
-	readonly inFlightWork?: readonly StaticCoordinatorWorkDiagnostics[];
-	readonly recentFailures?: readonly StaticCoordinatorWorkDiagnostics[];
+	readonly inFlightTasks?: readonly StaticCoordinatorTaskDiagnostics[];
+	readonly recentFailures?: readonly StaticCoordinatorTaskDiagnostics[];
 }
 
 interface StaticCoordinatorDiagnosticsSummary {
@@ -183,16 +183,17 @@ interface StaticCoordinatorDiagnosticsSummary {
 	readonly committedDrawUnits: number;
 }
 
-interface StaticCoordinatorWorkDiagnostics {
-	readonly staticWorkId: string;
+interface StaticCoordinatorTaskDiagnostics {
+	readonly taskId: string;
+	readonly ownerId: string;
 	readonly revision: number;
 	readonly domain: StaticDomain;
 	readonly scopeKey: string;
-	readonly status: "requested" | "resolving" | "baking" | "failed";
+	readonly phase: "requested" | "resolving" | "baking" | "failed";
 }
 
-export type StaticCoordinatorWorkReportDiagnostics =
-	StaticCoordinatorWorkDiagnostics;
+export type StaticCoordinatorTaskReportDiagnostics =
+	StaticCoordinatorTaskDiagnostics;
 
 interface StaticMaterialCoverageSummaryDiagnostics {
 	readonly reportCount: number;

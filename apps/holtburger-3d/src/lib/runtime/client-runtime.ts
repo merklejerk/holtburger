@@ -59,7 +59,7 @@ import {
 	type RuntimeDiagnostics,
 	type RuntimeDiagnosticsReport,
 	type StaticCoordinatorDiagnosticsReport,
-	type StaticCoordinatorWorkReportDiagnostics,
+	type StaticCoordinatorTaskReportDiagnostics,
 	type TerrainTextureDiagnosticsReport,
 	type TerrainTextureFallbackDiagnostics,
 } from "./diagnostics";
@@ -82,7 +82,7 @@ import type {
 	StaticObjectSourceIdentity,
 	MaterialTextureDataUseIdentity,
 	StaticMaterialUnrenderedBucket,
-	ScheduledStaticWorkStatus,
+	StaticLayerTaskStatus,
 	StaticRetentionReconciliation,
 	StaticPortalInteriorRecord,
 	StaticPortalApertureResource,
@@ -3732,13 +3732,13 @@ function getSceneInterestSource(
 function createStaticCoordinatorDiagnosticsReport(
 	snapshot: StaticCoordinatorSnapshot,
 ): Omit<StaticCoordinatorDiagnosticsReport, "kind"> {
-	const inFlightWork = snapshot.inFlightStaticWork
-		.filter(isInFlightStaticWorkStatus)
-		.map((work) => createStaticCoordinatorWorkDiagnostics(work));
-	const recentFailures = snapshot.inFlightStaticWork
-		.filter(isFailedStaticWorkStatus)
+	const inFlightTasks = snapshot.layerTasks
+		.filter(isInFlightStaticLayerTaskStatus)
+		.map((task) => createStaticCoordinatorTaskDiagnostics(task));
+	const recentFailures = snapshot.layerTasks
+		.filter(isFailedStaticLayerTaskStatus)
 		.slice(-STATIC_DIAGNOSTICS_FAILURE_LIMIT)
-		.map((work) => createStaticCoordinatorWorkDiagnostics(work));
+		.map((task) => createStaticCoordinatorTaskDiagnostics(task));
 
 	const targetStaticObjectBakeDiagnostics =
 		snapshot.staticObjectBakeDiagnostics.filter(
@@ -3769,7 +3769,7 @@ function createStaticCoordinatorDiagnosticsReport(
 	};
 	return {
 		...report,
-		...(inFlightWork.length > 0 ? { inFlightWork } : {}),
+		...(inFlightTasks.length > 0 ? { inFlightTasks } : {}),
 		...(recentFailures.length > 0 ? { recentFailures } : {}),
 	};
 }
@@ -4562,42 +4562,43 @@ function sumNumbers(values: readonly number[]): number {
 	return values.reduce((sum, value) => sum + value, 0);
 }
 
-type StaticCoordinatorReportWorkStatus = Exclude<
-	ScheduledStaticWorkStatus["status"],
-	"committed" | "source-committed"
+type StaticCoordinatorReportTaskPhase = Extract<
+	StaticLayerTaskStatus["phase"],
+	"baking" | "failed" | "requested" | "resolving"
 >;
 
-type StaticCoordinatorReportWork = ScheduledStaticWorkStatus & {
-	readonly status: StaticCoordinatorReportWorkStatus;
+type StaticCoordinatorReportTask = StaticLayerTaskStatus & {
+	readonly phase: StaticCoordinatorReportTaskPhase;
 };
 
-function isInFlightStaticWorkStatus(
-	work: ScheduledStaticWorkStatus,
-): work is ScheduledStaticWorkStatus & {
-	readonly status: "baking" | "requested" | "resolving";
+function isInFlightStaticLayerTaskStatus(
+	task: StaticLayerTaskStatus,
+): task is StaticLayerTaskStatus & {
+	readonly phase: "baking" | "requested" | "resolving";
 } {
 	return (
-		work.status === "requested" ||
-		work.status === "resolving" ||
-		work.status === "baking"
+		task.phase === "requested" ||
+		task.phase === "resolving" ||
+		task.phase === "baking"
 	);
 }
 
-function isFailedStaticWorkStatus(
-	work: ScheduledStaticWorkStatus,
-): work is ScheduledStaticWorkStatus & { readonly status: "failed" } {
-	return work.status === "failed";
+function isFailedStaticLayerTaskStatus(
+	task: StaticLayerTaskStatus,
+): task is StaticLayerTaskStatus & { readonly phase: "failed" } {
+	return task.phase === "failed";
 }
 
-function createStaticCoordinatorWorkDiagnostics(
-	work: StaticCoordinatorReportWork,
-): StaticCoordinatorWorkReportDiagnostics {
+function createStaticCoordinatorTaskDiagnostics(
+	task: StaticCoordinatorReportTask,
+): StaticCoordinatorTaskReportDiagnostics {
 	return {
-		domain: work.domain,
-		revision: work.revision,
-		scopeKey: work.scopeKey,
-		status: work.status,
-		staticWorkId: work.staticWorkId,
+		domain: task.domain,
+		ownerId: task.ownerId,
+		phase: task.phase,
+		revision: task.revision,
+		scopeKey: task.scopeKey,
+		taskId: task.taskId,
 	};
 }
 

@@ -11,10 +11,8 @@ import type {
 	StaticPortalProjectionRoot,
 	StaticBuildingTransitionApertureRange,
 	StaticPortalApertureResource,
-	StaticPortalGraphEdge,
 	StaticPortalGraphRecord,
 	StaticPortalInteriorRecord,
-	StaticLayerPeerRecordOwner,
 } from "./contracts";
 import {
 	createEnvCellPortalApertureRangeId,

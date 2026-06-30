@@ -1563,38 +1563,134 @@ Decisions and course corrections:
 - `LandblockEnvCellsResolver` still contains direct `createHostAssetKey("landblock-env-cells", ...)` compatibility behavior for standalone resolver jobs and tests. Normal source-first LoD resolution intercepts that request through the projected payload asset service; Phase 11 should delete the standalone old-route resolver path rather than preserve it.
 - Validation: `npm run test:ts -- src/lib/runtime/env-cell-system-layer-publication.test.ts src/lib/runtime/client-runtime.test.ts`; `npm run check`; zero-reference search for `EnvCellSystemLayerAssembly`, `env-cell-system-layer-assembly`, and `envCellSystemLayerAssembly`; audit searches for `landblock-env-cells` route-facing surfaces and `outdoor-buildings` dependencies in env-cell publication paths.
 
-### Phase 11A: Frontend Old Route Surface Cleanup
+### Phase 11A1: Frontend Old Outdoor And Env-Cell Contracts
 
-Status: pending.
+Status: completed on 2026-06-29.
 
-Goal: delete TypeScript route-facing old outdoor/env-cell/topology keys, schemas, preparation branches, and standalone direct resolvers.
+Goal: remove TypeScript route-facing `landblock-outdoor` and `landblock-env-cells` key/schema/preparation surfaces and replace resolver-local needs with LoD-projected layer payload contracts.
 
 Deliverables:
 
-- Remove normal frontend reliance on `landblock-outdoor`.
-- Remove normal frontend reliance on `landblock-env-cells`.
-- Remove TypeScript host asset key variants, formatters, parsers, schemas, route payload preparation, and binary lookup detection for old landblock outdoor/env-cell/topology assets.
-- Remove frontend resolvers, bakers, attachment providers, and asset views that consume `LandblockOutdoorPayloadDto` or `LandblockEnvCellsPayloadDto` as route payloads.
-- Delete standalone `LandblockEnvCellsResolver` direct-route loading or replace it with a LoD-projected-only resolver surface; normal browser source-first resolution should not need a route-capable env-cell resolver after Phase 10D.
-- Delete obsolete route fixtures and compatibility tests for old frontend route behavior.
+- Add resolver-local projected source payload contracts for outdoor and env-cell LoD layers.
+- Remove old frontend host asset key kinds, formatters, parsers, DTO route schemas, route payload preparation branches, and binary lookup detection for `landblock/{id}/outdoor` and `landblock/{id}/env-cells`.
+- Update contract and preparation tests so they assert only supported LoD source payloads, not old broad-route payloads.
+- Leave topology route implementation to Phase 11B unless an executable TypeScript asset key/preparation dependency blocks this phase.
 
 Acceptance criteria:
 
-- Static frontend rendering does not request old broad routes.
-- The old route-facing host payload schemas are gone from frontend contracts.
-- No executable code path can request or prepare `landblock/{id}/outdoor`, `landblock/{id}/env-cells`, or `landblock/{id}/topology`.
-- No test remains solely to preserve old route behavior, old payload kinds, old host asset key kinds, or the unsplit `outdoor-detail` domain.
-- No compatibility tests exist solely to prove removed behavior still exists.
+- `HostAssetKeyKind` does not include `landblock-outdoor` or `landblock-env-cells`.
+- Frontend route payload preparation cannot parse old outdoor/env-cell route payloads.
+- The old route-facing host payload schemas are gone from frontend contracts, while reusable component schemas remain if LoD layers still need them.
+- No test remains solely to preserve old outdoor/env-cell host asset key or payload preparation behavior.
+- TypeScript validation passes for touched frontend contract and preparation areas.
+
+Task checklist:
+
+- [x] Add projected outdoor/env-cell LoD layer source payload types.
+- [x] Delete old outdoor/env-cell host asset key variants, route id parsing/formatting, and preparation parser branches.
+- [x] Delete old outdoor/env-cell route-facing DTO schema exports after consumers are converted.
+- [x] Update key and route-preparation tests.
+- [x] Run focused frontend validation commands.
+
+Decisions and course corrections:
+
+- Added resolver-local projected source payload types `LandblockOutdoorLayerSourcePayloadDto` and `LandblockEnvCellsLayerSourcePayloadDto`. These are browser/static fanout payloads projected from `landblock-scene-lod`, not host route DTOs.
+- Kept the projected layer identities in `HostAssetKeyKind` only as in-memory asset-service keys. `formatHostAssetId` now fails loudly if a projected layer key leaks toward host lookup.
+- Removed old frontend host route key parsing/formatting and route payload preparation for `landblock/{id}/outdoor` and `landblock/{id}/env-cells`. The old broad routes now parse as raw/unsupported frontend assets.
+- Deleted old route-facing `LandblockOutdoorPayloadDto`, `LandblockEnvCellsPayloadDto`, `landblockOutdoorPayloadDtoSchema`, and `landblockEnvCellsPayloadDtoSchema` exports. Reusable terrain/static/env-cell component schemas remain because `landblock-scene-lod` layers still use those facts.
+- Removed old outdoor/env-cell asset-id helpers from `landblocks.ts`; topology helpers remain Phase 11B targets with Rust/Tauri route deletion.
+- TypeScript forced a minimal source-projection type cutover in the resolver path after the old DTO exports were deleted. Phase 11A2 should continue from this state by finishing resolver test updates and deleting remaining direct-route test assumptions, not by restoring old DTO aliases.
+- Validation: `npm run check`; `npm run test:ts -- src/lib/assets/keys.test.ts src/lib/assets/preparation.test.ts src/lib/landblocks.test.ts src/lib/assets/asset-service.test.ts`.
+
+### Phase 11A2: Frontend Source Projection Cutover
+
+Status: pending.
+
+Goal: make LoD source resolution provide the only frontend source payloads for terrain, outdoor object, and env-cell resolvers.
+
+Deliverables:
+
+- Update `LandblockSceneLodSourceResolver` to project LoD `terrain`, outdoor object, building transition aperture, and env-cell-system layers into resolver-local payloads keyed by LoD layer identity.
+- Update terrain, outdoor static object, and env-cell resolvers to request only projected LoD layer payload keys.
+- Remove direct resolver consumption of `LandblockOutdoorPayloadDto` and `LandblockEnvCellsPayloadDto`.
+- Keep each LoD level mapped to its own domain/layer; do not collapse explicit objects, generated scenery, buildings, terrain, or env-cell systems into a synthetic broad route.
+
+Acceptance criteria:
+
+- Static frontend rendering does not request old broad outdoor/env-cell routes.
+- Source projection uses minimal cache-key dimensions: landblock id plus LoD source identity, not caller include masks.
+- Each projected payload kind is local to source fanout and is not a revived host route contract.
+- TypeScript validation passes for touched resolver areas.
+
+Task checklist:
+
+- [ ] Update `LandblockSceneLodSourceResolver` projection and asset-service interception.
+- [ ] Update terrain and outdoor object resolvers to consume projected outdoor-layer payloads.
+- [ ] Update env-cell resolver or replace it with a projected-only env-cell resolver surface.
+- [ ] Delete or rewrite tests that expected old broad-route resolver inputs.
+- [ ] Run focused frontend resolver validation commands.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 11A3: Frontend Standalone Direct Resolver Deletion
+
+Status: pending.
+
+Goal: delete frontend standalone direct-route resolver behavior now that normal rendering is source-first and LoD-projected.
+
+Deliverables:
+
+- Delete standalone `LandblockEnvCellsResolver` direct `landblock-env-cells` loading or reduce it to a projected-only helper with no route capability.
+- Delete frontend attachment providers, prepared asset views, fixtures, and tests that exist only to support old outdoor/env-cell route payloads.
+- Remove compatibility helper branches that merge or synthesize old broad-route payload views.
+
+Acceptance criteria:
+
+- No executable frontend code path can request `landblock/{id}/outdoor` or `landblock/{id}/env-cells`.
+- No compatibility tests exist solely to prove removed outdoor/env-cell direct-route behavior still exists.
+- The remaining env-cell bake/materialization domain name is clearly internal ownership vocabulary, not a host route escape hatch.
+- TypeScript validation passes for touched resolver, baker, and asset-bridge areas.
+
+Task checklist:
+
+- [ ] Delete or narrow direct env-cell resolver behavior.
+- [ ] Delete old route payload asset views and compatibility fixtures.
+- [ ] Update env-cell resolver/baker/asset-bridge tests to use projected LoD input.
+- [ ] Run zero-reference searches for executable old outdoor/env-cell route requests.
+- [ ] Run focused frontend validation commands.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 11A4: Frontend Old Route Audit And Commit Gate
+
+Status: pending.
+
+Goal: prove the frontend outdoor/env-cell old-route cutover is complete before moving to Rust/Tauri route deletion.
+
+Deliverables:
+
+- Run zero-reference audits for TypeScript executable `landblock-outdoor`, `landblock-env-cells`, `LandblockOutdoorPayloadDto`, and `LandblockEnvCellsPayloadDto` route-facing references.
+- Classify any surviving `landblock-env-cells` vocabulary as internal env-cell bake/materialization ownership or delete it.
+- Record any surviving topology TypeScript helper references as Phase 11B targets.
+- Update this plan with validation commands, remaining debt, and any course corrections.
+
+Acceptance criteria:
+
+- No executable frontend route, key, payload-preparation, resolver, or asset-view surface can request or prepare `landblock/{id}/outdoor` or `landblock/{id}/env-cells`.
+- Any surviving old-route wording is historical prose or explicitly scheduled for Phase 11B Rust/Tauri cleanup.
+- No test remains solely to preserve removed outdoor/env-cell frontend route behavior.
 - TypeScript tests and lint pass for touched frontend areas.
 
 Task checklist:
 
-- [ ] Audit production route references after Phase 10D.
-- [ ] Delete old frontend host asset key kinds, DTO schemas, route payload preparation, and binary lookup branches.
-- [ ] Delete old env-cell resolver/attachment/store paths that request or merge `landblock-env-cells`.
-- [ ] Delete standalone env-cell direct-route resolver behavior and tests after LoD-projected env-cell payloads are the only supported resolver input.
-- [ ] Delete obsolete frontend route fixtures and compatibility helpers.
-- [ ] Run required frontend validation commands.
+- [ ] Run zero-reference searches for old frontend outdoor/env-cell route surfaces.
+- [ ] Classify or delete every surviving reference.
+- [ ] Update Phase 11A1 through 11A4 decisions and validation notes.
+- [ ] Commit the completed frontend cutover phase set.
 
 Decisions and course corrections:
 

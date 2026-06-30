@@ -2,8 +2,6 @@ import type { ZodIssue } from "zod";
 import type {
 	AssetLookupResponseDto,
 	AnimationPayloadDto,
-	LandblockEnvCellsPayloadDto,
-	LandblockOutdoorPayloadDto,
 	LandblockSceneLodPayloadDto,
 	GfxObjPayloadDto,
 	MaterialRecipePayloadDto,
@@ -19,8 +17,6 @@ import type {
 import {
 	animationPayloadDtoSchema,
 	gfxObjPayloadDtoSchema,
-	landblockEnvCellsPayloadDtoSchema,
-	landblockOutdoorPayloadDtoSchema,
 	landblockSceneLodPayloadDtoSchema,
 	materialRecipePayloadDtoSchema,
 	palettePayloadDtoSchema,
@@ -34,8 +30,6 @@ import {
 } from "../../../lib/host/contracts";
 
 export type V2PreparedAssetPayload =
-	| LandblockOutdoorPayloadDto
-	| LandblockEnvCellsPayloadDto
 	| LandblockSceneLodPayloadDto
 	| AnimationPayloadDto
 	| GfxObjPayloadDto
@@ -70,16 +64,6 @@ const SETUP_APPEARANCE_ROUTE = new RegExp(
 
 const V2_PAYLOAD_PARSERS: readonly RoutePayloadParser<V2PreparedAssetPayload>[] =
 	[
-		{
-			expectedKind: "landblock-outdoor",
-			route: /^landblock\/[0-9a-fA-F]{8}\/outdoor$/,
-			schema: landblockOutdoorPayloadDtoSchema,
-		},
-		{
-			expectedKind: "landblock-env-cells",
-			route: /^landblock\/[0-9a-fA-F]{8}\/env-cells$/,
-			schema: landblockEnvCellsPayloadDtoSchema,
-		},
 		{
 			expectedKind: "landblock-scene-lod",
 			route: /^landblock\/[0-9a-fA-F]{8}\/lod\/[0-4]$/,

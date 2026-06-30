@@ -1,11 +1,11 @@
 import type {
-	LandblockOutdoorPayloadDto,
 	PalettePayloadDto,
 	RegionRenderProfilePayloadDto,
 	RenderSurfacePayloadDto,
 	SurfaceTexturePayloadDto,
 	TerrainMaterialPayloadDto,
 } from "../../../lib/host/contracts";
+import type { LandblockOutdoorLayerSourcePayloadDto } from "../source-payloads";
 import type {
 	PreparedAsset,
 	PreparedAssetReader,
@@ -58,9 +58,9 @@ export class TerrainStaticScopeResolver {
 		}
 
 		const landblock = await this.#loadPayload(
-			"landblock-outdoor",
+			"landblock-scene-lod-outdoor-layer",
 			job.scope.landblockId,
-			"landblock-outdoor",
+			"landblock-scene-lod-outdoor-layer",
 		);
 		const terrainMaterial = await this.#loadPayload(
 			"terrain-material",
@@ -225,7 +225,7 @@ export class TerrainStaticScopeResolver {
 }
 
 type TerrainPreparedPayload =
-	| LandblockOutdoorPayloadDto
+	| LandblockOutdoorLayerSourcePayloadDto
 	| TerrainMaterialPayloadDto
 	| RegionRenderProfilePayloadDto
 	| SurfaceTexturePayloadDto
@@ -347,7 +347,7 @@ function requireSurfaceTextureIdentity(
 }
 
 function createTerrainSourceSpatialFacts(
-	landblock: LandblockOutdoorPayloadDto,
+	landblock: LandblockOutdoorLayerSourcePayloadDto,
 ): TerrainSourceSpatialFacts {
 	return {
 		bounds: landblock.terrain.bounds
@@ -368,7 +368,7 @@ function createTerrainSourceSpatialFacts(
 }
 
 function createTerrainMeshFacts(
-	landblock: LandblockOutdoorPayloadDto,
+	landblock: LandblockOutdoorLayerSourcePayloadDto,
 ): TerrainStaticScopePayload["mesh"] {
 	return {
 		bounds: landblock.terrain.bounds
@@ -396,8 +396,8 @@ function createTerrainMeshFacts(
 }
 
 function terrainSourceVec3ToRenderLocalVec3(
-	vec: LandblockOutdoorPayloadDto["terrain"]["vertices"][number],
-): LandblockOutdoorPayloadDto["terrain"]["vertices"][number] {
+	vec: LandblockOutdoorLayerSourcePayloadDto["terrain"]["vertices"][number],
+): LandblockOutdoorLayerSourcePayloadDto["terrain"]["vertices"][number] {
 	return {
 		x: vec.x,
 		y: vec.z,

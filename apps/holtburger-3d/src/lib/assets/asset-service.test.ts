@@ -8,7 +8,7 @@ import { HostBackedAssetService } from "./asset-service";
 
 describe("host-backed asset service lifecycle", () => {
 	it("dedupes in-flight preparation and only leases committed assets", async () => {
-		const key: HostAssetKey = { id: "da55ffff", kind: "landblock-outdoor" };
+		const key: HostAssetKey = { id: "da55ffff:2", kind: "landblock-scene-lod" };
 		let resolveLookup: (asset: PreparedAsset) => void = () => {
 			throw new Error("lookup promise was not initialized");
 		};
@@ -47,7 +47,7 @@ describe("host-backed asset service lifecycle", () => {
 				key,
 				leaseCount: 1,
 				revision: 1,
-				sourceAssetId: "landblock/da55ffff/outdoor",
+				sourceAssetId: "landblock-scene-lod/da55ffff:2",
 				warmRetainedUntilMs: null,
 			},
 		]);
@@ -145,9 +145,6 @@ function createPreparedAsset(
 		payload: { ok: true },
 		preparedAt: "2026-06-10T00:00:00.000Z",
 		revision,
-		sourceAssetId:
-			key.kind === "landblock-outdoor"
-				? `landblock/${key.id}/outdoor`
-				: `${key.kind}/${key.id}`,
+		sourceAssetId: `${key.kind}/${key.id}`,
 	};
 }

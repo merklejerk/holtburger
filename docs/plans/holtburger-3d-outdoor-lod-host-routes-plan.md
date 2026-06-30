@@ -2101,6 +2101,41 @@ Decisions and course corrections:
 - No durable architecture doc outside this implementation plan required an update. Other matching `docs/plans` hits are historical plan prose retained for posterity; executable and durable-boundary evidence is captured in this plan.
 - No remaining cleanup was intentionally deferred, so no follow-up plan was created.
 
+### Phase 13: Env-Cell Domain Naming Debt Follow-Up
+
+Status: pending.
+
+Goal: remove the remaining route-shaped env-cell vocabulary from the static domain/layer surface now that the LoD route cutover is complete.
+
+Deliverables:
+
+- Rename the `landblock-env-cells` static domain/layer vocabulary to a name that describes the current layer role rather than the deleted route shape. Candidate names are `env-cell-system` or `landblock-env-cell-system`; choose one before implementation starts and document the decision here.
+- Rename `LandblockEnvCellGeometryAttachmentProvider` to match its current role as an env-cell system layer attachment provider.
+- Update renderer, bake, material, static-scene-query, dynamic ownership, diagnostics, tests, and browser UI references that consume the env-cell domain/layer name.
+- Run zero-reference audits for the old domain/layer name and old provider type after the rename.
+
+Acceptance criteria:
+
+- No executable `landblock-env-cells` domain/layer string remains outside historical plan prose, source provenance, or deliberately retained compatibility-free source vocabulary documented here.
+- No executable `LandblockEnvCellGeometryAttachmentProvider` type/import/reference remains.
+- The renamed env-cell system layer still maps to LoD `4`, remains self-contained from materialized building layers, and keeps layer-owner lifecycle behavior.
+- TypeScript checks/tests and relevant Rust gates pass for touched areas.
+
+Task checklist:
+
+- [ ] Choose and record the final env-cell system domain/layer name.
+- [ ] Rename the TypeScript static domain/layer string and all renderer/bake/material/query/dynamic/diagnostic consumers.
+- [ ] Rename `LandblockEnvCellGeometryAttachmentProvider` and associated files/tests if the filename becomes misleading.
+- [ ] Update tests, fixtures, and debug/UI labels to the new env-cell system vocabulary.
+- [ ] Run targeted and broad TypeScript validation.
+- [ ] Run zero-reference audits for executable `landblock-env-cells` domain/layer usage and `LandblockEnvCellGeometryAttachmentProvider`.
+- [ ] Record decisions, validation, and any intentionally retained historical/source vocabulary in this phase.
+
+Decisions and course corrections:
+
+- Added after Phase 12 closeout at user request. Phase 12 proved the old route was deleted; this phase tackles the remaining naming debt that was classified as legitimate-but-spicy domain/layer vocabulary during the cutover.
+- The rename should not reintroduce compatibility aliases. This should be a clean domain/layer rename with tests updated to the new vocabulary.
+
 ## Source Assembly Requirements
 
 Content-side route implementation must keep one shared landblock-scene understanding path, but it must not blindly build the full current outdoor/env-cell payloads and filter the result afterward:

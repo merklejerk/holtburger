@@ -2099,7 +2099,7 @@ Decisions and course corrections:
 
 - Reviewed the final Definition of Done against current code and Phase 12A/12B evidence. The LoD route, prepared source cache, source-first frontend resolver fanout, layer-owner lifecycle, split explicit/generated domains, static-authored dynamic ownership, runtime dynamic no-residence handling, LoD `4` env-cell self-contained payload, old route deletion, and old lifecycle/domain audits are complete.
 - No durable architecture doc outside this implementation plan required an update. Other matching `docs/plans` hits are historical plan prose retained for posterity; executable and durable-boundary evidence is captured in this plan.
-- No remaining cleanup was intentionally deferred, so no follow-up plan was created.
+- At original closeout, no remaining cleanup was intentionally deferred. Later review promoted the spicy/concession vocabulary called out during the closeout tour into explicit follow-up cleanup phases below.
 
 ### Phase 13: Env-Cell Domain Naming Debt Follow-Up
 
@@ -2135,6 +2135,134 @@ Decisions and course corrections:
 
 - Added after Phase 12 closeout at user request. Phase 12 proved the old route was deleted; this phase tackles the remaining naming debt that was classified as legitimate-but-spicy domain/layer vocabulary during the cutover.
 - The rename should not reintroduce compatibility aliases. This should be a clean domain/layer rename with tests updated to the new vocabulary.
+
+### Phase 14: Route-Shaped Source Vocabulary Cleanup
+
+Status: pending.
+
+Goal: remove route-shaped outdoor naming from content source/provenance IDs and coordinate-space labels where the string now describes source identity or coordinate basis, not a host route.
+
+Deliverables:
+
+- Rename `landblock-outdoor-terrain-local` to a route-neutral terrain coordinate-space label. Candidate names are `landblock-terrain-local`, `outdoor-terrain-local`, or `landblock-scene-terrain-local`; choose one before implementation starts and document the decision here.
+- Rename content-generated source/provenance IDs shaped like `landblock/{id}/outdoor/...` to route-neutral source IDs that do not look like deleted host routes.
+- Update Tauri serializers, frontend contracts, tests, and source-identity expectations that consume those labels.
+- Run zero-reference audits for executable `landblock-outdoor-terrain-local` and route-shaped `landblock/{...}/outdoor/...` source IDs after the rename.
+
+Acceptance criteria:
+
+- No executable coordinate-space label named `landblock-outdoor-terrain-local` remains outside historical plan prose.
+- No executable content source/provenance ID pattern shaped like `landblock/{id}/outdoor/...` remains unless this phase proves it is an externally meaningful source identifier that must stay and records that proof here.
+- Terrain alignment, outdoor static source identity, generated scenery identity, and source diagnostics remain stable where semantic identity should not change.
+- TypeScript checks/tests and relevant Rust tests pass for touched areas.
+
+Task checklist:
+
+- [ ] Choose and record the final terrain coordinate-space label.
+- [ ] Choose and record the final route-neutral content source/provenance ID pattern.
+- [ ] Rename content source/provenance ID construction in `holtburger-content`.
+- [ ] Update Tauri JSON serialization and frontend host contracts/tests.
+- [ ] Update resolver, terrain, object, and source-identity tests.
+- [ ] Run Rust and TypeScript validation for touched areas.
+- [ ] Run zero-reference audits for executable old coordinate-space/source ID strings.
+
+Decisions and course corrections:
+
+- Added after Phase 12 closeout at user request. Phase 12 classified these strings as non-route source vocabulary; this phase exists because non-route but route-shaped vocabulary still makes future audits and code review noisier than necessary.
+
+### Phase 15: Scheduler Terminology Cleanup
+
+Status: pending.
+
+Goal: make transient static scheduling identifiers read like scheduler state instead of lifecycle/resource ownership.
+
+Deliverables:
+
+- Review `desiredKey`, `activeWork`, and `workId` usage in static demand planning, `StaticCoordinator`, runtime diagnostics, tests, and fake workers.
+- Rename fields and helpers where they imply ownership or retained lifecycle rather than transient demand/in-flight work. Candidate replacements include `demandKey`, `inFlightWork`, `staticWorkId`, or `staticWorkTicketId`; choose names before implementation starts and document the decision here.
+- Keep genuinely useful diagnostic identifiers, but make the names explicit about scheduling/correlation semantics.
+- Run zero-reference audits for the old confusing names where the phase decides they should be removed.
+
+Acceptance criteria:
+
+- Static resource ownership remains represented by layer owner records, not scheduler fields.
+- Scheduler snapshots and diagnostics use names that do not imply retained scene ownership.
+- Any surviving `workId` or `activeWork` names are explicitly justified as public diagnostic vocabulary in this phase.
+- TypeScript checks/tests pass for touched areas.
+
+Task checklist:
+
+- [ ] Classify each `desiredKey`, `activeWork`, and `workId` surface as internal scheduler state, public diagnostics, test helper, or removable confusion.
+- [ ] Choose replacement names for renamed scheduler fields/helpers.
+- [ ] Rename coordinator, demand planner, diagnostics, fake-worker, runtime, and test usages.
+- [ ] Run targeted static coordinator/runtime tests plus broad TypeScript validation.
+- [ ] Run zero-reference audits for names this phase removes.
+- [ ] Record any intentionally retained diagnostic terminology with rationale.
+
+Decisions and course corrections:
+
+- Phase 12 proved these fields are not lifecycle owners. This phase exists because even correctly classified scheduler names can keep causing review friction if they still sound like parallel ownership.
+
+### Phase 16: Static Object Bake Naming Cleanup
+
+Status: pending.
+
+Goal: remove or justify `compatibility` naming in static object bake modules so it cannot be confused with route-compatibility or legacy-shim behavior.
+
+Deliverables:
+
+- Audit `StaticObjectCompatibilityBaker`, `partitionStaticObjectCompatibility`, `StaticObjectCompatibilityPayload`, `static-object-compatibility-baker`, and `static-object-compatibility-partitioner`.
+- Decide whether `compatibility` accurately means material/geometry batching compatibility or whether it should be renamed to more specific bake terminology.
+- If renamed, update class/function/type/file/test names without keeping compatibility aliases.
+- Run zero-reference audits for old compatibility names that this phase removes.
+
+Acceptance criteria:
+
+- No static object bake module name reads as a legacy compatibility shim unless this phase explicitly proves and records that the term means material compatibility and is the clearest available name.
+- Env-cell and outdoor static object bake paths still share the intended batching logic without route compatibility aliases.
+- TypeScript checks/tests pass for touched areas.
+
+Task checklist:
+
+- [ ] Audit all static object bake `compatibility` names and classify which are semantic material-compatibility terms versus misleading legacy-shim terms.
+- [ ] Choose final names for the shared static object bake/partition pipeline.
+- [ ] Rename files, exports, imports, tests, and diagnostics if the audit finds misleading names.
+- [ ] Run targeted bake/partition tests plus broad TypeScript validation.
+- [ ] Run zero-reference audits for renamed compatibility symbols.
+- [ ] Record any intentionally retained `compatibility` terms with rationale.
+
+Decisions and course corrections:
+
+- Added because the final audit used `compatibility` as a red-flag term for legacy paths, while current static object bake code also uses it for batching compatibility. That ambiguity is not broken behavior, but it is reviewer-hostile.
+
+### Phase 17: Follow-Up Cleanup Verification
+
+Status: pending.
+
+Goal: prove the follow-up naming cleanup phases did not leave new aliases, compatibility shims, or misleading historical terminology in executable code.
+
+Deliverables:
+
+- Run full relevant TypeScript and Rust validation after Phases 13 through 16.
+- Run zero-reference audits for old env-cell domain names, old provider names, old route-shaped source IDs, old coordinate-space labels, removed scheduler names, and removed static-object bake compatibility names.
+- Update this plan with final classifications for any retained historical/source vocabulary.
+
+Acceptance criteria:
+
+- Follow-up cleanup has no compatibility aliases for old names.
+- Remaining historical terms are limited to plan prose or explicitly justified source vocabulary.
+- Validation passes for all touched areas.
+
+Task checklist:
+
+- [ ] Run `npm run check` and broad `npm run test:ts`.
+- [ ] Run relevant Rust format, clippy, and tests if content/Tauri/Rust contracts were touched.
+- [ ] Run final zero-reference audits for all names removed by Phases 13 through 16.
+- [ ] Record final validation and surviving-term classifications.
+
+Decisions and course corrections:
+
+- Pending implementation.
 
 ## Source Assembly Requirements
 

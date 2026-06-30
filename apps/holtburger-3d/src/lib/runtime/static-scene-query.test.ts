@@ -94,7 +94,7 @@ describe("static scene query", () => {
 		expect(hit?.distance).toBe(4);
 		expect(
 			query.queryOutdoorStaticObjectDetails({
-				domain: "outdoor-detail",
+				domain: "outdoor-generated-scenery",
 				instanceId: "outdoor-static-0",
 				landblockId: 0xda55ffff,
 			}),
@@ -119,7 +119,7 @@ describe("static scene query", () => {
 		);
 
 		const diagnostics = query.queryOutdoorStaticObjectSourceDiagnostics({
-			domain: "outdoor-detail",
+			domain: "outdoor-generated-scenery",
 			instanceId: "outdoor-static-0",
 			landblockId: 0xda55ffff,
 		});
@@ -166,7 +166,7 @@ describe("static scene query", () => {
 		commitEnvCellStaticObjectBounds(query);
 
 		const outdoorKey = createOutdoorStaticObjectSelectionKey({
-			domain: "outdoor-detail",
+			domain: "outdoor-generated-scenery",
 			instanceId: "outdoor-static-0",
 			landblockId: 0xda55ffff,
 		});
@@ -181,7 +181,7 @@ describe("static scene query", () => {
 		});
 
 		expect(describeStaticSceneSelectionKey(outdoorKey)).toBe(
-			"outdoor-static-object:outdoor-detail:da55ffff:outdoor-static-0",
+			"outdoor-static-object:outdoor-generated-scenery:da55ffff:outdoor-static-0",
 		);
 		expect(
 			compareStaticSceneSelectionKeys(outdoorKey, terrainKey),
@@ -1788,7 +1788,7 @@ function createOutdoorStaticObjectsPayload(
 				textureRefs: [],
 			};
 	return {
-		domain: "outdoor-detail",
+		domain: "outdoor-generated-scenery",
 		kind: "outdoor-static-objects",
 		landblock: {
 			kind: "landblock-source",

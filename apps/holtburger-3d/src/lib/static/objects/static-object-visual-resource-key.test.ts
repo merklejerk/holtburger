@@ -236,7 +236,7 @@ function createRenderInstance(options: {
 			max: { x: options.x + 1, y: 1, z: 1 },
 			min: { x: options.x, y: 0, z: 0 },
 		},
-		domain: "outdoor-detail",
+		domain: "outdoor-generated-scenery",
 		generated: {
 			sceneId: 7,
 			sceneTemplateIndex: 3,

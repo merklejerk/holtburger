@@ -1489,7 +1489,7 @@ function createStaticObjectBakeDiagnostics(): StaticObjectBakeDiagnostics {
 		objectCount: 1,
 		partitionCount: 1,
 		renderablePartitionCount: 1,
-		retainedTransparentOutdoorDetailPartitionReasons: {
+		retainedTransparentOutdoorGeneratedSceneryPartitionReasons: {
 			explicitObject: 0,
 			missingInstanceBounds: 0,
 			nonRenderableOrDeferredMaterialBucket: 0,

@@ -337,7 +337,7 @@ describe("browser texture manager", () => {
 		]);
 	});
 
-	it("packs outdoor-detail static object base-color refs across pages instead of one cohort page", async () => {
+	it("packs outdoor-generated-scenery static object base-color refs across pages instead of one cohort page", async () => {
 		const textureManager = new TextureManager({
 			assetService: new FixtureAssetService({
 				byteLength: 512 * 512 * 4,
@@ -349,7 +349,7 @@ describe("browser texture manager", () => {
 		});
 		const textureUses = Array.from({ length: 10 }, (_, index) =>
 			createTextureUseCommit({
-				domain: "outdoor-detail",
+				domain: "outdoor-generated-scenery",
 				drawUnitId: "detail-static-a",
 				renderSurfaceId: 0x06003780 + index,
 				textureUseId: `detail-static-a:base:${index}`,
@@ -1193,7 +1193,7 @@ describe("browser texture manager", () => {
 			staticBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
-					domain: "outdoor-detail",
+					domain: "outdoor-generated-scenery",
 					drawUnitId: "detail-a",
 					renderSurfaceId: 0x06000010,
 					samplingPolicy: {
@@ -1210,7 +1210,7 @@ describe("browser texture manager", () => {
 			textureUses: [
 				createDynamicTextureUseCommit({
 					textureBatchId: "batch-a",
-					textureDomain: "outdoor-detail",
+					textureDomain: "outdoor-generated-scenery",
 					renderSurfaceId: 0x06000010,
 					resourceId: "dynamic-windmill-part-0",
 					samplingPolicy: {
@@ -1401,7 +1401,7 @@ describe("browser texture manager", () => {
 			staticBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
-					domain: "outdoor-detail",
+					domain: "outdoor-generated-scenery",
 					drawUnitId: "detail-a",
 					renderSurfaceId: 0x06000010,
 					textureUseId: "detail-a:06000010",
@@ -1414,7 +1414,7 @@ describe("browser texture manager", () => {
 			textureUses: [
 				createDynamicTextureUseCommit({
 					textureBatchId: "batch-a",
-					textureDomain: "outdoor-detail",
+					textureDomain: "outdoor-generated-scenery",
 					renderSurfaceId: 0x06000010,
 					resourceId: "dynamic-windmill-part-0",
 					textureUseId: "dynamic-windmill-part-0:06000010",

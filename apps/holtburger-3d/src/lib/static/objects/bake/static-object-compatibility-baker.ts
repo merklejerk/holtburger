@@ -78,7 +78,6 @@ export function bakeStaticObjectCompatibility(
 		input.domain !== "outdoor-buildings" &&
 		input.domain !== "outdoor-explicit-objects" &&
 		input.domain !== "outdoor-generated-scenery" &&
-		input.domain !== "outdoor-detail" &&
 		input.domain !== "landblock-env-cells"
 	) {
 		throw new Error(
@@ -455,8 +454,8 @@ function createStaticObjectBakeDiagnostics(options: {
 		objectCount: options.payload.objects.length,
 		partitionCount: options.partitionPlan.partitions.length,
 		renderablePartitionCount: options.renderablePartitionCount,
-		retainedTransparentOutdoorDetailPartitionReasons:
-			createRetainedTransparentOutdoorDetailPartitionReasons({
+		retainedTransparentOutdoorGeneratedSceneryPartitionReasons:
+			createRetainedTransparentOutdoorGeneratedSceneryPartitionReasons({
 				partitions: options.retainedBakedPartitions,
 				payload: options.payload,
 				sourceIndex: options.sourceIndex,
@@ -551,16 +550,13 @@ function createStaticObjectInstancingBakeDiagnostics(input: {
 	};
 }
 
-function createRetainedTransparentOutdoorDetailPartitionReasons(options: {
+function createRetainedTransparentOutdoorGeneratedSceneryPartitionReasons(options: {
 	readonly partitions: readonly StaticObjectCompatibilityPartition[];
 	readonly payload: StaticObjectCompatibilityPayload;
 	readonly sourceIndex: StaticObjectBakeSourceIndex;
 }): StaticObjectRetainedTransparentPartitionReasonCounts {
 	const counts = createEmptyRetainedTransparentPartitionReasonCounts();
-	if (
-		options.payload.domain !== "outdoor-generated-scenery" &&
-		options.payload.domain !== "outdoor-detail"
-	) {
+	if (options.payload.domain !== "outdoor-generated-scenery") {
 		return counts;
 	}
 
@@ -733,10 +729,7 @@ function createStaticObjectInstancedOutput(options: {
 	readonly resources: readonly StaticObjectVisualResource[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
 } {
-	if (
-		options.payload.domain !== "outdoor-generated-scenery" &&
-		options.payload.domain !== "outdoor-detail"
-	) {
+	if (options.payload.domain !== "outdoor-generated-scenery") {
 		return {
 			cutoverPartitionSliceIds: new Set<string>(),
 			instances: [],
@@ -1297,8 +1290,7 @@ function createStaticObjectCompatibilityPayload(
 	if (
 		(item.work.job.domain === "outdoor-buildings" ||
 			item.work.job.domain === "outdoor-explicit-objects" ||
-			item.work.job.domain === "outdoor-generated-scenery" ||
-			item.work.job.domain === "outdoor-detail") &&
+			item.work.job.domain === "outdoor-generated-scenery") &&
 		item.payload.scope.kind === "outdoor-static-objects"
 	) {
 		return item.payload.scope;

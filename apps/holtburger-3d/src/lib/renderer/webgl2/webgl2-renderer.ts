@@ -26,7 +26,6 @@ import type {
 	OutdoorBuildingsLayerPayload,
 	OutdoorExplicitObjectsLayerPayload,
 	OutdoorGeneratedSceneryLayerPayload,
-	OutdoorDetailsLayerPayload,
 	RendererStaticLayerVisibility,
 	TerrainLayerPayload,
 	StaticTextureBinding,
@@ -880,8 +879,8 @@ class Webgl2Renderer implements Renderer {
 	#lastOutdoorCrossingSource: SceneDomainTargetSnapshot["outdoorCrossingSource"] =
 		"none";
 	#lastStaticObjectBakedDirectDrawCalls = 0;
-	#lastOutdoorDetailStaticObjectBakedDirectDrawCalls = 0;
-	#lastOutdoorDetailStaticObjectBakedDirectDrawCallsByPass =
+	#lastOutdoorGeneratedSceneryStaticObjectBakedDirectDrawCalls = 0;
+	#lastOutdoorGeneratedSceneryStaticObjectBakedDirectDrawCallsByPass =
 		createEmptyStaticObjectMaterialPassDrawCallCounts();
 	#lastStaticObjectDirectRenderInstanceDrawCalls = 0;
 	#lastStaticObjectInstancedRenderInstanceDrawCalls = 0;
@@ -1018,21 +1017,10 @@ class Webgl2Renderer implements Renderer {
 		);
 	}
 
-	setOutdoorDetailsLayer(
-		landblockId: number,
-		payload: OutdoorDetailsLayerPayload | null,
-	): void {
-		this.#setOutdoorStaticObjectLayer("outdoor-detail", landblockId, payload);
-	}
-
 	#setOutdoorStaticObjectLayer(
-		kind:
-			| "outdoor-detail"
-			| "outdoor-explicit-objects"
-			| "outdoor-generated-scenery",
+		kind: "outdoor-explicit-objects" | "outdoor-generated-scenery",
 		landblockId: number,
 		payload:
-			| OutdoorDetailsLayerPayload
 			| OutdoorExplicitObjectsLayerPayload
 			| OutdoorGeneratedSceneryLayerPayload
 			| null,
@@ -1461,8 +1449,8 @@ class Webgl2Renderer implements Renderer {
 		this.#lastEnvCellOutdoorCrossingColorBase = false;
 		this.#lastOutdoorCrossingSource = "none";
 		this.#lastStaticObjectBakedDirectDrawCalls = 0;
-		this.#lastOutdoorDetailStaticObjectBakedDirectDrawCalls = 0;
-		this.#lastOutdoorDetailStaticObjectBakedDirectDrawCallsByPass =
+		this.#lastOutdoorGeneratedSceneryStaticObjectBakedDirectDrawCalls = 0;
+		this.#lastOutdoorGeneratedSceneryStaticObjectBakedDirectDrawCallsByPass =
 			createEmptyStaticObjectMaterialPassDrawCallCounts();
 		this.#lastStaticObjectDirectRenderInstanceDrawCalls = 0;
 		this.#lastStaticObjectInstancedRenderInstanceDrawCalls = 0;
@@ -2604,12 +2592,12 @@ class Webgl2Renderer implements Renderer {
 		resource: StaticObjectGeometryResource,
 	): void {
 		this.#lastStaticObjectBakedDirectDrawCalls += 1;
-		if (resource.domain !== "outdoor-detail") {
+		if (resource.domain !== "outdoor-generated-scenery") {
 			return;
 		}
-		this.#lastOutdoorDetailStaticObjectBakedDirectDrawCalls += 1;
+		this.#lastOutdoorGeneratedSceneryStaticObjectBakedDirectDrawCalls += 1;
 		incrementStaticObjectMaterialPassDrawCallCounts(
-			this.#lastOutdoorDetailStaticObjectBakedDirectDrawCallsByPass,
+			this.#lastOutdoorGeneratedSceneryStaticObjectBakedDirectDrawCallsByPass,
 			resource.materialPass,
 		);
 	}
@@ -3083,27 +3071,27 @@ class Webgl2Renderer implements Renderer {
 				this.#lastStaticObjectFarTransparentInstancedRenderInstanceDrawCalls,
 			staticObjectFarTransparentInstancedRenderInstances:
 				this.#lastStaticObjectFarTransparentInstancedRenderInstances,
-			outdoorDetailStaticObjectResources: staticObjectResources.filter(
-				(resource) => resource.domain === "outdoor-detail",
+			outdoorGeneratedSceneryStaticObjectResources: staticObjectResources.filter(
+				(resource) => resource.domain === "outdoor-generated-scenery",
 			).length,
-			outdoorDetailStaticObjectBakedDirectDrawCalls:
-				this.#lastOutdoorDetailStaticObjectBakedDirectDrawCalls,
-			outdoorDetailStaticObjectBakedDirectDrawCallsByPass: {
-				...this.#lastOutdoorDetailStaticObjectBakedDirectDrawCallsByPass,
+			outdoorGeneratedSceneryStaticObjectBakedDirectDrawCalls:
+				this.#lastOutdoorGeneratedSceneryStaticObjectBakedDirectDrawCalls,
+			outdoorGeneratedSceneryStaticObjectBakedDirectDrawCallsByPass: {
+				...this.#lastOutdoorGeneratedSceneryStaticObjectBakedDirectDrawCallsByPass,
 			},
-			outdoorDetailStaticObjectVisualResources:
+			outdoorGeneratedSceneryStaticObjectVisualResources:
 				staticObjectVisualResources.length,
-			outdoorDetailStaticObjectRenderInstances:
+			outdoorGeneratedSceneryStaticObjectRenderInstances:
 				this.#staticObjectRenderInstances.size,
 			staticObjectUploadedBufferBytes: sumNumbers(
 				[...staticObjectResources, ...staticObjectVisualResources].map(
 					(resource) => resource.uploadedBufferBytes,
 				),
 			),
-			outdoorDetailStaticObjectUploadedBufferBytes: sumNumbers(
+			outdoorGeneratedSceneryStaticObjectUploadedBufferBytes: sumNumbers(
 				[
 					...staticObjectResources.filter(
-						(resource) => resource.domain === "outdoor-detail",
+						(resource) => resource.domain === "outdoor-generated-scenery",
 					),
 					...staticObjectVisualResources,
 				].map((resource) => resource.uploadedBufferBytes),
@@ -3828,7 +3816,6 @@ function staticLayerVisibilityEquals(
 
 function getOutdoorLayerInstancedObjectResources(
 	payload:
-		| OutdoorDetailsLayerPayload
 		| OutdoorExplicitObjectsLayerPayload
 		| OutdoorGeneratedSceneryLayerPayload
 		| null,
@@ -3840,7 +3827,6 @@ function getOutdoorLayerInstancedObjectResources(
 
 function getOutdoorLayerInstancedObjectInstances(
 	payload:
-		| OutdoorDetailsLayerPayload
 		| OutdoorExplicitObjectsLayerPayload
 		| OutdoorGeneratedSceneryLayerPayload
 		| null,
@@ -4127,11 +4113,6 @@ function shouldDrawOutdoorObjectDomain(
 			return visibility.outdoorExplicitObjects;
 		case "outdoor-generated-scenery":
 			return visibility.outdoorGeneratedScenery;
-		case "outdoor-detail":
-			return (
-				visibility.outdoorExplicitObjects ||
-				visibility.outdoorGeneratedScenery
-			);
 	}
 }
 
@@ -4784,7 +4765,7 @@ function createStaticObjectVisualGeometryResource(
 	});
 
 	return {
-		domain: "outdoor-detail",
+		domain: "outdoor-generated-scenery",
 		drawUnitId: resource.resourceId,
 		indexBuffer: uploadedGeometry.indexBuffer,
 		indexCount: uploadedGeometry.indexCount,

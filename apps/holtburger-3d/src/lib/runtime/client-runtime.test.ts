@@ -35,7 +35,6 @@ import type {
 	OutdoorBuildingsLayerPayload,
 	OutdoorExplicitObjectsLayerPayload,
 	OutdoorGeneratedSceneryLayerPayload,
-	OutdoorDetailsLayerPayload,
 	PortalFrameWorkPlan,
 	RenderPassPlan,
 	SamplerPolicyUpdate,
@@ -2450,7 +2449,7 @@ describe("browser client runtime", () => {
 					triangleCount: 1584,
 				},
 			],
-			domain: "outdoor-detail",
+			domain: "outdoor-generated-scenery",
 			kind: "static-material-coverage-deferred",
 			landblockId: 0xda55ffff,
 			revision: 1,
@@ -2830,10 +2829,10 @@ function createEnvCellLayerOwner(
 
 function createOutdoorLayerOwner(
 	landblockId: number,
-	domain: "outdoor-buildings" | "outdoor-detail" = "outdoor-buildings",
+	domain: "outdoor-buildings" | "outdoor-generated-scenery" = "outdoor-buildings",
 ): StaticLayerPeerRecordOwner {
 	const keyKind =
-		domain === "outdoor-detail" ? "outdoor-generated-scenery" : domain;
+		domain === "outdoor-generated-scenery" ? "outdoor-generated-scenery" : domain;
 	return {
 		domain,
 		key: {
@@ -2975,10 +2974,6 @@ class FakeRenderer implements Renderer {
 		number,
 		OutdoorGeneratedSceneryLayerPayload | null,
 	][] = [];
-	readonly outdoorDetailsLayerUpdates: readonly [
-		number,
-		OutdoorDetailsLayerPayload | null,
-	][] = [];
 	readonly envCellSystemLayerUpdates: readonly [
 		number,
 		EnvCellSystemLayerPayload | null,
@@ -3040,17 +3035,17 @@ class FakeRenderer implements Renderer {
 		staticObjectResources: 0,
 		staticObjectUploadedBufferBytes: 0,
 		staticObjectVisualResources: 0,
-		outdoorDetailStaticObjectBakedDirectDrawCalls: 0,
-		outdoorDetailStaticObjectBakedDirectDrawCallsByPass: {
+		outdoorGeneratedSceneryStaticObjectBakedDirectDrawCalls: 0,
+		outdoorGeneratedSceneryStaticObjectBakedDirectDrawCallsByPass: {
 			additive: 0,
 			alphaTest: 0,
 			opaque: 0,
 			transparent: 0,
 		},
-		outdoorDetailStaticObjectRenderInstances: 0,
-		outdoorDetailStaticObjectResources: 0,
-		outdoorDetailStaticObjectUploadedBufferBytes: 0,
-		outdoorDetailStaticObjectVisualResources: 0,
+		outdoorGeneratedSceneryStaticObjectRenderInstances: 0,
+		outdoorGeneratedSceneryStaticObjectResources: 0,
+		outdoorGeneratedSceneryStaticObjectUploadedBufferBytes: 0,
+		outdoorGeneratedSceneryStaticObjectVisualResources: 0,
 		recentStaticObjectUploads: [],
 		terrainDrawUnits: 0,
 	};
@@ -3084,12 +3079,6 @@ class FakeRenderer implements Renderer {
 		payload: OutdoorGeneratedSceneryLayerPayload | null,
 	): void {
 		this.outdoorGeneratedSceneryLayerUpdates.push([landblockId, payload]);
-	}
-	setOutdoorDetailsLayer(
-		landblockId: number,
-		payload: OutdoorDetailsLayerPayload | null,
-	): void {
-		this.outdoorDetailsLayerUpdates.push([landblockId, payload]);
 	}
 	setEnvCellSystemLayer(
 		landblockId: number,
@@ -3424,7 +3413,7 @@ function createOutdoorStaticObjectsPayload(
 	};
 
 	return {
-		domain: options.domain ?? "outdoor-detail",
+		domain: options.domain ?? "outdoor-generated-scenery",
 		kind: "outdoor-static-objects",
 		landblock: {
 			kind: "landblock-source",
@@ -3553,7 +3542,7 @@ function createStaticObjectDrawUnit(
 		domain:
 			options.ownership?.kind === "env-cell-static-object-seeds"
 				? "landblock-env-cells"
-				: "outdoor-detail",
+				: "outdoor-generated-scenery",
 		drawUnitId,
 		indexType: "uint16",
 		indices: new Uint16Array([0, 1, 2]),
@@ -3587,7 +3576,7 @@ function createStaticObjectDrawUnit(
 		ownership:
 			options.ownership ??
 			({
-				domain: "outdoor-detail",
+				domain: "outdoor-generated-scenery",
 				kind: "outdoor-static-objects",
 				landblockId: 0xda55ffff,
 			} satisfies StaticObjectGeometryStaticDrawUnit["ownership"]),
@@ -3709,7 +3698,7 @@ function createStaticObjectRenderInstance(options: {
 
 	return {
 		bounds,
-		domain: "outdoor-detail",
+		domain: "outdoor-generated-scenery",
 		generated: null,
 		instanceId: options.instanceId,
 		kind: "static-object-render-instance",
@@ -4036,11 +4025,11 @@ function createDeferredBlendedMaterialCoverage(): StaticMaterialCoverageReport {
 				triangleCount: 1584,
 			},
 		],
-		coverageKey: "outdoor-detail:static-objects",
+		coverageKey: "outdoor-generated-scenery:static-objects",
 		coverageKind: "outdoor-static-objects",
 		deferredTriangleCount: 1584,
 		detailRoleCount: 0,
-		domain: "outdoor-detail",
+		domain: "outdoor-generated-scenery",
 		fallbackReasonCount: 1,
 		fallbackReasonCounts: [{ code: "translucent-render-deferred", count: 1 }],
 		landblockId: 0xda55ffff,

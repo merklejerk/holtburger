@@ -20,8 +20,8 @@ describe("static landblock layer contracts", () => {
 		expect(staticLayerKindForStaticDomain("outdoor-generated-scenery")).toBe(
 			"outdoor-generated-scenery",
 		);
-		expect(staticLayerKindForStaticDomain("outdoor-detail")).toBe(
-			"outdoor-detail",
+		expect(staticLayerKindForStaticDomain("outdoor-generated-scenery")).toBe(
+			"outdoor-generated-scenery",
 		);
 		expect(staticLayerKindForStaticDomain("landblock-env-cells")).toBe(
 			"env-cell-system",

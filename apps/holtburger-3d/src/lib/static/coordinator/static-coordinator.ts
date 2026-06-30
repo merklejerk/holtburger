@@ -1079,7 +1079,6 @@ function createLayerOwnerKindForDomain(
 		case "outdoor-explicit-objects":
 			return "outdoor-explicit-objects";
 		case "outdoor-generated-scenery":
-		case "outdoor-detail":
 			return "outdoor-generated-scenery";
 		case "landblock-env-cells":
 			return "env-cell-system";

@@ -135,13 +135,13 @@ export interface RendererDiagnosticsSummary {
 	readonly staticObjectFarTransparentDirectRenderInstanceDrawCalls: number;
 	readonly staticObjectFarTransparentInstancedRenderInstanceDrawCalls: number;
 	readonly staticObjectFarTransparentInstancedRenderInstances: number;
-	readonly outdoorDetailStaticObjectResources: number;
-	readonly outdoorDetailStaticObjectBakedDirectDrawCalls: number;
-	readonly outdoorDetailStaticObjectBakedDirectDrawCallsByPass: RendererSnapshot["outdoorDetailStaticObjectBakedDirectDrawCallsByPass"];
-	readonly outdoorDetailStaticObjectVisualResources: number;
-	readonly outdoorDetailStaticObjectRenderInstances: number;
+	readonly outdoorGeneratedSceneryStaticObjectResources: number;
+	readonly outdoorGeneratedSceneryStaticObjectBakedDirectDrawCalls: number;
+	readonly outdoorGeneratedSceneryStaticObjectBakedDirectDrawCallsByPass: RendererSnapshot["outdoorGeneratedSceneryStaticObjectBakedDirectDrawCallsByPass"];
+	readonly outdoorGeneratedSceneryStaticObjectVisualResources: number;
+	readonly outdoorGeneratedSceneryStaticObjectRenderInstances: number;
 	readonly staticObjectUploadedBufferBytes: number;
-	readonly outdoorDetailStaticObjectUploadedBufferBytes: number;
+	readonly outdoorGeneratedSceneryStaticObjectUploadedBufferBytes: number;
 	readonly staticObjectUploadSummary: StaticObjectUploadSummaryDiagnostics;
 }
 
@@ -225,7 +225,7 @@ interface StaticObjectBakeSummaryDiagnostics {
 	readonly estimatedInstancedSourceTypedArrayBytes: number;
 	readonly estimatedAvoidedFlattenedTriangleCount: number;
 	readonly estimatedAvoidedFlattenedTypedArrayBytes: number;
-	readonly retainedTransparentOutdoorDetailPartitionReasons: StaticObjectRetainedTransparentPartitionReasonSummaryDiagnostics;
+	readonly retainedTransparentOutdoorGeneratedSceneryPartitionReasons: StaticObjectRetainedTransparentPartitionReasonSummaryDiagnostics;
 	readonly largestBake: StaticObjectBakeSampleDiagnostics | null;
 }
 

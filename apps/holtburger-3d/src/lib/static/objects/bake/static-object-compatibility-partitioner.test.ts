@@ -592,7 +592,8 @@ describe("static object compatibility partitioner", () => {
 				kind: "outdoor-static-object-dynamic-seed",
 				owner: expect.objectContaining({
 					domain: "outdoor-buildings",
-					workId: "1:landblock:da55ffff:outdoor-buildings",
+					kind: "layer-owner",
+					ownerId: "outdoor-buildings:0xda55ffff",
 				}),
 				seed: dynamicSeed,
 			},
@@ -1114,7 +1115,7 @@ describe("static object compatibility partitioner", () => {
 			drawUnitCount: 0,
 			instancedRenderInstanceCount: 2,
 			instancedVisualResourceCount: 1,
-			retainedTransparentOutdoorDetailPartitionReasons: {
+			retainedTransparentOutdoorGeneratedSceneryPartitionReasons: {
 				explicitObject: 0,
 				missingInstanceBounds: 0,
 				nonRenderableOrDeferredMaterialBucket: 0,
@@ -1802,7 +1803,7 @@ function createPayload(options: {
 }): OutdoorStaticObjectsScopePayload {
 	const domain = options.domain ?? "outdoor-buildings";
 	const isGeneratedScenery =
-		domain === "outdoor-generated-scenery" || domain === "outdoor-detail";
+		domain === "outdoor-generated-scenery" || domain === "outdoor-generated-scenery";
 	const objectIdentity = createObjectIdentity({
 		instanceId: isGeneratedScenery ? "detail-0" : "building-0",
 		objectKind: isGeneratedScenery ? "generated-scenery" : "building",
@@ -1845,7 +1846,7 @@ function createPayload(options: {
 				debug: { sourceAssetId: "setup-model/02000010" },
 				generated:
 					domain === "outdoor-generated-scenery" ||
-					domain === "outdoor-detail"
+					domain === "outdoor-generated-scenery"
 						? { sceneId: 1, sceneTemplateIndex: 0, terrainIndex: 0 }
 						: null,
 				identity: objectIdentity,

@@ -330,8 +330,7 @@ function isOutdoorStaticObjectDomain(
 	return (
 		domain === "outdoor-buildings" ||
 		domain === "outdoor-explicit-objects" ||
-		domain === "outdoor-generated-scenery" ||
-		domain === "outdoor-detail"
+		domain === "outdoor-generated-scenery"
 	);
 }
 
@@ -346,8 +345,6 @@ function shouldIncludeOutdoorStaticObject(
 			return objectKind === "explicit-object";
 		case "outdoor-generated-scenery":
 			return objectKind === "generated-scenery";
-		case "outdoor-detail":
-			return objectKind === "generated-scenery" || objectKind === "explicit-object";
 	}
 }
 
@@ -449,8 +446,7 @@ function createRegionDetailRolesForDomain(
 ): readonly RegionDetailRoleFacts[] {
 	if (
 		domain === "outdoor-explicit-objects" ||
-		domain === "outdoor-generated-scenery" ||
-		domain === "outdoor-detail"
+		domain === "outdoor-generated-scenery"
 	) {
 		return [];
 	}

@@ -14,7 +14,6 @@ export type StaticDomain =
 	| "outdoor-terrain"
 	| "outdoor-buildings"
 	| OutdoorStaticObjectLayerDomain
-	| "outdoor-detail"
 	| "landblock-env-cells";
 
 /**
@@ -26,15 +25,9 @@ export type OutdoorStaticObjectLayerDomain =
 	| "outdoor-explicit-objects"
 	| "outdoor-generated-scenery";
 
-/**
- * Outdoor static-object domains accepted by materialization contracts. The
- * combined detail domain remains only for the old resolver path scheduled for
- * removal in the source-first cutover phases.
- */
 export type OutdoorStaticObjectDomain =
 	| "outdoor-buildings"
-	| OutdoorStaticObjectLayerDomain
-	| "outdoor-detail";
+	| OutdoorStaticObjectLayerDomain;
 
 /**
  * Runtime-authored object-material texture placement is not a static resolver
@@ -1378,7 +1371,7 @@ export interface StaticObjectBakeDiagnostics {
 	readonly estimatedInstancedSourceTypedArrayBytes: number;
 	readonly estimatedAvoidedFlattenedTriangleCount: number;
 	readonly estimatedAvoidedFlattenedTypedArrayBytes: number;
-	readonly retainedTransparentOutdoorDetailPartitionReasons: StaticObjectRetainedTransparentPartitionReasonCounts;
+	readonly retainedTransparentOutdoorGeneratedSceneryPartitionReasons: StaticObjectRetainedTransparentPartitionReasonCounts;
 }
 
 export interface StaticObjectRetainedTransparentPartitionReasonCounts {
@@ -1577,7 +1570,7 @@ export interface StaticObjectRenderInstance {
 	readonly kind: "static-object-render-instance";
 	readonly instanceId: string;
 	readonly resourceId: StaticObjectVisualResourceId;
-	readonly domain: OutdoorStaticObjectLayerDomain | "outdoor-detail";
+	readonly domain: OutdoorStaticObjectLayerDomain;
 	readonly landblockId: number;
 	readonly transform: StaticPlacementTransform;
 	/**

@@ -2004,35 +2004,88 @@ Decisions and course corrections:
 - No retained-scope, durable work-owner, or source-scope ownership paths remain in executable static/runtime/dynamic code.
 - Validation reused the Phase 11C final frontend gates: `npm run check`; `npm run test:ts -- src/lib/renderer/static-layer-contracts.test.ts src/lib/static/demand-planner.test.ts src/lib/static/coordinator/static-coordinator.test.ts src/lib/static/objects/static-object-visual-resource-key.test.ts src/lib/static/objects/bake/static-object-compatibility-partitioner.test.ts src/lib/runtime/static-scene-query.test.ts src/lib/runtime/client-runtime.test.ts src/lib/renderer/webgl2/webgl2-renderer.test.ts src/lib/textures/texture-manager.test.ts`; zero-reference audits for old route/domain/lifecycle names.
 
-### Phase 12: Final Verification And Documentation Cleanup
+### Phase 12A: Final Validation Gates
 
 Status: pending.
 
-Goal: prove the full cutover and leave the implementation plan accurate for posterity.
+Goal: prove the touched Rust and TypeScript code still passes the relevant automated gates after the clean cutover.
 
 Deliverables:
 
 - Run the full relevant Rust and TypeScript validation suite for touched areas.
-- Run and record zero-reference audits for old route-facing names, old lifecycle abstractions, and old unsplit renderer/domain names.
-- Update this plan with completed phase notes, course corrections, and any deferred debt.
-- Update architecture docs only where the implementation changes durable boundaries.
+- Record validation commands and results in this phase.
 
 Acceptance criteria:
 
-- Definition of Done is satisfied.
+- `apps/holtburger-3d` TypeScript checks and tests pass.
+- Rust formatting, clippy, and touched crate tests pass.
+- Any command that cannot run is recorded with the concrete blocker and follow-up owner before continuing.
+
+Task checklist:
+
+- [ ] Run app TypeScript tests and lint for `apps/holtburger-3d`.
+- [ ] Run `cargo fmt --check`.
+- [ ] Run clippy for touched Rust crates.
+- [ ] Run Rust tests for `holtburger-content`, `holtburger-core`, `holtburger-3d`, and `holtburger-debug-harness`.
+- [ ] Update completed status/progress notes.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 12B: Final Zero-Reference Audits
+
+Status: pending.
+
+Goal: prove no executable compatibility path keeps the removed old route/domain/lifecycle model alive.
+
+Deliverables:
+
+- Run and record zero-reference audits for old route-facing names, old lifecycle abstractions, and old unsplit renderer/domain names.
+- Classify any surviving old terminology as historical prose, internal source vocabulary, or a real cleanup blocker.
+- Delete any newly discovered executable vestige before moving to documentation closeout.
+
+Acceptance criteria:
+
 - No old broad route remains.
 - No old host asset key, payload schema, resolver, attachment provider, scheduler branch, lifecycle owner, diagnostic counter, or test fixture keeps the removed route/domain model executable.
 - Any surviving mention of old terminology is documented as non-executable historical prose or internal source vocabulary, not a compatibility path.
 - No old-ownership cleanup target remains without an explicit follow-up owner.
-- The plan accurately records final behavior and any concessions.
 
 Task checklist:
 
-- [ ] Run Rust tests for `holtburger-content`, `holtburger-core`, and Tauri adapter changes.
-- [ ] Run app TypeScript tests and lint for `apps/holtburger-3d`.
-- [ ] Run clippy for touched Rust crates.
 - [ ] Run zero-reference audits for `landblock/{id}/outdoor`, `landblock/{id}/env-cells`, `landblock/{id}/topology`, `landblock-outdoor`, `landblock-env-cells`, route-facing `LandblockOutdoor`, route-facing `LandblockEnvCells`, route-facing `LandblockTopology`, `outdoor-detail`, `EnvCellSystemLayerAssemblyStore`, `LandblockEnvCellGeometryAttachmentProvider`, retained scopes, desired keys, active work ids, and source scope keys.
+- [ ] Classify all surviving hits in this plan.
+- [ ] Delete any surviving executable compatibility path discovered by the audit.
 - [ ] Update completed status/progress notes.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 12C: Documentation And Definition-Of-Done Closeout
+
+Status: pending.
+
+Goal: leave the implementation plan accurate for posterity and explicitly close the feature definition.
+
+Deliverables:
+
+- Update this plan with completed phase notes, course corrections, and any deferred debt.
+- Update architecture docs only where the implementation changes durable boundaries.
+- Confirm the Definition of Done is satisfied.
+
+Acceptance criteria:
+
+- Definition of Done is satisfied.
+- The plan accurately records final behavior and any concessions.
+- Any remaining cleanup is recorded in a dedicated follow-up plan only if it is intentionally deferred.
+
+Task checklist:
+
+- [ ] Review the plan against the final implementation and update stale prose where it would mislead future maintainers.
+- [ ] Update architecture docs only if the implemented boundaries differ from existing durable docs.
+- [ ] Confirm all phases and Definition of Done checklist items are complete.
 - [ ] Record any remaining cleanup in a dedicated follow-up plan only if it is intentionally deferred.
 
 Decisions and course corrections:

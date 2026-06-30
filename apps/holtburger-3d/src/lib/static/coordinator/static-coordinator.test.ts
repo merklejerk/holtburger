@@ -8,7 +8,7 @@ import type {
 	StaticScopePayload,
 	StaticMaterialCoverageReport,
 	StaticBakeAttachmentProvider,
-	ScheduledStaticWork,
+	StaticBakeTask,
 	StaticSpatialRecord,
 	StaticLayerTaskStatus,
 	TerrainGeometryStaticDrawUnit,
@@ -16,7 +16,7 @@ import type {
 	StaticObjectBakeDiagnostics,
 } from "../contracts";
 import { StaticCoordinator } from "./static-coordinator";
-import { createLayerPeerRecordOwnerForStaticWork } from "../layer-owners";
+import { createLayerPeerRecordOwnerForStaticBakeTask } from "../layer-owners";
 
 describe("static coordinator", () => {
 	it("drops late resolver results after a newer demand revision supersedes them", async () => {
@@ -27,18 +27,18 @@ describe("static coordinator", () => {
 			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
 			resolver,
 		});
-		const [firstWork] = scheduledWorkForDemand(
+		const [firstWork] = bakeTasksForDemand(
 			coordinator,
 			createSingleTerrainDemand(0xda55ffff),
 		);
-		const [secondWork] = scheduledWorkForDemand(
+		const [secondWork] = bakeTasksForDemand(
 			coordinator,
 			createSingleTerrainDemand(0xda56ffff),
 		);
 		const firstResolverRequest = resolver.pendingRequests[0];
 		const secondResolverRequest = resolver.pendingRequests[1];
 
-		expect(firstWork.job).toEqual(firstResolverRequest?.job);
+		expect({ domain: firstWork.domain, scope: firstWork.scope }).toEqual(firstResolverRequest?.job);
 		resolver.complete(firstResolverRequest?.requestId ?? "");
 		await flushPromises();
 
@@ -49,7 +49,7 @@ describe("static coordinator", () => {
 
 		resolver.complete(secondResolverRequest?.requestId ?? "");
 		await flushPromises();
-		baker.complete(secondWork.staticWorkId, {
+		baker.complete(secondWork.taskId, {
 			drawUnits: [createTerrainDrawUnit("terrain-a", 0xda56ffff)],
 		});
 		await flushPromises();
@@ -69,7 +69,7 @@ describe("static coordinator", () => {
 			resolver,
 		});
 
-		const [firstWork] = scheduledWorkForDemand(
+		const [firstWork] = bakeTasksForDemand(
 			coordinator,
 			createSingleTerrainDemand(0xda55ffff),
 		);
@@ -78,8 +78,8 @@ describe("static coordinator", () => {
 
 		expect(baker.pendingInputs).toHaveLength(1);
 
-		scheduledWorkForDemand(coordinator, createSingleTerrainDemand(0xda56ffff));
-		baker.complete(firstWork.staticWorkId);
+		bakeTasksForDemand(coordinator, createSingleTerrainDemand(0xda56ffff));
+		baker.complete(firstWork.taskId);
 		await flushPromises();
 
 		expect(coordinator.createSnapshot()).toMatchObject({
@@ -101,7 +101,7 @@ describe("static coordinator", () => {
 			resolver,
 		});
 
-		scheduledWorkForDemand(coordinator, createSingleTerrainDemand(0xda55ffff));
+		bakeTasksForDemand(coordinator, createSingleTerrainDemand(0xda55ffff));
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
 
@@ -127,7 +127,7 @@ describe("static coordinator", () => {
 			resolver,
 		});
 
-		scheduledWorkForDemand(coordinator, {
+		bakeTasksForDemand(coordinator, {
 			location: {
 				kind: "outdoor-landblock",
 				landblockId: 0xda55ffff,
@@ -141,7 +141,7 @@ describe("static coordinator", () => {
 		});
 		expect(resolver.pendingRequests).toHaveLength(9);
 
-		scheduledWorkForDemand(coordinator, {
+		bakeTasksForDemand(coordinator, {
 			location: {
 				kind: "outdoor-landblock",
 				landblockId: 0xdb55ffff,
@@ -194,7 +194,7 @@ describe("static coordinator", () => {
 			resolver,
 		});
 
-		scheduledWorkForDemand(coordinator, createSingleTerrainDemand(0xda55ffff));
+		bakeTasksForDemand(coordinator, createSingleTerrainDemand(0xda55ffff));
 
 		expect(coordinator.createSnapshot().layerTasks).toEqual([
 			{
@@ -222,7 +222,7 @@ describe("static coordinator", () => {
 			resolver,
 		});
 
-		scheduledWorkForDemand(coordinator, createSingleOutdoorObjectDemand(0xda55ffff));
+		bakeTasksForDemand(coordinator, createSingleOutdoorObjectDemand(0xda55ffff));
 
 		expect(coordinator.createSnapshot().ownerStates).toEqual([
 			{
@@ -266,7 +266,7 @@ describe("static coordinator", () => {
 			resolver,
 		});
 
-		scheduledWorkForDemand(
+		bakeTasksForDemand(
 			coordinator,
 			createSingleOutdoorObjectDemand(0xda55ffff),
 		);
@@ -308,7 +308,7 @@ describe("static coordinator", () => {
 		]);
 		expect(
 			baker.pendingInputs.flatMap((input) =>
-				input.items.map((item) => item.targetOwnerKey),
+				input.items.map((item) => item.task.ownerKey),
 			),
 		).toEqual([
 			{ kind: "terrain", landblockId: 0xda55ffff },
@@ -326,13 +326,13 @@ describe("static coordinator", () => {
 			resolver,
 		});
 
-		scheduledWorkForDemand(
+		bakeTasksForDemand(
 			coordinator,
 			createSingleOutdoorObjectDemand(0xda55ffff),
 		);
 		const sourceRequestId = resolver.pendingSourceRequests[0]?.requestId ?? "";
 
-		scheduledWorkForDemand(coordinator, {
+		bakeTasksForDemand(coordinator, {
 			location: null,
 			lod: { buildings: -1, detail: -1, envCells: -1, terrain: -1 },
 		});
@@ -351,14 +351,14 @@ describe("static coordinator", () => {
 			resolver,
 		});
 
-		scheduledWorkForDemand(coordinator, createSingleTerrainDemand(0xda55ffff));
+		bakeTasksForDemand(coordinator, createSingleTerrainDemand(0xda55ffff));
 		const oldSourceRequestId =
 			resolver.pendingSourceRequests[0]?.requestId ?? "";
-		scheduledWorkForDemand(coordinator, {
+		bakeTasksForDemand(coordinator, {
 			location: null,
 			lod: { buildings: -1, detail: -1, envCells: -1, terrain: -1 },
 		});
-		const [newTask] = scheduledWorkForDemand(
+		const [newTask] = bakeTasksForDemand(
 			coordinator,
 			createSingleTerrainDemand(0xda55ffff),
 		);
@@ -375,7 +375,7 @@ describe("static coordinator", () => {
 		expect(coordinator.createSnapshot().layerTasks).toMatchObject([
 			{
 				phase: "resolving",
-				taskId: newTask.staticWorkId,
+				taskId: newTask.taskId,
 			},
 		]);
 
@@ -383,8 +383,8 @@ describe("static coordinator", () => {
 		await flushPromises();
 
 		expect(baker.pendingInputs).toHaveLength(1);
-		expect(baker.pendingInputs[0]?.items[0]?.work.staticWorkId).toBe(
-			newTask.staticWorkId,
+		expect(baker.pendingInputs[0]?.items[0]?.task.taskId).toBe(
+			newTask.taskId,
 		);
 	});
 
@@ -397,7 +397,7 @@ describe("static coordinator", () => {
 			resolver,
 		});
 
-		const [work] = scheduledWorkForDemand(
+		const [work] = bakeTasksForDemand(
 			coordinator,
 			createSingleTerrainDemand(0xda55ffff),
 		);
@@ -417,7 +417,7 @@ describe("static coordinator", () => {
 			},
 		]);
 
-		baker.complete(work.staticWorkId, {
+		baker.complete(work.taskId, {
 			drawUnits: [createTerrainDrawUnit("terrain-a", 0xda55ffff)],
 		});
 		await flushPromises();
@@ -428,7 +428,7 @@ describe("static coordinator", () => {
 			},
 		]);
 
-		scheduledWorkForDemand(coordinator, {
+		bakeTasksForDemand(coordinator, {
 			location: null,
 			lod: { buildings: -1, detail: -1, envCells: -1, terrain: -1 },
 		});
@@ -446,13 +446,13 @@ describe("static coordinator", () => {
 			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
 			resolver: emptyResolver,
 		});
-		const [emptyWork] = scheduledWorkForDemand(
+		const [emptyWork] = bakeTasksForDemand(
 			emptyCoordinator,
 			createSingleTerrainDemand(0xda55ffff),
 		);
 		emptyResolver.complete(emptyResolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
-		emptyBaker.complete(emptyWork.staticWorkId, { drawUnits: [] });
+		emptyBaker.complete(emptyWork.taskId, { drawUnits: [] });
 		await flushPromises();
 
 		expect(emptyCoordinator.createSnapshot().ownerStates).toMatchObject([
@@ -469,7 +469,7 @@ describe("static coordinator", () => {
 			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
 			resolver: failedResolver,
 		});
-		scheduledWorkForDemand(failedCoordinator, createSingleTerrainDemand(0xda55ffff));
+		bakeTasksForDemand(failedCoordinator, createSingleTerrainDemand(0xda55ffff));
 		failedResolver.complete(failedResolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
 
@@ -580,13 +580,13 @@ describe("static coordinator", () => {
 		const deltas: StaticCoordinatorCommitDelta[] = [];
 		coordinator.subscribeCommits((delta) => deltas.push(delta));
 
-		const [work] = scheduledWorkForDemand(
+		const [work] = bakeTasksForDemand(
 			coordinator,
 			createSingleTerrainDemand(0xda55ffff),
 		);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
-		baker.complete(work.staticWorkId, {
+		baker.complete(work.taskId, {
 			drawUnits: [createTerrainDrawUnit("terrain-a", 0xda55ffff)],
 		});
 		await flushPromises();
@@ -612,7 +612,7 @@ describe("static coordinator", () => {
 		]);
 		expect(coordinator.createSnapshot().committedDrawUnits).toBe(1);
 
-		scheduledWorkForDemand(coordinator, {
+		bakeTasksForDemand(coordinator, {
 			location: null,
 			lod: {
 				buildings: -1,
@@ -650,10 +650,10 @@ describe("static coordinator", () => {
 			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
 			resolver,
 		});
-		const work = scheduledWorkForDemand(
+		const work = bakeTasksForDemand(
 			coordinator,
 			createSingleOutdoorObjectDemand(0xda55ffff),
-		).find((candidate) => candidate.job.domain === "outdoor-generated-scenery");
+		).find((candidate) => candidate.domain === "outdoor-generated-scenery");
 		const diagnostics = createStaticObjectBakeDiagnostics();
 
 		expect(work).toBeDefined();
@@ -663,7 +663,7 @@ describe("static coordinator", () => {
 			)?.requestId ?? "",
 		);
 		await flushPromises();
-		baker.complete(work?.staticWorkId ?? "", {
+		baker.complete(work?.taskId ?? "", {
 			staticObjectBakeDiagnostics: [diagnostics],
 		});
 		await flushPromises();
@@ -696,7 +696,7 @@ describe("static coordinator", () => {
 		const deltas: StaticCoordinatorCommitDelta[] = [];
 		coordinator.subscribeCommits((delta) => deltas.push(delta));
 
-		scheduledWorkForDemand(coordinator, createSingleTerrainDemand(0xda55ffff));
+		bakeTasksForDemand(coordinator, createSingleTerrainDemand(0xda55ffff));
 		const reconciliation = coordinator.reconcileStaticDemand({
 			location: null,
 			lod: {
@@ -726,13 +726,13 @@ describe("static coordinator", () => {
 		const deltas: StaticCoordinatorCommitDelta[] = [];
 		coordinator.subscribeCommits((delta) => deltas.push(delta));
 
-		const [work] = scheduledWorkForDemand(
+		const [work] = bakeTasksForDemand(
 			coordinator,
 			createSingleTerrainDemand(0xda55ffff),
 		);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
-		baker.complete(work.staticWorkId, {
+		baker.complete(work.taskId, {
 			drawUnits: [createInvalidOwnerlessDrawUnit("bad-draw-unit")],
 		});
 		await flushPromises();
@@ -761,7 +761,7 @@ describe("static coordinator", () => {
 			resolver,
 		});
 
-		const work = scheduledWorkForDemand(coordinator, {
+		const work = bakeTasksForDemand(coordinator, {
 			location: {
 				kind: "outdoor-landblock",
 				landblockId: 0xda55ffff,
@@ -774,12 +774,12 @@ describe("static coordinator", () => {
 			},
 		});
 		const terrainWork = work.filter(
-			(item) => item.job.domain === "outdoor-terrain",
+			(item) => item.domain === "outdoor-terrain",
 		);
 		const completedTerrainRequests = resolver.pendingRequests.slice(0, 2);
 		const completedTerrainWork = completedTerrainRequests.map((request) => {
 			const match = terrainWork.find(
-				(item) => item.job.scope.landblockId === request.job.scope.landblockId,
+				(item) => item.scope.landblockId === request.job.scope.landblockId,
 			);
 			if (!match) {
 				throw new Error("Expected completed terrain request to match work.");
@@ -791,7 +791,7 @@ describe("static coordinator", () => {
 		resolver.complete(completedTerrainRequests[1]?.requestId ?? "");
 		await flushPromises();
 
-		const firstTerrainScopeKey = `landblock:${completedTerrainWork[0]?.job.scope.landblockId
+		const firstTerrainScopeKey = `landblock:${completedTerrainWork[0]?.scope.landblockId
 			.toString(16)
 			.padStart(8, "0")}`;
 		expect(baker.pendingInputs).toHaveLength(1);
@@ -801,14 +801,14 @@ describe("static coordinator", () => {
 			staticBatchId: `static-batch:1:outdoor-terrain:${firstTerrainScopeKey}:2`,
 		});
 		expect(
-			baker.pendingInputs[0]?.items.map((item) => item.work.staticWorkId),
-		).toEqual(completedTerrainWork.map((item) => item.staticWorkId));
+			baker.pendingInputs[0]?.items.map((item) => item.task.taskId),
+		).toEqual(completedTerrainWork.map((item) => item.taskId));
 		expect(
-			baker.pendingInputs[0]?.items.map((item) => item.targetOwnerKey),
+			baker.pendingInputs[0]?.items.map((item) => item.task.ownerKey),
 		).toEqual(
 			completedTerrainWork.map((item) => ({
 				kind: "terrain",
-				landblockId: item.job.scope.landblockId,
+				landblockId: item.scope.landblockId,
 			})),
 		);
 
@@ -833,7 +833,7 @@ describe("static coordinator", () => {
 			resolver,
 		});
 
-		const work = scheduledWorkForDemand(coordinator, {
+		const work = bakeTasksForDemand(coordinator, {
 			location: {
 				kind: "outdoor-landblock",
 				landblockId: 0xda55ffff,
@@ -846,7 +846,7 @@ describe("static coordinator", () => {
 			},
 		});
 		const terrainWork = work.filter(
-			(item) => item.job.domain === "outdoor-terrain",
+			(item) => item.domain === "outdoor-terrain",
 		);
 		const evictedWork = terrainWork[0];
 		const retainedWork = terrainWork[1];
@@ -858,10 +858,10 @@ describe("static coordinator", () => {
 		await flushPromises();
 		expect(baker.pendingInputs).toHaveLength(0);
 
-		scheduledWorkForDemand(coordinator, {
+		bakeTasksForDemand(coordinator, {
 			location: {
 				kind: "outdoor-landblock",
-				landblockId: retainedWork.job.scope.landblockId,
+				landblockId: retainedWork.scope.landblockId,
 			},
 			lod: {
 				buildings: -1,
@@ -875,15 +875,15 @@ describe("static coordinator", () => {
 		await flushPromises();
 
 		expect(baker.pendingInputs).toHaveLength(1);
-		expect(baker.pendingInputs[0]?.items.map((item) => item.work.staticWorkId)).toEqual([
-			retainedWork.staticWorkId,
+		expect(baker.pendingInputs[0]?.items.map((item) => item.task.taskId)).toEqual([
+			retainedWork.taskId,
 		]);
 		expect(
-			baker.pendingInputs[0]?.items.map((item) => item.targetOwnerKey),
+			baker.pendingInputs[0]?.items.map((item) => item.task.ownerKey),
 		).toEqual([
 			{
 				kind: "terrain",
-				landblockId: retainedWork.job.scope.landblockId,
+				landblockId: retainedWork.scope.landblockId,
 			},
 		]);
 	});
@@ -899,7 +899,7 @@ describe("static coordinator", () => {
 		const sourcePayloads: StaticCoordinatorSourcePayloadDelta[] = [];
 		coordinator.subscribeSourcePayloads((delta) => sourcePayloads.push(delta));
 
-		const work = scheduledWorkForDemand(coordinator, {
+		const work = bakeTasksForDemand(coordinator, {
 			location: {
 				kind: "outdoor-landblock",
 				landblockId: 0xda55ffff,
@@ -912,7 +912,7 @@ describe("static coordinator", () => {
 			},
 		});
 		const buildingWork = work.find(
-			(item) => item.job.domain === "outdoor-buildings",
+			(item) => item.domain === "outdoor-buildings",
 		);
 		const buildingResolverRequest = resolver.pendingRequests.find(
 			(request) => request.job.domain === "outdoor-buildings",
@@ -1055,7 +1055,7 @@ describe("static coordinator", () => {
 			},
 		});
 		await flushPromises();
-		baker.complete(buildingWork?.staticWorkId ?? "");
+		baker.complete(buildingWork?.taskId ?? "");
 		await flushPromises();
 
 		expect(
@@ -1105,13 +1105,13 @@ describe("static coordinator", () => {
 			resolver,
 		});
 
-		const [work] = scheduledWorkForDemand(
+		const [work] = bakeTasksForDemand(
 			coordinator,
 			createSingleTerrainDemand(0xda55ffff),
 		);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
-		baker.complete(work?.staticWorkId ?? "", {
+		baker.complete(work?.taskId ?? "", {
 			materialCoverage: [
 				createMaterialCoverage("outdoor-terrain", {
 					coverageKey: "outdoor-terrain:terrain",
@@ -1128,7 +1128,7 @@ describe("static coordinator", () => {
 			}),
 		]);
 
-		scheduledWorkForDemand(coordinator, {
+		bakeTasksForDemand(coordinator, {
 			location: null,
 			lod: {
 				buildings: -1,
@@ -1150,7 +1150,7 @@ describe("static coordinator", () => {
 			resolver,
 		});
 
-		const work = scheduledWorkForDemand(coordinator, {
+		const work = bakeTasksForDemand(coordinator, {
 			location: {
 				kind: "outdoor-landblock",
 				landblockId: 0xda55ffff,
@@ -1161,11 +1161,11 @@ describe("static coordinator", () => {
 				envCells: -1,
 				terrain: 1,
 			},
-		}).filter((item) => item.job.domain === "outdoor-terrain");
+		}).filter((item) => item.domain === "outdoor-terrain");
 		const completedRequests = resolver.pendingRequests.slice(0, 2);
 		const completedWork = completedRequests.map((request) => {
 			const match = work.find(
-				(item) => item.job.scope.landblockId === request.job.scope.landblockId,
+				(item) => item.scope.landblockId === request.job.scope.landblockId,
 			);
 			if (!match) {
 				throw new Error("Expected completed terrain request to match work.");
@@ -1184,16 +1184,16 @@ describe("static coordinator", () => {
 		await flushPromises();
 
 		for (const input of baker.pendingInputs.slice(0, 2)) {
-			const workItem = input.items[0]?.work;
-			if (!workItem) {
-				throw new Error("Expected one terrain work item per bake input.");
+			const task = input.items[0]?.task;
+			if (!task) {
+				throw new Error("Expected one terrain task per bake input.");
 			}
 			baker.complete(input.staticBatchId, {
 				materialCoverage: [
 					createMaterialCoverage("outdoor-terrain", {
-						coverageKey: `outdoor-terrain:${workItem.job.scope.landblockId.toString(16)}`,
+						coverageKey: `outdoor-terrain:${task.scope.landblockId.toString(16)}`,
 						coverageKind: "terrain",
-						landblockId: workItem.job.scope.landblockId,
+						landblockId: task.scope.landblockId,
 					}),
 				],
 			});
@@ -1202,10 +1202,10 @@ describe("static coordinator", () => {
 
 		expect(coordinator.createSnapshot().materialCoverage).toHaveLength(2);
 
-		scheduledWorkForDemand(coordinator, {
+		bakeTasksForDemand(coordinator, {
 			location: {
 				kind: "outdoor-landblock",
-				landblockId: secondWork.job.scope.landblockId,
+				landblockId: secondWork.scope.landblockId,
 			},
 			lod: {
 				buildings: -1,
@@ -1217,12 +1217,12 @@ describe("static coordinator", () => {
 
 		expect(coordinator.createSnapshot().materialCoverage).toEqual([
 			createMaterialCoverage("outdoor-terrain", {
-				coverageKey: `outdoor-terrain:${secondWork.job.scope.landblockId.toString(16)}`,
+				coverageKey: `outdoor-terrain:${secondWork.scope.landblockId.toString(16)}`,
 				coverageKind: "terrain",
-				landblockId: secondWork.job.scope.landblockId,
+				landblockId: secondWork.scope.landblockId,
 			}),
 		]);
-		expect(firstWork.staticWorkId).not.toBe(secondWork.staticWorkId);
+		expect(firstWork.taskId).not.toBe(secondWork.taskId);
 	});
 
 	it("retains multiple latest material coverage reports for one static domain", async () => {
@@ -1234,7 +1234,7 @@ describe("static coordinator", () => {
 			resolver,
 		});
 
-		const envCellWork = scheduledWorkForDemand(coordinator, {
+		const envCellWork = bakeTasksForDemand(coordinator, {
 			location: {
 				envCellId: 0xda550100,
 				kind: "interior-cell",
@@ -1246,7 +1246,7 @@ describe("static coordinator", () => {
 				envCells: 0,
 				terrain: -1,
 			},
-		}).find((item) => item.job.domain === "env-cell-system");
+		}).find((item) => item.domain === "env-cell-system");
 		const envCellRequest = resolver.pendingRequests.find(
 			(request) => request.job.domain === "env-cell-system",
 		);
@@ -1255,7 +1255,7 @@ describe("static coordinator", () => {
 			createEnvCellSystemResolverPayload(),
 		);
 		await flushPromises();
-		baker.complete(envCellWork?.staticWorkId ?? "", {
+		baker.complete(envCellWork?.taskId ?? "", {
 			materialCoverage: [
 				createMaterialCoverage("env-cell-system", {
 					coverageKey: "env-cell-system:structured-interior",
@@ -1290,7 +1290,7 @@ describe("static coordinator", () => {
 		const sourcePayloads: StaticCoordinatorSourcePayloadDelta[] = [];
 		coordinator.subscribeSourcePayloads((delta) => sourcePayloads.push(delta));
 
-		const work = scheduledWorkForDemand(coordinator, {
+		const work = bakeTasksForDemand(coordinator, {
 			location: {
 				envCellId: 0xda550100,
 				kind: "interior-cell",
@@ -1302,7 +1302,7 @@ describe("static coordinator", () => {
 				envCells: 0,
 				terrain: -1,
 			},
-		}).find((item) => item.job.domain === "env-cell-system");
+		}).find((item) => item.domain === "env-cell-system");
 		const envCellRequest = resolver.pendingRequests.find(
 			(request) => request.job.domain === "env-cell-system",
 		);
@@ -1313,7 +1313,7 @@ describe("static coordinator", () => {
 		);
 		await flushPromises();
 
-		expect(work?.job.domain).toBe("env-cell-system");
+		expect(work?.domain).toBe("env-cell-system");
 		const envCellBakeInput = baker.pendingInputs.find(
 			(input) => input.domain === "env-cell-system",
 		);
@@ -1353,7 +1353,7 @@ describe("static coordinator", () => {
 			},
 		});
 
-		baker.complete(work?.staticWorkId ?? "");
+		baker.complete(work?.taskId ?? "");
 		await flushPromises();
 
 		expect(coordinator.createSnapshot()).toMatchObject({
@@ -1380,7 +1380,7 @@ describe("static coordinator", () => {
 		const deltas: StaticCoordinatorCommitDelta[] = [];
 		coordinator.subscribeCommits((delta) => deltas.push(delta));
 
-		scheduledWorkForDemand(coordinator, {
+		bakeTasksForDemand(coordinator, {
 			location: {
 				kind: "outdoor-landblock",
 				landblockId: 0xda55ffff,
@@ -1409,7 +1409,7 @@ describe("static coordinator", () => {
 		);
 		expect(envCellBatch?.items.length).toBeGreaterThan(1);
 
-		scheduledWorkForDemand(coordinator, {
+		bakeTasksForDemand(coordinator, {
 			location: {
 				kind: "outdoor-landblock",
 				landblockId: 0xda55ffff,
@@ -1423,10 +1423,10 @@ describe("static coordinator", () => {
 		});
 
 		const focusItem = envCellBatch?.items.find(
-			(item) => item.work.job.scope.landblockId === 0xda55ffff,
+			(item) => item.task.scope.landblockId === 0xda55ffff,
 		);
 		const staleItem = envCellBatch?.items.find(
-			(item) => item.work.job.scope.landblockId !== 0xda55ffff,
+			(item) => item.task.scope.landblockId !== 0xda55ffff,
 		);
 		if (!envCellBatch || !focusItem || !staleItem) {
 			throw new Error("Expected focus and stale env-cell batch items.");
@@ -1434,12 +1434,12 @@ describe("static coordinator", () => {
 
 		baker.complete(envCellBatch.staticBatchId, {
 			staticSpatialRecords: [
-				createEnvCellSpatialRecord(focusItem.work),
-				createEnvCellSpatialRecord(staleItem.work),
+				createEnvCellSpatialRecord(focusItem.task),
+				createEnvCellSpatialRecord(staleItem.task),
 			],
 			staticVisibilityRecords: [
-				createEnvCellVisibilityRecord(focusItem.work),
-				createEnvCellVisibilityRecord(staleItem.work),
+				createEnvCellVisibilityRecord(focusItem.task),
+				createEnvCellVisibilityRecord(staleItem.task),
 			],
 		});
 		await flushPromises();
@@ -1544,32 +1544,32 @@ function createStaticObjectBakeDiagnostics(): StaticObjectBakeDiagnostics {
 	};
 }
 
-function scheduledWorkForDemand(
+function bakeTasksForDemand(
 	coordinator: StaticCoordinator,
 	demand: StaticDemand,
-): readonly ScheduledStaticWork[] {
+): readonly StaticBakeTask[] {
 	return coordinator
 		.reconcileStaticDemand(demand)
-		.layerTasks.map(createScheduledWorkHandleForTask);
+		.layerTasks.map(createBakeTaskForLayerTaskStatus);
 }
 
-function createScheduledWorkHandleForTask(
+function createBakeTaskForLayerTaskStatus(
 	task: StaticLayerTaskStatus,
-): ScheduledStaticWork {
+): StaticBakeTask {
 	return {
-		job: {
-			domain: task.domain,
-			scope: createLandblockScopeForTask(task),
-		},
-		priority: 0,
+		domain: task.domain,
+		ownerId: task.ownerId,
+		ownerKey: task.ownerKey,
 		revision: task.revision,
-		staticWorkId: task.taskId,
+		scope: createLandblockScopeForTask(task),
+		scopeKey: task.scopeKey,
+		taskId: task.taskId,
 	};
 }
 
 function createLandblockScopeForTask(
 	task: StaticLayerTaskStatus,
-): ScheduledStaticWork["job"]["scope"] {
+): StaticBakeTask["scope"] {
 	const match = /^landblock:([0-9a-f]{8})$/u.exec(task.scopeKey);
 	if (!match) {
 		throw new Error(`Expected landblock task scope key, got ${task.scopeKey}.`);
@@ -1655,22 +1655,22 @@ function createMaterialCoverage(
 }
 
 function createEnvCellSpatialRecord(
-	work: ScheduledStaticWork,
+	work: StaticBakeTask,
 ): StaticSpatialRecord {
 	return {
 		cellStructure: {
 			cellStructureId: 0x0d000001,
 			kind: "cell-structure",
 		},
-		envCellId: work.job.scope.landblockId & 0xffff_ffff,
+		envCellId: work.scope.landblockId & 0xffff_ffff,
 		environment: {
 			environmentId: 0x0e000001,
 			kind: "environment",
 		},
 		kind: "env-cell-spatial",
-		landblockId: work.job.scope.landblockId,
-		memberId: `cell-${work.job.scope.landblockId.toString(16)}`,
-		owner: createLayerPeerRecordOwnerForStaticWork(work),
+		landblockId: work.scope.landblockId,
+		memberId: `cell-${work.scope.landblockId.toString(16)}`,
+		owner: createLayerPeerRecordOwnerForStaticBakeTask(work),
 		renderBounds: null,
 		residencyBvhItemCount: 0,
 		residencyBvhNodeCount: 0,
@@ -1678,14 +1678,14 @@ function createEnvCellSpatialRecord(
 }
 
 function createEnvCellVisibilityRecord(
-	work: ScheduledStaticWork,
+	work: StaticBakeTask,
 ): StaticVisibilityRecord {
 	return {
-		acceptedEnvCellIds: [work.job.scope.landblockId & 0xffff_ffff],
+		acceptedEnvCellIds: [work.scope.landblockId & 0xffff_ffff],
 		diagnostics: [],
 		kind: "env-cell-visibility",
-		landblockId: work.job.scope.landblockId,
-		owner: createLayerPeerRecordOwnerForStaticWork(work),
+		landblockId: work.scope.landblockId,
+		owner: createLayerPeerRecordOwnerForStaticBakeTask(work),
 		visibleLinks: [],
 	};
 }

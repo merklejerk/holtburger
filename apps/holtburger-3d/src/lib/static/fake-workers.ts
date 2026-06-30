@@ -242,14 +242,14 @@ export class DeferredStaticBaker implements StaticBaker {
 		result: Partial<
 			Omit<
 				StaticBakeBatchResult,
-				"domain" | "revision" | "staticBatchId" | "works"
+				"domain" | "revision" | "staticBatchId" | "tasks"
 			>
 		> = {},
 	): void {
 		const input = this.#pending.find(
 			(candidate) =>
 				candidate.staticBatchId === staticBatchId ||
-				candidate.items.some((item) => item.work.staticWorkId === staticBatchId),
+				candidate.items.some((item) => item.task.taskId === staticBatchId),
 		);
 		const resolver = input ? this.#resolvers.get(input.staticBatchId) : null;
 
@@ -265,7 +265,7 @@ export class DeferredStaticBaker implements StaticBaker {
 		const input = this.#pending.find(
 			(candidate) =>
 				candidate.staticBatchId === staticBatchId ||
-				candidate.items.some((item) => item.work.staticWorkId === staticBatchId),
+				candidate.items.some((item) => item.task.taskId === staticBatchId),
 		);
 		const resolver = input ? this.#resolvers.get(input.staticBatchId) : null;
 
@@ -315,7 +315,7 @@ function createFakeStaticBakeResult(
 	result: Partial<
 		Omit<
 			StaticBakeBatchResult,
-			"domain" | "revision" | "staticBatchId" | "works"
+			"domain" | "revision" | "staticBatchId" | "tasks"
 		>
 	> = {},
 ): StaticBakeBatchResult {
@@ -339,8 +339,8 @@ function createFakeStaticBakeResult(
 		staticSpatialRecords: result.staticSpatialRecords ?? [],
 		staticVisibilityRecords: result.staticVisibilityRecords ?? [],
 		staticBatchId: input.staticBatchId,
+		tasks: input.items.map((item) => item.task),
 		textureUses: result.textureUses ?? [],
-		works: input.items.map((item) => item.work),
 	};
 }
 

@@ -1,7 +1,7 @@
 import type {
 	LayerOwnerKey,
 	LayerOwnerState,
-	ScheduledStaticWork,
+	StaticBakeTask,
 	StaticDomain,
 	StaticLayerPeerRecordOwner,
 	StaticScopeOwnerKey,
@@ -49,19 +49,14 @@ export function createLayerOwnerKeyId(key: LayerOwnerKey): string {
 	return `${key.kind}:${formatLayerOwnerLandblockId(key.landblockId)}`;
 }
 
-export function createLayerPeerRecordOwnerForStaticWork(
-	work: ScheduledStaticWork,
+export function createLayerPeerRecordOwnerForStaticBakeTask(
+	task: StaticBakeTask,
 ): StaticLayerPeerRecordOwner {
-	const key = createLayerOwnerKeyForStaticScope({
-		domain: work.job.domain,
-		scope: work.job.scope,
-		scopeKey: describeStaticScopeKey(work.job.scope),
-	});
 	return {
-		domain: work.job.domain,
-		key,
+		domain: task.domain,
+		key: task.ownerKey,
 		kind: "layer-owner",
-		ownerId: createLayerOwnerKeyId(key),
+		ownerId: task.ownerId,
 	};
 }
 
@@ -109,8 +104,4 @@ function sortLayerOwnerKeys(keys: readonly LayerOwnerKey[]): readonly LayerOwner
 
 function formatLayerOwnerLandblockId(landblockId: number): string {
 	return `0x${(landblockId >>> 0).toString(16).padStart(8, "0")}`;
-}
-
-function describeStaticScopeKey(scope: ScheduledStaticWork["job"]["scope"]): string {
-	return `landblock:${(scope.landblockId >>> 0).toString(16).padStart(8, "0")}`;
 }

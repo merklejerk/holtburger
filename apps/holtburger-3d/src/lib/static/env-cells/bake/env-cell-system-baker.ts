@@ -1,7 +1,7 @@
 import type {
 	LandblockEnvCellStaticFacts,
 	EnvCellSystemStaticScopePayload,
-	ScheduledStaticWork,
+	StaticBakeTask,
 	StaticAuthoredDynamicSeedRecord,
 	StaticBakeBatchInput,
 	StaticBakeBatchItem,
@@ -23,7 +23,7 @@ import type {
 	StaticLayerPeerRecordOwner,
 } from "../../contracts";
 import { uniqueSortedStaticTextureUseOwners } from "../../contracts";
-import { createLayerPeerRecordOwnerForStaticWork } from "../../layer-owners";
+import { createLayerPeerRecordOwnerForStaticBakeTask } from "../../layer-owners";
 import {
 	AC_UNIT_SCALE,
 	buildAcPlacementMatrix,
@@ -138,7 +138,7 @@ export function bakeEnvCellSystem(
 			...itemResults.flatMap((result) => result.textureUses),
 			...staticObjectResult.textureUses,
 		]),
-		works: input.items.map((item) => item.work),
+		tasks: input.items.map((item) => item.task),
 	};
 }
 
@@ -196,28 +196,28 @@ function bakeLandblockEnvCellItem(
 	readonly textureUses: readonly StaticBakeTextureUse[];
 } {
 	if (
-		item.work.job.domain !== "env-cell-system" ||
+		item.task.domain !== "env-cell-system" ||
 		item.payload.scope.kind !== "env-cell-system"
 	) {
 		throw new Error(
-			`Landblock env-cell baker only supports landblock env-cell payloads. Received ${item.work.job.domain}/${item.payload.scope.kind}.`,
+			`Landblock env-cell baker only supports landblock env-cell payloads. Received ${item.task.domain}/${item.payload.scope.kind}.`,
 		);
 	}
 
-	const owner = createLayerPeerRecordOwner(item.work);
+	const owner = createLayerPeerRecordOwner(item.task);
 	const payload = item.payload.scope;
 	const materialPlansByEnvCellId = createStructuredInteriorMaterialPlans(
 		payload,
-		item.work,
+		item.task,
 	);
 	warnAboutStructuredInteriorMaterialOmissions({
 		materialPlansByEnvCellId,
 		payload,
-		work: item.work,
+		task: item.task,
 	});
 	const drawUnits = createStructuredInteriorDrawUnits(
 		input,
-		item.work,
+		item.task,
 		payload,
 		materialPlansByEnvCellId,
 	);
@@ -243,14 +243,14 @@ function bakeLandblockEnvCellItem(
 			drawUnits,
 			materialPlansByEnvCellId,
 			staticBatchId: input.staticBatchId,
-			work: item.work,
+			task: item.task,
 		}),
 	};
 }
 
 function createStructuredInteriorDrawUnits(
 	input: StaticBakeBatchInput,
-	work: ScheduledStaticWork,
+	task: StaticBakeTask,
 	payload: EnvCellSystemStaticScopePayload,
 	materialPlansByEnvCellId: ReadonlyMap<
 		number,
@@ -290,14 +290,14 @@ function createStructuredInteriorDrawUnits(
 				landblockId: payload.landblock.landblockId,
 				materialPlan,
 				slice,
-				work,
+				task,
 			}),
 		);
 	});
 	warnAboutStructuredInteriorGeometrySurfaceOmissions({
 		omissions: geometrySurfaceOmissions,
 		payload,
-		work,
+		task,
 	});
 	return drawUnits;
 }
@@ -311,11 +311,11 @@ function createStructuredInteriorDrawUnit(options: {
 		readonly sliceId: string;
 		readonly candidates: readonly StructuredInteriorTriangleCandidate[];
 	};
-	readonly work: ScheduledStaticWork;
+	readonly task: StaticBakeTask;
 }): StructuredInteriorGeometryStaticDrawUnit {
 	const materialEntries = createStructuredInteriorMaterialTableEntries({
 		candidates: options.slice.candidates,
-		work: options.work,
+		task: options.task,
 	});
 	const materialSlotByEntryKey = createMaterialSlotByEntryKey(
 		options.slice.candidates,
@@ -344,7 +344,7 @@ function createStructuredInteriorDrawUnit(options: {
 		coordinateSpace: "landblock-render-local",
 		domain: "env-cell-system",
 		drawUnitId: createStructuredInteriorDrawUnitId(
-			options.work,
+			options.task,
 			options.envCell,
 			options.slice.sliceId,
 		),
@@ -395,12 +395,12 @@ function createStructuredInteriorDrawUnit(options: {
 
 function createStructuredInteriorMaterialPlans(
 	payload: EnvCellSystemStaticScopePayload,
-	work: ScheduledStaticWork,
+	task: StaticBakeTask,
 ): ReadonlyMap<number, StructuredInteriorCellMaterialPlan> {
 	return new Map(
 		payload.envCells.map((envCell) => [
 			envCell.identity.envCellId,
-			planStructuredInteriorCellMaterials({ envCell, payload, work }),
+			planStructuredInteriorCellMaterials({ envCell, payload, task }),
 		]),
 	);
 }
@@ -432,7 +432,7 @@ function warnAboutStructuredInteriorMaterialOmissions(options: {
 		StructuredInteriorCellMaterialPlan
 	>;
 	readonly payload: EnvCellSystemStaticScopePayload;
-	readonly work: ScheduledStaticWork;
+	readonly task: StaticBakeTask;
 }): void {
 	const groups = createStructuredInteriorMaterialOmissionWarningGroups(options);
 	if (groups.length === 0) {
@@ -442,10 +442,10 @@ function warnAboutStructuredInteriorMaterialOmissions(options: {
 	console.warn(
 		"browser omitted/deferred structured-interior material surfaces; affected cell-structure triangles were not baked.",
 		{
-			domain: options.work.job.domain,
+			domain: options.task.domain,
 			groups,
 			landblockId: formatHex32(options.payload.landblock.landblockId),
-			staticWorkId: options.work.staticWorkId,
+			taskId: options.task.taskId,
 		},
 	);
 }
@@ -453,7 +453,7 @@ function warnAboutStructuredInteriorMaterialOmissions(options: {
 function warnAboutStructuredInteriorGeometrySurfaceOmissions(options: {
 	readonly omissions: readonly StructuredInteriorGeometrySurfaceOmission[];
 	readonly payload: EnvCellSystemStaticScopePayload;
-	readonly work: ScheduledStaticWork;
+	readonly task: StaticBakeTask;
 }): void {
 	if (options.omissions.length === 0) {
 		return;
@@ -462,12 +462,12 @@ function warnAboutStructuredInteriorGeometrySurfaceOmissions(options: {
 	console.warn(
 		"browser omitted structured-interior triangles whose geometry surface slot could not be resolved through the env-cell surface table.",
 		{
-			domain: options.work.job.domain,
+			domain: options.task.domain,
 			groups: createStructuredInteriorGeometrySurfaceOmissionWarningGroups(
 				options.omissions,
 			),
 			landblockId: formatHex32(options.payload.landblock.landblockId),
-			staticWorkId: options.work.staticWorkId,
+			taskId: options.task.taskId,
 		},
 	);
 }
@@ -616,7 +616,7 @@ function countStructuredInteriorSurfaceTriangles(
 
 function createStructuredInteriorMaterialTableEntries(options: {
 	readonly candidates: readonly StructuredInteriorTriangleCandidate[];
-	readonly work: ScheduledStaticWork;
+	readonly task: StaticBakeTask;
 }): readonly StaticMaterialTableEntry[] {
 	return [
 		...options.candidates
@@ -641,7 +641,7 @@ function createStructuredInteriorMaterialTableEntries(options: {
 					createTextureUseId: (dataUse, wrapMode) =>
 						createStructuredInteriorTextureUseId({
 							dataUse,
-							work: options.work,
+							task: options.task,
 							wrapMode,
 						}),
 					materialIds: uniqueSortedNumbers([...entry.materialIds]),
@@ -794,13 +794,13 @@ function createStructuredInteriorTextureUses(options: {
 		StructuredInteriorCellMaterialPlan
 	>;
 	readonly staticBatchId: string;
-	readonly work: ScheduledStaticWork;
+	readonly task: StaticBakeTask;
 }): readonly StaticBakeTextureUse[] {
 	return createStaticMaterialTextureUses({
 		createTextureUseId: (dataUse, wrapMode) =>
 			createStructuredInteriorTextureUseId({
 				dataUse,
-				work: options.work,
+				task: options.task,
 				wrapMode,
 			}),
 		domain: "env-cell-system",
@@ -824,7 +824,7 @@ function createStructuredInteriorTextureUses(options: {
 							drawUnitTextureUseIds.has(
 								createStructuredInteriorTextureUseId({
 									dataUse,
-									work: options.work,
+									task: options.task,
 									wrapMode: textureWrapMode,
 								}),
 							),
@@ -969,12 +969,12 @@ function requireGeometryAttachment(
 }
 
 function createStructuredInteriorDrawUnitId(
-	work: ScheduledStaticWork,
+	task: StaticBakeTask,
 	envCell: LandblockEnvCellStaticFacts,
 	sliceId: string,
 ): string {
 	return [
-		work.staticWorkId,
+		task.taskId,
 		"structured-interior",
 		formatHex32(envCell.identity.envCellId),
 		formatHex32(envCell.cellStructure.cellStructureId),
@@ -1187,9 +1187,9 @@ function createEnvCellStaticObjectDynamicSeedRecord(options: {
 }
 
 function createLayerPeerRecordOwner(
-	work: ScheduledStaticWork,
+	task: StaticBakeTask,
 ): StaticLayerPeerRecordOwner {
-	return createLayerPeerRecordOwnerForStaticWork(work);
+	return createLayerPeerRecordOwnerForStaticBakeTask(task);
 }
 
 function createSourceKey(

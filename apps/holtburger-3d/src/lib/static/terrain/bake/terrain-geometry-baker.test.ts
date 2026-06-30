@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type {
 	StaticBakeBatchInput,
+	StaticBakeTask,
 	TerrainGeometryStaticDrawUnit,
 	TerrainStaticScopePayload,
 } from "../../contracts";
@@ -68,7 +69,7 @@ describe("terrain geometry baker", () => {
 			],
 			staticVisibilityRecords: [],
 			textureUses: [],
-			works: [input.items[0]?.work],
+			tasks: [input.items[0]?.task],
 		});
 		expect(result.staticSourceMappings).toEqual([
 			{
@@ -263,7 +264,7 @@ describe("terrain geometry baker", () => {
 		const result = bakeTerrainGeometry(input);
 
 		expect(result.staticBatchId).toBe("batch-a");
-		expect(result.works.map((work) => work.staticWorkId)).toEqual([
+		expect(result.tasks.map((task) => task.taskId)).toEqual([
 			"7:landblock:da55ffff:outdoor-terrain",
 			"7:landblock:da56ffff:outdoor-terrain",
 		]);
@@ -304,35 +305,33 @@ function createTerrainBakeInput(
 		readonly includeSecondLandblock?: boolean;
 	} = {},
 ): StaticBakeBatchInput {
-	const work = createTerrainWork(0xda55ffff);
+	const task = createTerrainTask(0xda55ffff);
 	const payload = createTerrainPayload(options, 0xda55ffff);
 	const items = [
 		{
 			payload: {
-				job: work.job,
+				job: {
+					domain: task.domain,
+					scope: task.scope,
+				},
 				scope: payload,
 				sourceRevision: 42,
 			},
-			targetOwnerKey: {
-				kind: "terrain" as const,
-				landblockId: 0xda55ffff,
-			},
-			work,
+			task,
 		},
 	];
 	if (batchOptions.includeSecondLandblock) {
-		const secondWork = createTerrainWork(0xda56ffff);
+		const secondTask = createTerrainTask(0xda56ffff);
 		items.push({
 			payload: {
-				job: secondWork.job,
+				job: {
+					domain: secondTask.domain,
+					scope: secondTask.scope,
+				},
 				scope: createTerrainPayload(options, 0xda56ffff),
 				sourceRevision: 43,
 			},
-			targetOwnerKey: {
-				kind: "terrain" as const,
-				landblockId: 0xda56ffff,
-			},
-			work: secondWork,
+			task: secondTask,
 		});
 	}
 
@@ -350,19 +349,23 @@ function createTerrainBakeInput(
 	};
 }
 
-function createTerrainWork(landblockId: number) {
+function createTerrainTask(landblockId: number): StaticBakeTask {
 	const landblockHex = landblockId.toString(16).padStart(8, "0");
+	const taskId = `7:landblock:${landblockHex}:outdoor-terrain`;
 	return {
-		job: {
-			domain: "outdoor-terrain" as const,
-			scope: {
-				kind: "landblock" as const,
-				landblockId,
-			},
+		domain: "outdoor-terrain",
+		ownerId: `terrain:0x${landblockHex}`,
+		ownerKey: {
+			kind: "terrain",
+			landblockId,
 		},
-		priority: 0,
 		revision: 7,
-		staticWorkId: `7:landblock:${landblockHex}:outdoor-terrain`,
+		scope: {
+			kind: "landblock",
+			landblockId,
+		},
+		scopeKey: `landblock:${landblockHex}`,
+		taskId,
 	};
 }
 

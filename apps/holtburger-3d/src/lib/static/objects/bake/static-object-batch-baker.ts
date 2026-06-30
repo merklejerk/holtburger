@@ -1,7 +1,7 @@
 import type {
 	MaterialTextureDataUseIdentity,
 	EnvCellSystemStaticScopePayload,
-	ScheduledStaticWork,
+	StaticBakeTask,
 	StaticBounds,
 	StaticBakeBatchInput,
 	StaticBakeBatchItem,
@@ -31,10 +31,7 @@ import type {
 	StaticObjectDynamicSeedClassificationReasonCounts,
 } from "../../contracts";
 import { uniqueSortedStaticTextureUseOwners } from "../../contracts";
-import {
-	createLayerOwnerKeyId,
-	createLayerPeerRecordOwnerForStaticWork,
-} from "../../layer-owners";
+import { createLayerPeerRecordOwnerForStaticBakeTask } from "../../layer-owners";
 import {
 	AC_UNIT_SCALE,
 	buildAcPlacementMatrix,
@@ -126,7 +123,7 @@ export function bakeStaticObjectBatch(
 		textureUses: mergeTextureUses(
 			itemResults.flatMap((result) => result.textureUses),
 		),
-		works: input.items.map((item) => item.work),
+		tasks: input.items.map((item) => item.task),
 	};
 }
 
@@ -248,18 +245,18 @@ function bakeStaticObjectBatchItem(
 	readonly staticObjectRenderInstances: readonly StaticObjectRenderInstance[];
 	readonly staticObjectVisualResources: readonly StaticObjectVisualResource[];
 	readonly staticAuthoredDynamicSeeds: StaticBakeBatchResult["staticAuthoredDynamicSeeds"];
-	readonly work: StaticBakeBatchItem["work"];
+	readonly task: StaticBakeBatchItem["task"];
 } {
 	const scope = createStaticObjectBatchPayload(item);
 	const partitionPlan = partitionStaticObjectBatches(scope);
 	const sourceIndex = new StaticObjectBakeSourceIndex(scope, input.attachments);
-	const resourceIdPrefix = createLayerOwnerKeyId(item.targetOwnerKey);
+	const resourceIdPrefix = item.task.ownerId;
 	const renderablePartitions = partitionPlan.partitions.filter((partition) => {
 		if (isRenderableStaticObjectPartition(partition)) {
 			return true;
 		}
 
-		warnAboutSkippedStaticObjectPartition(item.work, scope, partition);
+		warnAboutSkippedStaticObjectPartition(item.task, scope, partition);
 		return false;
 	});
 	const instancedOutput = createStaticObjectInstancedOutput({
@@ -268,7 +265,7 @@ function bakeStaticObjectBatchItem(
 		resourceIdPrefix,
 		sourceIndex,
 		staticBatchId: input.staticBatchId,
-		work: item.work,
+		task: item.task,
 	});
 	const bakedPartitions = renderablePartitions.filter(
 		(partition) =>
@@ -280,7 +277,7 @@ function bakeStaticObjectBatchItem(
 			payload: scope,
 			resourceIdPrefix,
 			sourceIndex,
-			work: item.work,
+			task: item.task,
 		}),
 	);
 	const drawUnitIdBySliceId = new Map(
@@ -341,7 +338,7 @@ function bakeStaticObjectBatchItem(
 			...drawUnits.flatMap((output) => output.objectSpatialRecords),
 		],
 		staticAuthoredDynamicSeeds: createOutdoorAuthoredDynamicSeedRecords(
-			item.work,
+			item.task,
 			item.payload.scope,
 		),
 		staticObjectRenderInstances: instancedOutput.instances,
@@ -350,9 +347,9 @@ function bakeStaticObjectBatchItem(
 			partitions: bakedPartitions,
 			resourceIdPrefix,
 			staticBatchId: input.staticBatchId,
-			work: item.work,
+			task: item.task,
 		}).concat(instancedOutput.textureUses),
-		work: item.work,
+		task: item.task,
 	};
 }
 
@@ -453,13 +450,13 @@ function createStaticObjectBakeDiagnostics(options: {
 }
 
 function createOutdoorAuthoredDynamicSeedRecords(
-	work: StaticBakeBatchItem["work"],
+	task: StaticBakeBatchItem["task"],
 	payload: StaticBakeBatchItem["payload"]["scope"],
 ): StaticBakeBatchResult["staticAuthoredDynamicSeeds"] {
 	if (payload.kind !== "outdoor-static-objects") {
 		return [];
 	}
-	const owner = createLayerPeerRecordOwner(work);
+	const owner = createLayerPeerRecordOwner(task);
 	return payload.authoredDynamicSeeds.map((seed) => ({
 		kind: "outdoor-static-object-dynamic-seed",
 		owner,
@@ -705,7 +702,7 @@ function createStaticObjectInstancedOutput(options: {
 	readonly resourceIdPrefix: string;
 	readonly sourceIndex: StaticObjectBakeSourceIndex;
 	readonly staticBatchId: string;
-	readonly work: ScheduledStaticWork;
+	readonly task: StaticBakeTask;
 }): {
 	readonly cutoverPartitionSliceIds: ReadonlySet<string>;
 	readonly instances: readonly StaticObjectRenderInstance[];
@@ -1271,22 +1268,22 @@ function createStaticObjectBatchPayload(
 	item: StaticBakeBatchItem,
 ): StaticObjectBatchPayload {
 	if (
-		(item.work.job.domain === "outdoor-buildings" ||
-			item.work.job.domain === "outdoor-explicit-objects" ||
-			item.work.job.domain === "outdoor-generated-scenery") &&
+		(item.task.domain === "outdoor-buildings" ||
+			item.task.domain === "outdoor-explicit-objects" ||
+			item.task.domain === "outdoor-generated-scenery") &&
 		item.payload.scope.kind === "outdoor-static-objects"
 	) {
 		return item.payload.scope;
 	}
 	if (
-		item.work.job.domain === "env-cell-system" &&
+		item.task.domain === "env-cell-system" &&
 		item.payload.scope.kind === "env-cell-system"
 	) {
 		return createEnvCellStaticObjectBatchPayload(item.payload.scope);
 	}
 
 	throw new Error(
-		`Static object batch baker only supports static object payloads. Received ${item.work.job.domain}/${item.payload.scope.kind}.`,
+		`Static object batch baker only supports static object payloads. Received ${item.task.domain}/${item.payload.scope.kind}.`,
 	);
 }
 
@@ -1306,14 +1303,14 @@ function createDrawUnitSpatialRecord(
 }
 
 function warnAboutSkippedStaticObjectPartition(
-	work: ScheduledStaticWork,
+	task: StaticBakeTask,
 	payload: StaticObjectBatchPayload,
 	partition: StaticObjectBatchPartition,
 ): void {
 	console.warn(
 		`browser skipped non-renderable static object partition ${partition.sliceId}.`,
 		{
-			domain: work.job.domain,
+			domain: task.domain,
 			landblockId: payload.landblock.landblockId,
 			materialFamily: partition.family,
 			materialPass: partition.pass,
@@ -1321,7 +1318,7 @@ function warnAboutSkippedStaticObjectPartition(
 			reason: partition.reason,
 			renderCoverage: partition.renderCoverage,
 			triangleCount: partition.triangleCount,
-			staticWorkId: work.staticWorkId,
+			taskId: task.taskId,
 		},
 	);
 }
@@ -1332,7 +1329,7 @@ interface StaticObjectGeometryBakeOutput {
 }
 
 function createStaticObjectGeometryBakeOutput(options: {
-	readonly work: ScheduledStaticWork;
+	readonly task: StaticBakeTask;
 	readonly payload: StaticObjectBatchPayload;
 	readonly partition: StaticObjectBatchPartition;
 	readonly resourceIdPrefix: string;
@@ -1404,7 +1401,7 @@ function createStaticObjectGeometryBakeOutput(options: {
 		objectSpatialRecords: createEnvCellStaticObjectSpatialRecords({
 			geometry,
 			payload: options.payload,
-			workOwner: createLayerPeerRecordOwner(options.work),
+			taskOwner: createLayerPeerRecordOwner(options.task),
 		}),
 	};
 }
@@ -1412,7 +1409,7 @@ function createStaticObjectGeometryBakeOutput(options: {
 function createEnvCellStaticObjectSpatialRecords(options: {
 	readonly geometry: ReturnType<typeof bakeStaticObjectPartitionGeometry>;
 	readonly payload: StaticObjectBatchPayload;
-	readonly workOwner: StaticLayerPeerRecordOwner;
+	readonly taskOwner: StaticLayerPeerRecordOwner;
 }): readonly StaticEnvCellStaticObjectSpatialRecord[] {
 	if (options.payload.domain !== "env-cell-system") {
 		return [];
@@ -1444,7 +1441,7 @@ function createEnvCellStaticObjectSpatialRecords(options: {
 					instanceId: object.identity.instanceId,
 					kind: "env-cell-static-object-bounds",
 					landblockId: object.identity.landblockId,
-					owner: options.workOwner,
+					owner: options.taskOwner,
 				},
 			];
 		},
@@ -1452,9 +1449,9 @@ function createEnvCellStaticObjectSpatialRecords(options: {
 }
 
 function createLayerPeerRecordOwner(
-	work: ScheduledStaticWork,
+	task: StaticBakeTask,
 ): StaticLayerPeerRecordOwner {
-	return createLayerPeerRecordOwnerForStaticWork(work);
+	return createLayerPeerRecordOwnerForStaticBakeTask(task);
 }
 
 function createStaticObjectMaterialTableEntries(options: {
@@ -1762,7 +1759,7 @@ function bakeStaticObjectPartitionGeometry(
 }
 
 function createStaticObjectBakeTextureUses(options: {
-	readonly work: ScheduledStaticWork;
+	readonly task: StaticBakeTask;
 	readonly resourceIdPrefix: string;
 	readonly staticBatchId: string;
 	readonly partitions: readonly StaticObjectBatchPartition[];
@@ -1774,7 +1771,7 @@ function createStaticObjectBakeTextureUses(options: {
 				textureUseScopeId: options.resourceIdPrefix,
 				wrapMode,
 			}),
-		domain: options.work.job.domain,
+		domain: options.task.domain,
 		isStageableDataUse: isCurrentlyStageableStaticObjectDataUse,
 		staticBatchId: options.staticBatchId,
 		textureUseSpecs: options.partitions.flatMap((partition) => {

@@ -1,7 +1,7 @@
 import type {
 	LandblockEnvCellStaticFacts,
 	EnvCellSystemStaticScopePayload,
-	ScheduledStaticWork,
+	StaticBakeTask,
 	StaticMaterialCoverageReport,
 	StaticMaterialUnrenderedBucket,
 	StaticObjectMaterialSourceFacts,
@@ -24,10 +24,6 @@ import {
 	type StaticMaterialPlan,
 } from "../../objects/bake/static-object-material-planner";
 import { isRenderableStaticMaterialPlan } from "../../objects/bake/static-object-renderability";
-import {
-	createLayerOwnerKeyForStaticScope,
-	createLayerOwnerKeyId,
-} from "../../layer-owners";
 
 export interface StructuredInteriorCellMaterialPlan {
 	readonly entries: readonly StructuredInteriorMaterialPlanEntry[];
@@ -47,7 +43,7 @@ export function resolveStructuredInteriorMaterialSurfaceId(
 export function planStructuredInteriorCellMaterials(options: {
 	readonly envCell: LandblockEnvCellStaticFacts;
 	readonly payload: EnvCellSystemStaticScopePayload;
-	readonly work: ScheduledStaticWork;
+	readonly task: StaticBakeTask;
 }): StructuredInteriorCellMaterialPlan {
 	const materialSourcesById = new Map(
 		options.payload.materialSources.map((source) => [
@@ -108,7 +104,7 @@ export function planStructuredInteriorCellMaterials(options: {
 				textureUseIds: plan.textureRoles.map((role) =>
 					createStructuredInteriorTextureUseId({
 						dataUse: role.dataUse,
-						work: options.work,
+						task: options.task,
 						wrapMode: textureWrapMode,
 					}),
 				),
@@ -126,25 +122,15 @@ export function planStructuredInteriorCellMaterials(options: {
 
 export function createStructuredInteriorTextureUseId(options: {
 	readonly dataUse: Parameters<typeof createMaterialTextureDataUseKey>[0];
-	readonly work: ScheduledStaticWork;
+	readonly task: StaticBakeTask;
 	readonly wrapMode: StaticMaterialTextureWrapMode;
 }): string {
 	return createStaticMaterialTextureUseId({
 		dataUse: options.dataUse,
 		textureUseNamespace: "structured-interior-texture",
-		textureUseScopeId: createLayerOwnerKeyId(
-			createLayerOwnerKeyForStaticScope({
-				domain: options.work.job.domain,
-				scope: options.work.job.scope,
-				scopeKey: describeStructuredInteriorScopeKey(options.work),
-			}),
-		),
+		textureUseScopeId: options.task.ownerId,
 		wrapMode: options.wrapMode,
 	});
-}
-
-function describeStructuredInteriorScopeKey(work: ScheduledStaticWork): string {
-	return `landblock:${(work.job.scope.landblockId >>> 0).toString(16).padStart(8, "0")}`;
 }
 
 export function resolveStructuredInteriorPlanTextureWrapMode(

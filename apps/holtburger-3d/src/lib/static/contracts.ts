@@ -81,7 +81,7 @@ export interface StaticScopeOwnerKey {
 	readonly scopeKey: string;
 }
 
-export type LayerOwnerKind =
+type LayerOwnerKind =
 	| "terrain"
 	| "outdoor-buildings"
 	| OutdoorStaticObjectLayerDomain
@@ -477,7 +477,7 @@ export interface StaticBounds {
 	readonly max: StaticVec3;
 }
 
-export interface StaticVec3 {
+interface StaticVec3 {
 	readonly x: number;
 	readonly y: number;
 	readonly z: number;
@@ -750,7 +750,6 @@ interface StaticObjectDebugProvenance {
 
 export interface EnvCellSystemStaticScopePayload {
 	readonly kind: "env-cell-system";
-	readonly buildingTransitionApertures: LandblockOutdoorLayerSourcePayloadDto["buildingTransitionApertures"];
 	readonly landblock: LandblockSourceIdentity;
 	readonly regionRenderProfile: RegionRenderProfileSourceFacts;
 	readonly envCells: readonly LandblockEnvCellStaticFacts[];
@@ -759,6 +758,8 @@ export interface EnvCellSystemStaticScopePayload {
 	readonly materialSources: readonly StaticObjectMaterialSourceFacts[];
 	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
 	readonly portalLinks: readonly LandblockPortalLinkFacts[];
+	readonly portalConnectivityGraph: EnvCellSystemLayerSourcePayloadDto["portalConnectivityGraph"];
+	readonly portalApertureResources: EnvCellSystemLayerSourcePayloadDto["portalApertureResources"];
 	readonly acceptedEnvCellIds: readonly number[];
 	readonly visibilityDiagnostics: readonly EnvCellVisibilityDiagnostic[];
 	readonly residencySpatial: LandblockEnvCellResidencySpatialFacts;

@@ -1,189 +1,22 @@
 import { describe, expect, it } from "vitest";
 import type {
 	LandblockPortalLinkFacts,
+	StaticBuildingTransitionApertureRange,
 	StaticPortalApertureResource,
+	StaticPortalGraphEdge,
+	StaticPortalGraphNode,
+	StaticPortalGraphRecord,
+	StaticPortalGraphScene,
 	StaticPortalInteriorRecord,
 	StaticLayerPeerRecordOwner,
 } from "./contracts";
 import {
 	createEnvCellPortalProjectionRoot,
-	createEnvCellStaticPortalGraph,
 	createOutdoorPortalProjectionRoot,
 	createStaticPortalProjection,
-	createBuildingTransitionStaticPortalGraph,
 } from "./portal-graphs";
 
 describe("static portal graphs", () => {
-	it("normalizes env-cell portal links into directed graph edges", () => {
-		const owner = createLayerOwner("env-cell-system");
-		const graph = createEnvCellStaticPortalGraph(owner, {
-			envCells: [
-				createPortalSummary(0xda550100),
-				createPortalSummary(0xda550101),
-			],
-			kind: "env-cell-portal-interior",
-			landblockId: 0xda55ffff,
-			owner,
-			portalLinks: [
-				createEnvCellLink({
-					linkId: "link-a",
-					sourceIndex: 1,
-					sourcePortalId: "portal-a",
-					targetPortalId: "portal-b",
-				}),
-				createEnvCellLink({
-					linkId: "link-a",
-					sourceIndex: 0,
-					sourcePortalId: "portal-a-duplicate",
-					targetPortalId: "portal-b-duplicate",
-				}),
-			],
-		});
-
-		expect(graph).toMatchObject({
-			kind: "static-portal-graph",
-			landblockId: 0xda55ffff,
-			nodes: [
-				{ nodeId: "env-cell:3663003904" },
-				{ nodeId: "env-cell:3663003905" },
-			],
-		});
-		expect(graph.edges.map((edge) => edge.edgeId)).toEqual([
-			"env-cell-portal:link-a:0",
-			"env-cell-portal:link-a:1",
-		]);
-		expect(graph.edges).toEqual([
-			expect.objectContaining({
-				direction: "directed",
-				provenance: expect.objectContaining({
-					kind: "env-cell-portal",
-					sourcePortalId: "portal-a-duplicate",
-					target: {
-						envCellId: 0xda550101,
-						kind: "env-cell",
-						portalId: "portal-b-duplicate",
-					},
-				}),
-				sceneCrossing: {
-					kind: "env-cell-to-env-cell",
-					sourceEnvCellId: 0xda550100,
-					targetEnvCellId: 0xda550101,
-				},
-			}),
-			expect.objectContaining({
-				direction: "directed",
-				provenance: expect.objectContaining({
-					kind: "env-cell-portal",
-					sourcePortalId: "portal-a",
-					target: {
-						envCellId: 0xda550101,
-						kind: "env-cell",
-						portalId: "portal-b",
-					},
-				}),
-			}),
-		]);
-	});
-
-	it("normalizes env-cell scene-crossing links into graph edges", () => {
-		const owner = createLayerOwner("env-cell-system");
-		const graph = createEnvCellStaticPortalGraph(owner, {
-			envCells: [createPortalSummary(0xda550100)],
-			kind: "env-cell-portal-interior",
-			landblockId: 0xda55ffff,
-			owner,
-			portalLinks: [
-				{
-					flags: 0,
-					linkId: "a-to-outside",
-					polygonId: null,
-					source: {
-						envCellId: 0xda550100,
-						kind: "env-cell",
-						portalId: "portal-a",
-					},
-					sourceIndex: 1,
-					target: {
-						kind: "outside",
-						landblockId: 0xda55ffff,
-					},
-				},
-				{
-					flags: 0,
-					linkId: "a-to-building",
-					polygonId: null,
-					source: {
-						envCellId: 0xda550100,
-						kind: "env-cell",
-						portalId: "portal-b",
-					},
-					sourceIndex: 0,
-					target: {
-						instanceId: "building-a",
-						kind: "landblock-building",
-						portalId: "building-portal-a",
-					},
-				},
-			],
-		});
-
-		expect(graph.nodes.map((node) => node.nodeId)).toEqual([
-			"building:building-a",
-			"env-cell:3663003904",
-			"outdoor:3663069183",
-		]);
-		expect(graph.edges.map((edge) => edge.sceneCrossing)).toEqual([
-			{
-				buildingInstanceId: "building-a",
-				kind: "env-cell-to-landblock-building",
-				sourceEnvCellId: 0xda550100,
-			},
-			{
-				kind: "env-cell-to-outdoor",
-				outdoorLandblockId: 0xda55ffff,
-				sourceEnvCellId: 0xda550100,
-			},
-		]);
-	});
-
-	it("normalizes building transitions into the same graph edge shape", () => {
-		const owner = createLayerOwner("outdoor-buildings");
-		const graph = createBuildingTransitionStaticPortalGraph(
-			owner,
-			createBuildingTransitionPortalApertureResource(),
-		);
-
-		expect(graph.nodes.map((node) => node.nodeId)).toEqual([
-			"env-cell:3663003904",
-			"outdoor:3663069183",
-		]);
-		expect(graph.edges).toEqual([
-			expect.objectContaining({
-				direction: "directed",
-				edgeId:
-					"building-transition:portal-aperture-resource:building-transition:0xda55ffff:portal-0:3663003904",
-				linkId:
-					"transition:portal-aperture-resource:building-transition:0xda55ffff:portal-0:3663003904",
-				provenance: {
-					apertureResourceId:
-						"portal-aperture-resource:building-transition:0xda55ffff",
-					buildingInstanceId: "building-a",
-					buildingPortalId: "building-portal-a",
-					kind: "building-transition",
-					portalId: "portal-0",
-					targetEnvCellId: 0xda550100,
-				},
-				sceneCrossing: {
-					envCellId: 0xda550100,
-					kind: "outdoor-to-env-cell",
-					outdoorLandblockId: 0xda55ffff,
-				},
-				sourceNodeId: "outdoor:3663069183",
-				targetNodeId: "env-cell:3663003904",
-			}),
-		]);
-	});
-
 	it("projects outdoor portals by env-cell identity and longest acyclic layer", () => {
 		const owner = createLayerOwner("env-cell-system");
 		const record = createPortalInteriorRecord({
@@ -227,7 +60,7 @@ describe("static portal graphs", () => {
 					],
 				}),
 			],
-			portalGraphs: [createEnvCellStaticPortalGraph(owner, record)],
+			portalGraphs: [createEnvCellPortalGraphFixture(owner, record)],
 			portalInteriorRecords: [record],
 		});
 
@@ -304,7 +137,7 @@ describe("static portal graphs", () => {
 					],
 				}),
 			],
-			portalGraphs: [createEnvCellStaticPortalGraph(owner, record)],
+			portalGraphs: [createEnvCellPortalGraphFixture(owner, record)],
 			portalInteriorRecords: [record],
 		});
 
@@ -353,7 +186,7 @@ describe("static portal graphs", () => {
 					],
 				}),
 			],
-			portalGraphs: [createEnvCellStaticPortalGraph(owner, record)],
+			portalGraphs: [createEnvCellPortalGraphFixture(owner, record)],
 			portalInteriorRecords: [record],
 		});
 
@@ -411,7 +244,7 @@ describe("static portal graphs", () => {
 					],
 				}),
 			],
-			portalGraphs: [createEnvCellStaticPortalGraph(owner, record)],
+			portalGraphs: [createEnvCellPortalGraphFixture(owner, record)],
 			portalInteriorRecords: [record],
 		});
 
@@ -482,7 +315,7 @@ describe("static portal graphs", () => {
 					],
 				}),
 			],
-			portalGraphs: [createEnvCellStaticPortalGraph(owner, record)],
+			portalGraphs: [createEnvCellPortalGraphFixture(owner, record)],
 			portalInteriorRecords: [record],
 		});
 
@@ -555,7 +388,7 @@ describe("static portal graphs", () => {
 					],
 				}),
 			],
-			portalGraphs: [createEnvCellStaticPortalGraph(owner, record)],
+			portalGraphs: [createEnvCellPortalGraphFixture(owner, record)],
 			portalInteriorRecords: [record],
 		});
 
@@ -613,7 +446,7 @@ describe("static portal graphs", () => {
 				landblockId: 0xda55ffff,
 			}),
 			portalApertureResources: [],
-			portalGraphs: [createEnvCellStaticPortalGraph(owner, record)],
+			portalGraphs: [createEnvCellPortalGraphFixture(owner, record)],
 			portalInteriorRecords: [record],
 		});
 
@@ -671,7 +504,7 @@ describe("static portal graphs", () => {
 				landblockId: 0xda55ffff,
 			}),
 			portalApertureResources: [],
-			portalGraphs: [createEnvCellStaticPortalGraph(owner, record)],
+			portalGraphs: [createEnvCellPortalGraphFixture(owner, record)],
 			portalInteriorRecords: [record],
 		});
 
@@ -874,6 +707,226 @@ function createBuildingTransitionApertureRange(
 		].join(":"),
 		sourceKind: "building-transition",
 	};
+}
+
+function createEnvCellPortalGraphFixture(
+	owner: StaticLayerPeerRecordOwner,
+	record: StaticPortalInteriorRecord,
+): StaticPortalGraphRecord {
+	const nodesById = new Map<string, StaticPortalGraphNode>();
+	for (const envCell of record.envCells) {
+		const node = createPortalGraphFixtureNode({
+			envCellId: envCell.envCellId,
+			kind: "env-cell",
+		});
+		nodesById.set(node.nodeId, node);
+	}
+
+	const edges = record.portalLinks
+		.map((link) => createEnvCellPortalGraphFixtureEdge(link, nodesById))
+		.filter((edge): edge is StaticPortalGraphEdge => edge !== null)
+		.sort(comparePortalGraphEdges);
+
+	return {
+		edges,
+		kind: "static-portal-graph",
+		landblockId: record.landblockId,
+		nodes: [...nodesById.values()].sort(comparePortalGraphNodes),
+		owner,
+	};
+}
+
+function createBuildingTransitionPortalGraphFixture(
+	owner: StaticLayerPeerRecordOwner,
+	resource: StaticPortalApertureResource,
+): StaticPortalGraphRecord {
+	const nodesById = new Map<string, StaticPortalGraphNode>();
+	const outdoorNode = createPortalGraphFixtureNode({
+		kind: "outdoor",
+		landblockId: resource.landblockId,
+	});
+	nodesById.set(outdoorNode.nodeId, outdoorNode);
+
+	const edges: StaticPortalGraphEdge[] = [];
+	for (const range of getBuildingTransitionApertureRanges(resource)) {
+		const envCellId = range.source.targetEnvCellId;
+		const envCellNode = createPortalGraphFixtureNode({
+			envCellId,
+			kind: "env-cell",
+		});
+		nodesById.set(envCellNode.nodeId, envCellNode);
+		edges.push({
+			direction: "directed",
+			edgeId: [
+				"building-transition",
+				resource.apertureResourceId,
+				range.source.portalId,
+				envCellId,
+			].join(":"),
+			flags: 0,
+			linkId: [
+				"transition",
+				resource.apertureResourceId,
+				range.source.portalId,
+				envCellId,
+			].join(":"),
+			polygonId: range.source.polyId,
+			provenance: {
+				apertureResourceId: resource.apertureResourceId,
+				buildingInstanceId: range.source.buildingInstanceId,
+				buildingPortalId: range.source.buildingPortalId,
+				kind: "building-transition",
+				portalId: range.source.portalId,
+				targetEnvCellId: envCellId,
+			},
+			sceneCrossing: {
+				envCellId,
+				kind: "outdoor-to-env-cell",
+				outdoorLandblockId: resource.landblockId,
+			},
+			sourceIndex: range.source.buildingPortalSourceIndex,
+			sourceNodeId: outdoorNode.nodeId,
+			targetNodeId: envCellNode.nodeId,
+		});
+	}
+
+	return {
+		edges: edges.sort(comparePortalGraphEdges),
+		kind: "static-portal-graph",
+		landblockId: resource.landblockId,
+		nodes: [...nodesById.values()].sort(comparePortalGraphNodes),
+		owner,
+	};
+}
+
+function createEnvCellPortalGraphFixtureEdge(
+	link: LandblockPortalLinkFacts,
+	nodesById: Map<string, StaticPortalGraphNode>,
+): StaticPortalGraphEdge | null {
+	if (link.source.kind !== "env-cell") {
+		return null;
+	}
+
+	const sourceNode = createPortalGraphFixtureNode({
+		envCellId: link.source.envCellId,
+		kind: "env-cell",
+	});
+	const targetNode = createPortalGraphFixtureNodeFromEndpoint(link.target);
+	nodesById.set(sourceNode.nodeId, sourceNode);
+	nodesById.set(targetNode.nodeId, targetNode);
+
+	return {
+		direction: "directed",
+		edgeId: ["env-cell-portal", link.linkId, link.sourceIndex].join(":"),
+		flags: link.flags,
+		linkId: link.linkId,
+		polygonId: link.polygonId,
+		provenance: {
+			kind: "env-cell-portal",
+			sourceEnvCellId: link.source.envCellId,
+			sourcePortalId: link.source.portalId,
+			target: link.target,
+		},
+		sceneCrossing: createEnvCellPortalFixtureSceneCrossing(link),
+		sourceIndex: link.sourceIndex,
+		sourceNodeId: sourceNode.nodeId,
+		targetNodeId: targetNode.nodeId,
+	};
+}
+
+function createPortalGraphFixtureNodeFromEndpoint(
+	endpoint: LandblockPortalLinkFacts["target"],
+): StaticPortalGraphNode {
+	switch (endpoint.kind) {
+		case "env-cell":
+			return createPortalGraphFixtureNode({
+				envCellId: endpoint.envCellId,
+				kind: "env-cell",
+			});
+		case "landblock-building":
+			return createPortalGraphFixtureNode({
+				buildingInstanceId: endpoint.instanceId,
+				kind: "landblock-building",
+			});
+		case "outside":
+			return createPortalGraphFixtureNode({
+				kind: "outdoor",
+				landblockId: endpoint.landblockId,
+			});
+	}
+}
+
+function createEnvCellPortalFixtureSceneCrossing(
+	link: LandblockPortalLinkFacts,
+): StaticPortalGraphEdge["sceneCrossing"] {
+	if (link.source.kind !== "env-cell") {
+		return null;
+	}
+	switch (link.target.kind) {
+		case "env-cell":
+			return {
+				kind: "env-cell-to-env-cell",
+				sourceEnvCellId: link.source.envCellId,
+				targetEnvCellId: link.target.envCellId,
+			};
+		case "landblock-building":
+			return {
+				buildingInstanceId: link.target.instanceId,
+				kind: "env-cell-to-landblock-building",
+				sourceEnvCellId: link.source.envCellId,
+			};
+		case "outside":
+			return {
+				kind: "env-cell-to-outdoor",
+				outdoorLandblockId: link.target.landblockId,
+				sourceEnvCellId: link.source.envCellId,
+			};
+	}
+}
+
+function createPortalGraphFixtureNode(
+	scene: StaticPortalGraphScene,
+): StaticPortalGraphNode {
+	switch (scene.kind) {
+		case "env-cell":
+			return {
+				nodeId: `env-cell:${scene.envCellId >>> 0}`,
+				scene,
+			};
+		case "landblock-building":
+			return {
+				nodeId: `building:${scene.buildingInstanceId}`,
+				scene,
+			};
+		case "outdoor":
+			return {
+				nodeId: `outdoor:${scene.landblockId >>> 0}`,
+				scene,
+			};
+	}
+}
+
+function getBuildingTransitionApertureRanges(
+	resource: StaticPortalApertureResource,
+): readonly StaticBuildingTransitionApertureRange[] {
+	return resource.ranges.filter(
+		(range): range is StaticBuildingTransitionApertureRange =>
+			range.sourceKind === "building-transition",
+	);
+}
+
+function comparePortalGraphNodes(
+	left: StaticPortalGraphNode,
+	right: StaticPortalGraphNode,
+): number {
+	return left.nodeId.localeCompare(right.nodeId);
+}
+
+function comparePortalGraphEdges(
+	left: StaticPortalGraphEdge,
+	right: StaticPortalGraphEdge,
+): number {
+	return left.edgeId.localeCompare(right.edgeId);
 }
 
 function createPlacement() {

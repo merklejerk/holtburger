@@ -156,6 +156,10 @@ pub struct LandblockSceneLodEnvCellSystemLayer {
     pub landblock_info_id: u32,
     /// Building transition apertures needed to connect outdoor building portals to env cells.
     pub building_transition_apertures: Vec<PreparedBuildingTransitionAperture>,
+    /// Canonical ownerless portal graph for env-cell and outdoor/building transition traversal.
+    pub portal_connectivity_graph: PreparedPortalConnectivityGraph,
+    /// Renderer-ready portal aperture resources for the env-cell-system layer.
+    pub portal_aperture_resources: Vec<PreparedPortalApertureResource>,
     /// Prepared env-cell bundle cells for this landblock.
     pub env_cells: Vec<EnvCellSystemCell>,
     /// Landblock-space env-cell BVH item records.
@@ -237,6 +241,167 @@ pub struct PreparedBuildingTransitionAperture {
     pub other_portal_id: u16,
     pub linked_env_cell_ids: Vec<u32>,
     pub points: Vec<PreparedVec3>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PreparedPortalConnectivityGraph {
+    /// Portal graph nodes sorted by stable node id.
+    pub nodes: Vec<PreparedPortalConnectivityNode>,
+    /// Directed portal graph edges sorted by stable edge id.
+    pub edges: Vec<PreparedPortalConnectivityEdge>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreparedPortalConnectivityNode {
+    /// Stable graph node id matching the renderer portal graph contract.
+    pub node_id: String,
+    /// Scene entity represented by this graph node.
+    pub scene: PreparedPortalConnectivityScene,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PreparedPortalConnectivityScene {
+    EnvCell { env_cell_id: u32 },
+    Outdoor { landblock_id: u32 },
+    LandblockBuilding { building_instance_id: String },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreparedPortalConnectivityEdge {
+    /// Stable edge id matching the renderer portal graph contract.
+    pub edge_id: String,
+    pub source_node_id: String,
+    pub target_node_id: String,
+    pub link_id: String,
+    pub source_index: usize,
+    pub flags: u16,
+    pub polygon_id: Option<u16>,
+    pub provenance: PreparedPortalConnectivityEdgeProvenance,
+    pub scene_crossing: Option<PreparedPortalConnectivitySceneCrossing>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PreparedPortalConnectivityEdgeProvenance {
+    EnvCellPortal {
+        source_env_cell_id: u32,
+        source_portal_id: String,
+        target: PreparedPortalEndpoint,
+    },
+    BuildingTransition {
+        aperture_resource_id: String,
+        portal_id: String,
+        building_instance_id: String,
+        building_portal_id: String,
+        target_env_cell_id: u32,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PreparedPortalConnectivitySceneCrossing {
+    EnvCellToEnvCell {
+        source_env_cell_id: u32,
+        target_env_cell_id: u32,
+    },
+    EnvCellToOutdoor {
+        source_env_cell_id: u32,
+        outdoor_landblock_id: u32,
+    },
+    EnvCellToLandblockBuilding {
+        source_env_cell_id: u32,
+        building_instance_id: String,
+    },
+    OutdoorToEnvCell {
+        outdoor_landblock_id: u32,
+        env_cell_id: u32,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PreparedPortalEndpoint {
+    EnvCell {
+        env_cell_id: u32,
+        portal_id: String,
+    },
+    Outside {
+        landblock_id: u32,
+    },
+    LandblockBuilding {
+        instance_id: String,
+        portal_id: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreparedPortalApertureResource {
+    /// Stable resource id matching the renderer portal aperture contract.
+    pub aperture_resource_id: String,
+    pub coordinate_space: PreparedPortalApertureCoordinateSpace,
+    pub landblock_id: u32,
+    pub indices: Vec<u32>,
+    pub ranges: Vec<PreparedPortalApertureRange>,
+    pub source_domain: PreparedPortalApertureSourceDomain,
+    pub vertices: Vec<PreparedVec3>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreparedPortalApertureCoordinateSpace {
+    LandblockRenderLocal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreparedPortalApertureSourceDomain {
+    EnvCellSystem,
+    OutdoorBuildings,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PreparedPortalApertureRange {
+    EnvCellPortal(PreparedEnvCellPortalApertureRange),
+    BuildingTransition(PreparedBuildingTransitionApertureRange),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreparedEnvCellPortalApertureRange {
+    pub range_id: String,
+    pub source_id: String,
+    pub first_index: usize,
+    pub index_count: usize,
+    pub source: PreparedEnvCellPortalApertureRangeSource,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreparedEnvCellPortalApertureRangeSource {
+    pub env_cell_id: u32,
+    pub landblock_id: u32,
+    pub polygon_id: Option<u16>,
+    pub portal_id: String,
+    pub source_index: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreparedBuildingTransitionApertureRange {
+    pub range_id: String,
+    pub source_id: String,
+    pub first_index: usize,
+    pub index_count: usize,
+    pub source: PreparedBuildingTransitionApertureRangeSource,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreparedBuildingTransitionApertureRangeSource {
+    pub building_instance_id: String,
+    pub building_portal_id: String,
+    pub building_portal_source_index: usize,
+    pub linked_env_cell_ids: Vec<u32>,
+    pub other_cell_id: u16,
+    pub other_portal_id: u16,
+    pub poly_id: u16,
+    pub portal_id: String,
+    pub portal_index: i16,
+    pub source_asset_id: String,
+    pub source_did: u32,
+    pub landblock_id: u32,
+    pub target_env_cell_id: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -1336,15 +1501,492 @@ fn landblock_scene_lod_env_cell_system_layer(
     asset: EnvCellSystemAsset,
     building_transition_apertures: Vec<PreparedBuildingTransitionAperture>,
 ) -> LandblockSceneLodEnvCellSystemLayer {
+    let portal_aperture_resources = build_scene_lod_portal_aperture_resources(
+        asset.landblock_id,
+        &asset.env_cells,
+        &building_transition_apertures,
+    );
+    let portal_connectivity_graph = build_scene_lod_portal_connectivity_graph(
+        asset.landblock_id,
+        &asset.env_cells,
+        &building_transition_apertures,
+        &portal_aperture_resources,
+    );
     LandblockSceneLodEnvCellSystemLayer {
         landblock_id: asset.landblock_id,
         landblock_info_id: asset.landblock_info_id,
         building_transition_apertures,
+        portal_connectivity_graph,
+        portal_aperture_resources,
         env_cells: asset.env_cells,
         landblock_bvh_items: asset.landblock_bvh_items,
         landblock_bvh: asset.landblock_bvh,
         diagnostics: asset.diagnostics,
     }
+}
+
+fn build_scene_lod_portal_connectivity_graph(
+    landblock_id: u32,
+    env_cells: &[EnvCellSystemCell],
+    building_transition_apertures: &[PreparedBuildingTransitionAperture],
+    portal_aperture_resources: &[PreparedPortalApertureResource],
+) -> PreparedPortalConnectivityGraph {
+    let mut nodes_by_id = HashMap::<String, PreparedPortalConnectivityNode>::new();
+    for cell in env_cells {
+        let node = prepared_portal_connectivity_node(PreparedPortalConnectivityScene::EnvCell {
+            env_cell_id: cell.env_cell.env_cell_id,
+        });
+        nodes_by_id.insert(node.node_id.clone(), node);
+    }
+
+    let mut edges = Vec::new();
+    for cell in env_cells {
+        for portal in &cell.env_cell.portals {
+            let source_node =
+                prepared_portal_connectivity_node(PreparedPortalConnectivityScene::EnvCell {
+                    env_cell_id: cell.env_cell.env_cell_id,
+                });
+            let target = prepared_endpoint_for_env_cell_portal(landblock_id, portal);
+            let target_node = prepared_portal_connectivity_node_from_endpoint(&target);
+            nodes_by_id.insert(source_node.node_id.clone(), source_node.clone());
+            nodes_by_id.insert(target_node.node_id.clone(), target_node.clone());
+            edges.push(PreparedPortalConnectivityEdge {
+                edge_id: format!(
+                    "env-cell-portal:{}:{}",
+                    portal.portal_id, portal.source_index
+                ),
+                source_node_id: source_node.node_id,
+                target_node_id: target_node.node_id,
+                link_id: portal.portal_id.clone(),
+                source_index: portal.source_index,
+                flags: portal.flags,
+                polygon_id: Some(portal.polygon_id),
+                provenance: PreparedPortalConnectivityEdgeProvenance::EnvCellPortal {
+                    source_env_cell_id: cell.env_cell.env_cell_id,
+                    source_portal_id: portal.portal_id.clone(),
+                    target: target.clone(),
+                },
+                scene_crossing: prepared_scene_crossing_for_env_cell_portal(
+                    cell.env_cell.env_cell_id,
+                    landblock_id,
+                    &target,
+                ),
+            });
+        }
+    }
+
+    let building_resource_id = create_building_transition_portal_aperture_resource_id(landblock_id);
+    if portal_aperture_resources.iter().any(|resource| {
+        resource.aperture_resource_id == building_resource_id
+            && resource.source_domain == PreparedPortalApertureSourceDomain::OutdoorBuildings
+    }) {
+        let outdoor_node =
+            prepared_portal_connectivity_node(PreparedPortalConnectivityScene::Outdoor {
+                landblock_id,
+            });
+        nodes_by_id.insert(outdoor_node.node_id.clone(), outdoor_node.clone());
+        for aperture in building_transition_apertures {
+            let Ok(target_env_cell_id) =
+                building_transition_target_env_cell_id(landblock_id, aperture.other_cell_id)
+            else {
+                continue;
+            };
+            let target_node =
+                prepared_portal_connectivity_node(PreparedPortalConnectivityScene::EnvCell {
+                    env_cell_id: target_env_cell_id,
+                });
+            nodes_by_id.insert(target_node.node_id.clone(), target_node.clone());
+            let portal_id =
+                create_building_transition_aperture_portal_id(landblock_id, &aperture.aperture_id);
+            edges.push(PreparedPortalConnectivityEdge {
+                edge_id: format!(
+                    "building-transition:{building_resource_id}:{portal_id}:{target_env_cell_id}"
+                ),
+                source_node_id: outdoor_node.node_id.clone(),
+                target_node_id: target_node.node_id,
+                link_id: format!(
+                    "transition:{building_resource_id}:{portal_id}:{target_env_cell_id}"
+                ),
+                source_index: aperture.building_portal_source_index,
+                flags: 0,
+                polygon_id: Some(aperture.poly_id),
+                provenance: PreparedPortalConnectivityEdgeProvenance::BuildingTransition {
+                    aperture_resource_id: building_resource_id.clone(),
+                    portal_id,
+                    building_instance_id: aperture.building_instance_id.clone(),
+                    building_portal_id: aperture.building_portal_id.clone(),
+                    target_env_cell_id,
+                },
+                scene_crossing: Some(PreparedPortalConnectivitySceneCrossing::OutdoorToEnvCell {
+                    outdoor_landblock_id: landblock_id,
+                    env_cell_id: target_env_cell_id,
+                }),
+            });
+        }
+    }
+
+    let mut nodes = nodes_by_id.into_values().collect::<Vec<_>>();
+    nodes.sort_by(|left, right| left.node_id.cmp(&right.node_id));
+    edges.sort_by(|left, right| left.edge_id.cmp(&right.edge_id));
+    PreparedPortalConnectivityGraph { nodes, edges }
+}
+
+fn build_scene_lod_portal_aperture_resources(
+    landblock_id: u32,
+    env_cells: &[EnvCellSystemCell],
+    building_transition_apertures: &[PreparedBuildingTransitionAperture],
+) -> Vec<PreparedPortalApertureResource> {
+    [
+        build_env_cell_portal_aperture_resource(landblock_id, env_cells),
+        build_building_transition_portal_aperture_resource(
+            landblock_id,
+            building_transition_apertures,
+        ),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+fn build_env_cell_portal_aperture_resource(
+    landblock_id: u32,
+    env_cells: &[EnvCellSystemCell],
+) -> Option<PreparedPortalApertureResource> {
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    let mut ranges = Vec::new();
+    for cell in env_cells {
+        for aperture in &cell.prepared_cell.portal_apertures {
+            if aperture.points.len() < 3 {
+                continue;
+            }
+            let first_vertex = vertices.len();
+            let first_index = indices.len();
+            vertices.extend(aperture.points.iter().copied().map(|point| {
+                transform_render_local_point_by_ac_frame(
+                    point,
+                    &cell.prepared_cell.local_placement,
+                    unit_prepared_vec3(),
+                )
+            }));
+            indices.extend(
+                triangulate_portal_aperture_fan(aperture.points.len(), true)
+                    .into_iter()
+                    .map(|index| {
+                        u32::try_from(first_vertex + index)
+                            .expect("portal aperture vertex index should fit u32")
+                    }),
+            );
+            let index_count = indices.len() - first_index;
+            let source_id = create_env_cell_portal_aperture_source_id(
+                landblock_id,
+                cell.env_cell.env_cell_id,
+                &aperture.portal_id,
+                aperture.source_index,
+                Some(aperture.polygon_id),
+            );
+            ranges.push(PreparedPortalApertureRange::EnvCellPortal(
+                PreparedEnvCellPortalApertureRange {
+                    range_id: create_env_cell_portal_aperture_range_id(
+                        landblock_id,
+                        cell.env_cell.env_cell_id,
+                        &aperture.portal_id,
+                        aperture.source_index,
+                        Some(aperture.polygon_id),
+                    ),
+                    source_id,
+                    first_index,
+                    index_count,
+                    source: PreparedEnvCellPortalApertureRangeSource {
+                        env_cell_id: cell.env_cell.env_cell_id,
+                        landblock_id,
+                        polygon_id: Some(aperture.polygon_id),
+                        portal_id: aperture.portal_id.clone(),
+                        source_index: aperture.source_index,
+                    },
+                },
+            ));
+        }
+    }
+
+    (!indices.is_empty()).then_some(PreparedPortalApertureResource {
+        aperture_resource_id: create_env_cell_portal_aperture_resource_id(landblock_id),
+        coordinate_space: PreparedPortalApertureCoordinateSpace::LandblockRenderLocal,
+        landblock_id,
+        indices,
+        ranges,
+        source_domain: PreparedPortalApertureSourceDomain::EnvCellSystem,
+        vertices,
+    })
+}
+
+fn build_building_transition_portal_aperture_resource(
+    landblock_id: u32,
+    apertures: &[PreparedBuildingTransitionAperture],
+) -> Option<PreparedPortalApertureResource> {
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    let mut ranges = Vec::new();
+    let aperture_resource_id = create_building_transition_portal_aperture_resource_id(landblock_id);
+    let mut sorted_apertures = apertures.iter().collect::<Vec<_>>();
+    sorted_apertures.sort_by(|left, right| left.aperture_id.cmp(&right.aperture_id));
+
+    for aperture in sorted_apertures {
+        if aperture.points.len() < 3 {
+            continue;
+        }
+        let Ok(target_env_cell_id) =
+            building_transition_target_env_cell_id(landblock_id, aperture.other_cell_id)
+        else {
+            continue;
+        };
+        let first_vertex = vertices.len();
+        let first_index = indices.len();
+        let portal_id =
+            create_building_transition_aperture_portal_id(landblock_id, &aperture.aperture_id);
+        let aperture_indices = triangulate_portal_aperture_fan(
+            aperture.points.len(),
+            building_transition_interior_visible_side_is_positive(aperture.flags),
+        );
+        vertices.extend(aperture.points.iter().copied());
+        indices.extend(aperture_indices.into_iter().map(|index| {
+            u32::try_from(first_vertex + index)
+                .expect("portal aperture vertex index should fit u32")
+        }));
+        let index_count = indices.len() - first_index;
+        let source_id = create_building_transition_aperture_source_id(
+            &aperture_resource_id,
+            &portal_id,
+            first_index,
+            index_count,
+        );
+        ranges.push(PreparedPortalApertureRange::BuildingTransition(
+            PreparedBuildingTransitionApertureRange {
+                range_id: create_building_transition_aperture_range_id(
+                    &aperture_resource_id,
+                    &portal_id,
+                    first_index,
+                    index_count,
+                ),
+                source_id,
+                first_index,
+                index_count,
+                source: PreparedBuildingTransitionApertureRangeSource {
+                    building_instance_id: aperture.building_instance_id.clone(),
+                    building_portal_id: aperture.building_portal_id.clone(),
+                    building_portal_source_index: aperture.building_portal_source_index,
+                    linked_env_cell_ids: aperture.linked_env_cell_ids.clone(),
+                    other_cell_id: aperture.other_cell_id,
+                    other_portal_id: aperture.other_portal_id,
+                    poly_id: aperture.poly_id,
+                    portal_id,
+                    portal_index: aperture.portal_index,
+                    source_asset_id: aperture.source_asset_id.clone(),
+                    source_did: aperture.source_did,
+                    landblock_id,
+                    target_env_cell_id,
+                },
+            },
+        ));
+    }
+
+    (!indices.is_empty()).then_some(PreparedPortalApertureResource {
+        aperture_resource_id,
+        coordinate_space: PreparedPortalApertureCoordinateSpace::LandblockRenderLocal,
+        landblock_id,
+        indices,
+        ranges,
+        source_domain: PreparedPortalApertureSourceDomain::OutdoorBuildings,
+        vertices,
+    })
+}
+
+fn prepared_endpoint_for_env_cell_portal(
+    landblock_id: u32,
+    portal: &EnvCellPortalFact,
+) -> PreparedPortalEndpoint {
+    portal.target_env_cell_id.map_or(
+        PreparedPortalEndpoint::Outside { landblock_id },
+        |env_cell_id| PreparedPortalEndpoint::EnvCell {
+            env_cell_id,
+            portal_id: format!(
+                "interior-cell/{env_cell_id:08x}/portal/{:02x}",
+                portal.other_portal_id
+            ),
+        },
+    )
+}
+
+fn prepared_portal_connectivity_node_from_endpoint(
+    endpoint: &PreparedPortalEndpoint,
+) -> PreparedPortalConnectivityNode {
+    match endpoint {
+        PreparedPortalEndpoint::EnvCell { env_cell_id, .. } => {
+            prepared_portal_connectivity_node(PreparedPortalConnectivityScene::EnvCell {
+                env_cell_id: *env_cell_id,
+            })
+        }
+        PreparedPortalEndpoint::Outside { landblock_id } => {
+            prepared_portal_connectivity_node(PreparedPortalConnectivityScene::Outdoor {
+                landblock_id: *landblock_id,
+            })
+        }
+        PreparedPortalEndpoint::LandblockBuilding { instance_id, .. } => {
+            prepared_portal_connectivity_node(PreparedPortalConnectivityScene::LandblockBuilding {
+                building_instance_id: instance_id.clone(),
+            })
+        }
+    }
+}
+
+fn prepared_portal_connectivity_node(
+    scene: PreparedPortalConnectivityScene,
+) -> PreparedPortalConnectivityNode {
+    let node_id = match &scene {
+        PreparedPortalConnectivityScene::EnvCell { env_cell_id } => {
+            format!("env-cell:{env_cell_id}")
+        }
+        PreparedPortalConnectivityScene::Outdoor { landblock_id } => {
+            format!("outdoor:{landblock_id}")
+        }
+        PreparedPortalConnectivityScene::LandblockBuilding {
+            building_instance_id,
+        } => {
+            format!("building:{building_instance_id}")
+        }
+    };
+    PreparedPortalConnectivityNode { node_id, scene }
+}
+
+fn prepared_scene_crossing_for_env_cell_portal(
+    source_env_cell_id: u32,
+    landblock_id: u32,
+    target: &PreparedPortalEndpoint,
+) -> Option<PreparedPortalConnectivitySceneCrossing> {
+    match target {
+        PreparedPortalEndpoint::EnvCell { env_cell_id, .. } => {
+            Some(PreparedPortalConnectivitySceneCrossing::EnvCellToEnvCell {
+                source_env_cell_id,
+                target_env_cell_id: *env_cell_id,
+            })
+        }
+        PreparedPortalEndpoint::Outside { .. } => {
+            Some(PreparedPortalConnectivitySceneCrossing::EnvCellToOutdoor {
+                source_env_cell_id,
+                outdoor_landblock_id: landblock_id,
+            })
+        }
+        PreparedPortalEndpoint::LandblockBuilding { instance_id, .. } => Some(
+            PreparedPortalConnectivitySceneCrossing::EnvCellToLandblockBuilding {
+                source_env_cell_id,
+                building_instance_id: instance_id.clone(),
+            },
+        ),
+    }
+}
+
+fn triangulate_portal_aperture_fan(vertex_count: usize, positive_visible_side: bool) -> Vec<usize> {
+    let mut indices = Vec::new();
+    for index in 1..vertex_count.saturating_sub(1) {
+        if positive_visible_side {
+            indices.extend([0, index, index + 1]);
+        } else {
+            indices.extend([0, index + 1, index]);
+        }
+    }
+    indices
+}
+
+fn building_transition_interior_visible_side_is_positive(flags: u16) -> bool {
+    (flags & 0x2) == 0
+}
+
+fn building_transition_target_env_cell_id(
+    landblock_id: u32,
+    other_cell_id: u16,
+) -> Result<u32, ()> {
+    if other_cell_id == 0xffff {
+        return Err(());
+    }
+    Ok((landblock_id & 0xffff_0000) | u32::from(other_cell_id))
+}
+
+fn create_env_cell_portal_aperture_resource_id(landblock_id: u32) -> String {
+    format!(
+        "portal-aperture-resource:env-cell-system:{}",
+        format_hex32(landblock_id)
+    )
+}
+
+fn create_building_transition_portal_aperture_resource_id(landblock_id: u32) -> String {
+    format!(
+        "portal-aperture-resource:building-transition:{}",
+        format_hex32(landblock_id)
+    )
+}
+
+fn create_env_cell_portal_aperture_range_id(
+    landblock_id: u32,
+    env_cell_id: u32,
+    portal_id: &str,
+    source_index: usize,
+    polygon_id: Option<u16>,
+) -> String {
+    format!(
+        "portal-aperture:env-cell-portal:{}:{}:{portal_id}:{source_index}:{}",
+        format_hex32(landblock_id),
+        format_hex32(env_cell_id),
+        format_optional_polygon_id(polygon_id)
+    )
+}
+
+fn create_env_cell_portal_aperture_source_id(
+    landblock_id: u32,
+    env_cell_id: u32,
+    portal_id: &str,
+    source_index: usize,
+    polygon_id: Option<u16>,
+) -> String {
+    format!(
+        "env-cell-portal:{}:{}:{portal_id}:{source_index}:{}",
+        format_hex32(landblock_id),
+        format_hex32(env_cell_id),
+        format_optional_polygon_id(polygon_id)
+    )
+}
+
+fn create_building_transition_aperture_portal_id(landblock_id: u32, aperture_id: &str) -> String {
+    format!("transition-portal:outdoor-buildings:{landblock_id}:{aperture_id}")
+}
+
+fn create_building_transition_aperture_range_id(
+    aperture_resource_id: &str,
+    portal_id: &str,
+    range_first_index: usize,
+    range_index_count: usize,
+) -> String {
+    format!(
+        "portal-aperture:building-transition:{aperture_resource_id}:{portal_id}:{range_first_index}:{range_index_count}"
+    )
+}
+
+fn create_building_transition_aperture_source_id(
+    aperture_resource_id: &str,
+    portal_id: &str,
+    range_first_index: usize,
+    range_index_count: usize,
+) -> String {
+    format!(
+        "building-transition:{aperture_resource_id}:{portal_id}:{range_first_index}:{range_index_count}"
+    )
+}
+
+fn format_optional_polygon_id(polygon_id: Option<u16>) -> String {
+    polygon_id.map_or_else(|| "none".to_string(), |id| id.to_string())
+}
+
+fn format_hex32(value: u32) -> String {
+    format!("0x{value:08x}")
 }
 
 fn collect_scene_lod_building_transition_apertures(

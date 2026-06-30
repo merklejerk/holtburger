@@ -131,7 +131,6 @@ export class EnvCellSystemResolver {
 			acceptedEnvCellIds: envCells
 				.map((cell) => cell.identity.envCellId)
 				.sort(compareNumeric),
-			buildingTransitionApertures: landblock.payload.buildingTransitionApertures,
 			envCells,
 			kind: "env-cell-system",
 			landblock: {
@@ -142,6 +141,8 @@ export class EnvCellSystemResolver {
 			materialSources: sourceClosure.materialSources,
 			missingRefs,
 			paletteSources: [...paletteSources.values()],
+			portalApertureResources: landblock.payload.portalApertureResources,
+			portalConnectivityGraph: landblock.payload.portalConnectivityGraph,
 			portalLinks: landblock.payload.portalLinks,
 			regionRenderProfile: {
 				detailRoles,

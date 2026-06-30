@@ -46,7 +46,8 @@ export interface EnvCellSystemLayerSourcePayloadDto {
 	readonly landblockInfoId: EnvCellSystemLayerDto["landblockInfoId"];
 	readonly regionId: LandblockSceneLodPayloadDto["regionId"];
 	readonly regionNumber: LandblockSceneLodPayloadDto["regionNumber"];
-	readonly buildingTransitionApertures: EnvCellSystemLayerDto["buildingTransitionApertures"];
+	readonly portalConnectivityGraph: EnvCellSystemLayerDto["portalConnectivityGraph"];
+	readonly portalApertureResources: EnvCellSystemLayerDto["portalApertureResources"];
 	readonly envCells: EnvCellSystemLayerDto["envCells"];
 	readonly portalLinks: EnvCellSystemLayerDto["portalLinks"];
 	readonly envCellSystemBvh: EnvCellSystemLayerDto["envCellSystemBvh"];

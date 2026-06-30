@@ -28,7 +28,7 @@ export function createLayerOwnerKeyForStaticScope(
 	};
 }
 
-export function layerOwnerKindForStaticDomain(
+function layerOwnerKindForStaticDomain(
 	domain: StaticDomain,
 ): LayerOwnerKey["kind"] {
 	switch (domain) {

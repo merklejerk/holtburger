@@ -135,7 +135,6 @@ function createScopePayload(
 ): EnvCellSystemStaticScopePayload {
 	return {
 		acceptedEnvCellIds: payload.envCells.map((cell) => cell.envCellId),
-		buildingTransitionApertures: payload.buildingTransitionApertures,
 		envCells: payload.envCells.map((cell) => ({
 			cellBsp: cell.cellBsp,
 			cellStructure: {
@@ -176,6 +175,11 @@ function createScopePayload(
 			source: "env-cells",
 		},
 		missingRefs: [],
+		portalApertureResources: [],
+		portalConnectivityGraph: {
+			edges: [],
+			nodes: [],
+		},
 		portalLinks: [],
 		regionRenderProfile: {
 			detailRoles: [],
@@ -219,7 +223,6 @@ function createPreparedAsset(
 
 function createEnvCellSystemPayload(): EnvCellSystemLayerSourcePayloadDto {
 	return {
-		buildingTransitionApertures: [],
 		diagnostics: createDiagnostics(),
 		envCells: [createEnvCellPayload()],
 		kind: "landblock-scene-lod-env-cell-layer",
@@ -236,6 +239,11 @@ function createEnvCellSystemPayload(): EnvCellSystemLayerSourcePayloadDto {
 		},
 		landblockId: 0xda55ffff,
 		landblockInfoId: 0xda55fffe,
+		portalApertureResources: [],
+		portalConnectivityGraph: {
+			edges: [],
+			nodes: [],
+		},
 		portalLinks: [],
 		provenance: createProvenance(),
 		regionId: 1,

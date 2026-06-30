@@ -229,7 +229,7 @@ export type DynamicEntityRenderResidence =
 			readonly reason: DynamicEntityNoResidenceReason;
 	  };
 
-export type DynamicEntityNoResidenceReason =
+type DynamicEntityNoResidenceReason =
 	| "render-residence-evicted"
 	| "render-residence-unassigned";
 

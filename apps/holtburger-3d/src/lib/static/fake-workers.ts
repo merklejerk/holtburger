@@ -403,7 +403,6 @@ function createFakeStaticScopePayloadBody(
 	if (job.domain === "env-cell-system" && job.scope.kind === "landblock") {
 		return {
 			acceptedEnvCellIds: [],
-			buildingTransitionApertures: [],
 			envCells: [],
 			kind: "env-cell-system",
 			landblock: {
@@ -414,6 +413,11 @@ function createFakeStaticScopePayloadBody(
 			materialSources: [],
 			missingRefs: [],
 			paletteSources: [],
+			portalApertureResources: [],
+			portalConnectivityGraph: {
+				edges: [],
+				nodes: [],
+			},
 			portalLinks: [],
 			regionRenderProfile: {
 				detailRoles: [],

@@ -339,7 +339,6 @@ function createEmptyTerrain() {
 
 function createEnvCellSystemLayer() {
 	return {
-		buildingTransitionApertures: [],
 		diagnostics: createDiagnostics(),
 		envCellSystemBvh: {
 			items: [],
@@ -392,6 +391,8 @@ function createEnvCellSystemLayer() {
 		],
 		kind: "env-cell-system",
 		landblockInfoId: 0x0007fffe,
+		portalApertureResources: [],
+		portalConnectivityGraph: { edges: [], nodes: [] },
 		portalLinks: [],
 	};
 }

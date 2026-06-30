@@ -74,13 +74,15 @@ describe("landblock scene LoD source resolver", () => {
 		const envCellRecipe = resolution.recipes.find(
 			(recipe) => recipe.payload.job.domain === "env-cell-system",
 		);
-		expect(
-			envCellRecipe?.payload.scope.kind === "env-cell-system"
-				? envCellRecipe.payload.scope.buildingTransitionApertures.map(
-						(aperture) => aperture.apertureId,
-					)
-				: [],
-		).toEqual(["building-transition-aperture:building-01:0"]);
+		expect(envCellRecipe?.payload.scope.kind).toBe("env-cell-system");
+		if (envCellRecipe?.payload.scope.kind !== "env-cell-system") {
+			throw new Error("Expected env-cell-system recipe.");
+		}
+		expect(envCellRecipe.payload.scope.portalApertureResources).toEqual([]);
+		expect(envCellRecipe.payload.scope.portalConnectivityGraph).toEqual({
+			edges: [],
+			nodes: [],
+		});
 	});
 
 	it("emits recipes that feed existing domain bake workers with owner keys", async () => {
@@ -251,12 +253,13 @@ function createSceneLodPayload() {
 				statics: [],
 			},
 			{
-				buildingTransitionApertures: [createBuildingTransitionAperture()],
 				diagnostics: createDiagnostics(),
 				envCells: [],
 				kind: "env-cell-system",
 				envCellSystemBvh: { items: [], nodes: [] },
 				landblockInfoId: 0xda55fffe,
+				portalApertureResources: [],
+				portalConnectivityGraph: { edges: [], nodes: [] },
 				portalLinks: [],
 			},
 		],
@@ -269,28 +272,6 @@ function createSceneLodPayload() {
 		regionId: 1,
 		regionNumber: 2,
 		source: { context: "outdoor", level: 4 },
-	};
-}
-
-function createBuildingTransitionAperture() {
-	return {
-		apertureId: "building-transition-aperture:building-01:0",
-		buildingInstanceId: "building-01",
-		buildingPortalId: "building-portal-0",
-		buildingPortalSourceIndex: 0,
-		flags: 1,
-		linkedEnvCellIds: [0x01020100],
-		otherCellId: 0x0100,
-		otherPortalId: 0xffff,
-		points: [
-			{ x: 0, y: 0, z: 0 },
-			{ x: 1, y: 0, z: 0 },
-			{ x: 0, y: 1, z: 0 },
-		],
-		polyId: 42,
-		portalIndex: 0,
-		sourceAssetId: "gfxobj/02001234",
-		sourceDid: 0x02001234,
 	};
 }
 

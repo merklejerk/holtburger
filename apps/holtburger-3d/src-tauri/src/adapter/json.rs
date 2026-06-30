@@ -706,7 +706,8 @@ fn serialize_landblock_scene_lod_layer(layer: &LandblockSceneLodLayer) -> serde_
             serde_json::json!({
                 "kind": "env-cell-system",
                 "landblockInfoId": layer.landblock_info_id,
-                "buildingTransitionApertures": layer.building_transition_apertures.iter().map(serialize_prepared_building_transition_aperture).collect::<Vec<_>>(),
+                "portalConnectivityGraph": serialize_prepared_portal_connectivity_graph(&layer.portal_connectivity_graph),
+                "portalApertureResources": layer.portal_aperture_resources.iter().map(serialize_prepared_portal_aperture_resource).collect::<Vec<_>>(),
                 "envCells": layer.env_cells.iter().map(|cell| {
                     serialize_env_cell_system_cell(
                         cell,
@@ -718,6 +719,252 @@ fn serialize_landblock_scene_lod_layer(layer: &LandblockSceneLodLayer) -> serde_
                 "envCellSystemBvh": serialize_env_cell_system_bvh(&bundle),
                 "diagnostics": serialize_prepared_content_diagnostics(&layer.diagnostics),
             })
+        }
+    }
+}
+
+fn serialize_prepared_portal_connectivity_graph(
+    graph: &holtburger_content::PreparedPortalConnectivityGraph,
+) -> serde_json::Value {
+    serde_json::json!({
+        "nodes": graph.nodes.iter().map(serialize_prepared_portal_connectivity_node).collect::<Vec<_>>(),
+        "edges": graph.edges.iter().map(serialize_prepared_portal_connectivity_edge).collect::<Vec<_>>(),
+    })
+}
+
+fn serialize_prepared_portal_connectivity_node(
+    node: &holtburger_content::PreparedPortalConnectivityNode,
+) -> serde_json::Value {
+    serde_json::json!({
+        "nodeId": node.node_id,
+        "scene": serialize_prepared_portal_connectivity_scene(&node.scene),
+    })
+}
+
+fn serialize_prepared_portal_connectivity_scene(
+    scene: &holtburger_content::PreparedPortalConnectivityScene,
+) -> serde_json::Value {
+    match scene {
+        holtburger_content::PreparedPortalConnectivityScene::EnvCell { env_cell_id } => {
+            serde_json::json!({
+                "kind": "env-cell",
+                "envCellId": env_cell_id,
+            })
+        }
+        holtburger_content::PreparedPortalConnectivityScene::Outdoor { landblock_id } => {
+            serde_json::json!({
+                "kind": "outdoor",
+                "landblockId": landblock_id,
+            })
+        }
+        holtburger_content::PreparedPortalConnectivityScene::LandblockBuilding {
+            building_instance_id,
+        } => {
+            serde_json::json!({
+                "kind": "landblock-building",
+                "buildingInstanceId": building_instance_id,
+            })
+        }
+    }
+}
+
+fn serialize_prepared_portal_connectivity_edge(
+    edge: &holtburger_content::PreparedPortalConnectivityEdge,
+) -> serde_json::Value {
+    serde_json::json!({
+        "edgeId": edge.edge_id,
+        "sourceNodeId": edge.source_node_id,
+        "targetNodeId": edge.target_node_id,
+        "direction": "directed",
+        "linkId": edge.link_id,
+        "sourceIndex": edge.source_index,
+        "flags": edge.flags,
+        "polygonId": edge.polygon_id,
+        "provenance": serialize_prepared_portal_connectivity_edge_provenance(&edge.provenance),
+        "sceneCrossing": edge.scene_crossing.as_ref().map(serialize_prepared_portal_connectivity_scene_crossing),
+    })
+}
+
+fn serialize_prepared_portal_connectivity_edge_provenance(
+    provenance: &holtburger_content::PreparedPortalConnectivityEdgeProvenance,
+) -> serde_json::Value {
+    match provenance {
+        holtburger_content::PreparedPortalConnectivityEdgeProvenance::EnvCellPortal {
+            source_env_cell_id,
+            source_portal_id,
+            target,
+        } => serde_json::json!({
+            "kind": "env-cell-portal",
+            "sourceEnvCellId": source_env_cell_id,
+            "sourcePortalId": source_portal_id,
+            "target": serialize_prepared_portal_endpoint(target),
+        }),
+        holtburger_content::PreparedPortalConnectivityEdgeProvenance::BuildingTransition {
+            aperture_resource_id,
+            portal_id,
+            building_instance_id,
+            building_portal_id,
+            target_env_cell_id,
+        } => serde_json::json!({
+            "kind": "building-transition",
+            "apertureResourceId": aperture_resource_id,
+            "portalId": portal_id,
+            "buildingInstanceId": building_instance_id,
+            "buildingPortalId": building_portal_id,
+            "targetEnvCellId": target_env_cell_id,
+        }),
+    }
+}
+
+fn serialize_prepared_portal_connectivity_scene_crossing(
+    crossing: &holtburger_content::PreparedPortalConnectivitySceneCrossing,
+) -> serde_json::Value {
+    match crossing {
+        holtburger_content::PreparedPortalConnectivitySceneCrossing::EnvCellToEnvCell {
+            source_env_cell_id,
+            target_env_cell_id,
+        } => serde_json::json!({
+            "kind": "env-cell-to-env-cell",
+            "sourceEnvCellId": source_env_cell_id,
+            "targetEnvCellId": target_env_cell_id,
+        }),
+        holtburger_content::PreparedPortalConnectivitySceneCrossing::EnvCellToOutdoor {
+            source_env_cell_id,
+            outdoor_landblock_id,
+        } => serde_json::json!({
+            "kind": "env-cell-to-outdoor",
+            "sourceEnvCellId": source_env_cell_id,
+            "outdoorLandblockId": outdoor_landblock_id,
+        }),
+        holtburger_content::PreparedPortalConnectivitySceneCrossing::EnvCellToLandblockBuilding {
+            source_env_cell_id,
+            building_instance_id,
+        } => serde_json::json!({
+            "kind": "env-cell-to-landblock-building",
+            "sourceEnvCellId": source_env_cell_id,
+            "buildingInstanceId": building_instance_id,
+        }),
+        holtburger_content::PreparedPortalConnectivitySceneCrossing::OutdoorToEnvCell {
+            outdoor_landblock_id,
+            env_cell_id,
+        } => serde_json::json!({
+            "kind": "outdoor-to-env-cell",
+            "outdoorLandblockId": outdoor_landblock_id,
+            "envCellId": env_cell_id,
+        }),
+    }
+}
+
+fn serialize_prepared_portal_endpoint(
+    endpoint: &holtburger_content::PreparedPortalEndpoint,
+) -> serde_json::Value {
+    match endpoint {
+        holtburger_content::PreparedPortalEndpoint::EnvCell {
+            env_cell_id,
+            portal_id,
+        } => serde_json::json!({
+            "kind": "env-cell",
+            "envCellId": env_cell_id,
+            "portalId": portal_id,
+        }),
+        holtburger_content::PreparedPortalEndpoint::Outside { landblock_id } => {
+            serde_json::json!({
+                "kind": "outside",
+                "landblockId": landblock_id,
+            })
+        }
+        holtburger_content::PreparedPortalEndpoint::LandblockBuilding {
+            instance_id,
+            portal_id,
+        } => serde_json::json!({
+            "kind": "landblock-building",
+            "instanceId": instance_id,
+            "portalId": portal_id,
+        }),
+    }
+}
+
+fn serialize_prepared_portal_aperture_resource(
+    resource: &holtburger_content::PreparedPortalApertureResource,
+) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "portal-aperture-resource",
+        "apertureResourceId": resource.aperture_resource_id,
+        "coordinateSpace": serialize_prepared_portal_aperture_coordinate_space(resource.coordinate_space),
+        "landblockId": resource.landblock_id,
+        "indices": resource.indices,
+        "ranges": resource.ranges.iter().map(serialize_prepared_portal_aperture_range).collect::<Vec<_>>(),
+        "sourceDomain": serialize_prepared_portal_aperture_source_domain(resource.source_domain),
+        "vertices": resource.vertices.iter().map(serialize_prepared_vec3).collect::<Vec<_>>(),
+    })
+}
+
+fn serialize_prepared_portal_aperture_range(
+    range: &holtburger_content::PreparedPortalApertureRange,
+) -> serde_json::Value {
+    match range {
+        holtburger_content::PreparedPortalApertureRange::EnvCellPortal(range) => {
+            serde_json::json!({
+                "rangeId": range.range_id,
+                "sourceId": range.source_id,
+                "firstIndex": range.first_index,
+                "indexCount": range.index_count,
+                "sourceKind": "env-cell-portal",
+                "source": {
+                    "kind": "env-cell-portal",
+                    "envCellId": range.source.env_cell_id,
+                    "landblockId": range.source.landblock_id,
+                    "polygonId": range.source.polygon_id,
+                    "portalId": range.source.portal_id,
+                    "sourceIndex": range.source.source_index,
+                },
+            })
+        }
+        holtburger_content::PreparedPortalApertureRange::BuildingTransition(range) => {
+            serde_json::json!({
+                "rangeId": range.range_id,
+                "sourceId": range.source_id,
+                "firstIndex": range.first_index,
+                "indexCount": range.index_count,
+                "sourceKind": "building-transition",
+                "source": {
+                    "kind": "building-transition",
+                    "buildingInstanceId": range.source.building_instance_id,
+                    "buildingPortalId": range.source.building_portal_id,
+                    "buildingPortalSourceIndex": range.source.building_portal_source_index,
+                    "linkedEnvCellIds": range.source.linked_env_cell_ids,
+                    "otherCellId": range.source.other_cell_id,
+                    "otherPortalId": range.source.other_portal_id,
+                    "polyId": range.source.poly_id,
+                    "portalId": range.source.portal_id,
+                    "portalIndex": range.source.portal_index,
+                    "sourceAssetId": range.source.source_asset_id,
+                    "sourceDid": range.source.source_did,
+                    "landblockId": range.source.landblock_id,
+                    "targetEnvCellId": range.source.target_env_cell_id,
+                },
+            })
+        }
+    }
+}
+
+fn serialize_prepared_portal_aperture_coordinate_space(
+    coordinate_space: holtburger_content::PreparedPortalApertureCoordinateSpace,
+) -> &'static str {
+    match coordinate_space {
+        holtburger_content::PreparedPortalApertureCoordinateSpace::LandblockRenderLocal => {
+            "landblock-render-local"
+        }
+    }
+}
+
+fn serialize_prepared_portal_aperture_source_domain(
+    source_domain: holtburger_content::PreparedPortalApertureSourceDomain,
+) -> &'static str {
+    match source_domain {
+        holtburger_content::PreparedPortalApertureSourceDomain::EnvCellSystem => "env-cell-system",
+        holtburger_content::PreparedPortalApertureSourceDomain::OutdoorBuildings => {
+            "outdoor-buildings"
         }
     }
 }
@@ -1704,8 +1951,8 @@ mod tests {
         LandblockSceneLodLevel, LandblockSceneLodOutdoorBuildingsLayer,
         LandblockSceneLodOutdoorStaticLayer, LandblockSceneLodTerrainLayer, PreparedAabb,
         PreparedBuildingTransitionAperture, PreparedBvh, PreparedBvhNode,
-        PreparedContentSourceDiagnostics, PreparedStaticInstance, PreparedStaticInstanceKind,
-        PreparedVec3,
+        PreparedContentSourceDiagnostics, PreparedPortalConnectivityGraph, PreparedStaticInstance,
+        PreparedStaticInstanceKind, PreparedVec3,
     };
 
     #[test]
@@ -1801,6 +2048,8 @@ mod tests {
                         landblock_id: 0xda55ffff,
                         landblock_info_id: 0xda55fffe,
                         building_transition_apertures: Vec::new(),
+                        portal_connectivity_graph: PreparedPortalConnectivityGraph::default(),
+                        portal_aperture_resources: Vec::new(),
                         env_cells: Vec::new(),
                         landblock_bvh_items: Vec::new(),
                         landblock_bvh: None,
@@ -1817,7 +2066,11 @@ mod tests {
         assert_eq!(layer["kind"], "env-cell-system");
         assert_eq!(layer["landblockInfoId"].as_u64(), Some(0xda55fffe));
         assert_eq!(
-            layer["buildingTransitionApertures"]
+            layer["portalApertureResources"].as_array().map(Vec::len),
+            Some(0)
+        );
+        assert_eq!(
+            layer["portalConnectivityGraph"]["edges"]
                 .as_array()
                 .map(Vec::len),
             Some(0)

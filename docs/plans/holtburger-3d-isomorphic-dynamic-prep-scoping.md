@@ -1,6 +1,7 @@
 # Holtburger 3D Isomorphic Dynamic Prep Implementation Plan
 
-Status: implemented and validated.
+Status: implemented and validated. Follow-up cleanup phases planned for strongly typed prepared
+geometry, canonical geometry attachments, and stale bake diagnostics.
 
 ## Purpose
 
@@ -1797,6 +1798,193 @@ Verification:
 - `npm run test:ts`
 - `npm run lint:ts`
 
+### Phase 10A: Strong Prepared Geometry Buffer Contracts
+
+Goal: make prepared frontend geometry payloads honestly typed as `Float32Array` buffers, then remove
+defensive runtime/bake conversions that exist only because tests and old JSON-shaped payloads were
+allowed to weaken the contract.
+
+Why this exists:
+
+- Production `gfx-obj` and env-cell render geometry are binary-routed through the Tauri host and
+  decoded into `Float32Array` buffers.
+- The frontend host DTO schema still accepts `number[] | Float32Array` for prepared render geometry
+  buffers. That makes downstream code defend against a shape that should not exist in prepared
+  runtime/bake payloads.
+- Tests are low-priority consumers. They should follow the production prepared payload contract
+  rather than keeping permissive unions and fallback conversions alive.
+
+Deliverables:
+
+- Split transport-level acceptance from prepared-runtime asset types if needed, but ensure prepared
+  `gfx-obj` and env-cell render geometry expose `positions`, `normals`, and `uvs` as
+  `Float32Array`.
+- Reject or fail loudly for JSON-style prepared geometry buffers outside the explicit host transport
+  decoding edge.
+- Remove `toFloat32Array(...)` conversion helpers from static object and env-cell bake attachment
+  paths once the prepared payload type guarantees typed buffers.
+- Update test fixture helpers to construct typed-array geometry payloads directly.
+- Delete tests or fixture paths that preserve plain-array prepared geometry only for convenience.
+
+Task checklist:
+
+- Audit every `preparedFloat32ArrayDtoSchema`, render-geometry DTO, and prepared asset payload type
+  that currently permits `number[]`.
+- Introduce or tighten prepared asset payload types so binary-routed render geometry is strongly
+  typed after host response preparation.
+- Update `prepareV2AssetPayload(...)` or adjacent route-specific parsing so prepared geometry
+  payloads cannot silently carry plain arrays. Prefer route-specific prepared schemas/transforms over
+  generic casts.
+- Remove bake-local `toFloat32Array(...)` helpers for `gfx-obj` and env-cell geometry attachments.
+- Rebuild static object, env-cell, and dynamic visual test fixtures around `Float32Array` payloads.
+- Delete hollow tests that only prove plain-array geometry is still accepted after the prepared
+  contract is tightened.
+- Run focused host envelope/preparation, static attachment, env-cell attachment, and dynamic visual
+  bake tests before broad frontend verification.
+
+Acceptance criteria:
+
+- Prepared `gfx-obj` render geometry buffers are statically typed as `Float32Array`.
+- Prepared env-cell render geometry buffers used by bake attachments are statically typed as
+  `Float32Array`.
+- Bake attachment code does not normalize `number[] | Float32Array`; it consumes the strong
+  prepared geometry contract directly.
+- Tests and fixtures use production-shaped typed-array geometry payloads.
+- No legacy JSON-style prepared geometry path remains outside the explicit transport boundary.
+
+Spicy bits:
+
+- This should happen before canonical geometry dedupe. If the payload contract remains soft,
+  canonical attachments would still need defensive conversions and the cleanup would be half-fake.
+- If a non-Tauri tool genuinely needs JSON geometry later, it should get an explicit transport
+  adapter that converts at the edge, not a permissive runtime/bake contract.
+
+Dry-run findings:
+
+- The host DTO currently doubles as both transport schema and prepared runtime type. Tightening
+  `preparedFloat32ArrayDtoSchema` directly to `z.instanceof(Float32Array)` would make intent clear,
+  but it is a broad contract change because `preparedPolygonSetRenderGeometryDtoSchema` is shared by
+  `gfx-obj`, env-cell, and landblock-scene payload shapes.
+- Production `gfx-obj` and env-cell assets already reach the frontend through binary lookup and the
+  binary envelope decoder installs `Float32Array` values at `.renderGeometry.positions`,
+  `.renderGeometry.normals`, and `.renderGeometry.uvs`. The runtime behavior is already stricter
+  than the TypeScript type.
+- Existing `palettePayloadDtoSchema` already uses a Zod transform to turn plain JSON arrays into
+  `Uint32Array`. That is the clean local precedent if we need a transport-to-prepared transform,
+  but Phase 10A should avoid preserving plain-array prepared geometry as a permanent alternate
+  shape.
+- `V2PreparedAssetPayload` currently reuses host DTO types directly, and `PreparedAsset.payload` is
+  `unknown`. A clean implementation likely needs named prepared payload types for at least
+  `gfx-obj` and env-cell render geometry instead of trying to express the stronger post-parse type
+  only through consumers.
+- Resolver worker views intentionally omit render-geometry vertex buffers through
+  `createResolverGfxObjPreparedAssetView(...)` and `createResolverEnvCellPreparedAssetView(...)`.
+  Phase 10A should keep that metadata-only view intact; the strong typed-buffer contract applies to
+  full prepared payloads consumed by bake attachment providers.
+- Fixture blast radius is real but bounded. Plain-array geometry fixtures currently appear in host
+  preparation tests, asset-bridge resolver tests, static coordinator/query tests, static object bake
+  attachment tests, env-cell resolver tests, and env-cell geometry attachment tests. These should be
+  rewritten to typed arrays or metadata-only resolver views, not accommodated with runtime fallback
+  code.
+
+Dry-run course correction:
+
+- Start by introducing strong prepared render-geometry aliases/types and route-specific prepared
+  payload parsing for `gfx-obj` and env-cell payloads. Then update attachment providers to consume
+  those strong types and delete `toFloat32Array(...)`.
+- Do not first tighten the shared host DTO schema globally unless the route-specific prepared types
+  prove unnecessary. The goal is a clean prepared-runtime contract, not churn in every transport DTO
+  user at once.
+
+Verification:
+
+- `npm run check`
+- `npm run test:ts -- binary-asset-envelope preparation static-object-bake-attachments env-cell-system-geometry-attachments visual-bake-attachments visual-baker`
+- `npm run test:ts`
+- `npm run lint:ts`
+
+### Phase 10B: Canonical Geometry Attachments And Bake Diagnostics Cleanup
+
+Goal: split source-part identity from canonical gfx geometry payload identity, then remove static
+bake diagnostics that only exist to narrate the deleted static-authored dynamic activation path.
+
+Why this exists:
+
+- Static and dynamic visual bake attachment collection currently dedupes geometry by
+  `StaticObjectSourceGeometryIdentity`, which includes the higher-level source asset identity,
+  `gfx-obj` identity, and part index.
+- That is correct for source-part lookup, but the attachment payload itself is only raw
+  `gfx-obj` positions and texture coordinates. Different source assets that point at the same
+  `gfx-obj` part can therefore carry duplicate geometry attachments.
+- Phase 10A makes those payload buffers strongly typed first, so this phase can focus on identity
+  and dedupe rather than defensive conversion.
+- Static object bake diagnostics still report authored dynamic placement classification counts from
+  the static bake path. After the cutover, static-authored dynamic activation is source-resolved and
+  runtime-applied, so these diagnostics are stale narrative state rather than a useful contract.
+
+Deliverables:
+
+- Introduce a canonical gfx geometry identity keyed by `gfx-obj` identity and part index, separate
+  from source-part identity.
+- Update source-part facts so they retain their source-local identity while referencing the
+  canonical geometry identity needed for raw positions/UVs.
+- Key static and dynamic source-geometry attachments by the canonical geometry identity.
+- Update static and dynamic bakers to resolve `part -> canonical geometry -> attachment` without
+  weakening source-part/material/triangle lookup correctness.
+- Keep recipe resolution free of renderer products; this phase changes geometry attachment identity,
+  not the resolver/baker ownership split.
+- Remove or sharply narrow `StaticObjectBakeDiagnostics` fields that only report authored dynamic
+  placement counts/classification reasons from the old static bake ownership model.
+- Delete or rewrite tests that only preserve those stale diagnostic fields.
+
+Task checklist:
+
+- Add typed canonical geometry identity helpers and descriptive key functions near the existing
+  static object source-asset helpers.
+- Update `createStaticObjectSourceGeometryIdentity(...)` or its callers so source geometry facts
+  carry both source-part identity and canonical geometry identity without duplicating concepts.
+- Update `StaticObjectBakeAttachmentProvider` and `createDynamicVisualBakeSourceGeometry(...)` to
+  collect attachments by canonical geometry key.
+- Update static and dynamic source-geometry indexes to look up canonical attachments from source
+  parts.
+- Remove duplicate attachment tests keyed to source identity and replace them with canonical
+  dedupe coverage.
+- Audit `StaticObjectBakeDiagnostics`; delete authored-dynamic diagnostic fields unless a current
+  static-layer consumer still needs them for a live behavior decision.
+- Update snapshots/tests that consumed deleted diagnostics; do not replace them with "no longer has
+  field" tests.
+- Run focused static object attachment/baker, dynamic visual attachment/baker, static coordinator,
+  and broad frontend verification commands.
+
+Acceptance criteria:
+
+- Multiple source assets that reference the same `gfx-obj` part produce one geometry attachment for
+  that canonical geometry payload within a bake request.
+- Static and dynamic visual bakers still preserve source-part material slots, triangle facts, and
+  error messages with enough source context to debug missing/malformed inputs.
+- Static-authored and runtime-authored dynamic visual bake inputs remain isomorphic.
+- Static bake diagnostics no longer retain authored-dynamic placement/classification records that
+  do not drive current behavior.
+- No compatibility shim keeps the old source-keyed attachment shape alive after the cutover.
+
+Spicy bits:
+
+- The current `toFloat32Array(...)` conversion is not obviously expensive by itself. The structural
+  problem is concept collapse: source-part identity and raw gfx geometry payload identity are doing
+  one job under one key. Phase 10A should delete that conversion before this phase starts.
+- The clean fix adds a little bookkeeping. That is acceptable because it removes duplicate payload
+  identity and makes the attachment contract more honest.
+- If implementation shows the source-part identity is still needed as the direct attachment key for
+  error locality, keep source context on the part/lookup error path, not inside the canonical raw
+  geometry attachment identity.
+
+Verification:
+
+- `npm run check`
+- `npm run test:ts -- static-object-bake-attachments visual-bake-attachments visual-baker static-object-batch-baker static-coordinator`
+- `npm run test:ts`
+- `npm run lint:ts`
+
 ## Test Strategy
 
 Tests should be rebuilt around durable behavior and contract boundaries:
@@ -1808,6 +1996,7 @@ Tests should be rebuilt around durable behavior and contract boundaries:
 - Runtime tests prove visual readiness and residency activation are separate gates.
 - Static coordinator tests prove static bake and dynamic visual bake are sibling scoped jobs with
   shared currentness checks.
+- Attachment tests prove source-part lookup and canonical geometry payload dedupe separately.
 
 Ossified tests should be deleted and rewritten when updating them would preserve old concepts:
 
@@ -1815,6 +2004,8 @@ Ossified tests should be deleted and rewritten when updating them would preserve
 - tests requiring static materialization before static-authored dynamic visual prep begins;
 - tests treating `staticAuthoredDynamicSeeds` as the visual-prep carrier after recipes exist;
 - tests that only prove a legacy compatibility shim still calls the old path.
+- tests that only preserve authored-dynamic static bake diagnostics after activation no longer flows
+  through static bake output.
 
 Do not add tests that merely assert removed behavior stays removed. Cover the new behavior directly.
 
@@ -1867,6 +2058,17 @@ Risk: tests preserve legacy architecture by accident.
 Mitigation: delete and rewrite ossified tests when reworking them requires compatibility shims or
 old sequencing. New tests should target contracts and behavior, not historical call order.
 
+Risk: canonical geometry dedupe hides source context needed for actionable bake failures.
+
+Mitigation: keep source-part identity on recipe/part facts and error paths while keying only the raw
+positions/UV attachment by canonical gfx geometry identity.
+
+Risk: diagnostics cleanup removes a field that still drives live UI behavior.
+
+Mitigation: audit all `StaticObjectBakeDiagnostics` consumers first. If a live UI still needs a
+current static-layer fact, replace it with a narrowly named projection from current behavior instead
+of preserving authored-dynamic classification records.
+
 ## Resolved Plan Decisions
 
 - Use a dedicated dynamic visual recipe resolver worker entrypoint for runtime-authored dynamic
@@ -1910,4 +2112,10 @@ old sequencing. New tests should target contracts and behavior, not historical c
   legacy tests are removed.
 - Failure handling is loud and simple: fail affected jobs or skip affected entities with console
   reports, without durable issue ledgers.
+- Prepared render geometry buffers should be strong `Float32Array` payloads after Phase 10A, not
+  permissive `number[] | Float32Array` values tolerated for tests or legacy JSON-shaped assets.
+- Source-part identity and canonical raw gfx geometry identity are separate concepts; attachment
+  payloads should be keyed by canonical geometry once Phase 10B lands.
+- Static bake diagnostics should not preserve authored-dynamic activation history after activation
+  has moved to source-resolved dynamic placement records.
 - Frontend typecheck, lint, and relevant test suites pass.

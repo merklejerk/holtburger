@@ -861,7 +861,7 @@ Verification:
 
 ### Phase 9: Diagnostics Diet And Naming Cleanup
 
-Status: pending.
+Status: completed 2026-06-30.
 
 Purpose:
 
@@ -885,14 +885,29 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Update `StaticCoordinatorSnapshot`, runtime diagnostics, and diagnostics UI contracts.
-- [ ] Remove stale-result tests and replace with cancellation/currentness tests.
-- [ ] Rename remaining work-id helpers or delete them.
-- [ ] Run lint/dead-code checks and remove leftover compatibility scaffolding.
+- [x] Update `StaticCoordinatorSnapshot`, runtime diagnostics, and diagnostics UI contracts.
+- [x] Remove stale-result tests and replace with cancellation/currentness tests.
+- [x] Rename remaining work-id helpers or delete them.
+- [x] Run lint/dead-code checks and remove leftover compatibility scaffolding.
 
 Decisions and course corrections:
 
-- Record any diagnostic retained despite old naming pressure and why it is still useful.
+- 2026-06-30: Renamed private coordinator active-state storage from in-flight static work to layer
+  tasks by task id. The mutable coordinator state now uses `taskId`; `ScheduledStaticWork` remains
+  only at the demand-planner boundary for Phase 10.
+- 2026-06-30: Updated public overview comments and coordinator test names from active work wording
+  to layer task wording.
+- 2026-06-30: No `staleResolverResults`, `staleBakeResults`, `resolverMsByStaticWorkId`, or bake
+  stale-filter helpers remain in live app code. Plan-doc historical mentions are retained as
+  execution record only.
+
+Verification:
+
+- `npm run test:ts -- --run src/lib/static/coordinator/static-coordinator.test.ts`
+- `npm run test:ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run lint:dead`
 
 ### Phase 10: Resteer And Cleanup
 

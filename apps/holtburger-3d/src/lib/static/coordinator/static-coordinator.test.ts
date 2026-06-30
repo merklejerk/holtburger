@@ -390,7 +390,7 @@ describe("static coordinator", () => {
 		);
 	});
 
-	it("reports layer owner lifecycle transitions without changing work identity", async () => {
+	it("reports layer owner lifecycle transitions without changing task identity", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
@@ -873,7 +873,7 @@ describe("static coordinator", () => {
 		const evictedWork = terrainWork[0];
 		const retainedWork = terrainWork[1];
 		if (!evictedWork || !retainedWork) {
-			throw new Error("terrain radius 1 should create at least two work items");
+			throw new Error("terrain radius 1 should create at least two layer tasks");
 		}
 
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");

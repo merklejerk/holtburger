@@ -86,7 +86,7 @@ export class StaticCoordinator {
 	readonly #commitListeners = new Set<StaticCoordinatorCommitListener>();
 	readonly #sourcePayloadListeners =
 		new Set<StaticCoordinatorSourcePayloadListener>();
-	readonly #inFlightStaticWork = new Map<string, MutableScheduledStaticWorkStatus>();
+	readonly #layerTasksByTaskId = new Map<string, MutableStaticLayerTaskState>();
 	readonly #pendingBatches = new Map<string, PendingStaticBakeBatch>();
 	readonly #residentDrawUnitIds = new Set<string>();
 	readonly #residentResourcesByOwnerId = new Map<
@@ -152,9 +152,9 @@ export class StaticCoordinator {
 		};
 		const newWorkItems: ScheduledStaticWork[] = [];
 
-		for (const status of Array.from(this.#inFlightStaticWork.values())) {
+		for (const status of Array.from(this.#layerTasksByTaskId.values())) {
 			if (!run.desiredOwnerIds.has(status.ownerId)) {
-				this.#inFlightStaticWork.delete(status.staticWorkId);
+				this.#layerTasksByTaskId.delete(status.taskId);
 			}
 		}
 		const removedResources = this.#evictResidentResourcesExcept(
@@ -169,15 +169,15 @@ export class StaticCoordinator {
 		for (const work of demandPlan.work) {
 			const ownerId = createLayerOwnerKeyIdForWork(work);
 			const ownerKey = createLayerOwnerKeyForWork(work);
-			const existing = this.#findInFlightStaticWorkByOwnerId(ownerId);
+			const existing = this.#findLayerTaskByOwnerId(ownerId);
 			if (existing) {
 				continue;
 			}
-			this.#inFlightStaticWork.set(work.staticWorkId, {
+			this.#layerTasksByTaskId.set(work.staticWorkId, {
 				domain: work.job.domain,
 				ownerId,
 				ownerKey,
-				staticWorkId: work.staticWorkId,
+				taskId: work.staticWorkId,
 				revision: work.revision,
 				scopeKey: describeStaticScopeKey(work.job.scope),
 				status: "requested",
@@ -201,9 +201,9 @@ export class StaticCoordinator {
 
 		const layerTasks = demandPlan.retainedLayerOwners
 			.map((ownerKey) =>
-				this.#findInFlightStaticWorkByOwnerId(createLayerOwnerKeyId(ownerKey)),
+				this.#findLayerTaskByOwnerId(createLayerOwnerKeyId(ownerKey)),
 			)
-			.filter((status): status is MutableScheduledStaticWorkStatus =>
+			.filter((status): status is MutableStaticLayerTaskState =>
 				Boolean(status),
 			)
 			.map(toStaticLayerTaskStatus);
@@ -236,7 +236,7 @@ export class StaticCoordinator {
 	markCommitMaterialized(delta: StaticCoordinatorCommitDelta): void {
 		let changed = false;
 		for (const task of delta.tasks) {
-			const current = this.#inFlightStaticWork.get(task.taskId);
+			const current = this.#layerTasksByTaskId.get(task.taskId);
 			if (!current || current.status !== "materializing") {
 				continue;
 			}
@@ -268,7 +268,7 @@ export class StaticCoordinator {
 	}
 
 	createSnapshot(): StaticCoordinatorSnapshot {
-		const layerTasks = Array.from(this.#inFlightStaticWork.values()).map(
+		const layerTasks = Array.from(this.#layerTasksByTaskId.values()).map(
 			toStaticLayerTaskStatus,
 		);
 		const ownerStates = this.#createOwnerStates();
@@ -298,14 +298,14 @@ export class StaticCoordinator {
 	}
 
 	createOverviewSnapshot(): StaticCoordinatorOverviewSnapshot {
-		const inFlightStaticWork = Array.from(this.#inFlightStaticWork.values());
+		const layerTasks = Array.from(this.#layerTasksByTaskId.values());
 		return {
-			baking: inFlightStaticWork.filter((work) => work.status === "baking").length,
+			baking: layerTasks.filter((task) => task.status === "baking").length,
 			committed: this.#committed,
 			latestEnvCellSystemPayload: this.#latestEnvCellSystemPayload,
 			latestTerrainPayload: this.#latestTerrainPayload,
-			requested: inFlightStaticWork.length,
-			resolving: inFlightStaticWork.filter((work) => work.status === "resolving")
+			requested: layerTasks.length,
+			resolving: layerTasks.filter((task) => task.status === "resolving")
 				.length,
 			revision: this.#revision,
 		};
@@ -319,7 +319,7 @@ export class StaticCoordinator {
 		this.#disposed = true;
 		disposeIfAvailable(this.#resolver);
 		disposeIfAvailable(this.#baker);
-		this.#inFlightStaticWork.clear();
+		this.#layerTasksByTaskId.clear();
 		for (const pendingBatch of this.#pendingBatches.values()) {
 			if (pendingBatch.timeoutId) {
 				clearTimeout(pendingBatch.timeoutId);
@@ -341,10 +341,10 @@ export class StaticCoordinator {
 				createLayerOwnerKeyId(layer.targetOwnerKey),
 			),
 		);
-		const tasksByOwnerId = new Map<string, MutableScheduledStaticWorkStatus>();
+		const tasksByOwnerId = new Map<string, MutableStaticLayerTaskState>();
 		for (const layer of sourceRequest.requestedLayers) {
 			const ownerId = createLayerOwnerKeyId(layer.targetOwnerKey);
-			const task = this.#findInFlightStaticWorkByOwnerId(
+			const task = this.#findLayerTaskByOwnerId(
 				ownerId,
 			);
 			if (task) {
@@ -393,7 +393,7 @@ export class StaticCoordinator {
 	}
 
 	#enqueueBakePayload(
-		taskStatus: MutableScheduledStaticWorkStatus,
+		taskStatus: MutableStaticLayerTaskState,
 		payload: StaticScopePayload,
 		resolverMs: number,
 	): void {
@@ -447,7 +447,7 @@ export class StaticCoordinator {
 
 		const pendingItems = pendingBatch.items.filter(
 			(item) => {
-				const task = this.#inFlightStaticWork.get(item.taskId);
+				const task = this.#layerTasksByTaskId.get(item.taskId);
 				return (
 					task !== undefined &&
 					this.#isTaskCurrent(task) &&
@@ -558,7 +558,7 @@ export class StaticCoordinator {
 		const resourcesByOwnerId = collectCommittedResourceKeysByOwnerId(result);
 
 		for (const task of result.tasks) {
-			const status = this.#inFlightStaticWork.get(task.taskId);
+			const status = this.#layerTasksByTaskId.get(task.taskId);
 			if (!status) {
 				continue;
 			}
@@ -669,10 +669,10 @@ export class StaticCoordinator {
 		});
 	}
 
-	#findInFlightStaticWorkByOwnerId(
+	#findLayerTaskByOwnerId(
 		ownerId: string,
-	): MutableScheduledStaticWorkStatus | null {
-		for (const status of this.#inFlightStaticWork.values()) {
+	): MutableStaticLayerTaskState | null {
+		for (const status of this.#layerTasksByTaskId.values()) {
 			if (status.ownerId === ownerId) {
 				return status;
 			}
@@ -732,7 +732,7 @@ export class StaticCoordinator {
 	}
 
 	#markTaskFailedIfCurrent(
-		task: MutableScheduledStaticWorkStatus,
+		task: MutableStaticLayerTaskState,
 		message: string,
 	): void {
 		if (!this.#isTaskCurrent(task)) {
@@ -743,7 +743,7 @@ export class StaticCoordinator {
 	}
 
 	#markTaskIdFailedIfCurrent(taskId: string, message: string): void {
-		const task = this.#inFlightStaticWork.get(taskId);
+		const task = this.#layerTasksByTaskId.get(taskId);
 		if (!task) {
 			return;
 		}
@@ -752,7 +752,7 @@ export class StaticCoordinator {
 	}
 
 	#markTaskFailed(
-		task: MutableScheduledStaticWorkStatus,
+		task: MutableStaticLayerTaskState,
 		message: string,
 	): void {
 		if (task.status === "failed") {
@@ -762,7 +762,7 @@ export class StaticCoordinator {
 		task.status = "failed";
 		this.#failed += 1;
 		console.error(
-			`static layer task ${task.staticWorkId} failed; static content for ${task.scopeKey}/${task.domain} was not resolved.`,
+			`static layer task ${task.taskId} failed; static content for ${task.scopeKey}/${task.domain} was not resolved.`,
 			{
 				message,
 				revision: task.revision,
@@ -822,13 +822,13 @@ export class StaticCoordinator {
 
 	#setStatus(
 		work: ScheduledStaticWork,
-		status: MutableScheduledStaticWorkStatus["status"],
+		status: MutableStaticLayerTaskState["status"],
 	): void {
 		if (!this.#isCurrent(work)) {
 			return;
 		}
 
-		const current = this.#inFlightStaticWork.get(work.staticWorkId);
+		const current = this.#layerTasksByTaskId.get(work.staticWorkId);
 
 		if (!current) {
 			return;
@@ -840,9 +840,9 @@ export class StaticCoordinator {
 
 	#setTaskStatus(
 		taskId: string,
-		status: MutableScheduledStaticWorkStatus["status"],
+		status: MutableStaticLayerTaskState["status"],
 	): void {
-		const current = this.#inFlightStaticWork.get(taskId);
+		const current = this.#layerTasksByTaskId.get(taskId);
 
 		if (!current || !this.#isTaskCurrent(current)) {
 			return;
@@ -853,7 +853,7 @@ export class StaticCoordinator {
 	}
 
 	#createOwnerStates(): readonly LayerOwnerState[] {
-		return Array.from(this.#inFlightStaticWork.values())
+		return Array.from(this.#layerTasksByTaskId.values())
 			.map((status) => ({
 				key: status.ownerKey,
 				lifecycle: createLayerOwnerLifecycle(
@@ -870,23 +870,23 @@ export class StaticCoordinator {
 	}
 
 	#isCurrent(work: ScheduledStaticWork): boolean {
-		return !this.#disposed && this.#inFlightStaticWork.has(work.staticWorkId);
+		return !this.#disposed && this.#layerTasksByTaskId.has(work.staticWorkId);
 	}
 
-	#isTaskCurrent(task: MutableScheduledStaticWorkStatus): boolean {
+	#isTaskCurrent(task: MutableStaticLayerTaskState): boolean {
 		return (
 			!this.#disposed &&
-			this.#inFlightStaticWork.get(task.staticWorkId) === task
+			this.#layerTasksByTaskId.get(task.taskId) === task
 		);
 	}
 
 	#isBakeTaskCurrent(task: StaticBakeTask): boolean {
-		const current = this.#inFlightStaticWork.get(task.taskId);
+		const current = this.#layerTasksByTaskId.get(task.taskId);
 		return current !== undefined && this.#isTaskCurrent(current);
 	}
 
 	#findPendingBatchForTask(
-		task: MutableScheduledStaticWorkStatus,
+		task: MutableStaticLayerTaskState,
 	): PendingStaticBakeBatch | null {
 		for (const pendingBatch of this.#pendingBatches.values()) {
 			if (
@@ -927,7 +927,7 @@ export class StaticCoordinator {
 
 	#isLayerOwnerDemanded(ownerKey: LayerOwnerState["key"]): boolean {
 		const ownerId = createLayerOwnerKeyId(ownerKey);
-		for (const status of this.#inFlightStaticWork.values()) {
+		for (const status of this.#layerTasksByTaskId.values()) {
 			if (status.ownerId === ownerId) {
 				return true;
 			}
@@ -936,14 +936,14 @@ export class StaticCoordinator {
 	}
 }
 
-type MutableScheduledStaticWorkStatus = {
+type MutableStaticLayerTaskState = {
 	readonly ownerId: string;
 	readonly ownerKey: LayerOwnerState["key"];
 	readonly work: ScheduledStaticWork;
 	domain: StaticDomain;
 	revision: number;
 	scopeKey: string;
-	staticWorkId: string;
+	taskId: string;
 	status:
 		| "requested"
 		| "resolving"
@@ -1025,14 +1025,14 @@ function createStaticBatchId(input: {
 }
 
 function createPendingStaticBakeBatchId(
-	task: MutableScheduledStaticWorkStatus,
+	task: MutableStaticLayerTaskState,
 ): string {
 	return [
 		"pending-static-batch",
 		task.revision.toString(),
 		task.domain,
 		task.scopeKey,
-		task.staticWorkId,
+		task.taskId,
 	].join(":");
 }
 
@@ -1041,7 +1041,7 @@ function createStaticReconciliationRunId(revision: number): string {
 }
 
 function createStaticBakeTask(
-	status: MutableScheduledStaticWorkStatus,
+	status: MutableStaticLayerTaskState,
 ): StaticBakeTask {
 	return {
 		domain: status.domain,
@@ -1050,7 +1050,7 @@ function createStaticBakeTask(
 		revision: status.revision,
 		scope: status.work.job.scope,
 		scopeKey: status.scopeKey,
-		taskId: status.staticWorkId,
+		taskId: status.taskId,
 	};
 }
 
@@ -1401,7 +1401,7 @@ function isPeerRecordOwnedByRetainedWork(
 }
 
 function toStaticLayerTaskStatus(
-	status: MutableScheduledStaticWorkStatus,
+	status: MutableStaticLayerTaskState,
 ): StaticLayerTaskStatus {
 	return {
 		domain: status.domain,
@@ -1410,12 +1410,12 @@ function toStaticLayerTaskStatus(
 		phase: createStaticLayerTaskPhase(status.status),
 		revision: status.revision,
 		scopeKey: status.scopeKey,
-		taskId: status.staticWorkId,
+		taskId: status.taskId,
 	};
 }
 
 function createStaticLayerTaskPhase(
-	status: MutableScheduledStaticWorkStatus["status"],
+	status: MutableStaticLayerTaskState["status"],
 ): StaticLayerTaskStatus["phase"] {
 	switch (status) {
 		case "requested":
@@ -1432,7 +1432,7 @@ function createStaticLayerTaskPhase(
 }
 
 function createLayerOwnerLifecycle(
-	status: MutableScheduledStaticWorkStatus,
+	status: MutableStaticLayerTaskState,
 	residentResourcesByOwnerId: ReadonlyMap<string, readonly StaticResourceKey[]>,
 ): LayerOwnerLifecycle {
 	switch (status.status) {

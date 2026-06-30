@@ -1,6 +1,10 @@
 import type { GfxObjPayloadDto } from "../../../../lib/host/contracts";
 import type { PreparedAssetReader } from "../../../assets/contracts";
 import { createHostAssetKey, describeHostAssetKey } from "../../../assets/keys";
+import {
+	requirePreparedGfxObjPayload,
+	type PreparedGfxObjPayloadDto,
+} from "../../../assets/preparation/prepared-render-geometry";
 import type {
 	StaticBakeAttachmentProvider,
 	StaticBakeAttachmentRequest,
@@ -93,14 +97,19 @@ function collectStaticObjectGeometryIdentities(
 function requireGfxObjPayload(
 	payload: unknown,
 	key: Parameters<typeof describeHostAssetKey>[0],
-): GfxObjPayloadDto {
+): PreparedGfxObjPayloadDto {
 	if (
 		typeof payload === "object" &&
 		payload !== null &&
 		"kind" in payload &&
 		payload.kind === "gfx-obj"
 	) {
-		return payload as GfxObjPayloadDto;
+		return requirePreparedGfxObjPayload(
+			payload as GfxObjPayloadDto,
+			`Static object geometry attachment ${describeHostAssetKey(
+				key,
+			)}.renderGeometry`,
+		);
 	}
 
 	throw new Error(

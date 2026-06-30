@@ -2,8 +2,8 @@ import type { ZodIssue } from "zod";
 import type {
 	AssetLookupResponseDto,
 	AnimationPayloadDto,
-	LandblockSceneLodPayloadDto,
 	GfxObjPayloadDto,
+	LandblockSceneLodPayloadDto,
 	MaterialRecipePayloadDto,
 	PalettePayloadDto,
 	PreparedTexturePayloadDto,
@@ -28,11 +28,15 @@ import {
 	surfaceTexturePayloadDtoSchema,
 	terrainMaterialPayloadDtoSchema,
 } from "../../../lib/host/contracts";
+import {
+	requirePreparedGfxObjPayload,
+	type PreparedGfxObjPayloadDto,
+} from "./prepared-render-geometry";
 
 export type V2PreparedAssetPayload =
 	| LandblockSceneLodPayloadDto
 	| AnimationPayloadDto
-	| GfxObjPayloadDto
+	| PreparedGfxObjPayloadDto
 	| SetupModelPayloadDto
 	| SetupAppearancePayloadDto
 	| MaterialRecipePayloadDto
@@ -51,10 +55,10 @@ interface PayloadSchema<TPayload> {
 		| { success: false; error: { issues: readonly ZodIssue[] } };
 }
 
-interface RoutePayloadParser<TPayload extends V2PreparedAssetPayload> {
+interface RoutePayloadParser {
 	readonly route: RegExp;
-	readonly expectedKind: TPayload["kind"];
-	readonly schema: PayloadSchema<TPayload>;
+	readonly expectedKind: string;
+	readonly schema: PayloadSchema<unknown>;
 }
 
 const HEX32_ROUTE_SEGMENT = "[0-9a-fA-F]{8}";
@@ -62,8 +66,7 @@ const SETUP_APPEARANCE_ROUTE = new RegExp(
 	`^setup-appearance/${HEX32_ROUTE_SEGMENT}(?:\\?.*)?$`,
 );
 
-const V2_PAYLOAD_PARSERS: readonly RoutePayloadParser<V2PreparedAssetPayload>[] =
-	[
+const V2_PAYLOAD_PARSERS: readonly RoutePayloadParser[] = [
 		{
 			expectedKind: "landblock-scene-lod",
 			route: /^landblock\/[0-9a-fA-F]{8}\/lod\/[0-4]$/,
@@ -124,7 +127,7 @@ const V2_PAYLOAD_PARSERS: readonly RoutePayloadParser<V2PreparedAssetPayload>[] 
 			route: /^palette\/[0-9a-fA-F]{8}$/,
 			schema: palettePayloadDtoSchema,
 		},
-	];
+];
 
 export function prepareV2AssetPayload(
 	response: AssetLookupResponseDto,
@@ -139,17 +142,24 @@ export function prepareV2AssetPayload(
 		);
 	}
 
-	return parseExpectedRoutePayload(
+	const payload = parseExpectedRoutePayload(
 		response.assetId,
 		parser.expectedKind,
 		parser.schema,
 		response.payload,
 	);
+	if (isGfxObjPayload(payload)) {
+		return requirePreparedGfxObjPayload(
+			payload,
+			`Prepared gfx-obj ${response.assetId}.renderGeometry`,
+		);
+	}
+	return payload as V2PreparedAssetPayload;
 }
 
-function parseExpectedRoutePayload<TPayload extends V2PreparedAssetPayload>(
+function parseExpectedRoutePayload<TPayload>(
 	assetId: string,
-	expectedKind: TPayload["kind"],
+	expectedKind: string,
 	schema: PayloadSchema<TPayload>,
 	payload: unknown,
 ): TPayload {
@@ -166,6 +176,15 @@ function parseExpectedRoutePayload<TPayload extends V2PreparedAssetPayload>(
 	}
 
 	return parsedPayload.data;
+}
+
+function isGfxObjPayload(payload: unknown): payload is GfxObjPayloadDto {
+	return (
+		typeof payload === "object" &&
+		payload !== null &&
+		"kind" in payload &&
+		payload.kind === "gfx-obj"
+	);
 }
 
 function formatTypedPayloadParseError(

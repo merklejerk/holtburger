@@ -1,6 +1,10 @@
-import type { GfxObjPayloadDto } from "../host/contracts";
 import type { HostAssetKey, PreparedAssetReader } from "../assets/contracts";
 import { createHostAssetKey, describeHostAssetKey } from "../assets/keys";
+import {
+	requirePreparedGfxObjPayload,
+	type PreparedGfxObjPayloadDto,
+} from "../assets/preparation/prepared-render-geometry";
+import type { GfxObjPayloadDto } from "../host/contracts";
 import type { DynamicEntityRecipe, DynamicVisualBakeInput } from "./contracts";
 import type { StaticObjectSourceGeometryIdentity } from "../static/contracts";
 import {
@@ -60,7 +64,7 @@ function collectDynamicVisualGeometryIdentities(
 function requireGfxObjPayload(
 	payload: unknown,
 	key: HostAssetKey,
-): GfxObjPayloadDto {
+): PreparedGfxObjPayloadDto {
 	if (
 		typeof payload !== "object" ||
 		payload === null ||
@@ -73,5 +77,10 @@ function requireGfxObjPayload(
 			)}.`,
 		);
 	}
-	return payload as GfxObjPayloadDto;
+	return requirePreparedGfxObjPayload(
+		payload as GfxObjPayloadDto,
+		`Dynamic visual geometry attachment ${describeHostAssetKey(
+			key,
+		)}.renderGeometry`,
+	);
 }

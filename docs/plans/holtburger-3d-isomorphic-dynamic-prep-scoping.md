@@ -1896,12 +1896,52 @@ Dry-run course correction:
   prove unnecessary. The goal is a clean prepared-runtime contract, not churn in every transport DTO
   user at once.
 
+Implementation progress:
+
+- Completed in Phase 10A.
+- Added `PreparedRenderGeometryDto` and `PreparedGfxObjPayloadDto` as app-side prepared payload
+  contracts. These represent post-transport, binary-decoded render geometry with `Float32Array`
+  `positions`, `normals`, and `uvs`.
+- Updated `prepareV2AssetPayload(...)` so `gfx-obj` payloads still parse through the host transport
+  schema first, then fail loudly unless the prepared render geometry buffers are `Float32Array`.
+- Updated static-object and dynamic visual geometry attachment paths to require
+  `PreparedGfxObjPayloadDto` and consume `positions`/`uvs` directly. The old
+  `toFloat32Array(...)` fallback was deleted.
+- Updated env-cell geometry attachment creation to require prepared render geometry buffers before
+  building attachments and to consume those typed buffers directly. Resolver-light metadata views
+  still fail loudly if they leak into full attachment prep.
+- Rebuilt full prepared geometry fixtures around `Float32Array`. The only remaining
+  `positions: []` / `normals: []` / `uvs: []` fixtures are binary-envelope manifest placeholders
+  that are replaced by binary sections during decoding.
+
+Decisions and course corrections:
+
+- Kept the shared host DTO schema permissive for now. It still describes transport-level payloads,
+  while the route preparation boundary and attachment providers now enforce the stronger prepared
+  runtime contract.
+- Did not make all env-cell source facts permanently full-buffer typed. Static resolver worker views
+  intentionally strip geometry buffers before crossing the worker bridge. The full-buffer contract is
+  enforced where bake attachments require full prepared geometry.
+- Preserved metadata-only resolver views for `gfx-obj` and env-cell payloads. Phase 10A tightens
+  full prepared payload use without undoing the resolver memory-transfer optimization.
+
+Debt carried forward:
+
+- `PreparedAsset.payload` remains `unknown`, so some consumers still need route-specific payload
+  guards. A broader typed prepared-asset map could remove that boilerplate later, but it is outside
+  this cleanup phase.
+- `preparedFloat32ArrayDtoSchema` still accepts `number[]` because it remains a host transport DTO
+  shape shared by several routes. Prepared runtime code should not depend on that permissive type.
+- Env-cell static source facts still allow metadata-only render geometry for resolver output. If
+  future work wants stronger compile-time separation, split full env-cell source payloads from
+  resolver-light metadata payloads instead of weakening the attachment contract.
+
 Verification:
 
-- `npm run check`
-- `npm run test:ts -- binary-asset-envelope preparation static-object-bake-attachments env-cell-system-geometry-attachments visual-bake-attachments visual-baker`
-- `npm run test:ts`
-- `npm run lint:ts`
+- `npm run check` passed.
+- `npm run test:ts -- binary-asset-envelope preparation static-object-bake-attachments env-cell-system-geometry-attachments visual-bake-attachments visual-baker` passed after updating the resolver-light env-cell failure assertion to the typed-buffer contract message.
+- `npm run test:ts` passed.
+- `npm run lint:ts` passed.
 
 ### Phase 10B: Canonical Geometry Attachments And Bake Diagnostics Cleanup
 

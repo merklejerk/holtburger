@@ -1952,10 +1952,10 @@ Verification:
 - `npm run test:ts` passed.
 - `npm run lint:ts` passed.
 
-### Phase 10B: Canonical Geometry Attachments And Bake Diagnostics Cleanup
+### Phase 10B-1: Canonical Geometry Attachments
 
-Goal: split source-part identity from canonical gfx geometry payload identity, then remove static
-bake diagnostics that only exist to narrate the deleted static-authored dynamic activation path.
+Goal: split source-part identity from canonical gfx geometry payload identity without changing the
+resolver/baker ownership split.
 
 Why this exists:
 
@@ -1967,9 +1967,6 @@ Why this exists:
   `gfx-obj` part can therefore carry duplicate geometry attachments.
 - Phase 10A makes those payload buffers strongly typed first, so this phase can focus on identity
   and dedupe rather than defensive conversion.
-- Static object bake diagnostics still report authored dynamic placement classification counts from
-  the static bake path. After the cutover, static-authored dynamic activation is source-resolved and
-  runtime-applied, so these diagnostics are stale narrative state rather than a useful contract.
 
 Deliverables:
 
@@ -1982,9 +1979,9 @@ Deliverables:
   weakening source-part/material/triangle lookup correctness.
 - Keep recipe resolution free of renderer products; this phase changes geometry attachment identity,
   not the resolver/baker ownership split.
-- Remove or sharply narrow `StaticObjectBakeDiagnostics` fields that only report authored dynamic
-  placement counts/classification reasons from the old static bake ownership model.
-- Delete or rewrite tests that only preserve those stale diagnostic fields.
+- Do not canonicalize `StaticObjectVisualResourceKey` in this phase. Raw geometry attachment
+  identity is the proven duplicate payload problem; rendered visual resource dedupe has separate
+  material, texture, render-state, generated-resource, and provenance concerns.
 
 Task checklist:
 
@@ -1998,12 +1995,10 @@ Task checklist:
   parts.
 - Remove duplicate attachment tests keyed to source identity and replace them with canonical
   dedupe coverage.
-- Audit `StaticObjectBakeDiagnostics`; delete authored-dynamic diagnostic fields unless a current
-  static-layer consumer still needs them for a live behavior decision.
-- Update snapshots/tests that consumed deleted diagnostics; do not replace them with "no longer has
-  field" tests.
-- Run focused static object attachment/baker, dynamic visual attachment/baker, static coordinator,
-  and broad frontend verification commands.
+- Keep missing-attachment and malformed-input errors source-local by formatting the source-part
+  identity from `part.geometry`, even though the attachment map is keyed canonically.
+- Run focused static object attachment/baker, dynamic visual attachment/baker, and broad frontend
+  verification commands.
 
 Acceptance criteria:
 
@@ -2012,9 +2007,10 @@ Acceptance criteria:
 - Static and dynamic visual bakers still preserve source-part material slots, triangle facts, and
   error messages with enough source context to debug missing/malformed inputs.
 - Static-authored and runtime-authored dynamic visual bake inputs remain isomorphic.
-- Static bake diagnostics no longer retain authored-dynamic placement/classification records that
-  do not drive current behavior.
 - No compatibility shim keeps the old source-keyed attachment shape alive after the cutover.
+- `StaticObjectVisualResourceKey` remains unchanged unless implementation proves source identity is
+  already redundant for rendered resource identity. If that proof appears, record it as a separate
+  course correction instead of sliding it silently into this phase.
 
 Spicy bits:
 
@@ -2026,11 +2022,107 @@ Spicy bits:
 - If implementation shows the source-part identity is still needed as the direct attachment key for
   error locality, keep source context on the part/lookup error path, not inside the canonical raw
   geometry attachment identity.
+- Rendered resource key canonicalization is intentionally out of scope. That would be a broader
+  behavioral claim about material entries, texture uses, render state, generated-resource policy,
+  and provenance. Raw-buffer dedupe is the narrow structural fix we have evidence for.
+
+Dry-run findings:
+
+- `StaticObjectSourceGeometryIdentity` currently does two jobs: source-local part lookup and raw gfx
+  buffer payload identity. The implementation should preserve the first job on source facts and
+  move only the attachment payload key to canonical identity.
+- `StaticObjectBakeSourceIndex` and `LocalDynamicVisualBaker` already resolve through
+  `triangle/part -> source geometry attachment`. They can keep that shape by deriving a canonical
+  geometry key from `part.geometry` at lookup time.
+- Attachment provider tests should prove two separate facts: duplicate source-part references are
+  still harmless, and distinct source assets that point at the same `gfx-obj` part now produce one
+  canonical attachment.
+- Static coordinator and worker transport should remain mostly mechanical consumers because
+  `staticObjectSourceGeometry` stays the same collection field. The payload element identity shape
+  changes, not the worker boundary.
 
 Verification:
 
 - `npm run check`
-- `npm run test:ts -- static-object-bake-attachments visual-bake-attachments visual-baker static-object-batch-baker static-coordinator`
+- `npm run test:ts -- static-object-bake-attachments visual-baker static-object-batch-baker static-coordinator`
+- `npm run test:ts -- env-cell-system-baker`
+- `npm run test:ts`
+- `npm run lint:ts`
+
+### Phase 10B-2: Static Bake Diagnostics Cleanup
+
+Goal: remove static bake diagnostics that only narrate the deleted static-authored dynamic
+activation path.
+
+Why this exists:
+
+- Static object bake diagnostics still report authored dynamic placement classification counts from
+  the static bake path.
+- After the cutover, static-authored dynamic activation is source-resolved and runtime-applied.
+  Static bake no longer owns those activation records, so these diagnostics are stale narrative
+  state rather than a useful behavior contract.
+- Runtime diagnostics still use bake summaries for current size, instancing, and retained partition
+  visibility. Those are not part of this cleanup unless they are proven dead during the audit.
+
+Deliverables:
+
+- Remove `StaticObjectBakeDiagnostics.authoredDynamicPlacementCount`.
+- Remove `StaticObjectBakeDiagnostics.authoredDynamicPlacementClassificationReasons`.
+- Delete `StaticObjectDynamicPlacementClassificationReasonCounts` if no current consumer remains.
+- Remove static bake helper code that walks authored dynamic placements only to populate those
+  diagnostic fields.
+- Delete or rewrite tests that only preserve authored-dynamic static bake diagnostics after
+  activation no longer flows through static bake output.
+- Keep current runtime bake summaries that still report live bake size, instancing, partition, and
+  texture-pressure facts.
+
+Task checklist:
+
+- Audit all `StaticObjectBakeDiagnostics` consumers before deleting fields.
+- Remove authored-dynamic diagnostic fields from the type and from
+  `createStaticObjectBakeDiagnostics(...)`.
+- Delete `getOutdoorAuthoredDynamicPlacements(...)` and
+  `createStaticObjectDynamicPlacementClassificationReasonCounts(...)` if they become unused.
+- Update runtime diagnostics DTOs only if they still expose the removed authored-dynamic fields.
+- Remove the ossified static bake test that asserts removed authored-dynamic diagnostic narration,
+  unless it can be rewritten around a current behavior without preserving old sequencing.
+- Update fixture diagnostics in static coordinator tests.
+- Run focused static object baker/coordinator and broad frontend verification commands.
+
+Acceptance criteria:
+
+- Static bake diagnostics no longer retain authored-dynamic placement/classification records that
+  do not drive current behavior.
+- No test exists only to assert that static bake no longer emits dynamic activation records.
+- Current bake diagnostics for size, instancing, partitions, retained transparent generated scenery,
+  and material coverage remain intact unless proven unused.
+- No compatibility shim keeps the deleted diagnostic fields alive for tests or UI consumers.
+
+Spicy bits:
+
+- This is not a diary cleanup crusade. Keep diagnostics that summarize current live bake behavior;
+  delete the authored-dynamic activation history that static bake no longer owns.
+- TypeScript should do most of the audit. Delete the fields first, then fix every consumer that was
+  relying on the stale narrative.
+- Tests are low-priority consumers here. If updating a test means preserving deleted concepts,
+  delete or rewrite it around durable behavior instead.
+
+Dry-run findings:
+
+- `StaticObjectBakeDiagnostics` currently carries the authored-dynamic fields directly in
+  `static/contracts.ts`.
+- `createStaticObjectBakeDiagnostics(...)` in `static-object-batch-baker.ts` computes those fields
+  through helper functions that exist only for the stale diagnostic path.
+- Runtime diagnostics aggregate current bake size/instancing fields but do not appear to need the
+  authored-dynamic classification fields for behavior.
+- `static-object-batch-partitioner.test.ts` contains an ossified assertion that static bake does not
+  emit outdoor dynamic activation records while still checking the stale diagnostic fields. This
+  should be deleted or rewritten, not nursed along.
+
+Verification:
+
+- `npm run check`
+- `npm run test:ts -- static-object-batch-baker static-coordinator`
 - `npm run test:ts`
 - `npm run lint:ts`
 
@@ -2164,7 +2256,7 @@ of preserving authored-dynamic classification records.
 - Prepared render geometry buffers should be strong `Float32Array` payloads after Phase 10A, not
   permissive `number[] | Float32Array` values tolerated for tests or legacy JSON-shaped assets.
 - Source-part identity and canonical raw gfx geometry identity are separate concepts; attachment
-  payloads should be keyed by canonical geometry once Phase 10B lands.
+  payloads should be keyed by canonical geometry once Phase 10B-1 lands.
 - Static bake diagnostics should not preserve authored-dynamic activation history after activation
   has moved to source-resolved dynamic placement records.
 - Frontend typecheck, lint, and relevant test suites pass.

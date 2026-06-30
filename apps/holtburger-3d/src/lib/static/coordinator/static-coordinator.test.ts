@@ -10,6 +10,7 @@ import type {
 	StaticBakeAttachmentProvider,
 	ScheduledStaticWork,
 	StaticSpatialRecord,
+	StaticLayerTaskStatus,
 	TerrainGeometryStaticDrawUnit,
 	StaticVisibilityRecord,
 	StaticObjectBakeDiagnostics,
@@ -440,7 +441,7 @@ describe("static coordinator", () => {
 		consoleError.mockRestore();
 	});
 
-	it("returns retained layer owners separately from active work", () => {
+	it("returns retained layer owners with run task status", () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
@@ -459,8 +460,72 @@ describe("static coordinator", () => {
 				landblockId: 0xda55ffff,
 			},
 		]);
-		expect(reconciliation.inFlightStaticWork).toHaveLength(1);
+		expect(reconciliation.runId).toBe("static-run:1");
+		expect(reconciliation.layerTasks).toMatchObject([
+			{
+				ownerKey: {
+					kind: "terrain",
+					landblockId: 0xda55ffff,
+				},
+				phase: "resolving",
+				taskId: "1:landblock:da55ffff:outdoor-terrain",
+			},
+		]);
 		expect(reconciliation.removedResources).toEqual([]);
+	});
+
+	it("adopts same-owner tasks instead of replacing in-flight work", () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
+
+		const first = coordinator.reconcileStaticDemand(
+			createSingleTerrainDemand(0xda55ffff),
+		);
+		const second = coordinator.reconcileStaticDemand(
+			createSingleTerrainDemand(0xda55ffff),
+		);
+
+		expect(first.runId).toBe("static-run:1");
+		expect(second.runId).toBe("static-run:2");
+		expect(second.layerTasks).toEqual(first.layerTasks);
+		expect(resolver.pendingSourceRequests).toHaveLength(1);
+	});
+
+	it("keeps failed same-owner tasks terminal without retrying", async () => {
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => {});
+		const resolver = new DeferredStaticResolver();
+		const coordinator = new StaticCoordinator({
+			baker: new DeferredStaticBaker(),
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
+
+		coordinator.reconcileStaticDemand(createSingleTerrainDemand(0xda55ffff));
+		resolver.failSource(
+			resolver.pendingSourceRequests[0]?.requestId ?? "",
+			new Error("source missing"),
+		);
+		await flushPromises();
+
+		const retry = coordinator.reconcileStaticDemand(
+			createSingleTerrainDemand(0xda55ffff),
+		);
+
+		expect(retry.layerTasks).toMatchObject([
+			{
+				phase: "failed",
+				taskId: "1:landblock:da55ffff:outdoor-terrain",
+			},
+		]);
+		expect(resolver.pendingSourceRequests).toHaveLength(1);
+		consoleError.mockRestore();
 	});
 
 	it("emits committed draw-unit deltas and eviction deltas", async () => {
@@ -1442,7 +1507,36 @@ function scheduledWorkForDemand(
 	coordinator: StaticCoordinator,
 	demand: StaticDemand,
 ): readonly ScheduledStaticWork[] {
-	return coordinator.reconcileStaticDemand(demand).inFlightStaticWork;
+	return coordinator
+		.reconcileStaticDemand(demand)
+		.layerTasks.map(createScheduledWorkHandleForTask);
+}
+
+function createScheduledWorkHandleForTask(
+	task: StaticLayerTaskStatus,
+): ScheduledStaticWork {
+	return {
+		job: {
+			domain: task.domain,
+			scope: createLandblockScopeForTask(task),
+		},
+		priority: 0,
+		revision: task.revision,
+		staticWorkId: task.taskId,
+	};
+}
+
+function createLandblockScopeForTask(
+	task: StaticLayerTaskStatus,
+): ScheduledStaticWork["job"]["scope"] {
+	const match = /^landblock:([0-9a-f]{8})$/u.exec(task.scopeKey);
+	if (!match) {
+		throw new Error(`Expected landblock task scope key, got ${task.scopeKey}.`);
+	}
+	return {
+		kind: "landblock",
+		landblockId: Number.parseInt(match[1], 16),
+	};
 }
 
 class RejectingAttachmentProvider implements StaticBakeAttachmentProvider {

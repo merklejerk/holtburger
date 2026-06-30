@@ -149,7 +149,10 @@ export interface StaticLandblockSceneLodSourceResolver {
 }
 
 export interface StaticRetentionReconciliation {
-	readonly inFlightStaticWork: readonly ScheduledStaticWork[];
+	/** Reconciliation run that accepted this scene-interest demand. */
+	readonly runId: string;
+	/** Layer tasks retained or created by the run, keyed by layer owner. */
+	readonly layerTasks: readonly StaticLayerTaskStatus[];
 	readonly retainedLayerOwners: readonly LayerOwnerKey[];
 	readonly removedResources: readonly StaticResourceKey[];
 }

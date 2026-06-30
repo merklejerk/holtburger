@@ -176,8 +176,8 @@ interface DynamicEntityPreparation {
 Rules:
 
 - `StaticLayerTask.taskId` is an implementation detail. Owner identity is the stable semantic key.
-- A reconciliation run adopts an existing task when its owner is already desired and the task has not
-  settled terminally.
+- A reconciliation run adopts an existing task whenever its owner is still desired, including failed
+  tasks. Failed tasks are terminal while desired; they are not implicit retry candidates.
 - A failed task remains failed while the owner remains desired. Later reconciliations may report it
   as failed but must not restart it implicitly.
 - Source requests may fan out to multiple tasks. One source failure can fail multiple requested
@@ -302,7 +302,7 @@ Verification:
 
 ### Phase 2: Build Static Reconciliation Runs Around Existing Work
 
-Status: pending.
+Status: completed 2026-06-30.
 
 Purpose:
 
@@ -312,8 +312,7 @@ Purpose:
 Deliverables:
 
 - Add `StaticReconciliationRun` state in `StaticCoordinator`.
-- Change `reconcileStaticDemand` to produce a run with desired owners, adopted tasks, new tasks, and
-  evicted owners.
+- Change `reconcileStaticDemand` to produce a run with desired owners and owner-keyed task output.
 - Reuse existing in-flight tasks for still-desired owners instead of recreating same-owner work.
 - Cancel unresolved tasks only when their owner leaves desired retention.
 - Change demand planning or run construction so the coordinator consumes owner-keyed task specs
@@ -330,22 +329,45 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Create run construction from `planStaticDemand`.
-- [ ] Replace demand-key lookup in reconciliation with owner-key lookup.
-- [ ] Replace `StaticRetentionReconciliation.inFlightStaticWork` with run/task lifecycle output or
+- [x] Create run construction from `planStaticDemand`.
+- [x] Replace demand-key lookup in reconciliation with owner-key lookup.
+- [x] Replace `StaticRetentionReconciliation.inFlightStaticWork` with run/task lifecycle output or
       delete it if runtime no longer needs it.
-- [ ] Preserve resident-resource eviction by owner id.
-- [ ] Update `StaticRetentionReconciliation` to return retained owners and run/task information
+- [x] Preserve resident-resource eviction by owner id.
+- [x] Update `StaticRetentionReconciliation` to return retained owners and run/task information
       needed by runtime.
-- [ ] Update coordinator tests for adoption, cancellation, failed-task terminal behavior, and
+- [x] Update coordinator tests for adoption, cancellation, failed-task terminal behavior, and
       eviction.
-- [ ] Delete obsolete retry/work-id tests instead of translating them mechanically when the behavior
+- [x] Delete obsolete retry/work-id tests instead of translating them mechanically when the behavior
       no longer exists.
 
 Decisions and course corrections:
 
-- Record any untouched `ScheduledStaticWork` dependency that remains, with the exact later phase that
-  will delete it.
+- 2026-06-30: Added private `StaticReconciliationRunState` construction inside
+  `StaticCoordinator.reconcileStaticDemand`. The public reconciliation return now carries `runId`,
+  `layerTasks`, retained owners, and removed resources; it no longer exposes `inFlightStaticWork`.
+- 2026-06-30: Did not keep adopted/created/canceled task arrays on the run. They were tempting
+  diagnostics, but unused accounting is against the simplification north star. Tests prove adoption
+  through stable task identity and absence of duplicate source requests.
+- 2026-06-30: Reconciliation now adopts existing tasks by `LayerOwnerKey`/owner id. It does not
+  delete and recreate same-owner failed tasks, which makes failures terminal until the owner leaves
+  retention.
+- 2026-06-30: Kept `#inFlightStaticWork` and `ScheduledStaticWork` as private coordinator/bake
+  implementation details. Phase 3 removes demand-key source rejoining; Phase 4 removes
+  `StaticBakeBatchItem.work` and the remaining bake/test `staticWorkId` handles.
+- 2026-06-30: Materialization revisions are not a target concept. They are current runtime
+  bookkeeping for queued materialization, not semantic identity. Phase 5 should replace them with
+  commit/task identity instead of refining revision accounting.
+- 2026-06-30: Coordinator tests now use a test-only task-to-work handle adapter where the deferred
+  fake baker still requires the old batch handle. This is explicitly temporary and belongs to the
+  Phase 4 bake-contract deletion.
+
+Verification:
+
+- `npm run test:ts -- --run src/lib/static/coordinator/static-coordinator.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run lint:dead`
 
 ### Phase 3: Move Source Fanout And Resolver Validation Into Tasks
 

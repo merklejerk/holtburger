@@ -1972,7 +1972,7 @@ Decisions and course corrections:
 
 ### Phase 11D: Old Compatibility Resteer And Final Cleanup
 
-Status: pending.
+Status: completed on 2026-06-30.
 
 Goal: prove Phase 11 removed the old executable route/domain model and record any remaining historical/internal vocabulary.
 
@@ -1991,14 +1991,18 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Delete retained-scope, desired-key, active-work-id, and source-scope ownership paths after layer owners replace them if any survived Phase 8E/9 audits.
-- [ ] Run zero-reference searches for old route and lifecycle names; classify any surviving source vocabulary in this plan.
-- [ ] Delete obsolete fixtures and compatibility helpers.
-- [ ] Run required validation commands.
+- [x] Delete retained-scope, desired-key, active-work-id, and source-scope ownership paths after layer owners replace them if any survived Phase 8E/9 audits.
+- [x] Run zero-reference searches for old route and lifecycle names; classify any surviving source vocabulary in this plan.
+- [x] Delete obsolete fixtures and compatibility helpers.
+- [x] Run required validation commands.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Final route/domain audit found no executable old landblock route or old `outdoor-detail` domain references under `apps`, `crates`, or Tauri adapter code. Remaining hits are historical plan prose, internal outdoor source/provenance IDs, and `landblock-outdoor-terrain-local` coordinate-space labels.
+- `StaticCoordinator.desiredKey`, `activeWork`, and `workId` remain transient active-work scheduling, cancellation, diagnostics, and bake-completion handles. They are not resident resource ownership, layer lifecycle ownership, dynamic retention, or scene-interest readiness state.
+- `LandblockEnvCellGeometryAttachmentProvider` remains as a stateless bake attachment provider name. It no longer performs direct old-route host lookups; it derives geometry attachments from resolved env-cell source payloads.
+- No retained-scope, durable work-owner, or source-scope ownership paths remain in executable static/runtime/dynamic code.
+- Validation reused the Phase 11C final frontend gates: `npm run check`; `npm run test:ts -- src/lib/renderer/static-layer-contracts.test.ts src/lib/static/demand-planner.test.ts src/lib/static/coordinator/static-coordinator.test.ts src/lib/static/objects/static-object-visual-resource-key.test.ts src/lib/static/objects/bake/static-object-compatibility-partitioner.test.ts src/lib/runtime/static-scene-query.test.ts src/lib/runtime/client-runtime.test.ts src/lib/renderer/webgl2/webgl2-renderer.test.ts src/lib/textures/texture-manager.test.ts`; zero-reference audits for old route/domain/lifecycle names.
 
 ### Phase 12: Final Verification And Documentation Cleanup
 

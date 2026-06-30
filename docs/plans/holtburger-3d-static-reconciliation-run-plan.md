@@ -1,0 +1,716 @@
+# Holtburger 3D Static Reconciliation Run Plan
+
+## Context
+
+The static scene pipeline currently produces correct results, but its orchestration model spreads
+work lifecycle state across static work ids, demand keys, revisions, pending bake batches, stale
+result counters, resolver timing maps, and runtime materialization revision sets. Every async
+boundary has to reconstruct whether a resolver, bake, or materialization result is still relevant.
+
+This plan replaces that scattered accounting with explicit reconciliation and lifecycle objects:
+static reconciliation runs, owner-keyed static layer tasks, exact static commit tracking, and dynamic
+entity preparation objects. The refactor is intended to preserve the rendered outcome while deleting
+unnecessary accounting and old compatibility-shaped helpers.
+
+## Goal
+
+Make static and dynamic scene production lifecycle explicit, owner-keyed, and cancelable without
+retaining the current static work accounting model under new names.
+
+## North Stars
+
+- **Simplify aggressively**: preserve user-visible outcome, not old internal diagnostics,
+  stale-result counters, revision sets, or string-shaped work ids.
+- **Strict cutover per touched surface**: a phase may use temporary scaffolding while being
+  implemented, but its exit criteria must leave each touched contract/module on one model. No
+  compatibility shims, dual public shapes, deprecated aliases, or tests that exist only to preserve
+  removed accounting.
+- **Layer owners are the lifetime authority**: runs coordinate work, but `LayerOwnerKey` decides
+  static resource and static-authored dynamic lifetime.
+- **No duplicate same-owner work**: if a layer owner is already resolving, baking, or materializing,
+  later reconciliation runs adopt that task instead of replacing it.
+- **Failure is terminal for the task**: failed static layer tasks log a clear console error and settle
+  as failed. They are not retried while still desired and do not create durable issue records.
+- **Runs coordinate only**: runs must not own renderer materialization, texture residency, scene-query
+  storage, or dynamic entity policy.
+- **Static-authored dynamics are static layer products**: they are ingested only after the owning
+  static layer materializes successfully, and their lifetime follows that layer owner.
+- **Runtime-authored dynamics are explicit runtime entities**: static retention may invalidate their
+  render residence, but it must not delete the entity.
+- **Exact in-flight units beat revision accounting**: track concrete commits/tasks/preparations, not
+  broad revision numbers that can collapse multiple commits together.
+
+## Scope
+
+In scope:
+
+- Replace `ScheduledStaticWork`/`ScheduledStaticWorkStatus` orchestration with owner-keyed static
+  layer task state.
+- Introduce coordinator-owned static reconciliation run state that records desired owners, adopted
+  tasks, new tasks, evictions, and source requests.
+- Move source request fanout, resolver validation, bake batching, cancellation checks, and failure
+  handling behind run/task lifecycle methods.
+- Carry layer owner identity directly through bake inputs, bake outputs, commit deltas, peer records,
+  diagnostics, and materialization.
+- Replace revision-set materialization tracking with exact static commit tracking.
+- Remove stale resolver/bake counters and filtering paths once task cancellation makes them obsolete.
+- Change scene-interest settled detection to wait for demanded static owners to reach
+  `materialized`, `empty`, or `failed`, and for static-authored dynamic visual preparation to finish
+  for materialized layers that emitted dynamic seeds.
+- Refactor dynamic resource loading into explicit dynamic entity preparation lifecycle objects used
+  by both static-authored and runtime-authored dynamics.
+- Simplify diagnostics around active runs, layer tasks, static commits, dynamic preparations,
+  failures, and timings.
+
+Out of scope:
+
+- Changes to LoD policy, source-first LoD requests, layer-granular ownership, partial retention,
+  source fanout semantics, or env-cell system LoD behavior.
+- Moving static orchestration out of `apps/holtburger-3d`.
+- Moving renderer, texture manager, static scene query, or dynamic entity ownership into static runs.
+- Durable issue records for failed static tasks or dynamic preparations.
+- Retrying failed static layer tasks while the same owner remains desired.
+- Broad renderer, atlas, worker, or asset-service redesign beyond contracts required by this
+  lifecycle cleanup.
+
+## Ground Truth
+
+Primary files:
+
+- `apps/holtburger-3d/src/lib/static/coordinator/static-coordinator.ts`
+- `apps/holtburger-3d/src/lib/static/contracts.ts`
+- `apps/holtburger-3d/src/lib/static/demand-planner.ts`
+- `apps/holtburger-3d/src/lib/static/layer-owners.ts`
+- `apps/holtburger-3d/src/lib/runtime/client-runtime.ts`
+- `apps/holtburger-3d/src/lib/runtime/static-materializer.ts`
+- `apps/holtburger-3d/src/lib/runtime/static-scene-query.ts`
+- `apps/holtburger-3d/src/lib/dynamic/dynamic-entity-controller.ts`
+- `apps/holtburger-3d/src/lib/dynamic/dynamic-entity-resource-manager.ts`
+- `apps/holtburger-3d/src/lib/dynamic/dynamic-entity-store.ts`
+- `apps/holtburger-3d/src/lib/renderer/types.ts`
+- `apps/holtburger-3d/src/lib/textures/texture-manager.ts`
+
+Current accounting and cleanup targets:
+
+- `#inFlightStaticWork`
+- `#pendingBatches`
+- `#staleResolverResults`
+- `#staleBakeResults`
+- `#resolverMsByStaticWorkId`
+- `filterStaticBakeResultForWorks`
+- `ScheduledStaticWork`
+- `ScheduledStaticWorkStatus`
+- `StaticRetentionReconciliation.inFlightStaticWork`
+- `#pendingStaticMaterializations`
+- `#failedStaticMaterializationRevisions`
+- `DynamicEntityResourceManager` generation checks
+
+Dependent behavior:
+
+- Static owner retention in `StaticSceneQuery.retainLayerOwners`.
+- Static-authored dynamic ingestion in `DynamicEntityController.ingestStaticSeeds`.
+- Runtime-authored dynamic spawn/update/remove APIs in `ClientRuntimeImpl`.
+- Texture materialization and static commit application in `TextureManager` and
+  `materializeStaticCommit`.
+
+Verification commands:
+
+- `cd apps/holtburger-3d && npm run test:ts -- --run src/lib/static/coordinator/static-coordinator.test.ts`
+- `cd apps/holtburger-3d && npm run test:ts -- --run src/lib/runtime/client-runtime.test.ts src/lib/runtime/static-materializer.test.ts`
+- `cd apps/holtburger-3d && npm run test:ts -- --run src/lib/dynamic/dynamic-entity-controller.test.ts src/lib/dynamic/dynamic-entity-resource-manager.test.ts`
+- `cd apps/holtburger-3d && npm run test:ts`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+
+## Target Model
+
+The exact names may change during implementation, but the intended ownership shape is:
+
+```ts
+interface StaticReconciliationRun {
+	readonly runId: string;
+	readonly revision: number;
+	readonly desiredLayerOwners: ReadonlySet<string>;
+	readonly retainedLayerOwners: readonly LayerOwnerKey[];
+	readonly adoptedTaskIds: readonly string[];
+	readonly newTaskIds: readonly string[];
+	readonly evictedLayerOwners: readonly LayerOwnerKey[];
+	readonly sourceRequests: readonly StaticLandblockSceneLodSourceRequest[];
+}
+
+interface StaticLayerTask {
+	readonly taskId: string;
+	readonly ownerKey: LayerOwnerKey;
+	readonly ownerId: string;
+	readonly domain: StaticDomain;
+	readonly sourceRequest: StaticLandblockSceneLodSourceRequest;
+	phase:
+		| "requested"
+		| "resolving"
+		| "source-resolved"
+		| "baking"
+		| "committed"
+		| "materializing"
+		| "materialized"
+		| "empty"
+		| "failed"
+		| "canceled";
+}
+
+interface StaticCommitTracker {
+	readonly commitId: string;
+	readonly ownerIds: ReadonlySet<string>;
+	phase: "queued" | "materializing" | "materialized" | "failed" | "canceled";
+}
+
+interface DynamicEntityPreparation {
+	readonly entityId: DynamicEntityId;
+	readonly lifetime:
+		| { readonly kind: "static-layer-owner"; readonly ownerId: string }
+		| { readonly kind: "explicit-runtime" };
+	phase: "setup-loading" | "visual-loading" | "ready" | "failed" | "canceled";
+}
+```
+
+Rules:
+
+- `StaticLayerTask.taskId` is an implementation detail. Owner identity is the stable semantic key.
+- A reconciliation run adopts an existing task when its owner is already desired and the task has not
+  settled terminally.
+- A failed task remains failed while the owner remains desired. Later reconciliations may report it
+  as failed but must not restart it implicitly.
+- Source requests may fan out to multiple tasks. One source failure can fail multiple requested
+  tasks; one source success can emit recipes for multiple layer owners.
+- Bake batches may contain multiple tasks. Every baked product that survives to commit must carry
+  owner identity directly.
+- Static commit materialization uses commit ids or task ids, not revision sets.
+- Static-authored dynamic records are created only after successful static materialization.
+- Runtime-authored dynamic records may exist while dynamic visual preparation is pending.
+
+## Dry Run Findings
+
+Recorded after walking the plan against the current codebase before implementation.
+
+- The existing source-first request model already carries `LayerOwnerKey` through
+  `StaticLandblockSceneLodLayerRequest.targetOwnerKey` and `StaticBakeBatchItem.targetOwnerKey`.
+  That is the best cutover spine. Do not introduce a parallel desired-key model.
+- Phase 1 can cut over coordinator diagnostics to layer tasks, but it should not attempt to delete
+  every `ScheduledStaticWork` use. Terrain, static object, env-cell, attachment, and worker tests
+  still consume the current bake item shape. Treat those as untouched private bake-contract islands
+  until the bake phase replaces them.
+- `planStaticDemand` currently returns `work`, `sourceRequests`, and retained owner keys. The run
+  constructor should either absorb demand planning or change the demand plan to return layer task
+  specs directly. Leaving `work` as the public planner output after Phase 2 would keep old
+  orchestration alive under the planner boundary.
+- Failed work currently gets retried by `reconcileStaticDemand` because a failed existing work item
+  is deleted and recreated. Phase 2 must explicitly reverse that behavior: same-owner failed tasks
+  stay terminal while desired.
+- The bakers use `work.job.domain`, `work.job.scope`, and `work.staticWorkId` for validation, owner
+  records, diagnostics, and test handles. Phase 4 should replace `StaticBakeBatchItem.work` with a
+  first-class layer task/bake item shape containing `taskId`, `ownerKey`, `ownerId`, `domain`,
+  `scope`, and `scopeKey`, then update bakers in one cutover. Adding owner ids while keeping
+  `work` would be a fake migration.
+- `createLayerPeerRecordOwnerForStaticWork` is a key deletion target. Replace it with a helper that
+  creates peer owners from layer task/bake item identity.
+- Runtime materialization currently tracks `#pendingStaticMaterializations` and
+  `#failedStaticMaterializationRevisions` by revision, while commits are batch-shaped. Multiple
+  same-revision commits can collapse into one pending entry. The revision numbers are not
+  semantically important; they are just the current coarse key used for pending/failure bookkeeping.
+  Phase 5 should delete materialization revision accounting rather than preserve or refine it.
+- Static materialization awaits texture work before installing static layers and ingesting
+  static-authored dynamic seeds. Demand changes during that await are serialized by the queue, not
+  truly concurrent, but exact commit tracking is still required to describe and settle the right
+  unit.
+- Static-authored dynamic records are already ingested after successful static materialization, which
+  matches the target model. The missing piece is owner-scoped preparation readiness/failure so scene
+  settlement can wait for static-authored dynamic visuals.
+- `DynamicEntityResourceManager` already implements cancellation by releasing tracked entries and
+  ignoring late promises through generation checks. Phase 7 should replace the generation model in
+  one strict cutover with preparation objects; running both generation and preparation currentness
+  checks would preserve the clunky accounting under a new name.
+- Runtime-authored dynamic records correctly exist before visual preparation is ready. Static
+  retention clears invalid render residence but does not delete runtime entities. Keep this behavior.
+- Existing tests use `staticWorkId` heavily as a deferred baker handle. The test harnesses need to
+  complete work by owner key/domain/landblock or `taskId` once tasks exist. Prefer deleting and
+  rewriting brittle work-accounting tests over preserving `staticWorkId` in test infrastructure.
+
+## Phases
+
+Phase rule:
+
+- If a phase touches a public or cross-module contract, that phase must migrate its call sites and
+  tests before exit. Follow-up phases may continue deeper cutover work in untouched areas, but no
+  touched surface should keep both the old and new model alive.
+
+### Phase 1: Introduce Owner-Keyed Static Task Types
+
+Status: pending.
+
+Purpose:
+
+- Establish the new lifecycle vocabulary before changing async behavior.
+
+Deliverables:
+
+- Add `StaticLayerTask`, `StaticLayerTaskPhase`, and task diagnostics contracts near the static
+  coordinator contracts.
+- Add helper functions that derive task identity from `LayerOwnerKey`.
+- Replace coordinator-facing scheduled work status with layer task status in snapshots and
+  diagnostics.
+- Keep any `ScheduledStaticWork` use private to resolver/bake contracts that this phase does not
+  touch; do not expose it through coordinator diagnostics after this phase.
+- Replace work-id-oriented coordinator tests with owner-key identity and task lifecycle tests for
+  touched behavior.
+
+Acceptance criteria:
+
+- Existing behavior remains unchanged.
+- Static coordinator snapshots report layer tasks instead of old scheduled work reports.
+- No coordinator diagnostic contract exposes both old work reports and new task reports.
+- No new retry, epoch, compatibility, or deprecated accounting shape is introduced.
+
+Task checklist:
+
+- [ ] Add task types and lifecycle helpers.
+- [ ] Add conversion helpers from current demand-plan work to owner-keyed task state.
+- [ ] Replace coordinator diagnostics work reports with task reports in the same cutover.
+- [ ] Add focused unit tests for task identity and terminal phases.
+- [ ] Delete touched work-report tests instead of preserving them through compatibility helpers.
+- [ ] Update runtime diagnostics report shapes that currently expose `StaticCoordinatorWorkDiagnostics`.
+
+Decisions and course corrections:
+
+- Record any contract naming changes here during implementation.
+
+### Phase 2: Build Static Reconciliation Runs Around Existing Work
+
+Status: pending.
+
+Purpose:
+
+- Make each scene-interest reconciliation explicit while still using current resolver/bake behavior
+  internally.
+
+Deliverables:
+
+- Add `StaticReconciliationRun` state in `StaticCoordinator`.
+- Change `reconcileStaticDemand` to produce a run with desired owners, adopted tasks, new tasks, and
+  evicted owners.
+- Reuse existing in-flight tasks for still-desired owners instead of recreating same-owner work.
+- Cancel unresolved tasks only when their owner leaves desired retention.
+- Change demand planning or run construction so the coordinator consumes owner-keyed task specs
+  instead of exposing scheduled work as the reconciliation model.
+
+Acceptance criteria:
+
+- Partial retention behavior remains intact.
+- Same-owner demand changes adopt existing unresolved tasks.
+- Failed same-owner tasks are not retried by later reconciliations.
+- Same-owner failed tasks remain terminal while desired and are not deleted/recreated by
+  reconciliation.
+- Eviction still emits the correct removed resources.
+
+Task checklist:
+
+- [ ] Create run construction from `planStaticDemand`.
+- [ ] Replace demand-key lookup in reconciliation with owner-key lookup.
+- [ ] Replace `StaticRetentionReconciliation.inFlightStaticWork` with run/task lifecycle output or
+      delete it if runtime no longer needs it.
+- [ ] Preserve resident-resource eviction by owner id.
+- [ ] Update `StaticRetentionReconciliation` to return retained owners and run/task information
+      needed by runtime.
+- [ ] Update coordinator tests for adoption, cancellation, failed-task terminal behavior, and
+      eviction.
+- [ ] Delete obsolete retry/work-id tests instead of translating them mechanically when the behavior
+      no longer exists.
+
+Decisions and course corrections:
+
+- Record any untouched `ScheduledStaticWork` dependency that remains, with the exact later phase that
+  will delete it.
+
+### Phase 3: Move Source Fanout And Resolver Validation Into Tasks
+
+Status: pending.
+
+Purpose:
+
+- Stop resolver completion from reconstructing relevance through demand keys.
+
+Deliverables:
+
+- Attach source request and requested layer metadata to tasks/run source groups.
+- Route source resolution results to tasks by `LayerOwnerKey`.
+- Mark task phases on source start, source success, source failure, cancellation, and missing recipe.
+- Remove stale resolver result counting once ignored results are naturally explained by task
+  cancellation.
+
+Acceptance criteria:
+
+- Source-first LoD requests still request the maximum required LoD per landblock source group.
+- Source fanout can advance multiple layer tasks.
+- Canceled tasks do not enqueue bake payloads.
+- Resolver failure logs once per affected task and settles the task as failed.
+
+Task checklist:
+
+- [ ] Model source groups inside the run or coordinator task registry.
+- [ ] Replace `createDemandWorkKeyForSourceLayer` rejoining with target owner matching.
+- [ ] Move resolver timing onto source group/task timing records.
+- [ ] Remove `#staleResolverResults`.
+- [ ] Replace source payload listener contracts that expose old work objects.
+
+Decisions and course corrections:
+
+- Record any untouched source payload diagnostic that still needs owner-key replacement, with the
+  exact later phase that will delete it.
+
+### Phase 4: Move Bake Batching Behind Owner-Keyed Task Groups
+
+Status: pending.
+
+Purpose:
+
+- Make bake input, bake output, and commit products owner-addressable so post-bake filtering can be
+  deleted.
+
+Deliverables:
+
+- Replace pending batch keys based on revision/domain with explicit batch records containing task
+  ids and owner ids.
+- Replace `StaticBakeBatchItem.work` and `StaticBakeBatchResult.works` with task/bake item identity
+  carrying `taskId`, `ownerKey`, `ownerId`, `domain`, `scope`, and `scopeKey`.
+- Update terrain, static object, and env-cell bakers to propagate layer owner identity through every
+  peer record and emitted resource.
+- Delete `filterStaticBakeResultForWorks` once no result needs demand-key reconstruction.
+
+Acceptance criteria:
+
+- Bake batches can contain multiple owners.
+- Canceled tasks do not commit baked products.
+- Every commit product that participates in retention or materialization has direct owner identity.
+- Stale bake counters are gone, not renamed.
+- No baker, attachment provider, worker, or focused bake test depends on `ScheduledStaticWork` or
+  `staticWorkId`.
+
+Task checklist:
+
+- [ ] Add owner/task identity to bake item/result contracts.
+- [ ] Update static object, terrain, and env-cell bakers.
+- [ ] Replace `createLayerPeerRecordOwnerForStaticWork` with owner creation from layer task/bake
+      item identity.
+- [ ] Update attachment provider and atlas snapshot creation for owner-keyed batch items.
+- [ ] Replace `#pendingBatches` with owner-keyed pending batch records.
+- [ ] Remove `#staleBakeResults` and `filterStaticBakeResultForWorks`.
+- [ ] Update deferred baker test harnesses to complete by owner key/domain/landblock or task id
+      instead of `staticWorkId`.
+- [ ] Update bake tests to assert owner-key propagation instead of work-id filtering.
+
+Decisions and course corrections:
+
+- Record any baked output that cannot yet carry owner identity cleanly and why.
+
+### Phase 5: Replace Revision-Based Static Materialization Tracking
+
+Status: pending.
+
+Purpose:
+
+- Track exact static commit lifecycle through runtime materialization instead of broad revisions.
+
+Deliverables:
+
+- Add a stable `commitId` to `StaticCoordinatorCommitDelta`.
+- Track queued/materializing/materialized/failed/canceled static commits by commit id.
+- Update runtime materialization queue to settle commit trackers instead of adding/removing revision
+  numbers.
+- Connect materialization completion back to static layer task owner state.
+- Delete materialization revision diagnostics unless a remaining revision field has a concrete
+  non-materialization purpose.
+
+Acceptance criteria:
+
+- Multiple commits from one reconciliation revision cannot collapse into one pending entry.
+- Eviction commits and add commits are tracked as distinct materialization units.
+- Scene settled detection no longer depends on `#pendingStaticMaterializations` or
+  `#failedStaticMaterializationRevisions`.
+- No runtime behavior depends on materialization revision membership.
+- Final rendered static state remains correct when demand changes while materialization awaits
+  texture work.
+
+Task checklist:
+
+- [ ] Add `commitId` to commit deltas and tests.
+- [ ] Replace runtime pending/failed revision sets with commit trackers.
+- [ ] Replace runtime diagnostics `pendingRevisions`/`committedRevisions` with exact commit
+      diagnostics or delete them if task/commit lifecycle diagnostics make them redundant.
+- [ ] Mark owner tasks `materializing`, `materialized`, `empty`, or `failed` based on commit
+      materialization result.
+- [ ] Update diagnostics and tests that currently display pending materialization revisions.
+- [ ] Verify FIFO materialization behavior across add and eviction commits.
+
+Decisions and course corrections:
+
+- Record whether commit tracking lives in runtime only or whether the coordinator needs an explicit
+  materialization ack API.
+
+### Phase 6: Gate Static-Authored Dynamics On Static Materialization
+
+Status: pending.
+
+Purpose:
+
+- Treat static-authored dynamic seeds as static layer products until the owning layer has actually
+  materialized.
+
+Deliverables:
+
+- Ensure static-authored dynamic entity records are created only after successful static commit
+  materialization.
+- Ensure static-authored dynamic entities are retained and removed by layer owner.
+- Ensure evicting a static layer cancels/removes static-authored dynamic preparations and renderer
+  resources.
+- Preserve runtime-authored dynamic entity explicit lifetime.
+
+Acceptance criteria:
+
+- A static bake result that never materializes cannot create dynamic entities.
+- Static-authored dynamic entities disappear when their owner is evicted.
+- Runtime-authored dynamic entities survive static eviction, with invalid render residence cleared.
+- Existing static-authored dynamic rendered outcome is preserved after materialization.
+
+Task checklist:
+
+- [ ] Audit static materializer, static scene query, and dynamic controller ingestion order.
+- [ ] Keep static-authored seed ingestion after successful materialization only.
+- [ ] Make layer-owner retention remove static-authored dynamic records and release prep/resources.
+- [ ] Keep runtime-authored create/update/remove APIs independent from static owner retention.
+- [ ] Update runtime and dynamic controller tests.
+
+Decisions and course corrections:
+
+- Record any current tests that assumed static-authored dynamic records exist before materialization
+  and replace them with materialization-gated assertions.
+
+### Phase 7: Replace Dynamic Resource Generation Checks With Preparations
+
+Status: pending.
+
+Purpose:
+
+- Give static-authored and runtime-authored dynamics the same explicit async preparation shape without
+  pulling dynamic policy into static runs.
+
+Deliverables:
+
+- Introduce `DynamicEntityPreparation` or equivalent lifecycle object inside the dynamic resource
+  manager/controller boundary.
+- Replace generation-number stale checks with current preparation cancellation checks.
+- Make setup/animation loading, visual resource loading, failure, readiness, and cancellation visible
+  as preparation phases.
+- Keep semantic dynamic entity records separate from renderer resource commits.
+- Add owner-scoped readiness/failure queries for static-authored dynamic preparations.
+
+Acceptance criteria:
+
+- Updating/removing a runtime-authored dynamic cancels the old preparation and prevents stale commits.
+- Removing a static-authored dynamic through layer-owner eviction cancels its preparation.
+- Dynamic renderer resources are committed only when visual preparation is ready.
+- Dynamic diagnostics report pending/ready/failed/canceled preparations without generation ids.
+- Runtime can ask whether all static-authored preparations for a set of layer owners are ready,
+  failed, or still pending.
+
+Task checklist:
+
+- [ ] Add dynamic preparation types and state storage.
+- [ ] Move setup animation and visual resource request flow behind preparation methods.
+- [ ] Replace `generation` checks in `DynamicEntityResourceManager`.
+- [ ] Add dynamic controller query for static-authored preparation readiness by layer owner id.
+- [ ] Update dynamic entity resource manager/controller tests for cancellation, failures, and ready
+      commits.
+- [ ] Remove obsolete generation diagnostics or helper names.
+
+Decisions and course corrections:
+
+- Record any asset-service promise that cannot be aborted and confirm cancellation is implemented as
+  "ignore result and release leases".
+
+### Phase 8: Redefine Scene-Interest Settlement
+
+Status: pending.
+
+Purpose:
+
+- Make settled detection ask lifecycle state directly instead of combining owner state, pending
+  revisions, failed revisions, and active owner id sets.
+
+Deliverables:
+
+- Create a single runtime-facing settlement query over demanded layer owners.
+- Treat an owner as settled when it is `materialized` with static-authored dynamic preparations ready,
+  `empty`, or `failed`.
+- Keep runtime-authored dynamic preparation outside scene-interest settlement.
+- Remove old active-scene-owner/pending-revision settlement logic.
+- Consume the dynamic controller's static-authored owner readiness query instead of inspecting raw
+  dynamic records in runtime.
+
+Acceptance criteria:
+
+- Scene-interest settled fires `ready` only after all demanded materialized static layers and their
+  static-authored dynamics are ready.
+- Scene-interest settled fires `failed` when any demanded static layer task or static-authored dynamic
+  preparation fails.
+- Scene-interest settled fires `cleared` for no interest.
+- Runtime-authored dynamic loading does not block scene-interest settled.
+
+Task checklist:
+
+- [ ] Add lifecycle query API needed by `ClientRuntimeImpl`.
+- [ ] Replace `#maybeEmitSceneInterestSettled` internals.
+- [ ] Remove `#activeSceneOwnerIds`, `#pendingStaticMaterializations`, and
+      `#failedStaticMaterializationRevisions` if no longer needed.
+- [ ] Replace materialization and dynamic-readiness pending checks with commit/task/preparation
+      lifecycle queries.
+- [ ] Update runtime tests for ready, failed, cleared, materialization delay, and static-authored
+      dynamic delay.
+
+Decisions and course corrections:
+
+- Record the final definition of "ready" for empty layers and failed static-authored dynamic
+  preparation.
+
+### Phase 9: Diagnostics Diet And Naming Cleanup
+
+Status: pending.
+
+Purpose:
+
+- Delete old accounting vocabulary and keep only lifecycle diagnostics that help debug current work.
+
+Deliverables:
+
+- Replace active work diagnostics with active run, layer task, static commit, and dynamic preparation
+  diagnostics.
+- Remove stale resolver/bake counters from contracts, runtime diagnostic reports, UI copy, and tests.
+- Rename overloaded `workId` uses to run/task/owner/resource-specific names or delete them.
+- Remove compatibility helpers and tests that assert obsolete work-accounting behavior.
+
+Acceptance criteria:
+
+- No `staleResolverResults`, `staleBakeResults`, `resolverMsByStaticWorkId`, or
+  `filterStaticBakeResultForWorks` remain.
+- Public diagnostics describe current lifecycle objects, not legacy work ids.
+- Tests assert lifecycle outcomes, not string-shaped work ids.
+- Dead-code lint passes.
+
+Task checklist:
+
+- [ ] Update `StaticCoordinatorSnapshot`, runtime diagnostics, and diagnostics UI contracts.
+- [ ] Remove stale-result tests and replace with cancellation/currentness tests.
+- [ ] Rename remaining work-id helpers or delete them.
+- [ ] Run lint/dead-code checks and remove leftover compatibility scaffolding.
+
+Decisions and course corrections:
+
+- Record any diagnostic retained despite old naming pressure and why it is still useful.
+
+### Phase 10: Resteer And Cleanup
+
+Status: pending.
+
+Purpose:
+
+- Inspect the implemented shape, remove temporary scaffolding used inside phases, and confirm the
+  plan did not leave two orchestration models alive.
+
+Deliverables:
+
+- Review all touched contracts for redundant identifiers.
+- Remove any remaining private conversion helpers between `ScheduledStaticWork` and
+  `StaticLayerTask`.
+- Consolidate tests around lifecycle phases and owner retention.
+- Update related documentation if public diagnostic or lifecycle terminology changed.
+
+Acceptance criteria:
+
+- Static orchestration has one source of lifecycle truth.
+- Dynamic preparation has one cancellation/currentness model.
+- No compatibility, deprecated, or dual-shape model remains solely to preserve old tests.
+- Full TypeScript checks, lint, dead-code lint, and test suite pass.
+
+Task checklist:
+
+- [ ] Search for old symbols and terminology.
+- [ ] Delete remaining temporary conversion helpers.
+- [ ] Consolidate, delete, or rewrite hollow tests instead of preserving legacy harness shapes.
+- [ ] Update docs that mention old work accounting.
+- [ ] Run full verification.
+
+Decisions and course corrections:
+
+- Record final cleanup discoveries and any intentionally deferred work.
+
+## Risks And Mitigations
+
+- **Risk: runs become monolithic scene owners.**
+  Mitigation: keep owner-keyed tasks and layer owner retention as the resource lifetime authority.
+  Runs only coordinate reconciliation and source fanout.
+
+- **Risk: old work accounting survives under new names.**
+  Mitigation: each phase has deletion criteria for stale counters, revision sets, demand-key
+  filtering, and work-id helpers.
+
+- **Risk: failed tasks become invisible.**
+  Mitigation: failed tasks settle terminally, log a clear console error, and appear in lightweight
+  lifecycle diagnostics without durable issue records.
+
+- **Risk: source fanout is flattened too much.**
+  Mitigation: model source groups explicitly and preserve one source request satisfying multiple
+  owner tasks.
+
+- **Risk: materialization order produces transient or final wrong state.**
+  Mitigation: track exact commit ids through FIFO materialization and verify add/evict interleavings
+  in runtime tests.
+
+- **Risk: dynamic preparation leaks into static run ownership.**
+  Mitigation: static runs emit/materialize static products; dynamic controller owns dynamic entity
+  records and preparations.
+
+- **Risk: settlement semantics become stricter unexpectedly.**
+  Mitigation: explicitly update tests so static-authored dynamic readiness blocks scene settled while
+  runtime-authored dynamic readiness does not.
+
+- **Risk: tests preserve obsolete behavior.**
+  Mitigation: replace work-id/stale-counter tests with owner/task lifecycle tests when the behavior
+  still matters, and delete/rewrite tests that only prove removed accounting exists.
+
+## Definition Of Done
+
+- Static coordinator reconciliation is represented by run/task lifecycle state.
+- Static layer tasks are keyed by `LayerOwnerKey` and reused while the owner remains desired.
+- Failed static layer tasks are terminal until the owner leaves demand.
+- Source resolution and bake results route by owner/task identity, not demand-key reconstruction.
+- Static bake results carry owner identity directly, and `filterStaticBakeResultForWorks` is gone.
+- Static materialization is tracked by exact commit units, not revision sets.
+- Static-authored dynamic entity records are created only after owning static layer materialization.
+- Static-authored dynamic preparations block scene-interest `ready`; runtime-authored dynamic
+  preparations do not.
+- Dynamic async resource preparation uses explicit lifecycle/cancellation state instead of generation
+  checks.
+- Diagnostics show active runs, tasks, commits, preparations, failures, and timings without stale
+  result counters.
+- Old work-id terminology, deprecated aliases, dual public shapes, compatibility helpers, and legacy
+  accounting tests are removed unless a remaining use has a precise non-orchestration meaning.
+- `npm run test:ts`, `npm run check`, `npm run lint:ts`, and `npm run lint:dead` pass in
+  `apps/holtburger-3d`.
+
+## Open Questions
+
+- Should a failed static layer task remain visible in diagnostics indefinitely while desired, or only
+  in the active task snapshot until the owner leaves demand?
+- Should static-authored dynamic visual failure make the owner lifecycle `failed`, or should the
+  owner remain `materialized` with a separate dynamic failure state that scene settlement maps to
+  failed?
+- Should static commit materialization acks flow back into `StaticCoordinator`, or should runtime own
+  the authoritative materialization tracker and expose settlement state from there?

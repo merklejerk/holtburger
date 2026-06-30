@@ -806,7 +806,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 			renderPassPlan: { kind: "single-surface-resident" },
 		});
 	#cachedPortalFramePlan: CachedPortalFramePlan | null = null;
-	#lastPortalFrameDiagnosticSignature: string | null = null;
 	#sceneInterest: RuntimeSceneInterest = { kind: "none" };
 	#sceneInterestRevision = 0;
 	#settledSceneInterestRevision = 0;
@@ -1387,12 +1386,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 					portalOverlap: this.#currentPortalOverlapResidency,
 					projection,
 				});
-				this.#logPortalFrameDiagnostics({
-					landblockId,
-					plan: baseDirectPlan,
-					projection,
-					startEnvCellId: this.#currentCameraResidency.envCellId,
-				});
 				if (baseDirectPlan?.kind === "direct-env-cell") {
 					const exteriorSuffix =
 						baseDirectPlan.layeredGraph.outdoorCrossings.length > 0
@@ -1594,21 +1587,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 	): PortalFrameWorkPlan {
 		this.#cachedPortalFramePlan = { key, plan };
 		return plan;
-	}
-
-	#logPortalFrameDiagnostics(options: {
-		readonly landblockId: number;
-		readonly plan: PortalFrameWorkPlan | null;
-		readonly projection: StaticPortalProjectionRecord;
-		readonly startEnvCellId: number;
-	}): void {
-		const summary = createPortalFrameDiagnosticSummary(options);
-		const signature = JSON.stringify(summary);
-		if (this.#lastPortalFrameDiagnosticSignature === signature) {
-			return;
-		}
-		this.#lastPortalFrameDiagnosticSignature = signature;
-		console.info("[holtburger-3d][portal-frame-diagnostic]", summary);
 	}
 
 	#deriveRenderPassPlan(): RenderPassPlan {
@@ -3603,68 +3581,6 @@ function createRetainedOutdoorProjectionSourceKey(
 		)
 		.sort()
 		.join("|");
-}
-
-function createPortalFrameDiagnosticSummary(options: {
-	readonly landblockId: number;
-	readonly plan: PortalFrameWorkPlan | null;
-	readonly projection: StaticPortalProjectionRecord;
-	readonly startEnvCellId: number;
-}) {
-	const selectedLayerByEnvCellId = new Map(
-		options.projection.renderLayerByEnvCellId.map((entry) => [
-			entry.envCellId,
-			entry.renderLayer,
-		]),
-	);
-	const rootOutgoingEdges = options.projection.edges.filter(
-		(edge) => edge.sourceEnvCellId === options.startEnvCellId,
-	);
-	const directPlan =
-		options.plan?.kind === "direct-env-cell" &&
-		options.plan.mode === "portal-projection"
-			? options.plan
-			: null;
-
-	return {
-		landblockId: formatHex32(options.landblockId),
-		plan: directPlan
-			? {
-					apertureResourceCount:
-						directPlan.layeredGraph.apertureResources.length,
-					baseOverlapEnvCellCount: directPlan.baseOverlap.envCells.length,
-					maskEdgeCount: directPlan.layeredGraph.maskEdges.length,
-					missingResourceMembershipCount:
-						directPlan.layeredGraph.projectionDiagnostics
-							.missingResourceMembershipCount,
-					renderEntries: directPlan.layeredGraph.renderEntries.map((entry) => ({
-						envCellId: formatHex32(entry.envCellId),
-						incomingMaskEdgeCount: entry.incomingMaskEdgeIds.length,
-						renderLayer: entry.renderLayer,
-						resourceState: entry.resources.resourceState,
-					})),
-					renderLayerCount: directPlan.layeredGraph.renderLayers.length,
-				}
-			: {
-					kind: options.plan?.kind ?? "none",
-				},
-		projection: {
-			diagnostics: options.projection.diagnostics,
-			edgeCount: options.projection.edges.length,
-			renderLayers: options.projection.renderLayers.map((layer) => ({
-				envCellCount: layer.envCellIds.length,
-				renderLayer: layer.renderLayer,
-			})),
-			rootOutgoingEdges: rootOutgoingEdges.map((edge) => ({
-				linkId: edge.linkId,
-				sourceKind: edge.sourceKind,
-				targetEnvCellId: formatHex32(edge.targetEnvCellId),
-				targetRenderLayer:
-					selectedLayerByEnvCellId.get(edge.targetEnvCellId) ?? null,
-			})),
-		},
-		rootEnvCellId: formatHex32(options.startEnvCellId),
-	};
 }
 
 function collectDirectEnvCellFrameEnvCellIds(

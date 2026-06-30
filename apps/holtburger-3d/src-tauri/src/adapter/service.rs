@@ -948,6 +948,55 @@ mod tests {
     }
 
     #[test]
+    fn landblock_lod_binary_lookup_moves_nested_env_cell_geometry_into_sections() {
+        let adapter = HostBoundaryAdapter::new(false);
+        let bytes = tauri::async_runtime::block_on(adapter.asset_lookup_binary_batch(vec![
+            AssetLookupRequestDto {
+                request_id: "test-landblock-env-cell-binary".to_string(),
+                asset_id: "landblock/da55ffff/lod/4".to_string(),
+                priority: crate::contracts::AssetPriorityDto::Streaming,
+            },
+        ]))
+        .expect("binary landblock LoD lookup should succeed");
+        let (manifest, _) = decode_binary_manifest(&bytes);
+        let sections = manifest["sections"]
+            .as_array()
+            .expect("binary manifest should expose sections");
+        let layers = manifest["responses"][0]["payload"]["layers"]
+            .as_array()
+            .expect("landblock LoD payload should expose layers");
+        let (env_cell_layer_index, env_cell_layer) = layers
+            .iter()
+            .enumerate()
+            .find(|(_, layer)| layer["kind"] == "env-cell-system")
+            .expect("landblock LoD fixture should include an env-cell-system layer");
+        let env_cells = env_cell_layer["envCells"]
+            .as_array()
+            .expect("env-cell-system layer should expose env cells");
+        assert!(
+            !env_cells.is_empty(),
+            "env-cell-system layer should include at least one env cell"
+        );
+        let position_path = format!(
+            "responses.0.payload.layers.{env_cell_layer_index}.envCells.0.renderGeometry.positions"
+        );
+
+        assert!(
+            sections
+                .iter()
+                .any(|section| section["path"] == position_path.as_str()),
+            "landblock LoD env-cell render positions should move into binary sections"
+        );
+        assert_eq!(
+            layers[env_cell_layer_index]["envCells"][0]["renderGeometry"]["positions"]
+                .as_array()
+                .expect("nested env-cell positions should be manifest placeholders")
+                .len(),
+            0
+        );
+    }
+
+    #[test]
     fn terrain_material_lookup_returns_region_table_payload() {
         let runtime = HostRuntimeService::new(false);
         let region_number = 1_u64;

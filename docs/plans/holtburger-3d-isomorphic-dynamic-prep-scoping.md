@@ -1910,6 +1910,9 @@ Implementation progress:
 - Updated env-cell geometry attachment creation to require prepared render geometry buffers before
   building attachments and to consume those typed buffers directly. Resolver-light metadata views
   still fail loudly if they leak into full attachment prep.
+- Fixed the Tauri binary host adapter so `landblock/.../lod/...` responses move nested env-cell
+  render geometry buffers into binary sections too. Granular `env-cell/*` payloads already did this;
+  landblock LoD payloads were still carrying nested env-cell positions/normals/UVs as JSON arrays.
 - Rebuilt full prepared geometry fixtures around `Float32Array`. The only remaining
   `positions: []` / `normals: []` / `uvs: []` fixtures are binary-envelope manifest placeholders
   that are replaced by binary sections during decoding.
@@ -1924,6 +1927,10 @@ Decisions and course corrections:
   enforced where bake attachments require full prepared geometry.
 - Preserved metadata-only resolver views for `gfx-obj` and env-cell payloads. Phase 10A tightens
   full prepared payload use without undoing the resolver memory-transfer optimization.
+- Runtime smoke after the first Phase 10A commit exposed that the landblock-scene LoD binary route
+  was only binary in envelope format; nested env-cell render geometry still came from the JSON
+  serializer. The fix belongs at the host binary serialization boundary, not in frontend
+  bake-local conversion fallback.
 
 Debt carried forward:
 
@@ -1940,6 +1947,8 @@ Verification:
 
 - `npm run check` passed.
 - `npm run test:ts -- binary-asset-envelope preparation static-object-bake-attachments env-cell-system-geometry-attachments visual-bake-attachments visual-baker` passed after updating the resolver-light env-cell failure assertion to the typed-buffer contract message.
+- `cargo test -p holtburger-3d binary_lookup` passed after adding regression coverage for nested
+  landblock LoD env-cell render geometry binary sections.
 - `npm run test:ts` passed.
 - `npm run lint:ts` passed.
 

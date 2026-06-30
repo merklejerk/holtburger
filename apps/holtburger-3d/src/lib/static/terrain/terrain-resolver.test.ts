@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import type {
-	LandblockOutdoorPayloadDto,
 	PalettePayloadDto,
 	RegionRenderProfilePayloadDto,
 	RenderSurfacePayloadDto,
@@ -16,13 +15,14 @@ import type {
 } from "../../assets/contracts";
 import { createHostAssetKey, describeHostAssetKey } from "../../assets/keys";
 import type { StaticResolverJob } from "../contracts";
+import type { LandblockOutdoorLayerSourcePayloadDto } from "../source-payloads";
 import { TerrainStaticScopeResolver } from "./terrain-resolver";
 
 describe("terrain static resolver", () => {
 	it("resolves a concrete landblock terrain request into typed source facts", async () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
-				createHostAssetKey("landblock-outdoor", 0xda55ffff),
+				createHostAssetKey("landblock-scene-lod-outdoor-layer", 0xda55ffff),
 				createLandblockOutdoorPayload(),
 			),
 			createPreparedAsset(
@@ -161,7 +161,7 @@ describe("terrain static resolver", () => {
 	it("does not use host asset route strings as resolver payload identity", async () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
-				createHostAssetKey("landblock-outdoor", 0xda55ffff),
+				createHostAssetKey("landblock-scene-lod-outdoor-layer", 0xda55ffff),
 				createLandblockOutdoorPayload(),
 			),
 			createPreparedAsset(
@@ -213,7 +213,7 @@ describe("terrain static resolver", () => {
 	it("reports missing dependency refs as typed identities", async () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
-				createHostAssetKey("landblock-outdoor", 0xda55ffff),
+				createHostAssetKey("landblock-scene-lod-outdoor-layer", 0xda55ffff),
 				createLandblockOutdoorPayload(),
 			),
 			createPreparedAsset(
@@ -325,18 +325,16 @@ function createTerrainRequest(): StaticResolverJob {
 	};
 }
 
-function createLandblockOutdoorPayload(): LandblockOutdoorPayloadDto {
+function createLandblockOutdoorPayload(): LandblockOutdoorLayerSourcePayloadDto {
 	return {
-		classification: "outdoor",
+		buildingTransitionApertures: [],
 		diagnostics: { errors: [], omissions: [], sourceRecords: [] },
-		kind: "landblock-outdoor",
+		kind: "landblock-scene-lod-outdoor-layer",
 		landblockId: 0xda55ffff,
 		outdoorBvh: null,
-		provenance: createProvenance("landblock-outdoor"),
+		provenance: createProvenance("landblock-scene-lod"),
 		regionId: 1,
 		regionNumber: 1,
-		residencyKind: "outdoor-landblock",
-		sourceAssetKind: "landblock-outdoor",
 		statics: [],
 		terrain: {
 			bounds: {
@@ -409,7 +407,7 @@ function createLandblockOutdoorPayload(): LandblockOutdoorPayloadDto {
 function createTerrainTriangle(
 	terrainTriangleId: string,
 	triangleInQuad: 0 | 1,
-): LandblockOutdoorPayloadDto["terrain"]["triangles"][number] {
+): LandblockOutdoorLayerSourcePayloadDto["terrain"]["triangles"][number] {
 	return {
 		averageHeight: 1,
 		bounds: {

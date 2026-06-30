@@ -1604,7 +1604,7 @@ Decisions and course corrections:
 
 ### Phase 11A2: Frontend Source Projection Cutover
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: make LoD source resolution provide the only frontend source payloads for terrain, outdoor object, and env-cell resolvers.
 
@@ -1624,15 +1624,20 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Update `LandblockSceneLodSourceResolver` projection and asset-service interception.
-- [ ] Update terrain and outdoor object resolvers to consume projected outdoor-layer payloads.
-- [ ] Update env-cell resolver or replace it with a projected-only env-cell resolver surface.
-- [ ] Delete or rewrite tests that expected old broad-route resolver inputs.
-- [ ] Run focused frontend resolver validation commands.
+- [x] Update `LandblockSceneLodSourceResolver` projection and asset-service interception.
+- [x] Update terrain and outdoor object resolvers to consume projected outdoor-layer payloads.
+- [x] Update env-cell resolver or replace it with a projected-only env-cell resolver surface.
+- [x] Delete or rewrite tests that expected old broad-route resolver inputs.
+- [x] Run focused frontend resolver validation commands.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- `LandblockSceneLodSourceResolver` now intercepts resolver-local `landblock-scene-lod-outdoor-layer` and `landblock-scene-lod-env-cell-layer` keys instead of old broad route keys.
+- Terrain, outdoor static object, and env-cell resolvers now request projected LoD layer payloads. Their output domains remain `outdoor-terrain`, split outdoor object domains, and internal `landblock-env-cells` env-cell-system ownership respectively.
+- Resolver tests now build projected source payload fixtures. The only remaining `kind: "landblock-outdoor"` in the focused resolver tests is a wrong-kind rejection payload, not a supported route or source path.
+- Test fixture prepared source ids now distinguish real host assets from resolver-local projected layer keys: host assets keep route source ids, projected layer assets use `describeHostAssetKey` and cannot be formatted as host routes.
+- Remaining Phase 11A3 targets are standalone direct-route helper surfaces such as the asset bridge tests/views and the static resolver worker's direct env-cell resolver branch.
+- Validation: `npm run check`; `npm run test:ts -- src/lib/static/terrain/terrain-resolver.test.ts src/lib/static/objects/outdoor-static-objects-resolver.test.ts src/lib/static/env-cells/landblock-env-cells-resolver.test.ts src/lib/static/resolver/landblock-scene-lod-source-resolver.test.ts`.
 
 ### Phase 11A3: Frontend Standalone Direct Resolver Deletion
 

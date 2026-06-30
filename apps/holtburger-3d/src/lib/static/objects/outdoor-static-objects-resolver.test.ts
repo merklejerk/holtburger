@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type {
 	GfxObjPayloadDto,
-	LandblockOutdoorPayloadDto,
 	MaterialRecipePayloadDto,
 	PalettePayloadDto,
 	RegionRenderProfilePayloadDto,
@@ -24,6 +23,7 @@ import {
 	parseHostAssetId,
 } from "../../assets/keys";
 import type { StaticResolverJob } from "../contracts";
+import type { LandblockOutdoorLayerSourcePayloadDto } from "../source-payloads";
 import { RequestScopedPreparedAssetReader } from "../resolver/worker-asset-reader";
 import { OutdoorStaticObjectsResolver } from "./outdoor-static-objects-resolver";
 
@@ -31,7 +31,7 @@ describe("browser outdoor static object resolver", () => {
 	it("resolves outdoor building source, geometry, material, and texture facts", async () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
-				createHostAssetKey("landblock-outdoor", 0xda55ffff),
+				createHostAssetKey("landblock-scene-lod-outdoor-layer", 0xda55ffff),
 				createLandblockOutdoorPayload(),
 			),
 			createPreparedAsset(
@@ -293,7 +293,7 @@ describe("browser outdoor static object resolver", () => {
 	it("classifies setup-backed outdoor objects with default animations as dynamic seeds", async () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
-				createHostAssetKey("landblock-outdoor", 0xda55ffff),
+				createHostAssetKey("landblock-scene-lod-outdoor-layer", 0xda55ffff),
 				createLandblockOutdoorPayload({
 					buildingSourceAssetId: "setup-model/020003e5",
 				}),
@@ -369,7 +369,7 @@ describe("browser outdoor static object resolver", () => {
 	it("resolves generated scenery without building detail roles", async () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
-				createHostAssetKey("landblock-outdoor", 0xda55ffff),
+				createHostAssetKey("landblock-scene-lod-outdoor-layer", 0xda55ffff),
 				createLandblockOutdoorPayload(),
 			),
 			createPreparedAsset(
@@ -487,7 +487,7 @@ describe("browser outdoor static object resolver", () => {
 		const duplicatedPaletteKey = createHostAssetKey("palette", 0x04000010);
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
-				createHostAssetKey("landblock-outdoor", 0xda55ffff),
+				createHostAssetKey("landblock-scene-lod-outdoor-layer", 0xda55ffff),
 				createLandblockOutdoorPayload(),
 			),
 			createPreparedAsset(
@@ -559,7 +559,7 @@ describe("browser outdoor static object resolver", () => {
 	it("returns an empty generated-scenery payload when a landblock has no generated scenery", async () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
-				createHostAssetKey("landblock-outdoor", 0xda55ffff),
+				createHostAssetKey("landblock-scene-lod-outdoor-layer", 0xda55ffff),
 				createLandblockOutdoorPayload({ includeGeneratedScenery: false }),
 			),
 			createPreparedAsset(
@@ -588,7 +588,7 @@ describe("browser outdoor static object resolver", () => {
 	it("resolves explicit objects through the static object pipeline", async () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
-				createHostAssetKey("landblock-outdoor", 0xda55ffff),
+				createHostAssetKey("landblock-scene-lod-outdoor-layer", 0xda55ffff),
 				createLandblockOutdoorPayload({
 					includeExplicitObject: true,
 					includeGeneratedScenery: false,
@@ -675,7 +675,7 @@ describe("browser outdoor static object resolver", () => {
 	it("reports missing generated-scenery source assets as typed missing refs", async () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
-				createHostAssetKey("landblock-outdoor", 0xda55ffff),
+				createHostAssetKey("landblock-scene-lod-outdoor-layer", 0xda55ffff),
 				createLandblockOutdoorPayload(),
 			),
 			createPreparedAsset(
@@ -708,7 +708,7 @@ describe("browser outdoor static object resolver", () => {
 		const gfxObj = createGfxObjPayload();
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
-				createHostAssetKey("landblock-outdoor", 0xda55ffff),
+				createHostAssetKey("landblock-scene-lod-outdoor-layer", 0xda55ffff),
 				createLandblockOutdoorPayload(),
 			),
 			createPreparedAsset(
@@ -792,7 +792,7 @@ describe("browser outdoor static object resolver", () => {
 	it("keeps host routes confined to debug provenance", async () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
-				createHostAssetKey("landblock-outdoor", 0xda55ffff),
+				createHostAssetKey("landblock-scene-lod-outdoor-layer", 0xda55ffff),
 				createLandblockOutdoorPayload(),
 			),
 			createPreparedAsset(
@@ -850,7 +850,7 @@ describe("browser outdoor static object resolver", () => {
 	it("excludes objects whose source asset could not be resolved", async () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
-				createHostAssetKey("landblock-outdoor", 0xda55ffff),
+				createHostAssetKey("landblock-scene-lod-outdoor-layer", 0xda55ffff),
 				createLandblockOutdoorPayload({
 					buildingSourceAssetId: "gfx-obj/01000020",
 				}),
@@ -967,8 +967,19 @@ function createPreparedAsset(
 		payload,
 		preparedAt: "2026-06-11T00:00:00.000Z",
 		revision: 1,
-		sourceAssetId: formatHostAssetId(key),
+		sourceAssetId: formatPreparedSourceAssetId(key),
 	};
+}
+
+function formatPreparedSourceAssetId(key: HostAssetKey): string {
+	if (
+		key.kind === "landblock-scene-lod-outdoor-layer" ||
+		key.kind === "landblock-scene-lod-env-cell-layer"
+	) {
+		return describeHostAssetKey(key);
+	}
+
+	return formatHostAssetId(key);
 }
 
 function createBuildingRequest(): StaticResolverJob {
@@ -1007,11 +1018,11 @@ function createLandblockOutdoorPayload(
 		readonly includeExplicitObject?: boolean;
 		readonly includeGeneratedScenery?: boolean;
 	} = {},
-): LandblockOutdoorPayloadDto {
+): LandblockOutdoorLayerSourcePayloadDto {
 	const buildingSourceAssetId =
 		options.buildingSourceAssetId ?? "setup-model/02000010";
 	const buildingSourceKey = parseHostAssetId(buildingSourceAssetId);
-	const statics: LandblockOutdoorPayloadDto["statics"] = [
+	const statics: LandblockOutdoorLayerSourcePayloadDto["statics"] = [
 		{
 			building: { numLeaves: 1, portals: [] },
 			generated: null,
@@ -1058,9 +1069,9 @@ function createLandblockOutdoorPayload(
 	}
 
 	return {
-		classification: "outdoor",
+		buildingTransitionApertures: [],
 		diagnostics: { errors: [], omissions: [], sourceRecords: [] },
-		kind: "landblock-outdoor",
+		kind: "landblock-scene-lod-outdoor-layer",
 		landblockId: 0xda55ffff,
 		outdoorBvh: {
 			coordinateSpace: "landblock-render-local",
@@ -1070,11 +1081,9 @@ function createLandblockOutdoorPayload(
 			})),
 			nodes: [],
 		},
-		provenance: createProvenance("landblock-outdoor"),
+		provenance: createProvenance("landblock-scene-lod"),
 		regionId: 1,
 		regionNumber: 1,
-		residencyKind: "outdoor-landblock",
-		sourceAssetKind: "landblock-outdoor",
 		statics,
 		terrain: createTerrainStub(),
 	};
@@ -1324,7 +1333,7 @@ function createRenderSurfacePayload(
 	};
 }
 
-function createTerrainStub(): LandblockOutdoorPayloadDto["terrain"] {
+function createTerrainStub(): LandblockOutdoorLayerSourcePayloadDto["terrain"] {
 	return {
 		bounds: createBounds(),
 		gridSize: 2,

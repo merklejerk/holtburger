@@ -720,6 +720,7 @@ describe("static coordinator", () => {
 		]);
 		expect(commits).toEqual([
 			{
+				dynamicRecipes: [expect.objectContaining({ entityId: "static-dynamic:1" })],
 				dynamicVisualBake: {
 					batchId:
 						"static-batch:1:outdoor-terrain:landblock:da55ffff:1:static-authored-dynamic-visuals",

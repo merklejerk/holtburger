@@ -2,6 +2,7 @@ import type {
 	StaticBakeBatchInput,
 	StaticBakeBatchResult,
 	StaticBaker,
+	StaticAuthoredDynamicRecipe,
 	StaticDomain,
 	StaticLandblockSceneLodLayerRequest,
 	StaticLandblockSceneLodResolution,
@@ -157,6 +158,7 @@ export class DeferredStaticResolver
 	completeSource(
 		requestId: string,
 		recipes: readonly StaticLayerRecipe[] | null = null,
+		dynamicRecipes: readonly StaticAuthoredDynamicRecipe[] = [],
 	): void {
 		const sourceRequest = this.#pendingSourceRequests.find(
 			(candidate) => candidate.requestId === requestId,
@@ -171,7 +173,7 @@ export class DeferredStaticResolver
 
 		this.#sourceResolvers.delete(requestId);
 		resolver.resolve({
-			dynamicRecipes: [],
+			dynamicRecipes,
 			recipes:
 				recipes ??
 				sourceRequest.request.requestedLayers.map((layer) =>

@@ -106,7 +106,7 @@ function createEnvCellFactsByLandblock(
 			);
 		factsByLandblock.set(landblockId, {
 			authoredDynamicSeedRecords:
-				materialized.staticAuthoredDynamicSeeds.filter(
+				delta.staticAuthoredDynamicSeeds.filter(
 					(record) =>
 						record.kind === "env-cell-static-object-seed" &&
 						record.owner.domain === "env-cell-system" &&

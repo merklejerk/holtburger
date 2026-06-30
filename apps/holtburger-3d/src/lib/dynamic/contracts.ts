@@ -37,6 +37,19 @@ export function createDynamicVisualResourceId(
 	return `dynamic-visual-resource:${entityId}`;
 }
 
+export function createStaticAuthoredDynamicTextureBatchId(options: {
+	readonly entityId: DynamicEntityId;
+	readonly ownerId: string;
+}): string {
+	return `dynamic-static-authored:${options.ownerId}:${options.entityId}`;
+}
+
+export function createRuntimeDynamicTextureBatchId(
+	entityId: DynamicEntityId,
+): string {
+	return `runtime-dynamic:${entityId}`;
+}
+
 /** Static-authored seed fact shapes that can become dynamic runtime records. */
 export type StaticAuthoredDynamicSeedFacts =
 	| EnvCellStaticObjectDynamicSeedFacts
@@ -160,6 +173,139 @@ export interface DynamicVisualSource {
 	/** Concrete authoring/source residence used for resource lookup and planning. */
 	readonly sourceResidence: DynamicEntityResidence;
 }
+
+export type DynamicEntityRecipeSource =
+	| {
+			/** Static source fanout discovered this dynamic placement. */
+			readonly kind: "static-authored";
+			readonly owner: StaticLayerPeerRecordOwner;
+			/** Stable placement id before runtime owns the live entity record. */
+			readonly placementId: string;
+			readonly sourceResidence: DynamicEntityResidence;
+	  }
+	| {
+			/** Browser/runtime-authored request shaped like a future server-authored spawn. */
+			readonly kind: "runtime-authored";
+			readonly runtimeEntityId: DynamicEntityId;
+			readonly sourceResidence: DynamicEntityResidence;
+	  };
+
+export interface DynamicEntityRecipe {
+	/** Stable entity identity before visual baking; runtime owns final lifetime. */
+	readonly entityId: DynamicEntityId;
+	/** Source-specific provenance and activation policy. */
+	readonly source: DynamicEntityRecipeSource;
+	/** Placement at source residence before animation sampling. */
+	readonly baseTransform: DynamicEntityTransformState;
+	/** Animation selection requested by source facts or runtime input. */
+	readonly animationSelection: DynamicEntityAnimationSelection;
+	/** Data-only visual recipe consumed by the worker-backed visual baker. */
+	readonly visual: DynamicVisualRecipe;
+}
+
+export interface DynamicVisualRecipe {
+	/** Setup model driving part layout, default animation, and source closure. */
+	readonly setupModel: StaticObjectSourceAssetFacts;
+	/** Optional explicit/default animation payload facts, or null when animation is not required. */
+	readonly animation: DynamicEntityAnimationResource | null;
+	/** Resolved source closure; the visual baker must not do lazy host asset lookup. */
+	readonly sourceAssets: readonly StaticObjectSourceAssetFacts[];
+	readonly materialSources: readonly StaticObjectMaterialSourceFacts[];
+	readonly paletteSources: readonly StaticObjectPaletteSourceFacts[];
+	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
+	readonly missingRefs: readonly StaticResourceIdentity[];
+	/** Material planning policy and dynamic ownership identities, not renderer state. */
+	readonly materialPolicy: DynamicVisualMaterialPolicy;
+}
+
+export interface DynamicVisualMaterialPolicy {
+	readonly detailRolePolicy: DynamicVisualMaterialDetailRolePolicy;
+	readonly materialPlanningDomain: StaticMaterialPlanningDomain;
+	readonly visualObject: DynamicVisualObjectIdentity;
+}
+
+export type DynamicVisualMaterialDetailRolePolicy =
+	| {
+			readonly kind: "static-domain";
+			readonly domain: Exclude<
+				StaticMaterialPlanningDomain,
+				typeof RUNTIME_AUTHORED_DYNAMIC_RESOURCE_FAMILY
+			>;
+	  }
+	| {
+			readonly kind: typeof RUNTIME_AUTHORED_DYNAMIC_DETAIL_ROLE_POLICY;
+	  };
+
+export interface DynamicVisualBakeInput {
+	readonly batchId: string;
+	readonly recipes: readonly DynamicEntityRecipe[];
+	readonly revision: number;
+}
+
+export interface DynamicVisualBakeResult {
+	readonly batchId: string;
+	readonly failures: readonly DynamicVisualBakeFailure[];
+	readonly products: readonly DynamicVisualBakeProduct[];
+	readonly revision: number;
+}
+
+export type DynamicVisualBakeProduct =
+	| {
+			readonly kind: "baked";
+			readonly resource: BakedDynamicVisualResource;
+	  }
+	| {
+			readonly entityId: DynamicEntityId;
+			readonly kind: "skipped";
+			readonly reason: DynamicVisualSkipReason;
+	  };
+
+export interface BakedDynamicVisualResource {
+	readonly entityId: DynamicEntityId;
+	readonly materialSlots: readonly DynamicEntityMaterialSlotRequirement[];
+	readonly materialSources: readonly StaticObjectMaterialSourceFacts[];
+	readonly paletteSources: readonly StaticObjectPaletteSourceFacts[];
+	readonly renderParts: readonly DynamicEntityRenderPart[];
+	readonly resourceId: string;
+	readonly sourceAssets: readonly StaticObjectSourceAssetFacts[];
+	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
+	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
+}
+
+export type DynamicVisualSkipReason =
+	| {
+			readonly kind: "missing-dependencies";
+			readonly missingRefs: readonly StaticResourceIdentity[];
+	  }
+	| {
+			readonly kind: "unsupported-materials";
+			readonly unsupportedReasons: readonly DynamicEntityUnsupportedMaterialReason[];
+	  }
+	| {
+			readonly kind: "invalid-recipe";
+			readonly message: string;
+	  };
+
+export interface DynamicVisualBakeFailure {
+	readonly entityId: DynamicEntityId | null;
+	readonly message: string;
+	readonly stage: "material-planning" | "render-part-extraction" | "validation";
+}
+
+export type DynamicVisualApplicationResult =
+	| {
+			readonly kind: "recipe-resolved";
+			readonly recipe: DynamicEntityRecipe;
+	  }
+	| {
+			readonly kind: "visual-baked";
+			readonly resource: BakedDynamicVisualResource;
+	  }
+	| {
+			readonly entityId: DynamicEntityId;
+			readonly kind: "visual-skipped";
+			readonly reason: DynamicVisualSkipReason;
+	  };
 
 /** Runtime-local visual object identity for dynamic setup-backed material planning. */
 export interface DynamicVisualObjectIdentity {
@@ -418,7 +564,7 @@ export interface DynamicEntityResourceState {
 	readonly visual: DynamicEntityVisualResourceState;
 }
 
-type DynamicEntityResourceStatus =
+export type DynamicEntityResourceStatus =
 	| "failed"
 	| "pending"
 	| "ready"
@@ -460,14 +606,14 @@ export interface DynamicEntityAnimationResource {
 	readonly payload: AnimationPayloadDto;
 }
 
-type DynamicEntityVisualResourceState =
+export type DynamicEntityVisualResourceState =
 	| {
 			readonly status: "blocked" | "pending";
 	  }
 	| DynamicEntityVisualResourcesReadyState
 	| DynamicEntityVisualResourcesFailedState;
 
-interface DynamicEntityVisualResourcesReadyState {
+export interface DynamicEntityVisualResourcesReadyState {
 	readonly materialSources: readonly StaticObjectMaterialSourceFacts[];
 	readonly materialSlots: readonly DynamicEntityMaterialSlotRequirement[];
 	readonly paletteSources: readonly StaticObjectPaletteSourceFacts[];
@@ -483,14 +629,14 @@ export interface DynamicEntityRenderPart extends VisualGeometryPayload {
 	readonly sourceAssetId: string;
 }
 
-interface DynamicEntityVisualResourcesFailedState {
+export interface DynamicEntityVisualResourcesFailedState {
 	readonly failures: readonly DynamicEntityResourceFailure[];
 	readonly missingRefs: readonly StaticResourceIdentity[];
 	readonly status: "failed";
 	readonly unsupportedReasons: readonly DynamicEntityUnsupportedMaterialReason[];
 }
 
-interface DynamicEntityMaterialSlotRequirement {
+export interface DynamicEntityMaterialSlotRequirement {
 	readonly identity: DynamicVisualMaterialSlotIdentity;
 	readonly material: StaticObjectMaterialSourceFacts["identity"];
 	readonly partIndex: number;

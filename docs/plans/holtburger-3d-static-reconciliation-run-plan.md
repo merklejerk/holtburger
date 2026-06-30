@@ -94,9 +94,7 @@ Current accounting and cleanup targets:
 
 - `#inFlightStaticWork`
 - `#pendingBatches`
-- `#staleResolverResults`
 - `#staleBakeResults`
-- `#resolverMsByStaticWorkId`
 - `filterStaticBakeResultForWorks`
 - `ScheduledStaticWork`
 - `ScheduledStaticWorkStatus`
@@ -371,7 +369,7 @@ Verification:
 
 ### Phase 3: Move Source Fanout And Resolver Validation Into Tasks
 
-Status: pending.
+Status: completed 2026-06-30.
 
 Purpose:
 
@@ -394,16 +392,33 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Model source groups inside the run or coordinator task registry.
-- [ ] Replace `createDemandWorkKeyForSourceLayer` rejoining with target owner matching.
-- [ ] Move resolver timing onto source group/task timing records.
-- [ ] Remove `#staleResolverResults`.
-- [ ] Replace source payload listener contracts that expose old work objects.
+- [x] Model source groups inside the run or coordinator task registry.
+- [x] Replace `createDemandWorkKeyForSourceLayer` rejoining with target owner matching.
+- [x] Move resolver timing onto source group/task timing records.
+- [x] Remove `#staleResolverResults`.
+- [x] Replace source payload listener contracts that expose old work objects.
 
 Decisions and course corrections:
 
-- Record any untouched source payload diagnostic that still needs owner-key replacement, with the
-  exact later phase that will delete it.
+- 2026-06-30: Source resolver completion now routes recipes by `LayerOwnerKey`/owner id instead of
+  reconstructing demand keys from payload jobs or source-layer kinds.
+- 2026-06-30: Source groups capture the exact task objects that launched the request. A late source
+  result for an owner that left retention and later re-entered cannot feed the recreated task.
+- 2026-06-30: Removed `staleResolverResults` from coordinator snapshots, runtime diagnostics, and
+  tests. Late resolver output is ignored when no current requested task accepts it; we do not keep a
+  counter diary for expected cancellation.
+- 2026-06-30: Source payload deltas now expose `task: StaticLayerTaskStatus` instead of
+  `work: ScheduledStaticWork`.
+- 2026-06-30: Resolver timing is keyed by task id through `#resolverMsByTaskId`. This remains only
+  because Phase 4 bake results still return `ScheduledStaticWork`; the map should either collapse
+  into bake task records or disappear with the bake-contract cutover.
+
+Verification:
+
+- `npm run test:ts -- --run src/lib/static/coordinator/static-coordinator.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run lint:dead`
 
 ### Phase 4: Move Bake Batching Behind Owner-Keyed Task Groups
 

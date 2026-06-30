@@ -23,11 +23,13 @@ import {
 } from "../browser/runtime-spawn-form";
 import { DYNAMIC_ANIMATION_FRAME_RATE_FPS } from "../dynamic/dynamic-animation-player";
 import type {
+	BakedDynamicVisualResource,
 	DynamicEntityId,
 	DynamicEntityRecipe,
 	DynamicVisualBakeInput,
 	DynamicVisualBakeResult,
 } from "../dynamic/contracts";
+import { createDynamicVisualResourceId } from "../dynamic/contracts";
 import type { DynamicVisualRecipeResolver } from "../dynamic/visual-recipe-resolver";
 import type { DynamicVisualBaker } from "../dynamic/visual-baker";
 import type {
@@ -54,6 +56,7 @@ import type {
 	PreparedRgbaRenderSurfaceTextureUseIdentity,
 	LandblockPortalLinkFacts,
 	StaticBakeTextureUse,
+	StaticAuthoredDynamicRecipe,
 	StaticMaterialCoverageReport,
 	OutdoorStaticObjectsScopePayload,
 	StaticObjectGeometryStaticDrawUnit,
@@ -227,7 +230,13 @@ describe("browser client runtime", () => {
 				terrain: 0,
 			},
 		});
-		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
+		completeResolverRequest(
+			resolver,
+			"outdoor-buildings",
+			0xda55ffff,
+			{},
+			[createOutdoorDynamicSeedRecord()],
+		);
 		await flushPromises();
 
 		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
@@ -375,7 +384,13 @@ describe("browser client runtime", () => {
 				terrain: 0,
 			},
 		});
-		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
+		completeResolverRequest(
+			resolver,
+			"outdoor-buildings",
+			0xda55ffff,
+			{},
+			[createOutdoorDynamicSeedRecord()],
+		);
 		await flushPromises();
 		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
 			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
@@ -386,22 +401,11 @@ describe("browser client runtime", () => {
 			runtime.createDiagnosticsSnapshot().dynamic.records[0]?.resources,
 		).toMatchObject({
 			setupAnimation: {
-				status: "pending",
+				status: "ready",
 			},
-			status: "pending",
+			status: "ready",
 		});
-		expect(assetService.pendingKeys).toEqual([
-			{ id: "020003e5", kind: "setup-model" },
-			{ id: "0300061b", kind: "animation" },
-		]);
-
-		assetService.resolveNext(
-			createPreparedAsset(assetService.pendingKeys[0] ?? failKey()),
-		);
-		assetService.resolveNext(
-			createPreparedAsset(assetService.pendingKeys[1] ?? failKey()),
-		);
-		await flushRuntimeWork();
+		expect(assetService.pendingKeys).toEqual([]);
 
 		const readyDiagnosticsSnapshot = runtime.createDiagnosticsSnapshot();
 		expect(readyDiagnosticsSnapshot.dynamic.records[0]).toMatchObject({
@@ -409,14 +413,14 @@ describe("browser client runtime", () => {
 				status: "ready",
 			},
 			renderability: {
-				reasons: ["visual-resources-pending"],
+				reasons: [],
 			},
 			resources: {
 				setupAnimation: {
 					animationAssetId: "animation/0300061b",
 					status: "ready",
 				},
-				status: "setup-animation-ready",
+				status: "ready",
 			},
 		});
 		expect(
@@ -448,7 +452,13 @@ describe("browser client runtime", () => {
 				terrain: 0,
 			},
 		});
-		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
+		completeResolverRequest(
+			resolver,
+			"outdoor-buildings",
+			0xda55ffff,
+			{},
+			[createOutdoorDynamicSeedRecord()],
+		);
 		await flushPromises();
 		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
 			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
@@ -469,19 +479,17 @@ describe("browser client runtime", () => {
 		expect(rendererSnapshot.recentDynamicResourceCommits.at(-1)).toMatchObject({
 			addedVisualResources: 1,
 			removedVisualResources: 0,
-			textureUses: 1,
+			textureUses: 0,
 		});
 		const dynamicResource =
 			renderer.dynamicResourceCommits.at(-1)?.addedVisualResources[0];
 		expect(dynamicResource?.parts[0]).toMatchObject({
 			indexType: "uint16",
-			materialFamily: "texture-rgba",
+			materialFamily: "flat-color",
 			materialPass: "opaque",
 			partIndex: 0,
 			sourceAssetId: "gfx-obj/01000020",
-			textureUseIds: [
-				dynamicResource.materialPlan.textureUses[0]?.textureUseId,
-			],
+			textureUseIds: [],
 			triangleCount: 1,
 			vertexCount: 3,
 		});
@@ -959,7 +967,13 @@ describe("browser client runtime", () => {
 				terrain: 0,
 			},
 		});
-		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
+		completeResolverRequest(
+			resolver,
+			"outdoor-buildings",
+			0xda55ffff,
+			{},
+			[createOutdoorDynamicSeedRecord()],
+		);
 		await flushPromises();
 		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
 			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
@@ -1004,7 +1018,13 @@ describe("browser client runtime", () => {
 				terrain: 0,
 			},
 		});
-		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
+		completeResolverRequest(
+			resolver,
+			"outdoor-buildings",
+			0xda55ffff,
+			{},
+			[createOutdoorDynamicSeedRecord()],
+		);
 		await flushPromises();
 		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
 			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
@@ -1046,7 +1066,13 @@ describe("browser client runtime", () => {
 		});
 
 		updateInteriorSceneInterest(runtime);
-		completeResolverRequest(resolver, "env-cell-system", 0xda55ffff);
+		completeResolverRequest(
+			resolver,
+			"env-cell-system",
+			0xda55ffff,
+			{},
+			[createEnvCellDynamicSeedRecord()],
+		);
 		await flushPromises();
 
 		completeBakerWork(baker, "env-cell-system", 0xda55ffff, {
@@ -1916,7 +1942,13 @@ describe("browser client runtime", () => {
 			domains: ["buildings", "terrain"],
 			lod: { buildings: 0, envCells: -1, terrain: 0 },
 		});
-		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
+		completeResolverRequest(
+			resolver,
+			"outdoor-buildings",
+			0xda55ffff,
+			{},
+			[createOutdoorDynamicSeedRecord()],
+		);
 		completeResolverRequest(resolver, "outdoor-terrain", 0xda55ffff);
 		await flushRuntimeWork();
 		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
@@ -1927,11 +1959,7 @@ describe("browser client runtime", () => {
 
 		expect(
 			events.some((event) => event.kind === "scene-interest-settled"),
-		).toBe(false);
-
-		await resolvePendingDynamicAssetsUntil(assetService, () =>
-			events.some((event) => event.kind === "scene-interest-settled"),
-		);
+		).toBe(true);
 
 		expect(events).toContainEqual(
 			expect.objectContaining({
@@ -2685,6 +2713,7 @@ function completeResolverRequest(
 	domain: StaticDomain,
 	landblockId: number,
 	payload: Parameters<DeferredStaticResolver["complete"]>[1] = {},
+	dynamicRecords: readonly StaticAuthoredDynamicSeedRecord[] = [],
 ): void {
 	const request = resolver.pendingRequests.find(
 		(candidate) =>
@@ -2692,6 +2721,43 @@ function completeResolverRequest(
 			candidate.job.scope.kind === "landblock" &&
 			candidate.job.scope.landblockId === landblockId,
 	);
+	const sourceLayer =
+		dynamicRecords.length === 0
+			? null
+			: resolver.pendingSourceRequests.find((sourceRequest) =>
+					sourceRequest.request.requestedLayers.some(
+						(layer) => layer.kind === staticLayerKindForDomain(domain),
+					),
+				);
+	if (sourceLayer) {
+		const recipes = sourceLayer.request.requestedLayers.map((layer) => {
+			const layerPayload =
+				layer.kind === staticLayerKindForDomain(domain) ? payload : {};
+			return createStaticLayerRecipeForSourceRequest(
+				sourceLayer.request,
+				layer,
+				sourceLayer.revision,
+				layerPayload,
+			);
+		});
+		try {
+			resolver.completeSource(
+				sourceLayer.requestId,
+				recipes,
+				dynamicRecords.map((record) =>
+					createStaticAuthoredDynamicRecipeForRecord(record),
+				),
+			);
+			return;
+		} catch (error) {
+			if (
+				!(error instanceof Error) ||
+				!error.message.startsWith("No pending source resolver request exists")
+			) {
+				throw error;
+			}
+		}
+	}
 	resolver.complete(request?.requestId ?? failKey(), payload);
 }
 
@@ -2710,6 +2776,333 @@ function completeBakerWork(
 		),
 	);
 	baker.complete(input?.staticBatchId ?? failKey(), result);
+}
+
+function createStaticLayerRecipeForSourceRequest(
+	request: Parameters<DeferredStaticResolver["completeSource"]>[0] extends string
+		? import("../static/contracts").StaticLandblockSceneLodSourceRequest
+		: never,
+	layer: import("../static/contracts").StaticLandblockSceneLodLayerRequest,
+	revision: number,
+	payload: Partial<Omit<StaticScopePayload, "job" | "scope">> & {
+		readonly scope?: StaticScopePayload["scope"];
+	} = {},
+): import("../static/contracts").StaticLayerRecipe {
+	const job = {
+		domain: staticDomainForLayerKind(layer.kind),
+		scope: {
+			kind: "landblock" as const,
+			landblockId: request.landblockId,
+		},
+	};
+	return {
+		payload: {
+			job,
+			scope: payload.scope ?? {
+				kind: "placeholder",
+				referencedTextureUses: [],
+			},
+			sourceRevision: payload.sourceRevision ?? revision,
+		},
+		targetOwnerKey: layer.targetOwnerKey,
+	};
+}
+
+function staticLayerKindForDomain(
+	domain: StaticDomain,
+): import("../host/contracts").LandblockSceneLodLayerDto["kind"] {
+	switch (domain) {
+		case "outdoor-terrain":
+			return "terrain";
+		case "outdoor-buildings":
+			return "outdoor-buildings";
+		case "outdoor-explicit-objects":
+			return "outdoor-explicit-objects";
+		case "outdoor-generated-scenery":
+			return "outdoor-generated-scenery";
+		case "env-cell-system":
+			return "env-cell-system";
+	}
+}
+
+function staticDomainForLayerKind(
+	kind: import("../host/contracts").LandblockSceneLodLayerDto["kind"],
+): StaticDomain {
+	switch (kind) {
+		case "terrain":
+			return "outdoor-terrain";
+		case "outdoor-buildings":
+			return "outdoor-buildings";
+		case "outdoor-explicit-objects":
+			return "outdoor-explicit-objects";
+		case "outdoor-generated-scenery":
+			return "outdoor-generated-scenery";
+		case "env-cell-system":
+			return "env-cell-system";
+	}
+}
+
+function createStaticAuthoredDynamicRecipeForRecord(
+	record: StaticAuthoredDynamicSeedRecord,
+): StaticAuthoredDynamicRecipe {
+	if (
+		record.kind !== "outdoor-static-object-dynamic-seed" &&
+		record.kind !== "env-cell-static-object-dynamic-seed"
+	) {
+		throw new Error(`Cannot create dynamic recipe for ${record.kind}.`);
+	}
+	const entityId = createStaticAuthoredDynamicEntityId(record);
+	const sourceResidence =
+		record.kind === "env-cell-static-object-dynamic-seed"
+			? {
+					envCellId: record.seed.envCellId,
+					kind: "env-cell" as const,
+					landblockId: record.seed.landblockId,
+				}
+			: {
+					kind: "outdoor-landblock" as const,
+					landblockId: record.seed.landblockId,
+				};
+	return {
+		recipe: {
+			animationSelection: { kind: "setup-default" },
+			baseTransform: {
+				baseLocalPlacement: record.seed.localPlacement,
+				sourceScale: record.seed.sourceScale,
+			},
+			entityId,
+			source: {
+				kind: "static-authored",
+				owner: record.owner,
+				placementId: createStaticAuthoredDynamicPlacementId(record),
+				sourceResidence,
+			},
+			visual: {
+				animation: createDynamicRecipeAnimation(record.seed.defaultAnimationId),
+				materialPolicy: {
+					detailRolePolicy: {
+						domain:
+							record.owner.domain === "env-cell-system"
+								? "env-cell-system"
+								: record.seed.domain,
+						kind: "static-domain",
+					},
+					materialPlanningDomain:
+						record.owner.domain === "env-cell-system"
+							? "env-cell-system"
+							: record.seed.domain,
+					visualObject: {
+						entityId,
+						kind: "dynamic-visual-object",
+						resourceId: createDynamicVisualResourceId(entityId),
+					},
+				},
+				materialSources: [],
+				missingRefs: [],
+				paletteSources: [],
+				setupModel: createDynamicRecipeSetupModel(record.seed.setupModelId),
+				sourceAssets: [],
+				textureRefs: [],
+			},
+		},
+		targetOwnerKey: record.owner.key,
+	};
+}
+
+function createStaticAuthoredDynamicEntityId(
+	record: Extract<
+		StaticAuthoredDynamicSeedRecord,
+		{
+			readonly kind:
+				| "env-cell-static-object-dynamic-seed"
+				| "outdoor-static-object-dynamic-seed";
+		}
+	>,
+): string {
+	return [
+		record.kind === "env-cell-static-object-dynamic-seed"
+			? "static-authored-env-cell"
+			: "static-authored-outdoor",
+		record.owner.ownerId,
+		createStaticAuthoredDynamicPlacementId(record),
+	].join(":");
+}
+
+function createStaticAuthoredDynamicPlacementId(
+	record: Extract<
+		StaticAuthoredDynamicSeedRecord,
+		{
+			readonly kind:
+				| "env-cell-static-object-dynamic-seed"
+				| "outdoor-static-object-dynamic-seed";
+		}
+	>,
+): string {
+	if (record.kind === "env-cell-static-object-dynamic-seed") {
+		return [
+			`env-cell:${formatHex32(record.seed.envCellId)}`,
+			`object:${record.seed.object.objectKind}:${record.seed.object.instanceId}`,
+			`setup:${formatHex32(record.seed.setupModelId)}`,
+		].join(":");
+	}
+	return [
+		`object:${record.seed.object.objectKind}:${record.seed.object.instanceId}`,
+		`setup:${formatHex32(record.seed.setupModelId)}`,
+	].join(":");
+}
+
+function createDynamicRecipeSetupModel(setupModelId: number) {
+	return {
+		bounds: null,
+		debug: {
+			sourceAssetId: `setup-model/${formatHex32(setupModelId)}`,
+		},
+		defaultAnimation: 0x0300061b,
+		identity: {
+			kind: "static-object-source" as const,
+			sourceAssetKind: "setup-model" as const,
+			sourceDid: setupModelId,
+		},
+		invalidPolygonCount: 0,
+		materialSlotCount: 0,
+		partCount: 0,
+		parts: [],
+		physicsPolygonCount: 0,
+		renderTriangleCount: 0,
+		skippedPolygonCount: 0,
+	};
+}
+
+function createDynamicRecipeAnimation(animationId: number) {
+	return {
+		assetId: `animation/${formatHex32(animationId)}`,
+		payload: {
+			animationAssetId: `animation/${formatHex32(animationId)}`,
+			animationId,
+			dependencies: {},
+			flags: null,
+			frameCount: 1,
+			kind: "animation" as const,
+			objectPositionFrames: [],
+			partCount: 1,
+			partFrames: [
+				{
+					frameIndex: 0,
+					hooks: [
+						{
+							direction: 0,
+							directionName: "Both" as const,
+							hookName: "SetOmega",
+							hookType: TEST_SET_OMEGA_HOOK_TYPE,
+							payload: {
+								omega: { x: 0, y: 0, z: TEST_SET_OMEGA_Z },
+							},
+							payloadKind: "set-omega" as const,
+							rawPayloadBytes: TEST_SET_OMEGA_RAW_PAYLOAD_BYTES,
+						},
+					],
+					localPlacements: [createPlacement()],
+				},
+			],
+			provenance: createProvenance("animation"),
+			residencyKind: "unknown" as const,
+			sourceAssetKind: "animation" as const,
+		},
+		setupModelKey: {
+			id: 0x020003e5,
+			kind: "setup-model" as const,
+		},
+	};
+}
+
+function createBakedDynamicVisualResourceForRecipe(
+	recipe: DynamicEntityRecipe,
+): BakedDynamicVisualResource {
+	return {
+		entityId: recipe.entityId,
+		materialSlots: [],
+		materialSources: [],
+		paletteSources: [],
+		renderParts: [
+			{
+				bounds: createBounds(),
+				indexType: "uint16",
+				indices: new Uint16Array([0, 1, 2]),
+				materialEntries: [],
+				materialFamily: "flat-color",
+				materialPass: "opaque",
+				materialSlotIndices: new Uint16Array([0, 0, 0]),
+				partIndex: 0,
+				positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+				renderState: {
+					alphaTest: false,
+					twoSided: false,
+				},
+				sourceAssetId: "gfx-obj/01000020",
+				texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
+				textureUseIds: [],
+				triangleCount: 1,
+				vertexCount: 3,
+			},
+		],
+		resourceId: createDynamicVisualResourceId(recipe.entityId),
+		sourceAssets: [createBakedDynamicVisualSourceAsset()],
+		textureRefs: [],
+		textureRequirements: [],
+	};
+}
+
+function createBakedDynamicVisualSourceAsset() {
+	const setupSource = {
+		kind: "static-object-source" as const,
+		sourceAssetKind: "setup-model" as const,
+		sourceDid: 0x020003e5,
+	};
+	const gfxSource = {
+		kind: "static-object-source" as const,
+		sourceAssetKind: "gfx-obj" as const,
+		sourceDid: 0x01000020,
+	};
+	return {
+		bounds: createBounds(),
+		debug: { sourceAssetId: "setup-model/020003e5" },
+		defaultAnimation: 0x0300061b,
+		identity: setupSource,
+		invalidPolygonCount: 0,
+		materialSlotCount: 0,
+		partCount: 1,
+		parts: [
+			{
+				bounds: createBounds(),
+				defaultPlacements: [createPlacement()],
+				geometry: {
+					gfxObj: gfxSource,
+					kind: "static-object-source-geometry" as const,
+					partIndex: 0,
+					source: setupSource,
+				},
+				gfxObj: gfxSource,
+				invalidPolygonCount: 0,
+				materialSlotCount: 0,
+				materialSlots: [],
+				partIndex: 0,
+				physicsPolygonCount: 0,
+				renderTriangleCount: 1,
+				scale: { x: 1, y: 1, z: 1 },
+				skippedPolygonCount: 0,
+				source: setupSource,
+				triangles: [],
+			},
+		],
+		physicsPolygonCount: 0,
+		renderTriangleCount: 1,
+		skippedPolygonCount: 0,
+		sourceAssetKind: "setup-model" as const,
+	};
+}
+
+function formatHex32(value: number): string {
+	return (value >>> 0).toString(16).padStart(8, "0");
 }
 
 function createPortalInteriorRecord(options: {
@@ -3584,6 +3977,20 @@ class RecordingDynamicVisualBaker implements DynamicVisualBaker {
 	}
 }
 
+class StaticAuthoredTestDynamicVisualBaker implements DynamicVisualBaker {
+	bake(input: DynamicVisualBakeInput): Promise<DynamicVisualBakeResult> {
+		return Promise.resolve({
+			batchId: input.batchId,
+			failures: [],
+			products: input.recipes.map((recipe) => ({
+				kind: "baked" as const,
+				resource: createBakedDynamicVisualResourceForRecipe(recipe),
+			})),
+			revision: input.revision,
+		});
+	}
+}
+
 function createResolvingAssetService(): HostBackedAssetService {
 	return new HostBackedAssetService({
 		host: new ResolvingAssetRuntimeHost(),
@@ -4294,6 +4701,8 @@ function createImmediateStaticCoordinator(options: {
 			maxPayloadsPerBatch: 8,
 			maxWaitMs: 0,
 		},
+		dynamicVisualBaker: new StaticAuthoredTestDynamicVisualBaker(),
+		dynamicVisualGeometryAssetReader: createResolvingAssetService(),
 		resolver: options.resolver,
 	});
 }

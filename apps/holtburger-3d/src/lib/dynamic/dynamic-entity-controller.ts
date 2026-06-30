@@ -141,7 +141,6 @@ export class DynamicEntityController {
 				textureBatchIdsByStaticLayerOwner,
 			);
 			this.#store.upsert(entityRecord);
-			this.#trackRecordResources(entityRecord);
 		}
 	}
 
@@ -274,8 +273,12 @@ export class DynamicEntityController {
 	}
 
 	applyResolvedDynamicRecipe(recipe: DynamicEntityRecipe): boolean {
+		const current = this.#store.get(recipe.entityId);
+		if (current === null || !canApplyRecipeToRecord(current, recipe)) {
+			return false;
+		}
 		const updated = this.#store.update(recipe.entityId, (record) => {
-			if (record.source.kind !== "runtime-spawn") {
+			if (!canApplyRecipeToRecord(record, recipe)) {
 				return record;
 			}
 			const resources = createResourcesWithResolvedRecipe(
@@ -295,7 +298,7 @@ export class DynamicEntityController {
 				resources,
 			};
 		});
-		if (updated === null || updated.source.kind !== "runtime-spawn") {
+		if (updated === null) {
 			return false;
 		}
 		this.#upsertPlacementUpdate(updated);
@@ -304,10 +307,10 @@ export class DynamicEntityController {
 	}
 
 	applyBakedDynamicVisual(resource: BakedDynamicVisualResource): boolean {
+		if (this.#store.get(resource.entityId) === null) {
+			return false;
+		}
 		const updated = this.#store.update(resource.entityId, (record) => {
-			if (record.source.kind !== "runtime-spawn") {
-				return record;
-			}
 			const resources = createResourcesWithBakedVisual(
 				record.resources,
 				resource,
@@ -321,7 +324,7 @@ export class DynamicEntityController {
 				resources,
 			};
 		});
-		if (updated === null || updated.source.kind !== "runtime-spawn") {
+		if (updated === null) {
 			return false;
 		}
 		this.#upsertPlacementUpdate(updated);
@@ -333,10 +336,10 @@ export class DynamicEntityController {
 		entityId: DynamicEntityId,
 		reason: DynamicVisualSkipReason,
 	): boolean {
+		if (this.#store.get(entityId) === null) {
+			return false;
+		}
 		const updated = this.#store.update(entityId, (record) => {
-			if (record.source.kind !== "runtime-spawn") {
-				return record;
-			}
 			const resources = createResourcesWithSkippedVisual(
 				record.resources,
 				reason,
@@ -350,7 +353,7 @@ export class DynamicEntityController {
 				resources,
 			};
 		});
-		if (updated === null || updated.source.kind !== "runtime-spawn") {
+		if (updated === null) {
 			return false;
 		}
 		this.#upsertPlacementUpdate(updated);
@@ -446,13 +449,6 @@ export class DynamicEntityController {
 		this.#lastAnimationUpdateAtSecondsByEntityId.delete(record.id);
 		this.#placementTracker.release(record.id);
 		this.#resourceManager?.releaseEntity(record.id);
-	}
-
-	#trackRecordResources(record: DynamicEntityRecord): void {
-		this.#resourceManager?.trackProjectedVisualResources(
-			record.id,
-			record.presentation,
-		);
 	}
 
 	#upsertPlacementUpdate(record: DynamicEntityRecord): void {
@@ -612,6 +608,23 @@ function createRuntimeDynamicEntityRecord(
 		source,
 		sourceResidence: request.sourceResidence,
 	};
+}
+
+function canApplyRecipeToRecord(
+	record: DynamicEntityRecord,
+	recipe: DynamicEntityRecipe,
+): boolean {
+	if (record.source.kind === "runtime-spawn") {
+		return (
+			recipe.source.kind === "runtime-authored" &&
+			recipe.source.runtimeEntityId === record.id
+		);
+	}
+	return (
+		recipe.source.kind === "static-authored" &&
+		record.provenance.kind !== "runtime-spawn" &&
+		recipe.source.owner.ownerId === record.provenance.layerOwnerId
+	);
 }
 
 function createInitialAnimationState(options: {

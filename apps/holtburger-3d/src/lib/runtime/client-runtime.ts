@@ -2039,7 +2039,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#warnAboutStaticFallbacks(delta);
 		this.#staticSceneQuery.removeStaticResources(materialized.removedResources);
 		this.#staticSceneQuery.applyStaticPeerRecords({
-			authoredDynamicSeeds: materialized.staticAuthoredDynamicSeeds,
+			authoredDynamicSeeds: delta.staticAuthoredDynamicSeeds,
 			portalGraphs: materialized.staticPortalGraphs,
 			portalInteriorRecords: materialized.staticPortalInteriorRecords,
 			sourceMappings: materialized.staticSourceMappings,
@@ -2048,12 +2048,13 @@ class ClientRuntimeImpl implements ClientRuntime {
 		});
 		this.#recordDynamicSeedTextureBatchIds(
 			delta.staticBatchId,
-			materialized.staticAuthoredDynamicSeeds,
+			delta.staticAuthoredDynamicSeeds,
 		);
 		this.#dynamicEntityController.ingestStaticSeeds(
-			materialized.staticAuthoredDynamicSeeds,
+			delta.staticAuthoredDynamicSeeds,
 			this.#textureBatchIdByStaticLayerOwner,
 		);
+		this.#applyStaticAuthoredDynamicVisualPrep(commitEnvelope);
 		this.#enqueueDynamicRendererResourceSync();
 		this.#updateRenderPassPlan();
 		this.#refreshSceneDebugOverlay();
@@ -2195,6 +2196,31 @@ class ClientRuntimeImpl implements ClientRuntime {
 				),
 				staticBatchId,
 			);
+		}
+	}
+
+	#applyStaticAuthoredDynamicVisualPrep(
+		commitEnvelope: StaticScopePrepCommit,
+	): void {
+		for (const recipe of commitEnvelope.dynamicRecipes) {
+			this.#dynamicEntityController.applyResolvedDynamicRecipe(recipe);
+		}
+		const result = commitEnvelope.dynamicVisualBake;
+		if (!result) {
+			return;
+		}
+		for (const product of result.products) {
+			if (product.kind === "baked") {
+				this.#dynamicEntityController.applyBakedDynamicVisual(product.resource);
+				continue;
+			}
+			this.#dynamicEntityController.skipDynamicVisual(
+				product.entityId,
+				product.reason,
+			);
+		}
+		for (const failure of result.failures) {
+			console.warn("[holtburger-3d][dynamic-static-authored-bake]", failure);
 		}
 	}
 

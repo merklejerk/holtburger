@@ -539,6 +539,9 @@ export class StaticCoordinator {
 		}
 		const bakeMs = nowMs() - bakeStartedAt;
 		let dynamicVisualBake: DynamicVisualBakeResult | null;
+		let dynamicRecipes: readonly DynamicEntityRecipe[] = pendingItems.flatMap(
+			(item) => item.dynamicRecipes,
+		);
 		try {
 			dynamicVisualBake = await this.#bakeDynamicVisualsForPendingItems({
 				pendingItems,
@@ -560,6 +563,10 @@ export class StaticCoordinator {
 		);
 		if (currentTasks.length !== result.tasks.length) {
 			result = filterStaticBakeResultForCurrentTasks(result, currentTasks);
+			dynamicRecipes = filterDynamicRecipesForCurrentTasks(
+				pendingItems,
+				currentTasks,
+			);
 			dynamicVisualBake = filterDynamicVisualBakeResultForCurrentTasks(
 				dynamicVisualBake,
 				pendingItems,
@@ -575,6 +582,7 @@ export class StaticCoordinator {
 			this.#commit(result, {
 				attachmentMs,
 				bakeMs,
+				dynamicRecipes,
 				dynamicVisualBake,
 				resolverMs: sumNullableNumbers(
 					currentTasks.map((task) =>
@@ -627,6 +635,7 @@ export class StaticCoordinator {
 			readonly resolverMs: number | null;
 			readonly attachmentMs: number | null;
 			readonly bakeMs: number | null;
+			readonly dynamicRecipes: readonly DynamicEntityRecipe[];
 			readonly dynamicVisualBake: DynamicVisualBakeResult | null;
 		},
 	): void {
@@ -676,6 +685,7 @@ export class StaticCoordinator {
 			staticBatchId: result.staticBatchId,
 		});
 		this.#emitCommit({
+			dynamicRecipes: timing.dynamicRecipes,
 			dynamicVisualBake: timing.dynamicVisualBake,
 			staticCommit: {
 				addedDrawUnits: result.drawUnits,
@@ -728,6 +738,7 @@ export class StaticCoordinator {
 	}): void {
 		const staticBatchId = createEvictionStaticBatchId(this.#revision);
 		this.#emitCommit({
+			dynamicRecipes: [],
 			dynamicVisualBake: null,
 			staticCommit: {
 				addedDrawUnits: [],
@@ -1175,6 +1186,16 @@ function filterDynamicVisualBakeResultForCurrentTasks(
 			currentEntityIds.has(getDynamicVisualBakeProductEntityId(product)),
 		),
 	};
+}
+
+function filterDynamicRecipesForCurrentTasks(
+	pendingItems: readonly PendingStaticBakeBatchItem[],
+	currentTasks: readonly StaticBakeTask[],
+): readonly DynamicEntityRecipe[] {
+	const currentTaskIds = new Set(currentTasks.map((task) => task.taskId));
+	return pendingItems
+		.filter((item) => currentTaskIds.has(item.taskId))
+		.flatMap((item) => item.dynamicRecipes);
 }
 
 function getDynamicVisualBakeProductEntityId(

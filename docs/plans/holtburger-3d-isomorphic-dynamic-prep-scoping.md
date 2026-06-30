@@ -1589,7 +1589,31 @@ Acceptance criteria:
 
 Decisions and course corrections:
 
-- Pending.
+- Completed during Phase 8.
+- `StaticScopePrepCommit` now carries the resolved dynamic recipes as well as the dynamic visual bake
+  result. Runtime applies both inside the static materialization closure, so static-authored records
+  receive setup-animation readiness and baked visual readiness without a dynamic bake registry.
+- `DynamicEntityController` now applies resolved recipes and baked/skipped visual products to
+  static-authored records as well as runtime-authored records. Static-authored seed ingestion no
+  longer calls the legacy `DynamicEntityResourceManager` path.
+- `static-materializer.ts` no longer forwards `staticAuthoredDynamicSeeds` as a materialization
+  result. Runtime still reads the temporary activation records from the static commit until Phase 9
+  removes the seed carrier.
+- Env-cell layer publication now consumes env-cell static placement records from the static commit
+  rather than from static materialization output.
+- Runtime tests were rewritten so static-authored dynamic readiness comes from source-side recipes
+  and sibling dynamic bake results. The remaining `dynamic-entity-resource-manager.test.ts` file was
+  deleted because it only asserted the retired main-thread prep path.
+
+Debt carried forward:
+
+- `DynamicEntityResourceManager` remains in the production type surface but is no longer used for
+  static-authored or runtime-authored visual prep. Phase 9 should delete it and any constructor
+  plumbing that only exists for that legacy path.
+- `staticAuthoredDynamicSeeds` and `authoredDynamicSeeds` remain as temporary activation/placement
+  carriers. Phase 9 should replace them with placement terminology and delete the seed aliases.
+- Dynamic runtime diagnostics still expose `staticSeedCount`; Phase 9/10 should rename that public
+  inspection field once seed terminology is removed from activation.
 
 ### Resteer 2: Static Cutover Review
 

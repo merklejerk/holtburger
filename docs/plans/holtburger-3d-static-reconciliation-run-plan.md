@@ -528,7 +528,7 @@ Verification:
 
 ### Phase 4B: Replace Coordinator Pending Batches With Task Groups
 
-Status: pending.
+Status: completed 2026-06-30.
 
 Purpose:
 
@@ -549,15 +549,33 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Replace `createPendingBatchKey(work)` with explicit pending batch identity.
-- [ ] Store task ids/owner ids on pending batch items.
-- [ ] Replace `#resolverMsByTaskId` with timing carried by task/batch records or delete it if no
+- [x] Replace `createPendingBatchKey(work)` with explicit pending batch identity.
+- [x] Store task ids/owner ids on pending batch items.
+- [x] Replace `#resolverMsByTaskId` with timing carried by task/batch records or delete it if no
       longer valuable.
-- [ ] Update coordinator tests for canceled pending batches and same-owner task adoption.
+- [x] Verify coordinator tests cover canceled pending batches and same-owner task adoption.
 
 Decisions and course corrections:
 
-- Record whether resolver timing remains useful after task/batch identity is explicit.
+- 2026-06-30: Pending coordinator bake batches now have explicit `pending-static-batch:*` ids.
+  The map key is no longer the revision/domain group key.
+- 2026-06-30: Pending bake items now carry `taskId`, `ownerId`, `ownerKey`, bake `task`, payload,
+  and resolver timing. Worker-facing `StaticBakeBatchItem` values are derived from those pending
+  records at flush time.
+- 2026-06-30: Deleted `#resolverMsByTaskId`. Resolver timing remains useful for performance
+  diagnostics, but it now lives on the exact pending task record that will be flushed, not in a
+  separate static-work lookup table.
+- 2026-06-30: Existing coordinator tests already covered canceled pending batches and same-owner
+  task adoption after the contract cutover. No legacy-accounting assertions were kept just for this
+  phase.
+
+Verification:
+
+- `npm run test:ts -- --run src/lib/static/coordinator/static-coordinator.test.ts`
+- `npm run test:ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run lint:dead`
 
 ### Phase 4C: Delete Bake Stale Filtering And Demand-Key Result Reconstruction
 

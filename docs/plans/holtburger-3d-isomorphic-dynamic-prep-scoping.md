@@ -1245,8 +1245,8 @@ Deliverables:
   - `apps/holtburger-3d/src/lib/dynamic/visual-bake-worker-client.ts`;
   - `apps/holtburger-3d/src/lib/dynamic/visual-bake-worker-handler.ts`;
   - `apps/holtburger-3d/src/lib/dynamic/visual-bake.worker.ts`.
-- Instantiate a separate dynamic visual bake worker pool from the browser runtime, initially with
-  one worker.
+- Add a browser-runtime factory for a separate dynamic visual bake worker pool. Actual runtime
+  instantiation happens in Phase 5 when runtime-authored cutover has a consumer.
 - Add protocol types for dynamic visual bake requests/responses.
 - Add worker/fake-worker tests mirroring the current static worker test style where useful.
 
@@ -1271,7 +1271,32 @@ Acceptance criteria:
 
 Decisions and course corrections:
 
-- Pending.
+- Completed during Phase 4.
+
+Implemented worker transport:
+
+- Added dedicated dynamic visual bake worker protocol, client, handler, and worker entrypoint:
+  `visual-bake-protocol.ts`, `visual-bake-worker-client.ts`,
+  `visual-bake-worker-handler.ts`, and `visual-bake.worker.ts`.
+- Added `WorkerPoolDynamicVisualBaker` so dynamic visual bake jobs can use a separate worker pool
+  from static layer baking.
+- Added `createWorkerDynamicVisualBaker(...)` in browser runtime wiring. The factory creates
+  dedicated `visual-bake.worker.ts` instances and terminates them through the dynamic worker client.
+- Added protocol/fake-worker tests for request/response, handler failure responses, pool
+  round-robin behavior, and browser factory worker disposal.
+
+Course correction:
+
+- The original Phase 4 wording said to instantiate the separate dynamic visual bake worker pool from
+  browser runtime. That would create unused workers until Phase 5 wires runtime-authored dynamic
+  cutover. Phase 4 now adds the factory and proves it constructs a separate physical worker path;
+  Phase 5 will instantiate it when the runtime closure consumes it.
+
+Verification:
+
+- `npm run test:ts -- src/lib/dynamic/visual-bake-worker-client.test.ts src/lib/browser/create-browser-runtime.test.ts`
+- `npm run check`
+- `npm run lint:ts`
 
 ### Phase 5: Cut Over Runtime-Authored Dynamics First
 

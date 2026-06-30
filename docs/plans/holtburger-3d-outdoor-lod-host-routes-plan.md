@@ -2106,18 +2106,20 @@ Decisions and course corrections:
 
 Status: pending.
 
-Goal: remove the remaining route-shaped env-cell vocabulary from the static domain/layer surface now that the LoD route cutover is complete.
+Goal: remove the remaining route-shaped env-cell vocabulary from the static domain, scope, resolver, baker, and layer surface now that the LoD route cutover is complete.
 
 Deliverables:
 
-- Rename the `landblock-env-cells` static domain/layer vocabulary to a name that describes the current layer role rather than the deleted route shape. Candidate names are `env-cell-system` or `landblock-env-cell-system`; choose one before implementation starts and document the decision here.
+- Rename the `landblock-env-cells` static domain, static scope kind, payload scope kind, work id segment, diagnostic label, and layer vocabulary to `env-cell-system`.
+- Rename `LandblockEnvCellsResolver`, `LandblockEnvCellsBaker`, `bakeLandblockEnvCells`, and env-cell filenames whose names still imply the deleted landblock env-cells route.
 - Rename `LandblockEnvCellGeometryAttachmentProvider` to match its current role as an env-cell system layer attachment provider.
-- Update renderer, bake, material, static-scene-query, dynamic ownership, diagnostics, tests, and browser UI references that consume the env-cell domain/layer name.
+- Update renderer, bake, material, static-scene-query, dynamic ownership, diagnostics, fake workers, tests, and browser UI references that consume the env-cell domain/scope/layer name.
 - Run zero-reference audits for the old domain/layer name and old provider type after the rename.
 
 Acceptance criteria:
 
 - No executable `landblock-env-cells` domain/layer string remains outside historical plan prose, source provenance, or deliberately retained compatibility-free source vocabulary documented here.
+- No executable `landblock-env-cells` static scope kind, payload scope kind, work id segment, diagnostic label, resolver/baker filename, resolver/baker class/function name, or test fixture string remains.
 - No executable `LandblockEnvCellGeometryAttachmentProvider` type/import/reference remains.
 - The renamed env-cell system layer still maps to LoD `4`, remains self-contained from materialized building layers, and keeps layer-owner lifecycle behavior.
 - No alias accepts or translates the old env-cell domain/layer name after the cutover.
@@ -2125,8 +2127,9 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Choose and record the final env-cell system domain/layer name.
-- [ ] Rename the TypeScript static domain/layer string and all renderer/bake/material/query/dynamic/diagnostic consumers.
+- [ ] Record `env-cell-system` as the final env-cell static domain/scope/layer name.
+- [ ] Rename the TypeScript static domain/scope/layer string and all renderer/bake/material/query/dynamic/diagnostic consumers.
+- [ ] Rename env-cell resolver, baker, source-payload, fake-worker, and test fixture names that still say `landblock-env-cells`.
 - [ ] Rename `LandblockEnvCellGeometryAttachmentProvider` and associated files/tests if the filename becomes misleading.
 - [ ] Update tests, fixtures, and debug/UI labels to the new env-cell system vocabulary.
 - [ ] Run targeted and broad TypeScript validation.
@@ -2138,6 +2141,7 @@ Decisions and course corrections:
 
 - Added after Phase 12 closeout at user request. Phase 12 proved the old route was deleted; this phase tackles the remaining naming debt that was classified as legitimate-but-spicy domain/layer vocabulary during the cutover.
 - The rename should not reintroduce compatibility aliases. This should be a clean domain/layer rename with tests updated to the new vocabulary.
+- Dry run on 2026-06-30 found this phase is broader than the original domain/layer wording: `landblock-env-cells` appears in static contracts, source payload scope kinds, renderer types, runtime scene-query records, fake workers, material planning, texture policy, diagnostics, browser UI, resolver/baker filenames, class/function names, and tests. The cleanest final name is `env-cell-system` because `LayerOwnerKind` and renderer layer payloads already use it.
 
 ### Phase 14: Route-Shaped Source Vocabulary Cleanup
 
@@ -2147,8 +2151,8 @@ Goal: remove route-shaped outdoor naming from content source/provenance IDs and 
 
 Deliverables:
 
-- Rename `landblock-outdoor-terrain-local` to a route-neutral terrain coordinate-space label. Candidate names are `landblock-terrain-local`, `outdoor-terrain-local`, or `landblock-scene-terrain-local`; choose one before implementation starts and document the decision here.
-- Rename content-generated source/provenance IDs shaped like `landblock/{id}/outdoor/...` to route-neutral source IDs that do not look like deleted host routes.
+- Rename `landblock-outdoor-terrain-local` to `landblock-terrain-local`.
+- Rename content-generated source/provenance IDs shaped like `landblock/{id}/outdoor/...` to route-neutral source IDs that do not look like deleted host routes. Candidate pattern: `landblock-scene/{id}/terrain/...` and `landblock-scene/{id}/static/...`.
 - Update Tauri serializers, frontend contracts, tests, and source-identity expectations that consume those labels.
 - Run zero-reference audits for executable `landblock-outdoor-terrain-local` and route-shaped `landblock/{...}/outdoor/...` source IDs after the rename.
 
@@ -2162,7 +2166,7 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Choose and record the final terrain coordinate-space label.
+- [ ] Record `landblock-terrain-local` as the final terrain coordinate-space label.
 - [ ] Choose and record the final route-neutral content source/provenance ID pattern.
 - [ ] Rename content source/provenance ID construction in `holtburger-content`.
 - [ ] Update Tauri JSON serialization and frontend host contracts/tests.
@@ -2174,6 +2178,7 @@ Task checklist:
 Decisions and course corrections:
 
 - Added after Phase 12 closeout at user request. Phase 12 classified these strings as non-route source vocabulary; this phase exists because non-route but route-shaped vocabulary still makes future audits and code review noisier than necessary.
+- Dry run on 2026-06-30 found this phase is fairly contained: source/provenance ID construction lives in `crates/holtburger-content/src/landblock_scene_assets.rs`, the coordinate-space label is serialized in the Tauri JSON adapter and validated by frontend host contracts/tests. Expect Rust content tests, Tauri JSON tests, and focused frontend preparation/resolver tests to move together.
 
 ### Phase 15: Scheduler Terminology Cleanup
 
@@ -2183,8 +2188,9 @@ Goal: make transient static scheduling identifiers read like scheduler state ins
 
 Deliverables:
 
-- Review `desiredKey`, `activeWork`, and `workId` usage in static demand planning, `StaticCoordinator`, runtime diagnostics, tests, and fake workers.
-- Rename fields and helpers where they imply ownership or retained lifecycle rather than transient demand/in-flight work. Candidate replacements include `demandKey`, `inFlightWork`, `staticWorkId`, or `staticWorkTicketId`; choose names before implementation starts and document the decision here.
+- Review `desiredKey`, `activeWork`, and `workId` usage in static demand planning, `StaticCoordinator`, runtime diagnostics, tests, fake workers, bake workers, and resource-id construction.
+- Rename fields and helpers where they imply ownership or retained lifecycle rather than transient demand/in-flight work. Preferred replacements are `demandKey`, `inFlightStaticWork`, and `staticWorkId`.
+- Split scheduler correlation ids from renderer/resource ids if the dry run finds a field currently does both jobs.
 - Keep genuinely useful diagnostic identifiers, but make the names explicit about scheduling/correlation semantics.
 - Run zero-reference audits for the old confusing names where the phase decides they should be removed.
 
@@ -2192,15 +2198,17 @@ Acceptance criteria:
 
 - Static resource ownership remains represented by layer owner records, not scheduler fields.
 - Scheduler snapshots and diagnostics use names that do not imply retained scene ownership.
-- Any surviving `workId` or `activeWork` names are explicitly justified as public diagnostic vocabulary in this phase.
+- Any surviving `workId` or `activeWork` names are explicitly justified as external/public diagnostic vocabulary in this phase.
+- Resource ids that currently embed scheduler work ids are either renamed to embed `staticWorkId` explicitly or refactored to use layer-owner/resource-specific prefixes.
 - Renamed scheduler fields do not keep old-name getters, aliases, or snapshot compatibility fields.
 - TypeScript checks/tests pass for touched areas.
 
 Task checklist:
 
-- [ ] Classify each `desiredKey`, `activeWork`, and `workId` surface as internal scheduler state, public diagnostics, test helper, or removable confusion.
-- [ ] Choose replacement names for renamed scheduler fields/helpers.
+- [ ] Classify each `desiredKey`, `activeWork`, and `workId` surface as internal scheduler state, resource-id input, public diagnostics, test helper, or removable confusion.
+- [ ] Record `demandKey`, `inFlightStaticWork`, and `staticWorkId` as the default replacement names unless implementation evidence proves a narrower name is clearer.
 - [ ] Rename coordinator, demand planner, diagnostics, fake-worker, runtime, and test usages.
+- [ ] Refactor resource-id construction that currently treats scheduler work ids as durable owner ids.
 - [ ] Run targeted static coordinator/runtime tests plus broad TypeScript validation.
 - [ ] Run zero-reference audits for names this phase removes.
 - [ ] Audit for and delete any old-name alias, fallback, compatibility wrapper, or test shim introduced during the rename.
@@ -2209,6 +2217,7 @@ Task checklist:
 Decisions and course corrections:
 
 - Phase 12 proved these fields are not lifecycle owners. This phase exists because even correctly classified scheduler names can keep causing review friction if they still sound like parallel ownership.
+- Dry run on 2026-06-30 found `workId` has the highest blast radius because it is used both for scheduler correlation and as a baked resource id prefix. Do not solve this with a cosmetic field rename that leaves resource ownership semantics muddy.
 
 ### Phase 16: Static Object Bake Naming Cleanup
 
@@ -2219,8 +2228,8 @@ Goal: remove or justify `compatibility` naming in static object bake modules so 
 Deliverables:
 
 - Audit `StaticObjectCompatibilityBaker`, `partitionStaticObjectCompatibility`, `StaticObjectCompatibilityPayload`, `static-object-compatibility-baker`, and `static-object-compatibility-partitioner`.
-- Decide whether `compatibility` accurately means material/geometry batching compatibility or whether it should be renamed to more specific bake terminology.
-- If renamed, update class/function/type/file/test names without keeping compatibility aliases.
+- Decide whether `compatibility` accurately means material/geometry batching compatibility or whether it should be renamed to more specific bake terminology. Preferred replacement shape is `StaticObjectBatchBaker`, `partitionStaticObjectBatches`, and `StaticObjectBatchPayload` unless the audit proves a more precise material-compatibility name is clearer.
+- If renamed, update class/function/type/file/test names without keeping compatibility aliases or wrapper exports.
 - Run zero-reference audits for old compatibility names that this phase removes.
 
 Acceptance criteria:
@@ -2243,6 +2252,7 @@ Task checklist:
 Decisions and course corrections:
 
 - Added because the final audit used `compatibility` as a red-flag term for legacy paths, while current static object bake code also uses it for batching compatibility. That ambiguity is not broken behavior, but it is reviewer-hostile.
+- Dry run on 2026-06-30 found the compatibility naming is concentrated in the static object bake pipeline plus imports from the static bake worker and LoD source resolver tests. It is likely a clean TypeScript-only rename if Phase 13 has already renamed the env-cell domain/scope strings.
 
 ### Phase 17: Follow-Up Cleanup Verification
 
@@ -2273,7 +2283,8 @@ Task checklist:
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Dry run on 2026-06-30 found the phase order is sound with one important constraint: keep Phase 16 after Phase 13 so static object bake files are not renamed while still carrying old `landblock-env-cells` domain/scope vocabulary. Phase 14 is mostly independent and Rust/Tauri-heavy; Phase 15 is TypeScript-heavy and should happen after Phase 13 so env-cell work ids are not renamed twice.
+- Final shim audits should include searches for `compat`, `legacy`, `fallback`, `alias`, old fixture strings, and old-name acceptance tests, not only the specific removed identifiers.
 
 ## Source Assembly Requirements
 

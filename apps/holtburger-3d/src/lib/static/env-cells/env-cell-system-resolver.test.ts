@@ -950,8 +950,8 @@ function createRenderGeometry(
 		return {
 			bounds: createBounds(),
 			invalidPolygons: [],
-			normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
-			positions: [1, 2, 3, 4, 5, 6, 7, 8, 9],
+			normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+			positions: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8, 9]),
 			skippedPolygonCount: 0,
 			sourceId,
 			surfaceIds: [10],
@@ -964,7 +964,7 @@ function createRenderGeometry(
 					surfaceId: 10,
 				},
 			],
-			uvs: [0, 0, 1, 0, 0, 1],
+			uvs: new Float32Array([0, 0, 1, 0, 0, 1]),
 			vertexCount: 3,
 		};
 	}
@@ -972,14 +972,14 @@ function createRenderGeometry(
 	return {
 		bounds: null,
 		invalidPolygons: [],
-		normals: [],
-		positions: [],
+		normals: new Float32Array(),
+		positions: new Float32Array(),
 		skippedPolygonCount: 0,
 		sourceId,
 		surfaceIds: [],
 		triangleCount: 0,
 		triangles: [],
-		uvs: [],
+		uvs: new Float32Array(),
 		vertexCount: 0,
 	};
 }
@@ -1005,8 +1005,8 @@ function createGfxObjPayload(options: {
 		renderGeometry: {
 			bounds: createBounds(),
 			invalidPolygons: [],
-			normals: [],
-			positions: [],
+			normals: new Float32Array(),
+			positions: new Float32Array(),
 			skippedPolygonCount: 0,
 			sourceId: options.gfxObjId,
 			surfaceIds: [options.materialId],
@@ -1019,7 +1019,7 @@ function createGfxObjPayload(options: {
 					surfaceId: options.materialId,
 				},
 			],
-			uvs: [],
+			uvs: new Float32Array(),
 			vertexCount: 3,
 		},
 		residencyKind: "unknown",

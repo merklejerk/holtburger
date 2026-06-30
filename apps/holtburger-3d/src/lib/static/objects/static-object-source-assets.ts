@@ -1,4 +1,4 @@
-import type { GfxObjPayloadDto } from "../../../lib/host/contracts";
+import type { PreparedGfxObjPayloadDto } from "../../assets/preparation/prepared-render-geometry";
 import type {
 	StaticObjectSourceGeometryAttachment,
 	StaticObjectSourceGeometryIdentity,
@@ -31,12 +31,12 @@ export function describeStaticObjectSourceGeometryIdentity(
 
 export function createStaticObjectSourceGeometryAttachment(options: {
 	readonly identity: StaticObjectSourceGeometryIdentity;
-	readonly gfxObj: GfxObjPayloadDto;
+	readonly gfxObj: PreparedGfxObjPayloadDto;
 }): StaticObjectSourceGeometryAttachment {
 	return {
 		identity: options.identity,
-		positions: toFloat32Array(options.gfxObj.renderGeometry.positions),
-		texCoords: toFloat32Array(options.gfxObj.renderGeometry.uvs),
+		positions: options.gfxObj.renderGeometry.positions,
+		texCoords: options.gfxObj.renderGeometry.uvs,
 	};
 }
 
@@ -44,8 +44,4 @@ function describeStaticObjectSourceIdentity(
 	identity: StaticObjectSourceIdentity,
 ): string {
 	return `${identity.sourceAssetKind}:${identity.sourceDid}`;
-}
-
-function toFloat32Array(values: ArrayLike<number>): Float32Array {
-	return values instanceof Float32Array ? values : Float32Array.from(values);
 }

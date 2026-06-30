@@ -5124,7 +5124,7 @@ function createDynamicGfxObjPayload() {
 		renderGeometry: {
 			bounds: createBounds(),
 			invalidPolygons: [],
-			normals: [],
+			normals: new Float32Array(),
 			positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
 			skippedPolygonCount: 0,
 			sourceId: 0x01000020,

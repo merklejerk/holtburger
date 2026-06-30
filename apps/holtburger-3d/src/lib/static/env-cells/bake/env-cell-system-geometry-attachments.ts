@@ -1,4 +1,5 @@
 import { createEmptyStaticBakeAttachments } from "../../bake/attachments";
+import { requirePreparedRenderGeometryBuffers } from "../../../assets/preparation/prepared-render-geometry";
 import type {
 	EnvCellCellStructureGeometryAttachment,
 	EnvCellCellStructureGeometryIdentity,
@@ -129,46 +130,29 @@ function createEnvCellCellStructureGeometryAttachment(options: {
 	readonly identity: EnvCellCellStructureGeometryIdentity;
 	readonly cell: LandblockEnvCellStaticFacts;
 }): EnvCellCellStructureGeometryAttachment {
-	const renderGeometry = options.cell.renderGeometry;
-	assertRenderGeometryVertexBuffers(options.identity, renderGeometry);
+	const renderGeometry =
+		options.cell.renderGeometry as EnvCellSystemLayerSourcePayloadDto["envCells"][number]["renderGeometry"];
+	requirePreparedRenderGeometryBuffers(
+		renderGeometry,
+		`Env-cell geometry attachment ${describeEnvCellCellStructureGeometryIdentity(
+			options.identity,
+		)}.renderGeometry`,
+	);
 
 	return {
 		bounds: renderGeometry.bounds,
 		identity: options.identity,
 		invalidPolygons: renderGeometry.invalidPolygons,
-		normals: toFloat32Array(renderGeometry.normals),
-		positions: toFloat32Array(renderGeometry.positions),
+		normals: renderGeometry.normals,
+		positions: renderGeometry.positions,
 		skippedPolygonCount: renderGeometry.skippedPolygonCount,
 		sourceId: renderGeometry.sourceId,
 		surfaceIds: renderGeometry.surfaceIds,
 		triangleCount: renderGeometry.triangleCount,
 		triangles: renderGeometry.triangles,
-		uvs: toFloat32Array(renderGeometry.uvs),
+		uvs: renderGeometry.uvs,
 		vertexCount: renderGeometry.vertexCount,
 	};
-}
-
-function assertRenderGeometryVertexBuffers(
-	identity: EnvCellCellStructureGeometryIdentity,
-	renderGeometry: Partial<
-		EnvCellSystemLayerSourcePayloadDto["envCells"][number]["renderGeometry"]
-	>,
-): asserts renderGeometry is EnvCellSystemLayerSourcePayloadDto["envCells"][number]["renderGeometry"] {
-	if (
-		renderGeometry.positions === undefined ||
-		renderGeometry.normals === undefined ||
-		renderGeometry.uvs === undefined
-	) {
-		throw new Error(
-			`Env-cell geometry attachment ${describeEnvCellCellStructureGeometryIdentity(
-				identity,
-			)} resolved metadata-only render geometry; full positions, normals, and UVs are required for bake attachments.`,
-		);
-	}
-}
-
-function toFloat32Array(values: ArrayLike<number>): Float32Array {
-	return values instanceof Float32Array ? values : Float32Array.from(values);
 }
 
 function formatHex32(value: number): string {

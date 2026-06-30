@@ -86,7 +86,7 @@ describe("browser landblock env-cell geometry attachments", () => {
 		await expect(
 			provider.createAttachments(createAttachmentRequest(resolverPayload)),
 		).rejects.toThrow(
-			"resolved metadata-only render geometry; full positions, normals, and UVs are required for bake attachments",
+			"renderGeometry.positions must be a Float32Array in prepared render geometry",
 		);
 	});
 });
@@ -271,8 +271,8 @@ function createEnvCellPayload(): EnvCellSystemLayerSourcePayloadDto["envCells"][
 		renderGeometry: {
 			bounds: createBounds(),
 			invalidPolygons: [],
-			normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
-			positions: [1, 2, 3, 4, 5, 6, 7, 8, 9],
+			normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+			positions: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8, 9]),
 			skippedPolygonCount: 0,
 			sourceId: 0xda550100,
 			surfaceIds: [10],
@@ -285,7 +285,7 @@ function createEnvCellPayload(): EnvCellSystemLayerSourcePayloadDto["envCells"][
 					surfaceId: 10,
 				},
 			],
-			uvs: [0, 0, 1, 0, 0, 1],
+			uvs: new Float32Array([0, 0, 1, 0, 0, 1]),
 			vertexCount: 3,
 		},
 		restrictionObjectId: null,

@@ -57,10 +57,10 @@ describe("static resolver asset bridge", () => {
 			envCells: [
 				{
 					renderGeometry: {
-						normals: [0, 0, 1],
-						positions: [1, 2, 3],
+						normals: new Float32Array([0, 0, 1]),
+						positions: new Float32Array([1, 2, 3]),
 						triangles: [{ firstVertex: 0 }],
-						uvs: [0, 0],
+						uvs: new Float32Array([0, 0]),
 					},
 				},
 			],
@@ -101,11 +101,11 @@ describe("static resolver asset bridge", () => {
 			(
 				asset.payload as {
 					readonly envCells: readonly {
-						readonly renderGeometry: { readonly positions: readonly number[] };
+						readonly renderGeometry: { readonly positions: Float32Array };
 					}[];
 				}
 			).envCells[0]?.renderGeometry.positions,
-		).toEqual([1, 2, 3]);
+		).toEqual(new Float32Array([1, 2, 3]));
 
 		workerAssetReader.dispose();
 		bridge.dispose();
@@ -117,10 +117,10 @@ describe("static resolver asset bridge", () => {
 		const asset = createPreparedAssetWithPayload(key, {
 			kind: "gfx-obj",
 			renderGeometry: {
-				normals: [0, 0, 1],
-				positions: [1, 2, 3],
+				normals: new Float32Array([0, 0, 1]),
+				positions: new Float32Array([1, 2, 3]),
 				triangles: [{ firstVertex: 0 }],
-				uvs: [0, 0],
+				uvs: new Float32Array([0, 0]),
 			},
 		});
 		const assetReader = new FixturePreparedAssetReader(asset);

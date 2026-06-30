@@ -19,7 +19,7 @@ import { StaticCoordinator } from "./static-coordinator";
 import { createLayerPeerRecordOwnerForStaticWork } from "../layer-owners";
 
 describe("static coordinator", () => {
-	it("rejects stale resolver results after a newer demand revision supersedes them", async () => {
+	it("drops late resolver results after a newer demand revision supersedes them", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
@@ -44,7 +44,6 @@ describe("static coordinator", () => {
 
 		expect(coordinator.createSnapshot()).toMatchObject({
 			committed: 0,
-			staleResolverResults: 1,
 		});
 		expect(baker.pendingInputs).toHaveLength(0);
 
@@ -58,7 +57,6 @@ describe("static coordinator", () => {
 		expect(coordinator.createSnapshot()).toMatchObject({
 			committed: 1,
 			committedDrawUnits: 1,
-			staleResolverResults: 1,
 		});
 	});
 
@@ -184,7 +182,7 @@ describe("static coordinator", () => {
 		resolver.complete(evictedRequest?.requestId ?? "");
 		await flushPromises();
 
-		expect(coordinator.createSnapshot().staleResolverResults).toBe(1);
+		expect(baker.pendingInputs).toHaveLength(0);
 	});
 
 	it("tracks revisions on pending work without asset lease concepts", () => {
@@ -342,9 +340,52 @@ describe("static coordinator", () => {
 		await flushPromises();
 
 		expect(baker.pendingInputs).toHaveLength(0);
-		expect(coordinator.createSnapshot()).toMatchObject({
-			staleResolverResults: 3,
+	});
+
+	it("does not let old source groups feed recreated same-owner tasks", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
 		});
+
+		scheduledWorkForDemand(coordinator, createSingleTerrainDemand(0xda55ffff));
+		const oldSourceRequestId =
+			resolver.pendingSourceRequests[0]?.requestId ?? "";
+		scheduledWorkForDemand(coordinator, {
+			location: null,
+			lod: { buildings: -1, detail: -1, envCells: -1, terrain: -1 },
+		});
+		const [newTask] = scheduledWorkForDemand(
+			coordinator,
+			createSingleTerrainDemand(0xda55ffff),
+		);
+		if (!newTask) {
+			throw new Error("Expected recreated terrain task.");
+		}
+		const newSourceRequestId =
+			resolver.pendingSourceRequests[1]?.requestId ?? "";
+
+		resolver.completeSource(oldSourceRequestId);
+		await flushPromises();
+
+		expect(baker.pendingInputs).toHaveLength(0);
+		expect(coordinator.createSnapshot().layerTasks).toMatchObject([
+			{
+				phase: "resolving",
+				taskId: newTask.staticWorkId,
+			},
+		]);
+
+		resolver.completeSource(newSourceRequestId);
+		await flushPromises();
+
+		expect(baker.pendingInputs).toHaveLength(1);
+		expect(baker.pendingInputs[0]?.items[0]?.work.staticWorkId).toBe(
+			newTask.staticWorkId,
+		);
 	});
 
 	it("reports layer owner lifecycle transitions without changing work identity", async () => {
@@ -1019,7 +1060,7 @@ describe("static coordinator", () => {
 
 		expect(
 			sourcePayloads.filter(
-				(item) => item.work.job.domain === "outdoor-buildings",
+				(item) => item.task.domain === "outdoor-buildings",
 			),
 		).toMatchObject([
 			{
@@ -1031,8 +1072,8 @@ describe("static coordinator", () => {
 						},
 					},
 				},
-				work: {
-					staticWorkId: "1:landblock:da55ffff:outdoor-buildings",
+				task: {
+					taskId: "1:landblock:da55ffff:outdoor-buildings",
 				},
 			},
 		]);
@@ -1282,7 +1323,7 @@ describe("static coordinator", () => {
 		});
 		expect(
 			sourcePayloads.filter(
-				(item) => item.work.job.domain === "env-cell-system",
+				(item) => item.task.domain === "env-cell-system",
 			),
 		).toMatchObject([
 			{
@@ -1295,8 +1336,8 @@ describe("static coordinator", () => {
 					},
 				},
 				revision: 1,
-				work: {
-					staticWorkId: "1:landblock:da55ffff:env-cell-system",
+				task: {
+					taskId: "1:landblock:da55ffff:env-cell-system",
 				},
 			},
 		]);

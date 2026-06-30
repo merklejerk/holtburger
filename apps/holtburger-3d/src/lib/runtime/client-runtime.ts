@@ -3763,7 +3763,6 @@ function createStaticCoordinatorDiagnosticsReport(
 			resolving: snapshot.resolving,
 			revision: snapshot.revision,
 			staleBakeResults: snapshot.staleBakeResults,
-			staleResolverResults: snapshot.staleResolverResults,
 		},
 		timingSummary: createStaticCoordinatorTimingSummary(snapshot.recentTiming),
 	};

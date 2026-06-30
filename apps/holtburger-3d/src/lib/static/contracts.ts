@@ -1836,7 +1836,6 @@ export interface StaticCoordinatorSnapshot {
 	readonly baking: number;
 	readonly committed: number;
 	readonly failed: number;
-	readonly staleResolverResults: number;
 	readonly staleBakeResults: number;
 	readonly committedDrawUnits: number;
 	readonly ownerStates: readonly LayerOwnerState[];
@@ -1961,7 +1960,8 @@ interface StaticBuildingTransitionApertureRangeSource {
 export interface StaticCoordinatorSourcePayloadDelta {
 	readonly payload: StaticScopePayload;
 	readonly revision: number;
-	readonly work: ScheduledStaticWork;
+	/** Layer task that accepted the resolved source payload. */
+	readonly task: StaticLayerTaskStatus;
 }
 
 type StaticLayerTaskPhase =

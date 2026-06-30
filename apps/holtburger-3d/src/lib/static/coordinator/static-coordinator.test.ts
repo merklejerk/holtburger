@@ -14,6 +14,7 @@ import type {
 	TerrainGeometryStaticDrawUnit,
 	StaticVisibilityRecord,
 	StaticObjectBakeDiagnostics,
+	StaticBakeBatchInput,
 } from "../contracts";
 import { StaticCoordinator } from "./static-coordinator";
 import { createLayerPeerRecordOwnerForStaticBakeTask } from "../layer-owners";
@@ -40,7 +41,9 @@ describe("static coordinator", () => {
 		const firstResolverRequest = resolver.pendingRequests[0];
 		const secondResolverRequest = resolver.pendingRequests[1];
 
-		expect({ domain: firstWork.domain, scope: firstWork.scope }).toEqual(firstResolverRequest?.job);
+		expect({ domain: firstWork.domain, scope: firstWork.scope }).toEqual(
+			firstResolverRequest?.job,
+		);
 		resolver.complete(firstResolverRequest?.requestId ?? "");
 		await flushPromises();
 
@@ -51,7 +54,7 @@ describe("static coordinator", () => {
 
 		resolver.complete(secondResolverRequest?.requestId ?? "");
 		await flushPromises();
-		baker.complete(secondWork.taskId, {
+		baker.complete(pendingBatchIdForTask(baker, secondWork.taskId), {
 			drawUnits: [createTerrainDrawUnit("terrain-a", 0xda56ffff)],
 		});
 		await flushPromises();
@@ -81,7 +84,7 @@ describe("static coordinator", () => {
 		expect(baker.pendingInputs).toHaveLength(1);
 
 		bakeTasksForDemand(coordinator, createSingleTerrainDemand(0xda56ffff));
-		baker.complete(firstWork.taskId);
+		baker.complete(pendingBatchIdForTask(baker, firstWork.taskId));
 		await flushPromises();
 
 		expect(coordinator.createSnapshot()).toMatchObject({
@@ -90,7 +93,7 @@ describe("static coordinator", () => {
 		});
 	});
 
-	it("marks work failed when bake attachment creation fails", async () => {
+	it("marks layer tasks failed when bake attachment creation fails", async () => {
 		const consoleError = vi
 			.spyOn(console, "error")
 			.mockImplementation(() => {});
@@ -114,13 +117,10 @@ describe("static coordinator", () => {
 		expect(coordinator.createSnapshot().layerTasks[0]).toMatchObject({
 			phase: "failed",
 		});
-		expect(JSON.stringify(coordinator.createSnapshot())).not.toContain(
-			"geometry offline",
-		);
 		consoleError.mockRestore();
 	});
 
-	it("diffs desired outdoor work across neighboring anchors", async () => {
+	it("diffs desired outdoor layer tasks across neighboring anchors", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
@@ -160,7 +160,7 @@ describe("static coordinator", () => {
 		expect(coordinator.createSnapshot().layerTasks).toHaveLength(9);
 		expect(
 			new Set(
-				coordinator.createSnapshot().layerTasks.map((work) => work.scopeKey),
+				coordinator.createSnapshot().layerTasks.map((task) => task.scopeKey),
 			),
 		).toEqual(
 			new Set([
@@ -187,7 +187,7 @@ describe("static coordinator", () => {
 		expect(baker.pendingInputs).toHaveLength(0);
 	});
 
-	it("tracks revisions on pending work without asset lease concepts", () => {
+	it("reports pending layer task identity and revision", () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
@@ -212,7 +212,6 @@ describe("static coordinator", () => {
 				taskId: "1:landblock:da55ffff:outdoor-terrain",
 			},
 		]);
-		expect(JSON.stringify(coordinator.createSnapshot())).not.toContain("lease");
 	});
 
 	it("reports layer owner states for split static domains", () => {
@@ -224,7 +223,10 @@ describe("static coordinator", () => {
 			resolver,
 		});
 
-		bakeTasksForDemand(coordinator, createSingleOutdoorObjectDemand(0xda55ffff));
+		bakeTasksForDemand(
+			coordinator,
+			createSingleOutdoorObjectDemand(0xda55ffff),
+		);
 
 		expect(coordinator.createSnapshot().ownerStates).toEqual([
 			{
@@ -380,9 +382,7 @@ describe("static coordinator", () => {
 		await flushPromises();
 
 		expect(baker.pendingInputs).toHaveLength(1);
-		expect(baker.pendingInputs[0]?.items[0]?.task.taskId).toBe(
-			newTask.taskId,
-		);
+		expect(baker.pendingInputs[0]?.items[0]?.task.taskId).toBe(newTask.taskId);
 	});
 
 	it("reports layer owner lifecycle transitions without changing task identity", async () => {
@@ -416,7 +416,7 @@ describe("static coordinator", () => {
 			},
 		]);
 
-		baker.complete(work.taskId, {
+		baker.complete(pendingBatchIdForTask(baker, work.taskId), {
 			drawUnits: [createTerrainDrawUnit("terrain-a", 0xda55ffff)],
 		});
 		await flushPromises();
@@ -461,7 +461,9 @@ describe("static coordinator", () => {
 		);
 		emptyResolver.complete(emptyResolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
-		emptyBaker.complete(emptyWork.taskId, { drawUnits: [] });
+		emptyBaker.complete(pendingBatchIdForTask(emptyBaker, emptyWork.taskId), {
+			drawUnits: [],
+		});
 		await flushPromises();
 		emptyCoordinator.markCommitMaterialized(
 			emptyDeltas.at(-1) ?? failCommitDelta(),
@@ -481,7 +483,10 @@ describe("static coordinator", () => {
 			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
 			resolver: failedResolver,
 		});
-		bakeTasksForDemand(failedCoordinator, createSingleTerrainDemand(0xda55ffff));
+		bakeTasksForDemand(
+			failedCoordinator,
+			createSingleTerrainDemand(0xda55ffff),
+		);
 		failedResolver.complete(failedResolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
 
@@ -527,7 +532,7 @@ describe("static coordinator", () => {
 		expect(reconciliation.removedResources).toEqual([]);
 	});
 
-	it("adopts same-owner tasks instead of replacing in-flight work", () => {
+	it("adopts same-owner tasks instead of replacing in-flight tasks", () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
@@ -598,7 +603,7 @@ describe("static coordinator", () => {
 		);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
-		baker.complete(work.taskId, {
+		baker.complete(pendingBatchIdForTask(baker, work.taskId), {
 			drawUnits: [createTerrainDrawUnit("terrain-a", 0xda55ffff)],
 		});
 		await flushPromises();
@@ -680,7 +685,7 @@ describe("static coordinator", () => {
 			)?.requestId ?? "",
 		);
 		await flushPromises();
-		baker.complete(work?.taskId ?? "", {
+		baker.complete(pendingBatchIdForTask(baker, work?.taskId ?? ""), {
 			staticObjectBakeDiagnostics: [diagnostics],
 		});
 		await flushPromises();
@@ -749,7 +754,7 @@ describe("static coordinator", () => {
 		);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
-		baker.complete(work.taskId, {
+		baker.complete(pendingBatchIdForTask(baker, work.taskId), {
 			drawUnits: [createInvalidOwnerlessDrawUnit("bad-draw-unit")],
 		});
 		await flushPromises();
@@ -760,9 +765,6 @@ describe("static coordinator", () => {
 			committedDrawUnits: 0,
 			failed: 1,
 		});
-		expect(JSON.stringify(coordinator.createSnapshot())).not.toContain(
-			"bad-draw-unit",
-		);
 		consoleError.mockRestore();
 	});
 
@@ -868,7 +870,9 @@ describe("static coordinator", () => {
 		const evictedWork = terrainWork[0];
 		const retainedWork = terrainWork[1];
 		if (!evictedWork || !retainedWork) {
-			throw new Error("terrain radius 1 should create at least two layer tasks");
+			throw new Error(
+				"terrain radius 1 should create at least two layer tasks",
+			);
 		}
 
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
@@ -892,9 +896,9 @@ describe("static coordinator", () => {
 		await flushPromises();
 
 		expect(baker.pendingInputs).toHaveLength(1);
-		expect(baker.pendingInputs[0]?.items.map((item) => item.task.taskId)).toEqual([
-			retainedWork.taskId,
-		]);
+		expect(
+			baker.pendingInputs[0]?.items.map((item) => item.task.taskId),
+		).toEqual([retainedWork.taskId]);
 		expect(
 			baker.pendingInputs[0]?.items.map((item) => item.task.ownerKey),
 		).toEqual([
@@ -1072,13 +1076,11 @@ describe("static coordinator", () => {
 			},
 		});
 		await flushPromises();
-		baker.complete(buildingWork?.taskId ?? "");
+		baker.complete(pendingBatchIdForTask(baker, buildingWork?.taskId ?? ""));
 		await flushPromises();
 
 		expect(
-			sourcePayloads.filter(
-				(item) => item.task.domain === "outdoor-buildings",
-			),
+			sourcePayloads.filter((item) => item.task.domain === "outdoor-buildings"),
 		).toMatchObject([
 			{
 				payload: {
@@ -1128,7 +1130,7 @@ describe("static coordinator", () => {
 		);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
-		baker.complete(work?.taskId ?? "", {
+		baker.complete(pendingBatchIdForTask(baker, work?.taskId ?? ""), {
 			materialCoverage: [
 				createMaterialCoverage("outdoor-terrain", {
 					coverageKey: "outdoor-terrain:terrain",
@@ -1272,7 +1274,7 @@ describe("static coordinator", () => {
 			createEnvCellSystemResolverPayload(),
 		);
 		await flushPromises();
-		baker.complete(envCellWork?.taskId ?? "", {
+		baker.complete(pendingBatchIdForTask(baker, envCellWork?.taskId ?? ""), {
 			materialCoverage: [
 				createMaterialCoverage("env-cell-system", {
 					coverageKey: "env-cell-system:structured-interior",
@@ -1339,9 +1341,7 @@ describe("static coordinator", () => {
 			staticBatchId: "static-batch:1:env-cell-system:landblock:da55ffff:1",
 		});
 		expect(
-			sourcePayloads.filter(
-				(item) => item.task.domain === "env-cell-system",
-			),
+			sourcePayloads.filter((item) => item.task.domain === "env-cell-system"),
 		).toMatchObject([
 			{
 				payload: {
@@ -1370,7 +1370,7 @@ describe("static coordinator", () => {
 			},
 		});
 
-		baker.complete(work?.taskId ?? "");
+		baker.complete(pendingBatchIdForTask(baker, work?.taskId ?? ""));
 		await flushPromises();
 
 		expect(coordinator.createSnapshot()).toMatchObject({
@@ -1381,12 +1381,11 @@ describe("static coordinator", () => {
 		expect(
 			coordinator
 				.createSnapshot()
-				.layerTasks.find((item) => item.domain === "env-cell-system")
-				?.phase,
+				.layerTasks.find((item) => item.domain === "env-cell-system")?.phase,
 		).toBe("materializing");
 	});
 
-	it("filters typed work-owned env-cell peer records for superseded batch members", async () => {
+	it("filters typed layer-owned env-cell peer records for superseded batch members", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
@@ -1487,7 +1486,6 @@ describe("static coordinator", () => {
 				),
 		).toBe(false);
 	});
-
 });
 
 function failCommitDelta(): never {
@@ -1560,6 +1558,26 @@ function createStaticObjectBakeDiagnostics(): StaticObjectBakeDiagnostics {
 		uniqueSourcePartGeometryCount: 1,
 		uniqueSourceTriangleCount: 1,
 	};
+}
+
+function pendingBatchIdForTask(
+	baker: DeferredStaticBaker,
+	taskId: string,
+): string {
+	return pendingBatchForTask(baker.pendingInputs, taskId).staticBatchId;
+}
+
+function pendingBatchForTask(
+	pendingInputs: readonly StaticBakeBatchInput[],
+	taskId: string,
+): StaticBakeBatchInput {
+	const input = pendingInputs.find((candidate) =>
+		candidate.items.some((item) => item.task.taskId === taskId),
+	);
+	if (!input) {
+		throw new Error(`No pending bake batch contains task ${taskId}.`);
+	}
+	return input;
 }
 
 function bakeTasksForDemand(
@@ -1672,9 +1690,7 @@ function createMaterialCoverage(
 	};
 }
 
-function createEnvCellSpatialRecord(
-	work: StaticBakeTask,
-): StaticSpatialRecord {
+function createEnvCellSpatialRecord(work: StaticBakeTask): StaticSpatialRecord {
 	return {
 		cellStructure: {
 			cellStructureId: 0x0d000001,

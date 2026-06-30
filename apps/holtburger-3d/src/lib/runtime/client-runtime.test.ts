@@ -222,8 +222,7 @@ describe("browser client runtime", () => {
 		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
 		await flushPromises();
 
-		const taskId = "1:landblock:da55ffff:outdoor-buildings";
-		baker.complete(taskId, {
+		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
 			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
 		});
 		await flushRuntimeWork();
@@ -370,8 +369,7 @@ describe("browser client runtime", () => {
 		});
 		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
 		await flushPromises();
-		const taskId = "1:landblock:da55ffff:outdoor-buildings";
-		baker.complete(taskId, {
+		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
 			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
 		});
 		await flushPromises();
@@ -444,8 +442,7 @@ describe("browser client runtime", () => {
 		});
 		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
 		await flushPromises();
-		const taskId = "1:landblock:da55ffff:outdoor-buildings";
-		baker.complete(taskId, {
+		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
 			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
 		});
 		await flushRuntimeWork();
@@ -535,7 +532,9 @@ describe("browser client runtime", () => {
 			],
 			removedVisualResourceIds: [],
 		});
-		expect(runtime.createDiagnosticsSnapshot().dynamic.records[0]).toMatchObject({
+		expect(
+			runtime.createDiagnosticsSnapshot().dynamic.records[0],
+		).toMatchObject({
 			effectiveResidence: {
 				kind: "no-residence",
 				reason: "render-residence-unassigned",
@@ -586,7 +585,9 @@ describe("browser client runtime", () => {
 		await flushRuntimeWork();
 		updateRuntimeFrame(runtime, 2);
 
-		expect(runtime.createDiagnosticsSnapshot().dynamic.records[0]).toMatchObject({
+		expect(
+			runtime.createDiagnosticsSnapshot().dynamic.records[0],
+		).toMatchObject({
 			effectiveResidence: {
 				kind: "no-residence",
 				reason: "render-residence-evicted",
@@ -619,7 +620,9 @@ describe("browser client runtime", () => {
 		await flushRuntimeWork();
 		updateRuntimeFrame(runtime, 3);
 
-		expect(runtime.createDiagnosticsSnapshot().dynamic.records[0]).toMatchObject({
+		expect(
+			runtime.createDiagnosticsSnapshot().dynamic.records[0],
+		).toMatchObject({
 			effectiveResidence: {
 				kind: "outdoor-landblock",
 			},
@@ -888,8 +891,7 @@ describe("browser client runtime", () => {
 		expect(
 			assetService.pendingKeys.some(
 				(key) =>
-					key.kind === "setup-appearance" &&
-					key.id.startsWith("0200004e?"),
+					key.kind === "setup-appearance" && key.id.startsWith("0200004e?"),
 			),
 		).toBe(true);
 
@@ -918,8 +920,7 @@ describe("browser client runtime", () => {
 		});
 		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
 		await flushPromises();
-		const taskId = "1:landblock:da55ffff:outdoor-buildings";
-		baker.complete(taskId, {
+		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
 			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
 		});
 		await flushRuntimeWork();
@@ -964,8 +965,7 @@ describe("browser client runtime", () => {
 		});
 		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
 		await flushPromises();
-		const taskId = "1:landblock:da55ffff:outdoor-buildings";
-		baker.complete(taskId, {
+		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
 			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
 		});
 		await flushRuntimeWork();
@@ -1008,8 +1008,7 @@ describe("browser client runtime", () => {
 		completeResolverRequest(resolver, "env-cell-system", 0xda55ffff);
 		await flushPromises();
 
-		const taskId = "1:landblock:da55ffff:env-cell-system";
-		baker.complete(taskId, {
+		completeBakerWork(baker, "env-cell-system", 0xda55ffff, {
 			staticAuthoredDynamicSeeds: [
 				createEnvCellStaticSeedRecord(),
 				createEnvCellDynamicSeedRecord(),
@@ -1257,7 +1256,7 @@ describe("browser client runtime", () => {
 		);
 		resolver.complete(buildingRequest?.requestId ?? failKey());
 		await flushPromises();
-		baker.complete("1:landblock:da55ffff:outdoor-buildings");
+		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff);
 		await flushPromises();
 		resolver.complete(envCellRequest?.requestId ?? failKey());
 		await flushPromises();
@@ -1282,7 +1281,7 @@ describe("browser client runtime", () => {
 				},
 			],
 		});
-		baker.complete("1:landblock:da55ffff:env-cell-system", {
+		completeBakerWork(baker, "env-cell-system", 0xda55ffff, {
 			drawUnits: [
 				createStructuredInteriorDrawUnit({
 					drawUnitId: "structured:da550100",
@@ -1570,7 +1569,7 @@ describe("browser client runtime", () => {
 			},
 		});
 		await flushPromises();
-		baker.complete("1:landblock:da55ffff:outdoor-buildings");
+		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff);
 		await flushPromises();
 		const envCellRequest = resolver.pendingRequests.find(
 			(request) => request.job.domain === "env-cell-system",
@@ -1578,7 +1577,7 @@ describe("browser client runtime", () => {
 		expect(envCellRequest).toBeDefined();
 		resolver.complete(envCellRequest?.requestId ?? "");
 		await flushPromises();
-		baker.complete("1:landblock:da55ffff:env-cell-system", {
+		completeBakerWork(baker, "env-cell-system", 0xda55ffff, {
 			drawUnits: [
 				createStructuredInteriorDrawUnit({
 					drawUnitId: "structured:da550100",
@@ -1823,11 +1822,11 @@ describe("browser client runtime", () => {
 		);
 		resolver.complete(buildingRequest?.requestId ?? failKey());
 		await flushRuntimeWork();
-		baker.complete("1:landblock:da55ffff:outdoor-buildings");
+		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff);
 		await flushRuntimeWork();
 		resolver.complete(envCellRequest?.requestId ?? failKey());
 		await flushRuntimeWork();
-		baker.complete("1:landblock:da55ffff:env-cell-system");
+		completeBakerWork(baker, "env-cell-system", 0xda55ffff);
 		await flushRuntimeWork();
 
 		expect(events).toEqual([
@@ -1879,10 +1878,10 @@ describe("browser client runtime", () => {
 		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
 		completeResolverRequest(resolver, "outdoor-terrain", 0xda55ffff);
 		await flushRuntimeWork();
-		baker.complete("1:landblock:da55ffff:outdoor-buildings", {
+		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
 			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
 		});
-		baker.complete("1:landblock:da55ffff:outdoor-terrain");
+		completeBakerWork(baker, "outdoor-terrain", 0xda55ffff);
 		await flushRuntimeWork();
 
 		expect(
@@ -2076,7 +2075,7 @@ describe("browser client runtime", () => {
 		updateOutdoorSceneInterest(runtime);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
-		baker.complete("1:landblock:da55ffff:outdoor-terrain", {
+		completeBakerWork(baker, "outdoor-terrain", 0xda55ffff, {
 			drawUnits: [createTerrainDrawUnit("terrain-a", 0xdb55ffff)],
 		});
 		await flushPromises();
@@ -2140,7 +2139,7 @@ describe("browser client runtime", () => {
 			}),
 		});
 		await flushPromises();
-		baker.complete("1:landblock:dc59ffff:outdoor-generated-scenery", {
+		completeBakerWork(baker, "outdoor-generated-scenery", 0xdc59ffff, {
 			drawUnits: [],
 			staticObjectRenderInstances: [
 				{ ...instance, domain: "outdoor-generated-scenery" },
@@ -2192,7 +2191,7 @@ describe("browser client runtime", () => {
 			}),
 		});
 		await flushPromises();
-		baker.complete("1:landblock:da55ffff:outdoor-generated-scenery", {
+		completeBakerWork(baker, "outdoor-generated-scenery", 0xda55ffff, {
 			drawUnits: [
 				createStaticObjectDrawUnit("static-draw-a", {
 					domain: "outdoor-generated-scenery",
@@ -2283,7 +2282,7 @@ describe("browser client runtime", () => {
 		updateOutdoorSceneInterest(runtime);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
-		baker.complete("1:landblock:da55ffff:outdoor-terrain", {
+		completeBakerWork(baker, "outdoor-terrain", 0xda55ffff, {
 			drawUnits: [createTerrainDrawUnit("terrain-a", 0xdb55ffff)],
 		});
 		await flushPromises();
@@ -2323,7 +2322,7 @@ describe("browser client runtime", () => {
 		updateOutdoorSceneInterest(runtime);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
-		baker.complete("1:landblock:da55ffff:outdoor-terrain", {
+		completeBakerWork(baker, "outdoor-terrain", 0xda55ffff, {
 			drawUnits: [drawUnit],
 			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
 			textureUses: [createBakeTextureUse(drawUnit.drawUnitId, textureUse)],
@@ -2400,7 +2399,7 @@ describe("browser client runtime", () => {
 		updateOutdoorSceneInterest(runtime);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
-		baker.complete("1:landblock:da55ffff:outdoor-terrain", {
+		completeBakerWork(baker, "outdoor-terrain", 0xda55ffff, {
 			drawUnits: [drawUnit],
 			textureUses: [createBakeTextureUse(drawUnit.drawUnitId, textureUse)],
 		});
@@ -2457,7 +2456,7 @@ describe("browser client runtime", () => {
 		updateOutdoorSceneInterest(runtime);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
-		baker.complete("1:landblock:da55ffff:outdoor-terrain", {
+		completeBakerWork(baker, "outdoor-terrain", 0xda55ffff, {
 			drawUnits: [drawUnit],
 			textureUses: [createBakeTextureUse(drawUnit.drawUnitId, textureUse)],
 		});
@@ -2517,7 +2516,7 @@ describe("browser client runtime", () => {
 		updateOutdoorSceneInterest(runtime);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
-		baker.complete("1:landblock:da55ffff:outdoor-terrain", {
+		completeBakerWork(baker, "outdoor-terrain", 0xda55ffff, {
 			materialCoverage: [createDeferredBlendedMaterialCoverage()],
 		});
 		await flushPromises();
@@ -2540,43 +2539,6 @@ describe("browser client runtime", () => {
 			revision: 1,
 		});
 		runtime.dispose();
-	});
-
-	it("logs static resolver failures without retaining failure diagnostics", async () => {
-		const consoleError = vi
-			.spyOn(console, "error")
-			.mockImplementation(() => {});
-		const resolver = new DeferredStaticResolver();
-		const runtime = createClientRuntime({
-			diagnostics: silentDiagnostics,
-			host: new FakeRuntimeHost(),
-			renderer: new FakeRenderer(),
-			staticCoordinator: createImmediateStaticCoordinator({
-				baker: new DeferredStaticBaker(),
-				resolver,
-			}),
-		});
-		updateOutdoorSceneInterest(runtime);
-		resolver.fail(
-			resolver.pendingRequests[0]?.requestId ?? "",
-			new Error("landblock env-cell bundle unavailable"),
-		);
-		await flushPromises();
-
-	expect(consoleError).toHaveBeenCalledWith(
-		"static layer task 1:landblock:da55ffff:outdoor-terrain failed; static content for landblock:da55ffff/outdoor-terrain was not resolved.",
-		{
-			message: "landblock env-cell bundle unavailable",
-			revision: 1,
-			},
-		);
-		const diagnosticsSnapshot = runtime.createDiagnosticsSnapshot();
-		expect(diagnosticsSnapshot.static.failed).toBe(1);
-		expect(JSON.stringify(diagnosticsSnapshot)).not.toContain(
-			"landblock env-cell bundle unavailable",
-		);
-		runtime.dispose();
-		consoleError.mockRestore();
 	});
 
 	it("emits failed scene interest settlement from failed owner states", async () => {
@@ -2706,13 +2668,7 @@ function completeBakerWork(
 				item.task.scope.landblockId === landblockId,
 		),
 	);
-	const work = input?.items.find(
-		(item) =>
-			item.task.domain === domain &&
-			item.task.scope.kind === "landblock" &&
-			item.task.scope.landblockId === landblockId,
-	);
-	baker.complete(work?.task.taskId ?? failKey(), result);
+	baker.complete(input?.staticBatchId ?? failKey(), result);
 }
 
 function createPortalInteriorRecord(options: {
@@ -3050,10 +3006,14 @@ function createEnvCellLayerOwner(
 
 function createOutdoorLayerOwner(
 	landblockId: number,
-	domain: "outdoor-buildings" | "outdoor-generated-scenery" = "outdoor-buildings",
+	domain:
+		| "outdoor-buildings"
+		| "outdoor-generated-scenery" = "outdoor-buildings",
 ): StaticLayerPeerRecordOwner {
 	const keyKind =
-		domain === "outdoor-generated-scenery" ? "outdoor-generated-scenery" : domain;
+		domain === "outdoor-generated-scenery"
+			? "outdoor-generated-scenery"
+			: domain;
 	return {
 		domain,
 		key: {

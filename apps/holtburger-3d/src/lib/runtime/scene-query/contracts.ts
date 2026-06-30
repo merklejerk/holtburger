@@ -1,7 +1,7 @@
 import type {
 	EnvCellSystemStaticScopePayload,
 	OutdoorStaticObjectsScopePayload,
-	StaticAuthoredDynamicSeedRecord,
+	EnvCellStaticObjectPlacementRecord,
 	StaticBounds,
 	StaticObjectInstanceFacts,
 	StaticObjectMaterialSourceFacts,
@@ -169,7 +169,7 @@ export interface EnvCellStaticScenePickDetails {
 	readonly landblockId: number;
 	readonly envCellId: number;
 	readonly instanceId: string;
-	readonly seed: EnvCellSystemStaticScopePayload["envCells"][number]["staticObjectSeeds"][number];
+	readonly placement: EnvCellSystemStaticScopePayload["envCells"][number]["staticObjectPlacements"][number];
 }
 
 export interface TerrainQuadScenePickDetails {
@@ -269,7 +269,7 @@ export type StaticSceneCameraResidency =
 	  };
 
 export interface StaticSceneCommittedEnvCellRecords {
-	readonly authoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
+	readonly envCellStaticObjectPlacementRecords: readonly EnvCellStaticObjectPlacementRecord[];
 	readonly landblockId: number;
 	readonly portalGraphs: readonly StaticPortalGraphRecord[];
 	readonly portalInteriorRecords: readonly StaticPortalInteriorRecord[];

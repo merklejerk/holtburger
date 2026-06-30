@@ -26,7 +26,7 @@ export interface EnvCellSystemLayerPublication {
 }
 
 interface EnvCellFacts {
-	readonly authoredDynamicSeedRecords: EnvCellSystemLayerPayload["authoredDynamicSeedRecords"];
+	readonly envCellStaticObjectPlacementRecords: EnvCellSystemLayerPayload["envCellStaticObjectPlacementRecords"];
 	readonly envCellStaticObjectDrawUnits: EnvCellSystemLayerPayload["envCellStaticObjectDrawUnits"];
 	readonly landblockId: number;
 	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
@@ -53,8 +53,8 @@ export function createEnvCellSystemLayerPublications(
 			});
 			return {
 				payload: {
-					authoredDynamicSeedRecords:
-						envCellFacts.authoredDynamicSeedRecords,
+					envCellStaticObjectPlacementRecords:
+						envCellFacts.envCellStaticObjectPlacementRecords,
 					envCellStaticObjectDrawUnits:
 						envCellFacts.envCellStaticObjectDrawUnits,
 					generationId: createEnvCellSystemLayerGenerationId({
@@ -105,10 +105,10 @@ function createEnvCellFactsByLandblock(
 					drawUnit.landblockId === landblockId,
 			);
 		factsByLandblock.set(landblockId, {
-			authoredDynamicSeedRecords:
-				delta.staticAuthoredDynamicSeeds.filter(
+			envCellStaticObjectPlacementRecords:
+				delta.envCellStaticObjectPlacementRecords.filter(
 					(record) =>
-						record.kind === "env-cell-static-object-seed" &&
+						record.kind === "env-cell-static-object-placement" &&
 						record.owner.domain === "env-cell-system" &&
 						record.owner.key.landblockId === landblockId,
 				),
@@ -210,7 +210,7 @@ function createResourceMembership(
 		).structuredInteriorDrawUnitIds.push(drawUnit.drawUnitId);
 	}
 	for (const drawUnit of envCellFacts.envCellStaticObjectDrawUnits) {
-		if (drawUnit.ownership.kind !== "env-cell-static-object-seeds") {
+		if (drawUnit.ownership.kind !== "env-cell-static-object-placements") {
 			continue;
 		}
 		for (const envCellId of drawUnit.ownership.envCellIds) {

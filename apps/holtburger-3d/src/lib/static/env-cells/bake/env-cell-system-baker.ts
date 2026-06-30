@@ -2,7 +2,7 @@ import type {
 	LandblockEnvCellStaticFacts,
 	EnvCellSystemStaticScopePayload,
 	StaticBakeTask,
-	StaticAuthoredDynamicSeedRecord,
+	EnvCellStaticObjectPlacementRecord,
 	StaticBakeBatchInput,
 	StaticBakeBatchItem,
 	StaticBakeBatchResult,
@@ -114,8 +114,8 @@ export function bakeEnvCellSystem(
 			.flatMap((result) => result.portalApertureResources)
 			.concat(staticObjectResult.portalApertureResources),
 		revision: input.revision,
-		staticAuthoredDynamicSeeds: itemResults.flatMap(
-			(result) => result.staticAuthoredDynamicSeeds,
+		envCellStaticObjectPlacementRecords: itemResults.flatMap(
+			(result) => result.envCellStaticObjectPlacementRecords,
 		),
 		staticBatchId: input.staticBatchId,
 		staticPortalGraphs: itemResults
@@ -186,7 +186,7 @@ function bakeLandblockEnvCellItem(
 	readonly drawUnits: readonly StaticDrawUnit[];
 	readonly materialCoverage: StaticMaterialCoverageReport;
 	readonly portalApertureResources: readonly StaticPortalApertureResource[];
-	readonly staticAuthoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
+	readonly envCellStaticObjectPlacementRecords: readonly EnvCellStaticObjectPlacementRecord[];
 	readonly staticPortalGraphs: readonly StaticPortalGraphRecord[];
 	readonly staticPortalInteriorRecords: readonly StaticPortalInteriorRecord[];
 	readonly staticSourceMappings: readonly StaticSourceMappingRecord[];
@@ -229,7 +229,7 @@ function bakeLandblockEnvCellItem(
 			payload,
 		}),
 		portalApertureResources: payload.portalApertureResources,
-		staticAuthoredDynamicSeeds: createAuthoredDynamicSeedRecords(
+		envCellStaticObjectPlacementRecords: createEnvCellStaticObjectPlacementRecords(
 			owner,
 			payload,
 		),
@@ -1102,31 +1102,36 @@ function createSourceMappingRecords(
 	}));
 }
 
-function createAuthoredDynamicSeedRecords(
+function createEnvCellStaticObjectPlacementRecords(
 	owner: StaticLayerPeerRecordOwner,
 	payload: EnvCellSystemStaticScopePayload,
-): readonly StaticAuthoredDynamicSeedRecord[] {
+): readonly EnvCellStaticObjectPlacementRecord[] {
 	return payload.envCells.flatMap((envCell) =>
-		envCell.staticObjectSeeds.flatMap((seed) =>
-			createAuthoredDynamicSeedRecordsForSeed(owner, payload, envCell, seed),
+		envCell.staticObjectPlacements.flatMap((placement) =>
+			createEnvCellStaticObjectPlacementRecord(
+				owner,
+				payload,
+				envCell,
+				placement,
+			),
 		),
 	);
 }
 
-function createAuthoredDynamicSeedRecordsForSeed(
+function createEnvCellStaticObjectPlacementRecord(
 	owner: StaticLayerPeerRecordOwner,
 	payload: EnvCellSystemStaticScopePayload,
 	envCell: LandblockEnvCellStaticFacts,
-	seed: LandblockEnvCellStaticFacts["staticObjectSeeds"][number],
-): readonly StaticAuthoredDynamicSeedRecord[] {
-	const staticSeedRecord: StaticAuthoredDynamicSeedRecord = {
+	placement: LandblockEnvCellStaticFacts["staticObjectPlacements"][number],
+): readonly EnvCellStaticObjectPlacementRecord[] {
+	const record: EnvCellStaticObjectPlacementRecord = {
 		envCellId: envCell.identity.envCellId,
-		kind: "env-cell-static-object-seed",
+		kind: "env-cell-static-object-placement",
 		landblockId: payload.landblock.landblockId,
 		owner,
-		seed,
+		placement,
 	};
-	return [staticSeedRecord];
+	return [record];
 }
 
 function createLayerPeerRecordOwner(

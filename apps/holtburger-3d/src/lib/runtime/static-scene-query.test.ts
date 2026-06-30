@@ -470,7 +470,7 @@ describe("static scene query", () => {
 		).toBeNull();
 	});
 
-	it("ingests landblock env-cell static seed facts for object picking", () => {
+	it("ingests landblock env-cell static placement facts for object picking", () => {
 		const query = new StaticSceneQuery();
 		commitEnvCellSystem(query, createEnvCellSystemPayload());
 		commitEnvCellStaticObjectBounds(query);
@@ -502,7 +502,7 @@ describe("static scene query", () => {
 				landblockId: 0xda55ffff,
 			}),
 		).toMatchObject({
-			seed: {
+			placement: {
 				debug: { sourceAssetId: "setup-model/02000010" },
 				source: {
 					sourceAssetKind: "setup-model",
@@ -2267,7 +2267,7 @@ function createEnvCellSystemPayload(
 				},
 				restrictionObjectId: null,
 				seenOutside: null,
-				staticObjectSeeds: [
+				staticObjectPlacements: [
 					{
 						debug: { sourceAssetId: "setup-model/02000010" },
 						identity: {
@@ -2579,7 +2579,7 @@ function createEnvCellSystemLayerPayload(
 ): EnvCellSystemLayerPayload {
 	const landblockId = options.landblockId ?? 0xda55ffff;
 	return {
-		authoredDynamicSeedRecords: [],
+		envCellStaticObjectPlacementRecords: [],
 		envCellStaticObjectDrawUnits: [],
 		generationId: `env-cell-system:${landblockId.toString(16)}:test`,
 		kind: "env-cell-system",
@@ -2746,13 +2746,13 @@ function commitEnvCellSystem(
 	const landblockId = payload.landblock.landblockId;
 	const owner = createEnvCellLayerOwner(landblockId);
 	query.applyStaticPeerRecords({
-		authoredDynamicSeeds: payload.envCells.flatMap((envCell) =>
-			envCell.staticObjectSeeds.map((seed) => ({
+		envCellStaticObjectPlacementRecords: payload.envCells.flatMap((envCell) =>
+			envCell.staticObjectPlacements.map((placement) => ({
 				envCellId: envCell.identity.envCellId,
-				kind: "env-cell-static-object-seed" as const,
+				kind: "env-cell-static-object-placement" as const,
 				landblockId,
 				owner,
-				seed,
+				placement,
 			})),
 		),
 		portalInteriorRecords: [

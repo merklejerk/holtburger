@@ -4723,7 +4723,7 @@ function createStaticObjectGeometryResource(
 		domain: drawUnit.domain,
 		drawUnitId: drawUnit.drawUnitId,
 		envCellIds:
-			drawUnit.ownership.kind === "env-cell-static-object-seeds"
+			drawUnit.ownership.kind === "env-cell-static-object-placements"
 				? [...new Set(drawUnit.ownership.envCellIds)].sort(compareNumbers)
 				: [],
 		indexBuffer,

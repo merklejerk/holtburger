@@ -90,7 +90,7 @@ describe("static landblock layer contracts", () => {
 
 	it("models env-cell systems as projection/aperture layers without portal-stack contracts", () => {
 		const layer: EnvCellSystemLayerPayload = {
-			authoredDynamicSeedRecords: [],
+			envCellStaticObjectPlacementRecords: [],
 			envCellStaticObjectDrawUnits: [],
 			generationId: createStaticLandblockLayerGenerationId({
 				kind: "env-cell-system",

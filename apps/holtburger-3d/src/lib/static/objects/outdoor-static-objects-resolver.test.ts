@@ -290,7 +290,7 @@ describe("browser outdoor static object resolver", () => {
 		expect(payload.scope.missingRefs).toEqual([]);
 	});
 
-	it("classifies setup-backed outdoor objects with default animations as dynamic seeds", async () => {
+	it("classifies setup-backed outdoor objects with default animations as dynamic placements", async () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
 				createHostAssetKey("landblock-scene-lod-outdoor-layer", 0xda55ffff),
@@ -347,7 +347,7 @@ describe("browser outdoor static object resolver", () => {
 
 		expect(payload.scope.objects).toEqual([]);
 		expect(payload.scope.materialSlots).toEqual([]);
-		expect(payload.scope.authoredDynamicSeeds).toEqual([
+		expect(payload.scope.authoredDynamicPlacements).toEqual([
 			expect.objectContaining({
 				classificationReason: "setup-default-animation",
 				defaultAnimationId: 0x0300061b,

@@ -159,6 +159,7 @@ export class DeferredStaticResolver
 		requestId: string,
 		recipes: readonly StaticLayerRecipe[] | null = null,
 		dynamicRecipes: readonly StaticAuthoredDynamicRecipe[] = [],
+		dynamicPlacements: StaticLandblockSceneLodResolution["dynamicPlacements"] = [],
 	): void {
 		const sourceRequest = this.#pendingSourceRequests.find(
 			(candidate) => candidate.requestId === requestId,
@@ -173,6 +174,7 @@ export class DeferredStaticResolver
 
 		this.#sourceResolvers.delete(requestId);
 		resolver.resolve({
+			dynamicPlacements,
 			dynamicRecipes,
 			recipes:
 				recipes ??
@@ -293,6 +295,7 @@ export class ImmediateStaticResolver
 		request: StaticLandblockSceneLodSourceRequest,
 	): Promise<StaticLandblockSceneLodResolution> {
 		return {
+			dynamicPlacements: [],
 			dynamicRecipes: [],
 			recipes: request.requestedLayers.map((layer) =>
 				createFakeLayerRecipe(
@@ -334,7 +337,8 @@ function createFakeStaticBakeResult(
 		materialCoverage: result.materialCoverage ?? [],
 		portalApertureResources: result.portalApertureResources ?? [],
 		revision: input.revision,
-		staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds ?? [],
+		envCellStaticObjectPlacementRecords:
+			result.envCellStaticObjectPlacementRecords ?? [],
 		staticPortalGraphs: result.staticPortalGraphs ?? [],
 		staticPortalInteriorRecords: result.staticPortalInteriorRecords ?? [],
 		staticSourceMappings: result.staticSourceMappings ?? [],
@@ -445,7 +449,6 @@ function createFakeStaticScopePayloadBody(
 	if (job.domain === "outdoor-buildings" && job.scope.kind === "landblock") {
 		return {
 			authoredDynamicPlacements: [],
-			authoredDynamicSeeds: [],
 			buildingTransitionApertures: [],
 			domain: "outdoor-buildings",
 			kind: "outdoor-static-objects",

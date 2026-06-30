@@ -2131,7 +2131,7 @@ function createEnvCellStaticObjectDrawUnit(
 		materialSlotIndices: new Float32Array([0, 0, 0]),
 		ownership: {
 			envCellIds,
-			kind: "env-cell-static-object-seeds",
+			kind: "env-cell-static-object-placements",
 			landblockId: 0xda55ffff,
 			seedIdentities: [object],
 		},
@@ -2434,7 +2434,7 @@ function createEnvCellSystemLayerPayload(
 	} = {},
 ): EnvCellSystemLayerPayload {
 	return {
-		authoredDynamicSeedRecords: [],
+		envCellStaticObjectPlacementRecords: [],
 		envCellStaticObjectDrawUnits: options.envCellStaticObjectDrawUnits ?? [
 			createEnvCellStaticObjectDrawUnit("env-cell-static-a", [0xda550100]),
 		],

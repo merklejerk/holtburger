@@ -279,7 +279,7 @@ function reportOmittedStaticSeeds(options: {
 	readonly payload: ResolverLandblockEnvCellLayerPayloadDto;
 	readonly sourceByKey: ReadonlyMap<string, StaticObjectSourceAssetFacts>;
 }): void {
-	const omittedSeeds = options.payload.envCells.flatMap((cell) =>
+	const omittedPlacements = options.payload.envCells.flatMap((cell) =>
 		cell.statics.flatMap((staticSeed) => {
 			const source = createStaticObjectSourceIdentity(
 				parseHostAssetId(staticSeed.sourceAssetId),
@@ -297,15 +297,15 @@ function reportOmittedStaticSeeds(options: {
 			];
 		}),
 	);
-	if (omittedSeeds.length === 0) {
+	if (omittedPlacements.length === 0) {
 		return;
 	}
 
-	console.warn("[holtburger-3d][browser][landblock-env-cell-static-seeds]", {
+	console.warn("[holtburger-3d][browser][landblock-env-cell-static-placements]", {
 		landblockId: options.landblockId,
 		message:
-			"Omitted env-cell static seeds because their top-level source assets could not be resolved.",
-		omittedSeeds,
+			"Omitted env-cell static placements because their top-level source assets could not be resolved.",
+		omittedPlacements,
 	});
 }
 
@@ -375,7 +375,7 @@ function createLandblockEnvCellStaticFacts(options: {
 		restrictionObjectId: cell.restrictionObjectId,
 		seenOutside: cell.seenOutside,
 		authoredDynamicPlacements,
-		staticObjectSeeds: staticPlacements
+		staticObjectPlacements: staticPlacements
 			.filter(
 				(placement) =>
 					!authoredDynamicKeys.has(createObjectInstanceKey(placement.identity)),
@@ -400,7 +400,7 @@ function createLandblockEnvCellStaticFacts(options: {
 function createEnvCellDynamicPlacement(options: {
 	readonly landblockId: number;
 	readonly cell: ResolverLandblockEnvCellLayerPayloadDto["envCells"][number];
-	readonly placement: LandblockEnvCellStaticFacts["staticObjectSeeds"][number] & {
+	readonly placement: LandblockEnvCellStaticFacts["staticObjectPlacements"][number] & {
 		readonly sourceAsset: StaticObjectSourceAssetFacts;
 	};
 }): readonly EnvCellStaticObjectDynamicPlacementFacts[] {

@@ -1680,7 +1680,7 @@
 		overlap: RuntimePortalOverlapResidency,
 	): string {
 		const diagnostics = overlap.diagnostics;
-		return `${overlap.kind} cells ${overlap.baseOverlapEnvCellIds.length} boundaries ${overlap.boundaries.length} primary ${diagnostics.primaryAcceptedBoundaryCount}/${diagnostics.primaryCandidateCount} one-hop ${diagnostics.oneHopAcceptedBoundaryCount}/${diagnostics.oneHopCandidateCount} seeds ${diagnostics.oneHopSeedEnvCellCount} capped ${diagnostics.oneHopTraversalCapped ? "yes" : "no"}`;
+		return `${overlap.kind} cells ${overlap.baseOverlapEnvCellIds.length} boundaries ${overlap.boundaries.length} primary ${diagnostics.primaryAcceptedBoundaryCount}/${diagnostics.primaryCandidateCount} one-hop ${diagnostics.oneHopAcceptedBoundaryCount}/${diagnostics.oneHopCandidateCount} placements ${diagnostics.oneHopSeedEnvCellCount} capped ${diagnostics.oneHopTraversalCapped ? "yes" : "no"}`;
 	}
 
 	function currentCameraEnvCellResourceTarget(): {
@@ -2554,7 +2554,7 @@
 										.portalLinkCount}
 									seeds
 									{runtimeOverview.static.latestEnvCellSystemPayload
-										.staticObjectSeedCount} missing
+										.staticObjectPlacementCount} missing
 									{runtimeOverview.static.latestEnvCellSystemPayload
 										.missingRefCount}
 								{:else}
@@ -2563,7 +2563,7 @@
 							</dd>
 							{@render copyOverlay(
 								runtimeOverview?.static.latestEnvCellSystemPayload
-									? `lb ${runtimeOverview.static.latestEnvCellSystemPayload.landblockId.toString(16).padStart(8, "0")} cells ${runtimeOverview.static.latestEnvCellSystemPayload.envCellCount} accepted ${runtimeOverview.static.latestEnvCellSystemPayload.acceptedEnvCellCount} visible ${runtimeOverview.static.latestEnvCellSystemPayload.visibleCellCount} portals ${runtimeOverview.static.latestEnvCellSystemPayload.portalCount} links ${runtimeOverview.static.latestEnvCellSystemPayload.portalLinkCount} seeds ${runtimeOverview.static.latestEnvCellSystemPayload.staticObjectSeedCount} missing ${runtimeOverview.static.latestEnvCellSystemPayload.missingRefCount}`
+									? `lb ${runtimeOverview.static.latestEnvCellSystemPayload.landblockId.toString(16).padStart(8, "0")} cells ${runtimeOverview.static.latestEnvCellSystemPayload.envCellCount} accepted ${runtimeOverview.static.latestEnvCellSystemPayload.acceptedEnvCellCount} visible ${runtimeOverview.static.latestEnvCellSystemPayload.visibleCellCount} portals ${runtimeOverview.static.latestEnvCellSystemPayload.portalCount} links ${runtimeOverview.static.latestEnvCellSystemPayload.portalLinkCount} placements ${runtimeOverview.static.latestEnvCellSystemPayload.staticObjectPlacementCount} missing ${runtimeOverview.static.latestEnvCellSystemPayload.missingRefCount}`
 									: "none",
 								"Env-cell payload",
 							)}

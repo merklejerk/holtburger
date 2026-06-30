@@ -50,7 +50,7 @@ describe("static object bake attachments", () => {
 		]);
 	});
 
-	it("attaches env-cell static seed source geometry for landblock env-cell batches", async () => {
+	it("attaches env-cell static placement source geometry for landblock env-cell batches", async () => {
 		const source = createSourceIdentity("setup-model", 0x02000010);
 		const gfxObj = createSourceIdentity("gfx-obj", 0x01000020);
 		const geometry = createStaticObjectSourceGeometryIdentity({

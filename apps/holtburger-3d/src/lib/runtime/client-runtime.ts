@@ -96,7 +96,7 @@ import type {
 } from "../static/contracts";
 import {
 	collectStaticDrawUnitResourceIds,
-	type StaticAuthoredDynamicSeedRecord,
+	type StaticAuthoredDynamicPlacementRecord,
 } from "../static/contracts";
 import { createLayerOwnerKeyId } from "../static/layer-owners";
 import {
@@ -145,7 +145,6 @@ import {
 	DynamicEntityController,
 	type RuntimeDynamicSpawnRequest,
 } from "../dynamic/dynamic-entity-controller";
-import { DynamicEntityResourceManager } from "../dynamic/dynamic-entity-resource-manager";
 import {
 	createDynamicVisualResourceId,
 	createRuntimeDynamicTextureBatchId,
@@ -914,7 +913,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 					this.#maybeEmitSceneInterestSettled();
 				}
 			},
-			resourceManager: new DynamicEntityResourceManager({ assetService }),
 		});
 		this.#textureManager = new TextureManager({ assetService, texturePacker });
 		this.#staticCoordinator = staticCoordinator;
@@ -2039,19 +2037,20 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#warnAboutStaticFallbacks(delta);
 		this.#staticSceneQuery.removeStaticResources(materialized.removedResources);
 		this.#staticSceneQuery.applyStaticPeerRecords({
-			authoredDynamicSeeds: delta.staticAuthoredDynamicSeeds,
+			envCellStaticObjectPlacementRecords:
+				delta.envCellStaticObjectPlacementRecords,
 			portalGraphs: materialized.staticPortalGraphs,
 			portalInteriorRecords: materialized.staticPortalInteriorRecords,
 			sourceMappings: materialized.staticSourceMappings,
 			spatialRecords: materialized.staticSpatialRecords,
 			visibilityRecords: materialized.staticVisibilityRecords,
 		});
-		this.#recordDynamicSeedTextureBatchIds(
+		this.#recordDynamicPlacementTextureBatchIds(
 			delta.staticBatchId,
-			delta.staticAuthoredDynamicSeeds,
+			commitEnvelope.dynamicPlacements,
 		);
-		this.#dynamicEntityController.ingestStaticSeeds(
-			delta.staticAuthoredDynamicSeeds,
+		this.#dynamicEntityController.ingestStaticPlacements(
+			commitEnvelope.dynamicPlacements,
 			this.#textureBatchIdByStaticLayerOwner,
 		);
 		this.#applyStaticAuthoredDynamicVisualPrep(commitEnvelope);
@@ -2184,15 +2183,15 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#refreshRendererDiagnosticsSnapshot();
 	}
 
-	#recordDynamicSeedTextureBatchIds(
+	#recordDynamicPlacementTextureBatchIds(
 		staticBatchId: string,
-		seeds: readonly StaticAuthoredDynamicSeedRecord[],
+		placements: readonly StaticAuthoredDynamicPlacementRecord[],
 	): void {
-		for (const seed of seeds) {
+		for (const placement of placements) {
 			this.#textureBatchIdByStaticLayerOwner.set(
 				createStaticLayerOwnerTextureBatchLookupKey(
-					seed.owner.domain,
-					seed.owner.ownerId,
+					placement.owner.domain,
+					placement.owner.ownerId,
 				),
 				staticBatchId,
 			);

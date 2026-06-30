@@ -94,11 +94,11 @@ describe("browser landblock env-cell baker", () => {
 				],
 			}),
 		]);
-		expect(result.staticAuthoredDynamicSeeds).toEqual([
+		expect(result.envCellStaticObjectPlacementRecords).toEqual([
 			expect.objectContaining({
 				envCellId: 0xda550100,
-				kind: "env-cell-static-object-seed",
-				seed: expect.objectContaining({
+				kind: "env-cell-static-object-placement",
+				placement: expect.objectContaining({
 					sourceIndex: 0,
 				}),
 			}),
@@ -152,13 +152,13 @@ describe("browser landblock env-cell baker", () => {
 
 		const result = bakeEnvCellSystem(input);
 
-		expect(result.staticAuthoredDynamicSeeds).toEqual([
+		expect(result.envCellStaticObjectPlacementRecords).toEqual([
 			{
 				envCellId: 0xda550100,
-				kind: "env-cell-static-object-seed",
+				kind: "env-cell-static-object-placement",
 				landblockId: 0xda55ffff,
 				owner: expectedEnvCellLayerOwner(),
-				seed: {
+				placement: {
 					debug: { sourceAssetId: "setup-model/020003e5" },
 					identity: {
 						instanceId: "env-cell-static-0",
@@ -187,7 +187,7 @@ describe("browser landblock env-cell baker", () => {
 		).toEqual([]);
 	});
 
-	it("does not mirror unclassified env-cell statics into dynamic seeds", () => {
+	it("does not mirror unclassified env-cell statics into dynamic placements", () => {
 		const input = createInputWithEnvCellStaticSource(
 			createSetupStaticObjectSourceAsset({
 				defaultAnimation: null,
@@ -201,10 +201,10 @@ describe("browser landblock env-cell baker", () => {
 
 		const result = bakeEnvCellSystem(input);
 
-		expect(result.staticAuthoredDynamicSeeds).toEqual([
+		expect(result.envCellStaticObjectPlacementRecords).toEqual([
 			expect.objectContaining({
 				envCellId: 0xda550100,
-				kind: "env-cell-static-object-seed",
+				kind: "env-cell-static-object-placement",
 			}),
 		]);
 	});
@@ -787,7 +787,7 @@ describe("browser landblock env-cell baker", () => {
 		]);
 	});
 
-	it("bakes env-cell static seeds through static object draw units with env-cell ownership", () => {
+	it("bakes env-cell static placements through static object draw units with env-cell ownership", () => {
 		const input = createInputWithRenderableStaticSeed({
 			envCellLocalPlacement: {
 				orientation: { w: 1, x: 0, y: 0, z: 0 },
@@ -815,7 +815,7 @@ describe("browser landblock env-cell baker", () => {
 			materialFamily: "flat-color",
 			ownership: {
 				envCellIds: [0xda550100],
-				kind: "env-cell-static-object-seeds",
+				kind: "env-cell-static-object-placements",
 				landblockId: 0xda55ffff,
 				seedIdentities: [
 					{
@@ -845,10 +845,10 @@ describe("browser landblock env-cell baker", () => {
 			1, 3, -2, 2, 3, -2, 1, 4, -2,
 		]);
 		expect(result.textureUses).toEqual([]);
-		expect(result.staticAuthoredDynamicSeeds).toEqual([
+		expect(result.envCellStaticObjectPlacementRecords).toEqual([
 			expect.objectContaining({
 				envCellId: 0xda550100,
-				kind: "env-cell-static-object-seed",
+				kind: "env-cell-static-object-placement",
 			}),
 		]);
 		expect(result.staticSpatialRecords).toEqual(
@@ -873,7 +873,7 @@ describe("browser landblock env-cell baker", () => {
 		);
 	});
 
-	it("bakes env-cell static seed rotation without applying the containing cell frame", () => {
+	it("bakes env-cell static placement rotation without applying the containing cell frame", () => {
 		const input = createInputWithRenderableStaticSeed({
 			envCellLocalPlacement: {
 				orientation: {
@@ -1022,7 +1022,7 @@ function requireFirstEnvCell(
 function createInputWithRenderableStaticSeed(
 	options: {
 		readonly envCellLocalPlacement?: LandblockEnvCellStaticFacts["localPlacement"];
-		readonly seedLocalPlacement?: LandblockEnvCellStaticFacts["staticObjectSeeds"][number]["localPlacement"];
+		readonly seedLocalPlacement?: LandblockEnvCellStaticFacts["staticObjectPlacements"][number]["localPlacement"];
 	} = {},
 ): StaticBakeBatchInput {
 	const input = createInput();
@@ -1070,7 +1070,7 @@ function createInputWithRenderableStaticSeed(
 								...envCell,
 								localPlacement:
 									options.envCellLocalPlacement ?? envCell.localPlacement,
-								staticObjectSeeds: envCell.staticObjectSeeds.map((seed) => ({
+								staticObjectPlacements: envCell.staticObjectPlacements.map((seed) => ({
 									...seed,
 									identity: seedIdentity,
 									localPlacement:
@@ -1094,7 +1094,7 @@ function createInputWithEnvCellStaticSource(
 	options: {
 		readonly sourceAssetId: string;
 		readonly sourceDid: number;
-		readonly sourceScale?: LandblockEnvCellStaticFacts["staticObjectSeeds"][number]["sourceScale"];
+		readonly sourceScale?: LandblockEnvCellStaticFacts["staticObjectPlacements"][number]["sourceScale"];
 	},
 ): StaticBakeBatchInput {
 	const input = createInput();
@@ -1120,7 +1120,7 @@ function createInputWithEnvCellStaticSource(
 						envCells: [
 							{
 								...envCell,
-								staticObjectSeeds: envCell.staticObjectSeeds.map((seed) => ({
+								staticObjectPlacements: envCell.staticObjectPlacements.map((seed) => ({
 									...seed,
 									debug: { sourceAssetId: options.sourceAssetId },
 									source: {
@@ -1526,7 +1526,7 @@ function createInput(
 								},
 								restrictionObjectId: null,
 								seenOutside: null,
-								staticObjectSeeds: [
+								staticObjectPlacements: [
 									{
 										debug: {
 											sourceAssetId: "gfxobj/01000020",

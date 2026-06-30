@@ -53,7 +53,7 @@ describe("terrain geometry baker", () => {
 		expect(result).toMatchObject({
 			atlasRegistryUpdates: [],
 			buildRevision: 42,
-			staticAuthoredDynamicSeeds: [],
+			envCellStaticObjectPlacementRecords: [],
 			staticPortalGraphs: [],
 			staticPortalInteriorRecords: [],
 			staticSpatialRecords: [

@@ -74,12 +74,12 @@ export interface EnvCellBvhRoot {
 
 export type EnvCellBvhRuntimeItem = {
 	readonly kind: "static";
-	readonly seed: EnvCellStaticSeedRuntimeRecord;
+	readonly placement: EnvCellStaticPlacementRuntimeRecord;
 };
 
-export interface EnvCellStaticSeedRuntimeRecord {
+export interface EnvCellStaticPlacementRuntimeRecord {
 	readonly envCellId: number;
-	readonly seed: EnvCellSystemStaticScopePayload["envCells"][number]["staticObjectSeeds"][number];
+	readonly placement: EnvCellSystemStaticScopePayload["envCells"][number]["staticObjectPlacements"][number];
 }
 
 export interface EnvCellLandblockBvhRuntimeItem {

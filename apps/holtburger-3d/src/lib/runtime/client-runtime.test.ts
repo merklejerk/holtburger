@@ -69,7 +69,7 @@ import type {
 	StaticPortalGraphScene,
 	StaticPortalInteriorRecord,
 	StructuredInteriorGeometryStaticDrawUnit,
-	StaticAuthoredDynamicSeedRecord,
+	StaticAuthoredDynamicPlacementRecord,
 	StaticDomain,
 	StaticLayerPeerRecordOwner,
 	TerrainStaticScopePayload,
@@ -211,7 +211,7 @@ describe("browser client runtime", () => {
 		runtime.dispose();
 	});
 
-	it("ingests outdoor static-authored dynamic seeds and evicts them with layer owners", async () => {
+	it("ingests outdoor static-authored dynamic placements and evicts them with layer owners", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const renderer = new FakeRenderer();
@@ -235,12 +235,11 @@ describe("browser client runtime", () => {
 			"outdoor-buildings",
 			0xda55ffff,
 			{},
-			[createOutdoorDynamicSeedRecord()],
+			[createOutdoorDynamicPlacementRecord()],
 		);
 		await flushPromises();
 
 		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
-			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
 		});
 		await flushRuntimeWork();
 
@@ -248,8 +247,7 @@ describe("browser client runtime", () => {
 		expect(loadedDiagnosticsSnapshot.dynamic).toMatchObject({
 			activeEntityCount: 1,
 			nonRenderableEntityCount: 0,
-			staticSeedCount: 1,
-		});
+					});
 		expect(loadedDiagnosticsSnapshot.dynamic.records[0]).toMatchObject({
 			animation: {
 				defaultAnimationId: 0x0300061b,
@@ -360,8 +358,7 @@ describe("browser client runtime", () => {
 
 		expect(runtime.createDiagnosticsSnapshot().dynamic).toMatchObject({
 			activeEntityCount: 0,
-			staticSeedCount: 0,
-		});
+					});
 		runtime.dispose();
 	});
 
@@ -389,11 +386,10 @@ describe("browser client runtime", () => {
 			"outdoor-buildings",
 			0xda55ffff,
 			{},
-			[createOutdoorDynamicSeedRecord()],
+			[createOutdoorDynamicPlacementRecord()],
 		);
 		await flushPromises();
 		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
-			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
 		});
 		await flushPromises();
 
@@ -457,11 +453,10 @@ describe("browser client runtime", () => {
 			"outdoor-buildings",
 			0xda55ffff,
 			{},
-			[createOutdoorDynamicSeedRecord()],
+			[createOutdoorDynamicPlacementRecord()],
 		);
 		await flushPromises();
 		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
-			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
 		});
 		await flushRuntimeWork();
 
@@ -972,11 +967,10 @@ describe("browser client runtime", () => {
 			"outdoor-buildings",
 			0xda55ffff,
 			{},
-			[createOutdoorDynamicSeedRecord()],
+			[createOutdoorDynamicPlacementRecord()],
 		);
 		await flushPromises();
 		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
-			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
 		});
 		await flushRuntimeWork();
 
@@ -1023,11 +1017,10 @@ describe("browser client runtime", () => {
 			"outdoor-buildings",
 			0xda55ffff,
 			{},
-			[createOutdoorDynamicSeedRecord()],
+			[createOutdoorDynamicPlacementRecord()],
 		);
 		await flushPromises();
 		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
-			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
 		});
 		await flushRuntimeWork();
 
@@ -1048,7 +1041,7 @@ describe("browser client runtime", () => {
 		runtime.dispose();
 	});
 
-	it("ingests classified env-cell dynamic seeds through the dynamic render path", async () => {
+	it("ingests classified env-cell dynamic placements through the dynamic render path", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const renderer = new FakeRenderer();
@@ -1071,15 +1064,12 @@ describe("browser client runtime", () => {
 			"env-cell-system",
 			0xda55ffff,
 			{},
-			[createEnvCellDynamicSeedRecord()],
+			[createEnvCellDynamicPlacementRecord()],
 		);
 		await flushPromises();
 
 		completeBakerWork(baker, "env-cell-system", 0xda55ffff, {
-			staticAuthoredDynamicSeeds: [
-				createEnvCellStaticSeedRecord(),
-				createEnvCellDynamicSeedRecord(),
-			],
+			envCellStaticObjectPlacementRecords: [createEnvCellStaticPlacementRecord()],
 		});
 		await flushRuntimeWork();
 
@@ -1087,8 +1077,7 @@ describe("browser client runtime", () => {
 		expect(loadedDiagnosticsSnapshot.dynamic).toMatchObject({
 			activeEntityCount: 1,
 			nonRenderableEntityCount: 0,
-			staticSeedCount: 1,
-		});
+					});
 		expect(loadedDiagnosticsSnapshot.dynamic.records[0]).toMatchObject({
 			id: "static-authored-env-cell:env-cell-system:0xda55ffff:env-cell:da550100:object:building:env-cell-static-0:setup:020003e5",
 			provenance: {
@@ -1145,8 +1134,7 @@ describe("browser client runtime", () => {
 
 		expect(runtime.createDiagnosticsSnapshot().dynamic).toMatchObject({
 			activeEntityCount: 0,
-			staticSeedCount: 0,
-		});
+					});
 		runtime.dispose();
 	});
 
@@ -1357,7 +1345,7 @@ describe("browser client runtime", () => {
 				createStaticObjectDrawUnit("env-static-shared", {
 					ownership: {
 						envCellIds: [0xda550100, 0xda550101],
-						kind: "env-cell-static-object-seeds",
+						kind: "env-cell-static-object-placements",
 						landblockId: 0xda55ffff,
 						seedIdentities: [],
 					},
@@ -1947,12 +1935,11 @@ describe("browser client runtime", () => {
 			"outdoor-buildings",
 			0xda55ffff,
 			{},
-			[createOutdoorDynamicSeedRecord()],
+			[createOutdoorDynamicPlacementRecord()],
 		);
 		completeResolverRequest(resolver, "outdoor-terrain", 0xda55ffff);
 		await flushRuntimeWork();
 		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
-			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
 		});
 		completeBakerWork(baker, "outdoor-terrain", 0xda55ffff);
 		await flushRuntimeWork();
@@ -2393,7 +2380,6 @@ describe("browser client runtime", () => {
 		await flushPromises();
 		completeBakerWork(baker, "outdoor-terrain", 0xda55ffff, {
 			drawUnits: [drawUnit],
-			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
 			textureUses: [createBakeTextureUse(drawUnit.drawUnitId, textureUse)],
 		});
 		await flushPromises();
@@ -2538,8 +2524,7 @@ describe("browser client runtime", () => {
 		expect(renderer.textureUpdates).toEqual([]);
 		expect(runtime.createDiagnosticsSnapshot().dynamic).toMatchObject({
 			activeEntityCount: 0,
-			staticSeedCount: 0,
-		});
+					});
 		expect(
 			runtimeDiagnosticsSnapshotSummary(runtime.createDiagnosticsSnapshot())
 				.staticMaterialization,
@@ -2713,7 +2698,7 @@ function completeResolverRequest(
 	domain: StaticDomain,
 	landblockId: number,
 	payload: Parameters<DeferredStaticResolver["complete"]>[1] = {},
-	dynamicRecords: readonly StaticAuthoredDynamicSeedRecord[] = [],
+	dynamicRecords: readonly StaticAuthoredDynamicPlacementRecord[] = [],
 ): void {
 	const request = resolver.pendingRequests.find(
 		(candidate) =>
@@ -2747,6 +2732,7 @@ function completeResolverRequest(
 				dynamicRecords.map((record) =>
 					createStaticAuthoredDynamicRecipeForRecord(record),
 				),
+				dynamicRecords,
 			);
 			return;
 		} catch (error) {
@@ -2843,32 +2829,32 @@ function staticDomainForLayerKind(
 }
 
 function createStaticAuthoredDynamicRecipeForRecord(
-	record: StaticAuthoredDynamicSeedRecord,
+	record: StaticAuthoredDynamicPlacementRecord,
 ): StaticAuthoredDynamicRecipe {
 	if (
-		record.kind !== "outdoor-static-object-dynamic-seed" &&
-		record.kind !== "env-cell-static-object-dynamic-seed"
+		record.kind !== "outdoor-static-object-dynamic-placement" &&
+		record.kind !== "env-cell-static-object-dynamic-placement"
 	) {
 		throw new Error(`Cannot create dynamic recipe for ${record.kind}.`);
 	}
 	const entityId = createStaticAuthoredDynamicEntityId(record);
 	const sourceResidence =
-		record.kind === "env-cell-static-object-dynamic-seed"
+		record.kind === "env-cell-static-object-dynamic-placement"
 			? {
-					envCellId: record.seed.envCellId,
+					envCellId: record.placement.envCellId,
 					kind: "env-cell" as const,
-					landblockId: record.seed.landblockId,
+					landblockId: record.placement.landblockId,
 				}
 			: {
 					kind: "outdoor-landblock" as const,
-					landblockId: record.seed.landblockId,
+					landblockId: record.placement.landblockId,
 				};
 	return {
 		recipe: {
 			animationSelection: { kind: "setup-default" },
 			baseTransform: {
-				baseLocalPlacement: record.seed.localPlacement,
-				sourceScale: record.seed.sourceScale,
+				baseLocalPlacement: record.placement.localPlacement,
+				sourceScale: record.placement.sourceScale,
 			},
 			entityId,
 			source: {
@@ -2878,19 +2864,19 @@ function createStaticAuthoredDynamicRecipeForRecord(
 				sourceResidence,
 			},
 			visual: {
-				animation: createDynamicRecipeAnimation(record.seed.defaultAnimationId),
+				animation: createDynamicRecipeAnimation(record.placement.defaultAnimationId),
 				materialPolicy: {
 					detailRolePolicy: {
 						domain:
 							record.owner.domain === "env-cell-system"
 								? "env-cell-system"
-								: record.seed.domain,
+								: record.placement.domain,
 						kind: "static-domain",
 					},
 					materialPlanningDomain:
 						record.owner.domain === "env-cell-system"
 							? "env-cell-system"
-							: record.seed.domain,
+							: record.placement.domain,
 					visualObject: {
 						entityId,
 						kind: "dynamic-visual-object",
@@ -2900,7 +2886,7 @@ function createStaticAuthoredDynamicRecipeForRecord(
 				materialSources: [],
 				missingRefs: [],
 				paletteSources: [],
-				setupModel: createDynamicRecipeSetupModel(record.seed.setupModelId),
+				setupModel: createDynamicRecipeSetupModel(record.placement.setupModelId),
 				sourceAssets: [],
 				textureRefs: [],
 			},
@@ -2911,16 +2897,16 @@ function createStaticAuthoredDynamicRecipeForRecord(
 
 function createStaticAuthoredDynamicEntityId(
 	record: Extract<
-		StaticAuthoredDynamicSeedRecord,
+		StaticAuthoredDynamicPlacementRecord,
 		{
 			readonly kind:
-				| "env-cell-static-object-dynamic-seed"
-				| "outdoor-static-object-dynamic-seed";
+				| "env-cell-static-object-dynamic-placement"
+				| "outdoor-static-object-dynamic-placement";
 		}
 	>,
 ): string {
 	return [
-		record.kind === "env-cell-static-object-dynamic-seed"
+		record.kind === "env-cell-static-object-dynamic-placement"
 			? "static-authored-env-cell"
 			: "static-authored-outdoor",
 		record.owner.ownerId,
@@ -2930,24 +2916,24 @@ function createStaticAuthoredDynamicEntityId(
 
 function createStaticAuthoredDynamicPlacementId(
 	record: Extract<
-		StaticAuthoredDynamicSeedRecord,
+		StaticAuthoredDynamicPlacementRecord,
 		{
 			readonly kind:
-				| "env-cell-static-object-dynamic-seed"
-				| "outdoor-static-object-dynamic-seed";
+				| "env-cell-static-object-dynamic-placement"
+				| "outdoor-static-object-dynamic-placement";
 		}
 	>,
 ): string {
-	if (record.kind === "env-cell-static-object-dynamic-seed") {
+	if (record.kind === "env-cell-static-object-dynamic-placement") {
 		return [
-			`env-cell:${formatHex32(record.seed.envCellId)}`,
-			`object:${record.seed.object.objectKind}:${record.seed.object.instanceId}`,
-			`setup:${formatHex32(record.seed.setupModelId)}`,
+			`env-cell:${formatHex32(record.placement.envCellId)}`,
+			`object:${record.placement.object.objectKind}:${record.placement.object.instanceId}`,
+			`setup:${formatHex32(record.placement.setupModelId)}`,
 		].join(":");
 	}
 	return [
-		`object:${record.seed.object.objectKind}:${record.seed.object.instanceId}`,
-		`setup:${formatHex32(record.seed.setupModelId)}`,
+		`object:${record.placement.object.objectKind}:${record.placement.object.instanceId}`,
+		`setup:${formatHex32(record.placement.setupModelId)}`,
 	].join(":");
 }
 
@@ -3459,11 +3445,11 @@ function createOutdoorLayerOwner(
 	};
 }
 
-function createOutdoorDynamicSeedRecord(): StaticAuthoredDynamicSeedRecord {
+function createOutdoorDynamicPlacementRecord(): StaticAuthoredDynamicPlacementRecord {
 	return {
-		kind: "outdoor-static-object-dynamic-seed",
+		kind: "outdoor-static-object-dynamic-placement",
 		owner: createOutdoorLayerOwner(0xda55ffff),
-		seed: {
+		placement: {
 			classificationReason: "setup-default-animation",
 			defaultAnimationId: 0x0300061b,
 			domain: "outdoor-buildings",
@@ -3492,13 +3478,13 @@ function createOutdoorDynamicSeedRecord(): StaticAuthoredDynamicSeedRecord {
 	};
 }
 
-function createEnvCellStaticSeedRecord(): StaticAuthoredDynamicSeedRecord {
+function createEnvCellStaticPlacementRecord(): StaticAuthoredDynamicPlacementRecord {
 	return {
 		envCellId: 0xda550100,
-		kind: "env-cell-static-object-seed",
+		kind: "env-cell-static-object-placement",
 		landblockId: 0xda55ffff,
 		owner: createEnvCellLayerOwner(0xda55ffff),
-		seed: {
+		placement: {
 			debug: { sourceAssetId: "setup-model/020003e5" },
 			identity: {
 				instanceId: "env-cell-static-0",
@@ -3518,11 +3504,11 @@ function createEnvCellStaticSeedRecord(): StaticAuthoredDynamicSeedRecord {
 	};
 }
 
-function createEnvCellDynamicSeedRecord(): StaticAuthoredDynamicSeedRecord {
+function createEnvCellDynamicPlacementRecord(): StaticAuthoredDynamicPlacementRecord {
 	return {
-		kind: "env-cell-static-object-dynamic-seed",
+		kind: "env-cell-static-object-dynamic-placement",
 		owner: createEnvCellLayerOwner(0xda55ffff),
-		seed: {
+		placement: {
 			classificationReason: "setup-default-animation",
 			defaultAnimationId: 0x0300061b,
 			envCellId: 0xda550100,
@@ -4249,7 +4235,7 @@ function createStaticObjectDrawUnit(
 	return {
 		coordinateSpace: "landblock-render-local",
 		domain:
-			options.ownership?.kind === "env-cell-static-object-seeds"
+			options.ownership?.kind === "env-cell-static-object-placements"
 				? "env-cell-system"
 				: "outdoor-generated-scenery",
 		drawUnitId,

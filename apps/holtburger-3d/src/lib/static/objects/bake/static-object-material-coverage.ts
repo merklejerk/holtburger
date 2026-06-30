@@ -86,7 +86,7 @@ export function createStaticObjectMaterialCoverageReport(options: {
 		coverageKey: `${options.payload.domain}:static-objects`,
 		coverageKind:
 			options.payload.domain === "env-cell-system"
-				? "env-cell-static-object-seeds"
+				? "env-cell-static-object-placements"
 				: "outdoor-static-objects",
 		deferredTriangleCount: countOutcomeTriangles(buckets, "render-deferred"),
 		detailRoleCount: options.materialPlan.detailRoles.length,

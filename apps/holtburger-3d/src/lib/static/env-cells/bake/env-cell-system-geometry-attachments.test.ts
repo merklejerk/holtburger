@@ -158,7 +158,7 @@ function createScopePayload(
 			renderGeometry: cell.renderGeometry,
 			restrictionObjectId: cell.restrictionObjectId,
 			seenOutside: cell.seenOutside,
-			staticObjectSeeds: [],
+			staticObjectPlacements: [],
 			surfaces: cell.surfaces.map((surface) => ({
 				material: {
 					kind: "static-material-source",

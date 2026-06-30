@@ -1,22 +1,21 @@
 import { describe, expect, it } from "vitest";
 import type {
 	LayerOwnerKey,
-	StaticAuthoredDynamicSeedRecord,
+	StaticAuthoredDynamicPlacementRecord,
 	StaticLayerPeerRecordOwner,
 } from "../static/contracts";
 import { DynamicEntityController } from "./dynamic-entity-controller";
 
 describe("dynamic entity controller", () => {
-	it("creates stable non-renderable records from outdoor static-authored seeds", () => {
+	it("creates stable non-renderable records from outdoor static-authored placements", () => {
 		const controller = new DynamicEntityController();
 
-		controller.ingestStaticSeeds([createOutdoorSeedRecord()]);
+		controller.ingestStaticPlacements([createOutdoorPlacementRecord()]);
 
 		expect(controller.createSnapshot()).toMatchObject({
 			activeEntityCount: 1,
 			nonRenderableEntityCount: 1,
-			staticSeedCount: 1,
-		});
+					});
 		expect(controller.createSnapshot().records[0]).toMatchObject({
 			animation: {
 				defaultAnimationId: 0x0300061b,
@@ -36,10 +35,10 @@ describe("dynamic entity controller", () => {
 
 	it("re-ingests the same static source identity idempotently", () => {
 		const controller = new DynamicEntityController();
-		const seed = createOutdoorSeedRecord();
+		const seed = createOutdoorPlacementRecord();
 
-		controller.ingestStaticSeeds([seed]);
-		controller.ingestStaticSeeds([seed]);
+		controller.ingestStaticPlacements([seed]);
+		controller.ingestStaticPlacements([seed]);
 
 		expect(controller.createSnapshot().records).toHaveLength(1);
 	});
@@ -47,7 +46,7 @@ describe("dynamic entity controller", () => {
 	it("reports static-authored preparation readiness by layer owner", () => {
 		const controller = new DynamicEntityController();
 
-		controller.ingestStaticSeeds([createOutdoorSeedRecord()]);
+		controller.ingestStaticPlacements([createOutdoorPlacementRecord()]);
 
 		expect(
 			controller.queryStaticAuthoredPreparationStatus(
@@ -75,8 +74,8 @@ describe("dynamic entity controller", () => {
 	it("projects static-authored presentation policy from source facts and texture batch lookup", () => {
 		const controller = new DynamicEntityController();
 
-		controller.ingestStaticSeeds(
-			[createOutdoorSeedRecord()],
+		controller.ingestStaticPlacements(
+			[createOutdoorPlacementRecord()],
 			new Map([
 				[
 					"outdoor-buildings:outdoor-buildings:0xda55ffff",
@@ -128,8 +127,8 @@ describe("dynamic entity controller", () => {
 	it("replaces records for the same source identity under the same layer owner", () => {
 		const controller = new DynamicEntityController();
 
-		controller.ingestStaticSeeds([createOutdoorSeedRecord()]);
-		controller.ingestStaticSeeds([createOutdoorSeedRecord()]);
+		controller.ingestStaticPlacements([createOutdoorPlacementRecord()]);
+		controller.ingestStaticPlacements([createOutdoorPlacementRecord()]);
 
 		expect(controller.createSnapshot().records).toHaveLength(1);
 		expect(
@@ -139,9 +138,9 @@ describe("dynamic entity controller", () => {
 
 	it("removes records whose static layer owner is no longer retained", () => {
 		const controller = new DynamicEntityController();
-		controller.ingestStaticSeeds([
-			createOutdoorSeedRecord(),
-			createOutdoorSeedRecord({
+		controller.ingestStaticPlacements([
+			createOutdoorPlacementRecord(),
+			createOutdoorPlacementRecord({
 				instanceId: "windmill-1",
 				landblockId: 0xdb55ffff,
 			}),
@@ -156,24 +155,23 @@ describe("dynamic entity controller", () => {
 		});
 	});
 
-	it("ignores unclassified env-cell static seed records", () => {
+	it("ignores unclassified env-cell static placement records", () => {
 		const controller = new DynamicEntityController();
 
-		controller.ingestStaticSeeds([createEnvCellSeedRecord()]);
+		controller.ingestStaticPlacements([createEnvCellPlacementRecord()]);
 
 		expect(controller.createSnapshot().records).toEqual([]);
 	});
 
-	it("creates non-renderable records from classified env-cell dynamic seeds", () => {
+	it("creates non-renderable records from classified env-cell dynamic placements", () => {
 		const controller = new DynamicEntityController();
 
-		controller.ingestStaticSeeds([createEnvCellDynamicSeedRecord()]);
+		controller.ingestStaticPlacements([createEnvCellDynamicPlacementRecord()]);
 
 		expect(controller.createSnapshot()).toMatchObject({
 			activeEntityCount: 1,
 			nonRenderableEntityCount: 1,
-			staticSeedCount: 1,
-		});
+					});
 		expect(controller.createSnapshot().records[0]).toMatchObject({
 			animation: {
 				defaultAnimationId: 0x0300061b,
@@ -210,9 +208,9 @@ describe("dynamic entity controller", () => {
 
 	it("removes classified env-cell records with unretained env-cell scopes", () => {
 		const controller = new DynamicEntityController();
-		controller.ingestStaticSeeds([
-			createOutdoorSeedRecord(),
-			createEnvCellDynamicSeedRecord(),
+		controller.ingestStaticPlacements([
+			createOutdoorPlacementRecord(),
+			createEnvCellDynamicPlacementRecord(),
 		]);
 
 		controller.retainLayerOwners([createRetainedLayerOwner()]);
@@ -252,8 +250,7 @@ describe("dynamic entity controller", () => {
 			nonRenderableEntityCount: 2,
 			runtimeSpawnCount: 2,
 			staticAuthoredCount: 0,
-			staticSeedCount: 0,
-		});
+					});
 		expect(controller.queryDynamicEntitySummary(firstId)).toMatchObject({
 			id: firstId,
 			presentation: {
@@ -310,7 +307,7 @@ describe("dynamic entity controller", () => {
 
 	it("keeps runtime spawns across static retention until explicit removal", () => {
 		const controller = new DynamicEntityController();
-		controller.ingestStaticSeeds([createOutdoorSeedRecord()]);
+		controller.ingestStaticPlacements([createOutdoorPlacementRecord()]);
 		const runtimeId = controller.createRuntimeSpawn({
 			baseLocalPlacement: createPlacement(),
 			setupModelId: 0x020003e5,
@@ -326,8 +323,7 @@ describe("dynamic entity controller", () => {
 			activeEntityCount: 1,
 			runtimeSpawnCount: 1,
 			staticAuthoredCount: 0,
-			staticSeedCount: 0,
-		});
+					});
 		expect(controller.queryDynamicEntitySummary(runtimeId)?.id).toBe(runtimeId);
 
 		expect(controller.removeRuntimeSpawn(runtimeId)).toBe(true);
@@ -482,19 +478,19 @@ describe("dynamic entity controller", () => {
 	});
 });
 
-function createOutdoorSeedRecord(
+function createOutdoorPlacementRecord(
 	options: {
 		readonly instanceId?: string;
 		readonly landblockId?: number;
 	} = {},
-): StaticAuthoredDynamicSeedRecord {
+): StaticAuthoredDynamicPlacementRecord {
 	const landblockId = options.landblockId ?? 0xda55ffff;
 	return {
-		kind: "outdoor-static-object-dynamic-seed",
+		kind: "outdoor-static-object-dynamic-placement",
 		owner: createOwner({
 			landblockId,
 		}),
-		seed: {
+		placement: {
 			classificationReason: "setup-default-animation",
 			defaultAnimationId: 0x0300061b,
 			domain: "outdoor-buildings",
@@ -523,15 +519,15 @@ function createOutdoorSeedRecord(
 	};
 }
 
-function createEnvCellSeedRecord(): StaticAuthoredDynamicSeedRecord {
+function createEnvCellPlacementRecord(): StaticAuthoredDynamicPlacementRecord {
 	return {
 		envCellId: 0xda550100,
-		kind: "env-cell-static-object-seed",
+		kind: "env-cell-static-object-placement",
 		landblockId: 0xda55ffff,
 		owner: createOwner({
 			domain: "env-cell-system",
 		}),
-		seed: {
+		placement: {
 			debug: { sourceAssetId: "setup-model/020003e5" },
 			identity: {
 				instanceId: "seed-0",
@@ -551,13 +547,13 @@ function createEnvCellSeedRecord(): StaticAuthoredDynamicSeedRecord {
 	};
 }
 
-function createEnvCellDynamicSeedRecord(): StaticAuthoredDynamicSeedRecord {
+function createEnvCellDynamicPlacementRecord(): StaticAuthoredDynamicPlacementRecord {
 	return {
-		kind: "env-cell-static-object-dynamic-seed",
+		kind: "env-cell-static-object-dynamic-placement",
 		owner: createOwner({
 			domain: "env-cell-system",
 		}),
-		seed: {
+		placement: {
 			classificationReason: "setup-default-animation",
 			defaultAnimationId: 0x0300061b,
 			envCellId: 0xda550100,

@@ -1689,7 +1689,42 @@ Acceptance criteria:
 
 Decisions and course corrections:
 
-- Pending.
+- Completed during Phase 9.
+- Deleted `DynamicEntityResourceManager` and removed the resource-manager constructor/listener path
+  from `ClientRuntime` and `DynamicEntityController`.
+- Deleted `DynamicEntityResourceChange`, `applyResourceChange(...)`, and the old main-thread
+  setup/source/material/render-part visual prep path. Dynamic resource readiness is now applied
+  through explicit resolved-recipe and baked/skipped-visual results.
+- Moved static-authored dynamic activation to source-resolved
+  `StaticAuthoredDynamicPlacementRecord`s carried on `StaticScopePrepCommit.dynamicPlacements`.
+  Static bake results no longer emit outdoor dynamic activation records.
+- Renamed env-cell static-object publication records to
+  `EnvCellStaticObjectPlacementRecord` and renamed static bake/commit fields to
+  `envCellStaticObjectPlacementRecords`.
+- Removed the duplicate dynamic snapshot `staticSeedCount`; `staticAuthoredCount` is now the runtime
+  summary count for static-authored dynamic records.
+- Rewrote tests around placement records and the source-resolution activation carrier. The old
+  static object baker test that expected outdoor dynamic activation records from static bake was
+  rewritten to assert the new source-owned activation split.
+
+Debt carried forward:
+
+- Static object bake diagnostics still report authored dynamic placement counts from the static bake
+  path. This is now descriptive diagnostics only, not an activation carrier. Phase 10 should decide
+  whether that diagnostic is still useful enough to keep.
+- Some host-facing concepts still use "seed" where the upstream protocol/source DTO uses that term
+  directly. These were left alone unless they described frontend dynamic activation or static scene
+  placement records.
+
+Verification:
+
+- `npm run check`
+- `npm run test:ts`
+- `npm run lint:ts`
+- `rg` searches for `DynamicEntityResourceManager`, `DynamicEntityResourceChange`,
+  `applyResourceChange`, `staticAuthoredDynamicSeeds`, `authoredDynamicSeeds`,
+  `StaticAuthoredDynamicSeedRecord`, `staticObjectSeeds`, and `staticSeedCount` returned no live
+  frontend matches.
 
 ### Phase 10: Cleanup, Validation, And Documentation
 

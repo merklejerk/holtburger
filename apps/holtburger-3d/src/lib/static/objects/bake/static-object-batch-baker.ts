@@ -28,7 +28,7 @@ import type {
 	StaticObjectSourceGeometryIdentity,
 	StaticObjectInstanceFacts,
 	StaticObjectRetainedTransparentPartitionReasonCounts,
-	StaticObjectDynamicSeedClassificationReasonCounts,
+	StaticObjectDynamicPlacementClassificationReasonCounts,
 } from "../../contracts";
 import { uniqueSortedStaticTextureUseOwners } from "../../contracts";
 import { createLayerPeerRecordOwnerForStaticBakeTask } from "../../layer-owners";
@@ -107,9 +107,7 @@ export function bakeStaticObjectBatch(
 		materialCoverage: itemResults.map((result) => result.materialCoverage),
 		portalApertureResources: [],
 		revision: input.revision,
-		staticAuthoredDynamicSeeds: itemResults.flatMap(
-			(result) => result.staticAuthoredDynamicSeeds,
-		),
+		envCellStaticObjectPlacementRecords: [],
 		staticBatchId: input.staticBatchId,
 		staticPortalGraphs: [],
 		staticPortalInteriorRecords: [],
@@ -244,7 +242,6 @@ function bakeStaticObjectBatchItem(
 	readonly textureUses: readonly StaticBakeTextureUse[];
 	readonly staticObjectRenderInstances: readonly StaticObjectRenderInstance[];
 	readonly staticObjectVisualResources: readonly StaticObjectVisualResource[];
-	readonly staticAuthoredDynamicSeeds: StaticBakeBatchResult["staticAuthoredDynamicSeeds"];
 	readonly task: StaticBakeBatchItem["task"];
 } {
 	const scope = createStaticObjectBatchPayload(item);
@@ -321,7 +318,9 @@ function bakeStaticObjectBatchItem(
 	return {
 		drawUnits: bakedDrawUnits,
 		diagnostics: createStaticObjectBakeDiagnostics({
-			authoredDynamicSeeds: getOutdoorAuthoredDynamicSeeds(item.payload.scope),
+			authoredDynamicPlacements: getOutdoorAuthoredDynamicPlacements(
+				item.payload.scope,
+			),
 			drawUnits: drawUnits.map((output) => output.drawUnit),
 			input,
 			instancedOutput,
@@ -337,10 +336,6 @@ function bakeStaticObjectBatchItem(
 			...spatialRecordBySliceId.values(),
 			...drawUnits.flatMap((output) => output.objectSpatialRecords),
 		],
-		staticAuthoredDynamicSeeds: createOutdoorAuthoredDynamicSeedRecords(
-			item.task,
-			item.payload.scope,
-		),
 		staticObjectRenderInstances: instancedOutput.instances,
 		staticObjectVisualResources: instancedOutput.resources,
 		textureUses: createStaticObjectBakeTextureUses({
@@ -355,7 +350,7 @@ function bakeStaticObjectBatchItem(
 
 function createStaticObjectBakeDiagnostics(options: {
 	readonly input: StaticBakeBatchInput;
-	readonly authoredDynamicSeeds: readonly OutdoorStaticObjectsScopePayload["authoredDynamicSeeds"][number][];
+	readonly authoredDynamicPlacements: readonly OutdoorStaticObjectsScopePayload["authoredDynamicPlacements"][number][];
 	readonly instancedOutput: {
 		readonly instances: readonly StaticObjectRenderInstance[];
 		readonly resources: readonly StaticObjectVisualResource[];
@@ -398,10 +393,10 @@ function createStaticObjectBakeDiagnostics(options: {
 		buildingObjectCount: options.payload.objects.filter(
 			(object) => object.identity.objectKind === "building",
 		).length,
-		authoredDynamicSeedCount: options.authoredDynamicSeeds.length,
-		authoredDynamicSeedClassificationReasons:
-			createStaticObjectDynamicSeedClassificationReasonCounts(
-				options.authoredDynamicSeeds,
+		authoredDynamicPlacementCount: options.authoredDynamicPlacements.length,
+		authoredDynamicPlacementClassificationReasons:
+			createStaticObjectDynamicPlacementClassificationReasonCounts(
+				options.authoredDynamicPlacements,
 			),
 		domain: options.payload.domain,
 		drawUnitCount: options.drawUnits.length,
@@ -449,35 +444,21 @@ function createStaticObjectBakeDiagnostics(options: {
 	};
 }
 
-function createOutdoorAuthoredDynamicSeedRecords(
-	task: StaticBakeBatchItem["task"],
+function getOutdoorAuthoredDynamicPlacements(
 	payload: StaticBakeBatchItem["payload"]["scope"],
-): StaticBakeBatchResult["staticAuthoredDynamicSeeds"] {
-	if (payload.kind !== "outdoor-static-objects") {
-		return [];
-	}
-	const owner = createLayerPeerRecordOwner(task);
-	return payload.authoredDynamicSeeds.map((seed) => ({
-		kind: "outdoor-static-object-dynamic-seed",
-		owner,
-		seed,
-	}));
-}
-
-function getOutdoorAuthoredDynamicSeeds(
-	payload: StaticBakeBatchItem["payload"]["scope"],
-): readonly OutdoorStaticObjectsScopePayload["authoredDynamicSeeds"][number][] {
+): readonly OutdoorStaticObjectsScopePayload["authoredDynamicPlacements"][number][] {
 	return payload.kind === "outdoor-static-objects"
-		? payload.authoredDynamicSeeds
+		? payload.authoredDynamicPlacements
 		: [];
 }
 
-function createStaticObjectDynamicSeedClassificationReasonCounts(
-	seeds: readonly OutdoorStaticObjectsScopePayload["authoredDynamicSeeds"][number][],
-): StaticObjectDynamicSeedClassificationReasonCounts {
+function createStaticObjectDynamicPlacementClassificationReasonCounts(
+	placements: readonly OutdoorStaticObjectsScopePayload["authoredDynamicPlacements"][number][],
+): StaticObjectDynamicPlacementClassificationReasonCounts {
 	return {
-		setupDefaultAnimation: seeds.filter(
-			(seed) => seed.classificationReason === "setup-default-animation",
+		setupDefaultAnimation: placements.filter(
+			(placement) =>
+				placement.classificationReason === "setup-default-animation",
 		).length,
 	};
 }
@@ -1868,7 +1849,7 @@ function createEnvCellStaticObjectBatchPayload(
 		]),
 	);
 	const objects = payload.envCells.flatMap((envCell) =>
-		envCell.staticObjectSeeds.flatMap((seed) => {
+		envCell.staticObjectPlacements.flatMap((seed) => {
 			const source = sourceByKey.get(createSourceKey(seed.source));
 			if (!source || isEnvCellStaticObjectDynamicSource(source)) {
 				return [];
@@ -1932,7 +1913,7 @@ function createStaticObjectDrawUnitOwnership(
 	);
 	return {
 		envCellIds,
-		kind: "env-cell-static-object-seeds",
+		kind: "env-cell-static-object-placements",
 		landblockId: payload.landblock.landblockId,
 		seedIdentities: identities,
 	};

@@ -161,6 +161,7 @@ export interface StaticAuthoredDynamicRecipe {
 }
 
 export interface StaticLandblockSceneLodResolution {
+	readonly dynamicPlacements: readonly StaticAuthoredDynamicPlacementRecord[];
 	readonly dynamicRecipes: readonly StaticAuthoredDynamicRecipe[];
 	readonly request: StaticLandblockSceneLodSourceRequest;
 	readonly recipes: readonly StaticLayerRecipe[];
@@ -585,8 +586,6 @@ export interface OutdoorStaticObjectsScopePayload {
 	readonly domain: OutdoorStaticObjectDomain;
 	/** Static-authored object placements promoted to dynamic visual prep. */
 	readonly authoredDynamicPlacements: readonly OutdoorStaticObjectDynamicPlacementFacts[];
-	/** Legacy downstream activation carrier; removed once static-authored prep is recipe-backed. */
-	readonly authoredDynamicSeeds: readonly OutdoorStaticObjectDynamicSeedFacts[];
 	readonly buildingTransitionApertures: LandblockOutdoorLayerSourcePayloadDto["buildingTransitionApertures"];
 	readonly landblock: LandblockSourceIdentity;
 	readonly regionRenderProfile: StaticObjectRegionRenderProfileFacts;
@@ -805,7 +804,7 @@ export interface LandblockEnvCellStaticFacts {
 	/** Static-authored object placements promoted to dynamic visual prep. */
 	readonly authoredDynamicPlacements: readonly EnvCellStaticObjectDynamicPlacementFacts[];
 	/** Static object placements retained as env-cell bookkeeping, not dynamic activation inputs. */
-	readonly staticObjectSeeds: readonly LandblockEnvCellStaticObjectSeedFacts[];
+	readonly staticObjectPlacements: readonly LandblockEnvCellStaticObjectPlacementFacts[];
 	readonly renderGeometry: LandblockEnvCellRenderGeometryFacts;
 	readonly cellBsp: EnvCellSystemLayerSourcePayloadDto["envCells"][number]["cellBsp"];
 }
@@ -821,7 +820,7 @@ interface LandblockEnvCellSurfaceFacts {
 	readonly material: StaticMaterialSourceIdentity;
 }
 
-interface LandblockEnvCellStaticObjectSeedFacts {
+interface LandblockEnvCellStaticObjectPlacementFacts {
 	readonly identity: StaticObjectInstanceIdentity;
 	readonly source: StaticObjectSourceIdentity;
 	readonly sourceIndex: number;
@@ -1306,18 +1305,7 @@ interface EnvCellStaticObjectDynamicPlacementRecord {
 	readonly placement: EnvCellStaticObjectDynamicPlacementFacts;
 }
 
-export type StaticAuthoredDynamicSeedRecord =
-	| OutdoorStaticObjectDynamicSeedRecord
-	| StaticEnvCellStaticObjectDynamicSeedRecord
-	| StaticEnvCellStaticObjectSeedRecord;
-
-interface OutdoorStaticObjectDynamicSeedRecord {
-	readonly kind: "outdoor-static-object-dynamic-seed";
-	readonly owner: StaticLayerPeerRecordOwner;
-	readonly seed: OutdoorStaticObjectDynamicSeedFacts;
-}
-
-export interface OutdoorStaticObjectDynamicSeedFacts {
+export interface OutdoorStaticObjectDynamicPlacementFacts {
 	readonly landblockId: number;
 	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
 	readonly object: StaticObjectInstanceIdentity;
@@ -1331,18 +1319,8 @@ export interface OutdoorStaticObjectDynamicSeedFacts {
 	readonly classificationReason: "setup-default-animation";
 }
 
-export type OutdoorStaticObjectDynamicPlacementFacts =
-	OutdoorStaticObjectDynamicSeedFacts;
-
-/** Classified env-cell authored static that should enter dynamic runtime registration. */
-interface StaticEnvCellStaticObjectDynamicSeedRecord {
-	readonly kind: "env-cell-static-object-dynamic-seed";
-	readonly owner: StaticLayerPeerRecordOwner;
-	readonly seed: EnvCellStaticObjectDynamicSeedFacts;
-}
-
-/** Lossless env-cell counterpart to outdoor static-authored dynamic seed facts. */
-export interface EnvCellStaticObjectDynamicSeedFacts {
+/** Lossless env-cell counterpart to outdoor static-authored dynamic placement facts. */
+export interface EnvCellStaticObjectDynamicPlacementFacts {
 	readonly landblockId: number;
 	readonly envCellId: number;
 	readonly object: StaticObjectInstanceIdentity;
@@ -1356,15 +1334,12 @@ export interface EnvCellStaticObjectDynamicSeedFacts {
 	readonly classificationReason: "setup-default-animation";
 }
 
-export type EnvCellStaticObjectDynamicPlacementFacts =
-	EnvCellStaticObjectDynamicSeedFacts;
-
-interface StaticEnvCellStaticObjectSeedRecord {
-	readonly kind: "env-cell-static-object-seed";
+export interface EnvCellStaticObjectPlacementRecord {
+	readonly kind: "env-cell-static-object-placement";
 	readonly owner: StaticLayerPeerRecordOwner;
 	readonly landblockId: number;
 	readonly envCellId: number;
-	readonly seed: LandblockEnvCellStaticObjectSeedFacts;
+	readonly placement: LandblockEnvCellStaticObjectPlacementFacts;
 }
 
 export interface StaticBakeAttachmentRequest {
@@ -1396,7 +1371,7 @@ export interface StaticBakeBatchResult {
 	readonly staticPortalInteriorRecords: readonly StaticPortalInteriorRecord[];
 	readonly staticPortalGraphs: readonly StaticPortalGraphRecord[];
 	readonly staticSourceMappings: readonly StaticSourceMappingRecord[];
-	readonly staticAuthoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
+	readonly envCellStaticObjectPlacementRecords: readonly EnvCellStaticObjectPlacementRecord[];
 	readonly staticObjectRenderInstances: readonly StaticObjectRenderInstance[];
 	readonly staticObjectVisualResources: readonly StaticObjectVisualResource[];
 	readonly buildRevision: number;
@@ -1412,8 +1387,8 @@ export interface StaticObjectBakeDiagnostics {
 	readonly landblockId: number;
 	readonly objectCount: number;
 	readonly generatedInstanceCount: number;
-	readonly authoredDynamicSeedCount: number;
-	readonly authoredDynamicSeedClassificationReasons: StaticObjectDynamicSeedClassificationReasonCounts;
+	readonly authoredDynamicPlacementCount: number;
+	readonly authoredDynamicPlacementClassificationReasons: StaticObjectDynamicPlacementClassificationReasonCounts;
 	readonly explicitObjectCount: number;
 	readonly buildingObjectCount: number;
 	readonly uniqueSourceCount: number;
@@ -1444,7 +1419,7 @@ export interface StaticObjectRetainedTransparentPartitionReasonCounts {
 	readonly nonRenderableOrDeferredMaterialBucket: number;
 }
 
-export interface StaticObjectDynamicSeedClassificationReasonCounts {
+export interface StaticObjectDynamicPlacementClassificationReasonCounts {
 	readonly setupDefaultAnimation: number;
 }
 
@@ -1470,7 +1445,7 @@ export type StaticMaterialCoverageFilteringMode =
 	| "shader-palette-linear";
 
 type StaticMaterialCoverageKind =
-	| "env-cell-static-object-seeds"
+	| "env-cell-static-object-placements"
 	| "outdoor-static-objects"
 	| "structured-interior"
 	| "terrain";
@@ -1666,7 +1641,7 @@ export type StaticObjectDrawUnitOwnership =
 			readonly domain: OutdoorStaticObjectDomain;
 	  }
 	| {
-			readonly kind: "env-cell-static-object-seeds";
+			readonly kind: "env-cell-static-object-placements";
 			readonly landblockId: number;
 			readonly envCellIds: readonly number[];
 			readonly seedIdentities: readonly StaticObjectInstanceIdentity[];
@@ -1947,7 +1922,7 @@ export interface StaticCoordinatorCommitDelta {
 	readonly staticPortalInteriorRecords: readonly StaticPortalInteriorRecord[];
 	readonly staticPortalGraphs: readonly StaticPortalGraphRecord[];
 	readonly staticSourceMappings: readonly StaticSourceMappingRecord[];
-	readonly staticAuthoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
+	readonly envCellStaticObjectPlacementRecords: readonly EnvCellStaticObjectPlacementRecord[];
 	readonly staticObjectRenderInstances: readonly StaticObjectRenderInstance[];
 	readonly staticObjectVisualResources: readonly StaticObjectVisualResource[];
 	/** Static layer tasks whose products are represented by this commit. */
@@ -1958,6 +1933,8 @@ export interface StaticCoordinatorCommitDelta {
 export interface StaticScopePrepCommit {
 	/** Static-only materialization payload. */
 	readonly staticCommit: StaticCoordinatorCommitDelta;
+	/** Static-authored dynamic placements whose residency is gated by this commit. */
+	readonly dynamicPlacements: readonly StaticAuthoredDynamicPlacementRecord[];
 	/** Resolved static-authored dynamic recipes scoped to this commit. */
 	readonly dynamicRecipes: readonly DynamicEntityRecipe[];
 	/** Baked dynamic visuals produced from sibling source-resolution recipes. */
@@ -2065,7 +2042,7 @@ export interface EnvCellSystemPayloadSummary {
 	readonly visibleCellCount: number;
 	readonly portalCount: number;
 	readonly portalLinkCount: number;
-	readonly staticObjectSeedCount: number;
+	readonly staticObjectPlacementCount: number;
 	readonly visibilityDiagnosticCount: number;
 	readonly missingRefCount: number;
 }

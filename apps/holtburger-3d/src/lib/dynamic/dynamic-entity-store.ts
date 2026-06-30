@@ -87,7 +87,6 @@ export class DynamicEntityStore {
 			records: records.map(createDynamicEntitySummaryDto),
 			runtimeSpawnCount,
 			staticAuthoredCount,
-			staticSeedCount: staticAuthoredCount,
 		};
 	}
 }
@@ -128,11 +127,11 @@ function createDynamicEntitySourceSummary(
 		return source;
 	}
 	return {
-		defaultAnimationId: source.seed.defaultAnimationId,
+		defaultAnimationId: source.placement.defaultAnimationId,
 		kind: "static-authored",
-		object: source.seed.object,
-		setupModelId: source.seed.setupModelId,
-		sourceAssetId: source.seed.sourceAssetId,
+		object: source.placement.object,
+		setupModelId: source.placement.setupModelId,
+		sourceAssetId: source.placement.sourceAssetId,
 	};
 }
 

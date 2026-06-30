@@ -143,38 +143,44 @@ export class StaticCoordinator {
 		this.#assertActive();
 		this.#revision += 1;
 		const demandPlan = planStaticDemand(demand, this.#revision);
-		const demandKeys = new Set(demandPlan.work.map(createDemandWorkKey));
 		const desiredOwnerIds = new Set(
-			demandPlan.work.map((work) => createLayerOwnerKeyIdForWork(work)),
+			demandPlan.retainedLayerOwners.map(createLayerOwnerKeyId),
 		);
+		const run: StaticReconciliationRunState = {
+			desiredOwnerIds,
+			retainedLayerOwners: demandPlan.retainedLayerOwners,
+			revision: this.#revision,
+			runId: createStaticReconciliationRunId(this.#revision),
+		};
 		const newWorkItems: ScheduledStaticWork[] = [];
 
 		for (const status of Array.from(this.#inFlightStaticWork.values())) {
-			if (!demandKeys.has(status.demandKey)) {
+			if (!run.desiredOwnerIds.has(status.ownerId)) {
 				this.#inFlightStaticWork.delete(status.staticWorkId);
 			}
 		}
-		const removedResources = this.#evictResidentResourcesExcept(desiredOwnerIds);
+		const removedResources = this.#evictResidentResourcesExcept(
+			run.desiredOwnerIds,
+		);
 		if (removedResources.length > 0) {
 			this.#emitEvictionCommitDelta({ removedResources });
 		}
-		this.#pruneMaterialCoverageByOwnerIds(desiredOwnerIds);
-		this.#pruneStaticObjectBakeDiagnosticsByOwnerIds(desiredOwnerIds);
+		this.#pruneMaterialCoverageByOwnerIds(run.desiredOwnerIds);
+		this.#pruneStaticObjectBakeDiagnosticsByOwnerIds(run.desiredOwnerIds);
 
 		for (const work of demandPlan.work) {
 			const demandKey = createDemandWorkKey(work);
-			const existing = this.#findInFlightStaticWorkByDemandKey(demandKey);
-			if (existing && existing.status !== "failed") {
-				continue;
-			}
+			const ownerId = createLayerOwnerKeyIdForWork(work);
+			const ownerKey = createLayerOwnerKeyForWork(work);
+			const existing = this.#findInFlightStaticWorkByOwnerId(ownerId);
 			if (existing) {
-				this.#inFlightStaticWork.delete(existing.staticWorkId);
+				continue;
 			}
 			this.#inFlightStaticWork.set(work.staticWorkId, {
 				demandKey,
 				domain: work.job.domain,
-				ownerId: createLayerOwnerKeyIdForWork(work),
-				ownerKey: createLayerOwnerKeyForWork(work),
+				ownerId,
+				ownerKey,
 				staticWorkId: work.staticWorkId,
 				revision: work.revision,
 				scopeKey: describeStaticScopeKey(work.job.scope),
@@ -197,19 +203,20 @@ export class StaticCoordinator {
 			void this.#resolveSourceThenBake(sourceRequest);
 		}
 
-		const inFlightStaticWork = demandPlan.work
-			.map((work) =>
-				this.#findInFlightStaticWorkByDemandKey(createDemandWorkKey(work)),
+		const layerTasks = demandPlan.retainedLayerOwners
+			.map((ownerKey) =>
+				this.#findInFlightStaticWorkByOwnerId(createLayerOwnerKeyId(ownerKey)),
 			)
 			.filter((status): status is MutableScheduledStaticWorkStatus =>
 				Boolean(status),
 			)
-			.map((status) => status.work);
+			.map(toStaticLayerTaskStatus);
 
 		return {
-			inFlightStaticWork,
+			layerTasks,
 			removedResources,
-			retainedLayerOwners: demandPlan.retainedLayerOwners,
+			retainedLayerOwners: run.retainedLayerOwners,
+			runId: run.runId,
 		};
 	}
 
@@ -637,6 +644,18 @@ export class StaticCoordinator {
 		return null;
 	}
 
+	#findInFlightStaticWorkByOwnerId(
+		ownerId: string,
+	): MutableScheduledStaticWorkStatus | null {
+		for (const status of this.#inFlightStaticWork.values()) {
+			if (status.ownerId === ownerId) {
+				return status;
+			}
+		}
+
+		return null;
+	}
+
 	#pruneMaterialCoverageByOwnerIds(ownerIds: ReadonlySet<string>): void {
 		for (const coverage of Array.from(
 			this.#latestMaterialCoverageByKey.values(),
@@ -849,6 +868,17 @@ type MutableScheduledStaticWorkStatus = {
 	status: "requested" | "resolving" | "source-committed" | "baking" | "committed" | "failed";
 };
 
+interface StaticReconciliationRunState {
+	/** Opaque id for one accepted scene-interest reconciliation. */
+	readonly runId: string;
+	/** Coordinator revision assigned to this run. */
+	readonly revision: number;
+	/** Desired layer owners after demand planning, keyed by stable owner id. */
+	readonly desiredOwnerIds: ReadonlySet<string>;
+	/** Layer owners retained by the runtime for this run. */
+	readonly retainedLayerOwners: readonly LayerOwnerState["key"][];
+}
+
 interface PendingStaticBakeBatch {
 	readonly domain: ScheduledStaticWork["job"]["domain"];
 	readonly revision: number;
@@ -895,6 +925,10 @@ function createStaticBatchId(input: {
 
 function createPendingBatchKey(work: ScheduledStaticWork): string {
 	return [work.revision.toString(), work.job.domain].join(":");
+}
+
+function createStaticReconciliationRunId(revision: number): string {
+	return `static-run:${revision}`;
 }
 
 function createDemandWorkKey(work: ScheduledStaticWork): string {

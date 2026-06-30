@@ -233,6 +233,30 @@ export class StaticCoordinator {
 		};
 	}
 
+	markCommitMaterialized(delta: StaticCoordinatorCommitDelta): void {
+		let changed = false;
+		for (const task of delta.tasks) {
+			const current = this.#inFlightStaticWork.get(task.taskId);
+			if (!current || current.status !== "materializing") {
+				continue;
+			}
+			current.status = "committed";
+			changed = true;
+		}
+		if (changed) {
+			this.#emit();
+		}
+	}
+
+	markCommitMaterializationFailed(
+		delta: StaticCoordinatorCommitDelta,
+		message: string,
+	): void {
+		for (const task of delta.tasks) {
+			this.#markTaskIdFailedIfCurrent(task.taskId, message);
+		}
+	}
+
 	subscribeSourcePayloads(
 		listener: StaticCoordinatorSourcePayloadListener,
 	): () => void {
@@ -538,7 +562,7 @@ export class StaticCoordinator {
 			if (!status) {
 				continue;
 			}
-			status.status = "committed";
+			status.status = "materializing";
 			this.#committed += 1;
 		}
 		for (const [ownerId, resources] of resourcesByOwnerId) {
@@ -578,6 +602,7 @@ export class StaticCoordinator {
 		this.#emitCommitDelta({
 			addedDrawUnits: result.drawUnits,
 			addedPortalApertureResources: result.portalApertureResources,
+			commitId: createStaticCommitId(result.staticBatchId),
 			materialCoverage: result.materialCoverage,
 			removedResources: [],
 			revision: result.revision,
@@ -590,6 +615,7 @@ export class StaticCoordinator {
 			staticSourceMappings: result.staticSourceMappings,
 			staticSpatialRecords: result.staticSpatialRecords,
 			staticVisibilityRecords: result.staticVisibilityRecords,
+			tasks: result.tasks,
 			textureUses: result.textureUses,
 		});
 		this.#emit();
@@ -621,14 +647,16 @@ export class StaticCoordinator {
 	#emitEvictionCommitDelta(options: {
 		readonly removedResources: readonly StaticResourceKey[];
 	}): void {
+		const staticBatchId = createEvictionStaticBatchId(this.#revision);
 		this.#emitCommitDelta({
 			addedDrawUnits: [],
 			addedPortalApertureResources: [],
+			commitId: createStaticCommitId(staticBatchId),
 			materialCoverage: [],
 			removedResources: options.removedResources,
 			revision: this.#revision,
 			staticAuthoredDynamicSeeds: [],
-			staticBatchId: createEvictionStaticBatchId(this.#revision),
+			staticBatchId,
 			staticObjectRenderInstances: [],
 			staticObjectVisualResources: [],
 			staticPortalGraphs: [],
@@ -636,6 +664,7 @@ export class StaticCoordinator {
 			staticSourceMappings: [],
 			staticSpatialRecords: [],
 			staticVisibilityRecords: [],
+			tasks: [],
 			textureUses: [],
 		});
 	}
@@ -915,7 +944,14 @@ type MutableScheduledStaticWorkStatus = {
 	revision: number;
 	scopeKey: string;
 	staticWorkId: string;
-	status: "requested" | "resolving" | "source-committed" | "baking" | "committed" | "failed";
+	status:
+		| "requested"
+		| "resolving"
+		| "source-committed"
+		| "baking"
+		| "materializing"
+		| "committed"
+		| "failed";
 };
 
 interface StaticReconciliationRunState {
@@ -1390,6 +1426,8 @@ function createStaticLayerTaskPhase(
 			return status;
 		case "source-committed":
 			return "source-resolved";
+		case "materializing":
+			return "materializing";
 	}
 }
 
@@ -1405,6 +1443,8 @@ function createLayerOwnerLifecycle(
 			return "resolving";
 		case "baking":
 			return "baking";
+		case "materializing":
+			return "materializing";
 		case "committed":
 			return (residentResourcesByOwnerId.get(status.ownerId)?.length ?? 0) >
 				0
@@ -1417,6 +1457,10 @@ function createLayerOwnerLifecycle(
 
 function createEvictionStaticBatchId(revision: number): string {
 	return ["static-batch", revision.toString(), "evict"].join(":");
+}
+
+function createStaticCommitId(staticBatchId: string): string {
+	return ["static-commit", staticBatchId].join(":");
 }
 
 function createStaticObjectBakeDiagnosticsKey(

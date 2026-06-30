@@ -96,6 +96,7 @@ export type LayerOwnerLifecycle =
 	| "desired"
 	| "resolving"
 	| "baking"
+	| "materializing"
 	| "materialized"
 	| "empty"
 	| "failed";
@@ -1889,6 +1890,8 @@ export interface StaticCoordinatorTimingDiagnostics {
 }
 
 export interface StaticCoordinatorCommitDelta {
+	/** Stable identity for this exact runtime materialization unit. */
+	readonly commitId: string;
 	readonly staticBatchId: string;
 	readonly addedDrawUnits: readonly StaticDrawUnit[];
 	readonly addedPortalApertureResources: readonly StaticPortalApertureResource[];
@@ -1903,6 +1906,8 @@ export interface StaticCoordinatorCommitDelta {
 	readonly staticAuthoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
 	readonly staticObjectRenderInstances: readonly StaticObjectRenderInstance[];
 	readonly staticObjectVisualResources: readonly StaticObjectVisualResource[];
+	/** Static layer tasks whose products are represented by this commit. */
+	readonly tasks: readonly StaticBakeTask[];
 	readonly revision: number;
 }
 

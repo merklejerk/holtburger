@@ -155,6 +155,7 @@ import type { PlacementTransformDto } from "../host/contracts";
 import { translateBounds } from "./scene-query/geometry";
 
 const STATIC_DIAGNOSTICS_FAILURE_LIMIT = 8;
+const STATIC_MATERIALIZATION_COMMIT_DIAGNOSTICS_LIMIT = 8;
 const TERRAIN_TEXTURE_DIAGNOSTICS_EVENT_LIMIT = 8;
 const BLENDED_STATIC_AUDIT_WARNING_BUCKET_LIMIT = 8;
 const DEFAULT_ASSET_MAINTENANCE_INTERVAL_MS = 5_000;
@@ -652,11 +653,32 @@ interface RuntimeRenderPolicySnapshot {
 }
 
 interface StaticMaterializationSnapshot {
-	readonly pendingRevisions: readonly number[];
-	readonly committedRevisions: readonly number[];
+	readonly pendingCommits: readonly StaticMaterializationCommitSnapshot[];
+	readonly committedCommits: readonly StaticMaterializationCommitSnapshot[];
+	readonly failedCommits: readonly StaticMaterializationCommitSnapshot[];
 	readonly envCellResourceMembershipRevision: number;
 	readonly materializedDrawUnits: number;
 	readonly sourceDrawUnits: number;
+}
+
+interface StaticMaterializationCommitSnapshot {
+	readonly commitId: string;
+	readonly phase: StaticMaterializationCommitPhase;
+	readonly revision: number;
+	readonly staticBatchId: string;
+}
+
+type StaticMaterializationCommitPhase =
+	| "queued"
+	| "materializing"
+	| "materialized"
+	| "failed";
+
+interface MutableStaticMaterializationCommit {
+	readonly commitId: string;
+	phase: StaticMaterializationCommitPhase;
+	readonly revision: number;
+	readonly staticBatchId: string;
 }
 
 export interface ClientRuntime {
@@ -798,9 +820,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 	#lastFrameState: FrameState | null = null;
 	#renderAnchorLandblockId: number | null = null;
 	#staticMaterializationQueue: Promise<void> = Promise.resolve();
-	#pendingStaticMaterializations = new Set<number>();
-	#committedStaticMaterializations: number[] = [];
-	readonly #failedStaticMaterializationRevisions = new Set<number>();
+	readonly #staticMaterializationCommits =
+		new Map<string, MutableStaticMaterializationCommit>();
+	#committedStaticMaterializations: StaticMaterializationCommitSnapshot[] = [];
 	#materializedDrawUnitIdsBySourceDrawUnitId = new Map<
 		string,
 		readonly string[]
@@ -1232,7 +1254,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			kind: "runtime-diagnostics-report",
 			runtime: {
 				committedStaticMaterializationCount:
-					snapshot.staticMaterialization.committedRevisions.length,
+					snapshot.staticMaterialization.committedCommits.length,
 				envCellResourceMembershipRevision:
 					snapshot.staticMaterialization.envCellResourceMembershipRevision,
 				portalFrameWorkPlan: createPortalFrameWorkPlanDiagnostics(
@@ -1243,7 +1265,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 				materializedStaticDrawUnits:
 					snapshot.staticMaterialization.materializedDrawUnits,
 				pendingStaticMaterializationCount:
-					snapshot.staticMaterialization.pendingRevisions.length,
+					snapshot.staticMaterialization.pendingCommits.length,
 				sourceStaticDrawUnits: snapshot.staticMaterialization.sourceDrawUnits,
 				status: snapshot.status,
 				textureFilteringMode: snapshot.renderPolicy.textureFilteringMode,
@@ -1649,14 +1671,18 @@ class ClientRuntimeImpl implements ClientRuntime {
 			static: this.#lastStaticSnapshot,
 			staticSceneQuery: this.#staticSceneQuery.createSnapshot(),
 			staticMaterialization: {
-				committedRevisions: this.#committedStaticMaterializations,
+				committedCommits: this.#committedStaticMaterializations,
 				envCellResourceMembershipRevision:
 					this.#envCellResourceMembershipRevision,
+				failedCommits: this.#createStaticMaterializationCommitSnapshots(
+					"failed",
+				),
 				materializedDrawUnits: countMaterializedDrawUnits(
 					this.#materializedDrawUnitIdsBySourceDrawUnitId,
 				),
-				pendingRevisions: Array.from(this.#pendingStaticMaterializations).sort(
-					(a, b) => a - b,
+				pendingCommits: this.#createStaticMaterializationCommitSnapshots(
+					"queued",
+					"materializing",
 				),
 				sourceDrawUnits: this.#materializedDrawUnitIdsBySourceDrawUnitId.size,
 			},
@@ -1710,7 +1736,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			this.#sceneInterestRevision === 0 ||
 			this.#settledSceneInterestRevision === this.#sceneInterestRevision ||
 			this.#sceneInterestReconciliationActive ||
-			this.#pendingStaticMaterializations.size > 0
+			this.#hasPendingStaticMaterializationCommits()
 		) {
 			return;
 		}
@@ -1744,14 +1770,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 		const failedOwners = sceneOwnerStates.filter(
 			(state) => state.lifecycle === "failed",
 		);
-		const failedMaterialization = Array.from(
-			this.#failedStaticMaterializationRevisions,
-		).some((revision) =>
-			sceneOwnerStates.some((state) => state.revision === revision),
-		);
 		this.#emitSceneInterestSettled({
-			result:
-				failedOwners.length > 0 || failedMaterialization ? "failed" : "ready",
+			result: failedOwners.length > 0 ? "failed" : "ready",
 			source,
 		});
 	}
@@ -1780,12 +1800,46 @@ class ClientRuntimeImpl implements ClientRuntime {
 
 	#enqueueStaticMaterialization(delta: StaticCoordinatorCommitDelta): void {
 		this.#warnAboutDeferredStaticMaterialCoverage(delta);
-		this.#pendingStaticMaterializations.add(delta.revision);
+		const commit = this.#trackStaticMaterializationCommit(delta);
 		this.#staticMaterializationQueue = this.#staticMaterializationQueue
-			.then(() => this.#materializeStaticCommit(delta))
+			.then(() => {
+				commit.phase = "materializing";
+				return this.#materializeStaticCommit(delta);
+			})
 			.catch((error: unknown) => {
-				this.#recordStaticMaterializationFailure(delta.revision, error);
+				this.#recordStaticMaterializationFailure(delta, error);
 			});
+	}
+
+	#trackStaticMaterializationCommit(
+		delta: StaticCoordinatorCommitDelta,
+	): MutableStaticMaterializationCommit {
+		const commit: MutableStaticMaterializationCommit = {
+			commitId: delta.commitId,
+			phase: "queued",
+			revision: delta.revision,
+			staticBatchId: delta.staticBatchId,
+		};
+		this.#staticMaterializationCommits.set(delta.commitId, commit);
+		return commit;
+	}
+
+	#createStaticMaterializationCommitSnapshots(
+		...phases: StaticMaterializationCommitPhase[]
+	): StaticMaterializationCommitSnapshot[] {
+		const phaseSet = new Set(phases);
+		return Array.from(this.#staticMaterializationCommits.values())
+			.filter((commit) => phaseSet.has(commit.phase))
+			.map(toStaticMaterializationCommitSnapshot);
+	}
+
+	#hasPendingStaticMaterializationCommits(): boolean {
+		for (const commit of this.#staticMaterializationCommits.values()) {
+			if (commit.phase === "queued" || commit.phase === "materializing") {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	#warnAboutDeferredStaticMaterialCoverage(
@@ -1855,25 +1909,51 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#enqueueDynamicRendererResourceSync();
 		this.#updateRenderPassPlan();
 		this.#refreshSceneDebugOverlay();
-		this.#pendingStaticMaterializations.delete(delta.revision);
-		this.#committedStaticMaterializations = appendBoundedRevision(
+		this.#markStaticMaterializationCommit(delta, "materialized");
+		this.#staticCoordinator.markCommitMaterialized(delta);
+		this.#committedStaticMaterializations = appendBounded(
 			this.#committedStaticMaterializations,
-			delta.revision,
+			toStaticMaterializationCommitSnapshot(
+				this.#requireStaticMaterializationCommit(delta.commitId),
+			),
+			STATIC_MATERIALIZATION_COMMIT_DIAGNOSTICS_LIMIT,
 		);
 		this.#maybeEmitSceneInterestSettled();
 	}
 
-	#recordStaticMaterializationFailure(revision: number, error: unknown): void {
-		this.#pendingStaticMaterializations.delete(revision);
+	#recordStaticMaterializationFailure(
+		delta: StaticCoordinatorCommitDelta,
+		error: unknown,
+	): void {
 		const message = error instanceof Error ? error.message : String(error);
-		this.#failedStaticMaterializationRevisions.add(revision);
+		this.#markStaticMaterializationCommit(delta, "failed");
+		this.#staticCoordinator.markCommitMaterializationFailed(delta, message);
 		this.#diagnostics.warn({
+			commitId: delta.commitId,
 			error,
 			kind: "static-materialization-failed",
 			message,
-			revision,
+			revision: delta.revision,
+			staticBatchId: delta.staticBatchId,
 		});
 		this.#maybeEmitSceneInterestSettled();
+	}
+
+	#markStaticMaterializationCommit(
+		delta: StaticCoordinatorCommitDelta,
+		phase: StaticMaterializationCommitPhase,
+	): void {
+		this.#requireStaticMaterializationCommit(delta.commitId).phase = phase;
+	}
+
+	#requireStaticMaterializationCommit(
+		commitId: string,
+	): MutableStaticMaterializationCommit {
+		const commit = this.#staticMaterializationCommits.get(commitId);
+		if (!commit) {
+			throw new Error(`Missing static materialization commit ${commitId}.`);
+		}
+		return commit;
 	}
 
 	#enqueueDynamicRendererResourceSync(): void {
@@ -3316,13 +3396,6 @@ function resourceKeyId(resource: StaticResourceKey): string {
 	}
 }
 
-function appendBoundedRevision(
-	revisions: readonly number[],
-	revision: number,
-): number[] {
-	return [...revisions, revision].slice(-8);
-}
-
 function countMaterializedDrawUnits(
 	drawUnitIdsBySourceDrawUnitId: ReadonlyMap<string, readonly string[]>,
 ): number {
@@ -3334,6 +3407,17 @@ function countMaterializedDrawUnits(
 
 function appendBounded<T>(entries: readonly T[], entry: T, limit: number): T[] {
 	return [...entries, entry].slice(-limit);
+}
+
+function toStaticMaterializationCommitSnapshot(
+	commit: MutableStaticMaterializationCommit,
+): StaticMaterializationCommitSnapshot {
+	return {
+		commitId: commit.commitId,
+		phase: commit.phase,
+		revision: commit.revision,
+		staticBatchId: commit.staticBatchId,
+	};
 }
 
 function normalizeSceneInterest(

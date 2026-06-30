@@ -327,6 +327,7 @@ function createCommitDelta(options: {
 	return {
 		addedDrawUnits: options.addedDrawUnits,
 		addedPortalApertureResources: [],
+		commitId: "static-commit:batch-a",
 		materialCoverage: [],
 		removedResources: [],
 		revision: 7,
@@ -339,6 +340,7 @@ function createCommitDelta(options: {
 		staticObjectRenderInstances: [],
 		staticObjectVisualResources: options.staticObjectVisualResources ?? [],
 		staticVisibilityRecords: [],
+		tasks: [],
 		textureUses: options.textureUses,
 	};
 }

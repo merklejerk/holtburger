@@ -27,6 +27,8 @@ describe("static coordinator", () => {
 			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
 			resolver,
 		});
+		const deltas: StaticCoordinatorCommitDelta[] = [];
+		coordinator.subscribeCommits((delta) => deltas.push(delta));
 		const [firstWork] = bakeTasksForDemand(
 			coordinator,
 			createSingleTerrainDemand(0xda55ffff),
@@ -396,6 +398,8 @@ describe("static coordinator", () => {
 			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
 			resolver,
 		});
+		const deltas: StaticCoordinatorCommitDelta[] = [];
+		coordinator.subscribeCommits((delta) => deltas.push(delta));
 
 		const [work] = bakeTasksForDemand(
 			coordinator,
@@ -424,6 +428,14 @@ describe("static coordinator", () => {
 		expect(coordinator.createSnapshot().ownerStates).toMatchObject([
 			{
 				key: { kind: "terrain", landblockId: 0xda55ffff },
+				lifecycle: "materializing",
+			},
+		]);
+
+		coordinator.markCommitMaterialized(deltas.at(-1) ?? failCommitDelta());
+		expect(coordinator.createSnapshot().ownerStates).toMatchObject([
+			{
+				key: { kind: "terrain", landblockId: 0xda55ffff },
 				lifecycle: "materialized",
 			},
 		]);
@@ -446,6 +458,8 @@ describe("static coordinator", () => {
 			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
 			resolver: emptyResolver,
 		});
+		const emptyDeltas: StaticCoordinatorCommitDelta[] = [];
+		emptyCoordinator.subscribeCommits((delta) => emptyDeltas.push(delta));
 		const [emptyWork] = bakeTasksForDemand(
 			emptyCoordinator,
 			createSingleTerrainDemand(0xda55ffff),
@@ -454,6 +468,9 @@ describe("static coordinator", () => {
 		await flushPromises();
 		emptyBaker.complete(emptyWork.taskId, { drawUnits: [] });
 		await flushPromises();
+		emptyCoordinator.markCommitMaterialized(
+			emptyDeltas.at(-1) ?? failCommitDelta(),
+		);
 
 		expect(emptyCoordinator.createSnapshot().ownerStates).toMatchObject([
 			{
@@ -595,6 +612,8 @@ describe("static coordinator", () => {
 			{
 				addedDrawUnits: [createTerrainDrawUnit("terrain-a", 0xda55ffff)],
 				addedPortalApertureResources: [],
+				commitId:
+					"static-commit:static-batch:1:outdoor-terrain:landblock:da55ffff:1",
 				materialCoverage: [],
 				removedResources: [],
 				revision: 1,
@@ -607,6 +626,7 @@ describe("static coordinator", () => {
 				staticSourceMappings: [],
 				staticSpatialRecords: [],
 				staticVisibilityRecords: [],
+				tasks: [expect.objectContaining({ taskId: work.taskId })],
 				textureUses: [],
 			},
 		]);
@@ -625,6 +645,7 @@ describe("static coordinator", () => {
 		expect(deltas.at(-1)).toEqual({
 			addedDrawUnits: [],
 			addedPortalApertureResources: [],
+			commitId: "static-commit:static-batch:2:evict",
 			materialCoverage: [],
 			removedResources: [{ drawUnitId: "terrain-a", kind: "draw-unit" }],
 			revision: 2,
@@ -637,6 +658,7 @@ describe("static coordinator", () => {
 			staticSourceMappings: [],
 			staticSpatialRecords: [],
 			staticVisibilityRecords: [],
+			tasks: [],
 			textureUses: [],
 		});
 		expect(coordinator.createSnapshot().committedDrawUnits).toBe(0);
@@ -1366,7 +1388,7 @@ describe("static coordinator", () => {
 				.createSnapshot()
 				.layerTasks.find((item) => item.domain === "env-cell-system")
 				?.phase,
-		).toBe("committed");
+		).toBe("materializing");
 	});
 
 	it("filters typed work-owned env-cell peer records for superseded batch members", async () => {
@@ -1472,6 +1494,10 @@ describe("static coordinator", () => {
 	});
 
 });
+
+function failCommitDelta(): never {
+	throw new Error("Expected static coordinator commit delta.");
+}
 
 function createSingleTerrainDemand(landblockId: number): StaticDemand {
 	return {

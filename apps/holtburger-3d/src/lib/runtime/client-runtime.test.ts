@@ -2282,8 +2282,16 @@ describe("browser client runtime", () => {
 		expect(renderer.textureUpdates).toEqual([]);
 		expect(
 			runtimeDiagnosticsSnapshotSummary(runtime.createDiagnosticsSnapshot())
-				.staticMaterialization.pendingRevisions,
-		).toEqual([1]);
+				.staticMaterialization.pendingCommits,
+		).toEqual([
+			{
+				commitId:
+					"static-commit:static-batch:1:outdoor-terrain:landblock:da55ffff:1",
+				phase: "materializing",
+				revision: 1,
+				staticBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:1",
+			},
+		]);
 		assetService.resolveNext(
 			createPreparedTextureAsset(assetService.pendingKeys[0] ?? failKey()),
 		);
@@ -2297,10 +2305,19 @@ describe("browser client runtime", () => {
 			runtimeDiagnosticsSnapshotSummary(runtime.createDiagnosticsSnapshot())
 				.staticMaterialization,
 		).toEqual({
-			committedRevisions: [1],
+			committedCommits: [
+				{
+					commitId:
+						"static-commit:static-batch:1:outdoor-terrain:landblock:da55ffff:1",
+					phase: "materialized",
+					revision: 1,
+					staticBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:1",
+				},
+			],
 			envCellResourceMembershipRevision: 0,
+			failedCommits: [],
 			materializedDrawUnits: 1,
-			pendingRevisions: [],
+			pendingCommits: [],
 			sourceDrawUnits: 1,
 		});
 		runtime.dispose();
@@ -2403,10 +2420,19 @@ describe("browser client runtime", () => {
 			runtimeDiagnosticsSnapshotSummary(runtime.createDiagnosticsSnapshot())
 				.staticMaterialization,
 		).toEqual({
-			committedRevisions: [],
+			committedCommits: [],
 			envCellResourceMembershipRevision: 0,
+			failedCommits: [
+				{
+					commitId:
+						"static-commit:static-batch:1:outdoor-terrain:landblock:da55ffff:1",
+					phase: "failed",
+					revision: 1,
+					staticBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:1",
+				},
+			],
 			materializedDrawUnits: 0,
-			pendingRevisions: [],
+			pendingCommits: [],
 			sourceDrawUnits: 0,
 		});
 		runtime.dispose();

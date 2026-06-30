@@ -20,7 +20,7 @@ import {
 
 export type StaticMaterialDetailRoleDomain =
 	| OutdoorStaticObjectDomain
-	| "landblock-env-cells"
+	| "env-cell-system"
 	| "runtime-authored-dynamic-object-material";
 
 export interface StaticMaterialDetailRolePlan {
@@ -114,7 +114,7 @@ function resolveComposableDetailRole(
 	const role =
 		domain === "outdoor-buildings"
 			? "building"
-			: domain === "landblock-env-cells"
+			: domain === "env-cell-system"
 				? "environment"
 				: null;
 	if (!role) {

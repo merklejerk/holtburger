@@ -191,7 +191,7 @@ describe("browser client runtime", () => {
 		).toHaveLength(1);
 		expect(
 			resolver.pendingRequests.filter(
-				(request) => request.job.domain === "landblock-env-cells",
+				(request) => request.job.domain === "env-cell-system",
 			),
 		).toHaveLength(1);
 		runtime.dispose();
@@ -1002,10 +1002,10 @@ describe("browser client runtime", () => {
 		});
 
 		updateInteriorSceneInterest(runtime);
-		completeResolverRequest(resolver, "landblock-env-cells", 0xda55ffff);
+		completeResolverRequest(resolver, "env-cell-system", 0xda55ffff);
 		await flushPromises();
 
-		const workId = "1:landblock:da55ffff:landblock-env-cells";
+		const workId = "1:landblock:da55ffff:env-cell-system";
 		baker.complete(workId, {
 			staticAuthoredDynamicSeeds: [
 				createEnvCellStaticSeedRecord(workId),
@@ -1250,7 +1250,7 @@ describe("browser client runtime", () => {
 			(request) => request.job.domain === "outdoor-buildings",
 		);
 		const envCellRequest = resolver.pendingRequests.find(
-			(request) => request.job.domain === "landblock-env-cells",
+			(request) => request.job.domain === "env-cell-system",
 		);
 		resolver.complete(buildingRequest?.requestId ?? failKey());
 		await flushPromises();
@@ -1279,7 +1279,7 @@ describe("browser client runtime", () => {
 				},
 			],
 		});
-		baker.complete("1:landblock:da55ffff:landblock-env-cells", {
+		baker.complete("1:landblock:da55ffff:env-cell-system", {
 			drawUnits: [
 				createStructuredInteriorDrawUnit({
 					drawUnitId: "structured:da550100",
@@ -1423,10 +1423,10 @@ describe("browser client runtime", () => {
 				],
 			},
 		});
-		completeResolverRequest(resolver, "landblock-env-cells", 0xda55ffff);
+		completeResolverRequest(resolver, "env-cell-system", 0xda55ffff);
 		await flushPromises();
 		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff);
-		completeBakerWork(baker, "landblock-env-cells", 0xda55ffff, {
+		completeBakerWork(baker, "env-cell-system", 0xda55ffff, {
 			drawUnits: [
 				createStructuredInteriorDrawUnit({
 					drawUnitId: "structured:da550100",
@@ -1570,12 +1570,12 @@ describe("browser client runtime", () => {
 		baker.complete("1:landblock:da55ffff:outdoor-buildings");
 		await flushPromises();
 		const envCellRequest = resolver.pendingRequests.find(
-			(request) => request.job.domain === "landblock-env-cells",
+			(request) => request.job.domain === "env-cell-system",
 		);
 		expect(envCellRequest).toBeDefined();
 		resolver.complete(envCellRequest?.requestId ?? "");
 		await flushPromises();
-		baker.complete("1:landblock:da55ffff:landblock-env-cells", {
+		baker.complete("1:landblock:da55ffff:env-cell-system", {
 			drawUnits: [
 				createStructuredInteriorDrawUnit({
 					drawUnitId: "structured:da550100",
@@ -1663,12 +1663,12 @@ describe("browser client runtime", () => {
 				],
 			},
 		});
-		completeResolverRequest(resolver, "landblock-env-cells", 0xdb55ffff);
+		completeResolverRequest(resolver, "env-cell-system", 0xdb55ffff);
 		await flushPromises();
 
 		completeBakerWork(baker, "outdoor-terrain", 0xdb55ffff);
 		completeBakerWork(baker, "outdoor-buildings", 0xdb55ffff);
-		completeBakerWork(baker, "landblock-env-cells", 0xdb55ffff, {
+		completeBakerWork(baker, "env-cell-system", 0xdb55ffff, {
 			drawUnits: [
 				createStructuredInteriorDrawUnit({
 					drawUnitId: "structured:db550100",
@@ -1816,7 +1816,7 @@ describe("browser client runtime", () => {
 			(request) => request.job.domain === "outdoor-buildings",
 		);
 		const envCellRequest = resolver.pendingRequests.find(
-			(request) => request.job.domain === "landblock-env-cells",
+			(request) => request.job.domain === "env-cell-system",
 		);
 		resolver.complete(buildingRequest?.requestId ?? failKey());
 		await flushRuntimeWork();
@@ -1824,7 +1824,7 @@ describe("browser client runtime", () => {
 		await flushRuntimeWork();
 		resolver.complete(envCellRequest?.requestId ?? failKey());
 		await flushRuntimeWork();
-		baker.complete("1:landblock:da55ffff:landblock-env-cells");
+		baker.complete("1:landblock:da55ffff:env-cell-system");
 		await flushRuntimeWork();
 
 		expect(events).toEqual([
@@ -2817,7 +2817,7 @@ function createEnvCellLayerOwner(
 	landblockId: number,
 ): StaticLayerPeerRecordOwner {
 	return {
-		domain: "landblock-env-cells",
+		domain: "env-cell-system",
 		key: {
 			kind: "env-cell-system",
 			landblockId,
@@ -3541,7 +3541,7 @@ function createStaticObjectDrawUnit(
 		coordinateSpace: "landblock-render-local",
 		domain:
 			options.ownership?.kind === "env-cell-static-object-seeds"
-				? "landblock-env-cells"
+				? "env-cell-system"
 				: "outdoor-generated-scenery",
 		drawUnitId,
 		indexType: "uint16",
@@ -3745,7 +3745,7 @@ function createStructuredInteriorDrawUnit(options: {
 			kind: "cell-structure",
 		},
 		coordinateSpace: "landblock-render-local",
-		domain: "landblock-env-cells",
+		domain: "env-cell-system",
 		drawUnitId: options.drawUnitId,
 		envCellId: options.envCellId,
 		environment: {

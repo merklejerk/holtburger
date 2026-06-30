@@ -7,11 +7,11 @@ import type { ResolverLandblockEnvCellLayerPayloadDto } from "../../../assets/pr
 import { createResolverEnvCellPreparedAssetView } from "../../../assets/preparation/env-cell-views";
 import { createHostAssetKey, describeHostAssetKey } from "../../../assets/keys";
 import type {
-	LandblockEnvCellsStaticScopePayload,
+	EnvCellSystemStaticScopePayload,
 	StaticBakeAttachmentRequest,
 } from "../../contracts";
-import type { LandblockEnvCellsLayerSourcePayloadDto } from "../../source-payloads";
-import { LandblockEnvCellGeometryAttachmentProvider } from "./landblock-env-cell-geometry-attachments";
+import type { EnvCellSystemLayerSourcePayloadDto } from "../../source-payloads";
+import { EnvCellSystemGeometryAttachmentProvider } from "./env-cell-system-geometry-attachments";
 
 describe("browser landblock env-cell geometry attachments", () => {
 	it("attaches full cell-structure geometry from resolved source payloads", async () => {
@@ -21,11 +21,11 @@ describe("browser landblock env-cell geometry attachments", () => {
 		);
 		const fullAsset = createPreparedAsset(
 			key,
-			createLandblockEnvCellsPayload(),
+			createEnvCellSystemPayload(),
 		);
 		const fullPayload =
-			fullAsset.payload as LandblockEnvCellsLayerSourcePayloadDto;
-		const provider = new LandblockEnvCellGeometryAttachmentProvider();
+			fullAsset.payload as EnvCellSystemLayerSourcePayloadDto;
+		const provider = new EnvCellSystemGeometryAttachmentProvider();
 
 		const attachments = await provider.createAttachments(
 			createAttachmentRequest(fullPayload),
@@ -76,12 +76,12 @@ describe("browser landblock env-cell geometry attachments", () => {
 		);
 		const fullAsset = createPreparedAsset(
 			key,
-			createLandblockEnvCellsPayload(),
+			createEnvCellSystemPayload(),
 		);
 		const resolverAsset = createResolverEnvCellPreparedAssetView(fullAsset);
 		const resolverPayload =
 			resolverAsset.payload as ResolverLandblockEnvCellLayerPayloadDto;
-		const provider = new LandblockEnvCellGeometryAttachmentProvider();
+		const provider = new EnvCellSystemGeometryAttachmentProvider();
 
 		await expect(
 			provider.createAttachments(createAttachmentRequest(resolverPayload)),
@@ -93,10 +93,10 @@ describe("browser landblock env-cell geometry attachments", () => {
 
 function createAttachmentRequest(
 	payload:
-		| LandblockEnvCellsLayerSourcePayloadDto
+		| EnvCellSystemLayerSourcePayloadDto
 		| ResolverLandblockEnvCellLayerPayloadDto,
 ): StaticBakeAttachmentRequest {
-	const domain = "landblock-env-cells";
+	const domain = "env-cell-system";
 	const job = {
 		domain,
 		scope: {
@@ -130,9 +130,9 @@ function createAttachmentRequest(
 
 function createScopePayload(
 	payload:
-		| LandblockEnvCellsLayerSourcePayloadDto
+		| EnvCellSystemLayerSourcePayloadDto
 		| ResolverLandblockEnvCellLayerPayloadDto,
-): LandblockEnvCellsStaticScopePayload {
+): EnvCellSystemStaticScopePayload {
 	return {
 		acceptedEnvCellIds: payload.envCells.map((cell) => cell.envCellId),
 		buildingTransitionApertures: payload.buildingTransitionApertures,
@@ -169,7 +169,7 @@ function createScopePayload(
 			})),
 			visibleEnvCellIds: cell.visibleEnvCellIds,
 		})),
-		kind: "landblock-env-cells",
+		kind: "env-cell-system",
 		landblock: {
 			kind: "landblock-source",
 			landblockId: payload.landblockId,
@@ -185,8 +185,8 @@ function createScopePayload(
 			},
 		},
 		residencySpatial: {
-			landblockEnvCellBvh: {
-				items: payload.landblockEnvCellBvh.items.map((item) => ({
+			envCellSystemBvh: {
+				items: payload.envCellSystemBvh.items.map((item) => ({
 					bounds: item.bounds,
 					identity: {
 						envCellId: item.envCellId,
@@ -195,10 +195,10 @@ function createScopePayload(
 					memberId: item.memberId,
 					source: item.source,
 				})),
-				nodes: payload.landblockEnvCellBvh.nodes,
+				nodes: payload.envCellSystemBvh.nodes,
 			},
-			landblockEnvCellBvhItemCount: payload.landblockEnvCellBvh.items.length,
-			landblockEnvCellBvhNodeCount: payload.landblockEnvCellBvh.nodes.length,
+			envCellSystemBvhItemCount: payload.envCellSystemBvh.items.length,
+			envCellSystemBvhNodeCount: payload.envCellSystemBvh.nodes.length,
 		},
 		visibilityDiagnostics: [],
 	};
@@ -206,7 +206,7 @@ function createScopePayload(
 
 function createPreparedAsset(
 	key: HostAssetKey,
-	payload: LandblockEnvCellsLayerSourcePayloadDto,
+	payload: EnvCellSystemLayerSourcePayloadDto,
 ): PreparedAsset {
 	return {
 		key,
@@ -217,13 +217,13 @@ function createPreparedAsset(
 	};
 }
 
-function createLandblockEnvCellsPayload(): LandblockEnvCellsLayerSourcePayloadDto {
+function createEnvCellSystemPayload(): EnvCellSystemLayerSourcePayloadDto {
 	return {
 		buildingTransitionApertures: [],
 		diagnostics: createDiagnostics(),
 		envCells: [createEnvCellPayload()],
 		kind: "landblock-scene-lod-env-cell-layer",
-		landblockEnvCellBvh: {
+		envCellSystemBvh: {
 			items: [
 				{
 					bounds: createBounds(),
@@ -243,7 +243,7 @@ function createLandblockEnvCellsPayload(): LandblockEnvCellsLayerSourcePayloadDt
 	};
 }
 
-function createEnvCellPayload(): LandblockEnvCellsLayerSourcePayloadDto["envCells"][number] {
+function createEnvCellPayload(): EnvCellSystemLayerSourcePayloadDto["envCells"][number] {
 	return {
 		cellBsp: {
 			kind: "leaf",

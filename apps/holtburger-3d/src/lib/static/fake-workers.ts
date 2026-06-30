@@ -379,7 +379,7 @@ function staticDomainForFakeSourceLayer(
 		case "outdoor-generated-scenery":
 			return "outdoor-generated-scenery";
 		case "env-cell-system":
-			return "landblock-env-cells";
+			return "env-cell-system";
 	}
 }
 
@@ -400,12 +400,12 @@ function createFakeStaticScopePayload(
 function createFakeStaticScopePayloadBody(
 	job: StaticResolverJob,
 ): StaticScopePayload["scope"] {
-	if (job.domain === "landblock-env-cells" && job.scope.kind === "landblock") {
+	if (job.domain === "env-cell-system" && job.scope.kind === "landblock") {
 		return {
 			acceptedEnvCellIds: [],
 			buildingTransitionApertures: [],
 			envCells: [],
-			kind: "landblock-env-cells",
+			kind: "env-cell-system",
 			landblock: {
 				kind: "landblock-source",
 				landblockId: job.scope.landblockId,
@@ -423,9 +423,9 @@ function createFakeStaticScopePayloadBody(
 				},
 			},
 			residencySpatial: {
-				landblockEnvCellBvhItemCount: 0,
-				landblockEnvCellBvhNodeCount: 0,
-				landblockEnvCellBvh: {
+				envCellSystemBvhItemCount: 0,
+				envCellSystemBvhNodeCount: 0,
+				envCellSystemBvh: {
 					items: [],
 					nodes: [],
 				},

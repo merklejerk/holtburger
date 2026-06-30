@@ -695,7 +695,7 @@ fn serialize_landblock_scene_lod_layer(layer: &LandblockSceneLodLayer) -> serde_
             "outdoorBvh": serialize_landblock_scene_lod_static_bvh(&layer.statics, layer.outdoor_bvh.as_ref()),
         }),
         LandblockSceneLodLayer::EnvCellSystem(layer) => {
-            let bundle = LandblockEnvCellsAsset {
+            let bundle = EnvCellSystemAsset {
                 landblock_id: layer.landblock_id,
                 landblock_info_id: layer.landblock_info_id,
                 env_cells: layer.env_cells.clone(),
@@ -708,14 +708,14 @@ fn serialize_landblock_scene_lod_layer(layer: &LandblockSceneLodLayer) -> serde_
                 "landblockInfoId": layer.landblock_info_id,
                 "buildingTransitionApertures": layer.building_transition_apertures.iter().map(serialize_prepared_building_transition_aperture).collect::<Vec<_>>(),
                 "envCells": layer.env_cells.iter().map(|cell| {
-                    serialize_landblock_env_cell_bundle_cell(
+                    serialize_env_cell_system_cell(
                         cell,
                         serialize_prepared_polygon_set_render_geometry_json(&cell.prepared_cell.render_geometry),
                         serialize_prepared_portal_aperture_json,
                     )
                 }).collect::<Vec<_>>(),
-                "portalLinks": serialize_landblock_env_cell_bundle_portal_links(&bundle),
-                "landblockEnvCellBvh": serialize_landblock_env_cell_bundle_bvh(&bundle),
+                "portalLinks": serialize_env_cell_system_portal_links(&bundle),
+                "envCellSystemBvh": serialize_env_cell_system_bvh(&bundle),
                 "diagnostics": serialize_prepared_content_diagnostics(&layer.diagnostics),
             })
         }
@@ -835,34 +835,6 @@ pub fn serialize_landblock_outdoor_static_kind(kind: PreparedStaticInstanceKind)
     }
 }
 
-pub fn serialize_landblock_outdoor_bvh(outdoor: &LandblockOutdoorAsset) -> serde_json::Value {
-    let Some(bvh) = outdoor.outdoor_bvh.as_ref() else {
-        return serde_json::Value::Null;
-    };
-    let mut sorted_statics = outdoor
-        .statics
-        .iter()
-        .filter(|m| m.instance_bounds.is_some())
-        .collect::<Vec<_>>();
-    sorted_statics
-        .sort_by(|left, right| left.instance.instance_id.cmp(&right.instance.instance_id));
-    let items = sorted_statics
-        .into_iter()
-        .map(|member| {
-            serde_json::json!({
-                "kind": serialize_landblock_outdoor_bvh_item_kind(member.instance.kind),
-                "instanceId": member.instance.instance_id,
-            })
-        })
-        .collect::<Vec<_>>();
-
-    serde_json::json!({
-        "coordinateSpace": "landblock-render-local",
-        "nodes": bvh.nodes.iter().map(serialize_prepared_bvh_node).collect::<Vec<_>>(),
-        "items": items,
-    })
-}
-
 pub fn serialize_landblock_outdoor_bvh_item_kind(kind: PreparedStaticInstanceKind) -> &'static str {
     match kind {
         PreparedStaticInstanceKind::Building => "building",
@@ -870,9 +842,7 @@ pub fn serialize_landblock_outdoor_bvh_item_kind(kind: PreparedStaticInstanceKin
     }
 }
 
-pub fn serialize_landblock_env_cell_bundle_bvh(
-    bundle: &LandblockEnvCellsAsset,
-) -> serde_json::Value {
+pub fn serialize_env_cell_system_bvh(bundle: &EnvCellSystemAsset) -> serde_json::Value {
     let nodes = bundle
         .landblock_bvh
         .as_ref()
@@ -891,7 +861,7 @@ pub fn serialize_landblock_env_cell_bundle_bvh(
                 "envCellId": item.env_cell_id,
                 "memberId": item.member_id,
                 "bounds": serialize_prepared_aabb(&item.bounds),
-                "source": serialize_landblock_env_cell_bvh_item_source(item.source),
+                "source": serialize_env_cell_system_bvh_item_source(item.source),
             })
         })
         .collect::<Vec<_>>();
@@ -901,17 +871,17 @@ pub fn serialize_landblock_env_cell_bundle_bvh(
     })
 }
 
-pub fn serialize_landblock_env_cell_bvh_item_source(
-    source: LandblockEnvCellBvhItemSource,
+pub fn serialize_env_cell_system_bvh_item_source(
+    source: EnvCellSystemBvhItemSource,
 ) -> &'static str {
     match source {
-        LandblockEnvCellBvhItemSource::EnvCellRoot => "env-cell-root",
-        LandblockEnvCellBvhItemSource::Derived => "derived",
+        EnvCellSystemBvhItemSource::EnvCellRoot => "env-cell-root",
+        EnvCellSystemBvhItemSource::Derived => "derived",
     }
 }
 
-pub fn serialize_landblock_env_cell_bundle_portal_links(
-    bundle: &LandblockEnvCellsAsset,
+pub fn serialize_env_cell_system_portal_links(
+    bundle: &EnvCellSystemAsset,
 ) -> Vec<serde_json::Value> {
     let env_cells = bundle
         .env_cells
@@ -1026,8 +996,8 @@ where
     })
 }
 
-pub fn serialize_landblock_env_cell_bundle_cell<F>(
-    asset: &LandblockEnvCellBundleCell,
+pub fn serialize_env_cell_system_cell<F>(
+    asset: &EnvCellSystemCell,
     render_geometry: serde_json::Value,
     mut serialize_aperture: F,
 ) -> serde_json::Value
@@ -1283,8 +1253,8 @@ pub fn serialize_prepared_bvh_kind_mask(mask: PreparedBvhKindMask) -> serde_json
             "static": static_object,
             "building": building,
         }),
-        PreparedBvhKindMask::LandblockEnvCells { env_cell_root } => serde_json::json!({
-            "domain": "landblock-env-cells",
+        PreparedBvhKindMask::EnvCellSystem { env_cell_root } => serde_json::json!({
+            "domain": "env-cell-system",
             "envCellRoot": env_cell_root,
         }),
         PreparedBvhKindMask::EnvCellLocal {
@@ -1729,13 +1699,13 @@ pub fn serialize_bsp_node(node: &BspNode) -> serde_json::Value {
 mod tests {
     use super::*;
     use holtburger_content::{
-        CellLandblockFact, LandblockOutdoorAsset, LandblockOutdoorStaticMember,
-        LandblockSceneLodAsset, LandblockSceneLodContext, LandblockSceneLodEnvCellSystemLayer,
-        LandblockSceneLodLayer, LandblockSceneLodLevel, LandblockSceneLodOutdoorBuildingsLayer,
+        LandblockOutdoorAsset, LandblockOutdoorStaticMember, LandblockSceneLodAsset,
+        LandblockSceneLodContext, LandblockSceneLodEnvCellSystemLayer, LandblockSceneLodLayer,
+        LandblockSceneLodLevel, LandblockSceneLodOutdoorBuildingsLayer,
         LandblockSceneLodOutdoorStaticLayer, LandblockSceneLodTerrainLayer, PreparedAabb,
         PreparedBuildingTransitionAperture, PreparedBvh, PreparedBvhNode,
         PreparedContentSourceDiagnostics, PreparedStaticInstance, PreparedStaticInstanceKind,
-        PreparedTerrainMesh, PreparedVec3,
+        PreparedVec3,
     };
 
     #[test]
@@ -1854,15 +1824,11 @@ mod tests {
         );
         assert_eq!(layer["envCells"].as_array().map(Vec::len), Some(0));
         assert_eq!(
-            layer["landblockEnvCellBvh"]["nodes"]
-                .as_array()
-                .map(Vec::len),
+            layer["envCellSystemBvh"]["nodes"].as_array().map(Vec::len),
             Some(0)
         );
         assert_eq!(
-            layer["landblockEnvCellBvh"]["items"]
-                .as_array()
-                .map(Vec::len),
+            layer["envCellSystemBvh"]["items"].as_array().map(Vec::len),
             Some(0)
         );
     }
@@ -1912,7 +1878,7 @@ mod tests {
     }
 
     #[test]
-    fn landblock_env_cell_bundle_frame_remains_ac_frame() {
+    fn env_cell_system_frame_remains_ac_frame() {
         let frame = holtburger_dat::graphics::Frame {
             origin: holtburger_common::math::Vector3 {
                 x: 1.,
@@ -1927,8 +1893,8 @@ mod tests {
             },
         };
 
-        let payload = serialize_landblock_env_cell_bundle_cell(
-            &LandblockEnvCellBundleCell {
+        let payload = serialize_env_cell_system_cell(
+            &EnvCellSystemCell {
                 diagnostics: PreparedContentSourceDiagnostics::default(),
                 env_cell: EnvCellFact {
                     cell_structure_id: Some(0x0d000001),
@@ -2032,93 +1998,6 @@ mod tests {
             (actual - expected).abs() < 1e-6,
             "expected {actual} to be close to {expected}",
         );
-    }
-
-    #[test]
-    fn test_serialize_landblock_outdoor_bvh_items_are_filtered_and_sorted() {
-        let dummy_bounds = PreparedAabb {
-            min: PreparedVec3 {
-                x: 0.,
-                y: 0.,
-                z: 0.,
-            },
-            max: PreparedVec3 {
-                x: 1.,
-                y: 1.,
-                z: 1.,
-            },
-        };
-        let statics = vec![
-            LandblockOutdoorStaticMember {
-                instance: dummy_static_instance("c", PreparedStaticInstanceKind::Scenery),
-                source_bounds: None,
-                instance_bounds: Some(dummy_bounds),
-                building: None,
-                generated: None,
-            },
-            LandblockOutdoorStaticMember {
-                instance: dummy_static_instance("a", PreparedStaticInstanceKind::Building),
-                source_bounds: None,
-                instance_bounds: None, // This one should be filtered out!
-                building: None,
-                generated: None,
-            },
-            LandblockOutdoorStaticMember {
-                instance: dummy_static_instance("b", PreparedStaticInstanceKind::Scenery),
-                source_bounds: None,
-                instance_bounds: Some(dummy_bounds),
-                building: None,
-                generated: None,
-            },
-        ];
-
-        let outdoor = LandblockOutdoorAsset {
-            landblock_id: 1,
-            cell_landblock: Some(CellLandblockFact {
-                id: 1,
-                has_objects: false,
-                grid_size: 1,
-                tile_size: 1.,
-                terrain_types: vec![],
-                heights: vec![],
-                min_height: 0.,
-                max_height: 0.,
-                all_heights_zero: true,
-            }),
-            terrain_mesh: Some(PreparedTerrainMesh {
-                landblock_id: 1,
-                grid_size: 1,
-                tile_size: 1.,
-                vertices: vec![],
-                triangles: vec![],
-                quads: vec![],
-                terrain_bvh_items: vec![],
-                terrain_bvh: None,
-                min_height: 0.,
-                max_height: 0.,
-            }),
-            statics,
-            building_transition_apertures: Vec::new(),
-            outdoor_bvh: Some(PreparedBvh {
-                coordinate_space: "test",
-                landblock_id: 1,
-                scope: PreparedBvhScope::OutdoorStatic,
-                nodes: vec![],
-            }),
-            diagnostics: PreparedContentSourceDiagnostics::default(),
-        };
-
-        let result = serialize_landblock_outdoor_bvh(&outdoor);
-        let items = result
-            .get("items")
-            .expect("has items")
-            .as_array()
-            .expect("items is array");
-
-        // The array should be filtered (length 2) and sorted by instance_id (b then c).
-        assert_eq!(items.len(), 2);
-        assert_eq!(items[0].get("instanceId").unwrap().as_str().unwrap(), "b");
-        assert_eq!(items[1].get("instanceId").unwrap().as_str().unwrap(), "c");
     }
 
     #[test]
@@ -2259,38 +2138,6 @@ mod tests {
                 .pointer("/instanceBounds/min/z")
                 .and_then(serde_json::Value::as_f64),
             Some(3.)
-        );
-
-        let outdoor_bvh = serialize_landblock_outdoor_bvh(&outdoor);
-        assert_eq!(
-            outdoor_bvh
-                .get("coordinateSpace")
-                .and_then(serde_json::Value::as_str),
-            Some("landblock-render-local")
-        );
-        assert_eq!(
-            outdoor_bvh
-                .pointer("/items/0/instanceId")
-                .and_then(serde_json::Value::as_str),
-            Some("overhang")
-        );
-        assert_eq!(
-            outdoor_bvh
-                .pointer("/nodes/0/bounds/min/x")
-                .and_then(serde_json::Value::as_f64),
-            Some(199.)
-        );
-        assert_eq!(
-            outdoor_bvh
-                .pointer("/nodes/0/bounds/min/z")
-                .and_then(serde_json::Value::as_f64),
-            Some(3.)
-        );
-        assert_eq!(
-            outdoor_bvh
-                .pointer("/nodes/0/itemIndices/0")
-                .and_then(serde_json::Value::as_u64),
-            Some(0)
         );
     }
 }

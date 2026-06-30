@@ -2104,13 +2104,14 @@ Decisions and course corrections:
 
 ### Phase 13: Env-Cell Domain Naming Debt Follow-Up
 
-Status: pending.
+Status: completed on 2026-06-30.
 
 Goal: remove the remaining route-shaped env-cell vocabulary from the static domain, scope, resolver, baker, and layer surface now that the LoD route cutover is complete.
 
 Deliverables:
 
 - Rename the `landblock-env-cells` static domain, static scope kind, payload scope kind, work id segment, diagnostic label, and layer vocabulary to `env-cell-system`.
+- Rename Rust content/source types that still imply a standalone `LandblockEnvCells` route bundle, including `LandblockEnvCellsAsset`, `LandblockEnvCellsAssetAssembler`, and `PreparedBvhScope` / `PreparedBvhKindMask` variants for env-cell system BVHs.
 - Rename `LandblockEnvCellsResolver`, `LandblockEnvCellsBaker`, `bakeLandblockEnvCells`, and env-cell filenames whose names still imply the deleted landblock env-cells route.
 - Rename `LandblockEnvCellGeometryAttachmentProvider` to match its current role as an env-cell system layer attachment provider.
 - Update renderer, bake, material, static-scene-query, dynamic ownership, diagnostics, fake workers, tests, and browser UI references that consume the env-cell domain/scope/layer name.
@@ -2120,6 +2121,7 @@ Acceptance criteria:
 
 - No executable `landblock-env-cells` domain/layer string remains outside historical plan prose, source provenance, or deliberately retained compatibility-free source vocabulary documented here.
 - No executable `landblock-env-cells` static scope kind, payload scope kind, work id segment, diagnostic label, resolver/baker filename, resolver/baker class/function name, or test fixture string remains.
+- No executable `LandblockEnvCellsAsset`, `LandblockEnvCellsAssetAssembler`, `PreparedBvhScope::LandblockEnvCells`, or `PreparedBvhKindMask::LandblockEnvCells` references remain.
 - No executable `LandblockEnvCellGeometryAttachmentProvider` type/import/reference remains.
 - The renamed env-cell system layer still maps to LoD `4`, remains self-contained from materialized building layers, and keeps layer-owner lifecycle behavior.
 - No alias accepts or translates the old env-cell domain/layer name after the cutover.
@@ -2127,21 +2129,29 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Record `env-cell-system` as the final env-cell static domain/scope/layer name.
-- [ ] Rename the TypeScript static domain/scope/layer string and all renderer/bake/material/query/dynamic/diagnostic consumers.
-- [ ] Rename env-cell resolver, baker, source-payload, fake-worker, and test fixture names that still say `landblock-env-cells`.
-- [ ] Rename `LandblockEnvCellGeometryAttachmentProvider` and associated files/tests if the filename becomes misleading.
-- [ ] Update tests, fixtures, and debug/UI labels to the new env-cell system vocabulary.
-- [ ] Run targeted and broad TypeScript validation.
-- [ ] Run zero-reference audits for executable `landblock-env-cells` domain/layer usage and `LandblockEnvCellGeometryAttachmentProvider`.
-- [ ] Audit for and delete any old-name alias, fallback, compatibility wrapper, or test shim introduced during the rename.
-- [ ] Record decisions, validation, and any intentionally retained historical/source vocabulary in this phase.
+- [x] Record `env-cell-system` as the final env-cell static domain/scope/layer name.
+- [x] Rename Rust env-cell system source asset and prepared-BVH type names.
+- [x] Rename the TypeScript static domain/scope/layer string and all renderer/bake/material/query/dynamic/diagnostic consumers.
+- [x] Rename env-cell resolver, baker, source-payload, fake-worker, and test fixture names that still say `landblock-env-cells`.
+- [x] Rename `LandblockEnvCellGeometryAttachmentProvider` and associated files/tests if the filename becomes misleading.
+- [x] Update tests, fixtures, and debug/UI labels to the new env-cell system vocabulary.
+- [x] Run targeted and broad TypeScript validation.
+- [x] Run zero-reference audits for executable `landblock-env-cells` domain/layer usage and `LandblockEnvCellGeometryAttachmentProvider`.
+- [x] Audit for and delete any old-name alias, fallback, compatibility wrapper, or test shim introduced during the rename.
+- [x] Record decisions, validation, and any intentionally retained historical/source vocabulary in this phase.
 
 Decisions and course corrections:
 
 - Added after Phase 12 closeout at user request. Phase 12 proved the old route was deleted; this phase tackles the remaining naming debt that was classified as legitimate-but-spicy domain/layer vocabulary during the cutover.
 - The rename should not reintroduce compatibility aliases. This should be a clean domain/layer rename with tests updated to the new vocabulary.
 - Dry run on 2026-06-30 found this phase is broader than the original domain/layer wording: `landblock-env-cells` appears in static contracts, source payload scope kinds, renderer types, runtime scene-query records, fake workers, material planning, texture policy, diagnostics, browser UI, resolver/baker filenames, class/function names, and tests. The cleanest final name is `env-cell-system` because `LayerOwnerKind` and renderer layer payloads already use it.
+- Implemented `env-cell-system` as the only executable static domain, static scope kind, payload scope kind, work id segment, diagnostic label, and env-cell system layer vocabulary. No old-name alias or translation path was added.
+- Renamed Rust content/source route-shaped types to `EnvCellSystemAsset`, `EnvCellSystemAssetAssembler`, `EnvCellSystemCell`, `EnvCellSystemBvhItem`, `EnvCellSystemBvhItemSource`, `PreparedBvhScope::EnvCellSystem`, and `PreparedBvhKindMask::EnvCellSystem`.
+- Renamed TypeScript env-cell resolver/baker/provider surfaces to `EnvCellSystemResolver`, `EnvCellSystemBaker`, `bakeEnvCellSystem`, and `EnvCellSystemGeometryAttachmentProvider`; moved their files to `env-cell-system-*` names.
+- Removed the dead old `serialize_landblock_outdoor_bvh` wrapper instead of keeping a test-only shim after the Rust rename exposed it as unused.
+- Extended the cleanup beyond the original checklist by renaming the old bundle-shaped JSON/TypeScript contract field from `landblockEnvCellBvh` to `envCellSystemBvh` and `LandblockEnvCellBundleCell` to `EnvCellSystemCell`.
+- Validation passed: `npm run check`; `npm run test:ts` passed 68 test files / 568 tests; `cargo fmt --check`; `cargo clippy -p holtburger-content -p holtburger-3d -p holtburger-debug-harness --tests -- -D warnings`; `cargo test -p holtburger-content -p holtburger-3d -p holtburger-debug-harness --tests`.
+- Zero-reference audits passed for executable `landblock-env-cells`, `LandblockEnvCells`, `landblock_env_cells`, `LandblockEnvCellGeometryAttachmentProvider`, old env-cell resolver/baker/provider filenames, `LandblockEnvCellBundle*`, `LandblockEnvCellBvh*`, `landblockEnvCellBvh`, and old bundle serializer helper names under `apps/holtburger-3d/src`, `apps/holtburger-3d/src-tauri/src`, `crates/holtburger-content/src`, and `crates/holtburger-debug-harness/src`.
 
 ### Phase 14: Route-Shaped Source Vocabulary Cleanup
 

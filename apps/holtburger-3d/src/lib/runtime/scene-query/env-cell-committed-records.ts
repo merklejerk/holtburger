@@ -182,7 +182,7 @@ export class EnvCellCommittedRecordStore {
 		]) {
 			for (const entry of recordsByKey.values()) {
 				if (
-					getCommittedRecordDomain(entry.record) === "landblock-env-cells" &&
+					getCommittedRecordDomain(entry.record) === "env-cell-system" &&
 					getCommittedRecordLandblockId(entry.record) === landblockId
 				) {
 					return true;
@@ -534,7 +534,7 @@ export class EnvCellCommittedRecordStore {
 		]) {
 			for (const [key, entry] of recordsByKey) {
 				if (
-					getCommittedRecordDomain(entry.record) === "landblock-env-cells" &&
+					getCommittedRecordDomain(entry.record) === "env-cell-system" &&
 					getCommittedRecordLandblockId(entry.record) === normalizedLandblockId
 				) {
 					recordsByKey.delete(key);
@@ -940,7 +940,7 @@ function countCommittedEnvCellLandblocks(
 			const landblockId = getCommittedRecordLandblockId(entry.record);
 			if (
 				landblockId !== null &&
-				getCommittedRecordDomain(entry.record) === "landblock-env-cells"
+				getCommittedRecordDomain(entry.record) === "env-cell-system"
 			) {
 				landblockIds.add(landblockId);
 			}
@@ -1103,7 +1103,7 @@ function getCommittedRecordDomain(
 		return record.owner.domain;
 	}
 	if (isEnvCellRecord(record)) {
-		return "landblock-env-cells";
+		return "env-cell-system";
 	}
 	if (isTerrainSourceMappingRecord(record)) {
 		return "outdoor-terrain";

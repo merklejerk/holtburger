@@ -1,6 +1,6 @@
 import type {
 	LandblockEnvCellStaticFacts,
-	LandblockEnvCellsStaticScopePayload,
+	EnvCellSystemStaticScopePayload,
 	ScheduledStaticWork,
 	StaticMaterialCoverageReport,
 	StaticMaterialUnrenderedBucket,
@@ -42,7 +42,7 @@ export function resolveStructuredInteriorMaterialSurfaceId(
 
 export function planStructuredInteriorCellMaterials(options: {
 	readonly envCell: LandblockEnvCellStaticFacts;
-	readonly payload: LandblockEnvCellsStaticScopePayload;
+	readonly payload: EnvCellSystemStaticScopePayload;
 	readonly work: ScheduledStaticWork;
 }): StructuredInteriorCellMaterialPlan {
 	const materialSourcesById = new Map(
@@ -143,7 +143,7 @@ export function resolveStructuredInteriorPlanTextureWrapMode(
 
 function classifyStructuredInteriorMaterial(options: {
 	readonly material: StaticObjectMaterialSourceFacts;
-	readonly payload: LandblockEnvCellsStaticScopePayload;
+	readonly payload: EnvCellSystemStaticScopePayload;
 }): StaticMaterialPlan {
 	const basePlan = classifyStaticObjectMaterial({
 		material: options.material,
@@ -157,7 +157,7 @@ function classifyStructuredInteriorMaterial(options: {
 			detailRoles: options.payload.regionRenderProfile.detailRoles,
 			textureRefs: options.payload.textureRefs,
 		}),
-		domain: "landblock-env-cells",
+		domain: "env-cell-system",
 		plan: basePlan,
 	});
 }
@@ -182,7 +182,7 @@ export function getStructuredInteriorMaterialEntries(
 }
 
 export function createStructuredInteriorMaterialCoverageReport(options: {
-	readonly payload: LandblockEnvCellsStaticScopePayload;
+	readonly payload: EnvCellSystemStaticScopePayload;
 	readonly materialPlansByEnvCellId: ReadonlyMap<
 		number,
 		StructuredInteriorCellMaterialPlan
@@ -284,11 +284,11 @@ export function createStructuredInteriorMaterialCoverageReport(options: {
 				textureRoleCount: bucket.textureRoleCount,
 				triangleCount: bucket.triangleCount,
 			})),
-		coverageKey: "landblock-env-cells:structured-interior",
+		coverageKey: "env-cell-system:structured-interior",
 		coverageKind: "structured-interior",
 		deferredTriangleCount,
 		detailRoleCount: 0,
-		domain: "landblock-env-cells",
+		domain: "env-cell-system",
 		fallbackReasonCount: diagnosticCount,
 		fallbackReasonCounts: [...diagnosticCodes.entries()]
 			.sort(
@@ -320,15 +320,15 @@ export function createStructuredInteriorMaterialCoverageReport(options: {
 }
 
 function createEmptyCoverageReport(
-	payload: LandblockEnvCellsStaticScopePayload,
+	payload: EnvCellSystemStaticScopePayload,
 ): StaticMaterialCoverageReport {
 	return {
 		buckets: [],
-		coverageKey: "landblock-env-cells:structured-interior",
+		coverageKey: "env-cell-system:structured-interior",
 		coverageKind: "structured-interior",
 		deferredTriangleCount: 0,
 		detailRoleCount: 0,
-		domain: "landblock-env-cells",
+		domain: "env-cell-system",
 		fallbackReasonCount: 0,
 		fallbackReasonCounts: [],
 		landblockId: payload.landblock.landblockId,
@@ -342,7 +342,7 @@ function createEmptyCoverageReport(
 }
 
 function countRenderableEnvCells(
-	payload: LandblockEnvCellsStaticScopePayload,
+	payload: EnvCellSystemStaticScopePayload,
 ): number {
 	return payload.envCells.filter(
 		(envCell) => envCell.renderGeometry.triangleCount > 0,

@@ -345,7 +345,7 @@ function createCommitDelta(options: {
 
 function createEnvCellLayerOwner(): StaticLayerPeerRecordOwner {
 	return {
-		domain: "landblock-env-cells",
+		domain: "env-cell-system",
 		key: { kind: "env-cell-system", landblockId: 0xda55ffff },
 		kind: "layer-owner",
 		ownerId: "env-cell-system:0xda55ffff",

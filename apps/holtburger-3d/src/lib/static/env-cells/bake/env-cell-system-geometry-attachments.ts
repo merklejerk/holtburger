@@ -7,13 +7,13 @@ import type {
 	StaticBakeAttachmentRequest,
 	StaticBakeBatchAttachments,
 } from "../../contracts";
-import type { LandblockEnvCellsLayerSourcePayloadDto } from "../../source-payloads";
+import type { EnvCellSystemLayerSourcePayloadDto } from "../../source-payloads";
 
-export class LandblockEnvCellGeometryAttachmentProvider implements StaticBakeAttachmentProvider {
+export class EnvCellSystemGeometryAttachmentProvider implements StaticBakeAttachmentProvider {
 	async createAttachments(
 		request: StaticBakeAttachmentRequest,
 	): Promise<StaticBakeBatchAttachments> {
-		if (request.domain !== "landblock-env-cells") {
+		if (request.domain !== "env-cell-system") {
 			return createEmptyStaticBakeAttachments();
 		}
 
@@ -78,7 +78,7 @@ function collectEnvCellGeometryIdentities(
 	const byKey = new Map<string, EnvCellCellStructureGeometryIdentity>();
 
 	for (const item of request.items) {
-		if (item.payload.scope.kind !== "landblock-env-cells") {
+		if (item.payload.scope.kind !== "env-cell-system") {
 			continue;
 		}
 
@@ -107,7 +107,7 @@ function createFullEnvCellsByIdentity(
 	>();
 
 	for (const item of request.items) {
-		if (item.payload.scope.kind !== "landblock-env-cells") {
+		if (item.payload.scope.kind !== "env-cell-system") {
 			continue;
 		}
 
@@ -151,9 +151,9 @@ function createEnvCellCellStructureGeometryAttachment(options: {
 function assertRenderGeometryVertexBuffers(
 	identity: EnvCellCellStructureGeometryIdentity,
 	renderGeometry: Partial<
-		LandblockEnvCellsLayerSourcePayloadDto["envCells"][number]["renderGeometry"]
+		EnvCellSystemLayerSourcePayloadDto["envCells"][number]["renderGeometry"]
 	>,
-): asserts renderGeometry is LandblockEnvCellsLayerSourcePayloadDto["envCells"][number]["renderGeometry"] {
+): asserts renderGeometry is EnvCellSystemLayerSourcePayloadDto["envCells"][number]["renderGeometry"] {
 	if (
 		renderGeometry.positions === undefined ||
 		renderGeometry.normals === undefined ||

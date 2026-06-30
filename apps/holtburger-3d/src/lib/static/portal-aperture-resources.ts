@@ -80,7 +80,7 @@ export function createEnvCellPortalApertureResource(
 				kind: "portal-aperture-resource",
 				landblockId: record.landblockId,
 				ranges,
-				sourceDomain: "landblock-env-cells",
+				sourceDomain: "env-cell-system",
 				vertices,
 			}
 		: null;
@@ -166,7 +166,7 @@ export function createBuildingTransitionTargetEnvCellId(options: {
 }
 
 function createEnvCellPortalApertureResourceId(landblockId: number): string {
-	return `portal-aperture-resource:landblock-env-cells:${formatHex32(landblockId)}`;
+	return `portal-aperture-resource:env-cell-system:${formatHex32(landblockId)}`;
 }
 
 export function createBuildingTransitionPortalApertureResourceId(

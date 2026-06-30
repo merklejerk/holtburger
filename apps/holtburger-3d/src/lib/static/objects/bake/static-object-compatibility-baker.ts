@@ -1,6 +1,6 @@
 import type {
 	MaterialTextureDataUseIdentity,
-	LandblockEnvCellsStaticScopePayload,
+	EnvCellSystemStaticScopePayload,
 	ScheduledStaticWork,
 	StaticBounds,
 	StaticBakeBatchInput,
@@ -78,7 +78,7 @@ export function bakeStaticObjectCompatibility(
 		input.domain !== "outdoor-buildings" &&
 		input.domain !== "outdoor-explicit-objects" &&
 		input.domain !== "outdoor-generated-scenery" &&
-		input.domain !== "landblock-env-cells"
+		input.domain !== "env-cell-system"
 	) {
 		throw new Error(
 			`Static object compatibility baker only supports static object batches. Received ${input.domain}.`,
@@ -269,7 +269,7 @@ function bakeStaticObjectCompatibilityItem(
 	const scope = createStaticObjectCompatibilityPayload(item);
 	const buildingTransitionPortalApertureResource =
 		item.payload.scope.kind === "outdoor-static-objects" ||
-		item.payload.scope.kind === "landblock-env-cells"
+		item.payload.scope.kind === "env-cell-system"
 			? deriveBuildingTransitionPortalApertureResource(item.payload.scope)
 			: null;
 	const partitionPlan = partitionStaticObjectCompatibility(scope);
@@ -1296,8 +1296,8 @@ function createStaticObjectCompatibilityPayload(
 		return item.payload.scope;
 	}
 	if (
-		item.work.job.domain === "landblock-env-cells" &&
-		item.payload.scope.kind === "landblock-env-cells"
+		item.work.job.domain === "env-cell-system" &&
+		item.payload.scope.kind === "env-cell-system"
 	) {
 		return createEnvCellStaticObjectCompatibilityPayload(item.payload.scope);
 	}
@@ -1427,7 +1427,7 @@ function createEnvCellStaticObjectSpatialRecords(options: {
 	readonly payload: StaticObjectCompatibilityPayload;
 	readonly workOwner: StaticLayerPeerRecordOwner;
 }): readonly StaticEnvCellStaticObjectSpatialRecord[] {
-	if (options.payload.domain !== "landblock-env-cells") {
+	if (options.payload.domain !== "env-cell-system") {
 		return [];
 	}
 
@@ -1874,7 +1874,7 @@ function createStaticObjectSourcePartMatrix(
 }
 
 function createEnvCellStaticObjectCompatibilityPayload(
-	payload: LandblockEnvCellsStaticScopePayload,
+	payload: EnvCellSystemStaticScopePayload,
 ): StaticObjectCompatibilityPayload {
 	const sourceByKey = new Map(
 		(payload.sourceAssets ?? []).map((source) => [
@@ -1905,7 +1905,7 @@ function createEnvCellStaticObjectCompatibilityPayload(
 	);
 
 	return {
-		domain: "landblock-env-cells",
+		domain: "env-cell-system",
 		landblock: payload.landblock,
 		materialSlots: [],
 		materialSources: payload.materialSources ?? [],
@@ -1929,7 +1929,7 @@ function createStaticObjectDrawUnitOwnership(
 	payload: StaticObjectCompatibilityPayload,
 	partition: StaticObjectCompatibilityPartition,
 ): StaticObjectDrawUnitOwnership {
-	if (payload.domain !== "landblock-env-cells") {
+	if (payload.domain !== "env-cell-system") {
 		return {
 			domain: payload.domain,
 			kind: "outdoor-static-objects",

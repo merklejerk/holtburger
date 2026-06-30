@@ -7,7 +7,7 @@ import type {
 } from "../../../assets/contracts";
 import { createHostAssetKey, describeHostAssetKey } from "../../../assets/keys";
 import type {
-	LandblockEnvCellsStaticScopePayload,
+	EnvCellSystemStaticScopePayload,
 	OutdoorStaticObjectsScopePayload,
 	StaticBakeAttachmentRequest,
 	StaticObjectPartSourceFacts,
@@ -143,7 +143,7 @@ function createAttachmentRequest(
 function createEnvCellAttachmentRequest(
 	parts: readonly StaticObjectPartSourceFacts[],
 ): StaticBakeAttachmentRequest {
-	const domain = "landblock-env-cells";
+	const domain = "env-cell-system";
 	const job = {
 		domain,
 		scope: {
@@ -226,11 +226,11 @@ function createPayload(
 
 function createEnvCellPayload(
 	parts: readonly StaticObjectPartSourceFacts[],
-): LandblockEnvCellsStaticScopePayload {
+): EnvCellSystemStaticScopePayload {
 	return {
 		acceptedEnvCellIds: [0xda550100],
 		envCells: [],
-		kind: "landblock-env-cells",
+		kind: "env-cell-system",
 		landblock: {
 			kind: "landblock-source",
 			landblockId: 0xda55ffff,
@@ -245,12 +245,12 @@ function createEnvCellPayload(
 			regionNumber: 1,
 		},
 		residencySpatial: {
-			landblockEnvCellBvh: {
+			envCellSystemBvh: {
 				items: [],
 				nodes: [],
 			},
-			landblockEnvCellBvhItemCount: 0,
-			landblockEnvCellBvhNodeCount: 0,
+			envCellSystemBvhItemCount: 0,
+			envCellSystemBvhNodeCount: 0,
 		},
 		sourceAssets: [
 			{

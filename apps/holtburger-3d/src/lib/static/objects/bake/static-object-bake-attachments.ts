@@ -27,7 +27,7 @@ export class StaticObjectBakeAttachmentProvider implements StaticBakeAttachmentP
 			request.domain !== "outdoor-buildings" &&
 			request.domain !== "outdoor-explicit-objects" &&
 			request.domain !== "outdoor-generated-scenery" &&
-			request.domain !== "landblock-env-cells"
+			request.domain !== "env-cell-system"
 		) {
 			return createEmptyStaticBakeAttachments();
 		}
@@ -68,7 +68,7 @@ function collectStaticObjectGeometryIdentities(
 	for (const item of request.items) {
 		if (
 			item.payload.scope.kind !== "outdoor-static-objects" &&
-			item.payload.scope.kind !== "landblock-env-cells"
+			item.payload.scope.kind !== "env-cell-system"
 		) {
 			continue;
 		}

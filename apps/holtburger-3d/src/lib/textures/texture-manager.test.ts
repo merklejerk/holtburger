@@ -702,7 +702,7 @@ describe("browser texture manager", () => {
 			staticVisibilityRecords: [],
 			textureUses: [
 				createTextureUseCommit({
-					domain: "landblock-env-cells",
+					domain: "env-cell-system",
 					drawUnitId: "structured-interior-a",
 					renderSurfaceId: 0x06000010,
 					staticBatchId: "batch-env",
@@ -710,7 +710,7 @@ describe("browser texture manager", () => {
 					usage: "rgba-color",
 				}),
 				createTextureUseCommit({
-					domain: "landblock-env-cells",
+					domain: "env-cell-system",
 					drawUnitId: "structured-interior-a",
 					renderSurfaceId: 0x06000020,
 					staticBatchId: "batch-env",
@@ -740,7 +740,7 @@ describe("browser texture manager", () => {
 		]);
 		expect(texturePacker.jobs).toMatchObject([
 			{
-				domain: "landblock-env-cells",
+				domain: "env-cell-system",
 				page: {
 					gutterPixels: 4,
 				},

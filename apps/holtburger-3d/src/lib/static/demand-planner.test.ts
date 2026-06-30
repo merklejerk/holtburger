@@ -186,20 +186,20 @@ describe("static demand planner", () => {
 		);
 
 		const envCellWork = work.filter(
-			(item) => item.job.domain === "landblock-env-cells",
+			(item) => item.job.domain === "env-cell-system",
 		);
 
 		expect(envCellWork).toHaveLength(9);
 		expect(envCellWork[0]).toMatchObject({
 			job: {
-				domain: "landblock-env-cells",
+				domain: "env-cell-system",
 				scope: {
 					kind: "landblock",
 					landblockId: 0xda55ffff,
 				},
 			},
 			priority: 10,
-			workId: "4:landblock:da55ffff:landblock-env-cells",
+			workId: "4:landblock:da55ffff:env-cell-system",
 		});
 		expect(retainedLayerOwners).toContainEqual({
 			kind: "env-cell-system",
@@ -240,7 +240,7 @@ describe("static demand planner", () => {
 			},
 			{
 				job: {
-					domain: "landblock-env-cells",
+					domain: "env-cell-system",
 					scope: {
 						kind: "landblock",
 						landblockId: 0xda55ffff,
@@ -248,7 +248,7 @@ describe("static demand planner", () => {
 				},
 				priority: 10,
 				revision: 12,
-				workId: "12:landblock:da55ffff:landblock-env-cells",
+				workId: "12:landblock:da55ffff:env-cell-system",
 			},
 		]);
 		expect(retainedLayerOwners).toEqual([
@@ -330,7 +330,7 @@ describe("static demand planner", () => {
 				},
 			},
 			{
-				domain: "landblock-env-cells",
+				domain: "env-cell-system",
 				scope: {
 					kind: "landblock",
 					landblockId: 0xda55ffff,

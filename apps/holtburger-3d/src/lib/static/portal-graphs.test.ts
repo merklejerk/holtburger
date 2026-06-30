@@ -15,7 +15,7 @@ import {
 
 describe("static portal graphs", () => {
 	it("normalizes env-cell portal links into directed graph edges", () => {
-		const owner = createLayerOwner("landblock-env-cells");
+		const owner = createLayerOwner("env-cell-system");
 		const graph = createEnvCellStaticPortalGraph(owner, {
 			envCells: [
 				createPortalSummary(0xda550100),
@@ -86,7 +86,7 @@ describe("static portal graphs", () => {
 	});
 
 	it("normalizes env-cell scene-crossing links into graph edges", () => {
-		const owner = createLayerOwner("landblock-env-cells");
+		const owner = createLayerOwner("env-cell-system");
 		const graph = createEnvCellStaticPortalGraph(owner, {
 			envCells: [createPortalSummary(0xda550100)],
 			kind: "env-cell-portal-interior",
@@ -185,7 +185,7 @@ describe("static portal graphs", () => {
 	});
 
 	it("projects outdoor portals by env-cell identity and longest acyclic layer", () => {
-		const owner = createLayerOwner("landblock-env-cells");
+		const owner = createLayerOwner("env-cell-system");
 		const record = createPortalInteriorRecord({
 			envCellIds: [0xda550100, 0xda550101, 0xda550102, 0xda550103],
 			links: [
@@ -262,7 +262,7 @@ describe("static portal graphs", () => {
 	});
 
 	it("projects cycles as finite strongly connected components", () => {
-		const owner = createLayerOwner("landblock-env-cells");
+		const owner = createLayerOwner("env-cell-system");
 		const record = createPortalInteriorRecord({
 			envCellIds: [0xda550100, 0xda550101, 0xda550102, 0xda550103],
 			links: [
@@ -327,7 +327,7 @@ describe("static portal graphs", () => {
 	});
 
 	it("keeps multiple transition apertures into one projected env-cell node", () => {
-		const owner = createLayerOwner("landblock-env-cells");
+		const owner = createLayerOwner("env-cell-system");
 		const record = createPortalInteriorRecord({
 			envCellIds: [0xda550100],
 			links: [],
@@ -373,7 +373,7 @@ describe("static portal graphs", () => {
 	});
 
 	it("projects outdoor-root outbound outdoor crossings for outside-visible env cells", () => {
-		const owner = createLayerOwner("landblock-env-cells");
+		const owner = createLayerOwner("env-cell-system");
 		const record = createPortalInteriorRecord({
 			envCellIds: [0xda550100, 0xda550101],
 			links: [
@@ -437,7 +437,7 @@ describe("static portal graphs", () => {
 	});
 
 	it("projects env-cell roots by reachable portal links and longest acyclic layer", () => {
-		const owner = createLayerOwner("landblock-env-cells");
+		const owner = createLayerOwner("env-cell-system");
 		const record = createPortalInteriorRecord({
 			envCellIds: [0xda550100, 0xda550101, 0xda550102, 0xda550103],
 			links: [
@@ -519,7 +519,7 @@ describe("static portal graphs", () => {
 	});
 
 	it("projects env-cell root outbound outdoor crossings from building transition apertures", () => {
-		const owner = createLayerOwner("landblock-env-cells");
+		const owner = createLayerOwner("env-cell-system");
 		const record = createPortalInteriorRecord({
 			envCellIds: [0xda550100, 0xda550101],
 			links: [
@@ -577,7 +577,7 @@ describe("static portal graphs", () => {
 	});
 
 	it("keeps env-cell root cycles finite without assigning layer zero to non-root cells", () => {
-		const owner = createLayerOwner("landblock-env-cells");
+		const owner = createLayerOwner("env-cell-system");
 		const record = createPortalInteriorRecord({
 			envCellIds: [0xda550100, 0xda550101, 0xda550102],
 			links: [
@@ -635,7 +635,7 @@ describe("static portal graphs", () => {
 	});
 
 	it("preserves per-cell layers inside a cyclic env-cell root component", () => {
-		const owner = createLayerOwner("landblock-env-cells");
+		const owner = createLayerOwner("env-cell-system");
 		const record = createPortalInteriorRecord({
 			envCellIds: [0xda550100, 0xda550101, 0xda550102],
 			links: [
@@ -694,7 +694,7 @@ describe("static portal graphs", () => {
 
 function createLayerOwner(domain: StaticLayerPeerRecordOwner["domain"]): StaticLayerPeerRecordOwner {
 	const keyKind =
-		domain === "landblock-env-cells" ? "env-cell-system" : domain;
+		domain === "env-cell-system" ? "env-cell-system" : domain;
 	return {
 		domain,
 		key: {

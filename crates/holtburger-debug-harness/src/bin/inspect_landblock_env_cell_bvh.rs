@@ -1,8 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
 use holtburger_content::{
-    ContentDecodeCache, ContentRepository, LandblockEnvCellsAssetAssembler, PreparedAabb,
-    PreparedVec3, normalize_landblock_id,
+    ContentDecodeCache, ContentRepository, EnvCellSystemAssetAssembler, PreparedAabb, PreparedVec3,
+    normalize_landblock_id,
 };
 use holtburger_dat::graphics::Frame;
 use holtburger_dat::physics::BspNode;
@@ -47,7 +47,7 @@ fn main() -> Result<()> {
     let probe_point = args.point.as_deref().map(parse_point).transpose()?;
     let content = ContentRepository::from_hba_path(args.dats)?;
     let cache = ContentDecodeCache::new();
-    let asset = LandblockEnvCellsAssetAssembler::new().assemble_landblock_with_cache(
+    let asset = EnvCellSystemAssetAssembler::new().assemble_landblock_with_cache(
         &content,
         &cache,
         landblock_id,
@@ -300,7 +300,7 @@ struct PortalRelationship {
     reciprocal: bool,
 }
 
-fn report_duplicate_transition_portals(cells: &[holtburger_content::LandblockEnvCellBundleCell]) {
+fn report_duplicate_transition_portals(cells: &[holtburger_content::EnvCellSystemCell]) {
     let mut groups = BTreeMap::<String, Vec<TransitionPortalApertureDump>>::new();
     let mut total_transition_apertures = 0usize;
     for cell in cells {
@@ -376,10 +376,7 @@ fn report_duplicate_transition_portals(cells: &[holtburger_content::LandblockEnv
     }
 }
 
-fn report_portal_clusters(
-    cells: &[holtburger_content::LandblockEnvCellBundleCell],
-    min_size: usize,
-) {
+fn report_portal_clusters(cells: &[holtburger_content::EnvCellSystemCell], min_size: usize) {
     let mut groups = BTreeMap::<String, Vec<PortalClusterDump>>::new();
     let mut total_apertures = 0usize;
     let relationships = build_portal_relationships(cells);
@@ -501,7 +498,7 @@ fn print_portal_cluster_group(group: &[PortalClusterDump]) {
 }
 
 fn build_portal_relationships(
-    cells: &[holtburger_content::LandblockEnvCellBundleCell],
+    cells: &[holtburger_content::EnvCellSystemCell],
 ) -> BTreeMap<PortalKey, PortalRelationship> {
     let mut portal_targets = BTreeMap::<PortalKey, Option<PortalKey>>::new();
     let mut incoming_counts = BTreeMap::<PortalKey, usize>::new();
@@ -550,7 +547,7 @@ fn normalize_portal_index(portal_id: u16) -> Option<usize> {
 }
 
 fn report_portal_reachability_layers(
-    cells: &[holtburger_content::LandblockEnvCellBundleCell],
+    cells: &[holtburger_content::EnvCellSystemCell],
     root_env_cell_id: u32,
     max_depth: usize,
 ) {
@@ -646,7 +643,7 @@ fn report_portal_reachability_layers(
 }
 
 fn report_portal_reference_cell(
-    cells: &[holtburger_content::LandblockEnvCellBundleCell],
+    cells: &[holtburger_content::EnvCellSystemCell],
     focus_env_cell_id: u32,
 ) {
     let Some(focus_cell) = cells
@@ -1049,7 +1046,7 @@ fn parse_point(input: &str) -> Result<PreparedVec3> {
     })
 }
 
-fn count_overlapping_pairs(items: &[holtburger_content::LandblockEnvCellBvhItem]) -> usize {
+fn count_overlapping_pairs(items: &[holtburger_content::EnvCellSystemBvhItem]) -> usize {
     let mut count = 0;
     for left_index in 0..items.len() {
         for right in items.iter().skip(left_index + 1) {

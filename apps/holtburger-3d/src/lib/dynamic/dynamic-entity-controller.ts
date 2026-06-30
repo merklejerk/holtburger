@@ -601,15 +601,15 @@ function createStaticAuthoredTextureDomain(
 
 function createStaticAuthoredMaterialPlanningDomain(
 	owner: StaticLayerPeerRecordOwner,
-): "landblock-env-cells" | OutdoorStaticObjectDomain {
+): "env-cell-system" | OutdoorStaticObjectDomain {
 	return createStaticAuthoredObjectMaterialDomain(owner);
 }
 
 function createStaticAuthoredObjectMaterialDomain(
 	owner: StaticLayerPeerRecordOwner,
-): "landblock-env-cells" | OutdoorStaticObjectDomain {
-	if (owner.domain === "landblock-env-cells") {
-		return "landblock-env-cells";
+): "env-cell-system" | OutdoorStaticObjectDomain {
+	if (owner.domain === "env-cell-system") {
+		return "env-cell-system";
 	}
 	if (
 		owner.domain === "outdoor-buildings" ||

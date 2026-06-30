@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use holtburger_content::{
-    ContentDecodeCache, ContentRepository, LandblockEnvCellsAssetAssembler,
+    ContentDecodeCache, ContentRepository, EnvCellSystemAssetAssembler,
     LandblockOutdoorStaticMember, LandblockSceneLodAsset, LandblockSceneLodAssetAssembler,
     LandblockSceneLodContext, LandblockSceneLodLayer, LandblockSceneLodLevel,
     LandblockSceneLodRequest, PreparedAabb, PreparedBuildingTransitionAperture, PreparedVec3,
@@ -41,7 +41,7 @@ fn main() -> Result<()> {
             context: LandblockSceneLodContext::Outdoor,
         },
     );
-    let env_asset = LandblockEnvCellsAssetAssembler::new().assemble_landblock_with_cache(
+    let env_asset = EnvCellSystemAssetAssembler::new().assemble_landblock_with_cache(
         &content,
         &cache,
         landblock_id,
@@ -212,7 +212,7 @@ fn build_building_portals_by_target(
 }
 
 fn build_env_apertures_by_cell_and_index(
-    env_asset: &holtburger_content::LandblockEnvCellsAsset,
+    env_asset: &holtburger_content::EnvCellSystemAsset,
 ) -> BTreeMap<(u32, usize), EnvPortalApertureSummary> {
     let mut apertures = BTreeMap::new();
     for cell in &env_asset.env_cells {
@@ -378,7 +378,7 @@ fn report_duplicate_building_transition_apertures(
 
 fn report_duplicate_transition_portal_linkage(
     landblock_id: u32,
-    cells: &[holtburger_content::LandblockEnvCellBundleCell],
+    cells: &[holtburger_content::EnvCellSystemCell],
     linked_env_cell_ids: &BTreeSet<u32>,
 ) {
     let mut groups = BTreeMap::<String, Vec<TransitionPortalApertureDump>>::new();
@@ -440,7 +440,7 @@ fn report_duplicate_transition_portal_linkage(
 
 fn report_duplicate_outside_transition_module_seams(
     landblock_id: u32,
-    cells: &[holtburger_content::LandblockEnvCellBundleCell],
+    cells: &[holtburger_content::EnvCellSystemCell],
     building_portals_by_target: &BTreeMap<(u32, usize), Vec<BuildingPortalTargetDump>>,
 ) {
     let mut groups = BTreeMap::<String, Vec<TransitionPortalApertureDump>>::new();

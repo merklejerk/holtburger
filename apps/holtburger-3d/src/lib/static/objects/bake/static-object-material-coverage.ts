@@ -27,7 +27,7 @@ export function createStaticObjectMaterialCoverageReport(options: {
 	readonly payload: {
 		readonly domain: Extract<
 			StaticDomain,
-			OutdoorStaticObjectDomain | "landblock-env-cells"
+			OutdoorStaticObjectDomain | "env-cell-system"
 		>;
 		readonly landblock: LandblockSourceIdentity;
 	};
@@ -85,7 +85,7 @@ export function createStaticObjectMaterialCoverageReport(options: {
 		buckets,
 		coverageKey: `${options.payload.domain}:static-objects`,
 		coverageKind:
-			options.payload.domain === "landblock-env-cells"
+			options.payload.domain === "env-cell-system"
 				? "env-cell-static-object-seeds"
 				: "outdoor-static-objects",
 		deferredTriangleCount: countOutcomeTriangles(buckets, "render-deferred"),

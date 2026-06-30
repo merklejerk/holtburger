@@ -76,7 +76,7 @@ export interface StaticObjectMaterialPipelinePlan {
 
 export type StaticMaterialPlanningDomain =
 	| OutdoorStaticObjectsScopePayload["domain"]
-	| "landblock-env-cells"
+	| "env-cell-system"
 	| "runtime-authored-dynamic-object-material";
 
 export interface StaticMaterialPlanningPayload {

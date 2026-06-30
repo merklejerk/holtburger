@@ -95,7 +95,7 @@ function createEnvCellFactsByLandblock(
 					drawUnit,
 				): drawUnit is EnvCellFacts["envCellStaticObjectDrawUnits"][number] =>
 					drawUnit.kind === "static-object-geometry" &&
-					drawUnit.domain === "landblock-env-cells" &&
+					drawUnit.domain === "env-cell-system" &&
 					drawUnit.landblockId === landblockId,
 			);
 		const structuredInteriorDrawUnits =
@@ -109,28 +109,28 @@ function createEnvCellFactsByLandblock(
 				materialized.staticAuthoredDynamicSeeds.filter(
 					(record) =>
 						record.kind === "env-cell-static-object-seed" &&
-						record.owner.domain === "landblock-env-cells" &&
+						record.owner.domain === "env-cell-system" &&
 						record.owner.key.landblockId === landblockId,
 				),
 			envCellStaticObjectDrawUnits,
 			landblockId,
 			materialCoverage: delta.materialCoverage.filter(
 				(record) =>
-					record.domain === "landblock-env-cells" &&
+					record.domain === "env-cell-system" &&
 					record.landblockId === landblockId,
 			),
 			materializedRevision: delta.revision,
 			portalApertureResources: materialized.portalApertureResources.filter(
 				(resource) =>
 					resource.landblockId === landblockId &&
-					(resource.sourceDomain === "landblock-env-cells" ||
+					(resource.sourceDomain === "env-cell-system" ||
 						resource.ranges.some(
 							(range) => range.sourceKind === "building-transition",
 						)),
 			),
 			portalGraphs: materialized.staticPortalGraphs.filter(
 				(record) =>
-					record.owner.domain === "landblock-env-cells" &&
+					record.owner.domain === "env-cell-system" &&
 					record.landblockId === landblockId,
 			),
 			portalInteriorRecords: materialized.staticPortalInteriorRecords.filter(
@@ -139,18 +139,18 @@ function createEnvCellFactsByLandblock(
 			sourceMappingRecords: materialized.staticSourceMappings.filter(
 				(record) =>
 					record.owner.kind === "layer-owner" &&
-					record.owner.domain === "landblock-env-cells" &&
+					record.owner.domain === "env-cell-system" &&
 					record.owner.key.landblockId === landblockId,
 			),
 			spatialRecords: materialized.staticSpatialRecords.filter(
 				(record) =>
 					record.owner.kind === "layer-owner" &&
-					record.owner.domain === "landblock-env-cells" &&
+					record.owner.domain === "env-cell-system" &&
 					record.owner.key.landblockId === landblockId,
 			),
 			structuredInteriorDrawUnits,
 			textureUses: delta.textureUses.filter(
-				(textureUse) => textureUse.domain === "landblock-env-cells",
+				(textureUse) => textureUse.domain === "env-cell-system",
 			),
 			visibilityRecords: materialized.staticVisibilityRecords.filter(
 				(record) => record.landblockId === landblockId,
@@ -262,7 +262,7 @@ function collectEnvCellLandblockIds(
 	return uniqueNumbers([
 		...materialized.materializedDrawUnits.flatMap((drawUnit) =>
 			(drawUnit.kind === "static-object-geometry" &&
-				drawUnit.domain === "landblock-env-cells") ||
+				drawUnit.domain === "env-cell-system") ||
 			drawUnit.kind === "structured-interior-geometry"
 				? [drawUnit.landblockId]
 				: [],
@@ -271,7 +271,7 @@ function collectEnvCellLandblockIds(
 			(record) => record.landblockId,
 		),
 		...materialized.staticPortalGraphs.flatMap((record) =>
-			record.owner.domain === "landblock-env-cells" ? [record.landblockId] : [],
+			record.owner.domain === "env-cell-system" ? [record.landblockId] : [],
 		),
 	]);
 }

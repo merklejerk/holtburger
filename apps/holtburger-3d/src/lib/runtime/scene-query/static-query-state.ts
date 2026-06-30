@@ -1,6 +1,6 @@
 import type { RenderMat4 } from "../../math/ac-placement-transform";
 import type {
-	LandblockEnvCellsStaticScopePayload,
+	EnvCellSystemStaticScopePayload,
 	OutdoorStaticObjectsScopePayload,
 	StaticBounds,
 	StaticEnvCellSpatialRecord,
@@ -19,7 +19,7 @@ type BvhNode =
 			OutdoorStaticObjectsScopePayload["sourceSpatial"]["outdoorBvh"]
 	  >["nodes"][number]
 	| TerrainBvh["nodes"][number]
-	| LandblockEnvCellsStaticScopePayload["residencySpatial"]["landblockEnvCellBvh"]["nodes"][number];
+	| EnvCellSystemStaticScopePayload["residencySpatial"]["envCellSystemBvh"]["nodes"][number];
 
 export type EnvCellInteriorPortal =
 	StaticPortalInteriorRecord["envCells"][number]["portals"][number];
@@ -79,7 +79,7 @@ export type EnvCellBvhRuntimeItem = {
 
 export interface EnvCellStaticSeedRuntimeRecord {
 	readonly envCellId: number;
-	readonly seed: LandblockEnvCellsStaticScopePayload["envCells"][number]["staticObjectSeeds"][number];
+	readonly seed: EnvCellSystemStaticScopePayload["envCells"][number]["staticObjectSeeds"][number];
 }
 
 export interface EnvCellLandblockBvhRuntimeItem {

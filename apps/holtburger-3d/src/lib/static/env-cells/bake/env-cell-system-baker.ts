@@ -1,6 +1,6 @@
 import type {
 	LandblockEnvCellStaticFacts,
-	LandblockEnvCellsStaticScopePayload,
+	EnvCellSystemStaticScopePayload,
 	ScheduledStaticWork,
 	StaticAuthoredDynamicSeedRecord,
 	StaticBakeBatchInput,
@@ -42,7 +42,7 @@ import { sliceStaticMaterialCompatibilityCandidates } from "../../bake/static-ma
 import {
 	createEnvCellCellStructureGeometryIdentity,
 	describeEnvCellCellStructureGeometryIdentity,
-} from "./landblock-env-cell-geometry-attachments";
+} from "./env-cell-system-geometry-attachments";
 import { bakeStaticObjectCompatibility } from "../../objects/bake/static-object-compatibility-baker";
 import {
 	createStructuredInteriorTextureUseId,
@@ -71,16 +71,16 @@ interface StructuredInteriorTriangleCandidate {
 	readonly triangleIndex: number;
 }
 
-export class LandblockEnvCellsBaker implements StaticBaker {
+export class EnvCellSystemBaker implements StaticBaker {
 	async bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
-		return bakeLandblockEnvCells(input);
+		return bakeEnvCellSystem(input);
 	}
 }
 
-export function bakeLandblockEnvCells(
+export function bakeEnvCellSystem(
 	input: StaticBakeBatchInput,
 ): StaticBakeBatchResult {
-	if (input.domain !== "landblock-env-cells") {
+	if (input.domain !== "env-cell-system") {
 		throw new Error(
 			`Landblock env-cell baker only supports landblock env-cell batches. Received ${input.domain}.`,
 		);
@@ -146,7 +146,7 @@ export function bakeLandblockEnvCells(
 
 function validateGeometryAttachments(input: StaticBakeBatchInput): void {
 	for (const item of input.items) {
-		if (item.payload.scope.kind !== "landblock-env-cells") {
+		if (item.payload.scope.kind !== "env-cell-system") {
 			continue;
 		}
 
@@ -198,8 +198,8 @@ function bakeLandblockEnvCellItem(
 	readonly textureUses: readonly StaticBakeTextureUse[];
 } {
 	if (
-		item.work.job.domain !== "landblock-env-cells" ||
-		item.payload.scope.kind !== "landblock-env-cells"
+		item.work.job.domain !== "env-cell-system" ||
+		item.payload.scope.kind !== "env-cell-system"
 	) {
 		throw new Error(
 			`Landblock env-cell baker only supports landblock env-cell payloads. Received ${item.work.job.domain}/${item.payload.scope.kind}.`,
@@ -257,7 +257,7 @@ function bakeLandblockEnvCellItem(
 function createStructuredInteriorDrawUnits(
 	input: StaticBakeBatchInput,
 	work: ScheduledStaticWork,
-	payload: LandblockEnvCellsStaticScopePayload,
+	payload: EnvCellSystemStaticScopePayload,
 	materialPlansByEnvCellId: ReadonlyMap<
 		number,
 		StructuredInteriorCellMaterialPlan
@@ -348,7 +348,7 @@ function createStructuredInteriorDrawUnit(options: {
 	return {
 		cellStructure: options.envCell.cellStructure,
 		coordinateSpace: "landblock-render-local",
-		domain: "landblock-env-cells",
+		domain: "env-cell-system",
 		drawUnitId: createStructuredInteriorDrawUnitId(
 			options.work,
 			options.envCell,
@@ -400,7 +400,7 @@ function createStructuredInteriorDrawUnit(options: {
 }
 
 function createStructuredInteriorMaterialPlans(
-	payload: LandblockEnvCellsStaticScopePayload,
+	payload: EnvCellSystemStaticScopePayload,
 	work: ScheduledStaticWork,
 ): ReadonlyMap<number, StructuredInteriorCellMaterialPlan> {
 	return new Map(
@@ -437,7 +437,7 @@ function warnAboutStructuredInteriorMaterialOmissions(options: {
 		number,
 		StructuredInteriorCellMaterialPlan
 	>;
-	readonly payload: LandblockEnvCellsStaticScopePayload;
+	readonly payload: EnvCellSystemStaticScopePayload;
 	readonly work: ScheduledStaticWork;
 }): void {
 	const groups = createStructuredInteriorMaterialOmissionWarningGroups(options);
@@ -458,7 +458,7 @@ function warnAboutStructuredInteriorMaterialOmissions(options: {
 
 function warnAboutStructuredInteriorGeometrySurfaceOmissions(options: {
 	readonly omissions: readonly StructuredInteriorGeometrySurfaceOmission[];
-	readonly payload: LandblockEnvCellsStaticScopePayload;
+	readonly payload: EnvCellSystemStaticScopePayload;
 	readonly work: ScheduledStaticWork;
 }): void {
 	if (options.omissions.length === 0) {
@@ -511,7 +511,7 @@ function createStructuredInteriorMaterialOmissionWarningGroups(options: {
 		number,
 		StructuredInteriorCellMaterialPlan
 	>;
-	readonly payload: LandblockEnvCellsStaticScopePayload;
+	readonly payload: EnvCellSystemStaticScopePayload;
 }): readonly StructuredInteriorMaterialOmissionWarningGroup[] {
 	const groups = new Map<
 		string,
@@ -809,7 +809,7 @@ function createStructuredInteriorTextureUses(options: {
 				work: options.work,
 				wrapMode,
 			}),
-		domain: "landblock-env-cells",
+		domain: "env-cell-system",
 		isStageableDataUse: isCurrentlyStageableStaticObjectDataUse,
 		staticBatchId: options.staticBatchId,
 		textureUseSpecs: options.drawUnits.flatMap((drawUnit) => {
@@ -1021,7 +1021,7 @@ function mergeTextureUses(
 
 function createSpatialRecords(
 	owner: StaticLayerPeerRecordOwner,
-	payload: LandblockEnvCellsStaticScopePayload,
+	payload: EnvCellSystemStaticScopePayload,
 ): readonly StaticSpatialRecord[] {
 	return payload.envCells.map((envCell) => ({
 		cellBsp: envCell.cellBsp,
@@ -1034,17 +1034,17 @@ function createSpatialRecords(
 		memberId: envCell.memberId,
 		owner,
 		renderBounds: envCell.renderGeometry.bounds,
-		residencyBvh: payload.residencySpatial.landblockEnvCellBvh,
+		residencyBvh: payload.residencySpatial.envCellSystemBvh,
 		residencyBvhItemCount:
-			payload.residencySpatial.landblockEnvCellBvhItemCount,
+			payload.residencySpatial.envCellSystemBvhItemCount,
 		residencyBvhNodeCount:
-			payload.residencySpatial.landblockEnvCellBvhNodeCount,
+			payload.residencySpatial.envCellSystemBvhNodeCount,
 	}));
 }
 
 function createVisibilityRecord(
 	owner: StaticLayerPeerRecordOwner,
-	payload: LandblockEnvCellsStaticScopePayload,
+	payload: EnvCellSystemStaticScopePayload,
 ): StaticVisibilityRecord {
 	return {
 		acceptedEnvCellIds: payload.acceptedEnvCellIds,
@@ -1063,7 +1063,7 @@ function createVisibilityRecord(
 
 function createPortalInteriorRecord(
 	owner: StaticLayerPeerRecordOwner,
-	payload: LandblockEnvCellsStaticScopePayload,
+	payload: EnvCellSystemStaticScopePayload,
 ): StaticPortalInteriorRecord {
 	return {
 		envCells: payload.envCells.map((envCell) => ({
@@ -1082,7 +1082,7 @@ function createPortalInteriorRecord(
 
 function createSourceMappingRecords(
 	owner: StaticLayerPeerRecordOwner,
-	payload: LandblockEnvCellsStaticScopePayload,
+	payload: EnvCellSystemStaticScopePayload,
 ): readonly StaticSourceMappingRecord[] {
 	return payload.envCells.map((envCell) => ({
 		cellStructure: envCell.cellStructure,
@@ -1098,7 +1098,7 @@ function createSourceMappingRecords(
 
 function createAuthoredDynamicSeedRecords(
 	owner: StaticLayerPeerRecordOwner,
-	payload: LandblockEnvCellsStaticScopePayload,
+	payload: EnvCellSystemStaticScopePayload,
 ): readonly StaticAuthoredDynamicSeedRecord[] {
 	const sourceByKey = new Map(
 		payload.sourceAssets.map((source) => [
@@ -1121,7 +1121,7 @@ function createAuthoredDynamicSeedRecords(
 
 function createAuthoredDynamicSeedRecordsForSeed(
 	owner: StaticLayerPeerRecordOwner,
-	payload: LandblockEnvCellsStaticScopePayload,
+	payload: EnvCellSystemStaticScopePayload,
 	envCell: LandblockEnvCellStaticFacts,
 	seed: LandblockEnvCellStaticFacts["staticObjectSeeds"][number],
 	sourceByKey: ReadonlyMap<string, StaticObjectSourceAssetFacts>,
@@ -1147,7 +1147,7 @@ function createAuthoredDynamicSeedRecordsForSeed(
 function createEnvCellStaticObjectDynamicSeedRecord(options: {
 	readonly envCell: LandblockEnvCellStaticFacts;
 	readonly owner: StaticLayerPeerRecordOwner;
-	readonly payload: LandblockEnvCellsStaticScopePayload;
+	readonly payload: EnvCellSystemStaticScopePayload;
 	readonly seed: LandblockEnvCellStaticFacts["staticObjectSeeds"][number];
 	readonly sourceByKey: ReadonlyMap<string, StaticObjectSourceAssetFacts>;
 }): StaticAuthoredDynamicSeedRecord | null {

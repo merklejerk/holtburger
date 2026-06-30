@@ -25,7 +25,7 @@ export function createEnvCellStaticObjectSelectionKey(options: {
 	readonly instanceId: string;
 }): EnvCellStaticSceneSelectionKey {
 	return {
-		domain: "landblock-env-cells",
+		domain: "env-cell-system",
 		envCellId: options.envCellId,
 		instanceId: options.instanceId,
 		itemKind: "env-cell-static-object",
@@ -39,7 +39,7 @@ export function createEnvCellPortalSelectionKey(options: {
 	readonly portalId: string;
 }): EnvCellPortalSceneSelectionKey {
 	return {
-		domain: "landblock-env-cells",
+		domain: "env-cell-system",
 		envCellId: options.envCellId,
 		itemKind: "env-cell-portal",
 		landblockId: options.landblockId,

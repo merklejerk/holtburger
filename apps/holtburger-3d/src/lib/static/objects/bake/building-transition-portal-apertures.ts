@@ -1,5 +1,5 @@
 import type {
-	LandblockEnvCellsStaticScopePayload,
+	EnvCellSystemStaticScopePayload,
 	OutdoorStaticObjectsScopePayload,
 	StaticBuildingTransitionApertureRange,
 	StaticPortalApertureResource,
@@ -16,7 +16,7 @@ type TransitionPortalVisibleSide = "positive" | "negative";
 
 type BuildingTransitionPortalAperturePayload =
 	| OutdoorStaticObjectsScopePayload
-	| LandblockEnvCellsStaticScopePayload;
+	| EnvCellSystemStaticScopePayload;
 
 export function deriveBuildingTransitionPortalApertureResource(
 	payload: BuildingTransitionPortalAperturePayload,

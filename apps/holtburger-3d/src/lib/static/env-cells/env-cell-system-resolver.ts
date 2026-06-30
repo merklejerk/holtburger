@@ -12,7 +12,7 @@ import {
 } from "../../assets/keys";
 import type {
 	LandblockEnvCellStaticFacts,
-	LandblockEnvCellsStaticScopePayload,
+	EnvCellSystemStaticScopePayload,
 	StaticMaterialSourceIdentity,
 	StaticObjectInstanceIdentity,
 	StaticObjectPaletteSourceFacts,
@@ -32,35 +32,35 @@ import {
 } from "../objects/static-object-source-closure";
 import { createSurfaceTextureIdentity } from "../terrain/terrain-identities";
 
-type LandblockEnvCellsPreparedPayload =
+type EnvCellSystemPreparedPayload =
 	| ResolverLandblockEnvCellLayerPayloadDto
 	| RegionRenderProfilePayloadDto;
 
 interface LoadedPayload<
-	TKind extends LandblockEnvCellsPreparedPayload["kind"] =
-		LandblockEnvCellsPreparedPayload["kind"],
+	TKind extends EnvCellSystemPreparedPayload["kind"] =
+		EnvCellSystemPreparedPayload["kind"],
 > {
 	readonly asset: PreparedAsset;
 	readonly payload: Extract<
-		LandblockEnvCellsPreparedPayload,
+		EnvCellSystemPreparedPayload,
 		{ readonly kind: TKind }
 	>;
 }
 
-export interface LandblockEnvCellsResolverOptions {
+export interface EnvCellSystemResolverOptions {
 	readonly assetService: PreparedAssetReader;
 }
 
-export class LandblockEnvCellsResolver {
+export class EnvCellSystemResolver {
 	readonly #assetService: PreparedAssetReader;
 
-	constructor(options: LandblockEnvCellsResolverOptions) {
+	constructor(options: EnvCellSystemResolverOptions) {
 		this.#assetService = options.assetService;
 	}
 
 	async resolve(job: StaticResolverJob): Promise<StaticScopePayload> {
 		if (
-			job.domain !== "landblock-env-cells" ||
+			job.domain !== "env-cell-system" ||
 			job.scope.kind !== "landblock"
 		) {
 			throw new Error(
@@ -127,13 +127,13 @@ export class LandblockEnvCellsResolver {
 			}),
 		);
 		reportUnboundedEnvCells(landblock.payload);
-		const scope: LandblockEnvCellsStaticScopePayload = {
+		const scope: EnvCellSystemStaticScopePayload = {
 			acceptedEnvCellIds: envCells
 				.map((cell) => cell.identity.envCellId)
 				.sort(compareNumeric),
 			buildingTransitionApertures: landblock.payload.buildingTransitionApertures,
 			envCells,
-			kind: "landblock-env-cells",
+			kind: "env-cell-system",
 			landblock: {
 				kind: "landblock-source",
 				landblockId: landblock.payload.landblockId,
@@ -151,12 +151,12 @@ export class LandblockEnvCellsResolver {
 				},
 			},
 			residencySpatial: {
-				landblockEnvCellBvhItemCount:
-					landblock.payload.landblockEnvCellBvh.items.length,
-				landblockEnvCellBvhNodeCount:
-					landblock.payload.landblockEnvCellBvh.nodes.length,
-				landblockEnvCellBvh: {
-					items: landblock.payload.landblockEnvCellBvh.items.map((item) => ({
+				envCellSystemBvhItemCount:
+					landblock.payload.envCellSystemBvh.items.length,
+				envCellSystemBvhNodeCount:
+					landblock.payload.envCellSystemBvh.nodes.length,
+				envCellSystemBvh: {
+					items: landblock.payload.envCellSystemBvh.items.map((item) => ({
 						bounds: item.bounds,
 						identity: {
 							envCellId: item.envCellId,
@@ -165,7 +165,7 @@ export class LandblockEnvCellsResolver {
 						memberId: item.memberId,
 						source: item.source,
 					})),
-					nodes: landblock.payload.landblockEnvCellBvh.nodes,
+					nodes: landblock.payload.envCellSystemBvh.nodes,
 				},
 			},
 			sourceAssets: sourceClosure.sourceAssets,
@@ -209,7 +209,7 @@ export class LandblockEnvCellsResolver {
 		return sourceRevision;
 	}
 
-	async #loadPayload<TKind extends LandblockEnvCellsPreparedPayload["kind"]>(
+	async #loadPayload<TKind extends EnvCellSystemPreparedPayload["kind"]>(
 		key: HostAssetKey,
 		expectedKind: TKind,
 	): Promise<LoadedPayload<TKind>> {
@@ -254,7 +254,7 @@ function reportUnboundedEnvCells(
 	payload: ResolverLandblockEnvCellLayerPayloadDto,
 ): void {
 	const boundedEnvCellIds = new Set(
-		payload.landblockEnvCellBvh.items.map((item) => item.envCellId),
+		payload.envCellSystemBvh.items.map((item) => item.envCellId),
 	);
 	const omittedEnvCellIds = payload.envCells
 		.map((cell) => cell.envCellId)
@@ -263,10 +263,10 @@ function reportUnboundedEnvCells(
 		return;
 	}
 
-	console.warn("[holtburger-3d][browser][landblock-env-cells-bvh]", {
+	console.warn("[holtburger-3d][browser][env-cell-system-bvh]", {
 		landblockId: payload.landblockId,
 		message:
-			"Resolved env cells without landblock BVH bounds were omitted from the landblockEnvCellBvh broad phase.",
+			"Resolved env cells without landblock BVH bounds were omitted from the envCellSystemBvh broad phase.",
 		omittedEnvCellIds,
 	});
 }
@@ -417,13 +417,13 @@ function parseHex32KeyId(key: HostAssetKey, sourceAssetId: string): number {
 }
 
 function requirePreparedPayloadKind<
-	TKind extends LandblockEnvCellsPreparedPayload["kind"],
+	TKind extends EnvCellSystemPreparedPayload["kind"],
 >(
 	asset: PreparedAsset,
 	expectedKind: TKind,
-): Extract<LandblockEnvCellsPreparedPayload, { readonly kind: TKind }> {
+): Extract<EnvCellSystemPreparedPayload, { readonly kind: TKind }> {
 	const payload =
-		asset.payload as Partial<LandblockEnvCellsPreparedPayload> | null;
+		asset.payload as Partial<EnvCellSystemPreparedPayload> | null;
 	if (!payload || payload.kind !== expectedKind) {
 		throw new Error(
 			`Prepared asset ${asset.sourceAssetId} was ${String(
@@ -433,7 +433,7 @@ function requirePreparedPayloadKind<
 	}
 
 	return payload as Extract<
-		LandblockEnvCellsPreparedPayload,
+		EnvCellSystemPreparedPayload,
 		{ readonly kind: TKind }
 	>;
 }

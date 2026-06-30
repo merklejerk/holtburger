@@ -29,7 +29,7 @@ describe("layer owners", () => {
 			landblockId: 0xda55ffff,
 		});
 		expect(
-			createLayerOwnerKeyForStaticScope(createScope("landblock-env-cells")),
+			createLayerOwnerKeyForStaticScope(createScope("env-cell-system")),
 		).toEqual({
 			kind: "env-cell-system",
 			landblockId: 0xda55ffff,

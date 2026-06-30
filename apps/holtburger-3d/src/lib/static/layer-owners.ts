@@ -40,7 +40,7 @@ export function layerOwnerKindForStaticDomain(
 			return "outdoor-explicit-objects";
 		case "outdoor-generated-scenery":
 			return "outdoor-generated-scenery";
-		case "landblock-env-cells":
+		case "env-cell-system":
 			return "env-cell-system";
 	}
 }

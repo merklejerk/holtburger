@@ -1114,7 +1114,7 @@ class Webgl2Renderer implements Renderer {
 				}
 				if (payload && drawUnitCount > 0) {
 					this.#recordStaticObjectUpload({
-						domain: "landblock-env-cells",
+						domain: "env-cell-system",
 						drawUnitCount,
 						kind: "static-object-upload-diagnostics",
 						landblockId,
@@ -4087,12 +4087,12 @@ function shouldDrawStaticObjectResourceInDomain(
 		if (resource.domain === "outdoor-buildings") {
 			return visibility.outdoorBuildings;
 		}
-		if (resource.domain === "landblock-env-cells") {
+		if (resource.domain === "env-cell-system") {
 			return visibility.envCellInteriors;
 		}
 		return shouldDrawOutdoorObjectDomain(resource.domain, visibility);
 	}
-	const isInteriorStaticObject = resource.domain === "landblock-env-cells";
+	const isInteriorStaticObject = resource.domain === "env-cell-system";
 	if (domain === "interior") {
 		return isInteriorStaticObject && visibility.envCellInteriors;
 	}
@@ -4103,7 +4103,7 @@ function shouldDrawStaticObjectResourceInDomain(
 }
 
 function shouldDrawOutdoorObjectDomain(
-	domain: Exclude<StaticObjectGeometryResource["domain"], "landblock-env-cells">,
+	domain: Exclude<StaticObjectGeometryResource["domain"], "env-cell-system">,
 	visibility: RendererStaticLayerVisibility,
 ): boolean {
 	switch (domain) {

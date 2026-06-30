@@ -3,7 +3,7 @@ import type {
 	HostAssetKey,
 	PreparedAsset,
 } from "../../../assets/contracts";
-import type { ResolverLandblockEnvCellsPayloadDto } from "../../../assets/preparation/env-cell-views";
+import type { ResolverLandblockEnvCellLayerPayloadDto } from "../../../assets/preparation/env-cell-views";
 import { createResolverEnvCellPreparedAssetView } from "../../../assets/preparation/env-cell-views";
 import { createHostAssetKey, describeHostAssetKey } from "../../../assets/keys";
 import type {
@@ -80,7 +80,7 @@ describe("browser landblock env-cell geometry attachments", () => {
 		);
 		const resolverAsset = createResolverEnvCellPreparedAssetView(fullAsset);
 		const resolverPayload =
-			resolverAsset.payload as ResolverLandblockEnvCellsPayloadDto;
+			resolverAsset.payload as ResolverLandblockEnvCellLayerPayloadDto;
 		const provider = new LandblockEnvCellGeometryAttachmentProvider();
 
 		await expect(
@@ -94,7 +94,7 @@ describe("browser landblock env-cell geometry attachments", () => {
 function createAttachmentRequest(
 	payload:
 		| LandblockEnvCellsLayerSourcePayloadDto
-		| ResolverLandblockEnvCellsPayloadDto,
+		| ResolverLandblockEnvCellLayerPayloadDto,
 ): StaticBakeAttachmentRequest {
 	const domain = "landblock-env-cells";
 	const job = {
@@ -131,7 +131,7 @@ function createAttachmentRequest(
 function createScopePayload(
 	payload:
 		| LandblockEnvCellsLayerSourcePayloadDto
-		| ResolverLandblockEnvCellsPayloadDto,
+		| ResolverLandblockEnvCellLayerPayloadDto,
 ): LandblockEnvCellsStaticScopePayload {
 	return {
 		acceptedEnvCellIds: payload.envCells.map((cell) => cell.envCellId),
@@ -320,6 +320,6 @@ function createProvenance() {
 		detail: null,
 		errorCode: null,
 		source: "repo-local-hba" as const,
-		sourceAssetKind: "landblock-env-cells",
+		sourceAssetKind: "landblock-scene-lod-env-cell-layer",
 	};
 }

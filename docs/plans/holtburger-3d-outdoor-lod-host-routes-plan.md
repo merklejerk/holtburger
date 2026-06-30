@@ -2036,7 +2036,7 @@ Decisions and course corrections:
 
 ### Phase 12B: Final Zero-Reference Audits
 
-Status: pending.
+Status: completed on 2026-06-30.
 
 Goal: prove no executable compatibility path keeps the removed old route/domain/lifecycle model alive.
 
@@ -2055,14 +2055,20 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Run zero-reference audits for `landblock/{id}/outdoor`, `landblock/{id}/env-cells`, `landblock/{id}/topology`, `landblock-outdoor`, `landblock-env-cells`, route-facing `LandblockOutdoor`, route-facing `LandblockEnvCells`, route-facing `LandblockTopology`, `outdoor-detail`, `EnvCellSystemLayerAssemblyStore`, `LandblockEnvCellGeometryAttachmentProvider`, retained scopes, desired keys, active work ids, and source scope keys.
-- [ ] Classify all surviving hits in this plan.
-- [ ] Delete any surviving executable compatibility path discovered by the audit.
-- [ ] Update completed status/progress notes.
+- [x] Run zero-reference audits for `landblock/{id}/outdoor`, `landblock/{id}/env-cells`, `landblock/{id}/topology`, `landblock-outdoor`, `landblock-env-cells`, route-facing `LandblockOutdoor`, route-facing `LandblockEnvCells`, route-facing `LandblockTopology`, `outdoor-detail`, `EnvCellSystemLayerAssemblyStore`, `LandblockEnvCellGeometryAttachmentProvider`, retained scopes, desired keys, active work ids, and source scope keys.
+- [x] Classify all surviving hits in this plan.
+- [x] Delete any surviving executable compatibility path discovered by the audit.
+- [x] Update completed status/progress notes.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Strict removed-symbol audit passed with no hits under `apps` or `crates` for old `ContentAssetRequest`/`ContentAsset` variants, old Tauri route parsers, topology helpers, deleted topology/content assemblers, `outdoor-detail` renderer/runtime names, and `EnvCellSystemLayerAssemblyStore`.
+- Lifecycle audit passed with no hits for retained-scope/source-scope ownership names after renaming three stale test titles to layer-owner language. `desiredKey`, `activeWork`, and `workId` remain transient scheduler, cancellation, diagnostics, and bake-completion identifiers as classified in Phase 11D, not resource ownership.
+- Route audit found no surviving `landblock/{id}/outdoor`, `landblock/{id}/env-cells`, or `landblock/{id}/topology` host request routes. Remaining `landblock/{...}/outdoor/...` strings are content source/provenance IDs generated inside `landblock_scene_assets.rs`, not host route compatibility.
+- Remaining `landblock-outdoor-terrain-local` hits are terrain coordinate-space labels in content/Tauri/frontend contracts and tests. They describe source coordinate basis, not the deleted broad host route.
+- Remaining `landblock-env-cells` hits are the legitimate env-cell system layer/domain, payload scope kind, material/bake/render vocabulary, diagnostics, and tests. The old route-facing DTO/provenance names found during audit were trimmed: `ResolverLandblockEnvCellsPayloadDto` became `ResolverLandblockEnvCellLayerPayloadDto`, env-cell resolver test provenance now uses `landblock-scene-lod-env-cell-layer`, and stale source-scope/retained-scope test titles now use layer-owner wording.
+- `LandblockEnvCellGeometryAttachmentProvider` remains intentionally named for its layer attachment role. It has no host asset reader or direct old-route lookup and derives attachments from resolved `landblock-scene-lod` env-cell layer payloads.
+- Validation after audit cleanup passed: `npm run check`; `npm run test:ts` passed 68 test files / 568 tests; targeted reruns passed for `src/lib/dynamic/dynamic-entity-controller.test.ts`, `src/lib/runtime/static-scene-query.test.ts`, `src/lib/runtime/client-runtime.test.ts`, `src/lib/static/env-cells/landblock-env-cells-resolver.test.ts`, and `src/lib/static/env-cells/bake/landblock-env-cell-geometry-attachments.test.ts`; rerun zero-reference audits for removed symbols, lifecycle names, old route strings, old DTO/provenance names, and old host asset key/parsing patterns.
 
 ### Phase 12C: Documentation And Definition-Of-Done Closeout
 

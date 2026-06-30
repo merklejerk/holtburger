@@ -14,7 +14,7 @@ type ResolverLandblockEnvCellDto = Omit<
 	readonly renderGeometry: ResolverEnvCellRenderGeometryDto;
 };
 
-export type ResolverLandblockEnvCellsPayloadDto = Omit<
+export type ResolverLandblockEnvCellLayerPayloadDto = Omit<
 	LandblockEnvCellsLayerSourcePayloadDto,
 	"envCells"
 > & {
@@ -53,7 +53,7 @@ export function createResolverEnvCellPreparedAssetView(
 
 function createResolverLandblockEnvCellsPayloadView(
 	payload: LandblockEnvCellsLayerSourcePayloadDto,
-): ResolverLandblockEnvCellsPayloadDto {
+): ResolverLandblockEnvCellLayerPayloadDto {
 	return {
 		...payload,
 		envCells: payload.envCells.map(createResolverEnvCellPayloadView),

@@ -9,7 +9,7 @@ import type {
 	SetupModelPayloadDto,
 	SurfaceTexturePayloadDto,
 } from "../../../lib/host/contracts";
-import type { ResolverLandblockEnvCellsPayloadDto } from "../../assets/preparation/env-cell-views";
+import type { ResolverLandblockEnvCellLayerPayloadDto } from "../../assets/preparation/env-cell-views";
 import { omitRenderGeometryVertexBuffers } from "../../assets/preparation/render-geometry-views";
 import type {
 	AssetService,
@@ -357,7 +357,7 @@ describe("browser landblock env-cell resolver", () => {
 				...cell,
 				renderGeometry: omitRenderGeometryVertexBuffers(cell.renderGeometry),
 			})),
-		} satisfies ResolverLandblockEnvCellsPayloadDto;
+		} satisfies ResolverLandblockEnvCellLayerPayloadDto;
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
 				createHostAssetKey("landblock-scene-lod-env-cell-layer", 0xda55ffff),
@@ -1166,7 +1166,7 @@ function createDiagnostics() {
 	};
 }
 
-function createProvenance(sourceAssetKind = "landblock-env-cells") {
+function createProvenance(sourceAssetKind = "landblock-scene-lod-env-cell-layer") {
 	return {
 		detail: null,
 		errorCode: null,

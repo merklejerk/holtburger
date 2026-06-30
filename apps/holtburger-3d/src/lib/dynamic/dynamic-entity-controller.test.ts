@@ -109,7 +109,7 @@ describe("dynamic entity controller", () => {
 		).toBe("outdoor-buildings:0xda55ffff");
 	});
 
-	it("removes records whose static source scope is no longer retained", () => {
+	it("removes records whose static layer owner is no longer retained", () => {
 		const controller = new DynamicEntityController();
 		controller.ingestStaticSeeds([
 			createOutdoorSeedRecord(),

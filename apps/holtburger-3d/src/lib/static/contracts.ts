@@ -1848,7 +1848,6 @@ export interface StaticCoordinatorSnapshot {
 	readonly baking: number;
 	readonly committed: number;
 	readonly failed: number;
-	readonly staleBakeResults: number;
 	readonly committedDrawUnits: number;
 	readonly ownerStates: readonly LayerOwnerState[];
 	readonly layerTasks: readonly StaticLayerTaskStatus[];

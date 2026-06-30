@@ -579,7 +579,7 @@ Verification:
 
 ### Phase 4C: Delete Bake Stale Filtering And Demand-Key Result Reconstruction
 
-Status: pending.
+Status: completed 2026-06-30.
 
 Purpose:
 
@@ -600,14 +600,29 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Remove stale bake summary fields from static coordinator snapshot and runtime diagnostics.
-- [ ] Replace stale bake tests with task cancellation/currentness tests.
-- [ ] Delete result filtering helpers and any now-dead demand-key helpers.
-- [ ] Run full static bake/coordinator/runtime verification for the cutover.
+- [x] Remove stale bake summary fields from static coordinator snapshot and runtime diagnostics.
+- [x] Replace stale bake tests with task cancellation/currentness tests.
+- [x] Delete result filtering helpers and any now-dead demand-key helpers.
+- [x] Run full static bake/coordinator/runtime verification for the cutover.
 
 Decisions and course corrections:
 
-- Record any commit product that blocks deletion of demand-key reconstruction.
+- 2026-06-30: Deleted `#staleBakeResults` and removed `staleBakeResults` from coordinator
+  snapshots, runtime diagnostics, UI-facing reports, and tests.
+- 2026-06-30: Deleted bake-result demand-key reconstruction. Mixed current/stale batch results are
+  trimmed by direct owner identity instead of reconstructing keys from draw units, diagnostics,
+  portal records, dynamic seeds, visibility records, and texture uses.
+- 2026-06-30: Kept current-product salvage for mixed batches so demanded layers can still commit if
+  another task in the same batch became stale during the bake. This preserves the rendered outcome
+  without retaining stale counters or demand-key archaeology.
+
+Verification:
+
+- `npm run test:ts -- --run src/lib/static/coordinator/static-coordinator.test.ts`
+- `npm run test:ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run lint:dead`
 
 ### Phase 5: Replace Revision-Based Static Materialization Tracking
 

@@ -7,6 +7,7 @@ import {
 	type BakedDynamicVisualResource,
 	type DynamicEntityRecipe,
 	type DynamicEntityTransformState,
+	type DynamicVisualBakeInput,
 	type DynamicVisualBakeResult,
 	type DynamicVisualMaterialPolicy,
 	type DynamicVisualRecipe,
@@ -41,6 +42,12 @@ describe("dynamic visual contracts", () => {
 	});
 
 	it("models visual bake output as baked resources or entity-local skips", () => {
+		const input: DynamicVisualBakeInput = {
+			batchId: "dynamic-visual-batch:1",
+			recipes: [],
+			revision: 1,
+			sourceGeometry: [],
+		};
 		const baked: BakedDynamicVisualResource = {
 			entityId: "runtime-dynamic:1",
 			materialSlots: [],
@@ -72,6 +79,7 @@ describe("dynamic visual contracts", () => {
 			revision: 1,
 		};
 
+		expect(input.sourceGeometry).toEqual([]);
 		expect(result.products.map((product) => product.kind)).toEqual([
 			"baked",
 			"skipped",

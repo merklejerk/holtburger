@@ -1152,7 +1152,39 @@ Acceptance criteria:
 
 Decisions and course corrections:
 
-- Pending.
+- Completed during Phase 3.
+
+Implemented visual bake surface:
+
+- `LocalDynamicVisualBaker` and `bakeDynamicVisuals(...)` now convert dynamic recipes into
+  `BakedDynamicVisualResource` products with dynamic material slots, texture requirements, and
+  `DynamicEntityRenderPart` geometry.
+- The baker reuses the static object material planner and static material table adapter, but it
+  owns dynamic-local visual identities, dynamic texture-use ids, and dynamic render-part slicing.
+- Missing resolver dependencies become entity-local `missing-dependencies` skipped products.
+  Unsupported material plans become entity-local `unsupported-materials` skipped products.
+  Impossible internal bake states, such as missing geometry attachments, are reported as loud bake
+  failures.
+
+Course correction:
+
+- `DynamicVisualBakeInput` now carries `sourceGeometry` attachments alongside recipes. Source
+  recipes intentionally contain compact source facts, not full `gfx-obj` vertex buffers. The worker
+  boundary must therefore prepare and transfer `StaticObjectSourceGeometryAttachment` values before
+  baking. This keeps the baker free of `AssetService` access without bloating every recipe with raw
+  geometry.
+
+Debt:
+
+- Phase 3 duplicates some pure render-part/material helper logic that still exists in
+  `DynamicEntityResourceManager`. That is acceptable only until the runtime cutover deletes the old
+  manager path; do not let the duplicated implementation become a long-term compatibility layer.
+
+Verification:
+
+- `npm run test:ts -- src/lib/dynamic/visual-contracts.test.ts src/lib/dynamic/visual-baker.test.ts`
+- `npm run check`
+- `npm run lint:ts`
 
 ### Resteer 0: Contract Boundary Review
 

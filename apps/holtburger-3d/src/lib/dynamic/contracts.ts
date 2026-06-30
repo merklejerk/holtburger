@@ -5,6 +5,7 @@ import type {
 	StaticBakeTextureSamplingPolicy,
 	StaticAuthoredDynamicSeedRecord,
 	StaticBounds,
+	StaticObjectSourceGeometryAttachment,
 	StaticObjectMaterialSourceFacts,
 	StaticObjectPaletteSourceFacts,
 	StaticObjectPartMaterialSlotFacts,
@@ -240,6 +241,8 @@ export interface DynamicVisualBakeInput {
 	readonly batchId: string;
 	readonly recipes: readonly DynamicEntityRecipe[];
 	readonly revision: number;
+	/** Geometry buffers required by the baker; prepared before crossing the bake boundary. */
+	readonly sourceGeometry: readonly StaticObjectSourceGeometryAttachment[];
 }
 
 export interface DynamicVisualBakeResult {

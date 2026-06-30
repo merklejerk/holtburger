@@ -1,7 +1,3 @@
-import type {
-	StaticPortalInteriorRecord,
-} from "./contracts";
-
 export function createEnvCellPortalApertureRangeId(options: {
 	readonly envCellId: number;
 	readonly landblockId: number;

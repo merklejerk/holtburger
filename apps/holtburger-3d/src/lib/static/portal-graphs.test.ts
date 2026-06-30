@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type {
 	LandblockPortalLinkFacts,
-	StaticBuildingTransitionApertureRange,
 	StaticPortalApertureResource,
 	StaticPortalGraphEdge,
 	StaticPortalGraphNode,
@@ -736,69 +735,6 @@ function createEnvCellPortalGraphFixture(
 	};
 }
 
-function createBuildingTransitionPortalGraphFixture(
-	owner: StaticLayerPeerRecordOwner,
-	resource: StaticPortalApertureResource,
-): StaticPortalGraphRecord {
-	const nodesById = new Map<string, StaticPortalGraphNode>();
-	const outdoorNode = createPortalGraphFixtureNode({
-		kind: "outdoor",
-		landblockId: resource.landblockId,
-	});
-	nodesById.set(outdoorNode.nodeId, outdoorNode);
-
-	const edges: StaticPortalGraphEdge[] = [];
-	for (const range of getBuildingTransitionApertureRanges(resource)) {
-		const envCellId = range.source.targetEnvCellId;
-		const envCellNode = createPortalGraphFixtureNode({
-			envCellId,
-			kind: "env-cell",
-		});
-		nodesById.set(envCellNode.nodeId, envCellNode);
-		edges.push({
-			direction: "directed",
-			edgeId: [
-				"building-transition",
-				resource.apertureResourceId,
-				range.source.portalId,
-				envCellId,
-			].join(":"),
-			flags: 0,
-			linkId: [
-				"transition",
-				resource.apertureResourceId,
-				range.source.portalId,
-				envCellId,
-			].join(":"),
-			polygonId: range.source.polyId,
-			provenance: {
-				apertureResourceId: resource.apertureResourceId,
-				buildingInstanceId: range.source.buildingInstanceId,
-				buildingPortalId: range.source.buildingPortalId,
-				kind: "building-transition",
-				portalId: range.source.portalId,
-				targetEnvCellId: envCellId,
-			},
-			sceneCrossing: {
-				envCellId,
-				kind: "outdoor-to-env-cell",
-				outdoorLandblockId: resource.landblockId,
-			},
-			sourceIndex: range.source.buildingPortalSourceIndex,
-			sourceNodeId: outdoorNode.nodeId,
-			targetNodeId: envCellNode.nodeId,
-		});
-	}
-
-	return {
-		edges: edges.sort(comparePortalGraphEdges),
-		kind: "static-portal-graph",
-		landblockId: resource.landblockId,
-		nodes: [...nodesById.values()].sort(comparePortalGraphNodes),
-		owner,
-	};
-}
-
 function createEnvCellPortalGraphFixtureEdge(
 	link: LandblockPortalLinkFacts,
 	nodesById: Map<string, StaticPortalGraphNode>,
@@ -904,15 +840,6 @@ function createPortalGraphFixtureNode(
 				scene,
 			};
 	}
-}
-
-function getBuildingTransitionApertureRanges(
-	resource: StaticPortalApertureResource,
-): readonly StaticBuildingTransitionApertureRange[] {
-	return resource.ranges.filter(
-		(range): range is StaticBuildingTransitionApertureRange =>
-			range.sourceKind === "building-transition",
-	);
 }
 
 function comparePortalGraphNodes(

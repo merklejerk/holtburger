@@ -30,7 +30,7 @@ import type {
 	StaticScopePayload,
 	TerrainStaticScopePayloadSummary,
 	ScheduledStaticWork,
-	ScheduledStaticWorkStatus,
+	StaticLayerTaskStatus,
 } from "../contracts";
 import { describeStaticScopeKey, planStaticDemand } from "../demand-planner";
 import { createEmptyStaticBakeAttachments } from "../bake/attachments";
@@ -241,14 +241,14 @@ export class StaticCoordinator {
 	}
 
 	createSnapshot(): StaticCoordinatorSnapshot {
-		const inFlightStaticWork = Array.from(this.#inFlightStaticWork.values()).map(
-			toScheduledStaticWorkStatus,
+		const layerTasks = Array.from(this.#inFlightStaticWork.values()).map(
+			toStaticLayerTaskStatus,
 		);
 		const ownerStates = this.#createOwnerStates();
 
 		return {
-			inFlightStaticWork,
-			baking: countStatus(inFlightStaticWork, "baking"),
+			layerTasks,
+			baking: countPhase(layerTasks, "baking"),
 			committed: this.#committed,
 			committedDrawUnits: this.#committedDrawUnits,
 			failed: this.#failed,
@@ -261,8 +261,8 @@ export class StaticCoordinator {
 			latestTerrainPayload: this.#latestTerrainPayload,
 			ownerStates,
 			recentTiming: [...this.#recentTiming],
-			requested: inFlightStaticWork.length,
-			resolving: countStatus(inFlightStaticWork, "resolving"),
+			requested: layerTasks.length,
+			resolving: countPhase(layerTasks, "resolving"),
 			revision: this.#revision,
 			staleBakeResults: this.#staleBakeResults,
 			staleResolverResults: this.#staleResolverResults,
@@ -838,12 +838,15 @@ export class StaticCoordinator {
 }
 
 type MutableScheduledStaticWorkStatus = {
-	-readonly [Key in keyof ScheduledStaticWorkStatus]: ScheduledStaticWorkStatus[Key];
-} & {
 	readonly demandKey: string;
 	readonly ownerId: string;
 	readonly ownerKey: LayerOwnerState["key"];
 	readonly work: ScheduledStaticWork;
+	domain: StaticDomain;
+	revision: number;
+	scopeKey: string;
+	staticWorkId: string;
+	status: "requested" | "resolving" | "source-committed" | "baking" | "committed" | "failed";
 };
 
 interface PendingStaticBakeBatch {
@@ -1284,16 +1287,33 @@ function isPeerRecordOwnedByRetainedWork(
 	return retained.ownerIds.has(owner.ownerId);
 }
 
-function toScheduledStaticWorkStatus(
+function toStaticLayerTaskStatus(
 	status: MutableScheduledStaticWorkStatus,
-): ScheduledStaticWorkStatus {
+): StaticLayerTaskStatus {
 	return {
 		domain: status.domain,
+		ownerId: status.ownerId,
+		ownerKey: status.ownerKey,
+		phase: createStaticLayerTaskPhase(status.status),
 		revision: status.revision,
 		scopeKey: status.scopeKey,
-		status: status.status,
-		staticWorkId: status.staticWorkId,
+		taskId: status.staticWorkId,
 	};
+}
+
+function createStaticLayerTaskPhase(
+	status: MutableScheduledStaticWorkStatus["status"],
+): StaticLayerTaskStatus["phase"] {
+	switch (status) {
+		case "requested":
+		case "resolving":
+		case "baking":
+		case "committed":
+		case "failed":
+			return status;
+		case "source-committed":
+			return "source-resolved";
+	}
 }
 
 function createLayerOwnerLifecycle(
@@ -1391,11 +1411,11 @@ function countStaticObjectKinds(
 	return counts;
 }
 
-function countStatus(
-	requests: readonly ScheduledStaticWorkStatus[],
-	status: ScheduledStaticWorkStatus["status"],
+function countPhase(
+	tasks: readonly StaticLayerTaskStatus[],
+	phase: StaticLayerTaskStatus["phase"],
 ): number {
-	return requests.filter((request) => request.status === status).length;
+	return tasks.filter((task) => task.phase === phase).length;
 }
 
 function disposeIfAvailable(value: unknown): void {

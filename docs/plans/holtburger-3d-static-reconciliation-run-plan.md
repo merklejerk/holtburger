@@ -245,7 +245,7 @@ Phase rule:
 
 ### Phase 1: Introduce Owner-Keyed Static Task Types
 
-Status: pending.
+Status: completed 2026-06-30.
 
 Purpose:
 
@@ -272,16 +272,33 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add task types and lifecycle helpers.
-- [ ] Add conversion helpers from current demand-plan work to owner-keyed task state.
-- [ ] Replace coordinator diagnostics work reports with task reports in the same cutover.
-- [ ] Add focused unit tests for task identity and terminal phases.
-- [ ] Delete touched work-report tests instead of preserving them through compatibility helpers.
-- [ ] Update runtime diagnostics report shapes that currently expose `StaticCoordinatorWorkDiagnostics`.
+- [x] Add task types and lifecycle helpers.
+- [x] Add conversion helpers from current demand-plan work to owner-keyed task state.
+- [x] Replace coordinator diagnostics work reports with task reports in the same cutover.
+- [x] Add focused unit tests for task identity and terminal phases.
+- [x] Delete touched work-report tests instead of preserving them through compatibility helpers.
+- [x] Update runtime diagnostics report shapes that currently expose `StaticCoordinatorWorkDiagnostics`.
 
 Decisions and course corrections:
 
-- Record any contract naming changes here during implementation.
+- 2026-06-30: Cut over `StaticCoordinatorSnapshot` from `inFlightStaticWork` to `layerTasks`.
+  Task diagnostics now expose `taskId`, `ownerKey`, `ownerId`, `scopeKey`, `domain`, `revision`,
+  and `phase`; `staticWorkId` no longer appears in the coordinator snapshot or runtime diagnostics.
+- 2026-06-30: Kept `ScheduledStaticWork` private to the existing reconciliation return and
+  resolver/bake contracts because Phase 4 owns that bake-contract cutover. The coordinator snapshot
+  and runtime diagnostics no longer expose the old scheduled work report shape.
+- 2026-06-30: Kept `StaticLayerTaskPhase` internal for now because no external caller needs the
+  alias directly; callers can use `StaticLayerTaskStatus["phase"]`. This keeps dead-code lint clean
+  without adding a decorative public export.
+- 2026-06-30: Removed stale unused portal helper code found by `lint:ts`. This was dead code, not a
+  behavior change.
+
+Verification:
+
+- `npm run test:ts -- --run src/lib/static/coordinator/static-coordinator.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run lint:dead`
 
 ### Phase 2: Build Static Reconciliation Runs Around Existing Work
 

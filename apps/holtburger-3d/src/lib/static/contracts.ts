@@ -1837,7 +1837,7 @@ export interface StaticCoordinatorSnapshot {
 	readonly staleBakeResults: number;
 	readonly committedDrawUnits: number;
 	readonly ownerStates: readonly LayerOwnerState[];
-	readonly inFlightStaticWork: readonly ScheduledStaticWorkStatus[];
+	readonly layerTasks: readonly StaticLayerTaskStatus[];
 	readonly latestTerrainPayload: TerrainStaticScopePayloadSummary | null;
 	readonly latestOutdoorStaticObjectsPayload: OutdoorStaticObjectsPayloadSummary | null;
 	readonly latestEnvCellSystemPayload: EnvCellSystemPayloadSummary | null;
@@ -1961,18 +1961,29 @@ export interface StaticCoordinatorSourcePayloadDelta {
 	readonly work: ScheduledStaticWork;
 }
 
-export interface ScheduledStaticWorkStatus {
-	readonly staticWorkId: string;
+type StaticLayerTaskPhase =
+	| "requested"
+	| "resolving"
+	| "source-resolved"
+	| "baking"
+	| "committed"
+	| "materializing"
+	| "materialized"
+	| "empty"
+	| "failed"
+	| "canceled";
+
+export interface StaticLayerTaskStatus {
+	/** Opaque task identifier for diagnostics; layer owner identity remains the semantic key. */
+	readonly taskId: string;
+	/** Layer owner whose static product is produced by this task. */
+	readonly ownerKey: LayerOwnerKey;
+	/** Stable string form of `ownerKey` for map keys and compact diagnostics. */
+	readonly ownerId: string;
 	readonly revision: number;
 	readonly domain: StaticDomain;
 	readonly scopeKey: string;
-	readonly status:
-		| "requested"
-		| "resolving"
-		| "source-committed"
-		| "baking"
-		| "committed"
-		| "failed";
+	readonly phase: StaticLayerTaskPhase;
 }
 
 export interface EnvCellSystemPayloadSummary {

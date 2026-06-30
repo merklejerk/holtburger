@@ -4,9 +4,9 @@ import { normalizeOutdoorLodRadii, planStaticDemand } from "./demand-planner";
 import type { StaticDemand } from "./contracts";
 
 describe("static demand planner", () => {
-	it("clamps outdoor domain radii before producing scheduled work", () => {
+	it("clamps outdoor domain radii before producing layer tasks", () => {
 		const focusLandblockId = 0xda55ffff;
-		const { work } = planStaticDemand(
+		const { layerTasks } = planStaticDemand(
 			createOutdoorDemand(focusLandblockId, {
 				buildings: 9,
 				detail: 1,
@@ -16,41 +16,39 @@ describe("static demand planner", () => {
 			7,
 		);
 
-		const terrainWork = work.filter(
-			(item) => item.job.domain === "outdoor-terrain",
+		const terrainTasks = layerTasks.filter(
+			(item) => item.domain === "outdoor-terrain",
 		);
-		const buildingWork = work.filter(
-			(item) => item.job.domain === "outdoor-buildings",
+		const buildingTasks = layerTasks.filter(
+			(item) => item.domain === "outdoor-buildings",
 		);
-		const explicitObjectWork = work.filter(
-			(item) => item.job.domain === "outdoor-explicit-objects",
+		const explicitObjectTasks = layerTasks.filter(
+			(item) => item.domain === "outdoor-explicit-objects",
 		);
-		const generatedSceneryWork = work.filter(
-			(item) => item.job.domain === "outdoor-generated-scenery",
+		const generatedSceneryTasks = layerTasks.filter(
+			(item) => item.domain === "outdoor-generated-scenery",
 		);
 
-		expect(terrainWork).toHaveLength(9);
-		expect(buildingWork).toHaveLength(9);
-		expect(explicitObjectWork).toHaveLength(9);
-		expect(generatedSceneryWork).toHaveLength(9);
-		expect(work.every((item) => item.revision === 7)).toBe(true);
-		expect(work.every((item) => item.job.scope.kind === "landblock")).toBe(
+		expect(terrainTasks).toHaveLength(9);
+		expect(buildingTasks).toHaveLength(9);
+		expect(explicitObjectTasks).toHaveLength(9);
+		expect(generatedSceneryTasks).toHaveLength(9);
+		expect(layerTasks.every((item) => item.revision === 7)).toBe(true);
+		expect(layerTasks.every((item) => item.scope.kind === "landblock")).toBe(
 			true,
 		);
-		expect(work[0]).toMatchObject({
-			job: {
-				domain: "outdoor-terrain",
-				scope: {
-					kind: "landblock",
-					landblockId: normalizeOutdoorLandblockId(focusLandblockId),
-				},
+		expect(layerTasks[0]).toMatchObject({
+			domain: "outdoor-terrain",
+			scope: {
+				kind: "landblock",
+				landblockId: normalizeOutdoorLandblockId(focusLandblockId),
 			},
 			priority: 0,
 		});
 	});
 
-	it("does not put lifecycle policy, interest radii, or camera state on resolver jobs", () => {
-		const [work] = planStaticDemand(
+	it("does not put lifecycle policy, interest radii, or camera state on task source identity", () => {
+		const [task] = planStaticDemand(
 			createOutdoorDemand(0xda55ffff, {
 				buildings: -1,
 				detail: -1,
@@ -58,18 +56,22 @@ describe("static demand planner", () => {
 				terrain: 0,
 			}),
 			3,
-		).work;
+		).layerTasks;
 
-		expect(work?.job).toEqual({
+		const sourceIdentity = {
+			domain: task?.domain,
+			scope: task?.scope,
+		};
+		expect(sourceIdentity).toEqual({
 			domain: "outdoor-terrain",
 			scope: {
 				kind: "landblock",
 				landblockId: 0xda55ffff,
 			},
 		});
-		expect(JSON.stringify(work?.job)).not.toContain("revision");
-		expect(JSON.stringify(work?.job)).not.toContain("priority");
-		expect(JSON.stringify(work?.job)).not.toContain("policy");
+		expect(JSON.stringify(sourceIdentity)).not.toContain("revision");
+		expect(JSON.stringify(sourceIdentity)).not.toContain("priority");
+		expect(JSON.stringify(sourceIdentity)).not.toContain("policy");
 	});
 
 	it("plans terrain-only interest as one LoD 0 source request", () => {
@@ -175,7 +177,7 @@ describe("static demand planner", () => {
 	});
 
 	it("plans outdoor env-cell demand from env-cell coverage radius", () => {
-		const { retainedLayerOwners, work } = planStaticDemand(
+		const { retainedLayerOwners, layerTasks } = planStaticDemand(
 			createOutdoorDemand(0xda55ffff, {
 				buildings: -1,
 				detail: -1,
@@ -185,21 +187,19 @@ describe("static demand planner", () => {
 			4,
 		);
 
-		const envCellWork = work.filter(
-			(item) => item.job.domain === "env-cell-system",
+		const envCellTasks = layerTasks.filter(
+			(item) => item.domain === "env-cell-system",
 		);
 
-		expect(envCellWork).toHaveLength(9);
-		expect(envCellWork[0]).toMatchObject({
-			job: {
-				domain: "env-cell-system",
-				scope: {
-					kind: "landblock",
-					landblockId: 0xda55ffff,
-				},
+		expect(envCellTasks).toHaveLength(9);
+		expect(envCellTasks[0]).toMatchObject({
+			domain: "env-cell-system",
+			scope: {
+				kind: "landblock",
+				landblockId: 0xda55ffff,
 			},
 			priority: 10,
-			staticWorkId: "4:landblock:da55ffff:env-cell-system",
+			taskId: "4:landblock:da55ffff:env-cell-system",
 		});
 		expect(retainedLayerOwners).toContainEqual({
 			kind: "env-cell-system",
@@ -208,7 +208,7 @@ describe("static demand planner", () => {
 	});
 
 	it("plans dungeon/interior demand with same-landblock building portal facts before env-cells", () => {
-		const { retainedLayerOwners, work } = planStaticDemand(
+		const { retainedLayerOwners, layerTasks } = planStaticDemand(
 			{
 				location: {
 					envCellId: 0xda550123,
@@ -225,30 +225,26 @@ describe("static demand planner", () => {
 			12,
 		);
 
-		expect(work).toEqual([
+		expect(layerTasks).toMatchObject([
 			{
-				job: {
-					domain: "outdoor-buildings",
-					scope: {
-						kind: "landblock",
-						landblockId: 0xda55ffff,
-					},
+				domain: "outdoor-buildings",
+				scope: {
+					kind: "landblock",
+					landblockId: 0xda55ffff,
 				},
 				priority: 5,
 				revision: 12,
-				staticWorkId: "12:landblock:da55ffff:outdoor-buildings",
+				taskId: "12:landblock:da55ffff:outdoor-buildings",
 			},
 			{
-				job: {
-					domain: "env-cell-system",
-					scope: {
-						kind: "landblock",
-						landblockId: 0xda55ffff,
-					},
+				domain: "env-cell-system",
+				scope: {
+					kind: "landblock",
+					landblockId: 0xda55ffff,
 				},
 				priority: 10,
 				revision: 12,
-				staticWorkId: "12:landblock:da55ffff:env-cell-system",
+				taskId: "12:landblock:da55ffff:env-cell-system",
 			},
 		]);
 		expect(retainedLayerOwners).toEqual([
@@ -304,7 +300,7 @@ describe("static demand planner", () => {
 	});
 
 	it("does not expand interior-cell demand into neighboring outdoor source landblocks", () => {
-		const { retainedLayerOwners, work } = planStaticDemand(
+		const { retainedLayerOwners, layerTasks } = planStaticDemand(
 			{
 				location: {
 					envCellId: 0xda550123,
@@ -321,7 +317,12 @@ describe("static demand planner", () => {
 			13,
 		);
 
-		expect(work.map((item) => item.job)).toEqual([
+		expect(
+			layerTasks.map((item) => ({
+				domain: item.domain,
+				scope: item.scope,
+			})),
+		).toEqual([
 			{
 				domain: "outdoor-buildings",
 				scope: {
@@ -337,7 +338,7 @@ describe("static demand planner", () => {
 				},
 			},
 		]);
-		expect(new Set(work.map((item) => item.job.scope.landblockId))).toEqual(
+		expect(new Set(layerTasks.map((item) => item.scope.landblockId))).toEqual(
 			new Set([0xda55ffff]),
 		);
 		expect(retainedLayerOwners.map((owner) => owner.landblockId)).toEqual([

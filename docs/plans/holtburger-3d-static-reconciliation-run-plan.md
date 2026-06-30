@@ -911,7 +911,7 @@ Verification:
 
 ### Phase 10: Resteer And Cleanup
 
-Status: pending.
+Status: completed 2026-06-30.
 
 Purpose:
 
@@ -935,15 +935,30 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Search for old symbols and terminology.
-- [ ] Delete remaining temporary conversion helpers.
-- [ ] Consolidate, delete, or rewrite hollow tests instead of preserving legacy harness shapes.
-- [ ] Update docs that mention old work accounting.
-- [ ] Run full verification.
+- [x] Search for old symbols and terminology.
+- [x] Delete remaining temporary conversion helpers.
+- [x] Consolidate, delete, or rewrite hollow tests instead of preserving legacy harness shapes.
+- [x] Update docs that mention old work accounting.
+- [x] Run full verification.
 
 Decisions and course corrections:
 
-- Record final cleanup discoveries and any intentionally deferred work.
+- 2026-06-30: Replaced demand-planner `ScheduledStaticWork` output with
+  `StaticLayerTaskRequest`. The coordinator now consumes owner-keyed task requests directly.
+- 2026-06-30: Deleted remaining `ScheduledStaticWork` contract surface and coordinator conversion
+  helpers. Attachment tests now build task-shaped bake items.
+- 2026-06-30: Removed the hollow negative test that asserted `staticWorkId` did not appear in
+  snapshots; positive owner/task lifecycle assertions cover the behavior without retaining old
+  vocabulary.
+- 2026-06-30: No intentionally deferred orchestration cleanup remains in `apps/holtburger-3d`.
+  Plan-doc historical mentions remain as execution notes only.
+
+Verification:
+
+- `npm run test:ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run lint:dead`
 
 ## Risks And Mitigations
 

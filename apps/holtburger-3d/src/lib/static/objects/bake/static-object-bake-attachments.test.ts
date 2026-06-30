@@ -116,13 +116,6 @@ function createAttachmentRequest(
 			landblockId: 0xda55ffff,
 		},
 	};
-	const work = {
-		job,
-		priority: 0,
-		revision: 1,
-		staticWorkId: "work:static-object-attachments",
-	};
-
 	return {
 		domain,
 		items: [
@@ -132,7 +125,15 @@ function createAttachmentRequest(
 					scope: createPayload(parts),
 					sourceRevision: 1,
 				},
-				work,
+				task: {
+					domain,
+					ownerId: "outdoor-buildings:0xda55ffff",
+					ownerKey: { kind: "outdoor-buildings", landblockId: 0xda55ffff },
+					revision: 1,
+					scope: job.scope,
+					scopeKey: "landblock:da55ffff",
+					taskId: "task:static-object-attachments",
+				},
 			},
 		],
 		revision: 1,
@@ -151,13 +152,6 @@ function createEnvCellAttachmentRequest(
 			landblockId: 0xda55ffff,
 		},
 	};
-	const work = {
-		job,
-		priority: 0,
-		revision: 1,
-		staticWorkId: "work:env-cell-static-object-attachments",
-	};
-
 	return {
 		domain,
 		items: [
@@ -167,7 +161,15 @@ function createEnvCellAttachmentRequest(
 					scope: createEnvCellPayload(parts),
 					sourceRevision: 1,
 				},
-				work,
+				task: {
+					domain,
+					ownerId: "env-cell-system:0xda55ffff",
+					ownerKey: { kind: "env-cell-system", landblockId: 0xda55ffff },
+					revision: 1,
+					scope: job.scope,
+					scopeKey: "landblock:da55ffff",
+					taskId: "task:env-cell-static-object-attachments",
+				},
 			},
 		],
 		revision: 1,

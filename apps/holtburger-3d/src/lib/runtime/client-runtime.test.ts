@@ -197,7 +197,7 @@ describe("browser client runtime", () => {
 		runtime.dispose();
 	});
 
-	it("ingests outdoor static-authored dynamic seeds and evicts them with source scopes", async () => {
+	it("ingests outdoor static-authored dynamic seeds and evicts them with layer owners", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const renderer = new FakeRenderer();

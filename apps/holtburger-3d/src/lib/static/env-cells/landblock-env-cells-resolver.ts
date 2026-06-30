@@ -1,5 +1,5 @@
 import type { RegionRenderProfilePayloadDto } from "../../../lib/host/contracts";
-import type { ResolverLandblockEnvCellsPayloadDto } from "../../assets/preparation/env-cell-views";
+import type { ResolverLandblockEnvCellLayerPayloadDto } from "../../assets/preparation/env-cell-views";
 import type {
 	HostAssetKey,
 	PreparedAsset,
@@ -33,7 +33,7 @@ import {
 import { createSurfaceTextureIdentity } from "../terrain/terrain-identities";
 
 type LandblockEnvCellsPreparedPayload =
-	| ResolverLandblockEnvCellsPayloadDto
+	| ResolverLandblockEnvCellLayerPayloadDto
 	| RegionRenderProfilePayloadDto;
 
 interface LoadedPayload<
@@ -240,7 +240,7 @@ function createRegionDetailRoles(
 }
 
 function collectCellStructureMaterialIds(
-	payload: ResolverLandblockEnvCellsPayloadDto,
+	payload: ResolverLandblockEnvCellLayerPayloadDto,
 ): readonly number[] {
 	return payload.envCells.flatMap((cell) =>
 		cell.surfaces.map(
@@ -251,7 +251,7 @@ function collectCellStructureMaterialIds(
 }
 
 function reportUnboundedEnvCells(
-	payload: ResolverLandblockEnvCellsPayloadDto,
+	payload: ResolverLandblockEnvCellLayerPayloadDto,
 ): void {
 	const boundedEnvCellIds = new Set(
 		payload.landblockEnvCellBvh.items.map((item) => item.envCellId),
@@ -273,7 +273,7 @@ function reportUnboundedEnvCells(
 
 function reportOmittedStaticSeeds(options: {
 	readonly landblockId: number;
-	readonly payload: ResolverLandblockEnvCellsPayloadDto;
+	readonly payload: ResolverLandblockEnvCellLayerPayloadDto;
 	readonly sourceByKey: ReadonlySet<string>;
 }): void {
 	const omittedSeeds = options.payload.envCells.flatMap((cell) =>
@@ -308,7 +308,7 @@ function reportOmittedStaticSeeds(options: {
 
 function createLandblockEnvCellStaticFacts(options: {
 	readonly landblockId: number;
-	readonly cell: ResolverLandblockEnvCellsPayloadDto["envCells"][number];
+	readonly cell: ResolverLandblockEnvCellLayerPayloadDto["envCells"][number];
 	readonly sourceByKey: ReadonlySet<string>;
 }): LandblockEnvCellStaticFacts {
 	const { cell, landblockId, sourceByKey } = options;

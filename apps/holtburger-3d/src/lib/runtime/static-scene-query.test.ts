@@ -1482,7 +1482,7 @@ describe("static scene query", () => {
 		});
 	});
 
-	it("commits and prunes static portal graphs by retained scope", () => {
+	it("commits and prunes static portal graphs by retained layer owner", () => {
 		const query = new StaticSceneQuery();
 		const owner = createEnvCellLayerOwner(0xda55ffff);
 		const graph = createStaticPortalGraphRecord(owner);

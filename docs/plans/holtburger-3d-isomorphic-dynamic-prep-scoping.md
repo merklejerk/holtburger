@@ -1,6 +1,6 @@
 # Holtburger 3D Isomorphic Dynamic Prep Implementation Plan
 
-Status: implementation plan draft.
+Status: implemented and validated.
 
 ## Purpose
 
@@ -14,7 +14,7 @@ dynamics should use the same recipe and bake contracts without pretending to be 
 
 ## Summary
 
-The current frontend has a large preparation split:
+At discovery time, the frontend had a large preparation split:
 
 - Static landblock content resolves and bakes through worker-backed resolver and baker paths.
 - Runtime-authored dynamics and static-authored dynamics after seed ingestion prepare visual
@@ -29,7 +29,7 @@ waits for:
 static resolve -> static bake -> static materialize -> dynamic prep -> dynamic render commit
 ```
 
-The target architecture should separate two gates:
+The implemented architecture separates two gates:
 
 ```text
 visual readiness != residency activation
@@ -38,6 +38,21 @@ visual readiness != residency activation
 Static-authored dynamic visual resources can be resolved and baked before the owning static layer is
 materialized. The dynamic instance should still wait for layer ownership/residency activation before
 rendering.
+
+Implemented result:
+
+```text
+static source resolver worker
+  -> static layer recipes + static-authored dynamic placements + static-authored dynamic recipes
+  -> static bake worker pool and dynamic visual bake worker pool as sibling jobs
+  -> scoped static prep commit
+  -> runtime materializes static layer, activates retained dynamic placements, applies baked visuals
+
+runtime dynamic recipe resolver worker
+  -> runtime-authored dynamic recipe
+  -> dynamic visual bake worker pool
+  -> runtime applies baked visual readiness and commits dynamic renderer resources/instances
+```
 
 ## North Stars
 
@@ -241,11 +256,11 @@ flowchart TD
     Materializer --> Renderer
 ```
 
-### Static-Authored Dynamics Today
+### Static-Authored Dynamics Before Cutover
 
 ```mermaid
 flowchart TD
-    subgraph Main["Main thread: runtime control and dynamic prep today"]
+    subgraph Main["Main thread: runtime control and dynamic prep before cutover"]
         StaticCommit[Static commit received]
         StaticMat[Static materialization]
         Seeds[staticAuthoredDynamicSeeds]
@@ -283,11 +298,11 @@ Critique:
 - The sequence conflates "static layer is materialized" with "now we can start preparing the
   dynamic visual resource." Only residency needs to wait for the static layer.
 
-### Runtime-Authored Dynamics Today
+### Runtime-Authored Dynamics Before Cutover
 
 ```mermaid
 flowchart TD
-    subgraph Main["Main thread: current runtime-authored dynamic path"]
+    subgraph Main["Main thread: runtime-authored dynamic path before cutover"]
         Spawn[RuntimeDynamicSpawnRequest]
         Controller[DynamicEntityController.createRuntimeSpawn]
         Record[DynamicEntityRecord pending resources]
@@ -617,12 +632,12 @@ sequenceDiagram
 
     Runtime->>StaticCoordinator: reconcileStaticDemand()
     StaticCoordinator->>ResolverWorker: postMessage(resolveSource)
-    ResolverWorker-->>StaticCoordinator: recipes: static layer + dynamic visual
-    StaticCoordinator->>VisualBaker: postMessage(bake dynamic visuals)
+    ResolverWorker-->>StaticCoordinator: static recipes + dynamic placements + dynamic recipes
+    StaticCoordinator->>VisualBaker: postMessage(bake static-authored dynamic visuals)
     VisualBaker-->>StaticCoordinator: baked visuals or skipped entities
-    StaticCoordinator-->>Runtime: scoped result: static commit + dynamic products/skips
+    StaticCoordinator-->>Runtime: scoped result: static commit + dynamic placements + recipes + products/skips
     Runtime->>Renderer: materialize static layer
-    Runtime->>Runtime: mark owner/residence active
+    Runtime->>Runtime: activate retained dynamic placements and apply visual readiness
     Runtime->>Renderer: commit dynamic resources/instances
 ```
 
@@ -1755,7 +1770,32 @@ Acceptance criteria:
 
 Decisions and course corrections:
 
-- Pending.
+- Completed during Phase 10.
+- Updated this plan's summary and worker-boundary diagrams so the pre-cutover flow is labeled as
+  historical critique and the implemented flow shows source-resolved dynamic placements, dynamic
+  recipes, static bake workers, and dynamic visual bake workers as separate boundaries.
+- No additional app-local architecture markdown needed updates; `apps/holtburger-3d/README.md` does
+  not describe the static/dynamic preparation pipeline.
+- Final validation confirmed runtime-authored and static-authored dynamics use the shared
+  `DynamicEntityRecipe` and `DynamicVisualBakeInput -> DynamicVisualBakeResult` contracts.
+- Final validation confirmed no live frontend references remain for the deleted
+  `DynamicEntityResourceManager`, resource-change events, `staticAuthoredDynamicSeeds`,
+  `authoredDynamicSeeds`, `StaticAuthoredDynamicSeedRecord`, `staticObjectSeeds`, or
+  `staticSeedCount`.
+
+Concessions:
+
+- Historical plan docs outside this focused plan still mention older static-authored dynamic seed
+  terminology. They were not rewritten because old plans are retained for posterity and may no
+  longer represent current code.
+- Host/protocol source terminology that still says "seed" was left intact where it describes input
+  DTOs or unrelated concepts such as portal exterior seed behavior.
+
+Verification:
+
+- `npm run check`
+- `npm run test:ts`
+- `npm run lint:ts`
 
 ## Test Strategy
 

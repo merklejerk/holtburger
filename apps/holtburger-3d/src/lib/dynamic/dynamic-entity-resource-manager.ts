@@ -95,17 +95,25 @@ interface DynamicEntityVisualResourcesFailedChange {
 	readonly resources: DynamicEntityResourceState;
 }
 
-interface TrackedDynamicEntityResources {
+interface TrackedDynamicEntityPreparation {
 	readonly animationResolution: "explicit" | "none" | "setup-default";
 	animationResource: DynamicEntityAnimationResource | null;
 	animationHostKey?: HostAssetKey;
 	animationResourceKey?: DynamicEntityResourceKey;
-	readonly generation: number;
 	readonly leases: PreparedAssetLease[];
+	phase: DynamicEntityPreparationPhase;
 	readonly presentation: DynamicEntityPresentation;
+	readonly preparationId: string;
 	readonly setupHostKey: HostAssetKey;
 	readonly setupResourceKey: DynamicEntityResourceKey;
 }
+
+type DynamicEntityPreparationPhase =
+	| "setup-loading"
+	| "visual-loading"
+	| "ready"
+	| "failed"
+	| "canceled";
 
 interface DynamicVisualHostAssetRequestResult {
 	readonly failures: readonly DynamicEntityResourceFailure[];
@@ -143,9 +151,9 @@ export class DynamicEntityResourceManager {
 	#onResourcesChanged?: (change: DynamicEntityResourceChange) => void;
 	readonly #trackedByEntityId = new Map<
 		DynamicEntityId,
-		TrackedDynamicEntityResources
+		TrackedDynamicEntityPreparation
 	>();
-	#generation = 0;
+	#nextPreparationOrdinal = 1;
 
 	constructor({
 		assetService,
@@ -169,14 +177,15 @@ export class DynamicEntityResourceManager {
 
 		const keys = createSetupAnimationResourceKeys(presentation.visualSource);
 
-		const generation = this.#nextGeneration();
-		this.#trackedByEntityId.set(entityId, {
+		const tracked: TrackedDynamicEntityPreparation = {
 			...keys,
 			animationResource: null,
-			generation,
 			leases: [],
+			phase: "setup-loading",
 			presentation,
-		});
+			preparationId: this.#allocatePreparationId(entityId),
+		};
+		this.#trackedByEntityId.set(entityId, tracked);
 
 		const requests =
 			keys.kind === "explicit-animation"
@@ -186,7 +195,7 @@ export class DynamicEntityResourceManager {
 					]
 				: [this.#assetService.requestPreparedAsset(keys.setupHostKey)];
 		void Promise.allSettled(requests).then((results) => {
-			this.#completeSetupAnimationRequest(entityId, generation, results);
+			this.#completeSetupAnimationRequest(entityId, tracked, results);
 		});
 	}
 
@@ -196,6 +205,7 @@ export class DynamicEntityResourceManager {
 			return;
 		}
 
+		tracked.phase = "canceled";
 		for (const lease of tracked.leases) {
 			lease.release();
 		}
@@ -210,11 +220,10 @@ export class DynamicEntityResourceManager {
 
 	#completeSetupAnimationRequest(
 		entityId: DynamicEntityId,
-		generation: number,
+		tracked: TrackedDynamicEntityPreparation,
 		results: readonly PromiseSettledResult<unknown>[],
 	): void {
-		const tracked = this.#trackedByEntityId.get(entityId);
-		if (!tracked || tracked.generation !== generation) {
+		if (!this.#isCurrentPreparation(entityId, tracked)) {
 			return;
 		}
 
@@ -269,7 +278,7 @@ export class DynamicEntityResourceManager {
 						},
 					},
 				});
-				void this.#requestVisualResources(entityId, generation, tracked);
+				void this.#requestVisualResources(entityId, tracked);
 				return;
 			}
 
@@ -288,7 +297,7 @@ export class DynamicEntityResourceManager {
 					(reason: unknown) => ({ reason, status: "rejected" as const }),
 				)
 				.then((animationResult) => {
-					this.#completeSetupAnimationRequest(entityId, generation, [
+					this.#completeSetupAnimationRequest(entityId, tracked, [
 						{ status: "fulfilled", value: setupAsset },
 						animationResult,
 					]);
@@ -336,7 +345,7 @@ export class DynamicEntityResourceManager {
 			this.#assetService.acquirePreparedAssetLease(tracked.setupHostKey),
 		);
 		if (tracked.animationHostKey === undefined) {
-			void this.#requestVisualResources(entityId, generation, tracked);
+			void this.#requestVisualResources(entityId, tracked);
 			return;
 		}
 		if (
@@ -369,14 +378,15 @@ export class DynamicEntityResourceManager {
 				},
 			},
 		});
-		void this.#requestVisualResources(entityId, generation, tracked);
+		void this.#requestVisualResources(entityId, tracked);
 	}
 
 	#emitSetupAnimationFailure(
 		entityId: DynamicEntityId,
-		tracked: TrackedDynamicEntityResources,
+		tracked: TrackedDynamicEntityPreparation,
 		failures: readonly DynamicEntityResourceFailure[],
 	): void {
+		tracked.phase = "failed";
 		this.#onResourcesChanged?.({
 			entityId,
 			failures,
@@ -399,9 +409,12 @@ export class DynamicEntityResourceManager {
 
 	async #requestVisualResources(
 		entityId: DynamicEntityId,
-		generation: number,
-		tracked: TrackedDynamicEntityResources,
+		tracked: TrackedDynamicEntityPreparation,
 	): Promise<void> {
+		if (!this.#isCurrentPreparation(entityId, tracked)) {
+			return;
+		}
+		tracked.phase = "visual-loading";
 		const materialPlanningIdentity =
 			tracked.presentation.policy.materialPlanningIdentity;
 		if (materialPlanningIdentity.kind === "pending") {
@@ -462,8 +475,7 @@ export class DynamicEntityResourceManager {
 			textureRequirements,
 		});
 		const visualHostAssets = await this.#requestVisualHostAssets(resourceKeys);
-		const current = this.#trackedByEntityId.get(entityId);
-		if (!current || current.generation !== generation) {
+		if (!this.#isCurrentPreparation(entityId, tracked)) {
 			return;
 		}
 
@@ -476,6 +488,7 @@ export class DynamicEntityResourceManager {
 				...createMissingRefFailures(missingRefs),
 				...visualHostAssets.failures,
 			];
+			tracked.phase = "failed";
 			this.#onResourcesChanged?.({
 				entityId,
 				failures,
@@ -498,7 +511,7 @@ export class DynamicEntityResourceManager {
 			return;
 		}
 
-		current.leases.push(
+		tracked.leases.push(
 			...resourceKeys.map((key) =>
 				this.#assetService.acquirePreparedAssetLease(key),
 			),
@@ -513,6 +526,7 @@ export class DynamicEntityResourceManager {
 			});
 		} catch (error) {
 			const failures = [createDynamicRenderPartExtractionFailure(error)];
+			tracked.phase = "failed";
 			this.#onResourcesChanged?.({
 				entityId,
 				failures,
@@ -534,6 +548,7 @@ export class DynamicEntityResourceManager {
 			});
 			return;
 		}
+		tracked.phase = "ready";
 		this.#onResourcesChanged?.({
 			entityId,
 			kind: "visual-resources-ready",
@@ -590,9 +605,20 @@ export class DynamicEntityResourceManager {
 		};
 	}
 
-	#nextGeneration(): number {
-		this.#generation += 1;
-		return this.#generation;
+	#isCurrentPreparation(
+		entityId: DynamicEntityId,
+		tracked: TrackedDynamicEntityPreparation,
+	): boolean {
+		return (
+			this.#trackedByEntityId.get(entityId) === tracked &&
+			tracked.phase !== "canceled"
+		);
+	}
+
+	#allocatePreparationId(entityId: DynamicEntityId): string {
+		const ordinal = this.#nextPreparationOrdinal;
+		this.#nextPreparationOrdinal += 1;
+		return `dynamic-preparation:${entityId}:${ordinal}`;
 	}
 }
 
@@ -772,7 +798,7 @@ function reportPendingRuntimeMaterialPlanning(
 }
 
 function createReadySetupAnimationResourceState(
-	tracked: TrackedDynamicEntityResources,
+	tracked: TrackedDynamicEntityPreparation,
 ): Extract<
 	DynamicEntitySetupAnimationResourceState,
 	{ readonly status: "ready" }
@@ -790,7 +816,7 @@ function createReadySetupAnimationResourceState(
 }
 
 function createResolvedSetupAnimationResourceState(
-	tracked: TrackedDynamicEntityResources,
+	tracked: TrackedDynamicEntityPreparation,
 ): Extract<
 	DynamicEntitySetupAnimationResourceState,
 	{ readonly status: "not-required" | "ready" }
@@ -809,7 +835,7 @@ function createResolvedSetupAnimationResourceState(
 }
 
 function createDynamicRequiredResources(
-	tracked: TrackedDynamicEntityResources,
+	tracked: TrackedDynamicEntityPreparation,
 ): readonly DynamicEntityRequiredResource[] {
 	return tracked.animationHostKey === undefined
 		? ["setup-model"]
@@ -817,7 +843,7 @@ function createDynamicRequiredResources(
 }
 
 function requireAnimationResourceKey(
-	tracked: TrackedDynamicEntityResources,
+	tracked: TrackedDynamicEntityPreparation,
 ): DynamicEntityResourceKey {
 	if (tracked.animationResourceKey === undefined) {
 		throw new Error("dynamic animation resource key was expected");
@@ -949,7 +975,7 @@ function warnOnce(warningKey: string, warn: () => void): void {
 }
 
 function createSetupAnimationLoadFailures(
-	tracked: TrackedDynamicEntityResources,
+	tracked: TrackedDynamicEntityPreparation,
 	results: readonly PromiseSettledResult<unknown>[],
 ): readonly DynamicEntityResourceFailure[] {
 	const failures: DynamicEntityResourceFailure[] = [];

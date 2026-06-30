@@ -68,6 +68,12 @@ export interface DynamicEntityTickOptions {
 	readonly animationCadenceContext?: DynamicAnimationUpdateCadenceContext | null;
 }
 
+export interface StaticAuthoredDynamicPreparationStatus {
+	readonly entityIds: readonly DynamicEntityId[];
+	readonly ownerId: string;
+	readonly phase: "failed" | "pending" | "ready";
+}
+
 export interface RuntimeDynamicSpawnRequest {
 	readonly animationSelection?: DynamicEntityAnimationSelection;
 	readonly baseLocalPlacement: DynamicEntityTransformState["baseLocalPlacement"];
@@ -247,6 +253,24 @@ export class DynamicEntityController {
 		entityId: DynamicEntityId,
 	): DynamicEntitySummaryDto | null {
 		return this.#store.getSummary(entityId);
+	}
+
+	queryStaticAuthoredPreparationStatus(
+		ownerIds: ReadonlySet<string>,
+	): readonly StaticAuthoredDynamicPreparationStatus[] {
+		return Array.from(ownerIds)
+			.sort()
+			.map((ownerId) =>
+				createStaticAuthoredDynamicPreparationStatus(
+					ownerId,
+					this.#store.records().filter(
+						(record) =>
+							record.source.kind === "static-authored" &&
+							record.provenance.kind !== "runtime-spawn" &&
+							record.provenance.layerOwnerId === ownerId,
+					),
+				),
+			);
 	}
 
 	queryOutdoorDynamicBounds(options: {
@@ -662,6 +686,20 @@ function applyResourceChange(
 		renderability: createRenderability(change.resources, record.effectiveResidence),
 		resources: change.resources,
 	};
+}
+
+function createStaticAuthoredDynamicPreparationStatus(
+	ownerId: string,
+	records: readonly DynamicEntityRecord[],
+): StaticAuthoredDynamicPreparationStatus {
+	const entityIds = records.map((record) => record.id);
+	if (records.some((record) => record.resources.status === "failed")) {
+		return { entityIds, ownerId, phase: "failed" };
+	}
+	if (records.some((record) => record.resources.status !== "ready")) {
+		return { entityIds, ownerId, phase: "pending" };
+	}
+	return { entityIds, ownerId, phase: "ready" };
 }
 
 function withRuntimeRenderResidence(

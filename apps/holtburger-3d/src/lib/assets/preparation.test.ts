@@ -202,6 +202,45 @@ describe("host asset preparation", () => {
 		]);
 	});
 
+	it("accepts scene LoD env-cell portal apertures with contract portal ids", () => {
+		const payload = {
+			...createLandblockSceneLodPayload(),
+			landblockId: 0x0007ffff,
+			layers: [createEnvCellSystemLayer()],
+			source: {
+				context: "interior",
+				level: 4,
+			},
+		};
+
+		const prepared = prepareV2AssetPayload({
+			assetId: "landblock/0007ffff/lod/4",
+			payload,
+			payloadKind: "json",
+			requestId: "request-lod-env-cell",
+		});
+
+		expect(prepared).toMatchObject({
+			kind: "landblock-scene-lod",
+			source: { context: "interior", level: 4 },
+		});
+		if (prepared.kind !== "landblock-scene-lod") {
+			throw new Error("expected landblock scene LoD payload");
+		}
+		expect(prepared.layers[0]).toMatchObject({
+			envCells: [
+				{
+					portalApertures: [
+						{
+							portalId: "env-cell/00070100/portal/0001",
+						},
+					],
+				},
+			],
+			kind: "env-cell-system",
+		});
+	});
+
 	it("rejects duplicate and impossible landblock scene LoD layers", () => {
 		const payload = createLandblockSceneLodPayload();
 
@@ -295,6 +334,65 @@ function createEmptyTerrain() {
 		tileSize: 24,
 		triangles: [],
 		vertices: [],
+	};
+}
+
+function createEnvCellSystemLayer() {
+	return {
+		buildingTransitionApertures: [],
+		diagnostics: createDiagnostics(),
+		envCellSystemBvh: {
+			items: [],
+			nodes: [],
+		},
+		envCells: [
+			{
+				cellBsp: {
+					index: 0,
+					kind: "leaf",
+					polyIds: [],
+					solid: 0,
+					sphere: null,
+				},
+				cellStructureId: 0x0d000001,
+				diagnostics: createDiagnostics(),
+				envCellId: 0x00070100,
+				environmentId: 0x0d000001,
+				localPlacement: createPlacement(),
+				memberId: "env-cell/00070100",
+				portalApertures: [
+					{
+						plane: null,
+						points: [],
+						polygonId: 0,
+						portalId: "env-cell/00070100/portal/0001",
+						sourceIndex: 0,
+					},
+				],
+				portals: [],
+				renderGeometry: {
+					bounds: null,
+					invalidPolygons: [],
+					normals: [],
+					positions: [],
+					skippedPolygonCount: 0,
+					sourceId: 0x0d000001,
+					surfaceIds: [],
+					triangleCount: 0,
+					triangles: [],
+					uvs: [],
+					vertexCount: 0,
+				},
+				restrictionObjectId: null,
+				seenOutside: null,
+				statics: [],
+				surfaces: [],
+				visibleEnvCellIds: [],
+			},
+		],
+		kind: "env-cell-system",
+		landblockInfoId: 0x0007fffe,
+		portalLinks: [],
 	};
 }
 

@@ -780,7 +780,7 @@ fn serialize_prepared_portal_aperture_json(
     aperture: &PreparedPortalAperture,
 ) -> serde_json::Value {
     serde_json::json!({
-        "apertureId": aperture.portal_id,
+        "portalId": aperture.portal_id,
         "sourceIndex": aperture.source_index,
         "apertureIndex": aperture_index,
         "polygonId": aperture.polygon_id,
@@ -1981,6 +1981,25 @@ mod tests {
                 .and_then(serde_json::Value::as_f64),
             0.,
         );
+    }
+
+    #[test]
+    fn prepared_portal_aperture_serializes_contract_portal_id() {
+        let payload = serialize_prepared_portal_aperture_json(
+            7,
+            &PreparedPortalAperture {
+                portal_id: "env-cell/da550100/portal/0001".to_string(),
+                source_index: 3,
+                polygon_id: 42,
+                points: Vec::new(),
+                plane: None,
+            },
+        );
+
+        assert_eq!(payload["portalId"], "env-cell/da550100/portal/0001");
+        assert_eq!(payload["sourceIndex"].as_u64(), Some(3));
+        assert_eq!(payload["apertureIndex"].as_u64(), Some(7));
+        assert!(payload.get("apertureId").is_none());
     }
 
     fn empty_bsp_leaf() -> BspNode {

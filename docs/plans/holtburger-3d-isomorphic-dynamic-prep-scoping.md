@@ -1631,6 +1631,35 @@ Acceptance criteria:
 
 - The plan is updated with any required cleanup before Phase 9 starts.
 
+Review outcome:
+
+- Completed after Phase 8.
+- Static bake payloads still do not carry dynamic visual bake products. `StaticBakeBatchInput`
+  remains static-owned, while static-authored dynamic recipes and visual bake results ride through
+  the coordinator envelope as sibling closure outputs.
+- Dynamic visual baking still does not fetch assets inside the baker. Geometry attachment
+  collection uses `createDynamicVisualBakeSourceGeometry(...)` before the dynamic bake boundary.
+- Browser runtime uses a dedicated dynamic visual bake worker pool. The direct/local baker remains a
+  test and non-browser construction convenience, not a browser fallback path.
+- No durable issue ledger was added. Failures remain console-reportable and translate into skipped
+  or failed visual results.
+- Scene-interest settlement remains static-centered. Static-authored dynamic readiness is applied
+  during static materialization, but dynamic renderer synchronization still happens through the
+  runtime dynamic resource flow.
+
+Cleanup targets before Phase 9:
+
+- Delete `DynamicEntityResourceManager` and remove its constructor plumbing from `ClientRuntime` and
+  `DynamicEntityController`.
+- Delete `DynamicEntityResourceChange`, `applyResourceChange(...)`, and the resource-manager
+  listener path now that recipe and bake products are applied explicitly.
+- Rename temporary seed carriers to placement/activation records where they still describe dynamic
+  runtime activation or env-cell static placement publication.
+- Rename public/debug summary fields such as `staticSeedCount` once the underlying record names are
+  corrected.
+- Keep texture placement and renderer resource sync in runtime; Phase 9 should delete visual prep
+  vestiges without moving unrelated runtime rendering responsibilities.
+
 ### Phase 9: Delete Legacy Main-Thread Dynamic Visual Prep
 
 Goal: remove vestigial code after both authorship paths use the isomorphic pipeline.

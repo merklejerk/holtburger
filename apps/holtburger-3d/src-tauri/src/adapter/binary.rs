@@ -149,10 +149,12 @@ pub fn serialize_content_asset_binary_response(
                 request_id: request.request_id,
                 asset_id: request.asset_id,
                 payload_kind: AssetPayloadKindDto::Json,
-                payload: serialize_landblock_scene_lod_payload(
+                payload: serialize_landblock_scene_lod_payload_binary(
                     &scene_lod,
                     region_id,
                     region_number,
+                    path_prefix,
+                    writer,
                 ),
             },
             Ok(_) => unreachable!("content asset runtime returned mismatched landblock scene LoD"),
@@ -242,6 +244,35 @@ pub fn serialize_content_asset_binary_response(
             request.asset_id
         ),
     })
+}
+
+fn serialize_landblock_scene_lod_payload_binary(
+    scene_lod: &LandblockSceneLodAsset,
+    region_id: u32,
+    region_number: u32,
+    path_prefix: &str,
+    writer: &mut BinaryAssetSectionWriter,
+) -> serde_json::Value {
+    let mut payload = serialize_landblock_scene_lod_payload(scene_lod, region_id, region_number);
+
+    for (layer_index, layer) in scene_lod.layers.iter().enumerate() {
+        let LandblockSceneLodLayer::EnvCellSystem(layer) = layer else {
+            continue;
+        };
+
+        for (cell_index, cell) in layer.env_cells.iter().enumerate() {
+            payload["layers"][layer_index]["envCells"][cell_index]["renderGeometry"] =
+                serialize_prepared_polygon_set_render_geometry_binary(
+                    &cell.prepared_cell.render_geometry,
+                    format!(
+                        "{path_prefix}.layers.{layer_index}.envCells.{cell_index}.renderGeometry"
+                    ),
+                    writer,
+                );
+        }
+    }
+
+    payload
 }
 
 pub fn serialize_prepared_texture_binary_response(

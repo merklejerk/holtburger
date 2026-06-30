@@ -36,9 +36,7 @@ export class DeferredStaticResolver
 	readonly #sourceResolvers = new Map<
 		string,
 		{
-			readonly resolve: (
-				resolution: StaticLandblockSceneLodResolution,
-			) => void;
+			readonly resolve: (resolution: StaticLandblockSceneLodResolution) => void;
 			readonly reject: (error: Error) => void;
 		}
 	>();
@@ -166,7 +164,9 @@ export class DeferredStaticResolver
 		const resolver = this.#sourceResolvers.get(requestId);
 
 		if (!sourceRequest || !resolver) {
-			throw new Error(`No pending source resolver request exists for ${requestId}.`);
+			throw new Error(
+				`No pending source resolver request exists for ${requestId}.`,
+			);
 		}
 
 		this.#sourceResolvers.delete(requestId);
@@ -207,7 +207,9 @@ export class DeferredStaticResolver
 		const resolver = this.#sourceResolvers.get(requestId);
 
 		if (!resolver) {
-			throw new Error(`No pending source resolver request exists for ${requestId}.`);
+			throw new Error(
+				`No pending source resolver request exists for ${requestId}.`,
+			);
 		}
 
 		this.#sourceResolvers.delete(requestId);
@@ -247,9 +249,7 @@ export class DeferredStaticBaker implements StaticBaker {
 		> = {},
 	): void {
 		const input = this.#pending.find(
-			(candidate) =>
-				candidate.staticBatchId === staticBatchId ||
-				candidate.items.some((item) => item.task.taskId === staticBatchId),
+			(candidate) => candidate.staticBatchId === staticBatchId,
 		);
 		const resolver = input ? this.#resolvers.get(input.staticBatchId) : null;
 
@@ -263,9 +263,7 @@ export class DeferredStaticBaker implements StaticBaker {
 
 	fail(staticBatchId: string, error: Error): void {
 		const input = this.#pending.find(
-			(candidate) =>
-				candidate.staticBatchId === staticBatchId ||
-				candidate.items.some((item) => item.task.taskId === staticBatchId),
+			(candidate) => candidate.staticBatchId === staticBatchId,
 		);
 		const resolver = input ? this.#resolvers.get(input.staticBatchId) : null;
 

@@ -114,6 +114,7 @@ function createCommitDelta(
 	return {
 		addedDrawUnits: [],
 		addedPortalApertureResources: [],
+		commitId: `static-commit:${options.staticBatchId}`,
 		materialCoverage: [],
 		removedResources: [],
 		staticAuthoredDynamicSeeds: [],
@@ -125,6 +126,7 @@ function createCommitDelta(
 		staticSourceMappings: [],
 		staticSpatialRecords: [],
 		staticVisibilityRecords: [],
+		tasks: [],
 		textureUses: [],
 		...options,
 	};

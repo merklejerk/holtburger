@@ -382,8 +382,10 @@ interface DynamicRendererResourceSyncFailedWarning {
 }
 
 interface StaticMaterializationFailedWarning {
+	readonly commitId: string;
 	readonly kind: "static-materialization-failed";
 	readonly revision: number;
+	readonly staticBatchId: string;
 	readonly message: string;
 	readonly error: unknown;
 }
@@ -475,7 +477,7 @@ class ConsoleRuntimeDiagnostics implements RuntimeDiagnostics {
 				return;
 			case "static-materialization-failed":
 				console.error(
-					`static materialization revision ${event.revision} failed; draw units from this commit were not added to renderer residency.`,
+					`static materialization commit ${event.commitId} failed; draw units from ${event.staticBatchId} were not added to renderer residency.`,
 					event.error,
 				);
 				return;

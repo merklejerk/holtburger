@@ -626,7 +626,7 @@ Verification:
 
 ### Phase 5: Replace Revision-Based Static Materialization Tracking
 
-Status: pending.
+Status: completed 2026-06-30.
 
 Purpose:
 
@@ -654,19 +654,36 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add `commitId` to commit deltas and tests.
-- [ ] Replace runtime pending/failed revision sets with commit trackers.
-- [ ] Replace runtime diagnostics `pendingRevisions`/`committedRevisions` with exact commit
+- [x] Add `commitId` to commit deltas and tests.
+- [x] Replace runtime pending/failed revision sets with commit trackers.
+- [x] Replace runtime diagnostics `pendingRevisions`/`committedRevisions` with exact commit
       diagnostics or delete them if task/commit lifecycle diagnostics make them redundant.
-- [ ] Mark owner tasks `materializing`, `materialized`, `empty`, or `failed` based on commit
+- [x] Mark owner tasks `materializing`, `materialized`, `empty`, or `failed` based on commit
       materialization result.
-- [ ] Update diagnostics and tests that currently display pending materialization revisions.
-- [ ] Verify FIFO materialization behavior across add and eviction commits.
+- [x] Update diagnostics and tests that currently display pending materialization revisions.
+- [x] Verify FIFO materialization behavior across add and eviction commits.
 
 Decisions and course corrections:
 
-- Record whether commit tracking lives in runtime only or whether the coordinator needs an explicit
-  materialization ack API.
+- 2026-06-30: Added `StaticCoordinatorCommitDelta.commitId` and `tasks`. `staticBatchId` remains
+  worker/batch identity; `commitId` is the runtime materialization unit.
+- 2026-06-30: Runtime materialization now tracks `queued`, `materializing`, `materialized`, and
+  `failed` commit records keyed by `commitId`. Pending, committed, and failed diagnostics expose
+  commit records instead of revision arrays.
+- 2026-06-30: Deleted `#pendingStaticMaterializations`,
+  `#failedStaticMaterializationRevisions`, and committed revision history. Scene-interest settled
+  detection now waits for pending commit records and reads failure from static owner lifecycle.
+- 2026-06-30: The coordinator now exposes explicit materialization ack methods. Bake commit moves
+  layer tasks to `materializing`; runtime materialization success marks them `materialized`/`empty`
+  through the existing owner lifecycle, and runtime materialization failure marks them `failed`.
+
+Verification:
+
+- `npm run test:ts -- --run src/lib/static/coordinator/static-coordinator.test.ts src/lib/runtime/client-runtime.test.ts src/lib/runtime/static-materializer.test.ts src/lib/runtime/env-cell-system-layer-publication.test.ts`
+- `npm run test:ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run lint:dead`
 
 ### Phase 6: Gate Static-Authored Dynamics On Static Materialization
 

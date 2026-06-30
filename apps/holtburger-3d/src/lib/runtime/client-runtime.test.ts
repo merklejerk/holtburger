@@ -2274,6 +2274,7 @@ describe("browser client runtime", () => {
 		await flushPromises();
 		baker.complete("1:landblock:da55ffff:outdoor-terrain", {
 			drawUnits: [drawUnit],
+			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
 			textureUses: [createBakeTextureUse(drawUnit.drawUnitId, textureUse)],
 		});
 		await flushPromises();
@@ -2416,6 +2417,10 @@ describe("browser client runtime", () => {
 
 		expect(renderer.terrainLayerUpdates).toEqual([]);
 		expect(renderer.textureUpdates).toEqual([]);
+		expect(runtime.createDiagnosticsSnapshot().dynamic).toMatchObject({
+			activeEntityCount: 0,
+			staticSeedCount: 0,
+		});
 		expect(
 			runtimeDiagnosticsSnapshotSummary(runtime.createDiagnosticsSnapshot())
 				.staticMaterialization,

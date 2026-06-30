@@ -1135,23 +1135,23 @@ describe("static coordinator", () => {
 				envCells: 0,
 				terrain: -1,
 			},
-		}).find((item) => item.job.domain === "landblock-env-cells");
+		}).find((item) => item.job.domain === "env-cell-system");
 		const envCellRequest = resolver.pendingRequests.find(
-			(request) => request.job.domain === "landblock-env-cells",
+			(request) => request.job.domain === "env-cell-system",
 		);
 		resolver.complete(
 			envCellRequest?.requestId ?? "",
-			createLandblockEnvCellsResolverPayload(),
+			createEnvCellSystemResolverPayload(),
 		);
 		await flushPromises();
 		baker.complete(envCellWork?.workId ?? "", {
 			materialCoverage: [
-				createMaterialCoverage("landblock-env-cells", {
-					coverageKey: "landblock-env-cells:structured-interior",
+				createMaterialCoverage("env-cell-system", {
+					coverageKey: "env-cell-system:structured-interior",
 					coverageKind: "structured-interior",
 				}),
-				createMaterialCoverage("landblock-env-cells", {
-					coverageKey: "landblock-env-cells:static-objects",
+				createMaterialCoverage("env-cell-system", {
+					coverageKey: "env-cell-system:static-objects",
 					coverageKind: "env-cell-static-object-seeds",
 				}),
 			],
@@ -1163,8 +1163,8 @@ describe("static coordinator", () => {
 				.createSnapshot()
 				.materialCoverage.map((coverage) => coverage.coverageKey),
 		).toEqual([
-			"landblock-env-cells:static-objects",
-			"landblock-env-cells:structured-interior",
+			"env-cell-system:static-objects",
+			"env-cell-system:structured-interior",
 		]);
 	});
 
@@ -1191,34 +1191,34 @@ describe("static coordinator", () => {
 				envCells: 0,
 				terrain: -1,
 			},
-		}).find((item) => item.job.domain === "landblock-env-cells");
+		}).find((item) => item.job.domain === "env-cell-system");
 		const envCellRequest = resolver.pendingRequests.find(
-			(request) => request.job.domain === "landblock-env-cells",
+			(request) => request.job.domain === "env-cell-system",
 		);
 
 		resolver.complete(
 			envCellRequest?.requestId ?? "",
-			createLandblockEnvCellsResolverPayload(),
+			createEnvCellSystemResolverPayload(),
 		);
 		await flushPromises();
 
-		expect(work?.job.domain).toBe("landblock-env-cells");
+		expect(work?.job.domain).toBe("env-cell-system");
 		const envCellBakeInput = baker.pendingInputs.find(
-			(input) => input.domain === "landblock-env-cells",
+			(input) => input.domain === "env-cell-system",
 		);
 		expect(envCellBakeInput).toMatchObject({
-			domain: "landblock-env-cells",
-			staticBatchId: "static-batch:1:landblock-env-cells:landblock:da55ffff:1",
+			domain: "env-cell-system",
+			staticBatchId: "static-batch:1:env-cell-system:landblock:da55ffff:1",
 		});
 		expect(
 			sourcePayloads.filter(
-				(item) => item.work.job.domain === "landblock-env-cells",
+				(item) => item.work.job.domain === "env-cell-system",
 			),
 		).toMatchObject([
 			{
 				payload: {
 					scope: {
-						kind: "landblock-env-cells",
+						kind: "env-cell-system",
 						landblock: {
 							landblockId: 0xda55ffff,
 						},
@@ -1226,7 +1226,7 @@ describe("static coordinator", () => {
 				},
 				revision: 1,
 				work: {
-					workId: "1:landblock:da55ffff:landblock-env-cells",
+					workId: "1:landblock:da55ffff:env-cell-system",
 				},
 			},
 		]);
@@ -1234,7 +1234,7 @@ describe("static coordinator", () => {
 			baking: 2,
 			committed: 0,
 			committedDrawUnits: 0,
-			latestLandblockEnvCellsPayload: {
+			latestEnvCellSystemPayload: {
 				acceptedEnvCellCount: 1,
 				envCellCount: 1,
 				landblockId: 0xda55ffff,
@@ -1253,7 +1253,7 @@ describe("static coordinator", () => {
 		expect(
 			coordinator
 				.createSnapshot()
-				.activeWork.find((item) => item.domain === "landblock-env-cells")
+				.activeWork.find((item) => item.domain === "env-cell-system")
 				?.status,
 		).toBe("committed");
 	});
@@ -1283,18 +1283,18 @@ describe("static coordinator", () => {
 		});
 
 		const envCellRequests = resolver.pendingRequests.filter(
-			(request) => request.job.domain === "landblock-env-cells",
+			(request) => request.job.domain === "env-cell-system",
 		);
 		for (const request of envCellRequests) {
 			resolver.complete(
 				request.requestId,
-				createLandblockEnvCellsResolverPayload(request.job.scope.landblockId),
+				createEnvCellSystemResolverPayload(request.job.scope.landblockId),
 			);
 		}
 		await flushPromises();
 
 		const envCellBatch = baker.pendingInputs.find(
-			(input) => input.domain === "landblock-env-cells",
+			(input) => input.domain === "env-cell-system",
 		);
 		expect(envCellBatch?.items.length).toBeGreaterThan(1);
 
@@ -1667,7 +1667,7 @@ function createEnvCellVisibilityRecord(
 	};
 }
 
-function createLandblockEnvCellsResolverPayload(landblockId = 0xda55ffff): {
+function createEnvCellSystemResolverPayload(landblockId = 0xda55ffff): {
 	readonly scope: StaticScopePayload["scope"];
 } {
 	const envCellId = landblockId & 0xffff_ff00;
@@ -1723,7 +1723,7 @@ function createLandblockEnvCellsResolverPayload(landblockId = 0xda55ffff): {
 					visibleEnvCellIds: [],
 				},
 			],
-			kind: "landblock-env-cells",
+			kind: "env-cell-system",
 			landblock: {
 				kind: "landblock-source",
 				landblockId,
@@ -1739,9 +1739,9 @@ function createLandblockEnvCellsResolverPayload(landblockId = 0xda55ffff): {
 				},
 			},
 			residencySpatial: {
-				landblockEnvCellBvhItemCount: 0,
-				landblockEnvCellBvhNodeCount: 0,
-				landblockEnvCellBvh: {
+				envCellSystemBvhItemCount: 0,
+				envCellSystemBvhNodeCount: 0,
+				envCellSystemBvh: {
 					items: [],
 					nodes: [],
 				},

@@ -2535,35 +2535,35 @@
 						<div>
 							<dt>Env-cell payload</dt>
 							<dd>
-								{#if runtimeOverview?.static.latestLandblockEnvCellsPayload}
-									lb {runtimeOverview.static.latestLandblockEnvCellsPayload.landblockId
+								{#if runtimeOverview?.static.latestEnvCellSystemPayload}
+									lb {runtimeOverview.static.latestEnvCellSystemPayload.landblockId
 										.toString(16)
 										.padStart(8, "0")}
 									cells
-									{runtimeOverview.static.latestLandblockEnvCellsPayload
+									{runtimeOverview.static.latestEnvCellSystemPayload
 										.envCellCount}
 									accepted
-									{runtimeOverview.static.latestLandblockEnvCellsPayload
+									{runtimeOverview.static.latestEnvCellSystemPayload
 										.acceptedEnvCellCount} visible
-									{runtimeOverview.static.latestLandblockEnvCellsPayload
+									{runtimeOverview.static.latestEnvCellSystemPayload
 										.visibleCellCount} portals
-									{runtimeOverview.static.latestLandblockEnvCellsPayload
+									{runtimeOverview.static.latestEnvCellSystemPayload
 										.portalCount}
 									links
-									{runtimeOverview.static.latestLandblockEnvCellsPayload
+									{runtimeOverview.static.latestEnvCellSystemPayload
 										.portalLinkCount}
 									seeds
-									{runtimeOverview.static.latestLandblockEnvCellsPayload
+									{runtimeOverview.static.latestEnvCellSystemPayload
 										.staticObjectSeedCount} missing
-									{runtimeOverview.static.latestLandblockEnvCellsPayload
+									{runtimeOverview.static.latestEnvCellSystemPayload
 										.missingRefCount}
 								{:else}
 									none
 								{/if}
 							</dd>
 							{@render copyOverlay(
-								runtimeOverview?.static.latestLandblockEnvCellsPayload
-									? `lb ${runtimeOverview.static.latestLandblockEnvCellsPayload.landblockId.toString(16).padStart(8, "0")} cells ${runtimeOverview.static.latestLandblockEnvCellsPayload.envCellCount} accepted ${runtimeOverview.static.latestLandblockEnvCellsPayload.acceptedEnvCellCount} visible ${runtimeOverview.static.latestLandblockEnvCellsPayload.visibleCellCount} portals ${runtimeOverview.static.latestLandblockEnvCellsPayload.portalCount} links ${runtimeOverview.static.latestLandblockEnvCellsPayload.portalLinkCount} seeds ${runtimeOverview.static.latestLandblockEnvCellsPayload.staticObjectSeedCount} missing ${runtimeOverview.static.latestLandblockEnvCellsPayload.missingRefCount}`
+								runtimeOverview?.static.latestEnvCellSystemPayload
+									? `lb ${runtimeOverview.static.latestEnvCellSystemPayload.landblockId.toString(16).padStart(8, "0")} cells ${runtimeOverview.static.latestEnvCellSystemPayload.envCellCount} accepted ${runtimeOverview.static.latestEnvCellSystemPayload.acceptedEnvCellCount} visible ${runtimeOverview.static.latestEnvCellSystemPayload.visibleCellCount} portals ${runtimeOverview.static.latestEnvCellSystemPayload.portalCount} links ${runtimeOverview.static.latestEnvCellSystemPayload.portalLinkCount} seeds ${runtimeOverview.static.latestEnvCellSystemPayload.staticObjectSeedCount} missing ${runtimeOverview.static.latestEnvCellSystemPayload.missingRefCount}`
 									: "none",
 								"Env-cell payload",
 							)}

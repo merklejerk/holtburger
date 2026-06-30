@@ -160,12 +160,12 @@ describe("dynamic entity controller", () => {
 				policy: {
 					diagnosticsBucket: "static-authored-dynamic",
 					materialDetailRolePolicy: {
-						domain: "landblock-env-cells",
+						domain: "env-cell-system",
 						kind: "static-domain",
 					},
-					materialPlanningDomain: "landblock-env-cells",
+					materialPlanningDomain: "env-cell-system",
 					resourceFamily: "static-authored-dynamic-object-material",
-					textureDomain: "landblock-env-cells",
+					textureDomain: "env-cell-system",
 				},
 			},
 			renderability: {
@@ -501,7 +501,7 @@ function createEnvCellSeedRecord(): StaticAuthoredDynamicSeedRecord {
 		kind: "env-cell-static-object-seed",
 		landblockId: 0xda55ffff,
 		owner: createOwner({
-			domain: "landblock-env-cells",
+			domain: "env-cell-system",
 		}),
 		seed: {
 			debug: { sourceAssetId: "setup-model/020003e5" },
@@ -527,7 +527,7 @@ function createEnvCellDynamicSeedRecord(): StaticAuthoredDynamicSeedRecord {
 	return {
 		kind: "env-cell-static-object-dynamic-seed",
 		owner: createOwner({
-			domain: "landblock-env-cells",
+			domain: "env-cell-system",
 		}),
 		seed: {
 			classificationReason: "setup-default-animation",
@@ -572,7 +572,7 @@ function createOwner(options: {
 	const landblockId = options.landblockId ?? 0xda55ffff;
 	const domain = options.domain ?? "outdoor-buildings";
 	const key =
-		domain === "landblock-env-cells"
+		domain === "env-cell-system"
 			? { kind: "env-cell-system" as const, landblockId }
 			: { kind: domain, landblockId };
 	return {

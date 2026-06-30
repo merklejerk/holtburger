@@ -19,7 +19,7 @@ import type {
 	StaticLandblockSceneLodSourceRequest,
 	StaticLandblockSceneLodSourceResolver,
 	StaticMaterialCoverageReport,
-	LandblockEnvCellsPayloadSummary,
+	EnvCellSystemPayloadSummary,
 	OutdoorStaticObjectsPayloadSummary,
 	StaticObjectBakeDiagnostics,
 	StaticObjectRenderInstance,
@@ -102,7 +102,7 @@ export class StaticCoordinator {
 	#latestTerrainPayload: TerrainStaticScopePayloadSummary | null = null;
 	#latestOutdoorStaticObjectsPayload: OutdoorStaticObjectsPayloadSummary | null =
 		null;
-	#latestLandblockEnvCellsPayload: LandblockEnvCellsPayloadSummary | null =
+	#latestEnvCellSystemPayload: EnvCellSystemPayloadSummary | null =
 		null;
 	readonly #latestStaticObjectBakeDiagnosticsByKey = new Map<
 		string,
@@ -252,7 +252,7 @@ export class StaticCoordinator {
 			committed: this.#committed,
 			committedDrawUnits: this.#committedDrawUnits,
 			failed: this.#failed,
-			latestLandblockEnvCellsPayload: this.#latestLandblockEnvCellsPayload,
+			latestEnvCellSystemPayload: this.#latestEnvCellSystemPayload,
 			materialCoverage: Array.from(
 				this.#latestMaterialCoverageByKey.values(),
 			).sort(compareMaterialCoverageReports),
@@ -277,7 +277,7 @@ export class StaticCoordinator {
 		return {
 			baking: activeWork.filter((work) => work.status === "baking").length,
 			committed: this.#committed,
-			latestLandblockEnvCellsPayload: this.#latestLandblockEnvCellsPayload,
+			latestEnvCellSystemPayload: this.#latestEnvCellSystemPayload,
 			latestTerrainPayload: this.#latestTerrainPayload,
 			requested: activeWork.length,
 			resolving: activeWork.filter((work) => work.status === "resolving")
@@ -735,8 +735,8 @@ export class StaticCoordinator {
 			};
 		}
 
-		if (payload.scope.kind === "landblock-env-cells") {
-			this.#latestLandblockEnvCellsPayload = {
+		if (payload.scope.kind === "env-cell-system") {
+			this.#latestEnvCellSystemPayload = {
 				acceptedEnvCellCount: payload.scope.acceptedEnvCellIds.length,
 				envCellCount: payload.scope.envCells.length,
 				landblockId: payload.scope.landblock.landblockId,
@@ -959,7 +959,7 @@ function staticDomainForSourceLayer(
 		case "outdoor-generated-scenery":
 			return "outdoor-generated-scenery";
 		case "env-cell-system":
-			return "landblock-env-cells";
+			return "env-cell-system";
 	}
 }
 
@@ -1080,7 +1080,7 @@ function createLayerOwnerKindForDomain(
 			return "outdoor-explicit-objects";
 		case "outdoor-generated-scenery":
 			return "outdoor-generated-scenery";
-		case "landblock-env-cells":
+		case "env-cell-system":
 			return "env-cell-system";
 	}
 }

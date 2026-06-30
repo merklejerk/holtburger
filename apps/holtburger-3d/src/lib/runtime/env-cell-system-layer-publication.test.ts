@@ -45,7 +45,7 @@ describe("env-cell system layer publication", () => {
 		]);
 		expect(publication?.payload.portalGraphRecords).toEqual([
 			expect.objectContaining({
-				owner: createLayerPeerRecordOwner("landblock-env-cells"),
+				owner: createLayerPeerRecordOwner("env-cell-system"),
 			}),
 		]);
 	});
@@ -66,7 +66,7 @@ function createEnvCellCommitDelta(
 	return createCommitDelta({
 		revision,
 		staticPortalInteriorRecords: [createPortalInteriorRecord()],
-		staticBatchId: `static-batch:${revision}:landblock-env-cells`,
+		staticBatchId: `static-batch:${revision}:env-cell-system`,
 	});
 }
 
@@ -158,7 +158,7 @@ function createPortalInteriorRecord(): StaticPortalInteriorRecord {
 		envCells: [],
 		kind: "env-cell-portal-interior",
 		landblockId: 0xda55ffff,
-		owner: createLayerPeerRecordOwner("landblock-env-cells"),
+		owner: createLayerPeerRecordOwner("env-cell-system"),
 		portalLinks: [],
 	};
 }
@@ -205,7 +205,7 @@ function createBuildingTransitionPortalApertureResource() {
 }
 
 function createBuildingTransitionPortalGraph(
-	domain: ScheduledStaticWork["job"]["domain"] = "landblock-env-cells",
+	domain: ScheduledStaticWork["job"]["domain"] = "env-cell-system",
 ): StaticPortalGraphRecord {
 	return {
 		edges: [
@@ -244,7 +244,7 @@ function createLayerPeerRecordOwner(
 	domain: ScheduledStaticWork["job"]["domain"],
 ) {
 	const keyKind =
-		domain === "landblock-env-cells" ? "env-cell-system" : domain;
+		domain === "env-cell-system" ? "env-cell-system" : domain;
 	return {
 		domain,
 		key: {

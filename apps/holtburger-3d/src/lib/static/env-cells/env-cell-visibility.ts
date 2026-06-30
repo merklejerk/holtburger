@@ -1,7 +1,7 @@
 import type {
 	EnvCellVisibilityDiagnostic,
 	EnvCellVisibilitySelection,
-	LandblockEnvCellsStaticScopePayload,
+	EnvCellSystemStaticScopePayload,
 	LandblockEnvCellStaticFacts,
 } from "../contracts";
 
@@ -12,7 +12,7 @@ export interface EnvCellVisibilitySelectionOptions {
 }
 
 export function selectVisibleEnvCells(
-	bundle: Pick<LandblockEnvCellsStaticScopePayload, "envCells" | "portalLinks">,
+	bundle: Pick<EnvCellSystemStaticScopePayload, "envCells" | "portalLinks">,
 	options: EnvCellVisibilitySelectionOptions,
 ): EnvCellVisibilitySelection {
 	const maxDepth = normalizeMaxDepth(options.maxDepth);
@@ -89,7 +89,7 @@ export function selectVisibleEnvCells(
 }
 
 function collectVisibleTargetIds(
-	bundle: Pick<LandblockEnvCellsStaticScopePayload, "portalLinks">,
+	bundle: Pick<EnvCellSystemStaticScopePayload, "portalLinks">,
 	cell: LandblockEnvCellStaticFacts,
 ): readonly number[] {
 	const targets = new Set<number>(cell.visibleEnvCellIds);
@@ -104,7 +104,7 @@ function collectVisibleTargetIds(
 }
 
 function findLinkedEnvCellId(
-	link: LandblockEnvCellsStaticScopePayload["portalLinks"][number],
+	link: EnvCellSystemStaticScopePayload["portalLinks"][number],
 	envCellId: number,
 ): number | null {
 	if (

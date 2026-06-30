@@ -1992,7 +1992,7 @@ function createStructuredInteriorDrawUnit(
 			kind: "cell-structure",
 		},
 		coordinateSpace: "landblock-render-local",
-		domain: "landblock-env-cells",
+		domain: "env-cell-system",
 		drawUnitId,
 		envCellId,
 		environment: {
@@ -2099,7 +2099,7 @@ function createEnvCellStaticObjectDrawUnit(
 
 	return {
 		coordinateSpace: "landblock-render-local",
-		domain: "landblock-env-cells",
+		domain: "env-cell-system",
 		drawUnitId,
 		indexType: "uint16",
 		indices: new Uint16Array([0, 1, 2]),
@@ -2522,7 +2522,7 @@ function createPortalApertureResource(options: {
 			sourceId: range.sourceId,
 			sourceKind: range.sourceKind,
 		})),
-		sourceDomain: options.sourceDomain ?? "landblock-env-cells",
+		sourceDomain: options.sourceDomain ?? "env-cell-system",
 		vertices: options.ranges.flatMap((_range, rangeIndex) => {
 			const offset = rangeIndex * 2;
 			return [

@@ -104,7 +104,7 @@ export interface OutdoorGeneratedSceneryLayerPayload
 export interface EnvCellSystemLayerPayload extends StaticLandblockLayerPayloadBase {
 	readonly kind: "env-cell-system";
 	readonly authoredDynamicSeedRecords: readonly StaticAuthoredDynamicSeedRecord[];
-	readonly envCellStaticObjectDrawUnits: readonly OutdoorStaticObjectLayerDrawUnit<"landblock-env-cells">[];
+	readonly envCellStaticObjectDrawUnits: readonly OutdoorStaticObjectLayerDrawUnit<"env-cell-system">[];
 	readonly portalApertureResources: readonly StaticPortalApertureResource[];
 	readonly portalGraphRecords: readonly StaticPortalGraphRecord[];
 	readonly portalInteriorRecords: readonly StaticPortalInteriorRecord[];
@@ -157,7 +157,7 @@ export function staticLayerKindForStaticDomain(
 			return "outdoor-explicit-objects";
 		case "outdoor-generated-scenery":
 			return "outdoor-generated-scenery";
-		case "landblock-env-cells":
+		case "env-cell-system":
 			return "env-cell-system";
 	}
 }

@@ -3,7 +3,7 @@ import type {
 	StaticBakeBatchResult,
 	StaticBaker,
 } from "../contracts";
-import { LandblockEnvCellsBaker } from "../env-cells/bake/landblock-env-cells-baker";
+import { EnvCellSystemBaker } from "../env-cells/bake/env-cell-system-baker";
 import { StaticObjectCompatibilityBaker } from "../objects/bake/static-object-compatibility-baker";
 import { TerrainGeometryStaticBaker } from "../terrain/bake/terrain-geometry-baker";
 import { handleStaticBakeWorkerRequest } from "./worker-handler";
@@ -35,7 +35,7 @@ class StaticBakeWorkerRouter implements StaticBaker {
 		) {
 			return this.#staticObjectBaker.bake(input);
 		}
-		if (input.domain === "landblock-env-cells") {
+		if (input.domain === "env-cell-system") {
 			return this.#landblockEnvCellsBaker.bake(input);
 		}
 
@@ -47,7 +47,7 @@ class StaticBakeWorkerRouter implements StaticBaker {
 
 const workerPort = self as unknown as StaticBakeWorkerGlobalPort;
 const baker = new StaticBakeWorkerRouter({
-	landblockEnvCellsBaker: new LandblockEnvCellsBaker(),
+	landblockEnvCellsBaker: new EnvCellSystemBaker(),
 	staticObjectBaker: new StaticObjectCompatibilityBaker(),
 	terrainBaker: new TerrainGeometryStaticBaker(),
 });

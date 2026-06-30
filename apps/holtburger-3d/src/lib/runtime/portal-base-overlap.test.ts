@@ -517,7 +517,7 @@ function createPortalApertureResource(
 		],
 		sourceDomain:
 			sourceKind === "env-cell-portal"
-				? "landblock-env-cells"
+				? "env-cell-system"
 				: "outdoor-buildings",
 		vertices: [
 			{ x: -1, y: -1, z: 0 },

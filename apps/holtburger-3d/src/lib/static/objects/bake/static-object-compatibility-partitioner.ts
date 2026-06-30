@@ -42,7 +42,7 @@ export interface StaticObjectCompatibilityPartitionPlan {
 export interface StaticObjectCompatibilityPayload {
 	readonly domain: Extract<
 		StaticDomain,
-		OutdoorStaticObjectDomain | "landblock-env-cells"
+		OutdoorStaticObjectDomain | "env-cell-system"
 	>;
 	readonly landblock: LandblockSourceIdentity;
 	readonly regionRenderProfile: {
@@ -672,7 +672,7 @@ function createOwnershipAxis(options: {
 	readonly includeObjectPart: boolean;
 }): StaticObjectOwnershipAxis {
 	if (
-		options.domain === "landblock-env-cells" &&
+		options.domain === "env-cell-system" &&
 		options.owningEnvCellId === null
 	) {
 		throw new Error(
@@ -684,7 +684,7 @@ function createOwnershipAxis(options: {
 		? `${options.objectKey}:part:${options.partIndex}`
 		: null;
 	const envCellKey =
-		options.domain === "landblock-env-cells"
+		options.domain === "env-cell-system"
 			? `env-cell:${formatHex32(options.owningEnvCellId ?? 0)}`
 			: null;
 	const keyParts = [
@@ -700,7 +700,7 @@ function createOwnershipAxis(options: {
 	return {
 		domain: options.domain,
 		envCellId:
-			options.domain === "landblock-env-cells" ? options.owningEnvCellId : null,
+			options.domain === "env-cell-system" ? options.owningEnvCellId : null,
 		gfxKey: options.gfxKey,
 		gfxKeys: [options.gfxKey],
 		key: keyParts.join("|"),

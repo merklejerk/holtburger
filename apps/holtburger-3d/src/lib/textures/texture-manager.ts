@@ -1371,7 +1371,7 @@ function shouldUseIndependentRolePagePacking(
 		group.domain === "outdoor-buildings" ||
 		group.domain === "outdoor-explicit-objects" ||
 		group.domain === "outdoor-generated-scenery" ||
-		group.domain === "landblock-env-cells" ||
+		group.domain === "env-cell-system" ||
 		group.domain === "runtime-object-material"
 	);
 }

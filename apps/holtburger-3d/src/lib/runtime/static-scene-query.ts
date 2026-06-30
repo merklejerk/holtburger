@@ -1,5 +1,5 @@
 import type {
-	LandblockEnvCellsStaticScopePayload,
+	EnvCellSystemStaticScopePayload,
 	OutdoorStaticObjectsScopePayload,
 	StaticAuthoredDynamicSeedRecord,
 	StaticPortalProjectionRecord,
@@ -99,8 +99,8 @@ export class StaticSceneQuery {
 			return;
 		}
 
-		if (payload.scope.kind === "landblock-env-cells") {
-			this.ingestLandblockEnvCells(payload.scope);
+		if (payload.scope.kind === "env-cell-system") {
+			this.ingestEnvCellSystem(payload.scope);
 		}
 	}
 
@@ -295,7 +295,7 @@ export class StaticSceneQuery {
 		this.#landblockGridIndex.upsertOutdoorRoot(root);
 	}
 
-	ingestLandblockEnvCells(payload: LandblockEnvCellsStaticScopePayload): void {
+	ingestEnvCellSystem(payload: EnvCellSystemStaticScopePayload): void {
 		void payload;
 	}
 

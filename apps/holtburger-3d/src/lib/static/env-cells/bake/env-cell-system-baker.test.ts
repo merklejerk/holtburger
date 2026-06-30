@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
 	EnvCellCellStructureGeometryAttachment,
 	LandblockEnvCellStaticFacts,
-	LandblockEnvCellsStaticScopePayload,
+	EnvCellSystemStaticScopePayload,
 	RegionDetailRoleFacts,
 	StaticBakeBatchInput,
 	StaticObjectMaterialSourceFacts,
@@ -11,21 +11,21 @@ import type {
 	StaticObjectSourceAssetFacts,
 } from "../../contracts";
 import { createStaticObjectSourceGeometryIdentity } from "../../objects/static-object-source-assets";
-import { bakeLandblockEnvCells } from "./landblock-env-cells-baker";
-import { createEnvCellCellStructureGeometryIdentity } from "./landblock-env-cell-geometry-attachments";
+import { bakeEnvCellSystem } from "./env-cell-system-baker";
+import { createEnvCellCellStructureGeometryIdentity } from "./env-cell-system-geometry-attachments";
 
 describe("browser landblock env-cell baker", () => {
 	it("emits typed env-cell peer records without draw units", () => {
 		const input = createInput();
-		const result = bakeLandblockEnvCells(input);
+		const result = bakeEnvCellSystem(input);
 
 		expect(result).toMatchObject({
 			buildRevision: 42,
-			domain: "landblock-env-cells",
+			domain: "env-cell-system",
 			drawUnits: [],
 			materialCoverage: [
 				expect.objectContaining({
-					domain: "landblock-env-cells",
+					domain: "env-cell-system",
 					materialCount: 1,
 					triangleCount: 0,
 				}),
@@ -108,7 +108,7 @@ describe("browser landblock env-cell baker", () => {
 		const input = createInput({
 			buildingTransitionApertures: [createBuildingTransitionAperture()],
 		});
-		const result = bakeLandblockEnvCells(input);
+		const result = bakeEnvCellSystem(input);
 
 		expect(result.portalApertureResources).toEqual([
 			expect.objectContaining({
@@ -148,7 +148,7 @@ describe("browser landblock env-cell baker", () => {
 
 	it("rejects non-env-cell batches", () => {
 		expect(() =>
-			bakeLandblockEnvCells({
+			bakeEnvCellSystem({
 				...createInput(),
 				domain: "outdoor-terrain",
 			}),
@@ -170,7 +170,7 @@ describe("browser landblock env-cell baker", () => {
 			},
 		);
 
-		const result = bakeLandblockEnvCells(input);
+		const result = bakeEnvCellSystem(input);
 
 		expect(result.staticAuthoredDynamicSeeds).toEqual([
 			{
@@ -226,7 +226,7 @@ describe("browser landblock env-cell baker", () => {
 			},
 		);
 
-		const result = bakeLandblockEnvCells(input);
+		const result = bakeEnvCellSystem(input);
 
 		expect(result.staticAuthoredDynamicSeeds).toEqual([
 			expect.objectContaining({
@@ -239,7 +239,7 @@ describe("browser landblock env-cell baker", () => {
 	it("requires full geometry attachments for renderable cell structures", () => {
 		const input = createInputWithRenderableCellStructure();
 
-		expect(() => bakeLandblockEnvCells(input)).toThrow(
+		expect(() => bakeEnvCellSystem(input)).toThrow(
 			"Missing env-cell cell-structure geometry attachment env-cell-cell-structure-geometry|landblock:da55ffff|env-cell:da550100|environment:0e000001|cell-structure:0d000001.",
 		);
 	});
@@ -248,7 +248,7 @@ describe("browser landblock env-cell baker", () => {
 		const input = createInputWithRenderableCellStructure();
 		const envCell = requireFirstEnvCell(input);
 
-		const result = bakeLandblockEnvCells({
+		const result = bakeEnvCellSystem({
 			...input,
 			attachments: {
 				envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
@@ -264,9 +264,9 @@ describe("browser landblock env-cell baker", () => {
 				kind: "cell-structure",
 			},
 			coordinateSpace: "landblock-render-local",
-			domain: "landblock-env-cells",
+			domain: "env-cell-system",
 			drawUnitId:
-				"7:landblock:da55ffff:landblock-env-cells:structured-interior:da550100:0d000001:slice:0:0",
+				"7:landblock:da55ffff:env-cell-system:structured-interior:da550100:0d000001:slice:0:0",
 			envCellId: 0xda550100,
 			kind: "structured-interior-geometry",
 			landblockId: 0xda55ffff,
@@ -322,7 +322,7 @@ describe("browser landblock env-cell baker", () => {
 						},
 					],
 					deferredTriangleCount: 0,
-					domain: "landblock-env-cells",
+					domain: "env-cell-system",
 					fallbackReasonCounts: [],
 					fallbackReasonCount: 0,
 					landblockId: 0xda55ffff,
@@ -341,7 +341,7 @@ describe("browser landblock env-cell baker", () => {
 		});
 		const envCell = requireFirstEnvCell(input);
 
-		const result = bakeLandblockEnvCells({
+		const result = bakeEnvCellSystem({
 			...input,
 			attachments: {
 				envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
@@ -385,7 +385,7 @@ describe("browser landblock env-cell baker", () => {
 		});
 		const envCell = requireFirstEnvCell(input);
 
-		const result = bakeLandblockEnvCells({
+		const result = bakeEnvCellSystem({
 			...input,
 			attachments: {
 				envCellCellStructureGeometry: [
@@ -460,7 +460,7 @@ describe("browser landblock env-cell baker", () => {
 		});
 		const envCell = requireFirstEnvCell(input);
 
-		const result = bakeLandblockEnvCells({
+		const result = bakeEnvCellSystem({
 			...input,
 			attachments: {
 				envCellCellStructureGeometry: [
@@ -532,7 +532,7 @@ describe("browser landblock env-cell baker", () => {
 		});
 		const envCell = requireFirstEnvCell(input);
 
-		const result = bakeLandblockEnvCells({
+		const result = bakeEnvCellSystem({
 			...input,
 			attachments: {
 				envCellCellStructureGeometry: [
@@ -603,7 +603,7 @@ describe("browser landblock env-cell baker", () => {
 		});
 		const envCell = requireFirstEnvCell(input);
 
-		const result = bakeLandblockEnvCells({
+		const result = bakeEnvCellSystem({
 			...input,
 			attachments: {
 				envCellCellStructureGeometry: [
@@ -667,7 +667,7 @@ describe("browser landblock env-cell baker", () => {
 		});
 		const envCell = requireFirstEnvCell(input);
 
-		const result = bakeLandblockEnvCells({
+		const result = bakeEnvCellSystem({
 			...input,
 			attachments: {
 				envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
@@ -691,17 +691,17 @@ describe("browser landblock env-cell baker", () => {
 					family: "texture-rgba",
 					outcome: "rendered",
 					textureUseIds: [
-						"7:landblock:da55ffff:landblock-env-cells:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
+						"7:landblock:da55ffff:env-cell-system:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
 					],
 				}),
 			],
 			textureUseIds: [
-				"7:landblock:da55ffff:landblock-env-cells:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
+				"7:landblock:da55ffff:env-cell-system:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
 			],
 		});
 		expect(result.textureUses).toEqual([
 			expect.objectContaining({
-				domain: "landblock-env-cells",
+				domain: "env-cell-system",
 				owners: [{ drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" }],
 				samplingPolicy: {
 					wrapS: "repeat",
@@ -717,7 +717,7 @@ describe("browser landblock env-cell baker", () => {
 				},
 				staticBatchId: "env-batch-a",
 				textureUseId:
-					"7:landblock:da55ffff:landblock-env-cells:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
+					"7:landblock:da55ffff:env-cell-system:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
 			}),
 		]);
 	});
@@ -741,7 +741,7 @@ describe("browser landblock env-cell baker", () => {
 		});
 		const envCell = requireFirstEnvCell(input);
 
-		const result = bakeLandblockEnvCells({
+		const result = bakeEnvCellSystem({
 			...input,
 			attachments: {
 				envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
@@ -756,11 +756,11 @@ describe("browser landblock env-cell baker", () => {
 		expect(drawUnit.materialEntries[0]).toMatchObject({
 			detailTextureTiling: 8,
 			detailTextureUseId:
-				"7:landblock:da55ffff:landblock-env-cells:structured-interior-texture:prepared-render-surface-texture-use:06000020:rgba-detail:sampling:wrap=repeat,repeat",
+				"7:landblock:da55ffff:env-cell-system:structured-interior-texture:prepared-render-surface-texture-use:06000020:rgba-detail:sampling:wrap=repeat,repeat",
 		});
 		expect(drawUnit.textureUseIds).toEqual([
-			"7:landblock:da55ffff:landblock-env-cells:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
-			"7:landblock:da55ffff:landblock-env-cells:structured-interior-texture:prepared-render-surface-texture-use:06000020:rgba-detail:sampling:wrap=repeat,repeat",
+			"7:landblock:da55ffff:env-cell-system:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
+			"7:landblock:da55ffff:env-cell-system:structured-interior-texture:prepared-render-surface-texture-use:06000020:rgba-detail:sampling:wrap=repeat,repeat",
 		]);
 		expect(result.textureUses).toEqual(
 			expect.arrayContaining([
@@ -778,7 +778,7 @@ describe("browser landblock env-cell baker", () => {
 						usage: "rgba-detail",
 					},
 					textureUseId:
-						"7:landblock:da55ffff:landblock-env-cells:structured-interior-texture:prepared-render-surface-texture-use:06000020:rgba-detail:sampling:wrap=repeat,repeat",
+						"7:landblock:da55ffff:env-cell-system:structured-interior-texture:prepared-render-surface-texture-use:06000020:rgba-detail:sampling:wrap=repeat,repeat",
 				}),
 			]),
 		);
@@ -793,7 +793,7 @@ describe("browser landblock env-cell baker", () => {
 		});
 		const envCell = requireFirstEnvCell(input);
 
-		const result = bakeLandblockEnvCells({
+		const result = bakeEnvCellSystem({
 			...input,
 			attachments: {
 				envCellCellStructureGeometry: [
@@ -826,7 +826,7 @@ describe("browser landblock env-cell baker", () => {
 			},
 		});
 
-		const result = bakeLandblockEnvCells(input);
+		const result = bakeEnvCellSystem(input);
 		const drawUnit = result.drawUnits.find(
 			(candidate) => candidate.kind === "static-object-geometry",
 		);
@@ -836,7 +836,7 @@ describe("browser landblock env-cell baker", () => {
 
 		expect(result.drawUnits).toHaveLength(1);
 		expect(drawUnit).toMatchObject({
-			domain: "landblock-env-cells",
+			domain: "env-cell-system",
 			kind: "static-object-geometry",
 			landblockId: 0xda55ffff,
 			materialFamily: "flat-color",
@@ -866,7 +866,7 @@ describe("browser landblock env-cell baker", () => {
 			vertexCount: 3,
 		});
 		expect(drawUnit.drawUnitId).toContain(
-			"7:landblock:da55ffff:landblock-env-cells:static-object-partition:",
+			"7:landblock:da55ffff:env-cell-system:static-object-partition:",
 		);
 		expect(Array.from(drawUnit.positions.slice(0, 9))).toEqual([
 			1, 3, -2, 2, 3, -2, 1, 4, -2,
@@ -922,7 +922,7 @@ describe("browser landblock env-cell baker", () => {
 			},
 		});
 
-		const result = bakeLandblockEnvCells(input);
+		const result = bakeEnvCellSystem(input);
 		const drawUnit = result.drawUnits.find(
 			(candidate) => candidate.kind === "static-object-geometry",
 		);
@@ -957,7 +957,7 @@ function createInputWithRenderableCellStructure(
 		throw new Error("Missing fixture item.");
 	}
 	const scope = item.payload.scope;
-	if (scope?.kind !== "landblock-env-cells") {
+	if (scope?.kind !== "env-cell-system") {
 		throw new Error("Missing fixture env-cell scope.");
 	}
 	const envCell = scope.envCells[0];
@@ -1035,7 +1035,7 @@ function requireFirstEnvCell(
 	input: StaticBakeBatchInput,
 ): LandblockEnvCellStaticFacts {
 	const item = input.items[0];
-	if (!item || item.payload.scope.kind !== "landblock-env-cells") {
+	if (!item || item.payload.scope.kind !== "env-cell-system") {
 		throw new Error("Missing fixture env-cell scope.");
 	}
 	const envCell = item.payload.scope.envCells[0];
@@ -1054,7 +1054,7 @@ function createInputWithRenderableStaticSeed(
 ): StaticBakeBatchInput {
 	const input = createInput();
 	const item = input.items[0];
-	if (!item || item.payload.scope.kind !== "landblock-env-cells") {
+	if (!item || item.payload.scope.kind !== "env-cell-system") {
 		throw new Error("Missing fixture env-cell scope.");
 	}
 	const scope = item.payload.scope;
@@ -1126,7 +1126,7 @@ function createInputWithEnvCellStaticSource(
 ): StaticBakeBatchInput {
 	const input = createInput();
 	const item = input.items[0];
-	if (!item || item.payload.scope.kind !== "landblock-env-cells") {
+	if (!item || item.payload.scope.kind !== "env-cell-system") {
 		throw new Error("Missing fixture env-cell scope.");
 	}
 	const scope = item.payload.scope;
@@ -1454,7 +1454,7 @@ function formatHex32(value: number): string {
 
 function expectedEnvCellLayerOwner() {
 	return {
-		domain: "landblock-env-cells",
+		domain: "env-cell-system",
 		key: {
 			kind: "env-cell-system",
 			landblockId: 0xda55ffff,
@@ -1466,12 +1466,12 @@ function expectedEnvCellLayerOwner() {
 
 function createInput(
 	options: {
-		readonly buildingTransitionApertures?: LandblockEnvCellsStaticScopePayload["buildingTransitionApertures"];
+		readonly buildingTransitionApertures?: EnvCellSystemStaticScopePayload["buildingTransitionApertures"];
 	} = {},
 ): StaticBakeBatchInput {
 	const work = {
 		job: {
-			domain: "landblock-env-cells" as const,
+			domain: "env-cell-system" as const,
 			scope: {
 				kind: "landblock" as const,
 				landblockId: 0xda55ffff,
@@ -1479,12 +1479,12 @@ function createInput(
 		},
 		priority: 5,
 		revision: 7,
-		workId: "7:landblock:da55ffff:landblock-env-cells",
+		workId: "7:landblock:da55ffff:env-cell-system",
 	};
 
 	return {
 		atlasSnapshot: {
-			domain: "landblock-env-cells",
+			domain: "env-cell-system",
 			placements: [],
 			staticBatchId: "env-batch-a",
 			textureUses: [],
@@ -1493,7 +1493,7 @@ function createInput(
 			envCellCellStructureGeometry: [],
 			staticObjectSourceGeometry: [],
 		},
-		domain: "landblock-env-cells",
+		domain: "env-cell-system",
 		items: [
 			{
 				payload: {
@@ -1585,7 +1585,7 @@ function createInput(
 								visibleEnvCellIds: [0xda550101],
 							},
 						],
-						kind: "landblock-env-cells",
+						kind: "env-cell-system",
 						landblock: {
 							kind: "landblock-source",
 							landblockId: 0xda55ffff,
@@ -1603,12 +1603,12 @@ function createInput(
 							},
 						},
 						residencySpatial: {
-							landblockEnvCellBvh: {
+							envCellSystemBvh: {
 								items: [],
 								nodes: [],
 							},
-							landblockEnvCellBvhItemCount: 1,
-							landblockEnvCellBvhNodeCount: 1,
+							envCellSystemBvhItemCount: 1,
+							envCellSystemBvhNodeCount: 1,
 						},
 						sourceAssets: [],
 						textureRefs: [],

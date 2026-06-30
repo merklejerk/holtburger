@@ -10,7 +10,7 @@ import type {
 	StaticLandblockSceneLodSourceRequest,
 	StaticLayerRecipe,
 } from "../contracts";
-import { LandblockEnvCellsBaker } from "../env-cells/bake/landblock-env-cells-baker";
+import { EnvCellSystemBaker } from "../env-cells/bake/env-cell-system-baker";
 import { StaticObjectCompatibilityBaker } from "../objects/bake/static-object-compatibility-baker";
 import { TerrainGeometryStaticBaker } from "../terrain/bake/terrain-geometry-baker";
 import { LandblockSceneLodSourceResolver } from "./landblock-scene-lod-source-resolver";
@@ -55,7 +55,7 @@ describe("landblock scene LoD source resolver", () => {
 			"outdoor-buildings",
 			"outdoor-explicit-objects",
 			"outdoor-generated-scenery",
-			"landblock-env-cells",
+			"env-cell-system",
 		]);
 		expect(assetReader.requestedKeys).toContain(
 			"landblock-scene-lod:da55ffff:4",
@@ -72,10 +72,10 @@ describe("landblock scene LoD source resolver", () => {
 			"landblock-scene-lod-env-cell-layer:da55ffff",
 		);
 		const envCellRecipe = resolution.recipes.find(
-			(recipe) => recipe.payload.job.domain === "landblock-env-cells",
+			(recipe) => recipe.payload.job.domain === "env-cell-system",
 		);
 		expect(
-			envCellRecipe?.payload.scope.kind === "landblock-env-cells"
+			envCellRecipe?.payload.scope.kind === "env-cell-system"
 				? envCellRecipe.payload.scope.buildingTransitionApertures.map(
 						(aperture) => aperture.apertureId,
 					)
@@ -187,8 +187,8 @@ function bakerForRecipe(recipe: StaticLayerRecipe): StaticBaker {
 	if (recipe.payload.job.domain === "outdoor-terrain") {
 		return new TerrainGeometryStaticBaker();
 	}
-	if (recipe.payload.job.domain === "landblock-env-cells") {
-		return new LandblockEnvCellsBaker();
+	if (recipe.payload.job.domain === "env-cell-system") {
+		return new EnvCellSystemBaker();
 	}
 	return new StaticObjectCompatibilityBaker();
 }
@@ -255,7 +255,7 @@ function createSceneLodPayload() {
 				diagnostics: createDiagnostics(),
 				envCells: [],
 				kind: "env-cell-system",
-				landblockEnvCellBvh: { items: [], nodes: [] },
+				envCellSystemBvh: { items: [], nodes: [] },
 				landblockInfoId: 0xda55fffe,
 				portalLinks: [],
 			},

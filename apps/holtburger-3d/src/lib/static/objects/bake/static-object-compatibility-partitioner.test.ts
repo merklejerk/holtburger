@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type {
-	LandblockEnvCellsStaticScopePayload,
+	EnvCellSystemStaticScopePayload,
 	OutdoorStaticObjectsScopePayload,
 	StaticBakeBatchInput,
 	StaticBounds,
@@ -275,7 +275,7 @@ describe("static object compatibility partitioner", () => {
 		).toEqual([
 			{
 				drawUnitId:
-					"1:landblock:da55ffff:landblock-env-cells:static-object-partition:slice-0-0",
+					"1:landblock:da55ffff:env-cell-system:static-object-partition:slice-0-0",
 				ownership: {
 					envCellIds: [0xda550100],
 					kind: "env-cell-static-object-seeds",
@@ -288,7 +288,7 @@ describe("static object compatibility partitioner", () => {
 			},
 			{
 				drawUnitId:
-					"1:landblock:da55ffff:landblock-env-cells:static-object-partition:slice-1-0",
+					"1:landblock:da55ffff:env-cell-system:static-object-partition:slice-1-0",
 				ownership: {
 					envCellIds: [0xda550101],
 					kind: "env-cell-static-object-seeds",
@@ -1494,7 +1494,7 @@ function createEnvCellStaticPayload(): StaticObjectCompatibilityPayload &
 	OutdoorStaticObjectsScopePayload {
 	const payload = duplicateObjectInstance(
 		createPayload({
-			domain: "landblock-env-cells",
+			domain: "env-cell-system",
 			materials: [createSolidMaterial(0x08000010)],
 		}),
 	);
@@ -1549,7 +1549,7 @@ function createEnvCellStaticBakeInput(): StaticBakeBatchInput {
 	const payload = createEnvCellStaticScopePayload();
 	const work = {
 		job: {
-			domain: "landblock-env-cells" as const,
+			domain: "env-cell-system" as const,
 			scope: {
 				kind: "landblock" as const,
 				landblockId: 0xda55ffff,
@@ -1557,12 +1557,12 @@ function createEnvCellStaticBakeInput(): StaticBakeBatchInput {
 		},
 		priority: 0,
 		revision: 1,
-		workId: "1:landblock:da55ffff:landblock-env-cells",
+		workId: "1:landblock:da55ffff:env-cell-system",
 	};
 
 	return {
 		atlasSnapshot: {
-			domain: "landblock-env-cells",
+			domain: "env-cell-system",
 			placements: [],
 			staticBatchId: "static-batch:objects",
 			textureUses: [],
@@ -1583,7 +1583,7 @@ function createEnvCellStaticBakeInput(): StaticBakeBatchInput {
 				}),
 			),
 		},
-		domain: "landblock-env-cells",
+		domain: "env-cell-system",
 		items: [
 			{
 				payload: {
@@ -1599,7 +1599,7 @@ function createEnvCellStaticBakeInput(): StaticBakeBatchInput {
 	};
 }
 
-function createEnvCellStaticScopePayload(): LandblockEnvCellsStaticScopePayload {
+function createEnvCellStaticScopePayload(): EnvCellSystemStaticScopePayload {
 	const payload = createEnvCellStaticPayload();
 	return {
 		acceptedEnvCellIds: [0xda550100, 0xda550101],
@@ -1607,7 +1607,7 @@ function createEnvCellStaticScopePayload(): LandblockEnvCellsStaticScopePayload 
 		envCells: payload.objects.map((object) =>
 			createEnvCellStaticScopeEnvCell(object.owningEnvCellId ?? 0, object),
 		),
-		kind: "landblock-env-cells",
+		kind: "env-cell-system",
 		landblock: {
 			kind: "landblock-source",
 			landblockId: 0xda55ffff,
@@ -1637,7 +1637,7 @@ function createEnvCellStaticScopePayload(): LandblockEnvCellsStaticScopePayload 
 function createEnvCellStaticScopeEnvCell(
 	envCellId: number,
 	object: StaticObjectCompatibilityPayload["objects"][number],
-): LandblockEnvCellsStaticScopePayload["envCells"][number] {
+): EnvCellSystemStaticScopePayload["envCells"][number] {
 	return {
 		cellBsp: {
 			kind: "leaf",

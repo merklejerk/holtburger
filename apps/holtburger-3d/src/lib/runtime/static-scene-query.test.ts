@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type {
-	LandblockEnvCellsStaticScopePayload,
+	EnvCellSystemStaticScopePayload,
 	OutdoorStaticObjectsScopePayload,
 	StaticBounds,
 	StaticPortalApertureResource,
@@ -162,7 +162,7 @@ describe("static scene query", () => {
 		const query = new StaticSceneQuery();
 		query.ingestOutdoorStaticObjects(createOutdoorStaticObjectsPayload());
 		query.ingestTerrain(createTerrainPayload());
-		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
+		commitEnvCellSystem(query, createEnvCellSystemPayload());
 		commitEnvCellStaticObjectBounds(query);
 
 		const outdoorKey = createOutdoorStaticObjectSelectionKey({
@@ -472,7 +472,7 @@ describe("static scene query", () => {
 
 	it("ingests landblock env-cell static seed facts for object picking", () => {
 		const query = new StaticSceneQuery();
-		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
+		commitEnvCellSystem(query, createEnvCellSystemPayload());
 		commitEnvCellStaticObjectBounds(query);
 
 		const hit = query.pickRay({
@@ -532,9 +532,9 @@ describe("static scene query", () => {
 
 	it("picks env-cell static objects from STAB placement without reapplying the env-cell frame", () => {
 		const query = new StaticSceneQuery();
-		commitLandblockEnvCells(
+		commitEnvCellSystem(
 			query,
-			createLandblockEnvCellsPayload({
+			createEnvCellSystemPayload({
 				envCellPlacement: createPlacement({
 					origin: { x: 10, y: 20, z: 30 },
 				}),
@@ -571,7 +571,7 @@ describe("static scene query", () => {
 
 	it("uses baked env-cell static object bounds for picking", () => {
 		const query = new StaticSceneQuery();
-		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
+		commitEnvCellSystem(query, createEnvCellSystemPayload());
 		commitEnvCellStaticObjectBounds(query);
 
 		const hit = query.pickRay({
@@ -599,7 +599,7 @@ describe("static scene query", () => {
 
 	it("retains work-owned env-cell static bounds when draw-unit resources are removed", () => {
 		const query = new StaticSceneQuery();
-		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
+		commitEnvCellSystem(query, createEnvCellSystemPayload());
 		query.applyStaticSpatialRecords({
 			records: [
 				{
@@ -651,7 +651,7 @@ describe("static scene query", () => {
 
 	it("prunes work-owned env-cell static bounds when retained env-cell scopes are released", () => {
 		const query = new StaticSceneQuery();
-		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
+		commitEnvCellSystem(query, createEnvCellSystemPayload());
 		commitEnvCellStaticObjectBounds(query);
 
 		expect(
@@ -698,7 +698,7 @@ describe("static scene query", () => {
 
 	it("picks env-cell static objects from outdoor context for visible interior debugging", () => {
 		const query = new StaticSceneQuery();
-		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
+		commitEnvCellSystem(query, createEnvCellSystemPayload());
 		commitEnvCellStaticObjectBounds(query);
 
 		const hit = query.pickRay({
@@ -721,9 +721,9 @@ describe("static scene query", () => {
 	it("picks env-cell static objects in a neighboring landblock render frame", () => {
 		const query = new StaticSceneQuery();
 		query.setOutdoorAnchorLandblockId(0xda55ffff);
-		commitLandblockEnvCells(
+		commitEnvCellSystem(
 			query,
-			createLandblockEnvCellsPayload({
+			createEnvCellSystemPayload({
 				envCellId: 0xdb550100,
 				landblockId: 0xdb55ffff,
 			}),
@@ -759,9 +759,9 @@ describe("static scene query", () => {
 
 	it("does not query env-cell locals through a flat fallback when the landblock BVH is absent", () => {
 		const query = new StaticSceneQuery();
-		commitLandblockEnvCells(
+		commitEnvCellSystem(
 			query,
-			createLandblockEnvCellsPayload({ includeLandblockBvh: false }),
+			createEnvCellSystemPayload({ includeLandblockBvh: false }),
 		);
 
 		const hit = query.pickRay({
@@ -800,7 +800,7 @@ describe("static scene query", () => {
 
 	it("uses the landblock env-cell BVH for initial residency queries", () => {
 		const query = new StaticSceneQuery();
-		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
+		commitEnvCellSystem(query, createEnvCellSystemPayload());
 
 		expect(
 			query.queryEnvCellAtPoint({
@@ -820,9 +820,9 @@ describe("static scene query", () => {
 
 	it("refines overlapping landblock env-cell residency candidates with cell BSPs", () => {
 		const query = new StaticSceneQuery();
-		commitLandblockEnvCells(
+		commitEnvCellSystem(
 			query,
-			createLandblockEnvCellsPayload({
+			createEnvCellSystemPayload({
 				envCells: [
 					{
 						cellBsp: createCellBspRejectingBelowX(2),
@@ -855,9 +855,9 @@ describe("static scene query", () => {
 
 	it("prefers graph-supported env-cell residency candidates over graph-orphan overlap caps", () => {
 		const query = new StaticSceneQuery();
-		commitLandblockEnvCells(
+		commitEnvCellSystem(
 			query,
-			createLandblockEnvCellsPayload({
+			createEnvCellSystemPayload({
 				envCells: [
 					{
 						cellBsp: createCellBspLeaf(),
@@ -885,9 +885,9 @@ describe("static scene query", () => {
 
 	it("uses port BSP planes for env-cell residency refinement", () => {
 		const query = new StaticSceneQuery();
-		commitLandblockEnvCells(
+		commitEnvCellSystem(
 			query,
-			createLandblockEnvCellsPayload({
+			createEnvCellSystemPayload({
 				envCells: [
 					{
 						cellBsp: createCellBspPortRejectingBelowX(2),
@@ -914,9 +914,9 @@ describe("static scene query", () => {
 
 	it("evaluates env-cell residency BSPs in the candidate cell placement space", () => {
 		const query = new StaticSceneQuery();
-		commitLandblockEnvCells(
+		commitEnvCellSystem(
 			query,
-			createLandblockEnvCellsPayload({
+			createEnvCellSystemPayload({
 				envCells: [
 					{
 						cellBsp: createCellBspRejectingBelowX(2),
@@ -945,9 +945,9 @@ describe("static scene query", () => {
 
 	it("rejects coarse env-cell residency candidates when all BSPs reject", () => {
 		const query = new StaticSceneQuery();
-		commitLandblockEnvCells(
+		commitEnvCellSystem(
 			query,
-			createLandblockEnvCellsPayload({
+			createEnvCellSystemPayload({
 				envCells: [
 					{
 						cellBsp: createCellBspRejectingBelowX(2),
@@ -975,9 +975,9 @@ describe("static scene query", () => {
 
 	it("exposes committed env-cell landblock BVH bounds for debug overlays", () => {
 		const query = new StaticSceneQuery();
-		commitLandblockEnvCells(
+		commitEnvCellSystem(
 			query,
-			createLandblockEnvCellsPayload({
+			createEnvCellSystemPayload({
 				landblockBounds: {
 					max: { x: 8, y: 4, z: 2 },
 					min: { x: 2, y: -1, z: -6 },
@@ -1005,9 +1005,9 @@ describe("static scene query", () => {
 	it("translates env-cell debug bounds into the outdoor anchor frame", () => {
 		const query = new StaticSceneQuery();
 		query.setOutdoorAnchorLandblockId(0xda55ffff);
-		commitLandblockEnvCells(
+		commitEnvCellSystem(
 			query,
-			createLandblockEnvCellsPayload({
+			createEnvCellSystemPayload({
 				envCellId: 0xdb550100,
 				landblockBounds: {
 					max: { x: 8, y: 4, z: 2 },
@@ -1034,9 +1034,9 @@ describe("static scene query", () => {
 	it("exposes committed env-cell bounds in the render frame", () => {
 		const query = new StaticSceneQuery();
 		query.setOutdoorAnchorLandblockId(0xda55ffff);
-		commitLandblockEnvCells(
+		commitEnvCellSystem(
 			query,
-			createLandblockEnvCellsPayload({
+			createEnvCellSystemPayload({
 				envCellId: 0xdb550100,
 				landblockBounds: {
 					max: { x: 8, y: 4, z: 2 },
@@ -1070,9 +1070,9 @@ describe("static scene query", () => {
 	it("exposes all committed env-cell debug bounds by default", () => {
 		const query = new StaticSceneQuery();
 		query.setOutdoorAnchorLandblockId(0xda55ffff);
-		commitLandblockEnvCells(
+		commitEnvCellSystem(
 			query,
-			createLandblockEnvCellsPayload({
+			createEnvCellSystemPayload({
 				envCellId: 0xda550100,
 				landblockBounds: {
 					max: { x: 8, y: 4, z: 2 },
@@ -1081,9 +1081,9 @@ describe("static scene query", () => {
 				landblockId: 0xda55ffff,
 			}),
 		);
-		commitLandblockEnvCells(
+		commitEnvCellSystem(
 			query,
-			createLandblockEnvCellsPayload({
+			createEnvCellSystemPayload({
 				envCellId: 0xdb550100,
 				landblockBounds: {
 					max: { x: 18, y: 6, z: 12 },
@@ -1121,9 +1121,9 @@ describe("static scene query", () => {
 
 	it("does not count broad env-cell BVH node hits as residency without item containment", () => {
 		const query = new StaticSceneQuery();
-		commitLandblockEnvCells(
+		commitEnvCellSystem(
 			query,
-			createLandblockEnvCellsPayload({
+			createEnvCellSystemPayload({
 				landblockNodeBounds: {
 					max: { x: 64, y: 8, z: 64 },
 					min: { x: -64, y: -8, z: -64 },
@@ -1142,7 +1142,7 @@ describe("static scene query", () => {
 
 	it("derives camera residency from committed env-cell query data", () => {
 		const query = new StaticSceneQuery();
-		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
+		commitEnvCellSystem(query, createEnvCellSystemPayload());
 
 		expect(
 			query.queryCameraResidencyAtPoint({
@@ -1158,7 +1158,7 @@ describe("static scene query", () => {
 
 	it("derives camera residency from a dungeon landblock-local point", () => {
 		const query = new StaticSceneQuery();
-		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
+		commitEnvCellSystem(query, createEnvCellSystemPayload());
 
 		expect(
 			query.queryCameraResidencyAtLandblockPoint({
@@ -1184,9 +1184,9 @@ describe("static scene query", () => {
 	it("derives camera residency in a neighboring landblock render frame", () => {
 		const query = new StaticSceneQuery();
 		query.setOutdoorAnchorLandblockId(0xda55ffff);
-		commitLandblockEnvCells(
+		commitEnvCellSystem(
 			query,
-			createLandblockEnvCellsPayload({
+			createEnvCellSystemPayload({
 				envCellId: 0xdb550100,
 				landblockId: 0xdb55ffff,
 			}),
@@ -1207,9 +1207,9 @@ describe("static scene query", () => {
 	it("prefers retained env-cell render-frame residency before outdoor boundary fallback", () => {
 		const query = new StaticSceneQuery();
 		query.setOutdoorAnchorLandblockId(0x1a73ffff);
-		commitLandblockEnvCells(
+		commitEnvCellSystem(
 			query,
-			createLandblockEnvCellsPayload({
+			createEnvCellSystemPayload({
 				envCellId: 0x1a7301f6,
 				landblockBounds: createBounds(191, -1, -14, 201, 1, -4),
 				landblockId: 0x1a73ffff,
@@ -1230,7 +1230,7 @@ describe("static scene query", () => {
 
 	it("does not infer env-cell camera residency from source BVHs after committed records are gone", () => {
 		const query = new StaticSceneQuery();
-		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
+		commitEnvCellSystem(query, createEnvCellSystemPayload());
 		query.retainLayerOwners([]);
 
 		expect(
@@ -1719,7 +1719,7 @@ describe("static scene query", () => {
 			query.hasCommittedPortalInteriorScene({ landblockId: 0xda55ffff }),
 		).toBe(false);
 
-		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
+		commitEnvCellSystem(query, createEnvCellSystemPayload());
 
 		expect(
 			query.hasCommittedPortalInteriorScene({ landblockId: 0xda55ffff }),
@@ -2192,20 +2192,20 @@ function createOutdoorStaticObject(input: {
 	};
 }
 
-function createLandblockEnvCellsPayload(
+function createEnvCellSystemPayload(
 	options: {
 		readonly envCells?: readonly TestLandblockEnvCell[];
 		readonly envCellPlacement?: ReturnType<typeof createPlacement>;
 		readonly envCellId?: number;
 		readonly includeLandblockBvh?: boolean;
-		readonly landblockBounds?: LandblockEnvCellsStaticScopePayload["residencySpatial"]["landblockEnvCellBvh"]["items"][number]["bounds"];
+		readonly landblockBounds?: EnvCellSystemStaticScopePayload["residencySpatial"]["envCellSystemBvh"]["items"][number]["bounds"];
 		readonly landblockId?: number;
-		readonly landblockNodeBounds?: LandblockEnvCellsStaticScopePayload["residencySpatial"]["landblockEnvCellBvh"]["nodes"][number]["bounds"];
-		readonly portalApertures?: LandblockEnvCellsStaticScopePayload["envCells"][number]["portalApertures"];
-		readonly portalLinks?: LandblockEnvCellsStaticScopePayload["portalLinks"];
-		readonly portals?: LandblockEnvCellsStaticScopePayload["envCells"][number]["portals"];
+		readonly landblockNodeBounds?: EnvCellSystemStaticScopePayload["residencySpatial"]["envCellSystemBvh"]["nodes"][number]["bounds"];
+		readonly portalApertures?: EnvCellSystemStaticScopePayload["envCells"][number]["portalApertures"];
+		readonly portalLinks?: EnvCellSystemStaticScopePayload["portalLinks"];
+		readonly portals?: EnvCellSystemStaticScopePayload["envCells"][number]["portals"];
 	} = {},
-): LandblockEnvCellsStaticScopePayload {
+): EnvCellSystemStaticScopePayload {
 	const includeLandblockBvh = options.includeLandblockBvh ?? true;
 	const landblockId = options.landblockId ?? 0xda55ffff;
 	const envCellId =
@@ -2290,7 +2290,7 @@ function createLandblockEnvCellsPayload(
 				visibleEnvCellIds: [],
 			};
 		}),
-		kind: "landblock-env-cells",
+		kind: "env-cell-system",
 		landblock: {
 			kind: "landblock-source",
 			landblockId,
@@ -2303,9 +2303,9 @@ function createLandblockEnvCellsPayload(
 			regionNumber: 1,
 		},
 		residencySpatial: {
-			landblockEnvCellBvhItemCount: includeLandblockBvh ? envCells.length : 0,
-			landblockEnvCellBvhNodeCount: includeLandblockBvh ? 1 : 0,
-			landblockEnvCellBvh: {
+			envCellSystemBvhItemCount: includeLandblockBvh ? envCells.length : 0,
+			envCellSystemBvhNodeCount: includeLandblockBvh ? 1 : 0,
+			envCellSystemBvh: {
 				items: includeLandblockBvh
 					? envCells.map((cell, index) => ({
 							bounds: cell.landblockBounds ?? landblockBounds,
@@ -2323,7 +2323,7 @@ function createLandblockEnvCellsPayload(
 								bounds: landblockNodeBounds,
 								itemIndices: envCells.map((_, index) => index),
 								kindMask: {
-									domain: "landblock-env-cells",
+									domain: "env-cell-system",
 									envCellRoot: true,
 								},
 								left: null,
@@ -2338,9 +2338,9 @@ function createLandblockEnvCellsPayload(
 }
 
 type TestLandblockEnvCell = {
-	readonly cellBsp?: LandblockEnvCellsStaticScopePayload["envCells"][number]["cellBsp"];
+	readonly cellBsp?: EnvCellSystemStaticScopePayload["envCells"][number]["cellBsp"];
 	readonly envCellId: number;
-	readonly landblockBounds?: LandblockEnvCellsStaticScopePayload["residencySpatial"]["landblockEnvCellBvh"]["items"][number]["bounds"];
+	readonly landblockBounds?: EnvCellSystemStaticScopePayload["residencySpatial"]["envCellSystemBvh"]["items"][number]["bounds"];
 	readonly localPlacement?: ReturnType<typeof createPlacement>;
 	readonly memberId?: string;
 };
@@ -2348,7 +2348,7 @@ type TestLandblockEnvCell = {
 function createEnvCellPortalLink(
 	sourceEnvCellId: number,
 	targetEnvCellId: number,
-): LandblockEnvCellsStaticScopePayload["portalLinks"][number] {
+): EnvCellSystemStaticScopePayload["portalLinks"][number] {
 	return {
 		flags: 0,
 		linkId: `env-cell:${sourceEnvCellId.toString(16)}->${targetEnvCellId.toString(16)}`,
@@ -2367,7 +2367,7 @@ function createEnvCellPortalLink(
 	};
 }
 
-function createCellBspLeaf(): LandblockEnvCellsStaticScopePayload["envCells"][number]["cellBsp"] {
+function createCellBspLeaf(): EnvCellSystemStaticScopePayload["envCells"][number]["cellBsp"] {
 	return {
 		kind: "leaf",
 		polyIds: [],
@@ -2378,7 +2378,7 @@ function createCellBspLeaf(): LandblockEnvCellsStaticScopePayload["envCells"][nu
 
 function createCellBspRejectingBelowX(
 	minX: number,
-): LandblockEnvCellsStaticScopePayload["envCells"][number]["cellBsp"] {
+): EnvCellSystemStaticScopePayload["envCells"][number]["cellBsp"] {
 	return {
 		kind: "internal",
 		neg: { ...createCellBspLeaf(), solid: 1 },
@@ -2395,7 +2395,7 @@ function createCellBspRejectingBelowX(
 
 function createCellBspPortRejectingBelowX(
 	minX: number,
-): LandblockEnvCellsStaticScopePayload["envCells"][number]["cellBsp"] {
+): EnvCellSystemStaticScopePayload["envCells"][number]["cellBsp"] {
 	return {
 		kind: "port",
 		neg: { ...createCellBspLeaf(), solid: 1 },
@@ -2702,7 +2702,7 @@ function createEnvCellLayerOwner(
 	landblockId: number,
 ): StaticLayerPeerRecordOwner {
 	return {
-		domain: "landblock-env-cells",
+		domain: "env-cell-system",
 		key: {
 			kind: "env-cell-system",
 			landblockId,
@@ -2739,9 +2739,9 @@ function createThrowingJsonEnvCellSourceMapping(options: {
 	} as StaticSourceMappingRecord;
 }
 
-function commitLandblockEnvCells(
+function commitEnvCellSystem(
 	query: StaticSceneQuery,
-	payload: LandblockEnvCellsStaticScopePayload,
+	payload: EnvCellSystemStaticScopePayload,
 ): void {
 	const landblockId = payload.landblock.landblockId;
 	const owner = createEnvCellLayerOwner(landblockId);
@@ -2780,11 +2780,11 @@ function commitLandblockEnvCells(
 			memberId: envCell.memberId,
 			owner,
 			renderBounds: envCell.renderGeometry.bounds,
-			residencyBvh: payload.residencySpatial.landblockEnvCellBvh,
+			residencyBvh: payload.residencySpatial.envCellSystemBvh,
 			residencyBvhItemCount:
-				payload.residencySpatial.landblockEnvCellBvhItemCount,
+				payload.residencySpatial.envCellSystemBvhItemCount,
 			residencyBvhNodeCount:
-				payload.residencySpatial.landblockEnvCellBvhNodeCount,
+				payload.residencySpatial.envCellSystemBvhNodeCount,
 		})),
 		visibilityRecords: [
 			{

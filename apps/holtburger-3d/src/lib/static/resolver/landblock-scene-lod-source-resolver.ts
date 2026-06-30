@@ -21,10 +21,10 @@ import type {
 	StaticResolver,
 	StaticResolverJob,
 } from "../contracts";
-import { LandblockEnvCellsResolver } from "../env-cells/landblock-env-cells-resolver";
+import { EnvCellSystemResolver } from "../env-cells/env-cell-system-resolver";
 import { OutdoorStaticObjectsResolver } from "../objects/outdoor-static-objects-resolver";
 import type {
-	LandblockEnvCellsLayerSourcePayloadDto,
+	EnvCellSystemLayerSourcePayloadDto,
 	LandblockOutdoorLayerSourcePayloadDto,
 } from "../source-payloads";
 import { TerrainStaticScopeResolver } from "../terrain/terrain-resolver";
@@ -82,7 +82,7 @@ function createProjectedLayerResolver(options: {
 		return new TerrainStaticScopeResolver({ assetService });
 	}
 	if (options.layerKind === "env-cell-system") {
-		return new LandblockEnvCellsResolver({ assetService });
+		return new EnvCellSystemResolver({ assetService });
 	}
 	return new OutdoorStaticObjectsResolver({ assetService });
 }
@@ -165,14 +165,14 @@ function createProjectedOutdoorPayload(
 
 function createProjectedEnvCellsPayload(
 	payload: LandblockSceneLodPayloadDto,
-): LandblockEnvCellsLayerSourcePayloadDto {
+): EnvCellSystemLayerSourcePayloadDto {
 	const layer = requireSceneLodLayer(payload, "env-cell-system");
 	return {
 		buildingTransitionApertures: layer.buildingTransitionApertures,
 		diagnostics: layer.diagnostics,
 		envCells: layer.envCells,
 		kind: "landblock-scene-lod-env-cell-layer",
-		landblockEnvCellBvh: layer.landblockEnvCellBvh,
+		envCellSystemBvh: layer.envCellSystemBvh,
 		landblockId: payload.landblockId,
 		landblockInfoId: layer.landblockInfoId,
 		portalLinks: layer.portalLinks,
@@ -208,7 +208,7 @@ function staticDomainForSceneLodLayer(
 		case "outdoor-generated-scenery":
 			return "outdoor-generated-scenery";
 		case "env-cell-system":
-			return "landblock-env-cells";
+			return "env-cell-system";
 	}
 }
 

@@ -5,7 +5,7 @@ import type {
 	PlacementTransformDto,
 } from "../../lib/host/contracts";
 import type {
-	LandblockEnvCellsLayerSourcePayloadDto,
+	EnvCellSystemLayerSourcePayloadDto,
 	LandblockOutdoorLayerSourcePayloadDto,
 } from "./source-payloads";
 import type { VisualGeometryPayload } from "../visual/visual-geometry";
@@ -14,7 +14,7 @@ export type StaticDomain =
 	| "outdoor-terrain"
 	| "outdoor-buildings"
 	| OutdoorStaticObjectLayerDomain
-	| "landblock-env-cells";
+	| "env-cell-system";
 
 /**
  * Public outdoor object layer domains. Explicit object instances and generated
@@ -243,7 +243,7 @@ export interface StaticScopePayload {
 }
 
 type StaticScopePayloadBody =
-	| LandblockEnvCellsStaticScopePayload
+	| EnvCellSystemStaticScopePayload
 	| OutdoorStaticObjectsScopePayload
 	| TerrainStaticScopePayload
 	| PlaceholderStaticScopePayload;
@@ -748,8 +748,8 @@ interface StaticObjectDebugProvenance {
 	readonly sourceAssetId: string;
 }
 
-export interface LandblockEnvCellsStaticScopePayload {
-	readonly kind: "landblock-env-cells";
+export interface EnvCellSystemStaticScopePayload {
+	readonly kind: "env-cell-system";
 	readonly buildingTransitionApertures: LandblockOutdoorLayerSourcePayloadDto["buildingTransitionApertures"];
 	readonly landblock: LandblockSourceIdentity;
 	readonly regionRenderProfile: RegionRenderProfileSourceFacts;
@@ -776,15 +776,15 @@ export interface LandblockEnvCellStaticFacts {
 	readonly restrictionObjectId: number | null;
 	readonly seenOutside: boolean | null;
 	readonly surfaces: readonly LandblockEnvCellSurfaceFacts[];
-	readonly portals: LandblockEnvCellsLayerSourcePayloadDto["envCells"][number]["portals"];
-	readonly portalApertures: LandblockEnvCellsLayerSourcePayloadDto["envCells"][number]["portalApertures"];
+	readonly portals: EnvCellSystemLayerSourcePayloadDto["envCells"][number]["portals"];
+	readonly portalApertures: EnvCellSystemLayerSourcePayloadDto["envCells"][number]["portalApertures"];
 	readonly staticObjectSeeds: readonly LandblockEnvCellStaticObjectSeedFacts[];
 	readonly renderGeometry: LandblockEnvCellRenderGeometryFacts;
-	readonly cellBsp: LandblockEnvCellsLayerSourcePayloadDto["envCells"][number]["cellBsp"];
+	readonly cellBsp: EnvCellSystemLayerSourcePayloadDto["envCells"][number]["cellBsp"];
 }
 
 type LandblockEnvCellRenderGeometryFacts = Omit<
-	LandblockEnvCellsLayerSourcePayloadDto["envCells"][number]["renderGeometry"],
+	EnvCellSystemLayerSourcePayloadDto["envCells"][number]["renderGeometry"],
 	"normals" | "positions" | "uvs"
 >;
 
@@ -799,7 +799,7 @@ interface LandblockEnvCellStaticObjectSeedFacts {
 	readonly source: StaticObjectSourceIdentity;
 	readonly sourceIndex: number;
 	readonly localPlacement: PlacementTransformDto;
-	readonly sourceScale: LandblockEnvCellsLayerSourcePayloadDto["envCells"][number]["statics"][number]["sourceScale"];
+	readonly sourceScale: EnvCellSystemLayerSourcePayloadDto["envCells"][number]["statics"][number]["sourceScale"];
 	readonly debug: StaticObjectDebugProvenance;
 }
 
@@ -851,17 +851,17 @@ type PortalEndpointIdentity =
 	  };
 
 interface LandblockEnvCellResidencySpatialFacts {
-	readonly landblockEnvCellBvhNodeCount: number;
-	readonly landblockEnvCellBvhItemCount: number;
-	readonly landblockEnvCellBvh: LandblockEnvCellResidencyBvhFacts;
+	readonly envCellSystemBvhNodeCount: number;
+	readonly envCellSystemBvhItemCount: number;
+	readonly envCellSystemBvh: EnvCellSystemResidencyBvhFacts;
 }
 
-interface LandblockEnvCellResidencyBvhFacts {
-	readonly nodes: LandblockEnvCellsLayerSourcePayloadDto["landblockEnvCellBvh"]["nodes"];
-	readonly items: readonly LandblockEnvCellResidencyBvhItemFacts[];
+interface EnvCellSystemResidencyBvhFacts {
+	readonly nodes: EnvCellSystemLayerSourcePayloadDto["envCellSystemBvh"]["nodes"];
+	readonly items: readonly EnvCellSystemResidencyBvhItemFacts[];
 }
 
-interface LandblockEnvCellResidencyBvhItemFacts {
+interface EnvCellSystemResidencyBvhItemFacts {
 	readonly identity: EnvCellSourceIdentity;
 	readonly memberId: string;
 	readonly bounds: StaticBounds;
@@ -907,10 +907,10 @@ export interface EnvCellCellStructureGeometryAttachment {
 	readonly positions: Float32Array;
 	readonly normals: Float32Array;
 	readonly uvs: Float32Array;
-	readonly triangles: LandblockEnvCellsLayerSourcePayloadDto["envCells"][number]["renderGeometry"]["triangles"];
+	readonly triangles: EnvCellSystemLayerSourcePayloadDto["envCells"][number]["renderGeometry"]["triangles"];
 	readonly surfaceIds: readonly number[];
 	readonly bounds: StaticBounds | null;
-	readonly invalidPolygons: LandblockEnvCellsLayerSourcePayloadDto["envCells"][number]["renderGeometry"]["invalidPolygons"];
+	readonly invalidPolygons: EnvCellSystemLayerSourcePayloadDto["envCells"][number]["renderGeometry"]["invalidPolygons"];
 	readonly skippedPolygonCount: number;
 }
 
@@ -976,7 +976,7 @@ export interface StaticEnvCellSpatialRecord {
 	readonly cellBsp: LandblockEnvCellStaticFacts["cellBsp"];
 	readonly localPlacement: LandblockEnvCellStaticFacts["localPlacement"];
 	readonly renderBounds: StaticBounds | null;
-	readonly residencyBvh: LandblockEnvCellResidencyBvhFacts;
+	readonly residencyBvh: EnvCellSystemResidencyBvhFacts;
 	readonly residencyBvhNodeCount: number;
 	readonly residencyBvhItemCount: number;
 }
@@ -1346,7 +1346,7 @@ export interface StaticObjectBakeDiagnostics {
 	readonly staticBatchId: string;
 	readonly domain: Extract<
 		StaticDomain,
-		OutdoorStaticObjectDomain | "landblock-env-cells"
+		OutdoorStaticObjectDomain | "env-cell-system"
 	>;
 	readonly landblockId: number;
 	readonly objectCount: number;
@@ -1494,7 +1494,7 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly landblockId: number;
 	readonly domain:
 		| OutdoorStaticObjectDomain
-		| "landblock-env-cells";
+		| "env-cell-system";
 	readonly ownership: StaticObjectDrawUnitOwnership;
 	readonly materialFamily: "flat-color" | "indexed-paletted" | "texture-rgba";
 	readonly materialPass: StaticObjectMaterialPass;
@@ -1615,7 +1615,7 @@ export interface StructuredInteriorGeometryStaticDrawUnit {
 	readonly kind: "structured-interior-geometry";
 	readonly drawUnitId: string;
 	readonly landblockId: number;
-	readonly domain: "landblock-env-cells";
+	readonly domain: "env-cell-system";
 	readonly envCellId: number;
 	readonly memberId: string;
 	readonly environment: EnvironmentIdentity;
@@ -1839,7 +1839,7 @@ export interface StaticCoordinatorSnapshot {
 	readonly activeWork: readonly ScheduledStaticWorkStatus[];
 	readonly latestTerrainPayload: TerrainStaticScopePayloadSummary | null;
 	readonly latestOutdoorStaticObjectsPayload: OutdoorStaticObjectsPayloadSummary | null;
-	readonly latestLandblockEnvCellsPayload: LandblockEnvCellsPayloadSummary | null;
+	readonly latestEnvCellSystemPayload: EnvCellSystemPayloadSummary | null;
 	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
 	readonly staticObjectBakeDiagnostics: readonly StaticObjectBakeDiagnostics[];
 	readonly recentTiming: readonly StaticCoordinatorTimingDiagnostics[];
@@ -1859,7 +1859,7 @@ export interface StaticCoordinatorOverviewSnapshot {
 	/** Most recent terrain payload summary for browser diagnostics. */
 	readonly latestTerrainPayload: TerrainStaticScopePayloadSummary | null;
 	/** Most recent env-cell payload summary for browser diagnostics. */
-	readonly latestLandblockEnvCellsPayload: LandblockEnvCellsPayloadSummary | null;
+	readonly latestEnvCellSystemPayload: EnvCellSystemPayloadSummary | null;
 }
 
 export interface StaticCoordinatorTimingDiagnostics {
@@ -1974,7 +1974,7 @@ export interface ScheduledStaticWorkStatus {
 		| "failed";
 }
 
-export interface LandblockEnvCellsPayloadSummary {
+export interface EnvCellSystemPayloadSummary {
 	readonly landblockId: number;
 	readonly envCellCount: number;
 	readonly acceptedEnvCellCount: number;

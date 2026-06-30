@@ -40,7 +40,7 @@ export interface LandblockOutdoorLayerSourcePayloadDto {
 }
 
 /** Resolver-local env-cell source facts projected from a landblock scene LoD payload. */
-export interface LandblockEnvCellsLayerSourcePayloadDto {
+export interface EnvCellSystemLayerSourcePayloadDto {
 	readonly kind: "landblock-scene-lod-env-cell-layer";
 	readonly landblockId: LandblockSceneLodPayloadDto["landblockId"];
 	readonly landblockInfoId: EnvCellSystemLayerDto["landblockInfoId"];
@@ -49,7 +49,7 @@ export interface LandblockEnvCellsLayerSourcePayloadDto {
 	readonly buildingTransitionApertures: EnvCellSystemLayerDto["buildingTransitionApertures"];
 	readonly envCells: EnvCellSystemLayerDto["envCells"];
 	readonly portalLinks: EnvCellSystemLayerDto["portalLinks"];
-	readonly landblockEnvCellBvh: EnvCellSystemLayerDto["landblockEnvCellBvh"];
+	readonly envCellSystemBvh: EnvCellSystemLayerDto["envCellSystemBvh"];
 	readonly diagnostics: EnvCellSystemLayerDto["diagnostics"];
 	readonly provenance: LandblockSceneLodPayloadDto["provenance"];
 }

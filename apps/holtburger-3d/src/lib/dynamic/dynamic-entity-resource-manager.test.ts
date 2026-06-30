@@ -1014,7 +1014,7 @@ function createOutdoorSeedRecord(
 function createEnvCellDynamicSeedRecord(): StaticAuthoredDynamicSeedRecord {
 	return {
 		kind: "env-cell-static-object-dynamic-seed",
-		owner: createOwner("landblock-env-cells"),
+		owner: createOwner("env-cell-system"),
 		seed: {
 			classificationReason: "setup-default-animation",
 			defaultAnimationId: 0x0300061b,
@@ -1048,7 +1048,7 @@ function createOwner(
 	domain: StaticLayerPeerRecordOwner["domain"],
 ): StaticLayerPeerRecordOwner {
 	const keyKind =
-		domain === "landblock-env-cells" ? "env-cell-system" : domain;
+		domain === "env-cell-system" ? "env-cell-system" : domain;
 	return {
 		domain,
 		key: {

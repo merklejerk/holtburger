@@ -1,5 +1,5 @@
 import type {
-	LandblockEnvCellsStaticScopePayload,
+	EnvCellSystemStaticScopePayload,
 	OutdoorStaticObjectsScopePayload,
 	StaticAuthoredDynamicSeedRecord,
 	StaticBounds,
@@ -75,7 +75,7 @@ export interface OutdoorStaticObjectSceneSelectionKey {
 
 export interface EnvCellStaticSceneSelectionKey {
 	readonly itemKind: "env-cell-static-object";
-	readonly domain: "landblock-env-cells";
+	readonly domain: "env-cell-system";
 	readonly landblockId: number;
 	readonly envCellId: number;
 	readonly instanceId: string;
@@ -83,7 +83,7 @@ export interface EnvCellStaticSceneSelectionKey {
 
 export interface EnvCellPortalSceneSelectionKey {
 	readonly itemKind: "env-cell-portal";
-	readonly domain: "landblock-env-cells";
+	readonly domain: "env-cell-system";
 	readonly landblockId: number;
 	readonly envCellId: number;
 	readonly portalId: string;
@@ -169,7 +169,7 @@ export interface EnvCellStaticScenePickDetails {
 	readonly landblockId: number;
 	readonly envCellId: number;
 	readonly instanceId: string;
-	readonly seed: LandblockEnvCellsStaticScopePayload["envCells"][number]["staticObjectSeeds"][number];
+	readonly seed: EnvCellSystemStaticScopePayload["envCells"][number]["staticObjectSeeds"][number];
 }
 
 export interface TerrainQuadScenePickDetails {

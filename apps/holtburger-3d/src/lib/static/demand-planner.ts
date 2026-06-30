@@ -20,7 +20,7 @@ const domainPriorities: Record<StaticDomain, number> = {
 	"outdoor-buildings": 5,
 	"outdoor-explicit-objects": 15,
 	"outdoor-generated-scenery": 20,
-	"landblock-env-cells": 10,
+	"env-cell-system": 10,
 };
 
 export function planStaticDemand(
@@ -36,7 +36,7 @@ export function planStaticDemand(
 			demand.location.landblockId,
 		);
 		const work = [
-			...(["outdoor-buildings", "landblock-env-cells"] as const).map((domain) =>
+			...(["outdoor-buildings", "env-cell-system"] as const).map((domain) =>
 				createScheduledStaticWork({
 					job: {
 						domain,
@@ -87,7 +87,7 @@ export function planStaticDemand(
 		revision,
 	});
 	addOutdoorDomainRequests(work, {
-		domain: "landblock-env-cells",
+		domain: "env-cell-system",
 		focusLandblockId: landblockId,
 		radius: lod.envCells,
 		revision,
@@ -240,7 +240,7 @@ function landblockSceneLodLayerKindForStaticDomain(
 			return "outdoor-explicit-objects";
 		case "outdoor-generated-scenery":
 			return "outdoor-generated-scenery";
-		case "landblock-env-cells":
+		case "env-cell-system":
 			return "env-cell-system";
 	}
 }

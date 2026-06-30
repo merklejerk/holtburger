@@ -20,7 +20,7 @@ import type {
 	StaticScopePayload,
 } from "../static/contracts";
 import { ImmediateStaticBaker } from "../static/fake-workers";
-import { LandblockEnvCellGeometryAttachmentProvider } from "../static/env-cells/bake/landblock-env-cell-geometry-attachments";
+import { EnvCellSystemGeometryAttachmentProvider } from "../static/env-cells/bake/env-cell-system-geometry-attachments";
 import { StaticObjectBakeAttachmentProvider } from "../static/objects/bake/static-object-bake-attachments";
 import {
 	StaticBakeWorkerClient,
@@ -90,7 +90,7 @@ function createTauriStaticCoordinator(
 			new StaticObjectBakeAttachmentProvider({
 				assetReader,
 			}),
-			new LandblockEnvCellGeometryAttachmentProvider(),
+			new EnvCellSystemGeometryAttachmentProvider(),
 		]),
 		baker,
 		resolver,
@@ -274,7 +274,7 @@ export function shouldUseBrowserWorkerBaker(
 		domain === "outdoor-buildings" ||
 		domain === "outdoor-explicit-objects" ||
 		domain === "outdoor-generated-scenery" ||
-		domain === "landblock-env-cells"
+		domain === "env-cell-system"
 	);
 }
 

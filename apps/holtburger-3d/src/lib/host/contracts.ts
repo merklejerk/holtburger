@@ -215,7 +215,7 @@ const preparedBvhKindMaskDtoSchema = z.discriminatedUnion("domain", [
 		.strict(),
 	z
 		.object({
-			domain: z.literal("landblock-env-cells"),
+			domain: z.literal("env-cell-system"),
 			envCellRoot: z.boolean(),
 		})
 		.strict(),
@@ -465,7 +465,7 @@ const landblockEnvCellStaticMemberDtoSchema = envCellStaticMemberDtoSchema.omit(
 	},
 );
 
-const preparedLandblockEnvCellBvhItemDtoSchema = z
+const preparedEnvCellSystemBvhItemDtoSchema = z
 	.object({
 		envCellId: z.number().int().nonnegative(),
 		memberId: z.string().min(1),
@@ -474,10 +474,10 @@ const preparedLandblockEnvCellBvhItemDtoSchema = z
 	})
 	.strict();
 
-const preparedLandblockEnvCellBvhDtoSchema = z
+const preparedEnvCellSystemBvhDtoSchema = z
 	.object({
 		nodes: z.array(preparedLandblockBvhNodeDtoSchema),
-		items: z.array(preparedLandblockEnvCellBvhItemDtoSchema),
+		items: z.array(preparedEnvCellSystemBvhItemDtoSchema),
 	})
 	.strict();
 
@@ -562,7 +562,7 @@ const landblockSceneLodEnvCellSystemLayerDtoSchema = z
 		),
 		envCells: z.array(landblockEnvCellDtoSchema),
 		portalLinks: z.array(landblockScenePortalLinkDtoSchema),
-		landblockEnvCellBvh: preparedLandblockEnvCellBvhDtoSchema,
+		envCellSystemBvh: preparedEnvCellSystemBvhDtoSchema,
 		diagnostics: landblockPackDiagnosticsDtoSchema,
 	})
 	.strict();

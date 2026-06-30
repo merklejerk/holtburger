@@ -24,18 +24,18 @@ import {
 	formatHostAssetId,
 } from "../../assets/keys";
 import type {
-	LandblockEnvCellsStaticScopePayload,
+	EnvCellSystemStaticScopePayload,
 	StaticResolverJob,
 } from "../contracts";
-import type { LandblockEnvCellsLayerSourcePayloadDto } from "../source-payloads";
+import type { EnvCellSystemLayerSourcePayloadDto } from "../source-payloads";
 import { selectVisibleEnvCells } from "./env-cell-visibility";
-import { LandblockEnvCellsResolver } from "./landblock-env-cells-resolver";
+import { EnvCellSystemResolver } from "./env-cell-system-resolver";
 
 describe("browser landblock env-cell resolver", () => {
 	it("resolves env-cell static seed source closure without cell-structure vertex buffers", async () => {
 		const assetService = new FixtureAssetService(createResolverAssets());
 
-		const payload = await new LandblockEnvCellsResolver({
+		const payload = await new EnvCellSystemResolver({
 			assetService,
 		}).resolve(createEnvCellRequest());
 
@@ -59,8 +59,8 @@ describe("browser landblock env-cell resolver", () => {
 				.map((key) => describeHostAssetKey(key))
 				.filter((key) => key === "material:08000010"),
 		).toEqual(["material:08000010"]);
-		expect(payload.scope.kind).toBe("landblock-env-cells");
-		if (payload.scope.kind !== "landblock-env-cells") {
+		expect(payload.scope.kind).toBe("env-cell-system");
+		if (payload.scope.kind !== "env-cell-system") {
 			throw new Error("expected landblock env-cell payload");
 		}
 
@@ -79,8 +79,8 @@ describe("browser landblock env-cell resolver", () => {
 				},
 			},
 			residencySpatial: {
-				landblockEnvCellBvhItemCount: 2,
-				landblockEnvCellBvhNodeCount: 0,
+				envCellSystemBvhItemCount: 2,
+				envCellSystemBvhNodeCount: 0,
 			},
 		});
 		expect(payload.scope.sourceAssets).toEqual([
@@ -171,7 +171,7 @@ describe("browser landblock env-cell resolver", () => {
 	it("requests resolver metadata for static seeds but not standalone env-cell assets", async () => {
 		const assetService = new FixtureAssetService(createResolverAssets());
 
-		await new LandblockEnvCellsResolver({ assetService }).resolve(
+		await new EnvCellSystemResolver({ assetService }).resolve(
 			createEnvCellRequest(),
 		);
 
@@ -184,17 +184,17 @@ describe("browser landblock env-cell resolver", () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
 				createHostAssetKey("landblock-scene-lod-env-cell-layer", 0xda55ffff),
-				createLandblockEnvCellsPayload(),
+				createEnvCellSystemPayload(),
 			),
 			createRegionRenderProfileAsset(),
 		]);
 
-		const payload = await new LandblockEnvCellsResolver({
+		const payload = await new EnvCellSystemResolver({
 			assetService,
 		}).resolve(createEnvCellRequest());
 
-		expect(payload.scope.kind).toBe("landblock-env-cells");
-		if (payload.scope.kind !== "landblock-env-cells") {
+		expect(payload.scope.kind).toBe("env-cell-system");
+		if (payload.scope.kind !== "env-cell-system") {
 			throw new Error("expected landblock env-cell payload");
 		}
 
@@ -229,7 +229,7 @@ describe("browser landblock env-cell resolver", () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
 				createHostAssetKey("landblock-scene-lod-env-cell-layer", 0xda55ffff),
-				createLandblockEnvCellsPayload({ omitStatics: true }),
+				createEnvCellSystemPayload({ omitStatics: true }),
 			),
 			createRegionRenderProfileAsset(),
 			createPreparedAsset(
@@ -250,12 +250,12 @@ describe("browser landblock env-cell resolver", () => {
 			),
 		]);
 
-		const payload = await new LandblockEnvCellsResolver({
+		const payload = await new EnvCellSystemResolver({
 			assetService,
 		}).resolve(createEnvCellRequest());
 
-		expect(payload.scope.kind).toBe("landblock-env-cells");
-		if (payload.scope.kind !== "landblock-env-cells") {
+		expect(payload.scope.kind).toBe("env-cell-system");
+		if (payload.scope.kind !== "env-cell-system") {
 			throw new Error("expected landblock env-cell payload");
 		}
 		expect(
@@ -292,7 +292,7 @@ describe("browser landblock env-cell resolver", () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
 				createHostAssetKey("landblock-scene-lod-env-cell-layer", 0xda55ffff),
-				createLandblockEnvCellsPayload({
+				createEnvCellSystemPayload({
 					secondStaticSourceAssetId: "gfx-obj/01000010",
 				}),
 			),
@@ -322,12 +322,12 @@ describe("browser landblock env-cell resolver", () => {
 			),
 		]);
 
-		const payload = await new LandblockEnvCellsResolver({
+		const payload = await new EnvCellSystemResolver({
 			assetService,
 		}).resolve(createEnvCellRequest());
 
-		expect(payload.scope.kind).toBe("landblock-env-cells");
-		if (payload.scope.kind !== "landblock-env-cells") {
+		expect(payload.scope.kind).toBe("env-cell-system");
+		if (payload.scope.kind !== "env-cell-system") {
 			throw new Error("expected landblock env-cell payload");
 		}
 
@@ -348,7 +348,7 @@ describe("browser landblock env-cell resolver", () => {
 	});
 
 	it("preserves resolver-light cell-structure geometry metadata supplied by the resolver asset bridge", async () => {
-		const payload = createLandblockEnvCellsPayload({
+		const payload = createEnvCellSystemPayload({
 			heavyRenderGeometry: true,
 		});
 		const resolverPayload = {
@@ -366,12 +366,12 @@ describe("browser landblock env-cell resolver", () => {
 			createRegionRenderProfileAsset(),
 		]);
 
-		const result = await new LandblockEnvCellsResolver({
+		const result = await new EnvCellSystemResolver({
 			assetService,
 		}).resolve(createEnvCellRequest());
 
-		expect(result.scope.kind).toBe("landblock-env-cells");
-		if (result.scope.kind !== "landblock-env-cells") {
+		expect(result.scope.kind).toBe("env-cell-system");
+		if (result.scope.kind !== "env-cell-system") {
 			throw new Error("expected landblock env-cell payload");
 		}
 		const renderGeometry = result.scope.envCells[0]?.renderGeometry;
@@ -395,12 +395,12 @@ describe("browser landblock env-cell resolver", () => {
 	it("uses the same env-cell source path without topology classification", async () => {
 		const assetService = new FixtureAssetService(createResolverAssets());
 
-		const payload = await new LandblockEnvCellsResolver({
+		const payload = await new EnvCellSystemResolver({
 			assetService,
 		}).resolve(createEnvCellRequest());
 
-		expect(payload.scope.kind).toBe("landblock-env-cells");
-		if (payload.scope.kind !== "landblock-env-cells") {
+		expect(payload.scope.kind).toBe("env-cell-system");
+		if (payload.scope.kind !== "env-cell-system") {
 			throw new Error("expected landblock env-cell payload");
 		}
 		expect(
@@ -413,17 +413,17 @@ describe("browser landblock env-cell resolver", () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
 				createHostAssetKey("landblock-scene-lod-env-cell-layer", 0xda55ffff),
-				createLandblockEnvCellsPayload({ omitSecondBvhItem: true }),
+				createEnvCellSystemPayload({ omitSecondBvhItem: true }),
 			),
 			createRegionRenderProfileAsset(),
 		]);
 
-		await new LandblockEnvCellsResolver({ assetService }).resolve(
+		await new EnvCellSystemResolver({ assetService }).resolve(
 			createEnvCellRequest(),
 		);
 
 		expect(warn).toHaveBeenCalledWith(
-			"[holtburger-3d][browser][landblock-env-cells-bvh]",
+			"[holtburger-3d][browser][env-cell-system-bvh]",
 			expect.objectContaining({
 				landblockId: 0xda55ffff,
 				omittedEnvCellIds: [0xda550101],
@@ -443,7 +443,7 @@ describe("browser landblock env-cell resolver", () => {
 		]);
 
 		await expect(
-			new LandblockEnvCellsResolver({ assetService }).resolve(
+			new EnvCellSystemResolver({ assetService }).resolve(
 				createEnvCellRequest(),
 			),
 		).rejects.toThrow(
@@ -455,18 +455,18 @@ describe("browser landblock env-cell resolver", () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
 				createHostAssetKey("landblock-scene-lod-env-cell-layer", 0xda55ffff),
-				createLandblockEnvCellsPayload(),
+				createEnvCellSystemPayload(),
 			),
 			createRegionRenderProfileAsset(),
 		]);
 
-		const payload = await new LandblockEnvCellsResolver({
+		const payload = await new EnvCellSystemResolver({
 			assetService,
 		}).resolve(createEnvCellRequest());
 		const semanticScope = {
 			...payload.scope,
 			envCells:
-				payload.scope.kind === "landblock-env-cells"
+				payload.scope.kind === "env-cell-system"
 					? payload.scope.envCells.map((cell) => ({
 							...cell,
 							staticObjectSeeds: cell.staticObjectSeeds.map((seed) => ({
@@ -476,7 +476,7 @@ describe("browser landblock env-cell resolver", () => {
 						}))
 					: [],
 			sourceAssets:
-				payload.scope.kind === "landblock-env-cells"
+				payload.scope.kind === "env-cell-system"
 					? payload.scope.sourceAssets.map((source) => ({
 							...source,
 							debug: null,
@@ -601,7 +601,7 @@ function createResolverAssets(): readonly PreparedAsset[] {
 	return [
 		createPreparedAsset(
 			createHostAssetKey("landblock-scene-lod-env-cell-layer", 0xda55ffff),
-			createLandblockEnvCellsPayload(),
+			createEnvCellSystemPayload(),
 		),
 		createRegionRenderProfileAsset(),
 		createPreparedAsset(
@@ -651,7 +651,7 @@ function createResolverAssets(): readonly PreparedAsset[] {
 
 function createEnvCellRequest(): StaticResolverJob {
 	return {
-		domain: "landblock-env-cells",
+		domain: "env-cell-system",
 		scope: {
 			kind: "landblock",
 			landblockId: 0xda55ffff,
@@ -700,7 +700,7 @@ function createRegionRenderProfilePayload(
 }
 
 function createVisibilityBundle(): Pick<
-	LandblockEnvCellsStaticScopePayload,
+	EnvCellSystemStaticScopePayload,
 	"envCells" | "portalLinks"
 > {
 	return {
@@ -734,7 +734,7 @@ function createVisibilityBundle(): Pick<
 function createRuntimeEnvCell(
 	envCellId: number,
 	visibleEnvCellIds: readonly number[],
-): LandblockEnvCellsStaticScopePayload["envCells"][number] {
+): EnvCellSystemStaticScopePayload["envCells"][number] {
 	return {
 		cellBsp: createCellBsp(),
 		cellStructure: {
@@ -763,17 +763,17 @@ function createRuntimeEnvCell(
 	};
 }
 
-function createLandblockEnvCellsPayload(
+function createEnvCellSystemPayload(
 	options: {
 		readonly heavyRenderGeometry?: boolean;
 		readonly omitSecondBvhItem?: boolean;
 		readonly omitStatics?: boolean;
 		readonly secondStaticSourceAssetId?: string;
 	} = {},
-): LandblockEnvCellsLayerSourcePayloadDto {
+): EnvCellSystemLayerSourcePayloadDto {
 	return {
 		diagnostics: createDiagnostics(),
-		landblockEnvCellBvh: {
+		envCellSystemBvh: {
 			items: [
 				{
 					bounds: createBounds(),
@@ -847,7 +847,7 @@ function createEnvCellPayload(input: {
 	readonly memberId: string;
 	readonly visibleEnvCellIds: readonly number[];
 	readonly staticSourceAssetId: string | null;
-}): LandblockEnvCellsLayerSourcePayloadDto["envCells"][number] {
+}): EnvCellSystemLayerSourcePayloadDto["envCells"][number] {
 	return {
 		cellBsp: createCellBsp(),
 		cellStructureId: 0x0d000020,

@@ -13,9 +13,9 @@ pub use character_gen::CharacterGenCatalog;
 pub use decode_cache::ContentDecodeCache;
 pub use landblock_scene_assets::{
     CellLandblockFact, EnvCellAsset, EnvCellAssetAssembler, EnvCellFact, EnvCellPortalFact,
-    EnvironmentFact, IndoorStaticObjectFact, LandblockBuildingPortal, LandblockEnvCellBundleCell,
-    LandblockEnvCellBvhItem, LandblockEnvCellBvhItemSource, LandblockEnvCellsAsset,
-    LandblockEnvCellsAssetAssembler, LandblockGeneratedSceneryFacts, LandblockInfoFact,
+    EnvCellSystemAsset, EnvCellSystemAssetAssembler, EnvCellSystemBvhItem,
+    EnvCellSystemBvhItemSource, EnvCellSystemCell, EnvironmentFact, IndoorStaticObjectFact,
+    LandblockBuildingPortal, LandblockGeneratedSceneryFacts, LandblockInfoFact,
     LandblockOutdoorAsset, LandblockOutdoorBuildingFacts, LandblockOutdoorStaticMember,
     LandblockRestriction, LandblockSceneLodAsset, LandblockSceneLodAssetAssembler,
     LandblockSceneLodContext, LandblockSceneLodEnvCellSystemLayer, LandblockSceneLodLayer,

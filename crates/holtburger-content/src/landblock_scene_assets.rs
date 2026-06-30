@@ -37,11 +37,11 @@ pub struct LandblockOutdoorAsset {
 }
 
 #[derive(Debug, Clone)]
-pub struct LandblockEnvCellsAsset {
+pub struct EnvCellSystemAsset {
     pub landblock_id: u32,
     pub landblock_info_id: u32,
-    pub env_cells: Vec<LandblockEnvCellBundleCell>,
-    pub landblock_bvh_items: Vec<LandblockEnvCellBvhItem>,
+    pub env_cells: Vec<EnvCellSystemCell>,
+    pub landblock_bvh_items: Vec<EnvCellSystemBvhItem>,
     pub landblock_bvh: Option<PreparedBvh>,
     pub diagnostics: PreparedContentSourceDiagnostics,
 }
@@ -157,9 +157,9 @@ pub struct LandblockSceneLodEnvCellSystemLayer {
     /// Building transition apertures needed to connect outdoor building portals to env cells.
     pub building_transition_apertures: Vec<PreparedBuildingTransitionAperture>,
     /// Prepared env-cell bundle cells for this landblock.
-    pub env_cells: Vec<LandblockEnvCellBundleCell>,
+    pub env_cells: Vec<EnvCellSystemCell>,
     /// Landblock-space env-cell BVH item records.
-    pub landblock_bvh_items: Vec<LandblockEnvCellBvhItem>,
+    pub landblock_bvh_items: Vec<EnvCellSystemBvhItem>,
     /// Landblock-space env-cell BVH.
     pub landblock_bvh: Option<PreparedBvh>,
     /// Diagnostics collected while preparing the env-cell system layer.
@@ -167,7 +167,7 @@ pub struct LandblockSceneLodEnvCellSystemLayer {
 }
 
 #[derive(Debug, Clone)]
-pub struct LandblockEnvCellBundleCell {
+pub struct EnvCellSystemCell {
     pub env_cell: EnvCellFact,
     pub prepared_cell: PreparedInteriorCell,
     pub static_meshes: Vec<PreparedStaticMesh>,
@@ -176,15 +176,15 @@ pub struct LandblockEnvCellBundleCell {
 }
 
 #[derive(Debug, Clone)]
-pub struct LandblockEnvCellBvhItem {
+pub struct EnvCellSystemBvhItem {
     pub env_cell_id: u32,
     pub member_id: String,
     pub bounds: PreparedAabb,
-    pub source: LandblockEnvCellBvhItemSource,
+    pub source: EnvCellSystemBvhItemSource,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LandblockEnvCellBvhItemSource {
+pub enum EnvCellSystemBvhItemSource {
     EnvCellRoot,
     Derived,
 }
@@ -487,7 +487,7 @@ pub struct PreparedBvh {
 pub enum PreparedBvhScope {
     OutdoorTerrain,
     OutdoorStatic,
-    LandblockEnvCells,
+    EnvCellSystem,
     EnvCellLocal,
 }
 
@@ -509,7 +509,7 @@ pub enum PreparedBvhKindMask {
         static_object: bool,
         building: bool,
     },
-    LandblockEnvCells {
+    EnvCellSystem {
         env_cell_root: bool,
     },
     EnvCellLocal {
@@ -632,7 +632,7 @@ pub struct SourceLoadError {
 pub struct EnvCellAssetAssembler;
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct LandblockEnvCellsAssetAssembler;
+pub struct EnvCellSystemAssetAssembler;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct LandblockSceneLodAssetAssembler;
@@ -977,7 +977,7 @@ fn env_cell_assembly_error(
     }
 }
 
-fn landblock_env_cells_assembly_error(
+fn env_cell_system_assembly_error(
     landblock_id: u32,
     diagnostics: &PreparedContentSourceDiagnostics,
 ) -> anyhow::Error {
@@ -1003,7 +1003,7 @@ fn landblock_env_cells_assembly_error(
     }
 }
 
-impl LandblockEnvCellsAssetAssembler {
+impl EnvCellSystemAssetAssembler {
     pub fn new() -> Self {
         Self
     }
@@ -1013,7 +1013,7 @@ impl LandblockEnvCellsAssetAssembler {
         content: &ContentRepository,
         decode_cache: &ContentDecodeCache,
         raw_landblock_id: u32,
-    ) -> anyhow::Result<LandblockEnvCellsAsset> {
+    ) -> anyhow::Result<EnvCellSystemAsset> {
         self.assemble_landblock_with_context(
             PreparedContentAssemblyContext::with_decode_cache(content, decode_cache),
             raw_landblock_id,
@@ -1024,14 +1024,14 @@ impl LandblockEnvCellsAssetAssembler {
         &self,
         mut context: PreparedContentAssemblyContext<'_>,
         raw_landblock_id: u32,
-    ) -> anyhow::Result<LandblockEnvCellsAsset> {
+    ) -> anyhow::Result<EnvCellSystemAsset> {
         let landblock_id = normalize_landblock_id(raw_landblock_id);
         let landblock_info_id = derive_landblock_info_id(landblock_id);
         let landblock_info = match context.load_landblock_info_record(landblock_id) {
             SourceRecordLoad::Loaded(info) => LandblockInfoFact::from_info(&info, landblock_id),
             SourceRecordLoad::Missing => {
                 let diagnostics = context.into_diagnostics();
-                return Ok(empty_landblock_env_cells_asset(
+                return Ok(empty_env_cell_system_asset(
                     landblock_id,
                     landblock_info_id,
                     diagnostics,
@@ -1039,10 +1039,7 @@ impl LandblockEnvCellsAssetAssembler {
             }
             SourceRecordLoad::DecodeFailed => {
                 let diagnostics = context.into_diagnostics();
-                return Err(landblock_env_cells_assembly_error(
-                    landblock_id,
-                    &diagnostics,
-                ));
+                return Err(env_cell_system_assembly_error(landblock_id, &diagnostics));
             }
         };
         let env_cell_facts = load_env_cell_facts(&mut context, landblock_id, &landblock_info);
@@ -1098,7 +1095,7 @@ impl LandblockEnvCellsAssetAssembler {
                         ),
                     );
                 }
-                Some(LandblockEnvCellBundleCell {
+                Some(EnvCellSystemCell {
                     diagnostics: PreparedContentSourceDiagnostics::default(),
                     static_meshes,
                     landblock_bounds,
@@ -1113,12 +1110,12 @@ impl LandblockEnvCellsAssetAssembler {
         let landblock_bvh = build_prepared_bvh_with_scope(
             landblock_id,
             "landblock-env-cell-root",
-            PreparedBvhScope::LandblockEnvCells,
+            PreparedBvhScope::EnvCellSystem,
             &landblock_bvh_spatial_items,
         );
         let diagnostics = context.into_diagnostics();
 
-        Ok(LandblockEnvCellsAsset {
+        Ok(EnvCellSystemAsset {
             landblock_id,
             landblock_info_id,
             env_cells,
@@ -1185,7 +1182,7 @@ impl LandblockSceneLodAssetAssembler {
         {
             let building_transition_apertures =
                 collect_scene_lod_building_transition_apertures(&layers);
-            match LandblockEnvCellsAssetAssembler::new().assemble_landblock_with_cache(
+            match EnvCellSystemAssetAssembler::new().assemble_landblock_with_cache(
                 content,
                 decode_cache,
                 request.landblock_id,
@@ -1336,7 +1333,7 @@ impl LandblockSceneLodAssetAssembler {
 }
 
 fn landblock_scene_lod_env_cell_system_layer(
-    asset: LandblockEnvCellsAsset,
+    asset: EnvCellSystemAsset,
     building_transition_apertures: Vec<PreparedBuildingTransitionAperture>,
 ) -> LandblockSceneLodEnvCellSystemLayer {
     LandblockSceneLodEnvCellSystemLayer {
@@ -1474,12 +1471,12 @@ fn landblock_scene_lod_layer_level(layer: &LandblockSceneLodLayer) -> LandblockS
     }
 }
 
-fn empty_landblock_env_cells_asset(
+fn empty_env_cell_system_asset(
     landblock_id: u32,
     landblock_info_id: u32,
     diagnostics: PreparedContentSourceDiagnostics,
-) -> LandblockEnvCellsAsset {
-    LandblockEnvCellsAsset {
+) -> EnvCellSystemAsset {
+    EnvCellSystemAsset {
         landblock_id,
         landblock_info_id,
         env_cells: Vec::new(),
@@ -2250,17 +2247,17 @@ fn build_outdoor_member_spatial_items(
 }
 
 fn build_landblock_env_cell_bvh_items(
-    env_cells: &[LandblockEnvCellBundleCell],
-) -> Vec<LandblockEnvCellBvhItem> {
+    env_cells: &[EnvCellSystemCell],
+) -> Vec<EnvCellSystemBvhItem> {
     let mut items = env_cells
         .iter()
         .filter_map(|cell| {
             let bounds = cell.landblock_bounds?;
-            Some(LandblockEnvCellBvhItem {
+            Some(EnvCellSystemBvhItem {
                 env_cell_id: cell.env_cell.env_cell_id,
                 member_id: format!("env-cell/{:08x}", cell.env_cell.env_cell_id),
                 bounds,
-                source: LandblockEnvCellBvhItemSource::EnvCellRoot,
+                source: EnvCellSystemBvhItemSource::EnvCellRoot,
             })
         })
         .collect::<Vec<_>>();
@@ -2269,7 +2266,7 @@ fn build_landblock_env_cell_bvh_items(
 }
 
 fn build_landblock_env_cell_bvh_spatial_items(
-    items: &[LandblockEnvCellBvhItem],
+    items: &[EnvCellSystemBvhItem],
 ) -> Vec<PreparedSpatialItem> {
     items
         .iter()
@@ -2593,7 +2590,7 @@ fn prepared_bvh_kind_mask(
                 building,
             }
         }
-        PreparedBvhScope::LandblockEnvCells => {
+        PreparedBvhScope::EnvCellSystem => {
             for index in item_indices {
                 if items[*index].kind != PreparedSpatialItemKind::EnvCellRoot {
                     panic!(
@@ -2602,7 +2599,7 @@ fn prepared_bvh_kind_mask(
                     );
                 }
             }
-            PreparedBvhKindMask::LandblockEnvCells {
+            PreparedBvhKindMask::EnvCellSystem {
                 env_cell_root: !item_indices.is_empty(),
             }
         }
@@ -3943,34 +3940,34 @@ mod tests {
         let bvh = build_prepared_bvh_with_scope(
             0xda55ffff,
             "landblock-env-cell-root",
-            PreparedBvhScope::LandblockEnvCells,
+            PreparedBvhScope::EnvCellSystem,
             &items,
         )
         .expect("non-empty env-cell roots should build a BVH");
 
         assert_eq!(bvh.coordinate_space, "landblock-env-cell-root");
-        assert_eq!(bvh.scope, PreparedBvhScope::LandblockEnvCells);
+        assert_eq!(bvh.scope, PreparedBvhScope::EnvCellSystem);
         assert!(bvh.nodes.len() > 1);
         assert!(bvh.nodes[0].left.is_some());
         assert!(bvh.nodes[0].right.is_some());
         assert!(bvh.nodes[0].item_indices.is_empty());
         assert_eq!(
             bvh.nodes[0].kind_mask,
-            PreparedBvhKindMask::LandblockEnvCells {
+            PreparedBvhKindMask::EnvCellSystem {
                 env_cell_root: true
             }
         );
     }
 
     #[test]
-    fn landblock_env_cell_bundle_treats_missing_landblock_info_as_empty() {
+    fn env_cell_system_treats_missing_landblock_info_as_empty() {
         let source = Arc::new(CountingSource::new(HashMap::new()));
         let repository = ContentRepository::from_mounts(vec![source.clone()]);
         let landblock_id = 0xe25b_ffff;
         let landblock_info_id = derive_landblock_info_id(landblock_id);
         let decode_cache = ContentDecodeCache::new();
 
-        let asset = LandblockEnvCellsAssetAssembler::new()
+        let asset = EnvCellSystemAssetAssembler::new()
             .assemble_landblock_with_cache(&repository, &decode_cache, landblock_id)
             .expect("missing LandblockInfo should mean no env-cell bundle content");
 
@@ -3993,7 +3990,7 @@ mod tests {
     }
 
     #[test]
-    fn landblock_env_cell_bundle_rejects_decode_failed_landblock_info() {
+    fn env_cell_system_rejects_decode_failed_landblock_info() {
         let landblock_id = 0xe25b_ffff;
         let landblock_info_id = derive_landblock_info_id(landblock_id);
         let source = Arc::new(CountingSource::new(HashMap::from([(
@@ -4003,7 +4000,7 @@ mod tests {
         let repository = ContentRepository::from_mounts(vec![source]);
         let decode_cache = ContentDecodeCache::new();
 
-        let error = LandblockEnvCellsAssetAssembler::new()
+        let error = EnvCellSystemAssetAssembler::new()
             .assemble_landblock_with_cache(&repository, &decode_cache, landblock_id)
             .expect_err("corrupt LandblockInfo should remain a hard assembly error");
 
@@ -4097,7 +4094,7 @@ mod tests {
         let content =
             ContentRepository::from_hba_path(source_path).expect("repo assets.hba should open");
         let cache = ContentDecodeCache::new();
-        let asset = LandblockEnvCellsAssetAssembler::new()
+        let asset = EnvCellSystemAssetAssembler::new()
             .assemble_landblock_with_cache(&content, &cache, 0xda55ffff)
             .expect("da55ffff env-cell bundle should assemble");
         let cell = asset

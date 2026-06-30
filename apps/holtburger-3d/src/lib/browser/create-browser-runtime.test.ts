@@ -25,7 +25,7 @@ describe("browser runtime routing", () => {
 	});
 
 	it("routes env-cell bundles through worker baking", () => {
-		expect(shouldUseBrowserWorkerBaker("landblock-env-cells")).toBe(true);
+		expect(shouldUseBrowserWorkerBaker("env-cell-system")).toBe(true);
 	});
 
 	it("backs static resolver worker bridges with the supplied asset reader", () => {

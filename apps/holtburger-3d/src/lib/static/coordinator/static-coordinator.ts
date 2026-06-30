@@ -30,10 +30,10 @@ import type {
 	StaticRetentionReconciliation,
 	StaticScopePayload,
 	TerrainStaticScopePayloadSummary,
-	ScheduledStaticWork,
 	StaticLayerTaskStatus,
+	StaticLayerTaskRequest,
 } from "../contracts";
-import { describeStaticScopeKey, planStaticDemand } from "../demand-planner";
+import { planStaticDemand } from "../demand-planner";
 import { createEmptyStaticBakeAttachments } from "../bake/attachments";
 import {
 	createLayerOwnerKeyForStaticScope,
@@ -150,7 +150,7 @@ export class StaticCoordinator {
 			revision: this.#revision,
 			runId: createStaticReconciliationRunId(this.#revision),
 		};
-		const newWorkItems: ScheduledStaticWork[] = [];
+		const newLayerTasks: StaticLayerTaskRequest[] = [];
 
 		for (const status of Array.from(this.#layerTasksByTaskId.values())) {
 			if (!run.desiredOwnerIds.has(status.ownerId)) {
@@ -166,35 +166,33 @@ export class StaticCoordinator {
 		this.#pruneMaterialCoverageByOwnerIds(run.desiredOwnerIds);
 		this.#pruneStaticObjectBakeDiagnosticsByOwnerIds(run.desiredOwnerIds);
 
-		for (const work of demandPlan.work) {
-			const ownerId = createLayerOwnerKeyIdForWork(work);
-			const ownerKey = createLayerOwnerKeyForWork(work);
-			const existing = this.#findLayerTaskByOwnerId(ownerId);
+		for (const task of demandPlan.layerTasks) {
+			const existing = this.#findLayerTaskByOwnerId(task.ownerId);
 			if (existing) {
 				continue;
 			}
-			this.#layerTasksByTaskId.set(work.staticWorkId, {
-				domain: work.job.domain,
-				ownerId,
-				ownerKey,
-				taskId: work.staticWorkId,
-				revision: work.revision,
-				scopeKey: describeStaticScopeKey(work.job.scope),
+			this.#layerTasksByTaskId.set(task.taskId, {
+				domain: task.domain,
+				ownerId: task.ownerId,
+				ownerKey: task.ownerKey,
+				taskId: task.taskId,
+				revision: task.revision,
+				scope: task.scope,
+				scopeKey: task.scopeKey,
 				status: "requested",
-				work,
 			});
-			newWorkItems.push(work);
+			newLayerTasks.push(task);
 		}
 
 		this.#emit();
 
-		for (const work of newWorkItems) {
-			this.#setStatus(work, "resolving");
+		for (const task of newLayerTasks) {
+			this.#setTaskStatus(task.taskId, "resolving");
 		}
 
 		for (const sourceRequest of createSourceRequestsForNewWork(
 			demandPlan.sourceRequests,
-			newWorkItems,
+			newLayerTasks,
 		)) {
 			void this.#resolveSourceThenBake(sourceRequest);
 		}
@@ -820,24 +818,6 @@ export class StaticCoordinator {
 		this.#emit();
 	}
 
-	#setStatus(
-		work: ScheduledStaticWork,
-		status: MutableStaticLayerTaskState["status"],
-	): void {
-		if (!this.#isCurrent(work)) {
-			return;
-		}
-
-		const current = this.#layerTasksByTaskId.get(work.staticWorkId);
-
-		if (!current) {
-			return;
-		}
-
-		current.status = status;
-		this.#emit();
-	}
-
 	#setTaskStatus(
 		taskId: string,
 		status: MutableStaticLayerTaskState["status"],
@@ -867,10 +847,6 @@ export class StaticCoordinator {
 					createLayerOwnerKeyId(right.key),
 				),
 			);
-	}
-
-	#isCurrent(work: ScheduledStaticWork): boolean {
-		return !this.#disposed && this.#layerTasksByTaskId.has(work.staticWorkId);
 	}
 
 	#isTaskCurrent(task: MutableStaticLayerTaskState): boolean {
@@ -939,9 +915,9 @@ export class StaticCoordinator {
 type MutableStaticLayerTaskState = {
 	readonly ownerId: string;
 	readonly ownerKey: LayerOwnerState["key"];
-	readonly work: ScheduledStaticWork;
 	domain: StaticDomain;
 	revision: number;
+	scope: StaticLayerTaskRequest["scope"];
 	scopeKey: string;
 	taskId: string;
 	status:
@@ -968,7 +944,7 @@ interface StaticReconciliationRunState {
 interface PendingStaticBakeBatch {
 	/** Opaque id for one open coordinator-side bake batch. */
 	readonly batchId: string;
-	readonly domain: ScheduledStaticWork["job"]["domain"];
+	readonly domain: StaticDomain;
 	readonly revision: number;
 	readonly items: PendingStaticBakeBatchItem[];
 	readonly timeoutId: ReturnType<typeof setTimeout> | null;
@@ -1008,7 +984,7 @@ function createEmptyAtlasSnapshotForPayload(
 }
 
 function createStaticBatchId(input: {
-	readonly domain: ScheduledStaticWork["job"]["domain"];
+	readonly domain: StaticDomain;
 	readonly revision: number;
 	readonly items: readonly StaticBakeBatchItem[];
 }): string {
@@ -1048,7 +1024,7 @@ function createStaticBakeTask(
 		ownerId: status.ownerId,
 		ownerKey: status.ownerKey,
 		revision: status.revision,
-		scope: status.work.job.scope,
+		scope: status.scope,
 		scopeKey: status.scopeKey,
 		taskId: status.taskId,
 	};
@@ -1072,9 +1048,9 @@ function findPendingStaticBakeItemResolverMs(
 
 function createSourceRequestsForNewWork(
 	sourceRequests: readonly StaticLandblockSceneLodSourceRequest[],
-	newWorkItems: readonly ScheduledStaticWork[],
+	newLayerTasks: readonly StaticLayerTaskRequest[],
 ): readonly StaticLandblockSceneLodSourceRequest[] {
-	const newOwnerIds = new Set(newWorkItems.map(createLayerOwnerKeyIdForWork));
+	const newOwnerIds = new Set(newLayerTasks.map((task) => task.ownerId));
 	return sourceRequests.flatMap((sourceRequest) => {
 		const requestedLayers = sourceRequest.requestedLayers.filter((layer) =>
 			newOwnerIds.has(createLayerOwnerKeyId(layer.targetOwnerKey)),
@@ -1141,20 +1117,6 @@ function getDrawUnitOwnerId(drawUnit: StaticDrawUnit): string {
 	throw new Error(
 		`Static coordinator cannot commit ownerless draw unit ${String((drawUnit as { drawUnitId?: unknown }).drawUnitId ?? "unknown")}.`,
 	);
-}
-
-function createLayerOwnerKeyForWork(
-	work: ScheduledStaticWork,
-): LayerOwnerState["key"] {
-	return createLayerOwnerKeyForStaticScope({
-		domain: work.job.domain,
-		scope: work.job.scope,
-		scopeKey: describeStaticScopeKey(work.job.scope),
-	});
-}
-
-function createLayerOwnerKeyIdForWork(work: ScheduledStaticWork): string {
-	return createLayerOwnerKeyId(createLayerOwnerKeyForWork(work));
 }
 
 function createLayerOwnerIdForDomainLandblock(input: {

@@ -252,11 +252,6 @@ describe("static coordinator", () => {
 				revision: 1,
 			},
 		]);
-		expect(
-			coordinator
-				.createSnapshot()
-				.ownerStates.map((state) => JSON.stringify(state.key)),
-		).not.toContain("staticWorkId");
 	});
 
 	it("dispatches grouped source requests into owner-keyed bake inputs", async () => {

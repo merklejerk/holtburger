@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type {
-	ScheduledStaticWork,
 	StaticCoordinatorCommitDelta,
+	StaticDomain,
 	StaticPortalGraphRecord,
 	StaticPortalInteriorRecord,
 } from "../static/contracts";
@@ -207,7 +207,7 @@ function createBuildingTransitionPortalApertureResource() {
 }
 
 function createBuildingTransitionPortalGraph(
-	domain: ScheduledStaticWork["job"]["domain"] = "env-cell-system",
+	domain: StaticDomain = "env-cell-system",
 ): StaticPortalGraphRecord {
 	return {
 		edges: [
@@ -243,7 +243,7 @@ function createBuildingTransitionPortalGraph(
 }
 
 function createLayerPeerRecordOwner(
-	domain: ScheduledStaticWork["job"]["domain"],
+	domain: StaticDomain,
 ) {
 	const keyKind =
 		domain === "env-cell-system" ? "env-cell-system" : domain;

@@ -104,13 +104,6 @@ function createAttachmentRequest(
 			landblockId: payload.landblockId,
 		},
 	};
-	const work = {
-		job,
-		priority: 0,
-		revision: 1,
-		staticWorkId: "work:env-cell-geometry-attachments",
-	};
-
 	return {
 		domain,
 		items: [
@@ -120,7 +113,15 @@ function createAttachmentRequest(
 					scope: createScopePayload(payload),
 					sourceRevision: 1,
 				},
-				work,
+				task: {
+					domain,
+					ownerId: "env-cell-system:0xda55ffff",
+					ownerKey: { kind: "env-cell-system", landblockId: 0xda55ffff },
+					revision: 1,
+					scope: job.scope,
+					scopeKey: "landblock:da55ffff",
+					taskId: "task:env-cell-geometry-attachments",
+				},
 			},
 		],
 		revision: 1,

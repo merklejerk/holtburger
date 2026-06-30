@@ -108,9 +108,20 @@ export interface LayerOwnerState {
 }
 
 export interface StaticDemandPlan {
+	readonly layerTasks: readonly StaticLayerTaskRequest[];
 	readonly retainedLayerOwners: readonly LayerOwnerKey[];
 	readonly sourceRequests: readonly StaticLandblockSceneLodSourceRequest[];
-	readonly work: readonly ScheduledStaticWork[];
+}
+
+export interface StaticLayerTaskRequest {
+	readonly domain: StaticDomain;
+	readonly ownerKey: LayerOwnerKey;
+	readonly ownerId: string;
+	readonly priority: number;
+	readonly revision: number;
+	readonly scope: StaticResolverScope;
+	readonly scopeKey: string;
+	readonly taskId: string;
 }
 
 export interface StaticLandblockSceneLodLayerRequest {
@@ -231,13 +242,6 @@ export function uniqueSortedStaticTextureUseOwners(
 		ownersByKey.set(createStaticTextureUseOwnerKey(owner), owner);
 	}
 	return [...ownersByKey.values()].sort(compareStaticTextureUseOwners);
-}
-
-export interface ScheduledStaticWork {
-	readonly staticWorkId: string;
-	readonly revision: number;
-	readonly job: StaticResolverJob;
-	readonly priority: number;
 }
 
 export interface StaticScopePayload {

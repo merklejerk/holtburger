@@ -11,9 +11,12 @@ import type {
 	StaticLodRadii,
 	StaticResolverJob,
 	StaticResolverScope,
-	ScheduledStaticWork,
+	StaticLayerTaskRequest,
 } from "./contracts";
-import { createLayerOwnerKeyForStaticScope } from "./layer-owners";
+import {
+	createLayerOwnerKeyForStaticScope,
+	createLayerOwnerKeyId,
+} from "./layer-owners";
 
 const domainPriorities: Record<StaticDomain, number> = {
 	"outdoor-terrain": 0,
@@ -28,16 +31,16 @@ export function planStaticDemand(
 	revision: number,
 ): StaticDemandPlan {
 	if (!demand.location) {
-		return { retainedLayerOwners: [], sourceRequests: [], work: [] };
+		return { layerTasks: [], retainedLayerOwners: [], sourceRequests: [] };
 	}
 
 	if (demand.location.kind === "interior-cell") {
 		const landblockId = normalizeOutdoorLandblockId(
 			demand.location.landblockId,
 		);
-		const work = [
+		const layerTasks = [
 			...(["outdoor-buildings", "env-cell-system"] as const).map((domain) =>
-				createScheduledStaticWork({
+				createStaticLayerTaskRequest({
 					job: {
 						domain,
 						scope: {
@@ -49,59 +52,59 @@ export function planStaticDemand(
 					revision,
 				}),
 			),
-		].sort(compareScheduledStaticWork);
+		].sort(compareStaticLayerTaskRequests);
 
 		return {
-			retainedLayerOwners: work.map(createLayerOwnerKeyFromWork),
-			sourceRequests: createLandblockSceneLodSourceRequests(work, "outdoor"),
-			work,
+			layerTasks,
+			retainedLayerOwners: layerTasks.map((task) => task.ownerKey),
+			sourceRequests: createLandblockSceneLodSourceRequests(layerTasks, "outdoor"),
 		};
 	}
 
 	const lod = normalizeOutdoorLodRadii(demand.lod);
 	const landblockId = normalizeOutdoorLandblockId(demand.location.landblockId);
-	const work: ScheduledStaticWork[] = [];
+	const layerTasks: StaticLayerTaskRequest[] = [];
 
-	addOutdoorDomainRequests(work, {
+	addOutdoorDomainRequests(layerTasks, {
 		domain: "outdoor-terrain",
 		focusLandblockId: landblockId,
 		radius: lod.terrain,
 		revision,
 	});
-	addOutdoorDomainRequests(work, {
+	addOutdoorDomainRequests(layerTasks, {
 		domain: "outdoor-buildings",
 		focusLandblockId: landblockId,
 		radius: lod.buildings,
 		revision,
 	});
-	addOutdoorDomainRequests(work, {
+	addOutdoorDomainRequests(layerTasks, {
 		domain: "outdoor-explicit-objects",
 		focusLandblockId: landblockId,
 		radius: lod.detail,
 		revision,
 	});
-	addOutdoorDomainRequests(work, {
+	addOutdoorDomainRequests(layerTasks, {
 		domain: "outdoor-generated-scenery",
 		focusLandblockId: landblockId,
 		radius: lod.detail,
 		revision,
 	});
-	addOutdoorDomainRequests(work, {
+	addOutdoorDomainRequests(layerTasks, {
 		domain: "env-cell-system",
 		focusLandblockId: landblockId,
 		radius: lod.envCells,
 		revision,
 	});
 
-	const sortedWork = work.sort(compareScheduledStaticWork);
+	const sortedTasks = layerTasks.sort(compareStaticLayerTaskRequests);
 
 	return {
-		retainedLayerOwners: sortedWork.map(createLayerOwnerKeyFromWork),
+		layerTasks: sortedTasks,
+		retainedLayerOwners: sortedTasks.map((task) => task.ownerKey),
 		sourceRequests: createLandblockSceneLodSourceRequests(
-			sortedWork,
+			sortedTasks,
 			"outdoor",
 		),
-		work: sortedWork,
 	};
 }
 
@@ -117,7 +120,7 @@ export function normalizeOutdoorLodRadii(lod: StaticLodRadii): StaticLodRadii {
 }
 
 function addOutdoorDomainRequests(
-	work: ScheduledStaticWork[],
+	layerTasks: StaticLayerTaskRequest[],
 	input: {
 		readonly domain: StaticDomain;
 		readonly focusLandblockId: number;
@@ -133,8 +136,8 @@ function addOutdoorDomainRequests(
 		input.focusLandblockId,
 		input.radius,
 	)) {
-		work.push(
-			createScheduledStaticWork({
+		layerTasks.push(
+			createStaticLayerTaskRequest({
 				job: {
 					domain: input.domain,
 					scope: {
@@ -149,35 +152,36 @@ function addOutdoorDomainRequests(
 	}
 }
 
-function createScheduledStaticWork(input: {
+function createStaticLayerTaskRequest(input: {
 	readonly job: StaticResolverJob;
 	readonly priority: number;
 	readonly revision: number;
-}): ScheduledStaticWork {
+}): StaticLayerTaskRequest {
 	const scopeKey = describeStaticScopeKey(input.job.scope);
+	const ownerKey = createLayerOwnerKeyForStaticScope({
+		domain: input.job.domain,
+		scope: input.job.scope,
+		scopeKey,
+	});
 
 	return {
-		job: input.job,
+		domain: input.job.domain,
+		ownerId: createLayerOwnerKeyId(ownerKey),
+		ownerKey,
 		priority: input.priority,
-		staticWorkId: `${input.revision}:${scopeKey}:${input.job.domain}`,
 		revision: input.revision,
+		scope: input.job.scope,
+		scopeKey,
+		taskId: `${input.revision}:${scopeKey}:${input.job.domain}`,
 	};
 }
 
-export function describeStaticScopeKey(scope: StaticResolverScope): string {
+function describeStaticScopeKey(scope: StaticResolverScope): string {
 	return `landblock:${formatHex32(scope.landblockId)}`;
 }
 
-function createLayerOwnerKeyFromWork(work: ScheduledStaticWork) {
-	return createLayerOwnerKeyForStaticScope({
-		domain: work.job.domain,
-		scope: work.job.scope,
-		scopeKey: describeStaticScopeKey(work.job.scope),
-	});
-}
-
 function createLandblockSceneLodSourceRequests(
-	work: readonly ScheduledStaticWork[],
+	layerTasks: readonly StaticLayerTaskRequest[],
 	context: StaticLandblockSceneLodSourceRequest["context"],
 ): readonly StaticLandblockSceneLodSourceRequest[] {
 	const requestsByLandblock = new Map<
@@ -192,10 +196,10 @@ function createLandblockSceneLodSourceRequests(
 		}
 	>();
 
-	for (const item of work) {
-		const landblockId = item.job.scope.landblockId;
+	for (const item of layerTasks) {
+		const landblockId = item.scope.landblockId;
 		const layerKind = landblockSceneLodLayerKindForStaticDomain(
-			item.job.domain,
+			item.domain,
 		);
 		const layerLod = sourceLodForLandblockSceneLayer(layerKind);
 		let request = requestsByLandblock.get(landblockId);
@@ -212,7 +216,7 @@ function createLandblockSceneLodSourceRequests(
 		}
 		request.requestedLayersByKind.set(layerKind, {
 			kind: layerKind,
-			targetOwnerKey: createLayerOwnerKeyFromWork(item),
+			targetOwnerKey: item.ownerKey,
 		});
 	}
 
@@ -283,15 +287,15 @@ function compareLandblockSceneLodSourceRequests(
 	return left.landblockId - right.landblockId;
 }
 
-function compareScheduledStaticWork(
-	left: ScheduledStaticWork,
-	right: ScheduledStaticWork,
+function compareStaticLayerTaskRequests(
+	left: StaticLayerTaskRequest,
+	right: StaticLayerTaskRequest,
 ): number {
 	if (left.priority !== right.priority) {
 		return left.priority - right.priority;
 	}
 
-	return left.staticWorkId.localeCompare(right.staticWorkId);
+	return left.taskId.localeCompare(right.taskId);
 }
 
 function normalizeRadius(value: number): number {

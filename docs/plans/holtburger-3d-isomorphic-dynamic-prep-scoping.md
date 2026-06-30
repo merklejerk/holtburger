@@ -899,7 +899,75 @@ Acceptance criteria:
 
 Decisions and course corrections:
 
-- Pending.
+- Completed during Phase 0.
+
+Current `DynamicEntityResourceManager` responsibility map:
+
+- Resolver-owned:
+  - setup model asset request and setup/default animation lookup currently started by
+    `createSetupAnimationResourceKeys(...)` and `#completeSetupAnimationRequest(...)`;
+  - explicit animation asset request and payload validation;
+  - setup appearance override host-key creation from runtime model data;
+  - source closure resolution currently performed through `resolveStaticObjectSourceClosure(...)`;
+  - missing reference collection and recipe dependency failure reporting.
+- Baker-owned:
+  - dynamic material slot requirement construction currently handled by
+    `createDynamicMaterialSlotRequirements(...)`;
+  - static object material planning currently delegated to `planStaticObjectMaterials(...)`;
+  - texture requirement derivation currently handled by `createTextureRequirements(...)`;
+  - visual host asset key derivation and prepared visual asset collation currently handled by
+    `createVisualHostAssetKeys(...)` and `#requestVisualHostAssets(...)`;
+  - render-part extraction currently handled by `createDynamicRenderParts(...)`.
+- Runtime-owned:
+  - entity identity, source provenance, retention policy, render residence, and texture batch
+    ownership currently created by `DynamicEntityController`;
+  - animation playback and placement updates currently owned by `DynamicAnimationPlayer` and
+    `DynamicPlacementTracker`;
+  - renderer visual resource, texture-use, and instance commits currently read from
+    `record.resources.visual` in `client-runtime.ts`.
+- Delete:
+  - prepared asset leases in `DynamicEntityResourceManager`; recipe/bake products should be value
+    payloads, and prepared asset lifetime should not be coupled to dynamic runtime records;
+  - `DynamicEntityResourceChange` event fanout as the primary visual prep API;
+  - manager-local preparation phases once explicit recipe/bake closures own currentness.
+
+Runtime state seam map:
+
+- Replace `DynamicEntityController.applyResourceChange(...)` with explicit result methods:
+  `applyResolvedDynamicRecipe(...)`, `applyBakedDynamicVisual(...)`, and `skipDynamicVisual(...)`
+  or equivalent names chosen during Phase 1.
+- Preserve `DynamicEntityResourceState.visual` as the renderer-facing state during cutover so
+  `createDynamicRendererVisualResource(...)`, `createDynamicTextureUseCommits(...)`,
+  `createDynamicRendererInstances(...)`, and `DynamicPlacementTracker` can keep consuming the same
+  ready visual shape while the prep producer changes.
+- Rename public/debug seed terminology during the static-authored cutover:
+  `DynamicRuntimeSnapshot.staticSeedCount`, `DynamicEntitySourceSummaryDto` static-authored seed
+  fields, and tests that assert those names should move to placement/dynamic-authored terminology.
+
+Test triage:
+
+- Rewrite around new contracts:
+  - `dynamic-entity-resource-manager.test.ts`; keep behavioral scenarios, but move coverage to
+    recipe resolver, visual baker, worker transport, and controller result application tests;
+  - runtime tests that assert resource readiness through the old manager event sequence;
+  - static resolver/baker tests that currently expect `staticAuthoredDynamicSeeds` as visual-prep
+    carriers.
+- Preserve and adapt:
+  - `dynamic-entity-controller.test.ts` coverage for identity stability, static owner retention,
+    runtime lifetime, and render residence behavior;
+  - runtime renderer commit tests that can remain focused on `record.resources.visual` readiness;
+  - static coordinator currentness/eviction tests, after their commit listener expectations move to
+    the scoped result envelope.
+- Delete rather than port:
+  - tests whose only purpose is lease accounting in `DynamicEntityResourceManager`;
+  - tests that require static materialization before static-authored dynamic visual prep starts;
+  - tests that prove compatibility shims or old seed wrappers still exist.
+
+Course correction:
+
+- Add an early resteering checkpoint after Phase 3, before worker transport, because the dry run
+  found two separate dynamic worker seams. We should validate the recipe contract, visual bake
+  contract, and runtime state adapter before paying the worker/protocol cost.
 
 ### Phase 1: Add Dynamic Recipe And Bake Contracts
 
@@ -1023,6 +1091,27 @@ Acceptance criteria:
 Decisions and course corrections:
 
 - Pending.
+
+### Resteer 0: Contract Boundary Review
+
+Goal: validate the recipe, bake, and runtime state seams before adding worker transport.
+
+Review checklist:
+
+- Confirm `DynamicVisualRecipe` is complete enough that the baker does not need `AssetService`.
+- Confirm runtime-authored and static-authored fixtures use the same visual recipe shape without
+  authorship-specific bake branches.
+- Confirm `BakedDynamicVisualResource` can populate `DynamicEntityResourceState.visual` without
+  changing renderer resource/instance conversion in the same phase.
+- Confirm recipe-resolution failures and bake skips have clear console-reportable source context
+  without durable issue records.
+- Revisit Phase 0 test triage and delete/rewrite any tests that would force old manager events or
+  seed wrappers back into the design.
+
+Acceptance criteria:
+
+- Phase 4 worker protocol work begins only after the contract seams are proven by focused tests.
+- The plan is updated with any naming or ownership corrections before Phase 4 starts.
 
 ### Phase 4: Add Worker Transport For Dynamic Visual Baking
 

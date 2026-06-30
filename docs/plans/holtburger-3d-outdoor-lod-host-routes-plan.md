@@ -2072,7 +2072,7 @@ Decisions and course corrections:
 
 ### Phase 12C: Documentation And Definition-Of-Done Closeout
 
-Status: pending.
+Status: completed on 2026-06-30.
 
 Goal: leave the implementation plan accurate for posterity and explicitly close the feature definition.
 
@@ -2090,14 +2090,16 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Review the plan against the final implementation and update stale prose where it would mislead future maintainers.
-- [ ] Update architecture docs only if the implemented boundaries differ from existing durable docs.
-- [ ] Confirm all phases and Definition of Done checklist items are complete.
-- [ ] Record any remaining cleanup in a dedicated follow-up plan only if it is intentionally deferred.
+- [x] Review the plan against the final implementation and update stale prose where it would mislead future maintainers.
+- [x] Update architecture docs only if the implemented boundaries differ from existing durable docs.
+- [x] Confirm all phases and Definition of Done checklist items are complete.
+- [x] Record any remaining cleanup in a dedicated follow-up plan only if it is intentionally deferred.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Reviewed the final Definition of Done against current code and Phase 12A/12B evidence. The LoD route, prepared source cache, source-first frontend resolver fanout, layer-owner lifecycle, split explicit/generated domains, static-authored dynamic ownership, runtime dynamic no-residence handling, LoD `4` env-cell self-contained payload, old route deletion, and old lifecycle/domain audits are complete.
+- No durable architecture doc outside this implementation plan required an update. Other matching `docs/plans` hits are historical plan prose retained for posterity; executable and durable-boundary evidence is captured in this plan.
+- No remaining cleanup was intentionally deferred, so no follow-up plan was created.
 
 ## Source Assembly Requirements
 

@@ -20,7 +20,7 @@ import {
 describe("static resolver asset bridge", () => {
 	it("round-trips typed prepared asset requests through the worker boundary", async () => {
 		const channel = new FixtureWorkerChannel();
-		const key = createHostAssetKey("landblock-outdoor", 0xda55ffff);
+		const key = createHostAssetKey("palette", 0x04000010);
 		const asset = createPreparedAsset(key);
 		const assetReader = new FixturePreparedAssetReader(asset);
 		const bridge = createStaticResolverMainAssetBridge(
@@ -49,7 +49,10 @@ describe("static resolver asset bridge", () => {
 
 	it("sends resolver-light landblock env-cell payloads across the worker boundary without mutating the asset service copy", async () => {
 		const channel = new FixtureWorkerChannel();
-		const key = createHostAssetKey("landblock-env-cells", 0xda55ffff);
+		const key = createHostAssetKey(
+			"landblock-scene-lod-env-cell-layer",
+			0xda55ffff,
+		);
 		const asset = createPreparedAssetWithPayload(key, {
 			envCells: [
 				{
@@ -61,7 +64,7 @@ describe("static resolver asset bridge", () => {
 					},
 				},
 			],
-			kind: "landblock-env-cells",
+			kind: "landblock-scene-lod-env-cell-layer",
 		});
 		const assetReader = new FixturePreparedAssetReader(asset);
 		const bridge = createStaticResolverMainAssetBridge(
@@ -82,7 +85,7 @@ describe("static resolver asset bridge", () => {
 					},
 				},
 			],
-			kind: "landblock-env-cells",
+			kind: "landblock-scene-lod-env-cell-layer",
 		});
 		const renderGeometry = (
 			resolved.payload as {
@@ -196,7 +199,7 @@ describe("static resolver asset bridge", () => {
 
 	it("surfaces prepared asset request failures inside the worker", async () => {
 		const channel = new FixtureWorkerChannel();
-		const key = createHostAssetKey("landblock-outdoor", 0xda55ffff);
+		const key = createHostAssetKey("palette", 0x04000010);
 		const bridge = createStaticResolverMainAssetBridge(
 			channel.mainPort,
 			new FixturePreparedAssetReader(new Error("asset service said no")),
@@ -215,7 +218,7 @@ describe("static resolver asset bridge", () => {
 
 	it("dedupes identical prepared asset requests before crossing the worker bridge", async () => {
 		const channel = new FixtureWorkerChannel();
-		const key = createHostAssetKey("landblock-outdoor", 0xda55ffff);
+		const key = createHostAssetKey("palette", 0x04000010);
 		const assetReader = new DeferredPreparedAssetReader(
 			createPreparedAsset(key),
 		);
@@ -253,7 +256,7 @@ describe("static resolver asset bridge", () => {
 
 	it("rejects pending worker requests on disposal", async () => {
 		const channel = new FixtureWorkerChannel();
-		const key = createHostAssetKey("landblock-outdoor", 0xda55ffff);
+		const key = createHostAssetKey("palette", 0x04000010);
 		const bridge = createStaticResolverMainAssetBridge(
 			channel.mainPort,
 			new DeferredPreparedAssetReader(),
@@ -366,7 +369,7 @@ class DeferredPreparedAssetReader implements PreparedAssetReader {
 
 function createPreparedAsset(key: HostAssetKey): PreparedAsset {
 	return createPreparedAssetWithPayload(key, {
-		kind: "landblock-outdoor",
+		kind: key.kind,
 	});
 }
 
@@ -379,6 +382,6 @@ function createPreparedAssetWithPayload(
 		payload,
 		preparedAt: "2026-06-10T00:00:00.000Z",
 		revision: 7,
-		sourceAssetId: "landblock/da55ffff/outdoor",
+		sourceAssetId: `${key.kind}:${key.id}`,
 	};
 }

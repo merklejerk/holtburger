@@ -9,7 +9,6 @@ import type {
 	StaticResolverJob,
 	StaticScopePayload,
 } from "../contracts";
-import { LandblockEnvCellsResolver } from "../env-cells/landblock-env-cells-resolver";
 import { OutdoorStaticObjectsResolver } from "../objects/outdoor-static-objects-resolver";
 import { TerrainStaticScopeResolver } from "../terrain/terrain-resolver";
 import { LandblockSceneLodSourceResolver } from "./landblock-scene-lod-source-resolver";
@@ -30,18 +29,15 @@ class StaticResolverRouter
 {
 	readonly #terrainResolver: StaticResolver;
 	readonly #outdoorStaticObjectsResolver: StaticResolver;
-	readonly #landblockEnvCellsResolver: StaticResolver;
 	readonly #landblockSceneLodSourceResolver: StaticLandblockSceneLodSourceResolver;
 
 	constructor(options: {
 		readonly terrainResolver: StaticResolver;
 		readonly outdoorStaticObjectsResolver: StaticResolver;
-		readonly landblockEnvCellsResolver: StaticResolver;
 		readonly landblockSceneLodSourceResolver: StaticLandblockSceneLodSourceResolver;
 	}) {
 		this.#terrainResolver = options.terrainResolver;
 		this.#outdoorStaticObjectsResolver = options.outdoorStaticObjectsResolver;
-		this.#landblockEnvCellsResolver = options.landblockEnvCellsResolver;
 		this.#landblockSceneLodSourceResolver =
 			options.landblockSceneLodSourceResolver;
 	}
@@ -58,10 +54,6 @@ class StaticResolverRouter
 		) {
 			return this.#outdoorStaticObjectsResolver.resolve(job);
 		}
-		if (job.domain === "landblock-env-cells") {
-			return this.#landblockEnvCellsResolver.resolve(job);
-		}
-
 		return Promise.reject(
 			new Error(`Static resolver worker does not support ${job.domain}.`),
 		);
@@ -82,9 +74,6 @@ function createStaticResolver(
 	assetReader: PreparedAssetReader,
 ): StaticResolver {
 	return new StaticResolverRouter({
-		landblockEnvCellsResolver: new LandblockEnvCellsResolver({
-			assetService: assetReader,
-		}),
 		landblockSceneLodSourceResolver: new LandblockSceneLodSourceResolver({
 			assetService: assetReader,
 		}),

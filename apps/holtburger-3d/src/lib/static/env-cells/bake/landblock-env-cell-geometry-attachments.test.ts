@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import type { LandblockEnvCellsPayloadDto } from "../../../../lib/host/contracts";
 import type {
 	HostAssetKey,
 	PreparedAsset,
@@ -11,16 +10,21 @@ import type {
 	LandblockEnvCellsStaticScopePayload,
 	StaticBakeAttachmentRequest,
 } from "../../contracts";
+import type { LandblockEnvCellsLayerSourcePayloadDto } from "../../source-payloads";
 import { LandblockEnvCellGeometryAttachmentProvider } from "./landblock-env-cell-geometry-attachments";
 
 describe("browser landblock env-cell geometry attachments", () => {
 	it("attaches full cell-structure geometry from resolved source payloads", async () => {
-		const key = createHostAssetKey("landblock-env-cells", 0xda55ffff);
+		const key = createHostAssetKey(
+			"landblock-scene-lod-env-cell-layer",
+			0xda55ffff,
+		);
 		const fullAsset = createPreparedAsset(
 			key,
 			createLandblockEnvCellsPayload(),
 		);
-		const fullPayload = fullAsset.payload as LandblockEnvCellsPayloadDto;
+		const fullPayload =
+			fullAsset.payload as LandblockEnvCellsLayerSourcePayloadDto;
 		const provider = new LandblockEnvCellGeometryAttachmentProvider();
 
 		const attachments = await provider.createAttachments(
@@ -66,7 +70,10 @@ describe("browser landblock env-cell geometry attachments", () => {
 	});
 
 	it("fails if the host-backed asset reader returns resolver-light geometry", async () => {
-		const key = createHostAssetKey("landblock-env-cells", 0xda55ffff);
+		const key = createHostAssetKey(
+			"landblock-scene-lod-env-cell-layer",
+			0xda55ffff,
+		);
 		const fullAsset = createPreparedAsset(
 			key,
 			createLandblockEnvCellsPayload(),
@@ -85,7 +92,9 @@ describe("browser landblock env-cell geometry attachments", () => {
 });
 
 function createAttachmentRequest(
-	payload: LandblockEnvCellsPayloadDto | ResolverLandblockEnvCellsPayloadDto,
+	payload:
+		| LandblockEnvCellsLayerSourcePayloadDto
+		| ResolverLandblockEnvCellsPayloadDto,
 ): StaticBakeAttachmentRequest {
 	const domain = "landblock-env-cells";
 	const job = {
@@ -120,14 +129,13 @@ function createAttachmentRequest(
 }
 
 function createScopePayload(
-	payload: LandblockEnvCellsPayloadDto | ResolverLandblockEnvCellsPayloadDto,
+	payload:
+		| LandblockEnvCellsLayerSourcePayloadDto
+		| ResolverLandblockEnvCellsPayloadDto,
 ): LandblockEnvCellsStaticScopePayload {
 	return {
 		acceptedEnvCellIds: payload.envCells.map((cell) => cell.envCellId),
-		buildingTransitionApertures:
-			"buildingTransitionApertures" in payload
-				? payload.buildingTransitionApertures
-				: [],
+		buildingTransitionApertures: payload.buildingTransitionApertures,
 		envCells: payload.envCells.map((cell) => ({
 			cellBsp: cell.cellBsp,
 			cellStructure: {
@@ -198,7 +206,7 @@ function createScopePayload(
 
 function createPreparedAsset(
 	key: HostAssetKey,
-	payload: LandblockEnvCellsPayloadDto,
+	payload: LandblockEnvCellsLayerSourcePayloadDto,
 ): PreparedAsset {
 	return {
 		key,
@@ -209,11 +217,12 @@ function createPreparedAsset(
 	};
 }
 
-function createLandblockEnvCellsPayload(): LandblockEnvCellsPayloadDto {
+function createLandblockEnvCellsPayload(): LandblockEnvCellsLayerSourcePayloadDto {
 	return {
+		buildingTransitionApertures: [],
 		diagnostics: createDiagnostics(),
 		envCells: [createEnvCellPayload()],
-		kind: "landblock-env-cells",
+		kind: "landblock-scene-lod-env-cell-layer",
 		landblockEnvCellBvh: {
 			items: [
 				{
@@ -231,12 +240,10 @@ function createLandblockEnvCellsPayload(): LandblockEnvCellsPayloadDto {
 		provenance: createProvenance(),
 		regionId: 1,
 		regionNumber: 1,
-		residencyKind: "landblock",
-		sourceAssetKind: "landblock-env-cells",
 	};
 }
 
-function createEnvCellPayload(): LandblockEnvCellsPayloadDto["envCells"][number] {
+function createEnvCellPayload(): LandblockEnvCellsLayerSourcePayloadDto["envCells"][number] {
 	return {
 		cellBsp: {
 			kind: "leaf",

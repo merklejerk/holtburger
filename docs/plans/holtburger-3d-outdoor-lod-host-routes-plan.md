@@ -1641,7 +1641,7 @@ Decisions and course corrections:
 
 ### Phase 11A3: Frontend Standalone Direct Resolver Deletion
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: delete frontend standalone direct-route resolver behavior now that normal rendering is source-first and LoD-projected.
 
@@ -1660,15 +1660,20 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Delete or narrow direct env-cell resolver behavior.
-- [ ] Delete old route payload asset views and compatibility fixtures.
-- [ ] Update env-cell resolver/baker/asset-bridge tests to use projected LoD input.
-- [ ] Run zero-reference searches for executable old outdoor/env-cell route requests.
-- [ ] Run focused frontend validation commands.
+- [x] Delete or narrow direct env-cell resolver behavior.
+- [x] Delete old route payload asset views and compatibility fixtures.
+- [x] Update env-cell resolver/baker/asset-bridge tests to use projected LoD input.
+- [x] Run zero-reference searches for executable old outdoor/env-cell route requests.
+- [x] Run focused frontend validation commands.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Removed the static resolver worker's direct `landblock-env-cells` resolve branch. Env-cell work now reaches the worker through `resolveSource` and LoD projection, not a standalone direct-route resolver path.
+- Asset bridge tests now use ordinary host assets for generic worker plumbing and projected env-cell layer payloads for resolver-light env-cell geometry views.
+- Env-cell geometry attachment tests now consume projected env-cell layer payloads directly. The old compatibility branch that tolerated missing `buildingTransitionApertures` is gone because projected env-cell source payloads carry those facts.
+- `LandblockSceneLodSourceResolver` tests now assert projected layer keys do not leak to the backing asset reader, while old `landblock-outdoor` and route-facing `landblock-env-cells` keys remain absent.
+- Remaining Phase 11A4 work is the frontend-wide audit: classify internal `landblock-env-cells` domain vocabulary, delete any surviving route-facing references, and record topology TypeScript helper remnants for Phase 11B.
+- Validation: `npm run check`; `npm run test:ts -- src/lib/static/resolver/asset-bridge.test.ts src/lib/static/env-cells/bake/landblock-env-cell-geometry-attachments.test.ts src/lib/static/resolver/landblock-scene-lod-source-resolver.test.ts`; zero-reference search for direct old outdoor/env-cell route requests in resolver bridge and env-cell geometry attachment paths.
 
 ### Phase 11A4: Frontend Old Route Audit And Commit Gate
 

@@ -109,6 +109,56 @@ export class DynamicVisualRecipeWorkerClient implements DynamicVisualRecipeResol
 	}
 }
 
+export class WorkerPoolDynamicVisualRecipeResolver implements DynamicVisualRecipeResolver {
+	readonly #resolvers: readonly DynamicVisualRecipeResolver[];
+	#disposed = false;
+	#nextResolverIndex = 0;
+
+	constructor(resolvers: readonly DynamicVisualRecipeResolver[]) {
+		if (resolvers.length === 0) {
+			throw new Error(
+				"WorkerPoolDynamicVisualRecipeResolver requires at least one resolver.",
+			);
+		}
+
+		this.#resolvers = resolvers;
+	}
+
+	resolveRecipe(
+		request: DynamicVisualRecipeResolutionRequest,
+	): Promise<DynamicEntityRecipe> {
+		if (this.#disposed) {
+			return Promise.reject(
+				new Error("WorkerPoolDynamicVisualRecipeResolver has been disposed."),
+			);
+		}
+
+		const resolver = this.#resolvers[this.#nextResolverIndex];
+		if (!resolver) {
+			return Promise.reject(
+				new Error(
+					"WorkerPoolDynamicVisualRecipeResolver has no active resolver.",
+				),
+			);
+		}
+
+		this.#nextResolverIndex =
+			(this.#nextResolverIndex + 1) % this.#resolvers.length;
+		return resolver.resolveRecipe(request);
+	}
+
+	dispose(): void {
+		if (this.#disposed) {
+			return;
+		}
+
+		this.#disposed = true;
+		for (const resolver of this.#resolvers) {
+			disposeIfAvailable(resolver);
+		}
+	}
+}
+
 export function createDynamicVisualRecipeMainAssetBridge(
 	port: DynamicVisualRecipeWorkerPort,
 	assetReader: PreparedAssetReader,
@@ -170,4 +220,15 @@ function createDynamicVisualRecipePreparedAssetView(
 			createResolverRenderSurfacePreparedAssetView(asset),
 		),
 	);
+}
+
+function disposeIfAvailable(value: unknown): void {
+	if (
+		typeof value === "object" &&
+		value !== null &&
+		"dispose" in value &&
+		typeof value.dispose === "function"
+	) {
+		value.dispose();
+	}
 }

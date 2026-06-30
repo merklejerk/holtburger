@@ -741,7 +741,7 @@ Verification:
 
 ### Phase 7: Replace Dynamic Resource Generation Checks With Preparations
 
-Status: pending.
+Status: completed 2026-06-30.
 
 Purpose:
 
@@ -769,18 +769,34 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add dynamic preparation types and state storage.
-- [ ] Move setup animation and visual resource request flow behind preparation methods.
-- [ ] Replace `generation` checks in `DynamicEntityResourceManager`.
-- [ ] Add dynamic controller query for static-authored preparation readiness by layer owner id.
-- [ ] Update dynamic entity resource manager/controller tests for cancellation, failures, and ready
+- [x] Add dynamic preparation types and state storage.
+- [x] Move setup animation and visual resource request flow behind preparation methods.
+- [x] Replace `generation` checks in `DynamicEntityResourceManager`.
+- [x] Add dynamic controller query for static-authored preparation readiness by layer owner id.
+- [x] Update dynamic entity resource manager/controller tests for cancellation, failures, and ready
       commits.
-- [ ] Remove obsolete generation diagnostics or helper names.
+- [x] Remove obsolete generation diagnostics or helper names.
 
 Decisions and course corrections:
 
-- Record any asset-service promise that cannot be aborted and confirm cancellation is implemented as
-  "ignore result and release leases".
+- 2026-06-30: Replaced `DynamicEntityResourceManager` generation checks with
+  `TrackedDynamicEntityPreparation` objects. Preparations move through `setup-loading`,
+  `visual-loading`, `ready`, `failed`, and `canceled`.
+- 2026-06-30: Asset-service promises are not aborted. Cancellation is implemented by marking the
+  preparation `canceled`, releasing any held leases, deleting it from the current map, and ignoring
+  late promise results unless the same preparation object is still current.
+- 2026-06-30: Added `queryStaticAuthoredPreparationStatus` on `DynamicEntityController` so runtime
+  settlement can ask owner-scoped readiness without inspecting raw dynamic records.
+- 2026-06-30: Owners with no static-authored dynamic records report `ready`; owners with any failed
+  dynamic resource preparation report `failed`; owners with loading records report `pending`.
+
+Verification:
+
+- `npm run test:ts -- --run src/lib/dynamic/dynamic-entity-controller.test.ts src/lib/dynamic/dynamic-entity-resource-manager.test.ts`
+- `npm run test:ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run lint:dead`
 
 ### Phase 8: Redefine Scene-Interest Settlement
 

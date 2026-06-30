@@ -44,6 +44,34 @@ describe("dynamic entity controller", () => {
 		expect(controller.createSnapshot().records).toHaveLength(1);
 	});
 
+	it("reports static-authored preparation readiness by layer owner", () => {
+		const controller = new DynamicEntityController();
+
+		controller.ingestStaticSeeds([createOutdoorSeedRecord()]);
+
+		expect(
+			controller.queryStaticAuthoredPreparationStatus(
+				new Set([
+					"outdoor-buildings:0xda55ffff",
+					"outdoor-buildings:0xdb55ffff",
+				]),
+			),
+		).toEqual([
+			{
+				entityIds: [
+					"static-authored-outdoor:outdoor-buildings:0xda55ffff:object:building:windmill-0:setup:020003e5",
+				],
+				ownerId: "outdoor-buildings:0xda55ffff",
+				phase: "pending",
+			},
+			{
+				entityIds: [],
+				ownerId: "outdoor-buildings:0xdb55ffff",
+				phase: "ready",
+			},
+		]);
+	});
+
 	it("projects static-authored presentation policy from source facts and texture batch lookup", () => {
 		const controller = new DynamicEntityController();
 

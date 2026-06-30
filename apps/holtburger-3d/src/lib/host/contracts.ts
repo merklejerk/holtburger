@@ -405,6 +405,139 @@ const landblockScenePortalLinkDtoSchema = z.object({
 	sourceIndex: z.number().int().nonnegative(),
 });
 
+const portalConnectivitySceneDtoSchema = z.discriminatedUnion("kind", [
+	z.object({
+		kind: z.literal("env-cell"),
+		envCellId: z.number().int().nonnegative(),
+	}),
+	z.object({
+		kind: z.literal("outdoor"),
+		landblockId: z.number().int().nonnegative(),
+	}),
+	z.object({
+		kind: z.literal("landblock-building"),
+		buildingInstanceId: z.string().min(1),
+	}),
+]);
+
+const portalConnectivitySceneCrossingDtoSchema = z
+	.discriminatedUnion("kind", [
+		z.object({
+			kind: z.literal("env-cell-to-env-cell"),
+			sourceEnvCellId: z.number().int().nonnegative(),
+			targetEnvCellId: z.number().int().nonnegative(),
+		}),
+		z.object({
+			kind: z.literal("env-cell-to-outdoor"),
+			sourceEnvCellId: z.number().int().nonnegative(),
+			outdoorLandblockId: z.number().int().nonnegative(),
+		}),
+		z.object({
+			kind: z.literal("env-cell-to-landblock-building"),
+			sourceEnvCellId: z.number().int().nonnegative(),
+			buildingInstanceId: z.string().min(1),
+		}),
+		z.object({
+			kind: z.literal("outdoor-to-env-cell"),
+			outdoorLandblockId: z.number().int().nonnegative(),
+			envCellId: z.number().int().nonnegative(),
+		}),
+	])
+	.nullable();
+
+const portalConnectivityEdgeProvenanceDtoSchema = z.discriminatedUnion("kind", [
+	z.object({
+		kind: z.literal("env-cell-portal"),
+		sourceEnvCellId: z.number().int().nonnegative(),
+		sourcePortalId: z.string().min(1),
+		target: landblockScenePortalLinkEndpointDtoSchema,
+	}),
+	z.object({
+		kind: z.literal("building-transition"),
+		apertureResourceId: z.string().min(1),
+		portalId: z.string().min(1),
+		buildingInstanceId: z.string().min(1),
+		buildingPortalId: z.string().min(1),
+		targetEnvCellId: z.number().int().nonnegative(),
+	}),
+]);
+
+const portalConnectivityGraphDtoSchema = z.object({
+	nodes: z.array(
+		z.object({
+			nodeId: z.string().min(1),
+			scene: portalConnectivitySceneDtoSchema,
+		}),
+	),
+	edges: z.array(
+		z.object({
+			edgeId: z.string().min(1),
+			sourceNodeId: z.string().min(1),
+			targetNodeId: z.string().min(1),
+			direction: z.literal("directed"),
+			linkId: z.string().min(1),
+			sourceIndex: z.number().int().nonnegative(),
+			flags: z.number().int().nonnegative(),
+			polygonId: z.number().int().nonnegative().nullable(),
+			provenance: portalConnectivityEdgeProvenanceDtoSchema,
+			sceneCrossing: portalConnectivitySceneCrossingDtoSchema,
+		}),
+	),
+});
+
+const portalApertureRangeBaseDtoSchema = {
+	rangeId: z.string().min(1),
+	sourceId: z.string().min(1),
+	firstIndex: z.number().int().nonnegative(),
+	indexCount: z.number().int().nonnegative(),
+};
+
+const portalApertureRangeDtoSchema = z.discriminatedUnion("sourceKind", [
+	z.object({
+		...portalApertureRangeBaseDtoSchema,
+		sourceKind: z.literal("env-cell-portal"),
+		source: z.object({
+			kind: z.literal("env-cell-portal"),
+			envCellId: z.number().int().nonnegative(),
+			landblockId: z.number().int().nonnegative(),
+			polygonId: z.number().int().nonnegative().nullable(),
+			portalId: z.string().min(1),
+			sourceIndex: z.number().int().nonnegative(),
+		}),
+	}),
+	z.object({
+		...portalApertureRangeBaseDtoSchema,
+		sourceKind: z.literal("building-transition"),
+		source: z.object({
+			kind: z.literal("building-transition"),
+			buildingInstanceId: z.string().min(1),
+			buildingPortalId: z.string().min(1),
+			buildingPortalSourceIndex: z.number().int().nonnegative(),
+			linkedEnvCellIds: z.array(z.number().int().nonnegative()),
+			otherCellId: z.number().int().nonnegative(),
+			otherPortalId: z.number().int().nonnegative(),
+			polyId: z.number().int().nonnegative(),
+			portalId: z.string().min(1),
+			portalIndex: z.number().int(),
+			sourceAssetId: z.string().min(1),
+			sourceDid: z.number().int().nonnegative(),
+			landblockId: z.number().int().nonnegative(),
+			targetEnvCellId: z.number().int().nonnegative(),
+		}),
+	}),
+]);
+
+const portalApertureResourceDtoSchema = z.object({
+	kind: z.literal("portal-aperture-resource"),
+	apertureResourceId: z.string().min(1),
+	coordinateSpace: z.literal("landblock-render-local"),
+	landblockId: z.number().int().nonnegative(),
+	indices: z.array(z.number().int().nonnegative()),
+	ranges: z.array(portalApertureRangeDtoSchema),
+	sourceDomain: z.enum(["env-cell-system", "outdoor-buildings"]),
+	vertices: z.array(vec3DtoSchema),
+});
+
 const landblockOutdoorBuildingFactsDtoSchema = z.object({
 	numLeaves: z.number().int().nonnegative(),
 	portals: z.array(landblockSceneBuildingPortalDtoSchema),
@@ -501,7 +634,7 @@ const landblockEnvCellDtoSchema = z
 	})
 	.strict();
 
-export const landblockSceneLodLevelDtoSchema = z.union([
+const landblockSceneLodLevelDtoSchema = z.union([
 	z.literal(0),
 	z.literal(1),
 	z.literal(2),
@@ -512,7 +645,7 @@ export type LandblockSceneLodLevelDto = z.infer<
 	typeof landblockSceneLodLevelDtoSchema
 >;
 
-export const landblockSceneLodSourceDtoSchema = z
+const landblockSceneLodSourceDtoSchema = z
 	.object({
 		context: z.enum(["outdoor", "interior"]),
 		level: landblockSceneLodLevelDtoSchema,
@@ -557,9 +690,8 @@ const landblockSceneLodEnvCellSystemLayerDtoSchema = z
 	.object({
 		kind: z.literal("env-cell-system"),
 		landblockInfoId: z.number().int().nonnegative(),
-		buildingTransitionApertures: z.array(
-			landblockBuildingTransitionApertureDtoSchema,
-		),
+		portalConnectivityGraph: portalConnectivityGraphDtoSchema,
+		portalApertureResources: z.array(portalApertureResourceDtoSchema),
 		envCells: z.array(landblockEnvCellDtoSchema),
 		portalLinks: z.array(landblockScenePortalLinkDtoSchema),
 		envCellSystemBvh: preparedEnvCellSystemBvhDtoSchema,
@@ -567,7 +699,7 @@ const landblockSceneLodEnvCellSystemLayerDtoSchema = z
 	})
 	.strict();
 
-export const landblockSceneLodLayerDtoSchema = z.discriminatedUnion("kind", [
+const landblockSceneLodLayerDtoSchema = z.discriminatedUnion("kind", [
 	landblockSceneLodTerrainLayerDtoSchema,
 	landblockSceneLodOutdoorBuildingsLayerDtoSchema,
 	landblockSceneLodOutdoorStaticLayerDtoSchema("outdoor-explicit-objects"),

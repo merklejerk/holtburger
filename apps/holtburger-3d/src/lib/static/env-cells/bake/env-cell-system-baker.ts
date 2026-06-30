@@ -24,8 +24,6 @@ import type {
 } from "../../contracts";
 import { uniqueSortedStaticTextureUseOwners } from "../../contracts";
 import { createLayerPeerRecordOwnerForStaticWork } from "../../layer-owners";
-import { createEnvCellPortalApertureResource } from "../../portal-aperture-resources";
-import { createEnvCellStaticPortalGraph } from "../../portal-graphs";
 import {
 	AC_UNIT_SCALE,
 	buildAcPlacementMatrix,
@@ -113,9 +111,9 @@ export function bakeEnvCellSystem(
 				(coverage) => coverage.materialCount > 0 || coverage.partitionCount > 0,
 			),
 		],
-		portalApertureResources: itemResults.flatMap((result) =>
-			result.portalApertureResource ? [result.portalApertureResource] : [],
-		).concat(staticObjectResult.portalApertureResources),
+		portalApertureResources: itemResults
+			.flatMap((result) => result.portalApertureResources)
+			.concat(staticObjectResult.portalApertureResources),
 		revision: input.revision,
 		staticAuthoredDynamicSeeds: itemResults.flatMap(
 			(result) => result.staticAuthoredDynamicSeeds,
@@ -188,7 +186,7 @@ function bakeLandblockEnvCellItem(
 ): {
 	readonly drawUnits: readonly StaticDrawUnit[];
 	readonly materialCoverage: StaticMaterialCoverageReport;
-	readonly portalApertureResource: StaticPortalApertureResource | null;
+	readonly portalApertureResources: readonly StaticPortalApertureResource[];
 	readonly staticAuthoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
 	readonly staticPortalGraphs: readonly StaticPortalGraphRecord[];
 	readonly staticPortalInteriorRecords: readonly StaticPortalInteriorRecord[];
@@ -224,8 +222,6 @@ function bakeLandblockEnvCellItem(
 		materialPlansByEnvCellId,
 	);
 	const portalInteriorRecord = createPortalInteriorRecord(owner, payload);
-	const portalApertureResource =
-		createEnvCellPortalApertureResource(portalInteriorRecord);
 
 	return {
 		drawUnits,
@@ -233,14 +229,12 @@ function bakeLandblockEnvCellItem(
 			materialPlansByEnvCellId,
 			payload,
 		}),
-		portalApertureResource,
+		portalApertureResources: payload.portalApertureResources,
 		staticAuthoredDynamicSeeds: createAuthoredDynamicSeedRecords(
 			owner,
 			payload,
 		),
-		staticPortalGraphs: [
-			createEnvCellStaticPortalGraph(owner, portalInteriorRecord),
-		],
+		staticPortalGraphs: [createHostPortalGraphRecord(owner, payload)],
 		staticPortalInteriorRecords: [portalInteriorRecord],
 		staticSourceMappings: createSourceMappingRecords(owner, payload),
 		staticSpatialRecords: createSpatialRecords(owner, payload),
@@ -1077,6 +1071,19 @@ function createPortalInteriorRecord(
 		landblockId: payload.landblock.landblockId,
 		owner,
 		portalLinks: payload.portalLinks,
+	};
+}
+
+function createHostPortalGraphRecord(
+	owner: StaticLayerPeerRecordOwner,
+	payload: EnvCellSystemStaticScopePayload,
+): StaticPortalGraphRecord {
+	return {
+		edges: payload.portalConnectivityGraph.edges,
+		kind: "static-portal-graph",
+		landblockId: payload.landblock.landblockId,
+		nodes: payload.portalConnectivityGraph.nodes,
+		owner,
 	};
 }
 

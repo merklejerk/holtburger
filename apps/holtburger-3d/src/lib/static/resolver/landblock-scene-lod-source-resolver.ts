@@ -167,13 +167,14 @@ function createProjectedEnvCellsPayload(
 ): EnvCellSystemLayerSourcePayloadDto {
 	const layer = requireSceneLodLayer(payload, "env-cell-system");
 	return {
-		buildingTransitionApertures: layer.buildingTransitionApertures,
 		diagnostics: layer.diagnostics,
 		envCells: layer.envCells,
 		kind: "landblock-scene-lod-env-cell-layer",
 		envCellSystemBvh: layer.envCellSystemBvh,
 		landblockId: payload.landblockId,
 		landblockInfoId: layer.landblockInfoId,
+		portalApertureResources: layer.portalApertureResources,
+		portalConnectivityGraph: layer.portalConnectivityGraph,
 		portalLinks: layer.portalLinks,
 		provenance: payload.provenance,
 		regionId: payload.regionId,

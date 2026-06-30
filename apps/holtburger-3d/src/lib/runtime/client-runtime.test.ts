@@ -44,6 +44,7 @@ import type {
 import { StaticCoordinator } from "../static/coordinator/static-coordinator";
 import type {
 	PreparedRgbaRenderSurfaceTextureUseIdentity,
+	LandblockPortalLinkFacts,
 	StaticBakeTextureUse,
 	StaticMaterialCoverageReport,
 	OutdoorStaticObjectsScopePayload,
@@ -51,7 +52,10 @@ import type {
 	StaticObjectRenderInstance,
 	StaticObjectVisualResource,
 	StaticPortalApertureResource,
+	StaticPortalGraphEdge,
+	StaticPortalGraphNode,
 	StaticPortalGraphRecord,
+	StaticPortalGraphScene,
 	StaticPortalInteriorRecord,
 	StructuredInteriorGeometryStaticDrawUnit,
 	StaticAuthoredDynamicSeedRecord,
@@ -65,7 +69,6 @@ import {
 	DeferredStaticBaker,
 	DeferredStaticResolver,
 } from "../static/fake-workers";
-import { createEnvCellStaticPortalGraph } from "../static/portal-graphs";
 import {
 	createClientRuntime,
 	type RuntimeEvent,
@@ -1295,7 +1298,7 @@ describe("browser client runtime", () => {
 				}),
 			],
 			staticPortalGraphs: [
-				createEnvCellStaticPortalGraph(
+				createEnvCellPortalGraphFixture(
 					createEnvCellLayerOwner(0xda55ffff),
 					portalInteriorRecord,
 				),
@@ -1440,7 +1443,7 @@ describe("browser client runtime", () => {
 				}),
 			],
 			staticPortalGraphs: [
-				createBuildingTransitionStaticPortalGraph({
+				createBuildingTransitionPortalGraphFixture({
 					landblockId: 0xda55ffff,
 					targetEnvCellId: 0xda550100,
 				}),
@@ -1588,7 +1591,7 @@ describe("browser client runtime", () => {
 				}),
 			],
 			staticPortalGraphs: [
-				createBuildingTransitionStaticPortalGraph({
+				createBuildingTransitionPortalGraphFixture({
 					targetEnvCellId: 0xda550100,
 				}),
 			],
@@ -1683,7 +1686,7 @@ describe("browser client runtime", () => {
 				}),
 			],
 			staticPortalGraphs: [
-				createBuildingTransitionStaticPortalGraph({
+				createBuildingTransitionPortalGraphFixture({
 					landblockId: 0xdb55ffff,
 					targetEnvCellId: 0xdb550100,
 				}),
@@ -2758,7 +2761,7 @@ function createBuildingTransitionPortalApertureResource(options: {
 	};
 }
 
-function createBuildingTransitionStaticPortalGraph(options: {
+function createBuildingTransitionPortalGraphFixture(options: {
 	readonly landblockId?: number;
 	readonly targetEnvCellId: number;
 }): StaticPortalGraphRecord {
@@ -2811,6 +2814,142 @@ function createBuildingTransitionStaticPortalGraph(options: {
 		],
 		owner: createEnvCellLayerOwner(landblockId),
 	};
+}
+
+function createEnvCellPortalGraphFixture(
+	owner: StaticLayerPeerRecordOwner,
+	record: StaticPortalInteriorRecord,
+): StaticPortalGraphRecord {
+	const nodesById = new Map<string, StaticPortalGraphNode>();
+	for (const envCell of record.envCells) {
+		const node = createPortalGraphFixtureNode({
+			envCellId: envCell.envCellId,
+			kind: "env-cell",
+		});
+		nodesById.set(node.nodeId, node);
+	}
+
+	const edges = record.portalLinks
+		.map((link) => createEnvCellPortalGraphFixtureEdge(link, nodesById))
+		.filter((edge): edge is StaticPortalGraphEdge => edge !== null)
+		.sort((left, right) => left.edgeId.localeCompare(right.edgeId));
+
+	return {
+		edges,
+		kind: "static-portal-graph",
+		landblockId: record.landblockId,
+		nodes: [...nodesById.values()].sort((left, right) =>
+			left.nodeId.localeCompare(right.nodeId),
+		),
+		owner,
+	};
+}
+
+function createEnvCellPortalGraphFixtureEdge(
+	link: LandblockPortalLinkFacts,
+	nodesById: Map<string, StaticPortalGraphNode>,
+): StaticPortalGraphEdge | null {
+	if (link.source.kind !== "env-cell") {
+		return null;
+	}
+
+	const sourceNode = createPortalGraphFixtureNode({
+		envCellId: link.source.envCellId,
+		kind: "env-cell",
+	});
+	const targetNode = createPortalGraphFixtureNodeFromEndpoint(link.target);
+	nodesById.set(sourceNode.nodeId, sourceNode);
+	nodesById.set(targetNode.nodeId, targetNode);
+
+	return {
+		direction: "directed",
+		edgeId: ["env-cell-portal", link.linkId, link.sourceIndex].join(":"),
+		flags: link.flags,
+		linkId: link.linkId,
+		polygonId: link.polygonId,
+		provenance: {
+			kind: "env-cell-portal",
+			sourceEnvCellId: link.source.envCellId,
+			sourcePortalId: link.source.portalId,
+			target: link.target,
+		},
+		sceneCrossing: createEnvCellPortalFixtureSceneCrossing(link),
+		sourceIndex: link.sourceIndex,
+		sourceNodeId: sourceNode.nodeId,
+		targetNodeId: targetNode.nodeId,
+	};
+}
+
+function createPortalGraphFixtureNodeFromEndpoint(
+	endpoint: LandblockPortalLinkFacts["target"],
+): StaticPortalGraphNode {
+	switch (endpoint.kind) {
+		case "env-cell":
+			return createPortalGraphFixtureNode({
+				envCellId: endpoint.envCellId,
+				kind: "env-cell",
+			});
+		case "landblock-building":
+			return createPortalGraphFixtureNode({
+				buildingInstanceId: endpoint.instanceId,
+				kind: "landblock-building",
+			});
+		case "outside":
+			return createPortalGraphFixtureNode({
+				kind: "outdoor",
+				landblockId: endpoint.landblockId,
+			});
+	}
+}
+
+function createEnvCellPortalFixtureSceneCrossing(
+	link: LandblockPortalLinkFacts,
+): StaticPortalGraphEdge["sceneCrossing"] {
+	if (link.source.kind !== "env-cell") {
+		return null;
+	}
+	switch (link.target.kind) {
+		case "env-cell":
+			return {
+				kind: "env-cell-to-env-cell",
+				sourceEnvCellId: link.source.envCellId,
+				targetEnvCellId: link.target.envCellId,
+			};
+		case "landblock-building":
+			return {
+				buildingInstanceId: link.target.instanceId,
+				kind: "env-cell-to-landblock-building",
+				sourceEnvCellId: link.source.envCellId,
+			};
+		case "outside":
+			return {
+				kind: "env-cell-to-outdoor",
+				outdoorLandblockId: link.target.landblockId,
+				sourceEnvCellId: link.source.envCellId,
+			};
+	}
+}
+
+function createPortalGraphFixtureNode(
+	scene: StaticPortalGraphScene,
+): StaticPortalGraphNode {
+	switch (scene.kind) {
+		case "env-cell":
+			return {
+				nodeId: `env-cell:${scene.envCellId >>> 0}`,
+				scene,
+			};
+		case "landblock-building":
+			return {
+				nodeId: `building:${scene.buildingInstanceId}`,
+				scene,
+			};
+		case "outdoor":
+			return {
+				nodeId: `outdoor:${scene.landblockId >>> 0}`,
+				scene,
+			};
+	}
 }
 
 function createEnvCellLayerOwner(

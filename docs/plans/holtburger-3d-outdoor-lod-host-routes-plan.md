@@ -2316,6 +2316,74 @@ Decisions and course corrections:
 - Final zero-reference audit passed for executable old env-cell route/domain names, old env-cell provider name, old route-shaped outdoor source IDs, old terrain coordinate-space label, removed scheduler names, accidental `staticStaticWorkId`, and removed static-object/material compatibility bake names under `apps/holtburger-3d/src`, `apps/holtburger-3d/src-tauri/src`, `crates/holtburger-content/src`, and `crates/holtburger-debug-harness/src`.
 - Final shim-smell audit hits are classified as unrelated retained vocabulary: retail legacy sampler/material/render-pass terminology, material/terrain fallback diagnostics, texture wrap aliases, dynamic/browser fallback services, and `compatible` wording for current batching/material coalescing tests. No hit preserves a removed Phase 13-16 name, old route, old domain, dual-read path, compatibility wrapper, or old-name fixture acceptance.
 
+### Phase 18: Host-Emitted Portal Connectivity And Aperture Resources
+
+Status: implemented on 2026-06-30 with follow-up parity-test debt tracked below.
+
+Goal: make LoD `4` emit renderer-ready portal topology primitives so the browser no longer synthesizes sibling portal graph records or portal aperture resources from raw env-cell/building facts.
+
+Deliverables:
+
+- Add a host/content-side canonical portal connectivity graph for the LoD `4` `env-cell-system` layer.
+- Merge env-cell portal links and building transition links into one graph record with edge provenance rather than publishing separate sibling graph records.
+- Add host/content-side portal aperture resources for env-cell portals and building transition apertures, including stable range ids, source ids, vertices, indices, source kind, and source-domain/provenance metadata.
+- Preserve the current portal id/range/source id vocabulary intentionally, or update it in one reviewed cut with parity tests and snapshot changes. The host route must not emit a second naming dialect.
+- Preserve the current aperture triangulation and visible-side winding semantics, especially building transition apertures that currently depend on `decodeBuildingTransitionPortalInteriorVisibleSide`.
+- Extend the Tauri JSON adapter and TypeScript host DTO schemas to carry the merged connectivity graph and aperture resources from the LoD `4` route.
+- Update the frontend resolver/env-cell bake/publication path to consume the host-emitted graph and aperture resources directly.
+- Delete browser-side synthesis paths that become redundant, including env-cell portal aperture resource construction and sibling graph construction from `portalLinks`/building transition resources.
+- Keep projection view derivation in the browser/runtime unless profiling proves it should also move off the main thread.
+
+Acceptance criteria:
+
+- LoD `4` host payload contains one canonical env-cell-system portal connectivity graph for a landblock.
+- The graph contains both env-cell-to-env-cell and building-transition edge families with explicit provenance.
+- The LoD `4` host payload contains portal aperture resources sufficient for current portal stencil/mask rendering.
+- Runtime projection for an interior env-cell root sees outgoing env-cell graph edges without requiring browser-side `createEnvCellStaticPortalGraph`.
+- Runtime outdoor/building transition projection sees transition edges without requiring browser-side `createBuildingTransitionStaticPortalGraph`.
+- Browser env-cell bake/publication no longer emits duplicate same-owner portal graph records for one env-cell-system layer.
+- The temporary broad portal graph key hardening from the portal bug remains allowed as a defensive invariant, but no normal path depends on sibling graph records to preserve topology.
+- Outdoor-root `portalProjectionRecords` may continue to be derived during browser publication from the host-emitted graph/resources; Phase 18 must not require host-emitted projection views.
+- Tests prove LoD `4` host serialization, DTO parsing, resolver projection, env-cell publication, and static-scene-query projection all consume the host-emitted merged graph/resources.
+
+Task checklist:
+
+- [x] Add Rust/content types for merged portal connectivity edges, nodes, and aperture resources.
+- [x] Build merged connectivity from `EnvCellPortalFact` and `PreparedBuildingTransitionAperture` during LoD `4` assembly.
+- [x] Build portal aperture resource vertices/indices/ranges during LoD `4` assembly.
+- [x] Add host-side id helpers for portal graph node ids, edge ids, aperture resource ids, range ids, and source ids.
+- [ ] Add dedicated cross-language/shared parity tests that pin every portal graph id, aperture id, range id, source id, and winding rule against the old TypeScript contract.
+- [ ] Add dedicated aperture triangulation parity coverage for env-cell portal apertures and building transition apertures, including the interior-visible side winding rule.
+- [x] Serialize merged graph and aperture resources in the Tauri adapter.
+- [x] Add TypeScript DTO schemas and static contracts for the host-emitted graph/resources.
+- [x] Update `LandblockSceneLodSourceResolver` and env-cell-system source payloads to carry graph/resources through the resolver path.
+- [x] Update env-cell-system bake/publication to use host-emitted graph/resources instead of synthesizing them.
+- [x] Keep `portalProjectionRecords` browser-derived from host graph/resources during env-cell publication unless a later profiling phase moves root-specific projection derivation.
+- [x] Delete redundant browser-side graph/resource synthesis and update tests around the new source of truth.
+- [x] Run focused Rust/Tauri/TypeScript tests for LoD `4`, portal graph construction, env-cell publication, and portal projection.
+- [x] Run zero-reference audits for removed normal-path synthesis helpers and sibling graph assumptions.
+
+Decisions and course corrections:
+
+- Added after the portal visibility investigation showed the browser materialization path could produce sibling same-owner portal graph records, allowing a coarse committed-record key to erase env-cell topology while leaving aperture data intact.
+- Dry run on 2026-06-30 found the current host LoD `4` route still emits raw `buildingTransitionApertures`, `envCells`, and `portalLinks` only. The browser worker then creates env-cell aperture resources/graphs in `EnvCellSystemBaker` and building transition aperture resources/graphs in `StaticObjectBatchBaker`.
+- The implementation cut crosses Rust content assembly, Tauri JSON serialization, TypeScript DTO schemas, source payloads, `LandblockSceneLodSourceResolver`, env-cell baking/publication, committed-record query tests, and portal projection tests. This is one integration phase, not a narrow DTO-only edit.
+- The current adapter serializes source and target portal ids through different vocabularies in places. The merged host graph must canonicalize endpoint ids before the browser starts treating host graph records as renderer-ready.
+- Browser projection logic still needs interior records for outside visibility and env-cell aperture lookup. Phase 18 should replace graph/resource synthesis, not delete interior records or move root-specific projection derivation to the host.
+- This phase intentionally moves canonical portal connectivity and aperture resource construction into the host LoD asset route because those are deterministic prepared content/render primitives, not browser interaction policy.
+- Projection views remain runtime-derived because they depend on camera/root env-cell selection and current render caps. Moving projection view derivation to a worker is a later profiling-driven decision, not part of this phase.
+- Do not retain dual graph-building paths as compatibility shims. Once the host-emitted graph/resources are consumed, browser-side synthesis should be deleted from production modules. Test-only fixture construction is acceptable only if it is local to tests and cannot be reached by runtime code.
+- Implementation moved ownerless portal graph/resource construction into `holtburger-content` and stamps the runtime layer owner only inside env-cell-system bake publication.
+- Implementation deleted production browser synthesis for env-cell portal aperture resources, env-cell static portal graphs, and static-object building-transition portal resources/graphs. Old helper names remain only as test-local fixture builders.
+- Raw `portalLinks` remain in the env-cell source payload because portal interior records still use them as source facts. They are no longer used to synthesize production graph topology in the browser.
+- Outdoor building static-object bake no longer emits transition portal resources. Transition portal resources now come from the LoD `4` env-cell-system host payload.
+- The host graph canonicalizes env-cell target portal ids to the `interior-cell/{envCellId}/portal/{sourceIndex}` dialect instead of copying the older adapter target endpoint dialect.
+- Follow-up debt: add explicit cross-language parity coverage for portal ids/range ids/source ids and aperture winding. The runtime contract is covered by DTO parsing and focused tests, but the exact Rust-vs-old-TypeScript parity matrix is not yet first-class.
+- Validation passed: `npm run check` in `apps/holtburger-3d`; full `npm exec vitest run` in `apps/holtburger-3d` passed 68 files / 569 tests; `cargo fmt --check`; `cargo clippy -p holtburger-content -p holtburger-3d --tests -- -D warnings`; `cargo test -p holtburger-content -p holtburger-3d --tests`.
+- Final zero-reference audit passed for removed production synthesis helpers under `apps/holtburger-3d/src/lib`, `apps/holtburger-3d/src-tauri/src`, and `crates/holtburger-content/src`. Remaining `createEnvCellStaticPortalGraph` / `createBuildingTransitionStaticPortalGraph` hits are local fixture builders in `*.test.ts` files only.
+- Follow-up cleanup removed the local old graph-builder fixture names, deleted tests that only preserved deleted graph-builder behavior, deleted the sibling same-owner portal graph regression test, and removed the stale env-cell-system `buildingTransitionApertures` frontend DTO/source/scope shape. LoD `1` outdoor-buildings still emits raw `buildingTransitionApertures` as source facts; LoD `4` env-cell-system now exposes only host graph/resources plus `portalLinks` for interior records.
+- Follow-up validation passed: `npm run lint:dead`; `npm run check`; full `npm exec vitest run` passed 68 files / 564 tests; `cargo fmt --check`; `cargo test -p holtburger-3d --tests adapter::json`; `cargo clippy -p holtburger-3d --tests -- -D warnings`.
+
 ## Source Assembly Requirements
 
 Content-side route implementation must keep one shared landblock-scene understanding path, but it must not blindly build the full current outdoor/env-cell payloads and filter the result afterward:

@@ -21,7 +21,6 @@ import type {
 	StaticObjectSourceMappingCoverage,
 	StaticObjectSortMetadata,
 	StaticObjectSourceIdentity,
-	StaticPortalApertureResource,
 	StaticSpatialRecord,
 	StaticLayerPeerRecordOwner,
 	StaticObjectRenderInstance,
@@ -36,7 +35,6 @@ import {
 	createLayerOwnerKeyId,
 	createLayerPeerRecordOwnerForStaticWork,
 } from "../../layer-owners";
-import { createBuildingTransitionStaticPortalGraph } from "../../portal-graphs";
 import {
 	AC_UNIT_SCALE,
 	buildAcPlacementMatrix,
@@ -61,7 +59,6 @@ import {
 	isCurrentlyStageableStaticObjectDataUse,
 	isRenderableStaticObjectPartition,
 } from "./static-object-renderability";
-import { deriveBuildingTransitionPortalApertureResource } from "./building-transition-portal-apertures";
 import {
 	createStaticObjectVisualResourceId,
 	createStaticObjectVisualResourceKey,
@@ -92,12 +89,6 @@ export function bakeStaticObjectBatch(
 		bakeStaticObjectBatchItem(input, item),
 	);
 	const drawUnits = itemResults.flatMap((result) => result.drawUnits);
-	const buildingTransitionPortalApertureResources = itemResults.flatMap(
-		(result) =>
-			result.buildingTransitionPortalApertureResource
-				? [result.buildingTransitionPortalApertureResource]
-				: [],
-	);
 
 	return {
 		atlasRegistryUpdates: [],
@@ -117,22 +108,13 @@ export function bakeStaticObjectBatch(
 			(result) => result.diagnostics,
 		),
 		materialCoverage: itemResults.map((result) => result.materialCoverage),
-		portalApertureResources: buildingTransitionPortalApertureResources,
+		portalApertureResources: [],
 		revision: input.revision,
 		staticAuthoredDynamicSeeds: itemResults.flatMap(
 			(result) => result.staticAuthoredDynamicSeeds,
 		),
 		staticBatchId: input.staticBatchId,
-		staticPortalGraphs: itemResults.flatMap((result) =>
-			result.buildingTransitionPortalApertureResource
-				? [
-						createBuildingTransitionStaticPortalGraph(
-							createLayerPeerRecordOwner(result.work),
-							result.buildingTransitionPortalApertureResource,
-						),
-					]
-				: [],
-		),
+		staticPortalGraphs: [],
 		staticPortalInteriorRecords: [],
 		staticSourceMappings: itemResults.flatMap(
 			(result) => result.sourceMappings,
@@ -266,15 +248,9 @@ function bakeStaticObjectBatchItem(
 	readonly staticObjectRenderInstances: readonly StaticObjectRenderInstance[];
 	readonly staticObjectVisualResources: readonly StaticObjectVisualResource[];
 	readonly staticAuthoredDynamicSeeds: StaticBakeBatchResult["staticAuthoredDynamicSeeds"];
-	readonly buildingTransitionPortalApertureResource: StaticPortalApertureResource | null;
 	readonly work: StaticBakeBatchItem["work"];
 } {
 	const scope = createStaticObjectBatchPayload(item);
-	const buildingTransitionPortalApertureResource =
-		item.payload.scope.kind === "outdoor-static-objects" ||
-		item.payload.scope.kind === "env-cell-system"
-			? deriveBuildingTransitionPortalApertureResource(item.payload.scope)
-			: null;
 	const partitionPlan = partitionStaticObjectBatches(scope);
 	const sourceIndex = new StaticObjectBakeSourceIndex(scope, input.attachments);
 	const resourceIdPrefix = createLayerOwnerKeyId(item.targetOwnerKey);
@@ -376,7 +352,6 @@ function bakeStaticObjectBatchItem(
 			staticBatchId: input.staticBatchId,
 			work: item.work,
 		}).concat(instancedOutput.textureUses),
-		buildingTransitionPortalApertureResource,
 		work: item.work,
 	};
 }

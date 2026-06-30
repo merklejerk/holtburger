@@ -1,5 +1,4 @@
 import type {
-	LandblockPortalLinkFacts,
 	StaticPortalProjectionAdjacency,
 	StaticPortalProjectionComponent,
 	StaticPortalProjectionComponentEdge,
@@ -13,9 +12,7 @@ import type {
 	StaticBuildingTransitionApertureRange,
 	StaticPortalApertureResource,
 	StaticPortalGraphEdge,
-	StaticPortalGraphNode,
 	StaticPortalGraphRecord,
-	StaticPortalGraphScene,
 	StaticPortalInteriorRecord,
 	StaticLayerPeerRecordOwner,
 } from "./contracts";
@@ -31,96 +28,6 @@ type MutableProjectionDiagnostics = {
 };
 
 const OUTDOOR_ROOT_NODE_ID_PREFIX = "outdoor";
-
-export function createEnvCellStaticPortalGraph(
-	owner: StaticLayerPeerRecordOwner,
-	record: StaticPortalInteriorRecord,
-): StaticPortalGraphRecord {
-	const nodesById = new Map<string, StaticPortalGraphNode>();
-	for (const envCell of record.envCells) {
-		const node = createPortalGraphNode({
-			envCellId: envCell.envCellId,
-			kind: "env-cell",
-		});
-		nodesById.set(node.nodeId, node);
-	}
-
-	const edges = record.portalLinks
-		.map((link) => createEnvCellPortalGraphEdge(link, nodesById))
-		.filter((edge): edge is StaticPortalGraphEdge => edge !== null)
-		.sort(comparePortalGraphEdges);
-
-	return {
-		edges,
-		kind: "static-portal-graph",
-		landblockId: record.landblockId,
-		nodes: [...nodesById.values()].sort(comparePortalGraphNodes),
-		owner,
-	};
-}
-
-export function createBuildingTransitionStaticPortalGraph(
-	owner: StaticLayerPeerRecordOwner,
-	resource: StaticPortalApertureResource,
-): StaticPortalGraphRecord {
-	const nodesById = new Map<string, StaticPortalGraphNode>();
-	const outdoorNode = createPortalGraphNode({
-		kind: "outdoor",
-		landblockId: resource.landblockId,
-	});
-	nodesById.set(outdoorNode.nodeId, outdoorNode);
-
-	const edges: StaticPortalGraphEdge[] = [];
-	for (const range of getBuildingTransitionApertureRanges(resource)) {
-		const envCellId = range.source.targetEnvCellId;
-		const envCellNode = createPortalGraphNode({
-			envCellId,
-			kind: "env-cell",
-		});
-		nodesById.set(envCellNode.nodeId, envCellNode);
-		edges.push({
-			direction: "directed",
-			edgeId: [
-				"building-transition",
-				resource.apertureResourceId,
-				range.source.portalId,
-				envCellId,
-			].join(":"),
-			flags: 0,
-			linkId: [
-				"transition",
-				resource.apertureResourceId,
-				range.source.portalId,
-				envCellId,
-			].join(":"),
-			polygonId: range.source.polyId,
-			provenance: {
-				apertureResourceId: resource.apertureResourceId,
-				buildingInstanceId: range.source.buildingInstanceId,
-				buildingPortalId: range.source.buildingPortalId,
-				kind: "building-transition",
-				portalId: range.source.portalId,
-				targetEnvCellId: envCellId,
-			},
-			sceneCrossing: {
-				envCellId,
-				kind: "outdoor-to-env-cell",
-				outdoorLandblockId: resource.landblockId,
-			},
-			sourceIndex: range.source.buildingPortalSourceIndex,
-			sourceNodeId: outdoorNode.nodeId,
-			targetNodeId: envCellNode.nodeId,
-		});
-	}
-
-	return {
-		edges: edges.sort(comparePortalGraphEdges),
-		kind: "static-portal-graph",
-		landblockId: resource.landblockId,
-		nodes: [...nodesById.values()].sort(comparePortalGraphNodes),
-		owner,
-	};
-}
 
 export function createStaticPortalProjection(options: {
 	readonly landblockId: number;
@@ -275,133 +182,12 @@ export function createEnvCellPortalProjectionRoot(options: {
 	};
 }
 
-function createEnvCellPortalGraphEdge(
-	link: LandblockPortalLinkFacts,
-	nodesById: Map<string, StaticPortalGraphNode>,
-): StaticPortalGraphEdge | null {
-	if (link.source.kind !== "env-cell") {
-		return null;
-	}
-
-	const sourceNode = createPortalGraphNode({
-		envCellId: link.source.envCellId,
-		kind: "env-cell",
-	});
-	const targetNode = createPortalGraphNodeFromEndpoint(link.target);
-	nodesById.set(sourceNode.nodeId, sourceNode);
-	nodesById.set(targetNode.nodeId, targetNode);
-
-	return {
-		direction: "directed",
-		edgeId: ["env-cell-portal", link.linkId, link.sourceIndex].join(":"),
-		flags: link.flags,
-		linkId: link.linkId,
-		polygonId: link.polygonId,
-		provenance: {
-			kind: "env-cell-portal",
-			sourceEnvCellId: link.source.envCellId,
-			sourcePortalId: link.source.portalId,
-			target: link.target,
-		},
-		sceneCrossing: createEnvCellPortalSceneCrossing(link),
-		sourceIndex: link.sourceIndex,
-		sourceNodeId: sourceNode.nodeId,
-		targetNodeId: targetNode.nodeId,
-	};
-}
-
-function createPortalGraphNodeFromEndpoint(
-	endpoint: LandblockPortalLinkFacts["target"],
-): StaticPortalGraphNode {
-	switch (endpoint.kind) {
-		case "env-cell":
-			return createPortalGraphNode({
-				envCellId: endpoint.envCellId,
-				kind: "env-cell",
-			});
-		case "landblock-building":
-			return createPortalGraphNode({
-				buildingInstanceId: endpoint.instanceId,
-				kind: "landblock-building",
-			});
-		case "outside":
-			return createPortalGraphNode({
-				kind: "outdoor",
-				landblockId: endpoint.landblockId,
-			});
-	}
-}
-
-function createEnvCellPortalSceneCrossing(
-	link: LandblockPortalLinkFacts,
-): StaticPortalGraphEdge["sceneCrossing"] {
-	if (link.source.kind !== "env-cell") {
-		return null;
-	}
-	switch (link.target.kind) {
-		case "env-cell":
-			return {
-				kind: "env-cell-to-env-cell",
-				sourceEnvCellId: link.source.envCellId,
-				targetEnvCellId: link.target.envCellId,
-			};
-		case "landblock-building":
-			return {
-				buildingInstanceId: link.target.instanceId,
-				kind: "env-cell-to-landblock-building",
-				sourceEnvCellId: link.source.envCellId,
-			};
-		case "outside":
-			return {
-				kind: "env-cell-to-outdoor",
-				outdoorLandblockId: link.target.landblockId,
-				sourceEnvCellId: link.source.envCellId,
-			};
-	}
-}
-
-function createPortalGraphNode(
-	scene: StaticPortalGraphScene,
-): StaticPortalGraphNode {
-	switch (scene.kind) {
-		case "env-cell":
-			return {
-				nodeId: createEnvCellPortalGraphNodeId(scene.envCellId),
-				scene,
-			};
-		case "landblock-building":
-			return {
-				nodeId: `building:${scene.buildingInstanceId}`,
-				scene,
-			};
-		case "outdoor":
-			return {
-				nodeId: createOutdoorPortalGraphNodeId(scene.landblockId),
-				scene,
-			};
-	}
-}
-
 function createEnvCellPortalGraphNodeId(envCellId: number): string {
 	return `env-cell:${envCellId >>> 0}`;
 }
 
 function createOutdoorPortalGraphNodeId(landblockId: number): string {
 	return `${OUTDOOR_ROOT_NODE_ID_PREFIX}:${landblockId >>> 0}`;
-}
-
-function comparePortalGraphNodes(
-	left: StaticPortalGraphNode,
-	right: StaticPortalGraphNode,
-): number {
-	return left.nodeId.localeCompare(right.nodeId);
-}
-
-function comparePortalGraphEdges(
-	left: StaticPortalGraphEdge,
-	right: StaticPortalGraphEdge,
-): number {
-	return left.edgeId.localeCompare(right.edgeId);
 }
 
 function createOutsideVisibleEnvCellIds(

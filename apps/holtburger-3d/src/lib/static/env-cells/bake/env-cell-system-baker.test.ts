@@ -104,46 +104,25 @@ describe("browser landblock env-cell baker", () => {
 		]);
 	});
 
-	it("emits building transition portal resources from env-cell layer facts", () => {
+	it("passes through host-emitted portal resources and graph records", () => {
+		const transitionResource = createBuildingTransitionPortalApertureResource();
+		const transitionGraph = createPortalConnectivityGraph();
 		const input = createInput({
-			buildingTransitionApertures: [createBuildingTransitionAperture()],
+			portalApertureResources: [transitionResource],
+			portalConnectivityGraph: transitionGraph,
 		});
 		const result = bakeEnvCellSystem(input);
 
-		expect(result.portalApertureResources).toEqual([
-			expect.objectContaining({
-				apertureResourceId:
-					"portal-aperture-resource:building-transition:0xda55ffff",
+		expect(result.portalApertureResources).toEqual([transitionResource]);
+		expect(result.staticPortalGraphs).toEqual([
+			{
+				edges: transitionGraph.edges,
+				kind: "static-portal-graph",
 				landblockId: 0xda55ffff,
-				sourceDomain: "outdoor-buildings",
-				ranges: [
-					expect.objectContaining({
-						source: expect.objectContaining({
-							buildingInstanceId: "building-01",
-							kind: "building-transition",
-							targetEnvCellId: 0xda550100,
-						}),
-						sourceKind: "building-transition",
-					}),
-				],
-			}),
+				nodes: transitionGraph.nodes,
+				owner: expectedEnvCellLayerOwner(),
+			},
 		]);
-		expect(result.staticPortalGraphs).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({
-					edges: [
-						expect.objectContaining({
-							sceneCrossing: {
-								envCellId: 0xda550100,
-								kind: "outdoor-to-env-cell",
-								outdoorLandblockId: 0xda55ffff,
-							},
-						}),
-					],
-					owner: expectedEnvCellLayerOwner(),
-				}),
-			]),
-		);
 	});
 
 	it("rejects non-env-cell batches", () => {
@@ -1466,7 +1445,8 @@ function expectedEnvCellLayerOwner() {
 
 function createInput(
 	options: {
-		readonly buildingTransitionApertures?: EnvCellSystemStaticScopePayload["buildingTransitionApertures"];
+		readonly portalApertureResources?: EnvCellSystemStaticScopePayload["portalApertureResources"];
+		readonly portalConnectivityGraph?: EnvCellSystemStaticScopePayload["portalConnectivityGraph"];
 	} = {},
 ): StaticBakeBatchInput {
 	const work = {
@@ -1500,8 +1480,6 @@ function createInput(
 					job: work.job,
 					scope: {
 						acceptedEnvCellIds: [0xda550100],
-						buildingTransitionApertures:
-							options.buildingTransitionApertures ?? [],
 						envCells: [
 							{
 								cellBsp: {
@@ -1594,6 +1572,10 @@ function createInput(
 						missingRefs: [],
 						materialSources: [],
 						paletteSources: [],
+						portalApertureResources:
+							options.portalApertureResources ?? [],
+						portalConnectivityGraph:
+							options.portalConnectivityGraph ?? { edges: [], nodes: [] },
 						portalLinks: [],
 						regionRenderProfile: {
 							detailRoles: [],
@@ -1628,24 +1610,91 @@ function createInput(
 	};
 }
 
-function createBuildingTransitionAperture() {
+function createBuildingTransitionPortalApertureResource(): EnvCellSystemStaticScopePayload["portalApertureResources"][number] {
 	return {
-		apertureId: "building-transition-aperture:building-01:0",
-		buildingInstanceId: "building-01",
-		buildingPortalId: "building-portal-0",
-		buildingPortalSourceIndex: 0,
-		flags: 1,
-		linkedEnvCellIds: [0xda550100],
-		otherCellId: 0x0100,
-		otherPortalId: 0xffff,
-		points: [
+		apertureResourceId:
+			"portal-aperture-resource:building-transition:0xda55ffff",
+		coordinateSpace: "landblock-render-local",
+		indices: [0, 2, 1],
+		kind: "portal-aperture-resource",
+		landblockId: 0xda55ffff,
+		ranges: [
+			{
+				firstIndex: 0,
+				indexCount: 3,
+				rangeId:
+					"portal-aperture:building-transition:portal-aperture-resource:building-transition:0xda55ffff:transition-portal:outdoor-buildings:3663069183:building-transition-aperture:building-01:0:0:3",
+				source: {
+					buildingInstanceId: "building-01",
+					buildingPortalId: "building-portal-0",
+					buildingPortalSourceIndex: 0,
+					kind: "building-transition",
+					landblockId: 0xda55ffff,
+					linkedEnvCellIds: [0xda550100],
+					otherCellId: 0x0100,
+					otherPortalId: 0xffff,
+					polyId: 42,
+					portalId:
+						"transition-portal:outdoor-buildings:3663069183:building-transition-aperture:building-01:0",
+					portalIndex: 0,
+					sourceAssetId: "gfxobj/02001234",
+					sourceDid: 0x02001234,
+					targetEnvCellId: 0xda550100,
+				},
+				sourceId:
+					"building-transition:portal-aperture-resource:building-transition:0xda55ffff:transition-portal:outdoor-buildings:3663069183:building-transition-aperture:building-01:0:0:3",
+				sourceKind: "building-transition",
+			},
+		],
+		sourceDomain: "outdoor-buildings",
+		vertices: [
 			{ x: 0, y: 0, z: 0 },
 			{ x: 1, y: 0, z: 0 },
 			{ x: 0, y: 1, z: 0 },
 		],
-		polyId: 42,
-		portalIndex: 0,
-		sourceAssetId: "gfxobj/02001234",
-		sourceDid: 0x02001234,
+	};
+}
+
+function createPortalConnectivityGraph(): EnvCellSystemStaticScopePayload["portalConnectivityGraph"] {
+	return {
+		edges: [
+			{
+				direction: "directed",
+				edgeId:
+					"building-transition:portal-aperture-resource:building-transition:0xda55ffff:transition-portal:outdoor-buildings:3663069183:building-transition-aperture:building-01:0:3663008000",
+				flags: 0,
+				linkId:
+					"transition:portal-aperture-resource:building-transition:0xda55ffff:transition-portal:outdoor-buildings:3663069183:building-transition-aperture:building-01:0:3663008000",
+				polygonId: 42,
+				provenance: {
+					apertureResourceId:
+						"portal-aperture-resource:building-transition:0xda55ffff",
+					buildingInstanceId: "building-01",
+					buildingPortalId: "building-portal-0",
+					kind: "building-transition",
+					portalId:
+						"transition-portal:outdoor-buildings:3663069183:building-transition-aperture:building-01:0",
+					targetEnvCellId: 0xda550100,
+				},
+				sceneCrossing: {
+					envCellId: 0xda550100,
+					kind: "outdoor-to-env-cell",
+					outdoorLandblockId: 0xda55ffff,
+				},
+				sourceIndex: 0,
+				sourceNodeId: "outdoor:3663069183",
+				targetNodeId: "env-cell:3663008000",
+			},
+		],
+		nodes: [
+			{
+				nodeId: "env-cell:3663008000",
+				scene: { envCellId: 0xda550100, kind: "env-cell" },
+			},
+			{
+				nodeId: "outdoor:3663069183",
+				scene: { kind: "outdoor", landblockId: 0xda55ffff },
+			},
+		],
 	};
 }

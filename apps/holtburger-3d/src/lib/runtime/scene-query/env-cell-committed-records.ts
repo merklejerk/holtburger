@@ -965,7 +965,30 @@ function createCommittedAuthoredDynamicSeedRecordKey(
 function createCommittedPortalGraphRecordKey(
 	record: StaticPortalGraphRecord,
 ): string {
-	return `static-portal-graph:${record.landblockId >>> 0}:${createStaticPeerOwnerKey(record.owner)}`;
+	return [
+		"static-portal-graph",
+		record.landblockId >>> 0,
+		createStaticPeerOwnerKey(record.owner),
+		createStaticPortalGraphContentKey(record),
+	].join(":");
+}
+
+function createStaticPortalGraphContentKey(
+	record: StaticPortalGraphRecord,
+): string {
+	return record.edges
+		.map((edge) =>
+			[
+				edge.edgeId,
+				edge.linkId,
+				edge.sourceNodeId,
+				edge.targetNodeId,
+				edge.sourceIndex,
+				edge.polygonId ?? "none",
+			].join("/"),
+		)
+		.sort()
+		.join("|");
 }
 
 function createCommittedPortalInteriorRecordKey(

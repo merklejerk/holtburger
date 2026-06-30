@@ -1517,6 +1517,36 @@ describe("static scene query", () => {
 		});
 	});
 
+	it("keeps sibling portal graphs with the same layer owner", () => {
+		const query = new StaticSceneQuery();
+		const owner = createEnvCellLayerOwner(0xda55ffff);
+
+		query.applyStaticPeerRecords({
+			portalGraphs: [
+				createStaticPortalGraphRecord(owner, {
+					targetEnvCellId: 0xda550101,
+				}),
+				createStaticPortalGraphRecord(owner, {
+					targetEnvCellId: 0xda550102,
+				}),
+			],
+			portalInteriorRecords: [createProjectionPortalInteriorRecord(owner)],
+		});
+
+		expect(query.queryPortalGraphs({ landblockId: 0xda55ffff })).toHaveLength(
+			2,
+		);
+		expect(query.createSnapshot()).toMatchObject({
+			committedEnvCellPortalGraphRecordCount: 2,
+		});
+		expect(
+			query.queryEnvCellPortalProjection({
+				landblockId: 0xda55ffff,
+				startEnvCellId: 0xda550100,
+			})?.edges.map((edge) => edge.targetEnvCellId),
+		).toEqual([0xda550101, 0xda550102]);
+	});
+
 	it("returns null for outdoor portal projections without an env-cell-system layer", () => {
 		const query = new StaticSceneQuery();
 		const owner = createEnvCellLayerOwner(0xda55ffff);
@@ -2461,9 +2491,9 @@ function createStaticPortalGraphRecord(
 		edges: [
 			{
 				direction: "directed",
-				edgeId: "env-cell-portal:link-a:0",
+				edgeId: `env-cell-portal:${sourceEnvCellId >>> 0}:${targetEnvCellId >>> 0}:0`,
 				flags: 0,
-				linkId: "link-a",
+				linkId: `link:${sourceEnvCellId >>> 0}:${targetEnvCellId >>> 0}`,
 				polygonId: null,
 				provenance: {
 					kind: "env-cell-portal",

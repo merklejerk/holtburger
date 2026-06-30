@@ -420,50 +420,159 @@ Verification:
 - `npm run lint:ts`
 - `npm run lint:dead`
 
-### Phase 4: Move Bake Batching Behind Owner-Keyed Task Groups
+### Phase 4: Resteer Bake Contract Cutover
+
+Status: completed 2026-06-30.
+
+Purpose:
+
+- Split the bake-contract migration into strict but reviewable slices after confirming the blast
+  radius across coordinator, fake workers, worker protocol, terrain/static-object/env-cell bakers,
+  runtime tests, and bake tests.
+
+Deliverables:
+
+- Replace the original broad Phase 4 with smaller strict-cutover phases.
+- Keep the no-vestigial-code policy explicit: no touched bake contract may expose both
+  `ScheduledStaticWork` and owner/task identity at phase exit.
+- Record the remaining bake-work islands that must disappear before materialization tracking starts.
+
+Acceptance criteria:
+
+- The plan names the exact next slices and their deletion targets.
+- The split does not weaken the final Phase 4 outcome: no baker, attachment provider, worker, or
+  focused bake test may depend on `ScheduledStaticWork` or `staticWorkId` after the bake cutover
+  phases are done.
+
+Task checklist:
+
+- [x] Inspect current `StaticBakeBatchItem`, `StaticBakeBatchResult`, fake workers, worker protocol,
+      terrain baker, static object baker, env-cell baker, runtime tests, and coordinator tests.
+- [x] Split the original bake phase into contract, coordinator batch, and stale-filter deletion
+      slices.
+- [x] Preserve strict cutover language for each touched surface.
+
+Decisions and course corrections:
+
+- 2026-06-30: The original Phase 4 was too broad for one sane checkpoint. `StaticBakeBatchItem.work`
+  and `StaticBakeBatchResult.works` are consumed by coordinator, deferred fake workers, worker
+  protocol tests, terrain baker, static object baker, env-cell baker, runtime tests, and many focused
+  bake tests. The cutover should still be strict, but it needs smaller reviewable checkpoints.
+- 2026-06-30: No compatibility shape is allowed in the public bake contracts. A temporary helper may
+  adapt local test data while a phase is being implemented, but each phase exit must leave touched
+  contracts on exactly one model.
+
+Verification:
+
+- Plan-only resteer. No code verification required.
+
+### Phase 4A: Replace Bake Work Contracts With Task Identity
 
 Status: pending.
 
 Purpose:
 
-- Make bake input, bake output, and commit products owner-addressable so post-bake filtering can be
-  deleted.
+- Replace cross-module bake item/result identity from `ScheduledStaticWork` to explicit owner-keyed
+  task identity in one contract cutover.
 
 Deliverables:
 
-- Replace pending batch keys based on revision/domain with explicit batch records containing task
-  ids and owner ids.
-- Replace `StaticBakeBatchItem.work` and `StaticBakeBatchResult.works` with task/bake item identity
-  carrying `taskId`, `ownerKey`, `ownerId`, `domain`, `scope`, and `scopeKey`.
-- Update terrain, static object, and env-cell bakers to propagate layer owner identity through every
-  peer record and emitted resource.
-- Delete `filterStaticBakeResultForWorks` once no result needs demand-key reconstruction.
+- Add a first-class static layer bake task identity carrying `taskId`, `ownerKey`, `ownerId`,
+  `domain`, `scope`, `scopeKey`, and `revision`.
+- Replace `StaticBakeBatchItem.work` with `task`.
+- Replace `StaticBakeBatchResult.works` with task identities.
+- Update fake workers, worker client tests, coordinator tests, runtime tests, and the worker
+  protocol boundary for the new shape.
+- Update terrain, static object, and env-cell bakers enough to compile and preserve current output.
 
 Acceptance criteria:
 
 - Bake batches can contain multiple owners.
-- Canceled tasks do not commit baked products.
-- Every commit product that participates in retention or materialization has direct owner identity.
-- Stale bake counters are gone, not renamed.
-- No baker, attachment provider, worker, or focused bake test depends on `ScheduledStaticWork` or
+- No `StaticBakeBatchItem` or `StaticBakeBatchResult` field exposes `ScheduledStaticWork`.
+- No touched fake worker, worker protocol, or focused bake test completes or asserts by
   `staticWorkId`.
+- Existing rendered static output is preserved.
 
 Task checklist:
 
 - [ ] Add owner/task identity to bake item/result contracts.
-- [ ] Update static object, terrain, and env-cell bakers.
-- [ ] Replace `createLayerPeerRecordOwnerForStaticWork` with owner creation from layer task/bake
-      item identity.
-- [ ] Update attachment provider and atlas snapshot creation for owner-keyed batch items.
-- [ ] Replace `#pendingBatches` with owner-keyed pending batch records.
-- [ ] Remove `#staleBakeResults` and `filterStaticBakeResultForWorks`.
-- [ ] Update deferred baker test harnesses to complete by owner key/domain/landblock or task id
-      instead of `staticWorkId`.
-- [ ] Update bake tests to assert owner-key propagation instead of work-id filtering.
+- [ ] Replace all `item.work` and `result.works` compile errors with `item.task` and
+      `result.tasks`.
+- [ ] Replace `createLayerPeerRecordOwnerForStaticWork` call sites inside touched bakers with owner
+      creation from bake task identity.
+- [ ] Update deferred baker test harnesses to complete by owner key/domain/landblock or task id.
+- [ ] Update runtime tests that currently complete bakes by string-shaped static work id.
+- [ ] Run focused bake/coordinator/runtime tests touched by the contract change.
 
 Decisions and course corrections:
 
-- Record any baked output that cannot yet carry owner identity cleanly and why.
+- Record any baked output that still derives owner identity indirectly and why it survives this
+  phase.
+
+### Phase 4B: Replace Coordinator Pending Batches With Task Groups
+
+Status: pending.
+
+Purpose:
+
+- Make the coordinator's pending bake lifecycle task-addressable instead of revision/domain keyed.
+
+Deliverables:
+
+- Replace pending batch keys based on revision/domain with explicit pending batch records containing
+  task ids and owner ids.
+- Route bake completion through current task identity.
+- Keep resolver timing attached to task/batch records without `ScheduledStaticWork` maps.
+
+Acceptance criteria:
+
+- Canceled tasks do not commit baked products.
+- Pending batch records can describe their task owners directly.
+- Resolver timing does not depend on static work ids.
+
+Task checklist:
+
+- [ ] Replace `createPendingBatchKey(work)` with explicit pending batch identity.
+- [ ] Store task ids/owner ids on pending batch items.
+- [ ] Replace `#resolverMsByTaskId` with timing carried by task/batch records or delete it if no
+      longer valuable.
+- [ ] Update coordinator tests for canceled pending batches and same-owner task adoption.
+
+Decisions and course corrections:
+
+- Record whether resolver timing remains useful after task/batch identity is explicit.
+
+### Phase 4C: Delete Bake Stale Filtering And Demand-Key Result Reconstruction
+
+Status: pending.
+
+Purpose:
+
+- Remove the last bake-side stale-result accounting and post-bake demand-key archaeology.
+
+Deliverables:
+
+- Delete `#staleBakeResults`.
+- Delete `filterStaticBakeResultForWorks`.
+- Ensure every committed bake product that participates in retention or materialization already
+  carries direct owner identity.
+
+Acceptance criteria:
+
+- No stale bake counters remain in contracts, diagnostics, runtime reports, UI copy, or tests.
+- No `filterStaticBakeResultForWorks` or demand-key reconstruction remains.
+- Tests assert task/currentness outcomes instead of stale bake counts.
+
+Task checklist:
+
+- [ ] Remove stale bake summary fields from static coordinator snapshot and runtime diagnostics.
+- [ ] Replace stale bake tests with task cancellation/currentness tests.
+- [ ] Delete result filtering helpers and any now-dead demand-key helpers.
+- [ ] Run full static bake/coordinator/runtime verification for the cutover.
+
+Decisions and course corrections:
+
+- Record any commit product that blocks deletion of demand-key reconstruction.
 
 ### Phase 5: Replace Revision-Based Static Materialization Tracking
 

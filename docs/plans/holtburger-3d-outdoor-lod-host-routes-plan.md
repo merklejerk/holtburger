@@ -2100,6 +2100,7 @@ Decisions and course corrections:
 - Reviewed the final Definition of Done against current code and Phase 12A/12B evidence. The LoD route, prepared source cache, source-first frontend resolver fanout, layer-owner lifecycle, split explicit/generated domains, static-authored dynamic ownership, runtime dynamic no-residence handling, LoD `4` env-cell self-contained payload, old route deletion, and old lifecycle/domain audits are complete.
 - No durable architecture doc outside this implementation plan required an update. Other matching `docs/plans` hits are historical plan prose retained for posterity; executable and durable-boundary evidence is captured in this plan.
 - At original closeout, no remaining cleanup was intentionally deferred. Later review promoted the spicy/concession vocabulary called out during the closeout tour into explicit follow-up cleanup phases below.
+- Follow-up cleanup phases must be clean cutovers. Do not retain old-name aliases, translation tables, compatibility wrappers, fallback branches, test-only shims, or deprecation windows unless a phase explicitly proves the old name is an external protocol/source identifier that cannot be renamed safely.
 
 ### Phase 13: Env-Cell Domain Naming Debt Follow-Up
 
@@ -2119,6 +2120,7 @@ Acceptance criteria:
 - No executable `landblock-env-cells` domain/layer string remains outside historical plan prose, source provenance, or deliberately retained compatibility-free source vocabulary documented here.
 - No executable `LandblockEnvCellGeometryAttachmentProvider` type/import/reference remains.
 - The renamed env-cell system layer still maps to LoD `4`, remains self-contained from materialized building layers, and keeps layer-owner lifecycle behavior.
+- No alias accepts or translates the old env-cell domain/layer name after the cutover.
 - TypeScript checks/tests and relevant Rust gates pass for touched areas.
 
 Task checklist:
@@ -2129,6 +2131,7 @@ Task checklist:
 - [ ] Update tests, fixtures, and debug/UI labels to the new env-cell system vocabulary.
 - [ ] Run targeted and broad TypeScript validation.
 - [ ] Run zero-reference audits for executable `landblock-env-cells` domain/layer usage and `LandblockEnvCellGeometryAttachmentProvider`.
+- [ ] Audit for and delete any old-name alias, fallback, compatibility wrapper, or test shim introduced during the rename.
 - [ ] Record decisions, validation, and any intentionally retained historical/source vocabulary in this phase.
 
 Decisions and course corrections:
@@ -2154,6 +2157,7 @@ Acceptance criteria:
 - No executable coordinate-space label named `landblock-outdoor-terrain-local` remains outside historical plan prose.
 - No executable content source/provenance ID pattern shaped like `landblock/{id}/outdoor/...` remains unless this phase proves it is an externally meaningful source identifier that must stay and records that proof here.
 - Terrain alignment, outdoor static source identity, generated scenery identity, and source diagnostics remain stable where semantic identity should not change.
+- No alias accepts or translates old coordinate-space/source ID names after the cutover.
 - TypeScript checks/tests and relevant Rust tests pass for touched areas.
 
 Task checklist:
@@ -2165,6 +2169,7 @@ Task checklist:
 - [ ] Update resolver, terrain, object, and source-identity tests.
 - [ ] Run Rust and TypeScript validation for touched areas.
 - [ ] Run zero-reference audits for executable old coordinate-space/source ID strings.
+- [ ] Audit for and delete any old-name alias, fallback, compatibility wrapper, or test shim introduced during the rename.
 
 Decisions and course corrections:
 
@@ -2188,6 +2193,7 @@ Acceptance criteria:
 - Static resource ownership remains represented by layer owner records, not scheduler fields.
 - Scheduler snapshots and diagnostics use names that do not imply retained scene ownership.
 - Any surviving `workId` or `activeWork` names are explicitly justified as public diagnostic vocabulary in this phase.
+- Renamed scheduler fields do not keep old-name getters, aliases, or snapshot compatibility fields.
 - TypeScript checks/tests pass for touched areas.
 
 Task checklist:
@@ -2197,6 +2203,7 @@ Task checklist:
 - [ ] Rename coordinator, demand planner, diagnostics, fake-worker, runtime, and test usages.
 - [ ] Run targeted static coordinator/runtime tests plus broad TypeScript validation.
 - [ ] Run zero-reference audits for names this phase removes.
+- [ ] Audit for and delete any old-name alias, fallback, compatibility wrapper, or test shim introduced during the rename.
 - [ ] Record any intentionally retained diagnostic terminology with rationale.
 
 Decisions and course corrections:
@@ -2220,6 +2227,7 @@ Acceptance criteria:
 
 - No static object bake module name reads as a legacy compatibility shim unless this phase explicitly proves and records that the term means material compatibility and is the clearest available name.
 - Env-cell and outdoor static object bake paths still share the intended batching logic without route compatibility aliases.
+- Renamed bake files/exports do not keep compatibility aliases or wrapper exports under the old names.
 - TypeScript checks/tests pass for touched areas.
 
 Task checklist:
@@ -2229,6 +2237,7 @@ Task checklist:
 - [ ] Rename files, exports, imports, tests, and diagnostics if the audit finds misleading names.
 - [ ] Run targeted bake/partition tests plus broad TypeScript validation.
 - [ ] Run zero-reference audits for renamed compatibility symbols.
+- [ ] Audit for and delete any old-name alias, fallback, compatibility wrapper, or test shim introduced during the rename.
 - [ ] Record any intentionally retained `compatibility` terms with rationale.
 
 Decisions and course corrections:
@@ -2250,6 +2259,7 @@ Deliverables:
 Acceptance criteria:
 
 - Follow-up cleanup has no compatibility aliases for old names.
+- Follow-up cleanup has no fallback branches, temporary wrappers, dual-read paths, or tests that preserve old names as accepted inputs.
 - Remaining historical terms are limited to plan prose or explicitly justified source vocabulary.
 - Validation passes for all touched areas.
 
@@ -2258,6 +2268,7 @@ Task checklist:
 - [ ] Run `npm run check` and broad `npm run test:ts`.
 - [ ] Run relevant Rust format, clippy, and tests if content/Tauri/Rust contracts were touched.
 - [ ] Run final zero-reference audits for all names removed by Phases 13 through 16.
+- [ ] Run final shim audits for alias maps, fallback branches, compatibility wrappers, dual-name tests, and old-name fixture acceptance.
 - [ ] Record final validation and surviving-term classifications.
 
 Decisions and course corrections:

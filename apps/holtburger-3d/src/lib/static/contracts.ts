@@ -1863,13 +1863,13 @@ export interface StaticCoordinatorSnapshot {
 export interface StaticCoordinatorOverviewSnapshot {
 	/** Coordinator revision for browser-facing status summaries. */
 	readonly revision: number;
-	/** Number of active static work items not yet settled. */
+	/** Number of active static layer tasks not yet settled. */
 	readonly requested: number;
-	/** Number of active work items currently resolving source payloads. */
+	/** Number of active layer tasks currently resolving source payloads. */
 	readonly resolving: number;
-	/** Number of active work items currently baking renderable payloads. */
+	/** Number of active layer tasks currently baking renderable payloads. */
 	readonly baking: number;
-	/** Number of static work items committed since coordinator creation. */
+	/** Number of static layer tasks committed since coordinator creation. */
 	readonly committed: number;
 	/** Most recent terrain payload summary for browser diagnostics. */
 	readonly latestTerrainPayload: TerrainStaticScopePayloadSummary | null;

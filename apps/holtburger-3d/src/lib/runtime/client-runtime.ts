@@ -91,6 +91,7 @@ import type {
 	StaticCoordinatorTimingDiagnostics,
 	StaticCoordinatorOverviewSnapshot,
 	StaticObjectBakeDiagnostics,
+	LayerOwnerKey,
 } from "../static/contracts";
 import {
 	collectStaticDrawUnitResourceIds,
@@ -971,6 +972,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 		try {
 			reconciliation = this.#reconcileStaticRetention(this.#sceneInterest);
 			this.#dynamicEntityController.retainLayerOwners(
+				reconciliation.retainedLayerOwners,
+			);
+			this.#retainStaticLayerOwnerTextureBatchIds(
 				reconciliation.retainedLayerOwners,
 			);
 			this.#dynamicEntityController.clearEvictedRuntimeRenderResidences(
@@ -2047,6 +2051,15 @@ class ClientRuntimeImpl implements ClientRuntime {
 				),
 				staticBatchId,
 			);
+		}
+	}
+
+	#retainStaticLayerOwnerTextureBatchIds(layerOwners: readonly LayerOwnerKey[]): void {
+		const retainedOwnerIds = new Set(layerOwners.map(createLayerOwnerKeyId));
+		for (const key of this.#textureBatchIdByStaticLayerOwner.keys()) {
+			if (!retainedOwnerIds.has(getTextureBatchLookupLayerOwnerId(key))) {
+				this.#textureBatchIdByStaticLayerOwner.delete(key);
+			}
 		}
 	}
 
@@ -4316,6 +4329,14 @@ function createStaticLayerOwnerTextureBatchLookupKey(
 	layerOwnerId: string,
 ): string {
 	return `${domain}:${layerOwnerId}`;
+}
+
+function getTextureBatchLookupLayerOwnerId(key: string): string {
+	const separatorIndex = key.indexOf(":");
+	if (separatorIndex < 0) {
+		throw new Error(`Invalid static layer owner texture batch key ${key}.`);
+	}
+	return key.slice(separatorIndex + 1);
 }
 
 function createPortalFrameWorkPlanDiagnostics(plan: PortalFrameWorkPlan) {

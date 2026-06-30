@@ -687,7 +687,7 @@ Verification:
 
 ### Phase 6: Gate Static-Authored Dynamics On Static Materialization
 
-Status: pending.
+Status: completed 2026-06-30.
 
 Purpose:
 
@@ -712,16 +712,32 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Audit static materializer, static scene query, and dynamic controller ingestion order.
-- [ ] Keep static-authored seed ingestion after successful materialization only.
-- [ ] Make layer-owner retention remove static-authored dynamic records and release prep/resources.
-- [ ] Keep runtime-authored create/update/remove APIs independent from static owner retention.
-- [ ] Update runtime and dynamic controller tests.
+- [x] Audit static materializer, static scene query, and dynamic controller ingestion order.
+- [x] Keep static-authored seed ingestion after successful materialization only.
+- [x] Make layer-owner retention remove static-authored dynamic records and release prep/resources.
+- [x] Keep runtime-authored create/update/remove APIs independent from static owner retention.
+- [x] Update runtime and dynamic controller tests.
 
 Decisions and course corrections:
 
-- Record any current tests that assumed static-authored dynamic records exist before materialization
-  and replace them with materialization-gated assertions.
+- 2026-06-30: Static-authored seed ingestion already happens after successful
+  `materializeStaticCommit`; no pre-materialization dynamic entity records were being created on the
+  runtime path.
+- 2026-06-30: Added a failed texture materialization regression where the commit contains
+  static-authored dynamic seeds. The failed commit does not create dynamic entity records.
+- 2026-06-30: Layer-owner retention already removes static-authored dynamic records and leaves
+  runtime-authored records alive. Runtime render residence clearing remains independent for runtime
+  authored dynamics.
+- 2026-06-30: Pruned static layer owner texture-batch lookup entries during layer-owner retention so
+  static-authored dynamic material state does not outlive the owning layer.
+
+Verification:
+
+- `npm run test:ts -- --run src/lib/runtime/client-runtime.test.ts src/lib/dynamic/dynamic-entity-controller.test.ts src/lib/dynamic/dynamic-entity-resource-manager.test.ts`
+- `npm run test:ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run lint:dead`
 
 ### Phase 7: Replace Dynamic Resource Generation Checks With Preparations
 

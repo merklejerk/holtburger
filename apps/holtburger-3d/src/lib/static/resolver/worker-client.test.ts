@@ -244,6 +244,7 @@ function createSourceResolution(
 ): StaticLandblockSceneLodResolution {
 	const job = createJob();
 	return {
+		dynamicRecipes: [],
 		recipes: [
 			{
 				payload: createPayload(job),

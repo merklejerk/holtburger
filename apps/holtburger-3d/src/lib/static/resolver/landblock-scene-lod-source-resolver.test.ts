@@ -112,6 +112,68 @@ describe("landblock scene LoD source resolver", () => {
 			});
 		}
 	});
+
+	it("emits static-authored dynamic recipes beside static layer recipes", async () => {
+		const setupModelId = 0x02000010;
+		const animationId = 0x03000010;
+		const resolution = await new LandblockSceneLodSourceResolver({
+			assetService: new RecordingPreparedAssetReader([
+				createPreparedAsset(
+					"landblock-scene-lod",
+					"da55ffff:4",
+					createSceneLodPayload({ dynamicBuilding: true }),
+				),
+				createPreparedAsset("terrain-material", 2, createTerrainMaterialPayload()),
+				createPreparedAsset(
+					"region-render-profile",
+					2,
+					createRegionRenderProfilePayload(),
+				),
+				createPreparedAsset(
+					"setup-model",
+					setupModelId,
+					createSetupModelPayload({ animationId, setupModelId }),
+				),
+				createPreparedAsset(
+					"animation",
+					animationId,
+					createAnimationPayload(animationId),
+				),
+			]),
+		}).resolveSource(createSourceRequest());
+
+		expect(resolution.dynamicRecipes).toHaveLength(1);
+		expect(resolution.dynamicRecipes[0]?.targetOwnerKey).toEqual({
+			kind: "outdoor-buildings",
+			landblockId: 0xda55ffff,
+		});
+		expect(resolution.dynamicRecipes[0]?.recipe).toMatchObject({
+			animationSelection: { kind: "setup-default" },
+			entityId:
+				"static-authored-outdoor:outdoor-buildings:0xda55ffff:object:building:building-0:setup:02000010",
+			source: {
+				kind: "static-authored",
+				placementId: "object:building:building-0:setup:02000010",
+				sourceResidence: {
+					kind: "outdoor-landblock",
+					landblockId: 0xda55ffff,
+				},
+			},
+			visual: {
+				animation: {
+					payload: {
+						animationId,
+					},
+				},
+				setupModel: {
+					identity: {
+						sourceAssetKind: "setup-model",
+						sourceDid: setupModelId,
+					},
+				},
+			},
+		});
+	});
 });
 
 class RecordingPreparedAssetReader implements PreparedAssetReader {
@@ -231,7 +293,11 @@ function createBakeInput(recipe: StaticLayerRecipe): StaticBakeBatchInput {
 	};
 }
 
-function createSceneLodPayload() {
+function createSceneLodPayload(
+	options: {
+		readonly dynamicBuilding?: boolean;
+	} = {},
+) {
 	return {
 		diagnostics: createDiagnostics(),
 		kind: "landblock-scene-lod",
@@ -245,7 +311,7 @@ function createSceneLodPayload() {
 				buildingTransitionApertures: [],
 				kind: "outdoor-buildings",
 				outdoorBvh: null,
-				statics: [],
+				statics: options.dynamicBuilding ? [createDynamicBuildingStatic()] : [],
 			},
 			{
 				kind: "outdoor-explicit-objects",
@@ -277,6 +343,93 @@ function createSceneLodPayload() {
 		regionId: 1,
 		regionNumber: 2,
 		source: { context: "outdoor", level: 4 },
+	};
+}
+
+function createDynamicBuildingStatic() {
+	return {
+		building: { numLeaves: 1, portals: [] },
+		generated: null,
+		instanceBounds: null,
+		instanceId: "building-0",
+		kind: "building",
+		localPlacement: createPlacement(),
+		sourceAssetId: "setup-model/02000010",
+		sourceBounds: null,
+		sourceDid: 0x02000010,
+		sourceIndex: 0,
+		sourceScale: { x: 1, y: 1, z: 1 },
+	};
+}
+
+function createSetupModelPayload(options: {
+	readonly animationId: number;
+	readonly setupModelId: number;
+}) {
+	return {
+		collisionWitness: { cylSphereCount: 0, sphereCount: 0 },
+		connectionPoints: [],
+		defaultAnimation: options.animationId,
+		defaultMotionTable: null,
+		defaultScript: null,
+		defaultScriptTable: null,
+		defaultSoundTable: null,
+		dependencies: { gfxObjAssetIds: [] },
+		flags: null,
+		height: null,
+		holdingLocations: [],
+		kind: "setup-model",
+		lights: [],
+		parts: [],
+		placementSets: [],
+		provenance: createProvenance("setup-model"),
+		radius: null,
+		residencyKind: "unknown",
+		selectionSphere: null,
+		setupModelId: options.setupModelId,
+		sortingSphere: null,
+		sourceAssetKind: "setup-model",
+		stepDown: null,
+		stepUp: null,
+	};
+}
+
+function createAnimationPayload(animationId: number) {
+	return {
+		animationAssetId: `animation/${animationId.toString(16).padStart(8, "0")}`,
+		animationId,
+		dependencies: {},
+		flags: null,
+		frameCount: 1,
+		kind: "animation",
+		objectPositionFrames: [],
+		partCount: 0,
+		partFrames: [
+			{
+				frameIndex: 0,
+				hooks: [],
+				localPlacements: [],
+			},
+		],
+		provenance: createProvenance("animation"),
+		residencyKind: "unknown",
+		sourceAssetKind: "animation",
+	};
+}
+
+function createPlacement() {
+	return {
+		orientation: {
+			w: 1,
+			x: 0,
+			y: 0,
+			z: 0,
+		},
+		origin: {
+			x: 0,
+			y: 0,
+			z: 0,
+		},
 	};
 }
 

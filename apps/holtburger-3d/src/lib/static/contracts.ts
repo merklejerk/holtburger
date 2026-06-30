@@ -8,6 +8,7 @@ import type {
 	EnvCellSystemLayerSourcePayloadDto,
 	LandblockOutdoorLayerSourcePayloadDto,
 } from "./source-payloads";
+import type { DynamicEntityRecipe } from "../dynamic/contracts";
 import type { VisualGeometryPayload } from "../visual/visual-geometry";
 
 export type StaticDomain =
@@ -149,7 +150,15 @@ export interface StaticLayerRecipe {
 	readonly payload: StaticScopePayload;
 }
 
+export interface StaticAuthoredDynamicRecipe {
+	/** Layer owner whose residency gates activation of the dynamic placement. */
+	readonly targetOwnerKey: LayerOwnerKey;
+	/** Resolved dynamic visual recipe emitted beside static layer recipes. */
+	readonly recipe: DynamicEntityRecipe;
+}
+
 export interface StaticLandblockSceneLodResolution {
+	readonly dynamicRecipes: readonly StaticAuthoredDynamicRecipe[];
 	readonly request: StaticLandblockSceneLodSourceRequest;
 	readonly recipes: readonly StaticLayerRecipe[];
 }
@@ -571,6 +580,9 @@ interface TerrainRenderLocalBvh {
 export interface OutdoorStaticObjectsScopePayload {
 	readonly kind: "outdoor-static-objects";
 	readonly domain: OutdoorStaticObjectDomain;
+	/** Static-authored object placements promoted to dynamic visual prep. */
+	readonly authoredDynamicPlacements: readonly OutdoorStaticObjectDynamicPlacementFacts[];
+	/** Legacy downstream activation carrier; removed once static-authored prep is recipe-backed. */
 	readonly authoredDynamicSeeds: readonly OutdoorStaticObjectDynamicSeedFacts[];
 	readonly buildingTransitionApertures: LandblockOutdoorLayerSourcePayloadDto["buildingTransitionApertures"];
 	readonly landblock: LandblockSourceIdentity;
@@ -787,6 +799,9 @@ export interface LandblockEnvCellStaticFacts {
 	readonly surfaces: readonly LandblockEnvCellSurfaceFacts[];
 	readonly portals: EnvCellSystemLayerSourcePayloadDto["envCells"][number]["portals"];
 	readonly portalApertures: EnvCellSystemLayerSourcePayloadDto["envCells"][number]["portalApertures"];
+	/** Static-authored object placements promoted to dynamic visual prep. */
+	readonly authoredDynamicPlacements: readonly EnvCellStaticObjectDynamicPlacementFacts[];
+	/** Static object placements retained as env-cell bookkeeping, not dynamic activation inputs. */
 	readonly staticObjectSeeds: readonly LandblockEnvCellStaticObjectSeedFacts[];
 	readonly renderGeometry: LandblockEnvCellRenderGeometryFacts;
 	readonly cellBsp: EnvCellSystemLayerSourcePayloadDto["envCells"][number]["cellBsp"];
@@ -1272,6 +1287,22 @@ interface StaticEnvCellSourceMappingRecord {
 	readonly surfaces: readonly LandblockEnvCellSurfaceFacts[];
 }
 
+export type StaticAuthoredDynamicPlacementRecord =
+	| OutdoorStaticObjectDynamicPlacementRecord
+	| EnvCellStaticObjectDynamicPlacementRecord;
+
+interface OutdoorStaticObjectDynamicPlacementRecord {
+	readonly kind: "outdoor-static-object-dynamic-placement";
+	readonly owner: StaticLayerPeerRecordOwner;
+	readonly placement: OutdoorStaticObjectDynamicPlacementFacts;
+}
+
+interface EnvCellStaticObjectDynamicPlacementRecord {
+	readonly kind: "env-cell-static-object-dynamic-placement";
+	readonly owner: StaticLayerPeerRecordOwner;
+	readonly placement: EnvCellStaticObjectDynamicPlacementFacts;
+}
+
 export type StaticAuthoredDynamicSeedRecord =
 	| OutdoorStaticObjectDynamicSeedRecord
 	| StaticEnvCellStaticObjectDynamicSeedRecord
@@ -1297,6 +1328,9 @@ export interface OutdoorStaticObjectDynamicSeedFacts {
 	readonly classificationReason: "setup-default-animation";
 }
 
+export type OutdoorStaticObjectDynamicPlacementFacts =
+	OutdoorStaticObjectDynamicSeedFacts;
+
 /** Classified env-cell authored static that should enter dynamic runtime registration. */
 interface StaticEnvCellStaticObjectDynamicSeedRecord {
 	readonly kind: "env-cell-static-object-dynamic-seed";
@@ -1318,6 +1352,9 @@ export interface EnvCellStaticObjectDynamicSeedFacts {
 	readonly sourceScale: StaticVec3;
 	readonly classificationReason: "setup-default-animation";
 }
+
+export type EnvCellStaticObjectDynamicPlacementFacts =
+	EnvCellStaticObjectDynamicSeedFacts;
 
 interface StaticEnvCellStaticObjectSeedRecord {
 	readonly kind: "env-cell-static-object-seed";

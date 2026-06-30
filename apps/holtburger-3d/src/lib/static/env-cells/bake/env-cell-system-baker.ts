@@ -12,7 +12,6 @@ import type {
 	EnvCellCellStructureGeometryAttachment,
 	StaticMaterialCoverageReport,
 	StaticMaterialTableEntry,
-	StaticObjectSourceAssetFacts,
 	StaticPortalApertureResource,
 	StaticPortalGraphRecord,
 	StaticPortalInteriorRecord,
@@ -1107,21 +1106,9 @@ function createAuthoredDynamicSeedRecords(
 	owner: StaticLayerPeerRecordOwner,
 	payload: EnvCellSystemStaticScopePayload,
 ): readonly StaticAuthoredDynamicSeedRecord[] {
-	const sourceByKey = new Map(
-		payload.sourceAssets.map((source) => [
-			createSourceKey(source.identity),
-			source,
-		]),
-	);
 	return payload.envCells.flatMap((envCell) =>
 		envCell.staticObjectSeeds.flatMap((seed) =>
-			createAuthoredDynamicSeedRecordsForSeed(
-				owner,
-				payload,
-				envCell,
-				seed,
-				sourceByKey,
-			),
+			createAuthoredDynamicSeedRecordsForSeed(owner, payload, envCell, seed),
 		),
 	);
 }
@@ -1131,7 +1118,6 @@ function createAuthoredDynamicSeedRecordsForSeed(
 	payload: EnvCellSystemStaticScopePayload,
 	envCell: LandblockEnvCellStaticFacts,
 	seed: LandblockEnvCellStaticFacts["staticObjectSeeds"][number],
-	sourceByKey: ReadonlyMap<string, StaticObjectSourceAssetFacts>,
 ): readonly StaticAuthoredDynamicSeedRecord[] {
 	const staticSeedRecord: StaticAuthoredDynamicSeedRecord = {
 		envCellId: envCell.identity.envCellId,
@@ -1140,66 +1126,13 @@ function createAuthoredDynamicSeedRecordsForSeed(
 		owner,
 		seed,
 	};
-	const dynamicSeedRecord = createEnvCellStaticObjectDynamicSeedRecord({
-		envCell,
-		owner,
-		payload,
-		seed,
-		sourceByKey,
-	});
-
-	return dynamicSeedRecord ? [dynamicSeedRecord] : [staticSeedRecord];
-}
-
-function createEnvCellStaticObjectDynamicSeedRecord(options: {
-	readonly envCell: LandblockEnvCellStaticFacts;
-	readonly owner: StaticLayerPeerRecordOwner;
-	readonly payload: EnvCellSystemStaticScopePayload;
-	readonly seed: LandblockEnvCellStaticFacts["staticObjectSeeds"][number];
-	readonly sourceByKey: ReadonlyMap<string, StaticObjectSourceAssetFacts>;
-}): StaticAuthoredDynamicSeedRecord | null {
-	const source = options.sourceByKey.get(createSourceKey(options.seed.source));
-	if (
-		!source ||
-		source.sourceAssetKind !== "setup-model" ||
-		source.defaultAnimation === null
-	) {
-		return null;
-	}
-
-	return {
-		kind: "env-cell-static-object-dynamic-seed",
-		owner: options.owner,
-		seed: {
-			classificationReason: "setup-default-animation",
-			defaultAnimationId: source.defaultAnimation,
-			envCellId: options.envCell.identity.envCellId,
-			landblockId: options.payload.landblock.landblockId,
-			localPlacement: options.seed.localPlacement,
-			object: options.seed.identity,
-			setupModelId: source.identity.sourceDid,
-			source: options.seed.source,
-			sourceAssetId: source.debug.sourceAssetId,
-			sourceResidence: options.payload.landblock,
-			sourceScale: options.seed.sourceScale ?? { x: 1, y: 1, z: 1 },
-		},
-	};
+	return [staticSeedRecord];
 }
 
 function createLayerPeerRecordOwner(
 	task: StaticBakeTask,
 ): StaticLayerPeerRecordOwner {
 	return createLayerPeerRecordOwnerForStaticBakeTask(task);
-}
-
-function createSourceKey(
-	source: StaticObjectSourceAssetFacts["identity"],
-): string {
-	return [
-		source.kind,
-		source.sourceAssetKind,
-		formatHex32(source.sourceDid),
-	].join(":");
 }
 
 function formatHex32(value: number): string {

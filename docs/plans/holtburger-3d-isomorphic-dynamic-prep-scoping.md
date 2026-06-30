@@ -1010,7 +1010,34 @@ Acceptance criteria:
 
 Decisions and course corrections:
 
-- Pending.
+- Completed during Phase 1.
+
+Implemented contract surface:
+
+- Added `DynamicEntityRecipeSource`, `DynamicEntityRecipe`, `DynamicVisualRecipe`,
+  `DynamicVisualMaterialPolicy`, `DynamicVisualBakeInput`, `DynamicVisualBakeResult`,
+  `DynamicVisualBakeProduct`, `BakedDynamicVisualResource`, skip/failure reason types, and
+  controller-facing `DynamicVisualApplicationResult` in `dynamic/contracts.ts`.
+- Exported the existing renderer-facing visual resource state types needed for the cutover:
+  `DynamicEntityVisualResourceState`, `DynamicEntityVisualResourcesReadyState`,
+  `DynamicEntityVisualResourcesFailedState`, `DynamicEntityMaterialSlotRequirement`, and
+  `DynamicEntityResourceStatus`.
+- Added dynamic-owned texture batch helpers:
+  `createStaticAuthoredDynamicTextureBatchId(...)` and `createRuntimeDynamicTextureBatchId(...)`.
+- Added `dynamic/visual-recipe-resolver.ts` with the resolver interface/request shape.
+- Added `dynamic/visual-baker.ts` with the dynamic visual baker interface.
+
+Verification:
+
+- `npm run test:ts -- src/lib/dynamic/visual-contracts.test.ts`
+- `npm run check`
+
+Course correction:
+
+- `BakedDynamicVisualResource` intentionally mirrors the current ready visual state fields
+  (`sourceAssets`, `materialSources`, `paletteSources`, `textureRefs`, `renderParts`, material
+  slots, and texture requirements). This keeps Phase 5 able to populate `record.resources.visual`
+  without rewriting renderer conversion in the same step.
 
 ### Phase 2: Extract Shared Recipe Resolution
 

@@ -1,5 +1,11 @@
 import { HostBackedAssetService } from "../assets/asset-service";
 import type { PreparedAssetReader } from "../assets/contracts";
+import type { DynamicVisualBaker } from "../dynamic/visual-baker";
+import {
+	DynamicVisualBakeWorkerClient,
+	WorkerPoolDynamicVisualBaker,
+} from "../dynamic/visual-bake-worker-client";
+import type { DynamicVisualBakeWorkerPort } from "../dynamic/visual-bake-protocol";
 import { createBrowserRuntimeHost } from "../host/runtime-host";
 import { createWebgl2Renderer } from "../renderer/webgl2/webgl2-renderer";
 import {
@@ -159,6 +165,40 @@ function createWorkerStaticBaker(workerCount: number): StaticBaker {
 	return new WorkerPoolStaticBaker(bakers);
 }
 
+interface DynamicVisualBakerBrowserWorker extends DynamicVisualBakeWorkerPort {
+	terminate(): void;
+}
+
+interface WorkerDynamicVisualBakerFactories {
+	readonly createWorker?: () => DynamicVisualBakerBrowserWorker;
+}
+
+export function createWorkerDynamicVisualBaker(
+	workerCount: number,
+	factories: WorkerDynamicVisualBakerFactories = {},
+): DynamicVisualBaker {
+	assertPositiveInteger(workerCount, "dynamic visual baker worker count");
+	const createWorker =
+		factories.createWorker ?? createDynamicVisualBakerBrowserWorker;
+
+	const bakers = Array.from({ length: workerCount }, () => {
+		const worker = createWorker();
+
+		return new DynamicVisualBakeWorkerClient(worker, {
+			disposePort: () => worker.terminate(),
+		});
+	});
+
+	return new WorkerPoolDynamicVisualBaker(bakers);
+}
+
+function createDynamicVisualBakerBrowserWorker(): DynamicVisualBakerBrowserWorker {
+	return new Worker(
+		new URL("../dynamic/visual-bake.worker.ts", import.meta.url),
+		{ type: "module" },
+	) as DynamicVisualBakerBrowserWorker;
+}
+
 function createWorkerTexturePacker(workerCount: number): TexturePacker {
 	assertPositiveInteger(workerCount, "texture packing worker count");
 
@@ -189,7 +229,8 @@ class BrowserStaticResolver
 	#disposed = false;
 
 	constructor(options: {
-		readonly terrainResolver: StaticResolver & StaticLandblockSceneLodSourceResolver;
+		readonly terrainResolver: StaticResolver &
+			StaticLandblockSceneLodSourceResolver;
 	}) {
 		this.#sceneLodSourceResolver = options.terrainResolver;
 	}

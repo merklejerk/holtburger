@@ -178,9 +178,6 @@ describe("browser landblock env-cell resolver", () => {
 		expect(
 			assetService.requestedKeys.map((key) => describeHostAssetKey(key)),
 		).not.toContain("env-cell:da550100");
-		expect(
-			assetService.requestedKeys.map((key) => describeHostAssetKey(key)),
-		).not.toContain("landblock-outdoor:da55ffff");
 	});
 
 	it("records missing static seed sources without dropping cell-structure facts", async () => {
@@ -440,7 +437,7 @@ describe("browser landblock env-cell resolver", () => {
 			createPreparedAsset(
 				createHostAssetKey("landblock-scene-lod-env-cell-layer", 0xda55ffff),
 				{
-					kind: "landblock-outdoor",
+					kind: "setup-model",
 				},
 			),
 		]);
@@ -450,7 +447,7 @@ describe("browser landblock env-cell resolver", () => {
 				createEnvCellRequest(),
 			),
 		).rejects.toThrow(
-			"Prepared asset landblock-scene-lod-env-cell-layer:da55ffff was landblock-outdoor, expected landblock-scene-lod-env-cell-layer.",
+			"Prepared asset landblock-scene-lod-env-cell-layer:da55ffff was setup-model, expected landblock-scene-lod-env-cell-layer.",
 		);
 	});
 

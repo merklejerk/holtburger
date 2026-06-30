@@ -65,13 +65,6 @@ describe("landblock scene LoD source resolver", () => {
 				(key) => key === "landblock-scene-lod:da55ffff:4",
 			),
 		).toHaveLength(1);
-		expect(
-			assetReader.requestedKeys.some(
-				(key) =>
-					key.startsWith("landblock-outdoor:") ||
-					key.startsWith("landblock-env-cells:"),
-			),
-		).toBe(false);
 		expect(assetReader.requestedKeys).not.toContain(
 			"landblock-scene-lod-outdoor-layer:da55ffff",
 		);

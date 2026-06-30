@@ -3,8 +3,10 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::Parser;
 use holtburger_content::{
-    ContentDecodeCache, ContentRepository, LandblockOutdoorAssetAssembler,
-    PreparedContentSourceDiagnostics, PreparedStaticInstanceKind, normalize_landblock_id,
+    ContentDecodeCache, ContentRepository, LandblockOutdoorStaticMember, LandblockSceneLodAsset,
+    LandblockSceneLodAssetAssembler, LandblockSceneLodContext, LandblockSceneLodLayer,
+    LandblockSceneLodLevel, LandblockSceneLodRequest, PreparedContentSourceDiagnostics,
+    PreparedStaticInstanceKind, normalize_landblock_id,
 };
 
 #[derive(Parser, Debug)]
@@ -27,33 +29,35 @@ fn main() -> Result<()> {
 
     for raw_landblock in &args.landblocks {
         let landblock_id = normalize_landblock_id(parse_hex_u32(raw_landblock)?);
-        let asset = LandblockOutdoorAssetAssembler::new().assemble_landblock_with_cache(
+        let asset = LandblockSceneLodAssetAssembler::new().assemble_landblock_with_cache(
             &content,
             &decode_cache,
-            landblock_id,
+            LandblockSceneLodRequest {
+                landblock_id,
+                level: LandblockSceneLodLevel::Level3,
+                context: LandblockSceneLodContext::Outdoor,
+            },
         );
+        let statics = collect_outdoor_statics(&asset);
         println!("landblock=0x{landblock_id:08x}");
-        println!("  statics={}", asset.statics.len());
+        println!("  statics={}", statics.len());
         println!(
             "  explicit={} buildings={} generated={}",
-            asset
-                .statics
+            statics
                 .iter()
                 .filter(|member| matches!(
                     member.instance.kind,
                     PreparedStaticInstanceKind::Scenery
                 ))
                 .count(),
-            asset
-                .statics
+            statics
                 .iter()
                 .filter(|member| matches!(
                     member.instance.kind,
                     PreparedStaticInstanceKind::Building
                 ))
                 .count(),
-            asset
-                .statics
+            statics
                 .iter()
                 .filter(|member| matches!(
                     member.instance.kind,
@@ -61,8 +65,7 @@ fn main() -> Result<()> {
                 ))
                 .count(),
         );
-        let indoor = asset
-            .statics
+        let indoor = statics
             .iter()
             .filter(|member| {
                 matches!(
@@ -76,7 +79,7 @@ fn main() -> Result<()> {
         }
         if let Some(near_ac) = args.near_ac.as_deref() {
             let near = parse_vec3(near_ac)?;
-            print_nearby_statics(&asset.statics, near, args.radius);
+            print_nearby_statics(&statics, near, args.radius);
         }
         print_diagnostics(&asset.diagnostics);
     }
@@ -99,8 +102,23 @@ fn print_diagnostics(diagnostics: &PreparedContentSourceDiagnostics) {
     }
 }
 
+fn collect_outdoor_statics(asset: &LandblockSceneLodAsset) -> Vec<&LandblockOutdoorStaticMember> {
+    let mut statics = Vec::new();
+    for layer in &asset.layers {
+        match layer {
+            LandblockSceneLodLayer::OutdoorBuildings(layer) => statics.extend(&layer.statics),
+            LandblockSceneLodLayer::OutdoorExplicitObjects(layer)
+            | LandblockSceneLodLayer::OutdoorGeneratedScenery(layer) => {
+                statics.extend(&layer.statics);
+            }
+            LandblockSceneLodLayer::Terrain(_) | LandblockSceneLodLayer::EnvCellSystem(_) => {}
+        }
+    }
+    statics
+}
+
 fn print_nearby_statics(
-    statics: &[holtburger_content::LandblockOutdoorStaticMember],
+    statics: &[&LandblockOutdoorStaticMember],
     near: (f32, f32, f32),
     radius: f32,
 ) {

@@ -1,4 +1,4 @@
-use crate::adapter::binary::{BinaryAssetSectionWriter, serialize_landblock_terrain_binary};
+use crate::adapter::binary::BinaryAssetSectionWriter;
 use crate::adapter::service::asset_cache_error_code;
 use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_content::*;
@@ -479,7 +479,7 @@ pub fn build_landblock_terrain_triangles(
             let bounds = terrain_vertex_bounds_json(mesh, [triangle.a, triangle.b, triangle.c])?;
             Some(SerializedTerrainTriangle {
                 terrain_triangle_id: format!(
-                    "landblock/{:08x}/outdoor/terrain/triangle/{triangle_index:04x}",
+                    "landblock/{:08x}/terrain/triangle/{triangle_index:04x}",
                     mesh.landblock_id
                 ),
                 quad_index: triangle_index / 2,
@@ -618,50 +618,6 @@ pub fn build_flat_bvh_nodes_from_bounds(items: Vec<(PreparedAabb, u32)>) -> Vec<
     })]
 }
 
-pub fn serialize_landblock_outdoor_binary_payload(
-    outdoor: &LandblockOutdoorAsset,
-    region_id: u32,
-    region_number: u32,
-    path_prefix: &str,
-    writer: &mut BinaryAssetSectionWriter,
-) -> serde_json::Value {
-    let terrain_asset = landblock_outdoor_terrain_asset(outdoor);
-    serialize_landblock_outdoor_payload_with_terrain(
-        outdoor,
-        region_id,
-        region_number,
-        serialize_landblock_terrain_binary(&terrain_asset, path_prefix, writer),
-    )
-}
-
-pub fn serialize_landblock_outdoor_payload_with_terrain(
-    outdoor: &LandblockOutdoorAsset,
-    region_id: u32,
-    region_number: u32,
-    terrain: serde_json::Value,
-) -> serde_json::Value {
-    serde_json::json!({
-        "kind": "landblock-outdoor",
-        "residencyKind": "outdoor-landblock",
-        "sourceAssetKind": "landblock-outdoor",
-        "landblockId": outdoor.landblock_id,
-        "regionId": region_id,
-        "regionNumber": region_number,
-        "classification": "outdoor",
-        "terrain": terrain,
-        "statics": outdoor.statics.iter().map(serialize_landblock_outdoor_static_member).collect::<Vec<_>>(),
-        "buildingTransitionApertures": outdoor.building_transition_apertures.iter().map(serialize_prepared_building_transition_aperture).collect::<Vec<_>>(),
-        "outdoorBvh": serialize_landblock_outdoor_bvh(outdoor),
-        "diagnostics": serialize_prepared_content_diagnostics(&outdoor.diagnostics),
-        "provenance": {
-            "source": "repo-local-hba",
-            "sourceAssetKind": "landblock-outdoor",
-            "errorCode": outdoor.diagnostics.errors.first().map(|error| error.error_code),
-            "detail": outdoor.diagnostics.errors.first().map(|error| error.detail.clone())
-        }
-    })
-}
-
 fn serialize_prepared_building_transition_aperture(
     aperture: &holtburger_content::PreparedBuildingTransitionAperture,
 ) -> serde_json::Value {
@@ -679,59 +635,6 @@ fn serialize_prepared_building_transition_aperture(
         "otherPortalId": aperture.other_portal_id,
         "linkedEnvCellIds": aperture.linked_env_cell_ids,
         "points": aperture.points.iter().map(serialize_prepared_vec3).collect::<Vec<_>>(),
-    })
-}
-
-pub fn serialize_landblock_topology_payload(
-    topology: &LandblockTopologyAsset,
-) -> serde_json::Value {
-    serde_json::json!({
-        "kind": "landblock-topology",
-        "residencyKind": "landblock",
-        "sourceAssetKind": "landblock-topology",
-        "landblockId": topology.landblock_id,
-        "landblockInfoId": topology.landblock_info_id,
-        "classification": serialize_landblock_classification(topology.classification),
-        "envCells": topology.env_cells.iter().map(serialize_landblock_scene_env_cell_member).collect::<Vec<_>>(),
-        "portalLinks": serialize_landblock_topology_portal_links(topology),
-        "envCellResidencyBvh": serialize_landblock_topology_env_cell_residency_bvh(topology),
-        "diagnostics": serialize_prepared_content_diagnostics(&topology.diagnostics),
-        "provenance": {
-            "source": "repo-local-hba",
-            "sourceAssetKind": "landblock-topology",
-            "errorCode": topology.diagnostics.errors.first().map(|error| error.error_code),
-            "detail": topology.diagnostics.errors.first().map(|error| error.detail.clone())
-        }
-    })
-}
-
-pub fn serialize_landblock_env_cells_payload_with_cells<F>(
-    bundle: &LandblockEnvCellsAsset,
-    region_id: u32,
-    region_number: u32,
-    mut serialize_cell: F,
-) -> serde_json::Value
-where
-    F: FnMut(usize, &LandblockEnvCellBundleCell, u32, u32) -> serde_json::Value,
-{
-    serde_json::json!({
-        "kind": "landblock-env-cells",
-        "residencyKind": "landblock",
-        "sourceAssetKind": "landblock-env-cells",
-        "landblockId": bundle.landblock_id,
-        "landblockInfoId": bundle.landblock_info_id,
-        "regionId": region_id,
-        "regionNumber": region_number,
-        "envCells": bundle.env_cells.iter().enumerate().map(|(index, cell)| serialize_cell(index, cell, region_id, region_number)).collect::<Vec<_>>(),
-        "portalLinks": serialize_landblock_env_cell_bundle_portal_links(bundle),
-        "landblockEnvCellBvh": serialize_landblock_env_cell_bundle_bvh(bundle),
-        "diagnostics": serialize_prepared_content_diagnostics(&bundle.diagnostics),
-        "provenance": {
-            "source": "repo-local-hba",
-            "sourceAssetKind": "landblock-env-cells",
-            "errorCode": bundle.diagnostics.errors.first().map(|error| error.error_code),
-            "detail": bundle.diagnostics.errors.first().map(|error| error.detail.clone())
-        }
     })
 }
 
@@ -808,7 +711,7 @@ fn serialize_landblock_scene_lod_layer(layer: &LandblockSceneLodLayer) -> serde_
                     serialize_landblock_env_cell_bundle_cell(
                         cell,
                         serialize_prepared_polygon_set_render_geometry_json(&cell.prepared_cell.render_geometry),
-                        |index, aperture| serialize_prepared_portal_aperture_json(index, aperture),
+                        serialize_prepared_portal_aperture_json,
                     )
                 }).collect::<Vec<_>>(),
                 "portalLinks": serialize_landblock_env_cell_bundle_portal_links(&bundle),
@@ -884,14 +787,6 @@ fn serialize_prepared_portal_aperture_json(
         "points": aperture.points.iter().map(serialize_prepared_vec3).collect::<Vec<_>>(),
         "plane": aperture.plane.as_ref().map(serialize_prepared_portal_aperture_plane),
     })
-}
-
-pub fn landblock_outdoor_terrain_asset(
-    outdoor: &LandblockOutdoorAsset,
-) -> SerializedOutdoorTerrainSource {
-    SerializedOutdoorTerrainSource {
-        terrain_mesh: outdoor.terrain_mesh.clone(),
-    }
 }
 
 pub struct SerializedOutdoorTerrainSource {
@@ -975,50 +870,6 @@ pub fn serialize_landblock_outdoor_bvh_item_kind(kind: PreparedStaticInstanceKin
     }
 }
 
-pub fn serialize_landblock_topology_env_cell_residency_bvh(
-    topology: &LandblockTopologyAsset,
-) -> serde_json::Value {
-    let items = topology
-        .env_cells
-        .iter()
-        .map(|cell| {
-            serde_json::json!({
-                "envCellId": cell.env_cell_id,
-                "memberId": format!("env-cell/{:08x}", cell.env_cell_id),
-                "assetId": format_env_cell_asset_id(cell.env_cell_id),
-                "source": "env-cell-placement",
-            })
-        })
-        .collect::<Vec<_>>();
-    let node_inputs = topology
-        .env_cells
-        .iter()
-        .map(|cell| {
-            let point = PreparedVec3 {
-                x: cell.local_placement.origin.x,
-                y: cell.local_placement.origin.z,
-                z: if cell.local_placement.origin.y == 0.0 {
-                    0.0
-                } else {
-                    -cell.local_placement.origin.y
-                },
-            };
-            (
-                holtburger_content::pad_bvh_bounds(PreparedAabb {
-                    min: point,
-                    max: point,
-                }),
-                1_u32,
-            )
-        })
-        .collect::<Vec<_>>();
-    serde_json::json!({
-        "coordinateSpace": "landblock-topology-residency",
-        "nodes": build_flat_bvh_nodes_from_bounds(node_inputs),
-        "items": items,
-    })
-}
-
 pub fn serialize_landblock_env_cell_bundle_bvh(
     bundle: &LandblockEnvCellsAsset,
 ) -> serde_json::Value {
@@ -1057,12 +908,6 @@ pub fn serialize_landblock_env_cell_bvh_item_source(
         LandblockEnvCellBvhItemSource::EnvCellRoot => "env-cell-root",
         LandblockEnvCellBvhItemSource::Derived => "derived",
     }
-}
-
-pub fn serialize_landblock_topology_portal_links(
-    topology: &LandblockTopologyAsset,
-) -> Vec<serde_json::Value> {
-    serialize_landblock_portal_links(topology.landblock_id, &topology.env_cells)
 }
 
 pub fn serialize_landblock_env_cell_bundle_portal_links(
@@ -1112,20 +957,6 @@ fn serialize_landblock_portal_links(
             })
         })
         .collect()
-}
-
-pub fn serialize_landblock_scene_env_cell_member(
-    cell: &holtburger_content::EnvCellFact,
-) -> serde_json::Value {
-    serde_json::json!({
-        "memberId": format!("env-cell/{:08x}", cell.env_cell_id),
-        "envCellId": cell.env_cell_id,
-        "assetId": format_env_cell_asset_id(cell.env_cell_id),
-        "localPlacement": serialize_frame(&cell.local_placement),
-        "visibleEnvCellIds": cell.visible_cell_ids,
-        "restrictionObjectId": cell.restriction_object_id,
-        "seenOutside": cell.seen_outside,
-    })
 }
 
 pub fn serialize_env_cell_payload_with_geometry<F>(
@@ -1518,23 +1349,12 @@ pub fn serialize_prepared_vec3(vector: &PreparedVec3) -> serde_json::Value {
     })
 }
 
-pub fn serialize_landblock_classification(classification: LandblockClassification) -> &'static str {
-    match classification {
-        LandblockClassification::Outdoor => "outdoor",
-        LandblockClassification::Dungeon => "dungeon",
-    }
-}
-
 pub fn format_gfx_obj_asset_id(gfx_obj_id: u32) -> String {
     format!("gfx-obj/{gfx_obj_id:08x}")
 }
 
 pub fn format_animation_asset_id(animation_id: u32) -> String {
     format!("animation/{animation_id:08x}")
-}
-
-pub fn format_env_cell_asset_id(env_cell_id: u32) -> String {
-    format!("env-cell/{env_cell_id:08x}")
 }
 
 pub fn format_material_asset_id(surface_id: u32) -> String {
@@ -2302,7 +2122,7 @@ mod tests {
     }
 
     #[test]
-    fn serialize_landblock_outdoor_preserves_source_owned_overhanging_static_space() {
+    fn outdoor_component_serializers_preserve_source_owned_overhanging_static_space() {
         let source_landblock_id = 0x0203ffff;
         let instance_bounds = PreparedAabb {
             min: PreparedVec3 {
@@ -2384,25 +2204,9 @@ mod tests {
             diagnostics: PreparedContentSourceDiagnostics::default(),
         };
 
-        let payload = serialize_landblock_outdoor_payload_with_terrain(
-            &outdoor,
-            0,
-            0,
-            serde_json::Value::Null,
+        let aperture = serialize_prepared_building_transition_aperture(
+            &outdoor.building_transition_apertures[0],
         );
-
-        assert_eq!(
-            payload
-                .get("landblockId")
-                .and_then(serde_json::Value::as_u64),
-            Some(source_landblock_id as u64)
-        );
-
-        let aperture = payload
-            .get("buildingTransitionApertures")
-            .and_then(serde_json::Value::as_array)
-            .and_then(|apertures| apertures.first())
-            .expect("serialized payload should include building transition apertures");
         assert_eq!(
             aperture.pointer("/buildingInstanceId"),
             Some(&serde_json::Value::String("overhang".to_string()))
@@ -2427,11 +2231,7 @@ mod tests {
             Some(3)
         );
 
-        let static_member = payload
-            .get("statics")
-            .and_then(serde_json::Value::as_array)
-            .and_then(|statics| statics.first())
-            .expect("serialized payload should include the overhanging static");
+        let static_member = serialize_landblock_outdoor_static_member(&outdoor.statics[0]);
         let local_origin = static_member
             .pointer("/localPlacement/origin")
             .expect("static member should include local placement origin");
@@ -2461,9 +2261,7 @@ mod tests {
             Some(3.)
         );
 
-        let outdoor_bvh = payload
-            .get("outdoorBvh")
-            .expect("serialized payload should include outdoor BVH");
+        let outdoor_bvh = serialize_landblock_outdoor_bvh(&outdoor);
         assert_eq!(
             outdoor_bvh
                 .get("coordinateSpace")

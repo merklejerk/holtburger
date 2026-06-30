@@ -7,10 +7,8 @@ use anyhow::{Context, Result, anyhow};
 use futures::future::{BoxFuture, FutureExt, Shared};
 use holtburger_content::{
     ContentDecodeCache, ContentRepository, EnvCellAsset, EnvCellAssetAssembler,
-    LandblockEnvCellsAsset, LandblockEnvCellsAssetAssembler, LandblockOutdoorAsset,
-    LandblockOutdoorAssetAssembler, LandblockSceneLodAsset, LandblockSceneLodAssetAssembler,
-    LandblockSceneLodContext, LandblockSceneLodLayer, LandblockSceneLodLevel,
-    LandblockSceneLodRequest, LandblockTopologyAsset, LandblockTopologyAssetAssembler,
+    LandblockSceneLodAsset, LandblockSceneLodAssetAssembler, LandblockSceneLodContext,
+    LandblockSceneLodLayer, LandblockSceneLodLevel, LandblockSceneLodRequest,
     MaterialAppearanceInput, ResolvedMaterialRecipe, ResolvedRegionRenderProfile,
     ResolvedSetupAppearance, ResolvedSurfaceTexture, ResolvedTerrainMaterialTable,
     normalize_landblock_id,
@@ -24,9 +22,6 @@ const LANDBLOCK_SCENE_LOD_CACHE_CAPACITY: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ContentAssetRequest {
-    LandblockOutdoor(u32),
-    LandblockTopology(u32),
-    LandblockEnvCells(u32),
     LandblockSceneLod(LandblockSceneLodRequest),
     EnvCell(u32),
     TerrainMaterial(u32),
@@ -58,17 +53,6 @@ impl SetupAppearanceRequest {
 
 #[derive(Debug, Clone)]
 pub enum ContentAsset {
-    LandblockOutdoor {
-        outdoor: Box<LandblockOutdoorAsset>,
-        region_id: u32,
-        region_number: u32,
-    },
-    LandblockTopology(Box<LandblockTopologyAsset>),
-    LandblockEnvCells {
-        bundle: Box<LandblockEnvCellsAsset>,
-        region_id: u32,
-        region_number: u32,
-    },
     LandblockSceneLod {
         scene_lod: Box<LandblockSceneLodAsset>,
         region_id: u32,
@@ -111,46 +95,6 @@ impl ContentAssetService {
 
     pub fn load(&self, request: ContentAssetRequest) -> Result<ContentAsset> {
         match request {
-            ContentAssetRequest::LandblockOutdoor(landblock_id) => {
-                let landblock_id = normalize_landblock_id(landblock_id);
-                let outdoor = LandblockOutdoorAssetAssembler::new().assemble_landblock_with_cache(
-                    &self.content,
-                    &self.decode_cache,
-                    landblock_id,
-                );
-                let region = self.decode_cache.region_desc(&self.content)?;
-                Ok(ContentAsset::LandblockOutdoor {
-                    outdoor: Box::new(outdoor),
-                    region_id: region.id,
-                    region_number: region.region_number,
-                })
-            }
-            ContentAssetRequest::LandblockTopology(landblock_id) => {
-                let landblock_id = normalize_landblock_id(landblock_id);
-                Ok(ContentAsset::LandblockTopology(Box::new(
-                    LandblockTopologyAssetAssembler::new().assemble_landblock_with_cache(
-                        &self.content,
-                        &self.decode_cache,
-                        landblock_id,
-                    ),
-                )))
-            }
-            ContentAssetRequest::LandblockEnvCells(landblock_id) => {
-                let landblock_id = normalize_landblock_id(landblock_id);
-                let bundle = LandblockEnvCellsAssetAssembler::new()
-                    .assemble_landblock_with_cache(&self.content, &self.decode_cache, landblock_id)
-                    .with_context(|| {
-                        format!(
-                            "Could not assemble landblock env-cell bundle 0x{landblock_id:08X}"
-                        )
-                    })?;
-                let region = self.decode_cache.region_desc(&self.content)?;
-                Ok(ContentAsset::LandblockEnvCells {
-                    bundle: Box::new(bundle),
-                    region_id: region.id,
-                    region_number: region.region_number,
-                })
-            }
             ContentAssetRequest::LandblockSceneLod(request) => {
                 let scene_lod = self.load_landblock_scene_lod(request);
                 let region = self.decode_cache.region_desc(&self.content)?;
@@ -847,7 +791,7 @@ mod tests {
         let len = u16::try_from(value.len()).expect("test pstring should fit u16");
         bytes.extend_from_slice(&len.to_le_bytes());
         bytes.extend_from_slice(value.as_bytes());
-        while bytes.len() % 4 != 0 {
+        while !bytes.len().is_multiple_of(4) {
             bytes.push(0);
         }
     }

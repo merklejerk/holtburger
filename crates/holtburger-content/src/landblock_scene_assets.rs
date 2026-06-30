@@ -9,18 +9,13 @@ use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE};
 use crate::material_variants::legacy_sampler_material_variant_signature;
 use crate::source_reader::ContentSourceReader;
 use crate::static_outdoor_scene::{
-    StaticOutdoorScene, StaticOutdoorSceneAssembler, StaticOutdoorSceneSourceFamilies,
+    LoadedStaticOutdoorSceneSources, StaticOutdoorScene, StaticOutdoorSceneAssembler,
+    StaticOutdoorSceneSourceFamilies,
 };
 use crate::{ContentDecodeCache, ContentRepository, normalize_landblock_id};
 
 pub const LANDBLOCK_GRID_SIZE: usize = 9;
 pub const LANDBLOCK_TILE_SIZE: f32 = 24.0;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LandblockClassification {
-    Outdoor,
-    Dungeon,
-}
 
 #[derive(Debug, Clone)]
 pub struct EnvCellAsset {
@@ -38,15 +33,6 @@ pub struct LandblockOutdoorAsset {
     pub statics: Vec<LandblockOutdoorStaticMember>,
     pub building_transition_apertures: Vec<PreparedBuildingTransitionAperture>,
     pub outdoor_bvh: Option<PreparedBvh>,
-    pub diagnostics: PreparedContentSourceDiagnostics,
-}
-
-#[derive(Debug, Clone)]
-pub struct LandblockTopologyAsset {
-    pub landblock_id: u32,
-    pub landblock_info_id: u32,
-    pub classification: LandblockClassification,
-    pub env_cells: Vec<EnvCellFact>,
     pub diagnostics: PreparedContentSourceDiagnostics,
 }
 
@@ -646,12 +632,6 @@ pub struct SourceLoadError {
 pub struct EnvCellAssetAssembler;
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct LandblockOutdoorAssetAssembler;
-
-#[derive(Debug, Default, Clone, Copy)]
-pub struct LandblockTopologyAssetAssembler;
-
-#[derive(Debug, Default, Clone, Copy)]
 pub struct LandblockEnvCellsAssetAssembler;
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -1023,166 +1003,6 @@ fn landblock_env_cells_assembly_error(
     }
 }
 
-impl LandblockOutdoorAssetAssembler {
-    pub fn new() -> Self {
-        Self
-    }
-
-    pub fn assemble_landblock(
-        &self,
-        content: &ContentRepository,
-        raw_landblock_id: u32,
-    ) -> LandblockOutdoorAsset {
-        self.assemble_landblock_with_context(
-            PreparedContentAssemblyContext::new(content),
-            raw_landblock_id,
-        )
-    }
-
-    pub fn assemble_landblock_with_cache(
-        &self,
-        content: &ContentRepository,
-        decode_cache: &ContentDecodeCache,
-        raw_landblock_id: u32,
-    ) -> LandblockOutdoorAsset {
-        self.assemble_landblock_with_context(
-            PreparedContentAssemblyContext::with_decode_cache(content, decode_cache),
-            raw_landblock_id,
-        )
-    }
-
-    fn assemble_landblock_with_context(
-        &self,
-        mut context: PreparedContentAssemblyContext<'_>,
-        raw_landblock_id: u32,
-    ) -> LandblockOutdoorAsset {
-        let landblock_id = normalize_landblock_id(raw_landblock_id);
-        let cell_landblock_source = context.load_cell_landblock(landblock_id);
-        let cell_landblock = cell_landblock_source
-            .as_ref()
-            .map(CellLandblockFact::from_landblock);
-        let landblock_info_source = context.load_landblock_info(landblock_id);
-        let terrain_mesh = cell_landblock.as_ref().map(build_terrain_mesh);
-        let outdoor_scene = match cell_landblock_source.as_ref() {
-            Some(source_landblock) => match context.source.region_desc() {
-                Ok(region) => match StaticOutdoorSceneAssembler::new().assemble_from_loaded(
-                    &mut context.source,
-                    landblock_id,
-                    Some(source_landblock),
-                    landblock_info_source.as_ref(),
-                    None,
-                    Some(&region),
-                    StaticOutdoorSceneSourceFamilies::ALL,
-                ) {
-                    Ok(scene) => Some(scene),
-                    Err(error) => {
-                        context.report_source_error(
-                            EOR_CELL_NAMESPACE,
-                            landblock_id,
-                            "landblock-outdoor",
-                            "asset-decode-failed",
-                            format!(
-                                "Could not assemble outdoor static scene 0x{landblock_id:08X}: {error}"
-                            ),
-                        );
-                        None
-                    }
-                },
-                Err(error) => {
-                    context.report_source_error(
-                        EOR_CELL_NAMESPACE,
-                        landblock_id,
-                        "region-desc",
-                        "asset-decode-failed",
-                        format!("Could not load RegionDesc for outdoor landblock 0x{landblock_id:08X}: {error:#}"),
-                    );
-                    None
-                }
-            },
-            None => None,
-        };
-        let instances =
-            build_prepared_outdoor_static_instances(outdoor_scene.as_ref()).collect::<Vec<_>>();
-        let static_meshes = build_prepared_static_meshes(&mut context, instances.iter(), true);
-        let statics = build_landblock_outdoor_static_members(
-            outdoor_scene.as_ref(),
-            instances,
-            &static_meshes,
-        );
-        let building_transition_apertures =
-            build_prepared_building_transition_apertures(&mut context, outdoor_scene.as_ref());
-        let spatial_items = build_outdoor_member_spatial_items(landblock_id, &statics);
-        let outdoor_bvh = build_prepared_bvh(landblock_id, &spatial_items);
-        let diagnostics = context.into_diagnostics();
-
-        LandblockOutdoorAsset {
-            landblock_id,
-            cell_landblock,
-            terrain_mesh,
-            statics,
-            building_transition_apertures,
-            outdoor_bvh,
-            diagnostics,
-        }
-    }
-}
-
-impl LandblockTopologyAssetAssembler {
-    pub fn new() -> Self {
-        Self
-    }
-
-    pub fn assemble_landblock(
-        &self,
-        content: &ContentRepository,
-        raw_landblock_id: u32,
-    ) -> LandblockTopologyAsset {
-        self.assemble_landblock_with_context(
-            PreparedContentAssemblyContext::new(content),
-            raw_landblock_id,
-        )
-    }
-
-    pub fn assemble_landblock_with_cache(
-        &self,
-        content: &ContentRepository,
-        decode_cache: &ContentDecodeCache,
-        raw_landblock_id: u32,
-    ) -> LandblockTopologyAsset {
-        self.assemble_landblock_with_context(
-            PreparedContentAssemblyContext::with_decode_cache(content, decode_cache),
-            raw_landblock_id,
-        )
-    }
-
-    fn assemble_landblock_with_context(
-        &self,
-        mut context: PreparedContentAssemblyContext<'_>,
-        raw_landblock_id: u32,
-    ) -> LandblockTopologyAsset {
-        let landblock_id = normalize_landblock_id(raw_landblock_id);
-        let landblock_info_id = derive_landblock_info_id(landblock_id);
-        let landblock_info = context
-            .load_landblock_info(landblock_id)
-            .as_ref()
-            .map(|info| LandblockInfoFact::from_info(info, landblock_id));
-        let classification = classify_scene_landblock(landblock_info.as_ref());
-        let env_cells = landblock_info
-            .as_ref()
-            .map(|info| load_env_cell_facts(&mut context, landblock_id, info))
-            .unwrap_or_default();
-        let diagnostics = context.into_diagnostics();
-
-        LandblockTopologyAsset {
-            landblock_id,
-            landblock_info_id,
-            classification,
-            env_cells,
-            diagnostics,
-        }
-    }
-}
-
 impl LandblockEnvCellsAssetAssembler {
     pub fn new() -> Self {
         Self
@@ -1488,11 +1308,13 @@ impl LandblockSceneLodAssetAssembler {
         match StaticOutdoorSceneAssembler::new().assemble_from_loaded(
             &mut context.source,
             request.landblock_id,
-            cell_landblock,
-            landblock_info,
-            None,
-            region_ref,
-            static_families,
+            LoadedStaticOutdoorSceneSources {
+                landblock: cell_landblock,
+                landblock_info,
+                landblock_info_error: None,
+                region: region_ref,
+                families: static_families,
+            },
         ) {
             Ok(scene) => Some(scene),
             Err(error) => {
@@ -3784,17 +3606,6 @@ pub fn format_static_object_source_asset_id(did: u32) -> String {
         0x01 => format!("gfx-obj/{did:08x}"),
         0x02 => format!("setup-model/{did:08x}"),
         _ => format!("unsupported-static/{did:08x}"),
-    }
-}
-
-fn classify_scene_landblock(landblock_info: Option<&LandblockInfoFact>) -> LandblockClassification {
-    match landblock_info {
-        Some(info)
-            if info.num_env_cells > 0 && info.object_count == 0 && info.building_count == 0 =>
-        {
-            LandblockClassification::Dungeon
-        }
-        _ => LandblockClassification::Outdoor,
     }
 }
 

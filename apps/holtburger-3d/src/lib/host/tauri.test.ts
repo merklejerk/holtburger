@@ -7,7 +7,7 @@ describe("Tauri host commands", () => {
 		await expect(
 			lookupAsset({
 				requestId: "bootstrap-asset",
-				assetId: "landblock/0102ffff/outdoor",
+				assetId: "landblock/0102ffff/lod/2",
 				priority: "bootstrap",
 			}),
 		).rejects.toThrow(/requires the Tauri runtime/i);
@@ -15,14 +15,11 @@ describe("Tauri host commands", () => {
 
 	it("plans binary lookups as one host batch", () => {
 		const batches = planBinaryLookupBatches([
-			createRequest("a", "landblock/0102ffff/topology"),
-			createRequest("b", "landblock/0102ffff/outdoor"),
+			createRequest("a", "landblock/0102ffff/lod/2"),
 			createRequest("c", "gfx-obj/01000001"),
 			createRequest("d", "render-surface/06000001"),
-			createRequest("e", "landblock/0103ffff/topology"),
 			createRequest("f", "env-cell/01030100"),
 			createRequest("g", "palette/04000001"),
-			createRequest("h", "landblock/0103ffff/env-cells"),
 			createRequest("i", "landblock/0103ffff/lod/4"),
 		]);
 
@@ -30,14 +27,11 @@ describe("Tauri host commands", () => {
 			batches.map((batch) => batch.map((request) => request.assetId)),
 		).toEqual([
 			[
-				"landblock/0102ffff/topology",
-				"landblock/0102ffff/outdoor",
+				"landblock/0102ffff/lod/2",
 				"gfx-obj/01000001",
 				"render-surface/06000001",
-				"landblock/0103ffff/topology",
 				"env-cell/01030100",
 				"palette/04000001",
-				"landblock/0103ffff/env-cells",
 				"landblock/0103ffff/lod/4",
 			],
 		]);

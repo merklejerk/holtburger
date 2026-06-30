@@ -139,7 +139,7 @@ export function planBinaryLookupBatches(
 
 function usesBinaryAssetLookup(assetId: string): boolean {
 	return (
-		/^landblock\/[0-9a-fA-F]{8}\/(?:outdoor|topology|env-cells|lod\/[0-4])$/.test(
+		/^landblock\/[0-9a-fA-F]{8}\/lod\/[0-4]$/.test(
 			assetId,
 		) ||
 		/^env-cell\/[0-9a-fA-F]{8}$/.test(assetId) ||

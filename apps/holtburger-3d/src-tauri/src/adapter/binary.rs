@@ -1,4 +1,3 @@
-use crate::adapter::json::SerializedOutdoorTerrainSource;
 use crate::adapter::json::*;
 use crate::adapter::prepared_texture::{
     PreparedTexturePayload, serialize_prepared_texture_payload,
@@ -141,68 +140,6 @@ pub fn serialize_content_asset_binary_response(
     writer: &mut BinaryAssetSectionWriter,
 ) -> anyhow::Result<AssetLookupResponseDto> {
     Ok(match content_request {
-        ContentAssetRequest::LandblockOutdoor(landblock_id) => match asset {
-            Ok(ContentAsset::LandblockOutdoor {
-                outdoor,
-                region_id,
-                region_number,
-            }) => AssetLookupResponseDto {
-                request_id: request.request_id,
-                asset_id: request.asset_id,
-                payload_kind: AssetPayloadKindDto::Json,
-                payload: serialize_landblock_outdoor_binary_payload(
-                    &outdoor,
-                    region_id,
-                    region_number,
-                    path_prefix,
-                    writer,
-                ),
-            },
-            Ok(_) => unreachable!("content asset runtime returned mismatched landblock outdoor"),
-            Err(error) => anyhow::bail!(
-                "failed to load landblock outdoor 0x{:08X} for {}: {error:#}",
-                normalize_landblock_id(landblock_id),
-                request.asset_id
-            ),
-        },
-        ContentAssetRequest::LandblockTopology(landblock_id) => match asset {
-            Ok(ContentAsset::LandblockTopology(topology)) => AssetLookupResponseDto {
-                request_id: request.request_id,
-                asset_id: request.asset_id,
-                payload_kind: AssetPayloadKindDto::Json,
-                payload: serialize_landblock_topology_payload(&topology),
-            },
-            Ok(_) => unreachable!("content asset runtime returned mismatched landblock topology"),
-            Err(error) => anyhow::bail!(
-                "failed to load landblock topology 0x{:08X} for {}: {error:#}",
-                normalize_landblock_id(landblock_id),
-                request.asset_id
-            ),
-        },
-        ContentAssetRequest::LandblockEnvCells(landblock_id) => match asset {
-            Ok(ContentAsset::LandblockEnvCells {
-                bundle,
-                region_id,
-                region_number,
-            }) => AssetLookupResponseDto {
-                request_id: request.request_id,
-                asset_id: request.asset_id,
-                payload_kind: AssetPayloadKindDto::Json,
-                payload: serialize_landblock_env_cells_binary_payload(
-                    &bundle,
-                    region_id,
-                    region_number,
-                    path_prefix,
-                    writer,
-                ),
-            },
-            Ok(_) => unreachable!("content asset runtime returned mismatched landblock env-cells"),
-            Err(error) => anyhow::bail!(
-                "failed to load landblock env-cells 0x{:08X} for {}: {error:#}",
-                normalize_landblock_id(landblock_id),
-                request.asset_id
-            ),
-        },
         ContentAssetRequest::LandblockSceneLod(requested) => match asset {
             Ok(ContentAsset::LandblockSceneLod {
                 scene_lod,
@@ -476,52 +413,6 @@ fn encode_material_variant_signature(signature: &str) -> i32 {
         _ => 0,
     }
 }
-pub fn serialize_landblock_terrain_binary(
-    terrain_asset: &SerializedOutdoorTerrainSource,
-    path_prefix: &str,
-    writer: &mut BinaryAssetSectionWriter,
-) -> serde_json::Value {
-    let Some(mesh) = terrain_asset.terrain_mesh.as_ref() else {
-        return empty_landblock_terrain();
-    };
-    let mut terrain = serialize_landblock_terrain(terrain_asset);
-    writer.push_f32_section(
-        "landblockTerrain.vertices",
-        format!("{path_prefix}.terrain.vertices"),
-        3,
-        mesh.vertices
-            .iter()
-            .flat_map(|vertex| [vertex.x, vertex.y, vertex.z]),
-    );
-    writer.push_f32_section(
-        "landblockTerrain.triangles",
-        format!("{path_prefix}.terrain.triangles"),
-        13,
-        build_landblock_terrain_triangles(mesh)
-            .iter()
-            .enumerate()
-            .flat_map(|(triangle_index, triangle)| {
-                [
-                    triangle_index as f32,
-                    triangle.quad_index as f32,
-                    triangle.triangle_in_quad as f32,
-                    triangle.vertex_indices[0] as f32,
-                    triangle.vertex_indices[1] as f32,
-                    triangle.vertex_indices[2] as f32,
-                    triangle.average_height,
-                    triangle.bounds.min.x,
-                    triangle.bounds.min.y,
-                    triangle.bounds.min.z,
-                    triangle.bounds.max.x,
-                    triangle.bounds.max.y,
-                    triangle.bounds.max.z,
-                ]
-            }),
-    );
-    terrain["vertices"] = serde_json::json!([]);
-    terrain["triangles"] = serde_json::json!([]);
-    terrain
-}
 pub fn serialize_env_cell_binary_payload(
     asset: &EnvCellAsset,
     region_id: u32,
@@ -549,37 +440,6 @@ pub fn serialize_env_cell_binary_payload(
     )
 }
 
-pub fn serialize_landblock_env_cells_binary_payload(
-    bundle: &LandblockEnvCellsAsset,
-    region_id: u32,
-    region_number: u32,
-    path_prefix: &str,
-    writer: &mut BinaryAssetSectionWriter,
-) -> serde_json::Value {
-    serialize_landblock_env_cells_payload_with_cells(
-        bundle,
-        region_id,
-        region_number,
-        |cell_index, asset, _region_id, _region_number| {
-            serialize_landblock_env_cell_bundle_cell(
-                asset,
-                serialize_prepared_polygon_set_render_geometry_binary(
-                    &asset.prepared_cell.render_geometry,
-                    format!("{path_prefix}.envCells.{cell_index}.renderGeometry"),
-                    writer,
-                ),
-                |aperture_index, aperture| {
-                    serialize_prepared_portal_aperture_standalone_binary(
-                        aperture_index,
-                        aperture,
-                        &format!("{path_prefix}.envCells.{cell_index}"),
-                        writer,
-                    )
-                },
-            )
-        },
-    )
-}
 pub fn serialize_prepared_portal_aperture_standalone_binary(
     aperture_index: usize,
     aperture: &PreparedPortalAperture,

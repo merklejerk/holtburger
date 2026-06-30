@@ -38,12 +38,12 @@ import {
 	createStaticMaterialTextureRoleSchemaKey,
 	createStaticMaterialTextureUses,
 } from "../../bake/static-material-adapter";
-import { sliceStaticMaterialCompatibilityCandidates } from "../../bake/static-material-compatibility-slicer";
+import { sliceStaticMaterialBatchCandidates } from "../../bake/static-material-batch-slicer";
 import {
 	createEnvCellCellStructureGeometryIdentity,
 	describeEnvCellCellStructureGeometryIdentity,
 } from "./env-cell-system-geometry-attachments";
-import { bakeStaticObjectCompatibility } from "../../objects/bake/static-object-compatibility-baker";
+import { bakeStaticObjectBatch } from "../../objects/bake/static-object-batch-baker";
 import {
 	createStructuredInteriorTextureUseId,
 	createStructuredInteriorMaterialCoverageReport,
@@ -62,7 +62,7 @@ import {
 const MAX_STRUCTURED_INTERIOR_MATERIAL_ENTRIES_PER_DRAW = 8;
 
 interface StructuredInteriorTriangleCandidate {
-	readonly compatibilityKey: string;
+	readonly batchKey: string;
 	readonly materialEntryKey: string;
 	readonly materialPlan: StaticMaterialPlan;
 	readonly sourceTriangleId: string;
@@ -91,7 +91,7 @@ export function bakeEnvCellSystem(
 	const itemResults = input.items.map((item) =>
 		bakeLandblockEnvCellItem(input, item),
 	);
-	const staticObjectResult = bakeStaticObjectCompatibility(input);
+	const staticObjectResult = bakeStaticObjectBatch(input);
 	const drawUnits = [
 		...itemResults.flatMap((result) => result.drawUnits),
 		...staticObjectResult.drawUnits,
@@ -283,7 +283,7 @@ function createStructuredInteriorDrawUnits(
 			geometrySurfaceOmissions,
 			materialPlan,
 		});
-		const slices = sliceStaticMaterialCompatibilityCandidates({
+		const slices = sliceStaticMaterialBatchCandidates({
 			candidates,
 			maxMaterialEntriesPerSlice:
 				MAX_STRUCTURED_INTERIOR_MATERIAL_ENTRIES_PER_DRAW,
@@ -698,7 +698,7 @@ function createStructuredInteriorTriangleCandidates(options: {
 					textureWrapMode: resolveStructuredInteriorPlanTextureWrapMode(plan),
 				});
 				return {
-					compatibilityKey: createStructuredInteriorCompatibilityKey({
+					batchKey: createStructuredInteriorBatchKey({
 						materialEntryKey,
 						plan,
 					}),
@@ -764,7 +764,7 @@ function createStructuredInteriorSliceMaterialEntries(
 	);
 }
 
-function createStructuredInteriorCompatibilityKey(options: {
+function createStructuredInteriorBatchKey(options: {
 	readonly materialEntryKey: string;
 	readonly plan: StaticMaterialPlan;
 }): string {
@@ -785,7 +785,7 @@ function compareStructuredInteriorTriangleCandidates(
 	right: StructuredInteriorTriangleCandidate,
 ): number {
 	return (
-		left.compatibilityKey.localeCompare(right.compatibilityKey) ||
+		left.batchKey.localeCompare(right.batchKey) ||
 		left.surfaceId - right.surfaceId ||
 		left.triangle.polygonId - right.triangle.polygonId ||
 		left.triangle.firstVertex - right.triangle.firstVertex ||

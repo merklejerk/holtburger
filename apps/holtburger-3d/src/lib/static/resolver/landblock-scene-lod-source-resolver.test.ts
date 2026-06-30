@@ -11,7 +11,7 @@ import type {
 	StaticLayerRecipe,
 } from "../contracts";
 import { EnvCellSystemBaker } from "../env-cells/bake/env-cell-system-baker";
-import { StaticObjectCompatibilityBaker } from "../objects/bake/static-object-compatibility-baker";
+import { StaticObjectBatchBaker } from "../objects/bake/static-object-batch-baker";
 import { TerrainGeometryStaticBaker } from "../terrain/bake/terrain-geometry-baker";
 import { LandblockSceneLodSourceResolver } from "./landblock-scene-lod-source-resolver";
 
@@ -190,7 +190,7 @@ function bakerForRecipe(recipe: StaticLayerRecipe): StaticBaker {
 	if (recipe.payload.job.domain === "env-cell-system") {
 		return new EnvCellSystemBaker();
 	}
-	return new StaticObjectCompatibilityBaker();
+	return new StaticObjectBatchBaker();
 }
 
 function createBakeInput(recipe: StaticLayerRecipe): StaticBakeBatchInput {

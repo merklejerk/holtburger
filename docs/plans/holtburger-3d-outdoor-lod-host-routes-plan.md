@@ -590,9 +590,9 @@ Decisions and course corrections:
 - Split the original Phase 5 into 5A-5C on 2026-06-29 after discovery showed the phase combined public type contracts, browser controls, and resolver/baker behavior.
 - Added `OutdoorStaticObjectLayerDomain` for `outdoor-explicit-objects` and `outdoor-generated-scenery`, plus `OutdoorStaticObjectDomain` for static-object materialization contracts while the old combined detail resolver remains executable.
 - Added explicit-object and generated-scenery renderer layer payload contracts and mapped the new static domains to independent landblock layer kinds.
-- Updated material coverage, compatibility partitioning, static-object bake diagnostics, selection-facing payload domain types, and dynamic static-authored material-domain projection so they can preserve split object domains instead of collapsing them back to `outdoor-detail`.
+- Updated material coverage, batch partitioning, static-object bake diagnostics, selection-facing payload domain types, and dynamic static-authored material-domain projection so they can preserve split object domains instead of collapsing them back to `outdoor-detail`.
 - Left demand scheduling, browser visibility, resolver fanout, baker behavior, and renderer upload methods on the old `outdoor-detail` path for Phase 5B/5C. This is compatibility debt, not an escape hatch.
-- Validation: `npm run check`; `npm run test:ts -- src/lib/renderer/static-layer-contracts.test.ts src/lib/static/objects/bake/static-object-material-planner.test.ts src/lib/static/objects/bake/static-object-compatibility-partitioner.test.ts src/lib/dynamic/dynamic-entity-controller.test.ts`.
+- Validation: `npm run check`; `npm run test:ts -- src/lib/renderer/static-layer-contracts.test.ts src/lib/static/objects/bake/static-object-material-planner.test.ts src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/dynamic/dynamic-entity-controller.test.ts`.
 
 ### Phase 5B: Browser Interest And Visibility Axis Split
 
@@ -655,12 +655,12 @@ Decisions and course corrections:
 
 - Normal outdoor demand now schedules `outdoor-explicit-objects` and `outdoor-generated-scenery`; it no longer schedules `outdoor-detail` for browser object detail work.
 - The outdoor static object resolver filters explicit objects and generated scenery into separate payload domains while still reading the old `landblock-outdoor` source payload.
-- Static resolver/worker routing, browser runtime routing, bake attachment loading, and static object compatibility baking now accept split object domains.
+- Static resolver/worker routing, browser runtime routing, bake attachment loading, and static object batch baking now accept split object domains.
 - Runtime materialization now projects split explicit-object and generated-scenery renderer layer payloads. Generated-scenery retains instanced visual-resource support.
 - WebGL2 exposes split object layer setters that share the existing static-object upload implementation.
 - Generated object inventory and representative resolver/partition/runtime tests now use `outdoor-generated-scenery` instead of `outdoor-detail` for new behavior.
 - Surviving executable `outdoor-detail` references are compatibility surfaces for old detail payloads, WebGL2 old-detail diagnostics/counters, and old route/source tests. Phase 11 must delete or rename them after layer ownership and old-route removal make the compatibility path unreachable.
-- Validation: `npm run check`; `npm run test:ts -- src/lib/static/demand-planner.test.ts src/lib/static/objects/outdoor-static-objects-resolver.test.ts src/lib/static/objects/static-object-instance-inventory.test.ts src/lib/static/objects/bake/static-object-compatibility-partitioner.test.ts src/lib/runtime/client-runtime.test.ts src/lib/browser/create-browser-runtime.test.ts src/lib/renderer/webgl2/webgl2-renderer.test.ts`.
+- Validation: `npm run check`; `npm run test:ts -- src/lib/static/demand-planner.test.ts src/lib/static/objects/outdoor-static-objects-resolver.test.ts src/lib/static/objects/static-object-instance-inventory.test.ts src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/runtime/client-runtime.test.ts src/lib/browser/create-browser-runtime.test.ts src/lib/renderer/webgl2/webgl2-renderer.test.ts`.
 
 ### Phase 6A: Layer Owner Contract And Reconciliation Model
 
@@ -1070,11 +1070,11 @@ Task checklist:
 Decisions and course corrections:
 
 - Narrowed durable peer record owner fields for env-cell spatial, visibility, portal, source-mapping, and static-authored dynamic seed records to `StaticLayerPeerRecordOwner`.
-- Updated env-cell and static-object compatibility bakers to derive durable owners through `createLayerPeerRecordOwnerForStaticWork`.
+- Updated env-cell and static-object batch bakers to derive durable owners through `createLayerPeerRecordOwnerForStaticWork`.
 - Updated portal-graph helpers to accept layer-owned records so building transition and env-cell portal graphs no longer carry work ownership.
 - Removed the obsolete env-cell baker `describeStaticScopeKey` helper after owner construction moved to `layer-owners.ts`.
 - Updated env-cell baker tests to assert the layer owner shape (`env-cell-system:0xda55ffff`) instead of work ids.
-- Validation: `npm run test:ts -- src/lib/static/env-cells/bake/landblock-env-cells-baker.test.ts src/lib/static/objects/bake/static-object-compatibility-baker.test.ts src/lib/static/portal-graphs.test.ts src/lib/static/coordinator/static-coordinator.test.ts`; `npm run check`.
+- Validation: `npm run test:ts -- src/lib/static/env-cells/bake/landblock-env-cells-baker.test.ts src/lib/static/objects/bake/static-object-batch-baker.test.ts src/lib/static/portal-graphs.test.ts src/lib/static/coordinator/static-coordinator.test.ts`; `npm run check`.
 
 ### Phase 8B3: Runtime Peer-Owner Readers
 
@@ -1490,7 +1490,7 @@ Decisions and course corrections:
 
 - Reused the existing building-transition portal aperture derivation and static portal graph builder for env-cell-system scopes instead of adding a second aperture format.
 - `sourceDomain` on building transition aperture resources remains `outdoor-buildings` because it describes the source aperture vocabulary. The owning peer record for graphs emitted by env-cell-system bake is the env-cell-system layer owner.
-- `LandblockEnvCellsBaker` now merges portal aperture resources and static portal graphs emitted by its static-object compatibility pass, so a single env-cell-system materialized commit carries both env-cell portal resources and building transition portal resources.
+- `LandblockEnvCellsBaker` now merges portal aperture resources and static portal graphs emitted by its static-object batch pass, so a single env-cell-system materialized commit carries both env-cell portal resources and building transition portal resources.
 - Validation: `npm run test:ts -- src/lib/static/env-cells/bake/landblock-env-cells-baker.test.ts`; `npm run check`.
 
 ### Phase 10C: Runtime Env-Cell Publication Cutover
@@ -1913,7 +1913,7 @@ Goal: remove old `outdoor-detail` bake/texture/diagnostic naming after renderer 
 
 Deliverables:
 
-- Remove `outdoor-detail` from static-object bake attachments, compatibility baker/partitioner, texture manager grouping, static-scene query records, dynamic-resource filters, and browser diagnostics.
+- Remove `outdoor-detail` from static-object bake attachments, batch baker/partitioner, texture manager grouping, static-scene query records, dynamic-resource filters, and browser diagnostics.
 - Rename or delete diagnostics such as retained transparent outdoor detail partition reasons if they now describe split explicit/generated behavior.
 - Delete stale test fixtures that preserve `outdoor-detail` as a valid object-domain example.
 
@@ -1932,7 +1932,7 @@ Task checklist:
 
 Decisions and course corrections:
 
-- Static-object bake attachments, compatibility baker, partitioner tests, texture manager tests, dynamic static-authored material-domain filters, static-scene query readiness, and env-cell committed-record domain fallback no longer accept `outdoor-detail`.
+- Static-object bake attachments, batch baker, partitioner tests, texture manager tests, dynamic static-authored material-domain filters, static-scene query readiness, and env-cell committed-record domain fallback no longer accept `outdoor-detail`.
 - Split outdoor object domains now use independent role-page texture packing. This preserves the old object-detail packing behavior for generated scenery and explicit objects instead of regressing atlas packing when the domain was renamed.
 - Renamed retained transparent and renderer static-object diagnostics from outdoor-detail terminology to generated-scenery terminology.
 
@@ -1968,7 +1968,7 @@ Decisions and course corrections:
 
 - Zero-reference audit found no executable `outdoor-detail`, `OutdoorDetailsLayerPayload`, `setOutdoorDetailsLayer`, `OutdoorDetail`, `outdoorDetails`, or `outdoorDetail` references under `apps/holtburger-3d/src/lib`, `apps/holtburger-3d/src-tauri/src`, or `crates`.
 - Remaining `outdoor-detail` references are historical prose in this plan.
-- Validation: `npm run check`; `npm run test:ts -- src/lib/renderer/static-layer-contracts.test.ts src/lib/static/demand-planner.test.ts src/lib/static/coordinator/static-coordinator.test.ts src/lib/static/objects/static-object-visual-resource-key.test.ts src/lib/static/objects/bake/static-object-compatibility-partitioner.test.ts src/lib/runtime/static-scene-query.test.ts src/lib/runtime/client-runtime.test.ts src/lib/renderer/webgl2/webgl2-renderer.test.ts src/lib/textures/texture-manager.test.ts`.
+- Validation: `npm run check`; `npm run test:ts -- src/lib/renderer/static-layer-contracts.test.ts src/lib/static/demand-planner.test.ts src/lib/static/coordinator/static-coordinator.test.ts src/lib/static/objects/static-object-visual-resource-key.test.ts src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/runtime/static-scene-query.test.ts src/lib/runtime/client-runtime.test.ts src/lib/renderer/webgl2/webgl2-renderer.test.ts src/lib/textures/texture-manager.test.ts`.
 
 ### Phase 11D: Old Compatibility Resteer And Final Cleanup
 
@@ -2002,7 +2002,7 @@ Decisions and course corrections:
 - `StaticCoordinator.desiredKey`, `activeWork`, and `workId` remain transient active-work scheduling, cancellation, diagnostics, and bake-completion handles. They are not resident resource ownership, layer lifecycle ownership, dynamic retention, or scene-interest readiness state.
 - `LandblockEnvCellGeometryAttachmentProvider` remains as a stateless bake attachment provider name. It no longer performs direct old-route host lookups; it derives geometry attachments from resolved env-cell source payloads.
 - No retained-scope, durable work-owner, or source-scope ownership paths remain in executable static/runtime/dynamic code.
-- Validation reused the Phase 11C final frontend gates: `npm run check`; `npm run test:ts -- src/lib/renderer/static-layer-contracts.test.ts src/lib/static/demand-planner.test.ts src/lib/static/coordinator/static-coordinator.test.ts src/lib/static/objects/static-object-visual-resource-key.test.ts src/lib/static/objects/bake/static-object-compatibility-partitioner.test.ts src/lib/runtime/static-scene-query.test.ts src/lib/runtime/client-runtime.test.ts src/lib/renderer/webgl2/webgl2-renderer.test.ts src/lib/textures/texture-manager.test.ts`; zero-reference audits for old route/domain/lifecycle names.
+- Validation reused the Phase 11C final frontend gates: `npm run check`; `npm run test:ts -- src/lib/renderer/static-layer-contracts.test.ts src/lib/static/demand-planner.test.ts src/lib/static/coordinator/static-coordinator.test.ts src/lib/static/objects/static-object-visual-resource-key.test.ts src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/runtime/static-scene-query.test.ts src/lib/runtime/client-runtime.test.ts src/lib/renderer/webgl2/webgl2-renderer.test.ts src/lib/textures/texture-manager.test.ts`; zero-reference audits for old route/domain/lifecycle names.
 
 ### Phase 12A: Final Validation Gates
 
@@ -2237,12 +2237,12 @@ Decisions and course corrections:
 - Refactored terrain draw-unit IDs, terrain texture-use IDs, static-object draw-unit IDs, static-object texture-use IDs, and structured-interior texture-use IDs to derive from layer-owner/resource scope ids instead of scheduler `staticWorkId`.
 - Kept `staticWorkId` only for scheduler correlation, fake worker completion lookup, diagnostics, and warning context. Those retained uses are intentionally not resource ownership.
 - No old-name getters, aliases, snapshot compatibility fields, or fallback branches were added.
-- Validation passed: `npm run lint:ts`; `npm run check`; focused `npm run test:ts -- src/lib/static/coordinator/static-coordinator.test.ts src/lib/static/demand-planner.test.ts src/lib/static/terrain/bake/terrain-geometry-baker.test.ts src/lib/static/objects/bake/static-object-compatibility-partitioner.test.ts src/lib/static/objects/bake/static-object-bake-attachments.test.ts src/lib/static/env-cells/bake/env-cell-system-baker.test.ts src/lib/static/bake/static-material-texture-policy.test.ts src/lib/runtime/client-runtime.test.ts`; full `npm run test:ts` passed 68 files / 568 tests.
+- Validation passed: `npm run lint:ts`; `npm run check`; focused `npm run test:ts -- src/lib/static/coordinator/static-coordinator.test.ts src/lib/static/demand-planner.test.ts src/lib/static/terrain/bake/terrain-geometry-baker.test.ts src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/static/objects/bake/static-object-bake-attachments.test.ts src/lib/static/env-cells/bake/env-cell-system-baker.test.ts src/lib/static/bake/static-material-texture-policy.test.ts src/lib/runtime/client-runtime.test.ts`; full `npm run test:ts` passed 68 files / 568 tests.
 - Zero-reference audit passed for executable bare `activeWork`, `ActiveWork`, `desiredKey`, `DesiredWorkKey`, `DesiredKey`, `workId`, `WorkId`, and accidental `staticStaticWorkId` under `apps/holtburger-3d/src/lib/static` and `apps/holtburger-3d/src/lib/runtime`.
 
 ### Phase 16: Static Object Bake Naming Cleanup
 
-Status: pending.
+Status: completed on 2026-06-30.
 
 Goal: remove or justify `compatibility` naming in static object bake modules so it cannot be confused with route-compatibility or legacy-shim behavior.
 
@@ -2255,25 +2255,31 @@ Deliverables:
 
 Acceptance criteria:
 
-- No static object bake module name reads as a legacy compatibility shim unless this phase explicitly proves and records that the term means material compatibility and is the clearest available name.
+- No static object bake module name reads as a legacy compatibility shim unless this phase explicitly proves and records that the term means material batching and is the clearest available name.
 - Env-cell and outdoor static object bake paths still share the intended batching logic without route compatibility aliases.
 - Renamed bake files/exports do not keep compatibility aliases or wrapper exports under the old names.
 - TypeScript checks/tests pass for touched areas.
 
 Task checklist:
 
-- [ ] Audit all static object bake `compatibility` names and classify which are semantic material-compatibility terms versus misleading legacy-shim terms.
-- [ ] Choose final names for the shared static object bake/partition pipeline.
-- [ ] Rename files, exports, imports, tests, and diagnostics if the audit finds misleading names.
-- [ ] Run targeted bake/partition tests plus broad TypeScript validation.
-- [ ] Run zero-reference audits for renamed compatibility symbols.
-- [ ] Audit for and delete any old-name alias, fallback, compatibility wrapper, or test shim introduced during the rename.
-- [ ] Record any intentionally retained `compatibility` terms with rationale.
+- [x] Audit all static object bake `compatibility` names and classify which are semantic material-compatibility terms versus misleading legacy-shim terms.
+- [x] Choose final names for the shared static object bake/partition pipeline.
+- [x] Rename files, exports, imports, tests, and diagnostics if the audit finds misleading names.
+- [x] Run targeted bake/partition tests plus broad TypeScript validation.
+- [x] Run zero-reference audits for renamed compatibility symbols.
+- [x] Audit for and delete any old-name alias, fallback, compatibility wrapper, or test shim introduced during the rename.
+- [x] Record any intentionally retained `batch` terms with rationale.
 
 Decisions and course corrections:
 
-- Added because the final audit used `compatibility` as a red-flag term for legacy paths, while current static object bake code also uses it for batching compatibility. That ambiguity is not broken behavior, but it is reviewer-hostile.
-- Dry run on 2026-06-30 found the compatibility naming is concentrated in the static object bake pipeline plus imports from the static bake worker and LoD source resolver tests. It is likely a clean TypeScript-only rename if Phase 13 has already renamed the env-cell domain/scope strings.
+- Added because the final audit used `compatibility` as a red-flag term for legacy paths, while current static object bake code also uses it for batching. That ambiguity is not broken behavior, but it is reviewer-hostile.
+- Dry run on 2026-06-30 found the batch naming is concentrated in the static object bake pipeline plus imports from the static bake worker and LoD source resolver tests. It is likely a clean TypeScript-only rename if Phase 13 has already renamed the env-cell domain/scope strings.
+- Renamed the executable pipeline to `StaticObjectBatchBaker`, `bakeStaticObjectBatch`, `partitionStaticObjectBatches`, `StaticObjectBatchPayload`, `StaticObjectBatchPartition`, `static-object-batch-baker`, and `static-object-batch-partitioner`.
+- Renamed the shared material slicer from `static-material-compatibility-slicer` to `static-material-batch-slicer` with `StaticMaterialBatchCandidate`, `StaticMaterialBatchSlice`, and `sliceStaticMaterialBatchCandidates`.
+- Renamed internal static-object partition grouping fields from `compatibilityKey`/`compatibilityIndex` to `batchKey`/`batchIndex`; retained `batch` vocabulary because the code groups render-compatible material/ownership/sort/visibility candidates into draw batches, not route compatibility shims.
+- No old compatibility-named exports, wrapper modules, alias functions, or fallback imports were retained.
+- Validation passed: `npm run lint:ts`; `npm run check`; `npm run test:ts -- src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/static/env-cells/bake/env-cell-system-baker.test.ts src/lib/static/bake/worker-client.test.ts src/lib/static/resolver/landblock-scene-lod-source-resolver.test.ts`; full `npm run test:ts` passed 68 files / 568 tests.
+- Zero-reference audit passed for executable `Compatibility`, `compatibility`, `static-object-compatibility`, `static-material-compatibility`, `partitionStaticObjectCompatibility`, and `bakeStaticObjectCompatibility` under `apps/holtburger-3d/src/lib/static`, `apps/holtburger-3d/src/lib/runtime`, `apps/holtburger-3d/src/lib/dynamic`, and `apps/holtburger-3d/src/lib/visual`.
 
 ### Phase 17: Follow-Up Cleanup Verification
 

@@ -137,7 +137,7 @@ describe("browser landblock env-cell baker", () => {
 		);
 	});
 
-	it("emits classified env-cell dynamic seeds for setup sources with default animations", () => {
+	it("keeps env-cell static object seeds as static placement records", () => {
 		const input = createInputWithEnvCellStaticSource(
 			createSetupStaticObjectSourceAsset({
 				defaultAnimation: 0x0300061b,
@@ -154,36 +154,29 @@ describe("browser landblock env-cell baker", () => {
 
 		expect(result.staticAuthoredDynamicSeeds).toEqual([
 			{
-				kind: "env-cell-static-object-dynamic-seed",
+				envCellId: 0xda550100,
+				kind: "env-cell-static-object-seed",
+				landblockId: 0xda55ffff,
 				owner: expectedEnvCellLayerOwner(),
 				seed: {
-					classificationReason: "setup-default-animation",
-					defaultAnimationId: 0x0300061b,
-					envCellId: 0xda550100,
-					landblockId: 0xda55ffff,
-					localPlacement: {
-						orientation: { w: 1, x: 0, y: 0, z: 0 },
-						origin: { x: 1, y: 2, z: 3 },
-					},
-					object: {
+					debug: { sourceAssetId: "setup-model/020003e5" },
+					identity: {
 						instanceId: "env-cell-static-0",
 						kind: "static-object-instance",
 						landblockId: 0xda55ffff,
 						objectKind: "explicit-object",
 					},
-					setupModelId: 0x020003e5,
+					localPlacement: {
+						orientation: { w: 1, x: 0, y: 0, z: 0 },
+						origin: { x: 1, y: 2, z: 3 },
+					},
 					source: {
 						kind: "static-object-source",
 						sourceAssetKind: "setup-model",
 						sourceDid: 0x020003e5,
 					},
-					sourceAssetId: "setup-model/020003e5",
-					sourceResidence: {
-						kind: "landblock-source",
-						landblockId: 0xda55ffff,
-						source: "env-cells",
-					},
-					sourceScale: { x: 1, y: 1, z: 1 },
+					sourceIndex: 0,
+					sourceScale: null,
 				},
 			},
 		]);

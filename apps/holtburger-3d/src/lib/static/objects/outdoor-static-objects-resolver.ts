@@ -190,6 +190,7 @@ export class OutdoorStaticObjectsResolver {
 			sourceByKey,
 		});
 		const scope: OutdoorStaticObjectsScopePayload = {
+			authoredDynamicPlacements: dynamicSeedFacts,
 			authoredDynamicSeeds: dynamicSeedFacts,
 			buildingTransitionApertures:
 				domain === "outdoor-buildings"

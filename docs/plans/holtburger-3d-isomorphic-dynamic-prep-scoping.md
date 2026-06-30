@@ -1458,7 +1458,35 @@ Acceptance criteria:
 
 Decisions and course corrections:
 
-- Pending.
+- Completed during Phase 6.
+- Static source resolution now returns `dynamicRecipes` beside static layer `recipes`.
+- Static-authored dynamic recipe construction uses a shared helper in
+  `apps/holtburger-3d/src/lib/dynamic/static-authored-visual-recipe.ts`, so outdoor and env-cell
+  placements produce the same dynamic resolver payload shape before visual bake.
+- Env-cell setup/default-animation classification moved out of
+  `apps/holtburger-3d/src/lib/static/env-cells/bake/env-cell-system-baker.ts` and into
+  `apps/holtburger-3d/src/lib/static/env-cells/env-cell-system-resolver.ts`. The baker now treats
+  `staticObjectSeeds` as static placement bookkeeping only.
+- Outdoor source resolution mirrors `authoredDynamicPlacements` into the old `authoredDynamicSeeds`
+  field until static-authored activation is cut over. This is temporary compatibility debt, not a
+  durable dual path.
+- Deleted runtime-authored `DynamicEntityResourceManager` tests that asserted the pre-Phase-5
+  main-thread runtime prep path. Runtime-authored visual prep is now covered by the recipe/bake
+  closure tests and `ClientRuntime` cutover tests.
+- `DynamicEntityTransformState` still depends on `StaticAuthoredDynamicSeedFacts`. This is now
+  misleading because recipe construction is placement-backed; clean it up when static-authored
+  activation stops consuming seed records.
+
+Debt carried forward:
+
+- The coordinator currently ignores `StaticLandblockSceneLodResolution.dynamicRecipes`; Phase 7 must
+  carry those recipes through the static prep closure and bake their visuals before materialization.
+- Runtime/static materialization still consumes `staticAuthoredDynamicSeeds`; Phase 8 must replace
+  that activation input with recipe-backed baked dynamic visual products.
+- `authoredDynamicSeeds` and `staticAuthoredDynamicSeeds` remain as temporary downstream activation
+  carriers. Phase 9 must delete them rather than keeping aliases around.
+- Runtime/scene-query inspection names that expose seed terminology are still downstream of the
+  activation cutover and must be renamed once the old activation input is gone.
 
 ### Phase 7: Integrate Dynamic Visual Bake Into The Static Prep Closure
 

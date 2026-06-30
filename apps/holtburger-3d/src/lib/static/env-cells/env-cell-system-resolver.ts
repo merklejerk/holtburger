@@ -13,8 +13,10 @@ import {
 import type {
 	LandblockEnvCellStaticFacts,
 	EnvCellSystemStaticScopePayload,
+	EnvCellStaticObjectDynamicPlacementFacts,
 	StaticMaterialSourceIdentity,
 	StaticObjectInstanceIdentity,
+	StaticObjectSourceAssetFacts,
 	StaticObjectPaletteSourceFacts,
 	StaticObjectTextureRefFacts,
 	StaticResolverJob,
@@ -109,9 +111,9 @@ export class EnvCellSystemResolver {
 			paletteSources,
 			textureRefs,
 		});
-		const sourceByKey = new Set(
+		const sourceByKey = new Map(
 			sourceClosure.sourceAssets.map((source) =>
-				createSourceCacheKey(source.identity),
+				[createSourceCacheKey(source.identity), source] as const,
 			),
 		);
 		reportOmittedStaticSeeds({
@@ -275,7 +277,7 @@ function reportUnboundedEnvCells(
 function reportOmittedStaticSeeds(options: {
 	readonly landblockId: number;
 	readonly payload: ResolverLandblockEnvCellLayerPayloadDto;
-	readonly sourceByKey: ReadonlySet<string>;
+	readonly sourceByKey: ReadonlyMap<string, StaticObjectSourceAssetFacts>;
 }): void {
 	const omittedSeeds = options.payload.envCells.flatMap((cell) =>
 		cell.statics.flatMap((staticSeed) => {
@@ -310,9 +312,46 @@ function reportOmittedStaticSeeds(options: {
 function createLandblockEnvCellStaticFacts(options: {
 	readonly landblockId: number;
 	readonly cell: ResolverLandblockEnvCellLayerPayloadDto["envCells"][number];
-	readonly sourceByKey: ReadonlySet<string>;
+	readonly sourceByKey: ReadonlyMap<string, StaticObjectSourceAssetFacts>;
 }): LandblockEnvCellStaticFacts {
 	const { cell, landblockId, sourceByKey } = options;
+	const staticPlacements = cell.statics.flatMap((staticSeed) => {
+		const source = createStaticObjectSourceIdentity(
+			parseHostAssetId(staticSeed.sourceAssetId),
+		);
+		const sourceAsset = sourceByKey.get(createSourceCacheKey(source));
+		if (!sourceAsset) {
+			return [];
+		}
+
+		return [
+			{
+				debug: { sourceAssetId: staticSeed.sourceAssetId },
+				identity: createEnvCellStaticObjectInstanceIdentity({
+					envCellId: cell.envCellId,
+					instanceId: staticSeed.instanceId,
+					landblockId,
+				}),
+				localPlacement: staticSeed.localPlacement,
+				source,
+				sourceAsset,
+				sourceIndex: staticSeed.sourceIndex,
+				sourceScale: staticSeed.sourceScale,
+			},
+		];
+	});
+	const authoredDynamicPlacements = staticPlacements.flatMap((placement) =>
+		createEnvCellDynamicPlacement({
+			cell,
+			landblockId,
+			placement,
+		}),
+	);
+	const authoredDynamicKeys = new Set(
+		authoredDynamicPlacements.map((placement) =>
+			createObjectInstanceKey(placement.object),
+		),
+	);
 	return {
 		cellBsp: cell.cellBsp,
 		cellStructure: {
@@ -335,29 +374,20 @@ function createLandblockEnvCellStaticFacts(options: {
 		renderGeometry: cell.renderGeometry,
 		restrictionObjectId: cell.restrictionObjectId,
 		seenOutside: cell.seenOutside,
-		staticObjectSeeds: cell.statics.flatMap((staticSeed) => {
-			const source = createStaticObjectSourceIdentity(
-				parseHostAssetId(staticSeed.sourceAssetId),
-			);
-			if (!sourceByKey.has(createSourceCacheKey(source))) {
-				return [];
-			}
-
-			return [
-				{
-					debug: { sourceAssetId: staticSeed.sourceAssetId },
-					identity: createEnvCellStaticObjectInstanceIdentity({
-						envCellId: cell.envCellId,
-						instanceId: staticSeed.instanceId,
-						landblockId,
-					}),
-					localPlacement: staticSeed.localPlacement,
-					source,
-					sourceIndex: staticSeed.sourceIndex,
-					sourceScale: staticSeed.sourceScale,
-				},
-			];
-		}),
+		authoredDynamicPlacements,
+		staticObjectSeeds: staticPlacements
+			.filter(
+				(placement) =>
+					!authoredDynamicKeys.has(createObjectInstanceKey(placement.identity)),
+			)
+			.map((placement) => ({
+				debug: placement.debug,
+				identity: placement.identity,
+				localPlacement: placement.localPlacement,
+				source: placement.source,
+				sourceIndex: placement.sourceIndex,
+				sourceScale: placement.sourceScale,
+			})),
 		surfaces: cell.surfaces.map((surface) => ({
 			material: createStaticMaterialSourceIdentity(surface.materialAssetId),
 			slotId: surface.slotId,
@@ -365,6 +395,42 @@ function createLandblockEnvCellStaticFacts(options: {
 		})),
 		visibleEnvCellIds: [...cell.visibleEnvCellIds].sort(compareNumeric),
 	};
+}
+
+function createEnvCellDynamicPlacement(options: {
+	readonly landblockId: number;
+	readonly cell: ResolverLandblockEnvCellLayerPayloadDto["envCells"][number];
+	readonly placement: LandblockEnvCellStaticFacts["staticObjectSeeds"][number] & {
+		readonly sourceAsset: StaticObjectSourceAssetFacts;
+	};
+}): readonly EnvCellStaticObjectDynamicPlacementFacts[] {
+	const { cell, landblockId, placement } = options;
+	if (
+		placement.sourceAsset.sourceAssetKind !== "setup-model" ||
+		placement.sourceAsset.defaultAnimation === null
+	) {
+		return [];
+	}
+
+	return [
+		{
+			classificationReason: "setup-default-animation",
+			defaultAnimationId: placement.sourceAsset.defaultAnimation,
+			envCellId: cell.envCellId,
+			landblockId,
+			localPlacement: placement.localPlacement,
+			object: placement.identity,
+			setupModelId: placement.sourceAsset.identity.sourceDid,
+			source: placement.source,
+			sourceAssetId: placement.sourceAsset.debug.sourceAssetId,
+			sourceResidence: {
+				kind: "landblock-source",
+				landblockId,
+				source: "env-cells",
+			},
+			sourceScale: placement.sourceScale ?? { x: 1, y: 1, z: 1 },
+		},
+	];
 }
 
 function createEnvCellStaticObjectInstanceIdentity(input: {
@@ -385,6 +451,10 @@ function createEnvCellStaticObjectInstanceId(input: {
 	readonly instanceId: string;
 }): string {
 	return `${formatHex32(input.envCellId)}:${input.instanceId}`;
+}
+
+function createObjectInstanceKey(identity: StaticObjectInstanceIdentity): string {
+	return `${identity.landblockId}:${identity.objectKind}:${identity.instanceId}`;
 }
 
 function createStaticMaterialSourceIdentity(

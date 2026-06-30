@@ -111,6 +111,7 @@ describe("browser runtime routing", () => {
 		).toBe(false);
 
 		const resolution: StaticLandblockSceneLodResolution = {
+			dynamicRecipes: [],
 			recipes: [],
 			request: sourceRequest,
 		};

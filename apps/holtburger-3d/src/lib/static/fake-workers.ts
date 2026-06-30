@@ -171,6 +171,7 @@ export class DeferredStaticResolver
 
 		this.#sourceResolvers.delete(requestId);
 		resolver.resolve({
+			dynamicRecipes: [],
 			recipes:
 				recipes ??
 				sourceRequest.request.requestedLayers.map((layer) =>
@@ -290,6 +291,7 @@ export class ImmediateStaticResolver
 		request: StaticLandblockSceneLodSourceRequest,
 	): Promise<StaticLandblockSceneLodResolution> {
 		return {
+			dynamicRecipes: [],
 			recipes: request.requestedLayers.map((layer) =>
 				createFakeLayerRecipe(
 					request,
@@ -440,6 +442,7 @@ function createFakeStaticScopePayloadBody(
 
 	if (job.domain === "outdoor-buildings" && job.scope.kind === "landblock") {
 		return {
+			authoredDynamicPlacements: [],
 			authoredDynamicSeeds: [],
 			buildingTransitionApertures: [],
 			domain: "outdoor-buildings",

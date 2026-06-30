@@ -168,6 +168,38 @@ describe("browser landblock env-cell resolver", () => {
 		});
 	});
 
+	it("classifies setup-default env-cell statics as dynamic placements during source resolution", async () => {
+		const assetService = new FixtureAssetService(
+			createResolverAssets({ setupDefaultAnimation: 0x03000010 }),
+		);
+
+		const payload = await new EnvCellSystemResolver({
+			assetService,
+		}).resolve(createEnvCellRequest());
+
+		expect(payload.scope.kind).toBe("env-cell-system");
+		if (payload.scope.kind !== "env-cell-system") {
+			throw new Error("expected landblock env-cell payload");
+		}
+
+		const setupCell = payload.scope.envCells.find(
+			(cell) => cell.identity.envCellId === 0xda550101,
+		);
+		expect(setupCell?.staticObjectSeeds).toEqual([]);
+		expect(setupCell?.authoredDynamicPlacements).toEqual([
+			expect.objectContaining({
+				classificationReason: "setup-default-animation",
+				defaultAnimationId: 0x03000010,
+				envCellId: 0xda550101,
+				object: expect.objectContaining({
+					instanceId: "da550101:static-0",
+				}),
+				setupModelId: 0x02000010,
+				sourceAssetId: "setup-model/02000010",
+			}),
+		]);
+	});
+
 	it("requests resolver metadata for static seeds but not standalone env-cell assets", async () => {
 		const assetService = new FixtureAssetService(createResolverAssets());
 
@@ -597,7 +629,11 @@ function createRegionRenderProfileAsset(
 	);
 }
 
-function createResolverAssets(): readonly PreparedAsset[] {
+function createResolverAssets(
+	options: {
+		readonly setupDefaultAnimation?: number | null;
+	} = {},
+): readonly PreparedAsset[] {
 	return [
 		createPreparedAsset(
 			createHostAssetKey("landblock-scene-lod-env-cell-layer", 0xda55ffff),
@@ -613,7 +649,9 @@ function createResolverAssets(): readonly PreparedAsset[] {
 		),
 		createPreparedAsset(
 			createHostAssetKey("setup-model", 0x02000010),
-			createSetupModelPayload(),
+			createSetupModelPayload({
+				defaultAnimation: options.setupDefaultAnimation ?? null,
+			}),
 		),
 		createPreparedAsset(
 			createHostAssetKey("setup-appearance", 0x02000010),
@@ -992,11 +1030,15 @@ function createGfxObjPayload(options: {
 	};
 }
 
-function createSetupModelPayload(): SetupModelPayloadDto {
+function createSetupModelPayload(
+	options: {
+		readonly defaultAnimation?: number | null;
+	} = {},
+): SetupModelPayloadDto {
 	return {
 		collisionWitness: { cylSphereCount: 0, sphereCount: 0 },
 		connectionPoints: [],
-		defaultAnimation: null,
+		defaultAnimation: options.defaultAnimation ?? null,
 		defaultMotionTable: null,
 		defaultScript: null,
 		defaultScriptTable: null,

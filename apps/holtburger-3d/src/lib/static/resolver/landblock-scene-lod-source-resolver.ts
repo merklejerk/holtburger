@@ -19,7 +19,14 @@ import type {
 	StaticLandblockSceneLodSourceResolver,
 	StaticResolver,
 	StaticResolverJob,
+	StaticScopePayload,
 } from "../contracts";
+import {
+	createStaticAuthoredDynamicPlacementOwner,
+	createStaticAuthoredDynamicRecipe,
+	createStaticAuthoredDynamicRecipeResolutionPayload,
+} from "../../dynamic/static-authored-visual-recipe";
+import { resolveDynamicVisualRecipe } from "../../dynamic/visual-recipe-resolver";
 import { EnvCellSystemResolver } from "../env-cells/env-cell-system-resolver";
 import { OutdoorStaticObjectsResolver } from "../objects/outdoor-static-objects-resolver";
 import type {
@@ -51,6 +58,7 @@ export class LandblockSceneLodSourceResolver implements StaticLandblockSceneLodS
 		const scenePayload = requireLandblockSceneLodPayload(sceneAsset);
 		validateScenePayloadForRequest(scenePayload, request);
 		const recipes = [];
+		const dynamicRecipes = [];
 
 		for (const layerRequest of request.requestedLayers) {
 			const job = createStaticResolverJob(request, layerRequest);
@@ -60,14 +68,72 @@ export class LandblockSceneLodSourceResolver implements StaticLandblockSceneLodS
 				sceneAsset,
 				scenePayload,
 			});
+			const payload = await resolver.resolve(job);
 			recipes.push({
-				payload: await resolver.resolve(job),
+				payload,
 				targetOwnerKey: layerRequest.targetOwnerKey,
 			});
+			dynamicRecipes.push(
+				...(await this.#resolveStaticAuthoredDynamicRecipes({
+					job,
+					payload,
+					targetOwnerKey: layerRequest.targetOwnerKey,
+				})),
+			);
 		}
 
-		return { recipes, request };
+		return { dynamicRecipes, recipes, request };
 	}
+
+	async #resolveStaticAuthoredDynamicRecipes(options: {
+		readonly job: StaticResolverJob;
+		readonly payload: StaticScopePayload;
+		readonly targetOwnerKey: StaticLandblockSceneLodLayerRequest["targetOwnerKey"];
+	}): Promise<StaticLandblockSceneLodResolution["dynamicRecipes"]> {
+		const owner = createStaticAuthoredDynamicPlacementOwner({
+			domain: options.job.domain,
+			targetOwnerKey: options.targetOwnerKey,
+		});
+		const placementRecords = createStaticAuthoredDynamicPlacementRecords({
+			owner,
+			payload: options.payload,
+		});
+		return Promise.all(
+			placementRecords.map(async (record) =>
+				createStaticAuthoredDynamicRecipe({
+					recipe: await resolveDynamicVisualRecipe({
+						...createStaticAuthoredDynamicRecipeResolutionPayload(record),
+						assetReader: this.#assetService,
+					}),
+					targetOwnerKey: options.targetOwnerKey,
+				}),
+			),
+		);
+	}
+}
+
+function createStaticAuthoredDynamicPlacementRecords(options: {
+	readonly owner: ReturnType<typeof createStaticAuthoredDynamicPlacementOwner>;
+	readonly payload: StaticScopePayload;
+}) {
+	const { owner, payload } = options;
+	if (payload.scope.kind === "outdoor-static-objects") {
+		return payload.scope.authoredDynamicPlacements.map((placement) => ({
+			kind: "outdoor-static-object-dynamic-placement" as const,
+			owner,
+			placement,
+		}));
+	}
+	if (payload.scope.kind === "env-cell-system") {
+		return payload.scope.envCells.flatMap((envCell) =>
+			envCell.authoredDynamicPlacements.map((placement) => ({
+				kind: "env-cell-static-object-dynamic-placement" as const,
+				owner,
+				placement,
+			})),
+		);
+	}
+	return [];
 }
 
 function createProjectedLayerResolver(options: {

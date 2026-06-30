@@ -71,6 +71,7 @@ import { StaticCoordinator } from "../static/coordinator/static-coordinator";
 import type {
 	StaticCoordinatorSnapshot,
 	StaticCoordinatorCommitDelta,
+	StaticScopePrepCommit,
 	StaticDemand,
 	StaticBounds,
 	StaticDrawUnit,
@@ -941,8 +942,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 			},
 		);
 		this.#unsubscribeStaticCommits = staticCoordinator.subscribeCommits(
-			(delta) => {
-				this.#enqueueStaticMaterialization(delta);
+			(commit) => {
+				this.#enqueueStaticMaterialization(commit);
 			},
 		);
 		this.#unsubscribeStaticSourcePayloads =
@@ -1952,13 +1953,14 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#assetService.pruneExpiredWarmAssets();
 	}
 
-	#enqueueStaticMaterialization(delta: StaticCoordinatorCommitDelta): void {
+	#enqueueStaticMaterialization(commitEnvelope: StaticScopePrepCommit): void {
+		const delta = commitEnvelope.staticCommit;
 		this.#warnAboutDeferredStaticMaterialCoverage(delta);
 		const commit = this.#trackStaticMaterializationCommit(delta);
 		this.#staticMaterializationQueue = this.#staticMaterializationQueue
 			.then(() => {
 				commit.phase = "materializing";
-				return this.#materializeStaticCommit(delta);
+				return this.#materializeStaticCommit(commitEnvelope);
 			})
 			.catch((error: unknown) => {
 				this.#recordStaticMaterializationFailure(delta, error);
@@ -2009,8 +2011,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 	}
 
 	async #materializeStaticCommit(
-		delta: StaticCoordinatorCommitDelta,
+		commitEnvelope: StaticScopePrepCommit,
 	): Promise<void> {
+		const delta = commitEnvelope.staticCommit;
 		const textureUpdate =
 			await this.#textureManager.applyStaticCommitDelta(delta);
 		if (this.#disposed) {

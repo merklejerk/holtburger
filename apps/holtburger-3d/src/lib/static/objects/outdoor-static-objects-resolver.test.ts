@@ -1341,7 +1341,7 @@ function createTerrainStub(): LandblockOutdoorLayerSourcePayloadDto["terrain"] {
 		minHeight: 0,
 		quads: [],
 		terrainBvh: {
-			coordinateSpace: "landblock-outdoor-terrain-local",
+			coordinateSpace: "landblock-terrain-local",
 			items: [],
 			nodes: [],
 		},

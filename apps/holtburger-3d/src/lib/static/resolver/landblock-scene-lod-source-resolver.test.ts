@@ -72,6 +72,12 @@ describe("landblock scene LoD source resolver", () => {
 					key.startsWith("landblock-env-cells:"),
 			),
 		).toBe(false);
+		expect(assetReader.requestedKeys).not.toContain(
+			"landblock-scene-lod-outdoor-layer:da55ffff",
+		);
+		expect(assetReader.requestedKeys).not.toContain(
+			"landblock-scene-lod-env-cell-layer:da55ffff",
+		);
 		const envCellRecipe = resolution.recipes.find(
 			(recipe) => recipe.payload.job.domain === "landblock-env-cells",
 		);

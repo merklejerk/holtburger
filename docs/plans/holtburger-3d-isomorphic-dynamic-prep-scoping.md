@@ -1207,6 +1207,33 @@ Acceptance criteria:
 - Phase 4 worker protocol work begins only after the contract seams are proven by focused tests.
 - The plan is updated with any naming or ownership corrections before Phase 4 starts.
 
+Review outcome:
+
+- Completed after Phase 3.
+- `DynamicVisualRecipe` remains source/authorship-isomorphic. The baker consumes recipe facts and
+  geometry attachments without branching on `runtime-authored` versus `static-authored`.
+- `DynamicVisualBakeInput` is the corrected worker-boundary contract: recipes carry compact closure
+  facts, while `sourceGeometry` carries the typed vertex/UV buffers required for render-part
+  extraction. This is cleaner than stuffing raw geometry into every recipe and still keeps the
+  baker free of `AssetService`.
+- `BakedDynamicVisualResource` still mirrors the renderer-facing ready visual state closely enough
+  for Phase 5 to populate `DynamicEntityResourceState.visual` without changing renderer resource or
+  instance conversion in the same phase.
+- Failure handling remains simple: resolver failures throw/reject, missing recipe dependencies
+  become skipped products, unsupported materials become skipped products, and impossible bake states
+  become job failures. No durable issue ledger was introduced.
+- Phase 0 test triage still stands. Tests that encode old `DynamicEntityResourceManager` phase
+  events should be rewritten or deleted during runtime cutover instead of adapted around the new
+  contracts.
+
+Course corrections before Phase 4:
+
+- Dynamic visual bake worker transport must move `sourceGeometry` attachments across the worker
+  boundary with the bake input.
+- Phase 4 should add a dynamic visual bake attachment collection path equivalent in spirit to
+  `StaticObjectBakeAttachmentProvider`, but owned by the dynamic bake worker/client boundary.
+- Do not make the dynamic bake worker fetch assets directly just to hide attachment preparation.
+
 ### Phase 4: Add Worker Transport For Dynamic Visual Baking
 
 Goal: make dynamic visual baking worker-backed through a dedicated dynamic job contract.
@@ -1228,6 +1255,8 @@ Task checklist:
 - Keep `DynamicVisualBakeInput` separate from `StaticBakeBatchInput`.
 - Reuse generic worker transport helpers only where they do not blur job ownership.
 - Do not route dynamic visual bake messages through `static/bake/static-bake.worker.ts`.
+- Include `sourceGeometry` attachments in the dynamic visual bake request; prepare them before the
+  bake worker boundary.
 - Transfer typed arrays where the bake result carries large geometry data.
 - Console-report worker job failures and skip/fail the affected entity or job.
 

@@ -1563,51 +1563,128 @@ Decisions and course corrections:
 - `LandblockEnvCellsResolver` still contains direct `createHostAssetKey("landblock-env-cells", ...)` compatibility behavior for standalone resolver jobs and tests. Normal source-first LoD resolution intercepts that request through the projected payload asset service; Phase 11 should delete the standalone old-route resolver path rather than preserve it.
 - Validation: `npm run test:ts -- src/lib/runtime/env-cell-system-layer-publication.test.ts src/lib/runtime/client-runtime.test.ts`; `npm run check`; zero-reference search for `EnvCellSystemLayerAssembly`, `env-cell-system-layer-assembly`, and `envCellSystemLayerAssembly`; audit searches for `landblock-env-cells` route-facing surfaces and `outdoor-buildings` dependencies in env-cell publication paths.
 
-### Phase 11: Old Route And Compatibility Cleanup
+### Phase 11A: Frontend Old Route Surface Cleanup
 
 Status: pending.
 
-Goal: remove old broad routes, helper surfaces, and compatibility ballast after normal rendering uses `landblock-scene-lod`.
+Goal: delete TypeScript route-facing old outdoor/env-cell/topology keys, schemas, preparation branches, and standalone direct resolvers.
 
 Deliverables:
 
 - Remove normal frontend reliance on `landblock-outdoor`.
 - Remove normal frontend reliance on `landblock-env-cells`.
-- Remove `landblock/{id}/topology` route support, helpers, serializers, and tests.
-- Remove `landblock/{id}/outdoor` and `landblock/{id}/env-cells` route support, helpers, serializers, and tests.
-- Remove old route-facing `ContentAssetRequest` and `ContentAsset` variants for `LandblockOutdoor`, `LandblockTopology`, and `LandblockEnvCells`.
 - Remove TypeScript host asset key variants, formatters, parsers, schemas, route payload preparation, and binary lookup detection for old landblock outdoor/env-cell/topology assets.
 - Remove frontend resolvers, bakers, attachment providers, and asset views that consume `LandblockOutdoorPayloadDto` or `LandblockEnvCellsPayloadDto` as route payloads.
 - Delete standalone `LandblockEnvCellsResolver` direct-route loading or replace it with a LoD-projected-only resolver surface; normal browser source-first resolution should not need a route-capable env-cell resolver after Phase 10D.
-- Remove `outdoor-detail` as a renderer/static domain and replace it with the split explicit-object and generated-scenery domains everywhere.
-- Remove Phase 5A compatibility surfaces that still accept or emit executable `outdoor-detail` domains, including demand scheduling, resolver/baker branching, renderer `OutdoorDetailsLayerPayload`/`setOutdoorDetailsLayer`, generated-instance inventory naming, runtime tests, diagnostics counters, and WebGL2 resource paths after Phase 5B/5C and layer-owner cutover replace them.
-- Remove retained-scope, desired-key, durable work-owner, active-work-id, and source-scope lifecycle paths after layer owners become authoritative.
-- Remove route-specific diagnostics, snapshots, UI counters, and test helpers that mention the old route/domain names unless they describe an intentionally retained internal source fact.
-- Delete obsolete resolver fixture fields, compatibility helpers, and hollow tests.
-- Remove temporary route/source counters or promote them to existing-style diagnostics only if useful.
+- Delete obsolete route fixtures and compatibility tests for old frontend route behavior.
 
 Acceptance criteria:
 
 - Static frontend rendering does not request old broad routes.
-- Topology route parsing/serialization is gone from production code.
-- Old outdoor/env-cell route parsing/serialization is gone from production code.
 - The old route-facing host payload schemas are gone from frontend contracts.
 - No executable code path can request or prepare `landblock/{id}/outdoor`, `landblock/{id}/env-cells`, or `landblock/{id}/topology`.
 - No test remains solely to preserve old route behavior, old payload kinds, old host asset key kinds, or the unsplit `outdoor-detail` domain.
 - No compatibility tests exist solely to prove removed behavior still exists.
-- TypeScript tests, lint, Rust tests, and clippy pass for touched areas.
+- TypeScript tests and lint pass for touched frontend areas.
 
 Task checklist:
 
 - [ ] Audit production route references after Phase 10D.
-- [ ] Delete topology route implementation and frontend helpers/tests.
-- [ ] Delete old outdoor/env-cell route implementations and frontend helpers/tests.
-- [ ] Delete old `ContentAssetRequest` and `ContentAsset` variants or rename surviving internal source structs so they are not route-facing compatibility surfaces.
 - [ ] Delete old frontend host asset key kinds, DTO schemas, route payload preparation, and binary lookup branches.
 - [ ] Delete old env-cell resolver/attachment/store paths that request or merge `landblock-env-cells`.
 - [ ] Delete standalone env-cell direct-route resolver behavior and tests after LoD-projected env-cell payloads are the only supported resolver input.
+- [ ] Delete obsolete frontend route fixtures and compatibility helpers.
+- [ ] Run required frontend validation commands.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 11B: Rust And Tauri Old Route Cleanup
+
+Status: pending.
+
+Goal: delete old broad route support from Rust content/core and the Tauri adapter after the frontend no longer uses those routes.
+
+Deliverables:
+
+- Remove `landblock/{id}/topology` route support, helpers, serializers, and tests.
+- Remove `landblock/{id}/outdoor` and `landblock/{id}/env-cells` route support, helpers, serializers, and tests.
+- Remove old route-facing `ContentAssetRequest` and `ContentAsset` variants for `LandblockOutdoor`, `LandblockTopology`, and `LandblockEnvCells`.
+- Keep internal source structs/functions only where they are still used by `landblock-scene-lod`; rename or document them if route-facing names become misleading.
+
+Acceptance criteria:
+
+- Topology route parsing/serialization is gone from production code.
+- Old outdoor/env-cell route parsing/serialization is gone from production code.
+- No executable Rust/Tauri code path can request or serve `landblock/{id}/outdoor`, `landblock/{id}/env-cells`, or `landblock/{id}/topology`.
+- Rust tests and clippy pass for touched areas.
+
+Task checklist:
+
+- [ ] Delete topology route implementation and frontend/Tauri helpers/tests.
+- [ ] Delete old outdoor/env-cell route implementations and Tauri helpers/tests.
+- [ ] Delete old `ContentAssetRequest` and `ContentAsset` variants or rename surviving internal source structs so they are not route-facing compatibility surfaces.
+- [ ] Run Rust validation commands for touched crates.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 11C: Outdoor Detail Domain Cleanup
+
+Status: pending.
+
+Goal: remove the old unsplit `outdoor-detail` static/render domain now that explicit objects and generated scenery have separate domains/layers.
+
+Deliverables:
+
+- Remove `outdoor-detail` as a renderer/static domain and replace it with the split explicit-object and generated-scenery domains everywhere.
+- Remove Phase 5A compatibility surfaces that still accept or emit executable `outdoor-detail` domains, including demand scheduling, resolver/baker branching, renderer `OutdoorDetailsLayerPayload`/`setOutdoorDetailsLayer`, generated-instance inventory naming, runtime tests, diagnostics counters, and WebGL2 resource paths after Phase 5B/5C and layer-owner cutover replace them.
+- Remove route-specific diagnostics, snapshots, UI counters, and test helpers that mention the old domain unless they describe an intentionally retained material/detail texture concept.
+- Delete obsolete `outdoor-detail` fixtures, compatibility helpers, and hollow tests.
+
+Acceptance criteria:
+
+- No executable static/runtime/renderer code path accepts or emits `outdoor-detail`.
+- No renderer API surface exposes `OutdoorDetailsLayerPayload` or `setOutdoorDetailsLayer`.
+- No test remains solely to preserve the unsplit `outdoor-detail` domain.
+- TypeScript tests and lint pass for touched areas.
+
+Task checklist:
+
 - [ ] Delete old `outdoor-detail` layer/domain naming and diagnostics after explicit/generated layers replace it.
-- [ ] Delete retained-scope, desired-key, active-work-id, and source-scope ownership paths after layer owners replace them.
+- [ ] Remove old renderer/runtime `OutdoorDetailsLayerPayload` and `setOutdoorDetailsLayer` surfaces.
+- [ ] Remove old demand-planner/static resolver/baker `outdoor-detail` branches.
+- [ ] Run zero-reference searches for old `outdoor-detail` domain names; classify any surviving material detail texture vocabulary in this plan.
+- [ ] Run required frontend validation commands.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 11D: Old Compatibility Resteer And Final Cleanup
+
+Status: pending.
+
+Goal: prove Phase 11 removed the old executable route/domain model and record any remaining historical/internal vocabulary.
+
+Deliverables:
+
+- Remove retained-scope, desired-key, durable work-owner, active-work-id, and source-scope lifecycle paths after layer owners become authoritative if any executable references survived earlier phases.
+- Remove route-specific diagnostics, snapshots, UI counters, and test helpers that mention old route/domain names unless they describe an intentionally retained internal source fact.
+- Remove temporary route/source counters or promote them to existing-style diagnostics only if useful.
+- Run final zero-reference audits for old routes, old lifecycle names, and old domain names.
+
+Acceptance criteria:
+
+- No compatibility tests exist solely to prove removed behavior still exists.
+- No executable old route/domain/lifecycle compatibility path remains.
+- TypeScript tests, lint, Rust tests, and clippy pass for touched areas.
+
+Task checklist:
+
+- [ ] Delete retained-scope, desired-key, active-work-id, and source-scope ownership paths after layer owners replace them if any survived Phase 8E/9 audits.
 - [ ] Run zero-reference searches for old route and lifecycle names; classify any surviving source vocabulary in this plan.
 - [ ] Delete obsolete fixtures and compatibility helpers.
 - [ ] Run required validation commands.

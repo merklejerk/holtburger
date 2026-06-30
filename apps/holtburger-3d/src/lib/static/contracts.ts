@@ -637,6 +637,7 @@ export interface StaticObjectPartSourceFacts {
 	readonly partIndex: number;
 	readonly source: StaticObjectSourceIdentity;
 	readonly gfxObj: StaticObjectSourceIdentity;
+	/** Source-local geometry lookup identity plus canonical raw gfx geometry identity. */
 	readonly geometry: StaticObjectSourceGeometryIdentity;
 	readonly materialSlotCount: number;
 	readonly renderTriangleCount: number;
@@ -652,7 +653,14 @@ export interface StaticObjectPartSourceFacts {
 
 export interface StaticObjectSourceGeometryIdentity {
 	readonly kind: "static-object-source-geometry";
+	/** Higher-level source asset that authored this part reference. */
 	readonly source: StaticObjectSourceIdentity;
+	/** Canonical raw gfx geometry payload used by bake attachments. */
+	readonly canonical: StaticObjectCanonicalGeometryIdentity;
+}
+
+export interface StaticObjectCanonicalGeometryIdentity {
+	readonly kind: "static-object-canonical-geometry";
 	readonly gfxObj: StaticObjectSourceIdentity;
 	readonly partIndex: number;
 }
@@ -961,7 +969,7 @@ export interface EnvCellCellStructureGeometryIdentity {
 }
 
 export interface StaticObjectSourceGeometryAttachment {
-	readonly identity: StaticObjectSourceGeometryIdentity;
+	readonly identity: StaticObjectCanonicalGeometryIdentity;
 	readonly positions: Float32Array;
 	readonly texCoords: Float32Array;
 }

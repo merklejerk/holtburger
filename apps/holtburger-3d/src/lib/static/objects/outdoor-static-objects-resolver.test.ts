@@ -149,8 +149,11 @@ describe("browser outdoor static object resolver", () => {
 		});
 		expect(payload.scope.sourceAssets[0]?.parts[0]).toMatchObject({
 			geometry: {
+				canonical: {
+					kind: "static-object-canonical-geometry",
+					partIndex: 0,
+				},
 				kind: "static-object-source-geometry",
-				partIndex: 0,
 			},
 			gfxObj: {
 				kind: "static-object-source",

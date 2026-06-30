@@ -1052,7 +1052,9 @@ function createInputWithRenderableStaticSeed(
 			envCellCellStructureGeometry: [],
 			staticObjectSourceGeometry: [
 				{
-					identity: source.parts[0]?.geometry ?? createStaticObjectGeometry(),
+					identity:
+						source.parts[0]?.geometry.canonical ??
+						createStaticObjectGeometry().canonical,
 					positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
 					texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
 				},

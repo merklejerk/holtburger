@@ -168,13 +168,16 @@ function createGeometryIdentity(
 	} = {},
 ): StaticObjectSourceGeometryIdentity {
 	return {
-		gfxObj: {
-			kind: "static-object-source",
-			sourceAssetKind: "gfx-obj",
-			sourceDid: options.gfxObjDid ?? 0x01000020,
+		canonical: {
+			gfxObj: {
+				kind: "static-object-source",
+				sourceAssetKind: "gfx-obj",
+				sourceDid: options.gfxObjDid ?? 0x01000020,
+			},
+			kind: "static-object-canonical-geometry",
+			partIndex: options.partIndex ?? 0,
 		},
 		kind: "static-object-source-geometry",
-		partIndex: options.partIndex ?? 0,
 		source: {
 			kind: "static-object-source",
 			sourceAssetKind: "setup-model",

@@ -2049,6 +2049,50 @@ Verification:
 - `npm run test:ts`
 - `npm run lint:ts`
 
+Implementation progress:
+
+- Completed in Phase 10B-1.
+- Added `StaticObjectCanonicalGeometryIdentity` for raw `gfx-obj` part geometry and changed
+  `StaticObjectSourceGeometryIdentity` to carry source-local context plus that canonical identity.
+- Changed static and dynamic source-geometry attachments to use canonical geometry identity. Source
+  parts still retain source-local identity for material, triangle, visual-resource, and error
+  context.
+- Updated static and dynamic attachment collection to dedupe by canonical geometry identity, so
+  distinct source assets that reference the same `gfx-obj` part request and transfer one geometry
+  attachment per bake batch.
+- Updated static and dynamic bakers to derive canonical attachment lookup keys from each source
+  part while preserving source-part descriptions in missing-attachment errors.
+- Updated fixtures that hand-authored stale source-keyed attachment identities to the new canonical
+  attachment contract.
+- Added static and dynamic attachment coverage proving distinct source parts with the same canonical
+  gfx geometry produce one attachment.
+
+Decisions and course corrections:
+
+- Kept `StaticObjectVisualResourceKey` source-aware. The key now reads `gfxObj` and `partIndex`
+  through `geometry.canonical`, but still includes the higher-level source identity. Canonicalizing
+  rendered visual resources remains out of scope because material, texture, render-state,
+  generated-resource, and provenance behavior need separate proof.
+- Did not store parallel `gfxObj` and `partIndex` fields beside `canonical` on
+  `StaticObjectSourceGeometryIdentity`. The source identity now owns source context and delegates raw
+  payload identity to the nested canonical identity to avoid drift.
+- Did not keep compatibility handling for source-keyed `StaticObjectSourceGeometryAttachment`
+  fixtures. Tests were updated to the production contract instead.
+
+Debt carried forward:
+
+- Some tests still hand-author full static object source facts. They now use the correct canonical
+  geometry shape, but a small fixture helper could reduce repeated boilerplate later. This is test
+  ergonomics only, not a runtime compatibility path.
+
+Verification results:
+
+- `npm run check` passed.
+- `npm run test:ts -- static-object-bake-attachments visual-bake-attachments visual-baker static-object-batch-baker static-coordinator` passed.
+- `npm run test:ts -- env-cell-system-baker` passed.
+- `npm run test:ts` passed.
+- `npm run lint:ts` passed.
+
 ### Phase 10B-2: Static Bake Diagnostics Cleanup
 
 Goal: remove static bake diagnostics that only narrate the deleted static-authored dynamic

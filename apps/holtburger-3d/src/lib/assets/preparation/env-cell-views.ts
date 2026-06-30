@@ -1,34 +1,30 @@
-import type {
-	LandblockEnvCellsPayloadDto,
-	LandblockOutdoorPayloadDto,
-} from "../../../lib/host/contracts";
+import type { LandblockEnvCellsLayerSourcePayloadDto } from "../../static/source-payloads";
 import type { PreparedAsset } from "../contracts";
 import { omitRenderGeometryVertexBuffers } from "./render-geometry-views";
 
 type ResolverEnvCellRenderGeometryDto = Omit<
-	LandblockEnvCellsPayloadDto["envCells"][number]["renderGeometry"],
+	LandblockEnvCellsLayerSourcePayloadDto["envCells"][number]["renderGeometry"],
 	"normals" | "positions" | "uvs"
 >;
 
 type ResolverLandblockEnvCellDto = Omit<
-	LandblockEnvCellsPayloadDto["envCells"][number],
+	LandblockEnvCellsLayerSourcePayloadDto["envCells"][number],
 	"renderGeometry"
 > & {
 	readonly renderGeometry: ResolverEnvCellRenderGeometryDto;
 };
 
 export type ResolverLandblockEnvCellsPayloadDto = Omit<
-	LandblockEnvCellsPayloadDto,
+	LandblockEnvCellsLayerSourcePayloadDto,
 	"envCells"
 > & {
-	readonly buildingTransitionApertures: LandblockOutdoorPayloadDto["buildingTransitionApertures"];
 	readonly envCells: readonly ResolverLandblockEnvCellDto[];
 };
 
 // Minimal standalone env-cell shape needed for resolver diagnostic views.
 interface EnvCellPayloadDto {
 	readonly kind: "env-cell";
-	readonly renderGeometry: LandblockEnvCellsPayloadDto["envCells"][number]["renderGeometry"];
+	readonly renderGeometry: LandblockEnvCellsLayerSourcePayloadDto["envCells"][number]["renderGeometry"];
 	readonly [field: string]: unknown;
 }
 
@@ -56,11 +52,10 @@ export function createResolverEnvCellPreparedAssetView(
 }
 
 function createResolverLandblockEnvCellsPayloadView(
-	payload: LandblockEnvCellsPayloadDto,
+	payload: LandblockEnvCellsLayerSourcePayloadDto,
 ): ResolverLandblockEnvCellsPayloadDto {
 	return {
 		...payload,
-		buildingTransitionApertures: [],
 		envCells: payload.envCells.map(createResolverEnvCellPayloadView),
 	};
 }
@@ -69,10 +64,12 @@ function createResolverEnvCellPayloadView(
 	cell: EnvCellPayloadDto,
 ): ResolverEnvCellPayloadDto;
 function createResolverEnvCellPayloadView(
-	cell: LandblockEnvCellsPayloadDto["envCells"][number],
+	cell: LandblockEnvCellsLayerSourcePayloadDto["envCells"][number],
 ): ResolverLandblockEnvCellDto;
 function createResolverEnvCellPayloadView(
-	cell: EnvCellPayloadDto | LandblockEnvCellsPayloadDto["envCells"][number],
+	cell:
+		| EnvCellPayloadDto
+		| LandblockEnvCellsLayerSourcePayloadDto["envCells"][number],
 ): ResolverEnvCellPayloadDto | ResolverLandblockEnvCellDto {
 	return {
 		...cell,
@@ -82,12 +79,12 @@ function createResolverEnvCellPayloadView(
 
 function isLandblockEnvCellsPayload(
 	payload: unknown,
-): payload is LandblockEnvCellsPayloadDto {
+): payload is LandblockEnvCellsLayerSourcePayloadDto {
 	return (
 		typeof payload === "object" &&
 		payload !== null &&
 		"kind" in payload &&
-		payload.kind === "landblock-env-cells"
+		payload.kind === "landblock-scene-lod-env-cell-layer"
 	);
 }
 

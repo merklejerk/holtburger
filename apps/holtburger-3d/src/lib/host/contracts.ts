@@ -430,27 +430,6 @@ const landblockOutdoorStaticMemberDtoSchema = z.object({
 	generated: landblockGeneratedSceneryFactsDtoSchema.nullable(),
 });
 
-export const landblockOutdoorPayloadDtoSchema = z.object({
-	kind: z.literal("landblock-outdoor"),
-	residencyKind: z.literal("outdoor-landblock"),
-	sourceAssetKind: z.literal("landblock-outdoor"),
-	landblockId: z.number().int().nonnegative(),
-	regionId: z.number().int().nonnegative(),
-	regionNumber: z.number().int().nonnegative(),
-	classification: z.literal("outdoor"),
-	terrain: landblockTerrainDtoSchema,
-	statics: z.array(landblockOutdoorStaticMemberDtoSchema),
-	buildingTransitionApertures: z.array(
-		landblockBuildingTransitionApertureDtoSchema,
-	),
-	outdoorBvh: preparedOutdoorBvhDtoSchema.nullable(),
-	diagnostics: landblockPackDiagnosticsDtoSchema,
-	provenance: assetProvenanceDtoSchema,
-});
-export type LandblockOutdoorPayloadDto = z.infer<
-	typeof landblockOutdoorPayloadDtoSchema
->;
-
 const envCellSurfaceSlotDtoSchema = z.object({
 	slotId: z.number().int().nonnegative(),
 	surfaceId: z.number().int().nonnegative(),
@@ -521,26 +500,6 @@ const landblockEnvCellDtoSchema = z
 		diagnostics: landblockPackDiagnosticsDtoSchema,
 	})
 	.strict();
-
-export const landblockEnvCellsPayloadDtoSchema = z
-	.object({
-		kind: z.literal("landblock-env-cells"),
-		residencyKind: z.literal("landblock"),
-		sourceAssetKind: z.literal("landblock-env-cells"),
-		landblockId: z.number().int().nonnegative(),
-		landblockInfoId: z.number().int().nonnegative(),
-		regionId: z.number().int().nonnegative(),
-		regionNumber: z.number().int().nonnegative(),
-		envCells: z.array(landblockEnvCellDtoSchema),
-		portalLinks: z.array(landblockScenePortalLinkDtoSchema),
-		landblockEnvCellBvh: preparedLandblockEnvCellBvhDtoSchema,
-		diagnostics: landblockPackDiagnosticsDtoSchema,
-		provenance: assetProvenanceDtoSchema,
-	})
-	.strict();
-export type LandblockEnvCellsPayloadDto = z.infer<
-	typeof landblockEnvCellsPayloadDtoSchema
->;
 
 export const landblockSceneLodLevelDtoSchema = z.union([
 	z.literal(0),

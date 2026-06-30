@@ -1,7 +1,7 @@
 import type {
-	LandblockOutdoorPayloadDto,
 	RegionRenderProfilePayloadDto,
 } from "../../../lib/host/contracts";
+import type { LandblockOutdoorLayerSourcePayloadDto } from "../source-payloads";
 import type {
 	HostAssetKey,
 	PreparedAsset,
@@ -36,7 +36,7 @@ import {
 } from "./static-object-source-closure";
 
 type OutdoorStaticPreparedPayload =
-	| LandblockOutdoorPayloadDto
+	| LandblockOutdoorLayerSourcePayloadDto
 	| RegionRenderProfilePayloadDto;
 
 interface LoadedPayload<
@@ -81,8 +81,11 @@ export class OutdoorStaticObjectsResolver {
 
 		const landblock = await this.#loadPayload(
 			context,
-			createHostAssetKey("landblock-outdoor", job.scope.landblockId),
-			"landblock-outdoor",
+			createHostAssetKey(
+				"landblock-scene-lod-outdoor-layer",
+				job.scope.landblockId,
+			),
+			"landblock-scene-lod-outdoor-layer",
 		);
 		const selectedObjects = landblock.payload.statics.filter((object) =>
 			shouldIncludeOutdoorStaticObject(domain, object.kind),
@@ -334,7 +337,7 @@ function isOutdoorStaticObjectDomain(
 
 function shouldIncludeOutdoorStaticObject(
 	domain: OutdoorStaticObjectsScopePayload["domain"],
-	objectKind: LandblockOutdoorPayloadDto["statics"][number]["kind"],
+	objectKind: LandblockOutdoorLayerSourcePayloadDto["statics"][number]["kind"],
 ): boolean {
 	switch (domain) {
 		case "outdoor-buildings":
@@ -349,7 +352,7 @@ function shouldIncludeOutdoorStaticObject(
 }
 
 function createOutdoorStaticBvhFacts(
-	bvh: LandblockOutdoorPayloadDto["outdoorBvh"],
+	bvh: LandblockOutdoorLayerSourcePayloadDto["outdoorBvh"],
 	objectsByInstanceId: ReadonlyMap<string, StaticObjectInstanceFacts>,
 ): OutdoorStaticBvhFacts | null {
 	if (!bvh) {

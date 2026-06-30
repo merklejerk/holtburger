@@ -69,8 +69,11 @@ export class LandblockEnvCellsResolver {
 		}
 
 		const landblock = await this.#loadPayload(
-			createHostAssetKey("landblock-env-cells", job.scope.landblockId),
-			"landblock-env-cells",
+			createHostAssetKey(
+				"landblock-scene-lod-env-cell-layer",
+				job.scope.landblockId,
+			),
+			"landblock-scene-lod-env-cell-layer",
 		);
 		const regionRenderProfile = await this.#loadPayload(
 			createHostAssetKey(

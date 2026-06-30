@@ -10,12 +10,12 @@ import {
 describe("host asset preparation", () => {
 	it("creates host lookup requests from typed browser keys", () => {
 		const key: HostAssetKey = {
-			id: "da55ffff",
-			kind: "landblock-outdoor",
+			id: "da55ffff:2",
+			kind: "landblock-scene-lod",
 		};
 
 		expect(createHostAssetLookupRequest(key, "request-1")).toEqual({
-			assetId: "landblock/da55ffff/outdoor",
+			assetId: "landblock/da55ffff/lod/2",
 			priority: "streaming",
 			requestId: "request-1",
 		});
@@ -89,8 +89,6 @@ describe("host asset preparation", () => {
 
 	it("recognizes every static asset route and reports route-specific schema failures", () => {
 		const routes = [
-			["landblock/da55ffff/outdoor", "landblock-outdoor"],
-			["landblock/da55ffff/env-cells", "landblock-env-cells"],
 			["landblock/da55ffff/lod/3", "landblock-scene-lod"],
 			["animation/0300061b", "animation"],
 			["gfx-obj/01000001", "gfx-obj"],
@@ -116,6 +114,22 @@ describe("host asset preparation", () => {
 			).toThrow(
 				`Asset ${assetId} matched the ${expectedKind} route but its payload failed the ${expectedKind} contract`,
 			);
+		}
+	});
+
+	it("does not prepare old broad landblock route payloads", () => {
+		for (const assetId of [
+			"landblock/da55ffff/outdoor",
+			"landblock/da55ffff/env-cells",
+		]) {
+			expect(() =>
+				prepareV2AssetPayload({
+					assetId,
+					payload: { kind: "definitely-wrong" },
+					payloadKind: "json",
+					requestId: "request-1",
+				}),
+			).toThrow(`asset preparation does not support host asset route ${assetId}.`);
 		}
 	});
 
@@ -243,79 +257,6 @@ describe("host asset preparation", () => {
 		);
 	});
 
-	it("accepts only the normalized browser landblock env-cell bundle shape", () => {
-		const payload = createLandblockEnvCellsPayload();
-
-		expect(
-			prepareV2AssetPayload({
-				assetId: "landblock/da55ffff/env-cells",
-				payload,
-				payloadKind: "json",
-				requestId: "request-1",
-			}),
-		).toMatchObject({
-			kind: "landblock-env-cells",
-			landblockEnvCellBvh: {
-				items: [{ source: "env-cell-root" }],
-			},
-		});
-
-		expect(() =>
-			prepareV2AssetPayload({
-				assetId: "landblock/da55ffff/env-cells",
-				payload: {
-					...payload,
-					classification: "dungeon",
-					envCellResidencyBvh: payload.landblockEnvCellBvh,
-					envCells: payload.envCells,
-				},
-				payloadKind: "json",
-				requestId: "request-1",
-			}),
-		).toThrow(
-			"Asset landblock/da55ffff/env-cells matched the landblock-env-cells route but its payload failed the landblock-env-cells contract",
-		);
-
-		expect(() =>
-			prepareV2AssetPayload({
-				assetId: "landblock/da55ffff/env-cells",
-				payload: {
-					...payload,
-					landblockEnvCellBvh: {
-						...payload.landblockEnvCellBvh,
-						items: payload.landblockEnvCellBvh.items.map((item) => ({
-							...item,
-							bounds: null,
-						})),
-					},
-				},
-				payloadKind: "json",
-				requestId: "request-2",
-			}),
-		).toThrow(
-			"Asset landblock/da55ffff/env-cells matched the landblock-env-cells route but its payload failed the landblock-env-cells contract",
-		);
-
-		expect(() =>
-			prepareV2AssetPayload({
-				assetId: "landblock/da55ffff/env-cells",
-				payload: {
-					...payload,
-					landblockEnvCellBvh: {
-						...payload.landblockEnvCellBvh,
-						nodes: payload.landblockEnvCellBvh.nodes.map((node) => ({
-							...node,
-							kindMask: 1,
-						})),
-					},
-				},
-				payloadKind: "json",
-				requestId: "request-3",
-			}),
-		).toThrow(
-			"Asset landblock/da55ffff/env-cells matched the landblock-env-cells route but its payload failed the landblock-env-cells contract",
-		);
-	});
 });
 
 function createLandblockSceneLodPayload() {
@@ -370,91 +311,6 @@ function createEmptyTerrain() {
 		tileSize: 24,
 		triangles: [],
 		vertices: [],
-	};
-}
-
-function createLandblockEnvCellsPayload() {
-	return {
-		diagnostics: createDiagnostics(),
-		envCells: [
-			{
-				cellBsp: {
-					index: 0,
-					kind: "leaf",
-					polyIds: [],
-					solid: 0,
-					sphere: null,
-				},
-				cellStructureId: 0x0d000001,
-				diagnostics: createDiagnostics(),
-				environmentId: 0x0e000001,
-				envCellId: 0xda550100,
-				localPlacement: createPlacement({ x: 1, y: 3, z: -2 }),
-				memberId: "env-cell/da550100",
-				portalApertures: [],
-				portals: [],
-				renderGeometry: {
-					bounds: null,
-					invalidPolygons: [],
-					normals: [],
-					positions: [],
-					skippedPolygonCount: 0,
-					sourceId: 0xda550100,
-					surfaceIds: [],
-					triangleCount: 0,
-					triangles: [],
-					uvs: [],
-					vertexCount: 0,
-				},
-				restrictionObjectId: null,
-				seenOutside: null,
-				statics: [],
-				surfaces: [],
-				visibleEnvCellIds: [],
-			},
-		],
-		kind: "landblock-env-cells",
-		landblockEnvCellBvh: {
-			items: [
-				{
-					bounds: {
-						max: { x: 1, y: 3, z: -2 },
-						min: { x: 1, y: 3, z: -2 },
-					},
-					envCellId: 0xda550100,
-					memberId: "env-cell/da550100",
-					source: "env-cell-root",
-				},
-			],
-			nodes: [
-				{
-					bounds: {
-						max: { x: 1, y: 3, z: -2 },
-						min: { x: 1, y: 3, z: -2 },
-					},
-					itemIndices: [0],
-					kindMask: {
-						domain: "landblock-env-cells",
-						envCellRoot: true,
-					},
-					left: null,
-					right: null,
-				},
-			],
-		},
-		landblockId: 0xda55ffff,
-		landblockInfoId: 0xda55fffe,
-		portalLinks: [],
-		provenance: {
-			detail: null,
-			errorCode: null,
-			source: "repo-local-hba",
-			sourceAssetKind: "landblock-env-cells",
-		},
-		regionId: 1,
-		regionNumber: 1,
-		residencyKind: "landblock",
-		sourceAssetKind: "landblock-env-cells",
 	};
 }
 

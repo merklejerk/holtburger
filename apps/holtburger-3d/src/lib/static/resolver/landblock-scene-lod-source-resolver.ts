@@ -1,9 +1,7 @@
 import type {
-	LandblockOutdoorPayloadDto,
 	LandblockSceneLodLayerDto,
 	LandblockSceneLodPayloadDto,
 } from "../../../lib/host/contracts";
-import type { ResolverLandblockEnvCellsPayloadDto } from "../../assets/preparation/env-cell-views";
 import type {
 	HostAssetKey,
 	PreparedAsset,
@@ -25,6 +23,10 @@ import type {
 } from "../contracts";
 import { LandblockEnvCellsResolver } from "../env-cells/landblock-env-cells-resolver";
 import { OutdoorStaticObjectsResolver } from "../objects/outdoor-static-objects-resolver";
+import type {
+	LandblockEnvCellsLayerSourcePayloadDto,
+	LandblockOutdoorLayerSourcePayloadDto,
+} from "../source-payloads";
 import { TerrainStaticScopeResolver } from "../terrain/terrain-resolver";
 
 export interface LandblockSceneLodSourceResolverOptions {
@@ -105,7 +107,7 @@ class ProjectedSceneLodAssetReader implements PreparedAssetReader {
 
 	requestPreparedAsset(key: HostAssetKey): Promise<PreparedAsset> {
 		if (
-			key.kind === "landblock-outdoor" &&
+			key.kind === "landblock-scene-lod-outdoor-layer" &&
 			isOutdoorSceneLodLayer(this.#layerKind)
 		) {
 			return Promise.resolve({
@@ -119,7 +121,7 @@ class ProjectedSceneLodAssetReader implements PreparedAssetReader {
 			});
 		}
 		if (
-			key.kind === "landblock-env-cells" &&
+			key.kind === "landblock-scene-lod-env-cell-layer" &&
 			this.#layerKind === "env-cell-system"
 		) {
 			return Promise.resolve({
@@ -140,7 +142,7 @@ function createProjectedOutdoorPayload(
 		StaticLandblockSceneLodLayerRequest["kind"],
 		"env-cell-system"
 	>,
-): LandblockOutdoorPayloadDto {
+): LandblockOutdoorLayerSourcePayloadDto {
 	const terrainLayer = requireSceneLodLayer(payload, "terrain");
 	const layer =
 		layerKind === "terrain" ? null : requireSceneLodLayer(payload, layerKind);
@@ -149,16 +151,13 @@ function createProjectedOutdoorPayload(
 			layer?.kind === "outdoor-buildings"
 				? layer.buildingTransitionApertures
 				: [],
-		classification: "outdoor",
 		diagnostics: payload.diagnostics,
-		kind: "landblock-outdoor",
+		kind: "landblock-scene-lod-outdoor-layer",
 		landblockId: payload.landblockId,
 		outdoorBvh: layerKind === "terrain" ? null : (layer?.outdoorBvh ?? null),
 		provenance: payload.provenance,
 		regionId: payload.regionId,
 		regionNumber: payload.regionNumber,
-		residencyKind: "outdoor-landblock",
-		sourceAssetKind: "landblock-outdoor",
 		statics: layerKind === "terrain" ? [] : (layer?.statics ?? []),
 		terrain: terrainLayer.terrain,
 	};
@@ -166,13 +165,13 @@ function createProjectedOutdoorPayload(
 
 function createProjectedEnvCellsPayload(
 	payload: LandblockSceneLodPayloadDto,
-): ResolverLandblockEnvCellsPayloadDto {
+): LandblockEnvCellsLayerSourcePayloadDto {
 	const layer = requireSceneLodLayer(payload, "env-cell-system");
 	return {
 		buildingTransitionApertures: layer.buildingTransitionApertures,
 		diagnostics: layer.diagnostics,
 		envCells: layer.envCells,
-		kind: "landblock-env-cells",
+		kind: "landblock-scene-lod-env-cell-layer",
 		landblockEnvCellBvh: layer.landblockEnvCellBvh,
 		landblockId: payload.landblockId,
 		landblockInfoId: layer.landblockInfoId,
@@ -180,8 +179,6 @@ function createProjectedEnvCellsPayload(
 		provenance: payload.provenance,
 		regionId: payload.regionId,
 		regionNumber: payload.regionNumber,
-		residencyKind: "landblock",
-		sourceAssetKind: "landblock-env-cells",
 	};
 }
 

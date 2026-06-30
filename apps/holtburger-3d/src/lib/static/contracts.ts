@@ -1,11 +1,13 @@
 import type {
-	LandblockEnvCellsPayloadDto,
-	LandblockOutdoorPayloadDto,
 	LandblockSceneLodLayerDto,
 	LandblockSceneLodLevelDto,
 	LandblockSceneLodSourceDto,
 	PlacementTransformDto,
 } from "../../lib/host/contracts";
+import type {
+	LandblockEnvCellsLayerSourcePayloadDto,
+	LandblockOutdoorLayerSourcePayloadDto,
+} from "./source-payloads";
 import type { VisualGeometryPayload } from "../visual/visual-geometry";
 
 export type StaticDomain =
@@ -557,7 +559,7 @@ export interface TerrainSourceSpatialFacts {
 	readonly terrainBvhItemCount: number;
 }
 
-type TerrainHostBvh = LandblockOutdoorPayloadDto["terrain"]["terrainBvh"];
+type TerrainHostBvh = LandblockOutdoorLayerSourcePayloadDto["terrain"]["terrainBvh"];
 
 interface TerrainRenderLocalBvh {
 	readonly coordinateSpace: "landblock-render-local";
@@ -569,7 +571,7 @@ export interface OutdoorStaticObjectsScopePayload {
 	readonly kind: "outdoor-static-objects";
 	readonly domain: OutdoorStaticObjectDomain;
 	readonly authoredDynamicSeeds: readonly OutdoorStaticObjectDynamicSeedFacts[];
-	readonly buildingTransitionApertures: LandblockOutdoorPayloadDto["buildingTransitionApertures"];
+	readonly buildingTransitionApertures: LandblockOutdoorLayerSourcePayloadDto["buildingTransitionApertures"];
 	readonly landblock: LandblockSourceIdentity;
 	readonly regionRenderProfile: StaticObjectRegionRenderProfileFacts;
 	readonly objects: readonly StaticObjectInstanceFacts[];
@@ -725,7 +727,7 @@ interface OutdoorStaticSourceSpatialFacts {
 export interface OutdoorStaticBvhFacts {
 	readonly coordinateSpace: "landblock-render-local";
 	readonly nodes: NonNullable<
-		LandblockOutdoorPayloadDto["outdoorBvh"]
+		LandblockOutdoorLayerSourcePayloadDto["outdoorBvh"]
 	>["nodes"];
 	readonly items: readonly OutdoorStaticBvhItemFacts[];
 }
@@ -755,7 +757,7 @@ interface StaticObjectDebugProvenance {
 
 export interface LandblockEnvCellsStaticScopePayload {
 	readonly kind: "landblock-env-cells";
-	readonly buildingTransitionApertures: LandblockOutdoorPayloadDto["buildingTransitionApertures"];
+	readonly buildingTransitionApertures: LandblockOutdoorLayerSourcePayloadDto["buildingTransitionApertures"];
 	readonly landblock: LandblockSourceIdentity;
 	readonly regionRenderProfile: RegionRenderProfileSourceFacts;
 	readonly envCells: readonly LandblockEnvCellStaticFacts[];
@@ -781,15 +783,15 @@ export interface LandblockEnvCellStaticFacts {
 	readonly restrictionObjectId: number | null;
 	readonly seenOutside: boolean | null;
 	readonly surfaces: readonly LandblockEnvCellSurfaceFacts[];
-	readonly portals: LandblockEnvCellsPayloadDto["envCells"][number]["portals"];
-	readonly portalApertures: LandblockEnvCellsPayloadDto["envCells"][number]["portalApertures"];
+	readonly portals: LandblockEnvCellsLayerSourcePayloadDto["envCells"][number]["portals"];
+	readonly portalApertures: LandblockEnvCellsLayerSourcePayloadDto["envCells"][number]["portalApertures"];
 	readonly staticObjectSeeds: readonly LandblockEnvCellStaticObjectSeedFacts[];
 	readonly renderGeometry: LandblockEnvCellRenderGeometryFacts;
-	readonly cellBsp: LandblockEnvCellsPayloadDto["envCells"][number]["cellBsp"];
+	readonly cellBsp: LandblockEnvCellsLayerSourcePayloadDto["envCells"][number]["cellBsp"];
 }
 
 type LandblockEnvCellRenderGeometryFacts = Omit<
-	LandblockEnvCellsPayloadDto["envCells"][number]["renderGeometry"],
+	LandblockEnvCellsLayerSourcePayloadDto["envCells"][number]["renderGeometry"],
 	"normals" | "positions" | "uvs"
 >;
 
@@ -804,7 +806,7 @@ interface LandblockEnvCellStaticObjectSeedFacts {
 	readonly source: StaticObjectSourceIdentity;
 	readonly sourceIndex: number;
 	readonly localPlacement: PlacementTransformDto;
-	readonly sourceScale: LandblockEnvCellsPayloadDto["envCells"][number]["statics"][number]["sourceScale"];
+	readonly sourceScale: LandblockEnvCellsLayerSourcePayloadDto["envCells"][number]["statics"][number]["sourceScale"];
 	readonly debug: StaticObjectDebugProvenance;
 }
 
@@ -862,7 +864,7 @@ interface LandblockEnvCellResidencySpatialFacts {
 }
 
 interface LandblockEnvCellResidencyBvhFacts {
-	readonly nodes: LandblockEnvCellsPayloadDto["landblockEnvCellBvh"]["nodes"];
+	readonly nodes: LandblockEnvCellsLayerSourcePayloadDto["landblockEnvCellBvh"]["nodes"];
 	readonly items: readonly LandblockEnvCellResidencyBvhItemFacts[];
 }
 
@@ -912,10 +914,10 @@ export interface EnvCellCellStructureGeometryAttachment {
 	readonly positions: Float32Array;
 	readonly normals: Float32Array;
 	readonly uvs: Float32Array;
-	readonly triangles: LandblockEnvCellsPayloadDto["envCells"][number]["renderGeometry"]["triangles"];
+	readonly triangles: LandblockEnvCellsLayerSourcePayloadDto["envCells"][number]["renderGeometry"]["triangles"];
 	readonly surfaceIds: readonly number[];
 	readonly bounds: StaticBounds | null;
-	readonly invalidPolygons: LandblockEnvCellsPayloadDto["envCells"][number]["renderGeometry"]["invalidPolygons"];
+	readonly invalidPolygons: LandblockEnvCellsLayerSourcePayloadDto["envCells"][number]["renderGeometry"]["invalidPolygons"];
 	readonly skippedPolygonCount: number;
 }
 

@@ -1,4 +1,3 @@
-import type { LandblockEnvCellsPayloadDto } from "../../../../lib/host/contracts";
 import { createEmptyStaticBakeAttachments } from "../../bake/attachments";
 import type {
 	EnvCellCellStructureGeometryAttachment,
@@ -8,6 +7,7 @@ import type {
 	StaticBakeAttachmentRequest,
 	StaticBakeBatchAttachments,
 } from "../../contracts";
+import type { LandblockEnvCellsLayerSourcePayloadDto } from "../../source-payloads";
 
 export class LandblockEnvCellGeometryAttachmentProvider implements StaticBakeAttachmentProvider {
 	async createAttachments(
@@ -151,9 +151,9 @@ function createEnvCellCellStructureGeometryAttachment(options: {
 function assertRenderGeometryVertexBuffers(
 	identity: EnvCellCellStructureGeometryIdentity,
 	renderGeometry: Partial<
-		LandblockEnvCellsPayloadDto["envCells"][number]["renderGeometry"]
+		LandblockEnvCellsLayerSourcePayloadDto["envCells"][number]["renderGeometry"]
 	>,
-): asserts renderGeometry is LandblockEnvCellsPayloadDto["envCells"][number]["renderGeometry"] {
+): asserts renderGeometry is LandblockEnvCellsLayerSourcePayloadDto["envCells"][number]["renderGeometry"] {
 	if (
 		renderGeometry.positions === undefined ||
 		renderGeometry.normals === undefined ||

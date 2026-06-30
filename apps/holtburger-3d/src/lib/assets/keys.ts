@@ -1,8 +1,6 @@
 import {
 	formatEnvCellAssetId,
 	formatHex32,
-	formatLandblockEnvCellsAssetId,
-	formatLandblockOutdoorAssetId,
 	formatRegionRenderProfileAssetId,
 	formatTerrainMaterialAssetId,
 	normalizeOutdoorLandblockId,
@@ -57,17 +55,18 @@ export function formatHostAssetId(key: HostAssetKey): string {
 		return key.id;
 	}
 
-	if (key.kind === "landblock-outdoor") {
-		return formatLandblockOutdoorAssetId(parseHex32RouteId(key));
-	}
-
-	if (key.kind === "landblock-env-cells") {
-		return formatLandblockEnvCellsAssetId(parseHex32RouteId(key));
-	}
-
 	if (key.kind === "landblock-scene-lod") {
 		const { landblockId, level } = parseLandblockSceneLodRouteId(key);
 		return `landblock/${formatHex32(landblockId)}/lod/${level}`;
+	}
+
+	if (
+		key.kind === "landblock-scene-lod-outdoor-layer" ||
+		key.kind === "landblock-scene-lod-env-cell-layer"
+	) {
+		throw new Error(
+			`${key.kind} is a resolver-local source payload key and has no host route.`,
+		);
 	}
 
 	if (key.kind === "env-cell") {
@@ -86,16 +85,6 @@ export function formatHostAssetId(key: HostAssetKey): string {
 }
 
 export function parseHostAssetId(assetId: string): HostAssetKey {
-	const landblockMatch =
-		/^landblock\/([0-9a-fA-F]{8})\/(outdoor|env-cells)$/.exec(assetId);
-	if (landblockMatch) {
-		const routeKind = landblockMatch[2];
-		return createHostAssetKey(
-			routeKind === "outdoor" ? "landblock-outdoor" : "landblock-env-cells",
-			Number.parseInt(landblockMatch[1] as string, 16),
-		);
-	}
-
 	const lodMatch = /^landblock\/([0-9a-fA-F]{8})\/lod\/([0-4])$/.exec(assetId);
 	if (lodMatch) {
 		return createLandblockSceneLodHostAssetKey(
@@ -158,7 +147,10 @@ function normalizeAssetKeyId(
 		return formatHex32(id);
 	}
 
-	if (kind === "landblock-outdoor" || kind === "landblock-env-cells") {
+	if (
+		kind === "landblock-scene-lod-outdoor-layer" ||
+		kind === "landblock-scene-lod-env-cell-layer"
+	) {
 		return formatHex32(normalizeOutdoorLandblockId(id));
 	}
 
@@ -242,9 +234,9 @@ function normalizeSceneLodLevel(level: number): number {
 
 function isKnownHostAssetKeyKind(kind: string): kind is HostAssetKeyKind {
 	return (
-		kind === "landblock-outdoor" ||
-		kind === "landblock-env-cells" ||
 		kind === "landblock-scene-lod" ||
+		kind === "landblock-scene-lod-outdoor-layer" ||
+		kind === "landblock-scene-lod-env-cell-layer" ||
 		kind === "env-cell" ||
 		kind === "animation" ||
 		kind === "gfx-obj" ||

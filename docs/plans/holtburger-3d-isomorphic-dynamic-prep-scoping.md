@@ -2170,6 +2170,41 @@ Verification:
 - `npm run test:ts`
 - `npm run lint:ts`
 
+Implementation progress:
+
+- Completed in Phase 10B-2.
+- Removed `StaticObjectBakeDiagnostics.authoredDynamicPlacementCount` and
+  `StaticObjectBakeDiagnostics.authoredDynamicPlacementClassificationReasons`.
+- Deleted the now-unused `StaticObjectDynamicPlacementClassificationReasonCounts` type.
+- Removed static bake helper code that walked authored dynamic placements only to populate stale
+  diagnostics.
+- Deleted the ossified static object bake test that asserted static bake did not emit dynamic
+  activation records while still preserving authored-dynamic diagnostic narration.
+- Kept current runtime bake summaries for object counts, source/triangle counts, instancing,
+  typed-array byte estimates, partitions, retained transparent generated scenery, and material
+  coverage.
+
+Decisions and course corrections:
+
+- No runtime diagnostics DTO shape needed changing because the authored-dynamic classification
+  fields were not part of the runtime static bake summary.
+- Deleted the stale test outright instead of rewriting it as a "removed behavior stays removed"
+  assertion. Current dynamic activation behavior is covered by resolver/runtime tests, not by static
+  bake diagnostics.
+
+Debt carried forward:
+
+- None for this phase. The remaining static bake diagnostics describe current bake size,
+  instancing, partition, and material-coverage behavior rather than deleted dynamic activation
+  ownership.
+
+Verification results:
+
+- `npm run check` passed.
+- `npm run test:ts -- static-object-batch-baker static-coordinator` passed.
+- `npm run test:ts` passed.
+- `npm run lint:ts` passed.
+
 ## Test Strategy
 
 Tests should be rebuilt around durable behavior and contract boundaries:

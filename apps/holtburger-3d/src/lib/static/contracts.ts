@@ -1395,8 +1395,6 @@ export interface StaticObjectBakeDiagnostics {
 	readonly landblockId: number;
 	readonly objectCount: number;
 	readonly generatedInstanceCount: number;
-	readonly authoredDynamicPlacementCount: number;
-	readonly authoredDynamicPlacementClassificationReasons: StaticObjectDynamicPlacementClassificationReasonCounts;
 	readonly explicitObjectCount: number;
 	readonly buildingObjectCount: number;
 	readonly uniqueSourceCount: number;
@@ -1425,10 +1423,6 @@ export interface StaticObjectRetainedTransparentPartitionReasonCounts {
 	readonly missingInstanceBounds: number;
 	readonly unsupportedMaterialBucket: number;
 	readonly nonRenderableOrDeferredMaterialBucket: number;
-}
-
-export interface StaticObjectDynamicPlacementClassificationReasonCounts {
-	readonly setupDefaultAnimation: number;
 }
 
 export type StaticMaterialCoverageFamily =

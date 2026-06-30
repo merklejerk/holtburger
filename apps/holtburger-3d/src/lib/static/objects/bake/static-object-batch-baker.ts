@@ -9,7 +9,6 @@ import type {
 	StaticBakeTextureUse,
 	StaticBaker,
 	StaticDrawUnit,
-	OutdoorStaticObjectsScopePayload,
 	StaticObjectGeometryStaticDrawUnit,
 	StaticObjectDrawUnitOwnership,
 	StaticObjectBakeDiagnostics,
@@ -28,7 +27,6 @@ import type {
 	StaticObjectSourceGeometryIdentity,
 	StaticObjectInstanceFacts,
 	StaticObjectRetainedTransparentPartitionReasonCounts,
-	StaticObjectDynamicPlacementClassificationReasonCounts,
 } from "../../contracts";
 import { uniqueSortedStaticTextureUseOwners } from "../../contracts";
 import { createLayerPeerRecordOwnerForStaticBakeTask } from "../../layer-owners";
@@ -322,9 +320,6 @@ function bakeStaticObjectBatchItem(
 	return {
 		drawUnits: bakedDrawUnits,
 		diagnostics: createStaticObjectBakeDiagnostics({
-			authoredDynamicPlacements: getOutdoorAuthoredDynamicPlacements(
-				item.payload.scope,
-			),
 			drawUnits: drawUnits.map((output) => output.drawUnit),
 			input,
 			instancedOutput,
@@ -354,7 +349,6 @@ function bakeStaticObjectBatchItem(
 
 function createStaticObjectBakeDiagnostics(options: {
 	readonly input: StaticBakeBatchInput;
-	readonly authoredDynamicPlacements: readonly OutdoorStaticObjectsScopePayload["authoredDynamicPlacements"][number][];
 	readonly instancedOutput: {
 		readonly instances: readonly StaticObjectRenderInstance[];
 		readonly resources: readonly StaticObjectVisualResource[];
@@ -397,11 +391,6 @@ function createStaticObjectBakeDiagnostics(options: {
 		buildingObjectCount: options.payload.objects.filter(
 			(object) => object.identity.objectKind === "building",
 		).length,
-		authoredDynamicPlacementCount: options.authoredDynamicPlacements.length,
-		authoredDynamicPlacementClassificationReasons:
-			createStaticObjectDynamicPlacementClassificationReasonCounts(
-				options.authoredDynamicPlacements,
-			),
 		domain: options.payload.domain,
 		drawUnitCount: options.drawUnits.length,
 		estimatedFlattenedTypedArrayBytes: sumNumbers(
@@ -445,25 +434,6 @@ function createStaticObjectBakeDiagnostics(options: {
 		uniqueSourceCount: uniqueSourceKeys.size,
 		uniqueSourcePartGeometryCount: uniqueSourcePartGeometryKeys.size,
 		uniqueSourceTriangleCount,
-	};
-}
-
-function getOutdoorAuthoredDynamicPlacements(
-	payload: StaticBakeBatchItem["payload"]["scope"],
-): readonly OutdoorStaticObjectsScopePayload["authoredDynamicPlacements"][number][] {
-	return payload.kind === "outdoor-static-objects"
-		? payload.authoredDynamicPlacements
-		: [];
-}
-
-function createStaticObjectDynamicPlacementClassificationReasonCounts(
-	placements: readonly OutdoorStaticObjectsScopePayload["authoredDynamicPlacements"][number][],
-): StaticObjectDynamicPlacementClassificationReasonCounts {
-	return {
-		setupDefaultAnimation: placements.filter(
-			(placement) =>
-				placement.classificationReason === "setup-default-animation",
-		).length,
 	};
 }
 

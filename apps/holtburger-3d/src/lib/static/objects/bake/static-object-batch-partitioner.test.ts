@@ -479,50 +479,6 @@ describe("static object batch partitioner", () => {
 		expect(result.textureUses).toHaveLength(1);
 	});
 
-	it("does not emit outdoor dynamic activation records from static bake", () => {
-		const basePayload = createPayload({
-			materials: [createSolidMaterial(0x08000010)],
-		});
-		const object = basePayload.objects[0];
-		const source = basePayload.sourceAssets[0];
-		if (!object || !source) {
-			throw new Error("Fixture payload did not create an object source.");
-		}
-		const dynamicSeed = {
-			classificationReason: "setup-default-animation" as const,
-			defaultAnimationId: 0x0300061b,
-			domain: basePayload.domain,
-			landblockId: basePayload.landblock.landblockId,
-			localPlacement: object.localPlacement,
-			object: object.identity,
-			setupModelId: source.identity.sourceDid,
-			source: object.source,
-			sourceAssetId: source.debug.sourceAssetId,
-			sourceResidence: basePayload.landblock,
-			sourceScale: object.sourceScale,
-		};
-		const payload = {
-			...basePayload,
-			authoredDynamicPlacements: [dynamicSeed],
-			materialSlots: [],
-			objects: [],
-		} satisfies OutdoorStaticObjectsScopePayload;
-
-		const result = bakeStaticObjectBatch(createBakeInput(payload));
-
-		expect(result.drawUnits).toEqual([]);
-		expect(result.staticObjectRenderInstances).toEqual([]);
-		expect(result.envCellStaticObjectPlacementRecords).toEqual([]);
-		expect(result.staticObjectBakeDiagnostics[0]).toMatchObject({
-			authoredDynamicPlacementClassificationReasons: {
-				setupDefaultAnimation: 1,
-			},
-			authoredDynamicPlacementCount: 1,
-			drawUnitCount: 0,
-			objectCount: 0,
-		});
-	});
-
 	it("bakes Base1ClipMap indexed partitions with retail index cutoff", () => {
 		const payload = createPayload({
 			materials: [createIndexedMaterial(0x08000010, { surfaceType: 0x4 })],

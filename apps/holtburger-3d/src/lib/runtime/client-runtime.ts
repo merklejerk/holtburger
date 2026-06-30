@@ -810,8 +810,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 	#sceneInterest: RuntimeSceneInterest = { kind: "none" };
 	#sceneInterestRevision = 0;
 	#settledSceneInterestRevision = 0;
-	#activeSceneOwnerIds = new Set<string>();
-	#sceneInterestReconciliationActive = false;
 	#currentCameraResidency: RuntimeCameraResidency = {
 		kind: "unknown",
 		landblockId: null,
@@ -870,6 +868,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			onResourcesChanged: () => {
 				if (!this.#disposed) {
 					this.#enqueueDynamicRendererResourceSync();
+					this.#maybeEmitSceneInterestSettled();
 				}
 			},
 			resourceManager: new DynamicEntityResourceManager({ assetService }),
@@ -967,26 +966,17 @@ class ClientRuntimeImpl implements ClientRuntime {
 				? normalizeOutdoorLandblockId(this.#sceneInterest.anchorLandblockId)
 				: null;
 		this.#setRenderAnchorLandblockId(nextAnchor);
-		this.#sceneInterestReconciliationActive = true;
-		let reconciliation: StaticRetentionReconciliation;
-		try {
-			reconciliation = this.#reconcileStaticRetention(this.#sceneInterest);
-			this.#dynamicEntityController.retainLayerOwners(
-				reconciliation.retainedLayerOwners,
-			);
-			this.#retainStaticLayerOwnerTextureBatchIds(
-				reconciliation.retainedLayerOwners,
-			);
-			this.#dynamicEntityController.clearEvictedRuntimeRenderResidences(
-				reconciliation.retainedLayerOwners,
-			);
-			this.#enqueueDynamicRendererResourceSync();
-			this.#activeSceneOwnerIds = new Set(
-				reconciliation.retainedLayerOwners.map(createLayerOwnerKeyId),
-			);
-		} finally {
-			this.#sceneInterestReconciliationActive = false;
-		}
+		const reconciliation = this.#reconcileStaticRetention(this.#sceneInterest);
+		this.#dynamicEntityController.retainLayerOwners(
+			reconciliation.retainedLayerOwners,
+		);
+		this.#retainStaticLayerOwnerTextureBatchIds(
+			reconciliation.retainedLayerOwners,
+		);
+		this.#dynamicEntityController.clearEvictedRuntimeRenderResidences(
+			reconciliation.retainedLayerOwners,
+		);
+		this.#enqueueDynamicRendererResourceSync();
 		this.#refreshSceneDebugOverlay();
 		this.#maybeEmitSceneInterestSettled();
 	}
@@ -1738,9 +1728,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	#maybeEmitSceneInterestSettled(): void {
 		if (
 			this.#sceneInterestRevision === 0 ||
-			this.#settledSceneInterestRevision === this.#sceneInterestRevision ||
-			this.#sceneInterestReconciliationActive ||
-			this.#hasPendingStaticMaterializationCommits()
+			this.#settledSceneInterestRevision === this.#sceneInterestRevision
 		) {
 			return;
 		}
@@ -1754,14 +1742,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			return;
 		}
 
-		const sceneOwnerStates = this.#lastStaticSnapshot.ownerStates.filter((state) =>
-			this.#activeSceneOwnerIds.has(createLayerOwnerKeyId(state.key)),
-		);
-		if (sceneOwnerStates.length !== this.#activeSceneOwnerIds.size) {
-			return;
-		}
-
-		const unsettledOwners = sceneOwnerStates.filter(
+		const unsettledOwners = this.#lastStaticSnapshot.ownerStates.filter(
 			(state) =>
 				state.lifecycle !== "materialized" &&
 				state.lifecycle !== "empty" &&
@@ -1771,11 +1752,28 @@ class ClientRuntimeImpl implements ClientRuntime {
 			return;
 		}
 
-		const failedOwners = sceneOwnerStates.filter(
+		const failedOwners = this.#lastStaticSnapshot.ownerStates.filter(
 			(state) => state.lifecycle === "failed",
 		);
+		const dynamicStatuses =
+			this.#dynamicEntityController.queryStaticAuthoredPreparationStatus(
+				new Set(
+					this.#lastStaticSnapshot.ownerStates.flatMap((state) =>
+						state.lifecycle === "materialized" || state.lifecycle === "empty"
+							? [createLayerOwnerKeyId(state.key)]
+							: [],
+					),
+				),
+			);
+		if (dynamicStatuses.some((status) => status.phase === "pending")) {
+			return;
+		}
 		this.#emitSceneInterestSettled({
-			result: failedOwners.length > 0 ? "failed" : "ready",
+			result:
+				failedOwners.length > 0 ||
+				dynamicStatuses.some((status) => status.phase === "failed")
+					? "failed"
+					: "ready",
 			source,
 		});
 	}
@@ -1835,15 +1833,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 		return Array.from(this.#staticMaterializationCommits.values())
 			.filter((commit) => phaseSet.has(commit.phase))
 			.map(toStaticMaterializationCommitSnapshot);
-	}
-
-	#hasPendingStaticMaterializationCommits(): boolean {
-		for (const commit of this.#staticMaterializationCommits.values()) {
-			if (commit.phase === "queued" || commit.phase === "materializing") {
-				return true;
-			}
-		}
-		return false;
 	}
 
 	#warnAboutDeferredStaticMaterialCoverage(

@@ -2006,7 +2006,7 @@ Decisions and course corrections:
 
 ### Phase 12A: Final Validation Gates
 
-Status: pending.
+Status: completed on 2026-06-30.
 
 Goal: prove the touched Rust and TypeScript code still passes the relevant automated gates after the clean cutover.
 
@@ -2023,15 +2023,16 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Run app TypeScript tests and lint for `apps/holtburger-3d`.
-- [ ] Run `cargo fmt --check`.
-- [ ] Run clippy for touched Rust crates.
-- [ ] Run Rust tests for `holtburger-content`, `holtburger-core`, `holtburger-3d`, and `holtburger-debug-harness`.
-- [ ] Update completed status/progress notes.
+- [x] Run app TypeScript tests and lint for `apps/holtburger-3d`.
+- [x] Run `cargo fmt --check`.
+- [x] Run clippy for touched Rust crates.
+- [x] Run Rust tests for `holtburger-content`, `holtburger-core`, `holtburger-3d`, and `holtburger-debug-harness`.
+- [x] Update completed status/progress notes.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Validation passed: `npm run check` in `apps/holtburger-3d` reported 0 Svelte diagnostics, `npm run test:ts` passed 68 test files / 568 tests, `cargo fmt --check` passed, and `cargo clippy -p holtburger-content -p holtburger-core -p holtburger-3d -p holtburger-debug-harness --tests -- -D warnings` passed.
+- Rust tests passed with `cargo test -p holtburger-content -p holtburger-core -p holtburger-3d -p holtburger-debug-harness --tests`: `holtburger-3d` 40 tests, `holtburger-content` 64 tests, `holtburger-core` 158 tests, and debug-harness library/binary test targets with no failures.
 
 ### Phase 12B: Final Zero-Reference Audits
 

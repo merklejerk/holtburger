@@ -800,7 +800,7 @@ Verification:
 
 ### Phase 8: Redefine Scene-Interest Settlement
 
-Status: pending.
+Status: completed 2026-06-30.
 
 Purpose:
 
@@ -828,19 +828,36 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add lifecycle query API needed by `ClientRuntimeImpl`.
-- [ ] Replace `#maybeEmitSceneInterestSettled` internals.
-- [ ] Remove `#activeSceneOwnerIds`, `#pendingStaticMaterializations`, and
+- [x] Add lifecycle query API needed by `ClientRuntimeImpl`.
+- [x] Replace `#maybeEmitSceneInterestSettled` internals.
+- [x] Remove `#activeSceneOwnerIds`, `#pendingStaticMaterializations`, and
       `#failedStaticMaterializationRevisions` if no longer needed.
-- [ ] Replace materialization and dynamic-readiness pending checks with commit/task/preparation
+- [x] Replace materialization and dynamic-readiness pending checks with commit/task/preparation
       lifecycle queries.
-- [ ] Update runtime tests for ready, failed, cleared, materialization delay, and static-authored
+- [x] Update runtime tests for ready, failed, cleared, materialization delay, and static-authored
       dynamic delay.
 
 Decisions and course corrections:
 
-- Record the final definition of "ready" for empty layers and failed static-authored dynamic
-  preparation.
+- 2026-06-30: Scene-interest settlement no longer tracks a separate active owner id set or checks
+  pending materialization commits. Static owner lifecycle already exposes `materializing`,
+  `materialized`, `empty`, and `failed`.
+- 2026-06-30: Non-empty scene interest settles `ready` only when all current static owners are
+  `materialized`, `empty`, or `failed`, and all static-authored dynamic preparations for
+  `materialized` or `empty` owners are ready.
+- 2026-06-30: `empty` owners are included in dynamic readiness checks because a layer can produce no
+  static draw resources while still emitting static-authored dynamic seeds.
+- 2026-06-30: Settlement result is `failed` if any current static owner failed or any static-authored
+  dynamic preparation for a settled owner failed. Runtime-authored dynamic preparations do not block
+  scene-interest settlement.
+
+Verification:
+
+- `npm run test:ts -- --run src/lib/runtime/client-runtime.test.ts`
+- `npm run test:ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run lint:dead`
 
 ### Phase 9: Diagnostics Diet And Naming Cleanup
 

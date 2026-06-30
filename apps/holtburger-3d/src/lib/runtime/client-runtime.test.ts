@@ -1853,6 +1853,57 @@ describe("browser client runtime", () => {
 		runtime.dispose();
 	});
 
+	it("waits for static-authored dynamic preparations before settling scene interest", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const assetService = new DeferredAssetService();
+		const runtime = createClientRuntime({
+			assetService,
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer: new FakeRenderer(),
+			staticCoordinator: createImmediateStaticCoordinator({
+				baker,
+				resolver,
+			}),
+		});
+		const events: RuntimeEvent[] = [];
+		runtime.subscribeEvents((event) => {
+			events.push(event);
+		});
+
+		updateOutdoorSceneInterest(runtime, {
+			domains: ["buildings", "terrain"],
+			lod: { buildings: 0, envCells: -1, terrain: 0 },
+		});
+		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
+		completeResolverRequest(resolver, "outdoor-terrain", 0xda55ffff);
+		await flushRuntimeWork();
+		baker.complete("1:landblock:da55ffff:outdoor-buildings", {
+			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
+		});
+		baker.complete("1:landblock:da55ffff:outdoor-terrain");
+		await flushRuntimeWork();
+
+		expect(
+			events.some((event) => event.kind === "scene-interest-settled"),
+		).toBe(false);
+
+		await resolvePendingDynamicAssetsUntil(assetService, () =>
+			events.some((event) => event.kind === "scene-interest-settled"),
+		);
+
+		expect(events).toContainEqual(
+			expect.objectContaining({
+				kind: "scene-interest-settled",
+				result: "ready",
+				revision: 1,
+				source: "manual",
+			}),
+		);
+		runtime.dispose();
+	});
+
 	it("emits follow scene interest source separately from manual updates", async () => {
 		const runtime = createClientRuntime({
 			diagnostics: silentDiagnostics,

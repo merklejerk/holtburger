@@ -8,7 +8,10 @@ import type {
 	EnvCellSystemLayerSourcePayloadDto,
 	LandblockOutdoorLayerSourcePayloadDto,
 } from "./source-payloads";
-import type { DynamicEntityRecipe } from "../dynamic/contracts";
+import type {
+	DynamicEntityRecipe,
+	DynamicVisualBakeResult,
+} from "../dynamic/contracts";
 import type { VisualGeometryPayload } from "../visual/visual-geometry";
 
 export type StaticDomain =
@@ -1950,6 +1953,13 @@ export interface StaticCoordinatorCommitDelta {
 	/** Static layer tasks whose products are represented by this commit. */
 	readonly tasks: readonly StaticBakeTask[];
 	readonly revision: number;
+}
+
+export interface StaticScopePrepCommit {
+	/** Static-only materialization payload. */
+	readonly staticCommit: StaticCoordinatorCommitDelta;
+	/** Baked dynamic visuals produced from sibling source-resolution recipes. */
+	readonly dynamicVisualBake: DynamicVisualBakeResult | null;
 }
 
 type PortalApertureResourceSourceKind =

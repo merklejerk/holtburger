@@ -1532,7 +1532,28 @@ Acceptance criteria:
 
 Decisions and course corrections:
 
-- Pending.
+- Completed during Phase 7.
+- `StaticCoordinator` now carries static-authored dynamic recipes on the same pending batch items as
+  their owning static layer payloads.
+- Static flush now schedules dynamic visual geometry collection and dynamic visual bake from the
+  same filtered pending-item closure as static bake. The coordinator awaits both sibling outputs
+  before publishing the commit envelope.
+- Commit listeners now receive `StaticScopePrepCommit`, while `StaticCoordinatorCommitDelta` remains
+  the static-only materialization payload under `staticCommit`.
+- Browser/Tauri runtime creation injects the worker-backed dynamic visual baker and the host-backed
+  asset reader into `StaticCoordinator`, so static-authored dynamic visual bake does not fall back to
+  main-thread visual bake in browser mode.
+- Runtime materialization now queues the scoped commit envelope and unwraps `staticCommit` for static
+  materialization. Dynamic activation still intentionally waits for Phase 8, where residency and
+  baked visual products are applied together.
+
+Debt carried forward:
+
+- `StaticScopePrepCommit.dynamicVisualBake` is produced and carried through the runtime queue, but it
+  is not yet consumed for static-authored activation. Phase 8 must consume it within the same
+  materialization closure instead of adding a durable dynamic bake registry.
+- Static coordinator timing diagnostics still report only static attachment/bake timing. If dynamic
+  bake timing becomes necessary, keep it console/report oriented and avoid durable issue records.
 
 ### Phase 8: Cut Over Static-Authored Dynamic Activation
 

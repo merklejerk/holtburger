@@ -1,7 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 import { DeferredStaticBaker, DeferredStaticResolver } from "../fake-workers";
 import type {
+	HostAssetKey,
+	PreparedAsset,
+	PreparedAssetReader,
+} from "../../assets/contracts";
+import type {
+	DynamicEntityRecipe,
+	DynamicVisualBakeInput,
+	DynamicVisualBakeResult,
+} from "../../dynamic/contracts";
+import type { DynamicVisualBaker } from "../../dynamic/visual-baker";
+import type {
 	StaticCoordinatorCommitDelta,
+	StaticScopePrepCommit,
 	StaticCoordinatorSourcePayloadDelta,
 	StaticDemand,
 	StaticDrawUnit,
@@ -15,6 +27,11 @@ import type {
 	StaticVisibilityRecord,
 	StaticObjectBakeDiagnostics,
 	StaticBakeBatchInput,
+	StaticResolverJob,
+	StaticLandblockSceneLodSourceRequest,
+	StaticLandblockSceneLodResolution,
+	StaticResolver,
+	StaticLandblockSceneLodSourceResolver,
 } from "../contracts";
 import { StaticCoordinator } from "./static-coordinator";
 import { createLayerPeerRecordOwnerForStaticBakeTask } from "../layer-owners";
@@ -29,7 +46,7 @@ describe("static coordinator", () => {
 			resolver,
 		});
 		const deltas: StaticCoordinatorCommitDelta[] = [];
-		coordinator.subscribeCommits((delta) => deltas.push(delta));
+		coordinator.subscribeCommits((commit) => deltas.push(commit.staticCommit));
 		const [firstWork] = bakeTasksForDemand(
 			coordinator,
 			createSingleTerrainDemand(0xda55ffff),
@@ -394,7 +411,7 @@ describe("static coordinator", () => {
 			resolver,
 		});
 		const deltas: StaticCoordinatorCommitDelta[] = [];
-		coordinator.subscribeCommits((delta) => deltas.push(delta));
+		coordinator.subscribeCommits((commit) => deltas.push(commit.staticCommit));
 
 		const [work] = bakeTasksForDemand(
 			coordinator,
@@ -454,7 +471,9 @@ describe("static coordinator", () => {
 			resolver: emptyResolver,
 		});
 		const emptyDeltas: StaticCoordinatorCommitDelta[] = [];
-		emptyCoordinator.subscribeCommits((delta) => emptyDeltas.push(delta));
+		emptyCoordinator.subscribeCommits((commit) =>
+			emptyDeltas.push(commit.staticCommit),
+		);
 		const [emptyWork] = bakeTasksForDemand(
 			emptyCoordinator,
 			createSingleTerrainDemand(0xda55ffff),
@@ -595,7 +614,7 @@ describe("static coordinator", () => {
 			resolver,
 		});
 		const deltas: StaticCoordinatorCommitDelta[] = [];
-		coordinator.subscribeCommits((delta) => deltas.push(delta));
+		coordinator.subscribeCommits((commit) => deltas.push(commit.staticCommit));
 
 		const [work] = bakeTasksForDemand(
 			coordinator,
@@ -664,6 +683,68 @@ describe("static coordinator", () => {
 		expect(coordinator.createSnapshot().committedDrawUnits).toBe(0);
 	});
 
+	it("emits dynamic visual bake results beside static commit deltas", async () => {
+		const resolver = new DynamicRecipeSourceResolver();
+		const baker = new DeferredStaticBaker();
+		const dynamicVisualBaker = new RecordingDynamicVisualBaker();
+		const commits: StaticScopePrepCommit[] = [];
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			dynamicVisualBaker,
+			dynamicVisualGeometryAssetReader: new EmptyPreparedAssetReader(),
+			resolver,
+		});
+		coordinator.subscribeCommits((commit) => commits.push(commit));
+
+		const [work] = bakeTasksForDemand(
+			coordinator,
+			createSingleTerrainDemand(0xda55ffff),
+		);
+		await flushPromises();
+		baker.complete(pendingBatchIdForTask(baker, work.taskId), {
+			drawUnits: [createTerrainDrawUnit("terrain-a", 0xda55ffff)],
+		});
+		await flushPromises();
+		await flushPromises();
+		await flushPromises();
+
+		expect(dynamicVisualBaker.inputs).toEqual([
+			expect.objectContaining({
+				batchId:
+					"static-batch:1:outdoor-terrain:landblock:da55ffff:1:static-authored-dynamic-visuals",
+				recipes: [expect.objectContaining({ entityId: "static-dynamic:1" })],
+				revision: 1,
+				sourceGeometry: [],
+			}),
+		]);
+		expect(commits).toEqual([
+			{
+				dynamicVisualBake: {
+					batchId:
+						"static-batch:1:outdoor-terrain:landblock:da55ffff:1:static-authored-dynamic-visuals",
+					failures: [],
+					products: [
+						{
+							entityId: "static-dynamic:1",
+							kind: "skipped",
+							reason: {
+								kind: "invalid-recipe",
+								message: "test dynamic bake",
+							},
+						},
+					],
+					revision: 1,
+				},
+				staticCommit: expect.objectContaining({
+					addedDrawUnits: [createTerrainDrawUnit("terrain-a", 0xda55ffff)],
+					staticBatchId:
+						"static-batch:1:outdoor-terrain:landblock:da55ffff:1",
+				}),
+			},
+		]);
+	});
+
 	it("retains static object bake diagnostics and recent timing samples", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
@@ -716,7 +797,7 @@ describe("static coordinator", () => {
 			resolver,
 		});
 		const deltas: StaticCoordinatorCommitDelta[] = [];
-		coordinator.subscribeCommits((delta) => deltas.push(delta));
+		coordinator.subscribeCommits((commit) => deltas.push(commit.staticCommit));
 
 		bakeTasksForDemand(coordinator, createSingleTerrainDemand(0xda55ffff));
 		const reconciliation = coordinator.reconcileStaticDemand({
@@ -746,7 +827,7 @@ describe("static coordinator", () => {
 			resolver,
 		});
 		const deltas: StaticCoordinatorCommitDelta[] = [];
-		coordinator.subscribeCommits((delta) => deltas.push(delta));
+		coordinator.subscribeCommits((commit) => deltas.push(commit.staticCommit));
 
 		const [work] = bakeTasksForDemand(
 			coordinator,
@@ -1394,7 +1475,7 @@ describe("static coordinator", () => {
 			resolver,
 		});
 		const deltas: StaticCoordinatorCommitDelta[] = [];
-		coordinator.subscribeCommits((delta) => deltas.push(delta));
+		coordinator.subscribeCommits((commit) => deltas.push(commit.staticCommit));
 
 		bakeTasksForDemand(coordinator, {
 			location: {
@@ -1622,6 +1703,157 @@ class RejectingAttachmentProvider implements StaticBakeAttachmentProvider {
 	createAttachments(): Promise<never> {
 		return Promise.reject(new Error(this.message));
 	}
+}
+
+class EmptyPreparedAssetReader implements PreparedAssetReader {
+	requestPreparedAsset(key: HostAssetKey): Promise<PreparedAsset> {
+		return Promise.reject(
+			new Error(`Unexpected prepared asset request ${key.kind}:${key.id}.`),
+		);
+	}
+}
+
+class RecordingDynamicVisualBaker implements DynamicVisualBaker {
+	readonly inputs: DynamicVisualBakeInput[] = [];
+
+	bake(input: DynamicVisualBakeInput): Promise<DynamicVisualBakeResult> {
+		this.inputs.push(input);
+		return Promise.resolve({
+			batchId: input.batchId,
+			failures: [],
+			products: input.recipes.map((recipe) => ({
+				entityId: recipe.entityId,
+				kind: "skipped" as const,
+				reason: {
+					kind: "invalid-recipe" as const,
+					message: "test dynamic bake",
+				},
+			})),
+			revision: input.revision,
+		});
+	}
+}
+
+class DynamicRecipeSourceResolver
+	implements StaticResolver, StaticLandblockSceneLodSourceResolver
+{
+	resolve(job: StaticResolverJob): Promise<StaticScopePayload> {
+		return Promise.resolve(createPlaceholderPayload(job));
+	}
+
+	resolveSource(
+		request: StaticLandblockSceneLodSourceRequest,
+	): Promise<StaticLandblockSceneLodResolution> {
+		const layer = request.requestedLayers[0];
+		if (!layer) {
+			return Promise.resolve({
+				dynamicRecipes: [],
+				recipes: [],
+				request,
+			});
+		}
+		const job: StaticResolverJob = {
+			domain: "outdoor-terrain",
+			scope: {
+				kind: "landblock",
+				landblockId: request.landblockId,
+			},
+		};
+		return Promise.resolve({
+			dynamicRecipes: [
+				{
+					recipe: createDynamicRecipe(request),
+					targetOwnerKey: layer.targetOwnerKey,
+				},
+			],
+			recipes: [
+				{
+					payload: createPlaceholderPayload(job),
+					targetOwnerKey: layer.targetOwnerKey,
+				},
+			],
+			request,
+		});
+	}
+}
+
+function createPlaceholderPayload(job: StaticResolverJob): StaticScopePayload {
+	return {
+		job,
+		scope: {
+			kind: "placeholder",
+			referencedTextureUses: [],
+		},
+		sourceRevision: 1,
+	};
+}
+
+function createDynamicRecipe(
+	request: StaticLandblockSceneLodSourceRequest,
+): DynamicEntityRecipe {
+	const targetOwnerKey = request.requestedLayers[0]?.targetOwnerKey ?? {
+		kind: "terrain" as const,
+		landblockId: request.landblockId,
+	};
+	return {
+		animationSelection: { kind: "none" },
+		baseTransform: {
+			baseLocalPlacement: {
+				orientation: { w: 1, x: 0, y: 0, z: 0 },
+				origin: { x: 0, y: 0, z: 0 },
+			},
+			sourceScale: { x: 1, y: 1, z: 1 },
+		},
+		entityId: "static-dynamic:1",
+		source: {
+			kind: "static-authored",
+			owner: {
+				domain: "outdoor-terrain",
+				key: targetOwnerKey,
+				kind: "layer-owner",
+				ownerId: "terrain:0xda55ffff",
+			},
+			placementId: "test-placement",
+			sourceResidence: {
+				kind: "outdoor-landblock",
+				landblockId: request.landblockId,
+			},
+		},
+		visual: {
+			animation: null,
+			materialPolicy: {
+				detailRolePolicy: { kind: "static-domain", domain: "outdoor-buildings" },
+				materialPlanningDomain: "outdoor-buildings",
+				visualObject: {
+					entityId: "static-dynamic:1",
+					kind: "dynamic-visual-object",
+					resourceId: "dynamic-visual-resource:static-dynamic:1",
+				},
+			},
+			materialSources: [],
+			missingRefs: [],
+			paletteSources: [],
+			setupModel: {
+				bounds: null,
+				debug: { sourceAssetId: "setup-model/02000010" },
+				defaultAnimation: null,
+				identity: {
+					kind: "static-object-source",
+					sourceAssetKind: "setup-model",
+					sourceDid: 0x02000010,
+				},
+				invalidPolygonCount: 0,
+				materialSlotCount: 0,
+				partCount: 0,
+				parts: [],
+				physicsPolygonCount: 0,
+				renderTriangleCount: 0,
+				skippedPolygonCount: 0,
+			},
+			sourceAssets: [],
+			textureRefs: [],
+		},
+	};
 }
 
 async function flushPromises(): Promise<void> {

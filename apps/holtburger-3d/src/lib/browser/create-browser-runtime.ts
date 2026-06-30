@@ -66,8 +66,11 @@ export function createBrowserRuntime(canvas: HTMLCanvasElement): ClientRuntime {
 	const host = createBrowserRuntimeHost();
 	const assetService = new HostBackedAssetService({ host });
 	const hostSnapshot = host.createSnapshot();
+	const dynamicVisualBaker = hostSnapshot.isAvailable
+		? createWorkerDynamicVisualBaker(DEFAULT_DYNAMIC_VISUAL_BAKER_WORKER_COUNT)
+		: undefined;
 	const staticCoordinator = hostSnapshot.isAvailable
-		? createTauriStaticCoordinator(assetService)
+		? createTauriStaticCoordinator(assetService, dynamicVisualBaker)
 		: undefined;
 	const texturePacker = hostSnapshot.isAvailable
 		? createWorkerTexturePacker(DEFAULT_TEXTURE_PACKING_WORKER_COUNT)
@@ -77,9 +80,6 @@ export function createBrowserRuntime(canvas: HTMLCanvasElement): ClientRuntime {
 				assetService,
 				DEFAULT_DYNAMIC_VISUAL_RECIPE_RESOLVER_WORKER_COUNT,
 			)
-		: undefined;
-	const dynamicVisualBaker = hostSnapshot.isAvailable
-		? createWorkerDynamicVisualBaker(DEFAULT_DYNAMIC_VISUAL_BAKER_WORKER_COUNT)
 		: undefined;
 
 	return createClientRuntime({
@@ -95,6 +95,7 @@ export function createBrowserRuntime(canvas: HTMLCanvasElement): ClientRuntime {
 
 function createTauriStaticCoordinator(
 	assetReader: PreparedAssetReader,
+	dynamicVisualBaker: DynamicVisualBaker | undefined,
 ): StaticCoordinator {
 	const terrainResolver = createWorkerStaticResolver(
 		assetReader,
@@ -120,6 +121,8 @@ function createTauriStaticCoordinator(
 			new EnvCellSystemGeometryAttachmentProvider(),
 		]),
 		baker,
+		dynamicVisualBaker,
+		dynamicVisualGeometryAssetReader: assetReader,
 		resolver,
 	});
 }

@@ -1,5 +1,6 @@
 import type {
 	StaticAtlasBatchSnapshot,
+	StaticAuthoredDynamicRecipe,
 	StaticBakeAttachmentProvider,
 	StaticBakeBatchInput,
 	StaticBakeBatchResult,
@@ -29,10 +30,18 @@ import type {
 	StaticResourceKey,
 	StaticRetentionReconciliation,
 	StaticScopePayload,
+	StaticScopePrepCommit,
 	TerrainStaticScopePayloadSummary,
 	StaticLayerTaskStatus,
 	StaticLayerTaskRequest,
 } from "../contracts";
+import type { PreparedAssetReader } from "../../assets/contracts";
+import type {
+	DynamicEntityRecipe,
+	DynamicVisualBakeResult,
+} from "../../dynamic/contracts";
+import type { DynamicVisualBaker } from "../../dynamic/visual-baker";
+import { createDynamicVisualBakeSourceGeometry } from "../../dynamic/visual-bake-attachments";
 import { planStaticDemand } from "../demand-planner";
 import { createEmptyStaticBakeAttachments } from "../bake/attachments";
 import {
@@ -51,7 +60,7 @@ export type StaticCoordinatorListener = (
 	snapshot: StaticCoordinatorSnapshot,
 ) => void;
 export type StaticCoordinatorCommitListener = (
-	delta: StaticCoordinatorCommitDelta,
+	commit: StaticScopePrepCommit,
 ) => void;
 export type StaticCoordinatorSourcePayloadListener = (
 	delta: StaticCoordinatorSourcePayloadDelta,
@@ -66,6 +75,8 @@ export interface StaticCoordinatorOptions {
 		payloads: readonly StaticScopePayload[],
 		staticBatchId: string,
 	) => StaticAtlasBatchSnapshot;
+	readonly dynamicVisualBaker?: DynamicVisualBaker;
+	readonly dynamicVisualGeometryAssetReader?: PreparedAssetReader;
 }
 
 export interface StaticCoordinatorBatchingOptions {
@@ -77,6 +88,8 @@ export class StaticCoordinator {
 	readonly #resolver: StaticResolver & StaticLandblockSceneLodSourceResolver;
 	readonly #baker: StaticBaker;
 	readonly #attachmentProvider: StaticBakeAttachmentProvider;
+	readonly #dynamicVisualBaker: DynamicVisualBaker | null;
+	readonly #dynamicVisualGeometryAssetReader: PreparedAssetReader | null;
 	readonly #batching: StaticCoordinatorBatchingOptions;
 	#createAtlasSnapshot: (
 		payloads: readonly StaticScopePayload[],
@@ -117,6 +130,9 @@ export class StaticCoordinator {
 		this.#baker = options.baker;
 		this.#attachmentProvider =
 			options.attachmentProvider ?? DEFAULT_STATIC_BAKE_ATTACHMENT_PROVIDER;
+		this.#dynamicVisualBaker = options.dynamicVisualBaker ?? null;
+		this.#dynamicVisualGeometryAssetReader =
+			options.dynamicVisualGeometryAssetReader ?? null;
 		this.#batching = {
 			maxPayloadsPerBatch:
 				options.batching?.maxPayloadsPerBatch ??
@@ -365,6 +381,9 @@ export class StaticCoordinator {
 			return;
 		}
 		const resolverMs = nowMs() - resolverStartedAt;
+		const dynamicRecipesByOwnerId = groupDynamicRecipesByOwnerId(
+			resolution.dynamicRecipes,
+		);
 
 		for (const recipe of resolution.recipes) {
 			const ownerId = createLayerOwnerKeyId(recipe.targetOwnerKey);
@@ -386,7 +405,12 @@ export class StaticCoordinator {
 				revision: task.revision,
 				task: toStaticLayerTaskStatus(task),
 			});
-			this.#enqueueBakePayload(task, recipe.payload, resolverMs);
+			this.#enqueueBakePayload(
+				task,
+				recipe.payload,
+				resolverMs,
+				dynamicRecipesByOwnerId.get(ownerId) ?? [],
+			);
 		}
 	}
 
@@ -394,6 +418,7 @@ export class StaticCoordinator {
 		taskStatus: MutableStaticLayerTaskState,
 		payload: StaticScopePayload,
 		resolverMs: number,
+		dynamicRecipes: readonly DynamicEntityRecipe[],
 	): void {
 		let pendingBatch = this.#findPendingBatchForTask(taskStatus);
 		if (!pendingBatch) {
@@ -422,6 +447,7 @@ export class StaticCoordinator {
 		pendingBatch.items.push({
 			ownerId: task.ownerId,
 			ownerKey: task.ownerKey,
+			dynamicRecipes,
 			payload,
 			resolverMs,
 			task,
@@ -512,12 +538,33 @@ export class StaticCoordinator {
 			return;
 		}
 		const bakeMs = nowMs() - bakeStartedAt;
+		let dynamicVisualBake: DynamicVisualBakeResult | null;
+		try {
+			dynamicVisualBake = await this.#bakeDynamicVisualsForPendingItems({
+				pendingItems,
+				revision: pendingBatch.revision,
+				staticBatchId,
+			});
+		} catch (error: unknown) {
+			for (const item of items) {
+				this.#markTaskIdFailedIfCurrent(
+					item.task.taskId,
+					error instanceof Error ? error.message : String(error),
+				);
+			}
+			return;
+		}
 
 		const currentTasks = result.tasks.filter(
 			(task) => this.#isBakeTaskCurrent(task) && this.#isLayerOwnerDemanded(task.ownerKey),
 		);
 		if (currentTasks.length !== result.tasks.length) {
 			result = filterStaticBakeResultForCurrentTasks(result, currentTasks);
+			dynamicVisualBake = filterDynamicVisualBakeResultForCurrentTasks(
+				dynamicVisualBake,
+				pendingItems,
+				currentTasks,
+			);
 			if (currentTasks.length === 0) {
 				this.#emit();
 				return;
@@ -528,6 +575,7 @@ export class StaticCoordinator {
 			this.#commit(result, {
 				attachmentMs,
 				bakeMs,
+				dynamicVisualBake,
 				resolverMs: sumNullableNumbers(
 					currentTasks.map((task) =>
 						findPendingStaticBakeItemResolverMs(pendingItems, task.taskId),
@@ -544,12 +592,42 @@ export class StaticCoordinator {
 		}
 	}
 
+	async #bakeDynamicVisualsForPendingItems(options: {
+		readonly pendingItems: readonly PendingStaticBakeBatchItem[];
+		readonly revision: number;
+		readonly staticBatchId: string;
+	}): Promise<DynamicVisualBakeResult | null> {
+		const recipes = options.pendingItems.flatMap((item) => item.dynamicRecipes);
+		if (recipes.length === 0) {
+			return null;
+		}
+		if (!this.#dynamicVisualBaker || !this.#dynamicVisualGeometryAssetReader) {
+			throw new Error(
+				"Static-authored dynamic recipes require a dynamic visual baker and geometry asset reader.",
+			);
+		}
+
+		const sourceGeometry = await createDynamicVisualBakeSourceGeometry(
+			this.#dynamicVisualGeometryAssetReader,
+			recipes,
+		);
+		return this.#dynamicVisualBaker.bake({
+			batchId: createStaticAuthoredDynamicVisualBakeBatchId(
+				options.staticBatchId,
+			),
+			recipes,
+			revision: options.revision,
+			sourceGeometry,
+		});
+	}
+
 	#commit(
 		result: StaticBakeBatchResult,
 		timing: {
 			readonly resolverMs: number | null;
 			readonly attachmentMs: number | null;
 			readonly bakeMs: number | null;
+			readonly dynamicVisualBake: DynamicVisualBakeResult | null;
 		},
 	): void {
 		const commitStartedAt = nowMs();
@@ -597,24 +675,27 @@ export class StaticCoordinator {
 			revision: result.revision,
 			staticBatchId: result.staticBatchId,
 		});
-		this.#emitCommitDelta({
-			addedDrawUnits: result.drawUnits,
-			addedPortalApertureResources: result.portalApertureResources,
-			commitId: createStaticCommitId(result.staticBatchId),
-			materialCoverage: result.materialCoverage,
-			removedResources: [],
-			revision: result.revision,
-			staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds,
-			staticBatchId: result.staticBatchId,
-			staticObjectRenderInstances: result.staticObjectRenderInstances,
-			staticObjectVisualResources: result.staticObjectVisualResources,
-			staticPortalGraphs: result.staticPortalGraphs,
-			staticPortalInteriorRecords: result.staticPortalInteriorRecords,
-			staticSourceMappings: result.staticSourceMappings,
-			staticSpatialRecords: result.staticSpatialRecords,
-			staticVisibilityRecords: result.staticVisibilityRecords,
-			tasks: result.tasks,
-			textureUses: result.textureUses,
+		this.#emitCommit({
+			dynamicVisualBake: timing.dynamicVisualBake,
+			staticCommit: {
+				addedDrawUnits: result.drawUnits,
+				addedPortalApertureResources: result.portalApertureResources,
+				commitId: createStaticCommitId(result.staticBatchId),
+				materialCoverage: result.materialCoverage,
+				removedResources: [],
+				revision: result.revision,
+				staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds,
+				staticBatchId: result.staticBatchId,
+				staticObjectRenderInstances: result.staticObjectRenderInstances,
+				staticObjectVisualResources: result.staticObjectVisualResources,
+				staticPortalGraphs: result.staticPortalGraphs,
+				staticPortalInteriorRecords: result.staticPortalInteriorRecords,
+				staticSourceMappings: result.staticSourceMappings,
+				staticSpatialRecords: result.staticSpatialRecords,
+				staticVisibilityRecords: result.staticVisibilityRecords,
+				tasks: result.tasks,
+				textureUses: result.textureUses,
+			},
 		});
 		this.#emit();
 	}
@@ -646,24 +727,27 @@ export class StaticCoordinator {
 		readonly removedResources: readonly StaticResourceKey[];
 	}): void {
 		const staticBatchId = createEvictionStaticBatchId(this.#revision);
-		this.#emitCommitDelta({
-			addedDrawUnits: [],
-			addedPortalApertureResources: [],
-			commitId: createStaticCommitId(staticBatchId),
-			materialCoverage: [],
-			removedResources: options.removedResources,
-			revision: this.#revision,
-			staticAuthoredDynamicSeeds: [],
-			staticBatchId,
-			staticObjectRenderInstances: [],
-			staticObjectVisualResources: [],
-			staticPortalGraphs: [],
-			staticPortalInteriorRecords: [],
-			staticSourceMappings: [],
-			staticSpatialRecords: [],
-			staticVisibilityRecords: [],
-			tasks: [],
-			textureUses: [],
+		this.#emitCommit({
+			dynamicVisualBake: null,
+			staticCommit: {
+				addedDrawUnits: [],
+				addedPortalApertureResources: [],
+				commitId: createStaticCommitId(staticBatchId),
+				materialCoverage: [],
+				removedResources: options.removedResources,
+				revision: this.#revision,
+				staticAuthoredDynamicSeeds: [],
+				staticBatchId,
+				staticObjectRenderInstances: [],
+				staticObjectVisualResources: [],
+				staticPortalGraphs: [],
+				staticPortalInteriorRecords: [],
+				staticSourceMappings: [],
+				staticSpatialRecords: [],
+				staticVisibilityRecords: [],
+				tasks: [],
+				textureUses: [],
+			},
 		});
 	}
 
@@ -889,9 +973,9 @@ export class StaticCoordinator {
 		}
 	}
 
-	#emitCommitDelta(delta: StaticCoordinatorCommitDelta): void {
+	#emitCommit(commit: StaticScopePrepCommit): void {
 		for (const listener of this.#commitListeners) {
-			listener(delta);
+			listener(commit);
 		}
 	}
 
@@ -955,6 +1039,8 @@ interface PendingStaticBakeBatchItem {
 	readonly ownerId: string;
 	/** Layer owner identity that owns any resources produced by this item. */
 	readonly ownerKey: LayerOwnerState["key"];
+	/** Static-authored dynamic recipes discovered from the same source fanout. */
+	readonly dynamicRecipes: readonly DynamicEntityRecipe[];
 	readonly payload: StaticScopePayload;
 	/** Source-resolution duration captured with the task instead of a side map. */
 	readonly resolverMs: number;
@@ -998,6 +1084,12 @@ function createStaticBatchId(input: {
 		scopeKeys[0] ?? "empty",
 		input.items.length.toString(),
 	].join(":");
+}
+
+function createStaticAuthoredDynamicVisualBakeBatchId(
+	staticBatchId: string,
+): string {
+	return `${staticBatchId}:static-authored-dynamic-visuals`;
 }
 
 function createPendingStaticBakeBatchId(
@@ -1044,6 +1136,53 @@ function findPendingStaticBakeItemResolverMs(
 	taskId: string,
 ): number | null {
 	return items.find((item) => item.taskId === taskId)?.resolverMs ?? null;
+}
+
+function groupDynamicRecipesByOwnerId(
+	recipes: readonly StaticAuthoredDynamicRecipe[],
+): ReadonlyMap<string, readonly DynamicEntityRecipe[]> {
+	const byOwnerId = new Map<string, DynamicEntityRecipe[]>();
+	for (const entry of recipes) {
+		const ownerId = createLayerOwnerKeyId(entry.targetOwnerKey);
+		const ownerRecipes = byOwnerId.get(ownerId) ?? [];
+		ownerRecipes.push(entry.recipe);
+		byOwnerId.set(ownerId, ownerRecipes);
+	}
+	return byOwnerId;
+}
+
+function filterDynamicVisualBakeResultForCurrentTasks(
+	result: DynamicVisualBakeResult | null,
+	pendingItems: readonly PendingStaticBakeBatchItem[],
+	currentTasks: readonly StaticBakeTask[],
+): DynamicVisualBakeResult | null {
+	if (!result) {
+		return null;
+	}
+	const currentTaskIds = new Set(currentTasks.map((task) => task.taskId));
+	const currentEntityIds = new Set(
+		pendingItems
+			.filter((item) => currentTaskIds.has(item.taskId))
+			.flatMap((item) => item.dynamicRecipes.map((recipe) => recipe.entityId)),
+	);
+	return {
+		...result,
+		failures: result.failures.filter(
+			(failure) =>
+				failure.entityId === null || currentEntityIds.has(failure.entityId),
+		),
+		products: result.products.filter((product) =>
+			currentEntityIds.has(getDynamicVisualBakeProductEntityId(product)),
+		),
+	};
+}
+
+function getDynamicVisualBakeProductEntityId(
+	product: DynamicVisualBakeResult["products"][number],
+): string {
+	return product.kind === "baked"
+		? product.resource.entityId
+		: product.entityId;
 }
 
 function createSourceRequestsForNewWork(

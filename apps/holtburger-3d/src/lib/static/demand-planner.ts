@@ -57,7 +57,10 @@ export function planStaticDemand(
 		return {
 			layerTasks,
 			retainedLayerOwners: layerTasks.map((task) => task.ownerKey),
-			sourceRequests: createLandblockSceneLodSourceRequests(layerTasks, "outdoor"),
+			sourceRequests: createLandblockSceneLodSourceRequests(
+				layerTasks,
+				"outdoor",
+			),
 		};
 	}
 
@@ -199,9 +202,7 @@ function createLandblockSceneLodSourceRequests(
 
 	for (const item of layerTasks) {
 		const landblockId = item.scope.landblockId;
-		const layerKind = landblockSceneLodLayerKindForStaticDomain(
-			item.domain,
-		);
+		const layerKind = landblockSceneLodLayerKindForStaticDomain(item.domain);
 		const layerLod = sourceLodForLandblockSceneLayer(layerKind);
 		let request = requestsByLandblock.get(landblockId);
 		if (!request) {

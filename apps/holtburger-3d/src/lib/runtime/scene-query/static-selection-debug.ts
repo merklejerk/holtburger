@@ -233,10 +233,11 @@ export function querySelectionDebugBounds(
 			item.kind === "static" &&
 			item.placement.placement.identity.instanceId === selectionKey.instanceId
 		) {
-			const bounds = state.envCellCommittedRecords.getEnvCellStaticPlacementBounds(
-				root,
-				item.placement,
-			);
+			const bounds =
+				state.envCellCommittedRecords.getEnvCellStaticPlacementBounds(
+					root,
+					item.placement,
+				);
 			if (!bounds) {
 				return null;
 			}

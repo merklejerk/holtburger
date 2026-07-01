@@ -1,7 +1,4 @@
-import type {
-	DynamicEntityId,
-	DynamicEntityRecipe,
-} from "./contracts";
+import type { DynamicEntityId, DynamicEntityRecipe } from "./contracts";
 import { createDynamicVisualResourceId } from "./contracts";
 import type { DynamicVisualRecipeResolutionPayload } from "./visual-recipe-resolver";
 import type {
@@ -15,12 +12,10 @@ import type { StaticMaterialPlanningDomain } from "../static/objects/bake/static
 
 type DynamicPlacementRecord = StaticAuthoredDynamicPlacementRecord;
 
-export function createStaticAuthoredDynamicRecipe(
-	options: {
-		readonly recipe: DynamicEntityRecipe;
-		readonly targetOwnerKey: LayerOwnerKey;
-	},
-): StaticAuthoredDynamicRecipe {
+export function createStaticAuthoredDynamicRecipe(options: {
+	readonly recipe: DynamicEntityRecipe;
+	readonly targetOwnerKey: LayerOwnerKey;
+}): StaticAuthoredDynamicRecipe {
 	return {
 		recipe: options.recipe,
 		targetOwnerKey: options.targetOwnerKey,

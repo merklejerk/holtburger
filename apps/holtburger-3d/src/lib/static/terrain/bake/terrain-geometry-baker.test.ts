@@ -156,10 +156,10 @@ describe("terrain geometry baker", () => {
 			}),
 		]);
 		expect(result.textureUses).toEqual([
-				{
-					domain: "outdoor-terrain",
-					owners: [{ drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" }],
-					source: {
+			{
+				domain: "outdoor-terrain",
+				owners: [{ drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" }],
+				source: {
 					kind: "prepared-render-surface-texture-use",
 					renderSurface: {
 						kind: "render-surface",

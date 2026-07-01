@@ -111,7 +111,8 @@ describe("dynamic animation update cadence", () => {
 	it("throttles controller animation and placement updates without clearing stale state", () => {
 		const skippedTickSeconds =
 			DYNAMIC_ANIMATION_FAR_UPDATE_INTERVAL_SECONDS / 2;
-		const nextAllowedTickSeconds = DYNAMIC_ANIMATION_FAR_UPDATE_INTERVAL_SECONDS;
+		const nextAllowedTickSeconds =
+			DYNAMIC_ANIMATION_FAR_UPDATE_INTERVAL_SECONDS;
 		const store = new DynamicEntityStore();
 		store.upsert(
 			createReadyDynamicRecord({

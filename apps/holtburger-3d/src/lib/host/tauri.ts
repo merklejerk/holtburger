@@ -139,9 +139,7 @@ export function planBinaryLookupBatches(
 
 export function usesBinaryAssetLookup(assetId: string): boolean {
 	return (
-		/^landblock\/[0-9a-fA-F]{8}\/lod\/[0-4]$/.test(
-			assetId,
-		) ||
+		/^landblock\/[0-9a-fA-F]{8}\/lod\/[0-4]$/.test(assetId) ||
 		/^env-cell\/[0-9a-fA-F]{8}$/.test(assetId) ||
 		assetId.startsWith("gfx-obj/") ||
 		assetId.startsWith("prepared-texture/") ||

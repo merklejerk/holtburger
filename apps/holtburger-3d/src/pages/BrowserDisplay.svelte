@@ -443,7 +443,10 @@
 		);
 		buildingRadius = nextBuildingRadius;
 		explicitObjectRadius = Math.min(explicitObjectRadius, nextBuildingRadius);
-		generatedSceneryRadius = Math.min(generatedSceneryRadius, nextBuildingRadius);
+		generatedSceneryRadius = Math.min(
+			generatedSceneryRadius,
+			nextBuildingRadius,
+		);
 		scheduleStaticInterestRefresh();
 	}
 
@@ -2154,7 +2157,8 @@
 									/>
 								</label>
 								<button
-									disabled={!weenieLookupCapability.available || weenieLookupPending}
+									disabled={!weenieLookupCapability.available ||
+										weenieLookupPending}
 									type="button"
 									onclick={applySpawnWeenieSeed}
 								>

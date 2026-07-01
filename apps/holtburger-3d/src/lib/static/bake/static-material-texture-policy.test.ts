@@ -95,8 +95,7 @@ describe("static material texture policy", () => {
 			placementItemId:
 				"static-object-layer-a:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
 			purpose: "object-base-color",
-			sourceKey:
-				"prepared-render-surface-texture-use:06000010:rgba-color",
+			sourceKey: "prepared-render-surface-texture-use:06000010:rgba-color",
 		});
 		expect(textureUse.textureUseId).toBe(requirement.bindingKey);
 		expect(placementIntent.itemId).toBe(requirement.placementItemId);

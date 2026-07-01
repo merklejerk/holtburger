@@ -157,7 +157,9 @@ class HttpRuntimeHost implements RuntimeHost {
 			await response.arrayBuffer(),
 		);
 		if (!assetResponse) {
-			throw new Error(`No binary lookup response returned for ${request.assetId}.`);
+			throw new Error(
+				`No binary lookup response returned for ${request.assetId}.`,
+			);
 		}
 		return assetLookupResponseDtoSchema.parse(assetResponse);
 	}

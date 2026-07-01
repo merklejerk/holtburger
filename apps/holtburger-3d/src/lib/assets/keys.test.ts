@@ -63,9 +63,7 @@ describe("host asset keys", () => {
 				`landblock-scene-lod:da55ffff:${level}`,
 			);
 			expect(formatHostAssetId(key)).toBe(`landblock/da55ffff/lod/${level}`);
-			expect(parseHostAssetId(`landblock/da55ffff/lod/${level}`)).toEqual(
-				key,
-			);
+			expect(parseHostAssetId(`landblock/da55ffff/lod/${level}`)).toEqual(key);
 		}
 	});
 

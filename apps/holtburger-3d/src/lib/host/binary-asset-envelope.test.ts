@@ -59,8 +59,7 @@ describe("decodeBinaryAssetEnvelope", () => {
 				],
 				triangles: [
 					{
-						terrainTriangleId:
-							"landblock/0102ffff/lod/0/terrain/triangle/0000",
+						terrainTriangleId: "landblock/0102ffff/lod/0/terrain/triangle/0000",
 						quadIndex: 4,
 						triangleInQuad: 1,
 						vertexIndices: [0, 1, 2],

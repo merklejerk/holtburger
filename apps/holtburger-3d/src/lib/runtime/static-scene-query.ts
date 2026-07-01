@@ -667,7 +667,9 @@ export class StaticSceneQuery {
 	}
 }
 
-function createOutdoorDomainRetentionRootKey(owner: LayerOwnerKey): string | null {
+function createOutdoorDomainRetentionRootKey(
+	owner: LayerOwnerKey,
+): string | null {
 	switch (owner.kind) {
 		case "outdoor-buildings":
 		case "outdoor-explicit-objects":

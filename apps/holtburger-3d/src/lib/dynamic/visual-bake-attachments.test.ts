@@ -33,16 +33,23 @@ describe("dynamic visual bake attachments", () => {
 			createPreparedAsset(createHostAssetKey("gfx-obj", 0x01000020)),
 		]);
 
-		const attachments = await createDynamicVisualBakeSourceGeometry(assetReader, [
-			createRecipe([
-				createSourceAsset({ geometry: firstGeometry, gfxObj, source: firstSource }),
-				createSourceAsset({
-					geometry: secondGeometry,
-					gfxObj,
-					source: secondSource,
-				}),
-			]),
-		]);
+		const attachments = await createDynamicVisualBakeSourceGeometry(
+			assetReader,
+			[
+				createRecipe([
+					createSourceAsset({
+						geometry: firstGeometry,
+						gfxObj,
+						source: firstSource,
+					}),
+					createSourceAsset({
+						geometry: secondGeometry,
+						gfxObj,
+						source: secondSource,
+					}),
+				]),
+			],
+		);
 
 		expect(assetReader.requests).toEqual([
 			createHostAssetKey("gfx-obj", 0x01000020),
@@ -136,7 +143,9 @@ function createSourceAsset(options: {
 }): StaticObjectSourceAssetFacts {
 	return {
 		bounds: null,
-		debug: { sourceAssetId: `setup-model/${formatHex32(options.source.sourceDid)}` },
+		debug: {
+			sourceAssetId: `setup-model/${formatHex32(options.source.sourceDid)}`,
+		},
 		defaultAnimation: null,
 		identity: options.source,
 		invalidPolygonCount: 0,

@@ -95,7 +95,11 @@ describe("landblock scene LoD source resolver", () => {
 					"da55ffff:4",
 					createSceneLodPayload(),
 				),
-				createPreparedAsset("terrain-material", 2, createTerrainMaterialPayload()),
+				createPreparedAsset(
+					"terrain-material",
+					2,
+					createTerrainMaterialPayload(),
+				),
 				createPreparedAsset(
 					"region-render-profile",
 					2,
@@ -123,7 +127,11 @@ describe("landblock scene LoD source resolver", () => {
 					"da55ffff:4",
 					createSceneLodPayload({ dynamicBuilding: true }),
 				),
-				createPreparedAsset("terrain-material", 2, createTerrainMaterialPayload()),
+				createPreparedAsset(
+					"terrain-material",
+					2,
+					createTerrainMaterialPayload(),
+				),
 				createPreparedAsset(
 					"region-render-profile",
 					2,

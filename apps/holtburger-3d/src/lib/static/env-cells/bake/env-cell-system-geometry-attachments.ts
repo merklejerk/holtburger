@@ -102,10 +102,7 @@ function collectEnvCellGeometryIdentities(
 function createFullEnvCellsByIdentity(
 	request: StaticBakeAttachmentRequest,
 ): ReadonlyMap<string, LandblockEnvCellStaticFacts> {
-	const cellsByIdentity = new Map<
-		string,
-		LandblockEnvCellStaticFacts
-	>();
+	const cellsByIdentity = new Map<string, LandblockEnvCellStaticFacts>();
 
 	for (const item of request.items) {
 		if (item.payload.scope.kind !== "env-cell-system") {
@@ -130,8 +127,8 @@ function createEnvCellCellStructureGeometryAttachment(options: {
 	readonly identity: EnvCellCellStructureGeometryIdentity;
 	readonly cell: LandblockEnvCellStaticFacts;
 }): EnvCellCellStructureGeometryAttachment {
-	const renderGeometry =
-		options.cell.renderGeometry as EnvCellSystemLayerSourcePayloadDto["envCells"][number]["renderGeometry"];
+	const renderGeometry = options.cell
+		.renderGeometry as EnvCellSystemLayerSourcePayloadDto["envCells"][number]["renderGeometry"];
 	requirePreparedRenderGeometryBuffers(
 		renderGeometry,
 		`Env-cell geometry attachment ${describeEnvCellCellStructureGeometryIdentity(

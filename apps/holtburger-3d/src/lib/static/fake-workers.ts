@@ -318,10 +318,7 @@ export class ImmediateStaticBaker implements StaticBaker {
 function createFakeStaticBakeResult(
 	input: StaticBakeBatchInput,
 	result: Partial<
-		Omit<
-			StaticBakeBatchResult,
-			"domain" | "revision" | "bakeBatchId" | "tasks"
-		>
+		Omit<StaticBakeBatchResult, "domain" | "revision" | "bakeBatchId" | "tasks">
 	> = {},
 ): StaticBakeBatchResult {
 	return {

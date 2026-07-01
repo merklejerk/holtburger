@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { LayerOwnerKey, LayerOwnerState, StaticScopeOwnerKey } from "./contracts";
+import type {
+	LayerOwnerKey,
+	LayerOwnerState,
+	StaticScopeOwnerKey,
+} from "./contracts";
 import {
 	createLayerOwnerKeyForStaticScope,
 	createLayerOwnerKeyId,
@@ -24,7 +28,9 @@ describe("layer owners", () => {
 			kind: "outdoor-generated-scenery",
 			landblockId: 0xda55ffff,
 		});
-		expect(createLayerOwnerKeyForStaticScope(createScope("outdoor-terrain"))).toEqual({
+		expect(
+			createLayerOwnerKeyForStaticScope(createScope("outdoor-terrain")),
+		).toEqual({
 			kind: "terrain",
 			landblockId: 0xda55ffff,
 		});
@@ -78,7 +84,9 @@ describe("layer owners", () => {
 	});
 });
 
-function createScope(domain: StaticScopeOwnerKey["domain"]): StaticScopeOwnerKey {
+function createScope(
+	domain: StaticScopeOwnerKey["domain"],
+): StaticScopeOwnerKey {
 	return {
 		domain,
 		scope: {

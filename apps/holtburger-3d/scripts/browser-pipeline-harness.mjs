@@ -171,7 +171,9 @@ function createDiagnosticsSummary(diagnostics, outputPath, errorMessage) {
 	const staticCoordinator = domains.find(
 		(domain) => domain.kind === "static-coordinator",
 	);
-	const textureAtlas = domains.find((domain) => domain.kind === "texture-atlas");
+	const textureAtlas = domains.find(
+		(domain) => domain.kind === "texture-atlas",
+	);
 	return {
 		kind: "browser-pipeline-harness-summary",
 		errorMessage: errorMessage ?? null,
@@ -236,7 +238,9 @@ function waitForReadyLine(child, selectValue) {
 		}, 120_000);
 		child.once("exit", (code) => {
 			clearTimeout(timeout);
-			reject(new Error(`Dev asset host exited before startup with code ${code}.`));
+			reject(
+				new Error(`Dev asset host exited before startup with code ${code}.`),
+			);
 		});
 		child.stdout.on("data", (chunk) => {
 			buffer += chunk.toString("utf8");
@@ -374,7 +378,8 @@ function collectPipelineTrace(client, timeoutMs) {
 				kind: "browser-pipeline-harness-trace",
 				samples,
 				workerEvents: Array.from(workerEventsByKey.values()).sort(
-					(left, right) => left.atMs - right.atMs || left.key.localeCompare(right.key),
+					(left, right) =>
+						left.atMs - right.atMs || left.key.localeCompare(right.key),
 				),
 			};
 		},
@@ -397,7 +402,9 @@ async function samplePipelineTrace(client, samples, workerEventsByKey) {
 	const staticCoordinator = domains.find(
 		(domain) => domain.kind === "static-coordinator",
 	);
-	const textureAtlas = domains.find((domain) => domain.kind === "texture-atlas");
+	const textureAtlas = domains.find(
+		(domain) => domain.kind === "texture-atlas",
+	);
 	const staticBaker = staticCoordinator?.staticBaker ?? null;
 	const pendingJobs = staticBaker?.pendingJobs ?? [];
 	const sourceResolutions = staticCoordinator?.sourceResolutions ?? [];
@@ -474,7 +481,9 @@ function waitForChromeDevToolsUrl(child) {
 		}, 60_000);
 		child.once("exit", (code) => {
 			clearTimeout(timeout);
-			reject(new Error(`Chrome exited before DevTools startup with code ${code}.`));
+			reject(
+				new Error(`Chrome exited before DevTools startup with code ${code}.`),
+			);
 		});
 		child.stderr.on("data", (chunk) => {
 			buffer += chunk.toString("utf8");
@@ -495,8 +504,7 @@ async function waitForPageWebSocketUrl(browserWebSocketUrl, expectedPageUrl) {
 		const targets = await fetch(listUrl).then((response) => response.json());
 		const page =
 			targets.find(
-				(target) =>
-					target.type === "page" && target.url === expectedPageUrl,
+				(target) => target.type === "page" && target.url === expectedPageUrl,
 			) ??
 			targets.find(
 				(target) =>

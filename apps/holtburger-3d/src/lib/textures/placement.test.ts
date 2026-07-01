@@ -92,12 +92,11 @@ describe("texture placement vocabulary bridge", () => {
 		).toMatchObject({
 			domain: "outdoor-generated-scenery",
 			itemId: "static-authored-dynamic:detail:06000020",
-			placementBucketKey:
-				createStaticAuthoredDynamicTexturePlacementBucketKey({
-					domain: "outdoor-generated-scenery",
-					ownerId: "static-layer-owner:generated:0xda55ffff",
-					purpose: "object-detail",
-				}),
+			placementBucketKey: createStaticAuthoredDynamicTexturePlacementBucketKey({
+				domain: "outdoor-generated-scenery",
+				ownerId: "static-layer-owner:generated:0xda55ffff",
+				purpose: "object-detail",
+			}),
 			pool: "static-authored-object",
 			purpose: "object-detail",
 		});
@@ -121,11 +120,12 @@ describe("texture placement vocabulary bridge", () => {
 		).toMatchObject({
 			domain: "runtime-object-material",
 			itemId: "runtime-authored-dynamic:index:06000030",
-			placementBucketKey:
-				createRuntimeAuthoredDynamicTexturePlacementBucketKey({
+			placementBucketKey: createRuntimeAuthoredDynamicTexturePlacementBucketKey(
+				{
 					entityId: "runtime-spawn:1",
 					purpose: "object-index",
-				}),
+				},
+			),
 			pool: "runtime-authored-object",
 			purpose: "object-index",
 		});

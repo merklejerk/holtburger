@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type {
-	HostAssetKey,
-	PreparedAsset,
-} from "../../../assets/contracts";
+import type { HostAssetKey, PreparedAsset } from "../../../assets/contracts";
 import type { ResolverLandblockEnvCellLayerPayloadDto } from "../../../assets/preparation/env-cell-views";
 import { createResolverEnvCellPreparedAssetView } from "../../../assets/preparation/env-cell-views";
 import { createHostAssetKey, describeHostAssetKey } from "../../../assets/keys";
@@ -19,12 +16,8 @@ describe("browser landblock env-cell geometry attachments", () => {
 			"landblock-scene-lod-env-cell-layer",
 			0xda55ffff,
 		);
-		const fullAsset = createPreparedAsset(
-			key,
-			createEnvCellSystemPayload(),
-		);
-		const fullPayload =
-			fullAsset.payload as EnvCellSystemLayerSourcePayloadDto;
+		const fullAsset = createPreparedAsset(key, createEnvCellSystemPayload());
+		const fullPayload = fullAsset.payload as EnvCellSystemLayerSourcePayloadDto;
 		const provider = new EnvCellSystemGeometryAttachmentProvider();
 
 		const attachments = await provider.createAttachments(
@@ -74,10 +67,7 @@ describe("browser landblock env-cell geometry attachments", () => {
 			"landblock-scene-lod-env-cell-layer",
 			0xda55ffff,
 		);
-		const fullAsset = createPreparedAsset(
-			key,
-			createEnvCellSystemPayload(),
-		);
+		const fullAsset = createPreparedAsset(key, createEnvCellSystemPayload());
 		const resolverAsset = createResolverEnvCellPreparedAssetView(fullAsset);
 		const resolverPayload =
 			resolverAsset.payload as ResolverLandblockEnvCellLayerPayloadDto;

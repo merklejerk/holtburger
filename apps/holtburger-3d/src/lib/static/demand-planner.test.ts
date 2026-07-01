@@ -174,15 +174,15 @@ describe("static demand planner", () => {
 		expect(sourceRequests).toHaveLength(9);
 		expect(sourceRequests[0]?.landblockId).toBe(0xda55ffff);
 		expect(sourceRequests[0]?.sourceLod).toBe(4);
-		expect(sourceRequests[0]?.requestedLayers.map((layer) => layer.kind)).toEqual(
-			[
-				"terrain",
-				"outdoor-buildings",
-				"outdoor-explicit-objects",
-				"outdoor-generated-scenery",
-				"env-cell-system",
-			],
-		);
+		expect(
+			sourceRequests[0]?.requestedLayers.map((layer) => layer.kind),
+		).toEqual([
+			"terrain",
+			"outdoor-buildings",
+			"outdoor-explicit-objects",
+			"outdoor-generated-scenery",
+			"env-cell-system",
+		]);
 	});
 
 	it("normalizes domain radii without letting non-terrain domains exceed terrain", () => {

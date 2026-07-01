@@ -1,6 +1,6 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation in progress. Phases 0-9I are complete. This document defines the target
+Status: implementation in progress. Phases 0-9J are complete. This document defines the target
 model, north stars, risk surface, and phased cutover plan for replacing static-vs-dynamic object
 visual worker bifurcation with a shared object-like visual recipe graph.
 
@@ -1951,6 +1951,8 @@ Implementation notes after Phase 9I:
 
 ### Phase 9J: Static Object Bundle Expansion Producer
 
+Status: complete.
+
 Goal: add producer functions that expand current static source facts into object visual recipes,
 geometry buffers, part recipes, part instances, and texture bindings without invoking legacy static
 draw-unit bakers.
@@ -1976,6 +1978,33 @@ Acceptance criteria:
 Deletion criteria:
 
 - None yet. Static publication metadata and production routing land in later phases.
+
+Implementation notes after Phase 9J:
+
+- Added
+  `apps/holtburger-3d/src/lib/static/objects/bake/static-object-visual-bundle-producer.ts` as the
+  recipe-first static object bundle expansion producer.
+- The producer consumes `StaticObjectBatchPayload` plus `StaticObjectSourceGeometryAttachment`
+  buffers and emits `ObjectVisualBundleResolution` plus source-local geometry buffers. It does not
+  invoke the legacy static draw-unit/resource baker.
+- Direct `gfx_obj` and setup-model source facts now expand into geometry recipes, material recipes,
+  part recipes, and part instances. Static object transforms reuse the proven legacy matrix order:
+  object local placement, part default placements, then combined object/source part scale.
+- Material mapping uses the shared object visual material planner and maps material plans into the
+  Phase 9E recipe-grade material contract. Material recipe keys include texture wrap mode so
+  `sampler=repeat` variants do not collapse into clamp recipes.
+- Missing static object geometry attachments return a `missing-dependencies` visual resolution with
+  no partial geometry buffers.
+- Unsupported materials map to the `unsupported` recipe family; the shared baker warns and skips
+  them.
+- Env-cell static object payloads emit env-cell `PartInstance.residency`; outdoor payloads emit
+  outdoor-landblock residency.
+- Spicy debt: the producer currently carries a focused `MaterialSlotIndex` and key helpers parallel
+  to the legacy partitioner. Phase 9M cleanup should extract or delete the duplicated legacy helpers
+  once production no longer needs the old partition path.
+- Verification:
+  `npm --prefix apps/holtburger-3d run test:ts -- static-object-visual-bundle-producer` and
+  `npm --prefix apps/holtburger-3d run check`.
 
 ### Phase 9K: Static Publication Metadata Producer
 

@@ -7,25 +7,25 @@ import type {
 	StaticObjectVisualResource,
 	TerrainGeometryStaticDrawUnit,
 } from "../static/contracts";
-import { materializeStaticCommit } from "./static-materializer";
+import { installStaticCommit } from "./static-commit-installer";
 
-describe("static materializer", () => {
+describe("static commit installer", () => {
 	it("installs committed draw units directly from baker output", () => {
 		const drawUnit = createTerrainDrawUnit("terrain-textured", {
 			textureUseIds: ["terrain-textured:prepared-texture:06000010"],
 		});
 		const textureUpdate = createTexturePlacementUpdate(drawUnit);
 
-		const materialized = materializeStaticCommit({
+		const installed = installStaticCommit({
 			commit: createCommitDelta({
 				addedDrawUnits: [drawUnit],
 			}),
 			textureUpdate,
 		});
 
-		expect(materialized.materializedDrawUnits).toEqual([drawUnit]);
-		expect(materialized.textureUpdate).toBe(textureUpdate);
-		expect(materialized.removedResources).toEqual([]);
+		expect(installed.installedDrawUnits).toEqual([drawUnit]);
+		expect(installed.textureUpdate).toBe(textureUpdate);
+		expect(installed.removedResources).toEqual([]);
 	});
 
 	it("rejects textured draw units without committed texture bindings", () => {
@@ -34,7 +34,7 @@ describe("static materializer", () => {
 		});
 
 		expect(() =>
-			materializeStaticCommit({
+			installStaticCommit({
 				commit: createCommitDelta({
 					addedDrawUnits: [drawUnit],
 				}),
@@ -55,7 +55,7 @@ describe("static materializer", () => {
 		}
 		const textureUpdate = createTexturePlacementUpdate(drawUnit);
 
-		const materialized = materializeStaticCommit({
+		const installed = installStaticCommit({
 			commit: createCommitDelta({
 				addedDrawUnits: [drawUnit],
 				staticSpatialRecords: [spatialRecord],
@@ -63,9 +63,9 @@ describe("static materializer", () => {
 			textureUpdate,
 		});
 
-		expect(materialized.materializedDrawUnits).toEqual([drawUnit]);
-		expect(materialized.staticSpatialRecords).toEqual([spatialRecord]);
-		expect(materialized.textureUpdate).toBe(textureUpdate);
+		expect(installed.installedDrawUnits).toEqual([drawUnit]);
+		expect(installed.staticSpatialRecords).toEqual([spatialRecord]);
+		expect(installed.textureUpdate).toBe(textureUpdate);
 	});
 
 	it("preserves static object visual resources and their texture update", () => {
@@ -77,7 +77,7 @@ describe("static materializer", () => {
 		const textureUpdate =
 			createTexturePlacementUpdateForVisualResource(visualResource);
 
-		const materialized = materializeStaticCommit({
+		const installed = installStaticCommit({
 			commit: createCommitDelta({
 				addedDrawUnits: [],
 				staticObjectVisualResources: [visualResource],
@@ -85,8 +85,8 @@ describe("static materializer", () => {
 			textureUpdate,
 		});
 
-		expect(materialized.staticObjectVisualResources).toEqual([visualResource]);
-		expect(materialized.textureUpdate).toBe(textureUpdate);
+		expect(installed.staticObjectVisualResources).toEqual([visualResource]);
+		expect(installed.textureUpdate).toBe(textureUpdate);
 	});
 
 	it("preserves removed resources without expanding old fine draw-unit ids", () => {
@@ -98,7 +98,7 @@ describe("static materializer", () => {
 			},
 		];
 
-		const materialized = materializeStaticCommit({
+		const installed = installStaticCommit({
 			commit: createCommitDelta({
 				addedDrawUnits: [],
 				removedResources,
@@ -106,8 +106,8 @@ describe("static materializer", () => {
 			textureUpdate: null,
 		});
 
-		expect(materialized.materializedDrawUnits).toEqual([]);
-		expect(materialized.removedResources).toEqual(removedResources);
+		expect(installed.installedDrawUnits).toEqual([]);
+		expect(installed.removedResources).toEqual(removedResources);
 	});
 });
 
@@ -329,7 +329,7 @@ function createTexturePlacementUpdate(
 		placements: [],
 		removedTextureRefIds: [],
 		revision: 3,
-		textureUsePlacements: [
+		resolvedTexturePlacements: [
 			{
 				rect: [0, 0, 1, 1],
 				textureHeight: 1,
@@ -367,6 +367,6 @@ function createTexturePlacementUpdateForVisualResource(
 		placements: [],
 		removedTextureRefIds: [],
 		revision: 3,
-		textureUsePlacements: [],
+		resolvedTexturePlacements: [],
 	};
 }

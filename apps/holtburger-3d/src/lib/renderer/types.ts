@@ -205,7 +205,7 @@ interface DebugOverlayTrianglePrimitive {
 export interface TexturePlacementUpdate {
 	readonly placements: readonly TexturePlacement[];
 	readonly removedTextureRefIds: readonly string[];
-	readonly textureUsePlacements: readonly TextureUsePlacement[];
+	readonly resolvedTexturePlacements: readonly ResolvedTexturePlacement[];
 	readonly textureBindings: readonly TextureBinding[];
 	readonly revision: number;
 }
@@ -347,7 +347,7 @@ type DynamicRendererInstanceResidence =
 			readonly landblockId: number;
 	  };
 
-export interface TextureUsePlacement {
+export interface ResolvedTexturePlacement {
 	/** Material binding key whose atlas placement was resolved. */
 	readonly textureUseId: string;
 	readonly textureRefId: string;

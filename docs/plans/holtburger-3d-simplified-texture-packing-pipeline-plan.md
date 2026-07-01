@@ -1216,7 +1216,7 @@ Acceptance criteria:
 - [x] Resteering 3: review reclaim and renderer cleanup readiness.
 - [x] Phase 9: simplify renderer payload prep and specialize shader families.
 - [x] Phase 10: resolve `textureUseId` cleanup.
-- [ ] Phase 11: delete vestigial code and obsolete tests.
+- [x] Phase 11: delete vestigial code and obsolete tests.
 
 ## Decisions and Course Corrections
 
@@ -1441,6 +1441,19 @@ Acceptance criteria:
 - Phase 10 updated contract comments to make the identity split explicit: `textureUseId` names a
   material binding, while placement `itemId` is the packer/baker snapshot key. No compatibility alias
   was introduced.
+- Phase 11 renamed the stale runtime static materializer module to
+  `static-commit-installer.ts`. The helper now exposes `installStaticCommit(...)`,
+  `StaticCommitInstallInput`, and `StaticCommitInstallResult`, with `installedDrawUnits` instead of
+  materialized draw-unit vocabulary.
+- Phase 11 renamed runtime snapshot/report counters from static materialization draw-unit counts to
+  static commit install draw-unit counts. Coordinator lifecycle phases still use `materialized`
+  because that is the coordinator's accepted-commit state, not the removed post-pack refinement path.
+- Phase 11 renamed renderer update `TextureUsePlacement` to `ResolvedTexturePlacement` and changed
+  `TexturePlacementUpdate.textureUsePlacements` to `resolvedTexturePlacements`, removing the last
+  renderer payload type that implied texture uses were still the placement abstraction.
+- Phase 11 left terrain role-page terminology in place because terrain shaders still have real
+  multi-page role constraints. Object role-page overflow diagnostics and multi-slot object role-page
+  assignment were already removed in Phase 9.
 - Dry run split `TextureManager` responsibilities into placement and pinning. Current owner leases
   require post-bake draw-unit/resource owners, but pre-bake placement intents intentionally do not
   have owners yet.
@@ -1482,15 +1495,9 @@ Acceptance criteria:
 - Phase 6 introduced the same duplicated material-planning concession for dynamic visuals. If Phase 7
   needs similar terrain planning duplication, keep it contained to terrain planner/baker helpers and
   record the cleanup target rather than leaking material planning into `TextureManager`.
-- `static-materializer.ts` is now a direct install/validation helper with a stale name. Cleanup should
-  either rename it around static commit installation or inline the small validation once terrain no
-  longer depends on the old materialization terminology in tests and diagnostics.
-- `TextureManager` still emits renderer `TextureUsePlacement` records and owns object/terrain
-  role-page slot assignment as part of the old binding update path. This is acceptable until terrain
-  moves before bake, but it should not become the long-term source of renderer legality after bakers
-  own page partitioning.
-- Runtime diagnostics and tests still use `materialized` naming for direct-installed static
-  resources. Treat these as cleanup debt, not architectural terms to preserve.
+- Phase 11 resolved the stale `static-materializer.ts`, `TextureUsePlacement`, and runtime
+  materialized-draw-unit naming debt. Remaining `materialized` references are coordinator lifecycle
+  states or material-entry terminology, not the removed post-pack refinement path.
 - Terrain page splitting now always adds a page-slice suffix to multi-slice terrain draw-unit ids,
   even when the original split was caused by layer count rather than page count. This is explicit and
   deterministic, but diagnostics that compare historical draw-unit ids should treat it as Phase 7
@@ -1508,9 +1515,7 @@ Acceptance criteria:
   after bakers have already enforced one-page-per-role draw units. Phase 9 removed object multi-slot
   assignment and overflow diagnostics, but the renderer update payload still uses the old field name.
   Phase 10 or Phase 11 should rename that bridge if it survives `textureUseId` cleanup.
-- Renderer `TextureUsePlacement` remains a slightly stale type name. Its `textureUseId` field is still
-  honest, but the type is really a resolved material-texture placement update. Rename or collapse it
-  during final vestige cleanup if it still has a caller.
+- Renderer resolved material-texture placement updates now use `ResolvedTexturePlacement`.
 
 ## Risks and Concessions
 

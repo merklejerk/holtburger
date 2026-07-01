@@ -295,6 +295,8 @@ export interface DynamicRendererVisualResource {
 
 export interface DynamicRendererVisualPart extends VisualGeometryPayload {
 	readonly partIndex: number;
+	/** Stable renderer partition identity; source animation transforms still use `partIndex`. */
+	readonly renderPartId: string;
 	readonly sourceAssetId: string;
 }
 

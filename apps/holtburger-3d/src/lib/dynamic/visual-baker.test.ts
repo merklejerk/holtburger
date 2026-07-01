@@ -81,6 +81,128 @@ describe("dynamic visual baker", () => {
 		});
 	});
 
+	it("splits render parts by final textureRefId while preserving source partIndex", () => {
+		const sourceAsset = createSourceAsset({ surfaceIds: [7, 8] });
+		const recipe = createRecipe({
+			materialSources: [
+				createTexturedMaterial({
+					materialId: 0x08000001,
+					renderSurfaceId: 0x06000010,
+					surfaceId: 7,
+					surfaceTextureId: 0x05000010,
+				}),
+				createTexturedMaterial({
+					materialId: 0x08000002,
+					renderSurfaceId: 0x06000011,
+					surfaceId: 8,
+					surfaceTextureId: 0x05000011,
+				}),
+			],
+			sourceAsset,
+			textureRefs: createTextureRefs([0x06000010, 0x06000011]),
+		});
+		const placementSnapshot = createPlacementSnapshotForRecipe(recipe, {
+			textureRefIdsByItemIndex: ["texture-ref-a", "texture-ref-b"],
+		});
+
+		const result = bakeDynamicVisuals({
+			batchId: "dynamic-visual-batch:texture-ref-split",
+			recipes: [recipe],
+			revision: 16,
+			sourceGeometry: [createGeometryAttachment({ triangleCount: 2 })],
+			texturePlacementSnapshot: placementSnapshot,
+		});
+
+		expect(result.failures).toEqual([]);
+		const product = result.products[0];
+		expect(product?.kind).toBe("baked");
+		if (product?.kind !== "baked") {
+			throw new Error("Expected baked product.");
+		}
+		expect(product.resource.renderParts).toHaveLength(2);
+		expect(
+			product.resource.renderParts.map((part) => ({
+				partIndex: part.partIndex,
+				renderPartId: part.renderPartId,
+				textureUseIds: part.textureUseIds,
+			})),
+		).toEqual([
+			{
+				partIndex: 0,
+				renderPartId: "part:0/partition:0/split:0",
+				textureUseIds: [product.resource.textureRequirements[0]?.textureUseId],
+			},
+			{
+				partIndex: 0,
+				renderPartId: "part:0/partition:1/split:0",
+				textureUseIds: [product.resource.textureRequirements[1]?.textureUseId],
+			},
+		]);
+	});
+
+	it("splits render parts by the object material table budget", () => {
+		const surfaceIds = Array.from({ length: 9 }, (_, index) => 7 + index);
+		const sourceAsset = createSourceAsset({ surfaceIds });
+		const materialSources = surfaceIds.map((surfaceId, index) =>
+			createTexturedMaterial({
+				materialId: 0x08000001 + index,
+				renderSurfaceId: 0x06000010 + index,
+				surfaceId,
+				surfaceTextureId: 0x05000010 + index,
+			}),
+		);
+		const recipe = createRecipe({
+			materialSources,
+			sourceAsset,
+			textureRefs: createTextureRefs(
+				materialSources.map((material) => {
+					if (material.source.kind !== "texture") {
+						throw new Error("Expected textured material.");
+					}
+					return material.source.selectedRenderSurface.renderSurfaceId;
+				}),
+			),
+		});
+
+		const result = bakeDynamicVisuals({
+			batchId: "dynamic-visual-batch:budget-split",
+			recipes: [recipe],
+			revision: 17,
+			sourceGeometry: [
+				createGeometryAttachment({ triangleCount: surfaceIds.length }),
+			],
+			texturePlacementSnapshot: createPlacementSnapshotForRecipe(recipe, {
+				textureRefIdsByItemIndex: Array.from(
+					{ length: surfaceIds.length },
+					() => "shared-texture-ref",
+				),
+			}),
+		});
+
+		expect(result.failures).toEqual([]);
+		const product = result.products[0];
+		expect(product?.kind).toBe("baked");
+		if (product?.kind !== "baked") {
+			throw new Error("Expected baked product.");
+		}
+		expect(product.resource.renderParts).toHaveLength(2);
+		expect(
+			product.resource.renderParts.map((part) => ({
+				materialEntryCount: part.materialEntries.length,
+				renderPartId: part.renderPartId,
+			})),
+		).toEqual([
+			{
+				materialEntryCount: 8,
+				renderPartId: "part:0/partition:0/split:0",
+			},
+			{
+				materialEntryCount: 1,
+				renderPartId: "part:0/partition:0/split:1",
+			},
+		]);
+	});
+
 	it("skips recipes with resolver-owned missing dependencies", () => {
 		const missingRefs: readonly StaticResourceIdentity[] = [
 			{
@@ -139,9 +261,10 @@ describe("dynamic visual baker", () => {
 function createRecipe(options: {
 	readonly materialSources: readonly StaticObjectMaterialSourceFacts[];
 	readonly missingRefs?: readonly StaticResourceIdentity[];
+	readonly sourceAsset?: StaticObjectSourceAssetFacts;
 	readonly textureRefs?: readonly StaticObjectTextureRefFacts[];
 }): DynamicEntityRecipe {
-	const sourceAsset = createSourceAsset();
+	const sourceAsset = options.sourceAsset ?? createSourceAsset();
 	return {
 		animationSelection: { kind: "none" },
 		baseTransform: {
@@ -175,6 +298,9 @@ function createRecipe(options: {
 
 function createPlacementSnapshotForRecipe(
 	recipe: DynamicEntityRecipe,
+	options: {
+		readonly textureRefIdsByItemIndex?: readonly string[];
+	} = {},
 ): DynamicVisualBakeInput["texturePlacementSnapshot"] {
 	const placementsByItemId = new Map(
 		createDynamicVisualTexturePlanning(recipe).placementIntents.map(
@@ -187,6 +313,9 @@ function createPlacementSnapshotForRecipe(
 					pool: intent.pool,
 					purpose: intent.purpose,
 					rect: [0, 0, 16, 16] as const,
+					textureRefId:
+						options.textureRefIdsByItemIndex?.[index] ??
+						`${intent.purpose}:texture-ref:${index}`,
 					width: 16,
 				},
 			],
@@ -199,16 +328,21 @@ function createEmptyPlacementSnapshot(): DynamicVisualBakeInput["texturePlacemen
 	return { placementsByItemId: new Map() };
 }
 
-function createSourceAsset(): StaticObjectSourceAssetFacts {
+function createSourceAsset(
+	options: {
+		readonly surfaceIds?: readonly number[];
+	} = {},
+): StaticObjectSourceAssetFacts {
 	const source = createSetupSourceIdentity();
 	const gfxObj = createGfxObjSourceIdentity();
+	const surfaceIds = options.surfaceIds ?? [7];
 	return {
 		bounds: null,
 		debug: { sourceAssetId: "setup-model/020003e5" },
 		defaultAnimation: null,
 		identity: source,
 		invalidPolygonCount: 0,
-		materialSlotCount: 1,
+		materialSlotCount: surfaceIds.length,
 		partCount: 1,
 		parts: [
 			{
@@ -225,105 +359,132 @@ function createSourceAsset(): StaticObjectSourceAssetFacts {
 				},
 				gfxObj,
 				invalidPolygonCount: 0,
-				materialSlotCount: 1,
-				materialSlots: [
-					{
-						geometrySurfaceId: 7,
-						material: {
-							kind: "static-material-source",
-							materialId: 0x08000001,
-						},
-						materialSurfaceId: 7,
-						materialVariantSignature: null,
-						paletteOverride: null,
-						paletteViews: [],
-						slotIndex: 0,
+				materialSlotCount: surfaceIds.length,
+				materialSlots: surfaceIds.map((surfaceId, index) => ({
+					geometrySurfaceId: surfaceId,
+					material: {
+						kind: "static-material-source",
+						materialId: 0x08000001 + index,
 					},
-				],
+					materialSurfaceId: surfaceId,
+					materialVariantSignature: null,
+					paletteOverride: null,
+					paletteViews: [],
+					slotIndex: index,
+				})),
 				partIndex: 0,
 				physicsPolygonCount: 0,
-				renderTriangleCount: 1,
+				renderTriangleCount: surfaceIds.length,
 				scale: { x: 1, y: 1, z: 1 },
 				skippedPolygonCount: 0,
 				source,
-				triangles: [
-					{
-						firstVertex: 0,
-						geometrySurfaceId: 7,
-						materialVariantSignature: null,
-						polygonId: 1,
-					},
-				],
+				triangles: surfaceIds.map((surfaceId, index) => ({
+					firstVertex: index * 3,
+					geometrySurfaceId: surfaceId,
+					materialVariantSignature: null,
+					polygonId: index + 1,
+				})),
 			},
 		],
 		physicsPolygonCount: 0,
-		renderTriangleCount: 1,
+		renderTriangleCount: surfaceIds.length,
 		skippedPolygonCount: 0,
 		sourceAssetKind: "setup-model",
 	};
 }
 
-function createGeometryAttachment(): StaticObjectSourceGeometryAttachment {
+function createGeometryAttachment(
+	options: {
+		readonly triangleCount?: number;
+	} = {},
+): StaticObjectSourceGeometryAttachment {
+	const triangleCount = options.triangleCount ?? 1;
+	const positions = new Float32Array(triangleCount * 9);
+	const texCoords = new Float32Array(triangleCount * 6);
+	for (let triangle = 0; triangle < triangleCount; triangle += 1) {
+		const positionOffset = triangle * 9;
+		positions.set([0, 0, 0, 1, 0, 0, 0, 1, 0], positionOffset);
+		const texCoordOffset = triangle * 6;
+		texCoords.set([0, 0, 1, 0, 0, 1], texCoordOffset);
+	}
 	return {
 		identity: {
 			gfxObj: createGfxObjSourceIdentity(),
 			kind: "static-object-canonical-geometry",
 			partIndex: 0,
 		},
-		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
-		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
+		positions,
+		texCoords,
 	};
 }
 
-function createSolidMaterial(): StaticObjectMaterialSourceFacts {
+function createSolidMaterial(
+	options: {
+		readonly materialId?: number;
+		readonly surfaceId?: number;
+	} = {},
+): StaticObjectMaterialSourceFacts {
+	const surfaceId = options.surfaceId ?? 7;
 	return {
 		diffuse: 1,
 		identity: {
 			kind: "static-material-source",
-			materialId: 0x08000001,
+			materialId: options.materialId ?? 0x08000001,
 		},
 		luminosity: 0,
 		source: {
 			argb: 0xff336699,
 			kind: "solid-color",
 		},
-		surfaceId: 7,
+		surfaceId,
 		surfaceType: 0,
 		translucency: 0,
 	};
 }
 
-function createTexturedMaterial(): StaticObjectMaterialSourceFacts {
+function createTexturedMaterial(
+	options: {
+		readonly materialId?: number;
+		readonly renderSurfaceId?: number;
+		readonly surfaceId?: number;
+		readonly surfaceTextureId?: number;
+	} = {},
+): StaticObjectMaterialSourceFacts {
 	return {
-		...createSolidMaterial(),
+		...createSolidMaterial({
+			materialId: options.materialId,
+			surfaceId: options.surfaceId,
+		}),
 		source: {
 			kind: "texture",
 			palette: null,
 			renderSurfaceDefaultPalettes: [],
 			selectedRenderSurface: {
 				kind: "render-surface",
-				renderSurfaceId: 0x06000010,
+				renderSurfaceId: options.renderSurfaceId ?? 0x06000010,
 			},
 			texture: {
 				kind: "surface-texture",
-				surfaceTextureId: 0x05000010,
+				surfaceTextureId: options.surfaceTextureId ?? 0x05000010,
 			},
 		},
 	};
 }
 
-function createTextureRefs(): readonly StaticObjectTextureRefFacts[] {
-	return [
+function createTextureRefs(
+	renderSurfaceIds: readonly number[] = [0x06000010],
+): readonly StaticObjectTextureRefFacts[] {
+	return renderSurfaceIds.flatMap((renderSurfaceId, index) => [
 		{
 			palette: null,
 			renderSurface: {
 				kind: "render-surface",
-				renderSurfaceId: 0x06000010,
+				renderSurfaceId,
 			},
 			role: "surface-texture",
 			texture: {
 				kind: "surface-texture",
-				surfaceTextureId: 0x05000010,
+				surfaceTextureId: 0x05000010 + index,
 			},
 		},
 		{
@@ -333,12 +494,12 @@ function createTextureRefs(): readonly StaticObjectTextureRefFacts[] {
 			palette: null,
 			renderSurface: {
 				kind: "render-surface",
-				renderSurfaceId: 0x06000010,
+				renderSurfaceId,
 			},
 			role: "render-surface",
 			width: 64,
 		},
-	];
+	]);
 }
 
 function createMaterialPolicy(): DynamicVisualMaterialPolicy {

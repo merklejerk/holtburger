@@ -39,6 +39,7 @@ import {
 	describeStaticObjectSourceGeometryIdentity,
 	getStaticObjectCanonicalGeometryIdentity,
 } from "../static/objects/static-object-source-assets";
+import { MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW } from "../renderer/types";
 import {
 	classifyTexturePlacementPool,
 	classifyTextureUsagePurpose,
@@ -50,6 +51,10 @@ import {
 	type TextureResourceRoleDependency,
 	type TextureUsagePurpose,
 } from "../textures/placement";
+import {
+	createObjectMaterialDrawUnitPartitionKey,
+	splitObjectMaterialPartitionByMaterialTableBudget,
+} from "../visual/object-material-draw-unit-partition";
 
 export interface DynamicVisualBaker {
 	bake(input: DynamicVisualBakeInput): Promise<DynamicVisualBakeResult>;
@@ -66,6 +71,10 @@ interface DynamicMaterialRenderEntry {
 	readonly entry: StaticMaterialTableEntry;
 	readonly family: DynamicMaterialRenderFamily;
 	readonly pass: "opaque" | "alpha-test" | "transparent" | "additive";
+	readonly partitionMaterial: Parameters<
+		typeof createObjectMaterialDrawUnitPartitionKey
+	>[0]["material"];
+	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
 }
 
 type DynamicMaterialRenderFamily =
@@ -73,9 +82,14 @@ type DynamicMaterialRenderFamily =
 	| "indexed-paletted"
 	| "texture-rgba";
 
-interface DynamicTriangleRenderCandidate {
+interface DynamicTriangleRenderPrimitive {
 	readonly materialEntry: DynamicMaterialRenderEntry;
+	readonly materialEntryKey: string;
 	readonly triangle: StaticObjectSourceAssetFacts["parts"][number]["triangles"][number];
+	readonly textureRequirements: readonly {
+		readonly placementItemId: string;
+		readonly purpose: TextureUsagePurpose;
+	}[];
 }
 
 export class LocalDynamicVisualBaker implements DynamicVisualBaker {
@@ -190,6 +204,7 @@ function bakeDynamicVisualRecipe(options: {
 			materialPlans: materialPlans.materialPlans,
 			sourceAssets: recipe.visual.sourceAssets,
 			sourceGeometryByKey: options.sourceGeometryByKey,
+			texturePlacementSnapshot: options.texturePlacementSnapshot,
 			textureRequirements,
 		}),
 		resourceId,
@@ -578,6 +593,7 @@ function createDynamicRenderParts(options: {
 		string,
 		StaticObjectSourceGeometryAttachment
 	>;
+	readonly texturePlacementSnapshot: DynamicVisualBakeInput["texturePlacementSnapshot"];
 	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
 }): readonly DynamicEntityRenderPart[] {
 	const materialEntryByUseKey = createDynamicMaterialEntriesByUseKey(
@@ -601,10 +617,11 @@ function createDynamicRenderParts(options: {
 				);
 			}
 			parts.push(
-				...createDynamicRenderPartSlices({
+				...createDynamicRenderPartPartitions({
 					materialEntryByUseKey,
 					part,
 					sourceGeometry: attachment,
+					texturePlacementSnapshot: options.texturePlacementSnapshot,
 				}),
 			);
 		}
@@ -612,13 +629,14 @@ function createDynamicRenderParts(options: {
 	return parts;
 }
 
-function createDynamicRenderPartSlices(options: {
+function createDynamicRenderPartPartitions(options: {
 	readonly materialEntryByUseKey: ReadonlyMap<
 		string,
 		DynamicMaterialRenderEntry
 	>;
 	readonly part: StaticObjectSourceAssetFacts["parts"][number];
 	readonly sourceGeometry: StaticObjectSourceGeometryAttachment;
+	readonly texturePlacementSnapshot: DynamicVisualBakeInput["texturePlacementSnapshot"];
 }): readonly DynamicEntityRenderPart[] {
 	const triangles = options.part.triangles;
 	const sourcePositions = options.sourceGeometry.positions;
@@ -656,7 +674,10 @@ function createDynamicRenderPartSlices(options: {
 			]).map((surfaceId) => [surfaceId, renderEntry] as const);
 		}),
 	);
-	const candidateSlices = new Map<string, DynamicTriangleRenderCandidate[]>();
+	const primitivesByPartitionKey = new Map<
+		string,
+		DynamicTriangleRenderPrimitive[]
+	>();
 	for (
 		let triangleIndex = 0;
 		triangleIndex < triangles.length;
@@ -671,40 +692,79 @@ function createDynamicRenderPartSlices(options: {
 			partIndex: options.part.partIndex,
 			triangleGeometrySurfaceId: triangle.geometrySurfaceId,
 		});
-		const batchKey = createDynamicMaterialBatchKey(materialEntry);
-		const existing = candidateSlices.get(batchKey);
-		const candidate = { materialEntry, triangle };
+		const materialEntryKey = createDynamicMaterialRenderEntryKey(materialEntry);
+		const objectMaterialPartitionKey =
+			createObjectMaterialDrawUnitPartitionKey({
+				diagnosticSubject: `Dynamic render part ${options.part.partIndex}`,
+				includeConcreteEntryInKey: false,
+				material: materialEntry.partitionMaterial,
+				texturePlacementSnapshot: options.texturePlacementSnapshot,
+				textureRequirements: materialEntry.textureRequirements.map(
+					(requirement) => ({
+						placementItemId: requirement.textureUseId,
+						purpose: classifyDynamicRequirementPurpose(requirement),
+					}),
+				),
+			});
+		const existing = primitivesByPartitionKey.get(
+			objectMaterialPartitionKey.key,
+		);
+		const primitive = {
+			materialEntry,
+			materialEntryKey,
+			textureRequirements: materialEntry.textureRequirements.map(
+				(requirement) => ({
+					placementItemId: requirement.textureUseId,
+					purpose: classifyDynamicRequirementPurpose(requirement),
+				}),
+			),
+			triangle,
+		};
 		if (existing) {
-			existing.push(candidate);
+			existing.push(primitive);
 		} else {
-			candidateSlices.set(batchKey, [candidate]);
+			primitivesByPartitionKey.set(objectMaterialPartitionKey.key, [
+				primitive,
+			]);
 		}
 	}
-	return [...candidateSlices.values()].map((candidates) =>
-		createDynamicRenderPartSlice({
-			candidates,
-			part: options.part,
-			sourcePositions,
-			sourceTexCoords,
-		}),
-	);
+	return [...primitivesByPartitionKey.entries()]
+		.sort(([left], [right]) => left.localeCompare(right))
+		.flatMap(([, primitives], partitionIndex) =>
+			splitObjectMaterialPartitionByMaterialTableBudget({
+				maxMaterialEntriesPerPartition:
+					MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+				primitives,
+			}).map((splitPrimitives, splitIndex) =>
+				createDynamicRenderPartPartition({
+					part: options.part,
+					partitionIndex,
+					primitives: splitPrimitives,
+					sourcePositions,
+					sourceTexCoords,
+					splitIndex,
+				}),
+			),
+		);
 }
 
-function createDynamicRenderPartSlice(options: {
-	readonly candidates: readonly DynamicTriangleRenderCandidate[];
+function createDynamicRenderPartPartition(options: {
+	readonly partitionIndex: number;
 	readonly part: StaticObjectSourceAssetFacts["parts"][number];
+	readonly primitives: readonly DynamicTriangleRenderPrimitive[];
 	readonly sourcePositions: Float32Array;
 	readonly sourceTexCoords: Float32Array;
+	readonly splitIndex: number;
 }): DynamicEntityRenderPart {
-	const positions = new Float32Array(options.candidates.length * 9);
-	const texCoords = new Float32Array(options.candidates.length * 6);
-	const materialSlotIndices = new Float32Array(options.candidates.length * 3);
+	const positions = new Float32Array(options.primitives.length * 9);
+	const texCoords = new Float32Array(options.primitives.length * 6);
+	const materialSlotIndices = new Float32Array(options.primitives.length * 3);
 	const indices =
-		options.candidates.length * 3 > 65535
-			? new Uint32Array(options.candidates.length * 3)
-			: new Uint16Array(options.candidates.length * 3);
+		options.primitives.length * 3 > 65535
+			? new Uint32Array(options.primitives.length * 3)
+			: new Uint16Array(options.primitives.length * 3);
 	const renderEntries = uniqueMaterialRenderEntries(
-		options.candidates.map((candidate) => candidate.materialEntry),
+		options.primitives.map((primitive) => primitive.materialEntry),
 	);
 	const localSlotByEntryKey = new Map(
 		renderEntries.map((entry, localSlot) => [
@@ -718,14 +778,14 @@ function createDynamicRenderPartSlice(options: {
 	}));
 	for (
 		let triangleIndex = 0;
-		triangleIndex < options.candidates.length;
+		triangleIndex < options.primitives.length;
 		triangleIndex += 1
 	) {
-		const candidate = options.candidates[triangleIndex];
-		if (!candidate) {
+		const primitive = options.primitives[triangleIndex];
+		if (!primitive) {
 			continue;
 		}
-		const { materialEntry, triangle } = candidate;
+		const { materialEntry, triangle } = primitive;
 		for (let vertex = 0; vertex < 3; vertex += 1) {
 			const sourceVertexIndex = triangle.firstVertex + vertex;
 			const targetVertexIndex = triangleIndex * 3 + vertex;
@@ -774,6 +834,11 @@ function createDynamicRenderPartSlice(options: {
 		partIndex: options.part.partIndex,
 		positions,
 		renderState: firstMaterial.entry.renderState,
+		renderPartId: createDynamicRenderPartId({
+			partIndex: options.part.partIndex,
+			partitionIndex: options.partitionIndex,
+			splitIndex: options.splitIndex,
+		}),
 		sourceAssetId: `gfx-obj/${options.part.gfxObj.sourceDid.toString(16).padStart(8, "0")}`,
 		texCoords,
 		textureUseIds: uniqueSortedStrings(
@@ -788,8 +853,8 @@ function createDynamicRenderPartSlice(options: {
 				),
 			),
 		),
-		triangleCount: options.candidates.length,
-		vertexCount: options.candidates.length * 3,
+		triangleCount: options.primitives.length,
+		vertexCount: options.primitives.length * 3,
 	};
 }
 
@@ -820,18 +885,6 @@ function resolveDynamicTriangleMaterialEntry(options: {
 		);
 	}
 	return materialEntry;
-}
-
-function createDynamicMaterialBatchKey(
-	entry: DynamicMaterialRenderEntry,
-): string {
-	const { blend, depthTest, depthWrite } = entry.entry.renderState;
-	return [
-		`family:${entry.family}`,
-		`pass:${entry.pass}`,
-		`blend:${blend.enabled}:${blend.mode}:${blend.srcFactor ?? "none"}:${blend.dstFactor ?? "none"}`,
-		`depth:${depthTest}:${depthWrite}`,
-	].join("|");
 }
 
 function createDynamicSlotMaterialUseKey(
@@ -906,6 +959,11 @@ function createDynamicMaterialEntry(
 	const dataUses = plan.textureRoles.map((role) => role.dataUse);
 	const textureWrapMode =
 		resolveRepeatedStaticMaterialPrimaryWrapMode(dataUses);
+	const materialTextureRequirements = resolveDynamicMaterialTextureRequirements(
+		plan,
+		textureRequirements,
+	);
+	const family = resolveDynamicRenderableMaterialFamily(plan);
 	return {
 		entry: createStaticMaterialTableEntry({
 			createTextureUseId: (dataUse) =>
@@ -919,9 +977,85 @@ function createDynamicMaterialEntry(
 			slot,
 			textureWrapMode,
 		}),
-		family: resolveDynamicRenderableMaterialFamily(plan),
+		family,
 		pass: plan.pass,
+		partitionMaterial: {
+			alphaMode: plan.alphaPolicy.mode,
+			blendMode: plan.blend.mode,
+			family,
+			materialColorKey: createDynamicMaterialColorKey(plan),
+			materialEntryKey: createDynamicMaterialPlanEntryKey(plan),
+			pass: plan.pass,
+			renderCoverage: null,
+			textureRoleLayoutKey: createDynamicTextureRoleLayoutKey(plan),
+			textureRoleSchemaKey: createDynamicTextureRoleSchemaKey(plan),
+			textureWrapMode,
+		},
+		textureRequirements: materialTextureRequirements,
 	};
+}
+
+function resolveDynamicMaterialTextureRequirements(
+	plan: StaticMaterialPlan,
+	textureRequirements: readonly DynamicEntityTextureRequirement[],
+): readonly DynamicEntityTextureRequirement[] {
+	return plan.textureRoles.map((role) =>
+		resolveDynamicTextureRequirement({
+			dataUse: role.dataUse,
+			materialId: plan.material.materialId,
+			textureRequirements,
+		}),
+	);
+}
+
+function resolveDynamicTextureRequirement(options: {
+	readonly dataUse: MaterialTextureDataUseIdentity;
+	readonly materialId: number;
+	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
+}): DynamicEntityTextureRequirement {
+	const dataUseSignature = createMaterialTextureDataUseSignature(
+		options.dataUse,
+	);
+	const requirement = options.textureRequirements.find(
+		(candidate) =>
+			candidate.material.materialId === options.materialId &&
+			createMaterialTextureDataUseSignature(candidate.dataUse) ===
+				dataUseSignature,
+	);
+	if (!requirement) {
+		throw new Error(
+			`Dynamic material 0x${options.materialId.toString(16).padStart(8, "0")} has no texture requirement for ${dataUseSignature}.`,
+		);
+	}
+	return requirement;
+}
+
+function createDynamicMaterialColorKey(plan: StaticMaterialPlan): string {
+	return [
+		plan.color.join(","),
+		plan.emissiveColor.join(","),
+	].join("|");
+}
+
+function createDynamicMaterialPlanEntryKey(plan: StaticMaterialPlan): string {
+	return [
+		plan.material.materialId.toString(16).padStart(8, "0"),
+		plan.materialUseKey,
+	].join(":");
+}
+
+function createDynamicTextureRoleLayoutKey(plan: StaticMaterialPlan): string {
+	return plan.textureRoles
+		.map((role) => `${role.role}:${createMaterialTextureDataUseSignature(role.dataUse)}`)
+		.sort()
+		.join("|");
+}
+
+function createDynamicTextureRoleSchemaKey(plan: StaticMaterialPlan): string {
+	return plan.textureRoles
+		.map((role) => role.role)
+		.sort()
+		.join("|");
 }
 
 function resolveDynamicRenderableMaterialFamily(
@@ -966,6 +1100,18 @@ function createDynamicMaterialRenderEntryKey(
 		entry.family,
 		entry.pass,
 	].join("|");
+}
+
+function createDynamicRenderPartId(options: {
+	readonly partIndex: number;
+	readonly partitionIndex: number;
+	readonly splitIndex: number;
+}): string {
+	return [
+		`part:${options.partIndex}`,
+		`partition:${options.partitionIndex}`,
+		`split:${options.splitIndex}`,
+	].join("/");
 }
 
 function uniqueNumbers(values: readonly number[]): readonly number[] {

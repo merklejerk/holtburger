@@ -2,7 +2,6 @@ import type {
 	PortalFrameWorkPlan,
 	RenderPassPlan,
 	RendererSnapshot,
-	ObjectMaterialTextureRolePageKind,
 	TerrainTextureRolePageKind,
 } from "../renderer/types";
 import type { AssetServiceSnapshot } from "../assets/contracts";
@@ -314,9 +313,7 @@ interface TextureAtlasDiagnosticsSummary {
 	readonly approximateBytes: number;
 }
 
-type TextureAtlasWarningDiagnostics =
-	| TerrainRolePageOverflowSummaryDiagnostics
-	| ObjectMaterialRolePageOverflowSummaryDiagnostics;
+type TextureAtlasWarningDiagnostics = TerrainRolePageOverflowSummaryDiagnostics;
 
 export type TextureAtlasWarningReportDiagnostics =
 	TextureAtlasWarningDiagnostics;
@@ -326,13 +323,6 @@ interface TerrainRolePageOverflowSummaryDiagnostics {
 	readonly count: number;
 	readonly latestDrawUnitId: string | null;
 	readonly latestRole: TerrainTextureRolePageKind | null;
-}
-
-interface ObjectMaterialRolePageOverflowSummaryDiagnostics {
-	readonly kind: "object-material-role-page-overflow";
-	readonly count: number;
-	readonly latestOwnerKey: string | null;
-	readonly latestRole: ObjectMaterialTextureRolePageKind | null;
 }
 
 export interface TerrainTextureDiagnosticsReport {
@@ -356,13 +346,6 @@ export interface TerrainTextureFallbackDiagnostics {
 export interface TerrainRolePageOverflowDiagnostics {
 	readonly drawUnitId: string;
 	readonly kind: TerrainTextureRolePageKind;
-	readonly maxSlots: number;
-	readonly textureRefId: string;
-}
-
-export interface ObjectMaterialRolePageOverflowDiagnostics {
-	readonly ownerKey: string;
-	readonly kind: ObjectMaterialTextureRolePageKind;
 	readonly maxSlots: number;
 	readonly textureRefId: string;
 }
@@ -457,7 +440,7 @@ export function createDynamicDiagnosticsReport(
 					record.resources.status === "pending" ||
 					record.resources.status === "setup-animation-ready",
 			).length,
-				staticAuthoredSeeds: snapshot.staticAuthoredCount,
+			staticAuthoredSeeds: snapshot.staticAuthoredCount,
 		},
 	};
 }

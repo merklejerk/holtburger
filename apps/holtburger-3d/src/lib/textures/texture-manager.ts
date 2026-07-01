@@ -7,7 +7,6 @@ import {
 } from "../assets/preparation/prepared-texture-source";
 import type { DirectMaterialTextureSource } from "../assets/preparation/prepared-texture-source";
 import type {
-	ObjectMaterialRolePageOverflowDiagnostics,
 	TerrainRolePageOverflowDiagnostics,
 	TextureAtlasDiagnosticsReport,
 	TextureAtlasWarningReportDiagnostics,
@@ -23,10 +22,6 @@ import type {
 } from "../renderer/types";
 import {
 	createTextureBindingOwnerKey,
-	MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW,
-	MAX_OBJECT_MATERIAL_DETAIL_PAGES_PER_DRAW,
-	MAX_OBJECT_MATERIAL_INDEX_PAGES_PER_DRAW,
-	MAX_OBJECT_MATERIAL_PALETTE_PAGES_PER_DRAW,
 	MAX_TERRAIN_COLOR_PAGES_PER_DRAW,
 	MAX_TERRAIN_MASK_PAGES_PER_DRAW,
 } from "../renderer/types";
@@ -77,7 +72,6 @@ const TERRAIN_MASK_ATLAS_GUTTER_PIXELS = 16;
 const MAX_RUNTIME_ATLAS_PAGE_SIZE = 2048;
 const TERRAIN_COLOR_ATLAS_FILL_RGBA = [128, 128, 128, 255] as const;
 const RECENT_TERRAIN_ROLE_PAGE_OVERFLOW_LIMIT = 16;
-const RECENT_STATIC_OBJECT_ROLE_PAGE_OVERFLOW_LIMIT = 16;
 const DEFAULT_TEXTURE_PACK_GROUP_MAX_CONCURRENCY = 8;
 
 interface TextureManagerOptions {
@@ -133,8 +127,6 @@ export class TextureManager {
 	>();
 	readonly #dependencyItemIdsByResourceId = new Map<string, Set<string>>();
 	#recentTerrainRolePageOverflows: TerrainRolePageOverflowDiagnostics[] = [];
-	#recentObjectMaterialRolePageOverflows: ObjectMaterialRolePageOverflowDiagnostics[] =
-		[];
 	#filteringMode: TextureFilteringMode;
 	#revision = 0;
 
@@ -228,8 +220,6 @@ export class TextureManager {
 		).length;
 
 		const warnings = createTextureAtlasWarnings({
-			objectMaterialRolePageOverflows:
-				this.#recentObjectMaterialRolePageOverflows,
 			terrainRolePageOverflows: this.#recentTerrainRolePageOverflows,
 		});
 
@@ -427,15 +417,7 @@ export class TextureManager {
 				);
 			},
 		);
-		const objectMaterialRolePageSlots = new ObjectMaterialOwnerRolePageSlots(
-			(overflow) => {
-				this.#recentObjectMaterialRolePageOverflows = appendBounded(
-					this.#recentObjectMaterialRolePageOverflows,
-					overflow,
-					RECENT_STATIC_OBJECT_ROLE_PAGE_OVERFLOW_LIMIT,
-				);
-			},
-		);
+		const objectMaterialRolePageSlots = new ObjectMaterialOwnerRolePageSlots();
 		const pendingPlacements = new Map<string, PendingTexturePlacement>();
 		const uploadedTextureRefIds = new Set<string>();
 
@@ -1882,7 +1864,6 @@ function createTextureAtlasPageDiagnostics(
 }
 
 function createTextureAtlasWarnings(input: {
-	readonly objectMaterialRolePageOverflows: readonly ObjectMaterialRolePageOverflowDiagnostics[];
 	readonly terrainRolePageOverflows: readonly TerrainRolePageOverflowDiagnostics[];
 }): readonly TextureAtlasWarningReportDiagnostics[] {
 	const warnings: TextureAtlasWarningReportDiagnostics[] = [];
@@ -1893,16 +1874,6 @@ function createTextureAtlasWarnings(input: {
 			kind: "terrain-role-page-overflow",
 			latestDrawUnitId: latestTerrain?.drawUnitId ?? null,
 			latestRole: latestTerrain?.kind ?? null,
-		});
-	}
-
-	const latestObjectMaterial = input.objectMaterialRolePageOverflows.at(-1);
-	if (input.objectMaterialRolePageOverflows.length > 0) {
-		warnings.push({
-			count: input.objectMaterialRolePageOverflows.length,
-			kind: "object-material-role-page-overflow",
-			latestOwnerKey: latestObjectMaterial?.ownerKey ?? null,
-			latestRole: latestObjectMaterial?.kind ?? null,
 		});
 	}
 
@@ -2084,60 +2055,20 @@ function getMaxTerrainRolePageSlots(kind: TerrainTextureRolePageKind): number {
 }
 
 class ObjectMaterialOwnerRolePageSlots {
-	readonly #slotKeysByOwnerAndKind = new Map<string, string[]>();
-	readonly #overflowKeys = new Set<string>();
-	readonly #recordOverflow: (
-		overflow: ObjectMaterialRolePageOverflowDiagnostics,
-	) => void;
-
-	constructor(
-		recordOverflow: (
-			overflow: ObjectMaterialRolePageOverflowDiagnostics,
-		) => void,
-	) {
-		this.#recordOverflow = recordOverflow;
-	}
+	readonly #textureRefByOwnerAndKind = new Map<string, string>();
 
 	resolveSlot(
 		input: ObjectMaterialRolePageSlotInput,
 	): TextureBinding["rolePage"] | null {
 		const kind = createObjectMaterialTextureRolePageKind(input.source);
 		const ownerKindKey = `${input.ownerKey}:${kind}`;
-		if (this.#overflowKeys.has(ownerKindKey)) {
+		const textureRefId = this.#textureRefByOwnerAndKind.get(ownerKindKey);
+		if (textureRefId && textureRefId !== input.textureRefId) {
 			return null;
 		}
 
-		const slots = this.#slotKeysByOwnerAndKind.get(ownerKindKey) ?? [];
-		const existingSlot = slots.indexOf(input.textureRefId);
-		if (existingSlot >= 0) {
-			return { kind, slot: existingSlot };
-		}
-
-		const maxSlots = getMaxObjectMaterialRolePageSlots(kind);
-		if (slots.length >= maxSlots) {
-			this.#overflowKeys.add(ownerKindKey);
-			this.#recordOverflow({
-				kind,
-				maxSlots,
-				ownerKey: input.ownerKey,
-				textureRefId: input.textureRefId,
-			});
-			console.warn(
-				`object material owner ${input.ownerKey} exceeded ${kind} role-page capacity ${maxSlots}; bindings for that role are omitted for local fallback.`,
-				{
-					kind,
-					maxSlots,
-					ownerKey: input.ownerKey,
-					textureRefId: input.textureRefId,
-				},
-			);
-			return null;
-		}
-
-		slots.push(input.textureRefId);
-		this.#slotKeysByOwnerAndKind.set(ownerKindKey, slots);
-
-		return { kind, slot: slots.length - 1 };
+		this.#textureRefByOwnerAndKind.set(ownerKindKey, input.textureRefId);
+		return { kind, slot: 0 };
 	}
 }
 
@@ -2155,19 +2086,4 @@ function createObjectMaterialTextureRolePageKind(
 	}
 
 	return "object-base-color";
-}
-
-function getMaxObjectMaterialRolePageSlots(
-	kind: ObjectMaterialTextureRolePageKind,
-): number {
-	switch (kind) {
-		case "object-base-color":
-			return MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW;
-		case "object-detail":
-			return MAX_OBJECT_MATERIAL_DETAIL_PAGES_PER_DRAW;
-		case "object-index":
-			return MAX_OBJECT_MATERIAL_INDEX_PAGES_PER_DRAW;
-		case "object-palette":
-			return MAX_OBJECT_MATERIAL_PALETTE_PAGES_PER_DRAW;
-	}
 }

@@ -25,7 +25,7 @@ const opaqueRenderState: StaticObjectRenderState = {
 };
 
 describe("WebGL2 static object payload builder", () => {
-	it("fills material defaults and fallback modes without resident textures", () => {
+	it("fills flat-color material defaults without resident textures", () => {
 		const scratch = createObjectMaterialPreparedDrawPayload();
 		const resource = createStaticResource({
 			materialEntries: [
@@ -38,12 +38,11 @@ describe("WebGL2 static object payload builder", () => {
 					slot: 1,
 				}),
 			],
-			materialFamily: "texture-rgba",
+			materialFamily: "flat-color",
 		});
 
 		prepareObjectMaterialDrawPayload(scratch, resource, new Map(), new Map());
 
-		expect(scratch.materialUniforms.materialModes[1]).toBe(2);
 		expect(
 			Array.from(scratch.materialUniforms.baseColorRects.slice(4, 8)),
 		).toEqual([0, 0, 1, 1]);
@@ -55,15 +54,10 @@ describe("WebGL2 static object payload builder", () => {
 		expect(
 			Array.from(scratch.materialUniforms.emissiveColors.slice(3, 6)),
 		).toEqual([5, 6, 7]);
-		expect(scratch.rolePages.baseColor.textures).toEqual([
-			null,
-			null,
-			null,
-			null,
-		]);
-		expect(Array.from(scratch.rolePages.baseColor.sizes)).toEqual([
-			1, 1, 1, 1, 1, 1, 1, 1,
-		]);
+		expect(scratch.textures.baseColor).toBeNull();
+		expect(scratch.textures.detail).toBeNull();
+		expect(scratch.textures.index).toBeNull();
+		expect(scratch.textures.palette).toBeNull();
 	});
 
 	it("prepares resident role pages and indexed material uniforms", () => {
@@ -93,7 +87,7 @@ describe("WebGL2 static object payload builder", () => {
 					height: 64,
 					kind: "object-index",
 					rect: [10, 11, 12, 13],
-					slot: 1,
+					slot: 0,
 					textureRefId: "index-ref",
 					textureUseId: "index-use",
 					width: 32,
@@ -105,7 +99,7 @@ describe("WebGL2 static object payload builder", () => {
 					height: 16,
 					kind: "object-palette",
 					rect: [20, 21, 22, 23],
-					slot: 2,
+					slot: 0,
 					textureRefId: "palette-ref",
 					textureUseId: "palette-use",
 					width: 256,
@@ -117,7 +111,7 @@ describe("WebGL2 static object payload builder", () => {
 					height: 128,
 					kind: "object-detail",
 					rect: [30, 31, 32, 33],
-					slot: 3,
+					slot: 0,
 					textureRefId: "detail-ref",
 					textureUseId: "detail-use",
 					width: 128,
@@ -132,36 +126,35 @@ describe("WebGL2 static object payload builder", () => {
 
 		prepareObjectMaterialDrawPayload(scratch, resource, bindings, textures);
 
-		expect(scratch.materialUniforms.materialModes[2]).toBe(3);
 		expect(scratch.materialUniforms.indexedTextureFormats[2]).toBe(1);
-		expect(scratch.materialUniforms.indexPages[2]).toBe(1);
 		expect(
 			Array.from(scratch.materialUniforms.indexRects.slice(8, 12)),
 		).toEqual([10, 11, 12, 13]);
-		expect(scratch.materialUniforms.palettePages[2]).toBe(2);
 		expect(
 			Array.from(scratch.materialUniforms.paletteRects.slice(8, 12)),
 		).toEqual([20, 21, 22, 23]);
 		expect(scratch.materialUniforms.paletteFirstIndices[2]).toBe(24);
-		expect(scratch.materialUniforms.detailPages[2]).toBe(3);
 		expect(
 			Array.from(scratch.materialUniforms.detailRects.slice(8, 12)),
 		).toEqual([30, 31, 32, 33]);
 		expect(scratch.materialUniforms.detailEnabled[2]).toBe(1);
 		expect(scratch.materialUniforms.detailTilings[2]).toBe(3);
 		expect(scratch.materialUniforms.wrapModes[2]).toBe(1);
-		expect(scratch.rolePages.index.textures[1]).toBe(indexTexture);
-		expect(Array.from(scratch.rolePages.index.sizes.slice(2, 4))).toEqual([
-			32, 64,
-		]);
-		expect(scratch.rolePages.palette.textures[2]).toBe(paletteTexture);
-		expect(Array.from(scratch.rolePages.palette.sizes.slice(4, 6))).toEqual([
-			256, 16,
-		]);
-		expect(scratch.rolePages.detail.textures[3]).toBe(detailTexture);
-		expect(Array.from(scratch.rolePages.detail.sizes.slice(6, 8))).toEqual([
-			128, 128,
-		]);
+		expect(scratch.textures.index).toEqual({
+			height: 64,
+			texture: indexTexture,
+			width: 32,
+		});
+		expect(scratch.textures.palette).toEqual({
+			height: 16,
+			texture: paletteTexture,
+			width: 256,
+		});
+		expect(scratch.textures.detail).toEqual({
+			height: 128,
+			texture: detailTexture,
+			width: 128,
+		});
 	});
 
 	it("resets stale scratch values between preparations", () => {
@@ -178,7 +171,7 @@ describe("WebGL2 static object payload builder", () => {
 		});
 		const fallbackResource = createStaticResource({
 			materialEntries: [createMaterialEntry({ slot: 0 })],
-			materialFamily: "texture-rgba",
+			materialFamily: "flat-color",
 		});
 
 		prepareObjectMaterialDrawPayload(
@@ -207,14 +200,10 @@ describe("WebGL2 static object payload builder", () => {
 			new Map(),
 		);
 
-		expect(scratch.materialUniforms.materialModes[0]).toBe(2);
 		expect(
 			Array.from(scratch.materialUniforms.baseColorRects.slice(0, 4)),
 		).toEqual([0, 0, 1, 1]);
-		expect(scratch.rolePages.baseColor.textures[0]).toBeNull();
-		expect(Array.from(scratch.rolePages.baseColor.sizes.slice(0, 2))).toEqual([
-			1, 1,
-		]);
+		expect(scratch.textures.baseColor).toBeNull();
 		expect(scratch.materialUniforms.indexedClipThresholds[0]).toBe(-1);
 	});
 
@@ -267,7 +256,7 @@ describe("WebGL2 static object payload builder", () => {
 			textures,
 		);
 		expect(state.isDirty).toBe(false);
-		expect(firstPayload.materialUniforms.materialModes[0]).toBe(1);
+		expect(firstPayload.textures.baseColor?.texture).toBe(texture);
 
 		textures.delete("base-ref");
 		const unchangedPayload = prepareObjectMaterialDrawPayloadState(
@@ -277,19 +266,19 @@ describe("WebGL2 static object payload builder", () => {
 			textures,
 		);
 		expect(unchangedPayload).toBe(firstPayload);
-		expect(unchangedPayload.materialUniforms.materialModes[0]).toBe(1);
+		expect(unchangedPayload.textures.baseColor?.texture).toBe(texture);
 
 		markObjectMaterialPreparedDrawPayloadDirty(state);
-		const rebuiltPayload = prepareObjectMaterialDrawPayloadState(
-			state,
-			resource,
-			bindings,
-			textures,
+		expect(() =>
+			prepareObjectMaterialDrawPayloadState(
+				state,
+				resource,
+				bindings,
+				textures,
+			),
+		).toThrow(
+			"Object material resource test-draw-unit is missing resident base-color texture binding.",
 		);
-		expect(rebuiltPayload).toBe(firstPayload);
-		expect(state.isDirty).toBe(false);
-		expect(rebuiltPayload.materialUniforms.materialModes[0]).toBe(2);
-		expect(rebuiltPayload.rolePages.baseColor.textures[0]).toBeNull();
 	});
 });
 

@@ -8,7 +8,6 @@ import type {
 	TerrainGeometryStaticDrawUnit,
 } from "../../static/contracts";
 import {
-	MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW,
 	MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
 	MAX_TERRAIN_COLOR_PAGES_PER_DRAW,
 	MAX_TERRAIN_MASK_PAGES_PER_DRAW,
@@ -30,7 +29,7 @@ import {
 	resolveObjectMaterialBlendFactor,
 	createWebgl2Renderer,
 	SOURCE_SCENE_COPY_FRAGMENT_SHADER,
-	OBJECT_MATERIAL_FRAGMENT_SHADER,
+	OBJECT_MATERIAL_FRAGMENT_SHADERS,
 	TERRAIN_FRAGMENT_SHADER,
 } from "./webgl2-renderer";
 
@@ -72,76 +71,70 @@ describe("WebGL2 terrain renderer shader contract", () => {
 
 describe("WebGL2 static object indexed shader contract", () => {
 	it("keeps index textures exact and filters after palette lookup", () => {
-		expect(OBJECT_MATERIAL_FRAGMENT_SHADER).toContain(
-			"uniform sampler2D uObjectIndexTexture0;",
+		const shader = OBJECT_MATERIAL_FRAGMENT_SHADERS["indexed-paletted"];
+		expect(shader).toContain("uniform sampler2D uObjectIndexTexture;");
+		expect(shader).not.toContain("usampler2D");
+		expect(shader).toContain("vec4 sampleIndexedPaletteLinear(vec2 uv)");
+		expect(shader).toContain(
+			"texelFetch(uObjectIndexTexture, atlasCoord, 0) * 255.0",
 		);
-		expect(OBJECT_MATERIAL_FRAGMENT_SHADER).not.toContain("usampler2D");
-		expect(OBJECT_MATERIAL_FRAGMENT_SHADER).toContain(
-			"vec4 sampleIndexedPaletteLinear(vec2 uv)",
-		);
-		expect(OBJECT_MATERIAL_FRAGMENT_SHADER).toContain(
-			"fetchObjectIndexPage(uMaterialIndexTexturePages[slot], atlasCoord) * 255.0",
-		);
-		expect(OBJECT_MATERIAL_FRAGMENT_SHADER).toContain(
+		expect(shader).toContain(
 			"paletteColor(paletteIndexAt(resolveIndexSampleCoord(baseCoord, ivec2(1, 1))))",
 		);
-		expect(OBJECT_MATERIAL_FRAGMENT_SHADER).toContain(
-			"return mix(top, bottom, blend.y);",
-		);
+		expect(shader).toContain("return mix(top, bottom, blend.y);");
 	});
 
 	it("reconstructs index16 pages from normalized RG8 low and high bytes", () => {
-		expect(OBJECT_MATERIAL_FRAGMENT_SHADER).toContain(
+		const shader = OBJECT_MATERIAL_FRAGMENT_SHADERS["indexed-paletted"];
+		expect(shader).toContain(
 			`uniform int uMaterialIndexedTextureFormats[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];`,
 		);
-		expect(OBJECT_MATERIAL_FRAGMENT_SHADER).toContain(
-			"if (uMaterialIndexedTextureFormats[slot] == 1)",
-		);
-		expect(OBJECT_MATERIAL_FRAGMENT_SHADER).toContain(
+		expect(shader).toContain("if (uMaterialIndexedTextureFormats[slot] == 1)");
+		expect(shader).toContain(
 			"floor(packed.r + 0.5) + floor(packed.g + 0.5) * 256.0",
 		);
 	});
 });
 
-describe("WebGL2 static object role-page shader contract", () => {
-	it("uses bounded explicit static base-color page samplers and material page selectors", () => {
-		for (
-			let slot = 0;
-			slot < MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW;
-			slot += 1
-		) {
-			expect(OBJECT_MATERIAL_FRAGMENT_SHADER).toContain(
-				`uniform sampler2D uObjectBaseColorTexture${slot};`,
-			);
-		}
+describe("WebGL2 static object specialized shader contract", () => {
+	it("uses one base-color sampler in the RGBA material shader", () => {
+		const shader = OBJECT_MATERIAL_FRAGMENT_SHADERS["texture-rgba"];
+		expect(shader).toContain("uniform sampler2D uObjectBaseColorTexture;");
+		expect(shader).toContain("uniform vec2 uObjectBaseColorSize;");
 
-		expect(OBJECT_MATERIAL_FRAGMENT_SHADER).toContain(
+		expect(shader).toContain(
 			`uniform vec4 uMaterialBaseColorRects[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];`,
 		);
-		expect(OBJECT_MATERIAL_FRAGMENT_SHADER).toContain(
-			`uniform int uMaterialBaseColorPages[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];`,
+		expect(shader).not.toContain("uMaterialBaseColorPages");
+		expect(shader).not.toContain("uObjectBaseColorTexture0");
+		expect(shader).not.toContain("uMaterialModes");
+		expect(shader).toContain(
+			"baseColor = texture(uObjectBaseColorTexture, baseUv);",
 		);
-		expect(OBJECT_MATERIAL_FRAGMENT_SHADER).toContain(
-			"sampleObjectBaseColorPage(int page, vec4 rect, vec2 localUv)",
-		);
-		expect(OBJECT_MATERIAL_FRAGMENT_SHADER).not.toContain(
-			"uniform sampler2D uTexture;",
+	});
+
+	it("keeps flat-color shader free of object texture samplers", () => {
+		const shader = OBJECT_MATERIAL_FRAGMENT_SHADERS["flat-color"];
+		expect(shader).not.toContain("uObjectBaseColorTexture");
+		expect(shader).not.toContain("uObjectIndexTexture");
+		expect(shader).not.toContain("uObjectPaletteTexture");
+		expect(shader).not.toContain("uObjectDetailTexture");
+		expect(shader).not.toContain("uMaterialModes");
+		expect(shader).toContain(
+			"vec3 rgb = min(baseColor.rgb * uMaterialColors[slot].rgb + uMaterialEmissiveColors[slot], vec3(1.0));",
 		);
 	});
 });
 
 describe("WebGL2 static object detail shader contract", () => {
 	it("composes detail overlays as a second repeat-sampled material role", () => {
-		expect(OBJECT_MATERIAL_FRAGMENT_SHADER).toContain(
-			"uniform sampler2D uObjectDetailTexture0;",
-		);
-		expect(OBJECT_MATERIAL_FRAGMENT_SHADER).toContain(
-			"vec4 sampleDetailOverlay(vec2 uv)",
-		);
-		expect(OBJECT_MATERIAL_FRAGMENT_SHADER).toContain(
+		const shader = OBJECT_MATERIAL_FRAGMENT_SHADERS["texture-rgba"];
+		expect(shader).toContain("uniform sampler2D uObjectDetailTexture;");
+		expect(shader).toContain("vec4 sampleDetailOverlay(vec2 uv)");
+		expect(shader).toContain(
 			"vec2 localUv = fract(uv * uMaterialDetailTilings[slot]);",
 		);
-		expect(OBJECT_MATERIAL_FRAGMENT_SHADER).toContain(
+		expect(shader).toContain(
 			"rgb = clamp(rgb * (detailColor.rgb + (1.0 - detailAlpha)), vec3(0.0), vec3(1.0));",
 		);
 	});
@@ -173,7 +166,9 @@ describe("WebGL2 static object transparent pass helpers", () => {
 		} as WebGL2RenderingContext;
 
 		expect(resolveObjectMaterialBlendFactor(gl, "one")).toBe(gl.ONE);
-		expect(resolveObjectMaterialBlendFactor(gl, "src-alpha")).toBe(gl.SRC_ALPHA);
+		expect(resolveObjectMaterialBlendFactor(gl, "src-alpha")).toBe(
+			gl.SRC_ALPHA,
+		);
 		expect(resolveObjectMaterialBlendFactor(gl, "one-minus-src-alpha")).toBe(
 			gl.ONE_MINUS_SRC_ALPHA,
 		);
@@ -1705,9 +1700,10 @@ describe("WebGL2 structured interior rendering", () => {
 		vi.stubGlobal("cancelAnimationFrame", () => {});
 		vi.stubGlobal("window", { devicePixelRatio: 1 });
 		const renderer = createWebgl2Renderer(canvas);
-		const visualResource = createOutdoorGeneratedSceneryStaticObjectVisualResource(
-			"static-object-visual-resource:test",
-		);
+		const visualResource =
+			createOutdoorGeneratedSceneryStaticObjectVisualResource(
+				"static-object-visual-resource:test",
+			);
 
 		renderer.setOutdoorGeneratedSceneryLayer(0xda55ffff, {
 			...createOutdoorGeneratedSceneryLayerPayload(),
@@ -1753,10 +1749,11 @@ describe("WebGL2 structured interior rendering", () => {
 		vi.stubGlobal("cancelAnimationFrame", () => {});
 		vi.stubGlobal("window", { devicePixelRatio: 1 });
 		const renderer = createWebgl2Renderer(canvas);
-		const visualResource = createOutdoorGeneratedSceneryStaticObjectVisualResource(
-			"static-object-visual-resource:transparent-test",
-			{ materialPass: "transparent" },
-		);
+		const visualResource =
+			createOutdoorGeneratedSceneryStaticObjectVisualResource(
+				"static-object-visual-resource:transparent-test",
+				{ materialPass: "transparent" },
+			);
 
 		renderer.setOutdoorGeneratedSceneryLayer(0xda55ffff, {
 			...createOutdoorGeneratedSceneryLayerPayload(),
@@ -2217,7 +2214,11 @@ function createTerrainLayerPayload(
 
 function createOutdoorGeneratedSceneryLayerPayload(): OutdoorGeneratedSceneryLayerPayload {
 	return {
-		drawUnits: [createOutdoorGeneratedSceneryStaticObjectDrawUnit("outdoor-generated-scenery-a")],
+		drawUnits: [
+			createOutdoorGeneratedSceneryStaticObjectDrawUnit(
+				"outdoor-generated-scenery-a",
+			),
+		],
 		generationId: "outdoor-generated-scenery:a",
 		instancedObjectInstances: [],
 		instancedObjectResources: [],

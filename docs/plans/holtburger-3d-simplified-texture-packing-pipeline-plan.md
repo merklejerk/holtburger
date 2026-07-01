@@ -1,6 +1,6 @@
 # Holtburger 3D Simplified Texture Packing Pipeline Implementation Plan
 
-Status: implementation plan reopened for structured-interior follow-up.
+Status: implementation complete through final drawable isomorphism cleanup.
 
 ## Purpose
 
@@ -112,10 +112,16 @@ Current code paths that matter:
   - validates committed texture bindings and directly installs baker-authored draw units; the old
     static object fine-splitting path has been removed.
 - `apps/holtburger-3d/src/lib/static/env-cells/bake/env-cell-system-baker.ts`
-  - bakes `structured-interior-geometry` draw units for env-cell cell structures and delegates
-    env-cell static object placements through the static object baker.
+  - bakes placement-aware `structured-interior-geometry` draw units for env-cell cell structures,
+    emits their texture dependencies, and delegates env-cell static object placements through the
+    static object baker.
 - `apps/holtburger-3d/src/lib/static/env-cells/bake/structured-interior-material-planner.ts`
-  - plans structured-interior material texture ids from env-cell surface materials.
+  - plans structured-interior material binding requirements from env-cell surface materials.
+- `apps/holtburger-3d/src/lib/static/env-cells/bake/structured-interior-placement-planner.ts`
+  - discovers structured-interior placement intents before env-cell baking.
+- `apps/holtburger-3d/src/lib/static/bake/object-material-page-legality.ts`
+  - owns shared object-material one-page-per-role legality checks used by static objects and
+    structured interiors.
 - `apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-renderer.ts`
   - stores texture pages by `textureRefId` and texture bindings by owner key.
 - `apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-object-material-payloads.ts`
@@ -133,16 +139,17 @@ Renderer facts:
 - Binding updates are owner-granular where possible. Texture page creation/removal currently dirties
   all prepared object/terrain payloads because the renderer does not keep a reverse texture-ref owner
   index.
-- The current object renderer uses one monolithic object-material shader for `flat-color`,
-  `texture-rgba`, and `indexed-paletted` families. It selects behavior with `uMaterialModes`.
-- Current object draw limits are:
+- The current object renderer uses family-specific shader paths for `flat-color`, `texture-rgba`,
+  and `indexed-paletted` families.
+- Current object draw limits after the simplified cutover are:
   - 8 material entries per draw.
-  - 4 base-color pages per draw.
-  - 4 index pages per draw.
-  - 4 palette pages per draw.
-  - 4 detail pages per draw.
-- The current main-thread static materializer exists because baked draw units may exceed those
-  per-draw page limits after texture packing assigns pages.
+  - 1 base-color page per draw.
+  - 1 index page per draw.
+  - 1 palette page per draw.
+  - 1 detail page per draw.
+- Main-thread static commit installation validates committed bindings and installs baker-authored
+  draw units directly; it does not perform post-pack static object or structured-interior geometry
+  splitting.
 
 Terrain renderer facts:
 
@@ -153,10 +160,9 @@ Terrain renderer facts:
   - 4 color pages per draw.
   - 4 mask pages per draw.
   - 1 detail page per draw.
-- Current terrain baking already slices by layer count before renderer binding, but it does not slice
-  by final packed color/mask/detail page assignment.
-- Terrain role-page overflow is currently detected during texture binding preparation. If layered
-  terrain cannot be fully satisfied after packing, the renderer falls back to `terrain-debug-flat`.
+- Current terrain baking slices by layer count and final packed color/mask/detail page assignment.
+- Terrain role-page overflow after packing is treated as a baker invariant failure or an unsupported
+  terrain material shape, not as a normal renderer fallback path.
 
 Static draw-unit taxonomy:
 
@@ -166,10 +172,9 @@ Static draw-unit taxonomy:
 
 Follow-up finding:
 
-- `structured-interior-geometry` was not fully included in the texture-before-bake cutover. Env-cell
-  structured interiors produce `textureUseIds`, but their draw-unit slicing does not yet use final
-  placement pages as a legality input and their texture dependencies are not emitted alongside the
-  env-cell static object dependencies.
+- The structured-interior follow-up has been closed through Phases 12-14. Env-cell structured
+  interiors now discover placement intents before bake, slice draw units against final placement
+  pages, and emit texture dependencies alongside env-cell static object dependencies.
 
 ## Scoping Thesis
 
@@ -1652,7 +1657,7 @@ Acceptance criteria:
 - [x] Phase 12: split texture binding requirement identity.
 - [x] Phase 13: add structured-interior placement intents.
 - [x] Phase 14: make structured-interior baking placement-aware.
-- [ ] Phase 15: final drawable isomorphism cleanup.
+- [x] Phase 15: final drawable isomorphism cleanup.
 
 ## Decisions and Course Corrections
 
@@ -1899,10 +1904,9 @@ Acceptance criteria:
 - Dry run clarified that removing `static-materializer.ts` affects peer-record mapping in addition
   to geometry splitting. Functional selection/picking records must survive; diagnostic-only lineage is
   low priority and can be dropped.
-- Runtime validation after Phase 11 found that `structured-interior-geometry` was not fully included
-  in the texture-before-bake cutover. Env-cell structured interiors can still produce draw units that
-  reference texture ids without committed renderer bindings because their slicing does not yet use
-  final placement pages and their dependencies are not emitted in the env-cell bake result.
+- Runtime validation after Phase 11 exposed a `structured-interior-geometry` closure gap in the
+  texture-before-bake cutover. That gap is now resolved by Phases 12-14: structured interiors
+  discover placement intents, slice against placement snapshots, and emit texture dependencies.
 - The follow-up plan reopens the work around draw-unit taxonomy rather than patching the static
   commit installer or adding renderer fallback. `static-commit-installer.ts` is treated as a final
   invariant gate, not as the place to repair bad draw-unit/page combinations.
@@ -2020,14 +2024,12 @@ Acceptance criteria:
   assignment and overflow diagnostics, but the renderer update payload still uses the old field name.
   Phase 10 or Phase 11 should rename that bridge if it survives `textureUseId` cleanup.
 - Renderer resolved material-texture placement updates now use `ResolvedTexturePlacement`.
-- `structured-interior-geometry` still needs the same placement-before-bake closure as
-  `static-object-geometry`. Until Phases 13-14 land, structured interiors can still reach commit
-  installation with draw-unit texture ids that are not representable by committed object-material
-  bindings.
-- `EnvCellSystemBaker` currently merges structured-interior `textureUses` with env-cell static
-  object texture uses, but its texture dependency output is sourced from the embedded static object
-  bake result. Structured-interior dependencies must be emitted from final structured-interior draw
-  units during Phase 14.
+- `structured-interior-geometry` now uses the placement-before-bake closure. Keep future env-cell
+  texture work on the same planner -> placement snapshot -> baker dependency path; do not reintroduce
+  post-bake binding inference.
+- `EnvCellSystemBaker` now merges structured-interior and env-cell static object texture
+  dependencies. Future cleanup should preserve that isomorphic dependency merge rather than adding
+  domain-specific pinning.
 - `TextureManager` returning no object-material role-page binding for a second page on the same
   owner+role is an invariant detector after the object one-page-per-role cutover. Do not paper over
   that omission in `TextureManager`; split illegal draw units in the relevant baker.
@@ -2035,16 +2037,18 @@ Acceptance criteria:
   placement identity in one string. Phase 12 introduced a typed requirement boundary for static
   object and terrain placement/dependency edges; Phases 13-14 should use it for structured interiors
   instead of adding another parallel string generator.
-- Structured-interior dependency invariant coverage is intentionally deferred until Phases 13-14 add
-  real structured-interior placement intents and dependency emission. Do not add tests that merely
-  preserve today's missing dependency behavior.
+- Structured-interior dependency invariant coverage now lives in the env-cell baker tests added in
+  Phase 14. Keep future tests focused on placement/dependency closure rather than preserving older
+  missing-binding failure modes.
 - Dynamic visual texture requirements remain a dynamic-specific adapter over the same identity
   concepts. Revisit during Phase 15 only if keeping the adapter creates duplicated cleanup or
   diagnostics work; do not block structured interiors on this naming convergence.
-- Phase 13 still leaves structured-interior draw-unit slicing placement-unaware and dependency
 - Phase 14 resolved structured-interior placement-aware slicing and dependency emission. Remaining
   Phase 15 cleanup should focus on naming, diagnostics, and any now-obsolete structured-interior
   exception language rather than new closure behavior.
+- Phase 15 found no remaining structured-interior bypass or renderer fallback path. Remaining
+  `textureUseId` references in the touched static/env-cell code are material binding keys or legacy
+  renderer/TextureManager bridge vocabulary, not packer-facing placement concepts.
 
 ## Risks and Concessions
 

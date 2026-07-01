@@ -5,7 +5,10 @@ import type {
 	TerrainGeometryStaticDrawUnit,
 	TerrainStaticScopePayload,
 } from "../../contracts";
-import { bakeTerrainGeometry } from "./terrain-geometry-baker";
+import {
+	bakeTerrainGeometry,
+	createTerrainTexturePlacementIntents,
+} from "./terrain-geometry-baker";
 
 describe("terrain geometry baker", () => {
 	it("converts terrain mesh facts into a geometry-only draw unit", () => {
@@ -169,7 +172,72 @@ describe("terrain geometry baker", () => {
 					"terrain:0xda55ffff:prepared-texture:terrain-base:rgba-color:06000010",
 			},
 		]);
+		expect(result.textureDependencies).toEqual([
+			{
+				resourceId: drawUnit.drawUnitId,
+				roles: [
+					{
+						itemIds: [
+							"terrain:0xda55ffff:prepared-texture:terrain-base:rgba-color:06000010",
+						],
+						purpose: "terrain-color",
+					},
+				],
+			},
+		]);
 		expect(JSON.stringify(result)).not.toContain("texture-ref");
+	});
+
+	it("discovers terrain placement intents before bake", () => {
+		const input = createTerrainBakeInput({ includeTextureUse: true });
+
+		expect(
+			createTerrainTexturePlacementIntents({
+				items: input.items,
+				staticBatchId: input.staticBatchId,
+			}),
+		).toEqual([
+			expect.objectContaining({
+				affinityKey: "terrain:terrain:0xda55ffff",
+				itemId:
+					"terrain:0xda55ffff:prepared-texture:terrain-base:rgba-color:06000010",
+				pool: "terrain",
+				purpose: "terrain-color",
+			}),
+		]);
+	});
+
+	it("splits terrain draw units by final terrain color pages", () => {
+		const pcodes = Array.from({ length: 5 }, (_value, index) =>
+			encodeTerrainPcode(index + 1),
+		);
+		const input = createTerrainBakeInput({
+			pcodes,
+			terrainTypeCodes: pcodes.map((pcode) => decodeRepeatedTerrainCode(pcode)),
+			textureUseSurfaceTextureIds: pcodes.map(
+				(pcode) => 0x05000000 + decodeRepeatedTerrainCode(pcode),
+			),
+			uniqueColorPages: true,
+		});
+
+		const result = bakeTerrainGeometry(input);
+		const drawUnits = result.drawUnits.map(requireTerrainDrawUnit);
+
+		expect(drawUnits.map((drawUnit) => drawUnit.drawUnitId)).toEqual([
+			"terrain:0xda55ffff:terrain-geometry:slice-0-page-0",
+			"terrain:0xda55ffff:terrain-geometry:slice-0-page-1",
+		]);
+		expect(drawUnits.map((drawUnit) => drawUnit.triangleCount)).toEqual([8, 2]);
+		expect(drawUnits.map((drawUnit) => drawUnit.textureUseIds.length)).toEqual([
+			4, 1,
+		]);
+		expect(result.textureDependencies).toHaveLength(2);
+		expect(result.textureDependencies[0]?.roles).toEqual([
+			{
+				itemIds: drawUnits[0]?.textureUseIds,
+				purpose: "terrain-color",
+			},
+		]);
 	});
 
 	it("partitions terrain geometry by bounded material draw slices", () => {
@@ -186,8 +254,8 @@ describe("terrain geometry baker", () => {
 
 		expect(drawUnits).toHaveLength(2);
 		expect(drawUnits.map((drawUnit) => drawUnit.drawUnitId)).toEqual([
-			"terrain:0xda55ffff:terrain-geometry:slice-0",
-			"terrain:0xda55ffff:terrain-geometry:slice-1",
+			"terrain:0xda55ffff:terrain-geometry:slice-0-page-0",
+			"terrain:0xda55ffff:terrain-geometry:slice-1-page-0",
 		]);
 		expect(drawUnits.map((drawUnit) => drawUnit.triangleCount)).toEqual([
 			16, 2,
@@ -227,8 +295,8 @@ describe("terrain geometry baker", () => {
 		const result = bakeTerrainGeometry(input);
 
 		expect(result.drawUnits.map((drawUnit) => drawUnit.drawUnitId)).toEqual([
-			"terrain:0xda55ffff:terrain-geometry:slice-0",
-			"terrain:0xda55ffff:terrain-geometry:slice-1",
+			"terrain:0xda55ffff:terrain-geometry:slice-0-page-0",
+			"terrain:0xda55ffff:terrain-geometry:slice-1-page-0",
 		]);
 		expect(result.textureUses).toHaveLength(9);
 		expect(
@@ -236,8 +304,7 @@ describe("terrain geometry baker", () => {
 		).toEqual(
 			Array.from({ length: 8 }, () => [
 				{
-					drawUnitId:
-						"terrain:0xda55ffff:terrain-geometry:slice-0",
+					drawUnitId: "terrain:0xda55ffff:terrain-geometry:slice-0-page-0",
 					kind: "draw-unit",
 				},
 			]),
@@ -245,8 +312,7 @@ describe("terrain geometry baker", () => {
 		expect(result.textureUses[8]).toMatchObject({
 			owners: [
 				{
-					drawUnitId:
-						"terrain:0xda55ffff:terrain-geometry:slice-1",
+					drawUnitId: "terrain:0xda55ffff:terrain-geometry:slice-1-page-0",
 					kind: "draw-unit",
 				},
 			],
@@ -300,6 +366,7 @@ function createTerrainBakeInput(
 		readonly terrainTypeCodes?: readonly number[];
 		readonly triangleCount?: number;
 		readonly textureUseSurfaceTextureIds?: readonly number[];
+		readonly uniqueColorPages?: boolean;
 	} = {},
 	batchOptions: {
 		readonly includeSecondLandblock?: boolean;
@@ -335,7 +402,7 @@ function createTerrainBakeInput(
 		});
 	}
 
-	return {
+	const input: StaticBakeBatchInput = {
 		atlasSnapshot: {
 			domain: "outdoor-terrain",
 			placements: [],
@@ -346,6 +413,38 @@ function createTerrainBakeInput(
 		items,
 		revision: 7,
 		staticBatchId: "batch-a",
+	};
+	return {
+		...input,
+		texturePlacementSnapshot: createTexturePlacementSnapshot(input, options),
+	};
+}
+
+function createTexturePlacementSnapshot(
+	input: StaticBakeBatchInput,
+	options: { readonly uniqueColorPages?: boolean },
+): NonNullable<StaticBakeBatchInput["texturePlacementSnapshot"]> {
+	const intents = createTerrainTexturePlacementIntents({
+		items: input.items,
+		staticBatchId: input.staticBatchId,
+	});
+	return {
+		placementsByItemId: new Map(
+			intents.map((intent, index) => [
+				intent.itemId,
+				{
+					height: 16,
+					itemId: intent.itemId,
+					pageId: options.uniqueColorPages
+						? `${intent.purpose}:page:${index}`
+						: `${intent.purpose}:page:0`,
+					pool: intent.pool,
+					purpose: intent.purpose,
+					rect: [0, 0, 16, 16] as const,
+					width: 16,
+				},
+			]),
+		),
 	};
 }
 
@@ -376,6 +475,7 @@ function createTerrainPayload(
 		readonly terrainTypeCodes?: readonly number[];
 		readonly triangleCount?: number;
 		readonly textureUseSurfaceTextureIds?: readonly number[];
+		readonly uniqueColorPages?: boolean;
 	},
 	landblockId: number,
 ): TerrainStaticScopePayload {

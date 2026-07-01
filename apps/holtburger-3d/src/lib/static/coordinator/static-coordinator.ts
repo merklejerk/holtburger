@@ -53,6 +53,7 @@ import {
 	createLayerOwnerKeyId,
 } from "../layer-owners";
 import { createStaticObjectTexturePlacementIntents } from "../objects/bake/static-object-placement-planner";
+import { createTerrainTexturePlacementIntents } from "../terrain/bake/terrain-geometry-baker";
 import { isStaticObjectDomain } from "../objects/bake/static-object-batch-payload";
 import type {
 	TexturePlacementIntent,
@@ -546,6 +547,12 @@ export class StaticCoordinator {
 		const placementIntents = [
 			...(isStaticObjectDomain(options.pendingBatch.domain)
 				? createStaticObjectTexturePlacementIntents({
+						items: options.items,
+						staticBatchId: options.staticBatchId,
+					})
+				: []),
+			...(options.pendingBatch.domain === "outdoor-terrain"
+				? createTerrainTexturePlacementIntents({
 						items: options.items,
 						staticBatchId: options.staticBatchId,
 					})

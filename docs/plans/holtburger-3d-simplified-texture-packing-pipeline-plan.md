@@ -1211,7 +1211,7 @@ Acceptance criteria:
 - [x] Phase 5: remove main-thread static object fine splitting.
 - [x] Phase 6: bring dynamic visual baking onto the same placement contract.
 - [x] Resteering 2: review cutover health.
-- [ ] Phase 7: bring terrain onto the same placement-before-bake contract.
+- [x] Phase 7: bring terrain onto the same placement-before-bake contract.
 - [ ] Phase 8: add on-demand zombie reclaim.
 - [ ] Resteering 3: review reclaim and renderer cleanup readiness.
 - [ ] Phase 9: simplify renderer payload prep and specialize shader families.
@@ -1369,6 +1369,22 @@ Acceptance criteria:
   or missing terrain material source facts. After Phase 7, page overflow caused by final atlas
   assignments should be baked into additional terrain draw units, not diagnosed as an expected
   renderer binding fallback.
+- Phase 7 added terrain pre-bake placement intent discovery. `StaticCoordinator` now includes
+  terrain intents in the same source-ready continuation work used by static objects and
+  static-authored dynamics, so terrain placement runs through `TextureManager.placeTextureIntents(...)`
+  before terrain baking.
+- Phase 7 taught `TerrainGeometryStaticBaker` to consume `TexturePlacementSnapshot` and split terrain
+  material slices by final terrain color/mask/detail page assignments. Normal multi-entry terrain
+  page overflow now produces additional terrain draw units instead of relying on renderer fallback.
+- Phase 7 emits `TextureResourceDependencies` for terrain draw units from the final baked
+  `textureUseIds`, so active terrain placements are pinned through the same texture-resource
+  dependency path as static object draw units and dynamic visual resources.
+- Phase 7 kept terrain page legality inside the terrain baker. The packer still sees only pool,
+  purpose, source, item id, and opaque affinity key; it does not learn pcodes, terrain layers, roads,
+  overlays, draw units, or shader page limits.
+- Phase 7 keeps debug-flat terrain fallback for genuinely unsupported single-entry material shapes,
+  missing prepared texture uses, invalid detail roles, or unsplittable per-entry page overflow. This
+  is the remaining terrain shader limitation, not normal post-pack page overflow.
 - Dry run split `TextureManager` responsibilities into placement and pinning. Current owner leases
   require post-bake draw-unit/resource owners, but pre-bake placement intents intentionally do not
   have owners yet.
@@ -1400,8 +1416,9 @@ Acceptance criteria:
 - Phase 2 active references are tracked by placement `itemId`, matching the migration-era
   `textureUseId` assumption. If Phase 10 splits `textureUseId`, the placement reference index must
   move to the final placement item identity at the same time.
-- Source-ready work still carries empty placement intents for terrain and dynamic paths until their
-  planned cutovers. Do not let those empty arrays survive as hidden fallbacks after Phases 6 and 7.
+- Source-ready work no longer carries empty placement intents for migrated object, terrain, or
+  dynamic paths. Future domains should either emit real placement intents or document why they are
+  intentionally texture-free; do not reintroduce empty arrays as hidden fallbacks.
 - Phase 4 now runs static object material/partition planning once to discover placement intents and
   again in the baker to construct draw units. This is acceptable for the cutover because the logic is
   shared and deterministic, but future cleanup should avoid meaningful duplicated CPU work if it
@@ -1418,6 +1435,13 @@ Acceptance criteria:
   own page partitioning.
 - Runtime diagnostics and tests still use `materialized` naming for direct-installed static
   resources. Treat these as cleanup debt, not architectural terms to preserve.
+- Terrain page splitting now always adds a page-slice suffix to multi-slice terrain draw-unit ids,
+  even when the original split was caused by layer count rather than page count. This is explicit and
+  deterministic, but diagnostics that compare historical draw-unit ids should treat it as Phase 7
+  churn rather than stable lineage.
+- Unsplittable terrain entries that exceed shader page budgets still fall back to debug-flat because
+  splitting inside one terrain layer would require deeper shader/material semantics. This is
+  contained in the terrain baker and should be revisited only if real scenes hit it often.
 
 ## Risks and Concessions
 

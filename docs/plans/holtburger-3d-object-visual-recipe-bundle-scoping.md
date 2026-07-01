@@ -1,6 +1,6 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation in progress. Phases 0-9A are complete. This document defines the target
+Status: implementation in progress. Phases 0-9B are complete. This document defines the target
 model, north stars, risk surface, and phased cutover plan for replacing static-vs-dynamic object
 visual worker bifurcation with a shared object-like visual recipe graph.
 
@@ -1511,6 +1511,8 @@ Implementation notes after Phase 9A:
 
 ### Phase 9B: Unified Static Publication Baker Output
 
+Status: complete.
+
 Goal: teach the unified object visual baker to emit static-shaped install publications directly from
 recipe bundles plus static publication metadata.
 
@@ -1541,6 +1543,33 @@ Deletion criteria:
 - Mark legacy helper functions that exist only to build static visual payloads from
   `StaticObjectBatchPayload` or `EnvCellSystemStaticScopePayload` for hard-cutover deletion once
   producers are fully migrated.
+
+Implementation notes after Phase 9B:
+
+- Added `apps/holtburger-3d/src/lib/visual/object-visual-static-publication-baker.ts` as the bridge
+  from shared `ObjectVisualBakeResult` plus static publication metadata to `ObjectVisualInstallSet`.
+- `ObjectVisualBakedRenderPart` now carries dense `partInstanceIndices`, and `bakeObjectVisuals`
+  accepts `partitionKeyByPartInstanceIndex` so static publication metadata can force partition
+  separation without string-key joins.
+- The bridge emits:
+  - `StaticObjectGeometryStaticDrawUnit` records for direct static object publications;
+  - `StructuredInteriorGeometryStaticDrawUnit` records for structured interiors;
+  - `StaticObjectVisualResource` and `StaticObjectRenderInstance` records for reusable static object
+    resource groups;
+  - texture dependencies and dynamic animation bindings through the shared install-set shape.
+- The bridge fails loudly if a baked render part mixes part-instance indices from multiple static
+  publication metadata groups. This prevents accidental cross-publication batching.
+- Phase 9B also extended structured-interior metadata with material plan, source triangle ids, and
+  surface ids, and static resource-group metadata with source geometry identity. These facts cannot
+  be derived honestly from generic render parts.
+- Spicy debt: current generic baked render parts contain transformed geometry. That is correct for
+  direct draw units, but reusable static visual resources ultimately need source-local geometry plus
+  render-instance transforms. Resolver cutover must ensure instanced resource groups are baked in
+  source-local space before Phase 9C treats generated-scenery/resource publication as production
+  parity. Do not paper over this with runtime reconstruction from legacy payloads.
+- Verification:
+  `npm --prefix apps/holtburger-3d run test:ts -- object-visual-baker object-visual-static-publication object-visual-static-publication-baker`
+  and `npm --prefix apps/holtburger-3d run check`.
 
 ### Phase 9C: Static Object-Like Resolver Cutover
 

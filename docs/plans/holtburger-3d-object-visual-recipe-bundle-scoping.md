@@ -2204,10 +2204,11 @@ Course correction during Phase 9M:
   scopes that resolve zero visual part instances, such as unclassified env-cell static placements.
   Generic object-visual baking/publication failures are allowed to fail loudly instead of producing
   an empty install set that would hide hard-cutover bugs.
-- Spicy debt: structured-interior recipe publication also logs and skips when the recipe bundle
-  produces no render parts for publication metadata, such as all-materials-missing cases. That keeps
-  current bake behavior stable, but the hard cutover should make unsupported/missing materials skip
-  before publication metadata references part instances.
+- Resolved debt: structured-interior recipe expansion now omits static publication metadata when no
+  material bindings point at renderable material recipes, such as all-materials-missing cases. The
+  bundle can still carry unsupported material recipes for inspection, but install publication skips
+  before asking for direct draw units with no render parts, and generic publication failures now fail
+  loudly instead of flowing through a broad catch.
 - Coverage gap: the new coordinator regression covers install-set-owned object texture uses when
   legacy producer arrays are empty. It does not yet exercise a mixed stale/current object-visual
   bake result because current generated-scenery demand does not naturally batch multiple landblocks

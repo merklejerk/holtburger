@@ -346,6 +346,7 @@ describe("browser landblock env-cell baker", () => {
 		});
 
 		expect(result.drawUnits).toEqual([]);
+		expect(result.objectVisualInstallSet.directDrawUnits).toEqual([]);
 		expect(result.textureUses).toEqual([]);
 		expect(result.materialCoverage).toEqual([
 			expect.objectContaining({

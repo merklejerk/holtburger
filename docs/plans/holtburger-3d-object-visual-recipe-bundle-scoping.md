@@ -1,6 +1,6 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation in progress. Phases 0-8A are complete. This document defines the target
+Status: implementation in progress. Phases 0-8B are complete. This document defines the target
 model, north stars, risk surface, and phased cutover plan for replacing static-vs-dynamic object
 visual worker bifurcation with a shared object-like visual recipe graph.
 
@@ -1343,6 +1343,8 @@ Implementation notes after Phase 8A:
 
 ### Phase 8B: Object Visual Install Publication Foundation
 
+Status: complete.
+
 Goal: publish unified baker output through shared install data before resolver cutover.
 
 Deliverables:
@@ -1379,6 +1381,31 @@ Deletion criteria:
 
 - Remove install-shell wrapper logic that exists only to reconstruct visual payloads from
   `installedDrawUnits`, `staticObjectRenderInstances`, or `staticObjectVisualResources`.
+
+Implementation notes after Phase 8B:
+
+- Added `apps/holtburger-3d/src/lib/visual/object-visual-install-set.ts` with
+  `ObjectVisualInstallSet` for object-like direct draw units, visual resources, render instances,
+  dynamic animation part bindings, and texture dependencies.
+- Static commit installation now produces `objectVisualInstallSet`. Terrain remains outside the set;
+  object-like direct draw units include static object geometry and structured interior geometry.
+- Runtime outdoor and env-cell publication now read object-like draw units, visual resources, and
+  render instances from `objectVisualInstallSet` instead of re-querying the old installed draw-unit
+  and static object visual sibling arrays. Portal, visibility, spatial, and source-mapping sidecars
+  remain outside the set.
+- Static object visual resource texture bindings are now validated during commit installation, fixing
+  a pre-existing gap where textured visual resources could publish without committed texture
+  bindings even though direct draw units were checked.
+- Dynamic animation bindings are first-class install-set data, but static commit publication still
+  emits an empty binding list until dynamic/object-visual producers cut over to shared install set
+  production.
+- Debt retained intentionally: `StaticCommitInstallResult` still exposes `installedDrawUnits`,
+  `staticObjectVisualResources`, and `staticObjectRenderInstances` for callers and tests that have
+  not yet moved. The runtime object-like publication path no longer depends on those buckets, so the
+  later hard cutover can delete them after producers emit object visual install sets directly.
+- Verification:
+  `npm --prefix apps/holtburger-3d run test:ts -- static-commit-installer object-visual-install-set env-cell-system-layer-publication client-runtime`
+  and `npm --prefix apps/holtburger-3d run check`.
 
 ### Phase 9: Static Object-Like Resolver Cutover
 

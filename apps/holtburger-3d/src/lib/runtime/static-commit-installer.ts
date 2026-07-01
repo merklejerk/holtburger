@@ -15,6 +15,11 @@ import type {
 	StaticSpatialRecord,
 	StaticVisibilityRecord,
 } from "../static/contracts";
+import {
+	createObjectVisualInstallSet,
+	type ObjectVisualInstallSet,
+	type ObjectVisualDirectDrawUnit,
+} from "../visual/object-visual-install-set";
 
 export interface StaticCommitInstallInput {
 	readonly commit: StaticCoordinatorCommitDelta;
@@ -23,6 +28,7 @@ export interface StaticCommitInstallInput {
 
 export interface StaticCommitInstallResult {
 	readonly installedDrawUnits: readonly StaticDrawUnit[];
+	readonly objectVisualInstallSet: ObjectVisualInstallSet;
 	readonly portalApertureResources: readonly StaticPortalApertureResource[];
 	readonly removedResources: readonly StaticResourceKey[];
 	readonly staticObjectRenderInstances: readonly StaticObjectRenderInstance[];
@@ -38,13 +44,21 @@ export interface StaticCommitInstallResult {
 export function installStaticCommit(
 	input: StaticCommitInstallInput,
 ): StaticCommitInstallResult {
+	const objectVisualInstallSet = createStaticCommitObjectVisualInstallSet(
+		input.commit,
+	);
 	assertTexturedDrawUnitsHaveCommittedBindings(
 		input.commit.addedDrawUnits,
+		input.textureUpdate?.textureBindings ?? [],
+	);
+	assertTexturedStaticObjectVisualResourcesHaveCommittedBindings(
+		objectVisualInstallSet.visualResources,
 		input.textureUpdate?.textureBindings ?? [],
 	);
 
 	return {
 		installedDrawUnits: input.commit.addedDrawUnits,
+		objectVisualInstallSet,
 		portalApertureResources: input.commit.addedPortalApertureResources ?? [],
 		removedResources: input.commit.removedResources,
 		staticObjectRenderInstances: input.commit.staticObjectRenderInstances,
@@ -56,6 +70,27 @@ export function installStaticCommit(
 		staticVisibilityRecords: input.commit.staticVisibilityRecords,
 		textureUpdate: input.textureUpdate,
 	};
+}
+
+function createStaticCommitObjectVisualInstallSet(
+	commit: StaticCoordinatorCommitDelta,
+): ObjectVisualInstallSet {
+	return createObjectVisualInstallSet({
+		directDrawUnits: commit.addedDrawUnits.filter(isObjectVisualDirectDrawUnit),
+		dynamicAnimationPartBindings: [],
+		renderInstances: commit.staticObjectRenderInstances,
+		textureDependencies: commit.textureDependencies,
+		visualResources: commit.staticObjectVisualResources,
+	});
+}
+
+function isObjectVisualDirectDrawUnit(
+	drawUnit: StaticDrawUnit,
+): drawUnit is ObjectVisualDirectDrawUnit {
+	return (
+		drawUnit.kind === "static-object-geometry" ||
+		drawUnit.kind === "structured-interior-geometry"
+	);
 }
 
 function assertTexturedDrawUnitsHaveCommittedBindings(
@@ -88,6 +123,39 @@ function assertTexturedDrawUnitsHaveCommittedBindings(
 		if (missingTextureUseIds.length > 0) {
 			throw new Error(
 				`Static draw unit ${drawUnit.drawUnitId} is missing committed texture bindings for ${missingTextureUseIds.join(", ")}.`,
+			);
+		}
+	}
+}
+
+function assertTexturedStaticObjectVisualResourcesHaveCommittedBindings(
+	resources: readonly StaticObjectVisualResource[],
+	bindings: readonly StaticTextureBinding[],
+): void {
+	const textureUseIdsByResourceId = new Map<string, Set<string>>();
+	for (const binding of bindings) {
+		if (binding.owner.kind !== "static-object-visual-resource") {
+			continue;
+		}
+		const textureUseIds =
+			textureUseIdsByResourceId.get(binding.owner.resourceId) ??
+			new Set<string>();
+		textureUseIds.add(binding.bindingKey);
+		textureUseIdsByResourceId.set(binding.owner.resourceId, textureUseIds);
+	}
+
+	for (const resource of resources) {
+		if (resource.textureUseIds.length === 0) {
+			continue;
+		}
+		const committedTextureUseIds =
+			textureUseIdsByResourceId.get(resource.resourceId) ?? new Set<string>();
+		const missingTextureUseIds = resource.textureUseIds.filter(
+			(textureUseId) => !committedTextureUseIds.has(textureUseId),
+		);
+		if (missingTextureUseIds.length > 0) {
+			throw new Error(
+				`Static object visual resource ${resource.resourceId} is missing committed texture bindings for ${missingTextureUseIds.join(", ")}.`,
 			);
 		}
 	}

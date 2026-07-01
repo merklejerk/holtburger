@@ -1,34 +1,34 @@
 /** Axis-aligned bounds in the payload owner's source coordinate space. */
-interface VisualGeometryBounds {
+export interface VisualGeometryBounds {
 	readonly min: VisualGeometryVec3;
 	readonly max: VisualGeometryVec3;
 }
 
 /** Minimal vector shape shared by static and dynamic visual geometry bounds. */
-interface VisualGeometryVec3 {
+export interface VisualGeometryVec3 {
 	readonly x: number;
 	readonly y: number;
 	readonly z: number;
 }
 
 /** GPU index element width for a visual geometry payload. */
-type VisualGeometryIndexType = "uint16" | "uint32";
+export type VisualGeometryIndexType = "uint16" | "uint32";
 
 /** Renderer shader family selected by material batching planning. */
-type VisualGeometryMaterialFamily =
+export type VisualGeometryMaterialFamily =
 	| "flat-color"
 	| "indexed-paletted"
 	| "texture-rgba";
 
 /** Renderer pass selected by material batching planning. */
-type VisualGeometryMaterialPass =
+export type VisualGeometryMaterialPass =
 	| "opaque"
 	| "alpha-test"
 	| "transparent"
 	| "additive";
 
 /** Renderer-visible draw state shared by object-style static and dynamic visual geometry. */
-interface VisualGeometryRenderState {
+export interface VisualGeometryRenderState {
 	readonly blend: {
 		readonly enabled: boolean;
 		readonly mode:
@@ -48,7 +48,7 @@ interface VisualGeometryRenderState {
 }
 
 /** Renderer-visible material table entry for one material slot. */
-interface VisualGeometryMaterialTableEntry {
+export interface VisualGeometryMaterialTableEntry {
 	readonly slot: number;
 	readonly materialIds: readonly number[];
 	readonly alphaTest: number;

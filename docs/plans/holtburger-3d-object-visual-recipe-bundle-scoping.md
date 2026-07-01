@@ -1,8 +1,8 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation in progress. Phases 0-7 are complete. This document defines the target model,
-north stars, risk surface, and phased cutover plan for replacing static-vs-dynamic object visual
-worker bifurcation with a shared object-like visual recipe graph.
+Status: implementation in progress. Phases 0-8A are complete. This document defines the target
+model, north stars, risk surface, and phased cutover plan for replacing static-vs-dynamic object
+visual worker bifurcation with a shared object-like visual recipe graph.
 
 ## Purpose
 
@@ -1279,13 +1279,15 @@ Phase 7 completion notes:
 
 ### Phase 8A: Unified Object Visual Baker Core Foundation
 
+Status: complete.
+
 Goal: build the shared recipe-first baker core before domain resolvers cut over to the new final
 output shape.
 
 Deliverables:
 
-- Add a unified object visual baker that consumes ready bundle, geometry sidecars, and object visual
-  placement snapshot.
+- Add a unified object visual baker that consumes ready bundle, geometry sidecars, and texture
+  binding data derived from object visual placement/packing.
 - Preserve renderer material legality, material-table splitting, transparent/additive sorting
   anchors, and texture dependency output.
 - Add dynamic animation output bindings from source `sourcePartIndex` to one or more baked
@@ -1313,6 +1315,31 @@ Deletion criteria:
 
 - None yet. Legacy paths may remain only as side-by-side parity references until resolver cutover and
   hard cutover remove their producers and callers.
+
+Implementation notes after Phase 8A:
+
+- Added `apps/holtburger-3d/src/lib/visual/object-visual-baker.ts` as the first recipe-first baker
+  core. It expands bundle part instances into renderable primitives, groups compatible primitives
+  into renderer payloads, splits by material-table budget, skips `unsupported` materials with a
+  console complaint, emits texture dependencies from explicit texture bindings, and emits
+  `DynamicAnimationPartBinding` records from `sourcePartIndex` to every split `renderPartId`.
+- `sourcePartIndex` is part of the partition key. Dynamic source parts must not share a render part,
+  because a single render part cannot follow two animation transforms. Static-like instances use
+  `null` and can still batch normally.
+- `gfx-obj` geometry recipes now carry a `bufferId`, matching the decision that resolvers flatten
+  gfx-obj geometry into sidecar vertex/triangle buffers instead of making runtime re-inspect source
+  assets.
+- `VisualGeometryPayload` support types are exported so the shared baker can produce the same
+  renderer-facing payload shape currently produced by static and dynamic bakers.
+- Fixture coverage currently proves direct-color static-like batching, gfx-obj sidecar resolution,
+  unsupported material skipping, and dynamic animation binding across material-table splits. This is
+  not yet a production resolver cutover.
+- Texture material families are wired through explicit `textureBindings`; final resolver emission of
+  complete `TextureRecipe`/`MaterialRecipe` records and placement-derived binding publication remains
+  scheduled for the resolver/install cutover phases.
+- Verification:
+  `npm --prefix apps/holtburger-3d run test:ts -- object-visual-baker object-visual-recipe-bundle visual-geometry`
+  and `npm --prefix apps/holtburger-3d run check`.
 
 ### Phase 8B: Object Visual Install Publication Foundation
 

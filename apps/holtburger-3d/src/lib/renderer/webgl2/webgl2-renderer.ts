@@ -35,11 +35,7 @@ import type {
 import {
 	createTextureBindingOwnerKey,
 	DEFAULT_RENDERER_STATIC_LAYER_VISIBILITY,
-	MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW,
-	MAX_OBJECT_MATERIAL_DETAIL_PAGES_PER_DRAW,
-	MAX_OBJECT_MATERIAL_INDEX_PAGES_PER_DRAW,
 	MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
-	MAX_OBJECT_MATERIAL_PALETTE_PAGES_PER_DRAW,
 	MAX_TERRAIN_COLOR_PAGES_PER_DRAW,
 	MAX_TERRAIN_MASK_PAGES_PER_DRAW,
 	createStaticLandblockLayerKey,
@@ -77,7 +73,7 @@ import {
 	type ObjectMaterialPreparedUniforms,
 	type ObjectMaterialPreparedDrawPayload,
 	type ObjectMaterialPreparedDrawPayloadState,
-	type ObjectMaterialRolePageBindings,
+	type ObjectMaterialTextureBinding,
 } from "./webgl2-object-material-payloads";
 import {
 	createTerrainPreparedLayeredPayloadState,
@@ -126,15 +122,9 @@ const TERRAIN_MASK_TEXTURE_UNIT_BASE =
 const TERRAIN_DETAIL_TEXTURE_UNIT =
 	TERRAIN_MASK_TEXTURE_UNIT_BASE + MAX_TERRAIN_MASK_PAGES_PER_DRAW;
 const OBJECT_MATERIAL_BASE_COLOR_TEXTURE_UNIT_BASE = 0;
-const OBJECT_MATERIAL_INDEX_TEXTURE_UNIT_BASE =
-	OBJECT_MATERIAL_BASE_COLOR_TEXTURE_UNIT_BASE +
-	MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW;
-const OBJECT_MATERIAL_PALETTE_TEXTURE_UNIT_BASE =
-	OBJECT_MATERIAL_INDEX_TEXTURE_UNIT_BASE +
-	MAX_OBJECT_MATERIAL_INDEX_PAGES_PER_DRAW;
-const OBJECT_MATERIAL_DETAIL_TEXTURE_UNIT_BASE =
-	OBJECT_MATERIAL_PALETTE_TEXTURE_UNIT_BASE +
-	MAX_OBJECT_MATERIAL_PALETTE_PAGES_PER_DRAW;
+const OBJECT_MATERIAL_INDEX_TEXTURE_UNIT = 0;
+const OBJECT_MATERIAL_PALETTE_TEXTURE_UNIT = 1;
+const OBJECT_MATERIAL_DETAIL_TEXTURE_UNIT = 2;
 const SOURCE_SCENE_COPY_COLOR_TEXTURE_UNIT = 0;
 const SOURCE_SCENE_COPY_DEPTH_TEXTURE_UNIT = 1;
 const OUTDOOR_CROSSING_STENCIL_VALUE = 0xfe;
@@ -306,47 +296,52 @@ void main() {
 }
 `;
 
-export const OBJECT_MATERIAL_FRAGMENT_SHADER = `#version 300 es
+type ObjectMaterialShaderFamily =
+	| "flat-color"
+	| "indexed-paletted"
+	| "texture-rgba";
+
+export const OBJECT_MATERIAL_FRAGMENT_SHADERS: Readonly<
+	Record<ObjectMaterialShaderFamily, string>
+> = {
+	"flat-color": createObjectMaterialFragmentShader("flat-color"),
+	"indexed-paletted": createObjectMaterialFragmentShader("indexed-paletted"),
+	"texture-rgba": createObjectMaterialFragmentShader("texture-rgba"),
+};
+
+export const OBJECT_MATERIAL_FRAGMENT_SHADER =
+	OBJECT_MATERIAL_FRAGMENT_SHADERS["texture-rgba"];
+
+function createObjectMaterialFragmentShader(
+	family: ObjectMaterialShaderFamily,
+): string {
+	const usesBaseColor = family === "texture-rgba";
+	const usesIndexed = family === "indexed-paletted";
+	const usesDetail = family !== "flat-color";
+	return `#version 300 es
 precision highp float;
 precision highp int;
 
-uniform sampler2D uObjectBaseColorTexture0;
-uniform sampler2D uObjectBaseColorTexture1;
-uniform sampler2D uObjectBaseColorTexture2;
-uniform sampler2D uObjectBaseColorTexture3;
-uniform vec2 uObjectBaseColorSizes[${MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW}];
-uniform sampler2D uObjectIndexTexture0;
-uniform sampler2D uObjectIndexTexture1;
-uniform sampler2D uObjectIndexTexture2;
-uniform sampler2D uObjectIndexTexture3;
-uniform sampler2D uObjectPaletteTexture0;
-uniform sampler2D uObjectPaletteTexture1;
-uniform sampler2D uObjectPaletteTexture2;
-uniform sampler2D uObjectPaletteTexture3;
-uniform vec2 uObjectPaletteSizes[${MAX_OBJECT_MATERIAL_PALETTE_PAGES_PER_DRAW}];
-uniform sampler2D uObjectDetailTexture0;
-uniform sampler2D uObjectDetailTexture1;
-uniform sampler2D uObjectDetailTexture2;
-uniform sampler2D uObjectDetailTexture3;
-uniform vec2 uObjectDetailSizes[${MAX_OBJECT_MATERIAL_DETAIL_PAGES_PER_DRAW}];
-uniform vec4 uMaterialBaseColorRects[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
-uniform int uMaterialBaseColorPages[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
-uniform vec4 uMaterialIndexTextureRects[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
-uniform int uMaterialIndexTexturePages[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
-uniform vec4 uMaterialPaletteTextureRects[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
-uniform int uMaterialPaletteTexturePages[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
-uniform vec4 uMaterialDetailTextureRects[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
-uniform int uMaterialDetailTexturePages[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
-uniform float uMaterialPaletteFirstIndices[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
-uniform float uMaterialDetailTilings[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
-uniform int uMaterialDetailEnabled[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
+${usesBaseColor ? "uniform sampler2D uObjectBaseColorTexture;" : ""}
+${usesBaseColor ? "uniform vec2 uObjectBaseColorSize;" : ""}
+${usesIndexed ? "uniform sampler2D uObjectIndexTexture;" : ""}
+${usesIndexed ? "uniform sampler2D uObjectPaletteTexture;" : ""}
+${usesIndexed ? "uniform vec2 uObjectPaletteSize;" : ""}
+${usesDetail ? "uniform sampler2D uObjectDetailTexture;" : ""}
+${usesDetail ? "uniform vec2 uObjectDetailSize;" : ""}
+${usesBaseColor ? `uniform vec4 uMaterialBaseColorRects[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];` : ""}
+${usesIndexed ? `uniform vec4 uMaterialIndexTextureRects[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];` : ""}
+${usesIndexed ? `uniform vec4 uMaterialPaletteTextureRects[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];` : ""}
+${usesDetail ? `uniform vec4 uMaterialDetailTextureRects[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];` : ""}
+${usesIndexed ? `uniform float uMaterialPaletteFirstIndices[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];` : ""}
+${usesDetail ? `uniform float uMaterialDetailTilings[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];` : ""}
+${usesDetail ? `uniform int uMaterialDetailEnabled[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];` : ""}
 uniform float uMaterialAlphaTests[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
-uniform float uMaterialIndexedClipThresholds[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
+${usesIndexed ? `uniform float uMaterialIndexedClipThresholds[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];` : ""}
 uniform vec4 uMaterialColors[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
 uniform vec3 uMaterialEmissiveColors[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
-uniform int uMaterialIndexedTextureFormats[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
-uniform int uMaterialModes[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
-uniform int uMaterialWrapModes[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
+${usesIndexed ? `uniform int uMaterialIndexedTextureFormats[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];` : ""}
+${usesBaseColor || usesIndexed ? `uniform int uMaterialWrapModes[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];` : ""}
 
 in vec2 vTexCoord;
 flat in int vMaterialSlot;
@@ -357,11 +352,17 @@ int materialSlot() {
 	return clamp(vMaterialSlot, 0, ${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW - 1});
 }
 
-vec2 resolveWrappedUv(vec2 uv) {
+${
+	usesBaseColor || usesIndexed
+		? `vec2 resolveWrappedUv(vec2 uv) {
 	return uMaterialWrapModes[materialSlot()] == 1 ? fract(uv) : clamp(uv, vec2(0.0), vec2(0.999999));
+}`
+		: ""
 }
 
-ivec2 resolveIndexSampleCoord(ivec2 baseCoord, ivec2 offset) {
+${
+	usesIndexed
+		? `ivec2 resolveIndexSampleCoord(ivec2 baseCoord, ivec2 offset) {
 	int slot = materialSlot();
 	ivec2 size = ivec2(uMaterialIndexTextureRects[slot].zw);
 	ivec2 coord = baseCoord + offset;
@@ -376,86 +377,10 @@ ivec2 resolveIndexSampleCoord(ivec2 baseCoord, ivec2 offset) {
 	return coord;
 }
 
-vec4 sampleObjectBaseColorPage(int page, vec4 rect, vec2 localUv) {
-	vec2 atlasSize = uObjectBaseColorSizes[0];
-	if (page == 1) {
-		atlasSize = uObjectBaseColorSizes[1];
-		vec2 atlasUv = (rect.xy + localUv * rect.zw) / atlasSize;
-		return texture(uObjectBaseColorTexture1, atlasUv);
-	}
-	if (page == 2) {
-		atlasSize = uObjectBaseColorSizes[2];
-		vec2 atlasUv = (rect.xy + localUv * rect.zw) / atlasSize;
-		return texture(uObjectBaseColorTexture2, atlasUv);
-	}
-	if (page == 3) {
-		atlasSize = uObjectBaseColorSizes[3];
-		vec2 atlasUv = (rect.xy + localUv * rect.zw) / atlasSize;
-		return texture(uObjectBaseColorTexture3, atlasUv);
-	}
-	vec2 atlasUv = (rect.xy + localUv * rect.zw) / atlasSize;
-	return texture(uObjectBaseColorTexture0, atlasUv);
-}
-
-vec4 fetchObjectIndexPage(int page, ivec2 atlasCoord) {
-	if (page == 1) {
-		return texelFetch(uObjectIndexTexture1, atlasCoord, 0);
-	}
-	if (page == 2) {
-		return texelFetch(uObjectIndexTexture2, atlasCoord, 0);
-	}
-	if (page == 3) {
-		return texelFetch(uObjectIndexTexture3, atlasCoord, 0);
-	}
-	return texelFetch(uObjectIndexTexture0, atlasCoord, 0);
-}
-
-vec4 sampleObjectPalettePage(int page, vec4 rect, float paletteLocalX) {
-	vec2 atlasSize = uObjectPaletteSizes[0];
-	if (page == 1) {
-		atlasSize = uObjectPaletteSizes[1];
-		vec2 paletteUv = (rect.xy + vec2(paletteLocalX + 0.5, 0.5)) / atlasSize;
-		return texture(uObjectPaletteTexture1, paletteUv);
-	}
-	if (page == 2) {
-		atlasSize = uObjectPaletteSizes[2];
-		vec2 paletteUv = (rect.xy + vec2(paletteLocalX + 0.5, 0.5)) / atlasSize;
-		return texture(uObjectPaletteTexture2, paletteUv);
-	}
-	if (page == 3) {
-		atlasSize = uObjectPaletteSizes[3];
-		vec2 paletteUv = (rect.xy + vec2(paletteLocalX + 0.5, 0.5)) / atlasSize;
-		return texture(uObjectPaletteTexture3, paletteUv);
-	}
-	vec2 paletteUv = (rect.xy + vec2(paletteLocalX + 0.5, 0.5)) / atlasSize;
-	return texture(uObjectPaletteTexture0, paletteUv);
-}
-
-vec4 sampleObjectDetailPage(int page, vec4 rect, vec2 localUv) {
-	vec2 atlasSize = uObjectDetailSizes[0];
-	if (page == 1) {
-		atlasSize = uObjectDetailSizes[1];
-		vec2 atlasUv = (rect.xy + localUv * rect.zw) / atlasSize;
-		return texture(uObjectDetailTexture1, atlasUv);
-	}
-	if (page == 2) {
-		atlasSize = uObjectDetailSizes[2];
-		vec2 atlasUv = (rect.xy + localUv * rect.zw) / atlasSize;
-		return texture(uObjectDetailTexture2, atlasUv);
-	}
-	if (page == 3) {
-		atlasSize = uObjectDetailSizes[3];
-		vec2 atlasUv = (rect.xy + localUv * rect.zw) / atlasSize;
-		return texture(uObjectDetailTexture3, atlasUv);
-	}
-	vec2 atlasUv = (rect.xy + localUv * rect.zw) / atlasSize;
-	return texture(uObjectDetailTexture0, atlasUv);
-}
-
 float paletteIndexAt(ivec2 coord) {
 	int slot = materialSlot();
 	ivec2 atlasCoord = ivec2(floor(uMaterialIndexTextureRects[slot].xy + vec2(0.5))) + coord;
-	vec4 packed = fetchObjectIndexPage(uMaterialIndexTexturePages[slot], atlasCoord) * 255.0;
+	vec4 packed = texelFetch(uObjectIndexTexture, atlasCoord, 0) * 255.0;
 	if (uMaterialIndexedTextureFormats[slot] == 1) {
 		return floor(packed.r + 0.5) + floor(packed.g + 0.5) * 256.0;
 	}
@@ -473,7 +398,8 @@ vec4 paletteColor(float index) {
 	vec4 rect = uMaterialPaletteTextureRects[slot];
 	float paletteIndex = index - uMaterialPaletteFirstIndices[slot];
 	float paletteLocalX = clamp(paletteIndex, 0.0, max(rect.z - 1.0, 0.0));
-	return sampleObjectPalettePage(uMaterialPaletteTexturePages[slot], rect, paletteLocalX);
+	vec2 paletteUv = (rect.xy + vec2(paletteLocalX + 0.5, 0.5)) / uObjectPaletteSize;
+	return texture(uObjectPaletteTexture, paletteUv);
 }
 
 vec4 sampleIndexedPaletteLinear(vec2 uv) {
@@ -492,43 +418,44 @@ vec4 sampleIndexedPaletteLinear(vec2 uv) {
 		blend.x
 	);
 	return mix(top, bottom, blend.y);
+}`
+		: ""
 }
 
-vec4 sampleDetailOverlay(vec2 uv) {
+${
+	usesDetail
+		? `vec4 sampleDetailOverlay(vec2 uv) {
 	int slot = materialSlot();
 	vec2 localUv = fract(uv * uMaterialDetailTilings[slot]);
-	return sampleObjectDetailPage(
-		uMaterialDetailTexturePages[slot],
-		uMaterialDetailTextureRects[slot],
-		localUv
-	);
+	vec4 rect = uMaterialDetailTextureRects[slot];
+	vec2 atlasUv = (rect.xy + localUv * rect.zw) / uObjectDetailSize;
+	return texture(uObjectDetailTexture, atlasUv);
+}`
+		: ""
 }
 
 void main() {
 	int slot = materialSlot();
-	int materialMode = uMaterialModes[slot];
-	if (materialMode == 2) {
-		fragColor = vec4(1.0, 0.0, 1.0, 1.0);
-		return;
-	}
-
 	vec4 baseColor = vec4(1.0);
-	if (materialMode == 1) {
-		vec2 localUv = resolveWrappedUv(vTexCoord);
-		baseColor = sampleObjectBaseColorPage(
-			uMaterialBaseColorPages[slot],
-			uMaterialBaseColorRects[slot],
-			localUv
-		);
-	} else if (materialMode == 3) {
-		baseColor = sampleIndexedPaletteLinear(vTexCoord);
+	${
+		usesBaseColor
+			? `vec2 localUv = resolveWrappedUv(vTexCoord);
+	vec4 baseRect = uMaterialBaseColorRects[slot];
+	vec2 baseUv = (baseRect.xy + localUv * baseRect.zw) / uObjectBaseColorSize;
+	baseColor = texture(uObjectBaseColorTexture, baseUv);`
+			: ""
 	}
+	${usesIndexed ? "baseColor = sampleIndexedPaletteLinear(vTexCoord);" : ""}
 
 	vec3 rgb = min(baseColor.rgb * uMaterialColors[slot].rgb + uMaterialEmissiveColors[slot], vec3(1.0));
-	if (uMaterialDetailEnabled[slot] == 1) {
+	${
+		usesDetail
+			? `if (uMaterialDetailEnabled[slot] == 1) {
 		vec4 detailColor = sampleDetailOverlay(vTexCoord);
 		float detailAlpha = clamp(detailColor.a, 0.0, 1.0);
 		rgb = clamp(rgb * (detailColor.rgb + (1.0 - detailAlpha)), vec3(0.0), vec3(1.0));
+	}`
+			: ""
 	}
 
 	fragColor = vec4(
@@ -540,6 +467,7 @@ void main() {
 	}
 }
 `;
+}
 
 export const TERRAIN_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
@@ -832,7 +760,9 @@ class Webgl2Renderer implements Renderer {
 	readonly #warnedLayeredFallbackDrawUnitIds = new Set<string>();
 	readonly #warnedMissingPortalApertureRangeIds = new Set<string>();
 	readonly #terrainProgram: TerrainGeometryProgram;
-	readonly #staticObjectProgram: ObjectMaterialGeometryProgram;
+	readonly #staticObjectPrograms: Readonly<
+		Record<ObjectMaterialShaderFamily, ObjectMaterialGeometryProgram>
+	>;
 	readonly #debugOverlayProgram: DebugOverlayProgram;
 	readonly #transitionCompositeProgram: TransitionApertureCompositeProgram;
 	readonly #sourceSceneCopyProgram: SourceSceneCopyProgram;
@@ -899,7 +829,7 @@ class Webgl2Renderer implements Renderer {
 		this.#canvas = canvas;
 		this.#gl = gl;
 		this.#terrainProgram = createTerrainGeometryProgram(gl);
-		this.#staticObjectProgram = createObjectMaterialGeometryProgram(gl);
+		this.#staticObjectPrograms = createObjectMaterialGeometryPrograms(gl);
 		this.#debugOverlayProgram = createDebugOverlayProgram(gl);
 		this.#transitionCompositeProgram =
 			createTransitionApertureCompositeProgram(gl);
@@ -1025,64 +955,56 @@ class Webgl2Renderer implements Renderer {
 			| OutdoorGeneratedSceneryLayerPayload
 			| null,
 	): void {
-		this.#replaceStaticLayer(
-			{ kind, landblockId },
-			payload,
-			(ownership) => {
-				const uploadStartedAt = nowMs();
-				let uploadedBufferBytes = 0;
-				let drawUnitCount = 0;
-				for (const drawUnit of payload?.drawUnits ?? []) {
-					this.#removeStaticObjectResource(drawUnit.drawUnitId);
-					this.#addStaticObjectResource(
-						createStaticObjectGeometryResource(this.#gl, drawUnit),
-					);
-					ownership.drawUnitIds.add(drawUnit.drawUnitId);
-					ownership.textureBindingOwnerKeys.add(
-						createTextureBindingOwnerKey({
-							drawUnitId: drawUnit.drawUnitId,
-							kind: "draw-unit",
-						}),
-					);
-					uploadedBufferBytes +=
-						estimateStaticObjectUploadedBufferBytes(drawUnit);
-					drawUnitCount += 1;
-				}
-				for (const resource of getOutdoorLayerInstancedObjectResources(
-					payload,
-				)) {
-					this.#removeStaticObjectVisualResource(resource.resourceId);
-					this.#addStaticObjectVisualResource(
-						createStaticObjectVisualGeometryResource(this.#gl, resource),
-					);
-					ownership.staticObjectVisualResourceIds.add(resource.resourceId);
-					ownership.textureBindingOwnerKeys.add(
-						createTextureBindingOwnerKey({
-							kind: "static-object-visual-resource",
-							resourceId: resource.resourceId,
-						}),
-					);
-					uploadedBufferBytes +=
-						estimateStaticObjectVisualResourceUploadedBufferBytes(resource);
-				}
-				for (const instance of getOutdoorLayerInstancedObjectInstances(
-					payload,
-				)) {
-					this.#staticObjectRenderInstances.set(instance.instanceId, instance);
-					ownership.staticObjectRenderInstanceIds.add(instance.instanceId);
-				}
-				if (payload && drawUnitCount > 0) {
-					this.#recordStaticObjectUpload({
-						domain: kind,
-						drawUnitCount,
-						kind: "static-object-upload-diagnostics",
-						landblockId,
-						uploadedBufferBytes,
-						uploadMs: nowMs() - uploadStartedAt,
-					});
-				}
-			},
-		);
+		this.#replaceStaticLayer({ kind, landblockId }, payload, (ownership) => {
+			const uploadStartedAt = nowMs();
+			let uploadedBufferBytes = 0;
+			let drawUnitCount = 0;
+			for (const drawUnit of payload?.drawUnits ?? []) {
+				this.#removeStaticObjectResource(drawUnit.drawUnitId);
+				this.#addStaticObjectResource(
+					createStaticObjectGeometryResource(this.#gl, drawUnit),
+				);
+				ownership.drawUnitIds.add(drawUnit.drawUnitId);
+				ownership.textureBindingOwnerKeys.add(
+					createTextureBindingOwnerKey({
+						drawUnitId: drawUnit.drawUnitId,
+						kind: "draw-unit",
+					}),
+				);
+				uploadedBufferBytes +=
+					estimateStaticObjectUploadedBufferBytes(drawUnit);
+				drawUnitCount += 1;
+			}
+			for (const resource of getOutdoorLayerInstancedObjectResources(payload)) {
+				this.#removeStaticObjectVisualResource(resource.resourceId);
+				this.#addStaticObjectVisualResource(
+					createStaticObjectVisualGeometryResource(this.#gl, resource),
+				);
+				ownership.staticObjectVisualResourceIds.add(resource.resourceId);
+				ownership.textureBindingOwnerKeys.add(
+					createTextureBindingOwnerKey({
+						kind: "static-object-visual-resource",
+						resourceId: resource.resourceId,
+					}),
+				);
+				uploadedBufferBytes +=
+					estimateStaticObjectVisualResourceUploadedBufferBytes(resource);
+			}
+			for (const instance of getOutdoorLayerInstancedObjectInstances(payload)) {
+				this.#staticObjectRenderInstances.set(instance.instanceId, instance);
+				ownership.staticObjectRenderInstanceIds.add(instance.instanceId);
+			}
+			if (payload && drawUnitCount > 0) {
+				this.#recordStaticObjectUpload({
+					domain: kind,
+					drawUnitCount,
+					kind: "static-object-upload-diagnostics",
+					landblockId,
+					uploadedBufferBytes,
+					uploadMs: nowMs() - uploadStartedAt,
+				});
+			}
+		});
 	}
 
 	setEnvCellSystemLayer(
@@ -1392,7 +1314,9 @@ class Webgl2Renderer implements Renderer {
 		this.#warnedLayeredFallbackDrawUnitIds.clear();
 		this.#warnedMissingPortalApertureRangeIds.clear();
 		this.#terrainProgram.dispose();
-		this.#staticObjectProgram.dispose();
+		for (const program of Object.values(this.#staticObjectPrograms)) {
+			program.dispose();
+		}
 		this.#debugOverlayProgram.dispose();
 		this.#transitionCompositeProgram.dispose();
 		this.#sourceSceneCopyProgram.dispose();
@@ -2024,7 +1948,7 @@ class Webgl2Renderer implements Renderer {
 			structuredInteriorResources,
 			aspectRatio,
 		);
-		return staticDrawCalls + this.#drawDynamicResources(domain);
+		return staticDrawCalls + this.#drawDynamicResources(domain, aspectRatio);
 	}
 
 	#createDrawableStaticObjectInstanceResources(
@@ -2055,8 +1979,12 @@ class Webgl2Renderer implements Renderer {
 		);
 	}
 
-	#drawDynamicResources(domain: RenderStaticDomain): number {
+	#drawDynamicResources(
+		domain: RenderStaticDomain,
+		aspectRatio: number,
+	): number {
 		const gl = this.#gl;
+		const mvp = createModelViewProjectionMatrix(this.#frameState, aspectRatio);
 		let drawCalls = 0;
 		let skipped = 0;
 		for (const instance of this.#dynamicInstances.values()) {
@@ -2092,6 +2020,7 @@ class Webgl2Renderer implements Renderer {
 				this.#drawStaticMaterialResource(
 					resource,
 					multiplyMat4(objectToRenderMatrix, partMatrix),
+					mvp,
 				);
 				drawCalls += 1;
 			}
@@ -2455,13 +2384,6 @@ class Webgl2Renderer implements Renderer {
 		const gl = this.#gl;
 		const mvp = createModelViewProjectionMatrix(this.#frameState, aspectRatio);
 
-		this.#stateCache.useProgram(this.#staticObjectProgram.program);
-		gl.uniformMatrix4fv(
-			this.#staticObjectProgram.uniforms.uModelViewProjection,
-			false,
-			mvp,
-		);
-
 		applyObjectMaterialDepthWritingState(gl, this.#stateCache);
 		this.#resetTransparentStaticObjectDrawLists();
 		let drawCalls = 0;
@@ -2477,6 +2399,7 @@ class Webgl2Renderer implements Renderer {
 			this.#drawStaticMaterialResource(
 				resource,
 				this.#createResourceTransform(resource),
+				mvp,
 			);
 			this.#recordBakedStaticObjectDirectDraw(resource);
 			drawCalls += 1;
@@ -2498,10 +2421,14 @@ class Webgl2Renderer implements Renderer {
 			}
 		}
 		for (const group of instanceGroupsByResourceId.values()) {
-			drawCalls += this.#drawStaticObjectInstanceGroup(group);
+			drawCalls += this.#drawStaticObjectInstanceGroup(group, mvp);
 		}
 		for (const resource of structuredInteriorResources) {
-			applyObjectMaterialRenderState(gl, this.#stateCache, resource.renderState);
+			applyObjectMaterialRenderState(
+				gl,
+				this.#stateCache,
+				resource.renderState,
+			);
 			applyStructuredInteriorCullState(
 				gl,
 				this.#stateCache,
@@ -2510,15 +2437,21 @@ class Webgl2Renderer implements Renderer {
 			this.#drawStaticMaterialResource(
 				resource,
 				this.#createResourceTransform(resource),
+				mvp,
 			);
 			drawCalls += 1;
 		}
 
 		for (const resource of this.#farTransparentStaticObjectDrawList) {
-			applyObjectMaterialRenderState(gl, this.#stateCache, resource.renderState);
+			applyObjectMaterialRenderState(
+				gl,
+				this.#stateCache,
+				resource.renderState,
+			);
 			this.#drawStaticMaterialResource(
 				resource,
 				this.#createResourceTransform(resource),
+				mvp,
 			);
 			this.#recordBakedStaticObjectDirectDraw(resource);
 			drawCalls += 1;
@@ -2550,7 +2483,7 @@ class Webgl2Renderer implements Renderer {
 				this.#stateCache,
 				first.resource.renderState,
 			);
-			drawCalls += this.#drawStaticObjectInstanceGroup(group);
+			drawCalls += this.#drawStaticObjectInstanceGroup(group, mvp);
 			if (group.length < 2) {
 				this.#lastStaticObjectFarTransparentDirectRenderInstanceDrawCalls += 1;
 			} else {
@@ -2567,12 +2500,17 @@ class Webgl2Renderer implements Renderer {
 			if (!resource) {
 				throw new Error("Missing transparent static object draw resource.");
 			}
-			applyObjectMaterialRenderState(gl, this.#stateCache, resource.renderState);
+			applyObjectMaterialRenderState(
+				gl,
+				this.#stateCache,
+				resource.renderState,
+			);
 			this.#drawStaticMaterialResource(
 				resource,
 				entry.instance
 					? this.#createStaticObjectInstanceTransform(entry.instance)
 					: this.#createResourceTransform(resource),
+				mvp,
 			);
 			if (entry.instance) {
 				this.#lastStaticObjectDirectRenderInstanceDrawCalls += 1;
@@ -2604,6 +2542,7 @@ class Webgl2Renderer implements Renderer {
 
 	#drawStaticObjectInstanceGroup(
 		group: readonly StaticObjectInstanceDrawResource[],
+		mvp: Float32Array,
 	): number {
 		const first = group[0];
 		if (!first) {
@@ -2613,12 +2552,13 @@ class Webgl2Renderer implements Renderer {
 			this.#drawStaticMaterialResource(
 				first.resource,
 				this.#createStaticObjectInstanceTransform(first.instance),
+				mvp,
 			);
 			this.#lastStaticObjectDirectRenderInstanceDrawCalls += 1;
 			return 1;
 		}
 
-		this.#drawStaticMaterialResourceInstanced(first.resource, group);
+		this.#drawStaticMaterialResourceInstanced(first.resource, group, mvp);
 		this.#lastStaticObjectInstancedRenderInstanceDrawCalls += 1;
 		this.#lastStaticObjectInstancedRenderInstances += group.length;
 		return 1;
@@ -2668,18 +2608,16 @@ class Webgl2Renderer implements Renderer {
 	#drawStaticMaterialResource(
 		resource: ObjectMaterialGeometryResource,
 		objectTransform: Float32Array,
+		mvp: Float32Array,
 	): void {
 		const gl = this.#gl;
-		this.#bindStaticMaterialResourcePayload(resource);
+		const program = this.#bindStaticMaterialResourcePayload(resource, mvp);
 		gl.uniformMatrix4fv(
-			this.#staticObjectProgram.uniforms.uObjectTransform,
+			program.uniforms.uObjectTransform,
 			false,
 			objectTransform,
 		);
-		gl.uniform1i(
-			this.#staticObjectProgram.uniforms.uUseInstanceObjectTransform,
-			0,
-		);
+		gl.uniform1i(program.uniforms.uUseInstanceObjectTransform, 0);
 		this.#stateCache.bindVertexArray(resource.vertexArray);
 		gl.drawElements(gl.TRIANGLES, resource.indexCount, resource.indexType, 0);
 	}
@@ -2687,14 +2625,12 @@ class Webgl2Renderer implements Renderer {
 	#drawStaticMaterialResourceInstanced(
 		resource: StaticObjectVisualGeometryResource,
 		group: readonly StaticObjectInstanceDrawResource[],
+		mvp: Float32Array,
 	): void {
 		const gl = this.#gl;
-		this.#bindStaticMaterialResourcePayload(resource);
+		const program = this.#bindStaticMaterialResourcePayload(resource, mvp);
 		this.#writeStaticObjectInstanceTransforms(group);
-		gl.uniform1i(
-			this.#staticObjectProgram.uniforms.uUseInstanceObjectTransform,
-			1,
-		);
+		gl.uniform1i(program.uniforms.uUseInstanceObjectTransform, 1);
 		this.#stateCache.bindVertexArray(resource.vertexArray);
 		this.#bindStaticObjectInstanceTransformAttributes();
 		gl.drawElementsInstanced(
@@ -2708,49 +2644,50 @@ class Webgl2Renderer implements Renderer {
 
 	#bindStaticMaterialResourcePayload(
 		resource: ObjectMaterialGeometryResource,
-	): void {
+		mvp: Float32Array,
+	): ObjectMaterialGeometryProgram {
 		const gl = this.#gl;
-		const { materialUniforms, rolePages } =
+		const program = this.#staticObjectPrograms[resource.materialFamily];
+		this.#stateCache.useProgram(program.program);
+		gl.uniformMatrix4fv(program.uniforms.uModelViewProjection, false, mvp);
+		const { materialUniforms, textures } =
 			this.#getObjectMaterialPreparedPayload(resource);
 
-		uploadObjectMaterialRolePageBindings(
+		uploadObjectMaterialTextureBinding(
 			gl,
 			this.#stateCache,
-			this.#staticObjectProgram.uniforms.uObjectBaseColorTextures,
-			this.#staticObjectProgram.uniforms.uObjectBaseColorSizes,
-			rolePages.baseColor,
+			program.uniforms.uObjectBaseColorTexture,
+			program.uniforms.uObjectBaseColorSize,
+			textures.baseColor,
 			OBJECT_MATERIAL_BASE_COLOR_TEXTURE_UNIT_BASE,
 		);
-		uploadObjectMaterialRolePageBindings(
+		uploadObjectMaterialTextureBinding(
 			gl,
 			this.#stateCache,
-			this.#staticObjectProgram.uniforms.uObjectIndexTextures,
+			program.uniforms.uObjectIndexTexture,
 			null,
-			rolePages.index,
-			OBJECT_MATERIAL_INDEX_TEXTURE_UNIT_BASE,
+			textures.index,
+			OBJECT_MATERIAL_INDEX_TEXTURE_UNIT,
 		);
-		uploadObjectMaterialRolePageBindings(
+		uploadObjectMaterialTextureBinding(
 			gl,
 			this.#stateCache,
-			this.#staticObjectProgram.uniforms.uObjectPaletteTextures,
-			this.#staticObjectProgram.uniforms.uObjectPaletteSizes,
-			rolePages.palette,
-			OBJECT_MATERIAL_PALETTE_TEXTURE_UNIT_BASE,
+			program.uniforms.uObjectPaletteTexture,
+			program.uniforms.uObjectPaletteSize,
+			textures.palette,
+			OBJECT_MATERIAL_PALETTE_TEXTURE_UNIT,
 		);
-		uploadObjectMaterialRolePageBindings(
+		uploadObjectMaterialTextureBinding(
 			gl,
 			this.#stateCache,
-			this.#staticObjectProgram.uniforms.uObjectDetailTextures,
-			this.#staticObjectProgram.uniforms.uObjectDetailSizes,
-			rolePages.detail,
-			OBJECT_MATERIAL_DETAIL_TEXTURE_UNIT_BASE,
+			program.uniforms.uObjectDetailTexture,
+			program.uniforms.uObjectDetailSize,
+			textures.detail,
+			OBJECT_MATERIAL_DETAIL_TEXTURE_UNIT,
 		);
 
-		uploadObjectMaterialUniforms(
-			gl,
-			this.#staticObjectProgram,
-			materialUniforms,
-		);
+		uploadObjectMaterialUniforms(gl, program, materialUniforms);
+		return program;
 	}
 
 	#writeStaticObjectInstanceTransforms(
@@ -2946,7 +2883,9 @@ class Webgl2Renderer implements Renderer {
 		}
 	}
 
-	#markDynamicVisualResourceObjectMaterialPayloadDirty(resourceId: string): void {
+	#markDynamicVisualResourceObjectMaterialPayloadDirty(
+		resourceId: string,
+	): void {
 		for (const resource of this.#dynamicGeometryResources.get(resourceId) ??
 			[]) {
 			markObjectMaterialPreparedDrawPayloadDirty(
@@ -2964,10 +2903,14 @@ class Webgl2Renderer implements Renderer {
 			return;
 		}
 		if (owner.kind === "dynamic-visual-resource") {
-			this.#markDynamicVisualResourceObjectMaterialPayloadDirty(owner.resourceId);
+			this.#markDynamicVisualResourceObjectMaterialPayloadDirty(
+				owner.resourceId,
+			);
 			return;
 		}
-		this.#markStaticObjectVisualResourceObjectMaterialPayloadDirty(owner.resourceId);
+		this.#markStaticObjectVisualResourceObjectMaterialPayloadDirty(
+			owner.resourceId,
+		);
 	}
 
 	#markAllObjectMaterialPreparedPayloadsDirty(): void {
@@ -3071,13 +3014,15 @@ class Webgl2Renderer implements Renderer {
 				this.#lastStaticObjectFarTransparentInstancedRenderInstanceDrawCalls,
 			staticObjectFarTransparentInstancedRenderInstances:
 				this.#lastStaticObjectFarTransparentInstancedRenderInstances,
-			outdoorGeneratedSceneryStaticObjectResources: staticObjectResources.filter(
-				(resource) => resource.domain === "outdoor-generated-scenery",
-			).length,
+			outdoorGeneratedSceneryStaticObjectResources:
+				staticObjectResources.filter(
+					(resource) => resource.domain === "outdoor-generated-scenery",
+				).length,
 			outdoorGeneratedSceneryStaticObjectBakedDirectDrawCalls:
 				this.#lastOutdoorGeneratedSceneryStaticObjectBakedDirectDrawCalls,
 			outdoorGeneratedSceneryStaticObjectBakedDirectDrawCallsByPass: {
-				...this.#lastOutdoorGeneratedSceneryStaticObjectBakedDirectDrawCallsByPass,
+				...this
+					.#lastOutdoorGeneratedSceneryStaticObjectBakedDirectDrawCallsByPass,
 			},
 			outdoorGeneratedSceneryStaticObjectVisualResources:
 				staticObjectVisualResources.length,
@@ -3545,36 +3490,32 @@ interface TerrainGeometryProgram {
 }
 
 interface ObjectMaterialGeometryProgram {
+	readonly family: ObjectMaterialShaderFamily;
 	readonly program: WebGLProgram;
 	readonly uniforms: {
 		readonly uMaterialAlphaTests: WebGLUniformLocation;
-		readonly uMaterialBaseColorPages: WebGLUniformLocation;
-		readonly uMaterialBaseColorRects: WebGLUniformLocation;
+		readonly uMaterialBaseColorRects: WebGLUniformLocation | null;
 		readonly uMaterialColors: WebGLUniformLocation;
-		readonly uMaterialDetailEnabled: WebGLUniformLocation;
-		readonly uMaterialDetailTexturePages: WebGLUniformLocation;
-		readonly uMaterialDetailTextureRects: WebGLUniformLocation;
-		readonly uMaterialDetailTilings: WebGLUniformLocation;
+		readonly uMaterialDetailEnabled: WebGLUniformLocation | null;
+		readonly uMaterialDetailTextureRects: WebGLUniformLocation | null;
+		readonly uMaterialDetailTilings: WebGLUniformLocation | null;
 		readonly uMaterialEmissiveColors: WebGLUniformLocation;
-		readonly uMaterialIndexedClipThresholds: WebGLUniformLocation;
-		readonly uMaterialIndexedTextureFormats: WebGLUniformLocation;
-		readonly uMaterialIndexTexturePages: WebGLUniformLocation;
-		readonly uMaterialIndexTextureRects: WebGLUniformLocation;
-		readonly uMaterialModes: WebGLUniformLocation;
-		readonly uMaterialPaletteFirstIndices: WebGLUniformLocation;
-		readonly uMaterialPaletteTexturePages: WebGLUniformLocation;
-		readonly uMaterialPaletteTextureRects: WebGLUniformLocation;
-		readonly uMaterialWrapModes: WebGLUniformLocation;
+		readonly uMaterialIndexedClipThresholds: WebGLUniformLocation | null;
+		readonly uMaterialIndexedTextureFormats: WebGLUniformLocation | null;
+		readonly uMaterialIndexTextureRects: WebGLUniformLocation | null;
+		readonly uMaterialPaletteFirstIndices: WebGLUniformLocation | null;
+		readonly uMaterialPaletteTextureRects: WebGLUniformLocation | null;
+		readonly uMaterialWrapModes: WebGLUniformLocation | null;
 		readonly uModelViewProjection: WebGLUniformLocation;
 		readonly uObjectTransform: WebGLUniformLocation;
 		readonly uUseInstanceObjectTransform: WebGLUniformLocation;
-		readonly uObjectBaseColorSizes: WebGLUniformLocation;
-		readonly uObjectBaseColorTextures: readonly WebGLUniformLocation[];
-		readonly uObjectDetailSizes: WebGLUniformLocation;
-		readonly uObjectDetailTextures: readonly WebGLUniformLocation[];
-		readonly uObjectIndexTextures: readonly WebGLUniformLocation[];
-		readonly uObjectPaletteSizes: WebGLUniformLocation;
-		readonly uObjectPaletteTextures: readonly WebGLUniformLocation[];
+		readonly uObjectBaseColorSize: WebGLUniformLocation | null;
+		readonly uObjectBaseColorTexture: WebGLUniformLocation | null;
+		readonly uObjectDetailSize: WebGLUniformLocation | null;
+		readonly uObjectDetailTexture: WebGLUniformLocation | null;
+		readonly uObjectIndexTexture: WebGLUniformLocation | null;
+		readonly uObjectPaletteSize: WebGLUniformLocation | null;
+		readonly uObjectPaletteTexture: WebGLUniformLocation | null;
 	};
 	dispose(): void;
 }
@@ -4240,8 +4181,22 @@ function createTerrainGeometryProgram(
 	};
 }
 
+function createObjectMaterialGeometryPrograms(
+	gl: WebGL2RenderingContext,
+): Readonly<Record<ObjectMaterialShaderFamily, ObjectMaterialGeometryProgram>> {
+	return {
+		"flat-color": createObjectMaterialGeometryProgram(gl, "flat-color"),
+		"indexed-paletted": createObjectMaterialGeometryProgram(
+			gl,
+			"indexed-paletted",
+		),
+		"texture-rgba": createObjectMaterialGeometryProgram(gl, "texture-rgba"),
+	};
+}
+
 function createObjectMaterialGeometryProgram(
 	gl: WebGL2RenderingContext,
+	family: ObjectMaterialShaderFamily,
 ): ObjectMaterialGeometryProgram {
 	const vertexShader = compileShader(
 		gl,
@@ -4251,7 +4206,7 @@ function createObjectMaterialGeometryProgram(
 	const fragmentShader = compileShader(
 		gl,
 		gl.FRAGMENT_SHADER,
-		OBJECT_MATERIAL_FRAGMENT_SHADER,
+		OBJECT_MATERIAL_FRAGMENT_SHADERS[family],
 	);
 	const program = gl.createProgram();
 	if (!program) {
@@ -4271,6 +4226,7 @@ function createObjectMaterialGeometryProgram(
 	}
 
 	return {
+		family,
 		program,
 		uniforms: {
 			uMaterialAlphaTests: requireUniform(
@@ -4278,33 +4234,23 @@ function createObjectMaterialGeometryProgram(
 				program,
 				"uMaterialAlphaTests[0]",
 			),
-			uMaterialBaseColorPages: requireUniform(
-				gl,
-				program,
-				"uMaterialBaseColorPages[0]",
-			),
-			uMaterialBaseColorRects: requireUniform(
+			uMaterialBaseColorRects: optionalUniform(
 				gl,
 				program,
 				"uMaterialBaseColorRects[0]",
 			),
 			uMaterialColors: requireUniform(gl, program, "uMaterialColors[0]"),
-			uMaterialDetailEnabled: requireUniform(
+			uMaterialDetailEnabled: optionalUniform(
 				gl,
 				program,
 				"uMaterialDetailEnabled[0]",
 			),
-			uMaterialDetailTexturePages: requireUniform(
-				gl,
-				program,
-				"uMaterialDetailTexturePages[0]",
-			),
-			uMaterialDetailTextureRects: requireUniform(
+			uMaterialDetailTextureRects: optionalUniform(
 				gl,
 				program,
 				"uMaterialDetailTextureRects[0]",
 			),
-			uMaterialDetailTilings: requireUniform(
+			uMaterialDetailTilings: optionalUniform(
 				gl,
 				program,
 				"uMaterialDetailTilings[0]",
@@ -4314,43 +4260,32 @@ function createObjectMaterialGeometryProgram(
 				program,
 				"uMaterialEmissiveColors[0]",
 			),
-			uMaterialIndexedClipThresholds: requireUniform(
+			uMaterialIndexedClipThresholds: optionalUniform(
 				gl,
 				program,
 				"uMaterialIndexedClipThresholds[0]",
 			),
-			uMaterialIndexedTextureFormats: requireUniform(
+			uMaterialIndexedTextureFormats: optionalUniform(
 				gl,
 				program,
 				"uMaterialIndexedTextureFormats[0]",
 			),
-			uMaterialIndexTexturePages: requireUniform(
-				gl,
-				program,
-				"uMaterialIndexTexturePages[0]",
-			),
-			uMaterialIndexTextureRects: requireUniform(
+			uMaterialIndexTextureRects: optionalUniform(
 				gl,
 				program,
 				"uMaterialIndexTextureRects[0]",
 			),
-			uMaterialModes: requireUniform(gl, program, "uMaterialModes[0]"),
-			uMaterialPaletteFirstIndices: requireUniform(
+			uMaterialPaletteFirstIndices: optionalUniform(
 				gl,
 				program,
 				"uMaterialPaletteFirstIndices[0]",
 			),
-			uMaterialPaletteTexturePages: requireUniform(
-				gl,
-				program,
-				"uMaterialPaletteTexturePages[0]",
-			),
-			uMaterialPaletteTextureRects: requireUniform(
+			uMaterialPaletteTextureRects: optionalUniform(
 				gl,
 				program,
 				"uMaterialPaletteTextureRects[0]",
 			),
-			uMaterialWrapModes: requireUniform(gl, program, "uMaterialWrapModes[0]"),
+			uMaterialWrapModes: optionalUniform(gl, program, "uMaterialWrapModes[0]"),
 			uModelViewProjection: requireUniform(gl, program, "uModelViewProjection"),
 			uObjectTransform: requireUniform(gl, program, "uObjectTransform"),
 			uUseInstanceObjectTransform: requireUniform(
@@ -4358,40 +4293,28 @@ function createObjectMaterialGeometryProgram(
 				program,
 				"uUseInstanceObjectTransform",
 			),
-			uObjectBaseColorSizes: requireUniform(
+			uObjectBaseColorSize: optionalUniform(
 				gl,
 				program,
-				"uObjectBaseColorSizes[0]",
+				"uObjectBaseColorSize",
 			),
-			uObjectBaseColorTextures: createRolePageTextureUniforms(
+			uObjectBaseColorTexture: optionalUniform(
 				gl,
 				program,
 				"uObjectBaseColorTexture",
-				MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW,
 			),
-			uObjectDetailSizes: requireUniform(gl, program, "uObjectDetailSizes[0]"),
-			uObjectDetailTextures: createRolePageTextureUniforms(
+			uObjectDetailSize: optionalUniform(gl, program, "uObjectDetailSize"),
+			uObjectDetailTexture: optionalUniform(
 				gl,
 				program,
 				"uObjectDetailTexture",
-				MAX_OBJECT_MATERIAL_DETAIL_PAGES_PER_DRAW,
 			),
-			uObjectIndexTextures: createRolePageTextureUniforms(
-				gl,
-				program,
-				"uObjectIndexTexture",
-				MAX_OBJECT_MATERIAL_INDEX_PAGES_PER_DRAW,
-			),
-			uObjectPaletteSizes: requireUniform(
-				gl,
-				program,
-				"uObjectPaletteSizes[0]",
-			),
-			uObjectPaletteTextures: createRolePageTextureUniforms(
+			uObjectIndexTexture: optionalUniform(gl, program, "uObjectIndexTexture"),
+			uObjectPaletteSize: optionalUniform(gl, program, "uObjectPaletteSize"),
+			uObjectPaletteTexture: optionalUniform(
 				gl,
 				program,
 				"uObjectPaletteTexture",
-				MAX_OBJECT_MATERIAL_PALETTE_PAGES_PER_DRAW,
 			),
 		},
 		dispose() {
@@ -5106,21 +5029,21 @@ function createStaticVec3PositionBuffer(
 	return positions;
 }
 
-function uploadObjectMaterialRolePageBindings(
+function uploadObjectMaterialTextureBinding(
 	gl: WebGL2RenderingContext,
 	stateCache: Webgl2StateCache,
-	samplerUniforms: readonly WebGLUniformLocation[],
+	samplerUniform: WebGLUniformLocation | null,
 	sizeUniform: WebGLUniformLocation | null,
-	pages: ObjectMaterialRolePageBindings,
+	binding: ObjectMaterialTextureBinding | null,
 	textureUnitBase: number,
 ): void {
-	for (const [slot, uniform] of samplerUniforms.entries()) {
-		const textureUnit = textureUnitBase + slot;
-		stateCache.bindTexture2D(textureUnit, pages.textures[slot] ?? null);
-		gl.uniform1i(uniform, textureUnit);
+	if (!samplerUniform) {
+		return;
 	}
+	stateCache.bindTexture2D(textureUnitBase, binding?.texture ?? null);
+	gl.uniform1i(samplerUniform, textureUnitBase);
 	if (sizeUniform) {
-		gl.uniform2fv(sizeUniform, pages.sizes);
+		gl.uniform2f(sizeUniform, binding?.width ?? 1, binding?.height ?? 1);
 	}
 }
 
@@ -5130,28 +5053,24 @@ function uploadObjectMaterialUniforms(
 	uniforms: ObjectMaterialPreparedUniforms,
 ): void {
 	gl.uniform1fv(program.uniforms.uMaterialAlphaTests, uniforms.alphaTests);
-	gl.uniform1iv(
-		program.uniforms.uMaterialBaseColorPages,
-		uniforms.baseColorPages,
-	);
-	gl.uniform4fv(
+	uploadOptionalUniform4fv(
+		gl,
 		program.uniforms.uMaterialBaseColorRects,
 		uniforms.baseColorRects,
 	);
 	gl.uniform4fv(program.uniforms.uMaterialColors, uniforms.colors);
-	gl.uniform1iv(
+	uploadOptionalUniform1iv(
+		gl,
 		program.uniforms.uMaterialDetailEnabled,
 		uniforms.detailEnabled,
 	);
-	gl.uniform1iv(
-		program.uniforms.uMaterialDetailTexturePages,
-		uniforms.detailPages,
-	);
-	gl.uniform4fv(
+	uploadOptionalUniform4fv(
+		gl,
 		program.uniforms.uMaterialDetailTextureRects,
 		uniforms.detailRects,
 	);
-	gl.uniform1fv(
+	uploadOptionalUniform1fv(
+		gl,
 		program.uniforms.uMaterialDetailTilings,
 		uniforms.detailTilings,
 	);
@@ -5159,36 +5078,66 @@ function uploadObjectMaterialUniforms(
 		program.uniforms.uMaterialEmissiveColors,
 		uniforms.emissiveColors,
 	);
-	gl.uniform1fv(
+	uploadOptionalUniform1fv(
+		gl,
 		program.uniforms.uMaterialIndexedClipThresholds,
 		uniforms.indexedClipThresholds,
 	);
-	gl.uniform1iv(
+	uploadOptionalUniform1iv(
+		gl,
 		program.uniforms.uMaterialIndexedTextureFormats,
 		uniforms.indexedTextureFormats,
 	);
-	gl.uniform1iv(
-		program.uniforms.uMaterialIndexTexturePages,
-		uniforms.indexPages,
-	);
-	gl.uniform4fv(
+	uploadOptionalUniform4fv(
+		gl,
 		program.uniforms.uMaterialIndexTextureRects,
 		uniforms.indexRects,
 	);
-	gl.uniform1iv(program.uniforms.uMaterialModes, uniforms.materialModes);
-	gl.uniform1fv(
+	uploadOptionalUniform1fv(
+		gl,
 		program.uniforms.uMaterialPaletteFirstIndices,
 		uniforms.paletteFirstIndices,
 	);
-	gl.uniform1iv(
-		program.uniforms.uMaterialPaletteTexturePages,
-		uniforms.palettePages,
-	);
-	gl.uniform4fv(
+	uploadOptionalUniform4fv(
+		gl,
 		program.uniforms.uMaterialPaletteTextureRects,
 		uniforms.paletteRects,
 	);
-	gl.uniform1iv(program.uniforms.uMaterialWrapModes, uniforms.wrapModes);
+	uploadOptionalUniform1iv(
+		gl,
+		program.uniforms.uMaterialWrapModes,
+		uniforms.wrapModes,
+	);
+}
+
+function uploadOptionalUniform1fv(
+	gl: WebGL2RenderingContext,
+	uniform: WebGLUniformLocation | null,
+	values: Float32Array,
+): void {
+	if (uniform) {
+		gl.uniform1fv(uniform, values);
+	}
+}
+
+function uploadOptionalUniform1iv(
+	gl: WebGL2RenderingContext,
+	uniform: WebGLUniformLocation | null,
+	values: Int32Array,
+): void {
+	if (uniform) {
+		gl.uniform1iv(uniform, values);
+	}
+}
+
+function uploadOptionalUniform4fv(
+	gl: WebGL2RenderingContext,
+	uniform: WebGLUniformLocation | null,
+	values: Float32Array,
+): void {
+	if (uniform) {
+		gl.uniform4fv(uniform, values);
+	}
 }
 
 function sumRenderedTriangles(
@@ -5843,14 +5792,23 @@ function requireUniform(
 	program: WebGLProgram,
 	name: string,
 ): WebGLUniformLocation {
-	const uniform =
-		gl.getUniformLocation(program, name) ??
-		gl.getUniformLocation(program, `${name}[0]`);
+	const uniform = optionalUniform(gl, program, name);
 	if (!uniform) {
 		throw new Error(`terrain geometry shader is missing uniform ${name}.`);
 	}
 
 	return uniform;
+}
+
+function optionalUniform(
+	gl: WebGL2RenderingContext,
+	program: WebGLProgram,
+	name: string,
+): WebGLUniformLocation | null {
+	return (
+		gl.getUniformLocation(program, name) ??
+		gl.getUniformLocation(program, `${name}[0]`)
+	);
 }
 
 function createRolePageTextureUniforms(

@@ -121,7 +121,7 @@ describe("static object batch partitioner", () => {
 
 		expect(result.drawUnits).toEqual([
 			expect.objectContaining({
-				resourceId:
+				drawUnitId:
 					"outdoor-buildings:0xda55ffff:static-object-partition:slice-0-0",
 				kind: "static-object-geometry",
 				materialFamily: "texture-rgba",
@@ -917,7 +917,7 @@ describe("static object batch partitioner", () => {
 		]);
 		expect(result.textureDependencies).toEqual([
 			{
-				drawUnitId:
+				resourceId:
 					"outdoor-buildings:0xda55ffff:static-object-partition:slice-0-0",
 				roles: [
 					{

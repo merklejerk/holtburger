@@ -1214,7 +1214,7 @@ Acceptance criteria:
 - [x] Phase 7: bring terrain onto the same placement-before-bake contract.
 - [x] Phase 8: add on-demand zombie reclaim.
 - [x] Resteering 3: review reclaim and renderer cleanup readiness.
-- [ ] Phase 9: simplify renderer payload prep and specialize shader families.
+- [x] Phase 9: simplify renderer payload prep and specialize shader families.
 - [ ] Phase 10: resolve `textureUseId` cleanup.
 - [ ] Phase 11: delete vestigial code and obsolete tests.
 
@@ -1419,6 +1419,21 @@ Acceptance criteria:
 - Resteering 3 accepted the draw-unit count tradeoff without adding representative perf gates. Tests
   now prove partitioning is deterministic and explainable; any performance response should come from
   measurement after the clean cutover, not from preserving the monolithic shader path.
+- Phase 9 collapsed object material renderer payloads to one texture binding per relevant role.
+  Object prepared payloads now carry `baseColor`, `detail`, `index`, and `palette` bindings directly
+  instead of per-role texture arrays, page-size arrays, and material-mode fallbacks.
+- Phase 9 replaced the monolithic object material fragment shader with family-specific shader
+  sources for `flat-color`, `texture-rgba`, and `indexed-paletted`. The RGBA and indexed shaders keep
+  detail overlay support where applicable; the flat-color shader declares no object texture samplers.
+- Phase 9 removed object `uMaterialModes`, object material page selector uniforms, and object
+  4-pages-per-role shader assumptions. Textured object resources now fail loudly during payload prep
+  if their required resident binding is missing instead of silently selecting a magenta fallback
+  branch.
+- Phase 9 removed object role-page overflow diagnostics. `TextureManager` still emits renderer
+  `TextureBinding.rolePage` records as a bridge to the current renderer API, but object owner+role
+  assignment is intentionally single-slot: the first texture ref binds slot 0 and any different
+  texture ref for the same owner+role is omitted. Real object draw units should not hit that shape
+  because bakers now split by placement page before geometry is emitted.
 - Dry run split `TextureManager` responsibilities into placement and pinning. Current owner leases
   require post-bake draw-unit/resource owners, but pre-bake placement intents intentionally do not
   have owners yet.
@@ -1482,9 +1497,10 @@ Acceptance criteria:
 - `TextureManager` now stores `RuntimeTexturePlacement` on registry entries so pre-bake ownerless
   pages can be uploaded when ownership appears. This is pragmatic migration state tied to the current
   renderer update API; revisit during renderer payload cleanup if page residency becomes explicit.
-- `TextureManager` still marks renderer-facing object bindings through role-page slots after bakers
-  have already enforced one-page-per-role draw units. Phase 9 should remove the object multi-slot
-  role-page layer instead of teaching it to mimic the new contract.
+- `TextureManager` still marks renderer-facing object bindings through `rolePage`-shaped records
+  after bakers have already enforced one-page-per-role draw units. Phase 9 removed object multi-slot
+  assignment and overflow diagnostics, but the renderer update payload still uses the old field name.
+  Phase 10 or Phase 11 should rename that bridge if it survives `textureUseId` cleanup.
 
 ## Risks and Concessions
 

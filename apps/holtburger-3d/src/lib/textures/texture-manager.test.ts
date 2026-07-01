@@ -338,7 +338,7 @@ describe("browser texture manager", () => {
 		]);
 	});
 
-	it("packs outdoor-generated-scenery static object base-color refs across pages instead of one cohort page", async () => {
+	it("packs outdoor-generated-scenery static object base-color refs across pages while binding one owner page", async () => {
 		const textureManager = new TextureManager({
 			assetService: new FixtureAssetService({
 				byteLength: 512 * 512 * 4,
@@ -368,11 +368,12 @@ describe("browser texture manager", () => {
 
 		expect(update?.placements.length).toBeGreaterThan(1);
 		expect(update?.textureUsePlacements).toHaveLength(textureUses.length);
-		expect(update?.textureBindings).toHaveLength(textureUses.length);
+		expect(update?.textureBindings.length).toBeLessThan(textureUses.length);
 		expect(
-			new Set(update?.textureBindings.map((binding) => binding.rolePage?.slot))
-				.size,
-		).toBeGreaterThan(1);
+			update?.textureBindings.map((binding) => binding.rolePage?.slot),
+		).toEqual(
+			Array.from({ length: update?.textureBindings.length ?? 0 }, () => 0),
+		);
 	});
 
 	it("dedupes shared prepared sources inside one static batch", async () => {
@@ -651,11 +652,6 @@ describe("browser texture manager", () => {
 				rolePage: { kind: "object-base-color", slot: 0 },
 				textureUseId: "static-a:base:0",
 			}),
-			expect.objectContaining({
-				owner: { drawUnitId: "static-a", kind: "draw-unit" },
-				rolePage: { kind: "object-base-color", slot: 1 },
-				textureUseId: "static-a:base:1",
-			}),
 		]);
 	});
 
@@ -730,14 +726,6 @@ describe("browser texture manager", () => {
 				rolePage: { kind: "object-base-color", slot: 0 },
 				textureUseId: "structured-interior-a:base:0",
 			}),
-			expect.objectContaining({
-				owner: {
-					drawUnitId: "structured-interior-a",
-					kind: "draw-unit",
-				},
-				rolePage: { kind: "object-base-color", slot: 1 },
-				textureUseId: "structured-interior-a:base:1",
-			}),
 		]);
 		expect(texturePacker.jobs).toMatchObject([
 			{
@@ -810,12 +798,7 @@ describe("browser texture manager", () => {
 			).toEqual(textureUses.map((textureUse) => textureUse.textureUseId));
 			expect(
 				update?.textureBindings.map((binding) => binding.rolePage),
-			).toEqual([
-				{ kind: "object-base-color", slot: 0 },
-				{ kind: "object-base-color", slot: 1 },
-				{ kind: "object-base-color", slot: 2 },
-				{ kind: "object-base-color", slot: 3 },
-			]);
+			).toEqual([{ kind: "object-base-color", slot: 0 }]);
 		} finally {
 			warnSpy.mockRestore();
 		}
@@ -1535,14 +1518,6 @@ describe("browser texture manager", () => {
 				},
 				rolePage: { kind: "object-base-color", slot: 0 },
 				textureUseId: "runtime-spawn:1:base:0",
-			}),
-			expect.objectContaining({
-				owner: {
-					kind: "dynamic-visual-resource",
-					resourceId: "dynamic-visual-resource:runtime-spawn:1",
-				},
-				rolePage: { kind: "object-base-color", slot: 1 },
-				textureUseId: "runtime-spawn:1:base:1",
 			}),
 		]);
 	});

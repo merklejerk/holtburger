@@ -28,11 +28,11 @@ import type { TextureResourceDependencies } from "../textures/placement";
 
 export const MAX_TERRAIN_COLOR_PAGES_PER_DRAW = 4;
 export const MAX_TERRAIN_MASK_PAGES_PER_DRAW = 4;
-export const MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW = 4;
-export const MAX_OBJECT_MATERIAL_DETAIL_PAGES_PER_DRAW = 4;
-export const MAX_OBJECT_MATERIAL_INDEX_PAGES_PER_DRAW = 4;
+export const MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW = 1;
+export const MAX_OBJECT_MATERIAL_DETAIL_PAGES_PER_DRAW = 1;
+export const MAX_OBJECT_MATERIAL_INDEX_PAGES_PER_DRAW = 1;
 export const MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW = 8;
-export const MAX_OBJECT_MATERIAL_PALETTE_PAGES_PER_DRAW = 4;
+export const MAX_OBJECT_MATERIAL_PALETTE_PAGES_PER_DRAW = 1;
 
 export interface FrameState {
 	readonly camera: {

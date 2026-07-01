@@ -286,6 +286,20 @@ describe("browser landblock env-cell baker", () => {
 		expect(Array.from(drawUnit.materialSlotIndices)).toEqual([0, 0, 0]);
 		expect(Array.from(drawUnit.texCoords)).toEqual([0, 0, 1, 0, 0, 1]);
 		expect(result.textureUses).toEqual([]);
+		expect(result.objectVisualInstallSet.directDrawUnits).toHaveLength(1);
+		expect(result.objectVisualInstallSet.directDrawUnits[0]).toMatchObject({
+			cellStructure: {
+				cellStructureId: 0x0d000001,
+				kind: "cell-structure",
+			},
+			envCellId: 0xda550100,
+			kind: "structured-interior-geometry",
+			materialPlan: [{ surfaceId: 0x08000010 }],
+			sourceTriangleIds: ["polygon:1|surface:0|first:0|variant:none"],
+			surfaceIds: [0x08000010],
+			textureUseIds: [],
+		});
+		expect(result.objectVisualInstallSet.textureDependencies).toEqual([]);
 		expect(result.materialCoverage).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({

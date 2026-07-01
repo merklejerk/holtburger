@@ -2180,6 +2180,9 @@ Course correction during Phase 9M:
   Legacy `drawUnits`, `staticObjectRenderInstances`, `staticObjectVisualResources`, and
   `textureDependencies` remain populated from the old path in this slice so coordinator resource
   tracking and existing diagnostics stay stable while the runtime-facing install set moves first.
+- Env-cell structured-interior routing now also contributes recipe-first direct draw units to
+  `objectVisualInstallSet` from `createStructuredInteriorVisualBundleExpansion`, while legacy
+  structured-interior `drawUnits` remain populated for current sidecar/resource bookkeeping.
 - Spicy debt: static object result arrays and coordinator resource tracking still need the hard
   cutover to source direct draw-unit/resource ids from `objectVisualInstallSet`. Until then, the
   recipe-first install set is production-facing for object visual layers, but the worker result still
@@ -2188,6 +2191,10 @@ Course correction during Phase 9M:
   if generic object-visual baking rejects a geometry buffer. One fan-triangle fixture exposed a
   source/sidecar geometry mismatch that must be resolved before deleting the legacy object draw-unit
   arrays.
+- Spicy debt: structured-interior recipe publication also logs and skips when the recipe bundle
+  produces no render parts for publication metadata, such as all-materials-missing cases. That keeps
+  current bake behavior stable, but the hard cutover should make unsupported/missing materials skip
+  before publication metadata references part instances.
 
 ### Phase 10: Dynamic Resolver Cutover
 

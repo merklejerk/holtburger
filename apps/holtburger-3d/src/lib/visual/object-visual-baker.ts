@@ -28,6 +28,7 @@ export interface ObjectVisualBakeInput {
 		ObjectVisualGeometryBuffer
 	>;
 	readonly maxMaterialEntriesPerRenderPart?: number;
+	readonly partitionKeyByPartInstanceIndex?: ReadonlyMap<number, string>;
 	readonly renderPartIdPrefix: string;
 	readonly textureBindings?: ReadonlyMap<
 		ObjectVisualTextureRecipeId,
@@ -42,6 +43,7 @@ export interface ObjectVisualTextureBinding {
 
 export interface ObjectVisualBakedRenderPart extends VisualGeometryPayload {
 	readonly instanceIds: readonly string[];
+	readonly partInstanceIndices: readonly number[];
 	readonly renderPartId: string;
 	readonly sourcePartIndices: readonly number[];
 }
@@ -59,6 +61,8 @@ interface RenderablePrimitive {
 	readonly materialEntryKey: string;
 	readonly materialFamily: VisualGeometryMaterialFamily;
 	readonly materialPass: VisualGeometryMaterialPass;
+	readonly partInstanceIndex: number;
+	readonly partitionKey: string | null;
 	readonly renderState: VisualGeometryRenderState;
 	readonly sourcePartIndex: number | null;
 	readonly triangleFirstVertex: number;
@@ -112,7 +116,10 @@ function expandRenderablePrimitives(
 	input: ObjectVisualBakeInput,
 ): readonly RenderablePrimitive[] {
 	const primitives: RenderablePrimitive[] = [];
-	for (const instance of input.bundle.partInstances) {
+	for (const [
+		partInstanceIndex,
+		instance,
+	] of input.bundle.partInstances.entries()) {
 		const partRecipe = input.bundle.partRecipes.get(instance.partRecipeId);
 		if (!partRecipe) {
 			throw new Error(
@@ -180,6 +187,9 @@ function expandRenderablePrimitives(
 				materialEntryKey: createMaterialEntryKey(binding.materialRecipeId),
 				materialFamily: material.family,
 				materialPass: material.pass,
+				partInstanceIndex,
+				partitionKey:
+					input.partitionKeyByPartInstanceIndex?.get(partInstanceIndex) ?? null,
 				renderState: material.entry.renderState,
 				sourcePartIndex: instance.sourcePartIndex,
 				transform: new Float32Array(instance.transform),
@@ -420,6 +430,11 @@ function createRenderPart(options: {
 		materialFamily: firstPrimitive.materialFamily,
 		materialPass: firstPrimitive.materialPass,
 		materialSlotIndices,
+		partInstanceIndices: uniqueSortedNumbers(
+			options.partition.primitives.map(
+				(primitive) => primitive.partInstanceIndex,
+			),
+		),
 		positions,
 		renderPartId: options.renderPartId,
 		renderState: firstPrimitive.renderState,
@@ -519,6 +534,7 @@ function createPartitionKey(primitive: RenderablePrimitive): string {
 	return [
 		`family:${primitive.materialFamily}`,
 		`pass:${primitive.materialPass}`,
+		`partition:${primitive.partitionKey ?? "none"}`,
 		`state:${JSON.stringify(primitive.renderState)}`,
 		`sourcePart:${primitive.sourcePartIndex ?? "none"}`,
 		`textures:${primitive.materialEntry.primaryTextureUseId ?? ""}:${primitive.materialEntry.indexTextureUseId ?? ""}:${primitive.materialEntry.paletteTextureUseId ?? ""}:${primitive.materialEntry.detailTextureUseId ?? ""}`,

@@ -3,9 +3,11 @@ import type {
 	StaticObjectDrawUnitOwnership,
 	StaticObjectGeometryStaticDrawUnit,
 	StaticObjectRenderInstance,
+	StaticObjectSourceGeometryIdentity,
 	StaticObjectSortMetadata,
 	StaticObjectSourceMappingCoverage,
 	StaticSpatialRecord,
+	StructuredInteriorMaterialPlanEntry,
 	StructuredInteriorGeometryStaticDrawUnit,
 } from "../static/contracts";
 
@@ -52,6 +54,7 @@ export interface ObjectVisualStaticObjectDirectDrawUnitMetadata {
 }
 
 export interface ObjectVisualStaticInstancedResourceGroupMetadata {
+	readonly geometry: StaticObjectSourceGeometryIdentity;
 	/** Stable group id referenced by render instances without string joins. */
 	readonly groupId: ObjectVisualStaticResourceGroupId;
 	readonly kind: "static-object-instanced-resource-group";
@@ -87,8 +90,11 @@ export interface ObjectVisualStructuredInteriorDirectDrawUnitMetadata {
 	readonly kind: "structured-interior-direct-draw-unit";
 	readonly landblockId: number;
 	readonly localPlacement: StructuredInteriorGeometryStaticDrawUnit["localPlacement"];
+	readonly materialPlan: readonly StructuredInteriorMaterialPlanEntry[];
 	readonly memberId: string;
 	readonly partInstanceIndices: readonly ObjectVisualPartInstanceIndex[];
+	readonly sourceTriangleIds: readonly string[];
+	readonly surfaceIds: readonly number[];
 }
 
 export type ObjectVisualStaticSidecarKind =

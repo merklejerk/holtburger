@@ -19,15 +19,18 @@ import {
 	createStaticMaterialTextureRoleSchemaKey,
 	resolveStaticMaterialDetailTextureTiling,
 } from "../../bake/static-material-adapter";
-import { sliceStaticMaterialBatchCandidates } from "../../bake/static-material-batch-slicer";
 import {
 	createMaterialTextureDataUseKey,
 	createStaticMaterialTextureBindingRequirement,
 } from "../../bake/static-material-texture-policy";
 import type { TextureBindingRequirement, TexturePlacementSnapshot } from "../../../textures/placement";
-import { createObjectMaterialPageRequirementSliceGuard } from "../../bake/object-material-page-legality";
 import { emitStaticBakeWorkerTrace } from "../../bake/worker-trace";
 import { createStaticObjectMaterialCoverageReport } from "./static-object-material-coverage";
+import {
+	createObjectLikeDrawUnitPartitionKey,
+	splitObjectLikePartitionByMaterialTableBudget,
+	type ObjectLikeMaterialPartitionAxis,
+} from "./object-like-draw-unit-partition";
 import {
 	createStaticObjectMaterialUseKey,
 	planStaticObjectMaterials,
@@ -142,6 +145,8 @@ interface StaticObjectMaterialBatchAxis {
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
 	readonly textureRoleSchemaKey: string;
 	readonly textureRoleLayoutKey: string;
+	readonly textureBindingTupleKey: string;
+	readonly objectLike: ObjectLikeMaterialPartitionAxis;
 }
 
 interface StaticObjectOwnershipAxis {
@@ -241,32 +246,45 @@ export function partitionStaticObjectBatches(
 	const placementSnapshot = options.placementSnapshot;
 	const textureUseScopeId = options.textureUseScopeId;
 	const candidates = [
-		...createTriangleCandidates(payload, materialById, textureUseScopeId),
+		...createTriangleCandidates(
+			payload,
+			materialById,
+			textureUseScopeId,
+			placementSnapshot,
+		),
 	].sort(compareTriangleCandidates);
-	emitStaticBakeWorkerTrace("static-object-partition:candidates", {
+	emitStaticBakeWorkerTrace("static-object-partition:primitives", {
 		candidateCount: candidates.length,
 		domain: payload.domain,
 		landblockId: formatHex32(payload.landblock.landblockId),
 	});
-	const partitions = sliceStaticMaterialBatchCandidates({
-		createSliceGuard:
-			placementSnapshot && textureUseScopeId
-				? () =>
-						createObjectMaterialPageRequirementSliceGuard<StaticObjectTriangleCandidate>({
-							diagnosticSubject: "Static object",
-							placementSnapshot,
-						})
-				: undefined,
-		candidates,
-		maxMaterialEntriesPerSlice: STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE,
-	}).map((slice) =>
-		createBatchPartition({
-			candidates: slice.candidates,
-			batchIndex: slice.batchIndex,
-			batchKey: slice.batchKey,
-			sliceIndex: slice.sliceIndex,
-		}),
+	const partitionGroups = groupStaticObjectPrimitivesByPartitionKey(candidates);
+	emitStaticBakeWorkerTrace("static-object-partition:partition-key-groups", {
+		candidateCount: candidates.length,
+		domain: payload.domain,
+		groupCount: partitionGroups.length,
+		landblockId: formatHex32(payload.landblock.landblockId),
+	});
+	const partitions = partitionGroups.flatMap((group, batchIndex) =>
+		splitObjectLikePartitionByMaterialTableBudget({
+			primitives: group.candidates,
+			maxMaterialEntriesPerPartition:
+				STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE,
+		}).map((split, sliceIndex) =>
+			createBatchPartition({
+				candidates: split,
+				batchIndex,
+				batchKey: group.batchKey,
+				sliceIndex,
+			}),
+		),
 	);
+	emitStaticBakeWorkerTrace("static-object-partition:secondary-budget-split", {
+		candidateCount: candidates.length,
+		domain: payload.domain,
+		landblockId: formatHex32(payload.landblock.landblockId),
+		partitionCount: partitions.length,
+	});
 	emitStaticBakeWorkerTrace("static-object-partition:end", {
 		candidateCount: candidates.length,
 		domain: payload.domain,
@@ -309,6 +327,7 @@ function createTriangleCandidates(
 	payload: StaticObjectBatchPayload,
 	materialById: ReadonlyMap<string, StaticMaterialPlan>,
 	textureUseScopeId: string | undefined,
+	placementSnapshot: TexturePlacementSnapshot | undefined,
 ): readonly StaticObjectTriangleCandidate[] {
 	const sourceByKey = new Map(
 		payload.sourceAssets.map((source) => [
@@ -406,7 +425,9 @@ function createTriangleCandidates(
 					partIndex: part.partIndex,
 					materialEntryKey,
 					plan,
+					placementSnapshot,
 					sourceKey,
+					textureRequirements,
 					textureRoleSchemaKey,
 					textureRoleLayoutKey,
 					textureWrapMode,
@@ -638,12 +659,12 @@ function createCoarseTablePlan(options: {
 					materialIds: uniqueSorted([...materialIdSet]),
 				};
 			}),
-		pass: options.partitionAxes.material.pass,
-		renderCoverage: options.partitionAxes.material.renderCoverage,
+		pass: options.partitionAxes.material.objectLike.pass,
+		renderCoverage: options.partitionAxes.material.objectLike.renderCoverage,
 		sortPolicy: options.partitionAxes.sort.policy,
 		sourceTriangleIds: options.sourceTriangleIds,
-		tableFamily: options.partitionAxes.material.family,
-		tableSchemaKey: options.partitionAxes.material.textureRoleSchemaKey,
+		tableFamily: options.partitionAxes.material.objectLike.family,
+		tableSchemaKey: options.partitionAxes.material.objectLike.textureRoleSchemaKey,
 		textureDataUses: options.textureDataUses,
 		visibilityPolicy: options.partitionAxes.visibility.policy,
 	};
@@ -678,16 +699,35 @@ function createPartitionAxes(options: {
 	readonly partIndex: number;
 	readonly materialEntryKey: string;
 	readonly materialColorKey: string;
+	readonly placementSnapshot: TexturePlacementSnapshot | undefined;
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
+	readonly textureRequirements: readonly TextureBindingRequirement[];
 	readonly textureRoleSchemaKey: string;
 	readonly textureRoleLayoutKey: string;
 }): StaticObjectBatchPartitionAxes {
 	const sort = createSortAxis(options.plan);
-	const material = createMaterialBatchAxis({
+	const objectLikePartitionKey = createObjectLikeDrawUnitPartitionKey({
 		...options,
 		includeConcreteEntryInKey:
 			sort.policy === "transparent-object-part-sortable",
+		texturePlacementSnapshot: options.placementSnapshot,
 	});
+	const material = {
+		alphaMode: objectLikePartitionKey.material.alphaMode,
+		blendMode: objectLikePartitionKey.material.blendMode,
+		family: objectLikePartitionKey.material.family,
+		key: objectLikePartitionKey.key,
+		materialColorKey: objectLikePartitionKey.material.materialColorKey,
+		materialEntryKey: objectLikePartitionKey.material.materialEntryKey,
+		objectLike: objectLikePartitionKey.material,
+		pass: objectLikePartitionKey.material.pass,
+		renderCoverage: objectLikePartitionKey.material.renderCoverage,
+		textureBindingTupleKey:
+			objectLikePartitionKey.material.textureBindingTupleKey,
+		textureRoleLayoutKey: objectLikePartitionKey.material.textureRoleLayoutKey,
+		textureRoleSchemaKey: objectLikePartitionKey.material.textureRoleSchemaKey,
+		textureWrapMode: objectLikePartitionKey.material.textureWrapMode,
+	};
 	const ownership = createOwnershipAxis({
 		...options,
 		includeObjectPart: sort.policy === "transparent-object-part-sortable",
@@ -702,40 +742,28 @@ function createPartitionAxes(options: {
 	};
 }
 
-function createMaterialBatchAxis(options: {
-	readonly plan: StaticMaterialPlan;
-	readonly materialEntryKey: string;
-	readonly materialColorKey: string;
-	readonly includeConcreteEntryInKey: boolean;
-	readonly textureWrapMode: StaticObjectTextureWrapMode;
-	readonly textureRoleSchemaKey: string;
-	readonly textureRoleLayoutKey: string;
-}): StaticObjectMaterialBatchAxis {
-	const key = [
-		`family:${options.plan.family}`,
-		`coverage:${options.plan.renderCoverage}`,
-		`pass:${options.plan.pass}`,
-		`alpha:${options.plan.alphaPolicy.mode}`,
-		`blend:${options.plan.blend.mode}`,
-		`wrap:${options.textureWrapMode}`,
-		options.includeConcreteEntryInKey
-			? `entry:${options.materialEntryKey}`
-			: `schema:${options.textureRoleSchemaKey}`,
-	].join("|");
+function groupStaticObjectPrimitivesByPartitionKey(
+	candidates: readonly StaticObjectTriangleCandidate[],
+): readonly {
+	readonly batchKey: string;
+	readonly candidates: readonly StaticObjectTriangleCandidate[];
+}[] {
+	const groups = new Map<string, StaticObjectTriangleCandidate[]>();
+	for (const candidate of candidates) {
+		const group = groups.get(candidate.batchKey);
+		if (group) {
+			group.push(candidate);
+		} else {
+			groups.set(candidate.batchKey, [candidate]);
+		}
+	}
 
-	return {
-		alphaMode: options.plan.alphaPolicy.mode,
-		blendMode: options.plan.blend.mode,
-		family: options.plan.family,
-		key,
-		materialEntryKey: options.materialEntryKey,
-		materialColorKey: options.materialColorKey,
-		pass: options.plan.pass,
-		renderCoverage: options.plan.renderCoverage,
-		textureRoleSchemaKey: options.textureRoleSchemaKey,
-		textureRoleLayoutKey: options.textureRoleLayoutKey,
-		textureWrapMode: options.textureWrapMode,
-	};
+	return [...groups.entries()]
+		.sort(([left], [right]) => left.localeCompare(right))
+		.map(([batchKey, group]) => ({
+			batchKey,
+			candidates: group,
+		}));
 }
 
 function createOwnershipAxis(options: {

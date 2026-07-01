@@ -1,6 +1,6 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation in progress. Phases 0-2 are complete. This document defines the target model,
+Status: implementation in progress. Phases 0-3 are complete. This document defines the target model,
 north stars, risk surface, and phased cutover plan for replacing static-vs-dynamic object visual
 worker bifurcation with a shared object-like visual recipe graph.
 
@@ -998,6 +998,31 @@ Deletion criteria:
 - Delete object visual string placement item id helpers and tests once all object visual placement
   callers use numeric ids.
 
+Phase 3 completion notes:
+
+- Added numeric object-visual placement contracts with `TexturePlacementItemId`,
+  `ObjectVisualTexturePlacementIntent`, and `ObjectVisualTexturePlacementSnapshot`.
+- Split bake lookup identity from runtime dependency identity: object visual bakers now look up
+  placement by numeric `placementItemId`, while `textureUseId` remains the string handle for
+  renderer binding keys and texture dependency pin/release accounting.
+- Added `TextureManager.placeObjectVisualTextureIntents`, which rebases object-visual placement
+  intents to dense numeric ids for each placement operation and returns an
+  `itemIdsByTextureUseId` bridge table for baker boundary resolution.
+- Split static source-ready placement work into `objectVisualPlacementIntents` and
+  `terrainPlacementIntents`. Runtime placement now calls the object-visual numeric path for static
+  objects, structured interiors, and dynamic visuals, while terrain remains on the existing string
+  snapshot shape.
+- Cut over static object partitions, structured interiors, dynamic visual baking, and the shared
+  object-material partition helper to numeric object-visual placement ids.
+- Kept terrain deliberately string-shaped and added a terrain snapshot guard so object-visual
+  snapshots cannot be accidentally consumed by terrain baking.
+- Verification:
+  `npm --prefix apps/holtburger-3d run check`
+  `npm --prefix apps/holtburger-3d run test:ts -- src/lib/textures/placement.test.ts src/lib/textures/texture-manager.test.ts src/lib/visual/object-material-draw-unit-partition.test.ts src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/static/env-cells/bake/env-cell-system-baker.test.ts src/lib/dynamic/visual-baker.test.ts`
+- Debt carried forward: Phase 6 should move object-visual placement id allocation out of the current
+  domain-specific planning helpers and into the shared recipe/placement planner so ids come from one
+  bundle-local key table instead of being rebased at the texture manager boundary.
+
 ### Phase 4: Neutral Object Visual Material Planner
 
 Goal: replace static/dynamic-specific material planning with one object visual material recipe path.
@@ -1484,6 +1509,13 @@ Acceptance criteria:
   resolver worker can request pixel-bearing render-surface payloads for metadata.
 - Phase 2 confirmed palette metadata only needs identity and color count for current resolver
   material planning. Palette color data remains a texture preparation concern.
+- Phase 3 confirmed object-visual bake lookup can be numeric without converting runtime texture
+  dependency handles to numbers. `textureUseId` is still the correct string identity for renderer
+  binding keys and pin/release accounting; `placementItemId` is the numeric bake-time lookup id.
+- Phase 3 used manager-side rebasing to make placement ids dense across combined static object,
+  structured-interior, and dynamic placement work. This is a migration bridge, not the final recipe
+  identity source; Phase 6 should replace it with shared object-visual placement planning from the
+  bundle key tables.
 
 ## Risks And Mitigations
 

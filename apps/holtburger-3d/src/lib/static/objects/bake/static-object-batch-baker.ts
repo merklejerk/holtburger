@@ -32,6 +32,7 @@ import type {
 	TextureResourceDependencies,
 	TextureResourceRoleDependency,
 } from "../../../textures/placement";
+import { requireObjectVisualTexturePlacementSnapshot } from "../../../textures/placement";
 import { createLayerPeerRecordOwnerForStaticBakeTask } from "../../layer-owners";
 import {
 	AC_UNIT_SCALE,
@@ -286,7 +287,10 @@ function bakeStaticObjectBatchItem(
 	const sourceIndex = new StaticObjectBakeSourceIndex(scope, input.attachments);
 	const resourceIdPrefix = item.task.ownerId;
 	const partitionPlan = partitionStaticObjectBatches(scope, {
-		placementSnapshot: input.texturePlacementSnapshot,
+		placementSnapshot: requireObjectVisualTexturePlacementSnapshot(
+			input.texturePlacementSnapshot,
+			"Static object bake",
+		),
 		textureUseScopeId: resourceIdPrefix,
 	});
 	emitStaticBakeWorkerTrace("static-object-item:partitioned", {

@@ -50,8 +50,12 @@ import {
 	classifyTexturePlacementPool,
 	classifyTextureUsagePurpose,
 	createTexturePlacementBucketKey,
+	createTexturePlacementItemId,
+	type ObjectVisualTexturePlacementIntent,
+	type ObjectVisualTexturePlacementSnapshot,
 	type TexturePlacement as PlannedTexturePlacement,
 	type TexturePlacementBucketKey,
+	type TexturePlacementLookupId,
 	type TexturePlacementIntent,
 	type TexturePlacementPool,
 	type TextureResourceDependencies,
@@ -236,51 +240,85 @@ export class TextureManager {
 		};
 	}
 
-	async placeTextureIntents(
-		input: TextureIntentPlacementInput,
-	): Promise<TexturePlacementSnapshot> {
+	async placeTextureIntents<
+		TPlacementItemId extends TexturePlacementLookupId,
+	>(input: {
+		readonly intents: readonly TexturePlacementIntent<TPlacementItemId>[];
+	}): Promise<TexturePlacementSnapshot<TPlacementItemId>> {
 		return this.#runTextureMutation(async () => {
-		const pendingPlacements = new Map<string, PendingTexturePlacement>();
-		const stagedPlacements: StagedTexturePlacement[] = [];
-		const textureUses = input.intents.map((intent) =>
-			createVisualTextureUseCommitFromIntent(intent),
-		);
-
-		for (const textureUse of textureUses) {
-			stagedPlacements.push(
-				await this.#stageTexturePlacement(textureUse, pendingPlacements),
+			const pendingPlacements = new Map<string, PendingTexturePlacement>();
+			const stagedPlacements: StagedTexturePlacement[] = [];
+			const textureUses = input.intents.map((intent) =>
+				createVisualTextureUseCommitFromIntent(intent),
 			);
-		}
 
-		await this.#packPendingTexturePlacements(
-			uniquePendingTexturePlacements(pendingPlacements),
-			{
-				reclaimZeroReferencePages: false,
-				retainedTextureRefIds: collectStagedTextureRefIds(stagedPlacements),
-			},
-		);
-
-		const placementsByItemId = new Map<string, PlannedTexturePlacement>();
-		for (const textureUse of textureUses) {
-			const textureKey = createVisualTextureKey(textureUse);
-			const entry =
-				this.#getRegistry(
-					textureUse.domain,
-					textureUse.placementBucketKey,
-				).entries.get(textureKey) ?? pendingPlacements.get(textureKey)?.entry;
-			if (!entry) {
-				throw new Error(
-					`Texture placement ${textureUse.textureUseId} was not committed after packing.`,
+			for (const textureUse of textureUses) {
+				stagedPlacements.push(
+					await this.#stageTexturePlacement(textureUse, pendingPlacements),
 				);
 			}
-			placementsByItemId.set(
-				textureUse.textureUseId,
-				toPlannedTexturePlacement(entry, textureUse.textureUseId),
-			);
-		}
 
-		return { placementsByItemId };
+			await this.#packPendingTexturePlacements(
+				uniquePendingTexturePlacements(pendingPlacements),
+				{
+					reclaimZeroReferencePages: false,
+					retainedTextureRefIds: collectStagedTextureRefIds(stagedPlacements),
+				},
+			);
+
+			const placementsByItemId = new Map<
+				TPlacementItemId,
+				PlannedTexturePlacement<TPlacementItemId>
+			>();
+			for (let index = 0; index < textureUses.length; index += 1) {
+				const textureUse = textureUses[index];
+				const intent = input.intents[index];
+				if (!textureUse || !intent) {
+					throw new Error(
+						"Texture placement intent commit lost item ordering.",
+					);
+				}
+				const textureKey = createVisualTextureKey(textureUse);
+				const entry =
+					this.#getRegistry(
+						textureUse.domain,
+						textureUse.placementBucketKey,
+					).entries.get(textureKey) ?? pendingPlacements.get(textureKey)?.entry;
+				if (!entry) {
+					throw new Error(
+						`Texture placement ${textureUse.textureUseId} was not committed after packing.`,
+					);
+				}
+				placementsByItemId.set(
+					intent.itemId,
+					toPlannedTexturePlacement(
+						entry,
+						intent.itemId,
+						textureUse.textureUseId,
+					),
+				);
+			}
+
+			return { placementsByItemId };
 		});
+	}
+
+	async placeObjectVisualTextureIntents(input: {
+		readonly intents: readonly ObjectVisualTexturePlacementIntent[];
+	}): Promise<ObjectVisualTexturePlacementSnapshot> {
+		const rebasedIntents = input.intents.map((intent, index) => ({
+			...intent,
+			itemId: createTexturePlacementItemId(index),
+		}));
+		const snapshot = await this.placeTextureIntents({
+			intents: rebasedIntents,
+		});
+		return {
+			...snapshot,
+			itemIdsByTextureUseId: new Map(
+				rebasedIntents.map((intent) => [intent.textureUseId, intent.itemId]),
+			),
+		};
 	}
 
 	pinTextureResourceDependencies(
@@ -328,21 +366,21 @@ export class TextureManager {
 	): Promise<TexturePlacementUpdate | null> {
 		return this.#runTextureMutation(() =>
 			this.#applyVisualTextureUseDelta({
-			removedOwners: [
-				...collectStaticDrawUnitResourceIds(delta.removedResources).map(
-					(drawUnitId): StaticTextureUseOwner => ({
-						drawUnitId,
-						kind: "draw-unit",
-					}),
-				),
-				...collectStaticObjectVisualResourceIds(delta.removedResources).map(
-					(resourceId): StaticTextureUseOwner => ({
-						kind: "static-object-visual-resource",
-						resourceId,
-					}),
-				),
-			],
-			textureUses: delta.textureUses.map(createStaticVisualTextureUseCommit),
+				removedOwners: [
+					...collectStaticDrawUnitResourceIds(delta.removedResources).map(
+						(drawUnitId): StaticTextureUseOwner => ({
+							drawUnitId,
+							kind: "draw-unit",
+						}),
+					),
+					...collectStaticObjectVisualResourceIds(delta.removedResources).map(
+						(resourceId): StaticTextureUseOwner => ({
+							kind: "static-object-visual-resource",
+							resourceId,
+						}),
+					),
+				],
+				textureUses: delta.textureUses.map(createStaticVisualTextureUseCommit),
 			}),
 		);
 	}
@@ -352,8 +390,8 @@ export class TextureManager {
 	): Promise<TexturePlacementUpdate | null> {
 		return this.#runTextureMutation(() =>
 			this.#applyVisualTextureUseDelta({
-			removedOwners: delta.removedOwners,
-			textureUses: delta.textureUses.map(createDynamicVisualTextureUseCommit),
+				removedOwners: delta.removedOwners,
+				textureUses: delta.textureUses.map(createDynamicVisualTextureUseCommit),
 			}),
 		);
 	}
@@ -522,7 +560,10 @@ export class TextureManager {
 					continue;
 				}
 
-				const registry = this.#getRegistry(entry.domain, entry.placementBucketKey);
+				const registry = this.#getRegistry(
+					entry.domain,
+					entry.placementBucketKey,
+				);
 				deleteRegistryEntryAliases(registry, entry);
 				registry.revision += 1;
 				if (!this.#hasTextureRef(entry.textureRefId)) {
@@ -1197,7 +1238,7 @@ function createDynamicVisualTextureUseCommit(
 }
 
 function createVisualTextureUseCommitFromIntent(
-	intent: TexturePlacementIntent,
+	intent: TexturePlacementIntent<TexturePlacementLookupId>,
 ): VisualTextureUseCommit {
 	return {
 		domain: intent.domain,
@@ -1205,14 +1246,17 @@ function createVisualTextureUseCommitFromIntent(
 		samplingPolicy: intent.source.samplingPolicy,
 		source: intent.source.dataUse,
 		placementBucketKey: intent.placementBucketKey,
-		textureUseId: intent.itemId,
+		textureUseId: intent.textureUseId,
 	};
 }
 
-function toPlannedTexturePlacement(
+function toPlannedTexturePlacement<
+	TPlacementItemId extends TexturePlacementLookupId,
+>(
 	entry: VisualTextureRegistryEntry,
-	itemId = entry.itemId,
-): PlannedTexturePlacement {
+	itemId: TPlacementItemId,
+	textureUseId: string,
+): PlannedTexturePlacement<TPlacementItemId> {
 	return {
 		height: entry.textureHeight,
 		itemId,
@@ -1221,6 +1265,7 @@ function toPlannedTexturePlacement(
 		purpose: entry.purpose,
 		rect: entry.rect,
 		textureRefId: entry.textureRefId,
+		textureUseId,
 		width: entry.textureWidth,
 	};
 }
@@ -1229,7 +1274,9 @@ function createVisualTexturePlacementBucketRegistryKey(
 	domain: VisualTextureDomain,
 	placementBucketKey: TexturePlacementBucketKey,
 ): VisualTexturePlacementBucketRegistryKey {
-	return [domain, placementBucketKey].join(":") as VisualTexturePlacementBucketRegistryKey;
+	return [domain, placementBucketKey].join(
+		":",
+	) as VisualTexturePlacementBucketRegistryKey;
 }
 
 function findRegistryEntryBySource(
@@ -1479,9 +1526,12 @@ function createTextureRefId(
 	placementBucketKey: string,
 	textureUse: Pick<VisualTextureUseCommit, "textureUseId">,
 ): string {
-	return ["texture-ref", domain, placementBucketKey, textureUse.textureUseId].join(
-		":",
-	);
+	return [
+		"texture-ref",
+		domain,
+		placementBucketKey,
+		textureUse.textureUseId,
+	].join(":");
 }
 
 function createTexturePageRefId(
@@ -1941,9 +1991,7 @@ function resolveTexturePageSlot(options: {
 class TerrainDrawUnitRolePageSlots {
 	readonly #slotKeysByDrawUnitAndKind = new Map<string, string[]>();
 
-	resolveSlot(
-		input: TerrainRolePageSlotInput,
-	): TextureBinding["pageSlot"] {
+	resolveSlot(input: TerrainRolePageSlotInput): TextureBinding["pageSlot"] {
 		const kind = createTerrainTextureRolePageKind(input.usage);
 		const drawUnitKindKey = `${input.drawUnitId}:${kind}`;
 

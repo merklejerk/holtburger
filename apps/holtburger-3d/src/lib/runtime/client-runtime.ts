@@ -912,9 +912,14 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#staticCoordinator = staticCoordinator;
 		this.#staticCoordinator.setSourceReadyHandler(async (work) => {
 			const texturePlacementStartedAt = nowMs();
-			const placementSnapshot = await this.#textureManager.placeTextureIntents({
-				intents: work.placementIntents,
-			});
+			const placementSnapshot =
+				work.domain === "outdoor-terrain"
+					? await this.#textureManager.placeTextureIntents({
+							intents: work.terrainPlacementIntents,
+						})
+					: await this.#textureManager.placeObjectVisualTextureIntents({
+							intents: work.objectVisualPlacementIntents,
+						});
 			await work.continueWithPlacement(placementSnapshot, {
 				texturePlacementMs: nowMs() - texturePlacementStartedAt,
 			});
@@ -1023,7 +1028,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 
 			const texturePlanning = createDynamicVisualTexturePlanning(recipe);
 			const texturePlacementSnapshot =
-				await this.#textureManager.placeTextureIntents({
+				await this.#textureManager.placeObjectVisualTextureIntents({
 					intents: texturePlanning.placementIntents,
 				});
 			if (!this.#isCurrentRuntimeDynamicVisualPrep(options)) {
@@ -1144,10 +1149,10 @@ class ClientRuntimeImpl implements ClientRuntime {
 				: null;
 		this.#setRenderAnchorLandblockId(nextAnchor);
 		const reconciliation = this.#reconcileStaticRetention(this.#sceneInterest);
-			this.#dynamicEntityController.retainLayerOwners(
-				reconciliation.retainedLayerOwners,
-			);
-			this.#dynamicEntityController.clearEvictedRuntimeRenderResidences(
+		this.#dynamicEntityController.retainLayerOwners(
+			reconciliation.retainedLayerOwners,
+		);
+		this.#dynamicEntityController.clearEvictedRuntimeRenderResidences(
 			reconciliation.retainedLayerOwners,
 		);
 		this.#enqueueDynamicRendererResourceSync();
@@ -3918,19 +3923,19 @@ function createStaticCoordinatorDiagnosticsReport(
 		},
 		timingSummary: createStaticCoordinatorTimingSummary(snapshot.recentTiming),
 	};
-		return {
-			...report,
-			...(inFlightTasks.length > 0 ? { inFlightTasks } : {}),
-			...(recentFailures.length > 0 ? { recentFailures } : {}),
-			...(snapshot.sourceResolutionDiagnostics.length > 0
-				? { sourceResolutions: snapshot.sourceResolutionDiagnostics }
-				: {}),
-			...(snapshot.staticBakerDiagnostics &&
-			snapshot.staticBakerDiagnostics.pendingJobs.length > 0
-				? { staticBaker: snapshot.staticBakerDiagnostics }
-				: {}),
-		};
-	}
+	return {
+		...report,
+		...(inFlightTasks.length > 0 ? { inFlightTasks } : {}),
+		...(recentFailures.length > 0 ? { recentFailures } : {}),
+		...(snapshot.sourceResolutionDiagnostics.length > 0
+			? { sourceResolutions: snapshot.sourceResolutionDiagnostics }
+			: {}),
+		...(snapshot.staticBakerDiagnostics &&
+		snapshot.staticBakerDiagnostics.pendingJobs.length > 0
+			? { staticBaker: snapshot.staticBakerDiagnostics }
+			: {}),
+	};
+}
 
 function createRendererDiagnosticsSummary(
 	snapshot: RendererSnapshot,
@@ -4692,9 +4697,7 @@ function createStaticCoordinatorTimingSummary(
 		),
 		placementIntentMs: roundMilliseconds(
 			sumNumbers(
-				timings.map((timing) =>
-					nullableMilliseconds(timing.placementIntentMs),
-				),
+				timings.map((timing) => nullableMilliseconds(timing.placementIntentMs)),
 			),
 		),
 		reportCount: timings.length,

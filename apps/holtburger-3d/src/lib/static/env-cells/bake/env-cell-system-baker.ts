@@ -23,12 +23,13 @@ import type {
 } from "../../contracts";
 import { uniqueSortedStaticTextureUseOwners } from "../../contracts";
 import type {
-	TextureBindingRequirement,
-	TexturePlacementSnapshot,
+	ObjectVisualTextureBindingRequirement,
+	ObjectVisualTexturePlacementSnapshot,
 	TextureResourceDependencies,
 	TextureResourceRoleDependency,
 	TextureUsagePurpose,
 } from "../../../textures/placement";
+import { requireObjectVisualTexturePlacementSnapshot } from "../../../textures/placement";
 import { createLayerPeerRecordOwnerForStaticBakeTask } from "../../layer-owners";
 import {
 	AC_UNIT_SCALE,
@@ -70,7 +71,8 @@ import {
 } from "../../objects/bake/static-object-renderability";
 
 const MAX_STRUCTURED_INTERIOR_MATERIAL_ENTRIES_PER_DRAW = 8;
-const EMPTY_TEXTURE_PLACEMENT_SNAPSHOT: TexturePlacementSnapshot = {
+const EMPTY_TEXTURE_PLACEMENT_SNAPSHOT: ObjectVisualTexturePlacementSnapshot = {
+	itemIdsByTextureUseId: new Map(),
 	placementsByItemId: new Map(),
 };
 
@@ -78,7 +80,7 @@ interface StructuredInteriorTriangleCandidate {
 	readonly batchKey: string;
 	readonly materialEntryKey: string;
 	readonly materialPlan: StaticMaterialPlan;
-	readonly textureRequirements: readonly TextureBindingRequirement[];
+	readonly textureRequirements: readonly ObjectVisualTextureBindingRequirement[];
 	readonly sourceTriangleId: string;
 	readonly surfaceId: number;
 	readonly triangle: EnvCellCellStructureGeometryAttachment["triangles"][number];
@@ -238,11 +240,19 @@ function bakeLandblockEnvCellItem(
 		payload,
 		task: item.task,
 	});
+	const placementSnapshot =
+		input.texturePlacementSnapshot === undefined
+			? EMPTY_TEXTURE_PLACEMENT_SNAPSHOT
+			: requireObjectVisualTexturePlacementSnapshot(
+					input.texturePlacementSnapshot,
+					"Structured interior bake",
+				);
 	const drawUnits = createStructuredInteriorDrawUnits(
 		input,
 		item.task,
 		payload,
 		materialPlansByEnvCellId,
+		placementSnapshot,
 	);
 	const portalInteriorRecord = createPortalInteriorRecord(owner, payload);
 
@@ -268,7 +278,7 @@ function bakeLandblockEnvCellItem(
 		}),
 		textureDependencies: createStructuredInteriorTextureDependencies(
 			drawUnits,
-			input.texturePlacementSnapshot ?? EMPTY_TEXTURE_PLACEMENT_SNAPSHOT,
+			placementSnapshot,
 		),
 	};
 }
@@ -281,11 +291,10 @@ function createStructuredInteriorDrawUnits(
 		number,
 		StructuredInteriorCellMaterialPlan
 	>,
+	placementSnapshot: ObjectVisualTexturePlacementSnapshot,
 ): readonly StructuredInteriorGeometryStaticDrawUnit[] {
 	const geometrySurfaceOmissions: StructuredInteriorGeometrySurfaceOmission[] =
 		[];
-	const placementSnapshot =
-		input.texturePlacementSnapshot ?? EMPTY_TEXTURE_PLACEMENT_SNAPSHOT;
 	const drawUnits = payload.envCells.flatMap((envCell) => {
 		if (envCell.renderGeometry.triangleCount === 0) {
 			return [];
@@ -311,18 +320,18 @@ function createStructuredInteriorDrawUnits(
 			envCell,
 			placementSnapshot,
 		});
-		const partitions =
-			groupStructuredInteriorPrimitivesByPartitionKey(candidates).flatMap(
-				(group, batchIndex) =>
-					splitObjectMaterialPartitionByMaterialTableBudget({
-						maxMaterialEntriesPerPartition:
-							MAX_STRUCTURED_INTERIOR_MATERIAL_ENTRIES_PER_DRAW,
-						primitives: group.candidates,
-					}).map((split, splitIndex) => ({
-						candidates: split,
-						sliceId: `slice/${batchIndex}/${splitIndex}`,
-					})),
-			);
+		const partitions = groupStructuredInteriorPrimitivesByPartitionKey(
+			candidates,
+		).flatMap((group, batchIndex) =>
+			splitObjectMaterialPartitionByMaterialTableBudget({
+				maxMaterialEntriesPerPartition:
+					MAX_STRUCTURED_INTERIOR_MATERIAL_ENTRIES_PER_DRAW,
+				primitives: group.candidates,
+			}).map((split, splitIndex) => ({
+				candidates: split,
+				sliceId: `slice/${batchIndex}/${splitIndex}`,
+			})),
+		);
 
 		return partitions.map((slice) =>
 			createStructuredInteriorDrawUnit({
@@ -700,7 +709,7 @@ function createStructuredInteriorTriangleCandidates(options: {
 	readonly envCell: LandblockEnvCellStaticFacts;
 	readonly geometrySurfaceOmissions: StructuredInteriorGeometrySurfaceOmission[];
 	readonly materialPlan: StructuredInteriorCellMaterialPlan;
-	readonly placementSnapshot: TexturePlacementSnapshot | undefined;
+	readonly placementSnapshot: ObjectVisualTexturePlacementSnapshot;
 	readonly task: StaticBakeTask;
 }): readonly StructuredInteriorTriangleCandidate[] {
 	return options.attachment.triangles
@@ -734,11 +743,13 @@ function createStructuredInteriorTriangleCandidates(options: {
 					plan,
 					textureWrapMode: resolveStructuredInteriorPlanTextureWrapMode(plan),
 				});
-				const textureRequirements =
-					createStructuredInteriorTextureRequirements({
+				const textureRequirements = createStructuredInteriorTextureRequirements(
+					{
+						placementSnapshot: options.placementSnapshot,
 						plan,
 						task: options.task,
-					});
+					},
+				);
 				return {
 					batchKey: createStructuredInteriorBatchKey({
 						diagnosticSubject: `Structured interior ${formatHex32(options.envCell.identity.envCellId)}`,
@@ -765,26 +776,35 @@ function createStructuredInteriorTriangleCandidates(options: {
 }
 
 function createStructuredInteriorTextureRequirements(options: {
+	readonly placementSnapshot: ObjectVisualTexturePlacementSnapshot;
 	readonly plan: StaticMaterialPlan;
 	readonly task: StaticBakeTask;
-}): readonly TextureBindingRequirement[] {
+}): readonly ObjectVisualTextureBindingRequirement[] {
 	const wrapMode = resolveStructuredInteriorPlanTextureWrapMode(options.plan);
 	return options.plan.textureRoles
 		.map((role) => role.dataUse)
 		.filter(isCurrentlyStageableStaticObjectDataUse)
-		.map((dataUse) =>
-			createStructuredInteriorTextureBindingRequirement({
+		.map((dataUse) => {
+			const requirement = createStructuredInteriorTextureBindingRequirement({
 				dataUse,
 				task: options.task,
 				wrapMode,
-			}),
-		);
+			});
+			return {
+				...requirement,
+				placementItemId: requireObjectVisualPlacementItemId({
+					placementSnapshot: options.placementSnapshot,
+					subject: "Structured interior material",
+					textureUseId: requirement.textureUseId,
+				}),
+			};
+		});
 }
 
 function assertStructuredInteriorPlacementRequirements(options: {
 	readonly candidates: readonly StructuredInteriorTriangleCandidate[];
 	readonly envCell: LandblockEnvCellStaticFacts;
-	readonly placementSnapshot: TexturePlacementSnapshot;
+	readonly placementSnapshot: ObjectVisualTexturePlacementSnapshot;
 }): void {
 	for (const candidate of options.candidates) {
 		for (const requirement of candidate.textureRequirements) {
@@ -851,9 +871,9 @@ function createStructuredInteriorSliceMaterialEntries(
 function createStructuredInteriorBatchKey(options: {
 	readonly diagnosticSubject: string;
 	readonly materialEntryKey: string;
-	readonly placementSnapshot: TexturePlacementSnapshot | undefined;
+	readonly placementSnapshot: ObjectVisualTexturePlacementSnapshot | undefined;
 	readonly plan: StaticMaterialPlan;
-	readonly textureRequirements: readonly TextureBindingRequirement[];
+	readonly textureRequirements: readonly ObjectVisualTextureBindingRequirement[];
 }): string {
 	return createObjectMaterialDrawUnitPartitionKey({
 		diagnosticSubject: options.diagnosticSubject,
@@ -975,7 +995,7 @@ function createStructuredInteriorTextureUses(options: {
 
 function createStructuredInteriorTextureDependencies(
 	drawUnits: readonly StructuredInteriorGeometryStaticDrawUnit[],
-	texturePlacementSnapshot: TexturePlacementSnapshot,
+	texturePlacementSnapshot: ObjectVisualTexturePlacementSnapshot,
 ): readonly TextureResourceDependencies[] {
 	return drawUnits.flatMap((drawUnit) => {
 		const roles = createStructuredInteriorTextureRoleDependencies(
@@ -991,14 +1011,17 @@ function createStructuredInteriorTextureDependencies(
 
 function createStructuredInteriorTextureRoleDependencies(
 	drawUnit: StructuredInteriorGeometryStaticDrawUnit,
-	texturePlacementSnapshot: TexturePlacementSnapshot,
+	texturePlacementSnapshot: ObjectVisualTexturePlacementSnapshot,
 ): readonly TextureResourceRoleDependency[] {
 	const itemIdsByPurpose = new Map<TextureUsagePurpose, Set<string>>();
 	for (const bindingKey of drawUnit.textureUseIds) {
-		// Structured-interior binding keys intentionally remain placement item ids
-		// during Phase 14; the placement snapshot owns dependency purpose.
+		const placementItemId = requireObjectVisualPlacementItemId({
+			placementSnapshot: texturePlacementSnapshot,
+			subject: `Structured interior draw unit ${drawUnit.drawUnitId}`,
+			textureUseId: bindingKey,
+		});
 		const placement =
-			texturePlacementSnapshot.placementsByItemId.get(bindingKey);
+			texturePlacementSnapshot.placementsByItemId.get(placementItemId);
 		if (!placement) {
 			throw new Error(
 				`Structured interior draw unit ${drawUnit.drawUnitId} is missing pre-bake texture placement ${bindingKey}.`,
@@ -1016,6 +1039,22 @@ function createStructuredInteriorTextureRoleDependencies(
 		itemIds: Array.from(itemIds).sort(),
 		purpose,
 	})).sort((left, right) => left.purpose.localeCompare(right.purpose));
+}
+
+function requireObjectVisualPlacementItemId(options: {
+	readonly placementSnapshot: ObjectVisualTexturePlacementSnapshot;
+	readonly subject: string;
+	readonly textureUseId: string;
+}) {
+	const placementItemId = options.placementSnapshot.itemIdsByTextureUseId.get(
+		options.textureUseId,
+	);
+	if (placementItemId === undefined) {
+		throw new Error(
+			`${options.subject} is missing object-visual placement item id for ${options.textureUseId}.`,
+		);
+	}
+	return placementItemId;
 }
 
 function bakeCellStructureGeometry(

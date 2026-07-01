@@ -694,8 +694,8 @@ describe("browser landblock env-cell baker", () => {
 						renderSurfaceId: 0x06000010,
 					},
 					usage: "rgba-color",
-					},
-					textureUseId:
+				},
+				textureUseId:
 					"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
 			}),
 		]);
@@ -746,24 +746,27 @@ describe("browser landblock env-cell baker", () => {
 				itemId: intent.itemId,
 				pool: intent.pool,
 				purpose: intent.purpose,
+				textureUseId: intent.textureUseId,
 			})),
 		).toEqual([
 			{
 				affinityKey: expect.stringContaining("structured-interior|"),
-				itemId:
+				itemId: 0,
+				textureUseId:
 					"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
 				pool: "static-authored-object",
 				purpose: "object-base-color",
 			},
 			{
 				affinityKey: expect.stringContaining("structured-interior|"),
-				itemId:
+				itemId: 1,
+				textureUseId:
 					"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000020:rgba-detail:sampling:wrap=repeat,repeat",
 				pool: "static-authored-object",
 				purpose: "object-detail",
 			},
 		]);
-		expect(intents.map((intent) => intent.itemId)).toEqual(
+		expect(intents.map((intent) => intent.textureUseId)).toEqual(
 			drawUnit.textureUseIds,
 		);
 	});
@@ -784,7 +787,7 @@ describe("browser landblock env-cell baker", () => {
 				},
 			}),
 		).toThrow(
-			/Structured interior da550100 texture placement snapshot is missing env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat/,
+			/Structured interior material is missing object-visual placement item id for env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat/,
 		);
 	});
 
@@ -1258,12 +1261,14 @@ function createInputWithRenderableStaticSeed(
 								...envCell,
 								localPlacement:
 									options.envCellLocalPlacement ?? envCell.localPlacement,
-								staticObjectPlacements: envCell.staticObjectPlacements.map((seed) => ({
-									...seed,
-									identity: seedIdentity,
-									localPlacement:
-										options.seedLocalPlacement ?? seed.localPlacement,
-								})),
+								staticObjectPlacements: envCell.staticObjectPlacements.map(
+									(seed) => ({
+										...seed,
+										identity: seedIdentity,
+										localPlacement:
+											options.seedLocalPlacement ?? seed.localPlacement,
+									}),
+								),
 							},
 						],
 						materialSources: [material],
@@ -1308,16 +1313,18 @@ function createInputWithEnvCellStaticSource(
 						envCells: [
 							{
 								...envCell,
-								staticObjectPlacements: envCell.staticObjectPlacements.map((seed) => ({
-									...seed,
-									debug: { sourceAssetId: options.sourceAssetId },
-									source: {
-										kind: "static-object-source" as const,
-										sourceAssetKind: "setup-model" as const,
-										sourceDid: options.sourceDid,
-									},
-									sourceScale: options.sourceScale ?? seed.sourceScale,
-								})),
+								staticObjectPlacements: envCell.staticObjectPlacements.map(
+									(seed) => ({
+										...seed,
+										debug: { sourceAssetId: options.sourceAssetId },
+										source: {
+											kind: "static-object-source" as const,
+											sourceAssetKind: "setup-model" as const,
+											sourceDid: options.sourceDid,
+										},
+										sourceScale: options.sourceScale ?? seed.sourceScale,
+									}),
+								),
 							},
 						],
 						sourceAssets: [source],
@@ -1498,9 +1505,11 @@ function createStructuredInteriorPlacementSnapshot(
 ): NonNullable<StaticBakeBatchInput["texturePlacementSnapshot"]> {
 	const intents = createStructuredInteriorTexturePlacementIntents({
 		items: input.items,
-		bakeBatchId: input.bakeBatchId,
 	});
 	return {
+		itemIdsByTextureUseId: new Map(
+			intents.map((intent) => [intent.textureUseId, intent.itemId]),
+		),
 		placementsByItemId: new Map(
 			intents.map((intent, index) => [
 				intent.itemId,
@@ -1516,6 +1525,7 @@ function createStructuredInteriorPlacementSnapshot(
 					textureRefId: options.uniquePages
 						? `${intent.purpose}:texture-ref:${index}`
 						: `${intent.purpose}:texture-ref:0`,
+					textureUseId: intent.textureUseId,
 					width: 16,
 				},
 			]),
@@ -1798,10 +1808,11 @@ function createInput(
 						missingRefs: [],
 						materialSources: [],
 						paletteSources: [],
-						portalApertureResources:
-							options.portalApertureResources ?? [],
-						portalConnectivityGraph:
-							options.portalConnectivityGraph ?? { edges: [], nodes: [] },
+						portalApertureResources: options.portalApertureResources ?? [],
+						portalConnectivityGraph: options.portalConnectivityGraph ?? {
+							edges: [],
+							nodes: [],
+						},
 						portalLinks: [],
 						regionRenderProfile: {
 							detailRoles: [],
@@ -1829,6 +1840,10 @@ function createInput(
 		],
 		revision: 7,
 		bakeBatchId: "env-batch-a",
+		texturePlacementSnapshot: {
+			itemIdsByTextureUseId: new Map(),
+			placementsByItemId: new Map(),
+		},
 	};
 }
 

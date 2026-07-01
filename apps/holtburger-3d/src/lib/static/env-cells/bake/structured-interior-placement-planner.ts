@@ -4,10 +4,13 @@ import type {
 	StaticTextureUseOwner,
 } from "../../contracts";
 import type {
+	ObjectVisualTexturePlacementIntent,
 	TextureBindingRequirement,
-	TexturePlacementIntent,
 } from "../../../textures/placement";
-import { createStaticTexturePlacementIntent } from "../../../textures/placement";
+import {
+	createObjectVisualStaticTexturePlacementIntent,
+	createTexturePlacementItemId,
+} from "../../../textures/placement";
 import { isCurrentlyStageableStaticObjectDataUse } from "../../objects/bake/static-object-renderability";
 import {
 	createStructuredInteriorTextureBindingRequirement,
@@ -18,8 +21,11 @@ import { isRenderableStaticMaterialPlan } from "../../objects/bake/static-object
 
 export function createStructuredInteriorTexturePlacementIntents(input: {
 	readonly items: readonly StaticBakeBatchItem[];
-}): readonly TexturePlacementIntent[] {
-	const intentsByItemId = new Map<string, TexturePlacementIntent>();
+}): readonly ObjectVisualTexturePlacementIntent[] {
+	const intentsByTextureUseId = new Map<
+		string,
+		ObjectVisualTexturePlacementIntent
+	>();
 
 	for (const item of input.items) {
 		if (
@@ -44,21 +50,23 @@ export function createStructuredInteriorTexturePlacementIntents(input: {
 					if (!isCurrentlyStageableStaticObjectDataUse(role.dataUse)) {
 						continue;
 					}
-					const requirement =
-						createStructuredInteriorTextureBindingRequirement({
+					const requirement = createStructuredInteriorTextureBindingRequirement(
+						{
 							dataUse: role.dataUse,
 							task: item.task,
 							wrapMode,
-						});
-					if (intentsByItemId.has(requirement.placementItemId)) {
+						},
+					);
+					if (intentsByTextureUseId.has(requirement.textureUseId)) {
 						continue;
 					}
-					intentsByItemId.set(
-						requirement.placementItemId,
-							createStaticTexturePlacementIntent(
-								createStructuredInteriorPlanningTextureUse({
-									requirement,
-								}),
+					intentsByTextureUseId.set(
+						requirement.textureUseId,
+						createObjectVisualStaticTexturePlacementIntent(
+							createStructuredInteriorPlanningTextureUse({
+								requirement,
+							}),
+							createTexturePlacementItemId(intentsByTextureUseId.size),
 							{
 								affinityKey: createStructuredInteriorAffinityKey({
 									envCellId: envCell.identity.envCellId,
@@ -74,8 +82,8 @@ export function createStructuredInteriorTexturePlacementIntents(input: {
 		}
 	}
 
-	return [...intentsByItemId.values()].sort((left, right) =>
-		left.itemId.localeCompare(right.itemId),
+	return [...intentsByTextureUseId.values()].sort(
+		(left, right) => left.itemId - right.itemId,
 	);
 }
 

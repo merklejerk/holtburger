@@ -26,6 +26,14 @@ export type TexturePlacementBucketKey = string & {
 	readonly __texturePlacementBucketKey: unique symbol;
 };
 
+/** Bundle-local numeric lookup id for object-visual placement during baking. */
+export type TexturePlacementItemId = number & {
+	readonly __texturePlacementItemId: unique symbol;
+};
+
+/** Placement lookup key supported by the current terrain and object-visual paths. */
+export type TexturePlacementLookupId = string | TexturePlacementItemId;
+
 /** Lifetime/churn policy that decides how broadly placement may be shared. */
 type TexturePlacementBucketLifetime =
 	| {
@@ -66,11 +74,15 @@ interface TexturePlacementMaterialSource {
 export type TexturePlacementSource = TexturePlacementMaterialSource;
 
 /** Texture binding need shared by placement planning, bakers, and dependency emission. */
-export interface TextureBindingRequirement {
+export interface TextureBindingRequirement<
+	TPlacementItemId extends TexturePlacementLookupId = string,
+> {
 	/** Material-entry key referenced by draw units and renderer binding lookup. */
 	readonly bindingKey: string;
-	/** Packer/placement snapshot key and texture-resource dependency item id. */
-	readonly placementItemId: string;
+	/** Packer/placement snapshot key used by bake-time material partition lookup. */
+	readonly placementItemId: TPlacementItemId;
+	/** Runtime texture-resource dependency item id used by pin/release accounting. */
+	readonly textureUseId: string;
 	/** Source dedupe key, including palette/subpalette identity where applicable. */
 	readonly sourceKey: string;
 	/** Shader/page purpose for the placement item. */
@@ -82,9 +94,13 @@ export interface TextureBindingRequirement {
 }
 
 /** CPU-side request for TextureManager to assign one opaque item to an atlas page. */
-export interface TexturePlacementIntent {
+export interface TexturePlacementIntent<
+	TPlacementItemId extends TexturePlacementLookupId = string,
+> {
 	/** Opaque placement item id used by the packer and baker placement snapshot. */
-	readonly itemId: string;
+	readonly itemId: TPlacementItemId;
+	/** Runtime registry item id used for ownership and pin/release accounting. */
+	readonly textureUseId: string;
 	/** Atlas allocation namespace where compatible sources can be reused. */
 	readonly placementBucketKey: TexturePlacementBucketKey;
 	/** Exact renderer texture domain that must own the atlas registry entry. */
@@ -100,8 +116,11 @@ export interface TexturePlacementIntent {
 }
 
 /** CPU-side atlas assignment for one placement item. */
-export interface TexturePlacement {
-	readonly itemId: string;
+export interface TexturePlacement<
+	TPlacementItemId extends TexturePlacementLookupId = string,
+> {
+	readonly itemId: TPlacementItemId;
+	readonly textureUseId: string;
 	readonly purpose: TextureUsagePurpose;
 	readonly pool: TexturePlacementPool;
 	/** Renderer texture page identity used for shader binding legality. */
@@ -114,9 +133,49 @@ export interface TexturePlacement {
 }
 
 /** Compact baker input keyed by placement item id. */
-export interface TexturePlacementSnapshot {
-	readonly placementsByItemId: ReadonlyMap<string, TexturePlacement>;
+export interface TexturePlacementSnapshot<
+	TPlacementItemId extends TexturePlacementLookupId = string,
+> {
+	readonly placementsByItemId: ReadonlyMap<
+		TPlacementItemId,
+		TexturePlacement<TPlacementItemId>
+	>;
 }
+
+/** Object-visual placement snapshot keyed by numeric bake-time item ids. */
+export interface ObjectVisualTexturePlacementSnapshot extends TexturePlacementSnapshot<TexturePlacementItemId> {
+	/** Boundary bridge from renderer/runtime binding ids to numeric bake ids. */
+	readonly itemIdsByTextureUseId: ReadonlyMap<string, TexturePlacementItemId>;
+}
+
+export function isObjectVisualTexturePlacementSnapshot(
+	snapshot: TexturePlacementSnapshot | ObjectVisualTexturePlacementSnapshot,
+): snapshot is ObjectVisualTexturePlacementSnapshot {
+	return "itemIdsByTextureUseId" in snapshot;
+}
+
+export function requireObjectVisualTexturePlacementSnapshot(
+	snapshot:
+		| TexturePlacementSnapshot
+		| ObjectVisualTexturePlacementSnapshot
+		| undefined,
+	subject: string,
+): ObjectVisualTexturePlacementSnapshot {
+	if (!snapshot || !isObjectVisualTexturePlacementSnapshot(snapshot)) {
+		throw new Error(
+			`${subject} requires an object-visual texture placement snapshot.`,
+		);
+	}
+	return snapshot;
+}
+
+/** Object-visual texture binding need with numeric bake lookup identity. */
+export type ObjectVisualTextureBindingRequirement =
+	TextureBindingRequirement<TexturePlacementItemId>;
+
+/** Object-visual placement intent with numeric bake lookup identity. */
+export type ObjectVisualTexturePlacementIntent =
+	TexturePlacementIntent<TexturePlacementItemId>;
 
 /** Baker-authored active texture dependencies for one immutable renderer resource. */
 export interface TextureResourceDependencies {
@@ -136,6 +195,17 @@ export interface TexturePlacementIntentOptions {
 	readonly affinityKey?: string | null;
 	/** Explicit dynamic placement bucket when caller owns runtime/static lifetime. */
 	readonly placementBucketKey?: TexturePlacementBucketKey;
+}
+
+export function createTexturePlacementItemId(
+	value: number,
+): TexturePlacementItemId {
+	if (!Number.isSafeInteger(value) || value < 0) {
+		throw new Error(
+			`Texture placement item id must be a safe non-negative integer: ${value}.`,
+		);
+	}
+	return value as TexturePlacementItemId;
 }
 
 /**
@@ -160,6 +230,7 @@ export function createStaticTexturePlacementIntent(
 		affinityKey: options.affinityKey ?? null,
 		domain: textureUse.domain,
 		itemId: textureUse.textureUseId,
+		textureUseId: textureUse.textureUseId,
 		placementBucketKey:
 			options.placementBucketKey ??
 			createTexturePlacementBucketKey({
@@ -173,6 +244,18 @@ export function createStaticTexturePlacementIntent(
 			textureUse.source,
 			textureUse.samplingPolicy,
 		),
+	};
+}
+
+export function createObjectVisualStaticTexturePlacementIntent(
+	textureUse: StaticBakeTextureUse,
+	itemId: TexturePlacementItemId,
+	options: TexturePlacementIntentOptions = {},
+): ObjectVisualTexturePlacementIntent {
+	const intent = createStaticTexturePlacementIntent(textureUse, options);
+	return {
+		...intent,
+		itemId,
 	};
 }
 
@@ -191,6 +274,7 @@ export function createDynamicTexturePlacementIntent(
 		affinityKey: options.affinityKey ?? null,
 		domain: textureUse.textureDomain,
 		itemId: textureUse.textureUseId,
+		textureUseId: textureUse.textureUseId,
 		placementBucketKey: options.placementBucketKey,
 		pool,
 		purpose,
@@ -198,6 +282,18 @@ export function createDynamicTexturePlacementIntent(
 			textureUse.source,
 			textureUse.samplingPolicy,
 		),
+	};
+}
+
+export function createObjectVisualDynamicTexturePlacementIntent(
+	textureUse: DynamicTexturePlacementUse,
+	itemId: TexturePlacementItemId,
+	options: TexturePlacementIntentOptions = {},
+): ObjectVisualTexturePlacementIntent {
+	const intent = createDynamicTexturePlacementIntent(textureUse, options);
+	return {
+		...intent,
+		itemId,
 	};
 }
 

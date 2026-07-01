@@ -302,30 +302,35 @@ function createPlacementSnapshotForRecipe(
 		readonly textureRefIdsByItemIndex?: readonly string[];
 	} = {},
 ): DynamicVisualBakeInput["texturePlacementSnapshot"] {
+	const intents = createDynamicVisualTexturePlanning(recipe).placementIntents;
 	const placementsByItemId = new Map(
-		createDynamicVisualTexturePlanning(recipe).placementIntents.map(
-			(intent, index) => [
-				intent.itemId,
-				{
-					height: 16,
-					itemId: intent.itemId,
-					pageId: `${intent.purpose}:page:${index}`,
-					pool: intent.pool,
-					purpose: intent.purpose,
-					rect: [0, 0, 16, 16] as const,
-					textureRefId:
-						options.textureRefIdsByItemIndex?.[index] ??
-						`${intent.purpose}:texture-ref:${index}`,
-					width: 16,
-				},
-			],
-		),
+		intents.map((intent, index) => [
+			intent.itemId,
+			{
+				height: 16,
+				itemId: intent.itemId,
+				pageId: `${intent.purpose}:page:${index}`,
+				pool: intent.pool,
+				purpose: intent.purpose,
+				rect: [0, 0, 16, 16] as const,
+				textureRefId:
+					options.textureRefIdsByItemIndex?.[index] ??
+					`${intent.purpose}:texture-ref:${index}`,
+				textureUseId: intent.textureUseId,
+				width: 16,
+			},
+		]),
 	);
-	return { placementsByItemId };
+	return {
+		itemIdsByTextureUseId: new Map(
+			intents.map((intent) => [intent.textureUseId, intent.itemId]),
+		),
+		placementsByItemId,
+	};
 }
 
 function createEmptyPlacementSnapshot(): DynamicVisualBakeInput["texturePlacementSnapshot"] {
-	return { placementsByItemId: new Map() };
+	return { itemIdsByTextureUseId: new Map(), placementsByItemId: new Map() };
 }
 
 function createSourceAsset(

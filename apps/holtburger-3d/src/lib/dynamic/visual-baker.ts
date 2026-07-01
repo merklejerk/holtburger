@@ -43,9 +43,11 @@ import { MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW } from "../renderer/types";
 import {
 	classifyTexturePlacementPool,
 	classifyTextureUsagePurpose,
-	createDynamicTexturePlacementIntent,
+	createObjectVisualDynamicTexturePlacementIntent,
 	createRuntimeAuthoredDynamicTexturePlacementBucketKey,
 	createStaticAuthoredDynamicTexturePlacementBucketKey,
+	createTexturePlacementItemId,
+	type TexturePlacementItemId,
 	type TexturePlacementBucketKey,
 	type TextureResourceDependencies,
 	type TextureResourceRoleDependency,
@@ -87,7 +89,7 @@ interface DynamicTriangleRenderPrimitive {
 	readonly materialEntryKey: string;
 	readonly triangle: StaticObjectSourceAssetFacts["parts"][number]["triangles"][number];
 	readonly textureRequirements: readonly {
-		readonly placementItemId: string;
+		readonly placementItemId: TexturePlacementItemId;
 		readonly purpose: TextureUsagePurpose;
 	}[];
 }
@@ -186,9 +188,12 @@ function bakeDynamicVisualRecipe(options: {
 		});
 	}
 
-	const textureRequirements = createTextureRequirements({
-		materialPlans: materialPlans.materialPlans,
-		resourceId,
+	const textureRequirements = resolveDynamicTextureRequirementPlacementItemIds({
+		texturePlacementSnapshot: options.texturePlacementSnapshot,
+		textureRequirements: createTextureRequirements({
+			materialPlans: materialPlans.materialPlans,
+			resourceId,
+		}),
 	});
 	assertTextureRequirementsPlaced({
 		resourceId,
@@ -264,13 +269,14 @@ export function createDynamicVisualTexturePlanning(
 				"runtime-authored-none"
 					? "runtime-object-material"
 					: recipe.visual.materialPolicy.detailRolePolicy.domain;
-			return createDynamicTexturePlacementIntent(
+			return createObjectVisualDynamicTexturePlacementIntent(
 				{
 					samplingPolicy: requirement.samplingPolicy,
 					source: requirement.dataUse,
 					textureDomain,
 					textureUseId: requirement.textureUseId,
 				},
+				requirement.placementItemId,
 				{
 					affinityKey: createDynamicTextureAffinityKey(recipe),
 					placementBucketKey: createDynamicTexturePlacementBucketKey({
@@ -413,6 +419,7 @@ function createTextureRequirements(options: {
 	readonly materialPlans: readonly StaticMaterialPlan[];
 	readonly resourceId: string;
 }): readonly DynamicEntityTextureRequirement[] {
+	let nextPlacementItemId = 0;
 	return options.materialPlans.flatMap((plan) => {
 		const dataUses = plan.textureRoles.map((role) => role.dataUse);
 		const wrapMode = resolveRepeatedStaticMaterialPrimaryWrapMode(dataUses);
@@ -421,6 +428,7 @@ function createTextureRequirements(options: {
 				dataUse: role.dataUse,
 				key: createTextureRequirementKey(role.dataUse),
 				material: plan.material,
+				placementItemId: createTexturePlacementItemId(nextPlacementItemId++),
 				role: role.role,
 				samplingPolicy: createStaticMaterialTextureSamplingPolicy({
 					dataUse: role.dataUse,
@@ -514,10 +522,12 @@ function assertTextureRequirementsPlaced(options: {
 	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
 }): void {
 	const missingItemIds = options.textureRequirements
-		.map((requirement) => requirement.textureUseId)
+		.map((requirement) => requirement.placementItemId)
 		.filter(
-			(textureUseId) =>
-				!options.texturePlacementSnapshot.placementsByItemId.has(textureUseId),
+			(placementItemId) =>
+				!options.texturePlacementSnapshot.placementsByItemId.has(
+					placementItemId,
+				),
 		);
 	if (missingItemIds.length === 0) {
 		return;
@@ -527,6 +537,35 @@ function assertTextureRequirementsPlaced(options: {
 			", ",
 		)}.`,
 	);
+}
+
+function resolveDynamicTextureRequirementPlacementItemIds(options: {
+	readonly texturePlacementSnapshot: DynamicVisualBakeInput["texturePlacementSnapshot"];
+	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
+}): readonly DynamicEntityTextureRequirement[] {
+	return options.textureRequirements.map((requirement) => ({
+		...requirement,
+		placementItemId: requireDynamicPlacementItemId({
+			texturePlacementSnapshot: options.texturePlacementSnapshot,
+			textureUseId: requirement.textureUseId,
+		}),
+	}));
+}
+
+function requireDynamicPlacementItemId(options: {
+	readonly texturePlacementSnapshot: DynamicVisualBakeInput["texturePlacementSnapshot"];
+	readonly textureUseId: string;
+}) {
+	const placementItemId =
+		options.texturePlacementSnapshot.itemIdsByTextureUseId.get(
+			options.textureUseId,
+		);
+	if (placementItemId === undefined) {
+		throw new Error(
+			`Dynamic visual texture planning is missing object-visual placement item id for ${options.textureUseId}.`,
+		);
+	}
+	return placementItemId;
 }
 
 function createDynamicTextureDependencies(options: {
@@ -693,19 +732,20 @@ function createDynamicRenderPartPartitions(options: {
 			triangleGeometrySurfaceId: triangle.geometrySurfaceId,
 		});
 		const materialEntryKey = createDynamicMaterialRenderEntryKey(materialEntry);
-		const objectMaterialPartitionKey =
-			createObjectMaterialDrawUnitPartitionKey({
+		const objectMaterialPartitionKey = createObjectMaterialDrawUnitPartitionKey(
+			{
 				diagnosticSubject: `Dynamic render part ${options.part.partIndex}`,
 				includeConcreteEntryInKey: false,
 				material: materialEntry.partitionMaterial,
 				texturePlacementSnapshot: options.texturePlacementSnapshot,
 				textureRequirements: materialEntry.textureRequirements.map(
 					(requirement) => ({
-						placementItemId: requirement.textureUseId,
+						placementItemId: requirement.placementItemId,
 						purpose: classifyDynamicRequirementPurpose(requirement),
 					}),
 				),
-			});
+			},
+		);
 		const existing = primitivesByPartitionKey.get(
 			objectMaterialPartitionKey.key,
 		);
@@ -714,7 +754,7 @@ function createDynamicRenderPartPartitions(options: {
 			materialEntryKey,
 			textureRequirements: materialEntry.textureRequirements.map(
 				(requirement) => ({
-					placementItemId: requirement.textureUseId,
+					placementItemId: requirement.placementItemId,
 					purpose: classifyDynamicRequirementPurpose(requirement),
 				}),
 			),
@@ -723,17 +763,14 @@ function createDynamicRenderPartPartitions(options: {
 		if (existing) {
 			existing.push(primitive);
 		} else {
-			primitivesByPartitionKey.set(objectMaterialPartitionKey.key, [
-				primitive,
-			]);
+			primitivesByPartitionKey.set(objectMaterialPartitionKey.key, [primitive]);
 		}
 	}
 	return [...primitivesByPartitionKey.entries()]
 		.sort(([left], [right]) => left.localeCompare(right))
 		.flatMap(([, primitives], partitionIndex) =>
 			splitObjectMaterialPartitionByMaterialTableBudget({
-				maxMaterialEntriesPerPartition:
-					MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+				maxMaterialEntriesPerPartition: MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
 				primitives,
 			}).map((splitPrimitives, splitIndex) =>
 				createDynamicRenderPartPartition({
@@ -1031,10 +1068,7 @@ function resolveDynamicTextureRequirement(options: {
 }
 
 function createDynamicMaterialColorKey(plan: StaticMaterialPlan): string {
-	return [
-		plan.color.join(","),
-		plan.emissiveColor.join(","),
-	].join("|");
+	return [plan.color.join(","), plan.emissiveColor.join(",")].join("|");
 }
 
 function createDynamicMaterialPlanEntryKey(plan: StaticMaterialPlan): string {
@@ -1046,7 +1080,10 @@ function createDynamicMaterialPlanEntryKey(plan: StaticMaterialPlan): string {
 
 function createDynamicTextureRoleLayoutKey(plan: StaticMaterialPlan): string {
 	return plan.textureRoles
-		.map((role) => `${role.role}:${createMaterialTextureDataUseSignature(role.dataUse)}`)
+		.map(
+			(role) =>
+				`${role.role}:${createMaterialTextureDataUseSignature(role.dataUse)}`,
+		)
 		.sort()
 		.join("|");
 }

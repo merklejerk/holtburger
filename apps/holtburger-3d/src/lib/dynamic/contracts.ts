@@ -24,8 +24,9 @@ import type {
 	Vec3Dto,
 } from "../host/contracts";
 import type {
-	TexturePlacementIntent,
-	TexturePlacementSnapshot,
+	ObjectVisualTexturePlacementIntent,
+	ObjectVisualTexturePlacementSnapshot,
+	TexturePlacementItemId,
 	TextureResourceDependencies,
 } from "../textures/placement";
 
@@ -232,7 +233,7 @@ export interface DynamicVisualBakeInput {
 	/** Geometry buffers required by the baker; prepared before crossing the bake boundary. */
 	readonly sourceGeometry: readonly StaticObjectSourceGeometryAttachment[];
 	/** Texture placements assigned before baking so baked resources can declare legal dependencies. */
-	readonly texturePlacementSnapshot: TexturePlacementSnapshot;
+	readonly texturePlacementSnapshot: ObjectVisualTexturePlacementSnapshot;
 }
 
 /** Pre-bake dynamic visual texture work discovered from source facts. */
@@ -240,7 +241,7 @@ export interface DynamicVisualTexturePlanning {
 	/** Stable entity whose visual recipe produced these placement intents. */
 	readonly entityId: DynamicEntityId;
 	/** Texture placement intents that must be assigned before this visual is baked. */
-	readonly placementIntents: readonly TexturePlacementIntent[];
+	readonly placementIntents: readonly ObjectVisualTexturePlacementIntent[];
 	/** Texture requirements later reused by the baker and renderer binding path. */
 	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
 }
@@ -647,7 +648,9 @@ export interface DynamicEntityTextureRequirement {
 		| "detail-overlay"
 		| "palette-rgba";
 	readonly samplingPolicy: StaticBakeTextureSamplingPolicy;
-	/** Material binding key that also seeds the placement item id. */
+	/** Numeric bake-time placement lookup id. */
+	readonly placementItemId: TexturePlacementItemId;
+	/** Runtime texture-use id used for renderer binding and dependency pinning. */
 	readonly textureUseId: string;
 }
 

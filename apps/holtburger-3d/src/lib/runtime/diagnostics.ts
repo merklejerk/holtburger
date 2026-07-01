@@ -284,12 +284,12 @@ interface StaticCoordinatorTimingSampleDiagnostics {
 
 export interface TextureAtlasDiagnosticsReport {
 	readonly kind: "texture-atlas";
-	readonly batches: readonly TextureAtlasBatchDiagnostics[];
+	readonly buckets: readonly TextureAtlasBucketDiagnostics[];
 	readonly summary: TextureAtlasDiagnosticsSummary;
 }
 
-interface TextureAtlasBatchDiagnostics {
-	readonly batchId: string;
+interface TextureAtlasBucketDiagnostics {
+	readonly bucketId: string;
 	readonly domain: VisualTextureDomain;
 	readonly entryAliasCount: number;
 	readonly uniqueSourceCount: number;
@@ -313,9 +313,9 @@ interface TextureAtlasPageDiagnostics {
 }
 
 interface TextureAtlasDiagnosticsSummary {
-	readonly batchCount: number;
-	readonly activeBatchCount: number;
-	readonly emptyBatchCount: number;
+	readonly bucketCount: number;
+	readonly activeBucketCount: number;
+	readonly emptyBucketCount: number;
 	readonly texturePageCount: number;
 	readonly multiSourcePageCount: number;
 	readonly entryAliasCount: number;

@@ -141,10 +141,7 @@ import {
 	DynamicEntityController,
 	type RuntimeDynamicSpawnRequest,
 } from "../dynamic/dynamic-entity-controller";
-import {
-	createDynamicVisualResourceId,
-	createRuntimeDynamicTextureBatchId,
-} from "../dynamic/contracts";
+import { createDynamicVisualResourceId } from "../dynamic/contracts";
 import type {
 	DynamicEntitySummaryDto,
 	DynamicEntityId,
@@ -1042,7 +1039,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 			}
 
 			const result = await this.#dynamicVisualBaker.bake({
-				batchId: createRuntimeDynamicTextureBatchId(options.entityId),
+				batchId: createRuntimeAuthoredDynamicVisualBakeBatchId(
+					options.entityId,
+				),
 				recipes: [recipe],
 				revision: options.revision,
 				sourceGeometry,
@@ -4262,6 +4261,12 @@ function createDynamicTextureUsePlacementBucketKey(
 		ownerId: retentionPolicy.layerOwnerId,
 		purpose,
 	});
+}
+
+function createRuntimeAuthoredDynamicVisualBakeBatchId(
+	entityId: DynamicEntityId,
+): string {
+	return `runtime-dynamic-visual-bake:${entityId}`;
 }
 
 function createDynamicRendererInstances(

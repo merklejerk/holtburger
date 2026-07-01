@@ -1,11 +1,11 @@
 # Holtburger 3D Texture Pipeline Performance Investigation Worksheet
 
 Date: 2026-07-01
-Status: Active investigation
+Status: Phase 6 cleanup completed; follow-up profiling debt remains.
 
 ## Purpose
 
-Track the browser-runtime investigation into outdoor scene load CPU burn after the simplified texture packing pipeline refactor. The immediate goal is to preserve measured evidence, code-path findings, and next probes before changing pipeline behavior.
+Track the browser-runtime investigation into outdoor scene load CPU burn after the simplified texture packing pipeline refactor. The immediate goal was to preserve measured evidence, code-path findings, and next probes before changing pipeline behavior; the worksheet now also records the fix phases and cleanup decisions.
 
 This worksheet is diagnostic, not an implementation plan. Implementation should continue to prioritize the texture-pipeline north stars already captured in `docs/plans/holtburger-3d-simplified-texture-packing-pipeline-plan.md`: isomorphic paths, contained resolver/baker complexity, clean cutover, no vestigial code, and no guessing.
 
@@ -49,9 +49,9 @@ npm run check
 
 ## Measured Results
 
-The timings below are runtime diagnostics sums from `staticCoordinator.timingSummary`, not wall-clock duration unless explicitly stated. They are useful for scale and relative comparison, but some attribution is batch-shaped rather than pure per-domain stopwatch timing.
+The timings below are runtime diagnostics sums from `staticCoordinator.timingSummary`, not wall-clock duration unless explicitly stated. They are useful for scale and relative comparison, but some attribution is bucket/batch-shaped rather than pure per-domain stopwatch timing.
 
-| Scenario | Static tasks | Draw units | Resolver ms | Bake ms | Texture placement ms | Atlas MB | Atlas batches | Atlas pages |
+| Scenario | Static tasks | Draw units | Resolver ms | Bake ms | Texture placement ms | Atlas MB | Atlas buckets | Atlas pages |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `terrain` | 21 | 55 | 16,853 | 83 | 854 | 159 | 3 | 11 |
 | `terrain,buildings` | 30 | 90 | 24,603 | 498 | 5,780 | 171 | 4 | 15 |
@@ -64,9 +64,9 @@ The full scene settled successfully under a 180s ceiling, but took roughly 150s 
 
 ## Atlas Evidence
 
-Settled full-scene atlas totals by domain:
+Settled full-scene atlas totals by domain from the original diagnosis run. At that point diagnostics still called placement buckets "batches."
 
-| Domain | Batches | Pages | Approx bytes | Approx MB | Entry aliases | Unique sources |
+| Domain | Buckets | Pages | Approx bytes | Approx MB | Entry aliases | Unique sources |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | `outdoor-terrain` | 8 | 26 | 360,710,120 | 344 | 208 | 88 |
 | `outdoor-generated-scenery` | 6 | 30 | 236,574,032 | 226 | 230 | 145 |
@@ -74,18 +74,18 @@ Settled full-scene atlas totals by domain:
 | `outdoor-buildings` | 6 | 18 | 24,876,368 | 24 | 113 | 89 |
 | `outdoor-explicit-objects` | 6 | 14 | 13,383,000 | 13 | 70 | 59 |
 
-Largest retained batches in the settled full run:
+Largest retained buckets in the settled full run:
 
-- Two terrain batches are each about `62,914,556` bytes. Each contains one detail page, one mask page, and two color pages.
-- Several generated-scenery batches are each about `45,077,844` bytes. Most repeat large `rgba-color` pages with relatively small unique source counts.
+- Two terrain buckets are each about `62,914,556` bytes. Each contains one detail page, one mask page, and two color pages.
+- Several generated-scenery buckets are each about `45,077,844` bytes. Most repeat large `rgba-color` pages with relatively small unique source counts.
 - The final full-scene atlas is larger than the 45s partial snapshot. The page growth is retained, not just temporary packing garbage.
 
-Direct code-path evidence:
+Original code-path evidence, fixed by the later phases:
 
-- `TextureManager.placeTextureIntents()` maps every intent through `createVisualTextureUseCommitFromIntent(intent, input.placementBatchId)`.
-- `#stageTexturePlacement()` reuses existing sources only inside `#getRegistry(textureUse.domain, textureUse.textureBatchId)`.
-- Static pre-bake passes `work.staticBatchId` as the placement batch id.
-- Therefore current pre-bake placement reuse is scoped to `(domain, staticBatchId)`, where static batch ids are layer-owner/batch-shaped. Neighboring landblocks can repeatedly pack identical or similar texture sources into separate atlas pages instead of sharing broader domain/purpose pages.
+- `TextureManager.placeTextureIntents()` mapped every intent through `createVisualTextureUseCommitFromIntent(intent, input.placementBatchId)`.
+- `#stageTexturePlacement()` reused existing sources only inside `#getRegistry(textureUse.domain, textureUse.textureBatchId)`.
+- Static pre-bake passed `work.staticBatchId` as the placement batch id.
+- Therefore original pre-bake placement reuse was scoped to `(domain, staticBatchId)`, where static batch ids were layer-owner/batch-shaped. Neighboring landblocks could repeatedly pack identical or similar texture sources into separate atlas pages instead of sharing broader domain/purpose pages.
 
 This is consistent with the refactor concern: the current implementation still behaves much more like per-layer static allocation than the intended domain/purpose-oriented packing closure.
 
@@ -117,8 +117,8 @@ Current coordinator timing has several limitations:
 
 The following findings are still direct enough to trust:
 
-- Full settled atlas size, batch count, and page count.
-- Texture manager reuse scope: `(domain, textureBatchId)`.
+- Full settled atlas size, bucket count, and page count.
+- Original texture manager reuse scope was `(domain, textureBatchId)`. After the fix, reuse scope is `(domain, placementBucketKey)`.
 - Demand planner collapse from explicit/generated to one `detail` radius.
 - Terrain radius clamp affecting domain-slice diagnostics.
 - Env-cell and generated-scenery slices are materially heavier than terrain/buildings.
@@ -162,7 +162,7 @@ This does not mean every string id disappears in one pass. It means new code sho
 
 ## Phased Fix Plan
 
-Status: Blocked in Phase 5 on 2026-07-01 by full-scene generated-scenery page-legality failures.
+Status: Phase 6 completed on 2026-07-01. Follow-up profiling debt remains open.
 
 Goal: remove batch-scoped texture placement and retire `staticBatchId` as a public/static product identity while preserving internal coordinator batching as an implementation detail.
 
@@ -308,7 +308,7 @@ Deliverables:
 Acceptance criteria:
 
 - Focused texture-manager tests prove static-authored terrain/generated/object/env-cell sources can reuse atlas placement across different source-ready work closures.
-- Harness full-scene run for `0xda55ffff` shows materially fewer atlas batches/pages/MB than the recorded baseline:
+- Harness full-scene run for `0xda55ffff` shows materially fewer atlas buckets/pages/MB than the recorded baseline:
   - baseline settled full run: 32 batches, 108 pages, about 632 MiB reported in diagnostics
 - Texture placement time should decrease materially from the recorded full baseline:
   - baseline full run `texturePlacementMs`: about 36,812 ms aggregate
@@ -470,12 +470,12 @@ Phase 4 decisions:
 
 - `bakeBatchId` remains only as an internal coalesced bake input/worker correlation handle and in baker-local diagnostics. It is not a texture placement namespace, commit id source, install diagnostic field, or terrain material legality key.
 - Removing the internal bake handle entirely is lower value than proving performance first. The remaining name is still mild debt, but it has a concrete responsibility.
-- Texture-manager internals still use `textureBatchId` for the already-new placement bucket value. That is Phase 6 cleanup debt, not Phase 4 behavior risk.
-- Static-authored dynamic visual bake ids still derive from the internal bake handle. This is not texture placement, but it is terminology debt and should be revisited during cleanup if the dynamic visual baker can complete by recipe/task ownership instead.
+- Texture-manager internals still used `textureBatchId` for the already-new placement bucket value. This was retired in Phase 6.
+- Static-authored dynamic visual bake ids still derive from the internal bake handle. This is not texture placement, but it is terminology debt and should be revisited only if worker correlation starts leaking into product contracts.
 
 ### Phase 5: Harness Proof And Resteer
 
-Status: Blocked 2026-07-01.
+Status: Completed through Phase 5E on 2026-07-01.
 
 Purpose: prove the pipeline changed in the intended direction before broad cleanup.
 
@@ -487,7 +487,7 @@ Deliverables:
   - `terrain,env-cells`
   - full `0xda55ffff`
 - Record after numbers in this worksheet next to the existing baseline.
-- Compare atlas batches/pages/MB, texture placement time, resolver/bake timing, and wall-clock settle time.
+- Compare atlas buckets/pages/MB, texture placement time, resolver/bake timing, and wall-clock settle time.
 - Decide whether remaining wall-clock cost is still texture placement/page duplication or primarily resolver/baker CPU.
 
 Acceptance criteria:
@@ -512,7 +512,7 @@ Phase 5 implementation and evidence:
 
 Phase 5 after metrics:
 
-| Scenario | Result | Static tasks | Draw units | Resolver ms | Bake ms | Texture placement ms | Atlas MB | Atlas batches | Atlas pages |
+| Scenario | Result | Static tasks | Draw units | Resolver ms | Bake ms | Texture placement ms | Atlas MB | Atlas buckets | Atlas pages |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `terrain` | settled | 21 | 55 | 15,380 | 78 | 781 | 61 | 3 | 5 |
 | `terrain,buildings` | settled | 30 | 90 | 24,044 | 1,506 | 1,451 | 78 | 7 | 9 |
@@ -535,7 +535,7 @@ Phase 5 steering:
 
 ### Phase 5A: Generated-Scenery Page Legality And Snapshot Stability
 
-Status: In progress 2026-07-01. Correctness failure converted into long-running bake timeout; acceptance not yet met.
+Status: Completed/superseded 2026-07-01. Phase 5A fixed correctness races; Phases 5B-5E closed the remaining long-running bake timeout.
 
 Purpose: close the full-scene correctness gap exposed by Phase 5 without backing away from broad texture placement buckets.
 
@@ -569,7 +569,7 @@ Phase 5A implementation and evidence:
 
 Phase 5A harness result after snapshot-stability fix:
 
-| Scenario | Result | Static tasks | Draw units | Resolver ms | Bake ms | Texture placement ms | Atlas MB | Atlas batches | Atlas pages |
+| Scenario | Result | Static tasks | Draw units | Resolver ms | Bake ms | Texture placement ms | Atlas MB | Atlas buckets | Atlas pages |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | full `0xda55ffff`, 360s | timeout, no failures | 57 requested / 49 committed / 0 failed / 8 baking | 421 installed | 120,467 | 1,684,517 | 22,617 | 165 | 29 | 49 |
 
@@ -579,7 +579,7 @@ Phase 5A diagnostic result:
 - Remaining in-flight tasks at timeout were: center terrain, one buildings task, five env-cell-system tasks, and one explicit-objects task.
 - Phase 5A fixed a real correctness race, but the user's original CPU-burn report remained active and was dominated by long-running bake closures rather than atlas page-conflict retry/failure.
 
-Phase 5A steering:
+Phase 5A steering at the time:
 
 - Do not proceed to Phase 6 cleanup until full-scene harness settles.
 - Add harness-visible active bake stage diagnostics before changing bake behavior.
@@ -655,7 +655,7 @@ Implementation notes:
 
 Phase 5D evidence:
 
-| Scenario | Result | Static tasks | Draw units | Resolver ms | Bake ms | Texture placement ms | Atlas MB | Atlas batches | Atlas pages |
+| Scenario | Result | Static tasks | Draw units | Resolver ms | Bake ms | Texture placement ms | Atlas MB | Atlas buckets | Atlas pages |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | full `0xda55ffff`, central worker queue, 360s | timeout, no failures | 57 requested / 53 committed / 0 failed / 4 baking | 1122 installed | 263,367 | 1,131,981 | 30,419 | 165 | 29 | 44 |
 
@@ -686,7 +686,7 @@ Implementation notes:
 
 Phase 5E evidence:
 
-| Scenario | Result | Static tasks | Draw units | Resolver ms | Bake ms | Texture placement ms | Atlas MB | Atlas batches | Atlas pages |
+| Scenario | Result | Static tasks | Draw units | Resolver ms | Bake ms | Texture placement ms | Atlas MB | Atlas buckets | Atlas pages |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | full `0xda55ffff`, env-cell split, 360s | settled | 57 requested / 57 committed / 0 failed / 0 baking | 1556 installed | 285,977 | 1,705,232 | 74,010 | 165 | 29 | 58 |
 
@@ -699,7 +699,7 @@ Acceptance notes:
 
 ### Phase 6: Cleanup And Contract Hardening
 
-Status: Ready after Phase 5E settles full-scene harness.
+Status: Completed 2026-07-01.
 
 Purpose: remove vestiges and make the new architecture hard to accidentally regress.
 
@@ -720,6 +720,38 @@ Acceptance criteria:
 - Focused texture/static/runtime tests pass.
 - No vestigial compatibility path remains for batch-scoped static placement.
 
+Phase 6 implementation notes:
+
+- Renamed texture-manager internals from batch-shaped terminology to placement bucket terminology:
+  - `#placementBucketRegistries`
+  - `VisualTexturePlacementBucketRegistry`
+  - `placementBucketKey`
+  - bucket-shaped atlas diagnostics
+- Renamed texture atlas diagnostics from `batches`/`batchCount`/`batchId` to `buckets`/`bucketCount`/`bucketId`.
+- Removed stale `textureBatchId` fixture fields from dynamic tests.
+- Removed duplicate dynamic-contract texture bucket helpers. Texture placement bucket policy now lives only in `textures/placement.ts`.
+- Split runtime-authored dynamic visual bake job identity from texture placement bucket identity with `runtime-dynamic-visual-bake:<entity>`.
+- Unexported dead static/texture helper types found by `lint:dead`.
+- Added a diagnostics invariant to `texture-manager.test.ts`: two independent static bake batches that reference the same static-authored texture source produce one placement bucket and one atlas page.
+
+Phase 6 decisions:
+
+- `bakeBatchId` remains a true internal worker/coordinator bake correlation handle. It is not a texture placement namespace and should not be promoted back into product contracts.
+- Dynamic visual `batchId` remains because it is a worker job id. Runtime-authored dynamic visual bakes now use an explicitly visual-bake id, not a texture placement bucket id.
+- No compatibility path remains for batch-scoped texture placement. The surviving placement identity is `placementBucketKey`.
+
+Phase 6 verification:
+
+```sh
+npm run test:ts -- src/lib/textures/texture-manager.test.ts src/lib/textures/placement.test.ts src/lib/dynamic/visual-contracts.test.ts src/lib/dynamic/dynamic-animation-update-cadence.test.ts src/lib/dynamic/dynamic-animation-player.test.ts src/lib/dynamic/dynamic-placement-tracker.test.ts src/lib/runtime/client-runtime.test.ts src/lib/static/coordinator/static-coordinator.test.ts
+npm run test:ts -- src/lib/textures/texture-manager.test.ts
+npm run check
+npm run lint:ts
+npm run lint:dead
+```
+
+All passed during Phase 6 cleanup.
+
 ## Next Probes
 
 High-value follow-ups:
@@ -734,24 +766,24 @@ High-value follow-ups:
    - resulting task ids
 2. Add texture-packer diagnostics by job:
    - domain
-   - placement bucket key, or legacy texture batch id while still in transition
+   - placement bucket key
    - page class key
    - source count
    - unique source fingerprints
    - output page bytes
    - whether sources already existed in another active registry
-3. Compare atlas source fingerprints across terrain and generated-scenery batches to quantify duplicate page content rather than inferring from page shapes.
+3. Compare atlas source fingerprints across terrain and generated-scenery buckets to quantify duplicate page content rather than inferring from page shapes.
 4. Separate static demand detail radii or domain filters so `explicit-objects` and `generated-scenery` can be independently diagnosed.
 5. Decide whether terrain should remain the coverage ceiling for all outdoor domains or whether per-domain slices need a diagnostic-only override.
-Candidate implementation direction if the diagnosis holds:
+Completed implementation direction:
 
-- Move pre-bake texture placement away from source-ready/static-batch registries and toward broader domain/purpose/lifetime buckets, matching the simplified pipeline plan.
-- Remove `staticBatchId` from texture placement intents, committed texture uses, and atlas snapshot lookup.
-- Replace `createStaticAtlasBatchSnapshot(payloads, staticBatchId)` with a placement-facts query for the texture uses the baker needs, independent of bake grouping.
-- Replace static commit install tracking by `staticBatchId` with commit ids and task/resource identities.
-- Keep draw-unit legality and terrain shader constraints in the baker.
-- Avoid making the packer domain-aware beyond purpose/page constraints.
-- Preserve clean cutover: do not shim a second legacy batch registry beside the new one.
+- Pre-bake texture placement moved away from source-ready/static-batch registries and toward broader domain/purpose/lifetime buckets.
+- `staticBatchId` no longer drives texture placement intents, committed texture uses, or atlas snapshot lookup.
+- `StaticAtlasBatchSnapshot` and batch-scoped atlas snapshot lookup were deleted.
+- Static commit install tracking uses commit ids plus task/resource facts instead of `staticBatchId`.
+- Draw-unit legality and terrain shader constraints remain in the bakers.
+- The packer remains unaware of static/runtime domain semantics beyond page constraints and opaque grouping inputs.
+- The cutover stayed clean: there is no second legacy batch registry beside the placement bucket registry.
 
 ## Open Debt
 
@@ -760,8 +792,7 @@ Candidate implementation direction if the diagnosis holds:
 - Static baker worker diagnostics are new production diagnostics. Keep them if they continue to pay rent during cleanup; otherwise remove them instead of preserving low-value noise.
 - Harness CLI `--domains` is useful, but domain slices are currently distorted by runtime demand clamping and detail-domain collapse.
 - Static timing diagnostics are not sufficient for precise per-domain attribution.
-- Atlas diagnostics summarize batches and pages but do not yet expose duplicate source fingerprints across registries.
+- Atlas diagnostics summarize placement buckets and pages but do not yet expose duplicate source fingerprints across registries.
 - The final full-scene atlas size is large enough that page reuse should be investigated before more micro-optimizing worker code.
 - The animation catch-up warnings during generated-scenery load need a separate check; they may be downstream symptoms of long load stalls.
-- `textureBatchId` remains as internal texture-manager terminology for placement buckets. Rename it in Phase 6 if the harness proof confirms the bucket behavior is correct.
 - `bakeBatchId` remains as an internal worker-correlation handle. If it starts leaking into product contracts again, delete or rename it immediately; no second life as architecture glitter.

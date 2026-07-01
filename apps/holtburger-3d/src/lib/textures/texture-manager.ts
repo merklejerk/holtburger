@@ -108,9 +108,9 @@ export class TextureManager {
 	readonly #assetService: AssetService;
 	readonly #texturePacker: TexturePacker;
 	readonly #packGroupMaxConcurrency: number;
-	readonly #batchRegistries = new Map<
-		VisualTextureBatchRegistryKey,
-		VisualTextureBatchRegistry
+	readonly #placementBucketRegistries = new Map<
+		VisualTexturePlacementBucketRegistryKey,
+		VisualTexturePlacementBucketRegistry
 	>();
 	readonly #textureKeysByOwnerKey = new Map<string, Set<VisualTextureKey>>();
 	readonly #placementRecordsByItemId = new Map<
@@ -156,7 +156,7 @@ export class TextureManager {
 			SamplerPolicyUpdate["policies"][number]
 		>();
 
-		for (const registry of this.#batchRegistries.values()) {
+		for (const registry of this.#placementBucketRegistries.values()) {
 			for (const entry of uniqueSortedRegistryEntries(registry)) {
 				const samplerPolicy = createRuntimeTextureSamplerPolicy({
 					filteringMode,
@@ -191,43 +191,43 @@ export class TextureManager {
 	}
 
 	createDiagnosticsReport(): TextureAtlasDiagnosticsReport {
-		const batches = Array.from(this.#batchRegistries.values())
+		const buckets = Array.from(this.#placementBucketRegistries.values())
 			.sort((left, right) =>
-				[left.domain, left.textureBatchId]
+				[left.domain, left.placementBucketKey]
 					.join("|")
-					.localeCompare([right.domain, right.textureBatchId].join("|")),
+					.localeCompare([right.domain, right.placementBucketKey].join("|")),
 			)
 			.map((registry, index) =>
-				createTextureAtlasBatchDiagnostics(registry, index),
+				createTextureAtlasBucketDiagnostics(registry, index),
 			);
 		const textureRefs = new Map<string, TextureAtlasPageFacts>();
-		for (const batch of batches) {
-			for (const page of batch.pages) {
-				textureRefs.set(`${batch.batchId}:${page.pageId}`, page);
+		for (const bucket of buckets) {
+			for (const page of bucket.pages) {
+				textureRefs.set(`${bucket.bucketId}:${page.pageId}`, page);
 			}
 		}
-		const pages = batches.flatMap((batch) => batch.pages);
-		const activeBatchCount = batches.filter(
-			(batch) => batch.texturePageCount > 0,
+		const pages = buckets.flatMap((bucket) => bucket.pages);
+		const activeBucketCount = buckets.filter(
+			(bucket) => bucket.texturePageCount > 0,
 		).length;
 
 		return {
-			batches,
+			buckets,
 			kind: "texture-atlas",
 			summary: {
 				approximateBytes: sumNumbers(
 					Array.from(textureRefs.values(), (page) => page.approximateBytes),
 				),
-				activeBatchCount,
-				batchCount: batches.length,
-				emptyBatchCount: batches.length - activeBatchCount,
+				activeBucketCount,
+				bucketCount: buckets.length,
+				emptyBucketCount: buckets.length - activeBucketCount,
 				entryAliasCount: sumNumbers(
-					batches.map((batch) => batch.entryAliasCount),
+					buckets.map((bucket) => bucket.entryAliasCount),
 				),
 				mipmappedPageCount: pages.filter((page) => page.mipmapsGenerated)
 					.length,
 				multiSourcePageCount: sumNumbers(
-					batches.map((batch) => batch.multiSourcePageCount),
+					buckets.map((bucket) => bucket.multiSourcePageCount),
 				),
 				texturePageCount: textureRefs.size,
 				unmippedPageCount: pages.filter((page) => !page.mipmapsGenerated)
@@ -266,7 +266,7 @@ export class TextureManager {
 			const entry =
 				this.#getRegistry(
 					textureUse.domain,
-					textureUse.textureBatchId,
+					textureUse.placementBucketKey,
 				).entries.get(textureKey) ?? pendingPlacements.get(textureKey)?.entry;
 			if (!entry) {
 				throw new Error(
@@ -432,7 +432,7 @@ export class TextureManager {
 			const entry =
 				this.#getRegistry(
 					textureUse.domain,
-					textureUse.textureBatchId,
+					textureUse.placementBucketKey,
 				).entries.get(textureKey) ?? pendingPlacements.get(textureKey)?.entry;
 			if (!entry) {
 				continue;
@@ -522,7 +522,7 @@ export class TextureManager {
 					continue;
 				}
 
-				const registry = this.#getRegistry(entry.domain, entry.textureBatchId);
+				const registry = this.#getRegistry(entry.domain, entry.placementBucketKey);
 				deleteRegistryEntryAliases(registry, entry);
 				registry.revision += 1;
 				if (!this.#hasTextureRef(entry.textureRefId)) {
@@ -541,7 +541,7 @@ export class TextureManager {
 		const source = textureUse.source;
 		const registry = this.#getRegistry(
 			textureUse.domain,
-			textureUse.textureBatchId,
+			textureUse.placementBucketKey,
 		);
 		const textureKey = createVisualTextureKey(textureUse);
 		const existing = registry.entries.get(textureKey);
@@ -602,7 +602,7 @@ export class TextureManager {
 			pendingLeaseCount: 0,
 			samplerPolicy,
 			source: directSource,
-			textureBatchId: textureUse.textureBatchId,
+			placementBucketKey: textureUse.placementBucketKey,
 			textureKeys: new Set([textureKey]),
 			textureUseIds: new Set([textureUse.textureUseId]),
 			textureUse,
@@ -681,18 +681,18 @@ export class TextureManager {
 		groups: readonly PendingTexturePlacementGroup[],
 	): readonly PlannedPendingTexturePlacementGroup[] {
 		const nextRevisionByRegistry = new Map<
-			VisualTextureBatchRegistryKey,
+			VisualTexturePlacementBucketRegistryKey,
 			number
 		>();
 
 		return groups.map((group) => {
-			const registryKey = createVisualTextureBatchRegistryKey(
+			const registryKey = createVisualTexturePlacementBucketRegistryKey(
 				group.domain,
-				group.textureBatchId,
+				group.placementBucketKey,
 			);
 			const currentRevision =
 				nextRevisionByRegistry.get(registryKey) ??
-				this.#getRegistry(group.domain, group.textureBatchId).revision;
+				this.#getRegistry(group.domain, group.placementBucketKey).revision;
 			const placementRevision = currentRevision + 1;
 			nextRevisionByRegistry.set(registryKey, placementRevision);
 
@@ -701,7 +701,7 @@ export class TextureManager {
 				job: {
 					cohorts: createTexturePackingCohorts(group),
 					domain: group.domain,
-					jobId: `texture-pack:${group.textureBatchId}:${group.pageClassKey}:${placementRevision}`,
+					jobId: `texture-pack:${group.placementBucketKey}:${group.pageClassKey}:${placementRevision}`,
 					page: createTexturePackingPageConstraints(group),
 					placementRevision,
 					sources: group.entries.map((entry) => ({
@@ -768,12 +768,12 @@ export class TextureManager {
 				pageEntries.length === 1
 					? createTextureRefId(
 							group.domain,
-							group.textureBatchId,
+							group.placementBucketKey,
 							firstEntry.textureUse,
 						)
 					: createTexturePageRefId(
 							group.domain,
-							group.textureBatchId,
+							group.placementBucketKey,
 							group.pageClassKey,
 							placementRevision,
 							pageId,
@@ -824,7 +824,7 @@ export class TextureManager {
 					sampleClass: group.pagePolicy.sampleClass,
 					samplerPolicyKey: group.samplerPolicy.policyKey,
 					source: entry.textureUse.source,
-					textureBatchId: entry.textureBatchId,
+					placementBucketKey: entry.placementBucketKey,
 					textureHeight: page.height,
 					textureRefId,
 					textureWidth: page.width,
@@ -833,7 +833,7 @@ export class TextureManager {
 				};
 				entry.entry = registryEntry;
 				for (const textureKey of entry.textureKeys) {
-					this.#getRegistry(entry.domain, entry.textureBatchId).entries.set(
+					this.#getRegistry(entry.domain, entry.placementBucketKey).entries.set(
 						textureKey,
 						registryEntry,
 					);
@@ -845,14 +845,14 @@ export class TextureManager {
 			}
 		}
 
-		const registry = this.#getRegistry(group.domain, group.textureBatchId);
+		const registry = this.#getRegistry(group.domain, group.placementBucketKey);
 		registry.revision = Math.max(registry.revision, placementRevision);
 
 		return runtimePlacements;
 	}
 
 	#hasTextureRef(textureRefId: string): boolean {
-		for (const registry of this.#batchRegistries.values()) {
+		for (const registry of this.#placementBucketRegistries.values()) {
 			for (const entry of registry.entries.values()) {
 				if (entry.textureRefId === textureRefId) {
 					return true;
@@ -865,28 +865,28 @@ export class TextureManager {
 
 	#getRegistry(
 		domain: VisualTextureDomain,
-		textureBatchId: TexturePlacementBucketKey,
-	): VisualTextureBatchRegistry {
-		const registryKey = createVisualTextureBatchRegistryKey(
+		placementBucketKey: TexturePlacementBucketKey,
+	): VisualTexturePlacementBucketRegistry {
+		const registryKey = createVisualTexturePlacementBucketRegistryKey(
 			domain,
-			textureBatchId,
+			placementBucketKey,
 		);
-		let registry = this.#batchRegistries.get(registryKey);
+		let registry = this.#placementBucketRegistries.get(registryKey);
 		if (!registry) {
 			registry = {
 				domain,
 				entries: new Map<VisualTextureKey, VisualTextureRegistryEntry>(),
 				revision: 0,
-				textureBatchId,
+				placementBucketKey,
 			};
-			this.#batchRegistries.set(registryKey, registry);
+			this.#placementBucketRegistries.set(registryKey, registry);
 		}
 
 		return registry;
 	}
 
 	#findEntry(textureKey: VisualTextureKey): VisualTextureRegistryEntry | null {
-		for (const registry of this.#batchRegistries.values()) {
+		for (const registry of this.#placementBucketRegistries.values()) {
 			const entry = registry.entries.get(textureKey);
 			if (entry) {
 				return entry;
@@ -986,7 +986,7 @@ export class TextureManager {
 	}
 
 	#hasLeasedTextureRef(textureRefId: string): boolean {
-		for (const registry of this.#batchRegistries.values()) {
+		for (const registry of this.#placementBucketRegistries.values()) {
 			for (const entry of registry.entries.values()) {
 				if (entry.textureRefId === textureRefId && entry.leaseCount > 0) {
 					return true;
@@ -997,7 +997,7 @@ export class TextureManager {
 	}
 
 	#deleteTextureRef(textureRefId: string): void {
-		for (const registry of this.#batchRegistries.values()) {
+		for (const registry of this.#placementBucketRegistries.values()) {
 			for (const [textureKey, entry] of registry.entries) {
 				if (entry.textureRefId === textureRefId) {
 					registry.entries.delete(textureKey);
@@ -1019,7 +1019,7 @@ interface VisualTextureUseCommit {
 	readonly owners: readonly TextureBindingOwner[];
 	readonly samplingPolicy?: StaticBakeTextureUse["samplingPolicy"];
 	readonly source: MaterialTextureDataUseIdentity;
-	readonly textureBatchId: TexturePlacementBucketKey;
+	readonly placementBucketKey: TexturePlacementBucketKey;
 	readonly textureUseId: string;
 }
 
@@ -1028,16 +1028,16 @@ interface VisualTextureUseCommitDelta {
 	readonly textureUses: readonly VisualTextureUseCommit[];
 }
 
-type VisualTextureBatchRegistryKey = string & {
-	readonly __brand: "VisualTextureBatchRegistryKey";
+type VisualTexturePlacementBucketRegistryKey = string & {
+	readonly __brand: "VisualTexturePlacementBucketRegistryKey";
 };
 type VisualTextureKey = string & {
 	readonly __brand: "VisualTextureKey";
 };
 
-interface VisualTextureBatchRegistry {
+interface VisualTexturePlacementBucketRegistry {
 	readonly domain: VisualTextureDomain;
-	readonly textureBatchId: TexturePlacementBucketKey;
+	readonly placementBucketKey: TexturePlacementBucketKey;
 	revision: number;
 	readonly entries: Map<VisualTextureKey, VisualTextureRegistryEntry>;
 }
@@ -1048,7 +1048,7 @@ interface VisualTextureRegistryEntry {
 	filteringMode: TextureFilteringMode;
 	readonly format: RuntimeTexturePlacement["format"];
 	readonly itemId: string;
-	readonly textureBatchId: TexturePlacementBucketKey;
+	readonly placementBucketKey: TexturePlacementBucketKey;
 	readonly source: MaterialTextureDataUseIdentity;
 	readonly textureRefId: string;
 	readonly pageId: string;
@@ -1079,8 +1079,8 @@ interface TexturePlacementRecord {
 	readonly width: number;
 }
 
-interface TextureAtlasBatchFacts {
-	readonly batchId: string;
+interface TextureAtlasBucketFacts {
+	readonly bucketId: string;
 	readonly domain: VisualTextureDomain;
 	readonly entryAliasCount: number;
 	readonly uniqueSourceCount: number;
@@ -1120,7 +1120,7 @@ interface PendingStagedTexturePlacement {
 
 interface PendingTexturePlacement {
 	readonly domain: VisualTextureDomain;
-	readonly textureBatchId: TexturePlacementBucketKey;
+	readonly placementBucketKey: TexturePlacementBucketKey;
 	readonly textureUse: VisualTextureUseCommit;
 	readonly textureKeys: Set<VisualTextureKey>;
 	/** Texture-use ids that share this staged source placement. */
@@ -1135,7 +1135,7 @@ interface PendingTexturePlacement {
 
 interface PendingTexturePlacementGroup {
 	readonly domain: VisualTextureDomain;
-	readonly textureBatchId: TexturePlacementBucketKey;
+	readonly placementBucketKey: TexturePlacementBucketKey;
 	readonly pageClassKey: string;
 	readonly pagePolicy: RuntimeTexturePagePolicy;
 	readonly samplerPolicy: RuntimeTextureSamplerPolicy;
@@ -1174,7 +1174,7 @@ function createStaticVisualTextureUseCommit(
 		owners: textureUse.owners,
 		samplingPolicy: textureUse.samplingPolicy,
 		source: textureUse.source,
-		textureBatchId: createTexturePlacementBucketKey({
+		placementBucketKey: createTexturePlacementBucketKey({
 			domain: textureUse.domain,
 			lifetime: { kind: "static-authored" },
 			purpose,
@@ -1191,7 +1191,7 @@ function createDynamicVisualTextureUseCommit(
 		owners: [textureUse.owner],
 		samplingPolicy: textureUse.samplingPolicy,
 		source: textureUse.source,
-		textureBatchId: textureUse.placementBucketKey,
+		placementBucketKey: textureUse.placementBucketKey,
 		textureUseId: textureUse.textureUseId,
 	};
 }
@@ -1204,7 +1204,7 @@ function createVisualTextureUseCommitFromIntent(
 		owners: [],
 		samplingPolicy: intent.source.samplingPolicy,
 		source: intent.source.dataUse,
-		textureBatchId: intent.placementBucketKey,
+		placementBucketKey: intent.placementBucketKey,
 		textureUseId: intent.itemId,
 	};
 }
@@ -1225,15 +1225,15 @@ function toPlannedTexturePlacement(
 	};
 }
 
-function createVisualTextureBatchRegistryKey(
+function createVisualTexturePlacementBucketRegistryKey(
 	domain: VisualTextureDomain,
-	textureBatchId: TexturePlacementBucketKey,
-): VisualTextureBatchRegistryKey {
-	return [domain, textureBatchId].join(":") as VisualTextureBatchRegistryKey;
+	placementBucketKey: TexturePlacementBucketKey,
+): VisualTexturePlacementBucketRegistryKey {
+	return [domain, placementBucketKey].join(":") as VisualTexturePlacementBucketRegistryKey;
 }
 
 function findRegistryEntryBySource(
-	registry: VisualTextureBatchRegistry,
+	registry: VisualTexturePlacementBucketRegistry,
 	source: MaterialTextureDataUseIdentity,
 	pagePolicy: RuntimeTexturePagePolicy,
 	domain: VisualTextureDomain,
@@ -1282,7 +1282,7 @@ function createRegistryEntryAliasForPagePolicy(
 }
 
 function uniqueSortedRegistryEntries(
-	registry: VisualTextureBatchRegistry,
+	registry: VisualTexturePlacementBucketRegistry,
 ): readonly VisualTextureRegistryEntry[] {
 	return Array.from(new Set(registry.entries.values())).sort((left, right) =>
 		left.textureRefId.localeCompare(right.textureRefId),
@@ -1290,7 +1290,7 @@ function uniqueSortedRegistryEntries(
 }
 
 function deleteRegistryEntryAliases(
-	registry: VisualTextureBatchRegistry,
+	registry: VisualTexturePlacementBucketRegistry,
 	entry: VisualTextureRegistryEntry,
 ): void {
 	for (const [textureKey, candidate] of registry.entries) {
@@ -1447,7 +1447,7 @@ function createVisualTextureKey(
 ): VisualTextureKey {
 	return [
 		textureUse.domain,
-		textureUse.textureBatchId,
+		textureUse.placementBucketKey,
 		textureUse.textureUseId,
 	].join(":") as VisualTextureKey;
 }
@@ -1457,7 +1457,7 @@ function createVisualTextureSourcePlacementKey(
 ): string {
 	return [
 		textureUse.domain,
-		textureUse.textureBatchId,
+		textureUse.placementBucketKey,
 		createMaterialTextureDataUseKey(textureUse.source),
 		createTextureUseSamplingKey(textureUse),
 	].join(":");
@@ -1476,17 +1476,17 @@ function createTextureUseSamplingKey(
 
 function createTextureRefId(
 	domain: VisualTextureDomain,
-	textureBatchId: string,
+	placementBucketKey: string,
 	textureUse: Pick<VisualTextureUseCommit, "textureUseId">,
 ): string {
-	return ["texture-ref", domain, textureBatchId, textureUse.textureUseId].join(
+	return ["texture-ref", domain, placementBucketKey, textureUse.textureUseId].join(
 		":",
 	);
 }
 
 function createTexturePageRefId(
 	domain: VisualTextureDomain,
-	textureBatchId: string,
+	placementBucketKey: string,
 	pageClassKey: string,
 	placementRevision: number,
 	pageId: string,
@@ -1494,7 +1494,7 @@ function createTexturePageRefId(
 	return [
 		"texture-page-ref",
 		domain,
-		textureBatchId,
+		placementBucketKey,
 		pageClassKey,
 		placementRevision.toString(),
 		pageId,
@@ -1511,7 +1511,7 @@ function groupPendingTexturePlacements(
 			placement.pagePolicy,
 			placement.samplerPolicy,
 		);
-		const groupKey = `${placement.domain}|${placement.textureBatchId}|${pageClassKey}`;
+		const groupKey = `${placement.domain}|${placement.placementBucketKey}|${pageClassKey}`;
 		const existing = groups.get(groupKey);
 		if (existing) {
 			groups.set(groupKey, {
@@ -1527,7 +1527,7 @@ function groupPendingTexturePlacements(
 			pageClassKey,
 			pagePolicy: placement.pagePolicy,
 			samplerPolicy: placement.samplerPolicy,
-			textureBatchId: placement.textureBatchId,
+			placementBucketKey: placement.placementBucketKey,
 		});
 	}
 
@@ -1769,16 +1769,16 @@ function uniqueSortedStrings(values: readonly string[]): readonly string[] {
 	return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
-function createTextureAtlasBatchDiagnostics(
-	registry: VisualTextureBatchRegistry,
-	batchIndex: number,
-): TextureAtlasBatchFacts {
+function createTextureAtlasBucketDiagnostics(
+	registry: VisualTexturePlacementBucketRegistry,
+	bucketIndex: number,
+): TextureAtlasBucketFacts {
 	const entries = Array.from(registry.entries.values());
 	const pages = createTextureAtlasPageDiagnostics(entries);
 
 	return {
 		approximateBytes: sumNumbers(pages.map((page) => page.approximateBytes)),
-		batchId: `batch-${batchIndex + 1}`,
+		bucketId: `bucket-${bucketIndex + 1}`,
 		domain: registry.domain,
 		entryAliasCount: registry.entries.size,
 		multiSourcePageCount: pages.filter((page) => page.uniqueSourceCount > 1)
@@ -1829,7 +1829,7 @@ function createTextureAtlasPageDiagnostics(
 
 function countWrapModesForEntries(
 	entries: readonly VisualTextureRegistryEntry[],
-): TextureAtlasBatchFacts["wrapModes"] {
+): TextureAtlasBucketFacts["wrapModes"] {
 	return {
 		"clamp-to-edge": entries.filter(
 			(entry) =>

@@ -43,19 +43,6 @@ export function createDynamicVisualResourceId(
 	return `dynamic-visual-resource:${entityId}`;
 }
 
-export function createStaticAuthoredDynamicTextureBatchId(options: {
-	readonly entityId: DynamicEntityId;
-	readonly ownerId: string;
-}): string {
-	return `dynamic-static-authored:${options.ownerId}:${options.entityId}`;
-}
-
-export function createRuntimeDynamicTextureBatchId(
-	entityId: DynamicEntityId,
-): string {
-	return `runtime-dynamic:${entityId}`;
-}
-
 /** Static-authored placement fact shapes that can become dynamic runtime records. */
 export type StaticAuthoredDynamicPlacementFacts =
 	| EnvCellStaticObjectDynamicPlacementFacts

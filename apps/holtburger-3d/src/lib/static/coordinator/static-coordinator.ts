@@ -59,9 +59,12 @@ import { createTerrainTexturePlacementIntents } from "../terrain/bake/terrain-ge
 import { createStructuredInteriorTexturePlacementIntents } from "../env-cells/bake/structured-interior-placement-planner";
 import { isStaticObjectDomain } from "../objects/bake/static-object-batch-payload";
 import type {
+	ObjectVisualTexturePlacementIntent,
+	ObjectVisualTexturePlacementSnapshot,
 	TexturePlacementIntent,
 	TexturePlacementSnapshot,
 } from "../../textures/placement";
+import { requireObjectVisualTexturePlacementSnapshot } from "../../textures/placement";
 
 const DEFAULT_STATIC_BATCH_MAX_PAYLOADS = 10;
 const DEFAULT_STATIC_BATCH_COALESCE_DELAY_MS = 500;
@@ -73,6 +76,11 @@ const DEFAULT_STATIC_BAKE_ATTACHMENT_PROVIDER: StaticBakeAttachmentProvider = {
 const EMPTY_TEXTURE_PLACEMENT_SNAPSHOT: TexturePlacementSnapshot = {
 	placementsByItemId: new Map(),
 };
+const EMPTY_OBJECT_VISUAL_TEXTURE_PLACEMENT_SNAPSHOT: ObjectVisualTexturePlacementSnapshot =
+	{
+		itemIdsByTextureUseId: new Map(),
+		placementsByItemId: new Map(),
+	};
 
 export type StaticCoordinatorListener = (
 	snapshot: StaticCoordinatorSnapshot,
@@ -94,12 +102,14 @@ export interface StaticSourceReadyWork {
 	readonly bakeBatchId: string;
 	/** Resolved source payloads that are ready for texture placement and baking. */
 	readonly sourcePayloads: readonly StaticScopePayload[];
-	/** Texture placement intents discovered before bake. Empty until migrated domains emit them. */
-	readonly placementIntents: readonly TexturePlacementIntent[];
+	/** Terrain texture placement intents, still keyed by legacy string ids. */
+	readonly terrainPlacementIntents: readonly TexturePlacementIntent[];
+	/** Object-like visual placement intents keyed by numeric bake-time ids. */
+	readonly objectVisualPlacementIntents: readonly ObjectVisualTexturePlacementIntent[];
 	/** Current layer tasks represented by this source-ready batch. */
 	readonly tasks: readonly StaticBakeTask[];
 	continueWithPlacement(
-		snapshot: TexturePlacementSnapshot,
+		snapshot: TexturePlacementSnapshot | ObjectVisualTexturePlacementSnapshot,
 		timing?: StaticSourceReadyPlacementTiming,
 	): Promise<void>;
 	failPlacement(message: string): void;
@@ -132,7 +142,11 @@ export class StaticCoordinator {
 	readonly #dynamicVisualGeometryAssetReader: PreparedAssetReader | null;
 	readonly #batching: StaticCoordinatorBatchingOptions;
 	#sourceReadyHandler: StaticSourceReadyHandler = (work) =>
-		work.continueWithPlacement(EMPTY_TEXTURE_PLACEMENT_SNAPSHOT);
+		work.continueWithPlacement(
+			work.domain === "outdoor-terrain"
+				? EMPTY_TEXTURE_PLACEMENT_SNAPSHOT
+				: EMPTY_OBJECT_VISUAL_TEXTURE_PLACEMENT_SNAPSHOT,
+		);
 	readonly #listeners = new Set<StaticCoordinatorListener>();
 	readonly #commitListeners = new Set<StaticCoordinatorCommitListener>();
 	readonly #sourcePayloadListeners =
@@ -217,12 +231,12 @@ export class StaticCoordinator {
 			if (existing) {
 				continue;
 			}
-				this.#layerTasksByTaskId.set(task.taskId, {
-					activeBakeBatchId: null,
-					activeBakeStage: null,
-					activeBakeStageStartedAtMs: null,
-					domain: task.domain,
-					ownerId: task.ownerId,
+			this.#layerTasksByTaskId.set(task.taskId, {
+				activeBakeBatchId: null,
+				activeBakeStage: null,
+				activeBakeStageStartedAtMs: null,
+				domain: task.domain,
+				ownerId: task.ownerId,
 				ownerKey: task.ownerKey,
 				phaseStartedAtMs: nowMs(),
 				taskId: task.taskId,
@@ -287,13 +301,13 @@ export class StaticCoordinator {
 			const current = this.#layerTasksByTaskId.get(task.taskId);
 			if (!current || current.status !== "materializing") {
 				continue;
-				}
-				current.status = "committed";
-				current.activeBakeBatchId = null;
-				current.activeBakeStage = null;
-				current.activeBakeStageStartedAtMs = null;
-				current.phaseStartedAtMs = nowMs();
-				changed = true;
+			}
+			current.status = "committed";
+			current.activeBakeBatchId = null;
+			current.activeBakeStage = null;
+			current.activeBakeStageStartedAtMs = null;
+			current.phaseStartedAtMs = nowMs();
+			changed = true;
 		}
 		if (changed) {
 			this.#emit();
@@ -337,19 +351,18 @@ export class StaticCoordinator {
 			).sort(compareMaterialCoverageReports),
 			latestOutdoorStaticObjectsPayload:
 				this.#latestOutdoorStaticObjectsPayload,
-				latestTerrainPayload: this.#latestTerrainPayload,
-				ownerStates,
-				recentTiming: [...this.#recentTiming],
-				requested: layerTasks.length,
-				resolving: countPhase(layerTasks, "resolving"),
-				revision: this.#revision,
-				staticBakerDiagnostics:
-					this.#baker.createDiagnosticsSnapshot?.() ?? null,
-				sourceResolutionDiagnostics:
-					this.#createSourceResolutionDiagnosticsSnapshot(),
-				staticObjectBakeDiagnostics: Array.from(
-					this.#latestStaticObjectBakeDiagnosticsByKey.values(),
-				).sort(compareStaticObjectBakeDiagnostics),
+			latestTerrainPayload: this.#latestTerrainPayload,
+			ownerStates,
+			recentTiming: [...this.#recentTiming],
+			requested: layerTasks.length,
+			resolving: countPhase(layerTasks, "resolving"),
+			revision: this.#revision,
+			staticBakerDiagnostics: this.#baker.createDiagnosticsSnapshot?.() ?? null,
+			sourceResolutionDiagnostics:
+				this.#createSourceResolutionDiagnosticsSnapshot(),
+			staticObjectBakeDiagnostics: Array.from(
+				this.#latestStaticObjectBakeDiagnosticsByKey.values(),
+			).sort(compareStaticObjectBakeDiagnostics),
 		};
 	}
 
@@ -515,13 +528,13 @@ export class StaticCoordinator {
 			task,
 			taskId: task.taskId,
 		});
-			if (
-				pendingBatch.items.length >=
-				getMaxPayloadsPerBatchForDomain(taskStatus.domain, this.#batching)
-			) {
-				this.#flushPendingBatch(pendingBatch.batchId);
-			}
+		if (
+			pendingBatch.items.length >=
+			getMaxPayloadsPerBatchForDomain(taskStatus.domain, this.#batching)
+		) {
+			this.#flushPendingBatch(pendingBatch.batchId);
 		}
+	}
 
 	async #flushPendingBatch(pendingBatchId: string): Promise<void> {
 		const pendingBatch = this.#pendingBatches.get(pendingBatchId);
@@ -552,12 +565,12 @@ export class StaticCoordinator {
 			items,
 			revision: pendingBatch.revision,
 		});
-			for (const item of items) {
-				this.#setTaskStatus(item.task.taskId, "baking", {
-					activeBakeBatchId: bakeBatchId,
-					activeBakeStage: "source-ready-handler",
-				});
-			}
+		for (const item of items) {
+			this.#setTaskStatus(item.task.taskId, "baking", {
+				activeBakeBatchId: bakeBatchId,
+				activeBakeStage: "source-ready-handler",
+			});
+		}
 		await this.#dispatchSourceReadyWork({
 			items,
 			pendingBatch,
@@ -574,14 +587,9 @@ export class StaticCoordinator {
 	}): Promise<void> {
 		let consumed = false;
 		const placementIntentStartedAt = nowMs();
-		const placementIntents = [
+		const objectVisualPlacementIntents = [
 			...(isStaticObjectDomain(options.pendingBatch.domain)
 				? createStaticObjectTexturePlacementIntents({
-						items: options.items,
-					})
-				: []),
-			...(options.pendingBatch.domain === "outdoor-terrain"
-				? createTerrainTexturePlacementIntents({
 						items: options.items,
 					})
 				: []),
@@ -597,10 +605,17 @@ export class StaticCoordinator {
 				),
 			),
 		];
+		const terrainPlacementIntents =
+			options.pendingBatch.domain === "outdoor-terrain"
+				? createTerrainTexturePlacementIntents({
+						items: options.items,
+					})
+				: [];
 		const placementIntentMs = nowMs() - placementIntentStartedAt;
 		const work: StaticSourceReadyWork = {
 			domain: options.pendingBatch.domain,
-			placementIntents,
+			objectVisualPlacementIntents,
+			terrainPlacementIntents,
 			sourcePayloads: options.items.map((item) => item.payload),
 			bakeBatchId: options.bakeBatchId,
 			tasks: options.items.map((item) => item.task),
@@ -648,7 +663,9 @@ export class StaticCoordinator {
 		readonly items: readonly StaticBakeBatchItem[];
 		readonly bakeBatchId: string;
 		readonly placementIntentMs: number;
-		readonly placementSnapshot: TexturePlacementSnapshot;
+		readonly placementSnapshot:
+			| TexturePlacementSnapshot
+			| ObjectVisualTexturePlacementSnapshot;
 		readonly texturePlacementMs: number | null;
 	}): Promise<void> {
 		const currentItems = options.items.filter(
@@ -668,10 +685,10 @@ export class StaticCoordinator {
 		);
 		void options.placementSnapshot;
 
-			let attachments: StaticBakeBatchInput["attachments"];
-			const attachmentStartedAt = nowMs();
-			this.#setTaskBakeStage(currentItems, "attachments", options.bakeBatchId);
-			try {
+		let attachments: StaticBakeBatchInput["attachments"];
+		const attachmentStartedAt = nowMs();
+		this.#setTaskBakeStage(currentItems, "attachments", options.bakeBatchId);
+		try {
 			attachments = await this.#attachmentProvider.createAttachments({
 				domain: options.pendingBatch.domain,
 				items: currentItems,
@@ -697,10 +714,10 @@ export class StaticCoordinator {
 			texturePlacementSnapshot: options.placementSnapshot,
 		};
 
-			let result: StaticBakeBatchResult;
-			const bakeStartedAt = nowMs();
-			this.#setTaskBakeStage(currentItems, "static-baker", options.bakeBatchId);
-			try {
+		let result: StaticBakeBatchResult;
+		const bakeStartedAt = nowMs();
+		this.#setTaskBakeStage(currentItems, "static-baker", options.bakeBatchId);
+		try {
 			result = await this.#baker.bake(bakeInput);
 		} catch (error: unknown) {
 			for (const item of currentItems) {
@@ -715,14 +732,14 @@ export class StaticCoordinator {
 		let dynamicVisualBake: DynamicVisualBakeResult | null;
 		let dynamicPlacements: readonly StaticAuthoredDynamicPlacementRecord[] =
 			currentPendingItems.flatMap((item) => item.dynamicPlacements);
-			let dynamicRecipes: readonly DynamicEntityRecipe[] =
-				currentPendingItems.flatMap((item) => item.dynamicRecipes);
-			this.#setTaskBakeStage(
-				currentItems,
-				"dynamic-visual-baker",
-				options.bakeBatchId,
-			);
-			try {
+		let dynamicRecipes: readonly DynamicEntityRecipe[] =
+			currentPendingItems.flatMap((item) => item.dynamicRecipes);
+		this.#setTaskBakeStage(
+			currentItems,
+			"dynamic-visual-baker",
+			options.bakeBatchId,
+		);
+		try {
 			dynamicVisualBake = await this.#bakeDynamicVisualsForPendingItems({
 				pendingItems: currentPendingItems,
 				placementSnapshot: options.placementSnapshot,
@@ -762,15 +779,15 @@ export class StaticCoordinator {
 			if (currentTasks.length === 0) {
 				this.#emit();
 				return;
-				}
 			}
+		}
 
-			this.#setTaskBakeStage(
-				currentItems,
-				"commit-synthesis",
-				options.bakeBatchId,
-			);
-			try {
+		this.#setTaskBakeStage(
+			currentItems,
+			"commit-synthesis",
+			options.bakeBatchId,
+		);
+		try {
 			this.#commit(result, {
 				attachmentMs,
 				bakeMs,
@@ -800,7 +817,9 @@ export class StaticCoordinator {
 
 	async #bakeDynamicVisualsForPendingItems(options: {
 		readonly pendingItems: readonly PendingStaticBakeBatchItem[];
-		readonly placementSnapshot: TexturePlacementSnapshot;
+		readonly placementSnapshot:
+			| TexturePlacementSnapshot
+			| ObjectVisualTexturePlacementSnapshot;
 		readonly revision: number;
 		readonly bakeBatchId: string;
 	}): Promise<DynamicVisualBakeResult | null> {
@@ -825,7 +844,10 @@ export class StaticCoordinator {
 			recipes,
 			revision: options.revision,
 			sourceGeometry,
-			texturePlacementSnapshot: options.placementSnapshot,
+			texturePlacementSnapshot: requireObjectVisualTexturePlacementSnapshot(
+				options.placementSnapshot,
+				"Dynamic visual bake",
+			),
 		});
 	}
 
@@ -849,13 +871,13 @@ export class StaticCoordinator {
 			const status = this.#layerTasksByTaskId.get(task.taskId);
 			if (!status) {
 				continue;
-				}
-				status.status = "materializing";
-				status.activeBakeBatchId = null;
-				status.activeBakeStage = null;
-				status.activeBakeStageStartedAtMs = null;
-				status.phaseStartedAtMs = nowMs();
-				this.#committed += 1;
+			}
+			status.status = "materializing";
+			status.activeBakeBatchId = null;
+			status.activeBakeStage = null;
+			status.activeBakeStageStartedAtMs = null;
+			status.phaseStartedAtMs = nowMs();
+			this.#committed += 1;
 		}
 		for (const [ownerId, resources] of resourcesByOwnerId) {
 			const residentResources =
@@ -1147,12 +1169,12 @@ export class StaticCoordinator {
 			return;
 		}
 
-			task.status = "failed";
-			task.activeBakeBatchId = null;
-			task.activeBakeStage = null;
-			task.activeBakeStageStartedAtMs = null;
-			task.phaseStartedAtMs = nowMs();
-			this.#failed += 1;
+		task.status = "failed";
+		task.activeBakeBatchId = null;
+		task.activeBakeStage = null;
+		task.activeBakeStageStartedAtMs = null;
+		task.phaseStartedAtMs = nowMs();
+		this.#failed += 1;
 		console.error(
 			`static layer task ${task.taskId} failed; static content for ${task.scopeKey}/${task.domain} was not resolved.`,
 			{

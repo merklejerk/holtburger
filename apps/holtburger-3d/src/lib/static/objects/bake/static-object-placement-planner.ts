@@ -6,18 +6,24 @@ import type {
 } from "../../contracts";
 import { createStaticMaterialTextureBindingRequirement } from "../../bake/static-material-texture-policy";
 import type {
+	ObjectVisualTexturePlacementIntent,
 	TextureBindingRequirement,
-	TexturePlacementIntent,
 } from "../../../textures/placement";
-import { createStaticTexturePlacementIntent } from "../../../textures/placement";
+import {
+	createObjectVisualStaticTexturePlacementIntent,
+	createTexturePlacementItemId,
+} from "../../../textures/placement";
 import { createStaticObjectBatchPayload } from "./static-object-batch-payload";
 import { partitionStaticObjectBatches } from "./static-object-batch-partitioner";
 import { isCurrentlyStageableStaticObjectDataUse } from "./static-object-renderability";
 
 export function createStaticObjectTexturePlacementIntents(input: {
 	readonly items: readonly StaticBakeBatchItem[];
-}): readonly TexturePlacementIntent[] {
-	const intentsByItemId = new Map<string, TexturePlacementIntent>();
+}): readonly ObjectVisualTexturePlacementIntent[] {
+	const intentsByTextureUseId = new Map<
+		string,
+		ObjectVisualTexturePlacementIntent
+	>();
 
 	for (const item of input.items) {
 		if (!hasStaticObjectTexturePlanningPayload(item.payload)) {
@@ -37,16 +43,17 @@ export function createStaticObjectTexturePlacementIntents(input: {
 						textureUseScopeId: item.task.ownerId,
 						wrapMode: entry.textureWrapMode,
 					});
-					if (intentsByItemId.has(requirement.placementItemId)) {
+					if (intentsByTextureUseId.has(requirement.textureUseId)) {
 						continue;
 					}
-					intentsByItemId.set(
-						requirement.placementItemId,
-							createStaticTexturePlacementIntent(
-								createStaticObjectPlanningTextureUse({
-									domain: payload.domain,
-									requirement,
-								}),
+					intentsByTextureUseId.set(
+						requirement.textureUseId,
+						createObjectVisualStaticTexturePlacementIntent(
+							createStaticObjectPlanningTextureUse({
+								domain: payload.domain,
+								requirement,
+							}),
+							createTexturePlacementItemId(intentsByTextureUseId.size),
 							{
 								affinityKey: createStaticObjectPlacementAffinityKey({
 									landblockId: payload.landblock.landblockId,
@@ -61,8 +68,8 @@ export function createStaticObjectTexturePlacementIntents(input: {
 		}
 	}
 
-	return [...intentsByItemId.values()].sort((left, right) =>
-		left.itemId.localeCompare(right.itemId),
+	return [...intentsByTextureUseId.values()].sort(
+		(left, right) => left.itemId - right.itemId,
 	);
 }
 

@@ -13,6 +13,7 @@ import type {
 	DynamicVisualBakeResult,
 } from "../dynamic/contracts";
 import type {
+	ObjectVisualTexturePlacementSnapshot,
 	TextureResourceDependencies,
 	TexturePlacementSnapshot,
 } from "../textures/placement";
@@ -955,7 +956,9 @@ export interface StaticBakeBatchInput {
 	readonly domain: StaticDomain;
 	readonly items: readonly StaticBakeBatchItem[];
 	/** Pre-bake texture placement assignments available to bakers that can partition by final pages. */
-	readonly texturePlacementSnapshot?: TexturePlacementSnapshot;
+	readonly texturePlacementSnapshot?:
+		| TexturePlacementSnapshot
+		| ObjectVisualTexturePlacementSnapshot;
 	readonly revision: number;
 	readonly bakeBatchId: string;
 }

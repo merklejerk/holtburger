@@ -25,7 +25,10 @@ import {
 	MAX_TERRAIN_MASK_PAGES_PER_DRAW,
 } from "./terrain-material-family-classifier";
 import { buildTerrainMaterialLayerPlan } from "./terrain-material-layer-planner";
-import { createStaticTexturePlacementIntent } from "../../../textures/placement";
+import {
+	createStaticTexturePlacementIntent,
+	isObjectVisualTexturePlacementSnapshot,
+} from "../../../textures/placement";
 import type {
 	TextureBindingRequirement,
 	TexturePlacementIntent,
@@ -86,7 +89,7 @@ export function bakeTerrainGeometry(
 		tasks: input.items.map((item) => item.task),
 		textureDependencies: createTerrainTextureDependencies(
 			drawUnits,
-			input.texturePlacementSnapshot ?? EMPTY_TEXTURE_PLACEMENT_SNAPSHOT,
+			resolveTerrainTexturePlacementSnapshot(input.texturePlacementSnapshot),
 		),
 		textureUses: itemResults.flatMap((result) => result.textureUses),
 	};
@@ -109,10 +112,8 @@ export function createTerrainTexturePlacementIntents(options: {
 		);
 		const plan = buildTerrainMaterialLayerPlan({
 			createTextureUseId: (textureUse) =>
-				createTerrainTextureBindingRequirement(
-					item.task.ownerId,
-					textureUse,
-				).bindingKey,
+				createTerrainTextureBindingRequirement(item.task.ownerId, textureUse)
+					.bindingKey,
 			payload: item.payload.scope,
 		});
 		if (!plan) {
@@ -127,10 +128,10 @@ export function createTerrainTexturePlacementIntents(options: {
 				}
 				return [
 					createStaticTexturePlacementIntent(
-							createTerrainStaticBakeTextureUse({
-								owners: [],
-								requirement,
-							}),
+						createTerrainStaticBakeTextureUse({
+							owners: [],
+							requirement,
+						}),
 						{
 							affinityKey: createTerrainTextureAffinityKey(item.task.ownerId),
 						},
@@ -139,6 +140,20 @@ export function createTerrainTexturePlacementIntents(options: {
 			},
 		);
 	});
+}
+
+function resolveTerrainTexturePlacementSnapshot(
+	snapshot: StaticBakeBatchInput["texturePlacementSnapshot"],
+): TexturePlacementSnapshot {
+	if (!snapshot) {
+		return EMPTY_TEXTURE_PLACEMENT_SNAPSHOT;
+	}
+	if (isObjectVisualTexturePlacementSnapshot(snapshot)) {
+		throw new Error(
+			"Terrain bake received object-visual texture placement snapshot.",
+		);
+	}
+	return snapshot;
 }
 
 function createTerrainSourceMappingRecords(
@@ -191,7 +206,7 @@ function bakeTerrainGeometryItem(
 	const drawUnits = createTerrainGeometryDrawUnits(
 		textureUseScopeId,
 		item.payload.scope,
-		input.texturePlacementSnapshot ?? EMPTY_TEXTURE_PLACEMENT_SNAPSHOT,
+		resolveTerrainTexturePlacementSnapshot(input.texturePlacementSnapshot),
 	);
 
 	return {
@@ -857,10 +872,10 @@ function createTerrainBakeTextureUses(
 
 			textureUsesById.set(
 				requirement.bindingKey,
-					createTerrainStaticBakeTextureUse({
-						owners: [{ drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" }],
-						requirement,
-					}),
+				createTerrainStaticBakeTextureUse({
+					owners: [{ drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" }],
+					requirement,
+				}),
 			);
 		}
 	}
@@ -900,7 +915,11 @@ function createTerrainTextureBindingRequirement(
 		bindingKey,
 		// Phase 12 keeps terrain renderer binding keys equal to placement item ids.
 		placementItemId: bindingKey,
-		purpose: classifyTextureUsagePurpose(textureUse.preparedTextureUse, "terrain"),
+		textureUseId: bindingKey,
+		purpose: classifyTextureUsagePurpose(
+			textureUse.preparedTextureUse,
+			"terrain",
+		),
 		samplingPolicy: undefined,
 		source: {
 			dataUse: textureUse.preparedTextureUse,
@@ -998,13 +1017,18 @@ function createTerrainTextureRequirementIndex(
 	textureUses: readonly TerrainTextureUseFacts[],
 ): ReadonlyMap<string, TextureBindingRequirement> {
 	return new Map(
-		textureUses.flatMap((textureUse) =>
-			textureUse.preparedTextureUse
-				? [
-						createTerrainTextureBindingRequirement(textureUseScopeId, textureUse),
-					]
-				: [],
-		).map((requirement) => [requirement.bindingKey, requirement] as const),
+		textureUses
+			.flatMap((textureUse) =>
+				textureUse.preparedTextureUse
+					? [
+							createTerrainTextureBindingRequirement(
+								textureUseScopeId,
+								textureUse,
+							),
+						]
+					: [],
+			)
+			.map((requirement) => [requirement.bindingKey, requirement] as const),
 	);
 }
 

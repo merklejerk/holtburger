@@ -1,5 +1,6 @@
 import type {
-	TexturePlacementSnapshot,
+	ObjectVisualTexturePlacementSnapshot,
+	TexturePlacementItemId,
 	TextureUsagePurpose,
 } from "../textures/placement";
 
@@ -36,11 +37,7 @@ type ObjectMaterialFamily =
 	| "texture-rgba"
 	| "unsupported";
 
-type ObjectMaterialPass =
-	| "additive"
-	| "alpha-test"
-	| "opaque"
-	| "transparent";
+type ObjectMaterialPass = "additive" | "alpha-test" | "opaque" | "transparent";
 
 export interface ObjectMaterialPartitionInput {
 	readonly alphaMode: string;
@@ -57,7 +54,7 @@ export interface ObjectMaterialPartitionInput {
 }
 
 export interface ObjectMaterialTextureRequirement {
-	readonly placementItemId: string;
+	readonly placementItemId: TexturePlacementItemId;
 	readonly purpose: TextureUsagePurpose;
 }
 
@@ -78,7 +75,9 @@ export function createObjectMaterialDrawUnitPartitionKey(options: {
 	readonly diagnosticSubject?: string;
 	readonly includeConcreteEntryInKey: boolean;
 	readonly material: ObjectMaterialPartitionInput;
-	readonly texturePlacementSnapshot: TexturePlacementSnapshot | undefined;
+	readonly texturePlacementSnapshot:
+		| ObjectVisualTexturePlacementSnapshot
+		| undefined;
 	readonly textureRequirements: readonly ObjectMaterialTextureRequirement[];
 }): ObjectMaterialDrawUnitPartitionKey {
 	const textureBindingTuple = createObjectMaterialTextureBindingTuple({
@@ -167,7 +166,7 @@ function createObjectMaterialPartitionAxis(options: {
 
 function createObjectMaterialTextureBindingTuple(options: {
 	readonly diagnosticSubject?: string;
-	readonly placementSnapshot: TexturePlacementSnapshot | undefined;
+	readonly placementSnapshot: ObjectVisualTexturePlacementSnapshot | undefined;
 	readonly requirements: readonly ObjectMaterialTextureRequirement[];
 }): ObjectMaterialTextureBindingTuple {
 	if (!options.placementSnapshot) {
@@ -225,7 +224,9 @@ function createObjectMaterialTextureBindingTuple(options: {
 			textureRefId: placement.textureRefId,
 		};
 	});
-	const sortedEntries = [...entries].sort(compareObjectMaterialTextureBindingEntries);
+	const sortedEntries = [...entries].sort(
+		compareObjectMaterialTextureBindingEntries,
+	);
 	return {
 		bindings: sortedEntries,
 		key:

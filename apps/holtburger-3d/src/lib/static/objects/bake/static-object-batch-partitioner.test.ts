@@ -10,7 +10,10 @@ import type {
 	StaticObjectPaletteViewFacts,
 	StaticObjectTextureRefFacts,
 } from "../../contracts";
-import type { TexturePlacementSnapshot } from "../../../textures/placement";
+import type {
+	ObjectVisualTexturePlacementSnapshot,
+	TexturePlacementSnapshot,
+} from "../../../textures/placement";
 import { bakeStaticObjectBatch } from "./static-object-batch-baker";
 import {
 	partitionStaticObjectBatches,
@@ -969,18 +972,21 @@ describe("static object batch partitioner", () => {
 				itemId: intent.itemId,
 				pool: intent.pool,
 				purpose: intent.purpose,
+				textureUseId: intent.textureUseId,
 			})),
 		).toEqual([
 			{
 				affinityKey: expect.stringContaining("static-object|"),
-				itemId:
+				itemId: 0,
+				textureUseId:
 					"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
 				pool: "static-authored-object",
 				purpose: "object-base-color",
 			},
 			{
 				affinityKey: expect.stringContaining("static-object|"),
-				itemId:
+				itemId: 1,
+				textureUseId:
 					"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000011:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
 				pool: "static-authored-object",
 				purpose: "object-base-color",
@@ -1027,7 +1033,8 @@ describe("static object batch partitioner", () => {
 			bakeBatchId: bakeInput.bakeBatchId,
 		});
 
-		expect(intents.map((intent) => intent.itemId)).toEqual([
+		expect(intents.map((intent) => intent.itemId)).toEqual([0, 1]);
+		expect(intents.map((intent) => intent.textureUseId)).toEqual([
 			"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
 			"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
 		]);
@@ -1621,7 +1628,7 @@ function createEnvCellStaticBakeInput(): StaticBakeBatchInput {
 		taskId: "1:landblock:da55ffff:env-cell-system",
 	};
 
-	return {
+	const input: StaticBakeBatchInput = {
 		attachments: {
 			envCellCellStructureGeometry: [],
 			staticObjectSourceGeometry: payload.sourceAssets.flatMap((source) =>
@@ -1654,6 +1661,10 @@ function createEnvCellStaticBakeInput(): StaticBakeBatchInput {
 		],
 		revision: 1,
 		bakeBatchId: "static-batch:objects",
+	};
+	return {
+		...input,
+		texturePlacementSnapshot: createTexturePlacementSnapshotForInput(input),
 	};
 }
 
@@ -2012,7 +2023,7 @@ function createBakeInput(
 		taskId: `1:landblock:da55ffff:${domain}`,
 	};
 
-	return {
+	const input: StaticBakeBatchInput = {
 		attachments: {
 			envCellCellStructureGeometry: [],
 			staticObjectSourceGeometry: payload.sourceAssets.flatMap((source) =>
@@ -2046,23 +2057,61 @@ function createBakeInput(
 		revision: 1,
 		bakeBatchId: "static-batch:objects",
 	};
+	return {
+		...input,
+		texturePlacementSnapshot: createTexturePlacementSnapshotForInput(input),
+	};
 }
 
 function createTexturePlacementSnapshot(
 	placements: readonly (readonly [string, string])[],
-): TexturePlacementSnapshot {
+): ObjectVisualTexturePlacementSnapshot {
+	const itemIdsByTextureUseId = new Map(
+		placements.map(([textureUseId], index) => [textureUseId, index]),
+	);
 	return {
+		itemIdsByTextureUseId,
 		placementsByItemId: new Map(
-			placements.map(([itemId, pageId]) => [
-				itemId,
+			placements.map(([textureUseId, pageId], index) => [
+				index,
 				{
 					height: 64,
-					itemId,
+					itemId: index,
 					pageId,
 					pool: "static-authored-object" as const,
 					purpose: "object-base-color" as const,
 					rect: [0, 0, 64, 64] as const,
 					textureRefId: `texture-ref:${pageId}`,
+					textureUseId,
+					width: 64,
+				},
+			]),
+		),
+	};
+}
+
+function createTexturePlacementSnapshotForInput(
+	input: StaticBakeBatchInput,
+): ObjectVisualTexturePlacementSnapshot {
+	const intents = createStaticObjectTexturePlacementIntents({
+		items: input.items,
+	});
+	return {
+		itemIdsByTextureUseId: new Map(
+			intents.map((intent) => [intent.textureUseId, intent.itemId]),
+		),
+		placementsByItemId: new Map(
+			intents.map((intent) => [
+				intent.itemId,
+				{
+					height: 64,
+					itemId: intent.itemId,
+					pageId: `${intent.purpose}:page:0`,
+					pool: intent.pool,
+					purpose: intent.purpose,
+					rect: [0, 0, 64, 64] as const,
+					textureRefId: `${intent.purpose}:texture-ref:0`,
+					textureUseId: intent.textureUseId,
 					width: 64,
 				},
 			]),

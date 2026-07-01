@@ -71,6 +71,7 @@ export function createStaticMaterialTextureBindingRequirement(options: {
 		// Phase 12 keeps the current renderer binding key as the placement item id.
 		// The equality is now local to this bridge rather than ambient pipeline state.
 		placementItemId: bindingKey,
+		textureUseId: bindingKey,
 		purpose: classifyTextureUsagePurpose(
 			options.dataUse,
 			options.pool ?? "static-authored-object",

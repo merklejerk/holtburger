@@ -23,7 +23,10 @@ import {
 	createMaterialTextureDataUseKey,
 	createStaticMaterialTextureBindingRequirement,
 } from "../../bake/static-material-texture-policy";
-import type { TextureBindingRequirement, TexturePlacementSnapshot } from "../../../textures/placement";
+import type {
+	ObjectVisualTextureBindingRequirement,
+	ObjectVisualTexturePlacementSnapshot,
+} from "../../../textures/placement";
 import { emitStaticBakeWorkerTrace } from "../../bake/worker-trace";
 import { createStaticObjectMaterialCoverageReport } from "./static-object-material-coverage";
 import {
@@ -201,7 +204,7 @@ interface StaticObjectTriangleCandidate {
 	readonly materialKey: string;
 	readonly materialId: number;
 	readonly materialPlan: StaticMaterialPlan;
-	readonly textureRequirements: readonly TextureBindingRequirement[];
+	readonly textureRequirements: readonly ObjectVisualTextureBindingRequirement[];
 	readonly materialColorKey: string;
 	readonly materialEntryKey: string;
 	readonly textureRoleSchemaKey: string;
@@ -220,7 +223,7 @@ interface StaticObjectTriangleCandidate {
 export function partitionStaticObjectBatches(
 	payload: StaticObjectBatchPayload,
 	options: {
-		readonly placementSnapshot?: TexturePlacementSnapshot;
+		readonly placementSnapshot?: ObjectVisualTexturePlacementSnapshot;
 		readonly textureUseScopeId?: string;
 	} = {},
 ): StaticObjectBatchPartitionPlan {
@@ -306,28 +309,37 @@ export function partitionStaticObjectBatches(
 }
 
 function createStaticObjectTextureRequirements(options: {
+	readonly placementSnapshot: ObjectVisualTexturePlacementSnapshot;
 	readonly plan: StaticMaterialPlan;
 	readonly textureUseScopeId: string;
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
-}): readonly TextureBindingRequirement[] {
+}): readonly ObjectVisualTextureBindingRequirement[] {
 	return options.plan.textureRoles
 		.map((role) => role.dataUse)
 		.filter(isCurrentlyStageableStaticObjectDataUse)
-		.map((dataUse) =>
-			createStaticMaterialTextureBindingRequirement({
+		.map((dataUse) => {
+			const requirement = createStaticMaterialTextureBindingRequirement({
 				dataUse,
 				textureUseNamespace: "static-object-texture",
 				textureUseScopeId: options.textureUseScopeId,
 				wrapMode: options.textureWrapMode,
-			}),
-		);
+			});
+			return {
+				...requirement,
+				placementItemId: requireObjectVisualPlacementItemId({
+					placementSnapshot: options.placementSnapshot,
+					subject: "Static object material",
+					textureUseId: requirement.textureUseId,
+				}),
+			};
+		});
 }
 
 function createTriangleCandidates(
 	payload: StaticObjectBatchPayload,
 	materialById: ReadonlyMap<string, StaticMaterialPlan>,
 	textureUseScopeId: string | undefined,
-	placementSnapshot: TexturePlacementSnapshot | undefined,
+	placementSnapshot: ObjectVisualTexturePlacementSnapshot | undefined,
 ): readonly StaticObjectTriangleCandidate[] {
 	const sourceByKey = new Map(
 		payload.sourceAssets.map((source) => [
@@ -406,6 +418,10 @@ function createTriangleCandidates(
 				);
 				const textureRequirements = textureUseScopeId
 					? createStaticObjectTextureRequirements({
+							placementSnapshot: requireObjectVisualPlacementSnapshot({
+								placementSnapshot,
+								subject: "Static object material",
+							}),
 							plan,
 							textureUseScopeId,
 							textureWrapMode,
@@ -664,7 +680,8 @@ function createCoarseTablePlan(options: {
 		sortPolicy: options.partitionAxes.sort.policy,
 		sourceTriangleIds: options.sourceTriangleIds,
 		tableFamily: options.partitionAxes.material.objectLike.family,
-		tableSchemaKey: options.partitionAxes.material.objectLike.textureRoleSchemaKey,
+		tableSchemaKey:
+			options.partitionAxes.material.objectLike.textureRoleSchemaKey,
 		textureDataUses: options.textureDataUses,
 		visibilityPolicy: options.partitionAxes.visibility.policy,
 	};
@@ -699,9 +716,9 @@ function createPartitionAxes(options: {
 	readonly partIndex: number;
 	readonly materialEntryKey: string;
 	readonly materialColorKey: string;
-	readonly placementSnapshot: TexturePlacementSnapshot | undefined;
+	readonly placementSnapshot: ObjectVisualTexturePlacementSnapshot | undefined;
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
-	readonly textureRequirements: readonly TextureBindingRequirement[];
+	readonly textureRequirements: readonly ObjectVisualTextureBindingRequirement[];
 	readonly textureRoleSchemaKey: string;
 	readonly textureRoleLayoutKey: string;
 }): StaticObjectBatchPartitionAxes {
@@ -922,6 +939,34 @@ function resolveTextureWrapMode(
 	return materialVariantSignature?.includes("sampler=repeat")
 		? "repeat"
 		: "clamp";
+}
+
+function requireObjectVisualPlacementSnapshot(options: {
+	readonly placementSnapshot: ObjectVisualTexturePlacementSnapshot | undefined;
+	readonly subject: string;
+}): ObjectVisualTexturePlacementSnapshot {
+	if (!options.placementSnapshot) {
+		throw new Error(
+			`${options.subject} requires an object-visual texture placement snapshot.`,
+		);
+	}
+	return options.placementSnapshot;
+}
+
+function requireObjectVisualPlacementItemId(options: {
+	readonly placementSnapshot: ObjectVisualTexturePlacementSnapshot;
+	readonly subject: string;
+	readonly textureUseId: string;
+}) {
+	const placementItemId = options.placementSnapshot.itemIdsByTextureUseId.get(
+		options.textureUseId,
+	);
+	if (placementItemId === undefined) {
+		throw new Error(
+			`${options.subject} is missing object-visual placement item id for ${options.textureUseId}.`,
+		);
+	}
+	return placementItemId;
 }
 
 function compareObjects(

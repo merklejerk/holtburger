@@ -10,7 +10,10 @@ import type {
 	TerrainGeometryStaticDrawUnit,
 } from "../static/contracts";
 import type { TextureResourceDependencies } from "../textures/placement";
-import { createStaticBakeObjectVisualInstallSet } from "../static/bake/object-visual-install-set-publication";
+import {
+	createObjectVisualInstallSet,
+	type ObjectVisualDirectDrawUnit,
+} from "../visual/object-visual-install-set";
 import { installStaticCommit } from "./static-commit-installer";
 
 describe("static commit installer", () => {
@@ -218,11 +221,13 @@ function createCommitDelta(options: {
 		addedPortalApertureResources: [],
 		commitId: "static-commit:batch-a",
 		materialCoverage: [],
-		objectVisualInstallSet: createStaticBakeObjectVisualInstallSet({
-			drawUnits: options.addedDrawUnits,
-			staticObjectRenderInstances,
-			staticObjectVisualResources,
+		objectVisualInstallSet: createObjectVisualInstallSet({
+			directDrawUnits: options.addedDrawUnits.filter(
+				isObjectVisualDirectDrawUnit,
+			),
+			renderInstances: staticObjectRenderInstances,
 			textureDependencies,
+			visualResources: staticObjectVisualResources,
 		}),
 		removedResources: options.removedResources ?? [],
 		revision: 7,
@@ -238,6 +243,15 @@ function createCommitDelta(options: {
 		textureDependencies,
 		textureUses: [],
 	};
+}
+
+function isObjectVisualDirectDrawUnit(
+	drawUnit: StaticDrawUnit,
+): drawUnit is ObjectVisualDirectDrawUnit {
+	return (
+		drawUnit.kind === "static-object-geometry" ||
+		drawUnit.kind === "structured-interior-geometry"
+	);
 }
 
 function createTerrainDrawUnit(

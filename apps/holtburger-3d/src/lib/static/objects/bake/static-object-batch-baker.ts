@@ -46,6 +46,7 @@ import {
 	createStaticMaterialTextureUses,
 } from "../../bake/static-material-adapter";
 import { createStaticMaterialTextureBindingRequirement } from "../../bake/static-material-texture-policy";
+import { emitStaticBakeWorkerTrace } from "../../bake/worker-trace";
 import {
 	describeStaticObjectCanonicalGeometryIdentity,
 	describeStaticObjectSourceGeometryIdentity,
@@ -88,10 +89,22 @@ export function bakeStaticObjectBatch(
 		);
 	}
 
-	const itemResults = input.items.map((item) =>
-		bakeStaticObjectBatchItem(input, item),
+	emitStaticBakeWorkerTrace("static-object-batch:start", {
+		bakeBatchId: input.bakeBatchId,
+		domain: input.domain,
+		itemCount: input.items.length,
+		revision: input.revision,
+	});
+	const itemResults = input.items.map((item, index) =>
+		bakeStaticObjectBatchItem(input, item, index),
 	);
 	const drawUnits = itemResults.flatMap((result) => result.drawUnits);
+	emitStaticBakeWorkerTrace("static-object-batch:end", {
+		bakeBatchId: input.bakeBatchId,
+		domain: input.domain,
+		drawUnitCount: drawUnits.length,
+		itemCount: input.items.length,
+	});
 
 	return {
 		atlasRegistryUpdates: [],
@@ -242,6 +255,7 @@ function createStaticObjectSourceMappingCoverage(
 function bakeStaticObjectBatchItem(
 	input: StaticBakeBatchInput,
 	item: StaticBakeBatchItem,
+	itemIndex: number,
 ): {
 	readonly drawUnits: readonly StaticDrawUnit[];
 	readonly materialCoverage: StaticBakeBatchResult["materialCoverage"][number];
@@ -254,12 +268,32 @@ function bakeStaticObjectBatchItem(
 	readonly staticObjectVisualResources: readonly StaticObjectVisualResource[];
 	readonly task: StaticBakeBatchItem["task"];
 } {
+	emitStaticBakeWorkerTrace("static-object-item:start", {
+		domain: item.task.domain,
+		itemIndex,
+		ownerId: item.task.ownerId,
+		scopeKey: item.task.scopeKey,
+	});
 	const scope = createStaticObjectBatchPayload(item);
+	emitStaticBakeWorkerTrace("static-object-item:payload", {
+		domain: scope.domain,
+		itemIndex,
+		landblockId: formatHex32(scope.landblock.landblockId),
+		objectCount: scope.objects.length,
+		sourceAssetCount: scope.sourceAssets.length,
+		textureRefCount: scope.textureRefs.length,
+	});
 	const sourceIndex = new StaticObjectBakeSourceIndex(scope, input.attachments);
 	const resourceIdPrefix = item.task.ownerId;
 	const partitionPlan = partitionStaticObjectBatches(scope, {
 		placementSnapshot: input.texturePlacementSnapshot,
 		textureUseScopeId: resourceIdPrefix,
+	});
+	emitStaticBakeWorkerTrace("static-object-item:partitioned", {
+		domain: scope.domain,
+		itemIndex,
+		landblockId: formatHex32(scope.landblock.landblockId),
+		partitionCount: partitionPlan.partitions.length,
 	});
 	const renderablePartitions = partitionPlan.partitions.filter((partition) => {
 		if (isRenderableStaticObjectPartition(partition)) {
@@ -277,6 +311,14 @@ function bakeStaticObjectBatchItem(
 		bakeBatchId: input.bakeBatchId,
 		task: item.task,
 	});
+	emitStaticBakeWorkerTrace("static-object-item:instanced", {
+		cutoverPartitionCount: instancedOutput.cutoverPartitionSliceIds.size,
+		domain: scope.domain,
+		instanceCount: instancedOutput.instances.length,
+		itemIndex,
+		landblockId: formatHex32(scope.landblock.landblockId),
+		resourceCount: instancedOutput.resources.length,
+	});
 	const bakedPartitions = renderablePartitions.filter(
 		(partition) =>
 			!instancedOutput.cutoverPartitionSliceIds.has(partition.sliceId),
@@ -290,6 +332,13 @@ function bakeStaticObjectBatchItem(
 			task: item.task,
 		}),
 	);
+	emitStaticBakeWorkerTrace("static-object-item:direct-geometry", {
+		bakedPartitionCount: bakedPartitions.length,
+		domain: scope.domain,
+		drawUnitCount: drawUnits.length,
+		itemIndex,
+		landblockId: formatHex32(scope.landblock.landblockId),
+	});
 	const drawUnitIdBySliceId = new Map(
 		bakedPartitions.map((partition, index) => [
 			partition.sliceId,
@@ -333,6 +382,13 @@ function bakeStaticObjectBatchItem(
 		bakeBatchId: input.bakeBatchId,
 		task: item.task,
 	}).concat(instancedOutput.textureUses);
+	emitStaticBakeWorkerTrace("static-object-item:end", {
+		domain: scope.domain,
+		drawUnitCount: bakedDrawUnits.length,
+		itemIndex,
+		landblockId: formatHex32(scope.landblock.landblockId),
+		textureUseCount: textureUses.length,
+	});
 
 	return {
 		drawUnits: bakedDrawUnits,
@@ -748,11 +804,21 @@ function createStaticObjectInstancedOutput(options: {
 		};
 	}
 
+	emitStaticBakeWorkerTrace("static-object-instancing:start", {
+		domain: options.payload.domain,
+		landblockId: formatHex32(options.payload.landblock.landblockId),
+		partitionCount: options.partitions.length,
+		triangleCount: sumNumbers(
+			options.partitions.map((partition) => partition.triangleCount),
+		),
+	});
 	const groupsByKey = new Map<
 		string,
 		StaticObjectVisualResourceTriangleGroup
 	>();
 	const triangleCoverageKeysByPartitionSliceId = new Map<string, Set<string>>();
+	let generatedTriangleCount = 0;
+	let eligibleTriangleCount = 0;
 	for (const partition of options.partitions) {
 		triangleCoverageKeysByPartitionSliceId.set(
 			partition.sliceId,
@@ -777,12 +843,14 @@ function createStaticObjectInstancedOutput(options: {
 			if (triangle.object.objectKind !== "generated-scenery") {
 				continue;
 			}
+			generatedTriangleCount += 1;
 			const object = options.sourceIndex.getObject(triangle.object);
 			const candidate =
 				selectGeneratedStaticObjectRenderInstanceCandidate(object);
 			if (candidate.kind === "ineligible") {
 				continue;
 			}
+			eligibleTriangleCount += 1;
 			const materialEntry = materialEntryByKey.get(triangle.materialEntryKey);
 			if (!materialEntry) {
 				continue;
@@ -858,6 +926,13 @@ function createStaticObjectInstancedOutput(options: {
 			groupsByKey.set(groupKey, group);
 		}
 	}
+	emitStaticBakeWorkerTrace("static-object-instancing:groups", {
+		domain: options.payload.domain,
+		eligibleTriangleCount,
+		generatedTriangleCount,
+		groupCount: groupsByKey.size,
+		landblockId: formatHex32(options.payload.landblock.landblockId),
+	});
 
 	const coveredTriangleKeysByPartitionSliceId = new Map<string, Set<string>>();
 	for (const group of groupsByKey.values()) {
@@ -897,10 +972,17 @@ function createStaticObjectInstancedOutput(options: {
 			cutoverPartitionSliceIds.add(partitionSliceId);
 		}
 	}
+	emitStaticBakeWorkerTrace("static-object-instancing:cutover", {
+		cutoverPartitionCount: cutoverPartitionSliceIds.size,
+		domain: options.payload.domain,
+		groupCount: groupsByKey.size,
+		landblockId: formatHex32(options.payload.landblock.landblockId),
+	});
 
 	const resources: StaticObjectVisualResource[] = [];
 	const instances: StaticObjectRenderInstance[] = [];
 	const textureUses: StaticBakeTextureUse[] = [];
+	let resourceBakeGroupCount = 0;
 	for (const group of groupsByKey.values()) {
 		if (group.candidatesByInstanceId.size < 2) {
 			continue;
@@ -912,6 +994,7 @@ function createStaticObjectInstancedOutput(options: {
 		if (cutoverCandidates.length === 0) {
 			continue;
 		}
+		resourceBakeGroupCount += 1;
 		const resourceGeometry = bakeStaticObjectVisualResourceGeometry({
 			materialSlot: group.materialEntry.slot,
 			sourceIndex: options.sourceIndex,
@@ -1011,6 +1094,14 @@ function createStaticObjectInstancedOutput(options: {
 			});
 		}
 	}
+	emitStaticBakeWorkerTrace("static-object-instancing:end", {
+		domain: options.payload.domain,
+		instanceCount: instances.length,
+		landblockId: formatHex32(options.payload.landblock.landblockId),
+		resourceBakeGroupCount,
+		resourceCount: resources.length,
+		textureUseCount: textureUses.length,
+	});
 
 	return {
 		cutoverPartitionSliceIds,

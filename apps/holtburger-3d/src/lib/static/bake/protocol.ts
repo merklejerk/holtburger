@@ -1,4 +1,8 @@
-import type { StaticBakeBatchInput, StaticBakeBatchResult } from "../contracts";
+import type {
+	StaticBakeBatchInput,
+	StaticBakeBatchResult,
+	StaticBakerTraceEvent,
+} from "../contracts";
 
 export type StaticBakeWorkerMainMessage = {
 	readonly kind: "bake-static-batch";
@@ -10,6 +14,11 @@ export type StaticBakeWorkerThreadMessage =
 	| {
 			readonly kind: "static-batch-bake-started";
 			readonly requestId: string;
+	  }
+	| {
+			readonly kind: "static-batch-bake-trace";
+			readonly requestId: string;
+			readonly event: StaticBakerTraceEvent;
 	  }
 	| {
 			readonly kind: "static-batch-baked";

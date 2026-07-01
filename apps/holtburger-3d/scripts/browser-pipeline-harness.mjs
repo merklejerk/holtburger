@@ -326,6 +326,7 @@ async function runBrowserHarness({
 		await client.send("Page.enable");
 		await waitForHarnessApi(client, timeoutMs);
 		let errorMessage = null;
+		const traceCollector = collectPipelineTrace(client, timeoutMs);
 		try {
 			await evaluate(
 				client,
@@ -335,14 +336,133 @@ async function runBrowserHarness({
 		} catch (error) {
 			errorMessage = error instanceof Error ? error.message : String(error);
 		}
+		const harnessTrace = await traceCollector.stop();
 		const diagnostics = await evaluate(
 			client,
 			"globalThis.__HOLTBURGER_3D_HARNESS__.createDiagnosticsReport",
 			[],
 		);
+		diagnostics.harnessTrace = harnessTrace;
 		return { diagnostics, errorMessage };
 	} finally {
 		client.close();
+	}
+}
+
+function collectPipelineTrace(client, timeoutMs) {
+	const samples = [];
+	const workerEventsByKey = new Map();
+	let stopped = false;
+	const sampleIntervalMs = 1000;
+	const startedAt = Date.now();
+
+	const interval = setInterval(() => {
+		if (stopped || Date.now() - startedAt > timeoutMs + sampleIntervalMs) {
+			return;
+		}
+		void samplePipelineTrace(client, samples, workerEventsByKey);
+	}, sampleIntervalMs);
+
+	void samplePipelineTrace(client, samples, workerEventsByKey);
+
+	return {
+		async stop() {
+			stopped = true;
+			clearInterval(interval);
+			await samplePipelineTrace(client, samples, workerEventsByKey);
+			return {
+				kind: "browser-pipeline-harness-trace",
+				samples,
+				workerEvents: Array.from(workerEventsByKey.values()).sort(
+					(left, right) => left.atMs - right.atMs || left.key.localeCompare(right.key),
+				),
+			};
+		},
+	};
+}
+
+async function samplePipelineTrace(client, samples, workerEventsByKey) {
+	let diagnostics;
+	try {
+		diagnostics = await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_HARNESS__.createDiagnosticsReport",
+			[],
+		);
+	} catch {
+		return;
+	}
+
+	const domains = Array.isArray(diagnostics.domains) ? diagnostics.domains : [];
+	const staticCoordinator = domains.find(
+		(domain) => domain.kind === "static-coordinator",
+	);
+	const textureAtlas = domains.find((domain) => domain.kind === "texture-atlas");
+	const staticBaker = staticCoordinator?.staticBaker ?? null;
+	const pendingJobs = staticBaker?.pendingJobs ?? [];
+	const sourceResolutions = staticCoordinator?.sourceResolutions ?? [];
+
+	samples.push({
+		atMs: Date.now(),
+		inFlightTasks: (staticCoordinator?.inFlightTasks ?? []).map((task) => ({
+			activeBakeBatchId: task.activeBakeBatchId,
+			activeBakeStage: task.activeBakeStage,
+			activeBakeStageAgeMs: task.activeBakeStageAgeMs,
+			domain: task.domain,
+			phase: task.phase,
+			scopeKey: task.scopeKey,
+		})),
+		pendingJobs: pendingJobs.map((job) => ({
+			bakeBatchId: job.bakeBatchId,
+			domain: job.domain,
+			itemCount: job.itemCount,
+			lastTraceStage: job.traceEvents.at(-1)?.stage ?? null,
+			requestId: job.requestId,
+			stage: job.stage,
+			stageAgeMs: job.stageAgeMs,
+			traceEventCount: job.traceEvents.length,
+		})),
+		renderer: diagnostics.runtime,
+		sourceResolutions: sourceResolutions.map((resolution) => ({
+			ageMs: resolution.ageMs,
+			landblockHex: resolution.landblockHex,
+			layerKinds: resolution.layerKinds,
+			recipeCount: resolution.recipeCount,
+			requestId: resolution.requestId,
+			requestSeq: resolution.requestSeq,
+			resolverMs: resolution.resolverMs,
+			sourceLod: resolution.sourceLod,
+			status: resolution.status,
+			taskIds: resolution.taskIds,
+		})),
+		staticCoordinator: staticCoordinator?.summary ?? null,
+		textureAtlas: textureAtlas?.summary ?? null,
+	});
+
+	if (samples.length > 600) {
+		samples.splice(0, samples.length - 600);
+	}
+
+	for (const job of pendingJobs) {
+		for (const event of job.traceEvents) {
+			const key = [
+				job.requestId,
+				job.bakeBatchId,
+				event.atMs,
+				event.stage,
+				JSON.stringify(event.details),
+			].join("|");
+			if (!workerEventsByKey.has(key)) {
+				workerEventsByKey.set(key, {
+					...event,
+					bakeBatchId: job.bakeBatchId,
+					domain: job.domain,
+					itemCount: job.itemCount,
+					key,
+					requestId: job.requestId,
+				});
+			}
+		}
 	}
 }
 

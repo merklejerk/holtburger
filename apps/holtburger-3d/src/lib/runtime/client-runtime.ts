@@ -3922,6 +3922,9 @@ function createStaticCoordinatorDiagnosticsReport(
 			...report,
 			...(inFlightTasks.length > 0 ? { inFlightTasks } : {}),
 			...(recentFailures.length > 0 ? { recentFailures } : {}),
+			...(snapshot.sourceResolutionDiagnostics.length > 0
+				? { sourceResolutions: snapshot.sourceResolutionDiagnostics }
+				: {}),
 			...(snapshot.staticBakerDiagnostics &&
 			snapshot.staticBakerDiagnostics.pendingJobs.length > 0
 				? { staticBaker: snapshot.staticBakerDiagnostics }

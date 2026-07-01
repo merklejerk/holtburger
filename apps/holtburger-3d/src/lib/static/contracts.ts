@@ -171,6 +171,31 @@ export interface StaticLandblockSceneLodResolution {
 	readonly recipes: readonly StaticLayerRecipe[];
 }
 
+export interface StaticSourceResolutionDiagnostics {
+	/** Coordinator-local sequence for source request submission order. */
+	readonly requestSeq: number;
+	/** Coordinator-local request id for correlating active and recent source work. */
+	readonly requestId: string;
+	readonly revision: number;
+	/** Normalized outdoor landblock id requested from the scene LoD source. */
+	readonly landblockId: number;
+	/** String form used by browser diagnostics and console reports. */
+	readonly landblockHex: string;
+	readonly context: StaticLandblockSceneLodSourceRequest["context"];
+	readonly sourceLod: StaticLandblockSceneLodSourceRequest["sourceLod"];
+	readonly layerKinds: readonly StaticLandblockSceneLodLayerRequest["kind"][];
+	readonly taskIds: readonly string[];
+	readonly ownerIds: readonly string[];
+	readonly status: "pending" | "resolved" | "failed";
+	readonly submittedAtMs: number;
+	readonly ageMs: number;
+	readonly resolverMs: number | null;
+	readonly recipeCount: number | null;
+	readonly dynamicPlacementCount: number | null;
+	readonly dynamicRecipeCount: number | null;
+	readonly error: string | null;
+}
+
 export interface StaticLandblockSceneLodSourceResolver {
 	resolveSource(
 		request: StaticLandblockSceneLodSourceRequest,
@@ -1867,6 +1892,19 @@ export interface StaticBakerDiagnosticsSnapshot {
 	readonly workerCount: number | null;
 }
 
+export type StaticBakerTraceDetails = Readonly<
+	Record<string, string | number | boolean | null>
+>;
+
+export interface StaticBakerTraceEvent {
+	/** Monotonic worker timestamp, in milliseconds, when the trace event was emitted. */
+	readonly atMs: number;
+	/** Opaque worker substage label used only for pipeline diagnostics. */
+	readonly stage: string;
+	/** Compact counters and ids that explain the amount of work in this substage. */
+	readonly details: StaticBakerTraceDetails;
+}
+
 interface StaticBakerJobDiagnostics {
 	readonly requestId: string;
 	readonly bakeBatchId: string;
@@ -1878,6 +1916,8 @@ interface StaticBakerJobDiagnostics {
 	readonly stageAgeMs: number;
 	readonly queuedAtMs: number;
 	readonly stageStartedAtMs: number;
+	/** Recent worker-side substages for diagnosing long-running static bake jobs. */
+	readonly traceEvents: readonly StaticBakerTraceEvent[];
 }
 
 export interface StaticCoordinatorSnapshot {
@@ -1897,6 +1937,7 @@ export interface StaticCoordinatorSnapshot {
 	readonly staticObjectBakeDiagnostics: readonly StaticObjectBakeDiagnostics[];
 	readonly recentTiming: readonly StaticCoordinatorTimingDiagnostics[];
 	readonly staticBakerDiagnostics: StaticBakerDiagnosticsSnapshot | null;
+	readonly sourceResolutionDiagnostics: readonly StaticSourceResolutionDiagnostics[];
 }
 
 export interface StaticCoordinatorOverviewSnapshot {

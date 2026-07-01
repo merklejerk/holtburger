@@ -126,7 +126,10 @@ export type ObjectVisualGeometryRecipe =
 	| ObjectVisualGfxObjGeometryRecipe;
 
 export interface ObjectVisualGfxObjGeometryRecipe {
+	/** Sidecar buffer containing resolver-flattened source-local gfx-obj geometry. */
+	readonly bufferId: ObjectVisualGeometryBufferId;
 	readonly kind: "gfx-obj";
+	/** Original gfx-obj DID retained for source tracing and diagnostics. */
 	readonly sourceDid: number;
 }
 
@@ -242,6 +245,8 @@ export interface ObjectVisualPartInstance {
 	readonly instanceId: string;
 	readonly partRecipeId: ObjectVisualPartRecipeId;
 	readonly residency: ObjectVisualResidency;
+	/** Runtime-authored dynamic visuals use this source part for animation binding. */
+	readonly sourcePartIndex: number | null;
 	/** Source-local part geometry to render-local transform. */
 	readonly transform: ObjectVisualMat4;
 }

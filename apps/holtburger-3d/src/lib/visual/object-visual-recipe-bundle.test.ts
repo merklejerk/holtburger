@@ -224,6 +224,7 @@ describe("object visual recipe bundle contracts", () => {
 						kind: "env-cell",
 						landblockId: 0x0001ffff,
 					},
+					sourcePartIndex: null,
 					transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
 				},
 			],

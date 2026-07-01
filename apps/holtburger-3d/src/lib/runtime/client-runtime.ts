@@ -854,10 +854,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 		MutableStaticMaterializationCommit
 	>();
 	#committedStaticMaterializations: StaticMaterializationCommitSnapshot[] = [];
-	#materializedDrawUnitIdsBySourceDrawUnitId = new Map<
-		string,
-		readonly string[]
-	>();
 	readonly #materializedDrawUnitsById = new Map<string, StaticDrawUnit>();
 	#recentTerrainTextureFallbacks: TerrainTextureFallbackDiagnostics[] = [];
 	#sceneDebugSelection: RuntimeSceneDebugSelection | null = null;
@@ -1829,14 +1825,12 @@ class ClientRuntimeImpl implements ClientRuntime {
 					this.#envCellResourceMembershipRevision,
 				failedCommits:
 					this.#createStaticMaterializationCommitSnapshots("failed"),
-				materializedDrawUnits: countMaterializedDrawUnits(
-					this.#materializedDrawUnitIdsBySourceDrawUnitId,
-				),
+				materializedDrawUnits: this.#materializedDrawUnitsById.size,
 				pendingCommits: this.#createStaticMaterializationCommitSnapshots(
 					"queued",
 					"materializing",
 				),
-				sourceDrawUnits: this.#materializedDrawUnitIdsBySourceDrawUnitId.size,
+				sourceDrawUnits: this.#materializedDrawUnitsById.size,
 			},
 			status: this.#createRuntimeStatus(this.#lastStaticSnapshot.requested),
 		};
@@ -2030,11 +2024,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 
 		const materialized = materializeStaticCommit({
 			commit: delta,
-			materializedDrawUnitIdsBySourceDrawUnitId:
-				this.#materializedDrawUnitIdsBySourceDrawUnitId,
 			textureUpdate,
 		});
-		this.#updateMaterializedDrawUnitIdMappings(delta, materialized);
+		this.#updateMaterializedDrawUnits(delta, materialized);
 		this.#clearStaticLayersForRemovedResources(materialized.removedResources);
 		if (materialized.textureUpdate) {
 			this.#renderer.applyTexturePlacementUpdate(materialized.textureUpdate);
@@ -2247,27 +2239,14 @@ class ClientRuntimeImpl implements ClientRuntime {
 		}
 	}
 
-	#updateMaterializedDrawUnitIdMappings(
+	#updateMaterializedDrawUnits(
 		delta: StaticCoordinatorCommitDelta,
 		materialized: StaticMaterializationResult,
 	): void {
 		for (const removedDrawUnitId of collectStaticDrawUnitResourceIds(
 			delta.removedResources,
 		)) {
-			const materializedDrawUnitIds =
-				this.#materializedDrawUnitIdsBySourceDrawUnitId.get(
-					removedDrawUnitId,
-				) ?? [removedDrawUnitId];
-			this.#materializedDrawUnitIdsBySourceDrawUnitId.delete(removedDrawUnitId);
-			for (const materializedDrawUnitId of materializedDrawUnitIds) {
-				this.#materializedDrawUnitsById.delete(materializedDrawUnitId);
-			}
-		}
-		for (const mapping of materialized.drawUnitIdMappings) {
-			this.#materializedDrawUnitIdsBySourceDrawUnitId.set(
-				mapping.sourceDrawUnitId,
-				mapping.materializedDrawUnitIds,
-			);
+			this.#materializedDrawUnitsById.delete(removedDrawUnitId);
 		}
 		for (const drawUnit of materialized.materializedDrawUnits) {
 			this.#materializedDrawUnitsById.set(drawUnit.drawUnitId, drawUnit);
@@ -2746,7 +2725,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 					materialFamily: drawUnit.materialFamily,
 					materialIds: drawUnit.materialIds,
 					materialPass: drawUnit.materialPass,
-					sourceDrawUnitId: this.#findSourceDrawUnitId(drawUnit.drawUnitId),
+					sourceDrawUnitId: drawUnit.drawUnitId,
 					sourceMapping: createStaticSelectionSourceMappingSummary(
 						sourceMappingCoverage,
 					),
@@ -2761,17 +2740,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 		return drawUnits.sort((left, right) =>
 			left.diagnostics.drawUnitId.localeCompare(right.diagnostics.drawUnitId),
 		);
-	}
-
-	#findSourceDrawUnitId(materializedDrawUnitId: string): string | null {
-		for (const [sourceDrawUnitId, materializedDrawUnitIds] of this
-			.#materializedDrawUnitIdsBySourceDrawUnitId) {
-			if (materializedDrawUnitIds.includes(materializedDrawUnitId)) {
-				return sourceDrawUnitId;
-			}
-		}
-
-		return null;
 	}
 }
 
@@ -3597,15 +3565,6 @@ function resourceKeyId(resource: StaticResourceKey): string {
 		case "portal-aperture-resource":
 			return resource.apertureResourceId;
 	}
-}
-
-function countMaterializedDrawUnits(
-	drawUnitIdsBySourceDrawUnitId: ReadonlyMap<string, readonly string[]>,
-): number {
-	return [...drawUnitIdsBySourceDrawUnitId.values()].reduce(
-		(count, drawUnitIds) => count + drawUnitIds.length,
-		0,
-	);
 }
 
 function appendBounded<T>(entries: readonly T[], entry: T, limit: number): T[] {

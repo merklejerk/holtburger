@@ -79,7 +79,9 @@ function createBuildingCommitDelta(
 		],
 		revision,
 		staticBatchId: `static-batch:${revision}:outdoor-buildings`,
-		staticPortalGraphs: [createBuildingTransitionPortalGraph("outdoor-buildings")],
+		staticPortalGraphs: [
+			createBuildingTransitionPortalGraph("outdoor-buildings"),
+		],
 	});
 }
 
@@ -138,11 +140,9 @@ function createMaterializationResult(
 	},
 ): StaticMaterializationResult {
 	return {
-		drawUnitIdMappings: [],
 		materializedDrawUnits: [],
 		portalApertureResources: [],
 		removedResources: [],
-		envCellStaticObjectPlacementRecords: [],
 		staticObjectRenderInstances: [],
 		staticObjectVisualResources: [],
 		staticPortalGraphs: [],
@@ -242,11 +242,8 @@ function createBuildingTransitionPortalGraph(
 	};
 }
 
-function createLayerPeerRecordOwner(
-	domain: StaticDomain,
-) {
-	const keyKind =
-		domain === "env-cell-system" ? "env-cell-system" : domain;
+function createLayerPeerRecordOwner(domain: StaticDomain) {
+	const keyKind = domain === "env-cell-system" ? "env-cell-system" : domain;
 	return {
 		domain,
 		key: {

@@ -31,6 +31,7 @@ describe("dynamic visual baker", () => {
 			revision: 12,
 			sourceGeometry: [createGeometryAttachment()],
 			texturePlacementSnapshot: createPlacementSnapshotForRecipe(recipe),
+			texturePlannings: [createDynamicVisualTexturePlanning(recipe)],
 		});
 
 		expect(result.failures).toEqual([]);
@@ -66,12 +67,14 @@ describe("dynamic visual baker", () => {
 
 	it("supports the async baker interface", async () => {
 		const baker = new LocalDynamicVisualBaker();
+		const recipe = createRecipe({ materialSources: [createSolidMaterial()] });
 		const input: DynamicVisualBakeInput = {
 			batchId: "dynamic-visual-batch:async",
-			recipes: [createRecipe({ materialSources: [createSolidMaterial()] })],
+			recipes: [recipe],
 			revision: 13,
 			sourceGeometry: [createGeometryAttachment()],
 			texturePlacementSnapshot: createEmptyPlacementSnapshot(),
+			texturePlannings: [createDynamicVisualTexturePlanning(recipe)],
 		};
 
 		await expect(baker.bake(input)).resolves.toMatchObject({
@@ -111,6 +114,7 @@ describe("dynamic visual baker", () => {
 			revision: 16,
 			sourceGeometry: [createGeometryAttachment({ triangleCount: 2 })],
 			texturePlacementSnapshot: placementSnapshot,
+			texturePlannings: [createDynamicVisualTexturePlanning(recipe)],
 		});
 
 		expect(result.failures).toEqual([]);
@@ -177,6 +181,7 @@ describe("dynamic visual baker", () => {
 					() => "shared-texture-ref",
 				),
 			}),
+			texturePlannings: [createDynamicVisualTexturePlanning(recipe)],
 		});
 
 		expect(result.failures).toEqual([]);
@@ -211,17 +216,17 @@ describe("dynamic visual baker", () => {
 				sourceDid: 0x01000099,
 			},
 		];
+		const recipe = createRecipe({
+			materialSources: [createSolidMaterial()],
+			missingRefs,
+		});
 		const result = bakeDynamicVisuals({
 			batchId: "dynamic-visual-batch:missing",
-			recipes: [
-				createRecipe({
-					materialSources: [createSolidMaterial()],
-					missingRefs,
-				}),
-			],
+			recipes: [recipe],
 			revision: 14,
 			sourceGeometry: [createGeometryAttachment()],
 			texturePlacementSnapshot: createEmptyPlacementSnapshot(),
+			texturePlannings: [createDynamicVisualTexturePlanning(recipe)],
 		});
 
 		expect(result.failures).toEqual([]);
@@ -238,12 +243,14 @@ describe("dynamic visual baker", () => {
 	});
 
 	it("reports missing source geometry as a render-part extraction failure", () => {
+		const recipe = createRecipe({ materialSources: [createSolidMaterial()] });
 		const result = bakeDynamicVisuals({
 			batchId: "dynamic-visual-batch:geometry",
-			recipes: [createRecipe({ materialSources: [createSolidMaterial()] })],
+			recipes: [recipe],
 			revision: 15,
 			sourceGeometry: [],
 			texturePlacementSnapshot: createEmptyPlacementSnapshot(),
+			texturePlannings: [createDynamicVisualTexturePlanning(recipe)],
 		});
 
 		expect(result.products).toEqual([]);

@@ -13,19 +13,19 @@ import type {
 	StaticObjectPaletteViewFacts,
 	StaticObjectTextureRefFacts,
 	SurfaceTextureIdentity,
-} from "../../contracts";
+} from "../static/contracts";
 import {
 	composeStaticMaterialDetailRole,
 	planStaticMaterialDetailRoles,
 	type StaticMaterialDetailRolePlan,
-} from "../../bake/static-material-detail-roles";
+} from "../static/bake/static-material-detail-roles";
 import {
 	createStaticMaterialBucketKey,
-	createStaticMaterialFallbackReason,
+	createObjectVisualMaterialFallbackReason,
 	createStaticMaterialSourceKey,
 	findStaticRenderSurfaceRef,
 	findStaticSurfaceTextureRef,
-} from "../../bake/static-material-plan-primitives";
+} from "../static/bake/static-material-plan-primitives";
 
 const BYTE_MAX = 255;
 const LEGACY_OPACITY_BYTE_SCALE = 255;
@@ -67,23 +67,23 @@ type PaletteDataUseIdentity = Extract<
 	{ readonly kind: "palette-texture-use" }
 >;
 
-export interface StaticObjectMaterialPipelinePlan {
-	readonly domain: StaticMaterialPlanningDomain;
-	readonly materialPlans: readonly StaticMaterialPlan[];
+export interface ObjectVisualMaterialPipelinePlan {
+	readonly domain: ObjectVisualMaterialPlanningDomain;
+	readonly materialPlans: readonly ObjectVisualMaterialPlan[];
 	readonly detailRoles: readonly StaticMaterialDetailRolePlan[];
-	readonly fallbackReasons: readonly StaticMaterialFallbackReason[];
+	readonly fallbackReasons: readonly ObjectVisualMaterialFallbackReason[];
 }
 
-export type StaticMaterialPlanningDomain =
+export type ObjectVisualMaterialPlanningDomain =
 	| OutdoorStaticObjectsScopePayload["domain"]
 	| "env-cell-system"
 	| "runtime-authored-dynamic-object-material";
 
-export interface StaticMaterialPlanningPayload {
-	readonly domain: StaticMaterialPlanningDomain;
+export interface ObjectVisualMaterialPlanningPayload {
+	readonly domain: ObjectVisualMaterialPlanningDomain;
 	readonly landblock: LandblockSourceIdentity;
 	readonly materialSources: OutdoorStaticObjectsScopePayload["materialSources"];
-	readonly materialSlots: readonly StaticMaterialPlanningSlotFacts[];
+	readonly materialSlots: readonly ObjectVisualMaterialPlanningSlotFacts[];
 	readonly paletteSources: readonly StaticObjectPaletteSourceFacts[];
 	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
 	readonly regionRenderProfile: {
@@ -92,13 +92,13 @@ export interface StaticMaterialPlanningPayload {
 }
 
 /** Minimal material-slot projection consumed by static object material classification. */
-export interface StaticMaterialPlanningSlotFacts {
+export interface ObjectVisualMaterialPlanningSlotFacts {
 	readonly material: StaticMaterialSourceIdentity;
 	readonly paletteOverride: PaletteIdentity | null;
 	readonly paletteViews: readonly StaticObjectPaletteViewFacts[];
 }
 
-export interface StaticMaterialPlan {
+export interface ObjectVisualMaterialPlan {
 	readonly material: StaticMaterialSourceIdentity;
 	readonly materialUseKey: string;
 	readonly family: StaticObjectMaterialFamily;
@@ -108,12 +108,12 @@ export interface StaticMaterialPlan {
 	readonly blend: StaticObjectMaterialBlendFacts;
 	readonly color: readonly [number, number, number, number];
 	readonly emissiveColor: readonly [number, number, number];
-	readonly textureRoles: readonly StaticMaterialTextureUseRole[];
+	readonly textureRoles: readonly ObjectVisualMaterialTextureUseRole[];
 	readonly materialBucketKey: string;
-	readonly fallbackReasons: readonly StaticMaterialFallbackReason[];
+	readonly fallbackReasons: readonly ObjectVisualMaterialFallbackReason[];
 }
 
-export type StaticMaterialTextureUseRole =
+export type ObjectVisualMaterialTextureUseRole =
 	| {
 			readonly role: "base-color";
 			readonly texture: SurfaceTextureIdentity;
@@ -144,7 +144,7 @@ export type StaticMaterialTextureUseRole =
 			readonly fadeFar: number;
 	  };
 
-export interface StaticMaterialFallbackReason {
+export interface ObjectVisualMaterialFallbackReason {
 	readonly code:
 		| "missing-detail-render-surface"
 		| "missing-render-surface"
@@ -196,9 +196,9 @@ interface StaticObjectMaterialContext {
 	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
 }
 
-export function planStaticObjectMaterials(
-	payload: StaticMaterialPlanningPayload,
-): StaticObjectMaterialPipelinePlan {
+export function planObjectVisualMaterials(
+	payload: ObjectVisualMaterialPlanningPayload,
+): ObjectVisualMaterialPipelinePlan {
 	const materialById = new Map(
 		payload.materialSources.map((material) => [
 			createStaticMaterialSourceKey(material.identity),
@@ -206,7 +206,7 @@ export function planStaticObjectMaterials(
 		]),
 	);
 	const plannedMaterialKeys = new Set<string>();
-	const rawMaterialPlans: StaticMaterialPlan[] = [];
+	const rawMaterialPlans: ObjectVisualMaterialPlan[] = [];
 	for (const slot of payload.materialSlots) {
 		const material = materialById.get(
 			createStaticMaterialSourceKey(slot.material),
@@ -214,7 +214,7 @@ export function planStaticObjectMaterials(
 		if (!material) {
 			continue;
 		}
-		const planKey = createStaticObjectMaterialUseKey(
+		const planKey = createObjectVisualMaterialUseKey(
 			material.identity,
 			slot.paletteOverride,
 			slot.paletteViews,
@@ -224,7 +224,7 @@ export function planStaticObjectMaterials(
 		}
 		plannedMaterialKeys.add(planKey);
 		rawMaterialPlans.push(
-			classifyStaticObjectMaterial({
+			classifyObjectVisualMaterial({
 				material,
 				paletteOverride: slot.paletteOverride,
 				paletteViews: slot.paletteViews,
@@ -234,7 +234,7 @@ export function planStaticObjectMaterials(
 		);
 	}
 	for (const material of payload.materialSources) {
-		const planKey = createStaticObjectMaterialUseKey(
+		const planKey = createObjectVisualMaterialUseKey(
 			material.identity,
 			null,
 			[],
@@ -244,7 +244,7 @@ export function planStaticObjectMaterials(
 		}
 		plannedMaterialKeys.add(planKey);
 		rawMaterialPlans.push(
-			classifyStaticObjectMaterial({
+			classifyObjectVisualMaterial({
 				material,
 				paletteOverride: null,
 				paletteViews: [],
@@ -277,9 +277,9 @@ export function planStaticObjectMaterials(
 	};
 }
 
-export function classifyStaticObjectMaterial(
+export function classifyObjectVisualMaterial(
 	context: StaticObjectMaterialContext,
-): StaticMaterialPlan {
+): ObjectVisualMaterialPlan {
 	const behavior = deriveMaterialBehavior(context.material);
 	const basePlan = {
 		alphaPolicy: behavior.alphaPolicy,
@@ -287,7 +287,7 @@ export function classifyStaticObjectMaterial(
 		color: resolveMaterialColor(context.material, behavior),
 		emissiveColor: resolveMaterialEmissiveColor(behavior),
 		material: context.material.identity,
-		materialUseKey: createStaticObjectMaterialUseKey(
+		materialUseKey: createObjectVisualMaterialUseKey(
 			context.material.identity,
 			context.paletteOverride ?? null,
 			context.paletteViews ?? [],
@@ -295,7 +295,7 @@ export function classifyStaticObjectMaterial(
 		pass: resolveMaterialPass(behavior),
 	};
 	const unsupportedFlagReasons = behavior.unsupportedSurfaceFlags.map((flag) =>
-		createStaticMaterialFallbackReason({
+		createObjectVisualMaterialFallbackReason({
 			code: "unsupported-surface-flag",
 			material: context.material.identity,
 			message: `Static material uses unsupported surface flag ${flag}.`,
@@ -329,7 +329,7 @@ export function classifyStaticObjectMaterial(
 		context.material.source.texture,
 	);
 	if (!textureRef?.renderSurface) {
-		const reason = createStaticMaterialFallbackReason({
+		const reason = createObjectVisualMaterialFallbackReason({
 			code: "missing-render-surface",
 			material: context.material.identity,
 			message: "Static textured material has no selected render surface.",
@@ -343,7 +343,7 @@ export function classifyStaticObjectMaterial(
 		textureRef.renderSurface,
 	);
 	if (!renderSurfaceRef) {
-		const reason = createStaticMaterialFallbackReason({
+		const reason = createObjectVisualMaterialFallbackReason({
 			code: "missing-render-surface",
 			material: context.material.identity,
 			message:
@@ -361,7 +361,7 @@ export function classifyStaticObjectMaterial(
 			context.material.source.palette ??
 			renderSurfaceRef.palette;
 		if (!palette) {
-			const reason = createStaticMaterialFallbackReason({
+			const reason = createObjectVisualMaterialFallbackReason({
 				code: "missing-palette",
 				material: context.material.identity,
 				message:
@@ -376,7 +376,7 @@ export function classifyStaticObjectMaterial(
 		}
 		const paletteSource = findPaletteSource(context.paletteSources, palette);
 		if (!paletteSource) {
-			const reason = createStaticMaterialFallbackReason({
+			const reason = createObjectVisualMaterialFallbackReason({
 				code: "missing-palette",
 				material: context.material.identity,
 				message:
@@ -396,7 +396,7 @@ export function classifyStaticObjectMaterial(
 		)
 			? []
 			: [
-					createStaticMaterialFallbackReason({
+					createObjectVisualMaterialFallbackReason({
 						code: "translucent-render-deferred",
 						material: context.material.identity,
 						message:
@@ -460,7 +460,7 @@ export function classifyStaticObjectMaterial(
 	const translucentReasons = isSupportedTransparentStaticBlend(behavior)
 		? []
 		: [
-				createStaticMaterialFallbackReason({
+				createObjectVisualMaterialFallbackReason({
 					code: "translucent-render-deferred",
 					material: context.material.identity,
 					message:
@@ -497,7 +497,7 @@ export function classifyStaticObjectMaterial(
 
 function createTexturePlan(
 	options: Pick<
-		StaticMaterialPlan,
+		ObjectVisualMaterialPlan,
 		| "alphaPolicy"
 		| "blend"
 		| "color"
@@ -510,7 +510,7 @@ function createTexturePlan(
 		| "renderCoverage"
 		| "textureRoles"
 	>,
-): StaticMaterialPlan {
+): ObjectVisualMaterialPlan {
 	return {
 		...options,
 		materialBucketKey: createStaticMaterialBucketKey({
@@ -566,7 +566,7 @@ function deriveIndexedRenderSurfaceBehavior(
 	};
 }
 
-export function createStaticObjectMaterialUseKey(
+export function createObjectVisualMaterialUseKey(
 	material: StaticMaterialSourceIdentity,
 	paletteOverride: PaletteIdentity | null,
 	paletteViews: readonly StaticObjectPaletteViewFacts[],
@@ -611,7 +611,7 @@ function formatHex32(value: number): string {
 
 function createUnsupportedPlan(
 	basePlan: Pick<
-		StaticMaterialPlan,
+		ObjectVisualMaterialPlan,
 		| "alphaPolicy"
 		| "blend"
 		| "color"
@@ -620,8 +620,8 @@ function createUnsupportedPlan(
 		| "materialUseKey"
 		| "pass"
 	>,
-	fallbackReasons: readonly StaticMaterialFallbackReason[],
-): StaticMaterialPlan {
+	fallbackReasons: readonly ObjectVisualMaterialFallbackReason[],
+): ObjectVisualMaterialPlan {
 	return {
 		...basePlan,
 		fallbackReasons,

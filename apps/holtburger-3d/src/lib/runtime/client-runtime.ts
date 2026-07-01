@@ -912,17 +912,30 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#staticCoordinator = staticCoordinator;
 		this.#staticCoordinator.setSourceReadyHandler(async (work) => {
 			const texturePlacementStartedAt = nowMs();
-			const placementSnapshot =
-				work.domain === "outdoor-terrain"
-					? await this.#textureManager.placeTextureIntents({
+			const terrainPlacementSnapshot =
+				work.terrainPlacementIntents.length === 0
+					? { placementsByItemId: new Map() }
+					: await this.#textureManager.placeTextureIntents({
 							intents: work.terrainPlacementIntents,
-						})
+						});
+			const objectVisualPlacementSnapshot =
+				work.objectVisualPlacementIntents.length === 0
+					? {
+							itemIdsByTextureUseId: new Map(),
+							placementsByItemId: new Map(),
+						}
 					: await this.#textureManager.placeObjectVisualTextureIntents({
 							intents: work.objectVisualPlacementIntents,
 						});
-			await work.continueWithPlacement(placementSnapshot, {
-				texturePlacementMs: nowMs() - texturePlacementStartedAt,
-			});
+			await work.continueWithPlacement(
+				{
+					objectVisualPlacementSnapshot,
+					terrainPlacementSnapshot,
+				},
+				{
+					texturePlacementMs: nowMs() - texturePlacementStartedAt,
+				},
+			);
 		});
 		this.#lastRendererSnapshot = renderer.createDiagnosticsSnapshot();
 		this.#currentRenderPassPlan = this.#lastRendererSnapshot.renderPassPlan;
@@ -1051,6 +1064,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 				revision: options.revision,
 				sourceGeometry,
 				texturePlacementSnapshot,
+				texturePlannings: [texturePlanning],
 			});
 			if (!this.#isCurrentRuntimeDynamicVisualPrep(options)) {
 				return;

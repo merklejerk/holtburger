@@ -55,7 +55,11 @@ describe("dynamic visual contracts", () => {
 			recipes: [],
 			revision: 1,
 			sourceGeometry: [],
-			texturePlacementSnapshot: { placementsByItemId: new Map() },
+			texturePlacementSnapshot: {
+				itemIdsByTextureUseId: new Map(),
+				placementsByItemId: new Map(),
+			},
+			texturePlannings: [],
 		};
 		const baked: BakedDynamicVisualResource = {
 			entityId: "runtime-dynamic:1",

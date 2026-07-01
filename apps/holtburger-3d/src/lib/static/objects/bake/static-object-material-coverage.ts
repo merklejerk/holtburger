@@ -12,12 +12,12 @@ import type {
 } from "../../contracts";
 import type { StaticObjectBatchPartition } from "./static-object-batch-partitioner";
 import type {
-	StaticMaterialFallbackReason,
-	StaticObjectMaterialPipelinePlan,
-	StaticMaterialPlan,
-} from "./static-object-material-planner";
+	ObjectVisualMaterialFallbackReason,
+	ObjectVisualMaterialPipelinePlan,
+	ObjectVisualMaterialPlan,
+} from "../../../visual/object-visual-material-planner";
 import {
-	isRenderableStaticMaterialPlan,
+	isRenderableObjectVisualMaterialPlan,
 	isRenderableStaticObjectPartition,
 } from "./static-object-renderability";
 
@@ -31,7 +31,7 @@ export function createStaticObjectMaterialCoverageReport(options: {
 		>;
 		readonly landblock: LandblockSourceIdentity;
 	};
-	readonly materialPlan: StaticObjectMaterialPipelinePlan;
+	readonly materialPlan: ObjectVisualMaterialPipelinePlan;
 	readonly partitions: readonly StaticObjectBatchPartition[];
 }): StaticMaterialCoverageReport {
 	const bucketBuilders = new Map<string, MutableCoverageBucket>();
@@ -107,12 +107,14 @@ export function createStaticObjectMaterialCoverageReport(options: {
 }
 
 function resolveMaterialPlanOutcome(
-	plan: StaticMaterialPlan,
+	plan: ObjectVisualMaterialPlan,
 ): StaticMaterialRenderOutcome {
 	if (plan.renderCoverage === "unsupported") {
 		return "unsupported";
 	}
-	return isRenderableStaticMaterialPlan(plan) ? "rendered" : "render-deferred";
+	return isRenderableObjectVisualMaterialPlan(plan)
+		? "rendered"
+		: "render-deferred";
 }
 
 function resolvePartitionOutcome(
@@ -180,7 +182,7 @@ function countOutcomeTriangles(
 }
 
 function createFallbackReasonCounts(
-	reasons: readonly StaticMaterialFallbackReason[],
+	reasons: readonly ObjectVisualMaterialFallbackReason[],
 ): readonly StaticMaterialCoverageReport["fallbackReasonCounts"][number][] {
 	const counts = new Map<string, number>();
 	for (const reason of reasons) {
@@ -197,7 +199,7 @@ function createFallbackReasonCounts(
 
 function createUnrenderedBuckets(
 	buckets: readonly StaticMaterialCoverageBucket[],
-	reasons: readonly StaticMaterialFallbackReason[],
+	reasons: readonly ObjectVisualMaterialFallbackReason[],
 ): readonly StaticMaterialUnrenderedBucket[] {
 	const reasonCodes = Array.from(
 		new Set(reasons.map((reason) => reason.code)),

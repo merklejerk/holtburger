@@ -3,15 +3,15 @@ import type {
 	OutdoorStaticObjectsScopePayload,
 	StaticObjectMaterialSourceFacts,
 	StaticObjectTextureRefFacts,
-} from "../../contracts";
+} from "../static/contracts";
 import {
-	classifyStaticObjectMaterial,
-	planStaticObjectMaterials,
-} from "./static-object-material-planner";
+	classifyObjectVisualMaterial,
+	planObjectVisualMaterials,
+} from "./object-visual-material-planner";
 
-describe("static object material planner", () => {
+describe("object visual material planner", () => {
 	it("classifies solid-color materials without texture roles", () => {
-		const plan = classifyStaticObjectMaterial({
+		const plan = classifyObjectVisualMaterial({
 			material: createMaterial({
 				source: {
 					argb: 0xff336699,
@@ -38,7 +38,7 @@ describe("static object material planner", () => {
 	});
 
 	it("maps diffuse and luminosity flags into material color constants", () => {
-		const plan = classifyStaticObjectMaterial({
+		const plan = classifyObjectVisualMaterial({
 			material: createTexturedMaterial({
 				diffuse: 0.5,
 				luminosity: 0.75,
@@ -53,7 +53,7 @@ describe("static object material planner", () => {
 	});
 
 	it("plans non-indexed texture materials as filterable rgba base-color roles", () => {
-		const plan = classifyStaticObjectMaterial({
+		const plan = classifyObjectVisualMaterial({
 			material: createTexturedMaterial(),
 			paletteSources: [],
 			textureRefs: createTextureRefs({ formatRaw: 1, paletteId: null }),
@@ -91,7 +91,7 @@ describe("static object material planner", () => {
 	});
 
 	it("plans indexed P8 materials as index and palette data uses", () => {
-		const plan = classifyStaticObjectMaterial({
+		const plan = classifyObjectVisualMaterial({
 			material: createTexturedMaterial({
 				paletteId: 0x04000020,
 			}),
@@ -147,7 +147,7 @@ describe("static object material planner", () => {
 	});
 
 	it("uses retail indexed clip threshold for Base1ClipMap indexed materials", () => {
-		const plan = classifyStaticObjectMaterial({
+		const plan = classifyObjectVisualMaterial({
 			material: createTexturedMaterial({
 				paletteId: 0x04000020,
 				surfaceType: 0x4,
@@ -171,7 +171,7 @@ describe("static object material planner", () => {
 	});
 
 	it("uses render-surface palette facts for indexed Base1ClipMap materials without authored palettes", () => {
-		const plan = classifyStaticObjectMaterial({
+		const plan = classifyObjectVisualMaterial({
 			material: createTexturedMaterial({
 				paletteId: null,
 				surfaceType: 0x4,
@@ -195,7 +195,7 @@ describe("static object material planner", () => {
 	});
 
 	it("uses authored palette views as derived palette replacement ranges", () => {
-		const plan = classifyStaticObjectMaterial({
+		const plan = classifyObjectVisualMaterial({
 			material: createTexturedMaterial({
 				paletteId: 0x04000020,
 			}),
@@ -250,7 +250,7 @@ describe("static object material planner", () => {
 	});
 
 	it("plans indexed Index16 materials as index16 data uses", () => {
-		const plan = classifyStaticObjectMaterial({
+		const plan = classifyObjectVisualMaterial({
 			material: createTexturedMaterial(),
 			paletteSources: createPaletteSources({ paletteId: 0x04000010 }),
 			textureRefs: createTextureRefs({
@@ -291,7 +291,7 @@ describe("static object material planner", () => {
 	});
 
 	it("rejects indexed materials without a material or render-surface palette", () => {
-		const plan = classifyStaticObjectMaterial({
+		const plan = classifyObjectVisualMaterial({
 			material: createTexturedMaterial(),
 			paletteSources: [],
 			textureRefs: createTextureRefs({ formatRaw: 0x29, paletteId: null }),
@@ -310,7 +310,7 @@ describe("static object material planner", () => {
 	});
 
 	it("marks translucent texture materials renderable without losing roles", () => {
-		const plan = classifyStaticObjectMaterial({
+		const plan = classifyObjectVisualMaterial({
 			material: createTexturedMaterial({
 				surfaceType: 0x100,
 			}),
@@ -332,7 +332,7 @@ describe("static object material planner", () => {
 	});
 
 	it("keeps additive texture materials render-deferred until the blend mode is implemented", () => {
-		const plan = classifyStaticObjectMaterial({
+		const plan = classifyObjectVisualMaterial({
 			material: createTexturedMaterial({
 				surfaceType: 0x10000,
 			}),
@@ -358,7 +358,7 @@ describe("static object material planner", () => {
 	});
 
 	it("reports unsupported detail surface flags explicitly", () => {
-		const plan = classifyStaticObjectMaterial({
+		const plan = classifyObjectVisualMaterial({
 			material: createTexturedMaterial({
 				surfaceType: 0x20000,
 			}),
@@ -378,7 +378,7 @@ describe("static object material planner", () => {
 	});
 
 	it("keeps unresolved building detail roles diagnostic", () => {
-		const plan = planStaticObjectMaterials(createPayload());
+		const plan = planObjectVisualMaterials(createPayload());
 
 		expect(plan.detailRoles).toEqual([
 			{
@@ -416,7 +416,7 @@ describe("static object material planner", () => {
 			],
 		} satisfies OutdoorStaticObjectsScopePayload;
 
-		const plan = planStaticObjectMaterials(payload);
+		const plan = planObjectVisualMaterials(payload);
 
 		expect(plan.detailRoles).toEqual([
 			expect.objectContaining({
@@ -457,7 +457,7 @@ describe("static object material planner", () => {
 	});
 
 	it("rejects textured materials whose selected render surface was not resolved", () => {
-		const plan = classifyStaticObjectMaterial({
+		const plan = classifyObjectVisualMaterial({
 			material: createTexturedMaterial(),
 			paletteSources: [],
 			textureRefs: [

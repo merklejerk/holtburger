@@ -42,6 +42,7 @@ import type { PreparedAssetReader } from "../../assets/contracts";
 import type {
 	DynamicEntityRecipe,
 	DynamicVisualBakeResult,
+	DynamicVisualTexturePlanning,
 } from "../../dynamic/contracts";
 import {
 	createDynamicVisualTexturePlanning,
@@ -82,6 +83,11 @@ const EMPTY_OBJECT_VISUAL_TEXTURE_PLACEMENT_SNAPSHOT: ObjectVisualTexturePlaceme
 		placementsByItemId: new Map(),
 	};
 
+interface StaticSourceReadyPlacementSnapshots {
+	readonly objectVisualPlacementSnapshot: ObjectVisualTexturePlacementSnapshot;
+	readonly terrainPlacementSnapshot: TexturePlacementSnapshot;
+}
+
 export type StaticCoordinatorListener = (
 	snapshot: StaticCoordinatorSnapshot,
 ) => void;
@@ -109,7 +115,7 @@ export interface StaticSourceReadyWork {
 	/** Current layer tasks represented by this source-ready batch. */
 	readonly tasks: readonly StaticBakeTask[];
 	continueWithPlacement(
-		snapshot: TexturePlacementSnapshot | ObjectVisualTexturePlacementSnapshot,
+		snapshots: StaticSourceReadyPlacementSnapshots,
 		timing?: StaticSourceReadyPlacementTiming,
 	): Promise<void>;
 	failPlacement(message: string): void;
@@ -142,11 +148,11 @@ export class StaticCoordinator {
 	readonly #dynamicVisualGeometryAssetReader: PreparedAssetReader | null;
 	readonly #batching: StaticCoordinatorBatchingOptions;
 	#sourceReadyHandler: StaticSourceReadyHandler = (work) =>
-		work.continueWithPlacement(
-			work.domain === "outdoor-terrain"
-				? EMPTY_TEXTURE_PLACEMENT_SNAPSHOT
-				: EMPTY_OBJECT_VISUAL_TEXTURE_PLACEMENT_SNAPSHOT,
-		);
+		work.continueWithPlacement({
+			objectVisualPlacementSnapshot:
+				EMPTY_OBJECT_VISUAL_TEXTURE_PLACEMENT_SNAPSHOT,
+			terrainPlacementSnapshot: EMPTY_TEXTURE_PLACEMENT_SNAPSHOT,
+		});
 	readonly #listeners = new Set<StaticCoordinatorListener>();
 	readonly #commitListeners = new Set<StaticCoordinatorCommitListener>();
 	readonly #sourcePayloadListeners =
@@ -587,6 +593,11 @@ export class StaticCoordinator {
 	}): Promise<void> {
 		let consumed = false;
 		const placementIntentStartedAt = nowMs();
+		const dynamicVisualTexturePlannings = options.pendingItems.flatMap((item) =>
+			item.dynamicRecipes.map((recipe) =>
+				createDynamicVisualTexturePlanning(recipe),
+			),
+		);
 		const objectVisualPlacementIntents = [
 			...(isStaticObjectDomain(options.pendingBatch.domain)
 				? createStaticObjectTexturePlacementIntents({
@@ -598,11 +609,8 @@ export class StaticCoordinator {
 						items: options.items,
 					})
 				: []),
-			...options.pendingItems.flatMap((item) =>
-				item.dynamicRecipes.flatMap(
-					(recipe) =>
-						createDynamicVisualTexturePlanning(recipe).placementIntents,
-				),
+			...dynamicVisualTexturePlannings.flatMap(
+				(planning) => planning.placementIntents,
 			),
 		];
 		const terrainPlacementIntents =
@@ -619,7 +627,7 @@ export class StaticCoordinator {
 			sourcePayloads: options.items.map((item) => item.payload),
 			bakeBatchId: options.bakeBatchId,
 			tasks: options.items.map((item) => item.task),
-			continueWithPlacement: async (placementSnapshot, placementTiming) => {
+			continueWithPlacement: async (placementSnapshots, placementTiming) => {
 				if (consumed) {
 					throw new Error(
 						`Static source-ready work ${options.bakeBatchId} was already consumed.`,
@@ -629,8 +637,9 @@ export class StaticCoordinator {
 				await this.#continueSourceReadyBake({
 					...options,
 					placementIntentMs,
-					placementSnapshot,
+					placementSnapshots,
 					texturePlacementMs: placementTiming?.texturePlacementMs ?? null,
+					dynamicVisualTexturePlannings,
 				});
 			},
 			failPlacement: (message) => {
@@ -663,10 +672,9 @@ export class StaticCoordinator {
 		readonly items: readonly StaticBakeBatchItem[];
 		readonly bakeBatchId: string;
 		readonly placementIntentMs: number;
-		readonly placementSnapshot:
-			| TexturePlacementSnapshot
-			| ObjectVisualTexturePlacementSnapshot;
+		readonly placementSnapshots: StaticSourceReadyPlacementSnapshots;
 		readonly texturePlacementMs: number | null;
+		readonly dynamicVisualTexturePlannings: readonly DynamicVisualTexturePlanning[];
 	}): Promise<void> {
 		const currentItems = options.items.filter(
 			(item) =>
@@ -683,7 +691,6 @@ export class StaticCoordinator {
 		const currentPendingItems = options.pendingItems.filter((item) =>
 			currentTaskIds.has(item.taskId),
 		);
-		void options.placementSnapshot;
 
 		let attachments: StaticBakeBatchInput["attachments"];
 		const attachmentStartedAt = nowMs();
@@ -711,7 +718,10 @@ export class StaticCoordinator {
 			items: currentItems,
 			revision: options.pendingBatch.revision,
 			bakeBatchId: options.bakeBatchId,
-			texturePlacementSnapshot: options.placementSnapshot,
+			texturePlacementSnapshot:
+				options.pendingBatch.domain === "outdoor-terrain"
+					? options.placementSnapshots.terrainPlacementSnapshot
+					: options.placementSnapshots.objectVisualPlacementSnapshot,
 		};
 
 		let result: StaticBakeBatchResult;
@@ -742,9 +752,11 @@ export class StaticCoordinator {
 		try {
 			dynamicVisualBake = await this.#bakeDynamicVisualsForPendingItems({
 				pendingItems: currentPendingItems,
-				placementSnapshot: options.placementSnapshot,
+				placementSnapshot:
+					options.placementSnapshots.objectVisualPlacementSnapshot,
 				revision: options.pendingBatch.revision,
 				bakeBatchId: options.bakeBatchId,
+				texturePlannings: options.dynamicVisualTexturePlannings,
 			});
 		} catch (error: unknown) {
 			for (const item of currentItems) {
@@ -817,11 +829,10 @@ export class StaticCoordinator {
 
 	async #bakeDynamicVisualsForPendingItems(options: {
 		readonly pendingItems: readonly PendingStaticBakeBatchItem[];
-		readonly placementSnapshot:
-			| TexturePlacementSnapshot
-			| ObjectVisualTexturePlacementSnapshot;
+		readonly placementSnapshot: ObjectVisualTexturePlacementSnapshot;
 		readonly revision: number;
 		readonly bakeBatchId: string;
+		readonly texturePlannings: readonly DynamicVisualTexturePlanning[];
 	}): Promise<DynamicVisualBakeResult | null> {
 		const recipes = options.pendingItems.flatMap((item) => item.dynamicRecipes);
 		if (recipes.length === 0) {
@@ -844,9 +855,10 @@ export class StaticCoordinator {
 			recipes,
 			revision: options.revision,
 			sourceGeometry,
-			texturePlacementSnapshot: requireObjectVisualTexturePlacementSnapshot(
-				options.placementSnapshot,
-				"Dynamic visual bake",
+			texturePlacementSnapshot: options.placementSnapshot,
+			texturePlannings: filterDynamicVisualTexturePlanningsForRecipes(
+				options.texturePlannings,
+				recipes,
 			),
 		});
 	}
@@ -1590,6 +1602,14 @@ function filterDynamicRecipesForCurrentTasks(
 	return pendingItems
 		.filter((item) => currentTaskIds.has(item.taskId))
 		.flatMap((item) => item.dynamicRecipes);
+}
+
+function filterDynamicVisualTexturePlanningsForRecipes(
+	plannings: readonly DynamicVisualTexturePlanning[],
+	recipes: readonly DynamicEntityRecipe[],
+): readonly DynamicVisualTexturePlanning[] {
+	const entityIds = new Set(recipes.map((recipe) => recipe.entityId));
+	return plannings.filter((planning) => entityIds.has(planning.entityId));
 }
 
 function getDynamicVisualBakeProductEntityId(

@@ -35,12 +35,12 @@ import {
 	type ObjectMaterialPartitionAxis,
 } from "../../../visual/object-material-draw-unit-partition";
 import {
-	createStaticObjectMaterialUseKey,
-	planStaticObjectMaterials,
-	type StaticMaterialFallbackReason,
-	type StaticMaterialPlan,
-	type StaticMaterialTextureUseRole,
-} from "./static-object-material-planner";
+	createObjectVisualMaterialUseKey,
+	planObjectVisualMaterials,
+	type ObjectVisualMaterialFallbackReason,
+	type ObjectVisualMaterialPlan,
+	type ObjectVisualMaterialTextureUseRole,
+} from "../../../visual/object-visual-material-planner";
 import { isCurrentlyStageableStaticObjectDataUse } from "./static-object-renderability";
 
 export const STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE = 8;
@@ -48,7 +48,7 @@ export const STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE = 8;
 export interface StaticObjectBatchPartitionPlan {
 	readonly domain: StaticObjectBatchPayload["domain"];
 	readonly partitions: readonly StaticObjectBatchPartition[];
-	readonly fallbackReasons: readonly StaticMaterialFallbackReason[];
+	readonly fallbackReasons: readonly ObjectVisualMaterialFallbackReason[];
 	readonly materialCoverage: StaticMaterialCoverageReport;
 }
 
@@ -79,14 +79,14 @@ export interface StaticObjectBatchPartition {
 	readonly batchKey: string;
 	readonly partitionAxes: StaticObjectBatchPartitionAxes;
 	readonly coarseTablePlan: StaticObjectCoarseTablePlan;
-	readonly family: StaticMaterialPlan["family"];
-	readonly renderCoverage: StaticMaterialPlan["renderCoverage"];
-	readonly pass: StaticMaterialPlan["pass"];
-	readonly alphaMode: StaticMaterialPlan["alphaPolicy"]["mode"];
-	readonly alphaTest: StaticMaterialPlan["alphaPolicy"]["alphaTest"];
-	readonly indexedClipThreshold: StaticMaterialPlan["alphaPolicy"]["indexedClipThreshold"];
-	readonly materialColor: StaticMaterialPlan["color"];
-	readonly materialEmissiveColor: StaticMaterialPlan["emissiveColor"];
+	readonly family: ObjectVisualMaterialPlan["family"];
+	readonly renderCoverage: ObjectVisualMaterialPlan["renderCoverage"];
+	readonly pass: ObjectVisualMaterialPlan["pass"];
+	readonly alphaMode: ObjectVisualMaterialPlan["alphaPolicy"]["mode"];
+	readonly alphaTest: ObjectVisualMaterialPlan["alphaPolicy"]["alphaTest"];
+	readonly indexedClipThreshold: ObjectVisualMaterialPlan["alphaPolicy"]["indexedClipThreshold"];
+	readonly materialColor: ObjectVisualMaterialPlan["color"];
+	readonly materialEmissiveColor: ObjectVisualMaterialPlan["emissiveColor"];
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
 	readonly detailTextureTiling: number;
 	readonly textureRoleSchemaKey: string;
@@ -101,10 +101,10 @@ export interface StaticObjectBatchPartition {
 }
 
 interface StaticObjectCoarseTablePlan {
-	readonly tableFamily: StaticMaterialPlan["family"];
+	readonly tableFamily: ObjectVisualMaterialPlan["family"];
 	readonly tableSchemaKey: string;
-	readonly renderCoverage: StaticMaterialPlan["renderCoverage"];
-	readonly pass: StaticMaterialPlan["pass"];
+	readonly renderCoverage: ObjectVisualMaterialPlan["renderCoverage"];
+	readonly pass: ObjectVisualMaterialPlan["pass"];
 	readonly sortPolicy: StaticObjectSortAxis["policy"];
 	readonly visibilityPolicy: StaticObjectVisibilityAxis["policy"];
 	readonly entries: readonly StaticObjectCoarseMaterialEntry[];
@@ -115,17 +115,17 @@ interface StaticObjectCoarseTablePlan {
 interface StaticObjectCoarseMaterialEntry {
 	readonly materialEntryKey: string;
 	readonly materialUseKey: string;
-	readonly materialPlan: StaticMaterialPlan;
+	readonly materialPlan: ObjectVisualMaterialPlan;
 	readonly materialIds: readonly number[];
-	readonly blend: StaticMaterialPlan["blend"];
-	readonly materialColor: StaticMaterialPlan["color"];
-	readonly materialEmissiveColor: StaticMaterialPlan["emissiveColor"];
-	readonly alphaMode: StaticMaterialPlan["alphaPolicy"]["mode"];
-	readonly alphaTest: StaticMaterialPlan["alphaPolicy"]["alphaTest"];
-	readonly indexedClipThreshold: StaticMaterialPlan["alphaPolicy"]["indexedClipThreshold"];
+	readonly blend: ObjectVisualMaterialPlan["blend"];
+	readonly materialColor: ObjectVisualMaterialPlan["color"];
+	readonly materialEmissiveColor: ObjectVisualMaterialPlan["emissiveColor"];
+	readonly alphaMode: ObjectVisualMaterialPlan["alphaPolicy"]["mode"];
+	readonly alphaTest: ObjectVisualMaterialPlan["alphaPolicy"]["alphaTest"];
+	readonly indexedClipThreshold: ObjectVisualMaterialPlan["alphaPolicy"]["indexedClipThreshold"];
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
 	readonly detailTextureTiling: number;
-	readonly textureRoles: readonly StaticMaterialTextureUseRole[];
+	readonly textureRoles: readonly ObjectVisualMaterialTextureUseRole[];
 	readonly textureDataUses: readonly MaterialTextureDataUseIdentity[];
 }
 
@@ -138,11 +138,11 @@ interface StaticObjectBatchPartitionAxes {
 
 interface StaticObjectMaterialBatchAxis {
 	readonly key: string;
-	readonly family: StaticMaterialPlan["family"];
-	readonly renderCoverage: StaticMaterialPlan["renderCoverage"];
-	readonly pass: StaticMaterialPlan["pass"];
-	readonly alphaMode: StaticMaterialPlan["alphaPolicy"]["mode"];
-	readonly blendMode: StaticMaterialPlan["blend"]["mode"];
+	readonly family: ObjectVisualMaterialPlan["family"];
+	readonly renderCoverage: ObjectVisualMaterialPlan["renderCoverage"];
+	readonly pass: ObjectVisualMaterialPlan["pass"];
+	readonly alphaMode: ObjectVisualMaterialPlan["alphaPolicy"]["mode"];
+	readonly blendMode: ObjectVisualMaterialPlan["blend"]["mode"];
 	readonly materialEntryKey: string;
 	readonly materialColorKey: string;
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
@@ -203,7 +203,7 @@ interface StaticObjectTriangleCandidate {
 	readonly material: StaticMaterialSourceIdentity;
 	readonly materialKey: string;
 	readonly materialId: number;
-	readonly materialPlan: StaticMaterialPlan;
+	readonly materialPlan: ObjectVisualMaterialPlan;
 	readonly textureRequirements: readonly ObjectVisualTextureBindingRequirement[];
 	readonly materialColorKey: string;
 	readonly materialEntryKey: string;
@@ -236,7 +236,7 @@ export function partitionStaticObjectBatches(
 			options.placementSnapshot !== undefined &&
 			options.textureUseScopeId !== undefined,
 	});
-	const materialPlan = planStaticObjectMaterials(payload);
+	const materialPlan = planObjectVisualMaterials(payload);
 	emitStaticBakeWorkerTrace("static-object-partition:materials", {
 		domain: payload.domain,
 		fallbackReasonCount: materialPlan.fallbackReasons.length,
@@ -310,7 +310,7 @@ export function partitionStaticObjectBatches(
 
 function createStaticObjectTextureRequirements(options: {
 	readonly placementSnapshot: ObjectVisualTexturePlacementSnapshot;
-	readonly plan: StaticMaterialPlan;
+	readonly plan: ObjectVisualMaterialPlan;
 	readonly textureUseScopeId: string;
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
 }): readonly ObjectVisualTextureBindingRequirement[] {
@@ -337,7 +337,7 @@ function createStaticObjectTextureRequirements(options: {
 
 function createTriangleCandidates(
 	payload: StaticObjectBatchPayload,
-	materialById: ReadonlyMap<string, StaticMaterialPlan>,
+	materialById: ReadonlyMap<string, ObjectVisualMaterialPlan>,
 	textureUseScopeId: string | undefined,
 	placementSnapshot: ObjectVisualTexturePlacementSnapshot | undefined,
 ): readonly StaticObjectTriangleCandidate[] {
@@ -384,7 +384,7 @@ function createTriangleCandidates(
 				}
 
 				const plan = materialById.get(
-					createStaticObjectMaterialUseKey(
+					createObjectVisualMaterialUseKey(
 						materialSlot.material,
 						materialSlot.paletteOverride,
 						materialSlot.paletteViews,
@@ -405,7 +405,7 @@ function createTriangleCandidates(
 				const materialColorKey = createStaticMaterialColorKey(plan);
 				const sourceKey = createSourceKey(object.source);
 				const gfxKey = createSourceKey(part.gfxObj);
-				const materialKey = createStaticObjectMaterialUseKey(
+				const materialKey = createObjectVisualMaterialUseKey(
 					materialSlot.material,
 					materialSlot.paletteOverride,
 					materialSlot.paletteViews,
@@ -707,7 +707,7 @@ function createPartitionSliceAxes(
 
 function createPartitionAxes(options: {
 	readonly domain: StaticObjectBatchPayload["domain"];
-	readonly plan: StaticMaterialPlan;
+	readonly plan: ObjectVisualMaterialPlan;
 	readonly landblockId: number;
 	readonly sourceKey: string;
 	readonly gfxKey: string;
@@ -845,7 +845,7 @@ function createOwnershipAxis(options: {
 	};
 }
 
-function createSortAxis(plan: StaticMaterialPlan): StaticObjectSortAxis {
+function createSortAxis(plan: ObjectVisualMaterialPlan): StaticObjectSortAxis {
 	const policy =
 		plan.pass === "transparent" || plan.pass === "additive"
 			? "transparent-object-part-sortable"

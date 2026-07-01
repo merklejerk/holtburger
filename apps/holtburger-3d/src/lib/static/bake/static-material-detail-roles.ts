@@ -7,13 +7,13 @@ import type {
 	SurfaceTextureIdentity,
 } from "../contracts";
 import type {
-	StaticMaterialFallbackReason,
-	StaticMaterialPlan,
-	StaticMaterialTextureUseRole,
-} from "../objects/bake/static-object-material-planner";
+	ObjectVisualMaterialFallbackReason,
+	ObjectVisualMaterialPlan,
+	ObjectVisualMaterialTextureUseRole,
+} from "../../visual/object-visual-material-planner";
 import {
 	createStaticMaterialBucketKey,
-	createStaticMaterialFallbackReason,
+	createObjectVisualMaterialFallbackReason,
 	findStaticRenderSurfaceRef,
 	findStaticSurfaceTextureRef,
 } from "./static-material-plan-primitives";
@@ -34,7 +34,7 @@ export interface StaticMaterialDetailRolePlan {
 	readonly renderCoverage:
 		| "classified-render-candidate"
 		| "classified-render-deferred";
-	readonly fallbackReasons: readonly StaticMaterialFallbackReason[];
+	readonly fallbackReasons: readonly ObjectVisualMaterialFallbackReason[];
 }
 
 export function planStaticMaterialDetailRoles(options: {
@@ -51,8 +51,8 @@ export function planStaticMaterialDetailRoles(options: {
 export function composeStaticMaterialDetailRole(options: {
 	readonly domain: StaticMaterialDetailRoleDomain;
 	readonly detailRoles: readonly StaticMaterialDetailRolePlan[];
-	readonly plan: StaticMaterialPlan;
-}): StaticMaterialPlan {
+	readonly plan: ObjectVisualMaterialPlan;
+}): ObjectVisualMaterialPlan {
 	const detailRole = resolveComposableDetailRole(
 		options.domain,
 		options.detailRoles,
@@ -66,7 +66,7 @@ export function composeStaticMaterialDetailRole(options: {
 			...options.plan,
 			fallbackReasons: [
 				...options.plan.fallbackReasons,
-				createStaticMaterialFallbackReason({
+				createObjectVisualMaterialFallbackReason({
 					code: "detail-overlay-render-deferred",
 					material: options.plan.material,
 					message:
@@ -81,7 +81,7 @@ export function composeStaticMaterialDetailRole(options: {
 		return options.plan;
 	}
 
-	const textureRoles: readonly StaticMaterialTextureUseRole[] = [
+	const textureRoles: readonly ObjectVisualMaterialTextureUseRole[] = [
 		...options.plan.textureRoles,
 		{
 			dataUse: detailRole.dataUse,
@@ -138,7 +138,7 @@ function createStaticMaterialDetailRolePlan(
 			fadeFar: role.fadeFar,
 			fadeNear: role.fadeNear,
 			fallbackReasons: [
-				createStaticMaterialFallbackReason({
+				createObjectVisualMaterialFallbackReason({
 					code: "detail-overlay-render-deferred",
 					message:
 						"Static material detail overlay role is not renderable for this static family yet.",
@@ -164,7 +164,7 @@ function createStaticMaterialDetailRolePlan(
 			fadeFar: role.fadeFar,
 			fadeNear: role.fadeNear,
 			fallbackReasons: [
-				createStaticMaterialFallbackReason({
+				createObjectVisualMaterialFallbackReason({
 					code: "missing-detail-render-surface",
 					message:
 						"Static material detail overlay texture has no resolved render surface.",

@@ -8,9 +8,9 @@ import type {
 } from "../contracts";
 import { uniqueSortedStaticTextureUseOwners } from "../contracts";
 import type {
-	StaticMaterialPlan,
-	StaticMaterialTextureUseRole,
-} from "../objects/bake/static-object-material-planner";
+	ObjectVisualMaterialPlan,
+	ObjectVisualMaterialTextureUseRole,
+} from "../../visual/object-visual-material-planner";
 import {
 	createMaterialTextureDataUseKey,
 	createStaticMaterialTextureSamplingPolicy,
@@ -31,7 +31,7 @@ export interface StaticMaterialTextureUseSpec {
 }
 
 export function createStaticMaterialEntryKey(options: {
-	readonly plan: StaticMaterialPlan;
+	readonly plan: ObjectVisualMaterialPlan;
 	readonly textureWrapMode: StaticMaterialTextureWrapMode;
 }): string {
 	return [
@@ -50,7 +50,9 @@ export function createStaticMaterialEntryKey(options: {
 	].join("|");
 }
 
-export function createStaticMaterialColorKey(plan: StaticMaterialPlan): string {
+export function createStaticMaterialColorKey(
+	plan: ObjectVisualMaterialPlan,
+): string {
 	return [
 		...plan.color.map(formatMaterialScalar),
 		...plan.emissiveColor.map(formatMaterialScalar),
@@ -58,7 +60,7 @@ export function createStaticMaterialColorKey(plan: StaticMaterialPlan): string {
 }
 
 export function createStaticMaterialTextureRoleLayoutKey(
-	roles: readonly StaticMaterialTextureUseRole[],
+	roles: readonly ObjectVisualMaterialTextureUseRole[],
 ): string {
 	if (roles.length === 0) {
 		return "none";
@@ -74,7 +76,7 @@ export function createStaticMaterialTextureRoleLayoutKey(
 }
 
 export function createStaticMaterialTextureRoleSchemaKey(
-	roles: readonly StaticMaterialTextureUseRole[],
+	roles: readonly ObjectVisualMaterialTextureUseRole[],
 ): string {
 	if (roles.length === 0) {
 		return "none";
@@ -92,7 +94,7 @@ export function createStaticMaterialTextureRoleSchemaKey(
 export function createStaticMaterialTableEntry(options: {
 	readonly createTextureUseId: StaticMaterialTextureUseIdFactory;
 	readonly materialIds: readonly number[];
-	readonly plan: StaticMaterialPlan;
+	readonly plan: ObjectVisualMaterialPlan;
 	readonly slot: number;
 	readonly textureWrapMode: StaticMaterialTextureWrapMode;
 }): StaticMaterialTableEntry {
@@ -149,7 +151,7 @@ export function createStaticMaterialTableEntry(options: {
 }
 
 function createStaticMaterialRenderState(
-	blend: StaticMaterialPlan["blend"],
+	blend: ObjectVisualMaterialPlan["blend"],
 ): StaticObjectRenderState {
 	return {
 		blend: {
@@ -215,7 +217,7 @@ export function createStaticMaterialTextureUses(options: {
 }
 
 export function resolveStaticMaterialDetailTextureTiling(
-	plan: StaticMaterialPlan,
+	plan: ObjectVisualMaterialPlan,
 ): number {
 	const detailRole = plan.textureRoles.find(
 		(role) => role.role === "detail-overlay",
@@ -224,7 +226,7 @@ export function resolveStaticMaterialDetailTextureTiling(
 }
 
 function findPreparedTextureDataUse(
-	plan: StaticMaterialPlan,
+	plan: ObjectVisualMaterialPlan,
 	usage: Extract<
 		MaterialTextureDataUseIdentity,
 		{ readonly kind: "prepared-render-surface-texture-use" }

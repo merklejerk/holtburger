@@ -1704,33 +1704,34 @@ Acceptance criteria:
 - Existing worker/harness diagnostics can distinguish source resolution time from baker partition
   time before the rewrite starts.
 
-### Phase 17: Introduce Renderable Primitive and Draw-Unit Partition Contracts
+### Phase 17: Introduce Object-Like Renderable Primitive and Draw-Unit Partition Contracts
 
-Goal: add domain-local contracts that describe draw-unit compatibility directly from source facts and
-known texture placement facts.
+Goal: extract object-like draw-unit compatibility contracts from the existing static object
+partitioner so static objects and structured interiors can share the same partition vocabulary
+without inventing a parallel model.
 
 Deliverables:
 
-- Add object/structured-interior partition contracts near the object baker code, likely in a new or
-  existing colocated module under `static/objects/bake/`:
+- Extract object-like partition contracts near the object baker code, likely in a new colocated
+  module under `static/objects/bake/`:
   - renderable primitive record;
   - draw-unit partition key;
   - material-table entry identity;
-  - texture page tuple;
+  - texture binding tuple keyed by shader-visible `textureRefId` per purpose;
   - ownership/visibility/sort identity.
-- Add terrain partition contracts near the terrain baker code:
-  - terrain renderable layer/primitive record;
-  - terrain page tuple;
-  - terrain shader-budget identity.
+- Treat the current `StaticObjectTriangleCandidate` and `StaticObjectBatchPartitionAxes` shape as the
+  starting evidence. Prefer extraction, renaming, and narrowing over greenfield types.
 - Keep the shared texture-facing facts as existing `TextureBindingRequirement` and
   `TexturePlacementSnapshot` records. Do not create another placement vocabulary.
 - Add focused unit tests for partition-key derivation:
   - two primitives with identical hard rendering identity group together;
-  - primitives with different page tuples split;
+  - primitives with different texture binding tuples split;
   - primitives with different shader/material family split;
   - ownership/visibility differences split only where renderer records require it.
 - If helper functions are shared between static objects and structured interiors, place them behind
   object-material concepts, not landblock/env-cell concepts.
+- Do not add terrain partition contracts in this phase unless Phase 16 proves terrain needs a small
+  shared naming cleanup to unblock object-like work. Terrain is audited separately in Phase 20.
 
 Do not:
 
@@ -1740,24 +1741,29 @@ Do not:
   compatibility or downstream peer records, keep it out of the key.
 - Do not introduce adapters whose purpose is to keep old candidate/slice contracts alive after a
   domain has cut over.
+- Do not treat packer-local `pageId` as draw-call identity. `TexturePlacement.textureRefId` is the
+  shader binding legality identity; `pageId` is diagnostic and packer-local.
 
 Acceptance criteria:
 
 - New partition contracts compile and are covered by tests without changing runtime behavior.
 - Partition keys are inspectable and diagnostic-friendly enough to answer why two primitives do or
   do not share a draw unit.
-- Texture pages are represented as first-class partition facts, not as a later legality callback.
+- Texture binding identities are represented as first-class partition facts, not as a later legality
+  callback.
 
 ### Phase 18: Replace Static Object Draw-Unit Discovery With Partition-Key Grouping
 
 Goal: make static object baking derive draw units from renderable primitive partition keys instead of
-generic greedy slice history.
+generic greedy slice history. This includes outdoor static object domains and env-cell-owned static
+object payloads that flow through `StaticObjectBatchPayload`.
 
 Deliverables:
 
 - Update `static-object-batch-partitioner.ts` so its primary flow is:
   - material plan -> renderable triangle primitive records;
-  - derive draw-unit partition key from material family/pass/layout/page tuple/ownership/visibility;
+  - derive draw-unit partition key from material family/pass/layout/texture binding
+    tuple/ownership/visibility;
   - group primitives by partition key;
   - apply only domain-local secondary splitting for material-table budget or other real renderer
     budgets.
@@ -1765,10 +1771,12 @@ Deliverables:
 - Preserve static object instancing behavior, but make any interaction with partition keys explicit:
   instancing may create alternate products, but it should not revive generic candidate slicing as the
   main draw-unit authoring model.
+- Ensure env-cell static object payloads that use the static-object partitioner cut over in this
+  phase with outdoor static objects. Structured-interior geometry remains Phase 19.
 - Add tests covering:
   - generated-scenery-sized candidate sets process in linear or near-linear passes, with no growing
     slice rewalk;
-  - base/detail/index/palette page tuple differences produce separate draw units;
+  - base/detail/index/palette texture binding tuple differences produce separate draw units;
   - material table overflow produces deterministic secondary splits;
   - emitted texture dependencies match final draw-unit partition facts.
 - Update worker trace stages to name the new phases:
@@ -1791,6 +1799,8 @@ Acceptance criteria:
   `sliceStaticMaterialBatchCandidates(...)` path.
 - The old static object candidate/slicer production path is deleted or unreachable with no runtime
   switch back to it.
+- Env-cell-owned static objects are included in the same cutover; no separate env-cell static object
+  branch can still reach the generic slicer.
 - The large generated-scenery trace that previously wedged after candidate construction completes
   its partition stage within the bounded harness window.
 - Existing static object renderer output remains functionally equivalent, allowing expected draw-unit
@@ -1804,8 +1814,8 @@ source and portal complexity contained in the env-cell baker.
 Deliverables:
 
 - Update structured-interior baking in `env-cell-system-baker.ts` to build renderable
-  structured-interior primitive records and partition keys using the same object-material page tuple
-  concepts as static objects.
+  structured-interior primitive records and partition keys using the same object-material texture
+  binding tuple concepts as static objects.
 - Preserve env-cell-specific outputs:
   - portal aperture resources;
   - portal graphs;
@@ -1814,7 +1824,7 @@ Deliverables:
 - Preserve env-cell static object placement delegation, but keep it separate from structured
   interior primitive partitioning.
 - Add tests proving:
-  - structured interiors split by page tuple and shader/material family;
+  - structured interiors split by texture binding tuple and shader/material family;
   - portal/spatial/visibility records still reference final baker-emitted draw-unit ids;
   - texture dependencies pin final placement item ids;
   - no post-bake binding inference is reintroduced.
@@ -1838,31 +1848,41 @@ Acceptance criteria:
 
 ### Phase 20: Reassess Terrain Under The Partition-Key Model
 
-Goal: align terrain terminology with the first-principles baker model without flattening terrain's
-legitimate shader constraints into object-material rules.
+Goal: prove whether terrain is already first-principles enough under the new baker model, then make
+only the targeted terminology, test, or structural changes needed. Terrain should not be rewritten
+just for symmetry if its current flow is already bounded and shader-budget-owned.
 
 Deliverables:
 
 - Audit current terrain slicing in `terrain-geometry-baker.ts` against the same principle:
   draw units should be derived from terrain render identity and shader budgets, not generic mutable
   slice history.
-- If terrain already follows this model closely, document that decision and leave behavior stable.
-- If terrain still has legacy-shaped growing-slice logic, replace it with terrain partition records:
+- Specifically inspect the existing flow:
+  - terrain material layer plan;
+  - terrain material draw slices;
+  - placement-page capacity split by color/mask/detail shader budgets;
+  - emitted terrain draw-unit dependencies.
+- If terrain already follows this model closely, document that decision, leave behavior stable, and
+  add only missing invariant tests or naming cleanup.
+- If terrain still has legacy-shaped growing-slice logic after that audit, replace it with terrain
+  partition records:
   - terrain layer/material identity;
-  - color/mask/detail page tuple;
+  - color/mask/detail shader binding tuple;
   - terrain shader-budget grouping;
   - deterministic secondary split for layer/overlay/road limits.
 - Add or update tests for:
   - color/mask/detail page budget splits;
   - layer/overlay/road budget splits;
   - missing placement snapshot entries fail as baker invariant failures;
-  - emitted dependencies match final terrain draw-unit page tuples.
+  - emitted dependencies match final terrain draw-unit texture binding/page-budget facts.
 
 Do not:
 
 - Do not reduce terrain to the object one-page-per-role rule.
 - Do not move terrain legality into the packer.
 - Do not use terrain work to justify keeping a generic object-material slicer.
+- Do not rewrite terrain only to make it look textually identical to object-like geometry; shared
+  code paths are a north star, but terrain-owned shader legality is allowed to stay terrain-owned.
 - Do not keep a terrain compatibility path if terrain requires a rewrite. Either document that the
   current terrain model is already first-principles enough, or cut terrain over cleanly.
 
@@ -1870,6 +1890,8 @@ Acceptance criteria:
 
 - Terrain's draw-unit construction is either already first-principles and documented, or rewritten to
   match that model.
+- Any terrain changes are justified by actual draw-unit identity, shader budget, or invariant-test
+  gaps found during the audit.
 - Terrain remains first-class in the same placement-before-bake pipeline with terrain-owned legality.
 
 ### Phase 21: Delete Legacy Slicer Vestiges and Update Diagnostics
@@ -1881,8 +1903,8 @@ Deliverables:
 
 - Delete `static-material-batch-slicer.ts` if no remaining production draw-unit path needs it.
 - Delete or narrow `object-material-page-legality.ts` if its only purpose was supporting the old
-  generic slicer. If page tuple helpers still clarify partition-key derivation, rename them around
-  partition facts rather than legality callbacks.
+  generic slicer. If texture binding tuple helpers still clarify partition-key derivation, rename
+  them around partition facts rather than legality callbacks.
 - Remove tests that preserve the old slicer abstraction. Replace them with partition-key and
   emitted-draw-unit invariant tests.
 - Update diagnostics and worksheet notes:
@@ -1933,7 +1955,7 @@ Acceptance criteria:
 - [x] Phase 14: make structured-interior baking placement-aware.
 - [x] Phase 15: final drawable isomorphism cleanup.
 - [ ] Phase 16: resteer baker partitioning around first-principles draw-unit identity.
-- [ ] Phase 17: introduce renderable primitive and draw-unit partition contracts.
+- [ ] Phase 17: introduce object-like renderable primitive and draw-unit partition contracts.
 - [ ] Phase 18: replace static object draw-unit discovery with partition-key grouping.
 - [ ] Phase 19: port structured-interior baking to the same partition-key model.
 - [ ] Phase 20: reassess terrain under the partition-key model.
@@ -2334,6 +2356,16 @@ Acceptance criteria:
   page legality. The incremental guard repair is a transitional boundedness fix, not the target
   baker architecture. Phases 16-21 replace greedy slice discovery with partition-key draw-unit
   construction.
+- Dry-running Phases 16-21 showed that static object partitioning already carries most of the future
+  renderable primitive and partition-axis facts. Phase 17 should extract and rename that shape
+  rather than introducing a greenfield partition vocabulary.
+- Draw-unit partition identity must use shader-visible texture binding identity. In the current
+  placement contract that is `TexturePlacement.textureRefId`; packer-local `pageId` is retained for
+  diagnostics and must not become the object-like partition key.
+- Terrain currently appears closer to the desired model than object-like geometry: terrain material
+  layer planning and terrain-owned page-budget splitting already happen before draw-unit emission.
+  Phase 20 starts as an audit/document/test phase and rewrites terrain only if that audit proves a
+  real legacy-shaped draw-unit discovery problem.
 - Until Phase 21 lands, `static-material-batch-slicer.ts` and object page-legality callbacks are
   migration debt. Do not add new production users unless Phase 16 explicitly decides a domain-local
   secondary budget split needs a similar helper under a more honest name.

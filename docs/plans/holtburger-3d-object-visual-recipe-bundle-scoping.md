@@ -1,6 +1,6 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation in progress. Phases 0-9K are complete. This document defines the target
+Status: implementation in progress. Phases 0-9L are complete. This document defines the target
 model, north stars, risk surface, and phased cutover plan for replacing static-vs-dynamic object
 visual worker bifurcation with a shared object-like visual recipe graph.
 
@@ -2063,6 +2063,8 @@ Implementation notes after Phase 9K:
 
 ### Phase 9L: Structured-Interior Bundle Expansion Producer
 
+Status: complete.
+
 Goal: expand env-cell cell-structure geometry into embedded object visual recipe bundles and static
 publication metadata.
 
@@ -2091,6 +2093,33 @@ Deletion criteria:
 
 - Mark legacy structured-interior draw-unit construction helpers for removal once Phase 9M cuts
   production over.
+
+Implementation notes after Phase 9L:
+
+- Added
+  `apps/holtburger-3d/src/lib/static/env-cells/bake/structured-interior-visual-bundle-producer.ts`
+  as the recipe-first structured-interior bundle expansion producer.
+- The producer consumes a single `LandblockEnvCellStaticFacts` plus
+  `EnvCellCellStructureGeometryAttachment` sidecars and emits an embedded-geometry visual
+  resolution, source-local geometry buffers, and structured-interior publication metadata.
+- Structured-interior part instances now carry env-cell residency and use the env-cell local
+  placement as the only transform from source-local cell-structure geometry into render-local
+  space.
+- Empty cell-structure render geometry resolves to a ready empty bundle; missing geometry
+  attachments resolve to `missing-dependencies` without partial publication metadata.
+- Added focused producer tests covering ready expansion through `bakeObjectVisuals` and
+  `createObjectVisualStaticInstallSet`, missing geometry sidecars, and empty render geometry.
+- Spicy debt: shared object visual render parts currently expose recipe-local material ids in
+  renderer material-table entries. Structured-interior source material identity remains preserved in
+  `materialPlan`, but Phase 9M should decide whether publication payloads need AC material ids
+  restored separately from recipe ids.
+- Spicy debt: structured-interior material-recipe and texture-recipe construction duplicates a
+  narrow slice of the Phase 9J static object producer. Phase 9M cleanup should extract the shared
+  recipe material mapper or delete the duplicated legacy helpers once production routing is on the
+  recipe path.
+- Verification:
+  `npm --prefix apps/holtburger-3d run test:ts -- structured-interior-visual-bundle-producer` and
+  `npm --prefix apps/holtburger-3d run check`.
 
 ### Phase 9M: Static Object-Like Resolver Cutover
 

@@ -1,0 +1,1540 @@
+# Holtburger 3D Object Visual Recipe Bundle Implementation Plan
+
+Status: implementation plan. This document defines the target model, north stars, risk surface, and
+phased cutover plan for replacing static-vs-dynamic object visual worker bifurcation with a shared
+object-like visual recipe graph.
+
+## Purpose
+
+Define a normalized object visual recipe model that can describe static object layers,
+generated-scenery instancing, structured-interior embedded geometry, static-authored dynamics, and
+runtime-authored dynamics before texture placement and renderer-legal draw-unit baking.
+
+The core thesis: object-like visual source work should produce recipes and part instances. Runtime
+lifetime, residency, pinning, and eviction should not force separate material planning or baker
+pipelines inside resolver/baker workers.
+
+## Ground Truth And Current State
+
+Current files that establish the problem shape:
+
+- `apps/holtburger-3d/src/lib/static/objects/bake/static-object-batch-partitioner.ts`
+  - Static object baking currently consumes `StaticObjectBatchPayload`, builds material plans,
+    constructs triangle candidates, groups by object-material partition key, and emits static
+    partitions.
+- `apps/holtburger-3d/src/lib/dynamic/visual-baker.ts`
+  - Dynamic visual baking now uses the shared object-material partition helper, but still performs
+    dynamic-specific material planning and texture requirement discovery around entity recipes.
+- `apps/holtburger-3d/src/lib/visual/object-material-draw-unit-partition.ts`
+  - Shared renderer-legality partition vocabulary for object-like materials.
+- `apps/holtburger-3d/src/lib/static/objects/bake/static-object-batch-baker.ts`
+  - Generated-scenery instancing currently runs after static object partitioning and reconstructs
+    reusable visual-resource identity from baked partitions and source triangle coverage.
+- `apps/holtburger-3d/src/lib/static/env-cells/bake/env-cell-system-baker.ts`
+  - Structured interiors already behave like object-material geometry, but their geometry source is
+    embedded cell-structure geometry rather than `gfx_obj` geometry.
+- `apps/holtburger-3d/src/lib/textures/placement.ts`
+  - Shared texture placement intent, placement snapshot, and dependency vocabulary.
+
+Reference sources:
+
+- Current `apps/holtburger-3d` resolver, baker, texture, renderer, and runtime paths are the ground
+  truth for the architectural cutover.
+- ACE, ACViewer, and the retail client decompile should be consulted if implementation exposes new
+  uncertainty about AC source semantics, file formats, setup/appearance interpretation, or material
+  behavior.
+
+Current good shape:
+
+- Static objects, structured interiors, and dynamic visuals now share object-material render
+  partition rules.
+- Texture placement already uses shared placement/pinning concepts.
+- Renderer material legality is no longer fundamentally static-vs-dynamic.
+
+Current remaining smell:
+
+- Static objects and dynamic visuals still enter worker material planning through different payload
+  shapes.
+- Dynamic visuals still run material planning once for texture-placement discovery and again for
+  final baking.
+- Generated-scenery instancing is inferred after static draw-unit construction instead of falling out
+  naturally from repeated part instances.
+
+## Scope
+
+In scope:
+
+- Object-like drawable source domains:
+  - outdoor explicit static objects;
+  - outdoor generated scenery;
+  - env-cell static objects;
+  - structured interiors with embedded geometry;
+  - static-authored dynamics;
+  - runtime-authored dynamics.
+- Recipe graph concepts for textures, materials, geometry, parts, and part instances.
+- Residency as a first-class part-instance fact.
+- Resolver normalization of `setup-model` and `setup-appearance` indirection into the shared recipe
+  records, geometry buffers, and part instances.
+- Unsupported materials as known, ignorable material-family facts that do not become renderer facts.
+- How generated-scenery instancing becomes recipe reuse rather than a post-draw-unit cutover.
+
+Out of scope:
+
+- Terrain inner recipe model. Terrain can share placement/runtime machinery, but not object
+  `PartRecipe` semantics.
+- Portal graph, visibility, spatial, and interior sidecar records as drawable recipes.
+- Material diagnostics and coverage reporting. Those should stay out of the recipe model until a
+  concrete user-facing need proves they belong there.
+- Renderer shader redesign beyond the existing object-material partition constraints.
+
+## North Stars
+
+These principles should steer design decisions when the model hits ambiguous implementation details:
+
+1. Resolver outputs should be isomorphic across object-like domains.
+
+   Static layer objects, structured interiors, static-authored dynamics, and runtime-authored
+   dynamics should normalize into the same basic product: texture recipes, material recipes,
+   geometry recipes, geometry buffer refs, part recipes, and part instances. Source lifetime should
+   not create separate resolver or baker families.
+
+2. Runtime lifetime should stay out of visual recipe semantics.
+
+   Static layer residency, dynamic entity retention, texture pinning, dependency release, and
+   eviction policy are runtime concerns. Resolvers and bakers should scope work by residency and
+   ownership inputs, but they should not fork core material, geometry, or partition logic because a
+   product will be installed with a different lifetime.
+
+3. Source indirection should collapse before baking.
+
+   `setup-model`, `setup-appearance`, `ObjDesc`-style overrides, and authored source variants are
+   resolver inputs. The baker should receive effective visual facts and provenance, not source
+   indirection that forces it to rediscover static-vs-dynamic behavior.
+
+4. Geometry should have one transform rule.
+
+   Geometry buffers should remain source-local and `PartInstance.transform` should be the only path
+   from buffer-local positions to render-local positions. Avoid pre-baked landblock/env-cell geometry
+   inside this object visual graph unless a future source proves that such geometry is already
+   authored that way.
+
+5. Heavy payloads should be explicit sidecars, not hidden resolver graph weight.
+
+   The recipe graph should reference heavy geometry buffers by id. Full typed-array payloads may
+   travel through worker transfer, attachment, or cache channels, but recipe-to-buffer ownership must
+   remain explicit and deterministic.
+
+6. Hot-path identity should be numeric; semantic identity should remain inspectable.
+
+   Bundle-local ids should drive recipe, part, material, geometry, and placement lookups during
+   baking. Stable semantic keys should be retained in key tables for deterministic construction,
+   debugging, and cache boundaries, not used as routine partition comparison payloads.
+
+7. Texture recipes describe source need, not placement ownership.
+
+   Resolvers may use texture and palette metadata to author recipes, but they should not load texels
+   or choose atlas pools, placement buckets, runtime owners, pinning policy, or release policy.
+   Placement planning belongs at the runtime/coordinator boundary.
+
+8. Renderer legality remains a baker concern.
+
+   The shared recipe graph should represent source intent and instance candidacy. The baker still
+   owns material-family partitioning, render-pass splits, texture-placement compatibility,
+   material-table limits, sorting constraints, and direct-vs-instanced renderer output.
+
+9. Unsupported and missing inputs should be explicit but lightweight.
+
+   Unsupported materials should map to non-renderable `UnsupportedMaterial` recipes that placement
+   and renderer output ignore. Missing dependencies should produce skip-and-log readiness state, not
+   partial bundles or a diagnostics subsystem.
+
+10. The model should reduce code paths, not move the bifurcation.
+
+   A design that merely wraps old static and dynamic pipelines behind a shared facade does not meet
+   the goal. Shared types should pull shared resolver/baker logic into one object visual path, with
+   only thin domain adapters for source loading, residency, ownership, and runtime policy.
+
+11. Prefer hard cutover over long-lived compatibility scaffolding.
+
+   The target architecture is one object visual recipe path, not a permanent bridge between legacy
+   static and dynamic worker shapes. Temporary adapters are acceptable only as migration tools with
+   explicit deletion criteria. They should not become supported architecture, and they should not
+   preserve legacy material planning, geometry extraction, or generated-scenery inference paths after
+   the recipe model can replace them.
+
+## Target Concept
+
+Object-like resolvers should produce a visual recipe bundle:
+
+```ts
+interface ObjectVisualRecipeBundle {
+  readonly textureRecipes: ReadonlyMap<TextureRecipeId, TextureRecipe>;
+  readonly materialRecipes: ReadonlyMap<MaterialRecipeId, MaterialRecipe>;
+  readonly geometryRecipes: ReadonlyMap<GeometryRecipeId, GeometryRecipe>;
+  readonly geometryBufferRefs: ReadonlyMap<GeometryBufferId, GeometryBufferRef>;
+  readonly partRecipes: ReadonlyMap<PartRecipeId, PartRecipe>;
+  readonly partInstances: readonly PartInstance[];
+  readonly recipeKeys: ObjectVisualRecipeKeyTables;
+}
+```
+
+The bundle describes visual source intent plus references to the geometry payloads needed to bake
+that intent. Full `GeometryBuffer` payloads are same-contract sidecars keyed by
+`GeometryBufferId`, not independent semantic sidecars and not necessarily inline resolver JSON. This
+keeps heavy typed arrays out of the resolver-ready graph while still giving bakers a single
+recipe-to-buffer contract.
+
+Resolver output should be wrapped so missing dependencies are explicit operational state, not an
+empty successful bundle:
+
+```ts
+type ObjectVisualBundleResolution =
+  | {
+      readonly kind: "ready";
+      readonly bundle: ObjectVisualRecipeBundle;
+      readonly geometryBuffers: ReadonlyMap<GeometryBufferId, GeometryBuffer>;
+    }
+  | {
+      readonly kind: "missing-dependencies";
+      readonly missingRefs: readonly StaticResourceIdentity[];
+    };
+```
+
+When dependencies are missing, runtime should complain once in the console for the affected
+layer/entity/source and skip baking that product. This is not a material diagnostics system or issue
+diary.
+
+The ready bundle plus its geometry sidecars is not renderer-legal output. Renderer legality remains
+a baker responsibility:
+
+```text
+ObjectVisualRecipeBundle
+  + ObjectVisualTexturePlacementSnapshot
+  -> renderable primitives
+  -> object-material partition keys
+  -> material-table budget splits
+  -> renderer resources, draw units, or render parts
+```
+
+## Recipe Identity Sketch
+
+These shapes are illustrative. They are intentionally not final TypeScript contracts.
+
+```ts
+type TextureRecipeId = number;
+type MaterialRecipeId = number;
+type GeometryRecipeId = number;
+type GeometryBufferId = number;
+type PartRecipeId = number;
+type PartMaterialBindingId = number;
+type PartInstanceId = number;
+type TexturePlacementItemId = number;
+
+interface ObjectVisualRecipeKeyTables {
+  readonly textureRecipeKeys: readonly TextureRecipeKey[];
+  readonly materialRecipeKeys: readonly MaterialRecipeKey[];
+  readonly geometryRecipeKeys: readonly GeometryRecipeKey[];
+  readonly geometryBufferKeys: readonly GeometryBufferKey[];
+  readonly partRecipeKeys: readonly PartRecipeKey[];
+  readonly partInstanceKeys: readonly PartInstanceKey[];
+  readonly texturePlacementItemKeys: readonly TexturePlacementItemKey[];
+}
+
+interface TextureRecipe {
+  readonly textureRecipeId: TextureRecipeId;
+  readonly placementItemId: TexturePlacementItemId;
+  readonly usage:
+    | "object-base-color"
+    | "object-detail"
+    | "object-index"
+    | "object-palette";
+  readonly source: MaterialTextureDataUseIdentity;
+  readonly samplingPolicy?: StaticBakeTextureSamplingPolicy;
+  readonly affinityHint?: string;
+}
+
+type MaterialRecipe =
+  | DirectColorMaterialRecipe
+  | TextureRgbaMaterialRecipe
+  | IndexedColorMaterialRecipe
+  | UnsupportedMaterialRecipe;
+
+interface MaterialRecipeBase {
+  readonly materialRecipeId: MaterialRecipeId;
+  readonly materialSourceIds: readonly string[];
+  readonly pass: "opaque" | "alpha-test" | "transparent" | "additive";
+  readonly alphaMode: string;
+  readonly blendMode: string;
+}
+
+interface DirectColorMaterialRecipe extends MaterialRecipeBase {
+  readonly family: "direct-color";
+  readonly diffuseColor: readonly [number, number, number, number];
+  readonly emissiveColor: readonly [number, number, number];
+}
+
+interface TextureRgbaMaterialRecipe extends MaterialRecipeBase {
+  readonly family: "texture-rgba";
+  readonly baseColorTextureRecipeId: TextureRecipeId;
+  readonly detailTextureRecipeId: TextureRecipeId | null;
+  readonly diffuseColor: readonly [number, number, number, number];
+  readonly emissiveColor: readonly [number, number, number];
+  readonly textureWrapMode: "clamp" | "repeat";
+}
+
+interface IndexedColorMaterialRecipe extends MaterialRecipeBase {
+  readonly family: "indexed-color";
+  readonly indexTextureRecipeId: TextureRecipeId;
+  readonly paletteTextureRecipeId: TextureRecipeId;
+  readonly detailTextureRecipeId: TextureRecipeId | null;
+  readonly paletteFirstIndex: number;
+  readonly indexedTextureFormat: "p8" | "index16";
+  readonly diffuseColor: readonly [number, number, number, number];
+  readonly emissiveColor: readonly [number, number, number];
+  readonly textureWrapMode: "clamp" | "repeat";
+}
+
+interface UnsupportedMaterialRecipe extends MaterialRecipeBase {
+  readonly family: "unsupported";
+}
+```
+
+Unsupported material recipes are first-class source facts, but never renderer facts:
+
+```text
+UnsupportedMaterialRecipe
+  -> no texture placement intents
+  -> no object-material partition key
+  -> no renderer material table entry
+  -> retained only so source material references have an explicit non-renderable target
+```
+
+Texture recipes describe source visual needs. They should not decide atlas placement pool, owner
+bucket, lifetime policy, or pin/release behavior. An `ObjectVisualTexturePlacementPlanner` should
+derive `TexturePlacementIntent` values at the runtime/coordinator boundary from:
+
+- `TextureRecipe.usage`;
+- `TextureRecipe.source`;
+- `TextureRecipe.samplingPolicy`;
+- optional `TextureRecipe.affinityHint`;
+- `PartInstance.residency`;
+- static layer or dynamic entity ownership context.
+
+Illustrative planner boundary:
+
+```ts
+interface ObjectVisualTexturePlacementPolicy {
+  readonly sourceKind:
+    | "static-layer"
+    | "static-authored-dynamic"
+    | "runtime-authored-dynamic";
+  readonly ownerId: string;
+}
+
+function createObjectVisualTexturePlacementIntents(input: {
+  readonly bundle: ObjectVisualRecipeBundle;
+  readonly policy: ObjectVisualTexturePlacementPolicy;
+}): readonly ObjectVisualTexturePlacementIntent[] {
+  // Derives pool and placement bucket from policy + residency.
+  // Resolver-authored TextureRecipe remains source intent only.
+  throw new Error("scoping sketch");
+}
+
+interface ObjectVisualTexturePlacementIntent {
+  readonly itemId: TexturePlacementItemId;
+  readonly source: TexturePlacementSource;
+  readonly purpose: TextureUsagePurpose;
+  readonly placementBucketKey: TexturePlacementBucketKey;
+  readonly pool: TexturePlacementPool;
+  readonly affinityKey: string | null;
+}
+
+interface ObjectVisualTexturePlacementSnapshot {
+  readonly placementsByItemId: ReadonlyMap<TexturePlacementItemId, TexturePlacement>;
+}
+```
+
+Placement identity should follow the same strategy as recipe identity: dense numeric ids inside the
+object visual bundle and baker, stable semantic keys in `recipeKeys`, and string handles only at
+runtime registry boundaries. The current string-shaped `TexturePlacementIntent.itemId` and
+`TexturePlacementSnapshot.placementsByItemId` contracts should not be treated as the final object
+visual shape. Object visual placement should converge on `TexturePlacementItemId` for bake-time
+lookup, while renderer resource ids, texture page ids, and global ownership handles may remain
+strings.
+
+## Texture Asset Boundary
+
+Resolvers may load texture dependency metadata, but they should not load texture pixel payloads.
+The target asset boundary is:
+
+```text
+resolver-safe metadata routes
+  surface-texture/{id}
+  render-surface-metadata/{id}
+  palette-metadata/{id}
+
+runtime texture placement routes
+  prepared-texture/{id}?...
+  palette/{id} when palette pixels are needed for packing
+```
+
+`render-surface-metadata` should expose dimensions, source format, source byte length, default
+palette id, dependencies, and provenance. `palette-metadata` should expose palette dimensions,
+color-count/range facts, and provenance needed for indexed material planning. Neither metadata route
+should include texels or source bytes. Resolver-authored `TextureRecipe` records should reference
+these metadata facts through stable source identities and usage policy only. Texture placement is the
+first stage that should request pixel-bearing `prepared-texture` or `palette` assets.
+
+Current code does not cleanly satisfy this boundary: `render-surface/{id}` and `palette/{id}` are
+binary routes, and resolver-facing code can end up fetching pixel-capable payloads only to use
+metadata. The new model should replace resolver use with metadata-only routes instead of fetching
+texels and dropping them at the resolver boundary.
+
+## Source Indirection Normalization
+
+Resolvers should normalize source indirection before the baker sees the bundle:
+
+```text
+setup-model / setup-appearance / ObjDesc-style overrides
+  -> effective source parts
+  -> TextureRecipe records
+  -> MaterialRecipe records
+  -> GeometryRecipe records
+  -> GeometryBuffer sidecars
+  -> PartRecipe records
+  -> PartInstance records
+```
+
+This applies to static and dynamic inputs:
+
+- Static object-like domains flatten `setup-model` part selection into the same recipe records used
+  by direct `gfx_obj` objects.
+- Runtime-authored dynamics flatten `setup-appearance` and appearance override facts before baking,
+  including part swaps, texture changes, palette/sub-palette selection, and material slot resolution.
+- Static-authored dynamics use the same normalized visual shape; runtime only changes ownership,
+  residency, animation, and lifetime policy.
+
+The original source identities should remain available as provenance or source mapping facts, but
+they should not create separate baker paths. `setup-appearance` is an appearance override input, not a
+geometry provenance class.
+
+## Geometry Recipe Sketch
+
+Geometry recipes should separate source provenance from geometry payloads. Both `gfx_obj` parts and
+cell structures should reference geometry buffers so the baker does not need to reopen or
+reinterpret source assets:
+
+```ts
+interface GeometryRecipe {
+  readonly geometryRecipeId: GeometryRecipeId;
+  readonly provenance: GeometryProvenance;
+  readonly bufferId: GeometryBufferId;
+}
+
+type GeometryProvenance =
+  | {
+      readonly kind: "gfx-obj";
+      readonly sourceAssetKind: "gfx-obj" | "setup-model";
+      readonly sourceDid: number;
+      readonly gfxObjDid: number;
+      readonly partIndex: number;
+    }
+  | {
+      readonly kind: "cell-structure";
+      readonly envCellId: number;
+      readonly structureId: string;
+    };
+```
+
+Geometry buffers are visual payload sidecars attached to the bundle. They are not independent
+semantic sidecars like portals, visibility records, or env-cell adjacency. They exist so resolvers can
+expand source assets once and bakers can consume a single triangle-buffer shape:
+
+```ts
+interface GeometryBufferRef {
+  readonly bufferId: GeometryBufferId;
+  readonly key: GeometryBufferKey;
+  readonly coordinateSpace: "source-local";
+}
+
+interface GeometryBuffer {
+  readonly bufferId: GeometryBufferId;
+  readonly coordinateSpace: "source-local";
+  readonly positions: Float32Array;
+  readonly normals: Float32Array;
+  readonly texCoords: Float32Array;
+  readonly triangles: readonly GeometryTriangle[];
+}
+
+interface GeometryTriangle {
+  readonly firstVertex: number;
+  readonly surfaceId: number | null;
+  readonly materialVariantSignature: string | null;
+  readonly sourceTriangleId: string;
+}
+```
+
+The coordinate-space invariant should be universal:
+
+```text
+renderLocalPosition = PartInstance.transform * GeometryBuffer.sourceLocalPosition
+```
+
+`GeometryBuffer` payloads stay in their natural source-local coordinates. For a `gfx_obj` part, that
+means part/source-local geometry. For a cell structure, that means cell-structure-local geometry. The
+`PartInstance.transform` carries the transform from that buffer-local space into the owning
+render-local space, including env-cell placement for structured interiors. Bakers should not branch
+on static/dynamic/interior lifetime to decide whether a transform has already been applied.
+
+There is intentionally no `runtime-authored` geometry provenance in this model. Runtime-authored
+dynamics are runtime-authored entity instances that currently resolve through setup models and
+`gfx_obj` parts. If the project later supports actual runtime mesh authoring, that should be added as
+a proven new provenance kind rather than reserved speculatively now.
+
+## Part Recipe And Instance Sketch
+
+`PartRecipe` should not assume a single material. AC object parts and structured interiors need
+surface or primitive-level material bindings.
+
+```ts
+interface PartRecipe {
+  readonly partRecipeId: PartRecipeId;
+  readonly geometryRecipeId: GeometryRecipeId;
+  readonly materialBindings: readonly PrimitiveMaterialBinding[];
+}
+
+interface PrimitiveMaterialBinding {
+  readonly bindingId: PartMaterialBindingId;
+  readonly selector: PrimitiveSelector;
+  readonly materialRecipeId: MaterialRecipeId;
+  readonly sourceSlot: PartMaterialSourceSlot | null;
+  readonly materialVariantSignature: string | null;
+}
+
+interface PartMaterialSourceSlot {
+  readonly slotIndex: number;
+  readonly geometrySurfaceId: number;
+  readonly materialSurfaceId: number;
+}
+
+type PrimitiveSelector =
+  | {
+      readonly kind: "surface";
+      readonly surfaceId: number;
+    }
+  | {
+      readonly kind: "triangle-range";
+      readonly firstTriangle: number;
+      readonly triangleCount: number;
+    }
+  | {
+      readonly kind: "triangle-list";
+      readonly sourceTriangleIds: readonly string[];
+    };
+```
+
+Most current object-like domains can start with surface bindings. Triangle range/list selectors are
+escape hatches for geometry buffers or material variant cases that cannot be expressed cleanly by
+surface id alone. `sourceSlot` keeps authored material-slot identity separate from primitive
+selection, matching the current distinction between geometry surface ids, material surface ids, slot
+indices, and material variants.
+
+Part instances carry residency and instance facts:
+
+```ts
+interface PartInstance {
+  readonly partInstanceId: PartInstanceId;
+  readonly partRecipeId: PartRecipeId;
+  readonly transform: PlacementTransformDto;
+  readonly residency: VisualResidency;
+  readonly source: PartInstanceSource;
+  readonly sortAnchor?: StaticBounds | Vec3Dto;
+}
+
+type VisualResidency =
+  | {
+      readonly kind: "outdoor-landblock";
+      readonly landblockId: number;
+    }
+  | {
+      readonly kind: "env-cell";
+      readonly landblockId: number;
+      readonly envCellId: number;
+      readonly memberId: string;
+    }
+  | {
+      readonly kind: "runtime-entity";
+      readonly entityId: string;
+      readonly currentResidence:
+        | { readonly kind: "outdoor-landblock"; readonly landblockId: number }
+        | { readonly kind: "env-cell"; readonly landblockId: number; readonly envCellId: number }
+        | { readonly kind: "no-residence" };
+    };
+
+type PartInstanceSource =
+  | {
+      readonly kind: "static-object";
+      readonly objectInstanceId: string;
+      readonly objectKind: "explicit-object" | "generated-scenery";
+    }
+  | {
+      readonly kind: "structured-interior";
+      readonly envCellId: number;
+      readonly cellStructureId: number;
+    }
+  | {
+      readonly kind: "dynamic";
+      readonly entityId: string;
+      readonly sourcePartIndex: number;
+    };
+```
+
+Residency belongs on part instances. Portal, spatial, visibility, and source-mapping sidecars can
+refer to the same residency identifiers without becoming drawable recipes.
+
+## Layer Output Sketch
+
+Static object-like layer source output can wrap the visual bundle with sidecars:
+
+```ts
+interface ObjectLikeStaticLayerSource {
+  readonly domain:
+    | "outdoor-explicit-objects"
+    | "outdoor-generated-scenery"
+    | "env-cell-system";
+  readonly visual: ObjectVisualBundleResolution;
+  readonly sidecars: ObjectLikeLayerSidecars;
+}
+
+interface ObjectLikeLayerSidecars {
+  readonly sourceMappings: readonly StaticSourceMappingRecord[];
+  readonly spatialRecords: readonly StaticSpatialRecord[];
+  readonly visibilityRecords: readonly StaticVisibilityRecord[];
+  readonly portalApertureResources: readonly StaticPortalApertureResource[];
+  readonly portalGraphs: readonly StaticPortalGraphRecord[];
+  readonly portalInteriorRecords: readonly StaticPortalInteriorRecord[];
+}
+```
+
+Dynamic source output can use the same visual bundle:
+
+```ts
+interface DynamicObjectVisualSource {
+  readonly entityId: string;
+  readonly visual: ObjectVisualBundleResolution;
+  readonly animationBindings: readonly DynamicAnimationPartBinding[];
+}
+
+interface DynamicAnimationPartBinding {
+  readonly sourcePartIndex: number;
+  readonly renderPartIds: readonly string[];
+}
+```
+
+Dynamic animation bindings preserve source/setup part identity across baking, but they should not
+assume one source part becomes exactly one render part. Material partitioning, texture placement, or
+budget splits may turn one animated source part into multiple baked renderer parts. Runtime
+animation sampling should still produce transforms by `sourcePartIndex`; commit/install code expands
+that sampled transform to each `renderPartId` bound to the source part.
+
+Runtime lifetime stays outside the visual recipe graph:
+
+```text
+recipe bundle source
+  -> texture placement
+  -> bake renderer resources
+  -> runtime pins dependencies
+  -> runtime installs static layer or dynamic resource
+  -> runtime evicts and releases dependencies
+```
+
+## Sequence Diagrams
+
+### Static Object-Like Layer
+
+```mermaid
+sequenceDiagram
+  participant Resolver as Static resolver
+  participant Runtime as Runtime / TextureManager
+  participant Baker as Object visual baker
+  participant Renderer as Renderer
+
+  Resolver->>Resolver: Decode static source facts
+  Resolver->>Resolver: Resolve texture metadata without texels/source bytes
+  Resolver->>Resolver: Normalize direct/setup sources into recipes
+  Resolver->>Resolver: Expand source geometry into GeometryBuffer sidecars
+  Resolver->>Resolver: Build ObjectVisualRecipeBundle
+  Resolver-->>Runtime: visual recipes + geometry/semantic sidecars
+  Runtime->>Runtime: Derive placement intents from texture recipes + layer policy
+  Runtime->>Runtime: Load prepared texture/palette pixels for placement
+  Runtime->>Runtime: Place textures by derived pool/purpose/bucket
+  Runtime-->>Baker: recipes + ObjectVisualTexturePlacementSnapshot
+  Baker->>Baker: Expand renderable primitives
+  Baker->>Baker: Ignore UnsupportedMaterial recipes for renderer output
+  Baker->>Baker: Partition by object-material identity
+  Baker->>Baker: Split by material-table budget
+  Baker-->>Runtime: static draw units/resources + dependencies + sidecars
+  Runtime->>Renderer: Commit static layer resources
+  Runtime->>Runtime: Pin texture dependencies for resident resources
+```
+
+### Runtime-Authored Dynamic
+
+```mermaid
+sequenceDiagram
+  participant Resolver as Dynamic recipe resolver
+  participant Runtime as Runtime / TextureManager
+  participant Baker as Object visual baker
+  participant Renderer as Renderer
+
+  Resolver->>Resolver: Decode setup/model/material/appearance facts
+  Resolver->>Resolver: Resolve texture metadata without texels/source bytes
+  Resolver->>Resolver: Normalize setup-appearance overrides into recipes
+  Resolver->>Resolver: Expand setup/gfx geometry into GeometryBuffer sidecars
+  Resolver->>Resolver: Build ObjectVisualRecipeBundle
+  Resolver-->>Runtime: visual recipes + geometry buffers + animation bindings
+  Runtime->>Runtime: Derive placement intents from texture recipes + dynamic policy
+  Runtime->>Runtime: Load prepared texture/palette pixels for placement
+  Runtime->>Runtime: Place textures by derived runtime pool/bucket
+  Runtime-->>Baker: recipes + ObjectVisualTexturePlacementSnapshot
+  Baker->>Baker: Expand renderable primitives
+  Baker->>Baker: Partition by object-material identity
+  Baker->>Baker: Preserve sourcePartIndex to baked part-instance bindings
+  Baker-->>Runtime: dynamic visual resources + dependencies
+  Runtime->>Renderer: Commit dynamic resources and instances
+  Runtime->>Runtime: Pin texture dependencies for resident resource
+```
+
+### Generated Scenery Under Recipe-First Model
+
+```mermaid
+sequenceDiagram
+  participant Resolver as Static resolver
+  participant Baker as Object visual baker
+  participant Runtime as Runtime
+
+  Resolver->>Resolver: Build shared PartRecipe for repeated scenery
+  Resolver->>Resolver: Emit shared GeometryBuffer sidecars for source parts
+  Resolver->>Resolver: Emit many PartInstance records referencing that PartRecipe
+  Resolver-->>Baker: ObjectVisualRecipeBundle
+  Baker->>Baker: Partition by material pass/state, texture placement, and table budget
+  Baker->>Baker: Evaluate instancing policy for legal repeated partitions
+  Baker->>Baker: Bake instanced resources for profitable partitions
+  Baker->>Baker: Bake direct draw units for unique, split, or ineligible partitions
+  Baker-->>Runtime: visual resources + render instances + direct draw units
+```
+
+This removes the current backwards flow:
+
+```text
+draw units first -> inspect source coverage -> infer reusable resources -> cut over partitions
+```
+
+Generated scenery becomes repeated `PartInstance` data referencing shared recipes before renderer
+resource emission. That makes instance candidacy explicit early, but renderer instancing is still a
+post-partition output decision. One repeated `PartRecipe` can still become several renderer
+resources if material family, render pass, texture page placement, material-table limits, or sorting
+policy require splits. The baker should ask which repeated partitions are legal and profitable to
+instance, not infer repeated source objects backward from already-baked draw units.
+
+## Domain Fit Matrix
+
+| Domain | Fits `ObjectVisualRecipeBundle`? | Notes |
+| --- | --- | --- |
+| Outdoor explicit static objects | Yes | `gfx_obj` provenance plus geometry buffer refs/sidecars and outdoor landblock residency. |
+| Outdoor generated scenery | Yes | Repeated `PartInstance`s should replace post-partition candidate/cutover inference. |
+| Env-cell static objects | Yes | Same object recipe shape with env-cell residency. |
+| Structured interiors | Yes | Cell-structure provenance plus geometry buffer refs/sidecars and env-cell residency. Portal records remain sidecars. |
+| Static-authored dynamics | Yes | Same normalized visual recipes; runtime commits them as dynamic entities. |
+| Runtime-authored dynamics | Yes | Normalize setup-appearance overrides into the same setup/`gfx_obj` visual recipes, with runtime-authored instance policy and animation bindings. |
+| Terrain | No, not internally | Terrain should keep terrain-layer recipes but share placement/runtime dependency machinery. |
+
+## Phased Implementation
+
+The phases below are ordered for a decisive cutover while keeping each milestone reviewable. Where
+temporary adapters are needed, the phase names the deletion target so compatibility scaffolding does
+not become supported architecture.
+
+### Phase 0: Ground Truth Audit And Baseline
+
+Goal: prove the current behavior and data dependencies before changing contracts.
+
+Deliverables:
+
+- Update this plan with any newly discovered source facts from ACE, ACViewer, or current
+  `apps/holtburger-3d` paths.
+- Baseline the current static object, env-cell, dynamic visual, texture placement, and generated
+  scenery tests that will guard the cutover.
+- Identify any runtime asset requirements that are not represented by checked-in fixtures.
+
+Task checklist:
+
+- Trace `setup-model`, `setup-appearance`, material, texture, `gfx_obj`, cell-structure, and
+  generated scenery paths through current resolver and baker code.
+- Record the current missing dependency behavior for static layers and dynamics.
+- Record current generated-scenery instancing entry points, thresholds, and renderer output shapes.
+- Confirm whether palette metadata needed by material planning can be served without palette texels.
+
+Acceptance criteria:
+
+- The plan lists all code paths that must be replaced or deleted.
+- Existing relevant tests are known and runnable locally.
+- Any behavior that cannot be proven from code or references is recorded before implementation
+  proceeds.
+
+### Phase 1: Shared Object Visual Contract
+
+Goal: introduce the shared recipe graph and resolution wrapper without yet cutting over producers.
+
+Deliverables:
+
+- Add object visual recipe contracts for `ObjectVisualRecipeBundle`,
+  `ObjectVisualBundleResolution`, recipe ids, recipe key tables, texture/material/geometry/part
+  recipes, part instances, residency, sidecars, and animation bindings.
+- Add geometry sidecar/ref contracts with `GeometryBufferId`, `GeometryBufferRef`, and
+  source-local `GeometryBuffer` payloads.
+- Add focused contract tests for id stability, key-table ordering, unsupported material recipes, and
+  missing dependency resolution shape.
+
+Task checklist:
+
+- Place shared object visual contracts in the smallest existing `apps/holtburger-3d` module that can
+  be consumed by static and dynamic workers without dragging in runtime policy.
+- Define bundle-local numeric ids and key-table construction helpers.
+- Define `UnsupportedMaterialRecipe` as a non-renderable family.
+- Define `ObjectVisualBundleResolution` so missing dependencies cannot masquerade as an empty ready
+  bundle.
+
+Acceptance criteria:
+
+- Static and dynamic code can import the shared contracts without dependency cycles.
+- Contract tests prove deterministic dense id/key-table behavior.
+- No existing static or dynamic renderer behavior changes in this phase.
+
+Deletion criteria:
+
+- None. This phase adds the new contract foundation only.
+
+### Phase 2: Resolver-Safe Texture Metadata Routes
+
+Goal: separate resolver metadata needs from pixel-bearing texture/palette payloads across host,
+preparation, and resolver views.
+
+Deliverables:
+
+- Add resolver-safe `render-surface-metadata/{id}` and `palette-metadata/{id}` asset routes or
+  equivalent prepared metadata records.
+- Add host DTO schemas, prepared asset payload parsing, route validation, and tests for those
+  metadata routes.
+- Update Tauri/binary lookup routing so metadata routes do not use pixel-bearing binary payload
+  handling.
+- Update resolver asset views so resolver-facing material planning sees metadata-only payloads
+  rather than fetched texels with bytes stripped afterward.
+
+Task checklist:
+
+- Add metadata payload shapes for render-surface facts needed by material planning: dimensions,
+  format, source byte length, default palette id, dependencies, and provenance.
+- Add metadata payload shapes for palette facts needed by indexed material planning: dimensions,
+  color-count/range facts, and provenance.
+- Replace resolver-side uses that fetch `render-surface/{id}` or `palette/{id}` only for metadata.
+- Keep `prepared-texture/{id}` and pixel-bearing `palette/{id}` loading in texture placement/packing.
+- Add tests proving resolver metadata routes do not expose texels/source bytes.
+
+Acceptance criteria:
+
+- Resolvers can author texture and material recipes from metadata-only assets.
+- Texture placement remains the first stage that loads prepared texture or palette pixels.
+- Resolver-safe payload tests prove metadata routes do not contain texels/source bytes.
+
+Deletion criteria:
+
+- Remove resolver code that fetches pixel-bearing render-surface or palette assets only to strip or
+  ignore payload bytes.
+
+### Phase 3: Numeric Texture Placement Cutover
+
+Goal: make object visual placement numeric end-to-end in bake-time paths, without a long-lived
+string adapter layer.
+
+Deliverables:
+
+- Add object visual placement intent/snapshot contracts using `TexturePlacementItemId` for
+  bake-time lookup.
+- Update texture placement, texture manager, renderer binding preparation, and object visual bake
+  inputs so object visual placement items are numeric internally.
+- Keep string handles only for runtime registry/resource/page/owner identities where global names are
+  required.
+
+Task checklist:
+
+- Replace object visual `TexturePlacementIntent.itemId` and
+  `TexturePlacementSnapshot.placementsByItemId` usage with numeric placement item ids.
+- Update texture manager packing output to preserve numeric placement item ids for object visual
+  consumers.
+- Update renderer texture binding creation so material table/binding lookup can bridge from numeric
+  object visual placement ids to renderer texture refs without reintroducing hot-path string
+  placement ids.
+- Keep terrain placement on its existing shape unless and until terrain is deliberately generalized.
+- Add tests proving object visual placement lookup uses numeric item ids through manager, baker, and
+  renderer binding preparation.
+
+Acceptance criteria:
+
+- No object visual bake path depends on string placement item ids in hot-path maps.
+- Texture manager and renderer binding code support numeric object visual placement items without a
+  compatibility adapter that preserves the old object visual string path.
+- Runtime/global texture refs, renderer resource ids, and ownership handles may remain strings.
+
+Deletion criteria:
+
+- Delete object visual string placement item id helpers and tests once all object visual placement
+  callers use numeric ids.
+
+### Phase 4: Neutral Object Visual Material Planner
+
+Goal: replace static/dynamic-specific material planning with one object visual material recipe path.
+
+Deliverables:
+
+- Promote static object material planning into a neutral object visual material planner.
+- Emit `TextureRecipe` and `MaterialRecipe` records together after source/setup/appearance
+  normalization.
+- Preserve existing object-material renderer legality facts while removing duplicated dynamic
+  material planning.
+
+Task checklist:
+
+- Extract source-agnostic material family selection, render-state derivation, texture recipe
+  creation, and material binding construction.
+- Normalize direct-color, texture-rgba, indexed-color, and unsupported material cases into shared
+  recipes.
+- Make unsupported materials explicit non-renderable recipe targets that produce no placement
+  intents and no renderer material entries.
+- Add static and dynamic tests that assert equivalent material recipe output for equivalent source
+  facts.
+
+Acceptance criteria:
+
+- Static object-like sources and dynamic sources call the same planner for object visual material
+  recipes.
+- Dynamic baking no longer performs material planning once for placement discovery and again for
+  final bake.
+- Unsupported material cases skip renderer output without material diagnostics.
+
+Deletion criteria:
+
+- Delete or collapse legacy static-only and dynamic-only material planner entry points once all
+  callers use the neutral planner.
+
+### Phase 5: Geometry Sidecars And Transform Invariant
+
+Goal: make all object-like geometry arrive as source-local buffers referenced by recipes.
+
+Deliverables:
+
+- Build geometry buffer refs and sidecars for `gfx_obj` parts and cell-structure geometry.
+- Enforce the universal transform rule:
+  `renderLocalPosition = PartInstance.transform * GeometryBuffer.sourceLocalPosition`.
+- Add regression tests for env-cell structured interiors, explicit static objects, and dynamics to
+  prevent double-transform and pre-baked coordinate drift.
+
+Task checklist:
+
+- Adapt current static object geometry attachment loading into `GeometryBuffer` sidecar production.
+- Adapt current env-cell cell-structure geometry attachment loading into source-local
+  `GeometryBuffer` sidecars.
+- Preserve source provenance on `GeometryRecipe`, not on separate baker branches.
+- Verify normals/UVs/material surface ids/triangle ids required by object-material partitioning are
+  present in the sidecar shape.
+
+Acceptance criteria:
+
+- Static object, structured interior, and dynamic bake inputs consume the same geometry buffer
+  sidecar shape.
+- Tests prove env-cell placement is applied exactly once through `PartInstance.transform`.
+- Bakers no longer reopen source geometry assets after receiving ready bundle plus sidecars.
+
+Deletion criteria:
+
+- Remove geometry extraction branches that exist only because static objects, structured interiors,
+  or dynamics carry different geometry payload shapes.
+
+### Phase 6: Shared Object Visual Placement Planner
+
+Goal: derive texture placement intents from texture recipes plus runtime/coordinator policy.
+
+Deliverables:
+
+- Add `ObjectVisualTexturePlacementPlanner` shared by static and dynamic coordinators.
+- Accept policy inputs for static layer ownership, static-authored dynamics, runtime-authored
+  dynamics, residency, pool choice, and bucket choice.
+- Emit object visual placement intents keyed by numeric `TexturePlacementItemId`.
+
+Task checklist:
+
+- Move placement pool/bucket decisions out of resolver-authored texture recipes.
+- Preserve current texture pinning/dependency behavior at runtime install and eviction boundaries.
+- Add tests for static layer placement, structured interiors, generated scenery, and dynamic
+  placement using the same planner with different policy inputs.
+
+Acceptance criteria:
+
+- Static and dynamic coordinators call the same object visual placement planner.
+- Resolver-authored `TextureRecipe` records contain source need only, not runtime placement
+  ownership.
+- Texture dependencies remain accurate for static layer and dynamic resource eviction.
+
+Deletion criteria:
+
+- Remove static-object-only, structured-interior-only, and dynamic-only placement planner variants
+  after policy-based planner coverage is complete.
+
+### Phase 7: Resteer Shared Model Foundation
+
+Goal: reassess the shared contracts, metadata boundary, material planner, and geometry sidecar model
+before cutting over domain resolvers.
+
+Deliverables:
+
+- A short update to this plan documenting what changed in Phases 1-6, what was deleted, what
+  temporary adapters exist, and whether the remaining phases should be reordered or split.
+- A decision on whether the current object visual contract is strong enough for both static and
+  dynamic resolver cutover.
+- A list of cleanup targets discovered while establishing the shared foundation.
+
+Task checklist:
+
+- Confirm the shared contracts are not leaking runtime lifetime policy into resolver or baker types.
+- Confirm metadata-only texture routes can support material planning without texel-bearing payloads.
+- Confirm the neutral material planner handles static and dynamic source facts without domain-only
+  branches.
+- Confirm geometry sidecars and `PartInstance.transform` satisfy the source-local transform
+  invariant across representative object-like domains.
+- Confirm object visual placement uses numeric placement item ids through texture placement and
+  renderer binding preparation.
+- Reassess whether any upcoming phase should be subdivided before resolver cutover begins.
+
+Acceptance criteria:
+
+- The plan records whether to proceed, reorder, or split later phases.
+- Any temporary adapter introduced so far has an explicit deletion criterion.
+- No static or dynamic resolver cutover begins while the shared model still has unresolved contract
+  gaps.
+
+### Phase 8: Unified Object Visual Baker And Install Publication Foundation
+
+Goal: build the shared recipe-first baker core and shared object visual install publication before
+domain resolvers cut over to the new final output shape.
+
+Deliverables:
+
+- Add a unified object visual baker that consumes ready bundle, geometry sidecars, and object visual
+  placement snapshot.
+- Produce a shared `ObjectVisualInstallSet` shape for direct draw units, visual resources, render
+  instances, and texture dependencies.
+- Produce static layer install publications that wrap `ObjectVisualInstallSet` with domain,
+  landblock/residency, and non-visual sidecars.
+- Preserve renderer material legality, material-table splitting, transparent/additive sorting
+  anchors, and texture dependency output.
+- Add dynamic animation output bindings from source `sourcePartIndex` to one or more baked
+  `renderPartId`s.
+
+Task checklist:
+
+- Expand recipes and part instances into renderable primitive candidates.
+- Partition by material family, pass, render state, texture placement compatibility, and
+  material-table budget.
+- Route unsupported material bindings to no renderer output.
+- Replace runtime/install reconstruction of visual payloads from old static draw-unit buckets with a
+  shared object visual install publication.
+- Keep domain-specific shells only for renderer setter routing, scene-query sidecars, residency,
+  ownership, dependency pin/release, and runtime install policy.
+- Ensure install shells do not own visual payload construction, material planning, geometry
+  expansion, placement lookup, or instancing logic.
+- Expand sampled dynamic animation transforms from `sourcePartIndex` to every bound `renderPartId`
+  during dynamic commit/install.
+- Add fixture-driven parity tests for representative static, structured interior, and dynamic bundle
+  inputs before resolver cutovers delete old payload shapes.
+
+Acceptance criteria:
+
+- Static object-like layers and dynamic visuals can be produced by the same baker core from shared
+  object visual bundle inputs.
+- Runtime install code can publish object visual layers from shared `ObjectVisualInstallSet` data
+  without reconstructing visual payloads from legacy static draw-unit categories.
+- Domain-specific install shells contain no visual payload construction, material planning, geometry
+  expansion, placement lookup, or generated-scenery instancing logic.
+- Dynamic renderer/resource commits preserve animation for split render parts through explicit
+  source-part-to-render-part bindings.
+- Existing renderer-facing behavior remains equivalent for covered fixtures.
+
+Deletion criteria:
+
+- None yet. Legacy paths may remain only as side-by-side parity references until resolver cutover and
+  hard cutover remove their producers and callers.
+
+### Phase 9: Static Object-Like Resolver Cutover
+
+Goal: make static object-like layers produce object visual bundle resolutions and feed the unified
+baker/install publication path.
+
+Deliverables:
+
+- Cut over outdoor explicit static objects, outdoor generated scenery, env-cell static objects, and
+  structured interiors to emit `ObjectVisualBundleResolution`.
+- Preserve non-visual sidecars for portal, visibility, spatial, and source mapping records.
+- Ensure `PartInstance.residency` carries outdoor landblock or env-cell residency.
+
+Task checklist:
+
+- Normalize direct `gfx_obj` sources and setup-model sources into shared recipe records.
+- Emit `PartRecipe` records for reusable geometry/material combinations.
+- Emit `PartInstance` records for explicit objects, generated scenery, env-cell objects, and
+  structured interiors.
+- Route static object-like bundle outputs through the unified baker and shared install publication.
+- Map missing static dependencies to `missing-dependencies` resolution and console skip behavior.
+
+Acceptance criteria:
+
+- Static object-like resolvers no longer emit legacy static-object-only visual payloads as their
+  final ready shape.
+- Portal, visibility, spatial, and source mapping sidecars remain available and independent of
+  drawable recipes.
+- Static layer tests cover ready bundles, missing dependencies, residency, sidecar preservation, and
+  unified baker/install publication output.
+
+Deletion criteria:
+
+- Delete legacy static source payload fields once no static coordinator or baker consumes them.
+
+### Phase 10: Dynamic Resolver Cutover
+
+Goal: make static-authored and runtime-authored dynamics produce the same visual bundle shape and
+feed the unified baker/install publication path.
+
+Deliverables:
+
+- Normalize setup-appearance overrides, part swaps, texture changes, palette/sub-palette selection,
+  and material slot resolution into object visual recipes.
+- Emit dynamic `PartInstance` records with runtime-entity residency.
+- Preserve source/setup part identity needed by animation so the baker can emit
+  `DynamicAnimationPartBinding` records from `sourcePartIndex` to baked `renderPartId`s.
+
+Task checklist:
+
+- Cut over dynamic visual recipe resolution to the shared source/material/geometry recipe path.
+- Preserve source/setup part identity needed by animation without letting setup indirection cross
+  into the baker.
+- Route dynamic bundle outputs through the unified baker and dynamic resource/install publication.
+- Map missing dynamic dependencies to skip-and-log readiness state.
+- Add tests for one source part mapping to multiple baked render parts after partitioning.
+
+Acceptance criteria:
+
+- Static-authored and runtime-authored dynamics use the same object visual recipe graph as static
+  object-like layers.
+- Dynamic animation still binds source part transforms to all affected baked render parts.
+- Dynamic visual bake input no longer needs dynamic-only material or geometry recipe shapes.
+- Dynamic visual outputs are produced by the unified baker and publication path.
+
+Deletion criteria:
+
+- Delete legacy dynamic visual recipe/material/geometry payload shapes once all dynamic callers use
+  `ObjectVisualBundleResolution`.
+
+### Phase 11: Recipe-First Generated Scenery Instancing
+
+Goal: replace post-draw-unit generated-scenery inference with part-instance-driven reuse before the
+old static object baker path is removed.
+
+Deliverables:
+
+- Use repeated `PartInstance` records referencing shared `PartRecipe` records as instancing
+  candidates in the unified baker path.
+- Evaluate instancing after renderer-legal partitioning, texture placement, material-table splits,
+  sorting constraints, and reuse thresholds.
+- Emit instanced resources only for legal and profitable partitions; emit direct draw units for the
+  rest.
+
+Task checklist:
+
+- Port current generated-scenery thresholds and eligibility checks into an explicit policy object.
+- Remove source triangle coverage reconstruction from already-baked draw units in the new path.
+- Add tests for fully instanced, partially split, below-threshold, and ineligible transparent/additive
+  generated scenery.
+- Verify dependencies and resource ownership for instanced and direct outputs.
+
+Acceptance criteria:
+
+- Generated-scenery instancing no longer depends on reverse-engineering source identity from baked
+  draw units in the unified baker path.
+- Instanced and direct outputs remain renderer-legal and dependency-correct.
+- The generated-scenery path uses the same object visual baker core as other object-like domains.
+
+Deletion criteria:
+
+- Mark post-partition candidate/cutover inference code for deletion in the hard cutover phase.
+
+### Phase 12: Hard Cutover And Legacy Baker Removal
+
+Goal: lock production static/dynamic object visual bake paths onto the unified recipe-first baker and
+remove old duplicated worker logic.
+
+Deliverables:
+
+- Confirm production static object-like layers and dynamic visuals are routed through the unified
+  baker core.
+- Route static object-like layer installation through shared object visual install publications
+  instead of rebuilding domain payloads from `installedDrawUnits`, `staticObjectVisualResources`, and
+  `staticObjectRenderInstances`.
+- Route env-cell system publication through the same shared object visual install publication shape
+  for drawable static objects and structured interiors, while keeping portal, visibility, placement,
+  and scene-query records as sidecars.
+- Delete replaced legacy worker payloads, planner wrappers, duplicated baker branches, and tests that
+  only verify obsolete static/dynamic bifurcation.
+- Delete generated-scenery post-draw-unit candidate/cutover inference code.
+
+Task checklist:
+
+- Switch any remaining production caller from legacy static/dynamic baker entry points to the
+  unified object visual baker.
+- Replace runtime commit/install code that splits installed visuals by old domain buckets with
+  publication of shared object visual install sets plus sidecars.
+- Replace env-cell publication code that derives drawable layer facts from installed draw-unit lists
+  with publication from shared object visual install sets plus env-cell sidecars.
+- Keep renderer setter routing domain-specific only where renderer scene ownership still requires it.
+- Remove compatibility routing once parity tests pass.
+- Delete old static/dynamic object material/geometry bake paths that are no longer used.
+- Delete hollow tests that only protect removed worker shapes.
+
+Acceptance criteria:
+
+- Static object-like layers and dynamic visuals use the same baker core in production.
+- Static object-like runtime install uses the shared object visual install publication shape in
+  production.
+- Env-cell system runtime publication uses shared object visual install sets for drawable output and
+  sidecars for portal, visibility, spatial, and scene-query records.
+- Old static and dynamic object material/geometry bake paths are not used by production callers.
+- No generated-scenery production path infers reusable resources backward from baked draw units.
+- Runtime/domain shells do not reconstruct visual payloads from legacy installed draw-unit/resource
+  buckets.
+
+Deletion criteria:
+
+- Complete in this phase. Any remaining compatibility path must be treated as a blocker or recorded
+  with a specific follow-up deletion condition.
+
+### Phase 13: Resteer Hard Cutover
+
+Goal: assess whether the unified baker cutover actually eliminated the old static/dynamic
+bifurcation before cleanup continues.
+
+Deliverables:
+
+- A plan update documenting which legacy static/dynamic baker paths are deleted, which adapters
+  remain, and why any remaining adapter is temporary.
+- A decision on whether cleanup can proceed or whether additional baker/runtime install cleanup must
+  happen first.
+- A list of any tests that became hollow because they only protected removed worker shapes.
+
+Task checklist:
+
+- Search production callers for legacy static-only and dynamic-only material, geometry, placement,
+  and baker entry points.
+- Search runtime install/publication code for visual payload reconstruction from legacy draw-unit or
+  resource buckets.
+- Search env-cell publication code for drawable layer reconstruction from installed draw-unit lists.
+- Verify domain install shells are limited to renderer setter routing, sidecars, residency,
+  ownership, dependency pin/release, and runtime policy.
+- Confirm renderer-facing parity tests still pass for representative static, structured interior,
+  and dynamic visuals.
+- Record any remaining bifurcation and decide whether it blocks proceeding.
+
+Acceptance criteria:
+
+- The plan states whether the hard cutover north star has been met for the shared baker.
+- Any remaining compatibility path has a deletion criterion or is explicitly treated as a blocker.
+- Runtime/domain install shells are thin routing/sidecar/policy shells, not hidden old visual
+  pipelines or payload constructors.
+
+### Phase 14: Resteer And Generated Scenery Instancing Assessment
+
+Goal: assess the state of the generated scenery instancing pipeline after the recipe-first cutover.
+
+Deliverables:
+
+- A short update to this plan documenting what changed, what was deleted, what remains awkward, and
+  whether the generated scenery instancing policy should be simplified further.
+- Measurements or targeted diagnostics for generated scenery bake cost, resource count, instance
+  count, and texture dependency behavior on representative landblocks.
+- A decision on whether any additional generated scenery cleanup belongs in this effort or should be
+  split into a separate plan.
+
+Task checklist:
+
+- Compare generated scenery output before and after the recipe-first cutover for representative
+  scenes.
+- Inspect whether material partitioning or texture placement creates surprising instance splits.
+- Verify the policy object is source-agnostic and not carrying legacy static-object assumptions.
+- Record any cleanup target that blocks the hard cutover north star.
+
+Acceptance criteria:
+
+- The team can explain where generated scenery instancing now lives and why.
+- Any remaining generated-scenery-specific complexity is either justified by renderer constraints or
+  scheduled for cleanup.
+- No old draw-unit-first inference path remains in production code.
+
+### Phase 15: Cleanup And Legacy Removal
+
+Goal: remove scaffolding, hollow tests, obsolete names, and duplicate contracts after cutover.
+
+Deliverables:
+
+- Delete temporary adapters whose deletion criteria have been satisfied.
+- Rename files/symbols that still imply static-only or dynamic-only ownership for shared object
+  visual concepts.
+- Replace or delete tests that only preserve legacy worker shapes.
+- Update docs that would mislead future work toward the old bifurcation.
+
+Task checklist:
+
+- Search for legacy static/dynamic material planner names, old geometry attachment shapes, string
+  placement item ids in object visual hot paths, and generated scenery post-draw-unit inference.
+- Delete compatibility tests that assert removed behavior.
+- Keep tests that prove current behavior, renderer legality, missing dependency skip behavior,
+  transform invariants, and dependency release.
+- Run formatting, lint, typecheck, and the relevant test suites.
+
+Acceptance criteria:
+
+- No production caller uses old static/dynamic object visual planner or baker paths.
+- No object visual bake hot path depends on string placement item ids or semantic string recipe keys.
+- Documentation and names describe the new object visual recipe model.
+
+### Phase 16: Final Validation
+
+Goal: prove the cutover is complete enough to trust and maintain.
+
+Deliverables:
+
+- Final validation notes in this plan covering test suites, manual/diagnostic scenes, known residual
+  risk, and any deliberately deferred work.
+- A concise list of deleted legacy paths and remaining object visual entry points.
+
+Task checklist:
+
+- Run the relevant unit and integration tests for static objects, env cells, terrain adjacency where
+  texture placement is shared, dynamics, texture placement, renderer payloads, and runtime install/
+  eviction behavior.
+- Use targeted harnesses or renderer diagnostics for representative outdoor landblocks, generated
+  scenery, structured interiors, and dynamic entities.
+- Reach for the programmatic browser harness when the cutover needs end-to-end renderer/runtime
+  confidence, especially for scene installation, visual presence, texture binding, or animation
+  smoke checks that unit fixtures cannot prove.
+- Confirm missing dependencies skip with console complaints and do not produce partial renderer
+  resources.
+- Confirm dependency pin/release behavior for static and dynamic resources.
+
+Acceptance criteria:
+
+- The implementation satisfies the Definition of Done below.
+- Any remaining risk is documented and not caused by retained legacy bifurcation.
+
+## Decisions And Course Corrections
+
+- Pending implementation. During execution, record any deliberate deviation from the phase order,
+  any temporary adapter introduced, and the deletion criterion for that adapter.
+
+## Risks And Mitigations
+
+1. Material binding granularity.
+
+   A single `materialRecipeId` per `PartRecipe` is insufficient. The model needs surface/primitive
+   bindings to preserve geometry-surface ids, material surface ids, and material variant signatures.
+   Mitigation: keep `PartRecipe.materialBindings` as the required model shape from Phase 1 and add
+   tests that cover multi-surface and variant material bindings before baker cutover.
+
+2. Unsupported materials.
+
+   Unsupported material recipes should stay in the graph only as explicit non-renderable targets for
+   source material references. Placement and renderer baking must ignore them. This avoids pushing
+   `unsupported` into object-material partition identity.
+   Mitigation: test that unsupported recipes produce no placement intents, no renderer material table
+   entries, and no partial renderer resources.
+
+3. Recipe identity representation.
+
+   Stable semantic recipe ids should not become expensive string-heavy comparisons in hot bake or
+   render paths. The model uses dense bundle-local numeric ids for recipe and placement references,
+   with stable semantic keys retained in key tables for deterministic construction, debugging, and
+   cache boundaries.
+   Mitigation: make numeric ids the only graph reference type in shared contracts, and add tests that
+   semantic keys are retained in key tables rather than hot-path maps.
+
+4. Transparent and additive sorting.
+
+   Recipe identity cannot erase sort policy. The baker still needs enough per-instance bounds,
+   object-part identity, or sort anchors to preserve transparent/additive behavior.
+   Mitigation: preserve sort anchors on `PartInstance` and require parity tests for transparent and
+   additive object visual output before deleting legacy baker paths.
+
+5. Generated-scenery reuse thresholds.
+
+   Recipe reuse should not force every repeated part into an instanced resource. Repeated
+   `PartInstance` records establish candidacy before renderer output, but material partitioning,
+   texture placement, material-table limits, sorting policy, and reuse thresholds still decide
+   whether a partition becomes instanced or direct.
+   Mitigation: keep generated scenery instancing as a policy decision after renderer-legal
+   partitioning and add Phase 14 to reassess the policy after cutover.
+
+6. Geometry buffer sidecar transport.
+
+   Geometry buffers are heavy visual payload sidecars keyed by `GeometryBufferId`. They need stable
+   ids inside the recipe bundle and should not be duplicated per part recipe. The runtime may cache,
+   transfer, or attach them separately from resolver JSON, but the bundle contract should still make
+   recipe-to-buffer references explicit.
+   Mitigation: separate `GeometryBufferRef` from full `GeometryBuffer` payloads in the shared
+   contract and test that bakers require all referenced sidecars.
+
+7. Texture metadata versus texel payload routes.
+
+   The resolver needs enough texture metadata to author `TextureRecipe` and `MaterialRecipe` records,
+   but it should not trigger render-surface or palette pixel loading. The current binary
+   `render-surface/{id}` and `palette/{id}` resolver usage should be split or replaced by
+   metadata-only routes. Pixel-bearing `prepared-texture/{id}` and palette payloads belong to
+   texture placement/packing.
+   Mitigation: introduce metadata-only routes before resolver cutover and test that resolver-safe
+   payloads do not contain texels or source bytes.
+
+8. Dynamic animation binding.
+
+   `sourcePartIndex` remains required for dynamic animation. It belongs on dynamic source/instance
+   metadata, not in material planning. One source part may map to multiple baked renderer parts after
+   partitioning or renderer-resource splits.
+   Mitigation: model animation bindings as `sourcePartIndex -> renderPartId[]` and add tests for
+   split animated source parts.
+
+9. Source indirection flattening.
+
+   The resolver must flatten `setup-model` and `setup-appearance` inputs into effective visual
+   recipes before baking, while preserving enough provenance/source mapping for picking and debug
+   inspection. Letting setup indirection cross the baker boundary would preserve today's split
+   static/dynamic material and geometry paths.
+   Mitigation: make setup/source normalization part of resolver acceptance criteria and reject baker
+   inputs that require setup-specific interpretation.
+
+10. Sidecar boundaries.
+
+   Portal graphs, visibility records, spatial records, and source mappings can reference residency,
+   part instances, or source ids, but they should not become texture/material/geometry recipes.
+   Mitigation: keep non-visual sidecars in layer wrappers and test that drawable recipe processing
+   does not depend on portal or visibility records.
+
+11. Missing dependency handling.
+
+   Missing dependencies should produce a `missing-dependencies` resolution, not an empty bundle.
+   Runtime should log a concise console complaint for the affected source and skip baking. This is
+   operational readiness state, not material diagnostics.
+   Mitigation: use a discriminated resolution wrapper and test that missing dependencies do not enter
+   placement or baker stages.
+
+12. Coordinate-space discipline.
+
+   Geometry buffers should stay source-local and `PartInstance.transform` should always transform
+   buffer-local positions into render-local positions. Allowing some buffers to arrive pre-baked into
+   landblock or env-cell space would reintroduce special-case baker paths and double-transform risk.
+   Mitigation: add transform-invariant tests for explicit objects, structured interiors, and dynamics
+   before deleting legacy coordinate-space branches.
+
+13. Runtime install payload reconstruction.
+
+   Runtime install code can preserve old architecture by rebuilding domain visual payloads from
+   legacy draw-unit/resource buckets after the unified baker runs. That would hide bifurcation behind
+   the installer instead of deleting it.
+   Mitigation: introduce a shared object visual install publication shape and require domain shells
+   to route/publish that shape rather than reconstruct visual payloads from legacy buckets.
+
+## Definition Of Done
+
+The effort is complete when all of the following are true:
+
+- Static object-like layers and dynamic visuals use `ObjectVisualBundleResolution` as their shared
+  ready/missing visual source contract.
+- Static explicit objects, generated scenery, env-cell static objects, structured interiors,
+  static-authored dynamics, and runtime-authored dynamics all normalize into the same object visual
+  recipe graph.
+- Texture and material recipes are authored from resolver-safe metadata routes; resolvers do not
+  load render-surface source bytes, prepared texture pixels, or palette pixels for object visual
+  material planning.
+- Object visual bake-time recipe, part, geometry, material, and placement lookups use dense numeric
+  ids with stable semantic keys retained only in key tables or cache/debug boundaries.
+- Geometry buffers are source-local sidecars, and all object-like domains use
+  `PartInstance.transform` as the transform into render-local space.
+- Unsupported materials are explicit non-renderable recipes and do not enter placement or renderer
+  material-table output.
+- Missing dependencies produce skip-and-log readiness state and do not produce partial renderer
+  resources.
+- Static and dynamic object visual outputs are produced by one shared baker core, with only thin
+  domain wrappers for install semantics, residency, ownership, and runtime policy.
+- Static object-like and env-cell drawable runtime install/publication use a shared object visual
+  install publication shape; domain shells do not reconstruct visual payloads from legacy draw-unit/
+  resource buckets.
+- Generated scenery instancing starts from repeated `PartInstance`/`PartRecipe` data and no
+  production path infers reusable resources backward from baked draw units.
+- Temporary adapters introduced during migration have been deleted from production paths; any
+  deliberately deferred adapter is carved out as follow-up work with an explicit deletion condition.
+- Legacy static/dynamic material planners, duplicated geometry extraction paths, string-keyed object
+  visual placement hot paths, and generated scenery post-draw-unit inference paths have been removed
+  from production code.
+- Relevant formatting, linting, typechecking, and unit/integration tests pass.
+- Representative outdoor, env-cell, generated-scenery, and dynamic visual scenarios have been
+  checked with targeted tests or diagnostics.
+
+## Open Questions
+
+None at this planning level.
+
+## Working Conclusions
+
+- The proposed model is not naive, but the recipe graph must be richer than
+  `PartRecipe -> MaterialRecipe`.
+- The most important shape correction is `PartRecipe.materialBindings`.
+- `PartRecipe.materialBindings` need explicit material-slot identity in addition to primitive
+  selectors.
+- Geometry recipes should point at shared `GeometryBuffer` sidecars for both `gfx_obj` and
+  cell-structure geometry.
+- `ObjectVisualRecipeBundle` should carry `GeometryBufferRef` records while full `GeometryBuffer`
+  payloads travel as keyed sidecars/attachments.
+- Geometry provenance should describe source assets or structures, not runtime/static lifetime.
+- `setup-model` and `setup-appearance` are resolver inputs that normalize into effective recipes;
+  they are not baker-visible pipeline families.
+- Texture recipes should be authored from metadata-only texture dependencies. Resolver paths should
+  not request render-surface `sourceBytes`, prepared-texture pixels, or palette pixels.
+- Resolver-safe texture metadata should include both `render-surface-metadata/{id}` and
+  `palette-metadata/{id}` routes.
+- `TextureRecipe` and `MaterialRecipe` records should be emitted together by a resolver-worker
+  object visual material-planning subpass after source/setup/appearance normalization.
+- Recipe ids should be dense bundle-local numeric ids. Stable semantic keys should be interned and
+  retained for deterministic construction, debugging, and cache boundaries, not used as hot-path
+  comparison payloads.
+- Object visual texture placement should follow the same strategy: numeric placement item ids inside
+  the bundle/baker, stable keys in `recipeKeys`, and string handles only at runtime registry
+  boundaries.
+- Residency belongs on `PartInstance`.
+- `PartInstance.source` should carry compact instance/source provenance for picking and debug
+  correlation, but should not duplicate triangle-level coverage for hypothetical diagnostics.
+- `ObjectVisualTexturePlacementPlanner` should live in shared visual planning code and be called by
+  static and dynamic coordinators with different ownership/residency policy inputs.
+- Generated-scenery instancing should be controlled by an explicit reusable policy object, while the
+  baker remains responsible for executing direct-vs-instanced renderer output decisions after
+  renderer-legal partitioning.
+- `planStaticObjectMaterials(...)` should be promoted into a neutral object visual material planner;
+  wrappers may exist during migration but should not be the final architecture.
+- All geometry buffers should remain in source-local space, with the baker applying
+  `PartInstance.transform` consistently across object-like domains.
+- Non-visual env-cell records should remain sidecars.
+- Generated-scenery instancing is the strongest argument for recipe-first modeling because repeated
+  part instances can be represented before draw-unit emission.
+- Terrain should not be forced into this object visual graph.

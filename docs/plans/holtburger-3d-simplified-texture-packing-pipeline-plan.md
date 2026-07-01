@@ -981,6 +981,9 @@ Deliverables:
 
 - Move outdoor static object and env-cell static object texture intent discovery ahead of static
   object baking.
+- Extract that discovery from the existing static object material planning/texture-use-id policy
+  rather than inventing a resolver-side mini baker. The resolver/source-ready boundary may identify
+  source texture facts, but the object baker remains responsible for constructing draw units.
 - Feed the resulting placement snapshot into the static object baker.
 - Update static object baker output so object draw units are already renderer-legal under the
   one-page-per-role rule.
@@ -1201,7 +1204,7 @@ Acceptance criteria:
 - [x] Phase 1: add placement contracts and no-behavior-change adapters.
 - [x] Phase 2: split `TextureManager` placement and pinning around current behavior.
 - [x] Phase 3: add static source-ready placement continuation.
-- [ ] Resteering 1: review placement continuation shape.
+- [x] Resteering 1: review placement continuation shape.
 - [ ] Phase 4: move static object placement planning before static object baking.
 - [ ] Phase 5: remove main-thread static object fine splitting.
 - [ ] Phase 6: bring dynamic visual baking onto the same placement contract.
@@ -1268,6 +1271,26 @@ Acceptance criteria:
   discovery ahead of bake. This keeps current renderer texture upload behavior unchanged; pre-packing
   real static textures before the old materialization path can upload pages would make render output
   wrong.
+- Resteering 1 kept the planned direction intact. The three pool names still match the desired churn
+  boundaries: terrain is always static-authored but has a distinct shader/packing policy, static
+  objects use `static-authored-object`, and runtime visuals use `runtime-authored-object`.
+- Resteering 1 found that `affinityKey` stayed opaque in the contracts and tests. Keep it that way in
+  Phase 4: source/object/gfx ids may be folded into a caller-owned string, but the packer must not
+  learn those fields as structured domain concepts.
+- Resteering 1 found that `TextureManager` is still the right placement-planning boundary. Its
+  ownerless `placeTextureIntents(...)` API, dependency pin/release APIs, and reference snapshot are
+  narrow enough to keep; the packer still does not know draw units, layer owners, or static domains.
+- Resteering 1 found that the source-ready continuation has acceptable coupling. `StaticCoordinator`
+  owns demand/current-task guards and `ClientRuntime` wires texture placement, matching the existing
+  renderer/runtime ownership split. Do not add a durable source-ready queue unless the code proves a
+  real scheduling need.
+- Resteering 1 found the main Phase 4 migration edge: static object texture-use ids and texture-use
+  records are still created inside object/interior bakers through the material planner and texture
+  policy helpers. Phase 4 should lift that texture intent planning just far enough ahead of bake to
+  call `TextureManager`, while leaving draw-unit construction in the baker.
+- Resteering 1 found no diagnostic churn worth preserving as an architectural constraint. Keep the
+  useful bake timing and material coverage reports alive where cheap, but do not retain source
+  lineage or remapping diagnostics if they block the clean cutover.
 - Dry run split `TextureManager` responsibilities into placement and pinning. Current owner leases
   require post-bake draw-unit/resource owners, but pre-bake placement intents intentionally do not
   have owners yet.

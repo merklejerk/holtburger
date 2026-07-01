@@ -1,7 +1,7 @@
 # Holtburger 3D Texture Pipeline Performance Investigation Worksheet
 
 Date: 2026-07-01
-Status: Phase 6 cleanup completed; follow-up profiling debt remains.
+Status: Phase 7 short-run tracing in progress; one worker-pass root cause fixed, resolver-stage attribution pending.
 
 ## Purpose
 
@@ -751,6 +751,186 @@ npm run lint:dead
 ```
 
 All passed during Phase 6 cleanup.
+
+### Phase 7: Short-Run Trace And Bounded-Pass Fixes
+
+Status: In progress 2026-07-01.
+
+Purpose: investigate the user's report that outdoor scene loading still burns CPU far too long after Phase 6. The investigation now uses short harness runs under 20 seconds. The bar is not "eventually settles"; a correctly bounded closure should show healthy progress inside that window.
+
+Temporary trace instrumentation:
+
+- Added worker-side static baker trace events for active pending jobs.
+- The browser harness samples runtime diagnostics once per second and writes `harnessTrace` into the output JSON.
+- The trace records demand/coordinator state, pending static-baker jobs, and recent worker substages such as static-object partitioning, instancing, and direct geometry.
+- This instrumentation is diagnostic. Keep only if it continues to pay rent; otherwise remove after the root cause is fixed.
+
+Short-run commands:
+
+```sh
+npm run harness:browser -- --landblock 0xda55ffff --timeout-ms 8000 --output /tmp/holtburger-pipeline-trace-8s.json
+npm run harness:browser -- --landblock 0xda55ffff --timeout-ms 8000 --output /tmp/holtburger-pipeline-trace-8s-after.json
+```
+
+Phase 7 evidence before the slicer fix:
+
+| Run | Result after 8s | Committed/requested | Resolving | Baking | Installed draw units | Atlas MB | Buckets | Pages |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| before slicer fix | timeout | 29/57 | 5 | 23 | 46 | 116 | 21 | 26 |
+
+The active worker job was:
+
+- `domain`: `outdoor-generated-scenery`
+- `bakeBatchId`: `static-batch:1:outdoor-generated-scenery:landblock:d955ffff:4`
+- `itemCount`: 4
+- last worker trace event: `static-object-partition:candidates`
+- first item: landblock `0xd955ffff`, `43` objects, `9` source assets, `15,511` triangle candidates
+
+Root cause proven:
+
+- `partitionStaticObjectBatches()` built finite candidate sets, then called `sliceStaticMaterialBatchCandidates()`.
+- The placement legality callback rebuilt object material page sets from `currentSlice + candidate` for every candidate.
+- On large generated-scenery slices this made a bounded input behave like an unbounded pass: the growing slice was rewalked thousands of times.
+- This was not a packer churn issue, retry loop, or dynamic visual issue. The worker was stuck inside the static-object partition slicer after candidate construction and before partition completion.
+
+Fix landed in Phase 7:
+
+- Replaced the slicer's full-slice legality callback with an incremental `StaticMaterialBatchSliceGuard`.
+- Added an object-material page requirement guard that maintains per-purpose page sets and accepted material/requirement keys for the active slice.
+- Updated static object and structured-interior callers to use the shared incremental guard.
+- The packer and coordinator scheduling behavior were not changed by this fix.
+
+Verification:
+
+```sh
+npm run check
+npm run test:ts -- src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/static/env-cells/bake/env-cell-system-baker.test.ts
+```
+
+Both passed after the slicer fix.
+
+Phase 7 evidence after the slicer fix:
+
+| Run | Result after 8s | Committed/requested | Resolving | Baking | Installed draw units | Atlas MB | Buckets | Pages |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| after slicer fix | timeout | 51/57 | 5 | 1 | 420 | 153 | 29 | 52 |
+
+The worker trace now shows the same generated-scenery partition passes completing:
+
+- `0xd955ffff`: `15,511` candidates -> `3` partitions -> instancing completed
+- `0xd956ffff`: `20,270` candidates -> `5` partitions -> instancing completed
+- `0xdb55ffff`: `21,476` candidates -> `65` partitions -> instancing completed
+- `0xdb54ffff`: `23,677` candidates -> `102` partitions -> instancing completed
+- `0xda56ffff`: `39,570` candidates -> `157` partitions -> instancing completed
+
+Remaining issue proven by the after trace:
+
+- The five unresolved tasks after 8s were all for the anchor landblock `0xda55ffff`, one per requested domain:
+  - `outdoor-terrain`
+  - `outdoor-buildings`
+  - `env-cell-system`
+  - `outdoor-explicit-objects`
+  - `outdoor-generated-scenery`
+- Neighboring landblocks had already resolved, baked, and committed ahead of the anchor.
+- `planStaticDemand()` creates source requests grouped by landblock, but `compareLandblockSceneLodSourceRequests()` sorts them by numeric landblock id.
+- For an outdoor ring this can schedule neighbors before the focus landblock. That is a pipeline orchestration bug, not a micro-optimization target.
+
+Next Phase 7 action:
+
+- Sort source requests by demand priority/focus distance before numeric landblock id.
+- Preserve task-level priority semantics: terrain/anchor work should enter the resolver pool before lower-priority or farther coverage.
+- Rerun the 8s harness and record whether anchor tasks stop lingering in `resolving`.
+
+Phase 7 evidence after source-request priority sorting:
+
+```sh
+npm run harness:browser -- --landblock 0xda55ffff --timeout-ms 8000 --output /tmp/holtburger-pipeline-trace-8s-priority.json
+```
+
+| Run | Result after 8s | Committed/requested | Resolving | Baking | Installed draw units | Atlas MB | Buckets | Pages |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| after source priority sort | timeout | 46/57 | 5 | 6 | 317 | 153 | 29 | 52 |
+
+What changed:
+
+- Generated-scenery partitioning remained finite. The active worker trace shows large neighbor partitions completing instead of wedging in the slicer.
+- The active baker queue was no longer pathological in the same way: jobs were either queued behind two worker executions or actively progressing through object partition/instancing.
+
+What did not change:
+
+- All five anchor landblock `0xda55ffff` domain tasks still remained in `resolving` for the full short run:
+  - `outdoor-terrain`
+  - `outdoor-buildings`
+  - `env-cell-system`
+  - `outdoor-explicit-objects`
+  - `outdoor-generated-scenery`
+- Neighbor landblock bake work was still occupying worker capacity while anchor source tasks were unresolved.
+
+Interpretation:
+
+- Sorting source requests by task priority was directionally correct but not enough evidence to call the orchestration fixed.
+- Current diagnostics show layer task phases and baker-worker substages, but they do not show source request submission, worker assignment, completion order, or per-source wait/execute timing.
+- The next probe must trace source request lifecycle directly. Otherwise we are still inferring resolver behavior from downstream symptoms, which is exactly the trap this investigation is trying to avoid.
+
+Next Phase 7 action:
+
+- Add focused source-resolution diagnostics to the coordinator and/or resolver client:
+  - source request sequence id
+  - source landblock id
+  - requested layer kinds
+  - source LOD
+  - submitted/settled state
+  - age and elapsed resolver time
+  - represented task ids
+- Rerun the 8s harness and use that trace to decide whether the remaining issue is request ordering, resolver worker queueing, asset-service fanout, or something after source resolution.
+
+Phase 7 evidence after source-resolution and pending-asset diagnostics:
+
+```sh
+npm run harness:browser -- --landblock 0xda55ffff --timeout-ms 8000 --output /tmp/holtburger-pipeline-trace-8s-source-diag.json
+npm run harness:browser -- --landblock 0xda55ffff --timeout-ms 8000 --output /tmp/holtburger-pipeline-trace-8s-asset-pending.json
+```
+
+Findings:
+
+- Source request `0` is the focused landblock `0xda55ffff`, submitted first.
+- Source request `0` asks for the full focused closure:
+  - `terrain`
+  - `outdoor-buildings`
+  - `outdoor-explicit-objects`
+  - `outdoor-generated-scenery`
+  - `env-cell-system`
+- Source request `0` remains pending for the full 8s run.
+- Source requests `1..20` all resolve.
+- The slowest resolved source request in the latest run was `0xdb56ffff` at about `3.97s`.
+- The only asset-service pending item at timeout was:
+  - key: `gfx-obj:010008b9`
+  - waiter count: `1`
+
+Interpretation from the short-run snapshot:
+
+- The focused static source closure is not blocked on terrain bake, object bake, texture placement, or texture packing.
+- The focused static source closure is blocked inside resolver-side asset fanout after the landblock source payload is available.
+- The pending host asset in that run was `gfx-obj:010008b9`.
+- Later user-provided diagnostics showed `0xda55ffff` resolving with `dynamicPlacementCount: 0` and `dynamicRecipeCount: 0`, so the pending `gfx-obj` must not be attributed to static-authored dynamic recipe expansion without a more precise resolver-stage trace.
+- The resolver issue remains real, but the current evidence only proves unresolved source work was waiting on resolver-side asset fanout. It does not yet prove which resolver substage requested the pending `gfx-obj`.
+
+Corrected root-cause slice:
+
+- There are at least two independent load problems:
+  - A baker-side generated-scenery partition slicer that rewalked growing slices and made bounded candidate sets behave like unbounded work. This is fixed by the incremental slice guard.
+  - A resolver-side source closure that can hold a focused landblock in `resolving` while waiting on asset fanout. This is now visible but not yet substage-attributed.
+- The next diagnostic needs resolver-stage attribution for pending host asset requests, not another broad timing summary.
+
+Next Phase 7 action:
+
+- Add resolver-stage attribution for source closure waits:
+  - source request id
+  - layer kind being resolved
+  - host asset key requested
+  - requester substage, such as scene payload, terrain, static-object source closure, env-cell source closure, or dynamic recipe expansion
+- Only after that trace should we decide whether the fix is source closure staging, static-object source asset scheduling, dynamic recipe decoupling, or host asset preparation.
+- Keep the source-resolution and pending-asset diagnostics until the new orchestration is proven by a bounded harness run.
 
 ## Next Probes
 

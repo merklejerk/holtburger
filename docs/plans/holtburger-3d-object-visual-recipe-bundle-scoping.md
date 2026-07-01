@@ -1,6 +1,6 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation in progress. Phases 0-9 are complete. This document defines the target
+Status: implementation in progress. Phases 0-9A are complete. This document defines the target
 model, north stars, risk surface, and phased cutover plan for replacing static-vs-dynamic object
 visual worker bifurcation with a shared object-like visual recipe graph.
 
@@ -1453,6 +1453,8 @@ Verification:
 
 ### Phase 9A: Static Publication Metadata Contracts
 
+Status: complete.
+
 Goal: make the object visual recipe graph carry the static publication facts needed by the unified
 baker without reaching back into legacy static payloads.
 
@@ -1485,6 +1487,27 @@ Acceptance criteria:
 Deletion criteria:
 
 - None yet. This phase creates the replacement facts before producers/consumers cut over.
+
+Implementation notes after Phase 9A:
+
+- Added `apps/holtburger-3d/src/lib/visual/object-visual-static-publication.ts` with validated
+  static publication metadata contracts.
+- Static metadata is keyed by branded dense `ObjectVisualPartInstanceIndex` and
+  `ObjectVisualStaticResourceGroupId` values. This keeps later baker/install traversal off
+  repeated string joins while still retaining string seeds for diagnostics and final renderer ids.
+- Covered metadata families:
+  - direct static object draw-unit facts for outdoor and env-cell static objects;
+  - generated-scenery/static resource group facts plus render-instance facts;
+  - structured-interior env-cell/member/environment/cell-structure/local-placement facts;
+  - sidecar residency links for portal, visibility, spatial, and source-mapping records.
+- Sidecar payloads are intentionally not embedded in visual recipes. The metadata records ownership
+  and residency links only, so portal/visibility/spatial/source-mapping records can remain
+  independent sidecars.
+- Validation fails loudly for out-of-range part-instance indices, empty direct draw-unit part sets,
+  invalid ids, and render instances that reference missing static resource groups.
+- Verification:
+  `npm --prefix apps/holtburger-3d run test:ts -- object-visual-static-publication` and
+  `npm --prefix apps/holtburger-3d run check`.
 
 ### Phase 9B: Unified Static Publication Baker Output
 

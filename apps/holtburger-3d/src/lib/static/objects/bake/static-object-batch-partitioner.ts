@@ -27,10 +27,10 @@ import type { TextureBindingRequirement, TexturePlacementSnapshot } from "../../
 import { emitStaticBakeWorkerTrace } from "../../bake/worker-trace";
 import { createStaticObjectMaterialCoverageReport } from "./static-object-material-coverage";
 import {
-	createObjectLikeDrawUnitPartitionKey,
-	splitObjectLikePartitionByMaterialTableBudget,
-	type ObjectLikeMaterialPartitionAxis,
-} from "./object-like-draw-unit-partition";
+	createObjectMaterialDrawUnitPartitionKey,
+	splitObjectMaterialPartitionByMaterialTableBudget,
+	type ObjectMaterialPartitionAxis,
+} from "../../../visual/object-material-draw-unit-partition";
 import {
 	createStaticObjectMaterialUseKey,
 	planStaticObjectMaterials,
@@ -146,7 +146,7 @@ interface StaticObjectMaterialBatchAxis {
 	readonly textureRoleSchemaKey: string;
 	readonly textureRoleLayoutKey: string;
 	readonly textureBindingTupleKey: string;
-	readonly objectLike: ObjectLikeMaterialPartitionAxis;
+	readonly objectLike: ObjectMaterialPartitionAxis;
 }
 
 interface StaticObjectOwnershipAxis {
@@ -266,7 +266,7 @@ export function partitionStaticObjectBatches(
 		landblockId: formatHex32(payload.landblock.landblockId),
 	});
 	const partitions = partitionGroups.flatMap((group, batchIndex) =>
-		splitObjectLikePartitionByMaterialTableBudget({
+		splitObjectMaterialPartitionByMaterialTableBudget({
 			primitives: group.candidates,
 			maxMaterialEntriesPerPartition:
 				STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE,
@@ -660,7 +660,7 @@ function createCoarseTablePlan(options: {
 				};
 			}),
 		pass: options.partitionAxes.material.objectLike.pass,
-		renderCoverage: options.partitionAxes.material.objectLike.renderCoverage,
+		renderCoverage: options.partitionAxes.material.renderCoverage,
 		sortPolicy: options.partitionAxes.sort.policy,
 		sourceTriangleIds: options.sourceTriangleIds,
 		tableFamily: options.partitionAxes.material.objectLike.family,
@@ -706,22 +706,34 @@ function createPartitionAxes(options: {
 	readonly textureRoleLayoutKey: string;
 }): StaticObjectBatchPartitionAxes {
 	const sort = createSortAxis(options.plan);
-	const objectLikePartitionKey = createObjectLikeDrawUnitPartitionKey({
-		...options,
+	const objectLikePartitionKey = createObjectMaterialDrawUnitPartitionKey({
 		includeConcreteEntryInKey:
 			sort.policy === "transparent-object-part-sortable",
+		material: {
+			alphaMode: options.plan.alphaPolicy.mode,
+			blendMode: options.plan.blend.mode,
+			family: options.plan.family,
+			materialColorKey: options.materialColorKey,
+			materialEntryKey: options.materialEntryKey,
+			pass: options.plan.pass,
+			renderCoverage: options.plan.renderCoverage,
+			textureRoleLayoutKey: options.textureRoleLayoutKey,
+			textureRoleSchemaKey: options.textureRoleSchemaKey,
+			textureWrapMode: options.textureWrapMode,
+		},
 		texturePlacementSnapshot: options.placementSnapshot,
+		textureRequirements: options.textureRequirements,
 	});
 	const material = {
-		alphaMode: objectLikePartitionKey.material.alphaMode,
-		blendMode: objectLikePartitionKey.material.blendMode,
-		family: objectLikePartitionKey.material.family,
+		alphaMode: options.plan.alphaPolicy.mode,
+		blendMode: options.plan.blend.mode,
+		family: options.plan.family,
 		key: objectLikePartitionKey.key,
 		materialColorKey: objectLikePartitionKey.material.materialColorKey,
 		materialEntryKey: objectLikePartitionKey.material.materialEntryKey,
 		objectLike: objectLikePartitionKey.material,
-		pass: objectLikePartitionKey.material.pass,
-		renderCoverage: objectLikePartitionKey.material.renderCoverage,
+		pass: options.plan.pass,
+		renderCoverage: options.plan.renderCoverage,
 		textureBindingTupleKey:
 			objectLikePartitionKey.material.textureBindingTupleKey,
 		textureRoleLayoutKey: objectLikePartitionKey.material.textureRoleLayoutKey,

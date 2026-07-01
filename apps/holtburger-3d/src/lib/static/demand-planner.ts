@@ -234,7 +234,14 @@ function createLandblockSceneLodSourceRequests(
 			sourceLod: request.sourceLod,
 		}))
 		.sort(compareLandblockSceneLodSourceRequests)
-		.map(({ priority: _priority, ...request }) => request);
+		.map((prioritizedRequest) => {
+			return {
+				context: prioritizedRequest.context,
+				landblockId: prioritizedRequest.landblockId,
+				requestedLayers: prioritizedRequest.requestedLayers,
+				sourceLod: prioritizedRequest.sourceLod,
+			};
+		});
 }
 
 function landblockSceneLodLayerKindForStaticDomain(

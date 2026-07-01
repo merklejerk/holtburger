@@ -4198,6 +4198,7 @@ function createDynamicRendererVisualResource(
 				partIndex: part.partIndex,
 				positions: part.positions,
 				renderState: part.renderState,
+				renderPartId: part.renderPartId,
 				sourceAssetId: part.sourceAssetId,
 				texCoords: part.texCoords,
 				textureUseIds: part.textureUseIds,

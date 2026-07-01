@@ -2,42 +2,34 @@ import { describe, expect, it } from "vitest";
 import type {
 	TextureBindingRequirement,
 	TexturePlacementSnapshot,
-} from "../../../textures/placement";
-import { createObjectLikeDrawUnitPartitionKey } from "./object-like-draw-unit-partition";
-import type { StaticMaterialPlan } from "./static-object-material-planner";
+} from "../textures/placement";
+import { createObjectMaterialDrawUnitPartitionKey } from "./object-material-draw-unit-partition";
 
-describe("object-like draw-unit partition contracts", () => {
+describe("object-material draw-unit partition contracts", () => {
 	it("groups primitives with identical hard render identity", () => {
-		const plan = createPlan();
-		const first = createObjectLikeDrawUnitPartitionKey({
+		const first = createObjectMaterialDrawUnitPartitionKey({
 			includeConcreteEntryInKey: false,
-			materialColorKey: "white",
-			materialEntryKey: "entry-a",
-			plan,
+			material: createMaterialInput({
+				materialEntryKey: "entry-a",
+			}),
 			texturePlacementSnapshot: createPlacementSnapshot([
 				["base-a", "object-base-color", "texture-ref-a"],
 			]),
 			textureRequirements: [
 				createRequirement("base-a", "object-base-color"),
 			],
-			textureRoleLayoutKey: "base-color:layout",
-			textureRoleSchemaKey: "base-color:schema",
-			textureWrapMode: "clamp",
 		});
-		const second = createObjectLikeDrawUnitPartitionKey({
+		const second = createObjectMaterialDrawUnitPartitionKey({
 			includeConcreteEntryInKey: false,
-			materialColorKey: "white",
-			materialEntryKey: "entry-b",
-			plan,
+			material: createMaterialInput({
+				materialEntryKey: "entry-b",
+			}),
 			texturePlacementSnapshot: createPlacementSnapshot([
 				["base-b", "object-base-color", "texture-ref-a"],
 			]),
 			textureRequirements: [
 				createRequirement("base-b", "object-base-color"),
 			],
-			textureRoleLayoutKey: "base-color:layout",
-			textureRoleSchemaKey: "base-color:schema",
-			textureWrapMode: "clamp",
 		});
 
 		expect(second.key).toBe(first.key);
@@ -52,24 +44,21 @@ describe("object-like draw-unit partition contracts", () => {
 	it("splits primitives with different shader-visible texture bindings", () => {
 		const shared = {
 			includeConcreteEntryInKey: false,
-			materialColorKey: "white",
-			materialEntryKey: "entry-a",
-			plan: createPlan(),
+			material: createMaterialInput({
+				materialEntryKey: "entry-a",
+			}),
 			textureRequirements: [
 				createRequirement("base-a", "object-base-color"),
 			],
-			textureRoleLayoutKey: "base-color:layout",
-			textureRoleSchemaKey: "base-color:schema",
-			textureWrapMode: "clamp" as const,
 		};
 
-		const first = createObjectLikeDrawUnitPartitionKey({
+		const first = createObjectMaterialDrawUnitPartitionKey({
 			...shared,
 			texturePlacementSnapshot: createPlacementSnapshot([
 				["base-a", "object-base-color", "texture-ref-a"],
 			]),
 		});
-		const second = createObjectLikeDrawUnitPartitionKey({
+		const second = createObjectMaterialDrawUnitPartitionKey({
 			...shared,
 			texturePlacementSnapshot: createPlacementSnapshot([
 				["base-a", "object-base-color", "texture-ref-b"],
@@ -90,30 +79,63 @@ describe("object-like draw-unit partition contracts", () => {
 			createRequirement("base-a", "object-base-color"),
 		];
 
-		const rgba = createObjectLikeDrawUnitPartitionKey({
+		const rgba = createObjectMaterialDrawUnitPartitionKey({
 			includeConcreteEntryInKey: false,
-			materialColorKey: "white",
-			materialEntryKey: "entry-a",
-			plan: createPlan({ family: "texture-rgba" }),
+			material: createMaterialInput({ family: "texture-rgba" }),
 			texturePlacementSnapshot,
 			textureRequirements,
-			textureRoleLayoutKey: "base-color:layout",
-			textureRoleSchemaKey: "base-color:schema",
-			textureWrapMode: "clamp",
 		});
-		const indexed = createObjectLikeDrawUnitPartitionKey({
+		const indexed = createObjectMaterialDrawUnitPartitionKey({
 			includeConcreteEntryInKey: false,
-			materialColorKey: "white",
-			materialEntryKey: "entry-a",
-			plan: createPlan({ family: "indexed-paletted" }),
+			material: createMaterialInput({ family: "indexed-paletted" }),
 			texturePlacementSnapshot,
 			textureRequirements,
-			textureRoleLayoutKey: "base-color:layout",
-			textureRoleSchemaKey: "base-color:schema",
-			textureWrapMode: "clamp",
 		});
 
 		expect(indexed.key).not.toBe(rgba.key);
+	});
+
+	it("accepts dynamic-shaped texture requirements without static material plans", () => {
+		const key = createObjectMaterialDrawUnitPartitionKey({
+			includeConcreteEntryInKey: false,
+			material: createMaterialInput({
+				materialEntryKey: "dynamic-entry-a",
+				renderCoverage: null,
+			}),
+			texturePlacementSnapshot: createPlacementSnapshot([
+				["dynamic-base-a", "object-base-color", "texture-ref-a"],
+			]),
+			textureRequirements: [
+				{
+					placementItemId: "dynamic-base-a",
+					purpose: "object-base-color",
+				},
+			],
+		});
+
+		expect(key.textureBindingTuple.bindings).toEqual([
+			{
+				purpose: "object-base-color",
+				textureRefId: "texture-ref-a",
+			},
+		]);
+	});
+
+	it("rejects placements with incompatible object-material purposes", () => {
+		expect(() =>
+			createObjectMaterialDrawUnitPartitionKey({
+				includeConcreteEntryInKey: false,
+				material: createMaterialInput(),
+				texturePlacementSnapshot: createPlacementSnapshot([
+					["base-a", "object-detail", "texture-ref-a"],
+				]),
+				textureRequirements: [
+					createRequirement("base-a", "object-base-color"),
+				],
+			}),
+		).toThrow(
+			"Object-like material texture placement base-a has incompatible purpose object-detail; expected object-base-color.",
+		);
 	});
 });
 
@@ -167,35 +189,22 @@ function createPlacementSnapshot(
 	};
 }
 
-function createPlan(
-	options: Partial<Pick<StaticMaterialPlan, "family">> = {},
-): StaticMaterialPlan {
+function createMaterialInput(
+	options: Partial<
+		Parameters<typeof createObjectMaterialDrawUnitPartitionKey>[0]["material"]
+	> = {},
+): Parameters<typeof createObjectMaterialDrawUnitPartitionKey>[0]["material"] {
 	return {
-		alphaPolicy: {
-			alphaTest: 0,
-			indexedClipThreshold: -1,
-			mode: "opaque",
-		},
-		blend: {
-			dstFactor: null,
-			mode: "opaque",
-			srcFactor: null,
-		},
-		color: [1, 1, 1, 1],
-		detailRole: null,
-		diagnostics: [],
-		emissiveColor: [0, 0, 0],
-		family: options.family ?? "texture-rgba",
-		indexedTextureFormat: null,
-		material: {
-			kind: "material-source",
-			materialId: 0x08000010,
-		},
-		materialBucketKey: "bucket",
-		materialUseKey: "material-use",
-		paletteFirstIndex: 0,
+		alphaMode: "opaque",
+		blendMode: "opaque",
+		family: "texture-rgba",
+		materialColorKey: "white",
+		materialEntryKey: "entry-a",
 		pass: "opaque",
 		renderCoverage: "classified-render-candidate",
-		textureRoles: [],
+		textureRoleLayoutKey: "base-color:layout",
+		textureRoleSchemaKey: "base-color:schema",
+		textureWrapMode: "clamp",
+		...options,
 	};
 }

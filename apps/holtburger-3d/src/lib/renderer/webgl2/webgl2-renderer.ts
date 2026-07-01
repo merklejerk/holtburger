@@ -4716,12 +4716,12 @@ function createDynamicVisualGeometryResource(
 ): DynamicVisualGeometryResource {
 	const uploadedGeometry = createUploadedVisualGeometryResource({
 		gl,
-		label: `dynamic visual resource ${resource.resourceId} part ${part.partIndex}`,
+		label: `dynamic visual resource ${resource.resourceId} render part ${part.renderPartId}`,
 		payload: part,
 	});
 
 	return {
-		drawUnitId: `${resource.resourceId}:part:${part.partIndex}`,
+		drawUnitId: `${resource.resourceId}:render-part:${part.renderPartId}`,
 		dynamicResourceId: resource.resourceId,
 		indexBuffer: uploadedGeometry.indexBuffer,
 		indexCount: uploadedGeometry.indexCount,

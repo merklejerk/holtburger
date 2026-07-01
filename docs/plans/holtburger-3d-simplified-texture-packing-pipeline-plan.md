@@ -1,8 +1,8 @@
 # Holtburger 3D Simplified Texture Packing Pipeline Implementation Plan
 
 Status: implementation complete through simplified texture placement, final drawable isomorphism,
-and static baker partition-key draw-unit construction. Dynamic visual partition cutover and
-generated-scenery instancing assessment follow-up phases have been added.
+static baker partition-key draw-unit construction, dynamic visual partition-key render-part
+construction, and generated-scenery instancing assessment.
 
 ## Purpose
 
@@ -137,10 +137,10 @@ Current code paths that matter:
 - `apps/holtburger-3d/src/lib/static/bake/object-material-page-legality.ts`
   - deleted during Phase 21 after object-like geometry stopped using generic page-legality slice
     callbacks.
-- `apps/holtburger-3d/src/lib/static/objects/bake/object-like-draw-unit-partition.ts`
-  - owns the shared object-like renderable primitive partition vocabulary for static objects and
-    structured interiors: shader/material identity, shader-visible texture binding tuple,
-    ownership-adjacent partition key facts, and material-table secondary budget splitting.
+- `apps/holtburger-3d/src/lib/visual/object-material-draw-unit-partition.ts`
+  - owns the shared object-material partition vocabulary for static objects, structured interiors,
+    and dynamic visual render parts: shader/material identity, shader-visible texture binding tuple,
+    and material-table secondary budget splitting.
 - `apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-renderer.ts`
   - stores texture pages by `textureRefId` and texture bindings by owner key.
 - `apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-object-material-payloads.ts`
@@ -2221,11 +2221,11 @@ Acceptance criteria:
 - [x] Phase 19: port structured-interior baking to the same partition-key model.
 - [x] Phase 20: reassess terrain under the partition-key model.
 - [x] Phase 21: delete legacy slicer vestiges and update diagnostics.
-- [ ] Phase 22: resteer dynamic visuals into the object-material partition cutover.
-- [ ] Phase 23: promote object-material partition contracts for static and dynamic use.
-- [ ] Phase 24: cut dynamic visual render parts over to partition-key grouping.
-- [ ] Phase 25: dynamic visual cleanup, diagnostics, and test fixture tightening.
-- [ ] Phase 26: assess generated-scenery instancing pipeline state.
+- [x] Phase 22: resteer dynamic visuals into the object-material partition cutover.
+- [x] Phase 23: promote object-material partition contracts for static and dynamic use.
+- [x] Phase 24: cut dynamic visual render parts over to partition-key grouping.
+- [x] Phase 25: dynamic visual cleanup, diagnostics, and test fixture tightening.
+- [x] Phase 26: assess generated-scenery instancing pipeline state.
 
 ## Decisions and Course Corrections
 
@@ -2596,6 +2596,42 @@ Acceptance criteria:
   completeness and transparent cross-partition grouping through `partition.sliceId`, so Phase 26 must
   decide whether that is harmless bookkeeping or a hidden identity dependency before any partition-id
   cleanup.
+- Phase 22 confirmed the dynamic visual cutover scope. Dynamic render-part construction was the
+  remaining object-material draw-unit authoring path: it grouped triangles by
+  `createDynamicMaterialBatchKey(...)`, omitted final `TexturePlacement.textureRefId`, and did not
+  split by the renderer's eight-entry object material table budget. Runtime and WebGL renderer
+  inspection also confirmed that split dynamic render parts needed an identity separate from source
+  `partIndex`.
+- Phase 23 moved the shared partition helper to
+  `apps/holtburger-3d/src/lib/visual/object-material-draw-unit-partition.ts` and renamed it around
+  object-material render identity rather than static object ownership. The helper now consumes a
+  normalized `ObjectMaterialPartitionInput` plus placement-item/purpose requirements, so dynamic
+  visuals no longer need to fabricate `StaticMaterialPlan` records to participate.
+- Phase 23 kept one static-specific concession explicit: `unsupported` remains a valid family in the
+  shared partition input because static object partitioning still represents unsupported-but-classified
+  source geometry for coverage and diagnostics. Dynamic visuals still narrow to renderable families
+  before render-part emission.
+- Phase 24 cut dynamic visual render parts over to object-material partition keys. Dynamic baking now
+  constructs renderable triangle primitives, derives partition keys from final placement
+  `textureRefId` values, applies `MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW` as a secondary budget split,
+  and emits render parts from those partitions.
+- Phase 24 added `renderPartId` to baked dynamic render parts and renderer visual parts. `partIndex`
+  remains the animation/source transform lookup key, while renderer labels and draw-unit ids use
+  `renderPartId` so one source part can produce multiple renderer-legal render parts without
+  identity collisions.
+- Phase 25 deleted the old dynamic batch-key grouping path, renamed dynamic render-part construction
+  around partitions, tightened dynamic placement fixtures to include `textureRefId`, and added tests
+  for final texture-ref splits and material-table budget splits. The shared object-material helper
+  now rejects missing placement records, incompatible object-material purposes, and missing
+  `textureRefId` values with explicit errors.
+- Phase 26 assessed generated-scenery instancing and chose the "no rewrite now" outcome. The path is
+  complex and candidate-heavy, but it runs after static object partitioning and authors reusable
+  `StaticObjectVisualResource` instances, not primary draw-unit legality. Its grouping axes are
+  source geometry, one material entry, material family/pass/render state, texture use ids, and
+  transparent cross-partition policy. `partition.sliceId` is currently cutover coverage bookkeeping,
+  not evidence that instancing should be folded into object-material partition helpers.
+- Verification after Phases 22-26: `npm run check`, full `npm run test:ts`, `npm run lint:dead`,
+  and `npm run lint:ts` pass from `apps/holtburger-3d`.
 
 ## Tracked Debt
 
@@ -2695,25 +2731,16 @@ Acceptance criteria:
 - The gradual baker redesign was completed across domain boundaries. Static objects and structured
   interiors cut over atomically; terrain was audited and kept terrain-owned because it already follows
   render-identity plus shader-budget construction.
-- Dynamic visual render-part authoring still has a migration-era grouping path:
-  `candidateSlices` grouped by `createDynamicMaterialBatchKey(...)`. It should move to the shared
-  object-material partition-key model so dynamic render parts split by final texture binding tuple
-  and material-table budget before renderer upload.
-- `createDynamicMaterialBatchKey(...)` does not include final `TexturePlacement.textureRefId` and
-  dynamic visual baking does not currently split by `MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW`. The
-  renderer object-material payload path only uploads eight material entries, so leaving this in place
-  risks silently clamped or misdirected material slots.
-- Dynamic render parts currently use `partIndex` as source/animation transform identity. A dynamic
-  partition cutover may produce multiple render parts for one source part, so it needs a separate
-  render-part partition identity for renderer labels/diagnostics while preserving `partIndex` for
-  animation transforms.
-- Dynamic visual tests currently have placement snapshot helpers that may omit `textureRefId`, even
-  though object-material partition identity depends on shader-visible `TexturePlacement.textureRefId`.
-  Phase 25 should tighten these fixtures rather than letting dynamic tests preserve an incomplete
-  placement shape.
+- Dynamic visual render-part authoring now uses the shared object-material partition-key model. Keep
+  future dynamic visual material work on the same primitive -> partition key -> secondary budget
+  split path; do not reintroduce bespoke material batch keys.
+- Dynamic render parts now distinguish `renderPartId` from source `partIndex`. Future diagnostics,
+  selection, and renderer upload changes should preserve that split: `partIndex` is transform
+  identity, `renderPartId` is renderer partition identity.
 - Generated-scenery instancing remains complex and candidate-heavy inside
-  `static-object-batch-baker.ts`, but it is not proven to be the same draw-unit legality smell. Phase
-  26 should assess whether it is healthy, cleanup-only, or deserving of its own rewrite plan.
+  `static-object-batch-baker.ts`, but Phase 26 found it is not the same draw-unit legality smell.
+  Treat future work there as visual-resource reuse cleanup, not as part of the object-material
+  partition helper.
 - Generated-scenery instancing currently keys cutover coverage by `partition.sliceId` and uses
   `null` as a cross-partition grouping marker for transparent/additive visual resources. If future
   cleanup renames or replaces partition ids, preserve the coverage semantics deliberately rather than

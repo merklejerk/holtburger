@@ -50,9 +50,9 @@ import {
 } from "./env-cell-system-geometry-attachments";
 import { bakeStaticObjectBatch } from "../../objects/bake/static-object-batch-baker";
 import {
-	createObjectLikeDrawUnitPartitionKey,
-	splitObjectLikePartitionByMaterialTableBudget,
-} from "../../objects/bake/object-like-draw-unit-partition";
+	createObjectMaterialDrawUnitPartitionKey,
+	splitObjectMaterialPartitionByMaterialTableBudget,
+} from "../../../visual/object-material-draw-unit-partition";
 import {
 	createStructuredInteriorTextureBindingRequirement,
 	createStructuredInteriorTextureUseId,
@@ -314,7 +314,7 @@ function createStructuredInteriorDrawUnits(
 		const partitions =
 			groupStructuredInteriorPrimitivesByPartitionKey(candidates).flatMap(
 				(group, batchIndex) =>
-					splitObjectLikePartitionByMaterialTableBudget({
+					splitObjectMaterialPartitionByMaterialTableBudget({
 						maxMaterialEntriesPerPartition:
 							MAX_STRUCTURED_INTERIOR_MATERIAL_ENTRIES_PER_DRAW,
 						primitives: group.candidates,
@@ -855,21 +855,29 @@ function createStructuredInteriorBatchKey(options: {
 	readonly plan: StaticMaterialPlan;
 	readonly textureRequirements: readonly TextureBindingRequirement[];
 }): string {
-	return createObjectLikeDrawUnitPartitionKey({
+	return createObjectMaterialDrawUnitPartitionKey({
 		diagnosticSubject: options.diagnosticSubject,
 		includeConcreteEntryInKey: false,
-		materialColorKey: createStaticMaterialColorKey(options.plan),
-		materialEntryKey: options.materialEntryKey,
-		plan: options.plan,
+		material: {
+			alphaMode: options.plan.alphaPolicy.mode,
+			blendMode: options.plan.blend.mode,
+			family: resolveRenderableStructuredInteriorFamily(options.plan),
+			materialColorKey: createStaticMaterialColorKey(options.plan),
+			materialEntryKey: options.materialEntryKey,
+			pass: options.plan.pass,
+			renderCoverage: options.plan.renderCoverage,
+			textureRoleLayoutKey: createStaticMaterialTextureRoleLayoutKey(
+				options.plan.textureRoles,
+			),
+			textureRoleSchemaKey: createStaticMaterialTextureRoleSchemaKey(
+				options.plan.textureRoles,
+			),
+			textureWrapMode: resolveStructuredInteriorPlanTextureWrapMode(
+				options.plan,
+			),
+		},
 		texturePlacementSnapshot: options.placementSnapshot,
 		textureRequirements: options.textureRequirements,
-		textureRoleLayoutKey: createStaticMaterialTextureRoleLayoutKey(
-			options.plan.textureRoles,
-		),
-		textureRoleSchemaKey: createStaticMaterialTextureRoleSchemaKey(
-			options.plan.textureRoles,
-		),
-		textureWrapMode: resolveStructuredInteriorPlanTextureWrapMode(options.plan),
 	}).key;
 }
 

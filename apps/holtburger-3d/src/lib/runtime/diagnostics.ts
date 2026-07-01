@@ -2,7 +2,6 @@ import type {
 	PortalFrameWorkPlan,
 	RenderPassPlan,
 	RendererSnapshot,
-	TerrainTextureRolePageKind,
 } from "../renderer/types";
 import type { AssetServiceSnapshot } from "../assets/contracts";
 import type {
@@ -274,7 +273,6 @@ export interface TextureAtlasDiagnosticsReport {
 	readonly kind: "texture-atlas";
 	readonly batches: readonly TextureAtlasBatchDiagnostics[];
 	readonly summary: TextureAtlasDiagnosticsSummary;
-	readonly warnings?: readonly TextureAtlasWarningDiagnostics[];
 }
 
 interface TextureAtlasBatchDiagnostics {
@@ -313,18 +311,6 @@ interface TextureAtlasDiagnosticsSummary {
 	readonly approximateBytes: number;
 }
 
-type TextureAtlasWarningDiagnostics = TerrainRolePageOverflowSummaryDiagnostics;
-
-export type TextureAtlasWarningReportDiagnostics =
-	TextureAtlasWarningDiagnostics;
-
-interface TerrainRolePageOverflowSummaryDiagnostics {
-	readonly kind: "terrain-role-page-overflow";
-	readonly count: number;
-	readonly latestDrawUnitId: string | null;
-	readonly latestRole: TerrainTextureRolePageKind | null;
-}
-
 export interface TerrainTextureDiagnosticsReport {
 	readonly kind: "terrain-textures";
 	readonly summary: TerrainTextureDiagnosticsSummary;
@@ -341,13 +327,6 @@ export interface TerrainTextureFallbackDiagnostics {
 	readonly materialFamily: TerrainGeometryStaticDrawUnit["materialFamily"];
 	readonly materialBucketKey: string;
 	readonly reasons: readonly TerrainMaterialFallbackReason[];
-}
-
-export interface TerrainRolePageOverflowDiagnostics {
-	readonly drawUnitId: string;
-	readonly kind: TerrainTextureRolePageKind;
-	readonly maxSlots: number;
-	readonly textureRefId: string;
 }
 
 type RuntimeWarningEvent =

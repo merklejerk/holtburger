@@ -319,7 +319,7 @@ function createMaterialEntry(
 
 function createBinding(options: {
 	readonly height: number;
-	readonly kind: StaticTextureBinding["rolePage"]["kind"];
+	readonly kind: StaticTextureBinding["pageSlot"]["kind"];
 	readonly rect: readonly [number, number, number, number];
 	readonly slot: number;
 	readonly textureRefId: string;
@@ -327,15 +327,15 @@ function createBinding(options: {
 	readonly width: number;
 }): StaticTextureBinding {
 	return {
+		bindingKey: options.textureUseId,
 		owner: { drawUnitId: "test-draw-unit", kind: "draw-unit" },
 		rect: options.rect,
-		rolePage: {
+		pageSlot: {
 			kind: options.kind,
 			slot: options.slot,
 		},
 		textureHeight: options.height,
 		textureRefId: options.textureRefId,
-		textureUseId: options.textureUseId,
 		textureWidth: options.width,
 	};
 }

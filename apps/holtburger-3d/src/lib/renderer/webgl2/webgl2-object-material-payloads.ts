@@ -15,7 +15,7 @@ export interface ObjectMaterialPreparedDrawPayload {
 	readonly textures: ObjectMaterialTextureBindingsByRole;
 }
 
-export interface ObjectMaterialTextureBindingsByRole {
+interface ObjectMaterialTextureBindingsByRole {
 	baseColor: ObjectMaterialTextureBinding | null;
 	detail: ObjectMaterialTextureBinding | null;
 	index: ObjectMaterialTextureBinding | null;
@@ -223,7 +223,7 @@ function fillObjectMaterialTextureBindings(
 
 function collectObjectMaterialTextureBinding(
 	textureUseId: string | null,
-	expectedKind: TextureBinding["rolePage"]["kind"],
+	expectedKind: TextureBinding["pageSlot"]["kind"],
 	bindings: ReadonlyMap<string, TextureBinding>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 	setBinding: (binding: ObjectMaterialTextureBinding) => void,
@@ -232,11 +232,11 @@ function collectObjectMaterialTextureBinding(
 		return;
 	}
 	const binding = bindings.get(textureUseId);
-	if (!binding || binding.rolePage.kind !== expectedKind) {
+	if (!binding || binding.pageSlot.kind !== expectedKind) {
 		return;
 	}
 	const texture = textures.get(binding.textureRefId);
-	if (!texture || binding.rolePage.slot !== 0) {
+	if (!texture || binding.pageSlot.slot !== 0) {
 		return;
 	}
 	setBinding({
@@ -310,7 +310,7 @@ function fillObjectMaterialUniforms(
 
 function writeObjectMaterialTextureEntry(
 	textureUseId: string | null,
-	expectedKind: TextureBinding["rolePage"]["kind"],
+	expectedKind: TextureBinding["pageSlot"]["kind"],
 	bindings: ReadonlyMap<string, TextureBinding>,
 	rects: Float32Array,
 	slot: number,
@@ -322,7 +322,7 @@ function writeObjectMaterialTextureEntry(
 	if (!binding) {
 		return null;
 	}
-	if (binding.rolePage.kind !== expectedKind || binding.rolePage.slot !== 0) {
+	if (binding.pageSlot.kind !== expectedKind || binding.pageSlot.slot !== 0) {
 		return null;
 	}
 	rects.set(binding.rect, slot * 4);

@@ -6,9 +6,9 @@ import type {
 	TerrainGeometryStaticDrawUnit,
 } from "../../contracts";
 
-export const MAX_TERRAIN_LAYER_ENTRIES_PER_DRAW = 8;
-export const MAX_TERRAIN_OVERLAYS_PER_LAYER = 3;
-export const MAX_TERRAIN_ROADS_PER_LAYER = 2;
+const MAX_TERRAIN_LAYER_ENTRIES_PER_DRAW = 8;
+const MAX_TERRAIN_OVERLAYS_PER_LAYER = 3;
+const MAX_TERRAIN_ROADS_PER_LAYER = 2;
 export const MAX_TERRAIN_COLOR_PAGES_PER_DRAW = 4;
 export const MAX_TERRAIN_MASK_PAGES_PER_DRAW = 4;
 export const MAX_TERRAIN_DETAIL_PAGES_PER_DRAW = 1;

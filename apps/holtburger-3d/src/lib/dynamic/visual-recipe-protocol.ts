@@ -41,11 +41,6 @@ export type DynamicVisualRecipeWorkerThreadMessage =
 			readonly requestId: string;
 	  };
 
-export type DynamicVisualRecipeWorkerRequest = Extract<
-	DynamicVisualRecipeWorkerMainMessage,
-	{ readonly kind: "resolve-dynamic-visual-recipe" }
->;
-
 export type DynamicVisualRecipeWorkerResponse = Extract<
 	DynamicVisualRecipeWorkerThreadMessage,
 	{

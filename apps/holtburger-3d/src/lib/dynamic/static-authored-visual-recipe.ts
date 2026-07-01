@@ -76,7 +76,7 @@ export function createStaticAuthoredDynamicRecipeResolutionPayload(
 	};
 }
 
-export function createStaticAuthoredDynamicEntityId(
+function createStaticAuthoredDynamicEntityId(
 	record: DynamicPlacementRecord,
 ): DynamicEntityId {
 	return [
@@ -88,7 +88,7 @@ export function createStaticAuthoredDynamicEntityId(
 	].join(":");
 }
 
-export function createStaticAuthoredDynamicPlacementId(
+function createStaticAuthoredDynamicPlacementId(
 	record: DynamicPlacementRecord,
 ): string {
 	if (record.kind === "env-cell-static-object-dynamic-placement") {

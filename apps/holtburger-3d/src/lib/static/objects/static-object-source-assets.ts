@@ -18,7 +18,7 @@ export function createStaticObjectSourceGeometryIdentity(options: {
 	};
 }
 
-export function createStaticObjectCanonicalGeometryIdentity(options: {
+function createStaticObjectCanonicalGeometryIdentity(options: {
 	readonly gfxObj: StaticObjectSourceIdentity;
 	readonly partIndex: number;
 }): StaticObjectCanonicalGeometryIdentity {

@@ -2231,6 +2231,10 @@ Course correction during Phase 9M:
   and additive generated scenery regain `direct-sorted-transparent` sort metadata. With those fixes,
   `StaticBakeBatchResult.staticObjectRenderInstances/staticObjectVisualResources` can mirror
   `objectVisualInstallSet` for static object batches.
+- Static object batch item results no longer export legacy
+  `staticObjectRenderInstances/staticObjectVisualResources`; the batch result mirrors those fields
+  from `objectVisualInstallSet`. The legacy generated-scenery instancing calculation remains only as
+  diagnostic/coverage input until Phase 9M removes the old draw-unit/resource producer branch.
 
 ### Phase 10: Dynamic Resolver Cutover
 

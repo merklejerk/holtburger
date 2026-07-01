@@ -1,6 +1,6 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation in progress. Phases 0-9F are complete. This document defines the target
+Status: implementation in progress. Phases 0-9G are complete. This document defines the target
 model, north stars, risk surface, and phased cutover plan for replacing static-vs-dynamic object
 visual worker bifurcation with a shared object-like visual recipe graph.
 
@@ -1435,7 +1435,7 @@ Course correction:
 
 - Insert Phase 9A for static publication metadata contracts before resolver cutover.
 - Insert Phase 9B for unified baker static publication output before resolver cutover.
-- Move the actual static resolver cutover to Phase 9G, after the shared recipe path can produce
+- Move the actual static resolver cutover to Phase 9J, after the shared recipe path can produce
   static-shaped install publications without legacy lookup.
 - Keep Phase 10 as the dynamic cutover, but let it reuse the richer publication machinery introduced
   for static instead of inventing a dynamic-only install path.
@@ -1565,7 +1565,7 @@ Implementation notes after Phase 9B:
 - Spicy debt: current generic baked render parts contain transformed geometry. That is correct for
   direct draw units, but reusable static visual resources ultimately need source-local geometry plus
   render-instance transforms. Resolver cutover must ensure instanced resource groups are baked in
-  source-local space before Phase 9G treats generated-scenery/resource publication as production
+  source-local space before Phase 9J treats generated-scenery/resource publication as production
   parity. Do not paper over this with runtime reconstruction from legacy payloads.
 - Verification:
   `npm --prefix apps/holtburger-3d run test:ts -- object-visual-baker object-visual-static-publication object-visual-static-publication-baker`
@@ -1599,7 +1599,7 @@ Acceptance criteria:
 
 Deletion criteria:
 
-- Delete producer-side legacy-to-install-set publication once Phase 9G emits install sets from
+- Delete producer-side legacy-to-install-set publication once Phase 9J emits install sets from
   recipe-first static producers directly.
 
 Implementation notes after Phase 9C:
@@ -1657,7 +1657,7 @@ Implementation notes after Phase 9D:
   `EnvCellSystemStaticScopePayload` as their final ready products. The producer-authored install set
   now keeps runtime install shells thin, but static producers are still translating legacy outputs.
 - Course correction: split the static resolver cutover into Phase 9E material recipe expansion,
-  Phase 9F source-local static publication baking, and Phase 9G actual resolver cutover. This keeps
+  Phase 9F source-local static publication baking, and Phase 9J actual resolver cutover. This keeps
   the cutover hard without pretending the current contract is ready.
 - Verification:
   plan-only steering based on current code inspection of
@@ -1727,7 +1727,7 @@ Implementation notes after Phase 9E:
 - Material diagnostics and coverage summaries remain outside the recipe model. Unsupported material
   recipes still warn and skip.
 - Debt retained intentionally: `ObjectVisualMaterialPlan` still exists as the current static material
-  classification product. Phase 9G must make static resolvers emit the richer material recipes
+  classification product. Phase 9J must make static resolvers emit the richer material recipes
   directly, then delete or narrow static-only material adapter paths.
 - Verification:
   `npm --prefix apps/holtburger-3d run test:ts -- object-visual-baker object-visual-recipe-bundle`.
@@ -1769,7 +1769,7 @@ Acceptance criteria:
 Deletion criteria:
 
 - Delete any helper that reconstructs generated-scenery source-local resources from already-baked
-  draw units once Phase 9G uses this path.
+  draw units once Phase 9J uses this path.
 
 Implementation notes after Phase 9F:
 
@@ -1785,24 +1785,140 @@ Implementation notes after Phase 9F:
 - This preserves the recipe transform rule: geometry buffers are source-local and
   `PartInstance.transform` remains the source-local to render-local transform. Transform application
   is now a publication decision, not an unavoidable loss of source-local geometry.
-- Debt retained intentionally: Phase 9G still has to make static resolvers produce recipe-first
+- Debt retained intentionally: Phase 9J still has to make static resolvers produce recipe-first
   bundles and metadata directly. Until then, current static producers still feed the bridge from
   legacy outputs.
 - Verification:
   `npm --prefix apps/holtburger-3d run test:ts -- object-visual-baker object-visual-static-publication-baker`
   and `npm --prefix apps/holtburger-3d run check`.
 
-### Phase 9G: Static Object-Like Resolver Cutover
+### Phase 9G: Resteer Static Visual Scope Shape
 
-Goal: make static object-like layers produce object visual bundle resolutions and feed the unified
+Status: complete.
+
+Goal: verify that the static resolver cutover target preserves non-visual sidecars instead of
+replacing broad static scope payloads with a naked visual resolution.
+
+Deliverables:
+
+- Audit outdoor static object and env-cell resolver outputs, static bake result contracts, and the
+  transitional install-set publication bridge.
+- Decide whether `ObjectVisualBundleResolution` can be the final static resolver output by itself.
+- Update the plan with a sidecar-aware resolver output shape if visual-only resolution is too narrow.
+
+Acceptance criteria:
+
+- The plan states whether static object-like resolver output should be a naked
+  `ObjectVisualBundleResolution` or a sidecar wrapper containing one.
+- Any remaining static sidecars needed by coordinator/runtime publication are named explicitly.
+- The actual static resolver cutover is rescheduled behind concrete contract/producer work if needed.
+
+Implementation notes after Phase 9G:
+
+- A naked `ObjectVisualBundleResolution` is too narrow for static resolver output. Outdoor static
+  objects also carry authored dynamic placements, building transition apertures, source spatial/BVH
+  facts, material/source facts needed by current bake attachments, source mapping inputs, and missing
+  dependency records. Env-cell scopes also carry portal links, portal connectivity, aperture
+  resources, accepted env-cell ids, visibility diagnostics, residency spatial records, cell BSP data,
+  static object placements, and structured-interior geometry facts.
+- The north star still holds: drawable object-like work should normalize to visual recipes and part
+  instances. The resolver's final static scope product must be a sidecar-aware wrapper around visual
+  resolution plus non-visual sidecars, not the visual bundle alone.
+- Current static producers still translate `OutdoorStaticObjectsScopePayload` and
+  `EnvCellSystemStaticScopePayload` through legacy static object and env-cell bakers, then build
+  `ObjectVisualInstallSet` with `createStaticBakeObjectVisualInstallSet`. That bridge should remain
+  producer-side transitional debt until the recipe-first producer path exists.
+- Course correction: insert Phase 9H for the sidecar-aware static visual scope contract and Phase 9I
+  for recipe expansion producers. Move the actual static object-like resolver/producer cutover to
+  Phase 9J.
+- Verification:
+  plan-only steering based on inspection of
+  `apps/holtburger-3d/src/lib/static/contracts.ts`,
+  `apps/holtburger-3d/src/lib/static/objects/outdoor-static-objects-resolver.ts`,
+  `apps/holtburger-3d/src/lib/static/env-cells/env-cell-system-resolver.ts`,
+  `apps/holtburger-3d/src/lib/static/objects/bake/static-object-batch-baker.ts`,
+  `apps/holtburger-3d/src/lib/static/env-cells/bake/env-cell-system-baker.ts`, and
+  `apps/holtburger-3d/src/lib/static/bake/object-visual-install-set-publication.ts`.
+
+### Phase 9H: Static Visual Scope Sidecar Contract
+
+Goal: define the static resolver product shape that contains object visual bundle resolution plus
+the sidecars required by static coordinator, bake attachments, and runtime publication.
+
+Deliverables:
+
+- Add a sidecar-aware static object visual scope contract for outdoor object-like domains and
+  env-cell systems.
+- Include `ObjectVisualBundleResolution`, geometry buffers, static publication metadata, and
+  residency information for drawable object-like work.
+- Preserve portal, visibility, spatial, source mapping, env-cell residency, authored dynamic
+  placement, and building-transition sidecars outside drawable recipes.
+- Keep terrain outside this object visual scope contract.
+- Add contract tests proving outdoor explicit objects, generated scenery, env-cell static objects,
+  and structured interiors can keep current sidecars while exposing visual resolution through the
+  shared recipe graph.
+
+Acceptance criteria:
+
+- Static resolver output has a clear wrapper shape for visual resolution plus sidecars.
+- Non-visual sidecars are not embedded in `PartRecipe`, `PartInstance`, material recipes, geometry
+  recipes, or texture recipes.
+- Missing drawable dependencies can produce `missing-dependencies` visual resolution while sidecars
+  remain available only when their own dependencies are valid.
+
+Deletion criteria:
+
+- None yet. This phase creates the contract that the later producer cutover will target.
+
+### Phase 9I: Static Recipe Expansion Producers
+
+Goal: add producer functions that expand current static source facts into object visual recipes,
+geometry buffers, static publication metadata, and texture bindings without invoking legacy static
+draw-unit bakers.
+
+Deliverables:
+
+- Expand direct `gfx_obj` and setup-model source facts into source-local geometry buffer sidecars,
+  geometry recipes, material recipes, part recipes, and part instances.
+- Expand structured-interior cell geometry into embedded-geometry buffers and part instances with
+  env-cell residency.
+- Build static publication metadata for direct static object draw units, reusable generated-scenery
+  resource groups/render instances, env-cell static object publications, and structured interiors.
+- Map material plans into the recipe-grade material contract from Phase 9E.
+- Keep dense numeric/branded ids in producer traversal and reserve semantic string keys for registry
+  construction/debug tables.
+
+Acceptance criteria:
+
+- Producer tests can build ready object visual bundle scopes for outdoor explicit objects, generated
+  scenery, env-cell static objects, and structured interiors from representative current source facts.
+- The produced bundles bake through `bakeObjectVisuals` and
+  `createObjectVisualStaticInstallSet` without consulting legacy static draw-unit/resource arrays.
+- Unsupported materials map to the `unsupported` family and skip with console warnings.
+- Missing drawable dependencies produce `missing-dependencies` visual resolution without partial
+  renderer resources.
+
+Deletion criteria:
+
+- Mark legacy static batch partition/draw-unit helpers used only by the old producer path for removal
+  once Phase 9J cuts production over.
+
+### Phase 9J: Static Object-Like Resolver Cutover
+
+Goal: make static object-like layers produce sidecar-aware object visual scopes and feed the unified
 baker/install publication path.
 
 Deliverables:
 
 - Cut over outdoor explicit static objects, outdoor generated scenery, env-cell static objects, and
-  structured interiors to emit `ObjectVisualBundleResolution`.
-- Preserve non-visual sidecars for portal, visibility, spatial, and source mapping records.
+  structured interiors to emit the sidecar-aware static object visual scope from Phase 9H.
+- Preserve non-visual sidecars for portal, visibility, spatial, source mapping, authored dynamic
+  placement, env-cell residency, and building-transition records.
 - Ensure `PartInstance.residency` carries outdoor landblock or env-cell residency.
+- Route recipe-expanded static visual scopes through `bakeObjectVisuals` and
+  `createObjectVisualStaticInstallSet`.
+- Delete the transitional producer-side legacy-to-install-set bridge when no production producer
+  emits visual payloads from legacy draw-unit/resource arrays.
 
 Task checklist:
 
@@ -1825,6 +1941,8 @@ Acceptance criteria:
 Deletion criteria:
 
 - Delete legacy static source payload fields once no static coordinator or baker consumes them.
+- Delete `createStaticBakeObjectVisualInstallSet` once static object/env-cell producers publish
+  install sets from recipe-first output directly.
 
 ### Phase 10: Dynamic Resolver Cutover
 

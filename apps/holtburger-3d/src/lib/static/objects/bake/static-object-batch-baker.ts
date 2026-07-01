@@ -287,8 +287,6 @@ function bakeStaticObjectBatchItem(
 	readonly spatialRecords: readonly StaticSpatialRecord[];
 	readonly textureDependencies: readonly TextureResourceDependencies[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
-	readonly staticObjectRenderInstances: readonly StaticObjectRenderInstance[];
-	readonly staticObjectVisualResources: readonly StaticObjectVisualResource[];
 	readonly objectVisualInstallSet: ReturnType<
 		typeof createObjectVisualInstallSet
 	>;
@@ -444,8 +442,6 @@ function bakeStaticObjectBatchItem(
 			...spatialRecordBySliceId.values(),
 			...drawUnits.flatMap((output) => output.objectSpatialRecords),
 		],
-		staticObjectRenderInstances: instancedOutput.instances,
-		staticObjectVisualResources: instancedOutput.resources,
 		textureDependencies:
 			createStaticObjectDrawUnitTextureDependencies(bakedDrawUnits),
 		textureUses,

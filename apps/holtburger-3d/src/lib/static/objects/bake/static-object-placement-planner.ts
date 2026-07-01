@@ -27,40 +27,42 @@ export function createStaticObjectTexturePlacementIntents(input: {
 		const payload = createStaticObjectBatchPayload(item);
 		const partitionPlan = partitionStaticObjectBatches(payload);
 		for (const partition of partitionPlan.partitions) {
-			for (const dataUse of partition.textureDataUses) {
-				if (!isCurrentlyStageableStaticObjectDataUse(dataUse)) {
-					continue;
-				}
-				const textureUseId = createStaticMaterialTextureUseId({
-					dataUse,
-					textureUseNamespace: "static-object-texture",
-					textureUseScopeId: item.task.ownerId,
-					wrapMode: partition.textureWrapMode,
-				});
-				if (intentsByItemId.has(textureUseId)) {
-					continue;
-				}
-				const textureUse: StaticBakeTextureUse = {
-					domain: payload.domain,
-					owners: NO_STATIC_TEXTURE_USE_OWNERS,
-					samplingPolicy: createStaticMaterialTextureSamplingPolicy({
+			for (const entry of partition.coarseTablePlan.entries) {
+				for (const dataUse of entry.textureDataUses) {
+					if (!isCurrentlyStageableStaticObjectDataUse(dataUse)) {
+						continue;
+					}
+					const textureUseId = createStaticMaterialTextureUseId({
 						dataUse,
-						wrapMode: partition.textureWrapMode,
-					}),
-					source: dataUse,
-					staticBatchId: input.staticBatchId,
-					textureUseId,
-				};
-				intentsByItemId.set(
-					textureUseId,
-					createStaticTexturePlacementIntent(textureUse, {
-						affinityKey: createStaticObjectPlacementAffinityKey({
-							landblockId: payload.landblock.landblockId,
-							ownerId: item.task.ownerId,
-							partitionBatchKey: partition.batchKey,
+						textureUseNamespace: "static-object-texture",
+						textureUseScopeId: item.task.ownerId,
+						wrapMode: entry.textureWrapMode,
+					});
+					if (intentsByItemId.has(textureUseId)) {
+						continue;
+					}
+					const textureUse: StaticBakeTextureUse = {
+						domain: payload.domain,
+						owners: NO_STATIC_TEXTURE_USE_OWNERS,
+						samplingPolicy: createStaticMaterialTextureSamplingPolicy({
+							dataUse,
+							wrapMode: entry.textureWrapMode,
 						}),
-					}),
-				);
+						source: dataUse,
+						staticBatchId: input.staticBatchId,
+						textureUseId,
+					};
+					intentsByItemId.set(
+						textureUseId,
+						createStaticTexturePlacementIntent(textureUse, {
+							affinityKey: createStaticObjectPlacementAffinityKey({
+								landblockId: payload.landblock.landblockId,
+								ownerId: item.task.ownerId,
+								partitionBatchKey: partition.batchKey,
+							}),
+						}),
+					);
+				}
 			}
 		}
 	}

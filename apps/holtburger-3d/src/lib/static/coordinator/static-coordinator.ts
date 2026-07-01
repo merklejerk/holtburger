@@ -38,7 +38,11 @@ import type {
 	StaticLayerTaskStatus,
 	StaticLayerTaskRequest,
 } from "../contracts";
-import { createEmptyObjectVisualInstallSet } from "../../visual/object-visual-install-set";
+import {
+	createEmptyObjectVisualInstallSet,
+	createObjectVisualInstallSet,
+	type ObjectVisualInstallSet,
+} from "../../visual/object-visual-install-set";
 import type { PreparedAssetReader } from "../../assets/contracts";
 import type {
 	DynamicEntityRecipe,
@@ -945,15 +949,17 @@ export class StaticCoordinator {
 				revision: result.revision,
 				envCellStaticObjectPlacementRecords:
 					result.envCellStaticObjectPlacementRecords,
-				staticObjectRenderInstances: result.staticObjectRenderInstances,
-				staticObjectVisualResources: result.staticObjectVisualResources,
+				staticObjectRenderInstances:
+					result.objectVisualInstallSet.renderInstances,
+				staticObjectVisualResources:
+					result.objectVisualInstallSet.visualResources,
 				staticPortalGraphs: result.staticPortalGraphs,
 				staticPortalInteriorRecords: result.staticPortalInteriorRecords,
 				staticSourceMappings: result.staticSourceMappings,
 				staticSpatialRecords: result.staticSpatialRecords,
 				staticVisibilityRecords: result.staticVisibilityRecords,
 				tasks: result.tasks,
-				textureDependencies: result.textureDependencies,
+				textureDependencies: createCommitTextureDependencies(result),
 				textureUses: result.textureUses,
 			},
 		});
@@ -1746,7 +1752,17 @@ function collectCommittedResourceKeysByOwnerId(
 	result: StaticBakeBatchResult,
 ): Map<string, StaticResourceKey[]> {
 	const resourcesByOwnerId = new Map<string, StaticResourceKey[]>();
-	for (const drawUnit of result.drawUnits) {
+	for (const drawUnit of result.drawUnits.filter(
+		(drawUnit) =>
+			drawUnit.kind !== "static-object-geometry" &&
+			drawUnit.kind !== "structured-interior-geometry",
+	)) {
+		addResourceKey(resourcesByOwnerId, getDrawUnitOwnerId(drawUnit), {
+			drawUnitId: drawUnit.drawUnitId,
+			kind: "draw-unit",
+		});
+	}
+	for (const drawUnit of result.objectVisualInstallSet.directDrawUnits) {
 		addResourceKey(resourcesByOwnerId, getDrawUnitOwnerId(drawUnit), {
 			drawUnitId: drawUnit.drawUnitId,
 			kind: "draw-unit",
@@ -1772,13 +1788,13 @@ function collectCommittedResourceKeysByOwnerId(
 			readonly landblockId: number;
 		}
 	>();
-	for (const instance of result.staticObjectRenderInstances) {
+	for (const instance of result.objectVisualInstallSet.renderInstances) {
 		visualResourceDomains.set(instance.resourceId, {
 			domain: instance.domain,
 			landblockId: instance.landblockId,
 		});
 	}
-	for (const resource of result.staticObjectVisualResources) {
+	for (const resource of result.objectVisualInstallSet.visualResources) {
 		const owner = visualResourceDomains.get(resource.resourceId);
 		if (!owner) {
 			continue;
@@ -1796,6 +1812,29 @@ function collectCommittedResourceKeysByOwnerId(
 		);
 	}
 	return resourcesByOwnerId;
+}
+
+function createCommitTextureDependencies(
+	result: StaticBakeBatchResult,
+): StaticCoordinatorCommitDelta["textureDependencies"] {
+	const legacyObjectResourceIds = new Set([
+		...result.drawUnits
+			.filter(
+				(drawUnit) =>
+					drawUnit.kind === "static-object-geometry" ||
+					drawUnit.kind === "structured-interior-geometry",
+			)
+			.map((drawUnit) => drawUnit.drawUnitId),
+		...result.staticObjectVisualResources.map(
+			(resource) => resource.resourceId,
+		),
+	]);
+	return [
+		...result.textureDependencies.filter(
+			(dependency) => !legacyObjectResourceIds.has(dependency.resourceId),
+		),
+		...result.objectVisualInstallSet.textureDependencies,
+	];
 }
 
 function addResourceKey(
@@ -1852,6 +1891,10 @@ function filterStaticBakeResultForCurrentTasks(
 	const retainedStaticObjectVisualResourceIds = new Set(
 		retainedStaticObjectRenderInstances.map((instance) => instance.resourceId),
 	);
+	const retainedObjectVisualInstallSet = filterObjectVisualInstallSetForOwners(
+		result.objectVisualInstallSet,
+		ownerIds,
+	);
 
 	return {
 		...result,
@@ -1885,6 +1928,7 @@ function filterStaticBakeResultForCurrentTasks(
 			(resource) =>
 				retainedStaticObjectVisualResourceIds.has(resource.resourceId),
 		),
+		objectVisualInstallSet: retainedObjectVisualInstallSet,
 		staticPortalInteriorRecords: result.staticPortalInteriorRecords.filter(
 			(record) =>
 				isPeerRecordOwnedByRetainedWork(record.owner, {
@@ -1928,6 +1972,47 @@ function filterStaticBakeResultForCurrentTasks(
 		),
 		tasks,
 	};
+}
+
+function filterObjectVisualInstallSetForOwners(
+	installSet: ObjectVisualInstallSet,
+	ownerIds: ReadonlySet<string>,
+): ObjectVisualInstallSet {
+	const directDrawUnits = installSet.directDrawUnits.filter((drawUnit) =>
+		ownerIds.has(getDrawUnitOwnerId(drawUnit)),
+	);
+	const renderInstances = installSet.renderInstances.filter((instance) =>
+		ownerIds.has(
+			createLayerOwnerIdForDomainLandblock({
+				domain: instance.domain,
+				landblockId: instance.landblockId,
+			}),
+		),
+	);
+	const retainedVisualResourceIds = new Set(
+		renderInstances.map((instance) => instance.resourceId),
+	);
+	const visualResources = installSet.visualResources.filter((resource) =>
+		retainedVisualResourceIds.has(resource.resourceId),
+	);
+	const retainedResourceIds = new Set([
+		...directDrawUnits.map((drawUnit) => drawUnit.drawUnitId),
+		...visualResources.map((resource) => resource.resourceId),
+	]);
+	return createObjectVisualInstallSet({
+		directDrawUnits,
+		dynamicAnimationPartBindings:
+			installSet.dynamicAnimationPartBindings.filter((binding) =>
+				binding.renderPartIds.some((renderPartId) =>
+					retainedResourceIds.has(renderPartId),
+				),
+			),
+		renderInstances,
+		textureDependencies: installSet.textureDependencies.filter((dependency) =>
+			retainedResourceIds.has(dependency.resourceId),
+		),
+		visualResources,
+	});
 }
 
 function isPeerRecordOwnedByRetainedWork(

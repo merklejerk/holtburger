@@ -2183,10 +2183,15 @@ Course correction during Phase 9M:
 - Env-cell structured-interior routing now also contributes recipe-first direct draw units to
   `objectVisualInstallSet` from `createStructuredInteriorVisualBundleExpansion`, while legacy
   structured-interior `drawUnits` remain populated for current sidecar/resource bookkeeping.
-- Spicy debt: static object result arrays and coordinator resource tracking still need the hard
-  cutover to source direct draw-unit/resource ids from `objectVisualInstallSet`. Until then, the
-  recipe-first install set is production-facing for object visual layers, but the worker result still
-  carries legacy object publication arrays for compatibility with current commit bookkeeping.
+- Coordinator resource ownership, current-task filtering, commit texture dependencies, and commit
+  install mirroring now source object-visual direct draw units, render instances, and visual
+  resources from `objectVisualInstallSet`.
+- Deleted the legacy `createStaticBakeObjectVisualInstallSet` bridge once static object and
+  env-cell producers published recipe-first install sets directly.
+- Spicy debt: static bake worker result arrays still carry legacy object `drawUnits`,
+  `staticObjectRenderInstances`, and `staticObjectVisualResources` for diagnostics/tests. They are
+  no longer the coordinator/runtime source of truth for object visual publication, but the hard
+  cutover still needs to delete or narrow those result fields.
 - Spicy debt: static object recipe publication currently logs and skips recipe install publication
   if generic object-visual baking rejects a geometry buffer. One fan-triangle fixture exposed a
   source/sidecar geometry mismatch that must be resolved before deleting the legacy object draw-unit

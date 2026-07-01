@@ -18,7 +18,7 @@ import type {
 	TextureBinding,
 	TextureBindingOwner,
 	TexturePlacementUpdate,
-	TextureUsePlacement,
+	ResolvedTexturePlacement,
 } from "../renderer/types";
 import {
 	createTextureBindingOwnerKey,
@@ -407,7 +407,7 @@ export class TextureManager {
 		);
 		const placements: RuntimeTexturePlacement[] = [];
 		const textureBindings: TextureBinding[] = [];
-		const textureUsePlacements: TextureUsePlacement[] = [];
+		const resolvedTexturePlacements: ResolvedTexturePlacement[] = [];
 		const terrainRolePageSlots = new TerrainDrawUnitRolePageSlots(
 			(overflow) => {
 				this.#recentTerrainRolePageOverflows = appendBounded(
@@ -482,7 +482,7 @@ export class TextureManager {
 			if (!entry) {
 				continue;
 			}
-			textureUsePlacements.push({
+			resolvedTexturePlacements.push({
 				rect: entry.rect,
 				textureHeight: entry.textureHeight,
 				textureRefId: entry.textureRefId,
@@ -516,7 +516,7 @@ export class TextureManager {
 		if (
 			placements.length === 0 &&
 			removedTextureRefIds.length === 0 &&
-			textureUsePlacements.length === 0 &&
+			resolvedTexturePlacements.length === 0 &&
 			textureBindings.length === 0
 		) {
 			return null;
@@ -528,7 +528,7 @@ export class TextureManager {
 			textureBindings,
 			placements,
 			removedTextureRefIds,
-			textureUsePlacements,
+			resolvedTexturePlacements,
 			revision: this.#revision,
 		};
 	}

@@ -367,7 +367,7 @@ describe("browser texture manager", () => {
 		});
 
 		expect(update?.placements.length).toBeGreaterThan(1);
-		expect(update?.textureUsePlacements).toHaveLength(textureUses.length);
+		expect(update?.resolvedTexturePlacements).toHaveLength(textureUses.length);
 		expect(update?.textureBindings.length).toBeLessThan(textureUses.length);
 		expect(
 			update?.textureBindings.map((binding) => binding.rolePage?.slot),
@@ -794,7 +794,9 @@ describe("browser texture manager", () => {
 				MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW,
 			);
 			expect(
-				update?.textureUsePlacements.map((placement) => placement.textureUseId),
+				update?.resolvedTexturePlacements.map(
+					(placement) => placement.textureUseId,
+				),
 			).toEqual(textureUses.map((textureUse) => textureUse.textureUseId));
 			expect(
 				update?.textureBindings.map((binding) => binding.rolePage),

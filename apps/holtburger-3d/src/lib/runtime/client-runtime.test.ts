@@ -230,24 +230,19 @@ describe("browser client runtime", () => {
 				terrain: 0,
 			},
 		});
-		completeResolverRequest(
-			resolver,
-			"outdoor-buildings",
-			0xda55ffff,
-			{},
-			[createOutdoorDynamicPlacementRecord()],
-		);
+		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff, {}, [
+			createOutdoorDynamicPlacementRecord(),
+		]);
 		await flushPromises();
 
-		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
-		});
+		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {});
 		await flushRuntimeWork();
 
 		const loadedDiagnosticsSnapshot = runtime.createDiagnosticsSnapshot();
 		expect(loadedDiagnosticsSnapshot.dynamic).toMatchObject({
 			activeEntityCount: 1,
 			nonRenderableEntityCount: 0,
-					});
+		});
 		expect(loadedDiagnosticsSnapshot.dynamic.records[0]).toMatchObject({
 			animation: {
 				defaultAnimationId: 0x0300061b,
@@ -358,7 +353,7 @@ describe("browser client runtime", () => {
 
 		expect(runtime.createDiagnosticsSnapshot().dynamic).toMatchObject({
 			activeEntityCount: 0,
-					});
+		});
 		runtime.dispose();
 	});
 
@@ -381,16 +376,11 @@ describe("browser client runtime", () => {
 				terrain: 0,
 			},
 		});
-		completeResolverRequest(
-			resolver,
-			"outdoor-buildings",
-			0xda55ffff,
-			{},
-			[createOutdoorDynamicPlacementRecord()],
-		);
+		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff, {}, [
+			createOutdoorDynamicPlacementRecord(),
+		]);
 		await flushPromises();
-		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
-		});
+		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {});
 		await flushPromises();
 
 		expect(
@@ -448,16 +438,11 @@ describe("browser client runtime", () => {
 				terrain: 0,
 			},
 		});
-		completeResolverRequest(
-			resolver,
-			"outdoor-buildings",
-			0xda55ffff,
-			{},
-			[createOutdoorDynamicPlacementRecord()],
-		);
+		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff, {}, [
+			createOutdoorDynamicPlacementRecord(),
+		]);
 		await flushPromises();
-		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
-		});
+		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {});
 		await flushRuntimeWork();
 
 		await resolvePendingDynamicAssetsUntil(
@@ -962,16 +947,11 @@ describe("browser client runtime", () => {
 				terrain: 0,
 			},
 		});
-		completeResolverRequest(
-			resolver,
-			"outdoor-buildings",
-			0xda55ffff,
-			{},
-			[createOutdoorDynamicPlacementRecord()],
-		);
+		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff, {}, [
+			createOutdoorDynamicPlacementRecord(),
+		]);
 		await flushPromises();
-		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
-		});
+		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {});
 		await flushRuntimeWork();
 
 		await resolvePendingDynamicAssetsUntil(
@@ -1012,16 +992,11 @@ describe("browser client runtime", () => {
 				terrain: 0,
 			},
 		});
-		completeResolverRequest(
-			resolver,
-			"outdoor-buildings",
-			0xda55ffff,
-			{},
-			[createOutdoorDynamicPlacementRecord()],
-		);
+		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff, {}, [
+			createOutdoorDynamicPlacementRecord(),
+		]);
 		await flushPromises();
-		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
-		});
+		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {});
 		await flushRuntimeWork();
 
 		updateRuntimeFrame(runtime, 1);
@@ -1059,17 +1034,15 @@ describe("browser client runtime", () => {
 		});
 
 		updateInteriorSceneInterest(runtime);
-		completeResolverRequest(
-			resolver,
-			"env-cell-system",
-			0xda55ffff,
-			{},
-			[createEnvCellDynamicPlacementRecord()],
-		);
+		completeResolverRequest(resolver, "env-cell-system", 0xda55ffff, {}, [
+			createEnvCellDynamicPlacementRecord(),
+		]);
 		await flushPromises();
 
 		completeBakerWork(baker, "env-cell-system", 0xda55ffff, {
-			envCellStaticObjectPlacementRecords: [createEnvCellStaticPlacementRecord()],
+			envCellStaticObjectPlacementRecords: [
+				createEnvCellStaticPlacementRecord(),
+			],
 		});
 		await flushRuntimeWork();
 
@@ -1077,7 +1050,7 @@ describe("browser client runtime", () => {
 		expect(loadedDiagnosticsSnapshot.dynamic).toMatchObject({
 			activeEntityCount: 1,
 			nonRenderableEntityCount: 0,
-					});
+		});
 		expect(loadedDiagnosticsSnapshot.dynamic.records[0]).toMatchObject({
 			id: "static-authored-env-cell:env-cell-system:0xda55ffff:env-cell:da550100:object:building:env-cell-static-0:setup:020003e5",
 			provenance: {
@@ -1134,7 +1107,7 @@ describe("browser client runtime", () => {
 
 		expect(runtime.createDiagnosticsSnapshot().dynamic).toMatchObject({
 			activeEntityCount: 0,
-					});
+		});
 		runtime.dispose();
 	});
 
@@ -1930,17 +1903,12 @@ describe("browser client runtime", () => {
 			domains: ["buildings", "terrain"],
 			lod: { buildings: 0, envCells: -1, terrain: 0 },
 		});
-		completeResolverRequest(
-			resolver,
-			"outdoor-buildings",
-			0xda55ffff,
-			{},
-			[createOutdoorDynamicPlacementRecord()],
-		);
+		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff, {}, [
+			createOutdoorDynamicPlacementRecord(),
+		]);
 		completeResolverRequest(resolver, "outdoor-terrain", 0xda55ffff);
 		await flushRuntimeWork();
-		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
-		});
+		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {});
 		completeBakerWork(baker, "outdoor-terrain", 0xda55ffff);
 		await flushRuntimeWork();
 
@@ -2221,7 +2189,7 @@ describe("browser client runtime", () => {
 		runtime.dispose();
 	});
 
-	it("joins selected outdoor static diagnostics to source parts and materialized draw units", async () => {
+	it("joins selected outdoor static diagnostics to source parts and installed draw units", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const runtime = createClientRuntime({
@@ -2353,7 +2321,7 @@ describe("browser client runtime", () => {
 		runtime.dispose();
 	});
 
-	it("does not add textured static draw units before texture materialization is ready", async () => {
+	it("does not add textured static draw units before texture placement is ready", async () => {
 		const renderer = new FakeRenderer();
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
@@ -2388,7 +2356,7 @@ describe("browser client runtime", () => {
 		expect(renderer.textureUpdates).toEqual([]);
 		expect(
 			runtimeDiagnosticsSnapshotSummary(runtime.createDiagnosticsSnapshot())
-				.staticMaterialization.pendingCommits,
+				.staticCommitInstall.pendingCommits,
 		).toEqual([
 			{
 				commitId:
@@ -2409,7 +2377,7 @@ describe("browser client runtime", () => {
 		]);
 		expect(
 			runtimeDiagnosticsSnapshotSummary(runtime.createDiagnosticsSnapshot())
-				.staticMaterialization,
+				.staticCommitInstall,
 		).toEqual({
 			committedCommits: [
 				{
@@ -2422,7 +2390,7 @@ describe("browser client runtime", () => {
 			],
 			envCellResourceMembershipRevision: 0,
 			failedCommits: [],
-			materializedDrawUnits: 1,
+			installedDrawUnits: 1,
 			pendingCommits: [],
 			sourceDrawUnits: 1,
 		});
@@ -2486,7 +2454,7 @@ describe("browser client runtime", () => {
 		runtime.dispose();
 	});
 
-	it("keeps failed texture materialization out of renderer residency", async () => {
+	it("keeps failed texture placement out of renderer residency", async () => {
 		const renderer = new FakeRenderer();
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
@@ -2524,10 +2492,10 @@ describe("browser client runtime", () => {
 		expect(renderer.textureUpdates).toEqual([]);
 		expect(runtime.createDiagnosticsSnapshot().dynamic).toMatchObject({
 			activeEntityCount: 0,
-					});
+		});
 		expect(
 			runtimeDiagnosticsSnapshotSummary(runtime.createDiagnosticsSnapshot())
-				.staticMaterialization,
+				.staticCommitInstall,
 		).toEqual({
 			committedCommits: [],
 			envCellResourceMembershipRevision: 0,
@@ -2540,7 +2508,7 @@ describe("browser client runtime", () => {
 					staticBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:1",
 				},
 			],
-			materializedDrawUnits: 0,
+			installedDrawUnits: 0,
 			pendingCommits: [],
 			sourceDrawUnits: 0,
 		});
@@ -2765,7 +2733,9 @@ function completeBakerWork(
 }
 
 function createStaticLayerRecipeForSourceRequest(
-	request: Parameters<DeferredStaticResolver["completeSource"]>[0] extends string
+	request: Parameters<
+		DeferredStaticResolver["completeSource"]
+	>[0] extends string
 		? import("../static/contracts").StaticLandblockSceneLodSourceRequest
 		: never,
 	layer: import("../static/contracts").StaticLandblockSceneLodLayerRequest,
@@ -2864,7 +2834,9 @@ function createStaticAuthoredDynamicRecipeForRecord(
 				sourceResidence,
 			},
 			visual: {
-				animation: createDynamicRecipeAnimation(record.placement.defaultAnimationId),
+				animation: createDynamicRecipeAnimation(
+					record.placement.defaultAnimationId,
+				),
 				materialPolicy: {
 					detailRolePolicy: {
 						domain:
@@ -2886,7 +2858,9 @@ function createStaticAuthoredDynamicRecipeForRecord(
 				materialSources: [],
 				missingRefs: [],
 				paletteSources: [],
-				setupModel: createDynamicRecipeSetupModel(record.placement.setupModelId),
+				setupModel: createDynamicRecipeSetupModel(
+					record.placement.setupModelId,
+				),
 				sourceAssets: [],
 				textureRefs: [],
 			},
@@ -4885,9 +4859,9 @@ function parsePreparedTextureUsage(
 
 function runtimeDiagnosticsSnapshotSummary(
 	snapshot: RuntimeDiagnosticsSnapshot,
-): Pick<RuntimeDiagnosticsSnapshot, "staticMaterialization" | "status"> {
+): Pick<RuntimeDiagnosticsSnapshot, "staticCommitInstall" | "status"> {
 	return {
-		staticMaterialization: snapshot.staticMaterialization,
+		staticCommitInstall: snapshot.staticCommitInstall,
 		status: snapshot.status,
 	};
 }

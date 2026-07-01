@@ -1921,7 +1921,7 @@ export interface StaticCoordinatorTimingDiagnostics {
 }
 
 export interface StaticCoordinatorCommitDelta {
-	/** Stable identity for this exact runtime materialization unit. */
+	/** Stable identity for this exact static commit. */
 	readonly commitId: string;
 	readonly staticBatchId: string;
 	readonly addedDrawUnits: readonly StaticDrawUnit[];
@@ -1944,7 +1944,7 @@ export interface StaticCoordinatorCommitDelta {
 }
 
 export interface StaticScopePrepCommit {
-	/** Static-only materialization payload. */
+	/** Static-only commit payload. */
 	readonly staticCommit: StaticCoordinatorCommitDelta;
 	/** Static-authored dynamic placements whose residency is gated by this commit. */
 	readonly dynamicPlacements: readonly StaticAuthoredDynamicPlacementRecord[];

@@ -35,11 +35,11 @@ interface RuntimeDiagnosticsRuntimeSummary {
 	readonly sceneInterest: string | null;
 	readonly renderPassKind: RenderPassPlan["kind"];
 	readonly portalFrameWorkPlan: PortalFrameWorkPlanDiagnostics;
-	readonly pendingStaticMaterializationCount: number;
-	readonly committedStaticMaterializationCount: number;
+	readonly pendingStaticCommitInstallCount: number;
+	readonly committedStaticCommitInstallCount: number;
 	readonly envCellResourceMembershipRevision: number;
 	readonly sourceStaticDrawUnits: number;
-	readonly materializedStaticDrawUnits: number;
+	readonly installedStaticDrawUnits: number;
 }
 
 type PortalFrameWorkPlanDiagnostics =
@@ -351,7 +351,7 @@ export interface TerrainRolePageOverflowDiagnostics {
 }
 
 type RuntimeWarningEvent =
-	| StaticMaterializationFailedWarning
+	| StaticCommitInstallFailedWarning
 	| DynamicRendererResourceSyncFailedWarning
 	| StaticMaterialCoverageDeferredWarning
 	| TerrainRenderableFallbackWarning
@@ -364,9 +364,9 @@ interface DynamicRendererResourceSyncFailedWarning {
 	readonly revision: number;
 }
 
-interface StaticMaterializationFailedWarning {
+interface StaticCommitInstallFailedWarning {
 	readonly commitId: string;
-	readonly kind: "static-materialization-failed";
+	readonly kind: "static-commit-install-failed";
 	readonly revision: number;
 	readonly staticBatchId: string;
 	readonly message: string;
@@ -458,9 +458,9 @@ class ConsoleRuntimeDiagnostics implements RuntimeDiagnostics {
 					event.error,
 				);
 				return;
-			case "static-materialization-failed":
+			case "static-commit-install-failed":
 				console.error(
-					`static materialization commit ${event.commitId} failed; draw units from ${event.staticBatchId} were not added to renderer residency.`,
+					`static commit install ${event.commitId} failed; draw units from ${event.staticBatchId} were not added to renderer residency.`,
 					event.error,
 				);
 				return;

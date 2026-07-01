@@ -5,14 +5,14 @@ import type {
 	StaticPortalGraphRecord,
 	StaticPortalInteriorRecord,
 } from "../static/contracts";
-import type { StaticMaterializationResult } from "./static-materializer";
+import type { StaticCommitInstallResult } from "./static-commit-installer";
 import { createEnvCellSystemLayerPublications } from "./env-cell-system-layer-publication";
 
 describe("env-cell system layer publication", () => {
-	it("publishes directly from an env-cell materialized commit", () => {
+	it("publishes directly from an installed env-cell commit", () => {
 		const [publication] = createEnvCellSystemLayerPublications(
 			createEnvCellCommitDelta(1),
-			createEnvCellMaterialization(1),
+			createEnvCellInstallResult(1),
 		);
 
 		expect(publication).toMatchObject({
@@ -31,7 +31,7 @@ describe("env-cell system layer publication", () => {
 
 		const [publication] = createEnvCellSystemLayerPublications(
 			createEnvCellCommitDelta(2),
-			createEnvCellMaterialization(2, {
+			createEnvCellInstallResult(2, {
 				portalApertureResources: [transitionResource],
 				staticPortalGraphs: [transitionGraph],
 			}),
@@ -50,11 +50,11 @@ describe("env-cell system layer publication", () => {
 		]);
 	});
 
-	it("does not publish from outdoor-building materialization alone", () => {
+	it("does not publish from outdoor-building installation alone", () => {
 		expect(
 			createEnvCellSystemLayerPublications(
 				createBuildingCommitDelta(3),
-				createBuildingMaterialization(3),
+				createBuildingInstallResult(3),
 			),
 		).toEqual([]);
 	});
@@ -85,22 +85,22 @@ function createBuildingCommitDelta(
 	});
 }
 
-function createEnvCellMaterialization(
+function createEnvCellInstallResult(
 	revision: number,
-	options: Partial<StaticMaterializationResult> = {},
-): StaticMaterializationResult {
-	return createMaterializationResult({
+	options: Partial<StaticCommitInstallResult> = {},
+): StaticCommitInstallResult {
+	return createInstallResult({
 		revision,
 		staticPortalInteriorRecords: [createPortalInteriorRecord()],
 		...options,
 	});
 }
 
-function createBuildingMaterialization(
+function createBuildingInstallResult(
 	revision: number,
-): StaticMaterializationResult {
+): StaticCommitInstallResult {
 	const commit = createBuildingCommitDelta(revision);
-	return createMaterializationResult({
+	return createInstallResult({
 		portalApertureResources: commit.addedPortalApertureResources,
 		revision,
 		staticPortalGraphs: commit.staticPortalGraphs,
@@ -134,13 +134,13 @@ function createCommitDelta(
 	};
 }
 
-function createMaterializationResult(
-	options: Partial<StaticMaterializationResult> & {
+function createInstallResult(
+	options: Partial<StaticCommitInstallResult> & {
 		readonly revision: number;
 	},
-): StaticMaterializationResult {
+): StaticCommitInstallResult {
 	return {
-		materializedDrawUnits: [],
+		installedDrawUnits: [],
 		portalApertureResources: [],
 		removedResources: [],
 		staticObjectRenderInstances: [],

@@ -100,9 +100,9 @@ import {
 } from "../static/contracts";
 import { createLayerOwnerKeyId } from "../static/layer-owners";
 import {
-	materializeStaticCommit,
-	type StaticMaterializationResult,
-} from "./static-materializer";
+	installStaticCommit,
+	type StaticCommitInstallResult,
+} from "./static-commit-installer";
 import type {
 	EnvCellPortalScenePickDetails,
 	EnvCellStaticScenePickDetails,
@@ -171,7 +171,7 @@ import type { PlacementTransformDto } from "../host/contracts";
 import { translateBounds } from "./scene-query/geometry";
 
 const STATIC_DIAGNOSTICS_FAILURE_LIMIT = 8;
-const STATIC_MATERIALIZATION_COMMIT_DIAGNOSTICS_LIMIT = 8;
+const STATIC_COMMIT_INSTALL_DIAGNOSTICS_LIMIT = 8;
 const TERRAIN_TEXTURE_DIAGNOSTICS_EVENT_LIMIT = 8;
 const BLENDED_STATIC_AUDIT_WARNING_BUCKET_LIMIT = 8;
 const DEFAULT_ASSET_MAINTENANCE_INTERVAL_MS = 5_000;
@@ -294,7 +294,7 @@ export interface RuntimeDiagnosticsSnapshot {
 	readonly renderer: RendererSnapshot;
 	readonly static: StaticCoordinatorSnapshot;
 	readonly staticSceneQuery: StaticSceneQuerySnapshot;
-	readonly staticMaterialization: StaticMaterializationSnapshot;
+	readonly staticCommitInstall: StaticCommitInstallSnapshot;
 }
 
 export interface RuntimeOverviewSnapshot {
@@ -668,31 +668,31 @@ interface RuntimeRenderPolicySnapshot {
 	readonly textureFilteringMode: TextureFilteringMode;
 }
 
-interface StaticMaterializationSnapshot {
-	readonly pendingCommits: readonly StaticMaterializationCommitSnapshot[];
-	readonly committedCommits: readonly StaticMaterializationCommitSnapshot[];
-	readonly failedCommits: readonly StaticMaterializationCommitSnapshot[];
+interface StaticCommitInstallSnapshot {
+	readonly pendingCommits: readonly StaticCommitInstallCommitSnapshot[];
+	readonly committedCommits: readonly StaticCommitInstallCommitSnapshot[];
+	readonly failedCommits: readonly StaticCommitInstallCommitSnapshot[];
 	readonly envCellResourceMembershipRevision: number;
-	readonly materializedDrawUnits: number;
+	readonly installedDrawUnits: number;
 	readonly sourceDrawUnits: number;
 }
 
-interface StaticMaterializationCommitSnapshot {
+interface StaticCommitInstallCommitSnapshot {
 	readonly commitId: string;
-	readonly phase: StaticMaterializationCommitPhase;
+	readonly phase: StaticCommitInstallPhase;
 	readonly revision: number;
 	readonly staticBatchId: string;
 }
 
-type StaticMaterializationCommitPhase =
+type StaticCommitInstallPhase =
 	| "queued"
 	| "materializing"
 	| "materialized"
 	| "failed";
 
-interface MutableStaticMaterializationCommit {
+interface MutableStaticCommitInstall {
 	readonly commitId: string;
-	phase: StaticMaterializationCommitPhase;
+	phase: StaticCommitInstallPhase;
 	readonly revision: number;
 	readonly staticBatchId: string;
 }
@@ -849,13 +849,13 @@ class ClientRuntimeImpl implements ClientRuntime {
 		EMPTY_RUNTIME_PORTAL_OVERLAP_RESIDENCY;
 	#lastFrameState: FrameState | null = null;
 	#renderAnchorLandblockId: number | null = null;
-	#staticMaterializationQueue: Promise<void> = Promise.resolve();
-	readonly #staticMaterializationCommits = new Map<
+	#staticCommitInstallQueue: Promise<void> = Promise.resolve();
+	readonly #staticCommitInstallCommits = new Map<
 		string,
-		MutableStaticMaterializationCommit
+		MutableStaticCommitInstall
 	>();
-	#committedStaticMaterializations: StaticMaterializationCommitSnapshot[] = [];
-	readonly #materializedDrawUnitsById = new Map<string, StaticDrawUnit>();
+	#committedStaticCommitInstalls: StaticCommitInstallCommitSnapshot[] = [];
+	readonly #installedDrawUnitsById = new Map<string, StaticDrawUnit>();
 	#recentTerrainTextureFallbacks: TerrainTextureFallbackDiagnostics[] = [];
 	#sceneDebugSelection: RuntimeSceneDebugSelection | null = null;
 	#envCellResourceMembership: readonly EnvCellResourceMembership[] = [];
@@ -945,7 +945,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		);
 		this.#unsubscribeStaticCommits = staticCoordinator.subscribeCommits(
 			(commit) => {
-				this.#enqueueStaticMaterialization(commit);
+				this.#enqueueStaticCommitInstall(commit);
 			},
 		);
 		this.#unsubscribeStaticSourcePayloads =
@@ -1433,20 +1433,20 @@ class ClientRuntimeImpl implements ClientRuntime {
 			],
 			kind: "runtime-diagnostics-report",
 			runtime: {
-				committedStaticMaterializationCount:
-					snapshot.staticMaterialization.committedCommits.length,
+				committedStaticCommitInstallCount:
+					snapshot.staticCommitInstall.committedCommits.length,
 				envCellResourceMembershipRevision:
-					snapshot.staticMaterialization.envCellResourceMembershipRevision,
+					snapshot.staticCommitInstall.envCellResourceMembershipRevision,
 				portalFrameWorkPlan: createPortalFrameWorkPlanDiagnostics(
 					snapshot.portalFrameWorkPlan,
 				),
 				renderPassKind: snapshot.renderPassPlan.kind,
 				sceneInterest: createSceneInterestSummary(snapshot.sceneInterest),
-				materializedStaticDrawUnits:
-					snapshot.staticMaterialization.materializedDrawUnits,
-				pendingStaticMaterializationCount:
-					snapshot.staticMaterialization.pendingCommits.length,
-				sourceStaticDrawUnits: snapshot.staticMaterialization.sourceDrawUnits,
+				installedStaticDrawUnits:
+					snapshot.staticCommitInstall.installedDrawUnits,
+				pendingStaticCommitInstallCount:
+					snapshot.staticCommitInstall.pendingCommits.length,
+				sourceStaticDrawUnits: snapshot.staticCommitInstall.sourceDrawUnits,
 				status: snapshot.status,
 				textureFilteringMode: snapshot.renderPolicy.textureFilteringMode,
 			},
@@ -1833,18 +1833,17 @@ class ClientRuntimeImpl implements ClientRuntime {
 			sceneInterest: this.#sceneInterest,
 			static: this.#lastStaticSnapshot,
 			staticSceneQuery: this.#staticSceneQuery.createSnapshot(),
-			staticMaterialization: {
-				committedCommits: this.#committedStaticMaterializations,
+			staticCommitInstall: {
+				committedCommits: this.#committedStaticCommitInstalls,
 				envCellResourceMembershipRevision:
 					this.#envCellResourceMembershipRevision,
-				failedCommits:
-					this.#createStaticMaterializationCommitSnapshots("failed"),
-				materializedDrawUnits: this.#materializedDrawUnitsById.size,
-				pendingCommits: this.#createStaticMaterializationCommitSnapshots(
+				failedCommits: this.#createStaticCommitInstallCommitSnapshots("failed"),
+				installedDrawUnits: this.#installedDrawUnitsById.size,
+				pendingCommits: this.#createStaticCommitInstallCommitSnapshots(
 					"queued",
 					"materializing",
 				),
-				sourceDrawUnits: this.#materializedDrawUnitsById.size,
+				sourceDrawUnits: this.#installedDrawUnitsById.size,
 			},
 			status: this.#createRuntimeStatus(this.#lastStaticSnapshot.requested),
 		};
@@ -1966,40 +1965,40 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#assetService.pruneExpiredWarmAssets();
 	}
 
-	#enqueueStaticMaterialization(commitEnvelope: StaticScopePrepCommit): void {
+	#enqueueStaticCommitInstall(commitEnvelope: StaticScopePrepCommit): void {
 		const delta = commitEnvelope.staticCommit;
 		this.#warnAboutDeferredStaticMaterialCoverage(delta);
-		const commit = this.#trackStaticMaterializationCommit(delta);
-		this.#staticMaterializationQueue = this.#staticMaterializationQueue
+		const commit = this.#trackStaticCommitInstall(delta);
+		this.#staticCommitInstallQueue = this.#staticCommitInstallQueue
 			.then(() => {
 				commit.phase = "materializing";
-				return this.#materializeStaticCommit(commitEnvelope);
+				return this.#installStaticCommit(commitEnvelope);
 			})
 			.catch((error: unknown) => {
-				this.#recordStaticMaterializationFailure(delta, error);
+				this.#recordStaticCommitInstallFailure(delta, error);
 			});
 	}
 
-	#trackStaticMaterializationCommit(
+	#trackStaticCommitInstall(
 		delta: StaticCoordinatorCommitDelta,
-	): MutableStaticMaterializationCommit {
-		const commit: MutableStaticMaterializationCommit = {
+	): MutableStaticCommitInstall {
+		const commit: MutableStaticCommitInstall = {
 			commitId: delta.commitId,
 			phase: "queued",
 			revision: delta.revision,
 			staticBatchId: delta.staticBatchId,
 		};
-		this.#staticMaterializationCommits.set(delta.commitId, commit);
+		this.#staticCommitInstallCommits.set(delta.commitId, commit);
 		return commit;
 	}
 
-	#createStaticMaterializationCommitSnapshots(
-		...phases: StaticMaterializationCommitPhase[]
-	): StaticMaterializationCommitSnapshot[] {
+	#createStaticCommitInstallCommitSnapshots(
+		...phases: StaticCommitInstallPhase[]
+	): StaticCommitInstallCommitSnapshot[] {
 		const phaseSet = new Set(phases);
-		return Array.from(this.#staticMaterializationCommits.values())
+		return Array.from(this.#staticCommitInstallCommits.values())
 			.filter((commit) => phaseSet.has(commit.phase))
-			.map(toStaticMaterializationCommitSnapshot);
+			.map(toStaticCommitInstallCommitSnapshot);
 	}
 
 	#warnAboutDeferredStaticMaterialCoverage(
@@ -2023,7 +2022,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		}
 	}
 
-	async #materializeStaticCommit(
+	async #installStaticCommit(
 		commitEnvelope: StaticScopePrepCommit,
 	): Promise<void> {
 		const delta = commitEnvelope.staticCommit;
@@ -2036,33 +2035,33 @@ class ClientRuntimeImpl implements ClientRuntime {
 			return;
 		}
 
-		const materialized = materializeStaticCommit({
+		const installed = installStaticCommit({
 			commit: delta,
 			textureUpdate,
 		});
-		this.#updateMaterializedDrawUnits(delta, materialized);
-		this.#clearStaticLayersForRemovedResources(materialized.removedResources);
-		if (materialized.textureUpdate) {
-			this.#renderer.applyTexturePlacementUpdate(materialized.textureUpdate);
+		this.#updateInstalledDrawUnits(delta, installed);
+		this.#clearStaticLayersForRemovedResources(installed.removedResources);
+		if (installed.textureUpdate) {
+			this.#renderer.applyTexturePlacementUpdate(installed.textureUpdate);
 		}
 		this.#textureManager.pinTextureResourceDependencies(
 			delta.textureDependencies,
 		);
-		this.#applyMaterializedStaticLayers(delta, materialized);
+		this.#applyInstalledStaticLayers(delta, installed);
 		this.#applyEnvCellSystemLayerPublications(
-			createEnvCellSystemLayerPublications(delta, materialized),
+			createEnvCellSystemLayerPublications(delta, installed),
 		);
 		this.#refreshEnvCellResourceMembership();
 		this.#warnAboutStaticFallbacks(delta);
-		this.#staticSceneQuery.removeStaticResources(materialized.removedResources);
+		this.#staticSceneQuery.removeStaticResources(installed.removedResources);
 		this.#staticSceneQuery.applyStaticPeerRecords({
 			envCellStaticObjectPlacementRecords:
 				delta.envCellStaticObjectPlacementRecords,
-			portalGraphs: materialized.staticPortalGraphs,
-			portalInteriorRecords: materialized.staticPortalInteriorRecords,
-			sourceMappings: materialized.staticSourceMappings,
-			spatialRecords: materialized.staticSpatialRecords,
-			visibilityRecords: materialized.staticVisibilityRecords,
+			portalGraphs: installed.staticPortalGraphs,
+			portalInteriorRecords: installed.staticPortalInteriorRecords,
+			sourceMappings: installed.staticSourceMappings,
+			spatialRecords: installed.staticSpatialRecords,
+			visibilityRecords: installed.staticVisibilityRecords,
 		});
 		this.#recordDynamicPlacementTextureBatchIds(
 			delta.staticBatchId,
@@ -2076,29 +2075,29 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#enqueueDynamicRendererResourceSync();
 		this.#updateRenderPassPlan();
 		this.#refreshSceneDebugOverlay();
-		this.#markStaticMaterializationCommit(delta, "materialized");
+		this.#markStaticCommitInstall(delta, "materialized");
 		this.#staticCoordinator.markCommitMaterialized(delta);
-		this.#committedStaticMaterializations = appendBounded(
-			this.#committedStaticMaterializations,
-			toStaticMaterializationCommitSnapshot(
-				this.#requireStaticMaterializationCommit(delta.commitId),
+		this.#committedStaticCommitInstalls = appendBounded(
+			this.#committedStaticCommitInstalls,
+			toStaticCommitInstallCommitSnapshot(
+				this.#requireStaticCommitInstall(delta.commitId),
 			),
-			STATIC_MATERIALIZATION_COMMIT_DIAGNOSTICS_LIMIT,
+			STATIC_COMMIT_INSTALL_DIAGNOSTICS_LIMIT,
 		);
 		this.#maybeEmitSceneInterestSettled();
 	}
 
-	#recordStaticMaterializationFailure(
+	#recordStaticCommitInstallFailure(
 		delta: StaticCoordinatorCommitDelta,
 		error: unknown,
 	): void {
 		const message = error instanceof Error ? error.message : String(error);
-		this.#markStaticMaterializationCommit(delta, "failed");
+		this.#markStaticCommitInstall(delta, "failed");
 		this.#staticCoordinator.markCommitMaterializationFailed(delta, message);
 		this.#diagnostics.warn({
 			commitId: delta.commitId,
 			error,
-			kind: "static-materialization-failed",
+			kind: "static-commit-install-failed",
 			message,
 			revision: delta.revision,
 			staticBatchId: delta.staticBatchId,
@@ -2106,19 +2105,17 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#maybeEmitSceneInterestSettled();
 	}
 
-	#markStaticMaterializationCommit(
+	#markStaticCommitInstall(
 		delta: StaticCoordinatorCommitDelta,
-		phase: StaticMaterializationCommitPhase,
+		phase: StaticCommitInstallPhase,
 	): void {
-		this.#requireStaticMaterializationCommit(delta.commitId).phase = phase;
+		this.#requireStaticCommitInstall(delta.commitId).phase = phase;
 	}
 
-	#requireStaticMaterializationCommit(
-		commitId: string,
-	): MutableStaticMaterializationCommit {
-		const commit = this.#staticMaterializationCommits.get(commitId);
+	#requireStaticCommitInstall(commitId: string): MutableStaticCommitInstall {
+		const commit = this.#staticCommitInstallCommits.get(commitId);
 		if (!commit) {
-			throw new Error(`Missing static materialization commit ${commitId}.`);
+			throw new Error(`Missing static commit install ${commitId}.`);
 		}
 		return commit;
 	}
@@ -2257,27 +2254,27 @@ class ClientRuntimeImpl implements ClientRuntime {
 		}
 	}
 
-	#updateMaterializedDrawUnits(
+	#updateInstalledDrawUnits(
 		delta: StaticCoordinatorCommitDelta,
-		materialized: StaticMaterializationResult,
+		installed: StaticCommitInstallResult,
 	): void {
 		for (const removedDrawUnitId of collectStaticDrawUnitResourceIds(
 			delta.removedResources,
 		)) {
-			this.#materializedDrawUnitsById.delete(removedDrawUnitId);
+			this.#installedDrawUnitsById.delete(removedDrawUnitId);
 		}
-		for (const drawUnit of materialized.materializedDrawUnits) {
-			this.#materializedDrawUnitsById.set(drawUnit.drawUnitId, drawUnit);
+		for (const drawUnit of installed.installedDrawUnits) {
+			this.#installedDrawUnitsById.set(drawUnit.drawUnitId, drawUnit);
 		}
 	}
 
-	#applyMaterializedStaticLayers(
+	#applyInstalledStaticLayers(
 		delta: StaticCoordinatorCommitDelta,
-		materialized: StaticMaterializationResult,
+		installed: StaticCommitInstallResult,
 	): void {
-		for (const payload of createMaterializedLandblockLayerPayloads(
+		for (const payload of createInstalledLandblockLayerPayloads(
 			delta,
-			materialized,
+			installed,
 		)) {
 			this.#installStaticLayer(payload);
 		}
@@ -2443,7 +2440,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 
 	#refreshEnvCellResourceMembership(): void {
 		const nextMembership = createEnvCellResourceMembershipSnapshot(
-			this.#materializedDrawUnitsById.values(),
+			this.#installedDrawUnitsById.values(),
 		);
 		if (
 			envCellResourceMembershipSnapshotsEqual(
@@ -2677,7 +2674,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			return {
 				kind: "unsupported-static-selection-rendering",
 				reason:
-					"Env-cell portal selections are debug overlay evidence and are not materialized static draw units.",
+					"Env-cell portal selections are debug overlay evidence and are not installed static draw units.",
 			};
 		}
 
@@ -2703,7 +2700,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 				source === null
 					? "selected outdoor static source diagnostics were not retained"
 					: drawUnits.length === 0
-						? "no committed materialized static object draw units referenced this selection"
+						? "no committed installed static object draw units referenced this selection"
 						: null,
 		};
 	}
@@ -2716,7 +2713,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	): readonly MatchedStaticSelectionDrawUnitDiagnostics[] {
 		const drawUnits: MatchedStaticSelectionDrawUnitDiagnostics[] = [];
 
-		for (const drawUnit of this.#materializedDrawUnitsById.values()) {
+		for (const drawUnit of this.#installedDrawUnitsById.values()) {
 			if (drawUnit.kind !== "static-object-geometry") {
 				continue;
 			}
@@ -3309,9 +3306,9 @@ function createTerrainTextureDiagnosticsReport(
 	return report;
 }
 
-function createMaterializedLandblockLayerPayloads(
+function createInstalledLandblockLayerPayloads(
 	delta: StaticCoordinatorCommitDelta,
-	materialized: StaticMaterializationResult,
+	installed: StaticCommitInstallResult,
 ): readonly (
 	| TerrainLayerPayload
 	| OutdoorBuildingsLayerPayload
@@ -3341,7 +3338,7 @@ function createMaterializedLandblockLayerPayloads(
 		OutdoorGeneratedSceneryLayerPayload["drawUnits"]
 	>();
 
-	for (const drawUnit of materialized.materializedDrawUnits) {
+	for (const drawUnit of installed.installedDrawUnits) {
 		if (drawUnit.kind === "terrain-geometry") {
 			terrainByLandblock.set(drawUnit.landblockId, [
 				...(terrainByLandblock.get(drawUnit.landblockId) ?? []),
@@ -3373,7 +3370,7 @@ function createMaterializedLandblockLayerPayloads(
 			]);
 		}
 	}
-	for (const instance of materialized.staticObjectRenderInstances) {
+	for (const instance of installed.staticObjectRenderInstances) {
 		if (instance.domain === "outdoor-generated-scenery") {
 			if (!generatedSceneryByLandblock.has(instance.landblockId)) {
 				generatedSceneryByLandblock.set(instance.landblockId, []);
@@ -3404,12 +3401,12 @@ function createMaterializedLandblockLayerPayloads(
 					coverage.domain === "outdoor-terrain" &&
 					coverage.landblockId === landblockId,
 			),
-			sourceMappingRecords: materialized.staticSourceMappings.filter(
+			sourceMappingRecords: installed.staticSourceMappings.filter(
 				(record) =>
 					record.owner.kind === "draw-unit" &&
 					drawUnitIds.has(record.owner.drawUnitId),
 			),
-			spatialRecords: materialized.staticSpatialRecords.filter(
+			spatialRecords: installed.staticSpatialRecords.filter(
 				(record) =>
 					record.owner.kind === "draw-unit" &&
 					drawUnitIds.has(record.owner.drawUnitId),
@@ -3434,13 +3431,13 @@ function createMaterializedLandblockLayerPayloads(
 					coverage.domain === "outdoor-buildings" &&
 					coverage.landblockId === landblockId,
 			),
-			sourceMappingRecords: materialized.staticSourceMappings.filter(
+			sourceMappingRecords: installed.staticSourceMappings.filter(
 				(record) =>
 					record.owner.kind === "layer-owner" &&
 					record.owner.domain === "outdoor-buildings" &&
 					record.owner.key.landblockId === landblockId,
 			),
-			spatialRecords: materialized.staticSpatialRecords.filter(
+			spatialRecords: installed.staticSpatialRecords.filter(
 				(record) =>
 					record.owner.kind === "layer-owner" &&
 					record.owner.domain === "outdoor-buildings" &&
@@ -3466,13 +3463,13 @@ function createMaterializedLandblockLayerPayloads(
 					coverage.domain === "outdoor-explicit-objects" &&
 					coverage.landblockId === landblockId,
 			),
-			sourceMappingRecords: materialized.staticSourceMappings.filter(
+			sourceMappingRecords: installed.staticSourceMappings.filter(
 				(record) =>
 					record.owner.kind === "layer-owner" &&
 					record.owner.domain === "outdoor-explicit-objects" &&
 					record.owner.key.landblockId === landblockId,
 			),
-			spatialRecords: materialized.staticSpatialRecords.filter(
+			spatialRecords: installed.staticSpatialRecords.filter(
 				(record) =>
 					record.owner.kind === "layer-owner" &&
 					record.owner.domain === "outdoor-explicit-objects" &&
@@ -3491,14 +3488,14 @@ function createMaterializedLandblockLayerPayloads(
 				landblockId,
 				delta.revision,
 			),
-			instancedObjectInstances: materialized.staticObjectRenderInstances.filter(
+			instancedObjectInstances: installed.staticObjectRenderInstances.filter(
 				(instance) =>
 					instance.domain === "outdoor-generated-scenery" &&
 					instance.landblockId === landblockId,
 			),
-			instancedObjectResources: materialized.staticObjectVisualResources.filter(
+			instancedObjectResources: installed.staticObjectVisualResources.filter(
 				(resource) =>
-					materialized.staticObjectRenderInstances.some(
+					installed.staticObjectRenderInstances.some(
 						(instance) =>
 							instance.domain === "outdoor-generated-scenery" &&
 							instance.landblockId === landblockId &&
@@ -3512,13 +3509,13 @@ function createMaterializedLandblockLayerPayloads(
 					coverage.domain === "outdoor-generated-scenery" &&
 					coverage.landblockId === landblockId,
 			),
-			sourceMappingRecords: materialized.staticSourceMappings.filter(
+			sourceMappingRecords: installed.staticSourceMappings.filter(
 				(record) =>
 					record.owner.kind === "layer-owner" &&
 					record.owner.domain === "outdoor-generated-scenery" &&
 					record.owner.key.landblockId === landblockId,
 			),
-			spatialRecords: materialized.staticSpatialRecords.filter(
+			spatialRecords: installed.staticSpatialRecords.filter(
 				(record) =>
 					record.owner.kind === "layer-owner" &&
 					record.owner.domain === "outdoor-generated-scenery" &&
@@ -3589,9 +3586,9 @@ function appendBounded<T>(entries: readonly T[], entry: T, limit: number): T[] {
 	return [...entries, entry].slice(-limit);
 }
 
-function toStaticMaterializationCommitSnapshot(
-	commit: MutableStaticMaterializationCommit,
-): StaticMaterializationCommitSnapshot {
+function toStaticCommitInstallCommitSnapshot(
+	commit: MutableStaticCommitInstall,
+): StaticCommitInstallCommitSnapshot {
 	return {
 		commitId: commit.commitId,
 		phase: commit.phase,

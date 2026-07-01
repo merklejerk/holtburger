@@ -19,7 +19,7 @@ import type {
 	StaticVisibilityRecord,
 	StructuredInteriorGeometryStaticDrawUnit,
 } from "../static/contracts";
-import type { StaticMaterializationResult } from "./static-materializer";
+import type { StaticCommitInstallResult } from "./static-commit-installer";
 
 export interface EnvCellSystemLayerPublication {
 	readonly payload: EnvCellSystemLayerPayload;
@@ -30,7 +30,7 @@ interface EnvCellFacts {
 	readonly envCellStaticObjectDrawUnits: EnvCellSystemLayerPayload["envCellStaticObjectDrawUnits"];
 	readonly landblockId: number;
 	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
-	readonly materializedRevision: number;
+	readonly installedRevision: number;
 	readonly portalApertureResources: readonly StaticPortalApertureResource[];
 	readonly portalGraphs: readonly StaticPortalGraphRecord[];
 	readonly portalInteriorRecords: readonly StaticPortalInteriorRecord[];
@@ -43,9 +43,9 @@ interface EnvCellFacts {
 
 export function createEnvCellSystemLayerPublications(
 	delta: StaticCoordinatorCommitDelta,
-	materialized: StaticMaterializationResult,
+	installed: StaticCommitInstallResult,
 ): readonly EnvCellSystemLayerPublication[] {
-	return [...createEnvCellFactsByLandblock(delta, materialized).entries()].map(
+	return [...createEnvCellFactsByLandblock(delta, installed).entries()].map(
 		([landblockId, envCellFacts]) => {
 			const portalProjectionRecords = createPortalProjectionRecords({
 				envCellFacts,
@@ -72,8 +72,7 @@ export function createEnvCellSystemLayerPublications(
 					resourceMembership: createResourceMembership(envCellFacts),
 					sourceMappingRecords: envCellFacts.sourceMappingRecords,
 					spatialRecords: envCellFacts.spatialRecords,
-					structuredInteriorDrawUnits:
-						envCellFacts.structuredInteriorDrawUnits,
+					structuredInteriorDrawUnits: envCellFacts.structuredInteriorDrawUnits,
 					textureUses: envCellFacts.textureUses,
 					visibilityRecords: envCellFacts.visibilityRecords,
 				},
@@ -84,26 +83,24 @@ export function createEnvCellSystemLayerPublications(
 
 function createEnvCellFactsByLandblock(
 	delta: StaticCoordinatorCommitDelta,
-	materialized: StaticMaterializationResult,
+	installed: StaticCommitInstallResult,
 ): ReadonlyMap<number, EnvCellFacts> {
-	const landblockIds = collectEnvCellLandblockIds(materialized);
+	const landblockIds = collectEnvCellLandblockIds(installed);
 	const factsByLandblock = new Map<number, EnvCellFacts>();
 	for (const landblockId of landblockIds) {
-		const envCellStaticObjectDrawUnits =
-			materialized.materializedDrawUnits.filter(
-				(
-					drawUnit,
-				): drawUnit is EnvCellFacts["envCellStaticObjectDrawUnits"][number] =>
-					drawUnit.kind === "static-object-geometry" &&
-					drawUnit.domain === "env-cell-system" &&
-					drawUnit.landblockId === landblockId,
-			);
-		const structuredInteriorDrawUnits =
-			materialized.materializedDrawUnits.filter(
-				(drawUnit): drawUnit is StructuredInteriorGeometryStaticDrawUnit =>
-					drawUnit.kind === "structured-interior-geometry" &&
-					drawUnit.landblockId === landblockId,
-			);
+		const envCellStaticObjectDrawUnits = installed.installedDrawUnits.filter(
+			(
+				drawUnit,
+			): drawUnit is EnvCellFacts["envCellStaticObjectDrawUnits"][number] =>
+				drawUnit.kind === "static-object-geometry" &&
+				drawUnit.domain === "env-cell-system" &&
+				drawUnit.landblockId === landblockId,
+		);
+		const structuredInteriorDrawUnits = installed.installedDrawUnits.filter(
+			(drawUnit): drawUnit is StructuredInteriorGeometryStaticDrawUnit =>
+				drawUnit.kind === "structured-interior-geometry" &&
+				drawUnit.landblockId === landblockId,
+		);
 		factsByLandblock.set(landblockId, {
 			envCellStaticObjectPlacementRecords:
 				delta.envCellStaticObjectPlacementRecords.filter(
@@ -119,8 +116,8 @@ function createEnvCellFactsByLandblock(
 					record.domain === "env-cell-system" &&
 					record.landblockId === landblockId,
 			),
-			materializedRevision: delta.revision,
-			portalApertureResources: materialized.portalApertureResources.filter(
+			installedRevision: delta.revision,
+			portalApertureResources: installed.portalApertureResources.filter(
 				(resource) =>
 					resource.landblockId === landblockId &&
 					(resource.sourceDomain === "env-cell-system" ||
@@ -128,21 +125,21 @@ function createEnvCellFactsByLandblock(
 							(range) => range.sourceKind === "building-transition",
 						)),
 			),
-			portalGraphs: materialized.staticPortalGraphs.filter(
+			portalGraphs: installed.staticPortalGraphs.filter(
 				(record) =>
 					record.owner.domain === "env-cell-system" &&
 					record.landblockId === landblockId,
 			),
-			portalInteriorRecords: materialized.staticPortalInteriorRecords.filter(
+			portalInteriorRecords: installed.staticPortalInteriorRecords.filter(
 				(record) => record.landblockId === landblockId,
 			),
-			sourceMappingRecords: materialized.staticSourceMappings.filter(
+			sourceMappingRecords: installed.staticSourceMappings.filter(
 				(record) =>
 					record.owner.kind === "layer-owner" &&
 					record.owner.domain === "env-cell-system" &&
 					record.owner.key.landblockId === landblockId,
 			),
-			spatialRecords: materialized.staticSpatialRecords.filter(
+			spatialRecords: installed.staticSpatialRecords.filter(
 				(record) =>
 					record.owner.kind === "layer-owner" &&
 					record.owner.domain === "env-cell-system" &&
@@ -152,7 +149,7 @@ function createEnvCellFactsByLandblock(
 			textureUses: delta.textureUses.filter(
 				(textureUse) => textureUse.domain === "env-cell-system",
 			),
-			visibilityRecords: materialized.staticVisibilityRecords.filter(
+			visibilityRecords: installed.staticVisibilityRecords.filter(
 				(record) => record.landblockId === landblockId,
 			),
 		});
@@ -183,7 +180,7 @@ function createEnvCellSystemLayerGenerationId(options: {
 		kind: "env-cell-system",
 		landblockId: options.landblockId,
 		sourceKey: [
-			`env:${options.envCellFacts.materializedRevision}`,
+			`env:${options.envCellFacts.installedRevision}`,
 			`portal-apertures:${options.envCellFacts.portalApertureResources
 				.flatMap((resource) => resource.ranges.map((range) => range.rangeId))
 				.sort(compareStrings)
@@ -257,20 +254,20 @@ function getOrCreateMembership(
 }
 
 function collectEnvCellLandblockIds(
-	materialized: StaticMaterializationResult,
+	installed: StaticCommitInstallResult,
 ): readonly number[] {
 	return uniqueNumbers([
-		...materialized.materializedDrawUnits.flatMap((drawUnit) =>
+		...installed.installedDrawUnits.flatMap((drawUnit) =>
 			(drawUnit.kind === "static-object-geometry" &&
 				drawUnit.domain === "env-cell-system") ||
 			drawUnit.kind === "structured-interior-geometry"
 				? [drawUnit.landblockId]
 				: [],
 		),
-		...materialized.staticPortalInteriorRecords.map(
+		...installed.staticPortalInteriorRecords.map(
 			(record) => record.landblockId,
 		),
-		...materialized.staticPortalGraphs.flatMap((record) =>
+		...installed.staticPortalGraphs.flatMap((record) =>
 			record.owner.domain === "env-cell-system" ? [record.landblockId] : [],
 		),
 	]);

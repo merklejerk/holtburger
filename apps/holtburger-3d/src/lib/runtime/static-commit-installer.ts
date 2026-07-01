@@ -16,13 +16,13 @@ import type {
 	StaticVisibilityRecord,
 } from "../static/contracts";
 
-export interface StaticMaterializationInput {
+export interface StaticCommitInstallInput {
 	readonly commit: StaticCoordinatorCommitDelta;
 	readonly textureUpdate: TexturePlacementUpdate | null;
 }
 
-export interface StaticMaterializationResult {
-	readonly materializedDrawUnits: readonly StaticDrawUnit[];
+export interface StaticCommitInstallResult {
+	readonly installedDrawUnits: readonly StaticDrawUnit[];
 	readonly portalApertureResources: readonly StaticPortalApertureResource[];
 	readonly removedResources: readonly StaticResourceKey[];
 	readonly staticObjectRenderInstances: readonly StaticObjectRenderInstance[];
@@ -35,16 +35,16 @@ export interface StaticMaterializationResult {
 	readonly textureUpdate: TexturePlacementUpdate | null;
 }
 
-export function materializeStaticCommit(
-	input: StaticMaterializationInput,
-): StaticMaterializationResult {
+export function installStaticCommit(
+	input: StaticCommitInstallInput,
+): StaticCommitInstallResult {
 	assertTexturedDrawUnitsHaveCommittedBindings(
 		input.commit.addedDrawUnits,
 		input.textureUpdate?.textureBindings ?? [],
 	);
 
 	return {
-		materializedDrawUnits: input.commit.addedDrawUnits,
+		installedDrawUnits: input.commit.addedDrawUnits,
 		portalApertureResources: input.commit.addedPortalApertureResources ?? [],
 		removedResources: input.commit.removedResources,
 		staticObjectRenderInstances: input.commit.staticObjectRenderInstances,

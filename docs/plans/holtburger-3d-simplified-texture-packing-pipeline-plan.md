@@ -1210,7 +1210,7 @@ Acceptance criteria:
 - [x] Phase 4: move static object placement planning before static object baking.
 - [x] Phase 5: remove main-thread static object fine splitting.
 - [x] Phase 6: bring dynamic visual baking onto the same placement contract.
-- [ ] Resteering 2: review cutover health.
+- [x] Resteering 2: review cutover health.
 - [ ] Phase 7: bring terrain onto the same placement-before-bake contract.
 - [ ] Phase 8: add on-demand zombie reclaim.
 - [ ] Resteering 3: review reclaim and renderer cleanup readiness.
@@ -1343,6 +1343,32 @@ Acceptance criteria:
 - Phase 6 intentionally duplicates dynamic material planning between pre-bake texture planning and
   bake-time render-part construction. This mirrors the Phase 4 static object concession and keeps the
   planner from becoming a resolver-side mini baker before the final contract shape is proven.
+- Resteering 2 kept the remaining plan direction intact. Static objects and both dynamic paths now
+  use placement-before-bake snapshots; terrain is the only major rendering domain still relying on
+  post-bake texture placement to discover page legality problems.
+- Resteering 2 found no new orchestration blocker before terrain. `StaticCoordinator` source-ready
+  work is already the right closure boundary for terrain placement intents, so Phase 7 should append
+  terrain intents to the existing source-ready work instead of adding a terrain-only queue or runtime
+  branch.
+- Resteering 2 found that main-thread static materialization is no longer baker-like, but the
+  `static-materializer.ts` name is now misleading. It validates committed bindings and forwards
+  baker-authored resources directly. Rename or collapse it during cleanup; do not re-expand it into
+  geometry refinement.
+- Resteering 2 found that `TextureManager` still owns legacy owner-based renderer upload adapters
+  (`applyStaticCommitDelta(...)`, `applyDynamicTextureUseDelta(...)`, role-page slot assignment, and
+  `TextureUsePlacement` output). Keep them only as renderer binding/update bridges while terrain
+  moves before bake; remove or shrink them after terrain no longer needs post-pack fallback checks.
+- Resteering 2 confirmed `textureUseId` is more obviously migration vocabulary, not a durable packer
+  concept. Dynamic ids now had to be scoped by renderer resource to avoid ownerless-placement
+  collisions, which strengthens the Phase 10 cleanup case.
+- Resteering 2 found draw-unit count/perf evidence is still indirect without representative scene
+  measurements. This does not block Phase 7 because the north star explicitly accepts more draw
+  units for simpler legality, but Phase 7 tests should cover partitioning behavior so draw count
+  changes are explainable.
+- Resteering 2 decided that terrain debug-flat fallback should remain only for genuinely unsupported
+  or missing terrain material source facts. After Phase 7, page overflow caused by final atlas
+  assignments should be baked into additional terrain draw units, not diagnosed as an expected
+  renderer binding fallback.
 - Dry run split `TextureManager` responsibilities into placement and pinning. Current owner leases
   require post-bake draw-unit/resource owners, but pre-bake placement intents intentionally do not
   have owners yet.
@@ -1380,6 +1406,18 @@ Acceptance criteria:
   again in the baker to construct draw units. This is acceptable for the cutover because the logic is
   shared and deterministic, but future cleanup should avoid meaningful duplicated CPU work if it
   shows up in profiling or complicates diagnostics.
+- Phase 6 introduced the same duplicated material-planning concession for dynamic visuals. If Phase 7
+  needs similar terrain planning duplication, keep it contained to terrain planner/baker helpers and
+  record the cleanup target rather than leaking material planning into `TextureManager`.
+- `static-materializer.ts` is now a direct install/validation helper with a stale name. Cleanup should
+  either rename it around static commit installation or inline the small validation once terrain no
+  longer depends on the old materialization terminology in tests and diagnostics.
+- `TextureManager` still emits renderer `TextureUsePlacement` records and owns object/terrain
+  role-page slot assignment as part of the old binding update path. This is acceptable until terrain
+  moves before bake, but it should not become the long-term source of renderer legality after bakers
+  own page partitioning.
+- Runtime diagnostics and tests still use `materialized` naming for direct-installed static
+  resources. Treat these as cleanup debt, not architectural terms to preserve.
 
 ## Risks and Concessions
 

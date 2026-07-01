@@ -13,6 +13,7 @@ import {
 	type ObjectVisualGeometryBuffer,
 	type ObjectVisualGeometryRecipe,
 	type ObjectVisualMaterialRecipe,
+	type ObjectVisualMaterialRecipeBase,
 	type ObjectVisualPartRecipe,
 	type ObjectVisualRecipeBundle,
 	type ObjectVisualTextureRecipe,
@@ -101,15 +102,12 @@ describe("object visual recipe bundle contracts", () => {
 
 	it("models unsupported materials as non-renderable recipe records", () => {
 		const unsupported: ObjectVisualMaterialRecipe = {
+			...createMaterialRecipeBase(),
 			family: "unsupported",
 			pass: "opaque",
 			reason: "material family is not implemented",
 		};
-		const renderable: ObjectVisualMaterialRecipe = {
-			diffuseColor: [1, 1, 1, 1],
-			family: "direct-color",
-			pass: "opaque",
-		};
+		const renderable = createDirectColorMaterialRecipe([1, 1, 1, 1]);
 
 		expect(isRenderableObjectVisualMaterialRecipe(unsupported)).toBe(false);
 		expect(isRenderableObjectVisualMaterialRecipe(renderable)).toBe(true);
@@ -206,14 +204,7 @@ describe("object visual recipe bundle contracts", () => {
 			]),
 			geometryRecipes: new Map([[geometryRecipeId, geometryRecipe]]),
 			materialRecipes: new Map([
-				[
-					materialRecipeId,
-					{
-						diffuseColor: [1, 1, 1, 1],
-						family: "direct-color",
-						pass: "opaque",
-					},
-				],
+				[materialRecipeId, createDirectColorMaterialRecipe([1, 1, 1, 1])],
 			]),
 			partInstances: [
 				{
@@ -251,3 +242,42 @@ describe("object visual recipe bundle contracts", () => {
 		);
 	});
 });
+
+function createDirectColorMaterialRecipe(
+	materialColor: readonly [number, number, number, number],
+): ObjectVisualMaterialRecipe {
+	return {
+		...createMaterialRecipeBase(),
+		family: "direct-color",
+		materialColor,
+		pass: "opaque",
+	};
+}
+
+function createMaterialRecipeBase(): Omit<
+	ObjectVisualMaterialRecipeBase,
+	"family"
+> {
+	return {
+		alphaTest: 0,
+		detailTextureTiling: 1,
+		indexedClipThreshold: 0,
+		materialColor: [1, 1, 1, 1],
+		materialEmissiveColor: [0, 0, 0],
+		paletteFirstIndex: 0,
+		pass: "opaque",
+		primaryTextureWrapMode: "repeat",
+		renderState: {
+			blend: {
+				dstFactor: null,
+				enabled: false,
+				mode: "opaque",
+				srcFactor: null,
+			},
+			depthTest: true,
+			depthWrite: true,
+		},
+		textureRoleLayoutKey: "none",
+		textureRoleSchemaKey: "none",
+	};
+}

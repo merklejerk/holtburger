@@ -1,3 +1,5 @@
+import type { VisualGeometryRenderState } from "./visual-geometry";
+
 type Brand<TValue, TBrand extends string> = TValue & {
 	readonly __brand: TBrand;
 };
@@ -64,6 +66,10 @@ export type ObjectVisualMaterialPass =
 	| "opaque"
 	| "transparent";
 
+export type ObjectVisualIndexedTextureFormat = "index16" | "p8";
+
+export type ObjectVisualTextureWrapMode = "clamp" | "repeat";
+
 /** Metadata-only texture need authored by resolvers before placement or packing. */
 export interface ObjectVisualTextureRecipe {
 	readonly usage: ObjectVisualTextureUsage;
@@ -94,18 +100,38 @@ export type ObjectVisualMaterialRecipe =
 	| ObjectVisualUnsupportedMaterialRecipe;
 
 export interface ObjectVisualMaterialRecipeBase {
+	/** Alpha test threshold consumed by the renderer material table. */
+	readonly alphaTest: number;
+	/** Detail texture repetition scalar for object-style material shaders. */
+	readonly detailTextureTiling: number;
 	readonly family: ObjectVisualMaterialFamily;
+	/** Palette-index alpha clip threshold consumed by indexed material shaders. */
+	readonly indexedClipThreshold: number;
+	/** Renderer-visible diffuse/material color after setup/model overrides are flattened. */
+	readonly materialColor: readonly [number, number, number, number];
+	/** Renderer-visible emissive color after setup/model overrides are flattened. */
+	readonly materialEmissiveColor: readonly [number, number, number];
 	readonly pass: ObjectVisualMaterialPass;
+	/** Palette first-index window for indexed material recipes. */
+	readonly paletteFirstIndex: number;
+	/** Texture sampling mode for the primary material texture. */
+	readonly primaryTextureWrapMode: ObjectVisualTextureWrapMode;
+	/** Blend/depth state selected during resolver material planning. */
+	readonly renderState: VisualGeometryRenderState;
+	/** Material texture-role layout key retained for renderer-legal partitioning. */
+	readonly textureRoleLayoutKey: string;
+	/** Material texture-role schema key retained for renderer-legal partitioning. */
+	readonly textureRoleSchemaKey: string;
 }
 
 export interface ObjectVisualDirectColorMaterialRecipe extends ObjectVisualMaterialRecipeBase {
-	readonly diffuseColor: readonly [number, number, number, number];
 	readonly family: "direct-color";
 }
 
 export interface ObjectVisualIndexedColorMaterialRecipe extends ObjectVisualMaterialRecipeBase {
 	readonly colorTextureRecipeId: ObjectVisualTextureRecipeId;
 	readonly family: "indexed-color";
+	readonly indexedTextureFormat: ObjectVisualIndexedTextureFormat;
 	readonly paletteTextureRecipeId: ObjectVisualTextureRecipeId;
 }
 

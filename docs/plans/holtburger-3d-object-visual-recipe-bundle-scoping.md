@@ -1,6 +1,6 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation in progress. Phases 0-9D are complete. This document defines the target
+Status: implementation in progress. Phases 0-9E are complete. This document defines the target
 model, north stars, risk surface, and phased cutover plan for replacing static-vs-dynamic object
 visual worker bifurcation with a shared object-like visual recipe graph.
 
@@ -1669,6 +1669,8 @@ Implementation notes after Phase 9D:
 
 ### Phase 9E: Recipe-Grade Material Planning Contract
 
+Status: complete.
+
 Goal: make material recipes carry the renderable material facts currently trapped in static material
 plans, without adding material diagnostics to the recipe model.
 
@@ -1706,6 +1708,29 @@ Deletion criteria:
 
 - Delete or narrow static-only material adapter paths once no production caller needs
   `ObjectVisualMaterialPlan` after resolver normalization.
+
+Implementation notes after Phase 9E:
+
+- `ObjectVisualMaterialRecipeBase` now carries renderer-grade material table facts: alpha test,
+  indexed clip threshold, material color, emissive color, palette first index, primary texture wrap
+  mode, detail tiling, render state, and texture role layout/schema keys.
+- Direct-color recipes now use the shared `materialColor` field instead of a separate diffuse-color
+  field. This avoids two interdependent color fields in the recipe contract.
+- Indexed-color recipes now carry their indexed texture format explicitly. The baker no longer
+  hardcodes `p8`.
+- `bakeObjectVisuals` now builds material table entries from material recipe facts directly instead
+  of deriving render state, alpha defaults, wrap mode, palette window, detail tiling, or emissive
+  color from `pass` and hardcoded fallbacks.
+- The generic baker partition key now includes material texture role layout/schema keys from the
+  recipe, so renderer-incompatible material layouts cannot batch only because their family, pass,
+  state, and concrete texture ids match.
+- Material diagnostics and coverage summaries remain outside the recipe model. Unsupported material
+  recipes still warn and skip.
+- Debt retained intentionally: `ObjectVisualMaterialPlan` still exists as the current static material
+  classification product. Phase 9G must make static resolvers emit the richer material recipes
+  directly, then delete or narrow static-only material adapter paths.
+- Verification:
+  `npm --prefix apps/holtburger-3d run test:ts -- object-visual-baker object-visual-recipe-bundle`.
 
 ### Phase 9F: Source-Local Static Publication Baking
 

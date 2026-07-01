@@ -486,11 +486,11 @@ function createStaticObjectRecipePublication(options: {
 		};
 	}
 
-	const publication = createStaticObjectPublicationMetadata({
-		owner: createLayerPeerRecordOwner(options.task),
-		payload: options.payload,
-	});
 	try {
+		const publication = createStaticObjectPublicationMetadata({
+			owner: createLayerPeerRecordOwner(options.task),
+			payload: options.payload,
+		});
 		return createStaticObjectVisualRecipeInstallPublication({
 			bundle: expansion.resolution.bundle,
 			geometryBuffers: expansion.geometryBuffers,

@@ -50,7 +50,8 @@ import {
 	describeEnvCellCellStructureGeometryIdentity,
 } from "./env-cell-system-geometry-attachments";
 import { bakeStaticObjectBatch } from "../../objects/bake/static-object-batch-baker";
-import { createStaticBakeObjectVisualInstallSet } from "../../bake/object-visual-install-set-publication";
+import { createStaticObjectVisualRecipeInstallPublication } from "../../bake/object-visual-recipe-install-publication";
+import { createObjectVisualInstallSet } from "../../../visual/object-visual-install-set";
 import {
 	createObjectMaterialDrawUnitPartitionKey,
 	splitObjectMaterialPartitionByMaterialTableBudget,
@@ -71,6 +72,7 @@ import {
 	isCurrentlyStageableStaticObjectDataUse,
 	isRenderableObjectVisualMaterialPlan,
 } from "../../objects/bake/static-object-renderability";
+import { createStructuredInteriorVisualBundleExpansion } from "./structured-interior-visual-bundle-producer";
 
 const MAX_STRUCTURED_INTERIOR_MATERIAL_ENTRIES_PER_DRAW = 8;
 const EMPTY_TEXTURE_PLACEMENT_SNAPSHOT: ObjectVisualTexturePlacementSnapshot = {
@@ -92,6 +94,9 @@ interface StructuredInteriorTriangleCandidate {
 interface EnvCellSystemBakeItemResult {
 	readonly drawUnits: readonly StaticDrawUnit[];
 	readonly materialCoverage: StaticMaterialCoverageReport;
+	readonly objectVisualInstallSet: ReturnType<
+		typeof createObjectVisualInstallSet
+	>;
 	readonly portalApertureResources: readonly StaticPortalApertureResource[];
 	readonly envCellStaticObjectPlacementRecords: readonly EnvCellStaticObjectPlacementRecord[];
 	readonly staticPortalGraphs: readonly StaticPortalGraphRecord[];
@@ -132,6 +137,28 @@ export function bakeEnvCellSystem(
 		...itemResults.flatMap((result) => result.textureDependencies),
 		...staticObjectResult.textureDependencies,
 	];
+	const objectVisualInstallSet = createObjectVisualInstallSet({
+		directDrawUnits: [
+			...itemResults.flatMap(
+				(result) => result.objectVisualInstallSet.directDrawUnits,
+			),
+			...staticObjectResult.objectVisualInstallSet.directDrawUnits,
+		],
+		dynamicAnimationPartBindings: [
+			...itemResults.flatMap(
+				(result) => result.objectVisualInstallSet.dynamicAnimationPartBindings,
+			),
+			...staticObjectResult.objectVisualInstallSet.dynamicAnimationPartBindings,
+		],
+		renderInstances: staticObjectResult.objectVisualInstallSet.renderInstances,
+		textureDependencies: [
+			...itemResults.flatMap(
+				(result) => result.objectVisualInstallSet.textureDependencies,
+			),
+			...staticObjectResult.objectVisualInstallSet.textureDependencies,
+		],
+		visualResources: staticObjectResult.objectVisualInstallSet.visualResources,
+	});
 	return {
 		atlasRegistryUpdates: [],
 		buildRevision: Math.max(
@@ -149,14 +176,7 @@ export function bakeEnvCellSystem(
 				(coverage) => coverage.materialCount > 0 || coverage.partitionCount > 0,
 			),
 		],
-		objectVisualInstallSet: createStaticBakeObjectVisualInstallSet({
-			drawUnits,
-			staticObjectRenderInstances:
-				staticObjectResult.staticObjectRenderInstances,
-			staticObjectVisualResources:
-				staticObjectResult.staticObjectVisualResources,
-			textureDependencies,
-		}),
+		objectVisualInstallSet,
 		portalApertureResources: itemResults
 			.flatMap((result) => result.portalApertureResources)
 			.concat(staticObjectResult.portalApertureResources),
@@ -265,6 +285,13 @@ function bakeLandblockEnvCellItem(
 		materialPlansByEnvCellId,
 		placementSnapshot,
 	);
+	const objectVisualInstallSet = createStructuredInteriorObjectVisualInstallSet(
+		{
+			input,
+			payload,
+			task: item.task,
+		},
+	);
 	const portalInteriorRecord = createPortalInteriorRecord(owner, payload);
 
 	return {
@@ -273,6 +300,7 @@ function bakeLandblockEnvCellItem(
 			materialPlansByEnvCellId,
 			payload,
 		}),
+		objectVisualInstallSet,
 		portalApertureResources: payload.portalApertureResources,
 		envCellStaticObjectPlacementRecords:
 			createEnvCellStaticObjectPlacementRecords(owner, payload),
@@ -292,6 +320,72 @@ function bakeLandblockEnvCellItem(
 			placementSnapshot,
 		),
 	};
+}
+
+function createStructuredInteriorObjectVisualInstallSet(options: {
+	readonly input: StaticBakeBatchInput;
+	readonly payload: EnvCellSystemStaticScopePayload;
+	readonly task: StaticBakeTask;
+}): ReturnType<typeof createObjectVisualInstallSet> {
+	const publications = options.payload.envCells.map((envCell) =>
+		createStructuredInteriorVisualBundleExpansion({
+			attachments: options.input.attachments,
+			envCell,
+			payload: options.payload,
+			task: options.task,
+		}),
+	);
+	const installSets = publications.flatMap((publication) => {
+		if (publication.resolution.kind === "missing-dependencies") {
+			console.warn(
+				`Skipped structured interior visual recipe publication for ${options.task.ownerId}; missing ${publication.resolution.missingDependencies
+					.map((dependency) => dependency.sourceId)
+					.join(", ")}.`,
+			);
+			return [];
+		}
+		if (publication.publicationMetadata === null) {
+			return [];
+		}
+		try {
+			return [
+				createStaticObjectVisualRecipeInstallPublication({
+					bundle: publication.resolution.bundle,
+					geometryBuffers: publication.geometryBuffers,
+					metadata: publication.publicationMetadata,
+					renderPartIdPrefix: `${options.task.ownerId}:structured-interior`,
+					texturePlacementSnapshot:
+						publication.resolution.bundle.textureRecipes.size === 0
+							? EMPTY_TEXTURE_PLACEMENT_SNAPSHOT
+							: requireObjectVisualTexturePlacementSnapshot(
+									options.input.texturePlacementSnapshot,
+									"Structured interior visual recipe publication",
+								),
+					textureUseNamespace: "structured-interior-texture",
+					textureUseScopeId: options.task.ownerId,
+				}).installSet,
+			];
+		} catch (error) {
+			console.warn(
+				`Skipped structured interior visual recipe publication for ${options.task.ownerId}: ${error instanceof Error ? error.message : String(error)}.`,
+			);
+			return [];
+		}
+	});
+
+	return createObjectVisualInstallSet({
+		directDrawUnits: installSets.flatMap(
+			(installSet) => installSet.directDrawUnits,
+		),
+		dynamicAnimationPartBindings: installSets.flatMap(
+			(installSet) => installSet.dynamicAnimationPartBindings,
+		),
+		renderInstances: [],
+		textureDependencies: installSets.flatMap(
+			(installSet) => installSet.textureDependencies,
+		),
+		visualResources: [],
+	});
 }
 
 function createStructuredInteriorDrawUnits(

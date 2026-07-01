@@ -1,8 +1,8 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation plan. This document defines the target model, north stars, risk surface, and
-phased cutover plan for replacing static-vs-dynamic object visual worker bifurcation with a shared
-object-like visual recipe graph.
+Status: implementation in progress. Phase 0 is complete. This document defines the target model,
+north stars, risk surface, and phased cutover plan for replacing static-vs-dynamic object visual
+worker bifurcation with a shared object-like visual recipe graph.
 
 ## Purpose
 
@@ -782,6 +782,52 @@ Acceptance criteria:
 - Any behavior that cannot be proven from code or references is recorded before implementation
   proceeds.
 
+Phase 0 completion notes:
+
+- Static outdoor source resolution currently enters through
+  `static/objects/outdoor-static-objects-resolver.ts`, loads landblock outdoor layer and region
+  render profile payloads, resolves selected `gfx_obj`/`setup-model` source closure records, and
+  emits `OutdoorStaticObjectsScopePayload` with source assets, material sources, palette sources,
+  texture refs, material slots, object instances, missing refs, spatial facts, and authored dynamic
+  placements.
+- Dynamic visual source resolution enters through `dynamic/visual-recipe-resolver.ts`. It loads the
+  `setup-model`, resolves animation, optionally creates a `setup-appearance` override key from
+  runtime appearance data, and then reuses `resolveStaticObjectSourceClosure`. The good seam already
+  exists, but the output remains `DynamicEntityRecipe` rather than the shared object visual bundle.
+- `static/objects/static-object-source-closure.ts` is the current normalization choke point for
+  direct `gfx_obj` sources and `setup-model`/`setup-appearance` sources. It creates part facts from
+  direct gfx geometry or setup parts, applies palette/sub-palette overrides, follows material and
+  surface texture refs, and records missing static resource identities.
+- Current render-surface resolver views remove `sourceBytes`, but palette payloads still expose
+  `colorsArgb`. The later metadata-route phase must split palette metadata from palette texels rather
+  than only fixing render-surface routes.
+- Static object baking enters through `static/objects/bake/static-object-batch-baker.ts` and
+  `static/objects/bake/static-object-batch-partitioner.ts`. It consumes `StaticObjectBatchPayload`,
+  runs `planStaticObjectMaterials`, creates triangle candidates, partitions by object-material render
+  legality, and emits draw units, material coverage, texture uses/dependencies, source mappings,
+  spatial records, generated-scenery render instances, and generated-scenery visual resources.
+- Dynamic visual baking enters through `dynamic/visual-baker.ts`. It skips recipes with missing
+  dependencies, calls `planStaticObjectMaterials` once for texture-planning discovery and again for
+  final baking, then emits dynamic render parts, texture requirements, texture dependencies, material
+  slots, source assets, palette sources, and texture refs.
+- Env-cell system baking enters through `static/env-cells/bake/env-cell-system-baker.ts`. It bakes
+  structured interior embedded geometry locally, then calls `bakeStaticObjectBatch(input)` for
+  env-cell static object placements. This is a real shared target, but today it still combines two
+  static-oriented bake products instead of one object visual install publication.
+- Generated-scenery instancing currently lives inside `static-object-batch-baker.ts` after static
+  partitioning. It uses baked partition triangles and source-local triangle keys to decide whether
+  repeated generated objects become `StaticObjectRenderInstance`/`StaticObjectVisualResource` output.
+  Transparent/additive generated partitions are retained unless policy allows safe instancing.
+- Runtime install currently reconstructs static layer payloads from installed draw units and separate
+  `staticObjectRenderInstances`/`staticObjectVisualResources` in `runtime/client-runtime.ts`. This is
+  the installer-shell risk called out later in the plan.
+- Targeted Phase 0 baseline command:
+  `npm --prefix apps/holtburger-3d run test:ts -- src/lib/static/objects/outdoor-static-objects-resolver.test.ts src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/static/objects/bake/static-object-material-planner.test.ts src/lib/static/env-cells/bake/env-cell-system-baker.test.ts src/lib/dynamic/visual-recipe-resolver.test.ts src/lib/dynamic/visual-baker.test.ts src/lib/dynamic/dynamic-entity-controller.test.ts src/lib/textures/placement.test.ts src/lib/textures/texture-manager.test.ts src/lib/runtime/static-commit-installer.test.ts src/lib/runtime/env-cell-system-layer-publication.test.ts`
+  passed locally with 11 test files and 174 tests.
+- Runtime asset-backed scenarios are not fully represented by checked-in fixtures. Later validation
+  should keep relying on focused unit fixtures for contract proof, then use renderer diagnostics or
+  the programmatic browser harness for representative scene confidence.
+
 ### Phase 1: Shared Object Visual Contract
 
 Goal: introduce the shared recipe graph and resolution wrapper without yet cutting over producers.
@@ -1344,8 +1390,24 @@ Acceptance criteria:
 
 ## Decisions And Course Corrections
 
-- Pending implementation. During execution, record any deliberate deviation from the phase order,
-  any temporary adapter introduced, and the deletion criterion for that adapter.
+- Phase 0 confirmed the phase order still holds. No implementation phase should begin by introducing
+  a compatibility facade around the old static/dynamic payloads; Phase 1 should introduce shared
+  contracts and tests first.
+- Phase 0 confirmed `resolveStaticObjectSourceClosure` is the right source-normalization seam to
+  study for both static and dynamic cutover, but not the final contract boundary. Its current output
+  is still static-shaped and should be normalized into object visual recipe records rather than
+  promoted unchanged.
+- Phase 0 confirmed palette handling is a metadata-route issue, not only a render-surface issue.
+  `render-surface` resolver views already strip `sourceBytes`, while `palette` payloads still carry
+  `colorsArgb`; Phase 2 must add or route through palette metadata that does not prepare palette
+  texels.
+- Phase 0 confirmed generated-scenery instancing should not be preserved as post-draw-unit inference.
+  The current source-local triangle-key logic is useful ground truth for parity, but the target
+  policy should run from repeated `PartInstance`/`PartRecipe` candidates after renderer-legal
+  partitioning.
+- Phase 0 confirmed runtime install reconstruction is a first-class cutover target. The later shared
+  install publication must replace visual payload reconstruction from `installedDrawUnits`,
+  `staticObjectRenderInstances`, and `staticObjectVisualResources`, not merely rename those buckets.
 
 ## Risks And Mitigations
 

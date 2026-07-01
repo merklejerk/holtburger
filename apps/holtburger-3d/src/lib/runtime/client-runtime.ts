@@ -923,6 +923,13 @@ class ClientRuntimeImpl implements ClientRuntime {
 					staticBatchId,
 				),
 		);
+		this.#staticCoordinator.setSourceReadyHandler(async (work) => {
+			const placementSnapshot = await this.#textureManager.placeTextureIntents({
+				intents: work.placementIntents,
+				placementBatchId: work.staticBatchId,
+			});
+			await work.continueWithPlacement(placementSnapshot);
+		});
 		this.#lastRendererSnapshot = renderer.createDiagnosticsSnapshot();
 		this.#currentRenderPassPlan = this.#lastRendererSnapshot.renderPassPlan;
 		this.#currentPortalFrameWorkPlan =

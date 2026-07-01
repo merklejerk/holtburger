@@ -34,7 +34,9 @@ import type {
 	StaticLandblockSceneLodSourceResolver,
 } from "../contracts";
 import { StaticCoordinator } from "./static-coordinator";
+import type { StaticSourceReadyWork } from "./static-coordinator";
 import { createLayerPeerRecordOwnerForStaticBakeTask } from "../layer-owners";
+import type { TexturePlacementSnapshot } from "../../textures/placement";
 
 describe("static coordinator", () => {
 	it("drops late resolver results after a newer demand revision supersedes them", async () => {
@@ -330,6 +332,98 @@ describe("static coordinator", () => {
 			{ kind: "terrain", landblockId: 0xda55ffff },
 			{ kind: "outdoor-explicit-objects", landblockId: 0xda55ffff },
 			{ kind: "outdoor-generated-scenery", landblockId: 0xda55ffff },
+		]);
+	});
+
+	it("routes resolved source work through a guarded source-ready continuation", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
+		const sourceReady: StaticSourceReadyWork[] = [];
+		coordinator.setSourceReadyHandler((work) => {
+			sourceReady.push(work);
+		});
+		const [task] = bakeTasksForDemand(
+			coordinator,
+			createSingleTerrainDemand(0xda55ffff),
+		);
+
+		resolver.completeSource(resolver.pendingSourceRequests[0]?.requestId ?? "");
+		await flushPromises();
+
+		expect(sourceReady).toHaveLength(1);
+		expect(sourceReady[0]).toMatchObject({
+			domain: "outdoor-terrain",
+			placementIntents: [],
+			staticBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:1",
+			tasks: [expect.objectContaining({ taskId: task.taskId })],
+		});
+		expect(baker.pendingInputs).toHaveLength(0);
+
+		const continuation = sourceReady[0]?.continueWithPlacement(
+			createPlacementSnapshot(),
+		);
+		await flushPromises();
+
+		expect(baker.pendingInputs).toHaveLength(1);
+		expect(baker.pendingInputs[0]).toMatchObject({
+			staticBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:1",
+		});
+		baker.complete(pendingBatchIdForTask(baker, task.taskId));
+		await continuation;
+	});
+
+	it("does not let source-ready continuations bake work that left demand", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
+		let sourceReady: StaticSourceReadyWork | null = null;
+		coordinator.setSourceReadyHandler((work) => {
+			sourceReady = work;
+		});
+		bakeTasksForDemand(coordinator, createSingleTerrainDemand(0xda55ffff));
+		resolver.completeSource(resolver.pendingSourceRequests[0]?.requestId ?? "");
+		await flushPromises();
+
+		bakeTasksForDemand(coordinator, {
+			location: null,
+			lod: { buildings: -1, detail: -1, envCells: -1, terrain: -1 },
+		});
+		await sourceReady?.continueWithPlacement(createPlacementSnapshot());
+
+		expect(baker.pendingInputs).toHaveLength(0);
+		expect(coordinator.createSnapshot().committed).toBe(0);
+	});
+
+	it("marks source-ready tasks failed when placement fails", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
+		coordinator.setSourceReadyHandler((work) => {
+			work.failPlacement("texture placement failed");
+		});
+		bakeTasksForDemand(coordinator, createSingleTerrainDemand(0xda55ffff));
+
+		resolver.completeSource(resolver.pendingSourceRequests[0]?.requestId ?? "");
+		await flushPromises();
+
+		expect(baker.pendingInputs).toHaveLength(0);
+		expect(coordinator.createSnapshot().layerTasks).toMatchObject([
+			{
+				phase: "failed",
+			},
 		]);
 	});
 
@@ -721,7 +815,9 @@ describe("static coordinator", () => {
 		expect(commits).toEqual([
 			{
 				dynamicPlacements: [],
-				dynamicRecipes: [expect.objectContaining({ entityId: "static-dynamic:1" })],
+				dynamicRecipes: [
+					expect.objectContaining({ entityId: "static-dynamic:1" }),
+				],
 				dynamicVisualBake: {
 					batchId:
 						"static-batch:1:outdoor-terrain:landblock:da55ffff:1:static-authored-dynamic-visuals",
@@ -740,8 +836,7 @@ describe("static coordinator", () => {
 				},
 				staticCommit: expect.objectContaining({
 					addedDrawUnits: [createTerrainDrawUnit("terrain-a", 0xda55ffff)],
-					staticBatchId:
-						"static-batch:1:outdoor-terrain:landblock:da55ffff:1",
+					staticBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:1",
 				}),
 			},
 		]);
@@ -1826,7 +1921,10 @@ function createDynamicRecipe(
 		visual: {
 			animation: null,
 			materialPolicy: {
-				detailRolePolicy: { kind: "static-domain", domain: "outdoor-buildings" },
+				detailRolePolicy: {
+					kind: "static-domain",
+					domain: "outdoor-buildings",
+				},
 				materialPlanningDomain: "outdoor-buildings",
 				visualObject: {
 					entityId: "static-dynamic:1",
@@ -1863,6 +1961,10 @@ function createDynamicRecipe(
 async function flushPromises(): Promise<void> {
 	await Promise.resolve();
 	await Promise.resolve();
+}
+
+function createPlacementSnapshot(): TexturePlacementSnapshot {
+	return { placementsByItemId: new Map() };
 }
 
 function createInvalidOwnerlessDrawUnit(drawUnitId: string): StaticDrawUnit {

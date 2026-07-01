@@ -1200,7 +1200,7 @@ Acceptance criteria:
 - [x] Phase 0: lock first-pass contract names and homes.
 - [x] Phase 1: add placement contracts and no-behavior-change adapters.
 - [x] Phase 2: split `TextureManager` placement and pinning around current behavior.
-- [ ] Phase 3: add static source-ready placement continuation.
+- [x] Phase 3: add static source-ready placement continuation.
 - [ ] Resteering 1: review placement continuation shape.
 - [ ] Phase 4: move static object placement planning before static object baking.
 - [ ] Phase 5: remove main-thread static object fine splitting.
@@ -1260,6 +1260,14 @@ Acceptance criteria:
   records behind the old owner-based APIs. Static draw-unit owners, static object visual resource
   owners, and dynamic visual resource owners all flow through the same active-reference accounting
   path.
+- Phase 3 added the real `StaticCoordinator.setSourceReadyHandler(...)` guarded continuation path.
+  `ClientRuntime` installs the handler and asks `TextureManager.placeTextureIntents(...)` for a
+  placement snapshot before invoking the continuation. The old Phase 0A `StaticSourceReadyHandshake`
+  spike was deleted once coordinator tests covered the real source-ready boundary.
+- Phase 3 intentionally emits empty placement intent arrays until Phase 4 moves static object intent
+  discovery ahead of bake. This keeps current renderer texture upload behavior unchanged; pre-packing
+  real static textures before the old materialization path can upload pages would make render output
+  wrong.
 - Dry run split `TextureManager` responsibilities into placement and pinning. Current owner leases
   require post-bake draw-unit/resource owners, but pre-bake placement intents intentionally do not
   have owners yet.
@@ -1272,9 +1280,6 @@ Acceptance criteria:
 
 ## Tracked Debt
 
-- The Phase 0A spike is still named `StaticSourceReadyHandshake` and still models revision
-  supersession. Phase 3 must promote only the useful continuation-guard behavior or delete the spike;
-  do not preserve the token/revision shape as doctrine.
 - `apps/holtburger-3d/src/lib/renderer/types.ts` has a private renderer-upload interface named
   `TexturePlacement`. When Phase 1 introduces exported texture-domain `TexturePlacement`, rename the
   renderer-local type if an import would cause ambiguity.
@@ -1294,6 +1299,9 @@ Acceptance criteria:
 - Phase 2 active references are tracked by placement `itemId`, matching the migration-era
   `textureUseId` assumption. If Phase 10 splits `textureUseId`, the placement reference index must
   move to the final placement item identity at the same time.
+- Phase 3 source-ready work carries empty placement intents as a temporary no-behavior-change
+  adapter. Phase 4 must replace that with real static object placement intents; do not let empty
+  source-ready placement survive as a hidden fallback.
 
 ## Risks and Concessions
 

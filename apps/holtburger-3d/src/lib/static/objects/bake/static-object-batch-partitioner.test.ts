@@ -988,6 +988,51 @@ describe("static object batch partitioner", () => {
 		]);
 	});
 
+	it("discovers static object placement intents for mixed wrap entries", () => {
+		const payload = createPayload({
+			materials: [
+				createTexturedMaterial(0x08000010),
+				createTexturedMaterial(0x08000011),
+			],
+			textureRefs: createRgbaTextureRefs(),
+		});
+		const source = payload.sourceAssets[0];
+		const part = source?.parts[0];
+		if (!source || !part) {
+			throw new Error("Fixture payload did not create a source part.");
+		}
+		const updatedPart = {
+			...part,
+			materialSlots: part.materialSlots.map((slot, index) => ({
+				...slot,
+				materialVariantSignature: index === 1 ? "sampler=repeat" : null,
+			})),
+			triangles: part.triangles.map((triangle, index) => ({
+				...triangle,
+				materialVariantSignature: index === 1 ? "sampler=repeat" : null,
+				polygonId: 0,
+			})),
+		};
+		const bakeInput = createBakeInput({
+			...payload,
+			materialSlots: payload.materialSlots.map((slot, index) => ({
+				...slot,
+				materialVariantSignature: index === 1 ? "sampler=repeat" : null,
+			})),
+			sourceAssets: [{ ...source, parts: [updatedPart] }],
+		});
+
+		const intents = createStaticObjectTexturePlacementIntents({
+			items: bakeInput.items,
+			staticBatchId: bakeInput.staticBatchId,
+		});
+
+		expect(intents.map((intent) => intent.itemId)).toEqual([
+			"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
+			"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
+		]);
+	});
+
 	it("uses object part ownership as a hard partition axis for transparent static policy", () => {
 		const payload = duplicateObjectInstance(
 			createPayload({

@@ -24,6 +24,7 @@ import type {
 	TexturePageSampleClass,
 	TextureWrapMode,
 } from "../textures/sampling-policy";
+import type { TextureResourceDependencies } from "../textures/placement";
 
 export const MAX_TERRAIN_COLOR_PAGES_PER_DRAW = 4;
 export const MAX_TERRAIN_MASK_PAGES_PER_DRAW = 4;
@@ -83,16 +84,14 @@ export interface OutdoorBuildingsLayerPayload extends StaticLandblockLayerPayloa
 	readonly spatialRecords: readonly StaticSpatialRecord[];
 }
 
-export interface OutdoorExplicitObjectsLayerPayload
-	extends StaticLandblockLayerPayloadBase {
+export interface OutdoorExplicitObjectsLayerPayload extends StaticLandblockLayerPayloadBase {
 	readonly kind: "outdoor-explicit-objects";
 	readonly drawUnits: readonly OutdoorStaticObjectLayerDrawUnit<"outdoor-explicit-objects">[];
 	readonly sourceMappingRecords: readonly StaticSourceMappingRecord[];
 	readonly spatialRecords: readonly StaticSpatialRecord[];
 }
 
-export interface OutdoorGeneratedSceneryLayerPayload
-	extends StaticLandblockLayerPayloadBase {
+export interface OutdoorGeneratedSceneryLayerPayload extends StaticLandblockLayerPayloadBase {
 	readonly kind: "outdoor-generated-scenery";
 	readonly drawUnits: readonly OutdoorStaticObjectLayerDrawUnit<"outdoor-generated-scenery">[];
 	readonly instancedObjectInstances: readonly StaticObjectRenderInstance[];
@@ -293,6 +292,8 @@ export interface DynamicRendererVisualResource {
 	readonly entityId: DynamicRendererEntityId;
 	readonly materialPlan: DynamicRendererMaterialPlan;
 	readonly parts: readonly DynamicRendererVisualPart[];
+	/** Active atlas placements pinned while this immutable visual resource is resident. */
+	readonly textureDependencies: readonly TextureResourceDependencies[];
 }
 
 export interface DynamicRendererVisualPart extends VisualGeometryPayload {

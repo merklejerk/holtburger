@@ -142,6 +142,7 @@ function createInput(
 		recipes: [],
 		revision: 1,
 		sourceGeometry: [],
+		texturePlacementSnapshot: { placementsByItemId: new Map() },
 	};
 }
 

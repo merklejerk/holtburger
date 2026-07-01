@@ -7,7 +7,11 @@ import type {
 	StaticObjectTextureRefFacts,
 	StaticResourceIdentity,
 } from "../static/contracts";
-import { bakeDynamicVisuals, LocalDynamicVisualBaker } from "./visual-baker";
+import {
+	bakeDynamicVisuals,
+	createDynamicVisualTexturePlanning,
+	LocalDynamicVisualBaker,
+} from "./visual-baker";
 import {
 	createDynamicVisualResourceId,
 	type DynamicEntityRecipe,
@@ -26,6 +30,7 @@ describe("dynamic visual baker", () => {
 			recipes: [recipe],
 			revision: 12,
 			sourceGeometry: [createGeometryAttachment()],
+			texturePlacementSnapshot: createPlacementSnapshotForRecipe(recipe),
 		});
 
 		expect(result.failures).toEqual([]);
@@ -66,6 +71,7 @@ describe("dynamic visual baker", () => {
 			recipes: [createRecipe({ materialSources: [createSolidMaterial()] })],
 			revision: 13,
 			sourceGeometry: [createGeometryAttachment()],
+			texturePlacementSnapshot: createEmptyPlacementSnapshot(),
 		};
 
 		await expect(baker.bake(input)).resolves.toMatchObject({
@@ -93,6 +99,7 @@ describe("dynamic visual baker", () => {
 			],
 			revision: 14,
 			sourceGeometry: [createGeometryAttachment()],
+			texturePlacementSnapshot: createEmptyPlacementSnapshot(),
 		});
 
 		expect(result.failures).toEqual([]);
@@ -114,6 +121,7 @@ describe("dynamic visual baker", () => {
 			recipes: [createRecipe({ materialSources: [createSolidMaterial()] })],
 			revision: 15,
 			sourceGeometry: [],
+			texturePlacementSnapshot: createEmptyPlacementSnapshot(),
 		});
 
 		expect(result.products).toEqual([]);
@@ -163,6 +171,32 @@ function createRecipe(options: {
 			textureRefs: options.textureRefs ?? [],
 		},
 	};
+}
+
+function createPlacementSnapshotForRecipe(
+	recipe: DynamicEntityRecipe,
+): DynamicVisualBakeInput["texturePlacementSnapshot"] {
+	const placementsByItemId = new Map(
+		createDynamicVisualTexturePlanning(recipe).placementIntents.map(
+			(intent, index) => [
+				intent.itemId,
+				{
+					height: 16,
+					itemId: intent.itemId,
+					pageId: `${intent.purpose}:page:${index}`,
+					pool: intent.pool,
+					purpose: intent.purpose,
+					rect: [0, 0, 16, 16] as const,
+					width: 16,
+				},
+			],
+		),
+	);
+	return { placementsByItemId };
+}
+
+function createEmptyPlacementSnapshot(): DynamicVisualBakeInput["texturePlacementSnapshot"] {
+	return { placementsByItemId: new Map() };
 }
 
 function createSourceAsset(): StaticObjectSourceAssetFacts {

@@ -65,14 +65,15 @@ export interface TexturePlacementSnapshot {
 	readonly placementsByItemId: ReadonlyMap<string, TexturePlacement>;
 }
 
-/** Baker-authored active texture dependencies for one immutable draw unit. */
-export interface DrawUnitTextureDependencies {
-	readonly drawUnitId: string;
-	readonly roles: readonly DrawUnitTextureRoleDependency[];
+/** Baker-authored active texture dependencies for one immutable renderer resource. */
+export interface TextureResourceDependencies {
+	/** Stable renderer resource id used to release these dependencies on eviction. */
+	readonly resourceId: string;
+	readonly roles: readonly TextureResourceRoleDependency[];
 }
 
-/** Placement items needed for one draw-unit texture role. */
-export interface DrawUnitTextureRoleDependency {
+/** Placement items needed for one renderer-resource texture role. */
+export interface TextureResourceRoleDependency {
 	readonly purpose: TextureUsagePurpose;
 	readonly itemIds: readonly string[];
 }

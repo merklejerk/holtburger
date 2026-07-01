@@ -900,9 +900,9 @@ describe("browser texture manager", () => {
 			placementBatchId: "pre-bake-batch",
 		});
 
-		textureManager.pinDrawUnitTextureDependencies([
+		textureManager.pinTextureResourceDependencies([
 			{
-				drawUnitId: "terrain-a",
+				resourceId: "terrain-a",
 				roles: [
 					{
 						itemIds: [textureUse.textureUseId],
@@ -919,7 +919,7 @@ describe("browser texture manager", () => {
 			},
 		]);
 
-		textureManager.releaseDrawUnitTextureDependencies(["terrain-a"]);
+		textureManager.releaseTextureResourceDependencies(["terrain-a"]);
 		expect(textureManager.createPlacementReferenceSnapshot()).toMatchObject([
 			{
 				activeReferenceCount: 0,

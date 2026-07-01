@@ -13,7 +13,7 @@ import type {
 	DynamicVisualBakeResult,
 } from "../dynamic/contracts";
 import type {
-	DrawUnitTextureDependencies,
+	TextureResourceDependencies,
 	TexturePlacementSnapshot,
 } from "../textures/placement";
 import type { VisualGeometryPayload } from "../visual/visual-geometry";
@@ -1379,7 +1379,7 @@ export interface StaticBakeBatchResult {
 	readonly staticObjectBakeDiagnostics: readonly StaticObjectBakeDiagnostics[];
 	readonly portalApertureResources: readonly StaticPortalApertureResource[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
-	readonly textureDependencies: readonly DrawUnitTextureDependencies[];
+	readonly textureDependencies: readonly TextureResourceDependencies[];
 	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
 	readonly atlasRegistryUpdates: readonly string[];
 	readonly staticSpatialRecords: readonly StaticSpatialRecord[];
@@ -1924,7 +1924,7 @@ export interface StaticCoordinatorCommitDelta {
 	readonly addedPortalApertureResources: readonly StaticPortalApertureResource[];
 	readonly removedResources: readonly StaticResourceKey[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
-	readonly textureDependencies: readonly DrawUnitTextureDependencies[];
+	readonly textureDependencies: readonly TextureResourceDependencies[];
 	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
 	readonly staticSpatialRecords: readonly StaticSpatialRecord[];
 	readonly staticVisibilityRecords: readonly StaticVisibilityRecord[];

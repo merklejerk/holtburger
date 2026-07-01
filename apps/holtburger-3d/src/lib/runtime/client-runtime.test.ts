@@ -3033,6 +3033,7 @@ function createBakedDynamicVisualResourceForRecipe(
 		],
 		resourceId: createDynamicVisualResourceId(recipe.entityId),
 		sourceAssets: [createBakedDynamicVisualSourceAsset()],
+		textureDependencies: [],
 		textureRefs: [],
 		textureRequirements: [],
 	};

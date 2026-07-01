@@ -196,6 +196,7 @@ describe("object visual recipe bundle contracts", () => {
 				surfaceTextureId: null,
 			},
 			usage: "object-base-color",
+			wrapMode: "clamp",
 		};
 		const bundle: ObjectVisualRecipeBundle = {
 			geometryBufferRefs: new Map([

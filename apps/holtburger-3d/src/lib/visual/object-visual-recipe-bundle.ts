@@ -75,6 +75,8 @@ export type ObjectVisualTextureWrapMode = "clamp" | "repeat";
 export interface ObjectVisualTextureRecipe {
 	/** Original material texture metadata needed for placement and renderer binding. */
 	readonly dataUse: MaterialTextureDataUseIdentity;
+	/** Sampling wrap mode required for this texture binding. */
+	readonly wrapMode: ObjectVisualTextureWrapMode;
 	readonly usage: ObjectVisualTextureUsage;
 	readonly source: ObjectVisualTextureSource;
 }

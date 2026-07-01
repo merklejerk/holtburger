@@ -1,6 +1,6 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation in progress. Phases 0-5 are complete. This document defines the target model,
+Status: implementation in progress. Phases 0-6 are complete. This document defines the target model,
 north stars, risk surface, and phased cutover plan for replacing static-vs-dynamic object visual
 worker bifurcation with a shared object-like visual recipe graph.
 
@@ -1183,6 +1183,35 @@ Deletion criteria:
 - Remove static-object-only, structured-interior-only, and dynamic-only placement planner variants
   after policy-based planner coverage is complete.
 
+Phase 6 completion notes:
+
+- Added `src/lib/visual/object-visual-texture-placement-planner.ts` as the shared object visual
+  placement planner. It consumes source texture binding requirements plus static/dynamic placement
+  policy and emits numeric-id `ObjectVisualTexturePlacementIntent` records.
+- Moved object-visual placement item id allocation and texture-use de-duplication into the shared
+  planner. Static object, structured-interior, and dynamic planning no longer allocate ids
+  independently.
+- Cut static object placement and structured-interior placement planners over to requirement
+  collection plus shared planner policy. They still own domain-specific material/source extraction
+  until final `TextureRecipe` records exist.
+- Cut runtime/static-authored dynamic texture planning over to the shared planner. Dynamic planning
+  now discovers pending texture source requirements, lets the shared planner allocate placement ids,
+  and stamps those ids back onto bake texture requirements so placement snapshots and bake-time
+  lookups stay aligned.
+- Low-level static/dynamic placement-intent constructors and `createTexturePlacementItemId` are now
+  called only from the shared object visual planner for object-like domains.
+- Steering note: this phase cannot fully prove resolver-authored `TextureRecipe` records are
+  placement-policy-free because final recipe emission is still deferred. It does move pool, bucket,
+  affinity, de-dupe, and item-id policy out of resolver/source facts and into a shared
+  runtime/coordinator-boundary planner.
+- Verification:
+  `npm --prefix apps/holtburger-3d run check`
+  `npm --prefix apps/holtburger-3d run test:ts -- src/lib/visual/object-visual-texture-placement-planner.test.ts src/lib/textures/placement.test.ts src/lib/textures/texture-manager.test.ts src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/static/env-cells/bake/env-cell-system-baker.test.ts src/lib/dynamic/visual-baker.test.ts src/lib/dynamic/visual-contracts.test.ts src/lib/static/coordinator/static-coordinator.test.ts src/lib/runtime/client-runtime.test.ts`
+- Debt carried forward: Phase 7 should decide whether the remaining static-object,
+  structured-interior, and dynamic placement planner entry points should be collapsed further before
+  resolver bundle cutover, or retained briefly as requirement collectors with explicit deletion
+  criteria.
+
 ### Phase 7: Resteer Shared Model Foundation
 
 Goal: reassess the shared contracts, metadata boundary, material planner, and geometry sidecar model
@@ -1594,6 +1623,12 @@ Acceptance criteria:
 - Phase 5 kept asset loading outside bakers. Attachment providers and runtime prep may still request
   geometry assets before bake, but static, dynamic, and structured-interior bakers consume supplied
   sidecars rather than reopening source assets.
+- Phase 6 centralized object-visual placement item id allocation, de-duplication, and static/dynamic
+  placement-intent construction in `ObjectVisualTexturePlacementPlanner`. Existing domain entry
+  points now collect source requirements and policy rather than owning placement ids.
+- Phase 6 kept the source-requirement collectors in place because final `TextureRecipe` records do
+  not exist yet. These collectors are transitional seams with Phase 7 deletion/collapse review, not
+  permanent architecture.
 
 ## Risks And Mitigations
 

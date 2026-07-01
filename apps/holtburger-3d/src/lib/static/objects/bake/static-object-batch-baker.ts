@@ -104,12 +104,6 @@ export function bakeStaticObjectBatch(
 		bakeStaticObjectBatchItem(input, item, index),
 	);
 	const drawUnits = itemResults.flatMap((result) => result.drawUnits);
-	const staticObjectRenderInstances = itemResults.flatMap(
-		(result) => result.staticObjectRenderInstances,
-	);
-	const staticObjectVisualResources = dedupeStaticObjectVisualResources(
-		itemResults.flatMap((result) => result.staticObjectVisualResources),
-	);
 	const textureDependencies = itemResults.flatMap(
 		(result) => result.textureDependencies,
 	);
@@ -148,8 +142,8 @@ export function bakeStaticObjectBatch(
 		),
 		domain: input.domain,
 		drawUnits,
-		staticObjectRenderInstances,
-		staticObjectVisualResources,
+		staticObjectRenderInstances: objectVisualInstallSet.renderInstances,
+		staticObjectVisualResources: objectVisualInstallSet.visualResources,
 		staticObjectBakeDiagnostics: itemResults.map(
 			(result) => result.diagnostics,
 		),

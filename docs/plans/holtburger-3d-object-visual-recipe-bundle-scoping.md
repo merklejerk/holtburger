@@ -2224,6 +2224,13 @@ Course correction during Phase 9M:
   `direct-sorted-transparent` sort metadata. Do not delete the legacy generated-scenery arrays until
   Phase 9M teaches `createStaticObjectPublicationMetadata` to derive generated resource grouping and
   instance transparency from the same material/render facts that feed recipe publication.
+- Resolution: generic object-visual publication now groups instanced render parts by static resource
+  group instead of per instance, and `ObjectVisualBakedRenderPart.sourceLocalPayload` deduplicates
+  repeated source-local primitives while retaining all transformed primitives for direct draw units.
+  Instanced render-instance transparency is derived from each published render part, so transparent
+  and additive generated scenery regain `direct-sorted-transparent` sort metadata. With those fixes,
+  `StaticBakeBatchResult.staticObjectRenderInstances/staticObjectVisualResources` can mirror
+  `objectVisualInstallSet` for static object batches.
 
 ### Phase 10: Dynamic Resolver Cutover
 

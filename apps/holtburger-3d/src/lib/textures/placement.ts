@@ -23,8 +23,7 @@ export type TexturePlacementPool =
 
 /**
  * Current prepared/material texture source carried losslessly through the
- * placement bridge. Later phases can split source identity from placement
- * identity once `textureUseId` is no longer the migration-era item id.
+ * placement bridge. Placement identity is carried separately as `itemId`.
  */
 export interface TexturePlacementMaterialSource {
 	readonly kind: "material-texture-data-use";
@@ -37,7 +36,7 @@ export type TexturePlacementSource = TexturePlacementMaterialSource;
 
 /** CPU-side request for TextureManager to assign one opaque item to an atlas page. */
 export interface TexturePlacementIntent {
-	/** Opaque placement item id. During migration this is the current textureUseId. */
+	/** Opaque placement item id used by the packer and baker placement snapshot. */
 	readonly itemId: string;
 	/** Page compatibility and shader role for the item. */
 	readonly purpose: TextureUsagePurpose;
@@ -91,6 +90,7 @@ export interface DynamicTexturePlacementUse {
 	readonly samplingPolicy?: StaticBakeTextureSamplingPolicy;
 	readonly source: MaterialTextureDataUseIdentity;
 	readonly textureDomain: VisualTextureDomain;
+	/** Material binding key that becomes the placement item id at this boundary. */
 	readonly textureUseId: string;
 }
 

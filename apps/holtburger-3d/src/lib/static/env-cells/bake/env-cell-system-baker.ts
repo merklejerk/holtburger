@@ -137,6 +137,7 @@ export function bakeEnvCellSystem(
 			...itemResults.flatMap((result) => result.textureUses),
 			...staticObjectResult.textureUses,
 		]),
+		textureDependencies: staticObjectResult.textureDependencies,
 		tasks: input.items.map((item) => item.task),
 	};
 }
@@ -229,10 +230,8 @@ function bakeLandblockEnvCellItem(
 			payload,
 		}),
 		portalApertureResources: payload.portalApertureResources,
-		envCellStaticObjectPlacementRecords: createEnvCellStaticObjectPlacementRecords(
-			owner,
-			payload,
-		),
+		envCellStaticObjectPlacementRecords:
+			createEnvCellStaticObjectPlacementRecords(owner, payload),
 		staticPortalGraphs: [createHostPortalGraphRecord(owner, payload)],
 		staticPortalInteriorRecords: [portalInteriorRecord],
 		staticSourceMappings: createSourceMappingRecords(owner, payload),
@@ -1028,10 +1027,8 @@ function createSpatialRecords(
 		owner,
 		renderBounds: envCell.renderGeometry.bounds,
 		residencyBvh: payload.residencySpatial.envCellSystemBvh,
-		residencyBvhItemCount:
-			payload.residencySpatial.envCellSystemBvhItemCount,
-		residencyBvhNodeCount:
-			payload.residencySpatial.envCellSystemBvhNodeCount,
+		residencyBvhItemCount: payload.residencySpatial.envCellSystemBvhItemCount,
+		residencyBvhNodeCount: payload.residencySpatial.envCellSystemBvhNodeCount,
 	}));
 }
 

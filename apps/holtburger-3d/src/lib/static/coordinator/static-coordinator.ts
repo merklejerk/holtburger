@@ -49,6 +49,8 @@ import {
 	createLayerOwnerKeyForStaticScope,
 	createLayerOwnerKeyId,
 } from "../layer-owners";
+import { createStaticObjectTexturePlacementIntents } from "../objects/bake/static-object-placement-planner";
+import { isStaticObjectDomain } from "../objects/bake/static-object-batch-payload";
 import type {
 	TexturePlacementIntent,
 	TexturePlacementSnapshot,
@@ -538,9 +540,15 @@ export class StaticCoordinator {
 		readonly staticBatchId: string;
 	}): Promise<void> {
 		let consumed = false;
+		const placementIntents = isStaticObjectDomain(options.pendingBatch.domain)
+			? createStaticObjectTexturePlacementIntents({
+					items: options.items,
+					staticBatchId: options.staticBatchId,
+				})
+			: [];
 		const work: StaticSourceReadyWork = {
 			domain: options.pendingBatch.domain,
-			placementIntents: [],
+			placementIntents,
 			sourcePayloads: options.items.map((item) => item.payload),
 			staticBatchId: options.staticBatchId,
 			tasks: options.items.map((item) => item.task),
@@ -633,6 +641,7 @@ export class StaticCoordinator {
 			items: currentItems,
 			revision: options.pendingBatch.revision,
 			staticBatchId: options.staticBatchId,
+			texturePlacementSnapshot: options.placementSnapshot,
 		};
 
 		let result: StaticBakeBatchResult;
@@ -829,6 +838,7 @@ export class StaticCoordinator {
 				staticSpatialRecords: result.staticSpatialRecords,
 				staticVisibilityRecords: result.staticVisibilityRecords,
 				tasks: result.tasks,
+				textureDependencies: result.textureDependencies,
 				textureUses: result.textureUses,
 			},
 		});
@@ -883,6 +893,7 @@ export class StaticCoordinator {
 				staticSpatialRecords: [],
 				staticVisibilityRecords: [],
 				tasks: [],
+				textureDependencies: [],
 				textureUses: [],
 			},
 		});
@@ -1648,6 +1659,9 @@ function filterStaticBakeResultForCurrentTasks(
 					? drawUnitIds.has(owner.drawUnitId)
 					: retainedStaticObjectVisualResourceIds.has(owner.resourceId),
 			),
+		),
+		textureDependencies: result.textureDependencies.filter((dependency) =>
+			drawUnitIds.has(dependency.drawUnitId),
 		),
 		tasks,
 	};

@@ -740,6 +740,7 @@ describe("static coordinator", () => {
 				staticSpatialRecords: [],
 				staticVisibilityRecords: [],
 				tasks: [expect.objectContaining({ taskId: work.taskId })],
+				textureDependencies: [],
 				textureUses: [],
 			},
 		]);
@@ -772,6 +773,7 @@ describe("static coordinator", () => {
 			staticSpatialRecords: [],
 			staticVisibilityRecords: [],
 			tasks: [],
+			textureDependencies: [],
 			textureUses: [],
 		});
 		expect(coordinator.createSnapshot().committedDrawUnits).toBe(0);

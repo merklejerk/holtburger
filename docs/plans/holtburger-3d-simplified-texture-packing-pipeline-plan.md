@@ -1205,7 +1205,7 @@ Acceptance criteria:
 - [x] Phase 2: split `TextureManager` placement and pinning around current behavior.
 - [x] Phase 3: add static source-ready placement continuation.
 - [x] Resteering 1: review placement continuation shape.
-- [ ] Phase 4: move static object placement planning before static object baking.
+- [x] Phase 4: move static object placement planning before static object baking.
 - [ ] Phase 5: remove main-thread static object fine splitting.
 - [ ] Phase 6: bring dynamic visual baking onto the same placement contract.
 - [ ] Resteering 2: review cutover health.
@@ -1291,6 +1291,26 @@ Acceptance criteria:
 - Resteering 1 found no diagnostic churn worth preserving as an architectural constraint. Keep the
   useful bake timing and material coverage reports alive where cheap, but do not retain source
   lineage or remapping diagnostics if they block the clean cutover.
+- Phase 4 added static object placement intent discovery before bake. Source-ready static object
+  batches now derive `TexturePlacementIntent` values from the existing object material planner and
+  texture-use-id policy, then runtime `TextureManager` placement supplies the snapshot consumed by
+  the baker.
+- Phase 4 kept draw-unit construction inside the baker. The packer still receives only item id,
+  purpose, pool, source, and opaque affinity key; it does not learn landblocks, object records,
+  material plans, draw units, or page-legality rules.
+- Phase 4 taught static object partitioning to use final placement pages as an additional legality
+  constraint. When a placement snapshot is provided, static object partitions split before geometry
+  arrays are built so each emitted object draw unit references at most one page per texture role.
+- Phase 4 added `DrawUnitTextureDependencies` to static bake results and static commit deltas.
+  Static object draw units emit dependencies from baker-authored material entries, and `ClientRuntime`
+  releases dependency pins for removed draw units and pins new dependencies after texture placement
+  succeeds.
+- Phase 4 preserved the existing `static-object-texture` texture-use namespace. Renaming it during
+  this cutover would create churn without simplifying the pipeline; `textureUseId` cleanup remains
+  Phase 10 work.
+- Phase 4 intentionally skips pre-bake placement planning for static object source payloads with no
+  source triangles. This keeps empty/diagnostic payloads from running object material planning while
+  still failing loudly for real textured geometry with malformed material facts.
 - Dry run split `TextureManager` responsibilities into placement and pinning. Current owner leases
   require post-bake draw-unit/resource owners, but pre-bake placement intents intentionally do not
   have owners yet.
@@ -1322,9 +1342,15 @@ Acceptance criteria:
 - Phase 2 active references are tracked by placement `itemId`, matching the migration-era
   `textureUseId` assumption. If Phase 10 splits `textureUseId`, the placement reference index must
   move to the final placement item identity at the same time.
-- Phase 3 source-ready work carries empty placement intents as a temporary no-behavior-change
-  adapter. Phase 4 must replace that with real static object placement intents; do not let empty
-  source-ready placement survive as a hidden fallback.
+- Source-ready work still carries empty placement intents for terrain and dynamic paths until their
+  planned cutovers. Do not let those empty arrays survive as hidden fallbacks after Phases 6 and 7.
+- Phase 4 now runs static object material/partition planning once to discover placement intents and
+  again in the baker to construct draw units. This is acceptable for the cutover because the logic is
+  shared and deterministic, but future cleanup should avoid meaningful duplicated CPU work if it
+  shows up in profiling or complicates diagnostics.
+- Phase 4 made static object draw units page-legal before main-thread materialization, but
+  `static-materializer.ts` still contains the old geometry-copying/fine-splitting path. Phase 5 must
+  delete or shrink that path rather than preserving it as a compatibility layer.
 
 ## Risks and Concessions
 

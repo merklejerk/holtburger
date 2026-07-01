@@ -16,6 +16,14 @@ export interface StaticMaterialBatchSlice<
 export function sliceStaticMaterialBatchCandidates<
 	TCandidate extends StaticMaterialBatchCandidate,
 >(options: {
+	/**
+	 * Optional domain-specific legality check. It receives the current slice and
+	 * the next candidate before the candidate is appended.
+	 */
+	readonly canAddCandidateToSlice?: (
+		currentSlice: readonly TCandidate[],
+		candidate: TCandidate,
+	) => boolean;
 	readonly candidates: readonly TCandidate[];
 	readonly maxMaterialEntriesPerSlice: number;
 }): readonly StaticMaterialBatchSlice<TCandidate>[] {
@@ -25,6 +33,7 @@ export function sliceStaticMaterialBatchCandidates<
 		.sort(([left], [right]) => left.localeCompare(right))
 		.flatMap(([batchKey, group], batchIndex) =>
 			createBatchSlices({
+				canAddCandidateToSlice: options.canAddCandidateToSlice,
 				candidates: group,
 				batchIndex,
 				batchKey,
@@ -33,9 +42,9 @@ export function sliceStaticMaterialBatchCandidates<
 		);
 }
 
-function groupByBatch<
-	TCandidate extends StaticMaterialBatchCandidate,
->(candidates: readonly TCandidate[]): Map<string, readonly TCandidate[]> {
+function groupByBatch<TCandidate extends StaticMaterialBatchCandidate>(
+	candidates: readonly TCandidate[],
+): Map<string, readonly TCandidate[]> {
 	const groups = new Map<string, TCandidate[]>();
 
 	for (const candidate of candidates) {
@@ -53,6 +62,10 @@ function groupByBatch<
 function createBatchSlices<
 	TCandidate extends StaticMaterialBatchCandidate,
 >(options: {
+	readonly canAddCandidateToSlice?: (
+		currentSlice: readonly TCandidate[],
+		candidate: TCandidate,
+	) => boolean;
 	readonly candidates: readonly TCandidate[];
 	readonly batchKey: string;
 	readonly batchIndex: number;
@@ -64,8 +77,10 @@ function createBatchSlices<
 
 	for (const candidate of options.candidates) {
 		if (
-			!currentMaterialKeys.has(candidate.materialEntryKey) &&
-			currentMaterialKeys.size >= options.maxMaterialEntriesPerSlice
+			currentSlice.length > 0 &&
+			((!currentMaterialKeys.has(candidate.materialEntryKey) &&
+				currentMaterialKeys.size >= options.maxMaterialEntriesPerSlice) ||
+				options.canAddCandidateToSlice?.(currentSlice, candidate) === false)
 		) {
 			slices.push(currentSlice);
 			currentSlice = [];

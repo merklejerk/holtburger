@@ -1651,7 +1651,7 @@ Acceptance criteria:
 - [x] Resteering 4: audit textured drawable closure coverage.
 - [x] Phase 12: split texture binding requirement identity.
 - [x] Phase 13: add structured-interior placement intents.
-- [ ] Phase 14: make structured-interior baking placement-aware.
+- [x] Phase 14: make structured-interior baking placement-aware.
 - [ ] Phase 15: final drawable isomorphism cleanup.
 
 ## Decisions and Course Corrections
@@ -1956,6 +1956,16 @@ Acceptance criteria:
 - Phase 13 made coordinator env-cell test fixtures structurally complete enough for pre-bake
   structured-interior material planning. The old partial fixture was acceptable before the planner
   read material fields but is now misleading test debt.
+- Phase 14 made structured-interior draw-unit slicing consume `TexturePlacementSnapshot` and enforce
+  the object-material one-page-per-role rule inside `EnvCellSystemBaker`. Renderable textured
+  structured-interior candidates now fail loudly when their placement snapshot item is missing.
+- Phase 14 extracted `static/bake/object-material-page-legality.ts` as the shared page-legality
+  helper for static objects and structured interiors. The helper only knows material-entry keys,
+  texture binding requirements, placement snapshots, and object texture purposes; it does not know
+  objects, env cells, landblocks, draw units, or renderer owners.
+- Phase 14 emits structured-interior `TextureResourceDependencies` from final draw-unit ids and
+  placement item ids, then merges them with env-cell static object dependencies in the env-cell bake
+  result. Static commit install/pinning uses the existing static dependency path.
 
 ## Tracked Debt
 
@@ -2032,8 +2042,9 @@ Acceptance criteria:
   concepts. Revisit during Phase 15 only if keeping the adapter creates duplicated cleanup or
   diagnostics work; do not block structured interiors on this naming convergence.
 - Phase 13 still leaves structured-interior draw-unit slicing placement-unaware and dependency
-  emission missing. That is intentional Phase 14 work; do not treat the presence of placement intents
-  as a complete structured-interior closure.
+- Phase 14 resolved structured-interior placement-aware slicing and dependency emission. Remaining
+  Phase 15 cleanup should focus on naming, diagnostics, and any now-obsolete structured-interior
+  exception language rather than new closure behavior.
 
 ## Risks and Concessions
 

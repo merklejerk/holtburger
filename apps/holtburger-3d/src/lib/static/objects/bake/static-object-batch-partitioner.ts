@@ -24,10 +24,8 @@ import {
 	createMaterialTextureDataUseKey,
 	createStaticMaterialTextureBindingRequirement,
 } from "../../bake/static-material-texture-policy";
-import type {
-	TexturePlacementSnapshot,
-	TextureUsagePurpose,
-} from "../../../textures/placement";
+import type { TextureBindingRequirement, TexturePlacementSnapshot } from "../../../textures/placement";
+import { canAddObjectMaterialPageRequirementCandidate } from "../../bake/object-material-page-legality";
 import { createStaticObjectMaterialCoverageReport } from "./static-object-material-coverage";
 import {
 	createStaticObjectMaterialUseKey,
@@ -197,6 +195,7 @@ interface StaticObjectTriangleCandidate {
 	readonly materialKey: string;
 	readonly materialId: number;
 	readonly materialPlan: StaticMaterialPlan;
+	readonly textureRequirements: readonly TextureBindingRequirement[];
 	readonly materialColorKey: string;
 	readonly materialEntryKey: string;
 	readonly textureRoleSchemaKey: string;
@@ -223,11 +222,11 @@ export function partitionStaticObjectBatches(
 	const materialById = new Map(
 		materialPlan.materialPlans.map((plan) => [plan.materialUseKey, plan]),
 	);
-	const candidates = [...createTriangleCandidates(payload, materialById)].sort(
-		compareTriangleCandidates,
-	);
 	const placementSnapshot = options.placementSnapshot;
 	const textureUseScopeId = options.textureUseScopeId;
+	const candidates = [
+		...createTriangleCandidates(payload, materialById, textureUseScopeId),
+	].sort(compareTriangleCandidates);
 	const partitions = sliceStaticMaterialBatchCandidates({
 		canAddCandidateToSlice:
 			placementSnapshot && textureUseScopeId
@@ -236,7 +235,6 @@ export function partitionStaticObjectBatches(
 							candidate,
 							currentSlice,
 							placementSnapshot,
-							textureUseScopeId,
 						})
 				: undefined,
 		candidates,
@@ -266,115 +264,37 @@ function canAddStaticObjectCandidateUnderPlacement(options: {
 	readonly currentSlice: readonly StaticObjectTriangleCandidate[];
 	readonly candidate: StaticObjectTriangleCandidate;
 	readonly placementSnapshot: TexturePlacementSnapshot;
-	readonly textureUseScopeId: string;
 }): boolean {
-	const materialEntryKeys = new Set(
-		options.currentSlice.map((candidate) => candidate.materialEntryKey),
-	);
-	if (materialEntryKeys.has(options.candidate.materialEntryKey)) {
-		return true;
-	}
-
-	const pageSets = createEmptyObjectPurposePageSets();
-	const candidates = [...options.currentSlice, options.candidate];
-	const candidatesByEntryKey = new Map<string, StaticObjectTriangleCandidate>();
-	for (const candidate of candidates) {
-		if (!candidatesByEntryKey.has(candidate.materialEntryKey)) {
-			candidatesByEntryKey.set(candidate.materialEntryKey, candidate);
-		}
-	}
-
-	for (const candidate of candidatesByEntryKey.values()) {
-		addObjectMaterialPlanPlacementPages({
-			candidate,
-			pageSets,
-			placementSnapshot: options.placementSnapshot,
-			textureUseScopeId: options.textureUseScopeId,
-		});
-	}
-
-	return (
-		pageSets.baseColor.size <= 1 &&
-		pageSets.detail.size <= 1 &&
-		pageSets.index.size <= 1 &&
-		pageSets.palette.size <= 1
-	);
+	return canAddObjectMaterialPageRequirementCandidate({
+		candidate: options.candidate,
+		currentSlice: options.currentSlice,
+		diagnosticSubject: "Static object",
+		placementSnapshot: options.placementSnapshot,
+	});
 }
 
-function addObjectMaterialPlanPlacementPages(options: {
-	readonly candidate: StaticObjectTriangleCandidate;
-	readonly pageSets: ObjectPurposePageSets;
-	readonly placementSnapshot: TexturePlacementSnapshot;
+function createStaticObjectTextureRequirements(options: {
+	readonly plan: StaticMaterialPlan;
 	readonly textureUseScopeId: string;
-}): void {
-	for (const dataUse of options.candidate.materialPlan.textureRoles.map(
-		(role) => role.dataUse,
-	)) {
-		if (!isCurrentlyStageableStaticObjectDataUse(dataUse)) {
-			continue;
-		}
-		const requirement = createStaticMaterialTextureBindingRequirement({
-			dataUse,
-			textureUseNamespace: "static-object-texture",
-			textureUseScopeId: options.textureUseScopeId,
-			wrapMode: options.candidate.textureWrapMode,
-		});
-		const placement =
-			options.placementSnapshot.placementsByItemId.get(
-				requirement.placementItemId,
-			);
-		if (!placement) {
-			throw new Error(
-				`Static object texture placement snapshot is missing ${requirement.placementItemId}.`,
-			);
-		}
-		getObjectPurposePageSet(options.pageSets, placement.purpose).add(
-			placement.pageId,
+	readonly textureWrapMode: StaticObjectTextureWrapMode;
+}): readonly TextureBindingRequirement[] {
+	return options.plan.textureRoles
+		.map((role) => role.dataUse)
+		.filter(isCurrentlyStageableStaticObjectDataUse)
+		.map((dataUse) =>
+			createStaticMaterialTextureBindingRequirement({
+				dataUse,
+				textureUseNamespace: "static-object-texture",
+				textureUseScopeId: options.textureUseScopeId,
+				wrapMode: options.textureWrapMode,
+			}),
 		);
-	}
-}
-
-interface ObjectPurposePageSets {
-	readonly baseColor: Set<string>;
-	readonly detail: Set<string>;
-	readonly index: Set<string>;
-	readonly palette: Set<string>;
-}
-
-function createEmptyObjectPurposePageSets(): ObjectPurposePageSets {
-	return {
-		baseColor: new Set(),
-		detail: new Set(),
-		index: new Set(),
-		palette: new Set(),
-	};
-}
-
-function getObjectPurposePageSet(
-	pageSets: ObjectPurposePageSets,
-	purpose: TextureUsagePurpose,
-): Set<string> {
-	switch (purpose) {
-		case "object-base-color":
-			return pageSets.baseColor;
-		case "object-detail":
-			return pageSets.detail;
-		case "object-index":
-			return pageSets.index;
-		case "object-palette":
-			return pageSets.palette;
-		case "terrain-color":
-		case "terrain-detail":
-		case "terrain-mask":
-			throw new Error(
-				`Static object placement received incompatible texture purpose ${purpose}.`,
-			);
-	}
 }
 
 function createTriangleCandidates(
 	payload: StaticObjectBatchPayload,
 	materialById: ReadonlyMap<string, StaticMaterialPlan>,
+	textureUseScopeId: string | undefined,
 ): readonly StaticObjectTriangleCandidate[] {
 	const sourceByKey = new Map(
 		payload.sourceAssets.map((source) => [
@@ -451,6 +371,13 @@ function createTriangleCandidates(
 				const textureWrapMode = resolveTextureWrapMode(
 					materialVariantSignature,
 				);
+				const textureRequirements = textureUseScopeId
+					? createStaticObjectTextureRequirements({
+							plan,
+							textureUseScopeId,
+							textureWrapMode,
+						})
+					: [];
 				const materialEntryKey = createStaticMaterialEntryKey({
 					plan,
 					textureWrapMode,
@@ -501,6 +428,7 @@ function createTriangleCandidates(
 						`variant:${materialVariantSignature ?? "base"}`,
 					].join(":"),
 					textureWrapMode,
+					textureRequirements,
 					textureRoleSchemaKey,
 					textureRoleLayoutKey,
 				});

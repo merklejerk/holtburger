@@ -1,6 +1,6 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation in progress. Phases 0-6 are complete. This document defines the target model,
+Status: implementation in progress. Phases 0-7 are complete. This document defines the target model,
 north stars, risk surface, and phased cutover plan for replacing static-vs-dynamic object visual
 worker bifurcation with a shared object-like visual recipe graph.
 
@@ -1090,7 +1090,7 @@ Phase 4 completion notes:
   `npm --prefix apps/holtburger-3d run check`
   `npm --prefix apps/holtburger-3d run test:ts -- src/lib/visual/object-visual-material-planner.test.ts src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/static/env-cells/bake/env-cell-system-baker.test.ts src/lib/dynamic/visual-baker.test.ts src/lib/dynamic/visual-contracts.test.ts src/lib/dynamic/visual-bake-worker-client.test.ts src/lib/static/coordinator/static-coordinator.test.ts src/lib/runtime/client-runtime.test.ts`
 - Debt carried forward: Phase 7 should decide whether final material and texture recipe ids are
-  introduced with the shared bundle contract or inside Phase 8's unified baker foundation. Do not
+  introduced with the shared bundle contract or inside Phase 8A's unified baker foundation. Do not
   add a compatibility adapter that preserves the old static/dynamic planner split.
 
 ### Phase 5: Geometry Sidecars And Transform Invariant
@@ -1150,7 +1150,7 @@ Phase 5 completion notes:
   `npm --prefix apps/holtburger-3d run check`
   `npm --prefix apps/holtburger-3d run test:ts -- src/lib/visual/object-visual-recipe-bundle.test.ts src/lib/static/objects/bake/static-object-bake-attachments.test.ts src/lib/static/env-cells/bake/env-cell-system-geometry-attachments.test.ts src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/static/env-cells/bake/env-cell-system-baker.test.ts src/lib/dynamic/visual-bake-attachments.test.ts src/lib/dynamic/visual-baker.test.ts src/lib/static/coordinator/static-coordinator.test.ts src/lib/runtime/client-runtime.test.ts`
 - Debt carried forward: Phase 7 should verify whether `GeometryRecipe` records should be introduced
-  before or inside the Phase 8 unified baker. Avoid a compatibility adapter that accepts the old
+  before or inside the Phase 8A unified baker. Avoid a compatibility adapter that accepts the old
   top-level `positions`/`texCoords` attachment shape.
 
 ### Phase 6: Shared Object Visual Placement Planner
@@ -1244,19 +1244,48 @@ Acceptance criteria:
 - No static or dynamic resolver cutover begins while the shared model still has unresolved contract
   gaps.
 
-### Phase 8: Unified Object Visual Baker And Install Publication Foundation
+Phase 7 completion notes:
 
-Goal: build the shared recipe-first baker core and shared object visual install publication before
-domain resolvers cut over to the new final output shape.
+- Proceed with the shared model. Phases 1-6 established the minimum shared foundation needed before
+  resolver cutover: numeric recipe ids/key tables, metadata-only texture routes, neutral material
+  planning, source-local geometry sidecars, and shared object-visual placement planning.
+- The current object visual contract is strong enough to begin a unified baker foundation, but not
+  yet strong enough to cut over static or dynamic resolvers. Final `TextureRecipe`, `MaterialRecipe`,
+  `GeometryRecipe`, `PartRecipe`, and `PartInstance` emission still needs the shared baker/bundle
+  work.
+- Phase 8 was too broad. It mixed recipe expansion, renderer-legal partitioning, install
+  publication, runtime shell restructuring, and dynamic animation binding. Split it into Phase 8A
+  for the baker core and Phase 8B for install publication/runtime shell structure.
+- Temporary seams retained after Phase 7:
+  - static object, structured-interior, and dynamic placement entry points remain as requirement
+    collectors until final `TextureRecipe` records exist;
+  - attachment providers still load geometry sidecars before bake, while bakers consume shared
+    `ObjectVisualGeometryBuffer` payloads;
+  - dynamic texture planning still lives beside the dynamic baker until recipe bundle emission can
+    own texture requirements directly;
+  - static commit install still exposes legacy `installedDrawUnits`, `staticObjectVisualResources`,
+    and `staticObjectRenderInstances`.
+- Deletion criteria for those seams:
+  - remove requirement collector entry points when resolvers emit `TextureRecipe` records and shared
+    placement policy derives directly from bundles;
+  - remove old top-level attachment shapes permanently; no compatibility adapter should accept
+    `positions`/`texCoords` outside `ObjectVisualGeometryBuffer`;
+  - remove dynamic-only texture planning when dynamic resolvers emit the same bundle texture records
+    as static object-like domains;
+  - remove install reconstruction from legacy static draw-unit categories after
+    `ObjectVisualInstallSet` becomes the runtime publication shape.
+- Verification:
+  `npm --prefix apps/holtburger-3d run check`
+
+### Phase 8A: Unified Object Visual Baker Core Foundation
+
+Goal: build the shared recipe-first baker core before domain resolvers cut over to the new final
+output shape.
 
 Deliverables:
 
 - Add a unified object visual baker that consumes ready bundle, geometry sidecars, and object visual
   placement snapshot.
-- Produce a shared `ObjectVisualInstallSet` shape for direct draw units, visual resources, render
-  instances, and texture dependencies.
-- Produce static layer install publications that wrap `ObjectVisualInstallSet` with domain,
-  landblock/residency, and non-visual sidecars.
 - Preserve renderer material legality, material-table splitting, transparent/additive sorting
   anchors, and texture dependency output.
 - Add dynamic animation output bindings from source `sourcePartIndex` to one or more baked
@@ -1268,14 +1297,7 @@ Task checklist:
 - Partition by material family, pass, render state, texture placement compatibility, and
   material-table budget.
 - Route unsupported material bindings to no renderer output.
-- Replace runtime/install reconstruction of visual payloads from old static draw-unit buckets with a
-  shared object visual install publication.
-- Keep domain-specific shells only for renderer setter routing, scene-query sidecars, residency,
-  ownership, dependency pin/release, and runtime install policy.
-- Ensure install shells do not own visual payload construction, material planning, geometry
-  expansion, placement lookup, or instancing logic.
-- Expand sampled dynamic animation transforms from `sourcePartIndex` to every bound `renderPartId`
-  during dynamic commit/install.
+- Emit `DynamicAnimationPartBinding` records from `sourcePartIndex` to every bound `renderPartId`.
 - Add fixture-driven parity tests for representative static, structured interior, and dynamic bundle
   inputs before resolver cutovers delete old payload shapes.
 
@@ -1283,10 +1305,6 @@ Acceptance criteria:
 
 - Static object-like layers and dynamic visuals can be produced by the same baker core from shared
   object visual bundle inputs.
-- Runtime install code can publish object visual layers from shared `ObjectVisualInstallSet` data
-  without reconstructing visual payloads from legacy static draw-unit categories.
-- Domain-specific install shells contain no visual payload construction, material planning, geometry
-  expansion, placement lookup, or generated-scenery instancing logic.
 - Dynamic renderer/resource commits preserve animation for split render parts through explicit
   source-part-to-render-part bindings.
 - Existing renderer-facing behavior remains equivalent for covered fixtures.
@@ -1295,6 +1313,45 @@ Deletion criteria:
 
 - None yet. Legacy paths may remain only as side-by-side parity references until resolver cutover and
   hard cutover remove their producers and callers.
+
+### Phase 8B: Object Visual Install Publication Foundation
+
+Goal: publish unified baker output through shared install data before resolver cutover.
+
+Deliverables:
+
+- Produce a shared `ObjectVisualInstallSet` shape for direct draw units, visual resources, render
+  instances, animation part bindings, and texture dependencies.
+- Produce static layer install publications that wrap `ObjectVisualInstallSet` with domain,
+  landblock/residency, and non-visual sidecars.
+- Restructure install shells so they route publications and runtime policy but do not reconstruct
+  visual payloads from legacy static draw-unit categories.
+
+Task checklist:
+
+- Replace runtime/install reconstruction of visual payloads from old static draw-unit buckets with a
+  shared object visual install publication.
+- Keep domain-specific shells only for renderer setter routing, scene-query sidecars, residency,
+  ownership, dependency pin/release, and runtime install policy.
+- Ensure install shells do not own visual payload construction, material planning, geometry
+  expansion, placement lookup, generated-scenery instancing, or animation split mapping.
+- Preserve static sidecars for portals, visibility, spatial records, and source mappings outside the
+  visual install set.
+- Add publication tests that cover direct draw units, visual resources, render instances, dynamic
+  animation bindings, and texture dependency pin/release identity.
+
+Acceptance criteria:
+
+- Runtime install code can publish object visual layers from shared `ObjectVisualInstallSet` data
+  without reconstructing visual payloads from legacy static draw-unit categories.
+- Domain-specific install shells contain no visual payload construction, material planning, geometry
+  expansion, placement lookup, generated-scenery instancing logic, or animation split mapping.
+- Existing renderer-facing behavior remains equivalent for covered fixtures.
+
+Deletion criteria:
+
+- Remove install-shell wrapper logic that exists only to reconstruct visual payloads from
+  `installedDrawUnits`, `staticObjectRenderInstances`, or `staticObjectVisualResources`.
 
 ### Phase 9: Static Object-Like Resolver Cutover
 
@@ -1629,6 +1686,10 @@ Acceptance criteria:
 - Phase 6 kept the source-requirement collectors in place because final `TextureRecipe` records do
   not exist yet. These collectors are transitional seams with Phase 7 deletion/collapse review, not
   permanent architecture.
+- Phase 7 confirmed the shared foundation can proceed to unified baker work, but resolver cutover
+  should still wait until final recipe bundle emission exists. It split the old Phase 8 into Phase
+  8A for baker-core parity and Phase 8B for install publication/runtime shell structure so runtime
+  install restructuring does not block proving the recipe-first baker.
 
 ## Risks And Mitigations
 

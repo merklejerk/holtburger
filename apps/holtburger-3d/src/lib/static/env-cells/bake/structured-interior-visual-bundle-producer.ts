@@ -20,6 +20,7 @@ import {
 	createObjectVisualMissingDependenciesResolution,
 	createObjectVisualReadyResolution,
 	createObjectVisualRecipeKeyRegistry,
+	isRenderableObjectVisualMaterialRecipe,
 	objectVisualGeometryBufferKey,
 	objectVisualGeometryRecipeKey,
 	objectVisualMaterialRecipeKey,
@@ -146,6 +147,28 @@ export function createStructuredInteriorVisualBundleExpansion(input: {
 		bufferId,
 	};
 	const partInstanceCount = 1;
+	const materialRecipes = new Map(
+		surfacePlans.map(({ plan, surfaceId }) => [
+			requireRegistryId(
+				registry.materialRecipeIdsByKey,
+				objectVisualMaterialRecipeKey(
+					createMaterialRecipeKey(surfaceId, plan),
+				),
+				"material recipe",
+			),
+			createMaterialRecipe(plan, registry),
+		]),
+	);
+	const materialBindings = createMaterialBindings({
+		attachment,
+		envCell: input.envCell,
+		registry,
+		surfacePlans,
+	});
+	const hasRenderableMaterialBindings = materialBindings.some((binding) => {
+		const recipe = materialRecipes.get(binding.materialRecipeId);
+		return recipe ? isRenderableObjectVisualMaterialRecipe(recipe) : false;
+	});
 	const bundle: ObjectVisualRecipeBundle = {
 		geometryBufferRefs: new Map([
 			[
@@ -170,18 +193,7 @@ export function createStructuredInteriorVisualBundleExpansion(input: {
 				},
 			],
 		]),
-		materialRecipes: new Map(
-			surfacePlans.map(({ plan, surfaceId }) => [
-				requireRegistryId(
-					registry.materialRecipeIdsByKey,
-					objectVisualMaterialRecipeKey(
-						createMaterialRecipeKey(surfaceId, plan),
-					),
-					"material recipe",
-				),
-				createMaterialRecipe(plan, registry),
-			]),
-		),
+		materialRecipes,
 		partInstances: [
 			{
 				instanceId: `structured-interior:${formatHex32(
@@ -221,12 +233,7 @@ export function createStructuredInteriorVisualBundleExpansion(input: {
 				partRecipeId,
 				{
 					geometryRecipeId,
-					materialBindings: createMaterialBindings({
-						attachment,
-						envCell: input.envCell,
-						registry,
-						surfacePlans,
-					}),
+					materialBindings,
 				},
 			],
 		]),
@@ -239,29 +246,34 @@ export function createStructuredInteriorVisualBundleExpansion(input: {
 
 	return {
 		geometryBuffers: new Map([[bufferId, geometryBuffer]]),
-		publicationMetadata: createObjectVisualStaticPublicationMetadata({
-			partInstanceCount,
-			structuredInteriorDrawUnits: [
-				{
-					cellStructure: input.envCell.cellStructure,
-					drawUnitIdSeed: createDrawUnitIdSeed(input.task, input.envCell),
-					envCellId: input.envCell.identity.envCellId,
-					environment: input.envCell.environment,
-					kind: "structured-interior-direct-draw-unit",
-					landblockId: input.envCell.landblockId,
-					localPlacement: input.envCell.localPlacement,
-					materialPlan: materialPlan.entries,
-					memberId: input.envCell.memberId,
-					partInstanceIndices: [createObjectVisualPartInstanceIndex(0)],
-					sourceTriangleIds: attachment.buffer.triangles.map(
-						createSourceTriangleId,
-					),
-					surfaceIds: input.envCell.surfaces.map(
-						(surface) => surface.surfaceId,
-					),
-				},
-			],
-		}),
+		publicationMetadata: hasRenderableMaterialBindings
+			? createObjectVisualStaticPublicationMetadata({
+					partInstanceCount,
+					structuredInteriorDrawUnits: [
+						{
+							cellStructure: input.envCell.cellStructure,
+							drawUnitIdSeed: createDrawUnitIdSeed(
+								input.task,
+								input.envCell,
+							),
+							envCellId: input.envCell.identity.envCellId,
+							environment: input.envCell.environment,
+							kind: "structured-interior-direct-draw-unit",
+							landblockId: input.envCell.landblockId,
+							localPlacement: input.envCell.localPlacement,
+							materialPlan: materialPlan.entries,
+							memberId: input.envCell.memberId,
+							partInstanceIndices: [createObjectVisualPartInstanceIndex(0)],
+							sourceTriangleIds: attachment.buffer.triangles.map(
+								createSourceTriangleId,
+							),
+							surfaceIds: input.envCell.surfaces.map(
+								(surface) => surface.surfaceId,
+							),
+						},
+					],
+				})
+			: null,
 		resolution: createObjectVisualReadyResolution(bundle),
 	};
 }

@@ -347,30 +347,23 @@ function createStructuredInteriorObjectVisualInstallSet(options: {
 		if (publication.publicationMetadata === null) {
 			return [];
 		}
-		try {
-			return [
-				createStaticObjectVisualRecipeInstallPublication({
-					bundle: publication.resolution.bundle,
-					geometryBuffers: publication.geometryBuffers,
-					metadata: publication.publicationMetadata,
-					renderPartIdPrefix: `${options.task.ownerId}:structured-interior`,
-					texturePlacementSnapshot:
-						publication.resolution.bundle.textureRecipes.size === 0
-							? EMPTY_TEXTURE_PLACEMENT_SNAPSHOT
-							: requireObjectVisualTexturePlacementSnapshot(
-									options.input.texturePlacementSnapshot,
-									"Structured interior visual recipe publication",
-								),
-					textureUseNamespace: "structured-interior-texture",
-					textureUseScopeId: options.task.ownerId,
-				}).installSet,
-			];
-		} catch (error) {
-			console.warn(
-				`Skipped structured interior visual recipe publication for ${options.task.ownerId}: ${error instanceof Error ? error.message : String(error)}.`,
-			);
-			return [];
-		}
+		return [
+			createStaticObjectVisualRecipeInstallPublication({
+				bundle: publication.resolution.bundle,
+				geometryBuffers: publication.geometryBuffers,
+				metadata: publication.publicationMetadata,
+				renderPartIdPrefix: `${options.task.ownerId}:structured-interior`,
+				texturePlacementSnapshot:
+					publication.resolution.bundle.textureRecipes.size === 0
+						? EMPTY_TEXTURE_PLACEMENT_SNAPSHOT
+						: requireObjectVisualTexturePlacementSnapshot(
+								options.input.texturePlacementSnapshot,
+								"Structured interior visual recipe publication",
+							),
+				textureUseNamespace: "structured-interior-texture",
+				textureUseScopeId: options.task.ownerId,
+			}).installSet,
+		];
 	});
 
 	return createObjectVisualInstallSet({

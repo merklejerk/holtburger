@@ -188,6 +188,7 @@ function createLandblockSceneLodSourceRequests(
 		number,
 		{
 			readonly landblockId: number;
+			priority: number;
 			sourceLod: StaticLandblockSceneLodSourceRequest["sourceLod"];
 			readonly requestedLayersByKind: Map<
 				StaticLandblockSceneLodLayerRequest["kind"],
@@ -206,11 +207,13 @@ function createLandblockSceneLodSourceRequests(
 		if (!request) {
 			request = {
 				landblockId,
+				priority: item.priority,
 				requestedLayersByKind: new Map(),
 				sourceLod: layerLod,
 			};
 			requestsByLandblock.set(landblockId, request);
 		}
+		request.priority = Math.min(request.priority, item.priority);
 		if (layerLod > request.sourceLod) {
 			request.sourceLod = layerLod;
 		}
@@ -224,12 +227,14 @@ function createLandblockSceneLodSourceRequests(
 		.map((request) => ({
 			context,
 			landblockId: request.landblockId,
+			priority: request.priority,
 			requestedLayers: [...request.requestedLayersByKind.values()].sort(
 				compareLandblockSceneLodLayerRequests,
 			),
 			sourceLod: request.sourceLod,
 		}))
-		.sort(compareLandblockSceneLodSourceRequests);
+		.sort(compareLandblockSceneLodSourceRequests)
+		.map(({ priority: _priority, ...request }) => request);
 }
 
 function landblockSceneLodLayerKindForStaticDomain(
@@ -281,10 +286,10 @@ function compareLandblockSceneLodLayerRequests(
 }
 
 function compareLandblockSceneLodSourceRequests(
-	left: StaticLandblockSceneLodSourceRequest,
-	right: StaticLandblockSceneLodSourceRequest,
+	left: StaticLandblockSceneLodSourceRequest & { readonly priority: number },
+	right: StaticLandblockSceneLodSourceRequest & { readonly priority: number },
 ): number {
-	return left.landblockId - right.landblockId;
+	return left.priority - right.priority || left.landblockId - right.landblockId;
 }
 
 function compareStaticLayerTaskRequests(

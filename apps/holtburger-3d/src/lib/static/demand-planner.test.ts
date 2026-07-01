@@ -160,6 +160,31 @@ describe("static demand planner", () => {
 		]);
 	});
 
+	it("orders outdoor source requests by scene priority before landblock id", () => {
+		const { sourceRequests } = planStaticDemand(
+			createOutdoorDemand(0xda55ffff, {
+				buildings: 1,
+				detail: 1,
+				envCells: 1,
+				terrain: 1,
+			}),
+			3,
+		);
+
+		expect(sourceRequests).toHaveLength(9);
+		expect(sourceRequests[0]?.landblockId).toBe(0xda55ffff);
+		expect(sourceRequests[0]?.sourceLod).toBe(4);
+		expect(sourceRequests[0]?.requestedLayers.map((layer) => layer.kind)).toEqual(
+			[
+				"terrain",
+				"outdoor-buildings",
+				"outdoor-explicit-objects",
+				"outdoor-generated-scenery",
+				"env-cell-system",
+			],
+		);
+	});
+
 	it("normalizes domain radii without letting non-terrain domains exceed terrain", () => {
 		expect(
 			normalizeOutdoorLodRadii({

@@ -3,44 +3,61 @@ import type {
 	TexturePlacementSnapshot,
 	TextureUsagePurpose,
 } from "../../textures/placement";
+import type {
+	StaticMaterialBatchCandidate,
+	StaticMaterialBatchSliceGuard,
+} from "./static-material-batch-slicer";
 
 export interface ObjectMaterialPageRequirementCandidate {
 	readonly materialEntryKey: string;
 	readonly textureRequirements: readonly TextureBindingRequirement[];
 }
 
-export function canAddObjectMaterialPageRequirementCandidate<
-	TCandidate extends ObjectMaterialPageRequirementCandidate,
+export function createObjectMaterialPageRequirementSliceGuard<
+	TCandidate extends StaticMaterialBatchCandidate &
+		ObjectMaterialPageRequirementCandidate,
 >(options: {
-	readonly currentSlice: readonly TCandidate[];
-	readonly candidate: TCandidate;
 	readonly placementSnapshot: TexturePlacementSnapshot;
 	readonly diagnosticSubject: string;
-}): boolean {
-	const pageSets = createEmptyObjectPurposePageSets();
-	const candidatesByEntryKey = new Map<string, TCandidate>();
-	for (const candidate of [...options.currentSlice, options.candidate]) {
-		const pageLegalityKey = createObjectMaterialPageLegalityKey(candidate);
-		if (!candidatesByEntryKey.has(pageLegalityKey)) {
-			candidatesByEntryKey.set(pageLegalityKey, candidate);
-		}
-	}
+}): StaticMaterialBatchSliceGuard<TCandidate> {
+	let pageSets = createEmptyObjectPurposePageSets();
+	let acceptedPageLegalityKeys = new Set<string>();
 
-	for (const candidate of candidatesByEntryKey.values()) {
-		addObjectMaterialRequirementPlacementPages({
-			candidate,
-			diagnosticSubject: options.diagnosticSubject,
-			pageSets,
-			placementSnapshot: options.placementSnapshot,
-		});
-	}
+	return {
+		acceptCandidate(candidate) {
+			const pageLegalityKey = createObjectMaterialPageLegalityKey(candidate);
+			if (acceptedPageLegalityKeys.has(pageLegalityKey)) {
+				return;
+			}
+			addObjectMaterialRequirementPlacementPages({
+				candidate,
+				diagnosticSubject: options.diagnosticSubject,
+				pageSets,
+				placementSnapshot: options.placementSnapshot,
+			});
+			acceptedPageLegalityKeys.add(pageLegalityKey);
+		},
+		canAddCandidate(candidate) {
+			if (
+				acceptedPageLegalityKeys.has(
+					createObjectMaterialPageLegalityKey(candidate),
+				)
+			) {
+				return true;
+			}
 
-	return (
-		pageSets.baseColor.size <= 1 &&
-		pageSets.detail.size <= 1 &&
-		pageSets.index.size <= 1 &&
-		pageSets.palette.size <= 1
-	);
+			return candidateTextureRequirementsFitPageSets({
+				candidate,
+				diagnosticSubject: options.diagnosticSubject,
+				pageSets,
+				placementSnapshot: options.placementSnapshot,
+			});
+		},
+		reset() {
+			pageSets = createEmptyObjectPurposePageSets();
+			acceptedPageLegalityKeys = new Set<string>();
+		},
+	};
 }
 
 function createObjectMaterialPageLegalityKey(
@@ -79,6 +96,31 @@ function addObjectMaterialRequirementPlacementPages<
 			placement.textureRefId,
 		);
 	}
+}
+
+function candidateTextureRequirementsFitPageSets<
+	TCandidate extends ObjectMaterialPageRequirementCandidate,
+>(options: {
+	readonly candidate: TCandidate;
+	readonly diagnosticSubject: string;
+	readonly pageSets: ObjectPurposePageSets;
+	readonly placementSnapshot: TexturePlacementSnapshot;
+}): boolean {
+	for (const requirement of options.candidate.textureRequirements) {
+		const placement = options.placementSnapshot.placementsByItemId.get(
+			requirement.placementItemId,
+		);
+		if (!placement) {
+			throw new Error(
+				`${options.diagnosticSubject} texture placement snapshot is missing ${requirement.placementItemId}.`,
+			);
+		}
+		const pageSet = getObjectPurposePageSet(options.pageSets, placement.purpose);
+		if (pageSet.size > 0 && !pageSet.has(placement.textureRefId)) {
+			return false;
+		}
+	}
+	return true;
 }
 
 interface ObjectPurposePageSets {

@@ -42,7 +42,7 @@ import {
 	createStaticMaterialTextureRoleSchemaKey,
 	createStaticMaterialTextureUses,
 } from "../../bake/static-material-adapter";
-import { canAddObjectMaterialPageRequirementCandidate } from "../../bake/object-material-page-legality";
+import { createObjectMaterialPageRequirementSliceGuard } from "../../bake/object-material-page-legality";
 import { sliceStaticMaterialBatchCandidates } from "../../bake/static-material-batch-slicer";
 import {
 	createEnvCellCellStructureGeometryIdentity,
@@ -307,10 +307,8 @@ function createStructuredInteriorDrawUnits(
 			placementSnapshot,
 		});
 		const slices = sliceStaticMaterialBatchCandidates({
-			canAddCandidateToSlice: (currentSlice, candidate) =>
-				canAddObjectMaterialPageRequirementCandidate({
-					candidate,
-					currentSlice,
+			createSliceGuard: () =>
+				createObjectMaterialPageRequirementSliceGuard<StructuredInteriorTriangleCandidate>({
 					diagnosticSubject: `Structured interior ${formatHex32(envCell.identity.envCellId)}`,
 					placementSnapshot,
 				}),

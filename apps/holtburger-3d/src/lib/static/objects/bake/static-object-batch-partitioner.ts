@@ -25,7 +25,7 @@ import {
 	createStaticMaterialTextureBindingRequirement,
 } from "../../bake/static-material-texture-policy";
 import type { TextureBindingRequirement, TexturePlacementSnapshot } from "../../../textures/placement";
-import { canAddObjectMaterialPageRequirementCandidate } from "../../bake/object-material-page-legality";
+import { createObjectMaterialPageRequirementSliceGuard } from "../../bake/object-material-page-legality";
 import { createStaticObjectMaterialCoverageReport } from "./static-object-material-coverage";
 import {
 	createStaticObjectMaterialUseKey,
@@ -228,12 +228,11 @@ export function partitionStaticObjectBatches(
 		...createTriangleCandidates(payload, materialById, textureUseScopeId),
 	].sort(compareTriangleCandidates);
 	const partitions = sliceStaticMaterialBatchCandidates({
-		canAddCandidateToSlice:
+		createSliceGuard:
 			placementSnapshot && textureUseScopeId
-				? (currentSlice, candidate) =>
-						canAddStaticObjectCandidateUnderPlacement({
-							candidate,
-							currentSlice,
+				? () =>
+						createObjectMaterialPageRequirementSliceGuard<StaticObjectTriangleCandidate>({
+							diagnosticSubject: "Static object",
 							placementSnapshot,
 						})
 				: undefined,
@@ -258,19 +257,6 @@ export function partitionStaticObjectBatches(
 		}),
 		partitions,
 	};
-}
-
-function canAddStaticObjectCandidateUnderPlacement(options: {
-	readonly currentSlice: readonly StaticObjectTriangleCandidate[];
-	readonly candidate: StaticObjectTriangleCandidate;
-	readonly placementSnapshot: TexturePlacementSnapshot;
-}): boolean {
-	return canAddObjectMaterialPageRequirementCandidate({
-		candidate: options.candidate,
-		currentSlice: options.currentSlice,
-		diagnosticSubject: "Static object",
-		placementSnapshot: options.placementSnapshot,
-	});
 }
 
 function createStaticObjectTextureRequirements(options: {

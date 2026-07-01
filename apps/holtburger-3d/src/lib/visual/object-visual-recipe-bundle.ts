@@ -1,3 +1,4 @@
+import type { MaterialTextureDataUseIdentity } from "../static/contracts";
 import type { VisualGeometryRenderState } from "./visual-geometry";
 
 type Brand<TValue, TBrand extends string> = TValue & {
@@ -72,6 +73,8 @@ export type ObjectVisualTextureWrapMode = "clamp" | "repeat";
 
 /** Metadata-only texture need authored by resolvers before placement or packing. */
 export interface ObjectVisualTextureRecipe {
+	/** Original material texture metadata needed for placement and renderer binding. */
+	readonly dataUse: MaterialTextureDataUseIdentity;
 	readonly usage: ObjectVisualTextureUsage;
 	readonly source: ObjectVisualTextureSource;
 }

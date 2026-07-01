@@ -1,6 +1,6 @@
 # Holtburger 3D Simplified Texture Packing Pipeline Implementation Plan
 
-Status: implementation plan draft.
+Status: implementation plan reopened for structured-interior follow-up.
 
 ## Purpose
 
@@ -108,9 +108,14 @@ Current code paths that matter:
 - `apps/holtburger-3d/src/lib/runtime/client-runtime.ts`
   - owns static materialization, texture placement application, dynamic resource sync, renderer
     layer installation, and runtime dynamic spawn prep.
-- `apps/holtburger-3d/src/lib/runtime/static-materializer.ts`
+- `apps/holtburger-3d/src/lib/runtime/static-commit-installer.ts`
   - validates committed texture bindings and directly installs baker-authored draw units; the old
     static object fine-splitting path has been removed.
+- `apps/holtburger-3d/src/lib/static/env-cells/bake/env-cell-system-baker.ts`
+  - bakes `structured-interior-geometry` draw units for env-cell cell structures and delegates
+    env-cell static object placements through the static object baker.
+- `apps/holtburger-3d/src/lib/static/env-cells/bake/structured-interior-material-planner.ts`
+  - plans structured-interior material texture ids from env-cell surface materials.
 - `apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-renderer.ts`
   - stores texture pages by `textureRefId` and texture bindings by owner key.
 - `apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-object-material-payloads.ts`
@@ -152,6 +157,19 @@ Terrain renderer facts:
   by final packed color/mask/detail page assignment.
 - Terrain role-page overflow is currently detected during texture binding preparation. If layered
   terrain cannot be fully satisfied after packing, the renderer falls back to `terrain-debug-flat`.
+
+Static draw-unit taxonomy:
+
+- `terrain-geometry`
+- `static-object-geometry`
+- `structured-interior-geometry`
+
+Follow-up finding:
+
+- `structured-interior-geometry` was not fully included in the texture-before-bake cutover. Env-cell
+  structured interiors produce `textureUseIds`, but their draw-unit slicing does not yet use final
+  placement pages as a legality input and their texture dependencies are not emitted alongside the
+  env-cell static object dependencies.
 
 ## Scoping Thesis
 
@@ -233,6 +251,9 @@ In scope for this plan:
 - Phased implementation, including clean cutover and vestige removal.
 - First-class terrain support in the same texture-before-bake model, with terrain-specific baker
   legality rules.
+- First-class env-cell structured-interior support in the same texture-before-bake model, with
+  object-material page legality enforced before `structured-interior-geometry` draw units are
+  emitted.
 - Object shader-family specialization after the texture-before-bake path is established.
 
 Out of scope for this plan:
@@ -307,6 +328,35 @@ Notes:
   of continuing to pack more meaning into one string.
 - `source` identifies bytes or prepared texture source. Its exact shape can reuse current prepared
   texture contracts initially.
+
+Follow-up identity correction:
+
+Runtime validation after Phase 11 showed that `textureUseId` is still overloaded even though the
+placement contract names the packer-facing key `itemId`. Current code often derives placement item
+ids, material binding keys, dependency item ids, and renderer binding lookup keys from the same
+string. That makes stage mismatches easy to introduce: one domain can drop wrap mode, scope,
+palette range, or alias identity and the failure only surfaces later as a missing placement,
+dependency, or committed binding.
+
+Before adding more domain-specific structured-interior planning, the follow-up phases should split
+the concepts into explicit records:
+
+```ts
+interface TextureBindingRequirement {
+  /** Material/baker-facing key referenced by material entries and draw units. */
+  readonly bindingKey: string;
+  /** Packer/placement snapshot key. Often starts equal to bindingKey, but is not the same concept. */
+  readonly placementItemId: string;
+  /** Source dedupe identity, including palette ranges and sampling-relevant source facts. */
+  readonly sourceKey: string;
+  readonly purpose: TextureUsagePurpose;
+  readonly source: TexturePlacementSource;
+}
+```
+
+This shape is illustrative, not locked. The important requirement is structural separation: bakers
+and planners should exchange typed binding requirements instead of independently rebuilding
+`textureUseId` strings for placement, dependency, and renderer binding.
 
 ### Texture Placement Pool
 
@@ -512,6 +562,60 @@ terrain-layered candidate slice is legal when:
 
 The packer receives none of those terrain concepts. It only receives placement intents for currently
 packable items; active placements are pinned by `TextureManager`.
+
+## Proposed Env-Cell Structured Interior Sequence
+
+Env-cell structured interiors must use the same static topology as terrain and static objects. The
+structured-interior baker applies object-material page legality to cell-structure surfaces before
+emitting `structured-interior-geometry` draw units.
+
+```mermaid
+sequenceDiagram
+  participant Main as Main thread runtime
+  participant Coord as StaticCoordinator
+  participant Resolver as Static resolver worker
+  participant Packer as Texture packing worker
+  participant Baker as Env-cell bake worker
+  participant Renderer as Renderer
+
+  Main->>Coord: env-cell scene interest -> StaticDemand
+  Coord->>Resolver: resolve env-cell-system source request
+  Resolver->>Resolver: decode env-cell surfaces and cell-structure facts
+  Resolver->>Resolver: discover structured-interior texture placement intents
+  Resolver-->>Coord: env-cell source payload + intents
+  Coord-->>Main: source payload + texture placement intents
+  Main->>Packer: pack structured-interior items by pool/purpose/affinity
+  Packer->>Packer: preserve active placements; use free/zombie space only
+  Packer-->>Main: placements + page updates
+  Main->>Baker: bake env-cell system with placement snapshot
+  Baker->>Baker: plan cell-structure material entries
+  Baker->>Baker: split structured-interior slices by page legality
+  Baker->>Baker: emit structured-interior draw units legal for object material bindings
+  Baker-->>Main: env-cell prep product + texture dependencies
+  Main->>Renderer: apply texture page update
+  Main->>Renderer: install env-cell layers/resources
+  Main->>Main: register active structured-interior texture dependencies
+  Main->>Coord: mark env-cell commit materialized
+```
+
+Structured-interior legality is a baker concern:
+
+```text
+flat-color structured-interior draw unit
+  no texture pages
+
+texture-rgba structured-interior draw unit
+  <= 1 object-base-color page
+  <= 1 object-detail page
+
+indexed-paletted structured-interior draw unit
+  <= 1 object-index page
+  <= 1 object-palette page
+  <= 1 object-detail page
+```
+
+The packer receives no env-cell, surface, portal, or cell-structure semantics. It only receives
+placement items, pool/purpose, source identity, and opaque affinity hints.
 
 ## Proposed Runtime-Authored Dynamic Sequence
 
@@ -1199,6 +1303,173 @@ Acceptance criteria:
 - `npm`/project test and lint commands relevant to `apps/holtburger-3d` pass.
 - The plan's course-correction notes capture any intentional deviations.
 
+### Resteering 4: Textured Drawable Closure Audit
+
+Goal: verify every textured drawable class participates in the same placement-before-bake closure
+and identify overloaded texture identity seams before adding more domain-specific implementation.
+
+Deliverables:
+
+- Audit all `StaticDrawUnit` variants and dynamic visual resource products:
+  - `terrain-geometry`;
+  - `static-object-geometry`;
+  - `structured-interior-geometry`;
+  - static-authored dynamic visual resources;
+  - runtime-authored dynamic visual resources.
+- For each textured drawable class, document:
+  - where placement intents are discovered;
+  - where `TexturePlacementSnapshot` is consumed;
+  - where page legality is enforced;
+  - where `textureUses` are emitted;
+  - where `TextureResourceDependencies` are emitted;
+  - where removal releases dependency pins.
+- For each class, document whether the same string is acting as:
+  - material binding key;
+  - placement item id;
+  - source dedupe key;
+  - dependency item id;
+  - renderer binding key.
+- Add or update focused invariant tests that fail when a draw unit/resource references a
+  `textureUseId` without a corresponding committed binding or dependency.
+- Decide whether structured interiors can reuse static object material/page legality helpers as-is or
+  need a small shared object-material page-legality helper extracted first.
+- Decide the minimum identity split needed before structured-interior implementation can proceed
+  without creating another bespoke `textureUseId` generator.
+
+Acceptance criteria:
+
+- The audit identifies no unclassified textured drawable classes.
+- The remaining structured-interior work is scoped as a closure migration, not an installer or
+  renderer fallback.
+- The audit names which identity concepts remain overloaded and which must be separated in Phase 12.
+- Any new helper proposed by the audit has one caller family plus a clear second caller, or it is
+  deferred under YAGNI.
+
+### Phase 12: Split Texture Binding Requirement Identity
+
+Goal: replace ad hoc `textureUseId` recomputation at the placement/bake boundary with explicit
+texture binding requirements before adding structured-interior support.
+
+Deliverables:
+
+- Introduce a shared texture binding requirement shape near the existing placement/material texture
+  policy helpers. The exact name can change during implementation, but it must separate at least:
+  - material/baker binding key;
+  - placement item id;
+  - source dedupe key;
+  - purpose;
+  - placement source.
+- Update static object and terrain placement planning to derive placement intents from binding
+  requirement records instead of hand-built `textureUseId` strings where practical.
+- Update static object and terrain bake dependency emission to consume the same requirement-derived
+  placement item ids used for placement snapshots.
+- Keep renderer-facing `textureUseId` fields only where they still mean material binding key.
+- Add tests proving the same requirement record yields:
+  - the placement intent item id;
+  - the material entry binding key;
+  - the dependency item id;
+  - the renderer binding lookup key where applicable.
+- Document any places where `bindingKey === placementItemId` remains an intentional migration
+  shortcut.
+
+Acceptance criteria:
+
+- Static object and terrain paths no longer rely on independently recomputing equivalent texture id
+  strings across planner, baker, dependency, and renderer binding code.
+- The packer still sees only placement item ids and sources, not material binding keys or draw-unit
+  identities.
+- `textureUseId` is no longer used as a catch-all term in new placement or dependency-facing code.
+
+### Phase 13: Add Structured-Interior Placement Intents
+
+Goal: make env-cell cell-structure textures visible to `TextureManager.placeTextureIntents(...)`
+before env-cell baking.
+
+Deliverables:
+
+- Add structured-interior placement intent discovery from env-cell surface material plans, using the
+  shared texture binding requirement model from Phase 12.
+- Include structured-interior intents in `StaticCoordinator` source-ready work for
+  `env-cell-system`, alongside env-cell static object intents and static-authored dynamic intents.
+- Keep env-cell static object placement planning on the existing static object path; do not duplicate
+  it inside the structured-interior planner.
+- Add tests proving structured-interior pre-bake intents match the ids later referenced by
+  structured-interior material entries.
+- Add tests for mixed base/detail/index/palette structured-interior material shapes where existing
+  fixture coverage makes that practical.
+
+Acceptance criteria:
+
+- Env-cell source-ready placement work contains structured-interior placement intents for renderable
+  cell-structure surfaces.
+- Structured-interior material entries and placement intents share the same binding requirement
+  source, not parallel string construction.
+- Packer inputs remain domain-agnostic: pool, purpose, source, item id, and opaque affinity key only.
+- No draw units are created by the resolver or placement planner.
+
+### Phase 14: Make Structured-Interior Baking Placement-Aware
+
+Goal: make `structured-interior-geometry` draw units renderer-legal under final packed page
+assignments before they reach static commit installation.
+
+Deliverables:
+
+- Feed `TexturePlacementSnapshot` into structured-interior slice construction.
+- Split structured-interior candidates by object-material page legality:
+  - flat-color: no pages;
+  - texture-rgba: one base-color page and one detail page at most;
+  - indexed-paletted: one index page, one palette page, and one detail page at most.
+- Reuse static object material/page legality helpers where that reduces duplication without
+  blurring structured-interior source semantics.
+- Emit structured-interior `TextureResourceDependencies` from final baked draw-unit binding
+  requirements, using placement item ids rather than renderer binding keys when those concepts
+  diverge.
+- Include structured-interior dependencies in env-cell static bake results and static commit deltas,
+  merged with the existing env-cell static object dependencies.
+- Preserve env-cell portal, spatial, source-mapping, and visibility records against baker-emitted
+  structured-interior draw units.
+
+Acceptance criteria:
+
+- `structured-interior-geometry` draw units never hit the object one-page-per-role omission path in
+  `TextureManager` during normal operation.
+- Static commit installation no longer fails for renderable structured interiors due to missing
+  committed texture bindings.
+- Active structured-interior texture placements are pinned while their draw units are installed and
+  released when the draw units are removed.
+- Structured-interior dependency pins reference placement item ids produced by the shared binding
+  requirement model.
+- The packer remains unaware of env cells, surface ids, portals, draw units, and material-family
+  legality.
+
+### Phase 15: Final Drawable Isomorphism Cleanup
+
+Goal: remove the remaining texture-pipeline special cases exposed by the structured-interior cutover.
+
+Deliverables:
+
+- Delete any temporary structured-interior planning shims introduced in Phases 13-14.
+- Delete or rename any leftover new-code use of `textureUseId` where the intended concept is
+  placement item id, source key, or dependency item id.
+- Consolidate duplicated object-material page legality tests/helpers if both static object and
+  structured-interior paths now prove the same invariant.
+- Update diagnostics so failures name the violated closure stage:
+  - missing placement intent;
+  - missing placement snapshot entry;
+  - illegal baker draw-unit page set;
+  - missing committed renderer binding.
+- Update this plan's verified facts, tracked debt, and definition of done after the structured
+  interior cutover.
+- Run the relevant `apps/holtburger-3d` type, lint, and test checks.
+
+Acceptance criteria:
+
+- All `StaticDrawUnit` variants and dynamic visual resource products use the same placement,
+  dependency, and reclaim machinery.
+- Remaining domain branches are baker-owned legality differences, not orchestration or
+  `TextureManager` special cases.
+- No vestigial structured-interior fallback path remains to bypass placement-before-bake.
+
 ## Task Checklist
 
 - [x] Phase 0A: prove source-ready continuation contract in a segregated spike.
@@ -1217,6 +1488,11 @@ Acceptance criteria:
 - [x] Phase 9: simplify renderer payload prep and specialize shader families.
 - [x] Phase 10: resolve `textureUseId` cleanup.
 - [x] Phase 11: delete vestigial code and obsolete tests.
+- [ ] Resteering 4: audit textured drawable closure coverage.
+- [ ] Phase 12: split texture binding requirement identity.
+- [ ] Phase 13: add structured-interior placement intents.
+- [ ] Phase 14: make structured-interior baking placement-aware.
+- [ ] Phase 15: final drawable isomorphism cleanup.
 
 ## Decisions and Course Corrections
 
@@ -1463,6 +1739,18 @@ Acceptance criteria:
 - Dry run clarified that removing `static-materializer.ts` affects peer-record mapping in addition
   to geometry splitting. Functional selection/picking records must survive; diagnostic-only lineage is
   low priority and can be dropped.
+- Runtime validation after Phase 11 found that `structured-interior-geometry` was not fully included
+  in the texture-before-bake cutover. Env-cell structured interiors can still produce draw units that
+  reference texture ids without committed renderer bindings because their slicing does not yet use
+  final placement pages and their dependencies are not emitted in the env-cell bake result.
+- The follow-up plan reopens the work around draw-unit taxonomy rather than patching the static
+  commit installer or adding renderer fallback. `static-commit-installer.ts` is treated as a final
+  invariant gate, not as the place to repair bad draw-unit/page combinations.
+- Runtime validation also showed that Phase 10's `textureUseId` decision was too narrow. Keeping
+  `textureUseId` as a material binding key is still plausible, but the plan did not sufficiently
+  separate material binding keys, placement item ids, source dedupe keys, dependency item ids, and
+  renderer binding keys. Phase 12 now gates structured-interior work on an explicit binding
+  requirement identity split.
 
 ## Tracked Debt
 
@@ -1483,8 +1771,9 @@ Acceptance criteria:
   field. A later cleanup should rename or narrow the packer protocol once renderer-era domain
   ownership is no longer part of placement planning.
 - Phase 2 active references are tracked by placement `itemId`, matching the migration-era
-  `textureUseId` assumption. Phase 10 decided that this mapping is acceptable: material texture-use
-  ids seed placement item ids at the boundary, but the placement record itself is keyed by `itemId`.
+  `textureUseId` assumption. Runtime validation after Phase 11 showed that this equality is too easy
+  to misuse. Phase 12 must make any remaining `bindingKey === placementItemId` equality explicit and
+  local rather than ambient pipeline doctrine.
 - Source-ready work no longer carries empty placement intents for migrated object, terrain, or
   dynamic paths. Future domains should either emit real placement intents or document why they are
   intentionally texture-free; do not reintroduce empty arrays as hidden fallbacks.
@@ -1516,6 +1805,20 @@ Acceptance criteria:
   assignment and overflow diagnostics, but the renderer update payload still uses the old field name.
   Phase 10 or Phase 11 should rename that bridge if it survives `textureUseId` cleanup.
 - Renderer resolved material-texture placement updates now use `ResolvedTexturePlacement`.
+- `structured-interior-geometry` still needs the same placement-before-bake closure as
+  `static-object-geometry`. Until Phases 13-14 land, structured interiors can still reach commit
+  installation with draw-unit texture ids that are not representable by committed object-material
+  bindings.
+- `EnvCellSystemBaker` currently merges structured-interior `textureUses` with env-cell static
+  object texture uses, but its texture dependency output is sourced from the embedded static object
+  bake result. Structured-interior dependencies must be emitted from final structured-interior draw
+  units during Phase 14.
+- `TextureManager` returning no object-material role-page binding for a second page on the same
+  owner+role is an invariant detector after the object one-page-per-role cutover. Do not paper over
+  that omission in `TextureManager`; split illegal draw units in the relevant baker.
+- Current `textureUseId` values still often encode source, usage, scope, wrap/sampling, and
+  placement identity in one string. Phase 12 should collapse that into a typed requirement boundary
+  before new structured-interior code grows another parallel string generator.
 
 ## Risks and Concessions
 
@@ -1571,15 +1874,15 @@ decisions, stop and split the responsibility back to the owning stage.
 
 ## Definition of Done
 
-- Resolver output for migrated static, terrain, object, and dynamic texture paths carries source
-  facts and texture placement intents, not draw units.
-- Texture packing runs before terrain, object/static-object, and dynamic visual baking for the
-  migrated paths.
+- Resolver output for migrated static, terrain, static object, structured-interior, and dynamic
+  texture paths carries source facts and texture placement intents, not draw units.
+- Texture packing runs before terrain, static object, structured-interior, and dynamic visual baking
+  for the migrated paths.
 - Static source resolution produces guarded continuations that accept placement snapshots without
   accepting no-longer-demanded, cancelled, failed, disposed, or already-invoked work.
 - The Phase 0A continuation spike is either promoted into durable coordinator tests or deleted.
 - Bakers produce renderer-legal immutable draw units/resources under their material-family legality
-  contracts.
+  contracts for every `StaticDrawUnit` variant and dynamic visual product.
 - Resolver/baker complexity remains contained behind worker-owned contracts and does not leak into
   `TextureManager`, packer, or main-thread runtime orchestration.
 - Main-thread runtime no longer performs static object geometry splitting after texture packing.
@@ -1590,12 +1893,16 @@ decisions, stop and split the responsibility back to the owning stage.
 - Static-authored and runtime-authored dynamic visuals use the same texture placement vocabulary.
 - Terrain is integrated into the new placement model with terrain-specific baker legality and no
   expected role-page overflow fallback.
-- Terrain, static objects, and dynamic visuals share the same placement/reference/reclaim machinery;
-  remaining branches are baker-owned legality choices rather than parallel orchestration paths.
+- Terrain, static objects, structured interiors, and dynamic visuals share the same
+  placement/reference/reclaim machinery; remaining branches are baker-owned legality choices rather
+  than parallel orchestration paths.
 - Shader-family splitting is completed for flat-color, RGBA texture, and indexed-paletted object
   families.
-- `textureUseId` is either honestly retained, renamed, or split with no vestigial compatibility
-  layer.
+- Texture identity concepts are explicitly separated: material binding key, placement item id,
+  source dedupe key, dependency item id, and renderer binding key are not accidentally conflated
+  through ambient `textureUseId` string reuse.
+- `textureUseId` is either honestly retained only for material binding, renamed, or split with no
+  vestigial compatibility layer.
 - Obsolete post-pack materialization code, old tests, and stale diagnostics are deleted.
 - Relevant lint and test commands for `apps/holtburger-3d` pass.
 

@@ -37,18 +37,22 @@ import {
 	writeTransformedPosition,
 } from "../../../math/ac-placement-transform";
 import {
+	createStaticMaterialColorKey,
 	createStaticMaterialEntryKey,
 	createStaticMaterialTableEntry,
+	createStaticMaterialTextureRoleLayoutKey,
 	createStaticMaterialTextureRoleSchemaKey,
 	createStaticMaterialTextureUses,
 } from "../../bake/static-material-adapter";
-import { createObjectMaterialPageRequirementSliceGuard } from "../../bake/object-material-page-legality";
-import { sliceStaticMaterialBatchCandidates } from "../../bake/static-material-batch-slicer";
 import {
 	createEnvCellCellStructureGeometryIdentity,
 	describeEnvCellCellStructureGeometryIdentity,
 } from "./env-cell-system-geometry-attachments";
 import { bakeStaticObjectBatch } from "../../objects/bake/static-object-batch-baker";
+import {
+	createObjectLikeDrawUnitPartitionKey,
+	splitObjectLikePartitionByMaterialTableBudget,
+} from "../../objects/bake/object-like-draw-unit-partition";
 import {
 	createStructuredInteriorTextureBindingRequirement,
 	createStructuredInteriorTextureUseId,
@@ -299,6 +303,7 @@ function createStructuredInteriorDrawUnits(
 			envCell,
 			geometrySurfaceOmissions,
 			materialPlan,
+			placementSnapshot,
 			task,
 		});
 		assertStructuredInteriorPlacementRequirements({
@@ -306,18 +311,20 @@ function createStructuredInteriorDrawUnits(
 			envCell,
 			placementSnapshot,
 		});
-		const slices = sliceStaticMaterialBatchCandidates({
-			createSliceGuard: () =>
-				createObjectMaterialPageRequirementSliceGuard<StructuredInteriorTriangleCandidate>({
-					diagnosticSubject: `Structured interior ${formatHex32(envCell.identity.envCellId)}`,
-					placementSnapshot,
-				}),
-			candidates,
-			maxMaterialEntriesPerSlice:
-				MAX_STRUCTURED_INTERIOR_MATERIAL_ENTRIES_PER_DRAW,
-		});
+		const partitions =
+			groupStructuredInteriorPrimitivesByPartitionKey(candidates).flatMap(
+				(group, batchIndex) =>
+					splitObjectLikePartitionByMaterialTableBudget({
+						maxMaterialEntriesPerPartition:
+							MAX_STRUCTURED_INTERIOR_MATERIAL_ENTRIES_PER_DRAW,
+						primitives: group.candidates,
+					}).map((split, splitIndex) => ({
+						candidates: split,
+						sliceId: `slice/${batchIndex}/${splitIndex}`,
+					})),
+			);
 
-		return slices.map((slice) =>
+		return partitions.map((slice) =>
 			createStructuredInteriorDrawUnit({
 				attachment,
 				envCell,
@@ -693,6 +700,7 @@ function createStructuredInteriorTriangleCandidates(options: {
 	readonly envCell: LandblockEnvCellStaticFacts;
 	readonly geometrySurfaceOmissions: StructuredInteriorGeometrySurfaceOmission[];
 	readonly materialPlan: StructuredInteriorCellMaterialPlan;
+	readonly placementSnapshot: TexturePlacementSnapshot | undefined;
 	readonly task: StaticBakeTask;
 }): readonly StructuredInteriorTriangleCandidate[] {
 	return options.attachment.triangles
@@ -733,8 +741,11 @@ function createStructuredInteriorTriangleCandidates(options: {
 					});
 				return {
 					batchKey: createStructuredInteriorBatchKey({
+						diagnosticSubject: `Structured interior ${formatHex32(options.envCell.identity.envCellId)}`,
 						materialEntryKey,
+						placementSnapshot: options.placementSnapshot,
 						plan,
+						textureRequirements,
 					}),
 					materialEntryKey,
 					materialPlan: plan,
@@ -838,19 +849,49 @@ function createStructuredInteriorSliceMaterialEntries(
 }
 
 function createStructuredInteriorBatchKey(options: {
+	readonly diagnosticSubject: string;
 	readonly materialEntryKey: string;
+	readonly placementSnapshot: TexturePlacementSnapshot | undefined;
 	readonly plan: StaticMaterialPlan;
+	readonly textureRequirements: readonly TextureBindingRequirement[];
 }): string {
-	return [
-		`family:${options.plan.family}`,
-		`coverage:${options.plan.renderCoverage}`,
-		`pass:${options.plan.pass}`,
-		`alpha:${options.plan.alphaPolicy.mode}`,
-		`blend:${options.plan.blend.mode}`,
-		`schema:${createStaticMaterialTextureRoleSchemaKey(
+	return createObjectLikeDrawUnitPartitionKey({
+		diagnosticSubject: options.diagnosticSubject,
+		includeConcreteEntryInKey: false,
+		materialColorKey: createStaticMaterialColorKey(options.plan),
+		materialEntryKey: options.materialEntryKey,
+		plan: options.plan,
+		texturePlacementSnapshot: options.placementSnapshot,
+		textureRequirements: options.textureRequirements,
+		textureRoleLayoutKey: createStaticMaterialTextureRoleLayoutKey(
 			options.plan.textureRoles,
-		)}`,
-	].join("|");
+		),
+		textureRoleSchemaKey: createStaticMaterialTextureRoleSchemaKey(
+			options.plan.textureRoles,
+		),
+		textureWrapMode: resolveStructuredInteriorPlanTextureWrapMode(options.plan),
+	}).key;
+}
+
+function groupStructuredInteriorPrimitivesByPartitionKey(
+	candidates: readonly StructuredInteriorTriangleCandidate[],
+): readonly {
+	readonly batchKey: string;
+	readonly candidates: readonly StructuredInteriorTriangleCandidate[];
+}[] {
+	const groups = new Map<string, StructuredInteriorTriangleCandidate[]>();
+	for (const candidate of candidates) {
+		const group = groups.get(candidate.batchKey);
+		if (group) {
+			group.push(candidate);
+		} else {
+			groups.set(candidate.batchKey, [candidate]);
+		}
+	}
+
+	return [...groups.entries()]
+		.sort(([left], [right]) => left.localeCompare(right))
+		.map(([batchKey, group]) => ({ batchKey, candidates: group }));
 }
 
 function compareStructuredInteriorTriangleCandidates(

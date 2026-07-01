@@ -1,7 +1,8 @@
 # Holtburger 3D Simplified Texture Packing Pipeline Implementation Plan
 
-Status: implementation complete through final drawable isomorphism cleanup; follow-up baker
-redesign phases added after Phase 7 performance investigation.
+Status: implementation complete through simplified texture placement, final drawable isomorphism,
+and static baker partition-key draw-unit construction. Dynamic visual partition cutover and
+generated-scenery instancing assessment follow-up phases have been added.
 
 ## Purpose
 
@@ -134,8 +135,12 @@ Current code paths that matter:
 - `apps/holtburger-3d/src/lib/static/env-cells/bake/structured-interior-placement-planner.ts`
   - discovers structured-interior placement intents before env-cell baking.
 - `apps/holtburger-3d/src/lib/static/bake/object-material-page-legality.ts`
-  - owns shared object-material one-page-per-role legality checks used by static objects and
-    structured interiors.
+  - deleted during Phase 21 after object-like geometry stopped using generic page-legality slice
+    callbacks.
+- `apps/holtburger-3d/src/lib/static/objects/bake/object-like-draw-unit-partition.ts`
+  - owns the shared object-like renderable primitive partition vocabulary for static objects and
+    structured interiors: shader/material identity, shader-visible texture binding tuple,
+    ownership-adjacent partition key facts, and material-table secondary budget splitting.
 - `apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-renderer.ts`
   - stores texture pages by `textureRefId` and texture bindings by owner key.
 - `apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-object-material-payloads.ts`
@@ -177,6 +182,10 @@ Terrain renderer facts:
 - Current terrain baking slices by layer count and final packed color/mask/detail page assignment.
 - Terrain role-page overflow after packing is treated as a baker invariant failure or an unsupported
   terrain material shape, not as a normal renderer fallback path.
+- Terrain was audited in Phase 20 and kept domain-local: its layer planner and terrain page-budget
+  splitter already derive draw units from terrain render identity and shader budgets rather than the
+  deleted object-material greedy slicer. Missing or incompatible terrain placement snapshot entries
+  now fail loudly as pre-bake placement invariant errors.
 
 Static draw-unit taxonomy:
 
@@ -189,6 +198,10 @@ Follow-up finding:
 - The structured-interior follow-up has been closed through Phases 12-14. Env-cell structured
   interiors now discover placement intents before bake, slice draw units against final placement
   pages, and emit texture dependencies alongside env-cell static object dependencies.
+- The baker partitioning follow-up has been closed through Phases 16-21. Static objects and
+  structured interiors now use object-like partition-key grouping before material-table secondary
+  splits; the generic `static-material-batch-slicer.ts` and object page-legality callback helper were
+  deleted.
 
 ## Scoping Thesis
 
@@ -1931,6 +1944,254 @@ Acceptance criteria:
 - No runtime flag, debug branch, fallback switch, compatibility adapter, or old test suite preserves
   the previous candidate -> generic slicer -> draw-unit path for a migrated domain.
 
+### Phase 22: Resteer Dynamic Visuals Into The Object-Material Partition Cutover
+
+Goal: convert the dynamic visual smell found after Phase 21 into an implementation-ready scope
+without pretending generated-scenery instancing and dynamic render-part authoring are the same
+problem.
+
+Context:
+
+- `dynamic/visual-baker.ts` still builds `candidateSlices` by `createDynamicMaterialBatchKey(...)`.
+- That path is deterministic and not the deleted generic greedy slicer, but it is a bespoke
+  object-material grouping model.
+- The dynamic batch key currently includes material family, pass, and render state, but not final
+  `TexturePlacement.textureRefId`.
+- Dynamic render parts currently do not split by `MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW`, while the
+  renderer object-material uniforms support only eight material entries per draw.
+- Dynamic renderer resources preserve `partIndex` for animation/transform lookup, so splitting one
+  source part into multiple renderable parts requires an explicit render-part partition identity
+  rather than overloading `partIndex`.
+- `runtime/client-runtime.ts` maps dynamic render parts into renderer resources by `partIndex`, and
+  the WebGL renderer currently labels dynamic draw units as `${resourceId}:part:${partIndex}`.
+  Multiple render parts from one source part would therefore keep the correct transform lookup but
+  collide in renderer labels/draw-unit ids unless Phase 24 adds a separate render-part identity.
+
+Deliverables:
+
+- Audit dynamic visual render-part construction:
+  - `dynamic/visual-baker.ts`;
+  - `dynamic/contracts.ts`;
+  - `dynamic/dynamic-entity-controller.ts`;
+  - `runtime/client-runtime.ts` dynamic renderer commit creation;
+  - `renderer/types.ts` and `renderer/webgl2/webgl2-renderer.ts` dynamic visual resource upload and
+    draw paths.
+- Decide the exact home for shared object-material partition contracts after dynamic joins:
+  - promote `static/objects/bake/object-like-draw-unit-partition.ts` if it can stay free of static
+    object ownership concepts; or
+  - move/rename it under a shared static/dynamic object-material bake module.
+- List the normalized input facts dynamic visuals need to feed the shared helper:
+  - material family/pass/render state;
+  - material entry key;
+  - texture binding requirements or equivalent normalized texture-role records;
+  - placement snapshot;
+  - source part identity;
+  - renderer material-table budget.
+- Decide how dynamic render-part partition identity is represented:
+  - keep `partIndex` as source/animation transform identity;
+  - add a separate render-part id, partition id, or partition ordinal for renderer upload labels and
+    diagnostics.
+- Record whether dynamic visual placement snapshots in tests must include `textureRefId` everywhere
+  a placement is expected to participate in render identity.
+
+Do not:
+
+- Do not rewrite dynamic animation, placement tracking, or entity lifecycle in this phase.
+- Do not use `partIndex` as a fake unique draw-part id after splitting one source part.
+- Do not move dynamic lifetime policy into the shared partition helper.
+- Do not fold generated-scenery instancing into this dynamic visual cutover.
+
+Acceptance criteria:
+
+- The dynamic visual cutover has a concrete contract plan before code changes start.
+- The plan explicitly identifies any renderer/runtime contract shape that must change for split
+  dynamic render parts.
+- The generated-scenery instancing path is classified as adjacent follow-up work, not part of the
+  dynamic visual draw-unit legality cutover.
+
+### Phase 23: Promote Object-Material Partition Contracts For Static And Dynamic Use
+
+Goal: make the object-like partition helper a genuinely shared object-material contract instead of a
+static-object-local helper that dynamic visuals awkwardly import.
+
+Deliverables:
+
+- Move or rename the partition helper if Phase 22 decides its current home is dishonest.
+- Introduce a normalized object-material partition input shape that is not tied to
+  `StaticMaterialPlan`. Static objects and structured interiors may adapt their current
+  `TextureBindingRequirement` records into it, but dynamic visuals must be able to provide their
+  existing `DynamicEntityTextureRequirement` facts without fabricating static material records.
+- Keep the contract focused on renderer-visible object-material identity:
+  - material family/pass/render state;
+  - shader-visible texture binding tuple keyed by `TexturePlacement.textureRefId`;
+  - material-table entry identity;
+  - max material entries per draw as a secondary budget split.
+- Keep static-only planning facts, such as `renderCoverage`, outside the shared renderer identity
+  unless the implementation proves they affect object-material draw compatibility.
+- Generalize the helper inputs so static objects, structured interiors, and dynamic visuals can feed
+  normalized requirement facts without converting dynamic requirements into fake static records.
+- Preserve the current static object and structured-interior behavior while moving the helper.
+- Add or update tests proving:
+  - static object and structured-interior partition keys still split by texture `textureRefId`;
+  - dynamic-shaped normalized requirements can derive the same texture tuple without static-only
+    adapters;
+  - the material-table budget splitter is independent of domain ownership.
+
+Do not:
+
+- Do not let the shared helper learn landblocks, env cells, dynamic entity ids, animation, renderer
+  residency, or packer policy.
+- Do not create a second dynamic-only partition helper with the same responsibilities.
+- Do not use packer-local `pageId` as render identity.
+- Do not make dynamic visuals import static object material planner types to satisfy a shared helper
+  signature.
+
+Acceptance criteria:
+
+- Static object and structured-interior tests remain green after any helper move/rename.
+- Dynamic visual code can import a domain-neutral partition contract without depending on static
+  object ownership types.
+- The shared helper still explains why two object-material primitives do or do not share a draw unit.
+
+### Phase 24: Cut Dynamic Visual Render Parts Over To Partition-Key Grouping
+
+Goal: make dynamic visual baking derive render parts from the same object-material partition identity
+as static objects and structured interiors.
+
+Deliverables:
+
+- Replace `candidateSlices`/`createDynamicMaterialBatchKey(...)` as the primary dynamic render-part
+  discovery path with:
+  - dynamic renderable triangle primitive construction;
+  - object-material partition-key derivation using the final placement snapshot;
+  - grouping by partition key;
+  - material-table secondary budget split using `MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW`;
+  - render-part emission.
+- Keep `partIndex` as the source part transform/animation identity.
+- Add a separate dynamic render-part partition identity where needed for renderer labels,
+  diagnostics, and stable resource subpart identity.
+- Update `DynamicEntityRenderPart`, `DynamicRendererVisualPart`, runtime resource creation, renderer
+  upload labels, and dynamic draw-unit ids so split render parts have stable unique identities while
+  animation transform lookup still uses source `partIndex`.
+- Ensure dynamic render parts fail loudly when a required placement snapshot entry is missing or has
+  incompatible object-material purpose or missing `textureRefId`.
+- Add tests covering:
+  - split by final `textureRefId` for base/detail/index/palette roles;
+  - split by material family, material pass, and render state;
+  - deterministic secondary split when more than eight material entries would share a render part;
+  - multiple render parts from one source `partIndex` still use the same animation transform;
+  - texture dependencies match final dynamic render-part texture requirements.
+
+Do not:
+
+- Do not preserve the old dynamic batch-key path behind a debug flag or fallback.
+- Do not allow renderer material uniforms to silently clamp material slots beyond the supported
+  count.
+- Do not change dynamic visual placement/lifetime policy while changing render-part authoring.
+
+Acceptance criteria:
+
+- Dynamic visual render parts are authored from object-material partition keys, not bespoke batch
+  keys.
+- Dynamic visual render parts obey object material texture tuple and max-material-entry limits before
+  renderer upload.
+- Runtime dynamic rendering still applies animation/source part transforms correctly when one source
+  part produces multiple render parts.
+
+### Phase 25: Dynamic Visual Cleanup, Diagnostics, And Test Fixture Tightening
+
+Goal: delete migration vocabulary left by the dynamic visual cutover and make diagnostics name the
+new render-part partition model honestly.
+
+Deliverables:
+
+- Delete or rename dynamic-only helpers whose only job was the old grouping path:
+  - `createDynamicMaterialBatchKey(...)`;
+  - `DynamicTriangleRenderCandidate` if the normalized primitive replaces it;
+  - `createDynamicRenderPartSlice(...)` naming if it no longer describes the model.
+- Tighten dynamic visual test placement snapshots so every placement used for render identity carries
+  `textureRefId`.
+- Remove any test fixture helper paths that construct partial placement snapshots for textured
+  dynamic materials.
+- Update diagnostics and test names from "slice" to "partition" or "secondary budget split" where
+  applicable.
+- Run verification focused on dynamic visuals and the shared renderer object-material path:
+  - dynamic visual baker tests;
+  - dynamic entity controller tests touched by render-part identity;
+  - renderer dynamic visual upload/draw tests;
+  - full TypeScript test suite.
+
+Do not:
+
+- Do not add "no longer uses batch key" tests. Tests should prove partition invariants and renderer
+  behavior.
+- Do not retain stale dynamic grouping helpers as compatibility wrappers.
+
+Acceptance criteria:
+
+- Dynamic visual code has no production path using the old batch-key grouping helper.
+- Dynamic tests cover the split cases that previously could merge into illegal render parts.
+- Diagnostic labels distinguish source `partIndex` from render-part partition identity.
+
+### Phase 26: Assess Generated-Scenery Instancing Pipeline State
+
+Goal: assess whether generated-scenery instancing is healthy after the partition-key cutovers, and
+decide whether it needs its own rewrite plan or only naming/test cleanup.
+
+Context:
+
+- Generated-scenery instancing in `static-object-batch-baker.ts` runs after static object partition
+  construction.
+- It uses candidate/group/cutover language, but its job is visual-resource reuse and instance
+  publication, not primary draw-unit legality discovery.
+- It may still carry historical `sliceId` terminology and complex cutover rules that should be
+  audited separately from the dynamic visual partition cutover.
+
+Deliverables:
+
+- Audit:
+  - `static/objects/bake/static-object-batch-baker.ts` generated-scenery instancing functions;
+  - `static/objects/static-object-instance-inventory.ts`;
+  - `static/objects/static-object-visual-resource-key.ts`;
+  - renderer/resource diagnostics that count direct versus instanced generated scenery.
+- Identify which grouping axes are authoritative for reusable visual resources:
+  - source geometry;
+  - material entries;
+  - material family/pass/render state;
+  - texture use ids/bindings;
+  - transparent sort policy;
+  - source-local versus landblock-local coordinate space.
+- Determine whether generated-scenery instancing currently depends on historical partition `sliceId`
+  in a way that blocks future partition id cleanup.
+- Specifically inspect:
+  - `createStaticObjectVisualResourceTriangleGroupKey(...)`, including its resource key axes and
+    transparent/additive cross-partition grouping behavior;
+  - cutover completeness tracking by `partition.sliceId`;
+  - candidate coverage tracking by source triangle and material entry key;
+  - resource id/key construction for `StaticObjectVisualResource`;
+  - direct-versus-instanced generated-scenery diagnostics and whether they still describe useful
+    behavior after partition-key grouping.
+- Decide one of three outcomes:
+  - no rewrite: only terminology/docs/tests need cleanup;
+  - narrow cleanup: rename/structure candidate/cutover diagnostics around visual-resource reuse;
+  - separate rewrite plan: introduce explicit visual-resource grouping contracts.
+- Record any follow-up phases in this plan or a new dedicated plan if the assessment finds real
+  architecture debt.
+
+Do not:
+
+- Do not rewrite generated-scenery instancing during the assessment phase.
+- Do not collapse instancing concerns into object-material partition helpers unless the audit proves
+  the axes are identical.
+- Do not weaken generated-scenery visual-resource reuse just to reduce terminology overlap.
+
+Acceptance criteria:
+
+- The plan records whether generated-scenery instancing is healthy, cleanup-only, or needs a
+  dedicated rewrite.
+- The assessment distinguishes reusable visual-resource identity from draw-unit partition identity.
+- Any proposed follow-up has concrete target modules, tests, and risks.
+
 ## Task Checklist
 
 - [x] Phase 0A: prove source-ready continuation contract in a segregated spike.
@@ -1954,12 +2215,17 @@ Acceptance criteria:
 - [x] Phase 13: add structured-interior placement intents.
 - [x] Phase 14: make structured-interior baking placement-aware.
 - [x] Phase 15: final drawable isomorphism cleanup.
-- [ ] Phase 16: resteer baker partitioning around first-principles draw-unit identity.
-- [ ] Phase 17: introduce object-like renderable primitive and draw-unit partition contracts.
-- [ ] Phase 18: replace static object draw-unit discovery with partition-key grouping.
-- [ ] Phase 19: port structured-interior baking to the same partition-key model.
-- [ ] Phase 20: reassess terrain under the partition-key model.
-- [ ] Phase 21: delete legacy slicer vestiges and update diagnostics.
+- [x] Phase 16: resteer baker partitioning around first-principles draw-unit identity.
+- [x] Phase 17: introduce object-like renderable primitive and draw-unit partition contracts.
+- [x] Phase 18: replace static object draw-unit discovery with partition-key grouping.
+- [x] Phase 19: port structured-interior baking to the same partition-key model.
+- [x] Phase 20: reassess terrain under the partition-key model.
+- [x] Phase 21: delete legacy slicer vestiges and update diagnostics.
+- [ ] Phase 22: resteer dynamic visuals into the object-material partition cutover.
+- [ ] Phase 23: promote object-material partition contracts for static and dynamic use.
+- [ ] Phase 24: cut dynamic visual render parts over to partition-key grouping.
+- [ ] Phase 25: dynamic visual cleanup, diagnostics, and test fixture tightening.
+- [ ] Phase 26: assess generated-scenery instancing pipeline state.
 
 ## Decisions and Course Corrections
 
@@ -2266,12 +2532,70 @@ Acceptance criteria:
   the object-material one-page-per-role rule inside `EnvCellSystemBaker`. Renderable textured
   structured-interior candidates now fail loudly when their placement snapshot item is missing.
 - Phase 14 extracted `static/bake/object-material-page-legality.ts` as the shared page-legality
-  helper for static objects and structured interiors. The helper only knows material-entry keys,
-  texture binding requirements, placement snapshots, and object texture purposes; it does not know
-  objects, env cells, landblocks, draw units, or renderer owners.
+  helper for static objects and structured interiors. Phase 21 later deleted it after object-like
+  geometry moved page legality into shader-visible texture binding tuple partition keys.
 - Phase 14 emits structured-interior `TextureResourceDependencies` from final draw-unit ids and
   placement item ids, then merges them with env-cell static object dependencies in the env-cell bake
   result. Static commit install/pinning uses the existing static dependency path.
+- Phase 16 confirmed that the generic greedy material slicer was transitional architecture. The
+  target object-like model is now renderable primitive facts -> partition key -> material-table
+  secondary budget split -> draw-unit emission. Texture placement `textureRefId`, not packer-local
+  `pageId`, is the shader-visible texture binding identity used by partition keys.
+- Phase 17 added `static/objects/bake/object-like-draw-unit-partition.ts` as the shared object-like
+  partition contract home. It extracts the hard rendering identity from the static object partitioner
+  evidence instead of inventing a greenfield abstraction: material family/pass/blend/wrap, texture
+  binding tuple, material-entry identity when required, and the material-table budget splitter.
+- Phase 18 cut static objects over to partition-key grouping. `static-object-batch-partitioner.ts`
+  now builds triangle primitives, groups them by object-like partition key, and applies the max-8
+  material-entry limit only as a secondary split. Env-cell-owned static object payloads flow through
+  the same static object partitioner and therefore cut over in the same phase.
+- Phase 18 intentionally allows draw-unit id churn when final texture bindings are different:
+  placement-aware texture splits are now separate partition-key groups rather than later slices inside
+  one greedy batch. This is the expected north-star tradeoff: simpler legality over preserving old
+  slice history.
+- Phase 19 ported structured-interior geometry to the same object-like partition-key helper while
+  keeping env-cell portal, spatial, visibility, and source mapping records inside the env-cell baker.
+  Structured interiors no longer call the generic slicer or the object page-legality slice guard.
+- Phase 20 audited terrain and kept the terrain-owned model. Terrain already derives draw units from
+  terrain material layer plans plus terrain shader budgets, so no symmetry rewrite was justified.
+  The targeted fix was to make missing or incompatible terrain placement snapshot entries fail loudly
+  instead of degrading to debug-flat fallback.
+- Phase 21 deleted `static/bake/static-material-batch-slicer.ts` and
+  `static/bake/object-material-page-legality.ts`. Worker trace stages now expose static object
+  primitive construction, partition-key grouping, secondary budget split, and draw-unit emission
+  rather than candidate/slicer internals.
+- Phase 21 deliberately left `sliceId`/`slice-*` identifier vocabulary in emitted draw-unit ids for
+  now. That label is historical but not a live algorithmic dependency; renaming ids would create
+  broad diagnostic churn without further simplifying the partition model. Future diagnostics should
+  describe these as partition ids or secondary budget split ids.
+- User review after Phase 21 correctly challenged whether the baker cutover was comprehensive.
+  Follow-up investigation found dynamic visuals still use bespoke `candidateSlices` grouping in
+  `dynamic/visual-baker.ts`. That path is not the deleted generic greedy slicer, but it is still an
+  object-material render-part authoring model that omits final `textureRefId` from the grouping key
+  and does not enforce the renderer's eight-material-entry object uniform budget before upload.
+- The same investigation classified generated-scenery instancing as adjacent rather than part of the
+  dynamic visual cutover. It uses candidate/cutover language, but its primary job is reusable visual
+  resource instancing after static object partitioning. Phase 26 audits it explicitly instead of
+  folding a second rewrite into the dynamic visual phases.
+- Dry-running Phases 22-26 found that the current object-like helper is not yet genuinely
+  domain-neutral: its partition axis is fed by `StaticMaterialPlan` and static
+  `TextureBindingRequirement` records. Phase 23 therefore needs a normalized object-material
+  partition input instead of converting dynamic visual requirements into artificial static material
+  plans.
+- The same dry run found that Phase 24 must add explicit dynamic render-part partition identity
+  before or during the cutover. `partIndex` remains the source/animation transform identity, while
+  renderer labels and dynamic draw-unit ids need a separate split-part identity to avoid collisions
+  when one source part produces multiple legal render parts.
+- Dynamic visual placement validation is currently too weak for partition-key construction:
+  placement snapshot presence is checked by item id, but final object-material render identity needs
+  `TexturePlacement.textureRefId` and compatible texture purpose. Phase 24 should fail loudly on
+  incomplete placement records, and Phase 25 should tighten the dynamic test fixtures that still
+  omit `textureRefId`.
+- Dry-running Phase 26 found generated-scenery instancing is downstream of static object
+  partitioning, not another primary draw-unit legality author. It does, however, track cutover
+  completeness and transparent cross-partition grouping through `partition.sliceId`, so Phase 26 must
+  decide whether that is harmless bookkeeping or a hidden identity dependency before any partition-id
+  cleanup.
 
 ## Tracked Debt
 
@@ -2353,25 +2677,47 @@ Acceptance criteria:
   `bindingKey`.
 - Phase 7 performance investigation found that the generic material slicer made finite
   generated-scenery candidate sets behave pathologically by rewalking growing slices to rederive
-  page legality. The incremental guard repair is a transitional boundedness fix, not the target
-  baker architecture. Phases 16-21 replace greedy slice discovery with partition-key draw-unit
-  construction.
-- Dry-running Phases 16-21 showed that static object partitioning already carries most of the future
-  renderable primitive and partition-axis facts. Phase 17 should extract and rename that shape
-  rather than introducing a greenfield partition vocabulary.
+  page legality. Phases 16-21 resolved that architecture debt by deleting the generic slicer and
+  moving object-like static geometry to partition-key draw-unit construction.
+- Dry-running Phases 16-21 showed that static object partitioning already carried most of the future
+  renderable primitive and partition-axis facts. Phase 17 extracted that shape into the shared
+  object-like partition helper rather than introducing a greenfield partition vocabulary.
 - Draw-unit partition identity must use shader-visible texture binding identity. In the current
   placement contract that is `TexturePlacement.textureRefId`; packer-local `pageId` is retained for
   diagnostics and must not become the object-like partition key.
-- Terrain currently appears closer to the desired model than object-like geometry: terrain material
-  layer planning and terrain-owned page-budget splitting already happen before draw-unit emission.
-  Phase 20 starts as an audit/document/test phase and rewrites terrain only if that audit proves a
-  real legacy-shaped draw-unit discovery problem.
-- Until Phase 21 lands, `static-material-batch-slicer.ts` and object page-legality callbacks are
-  migration debt. Do not add new production users unless Phase 16 explicitly decides a domain-local
-  secondary budget split needs a similar helper under a more honest name.
-- The gradual baker redesign is allowed only across domain boundaries. Static objects, structured
-  interiors, and terrain must each cut over atomically within their own phase; retaining old and new
-  discovery models for the same domain is explicitly disallowed.
+- Terrain was closer to the desired model than object-like geometry: terrain material layer planning
+  and terrain-owned page-budget splitting already happened before draw-unit emission. Phase 20
+  confirmed this by audit and added the missing-placement invariant test/fix instead of rewriting
+  terrain for symmetry.
+- `sliceId` remains in static object and structured-interior draw-unit ids as historical identifier
+  vocabulary. It no longer points at the deleted generic slicer. Rename only with a scoped diagnostic
+  migration because draw-unit id churn is broad and not required for the partition model.
+- The gradual baker redesign was completed across domain boundaries. Static objects and structured
+  interiors cut over atomically; terrain was audited and kept terrain-owned because it already follows
+  render-identity plus shader-budget construction.
+- Dynamic visual render-part authoring still has a migration-era grouping path:
+  `candidateSlices` grouped by `createDynamicMaterialBatchKey(...)`. It should move to the shared
+  object-material partition-key model so dynamic render parts split by final texture binding tuple
+  and material-table budget before renderer upload.
+- `createDynamicMaterialBatchKey(...)` does not include final `TexturePlacement.textureRefId` and
+  dynamic visual baking does not currently split by `MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW`. The
+  renderer object-material payload path only uploads eight material entries, so leaving this in place
+  risks silently clamped or misdirected material slots.
+- Dynamic render parts currently use `partIndex` as source/animation transform identity. A dynamic
+  partition cutover may produce multiple render parts for one source part, so it needs a separate
+  render-part partition identity for renderer labels/diagnostics while preserving `partIndex` for
+  animation transforms.
+- Dynamic visual tests currently have placement snapshot helpers that may omit `textureRefId`, even
+  though object-material partition identity depends on shader-visible `TexturePlacement.textureRefId`.
+  Phase 25 should tighten these fixtures rather than letting dynamic tests preserve an incomplete
+  placement shape.
+- Generated-scenery instancing remains complex and candidate-heavy inside
+  `static-object-batch-baker.ts`, but it is not proven to be the same draw-unit legality smell. Phase
+  26 should assess whether it is healthy, cleanup-only, or deserving of its own rewrite plan.
+- Generated-scenery instancing currently keys cutover coverage by `partition.sliceId` and uses
+  `null` as a cross-partition grouping marker for transparent/additive visual resources. If future
+  cleanup renames or replaces partition ids, preserve the coverage semantics deliberately rather than
+  treating `sliceId` as only diagnostic text.
 
 ## Risks and Concessions
 
@@ -2423,7 +2769,9 @@ decisions, stop and split the responsibility back to the owning stage.
 - Should reclaim first support free rectangles inside partially live pages, or only rebuild pages
   that contain no active placements?
 - Which existing diagnostics remain high-value after the pipeline cutover, and which should be
-  deleted rather than preserved through churn?
+  deleted rather than preserved through churn? Phase 21 kept worker trace stage counters for
+  partition-key grouping and secondary budget splits, but broader runtime diagnostic naming can still
+  be improved if it starts confusing load-failure triage.
 
 ## Definition of Done
 
@@ -2446,6 +2794,11 @@ decisions, stop and split the responsibility back to the owning stage.
 - Static-authored and runtime-authored dynamic visuals use the same texture placement vocabulary.
 - Terrain is integrated into the new placement model with terrain-specific baker legality and no
   expected role-page overflow fallback.
+- Object-like static geometry has one production draw-unit authoring model: renderable primitives,
+  object-like partition keys, optional material-table secondary budget splits, then immutable draw
+  units.
+- No production static object or structured-interior path calls the deleted generic greedy material
+  slicer or object page-legality slice callback.
 - Terrain, static objects, structured interiors, and dynamic visuals share the same
   placement/reference/reclaim machinery; remaining branches are baker-owned legality choices rather
   than parallel orchestration paths.

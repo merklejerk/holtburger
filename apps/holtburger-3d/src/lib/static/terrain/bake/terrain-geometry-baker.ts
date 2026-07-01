@@ -503,7 +503,9 @@ function createTerrainPagePartitionContext(options: {
 		const placement =
 			options.texturePlacementSnapshot.placementsByItemId.get(textureUseId);
 		if (!placement) {
-			return `Terrain texture ${textureUseId} is missing a pre-bake placement.`;
+			throw new Error(
+				`Terrain texture ${textureUseId} is missing a pre-bake placement.`,
+			);
 		}
 		switch (placement.purpose) {
 			case "terrain-color":
@@ -519,7 +521,9 @@ function createTerrainPagePartitionContext(options: {
 			case "object-detail":
 			case "object-index":
 			case "object-palette":
-				return `Terrain texture ${textureUseId} was placed with incompatible purpose ${placement.purpose}.`;
+				throw new Error(
+					`Terrain texture ${textureUseId} was placed with incompatible purpose ${placement.purpose}.`,
+				);
 		}
 	};
 

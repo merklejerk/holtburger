@@ -928,7 +928,7 @@ describe("static object batch partitioner", () => {
 			},
 			{
 				resourceId:
-					"outdoor-buildings:0xda55ffff:static-object-partition:slice-0-1",
+					"outdoor-buildings:0xda55ffff:static-object-partition:slice-1-0",
 				roles: [
 					{
 						itemIds: [secondTextureUseId],

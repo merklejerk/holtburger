@@ -247,6 +247,19 @@ describe("terrain geometry baker", () => {
 		]);
 	});
 
+	it("fails terrain baking when a required texture is missing pre-bake placement", () => {
+		const input = {
+			...createTerrainBakeInput({ includeTextureUse: true }),
+			texturePlacementSnapshot: {
+				placementsByItemId: new Map(),
+			},
+		};
+
+		expect(() => bakeTerrainGeometry(input)).toThrow(
+			/Terrain texture terrain:0xda55ffff:prepared-texture:terrain-base:rgba-color:06000010 is missing a pre-bake placement/,
+		);
+	});
+
 	it("partitions terrain geometry by bounded material draw slices", () => {
 		const pcodes = Array.from({ length: 9 }, (_value, index) =>
 			encodeTerrainPcode(index + 1),

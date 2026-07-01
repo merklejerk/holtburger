@@ -1,6 +1,6 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation in progress. Phases 0-9G are complete. This document defines the target
+Status: implementation in progress. Phases 0-9H are complete. This document defines the target
 model, north stars, risk surface, and phased cutover plan for replacing static-vs-dynamic object
 visual worker bifurcation with a shared object-like visual recipe graph.
 
@@ -1842,6 +1842,8 @@ Implementation notes after Phase 9G:
 
 ### Phase 9H: Static Visual Scope Sidecar Contract
 
+Status: complete.
+
 Goal: define the static resolver product shape that contains object visual bundle resolution plus
 the sidecars required by static coordinator, bake attachments, and runtime publication.
 
@@ -1869,6 +1871,31 @@ Acceptance criteria:
 Deletion criteria:
 
 - None yet. This phase creates the contract that the later producer cutover will target.
+
+Implementation notes after Phase 9H:
+
+- Added `apps/holtburger-3d/src/lib/visual/object-visual-static-scope.ts` with a sidecar-aware
+  static visual scope contract for outdoor object-like layers and env-cell systems.
+- The new wrapper contains `ObjectVisualBundleResolution`, source-local geometry buffers, and static
+  publication metadata for drawable object-like work. Terrain remains outside this contract.
+- Outdoor sidecars explicitly retain authored dynamic placements, building-transition apertures,
+  source spatial/BVH facts, region render profile facts, source/material/texture facts, and missing
+  refs outside drawable recipes.
+- Env-cell sidecars explicitly retain env-cell records, portal links/connectivity/aperture resources,
+  accepted env-cell ids, visibility diagnostics, residency spatial records, source/material/texture
+  facts, and missing refs outside drawable recipes.
+- Validation enforces that ready visual scopes have publication metadata and all referenced
+  source-local geometry buffers, while missing-dependencies scopes cannot carry partial geometry
+  buffers or publication metadata.
+- Validation also rejects static visual part instances with the wrong residency family: outdoor
+  scopes require outdoor-landblock residency for the same landblock, and env-cell scopes require
+  env-cell residency for the same landblock.
+- Spicy debt: the sidecar wrapper intentionally retains some current source/material facts as
+  sidecars so Phase 9I has a truthful producer input surface. Those facts should narrow or disappear
+  once recipe expansion producers no longer need legacy static payload shape.
+- Verification:
+  `npm --prefix apps/holtburger-3d run test:ts -- object-visual-static-scope` and
+  `npm --prefix apps/holtburger-3d run check`.
 
 ### Phase 9I: Static Recipe Expansion Producers
 

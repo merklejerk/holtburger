@@ -61,6 +61,8 @@ interface RenderablePrimitive {
 	readonly materialEntryKey: string;
 	readonly materialFamily: VisualGeometryMaterialFamily;
 	readonly materialPass: VisualGeometryMaterialPass;
+	readonly materialTextureRoleLayoutKey: string;
+	readonly materialTextureRoleSchemaKey: string;
 	readonly partInstanceIndex: number;
 	readonly partitionKey: string | null;
 	readonly renderState: VisualGeometryRenderState;
@@ -187,6 +189,8 @@ function expandRenderablePrimitives(
 				materialEntryKey: createMaterialEntryKey(binding.materialRecipeId),
 				materialFamily: material.family,
 				materialPass: material.pass,
+				materialTextureRoleLayoutKey: materialRecipe.textureRoleLayoutKey,
+				materialTextureRoleSchemaKey: materialRecipe.textureRoleSchemaKey,
 				partInstanceIndex,
 				partitionKey:
 					input.partitionKeyByPartInstanceIndex?.get(partInstanceIndex) ?? null,
@@ -213,21 +217,21 @@ function createMaterialTableEntry(options: {
 	readonly family: VisualGeometryMaterialFamily;
 	readonly pass: VisualGeometryMaterialPass;
 } | null {
-	const renderState = createRenderState(options.materialRecipe.pass);
 	const baseEntry = {
-		alphaTest: options.materialRecipe.pass === "alpha-test" ? 0.5 : 0,
-		detailTextureTiling: 1,
+		alphaTest: options.materialRecipe.alphaTest,
+		detailTextureTiling: options.materialRecipe.detailTextureTiling,
 		detailTextureUseId: null,
 		indexTextureUseId: null,
-		indexedClipThreshold: 0,
+		indexedClipThreshold: options.materialRecipe.indexedClipThreshold,
 		indexedTextureFormat: null,
-		materialEmissiveColor: [0, 0, 0] as const,
+		materialColor: options.materialRecipe.materialColor,
+		materialEmissiveColor: options.materialRecipe.materialEmissiveColor,
 		materialIds: [options.materialRecipeId],
-		paletteFirstIndex: 0,
+		paletteFirstIndex: options.materialRecipe.paletteFirstIndex,
 		paletteTextureUseId: null,
 		primaryTextureUseId: null,
-		primaryTextureWrapMode: "repeat" as const,
-		renderState,
+		primaryTextureWrapMode: options.materialRecipe.primaryTextureWrapMode,
+		renderState: options.materialRecipe.renderState,
 		slot: options.slot,
 	};
 
@@ -236,7 +240,6 @@ function createMaterialTableEntry(options: {
 			return {
 				entry: {
 					...baseEntry,
-					materialColor: options.materialRecipe.diffuseColor,
 				},
 				family: "flat-color",
 				pass: options.materialRecipe.pass,
@@ -249,8 +252,7 @@ function createMaterialTableEntry(options: {
 						options.textureBindings,
 						options.materialRecipe.colorTextureRecipeId,
 					).textureUseId,
-					indexedTextureFormat: "p8",
-					materialColor: [1, 1, 1, 1],
+					indexedTextureFormat: options.materialRecipe.indexedTextureFormat,
 					paletteTextureUseId: requireTextureBinding(
 						options.textureBindings,
 						options.materialRecipe.paletteTextureRecipeId,
@@ -270,7 +272,6 @@ function createMaterialTableEntry(options: {
 									options.textureBindings,
 									options.materialRecipe.detailTextureRecipeId,
 								).textureUseId,
-					materialColor: [1, 1, 1, 1],
 					primaryTextureUseId: requireTextureBinding(
 						options.textureBindings,
 						options.materialRecipe.rgbaTextureRecipeId,
@@ -484,58 +485,14 @@ function createAnimationPartBindings(
 		}));
 }
 
-function createRenderState(
-	pass: VisualGeometryMaterialPass,
-): VisualGeometryRenderState {
-	switch (pass) {
-		case "opaque":
-			return createOpaqueRenderState();
-		case "alpha-test":
-			return createOpaqueRenderState();
-		case "transparent":
-			return {
-				blend: {
-					dstFactor: "one-minus-src-alpha",
-					enabled: true,
-					mode: "alpha",
-					srcFactor: "src-alpha",
-				},
-				depthTest: true,
-				depthWrite: false,
-			};
-		case "additive":
-			return {
-				blend: {
-					dstFactor: "one",
-					enabled: true,
-					mode: "additive",
-					srcFactor: "src-alpha",
-				},
-				depthTest: true,
-				depthWrite: false,
-			};
-	}
-}
-
-function createOpaqueRenderState(): VisualGeometryRenderState {
-	return {
-		blend: {
-			dstFactor: null,
-			enabled: false,
-			mode: "opaque",
-			srcFactor: null,
-		},
-		depthTest: true,
-		depthWrite: true,
-	};
-}
-
 function createPartitionKey(primitive: RenderablePrimitive): string {
 	return [
 		`family:${primitive.materialFamily}`,
 		`pass:${primitive.materialPass}`,
 		`partition:${primitive.partitionKey ?? "none"}`,
 		`state:${JSON.stringify(primitive.renderState)}`,
+		`roleLayout:${primitive.materialTextureRoleLayoutKey}`,
+		`roleSchema:${primitive.materialTextureRoleSchemaKey}`,
 		`sourcePart:${primitive.sourcePartIndex ?? "none"}`,
 		`textures:${primitive.materialEntry.primaryTextureUseId ?? ""}:${primitive.materialEntry.indexTextureUseId ?? ""}:${primitive.materialEntry.paletteTextureUseId ?? ""}:${primitive.materialEntry.detailTextureUseId ?? ""}`,
 	].join("|");

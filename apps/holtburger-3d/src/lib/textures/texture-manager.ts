@@ -321,7 +321,7 @@ export class TextureManager {
 			}
 			placementsByItemId.set(
 				textureUse.textureUseId,
-				toPlannedTexturePlacement(entry),
+				toPlannedTexturePlacement(entry, textureUse.textureUseId),
 			);
 		}
 
@@ -620,6 +620,7 @@ export class TextureManager {
 		if (pending) {
 			addPendingPlacementOwners(pending, textureUse.owners);
 			pending.textureKeys.add(textureKey);
+			pending.textureUseIds.add(textureUse.textureUseId);
 			pendingPlacements.set(textureKey, pending);
 			return {
 				entry: null,
@@ -642,6 +643,7 @@ export class TextureManager {
 			source: directSource,
 			textureBatchId: textureUse.textureBatchId,
 			textureKeys: new Set([textureKey]),
+			textureUseIds: new Set([textureUse.textureUseId]),
 			textureUse,
 			ownerKeys: new Set(textureUse.owners.map(createTextureBindingOwnerKey)),
 		};
@@ -866,6 +868,9 @@ export class TextureManager {
 					);
 				}
 				this.#recordPlacementEntry(registryEntry);
+				for (const textureUseId of entry.textureUseIds) {
+					this.#recordPlacementEntry(registryEntry, textureUseId);
+				}
 			}
 		}
 
@@ -920,11 +925,14 @@ export class TextureManager {
 		return null;
 	}
 
-	#recordPlacementEntry(entry: VisualTextureRegistryEntry): void {
-		this.#placementRecordsByItemId.set(entry.itemId, {
+	#recordPlacementEntry(
+		entry: VisualTextureRegistryEntry,
+		itemId = entry.itemId,
+	): void {
+		this.#placementRecordsByItemId.set(itemId, {
 			activeReferenceCount: entry.leaseCount,
 			height: entry.textureHeight,
-			itemId: entry.itemId,
+			itemId,
 			pageId: entry.pageId,
 			pool: entry.pool,
 			purpose: entry.purpose,
@@ -1136,6 +1144,8 @@ interface PendingTexturePlacement {
 	readonly textureBatchId: string;
 	readonly textureUse: VisualTextureUseCommit;
 	readonly textureKeys: Set<VisualTextureKey>;
+	/** Texture-use ids that share this staged source placement. */
+	readonly textureUseIds: Set<string>;
 	readonly source: DirectMaterialTextureSource;
 	readonly pagePolicy: RuntimeTexturePagePolicy;
 	readonly samplerPolicy: RuntimeTextureSamplerPolicy;
@@ -1249,10 +1259,11 @@ function texturePlacementPoolDomain(
 
 function toPlannedTexturePlacement(
 	entry: VisualTextureRegistryEntry,
+	itemId = entry.itemId,
 ): PlannedTexturePlacement {
 	return {
 		height: entry.textureHeight,
-		itemId: entry.itemId,
+		itemId,
 		pageId: entry.pageId,
 		pool: entry.pool,
 		purpose: entry.purpose,

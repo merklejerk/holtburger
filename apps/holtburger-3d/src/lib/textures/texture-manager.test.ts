@@ -889,6 +889,62 @@ describe("browser texture manager", () => {
 		});
 	});
 
+	it("pins pre-bake placement aliases that share one packed texture source", async () => {
+		const textureManager = new TextureManager({
+			assetService: new FixtureAssetService(),
+		});
+		const firstUse = createTextureUseCommit({
+			drawUnitId: "terrain-a",
+			outputFormat: "rgba8",
+			renderSurfaceId: 0x06000010,
+			textureUseId:
+				"terrain:0xda55ffff:prepared-texture:terrain-base:rgba-color:06000010",
+		});
+		const secondUse = createTextureUseCommit({
+			drawUnitId: "terrain-b",
+			outputFormat: "rgba8",
+			renderSurfaceId: 0x06000010,
+			textureUseId:
+				"terrain:0xd854ffff:prepared-texture:terrain-base:rgba-color:06000010",
+		});
+
+		const snapshot = await textureManager.placeTextureIntents({
+			intents: [
+				createStaticTexturePlacementIntent(firstUse),
+				createStaticTexturePlacementIntent(secondUse),
+			],
+			placementBatchId: "pre-bake-batch",
+		});
+
+		expect(snapshot.placementsByItemId.has(firstUse.textureUseId)).toBe(true);
+		expect(
+			snapshot.placementsByItemId.get(secondUse.textureUseId),
+		).toMatchObject({
+			itemId: secondUse.textureUseId,
+			purpose: "terrain-color",
+		});
+		textureManager.pinTextureResourceDependencies([
+			{
+				resourceId: "terrain-b",
+				roles: [
+					{
+						itemIds: [secondUse.textureUseId],
+						purpose: "terrain-color",
+					},
+				],
+			},
+		]);
+		expect(
+			textureManager
+				.createPlacementReferenceSnapshot()
+				.find((record) => record.itemId === secondUse.textureUseId),
+		).toMatchObject({
+			activeReferenceCount: 1,
+			itemId: secondUse.textureUseId,
+			purpose: "terrain-color",
+		});
+	});
+
 	it("pins and releases baked draw-unit texture dependencies", async () => {
 		const textureManager = new TextureManager({
 			assetService: new FixtureAssetService(),

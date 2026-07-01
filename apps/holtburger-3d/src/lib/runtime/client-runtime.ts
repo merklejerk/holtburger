@@ -3318,8 +3318,9 @@ function createInstalledLandblockLayerPayloads(
 				...(terrainByLandblock.get(drawUnit.landblockId) ?? []),
 				drawUnit,
 			]);
-			continue;
 		}
+	}
+	for (const drawUnit of installed.objectVisualInstallSet.directDrawUnits) {
 		if (drawUnit.kind !== "static-object-geometry") {
 			continue;
 		}
@@ -3344,7 +3345,7 @@ function createInstalledLandblockLayerPayloads(
 			]);
 		}
 	}
-	for (const instance of installed.staticObjectRenderInstances) {
+	for (const instance of installed.objectVisualInstallSet.renderInstances) {
 		if (instance.domain === "outdoor-generated-scenery") {
 			if (!generatedSceneryByLandblock.has(instance.landblockId)) {
 				generatedSceneryByLandblock.set(instance.landblockId, []);
@@ -3462,20 +3463,21 @@ function createInstalledLandblockLayerPayloads(
 				landblockId,
 				delta.revision,
 			),
-			instancedObjectInstances: installed.staticObjectRenderInstances.filter(
-				(instance) =>
-					instance.domain === "outdoor-generated-scenery" &&
-					instance.landblockId === landblockId,
-			),
-			instancedObjectResources: installed.staticObjectVisualResources.filter(
-				(resource) =>
-					installed.staticObjectRenderInstances.some(
+			instancedObjectInstances:
+				installed.objectVisualInstallSet.renderInstances.filter(
+					(instance) =>
+						instance.domain === "outdoor-generated-scenery" &&
+						instance.landblockId === landblockId,
+				),
+			instancedObjectResources:
+				installed.objectVisualInstallSet.visualResources.filter((resource) =>
+					installed.objectVisualInstallSet.renderInstances.some(
 						(instance) =>
 							instance.domain === "outdoor-generated-scenery" &&
 							instance.landblockId === landblockId &&
 							instance.resourceId === resource.resourceId,
 					),
-			),
+				),
 			kind: "outdoor-generated-scenery",
 			landblockId,
 			materialCoverage: delta.materialCoverage.filter(
@@ -3502,7 +3504,6 @@ function createInstalledLandblockLayerPayloads(
 	}
 	return payloads;
 }
-
 function createStaticLandblockLayerGenerationIdForRuntime(
 	kind: StaticLandblockLayerKind,
 	landblockId: number,

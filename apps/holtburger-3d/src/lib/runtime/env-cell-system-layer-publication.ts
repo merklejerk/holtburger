@@ -88,19 +88,21 @@ function createEnvCellFactsByLandblock(
 	const landblockIds = collectEnvCellLandblockIds(installed);
 	const factsByLandblock = new Map<number, EnvCellFacts>();
 	for (const landblockId of landblockIds) {
-		const envCellStaticObjectDrawUnits = installed.installedDrawUnits.filter(
-			(
-				drawUnit,
-			): drawUnit is EnvCellFacts["envCellStaticObjectDrawUnits"][number] =>
-				drawUnit.kind === "static-object-geometry" &&
-				drawUnit.domain === "env-cell-system" &&
-				drawUnit.landblockId === landblockId,
-		);
-		const structuredInteriorDrawUnits = installed.installedDrawUnits.filter(
-			(drawUnit): drawUnit is StructuredInteriorGeometryStaticDrawUnit =>
-				drawUnit.kind === "structured-interior-geometry" &&
-				drawUnit.landblockId === landblockId,
-		);
+		const envCellStaticObjectDrawUnits =
+			installed.objectVisualInstallSet.directDrawUnits.filter(
+				(
+					drawUnit,
+				): drawUnit is EnvCellFacts["envCellStaticObjectDrawUnits"][number] =>
+					drawUnit.kind === "static-object-geometry" &&
+					drawUnit.domain === "env-cell-system" &&
+					drawUnit.landblockId === landblockId,
+			);
+		const structuredInteriorDrawUnits =
+			installed.objectVisualInstallSet.directDrawUnits.filter(
+				(drawUnit): drawUnit is StructuredInteriorGeometryStaticDrawUnit =>
+					drawUnit.kind === "structured-interior-geometry" &&
+					drawUnit.landblockId === landblockId,
+			);
 		factsByLandblock.set(landblockId, {
 			envCellStaticObjectPlacementRecords:
 				delta.envCellStaticObjectPlacementRecords.filter(
@@ -257,7 +259,7 @@ function collectEnvCellLandblockIds(
 	installed: StaticCommitInstallResult,
 ): readonly number[] {
 	return uniqueNumbers([
-		...installed.installedDrawUnits.flatMap((drawUnit) =>
+		...installed.objectVisualInstallSet.directDrawUnits.flatMap((drawUnit) =>
 			(drawUnit.kind === "static-object-geometry" &&
 				drawUnit.domain === "env-cell-system") ||
 			drawUnit.kind === "structured-interior-geometry"

@@ -7,6 +7,7 @@ import type {
 } from "../static/contracts";
 import type { StaticCommitInstallResult } from "./static-commit-installer";
 import { createEnvCellSystemLayerPublications } from "./env-cell-system-layer-publication";
+import { createEmptyObjectVisualInstallSet } from "../visual/object-visual-install-set";
 
 describe("env-cell system layer publication", () => {
 	it("publishes directly from an installed env-cell commit", () => {
@@ -128,6 +129,7 @@ function createCommitDelta(
 		staticSpatialRecords: [],
 		staticVisibilityRecords: [],
 		tasks: [],
+		textureDependencies: [],
 		textureUses: [],
 		...options,
 	};
@@ -140,6 +142,7 @@ function createInstallResult(
 ): StaticCommitInstallResult {
 	return {
 		installedDrawUnits: [],
+		objectVisualInstallSet: createEmptyObjectVisualInstallSet(),
 		portalApertureResources: [],
 		removedResources: [],
 		staticObjectRenderInstances: [],

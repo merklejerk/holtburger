@@ -4,10 +4,12 @@ import type {
 	StaticCoordinatorCommitDelta,
 	StaticDrawUnit,
 	StaticObjectGeometryStaticDrawUnit,
+	StaticObjectRenderInstance,
 	StaticObjectVisualResource,
 	StructuredInteriorGeometryStaticDrawUnit,
 	TerrainGeometryStaticDrawUnit,
 } from "../static/contracts";
+import type { TextureResourceDependencies } from "../textures/placement";
 import { installStaticCommit } from "./static-commit-installer";
 
 describe("static commit installer", () => {
@@ -90,19 +92,91 @@ describe("static commit installer", () => {
 			"visual-static-object-a",
 			drawUnit,
 		);
+		const renderInstance = createStaticObjectRenderInstance(
+			"instance-static-object-a",
+			visualResource.resourceId,
+		);
 		const textureUpdate =
 			createTexturePlacementUpdateForVisualResource(visualResource);
+		const textureDependencies: readonly TextureResourceDependencies[] = [
+			{
+				resourceId: visualResource.resourceId,
+				roles: [{ itemIds: ["item-a"], purpose: "object-base-color" }],
+			},
+		];
 
 		const installed = installStaticCommit({
 			commit: createCommitDelta({
 				addedDrawUnits: [],
+				staticObjectRenderInstances: [renderInstance],
 				staticObjectVisualResources: [visualResource],
+				textureDependencies,
 			}),
 			textureUpdate,
 		});
 
 		expect(installed.staticObjectVisualResources).toEqual([visualResource]);
+		expect(installed.objectVisualInstallSet).toEqual({
+			directDrawUnits: [],
+			dynamicAnimationPartBindings: [],
+			renderInstances: [renderInstance],
+			textureDependencies,
+			visualResources: [visualResource],
+		});
 		expect(installed.textureUpdate).toBe(textureUpdate);
+	});
+
+	it("publishes object-like direct draw units separately from terrain", () => {
+		const terrainDrawUnit = createTerrainDrawUnit("terrain-a");
+		const staticObjectDrawUnit = createStaticObjectDrawUnit("static-object-a");
+		const structuredInteriorDrawUnit = createStructuredInteriorDrawUnit(
+			"structured-interior-a",
+		);
+		const textureUpdate = createTexturePlacementUpdateForDrawUnits([
+			staticObjectDrawUnit,
+			structuredInteriorDrawUnit,
+		]);
+
+		const installed = installStaticCommit({
+			commit: createCommitDelta({
+				addedDrawUnits: [
+					terrainDrawUnit,
+					staticObjectDrawUnit,
+					structuredInteriorDrawUnit,
+				],
+			}),
+			textureUpdate,
+		});
+
+		expect(installed.installedDrawUnits).toEqual([
+			terrainDrawUnit,
+			staticObjectDrawUnit,
+			structuredInteriorDrawUnit,
+		]);
+		expect(installed.objectVisualInstallSet.directDrawUnits).toEqual([
+			staticObjectDrawUnit,
+			structuredInteriorDrawUnit,
+		]);
+	});
+
+	it("rejects textured static object visual resources without committed texture bindings", () => {
+		const drawUnit = createStaticObjectDrawUnit("static-object-a");
+		const visualResource = createStaticObjectVisualResource(
+			"visual-static-object-a",
+			drawUnit,
+		);
+
+		expect(() =>
+			installStaticCommit({
+				commit: createCommitDelta({
+					addedDrawUnits: [],
+					staticObjectVisualResources: [visualResource],
+				}),
+				textureUpdate: null,
+			}),
+		).toThrow(
+			/visual-static-object-a is missing committed texture bindings for static-object-a:prepared-texture:0/,
+		);
 	});
 
 	it("preserves removed resources without expanding old fine draw-unit ids", () => {
@@ -130,8 +204,10 @@ describe("static commit installer", () => {
 function createCommitDelta(options: {
 	readonly addedDrawUnits: readonly StaticDrawUnit[];
 	readonly removedResources?: StaticCoordinatorCommitDelta["removedResources"];
+	readonly staticObjectRenderInstances?: readonly StaticObjectRenderInstance[];
 	readonly staticObjectVisualResources?: readonly StaticObjectVisualResource[];
 	readonly staticSpatialRecords?: StaticCoordinatorCommitDelta["staticSpatialRecords"];
+	readonly textureDependencies?: readonly TextureResourceDependencies[];
 }): StaticCoordinatorCommitDelta {
 	return {
 		addedDrawUnits: options.addedDrawUnits,
@@ -141,7 +217,7 @@ function createCommitDelta(options: {
 		removedResources: options.removedResources ?? [],
 		revision: 7,
 		envCellStaticObjectPlacementRecords: [],
-		staticObjectRenderInstances: [],
+		staticObjectRenderInstances: options.staticObjectRenderInstances ?? [],
 		staticObjectVisualResources: options.staticObjectVisualResources ?? [],
 		staticPortalGraphs: [],
 		staticPortalInteriorRecords: [],
@@ -149,7 +225,7 @@ function createCommitDelta(options: {
 		staticSpatialRecords: options.staticSpatialRecords ?? [],
 		staticVisibilityRecords: [],
 		tasks: [],
-		textureDependencies: [],
+		textureDependencies: options.textureDependencies ?? [],
 		textureUses: [],
 	};
 }
@@ -305,6 +381,39 @@ function createStaticObjectVisualResource(
 	};
 }
 
+function createStaticObjectRenderInstance(
+	instanceId: string,
+	resourceId: string,
+): StaticObjectRenderInstance {
+	return {
+		bounds: null,
+		domain: "outdoor-explicit-objects",
+		generated: null,
+		instanceId,
+		kind: "static-object-render-instance",
+		landblockId: 0xda55ffff,
+		resourceId,
+		sortCenter: { x: 0, y: 0, z: 0 },
+		source: {
+			kind: "static-object-instance",
+			ordinal: 0,
+			source: {
+				kind: "static-object-source",
+				sourceAssetKind: "setup-model",
+				sourceDid: 0x02000010,
+			},
+		},
+		sourceToLandblockMatrix: new Float32Array([
+			1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
+		]),
+		transform: {
+			orientation: { w: 1, x: 0, y: 0, z: 0 },
+			origin: { x: 0, y: 0, z: 0 },
+		},
+		transparency: { kind: "depth-writing" },
+	};
+}
+
 function createStructuredInteriorDrawUnit(
 	drawUnitId: string,
 ): StructuredInteriorGeometryStaticDrawUnit {
@@ -431,6 +540,21 @@ function createTexturePlacementUpdate(
 				textureWidth: 1,
 			},
 		],
+	};
+}
+
+function createTexturePlacementUpdateForDrawUnits(
+	drawUnits: readonly StaticDrawUnit[],
+): TexturePlacementUpdate {
+	const updates = drawUnits.map(createTexturePlacementUpdate);
+	return {
+		textureBindings: updates.flatMap((update) => update.textureBindings),
+		placements: [],
+		removedTextureRefIds: [],
+		revision: 3,
+		resolvedTexturePlacements: updates.flatMap(
+			(update) => update.resolvedTexturePlacements,
+		),
 	};
 }
 

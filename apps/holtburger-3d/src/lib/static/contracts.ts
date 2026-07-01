@@ -12,6 +12,10 @@ import type {
 	DynamicEntityRecipe,
 	DynamicVisualBakeResult,
 } from "../dynamic/contracts";
+import type {
+	DrawUnitTextureDependencies,
+	TexturePlacementSnapshot,
+} from "../textures/placement";
 import type { VisualGeometryPayload } from "../visual/visual-geometry";
 
 export type StaticDomain =
@@ -573,7 +577,8 @@ export interface TerrainSourceSpatialFacts {
 	readonly terrainBvhItemCount: number;
 }
 
-type TerrainHostBvh = LandblockOutdoorLayerSourcePayloadDto["terrain"]["terrainBvh"];
+type TerrainHostBvh =
+	LandblockOutdoorLayerSourcePayloadDto["terrain"]["terrainBvh"];
 
 interface TerrainRenderLocalBvh {
 	readonly coordinateSpace: "landblock-render-local";
@@ -936,6 +941,8 @@ export interface StaticBakeBatchInput {
 	readonly attachments: StaticBakeBatchAttachments;
 	readonly domain: StaticDomain;
 	readonly items: readonly StaticBakeBatchItem[];
+	/** Pre-bake texture placement assignments available to bakers that can partition by final pages. */
+	readonly texturePlacementSnapshot?: TexturePlacementSnapshot;
 	readonly revision: number;
 	readonly staticBatchId: string;
 }
@@ -1372,6 +1379,7 @@ export interface StaticBakeBatchResult {
 	readonly staticObjectBakeDiagnostics: readonly StaticObjectBakeDiagnostics[];
 	readonly portalApertureResources: readonly StaticPortalApertureResource[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
+	readonly textureDependencies: readonly DrawUnitTextureDependencies[];
 	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
 	readonly atlasRegistryUpdates: readonly string[];
 	readonly staticSpatialRecords: readonly StaticSpatialRecord[];
@@ -1530,9 +1538,7 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly kind: "static-object-geometry";
 	readonly drawUnitId: string;
 	readonly landblockId: number;
-	readonly domain:
-		| OutdoorStaticObjectDomain
-		| "env-cell-system";
+	readonly domain: OutdoorStaticObjectDomain | "env-cell-system";
 	readonly ownership: StaticObjectDrawUnitOwnership;
 	readonly materialFamily: "flat-color" | "indexed-paletted" | "texture-rgba";
 	readonly materialPass: StaticObjectMaterialPass;
@@ -1918,6 +1924,7 @@ export interface StaticCoordinatorCommitDelta {
 	readonly addedPortalApertureResources: readonly StaticPortalApertureResource[];
 	readonly removedResources: readonly StaticResourceKey[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
+	readonly textureDependencies: readonly DrawUnitTextureDependencies[];
 	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
 	readonly staticSpatialRecords: readonly StaticSpatialRecord[];
 	readonly staticVisibilityRecords: readonly StaticVisibilityRecord[];

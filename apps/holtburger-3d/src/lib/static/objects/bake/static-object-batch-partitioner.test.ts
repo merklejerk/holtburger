@@ -10,12 +10,14 @@ import type {
 	StaticObjectPaletteViewFacts,
 	StaticObjectTextureRefFacts,
 } from "../../contracts";
+import type { TexturePlacementSnapshot } from "../../../textures/placement";
 import { bakeStaticObjectBatch } from "./static-object-batch-baker";
 import {
 	partitionStaticObjectBatches,
 	STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE,
 	type StaticObjectBatchPayload,
 } from "./static-object-batch-partitioner";
+import { createStaticObjectTexturePlacementIntents } from "./static-object-placement-planner";
 import { createStaticObjectSourceGeometryIdentity } from "../static-object-source-assets";
 
 describe("static object batch partitioner", () => {
@@ -249,18 +251,14 @@ describe("static object batch partitioner", () => {
 		expect(plan.partitions.map((partition) => partition.triangleCount)).toEqual(
 			[1, 1],
 		);
-		expect(
-			plan.partitions.map((partition) => partition.batchKey),
-		).toEqual([
+		expect(plan.partitions.map((partition) => partition.batchKey)).toEqual([
 			expect.stringContaining("env-cell:da550100"),
 			expect.stringContaining("env-cell:da550101"),
 		]);
 	});
 
 	it("bakes env-cell static objects into cell-scoped draw units", () => {
-		const result = bakeStaticObjectBatch(
-			createEnvCellStaticBakeInput(),
-		);
+		const result = bakeStaticObjectBatch(createEnvCellStaticBakeInput());
 
 		const drawUnits = result.drawUnits.filter(
 			(drawUnit) => drawUnit.kind === "static-object-geometry",
@@ -857,6 +855,136 @@ describe("static object batch partitioner", () => {
 		expect(drawUnit.textureUseIds).toEqual([
 			"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
 			"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000011:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
+		]);
+	});
+
+	it("splits static object partitions by final placement pages before baking geometry", () => {
+		const firstTextureUseId =
+			"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge";
+		const secondTextureUseId =
+			"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000011:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge";
+		const payload = createPayload({
+			materials: [
+				createTexturedMaterial(0x08000010),
+				createTexturedMaterial(0x08000011, {
+					renderSurfaceId: 0x06000011,
+					surfaceTextureId: 0x05000011,
+				}),
+			],
+			textureRefs: [
+				...createRgbaTextureRefs(),
+				...createRgbaTextureRefs({
+					renderSurfaceId: 0x06000011,
+					surfaceTextureId: 0x05000011,
+				}),
+			],
+		});
+		const placementSnapshot = createTexturePlacementSnapshot([
+			[firstTextureUseId, "page-a"],
+			[secondTextureUseId, "page-b"],
+		]);
+
+		const plan = partitionStaticObjectBatches(payload, {
+			placementSnapshot,
+			textureUseScopeId: "outdoor-buildings:0xda55ffff",
+		});
+
+		expect(plan.partitions).toHaveLength(2);
+		expect(
+			plan.partitions.map((partition) =>
+				partition.coarseTablePlan.entries.map((entry) =>
+					entry.textureDataUses.map((dataUse) =>
+						dataUse.kind === "prepared-render-surface-texture-use"
+							? dataUse.renderSurface.renderSurfaceId
+							: null,
+					),
+				),
+			),
+		).toEqual([[[0x06000010]], [[0x06000011]]]);
+
+		const result = bakeStaticObjectBatch({
+			...createBakeInput(payload),
+			texturePlacementSnapshot: placementSnapshot,
+		});
+
+		const drawUnits = result.drawUnits.filter(
+			(drawUnit) => drawUnit.kind === "static-object-geometry",
+		);
+		expect(drawUnits).toHaveLength(2);
+		expect(drawUnits.map((drawUnit) => drawUnit.textureUseIds)).toEqual([
+			[firstTextureUseId],
+			[secondTextureUseId],
+		]);
+		expect(result.textureDependencies).toEqual([
+			{
+				drawUnitId:
+					"outdoor-buildings:0xda55ffff:static-object-partition:slice-0-0",
+				roles: [
+					{
+						itemIds: [firstTextureUseId],
+						purpose: "object-base-color",
+					},
+				],
+			},
+			{
+				drawUnitId:
+					"outdoor-buildings:0xda55ffff:static-object-partition:slice-0-1",
+				roles: [
+					{
+						itemIds: [secondTextureUseId],
+						purpose: "object-base-color",
+					},
+				],
+			},
+		]);
+	});
+
+	it("discovers static object texture placement intents before baking", () => {
+		const payload = createPayload({
+			materials: [
+				createTexturedMaterial(0x08000010),
+				createTexturedMaterial(0x08000011, {
+					renderSurfaceId: 0x06000011,
+					surfaceTextureId: 0x05000011,
+				}),
+			],
+			textureRefs: [
+				...createRgbaTextureRefs(),
+				...createRgbaTextureRefs({
+					renderSurfaceId: 0x06000011,
+					surfaceTextureId: 0x05000011,
+				}),
+			],
+		});
+		const bakeInput = createBakeInput(payload);
+
+		const intents = createStaticObjectTexturePlacementIntents({
+			items: bakeInput.items,
+			staticBatchId: bakeInput.staticBatchId,
+		});
+
+		expect(
+			intents.map((intent) => ({
+				affinityKey: intent.affinityKey,
+				itemId: intent.itemId,
+				pool: intent.pool,
+				purpose: intent.purpose,
+			})),
+		).toEqual([
+			{
+				affinityKey: expect.stringContaining("static-object|"),
+				itemId:
+					"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
+				pool: "static-authored-object",
+				purpose: "object-base-color",
+			},
+			{
+				affinityKey: expect.stringContaining("static-object|"),
+				itemId:
+					"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000011:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
+				pool: "static-authored-object",
+				purpose: "object-base-color",
+			},
 		]);
 	});
 
@@ -1680,7 +1808,8 @@ function createPayload(options: {
 }): OutdoorStaticObjectsScopePayload {
 	const domain = options.domain ?? "outdoor-buildings";
 	const isGeneratedScenery =
-		domain === "outdoor-generated-scenery" || domain === "outdoor-generated-scenery";
+		domain === "outdoor-generated-scenery" ||
+		domain === "outdoor-generated-scenery";
 	const objectIdentity = createObjectIdentity({
 		instanceId: isGeneratedScenery ? "detail-0" : "building-0",
 		objectKind: isGeneratedScenery ? "generated-scenery" : "building",
@@ -1869,6 +1998,27 @@ function createBakeInput(
 		],
 		revision: 1,
 		staticBatchId: "static-batch:objects",
+	};
+}
+
+function createTexturePlacementSnapshot(
+	placements: readonly (readonly [string, string])[],
+): TexturePlacementSnapshot {
+	return {
+		placementsByItemId: new Map(
+			placements.map(([itemId, pageId]) => [
+				itemId,
+				{
+					height: 64,
+					itemId,
+					pageId,
+					pool: "static-authored-object" as const,
+					purpose: "object-base-color" as const,
+					rect: [0, 0, 64, 64] as const,
+					width: 64,
+				},
+			]),
+		),
 	};
 }
 

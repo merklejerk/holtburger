@@ -2019,6 +2019,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 		commitEnvelope: StaticScopePrepCommit,
 	): Promise<void> {
 		const delta = commitEnvelope.staticCommit;
+		this.#textureManager.releaseDrawUnitTextureDependencies(
+			collectStaticDrawUnitResourceIds(delta.removedResources),
+		);
 		const textureUpdate =
 			await this.#textureManager.applyStaticCommitDelta(delta);
 		if (this.#disposed) {
@@ -2036,6 +2039,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 		if (materialized.textureUpdate) {
 			this.#renderer.applyTexturePlacementUpdate(materialized.textureUpdate);
 		}
+		this.#textureManager.pinDrawUnitTextureDependencies(
+			delta.textureDependencies,
+		);
 		this.#applyMaterializedStaticLayers(delta, materialized);
 		this.#applyEnvCellSystemLayerPublications(
 			createEnvCellSystemLayerPublications(delta, materialized),

@@ -169,6 +169,7 @@ function createResult(input: StaticBakeBatchInput): StaticBakeBatchResult {
 		staticVisibilityRecords: [],
 		staticBatchId: input.staticBatchId,
 		tasks: input.items.map((item) => item.task),
+		textureDependencies: [],
 		textureUses: [],
 	};
 }

@@ -346,6 +346,7 @@ function createFakeStaticBakeResult(
 		staticVisibilityRecords: result.staticVisibilityRecords ?? [],
 		staticBatchId: input.staticBatchId,
 		tasks: input.items.map((item) => item.task),
+		textureDependencies: result.textureDependencies ?? [],
 		textureUses: result.textureUses ?? [],
 	};
 }

@@ -64,6 +64,7 @@ export function bakeTerrainGeometry(
 		staticVisibilityRecords: [],
 		staticBatchId: input.staticBatchId,
 		tasks: input.items.map((item) => item.task),
+		textureDependencies: [],
 		textureUses: itemResults.flatMap((result) => result.textureUses),
 	};
 }

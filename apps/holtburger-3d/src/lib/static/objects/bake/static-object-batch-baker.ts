@@ -1,6 +1,5 @@
 import type {
 	MaterialTextureDataUseIdentity,
-	EnvCellSystemStaticScopePayload,
 	StaticBakeTask,
 	StaticBounds,
 	StaticBakeBatchInput,
@@ -29,6 +28,10 @@ import type {
 	StaticObjectRetainedTransparentPartitionReasonCounts,
 } from "../../contracts";
 import { uniqueSortedStaticTextureUseOwners } from "../../contracts";
+import type {
+	DrawUnitTextureDependencies,
+	DrawUnitTextureRoleDependency,
+} from "../../../textures/placement";
 import { createLayerPeerRecordOwnerForStaticBakeTask } from "../../layer-owners";
 import {
 	AC_UNIT_SCALE,
@@ -63,6 +66,7 @@ import {
 	createStaticObjectVisualResourceKey,
 	createStaticObjectVisualResourceKeyString,
 } from "../static-object-visual-resource-key";
+import { createStaticObjectBatchPayload } from "./static-object-batch-payload";
 
 export class StaticObjectBatchBaker implements StaticBaker {
 	async bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
@@ -122,6 +126,9 @@ export function bakeStaticObjectBatch(
 		staticVisibilityRecords: [],
 		textureUses: mergeTextureUses(
 			itemResults.flatMap((result) => result.textureUses),
+		),
+		textureDependencies: itemResults.flatMap(
+			(result) => result.textureDependencies,
 		),
 		tasks: input.items.map((item) => item.task),
 	};
@@ -241,15 +248,19 @@ function bakeStaticObjectBatchItem(
 	readonly diagnostics: StaticObjectBakeDiagnostics;
 	readonly sourceMappings: StaticBakeBatchResult["staticSourceMappings"];
 	readonly spatialRecords: readonly StaticSpatialRecord[];
+	readonly textureDependencies: readonly DrawUnitTextureDependencies[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
 	readonly staticObjectRenderInstances: readonly StaticObjectRenderInstance[];
 	readonly staticObjectVisualResources: readonly StaticObjectVisualResource[];
 	readonly task: StaticBakeBatchItem["task"];
 } {
 	const scope = createStaticObjectBatchPayload(item);
-	const partitionPlan = partitionStaticObjectBatches(scope);
 	const sourceIndex = new StaticObjectBakeSourceIndex(scope, input.attachments);
 	const resourceIdPrefix = item.task.ownerId;
+	const partitionPlan = partitionStaticObjectBatches(scope, {
+		placementSnapshot: input.texturePlacementSnapshot,
+		textureUseScopeId: resourceIdPrefix,
+	});
 	const renderablePartitions = partitionPlan.partitions.filter((partition) => {
 		if (isRenderableStaticObjectPartition(partition)) {
 			return true;
@@ -337,6 +348,8 @@ function bakeStaticObjectBatchItem(
 		],
 		staticObjectRenderInstances: instancedOutput.instances,
 		staticObjectVisualResources: instancedOutput.resources,
+		textureDependencies:
+			createStaticObjectDrawUnitTextureDependencies(bakedDrawUnits),
 		textureUses: createStaticObjectBakeTextureUses({
 			partitions: bakedPartitions,
 			resourceIdPrefix,
@@ -345,6 +358,67 @@ function bakeStaticObjectBatchItem(
 		}).concat(instancedOutput.textureUses),
 		task: item.task,
 	};
+}
+
+function createStaticObjectDrawUnitTextureDependencies(
+	drawUnits: readonly StaticDrawUnit[],
+): readonly DrawUnitTextureDependencies[] {
+	return drawUnits.flatMap((drawUnit) => {
+		if (drawUnit.kind !== "static-object-geometry") {
+			return [];
+		}
+		const roles = createStaticObjectDrawUnitTextureRoleDependencies(drawUnit);
+		if (roles.length === 0) {
+			return [];
+		}
+		return [
+			{
+				drawUnitId: drawUnit.drawUnitId,
+				roles,
+			},
+		];
+	});
+}
+
+function createStaticObjectDrawUnitTextureRoleDependencies(
+	drawUnit: StaticObjectGeometryStaticDrawUnit,
+): readonly DrawUnitTextureRoleDependency[] {
+	const baseColor = new Set<string>();
+	const detail = new Set<string>();
+	const index = new Set<string>();
+	const palette = new Set<string>();
+	for (const entry of drawUnit.materialEntries) {
+		addNullableString(baseColor, entry.primaryTextureUseId);
+		addNullableString(detail, entry.detailTextureUseId);
+		addNullableString(index, entry.indexTextureUseId);
+		addNullableString(palette, entry.paletteTextureUseId);
+	}
+
+	return [
+		createRoleDependency("object-base-color", baseColor),
+		createRoleDependency("object-detail", detail),
+		createRoleDependency("object-index", index),
+		createRoleDependency("object-palette", palette),
+	].filter((role): role is DrawUnitTextureRoleDependency => role !== null);
+}
+
+function createRoleDependency(
+	purpose: DrawUnitTextureRoleDependency["purpose"],
+	itemIds: ReadonlySet<string>,
+): DrawUnitTextureRoleDependency | null {
+	if (itemIds.size === 0) {
+		return null;
+	}
+	return {
+		itemIds: [...itemIds].sort((left, right) => left.localeCompare(right)),
+		purpose,
+	};
+}
+
+function addNullableString(values: Set<string>, value: string | null): void {
+	if (value) {
+		values.add(value);
+	}
 }
 
 function createStaticObjectBakeDiagnostics(options: {
@@ -1219,29 +1293,6 @@ function dedupeStaticObjectVisualResources(
 	);
 }
 
-function createStaticObjectBatchPayload(
-	item: StaticBakeBatchItem,
-): StaticObjectBatchPayload {
-	if (
-		(item.task.domain === "outdoor-buildings" ||
-			item.task.domain === "outdoor-explicit-objects" ||
-			item.task.domain === "outdoor-generated-scenery") &&
-		item.payload.scope.kind === "outdoor-static-objects"
-	) {
-		return item.payload.scope;
-	}
-	if (
-		item.task.domain === "env-cell-system" &&
-		item.payload.scope.kind === "env-cell-system"
-	) {
-		return createEnvCellStaticObjectBatchPayload(item.payload.scope);
-	}
-
-	throw new Error(
-		`Static object batch baker only supports static object payloads. Received ${item.task.domain}/${item.payload.scope.kind}.`,
-	);
-}
-
 function createDrawUnitSpatialRecord(
 	drawUnitId: string,
 	triangleCount: number,
@@ -1813,58 +1864,6 @@ function createStaticObjectSourcePartMatrix(
 			y: object.sourceScale.y * part.scale.y,
 			z: object.sourceScale.z * part.scale.z,
 		}),
-	);
-}
-
-function createEnvCellStaticObjectBatchPayload(
-	payload: EnvCellSystemStaticScopePayload,
-): StaticObjectBatchPayload {
-	const sourceByKey = new Map(
-		(payload.sourceAssets ?? []).map((source) => [
-			createSourceKey(source.identity),
-			source,
-		]),
-	);
-	const objects = payload.envCells.flatMap((envCell) =>
-		envCell.staticObjectPlacements.flatMap((seed) => {
-			const source = sourceByKey.get(createSourceKey(seed.source));
-			if (!source || isEnvCellStaticObjectDynamicSource(source)) {
-				return [];
-			}
-			return {
-				debug: seed.debug,
-				generated: null,
-				identity: seed.identity,
-				instanceBounds: null,
-				localPlacement: seed.localPlacement,
-				owningEnvCellId: envCell.identity.envCellId,
-				portalCount: 0,
-				source: seed.source,
-				sourceBounds: null,
-				sourceIndex: seed.sourceIndex,
-				sourceScale: seed.sourceScale ?? { x: 1, y: 1, z: 1 },
-			};
-		}),
-	);
-
-	return {
-		domain: "env-cell-system",
-		landblock: payload.landblock,
-		materialSlots: [],
-		materialSources: payload.materialSources ?? [],
-		objects,
-		paletteSources: payload.paletteSources ?? [],
-		regionRenderProfile: { detailRoles: [] },
-		sourceAssets: payload.sourceAssets ?? [],
-		textureRefs: payload.textureRefs ?? [],
-	};
-}
-
-function isEnvCellStaticObjectDynamicSource(
-	source: StaticObjectBatchPayload["sourceAssets"][number],
-): boolean {
-	return (
-		source.sourceAssetKind === "setup-model" && source.defaultAnimation !== null
 	);
 }
 

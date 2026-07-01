@@ -1212,7 +1212,7 @@ Acceptance criteria:
 - [x] Phase 6: bring dynamic visual baking onto the same placement contract.
 - [x] Resteering 2: review cutover health.
 - [x] Phase 7: bring terrain onto the same placement-before-bake contract.
-- [ ] Phase 8: add on-demand zombie reclaim.
+- [x] Phase 8: add on-demand zombie reclaim.
 - [ ] Resteering 3: review reclaim and renderer cleanup readiness.
 - [ ] Phase 9: simplify renderer payload prep and specialize shader families.
 - [ ] Phase 10: resolve `textureUseId` cleanup.
@@ -1385,6 +1385,21 @@ Acceptance criteria:
 - Phase 7 keeps debug-flat terrain fallback for genuinely unsupported single-entry material shapes,
   missing prepared texture uses, invalid detail roles, or unsplittable per-entry page overflow. This
   is the remaining terrain shader limitation, not normal post-pack page overflow.
+- Phase 8 implemented on-demand full-page reclaim in `TextureManager`. Reclaim runs only when new
+  texture placement work is pending, deletes placement records and registry aliases for texture refs
+  whose placement records are all zero-reference, and skips any texture ref with leased/active
+  renderer ownership.
+- Phase 8 chose full texture-ref/page reclaim instead of partial free-rectangle reuse. This is the
+  conservative implementation: active placements never move, the packer protocol remains unchanged,
+  and no allocator-style free-rectangle model leaks into the packer.
+- Phase 8 found and fixed a page lifecycle gap introduced by placement-before-bake: ownerless
+  pre-bake placement committed page pixels before renderer ownership existed, and the later owner
+  commit could bind an existing entry without re-emitting the page upload. Registry entries now retain
+  their runtime page upload, and owner commits emit that upload only when the texture ref is not
+  already resident through another leased entry.
+- Phase 8 keeps page removal conservative. Normal renderer page disposal still happens through
+  owner-removal texture updates; reclaim of never-uploaded ownerless pages can stay internal to
+  `TextureManager`.
 - Dry run split `TextureManager` responsibilities into placement and pinning. Current owner leases
   require post-bake draw-unit/resource owners, but pre-bake placement intents intentionally do not
   have owners yet.
@@ -1442,6 +1457,12 @@ Acceptance criteria:
 - Unsplittable terrain entries that exceed shader page budgets still fall back to debug-flat because
   splitting inside one terrain layer would require deeper shader/material semantics. This is
   contained in the terrain baker and should be revisited only if real scenes hit it often.
+- Phase 8 full-page reclaim does not yet reuse free rectangles inside partially live pages. If atlas
+  waste shows up after the clean cutover, add an existing-page occupancy model inside
+  `TextureManager`; do not push free-rectangle policy into the packer worker protocol prematurely.
+- `TextureManager` now stores `RuntimeTexturePlacement` on registry entries so pre-bake ownerless
+  pages can be uploaded when ownership appears. This is pragmatic migration state tied to the current
+  renderer update API; revisit during renderer payload cleanup if page residency becomes explicit.
 
 ## Risks and Concessions
 

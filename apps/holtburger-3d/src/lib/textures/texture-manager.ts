@@ -437,6 +437,7 @@ export class TextureManager {
 			},
 		);
 		const pendingPlacements = new Map<string, PendingTexturePlacement>();
+		const uploadedTextureRefIds = new Set<string>();
 
 		for (const textureUse of delta.textureUses) {
 			const staged = await this.#stageTexturePlacement(
@@ -453,6 +454,14 @@ export class TextureManager {
 				if (!textureKeys.has(staged.textureKey)) {
 					textureKeys.add(staged.textureKey);
 					if (staged.entry) {
+						if (
+							staged.entry.leaseCount === 0 &&
+							!this.#hasLeasedTextureRef(staged.entry.textureRefId) &&
+							!uploadedTextureRefIds.has(staged.entry.textureRefId)
+						) {
+							placements.push(staged.entry.runtimePlacement);
+							uploadedTextureRefIds.add(staged.entry.textureRefId);
+						}
 						staged.entry.leaseCount += 1;
 						this.#setPlacementActiveReferenceCount(
 							staged.entry,
@@ -692,6 +701,7 @@ export class TextureManager {
 		pendingPlacements: readonly PendingTexturePlacement[],
 	): Promise<readonly RuntimeTexturePlacement[]> {
 		const runtimePlacements: RuntimeTexturePlacement[] = [];
+		this.#reclaimZeroReferencePagesForPendingPlacements(pendingPlacements);
 		const plannedGroups = this.#planPendingTexturePackingGroups(
 			groupPendingTexturePlacements(pendingPlacements),
 		);
@@ -853,6 +863,9 @@ export class TextureManager {
 						classifyTexturePlacementPool(entry.domain),
 					),
 					rect: rect.rect,
+					runtimePlacement: {
+						...runtimePlacements[runtimePlacements.length - 1]!,
+					},
 					sampleClass: group.pagePolicy.sampleClass,
 					samplerPolicyKey: group.samplerPolicy.policyKey,
 					source: entry.textureUse.source,
@@ -969,6 +982,65 @@ export class TextureManager {
 		}
 		record.activeReferenceCount = nextCount;
 	}
+
+	#reclaimZeroReferencePagesForPendingPlacements(
+		pendingPlacements: readonly PendingTexturePlacement[],
+	): void {
+		if (pendingPlacements.length === 0) {
+			return;
+		}
+
+		for (const textureRefId of this.#collectFullyFreeTextureRefIds()) {
+			this.#deleteTextureRef(textureRefId);
+		}
+	}
+
+	#collectFullyFreeTextureRefIds(): readonly string[] {
+		const recordsByTextureRefId = new Map<string, TexturePlacementRecord[]>();
+		for (const record of this.#placementRecordsByItemId.values()) {
+			const records = recordsByTextureRefId.get(record.textureRefId) ?? [];
+			records.push(record);
+			recordsByTextureRefId.set(record.textureRefId, records);
+		}
+
+		const freeTextureRefIds: string[] = [];
+		for (const [textureRefId, records] of recordsByTextureRefId) {
+			if (records.some((record) => record.activeReferenceCount > 0)) {
+				continue;
+			}
+			if (this.#hasLeasedTextureRef(textureRefId)) {
+				continue;
+			}
+			freeTextureRefIds.push(textureRefId);
+		}
+		return freeTextureRefIds.sort();
+	}
+
+	#hasLeasedTextureRef(textureRefId: string): boolean {
+		for (const registry of this.#batchRegistries.values()) {
+			for (const entry of registry.entries.values()) {
+				if (entry.textureRefId === textureRefId && entry.leaseCount > 0) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	#deleteTextureRef(textureRefId: string): void {
+		for (const registry of this.#batchRegistries.values()) {
+			for (const [textureKey, entry] of registry.entries) {
+				if (entry.textureRefId === textureRefId) {
+					registry.entries.delete(textureKey);
+				}
+			}
+		}
+		for (const [itemId, record] of this.#placementRecordsByItemId) {
+			if (record.textureRefId === textureRefId) {
+				this.#placementRecordsByItemId.delete(itemId);
+			}
+		}
+	}
 }
 
 type RuntimeTexturePlacement = TexturePlacementUpdate["placements"][number];
@@ -1020,6 +1092,7 @@ interface VisualTextureRegistryEntry {
 	readonly textureWidth: number;
 	readonly textureHeight: number;
 	readonly rect: readonly [number, number, number, number];
+	readonly runtimePlacement: RuntimeTexturePlacement;
 	readonly wrapS: RuntimeTexturePagePolicy["wrapS"];
 	readonly wrapT: RuntimeTexturePagePolicy["wrapT"];
 	leaseCount: number;

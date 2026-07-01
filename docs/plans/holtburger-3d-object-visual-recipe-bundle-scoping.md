@@ -1,6 +1,6 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation in progress. Phases 0-9C are complete. This document defines the target
+Status: implementation in progress. Phases 0-9D are complete. This document defines the target
 model, north stars, risk surface, and phased cutover plan for replacing static-vs-dynamic object
 visual worker bifurcation with a shared object-like visual recipe graph.
 
@@ -1435,7 +1435,7 @@ Course correction:
 
 - Insert Phase 9A for static publication metadata contracts before resolver cutover.
 - Insert Phase 9B for unified baker static publication output before resolver cutover.
-- Move the actual static resolver cutover to Phase 9D, after the shared recipe path can produce
+- Move the actual static resolver cutover to Phase 9G, after the shared recipe path can produce
   static-shaped install publications without legacy lookup.
 - Keep Phase 10 as the dynamic cutover, but let it reuse the richer publication machinery introduced
   for static instead of inventing a dynamic-only install path.
@@ -1565,7 +1565,7 @@ Implementation notes after Phase 9B:
 - Spicy debt: current generic baked render parts contain transformed geometry. That is correct for
   direct draw units, but reusable static visual resources ultimately need source-local geometry plus
   render-instance transforms. Resolver cutover must ensure instanced resource groups are baked in
-  source-local space before Phase 9D treats generated-scenery/resource publication as production
+  source-local space before Phase 9G treats generated-scenery/resource publication as production
   parity. Do not paper over this with runtime reconstruction from legacy payloads.
 - Verification:
   `npm --prefix apps/holtburger-3d run test:ts -- object-visual-baker object-visual-static-publication object-visual-static-publication-baker`
@@ -1599,7 +1599,7 @@ Acceptance criteria:
 
 Deletion criteria:
 
-- Delete producer-side legacy-to-install-set publication once Phase 9D emits install sets from
+- Delete producer-side legacy-to-install-set publication once Phase 9G emits install sets from
   recipe-first static producers directly.
 
 Implementation notes after Phase 9C:
@@ -1618,7 +1618,133 @@ Implementation notes after Phase 9C:
   `npm --prefix apps/holtburger-3d run test:ts -- static-commit-installer static-coordinator terrain-geometry-baker env-cell-system-baker static-object-batch`
   and `npm --prefix apps/holtburger-3d run check`.
 
-### Phase 9D: Static Object-Like Resolver Cutover
+### Phase 9D: Resteer Static Resolver Cutover Prerequisites
+
+Status: complete.
+
+Goal: verify whether the current shared recipe and baker contracts can honestly support the static
+object-like resolver cutover before touching production resolvers.
+
+Deliverables:
+
+- Audit the current recipe contract, material planning contract, generic baker geometry transform
+  rule, static object resolver output, env-cell resolver output, and static install-set bridge.
+- Decide whether Phase 9D can proceed as a direct cutover or needs prerequisite contract work.
+- Update the plan with any prerequisite phases needed to avoid legacy payload reconstruction,
+  material-plan smuggling, or transformed-geometry resource publication.
+
+Acceptance criteria:
+
+- The plan explicitly identifies any contract gaps that would make the static resolver cutover
+  dishonest.
+- The actual static resolver cutover is rescheduled only if there is a specific prerequisite with a
+  deletion path.
+- No runtime adapter or compatibility branch is introduced to paper over the gap.
+
+Implementation notes after Phase 9D:
+
+- The current `ObjectVisualMaterialRecipe` shape is too thin to replace static material plans as the
+  final resolver product. Static partitioning and material-table creation still require alpha policy,
+  blend factors, texture role schema/layout facts, texture wrap mode, diffuse color, emissive color,
+  indexed clip thresholds, palette windows, detail tiling/fade facts, and renderer table ids. Cutting
+  over now would either duplicate planning downstream or sneak `ObjectVisualMaterialPlan` through the
+  recipe path under a new name.
+- The unified baker currently applies each `PartInstance.transform` into baked vertex buffers for
+  every render part. That is correct for direct draw-unit output, but reusable static resources need
+  source-local geometry paired with render-instance transforms. Generated scenery parity cannot rely
+  on transformed generic render parts.
+- Static object and env-cell resolvers still emit `OutdoorStaticObjectsScopePayload` and
+  `EnvCellSystemStaticScopePayload` as their final ready products. The producer-authored install set
+  now keeps runtime install shells thin, but static producers are still translating legacy outputs.
+- Course correction: split the static resolver cutover into Phase 9E material recipe expansion,
+  Phase 9F source-local static publication baking, and Phase 9G actual resolver cutover. This keeps
+  the cutover hard without pretending the current contract is ready.
+- Verification:
+  plan-only steering based on current code inspection of
+  `apps/holtburger-3d/src/lib/visual/object-visual-recipe-bundle.ts`,
+  `apps/holtburger-3d/src/lib/visual/object-visual-material-planner.ts`,
+  `apps/holtburger-3d/src/lib/visual/object-visual-baker.ts`,
+  `apps/holtburger-3d/src/lib/static/objects/outdoor-static-objects-resolver.ts`, and static/env-cell
+  baker call sites.
+
+### Phase 9E: Recipe-Grade Material Planning Contract
+
+Goal: make material recipes carry the renderable material facts currently trapped in static material
+plans, without adding material diagnostics to the recipe model.
+
+Deliverables:
+
+- Expand `ObjectVisualMaterialRecipe` into the authoritative renderable material contract for
+  object-like domains.
+- Represent alpha policy, blend facts, texture role layout/schema, texture wrap mode, direct color,
+  emissive color, indexed clip thresholds, palette window facts, detail tiling/fade facts, and
+  material-family-specific texture recipe ids in recipe records.
+- Keep unsupported materials as an `unsupported` family that logs and skips in the baker.
+- Move string-heavy signatures into recipe key construction/debug tables; keep bake-time joins on
+  branded numeric recipe ids and dense indices.
+- Update the unified baker to build material table entries from material recipes directly.
+
+Task checklist:
+
+- Compare `ObjectVisualMaterialPlan` and `ObjectVisualMaterialRecipe` field-by-field and decide
+  which render facts belong in the recipe contract.
+- Replace generic pass-only `createMaterialTableEntry` behavior with recipe-owned render state and
+  material table facts.
+- Ensure texture recipe references cover every texture role without loading texels in resolvers.
+- Add tests covering direct-color, indexed-color, rgba/detail, unsupported, alpha-test,
+  transparent/additive, wrap mode, palette window, and detail overlay cases.
+- Confirm material diagnostics and coverage summaries remain outside the recipe model.
+
+Acceptance criteria:
+
+- A ready object visual bundle can produce renderer-legal material table entries without consulting
+  `ObjectVisualMaterialPlan`, `StaticObjectBatchPayload`, or env-cell scope material fields.
+- Unsupported material recipes warn in the console and skip without producing partial render parts.
+- Hot baker/partition paths do not depend on repeated expensive string comparisons.
+
+Deletion criteria:
+
+- Delete or narrow static-only material adapter paths once no production caller needs
+  `ObjectVisualMaterialPlan` after resolver normalization.
+
+### Phase 9F: Source-Local Static Publication Baking
+
+Goal: make the unified baker able to emit reusable static resources from source-local geometry while
+still emitting direct draw units from transformed geometry where appropriate.
+
+Deliverables:
+
+- Add an explicit publication mode or output split that distinguishes direct transformed render
+  parts from source-local reusable resource geometry.
+- Preserve one transform rule in the recipe graph: geometry buffers remain source-local and
+  `PartInstance.transform` is the source-local to render-local transform.
+- For reusable static groups, emit source-local resource geometry and separate render instances with
+  transforms, bounds, sort anchors, source facts, and residency metadata.
+- For direct groups, continue emitting transformed draw-unit geometry.
+
+Task checklist:
+
+- Refactor the generic baker so transform application is an output/publication decision, not an
+  unavoidable primitive bake side effect.
+- Ensure generated scenery resource groups and env-cell reusable outputs cannot accidentally publish
+  transformed geometry as source-local resources.
+- Keep direct static object and structured-interior draw units renderer-equivalent to current output.
+- Add tests for direct-only, reusable-only, mixed direct/reusable, and partition-split resource
+  groups.
+
+Acceptance criteria:
+
+- Reusable static visual resources contain source-local geometry and render instances carry the
+  transforms needed to place them.
+- Direct draw units still contain render-local transformed geometry.
+- The static publication baker no longer needs legacy payload lookup to repair geometry space.
+
+Deletion criteria:
+
+- Delete any helper that reconstructs generated-scenery source-local resources from already-baked
+  draw units once Phase 9G uses this path.
+
+### Phase 9G: Static Object-Like Resolver Cutover
 
 Goal: make static object-like layers produce object visual bundle resolutions and feed the unified
 baker/install publication path.

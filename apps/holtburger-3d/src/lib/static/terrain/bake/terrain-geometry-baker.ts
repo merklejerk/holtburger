@@ -10,6 +10,7 @@ import type {
 	TerrainMaterialDrawSlice,
 	TerrainMaterialFallbackReason,
 	TerrainMaterialLayerPlan,
+	TerrainMaterialLayerEntry,
 	TerrainMeshQuadFacts,
 	TerrainMeshTriangleFacts,
 	TerrainMeshVertexFacts,
@@ -17,10 +18,26 @@ import type {
 	TerrainTextureUseFacts,
 } from "../../contracts";
 import { uniqueSortedStaticTextureUseOwners } from "../../contracts";
-import { classifyTerrainMaterialFamily } from "./terrain-material-family-classifier";
+import {
+	classifyTerrainMaterialFamily,
+	MAX_TERRAIN_COLOR_PAGES_PER_DRAW,
+	MAX_TERRAIN_DETAIL_PAGES_PER_DRAW,
+	MAX_TERRAIN_MASK_PAGES_PER_DRAW,
+} from "./terrain-material-family-classifier";
 import { buildTerrainMaterialLayerPlan } from "./terrain-material-layer-planner";
+import { createStaticTexturePlacementIntent } from "../../../textures/placement";
+import type {
+	TexturePlacementIntent,
+	TexturePlacementSnapshot,
+	TextureResourceDependencies,
+	TextureResourceRoleDependency,
+	TextureUsagePurpose,
+} from "../../../textures/placement";
 
 const UINT16_MAX_INDEX = 65_535;
+const EMPTY_TEXTURE_PLACEMENT_SNAPSHOT: TexturePlacementSnapshot = {
+	placementsByItemId: new Map(),
+};
 
 export class TerrainGeometryStaticBaker implements StaticBaker {
 	async bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
@@ -64,9 +81,62 @@ export function bakeTerrainGeometry(
 		staticVisibilityRecords: [],
 		staticBatchId: input.staticBatchId,
 		tasks: input.items.map((item) => item.task),
-		textureDependencies: [],
+		textureDependencies: createTerrainTextureDependencies(
+			drawUnits,
+			input.texturePlacementSnapshot ?? EMPTY_TEXTURE_PLACEMENT_SNAPSHOT,
+		),
 		textureUses: itemResults.flatMap((result) => result.textureUses),
 	};
+}
+
+export function createTerrainTexturePlacementIntents(options: {
+	readonly items: readonly StaticBakeBatchItem[];
+	readonly staticBatchId: string;
+}): readonly TexturePlacementIntent[] {
+	return options.items.flatMap((item) => {
+		if (
+			item.task.domain !== "outdoor-terrain" ||
+			item.payload.scope.kind !== "terrain"
+		) {
+			return [];
+		}
+
+		const textureUseById = createTerrainPreparedTextureUseIndex(
+			item.task.ownerId,
+			item.payload.scope.textureUses,
+		);
+		const plan = buildTerrainMaterialLayerPlan({
+			createTextureUseId: (textureUse) =>
+				createTerrainTextureUseId(item.task.ownerId, textureUse),
+			payload: item.payload.scope,
+		});
+		if (!plan) {
+			return [];
+		}
+
+		return collectTerrainMaterialPlanTextureUseIds(plan).flatMap(
+			(textureUseId) => {
+				const textureUse = textureUseById.get(textureUseId);
+				if (!textureUse?.preparedTextureUse) {
+					return [];
+				}
+				return [
+					createStaticTexturePlacementIntent(
+						{
+							domain: "outdoor-terrain",
+							owners: [],
+							source: textureUse.preparedTextureUse,
+							staticBatchId: options.staticBatchId,
+							textureUseId,
+						},
+						{
+							affinityKey: createTerrainTextureAffinityKey(item.task.ownerId),
+						},
+					),
+				];
+			},
+		);
+	});
 }
 
 function createTerrainSourceMappingRecords(
@@ -120,6 +190,7 @@ function bakeTerrainGeometryItem(
 		textureUseScopeId,
 		item.payload.scope,
 		input.staticBatchId,
+		input.texturePlacementSnapshot ?? EMPTY_TEXTURE_PLACEMENT_SNAPSHOT,
 	);
 
 	return {
@@ -132,13 +203,18 @@ function createTerrainGeometryDrawUnits(
 	textureUseScopeId: string,
 	payload: TerrainStaticScopePayload,
 	staticBatchId: string,
+	texturePlacementSnapshot: TexturePlacementSnapshot,
 ): readonly TerrainGeometryStaticDrawUnit[] {
 	const terrainMaterialPlan = buildTerrainMaterialLayerPlan({
 		createTextureUseId: (textureUse) =>
 			createTerrainTextureUseId(textureUseScopeId, textureUse),
 		payload,
 	});
-	const slices = createTerrainGeometrySlices(payload, terrainMaterialPlan);
+	const slices = createTerrainGeometrySlices(
+		payload,
+		terrainMaterialPlan,
+		texturePlacementSnapshot,
+	);
 	const pcodeByQuadIndex = new Map(
 		payload.mesh.quads.map((quad) => [quad.quadIndex, quad.pcode] as const),
 	);
@@ -245,6 +321,7 @@ interface TerrainGeometrySlice {
 function createTerrainGeometrySlices(
 	payload: TerrainStaticScopePayload,
 	plan: TerrainMaterialLayerPlan | null,
+	texturePlacementSnapshot: TexturePlacementSnapshot,
 ): readonly TerrainGeometrySlice[] {
 	if (!plan || plan.layerEntries.length === 0 || plan.drawSlices.length === 0) {
 		return [
@@ -266,17 +343,369 @@ function createTerrainGeometrySlices(
 		payload.mesh.quads.map((quad) => [quad.quadIndex, quad.pcode] as const),
 	);
 
-	return plan.drawSlices.map((slice) => {
+	return plan.drawSlices.flatMap((slice) => {
 		const slicePcodes = new Set(slice.pcodes);
-		return {
+		const triangles = payload.mesh.triangles.filter((triangle) => {
+			const pcode = quadPcodeByIndex.get(triangle.quadIndex);
+			return pcode === undefined ? false : slicePcodes.has(pcode);
+		});
+		return splitTerrainMaterialSliceByPlacementPages({
 			plan: createTerrainMaterialSlicePlan(plan, slice),
+			quadPcodeByIndex,
 			slice,
-			triangles: payload.mesh.triangles.filter((triangle) => {
-				const pcode = quadPcodeByIndex.get(triangle.quadIndex);
-				return pcode === undefined ? false : slicePcodes.has(pcode);
-			}),
-		};
+			texturePlacementSnapshot,
+			triangles,
+		});
 	});
+}
+
+function splitTerrainMaterialSliceByPlacementPages(options: {
+	readonly plan: TerrainMaterialLayerPlan;
+	readonly quadPcodeByIndex: ReadonlyMap<number, number>;
+	readonly slice: TerrainMaterialDrawSlice;
+	readonly texturePlacementSnapshot: TexturePlacementSnapshot;
+	readonly triangles: readonly TerrainMeshTriangleFacts[];
+}): readonly TerrainGeometrySlice[] {
+	const pageContext = createTerrainPagePartitionContext({
+		detailRoles: options.plan.detailRoles,
+		texturePlacementSnapshot: options.texturePlacementSnapshot,
+	});
+	if (!pageContext.valid) {
+		return [
+			createTerrainFallbackGeometrySlice({
+				message: pageContext.message,
+				plan: options.plan,
+				slice: options.slice,
+				triangles: options.triangles,
+			}),
+		];
+	}
+
+	const slices: TerrainGeometrySlice[] = [];
+	let pendingEntries: TerrainMaterialLayerEntry[] = [];
+	for (const entry of options.plan.layerEntries) {
+		const entryContext = createTerrainPagePartitionContext({
+			detailRoles: options.plan.detailRoles,
+			entries: [entry],
+			texturePlacementSnapshot: options.texturePlacementSnapshot,
+		});
+		if (!entryContext.valid) {
+			if (pendingEntries.length > 0) {
+				slices.push(
+					createTerrainGeometrySliceForEntries({
+						entries: pendingEntries,
+						plan: options.plan,
+						reason: "terrain page capacity slice",
+						slice: options.slice,
+						sliceIndex: slices.length,
+						triangles: filterTerrainTrianglesForPcodes(
+							options.triangles,
+							options.quadPcodeByIndex,
+							pendingEntries.map((pendingEntry) => pendingEntry.pcode),
+						),
+					}),
+				);
+				pendingEntries = [];
+			}
+			slices.push(
+				createTerrainFallbackGeometrySlice({
+					message: entryContext.message,
+					plan: createTerrainMaterialPlanForEntries({
+						entries: [entry],
+						plan: options.plan,
+						reason: "terrain page capacity fallback",
+						sliceId: `${options.slice.sliceId}/page-${slices.length}`,
+					}),
+					slice: {
+						layerSlots: [0],
+						pcodes: [entry.pcode],
+						reason: "terrain page capacity fallback",
+						sliceId: `${options.slice.sliceId}/page-${slices.length}`,
+					},
+					triangles: filterTerrainTrianglesForPcodes(
+						options.triangles,
+						options.quadPcodeByIndex,
+						[entry.pcode],
+					),
+				}),
+			);
+			continue;
+		}
+
+		const nextEntries = [...pendingEntries, entry];
+		const nextContext = createTerrainPagePartitionContext({
+			detailRoles: options.plan.detailRoles,
+			entries: nextEntries,
+			texturePlacementSnapshot: options.texturePlacementSnapshot,
+		});
+		if (pendingEntries.length > 0 && !nextContext.valid) {
+			slices.push(
+				createTerrainGeometrySliceForEntries({
+					entries: pendingEntries,
+					plan: options.plan,
+					reason: "terrain page capacity slice",
+					slice: options.slice,
+					sliceIndex: slices.length,
+					triangles: filterTerrainTrianglesForPcodes(
+						options.triangles,
+						options.quadPcodeByIndex,
+						pendingEntries.map((pendingEntry) => pendingEntry.pcode),
+					),
+				}),
+			);
+			pendingEntries = [entry];
+			continue;
+		}
+
+		pendingEntries = nextEntries;
+	}
+
+	if (pendingEntries.length > 0) {
+		slices.push(
+			createTerrainGeometrySliceForEntries({
+				entries: pendingEntries,
+				plan: options.plan,
+				reason:
+					slices.length === 0
+						? `${options.slice.reason}; terrain pages fit shader limits`
+						: "terrain page capacity slice",
+				slice: options.slice,
+				sliceIndex: slices.length,
+				triangles: filterTerrainTrianglesForPcodes(
+					options.triangles,
+					options.quadPcodeByIndex,
+					pendingEntries.map((pendingEntry) => pendingEntry.pcode),
+				),
+			}),
+		);
+	}
+
+	return slices;
+}
+
+interface TerrainPagePartitionContext {
+	readonly colorPages: ReadonlySet<string>;
+	readonly detailPages: ReadonlySet<string>;
+	readonly maskPages: ReadonlySet<string>;
+	readonly message: string;
+	readonly valid: boolean;
+}
+
+function createTerrainPagePartitionContext(options: {
+	readonly detailRoles: TerrainMaterialLayerPlan["detailRoles"];
+	readonly entries?: readonly TerrainMaterialLayerEntry[];
+	readonly texturePlacementSnapshot: TexturePlacementSnapshot;
+}): TerrainPagePartitionContext {
+	const colorPages = new Set<string>();
+	const detailPages = new Set<string>();
+	const maskPages = new Set<string>();
+	const addTextureUse = (textureUseId: string | null): string | null => {
+		if (!textureUseId) {
+			return null;
+		}
+		const placement =
+			options.texturePlacementSnapshot.placementsByItemId.get(textureUseId);
+		if (!placement) {
+			return `Terrain texture ${textureUseId} is missing a pre-bake placement.`;
+		}
+		switch (placement.purpose) {
+			case "terrain-color":
+				colorPages.add(placement.pageId);
+				return null;
+			case "terrain-detail":
+				detailPages.add(placement.pageId);
+				return null;
+			case "terrain-mask":
+				maskPages.add(placement.pageId);
+				return null;
+			case "object-base-color":
+			case "object-detail":
+			case "object-index":
+			case "object-palette":
+				return `Terrain texture ${textureUseId} was placed with incompatible purpose ${placement.purpose}.`;
+		}
+	};
+
+	for (const detailRole of options.detailRoles) {
+		const error = addTextureUse(detailRole.texture.textureUseId);
+		if (error) {
+			return createInvalidTerrainPagePartitionContext(
+				colorPages,
+				detailPages,
+				maskPages,
+				error,
+			);
+		}
+	}
+	for (const entry of options.entries ?? []) {
+		for (const binding of collectTerrainLayerEntryTextureBindings(entry)) {
+			const error = addTextureUse(binding.textureUseId);
+			if (error) {
+				return createInvalidTerrainPagePartitionContext(
+					colorPages,
+					detailPages,
+					maskPages,
+					error,
+				);
+			}
+		}
+	}
+
+	const overflowMessage = createTerrainPageOverflowMessage({
+		colorPages,
+		detailPages,
+		maskPages,
+	});
+	if (overflowMessage) {
+		return createInvalidTerrainPagePartitionContext(
+			colorPages,
+			detailPages,
+			maskPages,
+			overflowMessage,
+		);
+	}
+
+	return {
+		colorPages,
+		detailPages,
+		maskPages,
+		message: "",
+		valid: true,
+	};
+}
+
+function createInvalidTerrainPagePartitionContext(
+	colorPages: ReadonlySet<string>,
+	detailPages: ReadonlySet<string>,
+	maskPages: ReadonlySet<string>,
+	message: string,
+): TerrainPagePartitionContext {
+	return {
+		colorPages,
+		detailPages,
+		maskPages,
+		message,
+		valid: false,
+	};
+}
+
+function createTerrainPageOverflowMessage(options: {
+	readonly colorPages: ReadonlySet<string>;
+	readonly detailPages: ReadonlySet<string>;
+	readonly maskPages: ReadonlySet<string>;
+}): string | null {
+	if (options.colorPages.size > MAX_TERRAIN_COLOR_PAGES_PER_DRAW) {
+		return `Terrain material draw slice requires ${options.colorPages.size} color pages; shader limit is ${MAX_TERRAIN_COLOR_PAGES_PER_DRAW}.`;
+	}
+	if (options.maskPages.size > MAX_TERRAIN_MASK_PAGES_PER_DRAW) {
+		return `Terrain material draw slice requires ${options.maskPages.size} mask pages; shader limit is ${MAX_TERRAIN_MASK_PAGES_PER_DRAW}.`;
+	}
+	if (options.detailPages.size > MAX_TERRAIN_DETAIL_PAGES_PER_DRAW) {
+		return `Terrain material draw slice requires ${options.detailPages.size} detail pages; shader limit is ${MAX_TERRAIN_DETAIL_PAGES_PER_DRAW}.`;
+	}
+	return null;
+}
+
+function createTerrainGeometrySliceForEntries(options: {
+	readonly entries: readonly TerrainMaterialLayerEntry[];
+	readonly plan: TerrainMaterialLayerPlan;
+	readonly reason: string;
+	readonly slice: TerrainMaterialDrawSlice;
+	readonly sliceIndex: number;
+	readonly triangles: readonly TerrainMeshTriangleFacts[];
+}): TerrainGeometrySlice {
+	const sliceId = `${options.slice.sliceId}/page-${options.sliceIndex}`;
+	return {
+		plan: createTerrainMaterialPlanForEntries({
+			entries: options.entries,
+			plan: options.plan,
+			reason: options.reason,
+			sliceId,
+		}),
+		slice: {
+			layerSlots: options.entries.map((entry, index) => index),
+			pcodes: options.entries.map((entry) => entry.pcode),
+			reason: options.reason,
+			sliceId,
+		},
+		triangles: options.triangles,
+	};
+}
+
+function createTerrainMaterialPlanForEntries(options: {
+	readonly entries: readonly TerrainMaterialLayerEntry[];
+	readonly plan: TerrainMaterialLayerPlan;
+	readonly reason: string;
+	readonly sliceId: string;
+}): TerrainMaterialLayerPlan {
+	const pcodeSet = new Set(options.entries.map((entry) => entry.pcode));
+	const layerEntries = options.entries.map((entry, slot) => ({
+		...entry,
+		slot,
+	}));
+	const fallbackReasons = options.plan.fallbackReasons.filter((reason) =>
+		isFallbackReasonRelevantToSlice(reason, pcodeSet),
+	);
+	return {
+		detailRoles: options.plan.detailRoles,
+		drawSlices: [
+			{
+				layerSlots: layerEntries.map((entry) => entry.slot),
+				pcodes: layerEntries.map((entry) => entry.pcode),
+				reason: options.reason,
+				sliceId: options.sliceId,
+			},
+		],
+		fallbackReasons,
+		layerEntries,
+		signature: `${options.plan.signature}|page-slice:${options.sliceId}`,
+	};
+}
+
+function createTerrainFallbackGeometrySlice(options: {
+	readonly message: string;
+	readonly plan: TerrainMaterialLayerPlan;
+	readonly slice: TerrainMaterialDrawSlice;
+	readonly triangles: readonly TerrainMeshTriangleFacts[];
+}): TerrainGeometrySlice {
+	return {
+		plan: {
+			...options.plan,
+			fallbackReasons: [
+				...options.plan.fallbackReasons,
+				{
+					code: "unsupported-material-binding",
+					message: options.message,
+					pcode: null,
+					texture: null,
+				},
+			],
+		},
+		slice: options.slice,
+		triangles: options.triangles,
+	};
+}
+
+function filterTerrainTrianglesForPcodes(
+	triangles: readonly TerrainMeshTriangleFacts[],
+	quadPcodeByIndex: ReadonlyMap<number, number>,
+	pcodes: readonly number[],
+): readonly TerrainMeshTriangleFacts[] {
+	const pcodeSet = new Set(pcodes);
+	return triangles.filter((triangle) => {
+		const pcode = quadPcodeByIndex.get(triangle.quadIndex);
+		return pcode === undefined ? false : pcodeSet.has(pcode);
+	});
+}
+
+function collectTerrainLayerEntryTextureBindings(
+	entry: TerrainMaterialLayerEntry,
+): readonly TerrainMaterialLayerEntry["base"][] {
+	return [
+		entry.base,
+		...entry.overlays.flatMap((overlay) => [overlay.terrain, overlay.alpha]),
+		...entry.roads.flatMap((road) => [road.road, road.alpha]),
+	];
 }
 
 function createTerrainMaterialSlicePlan(
@@ -438,7 +867,7 @@ function createTerrainBakeTextureUses(
 	return [...textureUsesById.values()];
 }
 
-function createTerrainTextureUseId(
+export function createTerrainTextureUseId(
 	textureUseScopeId: string,
 	textureUse: TerrainTextureUseFacts,
 ): string {
@@ -455,6 +884,90 @@ function createTerrainTextureUseId(
 			.toString(16)
 			.padStart(8, "0"),
 	].join(":");
+}
+
+function createTerrainTextureDependencies(
+	drawUnits: readonly TerrainGeometryStaticDrawUnit[],
+	texturePlacementSnapshot: TexturePlacementSnapshot,
+): readonly TextureResourceDependencies[] {
+	return drawUnits.flatMap((drawUnit) => {
+		const roles = createTerrainTextureRoleDependencies(
+			drawUnit,
+			texturePlacementSnapshot,
+		);
+		if (roles.length === 0) {
+			return [];
+		}
+		return [{ resourceId: drawUnit.drawUnitId, roles }];
+	});
+}
+
+function createTerrainTextureRoleDependencies(
+	drawUnit: TerrainGeometryStaticDrawUnit,
+	texturePlacementSnapshot: TexturePlacementSnapshot,
+): readonly TextureResourceRoleDependency[] {
+	const itemIdsByPurpose = new Map<TextureUsagePurpose, Set<string>>();
+	for (const textureUseId of drawUnit.textureUseIds) {
+		const placement =
+			texturePlacementSnapshot.placementsByItemId.get(textureUseId);
+		if (!placement) {
+			throw new Error(
+				`Terrain draw unit ${drawUnit.drawUnitId} is missing pre-bake texture placement ${textureUseId}.`,
+			);
+		}
+		let itemIds = itemIdsByPurpose.get(placement.purpose);
+		if (!itemIds) {
+			itemIds = new Set<string>();
+			itemIdsByPurpose.set(placement.purpose, itemIds);
+		}
+		itemIds.add(textureUseId);
+	}
+
+	return Array.from(itemIdsByPurpose, ([purpose, itemIds]) => ({
+		itemIds: Array.from(itemIds).sort(),
+		purpose,
+	})).sort((left, right) => left.purpose.localeCompare(right.purpose));
+}
+
+function collectTerrainMaterialPlanTextureUseIds(
+	plan: TerrainMaterialLayerPlan,
+): readonly string[] {
+	const textureUseIds = new Set<string>();
+	for (const entry of plan.layerEntries) {
+		for (const binding of collectTerrainLayerEntryTextureBindings(entry)) {
+			if (binding.textureUseId) {
+				textureUseIds.add(binding.textureUseId);
+			}
+		}
+	}
+	for (const detailRole of plan.detailRoles) {
+		if (detailRole.texture.textureUseId) {
+			textureUseIds.add(detailRole.texture.textureUseId);
+		}
+	}
+	return Array.from(textureUseIds).sort();
+}
+
+function createTerrainPreparedTextureUseIndex(
+	textureUseScopeId: string,
+	textureUses: readonly TerrainTextureUseFacts[],
+): ReadonlyMap<string, TerrainTextureUseFacts> {
+	return new Map(
+		textureUses.flatMap((textureUse) =>
+			textureUse.preparedTextureUse
+				? [
+						[
+							createTerrainTextureUseId(textureUseScopeId, textureUse),
+							textureUse,
+						],
+					]
+				: [],
+		),
+	);
+}
+
+function createTerrainTextureAffinityKey(textureUseScopeId: string): string {
+	return ["terrain", textureUseScopeId].join(":");
 }
 
 function createSequentialIndices(

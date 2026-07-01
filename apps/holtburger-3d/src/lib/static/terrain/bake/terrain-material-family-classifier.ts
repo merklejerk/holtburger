@@ -6,9 +6,12 @@ import type {
 	TerrainGeometryStaticDrawUnit,
 } from "../../contracts";
 
-const MAX_LAYER_ENTRIES = 8;
-const MAX_OVERLAYS_PER_LAYER = 3;
-const MAX_ROADS_PER_LAYER = 2;
+export const MAX_TERRAIN_LAYER_ENTRIES_PER_DRAW = 8;
+export const MAX_TERRAIN_OVERLAYS_PER_LAYER = 3;
+export const MAX_TERRAIN_ROADS_PER_LAYER = 2;
+export const MAX_TERRAIN_COLOR_PAGES_PER_DRAW = 4;
+export const MAX_TERRAIN_MASK_PAGES_PER_DRAW = 4;
+export const MAX_TERRAIN_DETAIL_PAGES_PER_DRAW = 1;
 
 export type TerrainMaterialFamilyClassification = Pick<
 	TerrainGeometryStaticDrawUnit,
@@ -105,13 +108,13 @@ function findUnsupportedBindingReason(
 			plan.layerEntries[0] ?? null,
 		);
 	}
-	if (plan.layerEntries.length > MAX_LAYER_ENTRIES) {
+	if (plan.layerEntries.length > MAX_TERRAIN_LAYER_ENTRIES_PER_DRAW) {
 		return createUnsupportedBindingReason(
-			`Terrain material draw slice requires ${plan.layerEntries.length} layer entries; shader limit is ${MAX_LAYER_ENTRIES}.`,
+			`Terrain material draw slice requires ${plan.layerEntries.length} layer entries; shader limit is ${MAX_TERRAIN_LAYER_ENTRIES_PER_DRAW}.`,
 			plan.layerEntries[0] ?? null,
 		);
 	}
-	if (plan.detailRoles.length > 1) {
+	if (plan.detailRoles.length > MAX_TERRAIN_DETAIL_PAGES_PER_DRAW) {
 		return createUnsupportedBindingReason(
 			"Terrain material family supports at most one landscape detail binding.",
 			plan.layerEntries[0] ?? null,
@@ -129,15 +132,15 @@ function findUnsupportedBindingReason(
 	}
 
 	for (const entry of plan.layerEntries) {
-		if (entry.overlays.length > MAX_OVERLAYS_PER_LAYER) {
+		if (entry.overlays.length > MAX_TERRAIN_OVERLAYS_PER_LAYER) {
 			return createUnsupportedBindingReason(
-				`Terrain material entry requires ${entry.overlays.length} overlays; shader limit is ${MAX_OVERLAYS_PER_LAYER}.`,
+				`Terrain material entry requires ${entry.overlays.length} overlays; shader limit is ${MAX_TERRAIN_OVERLAYS_PER_LAYER}.`,
 				entry,
 			);
 		}
-		if (entry.roads.length > MAX_ROADS_PER_LAYER) {
+		if (entry.roads.length > MAX_TERRAIN_ROADS_PER_LAYER) {
 			return createUnsupportedBindingReason(
-				`Terrain material entry requires ${entry.roads.length} road masks; shader limit is ${MAX_ROADS_PER_LAYER}.`,
+				`Terrain material entry requires ${entry.roads.length} road masks; shader limit is ${MAX_TERRAIN_ROADS_PER_LAYER}.`,
 				entry,
 			);
 		}

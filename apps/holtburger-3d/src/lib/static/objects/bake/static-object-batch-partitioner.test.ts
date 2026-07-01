@@ -1578,6 +1578,19 @@ describe("static object batch partitioner", () => {
 				sourceTriangleCount: 2,
 			},
 		]);
+		const recipeDrawUnit = result.objectVisualInstallSet.directDrawUnits.find(
+			(candidate) => candidate.kind === "static-object-geometry",
+		);
+		expect(recipeDrawUnit).toMatchObject({
+			kind: "static-object-geometry",
+			triangleCount: 2,
+		});
+		if (!recipeDrawUnit || recipeDrawUnit.kind !== "static-object-geometry") {
+			throw new Error("Expected recipe static object geometry draw unit.");
+		}
+		expect(Array.from(recipeDrawUnit.positions.slice(0, 18))).toEqual([
+			1, 1, 1, 0, 1, 1, 1, 0, 1, 2, 1, 1, 0, 1, 1, 1, 0, 1,
+		]);
 	});
 });
 
@@ -1919,6 +1932,9 @@ function createPayload(options: {
 		instanceId: isGeneratedScenery ? "detail-0" : "building-0",
 		objectKind: isGeneratedScenery ? "generated-scenery" : "building",
 	});
+	const partPositions =
+		options.partPositions ?? createPartPositions(options.materials.length);
+	const partVertexCount = partPositions.length / 3;
 
 	return {
 		authoredDynamicPlacements: [],
@@ -2008,17 +2024,15 @@ function createPayload(options: {
 							paletteViews: options.paletteViews?.[index] ?? [],
 							slotIndex: index,
 						})),
-						normals: new Float32Array(options.materials.length * 9),
+						normals: new Float32Array(partPositions.length),
 						partIndex: 0,
 						physicsPolygonCount: 0,
-						positions:
-							options.partPositions ??
-							createPartPositions(options.materials.length),
+						positions: partPositions,
 						renderTriangleCount: options.materials.length,
 						scale: { x: 1, y: 1, z: 1 },
 						skippedPolygonCount: 0,
 						source: createSourceIdentity(),
-						texCoords: new Float32Array(options.materials.length * 6),
+						texCoords: new Float32Array(partVertexCount * 2),
 						triangles: options.materials.map((material, index) => ({
 							firstVertex: index * 3,
 							geometrySurfaceId: index,

@@ -2196,10 +2196,14 @@ Course correction during Phase 9M:
   `staticObjectRenderInstances`, and `staticObjectVisualResources` for diagnostics/tests. They are
   no longer the coordinator/runtime source of truth for object visual publication, but the hard
   cutover still needs to delete or narrow those result fields.
-- Spicy debt: static object recipe publication currently logs and skips recipe install publication
-  if generic object-visual baking rejects a geometry buffer. One fan-triangle fixture exposed a
-  source/sidecar geometry mismatch that must be resolved before deleting the legacy object draw-unit
-  arrays.
+- Resolved debt: the fan-triangle recipe publication mismatch was an invalid test-side vertex soup:
+  the fixture expanded positions for two triangles but left UVs sized for one triangle. The fixture
+  now keeps positions, normals, and texcoords in lockstep, and the fan-triangle test asserts the
+  recipe-first `objectVisualInstallSet` direct draw unit matches the legacy fan geometry.
+- Static object recipe publication now only logs and skips explicit missing geometry dependencies or
+  scopes that resolve zero visual part instances, such as unclassified env-cell static placements.
+  Generic object-visual baking/publication failures are allowed to fail loudly instead of producing
+  an empty install set that would hide hard-cutover bugs.
 - Spicy debt: structured-interior recipe publication also logs and skips when the recipe bundle
   produces no render parts for publication metadata, such as all-materials-missing cases. That keeps
   current bake behavior stable, but the hard cutover should make unsupported/missing materials skip

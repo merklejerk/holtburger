@@ -485,33 +485,32 @@ function createStaticObjectRecipePublication(options: {
 			textureDependencies: [],
 		};
 	}
-
-	try {
-		const publication = createStaticObjectPublicationMetadata({
-			owner: createLayerPeerRecordOwner(options.task),
-			payload: options.payload,
-		});
-		return createStaticObjectVisualRecipeInstallPublication({
-			bundle: expansion.resolution.bundle,
-			geometryBuffers: expansion.geometryBuffers,
-			metadata: publication.metadata,
-			renderPartIdPrefix: `${options.resourceIdPrefix}:object-visual`,
-			texturePlacementSnapshot: requireObjectVisualTexturePlacementSnapshot(
-				options.input.texturePlacementSnapshot,
-				"Static object visual recipe publication",
-			),
-			textureUseNamespace: "static-object-texture",
-			textureUseScopeId: options.resourceIdPrefix,
-		});
-	} catch (error) {
+	if (expansion.resolution.bundle.partInstances.length === 0) {
 		console.warn(
-			`Skipped static object visual recipe publication for ${options.task.ownerId}: ${error instanceof Error ? error.message : String(error)}.`,
+			`Skipped static object visual recipe publication for ${options.task.ownerId}; no visual part instances were resolved.`,
 		);
 		return {
 			installSet: createObjectVisualInstallSet({}),
 			textureDependencies: [],
 		};
 	}
+
+	const publication = createStaticObjectPublicationMetadata({
+		owner: createLayerPeerRecordOwner(options.task),
+		payload: options.payload,
+	});
+	return createStaticObjectVisualRecipeInstallPublication({
+		bundle: expansion.resolution.bundle,
+		geometryBuffers: expansion.geometryBuffers,
+		metadata: publication.metadata,
+		renderPartIdPrefix: `${options.resourceIdPrefix}:object-visual`,
+		texturePlacementSnapshot: requireObjectVisualTexturePlacementSnapshot(
+			options.input.texturePlacementSnapshot,
+			"Static object visual recipe publication",
+		),
+		textureUseNamespace: "static-object-texture",
+		textureUseScopeId: options.resourceIdPrefix,
+	});
 }
 
 function createStaticObjectDrawUnitTextureDependencies(

@@ -236,7 +236,7 @@ export class DeferredStaticBaker implements StaticBaker {
 		this.#pending.push(input);
 
 		return new Promise((resolve, reject) => {
-			this.#resolvers.set(input.staticBatchId, { reject, resolve });
+			this.#resolvers.set(input.bakeBatchId, { reject, resolve });
 		});
 	}
 
@@ -245,38 +245,38 @@ export class DeferredStaticBaker implements StaticBaker {
 	}
 
 	complete(
-		staticBatchId: string,
+		bakeBatchId: string,
 		result: Partial<
 			Omit<
 				StaticBakeBatchResult,
-				"domain" | "revision" | "staticBatchId" | "tasks"
+				"domain" | "revision" | "bakeBatchId" | "tasks"
 			>
 		> = {},
 	): void {
 		const input = this.#pending.find(
-			(candidate) => candidate.staticBatchId === staticBatchId,
+			(candidate) => candidate.bakeBatchId === bakeBatchId,
 		);
-		const resolver = input ? this.#resolvers.get(input.staticBatchId) : null;
+		const resolver = input ? this.#resolvers.get(input.bakeBatchId) : null;
 
 		if (!input || !resolver) {
-			throw new Error(`No pending bake batch exists for ${staticBatchId}.`);
+			throw new Error(`No pending bake batch exists for ${bakeBatchId}.`);
 		}
 
-		this.#resolvers.delete(input.staticBatchId);
+		this.#resolvers.delete(input.bakeBatchId);
 		resolver.resolve(createFakeStaticBakeResult(input, result));
 	}
 
-	fail(staticBatchId: string, error: Error): void {
+	fail(bakeBatchId: string, error: Error): void {
 		const input = this.#pending.find(
-			(candidate) => candidate.staticBatchId === staticBatchId,
+			(candidate) => candidate.bakeBatchId === bakeBatchId,
 		);
-		const resolver = input ? this.#resolvers.get(input.staticBatchId) : null;
+		const resolver = input ? this.#resolvers.get(input.bakeBatchId) : null;
 
 		if (!input || !resolver) {
-			throw new Error(`No pending bake batch exists for ${staticBatchId}.`);
+			throw new Error(`No pending bake batch exists for ${bakeBatchId}.`);
 		}
 
-		this.#resolvers.delete(input.staticBatchId);
+		this.#resolvers.delete(input.bakeBatchId);
 		resolver.reject(error);
 	}
 }
@@ -320,7 +320,7 @@ function createFakeStaticBakeResult(
 	result: Partial<
 		Omit<
 			StaticBakeBatchResult,
-			"domain" | "revision" | "staticBatchId" | "tasks"
+			"domain" | "revision" | "bakeBatchId" | "tasks"
 		>
 	> = {},
 ): StaticBakeBatchResult {
@@ -344,7 +344,7 @@ function createFakeStaticBakeResult(
 		staticSourceMappings: result.staticSourceMappings ?? [],
 		staticSpatialRecords: result.staticSpatialRecords ?? [],
 		staticVisibilityRecords: result.staticVisibilityRecords ?? [],
-		staticBatchId: input.staticBatchId,
+		bakeBatchId: input.bakeBatchId,
 		tasks: input.items.map((item) => item.task),
 		textureDependencies: result.textureDependencies ?? [],
 		textureUses: result.textureUses ?? [],

@@ -14,6 +14,10 @@ export async function handleStaticBakeWorkerRequest(
 	}
 
 	try {
+		postMessage({
+			kind: "static-batch-bake-started",
+			requestId: message.requestId,
+		});
 		const result = await baker.bake(message.input);
 		postMessage({
 			kind: "static-batch-baked",

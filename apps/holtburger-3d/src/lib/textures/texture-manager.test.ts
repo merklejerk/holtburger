@@ -7,11 +7,9 @@ import type {
 	PreparedAssetLease,
 } from "../assets/contracts";
 import type {
-	PreparedRgbaRenderSurfaceTextureUseIdentity,
 	PreparedRgbaRenderSurfaceTextureUsage,
 	StaticBakeTextureSamplingPolicy,
 	StaticCoordinatorCommitDelta,
-	StaticScopePayload,
 	VisualTextureDomain,
 } from "../static/contracts";
 import { AtlasTexturePacker, type TexturePacker } from "./packing/packer";
@@ -24,10 +22,17 @@ import {
 	TextureManager,
 	type DynamicTextureUseCommit,
 } from "./texture-manager";
-import { createStaticTexturePlacementIntent } from "./placement";
+import {
+	classifyTexturePlacementPool,
+	classifyTextureUsagePurpose,
+	createRuntimeAuthoredDynamicTexturePlacementBucketKey,
+	createStaticAuthoredDynamicTexturePlacementBucketKey,
+	createStaticTexturePlacementIntent,
+} from "./placement";
 
-const STABLE_TEXTURE_REF_ID =
-	"texture-ref:outdoor-terrain:batch-a:terrain-a:prepared-texture:06000010";
+const STATIC_TERRAIN_COLOR_BUCKET =
+	"texture-placement-bucket|outdoor-terrain|terrain|terrain-color|static-authored";
+const STABLE_TEXTURE_REF_ID = `texture-ref:outdoor-terrain:${STATIC_TERRAIN_COLOR_BUCKET}:terrain-a:prepared-texture:06000010`;
 
 describe("browser texture manager", () => {
 	it("turns bake-local texture uses into runtime-owned texture page placements", async () => {
@@ -164,7 +169,7 @@ describe("browser texture manager", () => {
 					addedDrawUnits: [],
 					removedResources: [],
 					revision: 1,
-					staticBatchId: "batch-a",
+					bakeBatchId: "batch-a",
 					textureUses,
 				}),
 			).rejects.toThrow(
@@ -186,7 +191,7 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 1,
-			staticBatchId: "batch-a",
+			bakeBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
 					drawUnitId: "terrain-a",
@@ -250,7 +255,7 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 1,
-			staticBatchId: "batch-a",
+			bakeBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
 					drawUnitId: "terrain-slice-a",
@@ -295,7 +300,7 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 1,
-			staticBatchId: "batch-a",
+			bakeBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
 					domain: "outdoor-buildings",
@@ -360,7 +365,7 @@ describe("browser texture manager", () => {
 				addedDrawUnits: [],
 				removedResources: [],
 				revision: 1,
-				staticBatchId: "batch-detail",
+				bakeBatchId: "batch-detail",
 				textureUses,
 			}),
 		).rejects.toThrow(
@@ -382,7 +387,7 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 1,
-			staticBatchId: "batch-a",
+			bakeBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
 					domain: "outdoor-buildings",
@@ -490,7 +495,7 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 1,
-			staticBatchId: "batch-a",
+			bakeBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
 					drawUnitId: "terrain-a",
@@ -542,7 +547,7 @@ describe("browser texture manager", () => {
 					addedDrawUnits: [],
 					removedResources: [],
 					revision: 1,
-				staticBatchId: "batch-a",
+				bakeBatchId: "batch-a",
 				textureUses: [
 					...Array.from({ length: 5 }, (_, index) =>
 						createTextureUseCommit({
@@ -590,7 +595,7 @@ describe("browser texture manager", () => {
 				addedDrawUnits: [],
 				removedResources: [],
 				revision: 1,
-			staticBatchId: "batch-a",
+			bakeBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
 					domain: "outdoor-buildings",
@@ -659,7 +664,7 @@ describe("browser texture manager", () => {
 			removedResources: [],
 			revision: 1,
 			envCellStaticObjectPlacementRecords: [],
-			staticBatchId: "batch-env",
+			bakeBatchId: "batch-env",
 			staticPortalGraphs: [],
 			staticPortalInteriorRecords: [],
 			staticSourceMappings: [],
@@ -670,7 +675,7 @@ describe("browser texture manager", () => {
 					domain: "env-cell-system",
 					drawUnitId: "structured-interior-a",
 					renderSurfaceId: 0x06000010,
-					staticBatchId: "batch-env",
+					bakeBatchId: "batch-env",
 					textureUseId: "structured-interior-a:base:0",
 					usage: "rgba-color",
 				}),
@@ -678,7 +683,7 @@ describe("browser texture manager", () => {
 					domain: "env-cell-system",
 					drawUnitId: "structured-interior-a",
 					renderSurfaceId: 0x06000020,
-					staticBatchId: "batch-env",
+					bakeBatchId: "batch-env",
 					textureUseId: "structured-interior-a:base:1",
 					usage: "rgba-color",
 				}),
@@ -761,7 +766,7 @@ describe("browser texture manager", () => {
 					addedDrawUnits: [],
 					removedResources: [],
 					revision: 1,
-					staticBatchId: "batch-a",
+					bakeBatchId: "batch-a",
 					textureUses,
 				}),
 			).rejects.toThrow(
@@ -781,7 +786,7 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [{ drawUnitId: "terrain-a", kind: "draw-unit" }],
 			revision: 2,
-			staticBatchId: "batch-a",
+			bakeBatchId: "batch-a",
 			textureUses: [],
 		});
 
@@ -806,7 +811,6 @@ describe("browser texture manager", () => {
 
 		const snapshot = await textureManager.placeTextureIntents({
 			intents: [createStaticTexturePlacementIntent(textureUse)],
-			placementBatchId: "pre-bake-batch",
 		});
 
 		const placement = snapshot.placementsByItemId.get(textureUse.textureUseId);
@@ -818,7 +822,7 @@ describe("browser texture manager", () => {
 			rect: [0, 0, 1, 1],
 			width: 256,
 		});
-		expect(placement?.pageId).toContain("pre-bake-batch");
+		expect(placement?.pageId).toContain("texture-placement-bucket");
 		expect(texturePacker.jobs).toHaveLength(1);
 		expect(textureManager.createPlacementReferenceSnapshot()).toEqual([
 			{
@@ -837,17 +841,57 @@ describe("browser texture manager", () => {
 				outputFormat: "rgba8",
 				textureUseId: textureUse.textureUseId,
 			}),
-			staticBatchId: "pre-bake-batch",
+			bakeBatchId: "pre-bake-batch",
 			textureUses: [
 				{
 					...textureUse,
-					staticBatchId: "pre-bake-batch",
+					bakeBatchId: "pre-bake-batch",
 				},
 			],
 		});
 		expect(update?.placements).toHaveLength(1);
 		expect(update?.placements[0]).toMatchObject({
-			textureRefId: expect.stringContaining("pre-bake-batch"),
+			textureRefId: expect.stringContaining("texture-placement-bucket"),
+			textureUseId: textureUse.textureUseId,
+		});
+	});
+
+	it("reuses static-authored non-terrain pre-bake placements during commit", async () => {
+		const assetService = new FixtureAssetService();
+		const texturePacker = new FixtureTexturePacker();
+		const textureManager = new TextureManager({ assetService, texturePacker });
+		const textureUse = createTextureUseCommit({
+			domain: "outdoor-generated-scenery",
+			drawUnitId: "generated-scenery-a",
+			outputFormat: "rgba8",
+			renderSurfaceId: 0x06000010,
+			textureUseId: "generated-scenery:prepared-texture:06000010",
+		});
+
+		await textureManager.placeTextureIntents({
+			intents: [createStaticTexturePlacementIntent(textureUse)],
+		});
+
+		const update = await textureManager.applyStaticCommitDelta({
+			...createCommitDelta({
+				domain: "outdoor-generated-scenery",
+				drawUnitId: "generated-scenery-a",
+				outputFormat: "rgba8",
+				bakeBatchId: "generated-scenery-pre-bake-batch",
+				textureUseId: textureUse.textureUseId,
+			}),
+			textureUses: [
+				{
+					...textureUse,
+					bakeBatchId: "generated-scenery-pre-bake-batch",
+				},
+			],
+		});
+
+		expect(texturePacker.jobs).toHaveLength(1);
+		expect(update?.placements).toHaveLength(1);
+		expect(update?.placements[0]).toMatchObject({
+			textureRefId: expect.stringContaining("texture-placement-bucket"),
 			textureUseId: textureUse.textureUseId,
 		});
 	});
@@ -876,7 +920,6 @@ describe("browser texture manager", () => {
 				createStaticTexturePlacementIntent(firstUse),
 				createStaticTexturePlacementIntent(secondUse),
 			],
-			placementBatchId: "pre-bake-batch",
 		});
 
 		expect(snapshot.placementsByItemId.has(firstUse.textureUseId)).toBe(true);
@@ -920,7 +963,6 @@ describe("browser texture manager", () => {
 		});
 		await textureManager.placeTextureIntents({
 			intents: [createStaticTexturePlacementIntent(textureUse)],
-			placementBatchId: "pre-bake-batch",
 		});
 
 		textureManager.pinTextureResourceDependencies([
@@ -971,7 +1013,7 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [{ drawUnitId: "terrain-a", kind: "draw-unit" }],
 			revision: 2,
-			staticBatchId: "batch-a",
+			bakeBatchId: "batch-a",
 			textureUses: [],
 		});
 
@@ -984,7 +1026,7 @@ describe("browser texture manager", () => {
 		]);
 	});
 
-	it("reclaims zero-reference ownerless pages only when new placement work arrives", async () => {
+	it("retains zero-reference ownerless pages during placement planning", async () => {
 		const textureManager = new TextureManager({
 			assetService: new FixtureAssetService(),
 			texturePacker: new FixtureTexturePacker(),
@@ -997,7 +1039,6 @@ describe("browser texture manager", () => {
 		});
 		await textureManager.placeTextureIntents({
 			intents: [createStaticTexturePlacementIntent(firstTextureUse)],
-			placementBatchId: "pre-bake-batch",
 		});
 		expect(textureManager.createPlacementReferenceSnapshot()).toHaveLength(1);
 
@@ -1009,14 +1050,76 @@ describe("browser texture manager", () => {
 		});
 		await textureManager.placeTextureIntents({
 			intents: [createStaticTexturePlacementIntent(secondTextureUse)],
-			placementBatchId: "pre-bake-batch",
 		});
 
-		expect(textureManager.createPlacementReferenceSnapshot()).toMatchObject([
+		expect(
+			textureManager
+				.createPlacementReferenceSnapshot()
+				.map((entry) => ({
+					activeReferenceCount: entry.activeReferenceCount,
+					itemId: entry.itemId,
+				}))
+				.sort((left, right) => left.itemId.localeCompare(right.itemId)),
+		).toEqual([
 			{
 				activeReferenceCount: 0,
 				itemId: "terrain-live:prepared-texture:06000020",
 			},
+			{
+				activeReferenceCount: 0,
+				itemId: "terrain-zombie:prepared-texture:06000010",
+			},
+		]);
+	});
+
+	it("retains existing ownerless placements reused by the current placement request", async () => {
+		const textureManager = new TextureManager({
+			assetService: new FixtureAssetService(),
+			texturePacker: new FixtureTexturePacker(),
+		});
+		const firstTextureUse = createTextureUseCommit({
+			drawUnitId: "terrain-a",
+			outputFormat: "rgba8",
+			renderSurfaceId: 0x06000010,
+			textureUseId: "terrain-existing:prepared-texture:06000010",
+		});
+		await textureManager.placeTextureIntents({
+			intents: [createStaticTexturePlacementIntent(firstTextureUse)],
+		});
+
+		const reusedTextureUse = createTextureUseCommit({
+			drawUnitId: "terrain-b",
+			outputFormat: "rgba8",
+			renderSurfaceId: 0x06000010,
+			textureUseId: "terrain-reused:prepared-texture:06000010",
+		});
+		const newTextureUse = createTextureUseCommit({
+			drawUnitId: "terrain-c",
+			outputFormat: "rgba8",
+			renderSurfaceId: 0x06000020,
+			textureUseId: "terrain-new:prepared-texture:06000020",
+		});
+
+		const snapshot = await textureManager.placeTextureIntents({
+			intents: [
+				createStaticTexturePlacementIntent(reusedTextureUse),
+				createStaticTexturePlacementIntent(newTextureUse),
+			],
+		});
+
+		expect([...snapshot.placementsByItemId.keys()].sort()).toEqual([
+			"terrain-new:prepared-texture:06000020",
+			"terrain-reused:prepared-texture:06000010",
+		]);
+		expect(
+			textureManager
+				.createPlacementReferenceSnapshot()
+				.map((record) => record.itemId)
+				.sort(),
+		).toEqual([
+			"terrain-existing:prepared-texture:06000010",
+			"terrain-new:prepared-texture:06000020",
+			"terrain-reused:prepared-texture:06000010",
 		]);
 	});
 
@@ -1033,7 +1136,6 @@ describe("browser texture manager", () => {
 		});
 		await textureManager.placeTextureIntents({
 			intents: [createStaticTexturePlacementIntent(activeTextureUse)],
-			placementBatchId: "pre-bake-batch",
 		});
 		textureManager.pinTextureResourceDependencies([
 			{
@@ -1055,7 +1157,6 @@ describe("browser texture manager", () => {
 		});
 		await textureManager.placeTextureIntents({
 			intents: [createStaticTexturePlacementIntent(newTextureUse)],
-			placementBatchId: "pre-bake-batch",
 		});
 
 		expect(
@@ -1113,7 +1214,7 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [{ drawUnitId: "terrain-a", kind: "draw-unit" }],
 			revision: 3,
-			staticBatchId: "batch-a",
+			bakeBatchId: "batch-a",
 			textureUses: [],
 		});
 		expect(removeFirstUpdate).toBeNull();
@@ -1122,7 +1223,7 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [{ drawUnitId: "terrain-b", kind: "draw-unit" }],
 			revision: 4,
-			staticBatchId: "batch-a",
+			bakeBatchId: "batch-a",
 			textureUses: [],
 		});
 		expect(removeSecondUpdate).toMatchObject({
@@ -1130,7 +1231,7 @@ describe("browser texture manager", () => {
 		});
 	});
 
-	it("duplicates compatible textures across independent static batches", async () => {
+	it("reuses compatible textures across independent static batches", async () => {
 		const assetService = new FixtureAssetService();
 		const textureManager = new TextureManager({
 			assetService,
@@ -1143,66 +1244,21 @@ describe("browser texture manager", () => {
 			createCommitDelta({
 				drawUnitId: "terrain-b",
 				outputFormat: "rgba8",
-				staticBatchId: "batch-b",
+				bakeBatchId: "batch-b",
 				textureUseId: "terrain-b:prepared-texture:06000010",
 			}),
 		);
 
-		expect(assetService.requestedKeys).toHaveLength(2);
+		expect(assetService.requestedKeys).toHaveLength(1);
 		expect(firstUpdate?.placements).toHaveLength(1);
 		expect(secondUpdate).toMatchObject({
 			textureBindings: [
 				{
 					owner: { drawUnitId: "terrain-b", kind: "draw-unit" },
-					textureRefId:
-						"texture-ref:outdoor-terrain:batch-b:terrain-b:prepared-texture:06000010",
+					textureRefId: STABLE_TEXTURE_REF_ID,
 				},
 			],
-			placements: [
-				{
-					textureRefId:
-						"texture-ref:outdoor-terrain:batch-b:terrain-b:prepared-texture:06000010",
-				},
-			],
-		});
-	});
-
-	it("creates scoped static atlas batch snapshots from typed payload texture uses", async () => {
-		const textureManager = new TextureManager({
-			assetService: new FixtureAssetService(),
-		});
-		const payload = createTerrainPayload([createTextureUse(0x06000010)]);
-
-		expect(
-			textureManager.createStaticAtlasBatchSnapshot([payload], "batch-a"),
-		).toEqual({
-			domain: "outdoor-terrain",
 			placements: [],
-			staticBatchId: "batch-a",
-			textureUses: [createTextureUse(0x06000010)],
-		});
-
-		await textureManager.applyStaticCommitDelta(
-			createCommitDelta({ outputFormat: "rgba8" }),
-		);
-
-		expect(
-			textureManager.createStaticAtlasBatchSnapshot([payload], "batch-a"),
-		).toMatchObject({
-			domain: "outdoor-terrain",
-			placements: [
-				{
-					texture: {
-						kind: "prepared-render-surface-texture-use",
-						renderSurface: {
-							kind: "render-surface",
-							renderSurfaceId: 0x06000010,
-						},
-					},
-				},
-			],
-			staticBatchId: "batch-a",
-			textureUses: [createTextureUse(0x06000010)],
 		});
 	});
 
@@ -1297,7 +1353,7 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 1,
-			staticBatchId: "batch-a",
+			bakeBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
 					domain: "outdoor-buildings",
@@ -1364,7 +1420,7 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 1,
-			staticBatchId: "batch-a",
+			bakeBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
 					domain: "outdoor-buildings",
@@ -1383,7 +1439,7 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 2,
-			staticBatchId: "batch-a",
+			bakeBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
 					domain: "outdoor-buildings",
@@ -1410,7 +1466,7 @@ describe("browser texture manager", () => {
 			]);
 	});
 
-	it("shares atlas entries across compatible static and dynamic visual owners", async () => {
+	it("separates compatible static and static-authored dynamic visual owners by lifetime bucket", async () => {
 		const texturePacker = new FixtureTexturePacker();
 		const textureManager = new TextureManager({
 			assetService: new FixtureAssetService(),
@@ -1421,7 +1477,7 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 1,
-			staticBatchId: "batch-a",
+			bakeBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
 					domain: "outdoor-generated-scenery",
@@ -1453,18 +1509,20 @@ describe("browser texture manager", () => {
 			],
 		});
 
-		expect(texturePacker.jobs).toHaveLength(1);
-		expect(dynamicUpdate?.placements).toEqual([]);
+		expect(texturePacker.jobs).toHaveLength(2);
+		expect(dynamicUpdate?.placements).toHaveLength(1);
 		expect(dynamicUpdate?.textureBindings).toMatchObject([
-				{
-					bindingKey: "dynamic-windmill-part-0:06000010",
-					owner: {
-						kind: "dynamic-visual-resource",
-						resourceId: "dynamic-windmill-part-0",
-					},
-					textureRefId: staticUpdate?.placements[0]?.textureRefId,
+			{
+				bindingKey: "dynamic-windmill-part-0:06000010",
+				owner: {
+					kind: "dynamic-visual-resource",
+					resourceId: "dynamic-windmill-part-0",
 				},
-			]);
+			},
+		]);
+		expect(dynamicUpdate?.textureBindings[0]?.textureRefId).not.toBe(
+			staticUpdate?.placements[0]?.textureRefId,
+		);
 	});
 
 	it("packs runtime object-material dynamic texture refs in their own visual domain", async () => {
@@ -1610,9 +1668,10 @@ describe("browser texture manager", () => {
 			textureUses: [],
 			});
 
-			expect(releaseUpdate?.removedTextureRefIds).toEqual([
-				"texture-page-ref:runtime-object-material:runtime-dynamic:runtime-spawn:1:sample:rgba-color|sampler:sample=rgba-color;filter=anisotropic-4x;mips=on;aniso=4:runtime-base-page:0",
-			]);
+			expect(releaseUpdate?.removedTextureRefIds).toHaveLength(1);
+			expect(releaseUpdate?.removedTextureRefIds[0]).toContain(
+				"runtime-authored-dynamic:runtime-dynamic:runtime-spawn:1",
+			);
 		expect(textureManager.createDiagnosticsReport().summary).toMatchObject({
 			texturePageCount: 0,
 		});
@@ -1628,7 +1687,7 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 1,
-			staticBatchId: "batch-a",
+			bakeBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
 					domain: "outdoor-generated-scenery",
@@ -1662,7 +1721,7 @@ describe("browser texture manager", () => {
 			textureUses: [],
 		});
 
-		expect(releaseUpdate).toBeNull();
+		expect(releaseUpdate?.removedTextureRefIds).toHaveLength(1);
 		expect(
 			textureManager.createDiagnosticsReport().summary.texturePageCount,
 		).toBe(1);
@@ -1710,7 +1769,7 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 1,
-			staticBatchId: "batch-a",
+			bakeBatchId: "batch-a",
 			textureUses: [
 				{
 					domain: "outdoor-buildings",
@@ -1727,7 +1786,7 @@ describe("browser texture manager", () => {
 						},
 						usage: "index8",
 					},
-					staticBatchId: "batch-a",
+					bakeBatchId: "batch-a",
 					textureUseId: "static-a:index",
 				},
 				{
@@ -1743,7 +1802,7 @@ describe("browser texture manager", () => {
 						},
 						usage: "palette-rgba",
 					},
-					staticBatchId: "batch-a",
+					bakeBatchId: "batch-a",
 					textureUseId: "static-a:palette",
 				},
 			],
@@ -1851,7 +1910,7 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 1,
-			staticBatchId: "batch-a",
+			bakeBatchId: "batch-a",
 			textureUses: [
 				{
 					domain: "outdoor-buildings",
@@ -1876,7 +1935,7 @@ describe("browser texture manager", () => {
 						],
 						usage: "palette-rgba",
 					},
-					staticBatchId: "batch-a",
+					bakeBatchId: "batch-a",
 					textureUseId: "static-a:palette",
 				},
 			],
@@ -2159,7 +2218,7 @@ function createCommitDelta(options: {
 	readonly outputFormat: "rgba8" | "dxt1";
 	readonly renderSurfaceId?: number;
 	readonly samplingPolicy?: StaticBakeTextureSamplingPolicy;
-	readonly staticBatchId?: string;
+	readonly bakeBatchId?: string;
 	readonly textureUseId?: string;
 	readonly usage?: PreparedRgbaRenderSurfaceTextureUsage;
 }): StaticCoordinatorCommitDelta {
@@ -2175,7 +2234,7 @@ function createCommitDelta(options: {
 		removedResources: [],
 		revision: 1,
 		envCellStaticObjectPlacementRecords: [],
-		staticBatchId: options.staticBatchId ?? "batch-a",
+		bakeBatchId: options.bakeBatchId ?? "batch-a",
 		staticPortalGraphs: [],
 		staticPortalInteriorRecords: [],
 		staticSourceMappings: [],
@@ -2188,7 +2247,7 @@ function createCommitDelta(options: {
 				outputFormat: options.outputFormat,
 				renderSurfaceId,
 				samplingPolicy: options.samplingPolicy,
-				staticBatchId: options.staticBatchId,
+				bakeBatchId: options.bakeBatchId,
 				textureUseId,
 				usage: options.usage,
 			}),
@@ -2202,7 +2261,7 @@ function createTextureUseCommit(options: {
 	readonly outputFormat?: "rgba8" | "dxt1";
 	readonly renderSurfaceId: number;
 	readonly samplingPolicy?: StaticBakeTextureSamplingPolicy;
-	readonly staticBatchId?: string;
+	readonly bakeBatchId?: string;
 	readonly textureUseId: string;
 	readonly usage?: PreparedRgbaRenderSurfaceTextureUsage;
 }): StaticCoordinatorCommitDelta["textureUses"][number] {
@@ -2218,7 +2277,7 @@ function createTextureUseCommit(options: {
 			usage: options.usage ?? "rgba-color",
 		},
 		samplingPolicy: options.samplingPolicy,
-		staticBatchId: options.staticBatchId ?? "batch-a",
+		bakeBatchId: options.bakeBatchId ?? "batch-a",
 		textureUseId: options.textureUseId,
 	};
 }
@@ -2232,103 +2291,38 @@ function createDynamicTextureUseCommit(options: {
 	readonly textureUseId: string;
 	readonly usage?: PreparedRgbaRenderSurfaceTextureUsage;
 }): DynamicTextureUseCommit {
+	const source: DynamicTextureUseCommit["source"] = {
+		kind: "prepared-render-surface-texture-use",
+		renderSurface: {
+			kind: "render-surface",
+			renderSurfaceId: options.renderSurfaceId,
+		},
+		usage: options.usage ?? "rgba-color",
+	};
+	const purpose = classifyTextureUsagePurpose(
+		source,
+		classifyTexturePlacementPool(options.textureDomain),
+	);
 	return {
-		textureBatchId: options.textureBatchId,
+		placementBucketKey:
+			options.textureDomain === "runtime-object-material"
+				? createRuntimeAuthoredDynamicTexturePlacementBucketKey({
+						entityId: options.textureBatchId,
+						purpose,
+					})
+				: createStaticAuthoredDynamicTexturePlacementBucketKey({
+						domain: options.textureDomain,
+						ownerId: options.textureBatchId,
+						purpose,
+					}),
 		textureDomain: options.textureDomain,
 		owner: {
 			kind: "dynamic-visual-resource",
 			resourceId: options.resourceId,
 		},
 		samplingPolicy: options.samplingPolicy,
-		source: {
-			kind: "prepared-render-surface-texture-use",
-			renderSurface: {
-				kind: "render-surface",
-				renderSurfaceId: options.renderSurfaceId,
-			},
-			usage: options.usage ?? "rgba-color",
-		},
+		source,
 		textureUseId: options.textureUseId,
-	};
-}
-
-function createTextureUse(
-	renderSurfaceId: number,
-): PreparedRgbaRenderSurfaceTextureUseIdentity {
-	return {
-		kind: "prepared-render-surface-texture-use",
-		renderSurface: {
-			kind: "render-surface",
-			renderSurfaceId,
-		},
-		usage: "rgba-color",
-	};
-}
-
-function createTerrainPayload(
-	textureUses: readonly PreparedRgbaRenderSurfaceTextureUseIdentity[],
-): StaticScopePayload {
-	return {
-		job: {
-			domain: "outdoor-terrain",
-			scope: {
-				kind: "landblock",
-				landblockId: 0xda55ffff,
-			},
-		},
-		scope: {
-			kind: "terrain",
-			landblock: {
-				kind: "landblock",
-				landblockId: 0xda55ffff,
-			},
-			mesh: {
-				bounds: null,
-				gridSize: 1,
-				maxHeight: 0,
-				minHeight: 0,
-				quadCount: 0,
-				quads: [],
-				tileSize: 24,
-				triangleCount: 0,
-				triangles: [],
-				vertexCount: 0,
-				vertices: [],
-			},
-			missingRefs: [],
-			regionProfile: {
-				detailTextureIds: [],
-				identity: {
-					kind: "region-render-profile",
-					regionNumber: 1,
-				},
-				sourceRevision: 1,
-			},
-			spatial: {
-				bounds: null,
-				coordinateSpace: "landblock-local",
-			},
-			terrainMaterial: {
-				identity: {
-					kind: "terrain-material",
-					regionNumber: 1,
-					terrainMaterialId: 1,
-				},
-				sourceRevision: 1,
-				surfaceTextureIds: [],
-			},
-			textureUses: textureUses.map((texture) => ({
-				preparedTextureUse: texture,
-				role: "terrain-base",
-				renderSurface: texture.renderSurface,
-				palette: null,
-				texture: {
-					kind: "surface-texture",
-					surfaceTextureId: texture.renderSurface.renderSurfaceId,
-				},
-			})),
-		},
-		sourceRevision: 1,
 	};
 }
 

@@ -5,6 +5,8 @@ import type {
 } from "../renderer/types";
 import type { AssetServiceSnapshot } from "../assets/contracts";
 import type {
+	StaticActiveBakeStage,
+	StaticBakerDiagnosticsSnapshot,
 	StaticDomain,
 	StaticMaterialUnrenderedBucket,
 	TerrainGeometryStaticDrawUnit,
@@ -167,6 +169,7 @@ export interface StaticCoordinatorDiagnosticsReport {
 	readonly timingSummary: StaticCoordinatorTimingSummaryDiagnostics;
 	readonly inFlightTasks?: readonly StaticCoordinatorTaskDiagnostics[];
 	readonly recentFailures?: readonly StaticCoordinatorTaskDiagnostics[];
+	readonly staticBaker?: StaticBakerDiagnosticsSnapshot;
 }
 
 interface StaticCoordinatorDiagnosticsSummary {
@@ -186,6 +189,12 @@ interface StaticCoordinatorTaskDiagnostics {
 	readonly domain: StaticDomain;
 	readonly scopeKey: string;
 	readonly phase: "requested" | "resolving" | "baking" | "failed";
+	readonly phaseAgeMs: number;
+	readonly phaseStartedAtMs: number;
+	readonly activeBakeBatchId: string | null;
+	readonly activeBakeStage: StaticActiveBakeStage | null;
+	readonly activeBakeStageAgeMs: number | null;
+	readonly activeBakeStageStartedAtMs: number | null;
 }
 
 export type StaticCoordinatorTaskReportDiagnostics =
@@ -253,6 +262,8 @@ interface StaticCoordinatorTimingSummaryDiagnostics {
 	readonly reportCount: number;
 	readonly totalItemCount: number;
 	readonly resolverMs: number;
+	readonly placementIntentMs: number;
+	readonly texturePlacementMs: number;
 	readonly attachmentMs: number;
 	readonly bakeMs: number;
 	readonly commitMs: number;
@@ -264,6 +275,8 @@ interface StaticCoordinatorTimingSampleDiagnostics {
 	readonly domain: StaticDomain;
 	readonly itemCount: number;
 	readonly resolverMs: number | null;
+	readonly placementIntentMs: number | null;
+	readonly texturePlacementMs: number | null;
 	readonly attachmentMs: number | null;
 	readonly bakeMs: number | null;
 	readonly commitMs: number | null;
@@ -347,7 +360,6 @@ interface StaticCommitInstallFailedWarning {
 	readonly commitId: string;
 	readonly kind: "static-commit-install-failed";
 	readonly revision: number;
-	readonly staticBatchId: string;
 	readonly message: string;
 	readonly error: unknown;
 }
@@ -439,7 +451,7 @@ class ConsoleRuntimeDiagnostics implements RuntimeDiagnostics {
 				return;
 			case "static-commit-install-failed":
 				console.error(
-					`static commit install ${event.commitId} failed; draw units from ${event.staticBatchId} were not added to renderer residency.`,
+					`static commit install ${event.commitId} failed at revision ${event.revision}; static resources were not added to renderer residency.`,
 					event.error,
 				);
 				return;

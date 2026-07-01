@@ -21,6 +21,37 @@ export type TexturePlacementPool =
 	| "static-authored-object"
 	| "terrain";
 
+/** Opaque atlas allocation namespace for compatible placement reuse. */
+export type TexturePlacementBucketKey = string & {
+	readonly __texturePlacementBucketKey: unique symbol;
+};
+
+/** Lifetime/churn policy that decides how broadly placement may be shared. */
+export type TexturePlacementBucketLifetime =
+	| {
+			/** Static-authored resources can share across source-ready bake closures. */
+			readonly kind: "static-authored";
+	  }
+	| {
+			/** Static-authored dynamic textures are retained with their static owner. */
+			readonly kind: "static-authored-dynamic";
+			readonly ownerId: string;
+	  }
+	| {
+			/** Runtime-authored dynamic textures are isolated to runtime lifetime. */
+			readonly kind: "runtime-authored-dynamic";
+			readonly entityId: string;
+	  };
+
+export interface TexturePlacementBucketInput {
+	/** Renderer texture domain that owns the compatible atlas registry. */
+	readonly domain: VisualTextureDomain;
+	/** Shader/page purpose that must remain compatible inside the bucket. */
+	readonly purpose: TextureUsagePurpose;
+	/** Allocation lifetime and reuse policy for this bucket. */
+	readonly lifetime: TexturePlacementBucketLifetime;
+}
+
 /**
  * Current prepared/material texture source carried losslessly through the
  * placement bridge. Placement identity is carried separately as `itemId`.
@@ -54,6 +85,10 @@ export interface TextureBindingRequirement {
 export interface TexturePlacementIntent {
 	/** Opaque placement item id used by the packer and baker placement snapshot. */
 	readonly itemId: string;
+	/** Atlas allocation namespace where compatible sources can be reused. */
+	readonly placementBucketKey: TexturePlacementBucketKey;
+	/** Exact renderer texture domain that must own the atlas registry entry. */
+	readonly domain: VisualTextureDomain;
 	/** Page compatibility and shader role for the item. */
 	readonly purpose: TextureUsagePurpose;
 	/** Atlas policy/churn pool the item belongs to. */
@@ -69,6 +104,9 @@ export interface TexturePlacement {
 	readonly itemId: string;
 	readonly purpose: TextureUsagePurpose;
 	readonly pool: TexturePlacementPool;
+	/** Renderer texture page identity used for shader binding legality. */
+	readonly textureRefId: string;
+	/** Packer-local page id retained for diagnostics. Not globally unique. */
 	readonly pageId: string;
 	readonly rect: readonly [number, number, number, number];
 	readonly width: number;
@@ -96,6 +134,8 @@ export interface TextureResourceRoleDependency {
 export interface TexturePlacementIntentOptions {
 	/** Caller-owned opaque clustering hint for the packer. */
 	readonly affinityKey?: string | null;
+	/** Explicit dynamic placement bucket when caller owns runtime/static lifetime. */
+	readonly placementBucketKey?: TexturePlacementBucketKey;
 }
 
 /**
@@ -115,11 +155,20 @@ export function createStaticTexturePlacementIntent(
 	options: TexturePlacementIntentOptions = {},
 ): TexturePlacementIntent {
 	const pool = classifyTexturePlacementPool(textureUse.domain);
+	const purpose = classifyTextureUsagePurpose(textureUse.source, pool);
 	return {
 		affinityKey: options.affinityKey ?? null,
+		domain: textureUse.domain,
 		itemId: textureUse.textureUseId,
+		placementBucketKey:
+			options.placementBucketKey ??
+			createTexturePlacementBucketKey({
+				domain: textureUse.domain,
+				lifetime: { kind: "static-authored" },
+				purpose,
+			}),
 		pool,
-		purpose: classifyTextureUsagePurpose(textureUse.source, pool),
+		purpose,
 		source: createTexturePlacementMaterialSource(
 			textureUse.source,
 			textureUse.samplingPolicy,
@@ -132,16 +181,72 @@ export function createDynamicTexturePlacementIntent(
 	options: TexturePlacementIntentOptions = {},
 ): TexturePlacementIntent {
 	const pool = classifyTexturePlacementPool(textureUse.textureDomain);
+	const purpose = classifyTextureUsagePurpose(textureUse.source, pool);
+	if (!options.placementBucketKey) {
+		throw new Error(
+			"Dynamic texture placement intents require an explicit placement bucket key.",
+		);
+	}
 	return {
 		affinityKey: options.affinityKey ?? null,
+		domain: textureUse.textureDomain,
 		itemId: textureUse.textureUseId,
+		placementBucketKey: options.placementBucketKey,
 		pool,
-		purpose: classifyTextureUsagePurpose(textureUse.source, pool),
+		purpose,
 		source: createTexturePlacementMaterialSource(
 			textureUse.source,
 			textureUse.samplingPolicy,
 		),
 	};
+}
+
+export function createStaticAuthoredTexturePlacementBucketKey(
+	intent: TexturePlacementIntent,
+): TexturePlacementBucketKey {
+	return intent.placementBucketKey;
+}
+
+export function createStaticAuthoredDynamicTexturePlacementBucketKey(input: {
+	readonly domain: Exclude<VisualTextureDomain, "runtime-object-material">;
+	readonly ownerId: string;
+	readonly purpose: TextureUsagePurpose;
+}): TexturePlacementBucketKey {
+	return createTexturePlacementBucketKey({
+		domain: input.domain,
+		lifetime: {
+			kind: "static-authored-dynamic",
+			ownerId: input.ownerId,
+		},
+		purpose: input.purpose,
+	});
+}
+
+export function createRuntimeAuthoredDynamicTexturePlacementBucketKey(input: {
+	readonly entityId: string;
+	readonly purpose: TextureUsagePurpose;
+}): TexturePlacementBucketKey {
+	return createTexturePlacementBucketKey({
+		domain: "runtime-object-material",
+		lifetime: {
+			entityId: input.entityId,
+			kind: "runtime-authored-dynamic",
+		},
+		purpose: input.purpose,
+	});
+}
+
+export function createTexturePlacementBucketKey(
+	input: TexturePlacementBucketInput,
+): TexturePlacementBucketKey {
+	const pool = classifyTexturePlacementPool(input.domain);
+	return [
+		"texture-placement-bucket",
+		input.domain,
+		pool,
+		input.purpose,
+		createTexturePlacementBucketLifetimeKey(input.lifetime),
+	].join("|") as TexturePlacementBucketKey;
 }
 
 export function classifyTexturePlacementPool(
@@ -204,4 +309,17 @@ function createTexturePlacementMaterialSource(
 		return { dataUse, kind: "material-texture-data-use" };
 	}
 	return { dataUse, kind: "material-texture-data-use", samplingPolicy };
+}
+
+function createTexturePlacementBucketLifetimeKey(
+	lifetime: TexturePlacementBucketLifetime,
+): string {
+	switch (lifetime.kind) {
+		case "static-authored":
+			return "static-authored";
+		case "static-authored-dynamic":
+			return `static-authored-dynamic:${lifetime.ownerId}`;
+		case "runtime-authored-dynamic":
+			return `runtime-authored-dynamic:${lifetime.entityId}`;
+	}
 }

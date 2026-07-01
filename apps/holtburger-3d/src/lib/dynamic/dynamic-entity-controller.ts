@@ -117,7 +117,6 @@ export class DynamicEntityController {
 
 	ingestStaticPlacements(
 		records: readonly StaticAuthoredDynamicPlacementRecord[],
-		textureBatchIdsByStaticLayerOwner: ReadonlyMap<string, string> = new Map(),
 	): void {
 		for (const record of records) {
 			if (
@@ -126,10 +125,7 @@ export class DynamicEntityController {
 			) {
 				continue;
 			}
-			const entityRecord = createDynamicEntityRecord(
-				record,
-				textureBatchIdsByStaticLayerOwner,
-			);
+			const entityRecord = createDynamicEntityRecord(record);
 			this.#store.upsert(entityRecord);
 		}
 	}
@@ -460,7 +456,6 @@ function createDynamicEntityRecord(
 				| "outdoor-static-object-dynamic-placement";
 		}
 	>,
-	textureBatchIdsByStaticLayerOwner: ReadonlyMap<string, string>,
 ): DynamicEntityRecord {
 	const layerOwnerId = createStaticLayerOwnerId(record.owner);
 	const sourceResidence =
@@ -480,10 +475,6 @@ function createDynamicEntityRecord(
 		layerOwnerId,
 		record,
 		sourceResidence,
-		textureBatchId:
-			textureBatchIdsByStaticLayerOwner.get(
-				createStaticTextureBatchLookupKey(record.owner),
-			) ?? `dynamic:${layerOwnerId}`,
 	});
 	const resourceState = createInitialPendingResourceState(presentation);
 
@@ -640,9 +631,8 @@ function createStaticAuthoredPresentation(options: {
 		}
 	>;
 	readonly sourceResidence: DynamicEntityResidence;
-	readonly textureBatchId: string;
 }): DynamicEntityPresentation {
-	const { id, layerOwnerId, record, sourceResidence, textureBatchId } = options;
+	const { id, layerOwnerId, record, sourceResidence } = options;
 	const animationSelection = {
 		animationId: record.placement.defaultAnimationId,
 		kind: "explicit" as const,
@@ -676,7 +666,6 @@ function createStaticAuthoredPresentation(options: {
 				kind: "static-layer-owner",
 				layerOwnerId,
 			},
-			textureBatchId,
 			textureDomain: createStaticAuthoredTextureDomain(record.owner),
 		},
 		visualSource: {
@@ -723,7 +712,6 @@ function createRuntimeSpawnPresentation(options: {
 			retentionPolicy: {
 				kind: "explicit-runtime-lifetime",
 			},
-			textureBatchId: `runtime-dynamic:${id}`,
 			textureDomain: createRuntimeSpawnTextureDomain(),
 		},
 		visualSource: {
@@ -1170,12 +1158,6 @@ function createDynamicEntityId(
 
 function createStaticLayerOwnerId(owner: StaticLayerPeerRecordOwner): string {
 	return owner.ownerId;
-}
-
-function createStaticTextureBatchLookupKey(
-	owner: StaticLayerPeerRecordOwner,
-): string {
-	return `${owner.domain}:${owner.ownerId}`;
 }
 
 function formatHex32(value: number): string {

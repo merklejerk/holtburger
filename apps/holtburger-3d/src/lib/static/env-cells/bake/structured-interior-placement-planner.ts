@@ -18,7 +18,6 @@ import { isRenderableStaticMaterialPlan } from "../../objects/bake/static-object
 
 export function createStructuredInteriorTexturePlacementIntents(input: {
 	readonly items: readonly StaticBakeBatchItem[];
-	readonly staticBatchId: string;
 }): readonly TexturePlacementIntent[] {
 	const intentsByItemId = new Map<string, TexturePlacementIntent>();
 
@@ -56,11 +55,10 @@ export function createStructuredInteriorTexturePlacementIntents(input: {
 					}
 					intentsByItemId.set(
 						requirement.placementItemId,
-						createStaticTexturePlacementIntent(
-							createStructuredInteriorPlanningTextureUse({
-								requirement,
-								staticBatchId: input.staticBatchId,
-							}),
+							createStaticTexturePlacementIntent(
+								createStructuredInteriorPlanningTextureUse({
+									requirement,
+								}),
 							{
 								affinityKey: createStructuredInteriorAffinityKey({
 									envCellId: envCell.identity.envCellId,
@@ -83,13 +81,11 @@ export function createStructuredInteriorTexturePlacementIntents(input: {
 
 function createStructuredInteriorPlanningTextureUse(options: {
 	readonly requirement: TextureBindingRequirement;
-	readonly staticBatchId: string;
 }): StaticBakeTextureUse {
 	const textureUse: StaticBakeTextureUse = {
 		domain: "env-cell-system",
 		owners: NO_STATIC_TEXTURE_USE_OWNERS,
 		source: options.requirement.source.dataUse,
-		staticBatchId: options.staticBatchId,
 		textureUseId: options.requirement.bindingKey,
 	};
 	if (!options.requirement.samplingPolicy) {

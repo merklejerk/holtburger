@@ -22,11 +22,7 @@ import {
 	MAX_TERRAIN_MASK_PAGES_PER_DRAW,
 } from "../renderer/types";
 import type {
-	StaticAtlasBatchSnapshot,
 	MaterialTextureDataUseIdentity,
-	PreparedRgbaRenderSurfaceTextureUseIdentity,
-	StaticScopePayload,
-	StaticTextureUseIdentity,
 	StaticBakeTextureUse,
 	StaticCoordinatorCommitDelta,
 	VisualTextureDomain,
@@ -53,7 +49,9 @@ import {
 import {
 	classifyTexturePlacementPool,
 	classifyTextureUsagePurpose,
+	createTexturePlacementBucketKey,
 	type TexturePlacement as PlannedTexturePlacement,
+	type TexturePlacementBucketKey,
 	type TexturePlacementIntent,
 	type TexturePlacementPool,
 	type TextureResourceDependencies,
@@ -78,7 +76,7 @@ interface TextureManagerOptions {
 
 export interface DynamicTextureUseCommit {
 	readonly textureDomain: VisualTextureDomain;
-	readonly textureBatchId: string;
+	readonly placementBucketKey: TexturePlacementBucketKey;
 	readonly owner: TextureBindingOwner & {
 		readonly kind: "dynamic-visual-resource";
 	};
@@ -93,7 +91,6 @@ export interface DynamicTextureUseCommitDelta {
 }
 
 export interface TextureIntentPlacementInput {
-	readonly placementBatchId: string;
 	readonly intents: readonly TexturePlacementIntent[];
 }
 
@@ -122,6 +119,7 @@ export class TextureManager {
 	>();
 	readonly #dependencyItemIdsByResourceId = new Map<string, Set<string>>();
 	#filteringMode: TextureFilteringMode;
+	#mutationQueue: Promise<void> = Promise.resolve();
 	#revision = 0;
 
 	constructor(options: TextureManagerOptions) {
@@ -238,61 +236,28 @@ export class TextureManager {
 		};
 	}
 
-	createStaticAtlasBatchSnapshot(
-		payloads: readonly StaticScopePayload[],
-		textureBatchId: string,
-	): StaticAtlasBatchSnapshot {
-		const firstPayload = payloads[0];
-		if (!firstPayload) {
-			throw new Error(
-				"Cannot create a static atlas batch snapshot without payloads.",
-			);
-		}
-		const textureUses = payloads.flatMap((payload) =>
-			collectPayloadTextureUses(payload),
-		);
-		const registry = this.#getRegistry(firstPayload.job.domain, textureBatchId);
-
-		return {
-			domain: firstPayload.job.domain,
-			placements: textureUses.flatMap((textureUse) => {
-				if (!isPreparedRgbaRenderSurfaceTextureUse(textureUse)) {
-					return [];
-				}
-
-				const entry = findRegistryEntryBySource(
-					registry,
-					textureUse,
-					createRuntimeTexturePagePolicy(textureUse),
-					firstPayload.job.domain,
-				);
-				return entry
-					? [
-							{
-								texture: textureUse,
-							},
-						]
-					: [];
-			}),
-			staticBatchId: textureBatchId,
-			textureUses,
-		};
-	}
-
 	async placeTextureIntents(
 		input: TextureIntentPlacementInput,
 	): Promise<TexturePlacementSnapshot> {
+		return this.#runTextureMutation(async () => {
 		const pendingPlacements = new Map<string, PendingTexturePlacement>();
+		const stagedPlacements: StagedTexturePlacement[] = [];
 		const textureUses = input.intents.map((intent) =>
-			createVisualTextureUseCommitFromIntent(intent, input.placementBatchId),
+			createVisualTextureUseCommitFromIntent(intent),
 		);
 
 		for (const textureUse of textureUses) {
-			await this.#stageTexturePlacement(textureUse, pendingPlacements);
+			stagedPlacements.push(
+				await this.#stageTexturePlacement(textureUse, pendingPlacements),
+			);
 		}
 
 		await this.#packPendingTexturePlacements(
 			uniquePendingTexturePlacements(pendingPlacements),
+			{
+				reclaimZeroReferencePages: false,
+				retainedTextureRefIds: collectStagedTextureRefIds(stagedPlacements),
+			},
 		);
 
 		const placementsByItemId = new Map<string, PlannedTexturePlacement>();
@@ -315,6 +280,7 @@ export class TextureManager {
 		}
 
 		return { placementsByItemId };
+		});
 	}
 
 	pinTextureResourceDependencies(
@@ -360,7 +326,8 @@ export class TextureManager {
 	async applyStaticCommitDelta(
 		delta: StaticCoordinatorCommitDelta,
 	): Promise<TexturePlacementUpdate | null> {
-		return this.#applyVisualTextureUseDelta({
+		return this.#runTextureMutation(() =>
+			this.#applyVisualTextureUseDelta({
 			removedOwners: [
 				...collectStaticDrawUnitResourceIds(delta.removedResources).map(
 					(drawUnitId): StaticTextureUseOwner => ({
@@ -376,16 +343,19 @@ export class TextureManager {
 				),
 			],
 			textureUses: delta.textureUses.map(createStaticVisualTextureUseCommit),
-		});
+			}),
+		);
 	}
 
 	async applyDynamicTextureUseDelta(
 		delta: DynamicTextureUseCommitDelta,
 	): Promise<TexturePlacementUpdate | null> {
-		return this.#applyVisualTextureUseDelta({
+		return this.#runTextureMutation(() =>
+			this.#applyVisualTextureUseDelta({
 			removedOwners: delta.removedOwners,
 			textureUses: delta.textureUses.map(createDynamicVisualTextureUseCommit),
-		});
+			}),
+		);
 	}
 
 	async #applyVisualTextureUseDelta(
@@ -439,6 +409,10 @@ export class TextureManager {
 
 		const packedPlacements = await this.#packPendingTexturePlacements(
 			uniquePendingTexturePlacements(pendingPlacements),
+			{
+				reclaimZeroReferencePages: false,
+				retainedTextureRefIds: new Set(),
+			},
 		);
 		placements.push(...packedPlacements);
 
@@ -509,6 +483,15 @@ export class TextureManager {
 			resolvedTexturePlacements,
 			revision: this.#revision,
 		};
+	}
+
+	#runTextureMutation<T>(operation: () => Promise<T>): Promise<T> {
+		const result = this.#mutationQueue.then(operation, operation);
+		this.#mutationQueue = result.then(
+			() => undefined,
+			() => undefined,
+		);
+		return result;
 	}
 
 	#removeOwnerTextureRefs(
@@ -661,9 +644,18 @@ export class TextureManager {
 
 	async #packPendingTexturePlacements(
 		pendingPlacements: readonly PendingTexturePlacement[],
+		options: {
+			readonly reclaimZeroReferencePages: boolean;
+			readonly retainedTextureRefIds: ReadonlySet<string>;
+		},
 	): Promise<readonly RuntimeTexturePlacement[]> {
 		const runtimePlacements: RuntimeTexturePlacement[] = [];
-		this.#reclaimZeroReferencePagesForPendingPlacements(pendingPlacements);
+		if (options.reclaimZeroReferencePages) {
+			this.#reclaimZeroReferencePagesForPendingPlacements(
+				pendingPlacements,
+				options.retainedTextureRefIds,
+			);
+		}
 		const plannedGroups = this.#planPendingTexturePackingGroups(
 			groupPendingTexturePlacements(pendingPlacements),
 		);
@@ -783,6 +775,7 @@ export class TextureManager {
 							group.domain,
 							group.textureBatchId,
 							group.pageClassKey,
+							placementRevision,
 							pageId,
 						);
 			runtimePlacements.push({
@@ -872,7 +865,7 @@ export class TextureManager {
 
 	#getRegistry(
 		domain: VisualTextureDomain,
-		textureBatchId: string,
+		textureBatchId: TexturePlacementBucketKey,
 	): VisualTextureBatchRegistry {
 		const registryKey = createVisualTextureBatchRegistryKey(
 			domain,
@@ -953,17 +946,22 @@ export class TextureManager {
 
 	#reclaimZeroReferencePagesForPendingPlacements(
 		pendingPlacements: readonly PendingTexturePlacement[],
+		retainedTextureRefIds: ReadonlySet<string>,
 	): void {
 		if (pendingPlacements.length === 0) {
 			return;
 		}
 
-		for (const textureRefId of this.#collectFullyFreeTextureRefIds()) {
+		for (const textureRefId of this.#collectFullyFreeTextureRefIds(
+			retainedTextureRefIds,
+		)) {
 			this.#deleteTextureRef(textureRefId);
 		}
 	}
 
-	#collectFullyFreeTextureRefIds(): readonly string[] {
+	#collectFullyFreeTextureRefIds(
+		retainedTextureRefIds: ReadonlySet<string>,
+	): readonly string[] {
 		const recordsByTextureRefId = new Map<string, TexturePlacementRecord[]>();
 		for (const record of this.#placementRecordsByItemId.values()) {
 			const records = recordsByTextureRefId.get(record.textureRefId) ?? [];
@@ -973,6 +971,9 @@ export class TextureManager {
 
 		const freeTextureRefIds: string[] = [];
 		for (const [textureRefId, records] of recordsByTextureRefId) {
+			if (retainedTextureRefIds.has(textureRefId)) {
+				continue;
+			}
 			if (records.some((record) => record.activeReferenceCount > 0)) {
 				continue;
 			}
@@ -1018,7 +1019,7 @@ interface VisualTextureUseCommit {
 	readonly owners: readonly TextureBindingOwner[];
 	readonly samplingPolicy?: StaticBakeTextureUse["samplingPolicy"];
 	readonly source: MaterialTextureDataUseIdentity;
-	readonly textureBatchId: string;
+	readonly textureBatchId: TexturePlacementBucketKey;
 	readonly textureUseId: string;
 }
 
@@ -1036,7 +1037,7 @@ type VisualTextureKey = string & {
 
 interface VisualTextureBatchRegistry {
 	readonly domain: VisualTextureDomain;
-	readonly textureBatchId: string;
+	readonly textureBatchId: TexturePlacementBucketKey;
 	revision: number;
 	readonly entries: Map<VisualTextureKey, VisualTextureRegistryEntry>;
 }
@@ -1047,7 +1048,7 @@ interface VisualTextureRegistryEntry {
 	filteringMode: TextureFilteringMode;
 	readonly format: RuntimeTexturePlacement["format"];
 	readonly itemId: string;
-	readonly textureBatchId: string;
+	readonly textureBatchId: TexturePlacementBucketKey;
 	readonly source: MaterialTextureDataUseIdentity;
 	readonly textureRefId: string;
 	readonly pageId: string;
@@ -1119,7 +1120,7 @@ interface PendingStagedTexturePlacement {
 
 interface PendingTexturePlacement {
 	readonly domain: VisualTextureDomain;
-	readonly textureBatchId: string;
+	readonly textureBatchId: TexturePlacementBucketKey;
 	readonly textureUse: VisualTextureUseCommit;
 	readonly textureKeys: Set<VisualTextureKey>;
 	/** Texture-use ids that share this staged source placement. */
@@ -1134,7 +1135,7 @@ interface PendingTexturePlacement {
 
 interface PendingTexturePlacementGroup {
 	readonly domain: VisualTextureDomain;
-	readonly textureBatchId: string;
+	readonly textureBatchId: TexturePlacementBucketKey;
 	readonly pageClassKey: string;
 	readonly pagePolicy: RuntimeTexturePagePolicy;
 	readonly samplerPolicy: RuntimeTextureSamplerPolicy;
@@ -1163,30 +1164,21 @@ interface ObjectMaterialRolePageSlotInput {
 	readonly source: MaterialTextureDataUseIdentity;
 }
 
-function collectPayloadTextureUses(
-	payload: StaticScopePayload,
-): readonly StaticTextureUseIdentity[] {
-	if (payload.scope.kind === "placeholder") {
-		return payload.scope.referencedTextureUses;
-	}
-	if (payload.scope.kind === "terrain") {
-		return payload.scope.textureUses.map(
-			(textureUse) => textureUse.preparedTextureUse ?? textureUse.texture,
-		);
-	}
-
-	return [];
-}
-
 function createStaticVisualTextureUseCommit(
 	textureUse: StaticBakeTextureUse,
 ): VisualTextureUseCommit {
+	const pool = classifyTexturePlacementPool(textureUse.domain);
+	const purpose = classifyTextureUsagePurpose(textureUse.source, pool);
 	return {
 		domain: textureUse.domain,
 		owners: textureUse.owners,
 		samplingPolicy: textureUse.samplingPolicy,
 		source: textureUse.source,
-		textureBatchId: textureUse.staticBatchId,
+		textureBatchId: createTexturePlacementBucketKey({
+			domain: textureUse.domain,
+			lifetime: { kind: "static-authored" },
+			purpose,
+		}),
 		textureUseId: textureUse.textureUseId,
 	};
 }
@@ -1199,40 +1191,22 @@ function createDynamicVisualTextureUseCommit(
 		owners: [textureUse.owner],
 		samplingPolicy: textureUse.samplingPolicy,
 		source: textureUse.source,
-		textureBatchId: textureUse.textureBatchId,
+		textureBatchId: textureUse.placementBucketKey,
 		textureUseId: textureUse.textureUseId,
 	};
 }
 
 function createVisualTextureUseCommitFromIntent(
 	intent: TexturePlacementIntent,
-	placementBatchId: string,
 ): VisualTextureUseCommit {
 	return {
-		domain: texturePlacementPoolDomain(intent.pool),
+		domain: intent.domain,
 		owners: [],
 		samplingPolicy: intent.source.samplingPolicy,
 		source: intent.source.dataUse,
-		textureBatchId: placementBatchId,
+		textureBatchId: intent.placementBucketKey,
 		textureUseId: intent.itemId,
 	};
-}
-
-function texturePlacementPoolDomain(
-	pool: TexturePlacementPool,
-): VisualTextureDomain {
-	switch (pool) {
-		case "terrain":
-			return "outdoor-terrain";
-		case "static-authored-object":
-			return "outdoor-buildings";
-		case "runtime-authored-object":
-			return "runtime-object-material";
-		default: {
-			const exhaustive: never = pool;
-			throw new Error(`Unsupported texture placement pool ${exhaustive}.`);
-		}
-	}
 }
 
 function toPlannedTexturePlacement(
@@ -1246,13 +1220,14 @@ function toPlannedTexturePlacement(
 		pool: entry.pool,
 		purpose: entry.purpose,
 		rect: entry.rect,
+		textureRefId: entry.textureRefId,
 		width: entry.textureWidth,
 	};
 }
 
 function createVisualTextureBatchRegistryKey(
 	domain: VisualTextureDomain,
-	textureBatchId: string,
+	textureBatchId: TexturePlacementBucketKey,
 ): VisualTextureBatchRegistryKey {
 	return [domain, textureBatchId].join(":") as VisualTextureBatchRegistryKey;
 }
@@ -1499,18 +1474,6 @@ function createTextureUseSamplingKey(
 	return `sampling:wrap=${samplingPolicy.wrapS},${samplingPolicy.wrapT}`;
 }
 
-function isPreparedRgbaRenderSurfaceTextureUse(
-	source: StaticTextureUseIdentity,
-): source is PreparedRgbaRenderSurfaceTextureUseIdentity {
-	return (
-		source.kind === "prepared-render-surface-texture-use" &&
-		(source.usage === "rgba-color" ||
-			source.usage === "rgba-detail" ||
-			source.usage === "rgba-mask" ||
-			source.usage === "rgba-raw")
-	);
-}
-
 function createTextureRefId(
 	domain: VisualTextureDomain,
 	textureBatchId: string,
@@ -1525,6 +1488,7 @@ function createTexturePageRefId(
 	domain: VisualTextureDomain,
 	textureBatchId: string,
 	pageClassKey: string,
+	placementRevision: number,
 	pageId: string,
 ): string {
 	return [
@@ -1532,6 +1496,7 @@ function createTexturePageRefId(
 		domain,
 		textureBatchId,
 		pageClassKey,
+		placementRevision.toString(),
 		pageId,
 	].join(":");
 }
@@ -1573,6 +1538,16 @@ function uniquePendingTexturePlacements(
 	placementsByKey: ReadonlyMap<string, PendingTexturePlacement>,
 ): readonly PendingTexturePlacement[] {
 	return [...new Set(placementsByKey.values())];
+}
+
+function collectStagedTextureRefIds(
+	stagedPlacements: readonly StagedTexturePlacement[],
+): ReadonlySet<string> {
+	return new Set(
+		stagedPlacements.flatMap((placement) =>
+			placement.entry ? [placement.entry.textureRefId] : [],
+		),
+	);
 }
 
 function addPendingPlacementOwners(

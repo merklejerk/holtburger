@@ -17,18 +17,12 @@ export function canAddObjectMaterialPageRequirementCandidate<
 	readonly placementSnapshot: TexturePlacementSnapshot;
 	readonly diagnosticSubject: string;
 }): boolean {
-	const materialEntryKeys = new Set(
-		options.currentSlice.map((candidate) => candidate.materialEntryKey),
-	);
-	if (materialEntryKeys.has(options.candidate.materialEntryKey)) {
-		return true;
-	}
-
 	const pageSets = createEmptyObjectPurposePageSets();
 	const candidatesByEntryKey = new Map<string, TCandidate>();
 	for (const candidate of [...options.currentSlice, options.candidate]) {
-		if (!candidatesByEntryKey.has(candidate.materialEntryKey)) {
-			candidatesByEntryKey.set(candidate.materialEntryKey, candidate);
+		const pageLegalityKey = createObjectMaterialPageLegalityKey(candidate);
+		if (!candidatesByEntryKey.has(pageLegalityKey)) {
+			candidatesByEntryKey.set(pageLegalityKey, candidate);
 		}
 	}
 
@@ -49,6 +43,21 @@ export function canAddObjectMaterialPageRequirementCandidate<
 	);
 }
 
+function createObjectMaterialPageLegalityKey(
+	candidate: ObjectMaterialPageRequirementCandidate,
+): string {
+	return [
+		candidate.materialEntryKey,
+		...candidate.textureRequirements.map((requirement) =>
+			[
+				requirement.purpose,
+				requirement.placementItemId,
+				requirement.sourceKey,
+			].join(":"),
+		),
+	].join("|");
+}
+
 function addObjectMaterialRequirementPlacementPages<
 	TCandidate extends ObjectMaterialPageRequirementCandidate,
 >(options: {
@@ -67,7 +76,7 @@ function addObjectMaterialRequirementPlacementPages<
 			);
 		}
 		getObjectPurposePageSet(options.pageSets, placement.purpose).add(
-			placement.pageId,
+			placement.textureRefId,
 		);
 	}
 }

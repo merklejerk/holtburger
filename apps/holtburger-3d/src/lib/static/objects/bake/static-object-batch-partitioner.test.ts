@@ -547,7 +547,7 @@ describe("static object batch partitioner", () => {
 				partitionCount: 1,
 				renderablePartitionCount: 1,
 				skippedPartitionCount: 0,
-				staticBatchId: "static-batch:objects",
+				bakeBatchId: "static-batch:objects",
 				uniqueSourceCount: 1,
 				uniqueSourcePartGeometryCount: 1,
 				uniqueSourceTriangleCount: 1,
@@ -960,7 +960,7 @@ describe("static object batch partitioner", () => {
 
 		const intents = createStaticObjectTexturePlacementIntents({
 			items: bakeInput.items,
-			staticBatchId: bakeInput.staticBatchId,
+			bakeBatchId: bakeInput.bakeBatchId,
 		});
 
 		expect(
@@ -1024,7 +1024,7 @@ describe("static object batch partitioner", () => {
 
 		const intents = createStaticObjectTexturePlacementIntents({
 			items: bakeInput.items,
-			staticBatchId: bakeInput.staticBatchId,
+			bakeBatchId: bakeInput.bakeBatchId,
 		});
 
 		expect(intents.map((intent) => intent.itemId)).toEqual([
@@ -1401,14 +1401,16 @@ describe("static object batch partitioner", () => {
 			(drawUnit) => drawUnit.kind === "static-object-geometry",
 		);
 
-		expect(drawUnits).toHaveLength(1);
+		expect(drawUnits).toHaveLength(2);
 		expect(
-			drawUnits[0]?.kind === "static-object-geometry"
-				? drawUnits[0].materialEntries.map(
-						(entry) => entry.primaryTextureWrapMode,
-					)
-				: [],
-		).toEqual(["clamp", "repeat"]);
+			drawUnits.map((drawUnit) =>
+				drawUnit.kind === "static-object-geometry"
+					? drawUnit.materialEntries.map(
+							(entry) => entry.primaryTextureWrapMode,
+						)
+					: [],
+			),
+		).toEqual([["clamp"], ["repeat"]]);
 		expect(
 			result.textureUses.map((textureUse) => ({
 				id: textureUse.textureUseId,
@@ -1434,20 +1436,32 @@ describe("static object batch partitioner", () => {
 			},
 		]);
 		expect(
-			drawUnits[0]?.kind === "static-object-geometry"
-				? Array.from(drawUnits[0].materialSlotIndices)
-				: [],
-		).toEqual([0, 0, 0, 1, 1, 1]);
+			drawUnits.map((drawUnit) =>
+				drawUnit.kind === "static-object-geometry"
+					? Array.from(drawUnit.materialSlotIndices)
+					: [],
+			),
+		).toEqual([
+			[0, 0, 0],
+			[0, 0, 0],
+		]);
 		expect(
-			drawUnits[0]?.kind === "static-object-geometry"
-				? Array.from(drawUnits[0].positions.slice(0, 18))
-				: [],
-		).toEqual([1, 1, 1, 0, 1, 1, 1, 0, 1, 2, 1, 1, 0, 1, 1, 1, 0, 1]);
+			drawUnits.map((drawUnit) =>
+				drawUnit.kind === "static-object-geometry"
+					? Array.from(drawUnit.positions.slice(0, 9))
+					: [],
+			),
+		).toEqual([
+			[1, 1, 1, 0, 1, 1, 1, 0, 1],
+			[2, 1, 1, 0, 1, 1, 1, 0, 1],
+		]);
 		expect(result.staticSourceMappings).toEqual([]);
 		expect(
-			drawUnits[0]?.kind === "static-object-geometry"
-				? drawUnits[0].sourceMappingCoverage
-				: [],
+			drawUnits.flatMap((drawUnit) =>
+				drawUnit.kind === "static-object-geometry"
+					? drawUnit.sourceMappingCoverage
+					: [],
+			),
 		).toMatchObject([
 			{
 				geometrySurfaceIds: [0],
@@ -1608,12 +1622,6 @@ function createEnvCellStaticBakeInput(): StaticBakeBatchInput {
 	};
 
 	return {
-		atlasSnapshot: {
-			domain: "env-cell-system",
-			placements: [],
-			staticBatchId: "static-batch:objects",
-			textureUses: [],
-		},
 		attachments: {
 			envCellCellStructureGeometry: [],
 			staticObjectSourceGeometry: payload.sourceAssets.flatMap((source) =>
@@ -1645,7 +1653,7 @@ function createEnvCellStaticBakeInput(): StaticBakeBatchInput {
 			},
 		],
 		revision: 1,
-		staticBatchId: "static-batch:objects",
+		bakeBatchId: "static-batch:objects",
 	};
 }
 
@@ -2005,12 +2013,6 @@ function createBakeInput(
 	};
 
 	return {
-		atlasSnapshot: {
-			domain,
-			placements: [],
-			staticBatchId: "static-batch:objects",
-			textureUses: [],
-		},
 		attachments: {
 			envCellCellStructureGeometry: [],
 			staticObjectSourceGeometry: payload.sourceAssets.flatMap((source) =>
@@ -2042,7 +2044,7 @@ function createBakeInput(
 			},
 		],
 		revision: 1,
-		staticBatchId: "static-batch:objects",
+		bakeBatchId: "static-batch:objects",
 	};
 }
 
@@ -2060,6 +2062,7 @@ function createTexturePlacementSnapshot(
 					pool: "static-authored-object" as const,
 					purpose: "object-base-color" as const,
 					rect: [0, 0, 64, 64] as const,
+					textureRefId: `texture-ref:${pageId}`,
 					width: 64,
 				},
 			]),

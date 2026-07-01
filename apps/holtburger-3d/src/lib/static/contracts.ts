@@ -907,17 +907,6 @@ interface EnvCellSystemResidencyBvhItemFacts {
 	readonly source: "env-cell-root" | "derived";
 }
 
-export interface StaticAtlasBatchSnapshot {
-	readonly staticBatchId: string;
-	readonly domain: StaticDomain;
-	readonly textureUses: readonly StaticTextureUseIdentity[];
-	readonly placements: readonly StaticAtlasBatchPlacementSnapshot[];
-}
-
-interface StaticAtlasBatchPlacementSnapshot {
-	readonly texture: PreparedRgbaRenderSurfaceTextureUseIdentity;
-}
-
 export interface StaticBakeTask {
 	/** Opaque async task id used for diagnostics and test harness completion. */
 	readonly taskId: string;
@@ -937,14 +926,13 @@ export interface StaticBakeBatchItem {
 }
 
 export interface StaticBakeBatchInput {
-	readonly atlasSnapshot: StaticAtlasBatchSnapshot;
 	readonly attachments: StaticBakeBatchAttachments;
 	readonly domain: StaticDomain;
 	readonly items: readonly StaticBakeBatchItem[];
 	/** Pre-bake texture placement assignments available to bakers that can partition by final pages. */
 	readonly texturePlacementSnapshot?: TexturePlacementSnapshot;
 	readonly revision: number;
-	readonly staticBatchId: string;
+	readonly bakeBatchId: string;
 }
 
 export interface StaticBakeBatchAttachments {
@@ -1361,7 +1349,7 @@ export interface StaticBakeAttachmentRequest {
 	readonly domain: StaticDomain;
 	readonly items: readonly StaticBakeBatchItem[];
 	readonly revision: number;
-	readonly staticBatchId: string;
+	readonly bakeBatchId: string;
 }
 
 export interface StaticBakeAttachmentProvider {
@@ -1371,7 +1359,7 @@ export interface StaticBakeAttachmentProvider {
 }
 
 export interface StaticBakeBatchResult {
-	readonly staticBatchId: string;
+	readonly bakeBatchId: string;
 	readonly domain: StaticDomain;
 	readonly revision: number;
 	readonly tasks: readonly StaticBakeTask[];
@@ -1395,7 +1383,7 @@ export interface StaticBakeBatchResult {
 
 export interface StaticObjectBakeDiagnostics {
 	readonly kind: "static-object-bake-diagnostics";
-	readonly staticBatchId: string;
+	readonly bakeBatchId: string;
 	readonly domain: Extract<
 		StaticDomain,
 		OutdoorStaticObjectDomain | "env-cell-system"
@@ -1858,7 +1846,6 @@ export interface TerrainMaterialFallbackReason {
 
 export interface StaticBakeTextureUse {
 	readonly textureUseId: string;
-	readonly staticBatchId: string;
 	readonly domain: StaticDomain;
 	readonly owners: readonly StaticTextureUseOwner[];
 	readonly source: MaterialTextureDataUseIdentity;
@@ -1871,6 +1858,26 @@ export interface StaticResolver {
 
 export interface StaticBaker {
 	bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult>;
+	createDiagnosticsSnapshot?(): StaticBakerDiagnosticsSnapshot;
+}
+
+export interface StaticBakerDiagnosticsSnapshot {
+	readonly kind: "static-baker";
+	readonly pendingJobs: readonly StaticBakerJobDiagnostics[];
+	readonly workerCount: number | null;
+}
+
+export interface StaticBakerJobDiagnostics {
+	readonly requestId: string;
+	readonly bakeBatchId: string;
+	readonly domain: StaticDomain;
+	readonly revision: number;
+	readonly itemCount: number;
+	readonly stage: "queued" | "executing";
+	readonly ageMs: number;
+	readonly stageAgeMs: number;
+	readonly queuedAtMs: number;
+	readonly stageStartedAtMs: number;
 }
 
 export interface StaticCoordinatorSnapshot {
@@ -1889,6 +1896,7 @@ export interface StaticCoordinatorSnapshot {
 	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
 	readonly staticObjectBakeDiagnostics: readonly StaticObjectBakeDiagnostics[];
 	readonly recentTiming: readonly StaticCoordinatorTimingDiagnostics[];
+	readonly staticBakerDiagnostics: StaticBakerDiagnosticsSnapshot | null;
 }
 
 export interface StaticCoordinatorOverviewSnapshot {
@@ -1910,11 +1918,13 @@ export interface StaticCoordinatorOverviewSnapshot {
 
 export interface StaticCoordinatorTimingDiagnostics {
 	readonly kind: "static-coordinator-timing";
-	readonly staticBatchId: string;
+	readonly bakeBatchId: string;
 	readonly domain: StaticDomain;
 	readonly revision: number;
 	readonly itemCount: number;
 	readonly resolverMs: number | null;
+	readonly placementIntentMs: number | null;
+	readonly texturePlacementMs: number | null;
 	readonly attachmentMs: number | null;
 	readonly bakeMs: number | null;
 	readonly commitMs: number | null;
@@ -1923,7 +1933,6 @@ export interface StaticCoordinatorTimingDiagnostics {
 export interface StaticCoordinatorCommitDelta {
 	/** Stable identity for this exact static commit. */
 	readonly commitId: string;
-	readonly staticBatchId: string;
 	readonly addedDrawUnits: readonly StaticDrawUnit[];
 	readonly addedPortalApertureResources: readonly StaticPortalApertureResource[];
 	readonly removedResources: readonly StaticResourceKey[];
@@ -2035,6 +2044,13 @@ type StaticLayerTaskPhase =
 	| "failed"
 	| "canceled";
 
+export type StaticActiveBakeStage =
+	| "source-ready-handler"
+	| "attachments"
+	| "static-baker"
+	| "dynamic-visual-baker"
+	| "commit-synthesis";
+
 export interface StaticLayerTaskStatus {
 	/** Opaque task identifier for diagnostics; layer owner identity remains the semantic key. */
 	readonly taskId: string;
@@ -2046,6 +2062,18 @@ export interface StaticLayerTaskStatus {
 	readonly domain: StaticDomain;
 	readonly scopeKey: string;
 	readonly phase: StaticLayerTaskPhase;
+	/** Monotonic timestamp, in milliseconds, when the task entered `phase`. */
+	readonly phaseStartedAtMs: number;
+	/** Elapsed milliseconds spent in the current phase when this snapshot was created. */
+	readonly phaseAgeMs: number;
+	/** Coordinator bake batch currently owning this task, if the task is baking. */
+	readonly activeBakeBatchId: string | null;
+	/** Current coordinator-side bake stage, for diagnosing long-running active bake closures. */
+	readonly activeBakeStage: StaticActiveBakeStage | null;
+	/** Monotonic timestamp, in milliseconds, when the active bake stage began. */
+	readonly activeBakeStageStartedAtMs: number | null;
+	/** Elapsed milliseconds spent in the active bake stage when this snapshot was created. */
+	readonly activeBakeStageAgeMs: number | null;
 }
 
 export interface EnvCellSystemPayloadSummary {

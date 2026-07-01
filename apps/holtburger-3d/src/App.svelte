@@ -1,9 +1,12 @@
 <script lang="ts">
 	import BrowserDisplay from "./pages/BrowserDisplay.svelte";
+	import BrowserPipelineHarness from "./pages/BrowserPipelineHarness.svelte";
 
 	const currentRoute =
 		typeof window === "undefined" ? "/browser" : window.location.pathname;
 	const isBrowserRoute = currentRoute === "/" || currentRoute === "/browser";
+	const isBrowserPipelineHarnessRoute =
+		currentRoute === "/harness/browser-pipeline";
 </script>
 
 <svelte:head>
@@ -15,7 +18,9 @@
 </svelte:head>
 
 <main class="viewer-shell">
-	{#if !isBrowserRoute}
+	{#if isBrowserPipelineHarnessRoute}
+		<BrowserPipelineHarness />
+	{:else if !isBrowserRoute}
 		<section class="viewer-unavailable">
 			<p class="kicker">Route Reserved</p>
 			<h1>Client mode is not implemented yet.</h1>

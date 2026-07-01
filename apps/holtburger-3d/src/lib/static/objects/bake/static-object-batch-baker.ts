@@ -114,7 +114,7 @@ export function bakeStaticObjectBatch(
 		portalApertureResources: [],
 		revision: input.revision,
 		envCellStaticObjectPlacementRecords: [],
-		staticBatchId: input.staticBatchId,
+		bakeBatchId: input.bakeBatchId,
 		staticPortalGraphs: [],
 		staticPortalInteriorRecords: [],
 		staticSourceMappings: itemResults.flatMap(
@@ -274,7 +274,7 @@ function bakeStaticObjectBatchItem(
 		payload: scope,
 		resourceIdPrefix,
 		sourceIndex,
-		staticBatchId: input.staticBatchId,
+		bakeBatchId: input.bakeBatchId,
 		task: item.task,
 	});
 	const bakedPartitions = renderablePartitions.filter(
@@ -327,6 +327,12 @@ function bakeStaticObjectBatchItem(
 		spatialRecord:
 			spatialRecordBySliceId.get(bakedPartitions[index]?.sliceId ?? "") ?? null,
 	}));
+	const textureUses = createStaticObjectBakeTextureUses({
+		partitions: bakedPartitions,
+		resourceIdPrefix,
+		bakeBatchId: input.bakeBatchId,
+		task: item.task,
+	}).concat(instancedOutput.textureUses);
 
 	return {
 		drawUnits: bakedDrawUnits,
@@ -350,12 +356,7 @@ function bakeStaticObjectBatchItem(
 		staticObjectVisualResources: instancedOutput.resources,
 		textureDependencies:
 			createStaticObjectDrawUnitTextureDependencies(bakedDrawUnits),
-		textureUses: createStaticObjectBakeTextureUses({
-			partitions: bakedPartitions,
-			resourceIdPrefix,
-			staticBatchId: input.staticBatchId,
-			task: item.task,
-		}).concat(instancedOutput.textureUses),
+		textureUses,
 		task: item.task,
 	};
 }
@@ -504,7 +505,7 @@ function createStaticObjectBakeDiagnostics(options: {
 		skippedPartitionCount:
 			options.partitionPlan.partitions.length -
 			options.renderablePartitionCount,
-		staticBatchId: options.input.staticBatchId,
+		bakeBatchId: options.input.bakeBatchId,
 		uniqueSourceCount: uniqueSourceKeys.size,
 		uniqueSourcePartGeometryCount: uniqueSourcePartGeometryKeys.size,
 		uniqueSourceTriangleCount,
@@ -730,7 +731,7 @@ function createStaticObjectInstancedOutput(options: {
 	readonly payload: StaticObjectBatchPayload;
 	readonly resourceIdPrefix: string;
 	readonly sourceIndex: StaticObjectBakeSourceIndex;
-	readonly staticBatchId: string;
+	readonly bakeBatchId: string;
 	readonly task: StaticBakeTask;
 }): {
 	readonly cutoverPartitionSliceIds: ReadonlySet<string>;
@@ -937,7 +938,7 @@ function createStaticObjectInstancedOutput(options: {
 					}),
 				domain: options.payload.domain,
 				isStageableDataUse: isCurrentlyStageableStaticObjectDataUse,
-				staticBatchId: options.staticBatchId,
+				bakeBatchId: options.bakeBatchId,
 				textureUseSpecs: [
 					{
 						owners: [
@@ -1770,7 +1771,7 @@ function bakeStaticObjectPartitionGeometry(
 function createStaticObjectBakeTextureUses(options: {
 	readonly task: StaticBakeTask;
 	readonly resourceIdPrefix: string;
-	readonly staticBatchId: string;
+	readonly bakeBatchId: string;
 	readonly partitions: readonly StaticObjectBatchPartition[];
 }): readonly StaticBakeTextureUse[] {
 	return createStaticMaterialTextureUses({
@@ -1782,7 +1783,7 @@ function createStaticObjectBakeTextureUses(options: {
 			}),
 		domain: options.task.domain,
 		isStageableDataUse: isCurrentlyStageableStaticObjectDataUse,
-		staticBatchId: options.staticBatchId,
+		bakeBatchId: options.bakeBatchId,
 		textureUseSpecs: options.partitions.flatMap((partition) => {
 			if (partition.renderCoverage !== "classified-render-candidate") {
 				return [];

@@ -40,7 +40,12 @@ import {
 	getStaticObjectCanonicalGeometryIdentity,
 } from "../static/objects/static-object-source-assets";
 import {
+	classifyTexturePlacementPool,
+	classifyTextureUsagePurpose,
 	createDynamicTexturePlacementIntent,
+	createRuntimeAuthoredDynamicTexturePlacementBucketKey,
+	createStaticAuthoredDynamicTexturePlacementBucketKey,
+	type TexturePlacementBucketKey,
 	type TextureResourceDependencies,
 	type TextureResourceRoleDependency,
 	type TextureUsagePurpose,
@@ -238,23 +243,63 @@ export function createDynamicVisualTexturePlanning(
 	});
 	return {
 		entityId: recipe.entityId,
-		placementIntents: textureRequirements.map((requirement) =>
-			createDynamicTexturePlacementIntent(
+		placementIntents: textureRequirements.map((requirement) => {
+			const textureDomain =
+				recipe.visual.materialPolicy.detailRolePolicy.kind ===
+				"runtime-authored-none"
+					? "runtime-object-material"
+					: recipe.visual.materialPolicy.detailRolePolicy.domain;
+			return createDynamicTexturePlacementIntent(
 				{
 					samplingPolicy: requirement.samplingPolicy,
 					source: requirement.dataUse,
-					textureDomain:
-						recipe.visual.materialPolicy.detailRolePolicy.kind ===
-						"runtime-authored-none"
-							? "runtime-object-material"
-							: recipe.visual.materialPolicy.detailRolePolicy.domain,
+					textureDomain,
 					textureUseId: requirement.textureUseId,
 				},
-				{ affinityKey: createDynamicTextureAffinityKey(recipe) },
-			),
-		),
+				{
+					affinityKey: createDynamicTextureAffinityKey(recipe),
+					placementBucketKey: createDynamicTexturePlacementBucketKey({
+						purpose: classifyTextureUsagePurpose(
+							requirement.dataUse,
+							classifyTexturePlacementPool(textureDomain),
+						),
+						recipe,
+						textureDomain,
+					}),
+				},
+			);
+		}),
 		textureRequirements,
 	};
+}
+
+function createDynamicTexturePlacementBucketKey(options: {
+	readonly purpose: TextureUsagePurpose;
+	readonly recipe: DynamicVisualBakeInput["recipes"][number];
+	readonly textureDomain:
+		| "runtime-object-material"
+		| Exclude<
+				DynamicVisualBakeInput["recipes"][number]["visual"]["materialPolicy"]["detailRolePolicy"],
+				{ readonly kind: "runtime-authored-none" }
+		  >["domain"];
+}): TexturePlacementBucketKey {
+	const { purpose, recipe, textureDomain } = options;
+	if (textureDomain === "runtime-object-material") {
+		return createRuntimeAuthoredDynamicTexturePlacementBucketKey({
+			entityId: recipe.entityId,
+			purpose,
+		});
+	}
+	if (recipe.source.kind !== "static-authored") {
+		throw new Error(
+			`Dynamic recipe ${recipe.entityId} cannot use static texture domain ${textureDomain} without static source ownership.`,
+		);
+	}
+	return createStaticAuthoredDynamicTexturePlacementBucketKey({
+		domain: textureDomain,
+		ownerId: recipe.source.owner.ownerId,
+		purpose,
+	});
 }
 
 function createSourceGeometryIndex(

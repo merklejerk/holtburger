@@ -8,7 +8,10 @@ import {
 	classifyTexturePlacementPool,
 	classifyTextureUsagePurpose,
 	createDynamicTexturePlacementIntent,
+	createRuntimeAuthoredDynamicTexturePlacementBucketKey,
+	createStaticAuthoredDynamicTexturePlacementBucketKey,
 	createStaticTexturePlacementIntent,
+	createStaticAuthoredTexturePlacementBucketKey,
 	type DynamicTexturePlacementUse,
 } from "./placement";
 
@@ -63,6 +66,7 @@ describe("texture placement vocabulary bridge", () => {
 		});
 
 		expect(createStaticTexturePlacementIntent(textureUse)).toMatchObject({
+			domain: "outdoor-terrain",
 			itemId: "terrain:mask:06000010",
 			pool: "terrain",
 			purpose: "terrain-mask",
@@ -76,8 +80,24 @@ describe("texture placement vocabulary bridge", () => {
 			textureUseId: "static-authored-dynamic:detail:06000020",
 		});
 
-		expect(createDynamicTexturePlacementIntent(textureUse)).toMatchObject({
+		expect(
+			createDynamicTexturePlacementIntent(textureUse, {
+				placementBucketKey:
+					createStaticAuthoredDynamicTexturePlacementBucketKey({
+						domain: "outdoor-generated-scenery",
+						ownerId: "static-layer-owner:generated:0xda55ffff",
+						purpose: "object-detail",
+					}),
+			}),
+		).toMatchObject({
+			domain: "outdoor-generated-scenery",
 			itemId: "static-authored-dynamic:detail:06000020",
+			placementBucketKey:
+				createStaticAuthoredDynamicTexturePlacementBucketKey({
+					domain: "outdoor-generated-scenery",
+					ownerId: "static-layer-owner:generated:0xda55ffff",
+					purpose: "object-detail",
+				}),
 			pool: "static-authored-object",
 			purpose: "object-detail",
 		});
@@ -90,11 +110,37 @@ describe("texture placement vocabulary bridge", () => {
 			textureUseId: "runtime-authored-dynamic:index:06000030",
 		});
 
-		expect(createDynamicTexturePlacementIntent(textureUse)).toMatchObject({
+		expect(
+			createDynamicTexturePlacementIntent(textureUse, {
+				placementBucketKey:
+					createRuntimeAuthoredDynamicTexturePlacementBucketKey({
+						entityId: "runtime-spawn:1",
+						purpose: "object-index",
+					}),
+			}),
+		).toMatchObject({
+			domain: "runtime-object-material",
 			itemId: "runtime-authored-dynamic:index:06000030",
+			placementBucketKey:
+				createRuntimeAuthoredDynamicTexturePlacementBucketKey({
+					entityId: "runtime-spawn:1",
+					purpose: "object-index",
+				}),
 			pool: "runtime-authored-object",
 			purpose: "object-index",
 		});
+	});
+
+	it("requires dynamic placement intents to declare their bucket lifetime", () => {
+		const textureUse = createDynamicTextureUse({
+			source: createPreparedDataUse("rgba-color"),
+			textureDomain: "runtime-object-material",
+			textureUseId: "runtime-authored-dynamic:base:06000031",
+		});
+
+		expect(() => createDynamicTexturePlacementIntent(textureUse)).toThrow(
+			"Dynamic texture placement intents require an explicit placement bucket key.",
+		);
 	});
 
 	it("passes affinity keys through without interpretation", () => {
@@ -112,6 +158,91 @@ describe("texture placement vocabulary bridge", () => {
 			affinityKey: "setup-model/020003e5",
 			itemId: "building:base:06000040",
 		});
+	});
+
+	it("derives one static-authored bucket across different source-ready closures", () => {
+		const source = createPreparedDataUse("rgba-color");
+		const firstIntent = createStaticTexturePlacementIntent(
+			createStaticTextureUse({
+				domain: "outdoor-generated-scenery",
+				source,
+				bakeBatchId: "static-batch:first-closure",
+				textureUseId: "scenery:base:06000050:first",
+			}),
+			{ affinityKey: "setup-model/020003e5" },
+		);
+		const secondIntent = createStaticTexturePlacementIntent(
+			createStaticTextureUse({
+				domain: "outdoor-generated-scenery",
+				source,
+				bakeBatchId: "static-batch:second-closure",
+				textureUseId: "scenery:base:06000050:second",
+			}),
+			{ affinityKey: "setup-model/020003e5:alternate" },
+		);
+
+		expect(createStaticAuthoredTexturePlacementBucketKey(firstIntent)).toBe(
+			createStaticAuthoredTexturePlacementBucketKey(secondIntent),
+		);
+	});
+
+	it("keeps static-authored buckets separated by shader purpose", () => {
+		const baseColorIntent = createStaticTexturePlacementIntent(
+			createStaticTextureUse({
+				domain: "outdoor-buildings",
+				source: createPreparedDataUse("rgba-color"),
+				textureUseId: "building:base:06000060",
+			}),
+		);
+		const detailIntent = createStaticTexturePlacementIntent(
+			createStaticTextureUse({
+				domain: "outdoor-buildings",
+				source: createPreparedDataUse("rgba-detail"),
+				textureUseId: "building:detail:06000061",
+			}),
+		);
+
+		expect(
+			createStaticAuthoredTexturePlacementBucketKey(baseColorIntent),
+		).not.toBe(createStaticAuthoredTexturePlacementBucketKey(detailIntent));
+	});
+
+	it("derives static-authored dynamic buckets from static owner lifetime", () => {
+		const firstBucket = createStaticAuthoredDynamicTexturePlacementBucketKey({
+			domain: "outdoor-generated-scenery",
+			ownerId: "static-layer-owner:generated:0xda55ffff",
+			purpose: "object-base-color",
+		});
+		const secondBucket = createStaticAuthoredDynamicTexturePlacementBucketKey({
+			domain: "outdoor-generated-scenery",
+			ownerId: "static-layer-owner:generated:0xda55ffff",
+			purpose: "object-base-color",
+		});
+		const otherOwnerBucket =
+			createStaticAuthoredDynamicTexturePlacementBucketKey({
+				domain: "outdoor-generated-scenery",
+				ownerId: "static-layer-owner:generated:0xda56ffff",
+				purpose: "object-base-color",
+			});
+
+		expect(firstBucket).toBe(secondBucket);
+		expect(firstBucket).not.toBe(otherOwnerBucket);
+	});
+
+	it("keeps runtime-authored dynamic buckets out of static-authored dynamic buckets", () => {
+		const staticAuthoredBucket =
+			createStaticAuthoredDynamicTexturePlacementBucketKey({
+				domain: "outdoor-explicit-objects",
+				ownerId: "static-layer-owner:explicit:0xda55ffff",
+				purpose: "object-index",
+			});
+		const runtimeAuthoredBucket =
+			createRuntimeAuthoredDynamicTexturePlacementBucketKey({
+				entityId: "runtime-spawn:1",
+				purpose: "object-index",
+			});
+
+		expect(runtimeAuthoredBucket).not.toBe(staticAuthoredBucket);
 	});
 
 	it("preserves current palette and subpalette identity in the placement source", () => {
@@ -154,6 +285,7 @@ describe("texture placement vocabulary bridge", () => {
 function createStaticTextureUse(options: {
 	readonly domain: VisualTextureDomain;
 	readonly source: MaterialTextureDataUseIdentity;
+	readonly bakeBatchId?: string;
 	readonly textureUseId: string;
 }): StaticBakeTextureUse {
 	if (options.domain === "runtime-object-material") {
@@ -167,7 +299,7 @@ function createStaticTextureUse(options: {
 			wrapT: "clamp-to-edge",
 		},
 		source: options.source,
-		staticBatchId: "static-batch:test",
+		bakeBatchId: options.bakeBatchId ?? "static-batch:test",
 		textureUseId: options.textureUseId,
 	};
 }

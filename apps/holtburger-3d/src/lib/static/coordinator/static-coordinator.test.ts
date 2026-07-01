@@ -21,10 +21,8 @@ import type {
 	StaticMaterialCoverageReport,
 	StaticBakeAttachmentProvider,
 	StaticBakeTask,
-	StaticSpatialRecord,
 	StaticLayerTaskStatus,
 	TerrainGeometryStaticDrawUnit,
-	StaticVisibilityRecord,
 	StaticObjectBakeDiagnostics,
 	StaticBakeBatchInput,
 	StaticResolverJob,
@@ -35,7 +33,6 @@ import type {
 } from "../contracts";
 import { StaticCoordinator } from "./static-coordinator";
 import type { StaticSourceReadyWork } from "./static-coordinator";
-import { createLayerPeerRecordOwnerForStaticBakeTask } from "../layer-owners";
 import type { TexturePlacementSnapshot } from "../../textures/placement";
 
 describe("static coordinator", () => {
@@ -217,8 +214,10 @@ describe("static coordinator", () => {
 
 		bakeTasksForDemand(coordinator, createSingleTerrainDemand(0xda55ffff));
 
-		expect(coordinator.createSnapshot().layerTasks).toEqual([
-			{
+		const layerTasks = coordinator.createSnapshot().layerTasks;
+		expect(layerTasks).toHaveLength(1);
+		expect(layerTasks[0]).toMatchObject({
+			activeBakeBatchId: null,
 				domain: "outdoor-terrain",
 				ownerId: "terrain:0xda55ffff",
 				ownerKey: {
@@ -229,8 +228,9 @@ describe("static coordinator", () => {
 				revision: 1,
 				scopeKey: "landblock:da55ffff",
 				taskId: "1:landblock:da55ffff:outdoor-terrain",
-			},
-		]);
+		});
+		expect(layerTasks[0]?.phaseAgeMs).toBeGreaterThanOrEqual(0);
+		expect(layerTasks[0]?.phaseStartedAtMs).toBeGreaterThan(0);
 	});
 
 	it("reports layer owner states for split static domains", () => {
@@ -359,7 +359,7 @@ describe("static coordinator", () => {
 		expect(sourceReady[0]).toMatchObject({
 			domain: "outdoor-terrain",
 			placementIntents: [],
-			staticBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:1",
+			bakeBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:1",
 			tasks: [expect.objectContaining({ taskId: task.taskId })],
 		});
 		expect(baker.pendingInputs).toHaveLength(0);
@@ -371,7 +371,7 @@ describe("static coordinator", () => {
 
 		expect(baker.pendingInputs).toHaveLength(1);
 		expect(baker.pendingInputs[0]).toMatchObject({
-			staticBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:1",
+			bakeBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:1",
 		});
 		baker.complete(pendingBatchIdForTask(baker, task.taskId));
 		await continuation;
@@ -718,11 +718,17 @@ describe("static coordinator", () => {
 			createSingleTerrainDemand(0xda55ffff),
 		);
 
-		expect(first.runId).toBe("static-run:1");
-		expect(second.runId).toBe("static-run:2");
-		expect(second.layerTasks).toEqual(first.layerTasks);
-		expect(resolver.pendingSourceRequests).toHaveLength(1);
-	});
+			expect(first.runId).toBe("static-run:1");
+			expect(second.runId).toBe("static-run:2");
+			const normalizePhaseAge = (task: StaticLayerTaskStatus) => ({
+				...task,
+				phaseAgeMs: 0,
+			});
+			expect(second.layerTasks.map(normalizePhaseAge)).toEqual(
+				first.layerTasks.map(normalizePhaseAge),
+			);
+			expect(resolver.pendingSourceRequests).toHaveLength(1);
+		});
 
 	it("keeps failed same-owner tasks terminal without retrying", async () => {
 		const consoleError = vi
@@ -782,13 +788,11 @@ describe("static coordinator", () => {
 			{
 				addedDrawUnits: [createTerrainDrawUnit("terrain-a", 0xda55ffff)],
 				addedPortalApertureResources: [],
-				commitId:
-					"static-commit:static-batch:1:outdoor-terrain:landblock:da55ffff:1",
+				commitId: "static-commit:1:1:landblock:da55ffff:outdoor-terrain",
 				materialCoverage: [],
 				removedResources: [],
 				revision: 1,
 				envCellStaticObjectPlacementRecords: [],
-				staticBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:1",
 				staticObjectRenderInstances: [],
 				staticObjectVisualResources: [],
 				staticPortalGraphs: [],
@@ -816,12 +820,11 @@ describe("static coordinator", () => {
 		expect(deltas.at(-1)).toEqual({
 			addedDrawUnits: [],
 			addedPortalApertureResources: [],
-			commitId: "static-commit:static-batch:2:evict",
+			commitId: "static-commit:2:evict",
 			materialCoverage: [],
 			removedResources: [{ drawUnitId: "terrain-a", kind: "draw-unit" }],
 			revision: 2,
 			envCellStaticObjectPlacementRecords: [],
-			staticBatchId: "static-batch:2:evict",
 			staticObjectRenderInstances: [],
 			staticObjectVisualResources: [],
 			staticPortalGraphs: [],
@@ -895,7 +898,7 @@ describe("static coordinator", () => {
 				},
 				staticCommit: expect.objectContaining({
 					addedDrawUnits: [createTerrainDrawUnit("terrain-a", 0xda55ffff)],
-					staticBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:1",
+					commitId: "static-commit:1:1:landblock:da55ffff:outdoor-terrain",
 				}),
 			},
 		]);
@@ -935,7 +938,7 @@ describe("static coordinator", () => {
 			itemCount: 1,
 			kind: "static-coordinator-timing",
 			revision: 1,
-			staticBatchId:
+			bakeBatchId:
 				"static-batch:1:outdoor-generated-scenery:landblock:da55ffff:1",
 		});
 		expect(snapshot.recentTiming[0]?.resolverMs).toEqual(expect.any(Number));
@@ -1054,7 +1057,7 @@ describe("static coordinator", () => {
 		expect(baker.pendingInputs[0]).toMatchObject({
 			domain: "outdoor-terrain",
 			revision: 1,
-			staticBatchId: `static-batch:1:outdoor-terrain:${firstTerrainScopeKey}:2`,
+			bakeBatchId: `static-batch:1:outdoor-terrain:${firstTerrainScopeKey}:2`,
 		});
 		expect(
 			baker.pendingInputs[0]?.items.map((item) => item.task.taskId),
@@ -1068,7 +1071,7 @@ describe("static coordinator", () => {
 			})),
 		);
 
-		baker.complete(baker.pendingInputs[0]?.staticBatchId ?? "");
+		baker.complete(baker.pendingInputs[0]?.bakeBatchId ?? "");
 		await flushPromises();
 
 		expect(coordinator.createSnapshot()).toMatchObject({
@@ -1444,7 +1447,7 @@ describe("static coordinator", () => {
 			if (!task) {
 				throw new Error("Expected one terrain task per bake input.");
 			}
-			baker.complete(input.staticBatchId, {
+			baker.complete(input.bakeBatchId, {
 				materialCoverage: [
 					createMaterialCoverage("outdoor-terrain", {
 						coverageKey: `outdoor-terrain:${task.scope.landblockId.toString(16)}`,
@@ -1575,7 +1578,7 @@ describe("static coordinator", () => {
 		);
 		expect(envCellBakeInput).toMatchObject({
 			domain: "env-cell-system",
-			staticBatchId: "static-batch:1:env-cell-system:landblock:da55ffff:1",
+			bakeBatchId: "static-batch:1:env-cell-system:landblock:da55ffff:1",
 		});
 		expect(
 			sourcePayloads.filter((item) => item.task.domain === "env-cell-system"),
@@ -1622,11 +1625,11 @@ describe("static coordinator", () => {
 		).toBe("materializing");
 	});
 
-	it("filters typed layer-owned env-cell peer records for superseded batch members", async () => {
-		const resolver = new DeferredStaticResolver();
-		const baker = new DeferredStaticBaker();
-		const coordinator = new StaticCoordinator({
-			baker,
+		it("isolates env-cell tasks into single-item bake inputs", async () => {
+			const resolver = new DeferredStaticResolver();
+			const baker = new DeferredStaticBaker();
+			const coordinator = new StaticCoordinator({
+				baker,
 			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
 			resolver,
 		});
@@ -1653,76 +1656,19 @@ describe("static coordinator", () => {
 			resolver.complete(
 				request.requestId,
 				createEnvCellSystemResolverPayload(request.job.scope.landblockId),
+				);
+			}
+			await flushPromises();
+
+			const envCellBatches = baker.pendingInputs.filter(
+				(input) => input.domain === "env-cell-system",
 			);
-		}
-		await flushPromises();
-
-		const envCellBatch = baker.pendingInputs.find(
-			(input) => input.domain === "env-cell-system",
-		);
-		expect(envCellBatch?.items.length).toBeGreaterThan(1);
-
-		bakeTasksForDemand(coordinator, {
-			location: {
-				kind: "outdoor-landblock",
-				landblockId: 0xda55ffff,
-			},
-			lod: {
-				buildings: -1,
-				detail: -1,
-				envCells: 0,
-				terrain: 1,
-			},
+			expect(envCellBatches.length).toBeGreaterThan(1);
+			expect(envCellBatches.every((input) => input.items.length === 1)).toBe(
+				true,
+			);
+			expect(deltas).toEqual([]);
 		});
-
-		const focusItem = envCellBatch?.items.find(
-			(item) => item.task.scope.landblockId === 0xda55ffff,
-		);
-		const staleItem = envCellBatch?.items.find(
-			(item) => item.task.scope.landblockId !== 0xda55ffff,
-		);
-		if (!envCellBatch || !focusItem || !staleItem) {
-			throw new Error("Expected focus and stale env-cell batch items.");
-		}
-
-		baker.complete(envCellBatch.staticBatchId, {
-			staticSpatialRecords: [
-				createEnvCellSpatialRecord(focusItem.task),
-				createEnvCellSpatialRecord(staleItem.task),
-			],
-			staticVisibilityRecords: [
-				createEnvCellVisibilityRecord(focusItem.task),
-				createEnvCellVisibilityRecord(staleItem.task),
-			],
-		});
-		await flushPromises();
-
-		expect(deltas.at(-1)).toMatchObject({
-			staticSpatialRecords: [
-				{
-					landblockId: 0xda55ffff,
-					owner: {
-						ownerId: "env-cell-system:0xda55ffff",
-					},
-				},
-			],
-			staticVisibilityRecords: [
-				{
-					landblockId: 0xda55ffff,
-					owner: {
-						ownerId: "env-cell-system:0xda55ffff",
-					},
-				},
-			],
-		});
-		expect(
-			deltas
-				.at(-1)
-				?.staticSpatialRecords.some(
-					(record) => record.owner.ownerId === "env-cell-system:0xdb55ffff",
-				),
-		).toBe(false);
-	});
 });
 
 function failCommitDelta(): never {
@@ -1789,7 +1735,7 @@ function createStaticObjectBakeDiagnostics(): StaticObjectBakeDiagnostics {
 			unsupportedMaterialBucket: 0,
 		},
 		skippedPartitionCount: 0,
-		staticBatchId:
+		bakeBatchId:
 			"static-batch:1:outdoor-generated-scenery:landblock:da55ffff:1",
 		uniqueSourceCount: 1,
 		uniqueSourcePartGeometryCount: 1,
@@ -1801,7 +1747,7 @@ function pendingBatchIdForTask(
 	baker: DeferredStaticBaker,
 	taskId: string,
 ): string {
-	return pendingBatchForTask(baker.pendingInputs, taskId).staticBatchId;
+	return pendingBatchForTask(baker.pendingInputs, taskId).bakeBatchId;
 }
 
 function pendingBatchForTask(
@@ -2084,40 +2030,6 @@ function createMaterialCoverage(
 		triangleCount: 0,
 		unrenderedBuckets: [],
 		unsupportedTriangleCount: 0,
-	};
-}
-
-function createEnvCellSpatialRecord(work: StaticBakeTask): StaticSpatialRecord {
-	return {
-		cellStructure: {
-			cellStructureId: 0x0d000001,
-			kind: "cell-structure",
-		},
-		envCellId: work.scope.landblockId & 0xffff_ffff,
-		environment: {
-			environmentId: 0x0e000001,
-			kind: "environment",
-		},
-		kind: "env-cell-spatial",
-		landblockId: work.scope.landblockId,
-		memberId: `cell-${work.scope.landblockId.toString(16)}`,
-		owner: createLayerPeerRecordOwnerForStaticBakeTask(work),
-		renderBounds: null,
-		residencyBvhItemCount: 0,
-		residencyBvhNodeCount: 0,
-	};
-}
-
-function createEnvCellVisibilityRecord(
-	work: StaticBakeTask,
-): StaticVisibilityRecord {
-	return {
-		acceptedEnvCellIds: [work.scope.landblockId & 0xffff_ffff],
-		diagnostics: [],
-		kind: "env-cell-visibility",
-		landblockId: work.scope.landblockId,
-		owner: createLayerPeerRecordOwnerForStaticBakeTask(work),
-		visibleLinks: [],
 	};
 }
 

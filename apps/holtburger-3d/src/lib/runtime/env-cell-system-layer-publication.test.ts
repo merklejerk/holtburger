@@ -64,9 +64,9 @@ function createEnvCellCommitDelta(
 	revision: number,
 ): StaticCoordinatorCommitDelta {
 	return createCommitDelta({
+		commitId: `static-commit:${revision}:env-cell-system`,
 		revision,
 		staticPortalInteriorRecords: [createPortalInteriorRecord()],
-		staticBatchId: `static-batch:${revision}:env-cell-system`,
 	});
 }
 
@@ -77,8 +77,8 @@ function createBuildingCommitDelta(
 		addedPortalApertureResources: [
 			createBuildingTransitionPortalApertureResource(),
 		],
+		commitId: `static-commit:${revision}:outdoor-buildings`,
 		revision,
-		staticBatchId: `static-batch:${revision}:outdoor-buildings`,
 		staticPortalGraphs: [
 			createBuildingTransitionPortalGraph("outdoor-buildings"),
 		],
@@ -109,18 +109,17 @@ function createBuildingInstallResult(
 
 function createCommitDelta(
 	options: Partial<StaticCoordinatorCommitDelta> & {
+		readonly commitId: string;
 		readonly revision: number;
-		readonly staticBatchId: string;
 	},
 ): StaticCoordinatorCommitDelta {
 	return {
 		addedDrawUnits: [],
 		addedPortalApertureResources: [],
-		commitId: `static-commit:${options.staticBatchId}`,
+		commitId: options.commitId,
 		materialCoverage: [],
 		removedResources: [],
 		envCellStaticObjectPlacementRecords: [],
-		staticBatchId: options.staticBatchId,
 		staticObjectRenderInstances: [],
 		staticObjectVisualResources: [],
 		staticPortalGraphs: [],

@@ -144,7 +144,7 @@ export function bakeEnvCellSystem(
 		envCellStaticObjectPlacementRecords: itemResults.flatMap(
 			(result) => result.envCellStaticObjectPlacementRecords,
 		),
-		staticBatchId: input.staticBatchId,
+		bakeBatchId: input.bakeBatchId,
 		staticPortalGraphs: itemResults
 			.flatMap((result) => result.staticPortalGraphs)
 			.concat(staticObjectResult.staticPortalGraphs),
@@ -259,7 +259,7 @@ function bakeLandblockEnvCellItem(
 		textureUses: createStructuredInteriorTextureUses({
 			drawUnits,
 			materialPlansByEnvCellId,
-			staticBatchId: input.staticBatchId,
+			bakeBatchId: input.bakeBatchId,
 			task: item.task,
 		}),
 		textureDependencies: createStructuredInteriorTextureDependencies(
@@ -874,7 +874,7 @@ function createStructuredInteriorTextureUses(options: {
 		number,
 		StructuredInteriorCellMaterialPlan
 	>;
-	readonly staticBatchId: string;
+	readonly bakeBatchId: string;
 	readonly task: StaticBakeTask;
 }): readonly StaticBakeTextureUse[] {
 	return createStaticMaterialTextureUses({
@@ -886,7 +886,7 @@ function createStructuredInteriorTextureUses(options: {
 			}),
 		domain: "env-cell-system",
 		isStageableDataUse: isCurrentlyStageableStaticObjectDataUse,
-		staticBatchId: options.staticBatchId,
+		bakeBatchId: options.bakeBatchId,
 		textureUseSpecs: options.drawUnits.flatMap((drawUnit) => {
 			const materialPlan = options.materialPlansByEnvCellId.get(
 				drawUnit.envCellId,

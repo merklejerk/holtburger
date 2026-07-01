@@ -134,7 +134,7 @@ describe("terrain geometry baker", () => {
 
 		expect(drawUnit).toMatchObject({
 			materialBucketKey:
-				"shader:terrain-single-base-color|domain:outdoor-terrain|sampler:color-repeat-filterable|batch:batch-a|texture:terrain:0xda55ffff:prepared-texture:terrain-base:rgba-color:06000010",
+				"shader:terrain-single-base-color|domain:outdoor-terrain|sampler:color-repeat-filterable|texture:terrain:0xda55ffff:prepared-texture:terrain-base:rgba-color:06000010",
 			materialFamily: "terrain-single-base-color",
 			primaryTextureUseId:
 				"terrain:0xda55ffff:prepared-texture:terrain-base:rgba-color:06000010",
@@ -156,11 +156,10 @@ describe("terrain geometry baker", () => {
 			}),
 		]);
 		expect(result.textureUses).toEqual([
-			{
-				domain: "outdoor-terrain",
-				owners: [{ drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" }],
-				staticBatchId: "batch-a",
-				source: {
+				{
+					domain: "outdoor-terrain",
+					owners: [{ drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" }],
+					source: {
 					kind: "prepared-render-surface-texture-use",
 					renderSurface: {
 						kind: "render-surface",
@@ -202,7 +201,7 @@ describe("terrain geometry baker", () => {
 		expect(
 			createTerrainTexturePlacementIntents({
 				items: input.items,
-				staticBatchId: input.staticBatchId,
+				bakeBatchId: input.bakeBatchId,
 			}),
 		).toEqual([
 			expect.objectContaining({
@@ -337,7 +336,7 @@ describe("terrain geometry baker", () => {
 
 		const result = bakeTerrainGeometry(input);
 
-		expect(result.staticBatchId).toBe("batch-a");
+		expect(result.bakeBatchId).toBe("batch-a");
 		expect(result.tasks.map((task) => task.taskId)).toEqual([
 			"7:landblock:da55ffff:outdoor-terrain",
 			"7:landblock:da56ffff:outdoor-terrain",
@@ -346,9 +345,7 @@ describe("terrain geometry baker", () => {
 			"terrain:0xda55ffff:terrain-geometry",
 			"terrain:0xda56ffff:terrain-geometry",
 		]);
-		expect(
-			new Set(result.textureUses.map((textureUse) => textureUse.staticBatchId)),
-		).toEqual(new Set(["batch-a"]));
+		expect(result.textureUses).toHaveLength(2);
 	});
 });
 
@@ -411,16 +408,10 @@ function createTerrainBakeInput(
 	}
 
 	const input: StaticBakeBatchInput = {
-		atlasSnapshot: {
-			domain: "outdoor-terrain",
-			placements: [],
-			staticBatchId: "batch-a",
-			textureUses: [],
-		},
 		domain: "outdoor-terrain",
 		items,
 		revision: 7,
-		staticBatchId: "batch-a",
+		bakeBatchId: "batch-a",
 	};
 	return {
 		...input,
@@ -434,7 +425,7 @@ function createTexturePlacementSnapshot(
 ): NonNullable<StaticBakeBatchInput["texturePlacementSnapshot"]> {
 	const intents = createTerrainTexturePlacementIntents({
 		items: input.items,
-		staticBatchId: input.staticBatchId,
+		bakeBatchId: input.bakeBatchId,
 	});
 	return {
 		placementsByItemId: new Map(

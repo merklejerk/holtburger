@@ -2,6 +2,7 @@ import type {
 	StaticBakeBatchInput,
 	StaticBakeBatchResult,
 	StaticBaker,
+	StaticBakerDiagnosticsSnapshot,
 } from "../contracts";
 import type {
 	StaticBakeWorkerPort,
@@ -9,8 +10,12 @@ import type {
 } from "./protocol";
 
 interface PendingBakeRequest {
+	readonly input: StaticBakeBatchInput;
+	readonly queuedAtMs: number;
 	readonly resolve: (result: StaticBakeBatchResult) => void;
 	readonly reject: (error: Error) => void;
+	stage: "queued" | "executing";
+	stageStartedAtMs: number;
 }
 
 interface StaticBakeWorkerClientOptions {
@@ -49,7 +54,15 @@ export class StaticBakeWorkerClient implements StaticBaker {
 		this.#nextRequestIndex += 1;
 
 		return new Promise((resolve, reject) => {
-			this.#pending.set(requestId, { reject, resolve });
+			const queuedAtMs = nowMs();
+			this.#pending.set(requestId, {
+				input,
+				queuedAtMs,
+				reject,
+				resolve,
+				stage: "queued",
+				stageStartedAtMs: queuedAtMs,
+			});
 			this.#port.postMessage({
 				input,
 				kind: "bake-static-batch",
@@ -72,25 +85,57 @@ export class StaticBakeWorkerClient implements StaticBaker {
 		this.#disposePort?.();
 	}
 
+	createDiagnosticsSnapshot(): StaticBakerDiagnosticsSnapshot {
+		const currentNowMs = nowMs();
+		return {
+			kind: "static-baker",
+			pendingJobs: Array.from(this.#pending.entries()).map(
+				([requestId, pending]) => ({
+					ageMs: currentNowMs - pending.queuedAtMs,
+					bakeBatchId: pending.input.bakeBatchId,
+					domain: pending.input.domain,
+					itemCount: pending.input.items.length,
+					queuedAtMs: pending.queuedAtMs,
+					requestId,
+					revision: pending.input.revision,
+					stage: pending.stage,
+					stageAgeMs: currentNowMs - pending.stageStartedAtMs,
+					stageStartedAtMs: pending.stageStartedAtMs,
+				}),
+			),
+			workerCount: 1,
+		};
+	}
+
 	#handleResponse(response: StaticBakeWorkerThreadMessage): void {
 		const pending = this.#pending.get(response.requestId);
 		if (!pending) {
 			return;
 		}
 
-		this.#pending.delete(response.requestId);
+		if (response.kind === "static-batch-bake-started") {
+			pending.stage = "executing";
+			pending.stageStartedAtMs = nowMs();
+			return;
+		}
+
 		if (response.kind === "static-batch-bake-failed") {
+			this.#pending.delete(response.requestId);
 			pending.reject(new Error(response.message));
 			return;
 		}
 
+		this.#pending.delete(response.requestId);
 		pending.resolve(response.result);
 	}
 }
 
 export class WorkerPoolStaticBaker implements StaticBaker {
 	readonly #bakers: readonly StaticBaker[];
+	readonly #activeBakerIndexes = new Set<number>();
+	readonly #queuedRequests: PoolQueuedBakeRequest[] = [];
 	#nextBakerIndex = 0;
+	#nextPoolRequestIndex = 0;
 	#disposed = false;
 
 	constructor(bakers: readonly StaticBaker[]) {
@@ -108,16 +153,86 @@ export class WorkerPoolStaticBaker implements StaticBaker {
 			);
 		}
 
-		const baker = this.#bakers[this.#nextBakerIndex];
-		if (!baker) {
-			return Promise.reject(
-				new Error("WorkerPoolStaticBaker has no active baker."),
+		return new Promise((resolve, reject) => {
+			const queuedAtMs = nowMs();
+			this.#queuedRequests.push({
+				input,
+				queuedAtMs,
+				reject,
+				requestId: `pool-job:${this.#nextPoolRequestIndex}`,
+				resolve,
+			});
+			this.#nextPoolRequestIndex += 1;
+			this.#dispatchQueuedRequests();
+		});
+	}
+
+	#dispatchQueuedRequests(): void {
+		while (this.#queuedRequests.length > 0) {
+			const bakerIndex = this.#selectIdleBakerIndex();
+			if (bakerIndex === null) {
+				return;
+			}
+			const request = this.#queuedRequests.shift();
+			const baker = this.#bakers[bakerIndex];
+			if (!request || !baker) {
+				return;
+			}
+			this.#activeBakerIndexes.add(bakerIndex);
+			this.#nextBakerIndex = (bakerIndex + 1) % this.#bakers.length;
+			void baker.bake(request.input).then(
+				(result) => {
+					this.#activeBakerIndexes.delete(bakerIndex);
+					this.#dispatchQueuedRequests();
+					request.resolve(result);
+				},
+				(error: unknown) => {
+					this.#activeBakerIndexes.delete(bakerIndex);
+					this.#dispatchQueuedRequests();
+					request.reject(error instanceof Error ? error : new Error(String(error)));
+				},
 			);
 		}
+	}
 
-		this.#nextBakerIndex = (this.#nextBakerIndex + 1) % this.#bakers.length;
+	#selectIdleBakerIndex(): number | null {
+		for (let offset = 0; offset < this.#bakers.length; offset += 1) {
+			const index = (this.#nextBakerIndex + offset) % this.#bakers.length;
+			if (!this.#activeBakerIndexes.has(index)) {
+				return index;
+			}
+		}
+		return null;
+	}
 
-		return baker.bake(input);
+	createDiagnosticsSnapshot(): StaticBakerDiagnosticsSnapshot {
+		const currentNowMs = nowMs();
+		return {
+			kind: "static-baker",
+			pendingJobs: [
+				...this.#queuedRequests.map((request) => ({
+					ageMs: currentNowMs - request.queuedAtMs,
+					bakeBatchId: request.input.bakeBatchId,
+					domain: request.input.domain,
+					itemCount: request.input.items.length,
+					queuedAtMs: request.queuedAtMs,
+					requestId: request.requestId,
+					revision: request.input.revision,
+					stage: "queued" as const,
+					stageAgeMs: currentNowMs - request.queuedAtMs,
+					stageStartedAtMs: request.queuedAtMs,
+				})),
+				...this.#bakers.flatMap((baker, workerIndex) =>
+					(baker.createDiagnosticsSnapshot?.().pendingJobs ?? []).map(
+						(job) => ({
+							...job,
+							requestId: `worker:${workerIndex}:${job.requestId}`,
+						}),
+					),
+				),
+			],
+			workerCount: this.#bakers.length,
+		};
 	}
 
 	dispose(): void {
@@ -126,10 +241,25 @@ export class WorkerPoolStaticBaker implements StaticBaker {
 		}
 
 		this.#disposed = true;
+		for (const request of this.#queuedRequests.splice(0)) {
+			request.reject(new Error("WorkerPoolStaticBaker has been disposed."));
+		}
 		for (const baker of this.#bakers) {
 			disposeIfAvailable(baker);
 		}
 	}
+}
+
+interface PoolQueuedBakeRequest {
+	readonly input: StaticBakeBatchInput;
+	readonly queuedAtMs: number;
+	readonly reject: (error: Error) => void;
+	readonly requestId: string;
+	readonly resolve: (result: StaticBakeBatchResult) => void;
+}
+
+function nowMs(): number {
+	return performance.now();
 }
 
 function disposeIfAvailable(value: unknown): void {

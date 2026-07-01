@@ -172,7 +172,7 @@ function createAttachmentRequest(
 			},
 		],
 		revision: 1,
-		staticBatchId: "static-batch:objects",
+		bakeBatchId: "static-batch:objects",
 	};
 }
 
@@ -208,7 +208,7 @@ function createEnvCellAttachmentRequest(
 			},
 		],
 		revision: 1,
-		staticBatchId: "static-batch:env-cells",
+		bakeBatchId: "static-batch:env-cells",
 	};
 }
 

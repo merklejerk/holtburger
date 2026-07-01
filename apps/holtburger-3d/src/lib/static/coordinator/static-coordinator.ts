@@ -1879,21 +1879,14 @@ function filterStaticBakeResultForCurrentTasks(
 			)
 			.map((resource) => resource.apertureResourceId),
 	);
-	const retainedStaticObjectRenderInstances =
-		result.staticObjectRenderInstances.filter((instance) =>
-			ownerIds.has(
-				createLayerOwnerIdForDomainLandblock({
-					domain: instance.domain,
-					landblockId: instance.landblockId,
-				}),
-			),
-		);
-	const retainedStaticObjectVisualResourceIds = new Set(
-		retainedStaticObjectRenderInstances.map((instance) => instance.resourceId),
-	);
 	const retainedObjectVisualInstallSet = filterObjectVisualInstallSetForOwners(
 		result.objectVisualInstallSet,
 		ownerIds,
+	);
+	const retainedObjectVisualResourceIds = new Set(
+		retainedObjectVisualInstallSet.visualResources.map(
+			(resource) => resource.resourceId,
+		),
 	);
 
 	return {
@@ -1923,10 +1916,9 @@ function filterStaticBakeResultForCurrentTasks(
 					ownerIds,
 				}),
 			),
-		staticObjectRenderInstances: retainedStaticObjectRenderInstances,
+		staticObjectRenderInstances: retainedObjectVisualInstallSet.renderInstances,
 		staticObjectVisualResources: result.staticObjectVisualResources.filter(
-			(resource) =>
-				retainedStaticObjectVisualResourceIds.has(resource.resourceId),
+			(resource) => retainedObjectVisualResourceIds.has(resource.resourceId),
 		),
 		objectVisualInstallSet: retainedObjectVisualInstallSet,
 		staticPortalInteriorRecords: result.staticPortalInteriorRecords.filter(
@@ -1964,7 +1956,7 @@ function filterStaticBakeResultForCurrentTasks(
 			textureUse.owners.some((owner) =>
 				owner.kind === "draw-unit"
 					? drawUnitIds.has(owner.drawUnitId)
-					: retainedStaticObjectVisualResourceIds.has(owner.resourceId),
+					: retainedObjectVisualResourceIds.has(owner.resourceId),
 			),
 		),
 		textureDependencies: result.textureDependencies.filter((dependency) =>

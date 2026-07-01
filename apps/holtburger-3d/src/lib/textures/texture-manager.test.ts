@@ -24,6 +24,7 @@ import {
 	TextureManager,
 	type DynamicTextureUseCommit,
 } from "./texture-manager";
+import { createStaticTexturePlacementIntent } from "./placement";
 
 const STABLE_TEXTURE_REF_ID =
 	"texture-ref:outdoor-terrain:batch-a:terrain-a:prepared-texture:06000010";
@@ -842,6 +843,122 @@ describe("browser texture manager", () => {
 			removedTextureRefIds: [STABLE_TEXTURE_REF_ID],
 			revision: 2,
 		});
+	});
+
+	it("places texture intents before owners exist", async () => {
+		const assetService = new FixtureAssetService();
+		const texturePacker = new FixtureTexturePacker();
+		const textureManager = new TextureManager({ assetService, texturePacker });
+		const textureUse = createTextureUseCommit({
+			drawUnitId: "terrain-a",
+			outputFormat: "rgba8",
+			renderSurfaceId: 0x06000010,
+			textureUseId: "terrain-pre-bake:prepared-texture:06000010",
+		});
+
+		const snapshot = await textureManager.placeTextureIntents({
+			intents: [createStaticTexturePlacementIntent(textureUse)],
+			placementBatchId: "pre-bake-batch",
+		});
+
+		const placement = snapshot.placementsByItemId.get(textureUse.textureUseId);
+		expect(placement).toMatchObject({
+			height: 256,
+			itemId: "terrain-pre-bake:prepared-texture:06000010",
+			pool: "terrain",
+			purpose: "terrain-color",
+			rect: [0, 0, 1, 1],
+			width: 256,
+		});
+		expect(placement?.pageId).toContain("pre-bake-batch");
+		expect(texturePacker.jobs).toHaveLength(1);
+		expect(textureManager.createPlacementReferenceSnapshot()).toEqual([
+			{
+				activeReferenceCount: 0,
+				freeable: true,
+				itemId: "terrain-pre-bake:prepared-texture:06000010",
+				pageId: placement?.pageId,
+				pool: "terrain",
+				purpose: "terrain-color",
+				rect: [0, 0, 1, 1],
+			},
+		]);
+	});
+
+	it("pins and releases baked draw-unit texture dependencies", async () => {
+		const textureManager = new TextureManager({
+			assetService: new FixtureAssetService(),
+		});
+		const textureUse = createTextureUseCommit({
+			drawUnitId: "terrain-a",
+			outputFormat: "rgba8",
+			renderSurfaceId: 0x06000010,
+			textureUseId: "terrain-pre-bake:prepared-texture:06000010",
+		});
+		await textureManager.placeTextureIntents({
+			intents: [createStaticTexturePlacementIntent(textureUse)],
+			placementBatchId: "pre-bake-batch",
+		});
+
+		textureManager.pinDrawUnitTextureDependencies([
+			{
+				drawUnitId: "terrain-a",
+				roles: [
+					{
+						itemIds: [textureUse.textureUseId],
+						purpose: "terrain-color",
+					},
+				],
+			},
+		]);
+		expect(textureManager.createPlacementReferenceSnapshot()).toMatchObject([
+			{
+				activeReferenceCount: 1,
+				freeable: false,
+				itemId: textureUse.textureUseId,
+			},
+		]);
+
+		textureManager.releaseDrawUnitTextureDependencies(["terrain-a"]);
+		expect(textureManager.createPlacementReferenceSnapshot()).toMatchObject([
+			{
+				activeReferenceCount: 0,
+				freeable: true,
+				itemId: textureUse.textureUseId,
+			},
+		]);
+	});
+
+	it("marks existing owner-based placements freeable after static draw-unit eviction", async () => {
+		const textureManager = new TextureManager({
+			assetService: new FixtureAssetService(),
+		});
+		await textureManager.applyStaticCommitDelta(
+			createCommitDelta({ outputFormat: "rgba8" }),
+		);
+		expect(textureManager.createPlacementReferenceSnapshot()).toMatchObject([
+			{
+				activeReferenceCount: 1,
+				freeable: false,
+				itemId: "terrain-a:prepared-texture:06000010",
+			},
+		]);
+
+		await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedResources: [{ drawUnitId: "terrain-a", kind: "draw-unit" }],
+			revision: 2,
+			staticBatchId: "batch-a",
+			textureUses: [],
+		});
+
+		expect(textureManager.createPlacementReferenceSnapshot()).toMatchObject([
+			{
+				activeReferenceCount: 0,
+				freeable: true,
+				itemId: "terrain-a:prepared-texture:06000010",
+			},
+		]);
 	});
 
 	it("reuses one placement across draw units that share prepared source", async () => {

@@ -1199,7 +1199,7 @@ Acceptance criteria:
 - [x] Phase 0A: prove source-ready continuation contract in a segregated spike.
 - [x] Phase 0: lock first-pass contract names and homes.
 - [x] Phase 1: add placement contracts and no-behavior-change adapters.
-- [ ] Phase 2: split `TextureManager` placement and pinning around current behavior.
+- [x] Phase 2: split `TextureManager` placement and pinning around current behavior.
 - [ ] Phase 3: add static source-ready placement continuation.
 - [ ] Resteering 1: review placement continuation shape.
 - [ ] Phase 4: move static object placement planning before static object baking.
@@ -1252,6 +1252,14 @@ Acceptance criteria:
   `static-authored-object` pool, while `runtime-object-material` maps to `runtime-authored-object`.
   This keeps static-authored and runtime-authored dynamics isomorphic without inventing a dynamic-only
   placement vocabulary.
+- Phase 2 added ownerless `TextureManager.placeTextureIntents(...)` placement planning,
+  draw-unit dependency pin/release APIs, and `createPlacementReferenceSnapshot()` for active vs.
+  zero-reference placement queries. Existing static and dynamic owner-based commit methods now update
+  the same placement reference records while preserving current renderer texture updates.
+- Phase 2 kept existing static/dynamic renderer upload behavior intact by adapting the new placement
+  records behind the old owner-based APIs. Static draw-unit owners, static object visual resource
+  owners, and dynamic visual resource owners all flow through the same active-reference accounting
+  path.
 - Dry run split `TextureManager` responsibilities into placement and pinning. Current owner leases
   require post-bake draw-unit/resource owners, but pre-bake placement intents intentionally do not
   have owners yet.
@@ -1279,6 +1287,13 @@ Acceptance criteria:
 - Phase 1 adapters are intentionally unused by runtime paths. Phase 2 must either integrate them into
   `TextureManager` internals or delete/rewrite them during the clean cutover; do not leave a parallel
   vocabulary bridge around after placement planning owns the flow.
+- `TextureManager.placeTextureIntents(...)` privately maps placement pools onto legacy
+  `VisualTextureDomain` values because `textures/packing/protocol.ts` still requires that domain
+  field. A later cleanup should rename or narrow the packer protocol once renderer-era domain
+  ownership is no longer part of placement planning.
+- Phase 2 active references are tracked by placement `itemId`, matching the migration-era
+  `textureUseId` assumption. If Phase 10 splits `textureUseId`, the placement reference index must
+  move to the final placement item identity at the same time.
 
 ## Risks and Concessions
 

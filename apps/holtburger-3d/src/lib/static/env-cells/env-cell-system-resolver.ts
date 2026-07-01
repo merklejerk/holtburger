@@ -61,10 +61,7 @@ export class EnvCellSystemResolver {
 	}
 
 	async resolve(job: StaticResolverJob): Promise<StaticScopePayload> {
-		if (
-			job.domain !== "env-cell-system" ||
-			job.scope.kind !== "landblock"
-		) {
+		if (job.domain !== "env-cell-system" || job.scope.kind !== "landblock") {
 			throw new Error(
 				`Landblock env-cell resolver only supports landblock env-cell jobs. Received ${job.scope.kind}/${job.domain}.`,
 			);
@@ -112,8 +109,8 @@ export class EnvCellSystemResolver {
 			textureRefs,
 		});
 		const sourceByKey = new Map(
-			sourceClosure.sourceAssets.map((source) =>
-				[createSourceCacheKey(source.identity), source] as const,
+			sourceClosure.sourceAssets.map(
+				(source) => [createSourceCacheKey(source.identity), source] as const,
 			),
 		);
 		reportOmittedStaticSeeds({
@@ -301,12 +298,15 @@ function reportOmittedStaticSeeds(options: {
 		return;
 	}
 
-	console.warn("[holtburger-3d][browser][landblock-env-cell-static-placements]", {
-		landblockId: options.landblockId,
-		message:
-			"Omitted env-cell static placements because their top-level source assets could not be resolved.",
-		omittedPlacements,
-	});
+	console.warn(
+		"[holtburger-3d][browser][landblock-env-cell-static-placements]",
+		{
+			landblockId: options.landblockId,
+			message:
+				"Omitted env-cell static placements because their top-level source assets could not be resolved.",
+			omittedPlacements,
+		},
+	);
 }
 
 function createLandblockEnvCellStaticFacts(options: {
@@ -453,7 +453,9 @@ function createEnvCellStaticObjectInstanceId(input: {
 	return `${formatHex32(input.envCellId)}:${input.instanceId}`;
 }
 
-function createObjectInstanceKey(identity: StaticObjectInstanceIdentity): string {
+function createObjectInstanceKey(
+	identity: StaticObjectInstanceIdentity,
+): string {
 	return `${identity.landblockId}:${identity.objectKind}:${identity.instanceId}`;
 }
 
@@ -493,8 +495,7 @@ function requirePreparedPayloadKind<
 	asset: PreparedAsset,
 	expectedKind: TKind,
 ): Extract<EnvCellSystemPreparedPayload, { readonly kind: TKind }> {
-	const payload =
-		asset.payload as Partial<EnvCellSystemPreparedPayload> | null;
+	const payload = asset.payload as Partial<EnvCellSystemPreparedPayload> | null;
 	if (!payload || payload.kind !== expectedKind) {
 		throw new Error(
 			`Prepared asset ${asset.sourceAssetId} was ${String(

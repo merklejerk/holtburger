@@ -199,13 +199,13 @@ export function createStaticMaterialTextureUses(options: {
 			textureUsesById.set(textureUseId, {
 				domain: options.domain,
 				owners: uniqueSortedStaticTextureUseOwners(spec.owners),
-					samplingPolicy: createStaticMaterialTextureSamplingPolicy({
-						dataUse,
-						wrapMode: spec.textureWrapMode,
-					}),
-					source: dataUse,
-					textureUseId,
-				});
+				samplingPolicy: createStaticMaterialTextureSamplingPolicy({
+					dataUse,
+					wrapMode: spec.textureWrapMode,
+				}),
+				source: dataUse,
+				textureUseId,
+			});
 		}
 	}
 

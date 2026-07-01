@@ -405,32 +405,32 @@ function createTexturePlacementUpdate(
 	}
 
 	return {
-			textureBindings: [
-				{
-					bindingKey: textureUseId,
-					owner: { drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" },
-					rect: { height: 1, width: 1, x: 0, y: 0 },
-					pageSlot:
+		textureBindings: [
+			{
+				bindingKey: textureUseId,
+				owner: { drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" },
+				rect: { height: 1, width: 1, x: 0, y: 0 },
+				pageSlot:
 					drawUnit.kind === "terrain-geometry"
 						? { kind: "color", slot: 0 }
 						: { kind: "object-base-color", slot: 0 },
-					textureHeight: 1,
-					textureRefId: "texture-ref-a",
-					textureWidth: 1,
-				},
-			],
+				textureHeight: 1,
+				textureRefId: "texture-ref-a",
+				textureWidth: 1,
+			},
+		],
 		placements: [],
 		removedTextureRefIds: [],
 		revision: 3,
-			resolvedTexturePlacements: [
-				{
-					bindingKey: textureUseId,
-					rect: [0, 0, 1, 1],
-					textureHeight: 1,
-					textureRefId: "texture-ref-a",
-					textureWidth: 1,
-				},
-			],
+		resolvedTexturePlacements: [
+			{
+				bindingKey: textureUseId,
+				rect: [0, 0, 1, 1],
+				textureHeight: 1,
+				textureRefId: "texture-ref-a",
+				textureWidth: 1,
+			},
+		],
 	};
 }
 
@@ -443,20 +443,20 @@ function createTexturePlacementUpdateForVisualResource(
 	}
 
 	return {
-			textureBindings: [
-				{
-					bindingKey: textureUseId,
-					owner: {
-						kind: "static-object-visual-resource",
-						resourceId: resource.resourceId,
+		textureBindings: [
+			{
+				bindingKey: textureUseId,
+				owner: {
+					kind: "static-object-visual-resource",
+					resourceId: resource.resourceId,
 				},
 				rect: { height: 1, width: 1, x: 0, y: 0 },
-					pageSlot: { kind: "object-base-color", slot: 0 },
-					textureHeight: 1,
-					textureRefId: "texture-ref-a",
-					textureWidth: 1,
-				},
-			],
+				pageSlot: { kind: "object-base-color", slot: 0 },
+				textureHeight: 1,
+				textureRefId: "texture-ref-a",
+				textureWidth: 1,
+			},
+		],
 		placements: [],
 		removedTextureRefIds: [],
 		revision: 3,

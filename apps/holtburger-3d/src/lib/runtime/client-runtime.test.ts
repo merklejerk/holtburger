@@ -2437,11 +2437,11 @@ describe("browser client runtime", () => {
 						anisotropy: 1,
 						filteringMode: "nearest",
 						mipmapsGenerated: false,
-							samplerPolicyKey:
-								"sample=rgba-color;filter=nearest;mips=off;aniso=1",
-							textureRefId:
-								"texture-ref:outdoor-terrain:texture-placement-bucket|outdoor-terrain|terrain|terrain-color|static-authored:terrain-textured:prepared-texture:06000010",
-						},
+						samplerPolicyKey:
+							"sample=rgba-color;filter=nearest;mips=off;aniso=1",
+						textureRefId:
+							"texture-ref:outdoor-terrain:texture-placement-bucket|outdoor-terrain|terrain|terrain-color|static-authored:terrain-textured:prepared-texture:06000010",
+					},
 				],
 				revision: 2,
 			},

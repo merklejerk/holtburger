@@ -15,7 +15,7 @@ describe("dynamic entity controller", () => {
 		expect(controller.createSnapshot()).toMatchObject({
 			activeEntityCount: 1,
 			nonRenderableEntityCount: 1,
-					});
+		});
 		expect(controller.createSnapshot().records[0]).toMatchObject({
 			animation: {
 				defaultAnimationId: 0x0300061b,
@@ -162,7 +162,7 @@ describe("dynamic entity controller", () => {
 		expect(controller.createSnapshot()).toMatchObject({
 			activeEntityCount: 1,
 			nonRenderableEntityCount: 1,
-					});
+		});
 		expect(controller.createSnapshot().records[0]).toMatchObject({
 			animation: {
 				defaultAnimationId: 0x0300061b,
@@ -241,7 +241,7 @@ describe("dynamic entity controller", () => {
 			nonRenderableEntityCount: 2,
 			runtimeSpawnCount: 2,
 			staticAuthoredCount: 0,
-					});
+		});
 		expect(controller.queryDynamicEntitySummary(firstId)).toMatchObject({
 			id: firstId,
 			presentation: {
@@ -309,7 +309,7 @@ describe("dynamic entity controller", () => {
 			activeEntityCount: 1,
 			runtimeSpawnCount: 1,
 			staticAuthoredCount: 0,
-					});
+		});
 		expect(controller.queryDynamicEntitySummary(runtimeId)?.id).toBe(runtimeId);
 
 		expect(controller.removeRuntimeSpawn(runtimeId)).toBe(true);
@@ -444,11 +444,11 @@ describe("dynamic entity controller", () => {
 				kind: "env-cell",
 				landblockId: 0xda55ffff,
 			},
-				presentation: {
-					policy: {
-						textureDomain: "runtime-object-material",
-					},
+			presentation: {
+				policy: {
+					textureDomain: "runtime-object-material",
 				},
+			},
 		});
 		expect(
 			controller.updateRuntimeSpawn("static-authored-outdoor:nope", {

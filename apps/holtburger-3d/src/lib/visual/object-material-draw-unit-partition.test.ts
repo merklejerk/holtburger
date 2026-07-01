@@ -15,9 +15,7 @@ describe("object-material draw-unit partition contracts", () => {
 			texturePlacementSnapshot: createPlacementSnapshot([
 				["base-a", "object-base-color", "texture-ref-a"],
 			]),
-			textureRequirements: [
-				createRequirement("base-a", "object-base-color"),
-			],
+			textureRequirements: [createRequirement("base-a", "object-base-color")],
 		});
 		const second = createObjectMaterialDrawUnitPartitionKey({
 			includeConcreteEntryInKey: false,
@@ -27,9 +25,7 @@ describe("object-material draw-unit partition contracts", () => {
 			texturePlacementSnapshot: createPlacementSnapshot([
 				["base-b", "object-base-color", "texture-ref-a"],
 			]),
-			textureRequirements: [
-				createRequirement("base-b", "object-base-color"),
-			],
+			textureRequirements: [createRequirement("base-b", "object-base-color")],
 		});
 
 		expect(second.key).toBe(first.key);
@@ -47,9 +43,7 @@ describe("object-material draw-unit partition contracts", () => {
 			material: createMaterialInput({
 				materialEntryKey: "entry-a",
 			}),
-			textureRequirements: [
-				createRequirement("base-a", "object-base-color"),
-			],
+			textureRequirements: [createRequirement("base-a", "object-base-color")],
 		};
 
 		const first = createObjectMaterialDrawUnitPartitionKey({
@@ -129,9 +123,7 @@ describe("object-material draw-unit partition contracts", () => {
 				texturePlacementSnapshot: createPlacementSnapshot([
 					["base-a", "object-detail", "texture-ref-a"],
 				]),
-				textureRequirements: [
-					createRequirement("base-a", "object-base-color"),
-				],
+				textureRequirements: [createRequirement("base-a", "object-base-color")],
 			}),
 		).toThrow(
 			"Object-like material texture placement base-a has incompatible purpose object-detail; expected object-base-color.",

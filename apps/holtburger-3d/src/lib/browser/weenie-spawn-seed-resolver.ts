@@ -1,5 +1,8 @@
 import { FIRST_RUNTIME_SPAWN_FIXTURE } from "../runtime/runtime-spawn-fixtures";
-import type { WeenieLookupCapabilityDto, WeenieSpawnSeedDto } from "../host/contracts";
+import type {
+	WeenieLookupCapabilityDto,
+	WeenieSpawnSeedDto,
+} from "../host/contracts";
 import {
 	getWeenieLookupCapability,
 	resolveWeenieSpawnSeed,
@@ -96,9 +99,13 @@ export function createTauriWeenieSpawnSeedResolver(
 	};
 }
 
-function convertTauriWeenieSpawnSeed(seed: WeenieSpawnSeedDto): WeenieSpawnSeed {
+function convertTauriWeenieSpawnSeed(
+	seed: WeenieSpawnSeedDto,
+): WeenieSpawnSeed {
 	return {
-		appearance: hasAppearanceFacts(seed.appearance) ? seed.appearance : undefined,
+		appearance: hasAppearanceFacts(seed.appearance)
+			? seed.appearance
+			: undefined,
 		className: seed.className,
 		defaultScale: seed.defaultScale ?? undefined,
 		label: seed.label,
@@ -111,7 +118,9 @@ function convertTauriWeenieSpawnSeed(seed: WeenieSpawnSeedDto): WeenieSpawnSeed 
 	};
 }
 
-function hasAppearanceFacts(appearance: WeenieSpawnSeedDto["appearance"]): boolean {
+function hasAppearanceFacts(
+	appearance: WeenieSpawnSeedDto["appearance"],
+): boolean {
 	return (
 		appearance.paletteId !== null ||
 		appearance.subPalettes.length > 0 ||

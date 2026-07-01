@@ -317,8 +317,9 @@
 	.status {
 		background: rgb(0 0 0 / 0.7);
 		border: 1px solid rgb(213 255 240 / 0.35);
-		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-			"Liberation Mono", "Courier New", monospace;
+		font-family:
+			ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+			"Courier New", monospace;
 		font-size: 12px;
 		left: 12px;
 		padding: 6px 8px;

@@ -53,14 +53,14 @@ describe("browser texture manager", () => {
 		expect(update).toMatchObject({
 			textureBindings: [
 				{
-						owner: { drawUnitId: "terrain-a", kind: "draw-unit" },
-						bindingKey: "terrain-a:prepared-texture:06000010",
-						rect: [0, 0, 1, 1],
-						textureHeight: 256,
-						textureRefId: STABLE_TEXTURE_REF_ID,
-						textureWidth: 256,
-					},
-				],
+					owner: { drawUnitId: "terrain-a", kind: "draw-unit" },
+					bindingKey: "terrain-a:prepared-texture:06000010",
+					rect: [0, 0, 1, 1],
+					textureHeight: 256,
+					textureRefId: STABLE_TEXTURE_REF_ID,
+					textureWidth: 256,
+				},
+			],
 			placements: [
 				{
 					format: "rgba8",
@@ -138,10 +138,10 @@ describe("browser texture manager", () => {
 		expect(texturePacker.jobs).toHaveLength(1);
 	});
 
-		it("rejects terrain role-page overflow from committed texture uses", async () => {
-			const assetService = new FixtureAssetService();
-			const textureUses = [
-				0x06000010, 0x06000020, 0x06000030, 0x06000040, 0x06000050,
+	it("rejects terrain role-page overflow from committed texture uses", async () => {
+		const assetService = new FixtureAssetService();
+		const textureUses = [
+			0x06000010, 0x06000020, 0x06000030, 0x06000040, 0x06000050,
 		].map((renderSurfaceId) =>
 			createTextureUseCommit({
 				drawUnitId: "terrain-overflow",
@@ -161,21 +161,21 @@ describe("browser texture manager", () => {
 					},
 				]),
 			),
-			});
-			const textureManager = new TextureManager({ assetService, texturePacker });
-
-			await expect(
-				textureManager.applyStaticCommitDelta({
-					addedDrawUnits: [],
-					removedResources: [],
-					revision: 1,
-					bakeBatchId: "batch-a",
-					textureUses,
-				}),
-			).rejects.toThrow(
-				"Terrain draw unit terrain-overflow exceeded color texture page capacity 4; baker must split illegal terrain draw units before commit.",
-			);
 		});
+		const textureManager = new TextureManager({ assetService, texturePacker });
+
+		await expect(
+			textureManager.applyStaticCommitDelta({
+				addedDrawUnits: [],
+				removedResources: [],
+				revision: 1,
+				bakeBatchId: "batch-a",
+				textureUses,
+			}),
+		).rejects.toThrow(
+			"Terrain draw unit terrain-overflow exceeded color texture page capacity 4; baker must split illegal terrain draw units before commit.",
+		);
+	});
 
 	it("packs compatible new texture uses into one shared page placement", async () => {
 		const assetService = new FixtureAssetService();
@@ -510,43 +510,43 @@ describe("browser texture manager", () => {
 			],
 		});
 
-			expect(update?.textureBindings).toEqual([
-				expect.objectContaining({
-					bindingKey: "terrain-a:prepared-texture:06000010",
-					pageSlot: { kind: "color", slot: 0 },
-				}),
-				expect.objectContaining({
-					bindingKey: "terrain-a:prepared-texture:06000020",
-					pageSlot: { kind: "color", slot: 1 },
-				}),
-			]);
+		expect(update?.textureBindings).toEqual([
+			expect.objectContaining({
+				bindingKey: "terrain-a:prepared-texture:06000010",
+				pageSlot: { kind: "color", slot: 0 },
+			}),
+			expect.objectContaining({
+				bindingKey: "terrain-a:prepared-texture:06000020",
+				pageSlot: { kind: "color", slot: 1 },
+			}),
+		]);
+	});
+
+	it("rejects terrain draw units that exceed terrain texture page slots", async () => {
+		const assetService = new FixtureAssetService();
+		const rectsByTextureUseId = new Map<
+			string,
+			FixtureTexturePackerRectPlacement
+		>();
+		for (let index = 0; index < 5; index += 1) {
+			rectsByTextureUseId.set(`overflow-texture-${index}`, {
+				pageHeight: 512,
+				pageId: `overflow-page:${index}`,
+				pageWidth: 512,
+				rect: [96, 96, 1, 1],
+			});
+		}
+		const texturePacker = new FixtureTexturePacker({ rectsByTextureUseId });
+		const textureManager = new TextureManager({
+			assetService,
+			texturePacker,
 		});
 
-		it("rejects terrain draw units that exceed terrain texture page slots", async () => {
-			const assetService = new FixtureAssetService();
-			const rectsByTextureUseId = new Map<
-				string,
-				FixtureTexturePackerRectPlacement
-			>();
-			for (let index = 0; index < 5; index += 1) {
-				rectsByTextureUseId.set(`overflow-texture-${index}`, {
-					pageHeight: 512,
-					pageId: `overflow-page:${index}`,
-					pageWidth: 512,
-					rect: [96, 96, 1, 1],
-				});
-			}
-			const texturePacker = new FixtureTexturePacker({ rectsByTextureUseId });
-			const textureManager = new TextureManager({
-				assetService,
-				texturePacker,
-			});
-
-			await expect(
-				textureManager.applyStaticCommitDelta({
-					addedDrawUnits: [],
-					removedResources: [],
-					revision: 1,
+		await expect(
+			textureManager.applyStaticCommitDelta({
+				addedDrawUnits: [],
+				removedResources: [],
+				revision: 1,
 				bakeBatchId: "batch-a",
 				textureUses: [
 					...Array.from({ length: 5 }, (_, index) =>
@@ -556,12 +556,12 @@ describe("browser texture manager", () => {
 							textureUseId: `overflow-texture-${index}`,
 						}),
 					),
-					],
-				}),
-			).rejects.toThrow(
-				"Terrain draw unit terrain-overflow exceeded color texture page capacity 4; baker must split illegal terrain draw units before commit.",
-			);
-		});
+				],
+			}),
+		).rejects.toThrow(
+			"Terrain draw unit terrain-overflow exceeded color texture page capacity 4; baker must split illegal terrain draw units before commit.",
+		);
+	});
 
 	it("assigns static object base-color role pages per draw unit", async () => {
 		const assetService = new FixtureAssetService();
@@ -579,22 +579,22 @@ describe("browser texture manager", () => {
 				},
 			],
 			[
-					"static-a:base:1",
-					{
-						pageHeight: 512,
-						pageId: "static-base-page:0",
-						pageWidth: 512,
-						rect: [96, 96, 1, 1],
-					},
+				"static-a:base:1",
+				{
+					pageHeight: 512,
+					pageId: "static-base-page:0",
+					pageWidth: 512,
+					rect: [96, 96, 1, 1],
+				},
 			],
 		]);
 		const texturePacker = new FixtureTexturePacker({ rectsByTextureUseId });
 		const textureManager = new TextureManager({ assetService, texturePacker });
 
-			const update = await textureManager.applyStaticCommitDelta({
-				addedDrawUnits: [],
-				removedResources: [],
-				revision: 1,
+		const update = await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedResources: [],
+			revision: 1,
 			bakeBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
@@ -614,19 +614,19 @@ describe("browser texture manager", () => {
 			],
 		});
 
-			expect(update?.textureBindings).toEqual([
-				expect.objectContaining({
-					bindingKey: "static-a:base:0",
-					owner: { drawUnitId: "static-a", kind: "draw-unit" },
-					pageSlot: { kind: "object-base-color", slot: 0 },
-				}),
-				expect.objectContaining({
-					bindingKey: "static-a:base:1",
-					owner: { drawUnitId: "static-a", kind: "draw-unit" },
-					pageSlot: { kind: "object-base-color", slot: 0 },
-				}),
-			]);
-		});
+		expect(update?.textureBindings).toEqual([
+			expect.objectContaining({
+				bindingKey: "static-a:base:0",
+				owner: { drawUnitId: "static-a", kind: "draw-unit" },
+				pageSlot: { kind: "object-base-color", slot: 0 },
+			}),
+			expect.objectContaining({
+				bindingKey: "static-a:base:1",
+				owner: { drawUnitId: "static-a", kind: "draw-unit" },
+				pageSlot: { kind: "object-base-color", slot: 0 },
+			}),
+		]);
+	});
 
 	it("assigns landblock env-cell texture uses to static role pages", async () => {
 		const rectsByTextureUseId = new Map<
@@ -643,13 +643,13 @@ describe("browser texture manager", () => {
 				},
 			],
 			[
-					"structured-interior-a:base:1",
-					{
-						pageHeight: 16,
-						pageId: "env-cell-base-page:0",
-						pageWidth: 16,
-						rect: [4, 4, 1, 1],
-					},
+				"structured-interior-a:base:1",
+				{
+					pageHeight: 16,
+					pageId: "env-cell-base-page:0",
+					pageWidth: 16,
+					rect: [4, 4, 1, 1],
+				},
 			],
 		]);
 		const texturePacker = new FixtureTexturePacker({ rectsByTextureUseId });
@@ -690,24 +690,24 @@ describe("browser texture manager", () => {
 			],
 		});
 
-			expect(update?.textureBindings).toEqual([
-				expect.objectContaining({
-					bindingKey: "structured-interior-a:base:0",
-					owner: {
-						drawUnitId: "structured-interior-a",
-						kind: "draw-unit",
-					},
-					pageSlot: { kind: "object-base-color", slot: 0 },
-				}),
-				expect.objectContaining({
-					bindingKey: "structured-interior-a:base:1",
-					owner: {
-						drawUnitId: "structured-interior-a",
-						kind: "draw-unit",
-					},
-					pageSlot: { kind: "object-base-color", slot: 0 },
-				}),
-			]);
+		expect(update?.textureBindings).toEqual([
+			expect.objectContaining({
+				bindingKey: "structured-interior-a:base:0",
+				owner: {
+					drawUnitId: "structured-interior-a",
+					kind: "draw-unit",
+				},
+				pageSlot: { kind: "object-base-color", slot: 0 },
+			}),
+			expect.objectContaining({
+				bindingKey: "structured-interior-a:base:1",
+				owner: {
+					drawUnitId: "structured-interior-a",
+					kind: "draw-unit",
+				},
+				pageSlot: { kind: "object-base-color", slot: 0 },
+			}),
+		]);
 		expect(texturePacker.jobs).toMatchObject([
 			{
 				domain: "env-cell-system",
@@ -728,51 +728,51 @@ describe("browser texture manager", () => {
 		]);
 	});
 
-		it("rejects static object texture uses that exceed one page per object role", async () => {
-			const assetService = new FixtureAssetService();
-			const textureUses = Array.from(
-				{ length: MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW + 1 },
-				(_, index) =>
-					createTextureUseCommit({
-						domain: "outdoor-buildings",
-						drawUnitId: "static-overflow",
-						renderSurfaceId: 0x06000010 + index,
-						textureUseId: `static-overflow:base:${index}`,
-						usage: "rgba-color",
-					}),
-			);
-			const rectsByTextureUseId = new Map<
-				string,
-				FixtureTexturePackerRectPlacement
-			>(
-				textureUses.map((textureUse, index) => [
-					textureUse.textureUseId,
-					{
-						pageHeight: 512,
-						pageId: `static-overflow-page:${index}`,
-						pageWidth: 512,
-						rect: [96, 96, 1, 1],
-					},
-				]),
-			);
-			const texturePacker = new FixtureTexturePacker({ rectsByTextureUseId });
-			const textureManager = new TextureManager({
-				assetService,
-				texturePacker,
-			});
-
-			await expect(
-				textureManager.applyStaticCommitDelta({
-					addedDrawUnits: [],
-					removedResources: [],
-					revision: 1,
-					bakeBatchId: "batch-a",
-					textureUses,
+	it("rejects static object texture uses that exceed one page per object role", async () => {
+		const assetService = new FixtureAssetService();
+		const textureUses = Array.from(
+			{ length: MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW + 1 },
+			(_, index) =>
+				createTextureUseCommit({
+					domain: "outdoor-buildings",
+					drawUnitId: "static-overflow",
+					renderSurfaceId: 0x06000010 + index,
+					textureUseId: `static-overflow:base:${index}`,
+					usage: "rgba-color",
 				}),
-			).rejects.toThrow(
-				"Object material texture binding for draw-unit:static-overflow exceeded one page for object-base-color.",
-			);
+		);
+		const rectsByTextureUseId = new Map<
+			string,
+			FixtureTexturePackerRectPlacement
+		>(
+			textureUses.map((textureUse, index) => [
+				textureUse.textureUseId,
+				{
+					pageHeight: 512,
+					pageId: `static-overflow-page:${index}`,
+					pageWidth: 512,
+					rect: [96, 96, 1, 1],
+				},
+			]),
+		);
+		const texturePacker = new FixtureTexturePacker({ rectsByTextureUseId });
+		const textureManager = new TextureManager({
+			assetService,
+			texturePacker,
 		});
+
+		await expect(
+			textureManager.applyStaticCommitDelta({
+				addedDrawUnits: [],
+				removedResources: [],
+				revision: 1,
+				bakeBatchId: "batch-a",
+				textureUses,
+			}),
+		).rejects.toThrow(
+			"Object material texture binding for draw-unit:static-overflow exceeded one page for object-base-color.",
+		);
+	});
 
 	it("removes texture refs by draw-unit ownership without requiring rebaked geometry", async () => {
 		const textureManager = new TextureManager({
@@ -1199,12 +1199,12 @@ describe("browser texture manager", () => {
 		expect(firstUpdate?.placements).toHaveLength(1);
 		expect(secondUpdate).toMatchObject({
 			textureBindings: [
-					{
-						bindingKey: "terrain-b:prepared-texture:06000010",
-						owner: { drawUnitId: "terrain-b", kind: "draw-unit" },
-						textureRefId: STABLE_TEXTURE_REF_ID,
-					},
-				],
+				{
+					bindingKey: "terrain-b:prepared-texture:06000010",
+					owner: { drawUnitId: "terrain-b", kind: "draw-unit" },
+					textureRefId: STABLE_TEXTURE_REF_ID,
+				},
+			],
 			placements: [],
 			removedTextureRefIds: [],
 			revision: 2,
@@ -1471,12 +1471,12 @@ describe("browser texture manager", () => {
 		expect(texturePacker.jobs).toHaveLength(1);
 		expect(secondUpdate?.placements).toEqual([]);
 		expect(secondUpdate?.textureBindings).toMatchObject([
-				{
-					bindingKey: "building-repeat:06000010",
-					owner: { drawUnitId: "building-repeat", kind: "draw-unit" },
-					textureRefId: firstUpdate?.placements[0]?.textureRefId,
-				},
-			]);
+			{
+				bindingKey: "building-repeat:06000010",
+				owner: { drawUnitId: "building-repeat", kind: "draw-unit" },
+				textureRefId: firstUpdate?.placements[0]?.textureRefId,
+			},
+		]);
 	});
 
 	it("separates compatible static and static-authored dynamic visual owners by lifetime bucket", async () => {
@@ -1597,29 +1597,29 @@ describe("browser texture manager", () => {
 			},
 		});
 		expect(textureManager.createDiagnosticsReport().buckets).toMatchObject([
-				{
-					domain: "runtime-object-material",
-					texturePageCount: 1,
+			{
+				domain: "runtime-object-material",
+				texturePageCount: 1,
+			},
+		]);
+		expect(update?.textureBindings).toEqual([
+			expect.objectContaining({
+				bindingKey: "runtime-spawn:1:base:0",
+				owner: {
+					kind: "dynamic-visual-resource",
+					resourceId: "dynamic-visual-resource:runtime-spawn:1",
 				},
-			]);
-			expect(update?.textureBindings).toEqual([
-				expect.objectContaining({
-					bindingKey: "runtime-spawn:1:base:0",
-					owner: {
-						kind: "dynamic-visual-resource",
-						resourceId: "dynamic-visual-resource:runtime-spawn:1",
-					},
-					pageSlot: { kind: "object-base-color", slot: 0 },
-				}),
-				expect.objectContaining({
-					bindingKey: "runtime-spawn:1:base:1",
-					owner: {
-						kind: "dynamic-visual-resource",
-						resourceId: "dynamic-visual-resource:runtime-spawn:1",
-					},
-					pageSlot: { kind: "object-base-color", slot: 0 },
-				}),
-			]);
+				pageSlot: { kind: "object-base-color", slot: 0 },
+			}),
+			expect.objectContaining({
+				bindingKey: "runtime-spawn:1:base:1",
+				owner: {
+					kind: "dynamic-visual-resource",
+					resourceId: "dynamic-visual-resource:runtime-spawn:1",
+				},
+				pageSlot: { kind: "object-base-color", slot: 0 },
+			}),
+		]);
 	});
 
 	it("releases runtime object-material texture pages when the runtime visual owner is removed", async () => {
@@ -1679,12 +1679,12 @@ describe("browser texture manager", () => {
 				},
 			],
 			textureUses: [],
-			});
+		});
 
-			expect(releaseUpdate?.removedTextureRefIds).toHaveLength(1);
-			expect(releaseUpdate?.removedTextureRefIds[0]).toContain(
-				"runtime-authored-dynamic:runtime-dynamic:runtime-spawn:1",
-			);
+		expect(releaseUpdate?.removedTextureRefIds).toHaveLength(1);
+		expect(releaseUpdate?.removedTextureRefIds[0]).toContain(
+			"runtime-authored-dynamic:runtime-dynamic:runtime-spawn:1",
+		);
 		expect(textureManager.createDiagnosticsReport().summary).toMatchObject({
 			texturePageCount: 0,
 		});
@@ -1898,17 +1898,17 @@ describe("browser texture manager", () => {
 			},
 		]);
 		expect(update?.textureBindings).toMatchObject([
-				{
-					bindingKey: "static-a:index",
-					owner: { drawUnitId: "static-a", kind: "draw-unit" },
-					pageSlot: { kind: "object-index", slot: 0 },
-				},
-				{
-					bindingKey: "static-a:palette",
-					owner: { drawUnitId: "static-a", kind: "draw-unit" },
-					pageSlot: { kind: "object-palette", slot: 0 },
-				},
-			]);
+			{
+				bindingKey: "static-a:index",
+				owner: { drawUnitId: "static-a", kind: "draw-unit" },
+				pageSlot: { kind: "object-index", slot: 0 },
+			},
+			{
+				bindingKey: "static-a:palette",
+				owner: { drawUnitId: "static-a", kind: "draw-unit" },
+				pageSlot: { kind: "object-palette", slot: 0 },
+			},
+		]);
 		expect(Array.from(update?.placements[1]?.pixels ?? [])).toEqual([
 			0x44, 0x55, 0x66, 0x80, 0xaa, 0xbb, 0xcc, 0xff,
 		]);

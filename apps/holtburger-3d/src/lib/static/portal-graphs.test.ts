@@ -524,9 +524,10 @@ describe("static portal graphs", () => {
 	});
 });
 
-function createLayerOwner(domain: StaticLayerPeerRecordOwner["domain"]): StaticLayerPeerRecordOwner {
-	const keyKind =
-		domain === "env-cell-system" ? "env-cell-system" : domain;
+function createLayerOwner(
+	domain: StaticLayerPeerRecordOwner["domain"],
+): StaticLayerPeerRecordOwner {
+	const keyKind = domain === "env-cell-system" ? "env-cell-system" : domain;
 	return {
 		domain,
 		key: {

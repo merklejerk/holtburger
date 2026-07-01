@@ -96,7 +96,9 @@ export function reconcileLayerOwners(
 	};
 }
 
-function sortLayerOwnerKeys(keys: readonly LayerOwnerKey[]): readonly LayerOwnerKey[] {
+function sortLayerOwnerKeys(
+	keys: readonly LayerOwnerKey[],
+): readonly LayerOwnerKey[] {
 	return [...keys].sort((left, right) =>
 		createLayerOwnerKeyId(left).localeCompare(createLayerOwnerKeyId(right)),
 	);

@@ -1,6 +1,4 @@
-import type {
-	RegionRenderProfilePayloadDto,
-} from "../../../lib/host/contracts";
+import type { RegionRenderProfilePayloadDto } from "../../../lib/host/contracts";
 import type { LandblockOutdoorLayerSourcePayloadDto } from "../source-payloads";
 import type {
 	HostAssetKey,

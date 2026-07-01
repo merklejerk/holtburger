@@ -501,10 +501,12 @@ describe("browser landblock env-cell resolver", () => {
 				payload.scope.kind === "env-cell-system"
 					? payload.scope.envCells.map((cell) => ({
 							...cell,
-							staticObjectPlacements: cell.staticObjectPlacements.map((seed) => ({
-								...seed,
-								debug: null,
-							})),
+							staticObjectPlacements: cell.staticObjectPlacements.map(
+								(seed) => ({
+									...seed,
+									debug: null,
+								}),
+							),
 						}))
 					: [],
 			sourceAssets:
@@ -1208,7 +1210,9 @@ function createDiagnostics() {
 	};
 }
 
-function createProvenance(sourceAssetKind = "landblock-scene-lod-env-cell-layer") {
+function createProvenance(
+	sourceAssetKind = "landblock-scene-lod-env-cell-layer",
+) {
 	return {
 		detail: null,
 		errorCode: null,

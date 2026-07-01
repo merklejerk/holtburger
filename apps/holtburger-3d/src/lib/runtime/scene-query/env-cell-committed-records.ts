@@ -231,10 +231,11 @@ export class EnvCellCommittedRecordStore {
 			this.#visibilityRecordsByKey,
 			options.landblockId,
 		);
-		const envCellStaticObjectPlacementRecords = collectCommittedRecordsByLandblock(
-			this.#envCellStaticObjectPlacementRecordsByKey,
-			options.landblockId,
-		);
+		const envCellStaticObjectPlacementRecords =
+			collectCommittedRecordsByLandblock(
+				this.#envCellStaticObjectPlacementRecordsByKey,
+				options.landblockId,
+			);
 
 		if (
 			envCellStaticObjectPlacementRecords.length === 0 &&
@@ -383,9 +384,10 @@ export class EnvCellCommittedRecordStore {
 		const spatialRecordsByLandblock = groupEnvCellSpatialRecordsByLandblock(
 			this.#spatialRecordsByKey,
 		);
-		const placementsByLandblockAndEnvCell = groupEnvCellPlacementsByLandblockAndEnvCell(
-			this.#envCellStaticObjectPlacementRecordsByKey,
-		);
+		const placementsByLandblockAndEnvCell =
+			groupEnvCellPlacementsByLandblockAndEnvCell(
+				this.#envCellStaticObjectPlacementRecordsByKey,
+			);
 
 		for (const [landblockId, spatialRecords] of spatialRecordsByLandblock) {
 			const residencyBvh = spatialRecords[0]?.residencyBvh;
@@ -403,8 +405,9 @@ export class EnvCellCommittedRecordStore {
 			const cellsByEnvCellId = new Map<number, EnvCellBvhRoot>();
 			for (const record of spatialRecords) {
 				const placements =
-					placementsByLandblockAndEnvCell.get(landblockId)?.get(record.envCellId) ??
-					[];
+					placementsByLandblockAndEnvCell
+						.get(landblockId)
+						?.get(record.envCellId) ?? [];
 				cellsByEnvCellId.set(record.envCellId, {
 					envCellId: record.envCellId,
 					items: placements.map((placementRecord): EnvCellBvhRuntimeItem => {
@@ -474,7 +477,8 @@ export class EnvCellCommittedRecordStore {
 		this.#clearEnvCellSystemLayerRecords(landblockId);
 		this.#envCellSystemLayersByLandblockId.set(landblockId, payload);
 		this.applyStaticPeerRecords({
-			envCellStaticObjectPlacementRecords: payload.envCellStaticObjectPlacementRecords,
+			envCellStaticObjectPlacementRecords:
+				payload.envCellStaticObjectPlacementRecords,
 			outdoorAnchorLandblockId,
 			portalGraphs: payload.portalGraphRecords,
 			portalInteriorRecords: payload.portalInteriorRecords,
@@ -1280,8 +1284,7 @@ function isRecordWithLayerOwner(record: unknown): record is {
 		typeof record === "object" &&
 		record !== null &&
 		"owner" in record &&
-		(record as { owner?: { kind?: unknown } }).owner?.kind ===
-			"layer-owner" &&
+		(record as { owner?: { kind?: unknown } }).owner?.kind === "layer-owner" &&
 		typeof (record as { owner?: { domain?: unknown } }).owner?.domain ===
 			"string"
 	);

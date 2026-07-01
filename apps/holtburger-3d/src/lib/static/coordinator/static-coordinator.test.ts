@@ -218,16 +218,16 @@ describe("static coordinator", () => {
 		expect(layerTasks).toHaveLength(1);
 		expect(layerTasks[0]).toMatchObject({
 			activeBakeBatchId: null,
-				domain: "outdoor-terrain",
-				ownerId: "terrain:0xda55ffff",
-				ownerKey: {
-					kind: "terrain",
-					landblockId: 0xda55ffff,
-				},
-				phase: "resolving",
-				revision: 1,
-				scopeKey: "landblock:da55ffff",
-				taskId: "1:landblock:da55ffff:outdoor-terrain",
+			domain: "outdoor-terrain",
+			ownerId: "terrain:0xda55ffff",
+			ownerKey: {
+				kind: "terrain",
+				landblockId: 0xda55ffff,
+			},
+			phase: "resolving",
+			revision: 1,
+			scopeKey: "landblock:da55ffff",
+			taskId: "1:landblock:da55ffff:outdoor-terrain",
 		});
 		expect(layerTasks[0]?.phaseAgeMs).toBeGreaterThanOrEqual(0);
 		expect(layerTasks[0]?.phaseStartedAtMs).toBeGreaterThan(0);
@@ -718,17 +718,17 @@ describe("static coordinator", () => {
 			createSingleTerrainDemand(0xda55ffff),
 		);
 
-			expect(first.runId).toBe("static-run:1");
-			expect(second.runId).toBe("static-run:2");
-			const normalizePhaseAge = (task: StaticLayerTaskStatus) => ({
-				...task,
-				phaseAgeMs: 0,
-			});
-			expect(second.layerTasks.map(normalizePhaseAge)).toEqual(
-				first.layerTasks.map(normalizePhaseAge),
-			);
-			expect(resolver.pendingSourceRequests).toHaveLength(1);
+		expect(first.runId).toBe("static-run:1");
+		expect(second.runId).toBe("static-run:2");
+		const normalizePhaseAge = (task: StaticLayerTaskStatus) => ({
+			...task,
+			phaseAgeMs: 0,
 		});
+		expect(second.layerTasks.map(normalizePhaseAge)).toEqual(
+			first.layerTasks.map(normalizePhaseAge),
+		);
+		expect(resolver.pendingSourceRequests).toHaveLength(1);
+	});
 
 	it("keeps failed same-owner tasks terminal without retrying", async () => {
 		const consoleError = vi
@@ -1625,11 +1625,11 @@ describe("static coordinator", () => {
 		).toBe("materializing");
 	});
 
-		it("isolates env-cell tasks into single-item bake inputs", async () => {
-			const resolver = new DeferredStaticResolver();
-			const baker = new DeferredStaticBaker();
-			const coordinator = new StaticCoordinator({
-				baker,
+	it("isolates env-cell tasks into single-item bake inputs", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
 			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
 			resolver,
 		});
@@ -1656,19 +1656,19 @@ describe("static coordinator", () => {
 			resolver.complete(
 				request.requestId,
 				createEnvCellSystemResolverPayload(request.job.scope.landblockId),
-				);
-			}
-			await flushPromises();
+			);
+		}
+		await flushPromises();
 
-			const envCellBatches = baker.pendingInputs.filter(
-				(input) => input.domain === "env-cell-system",
-			);
-			expect(envCellBatches.length).toBeGreaterThan(1);
-			expect(envCellBatches.every((input) => input.items.length === 1)).toBe(
-				true,
-			);
-			expect(deltas).toEqual([]);
-		});
+		const envCellBatches = baker.pendingInputs.filter(
+			(input) => input.domain === "env-cell-system",
+		);
+		expect(envCellBatches.length).toBeGreaterThan(1);
+		expect(envCellBatches.every((input) => input.items.length === 1)).toBe(
+			true,
+		);
+		expect(deltas).toEqual([]);
+	});
 });
 
 function failCommitDelta(): never {

@@ -221,11 +221,11 @@ function createInput(bakeBatchId = "batch-a"): StaticBakeBatchInput {
 				},
 				task,
 			},
-			],
-			revision: 1,
-			bakeBatchId,
-		};
-	}
+		],
+		revision: 1,
+		bakeBatchId,
+	};
+}
 
 function createResult(input: StaticBakeBatchInput): StaticBakeBatchResult {
 	return {

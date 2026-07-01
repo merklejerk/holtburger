@@ -206,7 +206,9 @@ export class WorkerPoolStaticBaker implements StaticBaker {
 				(error: unknown) => {
 					this.#activeBakerIndexes.delete(bakerIndex);
 					this.#dispatchQueuedRequests();
-					request.reject(error instanceof Error ? error : new Error(String(error)));
+					request.reject(
+						error instanceof Error ? error : new Error(String(error)),
+					);
 				},
 			);
 		}

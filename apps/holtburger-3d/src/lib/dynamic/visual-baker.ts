@@ -43,10 +43,8 @@ import { MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW } from "../renderer/types";
 import {
 	classifyTexturePlacementPool,
 	classifyTextureUsagePurpose,
-	createObjectVisualDynamicTexturePlacementIntent,
 	createRuntimeAuthoredDynamicTexturePlacementBucketKey,
 	createStaticAuthoredDynamicTexturePlacementBucketKey,
-	createTexturePlacementItemId,
 	type TexturePlacementItemId,
 	type TexturePlacementBucketKey,
 	type TextureResourceDependencies,
@@ -57,6 +55,10 @@ import {
 	createObjectMaterialDrawUnitPartitionKey,
 	splitObjectMaterialPartitionByMaterialTableBudget,
 } from "../visual/object-material-draw-unit-partition";
+import {
+	createObjectVisualTexturePlacementIntents,
+	type ObjectVisualTexturePlacementRequirement,
+} from "../visual/object-visual-texture-placement-planner";
 
 export interface DynamicVisualBaker {
 	bake(input: DynamicVisualBakeInput): Promise<DynamicVisualBakeResult>;
@@ -93,6 +95,11 @@ interface DynamicTriangleRenderPrimitive {
 		readonly purpose: TextureUsagePurpose;
 	}[];
 }
+
+type PendingDynamicEntityTextureRequirement = Omit<
+	DynamicEntityTextureRequirement,
+	"placementItemId"
+>;
 
 export class LocalDynamicVisualBaker implements DynamicVisualBaker {
 	async bake(input: DynamicVisualBakeInput): Promise<DynamicVisualBakeResult> {
@@ -169,10 +176,11 @@ function bakeDynamicVisualRecipe(options: {
 	readonly texturePlanning: DynamicVisualTexturePlanning | null;
 }): BakedDynamicVisualResource {
 	const { recipe } = options;
-	const materialPlans = requireDynamicVisualMaterialPlan({
+	const texturePlanning = requireDynamicVisualTexturePlanning({
 		entityId: recipe.entityId,
 		texturePlanning: options.texturePlanning,
 	});
+	const materialPlans = texturePlanning.materialPlan;
 	const resourceId = createDynamicVisualResourceId(recipe.entityId);
 	const materialSlots = createDynamicMaterialSlotRequirements(
 		recipe.visual.materialPolicy.visualObject,
@@ -190,10 +198,7 @@ function bakeDynamicVisualRecipe(options: {
 
 	const textureRequirements = resolveDynamicTextureRequirementPlacementItemIds({
 		texturePlacementSnapshot: options.texturePlacementSnapshot,
-		textureRequirements: createTextureRequirements({
-			materialPlans: materialPlans.materialPlans,
-			resourceId,
-		}),
+		textureRequirements: texturePlanning.textureRequirements,
 	});
 	assertTextureRequirementsPlaced({
 		resourceId,
@@ -259,42 +264,92 @@ export function createDynamicVisualTexturePlanning(
 			textureRequirements: [],
 		};
 	}
-	const textureRequirements = createTextureRequirements({
+	const pendingTextureRequirements = createPendingTextureRequirements({
 		materialPlans: materialPlans.materialPlans,
 		resourceId,
 	});
+	const placementIntents = createObjectVisualTexturePlacementIntents({
+		requirements: pendingTextureRequirements.map((requirement) =>
+			createDynamicTexturePlacementRequirement({
+				recipe,
+				requirement,
+			}),
+		),
+	});
+	const placementItemIdByTextureUseId = new Map(
+		placementIntents.map((intent) => [intent.textureUseId, intent.itemId]),
+	);
+	const textureRequirements = pendingTextureRequirements.map(
+		(requirement): DynamicEntityTextureRequirement => ({
+			...requirement,
+			placementItemId: requireDynamicTexturePlanningItemId({
+				entityId: recipe.entityId,
+				placementItemIdByTextureUseId,
+				textureUseId: requirement.textureUseId,
+			}),
+		}),
+	);
 	return {
 		entityId: recipe.entityId,
 		materialPlan: materialPlans,
-		placementIntents: textureRequirements.map((requirement) => {
-			const textureDomain =
-				recipe.visual.materialPolicy.detailRolePolicy.kind ===
-				"runtime-authored-none"
-					? "runtime-object-material"
-					: recipe.visual.materialPolicy.detailRolePolicy.domain;
-			return createObjectVisualDynamicTexturePlacementIntent(
-				{
-					samplingPolicy: requirement.samplingPolicy,
-					source: requirement.dataUse,
-					textureDomain,
-					textureUseId: requirement.textureUseId,
-				},
-				requirement.placementItemId,
-				{
-					affinityKey: createDynamicTextureAffinityKey(recipe),
-					placementBucketKey: createDynamicTexturePlacementBucketKey({
-						purpose: classifyTextureUsagePurpose(
-							requirement.dataUse,
-							classifyTexturePlacementPool(textureDomain),
-						),
-						recipe,
-						textureDomain,
-					}),
-				},
-			);
-		}),
+		placementIntents,
 		textureRequirements,
 	};
+}
+
+function createDynamicTexturePlacementRequirement(options: {
+	readonly recipe: DynamicVisualBakeInput["recipes"][number];
+	readonly requirement: PendingDynamicEntityTextureRequirement;
+}): ObjectVisualTexturePlacementRequirement {
+	const textureDomain =
+		options.recipe.visual.materialPolicy.detailRolePolicy.kind ===
+		"runtime-authored-none"
+			? "runtime-object-material"
+			: options.recipe.visual.materialPolicy.detailRolePolicy.domain;
+	return {
+		policy: {
+			affinityKey: createDynamicTextureAffinityKey(options.recipe),
+			kind: "dynamic",
+			placementBucketKey: createDynamicTexturePlacementBucketKey({
+				purpose: classifyTextureUsagePurpose(
+					options.requirement.dataUse,
+					classifyTexturePlacementPool(textureDomain),
+				),
+				recipe: options.recipe,
+				textureDomain,
+			}),
+			textureDomain,
+		},
+		requirement: {
+			bindingKey: options.requirement.textureUseId,
+			samplingPolicy: options.requirement.samplingPolicy,
+			source: {
+				dataUse: options.requirement.dataUse,
+				kind: "material-texture-data-use",
+				samplingPolicy: options.requirement.samplingPolicy,
+			},
+			textureUseId: options.requirement.textureUseId,
+		},
+	};
+}
+
+function requireDynamicTexturePlanningItemId(options: {
+	readonly entityId: string;
+	readonly placementItemIdByTextureUseId: ReadonlyMap<
+		string,
+		TexturePlacementItemId
+	>;
+	readonly textureUseId: string;
+}): TexturePlacementItemId {
+	const placementItemId = options.placementItemIdByTextureUseId.get(
+		options.textureUseId,
+	);
+	if (placementItemId === undefined) {
+		throw new Error(
+			`Dynamic visual ${options.entityId} has no planned placement item id for texture use ${options.textureUseId}.`,
+		);
+	}
+	return placementItemId;
 }
 
 function createDynamicTexturePlacementBucketKey(options: {
@@ -326,10 +381,14 @@ function createDynamicTexturePlacementBucketKey(options: {
 	});
 }
 
-function requireDynamicVisualMaterialPlan(options: {
+function requireDynamicVisualTexturePlanning(options: {
 	readonly entityId: string;
 	readonly texturePlanning: DynamicVisualTexturePlanning | null;
-}) {
+}): DynamicVisualTexturePlanning & {
+	readonly materialPlan: NonNullable<
+		DynamicVisualTexturePlanning["materialPlan"]
+	>;
+} {
 	if (!options.texturePlanning) {
 		throw new Error(
 			`Dynamic visual ${options.entityId} is missing pre-bake material planning.`,
@@ -340,7 +399,11 @@ function requireDynamicVisualMaterialPlan(options: {
 			`Dynamic visual ${options.entityId} has no material plan in pre-bake texture planning.`,
 		);
 	}
-	return options.texturePlanning.materialPlan;
+	return options.texturePlanning as DynamicVisualTexturePlanning & {
+		readonly materialPlan: NonNullable<
+			DynamicVisualTexturePlanning["materialPlan"]
+		>;
+	};
 }
 
 function createSourceGeometryIndex(
@@ -435,20 +498,18 @@ function createMaterialPlanningLandblockSource(
 	};
 }
 
-function createTextureRequirements(options: {
+function createPendingTextureRequirements(options: {
 	readonly materialPlans: readonly ObjectVisualMaterialPlan[];
 	readonly resourceId: string;
-}): readonly DynamicEntityTextureRequirement[] {
-	let nextPlacementItemId = 0;
+}): readonly PendingDynamicEntityTextureRequirement[] {
 	return options.materialPlans.flatMap((plan) => {
 		const dataUses = plan.textureRoles.map((role) => role.dataUse);
 		const wrapMode = resolveRepeatedStaticMaterialPrimaryWrapMode(dataUses);
 		return plan.textureRoles.map(
-			(role): DynamicEntityTextureRequirement => ({
+			(role): PendingDynamicEntityTextureRequirement => ({
 				dataUse: role.dataUse,
 				key: createTextureRequirementKey(role.dataUse),
 				material: plan.material,
-				placementItemId: createTexturePlacementItemId(nextPlacementItemId++),
 				role: role.role,
 				samplingPolicy: createStaticMaterialTextureSamplingPolicy({
 					dataUse: role.dataUse,

@@ -1,16 +1,9 @@
-import type {
-	StaticBakeBatchItem,
-	StaticBakeTextureUse,
-	StaticTextureUseOwner,
-} from "../../contracts";
-import type {
-	ObjectVisualTexturePlacementIntent,
-	TextureBindingRequirement,
-} from "../../../textures/placement";
+import type { StaticBakeBatchItem } from "../../contracts";
+import type { ObjectVisualTexturePlacementIntent } from "../../../textures/placement";
 import {
-	createObjectVisualStaticTexturePlacementIntent,
-	createTexturePlacementItemId,
-} from "../../../textures/placement";
+	createObjectVisualTexturePlacementIntents,
+	type ObjectVisualTexturePlacementRequirement,
+} from "../../../visual/object-visual-texture-placement-planner";
 import { isCurrentlyStageableStaticObjectDataUse } from "../../objects/bake/static-object-renderability";
 import {
 	createStructuredInteriorTextureBindingRequirement,
@@ -22,9 +15,9 @@ import { isRenderableObjectVisualMaterialPlan } from "../../objects/bake/static-
 export function createStructuredInteriorTexturePlacementIntents(input: {
 	readonly items: readonly StaticBakeBatchItem[];
 }): readonly ObjectVisualTexturePlacementIntent[] {
-	const intentsByTextureUseId = new Map<
+	const requirementsByTextureUseId = new Map<
 		string,
-		ObjectVisualTexturePlacementIntent
+		ObjectVisualTexturePlacementRequirement
 	>();
 
 	for (const item of input.items) {
@@ -57,52 +50,30 @@ export function createStructuredInteriorTexturePlacementIntents(input: {
 							wrapMode,
 						},
 					);
-					if (intentsByTextureUseId.has(requirement.textureUseId)) {
+					if (requirementsByTextureUseId.has(requirement.textureUseId)) {
 						continue;
 					}
-					intentsByTextureUseId.set(
-						requirement.textureUseId,
-						createObjectVisualStaticTexturePlacementIntent(
-							createStructuredInteriorPlanningTextureUse({
-								requirement,
+					requirementsByTextureUseId.set(requirement.textureUseId, {
+						policy: {
+							affinityKey: createStructuredInteriorAffinityKey({
+								envCellId: envCell.identity.envCellId,
+								landblockId: item.task.scope.landblockId,
+								ownerId: item.task.ownerId,
+								surfaceId,
 							}),
-							createTexturePlacementItemId(intentsByTextureUseId.size),
-							{
-								affinityKey: createStructuredInteriorAffinityKey({
-									envCellId: envCell.identity.envCellId,
-									landblockId: item.task.scope.landblockId,
-									ownerId: item.task.ownerId,
-									surfaceId,
-								}),
-							},
-						),
-					);
+							domain: "env-cell-system",
+							kind: "static-authored",
+						},
+						requirement,
+					});
 				}
 			}
 		}
 	}
 
-	return [...intentsByTextureUseId.values()].sort(
-		(left, right) => left.itemId - right.itemId,
-	);
-}
-
-function createStructuredInteriorPlanningTextureUse(options: {
-	readonly requirement: TextureBindingRequirement;
-}): StaticBakeTextureUse {
-	const textureUse: StaticBakeTextureUse = {
-		domain: "env-cell-system",
-		owners: NO_STATIC_TEXTURE_USE_OWNERS,
-		source: options.requirement.source.dataUse,
-		textureUseId: options.requirement.bindingKey,
-	};
-	if (!options.requirement.samplingPolicy) {
-		return textureUse;
-	}
-	return {
-		...textureUse,
-		samplingPolicy: options.requirement.samplingPolicy,
-	};
+	return createObjectVisualTexturePlacementIntents({
+		requirements: [...requirementsByTextureUseId.values()],
+	});
 }
 
 function createStructuredInteriorAffinityKey(input: {
@@ -123,5 +94,3 @@ function createStructuredInteriorAffinityKey(input: {
 function formatHex32(value: number): string {
 	return value.toString(16).padStart(8, "0");
 }
-
-const NO_STATIC_TEXTURE_USE_OWNERS: readonly StaticTextureUseOwner[] = [];

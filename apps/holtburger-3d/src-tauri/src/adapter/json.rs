@@ -294,6 +294,14 @@ pub fn serialize_render_surface_payload(render_surface: &RenderSurface) -> serde
     })
 }
 
+pub fn serialize_render_surface_metadata_payload(
+    render_surface: &RenderSurface,
+) -> serde_json::Value {
+    let mut payload = serialize_render_surface_payload(render_surface);
+    payload["kind"] = serde_json::json!("render-surface-metadata");
+    payload
+}
+
 pub fn serialize_render_surface_binary_payload(
     render_surface: &RenderSurface,
     path_prefix: &str,
@@ -318,6 +326,22 @@ pub fn serialize_palette_payload(palette: &Palette) -> serde_json::Value {
         "paletteId": palette.id,
         "colorCount": palette.colors_argb.len(),
         "colorsArgb": &palette.colors_argb,
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "palette",
+            "errorCode": null,
+            "detail": null
+        }
+    })
+}
+
+pub fn serialize_palette_metadata_payload(palette: &Palette) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "palette-metadata",
+        "residencyKind": "unknown",
+        "sourceAssetKind": "palette",
+        "paletteId": palette.id,
+        "colorCount": palette.colors_argb.len(),
         "provenance": {
             "source": "repo-local-hba",
             "sourceAssetKind": "palette",

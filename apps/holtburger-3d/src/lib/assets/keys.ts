@@ -15,8 +15,10 @@ const HEX32_ROUTE_KINDS = new Set<HostAssetKeyKind>([
 	"material",
 	"surface-texture",
 	"render-surface",
+	"render-surface-metadata",
 	"prepared-texture",
 	"palette",
+	"palette-metadata",
 ]);
 
 export function createHostAssetKey(
@@ -155,7 +157,9 @@ function normalizeAssetKeyId(
 	}
 
 	if (kind === "landblock-scene-lod") {
-		throw new Error("landblock-scene-lod route id requires landblock hex and LoD level.");
+		throw new Error(
+			"landblock-scene-lod route id requires landblock hex and LoD level.",
+		);
 	}
 
 	if (HEX32_ROUTE_KINDS.has(kind)) {
@@ -191,7 +195,9 @@ function assertNonnegativeInteger(value: number, kind: string): number {
 function normalizeSetupAppearanceRouteId(id: string): string {
 	const trimmed = id.trim();
 	if (!/^[0-9a-fA-F]{8}(?:\?.+)?$/.test(trimmed)) {
-		throw new Error(`setup-appearance route id must be hex32 with optional query: ${id}`);
+		throw new Error(
+			`setup-appearance route id must be hex32 with optional query: ${id}`,
+		);
 	}
 
 	return trimmed;
@@ -201,7 +207,9 @@ function normalizeLandblockSceneLodRouteId(id: string): string {
 	const trimmed = id.trim();
 	const match = /^([0-9a-fA-F]{8}):([0-4])$/.exec(trimmed);
 	if (!match) {
-		throw new Error(`landblock-scene-lod route id must be hex32:level with level 0..4: ${id}`);
+		throw new Error(
+			`landblock-scene-lod route id must be hex32:level with level 0..4: ${id}`,
+		);
 	}
 
 	return `${formatHex32(normalizeOutdoorLandblockId(Number.parseInt(match[1] as string, 16)))}:${match[2]}`;
@@ -226,7 +234,9 @@ function parseLandblockSceneLodRouteId(key: HostAssetKey): {
 
 function normalizeSceneLodLevel(level: number): number {
 	if (!Number.isInteger(level) || level < 0 || level > 4) {
-		throw new Error(`landblock-scene-lod level must be an integer from 0 through 4: ${level}`);
+		throw new Error(
+			`landblock-scene-lod level must be an integer from 0 through 4: ${level}`,
+		);
 	}
 
 	return level;

@@ -40,8 +40,21 @@ pub fn parse_render_surface_asset_id(asset_id: &str) -> Option<u32> {
         .or_else(|| parse_prefixed_data_id(asset_id, "render-surface/", 0x07))
 }
 
+pub fn parse_render_surface_metadata_asset_id(asset_id: &str) -> Option<u32> {
+    parse_prefixed_data_id(
+        asset_id,
+        "render-surface-metadata/",
+        DatFileType::Texture as u32,
+    )
+    .or_else(|| parse_prefixed_data_id(asset_id, "render-surface-metadata/", 0x07))
+}
+
 pub fn parse_palette_asset_id(asset_id: &str) -> Option<u32> {
     parse_prefixed_data_id(asset_id, "palette/", DatFileType::Palette as u32)
+}
+
+pub fn parse_palette_metadata_asset_id(asset_id: &str) -> Option<u32> {
+    parse_prefixed_data_id(asset_id, "palette-metadata/", DatFileType::Palette as u32)
 }
 
 fn parse_prefixed_data_id(asset_id: &str, prefix: &str, expected_type: u32) -> Option<u32> {

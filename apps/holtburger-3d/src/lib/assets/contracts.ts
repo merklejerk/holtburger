@@ -12,8 +12,10 @@ export type HostAssetKeyKind =
 	| "region-render-profile"
 	| "surface-texture"
 	| "render-surface"
+	| "render-surface-metadata"
 	| "prepared-texture"
 	| "palette"
+	| "palette-metadata"
 	| "raw";
 
 export interface HostAssetKey {

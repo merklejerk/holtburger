@@ -1283,6 +1283,17 @@ export type RenderSurfacePayloadDto = z.infer<
 	typeof renderSurfacePayloadDtoSchema
 >;
 
+export const renderSurfaceMetadataPayloadDtoSchema =
+	renderSurfacePayloadDtoSchema
+		.omit({ sourceBytes: true })
+		.extend({
+			kind: z.literal("render-surface-metadata"),
+		})
+		.strict();
+export type RenderSurfaceMetadataPayloadDto = z.infer<
+	typeof renderSurfaceMetadataPayloadDtoSchema
+>;
+
 const preparedTextureMipLevelDtoSchema = z.object({
 	level: z.number().int().nonnegative(),
 	width: z.number().int().positive(),
@@ -1353,3 +1364,17 @@ export const palettePayloadDtoSchema = z
 		path: ["colorsArgb"],
 	});
 export type PalettePayloadDto = z.infer<typeof palettePayloadDtoSchema>;
+
+export const paletteMetadataPayloadDtoSchema = z
+	.object({
+		kind: z.literal("palette-metadata"),
+		residencyKind: z.literal("unknown"),
+		sourceAssetKind: z.literal("palette"),
+		paletteId: z.number().int().nonnegative(),
+		colorCount: z.number().int().nonnegative(),
+		provenance: assetProvenanceDtoSchema,
+	})
+	.strict();
+export type PaletteMetadataPayloadDto = z.infer<
+	typeof paletteMetadataPayloadDtoSchema
+>;

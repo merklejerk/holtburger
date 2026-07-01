@@ -19,6 +19,18 @@ describe("host asset preparation", () => {
 			priority: "streaming",
 			requestId: "request-1",
 		});
+		expect(
+			createHostAssetLookupRequest(
+				{ id: "06000001", kind: "render-surface-metadata" },
+				"request-2",
+			).assetId,
+		).toBe("render-surface-metadata/06000001");
+		expect(
+			createHostAssetLookupRequest(
+				{ id: "04000001", kind: "palette-metadata" },
+				"request-3",
+			).assetId,
+		).toBe("palette-metadata/04000001");
 	});
 
 	it("prepares host responses into prepared assets without exposing old records", () => {
@@ -99,8 +111,10 @@ describe("host asset preparation", () => {
 			["region-render-profile/1", "region-render-profile"],
 			["surface-texture/06000001", "surface-texture"],
 			["render-surface/06000001", "render-surface"],
+			["render-surface-metadata/06000001", "render-surface-metadata"],
 			["prepared-texture/06000001?usage=color", "prepared-texture"],
 			["palette/04000001", "palette"],
+			["palette-metadata/04000001", "palette-metadata"],
 		] as const;
 
 		for (const [assetId, expectedKind] of routes) {
@@ -115,6 +129,99 @@ describe("host asset preparation", () => {
 				`Asset ${assetId} matched the ${expectedKind} route but its payload failed the ${expectedKind} contract`,
 			);
 		}
+	});
+
+	it("prepares texture metadata routes without texel-bearing fields", () => {
+		const renderSurface = prepareV2AssetPayload({
+			assetId: "render-surface-metadata/06000001",
+			payload: {
+				defaultPaletteId: 0x04000001,
+				dependencies: { paletteAssetIds: ["palette/04000001"] },
+				format: "p8",
+				formatRaw: 0x29,
+				height: 16,
+				kind: "render-surface-metadata",
+				provenance: createProvenance("render-surface"),
+				renderSurfaceId: 0x06000001,
+				residencyKind: "unknown",
+				sourceAssetKind: "render-surface",
+				sourceByteLength: 256,
+				unknown: 0,
+				width: 16,
+			},
+			payloadKind: "json",
+			requestId: "request-render-surface-metadata",
+		});
+		const palette = prepareV2AssetPayload({
+			assetId: "palette-metadata/04000001",
+			payload: {
+				colorCount: 256,
+				kind: "palette-metadata",
+				paletteId: 0x04000001,
+				provenance: createProvenance("palette"),
+				residencyKind: "unknown",
+				sourceAssetKind: "palette",
+			},
+			payloadKind: "json",
+			requestId: "request-palette-metadata",
+		});
+
+		expect(renderSurface).toMatchObject({
+			kind: "render-surface-metadata",
+			sourceByteLength: 256,
+		});
+		expect(renderSurface).not.toHaveProperty("sourceBytes");
+		expect(palette).toMatchObject({
+			colorCount: 256,
+			kind: "palette-metadata",
+		});
+		expect(palette).not.toHaveProperty("colorsArgb");
+	});
+
+	it("rejects texture metadata routes that expose texel payload fields", () => {
+		expect(() =>
+			prepareV2AssetPayload({
+				assetId: "render-surface-metadata/06000001",
+				payload: {
+					defaultPaletteId: null,
+					dependencies: { paletteAssetIds: [] },
+					format: "p8",
+					formatRaw: 0x29,
+					height: 16,
+					kind: "render-surface-metadata",
+					provenance: createProvenance("render-surface"),
+					renderSurfaceId: 0x06000001,
+					residencyKind: "unknown",
+					sourceAssetKind: "render-surface",
+					sourceByteLength: 256,
+					sourceBytes: new Uint8Array([1]),
+					unknown: 0,
+					width: 16,
+				},
+				payloadKind: "json",
+				requestId: "request-render-surface-metadata",
+			}),
+		).toThrow(
+			"Asset render-surface-metadata/06000001 matched the render-surface-metadata route but its payload failed the render-surface-metadata contract",
+		);
+		expect(() =>
+			prepareV2AssetPayload({
+				assetId: "palette-metadata/04000001",
+				payload: {
+					colorCount: 1,
+					colorsArgb: [0xff000000],
+					kind: "palette-metadata",
+					paletteId: 0x04000001,
+					provenance: createProvenance("palette"),
+					residencyKind: "unknown",
+					sourceAssetKind: "palette",
+				},
+				payloadKind: "json",
+				requestId: "request-palette-metadata",
+			}),
+		).toThrow(
+			"Asset palette-metadata/04000001 matched the palette-metadata route but its payload failed the palette-metadata contract",
+		);
 	});
 
 	it("prepares animation payloads with typed SetOmega hook bytes intact", () => {
@@ -279,7 +386,6 @@ describe("host asset preparation", () => {
 			"Asset landblock/da55ffff/lod/2 matched the landblock-scene-lod route but its payload failed the landblock-scene-lod contract",
 		);
 	});
-
 });
 
 function createLandblockSceneLodPayload() {
@@ -401,6 +507,15 @@ function createPlacement(origin = { x: 0, y: 0, z: 0 }) {
 	return {
 		orientation: { w: 1, x: 0, y: 0, z: 0 },
 		origin,
+	};
+}
+
+function createProvenance(sourceAssetKind: string) {
+	return {
+		detail: null,
+		errorCode: null,
+		source: "repo-local-hba",
+		sourceAssetKind,
 	};
 }
 

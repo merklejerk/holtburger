@@ -5,9 +5,11 @@ import type {
 	GfxObjPayloadDto,
 	LandblockSceneLodPayloadDto,
 	MaterialRecipePayloadDto,
+	PaletteMetadataPayloadDto,
 	PalettePayloadDto,
 	PreparedTexturePayloadDto,
 	RegionRenderProfilePayloadDto,
+	RenderSurfaceMetadataPayloadDto,
 	RenderSurfacePayloadDto,
 	SetupAppearancePayloadDto,
 	SetupModelPayloadDto,
@@ -19,9 +21,11 @@ import {
 	gfxObjPayloadDtoSchema,
 	landblockSceneLodPayloadDtoSchema,
 	materialRecipePayloadDtoSchema,
+	paletteMetadataPayloadDtoSchema,
 	palettePayloadDtoSchema,
 	preparedTexturePayloadDtoSchema,
 	regionRenderProfilePayloadDtoSchema,
+	renderSurfaceMetadataPayloadDtoSchema,
 	renderSurfacePayloadDtoSchema,
 	setupAppearancePayloadDtoSchema,
 	setupModelPayloadDtoSchema,
@@ -44,8 +48,10 @@ export type V2PreparedAssetPayload =
 	| RegionRenderProfilePayloadDto
 	| SurfaceTexturePayloadDto
 	| RenderSurfacePayloadDto
+	| RenderSurfaceMetadataPayloadDto
 	| PreparedTexturePayloadDto
-	| PalettePayloadDto;
+	| PalettePayloadDto
+	| PaletteMetadataPayloadDto;
 
 interface PayloadSchema<TPayload> {
 	safeParse(
@@ -67,66 +73,76 @@ const SETUP_APPEARANCE_ROUTE = new RegExp(
 );
 
 const V2_PAYLOAD_PARSERS: readonly RoutePayloadParser[] = [
-		{
-			expectedKind: "landblock-scene-lod",
-			route: /^landblock\/[0-9a-fA-F]{8}\/lod\/[0-4]$/,
-			schema: landblockSceneLodPayloadDtoSchema,
-		},
-		{
-			expectedKind: "animation",
-			route: /^animation\/[0-9a-fA-F]{8}$/,
-			schema: animationPayloadDtoSchema,
-		},
-		{
-			expectedKind: "gfx-obj",
-			route: /^gfx-obj\/[0-9a-fA-F]{8}$/,
-			schema: gfxObjPayloadDtoSchema,
-		},
-		{
-			expectedKind: "setup-model",
-			route: /^setup-model\/[0-9a-fA-F]{8}$/,
-			schema: setupModelPayloadDtoSchema,
-		},
-		{
-			expectedKind: "setup-appearance",
-			route: SETUP_APPEARANCE_ROUTE,
-			schema: setupAppearancePayloadDtoSchema,
-		},
-		{
-			expectedKind: "material-recipe",
-			route: /^material\/[0-9a-fA-F]{8}$/,
-			schema: materialRecipePayloadDtoSchema,
-		},
-		{
-			expectedKind: "terrain-material",
-			route: /^terrain-material\/[0-9]+$/,
-			schema: terrainMaterialPayloadDtoSchema,
-		},
-		{
-			expectedKind: "region-render-profile",
-			route: /^region-render-profile\/[0-9]+$/,
-			schema: regionRenderProfilePayloadDtoSchema,
-		},
-		{
-			expectedKind: "surface-texture",
-			route: /^surface-texture\/[0-9a-fA-F]{8}$/,
-			schema: surfaceTexturePayloadDtoSchema,
-		},
-		{
-			expectedKind: "render-surface",
-			route: /^render-surface\/[0-9a-fA-F]{8}$/,
-			schema: renderSurfacePayloadDtoSchema,
-		},
-		{
-			expectedKind: "prepared-texture",
-			route: /^prepared-texture\/[0-9a-fA-F]{8}(?:\?.*)?$/,
-			schema: preparedTexturePayloadDtoSchema,
-		},
-		{
-			expectedKind: "palette",
-			route: /^palette\/[0-9a-fA-F]{8}$/,
-			schema: palettePayloadDtoSchema,
-		},
+	{
+		expectedKind: "landblock-scene-lod",
+		route: /^landblock\/[0-9a-fA-F]{8}\/lod\/[0-4]$/,
+		schema: landblockSceneLodPayloadDtoSchema,
+	},
+	{
+		expectedKind: "animation",
+		route: /^animation\/[0-9a-fA-F]{8}$/,
+		schema: animationPayloadDtoSchema,
+	},
+	{
+		expectedKind: "gfx-obj",
+		route: /^gfx-obj\/[0-9a-fA-F]{8}$/,
+		schema: gfxObjPayloadDtoSchema,
+	},
+	{
+		expectedKind: "setup-model",
+		route: /^setup-model\/[0-9a-fA-F]{8}$/,
+		schema: setupModelPayloadDtoSchema,
+	},
+	{
+		expectedKind: "setup-appearance",
+		route: SETUP_APPEARANCE_ROUTE,
+		schema: setupAppearancePayloadDtoSchema,
+	},
+	{
+		expectedKind: "material-recipe",
+		route: /^material\/[0-9a-fA-F]{8}$/,
+		schema: materialRecipePayloadDtoSchema,
+	},
+	{
+		expectedKind: "terrain-material",
+		route: /^terrain-material\/[0-9]+$/,
+		schema: terrainMaterialPayloadDtoSchema,
+	},
+	{
+		expectedKind: "region-render-profile",
+		route: /^region-render-profile\/[0-9]+$/,
+		schema: regionRenderProfilePayloadDtoSchema,
+	},
+	{
+		expectedKind: "surface-texture",
+		route: /^surface-texture\/[0-9a-fA-F]{8}$/,
+		schema: surfaceTexturePayloadDtoSchema,
+	},
+	{
+		expectedKind: "render-surface",
+		route: /^render-surface\/[0-9a-fA-F]{8}$/,
+		schema: renderSurfacePayloadDtoSchema,
+	},
+	{
+		expectedKind: "render-surface-metadata",
+		route: /^render-surface-metadata\/[0-9a-fA-F]{8}$/,
+		schema: renderSurfaceMetadataPayloadDtoSchema,
+	},
+	{
+		expectedKind: "prepared-texture",
+		route: /^prepared-texture\/[0-9a-fA-F]{8}(?:\?.*)?$/,
+		schema: preparedTexturePayloadDtoSchema,
+	},
+	{
+		expectedKind: "palette",
+		route: /^palette\/[0-9a-fA-F]{8}$/,
+		schema: palettePayloadDtoSchema,
+	},
+	{
+		expectedKind: "palette-metadata",
+		route: /^palette-metadata\/[0-9a-fA-F]{8}$/,
+		schema: paletteMetadataPayloadDtoSchema,
+	},
 ];
 
 export function prepareV2AssetPayload(

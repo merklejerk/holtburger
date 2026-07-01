@@ -1,6 +1,6 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation in progress. Phases 0-9J are complete. This document defines the target
+Status: implementation in progress. Phases 0-9K are complete. This document defines the target
 model, north stars, risk surface, and phased cutover plan for replacing static-vs-dynamic object
 visual worker bifurcation with a shared object-like visual recipe graph.
 
@@ -2008,6 +2008,8 @@ Implementation notes after Phase 9J:
 
 ### Phase 9K: Static Publication Metadata Producer
 
+Status: complete.
+
 Goal: synthesize static publication metadata from recipe-expanded static object bundles without
 reconstructing identity from baked draw units.
 
@@ -2035,6 +2037,29 @@ Deletion criteria:
 
 - Mark legacy generated-scenery source-local reconstruction and post-draw-unit resource inference
   helpers for removal once Phase 9M cuts production over.
+
+Implementation notes after Phase 9K:
+
+- Added
+  `apps/holtburger-3d/src/lib/static/objects/bake/static-object-publication-metadata-producer.ts`
+  to synthesize `ObjectVisualStaticPublicationMetadata` from `StaticObjectBatchPayload`.
+- The producer creates dense `ObjectVisualPartInstanceIndex` values in the same object/part order
+  used by the Phase 9J bundle producer, plus dense generated resource group ids keyed by source
+  geometry.
+- Non-generated outdoor and env-cell static objects produce direct static object draw-unit metadata
+  with ownership, sort metadata, source mapping coverage, and env-cell spatial records where
+  available.
+- Generated scenery produces static resource group metadata and render-instance metadata from source
+  geometry and object generated facts instead of inferring resources from baked draw units.
+- Metadata composes with `bakeObjectVisuals` and `createObjectVisualStaticInstallSet` for direct and
+  generated outputs.
+- Spicy debt: generated-scenery reuse policy is intentionally conservative here: resource groups use
+  source-geometry grouping, minimum instance count `2`, and transparent reuse disabled. The later
+  generated-scenery instancing assessment should decide whether to restore or replace the legacy
+  profitability and transparency heuristics.
+- Verification:
+  `npm --prefix apps/holtburger-3d run test:ts -- static-object-publication-metadata-producer` and
+  `npm --prefix apps/holtburger-3d run check`.
 
 ### Phase 9L: Structured-Interior Bundle Expansion Producer
 

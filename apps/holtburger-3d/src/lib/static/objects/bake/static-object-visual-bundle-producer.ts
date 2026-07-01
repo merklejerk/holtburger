@@ -743,7 +743,7 @@ function findMissingGeometryAttachments(
 	return [...new Set(missing)].sort();
 }
 
-function createStaticObjectSourcePartMatrix(
+export function createStaticObjectSourcePartMatrix(
 	object: StaticObjectBatchPayload["objects"][number],
 	part: StaticObjectPartSourceFacts,
 ): Float32Array {

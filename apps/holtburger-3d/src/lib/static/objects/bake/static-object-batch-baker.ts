@@ -48,6 +48,7 @@ import {
 } from "../../bake/static-material-adapter";
 import { createStaticMaterialTextureBindingRequirement } from "../../bake/static-material-texture-policy";
 import { emitStaticBakeWorkerTrace } from "../../bake/worker-trace";
+import { createStaticObjectVisualRecipeInstallPublication } from "../../bake/object-visual-recipe-install-publication";
 import {
 	describeStaticObjectCanonicalGeometryIdentity,
 	describeStaticObjectSourceGeometryIdentity,
@@ -69,7 +70,9 @@ import {
 	createStaticObjectVisualResourceKeyString,
 } from "../static-object-visual-resource-key";
 import { createStaticObjectBatchPayload } from "./static-object-batch-payload";
-import { createStaticBakeObjectVisualInstallSet } from "../../bake/object-visual-install-set-publication";
+import { createObjectVisualInstallSet } from "../../../visual/object-visual-install-set";
+import { createStaticObjectVisualBundleExpansion } from "./static-object-visual-bundle-producer";
+import { createStaticObjectPublicationMetadata } from "./static-object-publication-metadata-producer";
 
 export class StaticObjectBatchBaker implements StaticBaker {
 	async bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
@@ -110,6 +113,26 @@ export function bakeStaticObjectBatch(
 	const textureDependencies = itemResults.flatMap(
 		(result) => result.textureDependencies,
 	);
+	const objectVisualTextureDependencies = itemResults.flatMap(
+		(result) => result.objectVisualTextureDependencies,
+	);
+	const objectVisualInstallSet = createObjectVisualInstallSet({
+		directDrawUnits: itemResults.flatMap(
+			(result) => result.objectVisualInstallSet.directDrawUnits,
+		),
+		dynamicAnimationPartBindings: itemResults.flatMap(
+			(result) => result.objectVisualInstallSet.dynamicAnimationPartBindings,
+		),
+		renderInstances: itemResults.flatMap(
+			(result) => result.objectVisualInstallSet.renderInstances,
+		),
+		textureDependencies: objectVisualTextureDependencies,
+		visualResources: dedupeStaticObjectVisualResources(
+			itemResults.flatMap(
+				(result) => result.objectVisualInstallSet.visualResources,
+			),
+		),
+	});
 	emitStaticBakeWorkerTrace("static-object-batch:end", {
 		bakeBatchId: input.bakeBatchId,
 		domain: input.domain,
@@ -131,12 +154,7 @@ export function bakeStaticObjectBatch(
 			(result) => result.diagnostics,
 		),
 		materialCoverage: itemResults.map((result) => result.materialCoverage),
-		objectVisualInstallSet: createStaticBakeObjectVisualInstallSet({
-			drawUnits,
-			staticObjectRenderInstances,
-			staticObjectVisualResources,
-			textureDependencies,
-		}),
+		objectVisualInstallSet,
 		portalApertureResources: [],
 		revision: input.revision,
 		envCellStaticObjectPlacementRecords: [],
@@ -277,6 +295,10 @@ function bakeStaticObjectBatchItem(
 	readonly textureUses: readonly StaticBakeTextureUse[];
 	readonly staticObjectRenderInstances: readonly StaticObjectRenderInstance[];
 	readonly staticObjectVisualResources: readonly StaticObjectVisualResource[];
+	readonly objectVisualInstallSet: ReturnType<
+		typeof createObjectVisualInstallSet
+	>;
+	readonly objectVisualTextureDependencies: readonly TextureResourceDependencies[];
 	readonly task: StaticBakeBatchItem["task"];
 } {
 	emitStaticBakeWorkerTrace("static-object-item:start", {
@@ -396,6 +418,12 @@ function bakeStaticObjectBatchItem(
 		bakeBatchId: input.bakeBatchId,
 		task: item.task,
 	}).concat(instancedOutput.textureUses);
+	const recipePublication = createStaticObjectRecipePublication({
+		input,
+		payload: scope,
+		resourceIdPrefix,
+		task: item.task,
+	});
 	emitStaticBakeWorkerTrace("static-object-item:end", {
 		domain: scope.domain,
 		drawUnitCount: bakedDrawUnits.length,
@@ -427,8 +455,63 @@ function bakeStaticObjectBatchItem(
 		textureDependencies:
 			createStaticObjectDrawUnitTextureDependencies(bakedDrawUnits),
 		textureUses,
+		objectVisualInstallSet: recipePublication.installSet,
+		objectVisualTextureDependencies: recipePublication.textureDependencies,
 		task: item.task,
 	};
+}
+
+function createStaticObjectRecipePublication(options: {
+	readonly input: StaticBakeBatchInput;
+	readonly payload: StaticObjectBatchPayload;
+	readonly resourceIdPrefix: string;
+	readonly task: StaticBakeTask;
+}): {
+	readonly installSet: ReturnType<typeof createObjectVisualInstallSet>;
+	readonly textureDependencies: readonly TextureResourceDependencies[];
+} {
+	const expansion = createStaticObjectVisualBundleExpansion({
+		attachments: options.input.attachments,
+		payload: options.payload,
+	});
+	if (expansion.resolution.kind === "missing-dependencies") {
+		console.warn(
+			`Skipped static object visual recipe publication for ${options.task.ownerId}; missing ${expansion.resolution.missingDependencies
+				.map((dependency) => dependency.sourceId)
+				.join(", ")}.`,
+		);
+		return {
+			installSet: createObjectVisualInstallSet({}),
+			textureDependencies: [],
+		};
+	}
+
+	const publication = createStaticObjectPublicationMetadata({
+		owner: createLayerPeerRecordOwner(options.task),
+		payload: options.payload,
+	});
+	try {
+		return createStaticObjectVisualRecipeInstallPublication({
+			bundle: expansion.resolution.bundle,
+			geometryBuffers: expansion.geometryBuffers,
+			metadata: publication.metadata,
+			renderPartIdPrefix: `${options.resourceIdPrefix}:object-visual`,
+			texturePlacementSnapshot: requireObjectVisualTexturePlacementSnapshot(
+				options.input.texturePlacementSnapshot,
+				"Static object visual recipe publication",
+			),
+			textureUseNamespace: "static-object-texture",
+			textureUseScopeId: options.resourceIdPrefix,
+		});
+	} catch (error) {
+		console.warn(
+			`Skipped static object visual recipe publication for ${options.task.ownerId}: ${error instanceof Error ? error.message : String(error)}.`,
+		);
+		return {
+			installSet: createObjectVisualInstallSet({}),
+			textureDependencies: [],
+		};
+	}
 }
 
 function createStaticObjectDrawUnitTextureDependencies(

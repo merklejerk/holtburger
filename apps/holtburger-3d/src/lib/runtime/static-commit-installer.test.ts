@@ -5,6 +5,7 @@ import type {
 	StaticDrawUnit,
 	StaticObjectGeometryStaticDrawUnit,
 	StaticObjectVisualResource,
+	StructuredInteriorGeometryStaticDrawUnit,
 	TerrainGeometryStaticDrawUnit,
 } from "../static/contracts";
 import { installStaticCommit } from "./static-commit-installer";
@@ -42,6 +43,21 @@ describe("static commit installer", () => {
 			}),
 		).toThrow(
 			/terrain-textured is missing committed texture bindings for terrain-textured:prepared-texture:06000010/,
+		);
+	});
+
+	it("rejects textured structured-interior draw units without committed texture bindings", () => {
+		const drawUnit = createStructuredInteriorDrawUnit("structured-interior-a");
+
+		expect(() =>
+			installStaticCommit({
+				commit: createCommitDelta({
+					addedDrawUnits: [drawUnit],
+				}),
+				textureUpdate: null,
+			}),
+		).toThrow(
+			/structured-interior-a is missing committed texture bindings for structured-interior-a:prepared-texture:06000010/,
 		);
 	});
 
@@ -287,6 +303,84 @@ function createStaticObjectVisualResource(
 		textureUseIds: drawUnit.textureUseIds,
 		triangleCount: drawUnit.triangleCount,
 		vertexCount: drawUnit.vertexCount,
+	};
+}
+
+function createStructuredInteriorDrawUnit(
+	drawUnitId: string,
+): StructuredInteriorGeometryStaticDrawUnit {
+	const textureUseIds = [`${drawUnitId}:prepared-texture:06000010`];
+	const renderState = createOpaqueRenderState();
+
+	return {
+		cellStructure: {
+			cellStructureId: 0x0d000001,
+			kind: "cell-structure",
+		},
+		coordinateSpace: "landblock-render-local",
+		domain: "env-cell-system",
+		drawUnitId,
+		envCellId: 0xda550100,
+		environment: {
+			environmentId: 0x0e000001,
+			kind: "environment",
+		},
+		indexType: "uint16",
+		indices: new Uint16Array([0, 1, 2]),
+		kind: "structured-interior-geometry",
+		landblockId: 0xda55ffff,
+		localPlacement: {
+			orientation: { w: 1, x: 0, y: 0, z: 0 },
+			origin: { x: 0, y: 0, z: 0 },
+		},
+		materialBucketKey: "family:texture-rgba|pass:opaque|material:08000010",
+		materialEntries: [
+			{
+				alphaTest: 0,
+				detailTextureTiling: 1,
+				detailTextureUseId: null,
+				indexedClipThreshold: -1,
+				indexedTextureFormat: null,
+				indexTextureUseId: null,
+				materialColor: [1, 1, 1, 1],
+				materialEmissiveColor: [0, 0, 0],
+				materialIds: [0x08000010],
+				paletteFirstIndex: 0,
+				paletteTextureUseId: null,
+				primaryTextureUseId: textureUseIds[0]!,
+				primaryTextureWrapMode: "repeat",
+				renderState,
+				slot: 0,
+			},
+		],
+		materialFamily: "texture-rgba",
+		materialIds: [0x08000010],
+		materialPass: "opaque",
+		materialPlan: [
+			{
+				diagnostics: [],
+				family: "texture-rgba",
+				material: {
+					kind: "static-material-source",
+					materialId: 0x08000010,
+				},
+				outcome: "rendered",
+				pass: "opaque",
+				slotId: 0,
+				surfaceId: 0x08000010,
+				textureUseIds,
+			},
+		],
+		materialSlotIndices: new Float32Array([0, 0, 0]),
+		memberId: "cell-0",
+		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+		renderState,
+		sourceTriangleIds: ["triangle-a"],
+		surfaceIds: [0x08000010],
+		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
+		textureUseIds,
+		triangleCount: 1,
+		vertexCount: 3,
 	};
 }
 

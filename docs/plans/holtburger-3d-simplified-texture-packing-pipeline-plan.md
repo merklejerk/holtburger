@@ -1345,6 +1345,37 @@ Acceptance criteria:
 - Any new helper proposed by the audit has one caller family plus a clear second caller, or it is
   deferred under YAGNI.
 
+Result:
+
+| Drawable/resource class | Placement intents | Placement snapshot + page legality | Texture uses | Texture dependencies | Release path | Identity overload |
+| --- | --- | --- | --- | --- | --- | --- |
+| `terrain-geometry` | `createTerrainTexturePlacementIntents(...)` in `static/terrain/bake/terrain-geometry-baker.ts` discovers terrain color/mask/detail placement items from terrain source facts. | `TerrainGeometryStaticBaker` consumes `texturePlacementSnapshot`; `createTerrainGeometrySlices(...)` and related terrain helpers split by terrain shader limits. | Terrain bake output emits `textureUses` from source terrain texture uses. | `createTerrainTextureDependencies(...)` emits draw-unit dependencies and fails if a textured draw unit lacks a placement snapshot item. | `ClientRuntime.#installStaticCommit(...)` releases removed draw-unit ids before commit application and pins `delta.textureDependencies` after install. | `createTerrainTextureUseId(...)` still acts as material binding key, placement item id, dependency item id, and renderer binding key. Source dedupe is adjacent through prepared texture host identity. |
+| `static-object-geometry` | `createStaticObjectTexturePlacementIntents(...)` in `static/objects/bake/static-object-placement-planner.ts` discovers placement items by reusing static object material planning. | `partitionStaticObjectBatches(...)` consumes `TexturePlacementSnapshot`; `canAddStaticObjectCandidateUnderPlacement(...)` enforces one page per object texture role. | `createStaticObjectBakeTextureUses(...)` emits texture uses from final baked partitions/resources. | `createStaticObjectDrawUnitTextureDependencies(...)` emits draw-unit dependencies from final material entries. | Same static commit install path releases removed draw-unit ids and pins committed dependencies. | `createStaticMaterialTextureUseId(...)` still acts as material binding key, placement item id, dependency item id, and renderer binding key. It also encodes source and wrap/sampling facts. |
+| `structured-interior-geometry` | Not yet present before env-cell bake. Current code plans structured-interior material texture ids inside `EnvCellSystemBaker`. | Not yet present. `createStructuredInteriorDrawUnits(...)` does not consume `TexturePlacementSnapshot`, so object-material page legality is not enforced before commit. | `createStructuredInteriorTextureUses(...)` emits texture uses from structured-interior draw units. | Missing. `EnvCellSystemBaker` returns only embedded env-cell static object `textureDependencies`. | Static commit removal can release draw-unit ids, but there are no structured-interior dependency pins to release yet. | Highest risk. `createStructuredInteriorTextureUseId(...)` independently rebuilds the same overloaded string used for material binding, placement, dependency, and renderer binding even though placement/dependency records are not complete. |
+| Static-authored dynamic visual resources | `StaticCoordinator` appends `createDynamicVisualTexturePlanning(recipe).placementIntents` to static source-ready work. | Static-authored dynamic visual bake receives the same static source-ready `TexturePlacementSnapshot`; dynamic visual bake asserts requirements were placed before emitting resources. | Dynamic renderer texture-use commits are created from baked resources during dynamic renderer resource sync. | `createDynamicTextureDependencies(...)` emits dependencies keyed by baked visual resource id. | `ClientRuntime.#syncDynamicRendererResources(...)` releases removed visual resource ids and pins committed resource dependencies. | `createDynamicTextureUseId(...)` is scoped by visual resource id, but it still acts as binding key, placement item id, dependency item id, and renderer binding key. Source and palette identity are embedded in the string. |
+| Runtime-authored dynamic visual resources | `ClientRuntime` resolves the recipe, calls `createDynamicVisualTexturePlanning(recipe)`, and places those intents before dynamic bake. | Runtime dynamic bake receives the placement snapshot and uses the same dynamic visual placement assertion as static-authored dynamics. | Same dynamic renderer texture-use commit path as static-authored dynamics. | Same dynamic visual resource dependency path. | Same dynamic renderer resource sync release/pin path. | Same overload as static-authored dynamics, with runtime-authored placement pool selection. |
+
+Audit decisions:
+
+- No additional textured drawable class was found beyond the three `StaticDrawUnit` variants and
+  dynamic visual resources.
+- Structured interiors are a closure migration, not an installer or renderer fallback problem. The
+  commit installer should continue failing loudly when a textured draw unit has no committed
+  binding.
+- The existing dependency tests cover terrain, static object draw units, and dynamic visual
+  resources. A new structured-interior dependency test would be hollow before Phases 13-14 create
+  structured-interior placement intents and dependencies, so Phase 14 keeps that as an acceptance
+  gate.
+- `static-commit-installer.test.ts` now includes a structured-interior missing-binding invariant so
+  the exact runtime failure class is covered by a focused test.
+- Structured interiors should not copy the static object partitioner wholesale. Phase 14 should
+  extract a narrow shared object-material page-legality helper only if static objects and structured
+  interiors can both call it directly. Otherwise, keep the helper local until the second real caller
+  exists.
+- Phase 12 should split only the boundary identity needed to unblock structured interiors:
+  material/baker binding key, placement item id, source dedupe key, purpose, and placement source.
+  A global `textureUseId` rename remains YAGNI until the closure migration proves the final shape.
+
 ### Phase 12: Split Texture Binding Requirement Identity
 
 Goal: replace ad hoc `textureUseId` recomputation at the placement/bake boundary with explicit
@@ -1488,7 +1519,7 @@ Acceptance criteria:
 - [x] Phase 9: simplify renderer payload prep and specialize shader families.
 - [x] Phase 10: resolve `textureUseId` cleanup.
 - [x] Phase 11: delete vestigial code and obsolete tests.
-- [ ] Resteering 4: audit textured drawable closure coverage.
+- [x] Resteering 4: audit textured drawable closure coverage.
 - [ ] Phase 12: split texture binding requirement identity.
 - [ ] Phase 13: add structured-interior placement intents.
 - [ ] Phase 14: make structured-interior baking placement-aware.
@@ -1751,6 +1782,21 @@ Acceptance criteria:
   separate material binding keys, placement item ids, source dedupe keys, dependency item ids, and
   renderer binding keys. Phase 12 now gates structured-interior work on an explicit binding
   requirement identity split.
+- Resteering 4 audited every textured drawable/resource class and found no class outside the known
+  taxonomy: terrain draw units, static object draw units, structured-interior draw units,
+  static-authored dynamic visual resources, and runtime-authored dynamic visual resources.
+- Resteering 4 confirmed the only non-closed class is `structured-interior-geometry`. It emits
+  texture uses but does not discover placement intents before env-cell bake, consume placement
+  snapshots for page legality, or emit texture dependencies.
+- Resteering 4 added a focused structured-interior invariant to `static-commit-installer.test.ts`
+  proving textured structured-interior draw units fail commit install when committed bindings are
+  missing. This keeps the installer as the final invariant gate rather than a repair site.
+- Resteering 4 decided Phase 12 should introduce a minimum typed texture binding requirement
+  boundary before structured-interior work: binding key, placement item id, source dedupe key,
+  purpose, and source. This is a targeted split, not a global rename.
+- Resteering 4 decided any shared object-material page-legality helper should be extracted only when
+  static object and structured-interior bakers both call it. Avoid a speculative helper that merely
+  wraps current static object internals.
 
 ## Tracked Debt
 
@@ -1819,6 +1865,9 @@ Acceptance criteria:
 - Current `textureUseId` values still often encode source, usage, scope, wrap/sampling, and
   placement identity in one string. Phase 12 should collapse that into a typed requirement boundary
   before new structured-interior code grows another parallel string generator.
+- Structured-interior dependency invariant coverage is intentionally deferred until Phases 13-14 add
+  real structured-interior placement intents and dependency emission. Do not add tests that merely
+  preserve today's missing dependency behavior.
 
 ## Risks and Concessions
 

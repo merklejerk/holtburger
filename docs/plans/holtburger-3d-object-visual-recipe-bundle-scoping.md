@@ -2188,6 +2188,10 @@ Course correction during Phase 9M:
   resources from `objectVisualInstallSet`.
 - Deleted the legacy `createStaticBakeObjectVisualInstallSet` bridge once static object and
   env-cell producers published recipe-first install sets directly.
+- Follow-up coordinator cutover: current-task filtering now derives retained object-visual resource
+  ids from the retained `objectVisualInstallSet`, not from legacy
+  `staticObjectRenderInstances`. Commit texture-use retention therefore follows the recipe-first
+  install publication even when producer-side legacy render-instance/resource arrays are empty.
 - Spicy debt: static bake worker result arrays still carry legacy object `drawUnits`,
   `staticObjectRenderInstances`, and `staticObjectVisualResources` for diagnostics/tests. They are
   no longer the coordinator/runtime source of truth for object visual publication, but the hard
@@ -2200,6 +2204,11 @@ Course correction during Phase 9M:
   produces no render parts for publication metadata, such as all-materials-missing cases. That keeps
   current bake behavior stable, but the hard cutover should make unsupported/missing materials skip
   before publication metadata references part instances.
+- Coverage gap: the new coordinator regression covers install-set-owned object texture uses when
+  legacy producer arrays are empty. It does not yet exercise a mixed stale/current object-visual
+  bake result because current generated-scenery demand does not naturally batch multiple landblocks
+  the same way terrain does; if that path grows more complex, add direct stale-batch coverage instead
+  of exporting coordinator internals just for tests.
 
 ### Phase 10: Dynamic Resolver Cutover
 

@@ -11,7 +11,10 @@ import type {
 	DynamicVisualBakeResult,
 } from "../../dynamic/contracts";
 import type { DynamicVisualBaker } from "../../dynamic/visual-baker";
-import { createEmptyObjectVisualInstallSet } from "../../visual/object-visual-install-set";
+import {
+	createEmptyObjectVisualInstallSet,
+	createObjectVisualInstallSet,
+} from "../../visual/object-visual-install-set";
 import type {
 	StaticCoordinatorCommitDelta,
 	StaticScopePrepCommit,
@@ -31,6 +34,9 @@ import type {
 	StaticLandblockSceneLodResolution,
 	StaticResolver,
 	StaticLandblockSceneLodSourceResolver,
+	StaticObjectRenderInstance,
+	StaticObjectVisualResource,
+	StaticBakeTextureUse,
 } from "../contracts";
 import { StaticCoordinator } from "./static-coordinator";
 import type { StaticSourceReadyWork } from "./static-coordinator";
@@ -1155,6 +1161,73 @@ describe("static coordinator", () => {
 		]);
 	});
 
+	it("commits object visual texture uses from install-set resource ownership", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: {
+				maxPayloadsPerBatch: 8,
+				maxWaitMs: 0,
+			},
+			resolver,
+		});
+		const deltas: StaticCoordinatorCommitDelta[] = [];
+		coordinator.subscribeCommits((commit) => deltas.push(commit.staticCommit));
+
+		const generatedWork = bakeTasksForDemand(
+			coordinator,
+			createSingleOutdoorObjectDemand(0xda55ffff),
+		).find(
+			(item) => item.domain === "outdoor-generated-scenery",
+		);
+		if (!generatedWork) {
+			throw new Error("Expected outdoor object demand to request scenery.");
+		}
+		resolver.completeSource(resolver.pendingSourceRequests[0]?.requestId ?? "");
+		await flushPromises();
+
+		const generatedInput = pendingBatchForTask(
+			baker.pendingInputs,
+			generatedWork.taskId,
+		);
+		const retainedResource = createStaticObjectVisualResource(
+			`resource:${generatedWork.ownerId}`,
+		);
+		baker.complete(generatedInput.bakeBatchId, {
+			objectVisualInstallSet: createObjectVisualInstallSet({
+				renderInstances: [
+					createStaticObjectRenderInstance({
+						instanceId: `instance:${generatedWork.ownerId}`,
+						landblockId: generatedWork.scope.landblockId,
+						resourceId: retainedResource.resourceId,
+					}),
+				],
+				visualResources: [retainedResource],
+			}),
+			staticObjectRenderInstances: [],
+			staticObjectVisualResources: [],
+			textureUses: [
+				createStaticObjectVisualTextureUse({
+					resourceId: retainedResource.resourceId,
+					textureUseId: "texture-use:retained",
+				}),
+			],
+		});
+		await flushPromises();
+
+		expect(deltas).toHaveLength(1);
+		expect(deltas[0]?.tasks.map((task) => task.taskId)).toEqual([
+			generatedInput.items[0]?.task.taskId,
+		]);
+		expect(deltas[0]?.objectVisualInstallSet.visualResources).toEqual([
+			retainedResource,
+		]);
+		expect(deltas[0]?.staticObjectVisualResources).toEqual([retainedResource]);
+		expect(deltas[0]?.textureUses.map((textureUse) => textureUse.textureUseId))
+			.toEqual(["texture-use:retained"]);
+	});
+
 	it("records compact outdoor static object payload summaries", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
@@ -1746,6 +1819,117 @@ function createStaticObjectBakeDiagnostics(): StaticObjectBakeDiagnostics {
 		uniqueSourceCount: 1,
 		uniqueSourcePartGeometryCount: 1,
 		uniqueSourceTriangleCount: 1,
+	};
+}
+
+function createStaticObjectVisualResource(
+	resourceId: string,
+): StaticObjectVisualResource {
+	return {
+		bounds: null,
+		coordinateSpace: "static-object-source-local",
+		geometry: {
+			kind: "static-object-source-geometry",
+			partIndex: 0,
+			source: {
+				kind: "static-object-source",
+				sourceAssetKind: "gfx-obj",
+				sourceDid: 0x01000001,
+			},
+			surfaceId: 1,
+		},
+		indexType: "uint16",
+		indices: new Uint16Array([0, 1, 2]),
+		key: {
+			geometry: {
+				kind: "static-object-source-geometry",
+				partIndex: 0,
+				source: {
+					kind: "static-object-source",
+					sourceAssetKind: "gfx-obj",
+					sourceDid: 0x01000001,
+				},
+				surfaceId: 1,
+			},
+			material: {
+				materialEntryKey: "material:test",
+				textureUseIds: [],
+			},
+		},
+		kind: "static-object-visual-resource",
+		materialEntries: [],
+		materialFamily: "unlit",
+		materialPass: "opaque",
+		materialSlotIndices: new Float32Array([0, 0, 0]),
+		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+		renderState: {
+			alphaTest: null,
+			blend: "opaque",
+			cull: "back",
+			depthWrite: true,
+		},
+		resourceId,
+		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
+		textureUseIds: [],
+		triangleCount: 1,
+		vertexCount: 3,
+	};
+}
+
+function createStaticObjectRenderInstance(options: {
+	readonly instanceId: string;
+	readonly landblockId: number;
+	readonly resourceId: string;
+}): StaticObjectRenderInstance {
+	return {
+		bounds: {
+			max: { x: 1, y: 1, z: 1 },
+			min: { x: 0, y: 0, z: 0 },
+		},
+		domain: "outdoor-generated-scenery",
+		generated: null,
+		instanceId: options.instanceId,
+		kind: "static-object-render-instance",
+		landblockId: options.landblockId,
+		resourceId: options.resourceId,
+		sortCenter: { x: 0, y: 0, z: 0 },
+		source: {
+			instanceId: options.instanceId,
+			kind: "static-object-instance",
+			landblockId: options.landblockId,
+			objectKind: "generated-scenery",
+		},
+		sourceToLandblockMatrix: new Float32Array([
+			1, 0, 0, 0,
+			0, 1, 0, 0,
+			0, 0, 1, 0,
+			0, 0, 0, 1,
+		]),
+		transform: {
+			localPlacement: {
+				orientation: { w: 1, x: 0, y: 0, z: 0 },
+				origin: { x: 0, y: 0, z: 0 },
+			},
+			sourceScale: { x: 1, y: 1, z: 1 },
+		},
+		transparency: { kind: "depth-writing" },
+	};
+}
+
+function createStaticObjectVisualTextureUse(options: {
+	readonly resourceId: string;
+	readonly textureUseId: string;
+}): StaticBakeTextureUse {
+	return {
+		domain: "outdoor-generated-scenery",
+		owners: [
+			{
+				kind: "static-object-visual-resource",
+				resourceId: options.resourceId,
+			},
+		],
+		source: { argb: 0xffffffff, kind: "solid-color" },
+		textureUseId: options.textureUseId,
 	};
 }
 

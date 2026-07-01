@@ -92,7 +92,6 @@ export function createStaticObjectVisualBundleExpansion(input: {
 	});
 	const registry = createObjectVisualRecipeKeyRegistry(
 		createRecipeKeys({
-			materialPlans: materialPlan.materialPlans,
 			materialRecipeSpecs,
 			payload: input.payload,
 		}),
@@ -137,7 +136,7 @@ export function createStaticObjectVisualBundleExpansion(input: {
 		partRecipes,
 		recipeKeys: registry.recipeKeys,
 		textureRecipes: createTextureRecipes({
-			materialPlans: materialPlan.materialPlans,
+			materialRecipeSpecs,
 			registry,
 		}),
 	};
@@ -156,7 +155,6 @@ interface MaterialRecipeSpec {
 
 function createRecipeKeys(options: {
 	readonly payload: StaticObjectBatchPayload;
-	readonly materialPlans: readonly ObjectVisualMaterialPlan[];
 	readonly materialRecipeSpecs: readonly MaterialRecipeSpec[];
 }) {
 	const geometryBufferKeys = new Set<string>();
@@ -187,7 +185,7 @@ function createRecipeKeys(options: {
 			objectVisualMaterialRecipeKey(spec.key),
 		),
 		partRecipeKeys: [...partRecipeKeys].map(objectVisualPartRecipeKey),
-		textureRecipeKeys: createTextureRecipeKeys(options.materialPlans).map(
+		textureRecipeKeys: createTextureRecipeKeys(options.materialRecipeSpecs).map(
 			objectVisualTextureRecipeKey,
 		),
 	};
@@ -427,6 +425,7 @@ function createMaterialRecipe(
 				colorTextureRecipeId: requireTextureRecipeId(
 					registry,
 					requireTextureRole(plan.textureRoles, "base-index").dataUse,
+					spec.textureWrapMode,
 				),
 				family: "indexed-color",
 				indexedTextureFormat:
@@ -437,6 +436,7 @@ function createMaterialRecipe(
 				paletteTextureRecipeId: requireTextureRecipeId(
 					registry,
 					requireTextureRole(plan.textureRoles, "palette-rgba").dataUse,
+					spec.textureWrapMode,
 				),
 			};
 		case "texture-rgba":
@@ -449,12 +449,14 @@ function createMaterialRecipe(
 					? requireTextureRecipeId(
 							registry,
 							requireTextureRole(plan.textureRoles, "detail-overlay").dataUse,
+							spec.textureWrapMode,
 						)
 					: null,
 				family: "texture-rgba",
 				rgbaTextureRecipeId: requireTextureRecipeId(
 					registry,
 					requireTextureRole(plan.textureRoles, "base-color").dataUse,
+					spec.textureWrapMode,
 				),
 			};
 		case "unsupported":
@@ -467,32 +469,40 @@ function createMaterialRecipe(
 }
 
 function createTextureRecipes(options: {
-	readonly materialPlans: readonly ObjectVisualMaterialPlan[];
+	readonly materialRecipeSpecs: readonly MaterialRecipeSpec[];
 	readonly registry: ReturnType<typeof createObjectVisualRecipeKeyRegistry>;
 }): ObjectVisualRecipeBundle["textureRecipes"] {
 	const recipes = new Map<
 		ObjectVisualTextureRecipeId,
 		ObjectVisualTextureRecipe
 	>();
-	for (const plan of options.materialPlans) {
-		for (const role of plan.textureRoles) {
-			const textureId = requireTextureRecipeId(options.registry, role.dataUse);
+	for (const spec of options.materialRecipeSpecs) {
+		for (const role of spec.plan.textureRoles) {
+			const textureId = requireTextureRecipeId(
+				options.registry,
+				role.dataUse,
+				spec.textureWrapMode,
+			);
 			if (recipes.has(textureId)) {
 				continue;
 			}
-			recipes.set(textureId, createTextureRecipe(role));
+			recipes.set(textureId, createTextureRecipe(role, spec.textureWrapMode));
 		}
 	}
 	return recipes;
 }
 
-function createTextureRecipe(role: ObjectVisualMaterialTextureUseRole) {
+function createTextureRecipe(
+	role: ObjectVisualMaterialTextureUseRole,
+	wrapMode: "clamp" | "repeat",
+) {
 	switch (role.role) {
 		case "base-color":
 		case "base-index":
 		case "detail-overlay":
 			return {
 				dataUse: role.dataUse,
+				wrapMode,
 				source: {
 					kind: "render-surface" as const,
 					renderSurfaceId: role.renderSurface.renderSurfaceId,
@@ -503,6 +513,7 @@ function createTextureRecipe(role: ObjectVisualMaterialTextureUseRole) {
 		case "palette-rgba":
 			return {
 				dataUse: role.dataUse,
+				wrapMode,
 				source: {
 					firstIndex: role.dataUse.firstIndex,
 					indexCount: role.dataUse.indexCount,
@@ -530,12 +541,14 @@ function getTextureUsage(
 }
 
 function createTextureRecipeKeys(
-	materialPlans: readonly ObjectVisualMaterialPlan[],
+	materialRecipeSpecs: readonly MaterialRecipeSpec[],
 ): readonly string[] {
 	return [
 		...new Set(
-			materialPlans.flatMap((plan) =>
-				plan.textureRoles.map((role) => createTextureRecipeKey(role.dataUse)),
+			materialRecipeSpecs.flatMap((spec) =>
+				spec.plan.textureRoles.map((role) =>
+					createTextureRecipeKey(role.dataUse, spec.textureWrapMode),
+				),
 			),
 		),
 	].sort();
@@ -603,16 +616,18 @@ function resolveTextureWrapMode(
 function requireTextureRecipeId(
 	registry: ReturnType<typeof createObjectVisualRecipeKeyRegistry>,
 	dataUse: MaterialTextureDataUseIdentity,
+	wrapMode: "clamp" | "repeat",
 ): ObjectVisualTextureRecipeId {
 	return requireRegistryId(
 		registry.textureRecipeIdsByKey,
-		objectVisualTextureRecipeKey(createTextureRecipeKey(dataUse)),
+		objectVisualTextureRecipeKey(createTextureRecipeKey(dataUse, wrapMode)),
 		"texture recipe",
 	);
 }
 
 function createTextureRecipeKey(
 	dataUse: MaterialTextureDataUseIdentity,
+	wrapMode: "clamp" | "repeat",
 ): string {
 	if (dataUse.kind === "palette-texture-use") {
 		return [
@@ -620,12 +635,14 @@ function createTextureRecipeKey(
 			formatHex32(dataUse.palette.paletteId),
 			`first:${dataUse.firstIndex}`,
 			`count:${dataUse.indexCount}`,
+			`wrap:${wrapMode}`,
 		].join(":");
 	}
 	return [
 		"render-surface",
 		formatHex32(dataUse.renderSurface.renderSurfaceId),
 		dataUse.usage,
+		`wrap:${wrapMode}`,
 	].join(":");
 }
 

@@ -2172,6 +2172,9 @@ Course correction during Phase 9M:
 - Steering decision: texture recipes now carry the original material texture data-use metadata as
   the lossless placement/binding source. The human-readable source summary remains useful for
   inspection, but production binding should use `dataUse`.
+- Follow-up steering decision: texture recipe identity also includes sampling wrap mode. The same
+  render surface can legally appear as both clamp and repeat in different material variants, so
+  recipe ids must not collapse those bindings before placement.
 
 ### Phase 10: Dynamic Resolver Cutover
 

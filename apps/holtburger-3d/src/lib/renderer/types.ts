@@ -254,10 +254,12 @@ export function createTextureBindingOwnerKey(
 }
 
 export interface TextureBinding {
-	/** Resource that owns the shader role-page slot assignment. */
+	/** Renderer resource that owns this material texture binding. */
 	readonly owner: TextureBindingOwner;
+	/** Material binding key used by material table entries and terrain material roles. */
 	readonly textureUseId: string;
 	readonly textureRefId: string;
+	/** Shader role/page slot. Object materials use slot 0; terrain still has page slots. */
 	readonly rolePage: TextureRolePageSlot;
 	readonly textureWidth: number;
 	readonly textureHeight: number;
@@ -346,6 +348,7 @@ type DynamicRendererInstanceResidence =
 	  };
 
 export interface TextureUsePlacement {
+	/** Material binding key whose atlas placement was resolved. */
 	readonly textureUseId: string;
 	readonly textureRefId: string;
 	readonly textureWidth: number;

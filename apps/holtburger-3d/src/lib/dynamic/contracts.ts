@@ -677,6 +677,7 @@ export interface DynamicEntityTextureRequirement {
 		| "detail-overlay"
 		| "palette-rgba";
 	readonly samplingPolicy: StaticBakeTextureSamplingPolicy;
+	/** Material binding key that also seeds the placement item id. */
 	readonly textureUseId: string;
 }
 

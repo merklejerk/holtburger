@@ -1215,7 +1215,7 @@ Acceptance criteria:
 - [x] Phase 8: add on-demand zombie reclaim.
 - [x] Resteering 3: review reclaim and renderer cleanup readiness.
 - [x] Phase 9: simplify renderer payload prep and specialize shader families.
-- [ ] Phase 10: resolve `textureUseId` cleanup.
+- [x] Phase 10: resolve `textureUseId` cleanup.
 - [ ] Phase 11: delete vestigial code and obsolete tests.
 
 ## Decisions and Course Corrections
@@ -1434,6 +1434,13 @@ Acceptance criteria:
   assignment is intentionally single-slot: the first texture ref binds slot 0 and any different
   texture ref for the same owner+role is omitted. Real object draw units should not hit that shape
   because bakers now split by placement page before geometry is emitted.
+- Phase 10 decided not to globally rename `textureUseId`. After the placement cutover, the remaining
+  durable meaning is a material binding key used by material table entries, terrain material roles,
+  dynamic texture requirements, and renderer binding maps. The packer/placement contract already uses
+  `itemId`, so `textureUseId` is no longer a packer concept.
+- Phase 10 updated contract comments to make the identity split explicit: `textureUseId` names a
+  material binding, while placement `itemId` is the packer/baker snapshot key. No compatibility alias
+  was introduced.
 - Dry run split `TextureManager` responsibilities into placement and pinning. Current owner leases
   require post-bake draw-unit/resource owners, but pre-bake placement intents intentionally do not
   have owners yet.
@@ -1463,8 +1470,8 @@ Acceptance criteria:
   field. A later cleanup should rename or narrow the packer protocol once renderer-era domain
   ownership is no longer part of placement planning.
 - Phase 2 active references are tracked by placement `itemId`, matching the migration-era
-  `textureUseId` assumption. If Phase 10 splits `textureUseId`, the placement reference index must
-  move to the final placement item identity at the same time.
+  `textureUseId` assumption. Phase 10 decided that this mapping is acceptable: material texture-use
+  ids seed placement item ids at the boundary, but the placement record itself is keyed by `itemId`.
 - Source-ready work no longer carries empty placement intents for migrated object, terrain, or
   dynamic paths. Future domains should either emit real placement intents or document why they are
   intentionally texture-free; do not reintroduce empty arrays as hidden fallbacks.
@@ -1501,6 +1508,9 @@ Acceptance criteria:
   after bakers have already enforced one-page-per-role draw units. Phase 9 removed object multi-slot
   assignment and overflow diagnostics, but the renderer update payload still uses the old field name.
   Phase 10 or Phase 11 should rename that bridge if it survives `textureUseId` cleanup.
+- Renderer `TextureUsePlacement` remains a slightly stale type name. Its `textureUseId` field is still
+  honest, but the type is really a resolved material-texture placement update. Rename or collapse it
+  during final vestige cleanup if it still has a caller.
 
 ## Risks and Concessions
 

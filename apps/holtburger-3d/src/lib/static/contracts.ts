@@ -1741,11 +1741,15 @@ export interface StaticMaterialTableEntry {
 	readonly renderState: StaticObjectRenderState;
 	readonly materialColor: readonly [number, number, number, number];
 	readonly materialEmissiveColor: readonly [number, number, number];
+	/** Material binding key for the entry's RGBA base-color texture, if present. */
 	readonly primaryTextureUseId: string | null;
+	/** Material binding key for the entry's indexed color texture, if present. */
 	readonly indexTextureUseId: string | null;
 	readonly indexedTextureFormat: "p8" | "index16" | null;
+	/** Material binding key for the entry's palette texture, if present. */
 	readonly paletteTextureUseId: string | null;
 	readonly paletteFirstIndex: number;
+	/** Material binding key for the entry's detail overlay texture, if present. */
 	readonly detailTextureUseId: string | null;
 	readonly detailTextureTiling: number;
 	readonly primaryTextureWrapMode: "clamp" | "repeat";

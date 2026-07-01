@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { MaterialTextureDataUseIdentity } from "../contracts";
+import type {
+	MaterialTextureDataUseIdentity,
+	StaticBakeTextureUse,
+} from "../contracts";
+import { createStaticTexturePlacementIntent } from "../../textures/placement";
 import {
+	createStaticMaterialTextureBindingRequirement,
 	createStaticMaterialTextureSamplingPolicy,
 	createStaticMaterialTextureUseId,
 } from "./static-material-texture-policy";
@@ -72,7 +77,57 @@ describe("static material texture policy", () => {
 			"static-object-layer-a:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
 		);
 	});
+
+	it("creates explicit binding requirements for placement and renderer binding", () => {
+		const dataUse = createPreparedTextureUse("rgba-color");
+		const requirement = createStaticMaterialTextureBindingRequirement({
+			dataUse,
+			textureUseNamespace: "static-object-texture",
+			textureUseScopeId: "static-object-layer-a",
+			wrapMode: "repeat",
+		});
+		const textureUse = createTextureUseFromRequirement(requirement);
+		const placementIntent = createStaticTexturePlacementIntent(textureUse);
+
+		expect(requirement).toMatchObject({
+			bindingKey:
+				"static-object-layer-a:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
+			placementItemId:
+				"static-object-layer-a:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
+			purpose: "object-base-color",
+			sourceKey:
+				"prepared-render-surface-texture-use:06000010:rgba-color",
+		});
+		expect(textureUse.textureUseId).toBe(requirement.bindingKey);
+		expect(placementIntent.itemId).toBe(requirement.placementItemId);
+		expect({
+			itemIds: [requirement.placementItemId],
+			purpose: requirement.purpose,
+		}).toEqual({
+			itemIds: [placementIntent.itemId],
+			purpose: "object-base-color",
+		});
+	});
 });
+
+function createTextureUseFromRequirement(
+	requirement: ReturnType<typeof createStaticMaterialTextureBindingRequirement>,
+): StaticBakeTextureUse {
+	const textureUse: StaticBakeTextureUse = {
+		domain: "outdoor-buildings",
+		owners: [],
+		source: requirement.source.dataUse,
+		staticBatchId: "static-batch-a",
+		textureUseId: requirement.bindingKey,
+	};
+	if (!requirement.samplingPolicy) {
+		return textureUse;
+	}
+	return {
+		...textureUse,
+		samplingPolicy: requirement.samplingPolicy,
+	};
+}
 
 function createPreparedTextureUse(
 	usage: Extract<

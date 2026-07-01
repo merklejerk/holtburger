@@ -2,6 +2,12 @@ import type {
 	MaterialTextureDataUseIdentity,
 	StaticBakeTextureSamplingPolicy,
 } from "../contracts";
+import type {
+	TextureBindingRequirement,
+	TexturePlacementPool,
+	TexturePlacementSource,
+} from "../../textures/placement";
+import { classifyTextureUsagePurpose } from "../../textures/placement";
 
 export type StaticMaterialTextureWrapMode = "clamp" | "repeat";
 
@@ -42,6 +48,40 @@ export function createStaticMaterialTextureUseId(options: {
 		createMaterialTextureDataUseKey(options.dataUse),
 		createStaticMaterialTextureSamplingPolicyKey(samplingPolicy),
 	].join(":");
+}
+
+export function createStaticMaterialTextureBindingRequirement(options: {
+	readonly dataUse: MaterialTextureDataUseIdentity;
+	readonly textureUseNamespace: string;
+	readonly textureUseScopeId: string;
+	readonly wrapMode: StaticMaterialTextureWrapMode;
+	readonly pool?: Extract<
+		TexturePlacementPool,
+		"runtime-authored-object" | "static-authored-object"
+	>;
+}): TextureBindingRequirement {
+	const samplingPolicy = createStaticMaterialTextureSamplingPolicy({
+		dataUse: options.dataUse,
+		wrapMode: options.wrapMode,
+	});
+	const bindingKey = createStaticMaterialTextureUseId(options);
+
+	return {
+		bindingKey,
+		// Phase 12 keeps the current renderer binding key as the placement item id.
+		// The equality is now local to this bridge rather than ambient pipeline state.
+		placementItemId: bindingKey,
+		purpose: classifyTextureUsagePurpose(
+			options.dataUse,
+			options.pool ?? "static-authored-object",
+		),
+		samplingPolicy,
+		source: createStaticMaterialTexturePlacementSource(
+			options.dataUse,
+			samplingPolicy,
+		),
+		sourceKey: createMaterialTextureDataUseKey(options.dataUse),
+	};
 }
 
 export function createStaticMaterialTextureSamplingPolicy(options: {
@@ -103,6 +143,17 @@ function shouldRepeatStaticMaterialTextureUse(options: {
 		case "rgba-raw":
 			return false;
 	}
+}
+
+function createStaticMaterialTexturePlacementSource(
+	dataUse: MaterialTextureDataUseIdentity,
+	samplingPolicy: StaticBakeTextureSamplingPolicy,
+): TexturePlacementSource {
+	return {
+		dataUse,
+		kind: "material-texture-data-use",
+		samplingPolicy,
+	};
 }
 
 function createPaletteTextureSubPalettesKey(

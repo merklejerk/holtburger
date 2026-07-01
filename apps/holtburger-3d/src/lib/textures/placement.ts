@@ -34,6 +34,22 @@ export interface TexturePlacementMaterialSource {
 /** Source bytes or prepared texture identity for one placement item. */
 export type TexturePlacementSource = TexturePlacementMaterialSource;
 
+/** Texture binding need shared by placement planning, bakers, and dependency emission. */
+export interface TextureBindingRequirement {
+	/** Material-entry key referenced by draw units and renderer binding lookup. */
+	readonly bindingKey: string;
+	/** Packer/placement snapshot key and texture-resource dependency item id. */
+	readonly placementItemId: string;
+	/** Source dedupe key, including palette/subpalette identity where applicable. */
+	readonly sourceKey: string;
+	/** Shader/page purpose for the placement item. */
+	readonly purpose: TextureUsagePurpose;
+	/** Prepared/material source facts needed to build atlas pixels. */
+	readonly source: TexturePlacementSource;
+	/** Sampling policy carried by the current material texture bridge, if any. */
+	readonly samplingPolicy: StaticBakeTextureSamplingPolicy | undefined;
+}
+
 /** CPU-side request for TextureManager to assign one opaque item to an atlas page. */
 export interface TexturePlacementIntent {
 	/** Opaque placement item id used by the packer and baker placement snapshot. */

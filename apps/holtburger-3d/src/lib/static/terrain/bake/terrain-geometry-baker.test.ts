@@ -185,6 +185,14 @@ describe("terrain geometry baker", () => {
 				],
 			},
 		]);
+		const placementItemIds = new Set(
+			input.texturePlacementSnapshot?.placementsByItemId.keys(),
+		);
+		expect(
+			result.textureDependencies.flatMap((dependency) =>
+				dependency.roles.flatMap((role) => role.itemIds),
+			),
+		).toEqual([...placementItemIds]);
 		expect(JSON.stringify(result)).not.toContain("texture-ref");
 	});
 

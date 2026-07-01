@@ -1649,7 +1649,7 @@ Acceptance criteria:
 - [x] Phase 10: resolve `textureUseId` cleanup.
 - [x] Phase 11: delete vestigial code and obsolete tests.
 - [x] Resteering 4: audit textured drawable closure coverage.
-- [ ] Phase 12: split texture binding requirement identity.
+- [x] Phase 12: split texture binding requirement identity.
 - [ ] Phase 13: add structured-interior placement intents.
 - [ ] Phase 14: make structured-interior baking placement-aware.
 - [ ] Phase 15: final drawable isomorphism cleanup.
@@ -1930,6 +1930,22 @@ Acceptance criteria:
   remaining phases were tightened with target modules, ordered implementation steps, required tests,
   and explicit "do not" constraints. Treat those details as the execution contract unless later code
   discovery proves they need another resteer.
+- Phase 12 added `TextureBindingRequirement` in `textures/placement.ts` and
+  `createStaticMaterialTextureBindingRequirement(...)` in
+  `static/bake/static-material-texture-policy.ts`. Static object placement planning and static
+  object page-legality checks now derive binding keys, placement item ids, source keys, purposes,
+  sources, and sampling policy from that shared requirement helper.
+- Phase 12 added a terrain-specific `createTerrainTextureBindingRequirement(...)` inside the terrain
+  baker. Terrain keeps its own constructor because terrain texture facts and shader purposes are not
+  object-material facts, but the resulting record uses the same binding/placement/source/purpose
+  shape.
+- Phase 12 intentionally keeps `bindingKey === placementItemId` for static object and terrain
+  migration paths. The equality is now documented at the requirement-constructor boundary instead of
+  being ambient `textureUseId` doctrine.
+- Phase 12 did not force dynamic visuals onto the shared static-material helper. Their existing
+  `DynamicEntityTextureRequirement` already carries the same effective fields with resource-scoped
+  identity, and forcing a shared type before structured-interior work would add churn without
+  simplifying the next phase.
 
 ## Tracked Debt
 
@@ -1996,11 +2012,15 @@ Acceptance criteria:
   owner+role is an invariant detector after the object one-page-per-role cutover. Do not paper over
   that omission in `TextureManager`; split illegal draw units in the relevant baker.
 - Current `textureUseId` values still often encode source, usage, scope, wrap/sampling, and
-  placement identity in one string. Phase 12 should collapse that into a typed requirement boundary
-  before new structured-interior code grows another parallel string generator.
+  placement identity in one string. Phase 12 introduced a typed requirement boundary for static
+  object and terrain placement/dependency edges; Phases 13-14 should use it for structured interiors
+  instead of adding another parallel string generator.
 - Structured-interior dependency invariant coverage is intentionally deferred until Phases 13-14 add
   real structured-interior placement intents and dependency emission. Do not add tests that merely
   preserve today's missing dependency behavior.
+- Dynamic visual texture requirements remain a dynamic-specific adapter over the same identity
+  concepts. Revisit during Phase 15 only if keeping the adapter creates duplicated cleanup or
+  diagnostics work; do not block structured interiors on this naming convergence.
 
 ## Risks and Concessions
 

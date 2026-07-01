@@ -4,11 +4,11 @@ import type {
 	StaticBakeTextureUse,
 	StaticTextureUseOwner,
 } from "../../contracts";
-import {
-	createStaticMaterialTextureSamplingPolicy,
-	createStaticMaterialTextureUseId,
-} from "../../bake/static-material-texture-policy";
-import type { TexturePlacementIntent } from "../../../textures/placement";
+import { createStaticMaterialTextureBindingRequirement } from "../../bake/static-material-texture-policy";
+import type {
+	TextureBindingRequirement,
+	TexturePlacementIntent,
+} from "../../../textures/placement";
 import { createStaticTexturePlacementIntent } from "../../../textures/placement";
 import { createStaticObjectBatchPayload } from "./static-object-batch-payload";
 import { partitionStaticObjectBatches } from "./static-object-batch-partitioner";
@@ -32,35 +32,31 @@ export function createStaticObjectTexturePlacementIntents(input: {
 					if (!isCurrentlyStageableStaticObjectDataUse(dataUse)) {
 						continue;
 					}
-					const textureUseId = createStaticMaterialTextureUseId({
+					const requirement = createStaticMaterialTextureBindingRequirement({
 						dataUse,
 						textureUseNamespace: "static-object-texture",
 						textureUseScopeId: item.task.ownerId,
 						wrapMode: entry.textureWrapMode,
 					});
-					if (intentsByItemId.has(textureUseId)) {
+					if (intentsByItemId.has(requirement.placementItemId)) {
 						continue;
 					}
-					const textureUse: StaticBakeTextureUse = {
-						domain: payload.domain,
-						owners: NO_STATIC_TEXTURE_USE_OWNERS,
-						samplingPolicy: createStaticMaterialTextureSamplingPolicy({
-							dataUse,
-							wrapMode: entry.textureWrapMode,
-						}),
-						source: dataUse,
-						staticBatchId: input.staticBatchId,
-						textureUseId,
-					};
 					intentsByItemId.set(
-						textureUseId,
-						createStaticTexturePlacementIntent(textureUse, {
-							affinityKey: createStaticObjectPlacementAffinityKey({
-								landblockId: payload.landblock.landblockId,
-								ownerId: item.task.ownerId,
-								partitionBatchKey: partition.batchKey,
+						requirement.placementItemId,
+						createStaticTexturePlacementIntent(
+							createStaticObjectPlanningTextureUse({
+								domain: payload.domain,
+								requirement,
+								staticBatchId: input.staticBatchId,
 							}),
-						}),
+							{
+								affinityKey: createStaticObjectPlacementAffinityKey({
+									landblockId: payload.landblock.landblockId,
+									ownerId: item.task.ownerId,
+									partitionBatchKey: partition.batchKey,
+								}),
+							},
+						),
 					);
 				}
 			}
@@ -70,6 +66,27 @@ export function createStaticObjectTexturePlacementIntents(input: {
 	return [...intentsByItemId.values()].sort((left, right) =>
 		left.itemId.localeCompare(right.itemId),
 	);
+}
+
+function createStaticObjectPlanningTextureUse(options: {
+	readonly domain: StaticBakeTextureUse["domain"];
+	readonly requirement: TextureBindingRequirement;
+	readonly staticBatchId: string;
+}): StaticBakeTextureUse {
+	const textureUse: StaticBakeTextureUse = {
+		domain: options.domain,
+		owners: NO_STATIC_TEXTURE_USE_OWNERS,
+		source: options.requirement.source.dataUse,
+		staticBatchId: options.staticBatchId,
+		textureUseId: options.requirement.bindingKey,
+	};
+	if (!options.requirement.samplingPolicy) {
+		return textureUse;
+	}
+	return {
+		...textureUse,
+		samplingPolicy: options.requirement.samplingPolicy,
+	};
 }
 
 function hasStaticObjectTexturePlanningPayload(

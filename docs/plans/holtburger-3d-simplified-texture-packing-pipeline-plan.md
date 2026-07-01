@@ -1213,7 +1213,7 @@ Acceptance criteria:
 - [x] Resteering 2: review cutover health.
 - [x] Phase 7: bring terrain onto the same placement-before-bake contract.
 - [x] Phase 8: add on-demand zombie reclaim.
-- [ ] Resteering 3: review reclaim and renderer cleanup readiness.
+- [x] Resteering 3: review reclaim and renderer cleanup readiness.
 - [ ] Phase 9: simplify renderer payload prep and specialize shader families.
 - [ ] Phase 10: resolve `textureUseId` cleanup.
 - [ ] Phase 11: delete vestigial code and obsolete tests.
@@ -1400,6 +1400,25 @@ Acceptance criteria:
 - Phase 8 keeps page removal conservative. Normal renderer page disposal still happens through
   owner-removal texture updates; reclaim of never-uploaded ownerless pages can stay internal to
   `TextureManager`.
+- Resteering 3 kept the remaining plan direction intact. The shared closure shape is now proven
+  across static objects, static-authored dynamics, runtime-authored dynamics, and terrain; the
+  remaining complexity is concentrated in renderer-facing binding/upload vocabulary rather than in
+  resolver -> packer -> baker sequencing.
+- Resteering 3 found Phase 8 reclaim state acceptable but transitional. Storing
+  `RuntimeTexturePlacement` on registry entries is only needed because pre-bake placement can happen
+  before renderer ownership exists; Phase 9 should keep this as a narrow page-upload bridge or
+  replace it with an explicit page-residency model if that deletes code.
+- Resteering 3 found that `TextureManager` still owns object and terrain role-page slot assignment
+  for renderer binding updates even though bakers now own page legality. Phase 9 should shrink this
+  to one-page-per-role binding lookup for object materials first, then preserve terrain's stricter
+  role-page payload only where the terrain shader still needs it.
+- Resteering 3 found atlas diagnostics still useful at the placement/page level, but role-page
+  overflow diagnostics are now mostly old-pipeline smoke. Delete object role-page overflow
+  diagnostics during Phase 9 if the object renderer no longer has multi-slot role pages; keep terrain
+  diagnostics only for genuinely unsplittable terrain material shapes.
+- Resteering 3 accepted the draw-unit count tradeoff without adding representative perf gates. Tests
+  now prove partitioning is deterministic and explainable; any performance response should come from
+  measurement after the clean cutover, not from preserving the monolithic shader path.
 - Dry run split `TextureManager` responsibilities into placement and pinning. Current owner leases
   require post-bake draw-unit/resource owners, but pre-bake placement intents intentionally do not
   have owners yet.
@@ -1463,6 +1482,9 @@ Acceptance criteria:
 - `TextureManager` now stores `RuntimeTexturePlacement` on registry entries so pre-bake ownerless
   pages can be uploaded when ownership appears. This is pragmatic migration state tied to the current
   renderer update API; revisit during renderer payload cleanup if page residency becomes explicit.
+- `TextureManager` still marks renderer-facing object bindings through role-page slots after bakers
+  have already enforced one-page-per-role draw units. Phase 9 should remove the object multi-slot
+  role-page layer instead of teaching it to mimic the new contract.
 
 ## Risks and Concessions
 

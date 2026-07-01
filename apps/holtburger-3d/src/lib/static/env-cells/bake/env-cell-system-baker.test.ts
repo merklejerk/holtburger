@@ -228,6 +228,8 @@ describe("browser landblock env-cell baker", () => {
 				envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
 				staticObjectSourceGeometry: [],
 			},
+			texturePlacementSnapshot:
+				createStructuredInteriorPlacementSnapshot(input),
 		});
 
 		expect(result.staticSpatialRecords).toHaveLength(1);
@@ -321,6 +323,8 @@ describe("browser landblock env-cell baker", () => {
 				envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
 				staticObjectSourceGeometry: [],
 			},
+			texturePlacementSnapshot:
+				createStructuredInteriorPlacementSnapshot(input),
 		});
 
 		expect(result.drawUnits).toEqual([]);
@@ -647,6 +651,8 @@ describe("browser landblock env-cell baker", () => {
 				envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
 				staticObjectSourceGeometry: [],
 			},
+			texturePlacementSnapshot:
+				createStructuredInteriorPlacementSnapshot(input),
 		});
 		const drawUnit = result.drawUnits[0];
 		if (!drawUnit || drawUnit.kind !== "structured-interior-geometry") {
@@ -725,6 +731,8 @@ describe("browser landblock env-cell baker", () => {
 				envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
 				staticObjectSourceGeometry: [],
 			},
+			texturePlacementSnapshot:
+				createStructuredInteriorPlacementSnapshot(input),
 		});
 		const drawUnit = result.drawUnits.find(
 			(candidate) => candidate.kind === "structured-interior-geometry",
@@ -761,6 +769,117 @@ describe("browser landblock env-cell baker", () => {
 		);
 	});
 
+	it("rejects textured structured-interior baking without placement snapshot entries", () => {
+		const input = createInputWithRenderableCellStructure({
+			materialSources: [createTexturedMaterialSource(0x08000010)],
+			textureRefs: createRgbaTextureRefs(),
+		});
+		const envCell = requireFirstEnvCell(input);
+
+		expect(() =>
+			bakeEnvCellSystem({
+				...input,
+				attachments: {
+					envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
+					staticObjectSourceGeometry: [],
+				},
+			}),
+		).toThrow(
+			/Structured interior da550100 texture placement snapshot is missing env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat/,
+		);
+	});
+
+	it("splits structured-interior draw units by final object texture pages", () => {
+		const input = createInputWithRenderableCellStructure({
+			materialSources: [
+				createTexturedMaterialSource(0x08000010),
+				createTexturedMaterialSource(0x08000011, {
+					renderSurfaceId: 0x06000011,
+					surfaceTextureId: 0x05000011,
+				}),
+			],
+			renderSurfaces: [
+				{ materialId: 0x08000010, polygonId: 1 },
+				{ materialId: 0x08000011, polygonId: 2 },
+			],
+			textureRefs: [
+				...createRgbaTextureRefs(),
+				...createRgbaTextureRefs({
+					renderSurfaceId: 0x06000011,
+					surfaceTextureId: 0x05000011,
+				}),
+			],
+		});
+		const envCell = requireFirstEnvCell(input);
+
+		const result = bakeEnvCellSystem({
+			...input,
+			attachments: {
+				envCellCellStructureGeometry: [
+					createGeometryAttachment(envCell, {
+						positions: new Float32Array([
+							0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0, 0, 3, 0, 0, 2, 1, 0,
+						]),
+						surfaceIds: [0, 1],
+						triangles: [
+							{
+								firstVertex: 0,
+								materialVariantSignature: null,
+								polygonId: 1,
+								surfaceId: 0,
+							},
+							{
+								firstVertex: 3,
+								materialVariantSignature: null,
+								polygonId: 2,
+								surfaceId: 1,
+							},
+						],
+						uvs: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
+					}),
+				],
+				staticObjectSourceGeometry: [],
+			},
+			texturePlacementSnapshot: createStructuredInteriorPlacementSnapshot(
+				input,
+				{ uniquePages: true },
+			),
+		});
+		const drawUnits = result.drawUnits.filter(
+			(drawUnit) => drawUnit.kind === "structured-interior-geometry",
+		);
+
+		expect(drawUnits).toHaveLength(2);
+		expect(drawUnits.map((drawUnit) => drawUnit.textureUseIds)).toEqual([
+			[
+				"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
+			],
+			[
+				"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000011:rgba-color:sampling:wrap=repeat,repeat",
+			],
+		]);
+		expect(result.textureDependencies).toEqual([
+			{
+				resourceId: drawUnits[0]?.drawUnitId,
+				roles: [
+					{
+						itemIds: drawUnits[0]?.textureUseIds,
+						purpose: "object-base-color",
+					},
+				],
+			},
+			{
+				resourceId: drawUnits[1]?.drawUnitId,
+				roles: [
+					{
+						itemIds: drawUnits[1]?.textureUseIds,
+						purpose: "object-base-color",
+					},
+				],
+			},
+		]);
+	});
+
 	it("composes environment detail roles onto structured-interior textured materials", () => {
 		const input = createInputWithRenderableCellStructure({
 			detailRoles: [
@@ -786,6 +905,8 @@ describe("browser landblock env-cell baker", () => {
 				envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
 				staticObjectSourceGeometry: [],
 			},
+			texturePlacementSnapshot:
+				createStructuredInteriorPlacementSnapshot(input),
 		});
 		const drawUnit = result.drawUnits[0];
 		if (!drawUnit || drawUnit.kind !== "structured-interior-geometry") {
@@ -1274,7 +1395,13 @@ function createStaticObjectMaterialSource(options: {
 
 function createTexturedMaterialSource(
 	materialId: number,
+	options: {
+		readonly renderSurfaceId?: number;
+		readonly surfaceTextureId?: number;
+	} = {},
 ): StaticObjectMaterialSourceFacts {
+	const renderSurfaceId = options.renderSurfaceId ?? 0x06000010;
+	const surfaceTextureId = options.surfaceTextureId ?? 0x05000010;
 	return {
 		diffuse: 1,
 		identity: {
@@ -1288,11 +1415,11 @@ function createTexturedMaterialSource(
 			renderSurfaceDefaultPalettes: [],
 			selectedRenderSurface: {
 				kind: "render-surface",
-				renderSurfaceId: 0x06000010,
+				renderSurfaceId,
 			},
 			texture: {
 				kind: "surface-texture",
-				surfaceTextureId: 0x05000010,
+				surfaceTextureId,
 			},
 		},
 		surfaceId: materialId,
@@ -1301,18 +1428,25 @@ function createTexturedMaterialSource(
 	};
 }
 
-function createRgbaTextureRefs(): readonly StaticObjectTextureRefFacts[] {
+function createRgbaTextureRefs(
+	options: {
+		readonly renderSurfaceId?: number;
+		readonly surfaceTextureId?: number;
+	} = {},
+): readonly StaticObjectTextureRefFacts[] {
+	const renderSurfaceId = options.renderSurfaceId ?? 0x06000010;
+	const surfaceTextureId = options.surfaceTextureId ?? 0x05000010;
 	return [
 		{
 			palette: null,
 			renderSurface: {
 				kind: "render-surface",
-				renderSurfaceId: 0x06000010,
+				renderSurfaceId,
 			},
 			role: "surface-texture",
 			texture: {
 				kind: "surface-texture",
-				surfaceTextureId: 0x05000010,
+				surfaceTextureId,
 			},
 		},
 		{
@@ -1322,7 +1456,7 @@ function createRgbaTextureRefs(): readonly StaticObjectTextureRefFacts[] {
 			palette: null,
 			renderSurface: {
 				kind: "render-surface",
-				renderSurfaceId: 0x06000010,
+				renderSurfaceId,
 			},
 			role: "render-surface",
 			width: 1,
@@ -1357,6 +1491,34 @@ function createDetailTextureRefs(): readonly StaticObjectTextureRefFacts[] {
 			width: 1,
 		},
 	];
+}
+
+function createStructuredInteriorPlacementSnapshot(
+	input: StaticBakeBatchInput,
+	options: { readonly uniquePages?: boolean } = {},
+): NonNullable<StaticBakeBatchInput["texturePlacementSnapshot"]> {
+	const intents = createStructuredInteriorTexturePlacementIntents({
+		items: input.items,
+		staticBatchId: input.staticBatchId,
+	});
+	return {
+		placementsByItemId: new Map(
+			intents.map((intent, index) => [
+				intent.itemId,
+				{
+					height: 16,
+					itemId: intent.itemId,
+					pageId: options.uniquePages
+						? `${intent.purpose}:page:${index}`
+						: `${intent.purpose}:page:0`,
+					pool: intent.pool,
+					purpose: intent.purpose,
+					rect: [0, 0, 16, 16] as const,
+					width: 16,
+				},
+			]),
+		),
+	};
 }
 
 function createIndexedTextureRefsWithoutPalette(): readonly StaticObjectTextureRefFacts[] {

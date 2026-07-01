@@ -50,6 +50,7 @@ import {
 	describeEnvCellCellStructureGeometryIdentity,
 } from "./env-cell-system-geometry-attachments";
 import { bakeStaticObjectBatch } from "../../objects/bake/static-object-batch-baker";
+import { createStaticBakeObjectVisualInstallSet } from "../../bake/object-visual-install-set-publication";
 import {
 	createObjectMaterialDrawUnitPartitionKey,
 	splitObjectMaterialPartitionByMaterialTableBudget,
@@ -127,6 +128,10 @@ export function bakeEnvCellSystem(
 		...itemResults.flatMap((result) => result.drawUnits),
 		...staticObjectResult.drawUnits,
 	];
+	const textureDependencies = [
+		...itemResults.flatMap((result) => result.textureDependencies),
+		...staticObjectResult.textureDependencies,
+	];
 	return {
 		atlasRegistryUpdates: [],
 		buildRevision: Math.max(
@@ -144,6 +149,14 @@ export function bakeEnvCellSystem(
 				(coverage) => coverage.materialCount > 0 || coverage.partitionCount > 0,
 			),
 		],
+		objectVisualInstallSet: createStaticBakeObjectVisualInstallSet({
+			drawUnits,
+			staticObjectRenderInstances:
+				staticObjectResult.staticObjectRenderInstances,
+			staticObjectVisualResources:
+				staticObjectResult.staticObjectVisualResources,
+			textureDependencies,
+		}),
 		portalApertureResources: itemResults
 			.flatMap((result) => result.portalApertureResources)
 			.concat(staticObjectResult.portalApertureResources),
@@ -171,10 +184,7 @@ export function bakeEnvCellSystem(
 			...itemResults.flatMap((result) => result.textureUses),
 			...staticObjectResult.textureUses,
 		]),
-		textureDependencies: [
-			...itemResults.flatMap((result) => result.textureDependencies),
-			...staticObjectResult.textureDependencies,
-		],
+		textureDependencies,
 		tasks: input.items.map((item) => item.task),
 	};
 }

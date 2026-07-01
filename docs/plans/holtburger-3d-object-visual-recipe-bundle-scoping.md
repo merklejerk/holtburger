@@ -1,6 +1,6 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation in progress. Phases 0-9B are complete. This document defines the target
+Status: implementation in progress. Phases 0-9C are complete. This document defines the target
 model, north stars, risk surface, and phased cutover plan for replacing static-vs-dynamic object
 visual worker bifurcation with a shared object-like visual recipe graph.
 
@@ -1435,7 +1435,7 @@ Course correction:
 
 - Insert Phase 9A for static publication metadata contracts before resolver cutover.
 - Insert Phase 9B for unified baker static publication output before resolver cutover.
-- Move the actual static resolver cutover to Phase 9C, after the shared recipe path can produce
+- Move the actual static resolver cutover to Phase 9D, after the shared recipe path can produce
   static-shaped install publications without legacy lookup.
 - Keep Phase 10 as the dynamic cutover, but let it reuse the richer publication machinery introduced
   for static instead of inventing a dynamic-only install path.
@@ -1565,13 +1565,60 @@ Implementation notes after Phase 9B:
 - Spicy debt: current generic baked render parts contain transformed geometry. That is correct for
   direct draw units, but reusable static visual resources ultimately need source-local geometry plus
   render-instance transforms. Resolver cutover must ensure instanced resource groups are baked in
-  source-local space before Phase 9C treats generated-scenery/resource publication as production
+  source-local space before Phase 9D treats generated-scenery/resource publication as production
   parity. Do not paper over this with runtime reconstruction from legacy payloads.
 - Verification:
   `npm --prefix apps/holtburger-3d run test:ts -- object-visual-baker object-visual-static-publication object-visual-static-publication-baker`
   and `npm --prefix apps/holtburger-3d run check`.
 
-### Phase 9C: Static Object-Like Resolver Cutover
+### Phase 9C: Static Object Visual Install-Set Transport Cutover
+
+Status: complete.
+
+Goal: make static bake results and coordinator commits carry producer-authored object visual install
+sets before resolver output shapes are cut over.
+
+Deliverables:
+
+- Add `ObjectVisualInstallSet` to `StaticBakeBatchResult` and `StaticCoordinatorCommitDelta`.
+- Route static coordinator commits and runtime install through the producer-authored install set
+  rather than deriving it inside the runtime install shell.
+- Populate terrain results with an empty object visual install set.
+- Populate static object and env-cell results with object-like direct draw units, static object
+  visual resources, render instances, and texture dependencies in `ObjectVisualInstallSet`.
+- Keep legacy `drawUnits`, `staticObjectVisualResources`, and `staticObjectRenderInstances` fields
+  present until resolver and baker producers stop emitting them.
+
+Acceptance criteria:
+
+- Runtime static commit installation consumes `commit.objectVisualInstallSet` directly.
+- Static object-like runtime publication still reads object-like drawable products from
+  `ObjectVisualInstallSet`.
+- Terrain remains outside the object visual install set.
+- Existing static coordinator and runtime tests pass with explicit install-set expectations.
+
+Deletion criteria:
+
+- Delete producer-side legacy-to-install-set publication once Phase 9D emits install sets from
+  recipe-first static producers directly.
+
+Implementation notes after Phase 9C:
+
+- Added `apps/holtburger-3d/src/lib/static/bake/object-visual-install-set-publication.ts` as a
+  transitional producer-side publication helper.
+- `StaticBakeBatchResult` and `StaticCoordinatorCommitDelta` now carry `objectVisualInstallSet`.
+- `installStaticCommit` no longer reconstructs object visual install sets from legacy commit
+  buckets. It validates and forwards the producer-authored set.
+- Terrain baker and eviction commits publish empty install sets; static object and env-cell bakers
+  publish object-like install sets from their current outputs.
+- Debt retained intentionally: current static object/env-cell producers still derive install sets
+  from legacy draw-unit/resource arrays. That is now producer-side transitional debt, not runtime
+  install-shell reconstruction.
+- Verification:
+  `npm --prefix apps/holtburger-3d run test:ts -- static-commit-installer static-coordinator terrain-geometry-baker env-cell-system-baker static-object-batch`
+  and `npm --prefix apps/holtburger-3d run check`.
+
+### Phase 9D: Static Object-Like Resolver Cutover
 
 Goal: make static object-like layers produce object visual bundle resolutions and feed the unified
 baker/install publication path.

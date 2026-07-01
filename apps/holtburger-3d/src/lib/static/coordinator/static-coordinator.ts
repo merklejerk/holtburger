@@ -38,6 +38,7 @@ import type {
 	StaticLayerTaskStatus,
 	StaticLayerTaskRequest,
 } from "../contracts";
+import { createEmptyObjectVisualInstallSet } from "../../visual/object-visual-install-set";
 import type { PreparedAssetReader } from "../../assets/contracts";
 import type {
 	DynamicEntityRecipe,
@@ -939,6 +940,7 @@ export class StaticCoordinator {
 					tasks: result.tasks,
 				}),
 				materialCoverage: result.materialCoverage,
+				objectVisualInstallSet: result.objectVisualInstallSet,
 				removedResources: [],
 				revision: result.revision,
 				envCellStaticObjectPlacementRecords:
@@ -993,6 +995,7 @@ export class StaticCoordinator {
 				addedPortalApertureResources: [],
 				commitId: createStaticEvictionCommitId(this.#revision),
 				materialCoverage: [],
+				objectVisualInstallSet: createEmptyObjectVisualInstallSet(),
 				removedResources: options.removedResources,
 				revision: this.#revision,
 				envCellStaticObjectPlacementRecords: [],

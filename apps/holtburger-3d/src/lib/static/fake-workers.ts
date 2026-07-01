@@ -13,6 +13,7 @@ import type {
 	StaticResolverJob,
 	StaticScopePayload,
 } from "./contracts";
+import { createEmptyObjectVisualInstallSet } from "../visual/object-visual-install-set";
 
 export class DeferredStaticResolver
 	implements StaticResolver, StaticLandblockSceneLodSourceResolver
@@ -332,6 +333,8 @@ function createFakeStaticBakeResult(
 		staticObjectRenderInstances: result.staticObjectRenderInstances ?? [],
 		staticObjectVisualResources: result.staticObjectVisualResources ?? [],
 		materialCoverage: result.materialCoverage ?? [],
+		objectVisualInstallSet:
+			result.objectVisualInstallSet ?? createEmptyObjectVisualInstallSet(),
 		portalApertureResources: result.portalApertureResources ?? [],
 		revision: input.revision,
 		envCellStaticObjectPlacementRecords:

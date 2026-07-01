@@ -69,6 +69,7 @@ import {
 	createStaticObjectVisualResourceKeyString,
 } from "../static-object-visual-resource-key";
 import { createStaticObjectBatchPayload } from "./static-object-batch-payload";
+import { createStaticBakeObjectVisualInstallSet } from "../../bake/object-visual-install-set-publication";
 
 export class StaticObjectBatchBaker implements StaticBaker {
 	async bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
@@ -100,6 +101,15 @@ export function bakeStaticObjectBatch(
 		bakeStaticObjectBatchItem(input, item, index),
 	);
 	const drawUnits = itemResults.flatMap((result) => result.drawUnits);
+	const staticObjectRenderInstances = itemResults.flatMap(
+		(result) => result.staticObjectRenderInstances,
+	);
+	const staticObjectVisualResources = dedupeStaticObjectVisualResources(
+		itemResults.flatMap((result) => result.staticObjectVisualResources),
+	);
+	const textureDependencies = itemResults.flatMap(
+		(result) => result.textureDependencies,
+	);
 	emitStaticBakeWorkerTrace("static-object-batch:end", {
 		bakeBatchId: input.bakeBatchId,
 		domain: input.domain,
@@ -115,16 +125,18 @@ export function bakeStaticObjectBatch(
 		),
 		domain: input.domain,
 		drawUnits,
-		staticObjectRenderInstances: itemResults.flatMap(
-			(result) => result.staticObjectRenderInstances,
-		),
-		staticObjectVisualResources: dedupeStaticObjectVisualResources(
-			itemResults.flatMap((result) => result.staticObjectVisualResources),
-		),
+		staticObjectRenderInstances,
+		staticObjectVisualResources,
 		staticObjectBakeDiagnostics: itemResults.map(
 			(result) => result.diagnostics,
 		),
 		materialCoverage: itemResults.map((result) => result.materialCoverage),
+		objectVisualInstallSet: createStaticBakeObjectVisualInstallSet({
+			drawUnits,
+			staticObjectRenderInstances,
+			staticObjectVisualResources,
+			textureDependencies,
+		}),
 		portalApertureResources: [],
 		revision: input.revision,
 		envCellStaticObjectPlacementRecords: [],
@@ -141,9 +153,7 @@ export function bakeStaticObjectBatch(
 		textureUses: mergeTextureUses(
 			itemResults.flatMap((result) => result.textureUses),
 		),
-		textureDependencies: itemResults.flatMap(
-			(result) => result.textureDependencies,
-		),
+		textureDependencies,
 		tasks: input.items.map((item) => item.task),
 	};
 }

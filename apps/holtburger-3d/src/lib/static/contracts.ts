@@ -18,6 +18,7 @@ import type {
 	TexturePlacementSnapshot,
 } from "../textures/placement";
 import type { ObjectVisualGeometryBuffer } from "../visual/object-visual-recipe-bundle";
+import type { ObjectVisualInstallSet } from "../visual/object-visual-install-set";
 import type { VisualGeometryPayload } from "../visual/visual-geometry";
 
 export type StaticDomain =
@@ -1391,6 +1392,7 @@ export interface StaticBakeBatchResult {
 	readonly textureUses: readonly StaticBakeTextureUse[];
 	readonly textureDependencies: readonly TextureResourceDependencies[];
 	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
+	readonly objectVisualInstallSet: ObjectVisualInstallSet;
 	readonly atlasRegistryUpdates: readonly string[];
 	readonly staticSpatialRecords: readonly StaticSpatialRecord[];
 	readonly staticVisibilityRecords: readonly StaticVisibilityRecord[];
@@ -1977,6 +1979,7 @@ export interface StaticCoordinatorCommitDelta {
 	readonly textureUses: readonly StaticBakeTextureUse[];
 	readonly textureDependencies: readonly TextureResourceDependencies[];
 	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
+	readonly objectVisualInstallSet: ObjectVisualInstallSet;
 	readonly staticSpatialRecords: readonly StaticSpatialRecord[];
 	readonly staticVisibilityRecords: readonly StaticVisibilityRecord[];
 	readonly staticPortalInteriorRecords: readonly StaticPortalInteriorRecord[];

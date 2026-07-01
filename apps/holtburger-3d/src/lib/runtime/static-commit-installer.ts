@@ -15,11 +15,7 @@ import type {
 	StaticSpatialRecord,
 	StaticVisibilityRecord,
 } from "../static/contracts";
-import {
-	createObjectVisualInstallSet,
-	type ObjectVisualInstallSet,
-	type ObjectVisualDirectDrawUnit,
-} from "../visual/object-visual-install-set";
+import type { ObjectVisualInstallSet } from "../visual/object-visual-install-set";
 
 export interface StaticCommitInstallInput {
 	readonly commit: StaticCoordinatorCommitDelta;
@@ -44,9 +40,7 @@ export interface StaticCommitInstallResult {
 export function installStaticCommit(
 	input: StaticCommitInstallInput,
 ): StaticCommitInstallResult {
-	const objectVisualInstallSet = createStaticCommitObjectVisualInstallSet(
-		input.commit,
-	);
+	const objectVisualInstallSet = input.commit.objectVisualInstallSet;
 	assertTexturedDrawUnitsHaveCommittedBindings(
 		input.commit.addedDrawUnits,
 		input.textureUpdate?.textureBindings ?? [],
@@ -70,27 +64,6 @@ export function installStaticCommit(
 		staticVisibilityRecords: input.commit.staticVisibilityRecords,
 		textureUpdate: input.textureUpdate,
 	};
-}
-
-function createStaticCommitObjectVisualInstallSet(
-	commit: StaticCoordinatorCommitDelta,
-): ObjectVisualInstallSet {
-	return createObjectVisualInstallSet({
-		directDrawUnits: commit.addedDrawUnits.filter(isObjectVisualDirectDrawUnit),
-		dynamicAnimationPartBindings: [],
-		renderInstances: commit.staticObjectRenderInstances,
-		textureDependencies: commit.textureDependencies,
-		visualResources: commit.staticObjectVisualResources,
-	});
-}
-
-function isObjectVisualDirectDrawUnit(
-	drawUnit: StaticDrawUnit,
-): drawUnit is ObjectVisualDirectDrawUnit {
-	return (
-		drawUnit.kind === "static-object-geometry" ||
-		drawUnit.kind === "structured-interior-geometry"
-	);
 }
 
 function assertTexturedDrawUnitsHaveCommittedBindings(

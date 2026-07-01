@@ -82,7 +82,7 @@ export function bakeTerrainGeometry(
 		staticSourceMappings: createTerrainSourceMappingRecords(drawUnits),
 		staticSpatialRecords: createTerrainSpatialRecords(drawUnits),
 		staticVisibilityRecords: [],
-		staticBatchId: input.staticBatchId,
+		bakeBatchId: input.bakeBatchId,
 		tasks: input.items.map((item) => item.task),
 		textureDependencies: createTerrainTextureDependencies(
 			drawUnits,
@@ -94,7 +94,6 @@ export function bakeTerrainGeometry(
 
 export function createTerrainTexturePlacementIntents(options: {
 	readonly items: readonly StaticBakeBatchItem[];
-	readonly staticBatchId: string;
 }): readonly TexturePlacementIntent[] {
 	return options.items.flatMap((item) => {
 		if (
@@ -128,11 +127,10 @@ export function createTerrainTexturePlacementIntents(options: {
 				}
 				return [
 					createStaticTexturePlacementIntent(
-						createTerrainStaticBakeTextureUse({
-							owners: [],
-							requirement,
-							staticBatchId: options.staticBatchId,
-						}),
+							createTerrainStaticBakeTextureUse({
+								owners: [],
+								requirement,
+							}),
 						{
 							affinityKey: createTerrainTextureAffinityKey(item.task.ownerId),
 						},
@@ -193,7 +191,6 @@ function bakeTerrainGeometryItem(
 	const drawUnits = createTerrainGeometryDrawUnits(
 		textureUseScopeId,
 		item.payload.scope,
-		input.staticBatchId,
 		input.texturePlacementSnapshot ?? EMPTY_TEXTURE_PLACEMENT_SNAPSHOT,
 	);
 
@@ -206,7 +203,6 @@ function bakeTerrainGeometryItem(
 function createTerrainGeometryDrawUnits(
 	textureUseScopeId: string,
 	payload: TerrainStaticScopePayload,
-	staticBatchId: string,
 	texturePlacementSnapshot: TexturePlacementSnapshot,
 ): readonly TerrainGeometryStaticDrawUnit[] {
 	const terrainMaterialPlan = buildTerrainMaterialLayerPlan({
@@ -236,7 +232,6 @@ function createTerrainGeometryDrawUnits(
 			landblockId: payload.landblock.landblockId,
 			pcodeByQuadIndex,
 			quadByIndex,
-			staticBatchId,
 			terrainMaterialPlan: slice.plan,
 			triangles: slice.triangles,
 			vertices: payload.mesh.vertices,
@@ -249,7 +244,6 @@ function createTerrainGeometryDrawUnit({
 	landblockId,
 	pcodeByQuadIndex,
 	quadByIndex,
-	staticBatchId,
 	terrainMaterialPlan,
 	triangles,
 	vertices,
@@ -258,7 +252,6 @@ function createTerrainGeometryDrawUnit({
 	readonly landblockId: number;
 	readonly pcodeByQuadIndex: ReadonlyMap<number, number>;
 	readonly quadByIndex: ReadonlyMap<number, TerrainMeshQuadFacts>;
-	readonly staticBatchId: string;
 	readonly terrainMaterialPlan: TerrainMaterialLayerPlan | null;
 	readonly triangles: readonly TerrainMeshTriangleFacts[];
 	readonly vertices: readonly TerrainMeshVertexFacts[];
@@ -270,7 +263,6 @@ function createTerrainGeometryDrawUnit({
 	const material = classifyTerrainMaterialFamily({
 		domain: "outdoor-terrain",
 		plan: terrainMaterialPlan,
-		staticBatchId,
 	});
 	const layerSlotByPcode = new Map(
 		terrainMaterialPlan?.layerEntries.map(
@@ -861,11 +853,10 @@ function createTerrainBakeTextureUses(
 
 			textureUsesById.set(
 				requirement.bindingKey,
-				createTerrainStaticBakeTextureUse({
-					owners: [{ drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" }],
-					requirement,
-					staticBatchId: input.staticBatchId,
-				}),
+					createTerrainStaticBakeTextureUse({
+						owners: [{ drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" }],
+						requirement,
+					}),
 			);
 		}
 	}
@@ -918,13 +909,11 @@ function createTerrainTextureBindingRequirement(
 function createTerrainStaticBakeTextureUse(options: {
 	readonly owners: StaticBakeTextureUse["owners"];
 	readonly requirement: TextureBindingRequirement;
-	readonly staticBatchId: string;
 }): StaticBakeTextureUse {
 	const textureUse: StaticBakeTextureUse = {
 		domain: "outdoor-terrain",
 		owners: options.owners,
 		source: options.requirement.source.dataUse,
-		staticBatchId: options.staticBatchId,
 		textureUseId: options.requirement.bindingKey,
 	};
 	if (!options.requirement.samplingPolicy) {

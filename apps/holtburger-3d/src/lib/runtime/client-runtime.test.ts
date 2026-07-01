@@ -2359,11 +2359,9 @@ describe("browser client runtime", () => {
 				.staticCommitInstall.pendingCommits,
 		).toEqual([
 			{
-				commitId:
-					"static-commit:static-batch:1:outdoor-terrain:landblock:da55ffff:1",
+				commitId: "static-commit:1:1:landblock:da55ffff:outdoor-terrain",
 				phase: "materializing",
 				revision: 1,
-				staticBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:1",
 			},
 		]);
 		assetService.resolveNext(
@@ -2381,11 +2379,9 @@ describe("browser client runtime", () => {
 		).toEqual({
 			committedCommits: [
 				{
-					commitId:
-						"static-commit:static-batch:1:outdoor-terrain:landblock:da55ffff:1",
+					commitId: "static-commit:1:1:landblock:da55ffff:outdoor-terrain",
 					phase: "materialized",
 					revision: 1,
-					staticBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:1",
 				},
 			],
 			envCellResourceMembershipRevision: 0,
@@ -2441,11 +2437,11 @@ describe("browser client runtime", () => {
 						anisotropy: 1,
 						filteringMode: "nearest",
 						mipmapsGenerated: false,
-						samplerPolicyKey:
-							"sample=rgba-color;filter=nearest;mips=off;aniso=1",
-						textureRefId:
-							"texture-ref:outdoor-terrain:batch-a:terrain-textured:prepared-texture:06000010",
-					},
+							samplerPolicyKey:
+								"sample=rgba-color;filter=nearest;mips=off;aniso=1",
+							textureRefId:
+								"texture-ref:outdoor-terrain:texture-placement-bucket|outdoor-terrain|terrain|terrain-color|static-authored:terrain-textured:prepared-texture:06000010",
+						},
 				],
 				revision: 2,
 			},
@@ -2501,11 +2497,9 @@ describe("browser client runtime", () => {
 			envCellResourceMembershipRevision: 0,
 			failedCommits: [
 				{
-					commitId:
-						"static-commit:static-batch:1:outdoor-terrain:landblock:da55ffff:1",
+					commitId: "static-commit:1:1:landblock:da55ffff:outdoor-terrain",
 					phase: "failed",
 					revision: 1,
-					staticBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:1",
 				},
 			],
 			installedDrawUnits: 0,
@@ -2729,7 +2723,7 @@ function completeBakerWork(
 				item.task.scope.landblockId === landblockId,
 		),
 	);
-	baker.complete(input?.staticBatchId ?? failKey(), result);
+	baker.complete(input?.bakeBatchId ?? failKey(), result);
 }
 
 function createStaticLayerRecipeForSourceRequest(
@@ -4682,7 +4676,7 @@ function createBakeTextureUse(
 		domain: "outdoor-terrain",
 		owners: [{ drawUnitId, kind: "draw-unit" }],
 		source,
-		staticBatchId: "batch-a",
+		bakeBatchId: "batch-a",
 		textureUseId: `${drawUnitId}:prepared-texture:${source.renderSurface.renderSurfaceId
 			.toString(16)
 			.padStart(8, "0")}`,

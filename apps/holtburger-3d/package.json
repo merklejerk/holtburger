@@ -16,6 +16,7 @@
 		"lint:rust": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
 		"format": "prettier --write .",
 		"format:check": "prettier --check .",
+		"harness:browser": "node scripts/browser-pipeline-harness.mjs",
 		"profile": "bash scripts/profile.sh",
 		"tauri": "tauri",
 		"tauri:dev": "tauri dev",

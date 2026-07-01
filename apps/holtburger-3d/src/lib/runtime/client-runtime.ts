@@ -92,12 +92,8 @@ import type {
 	StaticCoordinatorTimingDiagnostics,
 	StaticCoordinatorOverviewSnapshot,
 	StaticObjectBakeDiagnostics,
-	LayerOwnerKey,
 } from "../static/contracts";
-import {
-	collectStaticDrawUnitResourceIds,
-	type StaticAuthoredDynamicPlacementRecord,
-} from "../static/contracts";
+import { collectStaticDrawUnitResourceIds } from "../static/contracts";
 import { createLayerOwnerKeyId } from "../static/layer-owners";
 import {
 	installStaticCommit,
@@ -167,6 +163,13 @@ import {
 	type DynamicVisualBaker,
 } from "../dynamic/visual-baker";
 import { createDynamicVisualBakeSourceGeometry } from "../dynamic/visual-bake-attachments";
+import {
+	classifyTexturePlacementPool,
+	classifyTextureUsagePurpose,
+	createRuntimeAuthoredDynamicTexturePlacementBucketKey,
+	createStaticAuthoredDynamicTexturePlacementBucketKey,
+	type TexturePlacementBucketKey,
+} from "../textures/placement";
 import type { PlacementTransformDto } from "../host/contracts";
 import { translateBounds } from "./scene-query/geometry";
 
@@ -681,7 +684,6 @@ interface StaticCommitInstallCommitSnapshot {
 	readonly commitId: string;
 	readonly phase: StaticCommitInstallPhase;
 	readonly revision: number;
-	readonly staticBatchId: string;
 }
 
 type StaticCommitInstallPhase =
@@ -694,7 +696,6 @@ interface MutableStaticCommitInstall {
 	readonly commitId: string;
 	phase: StaticCommitInstallPhase;
 	readonly revision: number;
-	readonly staticBatchId: string;
 }
 
 export interface ClientRuntime {
@@ -864,7 +865,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 	);
 	readonly #staticLayersByKey = new Map<string, StaticLandblockLayerPayload>();
 	readonly #staticLayerKeyByResourceId = new Map<string, string>();
-	readonly #textureBatchIdByStaticLayerOwner = new Map<string, string>();
 	#envCellResourceMembershipRevision = 0;
 	readonly #dynamicEntityController: DynamicEntityController;
 	readonly #dynamicVisualBaker: DynamicVisualBaker;
@@ -913,19 +913,14 @@ class ClientRuntimeImpl implements ClientRuntime {
 		});
 		this.#textureManager = new TextureManager({ assetService, texturePacker });
 		this.#staticCoordinator = staticCoordinator;
-		this.#staticCoordinator.setAtlasSnapshotProvider(
-			(payloads, staticBatchId) =>
-				this.#textureManager.createStaticAtlasBatchSnapshot(
-					payloads,
-					staticBatchId,
-				),
-		);
 		this.#staticCoordinator.setSourceReadyHandler(async (work) => {
+			const texturePlacementStartedAt = nowMs();
 			const placementSnapshot = await this.#textureManager.placeTextureIntents({
 				intents: work.placementIntents,
-				placementBatchId: work.staticBatchId,
 			});
-			await work.continueWithPlacement(placementSnapshot);
+			await work.continueWithPlacement(placementSnapshot, {
+				texturePlacementMs: nowMs() - texturePlacementStartedAt,
+			});
 		});
 		this.#lastRendererSnapshot = renderer.createDiagnosticsSnapshot();
 		this.#currentRenderPassPlan = this.#lastRendererSnapshot.renderPassPlan;
@@ -1033,9 +1028,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 			const texturePlacementSnapshot =
 				await this.#textureManager.placeTextureIntents({
 					intents: texturePlanning.placementIntents,
-					placementBatchId: createRuntimeDynamicTextureBatchId(
-						options.entityId,
-					),
 				});
 			if (!this.#isCurrentRuntimeDynamicVisualPrep(options)) {
 				return;
@@ -1153,13 +1145,10 @@ class ClientRuntimeImpl implements ClientRuntime {
 				: null;
 		this.#setRenderAnchorLandblockId(nextAnchor);
 		const reconciliation = this.#reconcileStaticRetention(this.#sceneInterest);
-		this.#dynamicEntityController.retainLayerOwners(
-			reconciliation.retainedLayerOwners,
-		);
-		this.#retainStaticLayerOwnerTextureBatchIds(
-			reconciliation.retainedLayerOwners,
-		);
-		this.#dynamicEntityController.clearEvictedRuntimeRenderResidences(
+			this.#dynamicEntityController.retainLayerOwners(
+				reconciliation.retainedLayerOwners,
+			);
+			this.#dynamicEntityController.clearEvictedRuntimeRenderResidences(
 			reconciliation.retainedLayerOwners,
 		);
 		this.#enqueueDynamicRendererResourceSync();
@@ -1986,7 +1975,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 			commitId: delta.commitId,
 			phase: "queued",
 			revision: delta.revision,
-			staticBatchId: delta.staticBatchId,
 		};
 		this.#staticCommitInstallCommits.set(delta.commitId, commit);
 		return commit;
@@ -2063,13 +2051,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 			spatialRecords: installed.staticSpatialRecords,
 			visibilityRecords: installed.staticVisibilityRecords,
 		});
-		this.#recordDynamicPlacementTextureBatchIds(
-			delta.staticBatchId,
-			commitEnvelope.dynamicPlacements,
-		);
 		this.#dynamicEntityController.ingestStaticPlacements(
 			commitEnvelope.dynamicPlacements,
-			this.#textureBatchIdByStaticLayerOwner,
 		);
 		this.#applyStaticAuthoredDynamicVisualPrep(commitEnvelope);
 		this.#enqueueDynamicRendererResourceSync();
@@ -2100,7 +2083,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 			kind: "static-commit-install-failed",
 			message,
 			revision: delta.revision,
-			staticBatchId: delta.staticBatchId,
 		});
 		this.#maybeEmitSceneInterestSettled();
 	}
@@ -2203,21 +2185,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#refreshRendererDiagnosticsSnapshot();
 	}
 
-	#recordDynamicPlacementTextureBatchIds(
-		staticBatchId: string,
-		placements: readonly StaticAuthoredDynamicPlacementRecord[],
-	): void {
-		for (const placement of placements) {
-			this.#textureBatchIdByStaticLayerOwner.set(
-				createStaticLayerOwnerTextureBatchLookupKey(
-					placement.owner.domain,
-					placement.owner.ownerId,
-				),
-				staticBatchId,
-			);
-		}
-	}
-
 	#applyStaticAuthoredDynamicVisualPrep(
 		commitEnvelope: StaticScopePrepCommit,
 	): void {
@@ -2240,17 +2207,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 		}
 		for (const failure of result.failures) {
 			console.warn("[holtburger-3d][dynamic-static-authored-bake]", failure);
-		}
-	}
-
-	#retainStaticLayerOwnerTextureBatchIds(
-		layerOwners: readonly LayerOwnerKey[],
-	): void {
-		const retainedOwnerIds = new Set(layerOwners.map(createLayerOwnerKeyId));
-		for (const key of this.#textureBatchIdByStaticLayerOwner.keys()) {
-			if (!retainedOwnerIds.has(getTextureBatchLookupLayerOwnerId(key))) {
-				this.#textureBatchIdByStaticLayerOwner.delete(key);
-			}
 		}
 	}
 
@@ -3593,7 +3549,6 @@ function toStaticCommitInstallCommitSnapshot(
 		commitId: commit.commitId,
 		phase: commit.phase,
 		revision: commit.revision,
-		staticBatchId: commit.staticBatchId,
 	};
 }
 
@@ -3964,12 +3919,16 @@ function createStaticCoordinatorDiagnosticsReport(
 		},
 		timingSummary: createStaticCoordinatorTimingSummary(snapshot.recentTiming),
 	};
-	return {
-		...report,
-		...(inFlightTasks.length > 0 ? { inFlightTasks } : {}),
-		...(recentFailures.length > 0 ? { recentFailures } : {}),
-	};
-}
+		return {
+			...report,
+			...(inFlightTasks.length > 0 ? { inFlightTasks } : {}),
+			...(recentFailures.length > 0 ? { recentFailures } : {}),
+			...(snapshot.staticBakerDiagnostics &&
+			snapshot.staticBakerDiagnostics.pendingJobs.length > 0
+				? { staticBaker: snapshot.staticBakerDiagnostics }
+				: {}),
+		};
+	}
 
 function createRendererDiagnosticsSummary(
 	snapshot: RendererSnapshot,
@@ -4261,9 +4220,12 @@ function createDynamicTextureUseCommits(
 			`Cannot create dynamic texture uses for unknown entity ${resource.entityId}.`,
 		);
 	}
-	const { textureBatchId, textureDomain } = record.presentation.policy;
+	const { textureDomain } = record.presentation.policy;
 	return resource.materialPlan.textureUses.map((textureUse) => ({
-		textureBatchId,
+		placementBucketKey: createDynamicTextureUsePlacementBucketKey(
+			record,
+			textureUse.source,
+		),
 		textureDomain,
 		owner: {
 			kind: "dynamic-visual-resource",
@@ -4273,6 +4235,33 @@ function createDynamicTextureUseCommits(
 		source: textureUse.source,
 		textureUseId: textureUse.textureUseId,
 	}));
+}
+
+function createDynamicTextureUsePlacementBucketKey(
+	record: DynamicEntitySummaryDto,
+	source: DynamicTextureUseCommit["source"],
+): TexturePlacementBucketKey {
+	const { retentionPolicy, textureDomain } = record.presentation.policy;
+	const purpose = classifyTextureUsagePurpose(
+		source,
+		classifyTexturePlacementPool(textureDomain),
+	);
+	if (textureDomain === "runtime-object-material") {
+		return createRuntimeAuthoredDynamicTexturePlacementBucketKey({
+			entityId: record.id,
+			purpose,
+		});
+	}
+	if (retentionPolicy.kind !== "static-layer-owner") {
+		throw new Error(
+			`Dynamic entity ${record.id} cannot use static texture domain ${textureDomain} without static-layer ownership.`,
+		);
+	}
+	return createStaticAuthoredDynamicTexturePlacementBucketKey({
+		domain: textureDomain,
+		ownerId: retentionPolicy.layerOwnerId,
+		purpose,
+	});
 }
 
 function createDynamicRendererInstances(
@@ -4425,21 +4414,6 @@ function createDynamicRendererInstanceId(
 	record: Pick<DynamicEntitySummaryDto, "id">,
 ): string {
 	return `dynamic-instance:${record.id}`;
-}
-
-function createStaticLayerOwnerTextureBatchLookupKey(
-	domain: string,
-	layerOwnerId: string,
-): string {
-	return `${domain}:${layerOwnerId}`;
-}
-
-function getTextureBatchLookupLayerOwnerId(key: string): string {
-	const separatorIndex = key.indexOf(":");
-	if (separatorIndex < 0) {
-		throw new Error(`Invalid static layer owner texture batch key ${key}.`);
-	}
-	return key.slice(separatorIndex + 1);
 }
 
 function createPortalFrameWorkPlanDiagnostics(plan: PortalFrameWorkPlan) {
@@ -4707,10 +4681,24 @@ function createStaticCoordinatorTimingSummary(
 				timings.map((timing) => nullableMilliseconds(timing.commitMs)),
 			),
 		),
+		placementIntentMs: roundMilliseconds(
+			sumNumbers(
+				timings.map((timing) =>
+					nullableMilliseconds(timing.placementIntentMs),
+				),
+			),
+		),
 		reportCount: timings.length,
 		resolverMs: roundMilliseconds(
 			sumNumbers(
 				timings.map((timing) => nullableMilliseconds(timing.resolverMs)),
+			),
+		),
+		texturePlacementMs: roundMilliseconds(
+			sumNumbers(
+				timings.map((timing) =>
+					nullableMilliseconds(timing.texturePlacementMs),
+				),
 			),
 		),
 		slowestBake: createTimingSample(
@@ -4735,7 +4723,9 @@ function createTimingSample(
 		commitMs: roundNullableMilliseconds(timing.commitMs),
 		domain: timing.domain,
 		itemCount: timing.itemCount,
+		placementIntentMs: roundNullableMilliseconds(timing.placementIntentMs),
 		resolverMs: roundNullableMilliseconds(timing.resolverMs),
+		texturePlacementMs: roundNullableMilliseconds(timing.texturePlacementMs),
 	};
 }
 
@@ -4802,9 +4792,15 @@ function createStaticCoordinatorTaskDiagnostics(
 	task: StaticCoordinatorReportTask,
 ): StaticCoordinatorTaskReportDiagnostics {
 	return {
+		activeBakeBatchId: task.activeBakeBatchId,
+		activeBakeStage: task.activeBakeStage,
+		activeBakeStageAgeMs: task.activeBakeStageAgeMs,
+		activeBakeStageStartedAtMs: task.activeBakeStageStartedAtMs,
 		domain: task.domain,
 		ownerId: task.ownerId,
 		phase: task.phase,
+		phaseAgeMs: task.phaseAgeMs,
+		phaseStartedAtMs: task.phaseStartedAtMs,
 		revision: task.revision,
 		scopeKey: task.scopeKey,
 		taskId: task.taskId,
@@ -4888,6 +4884,10 @@ function createLegacyDetailLodRadius(
 		? (interest.lod?.detail ?? 0)
 		: -1;
 	return Math.max(explicitObjectRadius, generatedSceneryRadius);
+}
+
+function nowMs(): number {
+	return globalThis.performance?.now?.() ?? Date.now();
 }
 
 function disposeIfAvailable(value: unknown): void {

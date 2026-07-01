@@ -125,7 +125,7 @@ function createAttachmentRequest(
 			},
 		],
 		revision: 1,
-		staticBatchId: "static-batch:env-cell-geometry",
+		bakeBatchId: "static-batch:env-cell-geometry",
 	};
 }
 

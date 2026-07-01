@@ -71,18 +71,10 @@ describe("dynamic entity controller", () => {
 		]);
 	});
 
-	it("projects static-authored presentation policy from source facts and texture batch lookup", () => {
+	it("projects static-authored presentation policy from source facts", () => {
 		const controller = new DynamicEntityController();
 
-		controller.ingestStaticPlacements(
-			[createOutdoorPlacementRecord()],
-			new Map([
-				[
-					"outdoor-buildings:outdoor-buildings:0xda55ffff",
-					"static-batch:outdoor-buildings",
-				],
-			]),
-		);
+		controller.ingestStaticPlacements([createOutdoorPlacementRecord()]);
 
 		expect(controller.createSnapshot().records[0]?.presentation).toMatchObject({
 			diagnostics: {
@@ -114,7 +106,6 @@ describe("dynamic entity controller", () => {
 					kind: "static-layer-owner",
 					layerOwnerId: "outdoor-buildings:0xda55ffff",
 				},
-				textureBatchId: "static-batch:outdoor-buildings",
 				textureDomain: "outdoor-buildings",
 			},
 			visualSource: {
@@ -280,7 +271,6 @@ describe("dynamic entity controller", () => {
 					retentionPolicy: {
 						kind: "explicit-runtime-lifetime",
 					},
-					textureBatchId: "runtime-dynamic:runtime-spawn:1",
 					textureDomain: "runtime-object-material",
 				},
 				visualSource: {
@@ -299,10 +289,6 @@ describe("dynamic entity controller", () => {
 				setupModelId: 0x020003e5,
 			},
 		});
-		expect(
-			controller.queryDynamicEntitySummary(firstId)?.presentation.policy
-				.textureBatchId,
-		).not.toContain("server-object:5001");
 	});
 
 	it("keeps runtime spawns across static retention until explicit removal", () => {
@@ -458,12 +444,11 @@ describe("dynamic entity controller", () => {
 				kind: "env-cell",
 				landblockId: 0xda55ffff,
 			},
-			presentation: {
-				policy: {
-					textureBatchId: "runtime-dynamic:runtime-spawn:1",
-					textureDomain: "runtime-object-material",
+				presentation: {
+					policy: {
+						textureDomain: "runtime-object-material",
+					},
 				},
-			},
 		});
 		expect(
 			controller.updateRuntimeSpawn("static-authored-outdoor:nope", {

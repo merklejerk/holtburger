@@ -703,6 +703,7 @@ function createMaterialBatchAxis(options: {
 		`pass:${options.plan.pass}`,
 		`alpha:${options.plan.alphaPolicy.mode}`,
 		`blend:${options.plan.blend.mode}`,
+		`wrap:${options.textureWrapMode}`,
 		options.includeConcreteEntryInKey
 			? `entry:${options.materialEntryKey}`
 			: `schema:${options.textureRoleSchemaKey}`,

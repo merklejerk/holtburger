@@ -16,7 +16,6 @@ import { isCurrentlyStageableStaticObjectDataUse } from "./static-object-rendera
 
 export function createStaticObjectTexturePlacementIntents(input: {
 	readonly items: readonly StaticBakeBatchItem[];
-	readonly staticBatchId: string;
 }): readonly TexturePlacementIntent[] {
 	const intentsByItemId = new Map<string, TexturePlacementIntent>();
 
@@ -43,12 +42,11 @@ export function createStaticObjectTexturePlacementIntents(input: {
 					}
 					intentsByItemId.set(
 						requirement.placementItemId,
-						createStaticTexturePlacementIntent(
-							createStaticObjectPlanningTextureUse({
-								domain: payload.domain,
-								requirement,
-								staticBatchId: input.staticBatchId,
-							}),
+							createStaticTexturePlacementIntent(
+								createStaticObjectPlanningTextureUse({
+									domain: payload.domain,
+									requirement,
+								}),
 							{
 								affinityKey: createStaticObjectPlacementAffinityKey({
 									landblockId: payload.landblock.landblockId,
@@ -71,13 +69,11 @@ export function createStaticObjectTexturePlacementIntents(input: {
 function createStaticObjectPlanningTextureUse(options: {
 	readonly domain: StaticBakeTextureUse["domain"];
 	readonly requirement: TextureBindingRequirement;
-	readonly staticBatchId: string;
 }): StaticBakeTextureUse {
 	const textureUse: StaticBakeTextureUse = {
 		domain: options.domain,
 		owners: NO_STATIC_TEXTURE_USE_OWNERS,
 		source: options.requirement.source.dataUse,
-		staticBatchId: options.staticBatchId,
 		textureUseId: options.requirement.bindingKey,
 	};
 	if (!options.requirement.samplingPolicy) {

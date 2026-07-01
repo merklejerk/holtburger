@@ -1,8 +1,5 @@
-mod adapter;
-mod contracts;
-
-use adapter::HostRuntimeService;
-use contracts::{
+use holtburger_3d::adapter::HostRuntimeService;
+use holtburger_3d::contracts::{
     AssetLookupBatchRequestDto, AssetLookupRequestDto, AssetLookupResponseDto, DebugConfigDto,
     ResolveWeenieSpawnSeedRequestDto, RuntimeAppearanceRequestDto, WeenieLookupCapabilityDto,
     WeenieSpawnSeedDto,

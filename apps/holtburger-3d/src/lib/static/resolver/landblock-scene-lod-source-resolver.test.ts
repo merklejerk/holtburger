@@ -108,7 +108,7 @@ describe("landblock scene LoD source resolver", () => {
 			await expect(
 				bakerForRecipe(recipe).bake(createBakeInput(recipe)),
 			).resolves.toMatchObject({
-				staticBatchId: `batch:${recipe.payload.job.domain}`,
+				bakeBatchId: `batch:${recipe.payload.job.domain}`,
 			});
 		}
 	});
@@ -260,7 +260,7 @@ function bakerForRecipe(recipe: StaticLayerRecipe): StaticBaker {
 }
 
 function createBakeInput(recipe: StaticLayerRecipe): StaticBakeBatchInput {
-	const staticBatchId = `batch:${recipe.payload.job.domain}`;
+	const bakeBatchId = `batch:${recipe.payload.job.domain}`;
 	const task: StaticBakeTask = {
 		domain: recipe.payload.job.domain,
 		ownerId: createLayerOwnerKeyId(recipe.targetOwnerKey),
@@ -271,12 +271,6 @@ function createBakeInput(recipe: StaticLayerRecipe): StaticBakeBatchInput {
 		taskId: `task:${recipe.payload.job.domain}`,
 	};
 	return {
-		atlasSnapshot: {
-			domain: recipe.payload.job.domain,
-			placements: [],
-			staticBatchId,
-			textureUses: [],
-		},
 		attachments: {
 			envCellCellStructureGeometry: [],
 			staticObjectSourceGeometry: [],
@@ -289,7 +283,7 @@ function createBakeInput(recipe: StaticLayerRecipe): StaticBakeBatchInput {
 			},
 		],
 		revision: 1,
-		staticBatchId,
+		bakeBatchId,
 	};
 }
 

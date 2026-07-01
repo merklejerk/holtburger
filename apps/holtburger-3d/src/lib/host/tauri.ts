@@ -137,7 +137,7 @@ export function planBinaryLookupBatches(
 	return requests.length === 0 ? [] : [[...requests]];
 }
 
-function usesBinaryAssetLookup(assetId: string): boolean {
+export function usesBinaryAssetLookup(assetId: string): boolean {
 	return (
 		/^landblock\/[0-9a-fA-F]{8}\/lod\/[0-4]$/.test(
 			assetId,

@@ -169,7 +169,7 @@ export function createStaticMaterialTextureUses(options: {
 	readonly isStageableDataUse: (
 		dataUse: MaterialTextureDataUseIdentity,
 	) => boolean;
-	readonly staticBatchId: string;
+	readonly bakeBatchId: string;
 	readonly textureUseSpecs: readonly StaticMaterialTextureUseSpec[];
 }): readonly StaticBakeTextureUse[] {
 	const textureUsesById = new Map<string, StaticBakeTextureUse>();
@@ -199,14 +199,13 @@ export function createStaticMaterialTextureUses(options: {
 			textureUsesById.set(textureUseId, {
 				domain: options.domain,
 				owners: uniqueSortedStaticTextureUseOwners(spec.owners),
-				samplingPolicy: createStaticMaterialTextureSamplingPolicy({
-					dataUse,
-					wrapMode: spec.textureWrapMode,
-				}),
-				source: dataUse,
-				staticBatchId: options.staticBatchId,
-				textureUseId,
-			});
+					samplingPolicy: createStaticMaterialTextureSamplingPolicy({
+						dataUse,
+						wrapMode: spec.textureWrapMode,
+					}),
+					source: dataUse,
+					textureUseId,
+				});
 		}
 	}
 

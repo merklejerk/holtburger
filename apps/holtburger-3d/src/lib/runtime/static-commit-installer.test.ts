@@ -141,7 +141,6 @@ function createCommitDelta(options: {
 		removedResources: options.removedResources ?? [],
 		revision: 7,
 		envCellStaticObjectPlacementRecords: [],
-		staticBatchId: "batch-a",
 		staticObjectRenderInstances: [],
 		staticObjectVisualResources: options.staticObjectVisualResources ?? [],
 		staticPortalGraphs: [],

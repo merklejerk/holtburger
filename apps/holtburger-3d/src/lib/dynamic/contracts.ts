@@ -92,7 +92,6 @@ interface DynamicPresentationPolicy {
 	readonly ownershipPolicy: DynamicVisualOwnershipPolicy;
 	readonly resourceFamily: DynamicResourceFamily;
 	readonly retentionPolicy: DynamicRetentionPolicy;
-	readonly textureBatchId: string;
 	readonly textureDomain: VisualTextureDomain;
 }
 

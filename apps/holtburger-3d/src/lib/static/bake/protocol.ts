@@ -8,6 +8,10 @@ export type StaticBakeWorkerMainMessage = {
 
 export type StaticBakeWorkerThreadMessage =
 	| {
+			readonly kind: "static-batch-bake-started";
+			readonly requestId: string;
+	  }
+	| {
 			readonly kind: "static-batch-baked";
 			readonly requestId: string;
 			readonly result: StaticBakeBatchResult;

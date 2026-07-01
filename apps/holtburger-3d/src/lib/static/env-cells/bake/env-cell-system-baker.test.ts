@@ -32,7 +32,7 @@ describe("browser landblock env-cell baker", () => {
 					triangleCount: 0,
 				}),
 			],
-			staticBatchId: "env-batch-a",
+			bakeBatchId: "env-batch-a",
 			textureUses: [],
 			tasks: [input.items[0]?.task],
 		});
@@ -694,9 +694,8 @@ describe("browser landblock env-cell baker", () => {
 						renderSurfaceId: 0x06000010,
 					},
 					usage: "rgba-color",
-				},
-				staticBatchId: "env-batch-a",
-				textureUseId:
+					},
+					textureUseId:
 					"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
 			}),
 		]);
@@ -723,7 +722,7 @@ describe("browser landblock env-cell baker", () => {
 
 		const intents = createStructuredInteriorTexturePlacementIntents({
 			items: input.items,
-			staticBatchId: input.staticBatchId,
+			bakeBatchId: input.bakeBatchId,
 		});
 		const result = bakeEnvCellSystem({
 			...input,
@@ -1499,7 +1498,7 @@ function createStructuredInteriorPlacementSnapshot(
 ): NonNullable<StaticBakeBatchInput["texturePlacementSnapshot"]> {
 	const intents = createStructuredInteriorTexturePlacementIntents({
 		items: input.items,
-		staticBatchId: input.staticBatchId,
+		bakeBatchId: input.bakeBatchId,
 	});
 	return {
 		placementsByItemId: new Map(
@@ -1514,6 +1513,9 @@ function createStructuredInteriorPlacementSnapshot(
 					pool: intent.pool,
 					purpose: intent.purpose,
 					rect: [0, 0, 16, 16] as const,
+					textureRefId: options.uniquePages
+						? `${intent.purpose}:texture-ref:${index}`
+						: `${intent.purpose}:texture-ref:0`,
 					width: 16,
 				},
 			]),
@@ -1690,12 +1692,6 @@ function createInput(
 	};
 
 	return {
-		atlasSnapshot: {
-			domain: "env-cell-system",
-			placements: [],
-			staticBatchId: "env-batch-a",
-			textureUses: [],
-		},
 		attachments: {
 			envCellCellStructureGeometry: [],
 			staticObjectSourceGeometry: [],
@@ -1832,7 +1828,7 @@ function createInput(
 			},
 		],
 		revision: 7,
-		staticBatchId: "env-batch-a",
+		bakeBatchId: "env-batch-a",
 	};
 }
 

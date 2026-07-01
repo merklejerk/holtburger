@@ -26,6 +26,7 @@ import type {
 	StaticBakeBatchInput,
 	StaticBakeBatchResult,
 	StaticBaker,
+	StaticBakerDiagnosticsSnapshot,
 	StaticLandblockSceneLodResolution,
 	StaticLandblockSceneLodSourceRequest,
 	StaticLandblockSceneLodSourceResolver,
@@ -366,6 +367,16 @@ class BrowserStaticBaker implements StaticBaker {
 		}
 
 		return this.#placeholderBaker.bake(input);
+	}
+
+	createDiagnosticsSnapshot(): StaticBakerDiagnosticsSnapshot {
+		return (
+			this.#workerBaker.createDiagnosticsSnapshot?.() ?? {
+				kind: "static-baker",
+				pendingJobs: [],
+				workerCount: null,
+			}
+		);
 	}
 
 	dispose(): void {

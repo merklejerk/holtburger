@@ -117,7 +117,7 @@ function createTextureUseFromRequirement(
 		domain: "outdoor-buildings",
 		owners: [],
 		source: requirement.source.dataUse,
-		staticBatchId: "static-batch-a",
+		bakeBatchId: "static-batch-a",
 		textureUseId: requirement.bindingKey,
 	};
 	if (!requirement.samplingPolicy) {

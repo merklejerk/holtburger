@@ -49,12 +49,19 @@ import {
 	createLayerOwnerKeyForStaticScope,
 	createLayerOwnerKeyId,
 } from "../layer-owners";
+import type {
+	TexturePlacementIntent,
+	TexturePlacementSnapshot,
+} from "../../textures/placement";
 
 const DEFAULT_STATIC_BATCH_MAX_PAYLOADS = 10;
 const DEFAULT_STATIC_BATCH_COALESCE_DELAY_MS = 500;
 const STATIC_COORDINATOR_RECENT_DIAGNOSTICS_LIMIT = 20;
 const DEFAULT_STATIC_BAKE_ATTACHMENT_PROVIDER: StaticBakeAttachmentProvider = {
 	createAttachments: () => Promise.resolve(createEmptyStaticBakeAttachments()),
+};
+const EMPTY_TEXTURE_PLACEMENT_SNAPSHOT: TexturePlacementSnapshot = {
+	placementsByItemId: new Map(),
 };
 
 export type StaticCoordinatorListener = (
@@ -66,6 +73,24 @@ export type StaticCoordinatorCommitListener = (
 export type StaticCoordinatorSourcePayloadListener = (
 	delta: StaticCoordinatorSourcePayloadDelta,
 ) => void;
+export type StaticSourceReadyHandler = (
+	work: StaticSourceReadyWork,
+) => Promise<void> | void;
+
+export interface StaticSourceReadyWork {
+	/** Domain represented by this source-ready batch. */
+	readonly domain: StaticDomain;
+	/** Static batch id that will be used if the guarded continuation bakes. */
+	readonly staticBatchId: string;
+	/** Resolved source payloads that are ready for texture placement and baking. */
+	readonly sourcePayloads: readonly StaticScopePayload[];
+	/** Texture placement intents discovered before bake. Empty until migrated domains emit them. */
+	readonly placementIntents: readonly TexturePlacementIntent[];
+	/** Current layer tasks represented by this source-ready batch. */
+	readonly tasks: readonly StaticBakeTask[];
+	continueWithPlacement(snapshot: TexturePlacementSnapshot): Promise<void>;
+	failPlacement(message: string): void;
+}
 
 export interface StaticCoordinatorOptions {
 	readonly resolver: StaticResolver & StaticLandblockSceneLodSourceResolver;
@@ -96,6 +121,8 @@ export class StaticCoordinator {
 		payloads: readonly StaticScopePayload[],
 		staticBatchId: string,
 	) => StaticAtlasBatchSnapshot;
+	#sourceReadyHandler: StaticSourceReadyHandler = (work) =>
+		work.continueWithPlacement(EMPTY_TEXTURE_PLACEMENT_SNAPSHOT);
 	readonly #listeners = new Set<StaticCoordinatorListener>();
 	readonly #commitListeners = new Set<StaticCoordinatorCommitListener>();
 	readonly #sourcePayloadListeners =
@@ -103,10 +130,7 @@ export class StaticCoordinator {
 	readonly #layerTasksByTaskId = new Map<string, MutableStaticLayerTaskState>();
 	readonly #pendingBatches = new Map<string, PendingStaticBakeBatch>();
 	readonly #residentDrawUnitIds = new Set<string>();
-	readonly #residentResourcesByOwnerId = new Map<
-		string,
-		StaticResourceKey[]
-	>();
+	readonly #residentResourcesByOwnerId = new Map<string, StaticResourceKey[]>();
 	#revision = 0;
 	#disposed = false;
 	#committed = 0;
@@ -115,8 +139,7 @@ export class StaticCoordinator {
 	#latestTerrainPayload: TerrainStaticScopePayloadSummary | null = null;
 	#latestOutdoorStaticObjectsPayload: OutdoorStaticObjectsPayloadSummary | null =
 		null;
-	#latestEnvCellSystemPayload: EnvCellSystemPayloadSummary | null =
-		null;
+	#latestEnvCellSystemPayload: EnvCellSystemPayloadSummary | null = null;
 	readonly #latestStaticObjectBakeDiagnosticsByKey = new Map<
 		string,
 		StaticObjectBakeDiagnostics
@@ -152,6 +175,10 @@ export class StaticCoordinator {
 		) => StaticAtlasBatchSnapshot,
 	): void {
 		this.#createAtlasSnapshot = createAtlasSnapshot;
+	}
+
+	setSourceReadyHandler(handler: StaticSourceReadyHandler): void {
+		this.#sourceReadyHandler = handler;
 	}
 
 	reconcileStaticDemand(demand: StaticDemand): StaticRetentionReconciliation {
@@ -359,9 +386,7 @@ export class StaticCoordinator {
 		const tasksByOwnerId = new Map<string, MutableStaticLayerTaskState>();
 		for (const layer of sourceRequest.requestedLayers) {
 			const ownerId = createLayerOwnerKeyId(layer.targetOwnerKey);
-			const task = this.#findLayerTaskByOwnerId(
-				ownerId,
-			);
+			const task = this.#findLayerTaskByOwnerId(ownerId);
 			if (task) {
 				tasksByOwnerId.set(ownerId, task);
 			}
@@ -476,16 +501,14 @@ export class StaticCoordinator {
 			clearTimeout(pendingBatch.timeoutId);
 		}
 
-		const pendingItems = pendingBatch.items.filter(
-			(item) => {
-				const task = this.#layerTasksByTaskId.get(item.taskId);
-				return (
-					task !== undefined &&
-					this.#isTaskCurrent(task) &&
-					this.#isLayerOwnerDemanded(item.ownerKey)
-				);
-			},
-		);
+		const pendingItems = pendingBatch.items.filter((item) => {
+			const task = this.#layerTasksByTaskId.get(item.taskId);
+			return (
+				task !== undefined &&
+				this.#isTaskCurrent(task) &&
+				this.#isLayerOwnerDemanded(item.ownerKey)
+			);
+		});
 		const items = pendingItems.map(toStaticBakeBatchItem);
 		if (items.length === 0) {
 			return;
@@ -500,17 +523,98 @@ export class StaticCoordinator {
 			items,
 			revision: pendingBatch.revision,
 		});
+		await this.#dispatchSourceReadyWork({
+			items,
+			pendingBatch,
+			pendingItems,
+			staticBatchId,
+		});
+	}
+
+	async #dispatchSourceReadyWork(options: {
+		readonly pendingBatch: PendingStaticBakeBatch;
+		readonly pendingItems: readonly PendingStaticBakeBatchItem[];
+		readonly items: readonly StaticBakeBatchItem[];
+		readonly staticBatchId: string;
+	}): Promise<void> {
+		let consumed = false;
+		const work: StaticSourceReadyWork = {
+			domain: options.pendingBatch.domain,
+			placementIntents: [],
+			sourcePayloads: options.items.map((item) => item.payload),
+			staticBatchId: options.staticBatchId,
+			tasks: options.items.map((item) => item.task),
+			continueWithPlacement: async (placementSnapshot) => {
+				if (consumed) {
+					throw new Error(
+						`Static source-ready work ${options.staticBatchId} was already consumed.`,
+					);
+				}
+				consumed = true;
+				await this.#continueSourceReadyBake({
+					...options,
+					placementSnapshot,
+				});
+			},
+			failPlacement: (message) => {
+				if (consumed) {
+					return;
+				}
+				consumed = true;
+				for (const item of options.items) {
+					this.#markTaskIdFailedIfCurrent(item.task.taskId, message);
+				}
+			},
+		};
+
+		try {
+			await this.#sourceReadyHandler(work);
+		} catch (error: unknown) {
+			for (const item of options.items) {
+				this.#markTaskIdFailedIfCurrent(
+					item.task.taskId,
+					error instanceof Error ? error.message : String(error),
+				);
+			}
+			return;
+		}
+	}
+
+	async #continueSourceReadyBake(options: {
+		readonly pendingBatch: PendingStaticBakeBatch;
+		readonly pendingItems: readonly PendingStaticBakeBatchItem[];
+		readonly items: readonly StaticBakeBatchItem[];
+		readonly staticBatchId: string;
+		readonly placementSnapshot: TexturePlacementSnapshot;
+	}): Promise<void> {
+		const currentItems = options.items.filter(
+			(item) =>
+				this.#isBakeTaskCurrent(item.task) &&
+				this.#isLayerOwnerDemanded(item.task.ownerKey),
+		);
+		if (currentItems.length === 0) {
+			this.#emit();
+			return;
+		}
+		const currentTaskIds = new Set(
+			currentItems.map((item) => item.task.taskId),
+		);
+		const currentPendingItems = options.pendingItems.filter((item) =>
+			currentTaskIds.has(item.taskId),
+		);
+		void options.placementSnapshot;
+
 		let attachments: StaticBakeBatchInput["attachments"];
 		const attachmentStartedAt = nowMs();
 		try {
 			attachments = await this.#attachmentProvider.createAttachments({
-				domain: pendingBatch.domain,
-				items,
-				revision: pendingBatch.revision,
-				staticBatchId,
+				domain: options.pendingBatch.domain,
+				items: currentItems,
+				revision: options.pendingBatch.revision,
+				staticBatchId: options.staticBatchId,
 			});
 		} catch (error: unknown) {
-			for (const item of items) {
+			for (const item of currentItems) {
 				this.#markTaskIdFailedIfCurrent(
 					item.task.taskId,
 					error instanceof Error ? error.message : String(error),
@@ -521,14 +625,14 @@ export class StaticCoordinator {
 		const attachmentMs = nowMs() - attachmentStartedAt;
 		const bakeInput: StaticBakeBatchInput = {
 			atlasSnapshot: this.#createAtlasSnapshot(
-				items.map((item) => item.payload),
-				staticBatchId,
+				currentItems.map((item) => item.payload),
+				options.staticBatchId,
 			),
 			attachments,
-			domain: pendingBatch.domain,
-			items,
-			revision: pendingBatch.revision,
-			staticBatchId,
+			domain: options.pendingBatch.domain,
+			items: currentItems,
+			revision: options.pendingBatch.revision,
+			staticBatchId: options.staticBatchId,
 		};
 
 		let result: StaticBakeBatchResult;
@@ -536,7 +640,7 @@ export class StaticCoordinator {
 		try {
 			result = await this.#baker.bake(bakeInput);
 		} catch (error: unknown) {
-			for (const item of items) {
+			for (const item of currentItems) {
 				this.#markTaskIdFailedIfCurrent(
 					item.task.taskId,
 					error instanceof Error ? error.message : String(error),
@@ -547,18 +651,17 @@ export class StaticCoordinator {
 		const bakeMs = nowMs() - bakeStartedAt;
 		let dynamicVisualBake: DynamicVisualBakeResult | null;
 		let dynamicPlacements: readonly StaticAuthoredDynamicPlacementRecord[] =
-			pendingItems.flatMap((item) => item.dynamicPlacements);
-		let dynamicRecipes: readonly DynamicEntityRecipe[] = pendingItems.flatMap(
-			(item) => item.dynamicRecipes,
-		);
+			currentPendingItems.flatMap((item) => item.dynamicPlacements);
+		let dynamicRecipes: readonly DynamicEntityRecipe[] =
+			currentPendingItems.flatMap((item) => item.dynamicRecipes);
 		try {
 			dynamicVisualBake = await this.#bakeDynamicVisualsForPendingItems({
-				pendingItems,
-				revision: pendingBatch.revision,
-				staticBatchId,
+				pendingItems: currentPendingItems,
+				revision: options.pendingBatch.revision,
+				staticBatchId: options.staticBatchId,
 			});
 		} catch (error: unknown) {
-			for (const item of items) {
+			for (const item of currentItems) {
 				this.#markTaskIdFailedIfCurrent(
 					item.task.taskId,
 					error instanceof Error ? error.message : String(error),
@@ -568,21 +671,23 @@ export class StaticCoordinator {
 		}
 
 		const currentTasks = result.tasks.filter(
-			(task) => this.#isBakeTaskCurrent(task) && this.#isLayerOwnerDemanded(task.ownerKey),
+			(task) =>
+				this.#isBakeTaskCurrent(task) &&
+				this.#isLayerOwnerDemanded(task.ownerKey),
 		);
 		if (currentTasks.length !== result.tasks.length) {
 			result = filterStaticBakeResultForCurrentTasks(result, currentTasks);
 			dynamicPlacements = filterDynamicPlacementsForCurrentTasks(
-				pendingItems,
+				currentPendingItems,
 				currentTasks,
 			);
 			dynamicRecipes = filterDynamicRecipesForCurrentTasks(
-				pendingItems,
+				currentPendingItems,
 				currentTasks,
 			);
 			dynamicVisualBake = filterDynamicVisualBakeResultForCurrentTasks(
 				dynamicVisualBake,
-				pendingItems,
+				currentPendingItems,
 				currentTasks,
 			);
 			if (currentTasks.length === 0) {
@@ -600,7 +705,10 @@ export class StaticCoordinator {
 				dynamicVisualBake,
 				resolverMs: sumNullableNumbers(
 					currentTasks.map((task) =>
-						findPendingStaticBakeItemResolverMs(pendingItems, task.taskId),
+						findPendingStaticBakeItemResolverMs(
+							currentPendingItems,
+							task.taskId,
+						),
 					),
 				),
 			});
@@ -780,9 +888,7 @@ export class StaticCoordinator {
 		});
 	}
 
-	#findLayerTaskByOwnerId(
-		ownerId: string,
-	): MutableStaticLayerTaskState | null {
+	#findLayerTaskByOwnerId(ownerId: string): MutableStaticLayerTaskState | null {
 		for (const status of this.#layerTasksByTaskId.values()) {
 			if (status.ownerId === ownerId) {
 				return status;
@@ -862,10 +968,7 @@ export class StaticCoordinator {
 		this.#markTaskFailedIfCurrent(task, message);
 	}
 
-	#markTaskFailed(
-		task: MutableStaticLayerTaskState,
-		message: string,
-	): void {
+	#markTaskFailed(task: MutableStaticLayerTaskState, message: string): void {
 		if (task.status === "failed") {
 			return;
 		}
@@ -964,8 +1067,7 @@ export class StaticCoordinator {
 
 	#isTaskCurrent(task: MutableStaticLayerTaskState): boolean {
 		return (
-			!this.#disposed &&
-			this.#layerTasksByTaskId.get(task.taskId) === task
+			!this.#disposed && this.#layerTasksByTaskId.get(task.taskId) === task
 		);
 	}
 
@@ -1105,9 +1207,7 @@ function createStaticBatchId(input: {
 	readonly revision: number;
 	readonly items: readonly StaticBakeBatchItem[];
 }): string {
-	const scopeKeys = input.items.map((item) =>
-		item.task.scopeKey,
-	);
+	const scopeKeys = input.items.map((item) => item.task.scopeKey);
 	return [
 		"static-batch",
 		input.revision.toString(),
@@ -1456,12 +1556,13 @@ function filterStaticBakeResultForCurrentTasks(
 	);
 	const retainedPortalApertureResourceIds = new Set(
 		result.portalApertureResources
-			.filter((resource) => ownerIds.has(
-				createLayerOwnerIdForDomainLandblock({
-					domain: resource.sourceDomain,
-					landblockId: resource.landblockId,
-				}),
-			),
+			.filter((resource) =>
+				ownerIds.has(
+					createLayerOwnerIdForDomainLandblock({
+						domain: resource.sourceDomain,
+						landblockId: resource.landblockId,
+					}),
+				),
 			)
 			.map((resource) => resource.apertureResourceId),
 	);
@@ -1611,8 +1712,7 @@ function createLayerOwnerLifecycle(
 		case "materializing":
 			return "materializing";
 		case "committed":
-			return (residentResourcesByOwnerId.get(status.ownerId)?.length ?? 0) >
-				0
+			return (residentResourcesByOwnerId.get(status.ownerId)?.length ?? 0) > 0
 				? "materialized"
 				: "empty";
 		case "failed":

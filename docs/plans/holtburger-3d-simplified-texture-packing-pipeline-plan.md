@@ -1198,7 +1198,7 @@ Acceptance criteria:
 
 - [x] Phase 0A: prove source-ready continuation contract in a segregated spike.
 - [x] Phase 0: lock first-pass contract names and homes.
-- [ ] Phase 1: add placement contracts and no-behavior-change adapters.
+- [x] Phase 1: add placement contracts and no-behavior-change adapters.
 - [ ] Phase 2: split `TextureManager` placement and pinning around current behavior.
 - [ ] Phase 3: add static source-ready placement continuation.
 - [ ] Resteering 1: review placement continuation shape.
@@ -1242,6 +1242,16 @@ Acceptance criteria:
 - Phase 0 found no remaining pool-name disagreement. `affinityKey` remains the locked first-pass
   name and must stay an opaque clustering hint; if it starts encoding structured domain facts, the
   contract should be revisited rather than expanded.
+- Phase 1 added `apps/holtburger-3d/src/lib/textures/placement.ts` as the canonical placement
+  contract home. The first adapters are pure vocabulary bridges: static and dynamic texture-use
+  records keep current `textureUseId` values as opaque `itemId`s, preserve the existing
+  material-texture data use plus sampling policy in `TexturePlacementSource`, and classify purpose
+  using the same terrain/object rules currently embedded in `TextureManager`.
+- Phase 1 maps static-authored dynamic texture commits by their static visual texture domain
+  (`outdoor-buildings`, `outdoor-generated-scenery`, `env-cell-system`, etc.) into the
+  `static-authored-object` pool, while `runtime-object-material` maps to `runtime-authored-object`.
+  This keeps static-authored and runtime-authored dynamics isomorphic without inventing a dynamic-only
+  placement vocabulary.
 - Dry run split `TextureManager` responsibilities into placement and pinning. Current owner leases
   require post-bake draw-unit/resource owners, but pre-bake placement intents intentionally do not
   have owners yet.
@@ -1263,6 +1273,12 @@ Acceptance criteria:
 - Current `StaticAtlasBatchSnapshot`, `VisualTextureDomain`, `TextureUsePlacement`, and
   `placementRevision` names remain old-pipeline vocabulary. Phase 1 and Phase 2 should bridge or
   retire them deliberately instead of creating compatibility aliases that survive the cutover.
+- `TexturePlacementSource` currently preserves material data use plus sampling policy as a single
+  bridge source. Later phases may split byte/source identity from sampling policy if that simplifies
+  `TextureManager`; do not do that until real placement planning needs it.
+- Phase 1 adapters are intentionally unused by runtime paths. Phase 2 must either integrate them into
+  `TextureManager` internals or delete/rewrite them during the clean cutover; do not leave a parallel
+  vocabulary bridge around after placement planning owns the flow.
 
 ## Risks and Concessions
 

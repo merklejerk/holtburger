@@ -11,6 +11,7 @@ import type {
 	DynamicVisualBakeResult,
 } from "../../dynamic/contracts";
 import type { DynamicVisualBaker } from "../../dynamic/visual-baker";
+import { createEmptyObjectVisualInstallSet } from "../../visual/object-visual-install-set";
 import type {
 	StaticCoordinatorCommitDelta,
 	StaticScopePrepCommit,
@@ -793,6 +794,7 @@ describe("static coordinator", () => {
 				addedPortalApertureResources: [],
 				commitId: "static-commit:1:1:landblock:da55ffff:outdoor-terrain",
 				materialCoverage: [],
+				objectVisualInstallSet: createEmptyObjectVisualInstallSet(),
 				removedResources: [],
 				revision: 1,
 				envCellStaticObjectPlacementRecords: [],
@@ -825,6 +827,7 @@ describe("static coordinator", () => {
 			addedPortalApertureResources: [],
 			commitId: "static-commit:2:evict",
 			materialCoverage: [],
+			objectVisualInstallSet: createEmptyObjectVisualInstallSet(),
 			removedResources: [{ drawUnitId: "terrain-a", kind: "draw-unit" }],
 			revision: 2,
 			envCellStaticObjectPlacementRecords: [],

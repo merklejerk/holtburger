@@ -10,6 +10,7 @@ import type {
 	TerrainGeometryStaticDrawUnit,
 } from "../static/contracts";
 import type { TextureResourceDependencies } from "../textures/placement";
+import { createStaticBakeObjectVisualInstallSet } from "../static/bake/object-visual-install-set-publication";
 import { installStaticCommit } from "./static-commit-installer";
 
 describe("static commit installer", () => {
@@ -209,23 +210,32 @@ function createCommitDelta(options: {
 	readonly staticSpatialRecords?: StaticCoordinatorCommitDelta["staticSpatialRecords"];
 	readonly textureDependencies?: readonly TextureResourceDependencies[];
 }): StaticCoordinatorCommitDelta {
+	const textureDependencies = options.textureDependencies ?? [];
+	const staticObjectRenderInstances = options.staticObjectRenderInstances ?? [];
+	const staticObjectVisualResources = options.staticObjectVisualResources ?? [];
 	return {
 		addedDrawUnits: options.addedDrawUnits,
 		addedPortalApertureResources: [],
 		commitId: "static-commit:batch-a",
 		materialCoverage: [],
+		objectVisualInstallSet: createStaticBakeObjectVisualInstallSet({
+			drawUnits: options.addedDrawUnits,
+			staticObjectRenderInstances,
+			staticObjectVisualResources,
+			textureDependencies,
+		}),
 		removedResources: options.removedResources ?? [],
 		revision: 7,
 		envCellStaticObjectPlacementRecords: [],
-		staticObjectRenderInstances: options.staticObjectRenderInstances ?? [],
-		staticObjectVisualResources: options.staticObjectVisualResources ?? [],
+		staticObjectRenderInstances,
+		staticObjectVisualResources,
 		staticPortalGraphs: [],
 		staticPortalInteriorRecords: [],
 		staticSourceMappings: [],
 		staticSpatialRecords: options.staticSpatialRecords ?? [],
 		staticVisibilityRecords: [],
 		tasks: [],
-		textureDependencies: options.textureDependencies ?? [],
+		textureDependencies,
 		textureUses: [],
 	};
 }

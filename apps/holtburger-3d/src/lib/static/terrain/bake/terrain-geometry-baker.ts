@@ -39,6 +39,7 @@ import type {
 } from "../../../textures/placement";
 import { classifyTextureUsagePurpose } from "../../../textures/placement";
 import { createMaterialTextureDataUseKey } from "../../bake/static-material-texture-policy";
+import { createEmptyObjectVisualInstallSet } from "../../../visual/object-visual-install-set";
 
 const UINT16_MAX_INDEX = 65_535;
 const EMPTY_TEXTURE_PLACEMENT_SNAPSHOT: TexturePlacementSnapshot = {
@@ -77,6 +78,7 @@ export function bakeTerrainGeometry(
 		staticObjectRenderInstances: [],
 		staticObjectVisualResources: [],
 		materialCoverage: [],
+		objectVisualInstallSet: createEmptyObjectVisualInstallSet(),
 		portalApertureResources: [],
 		revision: input.revision,
 		envCellStaticObjectPlacementRecords: [],

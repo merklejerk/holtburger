@@ -1,6 +1,6 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation in progress. Phases 0-8B are complete. This document defines the target
+Status: implementation in progress. Phases 0-9 are complete. This document defines the target
 model, north stars, risk surface, and phased cutover plan for replacing static-vs-dynamic object
 visual worker bifurcation with a shared object-like visual recipe graph.
 
@@ -1407,7 +1407,119 @@ Implementation notes after Phase 8B:
   `npm --prefix apps/holtburger-3d run test:ts -- static-commit-installer object-visual-install-set env-cell-system-layer-publication client-runtime`
   and `npm --prefix apps/holtburger-3d run check`.
 
-### Phase 9: Static Object-Like Resolver Cutover
+### Phase 9: Resteer Static Object-Like Cutover
+
+Status: complete.
+
+Goal: correct the static cutover schedule after Phase 8A/8B exposed missing static publication
+metadata in the recipe-first path.
+
+Finding:
+
+- The current shared baker emits generic `ObjectVisualBakedRenderPart` records. That is enough to
+  prove recipe expansion, material-table splitting, texture dependency emission, and dynamic
+  animation binding, but it is not enough to cut over static production.
+- Static publication parity requires facts that are not currently represented in the object visual
+  recipe graph or baker output:
+  - direct static draw-unit identity, ownership, sort metadata, source mapping coverage, and spatial
+    records;
+  - static object visual resource keys, render instance bounds/sort/source/generated facts, and
+    generated-scenery reuse identity;
+  - structured-interior env-cell/member/environment/cell-structure/local-placement fields;
+  - non-visual sidecar ownership links for portals, visibility, spatial records, and source mappings.
+- Cutting static resolvers over now would force runtime or install code to reconstruct static
+  publications from generic render parts and legacy static payloads. That would recreate the
+  backwards draw-unit-first dance under a new name, so it is rejected.
+
+Course correction:
+
+- Insert Phase 9A for static publication metadata contracts before resolver cutover.
+- Insert Phase 9B for unified baker static publication output before resolver cutover.
+- Move the actual static resolver cutover to Phase 9C, after the shared recipe path can produce
+  static-shaped install publications without legacy lookup.
+- Keep Phase 10 as the dynamic cutover, but let it reuse the richer publication machinery introduced
+  for static instead of inventing a dynamic-only install path.
+
+Verification:
+
+- Plan-only steering based on current code inspection of:
+  - `apps/holtburger-3d/src/lib/visual/object-visual-baker.ts`;
+  - `apps/holtburger-3d/src/lib/visual/object-visual-install-set.ts`;
+  - `apps/holtburger-3d/src/lib/static/objects/outdoor-static-objects-resolver.ts`;
+  - `apps/holtburger-3d/src/lib/static/objects/bake/static-object-batch-baker.ts`;
+  - `apps/holtburger-3d/src/lib/static/env-cells/bake/env-cell-system-baker.ts`;
+  - `apps/holtburger-3d/src/lib/runtime/client-runtime.ts`;
+  - `apps/holtburger-3d/src/lib/runtime/env-cell-system-layer-publication.ts`.
+
+### Phase 9A: Static Publication Metadata Contracts
+
+Goal: make the object visual recipe graph carry the static publication facts needed by the unified
+baker without reaching back into legacy static payloads.
+
+Deliverables:
+
+- Add explicit static publication metadata sidecars or records for:
+  - direct static object draw-unit ownership, sort policy, source mapping coverage, and spatial
+    record ownership;
+  - generated-scenery resource/instance identity, reuse eligibility inputs, source/generated facts,
+    bounds, and sort centers;
+  - structured-interior env-cell/member/environment/cell-structure/local-placement facts;
+  - residency ownership links for non-visual sidecars.
+- Tie the metadata to `PartInstance` or stable recipe/instance ids using dense numeric ids or
+  branded ids, not repeated expensive string comparisons in hot paths.
+- Keep portal, visibility, spatial, and source-mapping sidecars independent. The new metadata should
+  identify ownership/residency; it should not embed portal or visibility payloads inside visual
+  recipes.
+- Add contract tests for outdoor explicit objects, generated scenery, env-cell static objects, and
+  structured interiors proving the metadata can describe current static publications losslessly.
+
+Acceptance criteria:
+
+- The shared object visual model can describe all static object-like publication facts needed to
+  emit current static renderer payloads without consulting `StaticObjectBatchPayload`,
+  `EnvCellSystemStaticScopePayload`, or legacy draw-unit buckets after recipe expansion.
+- Static publication metadata uses numeric/branded identity where relationships are traversed during
+  bake/install work.
+- The metadata still treats portal, visibility, spatial, and source-mapping records as sidecars.
+
+Deletion criteria:
+
+- None yet. This phase creates the replacement facts before producers/consumers cut over.
+
+### Phase 9B: Unified Static Publication Baker Output
+
+Goal: teach the unified object visual baker to emit static-shaped install publications directly from
+recipe bundles plus static publication metadata.
+
+Deliverables:
+
+- Extend the unified baker/install bridge to produce `ObjectVisualInstallSet` data containing:
+  - object-like direct draw units for non-instanced static object and structured-interior slices;
+  - static object visual resources and render instances for generated-scenery or reusable static
+    outputs;
+  - texture dependencies keyed by renderer resource identity.
+- Preserve renderer material legality, material-table budget splitting, transparent/additive sort
+  anchors, static ownership, and spatial/source-mapping coverage.
+- Keep generated-scenery instancing policy recipe-first: evaluate reuse from `PartInstance`/metadata
+  groups after partitioning, not by reverse-engineering already-baked draw units.
+- Add parity tests that compare the new static publication baker output against representative
+  current static object, generated scenery, env-cell static object, and structured-interior fixtures.
+
+Acceptance criteria:
+
+- The shared baker can produce static object-like `ObjectVisualInstallSet` publications without
+  calling legacy static object or structured-interior baker functions.
+- Covered fixtures produce renderer-facing output equivalent to the legacy static paths.
+- Runtime install/publication code receives ready install-set data and does not reconstruct visual
+  payloads from legacy static arrays.
+
+Deletion criteria:
+
+- Mark legacy helper functions that exist only to build static visual payloads from
+  `StaticObjectBatchPayload` or `EnvCellSystemStaticScopePayload` for hard-cutover deletion once
+  producers are fully migrated.
+
+### Phase 9C: Static Object-Like Resolver Cutover
 
 Goal: make static object-like layers produce object visual bundle resolutions and feed the unified
 baker/install publication path.

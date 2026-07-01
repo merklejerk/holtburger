@@ -143,6 +143,9 @@ describe("object visual static publication baker", () => {
 		const renderPart = createRenderPart({
 			partInstanceIndices: [partInstanceIndex],
 			renderPartId: "instanced:render-part:0",
+			sourceLocalPositions: new Float32Array([
+				10, 10, 10, 11, 10, 10, 10, 11, 10,
+			]),
 		});
 		const metadata = createObjectVisualStaticPublicationMetadata({
 			instancedRenderInstances: [
@@ -193,6 +196,9 @@ describe("object visual static publication baker", () => {
 			geometry: createGeometryIdentity(),
 			kind: "static-object-visual-resource",
 		});
+		expect([...(installSet.visualResources[0]?.positions ?? [])]).toEqual([
+			10, 10, 10, 11, 10, 10, 10, 11, 10,
+		]);
 		expect(installSet.renderInstances).toHaveLength(1);
 		expect(installSet.renderInstances[0]).toMatchObject({
 			domain: "outdoor-generated-scenery",
@@ -269,14 +275,12 @@ function createBakeResult(
 function createRenderPart(options: {
 	readonly partInstanceIndices: readonly number[];
 	readonly renderPartId: string;
+	readonly sourceLocalPositions?: Float32Array;
 }): ObjectVisualBakedRenderPart {
-	return {
+	const payload = {
 		bounds: null,
-		indexType: "uint16",
+		indexType: "uint16" as const,
 		indices: new Uint16Array([0, 1, 2]),
-		instanceIds: options.partInstanceIndices.map(
-			(index) => `instance:${index}`,
-		),
 		materialEntries: [
 			{
 				alphaTest: 0,
@@ -285,29 +289,39 @@ function createRenderPart(options: {
 				indexTextureUseId: null,
 				indexedClipThreshold: 0,
 				indexedTextureFormat: null,
-				materialColor: [1, 1, 1, 1],
-				materialEmissiveColor: [0, 0, 0],
+				materialColor: [1, 1, 1, 1] as const,
+				materialEmissiveColor: [0, 0, 0] as const,
 				materialIds: [0x08000001],
 				paletteFirstIndex: 0,
 				paletteTextureUseId: null,
 				primaryTextureUseId: null,
-				primaryTextureWrapMode: "repeat",
+				primaryTextureWrapMode: "repeat" as const,
 				renderState: createRenderState(),
 				slot: 0,
 			},
 		],
-		materialFamily: "flat-color",
-		materialPass: "opaque",
+		materialFamily: "flat-color" as const,
+		materialPass: "opaque" as const,
 		materialSlotIndices: new Float32Array([0, 0, 0]),
-		partInstanceIndices: options.partInstanceIndices,
 		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
-		renderPartId: options.renderPartId,
 		renderState: createRenderState(),
-		sourcePartIndices: [],
 		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
 		textureUseIds: [],
 		triangleCount: 1,
 		vertexCount: 3,
+	};
+	return {
+		...payload,
+		instanceIds: options.partInstanceIndices.map(
+			(index) => `instance:${index}`,
+		),
+		partInstanceIndices: options.partInstanceIndices,
+		renderPartId: options.renderPartId,
+		sourceLocalPayload: {
+			...payload,
+			positions: options.sourceLocalPositions ?? payload.positions,
+		},
+		sourcePartIndices: [],
 	};
 }
 

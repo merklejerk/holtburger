@@ -7,6 +7,7 @@ import {
 	type ObjectVisualMaterialRecipe,
 	type ObjectVisualMaterialRecipeBase,
 	type ObjectVisualMaterialRecipeId,
+	type ObjectVisualMat4,
 	type ObjectVisualPartMaterialBinding,
 	type ObjectVisualPartRecipeId,
 	type ObjectVisualRecipeBundle,
@@ -315,6 +316,37 @@ describe("object visual baker", () => {
 		]);
 	});
 
+	it("keeps source-local resource geometry separate from transformed direct geometry", () => {
+		const materialId = materialRecipeId(1);
+		const bundle = createBundle({
+			materialBindings: [
+				{
+					geometrySurfaceId: 10,
+					materialRecipeId: materialId,
+					materialSlot: 0,
+				},
+			],
+			materialRecipes: new Map([
+				[materialId, createDirectColorMaterialRecipe([1, 1, 1, 1])],
+			]),
+			sourcePartIndex: 0,
+			transform: createTranslationTransform(10, 20, 30),
+		});
+
+		const result = bakeObjectVisuals({
+			bundle,
+			geometryBuffers: new Map([[TEST_BUFFER.bufferId, TEST_BUFFER]]),
+			renderPartIdPrefix: "source-local-fixture",
+		});
+
+		expect([...result.renderParts[0]!.positions.slice(0, 9)]).toEqual([
+			10, 20, 30, 11, 20, 30, 10, 21, 30,
+		]);
+		expect([
+			...result.renderParts[0]!.sourceLocalPayload.positions.slice(0, 9),
+		]).toEqual([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+	});
+
 	it("complains in the console and skips unsupported material families", () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 		const materialId = materialRecipeId(1);
@@ -396,6 +428,7 @@ function createBundle(options: {
 	readonly materialBindings: readonly ObjectVisualPartMaterialBinding[];
 	readonly materialRecipes: ObjectVisualRecipeBundle["materialRecipes"];
 	readonly sourcePartIndex: number | null;
+	readonly transform?: ObjectVisualMat4;
 }): ObjectVisualRecipeBundle {
 	return {
 		geometryBufferRefs: new Map([
@@ -438,7 +471,7 @@ function createBundle(options: {
 					runtimeEntityId: "fixture-entity",
 				},
 				sourcePartIndex: options.sourcePartIndex,
-				transform: IDENTITY_TRANSFORM,
+				transform: options.transform ?? IDENTITY_TRANSFORM,
 			},
 		],
 		partRecipes: new Map([
@@ -530,4 +563,12 @@ function createTextureBinding(textureUseId: string) {
 
 function textureRecipeId(id: number): ObjectVisualTextureRecipeId {
 	return id as ObjectVisualTextureRecipeId;
+}
+
+function createTranslationTransform(
+	x: number,
+	y: number,
+	z: number,
+): ObjectVisualMat4 {
+	return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, z, 1];
 }

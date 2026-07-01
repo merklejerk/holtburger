@@ -157,18 +157,28 @@ function createInstancedStaticObjectPublications(options: {
 	const visualResources: StaticObjectVisualResource[] = [];
 	const renderInstances: StaticObjectRenderInstance[] = [];
 	const resourceIds = new Set<string>();
+	const instancesByGroupId = new Map<
+		ObjectVisualStaticInstancedResourceGroupMetadata["groupId"],
+		readonly ObjectVisualStaticInstancedRenderInstanceMetadata[]
+	>();
+	for (const instance of options.metadata.instancedRenderInstances) {
+		instancesByGroupId.set(instance.groupId, [
+			...(instancesByGroupId.get(instance.groupId) ?? []),
+			instance,
+		]);
+	}
 
-	for (const instanceMetadata of options.metadata.instancedRenderInstances) {
-		const group = groupsById.get(instanceMetadata.groupId);
-		if (!group) {
-			throw new Error(
-				`Static object render instance ${instanceMetadata.instanceIdSeed} references missing resource group ${instanceMetadata.groupId}.`,
-			);
+	for (const group of options.metadata.instancedResourceGroups) {
+		const groupInstances = instancesByGroupId.get(group.groupId) ?? [];
+		if (groupInstances.length === 0) {
+			continue;
 		}
 		const renderParts = selectRenderPartsForPartInstances({
-			partInstanceIndices: [instanceMetadata.partInstanceIndex],
+			partInstanceIndices: groupInstances.map(
+				(instance) => instance.partInstanceIndex,
+			),
 			renderPartsByPartInstanceIndex: options.renderPartsByPartInstanceIndex,
-			subject: `Static object render instance ${instanceMetadata.instanceIdSeed}`,
+			subject: `Static object resource group ${group.resourceIdSeed}`,
 		});
 		for (const [index, renderPart] of renderParts.entries()) {
 			const resourceId = createPartitionedId(
@@ -182,13 +192,29 @@ function createInstancedStaticObjectPublications(options: {
 				);
 				resourceIds.add(resourceId);
 			}
-			renderInstances.push(
-				createStaticObjectRenderInstance(
-					instanceMetadata,
-					resourceId,
-					renderPart,
-					index,
-				),
+			for (const instanceMetadata of groupInstances) {
+				if (
+					!renderPart.partInstanceIndices.includes(
+						instanceMetadata.partInstanceIndex,
+					)
+				) {
+					continue;
+				}
+				renderInstances.push(
+					createStaticObjectRenderInstance(
+						instanceMetadata,
+						resourceId,
+						renderPart,
+						index,
+					),
+				);
+			}
+		}
+	}
+	for (const instanceMetadata of options.metadata.instancedRenderInstances) {
+		if (!groupsById.has(instanceMetadata.groupId)) {
+			throw new Error(
+				`Static object render instance ${instanceMetadata.instanceIdSeed} references missing resource group ${instanceMetadata.groupId}.`,
 			);
 		}
 	}
@@ -241,8 +267,24 @@ function createStaticObjectRenderInstance(
 		source: metadata.source,
 		sourceToLandblockMatrix: metadata.sourceToLandblockMatrix,
 		transform: metadata.transform,
-		transparency: metadata.transparency,
+		transparency: createInstancedRenderTransparency(metadata, renderPart),
 	};
+}
+
+function createInstancedRenderTransparency(
+	metadata: ObjectVisualStaticInstancedRenderInstanceMetadata,
+	renderPart: ObjectVisualBakedRenderPart,
+): StaticObjectRenderInstance["transparency"] {
+	if (
+		renderPart.materialPass === "transparent" ||
+		renderPart.materialPass === "additive"
+	) {
+		return {
+			kind: "direct-sorted-transparent",
+			sortCenter: metadata.sortCenter,
+		};
+	}
+	return metadata.transparency;
 }
 
 type StaticObjectVisualPayloadFields = Pick<

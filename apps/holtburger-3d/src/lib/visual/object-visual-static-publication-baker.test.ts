@@ -212,6 +212,82 @@ describe("object visual static publication baker", () => {
 		});
 	});
 
+	it("publishes one instanced visual resource for grouped generated instances", () => {
+		const groupId = createObjectVisualStaticResourceGroupId(0);
+		const first = createObjectVisualPartInstanceIndex(0);
+		const second = createObjectVisualPartInstanceIndex(1);
+		const renderPart = createRenderPart({
+			materialPass: "transparent",
+			partInstanceIndices: [first, second],
+			renderPartId: "instanced:render-part:0",
+		});
+		const metadata = createObjectVisualStaticPublicationMetadata({
+			instancedRenderInstances: [
+				createGeneratedRenderInstanceMetadata({
+					groupId,
+					instanceIdSeed: "generated-instance-a",
+					partInstanceIndex: first,
+					sortCenter: { x: 1, y: 2, z: 3 },
+					source: createStaticObjectIdentity("generated:a"),
+				}),
+				createGeneratedRenderInstanceMetadata({
+					groupId,
+					instanceIdSeed: "generated-instance-b",
+					partInstanceIndex: second,
+					sortCenter: { x: 4, y: 5, z: 6 },
+					source: createStaticObjectIdentity("generated:b"),
+				}),
+			],
+			instancedResourceGroups: [
+				{
+					geometry: createGeometryIdentity(),
+					groupId,
+					kind: "static-object-instanced-resource-group",
+					minimumInstanceCount: 2,
+					resourceIdSeed: "generated-resource",
+					transparentReuseAllowed: true,
+				},
+			],
+			partInstanceCount: 2,
+		});
+
+		const installSet = createObjectVisualStaticInstallSet({
+			bakeResult: createBakeResult([renderPart]),
+			metadata,
+		});
+
+		expect(installSet.visualResources).toHaveLength(1);
+		expect(installSet.visualResources[0]).toMatchObject({
+			triangleCount: 1,
+			vertexCount: 3,
+		});
+		expect(installSet.renderInstances).toHaveLength(2);
+		expect(
+			new Set(installSet.renderInstances.map((instance) => instance.resourceId)),
+		).toHaveProperty("size", 1);
+		expect(
+			installSet.renderInstances.map((instance) => ({
+				source: instance.source.instanceId,
+				transparency: instance.transparency,
+			})),
+		).toEqual([
+			{
+				source: "generated:a",
+				transparency: {
+					kind: "direct-sorted-transparent",
+					sortCenter: { x: 1, y: 2, z: 3 },
+				},
+			},
+			{
+				source: "generated:b",
+				transparency: {
+					kind: "direct-sorted-transparent",
+					sortCenter: { x: 4, y: 5, z: 6 },
+				},
+			},
+		]);
+	});
+
 	it("rejects render parts that mix publication metadata groups", () => {
 		const first = createObjectVisualPartInstanceIndex(0);
 		const second = createObjectVisualPartInstanceIndex(1);
@@ -273,10 +349,12 @@ function createBakeResult(
 }
 
 function createRenderPart(options: {
+	readonly materialPass?: "opaque" | "alpha-test" | "transparent" | "additive";
 	readonly partInstanceIndices: readonly number[];
 	readonly renderPartId: string;
 	readonly sourceLocalPositions?: Float32Array;
 }): ObjectVisualBakedRenderPart {
+	const materialPass = options.materialPass ?? "opaque";
 	const payload = {
 		bounds: null,
 		indexType: "uint16" as const,
@@ -301,7 +379,7 @@ function createRenderPart(options: {
 			},
 		],
 		materialFamily: "flat-color" as const,
-		materialPass: "opaque" as const,
+		materialPass,
 		materialSlotIndices: new Float32Array([0, 0, 0]),
 		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
 		renderState: createRenderState(),
@@ -322,6 +400,37 @@ function createRenderPart(options: {
 			positions: options.sourceLocalPositions ?? payload.positions,
 		},
 		sourcePartIndices: [],
+	};
+}
+
+function createGeneratedRenderInstanceMetadata(options: {
+	readonly groupId: ReturnType<typeof createObjectVisualStaticResourceGroupId>;
+	readonly instanceIdSeed: string;
+	readonly partInstanceIndex: ReturnType<typeof createObjectVisualPartInstanceIndex>;
+	readonly sortCenter: { readonly x: number; readonly y: number; readonly z: number };
+	readonly source: ReturnType<typeof createStaticObjectIdentity>;
+}) {
+	return {
+		bounds: null,
+		domain: "outdoor-generated-scenery" as const,
+		generated: {
+			sceneId: 1,
+			sceneTemplateIndex: 2,
+			terrainIndex: 3,
+		},
+		groupId: options.groupId,
+		instanceIdSeed: options.instanceIdSeed,
+		kind: "static-object-instanced-render-instance" as const,
+		landblockId: 0xda55ffff,
+		partInstanceIndex: options.partInstanceIndex,
+		sortCenter: options.sortCenter,
+		source: options.source,
+		sourceToLandblockMatrix: createIdentityMatrix(),
+		transform: {
+			orientation: { w: 1, x: 0, y: 0, z: 0 },
+			origin: { x: 0, y: 0, z: 0 },
+		},
+		transparency: { kind: "depth-writing" as const },
 	};
 }
 
@@ -359,9 +468,9 @@ function createGeometryIdentity() {
 	};
 }
 
-function createStaticObjectIdentity() {
+function createStaticObjectIdentity(instanceId = "generated:a") {
 	return {
-		instanceId: "generated:a",
+		instanceId,
 		kind: "static-object-instance" as const,
 		landblockId: 0xda55ffff,
 		objectKind: "generated-scenery" as const,

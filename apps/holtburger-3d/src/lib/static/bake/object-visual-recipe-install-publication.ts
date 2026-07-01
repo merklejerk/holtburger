@@ -78,7 +78,7 @@ function createPublicationPartitionKeys(
 	for (const renderInstance of metadata.instancedRenderInstances) {
 		keys.set(
 			renderInstance.partInstanceIndex,
-			`instanced:${renderInstance.groupId}:${renderInstance.instanceIdSeed}`,
+			`instanced:${renderInstance.groupId}`,
 		);
 	}
 	return keys;

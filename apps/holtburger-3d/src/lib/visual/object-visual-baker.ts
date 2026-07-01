@@ -364,7 +364,6 @@ function createRenderPart(options: {
 }): ObjectVisualBakedRenderPart {
 	const vertexCount = options.partition.primitives.length * 3;
 	const positions = new Float32Array(vertexCount * 3);
-	const sourceLocalPositions = new Float32Array(vertexCount * 3);
 	const texCoords = new Float32Array(vertexCount * 2);
 	const materialSlotIndices = new Float32Array(vertexCount);
 	const indices =
@@ -402,12 +401,6 @@ function createRenderPart(options: {
 				sourceVertexIndex,
 				targetVertexIndex,
 			});
-			writeSourceLocalPosition({
-				positions: sourceLocalPositions,
-				source: primitive.buffer.positions,
-				sourceVertexIndex,
-				targetVertexIndex,
-			});
 			writeTexCoord({
 				source: primitive.buffer.texCoords,
 				sourceVertexIndex,
@@ -425,6 +418,13 @@ function createRenderPart(options: {
 			`Object visual partition ${options.partition.key} has no primitives.`,
 		);
 	}
+	const sourceLocalPayload = createSourceLocalPayload({
+		bounds: firstPrimitive.buffer.bounds,
+		materialEntries,
+		partitionKey: options.partition.key,
+		primitives: options.partition.primitives,
+		renderState: firstPrimitive.renderState,
+	});
 
 	const sharedPayload: Omit<VisualGeometryPayload, "positions"> = {
 		bounds: firstPrimitive.buffer.bounds,
@@ -467,10 +467,7 @@ function createRenderPart(options: {
 		),
 		positions,
 		renderPartId: options.renderPartId,
-		sourceLocalPayload: {
-			...sharedPayload,
-			positions: sourceLocalPositions,
-		},
+		sourceLocalPayload,
 		sourcePartIndices: uniqueSortedNumbers(
 			options.partition.primitives
 				.map((primitive) => primitive.sourcePartIndex)
@@ -480,6 +477,115 @@ function createRenderPart(options: {
 				),
 		),
 	};
+}
+
+function createSourceLocalPayload(options: {
+	readonly bounds: VisualGeometryPayload["bounds"];
+	readonly materialEntries: readonly VisualGeometryMaterialTableEntry[];
+	readonly partitionKey: string;
+	readonly primitives: readonly RenderablePrimitive[];
+	readonly renderState: VisualGeometryRenderState;
+}): VisualGeometryPayload {
+	const primitives = uniqueSourceLocalPrimitives(options.primitives);
+	const firstPrimitive = primitives[0];
+	if (!firstPrimitive) {
+		throw new Error(
+			`Object visual source-local partition ${options.partitionKey} has no primitives.`,
+		);
+	}
+	const vertexCount = primitives.length * 3;
+	const positions = new Float32Array(vertexCount * 3);
+	const texCoords = new Float32Array(vertexCount * 2);
+	const materialSlotIndices = new Float32Array(vertexCount);
+	const indices =
+		vertexCount > 65535
+			? new Uint32Array(vertexCount)
+			: new Uint16Array(vertexCount);
+	const materialEntries = options.materialEntries.map((entry, slot) => ({
+		...entry,
+		slot,
+	}));
+	const slotByMaterialEntryKey = new Map(
+		materialEntries.map((entry, localSlot) => [
+			createMaterialTableEntryKey(entry),
+			localSlot,
+		]),
+	);
+
+	for (const [triangleIndex, primitive] of primitives.entries()) {
+		const localSlot = slotByMaterialEntryKey.get(
+			createMaterialTableEntryKey(primitive.materialEntry),
+		);
+		if (localSlot === undefined) {
+			throw new Error(
+				`Object visual source-local partition ${options.partitionKey} cannot remap material entry ${primitive.materialEntryKey}.`,
+			);
+		}
+		for (let vertex = 0; vertex < 3; vertex += 1) {
+			const sourceVertexIndex = primitive.triangleFirstVertex + vertex;
+			const targetVertexIndex = triangleIndex * 3 + vertex;
+			assertSourceVertexAvailable(primitive.buffer, sourceVertexIndex);
+			writeSourceLocalPosition({
+				positions,
+				source: primitive.buffer.positions,
+				sourceVertexIndex,
+				targetVertexIndex,
+			});
+			writeTexCoord({
+				source: primitive.buffer.texCoords,
+				sourceVertexIndex,
+				target: texCoords,
+				targetVertexIndex,
+			});
+			materialSlotIndices[targetVertexIndex] = localSlot;
+			indices[targetVertexIndex] = targetVertexIndex;
+		}
+	}
+
+	return {
+		bounds: options.bounds,
+		indexType: indices instanceof Uint16Array ? "uint16" : "uint32",
+		indices,
+		materialEntries,
+		materialFamily: firstPrimitive.materialFamily,
+		materialPass: firstPrimitive.materialPass,
+		materialSlotIndices,
+		positions,
+		renderState: options.renderState,
+		texCoords,
+		textureUseIds: uniqueSortedStrings(
+			materialEntries.flatMap((entry) =>
+				[
+					entry.primaryTextureUseId,
+					entry.indexTextureUseId,
+					entry.paletteTextureUseId,
+					entry.detailTextureUseId,
+				].filter(
+					(textureUseId): textureUseId is string => textureUseId !== null,
+				),
+			),
+		),
+		triangleCount: primitives.length,
+		vertexCount,
+	};
+}
+
+function uniqueSourceLocalPrimitives(
+	primitives: readonly RenderablePrimitive[],
+): readonly RenderablePrimitive[] {
+	const primitivesByKey = new Map<string, RenderablePrimitive>();
+	for (const primitive of primitives) {
+		primitivesByKey.set(createSourceLocalPrimitiveKey(primitive), primitive);
+	}
+	return [...primitivesByKey.values()].sort(compareRenderablePrimitives);
+}
+
+function createSourceLocalPrimitiveKey(primitive: RenderablePrimitive): string {
+	return [
+		`buffer:${primitive.buffer.bufferId}`,
+		`firstVertex:${primitive.triangleFirstVertex}`,
+		`material:${createMaterialTableEntryKey(primitive.materialEntry)}`,
+	].join("|");
 }
 
 function writeSourceLocalPosition(options: {

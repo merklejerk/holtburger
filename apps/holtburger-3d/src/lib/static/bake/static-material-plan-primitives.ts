@@ -6,10 +6,10 @@ import type {
 	SurfaceTextureIdentity,
 } from "../contracts";
 import type {
-	StaticMaterialFallbackReason,
-	StaticMaterialPlan,
-	StaticMaterialTextureUseRole,
-} from "../objects/bake/static-object-material-planner";
+	ObjectVisualMaterialFallbackReason,
+	ObjectVisualMaterialPlan,
+	ObjectVisualMaterialTextureUseRole,
+} from "../../visual/object-visual-material-planner";
 
 export function createStaticMaterialSourceKey(
 	material: StaticMaterialSourceIdentity,
@@ -60,11 +60,11 @@ export function findStaticRenderSurfaceRef(
 }
 
 export function createStaticMaterialBucketKey(options: {
-	readonly family: StaticMaterialPlan["family"];
+	readonly family: ObjectVisualMaterialPlan["family"];
 	readonly material: StaticMaterialSourceIdentity;
-	readonly pass: StaticMaterialPlan["pass"];
-	readonly alphaPolicy: StaticMaterialPlan["alphaPolicy"]["mode"];
-	readonly textureRoles: readonly StaticMaterialTextureUseRole[];
+	readonly pass: ObjectVisualMaterialPlan["pass"];
+	readonly alphaPolicy: ObjectVisualMaterialPlan["alphaPolicy"]["mode"];
+	readonly textureRoles: readonly ObjectVisualMaterialTextureUseRole[];
 }): string {
 	return [
 		`family:${options.family}`,
@@ -76,14 +76,14 @@ export function createStaticMaterialBucketKey(options: {
 	].join("|");
 }
 
-export function createStaticMaterialFallbackReason(options: {
-	readonly code: StaticMaterialFallbackReason["code"];
+export function createObjectVisualMaterialFallbackReason(options: {
+	readonly code: ObjectVisualMaterialFallbackReason["code"];
 	readonly message: string;
 	readonly material?: StaticMaterialSourceIdentity | null;
 	readonly texture?: SurfaceTextureIdentity | null;
 	readonly renderSurface?: RenderSurfaceIdentity | null;
 	readonly palette?: PaletteIdentity | null;
-}): StaticMaterialFallbackReason {
+}): ObjectVisualMaterialFallbackReason {
 	return {
 		code: options.code,
 		material: options.material ?? null,
@@ -95,7 +95,7 @@ export function createStaticMaterialFallbackReason(options: {
 }
 
 function createStaticTextureRoleSignature(
-	roles: readonly StaticMaterialTextureUseRole[],
+	roles: readonly ObjectVisualMaterialTextureUseRole[],
 ): string {
 	if (roles.length === 0) {
 		return "none";
@@ -107,7 +107,7 @@ function createStaticTextureRoleSignature(
 }
 
 function createTextureRoleDataUseSignature(
-	role: StaticMaterialTextureUseRole,
+	role: ObjectVisualMaterialTextureUseRole,
 ): string {
 	const detailSuffix =
 		role.role === "detail-overlay" ? `:tiling=${role.tiling}` : "";

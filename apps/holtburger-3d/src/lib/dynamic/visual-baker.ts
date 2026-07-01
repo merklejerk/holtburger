@@ -28,12 +28,12 @@ import type {
 	StaticObjectSourceGeometryAttachment,
 } from "../static/contracts";
 import {
-	createStaticObjectMaterialUseKey,
-	planStaticObjectMaterials,
-	type StaticMaterialFallbackReason,
-	type StaticMaterialPlan,
-	type StaticMaterialPlanningSlotFacts,
-} from "../static/objects/bake/static-object-material-planner";
+	createObjectVisualMaterialUseKey,
+	planObjectVisualMaterials,
+	type ObjectVisualMaterialFallbackReason,
+	type ObjectVisualMaterialPlan,
+	type ObjectVisualMaterialPlanningSlotFacts,
+} from "../visual/object-visual-material-planner";
 import {
 	describeStaticObjectCanonicalGeometryIdentity,
 	describeStaticObjectSourceGeometryIdentity,
@@ -66,7 +66,7 @@ interface DynamicMaterialSlotFacts {
 	readonly identity: DynamicVisualMaterialSlotIdentity;
 	readonly partIndex: number;
 	readonly partSlot: StaticObjectPartMaterialSlotFacts;
-	readonly planningFacts: StaticMaterialPlanningSlotFacts;
+	readonly planningFacts: ObjectVisualMaterialPlanningSlotFacts;
 }
 
 interface DynamicMaterialRenderEntry {
@@ -104,6 +104,9 @@ export function bakeDynamicVisuals(
 	input: DynamicVisualBakeInput,
 ): DynamicVisualBakeResult {
 	const sourceGeometryByKey = createSourceGeometryIndex(input.sourceGeometry);
+	const texturePlanningByEntityId = new Map(
+		input.texturePlannings.map((planning) => [planning.entityId, planning]),
+	);
 	const products: DynamicVisualBakeProduct[] = [];
 	const failures: DynamicVisualBakeResult["failures"][number][] = [];
 
@@ -125,6 +128,7 @@ export function bakeDynamicVisuals(
 				recipe,
 				sourceGeometryByKey,
 				texturePlacementSnapshot: input.texturePlacementSnapshot,
+				texturePlanning: texturePlanningByEntityId.get(recipe.entityId) ?? null,
 			});
 			products.push({
 				kind: "baked",
@@ -162,22 +166,18 @@ function bakeDynamicVisualRecipe(options: {
 		StaticObjectSourceGeometryAttachment
 	>;
 	readonly texturePlacementSnapshot: DynamicVisualBakeInput["texturePlacementSnapshot"];
+	readonly texturePlanning: DynamicVisualTexturePlanning | null;
 }): BakedDynamicVisualResource {
 	const { recipe } = options;
+	const materialPlans = requireDynamicVisualMaterialPlan({
+		entityId: recipe.entityId,
+		texturePlanning: options.texturePlanning,
+	});
 	const resourceId = createDynamicVisualResourceId(recipe.entityId);
 	const materialSlots = createDynamicMaterialSlotRequirements(
 		recipe.visual.materialPolicy.visualObject,
 		recipe.visual.sourceAssets,
 	);
-	const materialPlans = planStaticObjectMaterials({
-		domain: recipe.visual.materialPolicy.materialPlanningDomain,
-		landblock: createMaterialPlanningLandblockSource(recipe),
-		materialSlots: materialSlots.map((slot) => slot.planningFacts),
-		materialSources: recipe.visual.materialSources,
-		paletteSources: recipe.visual.paletteSources,
-		regionRenderProfile: { detailRoles: [] },
-		textureRefs: recipe.visual.textureRefs,
-	});
 	const unsupportedReasons = createUnsupportedMaterialReasons(
 		materialPlans.fallbackReasons,
 	);
@@ -229,6 +229,7 @@ export function createDynamicVisualTexturePlanning(
 	if (recipe.visual.missingRefs.length > 0) {
 		return {
 			entityId: recipe.entityId,
+			materialPlan: null,
 			placementIntents: [],
 			textureRequirements: [],
 		};
@@ -238,7 +239,7 @@ export function createDynamicVisualTexturePlanning(
 		recipe.visual.materialPolicy.visualObject,
 		recipe.visual.sourceAssets,
 	);
-	const materialPlans = planStaticObjectMaterials({
+	const materialPlans = planObjectVisualMaterials({
 		domain: recipe.visual.materialPolicy.materialPlanningDomain,
 		landblock: createMaterialPlanningLandblockSource(recipe),
 		materialSlots: materialSlots.map((slot) => slot.planningFacts),
@@ -253,6 +254,7 @@ export function createDynamicVisualTexturePlanning(
 	if (unsupportedReasons.length > 0) {
 		return {
 			entityId: recipe.entityId,
+			materialPlan: materialPlans,
 			placementIntents: [],
 			textureRequirements: [],
 		};
@@ -263,6 +265,7 @@ export function createDynamicVisualTexturePlanning(
 	});
 	return {
 		entityId: recipe.entityId,
+		materialPlan: materialPlans,
 		placementIntents: textureRequirements.map((requirement) => {
 			const textureDomain =
 				recipe.visual.materialPolicy.detailRolePolicy.kind ===
@@ -321,6 +324,23 @@ function createDynamicTexturePlacementBucketKey(options: {
 		ownerId: recipe.source.owner.ownerId,
 		purpose,
 	});
+}
+
+function requireDynamicVisualMaterialPlan(options: {
+	readonly entityId: string;
+	readonly texturePlanning: DynamicVisualTexturePlanning | null;
+}) {
+	if (!options.texturePlanning) {
+		throw new Error(
+			`Dynamic visual ${options.entityId} is missing pre-bake material planning.`,
+		);
+	}
+	if (!options.texturePlanning.materialPlan) {
+		throw new Error(
+			`Dynamic visual ${options.entityId} has no material plan in pre-bake texture planning.`,
+		);
+	}
+	return options.texturePlanning.materialPlan;
 }
 
 function createSourceGeometryIndex(
@@ -416,7 +436,7 @@ function createMaterialPlanningLandblockSource(
 }
 
 function createTextureRequirements(options: {
-	readonly materialPlans: readonly StaticMaterialPlan[];
+	readonly materialPlans: readonly ObjectVisualMaterialPlan[];
 	readonly resourceId: string;
 }): readonly DynamicEntityTextureRequirement[] {
 	let nextPlacementItemId = 0;
@@ -442,8 +462,8 @@ function createTextureRequirements(options: {
 
 function createDynamicTextureUseId(
 	resourceId: string,
-	plan: StaticMaterialPlan,
-	role: StaticMaterialPlan["textureRoles"][number],
+	plan: ObjectVisualMaterialPlan,
+	role: ObjectVisualMaterialPlan["textureRoles"][number],
 ): string {
 	return [
 		"dynamic-texture",
@@ -616,7 +636,7 @@ function classifyDynamicRequirementPurpose(
 }
 
 function createUnsupportedMaterialReasons(
-	reasons: readonly StaticMaterialFallbackReason[],
+	reasons: readonly ObjectVisualMaterialFallbackReason[],
 ): readonly DynamicEntityUnsupportedMaterialReason[] {
 	return reasons.map((reason) => ({
 		code: reason.code,
@@ -626,7 +646,7 @@ function createUnsupportedMaterialReasons(
 }
 
 function createDynamicRenderParts(options: {
-	readonly materialPlans: readonly StaticMaterialPlan[];
+	readonly materialPlans: readonly ObjectVisualMaterialPlan[];
 	readonly sourceAssets: readonly StaticObjectSourceAssetFacts[];
 	readonly sourceGeometryByKey: ReadonlyMap<
 		string,
@@ -927,7 +947,7 @@ function resolveDynamicTriangleMaterialEntry(options: {
 function createDynamicSlotMaterialUseKey(
 	slot: StaticObjectPartMaterialSlotFacts,
 ): string {
-	return createStaticObjectMaterialUseKey(
+	return createObjectVisualMaterialUseKey(
 		slot.material,
 		slot.paletteOverride,
 		slot.paletteViews,
@@ -955,7 +975,7 @@ function assertDynamicSourceVertexAvailable(options: {
 }
 
 function createDynamicMaterialEntriesByUseKey(
-	materialPlans: readonly StaticMaterialPlan[],
+	materialPlans: readonly ObjectVisualMaterialPlan[],
 	textureRequirements: readonly DynamicEntityTextureRequirement[],
 ): ReadonlyMap<string, DynamicMaterialRenderEntry> {
 	return new Map(
@@ -989,7 +1009,7 @@ function resolveDynamicTextureUseId(options: {
 }
 
 function createDynamicMaterialEntry(
-	plan: StaticMaterialPlan,
+	plan: ObjectVisualMaterialPlan,
 	slot: number,
 	textureRequirements: readonly DynamicEntityTextureRequirement[],
 ): DynamicMaterialRenderEntry {
@@ -1033,7 +1053,7 @@ function createDynamicMaterialEntry(
 }
 
 function resolveDynamicMaterialTextureRequirements(
-	plan: StaticMaterialPlan,
+	plan: ObjectVisualMaterialPlan,
 	textureRequirements: readonly DynamicEntityTextureRequirement[],
 ): readonly DynamicEntityTextureRequirement[] {
 	return plan.textureRoles.map((role) =>
@@ -1067,18 +1087,22 @@ function resolveDynamicTextureRequirement(options: {
 	return requirement;
 }
 
-function createDynamicMaterialColorKey(plan: StaticMaterialPlan): string {
+function createDynamicMaterialColorKey(plan: ObjectVisualMaterialPlan): string {
 	return [plan.color.join(","), plan.emissiveColor.join(",")].join("|");
 }
 
-function createDynamicMaterialPlanEntryKey(plan: StaticMaterialPlan): string {
+function createDynamicMaterialPlanEntryKey(
+	plan: ObjectVisualMaterialPlan,
+): string {
 	return [
 		plan.material.materialId.toString(16).padStart(8, "0"),
 		plan.materialUseKey,
 	].join(":");
 }
 
-function createDynamicTextureRoleLayoutKey(plan: StaticMaterialPlan): string {
+function createDynamicTextureRoleLayoutKey(
+	plan: ObjectVisualMaterialPlan,
+): string {
 	return plan.textureRoles
 		.map(
 			(role) =>
@@ -1088,7 +1112,9 @@ function createDynamicTextureRoleLayoutKey(plan: StaticMaterialPlan): string {
 		.join("|");
 }
 
-function createDynamicTextureRoleSchemaKey(plan: StaticMaterialPlan): string {
+function createDynamicTextureRoleSchemaKey(
+	plan: ObjectVisualMaterialPlan,
+): string {
 	return plan.textureRoles
 		.map((role) => role.role)
 		.sort()
@@ -1096,7 +1122,7 @@ function createDynamicTextureRoleSchemaKey(plan: StaticMaterialPlan): string {
 }
 
 function resolveDynamicRenderableMaterialFamily(
-	plan: StaticMaterialPlan,
+	plan: ObjectVisualMaterialPlan,
 ): DynamicMaterialRenderFamily {
 	if (
 		plan.family === "flat-color" ||

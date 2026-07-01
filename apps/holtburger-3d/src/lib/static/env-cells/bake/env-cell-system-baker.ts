@@ -64,10 +64,10 @@ import {
 	resolveStructuredInteriorMaterialSurfaceId,
 	type StructuredInteriorCellMaterialPlan,
 } from "./structured-interior-material-planner";
-import type { StaticMaterialPlan } from "../../objects/bake/static-object-material-planner";
+import type { ObjectVisualMaterialPlan } from "../../../visual/object-visual-material-planner";
 import {
 	isCurrentlyStageableStaticObjectDataUse,
-	isRenderableStaticMaterialPlan,
+	isRenderableObjectVisualMaterialPlan,
 } from "../../objects/bake/static-object-renderability";
 
 const MAX_STRUCTURED_INTERIOR_MATERIAL_ENTRIES_PER_DRAW = 8;
@@ -79,7 +79,7 @@ const EMPTY_TEXTURE_PLACEMENT_SNAPSHOT: ObjectVisualTexturePlacementSnapshot = {
 interface StructuredInteriorTriangleCandidate {
 	readonly batchKey: string;
 	readonly materialEntryKey: string;
-	readonly materialPlan: StaticMaterialPlan;
+	readonly materialPlan: ObjectVisualMaterialPlan;
 	readonly textureRequirements: readonly ObjectVisualTextureBindingRequirement[];
 	readonly sourceTriangleId: string;
 	readonly surfaceId: number;
@@ -681,7 +681,7 @@ function createStructuredInteriorMaterialTableEntries(options: {
 					plan: candidate.materialPlan,
 				});
 				return entries;
-			}, new Map<string, { readonly plan: StaticMaterialPlan; readonly materialIds: Set<number> }>())
+			}, new Map<string, { readonly plan: ObjectVisualMaterialPlan; readonly materialIds: Set<number> }>())
 			.entries(),
 	]
 		.sort(([left], [right]) => left.localeCompare(right))
@@ -736,7 +736,7 @@ function createStructuredInteriorTriangleCandidates(options: {
 				}
 				const plan =
 					options.materialPlan.materialPlansBySurfaceId.get(materialSurfaceId);
-				if (!plan || !isRenderableStaticMaterialPlan(plan)) {
+				if (!plan || !isRenderableObjectVisualMaterialPlan(plan)) {
 					return null;
 				}
 				const materialEntryKey = createStaticMaterialEntryKey({
@@ -777,7 +777,7 @@ function createStructuredInteriorTriangleCandidates(options: {
 
 function createStructuredInteriorTextureRequirements(options: {
 	readonly placementSnapshot: ObjectVisualTexturePlacementSnapshot;
-	readonly plan: StaticMaterialPlan;
+	readonly plan: ObjectVisualMaterialPlan;
 	readonly task: StaticBakeTask;
 }): readonly ObjectVisualTextureBindingRequirement[] {
 	const wrapMode = resolveStructuredInteriorPlanTextureWrapMode(options.plan);
@@ -823,7 +823,7 @@ function assertStructuredInteriorPlacementRequirements(options: {
 }
 
 function resolveRenderableStructuredInteriorFamily(
-	plan: StaticMaterialPlan,
+	plan: ObjectVisualMaterialPlan,
 ): StructuredInteriorGeometryStaticDrawUnit["materialFamily"] {
 	if (
 		plan.family === "flat-color" ||
@@ -872,7 +872,7 @@ function createStructuredInteriorBatchKey(options: {
 	readonly diagnosticSubject: string;
 	readonly materialEntryKey: string;
 	readonly placementSnapshot: ObjectVisualTexturePlacementSnapshot | undefined;
-	readonly plan: StaticMaterialPlan;
+	readonly plan: ObjectVisualMaterialPlan;
 	readonly textureRequirements: readonly ObjectVisualTextureBindingRequirement[];
 }): string {
 	return createObjectMaterialDrawUnitPartitionKey({

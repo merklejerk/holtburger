@@ -14,7 +14,9 @@ import type {
 } from "../host/runtime-contracts";
 import type {
 	AnimationPayloadDto,
+	PaletteMetadataPayloadDto,
 	PreparedTexturePayloadDto,
+	RenderSurfaceMetadataPayloadDto,
 } from "../host/contracts";
 import {
 	applyWeenieSpawnSeedToForm,
@@ -4938,6 +4940,8 @@ function createDynamicPreparedPayload(key: HostAssetKey): unknown {
 			return createDynamicSurfaceTexturePayload();
 		case "render-surface":
 			return createDynamicRenderSurfacePayload();
+		case "render-surface-metadata":
+			return createDynamicRenderSurfaceMetadataPayload(key);
 		case "palette":
 			return {
 				colorCount: 256,
@@ -4945,6 +4949,8 @@ function createDynamicPreparedPayload(key: HostAssetKey): unknown {
 				kind: "palette",
 				paletteId: Number.parseInt(key.id, 16),
 			};
+		case "palette-metadata":
+			return createDynamicPaletteMetadataPayload(key);
 		case "prepared-texture":
 			return createPreparedTextureAsset(key).payload;
 		case "raw":
@@ -5181,6 +5187,39 @@ function createDynamicRenderSurfacePayload() {
 		sourceBytes: new Uint8Array([255, 255, 255, 255]),
 		unknown: 0,
 		width: 1,
+	};
+}
+
+function createDynamicRenderSurfaceMetadataPayload(
+	key: HostAssetKey,
+): RenderSurfaceMetadataPayloadDto {
+	return {
+		defaultPaletteId: 0x04000010,
+		dependencies: { paletteAssetIds: ["palette-metadata/04000010"] },
+		format: "A8R8G8B8",
+		formatRaw: 0,
+		height: 1,
+		kind: "render-surface-metadata",
+		provenance: createProvenance("render-surface"),
+		renderSurfaceId: Number.parseInt(key.id, 16),
+		residencyKind: "unknown",
+		sourceAssetKind: "render-surface",
+		sourceByteLength: 4,
+		unknown: 0,
+		width: 1,
+	};
+}
+
+function createDynamicPaletteMetadataPayload(
+	key: HostAssetKey,
+): PaletteMetadataPayloadDto {
+	return {
+		colorCount: 256,
+		kind: "palette-metadata",
+		paletteId: Number.parseInt(key.id, 16),
+		provenance: createProvenance("palette"),
+		residencyKind: "unknown",
+		sourceAssetKind: "palette",
 	};
 }
 

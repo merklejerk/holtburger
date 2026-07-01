@@ -1,9 +1,9 @@
 import type { MaterialTextureDataUseIdentity } from "../../contracts";
 import type { StaticObjectBatchPartition } from "./static-object-batch-partitioner";
-import type { StaticMaterialPlan } from "./static-object-material-planner";
+import type { ObjectVisualMaterialPlan } from "../../../visual/object-visual-material-planner";
 
-export function isRenderableStaticMaterialPlan(
-	plan: StaticMaterialPlan,
+export function isRenderableObjectVisualMaterialPlan(
+	plan: ObjectVisualMaterialPlan,
 ): boolean {
 	if (
 		plan.family === "flat-color" &&
@@ -50,8 +50,8 @@ export function isRenderableStaticObjectPartition(
 }
 
 function isRenderableStaticObjectPass(
-	pass: StaticMaterialPlan["pass"],
-	alphaMode: StaticMaterialPlan["alphaPolicy"]["mode"],
+	pass: ObjectVisualMaterialPlan["pass"],
+	alphaMode: ObjectVisualMaterialPlan["alphaPolicy"]["mode"],
 ): boolean {
 	return (
 		pass === "opaque" ||

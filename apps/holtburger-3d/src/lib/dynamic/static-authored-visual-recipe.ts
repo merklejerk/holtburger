@@ -8,7 +8,7 @@ import type {
 	StaticLayerPeerRecordOwner,
 } from "../static/contracts";
 import { createLayerOwnerKeyId } from "../static/layer-owners";
-import type { StaticMaterialPlanningDomain } from "../static/objects/bake/static-object-material-planner";
+import type { ObjectVisualMaterialPlanningDomain } from "../visual/object-visual-material-planner";
 
 type DynamicPlacementRecord = StaticAuthoredDynamicPlacementRecord;
 
@@ -121,7 +121,7 @@ function formatHex32(value: number): string {
 function createStaticAuthoredMaterialPlanningDomain(
 	owner: StaticLayerPeerRecordOwner,
 ): Exclude<
-	StaticMaterialPlanningDomain,
+	ObjectVisualMaterialPlanningDomain,
 	"runtime-authored-dynamic-object-material"
 > {
 	switch (owner.domain) {

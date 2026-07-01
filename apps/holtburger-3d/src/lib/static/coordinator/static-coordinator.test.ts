@@ -33,7 +33,10 @@ import type {
 } from "../contracts";
 import { StaticCoordinator } from "./static-coordinator";
 import type { StaticSourceReadyWork } from "./static-coordinator";
-import type { TexturePlacementSnapshot } from "../../textures/placement";
+import type {
+	ObjectVisualTexturePlacementSnapshot,
+	TexturePlacementSnapshot,
+} from "../../textures/placement";
 
 describe("static coordinator", () => {
 	it("drops late resolver results after a newer demand revision supersedes them", async () => {
@@ -358,14 +361,15 @@ describe("static coordinator", () => {
 		expect(sourceReady).toHaveLength(1);
 		expect(sourceReady[0]).toMatchObject({
 			domain: "outdoor-terrain",
-			placementIntents: [],
+			objectVisualPlacementIntents: [],
+			terrainPlacementIntents: [],
 			bakeBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:1",
 			tasks: [expect.objectContaining({ taskId: task.taskId })],
 		});
 		expect(baker.pendingInputs).toHaveLength(0);
 
 		const continuation = sourceReady[0]?.continueWithPlacement(
-			createPlacementSnapshot(),
+			createPlacementSnapshots(),
 		);
 		await flushPromises();
 
@@ -419,15 +423,14 @@ describe("static coordinator", () => {
 			(work) => work.domain === "env-cell-system",
 		);
 		expect(
-			envCellSourceReady?.placementIntents.map((intent) => ({
+			envCellSourceReady?.objectVisualPlacementIntents.map((intent) => ({
 				itemId: intent.itemId,
 				pool: intent.pool,
 				purpose: intent.purpose,
 			})),
 		).toEqual([
 			{
-				itemId:
-					"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
+				itemId: 0,
 				pool: "static-authored-object",
 				purpose: "object-base-color",
 			},
@@ -454,7 +457,7 @@ describe("static coordinator", () => {
 			location: null,
 			lod: { buildings: -1, detail: -1, envCells: -1, terrain: -1 },
 		});
-		await sourceReady?.continueWithPlacement(createPlacementSnapshot());
+		await sourceReady?.continueWithPlacement(createPlacementSnapshots());
 
 		expect(baker.pendingInputs).toHaveLength(0);
 		expect(coordinator.createSnapshot().committed).toBe(0);
@@ -1970,6 +1973,20 @@ async function flushPromises(): Promise<void> {
 
 function createPlacementSnapshot(): TexturePlacementSnapshot {
 	return { placementsByItemId: new Map() };
+}
+
+function createObjectVisualPlacementSnapshot(): ObjectVisualTexturePlacementSnapshot {
+	return { itemIdsByTextureUseId: new Map(), placementsByItemId: new Map() };
+}
+
+function createPlacementSnapshots(): {
+	readonly objectVisualPlacementSnapshot: ObjectVisualTexturePlacementSnapshot;
+	readonly terrainPlacementSnapshot: TexturePlacementSnapshot;
+} {
+	return {
+		objectVisualPlacementSnapshot: createObjectVisualPlacementSnapshot(),
+		terrainPlacementSnapshot: createPlacementSnapshot(),
+	};
 }
 
 function createInvalidOwnerlessDrawUnit(drawUnitId: string): StaticDrawUnit {

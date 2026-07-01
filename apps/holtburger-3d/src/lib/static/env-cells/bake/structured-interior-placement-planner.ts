@@ -17,7 +17,7 @@ import {
 	planStructuredInteriorCellMaterials,
 	resolveStructuredInteriorPlanTextureWrapMode,
 } from "./structured-interior-material-planner";
-import { isRenderableStaticMaterialPlan } from "../../objects/bake/static-object-renderability";
+import { isRenderableObjectVisualMaterialPlan } from "../../objects/bake/static-object-renderability";
 
 export function createStructuredInteriorTexturePlacementIntents(input: {
 	readonly items: readonly StaticBakeBatchItem[];
@@ -42,7 +42,7 @@ export function createStructuredInteriorTexturePlacementIntents(input: {
 				task: item.task,
 			});
 			for (const [surfaceId, plan] of materialPlan.materialPlansBySurfaceId) {
-				if (!isRenderableStaticMaterialPlan(plan)) {
+				if (!isRenderableObjectVisualMaterialPlan(plan)) {
 					continue;
 				}
 				const wrapMode = resolveStructuredInteriorPlanTextureWrapMode(plan);

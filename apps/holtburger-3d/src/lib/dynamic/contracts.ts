@@ -16,7 +16,10 @@ import type {
 	StaticLayerPeerRecordOwner,
 	VisualTextureDomain,
 } from "../static/contracts";
-import type { StaticMaterialPlanningDomain } from "../static/objects/bake/static-object-material-planner";
+import type {
+	ObjectVisualMaterialPipelinePlan,
+	ObjectVisualMaterialPlanningDomain,
+} from "../visual/object-visual-material-planner";
 import type { VisualGeometryPayload } from "../visual/visual-geometry";
 import type {
 	AnimationPayloadDto,
@@ -87,13 +90,13 @@ type DynamicResourceFamily =
 	| "static-authored-dynamic-object-material"
 	| typeof RUNTIME_AUTHORED_DYNAMIC_RESOURCE_FAMILY;
 
-type DynamicMaterialPlanningDomain = StaticMaterialPlanningDomain;
+type DynamicMaterialPlanningDomain = ObjectVisualMaterialPlanningDomain;
 
 type DynamicMaterialDetailRolePolicy =
 	| {
 			readonly kind: "static-domain";
 			readonly domain: Exclude<
-				StaticMaterialPlanningDomain,
+				ObjectVisualMaterialPlanningDomain,
 				typeof RUNTIME_AUTHORED_DYNAMIC_RESOURCE_FAMILY
 			>;
 	  }
@@ -210,7 +213,7 @@ export interface DynamicVisualRecipe {
 
 export interface DynamicVisualMaterialPolicy {
 	readonly detailRolePolicy: DynamicVisualMaterialDetailRolePolicy;
-	readonly materialPlanningDomain: StaticMaterialPlanningDomain;
+	readonly materialPlanningDomain: ObjectVisualMaterialPlanningDomain;
 	readonly visualObject: DynamicVisualObjectIdentity;
 }
 
@@ -218,7 +221,7 @@ type DynamicVisualMaterialDetailRolePolicy =
 	| {
 			readonly kind: "static-domain";
 			readonly domain: Exclude<
-				StaticMaterialPlanningDomain,
+				ObjectVisualMaterialPlanningDomain,
 				typeof RUNTIME_AUTHORED_DYNAMIC_RESOURCE_FAMILY
 			>;
 	  }
@@ -234,12 +237,16 @@ export interface DynamicVisualBakeInput {
 	readonly sourceGeometry: readonly StaticObjectSourceGeometryAttachment[];
 	/** Texture placements assigned before baking so baked resources can declare legal dependencies. */
 	readonly texturePlacementSnapshot: ObjectVisualTexturePlacementSnapshot;
+	/** Material planning results produced during pre-bake texture placement discovery. */
+	readonly texturePlannings: readonly DynamicVisualTexturePlanning[];
 }
 
 /** Pre-bake dynamic visual texture work discovered from source facts. */
 export interface DynamicVisualTexturePlanning {
 	/** Stable entity whose visual recipe produced these placement intents. */
 	readonly entityId: DynamicEntityId;
+	/** Neutral object-visual material plan reused by final dynamic baking. */
+	readonly materialPlan: ObjectVisualMaterialPipelinePlan | null;
 	/** Texture placement intents that must be assigned before this visual is baked. */
 	readonly placementIntents: readonly ObjectVisualTexturePlacementIntent[];
 	/** Texture requirements later reused by the baker and renderer binding path. */

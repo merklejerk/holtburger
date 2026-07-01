@@ -1,6 +1,6 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation in progress. Phase 0 is complete. This document defines the target model,
+Status: implementation in progress. Phases 0-1 are complete. This document defines the target model,
 north stars, risk surface, and phased cutover plan for replacing static-vs-dynamic object visual
 worker bifurcation with a shared object-like visual recipe graph.
 
@@ -857,6 +857,35 @@ Acceptance criteria:
 - Contract tests prove deterministic dense id/key-table behavior.
 - No existing static or dynamic renderer behavior changes in this phase.
 
+Phase 1 completion notes:
+
+- Added shared contracts in `apps/holtburger-3d/src/lib/visual/object-visual-recipe-bundle.ts`.
+  The module is intentionally under `visual`, not `static` or `dynamic`, so both worker families can
+  import the target contract without making one domain the owner of the other.
+- Added branded numeric ids for texture, material, geometry, geometry buffer, and part recipes, plus
+  branded semantic keys retained in `ObjectVisualRecipeKeyTables`.
+- Added `createObjectVisualRecipeKeyRegistry` to build deterministic dense id maps from sorted,
+  deduplicated semantic key tables. The helper preserves branded key types so hot-path references can
+  stay numeric while semantic keys remain inspectable.
+- Added `ObjectVisualBundleResolution` with explicit `ready` and `missing-dependencies` variants.
+  `createObjectVisualMissingDependenciesResolution` rejects empty missing-dependency lists so missing
+  state cannot masquerade as an empty ready bundle.
+- Added `UnsupportedMaterialRecipe` as a first-class non-renderable material family and
+  `isRenderableObjectVisualMaterialRecipe` for baker-side filtering.
+- Added source-local geometry sidecar contracts: `ObjectVisualGeometryBufferRef` for lightweight
+  graph references and `ObjectVisualGeometryBuffer` for transferable typed-array payloads.
+- Added `DynamicAnimationPartBinding` with `sourcePartIndex -> renderPartIds[]` to preserve the
+  animation split-binding requirement without baking setup indirection into material planning.
+- Added focused tests in `apps/holtburger-3d/src/lib/visual/object-visual-recipe-bundle.test.ts`.
+  They cover deterministic id/key-table construction, missing-dependency readiness shape,
+  unsupported material renderability, and embedded geometry sidecar references.
+- Verification:
+  `npm --prefix apps/holtburger-3d run test:ts -- src/lib/visual/object-visual-recipe-bundle.test.ts`
+  passed with 1 test file and 4 tests;
+  `npm --prefix apps/holtburger-3d run check` passed; and
+  `npm --prefix apps/holtburger-3d run lint:ts -- src/lib/visual/object-visual-recipe-bundle.ts src/lib/visual/object-visual-recipe-bundle.test.ts`
+  passed.
+
 Deletion criteria:
 
 - None. This phase adds the new contract foundation only.
@@ -1408,6 +1437,13 @@ Acceptance criteria:
 - Phase 0 confirmed runtime install reconstruction is a first-class cutover target. The later shared
   install publication must replace visual payload reconstruction from `installedDrawUnits`,
   `staticObjectRenderInstances`, and `staticObjectVisualResources`, not merely rename those buckets.
+- Phase 1 placed the shared object visual recipe contracts in `src/lib/visual`. This keeps the
+  contract adjacent to existing object-material partition vocabulary while avoiding static-owned or
+  dynamic-owned type gravity. The contract module must remain policy-free; runtime ownership,
+  pin/release, and install semantics belong in later coordinator/runtime publication layers.
+- Phase 1 kept semantic recipe keys as branded strings only in construction/debug key tables and made
+  recipe graph references branded numeric ids. Later phases should not introduce string-keyed
+  bake-time maps as a shortcut.
 
 ## Risks And Mitigations
 

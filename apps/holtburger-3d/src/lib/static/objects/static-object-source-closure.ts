@@ -1,11 +1,11 @@
 import type {
 	MaterialRecipePayloadDto,
-	PalettePayloadDto,
+	PaletteMetadataPayloadDto,
+	RenderSurfaceMetadataPayloadDto,
 	SetupAppearancePayloadDto,
 	SetupModelPayloadDto,
 	SurfaceTexturePayloadDto,
 } from "../../../lib/host/contracts";
-import type { ResolverRenderSurfacePayloadDto } from "../../assets/preparation/render-surface-views";
 import type { ResolverGfxObjPayloadDto } from "../../assets/preparation/gfx-obj-views";
 import type {
 	HostAssetKey,
@@ -41,8 +41,8 @@ import { createStaticObjectSourceGeometryIdentity } from "./static-object-source
 
 type StaticObjectSourceClosurePreparedPayload =
 	| MaterialRecipePayloadDto
-	| PalettePayloadDto
-	| ResolverRenderSurfacePayloadDto
+	| PaletteMetadataPayloadDto
+	| RenderSurfaceMetadataPayloadDto
 	| ResolverGfxObjPayloadDto
 	| SetupAppearancePayloadDto
 	| SetupModelPayloadDto
@@ -247,8 +247,11 @@ export async function resolveStaticObjectSurfaceTextureRef(options: {
 	try {
 		const loadedRenderSurface = await loadPayload(
 			options.assetService,
-			createHostAssetKey("render-surface", renderSurface.renderSurfaceId),
-			"render-surface",
+			createHostAssetKey(
+				"render-surface-metadata",
+				renderSurface.renderSurfaceId,
+			),
+			"render-surface-metadata",
 		);
 		palette =
 			palette ??
@@ -692,8 +695,8 @@ async function loadPalette(
 	try {
 		const loaded = await loadPayload(
 			assetService,
-			createHostAssetKey("palette", palette.paletteId),
-			"palette",
+			createHostAssetKey("palette-metadata", palette.paletteId),
+			"palette-metadata",
 		);
 		paletteSources.set(key, {
 			colorCount: loaded.payload.colorCount,
@@ -736,7 +739,8 @@ async function tryLoadSetupAppearance(
 	try {
 		return await loadPayload(
 			assetService,
-			setupAppearanceHostKey ?? createHostAssetKey("setup-appearance", setupModelId),
+			setupAppearanceHostKey ??
+				createHostAssetKey("setup-appearance", setupModelId),
 			"setup-appearance",
 		);
 	} catch {

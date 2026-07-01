@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import type {
 	GfxObjPayloadDto,
 	MaterialRecipePayloadDto,
+	PaletteMetadataPayloadDto,
 	PalettePayloadDto,
 	RegionRenderProfilePayloadDto,
+	RenderSurfaceMetadataPayloadDto,
 	RenderSurfacePayloadDto,
 	SetupAppearancePayloadDto,
 	SetupModelPayloadDto,
@@ -484,10 +486,18 @@ describe("browser outdoor static object resolver", () => {
 			0x05000010,
 		);
 		const duplicatedRenderSurfaceKey = createHostAssetKey(
+			"render-surface-metadata",
+			0x06000010,
+		);
+		const duplicatedPaletteKey = createHostAssetKey(
+			"palette-metadata",
+			0x04000010,
+		);
+		const renderSurfaceSourceKey = createHostAssetKey(
 			"render-surface",
 			0x06000010,
 		);
-		const duplicatedPaletteKey = createHostAssetKey("palette", 0x04000010);
+		const paletteSourceKey = createHostAssetKey("palette", 0x04000010);
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
 				createHostAssetKey("landblock-scene-lod-outdoor-layer", 0xda55ffff),
@@ -531,10 +541,10 @@ describe("browser outdoor static object resolver", () => {
 				}),
 			),
 			createPreparedAsset(
-				duplicatedRenderSurfaceKey,
+				renderSurfaceSourceKey,
 				createRenderSurfacePayload({ renderSurfaceId: 0x06000010 }),
 			),
-			createPreparedAsset(duplicatedPaletteKey, {
+			createPreparedAsset(paletteSourceKey, {
 				kind: "palette",
 				paletteId: 0x04000010,
 				provenance: createProvenance("palette"),
@@ -923,15 +933,55 @@ class FixtureAssetService implements AssetService {
 			(this.#requestCounts.get(requestKey) ?? 0) + 1,
 		);
 		const asset = this.#assets.get(describeHostAssetKey(key));
-		if (!asset) {
+		if (asset) {
+			return asset;
+		}
+		const metadataAsset = this.#createMetadataAsset(key);
+		if (!metadataAsset) {
 			throw new Error(`Missing fixture asset ${describeHostAssetKey(key)}.`);
 		}
 
-		return asset;
+		return metadataAsset;
 	}
 
 	countRequests(key: HostAssetKey): number {
 		return this.#requestCounts.get(describeHostAssetKey(key)) ?? 0;
+	}
+
+	#createMetadataAsset(key: HostAssetKey): PreparedAsset | null {
+		if (key.kind === "render-surface-metadata") {
+			const source = this.#assets.get(
+				describeHostAssetKey(
+					createHostAssetKey("render-surface", Number.parseInt(key.id, 16)),
+				),
+			);
+			if (!source || !isRenderSurfacePayload(source.payload)) {
+				return null;
+			}
+			return {
+				...source,
+				key,
+				payload: createRenderSurfaceMetadataPayload(source.payload),
+				sourceAssetId: formatHostAssetId(key),
+			};
+		}
+		if (key.kind === "palette-metadata") {
+			const source = this.#assets.get(
+				describeHostAssetKey(
+					createHostAssetKey("palette", Number.parseInt(key.id, 16)),
+				),
+			);
+			if (!source || !isPalettePayload(source.payload)) {
+				return null;
+			}
+			return {
+				...source,
+				key,
+				payload: createPaletteMetadataPayload(source.payload),
+				sourceAssetId: formatHostAssetId(key),
+			};
+		}
+		return null;
 	}
 
 	acquirePreparedAssetLease(key: HostAssetKey): PreparedAssetLease {
@@ -1334,6 +1384,59 @@ function createRenderSurfacePayload(
 		unknown: 0,
 		width: 1,
 	};
+}
+
+function createRenderSurfaceMetadataPayload(
+	payload: RenderSurfacePayloadDto,
+): RenderSurfaceMetadataPayloadDto {
+	return {
+		defaultPaletteId: payload.defaultPaletteId,
+		dependencies: payload.dependencies,
+		format: payload.format,
+		formatRaw: payload.formatRaw,
+		height: payload.height,
+		kind: "render-surface-metadata",
+		provenance: payload.provenance,
+		renderSurfaceId: payload.renderSurfaceId,
+		residencyKind: payload.residencyKind,
+		sourceAssetKind: payload.sourceAssetKind,
+		sourceByteLength: payload.sourceByteLength,
+		unknown: payload.unknown,
+		width: payload.width,
+	};
+}
+
+function createPaletteMetadataPayload(
+	payload: PalettePayloadDto,
+): PaletteMetadataPayloadDto {
+	return {
+		colorCount: payload.colorCount ?? 0,
+		kind: "palette-metadata",
+		paletteId: payload.paletteId,
+		provenance: payload.provenance,
+		residencyKind: payload.residencyKind,
+		sourceAssetKind: payload.sourceAssetKind,
+	};
+}
+
+function isRenderSurfacePayload(
+	payload: unknown,
+): payload is RenderSurfacePayloadDto {
+	return (
+		typeof payload === "object" &&
+		payload !== null &&
+		"kind" in payload &&
+		payload.kind === "render-surface"
+	);
+}
+
+function isPalettePayload(payload: unknown): payload is PalettePayloadDto {
+	return (
+		typeof payload === "object" &&
+		payload !== null &&
+		"kind" in payload &&
+		payload.kind === "palette"
+	);
 }
 
 function createTerrainStub(): LandblockOutdoorLayerSourcePayloadDto["terrain"] {

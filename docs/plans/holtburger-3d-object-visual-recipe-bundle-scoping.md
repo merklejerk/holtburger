@@ -1,6 +1,6 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation in progress. Phases 0-1 are complete. This document defines the target model,
+Status: implementation in progress. Phases 0-2 are complete. This document defines the target model,
 north stars, risk surface, and phased cutover plan for replacing static-vs-dynamic object visual
 worker bifurcation with a shared object-like visual recipe graph.
 
@@ -922,6 +922,38 @@ Acceptance criteria:
 - Texture placement remains the first stage that loads prepared texture or palette pixels.
 - Resolver-safe payload tests prove metadata routes do not contain texels/source bytes.
 
+Phase 2 completion notes:
+
+- Added strict `render-surface-metadata` and `palette-metadata` host DTO schemas in
+  `apps/holtburger-3d/src/lib/host/contracts.ts`. The metadata schemas reject texel-bearing
+  `sourceBytes` and `colorsArgb` instead of silently stripping unknown fields.
+- Added typed `render-surface-metadata/{id}` and `palette-metadata/{id}` browser asset keys and
+  prepared payload parsing in `assets/contracts.ts`, `assets/keys.ts`, and
+  `assets/preparation/route-payloads.ts`.
+- Added Tauri metadata route parsing and direct JSON lookup support in `src-tauri` for render
+  surfaces and palettes. These routes load the same content assets but serialize metadata-only JSON,
+  while existing `render-surface/{id}` and `palette/{id}` routes remain binary-only for pixel-bearing
+  payloads.
+- Updated `static/objects/static-object-source-closure.ts` so resolver-side material planning loads
+  `render-surface-metadata` and `palette-metadata` for dimensions, format, default palette, and
+  color-count facts. Pixel-bearing `palette` and `prepared-texture` payloads remain reserved for
+  texture source preparation/packing.
+- Kept the existing resolver bridge render-surface byte-stripping view as defensive compatibility for
+  any remaining direct `render-surface` worker request. The production resolver material-planning path
+  no longer relies on fetching that pixel-bearing route and stripping bytes afterward.
+- Added frontend parser and resolver tests proving metadata routes are typed, strict, and used by
+  static source resolution. Added Tauri service tests proving metadata routes are direct JSON and do
+  not expose source bytes or palette colors.
+- Verification:
+  `npm --prefix apps/holtburger-3d run test:ts -- src/lib/assets/preparation.test.ts src/lib/static/objects/outdoor-static-objects-resolver.test.ts src/lib/dynamic/visual-recipe-resolver.test.ts src/lib/static/resolver/asset-bridge.test.ts src/lib/dynamic/visual-recipe-worker-client.test.ts`
+  passed with 5 test files and 36 tests;
+  `npm --prefix apps/holtburger-3d run check` passed;
+  `npm --prefix apps/holtburger-3d run lint:ts -- src/lib/assets/preparation.test.ts src/lib/assets/preparation/route-payloads.ts src/lib/assets/contracts.ts src/lib/assets/keys.ts src/lib/host/contracts.ts src/lib/static/objects/static-object-source-closure.ts src/lib/static/objects/outdoor-static-objects-resolver.test.ts`
+  passed;
+  `npm --prefix apps/holtburger-3d run check:rust` passed; and
+  `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml adapter::service:: -- --nocapture`
+  passed with 18 tests.
+
 Deletion criteria:
 
 - Remove resolver code that fetches pixel-bearing render-surface or palette assets only to strip or
@@ -1444,6 +1476,14 @@ Acceptance criteria:
 - Phase 1 kept semantic recipe keys as branded strings only in construction/debug key tables and made
   recipe graph references branded numeric ids. Later phases should not introduce string-keyed
   bake-time maps as a shortcut.
+- Phase 2 made metadata routes strict. This is intentional: accepting `sourceBytes` or `colorsArgb`
+  on a metadata route and silently dropping them would recreate the old hidden-texel boundary bug.
+- Phase 2 left the existing resolver bridge render-surface byte-stripping view in place as defensive
+  compatibility, but resolver material planning now requests `render-surface-metadata` and
+  `palette-metadata`. Later cleanup should delete the bridge stripping path once searches prove no
+  resolver worker can request pixel-bearing render-surface payloads for metadata.
+- Phase 2 confirmed palette metadata only needs identity and color count for current resolver
+  material planning. Palette color data remains a texture preparation concern.
 
 ## Risks And Mitigations
 

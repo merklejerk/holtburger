@@ -313,6 +313,13 @@ impl HostBoundaryAdapter {
             });
         }
 
+        if let Some(response) = self
+            .build_texture_metadata_lookup_response_async(&request)
+            .await?
+        {
+            return Ok(response);
+        }
+
         if let Some(content_request) = content_asset_request_from_asset_id(&request.asset_id) {
             if let Some(message) =
                 binary_asset_lookup_required_message(&request.asset_id, &content_request)
@@ -455,6 +462,10 @@ impl HostBoundaryAdapter {
             });
         }
 
+        if let Some(response) = self.build_texture_metadata_lookup_response_blocking(&request)? {
+            return Ok(response);
+        }
+
         if let Some(content_request) = content_asset_request_from_asset_id(&request.asset_id) {
             if let Some(message) =
                 binary_asset_lookup_required_message(&request.asset_id, &content_request)
@@ -471,6 +482,67 @@ impl HostBoundaryAdapter {
             "unsupported app-local asset id {}; no debug manifest fallback is registered",
             request.asset_id
         )
+    }
+
+    async fn build_texture_metadata_lookup_response_async(
+        &self,
+        request: &AssetLookupRequestDto,
+    ) -> anyhow::Result<Option<AssetLookupResponseDto>> {
+        if let Some(render_surface_id) = parse_render_surface_metadata_asset_id(&request.asset_id) {
+            let asset = self
+                .content_asset_runtime
+                .load(ContentAssetRequest::RenderSurface(render_surface_id))
+                .await;
+            return Ok(Some(build_render_surface_metadata_lookup_response(
+                request.clone(),
+                render_surface_id,
+                asset,
+            )?));
+        }
+
+        if let Some(palette_id) = parse_palette_metadata_asset_id(&request.asset_id) {
+            let asset = self
+                .content_asset_runtime
+                .load(ContentAssetRequest::Palette(palette_id))
+                .await;
+            return Ok(Some(build_palette_metadata_lookup_response(
+                request.clone(),
+                palette_id,
+                asset,
+            )?));
+        }
+
+        Ok(None)
+    }
+
+    #[cfg(test)]
+    fn build_texture_metadata_lookup_response_blocking(
+        &self,
+        request: &AssetLookupRequestDto,
+    ) -> anyhow::Result<Option<AssetLookupResponseDto>> {
+        if let Some(render_surface_id) = parse_render_surface_metadata_asset_id(&request.asset_id) {
+            let asset = self
+                .content_asset_runtime
+                .load_blocking(ContentAssetRequest::RenderSurface(render_surface_id));
+            return Ok(Some(build_render_surface_metadata_lookup_response(
+                request.clone(),
+                render_surface_id,
+                asset,
+            )?));
+        }
+
+        if let Some(palette_id) = parse_palette_metadata_asset_id(&request.asset_id) {
+            let asset = self
+                .content_asset_runtime
+                .load_blocking(ContentAssetRequest::Palette(palette_id));
+            return Ok(Some(build_palette_metadata_lookup_response(
+                request.clone(),
+                palette_id,
+                asset,
+            )?));
+        }
+
+        Ok(None)
     }
 
     fn build_content_asset_lookup_response(
@@ -518,6 +590,46 @@ impl HostBoundaryAdapter {
                 unreachable!("binary-routed content request passed direct JSON rejection")
             }
         })
+    }
+}
+
+fn build_render_surface_metadata_lookup_response(
+    request: AssetLookupRequestDto,
+    render_surface_id: u32,
+    asset: anyhow::Result<ContentAsset>,
+) -> anyhow::Result<AssetLookupResponseDto> {
+    match asset {
+        Ok(ContentAsset::RenderSurface(render_surface)) => Ok(AssetLookupResponseDto {
+            request_id: request.request_id,
+            asset_id: request.asset_id,
+            payload_kind: AssetPayloadKindDto::Json,
+            payload: serialize_render_surface_metadata_payload(&render_surface),
+        }),
+        Ok(_) => unreachable!("content asset runtime returned mismatched render surface"),
+        Err(error) => anyhow::bail!(
+            "failed to load render surface metadata 0x{render_surface_id:08X} for {}: {error:#}",
+            request.asset_id
+        ),
+    }
+}
+
+fn build_palette_metadata_lookup_response(
+    request: AssetLookupRequestDto,
+    palette_id: u32,
+    asset: anyhow::Result<ContentAsset>,
+) -> anyhow::Result<AssetLookupResponseDto> {
+    match asset {
+        Ok(ContentAsset::Palette(palette)) => Ok(AssetLookupResponseDto {
+            request_id: request.request_id,
+            asset_id: request.asset_id,
+            payload_kind: AssetPayloadKindDto::Json,
+            payload: serialize_palette_metadata_payload(&palette),
+        }),
+        Ok(_) => unreachable!("content asset runtime returned mismatched palette"),
+        Err(error) => anyhow::bail!(
+            "failed to load palette metadata 0x{palette_id:08X} for {}: {error:#}",
+            request.asset_id
+        ),
     }
 }
 
@@ -857,6 +969,42 @@ mod tests {
                 "{asset_id} should explain the required transport: {message}"
             );
         }
+    }
+
+    #[test]
+    fn direct_json_lookup_exposes_texture_metadata_without_texels() {
+        let runtime = HostRuntimeService::new(false);
+
+        let render_surface = runtime.asset_lookup_blocking(AssetLookupRequestDto {
+            request_id: "test-render-surface-metadata-json".to_string(),
+            asset_id: "render-surface-metadata/060041c0".to_string(),
+            priority: crate::contracts::AssetPriorityDto::Bootstrap,
+        });
+        assert_eq!(
+            render_surface.payload["kind"],
+            serde_json::json!("render-surface-metadata")
+        );
+        assert_eq!(
+            render_surface.payload["sourceAssetKind"],
+            serde_json::json!("render-surface")
+        );
+        assert!(render_surface.payload.get("sourceBytes").is_none());
+
+        let palette = runtime.asset_lookup_blocking(AssetLookupRequestDto {
+            request_id: "test-palette-metadata-json".to_string(),
+            asset_id: "palette-metadata/0400007e".to_string(),
+            priority: crate::contracts::AssetPriorityDto::Bootstrap,
+        });
+        assert_eq!(
+            palette.payload["kind"],
+            serde_json::json!("palette-metadata")
+        );
+        assert_eq!(
+            palette.payload["sourceAssetKind"],
+            serde_json::json!("palette")
+        );
+        assert!(palette.payload["colorCount"].as_u64().is_some());
+        assert!(palette.payload.get("colorsArgb").is_none());
     }
 
     #[test]

@@ -45,7 +45,7 @@ import {
 	createStaticMaterialTableEntry,
 	createStaticMaterialTextureUses,
 } from "../../bake/static-material-adapter";
-import { createStaticMaterialTextureUseId } from "../../bake/static-material-texture-policy";
+import { createStaticMaterialTextureBindingRequirement } from "../../bake/static-material-texture-policy";
 import {
 	describeStaticObjectCanonicalGeometryIdentity,
 	describeStaticObjectSourceGeometryIdentity,
@@ -1802,12 +1802,12 @@ function createStaticObjectTextureUseId(options: {
 	readonly textureUseScopeId: string;
 	readonly wrapMode: StaticObjectBatchPartition["textureWrapMode"];
 }): string {
-	return createStaticMaterialTextureUseId({
+	return createStaticMaterialTextureBindingRequirement({
 		dataUse: options.dataUse,
 		textureUseNamespace: "static-object-texture",
 		textureUseScopeId: options.textureUseScopeId,
 		wrapMode: options.wrapMode,
-	});
+	}).bindingKey;
 }
 
 function mergeTextureUses(

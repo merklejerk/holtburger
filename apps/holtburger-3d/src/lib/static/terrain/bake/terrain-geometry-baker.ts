@@ -27,12 +27,15 @@ import {
 import { buildTerrainMaterialLayerPlan } from "./terrain-material-layer-planner";
 import { createStaticTexturePlacementIntent } from "../../../textures/placement";
 import type {
+	TextureBindingRequirement,
 	TexturePlacementIntent,
 	TexturePlacementSnapshot,
 	TextureResourceDependencies,
 	TextureResourceRoleDependency,
 	TextureUsagePurpose,
 } from "../../../textures/placement";
+import { classifyTextureUsagePurpose } from "../../../textures/placement";
+import { createMaterialTextureDataUseKey } from "../../bake/static-material-texture-policy";
 
 const UINT16_MAX_INDEX = 65_535;
 const EMPTY_TEXTURE_PLACEMENT_SNAPSHOT: TexturePlacementSnapshot = {
@@ -101,13 +104,16 @@ export function createTerrainTexturePlacementIntents(options: {
 			return [];
 		}
 
-		const textureUseById = createTerrainPreparedTextureUseIndex(
+		const requirementByBindingKey = createTerrainTextureRequirementIndex(
 			item.task.ownerId,
 			item.payload.scope.textureUses,
 		);
 		const plan = buildTerrainMaterialLayerPlan({
 			createTextureUseId: (textureUse) =>
-				createTerrainTextureUseId(item.task.ownerId, textureUse),
+				createTerrainTextureBindingRequirement(
+					item.task.ownerId,
+					textureUse,
+				).bindingKey,
 			payload: item.payload.scope,
 		});
 		if (!plan) {
@@ -115,20 +121,18 @@ export function createTerrainTexturePlacementIntents(options: {
 		}
 
 		return collectTerrainMaterialPlanTextureUseIds(plan).flatMap(
-			(textureUseId) => {
-				const textureUse = textureUseById.get(textureUseId);
-				if (!textureUse?.preparedTextureUse) {
+			(bindingKey) => {
+				const requirement = requirementByBindingKey.get(bindingKey);
+				if (!requirement) {
 					return [];
 				}
 				return [
 					createStaticTexturePlacementIntent(
-						{
-							domain: "outdoor-terrain",
+						createTerrainStaticBakeTextureUse({
 							owners: [],
-							source: textureUse.preparedTextureUse,
+							requirement,
 							staticBatchId: options.staticBatchId,
-							textureUseId,
-						},
+						}),
 						{
 							affinityKey: createTerrainTextureAffinityKey(item.task.ownerId),
 						},
@@ -207,7 +211,8 @@ function createTerrainGeometryDrawUnits(
 ): readonly TerrainGeometryStaticDrawUnit[] {
 	const terrainMaterialPlan = buildTerrainMaterialLayerPlan({
 		createTextureUseId: (textureUse) =>
-			createTerrainTextureUseId(textureUseScopeId, textureUse),
+			createTerrainTextureBindingRequirement(textureUseScopeId, textureUse)
+				.bindingKey,
 		payload,
 	});
 	const slices = createTerrainGeometrySlices(
@@ -834,17 +839,17 @@ function createTerrainBakeTextureUses(
 			if (!textureUse.preparedTextureUse) {
 				continue;
 			}
-			const textureUseId = createTerrainTextureUseId(
+			const requirement = createTerrainTextureBindingRequirement(
 				item.task.ownerId,
 				textureUse,
 			);
-			if (!boundTextureUseIds.has(textureUseId)) {
+			if (!boundTextureUseIds.has(requirement.bindingKey)) {
 				continue;
 			}
 
-			const existing = textureUsesById.get(textureUseId);
+			const existing = textureUsesById.get(requirement.bindingKey);
 			if (existing) {
-				textureUsesById.set(textureUseId, {
+				textureUsesById.set(requirement.bindingKey, {
 					...existing,
 					owners: uniqueSortedStaticTextureUseOwners([
 						...existing.owners,
@@ -854,13 +859,14 @@ function createTerrainBakeTextureUses(
 				continue;
 			}
 
-			textureUsesById.set(textureUseId, {
-				domain: "outdoor-terrain",
-				owners: [{ drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" }],
-				source: textureUse.preparedTextureUse,
-				staticBatchId: input.staticBatchId,
-				textureUseId,
-			});
+			textureUsesById.set(
+				requirement.bindingKey,
+				createTerrainStaticBakeTextureUse({
+					owners: [{ drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" }],
+					requirement,
+					staticBatchId: input.staticBatchId,
+				}),
+			);
 		}
 	}
 
@@ -886,6 +892,50 @@ export function createTerrainTextureUseId(
 	].join(":");
 }
 
+function createTerrainTextureBindingRequirement(
+	textureUseScopeId: string,
+	textureUse: TerrainTextureUseFacts,
+): TextureBindingRequirement {
+	const bindingKey = createTerrainTextureUseId(textureUseScopeId, textureUse);
+	if (!textureUse.preparedTextureUse) {
+		throw new Error("Prepared texture use disappeared during terrain bake.");
+	}
+
+	return {
+		bindingKey,
+		// Phase 12 keeps terrain renderer binding keys equal to placement item ids.
+		placementItemId: bindingKey,
+		purpose: classifyTextureUsagePurpose(textureUse.preparedTextureUse, "terrain"),
+		samplingPolicy: undefined,
+		source: {
+			dataUse: textureUse.preparedTextureUse,
+			kind: "material-texture-data-use",
+		},
+		sourceKey: createMaterialTextureDataUseKey(textureUse.preparedTextureUse),
+	};
+}
+
+function createTerrainStaticBakeTextureUse(options: {
+	readonly owners: StaticBakeTextureUse["owners"];
+	readonly requirement: TextureBindingRequirement;
+	readonly staticBatchId: string;
+}): StaticBakeTextureUse {
+	const textureUse: StaticBakeTextureUse = {
+		domain: "outdoor-terrain",
+		owners: options.owners,
+		source: options.requirement.source.dataUse,
+		staticBatchId: options.staticBatchId,
+		textureUseId: options.requirement.bindingKey,
+	};
+	if (!options.requirement.samplingPolicy) {
+		return textureUse;
+	}
+	return {
+		...textureUse,
+		samplingPolicy: options.requirement.samplingPolicy,
+	};
+}
+
 function createTerrainTextureDependencies(
 	drawUnits: readonly TerrainGeometryStaticDrawUnit[],
 	texturePlacementSnapshot: TexturePlacementSnapshot,
@@ -907,12 +957,14 @@ function createTerrainTextureRoleDependencies(
 	texturePlacementSnapshot: TexturePlacementSnapshot,
 ): readonly TextureResourceRoleDependency[] {
 	const itemIdsByPurpose = new Map<TextureUsagePurpose, Set<string>>();
-	for (const textureUseId of drawUnit.textureUseIds) {
+	for (const bindingKey of drawUnit.textureUseIds) {
+		// Terrain binding keys intentionally remain placement item ids during
+		// Phase 12; the placement snapshot is the authority for dependency purpose.
 		const placement =
-			texturePlacementSnapshot.placementsByItemId.get(textureUseId);
+			texturePlacementSnapshot.placementsByItemId.get(bindingKey);
 		if (!placement) {
 			throw new Error(
-				`Terrain draw unit ${drawUnit.drawUnitId} is missing pre-bake texture placement ${textureUseId}.`,
+				`Terrain draw unit ${drawUnit.drawUnitId} is missing pre-bake texture placement ${bindingKey}.`,
 			);
 		}
 		let itemIds = itemIdsByPurpose.get(placement.purpose);
@@ -920,7 +972,7 @@ function createTerrainTextureRoleDependencies(
 			itemIds = new Set<string>();
 			itemIdsByPurpose.set(placement.purpose, itemIds);
 		}
-		itemIds.add(textureUseId);
+		itemIds.add(bindingKey);
 	}
 
 	return Array.from(itemIdsByPurpose, ([purpose, itemIds]) => ({
@@ -948,21 +1000,18 @@ function collectTerrainMaterialPlanTextureUseIds(
 	return Array.from(textureUseIds).sort();
 }
 
-function createTerrainPreparedTextureUseIndex(
+function createTerrainTextureRequirementIndex(
 	textureUseScopeId: string,
 	textureUses: readonly TerrainTextureUseFacts[],
-): ReadonlyMap<string, TerrainTextureUseFacts> {
+): ReadonlyMap<string, TextureBindingRequirement> {
 	return new Map(
 		textureUses.flatMap((textureUse) =>
 			textureUse.preparedTextureUse
 				? [
-						[
-							createTerrainTextureUseId(textureUseScopeId, textureUse),
-							textureUse,
-						],
+						createTerrainTextureBindingRequirement(textureUseScopeId, textureUse),
 					]
 				: [],
-		),
+		).map((requirement) => [requirement.bindingKey, requirement] as const),
 	);
 }
 

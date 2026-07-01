@@ -22,7 +22,7 @@ import {
 import { sliceStaticMaterialBatchCandidates } from "../../bake/static-material-batch-slicer";
 import {
 	createMaterialTextureDataUseKey,
-	createStaticMaterialTextureUseId,
+	createStaticMaterialTextureBindingRequirement,
 } from "../../bake/static-material-texture-policy";
 import type {
 	TexturePlacementSnapshot,
@@ -313,17 +313,19 @@ function addObjectMaterialPlanPlacementPages(options: {
 		if (!isCurrentlyStageableStaticObjectDataUse(dataUse)) {
 			continue;
 		}
-		const textureUseId = createStaticMaterialTextureUseId({
+		const requirement = createStaticMaterialTextureBindingRequirement({
 			dataUse,
 			textureUseNamespace: "static-object-texture",
 			textureUseScopeId: options.textureUseScopeId,
 			wrapMode: options.candidate.textureWrapMode,
 		});
 		const placement =
-			options.placementSnapshot.placementsByItemId.get(textureUseId);
+			options.placementSnapshot.placementsByItemId.get(
+				requirement.placementItemId,
+			);
 		if (!placement) {
 			throw new Error(
-				`Static object texture placement snapshot is missing ${textureUseId}.`,
+				`Static object texture placement snapshot is missing ${requirement.placementItemId}.`,
 			);
 		}
 		getObjectPurposePageSet(options.pageSets, placement.purpose).add(

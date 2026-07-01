@@ -162,6 +162,7 @@ import {
 	type DynamicVisualRecipeResolver,
 } from "../dynamic/visual-recipe-resolver";
 import {
+	createDynamicVisualTexturePlanning,
 	LocalDynamicVisualBaker,
 	type DynamicVisualBaker,
 } from "../dynamic/visual-baker";
@@ -1028,6 +1029,18 @@ class ClientRuntimeImpl implements ClientRuntime {
 				return;
 			}
 
+			const texturePlanning = createDynamicVisualTexturePlanning(recipe);
+			const texturePlacementSnapshot =
+				await this.#textureManager.placeTextureIntents({
+					intents: texturePlanning.placementIntents,
+					placementBatchId: createRuntimeDynamicTextureBatchId(
+						options.entityId,
+					),
+				});
+			if (!this.#isCurrentRuntimeDynamicVisualPrep(options)) {
+				return;
+			}
+
 			const sourceGeometry = await createDynamicVisualBakeSourceGeometry(
 				this.#assetService,
 				[recipe],
@@ -1041,6 +1054,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 				recipes: [recipe],
 				revision: options.revision,
 				sourceGeometry,
+				texturePlacementSnapshot,
 			});
 			if (!this.#isCurrentRuntimeDynamicVisualPrep(options)) {
 				return;
@@ -2013,7 +2027,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		commitEnvelope: StaticScopePrepCommit,
 	): Promise<void> {
 		const delta = commitEnvelope.staticCommit;
-		this.#textureManager.releaseDrawUnitTextureDependencies(
+		this.#textureManager.releaseTextureResourceDependencies(
 			collectStaticDrawUnitResourceIds(delta.removedResources),
 		);
 		const textureUpdate =
@@ -2031,7 +2045,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		if (materialized.textureUpdate) {
 			this.#renderer.applyTexturePlacementUpdate(materialized.textureUpdate);
 		}
-		this.#textureManager.pinDrawUnitTextureDependencies(
+		this.#textureManager.pinTextureResourceDependencies(
 			delta.textureDependencies,
 		);
 		this.#applyMaterializedStaticLayers(delta, materialized);
@@ -2141,6 +2155,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			...this.#committedDynamicVisualResourceIds,
 		].filter((resourceId) => !nextResourceIds.has(resourceId));
 
+		this.#textureManager.releaseTextureResourceDependencies(removedResourceIds);
 		const textureUpdate =
 			await this.#textureManager.applyDynamicTextureUseDelta({
 				removedOwners: removedResourceIds.map((resourceId) => ({
@@ -2157,6 +2172,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 		if (textureUpdate) {
 			this.#renderer.applyTexturePlacementUpdate(textureUpdate);
 		}
+		this.#textureManager.pinTextureResourceDependencies(
+			resources.flatMap((resource) => resource.textureDependencies),
+		);
 
 		this.#dynamicRendererResourceRevision += 1;
 		const commit: DynamicRendererResourceCommit = {
@@ -4229,6 +4247,7 @@ function createDynamicRendererVisualResource(
 				vertexCount: part.vertexCount,
 			})),
 			resourceId: createDynamicRendererVisualResourceId(record),
+			textureDependencies: visual.textureDependencies,
 		},
 	];
 }

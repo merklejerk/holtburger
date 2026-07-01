@@ -849,6 +849,7 @@ function createResourcesWithBakedVisual(
 			renderParts: resource.renderParts,
 			sourceAssets: resource.sourceAssets,
 			status: "ready",
+			textureDependencies: resource.textureDependencies,
 			textureRefs: resource.textureRefs,
 			textureRequirements: resource.textureRequirements,
 		},

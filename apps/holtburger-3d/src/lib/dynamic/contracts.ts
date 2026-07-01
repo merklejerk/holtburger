@@ -23,6 +23,11 @@ import type {
 	PlacementTransformDto,
 	Vec3Dto,
 } from "../host/contracts";
+import type {
+	TexturePlacementIntent,
+	TexturePlacementSnapshot,
+	TextureResourceDependencies,
+} from "../textures/placement";
 
 export type DynamicEntityId = string;
 export const RUNTIME_AUTHORED_DYNAMIC_RESOURCE_FAMILY =
@@ -243,6 +248,18 @@ export interface DynamicVisualBakeInput {
 	readonly revision: number;
 	/** Geometry buffers required by the baker; prepared before crossing the bake boundary. */
 	readonly sourceGeometry: readonly StaticObjectSourceGeometryAttachment[];
+	/** Texture placements assigned before baking so baked resources can declare legal dependencies. */
+	readonly texturePlacementSnapshot: TexturePlacementSnapshot;
+}
+
+/** Pre-bake dynamic visual texture work discovered from source facts. */
+export interface DynamicVisualTexturePlanning {
+	/** Stable entity whose visual recipe produced these placement intents. */
+	readonly entityId: DynamicEntityId;
+	/** Texture placement intents that must be assigned before this visual is baked. */
+	readonly placementIntents: readonly TexturePlacementIntent[];
+	/** Texture requirements later reused by the baker and renderer binding path. */
+	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
 }
 
 export interface DynamicVisualBakeResult {
@@ -271,6 +288,8 @@ export interface BakedDynamicVisualResource {
 	readonly renderParts: readonly DynamicEntityRenderPart[];
 	readonly resourceId: string;
 	readonly sourceAssets: readonly StaticObjectSourceAssetFacts[];
+	/** Active atlas placements pinned while this immutable visual resource is resident. */
+	readonly textureDependencies: readonly TextureResourceDependencies[];
 	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
 	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
 }
@@ -623,6 +642,8 @@ export interface DynamicEntityVisualResourcesReadyState {
 	readonly renderParts: readonly DynamicEntityRenderPart[];
 	readonly sourceAssets: readonly StaticObjectSourceAssetFacts[];
 	readonly status: "ready";
+	/** Active atlas placements pinned while this immutable visual resource is resident. */
+	readonly textureDependencies: readonly TextureResourceDependencies[];
 	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
 	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
 }

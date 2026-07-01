@@ -41,7 +41,10 @@ import type {
 	DynamicEntityRecipe,
 	DynamicVisualBakeResult,
 } from "../../dynamic/contracts";
-import type { DynamicVisualBaker } from "../../dynamic/visual-baker";
+import {
+	createDynamicVisualTexturePlanning,
+	type DynamicVisualBaker,
+} from "../../dynamic/visual-baker";
 import { createDynamicVisualBakeSourceGeometry } from "../../dynamic/visual-bake-attachments";
 import { planStaticDemand } from "../demand-planner";
 import { createEmptyStaticBakeAttachments } from "../bake/attachments";
@@ -540,12 +543,20 @@ export class StaticCoordinator {
 		readonly staticBatchId: string;
 	}): Promise<void> {
 		let consumed = false;
-		const placementIntents = isStaticObjectDomain(options.pendingBatch.domain)
-			? createStaticObjectTexturePlacementIntents({
-					items: options.items,
-					staticBatchId: options.staticBatchId,
-				})
-			: [];
+		const placementIntents = [
+			...(isStaticObjectDomain(options.pendingBatch.domain)
+				? createStaticObjectTexturePlacementIntents({
+						items: options.items,
+						staticBatchId: options.staticBatchId,
+					})
+				: []),
+			...options.pendingItems.flatMap((item) =>
+				item.dynamicRecipes.flatMap(
+					(recipe) =>
+						createDynamicVisualTexturePlanning(recipe).placementIntents,
+				),
+			),
+		];
 		const work: StaticSourceReadyWork = {
 			domain: options.pendingBatch.domain,
 			placementIntents,
@@ -666,6 +677,7 @@ export class StaticCoordinator {
 		try {
 			dynamicVisualBake = await this.#bakeDynamicVisualsForPendingItems({
 				pendingItems: currentPendingItems,
+				placementSnapshot: options.placementSnapshot,
 				revision: options.pendingBatch.revision,
 				staticBatchId: options.staticBatchId,
 			});
@@ -733,6 +745,7 @@ export class StaticCoordinator {
 
 	async #bakeDynamicVisualsForPendingItems(options: {
 		readonly pendingItems: readonly PendingStaticBakeBatchItem[];
+		readonly placementSnapshot: TexturePlacementSnapshot;
 		readonly revision: number;
 		readonly staticBatchId: string;
 	}): Promise<DynamicVisualBakeResult | null> {
@@ -757,6 +770,7 @@ export class StaticCoordinator {
 			recipes,
 			revision: options.revision,
 			sourceGeometry,
+			texturePlacementSnapshot: options.placementSnapshot,
 		});
 	}
 
@@ -1661,7 +1675,7 @@ function filterStaticBakeResultForCurrentTasks(
 			),
 		),
 		textureDependencies: result.textureDependencies.filter((dependency) =>
-			drawUnitIds.has(dependency.drawUnitId),
+			drawUnitIds.has(dependency.resourceId),
 		),
 		tasks,
 	};

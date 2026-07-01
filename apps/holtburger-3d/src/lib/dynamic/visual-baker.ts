@@ -10,6 +10,7 @@ import type {
 	DynamicVisualBakeInput,
 	DynamicVisualBakeProduct,
 	DynamicVisualBakeResult,
+	DynamicVisualTexturePlanning,
 } from "./contracts";
 import { createDynamicVisualResourceId } from "./contracts";
 import { createPreparedTextureHostKey } from "../assets/preparation/prepared-texture-source";
@@ -38,6 +39,12 @@ import {
 	describeStaticObjectSourceGeometryIdentity,
 	getStaticObjectCanonicalGeometryIdentity,
 } from "../static/objects/static-object-source-assets";
+import {
+	createDynamicTexturePlacementIntent,
+	type TextureResourceDependencies,
+	type TextureResourceRoleDependency,
+	type TextureUsagePurpose,
+} from "../textures/placement";
 
 export interface DynamicVisualBaker {
 	bake(input: DynamicVisualBakeInput): Promise<DynamicVisualBakeResult>;
@@ -96,6 +103,7 @@ export function bakeDynamicVisuals(
 			const resource = bakeDynamicVisualRecipe({
 				recipe,
 				sourceGeometryByKey,
+				texturePlacementSnapshot: input.texturePlacementSnapshot,
 			});
 			products.push({
 				kind: "baked",
@@ -132,8 +140,10 @@ function bakeDynamicVisualRecipe(options: {
 		string,
 		StaticObjectSourceGeometryAttachment
 	>;
+	readonly texturePlacementSnapshot: DynamicVisualBakeInput["texturePlacementSnapshot"];
 }): BakedDynamicVisualResource {
 	const { recipe } = options;
+	const resourceId = createDynamicVisualResourceId(recipe.entityId);
 	const materialSlots = createDynamicMaterialSlotRequirements(
 		recipe.visual.materialPolicy.visualObject,
 		recipe.visual.sourceAssets,
@@ -157,9 +167,15 @@ function bakeDynamicVisualRecipe(options: {
 		});
 	}
 
-	const textureRequirements = createTextureRequirements(
-		materialPlans.materialPlans,
-	);
+	const textureRequirements = createTextureRequirements({
+		materialPlans: materialPlans.materialPlans,
+		resourceId,
+	});
+	assertTextureRequirementsPlaced({
+		resourceId,
+		texturePlacementSnapshot: options.texturePlacementSnapshot,
+		textureRequirements,
+	});
 	return {
 		entityId: recipe.entityId,
 		materialSlots: materialSlots.map(createMaterialSlotRequirement),
@@ -171,9 +187,72 @@ function bakeDynamicVisualRecipe(options: {
 			sourceGeometryByKey: options.sourceGeometryByKey,
 			textureRequirements,
 		}),
-		resourceId: createDynamicVisualResourceId(recipe.entityId),
+		resourceId,
 		sourceAssets: recipe.visual.sourceAssets,
+		textureDependencies: createDynamicTextureDependencies({
+			resourceId,
+			textureRequirements,
+		}),
 		textureRefs: recipe.visual.textureRefs,
+		textureRequirements,
+	};
+}
+
+export function createDynamicVisualTexturePlanning(
+	recipe: DynamicVisualBakeInput["recipes"][number],
+): DynamicVisualTexturePlanning {
+	if (recipe.visual.missingRefs.length > 0) {
+		return {
+			entityId: recipe.entityId,
+			placementIntents: [],
+			textureRequirements: [],
+		};
+	}
+	const resourceId = createDynamicVisualResourceId(recipe.entityId);
+	const materialSlots = createDynamicMaterialSlotRequirements(
+		recipe.visual.materialPolicy.visualObject,
+		recipe.visual.sourceAssets,
+	);
+	const materialPlans = planStaticObjectMaterials({
+		domain: recipe.visual.materialPolicy.materialPlanningDomain,
+		landblock: createMaterialPlanningLandblockSource(recipe),
+		materialSlots: materialSlots.map((slot) => slot.planningFacts),
+		materialSources: recipe.visual.materialSources,
+		paletteSources: recipe.visual.paletteSources,
+		regionRenderProfile: { detailRoles: [] },
+		textureRefs: recipe.visual.textureRefs,
+	});
+	const unsupportedReasons = createUnsupportedMaterialReasons(
+		materialPlans.fallbackReasons,
+	);
+	if (unsupportedReasons.length > 0) {
+		return {
+			entityId: recipe.entityId,
+			placementIntents: [],
+			textureRequirements: [],
+		};
+	}
+	const textureRequirements = createTextureRequirements({
+		materialPlans: materialPlans.materialPlans,
+		resourceId,
+	});
+	return {
+		entityId: recipe.entityId,
+		placementIntents: textureRequirements.map((requirement) =>
+			createDynamicTexturePlacementIntent(
+				{
+					samplingPolicy: requirement.samplingPolicy,
+					source: requirement.dataUse,
+					textureDomain:
+						recipe.visual.materialPolicy.detailRolePolicy.kind ===
+						"runtime-authored-none"
+							? "runtime-object-material"
+							: recipe.visual.materialPolicy.detailRolePolicy.domain,
+					textureUseId: requirement.textureUseId,
+				},
+				{ affinityKey: createDynamicTextureAffinityKey(recipe) },
+			),
+		),
 		textureRequirements,
 	};
 }
@@ -270,10 +349,11 @@ function createMaterialPlanningLandblockSource(
 	};
 }
 
-function createTextureRequirements(
-	materialPlans: readonly StaticMaterialPlan[],
-): readonly DynamicEntityTextureRequirement[] {
-	return materialPlans.flatMap((plan) => {
+function createTextureRequirements(options: {
+	readonly materialPlans: readonly StaticMaterialPlan[];
+	readonly resourceId: string;
+}): readonly DynamicEntityTextureRequirement[] {
+	return options.materialPlans.flatMap((plan) => {
 		const dataUses = plan.textureRoles.map((role) => role.dataUse);
 		const wrapMode = resolveRepeatedStaticMaterialPrimaryWrapMode(dataUses);
 		return plan.textureRoles.map(
@@ -286,18 +366,20 @@ function createTextureRequirements(
 					dataUse: role.dataUse,
 					wrapMode,
 				}),
-				textureUseId: createDynamicTextureUseId(plan, role),
+				textureUseId: createDynamicTextureUseId(options.resourceId, plan, role),
 			}),
 		);
 	});
 }
 
 function createDynamicTextureUseId(
+	resourceId: string,
 	plan: StaticMaterialPlan,
 	role: StaticMaterialPlan["textureRoles"][number],
 ): string {
 	return [
 		"dynamic-texture",
+		resourceId,
 		plan.material.materialId.toString(16).padStart(8, "0"),
 		role.role,
 		role.dataUse.kind === "palette-texture-use"
@@ -357,6 +439,83 @@ function createTextureRequirementKey(
 	};
 }
 
+function createDynamicTextureAffinityKey(
+	recipe: DynamicVisualBakeInput["recipes"][number],
+): string {
+	return [
+		"dynamic-visual",
+		recipe.visual.materialPolicy.visualObject.resourceId,
+	].join(":");
+}
+
+function assertTextureRequirementsPlaced(options: {
+	readonly resourceId: string;
+	readonly texturePlacementSnapshot: DynamicVisualBakeInput["texturePlacementSnapshot"];
+	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
+}): void {
+	const missingItemIds = options.textureRequirements
+		.map((requirement) => requirement.textureUseId)
+		.filter(
+			(textureUseId) =>
+				!options.texturePlacementSnapshot.placementsByItemId.has(textureUseId),
+		);
+	if (missingItemIds.length === 0) {
+		return;
+	}
+	throw new Error(
+		`Dynamic visual resource ${options.resourceId} is missing pre-bake texture placements: ${missingItemIds.join(
+			", ",
+		)}.`,
+	);
+}
+
+function createDynamicTextureDependencies(options: {
+	readonly resourceId: string;
+	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
+}): readonly TextureResourceDependencies[] {
+	const roles = createDynamicTextureRoleDependencies(
+		options.textureRequirements,
+	);
+	if (roles.length === 0) {
+		return [];
+	}
+	return [{ resourceId: options.resourceId, roles }];
+}
+
+function createDynamicTextureRoleDependencies(
+	textureRequirements: readonly DynamicEntityTextureRequirement[],
+): readonly TextureResourceRoleDependency[] {
+	const itemIdsByPurpose = new Map<TextureUsagePurpose, Set<string>>();
+	for (const requirement of textureRequirements) {
+		const purpose = classifyDynamicRequirementPurpose(requirement);
+		let itemIds = itemIdsByPurpose.get(purpose);
+		if (!itemIds) {
+			itemIds = new Set<string>();
+			itemIdsByPurpose.set(purpose, itemIds);
+		}
+		itemIds.add(requirement.textureUseId);
+	}
+	return Array.from(itemIdsByPurpose, ([purpose, itemIds]) => ({
+		itemIds: Array.from(itemIds).sort(),
+		purpose,
+	})).sort((left, right) => left.purpose.localeCompare(right.purpose));
+}
+
+function classifyDynamicRequirementPurpose(
+	requirement: DynamicEntityTextureRequirement,
+): TextureUsagePurpose {
+	switch (requirement.role) {
+		case "base-color":
+			return "object-base-color";
+		case "base-index":
+			return "object-index";
+		case "detail-overlay":
+			return "object-detail";
+		case "palette-rgba":
+			return "object-palette";
+	}
+}
+
 function createUnsupportedMaterialReasons(
 	reasons: readonly StaticMaterialFallbackReason[],
 ): readonly DynamicEntityUnsupportedMaterialReason[] {
@@ -383,9 +542,7 @@ function createDynamicRenderParts(options: {
 	const parts: DynamicEntityRenderPart[] = [];
 	for (const sourceAsset of options.sourceAssets) {
 		for (const part of sourceAsset.parts) {
-			const canonical = getStaticObjectCanonicalGeometryIdentity(
-				part.geometry,
-			);
+			const canonical = getStaticObjectCanonicalGeometryIdentity(part.geometry);
 			const attachment = options.sourceGeometryByKey.get(
 				describeStaticObjectCanonicalGeometryIdentity(canonical),
 			);

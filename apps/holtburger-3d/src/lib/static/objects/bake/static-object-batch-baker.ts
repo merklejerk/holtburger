@@ -29,8 +29,8 @@ import type {
 } from "../../contracts";
 import { uniqueSortedStaticTextureUseOwners } from "../../contracts";
 import type {
-	DrawUnitTextureDependencies,
-	DrawUnitTextureRoleDependency,
+	TextureResourceDependencies,
+	TextureResourceRoleDependency,
 } from "../../../textures/placement";
 import { createLayerPeerRecordOwnerForStaticBakeTask } from "../../layer-owners";
 import {
@@ -248,7 +248,7 @@ function bakeStaticObjectBatchItem(
 	readonly diagnostics: StaticObjectBakeDiagnostics;
 	readonly sourceMappings: StaticBakeBatchResult["staticSourceMappings"];
 	readonly spatialRecords: readonly StaticSpatialRecord[];
-	readonly textureDependencies: readonly DrawUnitTextureDependencies[];
+	readonly textureDependencies: readonly TextureResourceDependencies[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
 	readonly staticObjectRenderInstances: readonly StaticObjectRenderInstance[];
 	readonly staticObjectVisualResources: readonly StaticObjectVisualResource[];
@@ -362,7 +362,7 @@ function bakeStaticObjectBatchItem(
 
 function createStaticObjectDrawUnitTextureDependencies(
 	drawUnits: readonly StaticDrawUnit[],
-): readonly DrawUnitTextureDependencies[] {
+): readonly TextureResourceDependencies[] {
 	return drawUnits.flatMap((drawUnit) => {
 		if (drawUnit.kind !== "static-object-geometry") {
 			return [];
@@ -373,7 +373,7 @@ function createStaticObjectDrawUnitTextureDependencies(
 		}
 		return [
 			{
-				drawUnitId: drawUnit.drawUnitId,
+				resourceId: drawUnit.drawUnitId,
 				roles,
 			},
 		];
@@ -382,7 +382,7 @@ function createStaticObjectDrawUnitTextureDependencies(
 
 function createStaticObjectDrawUnitTextureRoleDependencies(
 	drawUnit: StaticObjectGeometryStaticDrawUnit,
-): readonly DrawUnitTextureRoleDependency[] {
+): readonly TextureResourceRoleDependency[] {
 	const baseColor = new Set<string>();
 	const detail = new Set<string>();
 	const index = new Set<string>();
@@ -399,13 +399,13 @@ function createStaticObjectDrawUnitTextureRoleDependencies(
 		createRoleDependency("object-detail", detail),
 		createRoleDependency("object-index", index),
 		createRoleDependency("object-palette", palette),
-	].filter((role): role is DrawUnitTextureRoleDependency => role !== null);
+	].filter((role): role is TextureResourceRoleDependency => role !== null);
 }
 
 function createRoleDependency(
-	purpose: DrawUnitTextureRoleDependency["purpose"],
+	purpose: TextureResourceRoleDependency["purpose"],
 	itemIds: ReadonlySet<string>,
-): DrawUnitTextureRoleDependency | null {
+): TextureResourceRoleDependency | null {
 	if (itemIds.size === 0) {
 		return null;
 	}

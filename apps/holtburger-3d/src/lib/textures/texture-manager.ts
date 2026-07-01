@@ -62,10 +62,10 @@ import {
 import {
 	classifyTexturePlacementPool,
 	classifyTextureUsagePurpose,
-	type DrawUnitTextureDependencies,
 	type TexturePlacement as PlannedTexturePlacement,
 	type TexturePlacementIntent,
 	type TexturePlacementPool,
+	type TextureResourceDependencies,
 	type TexturePlacementSnapshot,
 	type TextureUsagePurpose,
 } from "./placement";
@@ -131,7 +131,7 @@ export class TextureManager {
 		string,
 		TexturePlacementRecord
 	>();
-	readonly #dependencyItemIdsByDrawUnitId = new Map<string, Set<string>>();
+	readonly #dependencyItemIdsByResourceId = new Map<string, Set<string>>();
 	#recentTerrainRolePageOverflows: TerrainRolePageOverflowDiagnostics[] = [];
 	#recentObjectMaterialRolePageOverflows: ObjectMaterialRolePageOverflowDiagnostics[] =
 		[];
@@ -338,26 +338,26 @@ export class TextureManager {
 		return { placementsByItemId };
 	}
 
-	pinDrawUnitTextureDependencies(
-		dependencies: readonly DrawUnitTextureDependencies[],
+	pinTextureResourceDependencies(
+		dependencies: readonly TextureResourceDependencies[],
 	): void {
 		for (const dependency of dependencies) {
-			this.releaseDrawUnitTextureDependencies([dependency.drawUnitId]);
+			this.releaseTextureResourceDependencies([dependency.resourceId]);
 			const itemIds = new Set(dependency.roles.flatMap((role) => role.itemIds));
 			for (const itemId of itemIds) {
 				this.#changePlacementActiveReferenceCount(itemId, 1);
 			}
-			this.#dependencyItemIdsByDrawUnitId.set(dependency.drawUnitId, itemIds);
+			this.#dependencyItemIdsByResourceId.set(dependency.resourceId, itemIds);
 		}
 	}
 
-	releaseDrawUnitTextureDependencies(drawUnitIds: readonly string[]): void {
-		for (const drawUnitId of drawUnitIds) {
-			const itemIds = this.#dependencyItemIdsByDrawUnitId.get(drawUnitId);
+	releaseTextureResourceDependencies(resourceIds: readonly string[]): void {
+		for (const resourceId of resourceIds) {
+			const itemIds = this.#dependencyItemIdsByResourceId.get(resourceId);
 			if (!itemIds) {
 				continue;
 			}
-			this.#dependencyItemIdsByDrawUnitId.delete(drawUnitId);
+			this.#dependencyItemIdsByResourceId.delete(resourceId);
 			for (const itemId of itemIds) {
 				this.#changePlacementActiveReferenceCount(itemId, -1);
 			}

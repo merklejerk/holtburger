@@ -370,20 +370,21 @@ Notes:
 - The snapshot should not include renderer `WebGLTexture` handles or owner/lease state.
 - Terrain, object, and dynamic bakers should consume the same snapshot shape.
 
-### Draw Unit Texture Dependencies
+### Texture Resource Dependencies
 
-The baker-owned record of placement items that an immutable draw unit depends on. `TextureManager`
-uses these dependencies to retain active placements. The packer does not consume this type.
+The baker-owned record of placement items that an immutable renderer resource depends on.
+`TextureManager` uses these dependencies to retain active placements. The packer does not consume
+this type.
 
 Locked first-pass shape:
 
 ```ts
-interface DrawUnitTextureDependencies {
-  readonly drawUnitId: string;
-  readonly roles: readonly DrawUnitTextureRoleDependency[];
+interface TextureResourceDependencies {
+  readonly resourceId: string;
+  readonly roles: readonly TextureResourceRoleDependency[];
 }
 
-interface DrawUnitTextureRoleDependency {
+interface TextureResourceRoleDependency {
   readonly purpose: TextureUsagePurpose;
   readonly itemIds: readonly string[];
 }
@@ -396,7 +397,7 @@ released, but it must not move active placements.
 
 - `apps/holtburger-3d/src/lib/textures/placement.ts`
   - Owns `TextureUsagePurpose`, `TexturePlacementPool`, `TexturePlacementIntent`,
-    `TexturePlacement`, `TexturePlacementSnapshot`, `DrawUnitTextureDependencies`, and supporting
+    `TexturePlacement`, `TexturePlacementSnapshot`, `TextureResourceDependencies`, and supporting
     placement-source/helper types introduced in Phase 1.
   - Owns generic adapter helpers only when they are texture-domain concepts rather than static,
     dynamic, or renderer policy.
@@ -765,7 +766,7 @@ implementation.
 
    Pre-bake placement intents do not have draw-unit or resource owners yet. The manager needs split
    APIs: one to place intents and return a placement snapshot, and one to pin/release placements from
-   baked `DrawUnitTextureDependencies`.
+   baked `TextureResourceDependencies`.
 
 3. On-demand zombie reclaim is real, but premature before the shared pinning model exists.
 
@@ -842,7 +843,7 @@ Deliverables:
 
 - Confirm first-pass names for `TextureUsagePurpose`, `TexturePlacementPool`,
   `TexturePlacementIntent`, `TexturePlacement`, `TexturePlacementSnapshot`, and
-  `DrawUnitTextureDependencies`.
+  `TextureResourceDependencies`.
 - Lock the initial placement pools as `terrain`, `static-authored-object`, and
   `runtime-authored-object`; do not start with a generic `static-authored` pool that terrain must
   later escape.
@@ -905,7 +906,7 @@ Deliverables:
   - unreferenced/freeable status.
 - Add a placement API that can stage `TexturePlacementIntent` values and return a
   `TexturePlacementSnapshot` without requiring draw-unit/resource owners.
-- Add pin/release APIs that consume `DrawUnitTextureDependencies` after bake and update active
+- Add pin/release APIs that consume `TextureResourceDependencies` after bake and update active
   placement references.
 - Keep existing owner-based static/dynamic texture delta methods as temporary adapters over the new
   placement/pinning internals.
@@ -988,7 +989,7 @@ Deliverables:
 - Feed the resulting placement snapshot into the static object baker.
 - Update static object baker output so object draw units are already renderer-legal under the
   one-page-per-role rule.
-- Emit `DrawUnitTextureDependencies` from static object bake output.
+- Emit `TextureResourceDependencies` from static object bake output.
 - Ensure functional selection/picking records point at baker-authored draw-unit IDs after
   baker-owned partitioning. Treat debug-only source lineage as disposable.
 - Identify any static coordinator sequencing hooks terrain will need in Phase 7, but do not create
@@ -1079,7 +1080,7 @@ Deliverables:
   - terrain color pages <= 4;
   - terrain mask pages <= 4;
   - terrain detail pages <= 1.
-- Emit terrain `DrawUnitTextureDependencies` so terrain placements stay pinned while draw units are
+- Emit terrain `TextureResourceDependencies` so terrain placements stay pinned while draw units are
   active.
 - Remove terrain role-page overflow fallback as a normal expected path. Keep a loud diagnostic only
   for invariant violations or genuinely missing texture residency.
@@ -1208,7 +1209,7 @@ Acceptance criteria:
 - [x] Resteering 1: review placement continuation shape.
 - [x] Phase 4: move static object placement planning before static object baking.
 - [x] Phase 5: remove main-thread static object fine splitting.
-- [ ] Phase 6: bring dynamic visual baking onto the same placement contract.
+- [x] Phase 6: bring dynamic visual baking onto the same placement contract.
 - [ ] Resteering 2: review cutover health.
 - [ ] Phase 7: bring terrain onto the same placement-before-bake contract.
 - [ ] Phase 8: add on-demand zombie reclaim.
@@ -1257,9 +1258,9 @@ Acceptance criteria:
   This keeps static-authored and runtime-authored dynamics isomorphic without inventing a dynamic-only
   placement vocabulary.
 - Phase 2 added ownerless `TextureManager.placeTextureIntents(...)` placement planning,
-  draw-unit dependency pin/release APIs, and `createPlacementReferenceSnapshot()` for active vs.
-  zero-reference placement queries. Existing static and dynamic owner-based commit methods now update
-  the same placement reference records while preserving current renderer texture updates.
+  texture-resource dependency pin/release APIs, and `createPlacementReferenceSnapshot()` for active
+  vs. zero-reference placement queries. Existing static and dynamic owner-based commit methods now
+  update the same placement reference records while preserving current renderer texture updates.
 - Phase 2 kept existing static/dynamic renderer upload behavior intact by adapting the new placement
   records behind the old owner-based APIs. Static draw-unit owners, static object visual resource
   owners, and dynamic visual resource owners all flow through the same active-reference accounting
@@ -1302,7 +1303,7 @@ Acceptance criteria:
 - Phase 4 taught static object partitioning to use final placement pages as an additional legality
   constraint. When a placement snapshot is provided, static object partitions split before geometry
   arrays are built so each emitted object draw unit references at most one page per texture role.
-- Phase 4 added `DrawUnitTextureDependencies` to static bake results and static commit deltas.
+- Phase 4 added `TextureResourceDependencies` to static bake results and static commit deltas.
   Static object draw units emit dependencies from baker-authored material entries, and `ClientRuntime`
   releases dependency pins for removed draw units and pins new dependencies after texture placement
   succeeds.
@@ -1321,6 +1322,27 @@ Acceptance criteria:
   draw-unit id as the source draw-unit id because there is no separate materialized id.
 - Phase 5 rewrote `static-materializer.test.ts` around the direct-install contract and removed tests
   that encoded old geometry copying, role-page rebinding, and source-to-fine removal expansion.
+- Phase 6 generalized baked placement pinning from draw units to renderer resources. The canonical
+  type is now `TextureResourceDependencies`, keyed by `resourceId`, because dynamic visual resources
+  also need to pin immutable baked texture dependencies without pretending they are static draw
+  units.
+- Phase 6 added dynamic visual pre-bake texture planning. Static-authored dynamics append their
+  placement intents to the same static source-ready continuation work as static objects, while
+  runtime-authored dynamics call `TextureManager.placeTextureIntents(...)` after recipe resolution
+  and before dynamic visual bake.
+- Phase 6 made `DynamicVisualBakeInput` require a `TexturePlacementSnapshot`. Dynamic bake products
+  now emit `textureDependencies`; dynamic renderer resource sync releases dependencies for removed
+  visual resources and pins dependencies for committed resources.
+- Phase 6 scoped dynamic texture item ids by dynamic visual resource id. The old dynamic
+  `textureUseId` shape used material/role/source only, which could collide across dynamic entities
+  once placement became ownerless.
+- Phase 6 kept the existing dynamic renderer texture-use commit path as the upload/binding consumer.
+  This is intentional migration debt: dependencies now provide active placement pinning, but
+  renderer texture page updates still flow through the existing owner-based texture binding update
+  path until later cleanup removes obsolete texture-use concepts.
+- Phase 6 intentionally duplicates dynamic material planning between pre-bake texture planning and
+  bake-time render-part construction. This mirrors the Phase 4 static object concession and keeps the
+  planner from becoming a resolver-side mini baker before the final contract shape is proven.
 - Dry run split `TextureManager` responsibilities into placement and pinning. Current owner leases
   require post-bake draw-unit/resource owners, but pre-bake placement intents intentionally do not
   have owners yet.

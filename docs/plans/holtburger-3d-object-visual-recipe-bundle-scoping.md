@@ -2162,6 +2162,17 @@ Deletion criteria:
 - Delete `createStaticBakeObjectVisualInstallSet` once static object/env-cell producers publish
   install sets from recipe-first output directly.
 
+Course correction during Phase 9M:
+
+- While preparing production routing, the recipe-first texture path exposed a lossiness bug:
+  `ObjectVisualTextureRecipe` described render-surface/palette source summaries but did not preserve
+  the original `MaterialTextureDataUseIdentity`. That was insufficient for indexed textures and
+  palette replacements because placement binding needs exact usage, palette window, and sub-palette
+  metadata.
+- Steering decision: texture recipes now carry the original material texture data-use metadata as
+  the lossless placement/binding source. The human-readable source summary remains useful for
+  inspection, but production binding should use `dataUse`.
+
 ### Phase 10: Dynamic Resolver Cutover
 
 Goal: make static-authored and runtime-authored dynamics produce the same visual bundle shape and

@@ -429,6 +429,7 @@ function createTextureRecipe(
 		case "base-index":
 		case "detail-overlay":
 			return {
+				dataUse: role.dataUse,
 				source: {
 					kind: "render-surface",
 					renderSurfaceId: role.renderSurface.renderSurfaceId,
@@ -438,6 +439,7 @@ function createTextureRecipe(
 			};
 		case "palette-rgba":
 			return {
+				dataUse: role.dataUse,
 				source: {
 					firstIndex: role.dataUse.firstIndex,
 					indexCount: role.dataUse.indexCount,

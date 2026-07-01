@@ -492,6 +492,7 @@ function createTextureRecipe(role: ObjectVisualMaterialTextureUseRole) {
 		case "base-index":
 		case "detail-overlay":
 			return {
+				dataUse: role.dataUse,
 				source: {
 					kind: "render-surface" as const,
 					renderSurfaceId: role.renderSurface.renderSurfaceId,
@@ -501,6 +502,7 @@ function createTextureRecipe(role: ObjectVisualMaterialTextureUseRole) {
 			};
 		case "palette-rgba":
 			return {
+				dataUse: role.dataUse,
 				source: {
 					firstIndex: role.dataUse.firstIndex,
 					indexCount: role.dataUse.indexCount,

@@ -182,6 +182,14 @@ describe("object visual recipe bundle contracts", () => {
 			],
 		};
 		const textureRecipe: ObjectVisualTextureRecipe = {
+			dataUse: {
+				kind: "prepared-render-surface-texture-use",
+				renderSurface: {
+					kind: "render-surface",
+					renderSurfaceId: 0x06000001,
+				},
+				usage: "rgba-color",
+			},
 			source: {
 				kind: "render-surface",
 				renderSurfaceId: 0x06000001,

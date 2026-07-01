@@ -1,4 +1,5 @@
 import type { PreparedGfxObjPayloadDto } from "../../assets/preparation/prepared-render-geometry";
+import type { ObjectVisualGeometryBufferId } from "../../visual/object-visual-recipe-bundle";
 import type {
 	StaticObjectCanonicalGeometryIdentity,
 	StaticObjectSourceGeometryAttachment,
@@ -57,12 +58,28 @@ export function describeStaticObjectCanonicalGeometryIdentity(
 
 export function createStaticObjectSourceGeometryAttachment(options: {
 	readonly identity: StaticObjectCanonicalGeometryIdentity;
+	readonly bufferId: ObjectVisualGeometryBufferId;
 	readonly gfxObj: PreparedGfxObjPayloadDto;
 }): StaticObjectSourceGeometryAttachment {
+	const renderGeometry = options.gfxObj.renderGeometry;
 	return {
+		buffer: {
+			bounds: renderGeometry.bounds,
+			bufferId: options.bufferId,
+			coordinateSpace: "source-local",
+			normals: renderGeometry.normals,
+			positions: renderGeometry.positions,
+			texCoords: renderGeometry.uvs,
+			triangleCount: renderGeometry.triangleCount,
+			triangles: renderGeometry.triangles.map((triangle) => ({
+				firstVertex: triangle.firstVertex,
+				materialVariantSignature: triangle.materialVariantSignature ?? null,
+				polygonId: triangle.polygonId,
+				surfaceId: triangle.surfaceId,
+			})),
+			vertexCount: renderGeometry.vertexCount,
+		},
 		identity: options.identity,
-		positions: options.gfxObj.renderGeometry.positions,
-		texCoords: options.gfxObj.renderGeometry.uvs,
 	};
 }
 

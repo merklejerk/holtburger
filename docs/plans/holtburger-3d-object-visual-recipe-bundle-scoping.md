@@ -1,6 +1,6 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation in progress. Phases 0-4 are complete. This document defines the target model,
+Status: implementation in progress. Phases 0-5 are complete. This document defines the target model,
 north stars, risk surface, and phased cutover plan for replacing static-vs-dynamic object visual
 worker bifurcation with a shared object-like visual recipe graph.
 
@@ -1126,6 +1126,33 @@ Deletion criteria:
 - Remove geometry extraction branches that exist only because static objects, structured interiors,
   or dynamics carry different geometry payload shapes.
 
+Phase 5 completion notes:
+
+- Expanded `ObjectVisualGeometryBuffer` into the shared source-local geometry sidecar contract used
+  by object-like geometry: buffer id, coordinate-space tag, bounds, normals, positions, texcoords,
+  vertex/triangle counts, and triangle metadata.
+- Changed static `gfx_obj` geometry attachments and env-cell cell-structure attachments to wrap
+  their heavy payload as `ObjectVisualGeometryBuffer`. Domain-specific attachment wrappers now carry
+  lookup/provenance facts while bakers consume the same `buffer` shape.
+- Allocated dense object-visual geometry buffer ids from deterministic sorted attachment identity
+  order in static object, dynamic visual, and env-cell geometry attachment providers.
+- Cut static object baking, dynamic visual baking, and structured-interior baking over to
+  `attachment.buffer.*` for source-local geometry payloads.
+- Preserved the transform invariant in current output paths:
+  static instanced visual resources copy source-local buffer positions unchanged, while direct
+  static/env-cell draw-unit paths apply their object or env-cell placement exactly once when writing
+  renderer-local geometry.
+- Steering note: geometry sidecars are now shared at the attachment/baker boundary, but final
+  `GeometryRecipe`/`PartRecipe` bundle construction still belongs to the upcoming bundle and unified
+  baker phases. The attachment providers remain the asset-loading boundary before bake; the bakers
+  no longer reopen geometry assets once sidecars are supplied.
+- Verification:
+  `npm --prefix apps/holtburger-3d run check`
+  `npm --prefix apps/holtburger-3d run test:ts -- src/lib/visual/object-visual-recipe-bundle.test.ts src/lib/static/objects/bake/static-object-bake-attachments.test.ts src/lib/static/env-cells/bake/env-cell-system-geometry-attachments.test.ts src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/static/env-cells/bake/env-cell-system-baker.test.ts src/lib/dynamic/visual-bake-attachments.test.ts src/lib/dynamic/visual-baker.test.ts src/lib/static/coordinator/static-coordinator.test.ts src/lib/runtime/client-runtime.test.ts`
+- Debt carried forward: Phase 7 should verify whether `GeometryRecipe` records should be introduced
+  before or inside the Phase 8 unified baker. Avoid a compatibility adapter that accepts the old
+  top-level `positions`/`texCoords` attachment shape.
+
 ### Phase 6: Shared Object Visual Placement Planner
 
 Goal: derive texture placement intents from texture recipes plus runtime/coordinator policy.
@@ -1560,6 +1587,13 @@ Acceptance criteria:
 - Phase 4 confirmed runtime fixtures and resolver-safe closure code must request metadata routes
   (`render-surface-metadata`, `palette-metadata`) rather than pixel-bearing texture routes during
   material planning.
+- Phase 5 made object-like geometry sidecars shared at the attachment/baker boundary before final
+  bundle cutover. Static `gfx_obj` geometry and env-cell cell-structure geometry now expose the same
+  source-local `ObjectVisualGeometryBuffer` payload shape, while their wrappers keep the provenance
+  needed for lookup and stale-attachment validation.
+- Phase 5 kept asset loading outside bakers. Attachment providers and runtime prep may still request
+  geometry assets before bake, but static, dynamic, and structured-interior bakers consume supplied
+  sidecars rather than reopening source assets.
 
 ## Risks And Mitigations
 

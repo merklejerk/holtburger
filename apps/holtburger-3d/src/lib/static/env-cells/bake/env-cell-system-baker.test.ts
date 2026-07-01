@@ -15,6 +15,10 @@ import { createStaticObjectSourceGeometryIdentity } from "../../objects/static-o
 import { bakeEnvCellSystem } from "./env-cell-system-baker";
 import { createEnvCellCellStructureGeometryIdentity } from "./env-cell-system-geometry-attachments";
 import { createStructuredInteriorTexturePlacementIntents } from "./structured-interior-placement-planner";
+import {
+	objectVisualGeometryBufferId,
+	type ObjectVisualGeometryTriangle,
+} from "../../../visual/object-visual-recipe-bundle";
 
 describe("browser landblock env-cell baker", () => {
 	it("emits typed env-cell peer records without draw units", () => {
@@ -1241,11 +1245,27 @@ function createInputWithRenderableStaticSeed(
 			envCellCellStructureGeometry: [],
 			staticObjectSourceGeometry: [
 				{
+					buffer: {
+						bounds: null,
+						bufferId: objectVisualGeometryBufferId(0),
+						coordinateSpace: "source-local",
+						normals: new Float32Array(9),
+						positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+						texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
+						triangleCount: 1,
+						triangles: [
+							{
+								firstVertex: 0,
+								materialVariantSignature: null,
+								polygonId: 0,
+								surfaceId: 0,
+							},
+						],
+						vertexCount: 3,
+					},
 					identity:
 						source.parts[0]?.geometry.canonical ??
 						createStaticObjectGeometry().canonical,
-					positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
-					texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
 				},
 			],
 		},
@@ -1350,31 +1370,37 @@ function createGeometryAttachment(
 	options: {
 		readonly positions?: Float32Array;
 		readonly surfaceIds?: readonly number[];
-		readonly triangles?: readonly EnvCellCellStructureGeometryAttachment["triangles"][number][];
+		readonly triangles?: readonly ObjectVisualGeometryTriangle[];
 		readonly uvs?: Float32Array;
 	} = {},
 ): EnvCellCellStructureGeometryAttachment {
+	const positions =
+		options.positions ?? new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+	const triangles = options.triangles ?? [
+		{
+			firstVertex: 0,
+			materialVariantSignature: null,
+			polygonId: 1,
+			surfaceId: 0,
+		},
+	];
 	return {
-		bounds: envCell.renderGeometry.bounds,
+		buffer: {
+			bounds: envCell.renderGeometry.bounds,
+			bufferId: objectVisualGeometryBufferId(0),
+			coordinateSpace: "source-local",
+			normals: new Float32Array(positions.length),
+			positions,
+			texCoords: options.uvs ?? new Float32Array([0, 0, 1, 0, 0, 1]),
+			triangleCount: triangles.length,
+			triangles,
+			vertexCount: positions.length / 3,
+		},
 		identity: createEnvCellCellStructureGeometryIdentity({ envCell }),
 		invalidPolygons: [],
-		normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
-		positions:
-			options.positions ?? new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
 		skippedPolygonCount: 0,
 		sourceId: envCell.renderGeometry.sourceId,
 		surfaceIds: options.surfaceIds ?? [0],
-		triangleCount: envCell.renderGeometry.triangleCount,
-		triangles: options.triangles ?? [
-			{
-				firstVertex: 0,
-				materialVariantSignature: null,
-				polygonId: 1,
-				surfaceId: 0,
-			},
-		],
-		uvs: options.uvs ?? new Float32Array([0, 0, 1, 0, 0, 1]),
-		vertexCount: envCell.renderGeometry.vertexCount,
 	};
 }
 

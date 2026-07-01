@@ -65,6 +65,7 @@ import {
 	type StructuredInteriorCellMaterialPlan,
 } from "./structured-interior-material-planner";
 import type { ObjectVisualMaterialPlan } from "../../../visual/object-visual-material-planner";
+import type { ObjectVisualGeometryTriangle } from "../../../visual/object-visual-recipe-bundle";
 import {
 	isCurrentlyStageableStaticObjectDataUse,
 	isRenderableObjectVisualMaterialPlan,
@@ -83,7 +84,7 @@ interface StructuredInteriorTriangleCandidate {
 	readonly textureRequirements: readonly ObjectVisualTextureBindingRequirement[];
 	readonly sourceTriangleId: string;
 	readonly surfaceId: number;
-	readonly triangle: EnvCellCellStructureGeometryAttachment["triangles"][number];
+	readonly triangle: ObjectVisualGeometryTriangle;
 	readonly triangleIndex: number;
 }
 
@@ -205,8 +206,8 @@ function validateGeometryAttachments(input: StaticBakeBatchInput): void {
 
 			if (
 				attachment.sourceId !== envCell.renderGeometry.sourceId ||
-				attachment.vertexCount !== envCell.renderGeometry.vertexCount ||
-				attachment.triangleCount !== envCell.renderGeometry.triangleCount
+				attachment.buffer.vertexCount !== envCell.renderGeometry.vertexCount ||
+				attachment.buffer.triangleCount !== envCell.renderGeometry.triangleCount
 			) {
 				throw new Error(
 					`Stale env-cell cell-structure geometry attachment ${identityKey}; source/count metadata does not match resolver facts.`,
@@ -712,7 +713,7 @@ function createStructuredInteriorTriangleCandidates(options: {
 	readonly placementSnapshot: ObjectVisualTexturePlacementSnapshot;
 	readonly task: StaticBakeTask;
 }): readonly StructuredInteriorTriangleCandidate[] {
-	return options.attachment.triangles
+	return options.attachment.buffer.triangles
 		.map(
 			(triangle, triangleIndex): StructuredInteriorTriangleCandidate | null => {
 				if (triangle.surfaceId === null) {
@@ -1072,13 +1073,13 @@ function bakeCellStructureGeometry(
 	readonly vertexCount: number;
 } {
 	if (
-		attachment.triangleCount > 0 &&
-		attachment.triangles.length !== attachment.triangleCount
+		attachment.buffer.triangleCount > 0 &&
+		attachment.buffer.triangles.length !== attachment.buffer.triangleCount
 	) {
 		throw new Error(
 			`Env-cell cell-structure geometry ${describeEnvCellCellStructureGeometryIdentity(
 				attachment.identity,
-			)} expected ${attachment.triangleCount} triangle metadata records, got ${attachment.triangles.length}.`,
+			)} expected ${attachment.buffer.triangleCount} triangle metadata records, got ${attachment.buffer.triangles.length}.`,
 		);
 	}
 
@@ -1092,11 +1093,11 @@ function bakeCellStructureGeometry(
 
 	for (const [candidateIndex, candidate] of candidates.entries()) {
 		const firstSourceVertex = candidate.triangle.firstVertex;
-		if (firstSourceVertex + 2 >= attachment.vertexCount) {
+		if (firstSourceVertex + 2 >= attachment.buffer.vertexCount) {
 			throw new Error(
 				`Env-cell cell-structure geometry ${describeEnvCellCellStructureGeometryIdentity(
 					attachment.identity,
-				)} triangle ${candidate.triangleIndex} references vertex ${firstSourceVertex + 2}, but attachment has ${attachment.vertexCount} vertices.`,
+				)} triangle ${candidate.triangleIndex} references vertex ${firstSourceVertex + 2}, but attachment has ${attachment.buffer.vertexCount} vertices.`,
 			);
 		}
 		const firstTargetVertex = candidateIndex * 3;
@@ -1113,12 +1114,12 @@ function bakeCellStructureGeometry(
 			writeTransformedPosition({
 				matrix,
 				positions,
-				source: attachment.positions,
+				source: attachment.buffer.positions,
 				sourceVertexIndex,
 				targetVertexIndex,
 			});
 			writeTexCoord({
-				source: attachment.uvs,
+				source: attachment.buffer.texCoords,
 				sourceVertexIndex,
 				target: texCoords,
 				targetVertexIndex,
@@ -1150,7 +1151,7 @@ function createIndexArray(
 }
 
 function createSourceTriangleId(
-	triangle: EnvCellCellStructureGeometryAttachment["triangles"][number],
+	triangle: ObjectVisualGeometryTriangle,
 ): string {
 	return [
 		`polygon:${triangle.polygonId}`,

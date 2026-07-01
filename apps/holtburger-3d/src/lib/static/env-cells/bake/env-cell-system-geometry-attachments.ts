@@ -1,5 +1,6 @@
 import { createEmptyStaticBakeAttachments } from "../../bake/attachments";
 import { requirePreparedRenderGeometryBuffers } from "../../../assets/preparation/prepared-render-geometry";
+import { objectVisualGeometryBufferId } from "../../../visual/object-visual-recipe-bundle";
 import type {
 	EnvCellCellStructureGeometryAttachment,
 	EnvCellCellStructureGeometryIdentity,
@@ -24,20 +25,26 @@ export class EnvCellSystemGeometryAttachmentProvider implements StaticBakeAttach
 		}
 
 		const cellsByIdentity = createFullEnvCellsByIdentity(request);
-		const envCellCellStructureGeometry = identities.map((identity) => {
-			const cell = cellsByIdentity.get(
-				describeEnvCellCellStructureGeometryIdentity(identity),
-			);
-			if (!cell) {
-				throw new Error(
-					`Missing env-cell geometry attachment ${describeEnvCellCellStructureGeometryIdentity(
-						identity,
-					)} in resolved landblock-scene-lod payload.`,
+		const envCellCellStructureGeometry = identities.map(
+			(identity, bufferIndex) => {
+				const cell = cellsByIdentity.get(
+					describeEnvCellCellStructureGeometryIdentity(identity),
 				);
-			}
+				if (!cell) {
+					throw new Error(
+						`Missing env-cell geometry attachment ${describeEnvCellCellStructureGeometryIdentity(
+							identity,
+						)} in resolved landblock-scene-lod payload.`,
+					);
+				}
 
-			return createEnvCellCellStructureGeometryAttachment({ cell, identity });
-		});
+				return createEnvCellCellStructureGeometryAttachment({
+					bufferId: objectVisualGeometryBufferId(bufferIndex),
+					cell,
+					identity,
+				});
+			},
+		);
 
 		return {
 			...createEmptyStaticBakeAttachments(),
@@ -124,6 +131,7 @@ function createFullEnvCellsByIdentity(
 }
 
 function createEnvCellCellStructureGeometryAttachment(options: {
+	readonly bufferId: ReturnType<typeof objectVisualGeometryBufferId>;
 	readonly identity: EnvCellCellStructureGeometryIdentity;
 	readonly cell: LandblockEnvCellStaticFacts;
 }): EnvCellCellStructureGeometryAttachment {
@@ -137,18 +145,27 @@ function createEnvCellCellStructureGeometryAttachment(options: {
 	);
 
 	return {
-		bounds: renderGeometry.bounds,
+		buffer: {
+			bounds: renderGeometry.bounds,
+			bufferId: options.bufferId,
+			coordinateSpace: "source-local",
+			normals: renderGeometry.normals,
+			positions: renderGeometry.positions,
+			texCoords: renderGeometry.uvs,
+			triangleCount: renderGeometry.triangleCount,
+			triangles: renderGeometry.triangles.map((triangle) => ({
+				firstVertex: triangle.firstVertex,
+				materialVariantSignature: triangle.materialVariantSignature ?? null,
+				polygonId: triangle.polygonId,
+				surfaceId: triangle.surfaceId,
+			})),
+			vertexCount: renderGeometry.vertexCount,
+		},
 		identity: options.identity,
 		invalidPolygons: renderGeometry.invalidPolygons,
-		normals: renderGeometry.normals,
-		positions: renderGeometry.positions,
 		skippedPolygonCount: renderGeometry.skippedPolygonCount,
 		sourceId: renderGeometry.sourceId,
 		surfaceIds: renderGeometry.surfaceIds,
-		triangleCount: renderGeometry.triangleCount,
-		triangles: renderGeometry.triangles,
-		uvs: renderGeometry.uvs,
-		vertexCount: renderGeometry.vertexCount,
 	};
 }
 

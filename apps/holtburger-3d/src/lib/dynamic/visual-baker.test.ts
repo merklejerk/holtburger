@@ -18,6 +18,7 @@ import {
 	type DynamicVisualBakeInput,
 	type DynamicVisualMaterialPolicy,
 } from "./contracts";
+import { objectVisualGeometryBufferId } from "../visual/object-visual-recipe-bundle";
 
 describe("dynamic visual baker", () => {
 	it("bakes setup-backed dynamic recipes into material slots, texture requirements, and render parts", () => {
@@ -420,13 +421,27 @@ function createGeometryAttachment(
 		texCoords.set([0, 0, 1, 0, 0, 1], texCoordOffset);
 	}
 	return {
+		buffer: {
+			bounds: null,
+			bufferId: objectVisualGeometryBufferId(0),
+			coordinateSpace: "source-local",
+			normals: new Float32Array(triangleCount * 9),
+			positions,
+			texCoords,
+			triangleCount,
+			triangles: Array.from({ length: triangleCount }, (_, triangle) => ({
+				firstVertex: triangle * 3,
+				materialVariantSignature: null,
+				polygonId: triangle,
+				surfaceId: 7,
+			})),
+			vertexCount: triangleCount * 3,
+		},
 		identity: {
 			gfxObj: createGfxObjSourceIdentity(),
 			kind: "static-object-canonical-geometry",
 			partIndex: 0,
 		},
-		positions,
-		texCoords,
 	};
 }
 

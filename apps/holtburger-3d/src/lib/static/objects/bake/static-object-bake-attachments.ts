@@ -5,6 +5,7 @@ import {
 	requirePreparedGfxObjPayload,
 	type PreparedGfxObjPayloadDto,
 } from "../../../assets/preparation/prepared-render-geometry";
+import { objectVisualGeometryBufferId } from "../../../visual/object-visual-recipe-bundle";
 import type {
 	StaticBakeAttachmentProvider,
 	StaticBakeAttachmentRequest,
@@ -39,7 +40,7 @@ export class StaticObjectBakeAttachmentProvider implements StaticBakeAttachmentP
 
 		const identities = collectStaticObjectCanonicalGeometryIdentities(request);
 		const staticObjectSourceGeometry = await Promise.all(
-			identities.map(async (identity) => {
+			identities.map(async (identity, bufferIndex) => {
 				if (identity.gfxObj.sourceAssetKind !== "gfx-obj") {
 					throw new Error(
 						`Static object geometry attachment ${describeStaticObjectCanonicalGeometryIdentity(
@@ -52,6 +53,7 @@ export class StaticObjectBakeAttachmentProvider implements StaticBakeAttachmentP
 				const payload = requireGfxObjPayload(asset.payload, key);
 
 				return createStaticObjectSourceGeometryAttachment({
+					bufferId: objectVisualGeometryBufferId(bufferIndex),
 					gfxObj: payload,
 					identity,
 				});

@@ -239,6 +239,28 @@ describe("static object batch partitioner", () => {
 				triangleCount: 1,
 			},
 		]);
+		expect(result.objectVisualInstallSet.directDrawUnits).toHaveLength(1);
+		expect(result.objectVisualInstallSet.directDrawUnits[0]).toMatchObject({
+			domain: "outdoor-buildings",
+			kind: "static-object-geometry",
+			textureUseIds: [
+				"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
+			],
+		});
+		expect(result.objectVisualInstallSet.textureDependencies).toEqual([
+			{
+				resourceId:
+					result.objectVisualInstallSet.directDrawUnits[0]?.drawUnitId,
+				roles: [
+					{
+						itemIds: [
+							"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
+						],
+						purpose: "object-base-color",
+					},
+				],
+			},
+		]);
 	});
 
 	it("partitions env-cell static objects by owning env cell before material batching", () => {
@@ -642,6 +664,9 @@ describe("static object batch partitioner", () => {
 			instancedVisualResourceCount: 1,
 			renderablePartitionCount: 1,
 		});
+		expect(result.objectVisualInstallSet.directDrawUnits).toEqual([]);
+		expect(result.objectVisualInstallSet.renderInstances).toHaveLength(2);
+		expect(result.objectVisualInstallSet.visualResources).toHaveLength(1);
 	});
 
 	it("keeps compatible opaque object ownership as metadata without splitting batches", () => {

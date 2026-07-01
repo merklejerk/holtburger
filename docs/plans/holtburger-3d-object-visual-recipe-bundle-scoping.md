@@ -2175,6 +2175,19 @@ Course correction during Phase 9M:
 - Follow-up steering decision: texture recipe identity also includes sampling wrap mode. The same
   render surface can legally appear as both clamp and repeat in different material variants, so
   recipe ids must not collapse those bindings before placement.
+- Static object batch routing now builds `objectVisualInstallSet` from recipe-first bundle expansion,
+  static publication metadata, `bakeObjectVisuals`, and `createObjectVisualStaticInstallSet`.
+  Legacy `drawUnits`, `staticObjectRenderInstances`, `staticObjectVisualResources`, and
+  `textureDependencies` remain populated from the old path in this slice so coordinator resource
+  tracking and existing diagnostics stay stable while the runtime-facing install set moves first.
+- Spicy debt: static object result arrays and coordinator resource tracking still need the hard
+  cutover to source direct draw-unit/resource ids from `objectVisualInstallSet`. Until then, the
+  recipe-first install set is production-facing for object visual layers, but the worker result still
+  carries legacy object publication arrays for compatibility with current commit bookkeeping.
+- Spicy debt: static object recipe publication currently logs and skips recipe install publication
+  if generic object-visual baking rejects a geometry buffer. One fan-triangle fixture exposed a
+  source/sidecar geometry mismatch that must be resolved before deleting the legacy object draw-unit
+  arrays.
 
 ### Phase 10: Dynamic Resolver Cutover
 

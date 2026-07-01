@@ -2214,6 +2214,16 @@ Course correction during Phase 9M:
   bake result because current generated-scenery demand does not naturally batch multiple landblocks
   the same way terrain does; if that path grows more complex, add direct stale-batch coverage instead
   of exporting coordinator internals just for tests.
+- Resteering note: an attempted cutover of
+  `StaticBakeBatchResult.staticObjectRenderInstances/staticObjectVisualResources` to mirror
+  `objectVisualInstallSet` exposed generated-scenery parity gaps. Recipe-first generated scenery
+  currently does not preserve the legacy reusable-resource identity policy: legacy resources key by
+  geometry plus material entries/render state/texture use ids, while the recipe metadata groups only
+  by source/part before generic render partitioning. The same attempt also showed generated render
+  instance metadata hardcodes `depth-writing`, losing the legacy transparent/additive
+  `direct-sorted-transparent` sort metadata. Do not delete the legacy generated-scenery arrays until
+  Phase 9M teaches `createStaticObjectPublicationMetadata` to derive generated resource grouping and
+  instance transparency from the same material/render facts that feed recipe publication.
 
 ### Phase 10: Dynamic Resolver Cutover
 

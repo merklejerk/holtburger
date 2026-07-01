@@ -1,6 +1,7 @@
 import type {
 	LandblockEnvCellStaticFacts,
 	EnvCellSystemStaticScopePayload,
+	MaterialTextureDataUseIdentity,
 	StaticBakeTask,
 	StaticMaterialCoverageReport,
 	StaticMaterialUnrenderedBucket,
@@ -9,11 +10,11 @@ import type {
 	StructuredInteriorMaterialPlanEntry,
 } from "../../contracts";
 import {
-	createMaterialTextureDataUseKey,
-	createStaticMaterialTextureUseId,
+	createStaticMaterialTextureBindingRequirement,
 	resolveRepeatedStaticMaterialPrimaryWrapMode,
 	type StaticMaterialTextureWrapMode,
 } from "../../bake/static-material-texture-policy";
+import type { TextureBindingRequirement } from "../../../textures/placement";
 import {
 	composeStaticMaterialDetailRole,
 	planStaticMaterialDetailRoles,
@@ -121,11 +122,19 @@ export function planStructuredInteriorCellMaterials(options: {
 }
 
 export function createStructuredInteriorTextureUseId(options: {
-	readonly dataUse: Parameters<typeof createMaterialTextureDataUseKey>[0];
+	readonly dataUse: MaterialTextureDataUseIdentity;
 	readonly task: StaticBakeTask;
 	readonly wrapMode: StaticMaterialTextureWrapMode;
 }): string {
-	return createStaticMaterialTextureUseId({
+	return createStructuredInteriorTextureBindingRequirement(options).bindingKey;
+}
+
+export function createStructuredInteriorTextureBindingRequirement(options: {
+	readonly dataUse: MaterialTextureDataUseIdentity;
+	readonly task: StaticBakeTask;
+	readonly wrapMode: StaticMaterialTextureWrapMode;
+}): TextureBindingRequirement {
+	return createStaticMaterialTextureBindingRequirement({
 		dataUse: options.dataUse,
 		textureUseNamespace: "structured-interior-texture",
 		textureUseScopeId: options.task.ownerId,

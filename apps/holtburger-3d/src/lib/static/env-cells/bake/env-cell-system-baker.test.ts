@@ -14,6 +14,7 @@ import type {
 import { createStaticObjectSourceGeometryIdentity } from "../../objects/static-object-source-assets";
 import { bakeEnvCellSystem } from "./env-cell-system-baker";
 import { createEnvCellCellStructureGeometryIdentity } from "./env-cell-system-geometry-attachments";
+import { createStructuredInteriorTexturePlacementIntents } from "./structured-interior-placement-planner";
 
 describe("browser landblock env-cell baker", () => {
 	it("emits typed env-cell peer records without draw units", () => {
@@ -693,6 +694,71 @@ describe("browser landblock env-cell baker", () => {
 					"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
 			}),
 		]);
+	});
+
+	it("discovers structured-interior placement intents before env-cell baking", () => {
+		const input = createInputWithRenderableCellStructure({
+			detailRoles: [
+				{
+					fadeFar: 256,
+					fadeNear: 128,
+					role: "environment",
+					texture: {
+						kind: "surface-texture",
+						surfaceTextureId: 0x05000020,
+					},
+					tiling: 8,
+				},
+			],
+			materialSources: [createTexturedMaterialSource(0x08000010)],
+			textureRefs: [...createRgbaTextureRefs(), ...createDetailTextureRefs()],
+		});
+		const envCell = requireFirstEnvCell(input);
+
+		const intents = createStructuredInteriorTexturePlacementIntents({
+			items: input.items,
+			staticBatchId: input.staticBatchId,
+		});
+		const result = bakeEnvCellSystem({
+			...input,
+			attachments: {
+				envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
+				staticObjectSourceGeometry: [],
+			},
+		});
+		const drawUnit = result.drawUnits.find(
+			(candidate) => candidate.kind === "structured-interior-geometry",
+		);
+		if (!drawUnit || drawUnit.kind !== "structured-interior-geometry") {
+			throw new Error("Expected structured interior geometry draw unit.");
+		}
+
+		expect(
+			intents.map((intent) => ({
+				affinityKey: intent.affinityKey,
+				itemId: intent.itemId,
+				pool: intent.pool,
+				purpose: intent.purpose,
+			})),
+		).toEqual([
+			{
+				affinityKey: expect.stringContaining("structured-interior|"),
+				itemId:
+					"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
+				pool: "static-authored-object",
+				purpose: "object-base-color",
+			},
+			{
+				affinityKey: expect.stringContaining("structured-interior|"),
+				itemId:
+					"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000020:rgba-detail:sampling:wrap=repeat,repeat",
+				pool: "static-authored-object",
+				purpose: "object-detail",
+			},
+		]);
+		expect(intents.map((intent) => intent.itemId)).toEqual(
+			drawUnit.textureUseIds,
+		);
 	});
 
 	it("composes environment detail roles onto structured-interior textured materials", () => {

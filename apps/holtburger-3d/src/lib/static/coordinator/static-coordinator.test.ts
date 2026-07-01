@@ -377,6 +377,63 @@ describe("static coordinator", () => {
 		await continuation;
 	});
 
+	it("includes structured-interior placement intents in env-cell source-ready work", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
+		const sourceReady: StaticSourceReadyWork[] = [];
+		coordinator.setSourceReadyHandler((work) => {
+			sourceReady.push(work);
+		});
+		bakeTasksForDemand(coordinator, {
+			location: {
+				envCellId: 0xda550100,
+				kind: "interior-cell",
+				landblockId: 0xda55ffff,
+			},
+			lod: {
+				buildings: -1,
+				detail: -1,
+				envCells: 0,
+				terrain: -1,
+			},
+		});
+		const envCellRequest = resolver.pendingRequests.find(
+			(request) => request.job.domain === "env-cell-system",
+		);
+		if (!envCellRequest) {
+			throw new Error("Expected env-cell resolver request.");
+		}
+
+		resolver.complete(envCellRequest.requestId, {
+			scope: createTexturedEnvCellSystemScope(0xda55ffff),
+		});
+		await flushPromises();
+
+		expect(baker.pendingInputs).toHaveLength(0);
+		const envCellSourceReady = sourceReady.find(
+			(work) => work.domain === "env-cell-system",
+		);
+		expect(
+			envCellSourceReady?.placementIntents.map((intent) => ({
+				itemId: intent.itemId,
+				pool: intent.pool,
+				purpose: intent.purpose,
+			})),
+		).toEqual([
+			{
+				itemId:
+					"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
+				pool: "static-authored-object",
+				purpose: "object-base-color",
+			},
+		]);
+	});
+
 	it("does not let source-ready continuations bake work that left demand", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
@@ -2098,6 +2155,7 @@ function createEnvCellSystemResolverPayload(landblockId = 0xda55ffff): {
 						origin: { x: 0, y: 0, z: 0 },
 					},
 					memberId: "cell-0",
+					authoredDynamicPlacements: [],
 					portalApertures: [],
 					portals: [],
 					renderGeometry: {
@@ -2126,8 +2184,15 @@ function createEnvCellSystemResolverPayload(landblockId = 0xda55ffff): {
 				landblockId,
 				source: "env-cells",
 			},
+			materialSources: [],
 			missingRefs: [],
+			paletteSources: [],
 			portalLinks: [],
+			portalApertureResources: [],
+			portalConnectivityGraph: {
+				edges: [],
+				nodes: [],
+			},
 			regionRenderProfile: {
 				detailRoles: [],
 				identity: {
@@ -2143,7 +2208,111 @@ function createEnvCellSystemResolverPayload(landblockId = 0xda55ffff): {
 					nodes: [],
 				},
 			},
+			sourceAssets: [],
+			textureRefs: [],
 			visibilityDiagnostics: [],
 		},
+	};
+}
+
+function createTexturedEnvCellSystemScope(
+	landblockId: number,
+): StaticScopePayload["scope"] {
+	const base = createEnvCellSystemResolverPayload(landblockId).scope;
+	if (base.kind !== "env-cell-system") {
+		throw new Error("Expected env-cell-system scope fixture.");
+	}
+	const envCell = base.envCells[0];
+	if (!envCell) {
+		throw new Error("Expected env-cell fixture.");
+	}
+
+	return {
+		...base,
+		envCells: [
+			{
+				...envCell,
+				authoredDynamicPlacements: [],
+				renderGeometry: {
+					...envCell.renderGeometry,
+					sourceId: envCell.identity.envCellId,
+					surfaceIds: [0],
+					triangleCount: 1,
+					triangles: [
+						{
+							firstVertex: 0,
+							materialVariantSignature: null,
+							polygonId: 1,
+							surfaceId: 0,
+						},
+					],
+					vertexCount: 3,
+				},
+				surfaces: [
+					{
+						material: {
+							kind: "static-material-source",
+							materialId: 0x08000010,
+						},
+						slotId: 0,
+						surfaceId: 0x08000010,
+					},
+				],
+			},
+		],
+		materialSources: [
+			{
+				diffuse: 1,
+				identity: {
+					kind: "static-material-source",
+					materialId: 0x08000010,
+				},
+				luminosity: 0,
+				source: {
+					kind: "texture",
+					palette: null,
+					renderSurfaceDefaultPalettes: [],
+					selectedRenderSurface: {
+						kind: "render-surface",
+						renderSurfaceId: 0x06000010,
+					},
+					texture: {
+						kind: "surface-texture",
+						surfaceTextureId: 0x05000010,
+					},
+				},
+				surfaceId: 0x08000010,
+				surfaceType: 0,
+				translucency: 0,
+			},
+		],
+		paletteSources: [],
+		sourceAssets: [],
+		textureRefs: [
+			{
+				palette: null,
+				renderSurface: {
+					kind: "render-surface",
+					renderSurfaceId: 0x06000010,
+				},
+				role: "surface-texture",
+				texture: {
+					kind: "surface-texture",
+					surfaceTextureId: 0x05000010,
+				},
+			},
+			{
+				format: "rgba",
+				formatRaw: 1,
+				height: 1,
+				palette: null,
+				renderSurface: {
+					kind: "render-surface",
+					renderSurfaceId: 0x06000010,
+				},
+				role: "render-surface",
+				width: 1,
+			},
+		],
 	};
 }

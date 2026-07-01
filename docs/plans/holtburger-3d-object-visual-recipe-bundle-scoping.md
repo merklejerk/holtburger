@@ -2235,6 +2235,12 @@ Course correction during Phase 9M:
   `staticObjectRenderInstances/staticObjectVisualResources`; the batch result mirrors those fields
   from `objectVisualInstallSet`. The legacy generated-scenery instancing calculation remains only as
   diagnostic/coverage input until Phase 9M removes the old draw-unit/resource producer branch.
+- Resteering note: `StaticCoordinatorCommitDelta.addedDrawUnits` still carries legacy static-object
+  and structured-interior draw units. Runtime layer publication no longer uses those for object
+  visuals, but static object `textureUses` are still produced by legacy draw-unit/resource ownership
+  helpers. Before removing object draw units from commits, Phase 9M must make static object-like
+  texture-use publication derive owners from `objectVisualInstallSet` direct draw units and visual
+  resources; otherwise texture placement release/ownership bookkeeping can drift.
 
 ### Phase 10: Dynamic Resolver Cutover
 

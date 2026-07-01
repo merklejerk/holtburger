@@ -70,7 +70,7 @@ function assertTexturedDrawUnitsHaveCommittedBindings(
 		const textureUseIds =
 			textureUseIdsByDrawUnitId.get(binding.owner.drawUnitId) ??
 			new Set<string>();
-		textureUseIds.add(binding.textureUseId);
+		textureUseIds.add(binding.bindingKey);
 		textureUseIdsByDrawUnitId.set(binding.owner.drawUnitId, textureUseIds);
 	}
 

@@ -142,9 +142,6 @@ type DynamicMaterialPlanningIdentity =
 			readonly reason: "runtime-material-planning-identity-unsupported";
 	  };
 
-export type DynamicPendingMaterialPlanningReason =
-	"runtime-material-planning-identity-unsupported";
-
 interface DynamicEntityAppearanceSubPalette {
 	readonly subId: number;
 	readonly offset: number;
@@ -230,7 +227,7 @@ export interface DynamicVisualMaterialPolicy {
 	readonly visualObject: DynamicVisualObjectIdentity;
 }
 
-export type DynamicVisualMaterialDetailRolePolicy =
+type DynamicVisualMaterialDetailRolePolicy =
 	| {
 			readonly kind: "static-domain";
 			readonly domain: Exclude<
@@ -308,26 +305,11 @@ export type DynamicVisualSkipReason =
 			readonly message: string;
 	  };
 
-export interface DynamicVisualBakeFailure {
+interface DynamicVisualBakeFailure {
 	readonly entityId: DynamicEntityId | null;
 	readonly message: string;
 	readonly stage: "material-planning" | "render-part-extraction" | "validation";
 }
-
-export type DynamicVisualApplicationResult =
-	| {
-			readonly kind: "recipe-resolved";
-			readonly recipe: DynamicEntityRecipe;
-	  }
-	| {
-			readonly kind: "visual-baked";
-			readonly resource: BakedDynamicVisualResource;
-	  }
-	| {
-			readonly entityId: DynamicEntityId;
-			readonly kind: "visual-skipped";
-			readonly reason: DynamicVisualSkipReason;
-	  };
 
 /** Runtime-local visual object identity for dynamic setup-backed material planning. */
 export interface DynamicVisualObjectIdentity {
@@ -586,7 +568,7 @@ export interface DynamicEntityResourceState {
 	readonly visual: DynamicEntityVisualResourceState;
 }
 
-export type DynamicEntityResourceStatus =
+type DynamicEntityResourceStatus =
 	| "failed"
 	| "pending"
 	| "ready"
@@ -628,14 +610,14 @@ export interface DynamicEntityAnimationResource {
 	readonly payload: AnimationPayloadDto;
 }
 
-export type DynamicEntityVisualResourceState =
+type DynamicEntityVisualResourceState =
 	| {
 			readonly status: "blocked" | "pending";
 	  }
 	| DynamicEntityVisualResourcesReadyState
 	| DynamicEntityVisualResourcesFailedState;
 
-export interface DynamicEntityVisualResourcesReadyState {
+interface DynamicEntityVisualResourcesReadyState {
 	readonly materialSources: readonly StaticObjectMaterialSourceFacts[];
 	readonly materialSlots: readonly DynamicEntityMaterialSlotRequirement[];
 	readonly paletteSources: readonly StaticObjectPaletteSourceFacts[];
@@ -653,7 +635,7 @@ export interface DynamicEntityRenderPart extends VisualGeometryPayload {
 	readonly sourceAssetId: string;
 }
 
-export interface DynamicEntityVisualResourcesFailedState {
+interface DynamicEntityVisualResourcesFailedState {
 	readonly failures: readonly DynamicEntityResourceFailure[];
 	readonly missingRefs: readonly StaticResourceIdentity[];
 	readonly status: "failed";

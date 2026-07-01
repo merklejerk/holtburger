@@ -309,9 +309,6 @@ export const OBJECT_MATERIAL_FRAGMENT_SHADERS: Readonly<
 	"texture-rgba": createObjectMaterialFragmentShader("texture-rgba"),
 };
 
-export const OBJECT_MATERIAL_FRAGMENT_SHADER =
-	OBJECT_MATERIAL_FRAGMENT_SHADERS["texture-rgba"];
-
 function createObjectMaterialFragmentShader(
 	family: ObjectMaterialShaderFamily,
 ): string {
@@ -1210,7 +1207,7 @@ class Webgl2Renderer implements Renderer {
 		for (const binding of update.textureBindings) {
 			const ownerKey = createTextureBindingOwnerKey(binding.owner);
 			const bindings = this.#textureBindings.get(ownerKey) ?? new Map();
-			bindings.set(binding.textureUseId, binding);
+			bindings.set(binding.bindingKey, binding);
 			this.#textureBindings.set(ownerKey, bindings);
 			this.#markPreparedPayloadDirtyForTextureBindingOwner(binding.owner);
 		}

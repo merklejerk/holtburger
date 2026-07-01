@@ -1356,7 +1356,7 @@ Result:
 | --- | --- | --- | --- | --- | --- | --- |
 | `terrain-geometry` | `createTerrainTexturePlacementIntents(...)` in `static/terrain/bake/terrain-geometry-baker.ts` discovers terrain color/mask/detail placement items from terrain source facts. | `TerrainGeometryStaticBaker` consumes `texturePlacementSnapshot`; `createTerrainGeometrySlices(...)` and related terrain helpers split by terrain shader limits. | Terrain bake output emits `textureUses` from source terrain texture uses. | `createTerrainTextureDependencies(...)` emits draw-unit dependencies and fails if a textured draw unit lacks a placement snapshot item. | `ClientRuntime.#installStaticCommit(...)` releases removed draw-unit ids before commit application and pins `delta.textureDependencies` after install. | `createTerrainTextureUseId(...)` still acts as material binding key, placement item id, dependency item id, and renderer binding key. Source dedupe is adjacent through prepared texture host identity. |
 | `static-object-geometry` | `createStaticObjectTexturePlacementIntents(...)` in `static/objects/bake/static-object-placement-planner.ts` discovers placement items by reusing static object material planning. | `partitionStaticObjectBatches(...)` consumes `TexturePlacementSnapshot`; `canAddStaticObjectCandidateUnderPlacement(...)` enforces one page per object texture role. | `createStaticObjectBakeTextureUses(...)` emits texture uses from final baked partitions/resources. | `createStaticObjectDrawUnitTextureDependencies(...)` emits draw-unit dependencies from final material entries. | Same static commit install path releases removed draw-unit ids and pins committed dependencies. | `createStaticMaterialTextureUseId(...)` still acts as material binding key, placement item id, dependency item id, and renderer binding key. It also encodes source and wrap/sampling facts. |
-| `structured-interior-geometry` | Not yet present before env-cell bake. Current code plans structured-interior material texture ids inside `EnvCellSystemBaker`. | Not yet present. `createStructuredInteriorDrawUnits(...)` does not consume `TexturePlacementSnapshot`, so object-material page legality is not enforced before commit. | `createStructuredInteriorTextureUses(...)` emits texture uses from structured-interior draw units. | Missing. `EnvCellSystemBaker` returns only embedded env-cell static object `textureDependencies`. | Static commit removal can release draw-unit ids, but there are no structured-interior dependency pins to release yet. | Highest risk. `createStructuredInteriorTextureUseId(...)` independently rebuilds the same overloaded string used for material binding, placement, dependency, and renderer binding even though placement/dependency records are not complete. |
+| `structured-interior-geometry` | `createStructuredInteriorTexturePlacementIntents(...)` in `static/env-cells/bake/structured-interior-placement-planner.ts` discovers placement items before env-cell bake. | `EnvCellSystemBaker` consumes `TexturePlacementSnapshot`, asserts every renderable structured-interior texture requirement was placed, and uses shared object-material page legality checks to split illegal candidates before commit. | `createStructuredInteriorTextureUses(...)` emits texture uses from structured-interior draw units. | `createStructuredInteriorTextureDependencies(...)` emits draw-unit dependencies from final structured-interior material entries. | Same static commit install path releases removed draw-unit ids and pins committed dependencies. | `createStructuredInteriorTextureBindingRequirement(...)` now centralizes binding, placement, source, and dependency identity. The current binding key still equals the placement item id, but the equality is explicit instead of ambient string doctrine. |
 | Static-authored dynamic visual resources | `StaticCoordinator` appends `createDynamicVisualTexturePlanning(recipe).placementIntents` to static source-ready work. | Static-authored dynamic visual bake receives the same static source-ready `TexturePlacementSnapshot`; dynamic visual bake asserts requirements were placed before emitting resources. | Dynamic renderer texture-use commits are created from baked resources during dynamic renderer resource sync. | `createDynamicTextureDependencies(...)` emits dependencies keyed by baked visual resource id. | `ClientRuntime.#syncDynamicRendererResources(...)` releases removed visual resource ids and pins committed resource dependencies. | `createDynamicTextureUseId(...)` is scoped by visual resource id, but it still acts as binding key, placement item id, dependency item id, and renderer binding key. Source and palette identity are embedded in the string. |
 | Runtime-authored dynamic visual resources | `ClientRuntime` resolves the recipe, calls `createDynamicVisualTexturePlanning(recipe)`, and places those intents before dynamic bake. | Runtime dynamic bake receives the placement snapshot and uses the same dynamic visual placement assertion as static-authored dynamics. | Same dynamic renderer texture-use commit path as static-authored dynamics. | Same dynamic visual resource dependency path. | Same dynamic renderer resource sync release/pin path. | Same overload as static-authored dynamics, with runtime-authored placement pool selection. |
 
@@ -1870,11 +1870,11 @@ Acceptance criteria:
   4-pages-per-role shader assumptions. Textured object resources now fail loudly during payload prep
   if their required resident binding is missing instead of silently selecting a magenta fallback
   branch.
-- Phase 9 removed object role-page overflow diagnostics. `TextureManager` still emits renderer
-  `TextureBinding.rolePage` records as a bridge to the current renderer API, but object owner+role
-  assignment is intentionally single-slot: the first texture ref binds slot 0 and any different
-  texture ref for the same owner+role is omitted. Real object draw units should not hit that shape
-  because bakers now split by placement page before geometry is emitted.
+- Phase 9 removed object role-page overflow diagnostics. Follow-up cleanup renamed renderer
+  `TextureBinding` material identity to `bindingKey` and shader page assignment to `pageSlot`.
+  `TextureManager` now throws if object owner+role assignment would require a second texture page;
+  real object draw units should not hit that shape because bakers split by placement page before
+  geometry is emitted.
 - Phase 10 decided not to globally rename `textureUseId`. After the placement cutover, the remaining
   durable meaning is a material binding key used by material table entries, terrain material roles,
   dynamic texture requirements, and renderer binding maps. The packer/placement contract already uses
@@ -2019,10 +2019,9 @@ Acceptance criteria:
 - `TextureManager` now stores `RuntimeTexturePlacement` on registry entries so pre-bake ownerless
   pages can be uploaded when ownership appears. This is pragmatic migration state tied to the current
   renderer update API; revisit during renderer payload cleanup if page residency becomes explicit.
-- `TextureManager` still marks renderer-facing object bindings through `rolePage`-shaped records
-  after bakers have already enforced one-page-per-role draw units. Phase 9 removed object multi-slot
-  assignment and overflow diagnostics, but the renderer update payload still uses the old field name.
-  Phase 10 or Phase 11 should rename that bridge if it survives `textureUseId` cleanup.
+- Renderer-facing texture bindings now use `bindingKey` and `pageSlot` fields instead of carrying
+  material binding identity through `textureUseId` or the old `rolePage` bridge field. Remaining
+  material-entry `textureUseId` fields are binding handles, not packer placement concepts.
 - Renderer resolved material-texture placement updates now use `ResolvedTexturePlacement`.
 - `structured-interior-geometry` now uses the placement-before-bake closure. Keep future env-cell
   texture work on the same planner -> placement snapshot -> baker dependency path; do not reintroduce
@@ -2030,9 +2029,9 @@ Acceptance criteria:
 - `EnvCellSystemBaker` now merges structured-interior and env-cell static object texture
   dependencies. Future cleanup should preserve that isomorphic dependency merge rather than adding
   domain-specific pinning.
-- `TextureManager` returning no object-material role-page binding for a second page on the same
-  owner+role is an invariant detector after the object one-page-per-role cutover. Do not paper over
-  that omission in `TextureManager`; split illegal draw units in the relevant baker.
+- `TextureManager` now throws if a committed terrain draw unit exceeds terrain page slots or an
+  object-material owner exceeds one page for a role. These are baker legality failures, not local
+  fallback cases.
 - Current `textureUseId` values still often encode source, usage, scope, wrap/sampling, and
   placement identity in one string. Phase 12 introduced a typed requirement boundary for static
   object and terrain placement/dependency edges; Phases 13-14 should use it for structured interiors
@@ -2047,8 +2046,9 @@ Acceptance criteria:
   Phase 15 cleanup should focus on naming, diagnostics, and any now-obsolete structured-interior
   exception language rather than new closure behavior.
 - Phase 15 found no remaining structured-interior bypass or renderer fallback path. Remaining
-  `textureUseId` references in the touched static/env-cell code are material binding keys or legacy
-  renderer/TextureManager bridge vocabulary, not packer-facing placement concepts.
+  `textureUseId` references in the touched static/env-cell code are material binding keys, not
+  packer-facing placement concepts. Renderer texture binding payloads now name that edge
+  `bindingKey`.
 
 ## Risks and Concessions
 

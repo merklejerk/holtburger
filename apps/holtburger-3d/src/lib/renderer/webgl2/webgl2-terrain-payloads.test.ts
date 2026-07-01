@@ -387,20 +387,20 @@ function createRole(
 function createBinding(
 	textureUseId: string,
 	textureRefId: string,
-	kind: StaticTextureBinding["rolePage"]["kind"],
+	kind: StaticTextureBinding["pageSlot"]["kind"],
 	slot: number,
 	rect: readonly [number, number, number, number],
 ): StaticTextureBinding {
 	return {
+		bindingKey: textureUseId,
 		owner: { drawUnitId: "terrain-test", kind: "draw-unit" },
 		rect,
-		rolePage: {
+		pageSlot: {
 			kind,
 			slot,
 		},
 		textureHeight: 256,
 		textureRefId,
-		textureUseId,
 		textureWidth: 128,
 	};
 }

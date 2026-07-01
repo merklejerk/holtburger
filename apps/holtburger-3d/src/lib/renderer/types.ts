@@ -29,10 +29,7 @@ import type { TextureResourceDependencies } from "../textures/placement";
 export const MAX_TERRAIN_COLOR_PAGES_PER_DRAW = 4;
 export const MAX_TERRAIN_MASK_PAGES_PER_DRAW = 4;
 export const MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW = 1;
-export const MAX_OBJECT_MATERIAL_DETAIL_PAGES_PER_DRAW = 1;
-export const MAX_OBJECT_MATERIAL_INDEX_PAGES_PER_DRAW = 1;
 export const MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW = 8;
-export const MAX_OBJECT_MATERIAL_PALETTE_PAGES_PER_DRAW = 1;
 
 export interface FrameState {
 	readonly camera: {
@@ -238,8 +235,6 @@ export type TextureBindingOwner =
 	| StaticTextureUseOwner
 	| DynamicTextureBindingOwner;
 
-export type StaticTextureBindingOwner = StaticTextureUseOwner;
-
 export function createTextureBindingOwnerKey(
 	owner: TextureBindingOwner,
 ): string {
@@ -257,10 +252,10 @@ export interface TextureBinding {
 	/** Renderer resource that owns this material texture binding. */
 	readonly owner: TextureBindingOwner;
 	/** Material binding key used by material table entries and terrain material roles. */
-	readonly textureUseId: string;
+	readonly bindingKey: string;
 	readonly textureRefId: string;
-	/** Shader role/page slot. Object materials use slot 0; terrain still has page slots. */
-	readonly rolePage: TextureRolePageSlot;
+	/** Shader role-specific page slot. Object materials use slot 0; terrain still has page slots. */
+	readonly pageSlot: TextureRolePageSlot;
 	readonly textureWidth: number;
 	readonly textureHeight: number;
 	readonly rect: readonly [number, number, number, number];
@@ -349,7 +344,7 @@ type DynamicRendererInstanceResidence =
 
 export interface ResolvedTexturePlacement {
 	/** Material binding key whose atlas placement was resolved. */
-	readonly textureUseId: string;
+	readonly bindingKey: string;
 	readonly textureRefId: string;
 	readonly textureWidth: number;
 	readonly textureHeight: number;

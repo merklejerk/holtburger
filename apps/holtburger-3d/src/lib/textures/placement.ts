@@ -25,7 +25,7 @@ export type TexturePlacementPool =
  * Current prepared/material texture source carried losslessly through the
  * placement bridge. Placement identity is carried separately as `itemId`.
  */
-export interface TexturePlacementMaterialSource {
+interface TexturePlacementMaterialSource {
 	readonly kind: "material-texture-data-use";
 	readonly dataUse: MaterialTextureDataUseIdentity;
 	readonly samplingPolicy?: StaticBakeTextureSamplingPolicy;

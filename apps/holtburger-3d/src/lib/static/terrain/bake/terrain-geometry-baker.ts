@@ -873,7 +873,7 @@ function createTerrainBakeTextureUses(
 	return [...textureUsesById.values()];
 }
 
-export function createTerrainTextureUseId(
+function createTerrainTextureUseId(
 	textureUseScopeId: string,
 	textureUse: TerrainTextureUseFacts,
 ): string {

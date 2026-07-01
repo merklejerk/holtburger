@@ -314,20 +314,20 @@ function collectTerrainPageBinding(
 	if (!texture) {
 		return false;
 	}
-	const pages = binding.rolePage.kind === "mask" ? maskPages : colorPages;
+	const pages = binding.pageSlot.kind === "mask" ? maskPages : colorPages;
 	if (
-		binding.rolePage.slot < 0 ||
-		binding.rolePage.slot >= pages.textures.length
+		binding.pageSlot.slot < 0 ||
+		binding.pageSlot.slot >= pages.textures.length
 	) {
 		return false;
 	}
-	const existingTexture = pages.textures[binding.rolePage.slot] ?? null;
+	const existingTexture = pages.textures[binding.pageSlot.slot] ?? null;
 	if (existingTexture && existingTexture !== texture) {
 		return false;
 	}
-	pages.textures[binding.rolePage.slot] = texture;
-	pages.sizes[binding.rolePage.slot * 2] = binding.textureWidth;
-	pages.sizes[binding.rolePage.slot * 2 + 1] = binding.textureHeight;
+	pages.textures[binding.pageSlot.slot] = texture;
+	pages.sizes[binding.pageSlot.slot * 2] = binding.textureWidth;
+	pages.sizes[binding.pageSlot.slot * 2 + 1] = binding.textureHeight;
 	return true;
 }
 
@@ -470,5 +470,5 @@ function resolveBindingPage(
 		return 0;
 	}
 
-	return bindings.get(role.textureUseId)?.rolePage.slot ?? 0;
+	return bindings.get(role.textureUseId)?.pageSlot.slot ?? 0;
 }

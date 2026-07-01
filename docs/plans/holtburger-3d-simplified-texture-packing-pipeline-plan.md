@@ -109,7 +109,8 @@ Current code paths that matter:
   - owns static materialization, texture placement application, dynamic resource sync, renderer
     layer installation, and runtime dynamic spawn prep.
 - `apps/holtburger-3d/src/lib/runtime/static-materializer.ts`
-  - currently fine-splits static object draw units after texture packing.
+  - validates committed texture bindings and directly installs baker-authored draw units; the old
+    static object fine-splitting path has been removed.
 - `apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-renderer.ts`
   - stores texture pages by `textureRefId` and texture bindings by owner key.
 - `apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-object-material-payloads.ts`
@@ -1206,7 +1207,7 @@ Acceptance criteria:
 - [x] Phase 3: add static source-ready placement continuation.
 - [x] Resteering 1: review placement continuation shape.
 - [x] Phase 4: move static object placement planning before static object baking.
-- [ ] Phase 5: remove main-thread static object fine splitting.
+- [x] Phase 5: remove main-thread static object fine splitting.
 - [ ] Phase 6: bring dynamic visual baking onto the same placement contract.
 - [ ] Resteering 2: review cutover health.
 - [ ] Phase 7: bring terrain onto the same placement-before-bake contract.
@@ -1311,6 +1312,15 @@ Acceptance criteria:
 - Phase 4 intentionally skips pre-bake placement planning for static object source payloads with no
   source triangles. This keeps empty/diagnostic payloads from running object material planning while
   still failing loudly for real textured geometry with malformed material facts.
+- Phase 5 replaced `static-materializer.ts` with a direct materialization path. It now validates that
+  textured draw units have committed bindings, passes texture updates through unchanged, installs
+  baker-authored draw units/resources directly, and preserves removal resources without expanding
+  source draw-unit ids into old fine ids.
+- Phase 5 removed runtime source-to-materialized draw-unit tracking. Runtime diagnostics now count
+  installed draw units directly, and static object selection diagnostics report the baker-authored
+  draw-unit id as the source draw-unit id because there is no separate materialized id.
+- Phase 5 rewrote `static-materializer.test.ts` around the direct-install contract and removed tests
+  that encoded old geometry copying, role-page rebinding, and source-to-fine removal expansion.
 - Dry run split `TextureManager` responsibilities into placement and pinning. Current owner leases
   require post-bake draw-unit/resource owners, but pre-bake placement intents intentionally do not
   have owners yet.
@@ -1348,9 +1358,6 @@ Acceptance criteria:
   again in the baker to construct draw units. This is acceptable for the cutover because the logic is
   shared and deterministic, but future cleanup should avoid meaningful duplicated CPU work if it
   shows up in profiling or complicates diagnostics.
-- Phase 4 made static object draw units page-legal before main-thread materialization, but
-  `static-materializer.ts` still contains the old geometry-copying/fine-splitting path. Phase 5 must
-  delete or shrink that path rather than preserving it as a compatibility layer.
 
 ## Risks and Concessions
 

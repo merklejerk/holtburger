@@ -621,7 +621,7 @@ describe("static scene query", () => {
 		});
 
 		query.removeStaticResources([
-			{ drawUnitId: "env-cell-static-draw-unit#fine-1", kind: "draw-unit" },
+			{ drawUnitId: "unrelated-static-draw-unit", kind: "draw-unit" },
 		]);
 
 		expect(query.createSnapshot()).toMatchObject({
@@ -2781,10 +2781,8 @@ function commitEnvCellSystem(
 			owner,
 			renderBounds: envCell.renderGeometry.bounds,
 			residencyBvh: payload.residencySpatial.envCellSystemBvh,
-			residencyBvhItemCount:
-				payload.residencySpatial.envCellSystemBvhItemCount,
-			residencyBvhNodeCount:
-				payload.residencySpatial.envCellSystemBvhNodeCount,
+			residencyBvhItemCount: payload.residencySpatial.envCellSystemBvhItemCount,
+			residencyBvhNodeCount: payload.residencySpatial.envCellSystemBvhNodeCount,
 		})),
 		visibilityRecords: [
 			{
@@ -2830,9 +2828,7 @@ function commitEnvCellStaticObjectBounds(
 				instanceId: options.instanceId ?? "env-static-0",
 				kind: "env-cell-static-object-bounds",
 				landblockId,
-				owner:
-					options.owner ??
-					createEnvCellLayerOwner(landblockId),
+				owner: options.owner ?? createEnvCellLayerOwner(landblockId),
 			},
 		],
 	});

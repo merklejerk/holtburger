@@ -1,20 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { TexturePlacementUpdate } from "../renderer/types";
 import type {
-	PreparedRgbaRenderSurfaceTextureUseIdentity,
-	StaticBakeTextureUse,
 	StaticCoordinatorCommitDelta,
 	StaticDrawUnit,
 	StaticObjectGeometryStaticDrawUnit,
-	StaticMaterialTableEntry,
 	StaticObjectVisualResource,
-	StaticLayerPeerRecordOwner,
 	TerrainGeometryStaticDrawUnit,
 } from "../static/contracts";
 import { materializeStaticCommit } from "./static-materializer";
 
 describe("static materializer", () => {
-	it("materializes static residency from committed texture bindings", () => {
+	it("installs committed draw units directly from baker output", () => {
 		const drawUnit = createTerrainDrawUnit("terrain-textured", {
 			textureUseIds: ["terrain-textured:prepared-texture:06000010"],
 		});
@@ -23,16 +19,12 @@ describe("static materializer", () => {
 		const materialized = materializeStaticCommit({
 			commit: createCommitDelta({
 				addedDrawUnits: [drawUnit],
-				textureUses: [createBakeTextureUse(drawUnit.drawUnitId)],
 			}),
 			textureUpdate,
 		});
 
-		expect(materialized.textureUpdate).toBe(textureUpdate);
-		expect(materialized.staticSourceMappings).toEqual([]);
-		expect(materialized.staticSpatialRecords).toEqual([]);
 		expect(materialized.materializedDrawUnits).toEqual([drawUnit]);
-		expect(materialized.portalApertureResources).toEqual([]);
+		expect(materialized.textureUpdate).toBe(textureUpdate);
 		expect(materialized.removedResources).toEqual([]);
 	});
 
@@ -45,7 +37,6 @@ describe("static materializer", () => {
 			materializeStaticCommit({
 				commit: createCommitDelta({
 					addedDrawUnits: [drawUnit],
-					textureUses: [createBakeTextureUse(drawUnit.drawUnitId)],
 				}),
 				textureUpdate: null,
 			}),
@@ -54,303 +45,97 @@ describe("static materializer", () => {
 		);
 	});
 
-	it("materializes untextured draw units without a texture update", () => {
-		const drawUnit = createTerrainDrawUnit("terrain-flat");
+	it("passes static object draw units and peer records through without remapping", () => {
+		const drawUnit = createStaticObjectDrawUnit("static-object-a");
+		const spatialRecord = drawUnit.spatialRecord;
+		if (!spatialRecord) {
+			throw new Error(
+				"Expected static object fixture to have a spatial record.",
+			);
+		}
+		const textureUpdate = createTexturePlacementUpdate(drawUnit);
 
 		const materialized = materializeStaticCommit({
 			commit: createCommitDelta({
 				addedDrawUnits: [drawUnit],
-				textureUses: [],
-			}),
-			textureUpdate: null,
-		});
-
-		expect(materialized.materializedDrawUnits).toEqual([drawUnit]);
-		expect(materialized.textureUpdate).toBeNull();
-	});
-
-	it("fine-splits static object tables by committed static role-page capacity", () => {
-		const drawUnit = createStaticObjectDrawUnit("static-table", 5);
-		const textureUpdate = createStaticObjectTexturePlacementUpdate(drawUnit);
-
-		const materialized = materializeStaticCommit({
-			commit: createCommitDelta({
-				addedDrawUnits: [drawUnit],
-				staticSpatialRecords: [
-					{
-						bounds: {
-							max: { x: 2, y: 3, z: 4 },
-							min: { x: 1, y: 2, z: 3 },
-						},
-						envCellId: 0xda550100,
-						instanceId: "da550100:env-cell-static-0",
-						kind: "env-cell-static-object-bounds",
-						landblockId: 0xda55ffff,
-						owner: createEnvCellLayerOwner(),
-					},
-				],
-				textureUses: drawUnit.textureUseIds.map((textureUseId) =>
-					createBakeTextureUse(
-						drawUnit.drawUnitId,
-						textureUseId,
-						"outdoor-buildings",
-					),
-				),
+				staticSpatialRecords: [spatialRecord],
 			}),
 			textureUpdate,
 		});
 
-		const addedDrawUnits = materialized.materializedDrawUnits;
-		expect(addedDrawUnits.map((added) => added.drawUnitId)).toEqual([
-			"static-table",
-			"static-table#fine-1",
-		]);
-		expect(
-			addedDrawUnits.map((added) =>
-				added.kind === "static-object-geometry"
-					? added.materialEntries.map((entry) => entry.slot)
-					: [],
-			),
-		).toEqual([[0, 1, 2, 3], [0]]);
-		expect(
-			addedDrawUnits.map((added) =>
-				added.kind === "static-object-geometry"
-					? Array.from(added.materialSlotIndices)
-					: [],
-			),
-		).toEqual([
-			[0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3],
-			[0, 0, 0],
-		]);
-		expect(
-			addedDrawUnits.map((added) =>
-				added.kind === "static-object-geometry" ? added.renderState : null,
-			),
-		).toEqual([drawUnit.renderState, drawUnit.renderState]);
-		expect(materialized.textureUpdate?.textureBindings).toMatchObject([
-			{
-				owner: { drawUnitId: "static-table", kind: "draw-unit" },
-				rolePage: { kind: "object-base-color", slot: 0 },
-			},
-			{
-				owner: { drawUnitId: "static-table", kind: "draw-unit" },
-				rolePage: { kind: "object-base-color", slot: 1 },
-			},
-			{
-				owner: { drawUnitId: "static-table", kind: "draw-unit" },
-				rolePage: { kind: "object-base-color", slot: 2 },
-			},
-			{
-				owner: { drawUnitId: "static-table", kind: "draw-unit" },
-				rolePage: { kind: "object-base-color", slot: 3 },
-			},
-			{
-				owner: { drawUnitId: "static-table#fine-1", kind: "draw-unit" },
-				rolePage: { kind: "object-base-color", slot: 0 },
-			},
-		]);
-		expect(materialized.staticSourceMappings).toEqual([]);
-		expect(
-			addedDrawUnits.map((drawUnit) =>
-				drawUnit.kind === "static-object-geometry"
-					? drawUnit.sourceMappingCoverage.map((coverage) => ({
-							materialSlot: coverage.materialSlot,
-							polygonRange: coverage.polygonRange,
-						}))
-					: [],
-			),
-		).toEqual([
-			[
-				{ materialSlot: 0, polygonRange: { max: 0, min: 0 } },
-				{ materialSlot: 1, polygonRange: { max: 1, min: 1 } },
-				{ materialSlot: 2, polygonRange: { max: 2, min: 2 } },
-				{ materialSlot: 3, polygonRange: { max: 3, min: 3 } },
-			],
-			[{ materialSlot: 0, polygonRange: { max: 4, min: 4 } }],
-		]);
-		expect(materialized.staticSpatialRecords).toEqual([
-			{
-				bounds: {
-					max: { x: 2, y: 3, z: 4 },
-					min: { x: 1, y: 2, z: 3 },
-				},
-				envCellId: 0xda550100,
-				instanceId: "da550100:env-cell-static-0",
-				kind: "env-cell-static-object-bounds",
-				landblockId: 0xda55ffff,
-				owner: createEnvCellLayerOwner(),
-			},
-			{
-				drawUnitId: "static-table",
-				kind: "draw-unit-bounds",
-				owner: {
-					drawUnitId: "static-table",
-					kind: "draw-unit",
-				},
-				triangleCount: 4,
-			},
-			{
-				drawUnitId: "static-table#fine-1",
-				kind: "draw-unit-bounds",
-				owner: {
-					drawUnitId: "static-table#fine-1",
-					kind: "draw-unit",
-				},
-				triangleCount: 1,
-			},
-		]);
+		expect(materialized.materializedDrawUnits).toEqual([drawUnit]);
+		expect(materialized.staticSpatialRecords).toEqual([spatialRecord]);
+		expect(materialized.textureUpdate).toBe(textureUpdate);
 	});
 
-	it("preserves owner-keyed texture bindings for static object visual resources", () => {
-		const drawUnit = createStaticObjectDrawUnit("static-table", 2);
+	it("preserves static object visual resources and their texture update", () => {
+		const drawUnit = createStaticObjectDrawUnit("static-object-a");
 		const visualResource = createStaticObjectVisualResource(
-			"visual-static-table",
+			"visual-static-object-a",
 			drawUnit,
 		);
-		const textureUpdate = {
-			...createStaticObjectTexturePlacementUpdate(drawUnit),
-			textureBindings: drawUnit.textureUseIds.map((textureUseId, index) => ({
-				owner: {
-					kind: "static-object-visual-resource" as const,
-					resourceId: "visual-static-table",
-				},
-				rect: [0, 0, 1, 1] as const,
-				rolePage: {
-					kind: "object-base-color" as const,
-					slot: index,
-				},
-				textureHeight: 1,
-				textureRefId: `texture-ref-${index}`,
-				textureUseId,
-				textureWidth: 1,
-			})),
-		};
+		const textureUpdate =
+			createTexturePlacementUpdateForVisualResource(visualResource);
 
 		const materialized = materializeStaticCommit({
 			commit: createCommitDelta({
 				addedDrawUnits: [],
 				staticObjectVisualResources: [visualResource],
-				textureUses: [],
 			}),
 			textureUpdate,
 		});
 
-		expect(materialized.textureUpdate?.textureBindings).toMatchObject([
-			{
-				owner: {
-					kind: "static-object-visual-resource",
-					resourceId: "visual-static-table",
-				},
-				rolePage: { kind: "object-base-color", slot: 0 },
-				textureUseId: "static-table:prepared-texture:0",
-			},
-			{
-				owner: {
-					kind: "static-object-visual-resource",
-					resourceId: "visual-static-table",
-				},
-				rolePage: { kind: "object-base-color", slot: 1 },
-				textureUseId: "static-table:prepared-texture:1",
-			},
-		]);
+		expect(materialized.staticObjectVisualResources).toEqual([visualResource]);
+		expect(materialized.textureUpdate).toBe(textureUpdate);
 	});
 
-	it("expands removed static draw unit ids through previous materialization mappings", () => {
-		const materialized = materializeStaticCommit({
-			commit: {
-				addedDrawUnits: [],
-				addedPortalApertureResources: [],
-				removedResources: [{ drawUnitId: "static-table", kind: "draw-unit" }],
-				revision: 8,
-				envCellStaticObjectPlacementRecords: [],
-				staticBatchId: "batch-a",
-				staticPortalGraphs: [],
-				staticPortalInteriorRecords: [],
-				staticSourceMappings: [],
-				staticSpatialRecords: [],
-				staticVisibilityRecords: [],
-				textureUses: [],
+	it("preserves removed resources without expanding old fine draw-unit ids", () => {
+		const removedResources = [
+			{ drawUnitId: "static-object-a", kind: "draw-unit" as const },
+			{
+				apertureResourceId: "portal-aperture-resource:da55ffff",
+				kind: "portal-aperture-resource" as const,
 			},
-			materializedDrawUnitIdsBySourceDrawUnitId: new Map([
-				["static-table", ["static-table", "static-table#fine-1"]],
-			]),
-			textureUpdate: null,
-		});
+		];
 
-		expect(materialized.removedResources).toEqual([
-			{ drawUnitId: "static-table", kind: "draw-unit" },
-			{ drawUnitId: "static-table#fine-1", kind: "draw-unit" },
-		]);
-	});
-
-	it("preserves removed portal aperture resources", () => {
 		const materialized = materializeStaticCommit({
-			commit: {
+			commit: createCommitDelta({
 				addedDrawUnits: [],
-				addedPortalApertureResources: [],
-				removedResources: [
-					{
-						apertureResourceId: "portal-aperture-resource:da55ffff",
-						kind: "portal-aperture-resource",
-					},
-				],
-				revision: 9,
-				envCellStaticObjectPlacementRecords: [],
-				staticBatchId: "batch-a",
-				staticPortalGraphs: [],
-				staticPortalInteriorRecords: [],
-				staticSourceMappings: [],
-				staticSpatialRecords: [],
-				staticVisibilityRecords: [],
-				textureUses: [],
-			},
+				removedResources,
+			}),
 			textureUpdate: null,
 		});
 
 		expect(materialized.materializedDrawUnits).toEqual([]);
-		expect(materialized.portalApertureResources).toEqual([]);
-		expect(materialized.removedResources).toEqual([
-			{
-				apertureResourceId: "portal-aperture-resource:da55ffff",
-				kind: "portal-aperture-resource",
-			},
-		]);
+		expect(materialized.removedResources).toEqual(removedResources);
 	});
 });
 
 function createCommitDelta(options: {
 	readonly addedDrawUnits: readonly StaticDrawUnit[];
-	readonly staticSpatialRecords?: StaticCoordinatorCommitDelta["staticSpatialRecords"];
+	readonly removedResources?: StaticCoordinatorCommitDelta["removedResources"];
 	readonly staticObjectVisualResources?: readonly StaticObjectVisualResource[];
-	readonly textureUses: readonly StaticBakeTextureUse[];
+	readonly staticSpatialRecords?: StaticCoordinatorCommitDelta["staticSpatialRecords"];
 }): StaticCoordinatorCommitDelta {
 	return {
 		addedDrawUnits: options.addedDrawUnits,
 		addedPortalApertureResources: [],
 		commitId: "static-commit:batch-a",
 		materialCoverage: [],
-		removedResources: [],
+		removedResources: options.removedResources ?? [],
 		revision: 7,
 		envCellStaticObjectPlacementRecords: [],
 		staticBatchId: "batch-a",
+		staticObjectRenderInstances: [],
+		staticObjectVisualResources: options.staticObjectVisualResources ?? [],
 		staticPortalGraphs: [],
 		staticPortalInteriorRecords: [],
 		staticSourceMappings: [],
 		staticSpatialRecords: options.staticSpatialRecords ?? [],
-		staticObjectRenderInstances: [],
-		staticObjectVisualResources: options.staticObjectVisualResources ?? [],
 		staticVisibilityRecords: [],
 		tasks: [],
-		textureUses: options.textureUses,
-	};
-}
-
-function createEnvCellLayerOwner(): StaticLayerPeerRecordOwner {
-	return {
-		domain: "env-cell-system",
-		key: { kind: "env-cell-system", landblockId: 0xda55ffff },
-		kind: "layer-owner",
-		ownerId: "env-cell-system:0xda55ffff",
+		textureDependencies: [],
+		textureUses: [],
 	};
 }
 
@@ -391,153 +176,51 @@ function createTerrainDrawUnit(
 	};
 }
 
-function createBakeTextureUse(
-	drawUnitId: string,
-	textureUseId = `${drawUnitId}:prepared-texture:06000010`,
-	domain: StaticBakeTextureUse["domain"] = "outdoor-terrain",
-): StaticBakeTextureUse {
-	return {
-		domain,
-		owners: [{ drawUnitId, kind: "draw-unit" }],
-		samplingPolicy: {
-			wrapS: "repeat",
-			wrapT: "repeat",
-		},
-		source: createPreparedTextureUse(),
-		staticBatchId: "batch-a",
-		textureUseId,
-	};
-}
-
-function createPreparedTextureUse(): PreparedRgbaRenderSurfaceTextureUseIdentity {
-	return {
-		kind: "prepared-render-surface-texture-use",
-		renderSurface: {
-			kind: "render-surface",
-			renderSurfaceId: 0x06000010,
-		},
-		usage: "rgba-color",
-	};
-}
-
-function createTexturePlacementUpdate(
-	drawUnit: TerrainGeometryStaticDrawUnit,
-): TexturePlacementUpdate {
-	const textureUseId = drawUnit.textureUseIds[0];
-	if (!textureUseId) {
-		throw new Error("Texture placement fixture needs a textured draw unit.");
-	}
-
-	return {
-		textureBindings: [
-			{
-				owner: { drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" },
-				rect: { height: 1, width: 1, x: 0, y: 0 },
-				rolePage: { kind: "color", slot: 0 },
-				textureHeight: 1,
-				textureRefId: "texture-ref-a",
-				textureUseId,
-				textureWidth: 1,
-			},
-		],
-		placements: [],
-		removedTextureRefIds: [],
-		revision: 3,
-		textureUsePlacements: [
-			{
-				rect: [0, 0, 1, 1],
-				textureHeight: 1,
-				textureRefId: "texture-ref-a",
-				textureUseId,
-				textureWidth: 1,
-			},
-		],
-	};
-}
-
 function createStaticObjectDrawUnit(
 	drawUnitId: string,
-	materialCount: number,
 ): StaticObjectGeometryStaticDrawUnit {
-	const positions: number[] = [];
-	const texCoords: number[] = [];
-	const materialSlotIndices: number[] = [];
-	const indices: number[] = [];
-	const materialEntries: StaticMaterialTableEntry[] = [];
-
-	for (let slot = 0; slot < materialCount; slot += 1) {
-		const vertexOffset = slot * 3;
-		positions.push(0, 0, slot, 1, 0, slot, 0, 1, slot);
-		texCoords.push(0, 0, 1, 0, 0, 1);
-		materialSlotIndices.push(slot, slot, slot);
-		indices.push(vertexOffset, vertexOffset + 1, vertexOffset + 2);
-		materialEntries.push(createStaticObjectMaterialEntry(slot, drawUnitId));
-	}
-
-	const textureUseIds = materialEntries.map(
-		(entry) => entry.primaryTextureUseId!,
-	);
-
+	const textureUseIds = [`${drawUnitId}:prepared-texture:0`];
 	return {
 		coordinateSpace: "landblock-render-local",
 		domain: "outdoor-buildings",
 		drawUnitId,
 		indexType: "uint16",
-		indices: new Uint16Array(indices),
+		indices: new Uint16Array([0, 1, 2]),
 		kind: "static-object-geometry",
 		landblockId: 0xda55ffff,
 		materialBucketKey: "static-object:test",
-		materialEntries,
-		materialFamily: "texture-rgba",
-		materialIds: materialEntries.flatMap((entry) => entry.materialIds),
-		materialPass: "opaque",
-		materialSlotIndices: new Float32Array(materialSlotIndices),
-		positions: new Float32Array(positions),
-		renderState: {
-			blend: {
-				dstFactor: null,
-				enabled: false,
-				mode: "opaque",
-				srcFactor: null,
+		materialEntries: [
+			{
+				alphaTest: 0,
+				detailTextureTiling: 1,
+				detailTextureUseId: null,
+				indexedClipThreshold: -1,
+				indexedTextureFormat: null,
+				indexTextureUseId: null,
+				materialColor: [1, 1, 1, 1],
+				materialEmissiveColor: [0, 0, 0],
+				materialIds: [1],
+				paletteFirstIndex: 0,
+				paletteTextureUseId: null,
+				primaryTextureUseId: textureUseIds[0]!,
+				primaryTextureWrapMode: "clamp",
+				renderState: createOpaqueRenderState(),
+				slot: 0,
 			},
-			depthTest: true,
-			depthWrite: true,
-		},
+		],
+		materialFamily: "texture-rgba",
+		materialIds: [1],
+		materialPass: "opaque",
+		materialSlotIndices: new Float32Array([0, 0, 0]),
+		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+		renderState: createOpaqueRenderState(),
 		sort: {
 			bounds: null,
 			center: [0, 0, 0],
 			objectPartKey: null,
 			policy: "depth-writing",
 		},
-		sourceMappingCoverage: Array.from(
-			{ length: materialCount },
-			(_, index) => ({
-				geometrySurfaceIds: [index],
-				gfxObj: {
-					kind: "static-object-source" as const,
-					sourceAssetKind: "gfx-obj" as const,
-					sourceDid: 0x01000020,
-				},
-				materialIds: [index + 1],
-				materialSlot: index,
-				materialVariantSignatures: [null],
-				object: {
-					instanceId: "outdoor-static-0",
-					kind: "static-object-instance" as const,
-					landblockId: 0xda55ffff,
-					objectKind: "explicit-object" as const,
-				},
-				partIndex: 0,
-				polygonCount: 1,
-				polygonRange: { max: index, min: index },
-				source: {
-					kind: "static-object-source" as const,
-					sourceAssetKind: "setup-model" as const,
-					sourceDid: 0x02000010,
-				},
-				sourceTriangleCount: 1,
-			}),
-		),
+		sourceMappingCoverage: [],
 		spatialRecord: {
 			drawUnitId,
 			kind: "draw-unit-bounds",
@@ -545,12 +228,12 @@ function createStaticObjectDrawUnit(
 				drawUnitId,
 				kind: "draw-unit",
 			},
-			triangleCount: materialCount,
+			triangleCount: 1,
 		},
-		texCoords: new Float32Array(texCoords),
+		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
 		textureUseIds,
-		triangleCount: materialCount,
-		vertexCount: materialCount * 3,
+		triangleCount: 1,
+		vertexCount: 3,
 	};
 }
 
@@ -607,62 +290,83 @@ function createStaticObjectVisualResource(
 	};
 }
 
-function createStaticObjectMaterialEntry(
-	slot: number,
-	drawUnitId: string,
-): StaticMaterialTableEntry {
+function createOpaqueRenderState(): StaticObjectGeometryStaticDrawUnit["renderState"] {
 	return {
-		alphaTest: 0,
-		indexedClipThreshold: -1,
-		detailTextureTiling: 1,
-		detailTextureUseId: null,
-		indexTextureUseId: null,
-		indexedTextureFormat: null,
-		materialColor: [1, 1, 1, 1],
-		materialEmissiveColor: [0, 0, 0],
-		materialIds: [slot + 1],
-		paletteFirstIndex: 0,
-		paletteTextureUseId: null,
-		primaryTextureUseId: `${drawUnitId}:prepared-texture:${slot}`,
-		primaryTextureWrapMode: "clamp",
-		renderState: {
-			blend: {
-				dstFactor: null,
-				enabled: false,
-				mode: "opaque",
-				srcFactor: null,
-			},
-			depthTest: true,
-			depthWrite: true,
+		blend: {
+			dstFactor: null,
+			enabled: false,
+			mode: "opaque",
+			srcFactor: null,
 		},
-		slot,
+		depthTest: true,
+		depthWrite: true,
 	};
 }
 
-function createStaticObjectTexturePlacementUpdate(
-	drawUnit: StaticObjectGeometryStaticDrawUnit,
+function createTexturePlacementUpdate(
+	drawUnit: StaticDrawUnit,
 ): TexturePlacementUpdate {
+	const textureUseId = drawUnit.textureUseIds[0];
+	if (!textureUseId) {
+		throw new Error("Texture placement fixture needs a textured draw unit.");
+	}
+
 	return {
-		textureBindings: [],
+		textureBindings: [
+			{
+				owner: { drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" },
+				rect: { height: 1, width: 1, x: 0, y: 0 },
+				rolePage:
+					drawUnit.kind === "terrain-geometry"
+						? { kind: "color", slot: 0 }
+						: { kind: "object-base-color", slot: 0 },
+				textureHeight: 1,
+				textureRefId: "texture-ref-a",
+				textureUseId,
+				textureWidth: 1,
+			},
+		],
 		placements: [],
 		removedTextureRefIds: [],
 		revision: 3,
-		textureUsePlacements: drawUnit.textureUseIds.map((textureUseId, index) => ({
-			anisotropy: 1,
-			filteringMode: "nearest",
-			format: "rgba8",
-			height: 1,
-			mipmapsGenerated: false,
-			pixels: new Uint8Array([255, 255, 255, 255]),
-			placementRevision: 1,
-			rect: [0, 0, 1, 1],
-			sampleClass: "rgba-color",
-			samplerPolicyKey: `policy-${index}`,
-			textureRefId: `texture-ref-${index}`,
-			textureUseId,
-			width: 1,
-			wrapS: "clamp-to-edge",
-			wrapT: "clamp-to-edge",
-		})),
+		textureUsePlacements: [
+			{
+				rect: [0, 0, 1, 1],
+				textureHeight: 1,
+				textureRefId: "texture-ref-a",
+				textureUseId,
+				textureWidth: 1,
+			},
+		],
+	};
+}
+
+function createTexturePlacementUpdateForVisualResource(
+	resource: StaticObjectVisualResource,
+): TexturePlacementUpdate {
+	const textureUseId = resource.textureUseIds[0];
+	if (!textureUseId) {
+		throw new Error("Texture placement fixture needs a textured resource.");
+	}
+
+	return {
+		textureBindings: [
+			{
+				owner: {
+					kind: "static-object-visual-resource",
+					resourceId: resource.resourceId,
+				},
+				rect: { height: 1, width: 1, x: 0, y: 0 },
+				rolePage: { kind: "object-base-color", slot: 0 },
+				textureHeight: 1,
+				textureRefId: "texture-ref-a",
+				textureUseId,
+				textureWidth: 1,
+			},
+		],
+		placements: [],
+		removedTextureRefIds: [],
+		revision: 3,
+		textureUsePlacements: [],
 	};
 }

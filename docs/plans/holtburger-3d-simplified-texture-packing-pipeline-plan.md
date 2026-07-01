@@ -1650,7 +1650,7 @@ Acceptance criteria:
 - [x] Phase 11: delete vestigial code and obsolete tests.
 - [x] Resteering 4: audit textured drawable closure coverage.
 - [x] Phase 12: split texture binding requirement identity.
-- [ ] Phase 13: add structured-interior placement intents.
+- [x] Phase 13: add structured-interior placement intents.
 - [ ] Phase 14: make structured-interior baking placement-aware.
 - [ ] Phase 15: final drawable isomorphism cleanup.
 
@@ -1946,6 +1946,16 @@ Acceptance criteria:
   `DynamicEntityTextureRequirement` already carries the same effective fields with resource-scoped
   identity, and forcing a shared type before structured-interior work would add churn without
   simplifying the next phase.
+- Phase 13 added `structured-interior-placement-planner.ts` to discover renderable
+  structured-interior material texture placement intents before env-cell baking. The planner reuses
+  `planStructuredInteriorCellMaterials(...)` and the Phase 12 binding requirement helper, emits no
+  draw units, and leaves page legality to Phase 14.
+- Phase 13 wired structured-interior placement intents into `StaticCoordinator` source-ready work
+  for `env-cell-system`, alongside the existing env-cell static object and static-authored dynamic
+  intent paths.
+- Phase 13 made coordinator env-cell test fixtures structurally complete enough for pre-bake
+  structured-interior material planning. The old partial fixture was acceptable before the planner
+  read material fields but is now misleading test debt.
 
 ## Tracked Debt
 
@@ -2021,6 +2031,9 @@ Acceptance criteria:
 - Dynamic visual texture requirements remain a dynamic-specific adapter over the same identity
   concepts. Revisit during Phase 15 only if keeping the adapter creates duplicated cleanup or
   diagnostics work; do not block structured interiors on this naming convergence.
+- Phase 13 still leaves structured-interior draw-unit slicing placement-unaware and dependency
+  emission missing. That is intentional Phase 14 work; do not treat the presence of placement intents
+  as a complete structured-interior closure.
 
 ## Risks and Concessions
 

@@ -54,6 +54,7 @@ import {
 } from "../layer-owners";
 import { createStaticObjectTexturePlacementIntents } from "../objects/bake/static-object-placement-planner";
 import { createTerrainTexturePlacementIntents } from "../terrain/bake/terrain-geometry-baker";
+import { createStructuredInteriorTexturePlacementIntents } from "../env-cells/bake/structured-interior-placement-planner";
 import { isStaticObjectDomain } from "../objects/bake/static-object-batch-payload";
 import type {
 	TexturePlacementIntent,
@@ -553,6 +554,12 @@ export class StaticCoordinator {
 				: []),
 			...(options.pendingBatch.domain === "outdoor-terrain"
 				? createTerrainTexturePlacementIntents({
+						items: options.items,
+						staticBatchId: options.staticBatchId,
+					})
+				: []),
+			...(options.pendingBatch.domain === "env-cell-system"
+				? createStructuredInteriorTexturePlacementIntents({
 						items: options.items,
 						staticBatchId: options.staticBatchId,
 					})

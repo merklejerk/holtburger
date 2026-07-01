@@ -1,6 +1,6 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation in progress. Phases 0-9E are complete. This document defines the target
+Status: implementation in progress. Phases 0-9F are complete. This document defines the target
 model, north stars, risk surface, and phased cutover plan for replacing static-vs-dynamic object
 visual worker bifurcation with a shared object-like visual recipe graph.
 
@@ -1734,6 +1734,8 @@ Implementation notes after Phase 9E:
 
 ### Phase 9F: Source-Local Static Publication Baking
 
+Status: complete.
+
 Goal: make the unified baker able to emit reusable static resources from source-local geometry while
 still emitting direct draw units from transformed geometry where appropriate.
 
@@ -1768,6 +1770,27 @@ Deletion criteria:
 
 - Delete any helper that reconstructs generated-scenery source-local resources from already-baked
   draw units once Phase 9G uses this path.
+
+Implementation notes after Phase 9F:
+
+- `ObjectVisualBakedRenderPart` now carries `sourceLocalPayload` alongside its transformed
+  renderer payload. The transformed fields remain the direct draw-unit output; the source-local
+  payload is reserved for reusable visual resources.
+- The generic baker writes transformed positions and source-local positions during the same
+  partition pass. Material tables, texture ids, indices, texture coordinates, and material-slot
+  indices remain shared between the two geometry spaces.
+- `createObjectVisualStaticInstallSet` now publishes `StaticObjectVisualResource` geometry from
+  `renderPart.sourceLocalPayload` while static object and structured-interior direct draw units keep
+  using the transformed render part.
+- This preserves the recipe transform rule: geometry buffers are source-local and
+  `PartInstance.transform` remains the source-local to render-local transform. Transform application
+  is now a publication decision, not an unavoidable loss of source-local geometry.
+- Debt retained intentionally: Phase 9G still has to make static resolvers produce recipe-first
+  bundles and metadata directly. Until then, current static producers still feed the bridge from
+  legacy outputs.
+- Verification:
+  `npm --prefix apps/holtburger-3d run test:ts -- object-visual-baker object-visual-static-publication-baker`
+  and `npm --prefix apps/holtburger-3d run check`.
 
 ### Phase 9G: Static Object-Like Resolver Cutover
 

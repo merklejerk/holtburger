@@ -45,6 +45,8 @@ export interface ObjectVisualBakedRenderPart extends VisualGeometryPayload {
 	readonly instanceIds: readonly string[];
 	readonly partInstanceIndices: readonly number[];
 	readonly renderPartId: string;
+	/** Source-local geometry for reusable visual resources; direct draw units use transformed fields. */
+	readonly sourceLocalPayload: VisualGeometryPayload;
 	readonly sourcePartIndices: readonly number[];
 }
 
@@ -362,6 +364,7 @@ function createRenderPart(options: {
 }): ObjectVisualBakedRenderPart {
 	const vertexCount = options.partition.primitives.length * 3;
 	const positions = new Float32Array(vertexCount * 3);
+	const sourceLocalPositions = new Float32Array(vertexCount * 3);
 	const texCoords = new Float32Array(vertexCount * 2);
 	const materialSlotIndices = new Float32Array(vertexCount);
 	const indices =
@@ -399,6 +402,12 @@ function createRenderPart(options: {
 				sourceVertexIndex,
 				targetVertexIndex,
 			});
+			writeSourceLocalPosition({
+				positions: sourceLocalPositions,
+				source: primitive.buffer.positions,
+				sourceVertexIndex,
+				targetVertexIndex,
+			});
 			writeTexCoord({
 				source: primitive.buffer.texCoords,
 				sourceVertexIndex,
@@ -417,13 +426,10 @@ function createRenderPart(options: {
 		);
 	}
 
-	return {
+	const sharedPayload: Omit<VisualGeometryPayload, "positions"> = {
 		bounds: firstPrimitive.buffer.bounds,
 		indexType: indices instanceof Uint16Array ? "uint16" : "uint32",
 		indices,
-		instanceIds: uniqueSortedStrings(
-			options.partition.primitives.map((primitive) => primitive.instanceId),
-		),
 		materialEntries: materialEntries.map((entry, slot) => ({
 			...entry,
 			slot,
@@ -431,22 +437,7 @@ function createRenderPart(options: {
 		materialFamily: firstPrimitive.materialFamily,
 		materialPass: firstPrimitive.materialPass,
 		materialSlotIndices,
-		partInstanceIndices: uniqueSortedNumbers(
-			options.partition.primitives.map(
-				(primitive) => primitive.partInstanceIndex,
-			),
-		),
-		positions,
-		renderPartId: options.renderPartId,
 		renderState: firstPrimitive.renderState,
-		sourcePartIndices: uniqueSortedNumbers(
-			options.partition.primitives
-				.map((primitive) => primitive.sourcePartIndex)
-				.filter(
-					(sourcePartIndex): sourcePartIndex is number =>
-						sourcePartIndex !== null,
-				),
-		),
 		texCoords,
 		textureUseIds: uniqueSortedStrings(
 			materialEntries.flatMap((entry) =>
@@ -463,6 +454,45 @@ function createRenderPart(options: {
 		triangleCount: options.partition.primitives.length,
 		vertexCount,
 	};
+
+	return {
+		...sharedPayload,
+		instanceIds: uniqueSortedStrings(
+			options.partition.primitives.map((primitive) => primitive.instanceId),
+		),
+		partInstanceIndices: uniqueSortedNumbers(
+			options.partition.primitives.map(
+				(primitive) => primitive.partInstanceIndex,
+			),
+		),
+		positions,
+		renderPartId: options.renderPartId,
+		sourceLocalPayload: {
+			...sharedPayload,
+			positions: sourceLocalPositions,
+		},
+		sourcePartIndices: uniqueSortedNumbers(
+			options.partition.primitives
+				.map((primitive) => primitive.sourcePartIndex)
+				.filter(
+					(sourcePartIndex): sourcePartIndex is number =>
+						sourcePartIndex !== null,
+				),
+		),
+	};
+}
+
+function writeSourceLocalPosition(options: {
+	readonly positions: Float32Array;
+	readonly source: Float32Array;
+	readonly sourceVertexIndex: number;
+	readonly targetVertexIndex: number;
+}): void {
+	const sourceOffset = options.sourceVertexIndex * 3;
+	const targetOffset = options.targetVertexIndex * 3;
+	options.positions[targetOffset] = options.source[sourceOffset] ?? 0;
+	options.positions[targetOffset + 1] = options.source[sourceOffset + 1] ?? 0;
+	options.positions[targetOffset + 2] = options.source[sourceOffset + 2] ?? 0;
 }
 
 function createAnimationPartBindings(

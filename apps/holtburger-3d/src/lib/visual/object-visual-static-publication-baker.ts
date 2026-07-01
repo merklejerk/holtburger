@@ -14,6 +14,7 @@ import type {
 	ObjectVisualBakeResult,
 	ObjectVisualBakedRenderPart,
 } from "./object-visual-baker";
+import type { VisualGeometryPayload } from "./visual-geometry";
 import type {
 	ObjectVisualPartInstanceIndex,
 	ObjectVisualStaticInstancedRenderInstanceMetadata,
@@ -200,7 +201,7 @@ function createStaticObjectVisualResource(
 	resourceId: string,
 ): StaticObjectVisualResource {
 	return {
-		...createVisualResourcePayload(renderPart),
+		...createVisualResourcePayload(renderPart.sourceLocalPayload),
 		coordinateSpace: "static-object-source-local",
 		geometry: group.geometry,
 		key: {
@@ -267,7 +268,7 @@ function createStaticDrawUnitPayload(
 }
 
 function createVisualResourcePayload(
-	renderPart: ObjectVisualBakedRenderPart,
+	renderPart: VisualGeometryPayload,
 ): StaticObjectVisualPayloadFields &
 	Pick<StaticObjectVisualResource, "bounds"> {
 	return {

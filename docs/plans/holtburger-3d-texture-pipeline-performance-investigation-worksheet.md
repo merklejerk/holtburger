@@ -520,14 +520,14 @@ Phase 5 after metrics:
 | `terrain,env-cells` | settled | 30 | 866 | 128,617 | 34,537 | 15,935 | 73 | 7 | 14 |
 | full `0xda55ffff`, 360s | blocked | 57 requested / 51 committed / 4 failed / 6 baking | 572 installed / 651 committed | 144,949 | 1,496,929 | 23,019 | 153 | 23 active / 29 total | 34 |
 
-Phase 5 blocker:
+Phase 5 blocker observed at that point:
 
-- Full-scene correctness still fails after the texture-manager race and page-identity fixes.
-- The remaining concrete failure is generated-scenery reusable static-object resources in a multi-landblock commit. Example from the harness: `draw-unit:outdoor-generated-scenery:0xda56ffff:static-object-partition:slice-7-0` exceeded one page for `object-base-color` while installing the commit for `0xda56ffff`, `0xdb54ffff`, `0xdb55ffff`, and `0xdb56ffff`.
-- Isolated `terrain,generated-scenery` settles, so the failure depends on full-scene interaction/order or reusable-resource aggregation, not basic generated-scenery rendering alone.
-- This means Phase 6 cleanup is not appropriate yet. The next phase must focus on generated-scenery reusable static-object page legality under broad placement buckets.
+- Full-scene correctness still failed after the texture-manager race and page-identity fixes.
+- The remaining concrete failure was generated-scenery reusable static-object resources in a multi-landblock commit. Example from the harness: `draw-unit:outdoor-generated-scenery:0xda56ffff:static-object-partition:slice-7-0` exceeded one page for `object-base-color` while installing the commit for `0xda56ffff`, `0xdb54ffff`, `0xdb55ffff`, and `0xdb56ffff`.
+- Isolated `terrain,generated-scenery` settled, so the failure depended on full-scene interaction/order or reusable-resource aggregation, not basic generated-scenery rendering alone.
+- At that point, Phase 6 cleanup had to wait. The next phase needed to focus on generated-scenery reusable static-object page legality under broad placement buckets.
 
-Phase 5 steering:
+Phase 5 steering at that point:
 
 - Add a new Phase 5A before cleanup: reproduce the failing reusable generated-scenery partition in a segregated test or harness slice, then make the static object baker/resource aggregator preserve one-page-per-role legality using `textureRefId`.
 - Keep the texture-manager fixes. They removed real races and made isolated slices reliable.

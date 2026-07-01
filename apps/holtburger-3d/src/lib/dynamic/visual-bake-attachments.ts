@@ -7,6 +7,7 @@ import {
 import type { GfxObjPayloadDto } from "../host/contracts";
 import type { DynamicEntityRecipe, DynamicVisualBakeInput } from "./contracts";
 import type { StaticObjectCanonicalGeometryIdentity } from "../static/contracts";
+import { objectVisualGeometryBufferId } from "../visual/object-visual-recipe-bundle";
 import {
 	createStaticObjectSourceGeometryAttachment,
 	describeStaticObjectCanonicalGeometryIdentity,
@@ -19,7 +20,7 @@ export async function createDynamicVisualBakeSourceGeometry(
 ): Promise<DynamicVisualBakeInput["sourceGeometry"]> {
 	const identities = collectDynamicVisualCanonicalGeometryIdentities(recipes);
 	return Promise.all(
-		identities.map(async (identity) => {
+		identities.map(async (identity, bufferIndex) => {
 			if (identity.gfxObj.sourceAssetKind !== "gfx-obj") {
 				throw new Error(
 					`Dynamic visual geometry attachment ${describeStaticObjectCanonicalGeometryIdentity(
@@ -32,6 +33,7 @@ export async function createDynamicVisualBakeSourceGeometry(
 			const payload = requireGfxObjPayload(asset.payload, key);
 
 			return createStaticObjectSourceGeometryAttachment({
+				bufferId: objectVisualGeometryBufferId(bufferIndex),
 				gfxObj: payload,
 				identity,
 			});

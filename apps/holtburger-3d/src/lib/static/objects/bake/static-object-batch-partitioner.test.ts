@@ -22,6 +22,7 @@ import {
 } from "./static-object-batch-partitioner";
 import { createStaticObjectTexturePlacementIntents } from "./static-object-placement-planner";
 import { createStaticObjectSourceGeometryIdentity } from "../static-object-source-assets";
+import { objectVisualGeometryBufferId } from "../../../visual/object-visual-recipe-bundle";
 
 describe("static object batch partitioner", () => {
 	it("partitions compatible solid materials by bounded material table capacity", () => {
@@ -1638,9 +1639,24 @@ function createEnvCellStaticBakeInput(): StaticBakeBatchInput {
 						readonly texCoords: Float32Array;
 					};
 					return {
+						buffer: {
+							bounds: null,
+							bufferId: objectVisualGeometryBufferId(0),
+							coordinateSpace: "source-local",
+							normals: new Float32Array(fixturePart.positions.length),
+							positions: fixturePart.positions,
+							texCoords: fixturePart.texCoords,
+							triangleCount: part.triangles.length,
+							triangles: part.triangles.map((triangle) => ({
+								firstVertex: triangle.firstVertex,
+								materialVariantSignature:
+									triangle.materialVariantSignature ?? null,
+								polygonId: triangle.polygonId,
+								surfaceId: triangle.geometrySurfaceId,
+							})),
+							vertexCount: fixturePart.positions.length / 3,
+						},
 						identity: part.geometry.canonical,
-						positions: fixturePart.positions,
-						texCoords: fixturePart.texCoords,
 					};
 				}),
 			),
@@ -2033,9 +2049,24 @@ function createBakeInput(
 						readonly texCoords: Float32Array;
 					};
 					return {
+						buffer: {
+							bounds: null,
+							bufferId: objectVisualGeometryBufferId(0),
+							coordinateSpace: "source-local",
+							normals: new Float32Array(fixturePart.positions.length),
+							positions: fixturePart.positions,
+							texCoords: fixturePart.texCoords,
+							triangleCount: part.triangles.length,
+							triangles: part.triangles.map((triangle) => ({
+								firstVertex: triangle.firstVertex,
+								materialVariantSignature:
+									triangle.materialVariantSignature ?? null,
+								polygonId: triangle.polygonId,
+								surfaceId: triangle.geometrySurfaceId,
+							})),
+							vertexCount: fixturePart.positions.length / 3,
+						},
 						identity: part.geometry.canonical,
-						positions: fixturePart.positions,
-						texCoords: fixturePart.texCoords,
 					};
 				}),
 			),

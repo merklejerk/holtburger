@@ -1292,13 +1292,13 @@ function bakeStaticObjectVisualResourceGeometry(options: {
 			const sourceVertexIndex = sourceTriangle.firstVertex + triangleVertex;
 			const targetVertexIndex = triangleIndex * 3 + triangleVertex;
 			copySourcePosition({
-				source: sourceGeometry.positions,
+				source: sourceGeometry.buffer.positions,
 				sourceVertexIndex,
 				target: positions,
 				targetVertexIndex,
 			});
 			writeTexCoord({
-				source: sourceGeometry.texCoords,
+				source: sourceGeometry.buffer.texCoords,
 				sourceVertexIndex,
 				target: texCoords,
 				targetVertexIndex,
@@ -1833,7 +1833,7 @@ function bakeStaticObjectPartitionGeometry(
 			writeTransformedPosition({
 				matrix,
 				positions,
-				source: sourceGeometry.positions,
+				source: sourceGeometry.buffer.positions,
 				sourceVertexIndex,
 				targetVertexIndex,
 			});
@@ -1844,7 +1844,7 @@ function bakeStaticObjectPartitionGeometry(
 				targetVertexIndex,
 			);
 			writeTexCoord({
-				source: sourceGeometry.texCoords,
+				source: sourceGeometry.buffer.texCoords,
 				sourceVertexIndex,
 				target: texCoords,
 				targetVertexIndex,

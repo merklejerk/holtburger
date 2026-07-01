@@ -137,6 +137,8 @@ export interface ObjectVisualEmbeddedGeometryRecipe {
 
 /** Transfer/cache reference for a heavy source-local geometry payload. */
 export interface ObjectVisualGeometryBufferRef {
+	/** Source-local coordinate space for the heavy geometry payload. */
+	readonly coordinateSpace: "source-local";
 	readonly sourceKind: ObjectVisualSourceKind;
 	readonly sourceKey: string;
 	readonly vertexCount: number;
@@ -145,10 +147,42 @@ export interface ObjectVisualGeometryBufferRef {
 
 /** Heavy source-local geometry payload kept outside the recipe graph body. */
 export interface ObjectVisualGeometryBuffer {
+	/** Bundle-local id used by recipes to reference this sidecar. */
 	readonly bufferId: ObjectVisualGeometryBufferId;
-	readonly indices: Uint32Array;
+	/** All object visual sidecar geometry is authored in source-local space. */
+	readonly coordinateSpace: "source-local";
+	/** Optional source-local bounds copied from the prepared geometry payload. */
+	readonly bounds: ObjectVisualGeometryBounds | null;
+	/** Source-local normal attribute payload. */
+	readonly normals: Float32Array;
+	/** Source-local position attribute payload. */
 	readonly positions: Float32Array;
+	/** Source-local texture-coordinate attribute payload. */
 	readonly texCoords: Float32Array;
+	/** Source-local triangle metadata used for material binding and source tracing. */
+	readonly triangles: readonly ObjectVisualGeometryTriangle[];
+	/** Prepared source vertex count. */
+	readonly vertexCount: number;
+	/** Prepared source triangle count. */
+	readonly triangleCount: number;
+}
+
+export interface ObjectVisualGeometryBounds {
+	readonly max: ObjectVisualVec3;
+	readonly min: ObjectVisualVec3;
+}
+
+export interface ObjectVisualVec3 {
+	readonly x: number;
+	readonly y: number;
+	readonly z: number;
+}
+
+export interface ObjectVisualGeometryTriangle {
+	readonly firstVertex: number;
+	readonly materialVariantSignature: string | null;
+	readonly polygonId: number;
+	readonly surfaceId: number | null;
 }
 
 export interface ObjectVisualPartRecipe {
@@ -395,6 +429,17 @@ export function objectVisualGeometryBufferKey(
 	key: string,
 ): ObjectVisualGeometryBufferKey {
 	return createObjectVisualRecipeKey(key) as ObjectVisualGeometryBufferKey;
+}
+
+export function objectVisualGeometryBufferId(
+	id: number,
+): ObjectVisualGeometryBufferId {
+	if (!Number.isInteger(id) || id < 0) {
+		throw new Error(
+			"Object visual geometry buffer ids must be nonnegative integers.",
+		);
+	}
+	return id as ObjectVisualGeometryBufferId;
 }
 
 export function objectVisualPartRecipeKey(

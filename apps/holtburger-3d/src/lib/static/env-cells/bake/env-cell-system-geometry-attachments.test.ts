@@ -43,21 +43,24 @@ describe("browser landblock env-cell geometry attachments", () => {
 					kind: "env-cell-cell-structure-geometry",
 					landblockId: 0xda55ffff,
 				},
-				normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
-				positions: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8, 9]),
+				buffer: expect.objectContaining({
+					coordinateSpace: "source-local",
+					normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+					positions: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8, 9]),
+					texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
+					triangleCount: 1,
+					triangles: [
+						{
+							firstVertex: 0,
+							materialVariantSignature: "variant-a",
+							polygonId: 17,
+							surfaceId: 10,
+						},
+					],
+					vertexCount: 3,
+				}),
 				sourceId: 0xda550100,
 				surfaceIds: [10],
-				triangleCount: 1,
-				triangles: [
-					{
-						firstVertex: 0,
-						materialVariantSignature: "variant-a",
-						polygonId: 17,
-						surfaceId: 10,
-					},
-				],
-				uvs: new Float32Array([0, 0, 1, 0, 0, 1]),
-				vertexCount: 3,
 			}),
 		]);
 	});

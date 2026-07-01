@@ -43,9 +43,12 @@ describe("static object bake attachments", () => {
 		]);
 		expect(attachments.staticObjectSourceGeometry).toEqual([
 			expect.objectContaining({
+				buffer: expect.objectContaining({
+					coordinateSpace: "source-local",
+					positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+					texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
+				}),
 				identity: geometry.canonical,
-				positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
-				texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
 			}),
 		]);
 	});
@@ -109,9 +112,12 @@ describe("static object bake attachments", () => {
 		]);
 		expect(attachments.staticObjectSourceGeometry).toEqual([
 			expect.objectContaining({
+				buffer: expect.objectContaining({
+					coordinateSpace: "source-local",
+					positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+					texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
+				}),
 				identity: geometry.canonical,
-				positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
-				texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
 			}),
 		]);
 	});

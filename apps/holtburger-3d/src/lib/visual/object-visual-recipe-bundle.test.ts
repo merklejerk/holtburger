@@ -148,10 +148,25 @@ describe("object visual recipe bundle contracts", () => {
 			throw new Error("Fixture key registry did not create dense ids.");
 		}
 		const geometryBuffer: ObjectVisualGeometryBuffer = {
+			bounds: {
+				max: { x: 1, y: 1, z: 0 },
+				min: { x: 0, y: 0, z: 0 },
+			},
 			bufferId,
-			indices: new Uint32Array([0, 1, 2]),
+			coordinateSpace: "source-local",
+			normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
 			positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
 			texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
+			triangleCount: 1,
+			triangles: [
+				{
+					firstVertex: 0,
+					materialVariantSignature: null,
+					polygonId: 42,
+					surfaceId: 7,
+				},
+			],
+			vertexCount: 3,
 		};
 		const geometryRecipe: ObjectVisualGeometryRecipe = {
 			bufferId,
@@ -181,6 +196,7 @@ describe("object visual recipe bundle contracts", () => {
 				[
 					bufferId,
 					{
+						coordinateSpace: "source-local",
 						sourceKey: "env-cell:00010001",
 						sourceKind: "embedded-geometry",
 						triangleCount: 1,
@@ -216,7 +232,15 @@ describe("object visual recipe bundle contracts", () => {
 			textureRecipes: new Map([[textureRecipeId, textureRecipe]]),
 		};
 
-		expect(geometryBuffer.indices.length).toBe(3);
+		expect(geometryBuffer.coordinateSpace).toBe("source-local");
+		expect(geometryBuffer.triangles).toEqual([
+			{
+				firstVertex: 0,
+				materialVariantSignature: null,
+				polygonId: 42,
+				surfaceId: 7,
+			},
+		]);
 		expect(createObjectVisualReadyResolution(bundle)).toEqual({
 			bundle,
 			kind: "ready",

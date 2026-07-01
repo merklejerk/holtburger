@@ -17,6 +17,7 @@ import type {
 	TextureResourceDependencies,
 	TexturePlacementSnapshot,
 } from "../textures/placement";
+import type { ObjectVisualGeometryBuffer } from "../visual/object-visual-recipe-bundle";
 import type { VisualGeometryPayload } from "../visual/visual-geometry";
 
 export type StaticDomain =
@@ -970,15 +971,9 @@ export interface StaticBakeBatchAttachments {
 
 export interface EnvCellCellStructureGeometryAttachment {
 	readonly identity: EnvCellCellStructureGeometryIdentity;
+	readonly buffer: ObjectVisualGeometryBuffer;
 	readonly sourceId: number;
-	readonly vertexCount: number;
-	readonly triangleCount: number;
-	readonly positions: Float32Array;
-	readonly normals: Float32Array;
-	readonly uvs: Float32Array;
-	readonly triangles: EnvCellSystemLayerSourcePayloadDto["envCells"][number]["renderGeometry"]["triangles"];
 	readonly surfaceIds: readonly number[];
-	readonly bounds: StaticBounds | null;
 	readonly invalidPolygons: EnvCellSystemLayerSourcePayloadDto["envCells"][number]["renderGeometry"]["invalidPolygons"];
 	readonly skippedPolygonCount: number;
 }
@@ -993,8 +988,7 @@ export interface EnvCellCellStructureGeometryIdentity {
 
 export interface StaticObjectSourceGeometryAttachment {
 	readonly identity: StaticObjectCanonicalGeometryIdentity;
-	readonly positions: Float32Array;
-	readonly texCoords: Float32Array;
+	readonly buffer: ObjectVisualGeometryBuffer;
 }
 
 export type StaticPeerRecordOwner =

@@ -698,8 +698,8 @@ function createDynamicRenderPartPartitions(options: {
 	readonly texturePlacementSnapshot: DynamicVisualBakeInput["texturePlacementSnapshot"];
 }): readonly DynamicEntityRenderPart[] {
 	const triangles = options.part.triangles;
-	const sourcePositions = options.sourceGeometry.positions;
-	const sourceTexCoords = options.sourceGeometry.texCoords;
+	const sourcePositions = options.sourceGeometry.buffer.positions;
+	const sourceTexCoords = options.sourceGeometry.buffer.texCoords;
 	const renderEntries = uniqueMaterialRenderEntries(
 		options.part.materialSlots.flatMap((slot) => {
 			const materialUseKey = createDynamicSlotMaterialUseKey(slot);

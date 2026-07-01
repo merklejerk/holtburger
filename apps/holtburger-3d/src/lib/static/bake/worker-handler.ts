@@ -3,6 +3,7 @@ import type {
 	StaticBakeWorkerMainMessage,
 	StaticBakeWorkerResponse,
 } from "./protocol";
+import { runWithStaticBakeWorkerTraceSink } from "./worker-trace";
 
 export async function handleStaticBakeWorkerRequest(
 	baker: StaticBaker,
@@ -18,7 +19,15 @@ export async function handleStaticBakeWorkerRequest(
 			kind: "static-batch-bake-started",
 			requestId: message.requestId,
 		});
-		const result = await baker.bake(message.input);
+		const result = await runWithStaticBakeWorkerTraceSink(
+			(event) =>
+				postMessage({
+					event,
+					kind: "static-batch-bake-trace",
+					requestId: message.requestId,
+				}),
+			() => baker.bake(message.input),
+		);
 		postMessage({
 			kind: "static-batch-baked",
 			requestId: message.requestId,

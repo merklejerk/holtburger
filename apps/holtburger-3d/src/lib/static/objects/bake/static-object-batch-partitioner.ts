@@ -26,6 +26,7 @@ import {
 } from "../../bake/static-material-texture-policy";
 import type { TextureBindingRequirement, TexturePlacementSnapshot } from "../../../textures/placement";
 import { createObjectMaterialPageRequirementSliceGuard } from "../../bake/object-material-page-legality";
+import { emitStaticBakeWorkerTrace } from "../../bake/worker-trace";
 import { createStaticObjectMaterialCoverageReport } from "./static-object-material-coverage";
 import {
 	createStaticObjectMaterialUseKey,
@@ -218,7 +219,22 @@ export function partitionStaticObjectBatches(
 		readonly textureUseScopeId?: string;
 	} = {},
 ): StaticObjectBatchPartitionPlan {
+	emitStaticBakeWorkerTrace("static-object-partition:start", {
+		domain: payload.domain,
+		landblockId: formatHex32(payload.landblock.landblockId),
+		objectCount: payload.objects.length,
+		sourceAssetCount: payload.sourceAssets.length,
+		texturePlacementAware:
+			options.placementSnapshot !== undefined &&
+			options.textureUseScopeId !== undefined,
+	});
 	const materialPlan = planStaticObjectMaterials(payload);
+	emitStaticBakeWorkerTrace("static-object-partition:materials", {
+		domain: payload.domain,
+		fallbackReasonCount: materialPlan.fallbackReasons.length,
+		landblockId: formatHex32(payload.landblock.landblockId),
+		materialPlanCount: materialPlan.materialPlans.length,
+	});
 	const materialById = new Map(
 		materialPlan.materialPlans.map((plan) => [plan.materialUseKey, plan]),
 	);
@@ -227,6 +243,11 @@ export function partitionStaticObjectBatches(
 	const candidates = [
 		...createTriangleCandidates(payload, materialById, textureUseScopeId),
 	].sort(compareTriangleCandidates);
+	emitStaticBakeWorkerTrace("static-object-partition:candidates", {
+		candidateCount: candidates.length,
+		domain: payload.domain,
+		landblockId: formatHex32(payload.landblock.landblockId),
+	});
 	const partitions = sliceStaticMaterialBatchCandidates({
 		createSliceGuard:
 			placementSnapshot && textureUseScopeId
@@ -246,6 +267,13 @@ export function partitionStaticObjectBatches(
 			sliceIndex: slice.sliceIndex,
 		}),
 	);
+	emitStaticBakeWorkerTrace("static-object-partition:end", {
+		candidateCount: candidates.length,
+		domain: payload.domain,
+		landblockId: formatHex32(payload.landblock.landblockId),
+		partitionCount: partitions.length,
+		triangleCount: sumPartitionTriangles(partitions),
+	});
 
 	return {
 		domain: payload.domain,
@@ -836,6 +864,15 @@ function compareTriangleCandidates(
 		(left.materialVariantSignature ?? "").localeCompare(
 			right.materialVariantSignature ?? "",
 		)
+	);
+}
+
+function sumPartitionTriangles(
+	partitions: readonly StaticObjectBatchPartition[],
+): number {
+	return partitions.reduce(
+		(count, partition) => count + partition.triangleCount,
+		0,
 	);
 }
 

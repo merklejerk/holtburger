@@ -9,6 +9,7 @@ import type {
 	StaticBakerDiagnosticsSnapshot,
 	StaticDomain,
 	StaticMaterialUnrenderedBucket,
+	StaticSourceResolutionDiagnostics,
 	TerrainGeometryStaticDrawUnit,
 	TerrainMaterialFallbackReason,
 	VisualTextureDomain,
@@ -76,6 +77,7 @@ type RuntimeDiagnosticsDomainReport =
 export interface AssetServiceDiagnosticsReport {
 	readonly kind: "asset-service";
 	readonly summary: AssetServiceDiagnosticsSummary;
+	readonly pending?: readonly AssetServicePendingDiagnostics[];
 }
 
 interface AssetServiceDiagnosticsSummary {
@@ -84,6 +86,13 @@ interface AssetServiceDiagnosticsSummary {
 	readonly committed: number;
 	readonly leased: number;
 	readonly warmRetained: number;
+}
+
+interface AssetServicePendingDiagnostics {
+	readonly key: string;
+	readonly kind: string;
+	readonly revision: number;
+	readonly waiterCount: number;
 }
 
 export interface DynamicDiagnosticsReport {
@@ -169,6 +178,7 @@ export interface StaticCoordinatorDiagnosticsReport {
 	readonly timingSummary: StaticCoordinatorTimingSummaryDiagnostics;
 	readonly inFlightTasks?: readonly StaticCoordinatorTaskDiagnostics[];
 	readonly recentFailures?: readonly StaticCoordinatorTaskDiagnostics[];
+	readonly sourceResolutions?: readonly StaticSourceResolutionDiagnostics[];
 	readonly staticBaker?: StaticBakerDiagnosticsSnapshot;
 }
 
@@ -394,8 +404,15 @@ export function createConsoleRuntimeDiagnostics(): RuntimeDiagnostics {
 export function createAssetServiceDiagnosticsReport(
 	snapshot: AssetServiceSnapshot,
 ): AssetServiceDiagnosticsReport {
+	const pending = snapshot.pending.map((entry) => ({
+		key: `${entry.key.kind}:${entry.key.id}`,
+		kind: entry.key.kind,
+		revision: entry.revision,
+		waiterCount: entry.waiterCount,
+	}));
 	return {
 		kind: "asset-service",
+		...(pending.length > 0 ? { pending } : {}),
 		summary: {
 			committed: snapshot.committed.length,
 			leased: snapshot.committed.filter((entry) => entry.leaseCount > 0).length,

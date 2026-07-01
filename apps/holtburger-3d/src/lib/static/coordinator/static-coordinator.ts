@@ -17,6 +17,7 @@ import type {
 	StaticDrawUnit,
 	LayerOwnerLifecycle,
 	LayerOwnerState,
+	StaticLandblockSceneLodResolution,
 	StaticLandblockSceneLodLayerRequest,
 	StaticLandblockSceneLodSourceRequest,
 	StaticLandblockSceneLodSourceResolver,
@@ -31,6 +32,7 @@ import type {
 	StaticRetentionReconciliation,
 	StaticScopePayload,
 	StaticScopePrepCommit,
+	StaticSourceResolutionDiagnostics,
 	TerrainStaticScopePayloadSummary,
 	StaticActiveBakeStage,
 	StaticLayerTaskStatus,
@@ -64,6 +66,7 @@ import type {
 const DEFAULT_STATIC_BATCH_MAX_PAYLOADS = 10;
 const DEFAULT_STATIC_BATCH_COALESCE_DELAY_MS = 500;
 const STATIC_COORDINATOR_RECENT_DIAGNOSTICS_LIMIT = 20;
+const STATIC_COORDINATOR_SOURCE_DIAGNOSTICS_LIMIT = 80;
 const DEFAULT_STATIC_BAKE_ATTACHMENT_PROVIDER: StaticBakeAttachmentProvider = {
 	createAttachments: () => Promise.resolve(createEmptyStaticBakeAttachments()),
 };
@@ -156,6 +159,9 @@ export class StaticCoordinator {
 		string,
 		StaticMaterialCoverageReport
 	>();
+	readonly #sourceResolutionDiagnostics: MutableStaticSourceResolutionDiagnostics[] =
+		[];
+	#nextSourceResolutionSequence = 0;
 	constructor(options: StaticCoordinatorOptions) {
 		this.#resolver = options.resolver;
 		this.#baker = options.baker;
@@ -339,6 +345,8 @@ export class StaticCoordinator {
 				revision: this.#revision,
 				staticBakerDiagnostics:
 					this.#baker.createDiagnosticsSnapshot?.() ?? null,
+				sourceResolutionDiagnostics:
+					this.#createSourceResolutionDiagnosticsSnapshot(),
 				staticObjectBakeDiagnostics: Array.from(
 					this.#latestStaticObjectBakeDiagnosticsByKey.values(),
 				).sort(compareStaticObjectBakeDiagnostics),
@@ -398,12 +406,22 @@ export class StaticCoordinator {
 			}
 		}
 		const resolverStartedAt = nowMs();
+		const sourceDiagnostics = this.#beginSourceResolutionDiagnostics({
+			sourceRequest,
+			tasks: Array.from(tasksByOwnerId.values()),
+		});
 		let resolution: Awaited<
 			ReturnType<StaticLandblockSceneLodSourceResolver["resolveSource"]>
 		>;
 		try {
 			resolution = await this.#resolver.resolveSource(sourceRequest);
 		} catch (error: unknown) {
+			this.#finishSourceResolutionDiagnostics(sourceDiagnostics, {
+				error: error instanceof Error ? error.message : String(error),
+				resolution: null,
+				resolverMs: nowMs() - resolverStartedAt,
+				status: "failed",
+			});
 			for (const task of tasksByOwnerId.values()) {
 				this.#markTaskFailedIfCurrent(
 					task,
@@ -413,6 +431,12 @@ export class StaticCoordinator {
 			return;
 		}
 		const resolverMs = nowMs() - resolverStartedAt;
+		this.#finishSourceResolutionDiagnostics(sourceDiagnostics, {
+			error: null,
+			resolution,
+			resolverMs,
+			status: "resolved",
+		});
 		const dynamicRecipesByOwnerId = groupDynamicRecipesByOwnerId(
 			resolution.dynamicRecipes,
 		);
@@ -1012,6 +1036,92 @@ export class StaticCoordinator {
 		}
 	}
 
+	#beginSourceResolutionDiagnostics(options: {
+		readonly sourceRequest: StaticLandblockSceneLodSourceRequest;
+		readonly tasks: readonly MutableStaticLayerTaskState[];
+	}): MutableStaticSourceResolutionDiagnostics {
+		const requestSeq = this.#nextSourceResolutionSequence;
+		this.#nextSourceResolutionSequence += 1;
+		const revision = options.tasks[0]?.revision ?? this.#revision;
+		const diagnostics: MutableStaticSourceResolutionDiagnostics = {
+			context: options.sourceRequest.context,
+			dynamicPlacementCount: null,
+			dynamicRecipeCount: null,
+			error: null,
+			landblockHex: formatHex32(options.sourceRequest.landblockId),
+			landblockId: options.sourceRequest.landblockId,
+			layerKinds: options.sourceRequest.requestedLayers.map(
+				(layer) => layer.kind,
+			),
+			ownerIds: options.tasks.map((task) => task.ownerId),
+			recipeCount: null,
+			requestId: `source-resolution:${revision}:${requestSeq}`,
+			requestSeq,
+			resolverMs: null,
+			revision,
+			sourceLod: options.sourceRequest.sourceLod,
+			status: "pending",
+			submittedAtMs: nowMs(),
+			taskIds: options.tasks.map((task) => task.taskId),
+		};
+		this.#sourceResolutionDiagnostics.push(diagnostics);
+		if (
+			this.#sourceResolutionDiagnostics.length >
+			STATIC_COORDINATOR_SOURCE_DIAGNOSTICS_LIMIT
+		) {
+			this.#sourceResolutionDiagnostics.splice(
+				0,
+				this.#sourceResolutionDiagnostics.length -
+					STATIC_COORDINATOR_SOURCE_DIAGNOSTICS_LIMIT,
+			);
+		}
+		this.#emit();
+		return diagnostics;
+	}
+
+	#finishSourceResolutionDiagnostics(
+		diagnostics: MutableStaticSourceResolutionDiagnostics,
+		result: {
+			readonly status: "resolved" | "failed";
+			readonly resolverMs: number;
+			readonly resolution: StaticLandblockSceneLodResolution | null;
+			readonly error: string | null;
+		},
+	): void {
+		diagnostics.status = result.status;
+		diagnostics.resolverMs = result.resolverMs;
+		diagnostics.error = result.error;
+		diagnostics.recipeCount = result.resolution?.recipes.length ?? null;
+		diagnostics.dynamicPlacementCount =
+			result.resolution?.dynamicPlacements.length ?? null;
+		diagnostics.dynamicRecipeCount =
+			result.resolution?.dynamicRecipes.length ?? null;
+		this.#emit();
+	}
+
+	#createSourceResolutionDiagnosticsSnapshot(): readonly StaticSourceResolutionDiagnostics[] {
+		return this.#sourceResolutionDiagnostics.map((diagnostics) => ({
+			ageMs: nowMs() - diagnostics.submittedAtMs,
+			context: diagnostics.context,
+			dynamicPlacementCount: diagnostics.dynamicPlacementCount,
+			dynamicRecipeCount: diagnostics.dynamicRecipeCount,
+			error: diagnostics.error,
+			landblockHex: diagnostics.landblockHex,
+			landblockId: diagnostics.landblockId,
+			layerKinds: diagnostics.layerKinds,
+			ownerIds: diagnostics.ownerIds,
+			recipeCount: diagnostics.recipeCount,
+			requestId: diagnostics.requestId,
+			requestSeq: diagnostics.requestSeq,
+			resolverMs: diagnostics.resolverMs,
+			revision: diagnostics.revision,
+			sourceLod: diagnostics.sourceLod,
+			status: diagnostics.status,
+			submittedAtMs: diagnostics.submittedAtMs,
+			taskIds: diagnostics.taskIds,
+		}));
+	}
+
 	#markTaskFailedIfCurrent(
 		task: MutableStaticLayerTaskState,
 		message: string,
@@ -1252,6 +1362,26 @@ type MutableStaticLayerTaskState = {
 		| "materializing"
 		| "committed"
 		| "failed";
+};
+
+type MutableStaticSourceResolutionDiagnostics = {
+	readonly requestSeq: number;
+	readonly requestId: string;
+	readonly revision: number;
+	readonly landblockId: number;
+	readonly landblockHex: string;
+	readonly context: StaticLandblockSceneLodSourceRequest["context"];
+	readonly sourceLod: StaticLandblockSceneLodSourceRequest["sourceLod"];
+	readonly layerKinds: readonly StaticLandblockSceneLodLayerRequest["kind"][];
+	readonly taskIds: readonly string[];
+	readonly ownerIds: readonly string[];
+	status: StaticSourceResolutionDiagnostics["status"];
+	readonly submittedAtMs: number;
+	resolverMs: number | null;
+	recipeCount: number | null;
+	dynamicPlacementCount: number | null;
+	dynamicRecipeCount: number | null;
+	error: string | null;
 };
 
 interface StaticReconciliationRunState {

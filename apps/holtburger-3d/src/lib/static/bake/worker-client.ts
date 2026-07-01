@@ -3,6 +3,7 @@ import type {
 	StaticBakeBatchResult,
 	StaticBaker,
 	StaticBakerDiagnosticsSnapshot,
+	StaticBakerTraceEvent,
 } from "../contracts";
 import type {
 	StaticBakeWorkerPort,
@@ -16,7 +17,10 @@ interface PendingBakeRequest {
 	readonly reject: (error: Error) => void;
 	stage: "queued" | "executing";
 	stageStartedAtMs: number;
+	traceEvents: StaticBakerTraceEvent[];
 }
+
+const MAX_STATIC_BAKER_TRACE_EVENTS = 64;
 
 interface StaticBakeWorkerClientOptions {
 	readonly disposePort?: () => void;
@@ -62,6 +66,7 @@ export class StaticBakeWorkerClient implements StaticBaker {
 				resolve,
 				stage: "queued",
 				stageStartedAtMs: queuedAtMs,
+				traceEvents: [],
 			});
 			this.#port.postMessage({
 				input,
@@ -101,6 +106,7 @@ export class StaticBakeWorkerClient implements StaticBaker {
 					stage: pending.stage,
 					stageAgeMs: currentNowMs - pending.stageStartedAtMs,
 					stageStartedAtMs: pending.stageStartedAtMs,
+					traceEvents: pending.traceEvents,
 				}),
 			),
 			workerCount: 1,
@@ -116,6 +122,17 @@ export class StaticBakeWorkerClient implements StaticBaker {
 		if (response.kind === "static-batch-bake-started") {
 			pending.stage = "executing";
 			pending.stageStartedAtMs = nowMs();
+			return;
+		}
+
+		if (response.kind === "static-batch-bake-trace") {
+			pending.traceEvents.push(response.event);
+			if (pending.traceEvents.length > MAX_STATIC_BAKER_TRACE_EVENTS) {
+				pending.traceEvents.splice(
+					0,
+					pending.traceEvents.length - MAX_STATIC_BAKER_TRACE_EVENTS,
+				);
+			}
 			return;
 		}
 
@@ -221,6 +238,7 @@ export class WorkerPoolStaticBaker implements StaticBaker {
 					stage: "queued" as const,
 					stageAgeMs: currentNowMs - request.queuedAtMs,
 					stageStartedAtMs: request.queuedAtMs,
+					traceEvents: [],
 				})),
 				...this.#bakers.flatMap((baker, workerIndex) =>
 					(baker.createDiagnosticsSnapshot?.().pendingJobs ?? []).map(

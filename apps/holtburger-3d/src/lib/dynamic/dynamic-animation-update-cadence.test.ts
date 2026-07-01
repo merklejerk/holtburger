@@ -226,7 +226,6 @@ function createReadyDynamicRecord(options: {
 				retentionPolicy: {
 					kind: "explicit-runtime-lifetime",
 				},
-				textureBatchId: `runtime-dynamic:${entityId}`,
 				textureDomain: "runtime-object-material",
 			},
 			visualSource: {

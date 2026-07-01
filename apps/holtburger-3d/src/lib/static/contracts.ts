@@ -440,7 +440,7 @@ export type MaterialTextureDataUseIdentity =
 	| PreparedRenderSurfaceTextureUseIdentity
 	| PaletteTextureUseIdentity;
 
-export type StaticTextureUseIdentity =
+type StaticTextureUseIdentity =
 	| SurfaceTextureIdentity
 	| RenderSurfaceIdentity
 	| PaletteIdentity
@@ -1867,7 +1867,7 @@ export interface StaticBakerDiagnosticsSnapshot {
 	readonly workerCount: number | null;
 }
 
-export interface StaticBakerJobDiagnostics {
+interface StaticBakerJobDiagnostics {
 	readonly requestId: string;
 	readonly bakeBatchId: string;
 	readonly domain: StaticDomain;

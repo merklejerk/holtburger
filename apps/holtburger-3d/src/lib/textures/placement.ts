@@ -27,7 +27,7 @@ export type TexturePlacementBucketKey = string & {
 };
 
 /** Lifetime/churn policy that decides how broadly placement may be shared. */
-export type TexturePlacementBucketLifetime =
+type TexturePlacementBucketLifetime =
 	| {
 			/** Static-authored resources can share across source-ready bake closures. */
 			readonly kind: "static-authored";

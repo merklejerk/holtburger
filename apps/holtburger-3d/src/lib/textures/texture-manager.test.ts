@@ -1231,7 +1231,7 @@ describe("browser texture manager", () => {
 		});
 	});
 
-	it("reuses compatible textures across independent static batches", async () => {
+	it("reuses compatible textures across independent static buckets", async () => {
 		const assetService = new FixtureAssetService();
 		const textureManager = new TextureManager({
 			assetService,
@@ -1259,6 +1259,19 @@ describe("browser texture manager", () => {
 				},
 			],
 			placements: [],
+		});
+		expect(textureManager.createDiagnosticsReport()).toMatchObject({
+			buckets: [
+				{
+					domain: "outdoor-terrain",
+					texturePageCount: 1,
+					uniqueSourceCount: 1,
+				},
+			],
+			summary: {
+				bucketCount: 1,
+				texturePageCount: 1,
+			},
 		});
 	});
 
@@ -1496,7 +1509,7 @@ describe("browser texture manager", () => {
 			removedOwners: [],
 			textureUses: [
 				createDynamicTextureUseCommit({
-					textureBatchId: "batch-a",
+					placementBucketKey: "batch-a",
 					textureDomain: "outdoor-generated-scenery",
 					renderSurfaceId: 0x06000010,
 					resourceId: "dynamic-windmill-part-0",
@@ -1559,14 +1572,14 @@ describe("browser texture manager", () => {
 			removedOwners: [],
 			textureUses: [
 				createDynamicTextureUseCommit({
-					textureBatchId: "runtime-dynamic:runtime-spawn:1",
+					placementBucketKey: "runtime-dynamic:runtime-spawn:1",
 					textureDomain: "runtime-object-material",
 					renderSurfaceId: 0x06000010,
 					resourceId: "dynamic-visual-resource:runtime-spawn:1",
 					textureUseId: "runtime-spawn:1:base:0",
 				}),
 				createDynamicTextureUseCommit({
-					textureBatchId: "runtime-dynamic:runtime-spawn:1",
+					placementBucketKey: "runtime-dynamic:runtime-spawn:1",
 					textureDomain: "runtime-object-material",
 					renderSurfaceId: 0x06000020,
 					resourceId: "dynamic-visual-resource:runtime-spawn:1",
@@ -1583,7 +1596,7 @@ describe("browser texture manager", () => {
 				gutterPixels: 4,
 			},
 		});
-		expect(textureManager.createDiagnosticsReport().batches).toMatchObject([
+		expect(textureManager.createDiagnosticsReport().buckets).toMatchObject([
 				{
 					domain: "runtime-object-material",
 					texturePageCount: 1,
@@ -1642,14 +1655,14 @@ describe("browser texture manager", () => {
 			removedOwners: [],
 			textureUses: [
 				createDynamicTextureUseCommit({
-					textureBatchId: "runtime-dynamic:runtime-spawn:1",
+					placementBucketKey: "runtime-dynamic:runtime-spawn:1",
 					textureDomain: "runtime-object-material",
 					renderSurfaceId: 0x06000010,
 					resourceId: "dynamic-visual-resource:runtime-spawn:1",
 					textureUseId: "runtime-spawn:1:base:0",
 				}),
 				createDynamicTextureUseCommit({
-					textureBatchId: "runtime-dynamic:runtime-spawn:1",
+					placementBucketKey: "runtime-dynamic:runtime-spawn:1",
 					textureDomain: "runtime-object-material",
 					renderSurfaceId: 0x06000020,
 					resourceId: "dynamic-visual-resource:runtime-spawn:1",
@@ -1702,7 +1715,7 @@ describe("browser texture manager", () => {
 			removedOwners: [],
 			textureUses: [
 				createDynamicTextureUseCommit({
-					textureBatchId: "batch-a",
+					placementBucketKey: "batch-a",
 					textureDomain: "outdoor-generated-scenery",
 					renderSurfaceId: 0x06000010,
 					resourceId: "dynamic-windmill-part-0",
@@ -2283,7 +2296,7 @@ function createTextureUseCommit(options: {
 }
 
 function createDynamicTextureUseCommit(options: {
-	readonly textureBatchId: string;
+	readonly placementBucketKey: string;
 	readonly textureDomain: VisualTextureDomain;
 	readonly renderSurfaceId: number;
 	readonly resourceId: string;
@@ -2307,12 +2320,12 @@ function createDynamicTextureUseCommit(options: {
 		placementBucketKey:
 			options.textureDomain === "runtime-object-material"
 				? createRuntimeAuthoredDynamicTexturePlacementBucketKey({
-						entityId: options.textureBatchId,
+						entityId: options.placementBucketKey,
 						purpose,
 					})
 				: createStaticAuthoredDynamicTexturePlacementBucketKey({
 						domain: options.textureDomain,
-						ownerId: options.textureBatchId,
+						ownerId: options.placementBucketKey,
 						purpose,
 					}),
 		textureDomain: options.textureDomain,

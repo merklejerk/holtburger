@@ -2,8 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { StaticLayerPeerRecordOwner } from "../static/contracts";
 import {
 	createDynamicVisualResourceId,
-	createRuntimeDynamicTextureBatchId,
-	createStaticAuthoredDynamicTextureBatchId,
 	type BakedDynamicVisualResource,
 	type DynamicEntityRecipe,
 	type DynamicEntityTransformState,
@@ -12,6 +10,10 @@ import {
 	type DynamicVisualMaterialPolicy,
 	type DynamicVisualRecipe,
 } from "./contracts";
+import {
+	createRuntimeAuthoredDynamicTexturePlacementBucketKey,
+	createStaticAuthoredDynamicTexturePlacementBucketKey,
+} from "../textures/placement";
 
 describe("dynamic visual contracts", () => {
 	it("keeps static-authored and runtime-authored recipes isomorphic at the visual boundary", () => {
@@ -27,17 +29,23 @@ describe("dynamic visual contracts", () => {
 		expect(staticRecipe.visual).toBe(runtimeRecipe.visual);
 	});
 
-	it("uses dynamic-owned texture batch identities", () => {
+	it("uses dynamic-owned texture placement bucket identities", () => {
 		expect(
-			createStaticAuthoredDynamicTextureBatchId({
-				entityId: "static-authored-outdoor:test",
+			createStaticAuthoredDynamicTexturePlacementBucketKey({
+				domain: "outdoor-buildings",
 				ownerId: "outdoor-buildings:0xda55ffff",
+				purpose: "object-base-color",
 			}),
 		).toBe(
-			"dynamic-static-authored:outdoor-buildings:0xda55ffff:static-authored-outdoor:test",
+			"texture-placement-bucket|outdoor-buildings|static-authored-object|object-base-color|static-authored-dynamic:outdoor-buildings:0xda55ffff",
 		);
-		expect(createRuntimeDynamicTextureBatchId("runtime-dynamic:1")).toBe(
-			"runtime-dynamic:runtime-dynamic:1",
+		expect(
+			createRuntimeAuthoredDynamicTexturePlacementBucketKey({
+				entityId: "runtime-dynamic:1",
+				purpose: "object-base-color",
+			}),
+		).toBe(
+			"texture-placement-bucket|runtime-object-material|runtime-authored-object|object-base-color|runtime-authored-dynamic:runtime-dynamic:1",
 		);
 	});
 

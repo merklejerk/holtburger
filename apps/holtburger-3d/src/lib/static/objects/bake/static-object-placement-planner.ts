@@ -31,6 +31,7 @@ export function createStaticObjectTexturePlacementIntents(input: {
 					}
 					const requirement = createStaticMaterialTextureBindingRequirement({
 						dataUse,
+						domain: item.task.domain,
 						textureUseNamespace: "static-object-texture",
 						textureUseScopeId: item.task.ownerId,
 						wrapMode: entry.textureWrapMode,

@@ -913,7 +913,7 @@ function createTerrainTextureBindingRequirement(
 		textureUseId: bindingKey,
 		purpose: classifyTextureUsagePurpose(
 			textureUse.preparedTextureUse,
-			"terrain",
+			"outdoor-terrain",
 		),
 		samplingPolicy: undefined,
 		source: {

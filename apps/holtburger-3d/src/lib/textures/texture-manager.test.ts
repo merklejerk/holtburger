@@ -23,7 +23,6 @@ import {
 	type DynamicTextureUseCommit,
 } from "./texture-manager";
 import {
-	classifyTexturePlacementPool,
 	classifyTextureUsagePurpose,
 	createRuntimeAuthoredDynamicTexturePlacementBucketKey,
 	createStaticAuthoredDynamicTexturePlacementBucketKey,
@@ -31,7 +30,7 @@ import {
 } from "./placement";
 
 const STATIC_TERRAIN_COLOR_BUCKET =
-	"texture-placement-bucket|outdoor-terrain|terrain|terrain-color|static-authored";
+	"texture-placement-bucket|outdoor-terrain|terrain-color|static-authored";
 const STABLE_TEXTURE_REF_ID = `texture-ref:outdoor-terrain:${STATIC_TERRAIN_COLOR_BUCKET}:terrain-a:prepared-texture:06000010`;
 
 describe("browser texture manager", () => {
@@ -915,7 +914,6 @@ describe("browser texture manager", () => {
 		expect(placement).toMatchObject({
 			height: 256,
 			itemId: "terrain-pre-bake:prepared-texture:06000010",
-			pool: "terrain",
 			purpose: "terrain-color",
 			rect: [0, 0, 1, 1],
 			width: 256,
@@ -928,7 +926,6 @@ describe("browser texture manager", () => {
 				freeable: true,
 				itemId: "terrain-pre-bake:prepared-texture:06000010",
 				pageId: placement?.pageId,
-				pool: "terrain",
 				purpose: "terrain-color",
 				rect: [0, 0, 1, 1],
 			},
@@ -2387,10 +2384,7 @@ function createDynamicTextureUseCommit(options: {
 		},
 		usage: options.usage ?? "rgba-color",
 	};
-	const purpose = classifyTextureUsagePurpose(
-		source,
-		classifyTexturePlacementPool(options.textureDomain),
-	);
+	const purpose = classifyTextureUsagePurpose(source, options.textureDomain);
 	return {
 		placementBucketKey:
 			options.textureDomain === "runtime-object-material"

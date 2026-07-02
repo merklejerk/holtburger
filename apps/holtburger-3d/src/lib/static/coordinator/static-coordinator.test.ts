@@ -432,13 +432,11 @@ describe("static coordinator", () => {
 		expect(
 			envCellSourceReady?.objectVisualPlacementIntents.map((intent) => ({
 				itemId: intent.itemId,
-				pool: intent.pool,
 				purpose: intent.purpose,
 			})),
 		).toEqual([
 			{
 				itemId: 0,
-				pool: "static-authored-object",
 				purpose: "object-base-color",
 			},
 		]);

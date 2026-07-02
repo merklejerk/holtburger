@@ -283,6 +283,7 @@ export function partitionStaticObjectBatches(
 }
 
 function createStaticObjectTextureRequirements(options: {
+	readonly domain: ObjectVisualSourcePayload["domain"];
 	readonly placementSnapshot: ObjectVisualTexturePlacementSnapshot;
 	readonly plan: ObjectVisualMaterialPlan;
 	readonly textureUseScopeId: string;
@@ -294,6 +295,7 @@ function createStaticObjectTextureRequirements(options: {
 		.map((dataUse) => {
 			const requirement = createStaticMaterialTextureBindingRequirement({
 				dataUse,
+				domain: options.domain,
 				textureUseNamespace: "static-object-texture",
 				textureUseScopeId: options.textureUseScopeId,
 				wrapMode: options.textureWrapMode,
@@ -392,6 +394,7 @@ function createTriangleCandidates(
 				);
 				const textureRequirements = textureUseScopeId
 					? createStaticObjectTextureRequirements({
+							domain: payload.domain,
 							placementSnapshot: requireObjectVisualPlacementSnapshot({
 								placementSnapshot,
 								subject: "Static object material",

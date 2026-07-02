@@ -5,7 +5,6 @@ import type {
 	VisualTextureDomain,
 } from "../static/contracts";
 import {
-	classifyTexturePlacementPool,
 	classifyTextureUsagePurpose,
 	createDynamicTexturePlacementIntent,
 	createRuntimeAuthoredDynamicTexturePlacementBucketKey,
@@ -17,48 +16,37 @@ import {
 
 describe("texture placement vocabulary bridge", () => {
 	it.each([
-		["rgba-color", "static-authored-object", "object-base-color"],
-		["rgba-raw", "static-authored-object", "object-base-color"],
-		["rgba-detail", "static-authored-object", "object-detail"],
-		["rgba-mask", "static-authored-object", "object-base-color"],
-		["index8", "static-authored-object", "object-index"],
-		["index16", "static-authored-object", "object-index"],
-		["rgba-color", "terrain", "terrain-color"],
-		["rgba-raw", "terrain", "terrain-color"],
-		["rgba-detail", "terrain", "terrain-detail"],
-		["rgba-mask", "terrain", "terrain-mask"],
-	] as const)("classifies %s in %s as %s", (usage, pool, expectedPurpose) => {
+		["rgba-color", "outdoor-buildings", "object-base-color"],
+		["rgba-raw", "outdoor-buildings", "object-base-color"],
+		["rgba-detail", "outdoor-buildings", "object-detail"],
+		["rgba-mask", "outdoor-buildings", "object-base-color"],
+		["index8", "runtime-object-material", "object-index"],
+		["index16", "runtime-object-material", "object-index"],
+		["rgba-color", "outdoor-terrain", "terrain-color"],
+		["rgba-raw", "outdoor-terrain", "terrain-color"],
+		["rgba-detail", "outdoor-terrain", "terrain-detail"],
+		["rgba-mask", "outdoor-terrain", "terrain-mask"],
+	] as const)("classifies %s in %s as %s", (usage, domain, expectedPurpose) => {
 		expect(
-			classifyTextureUsagePurpose(createPreparedDataUse(usage), pool),
+			classifyTextureUsagePurpose(createPreparedDataUse(usage), domain),
 		).toBe(expectedPurpose);
 	});
 
-	it("classifies palette uses by pool while preserving palette range identity", () => {
+	it("classifies palette uses by domain while preserving palette range identity", () => {
 		const dataUse = createPaletteDataUse();
 
-		expect(classifyTextureUsagePurpose(dataUse, "static-authored-object")).toBe(
+		expect(classifyTextureUsagePurpose(dataUse, "outdoor-buildings")).toBe(
 			"object-palette",
 		);
 		expect(
-			classifyTextureUsagePurpose(dataUse, "runtime-authored-object"),
+			classifyTextureUsagePurpose(dataUse, "runtime-object-material"),
 		).toBe("object-palette");
-		expect(classifyTextureUsagePurpose(dataUse, "terrain")).toBe(
+		expect(classifyTextureUsagePurpose(dataUse, "outdoor-terrain")).toBe(
 			"terrain-color",
 		);
 	});
 
-	it.each([
-		["outdoor-terrain", "terrain"],
-		["outdoor-buildings", "static-authored-object"],
-		["outdoor-explicit-objects", "static-authored-object"],
-		["outdoor-generated-scenery", "static-authored-object"],
-		["env-cell-system", "static-authored-object"],
-		["runtime-object-material", "runtime-authored-object"],
-	] as const)("maps %s to %s pool", (domain, pool) => {
-		expect(classifyTexturePlacementPool(domain)).toBe(pool);
-	});
-
-	it("maps terrain static texture uses to the terrain pool", () => {
+	it("maps terrain static texture uses to terrain purposes", () => {
 		const textureUse = createStaticTextureUse({
 			domain: "outdoor-terrain",
 			source: createPreparedDataUse("rgba-mask"),
@@ -68,12 +56,11 @@ describe("texture placement vocabulary bridge", () => {
 		expect(createStaticTexturePlacementIntent(textureUse)).toMatchObject({
 			domain: "outdoor-terrain",
 			itemId: "terrain:mask:06000010",
-			pool: "terrain",
 			purpose: "terrain-mask",
 		});
 	});
 
-	it("maps static-authored dynamic object texture uses to the static-authored object pool", () => {
+	it("maps static-authored dynamic object texture uses to object purposes", () => {
 		const textureUse = createDynamicTextureUse({
 			source: createPreparedDataUse("rgba-detail"),
 			textureDomain: "outdoor-generated-scenery",
@@ -97,12 +84,11 @@ describe("texture placement vocabulary bridge", () => {
 				ownerId: "static-layer-owner:generated:0xda55ffff",
 				purpose: "object-detail",
 			}),
-			pool: "static-authored-object",
 			purpose: "object-detail",
 		});
 	});
 
-	it("maps runtime-authored dynamic object texture uses to the runtime-authored object pool", () => {
+	it("maps runtime-authored dynamic object texture uses to object purposes", () => {
 		const textureUse = createDynamicTextureUse({
 			source: createPreparedDataUse("index16"),
 			textureDomain: "runtime-object-material",
@@ -126,7 +112,6 @@ describe("texture placement vocabulary bridge", () => {
 					purpose: "object-index",
 				},
 			),
-			pool: "runtime-authored-object",
 			purpose: "object-index",
 		});
 	});

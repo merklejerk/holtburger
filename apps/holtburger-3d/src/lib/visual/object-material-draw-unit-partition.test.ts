@@ -170,7 +170,6 @@ function createPlacementSnapshot(
 					height: 16,
 					itemId,
 					pageId: `page:${textureRefId}`,
-					pool: "static-authored-object" as const,
 					purpose,
 					rect: [0, 0, 16, 16] as const,
 					textureRefId,

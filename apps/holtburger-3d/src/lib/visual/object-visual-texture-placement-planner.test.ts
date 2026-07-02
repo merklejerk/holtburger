@@ -34,13 +34,11 @@ describe("object visual texture placement planner", () => {
 			{
 				affinityKey: "static-object|batch:a",
 				domain: "outdoor-generated-scenery",
-				pool: "static-authored-object",
 				textureUseId: "texture-use:a",
 			},
 			{
 				affinityKey: "static-object|batch:b",
 				domain: "outdoor-generated-scenery",
-				pool: "static-authored-object",
 				textureUseId: "texture-use:b",
 			},
 		]);
@@ -102,7 +100,6 @@ describe("object visual texture placement planner", () => {
 				domain: "runtime-object-material",
 				itemId: 0,
 				placementBucketKey,
-				pool: "runtime-authored-object",
 				textureUseId: "dynamic-texture-use:a",
 			},
 		]);

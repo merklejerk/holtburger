@@ -861,6 +861,7 @@ function createStaticObjectGeometryBakeOutput(options: {
 	readonly sourceIndex: StaticObjectBakeSourceIndex;
 }): StaticObjectGeometryBakeOutput {
 	const materialEntries = createStaticObjectMaterialTableEntries({
+		domain: options.task.domain,
 		partition: options.partition,
 		textureUseScopeId: options.resourceIdPrefix,
 	});
@@ -980,6 +981,7 @@ function createLayerPeerRecordOwner(
 }
 
 function createStaticObjectMaterialTableEntries(options: {
+	readonly domain: StaticBakeTask["domain"];
 	readonly partition: StaticObjectBatchPartition;
 	readonly textureUseScopeId: string;
 }): readonly StaticMaterialTableEntry[] {
@@ -988,6 +990,7 @@ function createStaticObjectMaterialTableEntries(options: {
 			createTextureUseId: (dataUse, wrapMode) =>
 				createStaticObjectTextureUseId({
 					dataUse,
+					domain: options.domain,
 					textureUseScopeId: options.textureUseScopeId,
 					wrapMode,
 				}),
@@ -1288,11 +1291,13 @@ function bakeStaticObjectPartitionGeometry(
 
 function createStaticObjectTextureUseId(options: {
 	readonly dataUse: MaterialTextureDataUseIdentity;
+	readonly domain: StaticBakeTask["domain"];
 	readonly textureUseScopeId: string;
 	readonly wrapMode: StaticObjectBatchPartition["textureWrapMode"];
 }): string {
 	return createStaticMaterialTextureBindingRequirement({
 		dataUse: options.dataUse,
+		domain: options.domain,
 		textureUseNamespace: "static-object-texture",
 		textureUseScopeId: options.textureUseScopeId,
 		wrapMode: options.wrapMode,

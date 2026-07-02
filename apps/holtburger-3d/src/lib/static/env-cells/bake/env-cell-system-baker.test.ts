@@ -16,6 +16,7 @@ import { bakeEnvCellSystem } from "./env-cell-system-baker";
 import { createEnvCellCellStructureGeometryIdentity } from "./env-cell-system-geometry-resources";
 import { createStructuredInteriorTexturePlacementIntents } from "./structured-interior-placement-planner";
 import {
+	OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
 	objectVisualGeometryBufferId,
 	type ObjectVisualGeometryTriangle,
 } from "../../../visual/object-visual-recipe-bundle";
@@ -689,7 +690,8 @@ function createInputWithRenderableStaticSeed(
 						triangles: [
 							{
 								firstVertex: 0,
-								materialVariantSignature: null,
+								materialVariantSignature:
+									OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
 								polygonId: 0,
 								surfaceId: 0,
 							},
@@ -801,7 +803,7 @@ function createGeometrySidecar(
 	const triangles = options.triangles ?? [
 		{
 			firstVertex: 0,
-			materialVariantSignature: null,
+			materialVariantSignature: OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
 			polygonId: 1,
 			surfaceId: 0,
 		},

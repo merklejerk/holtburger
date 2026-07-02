@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { bakeObjectVisuals } from "../../../visual/object-visual-baker";
 import {
+	OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
 	objectVisualGeometryBufferId,
 	type ObjectVisualGeometryTriangle,
 } from "../../../visual/object-visual-recipe-bundle";
@@ -86,7 +87,7 @@ describe("structured interior visual bundle producer", () => {
 				}),
 			],
 			memberId: "cell-0",
-			sourceTriangleIds: ["polygon:1|surface:0|first:0|variant:none"],
+			sourceTriangleIds: ["polygon:1|surface:0|first:0|variant:base"],
 			surfaceIds: [TEST_MATERIAL_ID],
 		});
 		expect(installSet.directDrawUnits[0]?.triangleCount).toBe(1);
@@ -114,6 +115,50 @@ describe("structured interior visual bundle producer", () => {
 			kind: "missing-dependencies",
 			missingDependencies: [{ sourceKind: "env-cell-cell-structure-geometry" }],
 		});
+	});
+
+	it("preserves triangle material variants in cell-structure material bindings", () => {
+		const payload = createPayload();
+		const envCell = payload.envCells[0];
+		if (!envCell) {
+			throw new Error("Missing fixture env cell.");
+		}
+		const expansion = createStructuredInteriorVisualBundleExpansion({
+			geometrySidecars: {
+				envCellCellStructureGeometry: [
+					createGeometrySidecar(envCell, {
+						materialVariantSignature: "sampler=repeat",
+					}),
+				],
+			},
+			envCell,
+			payload,
+			task: createTask(),
+		});
+
+		expect(expansion.resolution.kind).toBe("ready");
+		if (expansion.resolution.kind !== "ready") {
+			throw new Error("Expected ready visual bundle.");
+		}
+		const partRecipe = [...expansion.resolution.bundle.partRecipes.values()][0];
+		expect(partRecipe?.materialBindings).toMatchObject([
+			{
+				geometrySurfaceId: 0,
+				materialVariantSignature: "sampler=repeat",
+			},
+		]);
+
+		const bake = bakeObjectVisuals({
+			bundle: expansion.resolution.bundle,
+			geometryBuffers: expansion.geometryBuffers,
+			renderPartIdPrefix: "structured-interior-variant-fixture",
+		});
+		expect(bake.renderParts).toHaveLength(1);
+		expect(bake.renderParts[0]?.triangleCount).toBe(1);
+		expect(
+			expansion.publicationMetadata?.structuredInteriorPublications[0]
+				?.sourceTriangleIds,
+		).toEqual(["polygon:1|surface:0|first:0|variant:sampler=repeat"]);
 	});
 
 	it("keeps empty render geometry as a ready empty visual bundle", () => {
@@ -309,11 +354,17 @@ function createMaterialSource(): StaticObjectMaterialSourceFacts {
 
 function createGeometrySidecar(
 	envCell: LandblockEnvCellStaticFacts,
+	options: {
+		readonly materialVariantSignature?: string | null;
+	} = {},
 ): EnvCellCellStructureGeometrySidecar {
+	const materialVariantSignature =
+		options.materialVariantSignature ??
+		OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE;
 	const triangles: readonly ObjectVisualGeometryTriangle[] = [
 		{
 			firstVertex: 0,
-			materialVariantSignature: null,
+			materialVariantSignature,
 			polygonId: 1,
 			surfaceId: 0,
 		},

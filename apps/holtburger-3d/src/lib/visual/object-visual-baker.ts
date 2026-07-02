@@ -4,16 +4,22 @@ import {
 } from "../math/ac-placement-transform";
 import type { TextureResourceDependencies } from "../textures/placement";
 import { MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW } from "../renderer/types";
+import {
+	createObjectVisualTriangleMaterialBindingKey,
+	formatObjectVisualMaterialVariantSignature,
+} from "./object-visual-recipe-bundle";
 import type {
 	DynamicAnimationPartBinding,
 	ObjectVisualGeometryBuffer,
 	ObjectVisualGeometryBufferId,
+	ObjectVisualMaterialVariantSignature,
 	ObjectVisualMaterialRecipe,
 	ObjectVisualMaterialRecipeId,
 	ObjectVisualPartMaterialBinding,
 	ObjectVisualPartRecipeId,
 	ObjectVisualRecipeBundle,
 	ObjectVisualTextureRecipeId,
+	ObjectVisualTriangleMaterialBindingKey,
 } from "./object-visual-recipe-bundle";
 import type {
 	VisualGeometryMaterialFamily,
@@ -146,14 +152,11 @@ function expandRenderablePrimitives(
 				`Object visual geometry recipe ${partRecipe.geometryRecipeId} references missing geometry buffer ${geometryRecipe.bufferId}.`,
 			);
 		}
-		const bindingsByTriangleMaterial = new Map(
-			partRecipe.materialBindings.map((binding) => [
-				createTriangleMaterialBindingKey({
-					materialVariantSignature: binding.materialVariantSignature,
-					surfaceId: binding.geometrySurfaceId,
-				}),
-				binding,
-			]),
+		const bindingsByTriangleMaterial = createMaterialBindingsByTriangleMaterial(
+			{
+				bindings: partRecipe.materialBindings,
+				partRecipeId: instance.partRecipeId,
+			},
 		);
 
 		for (const triangle of buffer.triangles) {
@@ -161,11 +164,9 @@ function expandRenderablePrimitives(
 				bindingsByTriangleMaterial,
 				partRecipeId: instance.partRecipeId,
 				materialVariantSignature: triangle.materialVariantSignature,
+				polygonId: triangle.polygonId,
 				surfaceId: triangle.surfaceId,
 			});
-			if (!binding) {
-				continue;
-			}
 			const materialRecipe = input.bundle.materialRecipes.get(
 				binding.materialRecipeId,
 			);
@@ -215,42 +216,70 @@ function expandRenderablePrimitives(
 
 function resolveTriangleMaterialBinding(options: {
 	readonly bindingsByTriangleMaterial: ReadonlyMap<
-		string,
+		ObjectVisualTriangleMaterialBindingKey,
 		ObjectVisualPartMaterialBinding
 	>;
-	readonly materialVariantSignature: string | null;
+	readonly materialVariantSignature: ObjectVisualMaterialVariantSignature;
 	readonly partRecipeId: ObjectVisualPartRecipeId;
+	readonly polygonId: number;
 	readonly surfaceId: number | null;
-}): ObjectVisualPartMaterialBinding | null {
+}): ObjectVisualPartMaterialBinding {
 	if (options.surfaceId !== null) {
-		return (
-			options.bindingsByTriangleMaterial.get(
-				createTriangleMaterialBindingKey({
-					materialVariantSignature: options.materialVariantSignature,
-					surfaceId: options.surfaceId,
-				}),
-			) ?? null
-		);
+		const key = createObjectVisualTriangleMaterialBindingKey({
+			materialVariantSignature: options.materialVariantSignature,
+			surfaceId: options.surfaceId,
+		});
+		const binding = options.bindingsByTriangleMaterial.get(key);
+		if (!binding) {
+			throw new Error(
+				`Object visual part recipe ${options.partRecipeId} has no material binding for polygon ${options.polygonId}, surface ${options.surfaceId}, variant ${formatObjectVisualMaterialVariantSignature(
+					options.materialVariantSignature,
+				)}.`,
+			);
+		}
+		return binding;
 	}
 	if (options.bindingsByTriangleMaterial.size === 1) {
-		return [...options.bindingsByTriangleMaterial.values()][0] ?? null;
+		const binding = options.bindingsByTriangleMaterial.values().next().value;
+		if (!binding) {
+			throw new Error(
+				`Object visual part recipe ${options.partRecipeId} has no material binding for polygon ${options.polygonId}.`,
+			);
+		}
+		return binding;
 	}
-	if (options.bindingsByTriangleMaterial.size > 1) {
-		console.warn(
-			`Skipped object visual triangle with no surface id in part recipe ${options.partRecipeId}; ${options.bindingsByTriangleMaterial.size} material bindings are ambiguous.`,
-		);
-	}
-	return null;
+	throw new Error(
+		`Object visual part recipe ${options.partRecipeId} has triangle polygon ${options.polygonId} without a surface id and ${options.bindingsByTriangleMaterial.size} material bindings; binding is ambiguous.`,
+	);
 }
 
-function createTriangleMaterialBindingKey(options: {
-	readonly materialVariantSignature: string | null;
-	readonly surfaceId: number;
-}): string {
-	return [
-		`surface:${options.surfaceId}`,
-		`variant:${options.materialVariantSignature ?? "none"}`,
-	].join("|");
+function createMaterialBindingsByTriangleMaterial(options: {
+	readonly bindings: readonly ObjectVisualPartMaterialBinding[];
+	readonly partRecipeId: ObjectVisualPartRecipeId;
+}): ReadonlyMap<
+	ObjectVisualTriangleMaterialBindingKey,
+	ObjectVisualPartMaterialBinding
+> {
+	const bindingsByTriangleMaterial = new Map<
+		ObjectVisualTriangleMaterialBindingKey,
+		ObjectVisualPartMaterialBinding
+	>();
+	for (const binding of options.bindings) {
+		const key = createObjectVisualTriangleMaterialBindingKey({
+			materialVariantSignature: binding.materialVariantSignature,
+			surfaceId: binding.geometrySurfaceId,
+		});
+		const existing = bindingsByTriangleMaterial.get(key);
+		if (existing) {
+			throw new Error(
+				`Object visual part recipe ${options.partRecipeId} has duplicate material bindings for surface ${binding.geometrySurfaceId}, variant ${formatObjectVisualMaterialVariantSignature(
+					binding.materialVariantSignature,
+				)}.`,
+			);
+		}
+		bindingsByTriangleMaterial.set(key, binding);
+	}
+	return bindingsByTriangleMaterial;
 }
 
 function createMaterialTableEntry(options: {

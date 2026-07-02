@@ -1176,7 +1176,7 @@ function createSourceTriangleId(
 		`polygon:${triangle.polygonId}`,
 		`surface:${triangle.surfaceId ?? "none"}`,
 		`first:${triangle.firstVertex}`,
-		`variant:${triangle.materialVariantSignature ?? "none"}`,
+		`variant:${triangle.materialVariantSignature}`,
 	].join("|");
 }
 

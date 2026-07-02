@@ -214,7 +214,7 @@ interface ObjectVisualVec3 {
 
 export interface ObjectVisualGeometryTriangle {
 	readonly firstVertex: number;
-	readonly materialVariantSignature: string | null;
+	readonly materialVariantSignature: ObjectVisualMaterialVariantSignature;
 	readonly polygonId: number;
 	readonly surfaceId: number | null;
 }
@@ -228,10 +228,84 @@ export interface ObjectVisualPartRecipe {
 export interface ObjectVisualPartMaterialBinding {
 	readonly geometrySurfaceId: number;
 	/** Source triangle material variant, such as legacy sampler policy, covered by this binding. */
-	readonly materialVariantSignature: string | null;
+	readonly materialVariantSignature: ObjectVisualMaterialVariantSignature;
 	readonly materialRecipeId: ObjectVisualMaterialRecipeId;
 	readonly materialSlot: number;
 	readonly polygonIds: readonly number[];
+}
+
+export const OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE = "base";
+
+/** Normalized source-authored material variant. Source DTO nulls are converted to the explicit base variant at the adapter boundary. */
+export type ObjectVisualMaterialVariantSignature = string;
+
+export type ObjectVisualTriangleMaterialBindingKey = string & {
+	readonly __brand: "ObjectVisualTriangleMaterialBindingKey";
+};
+
+export function createObjectVisualTriangleMaterialBindingKey(options: {
+	readonly materialVariantSignature: ObjectVisualMaterialVariantSignature;
+	readonly surfaceId: number;
+}): ObjectVisualTriangleMaterialBindingKey {
+	return [
+		`surface:${options.surfaceId}`,
+		`variant:${formatObjectVisualMaterialVariantSignature(
+			options.materialVariantSignature,
+		)}`,
+	].join("|") as ObjectVisualTriangleMaterialBindingKey;
+}
+
+export function addObjectVisualPartMaterialBinding(options: {
+	readonly binding: ObjectVisualPartMaterialBinding;
+	readonly bindingsByTriangleMaterial: Map<
+		ObjectVisualTriangleMaterialBindingKey,
+		ObjectVisualPartMaterialBinding
+	>;
+	readonly ownerLabel: string;
+}): void {
+	const key = createObjectVisualTriangleMaterialBindingKey({
+		materialVariantSignature: options.binding.materialVariantSignature,
+		surfaceId: options.binding.geometrySurfaceId,
+	});
+	const existing = options.bindingsByTriangleMaterial.get(key);
+	if (!existing) {
+		options.bindingsByTriangleMaterial.set(key, options.binding);
+		return;
+	}
+	if (
+		existing.materialRecipeId !== options.binding.materialRecipeId ||
+		existing.materialSlot !== options.binding.materialSlot
+	) {
+		throw new Error(
+			`${options.ownerLabel} has conflicting material bindings for surface ${options.binding.geometrySurfaceId}, variant ${options.binding.materialVariantSignature}.`,
+		);
+	}
+	options.bindingsByTriangleMaterial.set(key, {
+		...existing,
+		polygonIds: mergeObjectVisualPolygonIds(
+			existing.polygonIds,
+			options.binding.polygonIds,
+		),
+	});
+}
+
+function mergeObjectVisualPolygonIds(
+	left: readonly number[],
+	right: readonly number[],
+): readonly number[] {
+	return [...new Set([...left, ...right])];
+}
+
+export function formatObjectVisualMaterialVariantSignature(
+	signature: ObjectVisualMaterialVariantSignature,
+): string {
+	return signature;
+}
+
+export function objectVisualMaterialVariantSignature(
+	sourceSignature: string | null | undefined,
+): ObjectVisualMaterialVariantSignature {
+	return sourceSignature ?? OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE;
 }
 
 export type ObjectVisualResidency =

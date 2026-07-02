@@ -2487,7 +2487,10 @@
 					</section>
 				</div>
 			{:else if activeTab === "resources"}
-				<div class="browser-display__tab-panel" role="tabpanel">
+				<div
+					class="browser-display__tab-panel browser-display__tab-panel--resources"
+					role="tabpanel"
+				>
 					<section class="browser-display__control-group">
 						<h2>Runtime Resources</h2>
 						<div class="browser-display__resource-grid">
@@ -2558,7 +2561,9 @@
 						</dl>
 					</section>
 
-					<section class="browser-display__control-group">
+					<section
+						class="browser-display__control-group browser-display__control-group--atlas-pages"
+					>
 						<h2>Atlas Pages</h2>
 						<label class="browser-display__field">
 							<span>Filter</span>
@@ -2999,10 +3004,13 @@
 		position: absolute;
 		top: 16px;
 		right: 16px;
+		bottom: 16px;
 		z-index: 1;
+		display: flex;
+		flex-direction: column;
 		width: min(380px, calc(100vw - 32px));
-		max-height: calc(100vh - 32px);
-		overflow: auto;
+		min-height: 0;
+		overflow: hidden;
 		padding: 10px;
 		border: 1px solid rgba(91, 255, 187, 0.58);
 		border-radius: 6px;
@@ -3018,6 +3026,8 @@
 	.browser-display__panel--collapsed {
 		left: auto;
 		right: 16px;
+		bottom: auto;
+		display: block;
 		width: auto;
 		max-height: none;
 		overflow: visible;
@@ -3083,6 +3093,7 @@
 	}
 
 	.browser-display__tabs {
+		flex: 0 0 auto;
 		display: grid;
 		grid-template-columns: repeat(5, minmax(0, 1fr));
 		gap: 5px;
@@ -3097,14 +3108,27 @@
 	}
 
 	.browser-display__tab-panel {
+		flex: 1 1 auto;
 		display: grid;
+		align-content: start;
 		gap: 9px;
+		grid-auto-rows: max-content;
+		min-height: 0;
 		margin: 0;
+		overflow: auto;
+	}
+
+	.browser-display__tab-panel--resources {
+		align-content: stretch;
+		grid-template-rows: max-content minmax(0, 1fr);
+		overflow: hidden;
 	}
 
 	.browser-display__form {
 		display: grid;
+		align-content: start;
 		gap: 9px;
+		grid-auto-rows: max-content;
 		margin: 0;
 	}
 
@@ -3220,6 +3244,13 @@
 		border-radius: 4px;
 		background: rgba(9, 38, 31, 0.48);
 		font-size: 12px;
+	}
+
+	.browser-display__control-group--atlas-pages {
+		align-content: start;
+		grid-template-rows: max-content max-content max-content minmax(0, 1fr);
+		min-height: 0;
+		overflow: hidden;
 	}
 
 	.browser-display__checkbox-row {
@@ -3365,8 +3396,9 @@
 
 	.browser-display__atlas-list {
 		display: grid;
+		align-content: start;
 		gap: 5px;
-		max-height: 280px;
+		min-height: 0;
 		overflow: auto;
 		padding-right: 2px;
 	}
@@ -3559,14 +3591,15 @@
 		.browser-display__panel {
 			left: 10px;
 			right: 10px;
+			bottom: 10px;
 			top: 10px;
 			width: auto;
-			max-height: calc(100vh - 20px);
 		}
 
 		.browser-display__panel--collapsed {
 			left: auto;
 			right: 10px;
+			bottom: auto;
 			width: auto;
 			max-height: none;
 		}

@@ -1,6 +1,9 @@
 import { createEmptyStaticBakeJobResources } from "../../bake/resources";
 import { requirePreparedRenderGeometryBuffers } from "../../../assets/preparation/prepared-render-geometry";
-import { objectVisualGeometryBufferId } from "../../../visual/object-visual-recipe-bundle";
+import {
+	objectVisualGeometryBufferId,
+	objectVisualMaterialVariantSignature,
+} from "../../../visual/object-visual-recipe-bundle";
 import type {
 	EnvCellCellStructureGeometrySidecar,
 	EnvCellCellStructureGeometryIdentity,
@@ -148,7 +151,9 @@ function createEnvCellCellStructureGeometrySidecar(options: {
 			triangleCount: renderGeometry.triangleCount,
 			triangles: renderGeometry.triangles.map((triangle) => ({
 				firstVertex: triangle.firstVertex,
-				materialVariantSignature: triangle.materialVariantSignature ?? null,
+				materialVariantSignature: objectVisualMaterialVariantSignature(
+					triangle.materialVariantSignature,
+				),
 				polygonId: triangle.polygonId,
 				surfaceId: triangle.surfaceId,
 			})),

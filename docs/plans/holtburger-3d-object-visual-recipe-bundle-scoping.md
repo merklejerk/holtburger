@@ -1,7 +1,8 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation complete through Phase 19C. Residual cleanup and profiling follow-ups remain
-tracked in the phase notes below.
+Status: implementation complete through Phase 19C. Phase 20 and later were added after completion
+audit/dry-run found remaining DTO ownership, dynamic bake-shape, and publication-type neutrality
+debt that still blocks the Definition of Done.
 
 ## Purpose
 
@@ -3432,6 +3433,218 @@ Spicy bits and retained debt:
 - Source record ownership is still not fully visual-owned because `ObjectVisualSourcePayload` aliases
   static resolver facts. A later resolver-record pass can address that without blocking the
   publication metadata convergence.
+
+### Phase 20: Visual-Owned Source Records
+
+Status: planned.
+
+Goal: replace the remaining static-owned source fact aliases inside the neutral object visual source
+DTO with visual-owned record types.
+
+Context:
+
+- The Phase 19 dry run found that `ObjectVisualSourcePayload` is neutral in name but still aliases
+  static resolver facts such as `OutdoorStaticObjectsScopePayload["sourceAssets"]`,
+  `materialSources`, `paletteSources`, `materialSlots`, and `textureRefs`.
+- Dynamic visuals build this DTO directly, but their contracts still import static object source
+  fact types for setup model, material, palette, texture, and geometry sidecar records.
+- This is the biggest remaining source of accidental static-object type gravity. Leaving it in place
+  makes later bundle ownership and dynamic bake-shape cleanup look cleaner than it really is.
+
+Deliverables:
+
+- Add visual-owned source fact record types for:
+  - source identities/assets/parts;
+  - material source facts and material slot facts;
+  - palette source facts;
+  - texture reference facts;
+  - source object/part instance facts with residency and compact provenance.
+- Change `ObjectVisualSourcePayload` to use the new visual-owned records instead of indexing into
+  `OutdoorStaticObjectsScopePayload`.
+- Keep static-domain normalizers responsible for converting `StaticScopePayload` records into the
+  visual-owned DTO. Do not promote static job semantics into `src/lib/visual`.
+- Keep structured interior cell-structure geometry and `gfx_obj` geometry as sidecars, not embedded
+  heavyweight fields.
+- Update dynamic contracts so runtime-authored and static-authored dynamics describe their effective
+  setup-model/setup-appearance output through the same visual-owned source records.
+
+Acceptance criteria:
+
+- `src/lib/visual/object-visual-source-payload.ts` no longer imports `OutdoorStaticObjectsScopePayload`
+  or aliases static contracts for payload fields.
+- Dynamic visual contracts no longer need static object source fact types for effective visual
+  source records, except where a deliberate static source identity conversion boundary remains.
+- Static and dynamic source normalizers produce the same visual-owned DTO shape for equivalent visual
+  facts.
+- Existing resolver-safe metadata, numeric id, sidecar, unsupported-material, and missing-dependency
+  behavior remains unchanged.
+- Focused static object, structured interior, dynamic visual, material planner, placement planner,
+  `check`, `lint:dead`, and `format:check` validation passes.
+
+Spicy bits to watch:
+
+- Do not create an adapter layer that mirrors the static contracts one-for-one and preserves the
+  same ownership problem under new names. The record types should be visual-owned because they
+  describe effective visual facts, not because we copy-pasted static interfaces.
+- Do not collapse source provenance so far that picking, source mapping, dynamic animation binding,
+  or generated-scenery instancing lose the identities they need.
+
+### Phase 21: Neutral Bundle Expansion Ownership
+
+Status: planned.
+
+Goal: move shared object visual bundle expansion/planning ownership out of the static object bake
+folder once its inputs are visual-owned.
+
+Context:
+
+- `createObjectVisualSourceBundleExpansion(...)` and
+  `createObjectVisualSourceRecipePlan(...)` are neutral entry points, but the implementation still
+  lives in `static/objects/bake/static-object-visual-bundle-producer.ts`.
+- That location was tolerable while the producer consumed static-owned source facts. After Phase 20,
+  keeping the shared expansion producer in a static folder becomes misleading architectural debt.
+
+Deliverables:
+
+- Move the shared source-to-`ObjectVisualRecipeBundle` producer into `src/lib/visual`.
+- Keep static-only source normalizers, static source mapping, publication metadata, and
+  generated-scenery runtime policy in static/runtime modules.
+- Rename helper types/functions whose current names say `StaticObjectSource...` but whose behavior
+  is now genuinely object-visual source behavior.
+- Update imports and tests so dynamic code depends on visual-owned bundle expansion, not a static
+  object bake module.
+
+Acceptance criteria:
+
+- Dynamic visual code no longer imports bundle expansion or recipe-plan functions from
+  `static/objects/bake`.
+- Static object and structured-interior paths still reach the same recipe graph through their
+  static-domain normalizers.
+- No renderer publication or runtime residency policy moves into the visual bundle producer.
+- Focused bundle producer, dynamic visual, static object bake, structured interior, `check`,
+  `lint:dead`, and `format:check` validation passes.
+
+Spicy bits to watch:
+
+- If moving the file starts pulling static publication/source-mapping policy into `src/lib/visual`,
+  split the helper first. Visual-owned does not mean "everything that used to be nearby gets moved."
+
+### Phase 22: Dynamic Single-Visual Bake Contract
+
+Status: planned.
+
+Goal: remove dynamic visual bake batching semantics so runtime-authored and static-authored dynamic
+visuals use single-visual bake jobs like static object-like domains now do.
+
+Context:
+
+- Static bake batching was removed in Phase 17. Dynamic visual baking still exposes
+  `DynamicVisualBakeInput.batchId` and `recipes[]`, which preserves the old "one worker message may
+  contain semantic bake batch work" pattern.
+- The runtime may still enqueue many visual bake jobs and run workers concurrently. This phase only
+  removes batch identity from the dynamic baker contract; it should not reduce scheduling
+  throughput.
+
+Deliverables:
+
+- Replace `DynamicVisualBakeInput.recipes[]` with one effective dynamic visual recipe per bake job.
+- Replace `DynamicVisualBakeResult.products[]` with a single baked/skipped product result.
+- Remove or rename `batchId` in dynamic bake contracts, fake workers, worker clients, runtime
+  scheduling, browser harness reporting, and tests. Use entity/revision/job identity where stale
+  work correlation is still needed.
+- Update static-authored dynamic visual correlation so it does not derive identity from static bake
+  batch concepts.
+- Delete ossified tests that only prove dynamic bake batching existed; replace them with tests for
+  independent job dispatch, stale result rejection, and worker concurrency where needed.
+
+Acceptance criteria:
+
+- Production dynamic baker-facing contracts have no `batchId`, `recipes[]`, or `products[]` fields
+  for semantic visual batching.
+- Static-authored and runtime-authored dynamic visuals both bake through the single-visual dynamic
+  job shape.
+- Worker/client scheduling can still process multiple dynamic visual jobs without conflating their
+  results.
+- Browser harness diagnostics report dynamic bake job/entity identity rather than batch identity.
+- Focused dynamic worker-client, dynamic visual baker, runtime, browser harness, `check`,
+  `lint:dead`, and `format:check` validation passes.
+
+Spicy bits to watch:
+
+- Keep renderer material partition batches. "Batch" remains valid for renderer-legal draw-unit
+  grouping; this phase targets semantic bake batching only.
+- If runtime scheduling uses dynamic batch ids for stale-work protection, replace them with explicit
+  entity/revision/job identity instead of deleting the protection.
+
+### Phase 23: Object Visual Publication Type Neutrality
+
+Status: planned.
+
+Goal: make the shared object visual install/publication shape depend on visual-owned publication and
+resource records rather than static-owned renderer resource contracts.
+
+Context:
+
+- `ObjectVisualInstallSet` is the shared install/publication shell, but it still imports
+  `StaticDrawUnit`, `StaticObjectRenderInstance`, and `StaticObjectVisualResource`.
+- The runtime shell is thin enough now, but the type ownership still says static objects own reusable
+  object visual resources. That is not true after static, structured interior, generated-scenery, and
+  dynamic visuals converge on the same recipe/baker model.
+
+Deliverables:
+
+- Introduce visual-owned publication/resource/instance type names for object visual install sets.
+- Keep renderer draw-unit compatibility at the renderer boundary; do not make the resolver or baker
+  reason about static object install buckets.
+- Rename or move reusable object visual resource key helpers if they are now visual-owned rather
+  than static-object-owned.
+- Update runtime install shells, static coordinator, env-cell publication, generated-scenery
+  diagnostics, and tests to consume the visual-owned names.
+
+Acceptance criteria:
+
+- `src/lib/visual/object-visual-install-set.ts` no longer imports static object visual resource or
+  render-instance types as its canonical publication records.
+- Static object-like and env-cell runtime publication still route one shared install set without
+  reconstructing visual payloads from legacy draw-unit/resource buckets.
+- Generated-scenery reusable resource publication remains recipe/part-instance driven and does not
+  infer resources backward from baked draw units.
+- Focused runtime install, static coordinator, env-cell publication, generated scenery, browser
+  harness, `check`, `lint:dead`, and `format:check` validation passes.
+
+Spicy bits to watch:
+
+- Renderer draw units are allowed at the final renderer boundary. The smell is static-owned
+  publication/resource records pretending to be the canonical shared object visual model.
+
+### Phase 24: Completion Audit And Final Validation
+
+Status: planned.
+
+Goal: prove the Definition of Done against current code instead of relying on phase history.
+
+Deliverables:
+
+- Run exact-name audits for retired static batch, dynamic batch, adapter, draw-unit inference,
+  attachment, and static-owned shared visual vocabulary.
+- Run targeted tests for static explicit objects, generated scenery, env-cell static objects,
+  structured interiors, runtime-authored dynamics, static-authored dynamics, resolver-safe texture
+  metadata, placement, runtime install, and worker scheduling.
+- Run `check`, `lint:dead`, `format:check`, and representative browser harness validation.
+- Update this document with final implementation notes, any deliberate residual follow-up, and
+  evidence for each Definition of Done bullet.
+
+Acceptance criteria:
+
+- Every Definition of Done bullet has current-state evidence.
+- Any remaining debt is explicitly outside the Definition of Done or has a concrete follow-up with a
+  deletion condition.
+- The git worktree is clean except expected submodule noise.
+
+Spicy bits to watch:
+
+- A green test suite is not enough. The final audit must search for structural leftovers and inspect
+  whether the tests actually cover the required domains.
 
 ## Decisions And Course Corrections
 

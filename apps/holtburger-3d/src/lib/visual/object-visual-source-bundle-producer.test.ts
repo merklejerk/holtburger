@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+	OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
 	objectVisualGeometryBufferId,
 	type ObjectVisualGeometryBuffer,
 } from "./object-visual-recipe-bundle";
@@ -156,6 +157,44 @@ describe("object visual source bundle producer", () => {
 		});
 	});
 
+	it("merges repeated surface material bindings into one binding", () => {
+		const polygonIds = [7, 8];
+		const result = createObjectVisualSourceBundleExpansion({
+			geometrySidecars: {
+				staticObjectSourceGeometry: [
+					createGeometrySidecar({
+						materialVariantSignature: "sampler=repeat",
+						polygonIds,
+					}),
+				],
+			},
+			payload: createPayload({
+				materialVariantSignature: "sampler=repeat",
+				polygonIds,
+			}),
+		});
+
+		expect(result.resolution.kind).toBe("ready");
+		if (result.resolution.kind !== "ready") {
+			throw new Error("Expected ready visual bundle.");
+		}
+		const partRecipe = [...result.resolution.bundle.partRecipes.values()][0];
+		expect(partRecipe?.materialBindings).toMatchObject([
+			{
+				geometrySurfaceId: 1,
+				materialVariantSignature: "sampler=repeat",
+				polygonIds,
+			},
+		]);
+
+		const bake = bakeObjectVisuals({
+			bundle: result.resolution.bundle,
+			geometryBuffers: result.geometryBuffers,
+			renderPartIdPrefix: "merged-binding-static-object-fixture",
+		});
+		expect(bake.renderParts[0]?.triangleCount).toBe(2);
+	});
+
 	it("maps unsupported materials to skipped unsupported recipes", () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 		const result = createObjectVisualSourceBundleExpansion({
@@ -196,11 +235,13 @@ function createPayload(
 		readonly materialVariantSignature?: string | null;
 		readonly object?: StaticObjectInstanceIdentity;
 		readonly owningEnvCellId?: number | null;
+		readonly polygonIds?: readonly number[];
 		readonly surfaceType?: number;
 	} = {},
 ): ObjectVisualSourcePayload {
 	const object = options.object ?? TEST_OBJECT;
 	const materialVariantSignature = options.materialVariantSignature ?? null;
+	const polygonIds = options.polygonIds ?? [7];
 	return {
 		domain: options.domain ?? "outdoor-explicit-objects",
 		landblock: {
@@ -303,22 +344,20 @@ function createPayload(
 						],
 						partIndex: 0,
 						physicsPolygonCount: 0,
-						renderTriangleCount: 1,
+						renderTriangleCount: polygonIds.length,
 						scale: { x: 1, y: 1, z: 1 },
 						skippedPolygonCount: 0,
 						source: TEST_SOURCE,
-						triangles: [
-							{
-								firstVertex: 0,
-								geometrySurfaceId: 1,
-								materialVariantSignature,
-								polygonId: 7,
-							},
-						],
+						triangles: polygonIds.map((polygonId, index) => ({
+							firstVertex: index * 3,
+							geometrySurfaceId: 1,
+							materialVariantSignature,
+							polygonId,
+						})),
 					},
 				],
 				physicsPolygonCount: 0,
-				renderTriangleCount: 1,
+				renderTriangleCount: polygonIds.length,
 				skippedPolygonCount: 0,
 				sourceAssetKind: "gfx-obj",
 			},
@@ -327,30 +366,46 @@ function createPayload(
 	};
 }
 
-function createGeometrySidecar() {
+function createGeometrySidecar(
+	options: {
+		readonly materialVariantSignature?: string;
+		readonly polygonIds?: readonly number[];
+	} = {},
+) {
 	return {
-		buffer: createGeometryBuffer(),
+		buffer: createGeometryBuffer(options),
 		identity: TEST_GEOMETRY.canonical,
 	};
 }
 
-function createGeometryBuffer(): ObjectVisualGeometryBuffer {
+function createGeometryBuffer(
+	options: {
+		readonly materialVariantSignature?: string;
+		readonly polygonIds?: readonly number[];
+	} = {},
+): ObjectVisualGeometryBuffer {
+	const polygonIds = options.polygonIds ?? [7];
+	const materialVariantSignature =
+		options.materialVariantSignature ??
+		OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE;
 	return {
 		bounds: null,
 		bufferId: objectVisualGeometryBufferId(0),
 		coordinateSpace: "source-local",
-		normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
-		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
-		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
-		triangleCount: 1,
-		triangles: [
-			{
-				firstVertex: 0,
-				materialVariantSignature: null,
-				polygonId: 7,
-				surfaceId: 1,
-			},
-		],
-		vertexCount: 3,
+		normals: new Float32Array(
+			polygonIds.flatMap(() => [0, 0, 1, 0, 0, 1, 0, 0, 1]),
+		),
+		positions: new Float32Array(
+			polygonIds.flatMap(() => [0, 0, 0, 1, 0, 0, 0, 1, 0]),
+		),
+		texCoords: new Float32Array(polygonIds.flatMap(() => [0, 0, 1, 0, 0, 1])),
+		triangleCount: polygonIds.length,
+		triangles: polygonIds.map((polygonId, index) => ({
+			firstVertex: index * 3,
+			materialVariantSignature,
+			polygonId,
+			surfaceId: 1,
+		})),
+		vertexCount: polygonIds.length * 3,
 	};
 }

@@ -17,6 +17,7 @@ import {
 	resolveStaticMaterialDetailTextureTiling,
 } from "../../bake/static-material-adapter";
 import {
+	addObjectVisualPartMaterialBinding,
 	createObjectVisualMissingDependenciesResolution,
 	createObjectVisualReadyResolution,
 	createObjectVisualRecipeKeyRegistry,
@@ -30,8 +31,10 @@ import {
 	type ObjectVisualGeometryBuffer,
 	type ObjectVisualGeometryBufferId,
 	type ObjectVisualMaterialRecipe,
+	type ObjectVisualPartMaterialBinding,
 	type ObjectVisualRecipeBundle,
 	type ObjectVisualTextureRecipe,
+	type ObjectVisualTriangleMaterialBindingKey,
 	type ObjectVisualTextureUsage,
 } from "../../../visual/object-visual-recipe-bundle";
 import {
@@ -285,45 +288,49 @@ function createMaterialBindings(options: {
 		readonly plan: ObjectVisualMaterialPlan;
 		readonly surfaceId: number;
 	}[];
-}): ObjectVisualRecipeBundle["partRecipes"] extends ReadonlyMap<
-	unknown,
-	infer TPartRecipe
->
-	? TPartRecipe extends { readonly materialBindings: infer TBindings }
-		? TBindings
-		: never
-	: never {
-	return options.sidecar.buffer.triangles.flatMap((triangle) => {
+}): readonly ObjectVisualPartMaterialBinding[] {
+	const bindingsByTriangleMaterial = new Map<
+		ObjectVisualTriangleMaterialBindingKey,
+		ObjectVisualPartMaterialBinding
+	>();
+	for (const triangle of options.sidecar.buffer.triangles) {
 		if (triangle.surfaceId === null) {
-			return [];
+			continue;
 		}
 		const materialSurfaceId = resolveStructuredInteriorMaterialSurfaceId(
 			options.envCell,
 			triangle.surfaceId,
 		);
 		if (materialSurfaceId === null) {
-			return [];
+			continue;
 		}
 		const plan = options.surfacePlans.find(
 			(candidate) => candidate.surfaceId === materialSurfaceId,
 		)?.plan;
 		if (!plan) {
-			return [];
+			continue;
 		}
-		return {
-			geometrySurfaceId: triangle.surfaceId,
-			materialVariantSignature: null,
-			materialRecipeId: requireRegistryId(
-				options.registry.materialRecipeIdsByKey,
-				objectVisualMaterialRecipeKey(
-					createMaterialRecipeKey(materialSurfaceId, plan),
+		addObjectVisualPartMaterialBinding({
+			binding: {
+				geometrySurfaceId: triangle.surfaceId,
+				materialVariantSignature: triangle.materialVariantSignature,
+				materialRecipeId: requireRegistryId(
+					options.registry.materialRecipeIdsByKey,
+					objectVisualMaterialRecipeKey(
+						createMaterialRecipeKey(materialSurfaceId, plan),
+					),
+					"material recipe",
 				),
-				"material recipe",
-			),
-			materialSlot: materialSurfaceId,
-			polygonIds: [triangle.polygonId],
-		};
-	});
+				materialSlot: materialSurfaceId,
+				polygonIds: [triangle.polygonId],
+			},
+			bindingsByTriangleMaterial,
+			ownerLabel: `structured interior ${options.envCell.memberId} in landblock ${formatHex32(
+				options.envCell.landblockId,
+			)}`,
+		});
+	}
+	return [...bindingsByTriangleMaterial.values()];
 }
 
 function createMaterialRecipe(

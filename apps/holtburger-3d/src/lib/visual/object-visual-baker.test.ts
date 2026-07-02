@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+	OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
 	objectVisualGeometryBufferId,
 	type ObjectVisualGeometryBuffer,
 	type ObjectVisualGeometryRecipeId,
@@ -27,13 +28,15 @@ describe("object visual baker", () => {
 			materialBindings: [
 				{
 					geometrySurfaceId: 10,
-					materialVariantSignature: null,
+					materialVariantSignature:
+						OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
 					materialRecipeId: materialOneId,
 					materialSlot: 0,
 				},
 				{
 					geometrySurfaceId: 20,
-					materialVariantSignature: null,
+					materialVariantSignature:
+						OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
 					materialRecipeId: materialTwoId,
 					materialSlot: 1,
 				},
@@ -69,7 +72,8 @@ describe("object visual baker", () => {
 			triangles: [
 				{
 					...TEST_BUFFER.triangles[0]!,
-					materialVariantSignature: null,
+					materialVariantSignature:
+						OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
 					surfaceId: 10,
 				},
 				{
@@ -83,7 +87,8 @@ describe("object visual baker", () => {
 			materialBindings: [
 				{
 					geometrySurfaceId: 10,
-					materialVariantSignature: null,
+					materialVariantSignature:
+						OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
 					materialRecipeId: clampMaterialId,
 					materialSlot: 0,
 				},
@@ -133,7 +138,8 @@ describe("object visual baker", () => {
 			materialBindings: [
 				{
 					geometrySurfaceId: 10,
-					materialVariantSignature: null,
+					materialVariantSignature:
+						OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
 					materialRecipeId: materialId,
 					materialSlot: 0,
 				},
@@ -171,7 +177,15 @@ describe("object visual baker", () => {
 			materialBindings: [
 				{
 					geometrySurfaceId: 10,
-					materialVariantSignature: null,
+					materialVariantSignature:
+						OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
+					materialRecipeId: materialId,
+					materialSlot: 0,
+				},
+				{
+					geometrySurfaceId: 20,
+					materialVariantSignature:
+						OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
 					materialRecipeId: materialId,
 					materialSlot: 0,
 				},
@@ -219,13 +233,15 @@ describe("object visual baker", () => {
 			materialBindings: [
 				{
 					geometrySurfaceId: 10,
-					materialVariantSignature: null,
+					materialVariantSignature:
+						OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
 					materialRecipeId: materialOneId,
 					materialSlot: 0,
 				},
 				{
 					geometrySurfaceId: 20,
-					materialVariantSignature: null,
+					materialVariantSignature:
+						OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
 					materialRecipeId: materialTwoId,
 					materialSlot: 0,
 				},
@@ -272,13 +288,15 @@ describe("object visual baker", () => {
 			materialBindings: [
 				{
 					geometrySurfaceId: 10,
-					materialVariantSignature: null,
+					materialVariantSignature:
+						OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
 					materialRecipeId: indexedMaterialId,
 					materialSlot: 0,
 				},
 				{
 					geometrySurfaceId: 20,
-					materialVariantSignature: null,
+					materialVariantSignature:
+						OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
 					materialRecipeId: rgbaMaterialId,
 					materialSlot: 0,
 				},
@@ -359,13 +377,15 @@ describe("object visual baker", () => {
 			materialBindings: [
 				{
 					geometrySurfaceId: 10,
-					materialVariantSignature: null,
+					materialVariantSignature:
+						OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
 					materialRecipeId: materialOneId,
 					materialSlot: 0,
 				},
 				{
 					geometrySurfaceId: 20,
-					materialVariantSignature: null,
+					materialVariantSignature:
+						OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
 					materialRecipeId: materialTwoId,
 					materialSlot: 1,
 				},
@@ -407,7 +427,15 @@ describe("object visual baker", () => {
 			materialBindings: [
 				{
 					geometrySurfaceId: 10,
-					materialVariantSignature: null,
+					materialVariantSignature:
+						OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
+					materialRecipeId: materialId,
+					materialSlot: 0,
+				},
+				{
+					geometrySurfaceId: 20,
+					materialVariantSignature:
+						OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
 					materialRecipeId: materialId,
 					materialSlot: 0,
 				},
@@ -436,7 +464,15 @@ describe("object visual baker", () => {
 			materialBindings: [
 				{
 					geometrySurfaceId: 10,
-					materialVariantSignature: null,
+					materialVariantSignature:
+						OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
+					materialRecipeId: materialId,
+					materialSlot: 0,
+				},
+				{
+					geometrySurfaceId: 20,
+					materialVariantSignature:
+						OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
 					materialRecipeId: materialId,
 					materialSlot: 0,
 				},
@@ -469,7 +505,15 @@ describe("object visual baker", () => {
 			materialBindings: [
 				{
 					geometrySurfaceId: 10,
-					materialVariantSignature: null,
+					materialVariantSignature:
+						OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
+					materialRecipeId: materialId,
+					materialSlot: 0,
+				},
+				{
+					geometrySurfaceId: 20,
+					materialVariantSignature:
+						OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
 					materialRecipeId: materialId,
 					materialSlot: 0,
 				},
@@ -501,6 +545,71 @@ describe("object visual baker", () => {
 			warn.mockRestore();
 		}
 	});
+
+	it("throws when a surfaced triangle has no exact material binding", () => {
+		const materialId = materialRecipeId(1);
+		const bundle = createBundle({
+			materialBindings: [
+				{
+					geometrySurfaceId: 10,
+					materialVariantSignature:
+						OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
+					materialRecipeId: materialId,
+					materialSlot: 0,
+				},
+			],
+			materialRecipes: new Map([
+				[materialId, createDirectColorMaterialRecipe([1, 1, 1, 1])],
+			]),
+			sourcePartIndex: null,
+		});
+
+		expect(() =>
+			bakeObjectVisuals({
+				bundle,
+				geometryBuffers: new Map([[TEST_BUFFER.bufferId, TEST_BUFFER]]),
+				renderPartIdPrefix: "missing-binding-fixture",
+			}),
+		).toThrow(
+			/Object visual part recipe 1 has no material binding for polygon 200, surface 20, variant base/,
+		);
+	});
+
+	it("throws when a part recipe contains duplicate material bindings", () => {
+		const materialId = materialRecipeId(1);
+		const bundle = createBundle({
+			materialBindings: [
+				{
+					geometrySurfaceId: 10,
+					materialVariantSignature:
+						OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
+					materialRecipeId: materialId,
+					materialSlot: 0,
+				},
+				{
+					geometrySurfaceId: 10,
+					materialVariantSignature:
+						OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
+					materialRecipeId: materialId,
+					materialSlot: 1,
+				},
+			],
+			materialRecipes: new Map([
+				[materialId, createDirectColorMaterialRecipe([1, 1, 1, 1])],
+			]),
+			sourcePartIndex: null,
+		});
+
+		expect(() =>
+			bakeObjectVisuals({
+				bundle,
+				geometryBuffers: new Map([[TEST_BUFFER.bufferId, TEST_BUFFER]]),
+				renderPartIdPrefix: "duplicate-binding-fixture",
+			}),
+		).toThrow(
+			/Object visual part recipe 1 has duplicate material bindings for surface 10, variant base/,
+		);
+	});
 });
 
 const TEST_BUFFER_ID = objectVisualGeometryBufferId(1);
@@ -525,13 +634,13 @@ const TEST_BUFFER: ObjectVisualGeometryBuffer = {
 	triangles: [
 		{
 			firstVertex: 0,
-			materialVariantSignature: null,
+			materialVariantSignature: OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
 			polygonId: 100,
 			surfaceId: 10,
 		},
 		{
 			firstVertex: 3,
-			materialVariantSignature: null,
+			materialVariantSignature: OBJECT_VISUAL_BASE_MATERIAL_VARIANT_SIGNATURE,
 			polygonId: 200,
 			surfaceId: 20,
 		},

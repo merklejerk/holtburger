@@ -22,12 +22,14 @@ import {
 	type ObjectVisualMaterialTextureUseRole,
 } from "./object-visual-material-planner";
 import {
+	addObjectVisualPartMaterialBinding,
 	createObjectVisualMissingDependenciesResolution,
 	createObjectVisualReadyResolution,
 	createObjectVisualRecipeKeyRegistry,
 	objectVisualGeometryBufferKey,
 	objectVisualGeometryRecipeKey,
 	objectVisualMaterialRecipeKey,
+	objectVisualMaterialVariantSignature,
 	objectVisualPartRecipeKey,
 	objectVisualTextureRecipeKey,
 	type ObjectVisualBundleResolution,
@@ -36,9 +38,11 @@ import {
 	type ObjectVisualGeometryRecipe,
 	type ObjectVisualGeometryRecipeId,
 	type ObjectVisualMaterialRecipe,
+	type ObjectVisualPartMaterialBinding,
 	type ObjectVisualRecipeBundle,
 	type ObjectVisualTextureRecipe,
 	type ObjectVisualTextureRecipeId,
+	type ObjectVisualTriangleMaterialBindingKey,
 	type ObjectVisualTextureUsage,
 } from "./object-visual-recipe-bundle";
 import {
@@ -312,14 +316,18 @@ function createPartRecipes(options: {
 				objectVisualGeometryRecipeKey(createGeometryRecipeKey(part)),
 				"geometry recipe",
 			);
-			const bindings = part.triangles.flatMap((triangle) => {
+			const bindingsByTriangleMaterial = new Map<
+				ObjectVisualTriangleMaterialBindingKey,
+				ObjectVisualPartMaterialBinding
+			>();
+			for (const triangle of part.triangles) {
 				const slot = materialSlots.resolveMaterialSlot(
 					object.identity,
 					part,
 					triangle,
 				);
 				if (!slot || triangle.geometrySurfaceId === null) {
-					return [];
+					continue;
 				}
 				const plan = materialByUseKey.get(
 					createObjectVisualMaterialUseKey(
@@ -329,30 +337,36 @@ function createPartRecipes(options: {
 					),
 				);
 				if (!plan) {
-					return [];
+					continue;
 				}
-				return {
-					geometrySurfaceId: triangle.geometrySurfaceId,
-					materialVariantSignature: triangle.materialVariantSignature ?? null,
-					materialRecipeId: requireRegistryId(
-						options.registry.materialRecipeIdsByKey,
-						objectVisualMaterialRecipeKey(
-							createMaterialRecipeKey(
-								plan,
-								resolveTextureWrapMode(
-									triangle.materialVariantSignature ?? null,
+				addObjectVisualPartMaterialBinding({
+					binding: {
+						geometrySurfaceId: triangle.geometrySurfaceId,
+						materialVariantSignature: objectVisualMaterialVariantSignature(
+							triangle.materialVariantSignature,
+						),
+						materialRecipeId: requireRegistryId(
+							options.registry.materialRecipeIdsByKey,
+							objectVisualMaterialRecipeKey(
+								createMaterialRecipeKey(
+									plan,
+									resolveTextureWrapMode(
+										triangle.materialVariantSignature ?? null,
+									),
 								),
 							),
+							"material recipe",
 						),
-						"material recipe",
-					),
-					materialSlot: getMaterialSlotIndex(slot),
-					polygonIds: [triangle.polygonId],
-				};
-			});
+						materialSlot: getMaterialSlotIndex(slot),
+						polygonIds: [triangle.polygonId],
+					},
+					bindingsByTriangleMaterial,
+					ownerLabel: `object visual part recipe ${recipeId}`,
+				});
+			}
 			recipes.set(recipeId, {
 				geometryRecipeId,
-				materialBindings: bindings,
+				materialBindings: [...bindingsByTriangleMaterial.values()],
 			});
 		}
 	}

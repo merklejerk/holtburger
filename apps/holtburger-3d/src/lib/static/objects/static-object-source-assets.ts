@@ -1,5 +1,8 @@
 import type { PreparedGfxObjPayloadDto } from "../../assets/preparation/prepared-render-geometry";
-import type { ObjectVisualGeometryBufferId } from "../../visual/object-visual-recipe-bundle";
+import {
+	objectVisualMaterialVariantSignature,
+	type ObjectVisualGeometryBufferId,
+} from "../../visual/object-visual-recipe-bundle";
 import type {
 	StaticObjectCanonicalGeometryIdentity,
 	StaticObjectSourceGeometrySidecar,
@@ -73,7 +76,9 @@ export function createStaticObjectSourceGeometrySidecar(options: {
 			triangleCount: renderGeometry.triangleCount,
 			triangles: renderGeometry.triangles.map((triangle) => ({
 				firstVertex: triangle.firstVertex,
-				materialVariantSignature: triangle.materialVariantSignature ?? null,
+				materialVariantSignature: objectVisualMaterialVariantSignature(
+					triangle.materialVariantSignature,
+				),
 				polygonId: triangle.polygonId,
 				surfaceId: triangle.surfaceId,
 			})),

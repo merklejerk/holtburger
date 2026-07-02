@@ -12,9 +12,9 @@ import type {
 	StaticObjectSourceIdentity,
 } from "../../contracts";
 import { createStaticObjectSourceGeometryIdentity } from "../static-object-source-assets";
-import type { StaticObjectBatchPayload } from "./static-object-batch-partitioner";
+import type { ObjectVisualSourcePayload } from "./object-visual-source-payload";
 import { createStaticObjectPublicationMetadata } from "./static-object-publication-metadata-producer";
-import { createStaticObjectVisualBundleExpansion } from "./static-object-visual-bundle-producer";
+import { createObjectVisualSourceBundleExpansion } from "./static-object-visual-bundle-producer";
 
 const TEST_LANDBLOCK_ID = 0xda55ffff;
 const TEST_SOURCE: StaticObjectSourceIdentity = {
@@ -33,7 +33,7 @@ describe("static object publication metadata producer", () => {
 		const payload = createPayload({
 			objectKind: "explicit-object",
 		});
-		const expansion = createStaticObjectVisualBundleExpansion({
+		const expansion = createObjectVisualSourceBundleExpansion({
 			geometrySidecars: {
 				staticObjectSourceGeometry: [createGeometrySidecar()],
 			},
@@ -81,7 +81,7 @@ describe("static object publication metadata producer", () => {
 		const payload = createPayload({
 			objectKind: "generated-scenery",
 		});
-		const expansion = createStaticObjectVisualBundleExpansion({
+		const expansion = createObjectVisualSourceBundleExpansion({
 			geometrySidecars: {
 				staticObjectSourceGeometry: [createGeometrySidecar()],
 			},
@@ -160,7 +160,7 @@ describe("static object publication metadata producer", () => {
 			instanceId: "generated-scenery:0",
 			objectKind: "generated-scenery",
 		});
-		const payload: StaticObjectBatchPayload = {
+		const payload: ObjectVisualSourcePayload = {
 			...explicit,
 			domain: "outdoor-generated-scenery",
 			materialSlots: [...explicit.materialSlots, ...generated.materialSlots],
@@ -180,7 +180,7 @@ describe("static object publication metadata producer", () => {
 
 	it("keeps duplicate part indices distinct across source geometry identities", () => {
 		const payload = createPayloadWithDuplicatePartIndex();
-		const expansion = createStaticObjectVisualBundleExpansion({
+		const expansion = createObjectVisualSourceBundleExpansion({
 			geometrySidecars: {
 				staticObjectSourceGeometry: [
 					createGeometrySidecar(),
@@ -214,11 +214,11 @@ describe("static object publication metadata producer", () => {
 });
 
 function createPayload(options: {
-	readonly domain?: StaticObjectBatchPayload["domain"];
+	readonly domain?: ObjectVisualSourcePayload["domain"];
 	readonly instanceId?: string;
 	readonly objectKind: StaticObjectInstanceIdentity["objectKind"];
 	readonly owningEnvCellId?: number | null;
-}): StaticObjectBatchPayload {
+}): ObjectVisualSourcePayload {
 	const object: StaticObjectInstanceIdentity = {
 		instanceId: options.instanceId ?? `${options.objectKind}:0`,
 		kind: "static-object-instance",
@@ -407,7 +407,7 @@ function createGeometrySidecarForSource(sourceDid: number) {
 	};
 }
 
-function createPayloadWithDuplicatePartIndex(): StaticObjectBatchPayload {
+function createPayloadWithDuplicatePartIndex(): ObjectVisualSourcePayload {
 	const payload = createPayload({ objectKind: "explicit-object" });
 	const secondSource: StaticObjectSourceIdentity = {
 		kind: "static-object-source",

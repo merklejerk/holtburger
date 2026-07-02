@@ -18,8 +18,8 @@ import { bakeStaticObjectJob } from "./static-object-job-baker";
 import {
 	partitionStaticObjectBatches,
 	STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE,
-	type StaticObjectBatchPayload,
 } from "./static-object-batch-partitioner";
+import type { ObjectVisualSourcePayload } from "./object-visual-source-payload";
 import { createStaticObjectTexturePlacementIntents } from "./static-object-placement-planner";
 import { createStaticObjectSourceGeometryIdentity } from "../static-object-source-assets";
 import { objectVisualGeometryBufferId } from "../../../visual/object-visual-recipe-bundle";
@@ -817,7 +817,7 @@ describe("static object batch partitioner", () => {
 	});
 });
 
-function createEnvCellStaticPayload(): StaticObjectBatchPayload &
+function createEnvCellStaticPayload(): ObjectVisualSourcePayload &
 	OutdoorStaticObjectsScopePayload {
 	const payload = duplicateObjectInstance(
 		createPayload({
@@ -977,7 +977,7 @@ function createEnvCellStaticScopePayload(): EnvCellSystemStaticScopePayload {
 
 function createEnvCellStaticScopeEnvCell(
 	envCellId: number,
-	object: StaticObjectBatchPayload["objects"][number],
+	object: ObjectVisualSourcePayload["objects"][number],
 ): EnvCellSystemStaticScopePayload["envCells"][number] {
 	return {
 		cellBsp: {

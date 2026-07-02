@@ -1,6 +1,6 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation complete through Phase 18. Residual cleanup and profiling follow-ups remain
+Status: implementation complete through Phase 19A. Residual cleanup and profiling follow-ups remain
 tracked in the phase notes below.
 
 ## Purpose
@@ -18,7 +18,7 @@ pipelines inside resolver/baker workers.
 Current files that establish the problem shape:
 
 - `apps/holtburger-3d/src/lib/static/objects/bake/static-object-batch-partitioner.ts`
-  - Static object baking currently consumes `StaticObjectBatchPayload`, builds material plans,
+  - Static object baking currently consumes `ObjectVisualSourcePayload`, builds material plans,
     constructs triangle candidates, groups by object-material partition key, and emits static
     partitions.
 - `apps/holtburger-3d/src/lib/dynamic/visual-baker.ts`
@@ -816,7 +816,7 @@ Phase 0 completion notes:
   `colorsArgb`. The later metadata-route phase must split palette metadata from palette texels rather
   than only fixing render-surface routes.
 - Static object baking enters through `static/objects/bake/static-object-batch-baker.ts` and
-  `static/objects/bake/static-object-batch-partitioner.ts`. It consumes `StaticObjectBatchPayload`,
+  `static/objects/bake/static-object-batch-partitioner.ts`. It consumes `ObjectVisualSourcePayload`,
   runs `planObjectVisualMaterials`, creates triangle candidates, partitions by object-material render
   legality, and emits draw units, material coverage, texture uses/dependencies, source mappings,
   spatial records, generated-scenery render instances, and generated-scenery visual resources.
@@ -1485,7 +1485,7 @@ Deliverables:
 Acceptance criteria:
 
 - The shared object visual model can describe all static object-like publication facts needed to
-  emit current static renderer payloads without consulting `StaticObjectBatchPayload`,
+  emit current static renderer payloads without consulting `ObjectVisualSourcePayload`,
   `EnvCellSystemStaticScopePayload`, or legacy draw-unit buckets after recipe expansion.
 - Static publication metadata uses numeric/branded identity where relationships are traversed during
   bake/install work.
@@ -1548,7 +1548,7 @@ Acceptance criteria:
 Deletion criteria:
 
 - Mark legacy helper functions that exist only to build static visual payloads from
-  `StaticObjectBatchPayload` or `EnvCellSystemStaticScopePayload` for hard-cutover deletion once
+  `ObjectVisualSourcePayload` or `EnvCellSystemStaticScopePayload` for hard-cutover deletion once
   producers are fully migrated.
 
 Implementation notes after Phase 9B:
@@ -1707,7 +1707,7 @@ Task checklist:
 Acceptance criteria:
 
 - A ready object visual bundle can produce renderer-legal material table entries without consulting
-  `ObjectVisualMaterialPlan`, `StaticObjectBatchPayload`, or env-cell scope material fields.
+  `ObjectVisualMaterialPlan`, `ObjectVisualSourcePayload`, or env-cell scope material fields.
 - Unsupported material recipes warn in the console and skip without producing partial render parts.
 - Hot baker/partition paths do not depend on repeated expensive string comparisons.
 
@@ -1991,7 +1991,7 @@ Implementation notes after Phase 9J:
 - Added
   `apps/holtburger-3d/src/lib/static/objects/bake/static-object-visual-bundle-producer.ts` as the
   recipe-first static object bundle expansion producer.
-- The producer consumes `StaticObjectBatchPayload` plus `StaticObjectSourceGeometrySidecar`
+- The producer consumes `ObjectVisualSourcePayload` plus `StaticObjectSourceGeometrySidecar`
   buffers and emits `ObjectVisualBundleResolution` plus source-local geometry buffers. It does not
   invoke the legacy static draw-unit/resource baker.
 - Direct `gfx_obj` and setup-model source facts now expand into geometry recipes, material recipes,
@@ -2049,7 +2049,7 @@ Implementation notes after Phase 9K:
 
 - Added
   `apps/holtburger-3d/src/lib/static/objects/bake/static-object-publication-metadata-producer.ts`
-  to synthesize `ObjectVisualStaticPublicationMetadata` from `StaticObjectBatchPayload`.
+  to synthesize `ObjectVisualStaticPublicationMetadata` from `ObjectVisualSourcePayload`.
 - The producer creates dense `ObjectVisualPartInstanceIndex` values in the same object/part order
   used by the Phase 9J bundle producer, plus dense generated resource group ids keyed by source
   geometry.
@@ -2345,7 +2345,7 @@ Course correction during Phase 10:
   should make texture planning consume the bundle recipes before replacing dynamic render-part
   extraction with `bakeObjectVisuals(...)`.
 - Dynamic texture planning now consumes the shared object visual recipe plan. The static object
-  bundle producer exposes `createStaticObjectVisualRecipePlan(...)`, and dynamic planning reaches it
+  bundle producer exposes `createObjectVisualSourceRecipePlan(...)`, and dynamic planning reaches it
   through `createDynamicObjectVisualRecipePlan(...)` so placement requirements are enumerated from
   `ObjectVisualTextureRecipe` records instead of re-walking dynamic-only material slots. The output
   remains `DynamicVisualTexturePlanning` for compatibility with the existing dynamic bake/install
@@ -3173,9 +3173,9 @@ Context:
 
 - The current architecture has shared object visual baking and single-job static bake contracts, but
   resolver outputs and planner inputs still enter through domain-specific wrappers.
-- The dry run found concrete wrapper debt: dynamic visuals still adapt into
-  `StaticObjectBatchPayload`, and static publication metadata still carries some draw-unit-shaped
-  names for source mapping and residency bookkeeping.
+- The dry run found concrete wrapper debt: dynamic visuals adapted through the old static batch
+  payload shape, and static publication metadata still carries some draw-unit-shaped names for
+  source mapping and residency bookkeeping.
 - The Phase 19 inventory confirmed those two debts should not be fixed in the same first slice:
   source payload neutrality can be cut over before runtime-facing publication metadata is renamed or
   reshaped.
@@ -3270,23 +3270,23 @@ Risks and mitigations:
 Inventory notes after Phase 19 checkpoint:
 
 - `ObjectVisualRecipeBundle` is already the ready visual graph shape, but the source facts feeding
-  expansion still flow through `StaticObjectBatchPayload`.
-- Dynamic visuals still call `createDynamicObjectVisualPayload(...)` to fabricate a
-  `StaticObjectBatchPayload` before calling `createStaticObjectVisualBundleExpansion(...)`.
-- Static object baking calls `createStaticObjectBatchPayload(...)` and then uses that shape for both
+  expansion still flow through `ObjectVisualSourcePayload`.
+- Dynamic visuals now build `ObjectVisualSourcePayload` directly instead of fabricating a static
+  batch payload before calling `createObjectVisualSourceBundleExpansion(...)`.
+- Static object baking calls `createObjectVisualSourcePayload(...)` and then uses that shape for both
   recipe expansion and renderer-legal partitioning.
 - Structured interiors already have a dedicated embedded-geometry bundle producer and should be
   converted after the static/dynamic object-source DTO is neutral.
 - `ObjectVisualStaticPublicationMetadata` still has `directStaticObjectDrawUnits` and
   `structuredInteriorDrawUnits`. Those names reflect runtime publication shape and should move after
   the source DTO cutover proves the recipe/part-instance source vocabulary is stable.
-- The first concrete DTO name for the next slice is `ObjectVisualSourcePayload`. The old
-  `StaticObjectBatchPayload` name should disappear from dynamic paths first, then from static object
-  producers/partitioners.
+- The first concrete DTO name for the next slice is `ObjectVisualSourcePayload`; the old
+  static-object batch payload vocabulary should disappear from dynamic paths first, then from static
+  object producers/partitioners.
 
 ### Phase 19A: Neutral Object Visual Source Payload
 
-Status: planned.
+Status: completed.
 
 Goal: replace static-shaped source payload naming with a neutral object-visual source DTO for
 static-object-like and dynamic visual expansion/planning.
@@ -3295,8 +3295,8 @@ Deliverables:
 
 - Introduce or rename the shared pre-expansion source DTO to `ObjectVisualSourcePayload` with dense
   object/source/material arrays and sidecar-friendly landblock/residency facts.
-- Rename `createStaticObjectBatchPayload(...)` to a static-domain source-payload normalizer and make
-  dynamic visuals build the same neutral DTO without fabricating a static batch payload.
+- Rename the static-domain source-payload normalizer and make dynamic visuals build the same neutral
+  DTO without fabricating a static batch payload.
 - Rename static object bundle expansion and recipe planning entry points where they are now neutral,
   while keeping renderer-legal partitioning behavior unchanged.
 - Keep generated-scenery instancing behavior unchanged in this slice; the goal is source DTO
@@ -3304,10 +3304,34 @@ Deliverables:
 
 Acceptance criteria:
 
-- No dynamic visual path references `StaticObjectBatchPayload` or a static-object batch producer just
-  to reach object-visual planning/expansion.
+- No dynamic visual path references a static-object batch payload or static-object batch producer
+  just to reach object-visual planning/expansion.
 - Static object-like baking still partitions and publishes the same renderer output.
 - Tests, `check`, `lint:dead`, `format:check`, and a representative browser harness slice pass.
+
+Implementation notes:
+
+- Added `object-visual-source-payload.ts` as the shared source DTO/normalizer module and removed the
+  old `static-object-batch-payload.ts` module.
+- `ObjectVisualSourcePayload` now owns the shared pre-expansion source facts. Static object-like
+  domains normalize into it through `createObjectVisualSourcePayload(...)`, and dynamic visuals build
+  the same neutral DTO directly.
+- Renamed the bundle expansion and recipe-plan entry points to
+  `createObjectVisualSourceBundleExpansion(...)` and `createObjectVisualSourceRecipePlan(...)`.
+- Left `static-object-batch-partitioner.ts` in place because it still describes renderer-legal
+  static object partitioning policy, not the source DTO. Renaming or reshaping that policy belongs
+  with Phase 19C publication/instancing work.
+- Validation passed with focused dynamic/static source DTO tests, `check`, `lint:dead`,
+  `format:check`, and a terrain browser harness slice.
+
+Spicy bits and retained debt:
+
+- `ObjectVisualSourcePayload` still reuses static resolver fact types for material slots, source
+  assets, palettes, and texture refs. This is acceptable for 19A because 19B owns explicit recipe
+  record emission.
+- Dynamic visuals still import the source DTO from the static object bake folder. That is less bad
+  than importing the partitioner, but 19B should move neutral DTO ownership once the record-emission
+  shape is settled.
 
 ### Phase 19B: Recipe Record Emission Convergence
 

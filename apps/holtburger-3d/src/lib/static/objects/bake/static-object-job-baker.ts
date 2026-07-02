@@ -49,7 +49,6 @@ import {
 } from "../static-object-source-assets";
 import {
 	partitionStaticObjectBatches,
-	type StaticObjectBatchPayload,
 	type StaticObjectBatchPartition,
 	type StaticObjectBatchTriangle,
 } from "./static-object-batch-partitioner";
@@ -58,10 +57,11 @@ import {
 	isRenderableStaticObjectPartition,
 } from "./static-object-renderability";
 import { createStaticObjectVisualResourceKeyString } from "../static-object-visual-resource-key";
-import { createStaticObjectBatchPayload } from "./static-object-batch-payload";
+import { createObjectVisualSourcePayload } from "./object-visual-source-payload";
 import { createObjectVisualInstallSet } from "../../../visual/object-visual-install-set";
-import { createStaticObjectVisualBundleExpansion } from "./static-object-visual-bundle-producer";
+import { createObjectVisualSourceBundleExpansion } from "./static-object-visual-bundle-producer";
 import { createStaticObjectPublicationMetadata } from "./static-object-publication-metadata-producer";
+import type { ObjectVisualSourcePayload } from "./object-visual-source-payload";
 
 export class StaticObjectJobBaker implements StaticBaker {
 	async bake(input: StaticBakeJobInput): Promise<StaticBakeJobResult> {
@@ -260,7 +260,7 @@ function bakeStaticObjectJobPayload(
 		ownerId: item.task.ownerId,
 		scopeKey: item.task.scopeKey,
 	});
-	const scope = createStaticObjectBatchPayload(item);
+	const scope = createObjectVisualSourcePayload(item);
 	emitStaticBakeWorkerTrace("static-object-item:payload", {
 		domain: scope.domain,
 		itemIndex,
@@ -391,7 +391,7 @@ function bakeStaticObjectJobPayload(
 
 function createStaticObjectRecipePublication(options: {
 	readonly input: StaticBakeJobInput;
-	readonly payload: StaticObjectBatchPayload;
+	readonly payload: ObjectVisualSourcePayload;
 	readonly resourceIdPrefix: string;
 	readonly task: StaticBakeTask;
 }): {
@@ -399,7 +399,7 @@ function createStaticObjectRecipePublication(options: {
 	readonly textureDependencies: readonly TextureResourceDependencies[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
 } {
-	const expansion = createStaticObjectVisualBundleExpansion({
+	const expansion = createObjectVisualSourceBundleExpansion({
 		geometrySidecars: options.input.resources,
 		payload: options.payload,
 	});
@@ -451,7 +451,7 @@ function createStaticObjectBakeDiagnostics(options: {
 		readonly instances: readonly StaticObjectRenderInstance[];
 		readonly resources: readonly StaticObjectVisualResource[];
 	};
-	readonly payload: StaticObjectBatchPayload;
+	readonly payload: ObjectVisualSourcePayload;
 	readonly partitionPlan: ReturnType<typeof partitionStaticObjectBatches>;
 	readonly retainedBakedPartitions: readonly StaticObjectBatchPartition[];
 	readonly sourceIndex: StaticObjectBakeSourceIndex;
@@ -573,7 +573,7 @@ function createStaticObjectInstancingBakeDiagnostics(input: {
 
 function createRetainedTransparentOutdoorGeneratedSceneryPartitionReasons(options: {
 	readonly partitions: readonly StaticObjectBatchPartition[];
-	readonly payload: StaticObjectBatchPayload;
+	readonly payload: ObjectVisualSourcePayload;
 	readonly sourceIndex: StaticObjectBakeSourceIndex;
 }): StaticObjectRetainedTransparentPartitionReasonCounts {
 	const counts = createEmptyRetainedTransparentPartitionReasonCounts();
@@ -831,7 +831,7 @@ function createDrawUnitSpatialRecord(
 
 function warnAboutSkippedStaticObjectPartition(
 	task: StaticBakeTask,
-	payload: StaticObjectBatchPayload,
+	payload: ObjectVisualSourcePayload,
 	partition: StaticObjectBatchPartition,
 ): void {
 	console.warn(
@@ -857,7 +857,7 @@ interface StaticObjectGeometryBakeOutput {
 
 function createStaticObjectGeometryBakeOutput(options: {
 	readonly task: StaticBakeTask;
-	readonly payload: StaticObjectBatchPayload;
+	readonly payload: ObjectVisualSourcePayload;
 	readonly partition: StaticObjectBatchPartition;
 	readonly resourceIdPrefix: string;
 	readonly sourceIndex: StaticObjectBakeSourceIndex;
@@ -935,7 +935,7 @@ function createStaticObjectGeometryBakeOutput(options: {
 
 function createEnvCellStaticObjectSpatialRecords(options: {
 	readonly geometry: ReturnType<typeof bakeStaticObjectPartitionGeometry>;
-	readonly payload: StaticObjectBatchPayload;
+	readonly payload: ObjectVisualSourcePayload;
 	readonly taskOwner: StaticLayerPeerRecordOwner;
 }): readonly StaticEnvCellStaticObjectSpatialRecord[] {
 	if (options.payload.domain !== "env-cell-system") {
@@ -1127,11 +1127,11 @@ function centerOfBounds(
 class StaticObjectBakeSourceIndex {
 	readonly #objectsByKey = new Map<
 		string,
-		StaticObjectBatchPayload["objects"][number]
+		ObjectVisualSourcePayload["objects"][number]
 	>();
 	readonly #sourcesByKey = new Map<
 		string,
-		StaticObjectBatchPayload["sourceAssets"][number]
+		ObjectVisualSourcePayload["sourceAssets"][number]
 	>();
 	readonly #geometryByKey = new Map<
 		string,
@@ -1139,7 +1139,7 @@ class StaticObjectBakeSourceIndex {
 	>();
 
 	constructor(
-		payload: StaticObjectBatchPayload,
+		payload: ObjectVisualSourcePayload,
 		resources: StaticBakeJobInput["resources"],
 	) {
 		for (const object of payload.objects) {
@@ -1158,7 +1158,7 @@ class StaticObjectBakeSourceIndex {
 
 	getObject(
 		identity: StaticObjectInstanceIdentity,
-	): StaticObjectBatchPayload["objects"][number] {
+	): ObjectVisualSourcePayload["objects"][number] {
 		const object = this.#objectsByKey.get(createObjectKey(identity));
 		if (!object) {
 			throw new Error(
@@ -1337,7 +1337,7 @@ function createIndexArray(vertexCount: number): Uint16Array | Uint32Array {
 }
 
 function createStaticObjectSourcePartMatrix(
-	object: StaticObjectBatchPayload["objects"][number],
+	object: ObjectVisualSourcePayload["objects"][number],
 	part: StaticObjectPartSourceFacts,
 ): Float32Array {
 	let matrix = buildAcPlacementMatrix(object.localPlacement, AC_UNIT_SCALE);
@@ -1359,7 +1359,7 @@ function createStaticObjectSourcePartMatrix(
 }
 
 function createStaticObjectDrawUnitOwnership(
-	payload: StaticObjectBatchPayload,
+	payload: ObjectVisualSourcePayload,
 	partition: StaticObjectBatchPartition,
 ): StaticObjectDrawUnitOwnership {
 	if (payload.domain !== "env-cell-system") {

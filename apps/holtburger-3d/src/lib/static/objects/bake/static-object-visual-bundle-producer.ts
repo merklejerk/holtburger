@@ -49,9 +49,9 @@ import {
 	describeStaticObjectCanonicalGeometryIdentity,
 	getStaticObjectCanonicalGeometryIdentity,
 } from "../static-object-source-assets";
-import type { StaticObjectBatchPayload } from "./static-object-batch-partitioner";
+import type { ObjectVisualSourcePayload } from "./object-visual-source-payload";
 
-export interface StaticObjectVisualBundleExpansion {
+export interface ObjectVisualSourceBundleExpansion {
 	readonly geometryBuffers: ReadonlyMap<
 		ObjectVisualGeometryBufferId,
 		ObjectVisualGeometryBuffer
@@ -59,19 +59,19 @@ export interface StaticObjectVisualBundleExpansion {
 	readonly resolution: ObjectVisualBundleResolution;
 }
 
-export interface StaticObjectVisualRecipePlan {
+export interface ObjectVisualSourceRecipePlan {
 	readonly materialPlan: ReturnType<typeof planObjectVisualMaterials>;
 	readonly materialRecipes: ObjectVisualRecipeBundle["materialRecipes"];
 	readonly textureRecipes: ObjectVisualRecipeBundle["textureRecipes"];
 }
 
-export function createStaticObjectVisualBundleExpansion(input: {
+export function createObjectVisualSourceBundleExpansion(input: {
 	readonly geometrySidecars: Pick<
 		StaticBakeJobResources,
 		"staticObjectSourceGeometry"
 	>;
-	readonly payload: StaticObjectBatchPayload;
-}): StaticObjectVisualBundleExpansion {
+	readonly payload: ObjectVisualSourcePayload;
+}): ObjectVisualSourceBundleExpansion {
 	const missingSidecars = findMissingGeometrySidecars(
 		input.payload,
 		input.geometrySidecars.staticObjectSourceGeometry,
@@ -88,7 +88,7 @@ export function createStaticObjectVisualBundleExpansion(input: {
 		};
 	}
 
-	const recipePlan = createStaticObjectVisualRecipePlan(input.payload);
+	const recipePlan = createObjectVisualSourceRecipePlan(input.payload);
 	const registry = recipePlan.registry;
 	const geometryBuffers = createGeometryBuffers({
 		geometrySidecars: input.geometrySidecars.staticObjectSourceGeometry,
@@ -135,9 +135,9 @@ export function createStaticObjectVisualBundleExpansion(input: {
 	};
 }
 
-export function createStaticObjectVisualRecipePlan(
-	payload: StaticObjectBatchPayload,
-): StaticObjectVisualRecipePlan & {
+export function createObjectVisualSourceRecipePlan(
+	payload: ObjectVisualSourcePayload,
+): ObjectVisualSourceRecipePlan & {
 	readonly registry: ReturnType<typeof createObjectVisualRecipeKeyRegistry>;
 } {
 	const materialPlan = planObjectVisualMaterials(payload);
@@ -172,7 +172,7 @@ interface MaterialRecipeSpec {
 }
 
 function createRecipeKeys(options: {
-	readonly payload: StaticObjectBatchPayload;
+	readonly payload: ObjectVisualSourcePayload;
 	readonly materialRecipeSpecs: readonly MaterialRecipeSpec[];
 }) {
 	const geometryBufferKeys = new Set<string>();
@@ -211,7 +211,7 @@ function createRecipeKeys(options: {
 
 function createGeometryBuffers(options: {
 	readonly geometrySidecars: readonly StaticObjectSourceGeometrySidecar[];
-	readonly payload: StaticObjectBatchPayload;
+	readonly payload: ObjectVisualSourcePayload;
 	readonly registry: ReturnType<typeof createObjectVisualRecipeKeyRegistry>;
 }): ReadonlyMap<ObjectVisualGeometryBufferId, ObjectVisualGeometryBuffer> {
 	const requiredKeys = collectPayloadGeometryBufferKeys(options.payload);
@@ -241,7 +241,7 @@ function createGeometryBuffers(options: {
 }
 
 function collectPayloadGeometryBufferKeys(
-	payload: StaticObjectBatchPayload,
+	payload: ObjectVisualSourcePayload,
 ): ReadonlySet<string> {
 	const keys = new Set<string>();
 	for (const source of payload.sourceAssets) {
@@ -257,7 +257,7 @@ function collectPayloadGeometryBufferKeys(
 }
 
 function createGeometryRecipes(options: {
-	readonly payload: StaticObjectBatchPayload;
+	readonly payload: ObjectVisualSourcePayload;
 	readonly registry: ReturnType<typeof createObjectVisualRecipeKeyRegistry>;
 }): ReadonlyMap<ObjectVisualGeometryRecipeId, ObjectVisualGeometryRecipe> {
 	const recipes = new Map();
@@ -289,7 +289,7 @@ function createGeometryRecipes(options: {
 
 function createPartRecipes(options: {
 	readonly materialPlans: readonly ObjectVisualMaterialPlan[];
-	readonly payload: StaticObjectBatchPayload;
+	readonly payload: ObjectVisualSourcePayload;
 	readonly registry: ReturnType<typeof createObjectVisualRecipeKeyRegistry>;
 }): ObjectVisualRecipeBundle["partRecipes"] {
 	const materialByUseKey = new Map(
@@ -365,7 +365,7 @@ function getMaterialSlotIndex(
 }
 
 function createPartInstances(options: {
-	readonly payload: StaticObjectBatchPayload;
+	readonly payload: ObjectVisualSourcePayload;
 	readonly registry: ReturnType<typeof createObjectVisualRecipeKeyRegistry>;
 }): ObjectVisualRecipeBundle["partInstances"] {
 	return options.payload.objects.flatMap((object) => {
@@ -623,7 +623,7 @@ function createTextureRecipeKeys(
 
 function collectMaterialRecipeSpecs(options: {
 	readonly materialPlans: readonly ObjectVisualMaterialPlan[];
-	readonly payload: StaticObjectBatchPayload;
+	readonly payload: ObjectVisualSourcePayload;
 }): readonly MaterialRecipeSpec[] {
 	const materialByUseKey = new Map(
 		options.materialPlans.map((plan) => [plan.materialUseKey, plan]),
@@ -759,7 +759,7 @@ class MaterialSlotIndex {
 		StaticObjectMaterialSlotFacts
 	>();
 
-	constructor(payload: StaticObjectBatchPayload) {
+	constructor(payload: ObjectVisualSourcePayload) {
 		for (const slot of payload.materialSlots) {
 			for (const geometrySurfaceId of uniqueMaterialSlotSurfaceIds(slot)) {
 				this.#slotsByObjectPartSurface.set(
@@ -820,7 +820,7 @@ function uniqueMaterialSlotSurfaceIds(
 }
 
 function findMissingGeometrySidecars(
-	payload: StaticObjectBatchPayload,
+	payload: ObjectVisualSourcePayload,
 	geometrySidecars: readonly StaticObjectSourceGeometrySidecar[],
 ): readonly string[] {
 	const sidecarKeys = new Set(
@@ -843,7 +843,7 @@ function findMissingGeometrySidecars(
 }
 
 export function createStaticObjectSourcePartMatrix(
-	object: StaticObjectBatchPayload["objects"][number],
+	object: ObjectVisualSourcePayload["objects"][number],
 	part: StaticObjectPartSourceFacts,
 ): Float32Array {
 	let matrix = buildAcPlacementMatrix(object.localPlacement, AC_UNIT_SCALE);
@@ -891,9 +891,9 @@ function createGeometryBufferKey(
 }
 
 function requireSource(
-	payload: StaticObjectBatchPayload,
+	payload: ObjectVisualSourcePayload,
 	identity: StaticObjectSourceIdentity,
-): StaticObjectBatchPayload["sourceAssets"][number] {
+): ObjectVisualSourcePayload["sourceAssets"][number] {
 	const source = payload.sourceAssets.find(
 		(candidate) =>
 			createSourceKey(candidate.identity) === createSourceKey(identity),

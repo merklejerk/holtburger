@@ -50,16 +50,23 @@ describe("dynamic visual contracts", () => {
 	});
 
 	it("models visual bake output as baked resources or entity-local skips", () => {
+		const recipe = createRuntimeAuthoredRecipe(
+			createVisualRecipe("dynamic-visual-resource:shared"),
+		);
 		const input: DynamicVisualBakeInput = {
-			batchId: "dynamic-visual-batch:1",
-			recipes: [],
+			recipe,
 			revision: 1,
 			sourceGeometry: [],
 			texturePlacementSnapshot: {
 				itemIdsByTextureUseId: new Map(),
 				placementsByItemId: new Map(),
 			},
-			texturePlannings: [],
+			texturePlanning: {
+				entityId: recipe.entityId,
+				materialPlan: null,
+				placementIntents: [],
+				textureRequirements: [],
+			},
 		};
 		const baked: BakedDynamicVisualResource = {
 			entityId: "runtime-dynamic:1",
@@ -74,30 +81,30 @@ describe("dynamic visual contracts", () => {
 			textureRequirements: [],
 		};
 		const result: DynamicVisualBakeResult = {
-			batchId: "dynamic-visual-batch:1",
 			failures: [],
-			products: [
-				{
-					kind: "baked",
-					resource: baked,
+			product: {
+				kind: "baked",
+				resource: baked,
+			},
+			revision: 1,
+		};
+
+		const skipped: DynamicVisualBakeResult = {
+			failures: [],
+			product: {
+				entityId: "runtime-dynamic:2",
+				kind: "skipped",
+				reason: {
+					kind: "missing-dependencies",
+					missingRefs: [],
 				},
-				{
-					entityId: "runtime-dynamic:2",
-					kind: "skipped",
-					reason: {
-						kind: "missing-dependencies",
-						missingRefs: [],
-					},
-				},
-			],
+			},
 			revision: 1,
 		};
 
 		expect(input.sourceGeometry).toEqual([]);
-		expect(result.products.map((product) => product.kind)).toEqual([
-			"baked",
-			"skipped",
-		]);
+		expect(result.product?.kind).toBe("baked");
+		expect(skipped.product?.kind).toBe("skipped");
 	});
 });
 

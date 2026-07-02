@@ -1060,28 +1060,25 @@ class ClientRuntimeImpl implements ClientRuntime {
 			}
 
 			const result = await this.#dynamicVisualBaker.bake({
-				batchId: createRuntimeAuthoredDynamicVisualBakeBatchId(
-					options.entityId,
-				),
-				recipes: [recipe],
+				recipe,
 				revision: options.revision,
 				sourceGeometry,
 				texturePlacementSnapshot,
-				texturePlannings: [texturePlanning],
+				texturePlanning,
 			});
 			if (!this.#isCurrentRuntimeDynamicVisualPrep(options)) {
 				return;
 			}
 			this.#applyRuntimeAuthoredDynamicVisualBakeResult(
 				options.entityId,
-				result.products,
+				result.product,
 			);
 			for (const failure of result.failures) {
 				console.error(
 					`[holtburger-3d][runtime-dynamic] ${options.entityId} visual bake failed: ${failure.message}`,
 				);
 			}
-			if (result.failures.length > 0 && result.products.length === 0) {
+			if (result.failures.length > 0 && result.product === null) {
 				this.#dynamicEntityController.skipDynamicVisual(options.entityId, {
 					kind: "invalid-recipe",
 					message: result.failures.map((failure) => failure.message).join("; "),
@@ -1104,13 +1101,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 
 	#applyRuntimeAuthoredDynamicVisualBakeResult(
 		entityId: DynamicEntityId,
-		products: readonly DynamicVisualBakeProduct[],
+		product: DynamicVisualBakeProduct | null,
 	): void {
-		const product = products.find((candidate) =>
-			candidate.kind === "baked"
-				? candidate.resource.entityId === entityId
-				: candidate.entityId === entityId,
-		);
 		if (!product) {
 			this.#dynamicEntityController.skipDynamicVisual(entityId, {
 				kind: "invalid-recipe",
@@ -2215,11 +2207,17 @@ class ClientRuntimeImpl implements ClientRuntime {
 		for (const recipe of commitEnvelope.dynamicRecipes) {
 			this.#dynamicEntityController.applyResolvedDynamicRecipe(recipe);
 		}
-		const result = commitEnvelope.dynamicVisualBake;
-		if (!result) {
-			return;
-		}
-		for (const product of result.products) {
+		for (const result of commitEnvelope.dynamicVisualBakeResults) {
+			const product = result.product;
+			if (!product) {
+				for (const failure of result.failures) {
+					console.warn(
+						"[holtburger-3d][dynamic-static-authored-bake]",
+						failure,
+					);
+				}
+				continue;
+			}
 			if (product.kind === "baked") {
 				this.#dynamicEntityController.applyBakedDynamicVisual(product.resource);
 				continue;
@@ -2228,9 +2226,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 				product.entityId,
 				product.reason,
 			);
-		}
-		for (const failure of result.failures) {
-			console.warn("[holtburger-3d][dynamic-static-authored-bake]", failure);
+			for (const failure of result.failures) {
+				console.warn("[holtburger-3d][dynamic-static-authored-bake]", failure);
+			}
 		}
 	}
 
@@ -4300,12 +4298,6 @@ function createDynamicTextureUsePlacementBucketKey(
 		ownerId: retentionPolicy.layerOwnerId,
 		purpose,
 	});
-}
-
-function createRuntimeAuthoredDynamicVisualBakeBatchId(
-	entityId: DynamicEntityId,
-): string {
-	return `runtime-dynamic-visual-bake:${entityId}`;
 }
 
 function createDynamicRendererInstances(

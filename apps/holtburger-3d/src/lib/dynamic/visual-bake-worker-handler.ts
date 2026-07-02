@@ -12,13 +12,13 @@ export async function handleDynamicVisualBakeWorkerRequest(
 	try {
 		const result = await baker.bake(message.input);
 		postMessage({
-			kind: "dynamic-visual-batch-baked",
+			kind: "dynamic-visual-baked",
 			requestId: message.requestId,
 			result,
 		});
 	} catch (error: unknown) {
 		postMessage({
-			kind: "dynamic-visual-batch-bake-failed",
+			kind: "dynamic-visual-bake-failed",
 			message: error instanceof Error ? error.message : String(error),
 			requestId: message.requestId,
 		});

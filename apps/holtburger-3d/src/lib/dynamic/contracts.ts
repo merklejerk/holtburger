@@ -237,15 +237,15 @@ type DynamicVisualMaterialDetailRolePolicy =
 	  };
 
 export interface DynamicVisualBakeInput {
-	readonly batchId: string;
-	readonly recipes: readonly DynamicEntityRecipe[];
+	/** Effective visual recipe for exactly one dynamic entity. */
+	readonly recipe: DynamicEntityRecipe;
 	readonly revision: number;
 	/** Geometry buffers required by the baker; prepared before crossing the bake boundary. */
 	readonly sourceGeometry: readonly StaticObjectSourceGeometrySidecar[];
 	/** Texture placements assigned before baking so baked resources can declare legal dependencies. */
 	readonly texturePlacementSnapshot: ObjectVisualTexturePlacementSnapshot;
 	/** Material planning results produced during pre-bake texture placement discovery. */
-	readonly texturePlannings: readonly DynamicVisualTexturePlanning[];
+	readonly texturePlanning: DynamicVisualTexturePlanning;
 }
 
 /** Pre-bake dynamic visual texture work discovered from source facts. */
@@ -261,9 +261,8 @@ export interface DynamicVisualTexturePlanning {
 }
 
 export interface DynamicVisualBakeResult {
-	readonly batchId: string;
 	readonly failures: readonly DynamicVisualBakeFailure[];
-	readonly products: readonly DynamicVisualBakeProduct[];
+	readonly product: DynamicVisualBakeProduct | null;
 	readonly revision: number;
 }
 

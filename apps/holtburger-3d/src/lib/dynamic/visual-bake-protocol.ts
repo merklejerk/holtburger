@@ -5,18 +5,18 @@ import type {
 
 export type DynamicVisualBakeWorkerMainMessage = {
 	readonly input: DynamicVisualBakeInput;
-	readonly kind: "bake-dynamic-visual-batch";
+	readonly kind: "bake-dynamic-visual";
 	readonly requestId: string;
 };
 
 export type DynamicVisualBakeWorkerThreadMessage =
 	| {
-			readonly kind: "dynamic-visual-batch-baked";
+			readonly kind: "dynamic-visual-baked";
 			readonly requestId: string;
 			readonly result: DynamicVisualBakeResult;
 	  }
 	| {
-			readonly kind: "dynamic-visual-batch-bake-failed";
+			readonly kind: "dynamic-visual-bake-failed";
 			readonly message: string;
 			readonly requestId: string;
 	  };

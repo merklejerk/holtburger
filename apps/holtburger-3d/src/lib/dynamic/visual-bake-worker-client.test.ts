@@ -24,20 +24,19 @@ describe("dynamic visual bake worker protocol", () => {
 		expect(port.requests).toEqual([
 			{
 				input,
-				kind: "bake-dynamic-visual-batch",
+				kind: "bake-dynamic-visual",
 				requestId: "dynamic-visual-bake:0",
 			},
 		]);
 
 		port.emit({
-			kind: "dynamic-visual-batch-baked",
+			kind: "dynamic-visual-baked",
 			requestId: "dynamic-visual-bake:0",
 			result: createResult(input),
 		});
 
 		await expect(pending).resolves.toMatchObject({
-			batchId: input.batchId,
-			products: [],
+			product: null,
 			revision: input.revision,
 		});
 		client.dispose();
@@ -55,7 +54,7 @@ describe("dynamic visual bake worker protocol", () => {
 			},
 			{
 				input,
-				kind: "bake-dynamic-visual-batch",
+				kind: "bake-dynamic-visual",
 				requestId: "dynamic-transport:1",
 			},
 			(response) => responses.push(response),
@@ -63,7 +62,7 @@ describe("dynamic visual bake worker protocol", () => {
 
 		expect(responses).toEqual([
 			{
-				kind: "dynamic-visual-batch-bake-failed",
+				kind: "dynamic-visual-bake-failed",
 				message: "dynamic bake exploded",
 				requestId: "dynamic-transport:1",
 			},
@@ -75,12 +74,12 @@ describe("dynamic visual bake worker protocol", () => {
 		const second = new RecordingBaker("second");
 		const pool = new WorkerPoolDynamicVisualBaker([first, second]);
 
-		await pool.bake(createInput("batch:1"));
-		await pool.bake(createInput("batch:2"));
-		await pool.bake(createInput("batch:3"));
+		await pool.bake(createInput("dynamic:1"));
+		await pool.bake(createInput("dynamic:2"));
+		await pool.bake(createInput("dynamic:3"));
 
-		expect(first.batchIds).toEqual(["batch:1", "batch:3"]);
-		expect(second.batchIds).toEqual(["batch:2"]);
+		expect(first.entityIds).toEqual(["dynamic:1", "dynamic:3"]);
+		expect(second.entityIds).toEqual(["dynamic:2"]);
 	});
 });
 
@@ -119,42 +118,44 @@ class FixtureWorkerPort implements DynamicVisualBakeWorkerPort {
 }
 
 class RecordingBaker {
-	readonly batchIds: string[] = [];
+	readonly entityIds: string[] = [];
 
 	constructor(private readonly label: string) {}
 
 	bake(input: DynamicVisualBakeInput): Promise<DynamicVisualBakeResult> {
-		this.batchIds.push(input.batchId);
+		this.entityIds.push(input.recipe.entityId);
 		return Promise.resolve({
-			batchId: `${this.label}:${input.batchId}`,
 			failures: [],
-			products: [],
+			product: null,
 			revision: input.revision,
 		});
 	}
 }
 
-function createInput(
-	batchId = "dynamic-visual-batch:test",
-): DynamicVisualBakeInput {
+function createInput(entityId = "dynamic-visual:test"): DynamicVisualBakeInput {
 	return {
-		batchId,
-		recipes: [],
+		recipe: {
+			entityId,
+		} as DynamicVisualBakeInput["recipe"],
 		revision: 1,
 		sourceGeometry: [],
 		texturePlacementSnapshot: {
 			itemIdsByTextureUseId: new Map(),
 			placementsByItemId: new Map(),
 		},
-		texturePlannings: [],
+		texturePlanning: {
+			entityId,
+			materialPlan: null,
+			placementIntents: [],
+			textureRequirements: [],
+		},
 	};
 }
 
 function createResult(input: DynamicVisualBakeInput): DynamicVisualBakeResult {
 	return {
-		batchId: input.batchId,
 		failures: [],
-		products: [],
+		product: null,
 		revision: input.revision,
 	};
 }

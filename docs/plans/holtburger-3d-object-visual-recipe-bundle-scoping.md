@@ -1,7 +1,7 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation complete through Phase 16. Residual cleanup and profiling follow-ups are
-recorded in the phase notes below.
+Status: implementation complete through Phase 16. Residual cleanup and profiling follow-ups begin
+with Phase 17 below.
 
 ## Purpose
 
@@ -2804,6 +2804,189 @@ Implementation notes:
   diagnostics/source mapping/spatial sidecars; generated-scenery policy constants still deserve a
   named policy object; renderer resource class names remain static-object-specific because the
   renderer resource classes are still static object resources.
+
+### Phase 17: Delete Multi-Payload Bake Batching
+
+Status: planned.
+
+Goal: remove coordinator/worker support for multi-payload bake inputs so each bake job represents
+exactly one resolved layer/domain payload, and delete bake-batch identity from baker-facing
+contracts.
+
+Context:
+
+- The recipe-first model makes each resolved layer/domain payload an independently publishable visual
+  product. The baker mostly maps each `StaticBakeBatchInput.items[]` entry independently, then merges
+  the results afterward.
+- Multi-payload bake inputs currently act as a weak dedupe mechanism for geometry attachments and a
+  worker-message coalescing mechanism. They do not create a fundamentally better visual product under
+  the new model.
+- `bakeBatchId` should disappear as a baker concept. If source-ready or texture-placement work still
+  needs an aggregation handle, that handle should be renamed and scoped outside the baker, such as
+  `sourceReadyGroupId` or `placementGroupId`.
+- Recent browser harness work showed the cost clearly: lifting the env-cell-system batch-size guard
+  exposed cross-item attachment leakage, structured-interior texture recipe/planning drift, and
+  static-object publication metadata assumptions. Those were useful stress-test findings, but the
+  feature itself is still architectural gravity from the older baker shape.
+- Texture placement may still benefit from a coalesced view because atlas packing is inherently a
+  set-level decision. Resource records, embedded geometry, and object visual recipes should already be
+  scoped to the resolved layer/domain payload that owns them.
+- The new model should not merge attachment bags before the baker and then slice them back apart. If
+  a resource needs dedupe, that should happen behind identity-keyed resolver, asset-reader, or loader
+  caches, while the baker still receives one complete resolved payload.
+- This phase also absorbs the residual debt that shares the same edit surface: payload-scoped
+  geometry sidecars, local flattened draw-unit-shaped diagnostic helpers, dead batch-id parameters,
+  generated-scenery instancing policy naming, and end-to-end browser harness validation.
+
+Deliverables:
+
+- Replace `StaticBakeBatchInput.items` with a single payload/task shape, or introduce a new
+  single-job input type and delete the old batch input once callers are cut over. Prefer names such
+  as `StaticBakeJobInput` and `StaticBakeJobResult` so the contract does not preserve old batch
+  semantics in new clothes.
+- Remove `bakeBatchId` from baker input, baker output, worker protocol payloads, fake-worker control
+  APIs, and baker diagnostics. Worker-client request correlation should use worker-owned request ids,
+  not semantic bake ids.
+- Remove `maxPayloadsPerBatch`, `DEFAULT_STATIC_BATCH_MAX_PAYLOADS`, pending batch item arrays, and
+  item-count-driven coordinator flushing.
+- Keep source-ready/texture-placement coalescing only where it has a clear purpose, then dispatch
+  one bake job per retained layer/domain payload using the shared placement snapshot. Any retained
+  coalescing id must be named for that layer, not for the baker.
+- Scope resource records and sidecars to the resolved payload before baking:
+  - prepared or referenced `gfx-obj` geometry through resolver output records backed by asset-reader
+    caches keyed by canonical geometry;
+  - env-cell embedded geometry through layer-local sidecars emitted with the env-cell-system payload;
+  - material, texture, geometry, part, and part-instance records through the normalized resolver
+    output shape rather than through shared baker attachment bags;
+  - texture atlas packing through placement intent grouping and texture manager bucket policy.
+- Remove local flattened draw-unit-shaped helper data that remains only for static-object or
+  structured-interior diagnostics, source mapping coverage, or spatial sidecars. Derive those records
+  from recipe/publication metadata, or delete/narrow the diagnostics that require the old shape.
+- Split env-cell-system baking so structured-interior geometry and env-cell static-object visuals use
+  shared single-payload helpers. Do not preserve the current recursive call from the env-cell baker
+  into the static-object batch baker.
+- Detach static-authored dynamic visual bake correlation from static `bakeBatchId`. This phase should
+  only remove the static bake-batch dependency; it should not expand into a full dynamic visual baker
+  redesign.
+- Remove dead batch-id plumbing from helper APIs while the bake contract is being replaced, including
+  helper parameters that no longer influence texture-use identity or resource output.
+- Extract generated-scenery instancing thresholds and transparency reuse decisions into a named
+  policy object while the static object publication/bake path is being touched.
+- Delete worker, fake-worker, diagnostics, and tests that exist only to preserve multi-item bake
+  inputs.
+- Rename remaining "batch" symbols that become inaccurate after the cutover. Keep "batch" only for
+  renderer-legal material partition batches/slices where it still describes draw-unit grouping.
+
+Folded-in residual debt:
+
+- Payload-scoped geometry sidecars and resource records are in scope because deleting shared bake
+  attachments without moving that responsibility into resolver/domain output would only rename the
+  old ambiguity.
+- Static-object and structured-interior source mapping, spatial records, and bake diagnostics should
+  stop depending on locally flattened draw-unit-shaped intermediates. If a diagnostic is the only
+  consumer, prefer deleting or narrowing the diagnostic over preserving a fake visual pipeline.
+- `bakeBatchId` cleanup includes indirect helper parameters, active-task state, timing diagnostics,
+  fake-worker controls, worker diagnostics, and stale-work correlation.
+- Generated-scenery instancing policy extraction is in scope because Phase 17 already touches static
+  object publication metadata and removes obsolete batch naming there.
+- Programmatic browser harness validation is required for this phase, not a later nice-to-have.
+
+Task checklist:
+
+- Audit `StaticBakeBatchInput`, `StaticBakeBatchItem`, `StaticBakeBatchResult`, `StaticSourceReadyWork`,
+  `PendingStaticBakeBatch`, fake workers, worker protocol, and coordinator diagnostics for multi-item
+  assumptions.
+- Audit every `bakeBatchId` use and either delete it or rename it to a non-baker source/placement
+  group id when it genuinely belongs outside the baker.
+- Split coordinator flow into:
+  - source/placement coalescing over many ready payloads; and
+  - independent bake dispatch for each current payload.
+- Ensure resolver/domain outputs provide the resource records and sidecars needed by each payload
+  before the baker runs. Do not add a coordinator-level merged attachment bag as an intermediate
+  model.
+- Move any remaining current attachment-provider responsibility for `gfx_obj` geometry and env-cell
+  embedded geometry into payload-scoped resolver output records or sidecars. Keep asset-reader caches
+  behind that resolver boundary if duplicate loading becomes measurable.
+- Convert terrain, static objects, generated scenery, env-cell-system, and static-authored dynamic
+  visual bake call sites to the single-job input.
+- Delete `bakeStaticObjectBatch(...)` and `bakeEnvCellSystem(...)` multi-item loops or rename them to
+  single-job functions.
+- Replace the env-cell-system baker's nested `bakeStaticObjectBatch(input)` call with shared
+  single-payload object visual publication helpers.
+- Derive static-object and structured-interior source mapping/spatial sidecars from object visual
+  recipe publication metadata where practical; delete or narrow diagnostics that only preserve the
+  old flattened draw-unit-shaped helper.
+- Remove unused or obsolete `bakeBatchId` parameters from material, texture-use, publication, and
+  diagnostic helper APIs while replacing the bake job contract.
+- Extract generated-scenery instancing settings such as minimum reuse count and transparent reuse
+  eligibility into an explicit policy object with tests that assert policy behavior through the
+  current object visual install-set output.
+- Preserve failure isolation: one payload's bake failure must not fail sibling payloads that shared
+  source-ready or texture-placement work.
+- Replace tests that assert batch item counts with tests that assert independent bake dispatch,
+  retained placement snapshot reuse, and payload-scoped resource records/sidecars.
+- Delete ossified batching tests rather than migrating them if they only prove the old worker shape.
+- Run focused static coordinator, worker-client/fake-worker, static object, env-cell-system, terrain,
+  dynamic visual, runtime install, and texture placement tests.
+- Run the programmatic browser harness for at least:
+  - `terrain,generated-scenery`;
+  - `terrain,env-cells`;
+  - full default domains if the focused runs are clean.
+
+Acceptance criteria:
+
+- No production bake input contains more than one layer/domain payload.
+- No coordinator or worker behavior depends on `maxPayloadsPerBatch` or item-count batch flushing.
+- No baker-facing production type, worker protocol message, fake-worker API, or baker diagnostic uses
+  `bakeBatchId` or a synonym for semantic bake-batch identity.
+- Texture placement can still be planned over a coalesced set of ready payloads, but each bake result
+  is produced, failed, committed, and diagnosed per payload.
+- Resource records and sidecars are payload-scoped before baking. Prepared geometry/resource dedupe,
+  where needed, is explicit and keyed by resource identity behind resolver or asset-reader caches, not
+  accidental via unrelated payloads sharing one baker input.
+- Env-cell-system baking no longer routes through a multi-item static-object batch baker.
+- Static-object and structured-interior diagnostics, source mappings, and spatial sidecars no longer
+  require flattened draw-unit-shaped intermediates that exist only to support the old baker shape.
+- Dead `bakeBatchId` parameters are gone from material, texture-use, publication, diagnostic, worker,
+  fake-worker, and coordinator helper surfaces.
+- Generated-scenery instancing thresholds and transparent reuse behavior live behind a named policy
+  object rather than unnamed constants embedded in publication metadata.
+- Browser harness runs settle without static task failures for generated scenery and env-cell slices.
+
+Risks and mitigations:
+
+- Risk: deleting bake batching may increase worker message count.
+  Mitigation: measure with the browser harness; if needed, optimize worker transport or cache lookups
+  directly rather than reintroducing multi-payload baker semantics.
+- Risk: texture placement currently returns one snapshot for a coalesced source-ready set.
+  Mitigation: keep that snapshot shared and pass it into each single-payload bake. Do not split atlas
+  placement unless the texture manager requires it.
+- Risk: moving resource records fully into resolver output may expose missing per-domain resource
+  sidecars, especially for env-cell embedded geometry and `gfx-obj` geometry normalization.
+  Mitigation: treat missing resource records as resolver contract gaps and add payload-scoped sidecars
+  there. Do not reintroduce merged baker attachments as the workaround.
+- Risk: removing merged attachment inputs may duplicate `gfx-obj` loader work.
+  Mitigation: measure with the browser harness; if duplicate preparation is real, add
+  resource-identity caches behind the resolver or asset reader while keeping the bake job
+  payload-scoped.
+- Risk: diagnostics that currently summarize `itemCount` per worker job lose an aggregation handle.
+  Mitigation: report source-ready group ids and per-payload bake jobs separately. Diagnostics are not
+  a reason to preserve the old bake shape.
+- Risk: stale-work protection currently keys some stage updates with `bakeBatchId`.
+  Mitigation: replace it with per-task revision/currentness plus an explicitly named source/placement
+  group id only where an async pre-bake group genuinely needs stale-work correlation.
+- Risk: static-authored dynamic visuals currently derive their dynamic bake id from `bakeBatchId`.
+  Mitigation: create a dynamic-visual correlation id from the source-ready group or task ids without
+  exposing static bake-batch semantics to the static baker contract.
+- Risk: deriving diagnostics and sidecars from recipe/publication metadata may expose diagnostics
+  that only existed to preserve old flattened draw-unit helper state.
+  Mitigation: delete or narrow those diagnostics. Diagnostics are not a high-priority consumer and
+  should not keep a legacy visual pipeline alive.
+- Risk: folding generated-scenery policy extraction into this phase increases the static object
+  publication edit surface.
+  Mitigation: keep the extraction mechanical and policy-only: name the thresholds, preserve current
+  behavior, and assert through existing object visual install-set output rather than adding a new
+  publication path.
 
 ## Decisions And Course Corrections
 

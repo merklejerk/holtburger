@@ -47,7 +47,7 @@ export type ObjectVisualPartRecipeKey = Brand<
 	"ObjectVisualPartRecipeKey"
 >;
 
-export type ObjectVisualSourceKind = "gfx-obj" | "embedded-geometry";
+type ObjectVisualSourceKind = "gfx-obj" | "embedded-geometry";
 
 export type ObjectVisualTextureUsage =
 	| "object-base-color"
@@ -55,21 +55,21 @@ export type ObjectVisualTextureUsage =
 	| "object-index"
 	| "object-palette";
 
-export type ObjectVisualMaterialFamily =
+type ObjectVisualMaterialFamily =
 	| "direct-color"
 	| "indexed-color"
 	| "texture-rgba"
 	| "unsupported";
 
-export type ObjectVisualMaterialPass =
+type ObjectVisualMaterialPass =
 	| "additive"
 	| "alpha-test"
 	| "opaque"
 	| "transparent";
 
-export type ObjectVisualIndexedTextureFormat = "index16" | "p8";
+type ObjectVisualIndexedTextureFormat = "index16" | "p8";
 
-export type ObjectVisualTextureWrapMode = "clamp" | "repeat";
+type ObjectVisualTextureWrapMode = "clamp" | "repeat";
 
 /** Metadata-only texture need authored by resolvers before placement or packing. */
 export interface ObjectVisualTextureRecipe {
@@ -81,17 +81,17 @@ export interface ObjectVisualTextureRecipe {
 	readonly source: ObjectVisualTextureSource;
 }
 
-export type ObjectVisualTextureSource =
+type ObjectVisualTextureSource =
 	| ObjectVisualPaletteTextureSource
 	| ObjectVisualRenderSurfaceTextureSource;
 
-export interface ObjectVisualRenderSurfaceTextureSource {
+interface ObjectVisualRenderSurfaceTextureSource {
 	readonly kind: "render-surface";
 	readonly renderSurfaceId: number;
 	readonly surfaceTextureId: number | null;
 }
 
-export interface ObjectVisualPaletteTextureSource {
+interface ObjectVisualPaletteTextureSource {
 	readonly firstIndex: number;
 	readonly indexCount: number;
 	readonly kind: "palette";
@@ -129,18 +129,18 @@ export interface ObjectVisualMaterialRecipeBase {
 	readonly textureRoleSchemaKey: string;
 }
 
-export interface ObjectVisualDirectColorMaterialRecipe extends ObjectVisualMaterialRecipeBase {
+interface ObjectVisualDirectColorMaterialRecipe extends ObjectVisualMaterialRecipeBase {
 	readonly family: "direct-color";
 }
 
-export interface ObjectVisualIndexedColorMaterialRecipe extends ObjectVisualMaterialRecipeBase {
+interface ObjectVisualIndexedColorMaterialRecipe extends ObjectVisualMaterialRecipeBase {
 	readonly colorTextureRecipeId: ObjectVisualTextureRecipeId;
 	readonly family: "indexed-color";
 	readonly indexedTextureFormat: ObjectVisualIndexedTextureFormat;
 	readonly paletteTextureRecipeId: ObjectVisualTextureRecipeId;
 }
 
-export interface ObjectVisualTextureRgbaMaterialRecipe extends ObjectVisualMaterialRecipeBase {
+interface ObjectVisualTextureRgbaMaterialRecipe extends ObjectVisualMaterialRecipeBase {
 	readonly detailTextureRecipeId: ObjectVisualTextureRecipeId | null;
 	readonly family: "texture-rgba";
 	readonly rgbaTextureRecipeId: ObjectVisualTextureRecipeId;
@@ -156,7 +156,7 @@ export type ObjectVisualGeometryRecipe =
 	| ObjectVisualEmbeddedGeometryRecipe
 	| ObjectVisualGfxObjGeometryRecipe;
 
-export interface ObjectVisualGfxObjGeometryRecipe {
+interface ObjectVisualGfxObjGeometryRecipe {
 	/** Sidecar buffer containing resolver-flattened source-local gfx-obj geometry. */
 	readonly bufferId: ObjectVisualGeometryBufferId;
 	readonly kind: "gfx-obj";
@@ -164,13 +164,13 @@ export interface ObjectVisualGfxObjGeometryRecipe {
 	readonly sourceDid: number;
 }
 
-export interface ObjectVisualEmbeddedGeometryRecipe {
+interface ObjectVisualEmbeddedGeometryRecipe {
 	readonly bufferId: ObjectVisualGeometryBufferId;
 	readonly kind: "embedded-geometry";
 }
 
 /** Transfer/cache reference for a heavy source-local geometry payload. */
-export interface ObjectVisualGeometryBufferRef {
+interface ObjectVisualGeometryBufferRef {
 	/** Source-local coordinate space for the heavy geometry payload. */
 	readonly coordinateSpace: "source-local";
 	readonly sourceKind: ObjectVisualSourceKind;
@@ -201,12 +201,12 @@ export interface ObjectVisualGeometryBuffer {
 	readonly triangleCount: number;
 }
 
-export interface ObjectVisualGeometryBounds {
+interface ObjectVisualGeometryBounds {
 	readonly max: ObjectVisualVec3;
 	readonly min: ObjectVisualVec3;
 }
 
-export interface ObjectVisualVec3 {
+interface ObjectVisualVec3 {
 	readonly x: number;
 	readonly y: number;
 	readonly z: number;
@@ -237,18 +237,18 @@ export type ObjectVisualResidency =
 	| ObjectVisualOutdoorLandblockResidency
 	| ObjectVisualRuntimeEntityResidency;
 
-export interface ObjectVisualOutdoorLandblockResidency {
+interface ObjectVisualOutdoorLandblockResidency {
 	readonly kind: "outdoor-landblock";
 	readonly landblockId: number;
 }
 
-export interface ObjectVisualEnvCellResidency {
+interface ObjectVisualEnvCellResidency {
 	readonly envCellId: number;
 	readonly kind: "env-cell";
 	readonly landblockId: number;
 }
 
-export interface ObjectVisualRuntimeEntityResidency {
+interface ObjectVisualRuntimeEntityResidency {
 	readonly kind: "runtime-entity";
 	readonly runtimeEntityId: string;
 }
@@ -331,7 +331,7 @@ export interface DynamicAnimationPartBinding {
 	readonly sourcePartIndex: number;
 }
 
-export interface ObjectVisualRecipeKeyTables {
+interface ObjectVisualRecipeKeyTables {
 	readonly geometryBufferKeys: readonly ObjectVisualGeometryBufferKey[];
 	readonly geometryRecipeKeys: readonly ObjectVisualGeometryRecipeKey[];
 	readonly materialRecipeKeys: readonly ObjectVisualMaterialRecipeKey[];

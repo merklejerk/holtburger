@@ -97,7 +97,7 @@ export interface ObjectVisualStructuredInteriorDirectDrawUnitMetadata {
 	readonly surfaceIds: readonly number[];
 }
 
-export type ObjectVisualStaticSidecarKind =
+type ObjectVisualStaticSidecarKind =
 	| "portal"
 	| "source-mapping"
 	| "spatial"

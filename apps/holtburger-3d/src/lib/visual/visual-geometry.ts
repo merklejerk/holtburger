@@ -1,18 +1,18 @@
 /** Axis-aligned bounds in the payload owner's source coordinate space. */
-export interface VisualGeometryBounds {
+interface VisualGeometryBounds {
 	readonly min: VisualGeometryVec3;
 	readonly max: VisualGeometryVec3;
 }
 
 /** Minimal vector shape shared by static and dynamic visual geometry bounds. */
-export interface VisualGeometryVec3 {
+interface VisualGeometryVec3 {
 	readonly x: number;
 	readonly y: number;
 	readonly z: number;
 }
 
 /** GPU index element width for a visual geometry payload. */
-export type VisualGeometryIndexType = "uint16" | "uint32";
+type VisualGeometryIndexType = "uint16" | "uint32";
 
 /** Renderer shader family selected by material batching planning. */
 export type VisualGeometryMaterialFamily =

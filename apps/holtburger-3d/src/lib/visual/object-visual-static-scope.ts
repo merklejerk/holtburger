@@ -15,7 +15,7 @@ export type ObjectVisualStaticScope =
 	| ObjectVisualEnvCellSystemStaticScope
 	| ObjectVisualOutdoorStaticObjectScope;
 
-export interface ObjectVisualStaticVisualProduct {
+interface ObjectVisualStaticVisualProduct {
 	/** Heavy source-local geometry buffers referenced by ready object visual recipes. */
 	readonly geometryBuffers: ReadonlyMap<
 		ObjectVisualGeometryBufferId,
@@ -27,7 +27,7 @@ export interface ObjectVisualStaticVisualProduct {
 	readonly resolution: ObjectVisualBundleResolution;
 }
 
-export interface ObjectVisualOutdoorStaticObjectScope {
+interface ObjectVisualOutdoorStaticObjectScope {
 	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
 	readonly kind: "outdoor-object-visual-static-scope";
 	readonly landblock: OutdoorStaticObjectsScopePayload["landblock"];
@@ -35,7 +35,7 @@ export interface ObjectVisualOutdoorStaticObjectScope {
 	readonly visual: ObjectVisualStaticVisualProduct;
 }
 
-export interface ObjectVisualOutdoorStaticObjectSidecars {
+interface ObjectVisualOutdoorStaticObjectSidecars {
 	/** Static-authored dynamic placements stay outside drawable static recipes. */
 	readonly authoredDynamicPlacements: OutdoorStaticObjectsScopePayload["authoredDynamicPlacements"];
 	/** Building-transition aperture records remain sidecars owned by the static layer. */
@@ -52,14 +52,14 @@ export interface ObjectVisualOutdoorStaticObjectSidecars {
 	readonly textureRefs: OutdoorStaticObjectsScopePayload["textureRefs"];
 }
 
-export interface ObjectVisualEnvCellSystemStaticScope {
+interface ObjectVisualEnvCellSystemStaticScope {
 	readonly kind: "env-cell-system-object-visual-static-scope";
 	readonly landblock: EnvCellSystemStaticScopePayload["landblock"];
 	readonly sidecars: ObjectVisualEnvCellSystemSidecars;
 	readonly visual: ObjectVisualStaticVisualProduct;
 }
 
-export interface ObjectVisualEnvCellSystemSidecars {
+interface ObjectVisualEnvCellSystemSidecars {
 	readonly acceptedEnvCellIds: EnvCellSystemStaticScopePayload["acceptedEnvCellIds"];
 	/** Env-cell source records stay as sidecars for portals, visibility, placement, and BSP facts. */
 	readonly envCells: EnvCellSystemStaticScopePayload["envCells"];

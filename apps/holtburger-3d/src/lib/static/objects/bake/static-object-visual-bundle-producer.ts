@@ -448,8 +448,14 @@ function createMaterialRecipe(
 				)
 					? requireTextureRecipeId(
 							registry,
-							requireTextureRole(plan.textureRoles, "detail-overlay").dataUse,
-							spec.textureWrapMode,
+							requireTextureRole(
+								plan.textureRoles,
+								"detail-overlay",
+							).dataUse,
+							resolveTextureRoleWrapMode(
+								requireTextureRole(plan.textureRoles, "detail-overlay"),
+								spec.textureWrapMode,
+							),
 						)
 					: null,
 				family: "texture-rgba",
@@ -481,15 +487,31 @@ function createTextureRecipes(options: {
 			const textureId = requireTextureRecipeId(
 				options.registry,
 				role.dataUse,
-				spec.textureWrapMode,
+				resolveTextureRoleWrapMode(role, spec.textureWrapMode),
 			);
 			if (recipes.has(textureId)) {
 				continue;
 			}
-			recipes.set(textureId, createTextureRecipe(role, spec.textureWrapMode));
+			recipes.set(
+				textureId,
+				createTextureRecipe(
+					role,
+					resolveTextureRoleWrapMode(role, spec.textureWrapMode),
+				),
+			);
 		}
 	}
 	return recipes;
+}
+
+function resolveTextureRoleWrapMode(
+	role: ObjectVisualMaterialTextureUseRole,
+	materialWrapMode: "clamp" | "repeat",
+): "clamp" | "repeat" {
+	if (role.role === "detail-overlay" && role.tiling > 1) {
+		return "repeat";
+	}
+	return materialWrapMode;
 }
 
 function createTextureRecipe(
@@ -547,7 +569,10 @@ function createTextureRecipeKeys(
 		...new Set(
 			materialRecipeSpecs.flatMap((spec) =>
 				spec.plan.textureRoles.map((role) =>
-					createTextureRecipeKey(role.dataUse, spec.textureWrapMode),
+					createTextureRecipeKey(
+						role.dataUse,
+						resolveTextureRoleWrapMode(role, spec.textureWrapMode),
+					),
 				),
 			),
 		),

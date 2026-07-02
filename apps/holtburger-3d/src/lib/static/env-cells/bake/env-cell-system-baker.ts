@@ -350,6 +350,7 @@ function createStructuredInteriorObjectVisualInstallSet(options: {
 		return [
 			createStaticObjectVisualRecipeInstallPublication({
 				bundle: publication.resolution.bundle,
+				domain: "env-cell-system",
 				geometryBuffers: publication.geometryBuffers,
 				metadata: publication.publicationMetadata,
 				renderPartIdPrefix: `${options.task.ownerId}:structured-interior`,

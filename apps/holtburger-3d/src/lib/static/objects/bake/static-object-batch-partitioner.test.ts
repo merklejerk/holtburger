@@ -157,6 +157,10 @@ describe("static object batch partitioner", () => {
 		if (!drawUnit || drawUnit.kind !== "static-object-geometry") {
 			throw new Error("Expected static object geometry draw unit.");
 		}
+		const recipeDrawUnit = result.objectVisualInstallSet.directDrawUnits[0];
+		if (!recipeDrawUnit || recipeDrawUnit.kind !== "static-object-geometry") {
+			throw new Error("Expected recipe static object geometry draw unit.");
+		}
 		expect(drawUnit.materialEntries).toEqual([
 			{
 				alphaTest: 0,
@@ -191,8 +195,7 @@ describe("static object batch partitioner", () => {
 				domain: "outdoor-buildings",
 				owners: [
 					{
-						drawUnitId:
-							"outdoor-buildings:0xda55ffff:static-object-partition:slice-0-0",
+						drawUnitId: recipeDrawUnit.drawUnitId,
 						kind: "draw-unit",
 					},
 				],

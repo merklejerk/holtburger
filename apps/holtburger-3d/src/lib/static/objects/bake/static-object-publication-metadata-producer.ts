@@ -20,6 +20,11 @@ import {
 import { createStaticObjectSourcePartMatrix } from "./static-object-visual-bundle-producer";
 import type { StaticObjectBatchPayload } from "./static-object-batch-partitioner";
 
+const GENERATED_SCENERY_INSTANCING_POLICY = {
+	minimumInstanceCount: 2,
+	transparentReuseAllowed: false,
+} as const;
+
 export interface StaticObjectPublicationMetadataProduction {
 	readonly metadata: ObjectVisualStaticPublicationMetadata;
 	readonly partInstanceIndexByKey: ReadonlyMap<
@@ -133,9 +138,11 @@ function createGeneratedResourceGroupMetadata(options: {
 			geometry: group.part.geometry,
 			groupId: group.groupId,
 			kind: "static-object-instanced-resource-group" as const,
-			minimumInstanceCount: 2,
+			minimumInstanceCount:
+				GENERATED_SCENERY_INSTANCING_POLICY.minimumInstanceCount,
 			resourceIdSeed: `static-object-resource:${key}`,
-			transparentReuseAllowed: false,
+			transparentReuseAllowed:
+				GENERATED_SCENERY_INSTANCING_POLICY.transparentReuseAllowed,
 		}));
 }
 

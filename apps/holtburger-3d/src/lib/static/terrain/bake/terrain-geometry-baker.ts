@@ -1,7 +1,7 @@
 import type {
-	StaticBakeBatchInput,
-	StaticBakeBatchItem,
-	StaticBakeBatchResult,
+	StaticBakeJobInput,
+	StaticBakeJobPayload,
+	StaticBakeJobResult,
 	StaticBakeTextureUse,
 	StaticBaker,
 	StaticSourceMappingRecord,
@@ -47,31 +47,27 @@ const EMPTY_TEXTURE_PLACEMENT_SNAPSHOT: TexturePlacementSnapshot = {
 };
 
 export class TerrainGeometryStaticBaker implements StaticBaker {
-	async bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
+	async bake(input: StaticBakeJobInput): Promise<StaticBakeJobResult> {
 		return bakeTerrainGeometry(input);
 	}
 }
 
 export function bakeTerrainGeometry(
-	input: StaticBakeBatchInput,
-): StaticBakeBatchResult {
+	input: StaticBakeJobInput,
+): StaticBakeJobResult {
 	if (input.domain !== "outdoor-terrain") {
 		throw new Error(
-			`Terrain geometry baker only supports outdoor terrain batches. Received ${input.domain}.`,
+			`Terrain geometry baker only supports outdoor terrain jobs. Received ${input.domain}.`,
 		);
 	}
 
-	const itemResults = input.items.map((item) =>
-		bakeTerrainGeometryItem(input, item),
-	);
-	const drawUnits = itemResults.flatMap((result) => result.drawUnits);
+	const item = { payload: input.payload, task: input.task };
+	const itemResult = bakeTerrainGeometryItem(input, item);
+	const drawUnits = itemResult.drawUnits;
 
 	return {
 		atlasRegistryUpdates: [],
-		buildRevision: Math.max(
-			...input.items.map((item) => item.payload.sourceRevision),
-			0,
-		),
+		buildRevision: input.payload.sourceRevision,
 		domain: input.domain,
 		drawUnits,
 		staticObjectBakeDiagnostics: [],
@@ -85,18 +81,17 @@ export function bakeTerrainGeometry(
 		staticSourceMappings: createTerrainSourceMappingRecords(drawUnits),
 		staticSpatialRecords: createTerrainSpatialRecords(drawUnits),
 		staticVisibilityRecords: [],
-		bakeBatchId: input.bakeBatchId,
-		tasks: input.items.map((item) => item.task),
+		task: input.task,
 		textureDependencies: createTerrainTextureDependencies(
 			drawUnits,
 			resolveTerrainTexturePlacementSnapshot(input.texturePlacementSnapshot),
 		),
-		textureUses: itemResults.flatMap((result) => result.textureUses),
+		textureUses: itemResult.textureUses,
 	};
 }
 
 export function createTerrainTexturePlacementIntents(options: {
-	readonly items: readonly StaticBakeBatchItem[];
+	readonly items: readonly StaticBakeJobPayload[];
 }): readonly TexturePlacementIntent[] {
 	return options.items.flatMap((item) => {
 		if (
@@ -143,7 +138,7 @@ export function createTerrainTexturePlacementIntents(options: {
 }
 
 function resolveTerrainTexturePlacementSnapshot(
-	snapshot: StaticBakeBatchInput["texturePlacementSnapshot"],
+	snapshot: StaticBakeJobInput["texturePlacementSnapshot"],
 ): TexturePlacementSnapshot {
 	if (!snapshot) {
 		return EMPTY_TEXTURE_PLACEMENT_SNAPSHOT;
@@ -187,8 +182,8 @@ function createTerrainSpatialRecords(
 }
 
 function bakeTerrainGeometryItem(
-	input: StaticBakeBatchInput,
-	item: StaticBakeBatchItem,
+	input: StaticBakeJobInput,
+	item: StaticBakeJobPayload,
 ): {
 	readonly drawUnits: readonly TerrainGeometryStaticDrawUnit[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
@@ -835,8 +830,8 @@ function terrainQuadUv(
 }
 
 function createTerrainBakeTextureUses(
-	input: StaticBakeBatchInput,
-	item: StaticBakeBatchItem,
+	input: StaticBakeJobInput,
+	item: StaticBakeJobPayload,
 	drawUnits: readonly TerrainGeometryStaticDrawUnit[],
 ): readonly StaticBakeTextureUse[] {
 	if (item.payload.scope.kind !== "terrain") {

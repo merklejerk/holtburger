@@ -688,7 +688,7 @@ export interface StaticObjectSourceGeometryIdentity {
 	readonly kind: "static-object-source-geometry";
 	/** Higher-level source asset that authored this part reference. */
 	readonly source: StaticObjectSourceIdentity;
-	/** Canonical raw gfx geometry payload used by bake attachments. */
+	/** Canonical raw gfx geometry payload used by static bake resources. */
 	readonly canonical: StaticObjectCanonicalGeometryIdentity;
 }
 
@@ -948,24 +948,27 @@ export interface StaticBakeTask {
 	readonly revision: number;
 }
 
-export interface StaticBakeBatchItem {
+export interface StaticBakeJobPayload {
+	/** Task identity that owns the static product baked from this payload. */
 	readonly task: StaticBakeTask;
+	/** Resolver output for exactly one static layer/domain product. */
 	readonly payload: StaticScopePayload;
 }
 
-export interface StaticBakeBatchInput {
-	readonly attachments: StaticBakeBatchAttachments;
+export interface StaticBakeJobInput {
+	/** Payload-scoped resources needed to bake this single static job. */
+	readonly resources: StaticBakeJobResources;
 	readonly domain: StaticDomain;
-	readonly items: readonly StaticBakeBatchItem[];
+	readonly task: StaticBakeTask;
+	readonly payload: StaticScopePayload;
 	/** Pre-bake texture placement assignments available to bakers that can partition by final pages. */
 	readonly texturePlacementSnapshot?:
 		| TexturePlacementSnapshot
 		| ObjectVisualTexturePlacementSnapshot;
 	readonly revision: number;
-	readonly bakeBatchId: string;
 }
 
-export interface StaticBakeBatchAttachments {
+export interface StaticBakeJobResources {
 	readonly envCellCellStructureGeometry: readonly EnvCellCellStructureGeometryAttachment[];
 	readonly staticObjectSourceGeometry: readonly StaticObjectSourceGeometryAttachment[];
 }
@@ -1368,24 +1371,23 @@ export interface EnvCellStaticObjectPlacementRecord {
 	readonly placement: LandblockEnvCellStaticObjectPlacementFacts;
 }
 
-export interface StaticBakeAttachmentRequest {
+export interface StaticBakeResourceRequest {
 	readonly domain: StaticDomain;
-	readonly items: readonly StaticBakeBatchItem[];
+	readonly task: StaticBakeTask;
+	readonly payload: StaticScopePayload;
 	readonly revision: number;
-	readonly bakeBatchId: string;
 }
 
-export interface StaticBakeAttachmentProvider {
-	createAttachments(
-		request: StaticBakeAttachmentRequest,
-	): Promise<StaticBakeBatchAttachments>;
+export interface StaticBakeResourceProvider {
+	createResources(
+		request: StaticBakeResourceRequest,
+	): Promise<StaticBakeJobResources>;
 }
 
-export interface StaticBakeBatchResult {
-	readonly bakeBatchId: string;
+export interface StaticBakeJobResult {
 	readonly domain: StaticDomain;
 	readonly revision: number;
-	readonly tasks: readonly StaticBakeTask[];
+	readonly task: StaticBakeTask;
 	readonly drawUnits: readonly StaticDrawUnit[];
 	readonly staticObjectBakeDiagnostics: readonly StaticObjectBakeDiagnostics[];
 	readonly portalApertureResources: readonly StaticPortalApertureResource[];
@@ -1405,7 +1407,7 @@ export interface StaticBakeBatchResult {
 
 export interface StaticObjectBakeDiagnostics {
 	readonly kind: "static-object-bake-diagnostics";
-	readonly bakeBatchId: string;
+	readonly taskId: string;
 	readonly domain: Extract<
 		StaticDomain,
 		OutdoorStaticObjectDomain | "env-cell-system"
@@ -1879,7 +1881,7 @@ export interface StaticResolver {
 }
 
 export interface StaticBaker {
-	bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult>;
+	bake(input: StaticBakeJobInput): Promise<StaticBakeJobResult>;
 	createDiagnosticsSnapshot?(): StaticBakerDiagnosticsSnapshot;
 }
 
@@ -1904,10 +1906,10 @@ export interface StaticBakerTraceEvent {
 
 interface StaticBakerJobDiagnostics {
 	readonly requestId: string;
-	readonly bakeBatchId: string;
 	readonly domain: StaticDomain;
 	readonly revision: number;
-	readonly itemCount: number;
+	readonly taskId: string;
+	readonly scopeKey: string;
 	readonly stage: "queued" | "executing";
 	readonly ageMs: number;
 	readonly stageAgeMs: number;
@@ -1956,14 +1958,14 @@ export interface StaticCoordinatorOverviewSnapshot {
 
 export interface StaticCoordinatorTimingDiagnostics {
 	readonly kind: "static-coordinator-timing";
-	readonly bakeBatchId: string;
 	readonly domain: StaticDomain;
 	readonly revision: number;
-	readonly itemCount: number;
+	readonly taskId: string;
+	readonly scopeKey: string;
 	readonly resolverMs: number | null;
 	readonly placementIntentMs: number | null;
 	readonly texturePlacementMs: number | null;
-	readonly attachmentMs: number | null;
+	readonly resourceMs: number | null;
 	readonly bakeMs: number | null;
 	readonly commitMs: number | null;
 }
@@ -2083,7 +2085,7 @@ type StaticLayerTaskPhase =
 
 export type StaticActiveBakeStage =
 	| "source-ready-handler"
-	| "attachments"
+	| "resources"
 	| "static-baker"
 	| "dynamic-visual-baker"
 	| "commit-synthesis";
@@ -2103,8 +2105,6 @@ export interface StaticLayerTaskStatus {
 	readonly phaseStartedAtMs: number;
 	/** Elapsed milliseconds spent in the current phase when this snapshot was created. */
 	readonly phaseAgeMs: number;
-	/** Coordinator bake batch currently owning this task, if the task is baking. */
-	readonly activeBakeBatchId: string | null;
 	/** Current coordinator-side bake stage, for diagnosing long-running active bake closures. */
 	readonly activeBakeStage: StaticActiveBakeStage | null;
 	/** Monotonic timestamp, in milliseconds, when the active bake stage began. */

@@ -1,4 +1,4 @@
-import type { StaticBakeBatchItem } from "../../contracts";
+import type { StaticBakeJobPayload } from "../../contracts";
 import type { ObjectVisualTexturePlacementIntent } from "../../../textures/placement";
 import {
 	createObjectVisualTexturePlacementIntents,
@@ -13,7 +13,7 @@ import {
 import { isRenderableObjectVisualMaterialPlan } from "../../objects/bake/static-object-renderability";
 
 export function createStructuredInteriorTexturePlacementIntents(input: {
-	readonly items: readonly StaticBakeBatchItem[];
+	readonly items: readonly StaticBakeJobPayload[];
 }): readonly ObjectVisualTexturePlacementIntent[] {
 	const requirementsByTextureUseId = new Map<
 		string,

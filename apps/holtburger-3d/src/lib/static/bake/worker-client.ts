@@ -1,6 +1,6 @@
 import type {
-	StaticBakeBatchInput,
-	StaticBakeBatchResult,
+	StaticBakeJobInput,
+	StaticBakeJobResult,
 	StaticBaker,
 	StaticBakerDiagnosticsSnapshot,
 	StaticBakerTraceEvent,
@@ -11,9 +11,9 @@ import type {
 } from "./protocol";
 
 interface PendingBakeRequest {
-	readonly input: StaticBakeBatchInput;
+	readonly input: StaticBakeJobInput;
 	readonly queuedAtMs: number;
-	readonly resolve: (result: StaticBakeBatchResult) => void;
+	readonly resolve: (result: StaticBakeJobResult) => void;
 	readonly reject: (error: Error) => void;
 	stage: "queued" | "executing";
 	stageStartedAtMs: number;
@@ -47,7 +47,7 @@ export class StaticBakeWorkerClient implements StaticBaker {
 		this.#port.addEventListener("message", this.#onMessage);
 	}
 
-	bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
+	bake(input: StaticBakeJobInput): Promise<StaticBakeJobResult> {
 		if (this.#disposed) {
 			return Promise.reject(
 				new Error("Static bake worker client was disposed."),
@@ -70,7 +70,7 @@ export class StaticBakeWorkerClient implements StaticBaker {
 			});
 			this.#port.postMessage({
 				input,
-				kind: "bake-static-batch",
+				kind: "bake-static-job",
 				requestId,
 			});
 		});
@@ -97,15 +97,15 @@ export class StaticBakeWorkerClient implements StaticBaker {
 			pendingJobs: Array.from(this.#pending.entries()).map(
 				([requestId, pending]) => ({
 					ageMs: currentNowMs - pending.queuedAtMs,
-					bakeBatchId: pending.input.bakeBatchId,
 					domain: pending.input.domain,
-					itemCount: pending.input.items.length,
 					queuedAtMs: pending.queuedAtMs,
 					requestId,
 					revision: pending.input.revision,
+					scopeKey: pending.input.task.scopeKey,
 					stage: pending.stage,
 					stageAgeMs: currentNowMs - pending.stageStartedAtMs,
 					stageStartedAtMs: pending.stageStartedAtMs,
+					taskId: pending.input.task.taskId,
 					traceEvents: pending.traceEvents,
 				}),
 			),
@@ -119,13 +119,13 @@ export class StaticBakeWorkerClient implements StaticBaker {
 			return;
 		}
 
-		if (response.kind === "static-batch-bake-started") {
+		if (response.kind === "static-job-bake-started") {
 			pending.stage = "executing";
 			pending.stageStartedAtMs = nowMs();
 			return;
 		}
 
-		if (response.kind === "static-batch-bake-trace") {
+		if (response.kind === "static-job-bake-trace") {
 			pending.traceEvents.push(response.event);
 			if (pending.traceEvents.length > MAX_STATIC_BAKER_TRACE_EVENTS) {
 				pending.traceEvents.splice(
@@ -136,7 +136,7 @@ export class StaticBakeWorkerClient implements StaticBaker {
 			return;
 		}
 
-		if (response.kind === "static-batch-bake-failed") {
+		if (response.kind === "static-job-bake-failed") {
 			this.#pending.delete(response.requestId);
 			pending.reject(new Error(response.message));
 			return;
@@ -163,7 +163,7 @@ export class WorkerPoolStaticBaker implements StaticBaker {
 		this.#bakers = bakers;
 	}
 
-	bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
+	bake(input: StaticBakeJobInput): Promise<StaticBakeJobResult> {
 		if (this.#disposed) {
 			return Promise.reject(
 				new Error("WorkerPoolStaticBaker has been disposed."),
@@ -231,15 +231,15 @@ export class WorkerPoolStaticBaker implements StaticBaker {
 			pendingJobs: [
 				...this.#queuedRequests.map((request) => ({
 					ageMs: currentNowMs - request.queuedAtMs,
-					bakeBatchId: request.input.bakeBatchId,
 					domain: request.input.domain,
-					itemCount: request.input.items.length,
 					queuedAtMs: request.queuedAtMs,
 					requestId: request.requestId,
 					revision: request.input.revision,
+					scopeKey: request.input.task.scopeKey,
 					stage: "queued" as const,
 					stageAgeMs: currentNowMs - request.queuedAtMs,
 					stageStartedAtMs: request.queuedAtMs,
+					taskId: request.input.task.taskId,
 					traceEvents: [],
 				})),
 				...this.#bakers.flatMap((baker, workerIndex) =>
@@ -271,11 +271,11 @@ export class WorkerPoolStaticBaker implements StaticBaker {
 }
 
 interface PoolQueuedBakeRequest {
-	readonly input: StaticBakeBatchInput;
+	readonly input: StaticBakeJobInput;
 	readonly queuedAtMs: number;
 	readonly reject: (error: Error) => void;
 	readonly requestId: string;
-	readonly resolve: (result: StaticBakeBatchResult) => void;
+	readonly resolve: (result: StaticBakeJobResult) => void;
 }
 
 function nowMs(): number {

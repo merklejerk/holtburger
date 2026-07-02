@@ -23,12 +23,12 @@ import type {
 	StaticDrawUnit,
 	StaticScopePayload,
 	StaticMaterialCoverageReport,
-	StaticBakeAttachmentProvider,
+	StaticBakeResourceProvider,
 	StaticBakeTask,
 	StaticLayerTaskStatus,
 	TerrainGeometryStaticDrawUnit,
 	StaticObjectBakeDiagnostics,
-	StaticBakeBatchInput,
+	StaticBakeJobInput,
 	StaticResolverJob,
 	StaticLandblockSceneLodSourceRequest,
 	StaticLandblockSceneLodResolution,
@@ -52,7 +52,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 		const deltas: StaticCoordinatorCommitDelta[] = [];
@@ -81,7 +81,7 @@ describe("static coordinator", () => {
 
 		resolver.complete(secondResolverRequest?.requestId ?? "");
 		await flushPromises();
-		baker.complete(pendingBatchIdForTask(baker, secondWork.taskId), {
+		baker.complete(pendingTaskIdForTask(baker, secondWork.taskId), {
 			drawUnits: [createTerrainDrawUnit("terrain-a", 0xda56ffff)],
 		});
 		await flushPromises();
@@ -97,7 +97,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 
@@ -111,7 +111,7 @@ describe("static coordinator", () => {
 		expect(baker.pendingInputs).toHaveLength(1);
 
 		bakeTasksForDemand(coordinator, createSingleTerrainDemand(0xda56ffff));
-		baker.complete(pendingBatchIdForTask(baker, firstWork.taskId));
+		baker.complete(pendingTaskIdForTask(baker, firstWork.taskId));
 		await flushPromises();
 
 		expect(coordinator.createSnapshot()).toMatchObject({
@@ -127,9 +127,9 @@ describe("static coordinator", () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
-			attachmentProvider: new RejectingAttachmentProvider("geometry offline"),
+			resourceProvider: new RejectingResourceProvider("geometry offline"),
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 
@@ -152,7 +152,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 
@@ -219,7 +219,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 
@@ -228,7 +228,6 @@ describe("static coordinator", () => {
 		const layerTasks = coordinator.createSnapshot().layerTasks;
 		expect(layerTasks).toHaveLength(1);
 		expect(layerTasks[0]).toMatchObject({
-			activeBakeBatchId: null,
 			domain: "outdoor-terrain",
 			ownerId: "terrain:0xda55ffff",
 			ownerKey: {
@@ -249,7 +248,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 
@@ -291,7 +290,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 
@@ -336,9 +335,7 @@ describe("static coordinator", () => {
 			"outdoor-terrain",
 		]);
 		expect(
-			baker.pendingInputs.flatMap((input) =>
-				input.items.map((item) => item.task.ownerKey),
-			),
+			baker.pendingInputs.map((input) => input.task.ownerKey),
 		).toEqual([
 			{ kind: "terrain", landblockId: 0xda55ffff },
 			{ kind: "outdoor-explicit-objects", landblockId: 0xda55ffff },
@@ -351,7 +348,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 		const sourceReady: StaticSourceReadyWork[] = [];
@@ -371,7 +368,9 @@ describe("static coordinator", () => {
 			domain: "outdoor-terrain",
 			objectVisualPlacementIntents: [],
 			terrainPlacementIntents: [],
-			bakeBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:1",
+			sourceReadyGroupId: expect.stringContaining(
+				"static-source-ready-group:1:outdoor-terrain:landblock:da55ffff",
+			),
 			tasks: [expect.objectContaining({ taskId: task.taskId })],
 		});
 		expect(baker.pendingInputs).toHaveLength(0);
@@ -383,9 +382,9 @@ describe("static coordinator", () => {
 
 		expect(baker.pendingInputs).toHaveLength(1);
 		expect(baker.pendingInputs[0]).toMatchObject({
-			bakeBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:1",
+			task: expect.objectContaining({ taskId: task.taskId }),
 		});
-		baker.complete(pendingBatchIdForTask(baker, task.taskId));
+		baker.complete(pendingTaskIdForTask(baker, task.taskId));
 		await continuation;
 	});
 
@@ -394,7 +393,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 		const sourceReady: StaticSourceReadyWork[] = [];
@@ -450,7 +449,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 		let sourceReady: StaticSourceReadyWork | null = null;
@@ -476,7 +475,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 		coordinator.setSourceReadyHandler((work) => {
@@ -500,7 +499,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 
@@ -525,7 +524,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 
@@ -561,7 +560,7 @@ describe("static coordinator", () => {
 		await flushPromises();
 
 		expect(baker.pendingInputs).toHaveLength(1);
-		expect(baker.pendingInputs[0]?.items[0]?.task.taskId).toBe(newTask.taskId);
+		expect(baker.pendingInputs[0]?.task.taskId).toBe(newTask.taskId);
 	});
 
 	it("reports layer owner lifecycle transitions without changing task identity", async () => {
@@ -569,7 +568,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 		const deltas: StaticCoordinatorCommitDelta[] = [];
@@ -595,7 +594,7 @@ describe("static coordinator", () => {
 			},
 		]);
 
-		baker.complete(pendingBatchIdForTask(baker, work.taskId), {
+		baker.complete(pendingTaskIdForTask(baker, work.taskId), {
 			drawUnits: [createTerrainDrawUnit("terrain-a", 0xda55ffff)],
 		});
 		await flushPromises();
@@ -629,7 +628,7 @@ describe("static coordinator", () => {
 		const emptyBaker = new DeferredStaticBaker();
 		const emptyCoordinator = new StaticCoordinator({
 			baker: emptyBaker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver: emptyResolver,
 		});
 		const emptyDeltas: StaticCoordinatorCommitDelta[] = [];
@@ -642,7 +641,7 @@ describe("static coordinator", () => {
 		);
 		emptyResolver.complete(emptyResolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
-		emptyBaker.complete(pendingBatchIdForTask(emptyBaker, emptyWork.taskId), {
+		emptyBaker.complete(pendingTaskIdForTask(emptyBaker, emptyWork.taskId), {
 			drawUnits: [],
 		});
 		await flushPromises();
@@ -659,9 +658,9 @@ describe("static coordinator", () => {
 
 		const failedResolver = new DeferredStaticResolver();
 		const failedCoordinator = new StaticCoordinator({
-			attachmentProvider: new RejectingAttachmentProvider("geometry offline"),
+			resourceProvider: new RejectingResourceProvider("geometry offline"),
 			baker: new DeferredStaticBaker(),
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver: failedResolver,
 		});
 		bakeTasksForDemand(
@@ -685,7 +684,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 
@@ -718,7 +717,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 
@@ -748,7 +747,7 @@ describe("static coordinator", () => {
 		const resolver = new DeferredStaticResolver();
 		const coordinator = new StaticCoordinator({
 			baker: new DeferredStaticBaker(),
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 
@@ -778,7 +777,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 		const deltas: StaticCoordinatorCommitDelta[] = [];
@@ -790,7 +789,7 @@ describe("static coordinator", () => {
 		);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
-		baker.complete(pendingBatchIdForTask(baker, work.taskId), {
+		baker.complete(pendingTaskIdForTask(baker, work.taskId), {
 			drawUnits: [createTerrainDrawUnit("terrain-a", 0xda55ffff)],
 		});
 		await flushPromises();
@@ -855,7 +854,7 @@ describe("static coordinator", () => {
 		const commits: StaticScopePrepCommit[] = [];
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			dynamicVisualBaker,
 			dynamicVisualGeometryAssetReader: new EmptyPreparedAssetReader(),
 			resolver,
@@ -867,7 +866,7 @@ describe("static coordinator", () => {
 			createSingleTerrainDemand(0xda55ffff),
 		);
 		await flushPromises();
-		baker.complete(pendingBatchIdForTask(baker, work.taskId), {
+		baker.complete(pendingTaskIdForTask(baker, work.taskId), {
 			drawUnits: [createTerrainDrawUnit("terrain-a", 0xda55ffff)],
 		});
 		await flushPromises();
@@ -877,7 +876,7 @@ describe("static coordinator", () => {
 		expect(dynamicVisualBaker.inputs).toEqual([
 			expect.objectContaining({
 				batchId:
-					"static-batch:1:outdoor-terrain:landblock:da55ffff:1:static-authored-dynamic-visuals",
+					"static-source-ready-group:1:outdoor-terrain:landblock:da55ffff:1:landblock:da55ffff:outdoor-terrain:static-authored-dynamic-visuals",
 				recipes: [expect.objectContaining({ entityId: "static-dynamic:1" })],
 				revision: 1,
 				sourceGeometry: [],
@@ -891,7 +890,7 @@ describe("static coordinator", () => {
 				],
 				dynamicVisualBake: {
 					batchId:
-						"static-batch:1:outdoor-terrain:landblock:da55ffff:1:static-authored-dynamic-visuals",
+						"static-source-ready-group:1:outdoor-terrain:landblock:da55ffff:1:landblock:da55ffff:outdoor-terrain:static-authored-dynamic-visuals",
 					failures: [],
 					products: [
 						{
@@ -918,7 +917,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 		const work = bakeTasksForDemand(
@@ -934,7 +933,7 @@ describe("static coordinator", () => {
 			)?.requestId ?? "",
 		);
 		await flushPromises();
-		baker.complete(pendingBatchIdForTask(baker, work?.taskId ?? ""), {
+		baker.complete(pendingTaskIdForTask(baker, work?.taskId ?? ""), {
 			staticObjectBakeDiagnostics: [diagnostics],
 		});
 		await flushPromises();
@@ -944,14 +943,13 @@ describe("static coordinator", () => {
 		expect(snapshot.recentTiming).toHaveLength(1);
 		expect(snapshot.recentTiming[0]).toMatchObject({
 			domain: "outdoor-generated-scenery",
-			itemCount: 1,
 			kind: "static-coordinator-timing",
 			revision: 1,
-			bakeBatchId:
-				"static-batch:1:outdoor-generated-scenery:landblock:da55ffff:1",
+			scopeKey: "landblock:da55ffff",
+			taskId: "1:landblock:da55ffff:outdoor-generated-scenery",
 		});
 		expect(snapshot.recentTiming[0]?.resolverMs).toEqual(expect.any(Number));
-		expect(snapshot.recentTiming[0]?.attachmentMs).toEqual(expect.any(Number));
+		expect(snapshot.recentTiming[0]?.resourceMs).toEqual(expect.any(Number));
 		expect(snapshot.recentTiming[0]?.bakeMs).toEqual(expect.any(Number));
 		expect(snapshot.recentTiming[0]?.commitMs).toEqual(expect.any(Number));
 	});
@@ -961,7 +959,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 		const deltas: StaticCoordinatorCommitDelta[] = [];
@@ -991,7 +989,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 		const deltas: StaticCoordinatorCommitDelta[] = [];
@@ -1003,7 +1001,7 @@ describe("static coordinator", () => {
 		);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
-		baker.complete(pendingBatchIdForTask(baker, work.taskId), {
+		baker.complete(pendingTaskIdForTask(baker, work.taskId), {
 			drawUnits: [createInvalidOwnerlessDrawUnit("bad-draw-unit")],
 		});
 		await flushPromises();
@@ -1017,15 +1015,12 @@ describe("static coordinator", () => {
 		consoleError.mockRestore();
 	});
 
-	it("groups same-domain resolved payloads into one static bake batch", async () => {
+	it("dispatches same-domain resolved payloads as separate static bake jobs", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: {
-				maxPayloadsPerBatch: 8,
-				maxWaitMs: 0,
-			},
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 
@@ -1059,29 +1054,31 @@ describe("static coordinator", () => {
 		resolver.complete(completedTerrainRequests[1]?.requestId ?? "");
 		await flushPromises();
 
-		const firstTerrainScopeKey = `landblock:${completedTerrainWork[0]?.scope.landblockId
-			.toString(16)
-			.padStart(8, "0")}`;
+		let nextInputIndex = 0;
 		expect(baker.pendingInputs).toHaveLength(1);
-		expect(baker.pendingInputs[0]).toMatchObject({
-			domain: "outdoor-terrain",
-			revision: 1,
-			bakeBatchId: `static-batch:1:outdoor-terrain:${firstTerrainScopeKey}:2`,
-		});
-		expect(
-			baker.pendingInputs[0]?.items.map((item) => item.task.taskId),
-		).toEqual(completedTerrainWork.map((item) => item.taskId));
-		expect(
-			baker.pendingInputs[0]?.items.map((item) => item.task.ownerKey),
-		).toEqual(
-			completedTerrainWork.map((item) => ({
-				kind: "terrain",
-				landblockId: item.scope.landblockId,
-			})),
+		const observedTaskIds: string[] = [];
+		for (const item of completedTerrainWork) {
+			const { input, nextIndex } = nextDispatchedInput(
+				baker.pendingInputs,
+				nextInputIndex,
+				"outdoor-terrain",
+			);
+			nextInputIndex = nextIndex;
+			observedTaskIds.push(input.task.taskId);
+			expect(input).toMatchObject({
+				domain: "outdoor-terrain",
+				revision: 1,
+				task: expect.objectContaining({
+					ownerKey: expect.objectContaining({ kind: "terrain" }),
+				}),
+			});
+			baker.complete(input.task.taskId);
+			await flushPromises();
+			await flushPromises();
+		}
+		expect(observedTaskIds.sort()).toEqual(
+			completedTerrainWork.map((item) => item.taskId).sort(),
 		);
-
-		baker.complete(baker.pendingInputs[0]?.bakeBatchId ?? "");
-		await flushPromises();
 
 		expect(coordinator.createSnapshot()).toMatchObject({
 			committed: 2,
@@ -1089,15 +1086,12 @@ describe("static coordinator", () => {
 		});
 	});
 
-	it("drops pending bake items whose layer owner is no longer demanded", async () => {
+	it("drops pending bake jobs whose layer owner is no longer demanded", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: {
-				maxPayloadsPerBatch: 2,
-				maxWaitMs: 10_000,
-			},
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 
@@ -1126,7 +1120,9 @@ describe("static coordinator", () => {
 
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
-		expect(baker.pendingInputs).toHaveLength(0);
+
+		expect(baker.pendingInputs).toHaveLength(1);
+		expect(baker.pendingInputs[0]?.task.taskId).toBe(evictedWork.taskId);
 
 		bakeTasksForDemand(coordinator, {
 			location: {
@@ -1144,18 +1140,22 @@ describe("static coordinator", () => {
 		resolver.complete(resolver.pendingRequests[1]?.requestId ?? "");
 		await flushPromises();
 
-		expect(baker.pendingInputs).toHaveLength(1);
-		expect(
-			baker.pendingInputs[0]?.items.map((item) => item.task.taskId),
-		).toEqual([retainedWork.taskId]);
-		expect(
-			baker.pendingInputs[0]?.items.map((item) => item.task.ownerKey),
-		).toEqual([
-			{
-				kind: "terrain",
-				landblockId: retainedWork.scope.landblockId,
-			},
-		]);
+		expect(baker.pendingInputs).toHaveLength(2);
+		expect(baker.pendingInputs[1]?.task.taskId).toBe(retainedWork.taskId);
+		expect(baker.pendingInputs[1]?.task.ownerKey).toEqual({
+			kind: "terrain",
+			landblockId: retainedWork.scope.landblockId,
+		});
+		baker.complete(evictedWork.taskId);
+		await flushPromises();
+		expect(coordinator.createSnapshot()).toMatchObject({
+			committed: 0,
+		});
+		baker.complete(retainedWork.taskId);
+		await flushPromises();
+		expect(coordinator.createSnapshot()).toMatchObject({
+			committed: 1,
+		});
 	});
 
 	it("commits object visual texture uses from install-set resource ownership", async () => {
@@ -1163,10 +1163,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: {
-				maxPayloadsPerBatch: 8,
-				maxWaitMs: 0,
-			},
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 		const deltas: StaticCoordinatorCommitDelta[] = [];
@@ -1184,14 +1181,14 @@ describe("static coordinator", () => {
 		resolver.completeSource(resolver.pendingSourceRequests[0]?.requestId ?? "");
 		await flushPromises();
 
-		const generatedInput = pendingBatchForTask(
+		const generatedInput = pendingInputForTask(
 			baker.pendingInputs,
 			generatedWork.taskId,
 		);
 		const retainedResource = createStaticObjectVisualResource(
 			`resource:${generatedWork.ownerId}`,
 		);
-		baker.complete(generatedInput.bakeBatchId, {
+		baker.complete(generatedInput.task.taskId, {
 			objectVisualInstallSet: createObjectVisualInstallSet({
 				renderInstances: [
 					createStaticObjectRenderInstance({
@@ -1213,7 +1210,7 @@ describe("static coordinator", () => {
 
 		expect(deltas).toHaveLength(1);
 		expect(deltas[0]?.tasks.map((task) => task.taskId)).toEqual([
-			generatedInput.items[0]?.task.taskId,
+			generatedInput.task.taskId,
 		]);
 		expect(deltas[0]?.objectVisualInstallSet.visualResources).toEqual([
 			retainedResource,
@@ -1227,7 +1224,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 		const deltas: StaticCoordinatorCommitDelta[] = [];
@@ -1243,13 +1240,13 @@ describe("static coordinator", () => {
 		resolver.completeSource(resolver.pendingSourceRequests[0]?.requestId ?? "");
 		await flushPromises();
 
-		const input = pendingBatchForTask(baker.pendingInputs, work.taskId);
+		const input = pendingInputForTask(baker.pendingInputs, work.taskId);
 		const publishedDrawUnit = createStaticObjectDrawUnit(
 			"published-static-object-draw-unit",
 			work.scope.landblockId,
 			"outdoor-explicit-objects",
 		);
-		baker.complete(input.bakeBatchId, {
+		baker.complete(input.task.taskId, {
 			drawUnits: [],
 			objectVisualInstallSet: createObjectVisualInstallSet({
 				directDrawUnits: [publishedDrawUnit],
@@ -1270,7 +1267,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 		const sourcePayloads: StaticCoordinatorSourcePayloadDelta[] = [];
@@ -1432,7 +1429,7 @@ describe("static coordinator", () => {
 			},
 		});
 		await flushPromises();
-		baker.complete(pendingBatchIdForTask(baker, buildingWork?.taskId ?? ""));
+		baker.complete(pendingTaskIdForTask(baker, buildingWork?.taskId ?? ""));
 		await flushPromises();
 
 		expect(
@@ -1476,7 +1473,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 
@@ -1486,7 +1483,7 @@ describe("static coordinator", () => {
 		);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
-		baker.complete(pendingBatchIdForTask(baker, work?.taskId ?? ""), {
+		baker.complete(pendingTaskIdForTask(baker, work?.taskId ?? ""), {
 			materialCoverage: [
 				createMaterialCoverage("outdoor-terrain", {
 					coverageKey: "outdoor-terrain:terrain",
@@ -1521,7 +1518,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 1, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 
@@ -1558,12 +1555,18 @@ describe("static coordinator", () => {
 		}
 		await flushPromises();
 
-		for (const input of baker.pendingInputs.slice(0, 2)) {
-			const task = input.items[0]?.task;
-			if (!task) {
-				throw new Error("Expected one terrain task per bake input.");
-			}
-			baker.complete(input.bakeBatchId, {
+		let nextInputIndex = 0;
+		const observedTaskIds: string[] = [];
+		for (const _expectedWork of [firstWork, secondWork]) {
+			const { input, nextIndex } = nextDispatchedInput(
+				baker.pendingInputs,
+				nextInputIndex,
+				"outdoor-terrain",
+			);
+			nextInputIndex = nextIndex;
+			observedTaskIds.push(input.task.taskId);
+			const task = input.task;
+			baker.complete(input.task.taskId, {
 				materialCoverage: [
 					createMaterialCoverage("outdoor-terrain", {
 						coverageKey: `outdoor-terrain:${task.scope.landblockId.toString(16)}`,
@@ -1572,8 +1575,12 @@ describe("static coordinator", () => {
 					}),
 				],
 			});
+			await flushPromises();
+			await flushPromises();
 		}
-		await flushPromises();
+		expect(observedTaskIds.sort()).toEqual(
+			[firstWork.taskId, secondWork.taskId].sort(),
+		);
 
 		expect(coordinator.createSnapshot().materialCoverage).toHaveLength(2);
 
@@ -1605,7 +1612,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 
@@ -1630,7 +1637,7 @@ describe("static coordinator", () => {
 			createEnvCellSystemResolverPayload(),
 		);
 		await flushPromises();
-		baker.complete(pendingBatchIdForTask(baker, envCellWork?.taskId ?? ""), {
+		baker.complete(pendingTaskIdForTask(baker, envCellWork?.taskId ?? ""), {
 			materialCoverage: [
 				createMaterialCoverage("env-cell-system", {
 					coverageKey: "env-cell-system:structured-interior",
@@ -1659,7 +1666,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 		const sourcePayloads: StaticCoordinatorSourcePayloadDelta[] = [];
@@ -1694,7 +1701,9 @@ describe("static coordinator", () => {
 		);
 		expect(envCellBakeInput).toMatchObject({
 			domain: "env-cell-system",
-			bakeBatchId: "static-batch:1:env-cell-system:landblock:da55ffff:1",
+			task: expect.objectContaining({
+				taskId: "1:landblock:da55ffff:env-cell-system",
+			}),
 		});
 		expect(
 			sourcePayloads.filter((item) => item.task.domain === "env-cell-system"),
@@ -1726,7 +1735,7 @@ describe("static coordinator", () => {
 			},
 		});
 
-		baker.complete(pendingBatchIdForTask(baker, work?.taskId ?? ""));
+		baker.complete(pendingTaskIdForTask(baker, work?.taskId ?? ""));
 		await flushPromises();
 
 		expect(coordinator.createSnapshot()).toMatchObject({
@@ -1741,12 +1750,12 @@ describe("static coordinator", () => {
 		).toBe("materializing");
 	});
 
-	it("coalesces env-cell tasks using the configured batch size", async () => {
+	it("dispatches env-cell systems as one bake job per resolved payload", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 2, maxWaitMs: 0 },
+			sourceReadyCoalescing: { maxWaitMs: 0  },
 			resolver,
 		});
 		const deltas: StaticCoordinatorCommitDelta[] = [];
@@ -1776,13 +1785,30 @@ describe("static coordinator", () => {
 		}
 		await flushPromises();
 
-		const envCellBatches = baker.pendingInputs.filter(
-			(input) => input.domain === "env-cell-system",
+		const expectedTaskIds = envCellRequests.map((request) => {
+			const landblockId = request.job.scope.landblockId
+				.toString(16)
+				.padStart(8, "0");
+			return `1:landblock:${landblockId}:env-cell-system`;
+		});
+		const observedTaskIds: string[] = [];
+		let nextInputIndex = 0;
+		for (const _taskId of expectedTaskIds) {
+			const { input, nextIndex } = nextDispatchedInput(
+				baker.pendingInputs,
+				nextInputIndex,
+				"env-cell-system",
+			);
+			nextInputIndex = nextIndex;
+			observedTaskIds.push(input.task.taskId);
+			baker.complete(input.task.taskId);
+			await flushPromises();
+			await flushPromises();
+		}
+		expect(observedTaskIds.sort()).toEqual(expectedTaskIds.sort());
+		expect(deltas.map((delta) => delta.tasks[0]?.taskId).sort()).toEqual(
+			expectedTaskIds.sort(),
 		);
-		expect(envCellBatches.length).toBeGreaterThan(1);
-		expect(envCellBatches.map((input) => input.items.length)).toContain(2);
-		expect(envCellBatches.every((input) => input.items.length <= 2)).toBe(true);
-		expect(deltas).toEqual([]);
 	});
 });
 
@@ -1850,8 +1876,7 @@ function createStaticObjectBakeDiagnostics(): StaticObjectBakeDiagnostics {
 			unsupportedMaterialBucket: 0,
 		},
 		skippedPartitionCount: 0,
-		bakeBatchId:
-			"static-batch:1:outdoor-generated-scenery:landblock:da55ffff:1",
+		taskId: "1:landblock:da55ffff:outdoor-generated-scenery",
 		uniqueSourceCount: 1,
 		uniqueSourcePartGeometryCount: 1,
 		uniqueSourceTriangleCount: 1,
@@ -1969,24 +1994,44 @@ function createStaticObjectVisualTextureUse(options: {
 	};
 }
 
-function pendingBatchIdForTask(
+function pendingTaskIdForTask(
 	baker: DeferredStaticBaker,
 	taskId: string,
 ): string {
-	return pendingBatchForTask(baker.pendingInputs, taskId).bakeBatchId;
+	return pendingInputForTask(baker.pendingInputs, taskId).task.taskId;
 }
 
-function pendingBatchForTask(
-	pendingInputs: readonly StaticBakeBatchInput[],
+function pendingInputForTask(
+	pendingInputs: readonly StaticBakeJobInput[],
 	taskId: string,
-): StaticBakeBatchInput {
-	const input = pendingInputs.find((candidate) =>
-		candidate.items.some((item) => item.task.taskId === taskId),
+): StaticBakeJobInput {
+	const input = pendingInputs.find(
+		(candidate) => candidate.task.taskId === taskId,
 	);
 	if (!input) {
-		throw new Error(`No pending bake batch contains task ${taskId}.`);
+		throw new Error(`No pending bake job exists for task ${taskId}.`);
 	}
 	return input;
+}
+
+function nextDispatchedInput(
+	pendingInputs: readonly StaticBakeJobInput[],
+	startIndex: number,
+	domain: StaticBakeJobInput["domain"],
+): { readonly input: StaticBakeJobInput; readonly nextIndex: number } {
+	const index = pendingInputs.findIndex(
+		(candidate, candidateIndex) =>
+			candidateIndex >= startIndex && candidate.domain === domain,
+	);
+	if (index < 0) {
+		throw new Error(
+			`No dispatched ${domain} bake job exists at or after index ${startIndex}.`,
+		);
+	}
+	return {
+		input: pendingInputs[index],
+		nextIndex: index + 1,
+	};
 }
 
 function bakeTasksForDemand(
@@ -2025,10 +2070,10 @@ function createLandblockScopeForTask(
 	};
 }
 
-class RejectingAttachmentProvider implements StaticBakeAttachmentProvider {
+class RejectingResourceProvider implements StaticBakeResourceProvider {
 	constructor(private readonly message: string) {}
 
-	createAttachments(): Promise<never> {
+	createResources(): Promise<never> {
 		return Promise.reject(new Error(this.message));
 	}
 }

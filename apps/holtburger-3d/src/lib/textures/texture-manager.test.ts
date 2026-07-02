@@ -169,7 +169,6 @@ describe("browser texture manager", () => {
 				addedDrawUnits: [],
 				removedResources: [],
 				revision: 1,
-				bakeBatchId: "batch-a",
 				textureUses,
 			}),
 		).rejects.toThrow(
@@ -191,7 +190,6 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 1,
-			bakeBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
 					drawUnitId: "terrain-a",
@@ -255,7 +253,6 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 1,
-			bakeBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
 					drawUnitId: "terrain-slice-a",
@@ -300,7 +297,6 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 1,
-			bakeBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
 					domain: "outdoor-buildings",
@@ -365,7 +361,6 @@ describe("browser texture manager", () => {
 				addedDrawUnits: [],
 				removedResources: [],
 				revision: 1,
-				bakeBatchId: "batch-detail",
 				textureUses,
 			}),
 		).rejects.toThrow(
@@ -387,7 +382,6 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 1,
-			bakeBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
 					domain: "outdoor-buildings",
@@ -495,7 +489,6 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 1,
-			bakeBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
 					drawUnitId: "terrain-a",
@@ -547,7 +540,6 @@ describe("browser texture manager", () => {
 				addedDrawUnits: [],
 				removedResources: [],
 				revision: 1,
-				bakeBatchId: "batch-a",
 				textureUses: [
 					...Array.from({ length: 5 }, (_, index) =>
 						createTextureUseCommit({
@@ -595,7 +587,6 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 1,
-			bakeBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
 					domain: "outdoor-buildings",
@@ -664,7 +655,6 @@ describe("browser texture manager", () => {
 			removedResources: [],
 			revision: 1,
 			envCellStaticObjectPlacementRecords: [],
-			bakeBatchId: "batch-env",
 			staticPortalGraphs: [],
 			staticPortalInteriorRecords: [],
 			staticSourceMappings: [],
@@ -675,7 +665,6 @@ describe("browser texture manager", () => {
 					domain: "env-cell-system",
 					drawUnitId: "structured-interior-a",
 					renderSurfaceId: 0x06000010,
-					bakeBatchId: "batch-env",
 					textureUseId: "structured-interior-a:base:0",
 					usage: "rgba-color",
 				}),
@@ -683,7 +672,6 @@ describe("browser texture manager", () => {
 					domain: "env-cell-system",
 					drawUnitId: "structured-interior-a",
 					renderSurfaceId: 0x06000020,
-					bakeBatchId: "batch-env",
 					textureUseId: "structured-interior-a:base:1",
 					usage: "rgba-color",
 				}),
@@ -766,7 +754,6 @@ describe("browser texture manager", () => {
 				addedDrawUnits: [],
 				removedResources: [],
 				revision: 1,
-				bakeBatchId: "batch-a",
 				textureUses,
 			}),
 		).rejects.toThrow(
@@ -786,7 +773,6 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [{ drawUnitId: "terrain-a", kind: "draw-unit" }],
 			revision: 2,
-			bakeBatchId: "batch-a",
 			textureUses: [],
 		});
 
@@ -841,11 +827,9 @@ describe("browser texture manager", () => {
 				outputFormat: "rgba8",
 				textureUseId: textureUse.textureUseId,
 			}),
-			bakeBatchId: "pre-bake-batch",
 			textureUses: [
 				{
 					...textureUse,
-					bakeBatchId: "pre-bake-batch",
 				},
 			],
 		});
@@ -877,13 +861,11 @@ describe("browser texture manager", () => {
 				domain: "outdoor-generated-scenery",
 				drawUnitId: "generated-scenery-a",
 				outputFormat: "rgba8",
-				bakeBatchId: "generated-scenery-pre-bake-batch",
 				textureUseId: textureUse.textureUseId,
 			}),
 			textureUses: [
 				{
 					...textureUse,
-					bakeBatchId: "generated-scenery-pre-bake-batch",
 				},
 			],
 		});
@@ -1013,7 +995,6 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [{ drawUnitId: "terrain-a", kind: "draw-unit" }],
 			revision: 2,
-			bakeBatchId: "batch-a",
 			textureUses: [],
 		});
 
@@ -1214,7 +1195,6 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [{ drawUnitId: "terrain-a", kind: "draw-unit" }],
 			revision: 3,
-			bakeBatchId: "batch-a",
 			textureUses: [],
 		});
 		expect(removeFirstUpdate).toBeNull();
@@ -1223,7 +1203,6 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [{ drawUnitId: "terrain-b", kind: "draw-unit" }],
 			revision: 4,
-			bakeBatchId: "batch-a",
 			textureUses: [],
 		});
 		expect(removeSecondUpdate).toMatchObject({
@@ -1244,7 +1223,6 @@ describe("browser texture manager", () => {
 			createCommitDelta({
 				drawUnitId: "terrain-b",
 				outputFormat: "rgba8",
-				bakeBatchId: "batch-b",
 				textureUseId: "terrain-b:prepared-texture:06000010",
 			}),
 		);
@@ -1366,7 +1344,6 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 1,
-			bakeBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
 					domain: "outdoor-buildings",
@@ -1433,7 +1410,6 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 1,
-			bakeBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
 					domain: "outdoor-buildings",
@@ -1452,7 +1428,6 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 2,
-			bakeBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
 					domain: "outdoor-buildings",
@@ -1490,7 +1465,6 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 1,
-			bakeBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
 					domain: "outdoor-generated-scenery",
@@ -1700,7 +1674,6 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 1,
-			bakeBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
 					domain: "outdoor-generated-scenery",
@@ -1782,7 +1755,6 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 1,
-			bakeBatchId: "batch-a",
 			textureUses: [
 				{
 					domain: "outdoor-buildings",
@@ -1799,7 +1771,6 @@ describe("browser texture manager", () => {
 						},
 						usage: "index8",
 					},
-					bakeBatchId: "batch-a",
 					textureUseId: "static-a:index",
 				},
 				{
@@ -1815,7 +1786,6 @@ describe("browser texture manager", () => {
 						},
 						usage: "palette-rgba",
 					},
-					bakeBatchId: "batch-a",
 					textureUseId: "static-a:palette",
 				},
 			],
@@ -1923,7 +1893,6 @@ describe("browser texture manager", () => {
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 1,
-			bakeBatchId: "batch-a",
 			textureUses: [
 				{
 					domain: "outdoor-buildings",
@@ -1948,7 +1917,6 @@ describe("browser texture manager", () => {
 						],
 						usage: "palette-rgba",
 					},
-					bakeBatchId: "batch-a",
 					textureUseId: "static-a:palette",
 				},
 			],
@@ -2231,7 +2199,6 @@ function createCommitDelta(options: {
 	readonly outputFormat: "rgba8" | "dxt1";
 	readonly renderSurfaceId?: number;
 	readonly samplingPolicy?: StaticBakeTextureSamplingPolicy;
-	readonly bakeBatchId?: string;
 	readonly textureUseId?: string;
 	readonly usage?: PreparedRgbaRenderSurfaceTextureUsage;
 }): StaticCoordinatorCommitDelta {
@@ -2247,7 +2214,6 @@ function createCommitDelta(options: {
 		removedResources: [],
 		revision: 1,
 		envCellStaticObjectPlacementRecords: [],
-		bakeBatchId: options.bakeBatchId ?? "batch-a",
 		staticPortalGraphs: [],
 		staticPortalInteriorRecords: [],
 		staticSourceMappings: [],
@@ -2260,7 +2226,6 @@ function createCommitDelta(options: {
 				outputFormat: options.outputFormat,
 				renderSurfaceId,
 				samplingPolicy: options.samplingPolicy,
-				bakeBatchId: options.bakeBatchId,
 				textureUseId,
 				usage: options.usage,
 			}),
@@ -2274,7 +2239,6 @@ function createTextureUseCommit(options: {
 	readonly outputFormat?: "rgba8" | "dxt1";
 	readonly renderSurfaceId: number;
 	readonly samplingPolicy?: StaticBakeTextureSamplingPolicy;
-	readonly bakeBatchId?: string;
 	readonly textureUseId: string;
 	readonly usage?: PreparedRgbaRenderSurfaceTextureUsage;
 }): StaticCoordinatorCommitDelta["textureUses"][number] {
@@ -2290,7 +2254,6 @@ function createTextureUseCommit(options: {
 			usage: options.usage ?? "rgba-color",
 		},
 		samplingPolicy: options.samplingPolicy,
-		bakeBatchId: options.bakeBatchId ?? "batch-a",
 		textureUseId: options.textureUseId,
 	};
 }

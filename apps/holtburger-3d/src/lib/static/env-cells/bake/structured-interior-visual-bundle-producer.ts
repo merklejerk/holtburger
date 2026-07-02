@@ -3,7 +3,7 @@ import type {
 	EnvCellSystemStaticScopePayload,
 	LandblockEnvCellStaticFacts,
 	MaterialTextureDataUseIdentity,
-	StaticBakeBatchAttachments,
+	StaticBakeJobResources,
 	StaticBakeTask,
 } from "../../contracts";
 import {
@@ -46,7 +46,7 @@ import type {
 import {
 	createEnvCellCellStructureGeometryIdentity,
 	describeEnvCellCellStructureGeometryIdentity,
-} from "./env-cell-system-geometry-attachments";
+} from "./env-cell-system-geometry-resources";
 import {
 	planStructuredInteriorCellMaterials,
 	resolveStructuredInteriorMaterialSurfaceId,
@@ -65,7 +65,7 @@ export interface StructuredInteriorVisualBundleExpansion {
 
 export function createStructuredInteriorVisualBundleExpansion(input: {
 	readonly attachments: Pick<
-		StaticBakeBatchAttachments,
+		StaticBakeJobResources,
 		"envCellCellStructureGeometry"
 	>;
 	readonly envCell: LandblockEnvCellStaticFacts;
@@ -409,7 +409,7 @@ function createMaterialRecipe(
 
 function findGeometryAttachment(input: {
 	readonly attachments: Pick<
-		StaticBakeBatchAttachments,
+		StaticBakeJobResources,
 		"envCellCellStructureGeometry"
 	>;
 	readonly envCell: LandblockEnvCellStaticFacts;

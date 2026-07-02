@@ -1,4 +1,4 @@
-import type { StaticBakeBatchItem, StaticScopePayload } from "../../contracts";
+import type { StaticBakeJobPayload, StaticScopePayload } from "../../contracts";
 import { createStaticMaterialTextureBindingRequirement } from "../../bake/static-material-texture-policy";
 import type { ObjectVisualTexturePlacementIntent } from "../../../textures/placement";
 import {
@@ -10,7 +10,7 @@ import { partitionStaticObjectBatches } from "./static-object-batch-partitioner"
 import { isCurrentlyStageableStaticObjectDataUse } from "./static-object-renderability";
 
 export function createStaticObjectTexturePlacementIntents(input: {
-	readonly items: readonly StaticBakeBatchItem[];
+	readonly items: readonly StaticBakeJobPayload[];
 }): readonly ObjectVisualTexturePlacementIntent[] {
 	const requirementsByTextureUseId = new Map<
 		string,

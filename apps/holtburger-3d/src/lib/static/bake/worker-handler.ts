@@ -10,32 +10,32 @@ export async function handleStaticBakeWorkerRequest(
 	message: StaticBakeWorkerMainMessage,
 	postMessage: (response: StaticBakeWorkerResponse) => void,
 ): Promise<void> {
-	if (message.kind !== "bake-static-batch") {
+	if (message.kind !== "bake-static-job") {
 		return;
 	}
 
 	try {
 		postMessage({
-			kind: "static-batch-bake-started",
+			kind: "static-job-bake-started",
 			requestId: message.requestId,
 		});
 		const result = await runWithStaticBakeWorkerTraceSink(
 			(event) =>
 				postMessage({
 					event,
-					kind: "static-batch-bake-trace",
+					kind: "static-job-bake-trace",
 					requestId: message.requestId,
 				}),
 			() => baker.bake(message.input),
 		);
 		postMessage({
-			kind: "static-batch-baked",
+			kind: "static-job-baked",
 			requestId: message.requestId,
 			result,
 		});
 	} catch (error: unknown) {
 		postMessage({
-			kind: "static-batch-bake-failed",
+			kind: "static-job-bake-failed",
 			message: error instanceof Error ? error.message : String(error),
 			requestId: message.requestId,
 		});

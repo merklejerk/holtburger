@@ -7,35 +7,35 @@ import {
 } from "../../../assets/preparation/prepared-render-geometry";
 import { objectVisualGeometryBufferId } from "../../../visual/object-visual-recipe-bundle";
 import type {
-	StaticBakeAttachmentProvider,
-	StaticBakeAttachmentRequest,
-	StaticBakeBatchAttachments,
+	StaticBakeResourceProvider,
+	StaticBakeResourceRequest,
+	StaticBakeJobResources,
 	StaticObjectCanonicalGeometryIdentity,
 } from "../../contracts";
-import { createEmptyStaticBakeAttachments } from "../../bake/attachments";
+import { createEmptyStaticBakeJobResources } from "../../bake/resources";
 import {
 	createStaticObjectSourceGeometryAttachment,
 	describeStaticObjectCanonicalGeometryIdentity,
 	getStaticObjectCanonicalGeometryIdentity,
 } from "../static-object-source-assets";
 
-export class StaticObjectBakeAttachmentProvider implements StaticBakeAttachmentProvider {
+export class StaticObjectBakeResourceProvider implements StaticBakeResourceProvider {
 	readonly #assetReader: PreparedAssetReader;
 
 	constructor(options: { readonly assetReader: PreparedAssetReader }) {
 		this.#assetReader = options.assetReader;
 	}
 
-	async createAttachments(
-		request: StaticBakeAttachmentRequest,
-	): Promise<StaticBakeBatchAttachments> {
+	async createResources(
+		request: StaticBakeResourceRequest,
+	): Promise<StaticBakeJobResources> {
 		if (
 			request.domain !== "outdoor-buildings" &&
 			request.domain !== "outdoor-explicit-objects" &&
 			request.domain !== "outdoor-generated-scenery" &&
 			request.domain !== "env-cell-system"
 		) {
-			return createEmptyStaticBakeAttachments();
+			return createEmptyStaticBakeJobResources();
 		}
 
 		const identities = collectStaticObjectCanonicalGeometryIdentities(request);
@@ -61,35 +61,31 @@ export class StaticObjectBakeAttachmentProvider implements StaticBakeAttachmentP
 		);
 
 		return {
-			...createEmptyStaticBakeAttachments(),
+			...createEmptyStaticBakeJobResources(),
 			staticObjectSourceGeometry,
 		};
 	}
 }
 
 function collectStaticObjectCanonicalGeometryIdentities(
-	request: StaticBakeAttachmentRequest,
+	request: StaticBakeResourceRequest,
 ): readonly StaticObjectCanonicalGeometryIdentity[] {
 	const byKey = new Map<string, StaticObjectCanonicalGeometryIdentity>();
 
-	for (const item of request.items) {
-		if (
-			item.payload.scope.kind !== "outdoor-static-objects" &&
-			item.payload.scope.kind !== "env-cell-system"
-		) {
-			continue;
-		}
+	if (
+		request.payload.scope.kind !== "outdoor-static-objects" &&
+		request.payload.scope.kind !== "env-cell-system"
+	) {
+		return [];
+	}
 
-		for (const source of item.payload.scope.sourceAssets) {
-			for (const part of source.parts) {
-				const canonical = getStaticObjectCanonicalGeometryIdentity(
-					part.geometry,
-				);
-				byKey.set(
-					describeStaticObjectCanonicalGeometryIdentity(canonical),
-					canonical,
-				);
-			}
+	for (const source of request.payload.scope.sourceAssets) {
+		for (const part of source.parts) {
+			const canonical = getStaticObjectCanonicalGeometryIdentity(part.geometry);
+			byKey.set(
+				describeStaticObjectCanonicalGeometryIdentity(canonical),
+				canonical,
+			);
 		}
 	}
 

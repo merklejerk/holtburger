@@ -1,7 +1,7 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation complete through Phase 16. Residual cleanup and profiling follow-ups begin
-with Phase 17 below.
+Status: implementation complete through Phase 17. Residual cleanup and profiling follow-ups remain
+tracked in the phase notes below.
 
 ## Purpose
 
@@ -27,7 +27,7 @@ Current files that establish the problem shape:
     runtime compatibility.
 - `apps/holtburger-3d/src/lib/visual/object-material-draw-unit-partition.ts`
   - Shared renderer-legality partition vocabulary for object-like materials.
-- `apps/holtburger-3d/src/lib/static/objects/bake/static-object-batch-baker.ts`
+- `apps/holtburger-3d/src/lib/static/objects/bake/static-object-job-baker.ts`
   - Generated-scenery instancing currently runs after static object partitioning and reconstructs
     reusable visual-resource identity from baked partitions and source triangle coverage.
 - `apps/holtburger-3d/src/lib/static/env-cells/bake/env-cell-system-baker.ts`
@@ -2807,7 +2807,7 @@ Implementation notes:
 
 ### Phase 17: Delete Multi-Payload Bake Batching
 
-Status: planned.
+Status: complete.
 
 Goal: remove coordinator/worker support for multi-payload bake inputs so each bake job represents
 exactly one resolved layer/domain payload, and delete bake-batch identity from baker-facing
@@ -2952,6 +2952,66 @@ Acceptance criteria:
 - Generated-scenery instancing thresholds and transparent reuse behavior live behind a named policy
   object rather than unnamed constants embedded in publication metadata.
 - Browser harness runs settle without static task failures for generated scenery and env-cell slices.
+
+Implementation notes:
+
+- Replaced the baker-facing batch contract with `StaticBakeJobInput`, `StaticBakeJobPayload`,
+  `StaticBakeJobResources`, `StaticBakeResourceProvider`, and `StaticBakeJobResult`. A bake job now
+  carries exactly one `payload` and one `task`.
+- Removed `bakeBatchId` from production baker input/output, worker protocol messages, fake-worker
+  controls, coordinator task state, timing diagnostics, material/texture-use helpers, and texture
+  placement tests. Worker requests keep worker-owned request ids; source-ready work keeps
+  `sourceReadyGroupId` for pre-bake placement/correlation only.
+- Removed item-count-driven bake flushing and `maxPayloadsPerBatch`. Source-ready coalescing still
+  groups ready payloads for placement planning, then drains one bake job per current task.
+- Kept resource records scoped to the job payload at the baker boundary. The current implementation
+  still uses resource providers as the payload-scoped resource creation seam; it no longer builds one
+  merged resource bag for a multi-payload bake input.
+- Renamed stale baker/resource files:
+  - `static/bake/attachments.ts` -> `static/bake/resources.ts`;
+  - `static/objects/bake/static-object-batch-baker.ts` ->
+    `static/objects/bake/static-object-job-baker.ts`;
+  - `static/objects/bake/static-object-bake-attachments.ts` ->
+    `static/objects/bake/static-object-bake-resources.ts`;
+  - `static/env-cells/bake/env-cell-system-geometry-attachments.ts` ->
+    `static/env-cells/bake/env-cell-system-geometry-resources.ts`.
+- Left "batch" terminology in `static-object-batch-partitioner` because that still describes
+  renderer/material partition batches, not bake-job batching.
+- Extracted generated-scenery instancing settings into a named
+  `GENERATED_SCENERY_INSTANCING_POLICY` while preserving the current minimum reuse count and
+  transparent reuse behavior.
+- Updated tests that asserted batch item counts to assert independent job dispatch, sequential
+  source-ready group draining, and task-scoped diagnostics. Deleted the obsolete terrain multi-item
+  bake test instead of preserving a "we no longer batch" test.
+
+Validation:
+
+- `npm --prefix apps/holtburger-3d run test:ts`
+  - 84 files passed; 671 tests passed.
+- `npm --prefix apps/holtburger-3d run check`
+  - `svelte-check` and `tsc -p tsconfig.node.json` passed with 0 errors and 0 warnings.
+- `npm --prefix apps/holtburger-3d run harness:browser -- --timeout-ms 60000 --domains terrain,generated-scenery --output /tmp/holtburger-phase17-generated.json`
+  - Completed with `errorMessage: null`, `staticCoordinator.failed: 0`, `committed: 39`,
+    `committedDrawUnits: 349`, and timing keyed by `taskId`/`scopeKey`.
+- `npm --prefix apps/holtburger-3d run harness:browser -- --timeout-ms 60000 --domains terrain,env-cells --output /tmp/holtburger-phase17-env-cells.json`
+  - Completed with `errorMessage: null`, `staticCoordinator.failed: 0`, `committed: 30`,
+    `committedDrawUnits: 1852`, `envCellResourceMembershipRevision: 10`, and portal render path
+    `portal-scene-domains`.
+
+Spicy bits and retained debt:
+
+- The harness prints a Vite `Port 1420 is already in use` startup warning when another dev server is
+  already running, but still produces clean summaries. That is harness/install-shell ergonomics debt,
+  not a bake cutover failure.
+- Resource providers are now payload-scoped, but the deeper north-star model still wants resolver
+  output records/sidecars to own more of this shape directly. This phase avoided reintroducing merged
+  baker attachments, but it did not complete the full resolver-output DTO model.
+- `StaticObjectSourceGeometryAttachment` and `EnvCellCellStructureGeometryAttachment` type names
+  remain because those are concrete geometry sidecar record names. They are no longer multi-payload
+  bake attachment bags.
+- Source-ready groups currently drain sequentially through the baker when the baker promise is
+  pending. That keeps the no-batch invariant, but worker throughput should be measured before adding
+  any transport optimization.
 
 Risks and mitigations:
 

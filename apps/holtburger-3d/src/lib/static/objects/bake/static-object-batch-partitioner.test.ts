@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
 	EnvCellSystemStaticScopePayload,
 	OutdoorStaticObjectsScopePayload,
-	StaticBakeBatchInput,
+	StaticBakeJobInput,
 	StaticBakeTask,
 	StaticBounds,
 	StaticMaterialSourceIdentity,
@@ -14,7 +14,7 @@ import type {
 	ObjectVisualTexturePlacementSnapshot,
 	TexturePlacementSnapshot,
 } from "../../../textures/placement";
-import { bakeStaticObjectBatch } from "./static-object-batch-baker";
+import { bakeStaticObjectJob } from "./static-object-job-baker";
 import {
 	partitionStaticObjectBatches,
 	STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE,
@@ -141,13 +141,13 @@ describe("static object batch partitioner", () => {
 		});
 		const input = {
 			...createBakeInput(payload),
-			attachments: {
+			resources: {
 				envCellCellStructureGeometry: [],
 				staticObjectSourceGeometry: [],
 			},
 		};
 
-		expect(() => bakeStaticObjectBatch(input)).toThrow(
+		expect(() => bakeStaticObjectJob(input)).toThrow(
 			/missing geometry attachment/,
 		);
 	});
@@ -169,7 +169,7 @@ describe("static object batch partitioner", () => {
 			materials: [createTexturedMaterial(0x08000010)],
 			textureRefs: [...createRgbaTextureRefs(), ...createDetailTextureRefs()],
 		});
-		const result = bakeStaticObjectBatch(createBakeInput(payload));
+		const result = bakeStaticObjectJob(createBakeInput(payload));
 		const drawUnit = result.objectVisualInstallSet.directDrawUnits.find(
 			(candidate) => candidate.kind === "static-object-geometry",
 		);
@@ -235,7 +235,7 @@ describe("static object batch partitioner", () => {
 		});
 		const input = createBakeInput(payload);
 
-		const result = bakeStaticObjectBatch(input);
+		const result = bakeStaticObjectJob(input);
 
 		expect(result.objectVisualInstallSet.directDrawUnits).toEqual([
 			expect.objectContaining({
@@ -294,7 +294,7 @@ describe("static object batch partitioner", () => {
 		});
 		const input = createBakeInput(payload);
 
-		const result = bakeStaticObjectBatch(input);
+		const result = bakeStaticObjectJob(input);
 		const drawUnit = result.objectVisualInstallSet.directDrawUnits[0];
 
 		expect(drawUnit).toMatchObject({
@@ -317,7 +317,7 @@ describe("static object batch partitioner", () => {
 		});
 		const input = createBakeInput(payload);
 
-		const result = bakeStaticObjectBatch(input);
+		const result = bakeStaticObjectJob(input);
 		const drawUnit = result.objectVisualInstallSet.directDrawUnits[0];
 
 		expect(drawUnit).toMatchObject({
@@ -468,8 +468,7 @@ describe("static object batch partitioner", () => {
 		const bakeInput = createBakeInput(payload);
 
 		const intents = createStaticObjectTexturePlacementIntents({
-			items: bakeInput.items,
-			bakeBatchId: bakeInput.bakeBatchId,
+			items: [{ payload: bakeInput.payload, task: bakeInput.task }],
 		});
 
 		expect(
@@ -535,8 +534,7 @@ describe("static object batch partitioner", () => {
 		});
 
 		const intents = createStaticObjectTexturePlacementIntents({
-			items: bakeInput.items,
-			bakeBatchId: bakeInput.bakeBatchId,
+			items: [{ payload: bakeInput.payload, task: bakeInput.task }],
 		});
 
 		expect(intents.map((intent) => intent.itemId)).toEqual([0, 1]);
@@ -560,7 +558,7 @@ describe("static object batch partitioner", () => {
 		});
 		const input = createBakeInput(payload);
 
-		const result = bakeStaticObjectBatch(input);
+		const result = bakeStaticObjectJob(input);
 
 		expect(result.materialCoverage).toEqual([
 			expect.objectContaining({
@@ -629,7 +627,7 @@ describe("static object batch partitioner", () => {
 			materials: [createIndexedMaterial(0x08000013)],
 			textureRefs: createIndexedTextureRefs(),
 		});
-		const result = bakeStaticObjectBatch(createBakeInput(payload));
+		const result = bakeStaticObjectJob(createBakeInput(payload));
 		const drawUnit = result.objectVisualInstallSet.directDrawUnits[0];
 
 		expect(drawUnit).toMatchObject({
@@ -726,7 +724,7 @@ describe("static object batch partitioner", () => {
 		});
 		const input = createBakeInput(payload);
 
-		const result = bakeStaticObjectBatch(input);
+		const result = bakeStaticObjectJob(input);
 		const drawUnit = result.objectVisualInstallSet.directDrawUnits[0];
 
 		expect(drawUnit).toMatchObject({ kind: "static-object-geometry" });
@@ -778,7 +776,7 @@ describe("static object batch partitioner", () => {
 			],
 		});
 
-		const result = bakeStaticObjectBatch(input);
+		const result = bakeStaticObjectJob(input);
 		const drawUnit = result.objectVisualInstallSet.directDrawUnits.find(
 			(candidate) => candidate.kind === "static-object-geometry",
 		);
@@ -874,7 +872,7 @@ function createEnvCellStaticPayload(): StaticObjectBatchPayload &
 	};
 }
 
-function createEnvCellStaticBakeInput(): StaticBakeBatchInput {
+function createEnvCellStaticBakeInput(): StaticBakeJobInput {
 	const payload = createEnvCellStaticScopePayload();
 	const task: StaticBakeTask = {
 		domain: "env-cell-system",
@@ -892,8 +890,8 @@ function createEnvCellStaticBakeInput(): StaticBakeBatchInput {
 		taskId: "1:landblock:da55ffff:env-cell-system",
 	};
 
-	const input: StaticBakeBatchInput = {
-		attachments: {
+	const input: StaticBakeJobInput = {
+		resources: {
 			envCellCellStructureGeometry: [],
 			staticObjectSourceGeometry: payload.sourceAssets.flatMap((source) =>
 				source.parts.map((part) => {
@@ -925,21 +923,16 @@ function createEnvCellStaticBakeInput(): StaticBakeBatchInput {
 			),
 		},
 		domain: "env-cell-system",
-		items: [
-			{
-				payload: {
-					job: {
-						domain: task.domain,
-						scope: task.scope,
-					},
-					scope: payload,
-					sourceRevision: 1,
-				},
-				task,
+		payload: {
+			job: {
+				domain: task.domain,
+				scope: task.scope,
 			},
-		],
+			scope: payload,
+			sourceRevision: 1,
+		},
 		revision: 1,
-		bakeBatchId: "static-batch:objects",
+		task,
 	};
 	return {
 		...input,
@@ -1284,7 +1277,7 @@ function createPayload(options: {
 
 function createBakeInput(
 	payload: OutdoorStaticObjectsScopePayload,
-): StaticBakeBatchInput {
+): StaticBakeJobInput {
 	const domain = payload.domain;
 	const ownerKey = {
 		kind: staticObjectLayerOwnerKindForDomain(domain),
@@ -1303,8 +1296,8 @@ function createBakeInput(
 		taskId: `1:landblock:da55ffff:${domain}`,
 	};
 
-	const input: StaticBakeBatchInput = {
-		attachments: {
+	const input: StaticBakeJobInput = {
+		resources: {
 			envCellCellStructureGeometry: [],
 			staticObjectSourceGeometry: payload.sourceAssets.flatMap((source) =>
 				source.parts.map((part) => {
@@ -1336,21 +1329,16 @@ function createBakeInput(
 			),
 		},
 		domain,
-		items: [
-			{
-				payload: {
-					job: {
-						domain: task.domain,
-						scope: task.scope,
-					},
-					scope: payload,
-					sourceRevision: 1,
-				},
-				task,
+		payload: {
+			job: {
+				domain: task.domain,
+				scope: task.scope,
 			},
-		],
+			scope: payload,
+			sourceRevision: 1,
+		},
 		revision: 1,
-		bakeBatchId: "static-batch:objects",
+		task,
 	};
 	return {
 		...input,
@@ -1386,10 +1374,10 @@ function createTexturePlacementSnapshot(
 }
 
 function createTexturePlacementSnapshotForInput(
-	input: StaticBakeBatchInput,
+	input: StaticBakeJobInput,
 ): ObjectVisualTexturePlacementSnapshot {
 	const intents = createStaticObjectTexturePlacementIntents({
-		items: input.items,
+		items: [{ payload: input.payload, task: input.task }],
 	});
 	return {
 		itemIdsByTextureUseId: new Map(

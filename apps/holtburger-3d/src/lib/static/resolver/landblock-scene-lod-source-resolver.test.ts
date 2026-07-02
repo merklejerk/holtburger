@@ -5,7 +5,7 @@ import type {
 } from "../../assets/contracts";
 import { createHostAssetKey } from "../../assets/keys";
 import type {
-	StaticBakeBatchInput,
+	StaticBakeJobInput,
 	StaticBakeTask,
 	StaticBaker,
 	StaticLandblockSceneLodSourceRequest,
@@ -13,7 +13,7 @@ import type {
 } from "../contracts";
 import { EnvCellSystemBaker } from "../env-cells/bake/env-cell-system-baker";
 import { createLayerOwnerKeyId } from "../layer-owners";
-import { StaticObjectBatchBaker } from "../objects/bake/static-object-batch-baker";
+import { StaticObjectJobBaker } from "../objects/bake/static-object-job-baker";
 import { TerrainGeometryStaticBaker } from "../terrain/bake/terrain-geometry-baker";
 import { LandblockSceneLodSourceResolver } from "./landblock-scene-lod-source-resolver";
 
@@ -112,7 +112,9 @@ describe("landblock scene LoD source resolver", () => {
 			await expect(
 				bakerForRecipe(recipe).bake(createBakeInput(recipe)),
 			).resolves.toMatchObject({
-				bakeBatchId: `batch:${recipe.payload.job.domain}`,
+				task: expect.objectContaining({
+					domain: recipe.payload.job.domain,
+				}),
 			});
 		}
 	});
@@ -264,11 +266,10 @@ function bakerForRecipe(recipe: StaticLayerRecipe): StaticBaker {
 	if (recipe.payload.job.domain === "env-cell-system") {
 		return new EnvCellSystemBaker();
 	}
-	return new StaticObjectBatchBaker();
+	return new StaticObjectJobBaker();
 }
 
-function createBakeInput(recipe: StaticLayerRecipe): StaticBakeBatchInput {
-	const bakeBatchId = `batch:${recipe.payload.job.domain}`;
+function createBakeInput(recipe: StaticLayerRecipe): StaticBakeJobInput {
 	const task: StaticBakeTask = {
 		domain: recipe.payload.job.domain,
 		ownerId: createLayerOwnerKeyId(recipe.targetOwnerKey),
@@ -287,19 +288,14 @@ function createBakeInput(recipe: StaticLayerRecipe): StaticBakeBatchInput {
 					placementsByItemId: new Map(),
 				};
 	return {
-		attachments: {
+		domain: recipe.payload.job.domain,
+		payload: recipe.payload,
+		revision: 1,
+		resources: {
 			envCellCellStructureGeometry: [],
 			staticObjectSourceGeometry: [],
 		},
-		domain: recipe.payload.job.domain,
-		items: [
-			{
-				payload: recipe.payload,
-				task,
-			},
-		],
-		revision: 1,
-		bakeBatchId,
+		task,
 		texturePlacementSnapshot,
 	};
 }

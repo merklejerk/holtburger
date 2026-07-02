@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type {
-	StaticBakeBatchInput,
-	StaticBakeBatchResult,
+	StaticBakeJobInput,
+	StaticBakeJobResult,
 	StaticBaker,
 	StaticBakeTask,
 } from "../contracts";
@@ -23,38 +23,38 @@ describe("static bake worker protocol", () => {
 		expect(port.requests).toEqual([
 			{
 				input,
-				kind: "bake-static-batch",
+				kind: "bake-static-job",
 				requestId: "bake-job:0",
 			},
 		]);
 		expect(client.createDiagnosticsSnapshot().pendingJobs).toMatchObject([
 			{
-				bakeBatchId: input.bakeBatchId,
+				taskId: input.task.taskId,
 				requestId: "bake-job:0",
 				stage: "queued",
 			},
 		]);
 
 		port.emit({
-			kind: "static-batch-bake-started",
+			kind: "static-job-bake-started",
 			requestId: "bake-job:0",
 		});
 		expect(client.createDiagnosticsSnapshot().pendingJobs).toMatchObject([
 			{
-				bakeBatchId: input.bakeBatchId,
+				taskId: input.task.taskId,
 				requestId: "bake-job:0",
 				stage: "executing",
 			},
 		]);
 		port.emit({
-			kind: "static-batch-baked",
+			kind: "static-job-baked",
 			requestId: "bake-job:0",
 			result: createResult(input),
 		});
 
 		await expect(pending).resolves.toMatchObject({
 			drawUnits: [],
-			tasks: [input.items[0]?.task],
+			task: input.task,
 		});
 		client.dispose();
 	});
@@ -65,13 +65,13 @@ describe("static bake worker protocol", () => {
 
 		await handleStaticBakeWorkerRequest(
 			{
-				async bake(): Promise<StaticBakeBatchResult> {
+				async bake(): Promise<StaticBakeJobResult> {
 					throw new Error("unsupported bake payload");
 				},
 			},
 			{
 				input,
-				kind: "bake-static-batch",
+				kind: "bake-static-job",
 				requestId: "transport:1",
 			},
 			(response) => responses.push(response),
@@ -79,11 +79,11 @@ describe("static bake worker protocol", () => {
 
 		expect(responses).toEqual([
 			{
-				kind: "static-batch-bake-started",
+				kind: "static-job-bake-started",
 				requestId: "transport:1",
 			},
 			{
-				kind: "static-batch-bake-failed",
+				kind: "static-job-bake-failed",
 				message: "unsupported bake payload",
 				requestId: "transport:1",
 			},
@@ -94,33 +94,29 @@ describe("static bake worker protocol", () => {
 		const first = new ControlledStaticBaker();
 		const second = new ControlledStaticBaker();
 		const pool = new WorkerPoolStaticBaker([first, second]);
-		const firstJob = pool.bake(createInput("batch-1"));
-		const secondJob = pool.bake(createInput("batch-2"));
+		const firstJob = pool.bake(createInput("task-1"));
+		const secondJob = pool.bake(createInput("task-2"));
 
-		expect(first.inputs.map((input) => input.bakeBatchId)).toEqual(["batch-1"]);
-		expect(second.inputs.map((input) => input.bakeBatchId)).toEqual([
-			"batch-2",
-		]);
+		expect(first.inputs.map((input) => input.task.taskId)).toEqual(["task-1"]);
+		expect(second.inputs.map((input) => input.task.taskId)).toEqual(["task-2"]);
 
 		first.resolveNext();
 		await firstJob;
-		const thirdJob = pool.bake(createInput("batch-3"));
-		expect(first.inputs.map((input) => input.bakeBatchId)).toEqual([
-			"batch-1",
-			"batch-3",
+		const thirdJob = pool.bake(createInput("task-3"));
+		expect(first.inputs.map((input) => input.task.taskId)).toEqual([
+			"task-1",
+			"task-3",
 		]);
 
 		first.resolveNext();
 		await thirdJob;
-		const fourthJob = pool.bake(createInput("batch-4"));
-		expect(first.inputs.map((input) => input.bakeBatchId)).toEqual([
-			"batch-1",
-			"batch-3",
-			"batch-4",
+		const fourthJob = pool.bake(createInput("task-4"));
+		expect(first.inputs.map((input) => input.task.taskId)).toEqual([
+			"task-1",
+			"task-3",
+			"task-4",
 		]);
-		expect(second.inputs.map((input) => input.bakeBatchId)).toEqual([
-			"batch-2",
-		]);
+		expect(second.inputs.map((input) => input.task.taskId)).toEqual(["task-2"]);
 
 		first.resolveNext();
 		second.resolveNext();
@@ -161,13 +157,13 @@ class FixtureWorkerPort implements StaticBakeWorkerPort {
 }
 
 class ControlledStaticBaker implements StaticBaker {
-	readonly inputs: StaticBakeBatchInput[] = [];
+	readonly inputs: StaticBakeJobInput[] = [];
 	readonly #pending: Array<{
-		readonly input: StaticBakeBatchInput;
-		readonly resolve: (result: StaticBakeBatchResult) => void;
+		readonly input: StaticBakeJobInput;
+		readonly resolve: (result: StaticBakeJobResult) => void;
 	}> = [];
 
-	bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
+	bake(input: StaticBakeJobInput): Promise<StaticBakeJobResult> {
 		this.inputs.push(input);
 		return new Promise((resolve) => {
 			this.#pending.push({ input, resolve });
@@ -183,7 +179,7 @@ class ControlledStaticBaker implements StaticBaker {
 	}
 }
 
-function createInput(bakeBatchId = "batch-a"): StaticBakeBatchInput {
+function createInput(taskId = "1:landblock:da55ffff:outdoor-terrain"): StaticBakeJobInput {
 	const task: StaticBakeTask = {
 		domain: "outdoor-terrain",
 		ownerId: "terrain:0xda55ffff",
@@ -197,37 +193,32 @@ function createInput(bakeBatchId = "batch-a"): StaticBakeBatchInput {
 			landblockId: 0xda55ffff,
 		},
 		scopeKey: "landblock:da55ffff",
-		taskId: "1:landblock:da55ffff:outdoor-terrain",
+		taskId,
 	};
 
 	return {
-		attachments: {
+		domain: "outdoor-terrain",
+		payload: {
+			job: {
+				domain: task.domain,
+				scope: task.scope,
+			},
+			scope: {
+				kind: "placeholder",
+				referencedTextureUses: [],
+			},
+			sourceRevision: 1,
+		},
+		revision: 1,
+		resources: {
 			envCellCellStructureGeometry: [],
 			staticObjectSourceGeometry: [],
 		},
-		domain: "outdoor-terrain",
-		items: [
-			{
-				payload: {
-					job: {
-						domain: task.domain,
-						scope: task.scope,
-					},
-					scope: {
-						kind: "placeholder",
-						referencedTextureUses: [],
-					},
-					sourceRevision: 1,
-				},
-				task,
-			},
-		],
-		revision: 1,
-		bakeBatchId,
+		task,
 	};
 }
 
-function createResult(input: StaticBakeBatchInput): StaticBakeBatchResult {
+function createResult(input: StaticBakeJobInput): StaticBakeJobResult {
 	return {
 		atlasRegistryUpdates: [],
 		buildRevision: 1,
@@ -242,8 +233,7 @@ function createResult(input: StaticBakeBatchInput): StaticBakeBatchResult {
 		staticSourceMappings: [],
 		staticSpatialRecords: [],
 		staticVisibilityRecords: [],
-		bakeBatchId: input.bakeBatchId,
-		tasks: input.items.map((item) => item.task),
+		task: input.task,
 		textureDependencies: [],
 		textureUses: [],
 	};

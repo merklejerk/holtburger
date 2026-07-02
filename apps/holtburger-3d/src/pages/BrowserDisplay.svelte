@@ -1653,6 +1653,24 @@
 		return pageId.replace(/^page-/, "");
 	}
 
+	function formatAtlasPageSamplingEffects(sampleClass: string): string {
+		switch (sampleClass) {
+			case "index8":
+			case "index16":
+			case "palette-rgba":
+				return "nearest / no mips / data";
+			case "rgba-color":
+			case "rgba-detail":
+				return "filterable / mips";
+			case "rgba-mask":
+				return "filterable / no mips / mask";
+			case "rgba-exact":
+				return "filterable / no mips / exact";
+			default:
+				return sampleClass;
+		}
+	}
+
 	function inspectAtlasPage(page: RuntimeTextureAtlasPageOverview): void {
 		if (!runtime) {
 			return;
@@ -2584,8 +2602,9 @@
 												)}
 											</strong>
 											<small>
-												{page.format} / {page.sampleClass} / {page.width}x{page.height}
-												/ {page.wrapS}/{page.wrapT}
+												{page.format} / {page.width}x{page.height} / {formatAtlasPageSamplingEffects(
+													page.sampleClass,
+												)}
 											</small>
 										</div>
 										<div class="browser-display__atlas-metrics">

@@ -12,18 +12,18 @@ import {
 } from "./object-visual-static-publication";
 
 describe("object visual static publication baker", () => {
-	it("publishes direct static object draw units from baked render parts and metadata", () => {
+	it("publishes direct static object publications from baked render parts and metadata", () => {
 		const partInstanceIndex = createObjectVisualPartInstanceIndex(0);
 		const renderPart = createRenderPart({
 			partInstanceIndices: [partInstanceIndex],
 			renderPartId: "fixture:render-part:0",
 		});
 		const metadata = createObjectVisualStaticPublicationMetadata({
-			directStaticObjectDrawUnits: [
+			directStaticObjectPublications: [
 				{
 					domain: "outdoor-explicit-objects",
-					drawUnitIdSeed: "direct-static",
-					kind: "static-object-direct-draw-unit",
+					publicationIdSeed: "direct-static",
+					kind: "static-object-direct-publication",
 					landblockId: 0xda55ffff,
 					ownership: {
 						domain: "outdoor-explicit-objects",
@@ -80,11 +80,11 @@ describe("object visual static publication baker", () => {
 			renderPartId: "fixture:render-part:0",
 		});
 		const metadata = createObjectVisualStaticPublicationMetadata({
-			directStaticObjectDrawUnits: [
+			directStaticObjectPublications: [
 				{
 					domain: "outdoor-explicit-objects",
-					drawUnitIdSeed: "direct-static",
-					kind: "static-object-direct-draw-unit",
+					publicationIdSeed: "direct-static",
+					kind: "static-object-direct-publication",
 					landblockId: 0xda55ffff,
 					ownership: {
 						domain: "outdoor-explicit-objects",
@@ -122,19 +122,19 @@ describe("object visual static publication baker", () => {
 		});
 		const metadata = createObjectVisualStaticPublicationMetadata({
 			partInstanceCount: 1,
-			structuredInteriorDrawUnits: [
+			structuredInteriorPublications: [
 				{
 					cellStructure: {
 						cellStructureId: 0x0d000001,
 						kind: "cell-structure",
 					},
-					drawUnitIdSeed: "structured-direct",
+					publicationIdSeed: "structured-direct",
 					envCellId: 0xda550100,
 					environment: {
 						environmentId: 0x0e000001,
 						kind: "environment",
 					},
-					kind: "structured-interior-direct-draw-unit",
+					kind: "structured-interior-publication",
 					landblockId: 0xda55ffff,
 					localPlacement: {
 						orientation: { w: 1, x: 0, y: 0, z: 0 },
@@ -336,11 +336,11 @@ describe("object visual static publication baker", () => {
 		const first = createObjectVisualPartInstanceIndex(0);
 		const second = createObjectVisualPartInstanceIndex(1);
 		const metadata = createObjectVisualStaticPublicationMetadata({
-			directStaticObjectDrawUnits: [
+			directStaticObjectPublications: [
 				{
 					domain: "outdoor-explicit-objects",
-					drawUnitIdSeed: "direct-static",
-					kind: "static-object-direct-draw-unit",
+					publicationIdSeed: "direct-static",
+					kind: "static-object-direct-publication",
 					landblockId: 0xda55ffff,
 					ownership: {
 						domain: "outdoor-explicit-objects",

@@ -80,14 +80,17 @@ function createPublicationPartitionKeys(
 	metadata: ObjectVisualStaticPublicationMetadata,
 ): ReadonlyMap<number, string> {
 	const keys = new Map<number, string>();
-	for (const drawUnit of metadata.directStaticObjectDrawUnits) {
-		for (const partInstanceIndex of drawUnit.partInstanceIndices) {
-			keys.set(partInstanceIndex, `direct:${drawUnit.drawUnitIdSeed}`);
+	for (const publication of metadata.directStaticObjectPublications) {
+		for (const partInstanceIndex of publication.partInstanceIndices) {
+			keys.set(partInstanceIndex, `direct:${publication.publicationIdSeed}`);
 		}
 	}
-	for (const drawUnit of metadata.structuredInteriorDrawUnits) {
-		for (const partInstanceIndex of drawUnit.partInstanceIndices) {
-			keys.set(partInstanceIndex, `structured:${drawUnit.drawUnitIdSeed}`);
+	for (const publication of metadata.structuredInteriorPublications) {
+		for (const partInstanceIndex of publication.partInstanceIndices) {
+			keys.set(
+				partInstanceIndex,
+				`structured:${publication.publicationIdSeed}`,
+			);
 		}
 	}
 	for (const renderInstance of metadata.instancedRenderInstances) {

@@ -137,11 +137,11 @@ describe("structured interior visual bundle producer", () => {
 		expect(expansion.geometryBuffers.size).toBe(0);
 		expect(expansion.resolution.bundle.partInstances).toEqual([]);
 		expect(expansion.publicationMetadata).toMatchObject({
-			directStaticObjectDrawUnits: [],
+			directStaticObjectPublications: [],
 			instancedRenderInstances: [],
 			instancedResourceGroups: [],
 			sidecarResidencies: [],
-			structuredInteriorDrawUnits: [],
+			structuredInteriorPublications: [],
 		});
 	});
 });

@@ -59,6 +59,7 @@ import {
 	createObjectVisualTexturePlacementIntents,
 	type ObjectVisualTexturePlacementRequirement,
 } from "../visual/object-visual-texture-placement-planner";
+import { createDynamicObjectVisualBundleExpansion } from "./object-visual-bundle-producer";
 
 export interface DynamicVisualBaker {
 	bake(input: DynamicVisualBakeInput): Promise<DynamicVisualBakeResult>;
@@ -209,6 +210,10 @@ function bakeDynamicVisualRecipe(options: {
 		entityId: recipe.entityId,
 		materialSlots: materialSlots.map(createMaterialSlotRequirement),
 		materialSources: recipe.visual.materialSources,
+		objectVisual: createDynamicObjectVisualBundleExpansion({
+			recipe,
+			sourceGeometry: [...options.sourceGeometryByKey.values()],
+		}),
 		paletteSources: recipe.visual.paletteSources,
 		renderParts: createDynamicRenderParts({
 			materialPlans: materialPlans.materialPlans,

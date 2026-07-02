@@ -164,6 +164,9 @@ will otherwise drag range-strip behavior back in through the side door.
   `ContentAssetRuntime`, applies replacement ranges in Rust, emits full-domain
   RGBA pixels, hashes the final renderer payload identity, and serializes pixels
   through the binary envelope.
+- Completed the generated prepared palette texture cache. The host adapter now
+  checks a bounded recipe-keyed cache before loading palettes and composing
+  renderer-ready RGBA payloads.
 
 ## Decisions And Course Corrections
 
@@ -182,6 +185,9 @@ will otherwise drag range-strip behavior back in through the side door.
   old `prepareDirectPaletteTextureSource()` path is still needed until texture
   manager/material producers request `prepared-palette-texture/`; deleting it
   earlier would break the only active path instead of creating a clean cutover.
+- Prepared palette texture caching is intentionally separate from
+  `ContentDecodeCache`. The cache key is the normalized recipe; the cached value
+  is final RGBA pixels, dimensions, and content hash.
 
 ## Debt And Spicy Bits
 
@@ -198,9 +204,14 @@ will otherwise drag range-strip behavior back in through the side door.
   static coordinator, env-cell baker, and static object baker files. Touched-file
   ESLint for this contract phase is clean; do not conflate that existing lint
   debt with palette route work unless the next phases touch those files.
-- `prepare_palette_texture()` currently recomposes on every request. That is
-  intentional until the prepared palette texture cache phase; do not optimize it
-  inside `ContentDecodeCache`.
+- `prepare_palette_texture()` remains a pure composer and does not own caching.
+  Keep it that way; generated payload reuse belongs to the host adapter cache,
+  not `ContentDecodeCache`.
+- Concurrent identical prepared palette requests can still race and compose
+  twice on a cold miss because the cache lock is not held across async palette
+  loads. This avoids blocking the cache mutex across awaits. If measurement says
+  this matters, add an in-flight shared future map beside the cache rather than
+  moving generated payloads into `ContentDecodeCache`.
 
 ## Implementation Order
 

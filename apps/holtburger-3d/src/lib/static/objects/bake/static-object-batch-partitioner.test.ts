@@ -563,14 +563,14 @@ describe("static object batch partitioner", () => {
 				estimatedAvoidedFlattenedTriangleCount: 0,
 				estimatedAvoidedFlattenedTypedArrayBytes: 0,
 				estimatedFlattenedTypedArrayBytes: 78,
-				estimatedInstancedSourceTypedArrayBytes: 0,
+				estimatedInstancedSourceTypedArrayBytes: 78,
 				explicitObjectCount: 0,
 				flattenedTriangleCount: 1,
 				flattenedVertexCount: 3,
 				generatedInstanceCount: 1,
-				instancedRenderInstanceCount: 0,
-				instancedSourceTriangleCount: 0,
-				instancedVisualResourceCount: 0,
+				instancedRenderInstanceCount: 1,
+				instancedSourceTriangleCount: 1,
+				instancedVisualResourceCount: 1,
 				landblockId: 0xda55ffff,
 				objectCount: 1,
 				partitionCount: 1,
@@ -585,7 +585,7 @@ describe("static object batch partitioner", () => {
 		expect(result.textureUses).toHaveLength(1);
 	});
 
-	it("emits shared visual resources and render instances for repeated generated scenery", () => {
+	it("publishes shared visual resources and render instances for repeated generated scenery", () => {
 		const payload = duplicateObjectInstance(
 			createPayload({
 				domain: "outdoor-generated-scenery",
@@ -597,7 +597,7 @@ describe("static object batch partitioner", () => {
 
 		const result = bakeStaticObjectBatch(createBakeInput(payload));
 
-		expect(result.drawUnits).toHaveLength(0);
+		expect(result.drawUnits).toHaveLength(1);
 		expect(result.staticObjectVisualResources).toHaveLength(1);
 		expect(result.staticObjectRenderInstances).toMatchObject([
 			{
@@ -655,13 +655,13 @@ describe("static object batch partitioner", () => {
 			result.staticObjectRenderInstances[0]?.sourceToLandblockMatrix,
 		).toBeInstanceOf(Float32Array);
 		expect(result.staticObjectBakeDiagnostics[0]).toMatchObject({
-			drawUnitCount: 0,
+			drawUnitCount: 1,
 			estimatedAvoidedFlattenedTriangleCount: 1,
 			estimatedAvoidedFlattenedTypedArrayBytes: 78,
-			estimatedFlattenedTypedArrayBytes: 0,
+			estimatedFlattenedTypedArrayBytes: 156,
 			estimatedInstancedSourceTypedArrayBytes: 78,
-			flattenedTriangleCount: 0,
-			flattenedVertexCount: 0,
+			flattenedTriangleCount: 2,
+			flattenedVertexCount: 6,
 			instancedRenderInstanceCount: 2,
 			instancedSourceTriangleCount: 1,
 			instancedVisualResourceCount: 1,
@@ -1135,7 +1135,7 @@ describe("static object batch partitioner", () => {
 		]);
 	});
 
-	it("cuts over repeated transparent generated-scenery partitions to shared instances", () => {
+	it("publishes repeated transparent generated-scenery partitions as shared instances", () => {
 		const payload = duplicateObjectInstance(
 			createPayload({
 				domain: "outdoor-generated-scenery",
@@ -1147,7 +1147,7 @@ describe("static object batch partitioner", () => {
 
 		const result = bakeStaticObjectBatch(createBakeInput(payload));
 
-		expect(result.drawUnits).toHaveLength(0);
+		expect(result.drawUnits).toHaveLength(2);
 		expect(result.staticObjectVisualResources).toHaveLength(1);
 		expect(result.staticObjectVisualResources[0]).toMatchObject({
 			coordinateSpace: "static-object-source-local",
@@ -1192,7 +1192,7 @@ describe("static object batch partitioner", () => {
 			),
 		).toHaveProperty("size", 1);
 		expect(result.staticObjectBakeDiagnostics[0]).toMatchObject({
-			drawUnitCount: 0,
+			drawUnitCount: 2,
 			instancedRenderInstanceCount: 2,
 			instancedVisualResourceCount: 1,
 			retainedTransparentOutdoorGeneratedSceneryPartitionReasons: {
@@ -1200,7 +1200,7 @@ describe("static object batch partitioner", () => {
 				missingInstanceBounds: 0,
 				nonRenderableOrDeferredMaterialBucket: 0,
 				oneOffGeneratedSource: 0,
-				repeatedGeneratedSourceRetainedByPartitionPolicy: 0,
+				repeatedGeneratedSourceRetainedByPartitionPolicy: 2,
 				unsupportedMaterialBucket: 0,
 			},
 		});

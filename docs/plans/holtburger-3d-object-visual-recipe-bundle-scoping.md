@@ -2257,6 +2257,12 @@ Course correction during Phase 9M:
   `addedDrawUnits`. Bake results still carry legacy object draw units as producer-local transition
   data, so Phase 9M can now focus on deleting the old producer branches rather than defending commit
   ownership.
+- Deleted the static-object baker's old generated-scenery post-draw-unit instancing inference. Static
+  object diagnostics now derive instanced resource/instance counts from the recipe-first
+  `objectVisualInstallSet`, and runtime-facing generated-scenery resources/render instances are no
+  longer produced by a second draw-unit-first path. Producer-local legacy static-object draw units
+  still exist for flattened diagnostics and spatial/source sidecar construction; deleting or
+  replacing that final sidecar dependency remains hard-cutover debt.
 
 ### Phase 10: Dynamic Resolver Cutover
 

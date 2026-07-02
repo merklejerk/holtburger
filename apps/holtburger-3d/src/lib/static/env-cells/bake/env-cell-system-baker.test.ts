@@ -677,6 +677,11 @@ describe("browser landblock env-cell baker", () => {
 		if (!drawUnit || drawUnit.kind !== "structured-interior-geometry") {
 			throw new Error("Expected structured interior geometry draw unit.");
 		}
+		const objectVisualDrawUnit =
+			result.objectVisualInstallSet.directDrawUnits[0];
+		if (!objectVisualDrawUnit) {
+			throw new Error("Expected object visual direct draw unit.");
+		}
 
 		expect(drawUnit).toMatchObject({
 			materialFamily: "texture-rgba",
@@ -701,7 +706,12 @@ describe("browser landblock env-cell baker", () => {
 		expect(result.textureUses).toEqual([
 			expect.objectContaining({
 				domain: "env-cell-system",
-				owners: [{ drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" }],
+				owners: [
+					{
+						drawUnitId: objectVisualDrawUnit.drawUnitId,
+						kind: "draw-unit",
+					},
+				],
 				samplingPolicy: {
 					wrapS: "repeat",
 					wrapT: "repeat",

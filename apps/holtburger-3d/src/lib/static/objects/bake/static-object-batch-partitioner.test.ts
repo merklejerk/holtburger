@@ -596,10 +596,11 @@ describe("static object batch partitioner", () => {
 		);
 
 		const result = bakeStaticObjectBatch(createBakeInput(payload));
+		const { renderInstances, visualResources } = result.objectVisualInstallSet;
 
 		expect(result.drawUnits).toHaveLength(1);
-		expect(result.staticObjectVisualResources).toHaveLength(1);
-		expect(result.staticObjectRenderInstances).toMatchObject([
+		expect(visualResources).toHaveLength(1);
+		expect(renderInstances).toMatchObject([
 			{
 				bounds: createBounds(),
 				domain: "outdoor-generated-scenery",
@@ -623,12 +624,10 @@ describe("static object batch partitioner", () => {
 		]);
 		expect(
 			new Set(
-				result.staticObjectRenderInstances.map(
-					(instance) => instance.resourceId,
-				),
+				renderInstances.map((instance) => instance.resourceId),
 			),
 		).toHaveProperty("size", 1);
-		expect(result.staticObjectVisualResources[0]).toMatchObject({
+		expect(visualResources[0]).toMatchObject({
 			coordinateSpace: "static-object-source-local",
 			geometry: createStaticObjectSourceGeometryIdentity({
 				gfxObj: createGfxObjIdentity(),
@@ -644,15 +643,11 @@ describe("static object batch partitioner", () => {
 			triangleCount: 1,
 			vertexCount: 3,
 		});
-		expect(result.staticObjectVisualResources[0]?.positions).toBeInstanceOf(
-			Float32Array,
-		);
-		expect(result.staticObjectVisualResources[0]?.positions).toHaveLength(9);
-		expect(result.staticObjectVisualResources[0]?.indices).toBeInstanceOf(
-			Uint16Array,
-		);
+		expect(visualResources[0]?.positions).toBeInstanceOf(Float32Array);
+		expect(visualResources[0]?.positions).toHaveLength(9);
+		expect(visualResources[0]?.indices).toBeInstanceOf(Uint16Array);
 		expect(
-			result.staticObjectRenderInstances[0]?.sourceToLandblockMatrix,
+			renderInstances[0]?.sourceToLandblockMatrix,
 		).toBeInstanceOf(Float32Array);
 		expect(result.staticObjectBakeDiagnostics[0]).toMatchObject({
 			drawUnitCount: 1,
@@ -1146,19 +1141,20 @@ describe("static object batch partitioner", () => {
 		);
 
 		const result = bakeStaticObjectBatch(createBakeInput(payload));
+		const { renderInstances, visualResources } = result.objectVisualInstallSet;
 
 		expect(result.drawUnits).toHaveLength(2);
-		expect(result.staticObjectVisualResources).toHaveLength(1);
-		expect(result.staticObjectVisualResources[0]).toMatchObject({
+		expect(visualResources).toHaveLength(1);
+		expect(visualResources[0]).toMatchObject({
 			coordinateSpace: "static-object-source-local",
 			materialFamily: "texture-rgba",
 			materialPass: "transparent",
 			triangleCount: 1,
 			vertexCount: 3,
 		});
-		expect(result.staticObjectRenderInstances).toHaveLength(2);
+		expect(renderInstances).toHaveLength(2);
 		expect(
-			result.staticObjectRenderInstances.map((instance) => ({
+			renderInstances.map((instance) => ({
 				source: instance.source,
 				transparency: instance.transparency,
 			})),
@@ -1186,9 +1182,7 @@ describe("static object batch partitioner", () => {
 		]);
 		expect(
 			new Set(
-				result.staticObjectRenderInstances.map(
-					(instance) => instance.resourceId,
-				),
+				renderInstances.map((instance) => instance.resourceId),
 			),
 		).toHaveProperty("size", 1);
 		expect(result.staticObjectBakeDiagnostics[0]).toMatchObject({

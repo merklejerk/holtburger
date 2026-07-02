@@ -64,6 +64,24 @@ describe("dynamic visual baker", () => {
 		expect(product.resource.renderParts[0]?.textureUseIds).toEqual([
 			product.resource.textureRequirements[0]?.textureUseId,
 		]);
+		expect(product.resource.objectVisual?.geometryBuffers.has(
+			objectVisualGeometryBufferId(0),
+		)).toBe(true);
+		expect(product.resource.objectVisual?.resolution.kind).toBe("ready");
+		if (product.resource.objectVisual?.resolution.kind !== "ready") {
+			throw new Error("Expected dynamic object visual bundle resolution.");
+		}
+		expect(
+			product.resource.objectVisual.resolution.bundle.partInstances,
+		).toMatchObject([
+			{
+				residency: {
+					kind: "runtime-entity",
+					runtimeEntityId: "runtime:test",
+				},
+				sourcePartIndex: 0,
+			},
+		]);
 	});
 
 	it("supports the async baker interface", async () => {

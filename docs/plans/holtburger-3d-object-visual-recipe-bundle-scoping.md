@@ -2326,6 +2326,13 @@ Course correction during Phase 10:
   behind static batch payload shapes. Reusing it for dynamics through a small adapter is acceptable
   as an intermediate cut, but the hard cutover should pull the common setup/gfx source-to-recipe
   primitives into a neutral object-visual module instead of preserving a static-shaped producer API.
+- Added `createDynamicObjectVisualBundleExpansion(...)`, which projects dynamic setup-backed source
+  facts and bake geometry attachments into a shared object visual bundle expansion. Runtime-authored
+  dynamic part instances now carry `runtime-entity` residency and `sourcePartIndex` in that bundle,
+  and `BakedDynamicVisualResource` carries the expansion as additive cutover data. The renderer-facing
+  dynamic resource still uses the legacy `renderParts` wrapper in this slice; the next Phase 10 slice
+  should make texture planning consume the bundle recipes before replacing dynamic render-part
+  extraction with `bakeObjectVisuals(...)`.
 
 ### Phase 11: Recipe-First Generated Scenery Instancing
 

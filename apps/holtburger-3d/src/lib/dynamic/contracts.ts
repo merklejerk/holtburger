@@ -22,6 +22,11 @@ import type {
 } from "../visual/object-visual-material-planner";
 import type { VisualGeometryPayload } from "../visual/visual-geometry";
 import type {
+	ObjectVisualBundleResolution,
+	ObjectVisualGeometryBuffer,
+	ObjectVisualGeometryBufferId,
+} from "../visual/object-visual-recipe-bundle";
+import type {
 	AnimationPayloadDto,
 	PlacementTransformDto,
 	Vec3Dto,
@@ -275,6 +280,8 @@ export interface BakedDynamicVisualResource {
 	readonly entityId: DynamicEntityId;
 	readonly materialSlots: readonly DynamicEntityMaterialSlotRequirement[];
 	readonly materialSources: readonly StaticObjectMaterialSourceFacts[];
+	/** Shared object-visual recipe graph produced during dynamic baking. */
+	readonly objectVisual?: DynamicObjectVisualBundleExpansion;
 	readonly paletteSources: readonly StaticObjectPaletteSourceFacts[];
 	readonly renderParts: readonly DynamicEntityRenderPart[];
 	readonly resourceId: string;
@@ -283,6 +290,14 @@ export interface BakedDynamicVisualResource {
 	readonly textureDependencies: readonly TextureResourceDependencies[];
 	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
 	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
+}
+
+export interface DynamicObjectVisualBundleExpansion {
+	readonly geometryBuffers: ReadonlyMap<
+		ObjectVisualGeometryBufferId,
+		ObjectVisualGeometryBuffer
+	>;
+	readonly resolution: ObjectVisualBundleResolution;
 }
 
 export type DynamicVisualSkipReason =

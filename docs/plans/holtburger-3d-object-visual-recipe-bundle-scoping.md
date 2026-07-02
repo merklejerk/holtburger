@@ -2538,6 +2538,8 @@ Implementation notes:
 
 ### Phase 13: Resteer Hard Cutover
 
+Status: complete.
+
 Goal: assess whether the unified baker cutover actually eliminated the old static/dynamic
 bifurcation before cleanup continues.
 
@@ -2568,6 +2570,49 @@ Acceptance criteria:
 - Any remaining compatibility path has a deletion criterion or is explicitly treated as a blocker.
 - Runtime/domain install shells are thin routing/sidecar/policy shells, not hidden old visual
   pipelines or payload constructors.
+
+Implementation notes:
+
+- Hard-cutover assessment: the runtime install/publication cutover has met the north star for
+  object-like static outputs. Static object, generated scenery, and structured-interior drawable
+  outputs reach runtime through `objectVisualInstallSet.directDrawUnits`,
+  `objectVisualInstallSet.visualResources`, and `objectVisualInstallSet.renderInstances`; terrain
+  remains the legitimate `StaticBakeBatchResult.drawUnits` consumer.
+- Deleted paths: `StaticBakeBatchResult.staticObjectRenderInstances`,
+  `StaticBakeBatchResult.staticObjectVisualResources`, generated-scenery draw-unit inventory
+  inference, static-object/structured-interior object draw-unit mirrors in
+  `StaticBakeBatchResult.drawUnits`, and coordinator filters/scrubbers that compensated for those
+  mirrors.
+- Runtime publication audit: `buildStaticLayerCommitPayloads(...)` groups terrain from
+  `installed.installedDrawUnits`, object-like direct draw units from
+  `installed.objectVisualInstallSet.directDrawUnits`, and generated-scenery reusable resources from
+  `installed.objectVisualInstallSet.visualResources/renderInstances`. Env-cell publication consumes
+  `installed.objectVisualInstallSet.directDrawUnits` plus portal, visibility, spatial, and
+  scene-query sidecars. No runtime publication path reconstructs object visuals from legacy
+  installed draw-unit/resource buckets.
+- Remaining adapters are temporary and scoped: `StaticCommitInstallResult.installedDrawUnits` and
+  `StaticCoordinatorCommitDelta.addedDrawUnits` still exist for terrain/non-object static draw
+  units; object visuals use the install set. `#installedDrawUnitsById` still caches terrain plus
+  object visual direct draw units for membership and selection diagnostics, but its name is a
+  cleanup target, not a separate visual pipeline.
+- Remaining bifurcation/debt: static-object and structured-interior bakers still construct local
+  flattened draw-unit-shaped data for diagnostics, source mapping coverage, and spatial sidecars.
+  That code no longer publishes as a runtime install mirror. Phase 15 should either derive those
+  records from recipe publication metadata or delete the diagnostics that require the old local
+  shape.
+- Hollow tests removed: 17 tests that asserted object-like drawable output through the legacy
+  `drawUnits` transport were deleted during Phase 12. Retained tests cover partitioning,
+  object-visual publication, install-set installation, runtime publication, and env-cell sidecars.
+- Decision: proceed to Phase 14. The remaining debt is cleanup/diagnostics shape work, not a blocker
+  for generated-scenery instancing assessment.
+- Validation:
+  `rg -n "static-object-instance-inventory|inventoryGeneratedOutdoorSceneryInstances|legacyObjectResourceIds" apps/holtburger-3d/src/lib`
+  found no production hits;
+  `rg -n "staticObjectRenderInstances|staticObjectVisualResources" apps/holtburger-3d/src/lib`
+  found renderer/runtime diagnostic counters only, not bake/install mirror fields;
+  `npm --prefix apps/holtburger-3d run check` passed;
+  `npm --prefix apps/holtburger-3d run test:ts -- static-object-batch-partitioner env-cell-system-baker static-coordinator static-commit-installer env-cell-system-layer-publication client-runtime`
+  passed with 6 test files and 120 tests.
 
 ### Phase 14: Resteer And Generated Scenery Instancing Assessment
 

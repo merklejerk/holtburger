@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import type {
 	GfxObjPayloadDto,
 	MaterialRecipePayloadDto,
-	PalettePayloadDto,
+	PaletteMetadataPayloadDto,
 	RegionRenderProfilePayloadDto,
+	RenderSurfaceMetadataPayloadDto,
 	RenderSurfacePayloadDto,
 	SetupAppearancePayloadDto,
 	SetupModelPayloadDto,
@@ -273,12 +274,12 @@ describe("browser landblock env-cell resolver", () => {
 				createSurfaceTexturePayload(),
 			),
 			createPreparedAsset(
-				createHostAssetKey("render-surface", 0x06000010),
-				createRenderSurfacePayload(),
+				createHostAssetKey("render-surface-metadata", 0x06000010),
+				createRenderSurfaceMetadataPayload(createRenderSurfacePayload()),
 			),
 			createPreparedAsset(
-				createHostAssetKey("palette", 0x04000010),
-				createPalettePayload(),
+				createHostAssetKey("palette-metadata", 0x04000010),
+				createPaletteMetadataPayload(),
 			),
 		]);
 
@@ -297,8 +298,8 @@ describe("browser landblock env-cell resolver", () => {
 			"region-render-profile:1",
 			"material:08000010",
 			"surface-texture:05000010",
-			"render-surface:06000010",
-			"palette:04000010",
+			"render-surface-metadata:06000010",
+			"palette-metadata:04000010",
 		]);
 		expect(payload.scope.sourceAssets).toEqual([]);
 		expect(
@@ -345,12 +346,12 @@ describe("browser landblock env-cell resolver", () => {
 				createSurfaceTexturePayload(),
 			),
 			createPreparedAsset(
-				createHostAssetKey("render-surface", 0x06000010),
-				createRenderSurfacePayload(),
+				createHostAssetKey("render-surface-metadata", 0x06000010),
+				createRenderSurfaceMetadataPayload(createRenderSurfacePayload()),
 			),
 			createPreparedAsset(
-				createHostAssetKey("palette", 0x04000010),
-				createPalettePayload(),
+				createHostAssetKey("palette-metadata", 0x04000010),
+				createPaletteMetadataPayload(),
 			),
 		]);
 
@@ -679,12 +680,12 @@ function createResolverAssets(
 			createSurfaceTexturePayload(),
 		),
 		createPreparedAsset(
-			createHostAssetKey("render-surface", 0x06000010),
-			createRenderSurfacePayload(),
+			createHostAssetKey("render-surface-metadata", 0x06000010),
+			createRenderSurfaceMetadataPayload(createRenderSurfacePayload()),
 		),
 		createPreparedAsset(
-			createHostAssetKey("palette", 0x04000010),
-			createPalettePayload(),
+			createHostAssetKey("palette-metadata", 0x04000010),
+			createPaletteMetadataPayload(),
 		),
 	];
 }
@@ -1181,10 +1182,30 @@ function createRenderSurfacePayload(): RenderSurfacePayloadDto {
 	};
 }
 
-function createPalettePayload(): PalettePayloadDto {
+function createRenderSurfaceMetadataPayload(
+	payload: RenderSurfacePayloadDto,
+): RenderSurfaceMetadataPayloadDto {
+	return {
+		defaultPaletteId: payload.defaultPaletteId,
+		dependencies: payload.dependencies,
+		format: payload.format,
+		formatRaw: payload.formatRaw,
+		height: payload.height,
+		kind: "render-surface-metadata",
+		provenance: payload.provenance,
+		renderSurfaceId: payload.renderSurfaceId,
+		residencyKind: payload.residencyKind,
+		sourceAssetKind: payload.sourceAssetKind,
+		sourceByteLength: payload.sourceByteLength,
+		unknown: payload.unknown,
+		width: payload.width,
+	};
+}
+
+function createPaletteMetadataPayload(): PaletteMetadataPayloadDto {
 	return {
 		colorCount: 256,
-		kind: "palette",
+		kind: "palette-metadata",
 		paletteId: 0x04000010,
 		provenance: createProvenance(),
 		residencyKind: "unknown",

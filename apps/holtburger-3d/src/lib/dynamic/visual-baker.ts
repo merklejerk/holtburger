@@ -13,7 +13,10 @@ import type {
 	DynamicVisualTexturePlanning,
 } from "./contracts";
 import { createDynamicVisualResourceId } from "./contracts";
-import { createPreparedTextureHostKey } from "../assets/preparation/prepared-texture-source";
+import {
+	createPreparedPaletteTextureHostKey,
+	createPreparedTextureHostKey,
+} from "../assets/preparation/prepared-texture-source";
 import { createStaticMaterialTextureSamplingPolicy } from "../static/bake/static-material-texture-policy";
 import type {
 	MaterialTextureDataUseIdentity,
@@ -523,7 +526,7 @@ function createDynamicTextureUseId(
 		resourceId,
 		plan.material.materialId.toString(16).padStart(8, "0"),
 		role.role,
-		role.dataUse.kind === "palette-texture-use"
+		role.dataUse.kind === "prepared-palette-texture-use"
 			? createMaterialTextureDataUseSignature(role.dataUse)
 			: createPreparedTextureHostKey(role.dataUse).id,
 	].join(":");
@@ -532,7 +535,7 @@ function createDynamicTextureUseId(
 function createMaterialTextureDataUseSignature(
 	dataUse: MaterialTextureDataUseIdentity,
 ): string {
-	if (dataUse.kind !== "palette-texture-use") {
+	if (dataUse.kind !== "prepared-palette-texture-use") {
 		return [
 			dataUse.kind,
 			dataUse.usage,
@@ -540,37 +543,37 @@ function createMaterialTextureDataUseSignature(
 		].join(":");
 	}
 
-	const subPaletteSignature =
-		dataUse.subPalettes.length === 0
+	const replacementSignature =
+		dataUse.replacements.length === 0
 			? "none"
-			: [...dataUse.subPalettes]
+			: [...dataUse.replacements]
 					.sort(
 						(left, right) =>
-							left.firstIndex - right.firstIndex ||
-							left.indexCount - right.indexCount ||
+							left.offset - right.offset ||
+							left.count - right.count ||
 							left.palette.paletteId - right.palette.paletteId,
 					)
 					.map(
-						(subPalette) =>
-							`${formatHex32(subPalette.palette.paletteId)}@${subPalette.firstIndex}+${subPalette.indexCount}`,
+						(replacement) =>
+							`${formatHex32(replacement.palette.paletteId)}@${replacement.offset}+${replacement.count}`,
 					)
 					.join(",");
 	return [
 		dataUse.kind,
 		dataUse.usage,
 		formatHex32(dataUse.palette.paletteId),
-		`${dataUse.firstIndex}+${dataUse.indexCount}`,
-		subPaletteSignature,
+		dataUse.domain,
+		replacementSignature,
 	].join(":");
 }
 
 function createTextureRequirementKey(
 	dataUse: MaterialTextureDataUseIdentity,
 ): DynamicEntityTextureRequirement["key"] {
-	if (dataUse.kind === "palette-texture-use") {
+	if (dataUse.kind === "prepared-palette-texture-use") {
 		return {
-			id: dataUse.palette.paletteId,
-			kind: "palette",
+			id: createPreparedPaletteTextureHostKey(dataUse).id,
+			kind: "prepared-palette-texture",
 		};
 	}
 

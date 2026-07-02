@@ -1886,13 +1886,13 @@ describe("browser texture manager", () => {
 					domain: "outdoor-buildings",
 					owners: [{ drawUnitId: "static-a", kind: "draw-unit" }],
 					source: {
-						firstIndex: 1,
-						indexCount: 2,
-						kind: "palette-texture-use",
+						domain: "index8",
+						kind: "prepared-palette-texture-use",
 						palette: {
 							kind: "palette",
 							paletteId: 0x04000010,
 						},
+						replacements: [],
 						usage: "palette-rgba",
 					},
 					textureUseId: "static-a:palette",
@@ -1906,8 +1906,8 @@ describe("browser texture manager", () => {
 				kind: "prepared-texture",
 			},
 			{
-				id: "04000010",
-				kind: "palette",
+				id: "04000010?domain=index8",
+				kind: "prepared-palette-texture",
 			},
 		]);
 		expect(texturePacker.jobs).toHaveLength(2);
@@ -1938,15 +1938,20 @@ describe("browser texture manager", () => {
 						expect.objectContaining({
 							source: expect.objectContaining({
 								format: "rgba8",
-								pixels: new Uint8Array([
-									0x44, 0x55, 0x66, 0x80, 0xaa, 0xbb, 0xcc, 0xff,
-								]),
+								height: 16,
+								width: 16,
 							}),
 							textureUseId: "static-a:palette",
 						}),
 					],
 				}),
 			]),
+		);
+		const palettePackingSource = texturePacker.jobs
+			.flatMap((job) => job.sources)
+			.find((source) => source.textureUseId === "static-a:palette")?.source;
+		expect(Array.from(palettePackingSource?.pixels.slice(0, 12) ?? [])).toEqual(
+			[0x11, 0x22, 0x33, 0xff, 0x44, 0x55, 0x66, 0x80, 0xaa, 0xbb, 0xcc, 0xff],
 		);
 		expect(update?.placements).toMatchObject([
 			{
@@ -1965,13 +1970,13 @@ describe("browser texture manager", () => {
 			{
 				filteringMode: "nearest",
 				format: "rgba8",
-				height: 1,
+				height: 16,
 				mipmapsGenerated: false,
-				rect: [0, 0, 2, 1],
+				rect: [0, 0, 16, 16],
 				sampleClass: "palette-rgba",
 				samplerPolicyKey: "sample=palette-rgba;filter=nearest;mips=off;aniso=1",
 				textureUseId: "static-a:palette",
-				width: 2,
+				width: 16,
 				wrapS: "clamp-to-edge",
 				wrapT: "clamp-to-edge",
 			},
@@ -1988,12 +1993,14 @@ describe("browser texture manager", () => {
 				pageSlot: { kind: "object-palette", slot: 0 },
 			},
 		]);
-		expect(Array.from(update?.placements[1]?.pixels ?? [])).toEqual([
-			0x44, 0x55, 0x66, 0x80, 0xaa, 0xbb, 0xcc, 0xff,
+		expect(
+			Array.from(update?.placements[1]?.pixels.slice(0, 12) ?? []),
+		).toEqual([
+			0x11, 0x22, 0x33, 0xff, 0x44, 0x55, 0x66, 0x80, 0xaa, 0xbb, 0xcc, 0xff,
 		]);
 	});
 
-	it("composes packed palette data from authored subpalette replacements", async () => {
+	it("packs host-composed palette data from authored replacement recipes", async () => {
 		const assetService = new FixtureAssetService();
 		const texturePacker = new FixtureTexturePacker();
 		const textureManager = new TextureManager({ assetService, texturePacker });
@@ -2007,17 +2014,16 @@ describe("browser texture manager", () => {
 					domain: "outdoor-buildings",
 					owners: [{ drawUnitId: "static-a", kind: "draw-unit" }],
 					source: {
-						firstIndex: 0,
-						indexCount: 3,
-						kind: "palette-texture-use",
+						domain: "index8",
+						kind: "prepared-palette-texture-use",
 						palette: {
 							kind: "palette",
 							paletteId: 0x04000010,
 						},
-						subPalettes: [
+						replacements: [
 							{
-								firstIndex: 1,
-								indexCount: 1,
+								count: 1,
+								offset: 1,
 								palette: {
 									kind: "palette",
 									paletteId: 0x04000020,
@@ -2032,8 +2038,10 @@ describe("browser texture manager", () => {
 		});
 
 		expect(assetService.requestedKeys).toEqual([
-			{ id: "04000010", kind: "palette" },
-			{ id: "04000020", kind: "palette" },
+			{
+				id: "04000010?domain=index8&repl=04000020:1:1",
+				kind: "prepared-palette-texture",
+			},
 		]);
 		expect(
 			Array.from(update?.placements[0]?.pixels.slice(0, 12) ?? []),
@@ -2053,6 +2061,16 @@ class FixtureAssetService implements AssetService {
 
 	async requestPreparedAsset(key: HostAssetKey): Promise<PreparedAsset> {
 		this.requestedKeys.push(key);
+
+		if (key.kind === "prepared-palette-texture") {
+			return {
+				key,
+				payload: createPreparedPaletteTexturePayload(key.id),
+				preparedAt: "test",
+				revision: 1,
+				sourceAssetId: `prepared-palette-texture/${key.id}`,
+			};
+		}
 
 		if (key.kind === "palette") {
 			return {
@@ -2446,6 +2464,91 @@ function createPreparedTexturePayload(options: PreparedTexturePayloadOptions) {
 		sourceFormatRaw: options.sourceFormatRaw ?? 0,
 		usage: options.usage ?? "color",
 	};
+}
+
+function createPreparedPaletteTexturePayload(id: string) {
+	const [basePaletteHex, query = ""] = id.split("?", 2);
+	const params = new URLSearchParams(query);
+	const domain = params.get("domain") ?? "index8";
+	if (domain !== "index8") {
+		throw new Error(
+			`Fixture only supports index8 palette payloads, got ${domain}.`,
+		);
+	}
+	const replacements = parseFixturePreparedPaletteReplacements(
+		params.get("repl"),
+	);
+	const pixels = new Uint8Array(16 * 16 * 4);
+	writeFixturePaletteColor(pixels, 0, [0x11, 0x22, 0x33, 0xff]);
+	writeFixturePaletteColor(pixels, 1, [0x44, 0x55, 0x66, 0x80]);
+	writeFixturePaletteColor(pixels, 2, [0xaa, 0xbb, 0xcc, 0xff]);
+	for (const replacement of replacements) {
+		if (replacement.paletteId === 0x04000020 && replacement.offset === 1) {
+			writeFixturePaletteColor(pixels, 1, [0x77, 0x88, 0x99, 0xff]);
+		}
+	}
+
+	return {
+		basePaletteId: Number.parseInt(basePaletteHex ?? "04000010", 16),
+		byteLength: pixels.byteLength,
+		contentHash: `fixture:${id}`,
+		dependencies: {
+			paletteAssetIds: [
+				`palette/${basePaletteHex ?? "04000010"}`,
+				...replacements.map(
+					(replacement) =>
+						`palette/${replacement.paletteId.toString(16).padStart(8, "0")}`,
+				),
+			],
+		},
+		diagnostics: {
+			generatedByteLength: pixels.byteLength,
+		},
+		domain,
+		format: "rgba8",
+		formatRaw: 0,
+		height: 16,
+		kind: "prepared-palette-texture",
+		pixels,
+		provenance: {
+			detail: null,
+			errorCode: null,
+			source: "unknown",
+			sourceAssetKind: "prepared-palette-texture",
+		},
+		replacements,
+		residencyKind: "unknown",
+		sourceAssetKind: "prepared-palette-texture",
+		width: 16,
+	};
+}
+
+function parseFixturePreparedPaletteReplacements(
+	value: string | null,
+): readonly {
+	readonly count: number;
+	readonly offset: number;
+	readonly paletteId: number;
+}[] {
+	if (!value) {
+		return [];
+	}
+	return value.split(",").map((entry) => {
+		const [paletteHex, offset, count] = entry.split(":", 3);
+		return {
+			count: Number.parseInt(count ?? "0", 10),
+			offset: Number.parseInt(offset ?? "0", 10),
+			paletteId: Number.parseInt(paletteHex ?? "0", 16),
+		};
+	});
+}
+
+function writeFixturePaletteColor(
+	pixels: Uint8Array,
+	index: number,
+	color: readonly [number, number, number, number],
+): void {
+	pixels.set(color, index * 4);
 }
 
 function createPalettePayload(id = "04000010") {

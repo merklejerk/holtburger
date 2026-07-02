@@ -108,7 +108,8 @@ export function createStaticMaterialTableEntry(options: {
 	const paletteTextureUse =
 		options.plan.textureRoles
 			.map((role) => role.dataUse)
-			.find((dataUse) => dataUse.kind === "palette-texture-use") ?? null;
+			.find((dataUse) => dataUse.kind === "prepared-palette-texture-use") ??
+		null;
 	const detailTextureUse = findPreparedTextureDataUse(
 		options.plan,
 		"rgba-detail",
@@ -134,10 +135,7 @@ export function createStaticMaterialTableEntry(options: {
 		materialColor: options.plan.color,
 		materialEmissiveColor: options.plan.emissiveColor,
 		materialIds: options.materialIds,
-		paletteFirstIndex:
-			paletteTextureUse?.kind === "palette-texture-use"
-				? paletteTextureUse.firstIndex
-				: 0,
+		paletteFirstIndex: 0,
 		paletteTextureUseId: paletteTextureUse
 			? options.createTextureUseId(paletteTextureUse, options.textureWrapMode)
 			: null,
@@ -245,12 +243,8 @@ function findPreparedTextureDataUse(
 function createStaticMaterialTextureDataUseSchemaKey(
 	dataUse: MaterialTextureDataUseIdentity,
 ): string {
-	if (dataUse.kind === "palette-texture-use") {
-		return [
-			dataUse.kind,
-			`range:${dataUse.firstIndex}-${dataUse.indexCount}`,
-			dataUse.usage,
-		].join(":");
+	if (dataUse.kind === "prepared-palette-texture-use") {
+		return [dataUse.kind, dataUse.domain, dataUse.usage].join(":");
 	}
 
 	return [dataUse.kind, dataUse.usage].join(":");

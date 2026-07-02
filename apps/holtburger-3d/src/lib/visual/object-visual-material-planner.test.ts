@@ -127,13 +127,13 @@ describe("object visual material planner", () => {
 				},
 				{
 					dataUse: {
-						firstIndex: 0,
-						indexCount: 256,
-						kind: "palette-texture-use",
+						domain: "index8",
+						kind: "prepared-palette-texture-use",
 						palette: {
 							kind: "palette",
 							paletteId: 0x04000020,
 						},
+						replacements: [],
 						usage: "palette-rgba",
 					},
 					palette: {
@@ -224,17 +224,16 @@ describe("object visual material planner", () => {
 			expect.arrayContaining([
 				expect.objectContaining({
 					dataUse: {
-						firstIndex: 0,
-						indexCount: 258,
-						kind: "palette-texture-use",
+						domain: "index16",
+						kind: "prepared-palette-texture-use",
 						palette: {
 							kind: "palette",
 							paletteId: 0x04000020,
 						},
-						subPalettes: [
+						replacements: [
 							{
-								firstIndex: 16,
-								indexCount: 32,
+								count: 32,
+								offset: 16,
 								palette: {
 									kind: "palette",
 									paletteId: 0x04000030,
@@ -277,11 +276,13 @@ describe("object visual material planner", () => {
 				},
 				{
 					dataUse: {
-						kind: "palette-texture-use",
+						domain: "index8",
+						kind: "prepared-palette-texture-use",
 						palette: {
 							kind: "palette",
 							paletteId: 0x04000010,
 						},
+						replacements: [],
 						usage: "palette-rgba",
 					},
 					role: "palette-rgba",

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { PreparedAsset } from "../contracts";
-import type { PreparedRenderSurfaceTextureUseIdentity } from "../../static/contracts";
+import type {
+	MaterialTextureDataUseIdentity,
+	PreparedRenderSurfaceTextureUseIdentity,
+} from "../../static/contracts";
 import {
+	createPreparedPaletteTextureHostKey,
 	createPreparedTextureHostKey,
 	prepareDirectIndexTextureSource,
 	prepareDirectPaletteTextureSource,
@@ -142,76 +146,65 @@ describe("prepared texture source preparation", () => {
 		).toThrow("does not match index8");
 	});
 
-	it("converts palette payload ranges into direct rgba lookup sources", () => {
+	it("accepts prepared full-domain palette payloads as direct rgba lookup sources", () => {
+		const use = createPaletteUse();
 		const source = prepareDirectPaletteTextureSource(
-			createPalettePreparedAsset(),
-			{
-				firstIndex: 1,
-				indexCount: 2,
-				kind: "palette-texture-use",
-				palette: {
-					kind: "palette",
-					paletteId: 0x04000010,
-				},
-				subPalettes: [],
-				usage: "palette-rgba",
-			},
+			createPreparedPaletteAsset({ bytes: new Uint8Array(16 * 16 * 4) }),
+			use,
 		);
 
 		expect(source).toMatchObject({
-			firstIndex: 1,
-			height: 1,
-			indexCount: 2,
+			contentHash: "fnv:test",
+			height: 16,
 			kind: "direct-palette-texture-source",
 			outputFormat: "rgba8",
 			paletteId: 0x04000010,
 			usage: "palette-rgba",
-			width: 2,
+			width: 16,
 		});
-		expect(Array.from(source.pixels)).toEqual([
-			0x44, 0x55, 0x66, 0x80, 0xaa, 0xbb, 0xcc, 0xff,
-		]);
+		expect(source.pixels.byteLength).toBe(16 * 16 * 4);
 	});
 
-	it("composes palette payloads with authored subpalette replacement ranges", () => {
-		const source = prepareDirectPaletteTextureSource(
-			createPalettePreparedAsset(),
-			{
-				firstIndex: 0,
-				indexCount: 3,
-				kind: "palette-texture-use",
-				palette: {
-					kind: "palette",
-					paletteId: 0x04000010,
+	it("rejects prepared palette payloads whose recipe does not match the requested use", () => {
+		const use = createPaletteUse({
+			replacements: [
+				{
+					count: 1,
+					offset: 1,
+					palette: { kind: "palette", paletteId: 0x04000020 },
 				},
-				subPalettes: [
-					{
-						firstIndex: 1,
-						indexCount: 1,
-						palette: {
-							kind: "palette",
-							paletteId: 0x04000020,
-						},
-					},
-				],
-				usage: "palette-rgba",
-			},
-			[
-				createPalettePreparedAsset({
-					colorsArgb: [0xff000000, 0xff778899, 0xffffffff],
-					paletteId: 0x04000020,
-				}),
 			],
-		);
-
-		expect(source).toMatchObject({
-			firstIndex: 0,
-			indexCount: 3,
-			width: 3,
 		});
-		expect(Array.from(source.pixels)).toEqual([
-			0x11, 0x22, 0x33, 0xff, 0x77, 0x88, 0x99, 0xff, 0xaa, 0xbb, 0xcc, 0xff,
-		]);
+
+		expect(() =>
+			prepareDirectPaletteTextureSource(
+				createPreparedPaletteAsset({
+					replacements: [{ count: 1, offset: 2, paletteId: 0x04000020 }],
+				}),
+				use,
+			),
+		).toThrow("replacement 0 does not match requested recipe");
+	});
+
+	it("creates prepared palette host keys from compact replacement triples", () => {
+		expect(
+			createPreparedPaletteTextureHostKey(
+				createPaletteUse({
+					replacements: [
+						{
+							count: 32,
+							offset: 16,
+							palette: { kind: "palette", paletteId: 0x04000020 },
+						},
+					],
+				}),
+			),
+		).toEqual(
+			expect.objectContaining({
+				id: "04000010?domain=index8&repl=04000020:16:32",
+				kind: "prepared-palette-texture",
+			}),
+		);
 	});
 });
 
@@ -248,37 +241,73 @@ function createPreparedAsset(options: {
 	};
 }
 
-function createPalettePreparedAsset(
+function createPaletteUse(
+	overrides: Partial<
+		Extract<
+			MaterialTextureDataUseIdentity,
+			{ readonly kind: "prepared-palette-texture-use" }
+		>
+	> = {},
+): Extract<
+	MaterialTextureDataUseIdentity,
+	{ readonly kind: "prepared-palette-texture-use" }
+> {
+	return {
+		domain: "index8",
+		kind: "prepared-palette-texture-use",
+		palette: {
+			kind: "palette",
+			paletteId: 0x04000010,
+		},
+		replacements: [],
+		usage: "palette-rgba",
+		...overrides,
+	};
+}
+
+function createPreparedPaletteAsset(
 	options: {
-		readonly colorsArgb?: readonly number[];
-		readonly paletteId?: number;
+		readonly bytes?: Uint8Array;
+		readonly replacements?: readonly {
+			readonly count: number;
+			readonly offset: number;
+			readonly paletteId: number;
+		}[];
 	} = {},
 ): PreparedAsset {
-	const paletteId = options.paletteId ?? 0x04000010;
+	const bytes = options.bytes ?? new Uint8Array(16 * 16 * 4);
 	return {
-		key: {
-			id: paletteId.toString(16).padStart(8, "0"),
-			kind: "palette",
-		},
+		key: createPreparedPaletteTextureHostKey(createPaletteUse()),
 		payload: {
-			colorCount: options.colorsArgb?.length ?? 3,
-			colorsArgb: Uint32Array.from(
-				options.colorsArgb ?? [0xff112233, 0x80445566, 0xffaabbcc],
-			),
-			kind: "palette",
-			paletteId,
+			basePaletteId: 0x04000010,
+			byteLength: bytes.byteLength,
+			contentHash: "fnv:test",
+			dependencies: {
+				paletteAssetIds: ["palette/04000010"],
+			},
+			diagnostics: {
+				generatedByteLength: bytes.byteLength,
+			},
+			domain: "index8",
+			format: "rgba8",
+			formatRaw: 0,
+			height: 16,
+			kind: "prepared-palette-texture",
+			pixels: bytes,
 			provenance: {
 				detail: null,
 				errorCode: null,
-				source: "repo-local-hba",
-				sourceAssetKind: "palette",
+				source: "unknown",
+				sourceAssetKind: "prepared-palette-texture",
 			},
+			replacements: options.replacements ?? [],
 			residencyKind: "unknown",
-			sourceAssetKind: "palette",
+			sourceAssetKind: "prepared-palette-texture",
+			width: 16,
 		},
 		preparedAt: "test",
 		revision: 1,
-		sourceAssetId: `palette/${paletteId.toString(16).padStart(8, "0")}`,
+		sourceAssetId: "prepared-palette-texture/04000010?domain=index8",
 	};
 }
 

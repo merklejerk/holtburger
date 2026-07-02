@@ -142,13 +142,13 @@ function createUse(
 
 function createPaletteUse() {
 	return {
-		firstIndex: 0,
-		indexCount: 256,
-		kind: "palette-texture-use" as const,
+		domain: "index8" as const,
+		kind: "prepared-palette-texture-use" as const,
 		palette: {
 			kind: "palette" as const,
 			paletteId: 0x04000010,
 		},
+		replacements: [],
 		usage: "palette-rgba" as const,
 	};
 }

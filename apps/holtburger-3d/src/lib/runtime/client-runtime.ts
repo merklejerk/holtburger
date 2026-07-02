@@ -523,13 +523,12 @@ interface DynamicSelectionTextureRequirementDiagnostics {
 
 type DynamicSelectionTextureDataUseDiagnostics =
 	| {
-			readonly kind: "palette-texture-use";
-			readonly firstIndex: number;
-			readonly indexCount: number;
+			readonly kind: "prepared-palette-texture-use";
+			readonly domain: "index8" | "index16";
 			readonly paletteId: number;
-			readonly subPalettes: readonly {
-				readonly firstIndex: number;
-				readonly indexCount: number;
+			readonly replacements: readonly {
+				readonly offset: number;
+				readonly count: number;
 				readonly paletteId: number;
 			}[];
 			readonly usage: string;
@@ -4367,16 +4366,15 @@ function createDynamicSelectionIndexedMaterialDiagnostics(
 function createDynamicSelectionTextureDataUseDiagnostics(
 	dataUse: MaterialTextureDataUseIdentity,
 ): DynamicSelectionTextureDataUseDiagnostics {
-	if (dataUse.kind === "palette-texture-use") {
+	if (dataUse.kind === "prepared-palette-texture-use") {
 		return {
-			firstIndex: dataUse.firstIndex,
-			indexCount: dataUse.indexCount,
+			domain: dataUse.domain,
 			kind: dataUse.kind,
 			paletteId: dataUse.palette.paletteId,
-			subPalettes: (dataUse.subPalettes ?? []).map((subPalette) => ({
-				firstIndex: subPalette.firstIndex,
-				indexCount: subPalette.indexCount,
-				paletteId: subPalette.palette.paletteId,
+			replacements: dataUse.replacements.map((replacement) => ({
+				count: replacement.count,
+				offset: replacement.offset,
+				paletteId: replacement.palette.paletteId,
 			})),
 			usage: dataUse.usage,
 		};

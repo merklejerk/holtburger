@@ -7,6 +7,7 @@ import { MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW } from "../renderer/types";
 import {
 	createObjectVisualTriangleMaterialBindingKey,
 	formatObjectVisualMaterialVariantSignature,
+	objectVisualMaterialVariantSignature,
 } from "./object-visual-recipe-bundle";
 import type {
 	DynamicAnimationPartBinding,
@@ -163,7 +164,9 @@ function expandRenderablePrimitives(
 			const binding = resolveTriangleMaterialBinding({
 				bindingsByTriangleMaterial,
 				partRecipeId: instance.partRecipeId,
-				materialVariantSignature: triangle.materialVariantSignature,
+				materialVariantSignature: objectVisualMaterialVariantSignature(
+					triangle.materialVariantSignature,
+				),
 				polygonId: triangle.polygonId,
 				surfaceId: triangle.surfaceId,
 			});

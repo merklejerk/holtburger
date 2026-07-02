@@ -349,7 +349,7 @@ export function classifyTextureUsagePurpose(
 function classifyTerrainTextureUsagePurpose(
 	source: MaterialTextureDataUseIdentity,
 ): TextureUsagePurpose {
-	if (source.kind === "palette-texture-use") {
+	if (source.kind === "prepared-palette-texture-use") {
 		return "terrain-color";
 	}
 	if (source.usage === "rgba-mask") {
@@ -364,7 +364,7 @@ function classifyTerrainTextureUsagePurpose(
 function classifyObjectTextureUsagePurpose(
 	source: MaterialTextureDataUseIdentity,
 ): TextureUsagePurpose {
-	if (source.kind === "palette-texture-use") {
+	if (source.kind === "prepared-palette-texture-use") {
 		return "object-palette";
 	}
 	if (source.usage === "index8" || source.usage === "index16") {

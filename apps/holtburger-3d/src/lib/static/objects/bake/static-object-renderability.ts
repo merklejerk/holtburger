@@ -70,7 +70,7 @@ export function isCurrentlyStageableStaticObjectDataUse(
 				dataUse.usage === "rgba-detail" ||
 				dataUse.usage === "index8" ||
 				dataUse.usage === "index16")) ||
-		dataUse?.kind === "palette-texture-use"
+		dataUse?.kind === "prepared-palette-texture-use"
 	);
 }
 
@@ -93,7 +93,7 @@ function isCurrentlyStageableStaticObjectDataUseLayout(
 			(use.usage === "index8" || use.usage === "index16"),
 	).length;
 	const paletteUseCount = dataUses.filter(
-		(use) => use.kind === "palette-texture-use",
+		(use) => use.kind === "prepared-palette-texture-use",
 	).length;
 
 	if (

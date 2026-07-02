@@ -343,7 +343,6 @@ function createMaterialRecipe(
 		indexedClipThreshold: plan.alphaPolicy.indexedClipThreshold,
 		materialColor: plan.color,
 		materialEmissiveColor: plan.emissiveColor,
-		paletteFirstIndex: getPaletteFirstIndex(),
 		pass: plan.pass,
 		primaryTextureWrapMode:
 			resolveStructuredInteriorPlanTextureWrapMode(plan) === "repeat"
@@ -617,10 +616,6 @@ function requireTextureRole<
 		);
 	}
 	return found;
-}
-
-function getPaletteFirstIndex(): number {
-	return 0;
 }
 
 function createEmptyBundle(): ObjectVisualRecipeBundle {

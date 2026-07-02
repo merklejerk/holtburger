@@ -116,7 +116,6 @@ function createObjectVisualMaterialEntryKey(
 		materialColor: entry.materialColor,
 		materialEmissiveColor: entry.materialEmissiveColor,
 		materialIds: [...entry.materialIds].sort((left, right) => left - right),
-		paletteFirstIndex: entry.paletteFirstIndex,
 		paletteTextureUseId: entry.paletteTextureUseId,
 		primaryTextureUseId: entry.primaryTextureUseId,
 		primaryTextureWrapMode: entry.primaryTextureWrapMode,

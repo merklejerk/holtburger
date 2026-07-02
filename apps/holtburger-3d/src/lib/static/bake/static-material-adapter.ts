@@ -135,7 +135,6 @@ export function createStaticMaterialTableEntry(options: {
 		materialColor: options.plan.color,
 		materialEmissiveColor: options.plan.emissiveColor,
 		materialIds: options.materialIds,
-		paletteFirstIndex: 0,
 		paletteTextureUseId: paletteTextureUse
 			? options.createTextureUseId(paletteTextureUse, options.textureWrapMode)
 			: null,

@@ -308,7 +308,6 @@ describe("object visual baker", () => {
 						...createMaterialRecipeBase({
 							indexedClipThreshold: 8,
 							materialColor: [0.9, 0.9, 0.9, 1],
-							paletteFirstIndex: 32,
 						}),
 						colorTextureRecipeId: indexTextureRecipeId,
 						family: "indexed-color",
@@ -356,7 +355,6 @@ describe("object visual baker", () => {
 			indexedClipThreshold: 8,
 			indexedTextureFormat: "index16",
 			materialColor: [0.9, 0.9, 0.9, 1],
-			paletteFirstIndex: 32,
 			paletteTextureUseId: "palette-use",
 		});
 		expect(rgbaPart?.materialEntries[0]).toMatchObject({
@@ -744,7 +742,6 @@ function createMaterialRecipeBase(
 		indexedClipThreshold: 0,
 		materialColor: [1, 1, 1, 1],
 		materialEmissiveColor: [0, 0, 0],
-		paletteFirstIndex: 0,
 		pass: "opaque",
 		primaryTextureWrapMode: "repeat",
 		renderState: {

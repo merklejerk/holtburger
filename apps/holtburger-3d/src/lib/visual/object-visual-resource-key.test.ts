@@ -222,7 +222,6 @@ function createMaterialEntry(
 		materialColor: [1, 1, 1, 1],
 		materialEmissiveColor: [0, 0, 0],
 		materialIds: [0x08000010],
-		paletteFirstIndex: 0,
 		paletteTextureUseId: null,
 		primaryTextureUseId: textureUseId,
 		primaryTextureWrapMode: "repeat",

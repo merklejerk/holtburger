@@ -273,7 +273,6 @@ function createMaterialRecipeBase(): Omit<
 		indexedClipThreshold: 0,
 		materialColor: [1, 1, 1, 1],
 		materialEmissiveColor: [0, 0, 0],
-		paletteFirstIndex: 0,
 		pass: "opaque",
 		primaryTextureWrapMode: "repeat",
 		renderState: {

@@ -60,7 +60,6 @@ export interface VisualGeometryMaterialTableEntry {
 	readonly indexTextureUseId: string | null;
 	readonly indexedTextureFormat: "p8" | "index16" | null;
 	readonly paletteTextureUseId: string | null;
-	readonly paletteFirstIndex: number;
 	readonly detailTextureUseId: string | null;
 	readonly detailTextureTiling: number;
 	readonly primaryTextureWrapMode: "clamp" | "repeat";

@@ -498,7 +498,6 @@ interface DynamicSelectionIndexedMaterialDiagnostics {
 	readonly indexedTextureFormat: "index16" | "p8" | null;
 	readonly indexTextureUseId: string | null;
 	readonly materialIds: readonly number[];
-	readonly paletteFirstIndex: number;
 	readonly paletteTextureUseId: string | null;
 	readonly partIndex: number;
 	readonly sourceAssetId: string;
@@ -4354,7 +4353,6 @@ function createDynamicSelectionIndexedMaterialDiagnostics(
 				indexedTextureFormat: entry.indexedTextureFormat,
 				indexTextureUseId: entry.indexTextureUseId,
 				materialIds: entry.materialIds,
-				paletteFirstIndex: entry.paletteFirstIndex,
 				paletteTextureUseId: entry.paletteTextureUseId,
 				partIndex: part.partIndex,
 				sourceAssetId: part.sourceAssetId,

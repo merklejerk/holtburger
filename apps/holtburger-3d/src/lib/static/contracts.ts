@@ -1760,7 +1760,6 @@ export interface StaticMaterialTableEntry {
 	readonly indexedTextureFormat: "p8" | "index16" | null;
 	/** Material binding key for the entry's palette texture, if present. */
 	readonly paletteTextureUseId: string | null;
-	readonly paletteFirstIndex: number;
 	/** Material binding key for the entry's detail overlay texture, if present. */
 	readonly detailTextureUseId: string | null;
 	readonly detailTextureTiling: number;

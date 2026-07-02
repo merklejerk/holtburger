@@ -308,7 +308,6 @@ function createMaterialTableEntry(options: {
 		materialColor: options.materialRecipe.materialColor,
 		materialEmissiveColor: options.materialRecipe.materialEmissiveColor,
 		materialIds: [options.materialRecipeId],
-		paletteFirstIndex: options.materialRecipe.paletteFirstIndex,
 		paletteTextureUseId: null,
 		primaryTextureUseId: null,
 		primaryTextureWrapMode: options.materialRecipe.primaryTextureWrapMode,

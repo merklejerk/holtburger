@@ -39,7 +39,6 @@ export interface ObjectMaterialPreparedUniforms {
 	readonly indexedClipThresholds: Float32Array;
 	readonly indexedTextureFormats: Int32Array;
 	readonly indexRects: Float32Array;
-	readonly paletteFirstIndices: Float32Array;
 	readonly paletteRects: Float32Array;
 	readonly wrapModes: Int32Array;
 }
@@ -136,7 +135,6 @@ function createObjectMaterialUniformScratch(): ObjectMaterialPreparedUniforms {
 		),
 		indexedTextureFormats: new Int32Array(MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW),
 		indexRects: new Float32Array(MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 4),
-		paletteFirstIndices: new Float32Array(MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW),
 		paletteRects: new Float32Array(MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 4),
 		wrapModes: new Int32Array(MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW),
 	};
@@ -164,7 +162,6 @@ function resetObjectMaterialUniforms(
 	uniforms.indexedClipThresholds.fill(-1);
 	uniforms.indexedTextureFormats.fill(0);
 	fillDefaultMaterialRectTable(uniforms.indexRects);
-	uniforms.paletteFirstIndices.fill(0);
 	fillDefaultMaterialRectTable(uniforms.paletteRects);
 	uniforms.wrapModes.fill(0);
 }
@@ -272,7 +269,6 @@ function fillObjectMaterialUniforms(
 		target.indexedTextureFormats[slot] =
 			entry.indexedTextureFormat === "index16" ? 1 : 0;
 		target.indexedClipThresholds[slot] = entry.indexedClipThreshold;
-		target.paletteFirstIndices[slot] = entry.paletteFirstIndex;
 		target.wrapModes[slot] = entry.primaryTextureWrapMode === "repeat" ? 1 : 0;
 
 		writeObjectMaterialTextureEntry(

@@ -60,6 +60,7 @@
 		RuntimeSceneDebugSelection,
 		RuntimeSceneInterestSource,
 		RuntimeOverviewSnapshot,
+		RuntimeTextureAtlasPageOverview,
 	} from "../lib/runtime/client-runtime";
 	import type {
 		PortalFrameNodeResources,
@@ -79,7 +80,12 @@
 		type PerformanceMetricsSnapshot,
 	} from "../lib/ui/performance-metrics";
 
-	type BrowserPanelTab = "navigate" | "settings" | "spawns" | "debug";
+	type BrowserPanelTab =
+		| "navigate"
+		| "settings"
+		| "spawns"
+		| "resources"
+		| "debug";
 	type BrowserRuntimeSpawnRow = BrowserRuntimeSpawnRecord & {
 		readonly entityId: string;
 	};
@@ -169,6 +175,7 @@
 	let generatedSceneryRadius = $state(DEFAULT_GENERATED_SCENERY_LOD_RADIUS);
 	let envCellRadius = $state(DEFAULT_ENV_CELL_LOD_RADIUS);
 	let runtimeOverview = $state<RuntimeOverviewSnapshot | null>(null);
+	let atlasPageFilter = $state("");
 	let cameraState = $state<FreeCameraState>(createFreeCameraState());
 	let diagnosticsReportText = $state<string | null>(null);
 	let selectedDiagnosticsReportText = $state<string | null>(null);
@@ -1596,6 +1603,60 @@
 		return `0x${value.toString(16).padStart(8, "0")}`;
 	}
 
+	function filteredAtlasPages(): readonly RuntimeTextureAtlasPageOverview[] {
+		const filter = atlasPageFilter.trim().toLowerCase();
+		const pages =
+			runtimeOverview?.resources.atlas.buckets.flatMap(
+				(bucket) => bucket.pages,
+			) ?? [];
+		if (filter.length === 0) {
+			return pages;
+		}
+		return pages.filter((page) =>
+			[
+				page.bucketId,
+				page.bucketLabel,
+				page.domain,
+				page.format,
+				page.pageId,
+				page.placementBucketKey,
+				page.sampleClass,
+				page.wrapS,
+				page.wrapT,
+			]
+				.join(" ")
+				.toLowerCase()
+				.includes(filter),
+		);
+	}
+
+	function formatAtlasPageListSummary(): string {
+		const totalPages =
+			runtimeOverview?.resources.atlas.summary.texturePageCount ?? 0;
+		const shownPages = filteredAtlasPages().length;
+		return atlasPageFilter.trim().length === 0
+			? `${totalPages} total`
+			: `${shownPages} shown / ${totalPages} total`;
+	}
+
+	function formatAtlasPageOrdinal(pageId: string): string {
+		return pageId.replace(/^page-/, "");
+	}
+
+	function formatPercent(value: number): string {
+		return `${(value * 100).toFixed(1)}%`;
+	}
+
+	function formatByteCount(bytes: number): string {
+		if (bytes >= 1024 * 1024) {
+			return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+		}
+		if (bytes >= 1024) {
+			return `${(bytes / 1024).toFixed(1)} KiB`;
+		}
+		return `${bytes} B`;
+	}
+
 	function parseManualEnvCellResourceInspectionTarget(
 		value: string,
 	): { readonly envCellId: number; readonly landblockId: number } | null {
@@ -1850,6 +1911,19 @@
 					}}
 				>
 					<span aria-hidden="true">⊕</span>
+				</button>
+				<button
+					class:active={activeTab === "resources"}
+					type="button"
+					role="tab"
+					aria-selected={activeTab === "resources"}
+					aria-label="Resources"
+					title="Resources"
+					onclick={() => {
+						activeTab = "resources";
+					}}
+				>
+					<span aria-hidden="true">▦</span>
 				</button>
 				<button
 					class:active={activeTab === "debug"}
@@ -2369,6 +2443,136 @@
 						{/if}
 					</section>
 				</div>
+			{:else if activeTab === "resources"}
+				<div class="browser-display__tab-panel" role="tabpanel">
+					<section class="browser-display__control-group">
+						<h2>Runtime Resources</h2>
+						<div class="browser-display__resource-grid">
+							<div class="browser-display__resource-card">
+								<span>Atlas Pages</span>
+								<strong>
+									{runtimeOverview?.resources.atlas.summary.texturePageCount ??
+										0}
+								</strong>
+								<small>
+									{runtimeOverview?.resources.atlas.summary.activeBucketCount ??
+										0}
+									active buckets
+								</small>
+							</div>
+							<div class="browser-display__resource-card">
+								<span>Atlas Memory</span>
+								<strong>
+									{formatByteCount(
+										runtimeOverview?.resources.atlas.summary.approximateBytes ??
+											0,
+									)}
+								</strong>
+								<small>
+									{runtimeOverview?.resources.atlas.summary.entryAliasCount ??
+										0}
+									texture aliases
+								</small>
+							</div>
+							<div class="browser-display__resource-card">
+								<span>Static Draw Units</span>
+								<strong>
+									{runtimeOverview?.resources.renderer.staticDrawUnits ?? 0}
+								</strong>
+								<small>
+									{runtimeOverview?.resources.renderer.terrainDrawUnits ?? 0}
+									terrain
+								</small>
+							</div>
+							<div class="browser-display__resource-card">
+								<span>Dynamic Entities</span>
+								<strong>
+									{runtimeOverview?.resources.renderer.dynamicInstances ?? 0}
+								</strong>
+								<small>
+									{runtimeOverview?.resources.renderer.dynamicDrawCalls ?? 0}
+									draw calls
+								</small>
+							</div>
+						</div>
+						<dl class="browser-display__status">
+							<div>
+								<dt>Draw calls</dt>
+								<dd>
+									env {runtimeOverview?.resources.renderer
+										.directEnvCellDrawCalls ?? 0} / dynamic
+									{runtimeOverview?.resources.renderer.dynamicDrawCalls ?? 0}
+								</dd>
+							</div>
+							<div>
+								<dt>Dynamic visuals</dt>
+								<dd>
+									{runtimeOverview?.resources.renderer.dynamicVisualResources ??
+										0}
+									resources
+								</dd>
+							</div>
+						</dl>
+					</section>
+
+					<section class="browser-display__control-group">
+						<h2>Atlas Pages</h2>
+						<label class="browser-display__field">
+							<span>Filter</span>
+							<input
+								autocomplete="off"
+								placeholder="bucket, domain, format, wrap"
+								spellcheck="false"
+								value={atlasPageFilter}
+								oninput={(event) => {
+									atlasPageFilter = (event.currentTarget as HTMLInputElement)
+										.value;
+								}}
+							/>
+						</label>
+
+						<dl class="browser-display__status">
+							<div>
+								<dt>Pages</dt>
+								<dd>{formatAtlasPageListSummary()}</dd>
+							</div>
+						</dl>
+
+						{#if filteredAtlasPages().length === 0}
+							<dl class="browser-display__status">
+								<div>
+									<dt>Matches</dt>
+									<dd>none</dd>
+								</div>
+							</dl>
+						{:else}
+							<div class="browser-display__atlas-list">
+								{#each filteredAtlasPages() as page (`${page.bucketId}:${page.pageId}`)}
+									<div
+										class="browser-display__atlas-row"
+										title={page.placementBucketKey}
+									>
+										<div>
+											<strong>
+												{page.bucketLabel} / {formatAtlasPageOrdinal(
+													page.pageId,
+												)}
+											</strong>
+											<small>
+												{page.format} / {page.sampleClass} / {page.width}x{page.height}
+												/ {page.wrapS}/{page.wrapT}
+											</small>
+										</div>
+										<div class="browser-display__atlas-metrics">
+											<span>{page.textureCount} tex</span>
+											<span>{formatPercent(page.packingEfficiency)}</span>
+										</div>
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</section>
+				</div>
 			{:else}
 				<div class="browser-display__tab-panel" role="tabpanel">
 					<div
@@ -2818,7 +3022,7 @@
 
 	.browser-display__tabs {
 		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
+		grid-template-columns: repeat(5, minmax(0, 1fr));
 		gap: 5px;
 		margin-bottom: 10px;
 	}
@@ -3059,6 +3263,89 @@
 		background: rgba(0, 0, 0, 0.28);
 		color: #f1fff6;
 		font-size: 11px;
+	}
+
+	.browser-display__resource-grid {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 6px;
+	}
+
+	.browser-display__resource-card {
+		display: grid;
+		gap: 3px;
+		min-width: 0;
+		padding: 8px;
+		border: 1px solid rgba(91, 255, 187, 0.22);
+		border-radius: 4px;
+		background: rgba(1, 9, 8, 0.42);
+	}
+
+	.browser-display__resource-card span {
+		color: #75ffd1;
+		font-size: 10px;
+		text-transform: uppercase;
+	}
+
+	.browser-display__resource-card strong {
+		color: #fff7cf;
+		font-size: 18px;
+		font-weight: 700;
+		line-height: 1.05;
+		overflow-wrap: anywhere;
+	}
+
+	.browser-display__resource-card small {
+		color: rgba(241, 255, 246, 0.72);
+		font-size: 10px;
+		line-height: 1.25;
+	}
+
+	.browser-display__atlas-list {
+		display: grid;
+		gap: 5px;
+		max-height: 280px;
+		overflow: auto;
+		padding-right: 2px;
+	}
+
+	.browser-display__atlas-row {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 7px;
+		padding: 7px;
+		border: 1px solid rgba(91, 255, 187, 0.2);
+		border-radius: 4px;
+		background: rgba(1, 9, 8, 0.38);
+	}
+
+	.browser-display__atlas-row strong,
+	.browser-display__atlas-row small {
+		display: block;
+		overflow-wrap: anywhere;
+	}
+
+	.browser-display__atlas-row strong {
+		color: #fff7cf;
+		font-size: 12px;
+		font-weight: 700;
+	}
+
+	.browser-display__atlas-row small {
+		margin-top: 3px;
+		color: rgba(241, 255, 246, 0.74);
+		font-size: 10px;
+		line-height: 1.3;
+	}
+
+	.browser-display__atlas-metrics {
+		display: grid;
+		justify-items: end;
+		gap: 3px;
+		color: #75ffd1;
+		font-size: 11px;
+		white-space: nowrap;
 	}
 
 	.browser-display__spawn-list {

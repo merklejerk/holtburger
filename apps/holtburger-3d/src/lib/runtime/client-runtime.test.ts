@@ -39,6 +39,7 @@ import type {
 	Renderer,
 	RendererFrameTelemetry,
 	RendererFrameTelemetryListener,
+	RendererResourceSnapshot,
 	RendererStaticLayerVisibility,
 	RendererSnapshot,
 	DynamicRendererResourceCommit,
@@ -166,6 +167,18 @@ describe("browser client runtime", () => {
 			envCellLandblockCount: 0,
 			envCellRecordCount: 0,
 			outdoorRecordCount: 0,
+		});
+		expect(overviewSnapshot.resources).toMatchObject({
+			atlas: {
+				summary: {
+					bucketCount: 0,
+					texturePageCount: 0,
+				},
+			},
+			renderer: {
+				dynamicInstances: 0,
+				staticDrawUnits: 0,
+			},
 		});
 		expect(assetService.snapshotCount).toBe(0);
 		expect(renderer.diagnosticsSnapshotCount).toBe(
@@ -3769,6 +3782,17 @@ class FakeRenderer implements Renderer {
 	createDiagnosticsSnapshot(): RendererSnapshot {
 		this.diagnosticsSnapshotCount += 1;
 		return this.#snapshot;
+	}
+
+	createResourceSnapshot(): RendererResourceSnapshot {
+		return {
+			directEnvCellDrawCalls: this.#snapshot.directEnvCellDrawCalls,
+			dynamicDrawCalls: this.#snapshot.dynamicDrawCalls,
+			dynamicInstances: this.#snapshot.dynamicInstances,
+			dynamicVisualResources: this.#snapshot.dynamicVisualResources,
+			staticDrawUnits: this.#snapshot.staticDrawUnits,
+			terrainDrawUnits: this.#snapshot.terrainDrawUnits,
+		};
 	}
 
 	emitFrameTelemetry(telemetry: Partial<RendererFrameTelemetry> = {}): void {

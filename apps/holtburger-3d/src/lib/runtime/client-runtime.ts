@@ -11,6 +11,7 @@ import type {
 import type {
 	Renderer,
 	RendererFrameTelemetry,
+	RendererResourceSnapshot,
 	RendererStaticLayerVisibility,
 	RendererSnapshot,
 	RenderPassPlan,
@@ -62,6 +63,7 @@ import {
 	type StaticCoordinatorTaskReportDiagnostics,
 	type TerrainTextureDiagnosticsReport,
 	type TerrainTextureFallbackDiagnostics,
+	type TextureAtlasDiagnosticsReport,
 } from "./diagnostics";
 import {
 	ImmediateStaticBaker,
@@ -314,10 +316,62 @@ export interface RuntimeOverviewSnapshot {
 	readonly debugOverlays: RuntimeDebugOverlaySnapshot;
 	/** Cheap asset counts for browser diagnostics. */
 	readonly assets: AssetServiceOverviewSnapshot;
+	/** Cheap renderer and texture resource counts for browser diagnostics. */
+	readonly resources: RuntimeResourcesOverviewSnapshot;
 	/** Cheap static coordinator counts and latest payload summaries. */
 	readonly static: StaticCoordinatorOverviewSnapshot;
 	/** Cheap static scene query counts for browser diagnostics. */
 	readonly staticSceneQuery: StaticSceneQueryOverviewSnapshot;
+}
+
+export interface RuntimeResourcesOverviewSnapshot {
+	readonly atlas: RuntimeTextureAtlasOverviewSnapshot;
+	readonly renderer: RuntimeRendererResourcesOverviewSnapshot;
+}
+
+export interface RuntimeTextureAtlasOverviewSnapshot {
+	readonly buckets: readonly RuntimeTextureAtlasBucketOverview[];
+	readonly summary: {
+		readonly activeBucketCount: number;
+		readonly approximateBytes: number;
+		readonly bucketCount: number;
+		readonly entryAliasCount: number;
+		readonly texturePageCount: number;
+	};
+}
+
+export interface RuntimeTextureAtlasBucketOverview {
+	readonly bucketId: string;
+	readonly domain: string;
+	readonly pages: readonly RuntimeTextureAtlasPageOverview[];
+	readonly placementBucketKey: string;
+	readonly texturePageCount: number;
+	readonly uniqueSourceCount: number;
+}
+
+export interface RuntimeTextureAtlasPageOverview {
+	readonly bucketId: string;
+	readonly bucketLabel: string;
+	readonly domain: string;
+	readonly format: string;
+	readonly height: number;
+	readonly placementBucketKey: string;
+	readonly pageId: string;
+	readonly packingEfficiency: number;
+	readonly sampleClass: string;
+	readonly textureCount: number;
+	readonly width: number;
+	readonly wrapS: string;
+	readonly wrapT: string;
+}
+
+export interface RuntimeRendererResourcesOverviewSnapshot {
+	readonly directEnvCellDrawCalls: number;
+	readonly dynamicDrawCalls: number;
+	readonly dynamicInstances: number;
+	readonly dynamicVisualResources: number;
+	readonly staticDrawUnits: number;
+	readonly terrainDrawUnits: number;
 }
 
 interface RuntimeDebugOverlaySnapshot {
@@ -1811,6 +1865,10 @@ class ClientRuntimeImpl implements ClientRuntime {
 			renderPolicy: {
 				textureFilteringMode: this.#textureManager.filteringMode,
 			},
+			resources: createRuntimeResourcesOverviewSnapshot(
+				this.#textureManager.createDiagnosticsReport(),
+				this.#renderer.createResourceSnapshot(),
+			),
 			sceneInterest: this.#sceneInterest,
 			static: staticOverview,
 			staticSceneQuery: this.#staticSceneQuery.createOverviewSnapshot(),
@@ -3963,6 +4021,149 @@ function createStaticCoordinatorDiagnosticsReport(
 			? { staticBaker: snapshot.staticBakerDiagnostics }
 			: {}),
 	};
+}
+
+function createRuntimeResourcesOverviewSnapshot(
+	atlasReport: TextureAtlasDiagnosticsReport,
+	rendererSnapshot: RendererResourceSnapshot,
+): RuntimeResourcesOverviewSnapshot {
+	return {
+		atlas: {
+			buckets: atlasReport.buckets.map((bucket) => ({
+				bucketId: bucket.bucketId,
+				domain: bucket.domain,
+				pages: bucket.pages.map((page) => ({
+					bucketId: bucket.bucketId,
+					bucketLabel: formatTextureAtlasBucketLabel(bucket),
+					domain: bucket.domain,
+					format: page.format,
+					height: page.height,
+					pageId: page.pageId,
+					placementBucketKey: bucket.placementBucketKey,
+					packingEfficiency: page.packingEfficiency,
+					sampleClass: page.sampleClass,
+					textureCount: page.uniqueSourceCount,
+					width: page.width,
+					wrapS: page.wrapS,
+					wrapT: page.wrapT,
+				})),
+				placementBucketKey: bucket.placementBucketKey,
+				texturePageCount: bucket.texturePageCount,
+				uniqueSourceCount: bucket.uniqueSourceCount,
+			})),
+			summary: {
+				activeBucketCount: atlasReport.summary.activeBucketCount,
+				approximateBytes: atlasReport.summary.approximateBytes,
+				bucketCount: atlasReport.summary.bucketCount,
+				entryAliasCount: atlasReport.summary.entryAliasCount,
+				texturePageCount: atlasReport.summary.texturePageCount,
+			},
+		},
+		renderer: {
+			directEnvCellDrawCalls: rendererSnapshot.directEnvCellDrawCalls,
+			dynamicDrawCalls: rendererSnapshot.dynamicDrawCalls,
+			dynamicInstances: rendererSnapshot.dynamicInstances,
+			dynamicVisualResources: rendererSnapshot.dynamicVisualResources,
+			staticDrawUnits: rendererSnapshot.staticDrawUnits,
+			terrainDrawUnits: rendererSnapshot.terrainDrawUnits,
+		},
+	};
+}
+
+function formatTextureAtlasBucketLabel(
+	bucket: TextureAtlasDiagnosticsReport["buckets"][number],
+): string {
+	const parts = bucket.placementBucketKey.split("|");
+	if (parts[0] !== "texture-placement-bucket") {
+		return formatTextureAtlasDomainAxis(bucket.domain);
+	}
+
+	const [, bucketDomain, pool, purpose, lifetime] = parts;
+	return [
+		formatTextureAtlasDomainAxis(bucketDomain ?? bucket.domain),
+		...(pool ? [formatTextureAtlasPoolAxis(pool)] : []),
+		...(purpose ? [formatTextureAtlasPurposeAxis(purpose)] : []),
+		...(lifetime ? [formatTextureAtlasLifetimeAxis(lifetime)] : []),
+	].join(" / ");
+}
+
+function formatTextureAtlasDomainAxis(domain: string): string {
+	switch (domain) {
+		case "outdoor-buildings":
+			return "buildings";
+		case "outdoor-explicit-objects":
+			return "explicit";
+		case "outdoor-generated-scenery":
+			return "gen-scenery";
+		case "outdoor-terrain":
+			return "out-terrain";
+		case "runtime-object-material":
+			return "runtime-mat";
+		default:
+			return domain;
+	}
+}
+
+function formatTextureAtlasPoolAxis(pool: string): string {
+	switch (pool) {
+		case "runtime-authored-object":
+			return "rt-obj";
+		case "static-authored-object":
+			return "static-obj";
+		case "terrain":
+			return "terrain";
+		default:
+			return pool;
+	}
+}
+
+function formatTextureAtlasPurposeAxis(purpose: string): string {
+	switch (purpose) {
+		case "object-base-color":
+			return "base";
+		case "object-detail":
+			return "detail";
+		case "object-index":
+			return "index";
+		case "object-palette":
+			return "palette";
+		case "terrain-color":
+			return "color";
+		case "terrain-detail":
+			return "detail";
+		case "terrain-mask":
+			return "mask";
+		default:
+			return purpose;
+	}
+}
+
+function formatTextureAtlasLifetimeAxis(lifetime: string): string {
+	if (lifetime === "static-authored") {
+		return "static";
+	}
+
+	const staticDynamicMatch =
+		/^static-authored-dynamic:.*:0x([0-9a-fA-F]{8})$/.exec(lifetime);
+	if (staticDynamicMatch) {
+		return `static-dyn 0x${staticDynamicMatch[1].toLowerCase()}`;
+	}
+
+	const runtimeDynamicMatch =
+		/^runtime-authored-dynamic:runtime-dynamic:(.+)$/.exec(lifetime);
+	if (runtimeDynamicMatch) {
+		return `rt-dyn ${formatRuntimeDynamicTextureAtlasEntityAxis(runtimeDynamicMatch[1])}`;
+	}
+
+	return lifetime;
+}
+
+function formatRuntimeDynamicTextureAtlasEntityAxis(entityId: string): string {
+	const spawnMatch = /^runtime-spawn:(.+)$/.exec(entityId);
+	if (spawnMatch) {
+		return `spawn ${spawnMatch[1]}`;
+	}
+	return entityId;
 }
 
 function createRendererDiagnosticsSummary(

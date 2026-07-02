@@ -1120,6 +1120,7 @@ interface TextureAtlasBucketFacts {
 	readonly bucketId: string;
 	readonly domain: VisualTextureDomain;
 	readonly entryAliasCount: number;
+	readonly placementBucketKey: string;
 	readonly uniqueSourceCount: number;
 	readonly texturePageCount: number;
 	readonly multiSourcePageCount: number;
@@ -1132,7 +1133,11 @@ interface TextureAtlasPageFacts {
 	readonly pageId: string;
 	readonly approximateBytes: number;
 	readonly format: RuntimeTexturePlacement["format"];
+	readonly height: number;
+	readonly occupiedPixels: number;
+	readonly packingEfficiency: number;
 	readonly uniqueSourceCount: number;
+	readonly width: number;
 	readonly sampleClass: RuntimeTexturePagePolicy["sampleClass"];
 	readonly mipmapsGenerated: boolean;
 	readonly samplerPolicyKey: string;
@@ -1830,6 +1835,7 @@ function createTextureAtlasBucketDiagnostics(
 		multiSourcePageCount: pages.filter((page) => page.uniqueSourceCount > 1)
 			.length,
 		pages,
+		placementBucketKey: registry.placementBucketKey,
 		texturePageCount: pages.length,
 		uniqueSourceCount: countUniqueSources(entries),
 		wrapModes: countWrapModesForEntries(entries),
@@ -1839,14 +1845,15 @@ function createTextureAtlasBucketDiagnostics(
 function createTextureAtlasPageDiagnostics(
 	entries: readonly VisualTextureRegistryEntry[],
 ): readonly TextureAtlasPageFacts[] {
-	const entriesByTextureRef = new Map<string, VisualTextureRegistryEntry[]>();
+	const entriesByPageId = new Map<string, VisualTextureRegistryEntry[]>();
 	for (const entry of entries) {
-		const pageEntries = entriesByTextureRef.get(entry.textureRefId) ?? [];
+		const pageEntries = entriesByPageId.get(entry.pageId) ?? [];
 		pageEntries.push(entry);
-		entriesByTextureRef.set(entry.textureRefId, pageEntries);
+		entriesByPageId.set(entry.pageId, pageEntries);
 	}
 
-	return Array.from(entriesByTextureRef.entries())
+	return Array.from(entriesByPageId.entries())
+		.sort(([left], [right]) => left.localeCompare(right))
 		.map(([, pageEntries], pageIndex) => {
 			const firstEntry = pageEntries[0];
 			if (!firstEntry) {
@@ -1861,16 +1868,142 @@ function createTextureAtlasPageDiagnostics(
 					firstEntry.mipmapsGenerated,
 				),
 				format: firstEntry.format,
+				height: firstEntry.textureHeight,
 				mipmapsGenerated: firstEntry.mipmapsGenerated,
+				occupiedPixels: calculateTextureOccupiedPixels(pageEntries),
 				pageId: `page-${pageIndex + 1}`,
+				packingEfficiency: calculateTexturePackingEfficiency(pageEntries),
 				sampleClass: firstEntry.sampleClass,
 				samplerPolicyKey: firstEntry.samplerPolicyKey,
 				uniqueSourceCount: countUniqueSources(pageEntries),
+				width: firstEntry.textureWidth,
 				wrapS: firstEntry.wrapS,
 				wrapT: firstEntry.wrapT,
 			};
 		})
 		.sort((left, right) => left.pageId.localeCompare(right.pageId));
+}
+
+function calculateTexturePackingEfficiency(
+	entries: readonly VisualTextureRegistryEntry[],
+): number {
+	const firstEntry = entries[0];
+	if (!firstEntry) {
+		return 0;
+	}
+	const pagePixels = firstEntry.textureWidth * firstEntry.textureHeight;
+	if (pagePixels <= 0) {
+		return 0;
+	}
+	return calculateTextureOccupiedPixels(entries) / pagePixels;
+}
+
+function calculateTextureOccupiedPixels(
+	entries: readonly VisualTextureRegistryEntry[],
+): number {
+	const firstEntry = entries[0];
+	if (!firstEntry) {
+		return 0;
+	}
+	return calculateRectUnionArea(
+		uniqueSortedTextureEntries(entries).map((entry) =>
+			clipTextureRect(entry.rect, {
+				height: firstEntry.textureHeight,
+				width: firstEntry.textureWidth,
+			}),
+		),
+	);
+}
+
+function uniqueSortedTextureEntries(
+	entries: readonly VisualTextureRegistryEntry[],
+): readonly VisualTextureRegistryEntry[] {
+	return Array.from(new Set(entries)).sort((left, right) =>
+		[left.textureRefId, left.itemId]
+			.join("|")
+			.localeCompare([right.textureRefId, right.itemId].join("|")),
+	);
+}
+
+function clipTextureRect(
+	rect: readonly [number, number, number, number],
+	page: { readonly width: number; readonly height: number },
+): TextureOccupancyRect | null {
+	const left = Math.max(0, rect[0]);
+	const top = Math.max(0, rect[1]);
+	const right = Math.min(page.width, rect[0] + rect[2]);
+	const bottom = Math.min(page.height, rect[1] + rect[3]);
+	if (right <= left || bottom <= top) {
+		return null;
+	}
+	return { bottom, left, right, top };
+}
+
+function calculateRectUnionArea(
+	rects: readonly (TextureOccupancyRect | null)[],
+): number {
+	const clippedRects = rects.filter(
+		(rect): rect is TextureOccupancyRect => rect !== null,
+	);
+	if (clippedRects.length === 0) {
+		return 0;
+	}
+	const xEdges = uniqueSortedNumbers(
+		clippedRects.flatMap((rect) => [rect.left, rect.right]),
+	);
+	let area = 0;
+	for (let index = 0; index < xEdges.length - 1; index += 1) {
+		const left = xEdges[index]!;
+		const right = xEdges[index + 1]!;
+		if (right <= left) {
+			continue;
+		}
+		const yIntervals = clippedRects
+			.filter((rect) => rect.left < right && rect.right > left)
+			.map((rect) => [rect.top, rect.bottom] as const)
+			.sort(
+				(leftInterval, rightInterval) => leftInterval[0] - rightInterval[0],
+			);
+		area += (right - left) * calculateIntervalUnionLength(yIntervals);
+	}
+	return area;
+}
+
+function calculateIntervalUnionLength(
+	intervals: readonly (readonly [number, number])[],
+): number {
+	let total = 0;
+	let activeStart: number | null = null;
+	let activeEnd: number | null = null;
+	for (const [start, end] of intervals) {
+		if (activeStart === null || activeEnd === null) {
+			activeStart = start;
+			activeEnd = end;
+			continue;
+		}
+		if (start > activeEnd) {
+			total += activeEnd - activeStart;
+			activeStart = start;
+			activeEnd = end;
+			continue;
+		}
+		activeEnd = Math.max(activeEnd, end);
+	}
+	if (activeStart !== null && activeEnd !== null) {
+		total += activeEnd - activeStart;
+	}
+	return total;
+}
+
+function uniqueSortedNumbers(values: readonly number[]): readonly number[] {
+	return [...new Set(values)].sort((left, right) => left - right);
+}
+
+interface TextureOccupancyRect {
+	readonly bottom: number;
+	readonly left: number;
+	readonly right: number;
+	readonly top: number;
 }
 
 function countWrapModesForEntries(

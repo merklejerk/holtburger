@@ -179,10 +179,26 @@ describe("browser texture manager", () => {
 	it("packs compatible new texture uses into one shared page placement", async () => {
 		const assetService = new FixtureAssetService();
 		const texturePacker = new FixtureTexturePacker({
-			pageHeight: 16,
-			pageWidth: 16,
-			pixels: new Uint8Array(16 * 16 * 4),
-			rect: [4, 4, 1, 1],
+			rectsByTextureUseId: new Map([
+				[
+					"terrain-a:prepared-texture:06000010",
+					{
+						pageHeight: 16,
+						pageId: "fixture-page",
+						pageWidth: 16,
+						rect: [4, 4, 1, 1],
+					},
+				],
+				[
+					"terrain-b:prepared-texture:06000020",
+					{
+						pageHeight: 16,
+						pageId: "fixture-page",
+						pageWidth: 16,
+						rect: [5, 4, 1, 1],
+					},
+				],
+			]),
 		});
 		const textureManager = new TextureManager({ assetService, texturePacker });
 
@@ -237,11 +253,87 @@ describe("browser texture manager", () => {
 			}),
 			expect.objectContaining({
 				owner: { drawUnitId: "terrain-b", kind: "draw-unit" },
-				rect: [4, 4, 1, 1],
+				rect: [5, 4, 1, 1],
 				textureRefId: update?.placements[0]?.textureRefId,
 			}),
 		]);
 		expect(update?.placements[0]?.textureRefId).toContain("texture-page-ref");
+		expect(
+			textureManager.createDiagnosticsReport().buckets[0]?.pages[0],
+		).toMatchObject({
+			height: 16,
+			occupiedPixels: 2,
+			packingEfficiency: 2 / (16 * 16),
+			uniqueSourceCount: 2,
+			width: 16,
+		});
+	});
+
+	it("reports atlas occupancy as clipped union area for overlapping page rects", async () => {
+		const assetService = new FixtureAssetService();
+		const texturePacker = new FixtureTexturePacker({
+			rectsByTextureUseId: new Map([
+				[
+					"terrain-a:prepared-texture:06000010",
+					{
+						pageHeight: 4,
+						pageId: "fixture-page",
+						pageWidth: 4,
+						rect: [0, 0, 4, 4],
+					},
+				],
+				[
+					"terrain-b:prepared-texture:06000020",
+					{
+						pageHeight: 4,
+						pageId: "fixture-page",
+						pageWidth: 4,
+						rect: [0, 0, 4, 4],
+					},
+				],
+				[
+					"terrain-c:prepared-texture:06000030",
+					{
+						pageHeight: 4,
+						pageId: "fixture-page",
+						pageWidth: 4,
+						rect: [2, 2, 4, 4],
+					},
+				],
+			]),
+		});
+		const textureManager = new TextureManager({ assetService, texturePacker });
+
+		await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedResources: [],
+			revision: 1,
+			textureUses: [
+				createTextureUseCommit({
+					drawUnitId: "terrain-a",
+					renderSurfaceId: 0x06000010,
+					textureUseId: "terrain-a:prepared-texture:06000010",
+				}),
+				createTextureUseCommit({
+					drawUnitId: "terrain-b",
+					renderSurfaceId: 0x06000020,
+					textureUseId: "terrain-b:prepared-texture:06000020",
+				}),
+				createTextureUseCommit({
+					drawUnitId: "terrain-c",
+					renderSurfaceId: 0x06000030,
+					textureUseId: "terrain-c:prepared-texture:06000030",
+				}),
+			],
+		});
+
+		expect(
+			textureManager.createDiagnosticsReport().buckets[0]?.pages[0],
+		).toMatchObject({
+			occupiedPixels: 16,
+			packingEfficiency: 1,
+			uniqueSourceCount: 3,
+		});
 	});
 
 	it("does not force terrain color refs into draw-unit same-page cohorts", async () => {

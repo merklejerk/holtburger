@@ -297,6 +297,7 @@ interface TextureAtlasBucketDiagnostics {
 	readonly bucketId: string;
 	readonly domain: VisualTextureDomain;
 	readonly entryAliasCount: number;
+	readonly placementBucketKey: string;
 	readonly uniqueSourceCount: number;
 	readonly texturePageCount: number;
 	readonly multiSourcePageCount: number;
@@ -309,7 +310,11 @@ interface TextureAtlasPageDiagnostics {
 	readonly pageId: string;
 	readonly approximateBytes: number;
 	readonly format: "rgba8" | "r8" | "rg8";
+	readonly height: number;
+	readonly occupiedPixels: number;
+	readonly packingEfficiency: number;
 	readonly uniqueSourceCount: number;
+	readonly width: number;
 	readonly sampleClass: TexturePageSampleClass;
 	readonly mipmapsGenerated: boolean;
 	readonly samplerPolicyKey: string;

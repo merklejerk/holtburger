@@ -181,6 +181,13 @@ will otherwise drag range-strip behavior back in through the side door.
   `uMaterialPaletteFirstIndices` are gone from shared material tables, object
   visual recipes, WebGL payload uniforms, and tests. Indexed shaders now map
   palette indices directly into `16x16` or `256x256` palette domains.
+- Completed cleanup verification. Exact old range-strip symbol greps are clean
+  except the shader test that asserts `uMaterialPaletteFirstIndices` is absent.
+  Final cleanup also removed stale exported helpers/types surfaced by
+  `lint:dead` after the palette cutover.
+- Final verification passed for TypeScript tests/checks, app lint, Rust
+  check/clippy, Tauri tests, and content/core library tests. Python lint was not
+  run because no Python files were touched.
 
 ## Decisions And Course Corrections
 
@@ -252,6 +259,9 @@ will otherwise drag range-strip behavior back in through the side door.
   logical palette recipes. That matches the atlas behavior after content-hash
   aliasing; logical recipe diversity remains visible through texture-use ids and
   bindings rather than page source counts.
+- The final cleanup intentionally removed unrelated but now-visible dead exports
+  in static coordinator/runtime overview/static material helper code so the
+  project lint gates can pass without carrying local caveats.
 
 ## Implementation Order
 

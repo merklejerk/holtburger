@@ -982,35 +982,6 @@ function createStructuredInteriorPlacementSnapshot(
 	};
 }
 
-function createIndexedTextureRefsWithoutPalette(): readonly StaticObjectTextureRefFacts[] {
-	return [
-		{
-			palette: null,
-			renderSurface: {
-				kind: "render-surface",
-				renderSurfaceId: 0x06000010,
-			},
-			role: "surface-texture",
-			texture: {
-				kind: "surface-texture",
-				surfaceTextureId: 0x05000010,
-			},
-		},
-		{
-			format: "indexed",
-			formatRaw: 0x29,
-			height: 1,
-			palette: null,
-			renderSurface: {
-				kind: "render-surface",
-				renderSurfaceId: 0x06000010,
-			},
-			role: "render-surface",
-			width: 1,
-		},
-	];
-}
-
 function createStaticObjectSourceAsset(
 	material: StaticObjectMaterialSourceFacts,
 ): StaticObjectSourceAssetFacts {

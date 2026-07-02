@@ -324,12 +324,12 @@ export interface RuntimeOverviewSnapshot {
 	readonly staticSceneQuery: StaticSceneQueryOverviewSnapshot;
 }
 
-export interface RuntimeResourcesOverviewSnapshot {
+interface RuntimeResourcesOverviewSnapshot {
 	readonly atlas: RuntimeTextureAtlasOverviewSnapshot;
 	readonly renderer: RuntimeRendererResourcesOverviewSnapshot;
 }
 
-export interface RuntimeTextureAtlasOverviewSnapshot {
+interface RuntimeTextureAtlasOverviewSnapshot {
 	readonly buckets: readonly RuntimeTextureAtlasBucketOverview[];
 	readonly summary: {
 		readonly activeBucketCount: number;
@@ -340,7 +340,7 @@ export interface RuntimeTextureAtlasOverviewSnapshot {
 	};
 }
 
-export interface RuntimeTextureAtlasBucketOverview {
+interface RuntimeTextureAtlasBucketOverview {
 	readonly bucketId: string;
 	readonly domain: string;
 	readonly pages: readonly RuntimeTextureAtlasPageOverview[];
@@ -365,7 +365,7 @@ export interface RuntimeTextureAtlasPageOverview {
 	readonly wrapT: string;
 }
 
-export interface RuntimeRendererResourcesOverviewSnapshot {
+interface RuntimeRendererResourcesOverviewSnapshot {
 	readonly directEnvCellDrawCalls: number;
 	readonly dynamicDrawCalls: number;
 	readonly dynamicInstances: number;

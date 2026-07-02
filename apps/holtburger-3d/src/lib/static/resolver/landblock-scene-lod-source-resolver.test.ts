@@ -278,6 +278,14 @@ function createBakeInput(recipe: StaticLayerRecipe): StaticBakeBatchInput {
 		scopeKey: `landblock:${recipe.payload.job.scope.landblockId.toString(16).padStart(8, "0")}`,
 		taskId: `task:${recipe.payload.job.domain}`,
 	};
+	const texturePlacementSnapshot =
+		recipe.payload.job.domain === "outdoor-terrain"
+			? undefined
+			: {
+					itemIdsByTextureUseId: new Map(),
+					kind: "object-visual-texture-placement-snapshot" as const,
+					placementsByItemId: new Map(),
+				};
 	return {
 		attachments: {
 			envCellCellStructureGeometry: [],
@@ -292,6 +300,7 @@ function createBakeInput(recipe: StaticLayerRecipe): StaticBakeBatchInput {
 		],
 		revision: 1,
 		bakeBatchId,
+		texturePlacementSnapshot,
 	};
 }
 

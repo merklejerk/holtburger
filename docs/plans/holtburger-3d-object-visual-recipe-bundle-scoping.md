@@ -2738,6 +2738,8 @@ Implementation notes:
 
 ### Phase 16: Final Validation
 
+Status: complete.
+
 Goal: prove the cutover is complete enough to trust and maintain.
 
 Deliverables:
@@ -2764,6 +2766,41 @@ Acceptance criteria:
 
 - The implementation satisfies the Definition of Done below.
 - Any remaining risk is documented and not caused by retained legacy bifurcation.
+
+Implementation notes:
+
+- Final test gates:
+  `npm --prefix apps/holtburger-3d run check` passed;
+  `npm --prefix apps/holtburger-3d run test:ts` passed with 84 test files and 669 tests.
+- Final search gates:
+  `rg -n "static-object-instance-inventory|inventoryGeneratedOutdoorSceneryInstances|legacyObjectResourceIds|#installedDrawUnitsById|#updateInstalledDrawUnits|staticObjectRenderInstances|staticObjectVisualResources" apps/holtburger-3d/src/lib -g '*.ts'`
+  found no generated-scenery inventory, legacy object resource scrubber, or stale runtime direct
+  draw-unit cache names. Remaining `staticObjectVisualResources`/`staticObjectRenderInstances` hits
+  are renderer/runtime diagnostic resource class names and renderer tests, not bake/install mirror
+  fields.
+- Final stale-test cleanup: full-suite validation exposed env-cell resolver tests still expecting
+  pixel-bearing `render-surface`/`palette` routes and a landblock scene LoD smoke test that gave
+  terrain an object-visual placement snapshot. Those tests now expect metadata routes and use a
+  domain-aware bake input.
+- Deleted legacy paths across the effort: static object visual resource/render-instance bake result
+  mirrors, generated-scenery draw-unit inventory inference, object-like `StaticBakeBatchResult.drawUnits`
+  mirrors, coordinator object-draw-unit filtering/scrubbing, and runtime object-like installed
+  draw-unit fixture paths.
+- Remaining object visual entry points:
+  resolver/source normalization emits object visual recipe bundles and sidecar data;
+  object visual material planning and placement planning feed shared bake contracts;
+  static object, generated scenery, structured interiors, static-authored dynamics, and runtime
+  dynamics route through recipe-first object visual baking/publication;
+  runtime installs object-like direct draw units, visual resources, and render instances from
+  `objectVisualInstallSet`.
+- Browser/programmatic harness was not run in this phase. Unit/runtime fixture coverage proves the
+  structural cutover, but a later harness pass should be used for visual smoke confidence on real
+  scenes, texture binding, and animation once we want rendered evidence rather than contract
+  evidence.
+- Residual risks deliberately deferred: local flattened draw-unit-shaped data still supports some
+  diagnostics/source mapping/spatial sidecars; generated-scenery policy constants still deserve a
+  named policy object; renderer resource class names remain static-object-specific because the
+  renderer resource classes are still static object resources.
 
 ## Decisions And Course Corrections
 

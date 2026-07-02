@@ -2299,6 +2299,34 @@ Deletion criteria:
 - Delete legacy dynamic visual recipe/material/geometry payload shapes once all dynamic callers use
   `ObjectVisualBundleResolution`.
 
+Course correction during Phase 10:
+
+- Investigation showed static-authored and runtime-authored dynamics already share one
+  dynamic-specific resolver/baker path, and dynamic texture placement already reuses
+  `planObjectVisualMaterials(...)` plus the object-visual texture placement planner. The remaining
+  bifurcation is the dynamic-only recipe and bake shape: `DynamicEntityRecipe.visual` carries
+  source/material arrays, `DynamicVisualTexturePlanning` carries dynamic texture requirements, and
+  `bakeDynamicVisuals(...)` manually extracts render parts instead of consuming
+  `ObjectVisualBundleResolution`.
+- First implementation slice: add an isolated dynamic object-visual scope/bundle producer that
+  projects setup-backed dynamic visual facts into the shared object visual recipe bundle shape. This
+  can initially adapt dynamic setup-model/setup-appearance output into the same source/material/
+  geometry concepts used by static object bundle production, but the adapter must be named as a
+  temporary normalization shell and kept out of runtime lifetime/residency policy. The output should
+  carry `runtime-entity` residency for runtime-authored dynamics and static-authored dynamic
+  residency for static placements, plus `sourcePartIndex` for animation binding.
+- Second implementation slice: make dynamic texture planning consume the object visual bundle
+  recipes rather than recomputing dynamic material slots directly from source assets. This keeps
+  texture placement ids and material recipe ids aligned before the baker changes.
+- Third implementation slice: route dynamic baking through `bakeObjectVisuals(...)`, then translate
+  the shared baked render parts into the existing `BakedDynamicVisualResource` wrapper only as a
+  runtime compatibility shell. Delete the dynamic render-part extraction code once renderer/runtime
+  installation no longer needs the wrapper.
+- Spicy debt: the static object bundle producer currently contains useful recipe construction logic
+  behind static batch payload shapes. Reusing it for dynamics through a small adapter is acceptable
+  as an intermediate cut, but the hard cutover should pull the common setup/gfx source-to-recipe
+  primitives into a neutral object-visual module instead of preserving a static-shaped producer API.
+
 ### Phase 11: Recipe-First Generated Scenery Instancing
 
 Goal: replace post-draw-unit generated-scenery inference with part-instance-driven reuse before the

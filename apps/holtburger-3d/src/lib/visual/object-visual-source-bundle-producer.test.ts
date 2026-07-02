@@ -3,15 +3,15 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	objectVisualGeometryBufferId,
 	type ObjectVisualGeometryBuffer,
-} from "../../../visual/object-visual-recipe-bundle";
-import { bakeObjectVisuals } from "../../../visual/object-visual-baker";
+} from "./object-visual-recipe-bundle";
+import { bakeObjectVisuals } from "./object-visual-baker";
 import type {
 	StaticObjectInstanceIdentity,
 	StaticObjectSourceIdentity,
-} from "../../contracts";
-import { createStaticObjectSourceGeometryIdentity } from "../static-object-source-assets";
-import type { ObjectVisualSourcePayload } from "../../../visual/object-visual-source-payload";
-import { createObjectVisualSourceBundleExpansion } from "./static-object-visual-bundle-producer";
+} from "../static/contracts";
+import { createStaticObjectSourceGeometryIdentity } from "../static/objects/static-object-source-assets";
+import type { ObjectVisualSourcePayload } from "./object-visual-source-payload";
+import { createObjectVisualSourceBundleExpansion } from "./object-visual-source-bundle-producer";
 
 const TEST_LANDBLOCK_ID = 0xda55ffff;
 const TEST_SOURCE: StaticObjectSourceIdentity = {
@@ -31,7 +31,7 @@ const TEST_GEOMETRY = createStaticObjectSourceGeometryIdentity({
 	source: TEST_SOURCE,
 });
 
-describe("static object visual bundle producer", () => {
+describe("object visual source bundle producer", () => {
 	it("expands static object source facts into a ready object visual bundle", () => {
 		const payload = createPayload();
 		const result = createObjectVisualSourceBundleExpansion({

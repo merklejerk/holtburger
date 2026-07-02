@@ -14,7 +14,7 @@ import type {
 import { createStaticObjectSourceGeometryIdentity } from "../static-object-source-assets";
 import type { ObjectVisualSourcePayload } from "../../../visual/object-visual-source-payload";
 import { createStaticObjectPublicationMetadata } from "./static-object-publication-metadata-producer";
-import { createObjectVisualSourceBundleExpansion } from "./static-object-visual-bundle-producer";
+import { createObjectVisualSourceBundleExpansion } from "../../../visual/object-visual-source-bundle-producer";
 
 const TEST_LANDBLOCK_ID = 0xda55ffff;
 const TEST_SOURCE: StaticObjectSourceIdentity = {

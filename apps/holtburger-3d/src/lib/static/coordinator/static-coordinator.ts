@@ -765,15 +765,14 @@ export class StaticCoordinator {
 			return;
 		}
 
-		let dynamicVisualBake: DynamicVisualBakeResult | null;
+		let dynamicVisualBakeResults: readonly DynamicVisualBakeResult[];
 		this.#setTaskBakeStage(options.item.task, "dynamic-visual-baker");
 		try {
-			dynamicVisualBake = await this.#bakeDynamicVisualsForPendingItems({
+			dynamicVisualBakeResults = await this.#bakeDynamicVisualsForPendingItems({
 				pendingItems: [options.pendingItem],
 				placementSnapshot:
 					options.placementSnapshots.objectVisualPlacementSnapshot,
 				revision: options.pendingGroup.revision,
-				sourceReadyGroupId: options.pendingGroup.groupId,
 				texturePlannings: options.dynamicVisualTexturePlannings,
 			});
 		} catch (error: unknown) {
@@ -790,7 +789,7 @@ export class StaticCoordinator {
 				bakeMs,
 				dynamicPlacements: options.pendingItem.dynamicPlacements,
 				dynamicRecipes: options.pendingItem.dynamicRecipes,
-				dynamicVisualBake,
+				dynamicVisualBakeResults,
 				placementIntentMs: options.placementIntentMs,
 				resolverMs: options.pendingItem.resolverMs,
 				resourceMs,
@@ -808,12 +807,11 @@ export class StaticCoordinator {
 		readonly pendingItems: readonly PendingStaticSourceReadyItem[];
 		readonly placementSnapshot: ObjectVisualTexturePlacementSnapshot;
 		readonly revision: number;
-		readonly sourceReadyGroupId: string;
 		readonly texturePlannings: readonly DynamicVisualTexturePlanning[];
-	}): Promise<DynamicVisualBakeResult | null> {
+	}): Promise<readonly DynamicVisualBakeResult[]> {
 		const recipes = options.pendingItems.flatMap((item) => item.dynamicRecipes);
 		if (recipes.length === 0) {
-			return null;
+			return [];
 		}
 		if (!this.#dynamicVisualBaker || !this.#dynamicVisualGeometryAssetReader) {
 			throw new Error(
@@ -825,19 +823,23 @@ export class StaticCoordinator {
 			this.#dynamicVisualGeometryAssetReader,
 			recipes,
 		);
-		return this.#dynamicVisualBaker.bake({
-			batchId: createStaticAuthoredDynamicVisualCorrelationId(
-				options.sourceReadyGroupId,
+		const texturePlanningByEntityId = new Map(
+			options.texturePlannings.map((planning) => [planning.entityId, planning]),
+		);
+		return Promise.all(
+			recipes.map((recipe) =>
+				this.#dynamicVisualBaker!.bake({
+					recipe,
+					revision: options.revision,
+					sourceGeometry,
+					texturePlacementSnapshot: options.placementSnapshot,
+					texturePlanning: requireDynamicVisualTexturePlanningForRecipe({
+						recipe,
+						texturePlanningByEntityId,
+					}),
+				}),
 			),
-			recipes,
-			revision: options.revision,
-			sourceGeometry,
-			texturePlacementSnapshot: options.placementSnapshot,
-			texturePlannings: filterDynamicVisualTexturePlanningsForRecipes(
-				options.texturePlannings,
-				recipes,
-			),
-		});
+		);
 	}
 
 	#commit(
@@ -850,7 +852,7 @@ export class StaticCoordinator {
 			readonly bakeMs: number | null;
 			readonly dynamicPlacements: readonly StaticAuthoredDynamicPlacementRecord[];
 			readonly dynamicRecipes: readonly DynamicEntityRecipe[];
-			readonly dynamicVisualBake: DynamicVisualBakeResult | null;
+			readonly dynamicVisualBakeResults: readonly DynamicVisualBakeResult[];
 		},
 	): void {
 		const commitStartedAt = nowMs();
@@ -903,7 +905,7 @@ export class StaticCoordinator {
 		this.#emitCommit({
 			dynamicPlacements: timing.dynamicPlacements,
 			dynamicRecipes: timing.dynamicRecipes,
-			dynamicVisualBake: timing.dynamicVisualBake,
+			dynamicVisualBakeResults: timing.dynamicVisualBakeResults,
 			staticCommit: {
 				addedDrawUnits: createCommitDrawUnits(result),
 				addedPortalApertureResources: result.portalApertureResources,
@@ -959,7 +961,7 @@ export class StaticCoordinator {
 		this.#emitCommit({
 			dynamicPlacements: [],
 			dynamicRecipes: [],
-			dynamicVisualBake: null,
+			dynamicVisualBakeResults: [],
 			staticCommit: {
 				addedDrawUnits: [],
 				addedPortalApertureResources: [],
@@ -1410,12 +1412,6 @@ interface PendingStaticSourceReadyItem {
 	readonly taskId: string;
 }
 
-function createStaticAuthoredDynamicVisualCorrelationId(
-	sourceReadyGroupId: string,
-): string {
-	return `${sourceReadyGroupId}:static-authored-dynamic-visuals`;
-}
-
 function createStaticSourceReadyGroupId(
 	task: MutableStaticLayerTaskState,
 ): string {
@@ -1488,30 +1484,22 @@ function groupDynamicPlacementsByOwnerId(
 	return byOwnerId;
 }
 
-function filterDynamicVisualBakeResultForCurrentTasks(
-	result: DynamicVisualBakeResult | null,
-	pendingItems: readonly PendingStaticSourceReadyItem[],
-	currentTasks: readonly StaticBakeTask[],
-): DynamicVisualBakeResult | null {
-	if (!result) {
-		return null;
-	}
-	const currentTaskIds = new Set(currentTasks.map((task) => task.taskId));
-	const currentEntityIds = new Set(
-		pendingItems
-			.filter((item) => currentTaskIds.has(item.taskId))
-			.flatMap((item) => item.dynamicRecipes.map((recipe) => recipe.entityId)),
+function requireDynamicVisualTexturePlanningForRecipe(options: {
+	readonly recipe: DynamicEntityRecipe;
+	readonly texturePlanningByEntityId: ReadonlyMap<
+		string,
+		DynamicVisualTexturePlanning
+	>;
+}): DynamicVisualTexturePlanning {
+	const planning = options.texturePlanningByEntityId.get(
+		options.recipe.entityId,
 	);
-	return {
-		...result,
-		failures: result.failures.filter(
-			(failure) =>
-				failure.entityId === null || currentEntityIds.has(failure.entityId),
-		),
-		products: result.products.filter((product) =>
-			currentEntityIds.has(getDynamicVisualBakeProductEntityId(product)),
-		),
-	};
+	if (!planning) {
+		throw new Error(
+			`Static-authored dynamic visual ${options.recipe.entityId} has no texture planning result.`,
+		);
+	}
+	return planning;
 }
 
 function filterDynamicPlacementsForCurrentTasks(
@@ -1532,22 +1520,6 @@ function filterDynamicRecipesForCurrentTasks(
 	return pendingItems
 		.filter((item) => currentTaskIds.has(item.taskId))
 		.flatMap((item) => item.dynamicRecipes);
-}
-
-function filterDynamicVisualTexturePlanningsForRecipes(
-	plannings: readonly DynamicVisualTexturePlanning[],
-	recipes: readonly DynamicEntityRecipe[],
-): readonly DynamicVisualTexturePlanning[] {
-	const entityIds = new Set(recipes.map((recipe) => recipe.entityId));
-	return plannings.filter((planning) => entityIds.has(planning.entityId));
-}
-
-function getDynamicVisualBakeProductEntityId(
-	product: DynamicVisualBakeResult["products"][number],
-): string {
-	return product.kind === "baked"
-		? product.resource.entityId
-		: product.entityId;
 }
 
 function createSourceRequestsForNewWork(

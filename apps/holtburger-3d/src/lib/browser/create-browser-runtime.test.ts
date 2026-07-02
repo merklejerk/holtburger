@@ -5,6 +5,7 @@ import type {
 	DynamicVisualBakeWorkerPort,
 	DynamicVisualBakeWorkerThreadMessage,
 } from "../dynamic/visual-bake-protocol";
+import type { DynamicVisualBakeInput } from "../dynamic/contracts";
 import type {
 	DynamicVisualRecipeWorkerMainMessage,
 	DynamicVisualRecipeWorkerPort,
@@ -181,38 +182,28 @@ describe("browser runtime routing", () => {
 			},
 		});
 
-		const pending = baker.bake({
-			batchId: "dynamic-visual-batch:test",
-			recipes: [],
-			revision: 1,
-			sourceGeometry: [],
-		});
+		const input = createDynamicVisualBakeInput("dynamic-visual:test");
+		const pending = baker.bake(input);
 
 		expect(workers[0]?.messages).toEqual([
 			{
-				input: {
-					batchId: "dynamic-visual-batch:test",
-					recipes: [],
-					revision: 1,
-					sourceGeometry: [],
-				},
-				kind: "bake-dynamic-visual-batch",
+				input,
+				kind: "bake-dynamic-visual",
 				requestId: "dynamic-visual-bake:0",
 			},
 		]);
 		workers[0]?.emit({
-			kind: "dynamic-visual-batch-baked",
+			kind: "dynamic-visual-baked",
 			requestId: "dynamic-visual-bake:0",
 			result: {
-				batchId: "dynamic-visual-batch:test",
 				failures: [],
-				products: [],
+				product: null,
 				revision: 1,
 			},
 		});
 
 		await expect(pending).resolves.toMatchObject({
-			batchId: "dynamic-visual-batch:test",
+			revision: 1,
 		});
 		disposeResolver(baker);
 		expect(workers.map((worker) => worker.terminated)).toEqual([true, true]);
@@ -346,6 +337,26 @@ function disposeResolver(resolver: unknown): void {
 	}
 
 	resolver.dispose();
+}
+
+function createDynamicVisualBakeInput(
+	entityId: string,
+): DynamicVisualBakeInput {
+	return {
+		recipe: { entityId } as DynamicVisualBakeInput["recipe"],
+		revision: 1,
+		sourceGeometry: [],
+		texturePlacementSnapshot: {
+			itemIdsByTextureUseId: new Map(),
+			placementsByItemId: new Map(),
+		},
+		texturePlanning: {
+			entityId,
+			materialPlan: null,
+			placementIntents: [],
+			textureRequirements: [],
+		},
+	};
 }
 
 function createSourceRequest(): StaticLandblockSceneLodSourceRequest {

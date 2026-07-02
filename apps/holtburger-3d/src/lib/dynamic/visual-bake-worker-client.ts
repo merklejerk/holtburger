@@ -52,7 +52,7 @@ export class DynamicVisualBakeWorkerClient implements DynamicVisualBaker {
 			this.#pending.set(requestId, { reject, resolve });
 			this.#port.postMessage({
 				input,
-				kind: "bake-dynamic-visual-batch",
+				kind: "bake-dynamic-visual",
 				requestId,
 			});
 		});
@@ -81,7 +81,7 @@ export class DynamicVisualBakeWorkerClient implements DynamicVisualBaker {
 		}
 
 		this.#pending.delete(response.requestId);
-		if (response.kind === "dynamic-visual-batch-bake-failed") {
+		if (response.kind === "dynamic-visual-bake-failed") {
 			pending.reject(new Error(response.message));
 			return;
 		}

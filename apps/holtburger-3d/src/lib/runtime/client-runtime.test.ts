@@ -3934,9 +3934,8 @@ class RecordingDynamicVisualBaker implements DynamicVisualBaker {
 	bake(input: DynamicVisualBakeInput): Promise<DynamicVisualBakeResult> {
 		this.inputs.push(input);
 		return Promise.resolve({
-			batchId: input.batchId,
 			failures: [],
-			products: [],
+			product: null,
 			revision: input.revision,
 		});
 	}
@@ -3945,12 +3944,11 @@ class RecordingDynamicVisualBaker implements DynamicVisualBaker {
 class StaticAuthoredTestDynamicVisualBaker implements DynamicVisualBaker {
 	bake(input: DynamicVisualBakeInput): Promise<DynamicVisualBakeResult> {
 		return Promise.resolve({
-			batchId: input.batchId,
 			failures: [],
-			products: input.recipes.map((recipe) => ({
+			product: {
 				kind: "baked" as const,
-				resource: createBakedDynamicVisualResourceForRecipe(recipe),
-			})),
+				resource: createBakedDynamicVisualResourceForRecipe(input.recipe),
+			},
 			revision: input.revision,
 		});
 	}

@@ -3593,7 +3593,7 @@ Spicy bits and retained debt:
 
 ### Phase 22: Dynamic Single-Visual Bake Contract
 
-Status: planned.
+Status: completed.
 
 Goal: remove dynamic visual bake batching semantics so runtime-authored and static-authored dynamic
 visuals use single-visual bake jobs like static object-like domains now do.
@@ -3637,6 +3637,41 @@ Spicy bits to watch:
   grouping; this phase targets semantic bake batching only.
 - If runtime scheduling uses dynamic batch ids for stale-work protection, replace them with explicit
   entity/revision/job identity instead of deleting the protection.
+
+Implementation notes:
+
+- Replaced dynamic baker-facing `DynamicVisualBakeInput.batchId`, `recipes[]`, and
+  `texturePlannings[]` with a single `recipe` and single `texturePlanning`.
+- Replaced `DynamicVisualBakeResult.products[]` with a single nullable `product`. `failures[]`
+  remains an array because a single job can still accumulate stage failures, but it no longer
+  represents multiple visual products.
+- Renamed worker protocol discriminants from dynamic-visual-batch wording to
+  `bake-dynamic-visual`, `dynamic-visual-baked`, and `dynamic-visual-bake-failed`.
+- Changed static-authored dynamic baking to launch one dynamic visual bake job per recipe and carry
+  `dynamicVisualBakeResults[]` through `StaticScopePrepCommit`.
+- Changed runtime-authored dynamic baking to pass its one recipe and one texture planning directly,
+  then apply a single baked/skipped product.
+- Deleted the stale static coordinator result-filtering helpers that existed only for multi-product
+  dynamic bake results.
+- Updated worker-pool tests to assert round-robin scheduling by dynamic entity id instead of batch
+  id. Tests that only preserved old batch shape were rewritten around independent single-job
+  dispatch.
+- Validation passed:
+  `npm --prefix apps/holtburger-3d run test:ts -- src/lib/dynamic/visual-baker.test.ts src/lib/dynamic/visual-contracts.test.ts src/lib/dynamic/visual-bake-worker-client.test.ts src/lib/browser/create-browser-runtime.test.ts src/lib/static/coordinator/static-coordinator.test.ts src/lib/runtime/client-runtime.test.ts`,
+  `npm --prefix apps/holtburger-3d run check`,
+  `npm --prefix apps/holtburger-3d run lint:dead`,
+  `npm --prefix apps/holtburger-3d run format:check`, and
+  `npm --prefix apps/holtburger-3d run harness:browser -- --domains terrain --timeout-ms 60000 --output /tmp/holtburger-phase22-harness.json`.
+
+Spicy bits and retained debt:
+
+- `createDynamicVisualBakeSourceGeometry(...)` still accepts a recipe array so the static
+  coordinator can prepare geometry sidecars once for sibling static-authored dynamic recipes before
+  dispatching independent bake jobs. This is not a baker contract batch, but Phase 24 should decide
+  whether the helper name/input should become singular for consistency.
+- Static coordinator still uses a plural `texturePlannings` collection before dispatch because
+  texture placement is solved for the source-ready group. The baker boundary is now single-visual;
+  pre-bake placement grouping remains a scheduler/texture-manager concern.
 
 ### Phase 23: Object Visual Publication Type Neutrality
 

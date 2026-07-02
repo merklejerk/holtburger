@@ -81,69 +81,63 @@ export function bakeDynamicVisuals(
 	input: DynamicVisualBakeInput,
 ): DynamicVisualBakeResult {
 	const sourceGeometryByKey = createSourceGeometryIndex(input.sourceGeometry);
-	const texturePlanningByEntityId = new Map(
-		input.texturePlannings.map((planning) => [planning.entityId, planning]),
-	);
-	const products: DynamicVisualBakeProduct[] = [];
 	const failures: DynamicVisualBakeResult["failures"][number][] = [];
+	const recipe = input.recipe;
+	let product: DynamicVisualBakeProduct | null = null;
 
-	for (const recipe of input.recipes) {
-		if (recipe.visual.missingRefs.length > 0) {
-			products.push({
-				entityId: recipe.entityId,
-				kind: "skipped",
-				reason: {
-					kind: "missing-dependencies",
-					missingRefs: recipe.visual.missingRefs,
-				},
-			});
-			continue;
-		}
-
+	if (recipe.visual.missingRefs.length > 0) {
+		product = {
+			entityId: recipe.entityId,
+			kind: "skipped",
+			reason: {
+				kind: "missing-dependencies",
+				missingRefs: recipe.visual.missingRefs,
+			},
+		};
+	} else {
 		try {
 			const resource = bakeDynamicVisualRecipe({
 				recipe,
 				sourceGeometryByKey,
 				texturePlacementSnapshot: input.texturePlacementSnapshot,
-				texturePlanning: texturePlanningByEntityId.get(recipe.entityId) ?? null,
+				texturePlanning: input.texturePlanning,
 			});
-			products.push({
+			product = {
 				kind: "baked",
 				resource,
-			});
+			};
 		} catch (error) {
 			if (error instanceof DynamicVisualSkipError) {
-				products.push({
+				product = {
 					entityId: recipe.entityId,
 					kind: "skipped",
 					reason: error.productReason,
+				};
+			} else {
+				failures.push({
+					entityId: recipe.entityId,
+					message: formatErrorMessage(error),
+					stage: "render-part-extraction",
 				});
-				continue;
 			}
-			failures.push({
-				entityId: recipe.entityId,
-				message: formatErrorMessage(error),
-				stage: "render-part-extraction",
-			});
 		}
 	}
 
 	return {
-		batchId: input.batchId,
 		failures,
-		products,
+		product,
 		revision: input.revision,
 	};
 }
 
 function bakeDynamicVisualRecipe(options: {
-	readonly recipe: DynamicVisualBakeInput["recipes"][number];
+	readonly recipe: DynamicVisualBakeInput["recipe"];
 	readonly sourceGeometryByKey: ReadonlyMap<
 		string,
 		StaticObjectSourceGeometrySidecar
 	>;
 	readonly texturePlacementSnapshot: DynamicVisualBakeInput["texturePlacementSnapshot"];
-	readonly texturePlanning: DynamicVisualTexturePlanning | null;
+	readonly texturePlanning: DynamicVisualTexturePlanning;
 }): BakedDynamicVisualResource {
 	const { recipe } = options;
 	const texturePlanning = requireDynamicVisualTexturePlanning({
@@ -215,7 +209,7 @@ function bakeDynamicVisualRecipe(options: {
 }
 
 export function createDynamicVisualTexturePlanning(
-	recipe: DynamicVisualBakeInput["recipes"][number],
+	recipe: DynamicVisualBakeInput["recipe"],
 ): DynamicVisualTexturePlanning {
 	if (recipe.visual.missingRefs.length > 0) {
 		return {
@@ -275,7 +269,7 @@ export function createDynamicVisualTexturePlanning(
 }
 
 function createDynamicTexturePlacementRequirement(options: {
-	readonly recipe: DynamicVisualBakeInput["recipes"][number];
+	readonly recipe: DynamicVisualBakeInput["recipe"];
 	readonly requirement: PendingDynamicEntityTextureRequirement;
 }): ObjectVisualTexturePlacementRequirement {
 	const textureDomain =
@@ -331,11 +325,11 @@ function requireDynamicTexturePlanningItemId(options: {
 
 function createDynamicTexturePlacementBucketKey(options: {
 	readonly purpose: TextureUsagePurpose;
-	readonly recipe: DynamicVisualBakeInput["recipes"][number];
+	readonly recipe: DynamicVisualBakeInput["recipe"];
 	readonly textureDomain:
 		| "runtime-object-material"
 		| Exclude<
-				DynamicVisualBakeInput["recipes"][number]["visual"]["materialPolicy"]["detailRolePolicy"],
+				DynamicVisualBakeInput["recipe"]["visual"]["materialPolicy"]["detailRolePolicy"],
 				{ readonly kind: "runtime-authored-none" }
 		  >["domain"];
 }): TexturePlacementBucketKey {
@@ -360,17 +354,12 @@ function createDynamicTexturePlacementBucketKey(options: {
 
 function requireDynamicVisualTexturePlanning(options: {
 	readonly entityId: string;
-	readonly texturePlanning: DynamicVisualTexturePlanning | null;
+	readonly texturePlanning: DynamicVisualTexturePlanning;
 }): DynamicVisualTexturePlanning & {
 	readonly materialPlan: NonNullable<
 		DynamicVisualTexturePlanning["materialPlan"]
 	>;
 } {
-	if (!options.texturePlanning) {
-		throw new Error(
-			`Dynamic visual ${options.entityId} is missing pre-bake material planning.`,
-		);
-	}
 	if (!options.texturePlanning.materialPlan) {
 		throw new Error(
 			`Dynamic visual ${options.entityId} has no material plan in pre-bake texture planning.`,
@@ -593,7 +582,7 @@ function createTextureRequirementKey(
 }
 
 function createDynamicTextureAffinityKey(
-	recipe: DynamicVisualBakeInput["recipes"][number],
+	recipe: DynamicVisualBakeInput["recipe"],
 ): string {
 	return [
 		"dynamic-visual",
@@ -709,7 +698,7 @@ function requireTextureRequirementForRecipe(options: {
 
 function createDynamicRenderPartsFromObjectVisualBake(options: {
 	readonly bakeResult: ObjectVisualBakeResult;
-	readonly recipe: DynamicVisualBakeInput["recipes"][number];
+	readonly recipe: DynamicVisualBakeInput["recipe"];
 }): readonly DynamicEntityRenderPart[] {
 	return options.bakeResult.renderParts.map((renderPart) => {
 		const partIndex = requireSingleDynamicSourcePartIndex(renderPart);
@@ -744,7 +733,7 @@ function requireSingleDynamicSourcePartIndex(
 
 function createDynamicRenderPartSourceAssetId(options: {
 	readonly partIndex: number;
-	readonly recipe: DynamicVisualBakeInput["recipes"][number];
+	readonly recipe: DynamicVisualBakeInput["recipe"];
 }): string {
 	const part = options.recipe.visual.setupModel.parts.find(
 		(candidate) => candidate.partIndex === options.partIndex,

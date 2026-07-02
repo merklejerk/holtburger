@@ -873,9 +873,7 @@ describe("static coordinator", () => {
 
 		expect(dynamicVisualBaker.inputs).toEqual([
 			expect.objectContaining({
-				batchId:
-					"static-source-ready-group:1:outdoor-terrain:landblock:da55ffff:1:landblock:da55ffff:outdoor-terrain:static-authored-dynamic-visuals",
-				recipes: [expect.objectContaining({ entityId: "static-dynamic:1" })],
+				recipe: expect.objectContaining({ entityId: "static-dynamic:1" }),
 				revision: 1,
 				sourceGeometry: [],
 			}),
@@ -886,12 +884,10 @@ describe("static coordinator", () => {
 				dynamicRecipes: [
 					expect.objectContaining({ entityId: "static-dynamic:1" }),
 				],
-				dynamicVisualBake: {
-					batchId:
-						"static-source-ready-group:1:outdoor-terrain:landblock:da55ffff:1:landblock:da55ffff:outdoor-terrain:static-authored-dynamic-visuals",
-					failures: [],
-					products: [
-						{
+				dynamicVisualBakeResults: [
+					{
+						failures: [],
+						product: {
 							entityId: "static-dynamic:1",
 							kind: "skipped",
 							reason: {
@@ -899,9 +895,9 @@ describe("static coordinator", () => {
 								message: "test dynamic bake",
 							},
 						},
-					],
-					revision: 1,
-				},
+						revision: 1,
+					},
+				],
 				staticCommit: expect.objectContaining({
 					addedDrawUnits: [createTerrainDrawUnit("terrain-a", 0xda55ffff)],
 					commitId: "static-commit:1:1:landblock:da55ffff:outdoor-terrain",
@@ -2083,16 +2079,15 @@ class RecordingDynamicVisualBaker implements DynamicVisualBaker {
 	bake(input: DynamicVisualBakeInput): Promise<DynamicVisualBakeResult> {
 		this.inputs.push(input);
 		return Promise.resolve({
-			batchId: input.batchId,
 			failures: [],
-			products: input.recipes.map((recipe) => ({
-				entityId: recipe.entityId,
+			product: {
+				entityId: input.recipe.entityId,
 				kind: "skipped" as const,
 				reason: {
 					kind: "invalid-recipe" as const,
 					message: "test dynamic bake",
 				},
-			})),
+			},
 			revision: input.revision,
 		});
 	}

@@ -1992,7 +1992,7 @@ export interface StaticScopePrepCommit {
 	/** Resolved static-authored dynamic recipes scoped to this commit. */
 	readonly dynamicRecipes: readonly DynamicEntityRecipe[];
 	/** Baked dynamic visuals produced from sibling source-resolution recipes. */
-	readonly dynamicVisualBake: DynamicVisualBakeResult | null;
+	readonly dynamicVisualBakeResults: readonly DynamicVisualBakeResult[];
 }
 
 type PortalApertureResourceSourceKind =

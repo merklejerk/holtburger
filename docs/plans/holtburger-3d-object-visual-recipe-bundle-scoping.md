@@ -1,8 +1,7 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation in progress. Phases 0-9L are complete. This document defines the target
-model, north stars, risk surface, and phased cutover plan for replacing static-vs-dynamic object
-visual worker bifurcation with a shared object-like visual recipe graph.
+Status: implementation complete through Phase 16. Residual cleanup and profiling follow-ups are
+recorded in the phase notes below.
 
 ## Purpose
 
@@ -2131,6 +2130,8 @@ Implementation notes after Phase 9L:
 
 ### Phase 9M: Static Object-Like Resolver Cutover
 
+Status: complete.
+
 Goal: make static object-like layers produce sidecar-aware object visual scopes and feed the unified
 baker/install publication path.
 
@@ -2273,6 +2274,8 @@ Course correction during Phase 9M:
   replacing that final sidecar dependency remains hard-cutover debt.
 
 ### Phase 10: Dynamic Resolver Cutover
+
+Status: complete.
 
 Goal: make static-authored and runtime-authored dynamics produce the same visual bundle shape and
 feed the unified baker/install publication path.
@@ -2444,7 +2447,7 @@ Implementation notes:
 
 ### Phase 12: Hard Cutover And Legacy Baker Removal
 
-Status: in progress.
+Status: complete.
 
 Goal: lock production static/dynamic object visual bake paths onto the unified recipe-first baker and
 remove old duplicated worker logic.

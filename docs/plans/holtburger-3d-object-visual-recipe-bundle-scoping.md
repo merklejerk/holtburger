@@ -3048,6 +3048,191 @@ Risks and mitigations:
   behavior, and assert through existing object visual install-set output rather than adding a new
   publication path.
 
+### Phase 18: Cleanup And Route Audit
+
+Status: planned.
+
+Goal: remove the bounded cleanup debt left after the bake-job cutover before starting the deeper
+resolver-output convergence work.
+
+Context:
+
+- Phase 17 removed bake batching and made resource records job-local at the baker boundary, but
+  deliberately left a few cleanup seams that are easier to review before the next architectural
+  phase.
+- These items are mostly deletion, naming, audit, and harness ergonomics work. They should improve
+  clarity without changing the core recipe model.
+- Tests and diagnostics are not sacred. If a test only preserves an old helper shape or an obsolete
+  debug affordance, delete it and replace it later when the new model needs coverage.
+
+Deliverables:
+
+- Audit resolver texture usage and remove any remaining object-visual resolver or material-planning
+  path that asks for texel-bearing `render-surface`, `prepared-texture`, or palette assets when
+  metadata-only routes are sufficient. Leave renderer/baker texture binding paths alone when they
+  legitimately declare final `prepared-texture` or `palette` dependencies.
+- Tighten or rename geometry sidecar vocabulary where it still reads like old merged bake
+  attachments. Keep names only when they describe concrete source geometry sidecar records rather
+  than a baker aggregation bag.
+- Delete or narrow flattened draw-unit-shaped diagnostics/source-mapping/spatial helpers that exist
+  only to preserve old static-object or structured-interior debug shape.
+- Fix programmatic browser harness/dev-server ergonomics around the repeated
+  `Port 1420 is already in use` warning. Prefer structural harness behavior over shell-wrapper
+  papering.
+- Run `lint:dead` and remove newly exposed dead exports or scaffolding as part of the cleanup, not
+  as a separate shrine-maintenance chore.
+
+Task checklist:
+
+- Search static, dynamic, visual, texture, and asset-preparation code for direct texture/palette
+  pixel route usage from resolver or material-planning paths. Do not treat terrain or final renderer
+  binding requirements as object-visual recipe-authoring violations.
+- Confirm `render-surface-metadata` and `palette-metadata` routes expose all resolver-needed facts;
+  add missing metadata-only fields only if code proves the need.
+- Search for `Attachment`, `attachments`, flattened draw-unit helper names, and diagnostic-only
+  projection helpers in object visual, static object, structured-interior, and runtime code.
+- Delete brittle or hollow tests that assert deleted helper shapes. Replace only tests that prove
+  current behavior or an actively useful contract.
+- Rework the browser harness startup path so an occupied default Vite port is handled intentionally:
+  probe the default browser URL before spawning, then reuse a compatible running server, pick a free
+  port, or fail with an actionable message before long-running harness work starts.
+- Run focused tests for changed areas plus `lint:dead`, `check`, and at least one browser harness
+  slice that previously printed the port warning.
+
+Acceptance criteria:
+
+- No resolver/material-planning object-visual path loads texture or palette pixel payloads just to
+  author recipes. Remaining `prepared-texture`/`palette` usage is limited to renderer/baker binding
+  requirements or explicitly non-object-visual domains.
+- Remaining geometry sidecar names are either concrete and intentional or renamed to resource/sidecar
+  vocabulary.
+- Diagnostics/source-mapping/spatial helpers no longer preserve flattened draw-unit-shaped
+  intermediates solely for old debug output.
+- Browser harness startup does not emit misleading dev-server noise during a clean validation run.
+- `npm --prefix apps/holtburger-3d run lint:dead`, `npm --prefix apps/holtburger-3d run check`, and
+  focused tests pass.
+
+Out of scope:
+
+- Do not move the full resource-provider responsibility into resolver DTOs in this phase.
+- Do not redesign generated-scenery instancing beyond deleting obvious stale helper shape.
+- Do not force terrain into the object visual recipe graph.
+- Do not rewrite terrain palette resolution unless the texture audit proves it is accidentally
+  coupled to object-visual recipe authoring.
+
+Risks and mitigations:
+
+- Risk: the metadata route audit exposes missing palette/render-surface facts.
+  Mitigation: add narrow metadata-only fields and tests; do not fall back to texel-bearing resolver
+  routes.
+- Risk: deleting diagnostics hides a real regression clue.
+  Mitigation: keep behavior-facing tests and renderer/harness validation; diagnostics can be rebuilt
+  from the new model when there is a concrete consumer.
+- Risk: harness startup cleanup turns into installer/shell-wrapper restructuring.
+  Mitigation: keep this phase to the programmatic browser harness path unless investigation proves
+  the wrappers are the root cause.
+
+### Phase 19: Resolver Output Convergence
+
+Status: planned.
+
+Goal: make resolver/domain outputs and planner entry points converge on the normalized object visual
+recipe/sidecar DTO model across static object-like domains and dynamic visuals.
+
+Context:
+
+- The current architecture has shared object visual baking and single-job static bake contracts, but
+  resolver outputs and planner inputs still enter through domain-specific wrappers.
+- The dry run found concrete wrapper debt: dynamic visuals still adapt into
+  `StaticObjectBatchPayload`, and static publication metadata still carries some draw-unit-shaped
+  names for source mapping and residency bookkeeping.
+- The north star is not merely "resource providers are payload-scoped"; the resolver/domain output
+  should describe texture recipes, material recipes, geometry recipes, part recipes, part instances,
+  and explicit sidecars with dense local ids and inspectable key tables.
+- Generated-scenery instancing should improve only if repeated part-instance/resource candidates
+  naturally fall out of this convergence. If it requires a separate redesign, split it into the next
+  phase instead of hiding it inside this one.
+
+Deliverables:
+
+- Define the next concrete resolver-output DTO shape for object-like visual domains:
+  - texture recipe records;
+  - material recipe records;
+  - geometry recipe records;
+  - geometry buffer refs plus keyed heavy geometry sidecars;
+  - part recipe records;
+  - part instance records with residency and compact provenance;
+  - non-visual sidecars for portals, visibility, spatial/source mapping, and static-authored
+    dynamics.
+- Move remaining resource-provider responsibilities toward resolver/domain output records and
+  sidecars while keeping asset-reader/resource caches behind stable identities.
+- Promote shared material and texture placement planning entry points so static objects, structured
+  interiors, static-authored dynamics, and runtime-authored dynamics use isomorphic input shapes
+  where the source facts are equivalent.
+- Replace transitional static/dynamic wrapper shapes around object visual bundle expansion where they
+  no longer add domain-specific meaning, including the dynamic path that currently fabricates a
+  static-object batch payload before calling shared object-visual expansion.
+- Rename or delete draw-unit-shaped publication metadata once source mapping, residency, and
+  selection data are represented as recipe/part-instance sidecars rather than flattened draw-unit
+  projections.
+- Reassess generated-scenery instancing after DTO convergence:
+  - if repeated `PartInstance`/`PartRecipe` records are sufficient, simplify the instancing path in
+    this phase;
+  - if renderer constraints still require post-partition policy, document the constraint and split a
+    focused follow-up phase.
+
+Task checklist:
+
+- Inventory every producer/consumer of `ObjectVisualRecipeBundle`, `ObjectVisualStaticScope`,
+  `ObjectVisualMaterialPlan`, static-object payloads, structured-interior payloads, dynamic visual
+  bake inputs, and publication metadata that still speaks in draw-unit-shaped terms.
+- Stop after the inventory for a steering checkpoint: confirm the neutral DTO type names, domain
+  conversion order, and split triggers before changing runtime-facing publication contracts.
+- Draft the DTO shape in code or types with dense numeric ids and semantic key tables; avoid
+  hot-path string maps.
+- Convert one static object-like resolver path first, then structured interiors/env-cell static
+  object visuals, then dynamic/static-authored dynamic wrappers.
+- Keep unsupported materials explicit and lightweight; skip/log missing dependencies without adding
+  material diagnostics to the recipe model.
+- Delete adapters as each caller moves. Do not preserve compatibility paths unless a concrete
+  external boundary proves they are necessary.
+- Run focused resolver, material planner, texture placement, static object, structured-interior,
+  dynamic visual, runtime, and browser harness validation.
+
+Acceptance criteria:
+
+- Static object-like resolver output and dynamic visual planning input use the same object visual
+  recipe/part-instance vocabulary for equivalent concepts.
+- No dynamic visual path fabricates a static-object batch payload purely to reach object-visual
+  planning or expansion.
+- Resource records and heavy geometry sidecars are present before baking as resolver/domain output,
+  not assembled by a coordinator-level merged resource bag.
+- Runtime lifetime, eviction, pinning, and frontend residency policy do not fork resolver/baker
+  material or geometry planning paths.
+- Dense local ids drive bake-time lookups; semantic keys stay in key tables or registry/debug
+  boundaries.
+- Any remaining static/dynamic or generated-scenery-specific divergence is documented as renderer or
+  source-semantics driven, not accidental wrapper debt.
+
+Out of scope:
+
+- Do not redesign renderer shaders or material families beyond the existing renderer-legality
+  constraints.
+- Do not add material diagnostics unless a concrete user-facing need appears.
+- Do not make terrain part of the object visual DTO.
+
+Risks and mitigations:
+
+- Risk: this phase is large enough to become a mega-refactor.
+  Mitigation: convert domains in reviewable slices and stop to split Phase 20 if generated-scenery
+  instancing or dynamic wrappers start dominating the diff.
+- Risk: moving geometry/resource sidecars into resolver output duplicates asset preparation.
+  Mitigation: preserve identity-keyed caches behind resolver/asset-reader boundaries; do not
+  reintroduce multi-payload bake inputs as a dedupe mechanism.
+- Risk: static-authored dynamics and runtime-authored dynamics reveal real source-shape differences.
+  Mitigation: keep the shared DTO for equivalent visual facts and carry provenance/source-specific
+  facts as sidecars or compact `PartInstance.source`, not as separate baker pipelines.
+
 ## Decisions And Course Corrections
 
 - Phase 0 confirmed the phase order still holds. No implementation phase should begin by introducing

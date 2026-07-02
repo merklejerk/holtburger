@@ -3749,7 +3749,7 @@ Spicy bits and retained debt:
 
 ### Phase 24: Completion Audit And Final Validation
 
-Status: planned.
+Status: completed.
 
 Goal: prove the Definition of Done against current code instead of relying on phase history.
 
@@ -3775,6 +3775,91 @@ Spicy bits to watch:
 
 - A green test suite is not enough. The final audit must search for structural leftovers and inspect
   whether the tests actually cover the required domains.
+
+Implementation notes:
+
+- Exact-name code audit for semantic bake batching passed with no production hits:
+  `rg -n "batchId|bakeBatchId|maxPayloadsPerBatch|DEFAULT_STATIC_BATCH_MAX_PAYLOADS|StaticBakeBatch|dynamic-visual-batch" apps/holtburger-3d/src/lib -g '*.ts'`
+  exited with no matches.
+- Exact-name shared-path audit for static-owned object visual resource/publication vocabulary found
+  no hits in the visual publication, runtime install, static coordinator, static object job baker,
+  or static publication metadata producer paths after Phase 23.
+- Remaining `StaticObjectVisualResource`, `StaticObjectRenderInstance`,
+  `staticObjectVisualResources`, and `staticObjectRenderInstances` code hits are renderer/resource
+  class vocabulary (`src/lib/renderer/**`), runtime diagnostics snapshots, texture-manager removal
+  owner handling, and static contract boundary records consumed by the renderer. They are outside
+  the resolver/baker/publication DTO cutover and should only be renamed in a renderer-boundary
+  cleanup with matching diagnostics migration.
+- Route audit confirmed object/static resolver paths request metadata routes for material planning:
+  `static-object-source-closure.ts` requests `render-surface-metadata` and `palette-metadata`;
+  static object, env-cell, and terrain resolver tests assert metadata routes and absence of
+  resolver-safe `render-surface/` or `palette/` payload ids where relevant.
+- Unsupported and missing-dependency audit confirmed current contracts and tests:
+  `ObjectVisualUnsupportedMaterialRecipe`, `createObjectVisualBundleMissingDependenciesResolution`,
+  object visual baker skip-and-log tests, static object/env-cell missing-dependency skip paths, and
+  dynamic visual skipped product results.
+- Validation passed:
+  `npm --prefix apps/holtburger-3d run test:ts -- src/lib/visual/object-visual-source-bundle-producer.test.ts src/lib/visual/object-visual-recipe-bundle.test.ts src/lib/visual/object-visual-baker.test.ts src/lib/visual/object-visual-resource-key.test.ts src/lib/visual/object-visual-static-publication.test.ts src/lib/visual/object-visual-static-publication-baker.test.ts src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/static/objects/bake/static-object-publication-metadata-producer.test.ts src/lib/static/env-cells/bake/env-cell-system-baker.test.ts src/lib/static/env-cells/bake/structured-interior-visual-bundle-producer.test.ts src/lib/dynamic/visual-baker.test.ts src/lib/dynamic/visual-contracts.test.ts src/lib/dynamic/visual-bake-worker-client.test.ts src/lib/dynamic/visual-recipe-resolver.test.ts src/lib/dynamic/dynamic-placement-tracker.test.ts src/lib/textures/placement.test.ts src/lib/textures/texture-manager.test.ts src/lib/runtime/static-commit-installer.test.ts src/lib/runtime/env-cell-system-layer-publication.test.ts src/lib/static/coordinator/static-coordinator.test.ts src/lib/runtime/client-runtime.test.ts src/lib/browser/create-browser-runtime.test.ts src/lib/static/bake/worker-client.test.ts`,
+  `npm --prefix apps/holtburger-3d run check`,
+  `npm --prefix apps/holtburger-3d run lint:dead`,
+  `npm --prefix apps/holtburger-3d run format:check`, and
+  `npm --prefix apps/holtburger-3d run harness:browser -- --timeout-ms 180000 --output /tmp/holtburger-phase24-harness.json`.
+- Browser harness summary: no error, default domains
+  `buildings,env-cells,explicit-objects,generated-scenery,terrain`, 57 static jobs requested and
+  committed, 2376 source/installed static draw units, 0 failed/resolving/baking, portal scene-domain
+  render pass active. Harness emitted expected warnings for deferred transparent env-cell material
+  coverage and dynamic animation catch-up truncation; neither blocked readiness.
+
+Definition of Done evidence:
+
+- Shared ready/missing source contract: static object-like layers and dynamic visuals resolve through
+  `ObjectVisualBundleResolution` and `ObjectVisualSourcePayload` via
+  `createObjectVisualSourceBundleExpansion(...)` and dynamic/static source payload producers.
+- Same recipe graph: static explicit objects, generated scenery, env-cell static objects, structured
+  interiors, runtime-authored dynamics, and static-authored dynamics all feed
+  `ObjectVisualRecipeBundle`/`ObjectVisualBakeInput` before publication or dynamic install.
+- Resolver-safe metadata: static object/env-cell resolver tests cover `render-surface-metadata` and
+  `palette-metadata`; metadata payload tests reject `sourceBytes` and `colorsArgb` on metadata
+  routes.
+- Numeric bake lookups: object visual recipe bundle tests and placement tests cover numeric recipe,
+  part, geometry, material, texture, and placement ids; semantic strings remain in key tables,
+  renderer binding keys, and diagnostics/cache boundaries.
+- Source-local geometry sidecars and transform invariant: geometry buffers travel as sidecars, and
+  object visual static publication tests cover source-local resource publication plus per-instance
+  `sourceToLandblockMatrix`/transform application.
+- Unsupported materials: unsupported recipes are non-renderable and skipped before renderer material
+  table output; object visual material planner, source bundle producer, baker, and static partition
+  tests cover that behavior.
+- Missing dependencies: missing dependencies produce skip/readiness results without partial visual
+  products; object visual recipe bundle/static scope/static object/env-cell/dynamic visual tests
+  cover this.
+- Shared baker core: static object-like publication and dynamic visual baking both use the shared
+  object visual source bundle expansion, material planning, placement planning, and object visual
+  baker core; domain wrappers remain for resources, residency, installation, and runtime policy.
+- Shared install/publication shape: `ObjectVisualInstallSet` is the static object-like/env-cell
+  drawable publication carrier, and Phase 23 removed static-owned reusable resource/instance types
+  from its canonical records.
+- Generated scenery instancing: publication metadata and static object job baker derive reusable
+  resources from part-instance/resource-group metadata and resource keys, not from post-bake draw-unit
+  inventory.
+- Temporary adapters and legacy paths: code audit found no semantic bake-batch ids or old
+  static/dynamic batch worker names. Remaining static material adapter imports are renderer material
+  construction helpers, not compatibility wrappers between resolver/baker DTO shapes.
+- Validation: focused tests, typecheck, dead-code lint, format check, and all-domain browser harness
+  passed with current-state evidence.
+
+Spicy bits and retained debt:
+
+- Renderer resource class naming still says static object visual resource/render instance. This is
+  now renderer-boundary vocabulary, not shared resolver/baker/publication DTO ownership. Deletion
+  condition: rename only when the renderer contract and diagnostics are cut over together.
+- Terrain remains outside the object visual recipe model by design. The terrain texture placement
+  path still has legacy string-keyed placement ids; this is not object-visual hot-path debt.
+- `createDynamicVisualBakeSourceGeometry(...)` still accepts sibling recipes so static-authored
+  dynamic geometry sidecars can be prepared once before dispatching single visual bake jobs. This is
+  pre-bake resource preparation, not baker contract batching. Deletion condition: make it singular if
+  dynamic resource preparation stops sharing source geometry across sibling static-authored dynamic
+  recipes.
 
 ## Decisions And Course Corrections
 

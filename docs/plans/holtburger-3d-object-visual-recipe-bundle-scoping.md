@@ -3164,7 +3164,7 @@ Spicy bits and retained debt:
 
 ### Phase 19: Resolver Output Convergence
 
-Status: planned.
+Status: steered into Phase 19A through Phase 19C after inventory.
 
 Goal: make resolver/domain outputs and planner entry points converge on the normalized object visual
 recipe/sidecar DTO model across static object-like domains and dynamic visuals.
@@ -3176,6 +3176,9 @@ Context:
 - The dry run found concrete wrapper debt: dynamic visuals still adapt into
   `StaticObjectBatchPayload`, and static publication metadata still carries some draw-unit-shaped
   names for source mapping and residency bookkeeping.
+- The Phase 19 inventory confirmed those two debts should not be fixed in the same first slice:
+  source payload neutrality can be cut over before runtime-facing publication metadata is renamed or
+  reshaped.
 - The north star is not merely "resource providers are payload-scoped"; the resolver/domain output
   should describe texture recipes, material recipes, geometry recipes, part recipes, part instances,
   and explicit sidecars with dense local ids and inspectable key tables.
@@ -3213,11 +3216,12 @@ Deliverables:
 
 Task checklist:
 
-- Inventory every producer/consumer of `ObjectVisualRecipeBundle`, `ObjectVisualStaticScope`,
-  `ObjectVisualMaterialPlan`, static-object payloads, structured-interior payloads, dynamic visual
-  bake inputs, and publication metadata that still speaks in draw-unit-shaped terms.
-- Stop after the inventory for a steering checkpoint: confirm the neutral DTO type names, domain
-  conversion order, and split triggers before changing runtime-facing publication contracts.
+- Completed steering checkpoint: inventory every producer/consumer of `ObjectVisualRecipeBundle`,
+  `ObjectVisualStaticScope`, `ObjectVisualMaterialPlan`, static-object payloads,
+  structured-interior payloads, dynamic visual bake inputs, and publication metadata that still
+  speaks in draw-unit-shaped terms.
+- Confirmed neutral DTO type name, domain conversion order, and split triggers before changing
+  runtime-facing publication contracts.
 - Draft the DTO shape in code or types with dense numeric ids and semantic key tables; avoid
   hot-path string maps.
 - Convert one static object-like resolver path first, then structured interiors/env-cell static
@@ -3262,6 +3266,95 @@ Risks and mitigations:
 - Risk: static-authored dynamics and runtime-authored dynamics reveal real source-shape differences.
   Mitigation: keep the shared DTO for equivalent visual facts and carry provenance/source-specific
   facts as sidecars or compact `PartInstance.source`, not as separate baker pipelines.
+
+Inventory notes after Phase 19 checkpoint:
+
+- `ObjectVisualRecipeBundle` is already the ready visual graph shape, but the source facts feeding
+  expansion still flow through `StaticObjectBatchPayload`.
+- Dynamic visuals still call `createDynamicObjectVisualPayload(...)` to fabricate a
+  `StaticObjectBatchPayload` before calling `createStaticObjectVisualBundleExpansion(...)`.
+- Static object baking calls `createStaticObjectBatchPayload(...)` and then uses that shape for both
+  recipe expansion and renderer-legal partitioning.
+- Structured interiors already have a dedicated embedded-geometry bundle producer and should be
+  converted after the static/dynamic object-source DTO is neutral.
+- `ObjectVisualStaticPublicationMetadata` still has `directStaticObjectDrawUnits` and
+  `structuredInteriorDrawUnits`. Those names reflect runtime publication shape and should move after
+  the source DTO cutover proves the recipe/part-instance source vocabulary is stable.
+- The first concrete DTO name for the next slice is `ObjectVisualSourcePayload`. The old
+  `StaticObjectBatchPayload` name should disappear from dynamic paths first, then from static object
+  producers/partitioners.
+
+### Phase 19A: Neutral Object Visual Source Payload
+
+Status: planned.
+
+Goal: replace static-shaped source payload naming with a neutral object-visual source DTO for
+static-object-like and dynamic visual expansion/planning.
+
+Deliverables:
+
+- Introduce or rename the shared pre-expansion source DTO to `ObjectVisualSourcePayload` with dense
+  object/source/material arrays and sidecar-friendly landblock/residency facts.
+- Rename `createStaticObjectBatchPayload(...)` to a static-domain source-payload normalizer and make
+  dynamic visuals build the same neutral DTO without fabricating a static batch payload.
+- Rename static object bundle expansion and recipe planning entry points where they are now neutral,
+  while keeping renderer-legal partitioning behavior unchanged.
+- Keep generated-scenery instancing behavior unchanged in this slice; the goal is source DTO
+  neutrality, not publication policy.
+
+Acceptance criteria:
+
+- No dynamic visual path references `StaticObjectBatchPayload` or a static-object batch producer just
+  to reach object-visual planning/expansion.
+- Static object-like baking still partitions and publishes the same renderer output.
+- Tests, `check`, `lint:dead`, `format:check`, and a representative browser harness slice pass.
+
+### Phase 19B: Recipe Record Emission Convergence
+
+Status: planned.
+
+Goal: move resolver/domain output closer to explicit recipe records and sidecars instead of
+coordinator-owned source wrappers.
+
+Deliverables:
+
+- Make static object-like resolver outputs and dynamic visual planning inputs converge on explicit
+  texture, material, geometry, part recipe, and part instance vocabulary for equivalent facts.
+- Keep semantic string keys in key tables and construction/debug boundaries; bake-time lookup remains
+  numeric.
+- Convert structured interiors/env-cell static object visuals after the neutral source payload is in
+  place.
+
+Acceptance criteria:
+
+- Equivalent static and dynamic visual facts enter planning through isomorphic DTO fields.
+- Heavy geometry remains sidecar data keyed by dense/local geometry buffer ids and stable source
+  identities.
+- Unsupported materials remain lightweight non-renderable recipes with console skip behavior only.
+
+### Phase 19C: Publication Metadata Convergence And Instancing Reassessment
+
+Status: planned.
+
+Goal: rename or reshape draw-unit-shaped static publication metadata once source recipe records and
+part instances are the stable upstream vocabulary.
+
+Deliverables:
+
+- Replace `directStaticObjectDrawUnits` and `structuredInteriorDrawUnits` metadata names where they
+  no longer describe the producer contract.
+- Keep renderer install shells thin: runtime lifetime, pinning, and residency policy must not fork
+  resolver or baker planning.
+- Reassess generated-scenery instancing from repeated `PartInstance`/`PartRecipe` records and split a
+  follow-up if renderer constraints still require post-partition policy.
+
+Acceptance criteria:
+
+- Publication metadata names describe source/part-instance publication facts, not legacy flattened
+  draw-unit derivation.
+- Runtime selection/query behavior remains covered by tests or harness diagnostics.
+- Any remaining generated-scenery divergence is documented as renderer-policy driven, not wrapper
+  debt.
 
 ## Decisions And Course Corrections
 

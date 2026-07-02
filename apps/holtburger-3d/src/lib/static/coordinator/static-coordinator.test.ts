@@ -34,6 +34,7 @@ import type {
 	StaticLandblockSceneLodResolution,
 	StaticResolver,
 	StaticLandblockSceneLodSourceResolver,
+	StaticObjectGeometryStaticDrawUnit,
 	StaticObjectRenderInstance,
 	StaticObjectVisualResource,
 	StaticBakeTextureUse,
@@ -1228,6 +1229,54 @@ describe("static coordinator", () => {
 			.toEqual(["texture-use:retained"]);
 	});
 
+	it("commits object visual draw units only through the object visual install set", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
+		const deltas: StaticCoordinatorCommitDelta[] = [];
+		coordinator.subscribeCommits((commit) => deltas.push(commit.staticCommit));
+
+		const work = bakeTasksForDemand(
+			coordinator,
+			createSingleOutdoorObjectDemand(0xda55ffff),
+		).find((item) => item.domain === "outdoor-explicit-objects");
+		if (!work) {
+			throw new Error("Expected outdoor explicit object demand.");
+		}
+		resolver.completeSource(resolver.pendingSourceRequests[0]?.requestId ?? "");
+		await flushPromises();
+
+		const input = pendingBatchForTask(baker.pendingInputs, work.taskId);
+		const legacyDrawUnit = createStaticObjectDrawUnit(
+			"legacy-static-object-draw-unit",
+			work.scope.landblockId,
+			"outdoor-explicit-objects",
+		);
+		const publishedDrawUnit = createStaticObjectDrawUnit(
+			"published-static-object-draw-unit",
+			work.scope.landblockId,
+			"outdoor-explicit-objects",
+		);
+		baker.complete(input.bakeBatchId, {
+			drawUnits: [legacyDrawUnit],
+			objectVisualInstallSet: createObjectVisualInstallSet({
+				directDrawUnits: [publishedDrawUnit],
+			}),
+		});
+		await flushPromises();
+
+		expect(deltas).toHaveLength(1);
+		expect(deltas[0]?.addedDrawUnits).toEqual([]);
+		expect(deltas[0]?.objectVisualInstallSet.directDrawUnits).toEqual([
+			publishedDrawUnit,
+		]);
+		expect(coordinator.createSnapshot().committedDrawUnits).toBe(1);
+	});
+
 	it("records compact outdoor static object payload summaries", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
@@ -2181,6 +2230,49 @@ function createInvalidOwnerlessDrawUnit(drawUnitId: string): StaticDrawUnit {
 		drawUnitId,
 		kind: "ownerless-test-draw-unit",
 	} as unknown as StaticDrawUnit;
+}
+
+function createStaticObjectDrawUnit(
+	drawUnitId: string,
+	landblockId: number,
+	domain: StaticObjectGeometryStaticDrawUnit["domain"],
+): StaticObjectGeometryStaticDrawUnit {
+	return {
+		coordinateSpace: "landblock-render-local",
+		domain,
+		drawUnitId,
+		indexType: "uint16",
+		indices: new Uint16Array([0, 1, 2]),
+		kind: "static-object-geometry",
+		landblockId,
+		materialBucketKey: "shader:flat-color",
+		materialEntries: [],
+		materialFamily: "flat-color",
+		materialIds: [],
+		materialPass: "opaque",
+		materialSlotIndices: new Float32Array([0, 0, 0]),
+		ownership: {
+			kind: "outdoor-static-objects",
+			landblockId,
+			seedIdentities: [],
+		},
+		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 1]),
+		renderState: {
+			blendMode: "opaque",
+			cullMode: "back",
+			depthWrite: true,
+		},
+		sort: {
+			bucket: "opaque",
+			key: 0,
+		},
+		sourceMappingCoverage: [],
+		spatialRecord: null,
+		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
+		textureUseIds: [],
+		triangleCount: 1,
+		vertexCount: 3,
+	};
 }
 
 function createTerrainDrawUnit(

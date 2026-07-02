@@ -282,7 +282,6 @@ function createPlacementSnapshotForRecipe(
 				height: 16,
 				itemId: intent.itemId,
 				pageId: `${intent.purpose}:page:${index}`,
-				pool: intent.pool,
 				purpose: intent.purpose,
 				rect: [0, 0, 16, 16] as const,
 				textureRefId:

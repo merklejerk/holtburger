@@ -139,6 +139,7 @@ export function createStructuredInteriorTextureBindingRequirement(options: {
 }): TextureBindingRequirement {
 	return createStaticMaterialTextureBindingRequirement({
 		dataUse: options.dataUse,
+		domain: options.task.domain,
 		textureUseNamespace: "structured-interior-texture",
 		textureUseScopeId: options.task.ownerId,
 		wrapMode: options.wrapMode,

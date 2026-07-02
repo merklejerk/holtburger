@@ -82,6 +82,7 @@ describe("static material texture policy", () => {
 		const dataUse = createPreparedTextureUse("rgba-color");
 		const requirement = createStaticMaterialTextureBindingRequirement({
 			dataUse,
+			domain: "outdoor-generated-scenery",
 			textureUseNamespace: "static-object-texture",
 			textureUseScopeId: "static-object-layer-a",
 			wrapMode: "repeat",

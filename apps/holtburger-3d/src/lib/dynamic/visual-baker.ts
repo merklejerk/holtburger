@@ -25,7 +25,6 @@ import {
 } from "../visual/object-visual-material-planner";
 import { describeStaticObjectCanonicalGeometryIdentity } from "../static/objects/static-object-source-assets";
 import {
-	classifyTexturePlacementPool,
 	classifyTextureUsagePurpose,
 	createRuntimeAuthoredDynamicTexturePlacementBucketKey,
 	createStaticAuthoredDynamicTexturePlacementBucketKey,
@@ -284,7 +283,7 @@ function createDynamicTexturePlacementRequirement(options: {
 			placementBucketKey: createDynamicTexturePlacementBucketKey({
 				purpose: classifyTextureUsagePurpose(
 					options.requirement.dataUse,
-					classifyTexturePlacementPool(textureDomain),
+					textureDomain,
 				),
 				recipe: options.recipe,
 				textureDomain,

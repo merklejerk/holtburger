@@ -164,7 +164,6 @@ import {
 } from "../dynamic/visual-baker";
 import { createDynamicVisualBakeSourceGeometry } from "../dynamic/visual-bake-sidecars";
 import {
-	classifyTexturePlacementPool,
 	classifyTextureUsagePurpose,
 	createRuntimeAuthoredDynamicTexturePlacementBucketKey,
 	createStaticAuthoredDynamicTexturePlacementBucketKey,
@@ -4091,10 +4090,9 @@ function formatTextureAtlasBucketLabel(
 		return formatTextureAtlasDomainAxis(bucket.domain);
 	}
 
-	const [, bucketDomain, pool, purpose, lifetime] = parts;
+	const [, bucketDomain, purpose, lifetime] = parts;
 	return [
 		formatTextureAtlasDomainAxis(bucketDomain ?? bucket.domain),
-		...(pool ? [formatTextureAtlasPoolAxis(pool)] : []),
 		...(purpose ? [formatTextureAtlasPurposeAxis(purpose)] : []),
 		...(lifetime ? [formatTextureAtlasLifetimeAxis(lifetime)] : []),
 	].join(" / ");
@@ -4114,19 +4112,6 @@ function formatTextureAtlasDomainAxis(domain: string): string {
 			return "runtime-mat";
 		default:
 			return domain;
-	}
-}
-
-function formatTextureAtlasPoolAxis(pool: string): string {
-	switch (pool) {
-		case "runtime-authored-object":
-			return "rt-obj";
-		case "static-authored-object":
-			return "static-obj";
-		case "terrain":
-			return "terrain";
-		default:
-			return pool;
 	}
 }
 
@@ -4492,10 +4477,7 @@ function createDynamicTextureUsePlacementBucketKey(
 	source: DynamicTextureUseCommit["source"],
 ): TexturePlacementBucketKey {
 	const { retentionPolicy, textureDomain } = record.presentation.policy;
-	const purpose = classifyTextureUsagePurpose(
-		source,
-		classifyTexturePlacementPool(textureDomain),
-	);
+	const purpose = classifyTextureUsagePurpose(source, textureDomain);
 	if (textureDomain === "runtime-object-material") {
 		return createRuntimeAuthoredDynamicTexturePlacementBucketKey({
 			entityId: record.id,

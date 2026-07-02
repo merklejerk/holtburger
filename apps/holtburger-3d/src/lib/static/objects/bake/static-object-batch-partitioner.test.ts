@@ -475,7 +475,6 @@ describe("static object batch partitioner", () => {
 			intents.map((intent) => ({
 				affinityKey: intent.affinityKey,
 				itemId: intent.itemId,
-				pool: intent.pool,
 				purpose: intent.purpose,
 				textureUseId: intent.textureUseId,
 			})),
@@ -485,7 +484,6 @@ describe("static object batch partitioner", () => {
 				itemId: 0,
 				textureUseId:
 					"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
-				pool: "static-authored-object",
 				purpose: "object-base-color",
 			},
 			{
@@ -493,7 +491,6 @@ describe("static object batch partitioner", () => {
 				itemId: 1,
 				textureUseId:
 					"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000011:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
-				pool: "static-authored-object",
 				purpose: "object-base-color",
 			},
 		]);
@@ -1361,7 +1358,6 @@ function createTexturePlacementSnapshot(
 					height: 64,
 					itemId: index,
 					pageId,
-					pool: "static-authored-object" as const,
 					purpose: "object-base-color" as const,
 					rect: [0, 0, 64, 64] as const,
 					textureRefId: `texture-ref:${pageId}`,
@@ -1390,7 +1386,6 @@ function createTexturePlacementSnapshotForInput(
 					height: 64,
 					itemId: intent.itemId,
 					pageId: `${intent.purpose}:page:0`,
-					pool: intent.pool,
 					purpose: intent.purpose,
 					rect: [0, 0, 64, 64] as const,
 					textureRefId: `${intent.purpose}:texture-ref:0`,

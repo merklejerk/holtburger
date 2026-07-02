@@ -373,7 +373,6 @@ describe("browser landblock env-cell baker", () => {
 			intents.map((intent) => ({
 				affinityKey: intent.affinityKey,
 				itemId: intent.itemId,
-				pool: intent.pool,
 				purpose: intent.purpose,
 				textureUseId: intent.textureUseId,
 			})),
@@ -383,7 +382,6 @@ describe("browser landblock env-cell baker", () => {
 				itemId: 0,
 				textureUseId:
 					"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
-				pool: "static-authored-object",
 				purpose: "object-base-color",
 			},
 			{
@@ -391,7 +389,6 @@ describe("browser landblock env-cell baker", () => {
 				itemId: 1,
 				textureUseId:
 					"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000020:rgba-detail:sampling:wrap=repeat,repeat",
-				pool: "static-authored-object",
 				purpose: "object-detail",
 			},
 		]);
@@ -970,7 +967,6 @@ function createStructuredInteriorPlacementSnapshot(
 					pageId: options.uniquePages
 						? `${intent.purpose}:page:${index}`
 						: `${intent.purpose}:page:0`,
-					pool: intent.pool,
 					purpose: intent.purpose,
 					rect: [0, 0, 16, 16] as const,
 					textureRefId: options.uniquePages

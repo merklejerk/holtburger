@@ -2464,7 +2464,7 @@ describe("browser client runtime", () => {
 						samplerPolicyKey:
 							"sample=rgba-color;filter=nearest;mips=off;aniso=1",
 						textureRefId:
-							"texture-ref:outdoor-terrain:texture-placement-bucket|outdoor-terrain|terrain|terrain-color|static-authored:terrain-textured:prepared-texture:06000010",
+							"texture-ref:outdoor-terrain:texture-placement-bucket|outdoor-terrain|terrain-color|static-authored:terrain-textured:prepared-texture:06000010",
 					},
 				],
 				revision: 2,

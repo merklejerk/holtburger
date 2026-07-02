@@ -207,7 +207,6 @@ describe("terrain geometry baker", () => {
 				affinityKey: "terrain:terrain:0xda55ffff",
 				itemId:
 					"terrain:0xda55ffff:prepared-texture:terrain-base:rgba-color:06000010",
-				pool: "terrain",
 				purpose: "terrain-color",
 			}),
 		]);
@@ -406,7 +405,6 @@ function createTexturePlacementSnapshot(
 					pageId: options.uniqueColorPages
 						? `${intent.purpose}:page:${index}`
 						: `${intent.purpose}:page:0`,
-					pool: intent.pool,
 					purpose: intent.purpose,
 					rect: [0, 0, 16, 16] as const,
 					width: 16,

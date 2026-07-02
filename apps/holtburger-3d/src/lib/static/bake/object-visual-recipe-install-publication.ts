@@ -104,6 +104,7 @@ function createPublicationPartitionKeys(
 
 function createTextureBindings(input: {
 	readonly bundle: ObjectVisualRecipeBundle;
+	readonly domain: StaticBakeTextureUse["domain"];
 	readonly texturePlacementSnapshot: ObjectVisualTexturePlacementSnapshot;
 	readonly textureUseNamespace: string;
 	readonly textureUseScopeId: string;
@@ -115,6 +116,7 @@ function createTextureBindings(input: {
 	for (const [textureRecipeId, recipe] of input.bundle.textureRecipes) {
 		const requirement = createStaticMaterialTextureBindingRequirement({
 			dataUse: recipe.dataUse,
+			domain: input.domain,
 			textureUseNamespace: input.textureUseNamespace,
 			textureUseScopeId: input.textureUseScopeId,
 			wrapMode: recipe.wrapMode,

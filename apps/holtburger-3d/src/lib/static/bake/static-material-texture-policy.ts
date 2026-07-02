@@ -1,10 +1,10 @@
 import type {
 	MaterialTextureDataUseIdentity,
 	StaticBakeTextureSamplingPolicy,
+	VisualTextureDomain,
 } from "../contracts";
 import type {
 	TextureBindingRequirement,
-	TexturePlacementPool,
 	TexturePlacementSource,
 } from "../../textures/placement";
 import { classifyTextureUsagePurpose } from "../../textures/placement";
@@ -55,10 +55,8 @@ export function createStaticMaterialTextureBindingRequirement(options: {
 	readonly textureUseNamespace: string;
 	readonly textureUseScopeId: string;
 	readonly wrapMode: StaticMaterialTextureWrapMode;
-	readonly pool?: Extract<
-		TexturePlacementPool,
-		"runtime-authored-object" | "static-authored-object"
-	>;
+	/** Renderer texture domain used to derive the shader/page purpose. */
+	readonly domain: VisualTextureDomain;
 }): TextureBindingRequirement {
 	const samplingPolicy = createStaticMaterialTextureSamplingPolicy({
 		dataUse: options.dataUse,
@@ -72,10 +70,7 @@ export function createStaticMaterialTextureBindingRequirement(options: {
 		// The equality is now local to this bridge rather than ambient pipeline state.
 		placementItemId: bindingKey,
 		textureUseId: bindingKey,
-		purpose: classifyTextureUsagePurpose(
-			options.dataUse,
-			options.pool ?? "static-authored-object",
-		),
+		purpose: classifyTextureUsagePurpose(options.dataUse, options.domain),
 		samplingPolicy,
 		source: createStaticMaterialTexturePlacementSource(
 			options.dataUse,

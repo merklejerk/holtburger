@@ -37,7 +37,7 @@ describe("dynamic visual contracts", () => {
 				purpose: "object-base-color",
 			}),
 		).toBe(
-			"texture-placement-bucket|outdoor-buildings|static-authored-object|object-base-color|static-authored-dynamic:outdoor-buildings:0xda55ffff",
+			"texture-placement-bucket|outdoor-buildings|object-base-color|static-authored-dynamic:outdoor-buildings:0xda55ffff",
 		);
 		expect(
 			createRuntimeAuthoredDynamicTexturePlacementBucketKey({
@@ -45,7 +45,7 @@ describe("dynamic visual contracts", () => {
 				purpose: "object-base-color",
 			}),
 		).toBe(
-			"texture-placement-bucket|runtime-object-material|runtime-authored-object|object-base-color|runtime-authored-dynamic:runtime-dynamic:1",
+			"texture-placement-bucket|runtime-object-material|object-base-color|runtime-authored-dynamic:runtime-dynamic:1",
 		);
 	});
 

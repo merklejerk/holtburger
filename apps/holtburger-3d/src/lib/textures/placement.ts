@@ -15,12 +15,6 @@ export type TextureUsagePurpose =
 	| "terrain-detail"
 	| "terrain-mask";
 
-/** TextureManager pool that separates incompatible atlas policy and churn profiles. */
-export type TexturePlacementPool =
-	| "runtime-authored-object"
-	| "static-authored-object"
-	| "terrain";
-
 /** Opaque atlas allocation namespace for compatible placement reuse. */
 export type TexturePlacementBucketKey = string & {
 	readonly __texturePlacementBucketKey: unique symbol;
@@ -107,8 +101,6 @@ export interface TexturePlacementIntent<
 	readonly domain: VisualTextureDomain;
 	/** Page compatibility and shader role for the item. */
 	readonly purpose: TextureUsagePurpose;
-	/** Atlas policy/churn pool the item belongs to. */
-	readonly pool: TexturePlacementPool;
 	/** Opaque packer clustering hint owned by the caller. */
 	readonly affinityKey: string | null;
 	/** Prepared/material source facts needed to build atlas pixels. */
@@ -122,7 +114,6 @@ export interface TexturePlacement<
 	readonly itemId: TPlacementItemId;
 	readonly textureUseId: string;
 	readonly purpose: TextureUsagePurpose;
-	readonly pool: TexturePlacementPool;
 	/** Renderer texture page identity used for shader binding legality. */
 	readonly textureRefId: string;
 	/** Packer-local page id retained for diagnostics. Not globally unique. */
@@ -224,8 +215,10 @@ export function createStaticTexturePlacementIntent(
 	textureUse: StaticBakeTextureUse,
 	options: TexturePlacementIntentOptions = {},
 ): TexturePlacementIntent {
-	const pool = classifyTexturePlacementPool(textureUse.domain);
-	const purpose = classifyTextureUsagePurpose(textureUse.source, pool);
+	const purpose = classifyTextureUsagePurpose(
+		textureUse.source,
+		textureUse.domain,
+	);
 	return {
 		affinityKey: options.affinityKey ?? null,
 		domain: textureUse.domain,
@@ -238,7 +231,6 @@ export function createStaticTexturePlacementIntent(
 				lifetime: { kind: "static-authored" },
 				purpose,
 			}),
-		pool,
 		purpose,
 		source: createTexturePlacementMaterialSource(
 			textureUse.source,
@@ -263,8 +255,10 @@ export function createDynamicTexturePlacementIntent(
 	textureUse: DynamicTexturePlacementUse,
 	options: TexturePlacementIntentOptions = {},
 ): TexturePlacementIntent {
-	const pool = classifyTexturePlacementPool(textureUse.textureDomain);
-	const purpose = classifyTextureUsagePurpose(textureUse.source, pool);
+	const purpose = classifyTextureUsagePurpose(
+		textureUse.source,
+		textureUse.textureDomain,
+	);
 	if (!options.placementBucketKey) {
 		throw new Error(
 			"Dynamic texture placement intents require an explicit placement bucket key.",
@@ -276,7 +270,6 @@ export function createDynamicTexturePlacementIntent(
 		itemId: textureUse.textureUseId,
 		textureUseId: textureUse.textureUseId,
 		placementBucketKey: options.placementBucketKey,
-		pool,
 		purpose,
 		source: createTexturePlacementMaterialSource(
 			textureUse.source,
@@ -335,33 +328,19 @@ export function createRuntimeAuthoredDynamicTexturePlacementBucketKey(input: {
 export function createTexturePlacementBucketKey(
 	input: TexturePlacementBucketInput,
 ): TexturePlacementBucketKey {
-	const pool = classifyTexturePlacementPool(input.domain);
 	return [
 		"texture-placement-bucket",
 		input.domain,
-		pool,
 		input.purpose,
 		createTexturePlacementBucketLifetimeKey(input.lifetime),
 	].join("|") as TexturePlacementBucketKey;
 }
 
-export function classifyTexturePlacementPool(
-	domain: VisualTextureDomain,
-): TexturePlacementPool {
-	if (domain === "outdoor-terrain") {
-		return "terrain";
-	}
-	if (domain === "runtime-object-material") {
-		return "runtime-authored-object";
-	}
-	return "static-authored-object";
-}
-
 export function classifyTextureUsagePurpose(
 	source: MaterialTextureDataUseIdentity,
-	pool: TexturePlacementPool,
+	domain: VisualTextureDomain,
 ): TextureUsagePurpose {
-	if (pool === "terrain") {
+	if (domain === "outdoor-terrain") {
 		return classifyTerrainTextureUsagePurpose(source);
 	}
 	return classifyObjectTextureUsagePurpose(source);

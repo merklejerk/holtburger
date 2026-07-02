@@ -47,7 +47,6 @@ import {
 	type RuntimeTextureSamplerPolicy,
 } from "./sampling-policy";
 import {
-	classifyTexturePlacementPool,
 	classifyTextureUsagePurpose,
 	createTexturePlacementBucketKey,
 	createTexturePlacementItemId,
@@ -57,7 +56,6 @@ import {
 	type TexturePlacementBucketKey,
 	type TexturePlacementLookupId,
 	type TexturePlacementIntent,
-	type TexturePlacementPool,
 	type TextureResourceDependencies,
 	type TexturePlacementSnapshot,
 	type TextureUsagePurpose,
@@ -99,7 +97,6 @@ export interface TexturePlacementReferenceSnapshot {
 	readonly freeable: boolean;
 	readonly itemId: string;
 	readonly pageId: string;
-	readonly pool: TexturePlacementPool;
 	readonly purpose: TextureUsagePurpose;
 	readonly rect: readonly [number, number, number, number];
 }
@@ -419,7 +416,6 @@ export class TextureManager {
 				freeable: record.activeReferenceCount === 0,
 				itemId: record.itemId,
 				pageId: record.pageId,
-				pool: record.pool,
 				purpose: record.purpose,
 				rect: record.rect,
 			}))
@@ -918,10 +914,9 @@ export class TextureManager {
 					mipmapsGenerated: group.samplerPolicy.generateMipmaps,
 					pageId,
 					placementRevision,
-					pool: classifyTexturePlacementPool(entry.domain),
 					purpose: classifyTextureUsagePurpose(
 						entry.textureUse.source,
-						classifyTexturePlacementPool(entry.domain),
+						entry.domain,
 					),
 					rect: rect.rect,
 					runtimePlacement: {
@@ -1011,7 +1006,6 @@ export class TextureManager {
 			height: entry.textureHeight,
 			itemId,
 			pageId: entry.pageId,
-			pool: entry.pool,
 			purpose: entry.purpose,
 			rect: entry.rect,
 			textureRefId: entry.textureRefId,
@@ -1159,7 +1153,6 @@ interface VisualTextureRegistryEntry {
 	readonly textureRefId: string;
 	readonly pageId: string;
 	readonly placementRevision: number;
-	readonly pool: TexturePlacementPool;
 	readonly purpose: TextureUsagePurpose;
 	mipmapsGenerated: boolean;
 	readonly sampleClass: RuntimeTexturePagePolicy["sampleClass"];
@@ -1178,7 +1171,6 @@ interface TexturePlacementRecord {
 	readonly height: number;
 	readonly itemId: string;
 	readonly pageId: string;
-	readonly pool: TexturePlacementPool;
 	readonly purpose: TextureUsagePurpose;
 	readonly rect: readonly [number, number, number, number];
 	readonly textureRefId: string;
@@ -1278,8 +1270,10 @@ interface ObjectMaterialRolePageSlotInput {
 function createStaticVisualTextureUseCommit(
 	textureUse: StaticBakeTextureUse,
 ): VisualTextureUseCommit {
-	const pool = classifyTexturePlacementPool(textureUse.domain);
-	const purpose = classifyTextureUsagePurpose(textureUse.source, pool);
+	const purpose = classifyTextureUsagePurpose(
+		textureUse.source,
+		textureUse.domain,
+	);
 	return {
 		domain: textureUse.domain,
 		owners: textureUse.owners,
@@ -1331,7 +1325,6 @@ function toPlannedTexturePlacement<
 		height: entry.textureHeight,
 		itemId,
 		pageId: entry.pageId,
-		pool: entry.pool,
 		purpose: entry.purpose,
 		rect: entry.rect,
 		textureRefId: entry.textureRefId,
@@ -1374,14 +1367,15 @@ function createRegistryEntryAliasForPagePolicy(
 	pagePolicy: RuntimeTexturePagePolicy,
 	textureUse: VisualTextureUseCommit,
 ): VisualTextureRegistryEntry {
-	const pool = classifyTexturePlacementPool(textureUse.domain);
 	if (entry.wrapS === pagePolicy.wrapS && entry.wrapT === pagePolicy.wrapT) {
 		return {
 			...entry,
 			itemId: textureUse.textureUseId,
 			leaseCount: 0,
-			pool,
-			purpose: classifyTextureUsagePurpose(textureUse.source, pool),
+			purpose: classifyTextureUsagePurpose(
+				textureUse.source,
+				textureUse.domain,
+			),
 			source: textureUse.source,
 		};
 	}
@@ -1390,8 +1384,7 @@ function createRegistryEntryAliasForPagePolicy(
 		...entry,
 		itemId: textureUse.textureUseId,
 		leaseCount: 0,
-		pool,
-		purpose: classifyTextureUsagePurpose(textureUse.source, pool),
+		purpose: classifyTextureUsagePurpose(textureUse.source, textureUse.domain),
 		source: textureUse.source,
 		wrapS: pagePolicy.wrapS,
 		wrapT: pagePolicy.wrapT,

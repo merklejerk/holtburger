@@ -2,7 +2,7 @@ import { createEmptyStaticBakeJobResources } from "../../bake/resources";
 import { requirePreparedRenderGeometryBuffers } from "../../../assets/preparation/prepared-render-geometry";
 import { objectVisualGeometryBufferId } from "../../../visual/object-visual-recipe-bundle";
 import type {
-	EnvCellCellStructureGeometryAttachment,
+	EnvCellCellStructureGeometrySidecar,
 	EnvCellCellStructureGeometryIdentity,
 	LandblockEnvCellStaticFacts,
 	StaticBakeResourceProvider,
@@ -32,13 +32,13 @@ export class EnvCellSystemGeometryResourceProvider implements StaticBakeResource
 				);
 				if (!cell) {
 					throw new Error(
-						`Missing env-cell geometry attachment ${describeEnvCellCellStructureGeometryIdentity(
+						`Missing env-cell geometry sidecar ${describeEnvCellCellStructureGeometryIdentity(
 							identity,
 						)} in resolved landblock-scene-lod payload.`,
 					);
 				}
 
-				return createEnvCellCellStructureGeometryAttachment({
+				return createEnvCellCellStructureGeometrySidecar({
 					bufferId: objectVisualGeometryBufferId(bufferIndex),
 					cell,
 					identity,
@@ -123,16 +123,16 @@ function createFullEnvCellsByIdentity(
 	return cellsByIdentity;
 }
 
-function createEnvCellCellStructureGeometryAttachment(options: {
+function createEnvCellCellStructureGeometrySidecar(options: {
 	readonly bufferId: ReturnType<typeof objectVisualGeometryBufferId>;
 	readonly identity: EnvCellCellStructureGeometryIdentity;
 	readonly cell: LandblockEnvCellStaticFacts;
-}): EnvCellCellStructureGeometryAttachment {
+}): EnvCellCellStructureGeometrySidecar {
 	const renderGeometry = options.cell
 		.renderGeometry as EnvCellSystemLayerSourcePayloadDto["envCells"][number]["renderGeometry"];
 	requirePreparedRenderGeometryBuffers(
 		renderGeometry,
-		`Env-cell geometry attachment ${describeEnvCellCellStructureGeometryIdentity(
+		`Env-cell geometry sidecar ${describeEnvCellCellStructureGeometryIdentity(
 			options.identity,
 		)}.renderGeometry`,
 	);

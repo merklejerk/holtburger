@@ -9,7 +9,7 @@ import type { DynamicEntityRecipe, DynamicVisualBakeInput } from "./contracts";
 import type { StaticObjectCanonicalGeometryIdentity } from "../static/contracts";
 import { objectVisualGeometryBufferId } from "../visual/object-visual-recipe-bundle";
 import {
-	createStaticObjectSourceGeometryAttachment,
+	createStaticObjectSourceGeometrySidecar,
 	describeStaticObjectCanonicalGeometryIdentity,
 	getStaticObjectCanonicalGeometryIdentity,
 } from "../static/objects/static-object-source-assets";
@@ -23,7 +23,7 @@ export async function createDynamicVisualBakeSourceGeometry(
 		identities.map(async (identity, bufferIndex) => {
 			if (identity.gfxObj.sourceAssetKind !== "gfx-obj") {
 				throw new Error(
-					`Dynamic visual geometry attachment ${describeStaticObjectCanonicalGeometryIdentity(
+					`Dynamic visual geometry sidecar ${describeStaticObjectCanonicalGeometryIdentity(
 						identity,
 					)} expected gfx-obj source, got ${identity.gfxObj.sourceAssetKind}.`,
 				);
@@ -32,7 +32,7 @@ export async function createDynamicVisualBakeSourceGeometry(
 			const asset = await assetReader.requestPreparedAsset(key);
 			const payload = requireGfxObjPayload(asset.payload, key);
 
-			return createStaticObjectSourceGeometryAttachment({
+			return createStaticObjectSourceGeometrySidecar({
 				bufferId: objectVisualGeometryBufferId(bufferIndex),
 				gfxObj: payload,
 				identity,
@@ -78,14 +78,14 @@ function requireGfxObjPayload(
 		payload.kind !== "gfx-obj"
 	) {
 		throw new Error(
-			`Dynamic visual geometry attachment expected gfx-obj payload for ${describeHostAssetKey(
+			`Dynamic visual geometry sidecar expected gfx-obj payload for ${describeHostAssetKey(
 				key,
 			)}.`,
 		);
 	}
 	return requirePreparedGfxObjPayload(
 		payload as GfxObjPayloadDto,
-		`Dynamic visual geometry attachment ${describeHostAssetKey(
+		`Dynamic visual geometry sidecar ${describeHostAssetKey(
 			key,
 		)}.renderGeometry`,
 	);

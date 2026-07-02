@@ -1,6 +1,6 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation complete through Phase 17. Residual cleanup and profiling follow-ups remain
+Status: implementation complete through Phase 18. Residual cleanup and profiling follow-ups remain
 tracked in the phase notes below.
 
 ## Purpose
@@ -1930,9 +1930,9 @@ Acceptance criteria:
 Implementation notes after Phase 9I:
 
 - The previous Phase 9I combined too many independent seams: static object geometry buffer expansion
-  from `StaticObjectSourceGeometryAttachment`, material-plan-to-recipe mapping, static publication
+  from `StaticObjectSourceGeometrySidecar`, material-plan-to-recipe mapping, static publication
   metadata synthesis, generated-scenery resource grouping, and structured-interior embedded geometry
-  expansion from `EnvCellCellStructureGeometryAttachment`.
+  expansion from `EnvCellCellStructureGeometrySidecar`.
 - Static object transforms can reuse the legacy proven matrix rule:
   object local placement, then part default placements, then object/source part scale. That rule
   should move into the recipe producer so `PartInstance.transform` remains the only geometry
@@ -1991,7 +1991,7 @@ Implementation notes after Phase 9J:
 - Added
   `apps/holtburger-3d/src/lib/static/objects/bake/static-object-visual-bundle-producer.ts` as the
   recipe-first static object bundle expansion producer.
-- The producer consumes `StaticObjectBatchPayload` plus `StaticObjectSourceGeometryAttachment`
+- The producer consumes `StaticObjectBatchPayload` plus `StaticObjectSourceGeometrySidecar`
   buffers and emits `ObjectVisualBundleResolution` plus source-local geometry buffers. It does not
   invoke the legacy static draw-unit/resource baker.
 - Direct `gfx_obj` and setup-model source facts now expand into geometry recipes, material recipes,
@@ -2077,7 +2077,7 @@ publication metadata.
 
 Deliverables:
 
-- Expand `EnvCellCellStructureGeometryAttachment` buffers into embedded-geometry recipes and
+- Expand `EnvCellCellStructureGeometrySidecar` buffers into embedded-geometry recipes and
   geometry buffer sidecars.
 - Emit structured-interior `PartInstance` records with env-cell residency and local placement
   transforms.
@@ -2107,7 +2107,7 @@ Implementation notes after Phase 9L:
   `apps/holtburger-3d/src/lib/static/env-cells/bake/structured-interior-visual-bundle-producer.ts`
   as the recipe-first structured-interior bundle expansion producer.
 - The producer consumes a single `LandblockEnvCellStaticFacts` plus
-  `EnvCellCellStructureGeometryAttachment` sidecars and emits an embedded-geometry visual
+  `EnvCellCellStructureGeometrySidecar` sidecars and emits an embedded-geometry visual
   resolution, source-local geometry buffers, and structured-interior publication metadata.
 - Structured-interior part instances now carry env-cell residency and use the env-cell local
   placement as the only transform from source-local cell-structure geometry into render-local
@@ -3006,7 +3006,7 @@ Spicy bits and retained debt:
 - Resource providers are now payload-scoped, but the deeper north-star model still wants resolver
   output records/sidecars to own more of this shape directly. This phase avoided reintroducing merged
   baker attachments, but it did not complete the full resolver-output DTO model.
-- `StaticObjectSourceGeometryAttachment` and `EnvCellCellStructureGeometryAttachment` type names
+- `StaticObjectSourceGeometrySidecar` and `EnvCellCellStructureGeometrySidecar` type names
   remain because those are concrete geometry sidecar record names. They are no longer multi-payload
   bake attachment bags.
 - Source-ready groups currently drain sequentially through the baker when the baker promise is
@@ -3050,7 +3050,7 @@ Risks and mitigations:
 
 ### Phase 18: Cleanup And Route Audit
 
-Status: planned.
+Status: completed.
 
 Goal: remove the bounded cleanup debt left after the bake-job cutover before starting the deeper
 resolver-output convergence work.
@@ -3131,6 +3131,36 @@ Risks and mitigations:
 - Risk: harness startup cleanup turns into installer/shell-wrapper restructuring.
   Mitigation: keep this phase to the programmatic browser harness path unless investigation proves
   the wrappers are the root cause.
+
+Implementation notes:
+
+- Object-visual resolver/material-planning paths were audited for pixel-bearing texture route usage.
+  The current object-like paths already rely on `render-surface-metadata` and `palette-metadata` for
+  authoring recipe facts. Terrain still resolves texel-bearing routes, but terrain remains outside
+  the object visual recipe graph.
+- Geometry sidecar vocabulary was cut over in code: the static, dynamic, and structured-interior
+  geometry carrier types and helpers now use `Sidecar` names, and the dynamic bake sidecar module no
+  longer uses the old attachment filename.
+- Static object bake diagnostics no longer report flattened draw-unit triangle, vertex, or typed
+  array byte estimates. The remaining bake diagnostics focus on source counts, partition counts, and
+  instancing/avoidance counters that still describe current behavior.
+- The programmatic browser harness now probes the default browser URL before spawning Vite. A
+  compatible already-running Vite server is reused instead of spawning a second process that prints a
+  misleading strict-port warning.
+- Validation passed with focused sidecar/baker/coordinator tests, `lint:dead`, `check`,
+  `format:check`, a terrain browser harness slice, and a second terrain harness run that reused an
+  already-running Vite server.
+
+Spicy bits and retained debt:
+
+- Publication metadata still contains draw-unit-shaped source mapping and residency records. That is
+  deliberate Phase 19 debt because it touches runtime selection/query contracts, not just cleanup
+  naming.
+- Dynamic visuals still adapt through static-object payload shape to reach object-visual expansion.
+  Phase 18 did not touch that path beyond geometry sidecar vocabulary; Phase 19 owns the clean DTO
+  convergence.
+- Terrain still has pixel-route palette/render-surface resolution. That is acceptable for this
+  phase, but it should stay visibly out of the object visual model unless terrain is redesigned.
 
 ### Phase 19: Resolver Output Convergence
 
@@ -3411,6 +3441,30 @@ legacy draw-unit/resource buckets after the unified baker runs. That would hide 
 the installer instead of deleting it.
 Mitigation: introduce a shared object visual install publication shape and require domain shells
 to route/publish that shape rather than reconstruct visual payloads from legacy buckets.
+
+14. Geometry sidecar vocabulary.
+
+The current code should use `Sidecar` for source-local geometry records supplied across resolver,
+pre-bake, and baker boundaries. `Attachment` now describes the retired merged-bake-bag vocabulary
+and should not be reintroduced for object visual geometry carriers.
+Mitigation: keep sidecar names in contracts, helpers, tests, and dynamic bake modules; use
+`lint:dead` and search audits to catch stale aliases.
+
+15. Flattened draw-unit diagnostics.
+
+Flattened triangle, vertex, and byte-estimate bake diagnostics preserve the old draw-unit-first
+mental model without proving current rendering behavior. Source counts, partition counts, and
+instancing/avoidance counters are sufficient until a concrete diagnostic consumer needs more.
+Mitigation: delete the flattened counters now and rebuild diagnostics from recipe/publication data
+later if needed.
+
+16. Harness port handling.
+
+The programmatic browser harness should own dev-server readiness, not rely on shell wrappers or
+ignore strict-port noise. Reusing a compatible existing Vite server before spawning keeps validation
+output readable and avoids false suspicion during repeated runs.
+Mitigation: probe the browser URL before spawning Vite and keep wrapper/installer restructuring out
+of Phase 18 unless evidence shows the wrapper is the root cause.
 
 ## Definition Of Done
 

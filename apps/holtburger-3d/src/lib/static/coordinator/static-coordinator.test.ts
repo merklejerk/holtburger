@@ -120,7 +120,7 @@ describe("static coordinator", () => {
 		});
 	});
 
-	it("marks layer tasks failed when bake attachment creation fails", async () => {
+	it("marks layer tasks failed when bake sidecar creation fails", async () => {
 		const consoleError = vi
 			.spyOn(console, "error")
 			.mockImplementation(() => {});
@@ -1850,11 +1850,8 @@ function createStaticObjectBakeDiagnostics(): StaticObjectBakeDiagnostics {
 		drawUnitCount: 1,
 		estimatedAvoidedFlattenedTriangleCount: 0,
 		estimatedAvoidedFlattenedTypedArrayBytes: 0,
-		estimatedFlattenedTypedArrayBytes: 78,
 		estimatedInstancedSourceTypedArrayBytes: 0,
 		explicitObjectCount: 0,
-		flattenedTriangleCount: 1,
-		flattenedVertexCount: 3,
 		generatedInstanceCount: 1,
 		instancedRenderInstanceCount: 0,
 		instancedSourceTriangleCount: 0,

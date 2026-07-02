@@ -19,7 +19,7 @@ import type {
 	MaterialTextureDataUseIdentity,
 	StaticObjectPartMaterialSlotFacts,
 	StaticObjectSourceAssetFacts,
-	StaticObjectSourceGeometryAttachment,
+	StaticObjectSourceGeometrySidecar,
 } from "../static/contracts";
 import {
 	type ObjectVisualMaterialFallbackReason,
@@ -138,7 +138,7 @@ function bakeDynamicVisualRecipe(options: {
 	readonly recipe: DynamicVisualBakeInput["recipes"][number];
 	readonly sourceGeometryByKey: ReadonlyMap<
 		string,
-		StaticObjectSourceGeometryAttachment
+		StaticObjectSourceGeometrySidecar
 	>;
 	readonly texturePlacementSnapshot: DynamicVisualBakeInput["texturePlacementSnapshot"];
 	readonly texturePlanning: DynamicVisualTexturePlanning | null;
@@ -382,12 +382,12 @@ function requireDynamicVisualTexturePlanning(options: {
 }
 
 function createSourceGeometryIndex(
-	attachments: readonly StaticObjectSourceGeometryAttachment[],
-): ReadonlyMap<string, StaticObjectSourceGeometryAttachment> {
+	sidecars: readonly StaticObjectSourceGeometrySidecar[],
+): ReadonlyMap<string, StaticObjectSourceGeometrySidecar> {
 	return new Map(
-		attachments.map((attachment) => [
-			describeStaticObjectCanonicalGeometryIdentity(attachment.identity),
-			attachment,
+		sidecars.map((sidecar) => [
+			describeStaticObjectCanonicalGeometryIdentity(sidecar.identity),
+			sidecar,
 		]),
 	);
 }

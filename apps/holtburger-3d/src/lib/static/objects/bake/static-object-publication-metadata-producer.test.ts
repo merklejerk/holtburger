@@ -34,7 +34,9 @@ describe("static object publication metadata producer", () => {
 			objectKind: "explicit-object",
 		});
 		const expansion = createStaticObjectVisualBundleExpansion({
-			attachments: { staticObjectSourceGeometry: [createGeometryAttachment()] },
+			geometrySidecars: {
+				staticObjectSourceGeometry: [createGeometrySidecar()],
+			},
 			payload,
 		});
 		expect(expansion.resolution.kind).toBe("ready");
@@ -80,7 +82,9 @@ describe("static object publication metadata producer", () => {
 			objectKind: "generated-scenery",
 		});
 		const expansion = createStaticObjectVisualBundleExpansion({
-			attachments: { staticObjectSourceGeometry: [createGeometryAttachment()] },
+			geometrySidecars: {
+				staticObjectSourceGeometry: [createGeometrySidecar()],
+			},
 			payload,
 		});
 		expect(expansion.resolution.kind).toBe("ready");
@@ -177,10 +181,10 @@ describe("static object publication metadata producer", () => {
 	it("keeps duplicate part indices distinct across source geometry identities", () => {
 		const payload = createPayloadWithDuplicatePartIndex();
 		const expansion = createStaticObjectVisualBundleExpansion({
-			attachments: {
+			geometrySidecars: {
 				staticObjectSourceGeometry: [
-					createGeometryAttachment(),
-					createGeometryAttachmentForSource(0x01000002),
+					createGeometrySidecar(),
+					createGeometrySidecarForSource(0x01000002),
 				],
 			},
 			payload,
@@ -379,14 +383,14 @@ function createOwner(
 	};
 }
 
-function createGeometryAttachment() {
+function createGeometrySidecar() {
 	return {
 		buffer: createGeometryBuffer(),
 		identity: TEST_GEOMETRY.canonical,
 	};
 }
 
-function createGeometryAttachmentForSource(sourceDid: number) {
+function createGeometrySidecarForSource(sourceDid: number) {
 	const source: StaticObjectSourceIdentity = {
 		kind: "static-object-source",
 		sourceAssetKind: "gfx-obj",

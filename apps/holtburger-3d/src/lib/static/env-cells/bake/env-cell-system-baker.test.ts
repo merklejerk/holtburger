@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type {
-	EnvCellCellStructureGeometryAttachment,
+	EnvCellCellStructureGeometrySidecar,
 	LandblockEnvCellStaticFacts,
 	EnvCellSystemStaticScopePayload,
 	RegionDetailRoleFacts,
@@ -213,7 +213,7 @@ describe("browser landblock env-cell baker", () => {
 		]);
 	});
 
-	it("requires full geometry attachments for renderable cell structures", () => {
+	it("requires full geometry sidecars for renderable cell structures", () => {
 		const input = createInputWithRenderableCellStructure();
 
 		expect(() => bakeEnvCellSystem(input)).toThrow(
@@ -230,7 +230,7 @@ describe("browser landblock env-cell baker", () => {
 		const result = bakeEnvCellSystem({
 			...input,
 			resources: {
-				envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
+				envCellCellStructureGeometry: [createGeometrySidecar(envCell)],
 				staticObjectSourceGeometry: [],
 			},
 			texturePlacementSnapshot:
@@ -268,7 +268,7 @@ describe("browser landblock env-cell baker", () => {
 		const result = bakeEnvCellSystem({
 			...input,
 			resources: {
-				envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
+				envCellCellStructureGeometry: [createGeometrySidecar(envCell)],
 				staticObjectSourceGeometry: [],
 			},
 			texturePlacementSnapshot:
@@ -356,7 +356,7 @@ describe("browser landblock env-cell baker", () => {
 		const result = bakeEnvCellSystem({
 			...input,
 			resources: {
-				envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
+				envCellCellStructureGeometry: [createGeometrySidecar(envCell)],
 				staticObjectSourceGeometry: [],
 			},
 			texturePlacementSnapshot:
@@ -411,7 +411,7 @@ describe("browser landblock env-cell baker", () => {
 			bakeEnvCellSystem({
 				...input,
 				resources: {
-					envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
+					envCellCellStructureGeometry: [createGeometrySidecar(envCell)],
 					staticObjectSourceGeometry: [],
 				},
 			}),
@@ -442,7 +442,7 @@ describe("browser landblock env-cell baker", () => {
 		const result = bakeEnvCellSystem({
 			...input,
 			resources: {
-				envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
+				envCellCellStructureGeometry: [createGeometrySidecar(envCell)],
 				staticObjectSourceGeometry: [],
 			},
 			texturePlacementSnapshot:
@@ -497,7 +497,7 @@ describe("browser landblock env-cell baker", () => {
 			...input,
 			resources: {
 				envCellCellStructureGeometry: [
-					createGeometryAttachment(envCell, {
+					createGeometrySidecar(envCell, {
 						positions: new Float32Array([0, 1, 0, 0, 0, 1, 1, 0, 0]),
 					}),
 				],
@@ -790,7 +790,7 @@ function expectNumbersClose(
 	}
 }
 
-function createGeometryAttachment(
+function createGeometrySidecar(
 	envCell: LandblockEnvCellStaticFacts,
 	options: {
 		readonly positions?: Float32Array;
@@ -798,7 +798,7 @@ function createGeometryAttachment(
 		readonly triangles?: readonly ObjectVisualGeometryTriangle[];
 		readonly uvs?: Float32Array;
 	} = {},
-): EnvCellCellStructureGeometryAttachment {
+): EnvCellCellStructureGeometrySidecar {
 	const positions =
 		options.positions ?? new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
 	const triangles = options.triangles ?? [

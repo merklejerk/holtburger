@@ -5,7 +5,7 @@ import type {
 	StaticBakeTextureSamplingPolicy,
 	StaticAuthoredDynamicPlacementRecord,
 	StaticBounds,
-	StaticObjectSourceGeometryAttachment,
+	StaticObjectSourceGeometrySidecar,
 	StaticObjectMaterialSourceFacts,
 	StaticObjectPaletteSourceFacts,
 	StaticObjectPartMaterialSlotFacts,
@@ -239,7 +239,7 @@ export interface DynamicVisualBakeInput {
 	readonly recipes: readonly DynamicEntityRecipe[];
 	readonly revision: number;
 	/** Geometry buffers required by the baker; prepared before crossing the bake boundary. */
-	readonly sourceGeometry: readonly StaticObjectSourceGeometryAttachment[];
+	readonly sourceGeometry: readonly StaticObjectSourceGeometrySidecar[];
 	/** Texture placements assigned before baking so baked resources can declare legal dependencies. */
 	readonly texturePlacementSnapshot: ObjectVisualTexturePlacementSnapshot;
 	/** Material planning results produced during pre-bake texture placement discovery. */

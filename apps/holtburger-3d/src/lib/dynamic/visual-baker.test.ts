@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
 	StaticObjectMaterialSourceFacts,
 	StaticObjectSourceAssetFacts,
-	StaticObjectSourceGeometryAttachment,
+	StaticObjectSourceGeometrySidecar,
 	StaticObjectSourceIdentity,
 	StaticObjectTextureRefFacts,
 	StaticResourceIdentity,
@@ -33,7 +33,7 @@ describe("dynamic visual baker", () => {
 			batchId: "dynamic-visual-batch:test",
 			recipes: [recipe],
 			revision: 12,
-			sourceGeometry: [createGeometryAttachment()],
+			sourceGeometry: [createGeometrySidecar()],
 			texturePlacementSnapshot: createPlacementSnapshotForRecipe(recipe),
 			texturePlannings: [texturePlanning],
 		});
@@ -110,7 +110,7 @@ describe("dynamic visual baker", () => {
 			batchId: "dynamic-visual-batch:async",
 			recipes: [recipe],
 			revision: 13,
-			sourceGeometry: [createGeometryAttachment()],
+			sourceGeometry: [createGeometrySidecar()],
 			texturePlacementSnapshot: createEmptyPlacementSnapshot(),
 			texturePlannings: [createDynamicVisualTexturePlanning(recipe)],
 		};
@@ -150,7 +150,7 @@ describe("dynamic visual baker", () => {
 			batchId: "dynamic-visual-batch:texture-ref-split",
 			recipes: [recipe],
 			revision: 16,
-			sourceGeometry: [createGeometryAttachment({ surfaceIds: [7, 8] })],
+			sourceGeometry: [createGeometrySidecar({ surfaceIds: [7, 8] })],
 			texturePlacementSnapshot: placementSnapshot,
 			texturePlannings: [createDynamicVisualTexturePlanning(recipe)],
 		});
@@ -198,7 +198,7 @@ describe("dynamic visual baker", () => {
 			batchId: "dynamic-visual-batch:missing",
 			recipes: [recipe],
 			revision: 14,
-			sourceGeometry: [createGeometryAttachment()],
+			sourceGeometry: [createGeometrySidecar()],
 			texturePlacementSnapshot: createEmptyPlacementSnapshot(),
 			texturePlannings: [createDynamicVisualTexturePlanning(recipe)],
 		});
@@ -379,12 +379,12 @@ function createSourceAsset(
 	};
 }
 
-function createGeometryAttachment(
+function createGeometrySidecar(
 	options: {
 		readonly surfaceIds?: readonly number[];
 		readonly triangleCount?: number;
 	} = {},
-): StaticObjectSourceGeometryAttachment {
+): StaticObjectSourceGeometrySidecar {
 	const triangleCount =
 		options.surfaceIds?.length ?? options.triangleCount ?? 1;
 	const positions = new Float32Array(triangleCount * 9);

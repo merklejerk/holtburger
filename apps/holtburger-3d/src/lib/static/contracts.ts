@@ -969,11 +969,11 @@ export interface StaticBakeJobInput {
 }
 
 export interface StaticBakeJobResources {
-	readonly envCellCellStructureGeometry: readonly EnvCellCellStructureGeometryAttachment[];
-	readonly staticObjectSourceGeometry: readonly StaticObjectSourceGeometryAttachment[];
+	readonly envCellCellStructureGeometry: readonly EnvCellCellStructureGeometrySidecar[];
+	readonly staticObjectSourceGeometry: readonly StaticObjectSourceGeometrySidecar[];
 }
 
-export interface EnvCellCellStructureGeometryAttachment {
+export interface EnvCellCellStructureGeometrySidecar {
 	readonly identity: EnvCellCellStructureGeometryIdentity;
 	readonly buffer: ObjectVisualGeometryBuffer;
 	readonly sourceId: number;
@@ -990,7 +990,7 @@ export interface EnvCellCellStructureGeometryIdentity {
 	readonly cellStructure: CellStructureIdentity;
 }
 
-export interface StaticObjectSourceGeometryAttachment {
+export interface StaticObjectSourceGeometrySidecar {
 	readonly identity: StaticObjectCanonicalGeometryIdentity;
 	readonly buffer: ObjectVisualGeometryBuffer;
 }
@@ -1416,13 +1416,10 @@ export interface StaticObjectBakeDiagnostics {
 	readonly uniqueSourceCount: number;
 	readonly uniqueSourcePartGeometryCount: number;
 	readonly uniqueSourceTriangleCount: number;
-	readonly flattenedTriangleCount: number;
-	readonly flattenedVertexCount: number;
 	readonly drawUnitCount: number;
 	readonly partitionCount: number;
 	readonly renderablePartitionCount: number;
 	readonly skippedPartitionCount: number;
-	readonly estimatedFlattenedTypedArrayBytes: number;
 	readonly instancedVisualResourceCount: number;
 	readonly instancedRenderInstanceCount: number;
 	readonly instancedSourceTriangleCount: number;
@@ -1612,7 +1609,7 @@ export interface StaticObjectVisualResource extends VisualGeometryPayload {
 	readonly key: StaticObjectVisualResourceKey;
 	readonly geometry: StaticObjectSourceGeometryIdentity;
 	/**
-	 * Source-local geometry copied from the static object source attachment.
+	 * Source-local geometry copied from the static object source sidecar.
 	 * Per-instance placement and scale are applied by the render instance.
 	 */
 	readonly coordinateSpace: "static-object-source-local";

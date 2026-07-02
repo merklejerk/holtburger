@@ -52,7 +52,7 @@ import {
 	createDynamicVisualTexturePlanning,
 	type DynamicVisualBaker,
 } from "../../dynamic/visual-baker";
-import { createDynamicVisualBakeSourceGeometry } from "../../dynamic/visual-bake-attachments";
+import { createDynamicVisualBakeSourceGeometry } from "../../dynamic/visual-bake-sidecars";
 import { planStaticDemand } from "../demand-planner";
 import { createEmptyStaticBakeJobResources } from "../bake/resources";
 import {

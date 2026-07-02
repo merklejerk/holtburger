@@ -1244,18 +1244,13 @@ describe("static coordinator", () => {
 		await flushPromises();
 
 		const input = pendingBatchForTask(baker.pendingInputs, work.taskId);
-		const legacyDrawUnit = createStaticObjectDrawUnit(
-			"legacy-static-object-draw-unit",
-			work.scope.landblockId,
-			"outdoor-explicit-objects",
-		);
 		const publishedDrawUnit = createStaticObjectDrawUnit(
 			"published-static-object-draw-unit",
 			work.scope.landblockId,
 			"outdoor-explicit-objects",
 		);
 		baker.complete(input.bakeBatchId, {
-			drawUnits: [legacyDrawUnit],
+			drawUnits: [],
 			objectVisualInstallSet: createObjectVisualInstallSet({
 				directDrawUnits: [publishedDrawUnit],
 			}),

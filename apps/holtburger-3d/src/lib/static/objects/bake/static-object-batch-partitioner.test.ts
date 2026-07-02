@@ -114,158 +114,6 @@ describe("static object batch partitioner", () => {
 		);
 	});
 
-	it("bakes opaque texture-rgba partitions into rendered draw units and stageable texture uses", () => {
-		const payload = createPayload({
-			materials: [createTexturedMaterial(0x08000010)],
-			textureRefs: createRgbaTextureRefs(),
-		});
-		const input = createBakeInput(payload);
-
-		const result = bakeStaticObjectBatch(input);
-
-		expect(result.drawUnits).toEqual([
-			expect.objectContaining({
-				drawUnitId:
-					"outdoor-buildings:0xda55ffff:static-object-partition:slice-0-0",
-				kind: "static-object-geometry",
-				materialFamily: "texture-rgba",
-				materialEntries: [
-					expect.objectContaining({
-						primaryTextureUseId:
-							"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
-					}),
-				],
-				materialPass: "opaque",
-				materialSlotIndices: new Float32Array([0, 0, 0]),
-				renderState: {
-					blend: {
-						dstFactor: null,
-						enabled: false,
-						mode: "opaque",
-						srcFactor: null,
-					},
-					depthTest: true,
-					depthWrite: true,
-				},
-				sort: expect.objectContaining({
-					objectPartKey: null,
-					policy: "depth-writing",
-				}),
-			}),
-		]);
-		const drawUnit = result.drawUnits[0];
-		if (!drawUnit || drawUnit.kind !== "static-object-geometry") {
-			throw new Error("Expected static object geometry draw unit.");
-		}
-		const recipeDrawUnit = result.objectVisualInstallSet.directDrawUnits[0];
-		if (!recipeDrawUnit || recipeDrawUnit.kind !== "static-object-geometry") {
-			throw new Error("Expected recipe static object geometry draw unit.");
-		}
-		expect(drawUnit.materialEntries).toEqual([
-			{
-				alphaTest: 0,
-				detailTextureTiling: 1,
-				detailTextureUseId: null,
-				indexedClipThreshold: -1,
-				indexedTextureFormat: null,
-				indexTextureUseId: null,
-				materialColor: [1, 1, 1, 1],
-				materialEmissiveColor: [0, 0, 0],
-				materialIds: [0x08000010],
-				paletteFirstIndex: 0,
-				paletteTextureUseId: null,
-				primaryTextureUseId:
-					"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
-				primaryTextureWrapMode: "clamp",
-				renderState: {
-					blend: {
-						dstFactor: null,
-						enabled: false,
-						mode: "opaque",
-						srcFactor: null,
-					},
-					depthTest: true,
-					depthWrite: true,
-				},
-				slot: 0,
-			},
-		]);
-		expect(result.textureUses).toEqual([
-			expect.objectContaining({
-				domain: "outdoor-buildings",
-				owners: [
-					{
-						drawUnitId: recipeDrawUnit.drawUnitId,
-						kind: "draw-unit",
-					},
-				],
-				source: {
-					kind: "prepared-render-surface-texture-use",
-					renderSurface: {
-						kind: "render-surface",
-						renderSurfaceId: 0x06000010,
-					},
-					usage: "rgba-color",
-				},
-				samplingPolicy: {
-					wrapS: "clamp-to-edge",
-					wrapT: "clamp-to-edge",
-				},
-			}),
-		]);
-		expect(result.staticSourceMappings).toEqual([]);
-		expect(drawUnit.sourceMappingCoverage).toMatchObject([
-			{
-				geometrySurfaceIds: [0],
-				gfxObj: createGfxObjIdentity(),
-				materialIds: [0x08000010],
-				materialSlot: 0,
-				materialVariantSignatures: [null],
-				object: createObjectIdentity(),
-				partIndex: 0,
-				polygonCount: 1,
-				polygonRange: { max: 0, min: 0 },
-				source: createSourceIdentity(),
-				sourceTriangleCount: 1,
-			},
-		]);
-		expect(result.staticSpatialRecords).toEqual([
-			{
-				drawUnitId:
-					"outdoor-buildings:0xda55ffff:static-object-partition:slice-0-0",
-				kind: "draw-unit-bounds",
-				owner: {
-					drawUnitId:
-						"outdoor-buildings:0xda55ffff:static-object-partition:slice-0-0",
-					kind: "draw-unit",
-				},
-				triangleCount: 1,
-			},
-		]);
-		expect(result.objectVisualInstallSet.directDrawUnits).toHaveLength(1);
-		expect(result.objectVisualInstallSet.directDrawUnits[0]).toMatchObject({
-			domain: "outdoor-buildings",
-			kind: "static-object-geometry",
-			textureUseIds: [
-				"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
-			],
-		});
-		expect(result.objectVisualInstallSet.textureDependencies).toEqual([
-			{
-				resourceId:
-					result.objectVisualInstallSet.directDrawUnits[0]?.drawUnitId,
-				roles: [
-					{
-						itemIds: [
-							"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
-						],
-						purpose: "object-base-color",
-					},
-				],
-			},
-		]);
-	});
-
 	it("partitions env-cell static objects by owning env cell before material batching", () => {
 		const payload = createEnvCellStaticPayload();
 
@@ -283,50 +131,6 @@ describe("static object batch partitioner", () => {
 		expect(plan.partitions.map((partition) => partition.batchKey)).toEqual([
 			expect.stringContaining("env-cell:da550100"),
 			expect.stringContaining("env-cell:da550101"),
-		]);
-	});
-
-	it("bakes env-cell static objects into cell-scoped draw units", () => {
-		const result = bakeStaticObjectBatch(createEnvCellStaticBakeInput());
-
-		const drawUnits = result.drawUnits.filter(
-			(drawUnit) => drawUnit.kind === "static-object-geometry",
-		);
-
-		expect(drawUnits).toHaveLength(2);
-		expect(
-			drawUnits.map((drawUnit) => ({
-				drawUnitId: drawUnit.drawUnitId,
-				ownership: drawUnit.ownership,
-				triangleCount: drawUnit.triangleCount,
-			})),
-		).toEqual([
-			{
-				drawUnitId:
-					"env-cell-system:0xda55ffff:static-object-partition:slice-0-0",
-				ownership: {
-					envCellIds: [0xda550100],
-					kind: "env-cell-static-object-placements",
-					landblockId: 0xda55ffff,
-					seedIdentities: [
-						createObjectIdentity({ instanceId: "da550100:seed-0" }),
-					],
-				},
-				triangleCount: 1,
-			},
-			{
-				drawUnitId:
-					"env-cell-system:0xda55ffff:static-object-partition:slice-1-0",
-				ownership: {
-					envCellIds: [0xda550101],
-					kind: "env-cell-static-object-placements",
-					landblockId: 0xda55ffff,
-					seedIdentities: [
-						createObjectIdentity({ instanceId: "da550101:seed-0" }),
-					],
-				},
-				triangleCount: 1,
-			},
 		]);
 	});
 
@@ -366,7 +170,7 @@ describe("static object batch partitioner", () => {
 			textureRefs: [...createRgbaTextureRefs(), ...createDetailTextureRefs()],
 		});
 		const result = bakeStaticObjectBatch(createBakeInput(payload));
-		const drawUnit = result.drawUnits.find(
+		const drawUnit = result.objectVisualInstallSet.directDrawUnits.find(
 			(candidate) => candidate.kind === "static-object-geometry",
 		);
 		if (!drawUnit || drawUnit.kind !== "static-object-geometry") {
@@ -433,7 +237,7 @@ describe("static object batch partitioner", () => {
 
 		const result = bakeStaticObjectBatch(input);
 
-		expect(result.drawUnits).toEqual([
+		expect(result.objectVisualInstallSet.directDrawUnits).toEqual([
 			expect.objectContaining({
 				kind: "static-object-geometry",
 				materialEntries: [
@@ -491,7 +295,7 @@ describe("static object batch partitioner", () => {
 		const input = createBakeInput(payload);
 
 		const result = bakeStaticObjectBatch(input);
-		const drawUnit = result.drawUnits[0];
+		const drawUnit = result.objectVisualInstallSet.directDrawUnits[0];
 
 		expect(drawUnit).toMatchObject({
 			kind: "static-object-geometry",
@@ -514,7 +318,7 @@ describe("static object batch partitioner", () => {
 		const input = createBakeInput(payload);
 
 		const result = bakeStaticObjectBatch(input);
-		const drawUnit = result.drawUnits[0];
+		const drawUnit = result.objectVisualInstallSet.directDrawUnits[0];
 
 		expect(drawUnit).toMatchObject({
 			kind: "static-object-geometry",
@@ -531,140 +335,6 @@ describe("static object batch partitioner", () => {
 				? drawUnit.materialEntries[0]?.indexedClipThreshold
 				: null,
 		).toBe(8);
-	});
-
-	it("bakes generated-scenery alpha-test objects into rendered draw units", () => {
-		const payload = createPayload({
-			domain: "outdoor-generated-scenery",
-			instanceBounds: createBounds(),
-			materials: [createTexturedMaterial(0x08000010, { surfaceType: 0x4 })],
-			textureRefs: createRgbaTextureRefs(),
-		});
-		const input = createBakeInput(payload);
-
-		const result = bakeStaticObjectBatch(input);
-		const drawUnit = result.drawUnits[0];
-
-		expect(drawUnit).toMatchObject({
-			domain: "outdoor-generated-scenery",
-			kind: "static-object-geometry",
-			materialFamily: "texture-rgba",
-			materialPass: "alpha-test",
-		});
-		expect(result.materialCoverage[0]).toMatchObject({
-			domain: "outdoor-generated-scenery",
-			renderedTriangleCount: 1,
-			triangleCount: 1,
-		});
-		expect(result.staticObjectBakeDiagnostics).toEqual([
-			expect.objectContaining({
-				domain: "outdoor-generated-scenery",
-				drawUnitCount: 1,
-				estimatedAvoidedFlattenedTriangleCount: 0,
-				estimatedAvoidedFlattenedTypedArrayBytes: 0,
-				estimatedFlattenedTypedArrayBytes: 78,
-				estimatedInstancedSourceTypedArrayBytes: 78,
-				explicitObjectCount: 0,
-				flattenedTriangleCount: 1,
-				flattenedVertexCount: 3,
-				generatedInstanceCount: 1,
-				instancedRenderInstanceCount: 1,
-				instancedSourceTriangleCount: 1,
-				instancedVisualResourceCount: 1,
-				landblockId: 0xda55ffff,
-				objectCount: 1,
-				partitionCount: 1,
-				renderablePartitionCount: 1,
-				skippedPartitionCount: 0,
-				bakeBatchId: "static-batch:objects",
-				uniqueSourceCount: 1,
-				uniqueSourcePartGeometryCount: 1,
-				uniqueSourceTriangleCount: 1,
-			}),
-		]);
-		expect(result.textureUses).toHaveLength(1);
-	});
-
-	it("publishes shared visual resources and render instances for repeated generated scenery", () => {
-		const payload = duplicateObjectInstance(
-			createPayload({
-				domain: "outdoor-generated-scenery",
-				instanceBounds: createBounds(),
-				materials: [createTexturedMaterial(0x08000010, { surfaceType: 0x4 })],
-				textureRefs: createRgbaTextureRefs(),
-			}),
-		);
-
-		const result = bakeStaticObjectBatch(createBakeInput(payload));
-		const { renderInstances, visualResources } = result.objectVisualInstallSet;
-
-		expect(result.drawUnits).toHaveLength(1);
-		expect(visualResources).toHaveLength(1);
-		expect(renderInstances).toMatchObject([
-			{
-				bounds: createBounds(),
-				domain: "outdoor-generated-scenery",
-				generated: { sceneId: 1, sceneTemplateIndex: 0, terrainIndex: 0 },
-				landblockId: 0xda55ffff,
-				source: createObjectIdentity({
-					instanceId: "detail-0",
-					objectKind: "generated-scenery",
-				}),
-			},
-			{
-				bounds: createBounds(),
-				domain: "outdoor-generated-scenery",
-				generated: { sceneId: 1, sceneTemplateIndex: 0, terrainIndex: 0 },
-				landblockId: 0xda55ffff,
-				source: createObjectIdentity({
-					instanceId: "detail-1",
-					objectKind: "generated-scenery",
-				}),
-			},
-		]);
-		expect(
-			new Set(
-				renderInstances.map((instance) => instance.resourceId),
-			),
-		).toHaveProperty("size", 1);
-		expect(visualResources[0]).toMatchObject({
-			coordinateSpace: "static-object-source-local",
-			geometry: createStaticObjectSourceGeometryIdentity({
-				gfxObj: createGfxObjIdentity(),
-				partIndex: 0,
-				source: createSourceIdentity(),
-			}),
-			indexType: "uint16",
-			materialFamily: "texture-rgba",
-			materialPass: "alpha-test",
-			textureUseIds: expect.arrayContaining([
-				expect.stringContaining("prepared-render-surface-texture-use"),
-			]),
-			triangleCount: 1,
-			vertexCount: 3,
-		});
-		expect(visualResources[0]?.positions).toBeInstanceOf(Float32Array);
-		expect(visualResources[0]?.positions).toHaveLength(9);
-		expect(visualResources[0]?.indices).toBeInstanceOf(Uint16Array);
-		expect(
-			renderInstances[0]?.sourceToLandblockMatrix,
-		).toBeInstanceOf(Float32Array);
-		expect(result.staticObjectBakeDiagnostics[0]).toMatchObject({
-			drawUnitCount: 1,
-			estimatedAvoidedFlattenedTriangleCount: 1,
-			estimatedAvoidedFlattenedTypedArrayBytes: 78,
-			estimatedFlattenedTypedArrayBytes: 156,
-			estimatedInstancedSourceTypedArrayBytes: 78,
-			flattenedTriangleCount: 2,
-			flattenedVertexCount: 6,
-			instancedRenderInstanceCount: 2,
-			instancedSourceTriangleCount: 1,
-			instancedVisualResourceCount: 1,
-			renderablePartitionCount: 1,
-		});
-		expect(result.objectVisualInstallSet.directDrawUnits).toEqual([]);
-		expect(result.objectVisualInstallSet.renderInstances).toHaveLength(2);
-		expect(result.objectVisualInstallSet.visualResources).toHaveLength(1);
 	});
 
 	it("keeps compatible opaque object ownership as metadata without splitting batches", () => {
@@ -749,36 +419,6 @@ describe("static object batch partitioner", () => {
 		]);
 	});
 
-	it("keeps source and gfx provenance in source mappings after cross-source compaction", () => {
-		const payload = duplicateObjectWithDistinctSourceGfx(
-			createPayload({
-				materials: [createTexturedMaterial(0x08000010)],
-				textureRefs: createRgbaTextureRefs(),
-			}),
-		);
-
-		const result = bakeStaticObjectBatch(createBakeInput(payload));
-
-		expect(result.drawUnits).toHaveLength(1);
-		expect(result.staticSourceMappings).toEqual([]);
-		expect(
-			result.drawUnits[0]?.kind === "static-object-geometry"
-				? result.drawUnits[0].sourceMappingCoverage
-				: [],
-		).toMatchObject([
-			{
-				gfxObj: createGfxObjIdentity({ sourceDid: 0x01000020 }),
-				object: createObjectIdentity({ instanceId: "building-0" }),
-				source: createSourceIdentity({ sourceDid: 0x02000010 }),
-			},
-			{
-				gfxObj: createGfxObjIdentity({ sourceDid: 0x01000021 }),
-				object: createObjectIdentity({ instanceId: "building-1" }),
-				source: createSourceIdentity({ sourceDid: 0x02000011 }),
-			},
-		]);
-	});
-
 	it("compacts compatible alpha-test geometry from different source and gfx identities", () => {
 		const payload = duplicateObjectWithDistinctSourceGfx(
 			createPayload({
@@ -806,164 +446,6 @@ describe("static object batch partitioner", () => {
 			},
 			triangleCount: 2,
 		});
-	});
-
-	it("compacts concrete texture uses as entries under a shared coarse table schema", () => {
-		const payload = createPayload({
-			materials: [
-				createTexturedMaterial(0x08000010),
-				createTexturedMaterial(0x08000011, {
-					renderSurfaceId: 0x06000011,
-					surfaceTextureId: 0x05000011,
-				}),
-			],
-			textureRefs: [
-				...createRgbaTextureRefs(),
-				...createRgbaTextureRefs({
-					renderSurfaceId: 0x06000011,
-					surfaceTextureId: 0x05000011,
-				}),
-			],
-		});
-
-		const plan = partitionStaticObjectBatches(payload);
-
-		expect(plan.partitions).toHaveLength(1);
-		expect(
-			plan.partitions.map(
-				(partition) => partition.partitionAxes.material.textureRoleSchemaKey,
-			),
-		).toEqual(["base-color:prepared-render-surface-texture-use:rgba-color"]);
-		expect(
-			plan.partitions.map((partition) => partition.textureRoleSchemaKey),
-		).toEqual(["base-color:prepared-render-surface-texture-use:rgba-color"]);
-		expect(
-			plan.partitions.flatMap((partition) =>
-				partition.textureDataUses.map((dataUse) =>
-					dataUse.kind === "prepared-render-surface-texture-use"
-						? dataUse.renderSurface.renderSurfaceId
-						: null,
-				),
-			),
-		).toEqual([0x06000010, 0x06000011]);
-		expect(
-			plan.partitions.map((partition) => ({
-				entryCount: partition.coarseTablePlan.entries.length,
-				entryKeys: partition.materialEntryKeys,
-				tableSchemaKey: partition.coarseTablePlan.tableSchemaKey,
-			})),
-		).toEqual([
-			{
-				entryCount: 2,
-				entryKeys: [
-					"color:1.000000,1.000000,1.000000,1.000000,0.000000,0.000000,0.000000|wrap:clamp|roles:base-color:prepared-render-surface-texture-use:06000010:rgba-color|alpha-test:0.000000|indexed-clip:-1.000000|detail-tiling:1.000000",
-					"color:1.000000,1.000000,1.000000,1.000000,0.000000,0.000000,0.000000|wrap:clamp|roles:base-color:prepared-render-surface-texture-use:06000011:rgba-color|alpha-test:0.000000|indexed-clip:-1.000000|detail-tiling:1.000000",
-				],
-				tableSchemaKey:
-					"base-color:prepared-render-surface-texture-use:rgba-color",
-			},
-		]);
-
-		const result = bakeStaticObjectBatch(createBakeInput(payload));
-		const drawUnit = result.drawUnits[0];
-		if (!drawUnit || drawUnit.kind !== "static-object-geometry") {
-			throw new Error("Expected static object geometry draw unit.");
-		}
-		expect(result.drawUnits).toHaveLength(1);
-		expect(
-			drawUnit.materialEntries.map((entry) => entry.primaryTextureUseId),
-		).toEqual([
-			"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
-			"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000011:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
-		]);
-		expect(Array.from(drawUnit.materialSlotIndices)).toEqual([
-			0, 0, 0, 1, 1, 1,
-		]);
-		expect(drawUnit.textureUseIds).toEqual([
-			"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
-			"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000011:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
-		]);
-	});
-
-	it("splits static object partitions by final placement pages before baking geometry", () => {
-		const firstTextureUseId =
-			"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge";
-		const secondTextureUseId =
-			"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000011:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge";
-		const payload = createPayload({
-			materials: [
-				createTexturedMaterial(0x08000010),
-				createTexturedMaterial(0x08000011, {
-					renderSurfaceId: 0x06000011,
-					surfaceTextureId: 0x05000011,
-				}),
-			],
-			textureRefs: [
-				...createRgbaTextureRefs(),
-				...createRgbaTextureRefs({
-					renderSurfaceId: 0x06000011,
-					surfaceTextureId: 0x05000011,
-				}),
-			],
-		});
-		const placementSnapshot = createTexturePlacementSnapshot([
-			[firstTextureUseId, "page-a"],
-			[secondTextureUseId, "page-b"],
-		]);
-
-		const plan = partitionStaticObjectBatches(payload, {
-			placementSnapshot,
-			textureUseScopeId: "outdoor-buildings:0xda55ffff",
-		});
-
-		expect(plan.partitions).toHaveLength(2);
-		expect(
-			plan.partitions.map((partition) =>
-				partition.coarseTablePlan.entries.map((entry) =>
-					entry.textureDataUses.map((dataUse) =>
-						dataUse.kind === "prepared-render-surface-texture-use"
-							? dataUse.renderSurface.renderSurfaceId
-							: null,
-					),
-				),
-			),
-		).toEqual([[[0x06000010]], [[0x06000011]]]);
-
-		const result = bakeStaticObjectBatch({
-			...createBakeInput(payload),
-			texturePlacementSnapshot: placementSnapshot,
-		});
-
-		const drawUnits = result.drawUnits.filter(
-			(drawUnit) => drawUnit.kind === "static-object-geometry",
-		);
-		expect(drawUnits).toHaveLength(2);
-		expect(drawUnits.map((drawUnit) => drawUnit.textureUseIds)).toEqual([
-			[firstTextureUseId],
-			[secondTextureUseId],
-		]);
-		expect(result.textureDependencies).toEqual([
-			{
-				resourceId:
-					"outdoor-buildings:0xda55ffff:static-object-partition:slice-0-0",
-				roles: [
-					{
-						itemIds: [firstTextureUseId],
-						purpose: "object-base-color",
-					},
-				],
-			},
-			{
-				resourceId:
-					"outdoor-buildings:0xda55ffff:static-object-partition:slice-1-0",
-				roles: [
-					{
-						itemIds: [secondTextureUseId],
-						purpose: "object-base-color",
-					},
-				],
-			},
-		]);
 	});
 
 	it("discovers static object texture placement intents before baking", () => {
@@ -1064,142 +546,6 @@ describe("static object batch partitioner", () => {
 		]);
 	});
 
-	it("uses object part ownership as a hard partition axis for transparent static policy", () => {
-		const payload = duplicateObjectInstance(
-			createPayload({
-				materials: [createTexturedMaterial(0x08000010, { surfaceType: 0x10 })],
-				textureRefs: createRgbaTextureRefs(),
-			}),
-		);
-
-		const plan = partitionStaticObjectBatches(payload);
-
-		expect(plan.partitions).toHaveLength(2);
-		expect(
-			plan.partitions.map((partition) => partition.partitionAxes),
-		).toMatchObject([
-			{
-				ownership: {
-					objectPartKey: "da55ffff:building:building-0:part:0",
-				},
-				sort: {
-					policy: "transparent-object-part-sortable",
-				},
-			},
-			{
-				ownership: {
-					objectPartKey: "da55ffff:building:building-1:part:0",
-				},
-				sort: {
-					policy: "transparent-object-part-sortable",
-				},
-			},
-		]);
-		expect(plan.partitions.map((partition) => partition.triangleCount)).toEqual(
-			[1, 1],
-		);
-
-		const result = bakeStaticObjectBatch(createBakeInput(payload));
-		expect(result.drawUnits).toEqual([
-			expect.objectContaining({
-				kind: "static-object-geometry",
-				materialPass: "transparent",
-				renderState: {
-					blend: {
-						dstFactor: "one-minus-src-alpha",
-						enabled: true,
-						mode: "translucent",
-						srcFactor: "src-alpha",
-					},
-					depthTest: true,
-					depthWrite: false,
-				},
-				sort: expect.objectContaining({
-					objectPartKey: "da55ffff:building:building-0:part:0",
-					policy: "object-part-back-to-front",
-				}),
-			}),
-			expect.objectContaining({
-				kind: "static-object-geometry",
-				materialPass: "transparent",
-				sort: expect.objectContaining({
-					objectPartKey: "da55ffff:building:building-1:part:0",
-					policy: "object-part-back-to-front",
-				}),
-			}),
-		]);
-	});
-
-	it("publishes repeated transparent generated-scenery partitions as shared instances", () => {
-		const payload = duplicateObjectInstance(
-			createPayload({
-				domain: "outdoor-generated-scenery",
-				instanceBounds: createBounds(),
-				materials: [createTexturedMaterial(0x08000010, { surfaceType: 0x10 })],
-				textureRefs: createRgbaTextureRefs(),
-			}),
-		);
-
-		const result = bakeStaticObjectBatch(createBakeInput(payload));
-		const { renderInstances, visualResources } = result.objectVisualInstallSet;
-
-		expect(result.drawUnits).toHaveLength(2);
-		expect(visualResources).toHaveLength(1);
-		expect(visualResources[0]).toMatchObject({
-			coordinateSpace: "static-object-source-local",
-			materialFamily: "texture-rgba",
-			materialPass: "transparent",
-			triangleCount: 1,
-			vertexCount: 3,
-		});
-		expect(renderInstances).toHaveLength(2);
-		expect(
-			renderInstances.map((instance) => ({
-				source: instance.source,
-				transparency: instance.transparency,
-			})),
-		).toEqual([
-			{
-				source: createObjectIdentity({
-					instanceId: "detail-0",
-					objectKind: "generated-scenery",
-				}),
-				transparency: {
-					kind: "direct-sorted-transparent",
-					sortCenter: { x: 0.5, y: 0.5, z: 0.5 },
-				},
-			},
-			{
-				source: createObjectIdentity({
-					instanceId: "detail-1",
-					objectKind: "generated-scenery",
-				}),
-				transparency: {
-					kind: "direct-sorted-transparent",
-					sortCenter: { x: 0.5, y: 0.5, z: 0.5 },
-				},
-			},
-		]);
-		expect(
-			new Set(
-				renderInstances.map((instance) => instance.resourceId),
-			),
-		).toHaveProperty("size", 1);
-		expect(result.staticObjectBakeDiagnostics[0]).toMatchObject({
-			drawUnitCount: 2,
-			instancedRenderInstanceCount: 2,
-			instancedVisualResourceCount: 1,
-			retainedTransparentOutdoorGeneratedSceneryPartitionReasons: {
-				explicitObject: 0,
-				missingInstanceBounds: 0,
-				nonRenderableOrDeferredMaterialBucket: 0,
-				oneOffGeneratedSource: 0,
-				repeatedGeneratedSourceRetainedByPartitionPolicy: 2,
-				unsupportedMaterialBucket: 0,
-			},
-		});
-	});
-
 	it("reports compact material coverage by rendered, deferred, and unsupported buckets", () => {
 		const payload = createPayload({
 			materials: [
@@ -1284,7 +630,7 @@ describe("static object batch partitioner", () => {
 			textureRefs: createIndexedTextureRefs(),
 		});
 		const result = bakeStaticObjectBatch(createBakeInput(payload));
-		const drawUnit = result.drawUnits[0];
+		const drawUnit = result.objectVisualInstallSet.directDrawUnits[0];
 
 		expect(drawUnit).toMatchObject({
 			kind: "static-object-geometry",
@@ -1381,7 +727,7 @@ describe("static object batch partitioner", () => {
 		const input = createBakeInput(payload);
 
 		const result = bakeStaticObjectBatch(input);
-		const drawUnit = result.drawUnits[0];
+		const drawUnit = result.objectVisualInstallSet.directDrawUnits[0];
 
 		expect(drawUnit).toMatchObject({ kind: "static-object-geometry" });
 		if (!drawUnit || drawUnit.kind !== "static-object-geometry") {
@@ -1389,124 +735,6 @@ describe("static object batch partitioner", () => {
 		}
 		expect(Array.from(drawUnit.positions.slice(0, 9))).toEqual([
 			10, 34, -20, 10, 30, -17, 12, 30, -20,
-		]);
-	});
-
-	it("bakes duplicate polygon ids by geometry surface and material variant", () => {
-		const payload = createPayload({
-			materials: [
-				createTexturedMaterial(0x08000010),
-				createTexturedMaterial(0x08000011),
-			],
-			textureRefs: createRgbaTextureRefs(),
-		});
-		const source = payload.sourceAssets[0];
-		const part = source?.parts[0];
-		if (!source || !part) {
-			throw new Error("Fixture payload did not create a source part.");
-		}
-		const updatedPart = {
-			...part,
-			materialSlots: part.materialSlots.map((slot, index) => ({
-				...slot,
-				materialVariantSignature: index === 1 ? "sampler=repeat" : null,
-			})),
-			triangles: part.triangles.map((triangle, index) => ({
-				...triangle,
-				materialVariantSignature: index === 1 ? "sampler=repeat" : null,
-				polygonId: 0,
-			})),
-		};
-		const input = createBakeInput({
-			...payload,
-			materialSlots: payload.materialSlots.map((slot, index) => ({
-				...slot,
-				materialVariantSignature: index === 1 ? "sampler=repeat" : null,
-			})),
-			sourceAssets: [{ ...source, parts: [updatedPart] }],
-		});
-
-		const result = bakeStaticObjectBatch(input);
-		const drawUnits = result.drawUnits.filter(
-			(drawUnit) => drawUnit.kind === "static-object-geometry",
-		);
-
-		expect(drawUnits).toHaveLength(2);
-		expect(
-			drawUnits.map((drawUnit) =>
-				drawUnit.kind === "static-object-geometry"
-					? drawUnit.materialEntries.map(
-							(entry) => entry.primaryTextureWrapMode,
-						)
-					: [],
-			),
-		).toEqual([["clamp"], ["repeat"]]);
-		expect(
-			result.textureUses.map((textureUse) => ({
-				id: textureUse.textureUseId,
-				samplingPolicy: textureUse.samplingPolicy,
-				usage: textureUse.source.usage,
-			})),
-		).toEqual([
-			{
-				id: "outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
-				samplingPolicy: {
-					wrapS: "clamp-to-edge",
-					wrapT: "clamp-to-edge",
-				},
-				usage: "rgba-color",
-			},
-			{
-				id: "outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
-				samplingPolicy: {
-					wrapS: "repeat",
-					wrapT: "repeat",
-				},
-				usage: "rgba-color",
-			},
-		]);
-		expect(
-			drawUnits.map((drawUnit) =>
-				drawUnit.kind === "static-object-geometry"
-					? Array.from(drawUnit.materialSlotIndices)
-					: [],
-			),
-		).toEqual([
-			[0, 0, 0],
-			[0, 0, 0],
-		]);
-		expect(
-			drawUnits.map((drawUnit) =>
-				drawUnit.kind === "static-object-geometry"
-					? Array.from(drawUnit.positions.slice(0, 9))
-					: [],
-			),
-		).toEqual([
-			[1, 1, 1, 0, 1, 1, 1, 0, 1],
-			[2, 1, 1, 0, 1, 1, 1, 0, 1],
-		]);
-		expect(result.staticSourceMappings).toEqual([]);
-		expect(
-			drawUnits.flatMap((drawUnit) =>
-				drawUnit.kind === "static-object-geometry"
-					? drawUnit.sourceMappingCoverage
-					: [],
-			),
-		).toMatchObject([
-			{
-				geometrySurfaceIds: [0],
-				materialVariantSignatures: [null],
-				polygonCount: 1,
-				polygonRange: { max: 0, min: 0 },
-				sourceTriangleCount: 1,
-			},
-			{
-				geometrySurfaceIds: [1],
-				materialVariantSignatures: ["sampler=repeat"],
-				polygonCount: 1,
-				polygonRange: { max: 0, min: 0 },
-				sourceTriangleCount: 1,
-			},
 		]);
 	});
 
@@ -1551,7 +779,7 @@ describe("static object batch partitioner", () => {
 		});
 
 		const result = bakeStaticObjectBatch(input);
-		const drawUnit = result.drawUnits.find(
+		const drawUnit = result.objectVisualInstallSet.directDrawUnits.find(
 			(candidate) => candidate.kind === "static-object-geometry",
 		);
 

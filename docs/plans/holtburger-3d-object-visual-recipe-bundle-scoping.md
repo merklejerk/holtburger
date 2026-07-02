@@ -2509,16 +2509,32 @@ Implementation notes:
   `objectVisualInstallSet.directDrawUnits` for object-like direct draw units. Runtime tests now
   publish structured-interior and generated-scenery direct draw units through object visual install
   sets instead of the legacy `drawUnits` bucket.
+- Third hard-cutover slice stopped static-object and structured-interior bakers from exporting
+  object-like draw units through `StaticBakeBatchResult.drawUnits`. Direct object-like geometry now
+  publishes only through `objectVisualInstallSet.directDrawUnits`; `drawUnits` remains the terrain
+  and non-object static channel.
+- Removed the coordinator filters and texture-dependency scrubbers that existed only to compensate
+  for duplicated object draw units in `StaticBakeBatchResult.drawUnits`. Object-like texture
+  dependencies now come from `objectVisualInstallSet.textureDependencies`.
+- Deleted 17 ossified tests that asserted the old object-like `drawUnits` transport shape. The
+  retained tests now cover current partitioning, publication, install-set, coordinator, runtime,
+  and env-cell sidecar behavior without preserving the removed mirror path.
 - Validation:
   `npm --prefix apps/holtburger-3d run test:ts -- static-commit-installer static-coordinator env-cell-system-layer-publication worker-client static-object-batch-partitioner`
   passed with 9 test files and 94 tests;
   `npm --prefix apps/holtburger-3d run test:ts -- static-commit-installer static-coordinator env-cell-system-layer-publication worker-client static-object-batch-partitioner client-runtime`
   passed with 10 test files and 136 tests;
+  `npm --prefix apps/holtburger-3d run test:ts -- static-object-batch-partitioner env-cell-system-baker static-coordinator static-commit-installer env-cell-system-layer-publication client-runtime`
+  passed with 6 test files and 120 tests;
   `npm --prefix apps/holtburger-3d run check` passed.
-- Remaining Phase 12 debt: legacy static-object partition/bake code still emits transitional direct
-  draw units for diagnostics and sidecars. `client-runtime` also still stores terrain and object
-  visual direct draw units in `#installedDrawUnitsById`; the behavior is correct for membership and
-  selection diagnostics, but the name is now a thin-shell cleanup target for Phase 13/15.
+- Remaining Phase 12/13 audit target: static-object and structured-interior bakers still build some
+  flattened draw-unit-shaped data locally for diagnostics, source mapping coverage, and spatial
+  sidecars before publishing through the object visual install set. That path is no longer a runtime
+  install/publication mirror, but Phase 13 must decide whether to derive those records directly from
+  recipe publication metadata and delete the local flattened helper.
+- `client-runtime` still stores terrain and object visual direct draw units in
+  `#installedDrawUnitsById`; the behavior is correct for membership and selection diagnostics, but
+  the name is now a thin-shell cleanup target for Phase 13/15.
 
 ### Phase 13: Resteer Hard Cutover
 

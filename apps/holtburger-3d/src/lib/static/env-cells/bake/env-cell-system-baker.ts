@@ -26,8 +26,6 @@ import type {
 	ObjectVisualTextureBindingRequirement,
 	ObjectVisualTexturePlacementSnapshot,
 	TextureResourceDependencies,
-	TextureResourceRoleDependency,
-	TextureUsagePurpose,
 } from "../../../textures/placement";
 import { requireObjectVisualTexturePlacementSnapshot } from "../../../textures/placement";
 import { createLayerPeerRecordOwnerForStaticBakeTask } from "../../layer-owners";
@@ -130,7 +128,6 @@ export function bakeEnvCellSystem(
 	);
 	const staticObjectResult = bakeStaticObjectBatch(input);
 	const drawUnits = [
-		...itemResults.flatMap((result) => result.drawUnits),
 		...staticObjectResult.drawUnits,
 	];
 	const textureDependencies = [
@@ -308,10 +305,7 @@ function bakeLandblockEnvCellItem(
 		staticSpatialRecords: createSpatialRecords(owner, payload),
 		staticVisibilityRecords: [createVisibilityRecord(owner, payload)],
 		textureUses: objectVisualPublication.textureUses,
-		textureDependencies: createStructuredInteriorTextureDependencies(
-			drawUnits,
-			placementSnapshot,
-		),
+		textureDependencies: [],
 	};
 }
 
@@ -1092,54 +1086,6 @@ function createStructuredInteriorTextureUses(options: {
 			);
 		}),
 	});
-}
-
-function createStructuredInteriorTextureDependencies(
-	drawUnits: readonly StructuredInteriorGeometryStaticDrawUnit[],
-	texturePlacementSnapshot: ObjectVisualTexturePlacementSnapshot,
-): readonly TextureResourceDependencies[] {
-	return drawUnits.flatMap((drawUnit) => {
-		const roles = createStructuredInteriorTextureRoleDependencies(
-			drawUnit,
-			texturePlacementSnapshot,
-		);
-		if (roles.length === 0) {
-			return [];
-		}
-		return [{ resourceId: drawUnit.drawUnitId, roles }];
-	});
-}
-
-function createStructuredInteriorTextureRoleDependencies(
-	drawUnit: StructuredInteriorGeometryStaticDrawUnit,
-	texturePlacementSnapshot: ObjectVisualTexturePlacementSnapshot,
-): readonly TextureResourceRoleDependency[] {
-	const itemIdsByPurpose = new Map<TextureUsagePurpose, Set<string>>();
-	for (const bindingKey of drawUnit.textureUseIds) {
-		const placementItemId = requireObjectVisualPlacementItemId({
-			placementSnapshot: texturePlacementSnapshot,
-			subject: `Structured interior draw unit ${drawUnit.drawUnitId}`,
-			textureUseId: bindingKey,
-		});
-		const placement =
-			texturePlacementSnapshot.placementsByItemId.get(placementItemId);
-		if (!placement) {
-			throw new Error(
-				`Structured interior draw unit ${drawUnit.drawUnitId} is missing pre-bake texture placement ${bindingKey}.`,
-			);
-		}
-		let itemIds = itemIdsByPurpose.get(placement.purpose);
-		if (!itemIds) {
-			itemIds = new Set<string>();
-			itemIdsByPurpose.set(placement.purpose, itemIds);
-		}
-		itemIds.add(bindingKey);
-	}
-
-	return Array.from(itemIdsByPurpose, ([purpose, itemIds]) => ({
-		itemIds: Array.from(itemIds).sort(),
-		purpose,
-	})).sort((left, right) => left.purpose.localeCompare(right.purpose));
 }
 
 function requireObjectVisualPlacementItemId(options: {

@@ -2,13 +2,13 @@ import type { StaticObjectBatchPayload } from "./static-object-batch-partitioner
 import type {
 	EnvCellSystemStaticScopePayload,
 	OutdoorStaticObjectDomain,
-	StaticBakeBatchItem,
+	StaticBakeJobPayload,
 	StaticDomain,
 	StaticObjectSourceIdentity,
 } from "../../contracts";
 
 export function createStaticObjectBatchPayload(
-	item: StaticBakeBatchItem,
+	item: StaticBakeJobPayload,
 ): StaticObjectBatchPayload {
 	if (
 		(item.task.domain === "outdoor-buildings" ||

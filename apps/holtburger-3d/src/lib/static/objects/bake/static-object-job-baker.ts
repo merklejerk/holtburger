@@ -2,9 +2,9 @@ import type {
 	MaterialTextureDataUseIdentity,
 	StaticBakeTask,
 	StaticBounds,
-	StaticBakeBatchInput,
-	StaticBakeBatchItem,
-	StaticBakeBatchResult,
+	StaticBakeJobInput,
+	StaticBakeJobPayload,
+	StaticBakeJobResult,
 	StaticBakeTextureUse,
 	StaticBaker,
 	StaticDrawUnit,
@@ -67,15 +67,15 @@ import { createObjectVisualInstallSet } from "../../../visual/object-visual-inst
 import { createStaticObjectVisualBundleExpansion } from "./static-object-visual-bundle-producer";
 import { createStaticObjectPublicationMetadata } from "./static-object-publication-metadata-producer";
 
-export class StaticObjectBatchBaker implements StaticBaker {
-	async bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
-		return bakeStaticObjectBatch(input);
+export class StaticObjectJobBaker implements StaticBaker {
+	async bake(input: StaticBakeJobInput): Promise<StaticBakeJobResult> {
+		return bakeStaticObjectJob(input);
 	}
 }
 
-export function bakeStaticObjectBatch(
-	input: StaticBakeBatchInput,
-): StaticBakeBatchResult {
+export function bakeStaticObjectJob(
+	input: StaticBakeJobInput,
+): StaticBakeJobResult {
 	if (
 		input.domain !== "outdoor-buildings" &&
 		input.domain !== "outdoor-explicit-objects" &&
@@ -83,80 +83,55 @@ export function bakeStaticObjectBatch(
 		input.domain !== "env-cell-system"
 	) {
 		throw new Error(
-			`Static object batch baker only supports static object batches. Received ${input.domain}.`,
+			`Static object baker only supports static object jobs. Received ${input.domain}.`,
 		);
 	}
 
-	emitStaticBakeWorkerTrace("static-object-batch:start", {
-		bakeBatchId: input.bakeBatchId,
+	const item = { payload: input.payload, task: input.task };
+	emitStaticBakeWorkerTrace("static-object-job:start", {
 		domain: input.domain,
-		itemCount: input.items.length,
 		revision: input.revision,
+		taskId: input.task.taskId,
 	});
-	const itemResults = input.items.map((item, index) =>
-		bakeStaticObjectBatchItem(input, item, index),
-	);
-	const textureDependencies = itemResults.flatMap(
-		(result) => result.textureDependencies,
-	);
-	const objectVisualTextureDependencies = itemResults.flatMap(
-		(result) => result.objectVisualTextureDependencies,
-	);
+	const itemResult = bakeStaticObjectJobPayload(input, item, 0);
+	const textureDependencies = itemResult.textureDependencies;
+	const objectVisualTextureDependencies =
+		itemResult.objectVisualTextureDependencies;
 	const objectVisualInstallSet = createObjectVisualInstallSet({
-		directDrawUnits: itemResults.flatMap(
-			(result) => result.objectVisualInstallSet.directDrawUnits,
-		),
-		dynamicAnimationPartBindings: itemResults.flatMap(
-			(result) => result.objectVisualInstallSet.dynamicAnimationPartBindings,
-		),
-		renderInstances: itemResults.flatMap(
-			(result) => result.objectVisualInstallSet.renderInstances,
-		),
+		directDrawUnits: itemResult.objectVisualInstallSet.directDrawUnits,
+		dynamicAnimationPartBindings:
+			itemResult.objectVisualInstallSet.dynamicAnimationPartBindings,
+		renderInstances: itemResult.objectVisualInstallSet.renderInstances,
 		textureDependencies: objectVisualTextureDependencies,
 		visualResources: dedupeStaticObjectVisualResources(
-			itemResults.flatMap(
-				(result) => result.objectVisualInstallSet.visualResources,
-			),
+			itemResult.objectVisualInstallSet.visualResources,
 		),
 	});
-	emitStaticBakeWorkerTrace("static-object-batch:end", {
-		bakeBatchId: input.bakeBatchId,
+	emitStaticBakeWorkerTrace("static-object-job:end", {
 		domain: input.domain,
 		drawUnitCount: objectVisualInstallSet.directDrawUnits.length,
-		itemCount: input.items.length,
+		taskId: input.task.taskId,
 	});
 
 	return {
 		atlasRegistryUpdates: [],
-		buildRevision: Math.max(
-			...input.items.map((item) => item.payload.sourceRevision),
-			0,
-		),
+		buildRevision: input.payload.sourceRevision,
 		domain: input.domain,
 		drawUnits: [],
-		staticObjectBakeDiagnostics: itemResults.map(
-			(result) => result.diagnostics,
-		),
-		materialCoverage: itemResults.map((result) => result.materialCoverage),
+		staticObjectBakeDiagnostics: [itemResult.diagnostics],
+		materialCoverage: [itemResult.materialCoverage],
 		objectVisualInstallSet,
 		portalApertureResources: [],
 		revision: input.revision,
 		envCellStaticObjectPlacementRecords: [],
-		bakeBatchId: input.bakeBatchId,
 		staticPortalGraphs: [],
 		staticPortalInteriorRecords: [],
-		staticSourceMappings: itemResults.flatMap(
-			(result) => result.sourceMappings,
-		),
-		staticSpatialRecords: itemResults.flatMap(
-			(result) => result.spatialRecords,
-		),
+		staticSourceMappings: itemResult.sourceMappings,
+		staticSpatialRecords: itemResult.spatialRecords,
 		staticVisibilityRecords: [],
-		textureUses: mergeTextureUses(
-			itemResults.flatMap((result) => result.textureUses),
-		),
+		textureUses: mergeTextureUses(itemResult.textureUses),
 		textureDependencies,
-		tasks: input.items.map((item) => item.task),
+		task: input.task,
 	};
 }
 
@@ -265,15 +240,15 @@ function createStaticObjectSourceMappingCoverage(
 		.sort(compareSourceMappingCoverage);
 }
 
-function bakeStaticObjectBatchItem(
-	input: StaticBakeBatchInput,
-	item: StaticBakeBatchItem,
+function bakeStaticObjectJobPayload(
+	input: StaticBakeJobInput,
+	item: StaticBakeJobPayload,
 	itemIndex: number,
 ): {
 	readonly drawUnits: readonly StaticDrawUnit[];
-	readonly materialCoverage: StaticBakeBatchResult["materialCoverage"][number];
+	readonly materialCoverage: StaticBakeJobResult["materialCoverage"][number];
 	readonly diagnostics: StaticObjectBakeDiagnostics;
-	readonly sourceMappings: StaticBakeBatchResult["staticSourceMappings"];
+	readonly sourceMappings: StaticBakeJobResult["staticSourceMappings"];
 	readonly spatialRecords: readonly StaticSpatialRecord[];
 	readonly textureDependencies: readonly TextureResourceDependencies[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
@@ -281,7 +256,7 @@ function bakeStaticObjectBatchItem(
 		typeof createObjectVisualInstallSet
 	>;
 	readonly objectVisualTextureDependencies: readonly TextureResourceDependencies[];
-	readonly task: StaticBakeBatchItem["task"];
+	readonly task: StaticBakeJobPayload["task"];
 } {
 	emitStaticBakeWorkerTrace("static-object-item:start", {
 		domain: item.task.domain,
@@ -298,7 +273,7 @@ function bakeStaticObjectBatchItem(
 		sourceAssetCount: scope.sourceAssets.length,
 		textureRefCount: scope.textureRefs.length,
 	});
-	const sourceIndex = new StaticObjectBakeSourceIndex(scope, input.attachments);
+	const sourceIndex = new StaticObjectBakeSourceIndex(scope, input.resources);
 	const resourceIdPrefix = item.task.ownerId;
 	const partitionPlan = partitionStaticObjectBatches(scope, {
 		placementSnapshot: requireObjectVisualTexturePlacementSnapshot(
@@ -419,7 +394,7 @@ function bakeStaticObjectBatchItem(
 }
 
 function createStaticObjectRecipePublication(options: {
-	readonly input: StaticBakeBatchInput;
+	readonly input: StaticBakeJobInput;
 	readonly payload: StaticObjectBatchPayload;
 	readonly resourceIdPrefix: string;
 	readonly task: StaticBakeTask;
@@ -429,7 +404,7 @@ function createStaticObjectRecipePublication(options: {
 	readonly textureUses: readonly StaticBakeTextureUse[];
 } {
 	const expansion = createStaticObjectVisualBundleExpansion({
-		attachments: options.input.attachments,
+		attachments: options.input.resources,
 		payload: options.payload,
 	});
 	if (expansion.resolution.kind === "missing-dependencies") {
@@ -475,7 +450,7 @@ function createStaticObjectRecipePublication(options: {
 }
 
 function createStaticObjectBakeDiagnostics(options: {
-	readonly input: StaticBakeBatchInput;
+	readonly input: StaticBakeJobInput;
 	readonly instancedOutput: {
 		readonly instances: readonly StaticObjectRenderInstance[];
 		readonly resources: readonly StaticObjectVisualResource[];
@@ -557,7 +532,7 @@ function createStaticObjectBakeDiagnostics(options: {
 		skippedPartitionCount:
 			options.partitionPlan.partitions.length -
 			options.renderablePartitionCount,
-		bakeBatchId: options.input.bakeBatchId,
+		taskId: options.input.task.taskId,
 		uniqueSourceCount: uniqueSourceKeys.size,
 		uniqueSourcePartGeometryCount: uniqueSourcePartGeometryKeys.size,
 		uniqueSourceTriangleCount,
@@ -1191,7 +1166,7 @@ class StaticObjectBakeSourceIndex {
 
 	constructor(
 		payload: StaticObjectBatchPayload,
-		attachments: StaticBakeBatchInput["attachments"],
+		resources: StaticBakeJobInput["resources"],
 	) {
 		for (const object of payload.objects) {
 			this.#objectsByKey.set(createObjectKey(object.identity), object);
@@ -1199,7 +1174,7 @@ class StaticObjectBakeSourceIndex {
 		for (const source of payload.sourceAssets) {
 			this.#sourcesByKey.set(createSourceKey(source.identity), source);
 		}
-		for (const geometry of attachments.staticObjectSourceGeometry) {
+		for (const geometry of resources.staticObjectSourceGeometry) {
 			this.#geometryByKey.set(
 				describeStaticObjectCanonicalGeometryIdentity(geometry.identity),
 				geometry,

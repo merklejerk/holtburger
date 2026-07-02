@@ -3,9 +3,9 @@ import type {
 	EnvCellSystemStaticScopePayload,
 	StaticBakeTask,
 	EnvCellStaticObjectPlacementRecord,
-	StaticBakeBatchInput,
-	StaticBakeBatchItem,
-	StaticBakeBatchResult,
+	StaticBakeJobInput,
+	StaticBakeJobPayload,
+	StaticBakeJobResult,
 	StaticBakeTextureUse,
 	StaticBaker,
 	StaticDrawUnit,
@@ -46,8 +46,8 @@ import {
 import {
 	createEnvCellCellStructureGeometryIdentity,
 	describeEnvCellCellStructureGeometryIdentity,
-} from "./env-cell-system-geometry-attachments";
-import { bakeStaticObjectBatch } from "../../objects/bake/static-object-batch-baker";
+} from "./env-cell-system-geometry-resources";
+import { bakeStaticObjectJob } from "../../objects/bake/static-object-job-baker";
 import { createStaticObjectVisualRecipeInstallPublication } from "../../bake/object-visual-recipe-install-publication";
 import { createObjectVisualInstallSet } from "../../../visual/object-visual-install-set";
 import {
@@ -107,144 +107,121 @@ interface EnvCellSystemBakeItemResult {
 }
 
 export class EnvCellSystemBaker implements StaticBaker {
-	async bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
+	async bake(input: StaticBakeJobInput): Promise<StaticBakeJobResult> {
 		return bakeEnvCellSystem(input);
 	}
 }
 
 export function bakeEnvCellSystem(
-	input: StaticBakeBatchInput,
-): StaticBakeBatchResult {
+	input: StaticBakeJobInput,
+): StaticBakeJobResult {
 	if (input.domain !== "env-cell-system") {
 		throw new Error(
-			`Landblock env-cell baker only supports landblock env-cell batches. Received ${input.domain}.`,
+			`Landblock env-cell baker only supports landblock env-cell jobs. Received ${input.domain}.`,
 		);
 	}
 
 	validateGeometryAttachments(input);
 
-	const itemResults = input.items.map((item) =>
-		bakeLandblockEnvCellItem(input, item),
-	);
-	const staticObjectResult = bakeStaticObjectBatch(input);
-	const drawUnits = [
-		...staticObjectResult.drawUnits,
-	];
+	const item = { payload: input.payload, task: input.task };
+	const itemResult = bakeLandblockEnvCellItem(input, item);
+	const staticObjectResult = bakeStaticObjectJob(input);
+	const drawUnits = [...staticObjectResult.drawUnits];
 	const textureDependencies = [
-		...itemResults.flatMap((result) => result.textureDependencies),
+		...itemResult.textureDependencies,
 		...staticObjectResult.textureDependencies,
 	];
 	const objectVisualInstallSet = createObjectVisualInstallSet({
 		directDrawUnits: [
-			...itemResults.flatMap(
-				(result) => result.objectVisualInstallSet.directDrawUnits,
-			),
+			...itemResult.objectVisualInstallSet.directDrawUnits,
 			...staticObjectResult.objectVisualInstallSet.directDrawUnits,
 		],
 		dynamicAnimationPartBindings: [
-			...itemResults.flatMap(
-				(result) => result.objectVisualInstallSet.dynamicAnimationPartBindings,
-			),
+			...itemResult.objectVisualInstallSet.dynamicAnimationPartBindings,
 			...staticObjectResult.objectVisualInstallSet.dynamicAnimationPartBindings,
 		],
 		renderInstances: staticObjectResult.objectVisualInstallSet.renderInstances,
 		textureDependencies: [
-			...itemResults.flatMap(
-				(result) => result.objectVisualInstallSet.textureDependencies,
-			),
+			...itemResult.objectVisualInstallSet.textureDependencies,
 			...staticObjectResult.objectVisualInstallSet.textureDependencies,
 		],
 		visualResources: staticObjectResult.objectVisualInstallSet.visualResources,
 	});
 	return {
 		atlasRegistryUpdates: [],
-		buildRevision: Math.max(
-			...input.items.map((item) => item.payload.sourceRevision),
-			0,
-		),
+		buildRevision: input.payload.sourceRevision,
 		domain: input.domain,
 		drawUnits,
 		staticObjectBakeDiagnostics: staticObjectResult.staticObjectBakeDiagnostics,
 		materialCoverage: [
-			...itemResults.map((result) => result.materialCoverage),
+			itemResult.materialCoverage,
 			...staticObjectResult.materialCoverage.filter(
 				(coverage) => coverage.materialCount > 0 || coverage.partitionCount > 0,
 			),
 		],
 		objectVisualInstallSet,
-		portalApertureResources: itemResults
-			.flatMap((result) => result.portalApertureResources)
-			.concat(staticObjectResult.portalApertureResources),
+		portalApertureResources: itemResult.portalApertureResources.concat(
+			staticObjectResult.portalApertureResources,
+		),
 		revision: input.revision,
-		envCellStaticObjectPlacementRecords: itemResults.flatMap(
-			(result) => result.envCellStaticObjectPlacementRecords,
+		envCellStaticObjectPlacementRecords:
+			itemResult.envCellStaticObjectPlacementRecords,
+		staticPortalGraphs: itemResult.staticPortalGraphs.concat(
+			staticObjectResult.staticPortalGraphs,
 		),
-		bakeBatchId: input.bakeBatchId,
-		staticPortalGraphs: itemResults
-			.flatMap((result) => result.staticPortalGraphs)
-			.concat(staticObjectResult.staticPortalGraphs),
-		staticPortalInteriorRecords: itemResults.flatMap(
-			(result) => result.staticPortalInteriorRecords,
+		staticPortalInteriorRecords: itemResult.staticPortalInteriorRecords,
+		staticSourceMappings: itemResult.staticSourceMappings,
+		staticSpatialRecords: itemResult.staticSpatialRecords.concat(
+			staticObjectResult.staticSpatialRecords,
 		),
-		staticSourceMappings: itemResults.flatMap(
-			(result) => result.staticSourceMappings,
-		),
-		staticSpatialRecords: itemResults
-			.flatMap((result) => result.staticSpatialRecords)
-			.concat(staticObjectResult.staticSpatialRecords),
-		staticVisibilityRecords: itemResults.flatMap(
-			(result) => result.staticVisibilityRecords,
-		),
+		staticVisibilityRecords: itemResult.staticVisibilityRecords,
 		textureUses: mergeTextureUses([
-			...itemResults.flatMap((result) => result.textureUses),
+			...itemResult.textureUses,
 			...staticObjectResult.textureUses,
 		]),
 		textureDependencies,
-		tasks: input.items.map((item) => item.task),
+		task: input.task,
 	};
 }
 
-function validateGeometryAttachments(input: StaticBakeBatchInput): void {
-	for (const item of input.items) {
-		if (item.payload.scope.kind !== "env-cell-system") {
+function validateGeometryAttachments(input: StaticBakeJobInput): void {
+	if (input.payload.scope.kind !== "env-cell-system") {
+		return;
+	}
+
+	for (const envCell of input.payload.scope.envCells) {
+		if (envCell.renderGeometry.triangleCount === 0) {
 			continue;
 		}
 
-		for (const envCell of item.payload.scope.envCells) {
-			if (envCell.renderGeometry.triangleCount === 0) {
-				continue;
-			}
-
-			const identity = createEnvCellCellStructureGeometryIdentity({ envCell });
-			const identityKey =
-				describeEnvCellCellStructureGeometryIdentity(identity);
-			const attachment = input.attachments.envCellCellStructureGeometry.find(
-				(candidate) =>
-					describeEnvCellCellStructureGeometryIdentity(candidate.identity) ===
-					identityKey,
+		const identity = createEnvCellCellStructureGeometryIdentity({ envCell });
+		const identityKey = describeEnvCellCellStructureGeometryIdentity(identity);
+		const resource = input.resources.envCellCellStructureGeometry.find(
+			(candidate) =>
+				describeEnvCellCellStructureGeometryIdentity(candidate.identity) ===
+				identityKey,
+		);
+		if (!resource) {
+			throw new Error(
+				`Missing env-cell cell-structure geometry resource ${identityKey}.`,
 			);
-			if (!attachment) {
-				throw new Error(
-					`Missing env-cell cell-structure geometry attachment ${identityKey}.`,
-				);
-			}
+		}
 
-			if (
-				attachment.sourceId !== envCell.renderGeometry.sourceId ||
-				attachment.buffer.vertexCount !== envCell.renderGeometry.vertexCount ||
-				attachment.buffer.triangleCount !== envCell.renderGeometry.triangleCount
-			) {
-				throw new Error(
-					`Stale env-cell cell-structure geometry attachment ${identityKey}; source/count metadata does not match resolver facts.`,
-				);
-			}
+		if (
+			resource.sourceId !== envCell.renderGeometry.sourceId ||
+			resource.buffer.vertexCount !== envCell.renderGeometry.vertexCount ||
+			resource.buffer.triangleCount !== envCell.renderGeometry.triangleCount
+		) {
+			throw new Error(
+				`Stale env-cell cell-structure geometry resource ${identityKey}; source/count metadata does not match resolver facts.`,
+			);
 		}
 	}
 }
 
 function bakeLandblockEnvCellItem(
-	input: StaticBakeBatchInput,
-	item: StaticBakeBatchItem,
+	input: StaticBakeJobInput,
+	item: StaticBakeJobPayload,
 ): EnvCellSystemBakeItemResult {
 	if (
 		item.task.domain !== "env-cell-system" ||
@@ -310,16 +287,16 @@ function bakeLandblockEnvCellItem(
 }
 
 function createStructuredInteriorObjectVisualPublication(options: {
-	readonly input: StaticBakeBatchInput;
+	readonly input: StaticBakeJobInput;
 	readonly payload: EnvCellSystemStaticScopePayload;
 	readonly task: StaticBakeTask;
 }): {
 	readonly installSet: ReturnType<typeof createObjectVisualInstallSet>;
-	readonly textureUses: StaticBakeBatchResult["textureUses"];
+	readonly textureUses: StaticBakeJobResult["textureUses"];
 } {
 	const publications = options.payload.envCells.map((envCell) =>
 		createStructuredInteriorVisualBundleExpansion({
-			attachments: options.input.attachments,
+			attachments: options.input.resources,
 			envCell,
 			payload: options.payload,
 			task: options.task,
@@ -379,7 +356,7 @@ function createStructuredInteriorObjectVisualPublication(options: {
 }
 
 function createStructuredInteriorDrawUnits(
-	input: StaticBakeBatchInput,
+	input: StaticBakeJobInput,
 	task: StaticBakeTask,
 	payload: EnvCellSystemStaticScopePayload,
 	materialPlansByEnvCellId: ReadonlyMap<
@@ -1036,7 +1013,6 @@ function createStructuredInteriorTextureUses(options: {
 		number,
 		StructuredInteriorCellMaterialPlan
 	>;
-	readonly bakeBatchId: string;
 	readonly task: StaticBakeTask;
 }): readonly StaticBakeTextureUse[] {
 	return createStaticMaterialTextureUses({
@@ -1045,10 +1021,9 @@ function createStructuredInteriorTextureUses(options: {
 				dataUse,
 				task: options.task,
 				wrapMode,
-			}),
+		}),
 		domain: "env-cell-system",
 		isStageableDataUse: isCurrentlyStageableStaticObjectDataUse,
-		bakeBatchId: options.bakeBatchId,
 		textureUseSpecs: options.drawUnits.flatMap((drawUnit) => {
 			const materialPlan = options.materialPlansByEnvCellId.get(
 				drawUnit.envCellId,
@@ -1208,23 +1183,23 @@ function createSourceTriangleId(
 }
 
 function requireGeometryAttachment(
-	input: StaticBakeBatchInput,
+	input: StaticBakeJobInput,
 	envCell: LandblockEnvCellStaticFacts,
 ): EnvCellCellStructureGeometryAttachment {
 	const identity = createEnvCellCellStructureGeometryIdentity({ envCell });
 	const identityKey = describeEnvCellCellStructureGeometryIdentity(identity);
-	const attachment = input.attachments.envCellCellStructureGeometry.find(
+	const resource = input.resources.envCellCellStructureGeometry.find(
 		(candidate) =>
 			describeEnvCellCellStructureGeometryIdentity(candidate.identity) ===
 			identityKey,
 	);
-	if (!attachment) {
+	if (!resource) {
 		throw new Error(
-			`Missing env-cell cell-structure geometry attachment ${identityKey}.`,
+			`Missing env-cell cell-structure geometry resource ${identityKey}.`,
 		);
 	}
 
-	return attachment;
+	return resource;
 }
 
 function createStructuredInteriorDrawUnitId(

@@ -20,11 +20,11 @@ import {
 	createClientRuntime,
 	type ClientRuntime,
 } from "../runtime/client-runtime";
-import { CompositeStaticBakeAttachmentProvider } from "../static/bake/attachments";
+import { CompositeStaticBakeResourceProvider } from "../static/bake/resources";
 import { StaticCoordinator } from "../static/coordinator/static-coordinator";
 import type {
-	StaticBakeBatchInput,
-	StaticBakeBatchResult,
+	StaticBakeJobInput,
+	StaticBakeJobResult,
 	StaticBaker,
 	StaticBakerDiagnosticsSnapshot,
 	StaticLandblockSceneLodResolution,
@@ -35,8 +35,8 @@ import type {
 	StaticScopePayload,
 } from "../static/contracts";
 import { ImmediateStaticBaker } from "../static/fake-workers";
-import { EnvCellSystemGeometryAttachmentProvider } from "../static/env-cells/bake/env-cell-system-geometry-attachments";
-import { StaticObjectBakeAttachmentProvider } from "../static/objects/bake/static-object-bake-attachments";
+import { EnvCellSystemGeometryResourceProvider } from "../static/env-cells/bake/env-cell-system-geometry-resources";
+import { StaticObjectBakeResourceProvider } from "../static/objects/bake/static-object-bake-resources";
 import {
 	StaticBakeWorkerClient,
 	WorkerPoolStaticBaker,
@@ -115,11 +115,11 @@ function createTauriStaticCoordinator(
 	});
 
 	return new StaticCoordinator({
-		attachmentProvider: new CompositeStaticBakeAttachmentProvider([
-			new StaticObjectBakeAttachmentProvider({
+		resourceProvider: new CompositeStaticBakeResourceProvider([
+			new StaticObjectBakeResourceProvider({
 				assetReader,
 			}),
-			new EnvCellSystemGeometryAttachmentProvider(),
+			new EnvCellSystemGeometryResourceProvider(),
 		]),
 		baker,
 		dynamicVisualBaker,
@@ -357,7 +357,7 @@ class BrowserStaticBaker implements StaticBaker {
 		this.#placeholderBaker = options.placeholderBaker;
 	}
 
-	bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
+	bake(input: StaticBakeJobInput): Promise<StaticBakeJobResult> {
 		if (this.#disposed) {
 			return Promise.reject(new Error("BrowserStaticBaker has been disposed."));
 		}
@@ -391,7 +391,7 @@ class BrowserStaticBaker implements StaticBaker {
 }
 
 export function shouldUseBrowserWorkerBaker(
-	domain: StaticBakeBatchInput["domain"],
+	domain: StaticBakeJobInput["domain"],
 ): boolean {
 	return (
 		domain === "outdoor-terrain" ||

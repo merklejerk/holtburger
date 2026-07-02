@@ -201,7 +201,6 @@ interface StaticCoordinatorTaskDiagnostics {
 	readonly phase: "requested" | "resolving" | "baking" | "failed";
 	readonly phaseAgeMs: number;
 	readonly phaseStartedAtMs: number;
-	readonly activeBakeBatchId: string | null;
 	readonly activeBakeStage: StaticActiveBakeStage | null;
 	readonly activeBakeStageAgeMs: number | null;
 	readonly activeBakeStageStartedAtMs: number | null;
@@ -270,11 +269,11 @@ interface StaticObjectBakeSampleDiagnostics {
 
 interface StaticCoordinatorTimingSummaryDiagnostics {
 	readonly reportCount: number;
-	readonly totalItemCount: number;
+	readonly totalJobCount: number;
 	readonly resolverMs: number;
 	readonly placementIntentMs: number;
 	readonly texturePlacementMs: number;
-	readonly attachmentMs: number;
+	readonly resourceMs: number;
 	readonly bakeMs: number;
 	readonly commitMs: number;
 	readonly slowestResolver: StaticCoordinatorTimingSampleDiagnostics | null;
@@ -283,11 +282,12 @@ interface StaticCoordinatorTimingSummaryDiagnostics {
 
 interface StaticCoordinatorTimingSampleDiagnostics {
 	readonly domain: StaticDomain;
-	readonly itemCount: number;
+	readonly scopeKey: string;
+	readonly taskId: string;
 	readonly resolverMs: number | null;
 	readonly placementIntentMs: number | null;
 	readonly texturePlacementMs: number | null;
-	readonly attachmentMs: number | null;
+	readonly resourceMs: number | null;
 	readonly bakeMs: number | null;
 	readonly commitMs: number | null;
 }

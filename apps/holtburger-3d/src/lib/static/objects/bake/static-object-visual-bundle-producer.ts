@@ -1,6 +1,6 @@
 import type {
 	MaterialTextureDataUseIdentity,
-	StaticBakeBatchAttachments,
+	StaticBakeJobResources,
 	StaticObjectInstanceIdentity,
 	StaticObjectMaterialSlotFacts,
 	StaticObjectPartSourceFacts,
@@ -67,7 +67,7 @@ export interface StaticObjectVisualRecipePlan {
 
 export function createStaticObjectVisualBundleExpansion(input: {
 	readonly attachments: Pick<
-		StaticBakeBatchAttachments,
+		StaticBakeJobResources,
 		"staticObjectSourceGeometry"
 	>;
 	readonly payload: StaticObjectBatchPayload;

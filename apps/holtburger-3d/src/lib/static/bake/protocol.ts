@@ -1,32 +1,32 @@
 import type {
-	StaticBakeBatchInput,
-	StaticBakeBatchResult,
+	StaticBakeJobInput,
+	StaticBakeJobResult,
 	StaticBakerTraceEvent,
 } from "../contracts";
 
 export type StaticBakeWorkerMainMessage = {
-	readonly kind: "bake-static-batch";
+	readonly kind: "bake-static-job";
 	readonly requestId: string;
-	readonly input: StaticBakeBatchInput;
+	readonly input: StaticBakeJobInput;
 };
 
 export type StaticBakeWorkerThreadMessage =
 	| {
-			readonly kind: "static-batch-bake-started";
+			readonly kind: "static-job-bake-started";
 			readonly requestId: string;
 	  }
 	| {
-			readonly kind: "static-batch-bake-trace";
+			readonly kind: "static-job-bake-trace";
 			readonly requestId: string;
 			readonly event: StaticBakerTraceEvent;
 	  }
 	| {
-			readonly kind: "static-batch-baked";
+			readonly kind: "static-job-baked";
 			readonly requestId: string;
-			readonly result: StaticBakeBatchResult;
+			readonly result: StaticBakeJobResult;
 	  }
 	| {
-			readonly kind: "static-batch-bake-failed";
+			readonly kind: "static-job-bake-failed";
 			readonly requestId: string;
 			readonly message: string;
 	  };

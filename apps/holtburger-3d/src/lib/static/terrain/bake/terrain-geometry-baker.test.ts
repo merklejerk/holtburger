@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type {
-	StaticBakeBatchInput,
+	StaticBakeJobInput,
 	StaticBakeTask,
 	TerrainGeometryStaticDrawUnit,
 	TerrainStaticScopePayload,
@@ -72,7 +72,7 @@ describe("terrain geometry baker", () => {
 			],
 			staticVisibilityRecords: [],
 			textureUses: [],
-			tasks: [input.items[0]?.task],
+			task: input.task,
 		});
 		expect(result.staticSourceMappings).toEqual([
 			{
@@ -200,8 +200,7 @@ describe("terrain geometry baker", () => {
 
 		expect(
 			createTerrainTexturePlacementIntents({
-				items: input.items,
-				bakeBatchId: input.bakeBatchId,
+				items: [{ payload: input.payload, task: input.task }],
 			}),
 		).toEqual([
 			expect.objectContaining({
@@ -339,27 +338,6 @@ describe("terrain geometry baker", () => {
 		});
 	});
 
-	it("bakes multiple terrain payloads as one static atlas batch", () => {
-		const input = createTerrainBakeInput(
-			{ includeTextureUse: true },
-			{
-				includeSecondLandblock: true,
-			},
-		);
-
-		const result = bakeTerrainGeometry(input);
-
-		expect(result.bakeBatchId).toBe("batch-a");
-		expect(result.tasks.map((task) => task.taskId)).toEqual([
-			"7:landblock:da55ffff:outdoor-terrain",
-			"7:landblock:da56ffff:outdoor-terrain",
-		]);
-		expect(result.drawUnits.map((drawUnit) => drawUnit.drawUnitId)).toEqual([
-			"terrain:0xda55ffff:terrain-geometry",
-			"terrain:0xda56ffff:terrain-geometry",
-		]);
-		expect(result.textureUses).toHaveLength(2);
-	});
 });
 
 function requireTerrainDrawUnit(
@@ -386,45 +364,25 @@ function createTerrainBakeInput(
 		readonly textureUseSurfaceTextureIds?: readonly number[];
 		readonly uniqueColorPages?: boolean;
 	} = {},
-	batchOptions: {
-		readonly includeSecondLandblock?: boolean;
-	} = {},
-): StaticBakeBatchInput {
+): StaticBakeJobInput {
 	const task = createTerrainTask(0xda55ffff);
 	const payload = createTerrainPayload(options, 0xda55ffff);
-	const items = [
-		{
-			payload: {
-				job: {
-					domain: task.domain,
-					scope: task.scope,
-				},
-				scope: payload,
-				sourceRevision: 42,
-			},
-			task,
-		},
-	];
-	if (batchOptions.includeSecondLandblock) {
-		const secondTask = createTerrainTask(0xda56ffff);
-		items.push({
-			payload: {
-				job: {
-					domain: secondTask.domain,
-					scope: secondTask.scope,
-				},
-				scope: createTerrainPayload(options, 0xda56ffff),
-				sourceRevision: 43,
-			},
-			task: secondTask,
-		});
-	}
-
-	const input: StaticBakeBatchInput = {
+	const input: StaticBakeJobInput = {
 		domain: "outdoor-terrain",
-		items,
+		payload: {
+			job: {
+				domain: task.domain,
+				scope: task.scope,
+			},
+			scope: payload,
+			sourceRevision: 42,
+		},
+		resources: {
+			envCellCellStructureGeometry: [],
+			staticObjectSourceGeometry: [],
+		},
 		revision: 7,
-		bakeBatchId: "batch-a",
+		task,
 	};
 	return {
 		...input,
@@ -433,12 +391,11 @@ function createTerrainBakeInput(
 }
 
 function createTexturePlacementSnapshot(
-	input: StaticBakeBatchInput,
+	input: StaticBakeJobInput,
 	options: { readonly uniqueColorPages?: boolean },
-): NonNullable<StaticBakeBatchInput["texturePlacementSnapshot"]> {
+): NonNullable<StaticBakeJobInput["texturePlacementSnapshot"]> {
 	const intents = createTerrainTexturePlacementIntents({
-		items: input.items,
-		bakeBatchId: input.bakeBatchId,
+		items: [{ payload: input.payload, task: input.task }],
 	});
 	return {
 		placementsByItemId: new Map(

@@ -2727,14 +2727,11 @@ function completeBakerWork(
 	result: Parameters<DeferredStaticBaker["complete"]>[1] = {},
 ): void {
 	const input = baker.pendingInputs.find((candidate) =>
-		candidate.items.some(
-			(item) =>
-				item.task.domain === domain &&
-				item.task.scope.kind === "landblock" &&
-				item.task.scope.landblockId === landblockId,
-		),
+		candidate.task.domain === domain &&
+		candidate.task.scope.kind === "landblock" &&
+		candidate.task.scope.landblockId === landblockId,
 	);
-	baker.complete(input?.bakeBatchId ?? failKey(), result);
+	baker.complete(input?.task.taskId ?? failKey(), result);
 }
 
 function createStaticLayerRecipeForSourceRequest(
@@ -4669,10 +4666,7 @@ function createImmediateStaticCoordinator(options: {
 }): StaticCoordinator {
 	return new StaticCoordinator({
 		baker: options.baker,
-		batching: {
-			maxPayloadsPerBatch: 8,
-			maxWaitMs: 0,
-		},
+		sourceReadyCoalescing: { maxWaitMs: 0 },
 		dynamicVisualBaker: new StaticAuthoredTestDynamicVisualBaker(),
 		dynamicVisualGeometryAssetReader: createResolvingAssetService(),
 		resolver: options.resolver,
@@ -4687,7 +4681,6 @@ function createBakeTextureUse(
 		domain: "outdoor-terrain",
 		owners: [{ drawUnitId, kind: "draw-unit" }],
 		source,
-		bakeBatchId: "batch-a",
 		textureUseId: `${drawUnitId}:prepared-texture:${source.renderSurface.renderSurfaceId
 			.toString(16)
 			.padStart(8, "0")}`,

@@ -5,12 +5,12 @@ import { createResolverEnvCellPreparedAssetView } from "../../../assets/preparat
 import { createHostAssetKey, describeHostAssetKey } from "../../../assets/keys";
 import type {
 	EnvCellSystemStaticScopePayload,
-	StaticBakeAttachmentRequest,
+	StaticBakeResourceRequest,
 } from "../../contracts";
 import type { EnvCellSystemLayerSourcePayloadDto } from "../../source-payloads";
-import { EnvCellSystemGeometryAttachmentProvider } from "./env-cell-system-geometry-attachments";
+import { EnvCellSystemGeometryResourceProvider } from "./env-cell-system-geometry-resources";
 
-describe("browser landblock env-cell geometry attachments", () => {
+describe("browser landblock env-cell geometry resources", () => {
 	it("attaches full cell-structure geometry from resolved source payloads", async () => {
 		const key = createHostAssetKey(
 			"landblock-scene-lod-env-cell-layer",
@@ -18,14 +18,14 @@ describe("browser landblock env-cell geometry attachments", () => {
 		);
 		const fullAsset = createPreparedAsset(key, createEnvCellSystemPayload());
 		const fullPayload = fullAsset.payload as EnvCellSystemLayerSourcePayloadDto;
-		const provider = new EnvCellSystemGeometryAttachmentProvider();
+		const provider = new EnvCellSystemGeometryResourceProvider();
 
-		const attachments = await provider.createAttachments(
-			createAttachmentRequest(fullPayload),
+		const resources = await provider.createResources(
+			createResourceRequest(fullPayload),
 		);
 
-		expect(attachments.staticObjectSourceGeometry).toEqual([]);
-		expect(attachments.envCellCellStructureGeometry).toEqual([
+		expect(resources.staticObjectSourceGeometry).toEqual([]);
+		expect(resources.envCellCellStructureGeometry).toEqual([
 			expect.objectContaining({
 				identity: {
 					cellStructure: {
@@ -74,21 +74,21 @@ describe("browser landblock env-cell geometry attachments", () => {
 		const resolverAsset = createResolverEnvCellPreparedAssetView(fullAsset);
 		const resolverPayload =
 			resolverAsset.payload as ResolverLandblockEnvCellLayerPayloadDto;
-		const provider = new EnvCellSystemGeometryAttachmentProvider();
+		const provider = new EnvCellSystemGeometryResourceProvider();
 
 		await expect(
-			provider.createAttachments(createAttachmentRequest(resolverPayload)),
+			provider.createResources(createResourceRequest(resolverPayload)),
 		).rejects.toThrow(
 			"renderGeometry.positions must be a Float32Array in prepared render geometry",
 		);
 	});
 });
 
-function createAttachmentRequest(
+function createResourceRequest(
 	payload:
 		| EnvCellSystemLayerSourcePayloadDto
 		| ResolverLandblockEnvCellLayerPayloadDto,
-): StaticBakeAttachmentRequest {
+): StaticBakeResourceRequest {
 	const domain = "env-cell-system";
 	const job = {
 		domain,
@@ -99,26 +99,21 @@ function createAttachmentRequest(
 	};
 	return {
 		domain,
-		items: [
-			{
-				payload: {
-					job,
-					scope: createScopePayload(payload),
-					sourceRevision: 1,
-				},
-				task: {
-					domain,
-					ownerId: "env-cell-system:0xda55ffff",
-					ownerKey: { kind: "env-cell-system", landblockId: 0xda55ffff },
-					revision: 1,
-					scope: job.scope,
-					scopeKey: "landblock:da55ffff",
-					taskId: "task:env-cell-geometry-attachments",
-				},
-			},
-		],
+		payload: {
+			job,
+			scope: createScopePayload(payload),
+			sourceRevision: 1,
+		},
 		revision: 1,
-		bakeBatchId: "static-batch:env-cell-geometry",
+		task: {
+			domain,
+			ownerId: "env-cell-system:0xda55ffff",
+			ownerKey: { kind: "env-cell-system", landblockId: 0xda55ffff },
+			revision: 1,
+			scope: job.scope,
+			scopeKey: "landblock:da55ffff",
+			taskId: "task:env-cell-geometry-resources",
+		},
 	};
 }
 

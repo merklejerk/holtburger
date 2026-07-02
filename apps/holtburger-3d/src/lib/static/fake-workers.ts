@@ -1,6 +1,6 @@
 import type {
-	StaticBakeBatchInput,
-	StaticBakeBatchResult,
+	StaticBakeJobInput,
+	StaticBakeJobResult,
 	StaticBaker,
 	StaticAuthoredDynamicRecipe,
 	StaticDomain,
@@ -224,60 +224,57 @@ export class DeferredStaticResolver
 }
 
 export class DeferredStaticBaker implements StaticBaker {
-	readonly #pending: StaticBakeBatchInput[] = [];
+	readonly #pending: StaticBakeJobInput[] = [];
 	readonly #resolvers = new Map<
 		string,
 		{
-			readonly resolve: (result: StaticBakeBatchResult) => void;
+			readonly resolve: (result: StaticBakeJobResult) => void;
 			readonly reject: (error: Error) => void;
 		}
 	>();
 
-	bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
+	bake(input: StaticBakeJobInput): Promise<StaticBakeJobResult> {
 		this.#pending.push(input);
 
 		return new Promise((resolve, reject) => {
-			this.#resolvers.set(input.bakeBatchId, { reject, resolve });
+			this.#resolvers.set(input.task.taskId, { reject, resolve });
 		});
 	}
 
-	get pendingInputs(): readonly StaticBakeBatchInput[] {
+	get pendingInputs(): readonly StaticBakeJobInput[] {
 		return this.#pending;
 	}
 
 	complete(
-		bakeBatchId: string,
+		taskId: string,
 		result: Partial<
-			Omit<
-				StaticBakeBatchResult,
-				"domain" | "revision" | "bakeBatchId" | "tasks"
-			>
+			Omit<StaticBakeJobResult, "domain" | "revision" | "task">
 		> = {},
 	): void {
 		const input = this.#pending.find(
-			(candidate) => candidate.bakeBatchId === bakeBatchId,
+			(candidate) => candidate.task.taskId === taskId,
 		);
-		const resolver = input ? this.#resolvers.get(input.bakeBatchId) : null;
+		const resolver = input ? this.#resolvers.get(input.task.taskId) : null;
 
 		if (!input || !resolver) {
-			throw new Error(`No pending bake batch exists for ${bakeBatchId}.`);
+			throw new Error(`No pending static bake job exists for ${taskId}.`);
 		}
 
-		this.#resolvers.delete(input.bakeBatchId);
+		this.#resolvers.delete(input.task.taskId);
 		resolver.resolve(createFakeStaticBakeResult(input, result));
 	}
 
-	fail(bakeBatchId: string, error: Error): void {
+	fail(taskId: string, error: Error): void {
 		const input = this.#pending.find(
-			(candidate) => candidate.bakeBatchId === bakeBatchId,
+			(candidate) => candidate.task.taskId === taskId,
 		);
-		const resolver = input ? this.#resolvers.get(input.bakeBatchId) : null;
+		const resolver = input ? this.#resolvers.get(input.task.taskId) : null;
 
 		if (!input || !resolver) {
-			throw new Error(`No pending bake batch exists for ${bakeBatchId}.`);
+			throw new Error(`No pending static bake job exists for ${taskId}.`);
 		}
 
-		this.#resolvers.delete(input.bakeBatchId);
+		this.#resolvers.delete(input.task.taskId);
 		resolver.reject(error);
 	}
 }
@@ -311,22 +308,20 @@ export class ImmediateStaticResolver
 }
 
 export class ImmediateStaticBaker implements StaticBaker {
-	async bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
+	async bake(input: StaticBakeJobInput): Promise<StaticBakeJobResult> {
 		return createFakeStaticBakeResult(input);
 	}
 }
 
 function createFakeStaticBakeResult(
-	input: StaticBakeBatchInput,
+	input: StaticBakeJobInput,
 	result: Partial<
-		Omit<StaticBakeBatchResult, "domain" | "revision" | "bakeBatchId" | "tasks">
+		Omit<StaticBakeJobResult, "domain" | "revision" | "task">
 	> = {},
-): StaticBakeBatchResult {
+): StaticBakeJobResult {
 	return {
 		atlasRegistryUpdates: result.atlasRegistryUpdates ?? [],
-		buildRevision:
-			result.buildRevision ??
-			Math.max(...input.items.map((item) => item.payload.sourceRevision), 0),
+		buildRevision: result.buildRevision ?? input.payload.sourceRevision,
 		domain: input.domain,
 		drawUnits: result.drawUnits ?? [],
 		staticObjectBakeDiagnostics: result.staticObjectBakeDiagnostics ?? [],
@@ -342,8 +337,7 @@ function createFakeStaticBakeResult(
 		staticSourceMappings: result.staticSourceMappings ?? [],
 		staticSpatialRecords: result.staticSpatialRecords ?? [],
 		staticVisibilityRecords: result.staticVisibilityRecords ?? [],
-		bakeBatchId: input.bakeBatchId,
-		tasks: input.items.map((item) => item.task),
+		task: input.task,
 		textureDependencies: result.textureDependencies ?? [],
 		textureUses: result.textureUses ?? [],
 	};

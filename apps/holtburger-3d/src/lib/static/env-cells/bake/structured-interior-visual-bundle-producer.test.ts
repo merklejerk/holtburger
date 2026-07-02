@@ -13,7 +13,7 @@ import type {
 	StaticBakeTask,
 	StaticObjectMaterialSourceFacts,
 } from "../../contracts";
-import { createEnvCellCellStructureGeometryIdentity } from "./env-cell-system-geometry-attachments";
+import { createEnvCellCellStructureGeometryIdentity } from "./env-cell-system-geometry-resources";
 import { createStructuredInteriorVisualBundleExpansion } from "./structured-interior-visual-bundle-producer";
 
 const TEST_LANDBLOCK_ID = 0xda55ffff;

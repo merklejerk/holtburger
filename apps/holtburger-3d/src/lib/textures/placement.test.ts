@@ -160,13 +160,12 @@ describe("texture placement vocabulary bridge", () => {
 		});
 	});
 
-	it("derives one static-authored bucket across different source-ready closures", () => {
+	it("derives one static-authored bucket across different placement affinities", () => {
 		const source = createPreparedDataUse("rgba-color");
 		const firstIntent = createStaticTexturePlacementIntent(
 			createStaticTextureUse({
 				domain: "outdoor-generated-scenery",
 				source,
-				bakeBatchId: "static-batch:first-closure",
 				textureUseId: "scenery:base:06000050:first",
 			}),
 			{ affinityKey: "setup-model/020003e5" },
@@ -175,7 +174,6 @@ describe("texture placement vocabulary bridge", () => {
 			createStaticTextureUse({
 				domain: "outdoor-generated-scenery",
 				source,
-				bakeBatchId: "static-batch:second-closure",
 				textureUseId: "scenery:base:06000050:second",
 			}),
 			{ affinityKey: "setup-model/020003e5:alternate" },
@@ -285,7 +283,6 @@ describe("texture placement vocabulary bridge", () => {
 function createStaticTextureUse(options: {
 	readonly domain: VisualTextureDomain;
 	readonly source: MaterialTextureDataUseIdentity;
-	readonly bakeBatchId?: string;
 	readonly textureUseId: string;
 }): StaticBakeTextureUse {
 	if (options.domain === "runtime-object-material") {
@@ -299,7 +296,6 @@ function createStaticTextureUse(options: {
 			wrapT: "clamp-to-edge",
 		},
 		source: options.source,
-		bakeBatchId: options.bakeBatchId ?? "static-batch:test",
 		textureUseId: options.textureUseId,
 	};
 }

@@ -4,7 +4,7 @@ import type {
 	LandblockEnvCellStaticFacts,
 	EnvCellSystemStaticScopePayload,
 	RegionDetailRoleFacts,
-	StaticBakeBatchInput,
+	StaticBakeJobInput,
 	StaticBakeTask,
 	StaticObjectMaterialSourceFacts,
 	StaticObjectPaletteSourceFacts,
@@ -13,7 +13,7 @@ import type {
 } from "../../contracts";
 import { createStaticObjectSourceGeometryIdentity } from "../../objects/static-object-source-assets";
 import { bakeEnvCellSystem } from "./env-cell-system-baker";
-import { createEnvCellCellStructureGeometryIdentity } from "./env-cell-system-geometry-attachments";
+import { createEnvCellCellStructureGeometryIdentity } from "./env-cell-system-geometry-resources";
 import { createStructuredInteriorTexturePlacementIntents } from "./structured-interior-placement-planner";
 import {
 	objectVisualGeometryBufferId,
@@ -36,9 +36,8 @@ describe("browser landblock env-cell baker", () => {
 					triangleCount: 0,
 				}),
 			],
-			bakeBatchId: "env-batch-a",
 			textureUses: [],
-			tasks: [input.items[0]?.task],
+			task: input.task,
 		});
 		expect(result.staticSpatialRecords).toEqual([
 			expect.objectContaining({
@@ -138,7 +137,7 @@ describe("browser landblock env-cell baker", () => {
 				domain: "outdoor-terrain",
 			}),
 		).toThrow(
-			"Landblock env-cell baker only supports landblock env-cell batches. Received outdoor-terrain.",
+			"Landblock env-cell baker only supports landblock env-cell jobs. Received outdoor-terrain.",
 		);
 	});
 
@@ -218,7 +217,7 @@ describe("browser landblock env-cell baker", () => {
 		const input = createInputWithRenderableCellStructure();
 
 		expect(() => bakeEnvCellSystem(input)).toThrow(
-			"Missing env-cell cell-structure geometry attachment env-cell-cell-structure-geometry|landblock:da55ffff|env-cell:da550100|environment:0e000001|cell-structure:0d000001.",
+			"Missing env-cell cell-structure geometry resource env-cell-cell-structure-geometry|landblock:da55ffff|env-cell:da550100|environment:0e000001|cell-structure:0d000001.",
 		);
 	});
 
@@ -230,7 +229,7 @@ describe("browser landblock env-cell baker", () => {
 
 		const result = bakeEnvCellSystem({
 			...input,
-			attachments: {
+			resources: {
 				envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
 				staticObjectSourceGeometry: [],
 			},
@@ -268,7 +267,7 @@ describe("browser landblock env-cell baker", () => {
 
 		const result = bakeEnvCellSystem({
 			...input,
-			attachments: {
+			resources: {
 				envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
 				staticObjectSourceGeometry: [],
 			},
@@ -352,12 +351,11 @@ describe("browser landblock env-cell baker", () => {
 		const envCell = requireFirstEnvCell(input);
 
 		const intents = createStructuredInteriorTexturePlacementIntents({
-			items: input.items,
-			bakeBatchId: input.bakeBatchId,
+			items: [{ payload: input.payload, task: input.task }],
 		});
 		const result = bakeEnvCellSystem({
 			...input,
-			attachments: {
+			resources: {
 				envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
 				staticObjectSourceGeometry: [],
 			},
@@ -412,7 +410,7 @@ describe("browser landblock env-cell baker", () => {
 		expect(() =>
 			bakeEnvCellSystem({
 				...input,
-				attachments: {
+				resources: {
 					envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
 					staticObjectSourceGeometry: [],
 				},
@@ -443,7 +441,7 @@ describe("browser landblock env-cell baker", () => {
 
 		const result = bakeEnvCellSystem({
 			...input,
-			attachments: {
+			resources: {
 				envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
 				staticObjectSourceGeometry: [],
 			},
@@ -497,7 +495,7 @@ describe("browser landblock env-cell baker", () => {
 
 		const result = bakeEnvCellSystem({
 			...input,
-			attachments: {
+			resources: {
 				envCellCellStructureGeometry: [
 					createGeometryAttachment(envCell, {
 						positions: new Float32Array([0, 1, 0, 0, 0, 1, 1, 0, 0]),
@@ -566,13 +564,9 @@ function createInputWithRenderableCellStructure(
 		}[];
 		readonly textureRefs?: readonly StaticObjectTextureRefFacts[];
 	} = {},
-): StaticBakeBatchInput {
+): StaticBakeJobInput {
 	const input = createInput();
-	const item = input.items[0];
-	if (!item) {
-		throw new Error("Missing fixture item.");
-	}
-	const scope = item.payload.scope;
+	const scope = input.payload.scope;
 	if (scope?.kind !== "env-cell-system") {
 		throw new Error("Missing fixture env-cell scope.");
 	}
@@ -586,75 +580,67 @@ function createInputWithRenderableCellStructure(
 
 	return {
 		...input,
-		attachments: {
+		resources: {
 			envCellCellStructureGeometry: [],
 			staticObjectSourceGeometry: [],
 		},
-		items: [
-			{
-				...item,
-				payload: {
-					...item.payload,
-					scope: {
-						...scope,
-						envCells: [
-							{
-								...envCell,
-								renderGeometry: {
-									...envCell.renderGeometry,
-									sourceId: 0xda550100,
-									surfaceIds: renderSurfaces.map((_surface, slotId) => slotId),
-									triangleCount: renderSurfaces.length,
-									triangles: renderSurfaces.map((surface, index) => ({
-										firstVertex: index * 3,
-										materialVariantSignature: null,
-										polygonId: surface.polygonId,
-										surfaceId: index,
-									})),
-									vertexCount: renderSurfaces.length * 3,
-								},
-								localPlacement:
-									options.localPlacement ?? envCell.localPlacement,
-								surfaces: renderSurfaces.map((surface, slotId) => ({
-									material: {
-										kind: "static-material-source" as const,
-										materialId: surface.materialId,
-									},
-									slotId,
-									surfaceId: surface.materialId,
-								})),
-							},
-						],
-						materialSources:
-							options.includeMaterialSources === false
-								? []
-								: (options.materialSources ?? [
-										createStaticObjectMaterialSource({
-											materialId: 0x08000010,
-										}),
-									]),
-						paletteSources: options.paletteSources ?? scope.paletteSources,
-						regionRenderProfile: {
-							...scope.regionRenderProfile,
-							detailRoles:
-								options.detailRoles ?? scope.regionRenderProfile.detailRoles,
+		payload: {
+			...input.payload,
+			scope: {
+				...scope,
+				envCells: [
+					{
+						...envCell,
+						renderGeometry: {
+							...envCell.renderGeometry,
+							sourceId: 0xda550100,
+							surfaceIds: renderSurfaces.map((_surface, slotId) => slotId),
+							triangleCount: renderSurfaces.length,
+							triangles: renderSurfaces.map((surface, index) => ({
+								firstVertex: index * 3,
+								materialVariantSignature: null,
+								polygonId: surface.polygonId,
+								surfaceId: index,
+							})),
+							vertexCount: renderSurfaces.length * 3,
 						},
-						textureRefs: options.textureRefs ?? scope.textureRefs,
+						localPlacement: options.localPlacement ?? envCell.localPlacement,
+						surfaces: renderSurfaces.map((surface, slotId) => ({
+							material: {
+								kind: "static-material-source" as const,
+								materialId: surface.materialId,
+							},
+							slotId,
+							surfaceId: surface.materialId,
+						})),
 					},
+				],
+				materialSources:
+					options.includeMaterialSources === false
+						? []
+						: (options.materialSources ?? [
+								createStaticObjectMaterialSource({
+									materialId: 0x08000010,
+								}),
+							]),
+				paletteSources: options.paletteSources ?? scope.paletteSources,
+				regionRenderProfile: {
+					...scope.regionRenderProfile,
+					detailRoles: options.detailRoles ?? scope.regionRenderProfile.detailRoles,
 				},
+				textureRefs: options.textureRefs ?? scope.textureRefs,
 			},
-		],
+		},
 	};
 }
 
 function requireFirstEnvCell(
-	input: StaticBakeBatchInput,
+	input: StaticBakeJobInput,
 ): LandblockEnvCellStaticFacts {
-	const item = input.items[0];
-	if (!item || item.payload.scope.kind !== "env-cell-system") {
+	if (input.payload.scope.kind !== "env-cell-system") {
 		throw new Error("Missing fixture env-cell scope.");
 	}
-	const envCell = item.payload.scope.envCells[0];
+	const envCell = input.payload.scope.envCells[0];
 	if (!envCell) {
 		throw new Error("Missing fixture env cell.");
 	}
@@ -667,13 +653,12 @@ function createInputWithRenderableStaticSeed(
 		readonly envCellLocalPlacement?: LandblockEnvCellStaticFacts["localPlacement"];
 		readonly seedLocalPlacement?: LandblockEnvCellStaticFacts["staticObjectPlacements"][number]["localPlacement"];
 	} = {},
-): StaticBakeBatchInput {
+): StaticBakeJobInput {
 	const input = createInput();
-	const item = input.items[0];
-	if (!item || item.payload.scope.kind !== "env-cell-system") {
+	if (input.payload.scope.kind !== "env-cell-system") {
 		throw new Error("Missing fixture env-cell scope.");
 	}
-	const scope = item.payload.scope;
+	const scope = input.payload.scope;
 	const envCell = scope.envCells[0];
 	if (!envCell) {
 		throw new Error("Missing fixture env cell.");
@@ -691,7 +676,7 @@ function createInputWithRenderableStaticSeed(
 
 	return {
 		...input,
-		attachments: {
+		resources: {
 			envCellCellStructureGeometry: [],
 			staticObjectSourceGeometry: [
 				{
@@ -719,36 +704,27 @@ function createInputWithRenderableStaticSeed(
 				},
 			],
 		},
-		items: [
-			{
-				...item,
-				payload: {
-					...item.payload,
-					scope: {
-						...scope,
-						envCells: [
-							{
-								...envCell,
-								localPlacement:
-									options.envCellLocalPlacement ?? envCell.localPlacement,
-								staticObjectPlacements: envCell.staticObjectPlacements.map(
-									(seed) => ({
-										...seed,
-										identity: seedIdentity,
-										localPlacement:
-											options.seedLocalPlacement ?? seed.localPlacement,
-									}),
-								),
-							},
-						],
-						materialSources: [material],
-						paletteSources: [],
-						sourceAssets: [source],
-						textureRefs: [],
+		payload: {
+			...input.payload,
+			scope: {
+				...scope,
+				envCells: [
+					{
+						...envCell,
+						localPlacement: options.envCellLocalPlacement ?? envCell.localPlacement,
+						staticObjectPlacements: envCell.staticObjectPlacements.map((seed) => ({
+							...seed,
+							identity: seedIdentity,
+							localPlacement: options.seedLocalPlacement ?? seed.localPlacement,
+						})),
 					},
-				},
+				],
+				materialSources: [material],
+				paletteSources: [],
+				sourceAssets: [source],
+				textureRefs: [],
 			},
-		],
+		},
 	};
 }
 
@@ -759,13 +735,12 @@ function createInputWithEnvCellStaticSource(
 		readonly sourceDid: number;
 		readonly sourceScale?: LandblockEnvCellStaticFacts["staticObjectPlacements"][number]["sourceScale"];
 	},
-): StaticBakeBatchInput {
+): StaticBakeJobInput {
 	const input = createInput();
-	const item = input.items[0];
-	if (!item || item.payload.scope.kind !== "env-cell-system") {
+	if (input.payload.scope.kind !== "env-cell-system") {
 		throw new Error("Missing fixture env-cell scope.");
 	}
-	const scope = item.payload.scope;
+	const scope = input.payload.scope;
 	const envCell = scope.envCells[0];
 	if (!envCell) {
 		throw new Error("Missing fixture env cell.");
@@ -773,35 +748,28 @@ function createInputWithEnvCellStaticSource(
 
 	return {
 		...input,
-		items: [
-			{
-				...item,
-				payload: {
-					...item.payload,
-					scope: {
-						...scope,
-						envCells: [
-							{
-								...envCell,
-								staticObjectPlacements: envCell.staticObjectPlacements.map(
-									(seed) => ({
-										...seed,
-										debug: { sourceAssetId: options.sourceAssetId },
-										source: {
-											kind: "static-object-source" as const,
-											sourceAssetKind: "setup-model" as const,
-											sourceDid: options.sourceDid,
-										},
-										sourceScale: options.sourceScale ?? seed.sourceScale,
-									}),
-								),
+		payload: {
+			...input.payload,
+			scope: {
+				...scope,
+				envCells: [
+					{
+						...envCell,
+						staticObjectPlacements: envCell.staticObjectPlacements.map((seed) => ({
+							...seed,
+							debug: { sourceAssetId: options.sourceAssetId },
+							source: {
+								kind: "static-object-source" as const,
+								sourceAssetKind: "setup-model" as const,
+								sourceDid: options.sourceDid,
 							},
-						],
-						sourceAssets: [source],
+							sourceScale: options.sourceScale ?? seed.sourceScale,
+						})),
 					},
-				},
+				],
+				sourceAssets: [source],
 			},
-		],
+		},
 	};
 }
 
@@ -976,11 +944,11 @@ function createDetailTextureRefs(): readonly StaticObjectTextureRefFacts[] {
 }
 
 function createStructuredInteriorPlacementSnapshot(
-	input: StaticBakeBatchInput,
+	input: StaticBakeJobInput,
 	options: { readonly uniquePages?: boolean } = {},
-): NonNullable<StaticBakeBatchInput["texturePlacementSnapshot"]> {
+): NonNullable<StaticBakeJobInput["texturePlacementSnapshot"]> {
 	const intents = createStructuredInteriorTexturePlacementIntents({
-		items: input.items,
+		items: [{ payload: input.payload, task: input.task }],
 	});
 	return {
 		itemIdsByTextureUseId: new Map(
@@ -1160,7 +1128,7 @@ function createInput(
 		readonly portalApertureResources?: EnvCellSystemStaticScopePayload["portalApertureResources"];
 		readonly portalConnectivityGraph?: EnvCellSystemStaticScopePayload["portalConnectivityGraph"];
 	} = {},
-): StaticBakeBatchInput {
+): StaticBakeJobInput {
 	const task: StaticBakeTask = {
 		domain: "env-cell-system",
 		ownerId: "env-cell-system:0xda55ffff",
@@ -1178,19 +1146,13 @@ function createInput(
 	};
 
 	return {
-		attachments: {
-			envCellCellStructureGeometry: [],
-			staticObjectSourceGeometry: [],
-		},
 		domain: "env-cell-system",
-		items: [
-			{
-				payload: {
-					job: {
-						domain: task.domain,
-						scope: task.scope,
-					},
-					scope: {
+		payload: {
+			job: {
+				domain: task.domain,
+				scope: task.scope,
+			},
+			scope: {
 						acceptedEnvCellIds: [0xda550100],
 						envCells: [
 							{
@@ -1308,14 +1270,15 @@ function createInput(
 						sourceAssets: [],
 						textureRefs: [],
 						visibilityDiagnostics: [],
-					},
-					sourceRevision: 42,
-				},
-				task,
 			},
-		],
+			sourceRevision: 42,
+		},
 		revision: 7,
-		bakeBatchId: "env-batch-a",
+		resources: {
+			envCellCellStructureGeometry: [],
+			staticObjectSourceGeometry: [],
+		},
+		task,
 		texturePlacementSnapshot: {
 			itemIdsByTextureUseId: new Map(),
 			placementsByItemId: new Map(),

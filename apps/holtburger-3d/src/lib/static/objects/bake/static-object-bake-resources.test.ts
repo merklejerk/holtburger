@@ -9,16 +9,16 @@ import { createHostAssetKey, describeHostAssetKey } from "../../../assets/keys";
 import type {
 	EnvCellSystemStaticScopePayload,
 	OutdoorStaticObjectsScopePayload,
-	StaticBakeAttachmentRequest,
+	StaticBakeResourceRequest,
 	StaticObjectPartSourceFacts,
 	StaticObjectSourceGeometryIdentity,
 	StaticObjectSourceIdentity,
 } from "../../contracts";
 import { createStaticObjectSourceGeometryIdentity } from "../static-object-source-assets";
-import { StaticObjectBakeAttachmentProvider } from "./static-object-bake-attachments";
+import { StaticObjectBakeResourceProvider } from "./static-object-bake-resources";
 
-describe("static object bake attachments", () => {
-	it("attaches duplicate source geometry once per bake batch", async () => {
+describe("static object bake resources", () => {
+	it("attaches duplicate source geometry once per static bake job", async () => {
 		const source = createSourceIdentity("setup-model", 0x02000010);
 		const gfxObj = createSourceIdentity("gfx-obj", 0x01000020);
 		const geometry = createStaticObjectSourceGeometryIdentity({
@@ -29,10 +29,10 @@ describe("static object bake attachments", () => {
 		const assetReader = new FixturePreparedAssetReader([
 			createPreparedAsset(createHostAssetKey("gfx-obj", 0x01000020)),
 		]);
-		const provider = new StaticObjectBakeAttachmentProvider({ assetReader });
+		const provider = new StaticObjectBakeResourceProvider({ assetReader });
 
-		const attachments = await provider.createAttachments(
-			createAttachmentRequest([
+		const resources = await provider.createResources(
+			createResourceRequest([
 				createPart({ geometry, gfxObj, source }),
 				createPart({ geometry, gfxObj, source }),
 			]),
@@ -41,7 +41,7 @@ describe("static object bake attachments", () => {
 		expect(assetReader.requests).toEqual([
 			createHostAssetKey("gfx-obj", 0x01000020),
 		]);
-		expect(attachments.staticObjectSourceGeometry).toEqual([
+		expect(resources.staticObjectSourceGeometry).toEqual([
 			expect.objectContaining({
 				buffer: expect.objectContaining({
 					coordinateSpace: "source-local",
@@ -70,10 +70,10 @@ describe("static object bake attachments", () => {
 		const assetReader = new FixturePreparedAssetReader([
 			createPreparedAsset(createHostAssetKey("gfx-obj", 0x01000020)),
 		]);
-		const provider = new StaticObjectBakeAttachmentProvider({ assetReader });
+		const provider = new StaticObjectBakeResourceProvider({ assetReader });
 
-		const attachments = await provider.createAttachments(
-			createAttachmentRequest([
+		const resources = await provider.createResources(
+			createResourceRequest([
 				createPart({ geometry: firstGeometry, gfxObj, source: firstSource }),
 				createPart({ geometry: secondGeometry, gfxObj, source: secondSource }),
 			]),
@@ -82,13 +82,13 @@ describe("static object bake attachments", () => {
 		expect(assetReader.requests).toEqual([
 			createHostAssetKey("gfx-obj", 0x01000020),
 		]);
-		expect(attachments.staticObjectSourceGeometry).toHaveLength(1);
-		expect(attachments.staticObjectSourceGeometry[0]).toMatchObject({
+		expect(resources.staticObjectSourceGeometry).toHaveLength(1);
+		expect(resources.staticObjectSourceGeometry[0]).toMatchObject({
 			identity: firstGeometry.canonical,
 		});
 	});
 
-	it("attaches env-cell static placement source geometry for landblock env-cell batches", async () => {
+	it("attaches env-cell static placement source geometry for landblock env-cell jobs", async () => {
 		const source = createSourceIdentity("setup-model", 0x02000010);
 		const gfxObj = createSourceIdentity("gfx-obj", 0x01000020);
 		const geometry = createStaticObjectSourceGeometryIdentity({
@@ -99,10 +99,10 @@ describe("static object bake attachments", () => {
 		const assetReader = new FixturePreparedAssetReader([
 			createPreparedAsset(createHostAssetKey("gfx-obj", 0x01000020)),
 		]);
-		const provider = new StaticObjectBakeAttachmentProvider({ assetReader });
+		const provider = new StaticObjectBakeResourceProvider({ assetReader });
 
-		const attachments = await provider.createAttachments(
-			createEnvCellAttachmentRequest([
+		const resources = await provider.createResources(
+			createEnvCellResourceRequest([
 				createPart({ geometry, gfxObj, source }),
 			]),
 		);
@@ -110,7 +110,7 @@ describe("static object bake attachments", () => {
 		expect(assetReader.requests).toEqual([
 			createHostAssetKey("gfx-obj", 0x01000020),
 		]);
-		expect(attachments.staticObjectSourceGeometry).toEqual([
+		expect(resources.staticObjectSourceGeometry).toEqual([
 			expect.objectContaining({
 				buffer: expect.objectContaining({
 					coordinateSpace: "source-local",
@@ -146,9 +146,9 @@ class FixturePreparedAssetReader implements PreparedAssetReader {
 	}
 }
 
-function createAttachmentRequest(
+function createResourceRequest(
 	parts: readonly StaticObjectPartSourceFacts[],
-): StaticBakeAttachmentRequest {
+): StaticBakeResourceRequest {
 	const domain = "outdoor-buildings";
 	const job = {
 		domain,
@@ -159,32 +159,27 @@ function createAttachmentRequest(
 	};
 	return {
 		domain,
-		items: [
-			{
-				payload: {
-					job,
-					scope: createPayload(parts),
-					sourceRevision: 1,
-				},
-				task: {
-					domain,
-					ownerId: "outdoor-buildings:0xda55ffff",
-					ownerKey: { kind: "outdoor-buildings", landblockId: 0xda55ffff },
-					revision: 1,
-					scope: job.scope,
-					scopeKey: "landblock:da55ffff",
-					taskId: "task:static-object-attachments",
-				},
-			},
-		],
+		payload: {
+			job,
+			scope: createPayload(parts),
+			sourceRevision: 1,
+		},
 		revision: 1,
-		bakeBatchId: "static-batch:objects",
+		task: {
+			domain,
+			ownerId: "outdoor-buildings:0xda55ffff",
+			ownerKey: { kind: "outdoor-buildings", landblockId: 0xda55ffff },
+			revision: 1,
+			scope: job.scope,
+			scopeKey: "landblock:da55ffff",
+			taskId: "task:static-object-resources",
+		},
 	};
 }
 
-function createEnvCellAttachmentRequest(
+function createEnvCellResourceRequest(
 	parts: readonly StaticObjectPartSourceFacts[],
-): StaticBakeAttachmentRequest {
+): StaticBakeResourceRequest {
 	const domain = "env-cell-system";
 	const job = {
 		domain,
@@ -195,26 +190,21 @@ function createEnvCellAttachmentRequest(
 	};
 	return {
 		domain,
-		items: [
-			{
-				payload: {
-					job,
-					scope: createEnvCellPayload(parts),
-					sourceRevision: 1,
-				},
-				task: {
-					domain,
-					ownerId: "env-cell-system:0xda55ffff",
-					ownerKey: { kind: "env-cell-system", landblockId: 0xda55ffff },
-					revision: 1,
-					scope: job.scope,
-					scopeKey: "landblock:da55ffff",
-					taskId: "task:env-cell-static-object-attachments",
-				},
-			},
-		],
+		payload: {
+			job,
+			scope: createEnvCellPayload(parts),
+			sourceRevision: 1,
+		},
 		revision: 1,
-		bakeBatchId: "static-batch:env-cells",
+		task: {
+			domain,
+			ownerId: "env-cell-system:0xda55ffff",
+			ownerKey: { kind: "env-cell-system", landblockId: 0xda55ffff },
+			revision: 1,
+			scope: job.scope,
+			scopeKey: "landblock:da55ffff",
+			taskId: "task:env-cell-static-object-resources",
+		},
 	};
 }
 

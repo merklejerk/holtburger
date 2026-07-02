@@ -78,7 +78,7 @@ describe("static object visual bundle producer", () => {
 		});
 	});
 
-	it("ignores geometry attachments from other payloads in the same bake batch", () => {
+	it("ignores unrelated geometry resources in the same job resource set", () => {
 		const unrelatedSource: StaticObjectSourceIdentity = {
 			kind: "static-object-source",
 			sourceAssetKind: "gfx-obj",

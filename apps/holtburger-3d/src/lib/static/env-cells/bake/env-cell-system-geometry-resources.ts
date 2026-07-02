@@ -1,27 +1,27 @@
-import { createEmptyStaticBakeAttachments } from "../../bake/attachments";
+import { createEmptyStaticBakeJobResources } from "../../bake/resources";
 import { requirePreparedRenderGeometryBuffers } from "../../../assets/preparation/prepared-render-geometry";
 import { objectVisualGeometryBufferId } from "../../../visual/object-visual-recipe-bundle";
 import type {
 	EnvCellCellStructureGeometryAttachment,
 	EnvCellCellStructureGeometryIdentity,
 	LandblockEnvCellStaticFacts,
-	StaticBakeAttachmentProvider,
-	StaticBakeAttachmentRequest,
-	StaticBakeBatchAttachments,
+	StaticBakeResourceProvider,
+	StaticBakeResourceRequest,
+	StaticBakeJobResources,
 } from "../../contracts";
 import type { EnvCellSystemLayerSourcePayloadDto } from "../../source-payloads";
 
-export class EnvCellSystemGeometryAttachmentProvider implements StaticBakeAttachmentProvider {
-	async createAttachments(
-		request: StaticBakeAttachmentRequest,
-	): Promise<StaticBakeBatchAttachments> {
+export class EnvCellSystemGeometryResourceProvider implements StaticBakeResourceProvider {
+	async createResources(
+		request: StaticBakeResourceRequest,
+	): Promise<StaticBakeJobResources> {
 		if (request.domain !== "env-cell-system") {
-			return createEmptyStaticBakeAttachments();
+			return createEmptyStaticBakeJobResources();
 		}
 
 		const identities = collectEnvCellGeometryIdentities(request);
 		if (identities.length === 0) {
-			return createEmptyStaticBakeAttachments();
+			return createEmptyStaticBakeJobResources();
 		}
 
 		const cellsByIdentity = createFullEnvCellsByIdentity(request);
@@ -47,7 +47,7 @@ export class EnvCellSystemGeometryAttachmentProvider implements StaticBakeAttach
 		);
 
 		return {
-			...createEmptyStaticBakeAttachments(),
+			...createEmptyStaticBakeJobResources(),
 			envCellCellStructureGeometry,
 		};
 	}
@@ -81,22 +81,17 @@ export function describeEnvCellCellStructureGeometryIdentity(
 }
 
 function collectEnvCellGeometryIdentities(
-	request: StaticBakeAttachmentRequest,
+	request: StaticBakeResourceRequest,
 ): readonly EnvCellCellStructureGeometryIdentity[] {
 	const byKey = new Map<string, EnvCellCellStructureGeometryIdentity>();
 
-	for (const item of request.items) {
-		if (item.payload.scope.kind !== "env-cell-system") {
-			continue;
-		}
+	if (request.payload.scope.kind !== "env-cell-system") {
+		return [];
+	}
 
-		for (const envCell of item.payload.scope.envCells) {
-			const identity = createEnvCellCellStructureGeometryIdentity({ envCell });
-			byKey.set(
-				describeEnvCellCellStructureGeometryIdentity(identity),
-				identity,
-			);
-		}
+	for (const envCell of request.payload.scope.envCells) {
+		const identity = createEnvCellCellStructureGeometryIdentity({ envCell });
+		byKey.set(describeEnvCellCellStructureGeometryIdentity(identity), identity);
 	}
 
 	return [...byKey.values()].sort((left, right) =>
@@ -107,24 +102,22 @@ function collectEnvCellGeometryIdentities(
 }
 
 function createFullEnvCellsByIdentity(
-	request: StaticBakeAttachmentRequest,
+	request: StaticBakeResourceRequest,
 ): ReadonlyMap<string, LandblockEnvCellStaticFacts> {
 	const cellsByIdentity = new Map<string, LandblockEnvCellStaticFacts>();
 
-	for (const item of request.items) {
-		if (item.payload.scope.kind !== "env-cell-system") {
-			continue;
-		}
+	if (request.payload.scope.kind !== "env-cell-system") {
+		return cellsByIdentity;
+	}
 
-		for (const cell of item.payload.scope.envCells) {
-			const identity = createEnvCellCellStructureGeometryIdentity({
-				envCell: cell,
-			});
-			cellsByIdentity.set(
-				describeEnvCellCellStructureGeometryIdentity(identity),
-				cell,
-			);
-		}
+	for (const cell of request.payload.scope.envCells) {
+		const identity = createEnvCellCellStructureGeometryIdentity({
+			envCell: cell,
+		});
+		cellsByIdentity.set(
+			describeEnvCellCellStructureGeometryIdentity(identity),
+			cell,
+		);
 	}
 
 	return cellsByIdentity;

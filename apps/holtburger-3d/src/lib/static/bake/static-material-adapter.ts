@@ -171,7 +171,6 @@ export function createStaticMaterialTextureUses(options: {
 	readonly isStageableDataUse: (
 		dataUse: MaterialTextureDataUseIdentity,
 	) => boolean;
-	readonly bakeBatchId: string;
 	readonly textureUseSpecs: readonly StaticMaterialTextureUseSpec[];
 }): readonly StaticBakeTextureUse[] {
 	const textureUsesById = new Map<string, StaticBakeTextureUse>();

@@ -4711,9 +4711,9 @@ function createStaticCoordinatorTimingSummary(
 	timings: readonly StaticCoordinatorTimingDiagnostics[],
 ): StaticCoordinatorDiagnosticsReport["timingSummary"] {
 	return {
-		attachmentMs: roundMilliseconds(
+		resourceMs: roundMilliseconds(
 			sumNumbers(
-				timings.map((timing) => nullableMilliseconds(timing.attachmentMs)),
+				timings.map((timing) => nullableMilliseconds(timing.resourceMs)),
 			),
 		),
 		bakeMs: roundMilliseconds(
@@ -4748,7 +4748,7 @@ function createStaticCoordinatorTimingSummary(
 		slowestResolver: createTimingSample(
 			maxByNullableNumber(timings, (timing) => timing.resolverMs),
 		),
-		totalItemCount: sumNumbers(timings.map((timing) => timing.itemCount)),
+		totalJobCount: timings.length,
 	};
 }
 
@@ -4759,13 +4759,14 @@ function createTimingSample(
 		return null;
 	}
 	return {
-		attachmentMs: roundNullableMilliseconds(timing.attachmentMs),
 		bakeMs: roundNullableMilliseconds(timing.bakeMs),
 		commitMs: roundNullableMilliseconds(timing.commitMs),
 		domain: timing.domain,
-		itemCount: timing.itemCount,
 		placementIntentMs: roundNullableMilliseconds(timing.placementIntentMs),
+		resourceMs: roundNullableMilliseconds(timing.resourceMs),
 		resolverMs: roundNullableMilliseconds(timing.resolverMs),
+		scopeKey: timing.scopeKey,
+		taskId: timing.taskId,
 		texturePlacementMs: roundNullableMilliseconds(timing.texturePlacementMs),
 	};
 }
@@ -4833,7 +4834,6 @@ function createStaticCoordinatorTaskDiagnostics(
 	task: StaticCoordinatorReportTask,
 ): StaticCoordinatorTaskReportDiagnostics {
 	return {
-		activeBakeBatchId: task.activeBakeBatchId,
 		activeBakeStage: task.activeBakeStage,
 		activeBakeStageAgeMs: task.activeBakeStageAgeMs,
 		activeBakeStageStartedAtMs: task.activeBakeStageStartedAtMs,

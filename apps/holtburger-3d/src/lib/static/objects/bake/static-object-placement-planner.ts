@@ -5,7 +5,7 @@ import {
 	createObjectVisualTexturePlacementIntents,
 	type ObjectVisualTexturePlacementRequirement,
 } from "../../../visual/object-visual-texture-placement-planner";
-import { createStaticObjectBatchPayload } from "./static-object-batch-payload";
+import { createObjectVisualSourcePayload } from "./object-visual-source-payload";
 import { partitionStaticObjectBatches } from "./static-object-batch-partitioner";
 import { isCurrentlyStageableStaticObjectDataUse } from "./static-object-renderability";
 
@@ -21,7 +21,7 @@ export function createStaticObjectTexturePlacementIntents(input: {
 		if (!hasStaticObjectTexturePlanningPayload(item.payload)) {
 			continue;
 		}
-		const payload = createStaticObjectBatchPayload(item);
+		const payload = createObjectVisualSourcePayload(item);
 		const partitionPlan = partitionStaticObjectBatches(payload);
 		for (const partition of partitionPlan.partitions) {
 			for (const entry of partition.coarseTablePlan.entries) {

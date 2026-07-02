@@ -1,15 +1,39 @@
-import type { StaticObjectBatchPayload } from "./static-object-batch-partitioner";
 import type {
 	EnvCellSystemStaticScopePayload,
+	LandblockSourceIdentity,
 	OutdoorStaticObjectDomain,
+	OutdoorStaticObjectsScopePayload,
+	RegionDetailRoleFacts,
 	StaticBakeJobPayload,
 	StaticDomain,
 	StaticObjectSourceIdentity,
 } from "../../contracts";
 
-export function createStaticObjectBatchPayload(
+export interface ObjectVisualSourcePayload {
+	readonly domain: Extract<
+		StaticDomain,
+		OutdoorStaticObjectDomain | "env-cell-system"
+	>;
+	readonly landblock: LandblockSourceIdentity;
+	readonly regionRenderProfile: {
+		readonly detailRoles: readonly RegionDetailRoleFacts[];
+	};
+	readonly objects: readonly ObjectVisualSourceObject[];
+	readonly sourceAssets: OutdoorStaticObjectsScopePayload["sourceAssets"];
+	readonly paletteSources: OutdoorStaticObjectsScopePayload["paletteSources"];
+	readonly materialSlots: OutdoorStaticObjectsScopePayload["materialSlots"];
+	readonly materialSources: OutdoorStaticObjectsScopePayload["materialSources"];
+	readonly textureRefs: OutdoorStaticObjectsScopePayload["textureRefs"];
+}
+
+type ObjectVisualSourceObject =
+	OutdoorStaticObjectsScopePayload["objects"][number] & {
+		readonly owningEnvCellId?: number | null;
+	};
+
+export function createObjectVisualSourcePayload(
 	item: StaticBakeJobPayload,
-): StaticObjectBatchPayload {
+): ObjectVisualSourcePayload {
 	if (
 		(item.task.domain === "outdoor-buildings" ||
 			item.task.domain === "outdoor-explicit-objects" ||
@@ -22,7 +46,7 @@ export function createStaticObjectBatchPayload(
 		item.task.domain === "env-cell-system" &&
 		item.payload.scope.kind === "env-cell-system"
 	) {
-		return createEnvCellStaticObjectBatchPayload(item.payload.scope);
+		return createEnvCellObjectVisualSourcePayload(item.payload.scope);
 	}
 
 	throw new Error(
@@ -30,9 +54,9 @@ export function createStaticObjectBatchPayload(
 	);
 }
 
-function createEnvCellStaticObjectBatchPayload(
+function createEnvCellObjectVisualSourcePayload(
 	payload: EnvCellSystemStaticScopePayload,
-): StaticObjectBatchPayload {
+): ObjectVisualSourcePayload {
 	const sourceByKey = new Map(
 		(payload.sourceAssets ?? []).map((source) => [
 			createSourceKey(source.identity),
@@ -75,7 +99,7 @@ function createEnvCellStaticObjectBatchPayload(
 }
 
 function isEnvCellStaticObjectDynamicSource(
-	source: StaticObjectBatchPayload["sourceAssets"][number],
+	source: ObjectVisualSourcePayload["sourceAssets"][number],
 ): boolean {
 	return (
 		source.sourceAssetKind === "setup-model" && source.defaultAnimation !== null

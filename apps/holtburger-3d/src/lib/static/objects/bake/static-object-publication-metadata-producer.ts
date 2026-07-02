@@ -18,7 +18,7 @@ import {
 	type ObjectVisualStaticResourceGroupId,
 } from "../../../visual/object-visual-static-publication";
 import { createStaticObjectSourcePartMatrix } from "./static-object-visual-bundle-producer";
-import type { StaticObjectBatchPayload } from "./static-object-batch-partitioner";
+import type { ObjectVisualSourcePayload } from "./object-visual-source-payload";
 
 const GENERATED_SCENERY_INSTANCING_POLICY = {
 	minimumInstanceCount: 2,
@@ -39,7 +39,7 @@ export interface StaticObjectPublicationMetadataProduction {
 
 export function createStaticObjectPublicationMetadata(input: {
 	readonly owner: StaticLayerPeerRecordOwner;
-	readonly payload: StaticObjectBatchPayload;
+	readonly payload: ObjectVisualSourcePayload;
 }): StaticObjectPublicationMetadataProduction {
 	const partInstanceIndexByKey = createPartInstanceIndexByKey(input.payload);
 	const generatedGroupIdByKey = createGeneratedResourceGroupIds(input.payload);
@@ -67,7 +67,7 @@ export function createStaticObjectPublicationMetadata(input: {
 	};
 }
 
-function countPartInstances(payload: StaticObjectBatchPayload): number {
+function countPartInstances(payload: ObjectVisualSourcePayload): number {
 	return payload.objects.reduce((count, object) => {
 		const source = requireSource(payload, object.source);
 		return count + source.parts.length;
@@ -80,7 +80,7 @@ function createDirectDrawUnitMetadata(options: {
 		string,
 		ObjectVisualPartInstanceIndex
 	>;
-	readonly payload: StaticObjectBatchPayload;
+	readonly payload: ObjectVisualSourcePayload;
 }): ObjectVisualStaticPublicationMetadata["directStaticObjectDrawUnits"] {
 	return options.payload.objects
 		.filter((object) => object.identity.objectKind !== "generated-scenery")
@@ -110,7 +110,7 @@ function createGeneratedResourceGroupMetadata(options: {
 		string,
 		ObjectVisualStaticResourceGroupId
 	>;
-	readonly payload: StaticObjectBatchPayload;
+	readonly payload: ObjectVisualSourcePayload;
 }): ObjectVisualStaticPublicationMetadata["instancedResourceGroups"] {
 	const groups = new Map<
 		string,
@@ -155,7 +155,7 @@ function createGeneratedRenderInstanceMetadata(options: {
 		string,
 		ObjectVisualPartInstanceIndex
 	>;
-	readonly payload: StaticObjectBatchPayload;
+	readonly payload: ObjectVisualSourcePayload;
 }): ObjectVisualStaticPublicationMetadata["instancedRenderInstances"] {
 	return options.payload.objects.flatMap((object) => {
 		if (object.identity.objectKind !== "generated-scenery") {
@@ -196,7 +196,7 @@ function createGeneratedRenderInstanceMetadata(options: {
 }
 
 function createPartInstanceIndexByKey(
-	payload: StaticObjectBatchPayload,
+	payload: ObjectVisualSourcePayload,
 ): ReadonlyMap<string, ObjectVisualPartInstanceIndex> {
 	const indices = new Map<string, ObjectVisualPartInstanceIndex>();
 	let index = 0;
@@ -214,7 +214,7 @@ function createPartInstanceIndexByKey(
 }
 
 function createGeneratedResourceGroupIds(
-	payload: StaticObjectBatchPayload,
+	payload: ObjectVisualSourcePayload,
 ): ReadonlyMap<string, ObjectVisualStaticResourceGroupId> {
 	const keys = new Set<string>();
 	for (const object of payload.objects) {
@@ -237,7 +237,7 @@ function createGeneratedResourceGroupIds(
 }
 
 function createSourceMappingCoverage(
-	object: StaticObjectBatchPayload["objects"][number],
+	object: ObjectVisualSourcePayload["objects"][number],
 	part: StaticObjectPartSourceFacts,
 ): readonly StaticObjectSourceMappingCoverage[] {
 	const trianglesBySlot = new Map<
@@ -309,8 +309,8 @@ function createSourceMappingCoverage(
 }
 
 function createDrawUnitOwnership(
-	payload: StaticObjectBatchPayload,
-	object: StaticObjectBatchPayload["objects"][number],
+	payload: ObjectVisualSourcePayload,
+	object: ObjectVisualSourcePayload["objects"][number],
 ): StaticObjectDrawUnitOwnership {
 	if (payload.domain !== "env-cell-system") {
 		return {
@@ -331,7 +331,7 @@ function createDrawUnitOwnership(
 }
 
 function createSortMetadata(
-	object: StaticObjectBatchPayload["objects"][number],
+	object: ObjectVisualSourcePayload["objects"][number],
 ): StaticObjectSortMetadata {
 	const bounds = object.instanceBounds ?? object.sourceBounds;
 	return {
@@ -344,7 +344,7 @@ function createSortMetadata(
 
 function createSpatialRecord(
 	owner: StaticLayerPeerRecordOwner,
-	object: StaticObjectBatchPayload["objects"][number],
+	object: ObjectVisualSourcePayload["objects"][number],
 ) {
 	if (
 		object.owningEnvCellId === undefined ||
@@ -365,7 +365,7 @@ function createSpatialRecord(
 
 function requirePartInstanceIndex(
 	partInstanceIndexByKey: ReadonlyMap<string, ObjectVisualPartInstanceIndex>,
-	object: StaticObjectBatchPayload["objects"][number],
+	object: ObjectVisualSourcePayload["objects"][number],
 	part: StaticObjectPartSourceFacts,
 ): ObjectVisualPartInstanceIndex {
 	const key = createPartInstanceKey(object, part);
@@ -388,7 +388,7 @@ function requireResourceGroupId(
 }
 
 function requireStaticObjectBounds(
-	object: StaticObjectBatchPayload["objects"][number],
+	object: ObjectVisualSourcePayload["objects"][number],
 ): StaticBounds {
 	const bounds = object.instanceBounds ?? object.sourceBounds;
 	if (!bounds) {
@@ -420,7 +420,7 @@ function centerTupleOfBounds(
 }
 
 function createPartInstanceKey(
-	object: StaticObjectBatchPayload["objects"][number],
+	object: ObjectVisualSourcePayload["objects"][number],
 	part: StaticObjectPartSourceFacts,
 ): string {
 	return [
@@ -449,9 +449,9 @@ function createObjectDrawUnitIdSeed(
 }
 
 function requireSource(
-	payload: StaticObjectBatchPayload,
+	payload: ObjectVisualSourcePayload,
 	identity: StaticObjectSourceIdentity,
-): StaticObjectBatchPayload["sourceAssets"][number] {
+): ObjectVisualSourcePayload["sourceAssets"][number] {
 	const source = payload.sourceAssets.find(
 		(candidate) =>
 			createSourceKey(candidate.identity) === createSourceKey(identity),

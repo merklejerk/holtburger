@@ -1,10 +1,5 @@
 import type {
 	MaterialTextureDataUseIdentity,
-	LandblockSourceIdentity,
-	OutdoorStaticObjectDomain,
-	OutdoorStaticObjectsScopePayload,
-	RegionDetailRoleFacts,
-	StaticDomain,
 	StaticMaterialCoverageReport,
 	StaticMaterialSourceIdentity,
 	StaticObjectInstanceIdentity,
@@ -41,38 +36,17 @@ import {
 	type ObjectVisualMaterialPlan,
 	type ObjectVisualMaterialTextureUseRole,
 } from "../../../visual/object-visual-material-planner";
+import type { ObjectVisualSourcePayload } from "./object-visual-source-payload";
 import { isCurrentlyStageableStaticObjectDataUse } from "./static-object-renderability";
 
 export const STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE = 8;
 
 export interface StaticObjectBatchPartitionPlan {
-	readonly domain: StaticObjectBatchPayload["domain"];
+	readonly domain: ObjectVisualSourcePayload["domain"];
 	readonly partitions: readonly StaticObjectBatchPartition[];
 	readonly fallbackReasons: readonly ObjectVisualMaterialFallbackReason[];
 	readonly materialCoverage: StaticMaterialCoverageReport;
 }
-
-export interface StaticObjectBatchPayload {
-	readonly domain: Extract<
-		StaticDomain,
-		OutdoorStaticObjectDomain | "env-cell-system"
-	>;
-	readonly landblock: LandblockSourceIdentity;
-	readonly regionRenderProfile: {
-		readonly detailRoles: readonly RegionDetailRoleFacts[];
-	};
-	readonly objects: readonly StaticObjectBatchObject[];
-	readonly sourceAssets: OutdoorStaticObjectsScopePayload["sourceAssets"];
-	readonly paletteSources: OutdoorStaticObjectsScopePayload["paletteSources"];
-	readonly materialSlots: OutdoorStaticObjectsScopePayload["materialSlots"];
-	readonly materialSources: OutdoorStaticObjectsScopePayload["materialSources"];
-	readonly textureRefs: OutdoorStaticObjectsScopePayload["textureRefs"];
-}
-
-type StaticObjectBatchObject =
-	OutdoorStaticObjectsScopePayload["objects"][number] & {
-		readonly owningEnvCellId?: number | null;
-	};
 
 export interface StaticObjectBatchPartition {
 	readonly sliceId: string;
@@ -154,7 +128,7 @@ interface StaticObjectMaterialBatchAxis {
 
 interface StaticObjectOwnershipAxis {
 	readonly key: string;
-	readonly domain: StaticObjectBatchPayload["domain"];
+	readonly domain: ObjectVisualSourcePayload["domain"];
 	readonly landblockId: number;
 	readonly envCellId: number | null;
 	readonly sourceKey: string;
@@ -221,7 +195,7 @@ interface StaticObjectTriangleCandidate {
 }
 
 export function partitionStaticObjectBatches(
-	payload: StaticObjectBatchPayload,
+	payload: ObjectVisualSourcePayload,
 	options: {
 		readonly placementSnapshot?: ObjectVisualTexturePlacementSnapshot;
 		readonly textureUseScopeId?: string;
@@ -336,7 +310,7 @@ function createStaticObjectTextureRequirements(options: {
 }
 
 function createTriangleCandidates(
-	payload: StaticObjectBatchPayload,
+	payload: ObjectVisualSourcePayload,
 	materialById: ReadonlyMap<string, ObjectVisualMaterialPlan>,
 	textureUseScopeId: string | undefined,
 	placementSnapshot: ObjectVisualTexturePlacementSnapshot | undefined,
@@ -496,7 +470,7 @@ class MaterialSlotIndex {
 		StaticObjectMaterialSlotFacts
 	>();
 
-	constructor(payload: StaticObjectBatchPayload) {
+	constructor(payload: ObjectVisualSourcePayload) {
 		for (const slot of payload.materialSlots) {
 			this.#slotsByObjectPartSurface.set(
 				createMaterialSlotKey({
@@ -706,7 +680,7 @@ function createPartitionSliceAxes(
 }
 
 function createPartitionAxes(options: {
-	readonly domain: StaticObjectBatchPayload["domain"];
+	readonly domain: ObjectVisualSourcePayload["domain"];
 	readonly plan: ObjectVisualMaterialPlan;
 	readonly landblockId: number;
 	readonly sourceKey: string;
@@ -796,7 +770,7 @@ function groupStaticObjectPrimitivesByPartitionKey(
 }
 
 function createOwnershipAxis(options: {
-	readonly domain: StaticObjectBatchPayload["domain"];
+	readonly domain: ObjectVisualSourcePayload["domain"];
 	readonly landblockId: number;
 	readonly sourceKey: string;
 	readonly gfxKey: string;

@@ -62,7 +62,7 @@ import {
 import { createStaticObjectTexturePlacementIntents } from "../objects/bake/static-object-placement-planner";
 import { createTerrainTexturePlacementIntents } from "../terrain/bake/terrain-geometry-baker";
 import { createStructuredInteriorTexturePlacementIntents } from "../env-cells/bake/structured-interior-placement-planner";
-import { isStaticObjectDomain } from "../objects/bake/static-object-batch-payload";
+import { isStaticObjectDomain } from "../objects/bake/object-visual-source-payload";
 import type {
 	ObjectVisualTexturePlacementIntent,
 	ObjectVisualTexturePlacementSnapshot,

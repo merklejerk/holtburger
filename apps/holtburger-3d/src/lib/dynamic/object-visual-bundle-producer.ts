@@ -8,10 +8,10 @@ import type {
 	StaticObjectSourceAssetFacts,
 	StaticObjectSourceGeometrySidecar,
 } from "../static/contracts";
-import type { StaticObjectBatchPayload } from "../static/objects/bake/static-object-batch-partitioner";
+import type { ObjectVisualSourcePayload } from "../static/objects/bake/object-visual-source-payload";
 import {
-	createStaticObjectVisualBundleExpansion,
-	createStaticObjectVisualRecipePlan,
+	createObjectVisualSourceBundleExpansion,
+	createObjectVisualSourceRecipePlan,
 } from "../static/objects/bake/static-object-visual-bundle-producer";
 import {
 	createObjectVisualReadyResolution,
@@ -23,9 +23,9 @@ export function createDynamicObjectVisualBundleExpansion(input: {
 	readonly recipe: DynamicEntityRecipe;
 	readonly sourceGeometry: readonly StaticObjectSourceGeometrySidecar[];
 }): DynamicObjectVisualBundleExpansion {
-	const expansion = createStaticObjectVisualBundleExpansion({
+	const expansion = createObjectVisualSourceBundleExpansion({
 		geometrySidecars: { staticObjectSourceGeometry: input.sourceGeometry },
-		payload: createDynamicObjectVisualPayload(input.recipe),
+		payload: createDynamicObjectVisualSourcePayload(input.recipe),
 	});
 	if (expansion.resolution.kind !== "ready") {
 		return expansion;
@@ -45,15 +45,15 @@ export function createDynamicObjectVisualBundleExpansion(input: {
 
 export function createDynamicObjectVisualRecipePlan(
 	recipe: DynamicEntityRecipe,
-): ReturnType<typeof createStaticObjectVisualRecipePlan> {
-	return createStaticObjectVisualRecipePlan(
-		createDynamicObjectVisualPayload(recipe),
+): ReturnType<typeof createObjectVisualSourceRecipePlan> {
+	return createObjectVisualSourceRecipePlan(
+		createDynamicObjectVisualSourcePayload(recipe),
 	);
 }
 
-function createDynamicObjectVisualPayload(
+function createDynamicObjectVisualSourcePayload(
 	recipe: DynamicEntityRecipe,
-): StaticObjectBatchPayload {
+): ObjectVisualSourcePayload {
 	const identity = createDynamicStaticObjectIdentity(recipe);
 	return {
 		domain:

@@ -2244,8 +2244,13 @@ Course correction during Phase 9M:
 - Static object texture uses now come from recipe-first object visual install publication, with
   owners derived from published direct draw units and visual resources. The cutover also fixed
   role-specific detail texture wrapping so detail-overlay texture recipes can publish repeat sampling
-  independently of the base material sampler. Structured-interior texture uses still need the same
-  recipe-first ownership cutover before object draw units can be removed from `addedDrawUnits`.
+  independently of the base material sampler.
+- Structured-interior texture uses now also come from recipe-first object visual install
+  publication, with owners derived from the published direct draw units. This removes the last known
+  texture-use blocker to narrowing `StaticCoordinatorCommitDelta.addedDrawUnits` away from legacy
+  object draw units. The legacy draw units still exist inside bake results during the transition, so
+  the next hard-cutover slice should remove them from coordinator commits before deleting the old
+  producers.
 
 ### Phase 10: Dynamic Resolver Cutover
 

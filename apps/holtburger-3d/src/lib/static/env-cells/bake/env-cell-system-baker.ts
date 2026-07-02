@@ -285,7 +285,7 @@ function bakeLandblockEnvCellItem(
 		materialPlansByEnvCellId,
 		placementSnapshot,
 	);
-	const objectVisualInstallSet = createStructuredInteriorObjectVisualInstallSet(
+	const objectVisualPublication = createStructuredInteriorObjectVisualPublication(
 		{
 			input,
 			payload,
@@ -300,7 +300,7 @@ function bakeLandblockEnvCellItem(
 			materialPlansByEnvCellId,
 			payload,
 		}),
-		objectVisualInstallSet,
+		objectVisualInstallSet: objectVisualPublication.installSet,
 		portalApertureResources: payload.portalApertureResources,
 		envCellStaticObjectPlacementRecords:
 			createEnvCellStaticObjectPlacementRecords(owner, payload),
@@ -309,12 +309,7 @@ function bakeLandblockEnvCellItem(
 		staticSourceMappings: createSourceMappingRecords(owner, payload),
 		staticSpatialRecords: createSpatialRecords(owner, payload),
 		staticVisibilityRecords: [createVisibilityRecord(owner, payload)],
-		textureUses: createStructuredInteriorTextureUses({
-			drawUnits,
-			materialPlansByEnvCellId,
-			bakeBatchId: input.bakeBatchId,
-			task: item.task,
-		}),
+		textureUses: objectVisualPublication.textureUses,
 		textureDependencies: createStructuredInteriorTextureDependencies(
 			drawUnits,
 			placementSnapshot,
@@ -322,11 +317,14 @@ function bakeLandblockEnvCellItem(
 	};
 }
 
-function createStructuredInteriorObjectVisualInstallSet(options: {
+function createStructuredInteriorObjectVisualPublication(options: {
 	readonly input: StaticBakeBatchInput;
 	readonly payload: EnvCellSystemStaticScopePayload;
 	readonly task: StaticBakeTask;
-}): ReturnType<typeof createObjectVisualInstallSet> {
+}): {
+	readonly installSet: ReturnType<typeof createObjectVisualInstallSet>;
+	readonly textureUses: StaticBakeBatchResult["textureUses"];
+} {
 	const publications = options.payload.envCells.map((envCell) =>
 		createStructuredInteriorVisualBundleExpansion({
 			attachments: options.input.attachments,
@@ -335,7 +333,7 @@ function createStructuredInteriorObjectVisualInstallSet(options: {
 			task: options.task,
 		}),
 	);
-	const installSets = publications.flatMap((publication) => {
+	const recipePublications = publications.flatMap((publication) => {
 		if (publication.resolution.kind === "missing-dependencies") {
 			console.warn(
 				`Skipped structured interior visual recipe publication for ${options.task.ownerId}; missing ${publication.resolution.missingDependencies
@@ -363,23 +361,29 @@ function createStructuredInteriorObjectVisualInstallSet(options: {
 							),
 				textureUseNamespace: "structured-interior-texture",
 				textureUseScopeId: options.task.ownerId,
-			}).installSet,
+			}),
 		];
 	});
 
-	return createObjectVisualInstallSet({
-		directDrawUnits: installSets.flatMap(
-			(installSet) => installSet.directDrawUnits,
+	return {
+		installSet: createObjectVisualInstallSet({
+			directDrawUnits: recipePublications.flatMap(
+				(publication) => publication.installSet.directDrawUnits,
+			),
+			dynamicAnimationPartBindings: recipePublications.flatMap(
+				(publication) =>
+					publication.installSet.dynamicAnimationPartBindings,
+			),
+			renderInstances: [],
+			textureDependencies: recipePublications.flatMap(
+				(publication) => publication.installSet.textureDependencies,
+			),
+			visualResources: [],
+		}),
+		textureUses: recipePublications.flatMap(
+			(publication) => publication.textureUses,
 		),
-		dynamicAnimationPartBindings: installSets.flatMap(
-			(installSet) => installSet.dynamicAnimationPartBindings,
-		),
-		renderInstances: [],
-		textureDependencies: installSets.flatMap(
-			(installSet) => installSet.textureDependencies,
-		),
-		visualResources: [],
-	});
+	};
 }
 
 function createStructuredInteriorDrawUnits(

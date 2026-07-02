@@ -92,6 +92,7 @@ export function createStaticObjectVisualBundleExpansion(input: {
 	const registry = recipePlan.registry;
 	const geometryBuffers = createGeometryBuffers({
 		attachments: input.attachments.staticObjectSourceGeometry,
+		payload: input.payload,
 		registry,
 	});
 	const geometryRecipes = createGeometryRecipes({
@@ -210,27 +211,49 @@ function createRecipeKeys(options: {
 
 function createGeometryBuffers(options: {
 	readonly attachments: readonly StaticObjectSourceGeometryAttachment[];
+	readonly payload: StaticObjectBatchPayload;
 	readonly registry: ReturnType<typeof createObjectVisualRecipeKeyRegistry>;
 }): ReadonlyMap<ObjectVisualGeometryBufferId, ObjectVisualGeometryBuffer> {
+	const requiredKeys = collectPayloadGeometryBufferKeys(options.payload);
 	return new Map(
-		options.attachments.map((attachment) => {
-			const key = objectVisualGeometryBufferKey(
-				createGeometryBufferKey(attachment.identity),
-			);
+		options.attachments.flatMap((attachment) => {
+			const bufferKey = createGeometryBufferKey(attachment.identity);
+			if (!requiredKeys.has(bufferKey)) {
+				return [];
+			}
+			const key = objectVisualGeometryBufferKey(bufferKey);
 			const bufferId = requireRegistryId(
 				options.registry.geometryBufferIdsByKey,
 				key,
 				"geometry buffer",
 			);
 			return [
-				bufferId,
-				{
-					...attachment.buffer,
+				[
 					bufferId,
-				},
+					{
+						...attachment.buffer,
+						bufferId,
+					},
+				],
 			];
 		}),
 	);
+}
+
+function collectPayloadGeometryBufferKeys(
+	payload: StaticObjectBatchPayload,
+): ReadonlySet<string> {
+	const keys = new Set<string>();
+	for (const source of payload.sourceAssets) {
+		for (const part of source.parts) {
+			keys.add(
+				createGeometryBufferKey(
+					getStaticObjectCanonicalGeometryIdentity(part.geometry),
+				),
+			);
+		}
+	}
+	return keys;
 }
 
 function createGeometryRecipes(options: {
@@ -348,7 +371,12 @@ function createPartInstances(options: {
 	return options.payload.objects.flatMap((object) => {
 		const source = requireSource(options.payload, object.source);
 		return source.parts.map((part) => ({
-			instanceId: `${createObjectKey(object.identity)}:part:${part.partIndex}`,
+			instanceId: [
+				createObjectKey(object.identity),
+				createSourceKey(part.source),
+				createSourceKey(part.gfxObj),
+				`part:${part.partIndex}`,
+			].join("|"),
 			partRecipeId: requireRegistryId(
 				options.registry.partRecipeIdsByKey,
 				objectVisualPartRecipeKey(createPartRecipeKey(object.identity, part)),
@@ -465,10 +493,7 @@ function createMaterialRecipe(
 				)
 					? requireTextureRecipeId(
 							registry,
-							requireTextureRole(
-								plan.textureRoles,
-								"detail-overlay",
-							).dataUse,
+							requireTextureRole(plan.textureRoles, "detail-overlay").dataUse,
 							resolveTextureRoleWrapMode(
 								requireTextureRole(plan.textureRoles, "detail-overlay"),
 								spec.textureWrapMode,

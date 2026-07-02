@@ -55,11 +55,18 @@ export function createStaticObjectPublicationMetadata(input: {
 				generatedGroupIdByKey,
 				payload: input.payload,
 			}),
-			partInstanceCount: partInstanceIndexByKey.size,
+			partInstanceCount: countPartInstances(input.payload),
 		}),
 		partInstanceIndexByKey,
 		resourceGroupIdByKey: generatedGroupIdByKey,
 	};
+}
+
+function countPartInstances(payload: StaticObjectBatchPayload): number {
+	return payload.objects.reduce((count, object) => {
+		const source = requireSource(payload, object.source);
+		return count + source.parts.length;
+	}, 0);
 }
 
 function createDirectDrawUnitMetadata(options: {
@@ -409,7 +416,12 @@ function createPartInstanceKey(
 	object: StaticObjectBatchPayload["objects"][number],
 	part: StaticObjectPartSourceFacts,
 ): string {
-	return `${createObjectKey(object.identity)}:part:${part.partIndex}`;
+	return [
+		createObjectKey(object.identity),
+		createSourceKey(part.source),
+		createSourceKey(part.gfxObj),
+		`part:${part.partIndex}`,
+	].join("|");
 }
 
 function createGeneratedResourceGroupKey(

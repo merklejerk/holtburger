@@ -173,6 +173,10 @@ will otherwise drag range-strip behavior back in through the side door.
   and compact replacement triples. Texture staging requests
   `prepared-palette-texture/` binary payloads and consumes host-composed RGBA
   bytes instead of loading `palette/` payloads and composing in TypeScript.
+- Completed physical palette atlas dedupe by prepared content. Texture registry
+  entries now keep logical texture keys for material binding while using a
+  separate physical source key for atlas reuse. Prepared palette sources alias
+  by `rgba8:{width}x{height}:bytes:{byteLength}:hash:{contentHash}`.
 
 ## Decisions And Course Corrections
 
@@ -205,6 +209,11 @@ will otherwise drag range-strip behavior back in through the side door.
   signatures to the canonical `base` signature when resolving material
   bindings. This was exposed by the palette cutover tests and fixes a real
   binding mismatch instead of papering over the fixture.
+- Atlas dedupe now separates resolver identity from physical identity in the
+  texture manager. Non-palette sources keep their logical data-use key as the
+  physical key; prepared palette sources use the host-provided final content
+  hash plus dimensions and byte length. This preserves cheap collision-tolerant
+  dedupe without allowing hash-only ids to leak back into resolver recipes.
 
 ## Debt And Spicy Bits
 
@@ -235,6 +244,10 @@ will otherwise drag range-strip behavior back in through the side door.
 - Full `npm run lint:ts` still fails on unrelated unused-symbol debt in static
   coordinator, env-cell baker, and static object job baker files. The current
   touched-file ESLint set is clean.
+- Texture manager diagnostics now count unique physical source keys, not
+  logical palette recipes. That matches the atlas behavior after content-hash
+  aliasing; logical recipe diversity remains visible through texture-use ids and
+  bindings rather than page source counts.
 
 ## Implementation Order
 

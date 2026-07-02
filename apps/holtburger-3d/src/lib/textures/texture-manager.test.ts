@@ -7,6 +7,7 @@ import type {
 	PreparedAssetLease,
 } from "../assets/contracts";
 import type {
+	MaterialTextureDataUseIdentity,
 	PreparedRgbaRenderSurfaceTextureUsage,
 	StaticBakeTextureSamplingPolicy,
 	StaticCoordinatorCommitDelta,
@@ -2049,6 +2050,64 @@ describe("browser texture manager", () => {
 			0x11, 0x22, 0x33, 0xff, 0x77, 0x88, 0x99, 0xff, 0xaa, 0xbb, 0xcc, 0xff,
 		]);
 	});
+
+	it("aliases different palette recipes by prepared content hash", async () => {
+		const assetService = new FixtureAssetService();
+		const texturePacker = new FixtureTexturePacker();
+		const textureManager = new TextureManager({ assetService, texturePacker });
+
+		const update = await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedResources: [],
+			revision: 1,
+			textureUses: [
+				{
+					domain: "outdoor-buildings",
+					owners: [{ drawUnitId: "static-a", kind: "draw-unit" }],
+					source: createPreparedPaletteUse(0x04000010),
+					textureUseId: "static-a:palette-a",
+				},
+				{
+					domain: "outdoor-buildings",
+					owners: [{ drawUnitId: "static-b", kind: "draw-unit" }],
+					source: createPreparedPaletteUse(0x04000011),
+					textureUseId: "static-b:palette-b",
+				},
+			],
+		});
+
+		expect(assetService.requestedKeys).toEqual([
+			{
+				id: "04000010?domain=index8",
+				kind: "prepared-palette-texture",
+			},
+			{
+				id: "04000011?domain=index8",
+				kind: "prepared-palette-texture",
+			},
+		]);
+		expect(texturePacker.jobs).toHaveLength(1);
+		expect(texturePacker.jobs[0]?.sources).toHaveLength(1);
+		expect(update?.placements).toHaveLength(1);
+		expect(update?.textureBindings).toMatchObject([
+			{
+				bindingKey: "static-a:palette-a",
+				pageSlot: { kind: "object-palette", slot: 0 },
+			},
+			{
+				bindingKey: "static-b:palette-b",
+				pageSlot: { kind: "object-palette", slot: 0 },
+			},
+		]);
+		const textureRefs = new Set(
+			update?.textureBindings.map((binding) => binding.textureRefId),
+		);
+		expect(textureRefs.size).toBe(1);
+		expect(update?.resolvedTexturePlacements).toMatchObject([
+			{ bindingKey: "static-a:palette-a" },
+			{ bindingKey: "static-b:palette-b" },
+		]);
+	});
 });
 
 class FixtureAssetService implements AssetService {
@@ -2466,6 +2525,29 @@ function createPreparedTexturePayload(options: PreparedTexturePayloadOptions) {
 	};
 }
 
+function createPreparedPaletteUse(
+	paletteId: number,
+	replacements: readonly {
+		readonly count: number;
+		readonly offset: number;
+		readonly palette: { readonly kind: "palette"; readonly paletteId: number };
+	}[] = [],
+): Extract<
+	MaterialTextureDataUseIdentity,
+	{ readonly kind: "prepared-palette-texture-use" }
+> {
+	return {
+		domain: "index8",
+		kind: "prepared-palette-texture-use",
+		palette: {
+			kind: "palette",
+			paletteId,
+		},
+		replacements,
+		usage: "palette-rgba",
+	};
+}
+
 function createPreparedPaletteTexturePayload(id: string) {
 	const [basePaletteHex, query = ""] = id.split("?", 2);
 	const params = new URLSearchParams(query);
@@ -2491,7 +2573,7 @@ function createPreparedPaletteTexturePayload(id: string) {
 	return {
 		basePaletteId: Number.parseInt(basePaletteHex ?? "04000010", 16),
 		byteLength: pixels.byteLength,
-		contentHash: `fixture:${id}`,
+		contentHash: createFixturePaletteContentHash(pixels),
 		dependencies: {
 			paletteAssetIds: [
 				`palette/${basePaletteHex ?? "04000010"}`,
@@ -2521,6 +2603,10 @@ function createPreparedPaletteTexturePayload(id: string) {
 		sourceAssetKind: "prepared-palette-texture",
 		width: 16,
 	};
+}
+
+function createFixturePaletteContentHash(pixels: Uint8Array): string {
+	return Array.from(pixels).join(".");
 }
 
 function parseFixturePreparedPaletteReplacements(

@@ -49,6 +49,7 @@ import {
 import {
 	TextureManager,
 	type DynamicTextureUseCommit,
+	type TextureAtlasPageInspectionSnapshot,
 } from "../textures/texture-manager";
 import type { TexturePacker } from "../textures/packing/packer";
 import type { TextureFilteringMode } from "../textures/sampling-policy";
@@ -786,6 +787,10 @@ export interface ClientRuntime {
 		entityId: DynamicEntityId,
 		options?: { readonly pickDistance?: number | null },
 	): DynamicSelectionDiagnosticsReport;
+	createTextureAtlasPageInspectionSnapshot(input: {
+		readonly bucketId: string;
+		readonly pageId: string;
+	}): TextureAtlasPageInspectionSnapshot | null;
 	setSceneDebugSelection(selection: RuntimeSceneDebugSelection | null): void;
 	setEnvCellAabbDebugOverlayVisible(visible: boolean): void;
 	setEnvCellPortalDebugOverlayVisible(visible: boolean): void;
@@ -1361,6 +1366,14 @@ class ClientRuntimeImpl implements ClientRuntime {
 				pickDistance: options.pickDistance ?? null,
 			},
 		};
+	}
+
+	createTextureAtlasPageInspectionSnapshot(input: {
+		readonly bucketId: string;
+		readonly pageId: string;
+	}): TextureAtlasPageInspectionSnapshot | null {
+		this.#assertActive();
+		return this.#textureManager.createPageInspectionSnapshot(input);
 	}
 
 	setSceneDebugSelection(selection: RuntimeSceneDebugSelection | null): void {

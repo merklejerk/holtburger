@@ -267,6 +267,26 @@ describe("browser texture manager", () => {
 			uniqueSourceCount: 2,
 			width: 16,
 		});
+		expect(
+			textureManager.createPageInspectionSnapshot({
+				bucketId: "bucket-1",
+				pageId: "page-1",
+			}),
+		).toMatchObject({
+			format: "rgba8",
+			height: 16,
+			textures: [
+				expect.objectContaining({
+					itemId: "terrain-a:prepared-texture:06000010",
+					rect: [4, 4, 1, 1],
+				}),
+				expect.objectContaining({
+					itemId: "terrain-b:prepared-texture:06000020",
+					rect: [5, 4, 1, 1],
+				}),
+			],
+			width: 16,
+		});
 	});
 
 	it("reports atlas occupancy as clipped union area for overlapping page rects", async () => {

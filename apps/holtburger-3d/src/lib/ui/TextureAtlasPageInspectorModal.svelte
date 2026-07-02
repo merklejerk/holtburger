@@ -13,6 +13,7 @@
 	let { label, onClose, snapshot }: Props = $props();
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
+	let dialogElement: HTMLDivElement | null = $state(null);
 	let viewportElement: HTMLDivElement | null = $state(null);
 	let boundsVisible = $state(true);
 	let selectedTexture = $state<TextureAtlasPageInspectionTexture | null>(null);
@@ -69,6 +70,16 @@
 
 	function resetView(): void {
 		fitViewToPage();
+	}
+
+	function handleWindowPointerDown(event: PointerEvent): void {
+		if (
+			dialogElement &&
+			event.target instanceof Node &&
+			!dialogElement.contains(event.target)
+		) {
+			onClose();
+		}
 	}
 
 	function fitViewToPage(): void {
@@ -336,8 +347,11 @@
 	}
 </script>
 
+<svelte:window onpointerdown={handleWindowPointerDown} />
+
 <div class="atlas-inspector__backdrop" data-browser-display-modal>
 	<div
+		bind:this={dialogElement}
 		class="atlas-inspector"
 		role="dialog"
 		aria-modal="true"

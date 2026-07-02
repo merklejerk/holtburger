@@ -1400,8 +1400,6 @@ export interface StaticBakeBatchResult {
 	readonly staticPortalGraphs: readonly StaticPortalGraphRecord[];
 	readonly staticSourceMappings: readonly StaticSourceMappingRecord[];
 	readonly envCellStaticObjectPlacementRecords: readonly EnvCellStaticObjectPlacementRecord[];
-	readonly staticObjectRenderInstances: readonly StaticObjectRenderInstance[];
-	readonly staticObjectVisualResources: readonly StaticObjectVisualResource[];
 	readonly buildRevision: number;
 }
 
@@ -1986,8 +1984,6 @@ export interface StaticCoordinatorCommitDelta {
 	readonly staticPortalGraphs: readonly StaticPortalGraphRecord[];
 	readonly staticSourceMappings: readonly StaticSourceMappingRecord[];
 	readonly envCellStaticObjectPlacementRecords: readonly EnvCellStaticObjectPlacementRecord[];
-	readonly staticObjectRenderInstances: readonly StaticObjectRenderInstance[];
-	readonly staticObjectVisualResources: readonly StaticObjectVisualResource[];
 	/** Static layer tasks whose products are represented by this commit. */
 	readonly tasks: readonly StaticBakeTask[];
 	readonly revision: number;

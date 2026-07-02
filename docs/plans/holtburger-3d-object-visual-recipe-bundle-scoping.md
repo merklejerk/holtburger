@@ -2687,6 +2687,8 @@ Implementation notes:
 
 ### Phase 15: Cleanup And Legacy Removal
 
+Status: complete.
+
 Goal: remove scaffolding, hollow tests, obsolete names, and duplicate contracts after cutover.
 
 Deliverables:
@@ -2711,6 +2713,28 @@ Acceptance criteria:
 - No production caller uses old static/dynamic object visual planner or baker paths.
 - No object visual bake hot path depends on string placement item ids or semantic string recipe keys.
 - Documentation and names describe the new object visual recipe model.
+
+Implementation notes:
+
+- Renamed the runtime cache and snapshot fields from installed/source draw-unit language to
+  committed static direct draw-unit language:
+  `#committedStaticDirectDrawUnitsById`, `#updateCommittedStaticDirectDrawUnits(...)`,
+  `committedStaticDirectDrawUnits`, and `sourceStaticDirectDrawUnits`.
+- Kept `StaticCommitInstallResult.installedDrawUnits` unchanged for now because it still names the
+  non-object static direct draw-unit payload returned by the installer. Object-like direct draw
+  units are already separated in `objectVisualInstallSet.directDrawUnits`.
+- Rechecked legacy searches after Phase 12-14: generated-scenery inventory inference and object
+  visual bake/install mirror fields are gone from production code. Renderer
+  `staticObjectVisualResources`/`staticObjectRenderInstances` names remain legitimate renderer
+  resource classes, not compatibility mirrors.
+- Remaining cleanup debt for a later pass: derive static-object diagnostics/source mapping/spatial
+  sidecars from recipe publication metadata or delete the diagnostic shape that still requires local
+  flattened draw-unit-shaped data. Also consider extracting the generated-scenery instancing policy
+  constants (`minimumInstanceCount`, transparent reuse) into a named policy object.
+- Validation:
+  `npm --prefix apps/holtburger-3d run check` passed;
+  `npm --prefix apps/holtburger-3d run test:ts -- client-runtime static-commit-installer env-cell-system-layer-publication`
+  passed with 3 test files and 53 tests.
 
 ### Phase 16: Final Validation
 

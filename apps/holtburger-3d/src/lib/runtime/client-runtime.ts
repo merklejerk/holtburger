@@ -673,8 +673,8 @@ interface StaticCommitInstallSnapshot {
 	readonly committedCommits: readonly StaticCommitInstallCommitSnapshot[];
 	readonly failedCommits: readonly StaticCommitInstallCommitSnapshot[];
 	readonly envCellResourceMembershipRevision: number;
-	readonly installedDrawUnits: number;
-	readonly sourceDrawUnits: number;
+	readonly committedStaticDirectDrawUnits: number;
+	readonly sourceStaticDirectDrawUnits: number;
 }
 
 interface StaticCommitInstallCommitSnapshot {
@@ -853,7 +853,10 @@ class ClientRuntimeImpl implements ClientRuntime {
 		MutableStaticCommitInstall
 	>();
 	#committedStaticCommitInstalls: StaticCommitInstallCommitSnapshot[] = [];
-	readonly #installedDrawUnitsById = new Map<string, StaticDrawUnit>();
+	readonly #committedStaticDirectDrawUnitsById = new Map<
+		string,
+		StaticDrawUnit
+	>();
 	#recentTerrainTextureFallbacks: TerrainTextureFallbackDiagnostics[] = [];
 	#sceneDebugSelection: RuntimeSceneDebugSelection | null = null;
 	#envCellResourceMembership: readonly EnvCellResourceMembership[] = [];
@@ -1450,10 +1453,11 @@ class ClientRuntimeImpl implements ClientRuntime {
 				renderPassKind: snapshot.renderPassPlan.kind,
 				sceneInterest: createSceneInterestSummary(snapshot.sceneInterest),
 				installedStaticDrawUnits:
-					snapshot.staticCommitInstall.installedDrawUnits,
+					snapshot.staticCommitInstall.committedStaticDirectDrawUnits,
 				pendingStaticCommitInstallCount:
 					snapshot.staticCommitInstall.pendingCommits.length,
-				sourceStaticDrawUnits: snapshot.staticCommitInstall.sourceDrawUnits,
+				sourceStaticDrawUnits:
+					snapshot.staticCommitInstall.sourceStaticDirectDrawUnits,
 				status: snapshot.status,
 				textureFilteringMode: snapshot.renderPolicy.textureFilteringMode,
 			},
@@ -1845,12 +1849,13 @@ class ClientRuntimeImpl implements ClientRuntime {
 				envCellResourceMembershipRevision:
 					this.#envCellResourceMembershipRevision,
 				failedCommits: this.#createStaticCommitInstallCommitSnapshots("failed"),
-				installedDrawUnits: this.#installedDrawUnitsById.size,
+				committedStaticDirectDrawUnits:
+					this.#committedStaticDirectDrawUnitsById.size,
 				pendingCommits: this.#createStaticCommitInstallCommitSnapshots(
 					"queued",
 					"materializing",
 				),
-				sourceDrawUnits: this.#installedDrawUnitsById.size,
+				sourceStaticDirectDrawUnits: this.#committedStaticDirectDrawUnitsById.size,
 			},
 			status: this.#createRuntimeStatus(this.#lastStaticSnapshot.requested),
 		};
@@ -2045,7 +2050,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			commit: delta,
 			textureUpdate,
 		});
-		this.#updateInstalledDrawUnits(delta, installed);
+		this.#updateCommittedStaticDirectDrawUnits(delta, installed);
 		this.#clearStaticLayersForRemovedResources(installed.removedResources);
 		if (installed.textureUpdate) {
 			this.#renderer.applyTexturePlacementUpdate(installed.textureUpdate);
@@ -2228,20 +2233,26 @@ class ClientRuntimeImpl implements ClientRuntime {
 		}
 	}
 
-	#updateInstalledDrawUnits(
+	#updateCommittedStaticDirectDrawUnits(
 		delta: StaticCoordinatorCommitDelta,
 		installed: StaticCommitInstallResult,
 	): void {
 		for (const removedDrawUnitId of collectStaticDrawUnitResourceIds(
 			delta.removedResources,
 		)) {
-			this.#installedDrawUnitsById.delete(removedDrawUnitId);
+			this.#committedStaticDirectDrawUnitsById.delete(removedDrawUnitId);
 		}
 		for (const drawUnit of installed.installedDrawUnits) {
-			this.#installedDrawUnitsById.set(drawUnit.drawUnitId, drawUnit);
+			this.#committedStaticDirectDrawUnitsById.set(
+				drawUnit.drawUnitId,
+				drawUnit,
+			);
 		}
 		for (const drawUnit of installed.objectVisualInstallSet.directDrawUnits) {
-			this.#installedDrawUnitsById.set(drawUnit.drawUnitId, drawUnit);
+			this.#committedStaticDirectDrawUnitsById.set(
+				drawUnit.drawUnitId,
+				drawUnit,
+			);
 		}
 	}
 
@@ -2417,7 +2428,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 
 	#refreshEnvCellResourceMembership(): void {
 		const nextMembership = createEnvCellResourceMembershipSnapshot(
-			this.#installedDrawUnitsById.values(),
+			this.#committedStaticDirectDrawUnitsById.values(),
 		);
 		if (
 			envCellResourceMembershipSnapshotsEqual(
@@ -2690,7 +2701,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	): readonly MatchedStaticSelectionDrawUnitDiagnostics[] {
 		const drawUnits: MatchedStaticSelectionDrawUnitDiagnostics[] = [];
 
-		for (const drawUnit of this.#installedDrawUnitsById.values()) {
+		for (const drawUnit of this.#committedStaticDirectDrawUnitsById.values()) {
 			if (drawUnit.kind !== "static-object-geometry") {
 				continue;
 			}

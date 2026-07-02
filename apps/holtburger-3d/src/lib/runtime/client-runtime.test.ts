@@ -2397,9 +2397,9 @@ describe("browser client runtime", () => {
 			],
 			envCellResourceMembershipRevision: 0,
 			failedCommits: [],
-			installedDrawUnits: 1,
+			committedStaticDirectDrawUnits: 1,
 			pendingCommits: [],
-			sourceDrawUnits: 1,
+			sourceStaticDirectDrawUnits: 1,
 		});
 		runtime.dispose();
 	});
@@ -2513,9 +2513,9 @@ describe("browser client runtime", () => {
 					revision: 1,
 				},
 			],
-			installedDrawUnits: 0,
+			committedStaticDirectDrawUnits: 0,
 			pendingCommits: [],
-			sourceDrawUnits: 0,
+			sourceStaticDirectDrawUnits: 0,
 		});
 		runtime.dispose();
 	});

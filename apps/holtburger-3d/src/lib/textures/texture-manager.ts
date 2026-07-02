@@ -104,6 +104,24 @@ export interface TexturePlacementReferenceSnapshot {
 	readonly rect: readonly [number, number, number, number];
 }
 
+export interface TextureAtlasPageInspectionSnapshot {
+	readonly bucketId: string;
+	readonly domain: VisualTextureDomain;
+	readonly format: RuntimeTexturePlacement["format"];
+	readonly height: number;
+	readonly pageId: string;
+	readonly pixels: Uint8Array;
+	readonly placementBucketKey: string;
+	readonly textures: readonly TextureAtlasPageInspectionTexture[];
+	readonly width: number;
+}
+
+export interface TextureAtlasPageInspectionTexture {
+	readonly itemId: string;
+	readonly rect: readonly [number, number, number, number];
+	readonly sourceLabel: string;
+}
+
 export class TextureManager {
 	readonly #assetService: AssetService;
 	readonly #texturePacker: TexturePacker;
@@ -233,6 +251,57 @@ export class TextureManager {
 				unmippedPageCount: pages.filter((page) => !page.mipmapsGenerated)
 					.length,
 			},
+		};
+	}
+
+	createPageInspectionSnapshot(input: {
+		readonly bucketId: string;
+		readonly pageId: string;
+	}): TextureAtlasPageInspectionSnapshot | null {
+		const registries = Array.from(
+			this.#placementBucketRegistries.values(),
+		).sort((left, right) =>
+			[left.domain, left.placementBucketKey]
+				.join("|")
+				.localeCompare([right.domain, right.placementBucketKey].join("|")),
+		);
+		const bucketIndex = Number.parseInt(
+			input.bucketId.replace(/^bucket-/, ""),
+			10,
+		);
+		const registry = Number.isInteger(bucketIndex)
+			? registries[bucketIndex - 1]
+			: null;
+		if (!registry) {
+			return null;
+		}
+
+		const pageEntries = createTextureAtlasPageEntryGroups(
+			Array.from(registry.entries.values()),
+		);
+		const pageIndex = Number.parseInt(input.pageId.replace(/^page-/, ""), 10);
+		const entries = Number.isInteger(pageIndex)
+			? pageEntries[pageIndex - 1]
+			: null;
+		const firstEntry = entries?.[0];
+		if (!entries || !firstEntry) {
+			return null;
+		}
+
+		return {
+			bucketId: input.bucketId,
+			domain: registry.domain,
+			format: firstEntry.format,
+			height: firstEntry.textureHeight,
+			pageId: input.pageId,
+			pixels: firstEntry.runtimePlacement.pixels,
+			placementBucketKey: registry.placementBucketKey,
+			textures: uniqueSortedTextureEntries(entries).map((entry) => ({
+				itemId: entry.itemId,
+				rect: entry.rect,
+				sourceLabel: createTextureAtlasInspectionSourceLabel(entry.source),
+			})),
+			width: firstEntry.textureWidth,
 		};
 	}
 
@@ -1845,16 +1914,8 @@ function createTextureAtlasBucketDiagnostics(
 function createTextureAtlasPageDiagnostics(
 	entries: readonly VisualTextureRegistryEntry[],
 ): readonly TextureAtlasPageFacts[] {
-	const entriesByPageId = new Map<string, VisualTextureRegistryEntry[]>();
-	for (const entry of entries) {
-		const pageEntries = entriesByPageId.get(entry.pageId) ?? [];
-		pageEntries.push(entry);
-		entriesByPageId.set(entry.pageId, pageEntries);
-	}
-
-	return Array.from(entriesByPageId.entries())
-		.sort(([left], [right]) => left.localeCompare(right))
-		.map(([, pageEntries], pageIndex) => {
+	return createTextureAtlasPageEntryGroups(entries)
+		.map((pageEntries, pageIndex) => {
 			const firstEntry = pageEntries[0];
 			if (!firstEntry) {
 				throw new Error("Texture diagnostics page has no registry entries.");
@@ -1882,6 +1943,21 @@ function createTextureAtlasPageDiagnostics(
 			};
 		})
 		.sort((left, right) => left.pageId.localeCompare(right.pageId));
+}
+
+function createTextureAtlasPageEntryGroups(
+	entries: readonly VisualTextureRegistryEntry[],
+): readonly (readonly VisualTextureRegistryEntry[])[] {
+	const entriesByPageId = new Map<string, VisualTextureRegistryEntry[]>();
+	for (const entry of entries) {
+		const pageEntries = entriesByPageId.get(entry.pageId) ?? [];
+		pageEntries.push(entry);
+		entriesByPageId.set(entry.pageId, pageEntries);
+	}
+
+	return Array.from(entriesByPageId.entries())
+		.sort(([left], [right]) => left.localeCompare(right))
+		.map(([, pageEntries]) => pageEntries);
 }
 
 function calculateTexturePackingEfficiency(
@@ -1997,6 +2073,12 @@ function calculateIntervalUnionLength(
 
 function uniqueSortedNumbers(values: readonly number[]): readonly number[] {
 	return [...new Set(values)].sort((left, right) => left - right);
+}
+
+function createTextureAtlasInspectionSourceLabel(
+	source: MaterialTextureDataUseIdentity,
+): string {
+	return createMaterialTextureDataUseKey(source);
 }
 
 interface TextureOccupancyRect {

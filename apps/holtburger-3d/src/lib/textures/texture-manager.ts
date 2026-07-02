@@ -94,10 +94,6 @@ export interface DynamicTextureUseCommitDelta {
 	readonly textureUses: readonly DynamicTextureUseCommit[];
 }
 
-export interface TextureIntentPlacementInput {
-	readonly intents: readonly TexturePlacementIntent[];
-}
-
 export interface TexturePlacementReferenceSnapshot {
 	readonly activeReferenceCount: number;
 	readonly freeable: boolean;

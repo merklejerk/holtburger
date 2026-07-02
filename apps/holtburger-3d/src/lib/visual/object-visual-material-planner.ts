@@ -92,7 +92,7 @@ export interface ObjectVisualMaterialPlanningPayload {
 }
 
 /** Minimal material-slot projection consumed by static object material classification. */
-export interface ObjectVisualMaterialPlanningSlotFacts {
+interface ObjectVisualMaterialPlanningSlotFacts {
 	readonly material: StaticMaterialSourceIdentity;
 	readonly paletteOverride: PaletteIdentity | null;
 	readonly paletteViews: readonly StaticObjectPaletteViewFacts[];

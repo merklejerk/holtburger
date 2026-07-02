@@ -995,10 +995,6 @@ export interface StaticObjectSourceGeometryAttachment {
 	readonly buffer: ObjectVisualGeometryBuffer;
 }
 
-export type StaticPeerRecordOwner =
-	| StaticDrawUnitPeerRecordOwner
-	| StaticLayerPeerRecordOwner;
-
 interface StaticDrawUnitPeerRecordOwner {
 	readonly kind: "draw-unit";
 	readonly drawUnitId: string;

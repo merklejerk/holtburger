@@ -1,7 +1,7 @@
 import type { RenderSurfacePayloadDto } from "../../../lib/host/contracts";
 import type { PreparedAsset } from "../contracts";
 
-export type ResolverRenderSurfacePayloadDto = Omit<
+type ResolverRenderSurfacePayloadDto = Omit<
 	RenderSurfacePayloadDto,
 	"sourceBytes"
 >;

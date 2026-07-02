@@ -14,18 +14,18 @@ import {
 	createTexturePlacementItemId,
 } from "../textures/placement";
 
-export type ObjectVisualTexturePlacementPolicy =
+type ObjectVisualTexturePlacementPolicy =
 	| ObjectVisualStaticTexturePlacementPolicy
 	| ObjectVisualDynamicTexturePlacementPolicy;
 
-export interface ObjectVisualStaticTexturePlacementPolicy {
+interface ObjectVisualStaticTexturePlacementPolicy {
 	readonly affinityKey: string | null;
 	readonly domain: StaticBakeTextureUse["domain"];
 	readonly kind: "static-authored";
 	readonly placementBucketKey?: TexturePlacementBucketKey;
 }
 
-export interface ObjectVisualDynamicTexturePlacementPolicy {
+interface ObjectVisualDynamicTexturePlacementPolicy {
 	readonly affinityKey: string | null;
 	readonly kind: "dynamic";
 	readonly placementBucketKey: TexturePlacementBucketKey;
@@ -37,7 +37,7 @@ export interface ObjectVisualTexturePlacementRequirement {
 	readonly requirement: ObjectVisualTextureSourceRequirement;
 }
 
-export interface ObjectVisualTextureSourceRequirement {
+interface ObjectVisualTextureSourceRequirement {
 	readonly bindingKey: string;
 	readonly samplingPolicy?: StaticBakeTextureUse["samplingPolicy"];
 	readonly source: TexturePlacementSource;

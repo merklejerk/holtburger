@@ -1614,30 +1614,43 @@
 	}
 
 	function filteredAtlasPages(): readonly RuntimeTextureAtlasPageOverview[] {
-		const filter = atlasPageFilter.trim().toLowerCase();
+		const filterTokens = atlasPageFilter
+			.trim()
+			.toLowerCase()
+			.split(/\s+/)
+			.filter((token) => token.length > 0);
 		const pages =
 			runtimeOverview?.resources.atlas.buckets.flatMap(
 				(bucket) => bucket.pages,
 			) ?? [];
-		if (filter.length === 0) {
+		if (filterTokens.length === 0) {
 			return pages;
 		}
-		return pages.filter((page) =>
-			[
-				page.bucketId,
-				page.bucketLabel,
-				page.domain,
-				page.format,
-				page.pageId,
-				page.placementBucketKey,
-				page.sampleClass,
-				page.wrapS,
-				page.wrapT,
-			]
-				.join(" ")
-				.toLowerCase()
-				.includes(filter),
-		);
+		return pages.filter((page) => {
+			const searchableText = createAtlasPageSearchText(page);
+			return filterTokens.every((token) => searchableText.includes(token));
+		});
+	}
+
+	function createAtlasPageSearchText(
+		page: RuntimeTextureAtlasPageOverview,
+	): string {
+		return [
+			page.bucketId,
+			page.bucketLabel,
+			page.domain,
+			page.format,
+			page.pageId,
+			formatAtlasPageOrdinal(page.pageId),
+			page.placementBucketKey,
+			page.sampleClass,
+			formatAtlasPageSamplingEffects(page.sampleClass),
+			`${page.width}x${page.height}`,
+			page.wrapS,
+			page.wrapT,
+		]
+			.join(" ")
+			.toLowerCase();
 	}
 
 	function formatAtlasPageListSummary(): string {

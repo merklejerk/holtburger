@@ -29,7 +29,6 @@ import type {
 import { uniqueSortedStaticTextureUseOwners } from "../../contracts";
 import type {
 	TextureResourceDependencies,
-	TextureResourceRoleDependency,
 } from "../../../textures/placement";
 import { requireObjectVisualTexturePlacementSnapshot } from "../../../textures/placement";
 import { createLayerPeerRecordOwnerForStaticBakeTask } from "../../layer-owners";
@@ -97,7 +96,6 @@ export function bakeStaticObjectBatch(
 	const itemResults = input.items.map((item, index) =>
 		bakeStaticObjectBatchItem(input, item, index),
 	);
-	const drawUnits = itemResults.flatMap((result) => result.drawUnits);
 	const textureDependencies = itemResults.flatMap(
 		(result) => result.textureDependencies,
 	);
@@ -124,7 +122,7 @@ export function bakeStaticObjectBatch(
 	emitStaticBakeWorkerTrace("static-object-batch:end", {
 		bakeBatchId: input.bakeBatchId,
 		domain: input.domain,
-		drawUnitCount: drawUnits.length,
+		drawUnitCount: objectVisualInstallSet.directDrawUnits.length,
 		itemCount: input.items.length,
 	});
 
@@ -135,7 +133,7 @@ export function bakeStaticObjectBatch(
 			0,
 		),
 		domain: input.domain,
-		drawUnits,
+		drawUnits: [],
 		staticObjectBakeDiagnostics: itemResults.map(
 			(result) => result.diagnostics,
 		),
@@ -392,7 +390,7 @@ function bakeStaticObjectBatchItem(
 	});
 
 	return {
-		drawUnits: bakedDrawUnits,
+		drawUnits: [],
 		diagnostics: createStaticObjectBakeDiagnostics({
 			drawUnits: drawUnits.map((output) => output.drawUnit),
 			input,
@@ -412,8 +410,7 @@ function bakeStaticObjectBatchItem(
 			...spatialRecordBySliceId.values(),
 			...drawUnits.flatMap((output) => output.objectSpatialRecords),
 		],
-		textureDependencies:
-			createStaticObjectDrawUnitTextureDependencies(bakedDrawUnits),
+		textureDependencies: [],
 		textureUses: recipePublication.textureUses,
 		objectVisualInstallSet: recipePublication.installSet,
 		objectVisualTextureDependencies: recipePublication.textureDependencies,
@@ -475,67 +472,6 @@ function createStaticObjectRecipePublication(options: {
 		textureUseNamespace: "static-object-texture",
 		textureUseScopeId: options.resourceIdPrefix,
 	});
-}
-
-function createStaticObjectDrawUnitTextureDependencies(
-	drawUnits: readonly StaticDrawUnit[],
-): readonly TextureResourceDependencies[] {
-	return drawUnits.flatMap((drawUnit) => {
-		if (drawUnit.kind !== "static-object-geometry") {
-			return [];
-		}
-		const roles = createStaticObjectDrawUnitTextureRoleDependencies(drawUnit);
-		if (roles.length === 0) {
-			return [];
-		}
-		return [
-			{
-				resourceId: drawUnit.drawUnitId,
-				roles,
-			},
-		];
-	});
-}
-
-function createStaticObjectDrawUnitTextureRoleDependencies(
-	drawUnit: StaticObjectGeometryStaticDrawUnit,
-): readonly TextureResourceRoleDependency[] {
-	const baseColor = new Set<string>();
-	const detail = new Set<string>();
-	const index = new Set<string>();
-	const palette = new Set<string>();
-	for (const entry of drawUnit.materialEntries) {
-		addNullableString(baseColor, entry.primaryTextureUseId);
-		addNullableString(detail, entry.detailTextureUseId);
-		addNullableString(index, entry.indexTextureUseId);
-		addNullableString(palette, entry.paletteTextureUseId);
-	}
-
-	return [
-		createRoleDependency("object-base-color", baseColor),
-		createRoleDependency("object-detail", detail),
-		createRoleDependency("object-index", index),
-		createRoleDependency("object-palette", palette),
-	].filter((role): role is TextureResourceRoleDependency => role !== null);
-}
-
-function createRoleDependency(
-	purpose: TextureResourceRoleDependency["purpose"],
-	itemIds: ReadonlySet<string>,
-): TextureResourceRoleDependency | null {
-	if (itemIds.size === 0) {
-		return null;
-	}
-	return {
-		itemIds: [...itemIds].sort((left, right) => left.localeCompare(right)),
-		purpose,
-	};
-}
-
-function addNullableString(values: Set<string>, value: string | null): void {
-	if (value) {
-		values.add(value);
-	}
 }
 
 function createStaticObjectBakeDiagnostics(options: {

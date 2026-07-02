@@ -1699,11 +1699,7 @@ function getDrawUnitOwnerId(drawUnit: StaticDrawUnit): string {
 function createCommitDrawUnits(
 	result: StaticBakeBatchResult,
 ): StaticCoordinatorCommitDelta["addedDrawUnits"] {
-	return result.drawUnits.filter(
-		(drawUnit) =>
-			drawUnit.kind !== "static-object-geometry" &&
-			drawUnit.kind !== "structured-interior-geometry",
-	);
+	return result.drawUnits;
 }
 
 function createLayerOwnerIdForDomainLandblock(input: {
@@ -1756,11 +1752,7 @@ function collectCommittedResourceKeysByOwnerId(
 	result: StaticBakeBatchResult,
 ): Map<string, StaticResourceKey[]> {
 	const resourcesByOwnerId = new Map<string, StaticResourceKey[]>();
-	for (const drawUnit of result.drawUnits.filter(
-		(drawUnit) =>
-			drawUnit.kind !== "static-object-geometry" &&
-			drawUnit.kind !== "structured-interior-geometry",
-	)) {
+	for (const drawUnit of result.drawUnits) {
 		addResourceKey(resourcesByOwnerId, getDrawUnitOwnerId(drawUnit), {
 			drawUnitId: drawUnit.drawUnitId,
 			kind: "draw-unit",
@@ -1821,21 +1813,14 @@ function collectCommittedResourceKeysByOwnerId(
 function createCommitTextureDependencies(
 	result: StaticBakeBatchResult,
 ): StaticCoordinatorCommitDelta["textureDependencies"] {
-	const legacyObjectResourceIds = new Set([
-		...result.drawUnits
-			.filter(
-				(drawUnit) =>
-					drawUnit.kind === "static-object-geometry" ||
-					drawUnit.kind === "structured-interior-geometry",
-			)
-			.map((drawUnit) => drawUnit.drawUnitId),
-		...result.objectVisualInstallSet.visualResources.map(
+	const objectVisualResourceIds = new Set(
+		result.objectVisualInstallSet.visualResources.map(
 			(resource) => resource.resourceId,
 		),
-	]);
+	);
 	return [
 		...result.textureDependencies.filter(
-			(dependency) => !legacyObjectResourceIds.has(dependency.resourceId),
+			(dependency) => !objectVisualResourceIds.has(dependency.resourceId),
 		),
 		...result.objectVisualInstallSet.textureDependencies,
 	];

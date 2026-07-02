@@ -186,7 +186,7 @@ describe("browser landblock env-cell baker", () => {
 			},
 		]);
 		expect(
-			result.drawUnits.filter(
+			result.objectVisualInstallSet.directDrawUnits.filter(
 				(drawUnit) => drawUnit.kind === "static-object-geometry",
 			),
 		).toEqual([]);
@@ -222,113 +222,6 @@ describe("browser landblock env-cell baker", () => {
 		);
 	});
 
-	it("accepts full geometry attachments for resolver-light cell structures", () => {
-		const input = createInputWithRenderableCellStructure();
-		const envCell = requireFirstEnvCell(input);
-
-		const result = bakeEnvCellSystem({
-			...input,
-			attachments: {
-				envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
-				staticObjectSourceGeometry: [],
-			},
-			texturePlacementSnapshot:
-				createStructuredInteriorPlacementSnapshot(input),
-		});
-
-		expect(result.staticSpatialRecords).toHaveLength(1);
-		expect(result.drawUnits).toHaveLength(1);
-		expect(result.drawUnits[0]).toMatchObject({
-			cellStructure: {
-				cellStructureId: 0x0d000001,
-				kind: "cell-structure",
-			},
-			coordinateSpace: "landblock-render-local",
-			domain: "env-cell-system",
-			drawUnitId:
-				"7:landblock:da55ffff:env-cell-system:structured-interior:da550100:0d000001:slice:0:0",
-			envCellId: 0xda550100,
-			kind: "structured-interior-geometry",
-			landblockId: 0xda55ffff,
-			materialPlan: [
-				{
-					diagnostics: [],
-					family: "flat-color",
-					outcome: "rendered",
-					pass: "opaque",
-					slotId: 0,
-					surfaceId: 0x08000010,
-					textureUseIds: [],
-				},
-			],
-			materialEntries: [
-				expect.objectContaining({
-					materialColor: expect.any(Array),
-					materialIds: [0x08000010],
-					primaryTextureUseId: null,
-					slot: 0,
-				}),
-			],
-			materialFamily: "flat-color",
-			materialIds: [0x08000010],
-			materialPass: "opaque",
-			sourceTriangleIds: ["polygon:1|surface:0|first:0|variant:none"],
-			surfaceIds: [0x08000010],
-			textureUseIds: [],
-			triangleCount: 1,
-			vertexCount: 3,
-		});
-		const drawUnit = result.drawUnits[0];
-		if (!drawUnit || drawUnit.kind !== "structured-interior-geometry") {
-			throw new Error("Expected structured interior geometry draw unit.");
-		}
-		expect(Array.from(drawUnit.indices)).toEqual([0, 1, 2]);
-		expect(Array.from(drawUnit.materialSlotIndices)).toEqual([0, 0, 0]);
-		expect(Array.from(drawUnit.texCoords)).toEqual([0, 0, 1, 0, 0, 1]);
-		expect(result.textureUses).toEqual([]);
-		expect(result.objectVisualInstallSet.directDrawUnits).toHaveLength(1);
-		expect(result.objectVisualInstallSet.directDrawUnits[0]).toMatchObject({
-			cellStructure: {
-				cellStructureId: 0x0d000001,
-				kind: "cell-structure",
-			},
-			envCellId: 0xda550100,
-			kind: "structured-interior-geometry",
-			materialPlan: [{ surfaceId: 0x08000010 }],
-			sourceTriangleIds: ["polygon:1|surface:0|first:0|variant:none"],
-			surfaceIds: [0x08000010],
-			textureUseIds: [],
-		});
-		expect(result.objectVisualInstallSet.textureDependencies).toEqual([]);
-		expect(result.materialCoverage).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({
-					buckets: [
-						{
-							family: "flat-color",
-							filteringMode: "none",
-							materialCount: 1,
-							outcome: "rendered",
-							partitionCount: 1,
-							pass: "opaque",
-							textureRoleCount: 0,
-							triangleCount: 1,
-						},
-					],
-					deferredTriangleCount: 0,
-					domain: "env-cell-system",
-					fallbackReasonCounts: [],
-					fallbackReasonCount: 0,
-					landblockId: 0xda55ffff,
-					materialCount: 1,
-					renderedTriangleCount: 1,
-					triangleCount: 1,
-					unrenderedBuckets: [],
-				}),
-			]),
-		);
-	});
-
 	it("omits structured-interior draw units when all material sources are missing", () => {
 		const input = createInputWithRenderableCellStructure({
 			includeMaterialSources: false,
@@ -345,7 +238,7 @@ describe("browser landblock env-cell baker", () => {
 				createStructuredInteriorPlacementSnapshot(input),
 		});
 
-		expect(result.drawUnits).toEqual([]);
+		expect(result.objectVisualInstallSet.directDrawUnits).toEqual([]);
 		expect(result.objectVisualInstallSet.directDrawUnits).toEqual([]);
 		expect(result.textureUses).toEqual([]);
 		expect(result.materialCoverage).toEqual([
@@ -366,297 +259,6 @@ describe("browser landblock env-cell baker", () => {
 		]);
 	});
 
-	it("partitions mixed structured-interior material passes into separate draw units", () => {
-		const input = createInputWithRenderableCellStructure({
-			materialSources: [
-				createStaticObjectMaterialSource({ materialId: 0x08000010 }),
-				createStaticObjectMaterialSource({
-					materialId: 0x08000020,
-					surfaceType: 0x4,
-				}),
-			],
-			renderSurfaces: [
-				{ materialId: 0x08000010, polygonId: 1 },
-				{ materialId: 0x08000020, polygonId: 2 },
-			],
-		});
-		const envCell = requireFirstEnvCell(input);
-
-		const result = bakeEnvCellSystem({
-			...input,
-			attachments: {
-				envCellCellStructureGeometry: [
-					createGeometryAttachment(envCell, {
-						positions: new Float32Array([
-							0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0, 0, 3, 0, 0, 2, 1, 0,
-						]),
-						surfaceIds: [0, 1],
-						triangles: [
-							{
-								firstVertex: 0,
-								materialVariantSignature: null,
-								polygonId: 1,
-								surfaceId: 0,
-							},
-							{
-								firstVertex: 3,
-								materialVariantSignature: null,
-								polygonId: 2,
-								surfaceId: 1,
-							},
-						],
-						uvs: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
-					}),
-				],
-				staticObjectSourceGeometry: [],
-			},
-		});
-		const structuredDrawUnits = result.drawUnits.filter(
-			(drawUnit) => drawUnit.kind === "structured-interior-geometry",
-		);
-
-		expect(structuredDrawUnits).toHaveLength(2);
-		expect(
-			structuredDrawUnits.map((drawUnit) => ({
-				ids: drawUnit.sourceTriangleIds,
-				pass: drawUnit.materialPass,
-				surfaceIds: drawUnit.surfaceIds,
-				triangleCount: drawUnit.triangleCount,
-				vertexCount: drawUnit.vertexCount,
-			})),
-		).toEqual([
-			{
-				ids: ["polygon:2|surface:1|first:3|variant:none"],
-				pass: "alpha-test",
-				surfaceIds: [0x08000020],
-				triangleCount: 1,
-				vertexCount: 3,
-			},
-			{
-				ids: ["polygon:1|surface:0|first:0|variant:none"],
-				pass: "opaque",
-				surfaceIds: [0x08000010],
-				triangleCount: 1,
-				vertexCount: 3,
-			},
-		]);
-		expect(
-			new Set(structuredDrawUnits.map((drawUnit) => drawUnit.drawUnitId)).size,
-		).toBe(2);
-	});
-
-	it("omits missing structured-interior surfaces without blocking renderable slices", () => {
-		const input = createInputWithRenderableCellStructure({
-			materialSources: [
-				createStaticObjectMaterialSource({ materialId: 0x08000010 }),
-			],
-			renderSurfaces: [
-				{ materialId: 0x08000010, polygonId: 1 },
-				{ materialId: 0x08000020, polygonId: 2 },
-			],
-		});
-		const envCell = requireFirstEnvCell(input);
-
-		const result = bakeEnvCellSystem({
-			...input,
-			attachments: {
-				envCellCellStructureGeometry: [
-					createGeometryAttachment(envCell, {
-						positions: new Float32Array([
-							0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0, 0, 3, 0, 0, 2, 1, 0,
-						]),
-						surfaceIds: [0, 1],
-						triangles: [
-							{
-								firstVertex: 0,
-								materialVariantSignature: null,
-								polygonId: 1,
-								surfaceId: 0,
-							},
-							{
-								firstVertex: 3,
-								materialVariantSignature: null,
-								polygonId: 2,
-								surfaceId: 1,
-							},
-						],
-						uvs: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
-					}),
-				],
-				staticObjectSourceGeometry: [],
-			},
-		});
-		const structuredDrawUnits = result.drawUnits.filter(
-			(drawUnit) => drawUnit.kind === "structured-interior-geometry",
-		);
-
-		expect(structuredDrawUnits).toHaveLength(1);
-		expect(structuredDrawUnits[0]).toMatchObject({
-			sourceTriangleIds: ["polygon:1|surface:0|first:0|variant:none"],
-			surfaceIds: [0x08000010],
-			triangleCount: 1,
-			vertexCount: 3,
-		});
-		expect(result.materialCoverage).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({
-					coverageKind: "structured-interior",
-					deferredTriangleCount: 1,
-					renderedTriangleCount: 1,
-					triangleCount: 2,
-					unrenderedBuckets: [
-						expect.objectContaining({
-							outcome: "render-deferred",
-							reasonCodes: ["missing-cell-structure-material-source"],
-							triangleCount: 1,
-						}),
-					],
-				}),
-			]),
-		);
-	});
-
-	it("omits structured-interior surfaces with missing render surfaces without blocking renderable slices", () => {
-		const input = createInputWithRenderableCellStructure({
-			materialSources: [
-				createStaticObjectMaterialSource({ materialId: 0x08000010 }),
-				createTexturedMaterialSource(0x08000020),
-			],
-			renderSurfaces: [
-				{ materialId: 0x08000010, polygonId: 1 },
-				{ materialId: 0x08000020, polygonId: 2 },
-			],
-		});
-		const envCell = requireFirstEnvCell(input);
-
-		const result = bakeEnvCellSystem({
-			...input,
-			attachments: {
-				envCellCellStructureGeometry: [
-					createGeometryAttachment(envCell, {
-						positions: new Float32Array([
-							0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0, 0, 3, 0, 0, 2, 1, 0,
-						]),
-						surfaceIds: [0, 1],
-						triangles: [
-							{
-								firstVertex: 0,
-								materialVariantSignature: null,
-								polygonId: 1,
-								surfaceId: 0,
-							},
-							{
-								firstVertex: 3,
-								materialVariantSignature: null,
-								polygonId: 2,
-								surfaceId: 1,
-							},
-						],
-						uvs: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
-					}),
-				],
-				staticObjectSourceGeometry: [],
-			},
-		});
-		const structuredDrawUnits = result.drawUnits.filter(
-			(drawUnit) => drawUnit.kind === "structured-interior-geometry",
-		);
-
-		expect(structuredDrawUnits).toHaveLength(1);
-		expect(structuredDrawUnits[0]).toMatchObject({
-			surfaceIds: [0x08000010],
-			triangleCount: 1,
-		});
-		expect(result.materialCoverage).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({
-					deferredTriangleCount: 0,
-					fallbackReasonCounts: [{ code: "missing-render-surface", count: 1 }],
-					renderedTriangleCount: 1,
-					unsupportedTriangleCount: 1,
-					unrenderedBuckets: [
-						expect.objectContaining({
-							outcome: "unsupported",
-							reasonCodes: ["missing-render-surface"],
-							triangleCount: 1,
-						}),
-					],
-				}),
-			]),
-		);
-	});
-
-	it("omits indexed structured-interior surfaces with missing palettes without blocking renderable slices", () => {
-		const input = createInputWithRenderableCellStructure({
-			materialSources: [
-				createStaticObjectMaterialSource({ materialId: 0x08000010 }),
-				createTexturedMaterialSource(0x08000020),
-			],
-			renderSurfaces: [
-				{ materialId: 0x08000010, polygonId: 1 },
-				{ materialId: 0x08000020, polygonId: 2 },
-			],
-			textureRefs: createIndexedTextureRefsWithoutPalette(),
-		});
-		const envCell = requireFirstEnvCell(input);
-
-		const result = bakeEnvCellSystem({
-			...input,
-			attachments: {
-				envCellCellStructureGeometry: [
-					createGeometryAttachment(envCell, {
-						positions: new Float32Array([
-							0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0, 0, 3, 0, 0, 2, 1, 0,
-						]),
-						surfaceIds: [0, 1],
-						triangles: [
-							{
-								firstVertex: 0,
-								materialVariantSignature: null,
-								polygonId: 1,
-								surfaceId: 0,
-							},
-							{
-								firstVertex: 3,
-								materialVariantSignature: null,
-								polygonId: 2,
-								surfaceId: 1,
-							},
-						],
-						uvs: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
-					}),
-				],
-				staticObjectSourceGeometry: [],
-			},
-		});
-		const structuredDrawUnits = result.drawUnits.filter(
-			(drawUnit) => drawUnit.kind === "structured-interior-geometry",
-		);
-
-		expect(structuredDrawUnits).toHaveLength(1);
-		expect(structuredDrawUnits[0]).toMatchObject({
-			surfaceIds: [0x08000010],
-			triangleCount: 1,
-		});
-		expect(result.materialCoverage).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({
-					deferredTriangleCount: 0,
-					fallbackReasonCounts: [{ code: "missing-palette", count: 1 }],
-					renderedTriangleCount: 1,
-					unsupportedTriangleCount: 1,
-					unrenderedBuckets: [
-						expect.objectContaining({
-							outcome: "unsupported",
-							reasonCodes: ["missing-palette"],
-							triangleCount: 1,
-						}),
-					],
-				}),
-			]),
-		);
-	});
-
 	it("emits structured-interior texture uses for textured cell materials", () => {
 		const input = createInputWithRenderableCellStructure({
 			materialSources: [createTexturedMaterialSource(0x08000010)],
@@ -673,7 +275,7 @@ describe("browser landblock env-cell baker", () => {
 			texturePlacementSnapshot:
 				createStructuredInteriorPlacementSnapshot(input),
 		});
-		const drawUnit = result.drawUnits[0];
+		const drawUnit = result.objectVisualInstallSet.directDrawUnits[0];
 		if (!drawUnit || drawUnit.kind !== "structured-interior-geometry") {
 			throw new Error("Expected structured interior geometry draw unit.");
 		}
@@ -762,7 +364,7 @@ describe("browser landblock env-cell baker", () => {
 			texturePlacementSnapshot:
 				createStructuredInteriorPlacementSnapshot(input),
 		});
-		const drawUnit = result.drawUnits.find(
+		const drawUnit = result.objectVisualInstallSet.directDrawUnits.find(
 			(candidate) => candidate.kind === "structured-interior-geometry",
 		);
 		if (!drawUnit || drawUnit.kind !== "structured-interior-geometry") {
@@ -820,97 +422,6 @@ describe("browser landblock env-cell baker", () => {
 		);
 	});
 
-	it("splits structured-interior draw units by final object texture pages", () => {
-		const input = createInputWithRenderableCellStructure({
-			materialSources: [
-				createTexturedMaterialSource(0x08000010),
-				createTexturedMaterialSource(0x08000011, {
-					renderSurfaceId: 0x06000011,
-					surfaceTextureId: 0x05000011,
-				}),
-			],
-			renderSurfaces: [
-				{ materialId: 0x08000010, polygonId: 1 },
-				{ materialId: 0x08000011, polygonId: 2 },
-			],
-			textureRefs: [
-				...createRgbaTextureRefs(),
-				...createRgbaTextureRefs({
-					renderSurfaceId: 0x06000011,
-					surfaceTextureId: 0x05000011,
-				}),
-			],
-		});
-		const envCell = requireFirstEnvCell(input);
-
-		const result = bakeEnvCellSystem({
-			...input,
-			attachments: {
-				envCellCellStructureGeometry: [
-					createGeometryAttachment(envCell, {
-						positions: new Float32Array([
-							0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0, 0, 3, 0, 0, 2, 1, 0,
-						]),
-						surfaceIds: [0, 1],
-						triangles: [
-							{
-								firstVertex: 0,
-								materialVariantSignature: null,
-								polygonId: 1,
-								surfaceId: 0,
-							},
-							{
-								firstVertex: 3,
-								materialVariantSignature: null,
-								polygonId: 2,
-								surfaceId: 1,
-							},
-						],
-						uvs: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
-					}),
-				],
-				staticObjectSourceGeometry: [],
-			},
-			texturePlacementSnapshot: createStructuredInteriorPlacementSnapshot(
-				input,
-				{ uniquePages: true },
-			),
-		});
-		const drawUnits = result.drawUnits.filter(
-			(drawUnit) => drawUnit.kind === "structured-interior-geometry",
-		);
-
-		expect(drawUnits).toHaveLength(2);
-		expect(drawUnits.map((drawUnit) => drawUnit.textureUseIds)).toEqual([
-			[
-				"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
-			],
-			[
-				"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000011:rgba-color:sampling:wrap=repeat,repeat",
-			],
-		]);
-		expect(result.textureDependencies).toEqual([
-			{
-				resourceId: drawUnits[0]?.drawUnitId,
-				roles: [
-					{
-						itemIds: drawUnits[0]?.textureUseIds,
-						purpose: "object-base-color",
-					},
-				],
-			},
-			{
-				resourceId: drawUnits[1]?.drawUnitId,
-				roles: [
-					{
-						itemIds: drawUnits[1]?.textureUseIds,
-						purpose: "object-base-color",
-					},
-				],
-			},
-		]);
-	});
-
 	it("composes environment detail roles onto structured-interior textured materials", () => {
 		const input = createInputWithRenderableCellStructure({
 			detailRoles: [
@@ -939,7 +450,7 @@ describe("browser landblock env-cell baker", () => {
 			texturePlacementSnapshot:
 				createStructuredInteriorPlacementSnapshot(input),
 		});
-		const drawUnit = result.drawUnits[0];
+		const drawUnit = result.objectVisualInstallSet.directDrawUnits[0];
 		if (!drawUnit || drawUnit.kind !== "structured-interior-geometry") {
 			throw new Error("Expected structured interior geometry draw unit.");
 		}
@@ -995,7 +506,7 @@ describe("browser landblock env-cell baker", () => {
 				staticObjectSourceGeometry: [],
 			},
 		});
-		const drawUnit = result.drawUnits[0];
+		const drawUnit = result.objectVisualInstallSet.directDrawUnits[0];
 		if (!drawUnit || drawUnit.kind !== "structured-interior-geometry") {
 			throw new Error("Expected structured interior geometry draw unit.");
 		}
@@ -1003,92 +514,6 @@ describe("browser landblock env-cell baker", () => {
 		expect(Array.from(drawUnit.positions)).toEqual([
 			10, 31, -20, 10, 30, -19, 11, 30, -20,
 		]);
-	});
-
-	it("bakes env-cell static placements through static object draw units with env-cell ownership", () => {
-		const input = createInputWithRenderableStaticSeed({
-			envCellLocalPlacement: {
-				orientation: { w: 1, x: 0, y: 0, z: 0 },
-				origin: { x: 10, y: 30, z: -20 },
-			},
-			seedLocalPlacement: {
-				orientation: { w: 1, x: 0, y: 0, z: 0 },
-				origin: { x: 1, y: 2, z: 3 },
-			},
-		});
-
-		const result = bakeEnvCellSystem(input);
-		const drawUnit = result.drawUnits.find(
-			(candidate) => candidate.kind === "static-object-geometry",
-		);
-		if (!drawUnit || drawUnit.kind !== "static-object-geometry") {
-			throw new Error("Expected env-cell static object geometry draw unit.");
-		}
-
-		expect(result.drawUnits).toHaveLength(1);
-		expect(drawUnit).toMatchObject({
-			domain: "env-cell-system",
-			kind: "static-object-geometry",
-			landblockId: 0xda55ffff,
-			materialFamily: "flat-color",
-			ownership: {
-				envCellIds: [0xda550100],
-				kind: "env-cell-static-object-placements",
-				landblockId: 0xda55ffff,
-				seedIdentities: [
-					{
-						instanceId: "da550100:env-cell-static-0",
-						kind: "static-object-instance",
-						landblockId: 0xda55ffff,
-						objectKind: "explicit-object",
-					},
-				],
-			},
-			sourceMappingCoverage: [
-				expect.objectContaining({
-					object: expect.objectContaining({
-						instanceId: "da550100:env-cell-static-0",
-					}),
-					partIndex: 0,
-					sourceTriangleCount: 1,
-				}),
-			],
-			triangleCount: 1,
-			vertexCount: 3,
-		});
-		expect(drawUnit.drawUnitId).toContain(
-			"env-cell-system:0xda55ffff:static-object-partition:",
-		);
-		expect(Array.from(drawUnit.positions.slice(0, 9))).toEqual([
-			1, 3, -2, 2, 3, -2, 1, 4, -2,
-		]);
-		expect(result.textureUses).toEqual([]);
-		expect(result.envCellStaticObjectPlacementRecords).toEqual([
-			expect.objectContaining({
-				envCellId: 0xda550100,
-				kind: "env-cell-static-object-placement",
-			}),
-		]);
-		expect(result.staticSpatialRecords).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({
-					envCellId: 0xda550100,
-					kind: "env-cell-spatial",
-					landblockId: 0xda55ffff,
-				}),
-				expect.objectContaining({
-					bounds: {
-						max: { x: 2, y: 4, z: -2 },
-						min: { x: 1, y: 3, z: -2 },
-					},
-					envCellId: 0xda550100,
-					instanceId: "da550100:env-cell-static-0",
-					kind: "env-cell-static-object-bounds",
-					landblockId: 0xda55ffff,
-					owner: expectedEnvCellLayerOwner(),
-				}),
-			]),
-		);
 	});
 
 	it("bakes env-cell static placement rotation without applying the containing cell frame", () => {
@@ -1114,7 +539,7 @@ describe("browser landblock env-cell baker", () => {
 		});
 
 		const result = bakeEnvCellSystem(input);
-		const drawUnit = result.drawUnits.find(
+		const drawUnit = result.objectVisualInstallSet.directDrawUnits.find(
 			(candidate) => candidate.kind === "static-object-geometry",
 		);
 		if (!drawUnit || drawUnit.kind !== "static-object-geometry") {

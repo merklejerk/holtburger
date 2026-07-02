@@ -2240,6 +2240,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 		for (const drawUnit of installed.installedDrawUnits) {
 			this.#installedDrawUnitsById.set(drawUnit.drawUnitId, drawUnit);
 		}
+		for (const drawUnit of installed.objectVisualInstallSet.directDrawUnits) {
+			this.#installedDrawUnitsById.set(drawUnit.drawUnitId, drawUnit);
+		}
 	}
 
 	#applyInstalledStaticLayers(

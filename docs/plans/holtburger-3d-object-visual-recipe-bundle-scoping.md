@@ -2505,13 +2505,20 @@ Implementation notes:
 - Renderer diagnostics still expose `staticObjectRenderInstances` and
   `staticObjectVisualResources` counters. Those names describe renderer resident resource classes,
   not the removed bake/install mirror fields.
+- Second hard-cutover slice routed runtime membership and selection diagnostics through
+  `objectVisualInstallSet.directDrawUnits` for object-like direct draw units. Runtime tests now
+  publish structured-interior and generated-scenery direct draw units through object visual install
+  sets instead of the legacy `drawUnits` bucket.
 - Validation:
   `npm --prefix apps/holtburger-3d run test:ts -- static-commit-installer static-coordinator env-cell-system-layer-publication worker-client static-object-batch-partitioner`
   passed with 9 test files and 94 tests;
+  `npm --prefix apps/holtburger-3d run test:ts -- static-commit-installer static-coordinator env-cell-system-layer-publication worker-client static-object-batch-partitioner client-runtime`
+  passed with 10 test files and 136 tests;
   `npm --prefix apps/holtburger-3d run check` passed.
 - Remaining Phase 12 debt: legacy static-object partition/bake code still emits transitional direct
-  draw units for diagnostics and sidecars; broader `client-runtime` still has static projection and
-  static selection diagnostics tests expecting legacy installed draw-unit behavior.
+  draw units for diagnostics and sidecars. `client-runtime` also still stores terrain and object
+  visual direct draw units in `#installedDrawUnitsById`; the behavior is correct for membership and
+  selection diagnostics, but the name is now a thin-shell cleanup target for Phase 13/15.
 
 ### Phase 13: Resteer Hard Cutover
 

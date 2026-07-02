@@ -1313,20 +1313,22 @@ describe("browser client runtime", () => {
 			],
 		});
 		completeBakerWork(baker, "env-cell-system", 0xda55ffff, {
-			drawUnits: [
-				createStructuredInteriorDrawUnit({
-					drawUnitId: "structured:da550100",
-					envCellId: 0xda550100,
-				}),
-				createStaticObjectDrawUnit("env-static-shared", {
-					ownership: {
-						envCellIds: [0xda550100, 0xda550101],
-						kind: "env-cell-static-object-placements",
-						landblockId: 0xda55ffff,
-						seedIdentities: [],
-					},
-				}),
-			],
+			objectVisualInstallSet: createObjectVisualInstallSet({
+				directDrawUnits: [
+					createStructuredInteriorDrawUnit({
+						drawUnitId: "structured:da550100",
+						envCellId: 0xda550100,
+					}),
+					createStaticObjectDrawUnit("env-static-shared", {
+						ownership: {
+							envCellIds: [0xda550100, 0xda550101],
+							kind: "env-cell-static-object-placements",
+							landblockId: 0xda55ffff,
+							seedIdentities: [],
+						},
+					}),
+				],
+			}),
 			staticPortalGraphs: [
 				createEnvCellPortalGraphFixture(
 					createEnvCellLayerOwner(0xda55ffff),
@@ -1609,12 +1611,14 @@ describe("browser client runtime", () => {
 		resolver.complete(envCellRequest?.requestId ?? "");
 		await flushPromises();
 		completeBakerWork(baker, "env-cell-system", 0xda55ffff, {
-			drawUnits: [
-				createStructuredInteriorDrawUnit({
-					drawUnitId: "structured:da550100",
-					envCellId: 0xda550100,
-				}),
-			],
+			objectVisualInstallSet: createObjectVisualInstallSet({
+				directDrawUnits: [
+					createStructuredInteriorDrawUnit({
+						drawUnitId: "structured:da550100",
+						envCellId: 0xda550100,
+					}),
+				],
+			}),
 			portalApertureResources: [
 				createBuildingTransitionPortalApertureResource({
 					targetEnvCellId: 0xda550100,
@@ -2221,11 +2225,13 @@ describe("browser client runtime", () => {
 		});
 		await flushPromises();
 		completeBakerWork(baker, "outdoor-generated-scenery", 0xda55ffff, {
-			drawUnits: [
-				createStaticObjectDrawUnit("static-draw-a", {
-					domain: "outdoor-generated-scenery",
-				}),
-			],
+			objectVisualInstallSet: createObjectVisualInstallSet({
+				directDrawUnits: [
+					createStaticObjectDrawUnit("static-draw-a", {
+						domain: "outdoor-generated-scenery",
+					}),
+				],
+			}),
 		});
 		await flushPromises();
 

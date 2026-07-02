@@ -19,6 +19,7 @@ import {
 	type DynamicVisualMaterialPolicy,
 } from "./contracts";
 import { objectVisualGeometryBufferId } from "../visual/object-visual-recipe-bundle";
+import { createDynamicObjectVisualRecipePlan } from "./object-visual-bundle-producer";
 
 describe("dynamic visual baker", () => {
 	it("bakes setup-backed dynamic recipes into material slots, texture requirements, and render parts", () => {
@@ -26,13 +27,15 @@ describe("dynamic visual baker", () => {
 			materialSources: [createTexturedMaterial()],
 			textureRefs: createTextureRefs(),
 		});
+		const texturePlanning = createDynamicVisualTexturePlanning(recipe);
+		const objectVisualRecipePlan = createDynamicObjectVisualRecipePlan(recipe);
 		const result = bakeDynamicVisuals({
 			batchId: "dynamic-visual-batch:test",
 			recipes: [recipe],
 			revision: 12,
 			sourceGeometry: [createGeometryAttachment()],
 			texturePlacementSnapshot: createPlacementSnapshotForRecipe(recipe),
-			texturePlannings: [createDynamicVisualTexturePlanning(recipe)],
+			texturePlannings: [texturePlanning],
 		});
 
 		expect(result.failures).toEqual([]);
@@ -49,6 +52,22 @@ describe("dynamic visual baker", () => {
 		});
 		expect(product.resource.materialSlots).toHaveLength(1);
 		expect(product.resource.textureRequirements).toHaveLength(1);
+		expect(
+			texturePlanning.textureRequirements.map((requirement) => ({
+				dataUse: requirement.dataUse,
+				wrapMode:
+					requirement.samplingPolicy.wrapS === "repeat"
+						? "repeat"
+						: "clamp",
+			})),
+		).toEqual(
+			[...objectVisualRecipePlan.textureRecipes.values()].map(
+				(textureRecipe) => ({
+					dataUse: textureRecipe.dataUse,
+					wrapMode: textureRecipe.wrapMode,
+				}),
+			),
+		);
 		expect(product.resource.renderParts).toHaveLength(1);
 		expect(product.resource.renderParts[0]).toMatchObject({
 			indexType: "uint16",

@@ -2333,6 +2333,13 @@ Course correction during Phase 10:
   dynamic resource still uses the legacy `renderParts` wrapper in this slice; the next Phase 10 slice
   should make texture planning consume the bundle recipes before replacing dynamic render-part
   extraction with `bakeObjectVisuals(...)`.
+- Dynamic texture planning now consumes the shared object visual recipe plan. The static object
+  bundle producer exposes `createStaticObjectVisualRecipePlan(...)`, and dynamic planning reaches it
+  through `createDynamicObjectVisualRecipePlan(...)` so placement requirements are enumerated from
+  `ObjectVisualTextureRecipe` records instead of re-walking dynamic-only material slots. The output
+  remains `DynamicVisualTexturePlanning` for compatibility with the existing dynamic bake/install
+  shell; this is now a compatibility wrapper around recipe-first texture discovery, not the source
+  of texture recipe truth.
 
 ### Phase 11: Recipe-First Generated Scenery Instancing
 

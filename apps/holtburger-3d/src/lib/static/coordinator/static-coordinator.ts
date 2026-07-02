@@ -540,8 +540,7 @@ export class StaticCoordinator {
 			taskId: task.taskId,
 		});
 		if (
-			pendingBatch.items.length >=
-			getMaxPayloadsPerBatchForDomain(taskStatus.domain, this.#batching)
+			pendingBatch.items.length >= this.#batching.maxPayloadsPerBatch
 		) {
 			this.#flushPendingBatch(pendingBatch.batchId);
 		}
@@ -1489,16 +1488,6 @@ function createPendingStaticBakeBatchId(
 		task.scopeKey,
 		task.taskId,
 	].join(":");
-}
-
-function getMaxPayloadsPerBatchForDomain(
-	domain: StaticDomain,
-	batching: StaticCoordinatorBatchingOptions,
-): number {
-	if (domain === "env-cell-system") {
-		return 1;
-	}
-	return batching.maxPayloadsPerBatch;
 }
 
 function createStaticReconciliationRunId(revision: number): string {

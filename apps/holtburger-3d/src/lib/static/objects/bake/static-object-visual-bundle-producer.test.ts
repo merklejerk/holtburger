@@ -78,6 +78,35 @@ describe("static object visual bundle producer", () => {
 		});
 	});
 
+	it("ignores geometry attachments from other payloads in the same bake batch", () => {
+		const unrelatedSource: StaticObjectSourceIdentity = {
+			kind: "static-object-source",
+			sourceAssetKind: "gfx-obj",
+			sourceDid: 0x01000002,
+		};
+		const unrelatedGeometry = createStaticObjectSourceGeometryIdentity({
+			gfxObj: unrelatedSource,
+			partIndex: 0,
+			source: unrelatedSource,
+		});
+
+		const result = createStaticObjectVisualBundleExpansion({
+			attachments: {
+				staticObjectSourceGeometry: [
+					createGeometryAttachment(),
+					{
+						buffer: createGeometryBuffer(),
+						identity: unrelatedGeometry.canonical,
+					},
+				],
+			},
+			payload: createPayload(),
+		});
+
+		expect(result.resolution.kind).toBe("ready");
+		expect(result.geometryBuffers.size).toBe(1);
+	});
+
 	it("uses env-cell residency for env-cell static object payloads", () => {
 		const payload = createPayload({
 			domain: "env-cell-system",

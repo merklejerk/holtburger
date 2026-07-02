@@ -52,6 +52,7 @@ import {
 	resolveStructuredInteriorMaterialSurfaceId,
 	resolveStructuredInteriorPlanTextureWrapMode,
 } from "./structured-interior-material-planner";
+import { isRenderableObjectVisualMaterialPlan } from "../../objects/bake/static-object-renderability";
 
 export interface StructuredInteriorVisualBundleExpansion {
 	readonly geometryBuffers: ReadonlyMap<
@@ -151,9 +152,7 @@ export function createStructuredInteriorVisualBundleExpansion(input: {
 		surfacePlans.map(({ plan, surfaceId }) => [
 			requireRegistryId(
 				registry.materialRecipeIdsByKey,
-				objectVisualMaterialRecipeKey(
-					createMaterialRecipeKey(surfaceId, plan),
-				),
+				objectVisualMaterialRecipeKey(createMaterialRecipeKey(surfaceId, plan)),
 				"material recipe",
 			),
 			createMaterialRecipe(plan, registry),
@@ -252,10 +251,7 @@ export function createStructuredInteriorVisualBundleExpansion(input: {
 					structuredInteriorDrawUnits: [
 						{
 							cellStructure: input.envCell.cellStructure,
-							drawUnitIdSeed: createDrawUnitIdSeed(
-								input.task,
-								input.envCell,
-							),
+							drawUnitIdSeed: createDrawUnitIdSeed(input.task, input.envCell),
 							envCellId: input.envCell.identity.envCellId,
 							environment: input.envCell.environment,
 							kind: "structured-interior-direct-draw-unit",
@@ -350,6 +346,16 @@ function createMaterialRecipe(
 			plan.textureRoles,
 		),
 	};
+	if (!isRenderableObjectVisualMaterialPlan(plan)) {
+		return {
+			...base,
+			family: "unsupported",
+			reason:
+				plan.fallbackReasons.map((reason) => reason.code).join(",") ||
+				"non-renderable-structured-interior-material",
+		};
+	}
+
 	switch (plan.family) {
 		case "flat-color":
 			return { ...base, family: "direct-color" };
@@ -427,6 +433,9 @@ function createTextureRecipes(options: {
 }): ObjectVisualRecipeBundle["textureRecipes"] {
 	const recipes = new Map();
 	for (const plan of options.materialPlans) {
+		if (!isRenderableObjectVisualMaterialPlan(plan)) {
+			continue;
+		}
 		const wrapMode = getPlanWrapMode(plan);
 		for (const role of plan.textureRoles) {
 			const textureId = requireTextureRecipeId(
@@ -480,11 +489,14 @@ function createTextureRecipeKeys(
 ): readonly string[] {
 	return [
 		...new Set(
-			materialPlans.flatMap((plan) =>
-				plan.textureRoles.map((role) =>
+			materialPlans.flatMap((plan) => {
+				if (!isRenderableObjectVisualMaterialPlan(plan)) {
+					return [];
+				}
+				return plan.textureRoles.map((role) =>
 					createTextureRecipeKey(role.dataUse, getPlanWrapMode(plan)),
-				),
-			),
+				);
+			}),
 		),
 	].sort();
 }

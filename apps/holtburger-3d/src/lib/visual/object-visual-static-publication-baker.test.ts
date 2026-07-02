@@ -72,6 +72,48 @@ describe("object visual static publication baker", () => {
 		});
 	});
 
+	it("skips direct static part instances that produced no baked render parts", () => {
+		const renderablePartIndex = createObjectVisualPartInstanceIndex(0);
+		const unsupportedPartIndex = createObjectVisualPartInstanceIndex(1);
+		const renderPart = createRenderPart({
+			partInstanceIndices: [renderablePartIndex],
+			renderPartId: "fixture:render-part:0",
+		});
+		const metadata = createObjectVisualStaticPublicationMetadata({
+			directStaticObjectDrawUnits: [
+				{
+					domain: "outdoor-explicit-objects",
+					drawUnitIdSeed: "direct-static",
+					kind: "static-object-direct-draw-unit",
+					landblockId: 0xda55ffff,
+					ownership: {
+						domain: "outdoor-explicit-objects",
+						kind: "outdoor-static-objects",
+						landblockId: 0xda55ffff,
+					},
+					partInstanceIndices: [renderablePartIndex, unsupportedPartIndex],
+					sort: {
+						bounds: null,
+						center: [0, 0, 0],
+						objectPartKey: null,
+						policy: "depth-writing",
+					},
+					sourceMappingCoverage: [],
+					spatialRecord: null,
+				},
+			],
+			partInstanceCount: 2,
+		});
+
+		const installSet = createObjectVisualStaticInstallSet({
+			bakeResult: createBakeResult([renderPart]),
+			metadata,
+		});
+
+		expect(installSet.directDrawUnits).toHaveLength(1);
+		expect(installSet.directDrawUnits[0]?.triangleCount).toBe(1);
+	});
+
 	it("publishes structured-interior draw units with explicit source/material facts", () => {
 		const partInstanceIndex = createObjectVisualPartInstanceIndex(0);
 		const renderPart = createRenderPart({
@@ -263,7 +305,9 @@ describe("object visual static publication baker", () => {
 		});
 		expect(installSet.renderInstances).toHaveLength(2);
 		expect(
-			new Set(installSet.renderInstances.map((instance) => instance.resourceId)),
+			new Set(
+				installSet.renderInstances.map((instance) => instance.resourceId),
+			),
 		).toHaveProperty("size", 1);
 		expect(
 			installSet.renderInstances.map((instance) => ({
@@ -406,8 +450,14 @@ function createRenderPart(options: {
 function createGeneratedRenderInstanceMetadata(options: {
 	readonly groupId: ReturnType<typeof createObjectVisualStaticResourceGroupId>;
 	readonly instanceIdSeed: string;
-	readonly partInstanceIndex: ReturnType<typeof createObjectVisualPartInstanceIndex>;
-	readonly sortCenter: { readonly x: number; readonly y: number; readonly z: number };
+	readonly partInstanceIndex: ReturnType<
+		typeof createObjectVisualPartInstanceIndex
+	>;
+	readonly sortCenter: {
+		readonly x: number;
+		readonly y: number;
+		readonly z: number;
+	};
 	readonly source: ReturnType<typeof createStaticObjectIdentity>;
 }) {
 	return {

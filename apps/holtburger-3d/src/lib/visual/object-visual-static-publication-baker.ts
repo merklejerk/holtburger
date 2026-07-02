@@ -364,9 +364,7 @@ function selectRenderPartsForPartInstances(options: {
 			const parts =
 				options.renderPartsByPartInstanceIndex.get(partInstanceIndex);
 			if (!parts) {
-				throw new Error(
-					`${options.subject} references part-instance index ${partInstanceIndex}, but no baked render part contains it.`,
-				);
+				return [];
 			}
 			return parts;
 		}),

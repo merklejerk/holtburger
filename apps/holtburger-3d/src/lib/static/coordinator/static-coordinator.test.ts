@@ -1741,12 +1741,12 @@ describe("static coordinator", () => {
 		).toBe("materializing");
 	});
 
-	it("isolates env-cell tasks into single-item bake inputs", async () => {
+	it("coalesces env-cell tasks using the configured batch size", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			batching: { maxPayloadsPerBatch: 2, maxWaitMs: 0 },
 			resolver,
 		});
 		const deltas: StaticCoordinatorCommitDelta[] = [];
@@ -1780,9 +1780,8 @@ describe("static coordinator", () => {
 			(input) => input.domain === "env-cell-system",
 		);
 		expect(envCellBatches.length).toBeGreaterThan(1);
-		expect(envCellBatches.every((input) => input.items.length === 1)).toBe(
-			true,
-		);
+		expect(envCellBatches.map((input) => input.items.length)).toContain(2);
+		expect(envCellBatches.every((input) => input.items.length <= 2)).toBe(true);
 		expect(deltas).toEqual([]);
 	});
 });

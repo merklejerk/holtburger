@@ -173,6 +173,40 @@ describe("static object publication metadata producer", () => {
 		expect(publication.metadata.instancedRenderInstances).toHaveLength(1);
 		expect([...publication.partInstanceIndexByKey.values()]).toEqual([0, 1]);
 	});
+
+	it("keeps duplicate part indices distinct across source geometry identities", () => {
+		const payload = createPayloadWithDuplicatePartIndex();
+		const expansion = createStaticObjectVisualBundleExpansion({
+			attachments: {
+				staticObjectSourceGeometry: [
+					createGeometryAttachment(),
+					createGeometryAttachmentForSource(0x01000002),
+				],
+			},
+			payload,
+		});
+		expect(expansion.resolution.kind).toBe("ready");
+		if (expansion.resolution.kind !== "ready") {
+			throw new Error("Expected ready visual bundle.");
+		}
+		const publication = createStaticObjectPublicationMetadata({
+			owner: createOwner("outdoor-explicit-objects"),
+			payload,
+		});
+		const bake = bakeObjectVisuals({
+			bundle: expansion.resolution.bundle,
+			geometryBuffers: expansion.geometryBuffers,
+			renderPartIdPrefix: "duplicate-part-index-fixture",
+		});
+		const installSet = createObjectVisualStaticInstallSet({
+			bakeResult: bake,
+			metadata: publication.metadata,
+		});
+
+		expect(publication.partInstanceIndexByKey.size).toBe(2);
+		expect(expansion.resolution.bundle.partInstances).toHaveLength(2);
+		expect(installSet.directDrawUnits).toHaveLength(1);
+	});
 });
 
 function createPayload(options: {
@@ -349,6 +383,71 @@ function createGeometryAttachment() {
 	return {
 		buffer: createGeometryBuffer(),
 		identity: TEST_GEOMETRY.canonical,
+	};
+}
+
+function createGeometryAttachmentForSource(sourceDid: number) {
+	const source: StaticObjectSourceIdentity = {
+		kind: "static-object-source",
+		sourceAssetKind: "gfx-obj",
+		sourceDid,
+	};
+	const geometry = createStaticObjectSourceGeometryIdentity({
+		gfxObj: source,
+		partIndex: 0,
+		source,
+	});
+	return {
+		buffer: createGeometryBuffer(),
+		identity: geometry.canonical,
+	};
+}
+
+function createPayloadWithDuplicatePartIndex(): StaticObjectBatchPayload {
+	const payload = createPayload({ objectKind: "explicit-object" });
+	const secondSource: StaticObjectSourceIdentity = {
+		kind: "static-object-source",
+		sourceAssetKind: "gfx-obj",
+		sourceDid: 0x01000002,
+	};
+	const secondGeometry = createStaticObjectSourceGeometryIdentity({
+		gfxObj: secondSource,
+		partIndex: 0,
+		source: secondSource,
+	});
+	const source = payload.sourceAssets[0];
+	if (!source) {
+		throw new Error("Expected fixture source asset.");
+	}
+	const firstPart = source.parts[0];
+	if (!firstPart) {
+		throw new Error("Expected fixture source part.");
+	}
+	return {
+		...payload,
+		materialSlots: [
+			...payload.materialSlots,
+			{
+				...payload.materialSlots[0]!,
+				gfxObj: secondSource,
+				source: secondSource,
+			},
+		],
+		sourceAssets: [
+			{
+				...source,
+				partCount: 2,
+				parts: [
+					firstPart,
+					{
+						...firstPart,
+						geometry: secondGeometry,
+						gfxObj: secondSource,
+						source: secondSource,
+					},
+				],
+			},
+		],
 	};
 }
 

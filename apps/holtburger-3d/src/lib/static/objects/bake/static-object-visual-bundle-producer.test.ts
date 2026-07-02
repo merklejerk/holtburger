@@ -35,8 +35,8 @@ describe("static object visual bundle producer", () => {
 	it("expands static object source facts into a ready object visual bundle", () => {
 		const payload = createPayload();
 		const result = createStaticObjectVisualBundleExpansion({
-			attachments: {
-				staticObjectSourceGeometry: [createGeometryAttachment()],
+			geometrySidecars: {
+				staticObjectSourceGeometry: [createGeometrySidecar()],
 			},
 			payload,
 		});
@@ -65,9 +65,9 @@ describe("static object visual bundle producer", () => {
 		]);
 	});
 
-	it("returns missing dependencies when source geometry attachments are absent", () => {
+	it("returns missing dependencies when source geometry sidecars are absent", () => {
 		const result = createStaticObjectVisualBundleExpansion({
-			attachments: { staticObjectSourceGeometry: [] },
+			geometrySidecars: { staticObjectSourceGeometry: [] },
 			payload: createPayload(),
 		});
 
@@ -91,9 +91,9 @@ describe("static object visual bundle producer", () => {
 		});
 
 		const result = createStaticObjectVisualBundleExpansion({
-			attachments: {
+			geometrySidecars: {
 				staticObjectSourceGeometry: [
-					createGeometryAttachment(),
+					createGeometrySidecar(),
 					{
 						buffer: createGeometryBuffer(),
 						identity: unrelatedGeometry.canonical,
@@ -117,8 +117,8 @@ describe("static object visual bundle producer", () => {
 			owningEnvCellId: 0xda550100,
 		});
 		const result = createStaticObjectVisualBundleExpansion({
-			attachments: {
-				staticObjectSourceGeometry: [createGeometryAttachment()],
+			geometrySidecars: {
+				staticObjectSourceGeometry: [createGeometrySidecar()],
 			},
 			payload,
 		});
@@ -136,8 +136,8 @@ describe("static object visual bundle producer", () => {
 
 	it("keeps material recipe variants distinct by texture wrap mode", () => {
 		const result = createStaticObjectVisualBundleExpansion({
-			attachments: {
-				staticObjectSourceGeometry: [createGeometryAttachment()],
+			geometrySidecars: {
+				staticObjectSourceGeometry: [createGeometrySidecar()],
 			},
 			payload: createPayload({
 				materialVariantSignature: "sampler=repeat",
@@ -159,8 +159,8 @@ describe("static object visual bundle producer", () => {
 	it("maps unsupported materials to skipped unsupported recipes", () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 		const result = createStaticObjectVisualBundleExpansion({
-			attachments: {
-				staticObjectSourceGeometry: [createGeometryAttachment()],
+			geometrySidecars: {
+				staticObjectSourceGeometry: [createGeometrySidecar()],
 			},
 			payload: createPayload({ surfaceType: 0x20000 }),
 		});
@@ -327,7 +327,7 @@ function createPayload(
 	};
 }
 
-function createGeometryAttachment() {
+function createGeometrySidecar() {
 	return {
 		buffer: createGeometryBuffer(),
 		identity: TEST_GEOMETRY.canonical,

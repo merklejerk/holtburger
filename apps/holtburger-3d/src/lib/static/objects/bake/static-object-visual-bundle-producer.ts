@@ -4,7 +4,7 @@ import type {
 	StaticObjectInstanceIdentity,
 	StaticObjectMaterialSlotFacts,
 	StaticObjectPartSourceFacts,
-	StaticObjectSourceGeometryAttachment,
+	StaticObjectSourceGeometrySidecar,
 	StaticObjectSourceIdentity,
 } from "../../contracts";
 import {
@@ -66,21 +66,21 @@ export interface StaticObjectVisualRecipePlan {
 }
 
 export function createStaticObjectVisualBundleExpansion(input: {
-	readonly attachments: Pick<
+	readonly geometrySidecars: Pick<
 		StaticBakeJobResources,
 		"staticObjectSourceGeometry"
 	>;
 	readonly payload: StaticObjectBatchPayload;
 }): StaticObjectVisualBundleExpansion {
-	const missingAttachments = findMissingGeometryAttachments(
+	const missingSidecars = findMissingGeometrySidecars(
 		input.payload,
-		input.attachments.staticObjectSourceGeometry,
+		input.geometrySidecars.staticObjectSourceGeometry,
 	);
-	if (missingAttachments.length > 0) {
+	if (missingSidecars.length > 0) {
 		return {
 			geometryBuffers: new Map(),
 			resolution: createObjectVisualMissingDependenciesResolution(
-				missingAttachments.map((sourceId) => ({
+				missingSidecars.map((sourceId) => ({
 					sourceId,
 					sourceKind: "static-object-source-geometry",
 				})),
@@ -91,7 +91,7 @@ export function createStaticObjectVisualBundleExpansion(input: {
 	const recipePlan = createStaticObjectVisualRecipePlan(input.payload);
 	const registry = recipePlan.registry;
 	const geometryBuffers = createGeometryBuffers({
-		attachments: input.attachments.staticObjectSourceGeometry,
+		geometrySidecars: input.geometrySidecars.staticObjectSourceGeometry,
 		payload: input.payload,
 		registry,
 	});
@@ -210,14 +210,14 @@ function createRecipeKeys(options: {
 }
 
 function createGeometryBuffers(options: {
-	readonly attachments: readonly StaticObjectSourceGeometryAttachment[];
+	readonly geometrySidecars: readonly StaticObjectSourceGeometrySidecar[];
 	readonly payload: StaticObjectBatchPayload;
 	readonly registry: ReturnType<typeof createObjectVisualRecipeKeyRegistry>;
 }): ReadonlyMap<ObjectVisualGeometryBufferId, ObjectVisualGeometryBuffer> {
 	const requiredKeys = collectPayloadGeometryBufferKeys(options.payload);
 	return new Map(
-		options.attachments.flatMap((attachment) => {
-			const bufferKey = createGeometryBufferKey(attachment.identity);
+		options.geometrySidecars.flatMap((sidecar) => {
+			const bufferKey = createGeometryBufferKey(sidecar.identity);
 			if (!requiredKeys.has(bufferKey)) {
 				return [];
 			}
@@ -231,7 +231,7 @@ function createGeometryBuffers(options: {
 				[
 					bufferId,
 					{
-						...attachment.buffer,
+						...sidecar.buffer,
 						bufferId,
 					},
 				],
@@ -819,13 +819,13 @@ function uniqueMaterialSlotSurfaceIds(
 	];
 }
 
-function findMissingGeometryAttachments(
+function findMissingGeometrySidecars(
 	payload: StaticObjectBatchPayload,
-	attachments: readonly StaticObjectSourceGeometryAttachment[],
+	geometrySidecars: readonly StaticObjectSourceGeometrySidecar[],
 ): readonly string[] {
-	const attachmentKeys = new Set(
-		attachments.map((attachment) =>
-			describeStaticObjectCanonicalGeometryIdentity(attachment.identity),
+	const sidecarKeys = new Set(
+		geometrySidecars.map((sidecar) =>
+			describeStaticObjectCanonicalGeometryIdentity(sidecar.identity),
 		),
 	);
 	const missing: string[] = [];
@@ -834,7 +834,7 @@ function findMissingGeometryAttachments(
 			const key = describeStaticObjectCanonicalGeometryIdentity(
 				getStaticObjectCanonicalGeometryIdentity(part.geometry),
 			);
-			if (!attachmentKeys.has(key)) {
+			if (!sidecarKeys.has(key)) {
 				missing.push(key);
 			}
 		}
@@ -885,7 +885,7 @@ function createGeometryRecipeKey(part: StaticObjectPartSourceFacts): string {
 }
 
 function createGeometryBufferKey(
-	identity: StaticObjectSourceGeometryAttachment["identity"],
+	identity: StaticObjectSourceGeometrySidecar["identity"],
 ): string {
 	return describeStaticObjectCanonicalGeometryIdentity(identity);
 }

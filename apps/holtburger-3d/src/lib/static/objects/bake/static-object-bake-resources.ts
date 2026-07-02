@@ -14,7 +14,7 @@ import type {
 } from "../../contracts";
 import { createEmptyStaticBakeJobResources } from "../../bake/resources";
 import {
-	createStaticObjectSourceGeometryAttachment,
+	createStaticObjectSourceGeometrySidecar,
 	describeStaticObjectCanonicalGeometryIdentity,
 	getStaticObjectCanonicalGeometryIdentity,
 } from "../static-object-source-assets";
@@ -43,7 +43,7 @@ export class StaticObjectBakeResourceProvider implements StaticBakeResourceProvi
 			identities.map(async (identity, bufferIndex) => {
 				if (identity.gfxObj.sourceAssetKind !== "gfx-obj") {
 					throw new Error(
-						`Static object geometry attachment ${describeStaticObjectCanonicalGeometryIdentity(
+						`Static object geometry sidecar ${describeStaticObjectCanonicalGeometryIdentity(
 							identity,
 						)} expected gfx-obj source, got ${identity.gfxObj.sourceAssetKind}.`,
 					);
@@ -52,7 +52,7 @@ export class StaticObjectBakeResourceProvider implements StaticBakeResourceProvi
 				const asset = await this.#assetReader.requestPreparedAsset(key);
 				const payload = requireGfxObjPayload(asset.payload, key);
 
-				return createStaticObjectSourceGeometryAttachment({
+				return createStaticObjectSourceGeometrySidecar({
 					bufferId: objectVisualGeometryBufferId(bufferIndex),
 					gfxObj: payload,
 					identity,
@@ -108,14 +108,14 @@ function requireGfxObjPayload(
 	) {
 		return requirePreparedGfxObjPayload(
 			payload as GfxObjPayloadDto,
-			`Static object geometry attachment ${describeHostAssetKey(
+			`Static object geometry sidecar ${describeHostAssetKey(
 				key,
 			)}.renderGeometry`,
 		);
 	}
 
 	throw new Error(
-		`Static object geometry attachment expected ${describeHostAssetKey(
+		`Static object geometry sidecar expected ${describeHostAssetKey(
 			key,
 		)} to resolve to a gfx-obj payload.`,
 	);

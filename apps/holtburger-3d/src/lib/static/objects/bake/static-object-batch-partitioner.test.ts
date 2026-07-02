@@ -134,7 +134,7 @@ describe("static object batch partitioner", () => {
 		]);
 	});
 
-	it("fails hard when a bake input omits a referenced geometry attachment", () => {
+	it("fails hard when a bake input omits a referenced geometry sidecar", () => {
 		const payload = createPayload({
 			materials: [createTexturedMaterial(0x08000010)],
 			textureRefs: createRgbaTextureRefs(),
@@ -148,7 +148,7 @@ describe("static object batch partitioner", () => {
 		};
 
 		expect(() => bakeStaticObjectJob(input)).toThrow(
-			/missing geometry attachment/,
+			/missing geometry sidecar/,
 		);
 	});
 

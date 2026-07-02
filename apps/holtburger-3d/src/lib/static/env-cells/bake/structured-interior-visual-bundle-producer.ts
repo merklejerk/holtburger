@@ -1,5 +1,5 @@
 import type {
-	EnvCellCellStructureGeometryAttachment,
+	EnvCellCellStructureGeometrySidecar,
 	EnvCellSystemStaticScopePayload,
 	LandblockEnvCellStaticFacts,
 	MaterialTextureDataUseIdentity,
@@ -64,7 +64,7 @@ export interface StructuredInteriorVisualBundleExpansion {
 }
 
 export function createStructuredInteriorVisualBundleExpansion(input: {
-	readonly attachments: Pick<
+	readonly geometrySidecars: Pick<
 		StaticBakeJobResources,
 		"envCellCellStructureGeometry"
 	>;
@@ -82,8 +82,8 @@ export function createStructuredInteriorVisualBundleExpansion(input: {
 		};
 	}
 
-	const attachment = findGeometryAttachment(input);
-	if (!attachment) {
+	const sidecar = findGeometrySidecar(input);
+	if (!sidecar) {
 		const identity = createEnvCellCellStructureGeometryIdentity({
 			envCell: input.envCell,
 		});
@@ -110,7 +110,7 @@ export function createStructuredInteriorVisualBundleExpansion(input: {
 	const registry = createObjectVisualRecipeKeyRegistry({
 		geometryBufferKeys: [
 			objectVisualGeometryBufferKey(
-				describeEnvCellCellStructureGeometryIdentity(attachment.identity),
+				describeEnvCellCellStructureGeometryIdentity(sidecar.identity),
 			),
 		],
 		geometryRecipeKeys: [
@@ -129,7 +129,7 @@ export function createStructuredInteriorVisualBundleExpansion(input: {
 	const bufferId = requireRegistryId(
 		registry.geometryBufferIdsByKey,
 		objectVisualGeometryBufferKey(
-			describeEnvCellCellStructureGeometryIdentity(attachment.identity),
+			describeEnvCellCellStructureGeometryIdentity(sidecar.identity),
 		),
 		"geometry buffer",
 	);
@@ -144,7 +144,7 @@ export function createStructuredInteriorVisualBundleExpansion(input: {
 		"part recipe",
 	);
 	const geometryBuffer: ObjectVisualGeometryBuffer = {
-		...attachment.buffer,
+		...sidecar.buffer,
 		bufferId,
 	};
 	const partInstanceCount = 1;
@@ -159,7 +159,7 @@ export function createStructuredInteriorVisualBundleExpansion(input: {
 		]),
 	);
 	const materialBindings = createMaterialBindings({
-		attachment,
+		sidecar,
 		envCell: input.envCell,
 		registry,
 		surfacePlans,
@@ -175,7 +175,7 @@ export function createStructuredInteriorVisualBundleExpansion(input: {
 				{
 					coordinateSpace: "source-local",
 					sourceKey: describeEnvCellCellStructureGeometryIdentity(
-						attachment.identity,
+						sidecar.identity,
 					),
 					sourceKind: "embedded-geometry",
 					triangleCount: geometryBuffer.triangleCount,
@@ -260,7 +260,7 @@ export function createStructuredInteriorVisualBundleExpansion(input: {
 							materialPlan: materialPlan.entries,
 							memberId: input.envCell.memberId,
 							partInstanceIndices: [createObjectVisualPartInstanceIndex(0)],
-							sourceTriangleIds: attachment.buffer.triangles.map(
+							sourceTriangleIds: sidecar.buffer.triangles.map(
 								createSourceTriangleId,
 							),
 							surfaceIds: input.envCell.surfaces.map(
@@ -275,7 +275,7 @@ export function createStructuredInteriorVisualBundleExpansion(input: {
 }
 
 function createMaterialBindings(options: {
-	readonly attachment: EnvCellCellStructureGeometryAttachment;
+	readonly sidecar: EnvCellCellStructureGeometrySidecar;
 	readonly envCell: LandblockEnvCellStaticFacts;
 	readonly registry: ReturnType<typeof createObjectVisualRecipeKeyRegistry>;
 	readonly surfacePlans: readonly {
@@ -290,7 +290,7 @@ function createMaterialBindings(options: {
 		? TBindings
 		: never
 	: never {
-	return options.attachment.buffer.triangles.flatMap((triangle) => {
+	return options.sidecar.buffer.triangles.flatMap((triangle) => {
 		if (triangle.surfaceId === null) {
 			return [];
 		}
@@ -407,19 +407,19 @@ function createMaterialRecipe(
 	}
 }
 
-function findGeometryAttachment(input: {
-	readonly attachments: Pick<
+function findGeometrySidecar(input: {
+	readonly geometrySidecars: Pick<
 		StaticBakeJobResources,
 		"envCellCellStructureGeometry"
 	>;
 	readonly envCell: LandblockEnvCellStaticFacts;
-}): EnvCellCellStructureGeometryAttachment | null {
+}): EnvCellCellStructureGeometrySidecar | null {
 	const identity = createEnvCellCellStructureGeometryIdentity({
 		envCell: input.envCell,
 	});
 	const identityKey = describeEnvCellCellStructureGeometryIdentity(identity);
 	return (
-		input.attachments.envCellCellStructureGeometry.find(
+		input.geometrySidecars.envCellCellStructureGeometry.find(
 			(candidate) =>
 				describeEnvCellCellStructureGeometryIdentity(candidate.identity) ===
 				identityKey,

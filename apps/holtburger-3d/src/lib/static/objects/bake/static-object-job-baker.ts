@@ -14,7 +14,7 @@ import type {
 	StaticMaterialTableEntry,
 	StaticObjectInstanceIdentity,
 	StaticEnvCellStaticObjectSpatialRecord,
-	StaticObjectSourceGeometryAttachment,
+	StaticObjectSourceGeometrySidecar,
 	StaticObjectPartSourceFacts,
 	StaticObjectSourceMappingCoverage,
 	StaticObjectSortMetadata,
@@ -400,7 +400,7 @@ function createStaticObjectRecipePublication(options: {
 	readonly textureUses: readonly StaticBakeTextureUse[];
 } {
 	const expansion = createStaticObjectVisualBundleExpansion({
-		attachments: options.input.resources,
+		geometrySidecars: options.input.resources,
 		payload: options.payload,
 	});
 	if (expansion.resolution.kind === "missing-dependencies") {
@@ -475,12 +475,6 @@ function createStaticObjectBakeDiagnostics(options: {
 		}
 	}
 
-	const flattenedTriangleCount = sumNumbers(
-		options.drawUnits.map((drawUnit) => drawUnit.triangleCount),
-	);
-	const flattenedVertexCount = sumNumbers(
-		options.drawUnits.map((drawUnit) => drawUnit.vertexCount),
-	);
 	const instancingDiagnostics = createStaticObjectInstancingBakeDiagnostics(
 		options.instancedOutput,
 	);
@@ -491,14 +485,9 @@ function createStaticObjectBakeDiagnostics(options: {
 		).length,
 		domain: options.payload.domain,
 		drawUnitCount: options.drawUnits.length,
-		estimatedFlattenedTypedArrayBytes: sumNumbers(
-			options.drawUnits.map(estimateStaticObjectDrawUnitTypedArrayBytes),
-		),
 		explicitObjectCount: options.payload.objects.filter(
 			(object) => object.identity.objectKind === "explicit-object",
 		).length,
-		flattenedTriangleCount,
-		flattenedVertexCount,
 		generatedInstanceCount: options.payload.objects.filter(
 			(object) => object.identity.objectKind === "generated-scenery",
 		).length,
@@ -721,17 +710,6 @@ function incrementRetainedTransparentPartitionReason(
 	reason: RetainedTransparentPartitionReason,
 ): void {
 	counts[reason] += 1;
-}
-
-function estimateStaticObjectDrawUnitTypedArrayBytes(
-	drawUnit: StaticObjectGeometryStaticDrawUnit,
-): number {
-	return (
-		drawUnit.positions.byteLength +
-		drawUnit.texCoords.byteLength +
-		drawUnit.materialSlotIndices.byteLength +
-		drawUnit.indices.byteLength
-	);
 }
 
 function estimateStaticObjectVisualResourceTypedArrayBytes(
@@ -1157,7 +1135,7 @@ class StaticObjectBakeSourceIndex {
 	>();
 	readonly #geometryByKey = new Map<
 		string,
-		StaticObjectSourceGeometryAttachment
+		StaticObjectSourceGeometrySidecar
 	>();
 
 	constructor(
@@ -1219,14 +1197,14 @@ class StaticObjectBakeSourceIndex {
 
 	getGeometry(
 		part: StaticObjectPartSourceFacts,
-	): StaticObjectSourceGeometryAttachment {
+	): StaticObjectSourceGeometrySidecar {
 		const canonical = getStaticObjectCanonicalGeometryIdentity(part.geometry);
 		const geometry = this.#geometryByKey.get(
 			describeStaticObjectCanonicalGeometryIdentity(canonical),
 		);
 		if (!geometry) {
 			throw new Error(
-				`Static object geometry partition references missing geometry attachment ${describeStaticObjectCanonicalGeometryIdentity(
+				`Static object geometry partition references missing geometry sidecar ${describeStaticObjectCanonicalGeometryIdentity(
 					canonical,
 				)} for source part ${describeStaticObjectSourceGeometryIdentity(
 					part.geometry,

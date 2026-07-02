@@ -229,11 +229,8 @@ interface StaticObjectBakeSummaryDiagnostics {
 	readonly uniqueSourceCount: number;
 	readonly uniqueSourcePartGeometryCount: number;
 	readonly uniqueSourceTriangleCount: number;
-	readonly flattenedTriangleCount: number;
-	readonly flattenedVertexCount: number;
 	readonly drawUnitCount: number;
 	readonly partitionCount: number;
-	readonly estimatedFlattenedTypedArrayBytes: number;
 	readonly bakedInstancedVisualResourceCount: number;
 	readonly bakedInstancedRenderInstanceCount: number;
 	readonly instancedSourceTriangleCount: number;
@@ -259,8 +256,6 @@ interface StaticObjectBakeSampleDiagnostics {
 	readonly objectCount: number;
 	readonly generatedInstanceCount: number;
 	readonly drawUnitCount: number;
-	readonly flattenedTriangleCount: number;
-	readonly estimatedFlattenedTypedArrayBytes: number;
 	readonly bakedInstancedRenderInstanceCount: number;
 	readonly bakedInstancedVisualResourceCount: number;
 	readonly estimatedAvoidedFlattenedTypedArrayBytes: number;

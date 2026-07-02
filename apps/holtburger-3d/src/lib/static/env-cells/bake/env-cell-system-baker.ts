@@ -9,7 +9,7 @@ import type {
 	StaticBakeTextureUse,
 	StaticBaker,
 	StaticDrawUnit,
-	EnvCellCellStructureGeometryAttachment,
+	EnvCellCellStructureGeometrySidecar,
 	StaticMaterialCoverageReport,
 	StaticMaterialTableEntry,
 	StaticPortalApertureResource,
@@ -121,7 +121,7 @@ export function bakeEnvCellSystem(
 		);
 	}
 
-	validateGeometryAttachments(input);
+	validateGeometrySidecars(input);
 
 	const item = { payload: input.payload, task: input.task };
 	const itemResult = bakeLandblockEnvCellItem(input, item);
@@ -184,7 +184,7 @@ export function bakeEnvCellSystem(
 	};
 }
 
-function validateGeometryAttachments(input: StaticBakeJobInput): void {
+function validateGeometrySidecars(input: StaticBakeJobInput): void {
 	if (input.payload.scope.kind !== "env-cell-system") {
 		return;
 	}
@@ -295,7 +295,7 @@ function createStructuredInteriorObjectVisualPublication(options: {
 } {
 	const publications = options.payload.envCells.map((envCell) =>
 		createStructuredInteriorVisualBundleExpansion({
-			attachments: options.input.resources,
+			geometrySidecars: options.input.resources,
 			envCell,
 			payload: options.payload,
 			task: options.task,
@@ -376,9 +376,9 @@ function createStructuredInteriorDrawUnits(
 			return [];
 		}
 
-		const attachment = requireGeometryAttachment(input, envCell);
+		const sidecar = requireGeometrySidecar(input, envCell);
 		const candidates = createStructuredInteriorTriangleCandidates({
-			attachment,
+			sidecar,
 			envCell,
 			geometrySurfaceOmissions,
 			materialPlan,
@@ -405,7 +405,7 @@ function createStructuredInteriorDrawUnits(
 
 		return partitions.map((slice) =>
 			createStructuredInteriorDrawUnit({
-				attachment,
+				sidecar,
 				envCell,
 				landblockId: payload.landblock.landblockId,
 				materialPlan,
@@ -423,7 +423,7 @@ function createStructuredInteriorDrawUnits(
 }
 
 function createStructuredInteriorDrawUnit(options: {
-	readonly attachment: EnvCellCellStructureGeometryAttachment;
+	readonly sidecar: EnvCellCellStructureGeometrySidecar;
 	readonly envCell: LandblockEnvCellStaticFacts;
 	readonly landblockId: number;
 	readonly materialPlan: StructuredInteriorCellMaterialPlan;
@@ -442,7 +442,7 @@ function createStructuredInteriorDrawUnit(options: {
 	);
 	const geometry = bakeCellStructureGeometry(
 		options.envCell,
-		options.attachment,
+		options.sidecar,
 		options.slice.candidates,
 		materialSlotByEntryKey,
 	);
@@ -775,14 +775,14 @@ function createStructuredInteriorMaterialTableEntries(options: {
 }
 
 function createStructuredInteriorTriangleCandidates(options: {
-	readonly attachment: EnvCellCellStructureGeometryAttachment;
+	readonly sidecar: EnvCellCellStructureGeometrySidecar;
 	readonly envCell: LandblockEnvCellStaticFacts;
 	readonly geometrySurfaceOmissions: StructuredInteriorGeometrySurfaceOmission[];
 	readonly materialPlan: StructuredInteriorCellMaterialPlan;
 	readonly placementSnapshot: ObjectVisualTexturePlacementSnapshot;
 	readonly task: StaticBakeTask;
 }): readonly StructuredInteriorTriangleCandidate[] {
-	return options.attachment.buffer.triangles
+	return options.sidecar.buffer.triangles
 		.map(
 			(triangle, triangleIndex): StructuredInteriorTriangleCandidate | null => {
 				if (triangle.surfaceId === null) {
@@ -1079,7 +1079,7 @@ function requireObjectVisualPlacementItemId(options: {
 
 function bakeCellStructureGeometry(
 	envCell: LandblockEnvCellStaticFacts,
-	attachment: EnvCellCellStructureGeometryAttachment,
+	sidecar: EnvCellCellStructureGeometrySidecar,
 	candidates: readonly StructuredInteriorTriangleCandidate[],
 	materialSlotByEntryKey: ReadonlyMap<string, number>,
 ): {
@@ -1092,13 +1092,13 @@ function bakeCellStructureGeometry(
 	readonly vertexCount: number;
 } {
 	if (
-		attachment.buffer.triangleCount > 0 &&
-		attachment.buffer.triangles.length !== attachment.buffer.triangleCount
+		sidecar.buffer.triangleCount > 0 &&
+		sidecar.buffer.triangles.length !== sidecar.buffer.triangleCount
 	) {
 		throw new Error(
 			`Env-cell cell-structure geometry ${describeEnvCellCellStructureGeometryIdentity(
-				attachment.identity,
-			)} expected ${attachment.buffer.triangleCount} triangle metadata records, got ${attachment.buffer.triangles.length}.`,
+				sidecar.identity,
+			)} expected ${sidecar.buffer.triangleCount} triangle metadata records, got ${sidecar.buffer.triangles.length}.`,
 		);
 	}
 
@@ -1112,11 +1112,11 @@ function bakeCellStructureGeometry(
 
 	for (const [candidateIndex, candidate] of candidates.entries()) {
 		const firstSourceVertex = candidate.triangle.firstVertex;
-		if (firstSourceVertex + 2 >= attachment.buffer.vertexCount) {
+		if (firstSourceVertex + 2 >= sidecar.buffer.vertexCount) {
 			throw new Error(
 				`Env-cell cell-structure geometry ${describeEnvCellCellStructureGeometryIdentity(
-					attachment.identity,
-				)} triangle ${candidate.triangleIndex} references vertex ${firstSourceVertex + 2}, but attachment has ${attachment.buffer.vertexCount} vertices.`,
+					sidecar.identity,
+				)} triangle ${candidate.triangleIndex} references vertex ${firstSourceVertex + 2}, but sidecar has ${sidecar.buffer.vertexCount} vertices.`,
 			);
 		}
 		const firstTargetVertex = candidateIndex * 3;
@@ -1133,12 +1133,12 @@ function bakeCellStructureGeometry(
 			writeTransformedPosition({
 				matrix,
 				positions,
-				source: attachment.buffer.positions,
+				source: sidecar.buffer.positions,
 				sourceVertexIndex,
 				targetVertexIndex,
 			});
 			writeTexCoord({
-				source: attachment.buffer.texCoords,
+				source: sidecar.buffer.texCoords,
 				sourceVertexIndex,
 				target: texCoords,
 				targetVertexIndex,
@@ -1180,10 +1180,10 @@ function createSourceTriangleId(
 	].join("|");
 }
 
-function requireGeometryAttachment(
+function requireGeometrySidecar(
 	input: StaticBakeJobInput,
 	envCell: LandblockEnvCellStaticFacts,
-): EnvCellCellStructureGeometryAttachment {
+): EnvCellCellStructureGeometrySidecar {
 	const identity = createEnvCellCellStructureGeometryIdentity({ envCell });
 	const identityKey = describeEnvCellCellStructureGeometryIdentity(identity);
 	const resource = input.resources.envCellCellStructureGeometry.find(

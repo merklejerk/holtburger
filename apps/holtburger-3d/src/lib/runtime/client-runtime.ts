@@ -159,7 +159,7 @@ import {
 	LocalDynamicVisualBaker,
 	type DynamicVisualBaker,
 } from "../dynamic/visual-baker";
-import { createDynamicVisualBakeSourceGeometry } from "../dynamic/visual-bake-attachments";
+import { createDynamicVisualBakeSourceGeometry } from "../dynamic/visual-bake-sidecars";
 import {
 	classifyTexturePlacementPool,
 	classifyTextureUsagePurpose,
@@ -4574,8 +4574,8 @@ function createStaticObjectBakeSummary(
 	const largestBake = diagnostics.reduce<StaticObjectBakeDiagnostics | null>(
 		(largest, entry) =>
 			largest === null ||
-			entry.estimatedFlattenedTypedArrayBytes >
-				largest.estimatedFlattenedTypedArrayBytes
+			entry.estimatedAvoidedFlattenedTypedArrayBytes >
+				largest.estimatedAvoidedFlattenedTypedArrayBytes
 				? entry
 				: largest,
 		null,
@@ -4583,9 +4583,6 @@ function createStaticObjectBakeSummary(
 
 	return {
 		drawUnitCount: sumNumbers(diagnostics.map((entry) => entry.drawUnitCount)),
-		estimatedFlattenedTypedArrayBytes: sumNumbers(
-			diagnostics.map((entry) => entry.estimatedFlattenedTypedArrayBytes),
-		),
 		estimatedAvoidedFlattenedTriangleCount: sumNumbers(
 			diagnostics.map((entry) => entry.estimatedAvoidedFlattenedTriangleCount),
 		),
@@ -4599,12 +4596,6 @@ function createStaticObjectBakeSummary(
 		),
 		explicitObjectCount: sumNumbers(
 			diagnostics.map((entry) => entry.explicitObjectCount),
-		),
-		flattenedTriangleCount: sumNumbers(
-			diagnostics.map((entry) => entry.flattenedTriangleCount),
-		),
-		flattenedVertexCount: sumNumbers(
-			diagnostics.map((entry) => entry.flattenedVertexCount),
 		),
 		generatedInstanceCount: sumNumbers(
 			diagnostics.map((entry) => entry.generatedInstanceCount),
@@ -4626,9 +4617,6 @@ function createStaticObjectBakeSummary(
 						drawUnitCount: largestBake.drawUnitCount,
 						estimatedAvoidedFlattenedTypedArrayBytes:
 							largestBake.estimatedAvoidedFlattenedTypedArrayBytes,
-						estimatedFlattenedTypedArrayBytes:
-							largestBake.estimatedFlattenedTypedArrayBytes,
-						flattenedTriangleCount: largestBake.flattenedTriangleCount,
 						generatedInstanceCount: largestBake.generatedInstanceCount,
 						bakedInstancedRenderInstanceCount:
 							largestBake.instancedRenderInstanceCount,

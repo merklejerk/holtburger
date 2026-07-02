@@ -6,7 +6,7 @@ import type {
 	StaticObjectInstanceIdentity,
 	StaticObjectMaterialSlotFacts,
 	StaticObjectSourceAssetFacts,
-	StaticObjectSourceGeometryAttachment,
+	StaticObjectSourceGeometrySidecar,
 } from "../static/contracts";
 import type { StaticObjectBatchPayload } from "../static/objects/bake/static-object-batch-partitioner";
 import {
@@ -21,10 +21,10 @@ import {
 
 export function createDynamicObjectVisualBundleExpansion(input: {
 	readonly recipe: DynamicEntityRecipe;
-	readonly sourceGeometry: readonly StaticObjectSourceGeometryAttachment[];
+	readonly sourceGeometry: readonly StaticObjectSourceGeometrySidecar[];
 }): DynamicObjectVisualBundleExpansion {
 	const expansion = createStaticObjectVisualBundleExpansion({
-		attachments: { staticObjectSourceGeometry: input.sourceGeometry },
+		geometrySidecars: { staticObjectSourceGeometry: input.sourceGeometry },
 		payload: createDynamicObjectVisualPayload(input.recipe),
 	});
 	if (expansion.resolution.kind !== "ready") {

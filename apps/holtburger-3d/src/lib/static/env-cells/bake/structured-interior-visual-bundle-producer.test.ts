@@ -7,7 +7,7 @@ import {
 } from "../../../visual/object-visual-recipe-bundle";
 import { createObjectVisualStaticInstallSet } from "../../../visual/object-visual-static-publication-baker";
 import type {
-	EnvCellCellStructureGeometryAttachment,
+	EnvCellCellStructureGeometrySidecar,
 	EnvCellSystemStaticScopePayload,
 	LandblockEnvCellStaticFacts,
 	StaticBakeTask,
@@ -30,8 +30,8 @@ describe("structured interior visual bundle producer", () => {
 			throw new Error("Missing fixture env cell.");
 		}
 		const expansion = createStructuredInteriorVisualBundleExpansion({
-			attachments: {
-				envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
+			geometrySidecars: {
+				envCellCellStructureGeometry: [createGeometrySidecar(envCell)],
 			},
 			envCell,
 			payload,
@@ -102,7 +102,7 @@ describe("structured interior visual bundle producer", () => {
 		}
 
 		const expansion = createStructuredInteriorVisualBundleExpansion({
-			attachments: { envCellCellStructureGeometry: [] },
+			geometrySidecars: { envCellCellStructureGeometry: [] },
 			envCell,
 			payload,
 			task: createTask(),
@@ -124,7 +124,7 @@ describe("structured interior visual bundle producer", () => {
 		}
 
 		const expansion = createStructuredInteriorVisualBundleExpansion({
-			attachments: { envCellCellStructureGeometry: [] },
+			geometrySidecars: { envCellCellStructureGeometry: [] },
 			envCell,
 			payload,
 			task: createTask(),
@@ -307,9 +307,9 @@ function createMaterialSource(): StaticObjectMaterialSourceFacts {
 	};
 }
 
-function createGeometryAttachment(
+function createGeometrySidecar(
 	envCell: LandblockEnvCellStaticFacts,
-): EnvCellCellStructureGeometryAttachment {
+): EnvCellCellStructureGeometrySidecar {
 	const triangles: readonly ObjectVisualGeometryTriangle[] = [
 		{
 			firstVertex: 0,

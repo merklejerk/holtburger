@@ -215,6 +215,11 @@ async function startDevAssetHost(verbose) {
 }
 
 async function startViteDevServer() {
+	if (await isUrlReady(`${DEFAULT_VITE_URL}/browser`)) {
+		process.stderr.write(`Reusing Vite server at ${DEFAULT_VITE_URL}.\n`);
+		return DEFAULT_VITE_URL;
+	}
+
 	const child = spawn("npm", ["run", "dev"], {
 		cwd: process.cwd(),
 		stdio: ["ignore", "pipe", "pipe"],
@@ -276,18 +281,22 @@ function parseJsonLine(line) {
 async function waitForUrl(url, timeoutMs) {
 	const startedAt = Date.now();
 	for (;;) {
-		try {
-			const response = await fetch(url);
-			if (response.ok) {
-				return;
-			}
-		} catch {
-			// Keep polling until timeout.
+		if (await isUrlReady(url)) {
+			return;
 		}
 		if (Date.now() - startedAt >= timeoutMs) {
 			throw new Error(`Timed out waiting for ${url}.`);
 		}
 		await delay(250);
+	}
+}
+
+async function isUrlReady(url) {
+	try {
+		const response = await fetch(url);
+		return response.ok;
+	} catch {
+		return false;
 	}
 }
 

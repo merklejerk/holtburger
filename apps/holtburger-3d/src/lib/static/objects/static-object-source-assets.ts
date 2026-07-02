@@ -2,7 +2,7 @@ import type { PreparedGfxObjPayloadDto } from "../../assets/preparation/prepared
 import type { ObjectVisualGeometryBufferId } from "../../visual/object-visual-recipe-bundle";
 import type {
 	StaticObjectCanonicalGeometryIdentity,
-	StaticObjectSourceGeometryAttachment,
+	StaticObjectSourceGeometrySidecar,
 	StaticObjectSourceGeometryIdentity,
 	StaticObjectSourceIdentity,
 } from "../contracts";
@@ -56,11 +56,11 @@ export function describeStaticObjectCanonicalGeometryIdentity(
 	].join("|");
 }
 
-export function createStaticObjectSourceGeometryAttachment(options: {
+export function createStaticObjectSourceGeometrySidecar(options: {
 	readonly identity: StaticObjectCanonicalGeometryIdentity;
 	readonly bufferId: ObjectVisualGeometryBufferId;
 	readonly gfxObj: PreparedGfxObjPayloadDto;
-}): StaticObjectSourceGeometryAttachment {
+}): StaticObjectSourceGeometrySidecar {
 	const renderGeometry = options.gfxObj.renderGeometry;
 	return {
 		buffer: {

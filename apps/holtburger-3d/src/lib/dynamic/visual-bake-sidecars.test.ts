@@ -12,9 +12,9 @@ import type {
 	StaticObjectSourceIdentity,
 } from "../static/contracts";
 import { createStaticObjectSourceGeometryIdentity } from "../static/objects/static-object-source-assets";
-import { createDynamicVisualBakeSourceGeometry } from "./visual-bake-attachments";
+import { createDynamicVisualBakeSourceGeometry } from "./visual-bake-sidecars";
 
-describe("dynamic visual bake attachments", () => {
+describe("dynamic visual bake sidecars", () => {
 	it("dedupes distinct source parts that reference the same canonical gfx geometry", async () => {
 		const gfxObj = createSourceIdentity("gfx-obj", 0x01000020);
 		const firstSource = createSourceIdentity("setup-model", 0x02000010);
@@ -33,29 +33,26 @@ describe("dynamic visual bake attachments", () => {
 			createPreparedAsset(createHostAssetKey("gfx-obj", 0x01000020)),
 		]);
 
-		const attachments = await createDynamicVisualBakeSourceGeometry(
-			assetReader,
-			[
-				createRecipe([
-					createSourceAsset({
-						geometry: firstGeometry,
-						gfxObj,
-						source: firstSource,
-					}),
-					createSourceAsset({
-						geometry: secondGeometry,
-						gfxObj,
-						source: secondSource,
-					}),
-				]),
-			],
-		);
+		const sidecars = await createDynamicVisualBakeSourceGeometry(assetReader, [
+			createRecipe([
+				createSourceAsset({
+					geometry: firstGeometry,
+					gfxObj,
+					source: firstSource,
+				}),
+				createSourceAsset({
+					geometry: secondGeometry,
+					gfxObj,
+					source: secondSource,
+				}),
+			]),
+		]);
 
 		expect(assetReader.requests).toEqual([
 			createHostAssetKey("gfx-obj", 0x01000020),
 		]);
-		expect(attachments).toHaveLength(1);
-		expect(attachments[0]).toMatchObject({
+		expect(sidecars).toHaveLength(1);
+		expect(sidecars[0]).toMatchObject({
 			identity: firstGeometry.canonical,
 		});
 	});
@@ -89,7 +86,7 @@ function createRecipe(
 ): DynamicEntityRecipe {
 	const setupModel = sourceAssets[0];
 	if (!setupModel) {
-		throw new Error("Dynamic attachment fixture needs at least one source.");
+		throw new Error("Dynamic sidecar fixture needs at least one source.");
 	}
 	return {
 		animationSelection: { kind: "none" },

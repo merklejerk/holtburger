@@ -2251,6 +2251,12 @@ Course correction during Phase 9M:
   object draw units. The legacy draw units still exist inside bake results during the transition, so
   the next hard-cutover slice should remove them from coordinator commits before deleting the old
   producers.
+- `StaticCoordinatorCommitDelta.addedDrawUnits` now filters out legacy static-object and
+  structured-interior draw units. Object visual drawable output reaches runtime installation only
+  through `objectVisualInstallSet`, while terrain and other non-object draw-unit products remain on
+  `addedDrawUnits`. Bake results still carry legacy object draw units as producer-local transition
+  data, so Phase 9M can now focus on deleting the old producer branches rather than defending commit
+  ownership.
 
 ### Phase 10: Dynamic Resolver Cutover
 

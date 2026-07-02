@@ -937,7 +937,7 @@ export class StaticCoordinator {
 			dynamicRecipes: timing.dynamicRecipes,
 			dynamicVisualBake: timing.dynamicVisualBake,
 			staticCommit: {
-				addedDrawUnits: result.drawUnits,
+				addedDrawUnits: createCommitDrawUnits(result),
 				addedPortalApertureResources: result.portalApertureResources,
 				commitId: createStaticCommitId({
 					revision: result.revision,
@@ -1699,6 +1699,16 @@ function getDrawUnitOwnerId(drawUnit: StaticDrawUnit): string {
 
 	throw new Error(
 		`Static coordinator cannot commit ownerless draw unit ${String((drawUnit as { drawUnitId?: unknown }).drawUnitId ?? "unknown")}.`,
+	);
+}
+
+function createCommitDrawUnits(
+	result: StaticBakeBatchResult,
+): StaticCoordinatorCommitDelta["addedDrawUnits"] {
+	return result.drawUnits.filter(
+		(drawUnit) =>
+			drawUnit.kind !== "static-object-geometry" &&
+			drawUnit.kind !== "structured-interior-geometry",
 	);
 }
 

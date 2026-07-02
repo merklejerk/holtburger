@@ -25,7 +25,6 @@ import type {
 	EnvCellSystemPayloadSummary,
 	OutdoorStaticObjectsPayloadSummary,
 	StaticObjectBakeDiagnostics,
-	StaticObjectRenderInstance,
 	StaticResolver,
 	StaticResourceKey,
 	StaticRetentionReconciliation,
@@ -41,6 +40,7 @@ import {
 	createEmptyObjectVisualInstallSet,
 	createObjectVisualInstallSet,
 	type ObjectVisualInstallSet,
+	type ObjectVisualRenderInstance,
 } from "../../visual/object-visual-install-set";
 import type { PreparedAssetReader } from "../../assets/contracts";
 import type {
@@ -1679,7 +1679,7 @@ function collectCommittedResourceKeysByOwnerId(
 	const visualResourceDomains = new Map<
 		string,
 		{
-			readonly domain: StaticObjectRenderInstance["domain"];
+			readonly domain: ObjectVisualRenderInstance["domain"];
 			readonly landblockId: number;
 		}
 	>();

@@ -5,7 +5,6 @@ import type {
 import type {
 	StaticCoordinatorCommitDelta,
 	StaticDrawUnit,
-	StaticObjectVisualResource,
 	StaticPortalApertureResource,
 	StaticPortalGraphRecord,
 	StaticPortalInteriorRecord,
@@ -14,7 +13,10 @@ import type {
 	StaticSpatialRecord,
 	StaticVisibilityRecord,
 } from "../static/contracts";
-import type { ObjectVisualInstallSet } from "../visual/object-visual-install-set";
+import type {
+	ObjectVisualInstallSet,
+	ObjectVisualResource,
+} from "../visual/object-visual-install-set";
 
 export interface StaticCommitInstallInput {
 	readonly commit: StaticCoordinatorCommitDelta;
@@ -42,7 +44,7 @@ export function installStaticCommit(
 		input.commit.addedDrawUnits,
 		input.textureUpdate?.textureBindings ?? [],
 	);
-	assertTexturedStaticObjectVisualResourcesHaveCommittedBindings(
+	assertTexturedObjectVisualResourcesHaveCommittedBindings(
 		objectVisualInstallSet.visualResources,
 		input.textureUpdate?.textureBindings ?? [],
 	);
@@ -96,8 +98,8 @@ function assertTexturedDrawUnitsHaveCommittedBindings(
 	}
 }
 
-function assertTexturedStaticObjectVisualResourcesHaveCommittedBindings(
-	resources: readonly StaticObjectVisualResource[],
+function assertTexturedObjectVisualResourcesHaveCommittedBindings(
+	resources: readonly ObjectVisualResource[],
 	bindings: readonly StaticTextureBinding[],
 ): void {
 	const textureUseIdsByResourceId = new Map<string, Set<string>>();

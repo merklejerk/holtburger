@@ -4,8 +4,6 @@ import type {
 	StaticCoordinatorCommitDelta,
 	StaticDrawUnit,
 	StaticObjectGeometryStaticDrawUnit,
-	StaticObjectRenderInstance,
-	StaticObjectVisualResource,
 	StructuredInteriorGeometryStaticDrawUnit,
 	TerrainGeometryStaticDrawUnit,
 } from "../static/contracts";
@@ -13,6 +11,8 @@ import type { TextureResourceDependencies } from "../textures/placement";
 import {
 	createObjectVisualInstallSet,
 	type ObjectVisualDirectDrawUnit,
+	type ObjectVisualRenderInstance,
+	type ObjectVisualResource,
 } from "../visual/object-visual-install-set";
 import { installStaticCommit } from "./static-commit-installer";
 
@@ -92,11 +92,11 @@ describe("static commit installer", () => {
 
 	it("preserves static object visual resources and their texture update", () => {
 		const drawUnit = createStaticObjectDrawUnit("static-object-a");
-		const visualResource = createStaticObjectVisualResource(
+		const visualResource = createObjectVisualResource(
 			"visual-static-object-a",
 			drawUnit,
 		);
-		const renderInstance = createStaticObjectRenderInstance(
+		const renderInstance = createObjectVisualRenderInstance(
 			"instance-static-object-a",
 			visualResource.resourceId,
 		);
@@ -164,7 +164,7 @@ describe("static commit installer", () => {
 
 	it("rejects textured static object visual resources without committed texture bindings", () => {
 		const drawUnit = createStaticObjectDrawUnit("static-object-a");
-		const visualResource = createStaticObjectVisualResource(
+		const visualResource = createObjectVisualResource(
 			"visual-static-object-a",
 			drawUnit,
 		);
@@ -206,8 +206,8 @@ describe("static commit installer", () => {
 
 function createCommitDelta(options: {
 	readonly addedDrawUnits: readonly StaticDrawUnit[];
-	readonly objectVisualRenderInstances?: readonly StaticObjectRenderInstance[];
-	readonly objectVisualResources?: readonly StaticObjectVisualResource[];
+	readonly objectVisualRenderInstances?: readonly ObjectVisualRenderInstance[];
+	readonly objectVisualResources?: readonly ObjectVisualResource[];
 	readonly removedResources?: StaticCoordinatorCommitDelta["removedResources"];
 	readonly staticSpatialRecords?: StaticCoordinatorCommitDelta["staticSpatialRecords"];
 	readonly textureDependencies?: readonly TextureResourceDependencies[];
@@ -347,10 +347,10 @@ function createStaticObjectDrawUnit(
 	};
 }
 
-function createStaticObjectVisualResource(
+function createObjectVisualResource(
 	resourceId: string,
 	drawUnit: StaticObjectGeometryStaticDrawUnit,
-): StaticObjectVisualResource {
+): ObjectVisualResource {
 	const source = {
 		kind: "static-object-source" as const,
 		sourceAssetKind: "setup-model" as const,
@@ -400,10 +400,10 @@ function createStaticObjectVisualResource(
 	};
 }
 
-function createStaticObjectRenderInstance(
+function createObjectVisualRenderInstance(
 	instanceId: string,
 	resourceId: string,
-): StaticObjectRenderInstance {
+): ObjectVisualRenderInstance {
 	return {
 		bounds: null,
 		domain: "outdoor-explicit-objects",
@@ -578,7 +578,7 @@ function createTexturePlacementUpdateForDrawUnits(
 }
 
 function createTexturePlacementUpdateForVisualResource(
-	resource: StaticObjectVisualResource,
+	resource: ObjectVisualResource,
 ): TexturePlacementUpdate {
 	const textureUseId = resource.textureUseIds[0];
 	if (!textureUseId) {

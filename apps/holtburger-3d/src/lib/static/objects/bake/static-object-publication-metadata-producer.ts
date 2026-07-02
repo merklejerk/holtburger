@@ -4,11 +4,11 @@ import type {
 	StaticObjectDrawUnitOwnership,
 	StaticObjectInstanceIdentity,
 	StaticObjectPartSourceFacts,
-	StaticObjectRenderInstance,
 	StaticObjectSourceIdentity,
 	StaticObjectSourceMappingCoverage,
 	StaticObjectSortMetadata,
 } from "../../contracts";
+import type { ObjectVisualRenderInstance } from "../../../visual/object-visual-install-set";
 import {
 	createObjectVisualPartInstanceIndex,
 	createObjectVisualStaticPublicationMetadata,
@@ -401,7 +401,7 @@ function requireStaticObjectBounds(
 
 function centerVec3OfBounds(
 	bounds: StaticBounds,
-): StaticObjectRenderInstance["sortCenter"] {
+): ObjectVisualRenderInstance["sortCenter"] {
 	return {
 		x: (bounds.min.x + bounds.max.x) / 2,
 		y: (bounds.min.y + bounds.max.y) / 2,

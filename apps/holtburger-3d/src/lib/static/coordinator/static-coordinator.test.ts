@@ -35,8 +35,6 @@ import type {
 	StaticResolver,
 	StaticLandblockSceneLodSourceResolver,
 	StaticObjectGeometryStaticDrawUnit,
-	StaticObjectRenderInstance,
-	StaticObjectVisualResource,
 	StaticBakeTextureUse,
 } from "../contracts";
 import { StaticCoordinator } from "./static-coordinator";
@@ -45,6 +43,10 @@ import type {
 	ObjectVisualTexturePlacementSnapshot,
 	TexturePlacementSnapshot,
 } from "../../textures/placement";
+import type {
+	ObjectVisualRenderInstance,
+	ObjectVisualResource,
+} from "../../visual/object-visual-install-set";
 
 describe("static coordinator", () => {
 	it("drops late resolver results after a newer demand revision supersedes them", async () => {
@@ -1177,13 +1179,13 @@ describe("static coordinator", () => {
 			baker.pendingInputs,
 			generatedWork.taskId,
 		);
-		const retainedResource = createStaticObjectVisualResource(
+		const retainedResource = createObjectVisualResource(
 			`resource:${generatedWork.ownerId}`,
 		);
 		baker.complete(generatedInput.task.taskId, {
 			objectVisualInstallSet: createObjectVisualInstallSet({
 				renderInstances: [
-					createStaticObjectRenderInstance({
+					createObjectVisualRenderInstance({
 						instanceId: `instance:${generatedWork.ownerId}`,
 						landblockId: generatedWork.scope.landblockId,
 						resourceId: retainedResource.resourceId,
@@ -1873,9 +1875,7 @@ function createStaticObjectBakeDiagnostics(): StaticObjectBakeDiagnostics {
 	};
 }
 
-function createStaticObjectVisualResource(
-	resourceId: string,
-): StaticObjectVisualResource {
+function createObjectVisualResource(resourceId: string): ObjectVisualResource {
 	return {
 		bounds: null,
 		coordinateSpace: "static-object-source-local",
@@ -1927,11 +1927,11 @@ function createStaticObjectVisualResource(
 	};
 }
 
-function createStaticObjectRenderInstance(options: {
+function createObjectVisualRenderInstance(options: {
 	readonly instanceId: string;
 	readonly landblockId: number;
 	readonly resourceId: string;
-}): StaticObjectRenderInstance {
+}): ObjectVisualRenderInstance {
 	return {
 		bounds: {
 			max: { x: 1, y: 1, z: 1 },

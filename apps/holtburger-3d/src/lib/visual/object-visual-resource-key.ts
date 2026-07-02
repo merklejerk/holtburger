@@ -1,26 +1,24 @@
 import type {
-	StaticMaterialTableEntry,
-	StaticObjectRenderInstance,
-	StaticObjectRenderState,
-	StaticObjectSourceGeometryIdentity,
-	StaticObjectVisualResourceId,
-	StaticObjectVisualResourceKey,
-	StaticObjectGeometryStaticDrawUnit,
-} from "../contracts";
+	ObjectVisualRenderInstance,
+	ObjectVisualResourceId,
+	ObjectVisualResourceKey,
+	ObjectVisualSourceGeometryKey,
+} from "./object-visual-install-set";
+import type { VisualGeometryMaterialTableEntry } from "./visual-geometry";
 
-export interface StaticObjectVisualResourceKeyInput {
-	readonly geometry: StaticObjectSourceGeometryIdentity;
-	readonly materialEntries: readonly StaticMaterialTableEntry[];
-	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
-	readonly materialPass: StaticObjectGeometryStaticDrawUnit["materialPass"];
-	readonly renderState: StaticObjectRenderState;
-	readonly indexType: StaticObjectGeometryStaticDrawUnit["indexType"];
+export interface ObjectVisualResourceKeyInput {
+	readonly geometry: ObjectVisualSourceGeometryKey;
+	readonly indexType: ObjectVisualResourceKey["indexType"];
+	readonly materialEntries: readonly VisualGeometryMaterialTableEntry[];
+	readonly materialFamily: ObjectVisualResourceKey["materialFamily"];
+	readonly materialPass: ObjectVisualResourceKey["materialPass"];
+	readonly renderState: ObjectVisualResourceKey["renderState"];
 	readonly textureUseIds: readonly string[];
 }
 
-export function createStaticObjectVisualResourceKey(
-	input: StaticObjectVisualResourceKeyInput,
-): StaticObjectVisualResourceKey {
+export function createObjectVisualResourceKey(
+	input: ObjectVisualResourceKeyInput,
+): ObjectVisualResourceKey {
 	return {
 		geometry: input.geometry,
 		indexType: input.indexType,
@@ -33,37 +31,34 @@ export function createStaticObjectVisualResourceKey(
 	};
 }
 
-export function createStaticObjectVisualResourceId(
-	key: StaticObjectVisualResourceKey,
-): StaticObjectVisualResourceId {
-	return `static-object-visual-resource:${createStaticObjectVisualResourceKeyString(key)}`;
+export function createObjectVisualResourceId(
+	key: ObjectVisualResourceKey,
+): ObjectVisualResourceId {
+	return `static-object-visual-resource:${createObjectVisualResourceKeyString(key)}`;
 }
 
-export function createStaticObjectVisualResourceKeyString(
-	key: StaticObjectVisualResourceKey,
+export function createObjectVisualResourceKeyString(
+	key: ObjectVisualResourceKey,
 ): string {
 	return JSON.stringify({
-		geometry: createStaticObjectSourceGeometryKey(key.geometry),
+		geometry: createObjectVisualSourceGeometryKey(key.geometry),
 		indexType: key.indexType,
 		materialEntries: key.materialEntries
-			.map(createStaticObjectMaterialEntryKey)
+			.map(createObjectVisualMaterialEntryKey)
 			.sort((left, right) => left.slot - right.slot),
 		materialFamily: key.materialFamily,
 		materialPass: key.materialPass,
-		renderState: createStaticObjectRenderStateKey(key.renderState),
+		renderState: createObjectVisualRenderStateKey(key.renderState),
 		textureUseIds: createUniqueSortedStrings(key.textureUseIds),
 	});
 }
 
-export function groupStaticObjectRenderInstancesByVisualResource(
-	instances: readonly StaticObjectRenderInstance[],
-): ReadonlyMap<
-	StaticObjectVisualResourceId,
-	readonly StaticObjectRenderInstance[]
-> {
+export function groupObjectVisualRenderInstancesByResource(
+	instances: readonly ObjectVisualRenderInstance[],
+): ReadonlyMap<ObjectVisualResourceId, readonly ObjectVisualRenderInstance[]> {
 	const grouped = new Map<
-		StaticObjectVisualResourceId,
-		StaticObjectRenderInstance[]
+		ObjectVisualResourceId,
+		ObjectVisualRenderInstance[]
 	>();
 	for (const instance of instances) {
 		const resourceInstances = grouped.get(instance.resourceId) ?? [];
@@ -74,18 +69,18 @@ export function groupStaticObjectRenderInstancesByVisualResource(
 	return grouped;
 }
 
-function createStaticObjectSourceGeometryKey(
-	geometry: StaticObjectSourceGeometryIdentity,
+function createObjectVisualSourceGeometryKey(
+	geometry: ObjectVisualSourceGeometryKey,
 ) {
 	return {
-		gfxObj: createStaticObjectSourceKey(geometry.canonical.gfxObj),
+		gfxObj: createObjectVisualSourceKey(geometry.canonical.gfxObj),
 		partIndex: geometry.canonical.partIndex,
-		source: createStaticObjectSourceKey(geometry.source),
+		source: createObjectVisualSourceKey(geometry.source),
 	};
 }
 
-function createStaticObjectSourceKey(
-	source: StaticObjectSourceGeometryIdentity["source"],
+function createObjectVisualSourceKey(
+	source: ObjectVisualSourceGeometryKey["source"],
 ) {
 	return {
 		sourceAssetKind: source.sourceAssetKind,
@@ -93,8 +88,8 @@ function createStaticObjectSourceKey(
 	};
 }
 
-function createStaticObjectRenderStateKey(
-	renderState: StaticObjectRenderState,
+function createObjectVisualRenderStateKey(
+	renderState: ObjectVisualResourceKey["renderState"],
 ) {
 	return {
 		blend: {
@@ -108,7 +103,9 @@ function createStaticObjectRenderStateKey(
 	};
 }
 
-function createStaticObjectMaterialEntryKey(entry: StaticMaterialTableEntry) {
+function createObjectVisualMaterialEntryKey(
+	entry: VisualGeometryMaterialTableEntry,
+) {
 	return {
 		alphaTest: entry.alphaTest,
 		detailTextureTiling: entry.detailTextureTiling,
@@ -123,7 +120,7 @@ function createStaticObjectMaterialEntryKey(entry: StaticMaterialTableEntry) {
 		paletteTextureUseId: entry.paletteTextureUseId,
 		primaryTextureUseId: entry.primaryTextureUseId,
 		primaryTextureWrapMode: entry.primaryTextureWrapMode,
-		renderState: createStaticObjectRenderStateKey(entry.renderState),
+		renderState: createObjectVisualRenderStateKey(entry.renderState),
 		slot: entry.slot,
 	};
 }

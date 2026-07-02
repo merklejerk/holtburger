@@ -112,14 +112,13 @@ describe("static commit installer", () => {
 		const installed = installStaticCommit({
 			commit: createCommitDelta({
 				addedDrawUnits: [],
-				staticObjectRenderInstances: [renderInstance],
-				staticObjectVisualResources: [visualResource],
+				objectVisualRenderInstances: [renderInstance],
+				objectVisualResources: [visualResource],
 				textureDependencies,
 			}),
 			textureUpdate,
 		});
 
-		expect(installed.staticObjectVisualResources).toEqual([visualResource]);
 		expect(installed.objectVisualInstallSet).toEqual({
 			directDrawUnits: [],
 			dynamicAnimationPartBindings: [],
@@ -174,7 +173,7 @@ describe("static commit installer", () => {
 			installStaticCommit({
 				commit: createCommitDelta({
 					addedDrawUnits: [],
-					staticObjectVisualResources: [visualResource],
+					objectVisualResources: [visualResource],
 				}),
 				textureUpdate: null,
 			}),
@@ -207,15 +206,13 @@ describe("static commit installer", () => {
 
 function createCommitDelta(options: {
 	readonly addedDrawUnits: readonly StaticDrawUnit[];
+	readonly objectVisualRenderInstances?: readonly StaticObjectRenderInstance[];
+	readonly objectVisualResources?: readonly StaticObjectVisualResource[];
 	readonly removedResources?: StaticCoordinatorCommitDelta["removedResources"];
-	readonly staticObjectRenderInstances?: readonly StaticObjectRenderInstance[];
-	readonly staticObjectVisualResources?: readonly StaticObjectVisualResource[];
 	readonly staticSpatialRecords?: StaticCoordinatorCommitDelta["staticSpatialRecords"];
 	readonly textureDependencies?: readonly TextureResourceDependencies[];
 }): StaticCoordinatorCommitDelta {
 	const textureDependencies = options.textureDependencies ?? [];
-	const staticObjectRenderInstances = options.staticObjectRenderInstances ?? [];
-	const staticObjectVisualResources = options.staticObjectVisualResources ?? [];
 	return {
 		addedDrawUnits: options.addedDrawUnits,
 		addedPortalApertureResources: [],
@@ -225,15 +222,13 @@ function createCommitDelta(options: {
 			directDrawUnits: options.addedDrawUnits.filter(
 				isObjectVisualDirectDrawUnit,
 			),
-			renderInstances: staticObjectRenderInstances,
+			renderInstances: options.objectVisualRenderInstances ?? [],
 			textureDependencies,
-			visualResources: staticObjectVisualResources,
+			visualResources: options.objectVisualResources ?? [],
 		}),
 		removedResources: options.removedResources ?? [],
 		revision: 7,
 		envCellStaticObjectPlacementRecords: [],
-		staticObjectRenderInstances,
-		staticObjectVisualResources,
 		staticPortalGraphs: [],
 		staticPortalInteriorRecords: [],
 		staticSourceMappings: [],

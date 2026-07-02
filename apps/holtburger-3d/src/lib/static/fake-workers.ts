@@ -330,8 +330,6 @@ function createFakeStaticBakeResult(
 		domain: input.domain,
 		drawUnits: result.drawUnits ?? [],
 		staticObjectBakeDiagnostics: result.staticObjectBakeDiagnostics ?? [],
-		staticObjectRenderInstances: result.staticObjectRenderInstances ?? [],
-		staticObjectVisualResources: result.staticObjectVisualResources ?? [],
 		materialCoverage: result.materialCoverage ?? [],
 		objectVisualInstallSet:
 			result.objectVisualInstallSet ?? createEmptyObjectVisualInstallSet(),

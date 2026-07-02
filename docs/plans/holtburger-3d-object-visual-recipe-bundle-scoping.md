@@ -2444,6 +2444,8 @@ Implementation notes:
 
 ### Phase 12: Hard Cutover And Legacy Baker Removal
 
+Status: in progress.
+
 Goal: lock production static/dynamic object visual bake paths onto the unified recipe-first baker and
 remove old duplicated worker logic.
 
@@ -2490,6 +2492,26 @@ Deletion criteria:
 
 - Complete in this phase. Any remaining compatibility path must be treated as a blocker or recorded
   with a specific follow-up deletion condition.
+
+Implementation notes:
+
+- First hard-cutover slice deleted the `staticObjectRenderInstances` and
+  `staticObjectVisualResources` compatibility mirrors from `StaticBakeBatchResult`,
+  `StaticCoordinatorCommitDelta`, and `StaticCommitInstallResult`. Runtime and coordinator tests now
+  publish/read static object reusable resources through `objectVisualInstallSet` only.
+- `createCommitTextureDependencies(...)` and retained-task filtering now derive static object visual
+  resource ids from `objectVisualInstallSet.visualResources`; no static bake/install contract needs
+  the old mirror arrays.
+- Renderer diagnostics still expose `staticObjectRenderInstances` and
+  `staticObjectVisualResources` counters. Those names describe renderer resident resource classes,
+  not the removed bake/install mirror fields.
+- Validation:
+  `npm --prefix apps/holtburger-3d run test:ts -- static-commit-installer static-coordinator env-cell-system-layer-publication worker-client static-object-batch-partitioner`
+  passed with 9 test files and 94 tests;
+  `npm --prefix apps/holtburger-3d run check` passed.
+- Remaining Phase 12 debt: legacy static-object partition/bake code still emits transitional direct
+  draw units for diagnostics and sidecars; broader `client-runtime` still has static projection and
+  static selection diagnostics tests expecting legacy installed draw-unit behavior.
 
 ### Phase 13: Resteer Hard Cutover
 

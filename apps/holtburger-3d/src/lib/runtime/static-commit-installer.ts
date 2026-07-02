@@ -5,7 +5,6 @@ import type {
 import type {
 	StaticCoordinatorCommitDelta,
 	StaticDrawUnit,
-	StaticObjectRenderInstance,
 	StaticObjectVisualResource,
 	StaticPortalApertureResource,
 	StaticPortalGraphRecord,
@@ -27,8 +26,6 @@ export interface StaticCommitInstallResult {
 	readonly objectVisualInstallSet: ObjectVisualInstallSet;
 	readonly portalApertureResources: readonly StaticPortalApertureResource[];
 	readonly removedResources: readonly StaticResourceKey[];
-	readonly staticObjectRenderInstances: readonly StaticObjectRenderInstance[];
-	readonly staticObjectVisualResources: readonly StaticObjectVisualResource[];
 	readonly staticPortalGraphs: readonly StaticPortalGraphRecord[];
 	readonly staticPortalInteriorRecords: readonly StaticPortalInteriorRecord[];
 	readonly staticSourceMappings: readonly StaticSourceMappingRecord[];
@@ -55,8 +52,6 @@ export function installStaticCommit(
 		objectVisualInstallSet,
 		portalApertureResources: input.commit.addedPortalApertureResources ?? [],
 		removedResources: input.commit.removedResources,
-		staticObjectRenderInstances: objectVisualInstallSet.renderInstances,
-		staticObjectVisualResources: objectVisualInstallSet.visualResources,
 		staticPortalGraphs: input.commit.staticPortalGraphs,
 		staticPortalInteriorRecords: input.commit.staticPortalInteriorRecords,
 		staticSourceMappings: input.commit.staticSourceMappings,

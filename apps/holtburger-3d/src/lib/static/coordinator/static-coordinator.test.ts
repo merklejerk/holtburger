@@ -805,8 +805,6 @@ describe("static coordinator", () => {
 				removedResources: [],
 				revision: 1,
 				envCellStaticObjectPlacementRecords: [],
-				staticObjectRenderInstances: [],
-				staticObjectVisualResources: [],
 				staticPortalGraphs: [],
 				staticPortalInteriorRecords: [],
 				staticSourceMappings: [],
@@ -838,8 +836,6 @@ describe("static coordinator", () => {
 			removedResources: [{ drawUnitId: "terrain-a", kind: "draw-unit" }],
 			revision: 2,
 			envCellStaticObjectPlacementRecords: [],
-			staticObjectRenderInstances: [],
-			staticObjectVisualResources: [],
 			staticPortalGraphs: [],
 			staticPortalInteriorRecords: [],
 			staticSourceMappings: [],
@@ -1206,8 +1202,6 @@ describe("static coordinator", () => {
 				],
 				visualResources: [retainedResource],
 			}),
-			staticObjectRenderInstances: [],
-			staticObjectVisualResources: [],
 			textureUses: [
 				createStaticObjectVisualTextureUse({
 					resourceId: retainedResource.resourceId,
@@ -1224,7 +1218,6 @@ describe("static coordinator", () => {
 		expect(deltas[0]?.objectVisualInstallSet.visualResources).toEqual([
 			retainedResource,
 		]);
-		expect(deltas[0]?.staticObjectVisualResources).toEqual([retainedResource]);
 		expect(deltas[0]?.textureUses.map((textureUse) => textureUse.textureUseId))
 			.toEqual(["texture-use:retained"]);
 	});

@@ -168,8 +168,6 @@ export function bakeEnvCellSystem(
 		domain: input.domain,
 		drawUnits,
 		staticObjectBakeDiagnostics: staticObjectResult.staticObjectBakeDiagnostics,
-		staticObjectRenderInstances: staticObjectResult.staticObjectRenderInstances,
-		staticObjectVisualResources: staticObjectResult.staticObjectVisualResources,
 		materialCoverage: [
 			...itemResults.map((result) => result.materialCoverage),
 			...staticObjectResult.materialCoverage.filter(

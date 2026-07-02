@@ -136,8 +136,6 @@ export function bakeStaticObjectBatch(
 		),
 		domain: input.domain,
 		drawUnits,
-		staticObjectRenderInstances: objectVisualInstallSet.renderInstances,
-		staticObjectVisualResources: objectVisualInstallSet.visualResources,
 		staticObjectBakeDiagnostics: itemResults.map(
 			(result) => result.diagnostics,
 		),

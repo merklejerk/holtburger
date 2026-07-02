@@ -949,10 +949,6 @@ export class StaticCoordinator {
 				revision: result.revision,
 				envCellStaticObjectPlacementRecords:
 					result.envCellStaticObjectPlacementRecords,
-				staticObjectRenderInstances:
-					result.objectVisualInstallSet.renderInstances,
-				staticObjectVisualResources:
-					result.objectVisualInstallSet.visualResources,
 				staticPortalGraphs: result.staticPortalGraphs,
 				staticPortalInteriorRecords: result.staticPortalInteriorRecords,
 				staticSourceMappings: result.staticSourceMappings,
@@ -1005,8 +1001,6 @@ export class StaticCoordinator {
 				removedResources: options.removedResources,
 				revision: this.#revision,
 				envCellStaticObjectPlacementRecords: [],
-				staticObjectRenderInstances: [],
-				staticObjectVisualResources: [],
 				staticPortalGraphs: [],
 				staticPortalInteriorRecords: [],
 				staticSourceMappings: [],
@@ -1835,7 +1829,7 @@ function createCommitTextureDependencies(
 					drawUnit.kind === "structured-interior-geometry",
 			)
 			.map((drawUnit) => drawUnit.drawUnitId),
-		...result.staticObjectVisualResources.map(
+		...result.objectVisualInstallSet.visualResources.map(
 			(resource) => resource.resourceId,
 		),
 	]);
@@ -1898,7 +1892,6 @@ function filterStaticBakeResultForCurrentTasks(
 			(resource) => resource.resourceId,
 		),
 	);
-
 	return {
 		...result,
 		drawUnits: result.drawUnits.filter((drawUnit) =>
@@ -1926,10 +1919,6 @@ function filterStaticBakeResultForCurrentTasks(
 					ownerIds,
 				}),
 			),
-		staticObjectRenderInstances: retainedObjectVisualInstallSet.renderInstances,
-		staticObjectVisualResources: result.staticObjectVisualResources.filter(
-			(resource) => retainedObjectVisualResourceIds.has(resource.resourceId),
-		),
 		objectVisualInstallSet: retainedObjectVisualInstallSet,
 		staticPortalInteriorRecords: result.staticPortalInteriorRecords.filter(
 			(record) =>

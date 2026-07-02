@@ -75,8 +75,6 @@ export function bakeTerrainGeometry(
 		domain: input.domain,
 		drawUnits,
 		staticObjectBakeDiagnostics: [],
-		staticObjectRenderInstances: [],
-		staticObjectVisualResources: [],
 		materialCoverage: [],
 		objectVisualInstallSet: createEmptyObjectVisualInstallSet(),
 		portalApertureResources: [],

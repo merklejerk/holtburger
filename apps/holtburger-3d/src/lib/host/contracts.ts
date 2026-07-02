@@ -1337,6 +1337,38 @@ export type PreparedTexturePayloadDto = z.infer<
 	typeof preparedTexturePayloadDtoSchema
 >;
 
+const preparedPaletteReplacementDtoSchema = z.object({
+	paletteId: z.number().int().nonnegative(),
+	offset: z.number().int().nonnegative(),
+	count: z.number().int().nonnegative(),
+});
+
+export const preparedPaletteTexturePayloadDtoSchema = z.object({
+	kind: z.literal("prepared-palette-texture"),
+	residencyKind: z.literal("unknown"),
+	sourceAssetKind: z.literal("prepared-palette-texture"),
+	basePaletteId: z.number().int().nonnegative(),
+	domain: z.enum(["index8", "index16"]),
+	width: z.number().int().positive(),
+	height: z.number().int().positive(),
+	formatRaw: z.number().int().nonnegative(),
+	format: z.literal("rgba8"),
+	byteLength: z.number().int().nonnegative(),
+	contentHash: z.string().min(1),
+	replacements: z.array(preparedPaletteReplacementDtoSchema),
+	pixels: z.instanceof(Uint8Array),
+	dependencies: z.object({
+		paletteAssetIds: z.array(z.string().min(1)),
+	}),
+	diagnostics: z.object({
+		generatedByteLength: z.number().int().nonnegative(),
+	}),
+	provenance: assetProvenanceDtoSchema,
+});
+export type PreparedPaletteTexturePayloadDto = z.infer<
+	typeof preparedPaletteTexturePayloadDtoSchema
+>;
+
 const uint32ArrayDtoSchema = z
 	.union([
 		z.instanceof(Uint32Array),

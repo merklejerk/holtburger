@@ -240,6 +240,41 @@ describe("decodeBinaryAssetEnvelope", () => {
 		]);
 	});
 
+	it("hydrates prepared palette texture pixels as a Uint8Array", () => {
+		const pixels = new Uint8Array([0x11, 0x22, 0x33, 0xff]);
+		const response = decodeBinaryAssetEnvelope(
+			buildEnvelope({
+				response: {
+					requestId: "request-prepared-palette",
+					assetId: "prepared-palette-texture/04000001?domain=index8",
+					payloadKind: "json",
+					payload: {
+						kind: "prepared-palette-texture",
+						pixels: [],
+					},
+				},
+				sections: [
+					{
+						role: "preparedPaletteTexture.pixels",
+						path: "responses.0.payload.pixels",
+						scalarType: "u8",
+						componentCount: 4,
+						elementCount: 1,
+						byteOffset: 0,
+						byteLength: pixels.byteLength,
+					},
+				],
+				sectionData: [pixels],
+			}),
+		);
+
+		const payload = response.payload as { pixels: unknown };
+		expect(payload.pixels).toBeInstanceOf(Uint8Array);
+		expect(Array.from(payload.pixels as Uint8Array)).toEqual([
+			0x11, 0x22, 0x33, 0xff,
+		]);
+	});
+
 	it("hydrates env-cell portal aperture points as vec3 objects", () => {
 		const points = new Float32Array([1, 2, 3, 4, 5, 6]);
 		const response = decodeBinaryAssetEnvelope(

@@ -143,6 +143,7 @@ export function usesBinaryAssetLookup(assetId: string): boolean {
 		/^env-cell\/[0-9a-fA-F]{8}$/.test(assetId) ||
 		assetId.startsWith("gfx-obj/") ||
 		assetId.startsWith("prepared-texture/") ||
+		assetId.startsWith("prepared-palette-texture/") ||
 		assetId.startsWith("render-surface/") ||
 		assetId.startsWith("palette/")
 	);

@@ -111,7 +111,10 @@ export function parseHostAssetId(assetId: string): HostAssetKey {
 		return createHostAssetKey(kind, id);
 	}
 
-	if (kind === "prepared-texture" && id.includes("?")) {
+	if (
+		(kind === "prepared-texture" || kind === "prepared-palette-texture") &&
+		id.includes("?")
+	) {
 		return createHostAssetKey(kind, id);
 	}
 
@@ -128,7 +131,8 @@ function normalizeAssetKeyId(
 ): string {
 	if (
 		kind === "raw" ||
-		(kind === "prepared-texture" && typeof id === "string")
+		((kind === "prepared-texture" || kind === "prepared-palette-texture") &&
+			typeof id === "string")
 	) {
 		return `${id}`.trim();
 	}
@@ -258,6 +262,7 @@ function isKnownHostAssetKeyKind(kind: string): kind is HostAssetKeyKind {
 		kind === "surface-texture" ||
 		kind === "render-surface" ||
 		kind === "prepared-texture" ||
+		kind === "prepared-palette-texture" ||
 		kind === "palette" ||
 		kind === "raw"
 	);

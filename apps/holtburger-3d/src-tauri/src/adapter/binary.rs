@@ -1,4 +1,7 @@
 use crate::adapter::json::*;
+use crate::adapter::prepared_palette_texture::{
+    PreparedPaletteTexturePayload, serialize_prepared_palette_texture_payload,
+};
 use crate::adapter::prepared_texture::{
     PreparedTexturePayload, serialize_prepared_texture_payload,
 };
@@ -286,6 +289,24 @@ pub fn serialize_prepared_texture_binary_response(
         asset_id: request.asset_id,
         payload_kind: AssetPayloadKindDto::Json,
         payload: serialize_prepared_texture_payload(&prepared_texture, path_prefix, writer),
+    })
+}
+
+pub fn serialize_prepared_palette_texture_binary_response(
+    request: AssetLookupRequestDto,
+    prepared_palette_texture: PreparedPaletteTexturePayload,
+    path_prefix: &str,
+    writer: &mut BinaryAssetSectionWriter,
+) -> anyhow::Result<AssetLookupResponseDto> {
+    Ok(AssetLookupResponseDto {
+        request_id: request.request_id,
+        asset_id: request.asset_id,
+        payload_kind: AssetPayloadKindDto::Json,
+        payload: serialize_prepared_palette_texture_payload(
+            &prepared_palette_texture,
+            path_prefix,
+            writer,
+        ),
     })
 }
 

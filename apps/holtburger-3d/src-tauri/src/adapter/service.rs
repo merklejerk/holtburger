@@ -1,12 +1,13 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::adapter::ace_world_sql::AceWorldSqlResolver;
 use crate::adapter::binary::*;
 use crate::adapter::ids::*;
 use crate::adapter::json::*;
 use crate::adapter::prepared_palette_texture::{
+    PREPARED_PALETTE_TEXTURE_CACHE_CAPACITY, PreparedPaletteTextureCache,
     PreparedPaletteTexturePayload, PreparedPaletteTextureRequest,
     parse_prepared_palette_texture_asset_id, prepare_palette_texture,
 };
@@ -42,6 +43,7 @@ pub struct HostBoundaryAdapter {
     content: Arc<ContentRepository>,
     content_asset_runtime: ContentAssetRuntime,
     prepared_texture_worker_slots: Arc<Semaphore>,
+    prepared_palette_texture_cache: Arc<Mutex<PreparedPaletteTextureCache>>,
     verbose: bool,
 }
 
@@ -300,6 +302,9 @@ impl HostBoundaryAdapter {
             prepared_texture_worker_slots: Arc::new(Semaphore::new(
                 DEFAULT_PREPARED_TEXTURE_WORKERS,
             )),
+            prepared_palette_texture_cache: Arc::new(Mutex::new(PreparedPaletteTextureCache::new(
+                PREPARED_PALETTE_TEXTURE_CACHE_CAPACITY,
+            ))),
             verbose,
         }
     }
@@ -319,6 +324,9 @@ impl HostBoundaryAdapter {
             prepared_texture_worker_slots: Arc::new(Semaphore::new(
                 DEFAULT_PREPARED_TEXTURE_WORKERS,
             )),
+            prepared_palette_texture_cache: Arc::new(Mutex::new(PreparedPaletteTextureCache::new(
+                PREPARED_PALETTE_TEXTURE_CACHE_CAPACITY,
+            ))),
             verbose: false,
         }
     }
@@ -371,6 +379,7 @@ impl HostBoundaryAdapter {
         let loaded_assets = futures::future::join_all(requests.into_iter().map(|request| {
             let content_asset_runtime = self.content_asset_runtime.clone();
             let prepared_texture_worker_slots = Arc::clone(&self.prepared_texture_worker_slots);
+            let prepared_palette_texture_cache = Arc::clone(&self.prepared_palette_texture_cache);
             async move {
                 if let Some(prepared_texture_request) =
                     parse_prepared_texture_asset_id(&request.asset_id)
@@ -405,6 +414,7 @@ impl HostBoundaryAdapter {
                 {
                     let prepared_palette_texture = prepare_palette_texture_from_runtime(
                         content_asset_runtime.clone(),
+                        prepared_palette_texture_cache,
                         prepared_palette_texture_request,
                     )
                     .await;
@@ -702,8 +712,17 @@ async fn prepare_texture_blocking(
 
 async fn prepare_palette_texture_from_runtime(
     content_asset_runtime: ContentAssetRuntime,
+    prepared_palette_texture_cache: Arc<Mutex<PreparedPaletteTextureCache>>,
     request: PreparedPaletteTextureRequest,
 ) -> anyhow::Result<PreparedPaletteTexturePayload> {
+    if let Some(payload) = prepared_palette_texture_cache
+        .lock()
+        .expect("prepared palette texture cache lock should not be poisoned")
+        .get(&request)
+    {
+        return Ok(payload);
+    }
+
     let base_palette =
         load_palette_for_prepared_texture(&content_asset_runtime, request.base_palette_id, "base")
             .await?;
@@ -717,7 +736,12 @@ async fn prepare_palette_texture_from_runtime(
         .await?;
         replacement_palettes.push((*replacement, palette));
     }
-    prepare_palette_texture(request, &base_palette, &replacement_palettes)
+    let payload = prepare_palette_texture(request, &base_palette, &replacement_palettes)?;
+    prepared_palette_texture_cache
+        .lock()
+        .expect("prepared palette texture cache lock should not be poisoned")
+        .insert(payload.clone());
+    Ok(payload)
 }
 
 async fn load_palette_for_prepared_texture(

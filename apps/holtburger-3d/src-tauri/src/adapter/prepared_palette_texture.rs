@@ -2,10 +2,13 @@ use crate::adapter::binary::BinaryAssetSectionWriter;
 use crate::adapter::json::format_palette_asset_id;
 use anyhow::{Result, bail};
 use holtburger_dat::file_type::{Palette, PixelFormatId};
+use std::collections::{HashMap, VecDeque};
+use std::hash::Hash;
 
 const PREPARED_PALETTE_TEXTURE_PREFIX: &str = "prepared-palette-texture/";
+pub const PREPARED_PALETTE_TEXTURE_CACHE_CAPACITY: usize = 1_024;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PreparedPaletteTextureRequest {
     pub base_palette_id: u32,
     pub domain: PreparedPaletteTextureDomain,
@@ -32,6 +35,92 @@ pub struct PreparedPaletteTexturePayload {
     pub height: u32,
     pub pixels: Vec<u8>,
     pub content_hash: String,
+}
+
+#[derive(Debug)]
+pub struct PreparedPaletteTextureCache {
+    entries: SimpleLru<PreparedPaletteTextureRequest, PreparedPaletteTexturePayload>,
+}
+
+impl PreparedPaletteTextureCache {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            entries: SimpleLru::new(capacity),
+        }
+    }
+
+    pub fn get(
+        &mut self,
+        request: &PreparedPaletteTextureRequest,
+    ) -> Option<PreparedPaletteTexturePayload> {
+        self.entries.get(request)
+    }
+
+    pub fn insert(&mut self, payload: PreparedPaletteTexturePayload) {
+        self.entries.insert(payload.request.clone(), payload);
+    }
+
+    pub fn get_or_insert_with(
+        &mut self,
+        request: &PreparedPaletteTextureRequest,
+        prepare: impl FnOnce() -> Result<PreparedPaletteTexturePayload>,
+    ) -> Result<PreparedPaletteTexturePayload> {
+        if let Some(payload) = self.get(request) {
+            return Ok(payload);
+        }
+        let payload = prepare()?;
+        self.insert(payload.clone());
+        Ok(payload)
+    }
+}
+
+#[derive(Debug)]
+struct SimpleLru<K, V> {
+    capacity: usize,
+    values: HashMap<K, V>,
+    order: VecDeque<K>,
+}
+
+impl<K, V> SimpleLru<K, V>
+where
+    K: Clone + Eq + Hash,
+    V: Clone,
+{
+    fn new(capacity: usize) -> Self {
+        Self {
+            capacity,
+            values: HashMap::new(),
+            order: VecDeque::new(),
+        }
+    }
+
+    fn get(&mut self, key: &K) -> Option<V> {
+        let value = self.values.get(key).cloned()?;
+        self.touch(key);
+        Some(value)
+    }
+
+    fn insert(&mut self, key: K, value: V) {
+        if self.capacity == 0 {
+            return;
+        }
+        if self.values.insert(key.clone(), value).is_some() {
+            self.touch(&key);
+            return;
+        }
+        self.order.push_back(key.clone());
+        while self.values.len() > self.capacity {
+            let Some(evicted_key) = self.order.pop_front() else {
+                break;
+            };
+            self.values.remove(&evicted_key);
+        }
+    }
+
+    fn touch(&mut self, key: &K) {
+        self.order.retain(|existing_key| existing_key != key);
+        self.order.push_back(key.clone());
+    }
 }
 
 pub fn prepare_palette_texture(
@@ -591,5 +680,37 @@ mod tests {
                 .to_string()
                 .contains("exceeds replacement palette color count 3")
         );
+    }
+
+    #[test]
+    fn prepared_palette_texture_cache_reuses_recipe_payloads() {
+        let request = PreparedPaletteTextureRequest {
+            base_palette_id: 0x0400_0001,
+            domain: PreparedPaletteTextureDomain::Index8,
+            replacements: Vec::new(),
+        };
+        let base_palette = Palette {
+            id: 0x0400_0001,
+            colors_argb: vec![0xff11_2233],
+        };
+        let mut cache = PreparedPaletteTextureCache::new(8);
+        let mut compose_count = 0;
+
+        let first = cache
+            .get_or_insert_with(&request, || {
+                compose_count += 1;
+                prepare_palette_texture(request.clone(), &base_palette, &[])
+            })
+            .expect("first prepared palette should compose");
+        let second = cache
+            .get_or_insert_with(&request, || {
+                compose_count += 1;
+                prepare_palette_texture(request.clone(), &base_palette, &[])
+            })
+            .expect("second prepared palette should reuse cache");
+
+        assert_eq!(compose_count, 1);
+        assert_eq!(first.content_hash, second.content_hash);
+        assert_eq!(first.pixels, second.pixels);
     }
 }

@@ -146,17 +146,21 @@ function expandRenderablePrimitives(
 				`Object visual geometry recipe ${partRecipe.geometryRecipeId} references missing geometry buffer ${geometryRecipe.bufferId}.`,
 			);
 		}
-		const bindingsBySurfaceId = new Map(
+		const bindingsByTriangleMaterial = new Map(
 			partRecipe.materialBindings.map((binding) => [
-				binding.geometrySurfaceId,
+				createTriangleMaterialBindingKey({
+					materialVariantSignature: binding.materialVariantSignature,
+					surfaceId: binding.geometrySurfaceId,
+				}),
 				binding,
 			]),
 		);
 
 		for (const triangle of buffer.triangles) {
 			const binding = resolveTriangleMaterialBinding({
-				bindingsBySurfaceId,
+				bindingsByTriangleMaterial,
 				partRecipeId: instance.partRecipeId,
+				materialVariantSignature: triangle.materialVariantSignature,
 				surfaceId: triangle.surfaceId,
 			});
 			if (!binding) {
@@ -210,25 +214,43 @@ function expandRenderablePrimitives(
 }
 
 function resolveTriangleMaterialBinding(options: {
-	readonly bindingsBySurfaceId: ReadonlyMap<
-		number,
+	readonly bindingsByTriangleMaterial: ReadonlyMap<
+		string,
 		ObjectVisualPartMaterialBinding
 	>;
+	readonly materialVariantSignature: string | null;
 	readonly partRecipeId: ObjectVisualPartRecipeId;
 	readonly surfaceId: number | null;
 }): ObjectVisualPartMaterialBinding | null {
 	if (options.surfaceId !== null) {
-		return options.bindingsBySurfaceId.get(options.surfaceId) ?? null;
+		return (
+			options.bindingsByTriangleMaterial.get(
+				createTriangleMaterialBindingKey({
+					materialVariantSignature: options.materialVariantSignature,
+					surfaceId: options.surfaceId,
+				}),
+			) ?? null
+		);
 	}
-	if (options.bindingsBySurfaceId.size === 1) {
-		return [...options.bindingsBySurfaceId.values()][0] ?? null;
+	if (options.bindingsByTriangleMaterial.size === 1) {
+		return [...options.bindingsByTriangleMaterial.values()][0] ?? null;
 	}
-	if (options.bindingsBySurfaceId.size > 1) {
+	if (options.bindingsByTriangleMaterial.size > 1) {
 		console.warn(
-			`Skipped object visual triangle with no surface id in part recipe ${options.partRecipeId}; ${options.bindingsBySurfaceId.size} material bindings are ambiguous.`,
+			`Skipped object visual triangle with no surface id in part recipe ${options.partRecipeId}; ${options.bindingsByTriangleMaterial.size} material bindings are ambiguous.`,
 		);
 	}
 	return null;
+}
+
+function createTriangleMaterialBindingKey(options: {
+	readonly materialVariantSignature: string | null;
+	readonly surfaceId: number;
+}): string {
+	return [
+		`surface:${options.surfaceId}`,
+		`variant:${options.materialVariantSignature ?? "none"}`,
+	].join("|");
 }
 
 function createMaterialTableEntry(options: {

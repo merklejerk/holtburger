@@ -312,6 +312,7 @@ function createMaterialBindings(options: {
 		}
 		return {
 			geometrySurfaceId: triangle.surfaceId,
+			materialVariantSignature: null,
 			materialRecipeId: requireRegistryId(
 				options.registry.materialRecipeIdsByKey,
 				objectVisualMaterialRecipeKey(

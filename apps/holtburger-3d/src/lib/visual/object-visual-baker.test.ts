@@ -27,11 +27,13 @@ describe("object visual baker", () => {
 			materialBindings: [
 				{
 					geometrySurfaceId: 10,
+					materialVariantSignature: null,
 					materialRecipeId: materialOneId,
 					materialSlot: 0,
 				},
 				{
 					geometrySurfaceId: 20,
+					materialVariantSignature: null,
 					materialRecipeId: materialTwoId,
 					materialSlot: 1,
 				},
@@ -59,12 +61,79 @@ describe("object visual baker", () => {
 		expect(result.animationPartBindings).toEqual([]);
 	});
 
+	it("selects material bindings by surface and material variant", () => {
+		const clampMaterialId = materialRecipeId(1);
+		const repeatMaterialId = materialRecipeId(2);
+		const buffer = {
+			...TEST_BUFFER,
+			triangles: [
+				{
+					...TEST_BUFFER.triangles[0]!,
+					materialVariantSignature: null,
+					surfaceId: 10,
+				},
+				{
+					...TEST_BUFFER.triangles[1]!,
+					materialVariantSignature: "sampler=repeat",
+					surfaceId: 10,
+				},
+			],
+		};
+		const bundle = createBundle({
+			materialBindings: [
+				{
+					geometrySurfaceId: 10,
+					materialVariantSignature: null,
+					materialRecipeId: clampMaterialId,
+					materialSlot: 0,
+				},
+				{
+					geometrySurfaceId: 10,
+					materialVariantSignature: "sampler=repeat",
+					materialRecipeId: repeatMaterialId,
+					materialSlot: 1,
+				},
+			],
+			materialRecipes: new Map([
+				[
+					clampMaterialId,
+					createDirectColorMaterialRecipe([1, 0, 0, 1], {
+						primaryTextureWrapMode: "clamp",
+					}),
+				],
+				[
+					repeatMaterialId,
+					createDirectColorMaterialRecipe([0, 1, 0, 1], {
+						primaryTextureWrapMode: "repeat",
+					}),
+				],
+			]),
+			sourcePartIndex: null,
+		});
+
+		const result = bakeObjectVisuals({
+			bundle,
+			geometryBuffers: new Map([[TEST_BUFFER.bufferId, buffer]]),
+			renderPartIdPrefix: "variant-binding-fixture",
+		});
+
+		expect(result.renderParts).toHaveLength(1);
+		expect(result.renderParts[0]?.materialEntries).toMatchObject([
+			{ primaryTextureWrapMode: "clamp" },
+			{ primaryTextureWrapMode: "repeat" },
+		]);
+		expect([...result.renderParts[0]!.materialSlotIndices]).toEqual([
+			0, 0, 0, 1, 1, 1,
+		]);
+	});
+
 	it("maps null-surface triangles to the only material binding", () => {
 		const materialId = materialRecipeId(1);
 		const bundle = createBundle({
 			materialBindings: [
 				{
 					geometrySurfaceId: 10,
+					materialVariantSignature: null,
 					materialRecipeId: materialId,
 					materialSlot: 0,
 				},
@@ -102,6 +171,7 @@ describe("object visual baker", () => {
 			materialBindings: [
 				{
 					geometrySurfaceId: 10,
+					materialVariantSignature: null,
 					materialRecipeId: materialId,
 					materialSlot: 0,
 				},
@@ -149,11 +219,13 @@ describe("object visual baker", () => {
 			materialBindings: [
 				{
 					geometrySurfaceId: 10,
+					materialVariantSignature: null,
 					materialRecipeId: materialOneId,
 					materialSlot: 0,
 				},
 				{
 					geometrySurfaceId: 20,
+					materialVariantSignature: null,
 					materialRecipeId: materialTwoId,
 					materialSlot: 0,
 				},
@@ -200,11 +272,13 @@ describe("object visual baker", () => {
 			materialBindings: [
 				{
 					geometrySurfaceId: 10,
+					materialVariantSignature: null,
 					materialRecipeId: indexedMaterialId,
 					materialSlot: 0,
 				},
 				{
 					geometrySurfaceId: 20,
+					materialVariantSignature: null,
 					materialRecipeId: rgbaMaterialId,
 					materialSlot: 0,
 				},
@@ -285,11 +359,13 @@ describe("object visual baker", () => {
 			materialBindings: [
 				{
 					geometrySurfaceId: 10,
+					materialVariantSignature: null,
 					materialRecipeId: materialOneId,
 					materialSlot: 0,
 				},
 				{
 					geometrySurfaceId: 20,
+					materialVariantSignature: null,
 					materialRecipeId: materialTwoId,
 					materialSlot: 1,
 				},
@@ -331,6 +407,7 @@ describe("object visual baker", () => {
 			materialBindings: [
 				{
 					geometrySurfaceId: 10,
+					materialVariantSignature: null,
 					materialRecipeId: materialId,
 					materialSlot: 0,
 				},
@@ -359,6 +436,7 @@ describe("object visual baker", () => {
 			materialBindings: [
 				{
 					geometrySurfaceId: 10,
+					materialVariantSignature: null,
 					materialRecipeId: materialId,
 					materialSlot: 0,
 				},
@@ -391,6 +469,7 @@ describe("object visual baker", () => {
 			materialBindings: [
 				{
 					geometrySurfaceId: 10,
+					materialVariantSignature: null,
 					materialRecipeId: materialId,
 					materialSlot: 0,
 				},

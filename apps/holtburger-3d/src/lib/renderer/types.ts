@@ -433,6 +433,21 @@ export interface RendererSnapshot {
 	readonly debugOverlayPrimitives: number;
 }
 
+export interface RendererResourceSnapshot {
+	/** Direct draw calls emitted for direct env-cell rendering in the last rendered frame. */
+	readonly directEnvCellDrawCalls: number;
+	/** Dynamic draw calls emitted in the last rendered frame. */
+	readonly dynamicDrawCalls: number;
+	/** Dynamic render instances currently resident in the renderer. */
+	readonly dynamicInstances: number;
+	/** Dynamic visual resources currently resident in the renderer. */
+	readonly dynamicVisualResources: number;
+	/** Static draw units currently resident in the renderer. */
+	readonly staticDrawUnits: number;
+	/** Terrain draw units currently resident in the renderer. */
+	readonly terrainDrawUnits: number;
+}
+
 interface StaticObjectMaterialPassDrawCallCounts {
 	readonly opaque: number;
 	readonly alphaTest: number;
@@ -718,6 +733,7 @@ export interface Renderer {
 	setDebugOverlayPrimitives(primitives: readonly DebugOverlayPrimitive[]): void;
 	updateFrameState(state: FrameState): void;
 	subscribeTelemetry(listener: RendererFrameTelemetryListener): () => void;
+	createResourceSnapshot(): RendererResourceSnapshot;
 	createDiagnosticsSnapshot(): RendererSnapshot;
 	dispose(): void;
 }

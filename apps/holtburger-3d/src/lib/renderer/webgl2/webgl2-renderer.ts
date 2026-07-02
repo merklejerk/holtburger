@@ -10,6 +10,7 @@ import type {
 	Renderer,
 	RendererFrameTelemetry,
 	RendererFrameTelemetryListener,
+	RendererResourceSnapshot,
 	RendererSnapshot,
 	StaticObjectUploadDiagnostics,
 	RenderPassPlan,
@@ -1249,6 +1250,21 @@ class Webgl2Renderer implements Renderer {
 
 		return () => {
 			this.#telemetryListeners.delete(listener);
+		};
+	}
+
+	createResourceSnapshot(): RendererResourceSnapshot {
+		return {
+			directEnvCellDrawCalls: this.#lastDirectEnvCellDrawCalls,
+			dynamicDrawCalls: this.#lastDynamicDrawCalls,
+			dynamicInstances: this.#dynamicInstances.size,
+			dynamicVisualResources: this.#dynamicVisualResources.size,
+			staticDrawUnits:
+				this.#terrainResources.size +
+				this.#staticObjectResources.size +
+				this.#staticObjectVisualResources.size +
+				this.#structuredInteriorResources.size,
+			terrainDrawUnits: this.#terrainResources.size,
 		};
 	}
 

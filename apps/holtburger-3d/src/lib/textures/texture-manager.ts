@@ -659,7 +659,7 @@ export class TextureManager {
 		);
 		const existingSourceEntry = findRegistryEntryBySource(
 			registry,
-			source,
+			createLogicalTexturePhysicalSourceKey(source),
 			pagePolicy,
 			textureUse.domain,
 		);
@@ -692,6 +692,46 @@ export class TextureManager {
 		}
 
 		const directSource = await this.#prepareMaterialTextureSource(source);
+		const physicalSourceKey = createMaterialTexturePhysicalSourceKey(
+			source,
+			directSource,
+		);
+		const existingPhysicalSourceEntry = findRegistryEntryBySource(
+			registry,
+			physicalSourceKey,
+			pagePolicy,
+			textureUse.domain,
+		);
+		if (existingPhysicalSourceEntry) {
+			const registryEntry = createRegistryEntryAliasForPagePolicy(
+				existingPhysicalSourceEntry,
+				pagePolicy,
+				textureUse,
+			);
+			registry.entries.set(textureKey, registryEntry);
+			this.#recordPlacementEntry(registryEntry);
+			return {
+				entry: registryEntry,
+				textureKey,
+			};
+		}
+		const physicalPlacementKey = createVisualTexturePhysicalPlacementKey(
+			textureUse,
+			physicalSourceKey,
+		);
+		const pendingByPhysicalSource = pendingPlacements.get(physicalPlacementKey);
+		if (pendingByPhysicalSource) {
+			addPendingPlacementOwners(pendingByPhysicalSource, textureUse.owners);
+			pendingByPhysicalSource.textureKeys.add(textureKey);
+			pendingByPhysicalSource.textureUseIds.add(textureUse.textureUseId);
+			pendingPlacements.set(textureKey, pendingByPhysicalSource);
+			pendingPlacements.set(placementKey, pendingByPhysicalSource);
+			return {
+				entry: null,
+				pending: pendingByPhysicalSource,
+				textureKey,
+			};
+		}
 		const samplerPolicy = createRuntimeTextureSamplerPolicy({
 			filteringMode: this.#filteringMode,
 			sampleClass: pagePolicy.sampleClass,
@@ -701,6 +741,7 @@ export class TextureManager {
 			entry: null,
 			pagePolicy,
 			pendingLeaseCount: 0,
+			physicalSourceKey,
 			samplerPolicy,
 			source: directSource,
 			placementBucketKey: textureUse.placementBucketKey,
@@ -710,6 +751,7 @@ export class TextureManager {
 			ownerKeys: new Set(textureUse.owners.map(createTextureBindingOwnerKey)),
 		};
 		pendingPlacements.set(placementKey, staged);
+		pendingPlacements.set(physicalPlacementKey, staged);
 		pendingPlacements.set(textureKey, staged);
 
 		return {
@@ -897,6 +939,7 @@ export class TextureManager {
 					leaseCount: 0,
 					mipmapsGenerated: group.samplerPolicy.generateMipmaps,
 					pageId,
+					physicalSourceKey: entry.physicalSourceKey,
 					placementRevision,
 					purpose: classifyTextureUsagePurpose(
 						entry.textureUse.source,
@@ -1133,6 +1176,7 @@ interface VisualTextureRegistryEntry {
 	readonly format: RuntimeTexturePlacement["format"];
 	readonly itemId: string;
 	readonly placementBucketKey: TexturePlacementBucketKey;
+	readonly physicalSourceKey: string;
 	readonly source: MaterialTextureDataUseIdentity;
 	readonly textureRefId: string;
 	readonly pageId: string;
@@ -1213,6 +1257,7 @@ interface PendingTexturePlacement {
 	/** Texture-use ids that share this staged source placement. */
 	readonly textureUseIds: Set<string>;
 	readonly source: DirectMaterialTextureSource;
+	readonly physicalSourceKey: string;
 	readonly pagePolicy: RuntimeTexturePagePolicy;
 	readonly samplerPolicy: RuntimeTextureSamplerPolicy;
 	readonly ownerKeys: Set<string>;
@@ -1328,13 +1373,13 @@ function createVisualTexturePlacementBucketRegistryKey(
 
 function findRegistryEntryBySource(
 	registry: VisualTexturePlacementBucketRegistry,
-	source: MaterialTextureDataUseIdentity,
+	physicalSourceKey: string,
 	pagePolicy: RuntimeTexturePagePolicy,
 	domain: VisualTextureDomain,
 ): VisualTextureRegistryEntry | null {
 	for (const entry of registry.entries.values()) {
 		if (
-			isSameMaterialTextureDataUse(entry.source, source) &&
+			entry.physicalSourceKey === physicalSourceKey &&
 			entry.sampleClass === pagePolicy.sampleClass &&
 			(usesShaderVirtualWrap(domain, pagePolicy) ||
 				(entry.wrapS === pagePolicy.wrapS && entry.wrapT === pagePolicy.wrapT))
@@ -1344,6 +1389,28 @@ function findRegistryEntryBySource(
 	}
 
 	return null;
+}
+
+function createLogicalTexturePhysicalSourceKey(
+	source: MaterialTextureDataUseIdentity,
+): string {
+	return `logical:${createMaterialTextureDataUseKey(source)}`;
+}
+
+function createMaterialTexturePhysicalSourceKey(
+	logicalSource: MaterialTextureDataUseIdentity,
+	directSource: DirectMaterialTextureSource,
+): string {
+	if (directSource.kind === "direct-palette-texture-source") {
+		return [
+			"rgba8",
+			`${directSource.width}x${directSource.height}`,
+			`bytes:${directSource.pixels.byteLength}`,
+			`hash:${directSource.contentHash}`,
+		].join(":");
+	}
+
+	return createLogicalTexturePhysicalSourceKey(logicalSource);
 }
 
 function createRegistryEntryAliasForPagePolicy(
@@ -1392,37 +1459,6 @@ function deleteRegistryEntryAliases(
 			registry.entries.delete(textureKey);
 		}
 	}
-}
-
-function isSameMaterialTextureDataUse(
-	left: MaterialTextureDataUseIdentity,
-	right: MaterialTextureDataUseIdentity,
-): boolean {
-	if (left.kind !== right.kind || left.usage !== right.usage) {
-		return false;
-	}
-
-	if (
-		left.kind === "prepared-palette-texture-use" &&
-		right.kind === "prepared-palette-texture-use"
-	) {
-		return (
-			left.palette.paletteId === right.palette.paletteId &&
-			left.domain === right.domain &&
-			isSamePreparedPaletteReplacements(left.replacements, right.replacements)
-		);
-	}
-
-	if (
-		left.kind === "prepared-render-surface-texture-use" &&
-		right.kind === "prepared-render-surface-texture-use"
-	) {
-		return (
-			left.renderSurface.renderSurfaceId === right.renderSurface.renderSurfaceId
-		);
-	}
-
-	return false;
 }
 
 function createMaterialTextureHostKey(source: MaterialTextureDataUseIdentity) {
@@ -1485,37 +1521,6 @@ function createMaterialTextureDataUseKey(
 	].join(":");
 }
 
-function isSamePreparedPaletteReplacements(
-	left:
-		| Extract<
-				MaterialTextureDataUseIdentity,
-				{ readonly kind: "prepared-palette-texture-use" }
-		  >["replacements"]
-		| undefined,
-	right:
-		| Extract<
-				MaterialTextureDataUseIdentity,
-				{ readonly kind: "prepared-palette-texture-use" }
-		  >["replacements"]
-		| undefined,
-): boolean {
-	const leftReplacements = left ?? [];
-	const rightReplacements = right ?? [];
-	if (leftReplacements.length !== rightReplacements.length) {
-		return false;
-	}
-	return leftReplacements.every((leftReplacement, index) => {
-		const rightReplacement = rightReplacements[index];
-		return (
-			rightReplacement !== undefined &&
-			leftReplacement.palette.paletteId ===
-				rightReplacement.palette.paletteId &&
-			leftReplacement.offset === rightReplacement.offset &&
-			leftReplacement.count === rightReplacement.count
-		);
-	});
-}
-
 function createPreparedPaletteReplacementsKey(
 	replacements:
 		| Extract<
@@ -1553,6 +1558,18 @@ function createVisualTextureSourcePlacementKey(
 		textureUse.domain,
 		textureUse.placementBucketKey,
 		createMaterialTextureDataUseKey(textureUse.source),
+		createTextureUseSamplingKey(textureUse),
+	].join(":");
+}
+
+function createVisualTexturePhysicalPlacementKey(
+	textureUse: VisualTextureUseCommit,
+	physicalSourceKey: string,
+): string {
+	return [
+		textureUse.domain,
+		textureUse.placementBucketKey,
+		physicalSourceKey,
 		createTextureUseSamplingKey(textureUse),
 	].join(":");
 }
@@ -2082,9 +2099,7 @@ function countWrapModesForEntries(
 function countUniqueSources(
 	entries: readonly VisualTextureRegistryEntry[],
 ): number {
-	const sources = new Set(
-		entries.map((entry) => createMaterialTextureDataUseKey(entry.source)),
-	);
+	const sources = new Set(entries.map((entry) => entry.physicalSourceKey));
 
 	return sources.size;
 }

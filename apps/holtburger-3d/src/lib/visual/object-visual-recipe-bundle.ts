@@ -92,8 +92,6 @@ interface ObjectVisualRenderSurfaceTextureSource {
 }
 
 interface ObjectVisualPaletteTextureSource {
-	readonly firstIndex: number;
-	readonly indexCount: number;
 	readonly kind: "palette";
 	readonly paletteId: number;
 }

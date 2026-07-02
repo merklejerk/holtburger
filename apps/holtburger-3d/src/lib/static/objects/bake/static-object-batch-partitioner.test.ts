@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import type {
-	EnvCellSystemStaticScopePayload,
 	OutdoorStaticObjectsScopePayload,
 	StaticBakeJobInput,
 	StaticBakeTask,
@@ -10,10 +9,7 @@ import type {
 	StaticObjectPaletteViewFacts,
 	StaticObjectTextureRefFacts,
 } from "../../contracts";
-import type {
-	ObjectVisualTexturePlacementSnapshot,
-	TexturePlacementSnapshot,
-} from "../../../textures/placement";
+import type { ObjectVisualTexturePlacementSnapshot } from "../../../textures/placement";
 import { bakeStaticObjectJob } from "./static-object-job-baker";
 import {
 	partitionStaticObjectBatches,
@@ -641,7 +637,9 @@ describe("static object batch partitioner", () => {
 		expect(materialEntry.indexedTextureFormat).toBe("p8");
 		expect(materialEntry.primaryTextureUseId).toBeNull();
 		expect(materialEntry.indexTextureUseId).toContain("index8");
-		expect(materialEntry.paletteTextureUseId).toContain("palette-texture-use");
+		expect(materialEntry.paletteTextureUseId).toContain(
+			"prepared-palette-texture-use",
+		);
 		expect(materialEntry.paletteFirstIndex).toBe(0);
 		expect(drawUnit.textureUseIds).toHaveLength(2);
 		expect(drawUnit.textureUseIds).toEqual(
@@ -657,7 +655,9 @@ describe("static object batch partitioner", () => {
 					usage: "index8",
 				}),
 				expect.objectContaining({
-					kind: "palette-texture-use",
+					domain: "index8",
+					kind: "prepared-palette-texture-use",
+					replacements: [],
 					usage: "palette-rgba",
 				}),
 			]),
@@ -678,35 +678,30 @@ describe("static object batch partitioner", () => {
 		expect(
 			plan.partitions[0]?.coarseTablePlan.entries.map((entry) => {
 				const paletteUse = entry.textureDataUses.find(
-					(dataUse) => dataUse.kind === "palette-texture-use",
+					(dataUse) => dataUse.kind === "prepared-palette-texture-use",
 				);
-				if (!paletteUse || paletteUse.kind !== "palette-texture-use") {
-					throw new Error("Expected indexed partition palette data use.");
+				if (!paletteUse || paletteUse.kind !== "prepared-palette-texture-use") {
+					throw new Error(
+						"Expected indexed partition prepared palette data use.",
+					);
 				}
 				return {
-					firstIndex: paletteUse.firstIndex,
-					indexCount: paletteUse.indexCount,
-					subPalettes: paletteUse.subPalettes.map((subPalette) => ({
-						firstIndex: subPalette.firstIndex,
-						indexCount: subPalette.indexCount,
-						paletteId: subPalette.palette.paletteId,
+					domain: paletteUse.domain,
+					replacements: paletteUse.replacements.map((replacement) => ({
+						count: replacement.count,
+						offset: replacement.offset,
+						paletteId: replacement.palette.paletteId,
 					})),
 				};
 			}),
 		).toEqual([
 			{
-				firstIndex: 0,
-				indexCount: 256,
-				subPalettes: [
-					{ firstIndex: 16, indexCount: 32, paletteId: 0x04000010 },
-				],
+				domain: "index8",
+				replacements: [{ count: 32, offset: 16, paletteId: 0x04000010 }],
 			},
 			{
-				firstIndex: 0,
-				indexCount: 256,
-				subPalettes: [
-					{ firstIndex: 64, indexCount: 32, paletteId: 0x04000010 },
-				],
+				domain: "index8",
+				replacements: [{ count: 32, offset: 64, paletteId: 0x04000010 }],
 			},
 		]);
 	});
@@ -866,164 +861,6 @@ function createEnvCellStaticPayload(): ObjectVisualSourcePayload &
 				owningEnvCellId: 0xda550101,
 			},
 		],
-	};
-}
-
-function createEnvCellStaticBakeInput(): StaticBakeJobInput {
-	const payload = createEnvCellStaticScopePayload();
-	const task: StaticBakeTask = {
-		domain: "env-cell-system",
-		ownerId: "env-cell-system:0xda55ffff",
-		ownerKey: {
-			kind: "env-cell-system",
-			landblockId: 0xda55ffff,
-		},
-		revision: 1,
-		scope: {
-			kind: "landblock",
-			landblockId: 0xda55ffff,
-		},
-		scopeKey: "landblock:da55ffff",
-		taskId: "1:landblock:da55ffff:env-cell-system",
-	};
-
-	const input: StaticBakeJobInput = {
-		resources: {
-			envCellCellStructureGeometry: [],
-			staticObjectSourceGeometry: payload.sourceAssets.flatMap((source) =>
-				source.parts.map((part) => {
-					const fixturePart = part as typeof part & {
-						readonly positions: Float32Array;
-						readonly texCoords: Float32Array;
-					};
-					return {
-						buffer: {
-							bounds: null,
-							bufferId: objectVisualGeometryBufferId(0),
-							coordinateSpace: "source-local",
-							normals: new Float32Array(fixturePart.positions.length),
-							positions: fixturePart.positions,
-							texCoords: fixturePart.texCoords,
-							triangleCount: part.triangles.length,
-							triangles: part.triangles.map((triangle) => ({
-								firstVertex: triangle.firstVertex,
-								materialVariantSignature:
-									triangle.materialVariantSignature ?? null,
-								polygonId: triangle.polygonId,
-								surfaceId: triangle.geometrySurfaceId,
-							})),
-							vertexCount: fixturePart.positions.length / 3,
-						},
-						identity: part.geometry.canonical,
-					};
-				}),
-			),
-		},
-		domain: "env-cell-system",
-		payload: {
-			job: {
-				domain: task.domain,
-				scope: task.scope,
-			},
-			scope: payload,
-			sourceRevision: 1,
-		},
-		revision: 1,
-		task,
-	};
-	return {
-		...input,
-		texturePlacementSnapshot: createTexturePlacementSnapshotForInput(input),
-	};
-}
-
-function createEnvCellStaticScopePayload(): EnvCellSystemStaticScopePayload {
-	const payload = createEnvCellStaticPayload();
-	return {
-		acceptedEnvCellIds: [0xda550100, 0xda550101],
-		buildingTransitionApertures: [],
-		envCells: payload.objects.map((object) =>
-			createEnvCellStaticScopeEnvCell(object.owningEnvCellId ?? 0, object),
-		),
-		kind: "env-cell-system",
-		landblock: {
-			kind: "landblock-source",
-			landblockId: 0xda55ffff,
-			source: "env-cells",
-		},
-		materialSources: payload.materialSources,
-		missingRefs: [],
-		paletteSources: payload.paletteSources,
-		portalLinks: [],
-		regionRenderProfile: {
-			detailRoles: [],
-			identity: {
-				kind: "region-render-profile",
-				regionNumber: 1,
-			},
-		},
-		residencySpatial: {
-			landblockBounds: null,
-			nodeBounds: [],
-		},
-		sourceAssets: payload.sourceAssets,
-		textureRefs: payload.textureRefs,
-		visibilityDiagnostics: [],
-	};
-}
-
-function createEnvCellStaticScopeEnvCell(
-	envCellId: number,
-	object: ObjectVisualSourcePayload["objects"][number],
-): EnvCellSystemStaticScopePayload["envCells"][number] {
-	return {
-		cellBsp: {
-			kind: "leaf",
-			polyIds: [],
-			solid: 0,
-			sphere: null,
-		},
-		cellStructure: {
-			cellStructureId: 0x0d000001,
-			kind: "cell-structure",
-		},
-		environment: {
-			environmentId: 0x0e000001,
-			kind: "environment",
-		},
-		identity: {
-			envCellId,
-			kind: "env-cell-source",
-		},
-		landblockId: 0xda55ffff,
-		localPlacement: createPlacement(),
-		memberId: `member-${envCellId.toString(16)}`,
-		portalApertures: [],
-		portals: [],
-		renderGeometry: {
-			bounds: null,
-			invalidPolygons: [],
-			skippedPolygonCount: 0,
-			sourceId: envCellId,
-			surfaceIds: [],
-			triangleCount: 0,
-			triangles: [],
-			vertexCount: 0,
-		},
-		restrictionObjectId: null,
-		seenOutside: null,
-		staticObjectPlacements: [
-			{
-				debug: object.debug,
-				identity: object.identity,
-				localPlacement: object.localPlacement,
-				source: object.source,
-				sourceIndex: object.sourceIndex,
-				sourceScale: object.sourceScale,
-			},
-		],
-		surfaces: [],
-		visibleEnvCellIds: [],
 	};
 }
 
@@ -1340,32 +1177,6 @@ function createBakeInput(
 	return {
 		...input,
 		texturePlacementSnapshot: createTexturePlacementSnapshotForInput(input),
-	};
-}
-
-function createTexturePlacementSnapshot(
-	placements: readonly (readonly [string, string])[],
-): ObjectVisualTexturePlacementSnapshot {
-	const itemIdsByTextureUseId = new Map(
-		placements.map(([textureUseId], index) => [textureUseId, index]),
-	);
-	return {
-		itemIdsByTextureUseId,
-		placementsByItemId: new Map(
-			placements.map(([textureUseId, pageId], index) => [
-				index,
-				{
-					height: 64,
-					itemId: index,
-					pageId,
-					purpose: "object-base-color" as const,
-					rect: [0, 0, 64, 64] as const,
-					textureRefId: `texture-ref:${pageId}`,
-					textureUseId,
-					width: 64,
-				},
-			]),
-		),
 	};
 }
 
@@ -1688,13 +1499,6 @@ function createPartPositions(triangleCount: number): Float32Array {
 	}
 
 	return positions;
-}
-
-function createBounds(): StaticBounds {
-	return {
-		max: { x: 1, y: 1, z: 1 },
-		min: { x: 0, y: 0, z: 0 },
-	};
 }
 
 function createPlacement(

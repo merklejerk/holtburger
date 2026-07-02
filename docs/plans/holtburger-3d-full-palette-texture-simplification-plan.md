@@ -167,6 +167,12 @@ will otherwise drag range-strip behavior back in through the side door.
 - Completed the generated prepared palette texture cache. The host adapter now
   checks a bounded recipe-keyed cache before loading palettes and composing
   renderer-ready RGBA payloads.
+- Completed the frontend palette data-use cutover and pulled the texture upload
+  portion of Phase 5 into the same change. Renderer-facing material data uses
+  now emit `prepared-palette-texture-use` with a full `index8`/`index16` domain
+  and compact replacement triples. Texture staging requests
+  `prepared-palette-texture/` binary payloads and consumes host-composed RGBA
+  bytes instead of loading `palette/` payloads and composing in TypeScript.
 
 ## Decisions And Course Corrections
 
@@ -188,6 +194,17 @@ will otherwise drag range-strip behavior back in through the side door.
 - Prepared palette texture caching is intentionally separate from
   `ContentDecodeCache`. The cache key is the normalized recipe; the cached value
   is final RGBA pixels, dimensions, and content hash.
+- Phase 4 and the host-fetch portion of Phase 5 are intentionally combined. A
+  pure data-use rename would have preserved the old browser composition path for
+  another phase, which would violate the clean-cutover north star and keep tests
+  defending range-strip uploads.
+- Setup/authored palette view ranges remain in source facts as replacement
+  instructions. They are not palette texture use ranges and should continue to
+  be named and reviewed as replacement recipe inputs.
+- `object-visual-baker.ts` now normalizes raw `null` material variant
+  signatures to the canonical `base` signature when resolving material
+  bindings. This was exposed by the palette cutover tests and fixes a real
+  binding mismatch instead of papering over the fixture.
 
 ## Debt And Spicy Bits
 
@@ -212,6 +229,12 @@ will otherwise drag range-strip behavior back in through the side door.
   loads. This avoids blocking the cache mutex across awaits. If measurement says
   this matters, add an in-flight shared future map beside the cache rather than
   moving generated payloads into `ContentDecodeCache`.
+- `paletteFirstIndex` still exists as a temporary zero-valued material/shader
+  field until Phase 6 removes renderer range metadata. This is intentionally
+  quarantined; producers no longer compute it from palette texture ranges.
+- Full `npm run lint:ts` still fails on unrelated unused-symbol debt in static
+  coordinator, env-cell baker, and static object job baker files. The current
+  touched-file ESLint set is clean.
 
 ## Implementation Order
 

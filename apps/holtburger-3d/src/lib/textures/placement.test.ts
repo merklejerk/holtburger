@@ -32,7 +32,7 @@ describe("texture placement vocabulary bridge", () => {
 		).toBe(expectedPurpose);
 	});
 
-	it("classifies palette uses by domain while preserving palette range identity", () => {
+	it("classifies prepared palette uses by domain", () => {
 		const dataUse = createPaletteDataUse();
 
 		expect(classifyTextureUsagePurpose(dataUse, "outdoor-buildings")).toBe(
@@ -228,17 +228,17 @@ describe("texture placement vocabulary bridge", () => {
 		expect(runtimeAuthoredBucket).not.toBe(staticAuthoredBucket);
 	});
 
-	it("preserves current palette and subpalette identity in the placement source", () => {
+	it("preserves prepared palette recipe identity in the placement source", () => {
 		const dataUse = createPaletteDataUse();
 		const textureUse = createStaticTextureUse({
 			domain: "outdoor-buildings",
 			source: dataUse,
-			textureUseId: "building:palette:04000010:first=32:count=64",
+			textureUseId: "building:palette:04000010:domain=index8",
 		});
 
 		const intent = createStaticTexturePlacementIntent(textureUse);
 
-		expect(intent.itemId).toBe("building:palette:04000010:first=32:count=64");
+		expect(intent.itemId).toBe("building:palette:04000010:domain=index8");
 		expect(intent.source).toMatchObject({
 			kind: "material-texture-data-use",
 			samplingPolicy: {
@@ -247,17 +247,16 @@ describe("texture placement vocabulary bridge", () => {
 			},
 		});
 		expect(intent.source.dataUse).toBe(dataUse);
-		if (intent.source.dataUse.kind !== "palette-texture-use") {
-			throw new Error("Expected palette texture use.");
+		if (intent.source.dataUse.kind !== "prepared-palette-texture-use") {
+			throw new Error("Expected prepared palette texture use.");
 		}
 		expect(intent.source.dataUse).toMatchObject({
-			firstIndex: 32,
-			indexCount: 64,
+			domain: "index8",
 			palette: { kind: "palette", paletteId: 0x04000010 },
-			subPalettes: [
+			replacements: [
 				{
-					firstIndex: 48,
-					indexCount: 16,
+					count: 16,
+					offset: 48,
 					palette: { kind: "palette", paletteId: 0x04000020 },
 				},
 			],
@@ -319,17 +318,16 @@ function createPreparedDataUse(
 
 function createPaletteDataUse(): MaterialTextureDataUseIdentity {
 	return {
-		firstIndex: 32,
-		indexCount: 64,
-		kind: "palette-texture-use",
+		domain: "index8",
+		kind: "prepared-palette-texture-use",
 		palette: {
 			kind: "palette",
 			paletteId: 0x04000010,
 		},
-		subPalettes: [
+		replacements: [
 			{
-				firstIndex: 48,
-				indexCount: 16,
+				count: 16,
+				offset: 48,
 				palette: {
 					kind: "palette",
 					paletteId: 0x04000020,

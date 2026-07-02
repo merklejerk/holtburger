@@ -464,7 +464,7 @@ function createMaterialRecipe(
 		indexedClipThreshold: plan.alphaPolicy.indexedClipThreshold,
 		materialColor: plan.color,
 		materialEmissiveColor: plan.emissiveColor,
-		paletteFirstIndex: getPaletteFirstIndex(plan.textureRoles),
+		paletteFirstIndex: getPaletteFirstIndex(),
 		pass: plan.pass,
 		primaryTextureWrapMode: spec.textureWrapMode,
 		renderState: createStaticMaterialRenderState(plan.blend),
@@ -596,8 +596,6 @@ function createTextureRecipe(
 				dataUse: role.dataUse,
 				wrapMode,
 				source: {
-					firstIndex: role.dataUse.firstIndex,
-					indexCount: role.dataUse.indexCount,
 					kind: "palette" as const,
 					paletteId: role.palette.paletteId,
 				},
@@ -713,12 +711,12 @@ function createTextureRecipeKey(
 	dataUse: MaterialTextureDataUseIdentity,
 	wrapMode: "clamp" | "repeat",
 ): string {
-	if (dataUse.kind === "palette-texture-use") {
+	if (dataUse.kind === "prepared-palette-texture-use") {
 		return [
 			"palette",
 			formatHex32(dataUse.palette.paletteId),
-			`first:${dataUse.firstIndex}`,
-			`count:${dataUse.indexCount}`,
+			`domain:${dataUse.domain}`,
+			createPreparedPaletteReplacementsKey(dataUse.replacements),
 			`wrap:${wrapMode}`,
 		].join(":");
 	}
@@ -727,6 +725,25 @@ function createTextureRecipeKey(
 		formatHex32(dataUse.renderSurface.renderSurfaceId),
 		dataUse.usage,
 		`wrap:${wrapMode}`,
+	].join(":");
+}
+
+function createPreparedPaletteReplacementsKey(
+	replacements: readonly {
+		readonly palette: { readonly paletteId: number };
+		readonly offset: number;
+		readonly count: number;
+	}[],
+): string {
+	if (replacements.length === 0) {
+		return "repl:none";
+	}
+	return [
+		"repl",
+		...replacements.map(
+			(replacement) =>
+				`${formatHex32(replacement.palette.paletteId)}@${replacement.offset}+${replacement.count}`,
+		),
 	].join(":");
 }
 
@@ -764,10 +781,8 @@ function requireTextureRole<
 	return found;
 }
 
-function getPaletteFirstIndex(
-	roles: readonly ObjectVisualMaterialTextureUseRole[],
-): number {
-	return findTextureRole(roles, "palette-rgba")?.dataUse.firstIndex ?? 0;
+function getPaletteFirstIndex(): number {
+	return 0;
 }
 
 class MaterialSlotIndex {

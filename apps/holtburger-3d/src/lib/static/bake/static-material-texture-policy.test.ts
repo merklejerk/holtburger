@@ -146,14 +146,13 @@ function createPreparedTextureUse(
 
 function createPaletteTextureUse(): MaterialTextureDataUseIdentity {
 	return {
-		firstIndex: 0,
-		indexCount: 256,
-		kind: "palette-texture-use",
+		domain: "index8",
+		kind: "prepared-palette-texture-use",
 		palette: {
 			kind: "palette",
 			paletteId: 0x0400007e,
 		},
-		subPalettes: [],
+		replacements: [],
 		usage: "palette-rgba",
 	};
 }

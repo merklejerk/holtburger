@@ -40,7 +40,7 @@ export function createRuntimeTexturePagePolicy(
 			}
 		: null;
 
-	if (source.kind === "palette-texture-use") {
+	if (source.kind === "prepared-palette-texture-use") {
 		return {
 			sampleClass: "palette-rgba",
 			wrapS: "clamp-to-edge",

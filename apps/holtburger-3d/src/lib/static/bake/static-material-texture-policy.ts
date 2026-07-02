@@ -14,12 +14,12 @@ export type StaticMaterialTextureWrapMode = "clamp" | "repeat";
 export function createMaterialTextureDataUseKey(
 	dataUse: MaterialTextureDataUseIdentity,
 ): string {
-	if (dataUse.kind === "palette-texture-use") {
+	if (dataUse.kind === "prepared-palette-texture-use") {
 		return [
 			dataUse.kind,
 			formatHex32(dataUse.palette.paletteId),
-			`range:${dataUse.firstIndex}-${dataUse.indexCount}`,
-			createPaletteTextureSubPalettesKey(dataUse.subPalettes ?? []),
+			`domain:${dataUse.domain}`,
+			createPreparedPaletteReplacementsKey(dataUse.replacements),
 			dataUse.usage,
 		].join(":");
 	}
@@ -124,7 +124,7 @@ function shouldRepeatStaticMaterialTextureUse(options: {
 	readonly dataUse: MaterialTextureDataUseIdentity;
 	readonly wrapMode: StaticMaterialTextureWrapMode;
 }): boolean {
-	if (options.dataUse.kind === "palette-texture-use") {
+	if (options.dataUse.kind === "prepared-palette-texture-use") {
 		return false;
 	}
 
@@ -152,20 +152,20 @@ function createStaticMaterialTexturePlacementSource(
 	};
 }
 
-function createPaletteTextureSubPalettesKey(
-	subPalettes: Extract<
+function createPreparedPaletteReplacementsKey(
+	replacements: Extract<
 		MaterialTextureDataUseIdentity,
-		{ readonly kind: "palette-texture-use" }
-	>["subPalettes"],
+		{ readonly kind: "prepared-palette-texture-use" }
+	>["replacements"],
 ): string {
-	if (subPalettes.length === 0) {
-		return "sub:none";
+	if (replacements.length === 0) {
+		return "repl:none";
 	}
 	return [
-		"sub",
-		...subPalettes.map(
-			(subPalette) =>
-				`${formatHex32(subPalette.palette.paletteId)}@${subPalette.firstIndex}+${subPalette.indexCount}`,
+		"repl",
+		...replacements.map(
+			(replacement) =>
+				`${formatHex32(replacement.palette.paletteId)}@${replacement.offset}+${replacement.count}`,
 		),
 	].join(":");
 }

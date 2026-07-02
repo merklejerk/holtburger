@@ -41,7 +41,6 @@ const SURFACE_TYPE_ADDITIVE = 0x10000;
 const SURFACE_TYPE_DETAIL = 0x20000;
 const PIXEL_FORMAT_P8 = 0x29;
 const PIXEL_FORMAT_INDEX16 = 0x65;
-const DEFAULT_PALETTE_FIRST_INDEX = 0;
 const DIRECT_CLIP_MAP_ALPHA_TEST = 200 / BYTE_MAX;
 const INDEXED_CLIP_MAP_ALPHA_TEST = 100 / BYTE_MAX;
 const INDEXED_CLIP_MAP_INDEX_THRESHOLD = 8;
@@ -66,7 +65,7 @@ type StaticObjectMaterialPass =
 
 type PaletteDataUseIdentity = Extract<
 	MaterialTextureDataUseIdentity,
-	{ readonly kind: "palette-texture-use" }
+	{ readonly kind: "prepared-palette-texture-use" }
 >;
 
 export interface ObjectVisualMaterialPipelinePlan {
@@ -408,7 +407,7 @@ export function classifyObjectVisualMaterial(
 						texture: context.material.source.texture,
 					}),
 				];
-		const paletteView = resolvePaletteView(
+		const paletteDataUse = resolvePaletteView(
 			palette,
 			paletteSource.colorCount,
 			context.paletteViews ?? [],
@@ -444,15 +443,8 @@ export function classifyObjectVisualMaterial(
 					width: renderSurfaceRef.width,
 				},
 				{
-					dataUse: {
-						firstIndex: paletteView.firstIndex,
-						indexCount: paletteView.indexCount,
-						kind: "palette-texture-use",
-						palette: paletteView.palette,
-						subPalettes: paletteView.subPalettes,
-						usage: "palette-rgba",
-					},
-					palette: paletteView.palette,
+					dataUse: paletteDataUse,
+					palette: paletteDataUse.palette,
 					role: "palette-rgba",
 				},
 			],
@@ -531,11 +523,14 @@ function resolvePaletteView(
 	paletteViews: readonly ObjectVisualPaletteViewFacts[],
 ): PaletteDataUseIdentity {
 	return {
-		firstIndex: DEFAULT_PALETTE_FIRST_INDEX,
-		indexCount: colorCount,
-		kind: "palette-texture-use",
+		domain: colorCount <= 256 ? "index8" : "index16",
+		kind: "prepared-palette-texture-use",
 		palette: basePalette,
-		subPalettes: sortPaletteViews(paletteViews),
+		replacements: sortPaletteViews(paletteViews).map((view) => ({
+			count: view.indexCount,
+			offset: view.firstIndex,
+			palette: view.palette,
+		})),
 		usage: "palette-rgba",
 	};
 }

@@ -1,7 +1,10 @@
 import { createHostAssetKey } from "../keys";
 import type { HostAssetKey, PreparedAsset } from "../contracts";
-import type { PreparedTexturePayloadDto } from "../../../lib/host/contracts";
-import { palettePayloadDtoSchema } from "../../../lib/host/contracts";
+import type {
+	PreparedPaletteTexturePayloadDto,
+	PreparedTexturePayloadDto,
+} from "../../../lib/host/contracts";
+import { preparedPaletteTexturePayloadDtoSchema } from "../../../lib/host/contracts";
 import type {
 	MaterialTextureDataUseIdentity,
 	PaletteIdentity,
@@ -41,9 +44,8 @@ export interface DirectPaletteTextureSource {
 	readonly usage: "palette-rgba";
 	readonly outputFormat: "rgba8";
 	readonly width: number;
-	readonly height: 1;
-	readonly firstIndex: number;
-	readonly indexCount: number;
+	readonly height: number;
+	readonly contentHash: string;
 	readonly pixels: Uint8Array;
 }
 
@@ -66,6 +68,27 @@ export function createPreparedTextureHostKey(
 	return createHostAssetKey(
 		"prepared-texture",
 		`${source.renderSurface.renderSurfaceId.toString(16).padStart(8, "0")}?${query.toString()}`,
+	);
+}
+
+export function createPreparedPaletteTextureHostKey(
+	source: Extract<
+		MaterialTextureDataUseIdentity,
+		{ readonly kind: "prepared-palette-texture-use" }
+	>,
+): HostAssetKey {
+	const replacements =
+		source.replacements.length === 0
+			? ""
+			: `&repl=${source.replacements
+					.map(
+						(replacement) =>
+							`${formatPaletteId(replacement.palette.paletteId)}:${replacement.offset}:${replacement.count}`,
+					)
+					.join(",")}`;
+	return createHostAssetKey(
+		"prepared-palette-texture",
+		`${formatPaletteId(source.palette.paletteId)}?domain=${source.domain}${replacements}`,
 	);
 }
 
@@ -162,7 +185,7 @@ export function prepareDirectMaterialTextureSource(
 	prepared: PreparedAsset,
 	expectedUse: MaterialTextureDataUseIdentity,
 ): DirectMaterialTextureSource {
-	if (expectedUse.kind === "palette-texture-use") {
+	if (expectedUse.kind === "prepared-palette-texture-use") {
 		return prepareDirectPaletteTextureSource(prepared, expectedUse);
 	}
 
@@ -183,81 +206,49 @@ export function prepareDirectPaletteTextureSource(
 	prepared: PreparedAsset,
 	expectedUse: Extract<
 		MaterialTextureDataUseIdentity,
-		{ readonly kind: "palette-texture-use" }
+		{ readonly kind: "prepared-palette-texture-use" }
 	>,
-	subPaletteAssets: readonly PreparedAsset[] = [],
 ): DirectPaletteTextureSource {
-	const payload = palettePayloadDtoSchema.parse(prepared.payload);
+	const payload = preparedPaletteTexturePayloadDtoSchema.parse(
+		prepared.payload,
+	);
 	const expectedPalette = expectedUse.palette.paletteId;
-	if (payload.paletteId !== expectedPalette) {
+	if (payload.basePaletteId !== expectedPalette) {
 		throw new Error(
-			`Palette payload ${formatPaletteId(payload.paletteId)} does not match requested palette ${formatPaletteId(expectedPalette)}.`,
+			`Prepared palette texture ${formatPaletteId(payload.basePaletteId)} does not match requested palette ${formatPaletteId(expectedPalette)}.`,
 		);
 	}
-
-	const colorsArgb = new Uint32Array(payload.colorsArgb);
-	for (const subPalette of expectedUse.subPalettes ?? []) {
-		const subPaletteAsset = subPaletteAssets.find((asset) => {
-			const candidate = palettePayloadDtoSchema.safeParse(asset.payload);
-			return (
-				candidate.success &&
-				candidate.data.paletteId === subPalette.palette.paletteId
-			);
-		});
-		if (!subPaletteAsset) {
-			throw new Error(
-				`Palette ${formatPaletteId(expectedPalette)} subpalette ${formatPaletteId(subPalette.palette.paletteId)} was not prepared.`,
-			);
-		}
-		const subPalettePayload = palettePayloadDtoSchema.parse(
-			subPaletteAsset.payload,
-		);
-		const subPaletteLastIndexExclusive =
-			subPalette.firstIndex + subPalette.indexCount;
-		if (
-			subPalette.firstIndex < 0 ||
-			subPalette.indexCount <= 0 ||
-			subPaletteLastIndexExclusive > colorsArgb.length ||
-			subPaletteLastIndexExclusive > subPalettePayload.colorsArgb.length
-		) {
-			throw new Error(
-				`Palette ${formatPaletteId(expectedPalette)} subpalette ${formatPaletteId(subPalette.palette.paletteId)} range ${subPalette.firstIndex}+${subPalette.indexCount} is invalid for derived palette composition.`,
-			);
-		}
-		colorsArgb.set(
-			subPalettePayload.colorsArgb.subarray(
-				subPalette.firstIndex,
-				subPaletteLastIndexExclusive,
-			),
-			subPalette.firstIndex,
+	if (payload.domain !== expectedUse.domain) {
+		throw new Error(
+			`Prepared palette texture ${formatPaletteId(expectedPalette)} domain ${payload.domain} does not match requested ${expectedUse.domain}.`,
 		);
 	}
-
-	const firstIndex = expectedUse.firstIndex;
-	const indexCount = expectedUse.indexCount;
-	const lastIndexExclusive = firstIndex + indexCount;
+	const expectedDimension = expectedUse.domain === "index8" ? 16 : 256;
 	if (
-		firstIndex < 0 ||
-		indexCount <= 0 ||
-		lastIndexExclusive > payload.colorsArgb.length
+		payload.width !== expectedDimension ||
+		payload.height !== expectedDimension
 	) {
 		throw new Error(
-			`Palette ${formatPaletteId(expectedPalette)} range ${firstIndex}+${indexCount} exceeds ${payload.colorsArgb.length} colors.`,
+			`Prepared palette texture ${formatPaletteId(expectedPalette)} expected ${expectedDimension}x${expectedDimension}, got ${payload.width}x${payload.height}.`,
 		);
 	}
+	const expectedByteLength = payload.width * payload.height * 4;
+	if (payload.pixels.byteLength !== expectedByteLength) {
+		throw new Error(
+			`Prepared palette texture ${formatPaletteId(expectedPalette)} expected ${expectedByteLength} rgba8 bytes, got ${payload.pixels.byteLength}.`,
+		);
+	}
+	assertSamePreparedPaletteReplacements(expectedUse, payload);
 
 	return {
-		firstIndex,
-		height: 1,
-		indexCount,
+		contentHash: payload.contentHash,
+		height: payload.height,
 		kind: "direct-palette-texture-source",
 		outputFormat: "rgba8",
 		paletteId: expectedPalette,
-		pixels: paletteArgbToRgbaBytes(
-			colorsArgb.subarray(firstIndex, lastIndexExclusive),
-		),
+		pixels: payload.pixels,
 		usage: "palette-rgba",
-		width: indexCount,
+		width: payload.width,
 	};
 }
 
@@ -374,19 +365,33 @@ function isPreparedRgbaTextureUse(
 	);
 }
 
-function formatPaletteId(paletteId: PaletteIdentity["paletteId"]): string {
-	return paletteId.toString(16).padStart(8, "0");
+function assertSamePreparedPaletteReplacements(
+	expectedUse: Extract<
+		MaterialTextureDataUseIdentity,
+		{ readonly kind: "prepared-palette-texture-use" }
+	>,
+	payload: PreparedPaletteTexturePayloadDto,
+): void {
+	if (expectedUse.replacements.length !== payload.replacements.length) {
+		throw new Error(
+			`Prepared palette texture ${formatPaletteId(expectedUse.palette.paletteId)} replacement count ${payload.replacements.length} does not match requested ${expectedUse.replacements.length}.`,
+		);
+	}
+	for (const [index, expected] of expectedUse.replacements.entries()) {
+		const actual = payload.replacements[index];
+		if (
+			!actual ||
+			actual.paletteId !== expected.palette.paletteId ||
+			actual.offset !== expected.offset ||
+			actual.count !== expected.count
+		) {
+			throw new Error(
+				`Prepared palette texture ${formatPaletteId(expectedUse.palette.paletteId)} replacement ${index} does not match requested recipe.`,
+			);
+		}
+	}
 }
 
-function paletteArgbToRgbaBytes(colorsArgb: Uint32Array): Uint8Array {
-	const pixels = new Uint8Array(colorsArgb.length * 4);
-	for (let index = 0; index < colorsArgb.length; index += 1) {
-		const argb = colorsArgb[index] ?? 0;
-		const offset = index * 4;
-		pixels[offset] = (argb >>> 16) & 0xff;
-		pixels[offset + 1] = (argb >>> 8) & 0xff;
-		pixels[offset + 2] = argb & 0xff;
-		pixels[offset + 3] = (argb >>> 24) & 0xff;
-	}
-	return pixels;
+function formatPaletteId(paletteId: PaletteIdentity["paletteId"]): string {
+	return paletteId.toString(16).padStart(8, "0");
 }

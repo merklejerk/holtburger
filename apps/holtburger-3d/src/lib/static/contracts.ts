@@ -455,18 +455,25 @@ export interface PreparedIndexRenderSurfaceTextureUseIdentity extends PreparedRe
 	readonly usage: PreparedIndexRenderSurfaceTextureUsage;
 }
 
-interface PaletteTextureUseIdentity {
-	readonly kind: "palette-texture-use";
+export type PreparedPaletteTextureDomain = "index8" | "index16";
+
+export interface PreparedPaletteReplacementIdentity {
 	readonly palette: PaletteIdentity;
+	readonly offset: number;
+	readonly count: number;
+}
+
+interface PreparedPaletteTextureUseIdentity {
+	readonly kind: "prepared-palette-texture-use";
+	readonly palette: PaletteIdentity;
+	readonly domain: PreparedPaletteTextureDomain;
+	readonly replacements: readonly PreparedPaletteReplacementIdentity[];
 	readonly usage: "palette-rgba";
-	readonly firstIndex: number;
-	readonly indexCount: number;
-	readonly subPalettes: readonly StaticObjectPaletteViewFacts[];
 }
 
 export type MaterialTextureDataUseIdentity =
 	| PreparedRenderSurfaceTextureUseIdentity
-	| PaletteTextureUseIdentity;
+	| PreparedPaletteTextureUseIdentity;
 
 type StaticTextureUseIdentity =
 	| SurfaceTextureIdentity

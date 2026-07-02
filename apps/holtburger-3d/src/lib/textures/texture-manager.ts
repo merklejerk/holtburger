@@ -1,8 +1,7 @@
 import type { AssetService } from "../assets/contracts";
-import { createHostAssetKey } from "../assets/keys";
 import {
+	createPreparedPaletteTextureHostKey,
 	createPreparedTextureHostKey,
-	prepareDirectPaletteTextureSource,
 	prepareDirectMaterialTextureSource,
 } from "../assets/preparation/prepared-texture-source";
 import type { DirectMaterialTextureSource } from "../assets/preparation/prepared-texture-source";
@@ -726,22 +725,7 @@ export class TextureManager {
 		const prepared = await this.#assetService.requestPreparedAsset(
 			createMaterialTextureHostKey(source),
 		);
-		if (source.kind !== "palette-texture-use") {
-			return prepareDirectMaterialTextureSource(prepared, source);
-		}
-
-		const subPaletteAssets = await Promise.all(
-			(source.subPalettes ?? []).map((subPalette) =>
-				this.#assetService.requestPreparedAsset(
-					createHostAssetKey("palette", subPalette.palette.paletteId),
-				),
-			),
-		);
-		return prepareDirectPaletteTextureSource(
-			prepared,
-			source,
-			subPaletteAssets,
-		);
+		return prepareDirectMaterialTextureSource(prepared, source);
 	}
 
 	async #packPendingTexturePlacements(
@@ -1419,14 +1403,13 @@ function isSameMaterialTextureDataUse(
 	}
 
 	if (
-		left.kind === "palette-texture-use" &&
-		right.kind === "palette-texture-use"
+		left.kind === "prepared-palette-texture-use" &&
+		right.kind === "prepared-palette-texture-use"
 	) {
 		return (
 			left.palette.paletteId === right.palette.paletteId &&
-			left.firstIndex === right.firstIndex &&
-			left.indexCount === right.indexCount &&
-			isSamePaletteTextureSubPalettes(left.subPalettes, right.subPalettes)
+			left.domain === right.domain &&
+			isSamePreparedPaletteReplacements(left.replacements, right.replacements)
 		);
 	}
 
@@ -1443,8 +1426,8 @@ function isSameMaterialTextureDataUse(
 }
 
 function createMaterialTextureHostKey(source: MaterialTextureDataUseIdentity) {
-	if (source.kind === "palette-texture-use") {
-		return createHostAssetKey("palette", source.palette.paletteId);
+	if (source.kind === "prepared-palette-texture-use") {
+		return createPreparedPaletteTextureHostKey(source);
 	}
 
 	return createPreparedTextureHostKey(source);
@@ -1485,12 +1468,12 @@ function createTexturePackingPixelSource(
 function createMaterialTextureDataUseKey(
 	source: MaterialTextureDataUseIdentity,
 ): string {
-	if (source.kind === "palette-texture-use") {
+	if (source.kind === "prepared-palette-texture-use") {
 		return [
 			source.kind,
 			source.palette.paletteId.toString(16).padStart(8, "0"),
-			`range:${source.firstIndex}-${source.indexCount}`,
-			createPaletteTextureSubPalettesKey(source.subPalettes),
+			`domain:${source.domain}`,
+			createPreparedPaletteReplacementsKey(source.replacements),
 			source.usage,
 		].join(":");
 	}
@@ -1502,52 +1485,53 @@ function createMaterialTextureDataUseKey(
 	].join(":");
 }
 
-function isSamePaletteTextureSubPalettes(
+function isSamePreparedPaletteReplacements(
 	left:
 		| Extract<
 				MaterialTextureDataUseIdentity,
-				{ readonly kind: "palette-texture-use" }
-		  >["subPalettes"]
+				{ readonly kind: "prepared-palette-texture-use" }
+		  >["replacements"]
 		| undefined,
 	right:
 		| Extract<
 				MaterialTextureDataUseIdentity,
-				{ readonly kind: "palette-texture-use" }
-		  >["subPalettes"]
+				{ readonly kind: "prepared-palette-texture-use" }
+		  >["replacements"]
 		| undefined,
 ): boolean {
-	const leftSubPalettes = left ?? [];
-	const rightSubPalettes = right ?? [];
-	if (leftSubPalettes.length !== rightSubPalettes.length) {
+	const leftReplacements = left ?? [];
+	const rightReplacements = right ?? [];
+	if (leftReplacements.length !== rightReplacements.length) {
 		return false;
 	}
-	return leftSubPalettes.every((leftPalette, index) => {
-		const rightPalette = rightSubPalettes[index];
+	return leftReplacements.every((leftReplacement, index) => {
+		const rightReplacement = rightReplacements[index];
 		return (
-			rightPalette !== undefined &&
-			leftPalette.palette.paletteId === rightPalette.palette.paletteId &&
-			leftPalette.firstIndex === rightPalette.firstIndex &&
-			leftPalette.indexCount === rightPalette.indexCount
+			rightReplacement !== undefined &&
+			leftReplacement.palette.paletteId ===
+				rightReplacement.palette.paletteId &&
+			leftReplacement.offset === rightReplacement.offset &&
+			leftReplacement.count === rightReplacement.count
 		);
 	});
 }
 
-function createPaletteTextureSubPalettesKey(
-	subPalettes:
+function createPreparedPaletteReplacementsKey(
+	replacements:
 		| Extract<
 				MaterialTextureDataUseIdentity,
-				{ readonly kind: "palette-texture-use" }
-		  >["subPalettes"]
+				{ readonly kind: "prepared-palette-texture-use" }
+		  >["replacements"]
 		| undefined,
 ): string {
-	if (!subPalettes || subPalettes.length === 0) {
-		return "sub:none";
+	if (!replacements || replacements.length === 0) {
+		return "repl:none";
 	}
 	return [
-		"sub",
-		...subPalettes.map(
-			(subPalette) =>
-				`${subPalette.palette.paletteId.toString(16).padStart(8, "0")}@${subPalette.firstIndex}+${subPalette.indexCount}`,
+		"repl",
+		...replacements.map(
+			(replacement) =>
+				`${replacement.palette.paletteId.toString(16).padStart(8, "0")}@${replacement.offset}+${replacement.count}`,
 		),
 	].join(":");
 }
@@ -2251,7 +2235,7 @@ class ObjectMaterialOwnerRolePageSlots {
 function createObjectMaterialTextureRolePageKind(
 	source: MaterialTextureDataUseIdentity,
 ): ObjectMaterialTextureRolePageKind {
-	if (source.kind === "palette-texture-use") {
+	if (source.kind === "prepared-palette-texture-use") {
 		return "object-palette";
 	}
 	if (source.usage === "index8" || source.usage === "index16") {

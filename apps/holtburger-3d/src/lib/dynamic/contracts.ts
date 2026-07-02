@@ -692,6 +692,7 @@ export type DynamicEntityRequiredResource =
 	| "palette"
 	| "render-surface"
 	| "prepared-texture"
+	| "prepared-palette-texture"
 	| "motion-table"
 	| "sound-table"
 	| "physics-script"

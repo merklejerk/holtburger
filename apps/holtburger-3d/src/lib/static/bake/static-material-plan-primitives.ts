@@ -111,11 +111,12 @@ function createTextureRoleDataUseSignature(
 ): string {
 	const detailSuffix =
 		role.role === "detail-overlay" ? `:tiling=${role.tiling}` : "";
-	if (role.dataUse.kind === "palette-texture-use") {
+	if (role.dataUse.kind === "prepared-palette-texture-use") {
 		return (
 			[
 				formatHex32(role.dataUse.palette.paletteId),
-				`${role.dataUse.firstIndex}-${role.dataUse.indexCount}`,
+				role.dataUse.domain,
+				createPreparedPaletteReplacementsSignature(role.dataUse.replacements),
 				role.dataUse.usage,
 			].join(":") + detailSuffix
 		);
@@ -127,6 +128,25 @@ function createTextureRoleDataUseSignature(
 			role.dataUse.usage,
 		].join(":") + detailSuffix
 	);
+}
+
+function createPreparedPaletteReplacementsSignature(
+	replacements: readonly {
+		readonly palette: { readonly paletteId: number };
+		readonly offset: number;
+		readonly count: number;
+	}[],
+): string {
+	if (replacements.length === 0) {
+		return "repl:none";
+	}
+	return [
+		"repl",
+		...replacements.map(
+			(replacement) =>
+				`${formatHex32(replacement.palette.paletteId)}@${replacement.offset}+${replacement.count}`,
+		),
+	].join(":");
 }
 
 function formatHex32(value: number): string {

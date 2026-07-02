@@ -1,19 +1,14 @@
 import type {
 	MaterialTextureDataUseIdentity,
-	StaticBakeTextureUse,
-	StaticDomain,
 	StaticMaterialTableEntry,
 	StaticObjectRenderState,
-	StaticTextureUseOwner,
 } from "../contracts";
-import { uniqueSortedStaticTextureUseOwners } from "../contracts";
 import type {
 	ObjectVisualMaterialPlan,
 	ObjectVisualMaterialTextureUseRole,
 } from "../../visual/object-visual-material-planner";
 import {
 	createMaterialTextureDataUseKey,
-	createStaticMaterialTextureSamplingPolicy,
 	type StaticMaterialTextureWrapMode,
 } from "./static-material-texture-policy";
 
@@ -22,12 +17,6 @@ export interface StaticMaterialTextureUseIdFactory {
 		dataUse: MaterialTextureDataUseIdentity,
 		wrapMode: StaticMaterialTextureWrapMode,
 	): string;
-}
-
-export interface StaticMaterialTextureUseSpec {
-	readonly owners: readonly StaticTextureUseOwner[];
-	readonly textureDataUses: readonly MaterialTextureDataUseIdentity[];
-	readonly textureWrapMode: StaticMaterialTextureWrapMode;
 }
 
 export function createStaticMaterialEntryKey(options: {
@@ -160,56 +149,6 @@ export function createStaticMaterialRenderState(
 		depthTest: true,
 		depthWrite: blend.depthWrite,
 	};
-}
-
-export function createStaticMaterialTextureUses(options: {
-	readonly createTextureUseId: StaticMaterialTextureUseIdFactory;
-	readonly domain: StaticDomain;
-	readonly isStageableDataUse: (
-		dataUse: MaterialTextureDataUseIdentity,
-	) => boolean;
-	readonly textureUseSpecs: readonly StaticMaterialTextureUseSpec[];
-}): readonly StaticBakeTextureUse[] {
-	const textureUsesById = new Map<string, StaticBakeTextureUse>();
-
-	for (const spec of options.textureUseSpecs) {
-		for (const dataUse of spec.textureDataUses) {
-			if (!options.isStageableDataUse(dataUse)) {
-				continue;
-			}
-
-			const textureUseId = options.createTextureUseId(
-				dataUse,
-				spec.textureWrapMode,
-			);
-			const existing = textureUsesById.get(textureUseId);
-			if (existing) {
-				textureUsesById.set(textureUseId, {
-					...existing,
-					owners: uniqueSortedStaticTextureUseOwners([
-						...existing.owners,
-						...spec.owners,
-					]),
-				});
-				continue;
-			}
-
-			textureUsesById.set(textureUseId, {
-				domain: options.domain,
-				owners: uniqueSortedStaticTextureUseOwners(spec.owners),
-				samplingPolicy: createStaticMaterialTextureSamplingPolicy({
-					dataUse,
-					wrapMode: spec.textureWrapMode,
-				}),
-				source: dataUse,
-				textureUseId,
-			});
-		}
-	}
-
-	return [...textureUsesById.values()].sort((left, right) =>
-		left.textureUseId.localeCompare(right.textureUseId),
-	);
 }
 
 export function resolveStaticMaterialDetailTextureTiling(

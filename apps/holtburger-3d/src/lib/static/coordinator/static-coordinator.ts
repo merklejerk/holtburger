@@ -38,8 +38,6 @@ import type {
 } from "../contracts";
 import {
 	createEmptyObjectVisualInstallSet,
-	createObjectVisualInstallSet,
-	type ObjectVisualInstallSet,
 	type ObjectVisualRenderInstance,
 } from "../../visual/object-visual-install-set";
 import type { PreparedAssetReader } from "../../assets/contracts";
@@ -69,7 +67,6 @@ import type {
 	TexturePlacementIntent,
 	TexturePlacementSnapshot,
 } from "../../textures/placement";
-import { requireObjectVisualTexturePlacementSnapshot } from "../../textures/placement";
 
 const DEFAULT_STATIC_SOURCE_READY_COALESCE_DELAY_MS = 500;
 const STATIC_COORDINATOR_RECENT_DIAGNOSTICS_LIMIT = 20;
@@ -1451,13 +1448,6 @@ function toStaticBakeJobPayload(
 	};
 }
 
-function findPendingStaticSourceReadyItemResolverMs(
-	items: readonly PendingStaticSourceReadyItem[],
-	taskId: string,
-): number | null {
-	return items.find((item) => item.taskId === taskId)?.resolverMs ?? null;
-}
-
 function groupDynamicRecipesByOwnerId(
 	recipes: readonly StaticAuthoredDynamicRecipe[],
 ): ReadonlyMap<string, readonly DynamicEntityRecipe[]> {
@@ -1500,26 +1490,6 @@ function requireDynamicVisualTexturePlanningForRecipe(options: {
 		);
 	}
 	return planning;
-}
-
-function filterDynamicPlacementsForCurrentTasks(
-	pendingItems: readonly PendingStaticSourceReadyItem[],
-	currentTasks: readonly StaticBakeTask[],
-): readonly StaticAuthoredDynamicPlacementRecord[] {
-	const currentTaskIds = new Set(currentTasks.map((task) => task.taskId));
-	return pendingItems
-		.filter((item) => currentTaskIds.has(item.taskId))
-		.flatMap((item) => item.dynamicPlacements);
-}
-
-function filterDynamicRecipesForCurrentTasks(
-	pendingItems: readonly PendingStaticSourceReadyItem[],
-	currentTasks: readonly StaticBakeTask[],
-): readonly DynamicEntityRecipe[] {
-	const currentTaskIds = new Set(currentTasks.map((task) => task.taskId));
-	return pendingItems
-		.filter((item) => currentTaskIds.has(item.taskId))
-		.flatMap((item) => item.dynamicRecipes);
 }
 
 function createSourceRequestsForNewWork(
@@ -1841,14 +1811,6 @@ function compareStaticObjectBakeDiagnostics(
 		left.domain.localeCompare(right.domain) ||
 		left.landblockId - right.landblockId
 	);
-}
-
-function sumNullableNumbers(values: readonly (number | null)[]): number | null {
-	const present = values.filter((value): value is number => value !== null);
-	if (present.length === 0) {
-		return null;
-	}
-	return present.reduce((sum, value) => sum + value, 0);
 }
 
 function nowMs(): number {

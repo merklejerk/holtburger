@@ -50,10 +50,7 @@ import {
 	type StaticObjectBatchPartition,
 	type StaticObjectBatchTriangle,
 } from "./static-object-batch-partitioner";
-import {
-	isCurrentlyStageableStaticObjectDataUse,
-	isRenderableStaticObjectPartition,
-} from "./static-object-renderability";
+import { isRenderableStaticObjectPartition } from "./static-object-renderability";
 import { createObjectVisualResourceKeyString } from "../../../visual/object-visual-resource-key";
 import { createObjectVisualSourcePayload } from "./object-visual-source-payload";
 import {
@@ -722,10 +719,6 @@ function estimateObjectVisualResourceTypedArrayBytes(
 		resource.materialSlotIndices.byteLength +
 		resource.indices.byteLength
 	);
-}
-
-function sumNumbers(values: readonly number[]): number {
-	return values.reduce((sum, value) => sum + value, 0);
 }
 
 type GeneratedObjectVisualRenderInstanceCandidateEligibility =

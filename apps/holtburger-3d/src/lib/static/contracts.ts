@@ -455,9 +455,9 @@ export interface PreparedIndexRenderSurfaceTextureUseIdentity extends PreparedRe
 	readonly usage: PreparedIndexRenderSurfaceTextureUsage;
 }
 
-export type PreparedPaletteTextureDomain = "index8" | "index16";
+type PreparedPaletteTextureDomain = "index8" | "index16";
 
-export interface PreparedPaletteReplacementIdentity {
+interface PreparedPaletteReplacementIdentity {
 	readonly palette: PaletteIdentity;
 	readonly offset: number;
 	readonly count: number;

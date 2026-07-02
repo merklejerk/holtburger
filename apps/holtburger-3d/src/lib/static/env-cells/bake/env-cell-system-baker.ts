@@ -41,7 +41,6 @@ import {
 	createStaticMaterialTableEntry,
 	createStaticMaterialTextureRoleLayoutKey,
 	createStaticMaterialTextureRoleSchemaKey,
-	createStaticMaterialTextureUses,
 } from "../../bake/static-material-adapter";
 import {
 	createEnvCellCellStructureGeometryIdentity,
@@ -1003,62 +1002,6 @@ function compareStructuredInteriorTriangleCandidates(
 		left.triangle.firstVertex - right.triangle.firstVertex ||
 		left.materialEntryKey.localeCompare(right.materialEntryKey)
 	);
-}
-
-function createStructuredInteriorTextureUses(options: {
-	readonly drawUnits: readonly StructuredInteriorGeometryStaticDrawUnit[];
-	readonly materialPlansByEnvCellId: ReadonlyMap<
-		number,
-		StructuredInteriorCellMaterialPlan
-	>;
-	readonly task: StaticBakeTask;
-}): readonly StaticBakeTextureUse[] {
-	return createStaticMaterialTextureUses({
-		createTextureUseId: (dataUse, wrapMode) =>
-			createStructuredInteriorTextureUseId({
-				dataUse,
-				task: options.task,
-				wrapMode,
-			}),
-		domain: "env-cell-system",
-		isStageableDataUse: isCurrentlyStageableStaticObjectDataUse,
-		textureUseSpecs: options.drawUnits.flatMap((drawUnit) => {
-			const materialPlan = options.materialPlansByEnvCellId.get(
-				drawUnit.envCellId,
-			);
-			if (!materialPlan) {
-				return [];
-			}
-			const drawUnitTextureUseIds = new Set(drawUnit.textureUseIds);
-			return [...materialPlan.materialPlansBySurfaceId.values()].flatMap(
-				(plan) => {
-					const textureWrapMode =
-						resolveStructuredInteriorPlanTextureWrapMode(plan);
-					const textureDataUses = plan.textureRoles
-						.map((role) => role.dataUse)
-						.filter((dataUse) =>
-							drawUnitTextureUseIds.has(
-								createStructuredInteriorTextureUseId({
-									dataUse,
-									task: options.task,
-									wrapMode: textureWrapMode,
-								}),
-							),
-						);
-					if (textureDataUses.length === 0) {
-						return [];
-					}
-					return [
-						{
-							owners: [{ drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" }],
-							textureDataUses,
-							textureWrapMode,
-						},
-					];
-				},
-			);
-		}),
-	});
 }
 
 function requireObjectVisualPlacementItemId(options: {

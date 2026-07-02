@@ -1051,7 +1051,7 @@ describe("static coordinator", () => {
 		let nextInputIndex = 0;
 		expect(baker.pendingInputs).toHaveLength(1);
 		const observedTaskIds: string[] = [];
-		for (const item of completedTerrainWork) {
+		for (let index = 0; index < completedTerrainWork.length; index += 1) {
 			const { input, nextIndex } = nextDispatchedInput(
 				baker.pendingInputs,
 				nextInputIndex,
@@ -1550,7 +1550,7 @@ describe("static coordinator", () => {
 
 		let nextInputIndex = 0;
 		const observedTaskIds: string[] = [];
-		for (const _expectedWork of [firstWork, secondWork]) {
+		for (let index = 0; index < 2; index += 1) {
 			const { input, nextIndex } = nextDispatchedInput(
 				baker.pendingInputs,
 				nextInputIndex,
@@ -1786,7 +1786,7 @@ describe("static coordinator", () => {
 		});
 		const observedTaskIds: string[] = [];
 		let nextInputIndex = 0;
-		for (const _taskId of expectedTaskIds) {
+		for (let index = 0; index < expectedTaskIds.length; index += 1) {
 			const { input, nextIndex } = nextDispatchedInput(
 				baker.pendingInputs,
 				nextInputIndex,

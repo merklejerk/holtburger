@@ -27,9 +27,7 @@ import type {
 	StaticObjectRetainedTransparentPartitionReasonCounts,
 } from "../../contracts";
 import { uniqueSortedStaticTextureUseOwners } from "../../contracts";
-import type {
-	TextureResourceDependencies,
-} from "../../../textures/placement";
+import type { TextureResourceDependencies } from "../../../textures/placement";
 import { requireObjectVisualTexturePlacementSnapshot } from "../../../textures/placement";
 import { createLayerPeerRecordOwnerForStaticBakeTask } from "../../layer-owners";
 import {
@@ -40,9 +38,7 @@ import {
 	writeTexCoord,
 	writeTransformedPosition,
 } from "../../../math/ac-placement-transform";
-import {
-	createStaticMaterialTableEntry,
-} from "../../bake/static-material-adapter";
+import { createStaticMaterialTableEntry } from "../../bake/static-material-adapter";
 import { createStaticMaterialTextureBindingRequirement } from "../../bake/static-material-texture-policy";
 import { emitStaticBakeWorkerTrace } from "../../bake/worker-trace";
 import { createStaticObjectVisualRecipeInstallPublication } from "../../bake/object-visual-recipe-install-publication";

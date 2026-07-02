@@ -52,7 +52,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 		const deltas: StaticCoordinatorCommitDelta[] = [];
@@ -97,7 +97,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 
@@ -129,7 +129,7 @@ describe("static coordinator", () => {
 		const coordinator = new StaticCoordinator({
 			resourceProvider: new RejectingResourceProvider("geometry offline"),
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 
@@ -152,7 +152,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 
@@ -219,7 +219,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 
@@ -248,7 +248,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 
@@ -290,7 +290,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 
@@ -334,9 +334,7 @@ describe("static coordinator", () => {
 			"outdoor-generated-scenery",
 			"outdoor-terrain",
 		]);
-		expect(
-			baker.pendingInputs.map((input) => input.task.ownerKey),
-		).toEqual([
+		expect(baker.pendingInputs.map((input) => input.task.ownerKey)).toEqual([
 			{ kind: "terrain", landblockId: 0xda55ffff },
 			{ kind: "outdoor-explicit-objects", landblockId: 0xda55ffff },
 			{ kind: "outdoor-generated-scenery", landblockId: 0xda55ffff },
@@ -348,7 +346,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 		const sourceReady: StaticSourceReadyWork[] = [];
@@ -393,7 +391,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 		const sourceReady: StaticSourceReadyWork[] = [];
@@ -449,7 +447,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 		let sourceReady: StaticSourceReadyWork | null = null;
@@ -475,7 +473,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 		coordinator.setSourceReadyHandler((work) => {
@@ -499,7 +497,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 
@@ -524,7 +522,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 
@@ -568,7 +566,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 		const deltas: StaticCoordinatorCommitDelta[] = [];
@@ -628,7 +626,7 @@ describe("static coordinator", () => {
 		const emptyBaker = new DeferredStaticBaker();
 		const emptyCoordinator = new StaticCoordinator({
 			baker: emptyBaker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver: emptyResolver,
 		});
 		const emptyDeltas: StaticCoordinatorCommitDelta[] = [];
@@ -660,7 +658,7 @@ describe("static coordinator", () => {
 		const failedCoordinator = new StaticCoordinator({
 			resourceProvider: new RejectingResourceProvider("geometry offline"),
 			baker: new DeferredStaticBaker(),
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver: failedResolver,
 		});
 		bakeTasksForDemand(
@@ -684,7 +682,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 
@@ -717,7 +715,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 
@@ -747,7 +745,7 @@ describe("static coordinator", () => {
 		const resolver = new DeferredStaticResolver();
 		const coordinator = new StaticCoordinator({
 			baker: new DeferredStaticBaker(),
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 
@@ -777,7 +775,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 		const deltas: StaticCoordinatorCommitDelta[] = [];
@@ -854,7 +852,7 @@ describe("static coordinator", () => {
 		const commits: StaticScopePrepCommit[] = [];
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			dynamicVisualBaker,
 			dynamicVisualGeometryAssetReader: new EmptyPreparedAssetReader(),
 			resolver,
@@ -917,7 +915,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 		const work = bakeTasksForDemand(
@@ -959,7 +957,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 		const deltas: StaticCoordinatorCommitDelta[] = [];
@@ -989,7 +987,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 		const deltas: StaticCoordinatorCommitDelta[] = [];
@@ -1172,9 +1170,7 @@ describe("static coordinator", () => {
 		const generatedWork = bakeTasksForDemand(
 			coordinator,
 			createSingleOutdoorObjectDemand(0xda55ffff),
-		).find(
-			(item) => item.domain === "outdoor-generated-scenery",
-		);
+		).find((item) => item.domain === "outdoor-generated-scenery");
 		if (!generatedWork) {
 			throw new Error("Expected outdoor object demand to request scenery.");
 		}
@@ -1215,8 +1211,9 @@ describe("static coordinator", () => {
 		expect(deltas[0]?.objectVisualInstallSet.visualResources).toEqual([
 			retainedResource,
 		]);
-		expect(deltas[0]?.textureUses.map((textureUse) => textureUse.textureUseId))
-			.toEqual(["texture-use:retained"]);
+		expect(
+			deltas[0]?.textureUses.map((textureUse) => textureUse.textureUseId),
+		).toEqual(["texture-use:retained"]);
 	});
 
 	it("commits object visual draw units only through the object visual install set", async () => {
@@ -1224,7 +1221,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 		const deltas: StaticCoordinatorCommitDelta[] = [];
@@ -1267,7 +1264,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 		const sourcePayloads: StaticCoordinatorSourcePayloadDelta[] = [];
@@ -1473,7 +1470,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 
@@ -1518,7 +1515,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 
@@ -1612,7 +1609,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 
@@ -1666,7 +1663,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 		const sourcePayloads: StaticCoordinatorSourcePayloadDelta[] = [];
@@ -1755,7 +1752,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
-			sourceReadyCoalescing: { maxWaitMs: 0  },
+			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
 		const deltas: StaticCoordinatorCommitDelta[] = [];
@@ -1961,10 +1958,7 @@ function createStaticObjectRenderInstance(options: {
 			objectKind: "generated-scenery",
 		},
 		sourceToLandblockMatrix: new Float32Array([
-			1, 0, 0, 0,
-			0, 1, 0, 0,
-			0, 0, 1, 0,
-			0, 0, 0, 1,
+			1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
 		]),
 		transform: {
 			localPlacement: {

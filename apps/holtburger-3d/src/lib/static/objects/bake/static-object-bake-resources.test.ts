@@ -102,9 +102,7 @@ describe("static object bake resources", () => {
 		const provider = new StaticObjectBakeResourceProvider({ assetReader });
 
 		const resources = await provider.createResources(
-			createEnvCellResourceRequest([
-				createPart({ geometry, gfxObj, source }),
-			]),
+			createEnvCellResourceRequest([createPart({ geometry, gfxObj, source })]),
 		);
 
 		expect(assetReader.requests).toEqual([

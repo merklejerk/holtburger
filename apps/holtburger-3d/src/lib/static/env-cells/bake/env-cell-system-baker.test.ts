@@ -626,7 +626,8 @@ function createInputWithRenderableCellStructure(
 				paletteSources: options.paletteSources ?? scope.paletteSources,
 				regionRenderProfile: {
 					...scope.regionRenderProfile,
-					detailRoles: options.detailRoles ?? scope.regionRenderProfile.detailRoles,
+					detailRoles:
+						options.detailRoles ?? scope.regionRenderProfile.detailRoles,
 				},
 				textureRefs: options.textureRefs ?? scope.textureRefs,
 			},
@@ -711,12 +712,16 @@ function createInputWithRenderableStaticSeed(
 				envCells: [
 					{
 						...envCell,
-						localPlacement: options.envCellLocalPlacement ?? envCell.localPlacement,
-						staticObjectPlacements: envCell.staticObjectPlacements.map((seed) => ({
-							...seed,
-							identity: seedIdentity,
-							localPlacement: options.seedLocalPlacement ?? seed.localPlacement,
-						})),
+						localPlacement:
+							options.envCellLocalPlacement ?? envCell.localPlacement,
+						staticObjectPlacements: envCell.staticObjectPlacements.map(
+							(seed) => ({
+								...seed,
+								identity: seedIdentity,
+								localPlacement:
+									options.seedLocalPlacement ?? seed.localPlacement,
+							}),
+						),
 					},
 				],
 				materialSources: [material],
@@ -755,16 +760,18 @@ function createInputWithEnvCellStaticSource(
 				envCells: [
 					{
 						...envCell,
-						staticObjectPlacements: envCell.staticObjectPlacements.map((seed) => ({
-							...seed,
-							debug: { sourceAssetId: options.sourceAssetId },
-							source: {
-								kind: "static-object-source" as const,
-								sourceAssetKind: "setup-model" as const,
-								sourceDid: options.sourceDid,
-							},
-							sourceScale: options.sourceScale ?? seed.sourceScale,
-						})),
+						staticObjectPlacements: envCell.staticObjectPlacements.map(
+							(seed) => ({
+								...seed,
+								debug: { sourceAssetId: options.sourceAssetId },
+								source: {
+									kind: "static-object-source" as const,
+									sourceAssetKind: "setup-model" as const,
+									sourceDid: options.sourceDid,
+								},
+								sourceScale: options.sourceScale ?? seed.sourceScale,
+							}),
+						),
 					},
 				],
 				sourceAssets: [source],
@@ -1153,123 +1160,123 @@ function createInput(
 				scope: task.scope,
 			},
 			scope: {
-						acceptedEnvCellIds: [0xda550100],
-						envCells: [
+				acceptedEnvCellIds: [0xda550100],
+				envCells: [
+					{
+						cellBsp: {
+							kind: "leaf",
+							polyIds: [],
+							solid: 0,
+							sphere: null,
+						},
+						cellStructure: {
+							cellStructureId: 0x0d000001,
+							kind: "cell-structure",
+						},
+						environment: {
+							environmentId: 0x0e000001,
+							kind: "environment",
+						},
+						identity: {
+							envCellId: 0xda550100,
+							kind: "env-cell-source",
+						},
+						landblockId: 0xda55ffff,
+						localPlacement: {
+							orientation: { w: 1, x: 0, y: 0, z: 0 },
+							origin: { x: 0, y: 0, z: 0 },
+						},
+						memberId: "cell-0",
+						portalApertures: [],
+						portals: [],
+						renderGeometry: {
+							bounds: {
+								max: { x: 1, y: 2, z: 3 },
+								min: { x: -1, y: -2, z: -3 },
+							},
+							invalidPolygons: [],
+							normals: new Float32Array(),
+							positions: new Float32Array(),
+							skippedPolygonCount: 0,
+							sourceId: 0xda550100,
+							surfaceIds: [],
+							triangleCount: 0,
+							triangles: [],
+							uvs: new Float32Array(),
+							vertexCount: 0,
+						},
+						restrictionObjectId: null,
+						seenOutside: null,
+						staticObjectPlacements: [
 							{
-								cellBsp: {
-									kind: "leaf",
-									polyIds: [],
-									solid: 0,
-									sphere: null,
-								},
-								cellStructure: {
-									cellStructureId: 0x0d000001,
-									kind: "cell-structure",
-								},
-								environment: {
-									environmentId: 0x0e000001,
-									kind: "environment",
+								debug: {
+									sourceAssetId: "gfxobj/01000020",
 								},
 								identity: {
-									envCellId: 0xda550100,
-									kind: "env-cell-source",
+									instanceId: "env-cell-static-0",
+									kind: "static-object-instance",
+									landblockId: 0xda55ffff,
+									objectKind: "explicit-object",
 								},
-								landblockId: 0xda55ffff,
 								localPlacement: {
 									orientation: { w: 1, x: 0, y: 0, z: 0 },
-									origin: { x: 0, y: 0, z: 0 },
+									origin: { x: 1, y: 2, z: 3 },
 								},
-								memberId: "cell-0",
-								portalApertures: [],
-								portals: [],
-								renderGeometry: {
-									bounds: {
-										max: { x: 1, y: 2, z: 3 },
-										min: { x: -1, y: -2, z: -3 },
-									},
-									invalidPolygons: [],
-									normals: new Float32Array(),
-									positions: new Float32Array(),
-									skippedPolygonCount: 0,
-									sourceId: 0xda550100,
-									surfaceIds: [],
-									triangleCount: 0,
-									triangles: [],
-									uvs: new Float32Array(),
-									vertexCount: 0,
+								source: {
+									kind: "static-object-source",
+									sourceAssetKind: "gfx-obj",
+									sourceDid: 0x01000020,
 								},
-								restrictionObjectId: null,
-								seenOutside: null,
-								staticObjectPlacements: [
-									{
-										debug: {
-											sourceAssetId: "gfxobj/01000020",
-										},
-										identity: {
-											instanceId: "env-cell-static-0",
-											kind: "static-object-instance",
-											landblockId: 0xda55ffff,
-											objectKind: "explicit-object",
-										},
-										localPlacement: {
-											orientation: { w: 1, x: 0, y: 0, z: 0 },
-											origin: { x: 1, y: 2, z: 3 },
-										},
-										source: {
-											kind: "static-object-source",
-											sourceAssetKind: "gfx-obj",
-											sourceDid: 0x01000020,
-										},
-										sourceIndex: 0,
-										sourceScale: null,
-									},
-								],
-								surfaces: [
-									{
-										material: {
-											kind: "static-material-source",
-											materialId: 0x08000010,
-										},
-										slotId: 0,
-										surfaceId: 0x08000010,
-									},
-								],
-								visibleEnvCellIds: [0xda550101],
+								sourceIndex: 0,
+								sourceScale: null,
 							},
 						],
-						kind: "env-cell-system",
-						landblock: {
-							kind: "landblock-source",
-							landblockId: 0xda55ffff,
-							source: "env-cells",
-						},
-						missingRefs: [],
-						materialSources: [],
-						paletteSources: [],
-						portalApertureResources: options.portalApertureResources ?? [],
-						portalConnectivityGraph: options.portalConnectivityGraph ?? {
-							edges: [],
-							nodes: [],
-						},
-						portalLinks: [],
-						regionRenderProfile: {
-							detailRoles: [],
-							identity: {
-								kind: "region-render-profile",
-								regionNumber: 1,
+						surfaces: [
+							{
+								material: {
+									kind: "static-material-source",
+									materialId: 0x08000010,
+								},
+								slotId: 0,
+								surfaceId: 0x08000010,
 							},
-						},
-						residencySpatial: {
-							envCellSystemBvh: {
-								items: [],
-								nodes: [],
-							},
-							envCellSystemBvhItemCount: 1,
-							envCellSystemBvhNodeCount: 1,
-						},
-						sourceAssets: [],
-						textureRefs: [],
-						visibilityDiagnostics: [],
+						],
+						visibleEnvCellIds: [0xda550101],
+					},
+				],
+				kind: "env-cell-system",
+				landblock: {
+					kind: "landblock-source",
+					landblockId: 0xda55ffff,
+					source: "env-cells",
+				},
+				missingRefs: [],
+				materialSources: [],
+				paletteSources: [],
+				portalApertureResources: options.portalApertureResources ?? [],
+				portalConnectivityGraph: options.portalConnectivityGraph ?? {
+					edges: [],
+					nodes: [],
+				},
+				portalLinks: [],
+				regionRenderProfile: {
+					detailRoles: [],
+					identity: {
+						kind: "region-render-profile",
+						regionNumber: 1,
+					},
+				},
+				residencySpatial: {
+					envCellSystemBvh: {
+						items: [],
+						nodes: [],
+					},
+					envCellSystemBvhItemCount: 1,
+					envCellSystemBvhNodeCount: 1,
+				},
+				sourceAssets: [],
+				textureRefs: [],
+				visibilityDiagnostics: [],
 			},
 			sourceRevision: 42,
 		},

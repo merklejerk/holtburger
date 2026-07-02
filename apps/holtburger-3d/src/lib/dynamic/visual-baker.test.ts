@@ -56,9 +56,7 @@ describe("dynamic visual baker", () => {
 			texturePlanning.textureRequirements.map((requirement) => ({
 				dataUse: requirement.dataUse,
 				wrapMode:
-					requirement.samplingPolicy.wrapS === "repeat"
-						? "repeat"
-						: "clamp",
+					requirement.samplingPolicy.wrapS === "repeat" ? "repeat" : "clamp",
 			})),
 		).toEqual(
 			[...objectVisualRecipePlan.textureRecipes.values()].map(
@@ -83,9 +81,11 @@ describe("dynamic visual baker", () => {
 		expect(product.resource.renderParts[0]?.textureUseIds).toEqual([
 			product.resource.textureRequirements[0]?.textureUseId,
 		]);
-		expect(product.resource.objectVisual?.geometryBuffers.has(
-			objectVisualGeometryBufferId(0),
-		)).toBe(true);
+		expect(
+			product.resource.objectVisual?.geometryBuffers.has(
+				objectVisualGeometryBufferId(0),
+			),
+		).toBe(true);
 		expect(product.resource.objectVisual?.resolution.kind).toBe("ready");
 		if (product.resource.objectVisual?.resolution.kind !== "ready") {
 			throw new Error("Expected dynamic object visual bundle resolution.");
@@ -385,7 +385,8 @@ function createGeometryAttachment(
 		readonly triangleCount?: number;
 	} = {},
 ): StaticObjectSourceGeometryAttachment {
-	const triangleCount = options.surfaceIds?.length ?? options.triangleCount ?? 1;
+	const triangleCount =
+		options.surfaceIds?.length ?? options.triangleCount ?? 1;
 	const positions = new Float32Array(triangleCount * 9);
 	const texCoords = new Float32Array(triangleCount * 6);
 	for (let triangle = 0; triangle < triangleCount; triangle += 1) {

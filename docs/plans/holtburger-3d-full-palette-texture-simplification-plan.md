@@ -159,6 +159,11 @@ will otherwise drag range-strip behavior back in through the side door.
   parsing/formatting, Rust binary payload serialization, TypeScript host key
   handling, TypeScript payload schema, binary lookup classification, and binary
   envelope hydration tests.
+- Completed Rust prepared palette composition and runtime serving:
+  `prepared-palette-texture/` now loads decoded source palettes through
+  `ContentAssetRuntime`, applies replacement ranges in Rust, emits full-domain
+  RGBA pixels, hashes the final renderer payload identity, and serializes pixels
+  through the binary envelope.
 
 ## Decisions And Course Corrections
 
@@ -173,6 +178,10 @@ will otherwise drag range-strip behavior back in through the side door.
   phase to the composition phase. Serving `prepared-palette-texture/` requires
   real composed pixels; wiring it before composition would either create a fake
   payload path or a loud-but-useless not-implemented route.
+- Browser palette composition removal moves to the frontend cutover phase. The
+  old `prepareDirectPaletteTextureSource()` path is still needed until texture
+  manager/material producers request `prepared-palette-texture/`; deleting it
+  earlier would break the only active path instead of creating a clean cutover.
 
 ## Debt And Spicy Bits
 
@@ -189,6 +198,9 @@ will otherwise drag range-strip behavior back in through the side door.
   static coordinator, env-cell baker, and static object baker files. Touched-file
   ESLint for this contract phase is clean; do not conflate that existing lint
   debt with palette route work unless the next phases touch those files.
+- `prepare_palette_texture()` currently recomposes on every request. That is
+  intentional until the prepared palette texture cache phase; do not optimize it
+  inside `ContentDecodeCache`.
 
 ## Implementation Order
 
@@ -317,8 +329,6 @@ Deliverables:
   `content_asset_request_from_asset_id()`.
 - Normalize replacement order before composition and cache lookup. Use the same
   deterministic order everywhere: `offset`, then `count`, then `paletteId`.
-- Remove or shrink `prepareDirectPaletteTextureSource()` so browser code no
-  longer owns AC-specific palette composition rules.
 
 Acceptance criteria:
 
@@ -397,6 +407,8 @@ Deliverables:
   structured interior, static material policy, and texture manager paths.
 - Make palette direct sources look like ordinary RGBA texture sources to the
   packer.
+- Remove or shrink `prepareDirectPaletteTextureSource()` so browser code no
+  longer owns AC-specific palette composition rules.
 
 Acceptance criteria:
 

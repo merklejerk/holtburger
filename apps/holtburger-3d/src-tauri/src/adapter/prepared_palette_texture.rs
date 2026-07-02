@@ -1,6 +1,7 @@
 use crate::adapter::binary::BinaryAssetSectionWriter;
 use crate::adapter::json::format_palette_asset_id;
-use holtburger_dat::file_type::PixelFormatId;
+use anyhow::{Result, bail};
+use holtburger_dat::file_type::{Palette, PixelFormatId};
 
 const PREPARED_PALETTE_TEXTURE_PREFIX: &str = "prepared-palette-texture/";
 
@@ -31,6 +32,105 @@ pub struct PreparedPaletteTexturePayload {
     pub height: u32,
     pub pixels: Vec<u8>,
     pub content_hash: String,
+}
+
+pub fn prepare_palette_texture(
+    request: PreparedPaletteTextureRequest,
+    base_palette: &Palette,
+    replacement_palettes: &[(PreparedPaletteReplacement, Palette)],
+) -> Result<PreparedPaletteTexturePayload> {
+    if request.base_palette_id != base_palette.id {
+        bail!(
+            "prepared palette texture request 0x{:08X} was given Palette 0x{:08X}",
+            request.base_palette_id,
+            base_palette.id
+        );
+    }
+
+    let (width, height) = domain_dimensions(request.domain);
+    let color_count = usize::try_from(width)
+        .expect("palette width fits usize")
+        .saturating_mul(usize::try_from(height).expect("palette height fits usize"));
+    let mut colors_argb = vec![0; color_count];
+    for (index, color) in base_palette
+        .colors_argb
+        .iter()
+        .take(color_count)
+        .enumerate()
+    {
+        colors_argb[index] = *color;
+    }
+
+    let mut replacements = request.replacements.clone();
+    normalize_replacements(&mut replacements);
+    if replacements.len() != replacement_palettes.len() {
+        bail!(
+            "prepared palette texture {} expected {} replacement palettes, got {}",
+            format_prepared_palette_texture_asset_id(&request),
+            replacements.len(),
+            replacement_palettes.len()
+        );
+    }
+
+    for (expected, (actual, palette)) in replacements.iter().zip(replacement_palettes) {
+        if expected != actual {
+            bail!(
+                "prepared palette texture {} replacement palette order mismatch",
+                format_prepared_palette_texture_asset_id(&request)
+            );
+        }
+        if expected.palette_id != palette.id {
+            bail!(
+                "prepared palette texture replacement 0x{:08X} was given Palette 0x{:08X}",
+                expected.palette_id,
+                palette.id
+            );
+        }
+        let offset =
+            usize::try_from(expected.offset).expect("palette replacement offset fits usize");
+        let count = usize::try_from(expected.count).expect("palette replacement count fits usize");
+        let end = offset
+            .checked_add(count)
+            .ok_or_else(|| anyhow::anyhow!("palette replacement range overflows usize"))?;
+        if end > color_count {
+            bail!(
+                "prepared palette texture {} replacement 0x{:08X}@{}+{} exceeds {} color domain",
+                format_prepared_palette_texture_asset_id(&request),
+                expected.palette_id,
+                expected.offset,
+                expected.count,
+                color_count
+            );
+        }
+        if end > palette.colors_argb.len() {
+            bail!(
+                "prepared palette texture {} replacement 0x{:08X}@{}+{} exceeds replacement palette color count {}",
+                format_prepared_palette_texture_asset_id(&request),
+                expected.palette_id,
+                expected.offset,
+                expected.count,
+                palette.colors_argb.len()
+            );
+        }
+        colors_argb[offset..end].copy_from_slice(&palette.colors_argb[offset..end]);
+    }
+
+    let mut pixels = Vec::with_capacity(color_count * 4);
+    for color in colors_argb {
+        pixels.extend_from_slice(&argb_to_rgba(color));
+    }
+    let content_hash = prepared_palette_content_hash(width, height, &pixels);
+
+    Ok(PreparedPaletteTexturePayload {
+        request: PreparedPaletteTextureRequest {
+            replacements,
+            ..request
+        },
+        width,
+        height,
+        pixels,
+        content_hash,
+    })
 }
 
 pub fn parse_prepared_palette_texture_asset_id(
@@ -163,6 +263,22 @@ fn parse_replacements(value: &str) -> Option<Vec<PreparedPaletteReplacement>> {
             })
         })
         .collect()
+}
+
+fn domain_dimensions(domain: PreparedPaletteTextureDomain) -> (u32, u32) {
+    match domain {
+        PreparedPaletteTextureDomain::Index8 => (16, 16),
+        PreparedPaletteTextureDomain::Index16 => (256, 256),
+    }
+}
+
+fn argb_to_rgba(color: u32) -> [u8; 4] {
+    [
+        ((color >> 16) & 0xff) as u8,
+        ((color >> 8) & 0xff) as u8,
+        (color & 0xff) as u8,
+        ((color >> 24) & 0xff) as u8,
+    ]
 }
 
 fn normalize_replacements(replacements: &mut [PreparedPaletteReplacement]) {
@@ -327,5 +443,153 @@ mod tests {
             serde_json::json!(["palette/04000001", "palette/04000010"])
         );
         assert_eq!(writer.serialize_sections().len(), 1);
+    }
+
+    #[test]
+    fn prepares_index8_full_domain_rgba_with_padding() {
+        let request = PreparedPaletteTextureRequest {
+            base_palette_id: 0x0400_0001,
+            domain: PreparedPaletteTextureDomain::Index8,
+            replacements: Vec::new(),
+        };
+        let base_palette = Palette {
+            id: 0x0400_0001,
+            colors_argb: vec![0xff11_2233, 0x8044_5566],
+        };
+
+        let payload = prepare_palette_texture(request, &base_palette, &[])
+            .expect("prepared palette texture should compose");
+
+        assert_eq!(payload.width, 16);
+        assert_eq!(payload.height, 16);
+        assert_eq!(payload.pixels.len(), 16 * 16 * 4);
+        assert_eq!(
+            &payload.pixels[0..8],
+            &[0x11, 0x22, 0x33, 0xff, 0x44, 0x55, 0x66, 0x80]
+        );
+        assert_eq!(&payload.pixels[8..12], &[0, 0, 0, 0]);
+        assert_eq!(
+            payload.content_hash,
+            prepared_palette_content_hash(payload.width, payload.height, &payload.pixels)
+        );
+    }
+
+    #[test]
+    fn prepares_index16_full_domain_rgba_with_padding() {
+        let request = PreparedPaletteTextureRequest {
+            base_palette_id: 0x0400_0001,
+            domain: PreparedPaletteTextureDomain::Index16,
+            replacements: Vec::new(),
+        };
+        let base_palette = Palette {
+            id: 0x0400_0001,
+            colors_argb: vec![0xff11_2233],
+        };
+
+        let payload = prepare_palette_texture(request, &base_palette, &[])
+            .expect("prepared palette texture should compose");
+
+        assert_eq!(payload.width, 256);
+        assert_eq!(payload.height, 256);
+        assert_eq!(payload.pixels.len(), 256 * 256 * 4);
+        assert_eq!(&payload.pixels[0..4], &[0x11, 0x22, 0x33, 0xff]);
+        assert_eq!(&payload.pixels[4..8], &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn applies_replacements_before_hashing() {
+        let request = PreparedPaletteTextureRequest {
+            base_palette_id: 0x0400_0001,
+            domain: PreparedPaletteTextureDomain::Index8,
+            replacements: vec![PreparedPaletteReplacement {
+                palette_id: 0x0400_0010,
+                offset: 1,
+                count: 2,
+            }],
+        };
+        let base_palette = Palette {
+            id: 0x0400_0001,
+            colors_argb: vec![0xff00_0001, 0xff00_0002, 0xff00_0003],
+        };
+        let replacement_palette = Palette {
+            id: 0x0400_0010,
+            colors_argb: vec![0xff10_0001, 0xff10_0002, 0xff10_0003],
+        };
+
+        let payload = prepare_palette_texture(
+            request.clone(),
+            &base_palette,
+            &[(request.replacements[0], replacement_palette)],
+        )
+        .expect("prepared palette texture should compose");
+
+        assert_eq!(
+            &payload.pixels[0..12],
+            &[0, 0, 1, 0xff, 0x10, 0, 2, 0xff, 0x10, 0, 3, 0xff]
+        );
+    }
+
+    #[test]
+    fn rejects_replacement_ranges_outside_destination_domain() {
+        let request = PreparedPaletteTextureRequest {
+            base_palette_id: 0x0400_0001,
+            domain: PreparedPaletteTextureDomain::Index8,
+            replacements: vec![PreparedPaletteReplacement {
+                palette_id: 0x0400_0010,
+                offset: 255,
+                count: 2,
+            }],
+        };
+        let base_palette = Palette {
+            id: 0x0400_0001,
+            colors_argb: vec![0; 256],
+        };
+        let replacement_palette = Palette {
+            id: 0x0400_0010,
+            colors_argb: vec![0; 257],
+        };
+
+        let error = prepare_palette_texture(
+            request.clone(),
+            &base_palette,
+            &[(request.replacements[0], replacement_palette)],
+        )
+        .expect_err("replacement outside index8 domain should fail");
+
+        assert!(error.to_string().contains("exceeds 256 color domain"));
+    }
+
+    #[test]
+    fn rejects_replacement_ranges_outside_replacement_palette() {
+        let request = PreparedPaletteTextureRequest {
+            base_palette_id: 0x0400_0001,
+            domain: PreparedPaletteTextureDomain::Index8,
+            replacements: vec![PreparedPaletteReplacement {
+                palette_id: 0x0400_0010,
+                offset: 2,
+                count: 2,
+            }],
+        };
+        let base_palette = Palette {
+            id: 0x0400_0001,
+            colors_argb: vec![0; 256],
+        };
+        let replacement_palette = Palette {
+            id: 0x0400_0010,
+            colors_argb: vec![0; 3],
+        };
+
+        let error = prepare_palette_texture(
+            request.clone(),
+            &base_palette,
+            &[(request.replacements[0], replacement_palette)],
+        )
+        .expect_err("replacement outside replacement palette should fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("exceeds replacement palette color count 3")
+        );
     }
 }

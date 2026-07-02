@@ -333,6 +333,7 @@ function createPartRecipes(options: {
 				}
 				return {
 					geometrySurfaceId: triangle.geometrySurfaceId,
+					materialVariantSignature: triangle.materialVariantSignature ?? null,
 					materialRecipeId: requireRegistryId(
 						options.registry.materialRecipeIdsByKey,
 						objectVisualMaterialRecipeKey(

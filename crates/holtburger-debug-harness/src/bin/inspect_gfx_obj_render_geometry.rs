@@ -11,6 +11,8 @@ use holtburger_dat::{EOR_PORTAL_NAMESPACE, HbaReader};
 
 const STIPPLING_NO_POS: u8 = 0x04;
 const STIPPLING_NO_NEG: u8 = 0x08;
+const STIPPLING_REPEAT_POS: u8 = 0x01;
+const STIPPLING_REPEAT_NEG: u8 = 0x02;
 const CULL_MODE_NONE: i32 = 1;
 const CULL_MODE_CLOCKWISE: i32 = 2;
 
@@ -20,6 +22,8 @@ struct Args {
     dats: String,
     #[arg(long)]
     gfx_obj: String,
+    #[arg(long)]
+    surface_slot: Option<i16>,
 }
 
 fn main() -> Result<()> {
@@ -70,6 +74,7 @@ fn main() -> Result<()> {
     print_triangle_counts(&render_geometry.triangles);
     print_raw_polygon_counts(&gfx_obj.polygons);
     print_policy_sensitive_polygons(&gfx_obj, &drawing_bsp_polygon_ids);
+    print_polygon_side_details(&gfx_obj, args.surface_slot);
     print_unrendered_polygons(&gfx_obj, &drawing_bsp_polygon_ids, &rendered_polygon_ids);
 
     Ok(())
@@ -193,6 +198,73 @@ fn print_policy_sensitive_polygons(gfx_obj: &GfxObj, drawing_bsp_polygon_ids: &B
     }
 }
 
+fn print_polygon_side_details(gfx_obj: &GfxObj, surface_slot_filter: Option<i16>) {
+    let mut rows = Vec::new();
+    for (polygon_id, polygon) in BTreeMap::from_iter(gfx_obj.polygons.clone()) {
+        for side in polygon_render_sides(&polygon) {
+            if surface_slot_filter.is_some_and(|surface_slot| surface_slot != side.surface_slot) {
+                continue;
+            }
+            rows.push(format!(
+                "polygon={polygon_id} side={} surfaceSlot={} variant={} stippling=0x{:02X} sidesType={} points={} vertexIds={:?} {} {}",
+                side.label,
+                side.surface_slot,
+                if side.repeats {
+                    "sampler=repeat"
+                } else {
+                    "sampler=clamp"
+                },
+                polygon.stippling,
+                polygon.sides_type,
+                polygon.vertex_ids.len(),
+                polygon.vertex_ids,
+                format_polygon_vertices(gfx_obj, &polygon),
+                format_polygon_uvs(gfx_obj, &polygon, side.uv_indices),
+            ));
+        }
+    }
+
+    match surface_slot_filter {
+        Some(surface_slot) => {
+            println!("polygon side details for surfaceSlot={surface_slot}:");
+        }
+        None => {
+            println!("polygon side details:");
+        }
+    }
+    for line in rows {
+        println!("  {line}");
+    }
+}
+
+struct PolygonRenderSide<'a> {
+    label: &'static str,
+    surface_slot: i16,
+    repeats: bool,
+    uv_indices: &'a [u8],
+}
+
+fn polygon_render_sides(polygon: &Polygon) -> Vec<PolygonRenderSide<'_>> {
+    let mut sides = Vec::with_capacity(2);
+    if positive_side_is_renderable(polygon) {
+        sides.push(PolygonRenderSide {
+            label: "positive",
+            repeats: (polygon.stippling & STIPPLING_REPEAT_POS) != 0,
+            surface_slot: polygon.pos_surface,
+            uv_indices: &polygon.pos_uv_indices,
+        });
+    }
+    if polygon.sides_type == CULL_MODE_CLOCKWISE && negative_side_is_renderable(polygon) {
+        sides.push(PolygonRenderSide {
+            label: "negative",
+            repeats: (polygon.stippling & STIPPLING_REPEAT_NEG) != 0,
+            surface_slot: polygon.neg_surface,
+            uv_indices: &polygon.neg_uv_indices,
+        });
+    }
+    sides
+}
+
 fn format_polygon_vertices(gfx_obj: &GfxObj, polygon: &Polygon) -> String {
     let mut min = None::<(f32, f32, f32)>;
     let mut max = None::<(f32, f32, f32)>;
@@ -222,6 +294,47 @@ fn format_polygon_vertices(gfx_obj: &GfxObj, polygon: &Polygon) -> String {
     format!("{bounds} vertices=[{}]", points.join(","))
 }
 
+fn format_polygon_uvs(gfx_obj: &GfxObj, polygon: &Polygon, uv_indices: &[u8]) -> String {
+    if uv_indices.len() != polygon.vertex_ids.len() {
+        return format!("uvs=<malformed:{}>", uv_indices.len());
+    }
+
+    let mut min = None::<(f32, f32)>;
+    let mut max = None::<(f32, f32)>;
+    let mut points = Vec::new();
+    for (vertex_id, uv_index) in polygon.vertex_ids.iter().zip(uv_indices) {
+        let Some(uv) = gfx_obj
+            .vertex_array
+            .vertices
+            .get(vertex_id)
+            .and_then(|vertex| vertex.uvs.get(usize::from(*uv_index)))
+        else {
+            points.push(format!("{vertex_id}:uv{uv_index}:<missing>"));
+            continue;
+        };
+        let point = (uv.u, uv.v);
+        min = Some(expand_uv_min(min.unwrap_or(point), point));
+        max = Some(expand_uv_max(max.unwrap_or(point), point));
+        points.push(format!(
+            "{vertex_id}:uv{uv_index}=({:.6},{:.6})",
+            uv.u, uv.v
+        ));
+    }
+
+    let range = match (min, max) {
+        (Some(min), Some(max)) => format!(
+            "uvRange=min({:.6},{:.6}) max({:.6},{:.6}) wraps={}",
+            min.0,
+            min.1,
+            max.0,
+            max.1,
+            min.0 < 0.0 || min.1 < 0.0 || max.0 > 1.0 || max.1 > 1.0
+        ),
+        _ => "uvRange=none".to_string(),
+    };
+    format!("{range} uvs=[{}]", points.join(","))
+}
+
 fn expand_min(left: (f32, f32, f32), right: (f32, f32, f32)) -> (f32, f32, f32) {
     (
         left.0.min(right.0),
@@ -236,6 +349,14 @@ fn expand_max(left: (f32, f32, f32), right: (f32, f32, f32)) -> (f32, f32, f32) 
         left.1.max(right.1),
         left.2.max(right.2),
     )
+}
+
+fn expand_uv_min(left: (f32, f32), right: (f32, f32)) -> (f32, f32) {
+    (left.0.min(right.0), left.1.min(right.1))
+}
+
+fn expand_uv_max(left: (f32, f32), right: (f32, f32)) -> (f32, f32) {
+    (left.0.max(right.0), left.1.max(right.1))
 }
 
 fn print_unrendered_polygons(

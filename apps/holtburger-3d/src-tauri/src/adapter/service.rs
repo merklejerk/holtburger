@@ -6,6 +6,10 @@ use crate::adapter::ace_world_sql::AceWorldSqlResolver;
 use crate::adapter::binary::*;
 use crate::adapter::ids::*;
 use crate::adapter::json::*;
+use crate::adapter::prepared_palette_texture::{
+    PreparedPaletteTexturePayload, PreparedPaletteTextureRequest,
+    parse_prepared_palette_texture_asset_id, prepare_palette_texture,
+};
 use crate::adapter::prepared_texture::{
     PreparedTexturePayload, PreparedTextureRequest, parse_prepared_texture_asset_id,
     prepare_texture,
@@ -16,7 +20,9 @@ use holtburger_core::{
     ContentAsset, ContentAssetRequest, ContentAssetRuntime, ContentAssetService,
     SetupAppearanceRequest,
 };
-use holtburger_dat::file_type::{AnimationPartChange, ObjDesc, SubPalette, TextureMapChange};
+use holtburger_dat::file_type::{
+    AnimationPartChange, ObjDesc, Palette, SubPalette, TextureMapChange,
+};
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 
 use crate::contracts::{
@@ -298,6 +304,25 @@ impl HostBoundaryAdapter {
         }
     }
 
+    #[cfg(test)]
+    fn from_content_repository(content: ContentRepository) -> Self {
+        let content = Arc::new(content);
+        let decode_cache = Arc::new(ContentDecodeCache::new());
+        let content_asset_runtime = ContentAssetRuntime::new(ContentAssetService::new(
+            Arc::clone(&content),
+            Arc::clone(&decode_cache),
+        ));
+        Self {
+            ace_world_sql: AceWorldSqlResolver::from_env(),
+            content,
+            content_asset_runtime,
+            prepared_texture_worker_slots: Arc::new(Semaphore::new(
+                DEFAULT_PREPARED_TEXTURE_WORKERS,
+            )),
+            verbose: false,
+        }
+    }
+
     pub async fn asset_lookup(
         &self,
         request: AssetLookupRequestDto,
@@ -375,6 +400,20 @@ impl HostBoundaryAdapter {
                     ));
                 }
 
+                if let Some(prepared_palette_texture_request) =
+                    parse_prepared_palette_texture_asset_id(&request.asset_id)
+                {
+                    let prepared_palette_texture = prepare_palette_texture_from_runtime(
+                        content_asset_runtime.clone(),
+                        prepared_palette_texture_request,
+                    )
+                    .await;
+                    return anyhow::Ok((
+                        request,
+                        LoadedBinaryAsset::PreparedPaletteTexture(prepared_palette_texture),
+                    ));
+                }
+
                 let Some(content_request) = content_asset_request_from_asset_id(&request.asset_id)
                 else {
                     anyhow::bail!(
@@ -409,6 +448,14 @@ impl HostBoundaryAdapter {
                     serialize_prepared_texture_binary_response(
                         request,
                         prepared_texture?,
+                        &path_prefix,
+                        &mut writer,
+                    )?
+                }
+                LoadedBinaryAsset::PreparedPaletteTexture(prepared_palette_texture) => {
+                    serialize_prepared_palette_texture_binary_response(
+                        request,
+                        prepared_palette_texture?,
                         &path_prefix,
                         &mut writer,
                     )?
@@ -636,6 +683,7 @@ fn build_palette_metadata_lookup_response(
 enum LoadedBinaryAsset {
     Content(ContentAssetRequest, anyhow::Result<ContentAsset>),
     PreparedTexture(anyhow::Result<PreparedTexturePayload>),
+    PreparedPaletteTexture(anyhow::Result<PreparedPaletteTexturePayload>),
 }
 
 async fn prepare_texture_blocking(
@@ -650,6 +698,43 @@ async fn prepare_texture_blocking(
     tokio::task::spawn_blocking(move || prepare_texture(request, &render_surface))
         .await
         .map_err(|error| anyhow::anyhow!("prepared texture worker failed to join: {error}"))?
+}
+
+async fn prepare_palette_texture_from_runtime(
+    content_asset_runtime: ContentAssetRuntime,
+    request: PreparedPaletteTextureRequest,
+) -> anyhow::Result<PreparedPaletteTexturePayload> {
+    let base_palette =
+        load_palette_for_prepared_texture(&content_asset_runtime, request.base_palette_id, "base")
+            .await?;
+    let mut replacement_palettes = Vec::with_capacity(request.replacements.len());
+    for replacement in &request.replacements {
+        let palette = load_palette_for_prepared_texture(
+            &content_asset_runtime,
+            replacement.palette_id,
+            "replacement",
+        )
+        .await?;
+        replacement_palettes.push((*replacement, palette));
+    }
+    prepare_palette_texture(request, &base_palette, &replacement_palettes)
+}
+
+async fn load_palette_for_prepared_texture(
+    content_asset_runtime: &ContentAssetRuntime,
+    palette_id: u32,
+    role: &str,
+) -> anyhow::Result<Palette> {
+    match content_asset_runtime
+        .load(ContentAssetRequest::Palette(palette_id))
+        .await
+    {
+        Ok(ContentAsset::Palette(palette)) => Ok(*palette),
+        Ok(_) => unreachable!("content asset runtime returned mismatched palette"),
+        Err(error) => anyhow::bail!(
+            "failed to load {role} palette 0x{palette_id:08X} for prepared palette texture: {error:#}"
+        ),
+    }
 }
 
 impl HostBoundaryAdapter {
@@ -913,6 +998,46 @@ fn repo_assets_hba_path() -> PathBuf {
 mod tests {
     use super::*;
     use holtburger_dat::file_type::{Palette, PixelFormatId, RenderSurface};
+    use holtburger_dat::{DatError, FileMetadata, ResourceSource};
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    #[derive(Debug, Default)]
+    struct InMemoryResourceSource {
+        files: HashMap<(String, u32), Vec<u8>>,
+    }
+
+    impl InMemoryResourceSource {
+        fn with_file(mut self, namespace: &str, file_id: u32, bytes: Vec<u8>) -> Self {
+            self.files.insert((namespace.to_string(), file_id), bytes);
+            self
+        }
+    }
+
+    impl ResourceSource for InMemoryResourceSource {
+        fn get_file_by_key(&self, key: ResourceKey<'_>) -> holtburger_dat::Result<Vec<u8>> {
+            self.files
+                .get(&(key.namespace.to_string(), key.file_id))
+                .cloned()
+                .ok_or(DatError::NotFound(key.file_id))
+        }
+
+        fn get_metadata_by_key(&self, key: ResourceKey<'_>) -> Option<FileMetadata> {
+            self.files
+                .get(&(key.namespace.to_string(), key.file_id))
+                .map(|bytes| FileMetadata {
+                    id: key.file_id,
+                    size: bytes.len() as u32,
+                    is_pruned: false,
+                })
+        }
+
+        fn has_namespace(&self, namespace: &str) -> bool {
+            self.files
+                .keys()
+                .any(|(source_namespace, _)| source_namespace == namespace)
+        }
+    }
 
     #[test]
     fn parses_setup_appearance_override_query_route() {
@@ -1447,6 +1572,64 @@ mod tests {
         );
     }
 
+    #[test]
+    fn prepared_palette_texture_binary_lookup_composes_full_domain_pixels() {
+        let base_palette_id = 0x0400_0001;
+        let replacement_palette_id = 0x0400_0010;
+        let source = InMemoryResourceSource::default()
+            .with_file(
+                EOR_PORTAL_NAMESPACE,
+                base_palette_id,
+                palette_bytes(base_palette_id, &[0xff00_0001, 0xff00_0002, 0xff00_0003]),
+            )
+            .with_file(
+                EOR_PORTAL_NAMESPACE,
+                replacement_palette_id,
+                palette_bytes(
+                    replacement_palette_id,
+                    &[0xff10_0001, 0xff10_0002, 0xff10_0003],
+                ),
+            );
+        let repository = ContentRepository::from_mounts(vec![Arc::new(source)]);
+        let adapter = HostBoundaryAdapter::from_content_repository(repository);
+
+        let bytes = tauri::async_runtime::block_on(adapter.asset_lookup_binary_batch(vec![
+            AssetLookupRequestDto {
+                request_id: "test-prepared-palette-binary".to_string(),
+                asset_id:
+                    "prepared-palette-texture/04000001?domain=index8&repl=04000010:1:2".to_string(),
+                priority: crate::contracts::AssetPriorityDto::Streaming,
+            },
+        ]))
+        .expect("prepared palette binary lookup should succeed");
+
+        let (manifest, manifest_len) = decode_binary_manifest(&bytes);
+        let payload = &manifest["responses"][0]["payload"];
+        assert_eq!(payload["kind"], "prepared-palette-texture");
+        assert_eq!(payload["width"], 16);
+        assert_eq!(payload["height"], 16);
+        assert_eq!(payload["byteLength"], 16 * 16 * 4);
+        assert_eq!(
+            payload["dependencies"]["paletteAssetIds"],
+            serde_json::json!(["palette/04000001", "palette/04000010"])
+        );
+
+        let sections = manifest["sections"]
+            .as_array()
+            .expect("binary manifest should expose sections");
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0]["role"], "preparedPaletteTexture.pixels");
+        assert_eq!(sections[0]["path"], "responses.0.payload.pixels");
+        assert_eq!(sections[0]["componentCount"], 4);
+        assert_eq!(sections[0]["elementCount"], 16 * 16);
+
+        let section_start = ASSET_BINARY_HEADER_LEN + manifest_len;
+        assert_eq!(
+            &bytes[section_start..section_start + 12],
+            &[0, 0, 1, 0xff, 0x10, 0, 2, 0xff, 0x10, 0, 3, 0xff]
+        );
+    }
+
     fn decode_binary_manifest(bytes: &[u8]) -> (serde_json::Value, usize) {
         assert_eq!(&bytes[0..4], ASSET_BINARY_MAGIC);
         assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), 1);
@@ -1461,6 +1644,16 @@ mod tests {
         )
         .expect("binary manifest should be JSON");
         (manifest, manifest_len)
+    }
+
+    fn palette_bytes(palette_id: u32, colors_argb: &[u32]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&palette_id.to_le_bytes());
+        bytes.extend_from_slice(&(colors_argb.len() as u32).to_le_bytes());
+        for color in colors_argb {
+            bytes.extend_from_slice(&color.to_le_bytes());
+        }
+        bytes
     }
 
     #[test]

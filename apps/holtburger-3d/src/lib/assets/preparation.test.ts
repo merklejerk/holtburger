@@ -113,6 +113,10 @@ describe("host asset preparation", () => {
 			["render-surface/06000001", "render-surface"],
 			["render-surface-metadata/06000001", "render-surface-metadata"],
 			["prepared-texture/06000001?usage=color", "prepared-texture"],
+			[
+				"prepared-palette-texture/04000001?domain=index8",
+				"prepared-palette-texture",
+			],
 			["palette/04000001", "palette"],
 			["palette-metadata/04000001", "palette-metadata"],
 		] as const;
@@ -222,6 +226,49 @@ describe("host asset preparation", () => {
 		).toThrow(
 			"Asset palette-metadata/04000001 matched the palette-metadata route but its payload failed the palette-metadata contract",
 		);
+	});
+
+	it("prepares full-domain prepared palette texture payloads", () => {
+		const pixels = new Uint8Array([0x11, 0x22, 0x33, 0xff]);
+		const prepared = prepareV2AssetPayload({
+			assetId:
+				"prepared-palette-texture/04000001?domain=index8&repl=04000010:16:32",
+			payload: {
+				basePaletteId: 0x04000001,
+				byteLength: pixels.byteLength,
+				contentHash: "0123456789abcdef",
+				dependencies: {
+					paletteAssetIds: ["palette/04000001", "palette/04000010"],
+				},
+				diagnostics: {
+					generatedByteLength: pixels.byteLength,
+				},
+				domain: "index8",
+				format: "rgba8",
+				formatRaw: 0x15,
+				height: 16,
+				kind: "prepared-palette-texture",
+				pixels,
+				provenance: createProvenance("prepared-palette-texture"),
+				replacements: [{ count: 32, offset: 16, paletteId: 0x04000010 }],
+				residencyKind: "unknown",
+				sourceAssetKind: "prepared-palette-texture",
+				width: 16,
+			},
+			payloadKind: "json",
+			requestId: "request-prepared-palette",
+		});
+
+		expect(prepared).toMatchObject({
+			basePaletteId: 0x04000001,
+			domain: "index8",
+			height: 16,
+			kind: "prepared-palette-texture",
+			width: 16,
+		});
+		expect(prepared).toHaveProperty("pixels", pixels);
+		expect(prepared).not.toHaveProperty("firstIndex");
+		expect(prepared).not.toHaveProperty("indexCount");
 	});
 
 	it("prepares animation payloads with typed SetOmega hook bytes intact", () => {

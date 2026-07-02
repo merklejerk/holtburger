@@ -14,6 +14,7 @@ export type HostAssetKeyKind =
 	| "render-surface"
 	| "render-surface-metadata"
 	| "prepared-texture"
+	| "prepared-palette-texture"
 	| "palette"
 	| "palette-metadata"
 	| "raw";

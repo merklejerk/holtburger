@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { lookupAsset, planBinaryLookupBatches } from "./tauri";
+import {
+	lookupAsset,
+	planBinaryLookupBatches,
+	usesBinaryAssetLookup,
+} from "./tauri";
 
 describe("Tauri host commands", () => {
 	it("fails asset lookup outside the Tauri runtime", async () => {
@@ -35,6 +39,12 @@ describe("Tauri host commands", () => {
 				"landblock/0103ffff/lod/4",
 			],
 		]);
+	});
+
+	it("routes prepared palette textures through binary lookup", () => {
+		expect(
+			usesBinaryAssetLookup("prepared-palette-texture/04000001?domain=index8"),
+		).toBe(true);
 	});
 });
 

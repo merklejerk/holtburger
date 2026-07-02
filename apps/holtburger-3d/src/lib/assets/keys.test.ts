@@ -101,4 +101,23 @@ describe("host asset keys", () => {
 			),
 		).toEqual(key);
 	});
+
+	it("round-trips prepared palette texture query routes as typed keys", () => {
+		const key = createHostAssetKey(
+			"prepared-palette-texture",
+			"04000001?domain=index16&repl=04000010:16:32",
+		);
+
+		expect(describeHostAssetKey(key)).toBe(
+			"prepared-palette-texture:04000001?domain=index16&repl=04000010:16:32",
+		);
+		expect(formatHostAssetId(key)).toBe(
+			"prepared-palette-texture/04000001?domain=index16&repl=04000010:16:32",
+		);
+		expect(
+			parseHostAssetId(
+				"prepared-palette-texture/04000001?domain=index16&repl=04000010:16:32",
+			),
+		).toEqual(key);
+	});
 });

@@ -7,6 +7,7 @@ import type {
 	MaterialRecipePayloadDto,
 	PaletteMetadataPayloadDto,
 	PalettePayloadDto,
+	PreparedPaletteTexturePayloadDto,
 	PreparedTexturePayloadDto,
 	RegionRenderProfilePayloadDto,
 	RenderSurfaceMetadataPayloadDto,
@@ -23,6 +24,7 @@ import {
 	materialRecipePayloadDtoSchema,
 	paletteMetadataPayloadDtoSchema,
 	palettePayloadDtoSchema,
+	preparedPaletteTexturePayloadDtoSchema,
 	preparedTexturePayloadDtoSchema,
 	regionRenderProfilePayloadDtoSchema,
 	renderSurfaceMetadataPayloadDtoSchema,
@@ -50,6 +52,7 @@ export type V2PreparedAssetPayload =
 	| RenderSurfacePayloadDto
 	| RenderSurfaceMetadataPayloadDto
 	| PreparedTexturePayloadDto
+	| PreparedPaletteTexturePayloadDto
 	| PalettePayloadDto
 	| PaletteMetadataPayloadDto;
 
@@ -132,6 +135,11 @@ const V2_PAYLOAD_PARSERS: readonly RoutePayloadParser[] = [
 		expectedKind: "prepared-texture",
 		route: /^prepared-texture\/[0-9a-fA-F]{8}(?:\?.*)?$/,
 		schema: preparedTexturePayloadDtoSchema,
+	},
+	{
+		expectedKind: "prepared-palette-texture",
+		route: /^prepared-palette-texture\/[0-9a-fA-F]{8}(?:\?.*)?$/,
+		schema: preparedPaletteTexturePayloadDtoSchema,
 	},
 	{
 		expectedKind: "palette",

@@ -155,6 +155,10 @@ will otherwise drag range-strip behavior back in through the side door.
   intentional steering choice from the dry run: source palette decode caching is
   prerequisite infrastructure for the prepared palette route, so it lands before
   the host contract even though the later phase headings list the route first.
+- Completed the prepared palette texture host contract surface: Rust route
+  parsing/formatting, Rust binary payload serialization, TypeScript host key
+  handling, TypeScript payload schema, binary lookup classification, and binary
+  envelope hydration tests.
 
 ## Decisions And Course Corrections
 
@@ -165,6 +169,10 @@ will otherwise drag range-strip behavior back in through the side door.
 - Ordinary `ContentAssetService::Palette` loads now go through
   `ContentDecodeCache::palette(...)`. The future prepared palette route should
   use the same method instead of adding another direct `Palette::unpack` path.
+- Runtime interception in `asset_lookup_binary_batch()` moves from the contract
+  phase to the composition phase. Serving `prepared-palette-texture/` requires
+  real composed pixels; wiring it before composition would either create a fake
+  payload path or a loud-but-useless not-implemented route.
 
 ## Debt And Spicy Bits
 
@@ -173,6 +181,14 @@ will otherwise drag range-strip behavior back in through the side door.
   edited again, consider splitting the current Phase 2 into a Phase 0/1 cache
   foundation and a later composition phase. Not doing that now avoids a noisy
   plan restructure mid-stream.
+- `usesBinaryAssetLookup()` now recognizes `prepared-palette-texture/` before
+  the Tauri runtime serves it. No production planner emits that route yet, so
+  this is acceptable as a contract-only phase, but the composition phase must
+  wire the Rust runtime before any frontend producer starts requesting it.
+- Full `npm run lint:ts` currently fails on unrelated unused-symbol debt in
+  static coordinator, env-cell baker, and static object baker files. Touched-file
+  ESLint for this contract phase is clean; do not conflate that existing lint
+  debt with palette route work unless the next phases touch those files.
 
 ## Implementation Order
 
@@ -252,10 +268,6 @@ Deliverables:
 - Add binary serialization support beside
   `serialize_prepared_texture_binary_response()` in
   `apps/holtburger-3d/src-tauri/src/adapter/binary.rs`.
-- Extend `LoadedBinaryAsset` in
-  `apps/holtburger-3d/src-tauri/src/adapter/service.rs` with a prepared palette
-  variant and intercept the new route before
-  `content_asset_request_from_asset_id()`.
 
 Acceptance criteria:
 
@@ -299,6 +311,10 @@ Deliverables:
   load the base palette, load replacement palette assets referenced by
   replacement entries, copy `offset..offset+count`, expand/pad to full domain,
   convert ARGB to RGBA, emit `pixels`.
+- Extend `LoadedBinaryAsset` in
+  `apps/holtburger-3d/src-tauri/src/adapter/service.rs` with a prepared palette
+  variant and intercept the new route before
+  `content_asset_request_from_asset_id()`.
 - Normalize replacement order before composition and cache lookup. Use the same
   deterministic order everywhere: `offset`, then `count`, then `paletteId`.
 - Remove or shrink `prepareDirectPaletteTextureSource()` so browser code no

@@ -2616,6 +2616,8 @@ Implementation notes:
 
 ### Phase 14: Resteer And Generated Scenery Instancing Assessment
 
+Status: complete.
+
 Goal: assess the state of the generated scenery instancing pipeline after the recipe-first cutover.
 
 Deliverables:
@@ -2641,6 +2643,47 @@ Acceptance criteria:
 - Any remaining generated-scenery-specific complexity is either justified by renderer constraints or
   scheduled for cleanup.
 - No old draw-unit-first inference path remains in production code.
+
+Implementation notes:
+
+- Generated-scenery instancing now lives in static publication metadata and the shared object visual
+  publication baker. `createStaticObjectPublicationMetadata(...)` groups generated objects by source
+  geometry part into `instancedResourceGroups` and emits one `instancedRenderInstance` per generated
+  part instance. `createObjectVisualStaticInstallSet(...)` then maps renderer-legal render parts to
+  `StaticObjectVisualResource` plus `StaticObjectRenderInstance` records.
+- Runtime publication no longer infers generated-scenery resources from direct draw units.
+  `buildStaticLayerCommitPayloads(...)` forwards generated-scenery direct draw units, visual
+  resources, and render instances from `objectVisualInstallSet`.
+- Fixture-backed measurements:
+  `object-visual-static-publication-baker` proves two grouped generated instances publish one
+  visual resource and two render instances;
+  `static-object-publication-metadata-producer` proves a generated payload emits zero direct draw
+  units, one resource group, one render instance, and then one baked visual resource/instance for a
+  single generated object;
+  `client-runtime` proves an instanced-only generated-scenery layer reaches the renderer without
+  direct draw units;
+  `static-object-batch-partitioner` retained generated-scenery material/partition tests that now
+  read current object visual install-set output rather than legacy result mirrors.
+- Texture dependency behavior is now object visual install-set behavior: generated visual resources
+  and direct draw units carry dependencies through `objectVisualInstallSet.textureDependencies`.
+  The old `StaticBakeBatchResult.textureDependencies` object-draw-unit path was removed in Phase 12.
+- Remaining awkwardness: generated-scenery grouping is still encoded as static-object publication
+  metadata policy with `minimumInstanceCount: 2` and `transparentReuseAllowed: false`. That is
+  defensible for renderer legality today, but it is still source-domain policy sitting near shared
+  publication metadata rather than a clearly named generated-scenery instancing policy object.
+- Limitation: this phase used targeted fixture diagnostics, not live representative landblock
+  profiling. A future browser/programmatic harness pass can collect real scene bake cost, resource
+  count, instance count, and texture dependency statistics once we want performance data rather than
+  structural cutover evidence.
+- Decision: no generated-scenery blocker remains for the model switch. Keep the current policy in
+  this effort, record the naming/policy clarity issue for cleanup, and split real-scene profiling
+  into a follow-up if fixture evidence stops being enough.
+- Validation:
+  `rg -n "static-object-instance-inventory|inventoryGeneratedOutdoorSceneryInstances|legacyObjectResourceIds" apps/holtburger-3d/src/lib`
+  found no production hits;
+  `npm --prefix apps/holtburger-3d run check` passed;
+  `npm --prefix apps/holtburger-3d run test:ts -- object-visual-static-publication object-visual-static-publication-baker static-object-publication-metadata-producer static-object-batch-partitioner client-runtime`
+  passed with 5 test files and 77 tests.
 
 ### Phase 15: Cleanup And Legacy Removal
 

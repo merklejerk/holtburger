@@ -464,7 +464,6 @@ function createMaterialRecipe(
 		indexedClipThreshold: plan.alphaPolicy.indexedClipThreshold,
 		materialColor: plan.color,
 		materialEmissiveColor: plan.emissiveColor,
-		paletteFirstIndex: getPaletteFirstIndex(),
 		pass: plan.pass,
 		primaryTextureWrapMode: spec.textureWrapMode,
 		renderState: createStaticMaterialRenderState(plan.blend),
@@ -779,10 +778,6 @@ function requireTextureRole<
 		throw new Error(`Material recipe requires texture role ${role}.`);
 	}
 	return found;
-}
-
-function getPaletteFirstIndex(): number {
-	return 0;
 }
 
 class MaterialSlotIndex {

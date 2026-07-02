@@ -94,6 +94,19 @@ describe("WebGL2 static object indexed shader contract", () => {
 			"floor(packed.r + 0.5) + floor(packed.g + 0.5) * 256.0",
 		);
 	});
+
+	it("maps palette indices directly into full square palette domains", () => {
+		const shader = OBJECT_MATERIAL_FRAGMENT_SHADERS["indexed-paletted"];
+		expect(shader).not.toContain("uMaterialPaletteFirstIndices");
+		expect(shader).not.toContain("index -");
+		expect(shader).toContain(
+			"float paletteSide = uMaterialIndexedTextureFormats[slot] == 1 ? 256.0 : 16.0;",
+		);
+		expect(shader).toContain("float paletteLocalX = mod(index, paletteSide);");
+		expect(shader).toContain(
+			"float paletteLocalY = floor(index / paletteSide);",
+		);
+	});
 });
 
 describe("WebGL2 static object specialized shader contract", () => {
@@ -2016,7 +2029,6 @@ function createStructuredInteriorDrawUnit(
 				materialColor: [1, 0, 0, 1],
 				materialEmissiveColor: [0, 0, 0],
 				materialIds: [0x08000010],
-				paletteFirstIndex: 0,
 				paletteTextureUseId: null,
 				primaryTextureUseId: null,
 				primaryTextureWrapMode: "clamp",
@@ -2114,7 +2126,6 @@ function createEnvCellStaticObjectDrawUnit(
 				materialColor: [1, 1, 1, 1],
 				materialEmissiveColor: [0, 0, 0],
 				materialIds: [0x08000010],
-				paletteFirstIndex: 0,
 				paletteTextureUseId: null,
 				primaryTextureUseId: null,
 				primaryTextureWrapMode: "clamp",

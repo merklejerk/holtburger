@@ -72,7 +72,6 @@ describe("WebGL2 static object payload builder", () => {
 					detailTextureUseId: "detail-use",
 					indexTextureUseId: "index-use",
 					indexedTextureFormat: "index16",
-					paletteFirstIndex: 24,
 					paletteTextureUseId: "palette-use",
 					primaryTextureWrapMode: "repeat",
 					slot: 2,
@@ -133,7 +132,6 @@ describe("WebGL2 static object payload builder", () => {
 		expect(
 			Array.from(scratch.materialUniforms.paletteRects.slice(8, 12)),
 		).toEqual([20, 21, 22, 23]);
-		expect(scratch.materialUniforms.paletteFirstIndices[2]).toBe(24);
 		expect(
 			Array.from(scratch.materialUniforms.detailRects.slice(8, 12)),
 		).toEqual([30, 31, 32, 33]);
@@ -308,7 +306,6 @@ function createMaterialEntry(
 		materialColor: options.materialColor ?? [1, 1, 1, 1],
 		materialEmissiveColor: options.materialEmissiveColor ?? [0, 0, 0],
 		materialIds: options.materialIds ?? [],
-		paletteFirstIndex: options.paletteFirstIndex ?? 0,
 		paletteTextureUseId: options.paletteTextureUseId ?? null,
 		primaryTextureUseId: options.primaryTextureUseId ?? null,
 		primaryTextureWrapMode: options.primaryTextureWrapMode ?? "clamp",

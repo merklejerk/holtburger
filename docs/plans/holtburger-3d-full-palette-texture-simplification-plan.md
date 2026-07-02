@@ -177,6 +177,10 @@ will otherwise drag range-strip behavior back in through the side door.
   entries now keep logical texture keys for material binding while using a
   separate physical source key for atlas reuse. Prepared palette sources alias
   by `rgba8:{width}x{height}:bytes:{byteLength}:hash:{contentHash}`.
+- Completed material/shader range metadata removal. `paletteFirstIndex` and
+  `uMaterialPaletteFirstIndices` are gone from shared material tables, object
+  visual recipes, WebGL payload uniforms, and tests. Indexed shaders now map
+  palette indices directly into `16x16` or `256x256` palette domains.
 
 ## Decisions And Course Corrections
 
@@ -214,6 +218,9 @@ will otherwise drag range-strip behavior back in through the side door.
   physical key; prepared palette sources use the host-provided final content
   hash plus dimensions and byte length. This preserves cheap collision-tolerant
   dedupe without allowing hash-only ids to leak back into resolver recipes.
+- Shader palette-domain selection uses the indexed texture format already
+  carried by each material slot: `p8` samples a `16x16` palette and `index16`
+  samples a `256x256` palette. No range offset is available to subtract.
 
 ## Debt And Spicy Bits
 
@@ -238,9 +245,6 @@ will otherwise drag range-strip behavior back in through the side door.
   loads. This avoids blocking the cache mutex across awaits. If measurement says
   this matters, add an in-flight shared future map beside the cache rather than
   moving generated payloads into `ContentDecodeCache`.
-- `paletteFirstIndex` still exists as a temporary zero-valued material/shader
-  field until Phase 6 removes renderer range metadata. This is intentionally
-  quarantined; producers no longer compute it from palette texture ranges.
 - Full `npm run lint:ts` still fails on unrelated unused-symbol debt in static
   coordinator, env-cell baker, and static object job baker files. The current
   touched-file ESLint set is clean.

@@ -331,7 +331,6 @@ ${usesBaseColor ? `uniform vec4 uMaterialBaseColorRects[${MAX_OBJECT_MATERIAL_EN
 ${usesIndexed ? `uniform vec4 uMaterialIndexTextureRects[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];` : ""}
 ${usesIndexed ? `uniform vec4 uMaterialPaletteTextureRects[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];` : ""}
 ${usesDetail ? `uniform vec4 uMaterialDetailTextureRects[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];` : ""}
-${usesIndexed ? `uniform float uMaterialPaletteFirstIndices[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];` : ""}
 ${usesDetail ? `uniform float uMaterialDetailTilings[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];` : ""}
 ${usesDetail ? `uniform int uMaterialDetailEnabled[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];` : ""}
 uniform float uMaterialAlphaTests[${MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
@@ -394,9 +393,15 @@ vec4 paletteColor(float index) {
 		return vec4(0.0);
 	}
 	vec4 rect = uMaterialPaletteTextureRects[slot];
-	float paletteIndex = index - uMaterialPaletteFirstIndices[slot];
-	float paletteLocalX = clamp(paletteIndex, 0.0, max(rect.z - 1.0, 0.0));
-	vec2 paletteUv = (rect.xy + vec2(paletteLocalX + 0.5, 0.5)) / uObjectPaletteSize;
+	float paletteSide = uMaterialIndexedTextureFormats[slot] == 1 ? 256.0 : 16.0;
+	float paletteLocalX = mod(index, paletteSide);
+	float paletteLocalY = floor(index / paletteSide);
+	vec2 paletteCoord = clamp(
+		vec2(paletteLocalX, paletteLocalY),
+		vec2(0.0),
+		max(rect.zw - vec2(1.0), vec2(0.0))
+	);
+	vec2 paletteUv = (rect.xy + paletteCoord + vec2(0.5)) / uObjectPaletteSize;
 	return texture(uObjectPaletteTexture, paletteUv);
 }
 
@@ -3516,7 +3521,6 @@ interface ObjectMaterialGeometryProgram {
 		readonly uMaterialIndexedClipThresholds: WebGLUniformLocation | null;
 		readonly uMaterialIndexedTextureFormats: WebGLUniformLocation | null;
 		readonly uMaterialIndexTextureRects: WebGLUniformLocation | null;
-		readonly uMaterialPaletteFirstIndices: WebGLUniformLocation | null;
 		readonly uMaterialPaletteTextureRects: WebGLUniformLocation | null;
 		readonly uMaterialWrapModes: WebGLUniformLocation | null;
 		readonly uModelViewProjection: WebGLUniformLocation;
@@ -4287,11 +4291,6 @@ function createObjectMaterialGeometryProgram(
 				gl,
 				program,
 				"uMaterialIndexTextureRects[0]",
-			),
-			uMaterialPaletteFirstIndices: optionalUniform(
-				gl,
-				program,
-				"uMaterialPaletteFirstIndices[0]",
 			),
 			uMaterialPaletteTextureRects: optionalUniform(
 				gl,
@@ -5105,11 +5104,6 @@ function uploadObjectMaterialUniforms(
 		gl,
 		program.uniforms.uMaterialIndexTextureRects,
 		uniforms.indexRects,
-	);
-	uploadOptionalUniform1fv(
-		gl,
-		program.uniforms.uMaterialPaletteFirstIndices,
-		uniforms.paletteFirstIndices,
 	);
 	uploadOptionalUniform4fv(
 		gl,

@@ -640,7 +640,6 @@ describe("static object batch partitioner", () => {
 		expect(materialEntry.paletteTextureUseId).toContain(
 			"prepared-palette-texture-use",
 		);
-		expect(materialEntry.paletteFirstIndex).toBe(0);
 		expect(drawUnit.textureUseIds).toHaveLength(2);
 		expect(drawUnit.textureUseIds).toEqual(
 			expect.arrayContaining([

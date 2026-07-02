@@ -414,7 +414,6 @@ function createRenderPart(options: {
 				materialColor: [1, 1, 1, 1] as const,
 				materialEmissiveColor: [0, 0, 0] as const,
 				materialIds: [0x08000001],
-				paletteFirstIndex: 0,
 				paletteTextureUseId: null,
 				primaryTextureUseId: null,
 				primaryTextureWrapMode: "repeat" as const,

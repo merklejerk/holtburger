@@ -115,8 +115,6 @@ export interface ObjectVisualMaterialRecipeBase {
 	/** Renderer-visible emissive color after setup/model overrides are flattened. */
 	readonly materialEmissiveColor: readonly [number, number, number];
 	readonly pass: ObjectVisualMaterialPass;
-	/** Palette first-index window for indexed material recipes. */
-	readonly paletteFirstIndex: number;
 	/** Texture sampling mode for the primary material texture. */
 	readonly primaryTextureWrapMode: ObjectVisualTextureWrapMode;
 	/** Blend/depth state selected during resolver material planning. */

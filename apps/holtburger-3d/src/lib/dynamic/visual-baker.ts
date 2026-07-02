@@ -17,8 +17,6 @@ import { createPreparedTextureHostKey } from "../assets/preparation/prepared-tex
 import { createStaticMaterialTextureSamplingPolicy } from "../static/bake/static-material-texture-policy";
 import type {
 	MaterialTextureDataUseIdentity,
-	StaticObjectPartMaterialSlotFacts,
-	StaticObjectSourceAssetFacts,
 	StaticObjectSourceGeometrySidecar,
 } from "../static/contracts";
 import {
@@ -53,6 +51,10 @@ import type {
 	ObjectVisualTextureRecipe,
 	ObjectVisualTextureRecipeId,
 } from "../visual/object-visual-recipe-bundle";
+import type {
+	ObjectVisualPartMaterialSlotFacts,
+	ObjectVisualSourceAssetFacts,
+} from "../visual/object-visual-source-payload";
 
 export interface DynamicVisualBaker {
 	bake(input: DynamicVisualBakeInput): Promise<DynamicVisualBakeResult>;
@@ -61,7 +63,7 @@ export interface DynamicVisualBaker {
 interface DynamicMaterialSlotFacts {
 	readonly identity: DynamicVisualMaterialSlotIdentity;
 	readonly partIndex: number;
-	readonly partSlot: StaticObjectPartMaterialSlotFacts;
+	readonly partSlot: ObjectVisualPartMaterialSlotFacts;
 }
 
 type PendingDynamicEntityTextureRequirement = Omit<
@@ -394,7 +396,7 @@ function createSourceGeometryIndex(
 
 function createDynamicMaterialSlotRequirements(
 	visualObject: DynamicVisualObjectIdentity,
-	sourceAssets: readonly StaticObjectSourceAssetFacts[],
+	sourceAssets: readonly ObjectVisualSourceAssetFacts[],
 ): readonly DynamicMaterialSlotFacts[] {
 	return sourceAssets.flatMap((source) =>
 		source.parts.flatMap((part) =>
@@ -418,8 +420,8 @@ function createDynamicMaterialSlotRequirements(
 }
 
 function createDynamicVisualPartIdentity(options: {
-	readonly part: StaticObjectSourceAssetFacts["parts"][number];
-	readonly source: StaticObjectSourceAssetFacts;
+	readonly part: ObjectVisualSourceAssetFacts["parts"][number];
+	readonly source: ObjectVisualSourceAssetFacts;
 	readonly visualObject: DynamicVisualObjectIdentity;
 }): DynamicVisualPartIdentity {
 	return {
@@ -433,7 +435,7 @@ function createDynamicVisualPartIdentity(options: {
 
 function createDynamicVisualMaterialSlotIdentity(options: {
 	readonly part: DynamicVisualPartIdentity;
-	readonly slot: StaticObjectPartMaterialSlotFacts;
+	readonly slot: ObjectVisualPartMaterialSlotFacts;
 }): DynamicVisualMaterialSlotIdentity {
 	return {
 		geometrySurfaceId: options.slot.geometrySurfaceId,

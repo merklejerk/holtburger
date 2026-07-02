@@ -2,13 +2,13 @@ import type {
 	DynamicEntityRecipe,
 	DynamicObjectVisualBundleExpansion,
 } from "./contracts";
+import type { StaticObjectSourceGeometrySidecar } from "../static/contracts";
 import type {
-	StaticObjectInstanceIdentity,
-	StaticObjectMaterialSlotFacts,
-	StaticObjectSourceAssetFacts,
-	StaticObjectSourceGeometrySidecar,
-} from "../static/contracts";
-import type { ObjectVisualSourcePayload } from "../visual/object-visual-source-payload";
+	ObjectVisualMaterialSlotFacts,
+	ObjectVisualObjectIdentity,
+	ObjectVisualSourceAssetFacts,
+	ObjectVisualSourcePayload,
+} from "../visual/object-visual-source-payload";
 import {
 	createObjectVisualSourceBundleExpansion,
 	createObjectVisualSourceRecipePlan,
@@ -102,7 +102,7 @@ function createDynamicObjectVisualSourcePayload(
 
 export function createDynamicObjectVisualSourceAssets(
 	recipe: DynamicEntityRecipe,
-): readonly StaticObjectSourceAssetFacts[] {
+): readonly ObjectVisualSourceAssetFacts[] {
 	if (
 		recipe.visual.sourceAssets.some((sourceAsset) =>
 			staticObjectSourceEquals(
@@ -117,8 +117,8 @@ export function createDynamicObjectVisualSourceAssets(
 }
 
 function staticObjectSourceEquals(
-	left: StaticObjectSourceAssetFacts["identity"],
-	right: StaticObjectSourceAssetFacts["identity"],
+	left: ObjectVisualSourceAssetFacts["identity"],
+	right: ObjectVisualSourceAssetFacts["identity"],
 ): boolean {
 	return (
 		left.kind === right.kind &&
@@ -128,12 +128,12 @@ function staticObjectSourceEquals(
 }
 
 function createDynamicMaterialSlots(options: {
-	readonly object: StaticObjectInstanceIdentity;
+	readonly object: ObjectVisualObjectIdentity;
 	readonly recipe: DynamicEntityRecipe;
-}): readonly StaticObjectMaterialSlotFacts[] {
+}): readonly ObjectVisualMaterialSlotFacts[] {
 	return options.recipe.visual.setupModel.parts.flatMap((part) =>
 		part.materialSlots.map(
-			(slot): StaticObjectMaterialSlotFacts => ({
+			(slot): ObjectVisualMaterialSlotFacts => ({
 				gfxObj: part.gfxObj,
 				identity: {
 					geometrySurfaceId: slot.geometrySurfaceId,
@@ -179,7 +179,7 @@ function createDynamicPartInstances(input: {
 
 function createDynamicStaticObjectIdentity(
 	recipe: DynamicEntityRecipe,
-): StaticObjectInstanceIdentity {
+): ObjectVisualObjectIdentity {
 	return {
 		instanceId: recipe.entityId,
 		kind: "static-object-instance",

@@ -1,6 +1,6 @@
 import type {
 	LandblockSourceIdentity,
-	OutdoorStaticObjectsScopePayload,
+	OutdoorStaticObjectDomain,
 	PaletteIdentity,
 	MaterialTextureDataUseIdentity,
 	PreparedIndexRenderSurfaceTextureUseIdentity,
@@ -8,12 +8,14 @@ import type {
 	RegionDetailRoleFacts,
 	RenderSurfaceIdentity,
 	StaticMaterialSourceIdentity,
-	StaticObjectMaterialSourceFacts,
-	StaticObjectPaletteSourceFacts,
-	StaticObjectPaletteViewFacts,
-	StaticObjectTextureRefFacts,
 	SurfaceTextureIdentity,
 } from "../static/contracts";
+import type {
+	ObjectVisualMaterialSourceFacts,
+	ObjectVisualPaletteSourceFacts,
+	ObjectVisualPaletteViewFacts,
+	ObjectVisualTextureRefFacts,
+} from "./object-visual-source-payload";
 import {
 	composeStaticMaterialDetailRole,
 	planStaticMaterialDetailRoles,
@@ -75,17 +77,17 @@ export interface ObjectVisualMaterialPipelinePlan {
 }
 
 export type ObjectVisualMaterialPlanningDomain =
-	| OutdoorStaticObjectsScopePayload["domain"]
+	| OutdoorStaticObjectDomain
 	| "env-cell-system"
 	| "runtime-authored-dynamic-object-material";
 
 export interface ObjectVisualMaterialPlanningPayload {
 	readonly domain: ObjectVisualMaterialPlanningDomain;
 	readonly landblock: LandblockSourceIdentity;
-	readonly materialSources: OutdoorStaticObjectsScopePayload["materialSources"];
+	readonly materialSources: readonly ObjectVisualMaterialSourceFacts[];
 	readonly materialSlots: readonly ObjectVisualMaterialPlanningSlotFacts[];
-	readonly paletteSources: readonly StaticObjectPaletteSourceFacts[];
-	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
+	readonly paletteSources: readonly ObjectVisualPaletteSourceFacts[];
+	readonly textureRefs: readonly ObjectVisualTextureRefFacts[];
 	readonly regionRenderProfile: {
 		readonly detailRoles: readonly RegionDetailRoleFacts[];
 	};
@@ -95,7 +97,7 @@ export interface ObjectVisualMaterialPlanningPayload {
 interface ObjectVisualMaterialPlanningSlotFacts {
 	readonly material: StaticMaterialSourceIdentity;
 	readonly paletteOverride: PaletteIdentity | null;
-	readonly paletteViews: readonly StaticObjectPaletteViewFacts[];
+	readonly paletteViews: readonly ObjectVisualPaletteViewFacts[];
 }
 
 export interface ObjectVisualMaterialPlan {
@@ -189,11 +191,11 @@ interface StaticObjectMaterialBlendFacts {
 }
 
 interface StaticObjectMaterialContext {
-	readonly material: StaticObjectMaterialSourceFacts;
+	readonly material: ObjectVisualMaterialSourceFacts;
 	readonly paletteOverride?: PaletteIdentity | null;
-	readonly paletteViews?: readonly StaticObjectPaletteViewFacts[];
-	readonly paletteSources: readonly StaticObjectPaletteSourceFacts[];
-	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
+	readonly paletteViews?: readonly ObjectVisualPaletteViewFacts[];
+	readonly paletteSources: readonly ObjectVisualPaletteSourceFacts[];
+	readonly textureRefs: readonly ObjectVisualTextureRefFacts[];
 }
 
 export function planObjectVisualMaterials(
@@ -526,7 +528,7 @@ function createTexturePlan(
 function resolvePaletteView(
 	basePalette: PaletteIdentity,
 	colorCount: number,
-	paletteViews: readonly StaticObjectPaletteViewFacts[],
+	paletteViews: readonly ObjectVisualPaletteViewFacts[],
 ): PaletteDataUseIdentity {
 	return {
 		firstIndex: DEFAULT_PALETTE_FIRST_INDEX,
@@ -539,9 +541,9 @@ function resolvePaletteView(
 }
 
 function findPaletteSource(
-	paletteSources: readonly StaticObjectPaletteSourceFacts[],
+	paletteSources: readonly ObjectVisualPaletteSourceFacts[],
 	palette: PaletteIdentity,
-): StaticObjectPaletteSourceFacts | null {
+): ObjectVisualPaletteSourceFacts | null {
 	return (
 		paletteSources.find(
 			(source) => source.palette.paletteId === palette.paletteId,
@@ -569,7 +571,7 @@ function deriveIndexedRenderSurfaceBehavior(
 export function createObjectVisualMaterialUseKey(
 	material: StaticMaterialSourceIdentity,
 	paletteOverride: PaletteIdentity | null,
-	paletteViews: readonly StaticObjectPaletteViewFacts[],
+	paletteViews: readonly ObjectVisualPaletteViewFacts[],
 ): string {
 	return [
 		createStaticMaterialSourceKey(material),
@@ -579,7 +581,7 @@ export function createObjectVisualMaterialUseKey(
 }
 
 function createStaticObjectPaletteViewsKey(
-	paletteViews: readonly StaticObjectPaletteViewFacts[],
+	paletteViews: readonly ObjectVisualPaletteViewFacts[],
 ): string {
 	if (paletteViews.length === 0) {
 		return "palette-views:none";
@@ -595,8 +597,8 @@ function createStaticObjectPaletteViewsKey(
 }
 
 function sortPaletteViews(
-	paletteViews: readonly StaticObjectPaletteViewFacts[],
-): readonly StaticObjectPaletteViewFacts[] {
+	paletteViews: readonly ObjectVisualPaletteViewFacts[],
+): readonly ObjectVisualPaletteViewFacts[] {
 	return [...paletteViews].sort(
 		(left, right) =>
 			left.firstIndex - right.firstIndex ||
@@ -638,7 +640,7 @@ function createUnsupportedPlan(
 	};
 }
 
-function deriveMaterialBehavior(material: StaticObjectMaterialSourceFacts): {
+function deriveMaterialBehavior(material: ObjectVisualMaterialSourceFacts): {
 	readonly alphaPolicy: StaticObjectMaterialAlphaPolicy;
 	readonly blend: StaticObjectMaterialBlendFacts;
 	readonly diffuseScale: number;
@@ -824,7 +826,7 @@ function isSupportedTransparentStaticBlend(
 }
 
 function resolveMaterialColor(
-	material: StaticObjectMaterialSourceFacts,
+	material: ObjectVisualMaterialSourceFacts,
 	behavior: ReturnType<typeof deriveMaterialBehavior>,
 ): readonly [number, number, number, number] {
 	if (material.source.kind !== "solid-color") {

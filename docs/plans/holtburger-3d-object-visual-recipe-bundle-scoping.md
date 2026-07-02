@@ -3436,7 +3436,7 @@ Spicy bits and retained debt:
 
 ### Phase 20: Visual-Owned Source Records
 
-Status: planned.
+Status: completed.
 
 Goal: replace the remaining static-owned source fact aliases inside the neutral object visual source
 DTO with visual-owned record types.
@@ -3488,6 +3488,38 @@ Spicy bits to watch:
   describe effective visual facts, not because we copy-pasted static interfaces.
 - Do not collapse source provenance so far that picking, source mapping, dynamic animation binding,
   or generated-scenery instancing lose the identities they need.
+
+Implementation notes:
+
+- Added visual-owned effective source record types to
+  `src/lib/visual/object-visual-source-payload.ts` for source identities/assets/parts, material
+  source facts, material slot facts, palette source facts, texture refs, source objects, placement,
+  and compact debug provenance.
+- Changed `ObjectVisualSourcePayload` to use those visual-owned records instead of indexing into
+  `OutdoorStaticObjectsScopePayload`.
+- Retargeted `ObjectVisualMaterialPlanningPayload`, dynamic visual recipes, baked dynamic visual
+  resources, dynamic material slot requirements, dynamic texture requirements, the dynamic placement
+  tracker, and the dynamic visual baker to the visual-owned records.
+- Kept static-domain normalizers and static object bake/publication internals as conversion and
+  policy boundaries. Static resolver facts remain legal inputs there; the shared visual DTO no
+  longer exposes those facts as its canonical shape.
+- Validation passed:
+  `npm --prefix apps/holtburger-3d run test:ts -- src/lib/visual/object-visual-material-planner.test.ts src/lib/visual/object-visual-recipe-bundle.test.ts src/lib/dynamic/visual-baker.test.ts src/lib/dynamic/visual-contracts.test.ts src/lib/dynamic/dynamic-placement-tracker.test.ts src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/static/env-cells/bake/structured-interior-visual-bundle-producer.test.ts`,
+  `npm --prefix apps/holtburger-3d run check`,
+  `npm --prefix apps/holtburger-3d run lint:dead`, and
+  `npm --prefix apps/holtburger-3d run format:check`.
+
+Spicy bits and retained debt:
+
+- `StaticObjectSourceGeometrySidecar` still carries prepared `gfx_obj` geometry into dynamic and
+  static bakers. That is intentionally deferred: Phase 21 owns moving the shared bundle expansion
+  producer and can decide whether geometry sidecar naming should become visual-owned at the same
+  seam.
+- `object-visual-static-scope.ts` still aliases static scope payload fields because it is a static
+  scope wrapper, not the neutral source payload. Do not promote it as shared source vocabulary.
+- Several helper names still say `StaticObject...` inside material/source primitive modules. They
+  remain behaviorally shared now, but renaming them belongs with Phase 21's producer ownership move
+  so naming and module gravity change together.
 
 ### Phase 21: Neutral Bundle Expansion Ownership
 

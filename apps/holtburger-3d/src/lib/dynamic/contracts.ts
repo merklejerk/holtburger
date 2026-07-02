@@ -6,12 +6,6 @@ import type {
 	StaticAuthoredDynamicPlacementRecord,
 	StaticBounds,
 	StaticObjectSourceGeometrySidecar,
-	StaticObjectMaterialSourceFacts,
-	StaticObjectPaletteSourceFacts,
-	StaticObjectPartMaterialSlotFacts,
-	StaticObjectSourceIdentity,
-	StaticObjectSourceAssetFacts,
-	StaticObjectTextureRefFacts,
 	StaticResourceIdentity,
 	StaticLayerPeerRecordOwner,
 	VisualTextureDomain,
@@ -26,6 +20,14 @@ import type {
 	ObjectVisualGeometryBuffer,
 	ObjectVisualGeometryBufferId,
 } from "../visual/object-visual-recipe-bundle";
+import type {
+	ObjectVisualMaterialSourceFacts,
+	ObjectVisualPaletteSourceFacts,
+	ObjectVisualPartMaterialSlotFacts,
+	ObjectVisualSourceAssetFacts,
+	ObjectVisualSourceIdentity,
+	ObjectVisualTextureRefFacts,
+} from "../visual/object-visual-source-payload";
 import type {
 	AnimationPayloadDto,
 	PlacementTransformDto,
@@ -203,14 +205,14 @@ export interface DynamicEntityRecipe {
 
 export interface DynamicVisualRecipe {
 	/** Setup model driving part layout, default animation, and source closure. */
-	readonly setupModel: StaticObjectSourceAssetFacts;
+	readonly setupModel: ObjectVisualSourceAssetFacts;
 	/** Optional explicit/default animation payload facts, or null when animation is not required. */
 	readonly animation: DynamicEntityAnimationResource | null;
 	/** Resolved source closure; the visual baker must not do lazy host asset lookup. */
-	readonly sourceAssets: readonly StaticObjectSourceAssetFacts[];
-	readonly materialSources: readonly StaticObjectMaterialSourceFacts[];
-	readonly paletteSources: readonly StaticObjectPaletteSourceFacts[];
-	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
+	readonly sourceAssets: readonly ObjectVisualSourceAssetFacts[];
+	readonly materialSources: readonly ObjectVisualMaterialSourceFacts[];
+	readonly paletteSources: readonly ObjectVisualPaletteSourceFacts[];
+	readonly textureRefs: readonly ObjectVisualTextureRefFacts[];
 	readonly missingRefs: readonly StaticResourceIdentity[];
 	/** Material planning policy and dynamic ownership identities, not renderer state. */
 	readonly materialPolicy: DynamicVisualMaterialPolicy;
@@ -279,16 +281,16 @@ export type DynamicVisualBakeProduct =
 export interface BakedDynamicVisualResource {
 	readonly entityId: DynamicEntityId;
 	readonly materialSlots: readonly DynamicEntityMaterialSlotRequirement[];
-	readonly materialSources: readonly StaticObjectMaterialSourceFacts[];
+	readonly materialSources: readonly ObjectVisualMaterialSourceFacts[];
 	/** Shared object-visual recipe graph produced during dynamic baking. */
 	readonly objectVisual?: DynamicObjectVisualBundleExpansion;
-	readonly paletteSources: readonly StaticObjectPaletteSourceFacts[];
+	readonly paletteSources: readonly ObjectVisualPaletteSourceFacts[];
 	readonly renderParts: readonly DynamicEntityRenderPart[];
 	readonly resourceId: string;
-	readonly sourceAssets: readonly StaticObjectSourceAssetFacts[];
+	readonly sourceAssets: readonly ObjectVisualSourceAssetFacts[];
 	/** Active atlas placements pinned while this immutable visual resource is resident. */
 	readonly textureDependencies: readonly TextureResourceDependencies[];
-	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
+	readonly textureRefs: readonly ObjectVisualTextureRefFacts[];
 	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
 }
 
@@ -329,11 +331,11 @@ export interface DynamicVisualObjectIdentity {
 
 /** Runtime-local visual part identity independent from static object instances. */
 export interface DynamicVisualPartIdentity {
-	readonly gfxObj: StaticObjectSourceIdentity;
+	readonly gfxObj: ObjectVisualSourceIdentity;
 	readonly kind: "dynamic-visual-part";
 	readonly object: DynamicVisualObjectIdentity;
 	readonly partIndex: number;
-	readonly source: StaticObjectSourceIdentity;
+	readonly source: ObjectVisualSourceIdentity;
 }
 
 /** Runtime-local material slot identity used by dynamic visual material planning. */
@@ -627,15 +629,15 @@ type DynamicEntityVisualResourceState =
 	| DynamicEntityVisualResourcesFailedState;
 
 interface DynamicEntityVisualResourcesReadyState {
-	readonly materialSources: readonly StaticObjectMaterialSourceFacts[];
+	readonly materialSources: readonly ObjectVisualMaterialSourceFacts[];
 	readonly materialSlots: readonly DynamicEntityMaterialSlotRequirement[];
-	readonly paletteSources: readonly StaticObjectPaletteSourceFacts[];
+	readonly paletteSources: readonly ObjectVisualPaletteSourceFacts[];
 	readonly renderParts: readonly DynamicEntityRenderPart[];
-	readonly sourceAssets: readonly StaticObjectSourceAssetFacts[];
+	readonly sourceAssets: readonly ObjectVisualSourceAssetFacts[];
 	readonly status: "ready";
 	/** Active atlas placements pinned while this immutable visual resource is resident. */
 	readonly textureDependencies: readonly TextureResourceDependencies[];
-	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
+	readonly textureRefs: readonly ObjectVisualTextureRefFacts[];
 	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
 }
 
@@ -655,15 +657,15 @@ interface DynamicEntityVisualResourcesFailedState {
 
 export interface DynamicEntityMaterialSlotRequirement {
 	readonly identity: DynamicVisualMaterialSlotIdentity;
-	readonly material: StaticObjectMaterialSourceFacts["identity"];
+	readonly material: ObjectVisualMaterialSourceFacts["identity"];
 	readonly partIndex: number;
-	readonly slot: StaticObjectPartMaterialSlotFacts;
+	readonly slot: ObjectVisualPartMaterialSlotFacts;
 }
 
 export interface DynamicEntityTextureRequirement {
 	readonly dataUse: MaterialTextureDataUseIdentity;
 	readonly key: DynamicEntityResourceKey;
-	readonly material: StaticObjectMaterialSourceFacts["identity"];
+	readonly material: ObjectVisualMaterialSourceFacts["identity"];
 	readonly role:
 		| "base-color"
 		| "base-index"
@@ -679,7 +681,7 @@ export interface DynamicEntityTextureRequirement {
 export interface DynamicEntityUnsupportedMaterialReason {
 	readonly code: string;
 	readonly message: string;
-	readonly material: StaticObjectMaterialSourceFacts["identity"] | null;
+	readonly material: ObjectVisualMaterialSourceFacts["identity"] | null;
 }
 
 export type DynamicEntityRequiredResource =

@@ -14,29 +14,18 @@ import type {
 } from "./contracts";
 import { createDynamicVisualResourceId } from "./contracts";
 import { createPreparedTextureHostKey } from "../assets/preparation/prepared-texture-source";
-import { createStaticMaterialTableEntry } from "../static/bake/static-material-adapter";
-import {
-	createStaticMaterialTextureSamplingPolicy,
-	resolveRepeatedStaticMaterialPrimaryWrapMode,
-} from "../static/bake/static-material-texture-policy";
+import { createStaticMaterialTextureSamplingPolicy } from "../static/bake/static-material-texture-policy";
 import type {
 	MaterialTextureDataUseIdentity,
-	StaticMaterialTableEntry,
 	StaticObjectPartMaterialSlotFacts,
 	StaticObjectSourceAssetFacts,
 	StaticObjectSourceGeometryAttachment,
 } from "../static/contracts";
 import {
-	createObjectVisualMaterialUseKey,
 	type ObjectVisualMaterialFallbackReason,
 	type ObjectVisualMaterialPlan,
 } from "../visual/object-visual-material-planner";
-import {
-	describeStaticObjectCanonicalGeometryIdentity,
-	describeStaticObjectSourceGeometryIdentity,
-	getStaticObjectCanonicalGeometryIdentity,
-} from "../static/objects/static-object-source-assets";
-import { MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW } from "../renderer/types";
+import { describeStaticObjectCanonicalGeometryIdentity } from "../static/objects/static-object-source-assets";
 import {
 	classifyTexturePlacementPool,
 	classifyTextureUsagePurpose,
@@ -44,23 +33,26 @@ import {
 	createStaticAuthoredDynamicTexturePlacementBucketKey,
 	type TexturePlacementItemId,
 	type TexturePlacementBucketKey,
-	type TextureResourceDependencies,
-	type TextureResourceRoleDependency,
 	type TextureUsagePurpose,
 } from "../textures/placement";
-import {
-	createObjectMaterialDrawUnitPartitionKey,
-	splitObjectMaterialPartitionByMaterialTableBudget,
-} from "../visual/object-material-draw-unit-partition";
 import {
 	createObjectVisualTexturePlacementIntents,
 	type ObjectVisualTexturePlacementRequirement,
 } from "../visual/object-visual-texture-placement-planner";
 import {
 	createDynamicObjectVisualBundleExpansion,
+	createDynamicObjectVisualSourceAssets,
 	createDynamicObjectVisualRecipePlan,
 } from "./object-visual-bundle-producer";
-import type { ObjectVisualTextureRecipe } from "../visual/object-visual-recipe-bundle";
+import {
+	bakeObjectVisuals,
+	type ObjectVisualBakeResult,
+	type ObjectVisualTextureBinding,
+} from "../visual/object-visual-baker";
+import type {
+	ObjectVisualTextureRecipe,
+	ObjectVisualTextureRecipeId,
+} from "../visual/object-visual-recipe-bundle";
 
 export interface DynamicVisualBaker {
 	bake(input: DynamicVisualBakeInput): Promise<DynamicVisualBakeResult>;
@@ -70,31 +62,6 @@ interface DynamicMaterialSlotFacts {
 	readonly identity: DynamicVisualMaterialSlotIdentity;
 	readonly partIndex: number;
 	readonly partSlot: StaticObjectPartMaterialSlotFacts;
-}
-
-interface DynamicMaterialRenderEntry {
-	readonly entry: StaticMaterialTableEntry;
-	readonly family: DynamicMaterialRenderFamily;
-	readonly pass: "opaque" | "alpha-test" | "transparent" | "additive";
-	readonly partitionMaterial: Parameters<
-		typeof createObjectMaterialDrawUnitPartitionKey
-	>[0]["material"];
-	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
-}
-
-type DynamicMaterialRenderFamily =
-	| "flat-color"
-	| "indexed-paletted"
-	| "texture-rgba";
-
-interface DynamicTriangleRenderPrimitive {
-	readonly materialEntry: DynamicMaterialRenderEntry;
-	readonly materialEntryKey: string;
-	readonly triangle: StaticObjectSourceAssetFacts["parts"][number]["triangles"][number];
-	readonly textureRequirements: readonly {
-		readonly placementItemId: TexturePlacementItemId;
-		readonly purpose: TextureUsagePurpose;
-	}[];
 }
 
 type PendingDynamicEntityTextureRequirement = Omit<
@@ -206,28 +173,40 @@ function bakeDynamicVisualRecipe(options: {
 		texturePlacementSnapshot: options.texturePlacementSnapshot,
 		textureRequirements,
 	});
+	const objectVisual = createDynamicObjectVisualBundleExpansion({
+		recipe,
+		sourceGeometry: [...options.sourceGeometryByKey.values()],
+	});
+	if (objectVisual.resolution.kind !== "ready") {
+		throw new Error(
+			`Dynamic object visual bundle missing dependencies: ${objectVisual.resolution.missingDependencies
+				.map((dependency) => `${dependency.sourceKind}:${dependency.sourceId}`)
+				.join(", ")}`,
+		);
+	}
+	const objectVisualBake = bakeObjectVisuals({
+		bundle: objectVisual.resolution.bundle,
+		geometryBuffers: objectVisual.geometryBuffers,
+		renderPartIdPrefix: resourceId,
+		textureBindings: createDynamicObjectVisualTextureBindings({
+			resourceId,
+			textureRecipes: objectVisual.resolution.bundle.textureRecipes,
+			textureRequirements,
+		}),
+	});
 	return {
 		entityId: recipe.entityId,
 		materialSlots: materialSlots.map(createMaterialSlotRequirement),
 		materialSources: recipe.visual.materialSources,
-		objectVisual: createDynamicObjectVisualBundleExpansion({
-			recipe,
-			sourceGeometry: [...options.sourceGeometryByKey.values()],
-		}),
+		objectVisual,
 		paletteSources: recipe.visual.paletteSources,
-		renderParts: createDynamicRenderParts({
-			materialPlans: materialPlans.materialPlans,
-			sourceAssets: recipe.visual.sourceAssets,
-			sourceGeometryByKey: options.sourceGeometryByKey,
-			texturePlacementSnapshot: options.texturePlacementSnapshot,
-			textureRequirements,
+		renderParts: createDynamicRenderPartsFromObjectVisualBake({
+			bakeResult: objectVisualBake,
+			recipe,
 		}),
 		resourceId,
-		sourceAssets: recipe.visual.sourceAssets,
-		textureDependencies: createDynamicTextureDependencies({
-			resourceId,
-			textureRequirements,
-		}),
+		sourceAssets: createDynamicObjectVisualSourceAssets(recipe),
+		textureDependencies: objectVisualBake.textureDependencies,
 		textureRefs: recipe.visual.textureRefs,
 		textureRequirements,
 	};
@@ -671,36 +650,108 @@ function requireDynamicPlacementItemId(options: {
 	return placementItemId;
 }
 
-function createDynamicTextureDependencies(options: {
+function createDynamicObjectVisualTextureBindings(options: {
 	readonly resourceId: string;
+	readonly textureRecipes: ReadonlyMap<
+		ObjectVisualTextureRecipeId,
+		ObjectVisualTextureRecipe
+	>;
 	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
-}): readonly TextureResourceDependencies[] {
-	const roles = createDynamicTextureRoleDependencies(
-		options.textureRequirements,
+}): ReadonlyMap<ObjectVisualTextureRecipeId, ObjectVisualTextureBinding> {
+	return new Map(
+		[...options.textureRecipes.entries()].map(
+			([textureRecipeId, textureRecipe]) => {
+				const requirement = requireTextureRequirementForRecipe({
+					textureRecipe,
+					textureRequirements: options.textureRequirements,
+				});
+				return [
+					textureRecipeId,
+					{
+						dependency: {
+							resourceId: options.resourceId,
+							roles: [
+								{
+									itemIds: [requirement.textureUseId],
+									purpose: classifyDynamicRequirementPurpose(requirement),
+								},
+							],
+						},
+						textureUseId: requirement.textureUseId,
+					},
+				] as const;
+			},
+		),
 	);
-	if (roles.length === 0) {
-		return [];
-	}
-	return [{ resourceId: options.resourceId, roles }];
 }
 
-function createDynamicTextureRoleDependencies(
-	textureRequirements: readonly DynamicEntityTextureRequirement[],
-): readonly TextureResourceRoleDependency[] {
-	const itemIdsByPurpose = new Map<TextureUsagePurpose, Set<string>>();
-	for (const requirement of textureRequirements) {
-		const purpose = classifyDynamicRequirementPurpose(requirement);
-		let itemIds = itemIdsByPurpose.get(purpose);
-		if (!itemIds) {
-			itemIds = new Set<string>();
-			itemIdsByPurpose.set(purpose, itemIds);
-		}
-		itemIds.add(requirement.textureUseId);
+function requireTextureRequirementForRecipe(options: {
+	readonly textureRecipe: ObjectVisualTextureRecipe;
+	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
+}): DynamicEntityTextureRequirement {
+	const role = dynamicRoleForTextureUsage(options.textureRecipe.usage);
+	const requirement = options.textureRequirements.find(
+		(candidate) =>
+			candidate.role === role &&
+			createMaterialTextureDataUseSignature(candidate.dataUse) ===
+				createMaterialTextureDataUseSignature(options.textureRecipe.dataUse),
+	);
+	if (!requirement) {
+		throw new Error(
+			`Dynamic object visual texture recipe ${options.textureRecipe.usage} has no matching texture requirement.`,
+		);
 	}
-	return Array.from(itemIdsByPurpose, ([purpose, itemIds]) => ({
-		itemIds: Array.from(itemIds).sort(),
-		purpose,
-	})).sort((left, right) => left.purpose.localeCompare(right.purpose));
+	return requirement;
+}
+
+function createDynamicRenderPartsFromObjectVisualBake(options: {
+	readonly bakeResult: ObjectVisualBakeResult;
+	readonly recipe: DynamicVisualBakeInput["recipes"][number];
+}): readonly DynamicEntityRenderPart[] {
+	return options.bakeResult.renderParts.map((renderPart) => {
+		const partIndex = requireSingleDynamicSourcePartIndex(renderPart);
+		return {
+			...renderPart.sourceLocalPayload,
+			partIndex,
+			renderPartId: renderPart.renderPartId,
+			sourceAssetId: createDynamicRenderPartSourceAssetId({
+				partIndex,
+				recipe: options.recipe,
+			}),
+		};
+	});
+}
+
+function requireSingleDynamicSourcePartIndex(
+	renderPart: ObjectVisualBakeResult["renderParts"][number],
+): number {
+	if (renderPart.sourcePartIndices.length !== 1) {
+		throw new Error(
+			`Dynamic object visual render part ${renderPart.renderPartId} maps to ${renderPart.sourcePartIndices.length} source parts.`,
+		);
+	}
+	const partIndex = renderPart.sourcePartIndices[0];
+	if (partIndex === undefined) {
+		throw new Error(
+			`Dynamic object visual render part ${renderPart.renderPartId} has no source part index.`,
+		);
+	}
+	return partIndex;
+}
+
+function createDynamicRenderPartSourceAssetId(options: {
+	readonly partIndex: number;
+	readonly recipe: DynamicVisualBakeInput["recipes"][number];
+}): string {
+	const part = options.recipe.visual.setupModel.parts.find(
+		(candidate) => candidate.partIndex === options.partIndex,
+	);
+	if (!part) {
+		throw new Error(
+			`Dynamic visual ${options.recipe.entityId} has no setup part ${options.partIndex}.`,
+		);
+	}
+	return `gfx-obj/${formatHex32(part.gfxObj.sourceDid)}`;
 }
 
 function classifyDynamicRequirementPurpose(
@@ -726,546 +777,6 @@ function createUnsupportedMaterialReasons(
 		material: reason.material,
 		message: reason.message,
 	}));
-}
-
-function createDynamicRenderParts(options: {
-	readonly materialPlans: readonly ObjectVisualMaterialPlan[];
-	readonly sourceAssets: readonly StaticObjectSourceAssetFacts[];
-	readonly sourceGeometryByKey: ReadonlyMap<
-		string,
-		StaticObjectSourceGeometryAttachment
-	>;
-	readonly texturePlacementSnapshot: DynamicVisualBakeInput["texturePlacementSnapshot"];
-	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
-}): readonly DynamicEntityRenderPart[] {
-	const materialEntryByUseKey = createDynamicMaterialEntriesByUseKey(
-		options.materialPlans,
-		options.textureRequirements,
-	);
-	const parts: DynamicEntityRenderPart[] = [];
-	for (const sourceAsset of options.sourceAssets) {
-		for (const part of sourceAsset.parts) {
-			const canonical = getStaticObjectCanonicalGeometryIdentity(part.geometry);
-			const attachment = options.sourceGeometryByKey.get(
-				describeStaticObjectCanonicalGeometryIdentity(canonical),
-			);
-			if (!attachment) {
-				throw new Error(
-					`Dynamic render part ${part.partIndex} missing source geometry ${describeStaticObjectCanonicalGeometryIdentity(
-						canonical,
-					)} for source part ${describeStaticObjectSourceGeometryIdentity(
-						part.geometry,
-					)}.`,
-				);
-			}
-			parts.push(
-				...createDynamicRenderPartPartitions({
-					materialEntryByUseKey,
-					part,
-					sourceGeometry: attachment,
-					texturePlacementSnapshot: options.texturePlacementSnapshot,
-				}),
-			);
-		}
-	}
-	return parts;
-}
-
-function createDynamicRenderPartPartitions(options: {
-	readonly materialEntryByUseKey: ReadonlyMap<
-		string,
-		DynamicMaterialRenderEntry
-	>;
-	readonly part: StaticObjectSourceAssetFacts["parts"][number];
-	readonly sourceGeometry: StaticObjectSourceGeometryAttachment;
-	readonly texturePlacementSnapshot: DynamicVisualBakeInput["texturePlacementSnapshot"];
-}): readonly DynamicEntityRenderPart[] {
-	const triangles = options.part.triangles;
-	const sourcePositions = options.sourceGeometry.buffer.positions;
-	const sourceTexCoords = options.sourceGeometry.buffer.texCoords;
-	const renderEntries = uniqueMaterialRenderEntries(
-		options.part.materialSlots.flatMap((slot) => {
-			const materialUseKey = createDynamicSlotMaterialUseKey(slot);
-			const renderEntry = options.materialEntryByUseKey.get(materialUseKey);
-			if (!renderEntry) {
-				throw new Error(
-					`Dynamic render part ${options.part.partIndex} has no material entry for material use ${materialUseKey}.`,
-				);
-			}
-			return [renderEntry];
-		}),
-	);
-	if (renderEntries.length === 0) {
-		throw new Error(
-			`Dynamic render part ${options.part.partIndex} has no material entries.`,
-		);
-	}
-	const materialEntryBySurfaceId = new Map(
-		options.part.materialSlots.flatMap((slot) => {
-			const renderEntry = renderEntries.find((entry) =>
-				entry.entry.materialIds.includes(slot.material.materialId),
-			);
-			if (!renderEntry) {
-				throw new Error(
-					`Dynamic render part ${options.part.partIndex} cannot map surface ${slot.geometrySurfaceId} to a material entry.`,
-				);
-			}
-			return uniqueNumbers([
-				slot.geometrySurfaceId,
-				slot.materialSurfaceId,
-			]).map((surfaceId) => [surfaceId, renderEntry] as const);
-		}),
-	);
-	const primitivesByPartitionKey = new Map<
-		string,
-		DynamicTriangleRenderPrimitive[]
-	>();
-	for (
-		let triangleIndex = 0;
-		triangleIndex < triangles.length;
-		triangleIndex += 1
-	) {
-		const triangle = triangles[triangleIndex];
-		if (!triangle) {
-			continue;
-		}
-		const materialEntry = resolveDynamicTriangleMaterialEntry({
-			materialEntryBySurfaceId,
-			partIndex: options.part.partIndex,
-			triangleGeometrySurfaceId: triangle.geometrySurfaceId,
-		});
-		const materialEntryKey = createDynamicMaterialRenderEntryKey(materialEntry);
-		const objectMaterialPartitionKey = createObjectMaterialDrawUnitPartitionKey(
-			{
-				diagnosticSubject: `Dynamic render part ${options.part.partIndex}`,
-				includeConcreteEntryInKey: false,
-				material: materialEntry.partitionMaterial,
-				texturePlacementSnapshot: options.texturePlacementSnapshot,
-				textureRequirements: materialEntry.textureRequirements.map(
-					(requirement) => ({
-						placementItemId: requirement.placementItemId,
-						purpose: classifyDynamicRequirementPurpose(requirement),
-					}),
-				),
-			},
-		);
-		const existing = primitivesByPartitionKey.get(
-			objectMaterialPartitionKey.key,
-		);
-		const primitive = {
-			materialEntry,
-			materialEntryKey,
-			textureRequirements: materialEntry.textureRequirements.map(
-				(requirement) => ({
-					placementItemId: requirement.placementItemId,
-					purpose: classifyDynamicRequirementPurpose(requirement),
-				}),
-			),
-			triangle,
-		};
-		if (existing) {
-			existing.push(primitive);
-		} else {
-			primitivesByPartitionKey.set(objectMaterialPartitionKey.key, [primitive]);
-		}
-	}
-	return [...primitivesByPartitionKey.entries()]
-		.sort(([left], [right]) => left.localeCompare(right))
-		.flatMap(([, primitives], partitionIndex) =>
-			splitObjectMaterialPartitionByMaterialTableBudget({
-				maxMaterialEntriesPerPartition: MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
-				primitives,
-			}).map((splitPrimitives, splitIndex) =>
-				createDynamicRenderPartPartition({
-					part: options.part,
-					partitionIndex,
-					primitives: splitPrimitives,
-					sourcePositions,
-					sourceTexCoords,
-					splitIndex,
-				}),
-			),
-		);
-}
-
-function createDynamicRenderPartPartition(options: {
-	readonly partitionIndex: number;
-	readonly part: StaticObjectSourceAssetFacts["parts"][number];
-	readonly primitives: readonly DynamicTriangleRenderPrimitive[];
-	readonly sourcePositions: Float32Array;
-	readonly sourceTexCoords: Float32Array;
-	readonly splitIndex: number;
-}): DynamicEntityRenderPart {
-	const positions = new Float32Array(options.primitives.length * 9);
-	const texCoords = new Float32Array(options.primitives.length * 6);
-	const materialSlotIndices = new Float32Array(options.primitives.length * 3);
-	const indices =
-		options.primitives.length * 3 > 65535
-			? new Uint32Array(options.primitives.length * 3)
-			: new Uint16Array(options.primitives.length * 3);
-	const renderEntries = uniqueMaterialRenderEntries(
-		options.primitives.map((primitive) => primitive.materialEntry),
-	);
-	const localSlotByEntryKey = new Map(
-		renderEntries.map((entry, localSlot) => [
-			createDynamicMaterialRenderEntryKey(entry),
-			localSlot,
-		]),
-	);
-	const materialEntries = renderEntries.map((entry, localSlot) => ({
-		...entry.entry,
-		slot: localSlot,
-	}));
-	for (
-		let triangleIndex = 0;
-		triangleIndex < options.primitives.length;
-		triangleIndex += 1
-	) {
-		const primitive = options.primitives[triangleIndex];
-		if (!primitive) {
-			continue;
-		}
-		const { materialEntry, triangle } = primitive;
-		for (let vertex = 0; vertex < 3; vertex += 1) {
-			const sourceVertexIndex = triangle.firstVertex + vertex;
-			const targetVertexIndex = triangleIndex * 3 + vertex;
-			assertDynamicSourceVertexAvailable({
-				partIndex: options.part.partIndex,
-				sourcePositions: options.sourcePositions,
-				sourceTexCoords: options.sourceTexCoords,
-				sourceVertexIndex,
-			});
-			positions[targetVertexIndex * 3] = options.sourcePositions[
-				sourceVertexIndex * 3
-			] as number;
-			positions[targetVertexIndex * 3 + 1] = options.sourcePositions[
-				sourceVertexIndex * 3 + 1
-			] as number;
-			positions[targetVertexIndex * 3 + 2] = options.sourcePositions[
-				sourceVertexIndex * 3 + 2
-			] as number;
-			texCoords[targetVertexIndex * 2] = options.sourceTexCoords[
-				sourceVertexIndex * 2
-			] as number;
-			texCoords[targetVertexIndex * 2 + 1] = options.sourceTexCoords[
-				sourceVertexIndex * 2 + 1
-			] as number;
-			const materialLocalSlot = localSlotByEntryKey.get(
-				createDynamicMaterialRenderEntryKey(materialEntry),
-			);
-			if (materialLocalSlot === undefined) {
-				throw new Error(
-					`Dynamic render part ${options.part.partIndex} cannot remap material slot ${materialEntry.entry.slot}.`,
-				);
-			}
-			materialSlotIndices[targetVertexIndex] = materialLocalSlot;
-			indices[targetVertexIndex] = targetVertexIndex;
-		}
-	}
-	const firstMaterial = renderEntries[0] as DynamicMaterialRenderEntry;
-	return {
-		bounds: options.part.bounds,
-		indexType: indices instanceof Uint16Array ? "uint16" : "uint32",
-		indices,
-		materialEntries,
-		materialFamily: firstMaterial.family,
-		materialPass: firstMaterial.pass,
-		materialSlotIndices,
-		partIndex: options.part.partIndex,
-		positions,
-		renderState: firstMaterial.entry.renderState,
-		renderPartId: createDynamicRenderPartId({
-			partIndex: options.part.partIndex,
-			partitionIndex: options.partitionIndex,
-			splitIndex: options.splitIndex,
-		}),
-		sourceAssetId: `gfx-obj/${options.part.gfxObj.sourceDid.toString(16).padStart(8, "0")}`,
-		texCoords,
-		textureUseIds: uniqueSortedStrings(
-			materialEntries.flatMap((entry) =>
-				[
-					entry.primaryTextureUseId,
-					entry.indexTextureUseId,
-					entry.paletteTextureUseId,
-					entry.detailTextureUseId,
-				].filter(
-					(textureUseId): textureUseId is string => textureUseId !== null,
-				),
-			),
-		),
-		triangleCount: options.primitives.length,
-		vertexCount: options.primitives.length * 3,
-	};
-}
-
-function resolveDynamicTriangleMaterialEntry(options: {
-	readonly materialEntryBySurfaceId: ReadonlyMap<
-		number,
-		DynamicMaterialRenderEntry
-	>;
-	readonly partIndex: number;
-	readonly triangleGeometrySurfaceId: number | null;
-}): DynamicMaterialRenderEntry {
-	if (options.triangleGeometrySurfaceId === null) {
-		if (options.materialEntryBySurfaceId.size === 1) {
-			return [
-				...options.materialEntryBySurfaceId.values(),
-			][0] as DynamicMaterialRenderEntry;
-		}
-		throw new Error(
-			`Dynamic render part ${options.partIndex} has a triangle without geometry surface id and ${options.materialEntryBySurfaceId.size} material slots.`,
-		);
-	}
-	const materialEntry = options.materialEntryBySurfaceId.get(
-		options.triangleGeometrySurfaceId,
-	);
-	if (materialEntry === undefined) {
-		throw new Error(
-			`Dynamic render part ${options.partIndex} has no material slot for geometry surface ${options.triangleGeometrySurfaceId}.`,
-		);
-	}
-	return materialEntry;
-}
-
-function createDynamicSlotMaterialUseKey(
-	slot: StaticObjectPartMaterialSlotFacts,
-): string {
-	return createObjectVisualMaterialUseKey(
-		slot.material,
-		slot.paletteOverride,
-		slot.paletteViews,
-	);
-}
-
-function assertDynamicSourceVertexAvailable(options: {
-	readonly partIndex: number;
-	readonly sourcePositions: Float32Array;
-	readonly sourceTexCoords: Float32Array;
-	readonly sourceVertexIndex: number;
-}): void {
-	const positionOffset = options.sourceVertexIndex * 3;
-	const texCoordOffset = options.sourceVertexIndex * 2;
-	if (positionOffset + 2 >= options.sourcePositions.length) {
-		throw new Error(
-			`Dynamic render part ${options.partIndex} triangle references missing position vertex ${options.sourceVertexIndex}.`,
-		);
-	}
-	if (texCoordOffset + 1 >= options.sourceTexCoords.length) {
-		throw new Error(
-			`Dynamic render part ${options.partIndex} triangle references missing texcoord vertex ${options.sourceVertexIndex}.`,
-		);
-	}
-}
-
-function createDynamicMaterialEntriesByUseKey(
-	materialPlans: readonly ObjectVisualMaterialPlan[],
-	textureRequirements: readonly DynamicEntityTextureRequirement[],
-): ReadonlyMap<string, DynamicMaterialRenderEntry> {
-	return new Map(
-		materialPlans.map((plan, slot): [string, DynamicMaterialRenderEntry] => [
-			plan.materialUseKey,
-			createDynamicMaterialEntry(plan, slot, textureRequirements),
-		]),
-	);
-}
-
-function resolveDynamicTextureUseId(options: {
-	readonly dataUse: MaterialTextureDataUseIdentity;
-	readonly materialId: number;
-	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
-}): string {
-	const dataUseSignature = createMaterialTextureDataUseSignature(
-		options.dataUse,
-	);
-	const requirement = options.textureRequirements.find(
-		(candidate) =>
-			candidate.material.materialId === options.materialId &&
-			createMaterialTextureDataUseSignature(candidate.dataUse) ===
-				dataUseSignature,
-	);
-	if (!requirement) {
-		throw new Error(
-			`Dynamic material 0x${options.materialId.toString(16).padStart(8, "0")} has no texture use id for ${dataUseSignature}.`,
-		);
-	}
-	return requirement.textureUseId;
-}
-
-function createDynamicMaterialEntry(
-	plan: ObjectVisualMaterialPlan,
-	slot: number,
-	textureRequirements: readonly DynamicEntityTextureRequirement[],
-): DynamicMaterialRenderEntry {
-	const dataUses = plan.textureRoles.map((role) => role.dataUse);
-	const textureWrapMode =
-		resolveRepeatedStaticMaterialPrimaryWrapMode(dataUses);
-	const materialTextureRequirements = resolveDynamicMaterialTextureRequirements(
-		plan,
-		textureRequirements,
-	);
-	const family = resolveDynamicRenderableMaterialFamily(plan);
-	return {
-		entry: createStaticMaterialTableEntry({
-			createTextureUseId: (dataUse) =>
-				resolveDynamicTextureUseId({
-					dataUse,
-					materialId: plan.material.materialId,
-					textureRequirements,
-				}),
-			materialIds: [plan.material.materialId],
-			plan,
-			slot,
-			textureWrapMode,
-		}),
-		family,
-		pass: plan.pass,
-		partitionMaterial: {
-			alphaMode: plan.alphaPolicy.mode,
-			blendMode: plan.blend.mode,
-			family,
-			materialColorKey: createDynamicMaterialColorKey(plan),
-			materialEntryKey: createDynamicMaterialPlanEntryKey(plan),
-			pass: plan.pass,
-			renderCoverage: null,
-			textureRoleLayoutKey: createDynamicTextureRoleLayoutKey(plan),
-			textureRoleSchemaKey: createDynamicTextureRoleSchemaKey(plan),
-			textureWrapMode,
-		},
-		textureRequirements: materialTextureRequirements,
-	};
-}
-
-function resolveDynamicMaterialTextureRequirements(
-	plan: ObjectVisualMaterialPlan,
-	textureRequirements: readonly DynamicEntityTextureRequirement[],
-): readonly DynamicEntityTextureRequirement[] {
-	return plan.textureRoles.map((role) =>
-		resolveDynamicTextureRequirement({
-			dataUse: role.dataUse,
-			materialId: plan.material.materialId,
-			textureRequirements,
-		}),
-	);
-}
-
-function resolveDynamicTextureRequirement(options: {
-	readonly dataUse: MaterialTextureDataUseIdentity;
-	readonly materialId: number;
-	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
-}): DynamicEntityTextureRequirement {
-	const dataUseSignature = createMaterialTextureDataUseSignature(
-		options.dataUse,
-	);
-	const requirement = options.textureRequirements.find(
-		(candidate) =>
-			candidate.material.materialId === options.materialId &&
-			createMaterialTextureDataUseSignature(candidate.dataUse) ===
-				dataUseSignature,
-	);
-	if (!requirement) {
-		throw new Error(
-			`Dynamic material 0x${options.materialId.toString(16).padStart(8, "0")} has no texture requirement for ${dataUseSignature}.`,
-		);
-	}
-	return requirement;
-}
-
-function createDynamicMaterialColorKey(plan: ObjectVisualMaterialPlan): string {
-	return [plan.color.join(","), plan.emissiveColor.join(",")].join("|");
-}
-
-function createDynamicMaterialPlanEntryKey(
-	plan: ObjectVisualMaterialPlan,
-): string {
-	return [
-		plan.material.materialId.toString(16).padStart(8, "0"),
-		plan.materialUseKey,
-	].join(":");
-}
-
-function createDynamicTextureRoleLayoutKey(
-	plan: ObjectVisualMaterialPlan,
-): string {
-	return plan.textureRoles
-		.map(
-			(role) =>
-				`${role.role}:${createMaterialTextureDataUseSignature(role.dataUse)}`,
-		)
-		.sort()
-		.join("|");
-}
-
-function createDynamicTextureRoleSchemaKey(
-	plan: ObjectVisualMaterialPlan,
-): string {
-	return plan.textureRoles
-		.map((role) => role.role)
-		.sort()
-		.join("|");
-}
-
-function resolveDynamicRenderableMaterialFamily(
-	plan: ObjectVisualMaterialPlan,
-): DynamicMaterialRenderFamily {
-	if (
-		plan.family === "flat-color" ||
-		plan.family === "indexed-paletted" ||
-		plan.family === "texture-rgba"
-	) {
-		return plan.family;
-	}
-	throw new Error(
-		`Dynamic material 0x${plan.material.materialId.toString(16).padStart(8, "0")} has unrenderable family ${plan.family}.`,
-	);
-}
-
-function uniqueMaterialRenderEntries(
-	entries: readonly DynamicMaterialRenderEntry[],
-): readonly DynamicMaterialRenderEntry[] {
-	const byEntryKey = new Map<string, DynamicMaterialRenderEntry>();
-	for (const entry of entries) {
-		byEntryKey.set(createDynamicMaterialRenderEntryKey(entry), entry);
-	}
-	return [...byEntryKey.values()].sort(
-		(left, right) => left.entry.slot - right.entry.slot,
-	);
-}
-
-function createDynamicMaterialRenderEntryKey(
-	entry: DynamicMaterialRenderEntry,
-): string {
-	const materialIds = entry.entry.materialIds
-		.map((materialId) => materialId.toString(16).padStart(8, "0"))
-		.join(",");
-	return [
-		materialIds,
-		entry.entry.primaryTextureUseId ?? "none",
-		entry.entry.indexTextureUseId ?? "none",
-		entry.entry.paletteTextureUseId ?? "none",
-		entry.entry.detailTextureUseId ?? "none",
-		entry.family,
-		entry.pass,
-	].join("|");
-}
-
-function createDynamicRenderPartId(options: {
-	readonly partIndex: number;
-	readonly partitionIndex: number;
-	readonly splitIndex: number;
-}): string {
-	return [
-		`part:${options.partIndex}`,
-		`partition:${options.partitionIndex}`,
-		`split:${options.splitIndex}`,
-	].join("/");
-}
-
-function uniqueNumbers(values: readonly number[]): readonly number[] {
-	return [...new Set(values)];
-}
-
-function uniqueSortedStrings(values: readonly string[]): readonly string[] {
-	return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
 function formatHex32(value: number): string {

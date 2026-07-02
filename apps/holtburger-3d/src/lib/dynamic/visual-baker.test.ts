@@ -122,7 +122,7 @@ describe("dynamic visual baker", () => {
 		});
 	});
 
-	it("splits render parts by final textureRefId while preserving source partIndex", () => {
+	it("projects shared object visual render parts while preserving source partIndex", () => {
 		const sourceAsset = createSourceAsset({ surfaceIds: [7, 8] });
 		const recipe = createRecipe({
 			materialSources: [
@@ -150,7 +150,7 @@ describe("dynamic visual baker", () => {
 			batchId: "dynamic-visual-batch:texture-ref-split",
 			recipes: [recipe],
 			revision: 16,
-			sourceGeometry: [createGeometryAttachment({ triangleCount: 2 })],
+			sourceGeometry: [createGeometryAttachment({ surfaceIds: [7, 8] })],
 			texturePlacementSnapshot: placementSnapshot,
 			texturePlannings: [createDynamicVisualTexturePlanning(recipe)],
 		});
@@ -171,77 +171,13 @@ describe("dynamic visual baker", () => {
 		).toEqual([
 			{
 				partIndex: 0,
-				renderPartId: "part:0/partition:0/split:0",
+				renderPartId: "dynamic-visual-resource:runtime:test:render-part:0",
 				textureUseIds: [product.resource.textureRequirements[0]?.textureUseId],
 			},
 			{
 				partIndex: 0,
-				renderPartId: "part:0/partition:1/split:0",
+				renderPartId: "dynamic-visual-resource:runtime:test:render-part:1",
 				textureUseIds: [product.resource.textureRequirements[1]?.textureUseId],
-			},
-		]);
-	});
-
-	it("splits render parts by the object material table budget", () => {
-		const surfaceIds = Array.from({ length: 9 }, (_, index) => 7 + index);
-		const sourceAsset = createSourceAsset({ surfaceIds });
-		const materialSources = surfaceIds.map((surfaceId, index) =>
-			createTexturedMaterial({
-				materialId: 0x08000001 + index,
-				renderSurfaceId: 0x06000010 + index,
-				surfaceId,
-				surfaceTextureId: 0x05000010 + index,
-			}),
-		);
-		const recipe = createRecipe({
-			materialSources,
-			sourceAsset,
-			textureRefs: createTextureRefs(
-				materialSources.map((material) => {
-					if (material.source.kind !== "texture") {
-						throw new Error("Expected textured material.");
-					}
-					return material.source.selectedRenderSurface.renderSurfaceId;
-				}),
-			),
-		});
-
-		const result = bakeDynamicVisuals({
-			batchId: "dynamic-visual-batch:budget-split",
-			recipes: [recipe],
-			revision: 17,
-			sourceGeometry: [
-				createGeometryAttachment({ triangleCount: surfaceIds.length }),
-			],
-			texturePlacementSnapshot: createPlacementSnapshotForRecipe(recipe, {
-				textureRefIdsByItemIndex: Array.from(
-					{ length: surfaceIds.length },
-					() => "shared-texture-ref",
-				),
-			}),
-			texturePlannings: [createDynamicVisualTexturePlanning(recipe)],
-		});
-
-		expect(result.failures).toEqual([]);
-		const product = result.products[0];
-		expect(product?.kind).toBe("baked");
-		if (product?.kind !== "baked") {
-			throw new Error("Expected baked product.");
-		}
-		expect(product.resource.renderParts).toHaveLength(2);
-		expect(
-			product.resource.renderParts.map((part) => ({
-				materialEntryCount: part.materialEntries.length,
-				renderPartId: part.renderPartId,
-			})),
-		).toEqual([
-			{
-				materialEntryCount: 8,
-				renderPartId: "part:0/partition:0/split:0",
-			},
-			{
-				materialEntryCount: 1,
-				renderPartId: "part:0/partition:0/split:1",
 			},
 		]);
 	});
@@ -296,7 +232,7 @@ describe("dynamic visual baker", () => {
 			{
 				entityId: "runtime:test",
 				message:
-					"Dynamic render part 0 missing source geometry static-object-canonical-geometry|gfx-obj:16777217|part:0 for source part static-object-source-geometry|setup-model:33555429|static-object-canonical-geometry|gfx-obj:16777217|part:0.",
+					"Dynamic object visual bundle missing dependencies: static-object-source-geometry:static-object-canonical-geometry|gfx-obj:16777217|part:0",
 				stage: "render-part-extraction",
 			},
 		]);
@@ -445,10 +381,11 @@ function createSourceAsset(
 
 function createGeometryAttachment(
 	options: {
+		readonly surfaceIds?: readonly number[];
 		readonly triangleCount?: number;
 	} = {},
 ): StaticObjectSourceGeometryAttachment {
-	const triangleCount = options.triangleCount ?? 1;
+	const triangleCount = options.surfaceIds?.length ?? options.triangleCount ?? 1;
 	const positions = new Float32Array(triangleCount * 9);
 	const texCoords = new Float32Array(triangleCount * 6);
 	for (let triangle = 0; triangle < triangleCount; triangle += 1) {
@@ -470,7 +407,7 @@ function createGeometryAttachment(
 				firstVertex: triangle * 3,
 				materialVariantSignature: null,
 				polygonId: triangle,
-				surfaceId: 7,
+				surfaceId: options.surfaceIds?.[triangle] ?? 7,
 			})),
 			vertexCount: triangleCount * 3,
 		},

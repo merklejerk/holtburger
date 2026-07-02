@@ -14,7 +14,6 @@ import {
 	multiplyMat4,
 } from "../../../math/ac-placement-transform";
 import {
-	createStaticMaterialColorKey,
 	createStaticMaterialRenderState,
 	createStaticMaterialTextureRoleLayoutKey,
 	createStaticMaterialTextureRoleSchemaKey,
@@ -41,8 +40,6 @@ import {
 	type ObjectVisualGeometryRecipe,
 	type ObjectVisualGeometryRecipeId,
 	type ObjectVisualMaterialRecipe,
-	type ObjectVisualMaterialRecipeId,
-	type ObjectVisualPartRecipeId,
 	type ObjectVisualRecipeBundle,
 	type ObjectVisualTextureRecipe,
 	type ObjectVisualTextureRecipeId,
@@ -739,15 +736,17 @@ class MaterialSlotIndex {
 
 	constructor(payload: StaticObjectBatchPayload) {
 		for (const slot of payload.materialSlots) {
-			this.#slotsByObjectPartSurface.set(
-				createMaterialSlotKey({
-					geometrySurfaceId: slot.identity.geometrySurfaceId,
-					materialVariantSignature: slot.materialVariantSignature,
-					object: slot.object,
-					partIndex: slot.identity.part.partIndex,
-				}),
-				slot,
-			);
+			for (const geometrySurfaceId of uniqueMaterialSlotSurfaceIds(slot)) {
+				this.#slotsByObjectPartSurface.set(
+					createMaterialSlotKey({
+						geometrySurfaceId,
+						materialVariantSignature: slot.materialVariantSignature,
+						object: slot.object,
+						partIndex: slot.identity.part.partIndex,
+					}),
+					slot,
+				);
+			}
 		}
 	}
 
@@ -782,6 +781,17 @@ class MaterialSlotIndex {
 			null
 		);
 	}
+}
+
+function uniqueMaterialSlotSurfaceIds(
+	slot: StaticObjectMaterialSlotFacts,
+): readonly number[] {
+	return [
+		...new Set([
+			slot.identity.geometrySurfaceId,
+			slot.identity.materialSurfaceId,
+		]),
+	];
 }
 
 function findMissingGeometryAttachments(

@@ -59,6 +59,43 @@ describe("object visual baker", () => {
 		expect(result.animationPartBindings).toEqual([]);
 	});
 
+	it("maps null-surface triangles to the only material binding", () => {
+		const materialId = materialRecipeId(1);
+		const bundle = createBundle({
+			materialBindings: [
+				{
+					geometrySurfaceId: 10,
+					materialRecipeId: materialId,
+					materialSlot: 0,
+				},
+			],
+			materialRecipes: new Map([
+				[materialId, createDirectColorMaterialRecipe([1, 1, 1, 1])],
+			]),
+			sourcePartIndex: 0,
+		});
+		const buffer = {
+			...TEST_BUFFER,
+			triangleCount: 1,
+			triangles: [
+				{
+					...TEST_BUFFER.triangles[0]!,
+					surfaceId: null,
+				},
+			],
+		};
+
+		const result = bakeObjectVisuals({
+			bundle,
+			geometryBuffers: new Map([[TEST_BUFFER.bufferId, buffer]]),
+			renderPartIdPrefix: "null-surface-fixture",
+		});
+
+		expect(result.renderParts).toHaveLength(1);
+		expect(result.renderParts[0]?.triangleCount).toBe(1);
+		expect([...result.renderParts[0]!.materialSlotIndices]).toEqual([0, 0, 0]);
+	});
+
 	it("uses recipe-owned material table facts instead of pass-derived defaults", () => {
 		const materialId = materialRecipeId(1);
 		const bundle = createBundle({

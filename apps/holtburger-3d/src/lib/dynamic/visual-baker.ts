@@ -20,7 +20,6 @@ import {
 	resolveRepeatedStaticMaterialPrimaryWrapMode,
 } from "../static/bake/static-material-texture-policy";
 import type {
-	LandblockSourceIdentity,
 	MaterialTextureDataUseIdentity,
 	StaticMaterialTableEntry,
 	StaticObjectPartMaterialSlotFacts,
@@ -29,10 +28,8 @@ import type {
 } from "../static/contracts";
 import {
 	createObjectVisualMaterialUseKey,
-	planObjectVisualMaterials,
 	type ObjectVisualMaterialFallbackReason,
 	type ObjectVisualMaterialPlan,
-	type ObjectVisualMaterialPlanningSlotFacts,
 } from "../visual/object-visual-material-planner";
 import {
 	describeStaticObjectCanonicalGeometryIdentity,
@@ -59,7 +56,11 @@ import {
 	createObjectVisualTexturePlacementIntents,
 	type ObjectVisualTexturePlacementRequirement,
 } from "../visual/object-visual-texture-placement-planner";
-import { createDynamicObjectVisualBundleExpansion } from "./object-visual-bundle-producer";
+import {
+	createDynamicObjectVisualBundleExpansion,
+	createDynamicObjectVisualRecipePlan,
+} from "./object-visual-bundle-producer";
+import type { ObjectVisualTextureRecipe } from "../visual/object-visual-recipe-bundle";
 
 export interface DynamicVisualBaker {
 	bake(input: DynamicVisualBakeInput): Promise<DynamicVisualBakeResult>;
@@ -69,7 +70,6 @@ interface DynamicMaterialSlotFacts {
 	readonly identity: DynamicVisualMaterialSlotIdentity;
 	readonly partIndex: number;
 	readonly partSlot: StaticObjectPartMaterialSlotFacts;
-	readonly planningFacts: ObjectVisualMaterialPlanningSlotFacts;
 }
 
 interface DynamicMaterialRenderEntry {
@@ -245,19 +245,8 @@ export function createDynamicVisualTexturePlanning(
 		};
 	}
 	const resourceId = createDynamicVisualResourceId(recipe.entityId);
-	const materialSlots = createDynamicMaterialSlotRequirements(
-		recipe.visual.materialPolicy.visualObject,
-		recipe.visual.sourceAssets,
-	);
-	const materialPlans = planObjectVisualMaterials({
-		domain: recipe.visual.materialPolicy.materialPlanningDomain,
-		landblock: createMaterialPlanningLandblockSource(recipe),
-		materialSlots: materialSlots.map((slot) => slot.planningFacts),
-		materialSources: recipe.visual.materialSources,
-		paletteSources: recipe.visual.paletteSources,
-		regionRenderProfile: { detailRoles: [] },
-		textureRefs: recipe.visual.textureRefs,
-	});
+	const recipePlan = createDynamicObjectVisualRecipePlan(recipe);
+	const materialPlans = recipePlan.materialPlan;
 	const unsupportedReasons = createUnsupportedMaterialReasons(
 		materialPlans.fallbackReasons,
 	);
@@ -269,9 +258,10 @@ export function createDynamicVisualTexturePlanning(
 			textureRequirements: [],
 		};
 	}
-	const pendingTextureRequirements = createPendingTextureRequirements({
+	const pendingTextureRequirements = createPendingTextureRequirementsFromRecipes({
 		materialPlans: materialPlans.materialPlans,
 		resourceId,
+		textureRecipes: recipePlan.textureRecipes,
 	});
 	const placementIntents = createObjectVisualTexturePlacementIntents({
 		requirements: pendingTextureRequirements.map((requirement) =>
@@ -441,11 +431,6 @@ function createDynamicMaterialSlotRequirements(
 					}),
 					partIndex: part.partIndex,
 					partSlot: slot,
-					planningFacts: {
-						material: slot.material,
-						paletteOverride: slot.paletteOverride,
-						paletteViews: slot.paletteViews,
-					},
 				};
 			}),
 		),
@@ -490,40 +475,72 @@ function createMaterialSlotRequirement(
 	};
 }
 
-function createMaterialPlanningLandblockSource(
-	recipe: DynamicVisualBakeInput["recipes"][number],
-): LandblockSourceIdentity {
-	return {
-		kind: "landblock-source",
-		landblockId: recipe.source.sourceResidence.landblockId,
-		source:
-			recipe.source.sourceResidence.kind === "env-cell"
-				? "env-cells"
-				: "outdoor",
-	};
-}
-
-function createPendingTextureRequirements(options: {
+function createPendingTextureRequirementsFromRecipes(options: {
 	readonly materialPlans: readonly ObjectVisualMaterialPlan[];
 	readonly resourceId: string;
+	readonly textureRecipes: ReadonlyMap<number, ObjectVisualTextureRecipe>;
 }): readonly PendingDynamicEntityTextureRequirement[] {
-	return options.materialPlans.flatMap((plan) => {
-		const dataUses = plan.textureRoles.map((role) => role.dataUse);
-		const wrapMode = resolveRepeatedStaticMaterialPrimaryWrapMode(dataUses);
-		return plan.textureRoles.map(
-			(role): PendingDynamicEntityTextureRequirement => ({
-				dataUse: role.dataUse,
-				key: createTextureRequirementKey(role.dataUse),
-				material: plan.material,
-				role: role.role,
+	return [...options.textureRecipes.entries()]
+		.sort(([left], [right]) => left - right)
+		.map(([, textureRecipe]) => {
+			const role = requireMaterialTextureRoleForRecipe({
+				materialPlans: options.materialPlans,
+				textureRecipe,
+			});
+			return {
+				dataUse: textureRecipe.dataUse,
+				key: createTextureRequirementKey(textureRecipe.dataUse),
+				material: role.plan.material,
+				role: role.role.role,
 				samplingPolicy: createStaticMaterialTextureSamplingPolicy({
-					dataUse: role.dataUse,
-					wrapMode,
+					dataUse: textureRecipe.dataUse,
+					wrapMode: textureRecipe.wrapMode,
 				}),
-				textureUseId: createDynamicTextureUseId(options.resourceId, plan, role),
-			}),
-		);
-	});
+				textureUseId: createDynamicTextureUseId(
+					options.resourceId,
+					role.plan,
+					role.role,
+				),
+			};
+		});
+}
+
+function requireMaterialTextureRoleForRecipe(options: {
+	readonly materialPlans: readonly ObjectVisualMaterialPlan[];
+	readonly textureRecipe: ObjectVisualTextureRecipe;
+}): {
+	readonly plan: ObjectVisualMaterialPlan;
+	readonly role: ObjectVisualMaterialPlan["textureRoles"][number];
+} {
+	for (const plan of options.materialPlans) {
+		for (const role of plan.textureRoles) {
+			if (
+				role.role === dynamicRoleForTextureUsage(options.textureRecipe.usage) &&
+				createMaterialTextureDataUseSignature(role.dataUse) ===
+					createMaterialTextureDataUseSignature(options.textureRecipe.dataUse)
+			) {
+				return { plan, role };
+			}
+		}
+	}
+	throw new Error(
+		`Dynamic object visual texture recipe ${options.textureRecipe.usage} has no matching material texture role.`,
+	);
+}
+
+function dynamicRoleForTextureUsage(
+	usage: ObjectVisualTextureRecipe["usage"],
+): ObjectVisualMaterialPlan["textureRoles"][number]["role"] {
+	switch (usage) {
+		case "object-base-color":
+			return "base-color";
+		case "object-detail":
+			return "detail-overlay";
+		case "object-index":
+			return "base-index";
+		case "object-palette":
+			return "palette-rgba";
+	}
 }
 
 function createDynamicTextureUseId(

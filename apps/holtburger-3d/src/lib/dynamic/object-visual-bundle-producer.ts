@@ -7,7 +7,10 @@ import type {
 	StaticObjectSourceGeometryAttachment,
 } from "../static/contracts";
 import type { StaticObjectBatchPayload } from "../static/objects/bake/static-object-batch-partitioner";
-import { createStaticObjectVisualBundleExpansion } from "../static/objects/bake/static-object-visual-bundle-producer";
+import {
+	createStaticObjectVisualBundleExpansion,
+	createStaticObjectVisualRecipePlan,
+} from "../static/objects/bake/static-object-visual-bundle-producer";
 import {
 	createObjectVisualReadyResolution,
 	type ObjectVisualBundleReadyResolution,
@@ -36,6 +39,14 @@ export function createDynamicObjectVisualBundleExpansion(input: {
 			}),
 		}),
 	};
+}
+
+export function createDynamicObjectVisualRecipePlan(
+	recipe: DynamicEntityRecipe,
+): ReturnType<typeof createStaticObjectVisualRecipePlan> {
+	return createStaticObjectVisualRecipePlan(
+		createDynamicObjectVisualPayload(recipe),
+	);
 }
 
 function createDynamicObjectVisualPayload(

@@ -62,6 +62,12 @@ export interface StaticObjectVisualBundleExpansion {
 	readonly resolution: ObjectVisualBundleResolution;
 }
 
+export interface StaticObjectVisualRecipePlan {
+	readonly materialPlan: ReturnType<typeof planObjectVisualMaterials>;
+	readonly materialRecipes: ObjectVisualRecipeBundle["materialRecipes"];
+	readonly textureRecipes: ObjectVisualRecipeBundle["textureRecipes"];
+}
+
 export function createStaticObjectVisualBundleExpansion(input: {
 	readonly attachments: Pick<
 		StaticBakeBatchAttachments,
@@ -85,23 +91,10 @@ export function createStaticObjectVisualBundleExpansion(input: {
 		};
 	}
 
-	const materialPlan = planObjectVisualMaterials(input.payload);
-	const materialRecipeSpecs = collectMaterialRecipeSpecs({
-		materialPlans: materialPlan.materialPlans,
-		payload: input.payload,
-	});
-	const registry = createObjectVisualRecipeKeyRegistry(
-		createRecipeKeys({
-			materialRecipeSpecs,
-			payload: input.payload,
-		}),
-	);
+	const recipePlan = createStaticObjectVisualRecipePlan(input.payload);
+	const registry = recipePlan.registry;
 	const geometryBuffers = createGeometryBuffers({
 		attachments: input.attachments.staticObjectSourceGeometry,
-		registry,
-	});
-	const materialRecipes = createMaterialRecipes({
-		materialRecipeSpecs,
 		registry,
 	});
 	const geometryRecipes = createGeometryRecipes({
@@ -109,7 +102,7 @@ export function createStaticObjectVisualBundleExpansion(input: {
 		registry,
 	});
 	const partRecipes = createPartRecipes({
-		materialPlans: materialPlan.materialPlans,
+		materialPlans: recipePlan.materialPlan.materialPlans,
 		payload: input.payload,
 		registry,
 	});
@@ -131,19 +124,46 @@ export function createStaticObjectVisualBundleExpansion(input: {
 			]),
 		),
 		geometryRecipes,
-		materialRecipes,
+		materialRecipes: recipePlan.materialRecipes,
 		partInstances,
 		partRecipes,
 		recipeKeys: registry.recipeKeys,
-		textureRecipes: createTextureRecipes({
-			materialRecipeSpecs,
-			registry,
-		}),
+		textureRecipes: recipePlan.textureRecipes,
 	};
 
 	return {
 		geometryBuffers,
 		resolution: createObjectVisualReadyResolution(bundle),
+	};
+}
+
+export function createStaticObjectVisualRecipePlan(
+	payload: StaticObjectBatchPayload,
+): StaticObjectVisualRecipePlan & {
+	readonly registry: ReturnType<typeof createObjectVisualRecipeKeyRegistry>;
+} {
+	const materialPlan = planObjectVisualMaterials(payload);
+	const materialRecipeSpecs = collectMaterialRecipeSpecs({
+		materialPlans: materialPlan.materialPlans,
+		payload,
+	});
+	const registry = createObjectVisualRecipeKeyRegistry(
+		createRecipeKeys({
+			materialRecipeSpecs,
+			payload,
+		}),
+	);
+	return {
+		materialPlan,
+		materialRecipes: createMaterialRecipes({
+			materialRecipeSpecs,
+			registry,
+		}),
+		registry,
+		textureRecipes: createTextureRecipes({
+			materialRecipeSpecs,
+			registry,
+		}),
 	};
 }
 

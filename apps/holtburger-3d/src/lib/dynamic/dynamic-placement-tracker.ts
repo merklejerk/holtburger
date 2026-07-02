@@ -6,11 +6,11 @@ import {
 	transformBoundsByMat4,
 	type RenderMat4,
 } from "../math/ac-placement-transform";
+import type { StaticBounds } from "../static/contracts";
 import type {
-	StaticBounds,
-	StaticObjectPartSourceFacts,
-	StaticObjectSourceAssetFacts,
-} from "../static/contracts";
+	ObjectVisualPartSourceFacts,
+	ObjectVisualSourceAssetFacts,
+} from "../visual/object-visual-source-payload";
 import type { PlacementTransformDto } from "../host/contracts";
 import { outdoorLandblockIdsForSourceLocalBounds } from "../runtime/outdoor-landblock-grid";
 import type {
@@ -260,7 +260,7 @@ function deriveEnvCellPlacedRecord(
 
 function deriveOutdoorCurrentBounds(options: {
 	readonly record: DynamicEntityRecord;
-	readonly sourceAssets: readonly StaticObjectSourceAssetFacts[];
+	readonly sourceAssets: readonly ObjectVisualSourceAssetFacts[];
 	readonly sourceLandblockId: number;
 }): Extract<
 	DynamicEntityCurrentBounds,
@@ -296,7 +296,7 @@ function deriveOutdoorCurrentBounds(options: {
 
 function derivePartBounds(options: {
 	readonly record: DynamicEntityRecord;
-	readonly sourceAssets: readonly StaticObjectSourceAssetFacts[];
+	readonly sourceAssets: readonly ObjectVisualSourceAssetFacts[];
 }): readonly DynamicEntityPartBounds[] {
 	const sourceAsset = selectSourceAsset(options.sourceAssets);
 	if (!sourceAsset) {
@@ -326,7 +326,7 @@ function derivePartBounds(options: {
 
 function createPartMatrix(
 	record: DynamicEntityRecord,
-	sourcePart: StaticObjectPartSourceFacts,
+	sourcePart: ObjectVisualPartSourceFacts,
 	partPlacement: PlacementTransformDto,
 ): RenderMat4 {
 	const baseMatrix = buildAcPlacementMatrix(
@@ -388,8 +388,8 @@ function createCurrentPartPoses(record: DynamicEntityRecord): readonly {
 }
 
 function selectSourceAsset(
-	sourceAssets: readonly StaticObjectSourceAssetFacts[],
-): StaticObjectSourceAssetFacts | null {
+	sourceAssets: readonly ObjectVisualSourceAssetFacts[],
+): ObjectVisualSourceAssetFacts | null {
 	return sourceAssets[0] ?? null;
 }
 

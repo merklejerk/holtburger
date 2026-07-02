@@ -61,7 +61,7 @@ import { createObjectVisualSourcePayload } from "./object-visual-source-payload"
 import { createObjectVisualInstallSet } from "../../../visual/object-visual-install-set";
 import { createObjectVisualSourceBundleExpansion } from "./static-object-visual-bundle-producer";
 import { createStaticObjectPublicationMetadata } from "./static-object-publication-metadata-producer";
-import type { ObjectVisualSourcePayload } from "./object-visual-source-payload";
+import type { ObjectVisualSourcePayload } from "../../../visual/object-visual-source-payload";
 
 export class StaticObjectJobBaker implements StaticBaker {
 	async bake(input: StaticBakeJobInput): Promise<StaticBakeJobResult> {

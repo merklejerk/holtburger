@@ -10,7 +10,7 @@ import type {
 	StaticObjectSourceIdentity,
 } from "../../contracts";
 import { createStaticObjectSourceGeometryIdentity } from "../static-object-source-assets";
-import type { ObjectVisualSourcePayload } from "./object-visual-source-payload";
+import type { ObjectVisualSourcePayload } from "../../../visual/object-visual-source-payload";
 import { createObjectVisualSourceBundleExpansion } from "./static-object-visual-bundle-producer";
 
 const TEST_LANDBLOCK_ID = 0xda55ffff;

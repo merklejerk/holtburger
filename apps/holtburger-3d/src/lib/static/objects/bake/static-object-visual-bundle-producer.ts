@@ -49,7 +49,7 @@ import {
 	describeStaticObjectCanonicalGeometryIdentity,
 	getStaticObjectCanonicalGeometryIdentity,
 } from "../static-object-source-assets";
-import type { ObjectVisualSourcePayload } from "./object-visual-source-payload";
+import type { ObjectVisualSourcePayload } from "../../../visual/object-visual-source-payload";
 
 export interface ObjectVisualSourceBundleExpansion {
 	readonly geometryBuffers: ReadonlyMap<

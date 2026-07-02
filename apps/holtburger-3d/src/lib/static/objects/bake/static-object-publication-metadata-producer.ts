@@ -18,7 +18,7 @@ import {
 	type ObjectVisualStaticResourceGroupId,
 } from "../../../visual/object-visual-static-publication";
 import { createStaticObjectSourcePartMatrix } from "./static-object-visual-bundle-producer";
-import type { ObjectVisualSourcePayload } from "./object-visual-source-payload";
+import type { ObjectVisualSourcePayload } from "../../../visual/object-visual-source-payload";
 
 const GENERATED_SCENERY_INSTANCING_POLICY = {
 	minimumInstanceCount: 2,

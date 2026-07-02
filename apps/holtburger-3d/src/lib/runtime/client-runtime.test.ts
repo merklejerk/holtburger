@@ -2173,9 +2173,7 @@ describe("browser client runtime", () => {
 		completeBakerWork(baker, "outdoor-generated-scenery", 0xdc59ffff, {
 			drawUnits: [],
 			objectVisualInstallSet: createObjectVisualInstallSet({
-				renderInstances: [
-					{ ...instance, domain: "outdoor-generated-scenery" },
-				],
+				renderInstances: [{ ...instance, domain: "outdoor-generated-scenery" }],
 				visualResources: [resource],
 			}),
 		});
@@ -2726,10 +2724,11 @@ function completeBakerWork(
 	landblockId: number,
 	result: Parameters<DeferredStaticBaker["complete"]>[1] = {},
 ): void {
-	const input = baker.pendingInputs.find((candidate) =>
-		candidate.task.domain === domain &&
-		candidate.task.scope.kind === "landblock" &&
-		candidate.task.scope.landblockId === landblockId,
+	const input = baker.pendingInputs.find(
+		(candidate) =>
+			candidate.task.domain === domain &&
+			candidate.task.scope.kind === "landblock" &&
+			candidate.task.scope.landblockId === landblockId,
 	);
 	baker.complete(input?.task.taskId ?? failKey(), result);
 }

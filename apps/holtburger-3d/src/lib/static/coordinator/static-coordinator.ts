@@ -685,8 +685,7 @@ export class StaticCoordinator {
 			}
 
 			await this.#continueSourceReadyBakeJob({
-				dynamicVisualTexturePlannings:
-					options.dynamicVisualTexturePlannings,
+				dynamicVisualTexturePlannings: options.dynamicVisualTexturePlannings,
 				item,
 				pendingItem,
 				pendingGroup: options.pendingGroup,
@@ -1239,10 +1238,7 @@ export class StaticCoordinator {
 		this.#emit();
 	}
 
-	#setTaskBakeStage(
-		task: StaticBakeTask,
-		stage: StaticActiveBakeStage,
-	): void {
+	#setTaskBakeStage(task: StaticBakeTask, stage: StaticActiveBakeStage): void {
 		const stageStartedAtMs = nowMs();
 		const current = this.#layerTasksByTaskId.get(task.taskId);
 		if (

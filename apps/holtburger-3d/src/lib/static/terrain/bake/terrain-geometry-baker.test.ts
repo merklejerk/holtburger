@@ -337,7 +337,6 @@ describe("terrain geometry baker", () => {
 			],
 		});
 	});
-
 });
 
 function requireTerrainDrawUnit(

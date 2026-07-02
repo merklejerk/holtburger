@@ -1855,7 +1855,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 					"queued",
 					"materializing",
 				),
-				sourceStaticDirectDrawUnits: this.#committedStaticDirectDrawUnitsById.size,
+				sourceStaticDirectDrawUnits:
+					this.#committedStaticDirectDrawUnitsById.size,
 			},
 			status: this.#createRuntimeStatus(this.#lastStaticSnapshot.requested),
 		};

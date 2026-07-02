@@ -257,13 +257,12 @@ function bakeLandblockEnvCellItem(
 		materialPlansByEnvCellId,
 		placementSnapshot,
 	);
-	const objectVisualPublication = createStructuredInteriorObjectVisualPublication(
-		{
+	const objectVisualPublication =
+		createStructuredInteriorObjectVisualPublication({
 			input,
 			payload,
 			task: item.task,
-		},
-	);
+		});
 	const portalInteriorRecord = createPortalInteriorRecord(owner, payload);
 
 	return {
@@ -340,8 +339,7 @@ function createStructuredInteriorObjectVisualPublication(options: {
 				(publication) => publication.installSet.directDrawUnits,
 			),
 			dynamicAnimationPartBindings: recipePublications.flatMap(
-				(publication) =>
-					publication.installSet.dynamicAnimationPartBindings,
+				(publication) => publication.installSet.dynamicAnimationPartBindings,
 			),
 			renderInstances: [],
 			textureDependencies: recipePublications.flatMap(
@@ -1021,7 +1019,7 @@ function createStructuredInteriorTextureUses(options: {
 				dataUse,
 				task: options.task,
 				wrapMode,
-		}),
+			}),
 		domain: "env-cell-system",
 		isStageableDataUse: isCurrentlyStageableStaticObjectDataUse,
 		textureUseSpecs: options.drawUnits.flatMap((drawUnit) => {

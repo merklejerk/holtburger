@@ -179,7 +179,9 @@ class ControlledStaticBaker implements StaticBaker {
 	}
 }
 
-function createInput(taskId = "1:landblock:da55ffff:outdoor-terrain"): StaticBakeJobInput {
+function createInput(
+	taskId = "1:landblock:da55ffff:outdoor-terrain",
+): StaticBakeJobInput {
 	const task: StaticBakeTask = {
 		domain: "outdoor-terrain",
 		ownerId: "terrain:0xda55ffff",

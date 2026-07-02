@@ -237,11 +237,12 @@ export function createDynamicVisualTexturePlanning(
 			textureRequirements: [],
 		};
 	}
-	const pendingTextureRequirements = createPendingTextureRequirementsFromRecipes({
-		materialPlans: materialPlans.materialPlans,
-		resourceId,
-		textureRecipes: recipePlan.textureRecipes,
-	});
+	const pendingTextureRequirements =
+		createPendingTextureRequirementsFromRecipes({
+			materialPlans: materialPlans.materialPlans,
+			resourceId,
+			textureRecipes: recipePlan.textureRecipes,
+		});
 	const placementIntents = createObjectVisualTexturePlacementIntents({
 		requirements: pendingTextureRequirements.map((requirement) =>
 			createDynamicTexturePlacementRequirement({

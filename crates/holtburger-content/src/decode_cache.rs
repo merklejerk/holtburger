@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use anyhow::{Context, Result};
 use holtburger_dat::file_type::{
-    EnvCell, Environment, GfxObj, REGION_DESC_FILE_ID, RegionDesc, Scene, SetupModel,
+    EnvCell, Environment, GfxObj, Palette, REGION_DESC_FILE_ID, RegionDesc, Scene, SetupModel,
 };
 use holtburger_dat::landblock::{CellLandblock, LandblockInfo};
 use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, ResourceKey};
@@ -19,6 +19,7 @@ const ENVIRONMENT_CAPACITY: usize = 1_024;
 const SCENE_CAPACITY: usize = 512;
 const SETUP_MODEL_CAPACITY: usize = 4_096;
 const GFX_OBJ_CAPACITY: usize = 8_192;
+const PALETTE_CAPACITY: usize = 8_192;
 
 #[derive(Debug, Default)]
 pub struct ContentDecodeCache {
@@ -40,6 +41,7 @@ struct LruDecodedRecordCache {
     scenes: Mutex<SimpleLru<u32, Scene>>,
     setup_models: Mutex<SimpleLru<u32, SetupModel>>,
     gfx_objs: Mutex<SimpleLru<u32, GfxObj>>,
+    palettes: Mutex<SimpleLru<u32, Palette>>,
 }
 
 #[derive(Debug)]
@@ -59,6 +61,7 @@ impl Default for LruDecodedRecordCache {
             scenes: Mutex::new(SimpleLru::new(SCENE_CAPACITY)),
             setup_models: Mutex::new(SimpleLru::new(SETUP_MODEL_CAPACITY)),
             gfx_objs: Mutex::new(SimpleLru::new(GFX_OBJ_CAPACITY)),
+            palettes: Mutex::new(SimpleLru::new(PALETTE_CAPACITY)),
         }
     }
 }
@@ -218,6 +221,21 @@ impl ContentDecodeCache {
                 .with_context(|| format!("Could not decode GfxObj 0x{gfx_obj_id:08X}"))
         })
     }
+
+    pub fn palette(&self, content: &ContentRepository, palette_id: u32) -> Result<Palette> {
+        load_lru_record(&self.lru.palettes, palette_id, || {
+            let resource = content
+                .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, palette_id))
+                .with_context(|| {
+                    format!(
+                        "Could not read {}:0x{palette_id:08X} from content repository",
+                        EOR_PORTAL_NAMESPACE
+                    )
+                })?;
+            Palette::unpack(&mut Cursor::new(resource.bytes))
+                .with_context(|| format!("Could not decode Palette 0x{palette_id:08X}"))
+        })
+    }
 }
 
 fn load_lru_record<V>(
@@ -362,6 +380,16 @@ mod tests {
         bytes
     }
 
+    fn minimal_palette_bytes(palette_id: u32, colors_argb: &[u32]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&palette_id.to_le_bytes());
+        bytes.extend_from_slice(&(colors_argb.len() as u32).to_le_bytes());
+        for color in colors_argb {
+            bytes.extend_from_slice(&color.to_le_bytes());
+        }
+        bytes
+    }
+
     #[test]
     fn decode_cache_reuses_decoded_records_across_loads() {
         let landblock_id = 0x0102ffff;
@@ -382,6 +410,29 @@ mod tests {
         assert_eq!(first.id, landblock_id);
         assert_eq!(second.id, landblock_id);
         assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_id), 1);
+    }
+
+    #[test]
+    fn decode_cache_reuses_palettes_across_loads() {
+        let palette_id = 0x0400_0001;
+        let source = Arc::new(CountingSource::new(HashMap::from([(
+            (EOR_PORTAL_NAMESPACE.to_string(), palette_id),
+            minimal_palette_bytes(palette_id, &[0xff11_2233, 0x8044_5566]),
+        )])));
+        let repository = ContentRepository::from_mounts(vec![source.clone()]);
+        let cache = ContentDecodeCache::new();
+
+        let first = cache
+            .palette(&repository, palette_id)
+            .expect("first palette load should decode");
+        let second = cache
+            .palette(&repository, palette_id)
+            .expect("second palette load should reuse cache");
+
+        assert_eq!(first.id, palette_id);
+        assert_eq!(second.id, palette_id);
+        assert_eq!(second.colors_argb, vec![0xff11_2233, 0x8044_5566]);
+        assert_eq!(source.read_count(EOR_PORTAL_NAMESPACE, palette_id), 1);
     }
 
     #[test]

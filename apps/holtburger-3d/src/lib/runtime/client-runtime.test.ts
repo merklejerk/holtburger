@@ -82,6 +82,7 @@ import {
 	DeferredStaticBaker,
 	DeferredStaticResolver,
 } from "../static/fake-workers";
+import { createObjectVisualInstallSet } from "../visual/object-visual-install-set";
 import {
 	createClientRuntime,
 	type RuntimeEvent,
@@ -2167,10 +2168,12 @@ describe("browser client runtime", () => {
 		await flushPromises();
 		completeBakerWork(baker, "outdoor-generated-scenery", 0xdc59ffff, {
 			drawUnits: [],
-			staticObjectRenderInstances: [
-				{ ...instance, domain: "outdoor-generated-scenery" },
-			],
-			staticObjectVisualResources: [resource],
+			objectVisualInstallSet: createObjectVisualInstallSet({
+				renderInstances: [
+					{ ...instance, domain: "outdoor-generated-scenery" },
+				],
+				visualResources: [resource],
+			}),
 		});
 		await flushPromises();
 

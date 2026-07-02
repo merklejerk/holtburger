@@ -2384,6 +2384,8 @@ Course correction during Phase 10:
 
 ### Phase 11: Recipe-First Generated Scenery Instancing
 
+Status: complete.
+
 Goal: replace post-draw-unit generated-scenery inference with part-instance-driven reuse before the
 old static object baker path is removed.
 
@@ -2414,6 +2416,31 @@ Acceptance criteria:
 Deletion criteria:
 
 - Mark post-partition candidate/cutover inference code for deletion in the hard cutover phase.
+
+Implementation notes:
+
+- Audit showed the production generated-scenery path is already recipe-first: resource groups and
+  render instances are produced from object visual publication metadata, baked through
+  `createObjectVisualStaticInstallSet(...)`, and installed/published from
+  `objectVisualInstallSet.renderInstances` and `objectVisualInstallSet.visualResources`.
+- Deleted the unused `static-object-instance-inventory` module and test. That module grouped
+  generated scenery candidates from old static-object draw-unit source coverage and had no
+  production import after the recipe-first cutover.
+- Test steering: runtime generated-scenery fixtures now feed instanced resources through
+  `ObjectVisualInstallSet` instead of legacy `staticObjectRenderInstances`/
+  `staticObjectVisualResources` mirror fields. Static object batch tests now assert generated
+  scenery resources and render instances through `result.objectVisualInstallSet`, keeping mirror
+  fields out of the north-star tests.
+- Remaining spicy bit: `StaticBakeBatchResult` and installer result contracts still expose
+  `staticObjectRenderInstances` and `staticObjectVisualResources` as compatibility mirrors of
+  `objectVisualInstallSet`. Phase 12 should delete those mirrors if no production caller still needs
+  them.
+- Validation:
+  `npm --prefix apps/holtburger-3d run test:ts -- client-runtime -t "generated scenery"` passed with
+  1 selected runtime test;
+  `npm --prefix apps/holtburger-3d run test:ts -- static-object-batch-partitioner object-visual-static-publication-baker object-visual-static-publication`
+  passed with 3 test files and 41 tests;
+  `npm --prefix apps/holtburger-3d run check` passed.
 
 ### Phase 12: Hard Cutover And Legacy Baker Removal
 

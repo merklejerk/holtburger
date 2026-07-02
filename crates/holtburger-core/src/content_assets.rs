@@ -209,13 +209,10 @@ impl ContentAssetService {
                 )))
             }
             ContentAssetRequest::Palette(palette_id) => {
-                let resource = self
-                    .content
-                    .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, palette_id))
-                    .with_context(|| format!("Could not load Palette 0x{palette_id:08X}"))?;
                 Ok(ContentAsset::Palette(Box::new(
-                    Palette::unpack(&mut Cursor::new(resource.bytes))
-                        .with_context(|| format!("Could not parse Palette 0x{palette_id:08X}"))?,
+                    self.decode_cache
+                        .palette(&self.content, palette_id)
+                        .with_context(|| format!("Could not load Palette 0x{palette_id:08X}"))?,
                 )))
             }
         }
@@ -541,6 +538,36 @@ mod tests {
     }
 
     #[test]
+    fn content_asset_service_reuses_decode_cache_for_palettes() {
+        let palette_id = 0x0400_0001;
+        let source = Arc::new(InMemoryResourceSource::default().with_file(
+            EOR_PORTAL_NAMESPACE,
+            palette_id,
+            palette_bytes(palette_id, &[0xff11_2233, 0x8044_5566]),
+        ));
+        let repository = ContentRepository::from_mounts(vec![source.clone()]);
+        let service =
+            ContentAssetService::new(Arc::new(repository), Arc::new(ContentDecodeCache::new()));
+
+        let first = service
+            .load(ContentAssetRequest::Palette(palette_id))
+            .expect("first palette request should load");
+        let second = service
+            .load(ContentAssetRequest::Palette(palette_id))
+            .expect("second palette request should reuse decoded cache");
+
+        let ContentAsset::Palette(first_palette) = first else {
+            panic!("content asset service returned mismatched first palette asset");
+        };
+        let ContentAsset::Palette(second_palette) = second else {
+            panic!("content asset service returned mismatched second palette asset");
+        };
+        assert_eq!(first_palette.id, palette_id);
+        assert_eq!(second_palette.colors_argb, vec![0xff11_2233, 0x8044_5566]);
+        assert_eq!(source.read_count(EOR_PORTAL_NAMESPACE, palette_id), 1);
+    }
+
+    #[test]
     fn content_asset_service_loads_landblock_scene_lod_layers() {
         let repository = ContentRepository::from_mounts(vec![Arc::new(scene_lod_test_source())]);
         let service =
@@ -753,6 +780,16 @@ mod tests {
             },
         );
         bytes.extend_from_slice(&0_u32.to_le_bytes()); // hook count
+        bytes
+    }
+
+    fn palette_bytes(palette_id: u32, colors_argb: &[u32]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&palette_id.to_le_bytes());
+        bytes.extend_from_slice(&(colors_argb.len() as u32).to_le_bytes());
+        for color in colors_argb {
+            bytes.extend_from_slice(&color.to_le_bytes());
+        }
         bytes
     }
 

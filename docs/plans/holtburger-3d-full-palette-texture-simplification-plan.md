@@ -149,6 +149,31 @@ will otherwise drag range-strip behavior back in through the side door.
    Add a `Palette` LRU before implementing the prepared palette route, then use
    it from both `ContentAssetService::Palette` and prepared palette composition.
 
+## Progress Log
+
+- Completed implementation-order step 1 before numbered Phase 1. This is an
+  intentional steering choice from the dry run: source palette decode caching is
+  prerequisite infrastructure for the prepared palette route, so it lands before
+  the host contract even though the later phase headings list the route first.
+
+## Decisions And Course Corrections
+
+- `ContentDecodeCache` now owns decoded source `Palette` records, while prepared
+  palette textures remain explicitly out of that cache. This keeps the two cache
+  layers clean: source DAT/HBA decode reuse in `holtburger-content`, generated
+  renderer-ready RGBA reuse later in the host adapter.
+- Ordinary `ContentAssetService::Palette` loads now go through
+  `ContentDecodeCache::palette(...)`. The future prepared palette route should
+  use the same method instead of adding another direct `Palette::unpack` path.
+
+## Debt And Spicy Bits
+
+- The numbered phase ordering is slightly misleading because the concrete
+  implementation order starts with source palette caching. If this plan is
+  edited again, consider splitting the current Phase 2 into a Phase 0/1 cache
+  foundation and a later composition phase. Not doing that now avoids a noisy
+  plan restructure mid-stream.
+
 ## Implementation Order
 
 This is the intended execution order. Do not start by changing the shader; the

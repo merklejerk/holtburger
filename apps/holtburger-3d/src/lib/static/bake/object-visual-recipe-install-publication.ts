@@ -1,4 +1,9 @@
-import type { StaticMaterialTableEntry } from "../contracts";
+import {
+	uniqueSortedStaticTextureUseOwners,
+	type StaticBakeTextureUse,
+	type StaticMaterialTableEntry,
+	type StaticTextureUseOwner,
+} from "../contracts";
 import {
 	type ObjectVisualTexturePlacementSnapshot,
 	type TextureResourceDependencies,
@@ -22,10 +27,12 @@ import type { ObjectVisualInstallSet } from "../../visual/object-visual-install-
 export interface StaticObjectVisualRecipeInstallPublication {
 	readonly installSet: ObjectVisualInstallSet;
 	readonly textureDependencies: readonly TextureResourceDependencies[];
+	readonly textureUses: readonly StaticBakeTextureUse[];
 }
 
 export function createStaticObjectVisualRecipeInstallPublication(input: {
 	readonly bundle: ObjectVisualRecipeBundle;
+	readonly domain: StaticBakeTextureUse["domain"];
 	readonly geometryBuffers: ReadonlyMap<
 		ObjectVisualGeometryBufferId,
 		ObjectVisualGeometryBuffer
@@ -37,6 +44,7 @@ export function createStaticObjectVisualRecipeInstallPublication(input: {
 	readonly textureUseScopeId: string;
 	readonly partitionKeyByPartInstanceIndex?: ReadonlyMap<number, string>;
 }): StaticObjectVisualRecipeInstallPublication {
+	const textureBindings = createTextureBindings(input);
 	const bakeResult = bakeObjectVisuals({
 		bundle: input.bundle,
 		geometryBuffers: input.geometryBuffers,
@@ -44,13 +52,19 @@ export function createStaticObjectVisualRecipeInstallPublication(input: {
 			input.partitionKeyByPartInstanceIndex ??
 			createPublicationPartitionKeys(input.metadata),
 		renderPartIdPrefix: input.renderPartIdPrefix,
-		textureBindings: createTextureBindings(input),
+		textureBindings,
 	});
 	const installSet = createObjectVisualStaticInstallSet({
 		bakeResult,
 		metadata: input.metadata,
 	});
 	const textureDependencies = createPublishedTextureDependencies(installSet);
+	const textureUses = createPublishedTextureUses({
+		bundle: input.bundle,
+		domain: input.domain,
+		installSet,
+		textureBindings,
+	});
 
 	return {
 		installSet: {
@@ -58,6 +72,7 @@ export function createStaticObjectVisualRecipeInstallPublication(input: {
 			textureDependencies,
 		},
 		textureDependencies,
+		textureUses,
 	};
 }
 
@@ -155,6 +170,70 @@ function createPublishedTextureDependencies(
 			}),
 		),
 	];
+}
+
+function createPublishedTextureUses(input: {
+	readonly bundle: ObjectVisualRecipeBundle;
+	readonly domain: StaticBakeTextureUse["domain"];
+	readonly installSet: ObjectVisualInstallSet;
+	readonly textureBindings: ReadonlyMap<
+		ObjectVisualTextureRecipeId,
+		ObjectVisualTextureBinding
+	>;
+}): readonly StaticBakeTextureUse[] {
+	return [...input.bundle.textureRecipes.entries()]
+		.flatMap(([textureRecipeId, recipe]) => {
+			const binding = input.textureBindings.get(textureRecipeId);
+			if (!binding) {
+				return [];
+			}
+			const owners = collectPublishedTextureUseOwners({
+				installSet: input.installSet,
+				textureUseId: binding.textureUseId,
+			});
+			if (owners.length === 0) {
+				return [];
+			}
+			return {
+				domain: input.domain,
+				owners,
+				samplingPolicy: createTextureSamplingPolicy(recipe.wrapMode),
+				source: recipe.dataUse,
+				textureUseId: binding.textureUseId,
+			};
+		})
+		.sort((left, right) => left.textureUseId.localeCompare(right.textureUseId));
+}
+
+function collectPublishedTextureUseOwners(input: {
+	readonly installSet: ObjectVisualInstallSet;
+	readonly textureUseId: string;
+}): readonly StaticTextureUseOwner[] {
+	return uniqueSortedStaticTextureUseOwners([
+		...input.installSet.directDrawUnits.flatMap((drawUnit) =>
+			drawUnit.textureUseIds.includes(input.textureUseId)
+				? [{ drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" as const }]
+				: [],
+		),
+		...input.installSet.visualResources.flatMap((resource) =>
+			resource.textureUseIds.includes(input.textureUseId)
+				? [
+						{
+							kind: "static-object-visual-resource" as const,
+							resourceId: resource.resourceId,
+						},
+					]
+				: [],
+		),
+	]);
+}
+
+function createTextureSamplingPolicy(
+	wrapMode: "clamp" | "repeat",
+): StaticBakeTextureUse["samplingPolicy"] {
+	return wrapMode === "repeat"
+		? { wrapS: "repeat", wrapT: "repeat" }
+		: { wrapS: "clamp-to-edge", wrapT: "clamp-to-edge" };
 }
 
 function createVisualResourceTextureDependency(options: {

@@ -404,12 +404,6 @@ function bakeStaticObjectBatchItem(
 		spatialRecord:
 			spatialRecordBySliceId.get(bakedPartitions[index]?.sliceId ?? "") ?? null,
 	}));
-	const textureUses = createStaticObjectBakeTextureUses({
-		partitions: bakedPartitions,
-		resourceIdPrefix,
-		bakeBatchId: input.bakeBatchId,
-		task: item.task,
-	}).concat(instancedOutput.textureUses);
 	const recipePublication = createStaticObjectRecipePublication({
 		input,
 		payload: scope,
@@ -421,7 +415,7 @@ function bakeStaticObjectBatchItem(
 		drawUnitCount: bakedDrawUnits.length,
 		itemIndex,
 		landblockId: formatHex32(scope.landblock.landblockId),
-		textureUseCount: textureUses.length,
+		textureUseCount: recipePublication.textureUses.length,
 	});
 
 	return {
@@ -444,7 +438,7 @@ function bakeStaticObjectBatchItem(
 		],
 		textureDependencies:
 			createStaticObjectDrawUnitTextureDependencies(bakedDrawUnits),
-		textureUses,
+		textureUses: recipePublication.textureUses,
 		objectVisualInstallSet: recipePublication.installSet,
 		objectVisualTextureDependencies: recipePublication.textureDependencies,
 		task: item.task,
@@ -459,6 +453,7 @@ function createStaticObjectRecipePublication(options: {
 }): {
 	readonly installSet: ReturnType<typeof createObjectVisualInstallSet>;
 	readonly textureDependencies: readonly TextureResourceDependencies[];
+	readonly textureUses: readonly StaticBakeTextureUse[];
 } {
 	const expansion = createStaticObjectVisualBundleExpansion({
 		attachments: options.input.attachments,
@@ -473,6 +468,7 @@ function createStaticObjectRecipePublication(options: {
 		return {
 			installSet: createObjectVisualInstallSet({}),
 			textureDependencies: [],
+			textureUses: [],
 		};
 	}
 	if (expansion.resolution.bundle.partInstances.length === 0) {
@@ -482,6 +478,7 @@ function createStaticObjectRecipePublication(options: {
 		return {
 			installSet: createObjectVisualInstallSet({}),
 			textureDependencies: [],
+			textureUses: [],
 		};
 	}
 
@@ -491,6 +488,7 @@ function createStaticObjectRecipePublication(options: {
 	});
 	return createStaticObjectVisualRecipeInstallPublication({
 		bundle: expansion.resolution.bundle,
+		domain: options.task.domain,
 		geometryBuffers: expansion.geometryBuffers,
 		metadata: publication.metadata,
 		renderPartIdPrefix: `${options.resourceIdPrefix}:object-visual`,
@@ -1943,36 +1941,6 @@ function bakeStaticObjectPartitionGeometry(
 		positions,
 		texCoords,
 	};
-}
-
-function createStaticObjectBakeTextureUses(options: {
-	readonly task: StaticBakeTask;
-	readonly resourceIdPrefix: string;
-	readonly bakeBatchId: string;
-	readonly partitions: readonly StaticObjectBatchPartition[];
-}): readonly StaticBakeTextureUse[] {
-	return createStaticMaterialTextureUses({
-		createTextureUseId: (dataUse, wrapMode) =>
-			createStaticObjectTextureUseId({
-				dataUse,
-				textureUseScopeId: options.resourceIdPrefix,
-				wrapMode,
-			}),
-		domain: options.task.domain,
-		isStageableDataUse: isCurrentlyStageableStaticObjectDataUse,
-		bakeBatchId: options.bakeBatchId,
-		textureUseSpecs: options.partitions.flatMap((partition) => {
-			if (partition.renderCoverage !== "classified-render-candidate") {
-				return [];
-			}
-			const drawUnitOwnerId = `${options.resourceIdPrefix}:static-object-partition:${partition.sliceId.replaceAll("/", "-")}`;
-			return partition.coarseTablePlan.entries.map((entry) => ({
-				owners: [{ drawUnitId: drawUnitOwnerId, kind: "draw-unit" as const }],
-				textureDataUses: entry.textureDataUses,
-				textureWrapMode: entry.textureWrapMode,
-			}));
-		}),
-	});
 }
 
 function createStaticObjectTextureUseId(options: {

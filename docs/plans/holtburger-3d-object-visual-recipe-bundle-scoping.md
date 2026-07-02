@@ -2241,6 +2241,11 @@ Course correction during Phase 9M:
   helpers. Before removing object draw units from commits, Phase 9M must make static object-like
   texture-use publication derive owners from `objectVisualInstallSet` direct draw units and visual
   resources; otherwise texture placement release/ownership bookkeeping can drift.
+- Static object texture uses now come from recipe-first object visual install publication, with
+  owners derived from published direct draw units and visual resources. The cutover also fixed
+  role-specific detail texture wrapping so detail-overlay texture recipes can publish repeat sampling
+  independently of the base material sampler. Structured-interior texture uses still need the same
+  recipe-first ownership cutover before object draw units can be removed from `addedDrawUnits`.
 
 ### Phase 10: Dynamic Resolver Cutover
 

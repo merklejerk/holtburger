@@ -8,12 +8,12 @@ import {
 } from "./object-visual-static-publication";
 
 describe("object visual static publication metadata", () => {
-	it("describes outdoor explicit and env-cell static object direct draw-unit publication facts", () => {
+	it("describes outdoor explicit and env-cell static object direct publication facts", () => {
 		const explicitIndex = createObjectVisualPartInstanceIndex(0);
 		const envCellIndex = createObjectVisualPartInstanceIndex(1);
 		const explicit = createDirectStaticObjectMetadata({
 			domain: "outdoor-explicit-objects",
-			drawUnitIdSeed: "explicit-a",
+			publicationIdSeed: "explicit-a",
 			ownership: {
 				domain: "outdoor-explicit-objects",
 				kind: "outdoor-static-objects",
@@ -23,7 +23,7 @@ describe("object visual static publication metadata", () => {
 		});
 		const envCell = createDirectStaticObjectMetadata({
 			domain: "env-cell-system",
-			drawUnitIdSeed: "env-cell-static-a",
+			publicationIdSeed: "env-cell-static-a",
 			ownership: {
 				envCellIds: [0xda550100],
 				kind: "env-cell-static-object-placements",
@@ -34,13 +34,16 @@ describe("object visual static publication metadata", () => {
 		});
 
 		const metadata = createObjectVisualStaticPublicationMetadata({
-			directStaticObjectDrawUnits: [explicit, envCell],
+			directStaticObjectPublications: [explicit, envCell],
 			partInstanceCount: 2,
 		});
 
-		expect(metadata.directStaticObjectDrawUnits).toEqual([explicit, envCell]);
+		expect(metadata.directStaticObjectPublications).toEqual([
+			explicit,
+			envCell,
+		]);
 		expect(
-			metadata.directStaticObjectDrawUnits.map(
+			metadata.directStaticObjectPublications.map(
 				(drawUnit) => drawUnit.partInstanceIndices[0],
 			),
 		).toEqual([0, 1]);
@@ -105,19 +108,19 @@ describe("object visual static publication metadata", () => {
 		const metadata = createObjectVisualStaticPublicationMetadata({
 			partInstanceCount: 1,
 			sidecarResidencies: [sidecarResidency],
-			structuredInteriorDrawUnits: [
+			structuredInteriorPublications: [
 				{
 					cellStructure: {
 						cellStructureId: 0x0d000001,
 						kind: "cell-structure",
 					},
-					drawUnitIdSeed: "structured-interior-a",
+					publicationIdSeed: "structured-interior-a",
 					envCellId: 0xda550100,
 					environment: {
 						environmentId: 0x0e000001,
 						kind: "environment",
 					},
-					kind: "structured-interior-direct-draw-unit",
+					kind: "structured-interior-publication",
 					landblockId: 0xda55ffff,
 					localPlacement: {
 						orientation: { w: 1, x: 0, y: 0, z: 0 },
@@ -129,7 +132,7 @@ describe("object visual static publication metadata", () => {
 			],
 		});
 
-		expect(metadata.structuredInteriorDrawUnits[0]).toMatchObject({
+		expect(metadata.structuredInteriorPublications[0]).toMatchObject({
 			envCellId: 0xda550100,
 			memberId: "env-cell-member-a",
 		});
@@ -139,10 +142,10 @@ describe("object visual static publication metadata", () => {
 	it("rejects metadata that references missing part instances", () => {
 		expect(() =>
 			createObjectVisualStaticPublicationMetadata({
-				directStaticObjectDrawUnits: [
+				directStaticObjectPublications: [
 					createDirectStaticObjectMetadata({
 						domain: "outdoor-explicit-objects",
-						drawUnitIdSeed: "explicit-a",
+						publicationIdSeed: "explicit-a",
 						ownership: {
 							domain: "outdoor-explicit-objects",
 							kind: "outdoor-static-objects",
@@ -154,7 +157,7 @@ describe("object visual static publication metadata", () => {
 				partInstanceCount: 2,
 			}),
 		).toThrow(
-			/Direct static object draw unit explicit-a references part-instance index 2, but only 2 part instances exist/,
+			/Direct static object publication explicit-a references part-instance index 2, but only 2 part instances exist/,
 		);
 	});
 
@@ -191,7 +194,7 @@ describe("object visual static publication metadata", () => {
 
 function createDirectStaticObjectMetadata(options: {
 	readonly domain: "env-cell-system" | "outdoor-explicit-objects";
-	readonly drawUnitIdSeed: string;
+	readonly publicationIdSeed: string;
 	readonly ownership:
 		| {
 				readonly domain: "outdoor-explicit-objects";
@@ -212,8 +215,8 @@ function createDirectStaticObjectMetadata(options: {
 }) {
 	return {
 		domain: options.domain,
-		drawUnitIdSeed: options.drawUnitIdSeed,
-		kind: "static-object-direct-draw-unit" as const,
+		publicationIdSeed: options.publicationIdSeed,
+		kind: "static-object-direct-publication" as const,
 		landblockId: 0xda55ffff,
 		ownership: options.ownership,
 		partInstanceIndices: [options.partInstanceIndex],
@@ -247,10 +250,10 @@ function createDirectStaticObjectMetadata(options: {
 			},
 		],
 		spatialRecord: {
-			drawUnitId: options.drawUnitIdSeed,
+			drawUnitId: options.publicationIdSeed,
 			kind: "draw-unit-bounds" as const,
 			owner: {
-				drawUnitId: options.drawUnitIdSeed,
+				drawUnitId: options.publicationIdSeed,
 				kind: "draw-unit" as const,
 			},
 			triangleCount: 1,

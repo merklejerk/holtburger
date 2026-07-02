@@ -248,13 +248,16 @@ export function createStructuredInteriorVisualBundleExpansion(input: {
 		publicationMetadata: hasRenderableMaterialBindings
 			? createObjectVisualStaticPublicationMetadata({
 					partInstanceCount,
-					structuredInteriorDrawUnits: [
+					structuredInteriorPublications: [
 						{
 							cellStructure: input.envCell.cellStructure,
-							drawUnitIdSeed: createDrawUnitIdSeed(input.task, input.envCell),
+							publicationIdSeed: createDrawUnitIdSeed(
+								input.task,
+								input.envCell,
+							),
 							envCellId: input.envCell.identity.envCellId,
 							environment: input.envCell.environment,
-							kind: "structured-interior-direct-draw-unit",
+							kind: "structured-interior-publication",
 							landblockId: input.envCell.landblockId,
 							localPlacement: input.envCell.localPlacement,
 							materialPlan: materialPlan.entries,

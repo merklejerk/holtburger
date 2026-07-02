@@ -1,6 +1,6 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation complete through Phase 19B. Residual cleanup and profiling follow-ups remain
+Status: implementation complete through Phase 19C. Residual cleanup and profiling follow-ups remain
 tracked in the phase notes below.
 
 ## Purpose
@@ -3386,7 +3386,7 @@ Spicy bits and retained debt:
 
 ### Phase 19C: Publication Metadata Convergence And Instancing Reassessment
 
-Status: planned.
+Status: completed.
 
 Goal: rename or reshape draw-unit-shaped static publication metadata once source recipe records and
 part instances are the stable upstream vocabulary.
@@ -3407,6 +3407,31 @@ Acceptance criteria:
 - Runtime selection/query behavior remains covered by tests or harness diagnostics.
 - Any remaining generated-scenery divergence is documented as renderer-policy driven, not wrapper
   debt.
+
+Implementation notes:
+
+- Renamed static publication metadata fields from `directStaticObjectDrawUnits` and
+  `structuredInteriorDrawUnits` to `directStaticObjectPublications` and
+  `structuredInteriorPublications`.
+- Renamed direct publication metadata types and id seeds to publication vocabulary. The static
+  publication baker still emits renderer draw units, but the metadata contract now describes
+  publication candidates derived from part instances.
+- Updated static object and structured-interior publication producers, install publication partition
+  keys, and publication tests to use publication vocabulary.
+- Validation passed with focused publication/runtime tests, `check`, `lint:dead`, `format:check`,
+  and a terrain browser harness slice.
+
+Spicy bits and retained debt:
+
+- Actual renderer payloads still use `StaticObjectGeometryStaticDrawUnit` and
+  `StructuredInteriorGeometryStaticDrawUnit`. That is intentional: the renderer consumes draw units,
+  while the upstream metadata no longer pretends draw units are the source model.
+- Generated-scenery instancing remains renderer-policy driven through resource groups and render
+  instances. The current recipe/part-instance model is enough to avoid backwards draw-unit inference,
+  but further simplification would require renderer policy changes, not just DTO cleanup.
+- Source record ownership is still not fully visual-owned because `ObjectVisualSourcePayload` aliases
+  static resolver facts. A later resolver-record pass can address that without blocking the
+  publication metadata convergence.
 
 ## Decisions And Course Corrections
 

@@ -19,9 +19,9 @@ import type {
 	ObjectVisualPartInstanceIndex,
 	ObjectVisualStaticInstancedRenderInstanceMetadata,
 	ObjectVisualStaticInstancedResourceGroupMetadata,
-	ObjectVisualStaticObjectDirectDrawUnitMetadata,
+	ObjectVisualStaticObjectDirectPublicationMetadata,
 	ObjectVisualStaticPublicationMetadata,
-	ObjectVisualStructuredInteriorDirectDrawUnitMetadata,
+	ObjectVisualStructuredInteriorPublicationMetadata,
 } from "./object-visual-static-publication";
 
 export interface ObjectVisualStaticPublicationBakeInput {
@@ -36,14 +36,14 @@ export function createObjectVisualStaticInstallSet(
 		input.bakeResult.renderParts,
 	);
 	const directStaticObjectDrawUnits =
-		input.metadata.directStaticObjectDrawUnits.flatMap((metadata) =>
+		input.metadata.directStaticObjectPublications.flatMap((metadata) =>
 			createDirectStaticObjectDrawUnits({
 				metadata,
 				renderPartsByPartInstanceIndex,
 			}),
 		);
 	const structuredInteriorDrawUnits =
-		input.metadata.structuredInteriorDrawUnits.flatMap((metadata) =>
+		input.metadata.structuredInteriorPublications.flatMap((metadata) =>
 			createStructuredInteriorDrawUnits({
 				metadata,
 				renderPartsByPartInstanceIndex,
@@ -67,7 +67,7 @@ export function createObjectVisualStaticInstallSet(
 }
 
 function createDirectStaticObjectDrawUnits(options: {
-	readonly metadata: ObjectVisualStaticObjectDirectDrawUnitMetadata;
+	readonly metadata: ObjectVisualStaticObjectDirectPublicationMetadata;
 	readonly renderPartsByPartInstanceIndex: ReadonlyMap<
 		ObjectVisualPartInstanceIndex,
 		readonly ObjectVisualBakedRenderPart[]
@@ -76,10 +76,10 @@ function createDirectStaticObjectDrawUnits(options: {
 	return selectRenderPartsForPartInstances({
 		partInstanceIndices: options.metadata.partInstanceIndices,
 		renderPartsByPartInstanceIndex: options.renderPartsByPartInstanceIndex,
-		subject: `Direct static object draw unit ${options.metadata.drawUnitIdSeed}`,
+		subject: `Direct static object publication ${options.metadata.publicationIdSeed}`,
 	}).map((renderPart, index) => {
 		const drawUnitId = createPartitionedId(
-			options.metadata.drawUnitIdSeed,
+			options.metadata.publicationIdSeed,
 			renderPart.renderPartId,
 			index,
 		);
@@ -104,7 +104,7 @@ function createDirectStaticObjectDrawUnits(options: {
 }
 
 function createStructuredInteriorDrawUnits(options: {
-	readonly metadata: ObjectVisualStructuredInteriorDirectDrawUnitMetadata;
+	readonly metadata: ObjectVisualStructuredInteriorPublicationMetadata;
 	readonly renderPartsByPartInstanceIndex: ReadonlyMap<
 		ObjectVisualPartInstanceIndex,
 		readonly ObjectVisualBakedRenderPart[]
@@ -113,14 +113,14 @@ function createStructuredInteriorDrawUnits(options: {
 	return selectRenderPartsForPartInstances({
 		partInstanceIndices: options.metadata.partInstanceIndices,
 		renderPartsByPartInstanceIndex: options.renderPartsByPartInstanceIndex,
-		subject: `Structured interior draw unit ${options.metadata.drawUnitIdSeed}`,
+		subject: `Structured interior publication ${options.metadata.publicationIdSeed}`,
 	}).map((renderPart, index) => ({
 		...createStaticDrawUnitPayload(renderPart),
 		cellStructure: options.metadata.cellStructure,
 		coordinateSpace: "landblock-render-local",
 		domain: "env-cell-system",
 		drawUnitId: createPartitionedId(
-			options.metadata.drawUnitIdSeed,
+			options.metadata.publicationIdSeed,
 			renderPart.renderPartId,
 			index,
 		),

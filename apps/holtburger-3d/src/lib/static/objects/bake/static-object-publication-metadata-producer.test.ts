@@ -57,7 +57,7 @@ describe("static object publication metadata producer", () => {
 			metadata: publication.metadata,
 		});
 
-		expect(publication.metadata.directStaticObjectDrawUnits).toHaveLength(1);
+		expect(publication.metadata.directStaticObjectPublications).toHaveLength(1);
 		expect(publication.metadata.instancedRenderInstances).toEqual([]);
 		expect(installSet.directDrawUnits).toHaveLength(1);
 		expect(installSet.visualResources).toEqual([]);
@@ -67,7 +67,7 @@ describe("static object publication metadata producer", () => {
 			landblockId: TEST_LANDBLOCK_ID,
 		});
 		expect(
-			publication.metadata.directStaticObjectDrawUnits[0]
+			publication.metadata.directStaticObjectPublications[0]
 				?.sourceMappingCoverage[0],
 		).toMatchObject({
 			geometrySurfaceIds: [1],
@@ -106,7 +106,7 @@ describe("static object publication metadata producer", () => {
 			metadata: publication.metadata,
 		});
 
-		expect(publication.metadata.directStaticObjectDrawUnits).toEqual([]);
+		expect(publication.metadata.directStaticObjectPublications).toEqual([]);
 		expect(publication.metadata.instancedResourceGroups).toHaveLength(1);
 		expect(publication.metadata.instancedRenderInstances).toHaveLength(1);
 		expect(installSet.visualResources).toHaveLength(1);
@@ -135,7 +135,7 @@ describe("static object publication metadata producer", () => {
 		});
 
 		expect(
-			publication.metadata.directStaticObjectDrawUnits[0]?.ownership,
+			publication.metadata.directStaticObjectPublications[0]?.ownership,
 		).toEqual({
 			envCellIds: [0xda550100],
 			kind: "env-cell-static-object-placements",
@@ -143,7 +143,7 @@ describe("static object publication metadata producer", () => {
 			seedIdentities: [payload.objects[0]?.identity],
 		});
 		expect(
-			publication.metadata.directStaticObjectDrawUnits[0]?.spatialRecord,
+			publication.metadata.directStaticObjectPublications[0]?.spatialRecord,
 		).toMatchObject({
 			envCellId: 0xda550100,
 			kind: "env-cell-static-object-bounds",
@@ -172,7 +172,7 @@ describe("static object publication metadata producer", () => {
 			payload,
 		});
 
-		expect(publication.metadata.directStaticObjectDrawUnits).toHaveLength(1);
+		expect(publication.metadata.directStaticObjectPublications).toHaveLength(1);
 		expect(publication.metadata.instancedResourceGroups).toHaveLength(1);
 		expect(publication.metadata.instancedRenderInstances).toHaveLength(1);
 		expect([...publication.partInstanceIndexByKey.values()]).toEqual([0, 1]);

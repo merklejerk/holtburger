@@ -46,7 +46,7 @@ export function createStaticObjectPublicationMetadata(input: {
 
 	return {
 		metadata: createObjectVisualStaticPublicationMetadata({
-			directStaticObjectDrawUnits: createDirectDrawUnitMetadata({
+			directStaticObjectPublications: createDirectStaticObjectPublications({
 				owner: input.owner,
 				partInstanceIndexByKey,
 				payload: input.payload,
@@ -74,14 +74,14 @@ function countPartInstances(payload: ObjectVisualSourcePayload): number {
 	}, 0);
 }
 
-function createDirectDrawUnitMetadata(options: {
+function createDirectStaticObjectPublications(options: {
 	readonly owner: StaticLayerPeerRecordOwner;
 	readonly partInstanceIndexByKey: ReadonlyMap<
 		string,
 		ObjectVisualPartInstanceIndex
 	>;
 	readonly payload: ObjectVisualSourcePayload;
-}): ObjectVisualStaticPublicationMetadata["directStaticObjectDrawUnits"] {
+}): ObjectVisualStaticPublicationMetadata["directStaticObjectPublications"] {
 	return options.payload.objects
 		.filter((object) => object.identity.objectKind !== "generated-scenery")
 		.map((object) => {
@@ -91,8 +91,8 @@ function createDirectDrawUnitMetadata(options: {
 			);
 			return {
 				domain: options.payload.domain,
-				drawUnitIdSeed: createObjectDrawUnitIdSeed(object.identity),
-				kind: "static-object-direct-draw-unit" as const,
+				publicationIdSeed: createObjectDrawUnitIdSeed(object.identity),
+				kind: "static-object-direct-publication" as const,
 				landblockId: options.payload.landblock.landblockId,
 				ownership: createDrawUnitOwnership(options.payload, object),
 				partInstanceIndices,

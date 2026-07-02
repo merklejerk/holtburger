@@ -25,23 +25,23 @@ export type ObjectVisualStaticResourceGroupId = Brand<
 >;
 
 export interface ObjectVisualStaticPublicationMetadata {
-	/** Direct, non-instanced static object draw-unit publication facts. */
-	readonly directStaticObjectDrawUnits: readonly ObjectVisualStaticObjectDirectDrawUnitMetadata[];
+	/** Direct, non-instanced static object publication facts. */
+	readonly directStaticObjectPublications: readonly ObjectVisualStaticObjectDirectPublicationMetadata[];
 	/** Reusable static object resource groups evaluated after renderer-legal partitioning. */
 	readonly instancedResourceGroups: readonly ObjectVisualStaticInstancedResourceGroupMetadata[];
 	/** Static object render-instance facts for reusable resource publication. */
 	readonly instancedRenderInstances: readonly ObjectVisualStaticInstancedRenderInstanceMetadata[];
-	/** Direct structured-interior draw-unit publication facts. */
-	readonly structuredInteriorDrawUnits: readonly ObjectVisualStructuredInteriorDirectDrawUnitMetadata[];
+	/** Direct structured-interior publication facts. */
+	readonly structuredInteriorPublications: readonly ObjectVisualStructuredInteriorPublicationMetadata[];
 	/** Ownership/residency links for non-visual sidecars kept outside the visual recipe graph. */
 	readonly sidecarResidencies: readonly ObjectVisualStaticSidecarResidencyMetadata[];
 }
 
-export interface ObjectVisualStaticObjectDirectDrawUnitMetadata {
+export interface ObjectVisualStaticObjectDirectPublicationMetadata {
 	readonly domain: StaticObjectGeometryStaticDrawUnit["domain"];
-	/** Stable id seed used when a partition becomes a direct draw unit. */
-	readonly drawUnitIdSeed: string;
-	readonly kind: "static-object-direct-draw-unit";
+	/** Stable id seed used when this publication becomes renderer output. */
+	readonly publicationIdSeed: string;
+	readonly kind: "static-object-direct-publication";
 	readonly landblockId: number;
 	readonly ownership: StaticObjectDrawUnitOwnership;
 	/** Part instances contributing primitives to this publication candidate. */
@@ -49,7 +49,7 @@ export interface ObjectVisualStaticObjectDirectDrawUnitMetadata {
 	readonly sort: StaticObjectSortMetadata;
 	/** Source coverage remains visual metadata; source-mapping records remain sidecars. */
 	readonly sourceMappingCoverage: readonly StaticObjectSourceMappingCoverage[];
-	/** Optional renderer-side spatial record for direct draw units. */
+	/** Optional renderer-side spatial record for direct static output. */
 	readonly spatialRecord: StaticSpatialRecord | null;
 }
 
@@ -82,12 +82,12 @@ export interface ObjectVisualStaticInstancedRenderInstanceMetadata {
 	readonly transparency: StaticObjectRenderInstance["transparency"];
 }
 
-export interface ObjectVisualStructuredInteriorDirectDrawUnitMetadata {
+export interface ObjectVisualStructuredInteriorPublicationMetadata {
 	readonly cellStructure: StructuredInteriorGeometryStaticDrawUnit["cellStructure"];
-	readonly drawUnitIdSeed: string;
+	readonly publicationIdSeed: string;
 	readonly envCellId: number;
 	readonly environment: StructuredInteriorGeometryStaticDrawUnit["environment"];
-	readonly kind: "structured-interior-direct-draw-unit";
+	readonly kind: "structured-interior-publication";
 	readonly landblockId: number;
 	readonly localPlacement: StructuredInteriorGeometryStaticDrawUnit["localPlacement"];
 	readonly materialPlan: readonly StructuredInteriorMaterialPlanEntry[];
@@ -135,12 +135,12 @@ export function createObjectVisualStaticResourceGroupId(
 }
 
 export function createObjectVisualStaticPublicationMetadata(input: {
-	readonly directStaticObjectDrawUnits?: readonly ObjectVisualStaticObjectDirectDrawUnitMetadata[];
+	readonly directStaticObjectPublications?: readonly ObjectVisualStaticObjectDirectPublicationMetadata[];
 	readonly instancedRenderInstances?: readonly ObjectVisualStaticInstancedRenderInstanceMetadata[];
 	readonly instancedResourceGroups?: readonly ObjectVisualStaticInstancedResourceGroupMetadata[];
 	readonly partInstanceCount: number;
 	readonly sidecarResidencies?: readonly ObjectVisualStaticSidecarResidencyMetadata[];
-	readonly structuredInteriorDrawUnits?: readonly ObjectVisualStructuredInteriorDirectDrawUnitMetadata[];
+	readonly structuredInteriorPublications?: readonly ObjectVisualStructuredInteriorPublicationMetadata[];
 }): ObjectVisualStaticPublicationMetadata {
 	if (
 		!Number.isSafeInteger(input.partInstanceCount) ||
@@ -151,36 +151,36 @@ export function createObjectVisualStaticPublicationMetadata(input: {
 		);
 	}
 	const metadata: ObjectVisualStaticPublicationMetadata = {
-		directStaticObjectDrawUnits: input.directStaticObjectDrawUnits ?? [],
+		directStaticObjectPublications: input.directStaticObjectPublications ?? [],
 		instancedRenderInstances: input.instancedRenderInstances ?? [],
 		instancedResourceGroups: input.instancedResourceGroups ?? [],
 		sidecarResidencies: input.sidecarResidencies ?? [],
-		structuredInteriorDrawUnits: input.structuredInteriorDrawUnits ?? [],
+		structuredInteriorPublications: input.structuredInteriorPublications ?? [],
 	};
 	const resourceGroupIds = new Set(
 		metadata.instancedResourceGroups.map((group) => group.groupId),
 	);
 
-	for (const drawUnit of metadata.directStaticObjectDrawUnits) {
+	for (const publication of metadata.directStaticObjectPublications) {
 		assertNonEmptyPartInstanceIndices(
-			drawUnit.partInstanceIndices,
-			`Direct static object draw unit ${drawUnit.drawUnitIdSeed}`,
+			publication.partInstanceIndices,
+			`Direct static object publication ${publication.publicationIdSeed}`,
 		);
 		assertPartInstanceIndicesInRange(
-			drawUnit.partInstanceIndices,
+			publication.partInstanceIndices,
 			input.partInstanceCount,
-			`Direct static object draw unit ${drawUnit.drawUnitIdSeed}`,
+			`Direct static object publication ${publication.publicationIdSeed}`,
 		);
 	}
-	for (const drawUnit of metadata.structuredInteriorDrawUnits) {
+	for (const publication of metadata.structuredInteriorPublications) {
 		assertNonEmptyPartInstanceIndices(
-			drawUnit.partInstanceIndices,
-			`Structured interior draw unit ${drawUnit.drawUnitIdSeed}`,
+			publication.partInstanceIndices,
+			`Structured interior publication ${publication.publicationIdSeed}`,
 		);
 		assertPartInstanceIndicesInRange(
-			drawUnit.partInstanceIndices,
+			publication.partInstanceIndices,
 			input.partInstanceCount,
-			`Structured interior draw unit ${drawUnit.drawUnitIdSeed}`,
+			`Structured interior publication ${publication.publicationIdSeed}`,
 		);
 	}
 	for (const instance of metadata.instancedRenderInstances) {

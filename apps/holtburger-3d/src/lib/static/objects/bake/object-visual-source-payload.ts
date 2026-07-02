@@ -1,35 +1,11 @@
 import type {
 	EnvCellSystemStaticScopePayload,
-	LandblockSourceIdentity,
 	OutdoorStaticObjectDomain,
-	OutdoorStaticObjectsScopePayload,
-	RegionDetailRoleFacts,
 	StaticBakeJobPayload,
 	StaticDomain,
 	StaticObjectSourceIdentity,
 } from "../../contracts";
-
-export interface ObjectVisualSourcePayload {
-	readonly domain: Extract<
-		StaticDomain,
-		OutdoorStaticObjectDomain | "env-cell-system"
-	>;
-	readonly landblock: LandblockSourceIdentity;
-	readonly regionRenderProfile: {
-		readonly detailRoles: readonly RegionDetailRoleFacts[];
-	};
-	readonly objects: readonly ObjectVisualSourceObject[];
-	readonly sourceAssets: OutdoorStaticObjectsScopePayload["sourceAssets"];
-	readonly paletteSources: OutdoorStaticObjectsScopePayload["paletteSources"];
-	readonly materialSlots: OutdoorStaticObjectsScopePayload["materialSlots"];
-	readonly materialSources: OutdoorStaticObjectsScopePayload["materialSources"];
-	readonly textureRefs: OutdoorStaticObjectsScopePayload["textureRefs"];
-}
-
-type ObjectVisualSourceObject =
-	OutdoorStaticObjectsScopePayload["objects"][number] & {
-		readonly owningEnvCellId?: number | null;
-	};
+import type { ObjectVisualSourcePayload } from "../../../visual/object-visual-source-payload";
 
 export function createObjectVisualSourcePayload(
 	item: StaticBakeJobPayload,

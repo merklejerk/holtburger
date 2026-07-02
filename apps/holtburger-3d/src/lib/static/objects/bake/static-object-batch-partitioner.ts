@@ -36,7 +36,7 @@ import {
 	type ObjectVisualMaterialPlan,
 	type ObjectVisualMaterialTextureUseRole,
 } from "../../../visual/object-visual-material-planner";
-import type { ObjectVisualSourcePayload } from "./object-visual-source-payload";
+import type { ObjectVisualSourcePayload } from "../../../visual/object-visual-source-payload";
 import { isCurrentlyStageableStaticObjectDataUse } from "./static-object-renderability";
 
 export const STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE = 8;

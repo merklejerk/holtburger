@@ -19,7 +19,7 @@ import {
 	partitionStaticObjectBatches,
 	STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE,
 } from "./static-object-batch-partitioner";
-import type { ObjectVisualSourcePayload } from "./object-visual-source-payload";
+import type { ObjectVisualSourcePayload } from "../../../visual/object-visual-source-payload";
 import { createStaticObjectTexturePlacementIntents } from "./static-object-placement-planner";
 import { createStaticObjectSourceGeometryIdentity } from "../static-object-source-assets";
 import { objectVisualGeometryBufferId } from "../../../visual/object-visual-recipe-bundle";

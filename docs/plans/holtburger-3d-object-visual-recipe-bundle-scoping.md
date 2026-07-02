@@ -1,6 +1,6 @@
 # Holtburger 3D Object Visual Recipe Bundle Implementation Plan
 
-Status: implementation complete through Phase 19A. Residual cleanup and profiling follow-ups remain
+Status: implementation complete through Phase 19B. Residual cleanup and profiling follow-ups remain
 tracked in the phase notes below.
 
 ## Purpose
@@ -3335,7 +3335,7 @@ Spicy bits and retained debt:
 
 ### Phase 19B: Recipe Record Emission Convergence
 
-Status: planned.
+Status: completed.
 
 Goal: move resolver/domain output closer to explicit recipe records and sidecars instead of
 coordinator-owned source wrappers.
@@ -3355,6 +3355,34 @@ Acceptance criteria:
 - Heavy geometry remains sidecar data keyed by dense/local geometry buffer ids and stable source
   identities.
 - Unsupported materials remain lightweight non-renderable recipes with console skip behavior only.
+
+Implementation notes:
+
+- Moved the neutral `ObjectVisualSourcePayload` contract into `src/lib/visual` so static and dynamic
+  recipe planning share a visual-owned DTO type instead of importing a static object bake module.
+- Kept `createObjectVisualSourcePayload(...)` in the static object bake folder because it is a
+  static-domain normalizer from `StaticBakeJobPayload`; promoting that function would leak static job
+  semantics into visual code.
+- Dynamic visuals now import only the neutral visual DTO for source-payload typing. They still call
+  the shared source bundle expansion producer, but no longer type against static object source
+  normalizer ownership.
+- Static object-like domains and dynamic visuals continue to reach `ObjectVisualRecipeBundle`
+  emission through the same `ObjectVisualSourcePayload` shape, with geometry delivered as sidecars
+  and recipe ids remaining dense/local.
+- Validation passed with focused dynamic/static recipe-emission tests, `check`, `lint:dead`,
+  `format:check`, and a terrain browser harness slice.
+
+Spicy bits and retained debt:
+
+- `ObjectVisualSourcePayload` still aliases several static resolver fact arrays. That keeps this
+  phase reviewable, but a later resolver-output record pass should replace those aliases with
+  visual-owned source/material/texture fact records.
+- The source bundle expansion producer still lives in the static object bake folder because it
+  depends on static material adapters and source geometry helpers. Moving that producer is not free;
+  do it only when those dependencies are neutralized.
+- Structured interiors already emit recipe records, but their material/source facts still use
+  env-cell static payload types. Phase 19C should decide whether publication metadata convergence is
+  enough or whether a smaller 19D resolver-record pass is warranted.
 
 ### Phase 19C: Publication Metadata Convergence And Instancing Reassessment
 

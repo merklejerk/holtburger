@@ -8,7 +8,7 @@ import type {
 	StaticObjectSourceAssetFacts,
 	StaticObjectSourceGeometrySidecar,
 } from "../static/contracts";
-import type { ObjectVisualSourcePayload } from "../static/objects/bake/object-visual-source-payload";
+import type { ObjectVisualSourcePayload } from "../visual/object-visual-source-payload";
 import {
 	createObjectVisualSourceBundleExpansion,
 	createObjectVisualSourceRecipePlan,

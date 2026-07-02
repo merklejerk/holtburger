@@ -12,7 +12,7 @@ import type {
 	StaticObjectSourceIdentity,
 } from "../../contracts";
 import { createStaticObjectSourceGeometryIdentity } from "../static-object-source-assets";
-import type { ObjectVisualSourcePayload } from "./object-visual-source-payload";
+import type { ObjectVisualSourcePayload } from "../../../visual/object-visual-source-payload";
 import { createStaticObjectPublicationMetadata } from "./static-object-publication-metadata-producer";
 import { createObjectVisualSourceBundleExpansion } from "./static-object-visual-bundle-producer";
 

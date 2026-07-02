@@ -4,6 +4,8 @@ import type {
 } from "./contracts";
 import type {
 	StaticObjectInstanceIdentity,
+	StaticObjectMaterialSlotFacts,
+	StaticObjectSourceAssetFacts,
 	StaticObjectSourceGeometryAttachment,
 } from "../static/contracts";
 import type { StaticObjectBatchPayload } from "../static/objects/bake/static-object-batch-partitioner";
@@ -66,7 +68,10 @@ function createDynamicObjectVisualPayload(
 					? "env-cells"
 					: "outdoor",
 		},
-		materialSlots: [],
+		materialSlots: createDynamicMaterialSlots({
+			object: identity,
+			recipe,
+		}),
 		materialSources: recipe.visual.materialSources,
 		objects: [
 			{
@@ -90,9 +95,64 @@ function createDynamicObjectVisualPayload(
 		],
 		paletteSources: recipe.visual.paletteSources,
 		regionRenderProfile: { detailRoles: [] },
-		sourceAssets: recipe.visual.sourceAssets,
+		sourceAssets: createDynamicObjectVisualSourceAssets(recipe),
 		textureRefs: recipe.visual.textureRefs,
 	};
+}
+
+export function createDynamicObjectVisualSourceAssets(
+	recipe: DynamicEntityRecipe,
+): readonly StaticObjectSourceAssetFacts[] {
+	if (
+		recipe.visual.sourceAssets.some((sourceAsset) =>
+			staticObjectSourceEquals(
+				sourceAsset.identity,
+				recipe.visual.setupModel.identity,
+			),
+		)
+	) {
+		return recipe.visual.sourceAssets;
+	}
+	return [recipe.visual.setupModel, ...recipe.visual.sourceAssets];
+}
+
+function staticObjectSourceEquals(
+	left: StaticObjectSourceAssetFacts["identity"],
+	right: StaticObjectSourceAssetFacts["identity"],
+): boolean {
+	return (
+		left.kind === right.kind &&
+		left.sourceAssetKind === right.sourceAssetKind &&
+		left.sourceDid === right.sourceDid
+	);
+}
+
+function createDynamicMaterialSlots(options: {
+	readonly object: StaticObjectInstanceIdentity;
+	readonly recipe: DynamicEntityRecipe;
+}): readonly StaticObjectMaterialSlotFacts[] {
+	return options.recipe.visual.setupModel.parts.flatMap((part) =>
+		part.materialSlots.map((slot): StaticObjectMaterialSlotFacts => ({
+			gfxObj: part.gfxObj,
+			identity: {
+				geometrySurfaceId: slot.geometrySurfaceId,
+				kind: "static-material-slot",
+				materialSurfaceId: slot.materialSurfaceId,
+				part: {
+					kind: "static-object-part",
+					object: options.object,
+					partIndex: part.partIndex,
+				},
+				slotIndex: slot.slotIndex,
+			},
+			material: slot.material,
+			materialVariantSignature: slot.materialVariantSignature,
+			object: options.object,
+			paletteOverride: slot.paletteOverride,
+			paletteViews: slot.paletteViews,
+			source: part.source,
+		})),
+	);
 }
 
 function createDynamicPartInstances(input: {

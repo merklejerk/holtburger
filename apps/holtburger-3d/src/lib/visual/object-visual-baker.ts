@@ -10,6 +10,8 @@ import type {
 	ObjectVisualGeometryBufferId,
 	ObjectVisualMaterialRecipe,
 	ObjectVisualMaterialRecipeId,
+	ObjectVisualPartMaterialBinding,
+	ObjectVisualPartRecipeId,
 	ObjectVisualRecipeBundle,
 	ObjectVisualTextureRecipeId,
 } from "./object-visual-recipe-bundle";
@@ -152,10 +154,11 @@ function expandRenderablePrimitives(
 		);
 
 		for (const triangle of buffer.triangles) {
-			if (triangle.surfaceId === null) {
-				continue;
-			}
-			const binding = bindingsBySurfaceId.get(triangle.surfaceId);
+			const binding = resolveTriangleMaterialBinding({
+				bindingsBySurfaceId,
+				partRecipeId: instance.partRecipeId,
+				surfaceId: triangle.surfaceId,
+			});
 			if (!binding) {
 				continue;
 			}
@@ -204,6 +207,28 @@ function expandRenderablePrimitives(
 		}
 	}
 	return primitives.sort(compareRenderablePrimitives);
+}
+
+function resolveTriangleMaterialBinding(options: {
+	readonly bindingsBySurfaceId: ReadonlyMap<
+		number,
+		ObjectVisualPartMaterialBinding
+	>;
+	readonly partRecipeId: ObjectVisualPartRecipeId;
+	readonly surfaceId: number | null;
+}): ObjectVisualPartMaterialBinding | null {
+	if (options.surfaceId !== null) {
+		return options.bindingsBySurfaceId.get(options.surfaceId) ?? null;
+	}
+	if (options.bindingsBySurfaceId.size === 1) {
+		return [...options.bindingsBySurfaceId.values()][0] ?? null;
+	}
+	if (options.bindingsBySurfaceId.size > 1) {
+		console.warn(
+			`Skipped object visual triangle with no surface id in part recipe ${options.partRecipeId}; ${options.bindingsBySurfaceId.size} material bindings are ambiguous.`,
+		);
+	}
+	return null;
 }
 
 function createMaterialTableEntry(options: {

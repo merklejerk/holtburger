@@ -23,8 +23,9 @@ Current files that establish the problem shape:
     constructs triangle candidates, groups by object-material partition key, and emits static
     partitions.
 - `apps/holtburger-3d/src/lib/dynamic/visual-baker.ts`
-  - Dynamic visual baking now uses the shared object-material partition helper, but still performs
-    dynamic-specific material planning and texture requirement discovery around entity recipes.
+  - Dynamic visual baking now routes dynamic recipe expansions through `bakeObjectVisuals(...)` and
+    projects the shared baked render parts back into the existing dynamic resource wrapper for
+    runtime compatibility.
 - `apps/holtburger-3d/src/lib/visual/object-material-draw-unit-partition.ts`
   - Shared renderer-legality partition vocabulary for object-like materials.
 - `apps/holtburger-3d/src/lib/static/objects/bake/static-object-batch-baker.ts`
@@ -55,8 +56,8 @@ Current remaining smell:
 
 - Static objects and dynamic visuals still enter worker material planning through different payload
   shapes.
-- Dynamic visuals still run material planning once for texture-placement discovery and again for
-  final baking.
+- Dynamic visuals still expose dynamic-specific recipe/planning/resource wrapper shapes around the
+  object visual bundle and shared baker output.
 - Generated-scenery instancing is inferred after static draw-unit construction instead of falling out
   naturally from repeated part instances.
 
@@ -161,6 +162,13 @@ static and dynamic worker shapes. Temporary adapters are acceptable only as migr
 explicit deletion criteria. They should not become supported architecture, and they should not
 preserve legacy material planning, geometry extraction, or generated-scenery inference paths after
 the recipe model can replace them.
+
+12. Tests are not sacred when they preserve dead architecture.
+
+Focused tests should prove current renderer legality, deterministic contracts, and important
+behavioral invariants. If legacy tests are ossified around removed worker shapes, duplicated
+pipelines, or implementation choreography, prefer deleting them and rebuilding focused coverage over
+migrating brittle expectations through heavy churn.
 
 ## Target Concept
 
@@ -2320,8 +2328,8 @@ Course correction during Phase 10:
   texture placement ids and material recipe ids aligned before the baker changes.
 - Third implementation slice: route dynamic baking through `bakeObjectVisuals(...)`, then translate
   the shared baked render parts into the existing `BakedDynamicVisualResource` wrapper only as a
-  runtime compatibility shell. Delete the dynamic render-part extraction code once renderer/runtime
-  installation no longer needs the wrapper.
+  runtime compatibility shell. Delete the old dynamic render-part extraction code in the same slice
+  so the compatibility wrapper cannot silently become a second baker.
 - Spicy debt: the static object bundle producer currently contains useful recipe construction logic
   behind static batch payload shapes. Reusing it for dynamics through a small adapter is acceptable
   as an intermediate cut, but the hard cutover should pull the common setup/gfx source-to-recipe
@@ -2340,6 +2348,39 @@ Course correction during Phase 10:
   remains `DynamicVisualTexturePlanning` for compatibility with the existing dynamic bake/install
   shell; this is now a compatibility wrapper around recipe-first texture discovery, not the source
   of texture recipe truth.
+- Dynamic baking now consumes `createDynamicObjectVisualBundleExpansion(...)` and
+  `bakeObjectVisuals(...)` directly. The dynamic resource wrapper preserves source-local render
+  payloads for animation and assigns existing `BakedDynamicVisualResource.renderParts` fields from
+  shared object visual render parts. The old dynamic-only render-part extractor, dynamic material
+  render entry builder, and dynamic material-budget partition helpers were deleted.
+- Course correction: runtime-authored setup-appearance material slots exposed a shared recipe
+  normalization gap. Appearance payloads may address geometry through a surface id that differs from
+  the slot index stored as `geometrySurfaceId`; `MaterialSlotIndex` now indexes both
+  `geometrySurfaceId` and `materialSurfaceId` so setup-appearance slots flatten into normal
+  `PartRecipe.materialBindings` instead of requiring dynamic-only fallback logic.
+- Course correction: shared baking now maps null-surface triangles to the only material binding when
+  a part has exactly one binding. This preserves the old dynamic single-material behavior in the
+  common object visual baker and leaves ambiguous multi-binding null-surface triangles skipped with a
+  console warning.
+- Test steering: the dynamic-specific material-budget test was deleted instead of migrated because
+  material-table budget splitting is now owned by `object-visual-baker` coverage. Dynamic baker
+  tests now assert wrapper projection, source part preservation, dependency skip behavior, and the
+  shared-bundle missing dependency failure surface.
+- Validation:
+  `npm --prefix apps/holtburger-3d run test:ts -- visual-baker object-visual-baker static-coordinator`
+  passed with 3 test files and 47 tests;
+  `npm --prefix apps/holtburger-3d run test:ts -- client-runtime -t "runtime spawn|dynamic render residence|dynamic renderer submissions|SetOmega|classified env-cell dynamic"`
+  passed with 5 dynamic runtime tests;
+  `npm --prefix apps/holtburger-3d run check` passed.
+- Known validation debt: the broader `client-runtime` suite still has four static-publication/
+  diagnostic expectation failures around env-cell projection resources, generated scenery layer
+  forwarding, and legacy static draw-unit diagnostics. The project lint script also still reports
+  unrelated unused imports in static coordinator/env-cell/static-object batch files outside this
+  slice.
+- Remaining Phase 10 debt: runtime installation still consumes
+  `BakedDynamicVisualResource.renderParts` rather than installing shared object visual products and
+  animation bindings directly. The dynamic resolver/planning shell also still exposes
+  dynamic-specific wrapper contracts around object visual recipes.
 
 ### Phase 11: Recipe-First Generated Scenery Instancing
 

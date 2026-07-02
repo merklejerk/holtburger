@@ -12,7 +12,7 @@ import type {
 import {
 	createObjectVisualSourceBundleExpansion,
 	createObjectVisualSourceRecipePlan,
-} from "../static/objects/bake/static-object-visual-bundle-producer";
+} from "../visual/object-visual-source-bundle-producer";
 import {
 	createObjectVisualReadyResolution,
 	type ObjectVisualBundleReadyResolution,

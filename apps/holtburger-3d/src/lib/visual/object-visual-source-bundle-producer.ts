@@ -1,30 +1,26 @@
 import type {
 	MaterialTextureDataUseIdentity,
 	StaticBakeJobResources,
-	StaticObjectInstanceIdentity,
-	StaticObjectMaterialSlotFacts,
-	StaticObjectPartSourceFacts,
 	StaticObjectSourceGeometrySidecar,
-	StaticObjectSourceIdentity,
-} from "../../contracts";
+} from "../static/contracts";
 import {
 	AC_UNIT_SCALE,
 	buildAcPlacementMatrix,
 	createStaticObjectSourceScaleMatrix,
 	multiplyMat4,
-} from "../../../math/ac-placement-transform";
+} from "../math/ac-placement-transform";
 import {
 	createStaticMaterialRenderState,
 	createStaticMaterialTextureRoleLayoutKey,
 	createStaticMaterialTextureRoleSchemaKey,
 	resolveStaticMaterialDetailTextureTiling,
-} from "../../bake/static-material-adapter";
+} from "../static/bake/static-material-adapter";
 import {
 	createObjectVisualMaterialUseKey,
 	planObjectVisualMaterials,
 	type ObjectVisualMaterialPlan,
 	type ObjectVisualMaterialTextureUseRole,
-} from "../../../visual/object-visual-material-planner";
+} from "./object-visual-material-planner";
 import {
 	createObjectVisualMissingDependenciesResolution,
 	createObjectVisualReadyResolution,
@@ -44,12 +40,18 @@ import {
 	type ObjectVisualTextureRecipe,
 	type ObjectVisualTextureRecipeId,
 	type ObjectVisualTextureUsage,
-} from "../../../visual/object-visual-recipe-bundle";
+} from "./object-visual-recipe-bundle";
 import {
 	describeStaticObjectCanonicalGeometryIdentity,
 	getStaticObjectCanonicalGeometryIdentity,
-} from "../static-object-source-assets";
-import type { ObjectVisualSourcePayload } from "../../../visual/object-visual-source-payload";
+} from "../static/objects/static-object-source-assets";
+import type {
+	ObjectVisualMaterialSlotFacts,
+	ObjectVisualObjectIdentity,
+	ObjectVisualPartSourceFacts,
+	ObjectVisualSourceIdentity,
+	ObjectVisualSourcePayload,
+} from "./object-visual-source-payload";
 
 export interface ObjectVisualSourceBundleExpansion {
 	readonly geometryBuffers: ReadonlyMap<
@@ -358,8 +360,8 @@ function createPartRecipes(options: {
 
 function getMaterialSlotIndex(
 	slot:
-		| StaticObjectMaterialSlotFacts
-		| StaticObjectPartSourceFacts["materialSlots"][number],
+		| ObjectVisualMaterialSlotFacts
+		| ObjectVisualPartSourceFacts["materialSlots"][number],
 ): number {
 	return "slotIndex" in slot ? slot.slotIndex : slot.identity.slotIndex;
 }
@@ -397,7 +399,7 @@ function createPartInstances(options: {
 						},
 			sourcePartIndex: null,
 			transform: Array.from(
-				createStaticObjectSourcePartMatrix(object, part),
+				createObjectVisualSourcePartMatrix(object, part),
 			) as [
 				number,
 				number,
@@ -756,7 +758,7 @@ function getPaletteFirstIndex(
 class MaterialSlotIndex {
 	readonly #slotsByObjectPartSurface = new Map<
 		string,
-		StaticObjectMaterialSlotFacts
+		ObjectVisualMaterialSlotFacts
 	>();
 
 	constructor(payload: ObjectVisualSourcePayload) {
@@ -776,15 +778,15 @@ class MaterialSlotIndex {
 	}
 
 	resolveMaterialSlot(
-		object: StaticObjectInstanceIdentity,
-		part: StaticObjectPartSourceFacts,
+		object: ObjectVisualObjectIdentity,
+		part: ObjectVisualPartSourceFacts,
 		triangle: {
 			readonly geometrySurfaceId: number | null;
 			readonly materialVariantSignature: string | null;
 		},
 	):
-		| StaticObjectMaterialSlotFacts
-		| StaticObjectPartSourceFacts["materialSlots"][number]
+		| ObjectVisualMaterialSlotFacts
+		| ObjectVisualPartSourceFacts["materialSlots"][number]
 		| null {
 		if (triangle.geometrySurfaceId === null) {
 			return null;
@@ -809,7 +811,7 @@ class MaterialSlotIndex {
 }
 
 function uniqueMaterialSlotSurfaceIds(
-	slot: StaticObjectMaterialSlotFacts,
+	slot: ObjectVisualMaterialSlotFacts,
 ): readonly number[] {
 	return [
 		...new Set([
@@ -842,9 +844,9 @@ function findMissingGeometrySidecars(
 	return [...new Set(missing)].sort();
 }
 
-export function createStaticObjectSourcePartMatrix(
+export function createObjectVisualSourcePartMatrix(
 	object: ObjectVisualSourcePayload["objects"][number],
-	part: StaticObjectPartSourceFacts,
+	part: ObjectVisualPartSourceFacts,
 ): Float32Array {
 	let matrix = buildAcPlacementMatrix(object.localPlacement, AC_UNIT_SCALE);
 	for (const placement of part.defaultPlacements) {
@@ -864,8 +866,8 @@ export function createStaticObjectSourcePartMatrix(
 }
 
 function createPartRecipeKey(
-	object: StaticObjectInstanceIdentity,
-	part: StaticObjectPartSourceFacts,
+	object: ObjectVisualObjectIdentity,
+	part: ObjectVisualPartSourceFacts,
 ): string {
 	return [
 		"static-object-part",
@@ -875,7 +877,7 @@ function createPartRecipeKey(
 	].join("|");
 }
 
-function createGeometryRecipeKey(part: StaticObjectPartSourceFacts): string {
+function createGeometryRecipeKey(part: ObjectVisualPartSourceFacts): string {
 	return [
 		"static-object-geometry",
 		createSourceKey(part.source),
@@ -892,7 +894,7 @@ function createGeometryBufferKey(
 
 function requireSource(
 	payload: ObjectVisualSourcePayload,
-	identity: StaticObjectSourceIdentity,
+	identity: ObjectVisualSourceIdentity,
 ): ObjectVisualSourcePayload["sourceAssets"][number] {
 	const source = payload.sourceAssets.find(
 		(candidate) =>
@@ -907,7 +909,7 @@ function requireSource(
 }
 
 function createMaterialSlotKey(options: {
-	readonly object: StaticObjectInstanceIdentity;
+	readonly object: ObjectVisualObjectIdentity;
 	readonly partIndex: number;
 	readonly geometrySurfaceId: number;
 	readonly materialVariantSignature: string | null;
@@ -920,7 +922,7 @@ function createMaterialSlotKey(options: {
 	].join("|");
 }
 
-function createObjectKey(object: StaticObjectInstanceIdentity): string {
+function createObjectKey(object: ObjectVisualObjectIdentity): string {
 	return [
 		formatHex32(object.landblockId),
 		object.objectKind,
@@ -928,7 +930,7 @@ function createObjectKey(object: StaticObjectInstanceIdentity): string {
 	].join(":");
 }
 
-function createSourceKey(source: StaticObjectSourceIdentity): string {
+function createSourceKey(source: ObjectVisualSourceIdentity): string {
 	return [
 		source.kind,
 		source.sourceAssetKind,

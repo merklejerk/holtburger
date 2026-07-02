@@ -3523,7 +3523,7 @@ Spicy bits and retained debt:
 
 ### Phase 21: Neutral Bundle Expansion Ownership
 
-Status: planned.
+Status: completed.
 
 Goal: move shared object visual bundle expansion/planning ownership out of the static object bake
 folder once its inputs are visual-owned.
@@ -3560,6 +3560,36 @@ Spicy bits to watch:
 
 - If moving the file starts pulling static publication/source-mapping policy into `src/lib/visual`,
   split the helper first. Visual-owned does not mean "everything that used to be nearby gets moved."
+
+Implementation notes:
+
+- Moved the shared source-to-recipe-bundle producer from
+  `static/objects/bake/static-object-visual-bundle-producer.ts` to
+  `visual/object-visual-source-bundle-producer.ts`.
+- Moved the producer test alongside it as `visual/object-visual-source-bundle-producer.test.ts`.
+- Updated dynamic visual expansion, static object baking, and static publication metadata production
+  to import the shared producer from `src/lib/visual`.
+- Renamed the exported part-matrix helper from `createStaticObjectSourcePartMatrix(...)` to
+  `createObjectVisualSourcePartMatrix(...)` for shared producer consumers. The static object job
+  baker still has a local `createStaticObjectSourcePartMatrix(...)` helper because that code remains
+  static-publication/diagnostic policy.
+- Retyped the moved producer's source-object, source-part, material-slot, and source-identity helper
+  signatures to the visual-owned source records from Phase 20.
+- Validation passed:
+  `npm --prefix apps/holtburger-3d run test:ts -- src/lib/visual/object-visual-source-bundle-producer.test.ts src/lib/dynamic/visual-baker.test.ts src/lib/dynamic/visual-contracts.test.ts src/lib/static/objects/bake/static-object-publication-metadata-producer.test.ts src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/static/env-cells/bake/structured-interior-visual-bundle-producer.test.ts`,
+  `npm --prefix apps/holtburger-3d run check`,
+  `npm --prefix apps/holtburger-3d run lint:dead`, and
+  `npm --prefix apps/holtburger-3d run format:check`.
+
+Spicy bits and retained debt:
+
+- The moved producer still imports static material adapter helpers and static geometry sidecar
+  description helpers. That is acceptable for this phase because those modules encode current
+  renderer/material behavior and prepared `gfx_obj` geometry identity, not runtime publication
+  policy. Renaming or extracting those helpers should be part of Phase 23 or the final audit only if
+  they still block the Definition of Done.
+- Historical Phase 9J notes still reference the old producer path and test command. Those are
+  retained as history; production imports no longer use that module path.
 
 ### Phase 22: Dynamic Single-Visual Bake Contract
 

@@ -59,7 +59,7 @@ import {
 import { createStaticObjectVisualResourceKeyString } from "../static-object-visual-resource-key";
 import { createObjectVisualSourcePayload } from "./object-visual-source-payload";
 import { createObjectVisualInstallSet } from "../../../visual/object-visual-install-set";
-import { createObjectVisualSourceBundleExpansion } from "./static-object-visual-bundle-producer";
+import { createObjectVisualSourceBundleExpansion } from "../../../visual/object-visual-source-bundle-producer";
 import { createStaticObjectPublicationMetadata } from "./static-object-publication-metadata-producer";
 import type { ObjectVisualSourcePayload } from "../../../visual/object-visual-source-payload";
 

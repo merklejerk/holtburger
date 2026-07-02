@@ -17,7 +17,7 @@ import {
 	type ObjectVisualStaticPublicationMetadata,
 	type ObjectVisualStaticResourceGroupId,
 } from "../../../visual/object-visual-static-publication";
-import { createStaticObjectSourcePartMatrix } from "./static-object-visual-bundle-producer";
+import { createObjectVisualSourcePartMatrix } from "../../../visual/object-visual-source-bundle-producer";
 import type { ObjectVisualSourcePayload } from "../../../visual/object-visual-source-payload";
 
 const GENERATED_SCENERY_INSTANCING_POLICY = {
@@ -184,7 +184,7 @@ function createGeneratedRenderInstanceMetadata(options: {
 				),
 				sortCenter,
 				source: object.identity,
-				sourceToLandblockMatrix: createStaticObjectSourcePartMatrix(
+				sourceToLandblockMatrix: createObjectVisualSourcePartMatrix(
 					object,
 					part,
 				),

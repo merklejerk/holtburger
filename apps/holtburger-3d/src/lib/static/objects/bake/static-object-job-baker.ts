@@ -21,8 +21,6 @@ import type {
 	StaticObjectSourceIdentity,
 	StaticSpatialRecord,
 	StaticLayerPeerRecordOwner,
-	StaticObjectRenderInstance,
-	StaticObjectVisualResource,
 	StaticObjectInstanceFacts,
 	StaticObjectRetainedTransparentPartitionReasonCounts,
 } from "../../contracts";
@@ -56,9 +54,13 @@ import {
 	isCurrentlyStageableStaticObjectDataUse,
 	isRenderableStaticObjectPartition,
 } from "./static-object-renderability";
-import { createStaticObjectVisualResourceKeyString } from "../static-object-visual-resource-key";
+import { createObjectVisualResourceKeyString } from "../../../visual/object-visual-resource-key";
 import { createObjectVisualSourcePayload } from "./object-visual-source-payload";
-import { createObjectVisualInstallSet } from "../../../visual/object-visual-install-set";
+import {
+	createObjectVisualInstallSet,
+	type ObjectVisualRenderInstance,
+	type ObjectVisualResource,
+} from "../../../visual/object-visual-install-set";
 import { createObjectVisualSourceBundleExpansion } from "../../../visual/object-visual-source-bundle-producer";
 import { createStaticObjectPublicationMetadata } from "./static-object-publication-metadata-producer";
 import type { ObjectVisualSourcePayload } from "../../../visual/object-visual-source-payload";
@@ -99,7 +101,7 @@ export function bakeStaticObjectJob(
 			itemResult.objectVisualInstallSet.dynamicAnimationPartBindings,
 		renderInstances: itemResult.objectVisualInstallSet.renderInstances,
 		textureDependencies: objectVisualTextureDependencies,
-		visualResources: dedupeStaticObjectVisualResources(
+		visualResources: dedupeObjectVisualResources(
 			itemResult.objectVisualInstallSet.visualResources,
 		),
 	});
@@ -448,8 +450,8 @@ function createStaticObjectRecipePublication(options: {
 function createStaticObjectBakeDiagnostics(options: {
 	readonly input: StaticBakeJobInput;
 	readonly instancedOutput: {
-		readonly instances: readonly StaticObjectRenderInstance[];
-		readonly resources: readonly StaticObjectVisualResource[];
+		readonly instances: readonly ObjectVisualRenderInstance[];
+		readonly resources: readonly ObjectVisualResource[];
 	};
 	readonly payload: ObjectVisualSourcePayload;
 	readonly partitionPlan: ReturnType<typeof partitionStaticObjectBatches>;
@@ -525,8 +527,8 @@ function createStaticObjectBakeDiagnostics(options: {
 }
 
 function createStaticObjectInstancingBakeDiagnostics(input: {
-	readonly instances: readonly StaticObjectRenderInstance[];
-	readonly resources: readonly StaticObjectVisualResource[];
+	readonly instances: readonly ObjectVisualRenderInstance[];
+	readonly resources: readonly ObjectVisualResource[];
 }): Pick<
 	StaticObjectBakeDiagnostics,
 	| "estimatedAvoidedFlattenedTriangleCount"
@@ -549,8 +551,7 @@ function createStaticObjectInstancingBakeDiagnostics(input: {
 	let estimatedInstancedSourceTypedArrayBytes = 0;
 	let instancedSourceTriangleCount = 0;
 	for (const resource of input.resources) {
-		const resourceBytes =
-			estimateStaticObjectVisualResourceTypedArrayBytes(resource);
+		const resourceBytes = estimateObjectVisualResourceTypedArrayBytes(resource);
 		const instanceCount =
 			instanceCountByResourceId.get(resource.resourceId) ?? 0;
 		estimatedInstancedSourceTypedArrayBytes += resourceBytes;
@@ -675,7 +676,7 @@ function classifyRetainedTransparentPartition(options: {
 			(options.generatedObjectCountBySourceLocalTriangleKey.get(
 				createStaticObjectSourceLocalTriangleKey(triangle),
 			) ?? 0) > 1;
-		const candidate = selectGeneratedStaticObjectRenderInstanceCandidate(
+		const candidate = selectGeneratedObjectVisualRenderInstanceCandidate(
 			sourceIndex.getObject(triangle.object),
 		);
 		if (candidate.kind === "ineligible") {
@@ -712,8 +713,8 @@ function incrementRetainedTransparentPartitionReason(
 	counts[reason] += 1;
 }
 
-function estimateStaticObjectVisualResourceTypedArrayBytes(
-	resource: StaticObjectVisualResource,
+function estimateObjectVisualResourceTypedArrayBytes(
+	resource: ObjectVisualResource,
 ): number {
 	return (
 		resource.positions.byteLength +
@@ -727,7 +728,7 @@ function sumNumbers(values: readonly number[]): number {
 	return values.reduce((sum, value) => sum + value, 0);
 }
 
-type GeneratedStaticObjectRenderInstanceCandidateEligibility =
+type GeneratedObjectVisualRenderInstanceCandidateEligibility =
 	| {
 			/** Candidate object with nullable host/content fields promoted to required render-instance facts. */
 			readonly kind: "eligible";
@@ -744,9 +745,9 @@ type GeneratedStaticObjectRenderInstanceCandidateEligibility =
 				| "missing-instance-bounds";
 	  };
 
-function selectGeneratedStaticObjectRenderInstanceCandidate(
+function selectGeneratedObjectVisualRenderInstanceCandidate(
 	object: StaticObjectInstanceFacts | undefined,
-): GeneratedStaticObjectRenderInstanceCandidateEligibility {
+): GeneratedObjectVisualRenderInstanceCandidateEligibility {
 	if (!object) {
 		return { kind: "ineligible", reason: "missing-object" };
 	}
@@ -799,15 +800,12 @@ function findStaticObjectSourceTriangle(
 	return sourceTriangle;
 }
 
-function dedupeStaticObjectVisualResources(
-	resources: readonly StaticObjectVisualResource[],
-): readonly StaticObjectVisualResource[] {
-	const byKey = new Map<string, StaticObjectVisualResource>();
+function dedupeObjectVisualResources(
+	resources: readonly ObjectVisualResource[],
+): readonly ObjectVisualResource[] {
+	const byKey = new Map<string, ObjectVisualResource>();
 	for (const resource of resources) {
-		byKey.set(
-			createStaticObjectVisualResourceKeyString(resource.key),
-			resource,
-		);
+		byKey.set(createObjectVisualResourceKeyString(resource.key), resource);
 	}
 	return Array.from(byKey.values()).sort((left, right) =>
 		left.resourceId.localeCompare(right.resourceId),

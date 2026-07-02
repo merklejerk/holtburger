@@ -3675,7 +3675,7 @@ Spicy bits and retained debt:
 
 ### Phase 23: Object Visual Publication Type Neutrality
 
-Status: planned.
+Status: completed.
 
 Goal: make the shared object visual install/publication shape depend on visual-owned publication and
 resource records rather than static-owned renderer resource contracts.
@@ -3713,6 +3713,39 @@ Spicy bits to watch:
 
 - Renderer draw units are allowed at the final renderer boundary. The smell is static-owned
   publication/resource records pretending to be the canonical shared object visual model.
+
+Implementation notes:
+
+- Added visual-owned `ObjectVisualResource`, `ObjectVisualResourceKey`,
+  `ObjectVisualResourceId`, and `ObjectVisualRenderInstance` records to
+  `src/lib/visual/object-visual-install-set.ts`, then retargeted `ObjectVisualInstallSet` to those
+  records instead of `StaticObjectVisualResource` and `StaticObjectRenderInstance`.
+- Moved reusable visual-resource key construction/grouping from the static object helper module to
+  `src/lib/visual/object-visual-resource-key.ts` and moved the key tests beside it.
+- Retargeted static publication metadata, static publication baking, generated-scenery instancing
+  diagnostics/dedupe, the static coordinator resource-owner collection, runtime static commit
+  installation, and runtime/coordinator/installer tests to consume visual-owned resource and
+  render-instance types.
+- Removed the old `static/objects/static-object-visual-resource-key.ts` module and its old test.
+- Tightened now-unused static-contract exports for static object visual resource ids/keys so knip
+  does not preserve static-owned shared vocabulary as dead public API.
+- Validation passed:
+  `npm --prefix apps/holtburger-3d run test:ts -- src/lib/visual/object-visual-install-set.test.ts src/lib/visual/object-visual-resource-key.test.ts src/lib/visual/object-visual-static-publication.test.ts src/lib/visual/object-visual-static-publication-baker.test.ts src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/static/objects/bake/static-object-publication-metadata-producer.test.ts src/lib/static/coordinator/static-coordinator.test.ts src/lib/runtime/static-commit-installer.test.ts src/lib/runtime/client-runtime.test.ts`,
+  `npm --prefix apps/holtburger-3d run check`,
+  `npm --prefix apps/holtburger-3d run lint:dead`,
+  `npm --prefix apps/holtburger-3d run format:check`, and
+  `npm --prefix apps/holtburger-3d run harness:browser -- --domains terrain --timeout-ms 60000 --output /tmp/holtburger-phase23-harness.json`.
+
+Spicy bits and retained debt:
+
+- `ObjectVisualResource.kind`, `ObjectVisualRenderInstance.kind`, and
+  `ObjectVisualResourceKey.kind` still use `static-object-*` discriminant strings. That is
+  deliberate for this phase because renderer and texture-placement ownership still key off those
+  protocol literals. The TypeScript ownership is visual-owned now; literal vocabulary belongs to a
+  renderer-boundary cleanup if it becomes worth the churn.
+- Static draw units remain in `ObjectVisualDirectDrawUnit` because direct object-like publications
+  are still renderer-ready static draw-unit contracts. This phase removed static-owned reusable
+  resource/instance records, not the renderer draw-unit boundary.
 
 ### Phase 24: Completion Audit And Final Validation
 

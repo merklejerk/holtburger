@@ -1,22 +1,24 @@
 import { describe, expect, it } from "vitest";
 import type {
 	StaticMaterialTableEntry,
-	StaticObjectRenderInstance,
 	StaticObjectRenderState,
-	StaticObjectSourceGeometryIdentity,
-} from "../contracts";
+} from "../static/contracts";
+import type {
+	ObjectVisualRenderInstance,
+	ObjectVisualSourceGeometryKey,
+} from "./object-visual-install-set";
 import {
-	createStaticObjectVisualResourceId,
-	createStaticObjectVisualResourceKey,
-	createStaticObjectVisualResourceKeyString,
-	groupStaticObjectRenderInstancesByVisualResource,
-	type StaticObjectVisualResourceKeyInput,
-} from "./static-object-visual-resource-key";
+	createObjectVisualResourceId,
+	createObjectVisualResourceKey,
+	createObjectVisualResourceKeyString,
+	groupObjectVisualRenderInstancesByResource,
+	type ObjectVisualResourceKeyInput,
+} from "./object-visual-resource-key";
 
-describe("static object visual resource keys", () => {
+describe("object visual resource keys", () => {
 	it("keeps per-instance placement and source identity out of the reusable resource key", () => {
-		const key = createStaticObjectVisualResourceKey(createVisualKeyInput());
-		const resourceId = createStaticObjectVisualResourceId(key);
+		const key = createObjectVisualResourceKey(createVisualKeyInput());
+		const resourceId = createObjectVisualResourceId(key);
 		const firstInstance = createRenderInstance({
 			instanceId: "generated-a",
 			resourceId,
@@ -28,9 +30,9 @@ describe("static object visual resource keys", () => {
 			x: 42,
 		});
 
-		expect(createStaticObjectVisualResourceKeyString(key)).toEqual(
-			createStaticObjectVisualResourceKeyString(
-				createStaticObjectVisualResourceKey(createVisualKeyInput()),
+		expect(createObjectVisualResourceKeyString(key)).toEqual(
+			createObjectVisualResourceKeyString(
+				createObjectVisualResourceKey(createVisualKeyInput()),
 			),
 		);
 		expect(firstInstance.transform.origin.x).not.toBe(
@@ -59,24 +61,24 @@ describe("static object visual resource keys", () => {
 		});
 
 		expect(
-			createStaticObjectVisualResourceKeyString(
-				createStaticObjectVisualResourceKey(baseInput),
+			createObjectVisualResourceKeyString(
+				createObjectVisualResourceKey(baseInput),
 			),
 		).toEqual(
-			createStaticObjectVisualResourceKeyString(
-				createStaticObjectVisualResourceKey(reorderedInput),
+			createObjectVisualResourceKeyString(
+				createObjectVisualResourceKey(reorderedInput),
 			),
 		);
 	});
 
 	it("changes the resource key when geometry, material, render state, or index type changes", () => {
-		const base = createStaticObjectVisualResourceKeyString(
-			createStaticObjectVisualResourceKey(createVisualKeyInput()),
+		const base = createObjectVisualResourceKeyString(
+			createObjectVisualResourceKey(createVisualKeyInput()),
 		);
 
 		expect(
-			createStaticObjectVisualResourceKeyString(
-				createStaticObjectVisualResourceKey(
+			createObjectVisualResourceKeyString(
+				createObjectVisualResourceKey(
 					createVisualKeyInput({
 						geometry: createGeometryIdentity({ gfxObjDid: 0x01000030 }),
 					}),
@@ -84,8 +86,8 @@ describe("static object visual resource keys", () => {
 			),
 		).not.toEqual(base);
 		expect(
-			createStaticObjectVisualResourceKeyString(
-				createStaticObjectVisualResourceKey(
+			createObjectVisualResourceKeyString(
+				createObjectVisualResourceKey(
 					createVisualKeyInput({
 						materialEntries: [createMaterialEntry({ alphaTest: 0.75 })],
 					}),
@@ -93,8 +95,8 @@ describe("static object visual resource keys", () => {
 			),
 		).not.toEqual(base);
 		expect(
-			createStaticObjectVisualResourceKeyString(
-				createStaticObjectVisualResourceKey(
+			createObjectVisualResourceKeyString(
+				createObjectVisualResourceKey(
 					createVisualKeyInput({
 						renderState: createRenderState({ depthWrite: false }),
 					}),
@@ -102,8 +104,8 @@ describe("static object visual resource keys", () => {
 			),
 		).not.toEqual(base);
 		expect(
-			createStaticObjectVisualResourceKeyString(
-				createStaticObjectVisualResourceKey(
+			createObjectVisualResourceKeyString(
+				createObjectVisualResourceKey(
 					createVisualKeyInput({ indexType: "uint32" }),
 				),
 			),
@@ -111,18 +113,18 @@ describe("static object visual resource keys", () => {
 	});
 
 	it("groups render instances by shared visual resource id", () => {
-		const treeResourceId = createStaticObjectVisualResourceId(
-			createStaticObjectVisualResourceKey(createVisualKeyInput()),
+		const treeResourceId = createObjectVisualResourceId(
+			createObjectVisualResourceKey(createVisualKeyInput()),
 		);
-		const rockResourceId = createStaticObjectVisualResourceId(
-			createStaticObjectVisualResourceKey(
+		const rockResourceId = createObjectVisualResourceId(
+			createObjectVisualResourceKey(
 				createVisualKeyInput({
 					geometry: createGeometryIdentity({ gfxObjDid: 0x01000040 }),
 				}),
 			),
 		);
 
-		const grouped = groupStaticObjectRenderInstancesByVisualResource([
+		const grouped = groupObjectVisualRenderInstancesByResource([
 			createRenderInstance({
 				instanceId: "tree-a",
 				resourceId: treeResourceId,
@@ -146,8 +148,8 @@ describe("static object visual resource keys", () => {
 });
 
 function createVisualKeyInput(
-	overrides: Partial<StaticObjectVisualResourceKeyInput> = {},
-): StaticObjectVisualResourceKeyInput {
+	overrides: Partial<ObjectVisualResourceKeyInput> = {},
+): ObjectVisualResourceKeyInput {
 	return {
 		geometry: createGeometryIdentity(),
 		indexType: "uint16",
@@ -166,7 +168,7 @@ function createGeometryIdentity(
 		readonly sourceDid?: number;
 		readonly partIndex?: number;
 	} = {},
-): StaticObjectSourceGeometryIdentity {
+): ObjectVisualSourceGeometryKey {
 	return {
 		canonical: {
 			gfxObj: {
@@ -233,7 +235,7 @@ function createRenderInstance(options: {
 	readonly instanceId: string;
 	readonly resourceId: string;
 	readonly x: number;
-}): StaticObjectRenderInstance {
+}): ObjectVisualRenderInstance {
 	return {
 		bounds: {
 			max: { x: options.x + 1, y: 1, z: 1 },
@@ -256,6 +258,7 @@ function createRenderInstance(options: {
 			landblockId: 0xda56ffff,
 			objectKind: "generated-scenery",
 		},
+		sourceToLandblockMatrix: new Float32Array(16),
 		transform: {
 			orientation: { w: 1, x: 0, y: 0, z: 0 },
 			origin: { x: options.x, y: 0, z: 0 },

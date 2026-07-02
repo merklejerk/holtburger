@@ -2,7 +2,6 @@ import type {
 	StaticLayerPeerRecordOwner,
 	StaticObjectDrawUnitOwnership,
 	StaticObjectGeometryStaticDrawUnit,
-	StaticObjectRenderInstance,
 	StaticObjectSourceGeometryIdentity,
 	StaticObjectSortMetadata,
 	StaticObjectSourceMappingCoverage,
@@ -10,6 +9,7 @@ import type {
 	StructuredInteriorMaterialPlanEntry,
 	StructuredInteriorGeometryStaticDrawUnit,
 } from "../static/contracts";
+import type { ObjectVisualRenderInstance } from "./object-visual-install-set";
 
 type Brand<TValue, TBrand extends string> = TValue & {
 	readonly __brand: TBrand;
@@ -67,19 +67,19 @@ export interface ObjectVisualStaticInstancedResourceGroupMetadata {
 }
 
 export interface ObjectVisualStaticInstancedRenderInstanceMetadata {
-	readonly bounds: StaticObjectRenderInstance["bounds"];
-	readonly domain: StaticObjectRenderInstance["domain"];
-	readonly generated: StaticObjectRenderInstance["generated"];
+	readonly bounds: ObjectVisualRenderInstance["bounds"];
+	readonly domain: ObjectVisualRenderInstance["domain"];
+	readonly generated: ObjectVisualRenderInstance["generated"];
 	readonly groupId: ObjectVisualStaticResourceGroupId;
 	readonly instanceIdSeed: string;
 	readonly kind: "static-object-instanced-render-instance";
 	readonly landblockId: number;
 	readonly partInstanceIndex: ObjectVisualPartInstanceIndex;
-	readonly sortCenter: StaticObjectRenderInstance["sortCenter"];
-	readonly source: StaticObjectRenderInstance["source"];
-	readonly sourceToLandblockMatrix: StaticObjectRenderInstance["sourceToLandblockMatrix"];
-	readonly transform: StaticObjectRenderInstance["transform"];
-	readonly transparency: StaticObjectRenderInstance["transparency"];
+	readonly sortCenter: ObjectVisualRenderInstance["sortCenter"];
+	readonly source: ObjectVisualRenderInstance["source"];
+	readonly sourceToLandblockMatrix: ObjectVisualRenderInstance["sourceToLandblockMatrix"];
+	readonly transform: ObjectVisualRenderInstance["transform"];
+	readonly transparency: ObjectVisualRenderInstance["transparency"];
 }
 
 export interface ObjectVisualStructuredInteriorPublicationMetadata {

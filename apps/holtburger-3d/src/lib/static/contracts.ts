@@ -1565,9 +1565,9 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly materialIds: readonly number[];
 }
 
-export type StaticObjectVisualResourceId = string;
+type StaticObjectVisualResourceId = string;
 
-export interface StaticObjectVisualResourceKey {
+interface StaticObjectVisualResourceKey {
 	readonly kind: "static-object-visual-resource-key";
 	/**
 	 * Source-local geometry identity. Per-instance placement, landblock residence,

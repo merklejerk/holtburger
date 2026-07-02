@@ -62,8 +62,6 @@ import type {
 	StaticMaterialCoverageReport,
 	OutdoorStaticObjectsScopePayload,
 	StaticObjectGeometryStaticDrawUnit,
-	StaticObjectRenderInstance,
-	StaticObjectVisualResource,
 	StaticPortalApertureResource,
 	StaticPortalGraphEdge,
 	StaticPortalGraphNode,
@@ -82,7 +80,11 @@ import {
 	DeferredStaticBaker,
 	DeferredStaticResolver,
 } from "../static/fake-workers";
-import { createObjectVisualInstallSet } from "../visual/object-visual-install-set";
+import {
+	createObjectVisualInstallSet,
+	type ObjectVisualRenderInstance,
+	type ObjectVisualResource,
+} from "../visual/object-visual-install-set";
 import {
 	createClientRuntime,
 	type RuntimeEvent,
@@ -2146,10 +2148,10 @@ describe("browser client runtime", () => {
 			staticCoordinator,
 		});
 		const landblockId = 0xdc59ffff;
-		const resource = createStaticObjectVisualResource({
+		const resource = createObjectVisualResource({
 			resourceId: "detail-resource-a",
 		});
-		const instance = createStaticObjectRenderInstance({
+		const instance = createObjectVisualRenderInstance({
 			instanceId: "detail-instance-a",
 			landblockId,
 			resourceId: resource.resourceId,
@@ -4303,9 +4305,9 @@ function createStaticObjectDrawUnit(
 	};
 }
 
-function createStaticObjectVisualResource(options: {
+function createObjectVisualResource(options: {
 	readonly resourceId: string;
-}): StaticObjectVisualResource {
+}): ObjectVisualResource {
 	const source = {
 		kind: "static-object-source" as const,
 		sourceAssetKind: "setup-model" as const,
@@ -4361,11 +4363,11 @@ function createStaticObjectVisualResource(options: {
 	};
 }
 
-function createStaticObjectRenderInstance(options: {
+function createObjectVisualRenderInstance(options: {
 	readonly instanceId: string;
 	readonly landblockId: number;
 	readonly resourceId: string;
-}): StaticObjectRenderInstance {
+}): ObjectVisualRenderInstance {
 	const bounds = {
 		max: { x: 1, y: 1, z: 1 },
 		min: { x: -1, y: -1, z: -1 },

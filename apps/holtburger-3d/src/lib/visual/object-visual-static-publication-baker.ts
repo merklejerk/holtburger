@@ -1,14 +1,14 @@
 import type {
 	StaticMaterialTableEntry,
 	StaticObjectGeometryStaticDrawUnit,
-	StaticObjectRenderInstance,
-	StaticObjectVisualResource,
 	StaticSpatialRecord,
 	StructuredInteriorGeometryStaticDrawUnit,
 } from "../static/contracts";
 import {
 	createObjectVisualInstallSet,
 	type ObjectVisualInstallSet,
+	type ObjectVisualRenderInstance,
+	type ObjectVisualResource,
 } from "./object-visual-install-set";
 import type {
 	ObjectVisualBakeResult,
@@ -145,8 +145,8 @@ function createInstancedStaticObjectPublications(options: {
 		readonly ObjectVisualBakedRenderPart[]
 	>;
 }): {
-	readonly renderInstances: readonly StaticObjectRenderInstance[];
-	readonly visualResources: readonly StaticObjectVisualResource[];
+	readonly renderInstances: readonly ObjectVisualRenderInstance[];
+	readonly visualResources: readonly ObjectVisualResource[];
 } {
 	const groupsById = new Map(
 		options.metadata.instancedResourceGroups.map((group) => [
@@ -154,8 +154,8 @@ function createInstancedStaticObjectPublications(options: {
 			group,
 		]),
 	);
-	const visualResources: StaticObjectVisualResource[] = [];
-	const renderInstances: StaticObjectRenderInstance[] = [];
+	const visualResources: ObjectVisualResource[] = [];
+	const renderInstances: ObjectVisualRenderInstance[] = [];
 	const resourceIds = new Set<string>();
 	const instancesByGroupId = new Map<
 		ObjectVisualStaticInstancedResourceGroupMetadata["groupId"],
@@ -188,7 +188,7 @@ function createInstancedStaticObjectPublications(options: {
 			);
 			if (!resourceIds.has(resourceId)) {
 				visualResources.push(
-					createStaticObjectVisualResource(group, renderPart, resourceId),
+					createObjectVisualResource(group, renderPart, resourceId),
 				);
 				resourceIds.add(resourceId);
 			}
@@ -201,7 +201,7 @@ function createInstancedStaticObjectPublications(options: {
 					continue;
 				}
 				renderInstances.push(
-					createStaticObjectRenderInstance(
+					createObjectVisualRenderInstance(
 						instanceMetadata,
 						resourceId,
 						renderPart,
@@ -221,11 +221,11 @@ function createInstancedStaticObjectPublications(options: {
 	return { renderInstances, visualResources };
 }
 
-function createStaticObjectVisualResource(
+function createObjectVisualResource(
 	group: ObjectVisualStaticInstancedResourceGroupMetadata,
 	renderPart: ObjectVisualBakedRenderPart,
 	resourceId: string,
-): StaticObjectVisualResource {
+): ObjectVisualResource {
 	return {
 		...createVisualResourcePayload(renderPart.sourceLocalPayload),
 		coordinateSpace: "static-object-source-local",
@@ -245,12 +245,12 @@ function createStaticObjectVisualResource(
 	};
 }
 
-function createStaticObjectRenderInstance(
+function createObjectVisualRenderInstance(
 	metadata: ObjectVisualStaticInstancedRenderInstanceMetadata,
 	resourceId: string,
 	renderPart: ObjectVisualBakedRenderPart,
 	index: number,
-): StaticObjectRenderInstance {
+): ObjectVisualRenderInstance {
 	return {
 		bounds: metadata.bounds,
 		domain: metadata.domain,
@@ -274,7 +274,7 @@ function createStaticObjectRenderInstance(
 function createInstancedRenderTransparency(
 	metadata: ObjectVisualStaticInstancedRenderInstanceMetadata,
 	renderPart: ObjectVisualBakedRenderPart,
-): StaticObjectRenderInstance["transparency"] {
+): ObjectVisualRenderInstance["transparency"] {
 	if (
 		renderPart.materialPass === "transparent" ||
 		renderPart.materialPass === "additive"
@@ -311,8 +311,7 @@ function createStaticDrawUnitPayload(
 
 function createVisualResourcePayload(
 	renderPart: VisualGeometryPayload,
-): StaticObjectVisualPayloadFields &
-	Pick<StaticObjectVisualResource, "bounds"> {
+): StaticObjectVisualPayloadFields & Pick<ObjectVisualResource, "bounds"> {
 	return {
 		bounds: renderPart.bounds,
 		indexType: renderPart.indexType,

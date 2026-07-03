@@ -328,6 +328,117 @@ Implementation notes:
   timeline later, add an explicit bounded event ring rather than overloading the
   snapshot summary.
 
+## Phase 6: Page-Local Repack And Growth
+
+Goal:
+
+- Recover packing density when an early small page becomes the compatible target
+  for later texture waves, without falling back to whole-bucket repacking.
+
+Deliverables:
+
+- Add a page-local repack/grow path that runs when simple existing-page
+  absorption cannot fit all compatible pending entries.
+- For each candidate physical page, collect metadata for unique physical entries
+  already on that page plus the compatible incoming entries.
+- Run layout-only candidate planning before any old source pixels are
+  re-requested.
+- Re-run pixel materialization only for the one selected candidate page,
+  allowing the page to grow by normal size tiers up to the runtime max.
+- Rebuild the same `textureRefId` with the new larger page pixels when the
+  page-local repack succeeds.
+- Update registry rects and emit `resolvedTexturePlacements` for every texture
+  use whose rect moved, including existing aliases on that page.
+- Preserve the current new-page fallback when no candidate page-local repack can
+  fit the incoming entries.
+
+Out of scope:
+
+- No whole-bucket repack.
+- No cross-page merge pass.
+- No palette-specific packing branch.
+- No global "optimize all atlas pages" maintenance job.
+
+Acceptance criteria:
+
+- A fresh run where one `46x46` palette arrives before four later compatible
+  palettes can grow/repack the original `128x128` page into a larger page
+  instead of producing a `4 + 1` page split.
+- Page-local repack may move rects only for texture uses already on the selected
+  physical page plus the incoming compatible entries.
+- Texture uses on other pages in the same bucket keep their `textureRefId`,
+  rect, and pixels untouched.
+- Renderer placement maps receive updated rows for every moved or inserted
+  `textureUseId`.
+- If the candidate page cannot fit after growth, current new-page packing still
+  works.
+
+Task checklist:
+
+- [ ] Add a page-local layout-only repack planner API in `atlas-layout.ts` or a thin
+  TextureManager-local adapter over the existing packer, with explicit
+  candidate-page inputs.
+- [ ] Teach `TextureManager` to try page-local repack/grow after insertion
+  fails and before creating a brand-new page.
+- [ ] Score/select a candidate page using only dimensions, gutters, page class,
+  and existing registry metadata; do not request old pixels during candidate
+  planning.
+- [ ] Re-request/reprepare old unique physical sources only after a candidate
+  page-local repack plan has been selected.
+- [ ] Materialize the grown page under the existing `textureRefId`, copying or
+  rebuilding pixels from unique physical sources.
+- [ ] Update all registry aliases that point at moved physical placements.
+- [ ] Emit `resolvedTexturePlacements` for all moved and inserted logical
+  texture uses.
+- [ ] Add tests for the `46x46` one-then-four palette wave producing one grown
+  page instead of `4 + 1`.
+- [ ] Add guard tests proving unrelated pages in the same bucket are not
+  repacked or moved.
+
+Implementation notes:
+
+- This phase exists because vacancy-only absorption preserves old rects and page
+  size. That is good for low churn, but it locks in unlucky early pages such as
+  a one-texture `64x64 -> 128x128` runway page.
+- Page-local repack is the middle ground: it is allowed to move rects within one
+  selected physical page, but it is not allowed to reconsider the whole bucket.
+- Because renderer placement is now canonical by `textureUseId`, moved rects can
+  be announced cleanly through `resolvedTexturePlacements`.
+
+Dry-run notes:
+
+- `TextureManager` currently stores source identity and physical keys on
+  registry entries, but not the prepared/direct pixel source. Page-local repack
+  needs pixels only after a candidate is selected. Candidate selection must stay
+  layout-only and use registry dimensions/gutters plus incoming source metadata.
+- After selecting one candidate page, re-request/reprepare only that page's old
+  unique physical sources through `AssetService`. Persisting direct sources in
+  registry entries is faster but increases retained CPU memory and should be
+  avoided unless profiling proves the reprepare path is too expensive.
+- The worker packer should not be used for candidate scoring because its current
+  protocol requires source pixels. Reuse `atlas-layout.ts` for layout-only
+  planning, then use shared materialization/blit helpers only for the selected
+  candidate.
+- The existing packer protocol can stay unchanged for normal new-page packing.
+  Page-local replacement may ignore generated page ids entirely because the
+  materialized page keeps the existing `textureRefId`.
+- `atlas-layout.ts` currently generates candidates from source sizes up to
+  `maxTextureSize`; page-local growth needs a minimum page-size floor so it does
+  not shrink an existing page during repack. Add that as explicit policy rather
+  than inferring it from locked pages.
+- Current texture placement updates only resolve incoming `textureUseId`s.
+  Page-local repack moves existing rects, so the repack helper must return
+  `ResolvedTexturePlacement` rows for every moved alias and every inserted
+  texture use.
+- Existing aliases may share one physical source but differ in authored wrap
+  policy. Repacking must choose the original physical materialization policy for
+  the unique source, not an arbitrary alias policy, or gutter pixels can change
+  by accident.
+- `placeTextureIntents()` also uses the packing path before renderer ownership
+  exists. If a pre-bake placement intent triggers page-local repack, placement
+  records for moved old aliases still need to update even though no renderer
+  update is emitted.
+
 ## Risks
 
 - Reclaim may delete a page still referenced by renderer state if records and
@@ -346,6 +457,14 @@ Implementation notes:
   terrain and object-material payload prep.
   Mitigation: refactor one draw path at a time, with tests proving page-slot
   assignment still respects shader page limits.
+- Page-local repack may quietly become whole-bucket repack if the candidate
+  source collection is not tightly bounded.
+  Mitigation: candidate inputs must be one physical page plus incoming compatible
+  entries; tests assert unrelated pages do not move.
+- Moving existing rects requires complete renderer placement invalidation for
+  every alias on the repacked page.
+  Mitigation: derive moved logical texture uses from registry aliases and assert
+  every affected `textureUseId` appears in `resolvedTexturePlacements`.
 
 ## Definition Of Done
 
@@ -357,6 +476,8 @@ Implementation notes:
   longer expose `pageSlot`.
 - Two-wave compatible atlas placement can reuse a prior page when vacancy
   exists.
+- Page-local repack/grow fixes unlucky early-page sizing without whole-bucket
+  repack.
 - No whole-bucket repack or palette-specific branch is introduced.
 
 ## Open Questions

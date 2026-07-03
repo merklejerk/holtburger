@@ -60,7 +60,7 @@ function packTexturesWithAtlasLayout(
 		job.sources.map((entry) => [entry.textureUseId, entry] as const),
 	);
 	const pages = layout.texturePages.map((layoutPage) => {
-		const pagePixels = createBlankPage({
+		const pagePixels = createBlankTexturePackingPage({
 			fillRgba: job.page.fillRgba,
 			format: job.page.format,
 			height: layoutPage.height,
@@ -74,7 +74,7 @@ function packTexturesWithAtlasLayout(
 				);
 			}
 			const { source } = entry;
-			blitTextureWithGutter({
+			blitTexturePackingSourceWithGutter({
 				destination: pagePixels,
 				destinationWidth: layoutPage.width,
 				edgeMode: entry.gutterEdgeMode ?? job.page.gutterEdgeMode ?? "clamp",
@@ -117,13 +117,13 @@ function packTexturesWithAtlasLayout(
 	};
 }
 
-function createBlankPage(options: {
+export function createBlankTexturePackingPage(options: {
 	readonly width: number;
 	readonly height: number;
 	readonly format: TexturePackingPageFormat;
 	readonly fillRgba?: readonly [number, number, number, number];
 }): Uint8Array {
-	const bytesPerPixel = getBytesPerPixel(options.format);
+	const bytesPerPixel = getTexturePackingFormatBytesPerPixel(options.format);
 	const pixels = new Uint8Array(options.width * options.height * bytesPerPixel);
 	if (options.fillRgba && options.format !== "rgba8") {
 		throw new Error(
@@ -148,7 +148,7 @@ function createPageId(jobId: string, pageIndex: number): string {
 	return `${jobId}:page:${pageIndex}`;
 }
 
-function blitTextureWithGutter(options: {
+export function blitTexturePackingSourceWithGutter(options: {
 	readonly destination: Uint8Array;
 	readonly destinationWidth: number;
 	readonly edgeMode: "clamp" | "repeat";
@@ -160,7 +160,7 @@ function blitTextureWithGutter(options: {
 	readonly y: number;
 	readonly gutterPixels: number;
 }): void {
-	const bytesPerPixel = getBytesPerPixel(options.format);
+	const bytesPerPixel = getTexturePackingFormatBytesPerPixel(options.format);
 	for (
 		let row = -options.gutterPixels;
 		row < options.sourceHeight + options.gutterPixels;
@@ -201,7 +201,9 @@ function assertPixelLengthMatchesFormat(
 	source: TexturePackingJob["sources"][number]["source"],
 ): void {
 	const expectedLength =
-		source.width * source.height * getBytesPerPixel(source.format);
+		source.width *
+		source.height *
+		getTexturePackingFormatBytesPerPixel(source.format);
 	if (source.pixels.byteLength !== expectedLength) {
 		throw new Error(
 			`Texture packing job ${jobId} source ${textureUseId} expected ${expectedLength} bytes for ${source.format}, got ${source.pixels.byteLength}.`,
@@ -209,7 +211,9 @@ function assertPixelLengthMatchesFormat(
 	}
 }
 
-function getBytesPerPixel(format: TexturePackingPageFormat): number {
+export function getTexturePackingFormatBytesPerPixel(
+	format: TexturePackingPageFormat,
+): number {
 	switch (format) {
 		case "rgba8":
 			return 4;

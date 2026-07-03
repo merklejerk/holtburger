@@ -250,6 +250,78 @@ describe("browser texture manager", () => {
 		});
 	});
 
+	it("absorbs later compatible texture uses into an existing page", async () => {
+		const texturePacker = new FixtureTexturePacker({
+			pageHeight: 16,
+			pageWidth: 16,
+		});
+		const textureManager = new TextureManager({
+			assetService: new FixtureAssetService(),
+			texturePacker,
+		});
+
+		const firstUpdate = await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedResources: [],
+			revision: 1,
+			textureUses: [
+				createTextureUseCommit({
+					domain: "outdoor-buildings",
+					drawUnitId: "building-a",
+					renderSurfaceId: 0x06000010,
+					textureUseId: "building-a:mask:06000010",
+					usage: "rgba-mask",
+				}),
+			],
+		});
+		const secondUpdate = await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedResources: [],
+			revision: 2,
+			textureUses: [
+				createTextureUseCommit({
+					domain: "outdoor-buildings",
+					drawUnitId: "building-b",
+					renderSurfaceId: 0x06000020,
+					textureUseId: "building-b:mask:06000020",
+					usage: "rgba-mask",
+				}),
+			],
+		});
+
+		expect(texturePacker.jobs).toHaveLength(1);
+		expect(secondUpdate?.placements).toEqual([
+			expect.objectContaining({
+				textureRefId: firstUpdate?.placements[0]?.textureRefId,
+				width: 16,
+				height: 16,
+			}),
+		]);
+		expect(secondUpdate?.resolvedTexturePlacements).toEqual([
+			expect.objectContaining({
+				rect: [1, 0, 1, 1],
+				textureRefId: firstUpdate?.placements[0]?.textureRefId,
+				textureUseId: "building-b:mask:06000020",
+			}),
+		]);
+		expect(textureManager.createDiagnosticsReport()).toMatchObject({
+			buckets: [
+				{
+					pages: [
+						expect.objectContaining({
+							occupiedPixels: 2,
+							uniqueSourceCount: 2,
+						}),
+					],
+					texturePageCount: 1,
+				},
+			],
+			summary: {
+				texturePageCount: 1,
+			},
+		});
+	});
+
 	it("reports atlas occupancy as clipped union area for overlapping page rects", async () => {
 		const assetService = new FixtureAssetService();
 		const texturePacker = new FixtureTexturePacker({
@@ -983,7 +1055,7 @@ describe("browser texture manager", () => {
 	it("retains existing ownerless placements reused by the current placement request", async () => {
 		const textureManager = new TextureManager({
 			assetService: new FixtureAssetService(),
-			texturePacker: new FixtureTexturePacker(),
+			texturePacker: new FixtureTexturePacker({ rect: [96, 96, 1, 1] }),
 		});
 		const firstTextureUse = createTextureUseCommit({
 			drawUnitId: "terrain-a",
@@ -1034,7 +1106,7 @@ describe("browser texture manager", () => {
 	it("does not reclaim active placements when new placement work arrives", async () => {
 		const textureManager = new TextureManager({
 			assetService: new FixtureAssetService(),
-			texturePacker: new FixtureTexturePacker(),
+			texturePacker: new FixtureTexturePacker({ rect: [96, 96, 1, 1] }),
 		});
 		const activeTextureUse = createTextureUseCommit({
 			drawUnitId: "terrain-a",

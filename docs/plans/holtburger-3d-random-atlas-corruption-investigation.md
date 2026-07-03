@@ -462,6 +462,8 @@ Resteering after Phase 3:
 
 ### Phase 4: Collapse Placement And Binding Inputs Around Page Version
 
+Status: completed.
+
 Deliverables:
 
 - Update object-material and terrain payload builders to consume a placement object that includes page version, rect, and texture role together.
@@ -470,6 +472,14 @@ Deliverables:
   - physical texture object lookup,
   - page-version freshness checks,
   - debug labels.
+
+Completed implementation:
+
+- Removed mirrored physical placement fields from `VisualTextureRegistryEntry`; logical aliases now carry ownership/material policy while `VisualTexturePhysicalEntry` is the only source for page content, rect, dimensions, texture ref, and placement revision.
+- Updated planned placement snapshots, absorption, repack, retention, deletion, sampler-policy updates, and diagnostics to read physical placement state from `physicalEntry`.
+- Changed object-material payload prep to build an `ObjectMaterialResolvedTextureResource` map that couples `ResolvedTexturePlacement` with the resident `WebGLTexture` once at the draw-prep boundary.
+- Changed terrain payload prep to build a `TerrainResolvedTextureResource` map and use it for page binding, detail texture resolution, rect writes, and page-slot resolution.
+- Left physical WebGL texture lookup keyed by bare `textureRefId`; that is still the correct physical object lookup key.
 
 Acceptance criteria:
 
@@ -487,6 +497,23 @@ Debug cleanup:
 - Revisit `rendererTextures` selection diagnostics after the shared placement input exists.
 - Keep page version, role, rect, dimensions, and texture binding summaries if they mirror the real payload contract.
 - Delete fields that duplicate production state only because older call sites accepted incomplete placement records.
+
+Decision:
+
+- Kept `ResolvedTexturePlacement.textureRefId` beside `pageVersion` for now because texture-object lookup still naturally uses the physical ref. Freshness comparisons and diagnostics should use `pageVersion`.
+- Kept terrain page slots keyed by `textureRefId` inside draw prep. The slot is renderer-local binding state; Phase 4 made the resolved placement resource coherent before slot allocation rather than making slots globally versioned.
+
+Debt:
+
+- Object and terrain resource-map helpers are currently local and structurally similar. If another payload path needs this shape, extract a shared renderer-local helper instead of duplicating a third copy.
+- Selection diagnostics still expose renderer texture binding summaries. They now mirror production payload state, but Phase 6 should trim any field that stops matching a production composite type.
+
+Verification:
+
+- `npm run test:ts -- --run src/lib/runtime/client-runtime.test.ts src/lib/textures/texture-manager.test.ts src/lib/renderer/webgl2/webgl2-object-material-payloads.test.ts src/lib/renderer/webgl2/webgl2-terrain-payloads.test.ts src/lib/renderer/webgl2/webgl2-renderer.test.ts src/lib/runtime/static-commit-installer.test.ts` passed.
+- `npm run check` passed.
+- `npm run lint:ts` passed.
+- `git diff --check` passed.
 
 ### Phase 5: Renderer State Boundary Audit
 

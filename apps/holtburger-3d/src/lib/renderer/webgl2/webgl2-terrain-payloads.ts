@@ -61,6 +61,11 @@ export interface TerrainPreparedLayerRects {
 	readonly roadTilings: Float32Array;
 }
 
+interface TerrainResolvedTextureResource {
+	readonly placement: ResolvedTexturePlacement;
+	readonly texture: WebGLTexture;
+}
+
 export function createTerrainPreparedLayeredPayloadState(): TerrainPreparedLayeredPayloadState {
 	return {
 		isDirty: true,
@@ -117,13 +122,13 @@ export function prepareTerrainLayeredPayload(
 ): boolean {
 	resetTerrainLayeredPayload(target);
 	const pageSlots = new TerrainDrawUnitRolePageSlots(plan.signature);
+	const textureResources = createTerrainTextureResources(placements, textures);
 
 	for (const entry of plan.layerEntries) {
 		if (
 			!collectTerrainPageBinding(
 				entry.base,
-				placements,
-				textures,
+				textureResources,
 				pageSlots,
 				target.colorPages,
 				target.maskPages,
@@ -135,16 +140,14 @@ export function prepareTerrainLayeredPayload(
 			if (
 				!collectTerrainPageBinding(
 					overlay.terrain,
-					placements,
-					textures,
+					textureResources,
 					pageSlots,
 					target.colorPages,
 					target.maskPages,
 				) ||
 				!collectTerrainPageBinding(
 					overlay.alpha,
-					placements,
-					textures,
+					textureResources,
 					pageSlots,
 					target.colorPages,
 					target.maskPages,
@@ -157,16 +160,14 @@ export function prepareTerrainLayeredPayload(
 			if (
 				!collectTerrainPageBinding(
 					road.road,
-					placements,
-					textures,
+					textureResources,
 					pageSlots,
 					target.colorPages,
 					target.maskPages,
 				) ||
 				!collectTerrainPageBinding(
 					road.alpha,
-					placements,
-					textures,
+					textureResources,
 					pageSlots,
 					target.colorPages,
 					target.maskPages,
@@ -177,22 +178,17 @@ export function prepareTerrainLayeredPayload(
 		}
 	}
 
-	const detailPlacement = resolveDetailPlacement(plan, placements);
-	if (detailPlacement === false) {
+	const detailResource = resolveDetailPlacement(plan, textureResources);
+	if (detailResource === false) {
 		return false;
 	}
-	const detailTexture = detailPlacement
-		? (textures.get(detailPlacement.textureRefId) ?? null)
-		: null;
-	if (detailPlacement && !detailTexture) {
-		return false;
-	}
+	const detailTexture = detailResource?.texture ?? null;
 
-	fillTerrainLayerRects(target.layerRects, plan, placements, pageSlots);
-	fillTerrainDetailUniforms(target.detail, plan, placements, detailPlacement);
+	fillTerrainLayerRects(target.layerRects, plan, textureResources, pageSlots);
+	fillTerrainDetailUniforms(target.detail, plan, textureResources, detailResource);
 	target.detail.texture = detailTexture;
-	target.detail.atlasSize[0] = detailPlacement?.textureWidth ?? 1;
-	target.detail.atlasSize[1] = detailPlacement?.textureHeight ?? 1;
+	target.detail.atlasSize[0] = detailResource?.placement.textureWidth ?? 1;
+	target.detail.atlasSize[1] = detailResource?.placement.textureHeight ?? 1;
 
 	return true;
 }
@@ -302,10 +298,24 @@ function resetTerrainLayerRects(layerRects: TerrainPreparedLayerRects): void {
 	layerRects.roadTilings.fill(0);
 }
 
-function collectTerrainPageBinding(
-	role: TerrainMaterialTextureRoleBinding,
+function createTerrainTextureResources(
 	placements: ReadonlyMap<string, ResolvedTexturePlacement>,
 	textures: ReadonlyMap<string, WebGLTexture>,
+): ReadonlyMap<string, TerrainResolvedTextureResource> {
+	const resources = new Map<string, TerrainResolvedTextureResource>();
+	for (const [textureUseId, placement] of placements) {
+		const texture = textures.get(placement.textureRefId);
+		if (!texture) {
+			continue;
+		}
+		resources.set(textureUseId, { placement, texture });
+	}
+	return resources;
+}
+
+function collectTerrainPageBinding(
+	role: TerrainMaterialTextureRoleBinding,
+	textureResources: ReadonlyMap<string, TerrainResolvedTextureResource>,
 	pageSlots: TerrainDrawUnitRolePageSlots,
 	colorPages: TerrainPreparedRolePageBindings,
 	maskPages: TerrainPreparedRolePageBindings,
@@ -313,14 +323,11 @@ function collectTerrainPageBinding(
 	if (!role.textureUseId) {
 		return false;
 	}
-	const placement = placements.get(role.textureUseId);
-	if (!placement) {
+	const resource = textureResources.get(role.textureUseId);
+	if (!resource) {
 		return false;
 	}
-	const texture = textures.get(placement.textureRefId);
-	if (!texture) {
-		return false;
-	}
+	const { placement, texture } = resource;
 	const pageKind = createTerrainRolePageKind(role);
 	const pageSlot = pageSlots.resolveSlot(pageKind, placement.textureRefId);
 	const pages = pageKind === "mask" ? maskPages : colorPages;
@@ -336,44 +343,45 @@ function collectTerrainPageBinding(
 
 function resolveDetailPlacement(
 	plan: TerrainMaterialLayerPlan,
-	placements: ReadonlyMap<string, ResolvedTexturePlacement>,
-): ResolvedTexturePlacement | null | false {
-	let detailPlacement: ResolvedTexturePlacement | null = null;
+	textureResources: ReadonlyMap<string, TerrainResolvedTextureResource>,
+): TerrainResolvedTextureResource | null | false {
+	let detailResource: TerrainResolvedTextureResource | null = null;
 	for (const detailRole of plan.detailRoles) {
-		const placement = detailRole.texture.textureUseId
-			? placements.get(detailRole.texture.textureUseId)
+		const resource = detailRole.texture.textureUseId
+			? textureResources.get(detailRole.texture.textureUseId)
 			: undefined;
-		if (!placement) {
+		if (!resource) {
 			return false;
 		}
+		const placement = resource.placement;
 		if (
-			detailPlacement &&
-			(detailPlacement.pageVersion.textureRefId !==
+			detailResource &&
+			(detailResource.placement.pageVersion.textureRefId !==
 				placement.pageVersion.textureRefId ||
-				detailPlacement.pageVersion.placementRevision !==
+				detailResource.placement.pageVersion.placementRevision !==
 					placement.pageVersion.placementRevision)
 		) {
 			return false;
 		}
-		detailPlacement = placement;
+		detailResource = resource;
 	}
 
-	return detailPlacement;
+	return detailResource;
 }
 
 function fillTerrainLayerRects(
 	target: TerrainPreparedLayerRects,
 	plan: TerrainMaterialLayerPlan,
-	placements: ReadonlyMap<string, ResolvedTexturePlacement>,
+	textureResources: ReadonlyMap<string, TerrainResolvedTextureResource>,
 	pageSlots: TerrainDrawUnitRolePageSlots,
 ): void {
 	for (const layer of plan.layerEntries) {
 		target.baseColorRects.set(
-			resolvePlacementRect(placements, layer.base),
+			resolvePlacementRect(textureResources, layer.base),
 			layer.slot * 4,
 		);
 		target.baseColorPages[layer.slot] = resolvePlacementPage(
-			placements,
+			textureResources,
 			pageSlots,
 			layer.base,
 		);
@@ -391,20 +399,20 @@ function fillTerrainLayerRects(
 			const index =
 				layer.slot * TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER + overlayIndex;
 			target.overlayColorRects.set(
-				resolvePlacementRect(placements, overlay.terrain),
+				resolvePlacementRect(textureResources, overlay.terrain),
 				index * 4,
 			);
 			target.overlayColorPages[index] = resolvePlacementPage(
-				placements,
+				textureResources,
 				pageSlots,
 				overlay.terrain,
 			);
 			target.overlayMaskRects.set(
-				resolvePlacementRect(placements, overlay.alpha),
+				resolvePlacementRect(textureResources, overlay.alpha),
 				index * 4,
 			);
 			target.overlayMaskPages[index] = resolvePlacementPage(
-				placements,
+				textureResources,
 				pageSlots,
 				overlay.alpha,
 			);
@@ -420,11 +428,11 @@ function fillTerrainLayerRects(
 		const roadTexture = layer.roads[0]?.road ?? null;
 		if (roadTexture) {
 			target.roadColorRects.set(
-				resolvePlacementRect(placements, roadTexture),
+				resolvePlacementRect(textureResources, roadTexture),
 				layer.slot * 4,
 			);
 			target.roadColorPages[layer.slot] = resolvePlacementPage(
-				placements,
+				textureResources,
 				pageSlots,
 				roadTexture,
 			);
@@ -438,11 +446,11 @@ function fillTerrainLayerRects(
 			const index =
 				layer.slot * TERRAIN_LAYERED_MAX_ROADS_PER_LAYER + roadIndex;
 			target.roadMaskRects.set(
-				resolvePlacementRect(placements, road.alpha),
+				resolvePlacementRect(textureResources, road.alpha),
 				index * 4,
 			);
 			target.roadMaskPages[index] = resolvePlacementPage(
-				placements,
+				textureResources,
 				pageSlots,
 				road.alpha,
 			);
@@ -454,14 +462,14 @@ function fillTerrainLayerRects(
 function fillTerrainDetailUniforms(
 	target: TerrainPreparedDetailUniforms,
 	plan: TerrainMaterialLayerPlan,
-	placements: ReadonlyMap<string, ResolvedTexturePlacement>,
-	detailPlacement: ResolvedTexturePlacement | null,
+	textureResources: ReadonlyMap<string, TerrainResolvedTextureResource>,
+	detailResource: TerrainResolvedTextureResource | null,
 ): void {
 	const detailRole = plan.detailRoles[0] ?? null;
-	target.isEnabled = Boolean(detailRole && detailPlacement);
+	target.isEnabled = Boolean(detailRole && detailResource);
 	target.atlasRect.set(
 		detailRole
-			? resolvePlacementRect(placements, detailRole.texture)
+			? resolvePlacementRect(textureResources, detailRole.texture)
 			: DEFAULT_TEXTURE_RECT,
 	);
 	target.tiling = detailRole?.texture.tiling ?? 1;
@@ -470,18 +478,21 @@ function fillTerrainDetailUniforms(
 }
 
 function resolvePlacementRect(
-	placements: ReadonlyMap<string, ResolvedTexturePlacement>,
+	textureResources: ReadonlyMap<string, TerrainResolvedTextureResource>,
 	role: TerrainMaterialTextureRoleBinding,
 ): readonly [number, number, number, number] {
 	if (!role.textureUseId) {
 		return DEFAULT_TEXTURE_RECT;
 	}
 
-	return placements.get(role.textureUseId)?.rect ?? DEFAULT_TEXTURE_RECT;
+	return (
+		textureResources.get(role.textureUseId)?.placement.rect ??
+		DEFAULT_TEXTURE_RECT
+	);
 }
 
 function resolvePlacementPage(
-	placements: ReadonlyMap<string, ResolvedTexturePlacement>,
+	textureResources: ReadonlyMap<string, TerrainResolvedTextureResource>,
 	pageSlots: TerrainDrawUnitRolePageSlots,
 	role: TerrainMaterialTextureRoleBinding,
 ): number {
@@ -489,13 +500,13 @@ function resolvePlacementPage(
 		return 0;
 	}
 
-	const placement = placements.get(role.textureUseId);
-	if (!placement) {
+	const resource = textureResources.get(role.textureUseId);
+	if (!resource) {
 		return 0;
 	}
 	return pageSlots.resolveSlot(
 		createTerrainRolePageKind(role),
-		placement.textureRefId,
+		resource.placement.textureRefId,
 	);
 }
 

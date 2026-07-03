@@ -20,6 +20,7 @@ import type {
 	PortalBaseOverlapPlan,
 	PortalFrameWorkPlan,
 	TerrainLayerPayload,
+	TexturePlacementUpdate,
 } from "../types";
 import {
 	compareStaticObjectTransparentDrawEntries,
@@ -279,6 +280,57 @@ describe("WebGL2 structured interior rendering", () => {
 			height: 64,
 			width: 64,
 		});
+
+		renderer.dispose();
+	});
+
+	it("invalidates cached texture bindings after scene-domain target allocation", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+
+		renderer.applyTexturePlacementUpdate(
+			createTexturePlacementUpdate("object-texture-use", "object-texture-ref"),
+		);
+		const atlasTexture = gl.createTexture.mock.results.at(-1)?.value;
+		renderer.setOutdoorGeneratedSceneryLayer(
+			0xda55ffff,
+			createOutdoorGeneratedSceneryLayerPayload({
+				drawUnits: [
+					createTexturedOutdoorGeneratedSceneryStaticObjectDrawUnit(
+						"textured-static-object",
+						"object-texture-use",
+					),
+				],
+			}),
+		);
+
+		pendingFrame?.(16);
+		const atlasBindCountAfterSingleSurfaceFrame = countTextureBinds(
+			gl,
+			atlasTexture,
+		);
+		expect(atlasBindCountAfterSingleSurfaceFrame).toBeGreaterThan(0);
+
+		renderer.setRenderPassPlan({
+			baseScene: {
+				kind: "exterior",
+				landblockId: 0xda55ffff,
+			},
+			kind: "portal-scene-domains",
+			transitionDepthPolicy: { maxDepth: 4 },
+		});
+		pendingFrame?.(32);
+
+		expect(countTextureBinds(gl, atlasTexture)).toBeGreaterThan(
+			atlasBindCountAfterSingleSurfaceFrame,
+		);
 
 		renderer.dispose();
 	});
@@ -2222,12 +2274,18 @@ function createTerrainLayerPayload(
 	};
 }
 
-function createOutdoorGeneratedSceneryLayerPayload(): OutdoorGeneratedSceneryLayerPayload {
+function createOutdoorGeneratedSceneryLayerPayload(
+	options: {
+		readonly drawUnits?: OutdoorGeneratedSceneryLayerPayload["drawUnits"];
+	} = {},
+): OutdoorGeneratedSceneryLayerPayload {
 	return {
 		drawUnits: [
-			createOutdoorGeneratedSceneryStaticObjectDrawUnit(
-				"outdoor-generated-scenery-a",
-			),
+			...(options.drawUnits ?? [
+				createOutdoorGeneratedSceneryStaticObjectDrawUnit(
+					"outdoor-generated-scenery-a",
+				),
+			]),
 		],
 		generationId: "outdoor-generated-scenery:a",
 		instancedObjectInstances: [],
@@ -2239,6 +2297,70 @@ function createOutdoorGeneratedSceneryLayerPayload(): OutdoorGeneratedSceneryLay
 		spatialRecords: [],
 		textureUses: [],
 	};
+}
+
+function createTexturedOutdoorGeneratedSceneryStaticObjectDrawUnit(
+	drawUnitId: string,
+	textureUseId: string,
+): OutdoorGeneratedSceneryLayerPayload["drawUnits"][number] {
+	const base = createOutdoorGeneratedSceneryStaticObjectDrawUnit(drawUnitId);
+	return {
+		...base,
+		materialBucketKey: "family:texture-rgba|pass:opaque|material:08000010",
+		materialEntries: base.materialEntries.map((entry) => ({
+			...entry,
+			primaryTextureUseId: textureUseId,
+		})),
+		materialFamily: "texture-rgba",
+		textureUseIds: [textureUseId],
+	};
+}
+
+function createTexturePlacementUpdate(
+	textureUseId: string,
+	textureRefId: string,
+): TexturePlacementUpdate {
+	return {
+		placements: [
+			{
+				anisotropy: 1,
+				filteringMode: "nearest",
+				format: "rgba8",
+				height: 1,
+				mipmapsGenerated: false,
+				pixels: new Uint8Array([255, 255, 255, 255]),
+				placementRevision: 1,
+				rect: [0, 0, 1, 1],
+				sampleClass: "rgba-color",
+				samplerPolicyKey: "sample=rgba-color;filter=nearest;mips=off;aniso=1",
+				textureRefId,
+				textureUseId,
+				width: 1,
+				wrapS: "clamp-to-edge",
+				wrapT: "clamp-to-edge",
+			},
+		],
+		removedTextureRefIds: [],
+		resolvedTexturePlacements: [
+			{
+				rect: [0, 0, 1, 1],
+				textureHeight: 1,
+				textureRefId,
+				textureUseId,
+				textureWidth: 1,
+			},
+		],
+		revision: 1,
+	};
+}
+
+function countTextureBinds(
+	gl: ReturnType<typeof createFakeWebgl2Context>,
+	texture: WebGLTexture | undefined,
+): number {
+	return gl.bindTexture.mock.calls.filter(
+		([target, boundTexture]) => target === gl.TEXTURE_2D && boundTexture === texture,
+	).length;
 }
 
 function createDynamicResourceCommit(options: {
@@ -2997,6 +3119,23 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		lineWidth: vi.fn(),
 		linkProgram: vi.fn(),
 		pixelStorei: vi.fn(),
+		readPixels: vi.fn(
+			(
+				_x: number,
+				_y: number,
+				width: number,
+				height: number,
+				_format: GLenum,
+				_type: GLenum,
+				pixels: ArrayBufferView | null,
+			) => {
+				if (pixels instanceof Uint8Array) {
+					for (let index = 0; index < width * height * 4; index += 1) {
+						pixels[index] = index & 0xff;
+					}
+				}
+			},
+		),
 		shaderSource: vi.fn(),
 		REPLACE: 7681,
 		stencilFunc: vi.fn((func: GLenum, ref: number, mask: number) => {

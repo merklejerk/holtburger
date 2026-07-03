@@ -9,6 +9,10 @@ import type {
 	FrameState,
 	Renderer,
 	RendererFrameTelemetry,
+	RendererObjectMaterialEntryDiagnostics,
+	RendererObjectMaterialTextureBindingDiagnostics,
+	RendererObjectMaterialTextureDiagnostics,
+	RendererObjectMaterialTextureRole,
 	RendererFrameTelemetryListener,
 	RendererResourceSnapshot,
 	RendererSnapshot,
@@ -1227,6 +1231,35 @@ class Webgl2Renderer implements Renderer {
 				this.#structuredInteriorResources.size,
 			terrainDrawUnits: this.#terrainResources.size,
 		};
+	}
+
+	createObjectMaterialTextureDiagnostics(
+		drawUnitIds: readonly string[],
+	): readonly RendererObjectMaterialTextureDiagnostics[] {
+		return drawUnitIds.map((drawUnitId) => {
+			const resource = this.#findObjectMaterialResource(drawUnitId);
+			if (!resource) {
+				return {
+					drawUnitId,
+					status: "missing-resource",
+				};
+			}
+
+			const wasPreparedPayloadDirty = resource.preparedDrawPayloadState.isDirty;
+			const payload = this.#getObjectMaterialPreparedPayload(resource);
+			return {
+				drawUnitId,
+				materialEntries: createRendererObjectMaterialEntryDiagnostics(
+					resource,
+					payload,
+				),
+				status: "resolved",
+				textureBindings: createRendererObjectMaterialTextureBindingDiagnostics(
+					payload,
+				),
+				wasPreparedPayloadDirty,
+			};
+		});
 	}
 
 	createDiagnosticsSnapshot(): RendererSnapshot {
@@ -2739,6 +2772,22 @@ class Webgl2Renderer implements Renderer {
 		);
 	}
 
+	#findObjectMaterialResource(
+		drawUnitId: string,
+	): ObjectMaterialGeometryResource | null {
+		return (
+			this.#staticObjectResources.get(drawUnitId) ??
+			this.#structuredInteriorResources.get(drawUnitId) ??
+			[...this.#staticObjectVisualResources.values()].find(
+				(resource) => resource.drawUnitId === drawUnitId,
+			) ??
+			[...this.#dynamicGeometryResources.values()]
+				.flat()
+				.find((resource) => resource.drawUnitId === drawUnitId) ??
+			null
+		);
+	}
+
 	#resetTransparentStaticObjectDrawLists(): void {
 		this.#farTransparentStaticObjectDrawList.length = 0;
 		this.#farTransparentStaticObjectInstanceDrawList.length = 0;
@@ -3251,6 +3300,9 @@ class Webgl2Renderer implements Renderer {
 		current?.dispose();
 		try {
 			const targets = createSceneDomainTargets(this.#gl, width, height);
+			// Target allocation uses raw WebGL texture/framebuffer binds; invalidate
+			// cached state before any draw can rely on previous texture-unit bindings.
+			this.#stateCache.invalidate();
 			this.#sceneDomainTargets = targets;
 			return targets;
 		} catch (error) {
@@ -4906,6 +4958,82 @@ function uploadObjectMaterialTextureBinding(
 	if (sizeUniform) {
 		gl.uniform2f(sizeUniform, binding?.width ?? 1, binding?.height ?? 1);
 	}
+}
+
+function createRendererObjectMaterialEntryDiagnostics(
+	resource: ObjectMaterialGeometryResource,
+	payload: ObjectMaterialPreparedDrawPayload,
+): readonly RendererObjectMaterialEntryDiagnostics[] {
+	const uniforms = payload.materialUniforms;
+	return resource.materialEntries.map((entry) => {
+		const slot = entry.slot;
+		return {
+			baseColorRect: readUniformRect(uniforms.baseColorRects, slot),
+			detailRect: readUniformRect(uniforms.detailRects, slot),
+			detailTextureEnabled: uniforms.detailEnabled[slot] === 1,
+			indexRect: readUniformRect(uniforms.indexRects, slot),
+			materialIds: entry.materialIds,
+			paletteRect: readUniformRect(uniforms.paletteRects, slot),
+			slot,
+			wrapMode: uniforms.wrapModes[slot] === 1 ? "repeat" : "clamp",
+		};
+	});
+}
+
+function createRendererObjectMaterialTextureBindingDiagnostics(
+	payload: ObjectMaterialPreparedDrawPayload,
+): readonly RendererObjectMaterialTextureBindingDiagnostics[] {
+	return [
+		createRendererObjectMaterialTextureBindingDiagnostic(
+			"base-color",
+			payload.textures.baseColor,
+		),
+		createRendererObjectMaterialTextureBindingDiagnostic(
+			"detail",
+			payload.textures.detail,
+		),
+		createRendererObjectMaterialTextureBindingDiagnostic(
+			"index",
+			payload.textures.index,
+		),
+		createRendererObjectMaterialTextureBindingDiagnostic(
+			"palette",
+			payload.textures.palette,
+		),
+	].filter(
+		(
+			diagnostic,
+		): diagnostic is RendererObjectMaterialTextureBindingDiagnostics =>
+			diagnostic !== null,
+	);
+}
+
+function createRendererObjectMaterialTextureBindingDiagnostic(
+	role: RendererObjectMaterialTextureRole,
+	binding: ObjectMaterialTextureBinding | null,
+): RendererObjectMaterialTextureBindingDiagnostics | null {
+	if (!binding) {
+		return null;
+	}
+	return {
+		height: binding.height,
+		role,
+		textureRefId: binding.textureRefId,
+		width: binding.width,
+	};
+}
+
+function readUniformRect(
+	values: Float32Array,
+	slot: number,
+): readonly [number, number, number, number] {
+	const offset = slot * 4;
+	return [
+		values[offset] ?? 0,
+		values[offset + 1] ?? 0,
+		values[offset + 2] ?? 0,
+		values[offset + 3] ?? 0,
+	];
 }
 
 function uploadObjectMaterialUniforms(

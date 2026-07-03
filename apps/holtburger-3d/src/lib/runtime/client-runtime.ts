@@ -11,6 +11,7 @@ import type {
 import type {
 	Renderer,
 	RendererFrameTelemetry,
+	RendererObjectMaterialTextureDiagnostics,
 	RendererResourceSnapshot,
 	RendererStaticLayerVisibility,
 	RendererSnapshot,
@@ -50,6 +51,7 @@ import {
 	TextureManager,
 	type DynamicTextureUseCommit,
 	type TextureAtlasPageInspectionSnapshot,
+	type TexturePlacementResolutionSnapshot,
 } from "../textures/texture-manager";
 import type { TexturePacker } from "../textures/packing/packer";
 import type { TextureFilteringMode } from "../textures/sampling-policy";
@@ -615,16 +617,44 @@ interface StaticSelectionDrawUnitDiagnostics {
 	readonly drawUnitId: string;
 	readonly sourceDrawUnitId: string | null;
 	readonly domain: StaticObjectGeometryStaticDrawUnit["domain"];
+	readonly geometry: StaticSelectionDrawUnitGeometryDiagnostics;
 	readonly materialEntryCount: number;
 	readonly materialEntries: readonly StaticSelectionDrawUnitMaterialEntryDiagnostics[];
 	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
 	readonly materialIds: readonly number[];
 	readonly materialPass: StaticObjectGeometryStaticDrawUnit["materialPass"];
+	readonly rendererTextures: RendererObjectMaterialTextureDiagnostics;
 	readonly sourceMapping: StaticSelectionSourceMappingSummaryDiagnostics;
+	readonly texturePlacements: readonly StaticSelectionTexturePlacementDiagnostics[];
 	readonly textureUseCount: number;
+	readonly textureUseIds: readonly string[];
 	readonly triangleCount: number;
 	readonly vertexCount: number;
 }
+
+interface StaticSelectionDrawUnitGeometryDiagnostics {
+	/** Inclusive source UV bounds from the draw unit vertex buffer. */
+	readonly texCoordBounds: {
+		readonly max: readonly [number, number];
+		readonly min: readonly [number, number];
+	} | null;
+	/** Inclusive material-slot attribute bounds from the draw unit vertex buffer. */
+	readonly materialSlotBounds: {
+		readonly max: number;
+		readonly min: number;
+	} | null;
+	/** Unique material-slot attribute values, capped to keep reports compact. */
+	readonly materialSlots: readonly number[];
+}
+
+type StaticSelectionTexturePlacementDiagnostics =
+	| {
+			readonly itemId: string;
+			readonly status: "missing";
+	  }
+	| ({
+			readonly status: "resolved";
+	  } & TexturePlacementResolutionSnapshot);
 
 interface StaticSelectionDrawUnitMaterialEntryDiagnostics {
 	readonly alphaTest: number;
@@ -2786,26 +2816,42 @@ class ClientRuntimeImpl implements ClientRuntime {
 						objectKind,
 					),
 			);
-			if (sourceMappingCoverage.length === 0) {
-				continue;
-			}
+				if (sourceMappingCoverage.length === 0) {
+					continue;
+				}
+				const rendererTextures =
+					this.#renderer.createObjectMaterialTextureDiagnostics([
+						drawUnit.drawUnitId,
+					])[0] ?? {
+						drawUnitId: drawUnit.drawUnitId,
+						status: "missing-resource",
+					};
 
-			drawUnits.push({
-				diagnostics: {
+				drawUnits.push({
+					diagnostics: {
 					domain: drawUnit.domain,
 					drawUnitId: drawUnit.drawUnitId,
+					geometry: createStaticSelectionDrawUnitGeometryDiagnostics(drawUnit),
 					materialEntryCount: drawUnit.materialEntries.length,
 					materialEntries: drawUnit.materialEntries.map(
 						summarizeDrawUnitMaterialEntry,
 					),
 					materialFamily: drawUnit.materialFamily,
-					materialIds: drawUnit.materialIds,
-					materialPass: drawUnit.materialPass,
-					sourceDrawUnitId: drawUnit.drawUnitId,
+						materialIds: drawUnit.materialIds,
+						materialPass: drawUnit.materialPass,
+						rendererTextures,
+						sourceDrawUnitId: drawUnit.drawUnitId,
 					sourceMapping: createStaticSelectionSourceMappingSummary(
 						sourceMappingCoverage,
 					),
+					texturePlacements: createStaticSelectionTexturePlacementDiagnostics(
+						drawUnit.textureUseIds,
+						this.#textureManager.createPlacementResolutionSnapshot(
+							drawUnit.textureUseIds,
+						),
+					),
 					textureUseCount: drawUnit.textureUseIds.length,
+					textureUseIds: drawUnit.textureUseIds,
 					triangleCount: drawUnit.triangleCount,
 					vertexCount: drawUnit.vertexCount,
 				},
@@ -2919,6 +2965,86 @@ function summarizeDrawUnitMaterialEntry(
 		slot: entry.slot,
 		wrapMode: entry.primaryTextureWrapMode,
 	};
+}
+
+function createStaticSelectionDrawUnitGeometryDiagnostics(
+	drawUnit: StaticObjectGeometryStaticDrawUnit,
+): StaticSelectionDrawUnitGeometryDiagnostics {
+	return {
+		materialSlotBounds: createScalarBounds(drawUnit.materialSlotIndices),
+		materialSlots: createUniqueSortedNumbers(drawUnit.materialSlotIndices, 16),
+		texCoordBounds: createVec2Bounds(drawUnit.texCoords),
+	};
+}
+
+function createVec2Bounds(
+	values: Float32Array,
+): StaticSelectionDrawUnitGeometryDiagnostics["texCoordBounds"] {
+	if (values.length < 2) {
+		return null;
+	}
+	let minX = values[0]!;
+	let minY = values[1]!;
+	let maxX = minX;
+	let maxY = minY;
+	for (let index = 2; index + 1 < values.length; index += 2) {
+		const x = values[index]!;
+		const y = values[index + 1]!;
+		minX = Math.min(minX, x);
+		minY = Math.min(minY, y);
+		maxX = Math.max(maxX, x);
+		maxY = Math.max(maxY, y);
+	}
+	return {
+		max: [maxX, maxY],
+		min: [minX, minY],
+	};
+}
+
+function createScalarBounds(
+	values: Float32Array,
+): StaticSelectionDrawUnitGeometryDiagnostics["materialSlotBounds"] {
+	if (values.length === 0) {
+		return null;
+	}
+	let min = values[0]!;
+	let max = min;
+	for (let index = 1; index < values.length; index += 1) {
+		const value = values[index]!;
+		min = Math.min(min, value);
+		max = Math.max(max, value);
+	}
+	return { max, min };
+}
+
+function createUniqueSortedNumbers(
+	values: Float32Array,
+	limit: number,
+): readonly number[] {
+	return [...new Set(values)]
+		.sort((left, right) => left - right)
+		.slice(0, limit);
+}
+
+function createStaticSelectionTexturePlacementDiagnostics(
+	textureUseIds: readonly string[],
+	placements: readonly TexturePlacementResolutionSnapshot[],
+): readonly StaticSelectionTexturePlacementDiagnostics[] {
+	const placementsByItemId = new Map(
+		placements.map((placement) => [placement.itemId, placement] as const),
+	);
+	return [...new Set(textureUseIds)].sort().map((itemId) => {
+		const placement = placementsByItemId.get(itemId);
+		return placement
+			? {
+					...placement,
+					status: "resolved",
+				}
+			: {
+					itemId,
+					status: "missing",
+				};
+	});
 }
 
 function extractTextureUseDid(textureUseId: string | null): string | null {

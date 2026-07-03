@@ -39,6 +39,7 @@ import type {
 	Renderer,
 	RendererFrameTelemetry,
 	RendererFrameTelemetryListener,
+	RendererObjectMaterialTextureDiagnostics,
 	RendererResourceSnapshot,
 	RendererStaticLayerVisibility,
 	RendererSnapshot,
@@ -2261,6 +2262,14 @@ describe("browser client runtime", () => {
 			drawUnits: [
 				{
 					drawUnitId: "static-draw-a",
+					geometry: {
+						materialSlotBounds: { max: 0, min: 0 },
+						materialSlots: [0],
+						texCoordBounds: {
+							max: [1, 1],
+							min: [0, 0],
+						},
+					},
 					materialEntryCount: 1,
 					materialEntries: [
 						{
@@ -2268,15 +2277,21 @@ describe("browser client runtime", () => {
 							materialIds: [0x08000010],
 							slot: 0,
 						},
-					],
-					sourceMapping: {
+						],
+						rendererTextures: {
+							drawUnitId: "static-draw-a",
+							status: "missing-resource",
+						},
+						sourceMapping: {
 						geometrySurfaceIds: [0],
 						partIndices: [0],
 						polygonCount: 1,
 						polygonRange: { max: 0, min: 0 },
 						sourceTriangleCount: 1,
 					},
+					texturePlacements: [],
 					textureUseCount: 0,
+					textureUseIds: [],
 				},
 			],
 			kind: "outdoor-static-object-rendering",
@@ -3775,13 +3790,22 @@ class FakeRenderer implements Renderer {
 		};
 	}
 
-	createDiagnosticsSnapshot(): RendererSnapshot {
-		this.diagnosticsSnapshotCount += 1;
-		return this.#snapshot;
-	}
+		createDiagnosticsSnapshot(): RendererSnapshot {
+			this.diagnosticsSnapshotCount += 1;
+			return this.#snapshot;
+		}
 
-	createResourceSnapshot(): RendererResourceSnapshot {
-		return {
+		createObjectMaterialTextureDiagnostics(
+			drawUnitIds: readonly string[],
+		): readonly RendererObjectMaterialTextureDiagnostics[] {
+			return drawUnitIds.map((drawUnitId) => ({
+				drawUnitId,
+				status: "missing-resource",
+			}));
+		}
+
+		createResourceSnapshot(): RendererResourceSnapshot {
+			return {
 			directEnvCellDrawCalls: this.#snapshot.directEnvCellDrawCalls,
 			dynamicDrawCalls: this.#snapshot.dynamicDrawCalls,
 			dynamicInstances: this.#snapshot.dynamicInstances,

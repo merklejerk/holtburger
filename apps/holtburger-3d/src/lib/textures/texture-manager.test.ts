@@ -254,6 +254,7 @@ describe("browser texture manager", () => {
 		const texturePacker = new FixtureTexturePacker({
 			pageHeight: 16,
 			pageWidth: 16,
+			rect: [4, 4, 1, 1],
 		});
 		const textureManager = new TextureManager({
 			assetService: new FixtureAssetService(),
@@ -299,7 +300,6 @@ describe("browser texture manager", () => {
 		]);
 		expect(secondUpdate?.resolvedTexturePlacements).toEqual([
 			expect.objectContaining({
-				rect: [1, 0, 1, 1],
 				textureRefId: firstUpdate?.placements[0]?.textureRefId,
 				textureUseId: "building-b:mask:06000020",
 			}),
@@ -410,6 +410,76 @@ describe("browser texture manager", () => {
 				(key) => key.kind === "prepared-palette-texture",
 			),
 		).toHaveLength(6);
+	});
+
+	it("updates every logical alias when page-local repack moves a shared physical source", async () => {
+		const assetService = new FixtureAssetService(null, { paletteSize: 46 });
+		const textureManager = new TextureManager({ assetService });
+
+		await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedResources: [],
+			revision: 1,
+			textureUses: [
+				createPaletteTextureUseCommit({
+					drawUnitId: "building-a",
+					paletteId: 0x04000010,
+					replacementPaletteId: 0x04000110,
+					textureUseId: "building-a:palette",
+				}),
+				createPaletteTextureUseCommit({
+					drawUnitId: "building-a-alias",
+					paletteId: 0x04000010,
+					replacementPaletteId: 0x04000110,
+					textureUseId: "building-a:palette-alias",
+				}),
+			],
+		});
+		const secondUpdate = await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedResources: [],
+			revision: 2,
+			textureUses: [1, 2, 3, 4].map((index) =>
+				createPaletteTextureUseCommit({
+					drawUnitId: `building-${index}`,
+					paletteId: 0x04000010 + index,
+					replacementPaletteId: 0x04000110 + index,
+					textureUseId: `building-${index}:palette`,
+				}),
+			),
+		});
+
+		expect(
+			new Set(
+				secondUpdate?.resolvedTexturePlacements.map(
+					(placement) => placement.textureUseId,
+				),
+			),
+		).toEqual(
+			new Set([
+				"building-a:palette",
+				"building-a:palette-alias",
+				"building-1:palette",
+				"building-2:palette",
+				"building-3:palette",
+				"building-4:palette",
+			]),
+		);
+		expect(
+			textureManager.createPlacementResolutionSnapshot([
+				"building-a:palette",
+				"building-a:palette-alias",
+			]),
+		).toEqual([
+			expect.objectContaining({
+				itemId: "building-a:palette",
+				width: 256,
+			}),
+			expect.objectContaining({
+				itemId: "building-a:palette-alias",
+				width: 256,
+			}),
+		]);
 	});
 
 	it("does not repack unrelated compatible pages in the same bucket", async () => {
@@ -1027,6 +1097,66 @@ describe("browser texture manager", () => {
 			textureRefId: expect.stringContaining("texture-placement-bucket"),
 			textureUseId: textureUse.textureUseId,
 		});
+	});
+
+	it("uploads a live page when committing an offline placement absorbed into it", async () => {
+		const assetService = new FixtureAssetService();
+		const texturePacker = new FixtureTexturePacker({
+			pageHeight: 32,
+			pageWidth: 32,
+			rect: [4, 4, 1, 1],
+		});
+		const textureManager = new TextureManager({ assetService, texturePacker });
+		const activeTextureUse = createTextureUseCommit({
+			domain: "outdoor-explicit-objects",
+			drawUnitId: "object-a",
+			outputFormat: "rgba8",
+			renderSurfaceId: 0x06000010,
+			textureUseId: "object-a:prepared-texture:06000010",
+		});
+		const firstUpdate = await textureManager.applyStaticCommitDelta({
+			...createCommitDelta({
+				domain: "outdoor-explicit-objects",
+				drawUnitId: "object-a",
+				outputFormat: "rgba8",
+				textureUseId: activeTextureUse.textureUseId,
+			}),
+			textureUses: [activeTextureUse],
+		});
+		const inactiveTextureUse = createTextureUseCommit({
+			domain: "outdoor-explicit-objects",
+			drawUnitId: "object-b",
+			outputFormat: "rgba8",
+			renderSurfaceId: 0x06000020,
+			textureUseId: "object-b:prepared-texture:06000020",
+		});
+
+		await textureManager.placeTextureIntents({
+			intents: [createStaticTexturePlacementIntent(inactiveTextureUse)],
+		});
+		const secondUpdate = await textureManager.applyStaticCommitDelta({
+			...createCommitDelta({
+				domain: "outdoor-explicit-objects",
+				drawUnitId: "object-b",
+				outputFormat: "rgba8",
+				textureUseId: inactiveTextureUse.textureUseId,
+			}),
+			revision: 2,
+			textureUses: [inactiveTextureUse],
+		});
+
+		expect(texturePacker.jobs).toHaveLength(1);
+		expect(secondUpdate?.placements).toEqual([
+			expect.objectContaining({
+				textureRefId: firstUpdate?.placements[0]?.textureRefId,
+			}),
+		]);
+		expect(secondUpdate?.resolvedTexturePlacements).toEqual([
+			expect.objectContaining({
+				textureRefId: firstUpdate?.placements[0]?.textureRefId,
+				textureUseId: inactiveTextureUse.textureUseId,
+			}),
+		]);
 	});
 
 	it("reuses static-authored non-terrain pre-bake placements during commit", async () => {

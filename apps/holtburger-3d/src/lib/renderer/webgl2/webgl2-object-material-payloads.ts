@@ -15,7 +15,7 @@ export interface ObjectMaterialPreparedDrawPayload {
 	readonly textures: ObjectMaterialTextureBindingsByRole;
 }
 
-interface ObjectMaterialTextureBindingsByRole {
+export interface ObjectMaterialTextureBindingsByRole {
 	baseColor: ObjectMaterialTextureBinding | null;
 	detail: ObjectMaterialTextureBinding | null;
 	index: ObjectMaterialTextureBinding | null;
@@ -25,6 +25,8 @@ interface ObjectMaterialTextureBindingsByRole {
 export interface ObjectMaterialTextureBinding {
 	readonly height: number;
 	readonly texture: WebGLTexture;
+	/** Renderer texture reference resolved from the logical texture use id. */
+	readonly textureRefId: string;
 	readonly width: number;
 }
 
@@ -234,6 +236,7 @@ function collectObjectMaterialTextureBinding(
 	setBinding({
 		height: placement.textureHeight,
 		texture,
+		textureRefId: placement.textureRefId,
 		width: placement.textureWidth,
 	});
 }

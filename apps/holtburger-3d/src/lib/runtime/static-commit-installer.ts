@@ -1,7 +1,4 @@
-import type {
-	StaticTextureBinding,
-	TexturePlacementUpdate,
-} from "../renderer/types";
+import type { ResolvedTexturePlacement, TexturePlacementUpdate } from "../renderer/types";
 import type {
 	StaticCoordinatorCommitDelta,
 	StaticDrawUnit,
@@ -40,13 +37,13 @@ export function installStaticCommit(
 	input: StaticCommitInstallInput,
 ): StaticCommitInstallResult {
 	const objectVisualInstallSet = input.commit.objectVisualInstallSet;
-	assertTexturedDrawUnitsHaveCommittedBindings(
+	assertTexturedDrawUnitsHaveResolvedPlacements(
 		input.commit.addedDrawUnits,
-		input.textureUpdate?.textureBindings ?? [],
+		input.textureUpdate?.resolvedTexturePlacements ?? [],
 	);
-	assertTexturedObjectVisualResourcesHaveCommittedBindings(
+	assertTexturedObjectVisualResourcesHaveResolvedPlacements(
 		objectVisualInstallSet.visualResources,
-		input.textureUpdate?.textureBindings ?? [],
+		input.textureUpdate?.resolvedTexturePlacements ?? [],
 	);
 
 	return {
@@ -63,21 +60,13 @@ export function installStaticCommit(
 	};
 }
 
-function assertTexturedDrawUnitsHaveCommittedBindings(
+function assertTexturedDrawUnitsHaveResolvedPlacements(
 	drawUnits: readonly StaticDrawUnit[],
-	bindings: readonly StaticTextureBinding[],
+	placements: readonly ResolvedTexturePlacement[],
 ): void {
-	const textureUseIdsByDrawUnitId = new Map<string, Set<string>>();
-	for (const binding of bindings) {
-		if (binding.owner.kind !== "draw-unit") {
-			continue;
-		}
-		const textureUseIds =
-			textureUseIdsByDrawUnitId.get(binding.owner.drawUnitId) ??
-			new Set<string>();
-		textureUseIds.add(binding.bindingKey);
-		textureUseIdsByDrawUnitId.set(binding.owner.drawUnitId, textureUseIds);
-	}
+	const committedTextureUseIds = new Set(
+		placements.map((placement) => placement.textureUseId),
+	);
 
 	for (const drawUnit of drawUnits) {
 		const expectedTextureUseIds = drawUnit.textureUseIds;
@@ -85,47 +74,35 @@ function assertTexturedDrawUnitsHaveCommittedBindings(
 			continue;
 		}
 
-		const committedTextureUseIds =
-			textureUseIdsByDrawUnitId.get(drawUnit.drawUnitId) ?? new Set<string>();
 		const missingTextureUseIds = expectedTextureUseIds.filter(
 			(textureUseId) => !committedTextureUseIds.has(textureUseId),
 		);
 		if (missingTextureUseIds.length > 0) {
 			throw new Error(
-				`Static draw unit ${drawUnit.drawUnitId} is missing committed texture bindings for ${missingTextureUseIds.join(", ")}.`,
+				`Static draw unit ${drawUnit.drawUnitId} is missing resolved texture placements for ${missingTextureUseIds.join(", ")}.`,
 			);
 		}
 	}
 }
 
-function assertTexturedObjectVisualResourcesHaveCommittedBindings(
+function assertTexturedObjectVisualResourcesHaveResolvedPlacements(
 	resources: readonly ObjectVisualResource[],
-	bindings: readonly StaticTextureBinding[],
+	placements: readonly ResolvedTexturePlacement[],
 ): void {
-	const textureUseIdsByResourceId = new Map<string, Set<string>>();
-	for (const binding of bindings) {
-		if (binding.owner.kind !== "static-object-visual-resource") {
-			continue;
-		}
-		const textureUseIds =
-			textureUseIdsByResourceId.get(binding.owner.resourceId) ??
-			new Set<string>();
-		textureUseIds.add(binding.bindingKey);
-		textureUseIdsByResourceId.set(binding.owner.resourceId, textureUseIds);
-	}
+	const committedTextureUseIds = new Set(
+		placements.map((placement) => placement.textureUseId),
+	);
 
 	for (const resource of resources) {
 		if (resource.textureUseIds.length === 0) {
 			continue;
 		}
-		const committedTextureUseIds =
-			textureUseIdsByResourceId.get(resource.resourceId) ?? new Set<string>();
 		const missingTextureUseIds = resource.textureUseIds.filter(
 			(textureUseId) => !committedTextureUseIds.has(textureUseId),
 		);
 		if (missingTextureUseIds.length > 0) {
 			throw new Error(
-				`Static object visual resource ${resource.resourceId} is missing committed texture bindings for ${missingTextureUseIds.join(", ")}.`,
+				`Static object visual resource ${resource.resourceId} is missing resolved texture placements for ${missingTextureUseIds.join(", ")}.`,
 			);
 		}
 	}

@@ -227,14 +227,33 @@ Acceptance criteria:
 
 Task checklist:
 
-- Add a `textureUseId -> placement` resolver/table in `TextureManager`.
-- Replace renderer `#textureBindings` with a placement map keyed by
+- [x] Emit placement resolution rows keyed by `textureUseId` from
+  `TextureManager`.
+- [x] Replace renderer `#textureBindings` with a placement map keyed by
   `textureUseId`.
-- Move `pageId`/physical texture refs behind renderer texture page management.
-- Refactor terrain payload builders to assign page slots during prep.
-- Refactor object material payload builders to resolve placements by texture use
+- [x] Move `pageId`/physical texture refs behind renderer texture page management.
+- [x] Refactor terrain payload builders to assign page slots during prep.
+- [x] Refactor object material payload builders to resolve placements by texture use
   id during prep.
-- Yeet or rewrite tests that assert durable `pageSlot` fields.
+- [x] Yeet or rewrite tests that assert durable `pageSlot` fields.
+
+Implementation notes:
+
+- `TexturePlacementUpdate` no longer carries durable `textureBindings`.
+  `resolvedTexturePlacements` is the renderer update contract and uses
+  `textureUseId` directly.
+- The renderer owns `textureUseId -> ResolvedTexturePlacement` because draw-time
+  payload preparation also needs the current WebGL texture handles.
+- `TextureManager` no longer assigns `pageSlot`; it only manages residency,
+  packing, leases, uploads, and logical placement rows.
+- Terrain payload prep assigns color/mask page slots from resolved placements
+  while walking the terrain material plan. Detail textures remain a separate
+  uniform path.
+- Object-material payload prep resolves role textures from material-entry
+  texture use ids; shader slot `0` is role-local and no longer durable state.
+- Deleted texture-manager tests that only protected the old owner-scoped
+  `pageSlot` allocator. Replacement coverage lives in terrain/object payload
+  prep tests where slots are now assigned.
 
 ## Phase 4: Existing Page Absorption
 

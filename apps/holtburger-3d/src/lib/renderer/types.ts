@@ -203,7 +203,6 @@ export interface TexturePlacementUpdate {
 	readonly placements: readonly TexturePlacement[];
 	readonly removedTextureRefIds: readonly string[];
 	readonly resolvedTexturePlacements: readonly ResolvedTexturePlacement[];
-	readonly textureBindings: readonly TextureBinding[];
 	readonly revision: number;
 }
 
@@ -247,21 +246,6 @@ export function createTextureBindingOwnerKey(
 			return `dynamic-visual-resource:${owner.resourceId}`;
 	}
 }
-
-export interface TextureBinding {
-	/** Renderer resource that owns this material texture binding. */
-	readonly owner: TextureBindingOwner;
-	/** Material binding key used by material table entries and terrain material roles. */
-	readonly bindingKey: string;
-	readonly textureRefId: string;
-	/** Shader role-specific page slot. Object materials use slot 0; terrain still has page slots. */
-	readonly pageSlot: TextureRolePageSlot;
-	readonly textureWidth: number;
-	readonly textureHeight: number;
-	readonly rect: readonly [number, number, number, number];
-}
-
-export type StaticTextureBinding = TextureBinding;
 
 type DynamicRendererResourceId = string;
 type DynamicRendererEntityId = string;
@@ -345,36 +329,12 @@ type DynamicRendererInstanceResidence =
 	  };
 
 export interface ResolvedTexturePlacement {
-	/** Material binding key whose atlas placement was resolved. */
-	readonly bindingKey: string;
+	/** Logical texture use id whose atlas placement was resolved. */
+	readonly textureUseId: string;
 	readonly textureRefId: string;
 	readonly textureWidth: number;
 	readonly textureHeight: number;
 	readonly rect: readonly [number, number, number, number];
-}
-
-type TextureRolePageKind =
-	| "color"
-	| "detail"
-	| "mask"
-	| "object-base-color"
-	| "object-detail"
-	| "object-index"
-	| "object-palette";
-
-export type TerrainTextureRolePageKind = Extract<
-	TextureRolePageKind,
-	"color" | "detail" | "mask"
->;
-
-export type ObjectMaterialTextureRolePageKind = Extract<
-	TextureRolePageKind,
-	"object-base-color" | "object-detail" | "object-index" | "object-palette"
->;
-
-interface TextureRolePageSlot {
-	readonly kind: TextureRolePageKind;
-	readonly slot: number;
 }
 
 export interface SamplerPolicyUpdate {

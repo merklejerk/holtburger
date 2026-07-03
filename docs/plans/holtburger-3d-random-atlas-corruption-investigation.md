@@ -131,17 +131,18 @@ Evidence:
 - The wrong rendered texture did not appear in that inspected page.
 - Prepared payload and texture manager agreed on rect and texture ref.
 
-Diagnostics added:
+Temporary diagnostics used during investigation:
 
-- `TexturePlacementResolutionSnapshot` now reports `format` and `rectPixelHash`, a cheap FNV-1a hash over the CPU-side runtime page rect.
-- Renderer object-material diagnostics now include `textureRectProbes`, which probe the WebGL texture object with `gl.readPixels`.
-- The probe reports `pixelHash`, `yFlippedPixelHash`, `mirroredYPixelHash`, and `mirroredYFlippedPixelHash` so texture row-origin and framebuffer-coordinate differences do not masquerade as corruption.
-- Shared hashing lives in `src/lib/textures/pixel-hash.ts` so CPU and GPU hashes use the same algorithm.
+- `TexturePlacementResolutionSnapshot` temporarily reported `format` and `rectPixelHash`, a cheap FNV-1a hash over the CPU-side runtime page rect.
+- Renderer object-material diagnostics temporarily included `textureRectProbes`, which probed the WebGL texture object with `gl.readPixels`.
+- The probe reported `pixelHash`, `yFlippedPixelHash`, `mirroredYPixelHash`, and `mirroredYFlippedPixelHash` so texture row-origin and framebuffer-coordinate differences did not masquerade as corruption.
+- Shared hashing temporarily lived in `src/lib/textures/pixel-hash.ts` so CPU and GPU hashes used the same algorithm.
+- These probes were removed before the corruption-fix checkpoint commit. Stable diagnostics now expose placement/page-version intent rather than GPU readback proof.
 
-How to interpret the next broken-object report:
+How to interpret a future broken-object report:
 
-- If `texturePlacements[].rectPixelHash` matches any GPU probe hash, the WebGL texture object contains the expected rect pixels. Continue with draw-time binding/shader-state investigation.
-- If `texturePlacements[].rectPixelHash` matches none of the GPU probe hashes, the CPU atlas inspector and WebGL texture object disagree. Continue with upload, replacement, page reclamation, and texture-ref lifetime investigation.
+- If placement/page-version diagnostics agree but rendering is wrong, write a fresh focused probe for that failure mode.
+- Do not restore the old broad CPU/GPU hash diagnostics by default.
 
 Confirmed root cause:
 
@@ -568,6 +569,8 @@ Verification:
 
 ### Phase 6: Diagnostics Cutover And Probe Cleanup
 
+Status: completed.
+
 Deliverables:
 
 - Finish the diagnostic split started before the structural phases.
@@ -595,6 +598,26 @@ Test strategy:
 - Delete probe-output assertions from general runtime diagnostics tests.
 - Delete focused GPU-probe tests with the probe implementation.
 - Rewrite or delete diagnostics tests that depend on legacy partial placement shapes once the production types prevent those shapes.
+
+Completed implementation:
+
+- Verified production source no longer contains `textureRectProbes`, CPU rect hash diagnostics, mirrored/flipped hash diagnostics, `readPixels` probe plumbing, or `pixel-hash.ts`.
+- Kept stable diagnostics that mirror production state: selected draw unit geometry, resolved texture placements, page versions, renderer material rects, texture bindings, and prepared-payload dirty status.
+- Updated this investigation plan so historical probe evidence is described as removed temporary instrumentation rather than current diagnostic API.
+
+Decision:
+
+- No new code deletion was needed in this phase because probe implementation was already removed during the pre-structural cleanup. This phase exists as an audit and documentation cutover.
+
+Debt:
+
+- `client-runtime` selection diagnostics are still broad. Phase 7 should keep tests only for diagnostics that mirror production composite types and delete tests that protect panel-only formatting.
+
+Verification:
+
+- `rg -n "textureRectProbes|rectPixelHash|pixelHash|mirroredY|yFlipped|readPixels|framebuffer readback|pixel-hash" apps/holtburger-3d/src -g '!*.test.ts'` found no production probe/readback/hash diagnostics.
+- `npm run check` passed.
+- `git diff --check` passed.
 
 ### Phase 7: Test Suite Cleanup And Clean Cutover
 
@@ -763,9 +786,9 @@ Course correction:
 
 Current seams:
 
-- CPU rect hashes are now attached to placement resolution snapshots.
-- GPU probes read texture objects through framebuffer readback.
-- Selection diagnostics currently mix stable inspection fields with incident-specific proof fields.
+- CPU rect hashes have been removed from placement resolution snapshots.
+- GPU probe/readback diagnostics have been removed from production source.
+- Selection diagnostics still carry stable inspection fields and should stay aligned with production composite types.
 
 Expected implementation path:
 
@@ -779,7 +802,7 @@ Friction:
 
 Course correction:
 
-- Delete the current probe implementation. If follow-mode validation finds a second bug, write a smaller purpose-built probe for that bug instead of carrying this one forward.
+- Probe implementation is already deleted. If follow-mode validation finds a second bug, write a smaller purpose-built probe for that bug instead of carrying the old one forward.
 
 ### Phase 7 Dry Run: Tests And Clean Cutover
 

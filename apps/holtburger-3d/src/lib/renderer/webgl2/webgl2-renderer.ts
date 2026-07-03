@@ -1126,50 +1126,53 @@ class Webgl2Renderer implements Renderer {
 			return;
 		}
 		const overlay = createDebugOverlayVertices(primitives);
-		const gl = this.#gl;
-		gl.bindVertexArray(this.#debugOverlayVertexArray);
-		gl.bindBuffer(gl.ARRAY_BUFFER, this.#debugOverlayVertexBuffer);
-		gl.bufferData(gl.ARRAY_BUFFER, overlay.vertices, gl.DYNAMIC_DRAW);
-		gl.bindVertexArray(null);
-		gl.bindBuffer(gl.ARRAY_BUFFER, null);
-		this.#stateCache.invalidate();
+		this.#runUnmanagedWebglStateMutation((gl) => {
+			gl.bindVertexArray(this.#debugOverlayVertexArray);
+			gl.bindBuffer(gl.ARRAY_BUFFER, this.#debugOverlayVertexBuffer);
+			gl.bufferData(gl.ARRAY_BUFFER, overlay.vertices, gl.DYNAMIC_DRAW);
+			gl.bindVertexArray(null);
+			gl.bindBuffer(gl.ARRAY_BUFFER, null);
+		});
 		this.#debugOverlayPrimitiveCount = primitives.length;
 		this.#debugOverlayTriangleVertexCount = overlay.triangleVertexCount;
 		this.#debugOverlayLineVertexCount = overlay.lineVertexCount;
 	}
 
 	applyTexturePlacementUpdate(update: TexturePlacementUpdate): void {
-		const gl = this.#gl;
 		let shouldMarkAllStaticPayloadsDirty =
 			update.removedTextureRefIds.length > 0;
 		let shouldMarkAllTerrainPayloadsDirty =
 			update.removedTextureRefIds.length > 0;
-		for (const textureRefId of update.removedTextureRefIds) {
-			const texture = this.#textures.get(textureRefId);
-			if (!texture) {
-				continue;
-			}
-			gl.deleteTexture(texture);
-			this.#textures.delete(textureRefId);
-			for (const [textureUseId, placement] of this.#texturePlacements) {
-				if (placement.textureRefId === textureRefId) {
-					this.#texturePlacements.delete(textureUseId);
+		if (
+			update.removedTextureRefIds.length > 0 ||
+			update.placements.length > 0
+		) {
+			this.#runUnmanagedWebglStateMutation((gl) => {
+				for (const textureRefId of update.removedTextureRefIds) {
+					const texture = this.#textures.get(textureRefId);
+					if (!texture) {
+						continue;
+					}
+					gl.deleteTexture(texture);
+					this.#textures.delete(textureRefId);
+					for (const [textureUseId, placement] of this.#texturePlacements) {
+						if (placement.textureRefId === textureRefId) {
+							this.#texturePlacements.delete(textureUseId);
+						}
+					}
 				}
-			}
-		}
 
-		for (const placement of update.placements) {
-			const texture = createTexturePage(gl, placement);
-			const previousTexture = this.#textures.get(placement.textureRefId);
-			if (previousTexture) {
-				gl.deleteTexture(previousTexture);
-			}
-			this.#textures.set(placement.textureRefId, texture);
-			shouldMarkAllStaticPayloadsDirty = true;
-			shouldMarkAllTerrainPayloadsDirty = true;
-		}
-		if (update.placements.length > 0) {
-			this.#stateCache.invalidate();
+				for (const placement of update.placements) {
+					const texture = createTexturePage(gl, placement);
+					const previousTexture = this.#textures.get(placement.textureRefId);
+					if (previousTexture) {
+						gl.deleteTexture(previousTexture);
+					}
+					this.#textures.set(placement.textureRefId, texture);
+					shouldMarkAllStaticPayloadsDirty = true;
+					shouldMarkAllTerrainPayloadsDirty = true;
+				}
+			});
 		}
 
 		for (const placement of update.resolvedTexturePlacements) {
@@ -1190,19 +1193,25 @@ class Webgl2Renderer implements Renderer {
 	}
 
 	applySamplerPolicyUpdate(update: SamplerPolicyUpdate): void {
-		const gl = this.#gl;
-		let didApplyPolicy = false;
-		for (const policy of update.policies) {
-			const texture = this.#textures.get(policy.textureRefId);
-			if (!texture) {
-				continue;
+		const residentPolicies = update.policies
+			.map((policy) => ({
+				policy,
+				texture: this.#textures.get(policy.textureRefId) ?? null,
+			}))
+			.filter(
+				(entry): entry is {
+					readonly policy: SamplerPolicyUpdate["policies"][number];
+					readonly texture: WebGLTexture;
+				} => entry.texture !== null,
+			);
+		if (residentPolicies.length === 0) {
+			return;
+		}
+		this.#runUnmanagedWebglStateMutation((gl) => {
+			for (const { policy, texture } of residentPolicies) {
+				applyTextureSamplerPolicy(gl, texture, policy);
 			}
-			applyTextureSamplerPolicy(gl, texture, policy);
-			didApplyPolicy = true;
-		}
-		if (didApplyPolicy) {
-			this.#stateCache.invalidate();
-		}
+		});
 	}
 
 	updateFrameState(state: FrameState): void {
@@ -1407,6 +1416,16 @@ class Webgl2Renderer implements Renderer {
 		this.#frameCount += 1;
 	}
 
+	#runUnmanagedWebglStateMutation<T>(
+		mutate: (gl: WebGL2RenderingContext) => T,
+	): T {
+		try {
+			return mutate(this.#gl);
+		} finally {
+			this.#stateCache.invalidate();
+		}
+	}
+
 	#resetFramebufferTransferState(): void {
 		const gl = this.#gl;
 		gl.colorMask(true, true, true, true);
@@ -1415,7 +1434,7 @@ class Webgl2Renderer implements Renderer {
 
 	#renderSingleSurfaceResident(pulse: number): void {
 		const gl = this.#gl;
-		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+		this.#stateCache.bindFramebuffer(null);
 		this.#stateCache.setViewport({
 			height: gl.drawingBufferHeight,
 			width: gl.drawingBufferWidth,
@@ -1503,7 +1522,7 @@ class Webgl2Renderer implements Renderer {
 			return;
 		}
 
-		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+		this.#stateCache.bindFramebuffer(null);
 		this.#stateCache.setViewport({
 			height: gl.drawingBufferHeight,
 			width: gl.drawingBufferWidth,
@@ -1634,8 +1653,7 @@ class Webgl2Renderer implements Renderer {
 		options: { readonly cullTerrainBackfaces?: boolean } = {},
 	): number {
 		const gl = this.#gl;
-		gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
-		this.#stateCache.invalidate();
+		this.#stateCache.bindFramebuffer(target.framebuffer);
 		this.#stateCache.setViewport({
 			height: target.height,
 			width: target.width,
@@ -1760,50 +1778,50 @@ class Webgl2Renderer implements Renderer {
 		source: SceneDomainTarget,
 		destination: SceneDomainTarget,
 	): void {
-		const gl = this.#gl;
-		this.#resetFramebufferTransferState();
-		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, source.framebuffer);
-		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, destination.framebuffer);
-		gl.blitFramebuffer(
-			0,
-			0,
-			source.width,
-			source.height,
-			0,
-			0,
-			destination.width,
-			destination.height,
-			gl.DEPTH_BUFFER_BIT,
-			gl.NEAREST,
-		);
-		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-		this.#stateCache.invalidate();
+		this.#runUnmanagedWebglStateMutation((gl) => {
+			this.#resetFramebufferTransferState();
+			gl.bindFramebuffer(gl.READ_FRAMEBUFFER, source.framebuffer);
+			gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, destination.framebuffer);
+			gl.blitFramebuffer(
+				0,
+				0,
+				source.width,
+				source.height,
+				0,
+				0,
+				destination.width,
+				destination.height,
+				gl.DEPTH_BUFFER_BIT,
+				gl.NEAREST,
+			);
+			gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+			gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+		});
 	}
 
 	#blitSceneDomainStencil(
 		source: SceneDomainTarget,
 		destination: SceneDomainTarget,
 	): void {
-		const gl = this.#gl;
-		this.#resetFramebufferTransferState();
-		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, source.framebuffer);
-		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, destination.framebuffer);
-		gl.blitFramebuffer(
-			0,
-			0,
-			source.width,
-			source.height,
-			0,
-			0,
-			destination.width,
-			destination.height,
-			gl.STENCIL_BUFFER_BIT,
-			gl.NEAREST,
-		);
-		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-		this.#stateCache.invalidate();
+		this.#runUnmanagedWebglStateMutation((gl) => {
+			this.#resetFramebufferTransferState();
+			gl.bindFramebuffer(gl.READ_FRAMEBUFFER, source.framebuffer);
+			gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, destination.framebuffer);
+			gl.blitFramebuffer(
+				0,
+				0,
+				source.width,
+				source.height,
+				0,
+				0,
+				destination.width,
+				destination.height,
+				gl.STENCIL_BUFFER_BIT,
+				gl.NEAREST,
+			);
+			gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+			gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+		});
 	}
 
 	#drawSourceSceneCopy(source: SceneDomainTarget): void {
@@ -3299,10 +3317,9 @@ class Webgl2Renderer implements Renderer {
 
 		current?.dispose();
 		try {
-			const targets = createSceneDomainTargets(this.#gl, width, height);
-			// Target allocation uses raw WebGL texture/framebuffer binds; invalidate
-			// cached state before any draw can rely on previous texture-unit bindings.
-			this.#stateCache.invalidate();
+			const targets = this.#runUnmanagedWebglStateMutation((gl) =>
+				createSceneDomainTargets(gl, width, height),
+			);
 			this.#sceneDomainTargets = targets;
 			return targets;
 		} catch (error) {

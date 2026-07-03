@@ -223,13 +223,9 @@ export function prepareDirectPaletteTextureSource(
 			`Prepared palette texture ${formatPaletteId(expectedPalette)} domain ${payload.domain} does not match requested ${expectedUse.domain}.`,
 		);
 	}
-	const expectedDimension = expectedUse.domain === "index8" ? 16 : 256;
-	if (
-		payload.width !== expectedDimension ||
-		payload.height !== expectedDimension
-	) {
+	if (payload.width !== payload.height) {
 		throw new Error(
-			`Prepared palette texture ${formatPaletteId(expectedPalette)} expected ${expectedDimension}x${expectedDimension}, got ${payload.width}x${payload.height}.`,
+			`Prepared palette texture ${formatPaletteId(expectedPalette)} expected a square payload, got ${payload.width}x${payload.height}.`,
 		);
 	}
 	const expectedByteLength = payload.width * payload.height * 4;

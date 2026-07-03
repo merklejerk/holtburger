@@ -393,7 +393,10 @@ vec4 paletteColor(float index) {
 		return vec4(0.0);
 	}
 	vec4 rect = uMaterialPaletteTextureRects[slot];
-	float paletteSide = uMaterialIndexedTextureFormats[slot] == 1 ? 256.0 : 16.0;
+	float paletteSide = max(rect.z, 1.0);
+	if (index >= paletteSide * paletteSide) {
+		return vec4(0.0);
+	}
 	float paletteLocalX = mod(index, paletteSide);
 	float paletteLocalY = floor(index / paletteSide);
 	vec2 paletteCoord = clamp(

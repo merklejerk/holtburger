@@ -480,16 +480,25 @@ describe("browser texture manager", () => {
 				"building-a:palette",
 				"building-a:palette-alias",
 			]),
-		).toEqual([
-			expect.objectContaining({
-				itemId: "building-a:palette",
-				width: 256,
-			}),
-			expect.objectContaining({
-				itemId: "building-a:palette-alias",
-				width: 256,
-			}),
-		]);
+		).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					itemId: "building-a:palette",
+					pageVersion: secondUpdate?.resolvedTexturePlacements.find(
+						(placement) => placement.textureUseId === "building-a:palette",
+					)?.pageVersion,
+					width: 256,
+				}),
+				expect.objectContaining({
+					itemId: "building-a:palette-alias",
+					pageVersion: secondUpdate?.resolvedTexturePlacements.find(
+						(placement) =>
+							placement.textureUseId === "building-a:palette-alias",
+					)?.pageVersion,
+					width: 256,
+				}),
+			]),
+		);
 	});
 
 	it("does not repack unrelated compatible pages in the same bucket", async () => {

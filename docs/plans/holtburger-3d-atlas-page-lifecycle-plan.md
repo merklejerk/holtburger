@@ -375,24 +375,24 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add a page-local layout-only repack planner API in `atlas-layout.ts` or a thin
+- [x] Add a page-local layout-only repack planner API in `atlas-layout.ts` or a thin
   TextureManager-local adapter over the existing packer, with explicit
   candidate-page inputs.
-- [ ] Teach `TextureManager` to try page-local repack/grow after insertion
+- [x] Teach `TextureManager` to try page-local repack/grow after insertion
   fails and before creating a brand-new page.
-- [ ] Score/select a candidate page using only dimensions, gutters, page class,
+- [x] Score/select a candidate page using only dimensions, gutters, page class,
   and existing registry metadata; do not request old pixels during candidate
   planning.
-- [ ] Re-request/reprepare old unique physical sources only after a candidate
+- [x] Re-request/reprepare old unique physical sources only after a candidate
   page-local repack plan has been selected.
-- [ ] Materialize the grown page under the existing `textureRefId`, copying or
+- [x] Materialize the grown page under the existing `textureRefId`, copying or
   rebuilding pixels from unique physical sources.
-- [ ] Update all registry aliases that point at moved physical placements.
-- [ ] Emit `resolvedTexturePlacements` for all moved and inserted logical
+- [x] Update all registry aliases that point at moved physical placements.
+- [x] Emit `resolvedTexturePlacements` for all moved and inserted logical
   texture uses.
-- [ ] Add tests for the `46x46` one-then-four palette wave producing one grown
+- [x] Add tests for the `46x46` one-then-four palette wave producing one grown
   page instead of `4 + 1`.
-- [ ] Add guard tests proving unrelated pages in the same bucket are not
+- [x] Add guard tests proving unrelated pages in the same bucket are not
   repacked or moved.
 
 Implementation notes:
@@ -404,6 +404,14 @@ Implementation notes:
   selected physical page, but it is not allowed to reconsider the whole bucket.
 - Because renderer placement is now canonical by `textureUseId`, moved rects can
   be announced cleanly through `resolvedTexturePlacements`.
+- Candidate selection is metadata-only. The implementation uses registry
+  dimensions, gutters, and current page dimensions to pick one page, then
+  re-requests only the selected page's unique old physical sources before
+  rebuilding pixels. Incoming textures are already prepared by the existing
+  placement pipeline.
+- The memory-minimizing planner may grow the observed `46x46` one-then-four
+  palette wave to `256x128`, not necessarily `256x256`. That is intentional:
+  the rule is preserve-or-grow the selected page, not force square pages.
 
 Dry-run notes:
 

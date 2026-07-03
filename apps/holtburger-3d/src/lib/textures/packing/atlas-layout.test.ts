@@ -108,6 +108,32 @@ describe("browser atlas layout planner", () => {
 		});
 	});
 
+	it("honors minimum page size floors when planning repacks", () => {
+		const plan = planAtlasLayout({
+			entries: [
+				{ height: 46, key: "existing", width: 46 },
+				{ height: 46, key: "incoming", width: 46 },
+			],
+			policy: {
+				...createPolicy(),
+				minTextureHeight: 128,
+				minTextureWidth: 128,
+				pageSelection: "minimize-memory",
+			},
+		});
+
+		expect(plan.texturePages).toMatchObject([
+			{
+				height: 128,
+				placements: [
+					{ atlasEntryKey: "existing" },
+					{ atlasEntryKey: "incoming" },
+				],
+				width: 128,
+			},
+		]);
+	});
+
 	it("keeps cohort entries on one page when independent entries would split", () => {
 		const entries = [
 			{ height: 8, key: "terrain-wide-a", width: 300 },

@@ -206,7 +206,16 @@ export interface TexturePlacementUpdate {
 	readonly revision: number;
 }
 
+export interface TexturePageVersion {
+	/** Renderer texture object identity for this atlas page. */
+	readonly textureRefId: string;
+	/** Monotonic page content revision within the texture manager bucket. */
+	readonly placementRevision: number;
+}
+
 interface TexturePlacement {
+	/** Page identity for the uploaded pixels. */
+	readonly pageVersion: TexturePageVersion;
 	readonly textureRefId: string;
 	readonly textureUseId: string;
 	readonly placementRevision: number;
@@ -331,6 +340,8 @@ type DynamicRendererInstanceResidence =
 export interface ResolvedTexturePlacement {
 	/** Logical texture use id whose atlas placement was resolved. */
 	readonly textureUseId: string;
+	/** Page identity that owns this rect. */
+	readonly pageVersion: TexturePageVersion;
 	readonly textureRefId: string;
 	readonly textureWidth: number;
 	readonly textureHeight: number;
@@ -441,6 +452,7 @@ export interface RendererObjectMaterialEntryDiagnostics {
 
 export interface RendererObjectMaterialTextureBindingDiagnostics {
 	readonly height: number;
+	readonly pageVersion: TexturePageVersion;
 	readonly role: RendererObjectMaterialTextureRole;
 	readonly textureRefId: string;
 	readonly width: number;

@@ -370,6 +370,10 @@ function createPlacement(
 	rect: readonly [number, number, number, number],
 ): ResolvedTexturePlacement {
 	return {
+		pageVersion: {
+			placementRevision: 1,
+			textureRefId,
+		},
 		rect,
 		textureHeight: 256,
 		textureRefId,

@@ -132,24 +132,36 @@ describe("WebGL2 static object payload builder", () => {
 		expect(scratch.materialUniforms.detailEnabled[2]).toBe(1);
 		expect(scratch.materialUniforms.detailTilings[2]).toBe(3);
 		expect(scratch.materialUniforms.wrapModes[2]).toBe(1);
-			expect(scratch.textures.index).toEqual({
-				height: 64,
-				texture: indexTexture,
+		expect(scratch.textures.index).toEqual({
+			height: 64,
+			pageVersion: {
+				placementRevision: 1,
 				textureRefId: "index-ref",
-				width: 32,
-			});
-			expect(scratch.textures.palette).toEqual({
-				height: 16,
-				texture: paletteTexture,
+			},
+			texture: indexTexture,
+			textureRefId: "index-ref",
+			width: 32,
+		});
+		expect(scratch.textures.palette).toEqual({
+			height: 16,
+			pageVersion: {
+				placementRevision: 1,
 				textureRefId: "palette-ref",
-				width: 256,
-			});
-			expect(scratch.textures.detail).toEqual({
-				height: 128,
-				texture: detailTexture,
+			},
+			texture: paletteTexture,
+			textureRefId: "palette-ref",
+			width: 256,
+		});
+		expect(scratch.textures.detail).toEqual({
+			height: 128,
+			pageVersion: {
+				placementRevision: 1,
 				textureRefId: "detail-ref",
-				width: 128,
-			});
+			},
+			texture: detailTexture,
+			textureRefId: "detail-ref",
+			width: 128,
+		});
 	});
 
 	it("resets stale scratch values between preparations", () => {
@@ -315,6 +327,10 @@ function createPlacement(options: {
 	readonly width: number;
 }): ResolvedTexturePlacement {
 	return {
+		pageVersion: {
+			placementRevision: 1,
+			textureRefId: options.textureRefId,
+		},
 		rect: options.rect,
 		textureHeight: options.height,
 		textureRefId: options.textureRefId,

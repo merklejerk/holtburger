@@ -95,13 +95,12 @@ describe("WebGL2 static object indexed shader contract", () => {
 		);
 	});
 
-	it("maps palette indices directly into full square palette domains", () => {
+	it("maps palette indices through dynamic square palette payloads", () => {
 		const shader = OBJECT_MATERIAL_FRAGMENT_SHADERS["indexed-paletted"];
 		expect(shader).not.toContain("uMaterialPaletteFirstIndices");
 		expect(shader).not.toContain("index -");
-		expect(shader).toContain(
-			"float paletteSide = uMaterialIndexedTextureFormats[slot] == 1 ? 256.0 : 16.0;",
-		);
+		expect(shader).toContain("float paletteSide = max(rect.z, 1.0);");
+		expect(shader).toContain("if (index >= paletteSide * paletteSide)");
 		expect(shader).toContain("float paletteLocalX = mod(index, paletteSide);");
 		expect(shader).toContain(
 			"float paletteLocalY = floor(index / paletteSide);",

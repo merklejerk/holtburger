@@ -228,7 +228,7 @@ describe("host asset preparation", () => {
 		);
 	});
 
-	it("prepares full-domain prepared palette texture payloads", () => {
+	it("prepares dynamic prepared palette texture payloads", () => {
 		const pixels = new Uint8Array([0x11, 0x22, 0x33, 0xff]);
 		const prepared = prepareV2AssetPayload({
 			assetId:

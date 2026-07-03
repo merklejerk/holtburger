@@ -146,7 +146,7 @@ describe("prepared texture source preparation", () => {
 		).toThrow("does not match index8");
 	});
 
-	it("accepts prepared full-domain palette payloads as direct rgba lookup sources", () => {
+	it("accepts prepared square palette payloads as direct rgba lookup sources", () => {
 		const use = createPaletteUse();
 		const source = prepareDirectPaletteTextureSource(
 			createPreparedPaletteAsset({ bytes: new Uint8Array(16 * 16 * 4) }),

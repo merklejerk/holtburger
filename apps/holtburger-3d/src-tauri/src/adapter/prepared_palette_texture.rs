@@ -1,6 +1,6 @@
 use crate::adapter::binary::BinaryAssetSectionWriter;
 use crate::adapter::json::format_palette_asset_id;
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use holtburger_dat::file_type::{Palette, PixelFormatId};
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
@@ -136,20 +136,6 @@ pub fn prepare_palette_texture(
         );
     }
 
-    let (width, height) = domain_dimensions(request.domain);
-    let color_count = usize::try_from(width)
-        .expect("palette width fits usize")
-        .saturating_mul(usize::try_from(height).expect("palette height fits usize"));
-    let mut colors_argb = vec![0; color_count];
-    for (index, color) in base_palette
-        .colors_argb
-        .iter()
-        .take(color_count)
-        .enumerate()
-    {
-        colors_argb[index] = *color;
-    }
-
     let mut replacements = request.replacements.clone();
     normalize_replacements(&mut replacements);
     if replacements.len() != replacement_palettes.len() {
@@ -159,6 +145,18 @@ pub fn prepare_palette_texture(
             replacements.len(),
             replacement_palettes.len()
         );
+    }
+
+    let color_count = prepared_palette_color_count(request.domain, base_palette, &replacements)?;
+    let (width, height) = square_dimensions_for_color_count(color_count)?;
+    let mut colors_argb = vec![0; color_count];
+    for (index, color) in base_palette
+        .colors_argb
+        .iter()
+        .take(color_count)
+        .enumerate()
+    {
+        colors_argb[index] = *color;
     }
 
     for (expected, (actual, palette)) in replacements.iter().zip(replacement_palettes) {
@@ -181,16 +179,6 @@ pub fn prepare_palette_texture(
         let end = offset
             .checked_add(count)
             .ok_or_else(|| anyhow::anyhow!("palette replacement range overflows usize"))?;
-        if end > color_count {
-            bail!(
-                "prepared palette texture {} replacement 0x{:08X}@{}+{} exceeds {} color domain",
-                format_prepared_palette_texture_asset_id(&request),
-                expected.palette_id,
-                expected.offset,
-                expected.count,
-                color_count
-            );
-        }
         if end > palette.colors_argb.len() {
             bail!(
                 "prepared palette texture {} replacement 0x{:08X}@{}+{} exceeds replacement palette color count {}",
@@ -204,10 +192,14 @@ pub fn prepare_palette_texture(
         colors_argb[offset..end].copy_from_slice(&palette.colors_argb[offset..end]);
     }
 
-    let mut pixels = Vec::with_capacity(color_count * 4);
+    let texture_color_count = usize::try_from(width)
+        .expect("palette width fits usize")
+        .saturating_mul(usize::try_from(height).expect("palette height fits usize"));
+    let mut pixels = Vec::with_capacity(texture_color_count * 4);
     for color in colors_argb {
         pixels.extend_from_slice(&argb_to_rgba(color));
     }
+    pixels.resize(texture_color_count * 4, 0);
     let content_hash = prepared_palette_content_hash(width, height, &pixels);
 
     Ok(PreparedPaletteTexturePayload {
@@ -354,11 +346,65 @@ fn parse_replacements(value: &str) -> Option<Vec<PreparedPaletteReplacement>> {
         .collect()
 }
 
-fn domain_dimensions(domain: PreparedPaletteTextureDomain) -> (u32, u32) {
+fn domain_color_limit(domain: PreparedPaletteTextureDomain) -> usize {
     match domain {
-        PreparedPaletteTextureDomain::Index8 => (16, 16),
-        PreparedPaletteTextureDomain::Index16 => (256, 256),
+        PreparedPaletteTextureDomain::Index8 => 256,
+        PreparedPaletteTextureDomain::Index16 => 65_536,
     }
+}
+
+fn prepared_palette_color_count(
+    domain: PreparedPaletteTextureDomain,
+    base_palette: &Palette,
+    replacements: &[PreparedPaletteReplacement],
+) -> Result<usize> {
+    let domain_limit = domain_color_limit(domain);
+    let base_color_count = base_palette.colors_argb.len();
+    if domain == PreparedPaletteTextureDomain::Index16 && base_color_count > domain_limit {
+        bail!(
+            "prepared palette texture base palette 0x{:08X} has {} colors, exceeding {} color domain",
+            base_palette.id,
+            base_color_count,
+            domain_limit
+        );
+    }
+
+    // P8 index textures can only address the first 256 palette entries, even when AC stores a
+    // larger shared palette asset.
+    let mut color_count = base_color_count.min(domain_limit);
+    for replacement in replacements {
+        let offset =
+            usize::try_from(replacement.offset).expect("palette replacement offset fits usize");
+        let count =
+            usize::try_from(replacement.count).expect("palette replacement count fits usize");
+        let end = offset
+            .checked_add(count)
+            .ok_or_else(|| anyhow::anyhow!("palette replacement range overflows usize"))?;
+        if end > domain_limit {
+            bail!(
+                "prepared palette texture replacement 0x{:08X}@{}+{} exceeds {} color domain",
+                replacement.palette_id,
+                replacement.offset,
+                replacement.count,
+                domain_limit
+            );
+        }
+        color_count = color_count.max(end);
+    }
+
+    Ok(color_count.max(1))
+}
+
+fn square_dimensions_for_color_count(color_count: usize) -> Result<(u32, u32)> {
+    let color_count_u32 =
+        u32::try_from(color_count).context("prepared palette color count exceeds u32")?;
+    let mut side = 1u32;
+    while side.saturating_mul(side) < color_count_u32 {
+        side = side
+            .checked_add(1)
+            .context("prepared palette square side exceeds u32")?;
+    }
+    Ok((side, side))
 }
 
 fn argb_to_rgba(color: u32) -> [u8; 4] {
@@ -535,7 +581,7 @@ mod tests {
     }
 
     #[test]
-    fn prepares_index8_full_domain_rgba_with_padding() {
+    fn prepares_index8_dynamic_square_rgba_with_padding() {
         let request = PreparedPaletteTextureRequest {
             base_palette_id: 0x0400_0001,
             domain: PreparedPaletteTextureDomain::Index8,
@@ -549,9 +595,9 @@ mod tests {
         let payload = prepare_palette_texture(request, &base_palette, &[])
             .expect("prepared palette texture should compose");
 
-        assert_eq!(payload.width, 16);
-        assert_eq!(payload.height, 16);
-        assert_eq!(payload.pixels.len(), 16 * 16 * 4);
+        assert_eq!(payload.width, 2);
+        assert_eq!(payload.height, 2);
+        assert_eq!(payload.pixels.len(), 2 * 2 * 4);
         assert_eq!(
             &payload.pixels[0..8],
             &[0x11, 0x22, 0x33, 0xff, 0x44, 0x55, 0x66, 0x80]
@@ -564,7 +610,7 @@ mod tests {
     }
 
     #[test]
-    fn prepares_index16_full_domain_rgba_with_padding() {
+    fn prepares_index16_dynamic_square_rgba_with_padding() {
         let request = PreparedPaletteTextureRequest {
             base_palette_id: 0x0400_0001,
             domain: PreparedPaletteTextureDomain::Index16,
@@ -572,17 +618,17 @@ mod tests {
         };
         let base_palette = Palette {
             id: 0x0400_0001,
-            colors_argb: vec![0xff11_2233],
+            colors_argb: vec![0xff11_2233; 2_048],
         };
 
         let payload = prepare_palette_texture(request, &base_palette, &[])
             .expect("prepared palette texture should compose");
 
-        assert_eq!(payload.width, 256);
-        assert_eq!(payload.height, 256);
-        assert_eq!(payload.pixels.len(), 256 * 256 * 4);
+        assert_eq!(payload.width, 46);
+        assert_eq!(payload.height, 46);
+        assert_eq!(payload.pixels.len(), 46 * 46 * 4);
         assert_eq!(&payload.pixels[0..4], &[0x11, 0x22, 0x33, 0xff]);
-        assert_eq!(&payload.pixels[4..8], &[0, 0, 0, 0]);
+        assert_eq!(&payload.pixels[(2_048 * 4)..(2_049 * 4)], &[0, 0, 0, 0]);
     }
 
     #[test]

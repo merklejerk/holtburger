@@ -1597,7 +1597,7 @@ mod tests {
     }
 
     #[test]
-    fn prepared_palette_texture_binary_lookup_composes_full_domain_pixels() {
+    fn prepared_palette_texture_binary_lookup_composes_dynamic_square_pixels() {
         let base_palette_id = 0x0400_0001;
         let replacement_palette_id = 0x0400_0010;
         let source = InMemoryResourceSource::default()
@@ -1630,9 +1630,9 @@ mod tests {
         let (manifest, manifest_len) = decode_binary_manifest(&bytes);
         let payload = &manifest["responses"][0]["payload"];
         assert_eq!(payload["kind"], "prepared-palette-texture");
-        assert_eq!(payload["width"], 16);
-        assert_eq!(payload["height"], 16);
-        assert_eq!(payload["byteLength"], 16 * 16 * 4);
+        assert_eq!(payload["width"], 2);
+        assert_eq!(payload["height"], 2);
+        assert_eq!(payload["byteLength"], 2 * 2 * 4);
         assert_eq!(
             payload["dependencies"]["paletteAssetIds"],
             serde_json::json!(["palette/04000001", "palette/04000010"])
@@ -1645,7 +1645,7 @@ mod tests {
         assert_eq!(sections[0]["role"], "preparedPaletteTexture.pixels");
         assert_eq!(sections[0]["path"], "responses.0.payload.pixels");
         assert_eq!(sections[0]["componentCount"], 4);
-        assert_eq!(sections[0]["elementCount"], 16 * 16);
+        assert_eq!(sections[0]["elementCount"], 2 * 2);
 
         let section_start = ASSET_BINARY_HEADER_LEN + manifest_len;
         assert_eq!(

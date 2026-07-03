@@ -1,7 +1,7 @@
 # Holtburger 3D Random Atlas Corruption Investigation
 
 Date: 2026-07-03
-Status: root cause identified and fix implemented; awaiting user repro validation in the 3D client.
+Status: root cause identified; structural follow-up phases completed; awaiting user repro validation in the 3D client.
 
 ## Purpose
 
@@ -881,15 +881,14 @@ Course correction:
 From `apps/holtburger-3d`:
 
 ```sh
-npm run test:ts -- --run src/lib/runtime/client-runtime.test.ts src/lib/textures/texture-manager.test.ts src/lib/renderer/webgl2/webgl2-object-material-payloads.test.ts src/lib/renderer/webgl2/webgl2-renderer.test.ts
+npm run test:ts -- --run src/lib/runtime/client-runtime.test.ts src/lib/textures/texture-manager.test.ts src/lib/renderer/webgl2/webgl2-object-material-payloads.test.ts src/lib/renderer/webgl2/webgl2-terrain-payloads.test.ts src/lib/renderer/webgl2/webgl2-renderer.test.ts src/lib/runtime/static-commit-installer.test.ts
 npm run check
 npm run lint:ts
 ```
 
 Results:
 
-- Focused texture-manager suite passed: 1 file, 41 tests.
-- Focused affected suite passed: 4 files, 125 tests.
+- Focused affected suite passed: 6 files, 138 tests.
 - `npm run check` passed.
 - `npm run lint:ts` passed.
 - `git diff --check` passed from the repo root.
@@ -897,23 +896,18 @@ Results:
 ## Next Steps
 
 1. Rebuild/reload the 3D client and try to reproduce the `0xdc56ffff/object/0003/02000248` corruption again.
-2. If it reproduces after probe cleanup, capture the selected-object diagnostic report and inspect page-version and placement identity:
+2. If it reproduces after the structural follow-up, capture the selected-object diagnostic report and inspect page-version and placement identity:
    - resolved placement page version,
    - renderer prepared payload page version,
    - texture ref deletion/recreation history,
    - page-local repack upload order.
 3. If placement/page-version identity still agrees but rendering is wrong, write a fresh focused GPU probe for the new failure mode rather than restoring the old probe plumbing.
-4. Inspect remaining texture upload/replacement/page lifetime:
-   - `applyTexturePlacementUpdate`
-   - texture ref deletion/recreation
-   - page-local repack upload order
-   - zero-ref page reclamation
-5. If page versions match, instrument draw-time binding:
+4. If page versions match, instrument draw-time binding:
    - texture unit binds immediately before object-material draw
    - object material uniform uploads for the selected draw unit
    - shader rect normalization path
    - any raw WebGL state mutation between diagnostics and draw
-6. Keep terrain-mask investigation separate until object-material results prove the shared layer is below both paths.
+5. Keep terrain-mask investigation separate until object-material results prove the shared layer is below both paths.
 
 ## Guardrails
 

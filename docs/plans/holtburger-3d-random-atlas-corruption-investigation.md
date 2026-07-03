@@ -343,11 +343,20 @@ Debt:
 
 ### Phase 2: Separate Planned Atlas Mutations From Committed Renderer Pages
 
+Status: completed.
+
 Deliverables:
 
 - Split the result of `placeTextureIntents()` from committed runtime uploads. The planned path should return placement lookups, but any live-page mutation it performs must be represented as staged page content that is not silently considered renderer-current.
 - Make the commit path the only path that marks a page version uploaded to the renderer.
 - Audit page-local absorption and repack so both paths return the same explicit mutation object instead of manually pushing runtime placements from multiple branches.
+
+Completed implementation:
+
+- Added explicit unuploaded page-version tracking for texture placements produced by `placeTextureIntents()`.
+- Commit activation now consumes an unuploaded planned page placement and emits that exact page version to the renderer.
+- Removed the previous uploaded-revision side map.
+- Texture ref deletion and successful uploads clear pending unuploaded placements.
 
 Acceptance criteria:
 
@@ -362,6 +371,14 @@ Test strategy:
   - commit that texture later,
   - assert the commit emits a page upload with the same page version used by resolved placements.
 - Delete tests that only assert exact fake-packer coordinates when they are not behavioral requirements.
+
+Decision:
+
+- Kept registry mutation during planning for this phase. A pure immutable planning model would be a larger architectural cutover and is not required now that unuploaded page versions are explicit.
+
+Debt:
+
+- Packing, absorption, and repack still return separate placement/result arrays from several branches. Later alias-set work should consolidate those around a single mutation object.
 
 ### Phase 3: Make Alias Sets Explicit
 

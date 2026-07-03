@@ -167,7 +167,10 @@ export class TextureManager {
 		string,
 		TexturePlacementRecord
 	>();
-	readonly #uploadedPlacementRevisionByTextureRefId = new Map<string, number>();
+	readonly #unuploadedTexturePlacementsByPageVersion = new Map<
+		string,
+		RuntimeTexturePlacement
+	>();
 	readonly #dependencyItemIdsByResourceId = new Map<string, Set<string>>();
 	readonly #pageLifecycleTotals: TextureAtlasPageLifecycleTotals = {
 		absorbed: 0,
@@ -363,13 +366,14 @@ export class TextureManager {
 				);
 			}
 
-			await this.#packPendingTexturePlacements(
+			const packedResult = await this.#packPendingTexturePlacements(
 				uniquePendingTexturePlacements(pendingPlacements),
 				{
 					reclaimZeroReferencePages: true,
 					retainedTextureRefIds: collectStagedTextureRefIds(stagedPlacements),
 				},
 			);
+			this.#recordUnuploadedTexturePlacements(packedResult.placements);
 
 			const placementsByItemId = new Map<
 				TPlacementItemId,
@@ -557,13 +561,14 @@ export class TextureManager {
 						// that page revision has not yet been handed to the renderer.
 						if (
 							staged.entry.leaseCount === 0 &&
-							this.#uploadedPlacementRevisionByTextureRefId.get(
-								staged.entry.textureRefId,
-							) !== staged.entry.placementRevision &&
 							!uploadedTextureRefIds.has(staged.entry.textureRefId)
 						) {
-							placements.push(staged.entry.runtimePlacement);
-							uploadedTextureRefIds.add(staged.entry.textureRefId);
+							const pendingUpload =
+								this.#consumeUnuploadedTexturePlacement(staged.entry);
+							if (pendingUpload) {
+								placements.push(pendingUpload);
+								uploadedTextureRefIds.add(staged.entry.textureRefId);
+							}
 						}
 						staged.entry.leaseCount += 1;
 						this.#setPlacementActiveReferenceCount(
@@ -634,7 +639,7 @@ export class TextureManager {
 		}
 
 		this.#revision += 1;
-		this.#markUploadedTexturePlacements(placements);
+		this.#markTexturePlacementsUploaded(placements);
 
 		return {
 			placements,
@@ -1641,17 +1646,52 @@ export class TextureManager {
 				this.#placementRecordsByItemId.delete(itemId);
 			}
 		}
-		this.#uploadedPlacementRevisionByTextureRefId.delete(textureRefId);
+		this.#deleteUnuploadedTexturePlacementsForRef(textureRefId);
 	}
 
-	#markUploadedTexturePlacements(
+	#recordUnuploadedTexturePlacements(
 		placements: readonly RuntimeTexturePlacement[],
 	): void {
 		for (const placement of placements) {
-			this.#uploadedPlacementRevisionByTextureRefId.set(
-				placement.textureRefId,
-				placement.placementRevision,
+			this.#deleteUnuploadedTexturePlacementsForRef(placement.textureRefId);
+			this.#unuploadedTexturePlacementsByPageVersion.set(
+				createTexturePageVersionKey(placement.pageVersion),
+				placement,
 			);
+		}
+	}
+
+	#consumeUnuploadedTexturePlacement(
+		entry: VisualTextureRegistryEntry,
+	): RuntimeTexturePlacement | null {
+		const pageVersionKey = createTexturePageVersionKey({
+			placementRevision: entry.placementRevision,
+			textureRefId: entry.textureRefId,
+		});
+		const placement =
+			this.#unuploadedTexturePlacementsByPageVersion.get(pageVersionKey) ?? null;
+		if (placement) {
+			this.#unuploadedTexturePlacementsByPageVersion.delete(pageVersionKey);
+		}
+		return placement;
+	}
+
+	#markTexturePlacementsUploaded(
+		placements: readonly RuntimeTexturePlacement[],
+	): void {
+		for (const placement of placements) {
+			this.#unuploadedTexturePlacementsByPageVersion.delete(
+				createTexturePageVersionKey(placement.pageVersion),
+			);
+		}
+	}
+
+	#deleteUnuploadedTexturePlacementsForRef(textureRefId: string): void {
+		for (const [pageVersionKey, placement] of this
+			.#unuploadedTexturePlacementsByPageVersion) {
+			if (placement.textureRefId === textureRefId) {
+				this.#unuploadedTexturePlacementsByPageVersion.delete(pageVersionKey);
+			}
 		}
 	}
 }
@@ -2483,6 +2523,10 @@ function createRegistryEntryPhysicalPlacementKey(
 	entry: Pick<VisualTextureRegistryEntry, "physicalSourceKey" | "rect">,
 ): string {
 	return [entry.physicalSourceKey, entry.rect.join(",")].join("|");
+}
+
+function createTexturePageVersionKey(pageVersion: TexturePageVersion): string {
+	return `${pageVersion.textureRefId}@${pageVersion.placementRevision}`;
 }
 
 function createTextureUseIdsForRegistryEntry(

@@ -8,18 +8,11 @@ import type { DirectMaterialTextureSource } from "../assets/preparation/prepared
 import type { TextureAtlasDiagnosticsReport } from "../runtime/diagnostics";
 import type {
 	SamplerPolicyUpdate,
-	ObjectMaterialTextureRolePageKind,
-	TerrainTextureRolePageKind,
-	TextureBinding,
 	TextureBindingOwner,
 	TexturePlacementUpdate,
 	ResolvedTexturePlacement,
 } from "../renderer/types";
-import {
-	createTextureBindingOwnerKey,
-	MAX_TERRAIN_COLOR_PAGES_PER_DRAW,
-	MAX_TERRAIN_MASK_PAGES_PER_DRAW,
-} from "../renderer/types";
+import { createTextureBindingOwnerKey } from "../renderer/types";
 import type {
 	MaterialTextureDataUseIdentity,
 	StaticBakeTextureUse,
@@ -470,10 +463,7 @@ export class TextureManager {
 			delta.removedOwners,
 		);
 		const placements: RuntimeTexturePlacement[] = [];
-		const textureBindings: TextureBinding[] = [];
 		const resolvedTexturePlacements: ResolvedTexturePlacement[] = [];
-		const terrainRolePageSlots = new TerrainDrawUnitRolePageSlots();
-		const objectMaterialRolePageSlots = new ObjectMaterialOwnerRolePageSlots();
 		const pendingPlacements = new Map<string, PendingTexturePlacement>();
 		const stagedPlacements: StagedTexturePlacement[] = [];
 		const uploadedTextureRefIds = new Set<string>();
@@ -549,38 +539,18 @@ export class TextureManager {
 				continue;
 			}
 			resolvedTexturePlacements.push({
-				bindingKey: textureUse.textureUseId,
 				rect: entry.rect,
 				textureHeight: entry.textureHeight,
 				textureRefId: entry.textureRefId,
+				textureUseId: textureUse.textureUseId,
 				textureWidth: entry.textureWidth,
 			});
-			for (const owner of textureUse.owners) {
-				const pageSlot = resolveTexturePageSlot({
-					domain: textureUse.domain,
-					owner,
-					source: textureUse.source,
-					objectMaterialRolePageSlots,
-					terrainRolePageSlots,
-					textureRefId: entry.textureRefId,
-				});
-				textureBindings.push({
-					bindingKey: textureUse.textureUseId,
-					owner,
-					pageSlot,
-					rect: entry.rect,
-					textureHeight: entry.textureHeight,
-					textureRefId: entry.textureRefId,
-					textureWidth: entry.textureWidth,
-				});
-			}
 		}
 
 		if (
 			placements.length === 0 &&
 			removedTextureRefIds.length === 0 &&
-			resolvedTexturePlacements.length === 0 &&
-			textureBindings.length === 0
+			resolvedTexturePlacements.length === 0
 		) {
 			return null;
 		}
@@ -588,7 +558,6 @@ export class TextureManager {
 		this.#revision += 1;
 
 		return {
-			textureBindings,
 			placements,
 			removedTextureRefIds,
 			resolvedTexturePlacements,
@@ -1303,18 +1272,6 @@ interface PlannedPendingTexturePlacementGroup {
 
 interface PackedPendingTexturePlacementGroup extends PlannedPendingTexturePlacementGroup {
 	readonly packed: TexturePackingResult;
-}
-
-interface TerrainRolePageSlotInput {
-	readonly drawUnitId: string;
-	readonly textureRefId: string;
-	readonly usage: MaterialTextureDataUseIdentity["usage"];
-}
-
-interface ObjectMaterialRolePageSlotInput {
-	readonly ownerKey: string;
-	readonly textureRefId: string;
-	readonly source: MaterialTextureDataUseIdentity;
 }
 
 function createStaticVisualTextureUseCommit(
@@ -2163,124 +2120,4 @@ function getTextureFormatBytesPerPixel(
 
 function sumNumbers(values: readonly number[]): number {
 	return values.reduce((sum, value) => sum + value, 0);
-}
-
-function createTerrainTextureRolePageKind(
-	usage: MaterialTextureDataUseIdentity["usage"],
-): TerrainTextureRolePageKind {
-	if (usage === "rgba-mask") {
-		return "mask";
-	}
-	if (usage === "rgba-detail") {
-		return "detail";
-	}
-
-	return "color";
-}
-
-function resolveTexturePageSlot(options: {
-	readonly domain: VisualTextureDomain;
-	readonly owner: TextureBindingOwner;
-	readonly source: MaterialTextureDataUseIdentity;
-	readonly objectMaterialRolePageSlots: ObjectMaterialOwnerRolePageSlots;
-	readonly terrainRolePageSlots: TerrainDrawUnitRolePageSlots;
-	readonly textureRefId: string;
-}): TextureBinding["pageSlot"] {
-	if (options.domain === "outdoor-terrain") {
-		if (options.owner.kind !== "draw-unit") {
-			throw new Error(
-				`Terrain texture use cannot be owned by ${options.owner.kind}.`,
-			);
-		}
-		return options.terrainRolePageSlots.resolveSlot({
-			drawUnitId: options.owner.drawUnitId,
-			textureRefId: options.textureRefId,
-			usage: options.source.usage,
-		});
-	}
-
-	const objectSlot = options.objectMaterialRolePageSlots.resolveSlot({
-		ownerKey: createTextureBindingOwnerKey(options.owner),
-		source: options.source,
-		textureRefId: options.textureRefId,
-	});
-	if (objectSlot === null) {
-		throw new Error(
-			`Object material texture binding for ${createTextureBindingOwnerKey(options.owner)} exceeded one page for ${createObjectMaterialTextureRolePageKind(options.source)}.`,
-		);
-	}
-
-	return objectSlot;
-}
-
-class TerrainDrawUnitRolePageSlots {
-	readonly #slotKeysByDrawUnitAndKind = new Map<string, string[]>();
-
-	resolveSlot(input: TerrainRolePageSlotInput): TextureBinding["pageSlot"] {
-		const kind = createTerrainTextureRolePageKind(input.usage);
-		const drawUnitKindKey = `${input.drawUnitId}:${kind}`;
-
-		const slots = this.#slotKeysByDrawUnitAndKind.get(drawUnitKindKey) ?? [];
-		const existingSlot = slots.indexOf(input.textureRefId);
-		if (existingSlot >= 0) {
-			return { kind, slot: existingSlot };
-		}
-
-		const maxSlots = getMaxTerrainRolePageSlots(kind);
-		if (slots.length >= maxSlots) {
-			throw new Error(
-				`Terrain draw unit ${input.drawUnitId} exceeded ${kind} texture page capacity ${maxSlots}; baker must split illegal terrain draw units before commit.`,
-			);
-		}
-
-		slots.push(input.textureRefId);
-		this.#slotKeysByDrawUnitAndKind.set(drawUnitKindKey, slots);
-
-		return { kind, slot: slots.length - 1 };
-	}
-}
-
-function getMaxTerrainRolePageSlots(kind: TerrainTextureRolePageKind): number {
-	if (kind === "color") {
-		return MAX_TERRAIN_COLOR_PAGES_PER_DRAW;
-	}
-	if (kind === "mask") {
-		return MAX_TERRAIN_MASK_PAGES_PER_DRAW;
-	}
-
-	return 1;
-}
-
-class ObjectMaterialOwnerRolePageSlots {
-	readonly #textureRefByOwnerAndKind = new Map<string, string>();
-
-	resolveSlot(
-		input: ObjectMaterialRolePageSlotInput,
-	): TextureBinding["pageSlot"] | null {
-		const kind = createObjectMaterialTextureRolePageKind(input.source);
-		const ownerKindKey = `${input.ownerKey}:${kind}`;
-		const textureRefId = this.#textureRefByOwnerAndKind.get(ownerKindKey);
-		if (textureRefId && textureRefId !== input.textureRefId) {
-			return null;
-		}
-
-		this.#textureRefByOwnerAndKind.set(ownerKindKey, input.textureRefId);
-		return { kind, slot: 0 };
-	}
-}
-
-function createObjectMaterialTextureRolePageKind(
-	source: MaterialTextureDataUseIdentity,
-): ObjectMaterialTextureRolePageKind {
-	if (source.kind === "prepared-palette-texture-use") {
-		return "object-palette";
-	}
-	if (source.usage === "index8" || source.usage === "index16") {
-		return "object-index";
-	}
-	if (source.usage === "rgba-detail") {
-		return "object-detail";
-	}
-
-	return "object-base-color";
 }

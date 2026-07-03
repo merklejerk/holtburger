@@ -1,5 +1,5 @@
 import type { StaticMaterialTableEntry } from "../../static/contracts";
-import type { TextureBinding } from "../types";
+import type { ResolvedTexturePlacement } from "../types";
 import { MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW } from "../types";
 
 const DEFAULT_TEXTURE_RECT = [0, 0, 1, 1] as const;
@@ -64,14 +64,14 @@ export function markObjectMaterialPreparedDrawPayloadDirty(
 export function prepareObjectMaterialDrawPayloadState(
 	state: ObjectMaterialPreparedDrawPayloadState,
 	resource: ObjectMaterialPayloadResource,
-	bindings: ReadonlyMap<string, TextureBinding>,
+	placements: ReadonlyMap<string, ResolvedTexturePlacement>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 ): ObjectMaterialPreparedDrawPayload {
 	if (state.isDirty) {
 		prepareObjectMaterialDrawPayload(
 			state.payload,
 			resource,
-			bindings,
+			placements,
 			textures,
 		);
 		state.isDirty = false;
@@ -95,7 +95,7 @@ export function createObjectMaterialPreparedDrawPayload(): ObjectMaterialPrepare
 export function prepareObjectMaterialDrawPayload(
 	target: ObjectMaterialPreparedDrawPayload,
 	resource: ObjectMaterialPayloadResource,
-	bindings: ReadonlyMap<string, TextureBinding>,
+	placements: ReadonlyMap<string, ResolvedTexturePlacement>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 ): void {
 	if (resource.materialEntries.length === 0) {
@@ -109,13 +109,13 @@ export function prepareObjectMaterialDrawPayload(
 	fillObjectMaterialTextureBindings(
 		target.textures,
 		resource,
-		bindings,
+		placements,
 		textures,
 	);
 	fillObjectMaterialUniforms(
 		target.materialUniforms,
 		resource,
-		bindings,
+		placements,
 		textures,
 	);
 	validateObjectMaterialTextureBindings(target.textures, resource);
@@ -175,14 +175,13 @@ function fillDefaultMaterialRectTable(rects: Float32Array): void {
 function fillObjectMaterialTextureBindings(
 	target: ObjectMaterialTextureBindingsByRole,
 	resource: ObjectMaterialPayloadResource,
-	bindings: ReadonlyMap<string, TextureBinding>,
+	placements: ReadonlyMap<string, ResolvedTexturePlacement>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 ): void {
 	for (const entry of resource.materialEntries) {
 		collectObjectMaterialTextureBinding(
 			entry.primaryTextureUseId,
-			"object-base-color",
-			bindings,
+			placements,
 			textures,
 			(binding) => {
 				target.baseColor = binding;
@@ -190,8 +189,7 @@ function fillObjectMaterialTextureBindings(
 		);
 		collectObjectMaterialTextureBinding(
 			entry.indexTextureUseId,
-			"object-index",
-			bindings,
+			placements,
 			textures,
 			(binding) => {
 				target.index = binding;
@@ -199,8 +197,7 @@ function fillObjectMaterialTextureBindings(
 		);
 		collectObjectMaterialTextureBinding(
 			entry.paletteTextureUseId,
-			"object-palette",
-			bindings,
+			placements,
 			textures,
 			(binding) => {
 				target.palette = binding;
@@ -208,8 +205,7 @@ function fillObjectMaterialTextureBindings(
 		);
 		collectObjectMaterialTextureBinding(
 			entry.detailTextureUseId,
-			"object-detail",
-			bindings,
+			placements,
 			textures,
 			(binding) => {
 				target.detail = binding;
@@ -220,33 +216,32 @@ function fillObjectMaterialTextureBindings(
 
 function collectObjectMaterialTextureBinding(
 	textureUseId: string | null,
-	expectedKind: TextureBinding["pageSlot"]["kind"],
-	bindings: ReadonlyMap<string, TextureBinding>,
+	placements: ReadonlyMap<string, ResolvedTexturePlacement>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 	setBinding: (binding: ObjectMaterialTextureBinding) => void,
 ): void {
 	if (!textureUseId) {
 		return;
 	}
-	const binding = bindings.get(textureUseId);
-	if (!binding || binding.pageSlot.kind !== expectedKind) {
+	const placement = placements.get(textureUseId);
+	if (!placement) {
 		return;
 	}
-	const texture = textures.get(binding.textureRefId);
-	if (!texture || binding.pageSlot.slot !== 0) {
+	const texture = textures.get(placement.textureRefId);
+	if (!texture) {
 		return;
 	}
 	setBinding({
-		height: binding.textureHeight,
+		height: placement.textureHeight,
 		texture,
-		width: binding.textureWidth,
+		width: placement.textureWidth,
 	});
 }
 
 function fillObjectMaterialUniforms(
 	target: ObjectMaterialPreparedUniforms,
 	resource: ObjectMaterialPayloadResource,
-	bindings: ReadonlyMap<string, TextureBinding>,
+	placements: ReadonlyMap<string, ResolvedTexturePlacement>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 ): void {
 	const materialEntryCount = Math.min(
@@ -273,57 +268,49 @@ function fillObjectMaterialUniforms(
 
 		writeObjectMaterialTextureEntry(
 			entry.primaryTextureUseId,
-			"object-base-color",
-			bindings,
+			placements,
 			target.baseColorRects,
 			slot,
 		);
 		writeObjectMaterialTextureEntry(
 			entry.indexTextureUseId,
-			"object-index",
-			bindings,
+			placements,
 			target.indexRects,
 			slot,
 		);
 		writeObjectMaterialTextureEntry(
 			entry.paletteTextureUseId,
-			"object-palette",
-			bindings,
+			placements,
 			target.paletteRects,
 			slot,
 		);
-		const detailBinding = writeObjectMaterialTextureEntry(
+		const detailPlacement = writeObjectMaterialTextureEntry(
 			entry.detailTextureUseId,
-			"object-detail",
-			bindings,
+			placements,
 			target.detailRects,
 			slot,
 		);
 		target.detailEnabled[slot] =
-			detailBinding && textures.has(detailBinding.textureRefId) ? 1 : 0;
+			detailPlacement && textures.has(detailPlacement.textureRefId) ? 1 : 0;
 	}
 }
 
 function writeObjectMaterialTextureEntry(
 	textureUseId: string | null,
-	expectedKind: TextureBinding["pageSlot"]["kind"],
-	bindings: ReadonlyMap<string, TextureBinding>,
+	placements: ReadonlyMap<string, ResolvedTexturePlacement>,
 	rects: Float32Array,
 	slot: number,
-): TextureBinding | null {
+): ResolvedTexturePlacement | null {
 	if (!textureUseId) {
 		return null;
 	}
-	const binding = bindings.get(textureUseId);
-	if (!binding) {
+	const placement = placements.get(textureUseId);
+	if (!placement) {
 		return null;
 	}
-	if (binding.pageSlot.kind !== expectedKind || binding.pageSlot.slot !== 0) {
-		return null;
-	}
-	rects.set(binding.rect, slot * 4);
+	rects.set(placement.rect, slot * 4);
 
-	return binding;
+	return placement;
 }
 
 function validateObjectMaterialTextureBindings(

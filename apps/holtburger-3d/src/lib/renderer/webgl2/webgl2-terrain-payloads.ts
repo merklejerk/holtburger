@@ -2,7 +2,7 @@ import type {
 	TerrainMaterialLayerPlan,
 	TerrainMaterialTextureRoleBinding,
 } from "../../static/contracts";
-import type { StaticTextureBinding } from "../types";
+import type { ResolvedTexturePlacement } from "../types";
 import {
 	MAX_TERRAIN_COLOR_PAGES_PER_DRAW,
 	MAX_TERRAIN_MASK_PAGES_PER_DRAW,
@@ -77,14 +77,14 @@ export function markTerrainPreparedLayeredPayloadDirty(
 export function prepareTerrainLayeredPayloadState(
 	state: TerrainPreparedLayeredPayloadState,
 	plan: TerrainMaterialLayerPlan,
-	bindings: ReadonlyMap<string, StaticTextureBinding>,
+	placements: ReadonlyMap<string, ResolvedTexturePlacement>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 ): TerrainPreparedLayeredPayload | null {
 	if (!state.isDirty) {
 		return state.payload;
 	}
 
-	if (!prepareTerrainLayeredPayload(state.payload, plan, bindings, textures)) {
+	if (!prepareTerrainLayeredPayload(state.payload, plan, placements, textures)) {
 		return null;
 	}
 	state.isDirty = false;
@@ -112,17 +112,19 @@ export function createTerrainPreparedLayeredPayload(): TerrainPreparedLayeredPay
 export function prepareTerrainLayeredPayload(
 	target: TerrainPreparedLayeredPayload,
 	plan: TerrainMaterialLayerPlan,
-	bindings: ReadonlyMap<string, StaticTextureBinding>,
+	placements: ReadonlyMap<string, ResolvedTexturePlacement>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 ): boolean {
 	resetTerrainLayeredPayload(target);
+	const pageSlots = new TerrainDrawUnitRolePageSlots(plan.signature);
 
 	for (const entry of plan.layerEntries) {
 		if (
 			!collectTerrainPageBinding(
 				entry.base,
-				bindings,
+				placements,
 				textures,
+				pageSlots,
 				target.colorPages,
 				target.maskPages,
 			)
@@ -133,15 +135,17 @@ export function prepareTerrainLayeredPayload(
 			if (
 				!collectTerrainPageBinding(
 					overlay.terrain,
-					bindings,
+					placements,
 					textures,
+					pageSlots,
 					target.colorPages,
 					target.maskPages,
 				) ||
 				!collectTerrainPageBinding(
 					overlay.alpha,
-					bindings,
+					placements,
 					textures,
+					pageSlots,
 					target.colorPages,
 					target.maskPages,
 				)
@@ -153,15 +157,17 @@ export function prepareTerrainLayeredPayload(
 			if (
 				!collectTerrainPageBinding(
 					road.road,
-					bindings,
+					placements,
 					textures,
+					pageSlots,
 					target.colorPages,
 					target.maskPages,
 				) ||
 				!collectTerrainPageBinding(
 					road.alpha,
-					bindings,
+					placements,
 					textures,
+					pageSlots,
 					target.colorPages,
 					target.maskPages,
 				)
@@ -171,22 +177,22 @@ export function prepareTerrainLayeredPayload(
 		}
 	}
 
-	const detailBinding = resolveDetailBinding(plan, bindings);
-	if (detailBinding === false) {
+	const detailPlacement = resolveDetailPlacement(plan, placements);
+	if (detailPlacement === false) {
 		return false;
 	}
-	const detailTexture = detailBinding
-		? (textures.get(detailBinding.textureRefId) ?? null)
+	const detailTexture = detailPlacement
+		? (textures.get(detailPlacement.textureRefId) ?? null)
 		: null;
-	if (detailBinding && !detailTexture) {
+	if (detailPlacement && !detailTexture) {
 		return false;
 	}
 
-	fillTerrainLayerRects(target.layerRects, plan, bindings);
-	fillTerrainDetailUniforms(target.detail, plan, bindings, detailBinding);
+	fillTerrainLayerRects(target.layerRects, plan, placements, pageSlots);
+	fillTerrainDetailUniforms(target.detail, plan, placements, detailPlacement);
 	target.detail.texture = detailTexture;
-	target.detail.atlasSize[0] = detailBinding?.textureWidth ?? 1;
-	target.detail.atlasSize[1] = detailBinding?.textureHeight ?? 1;
+	target.detail.atlasSize[0] = detailPlacement?.textureWidth ?? 1;
+	target.detail.atlasSize[1] = detailPlacement?.textureHeight ?? 1;
 
 	return true;
 }
@@ -298,72 +304,74 @@ function resetTerrainLayerRects(layerRects: TerrainPreparedLayerRects): void {
 
 function collectTerrainPageBinding(
 	role: TerrainMaterialTextureRoleBinding,
-	bindings: ReadonlyMap<string, StaticTextureBinding>,
+	placements: ReadonlyMap<string, ResolvedTexturePlacement>,
 	textures: ReadonlyMap<string, WebGLTexture>,
+	pageSlots: TerrainDrawUnitRolePageSlots,
 	colorPages: TerrainPreparedRolePageBindings,
 	maskPages: TerrainPreparedRolePageBindings,
 ): boolean {
 	if (!role.textureUseId) {
 		return false;
 	}
-	const binding = bindings.get(role.textureUseId);
-	if (!binding) {
+	const placement = placements.get(role.textureUseId);
+	if (!placement) {
 		return false;
 	}
-	const texture = textures.get(binding.textureRefId);
+	const texture = textures.get(placement.textureRefId);
 	if (!texture) {
 		return false;
 	}
-	const pages = binding.pageSlot.kind === "mask" ? maskPages : colorPages;
-	if (
-		binding.pageSlot.slot < 0 ||
-		binding.pageSlot.slot >= pages.textures.length
-	) {
-		return false;
-	}
-	const existingTexture = pages.textures[binding.pageSlot.slot] ?? null;
+	const pageKind = createTerrainRolePageKind(role);
+	const pageSlot = pageSlots.resolveSlot(pageKind, placement.textureRefId);
+	const pages = pageKind === "mask" ? maskPages : colorPages;
+	const existingTexture = pages.textures[pageSlot] ?? null;
 	if (existingTexture && existingTexture !== texture) {
 		return false;
 	}
-	pages.textures[binding.pageSlot.slot] = texture;
-	pages.sizes[binding.pageSlot.slot * 2] = binding.textureWidth;
-	pages.sizes[binding.pageSlot.slot * 2 + 1] = binding.textureHeight;
+	pages.textures[pageSlot] = texture;
+	pages.sizes[pageSlot * 2] = placement.textureWidth;
+	pages.sizes[pageSlot * 2 + 1] = placement.textureHeight;
 	return true;
 }
 
-function resolveDetailBinding(
+function resolveDetailPlacement(
 	plan: TerrainMaterialLayerPlan,
-	bindings: ReadonlyMap<string, StaticTextureBinding>,
-): StaticTextureBinding | null | false {
-	let detailBinding: StaticTextureBinding | null = null;
+	placements: ReadonlyMap<string, ResolvedTexturePlacement>,
+): ResolvedTexturePlacement | null | false {
+	let detailPlacement: ResolvedTexturePlacement | null = null;
 	for (const detailRole of plan.detailRoles) {
-		const binding = detailRole.texture.textureUseId
-			? bindings.get(detailRole.texture.textureUseId)
+		const placement = detailRole.texture.textureUseId
+			? placements.get(detailRole.texture.textureUseId)
 			: undefined;
-		if (!binding) {
+		if (!placement) {
 			return false;
 		}
-		if (detailBinding && detailBinding.textureRefId !== binding.textureRefId) {
+		if (
+			detailPlacement &&
+			detailPlacement.textureRefId !== placement.textureRefId
+		) {
 			return false;
 		}
-		detailBinding = binding;
+		detailPlacement = placement;
 	}
 
-	return detailBinding;
+	return detailPlacement;
 }
 
 function fillTerrainLayerRects(
 	target: TerrainPreparedLayerRects,
 	plan: TerrainMaterialLayerPlan,
-	bindings: ReadonlyMap<string, StaticTextureBinding>,
+	placements: ReadonlyMap<string, ResolvedTexturePlacement>,
+	pageSlots: TerrainDrawUnitRolePageSlots,
 ): void {
 	for (const layer of plan.layerEntries) {
 		target.baseColorRects.set(
-			resolveBindingRect(bindings, layer.base),
+			resolvePlacementRect(placements, layer.base),
 			layer.slot * 4,
 		);
-		target.baseColorPages[layer.slot] = resolveBindingPage(
-			bindings,
+		target.baseColorPages[layer.slot] = resolvePlacementPage(
+			placements,
+			pageSlots,
 			layer.base,
 		);
 		target.baseTilings[layer.slot] = layer.base.tiling;
@@ -380,19 +388,21 @@ function fillTerrainLayerRects(
 			const index =
 				layer.slot * TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER + overlayIndex;
 			target.overlayColorRects.set(
-				resolveBindingRect(bindings, overlay.terrain),
+				resolvePlacementRect(placements, overlay.terrain),
 				index * 4,
 			);
-			target.overlayColorPages[index] = resolveBindingPage(
-				bindings,
+			target.overlayColorPages[index] = resolvePlacementPage(
+				placements,
+				pageSlots,
 				overlay.terrain,
 			);
 			target.overlayMaskRects.set(
-				resolveBindingRect(bindings, overlay.alpha),
+				resolvePlacementRect(placements, overlay.alpha),
 				index * 4,
 			);
-			target.overlayMaskPages[index] = resolveBindingPage(
-				bindings,
+			target.overlayMaskPages[index] = resolvePlacementPage(
+				placements,
+				pageSlots,
 				overlay.alpha,
 			);
 			target.overlayTilings[index] = overlay.terrain.tiling;
@@ -407,11 +417,12 @@ function fillTerrainLayerRects(
 		const roadTexture = layer.roads[0]?.road ?? null;
 		if (roadTexture) {
 			target.roadColorRects.set(
-				resolveBindingRect(bindings, roadTexture),
+				resolvePlacementRect(placements, roadTexture),
 				layer.slot * 4,
 			);
-			target.roadColorPages[layer.slot] = resolveBindingPage(
-				bindings,
+			target.roadColorPages[layer.slot] = resolvePlacementPage(
+				placements,
+				pageSlots,
 				roadTexture,
 			);
 			target.roadTilings[layer.slot] = roadTexture.tiling;
@@ -424,10 +435,14 @@ function fillTerrainLayerRects(
 			const index =
 				layer.slot * TERRAIN_LAYERED_MAX_ROADS_PER_LAYER + roadIndex;
 			target.roadMaskRects.set(
-				resolveBindingRect(bindings, road.alpha),
+				resolvePlacementRect(placements, road.alpha),
 				index * 4,
 			);
-			target.roadMaskPages[index] = resolveBindingPage(bindings, road.alpha);
+			target.roadMaskPages[index] = resolvePlacementPage(
+				placements,
+				pageSlots,
+				road.alpha,
+			);
 			target.roadRotations[index] = road.rotation;
 		}
 	}
@@ -436,14 +451,14 @@ function fillTerrainLayerRects(
 function fillTerrainDetailUniforms(
 	target: TerrainPreparedDetailUniforms,
 	plan: TerrainMaterialLayerPlan,
-	bindings: ReadonlyMap<string, StaticTextureBinding>,
-	detailBinding: StaticTextureBinding | null,
+	placements: ReadonlyMap<string, ResolvedTexturePlacement>,
+	detailPlacement: ResolvedTexturePlacement | null,
 ): void {
 	const detailRole = plan.detailRoles[0] ?? null;
-	target.isEnabled = Boolean(detailRole && detailBinding);
+	target.isEnabled = Boolean(detailRole && detailPlacement);
 	target.atlasRect.set(
 		detailRole
-			? resolveBindingRect(bindings, detailRole.texture)
+			? resolvePlacementRect(placements, detailRole.texture)
 			: DEFAULT_TEXTURE_RECT,
 	);
 	target.tiling = detailRole?.texture.tiling ?? 1;
@@ -451,24 +466,73 @@ function fillTerrainDetailUniforms(
 	target.fadeFar = detailRole?.fadeFar ?? 1;
 }
 
-function resolveBindingRect(
-	bindings: ReadonlyMap<string, StaticTextureBinding>,
+function resolvePlacementRect(
+	placements: ReadonlyMap<string, ResolvedTexturePlacement>,
 	role: TerrainMaterialTextureRoleBinding,
 ): readonly [number, number, number, number] {
 	if (!role.textureUseId) {
 		return DEFAULT_TEXTURE_RECT;
 	}
 
-	return bindings.get(role.textureUseId)?.rect ?? DEFAULT_TEXTURE_RECT;
+	return placements.get(role.textureUseId)?.rect ?? DEFAULT_TEXTURE_RECT;
 }
 
-function resolveBindingPage(
-	bindings: ReadonlyMap<string, StaticTextureBinding>,
+function resolvePlacementPage(
+	placements: ReadonlyMap<string, ResolvedTexturePlacement>,
+	pageSlots: TerrainDrawUnitRolePageSlots,
 	role: TerrainMaterialTextureRoleBinding,
 ): number {
 	if (!role.textureUseId) {
 		return 0;
 	}
 
-	return bindings.get(role.textureUseId)?.pageSlot.slot ?? 0;
+	const placement = placements.get(role.textureUseId);
+	if (!placement) {
+		return 0;
+	}
+	return pageSlots.resolveSlot(
+		createTerrainRolePageKind(role),
+		placement.textureRefId,
+	);
+}
+
+type TerrainRolePageKind = "color" | "mask";
+
+function createTerrainRolePageKind(
+	role: TerrainMaterialTextureRoleBinding,
+): TerrainRolePageKind {
+	return role.role === "terrain-alpha" || role.role === "road-alpha"
+		? "mask"
+		: "color";
+}
+
+class TerrainDrawUnitRolePageSlots {
+	readonly #planSignature: string;
+	readonly #textureRefIdsByKind = new Map<TerrainRolePageKind, string[]>();
+
+	constructor(planSignature: string) {
+		this.#planSignature = planSignature;
+	}
+
+	resolveSlot(kind: TerrainRolePageKind, textureRefId: string): number {
+		const textureRefIds = this.#textureRefIdsByKind.get(kind) ?? [];
+		const existingSlot = textureRefIds.indexOf(textureRefId);
+		if (existingSlot >= 0) {
+			return existingSlot;
+		}
+
+		const maxSlots =
+			kind === "mask"
+				? MAX_TERRAIN_MASK_PAGES_PER_DRAW
+				: MAX_TERRAIN_COLOR_PAGES_PER_DRAW;
+		if (textureRefIds.length >= maxSlots) {
+			throw new Error(
+				`Terrain material plan ${this.#planSignature} exceeded ${kind} texture page capacity ${maxSlots}.`,
+			);
+		}
+
+		textureRefIds.push(textureRefId);
+		this.#textureRefIdsByKind.set(kind, textureRefIds);
+		return textureRefIds.length - 1;
+	}
 }

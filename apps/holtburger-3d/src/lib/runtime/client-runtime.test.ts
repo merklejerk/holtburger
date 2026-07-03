@@ -3726,12 +3726,8 @@ class FakeRenderer implements Renderer {
 	applyTexturePlacementUpdate(update: TexturePlacementUpdate): void {
 		this.textureUpdates.push(update);
 		this.events.push(
-			`texture:${update.revision}:${update.textureBindings
-				.map((binding) =>
-					binding.owner.kind === "draw-unit"
-						? binding.owner.drawUnitId
-						: binding.owner.resourceId,
-				)
+			`texture:${update.revision}:${update.resolvedTexturePlacements
+				.map((placement) => placement.textureUseId)
 				.join(",")}`,
 		);
 	}

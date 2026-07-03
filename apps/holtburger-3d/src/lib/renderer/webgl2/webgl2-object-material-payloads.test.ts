@@ -3,7 +3,7 @@ import type {
 	StaticMaterialTableEntry,
 	StaticObjectRenderState,
 } from "../../static/contracts";
-import type { StaticTextureBinding } from "../types";
+import type { ResolvedTexturePlacement } from "../types";
 import {
 	createObjectMaterialPreparedDrawPayload,
 	createObjectMaterialPreparedDrawPayloadState,
@@ -79,14 +79,12 @@ describe("WebGL2 static object payload builder", () => {
 			],
 			materialFamily: "indexed-paletted",
 		});
-		const bindings = new Map<string, StaticTextureBinding>([
+		const placements = new Map<string, ResolvedTexturePlacement>([
 			[
 				"index-use",
-				createBinding({
+				createPlacement({
 					height: 64,
-					kind: "object-index",
 					rect: [10, 11, 12, 13],
-					slot: 0,
 					textureRefId: "index-ref",
 					textureUseId: "index-use",
 					width: 32,
@@ -94,11 +92,9 @@ describe("WebGL2 static object payload builder", () => {
 			],
 			[
 				"palette-use",
-				createBinding({
+				createPlacement({
 					height: 16,
-					kind: "object-palette",
 					rect: [20, 21, 22, 23],
-					slot: 0,
 					textureRefId: "palette-ref",
 					textureUseId: "palette-use",
 					width: 256,
@@ -106,11 +102,9 @@ describe("WebGL2 static object payload builder", () => {
 			],
 			[
 				"detail-use",
-				createBinding({
+				createPlacement({
 					height: 128,
-					kind: "object-detail",
 					rect: [30, 31, 32, 33],
-					slot: 0,
 					textureRefId: "detail-ref",
 					textureUseId: "detail-use",
 					width: 128,
@@ -123,7 +117,7 @@ describe("WebGL2 static object payload builder", () => {
 			["detail-ref", detailTexture],
 		]);
 
-		prepareObjectMaterialDrawPayload(scratch, resource, bindings, textures);
+		prepareObjectMaterialDrawPayload(scratch, resource, placements, textures);
 
 		expect(scratch.materialUniforms.indexedTextureFormats[2]).toBe(1);
 		expect(
@@ -178,11 +172,9 @@ describe("WebGL2 static object payload builder", () => {
 			new Map([
 				[
 					"base-use",
-					createBinding({
+					createPlacement({
 						height: 8,
-						kind: "object-base-color",
 						rect: [4, 5, 6, 7],
-						slot: 0,
 						textureRefId: "base-ref",
 						textureUseId: "base-use",
 						width: 8,
@@ -231,14 +223,12 @@ describe("WebGL2 static object payload builder", () => {
 			],
 			materialFamily: "texture-rgba",
 		});
-		const bindings = new Map<string, StaticTextureBinding>([
+		const placements = new Map<string, ResolvedTexturePlacement>([
 			[
 				"base-use",
-				createBinding({
+				createPlacement({
 					height: 8,
-					kind: "object-base-color",
 					rect: [1, 2, 3, 4],
-					slot: 0,
 					textureRefId: "base-ref",
 					textureUseId: "base-use",
 					width: 8,
@@ -250,7 +240,7 @@ describe("WebGL2 static object payload builder", () => {
 		const firstPayload = prepareObjectMaterialDrawPayloadState(
 			state,
 			resource,
-			bindings,
+			placements,
 			textures,
 		);
 		expect(state.isDirty).toBe(false);
@@ -260,7 +250,7 @@ describe("WebGL2 static object payload builder", () => {
 		const unchangedPayload = prepareObjectMaterialDrawPayloadState(
 			state,
 			resource,
-			bindings,
+			placements,
 			textures,
 		);
 		expect(unchangedPayload).toBe(firstPayload);
@@ -271,7 +261,7 @@ describe("WebGL2 static object payload builder", () => {
 			prepareObjectMaterialDrawPayloadState(
 				state,
 				resource,
-				bindings,
+				placements,
 				textures,
 			),
 		).toThrow(
@@ -314,25 +304,18 @@ function createMaterialEntry(
 	};
 }
 
-function createBinding(options: {
+function createPlacement(options: {
 	readonly height: number;
-	readonly kind: StaticTextureBinding["pageSlot"]["kind"];
 	readonly rect: readonly [number, number, number, number];
-	readonly slot: number;
 	readonly textureRefId: string;
 	readonly textureUseId: string;
 	readonly width: number;
-}): StaticTextureBinding {
+}): ResolvedTexturePlacement {
 	return {
-		bindingKey: options.textureUseId,
-		owner: { drawUnitId: "test-draw-unit", kind: "draw-unit" },
 		rect: options.rect,
-		pageSlot: {
-			kind: options.kind,
-			slot: options.slot,
-		},
 		textureHeight: options.height,
 		textureRefId: options.textureRefId,
+		textureUseId: options.textureUseId,
 		textureWidth: options.width,
 	};
 }

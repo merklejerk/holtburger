@@ -35,7 +35,7 @@ describe("static commit installer", () => {
 		expect(installed.removedResources).toEqual([]);
 	});
 
-	it("rejects textured draw units without committed texture bindings", () => {
+	it("rejects textured draw units without resolved texture placements", () => {
 		const drawUnit = createTerrainDrawUnit("terrain-textured", {
 			textureUseIds: ["terrain-textured:prepared-texture:06000010"],
 		});
@@ -48,11 +48,11 @@ describe("static commit installer", () => {
 				textureUpdate: null,
 			}),
 		).toThrow(
-			/terrain-textured is missing committed texture bindings for terrain-textured:prepared-texture:06000010/,
+			/terrain-textured is missing resolved texture placements for terrain-textured:prepared-texture:06000010/,
 		);
 	});
 
-	it("rejects textured structured-interior draw units without committed texture bindings", () => {
+	it("rejects textured structured-interior draw units without resolved texture placements", () => {
 		const drawUnit = createStructuredInteriorDrawUnit("structured-interior-a");
 
 		expect(() =>
@@ -63,7 +63,7 @@ describe("static commit installer", () => {
 				textureUpdate: null,
 			}),
 		).toThrow(
-			/structured-interior-a is missing committed texture bindings for structured-interior-a:prepared-texture:06000010/,
+			/structured-interior-a is missing resolved texture placements for structured-interior-a:prepared-texture:06000010/,
 		);
 	});
 
@@ -162,7 +162,7 @@ describe("static commit installer", () => {
 		]);
 	});
 
-	it("rejects textured static object visual resources without committed texture bindings", () => {
+	it("rejects textured static object visual resources without resolved texture placements", () => {
 		const drawUnit = createStaticObjectDrawUnit("static-object-a");
 		const visualResource = createObjectVisualResource(
 			"visual-static-object-a",
@@ -178,7 +178,7 @@ describe("static commit installer", () => {
 				textureUpdate: null,
 			}),
 		).toThrow(
-			/visual-static-object-a is missing committed texture bindings for static-object-a:prepared-texture:0/,
+			/visual-static-object-a is missing resolved texture placements for static-object-a:prepared-texture:0/,
 		);
 	});
 
@@ -531,29 +531,15 @@ function createTexturePlacementUpdate(
 	}
 
 	return {
-		textureBindings: [
-			{
-				bindingKey: textureUseId,
-				owner: { drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" },
-				rect: { height: 1, width: 1, x: 0, y: 0 },
-				pageSlot:
-					drawUnit.kind === "terrain-geometry"
-						? { kind: "color", slot: 0 }
-						: { kind: "object-base-color", slot: 0 },
-				textureHeight: 1,
-				textureRefId: "texture-ref-a",
-				textureWidth: 1,
-			},
-		],
 		placements: [],
 		removedTextureRefIds: [],
 		revision: 3,
 		resolvedTexturePlacements: [
 			{
-				bindingKey: textureUseId,
 				rect: [0, 0, 1, 1],
 				textureHeight: 1,
 				textureRefId: "texture-ref-a",
+				textureUseId,
 				textureWidth: 1,
 			},
 		],
@@ -565,7 +551,6 @@ function createTexturePlacementUpdateForDrawUnits(
 ): TexturePlacementUpdate {
 	const updates = drawUnits.map(createTexturePlacementUpdate);
 	return {
-		textureBindings: updates.flatMap((update) => update.textureBindings),
 		placements: [],
 		removedTextureRefIds: [],
 		revision: 3,
@@ -584,23 +569,17 @@ function createTexturePlacementUpdateForVisualResource(
 	}
 
 	return {
-		textureBindings: [
-			{
-				bindingKey: textureUseId,
-				owner: {
-					kind: "static-object-visual-resource",
-					resourceId: resource.resourceId,
-				},
-				rect: { height: 1, width: 1, x: 0, y: 0 },
-				pageSlot: { kind: "object-base-color", slot: 0 },
-				textureHeight: 1,
-				textureRefId: "texture-ref-a",
-				textureWidth: 1,
-			},
-		],
 		placements: [],
 		removedTextureRefIds: [],
 		revision: 3,
-		resolvedTexturePlacements: [],
+		resolvedTexturePlacements: [
+			{
+				rect: [0, 0, 1, 1],
+				textureHeight: 1,
+				textureRefId: "texture-ref-a",
+				textureUseId,
+				textureWidth: 1,
+			},
+		],
 	};
 }

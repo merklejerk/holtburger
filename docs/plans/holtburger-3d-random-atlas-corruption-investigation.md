@@ -517,11 +517,20 @@ Verification:
 
 ### Phase 5: Renderer State Boundary Audit
 
+Status: completed.
+
 Deliverables:
 
 - Inventory raw WebGL state mutations outside `Webgl2StateCache`.
 - Either move them behind the cache or require explicit invalidation at each boundary.
 - Add a small helper for operations that intentionally bypass the cache so invalidation is not caller folklore.
+
+Completed implementation:
+
+- Added `Webgl2Renderer.#runUnmanagedWebglStateMutation()`, which runs a raw WebGL mutation and invalidates `Webgl2StateCache` in `finally`.
+- Moved runtime debug-overlay buffer upload, texture page upload/removal, sampler policy updates, scene-domain target allocation, and scene-domain depth/stencil blits behind that helper.
+- Replaced render-path raw framebuffer binds with `#stateCache.bindFramebuffer()` where no bypass was needed.
+- Left setup/allocation helper raw binds in place when they run under the unmanaged mutation helper or during one-time resource construction.
 
 Acceptance criteria:
 
@@ -538,6 +547,24 @@ Debug cleanup:
 
 - Do not add broad WebGL trace diagnostics as a substitute for a state-boundary abstraction.
 - If a runtime diagnostic is needed, expose the wrapper/helper state at the boundary, not raw per-draw probe data.
+
+Decision:
+
+- The helper is intentionally broad and renderer-local. It does not try to model every WebGL state field; it marks the cache unknown after any unmanaged mutation. That is boring and correct for the current cache model.
+- Setup-time VAO/buffer construction was not routed through the helper unless it can occur during runtime rendering. Those paths either already invalidate after construction or happen before cached draw assumptions matter.
+
+Debt:
+
+- `#resetFramebufferTransferState()` still directly uses raw `colorMask` and `disable(SCISSOR_TEST)` because those states are not fully represented by `Webgl2StateCache`. If future bugs involve those states, promote them into the cache instead of adding more one-off resets.
+- The helper is private to `Webgl2Renderer`. If other renderer modules begin owning runtime raw GL mutations, move the helper near `Webgl2StateCache`.
+
+Verification:
+
+- `npm run test:ts -- --run src/lib/renderer/webgl2/webgl2-renderer.test.ts src/lib/renderer/webgl2/webgl2-object-material-payloads.test.ts src/lib/renderer/webgl2/webgl2-terrain-payloads.test.ts` passed.
+- `npm run test:ts -- --run src/lib/runtime/client-runtime.test.ts src/lib/textures/texture-manager.test.ts src/lib/renderer/webgl2/webgl2-object-material-payloads.test.ts src/lib/renderer/webgl2/webgl2-terrain-payloads.test.ts src/lib/renderer/webgl2/webgl2-renderer.test.ts src/lib/runtime/static-commit-installer.test.ts` passed.
+- `npm run check` passed.
+- `npm run lint:ts` passed.
+- `git diff --check` passed.
 
 ### Phase 6: Diagnostics Cutover And Probe Cleanup
 

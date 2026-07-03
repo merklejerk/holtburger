@@ -118,6 +118,13 @@ export interface TextureAtlasPageInspectionTexture {
 	readonly sourceLabel: string;
 }
 
+// Placement packing can also delete stale physical pages; renderer-facing
+// callers need both sides of that mutation in one ordered result.
+interface PackedTexturePlacementResult {
+	readonly placements: readonly RuntimeTexturePlacement[];
+	readonly reclaimedTextureRefIds: readonly string[];
+}
+
 export class TextureManager {
 	readonly #assetService: AssetService;
 	readonly #texturePacker: TexturePacker;
@@ -322,7 +329,7 @@ export class TextureManager {
 			await this.#packPendingTexturePlacements(
 				uniquePendingTexturePlacements(pendingPlacements),
 				{
-					reclaimZeroReferencePages: false,
+					reclaimZeroReferencePages: true,
 					retainedTextureRefIds: collectStagedTextureRefIds(stagedPlacements),
 				},
 			);
@@ -459,7 +466,7 @@ export class TextureManager {
 	async #applyVisualTextureUseDelta(
 		delta: VisualTextureUseCommitDelta,
 	): Promise<TexturePlacementUpdate | null> {
-		const removedTextureRefIds = this.#removeOwnerTextureRefs(
+		let removedTextureRefIds = this.#removeOwnerTextureRefs(
 			delta.removedOwners,
 		);
 		const placements: RuntimeTexturePlacement[] = [];
@@ -468,6 +475,7 @@ export class TextureManager {
 		const terrainRolePageSlots = new TerrainDrawUnitRolePageSlots();
 		const objectMaterialRolePageSlots = new ObjectMaterialOwnerRolePageSlots();
 		const pendingPlacements = new Map<string, PendingTexturePlacement>();
+		const stagedPlacements: StagedTexturePlacement[] = [];
 		const uploadedTextureRefIds = new Set<string>();
 
 		for (const textureUse of delta.textureUses) {
@@ -475,6 +483,7 @@ export class TextureManager {
 				textureUse,
 				pendingPlacements,
 			);
+			stagedPlacements.push(staged);
 			for (const owner of textureUse.owners) {
 				const ownerKey = createTextureBindingOwnerKey(owner);
 				let textureKeys = this.#textureKeysByOwnerKey.get(ownerKey);
@@ -505,14 +514,18 @@ export class TextureManager {
 			}
 		}
 
-		const packedPlacements = await this.#packPendingTexturePlacements(
+		const packedResult = await this.#packPendingTexturePlacements(
 			uniquePendingTexturePlacements(pendingPlacements),
 			{
-				reclaimZeroReferencePages: false,
-				retainedTextureRefIds: new Set(),
+				reclaimZeroReferencePages: true,
+				retainedTextureRefIds: collectStagedTextureRefIds(stagedPlacements),
 			},
 		);
-		placements.push(...packedPlacements);
+		placements.push(...packedResult.placements);
+		removedTextureRefIds = uniqueSortedStrings([
+			...removedTextureRefIds,
+			...packedResult.reclaimedTextureRefIds,
+		]);
 
 		for (const placement of uniquePendingTexturePlacements(pendingPlacements)) {
 			const entry = placement.entry;
@@ -776,14 +789,14 @@ export class TextureManager {
 			readonly reclaimZeroReferencePages: boolean;
 			readonly retainedTextureRefIds: ReadonlySet<string>;
 		},
-	): Promise<readonly RuntimeTexturePlacement[]> {
+	): Promise<PackedTexturePlacementResult> {
 		const runtimePlacements: RuntimeTexturePlacement[] = [];
-		if (options.reclaimZeroReferencePages) {
-			this.#reclaimZeroReferencePagesForPendingPlacements(
-				pendingPlacements,
-				options.retainedTextureRefIds,
-			);
-		}
+		const reclaimedTextureRefIds = options.reclaimZeroReferencePages
+			? this.#reclaimZeroReferencePagesForTextureMutation(
+					pendingPlacements,
+					options.retainedTextureRefIds,
+				)
+			: [];
 		const plannedGroups = this.#planPendingTexturePackingGroups(
 			groupPendingTexturePlacements(pendingPlacements),
 		);
@@ -802,7 +815,10 @@ export class TextureManager {
 			);
 		}
 
-		return runtimePlacements;
+		return {
+			placements: runtimePlacements,
+			reclaimedTextureRefIds,
+		};
 	}
 
 	#planPendingTexturePackingGroups(
@@ -1071,19 +1087,24 @@ export class TextureManager {
 		record.activeReferenceCount = nextCount;
 	}
 
-	#reclaimZeroReferencePagesForPendingPlacements(
+	#reclaimZeroReferencePagesForTextureMutation(
 		pendingPlacements: readonly PendingTexturePlacement[],
 		retainedTextureRefIds: ReadonlySet<string>,
-	): void {
-		if (pendingPlacements.length === 0) {
-			return;
+	): readonly string[] {
+		const retainedTextureRefIdsForMutation = new Set(retainedTextureRefIds);
+		for (const placement of pendingPlacements) {
+			if (placement.entry) {
+				retainedTextureRefIdsForMutation.add(placement.entry.textureRefId);
+			}
 		}
 
-		for (const textureRefId of this.#collectFullyFreeTextureRefIds(
-			retainedTextureRefIds,
-		)) {
+		const reclaimedTextureRefIds = this.#collectFullyFreeTextureRefIds(
+			retainedTextureRefIdsForMutation,
+		);
+		for (const textureRefId of reclaimedTextureRefIds) {
 			this.#deleteTextureRef(textureRefId);
 		}
+		return reclaimedTextureRefIds;
 	}
 
 	#collectFullyFreeTextureRefIds(

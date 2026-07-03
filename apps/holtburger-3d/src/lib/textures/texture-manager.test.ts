@@ -1086,7 +1086,7 @@ describe("browser texture manager", () => {
 		]);
 	});
 
-	it("marks existing owner-based placements freeable after static draw-unit eviction", async () => {
+	it("reclaims existing owner-based placements after static draw-unit eviction", async () => {
 		const textureManager = new TextureManager({
 			assetService: new FixtureAssetService(),
 		});
@@ -1108,16 +1108,10 @@ describe("browser texture manager", () => {
 			textureUses: [],
 		});
 
-		expect(textureManager.createPlacementReferenceSnapshot()).toMatchObject([
-			{
-				activeReferenceCount: 0,
-				freeable: true,
-				itemId: "terrain-a:prepared-texture:06000010",
-			},
-		]);
+		expect(textureManager.createPlacementReferenceSnapshot()).toEqual([]);
 	});
 
-	it("retains zero-reference ownerless pages during placement planning", async () => {
+	it("reclaims zero-reference ownerless pages during placement planning", async () => {
 		const textureManager = new TextureManager({
 			assetService: new FixtureAssetService(),
 			texturePacker: new FixtureTexturePacker(),
@@ -1155,10 +1149,6 @@ describe("browser texture manager", () => {
 			{
 				activeReferenceCount: 0,
 				itemId: "terrain-live:prepared-texture:06000020",
-			},
-			{
-				activeReferenceCount: 0,
-				itemId: "terrain-zombie:prepared-texture:06000010",
 			},
 		]);
 	});

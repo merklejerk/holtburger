@@ -43,8 +43,8 @@ Current facts:
 
 - `TextureManager` can delete owner-based placements when owner leases reach
   zero.
-- `#reclaimZeroReferencePagesForPendingPlacements()` exists, but current
-  callsites pass `reclaimZeroReferencePages: false`.
+- `#reclaimZeroReferencePagesForTextureMutation()` deletes zero-reference
+  physical pages and returns the reclaimed ids to renderer-facing mutations.
 - Pending placement packing only packs new pending entries; it does not repack
   retained live entries.
 - The packer chooses the fewest pages, then the smallest allocated area, so
@@ -60,9 +60,8 @@ implementation.
    `#removeOwnerTextureRefs()`. Ownerless pre-bake pages created by
    `placeTextureIntents()` are not uploaded to the renderer until a later owner
    commit reuses them, so reclaiming those pages mainly deletes texture-manager
-   residency and placement records. Phase 1 should return reclaimed page ids
-   from the reclaim helper, but only renderer-visible paths need to emit remove
-   updates.
+   residency and placement records. The reclaim helper returns reclaimed page
+   ids, but only renderer-visible paths emit remove updates.
 2. Page runway should happen after pack-attempt selection.
    The existing layout comparison intentionally chooses the smallest page area
    once texture count is minimized. The one-tier runway should grow the
@@ -144,14 +143,26 @@ Acceptance criteria:
 
 Task checklist:
 
-- Replace dead `reclaimZeroReferencePages: false` callsites with a real policy.
-- Change the reclaim helper to return reclaimed physical page ids instead of
+- [x] Replace dead `reclaimZeroReferencePages: false` callsites with a real policy.
+- [x] Change the reclaim helper to return reclaimed physical page ids instead of
   silently deleting them.
-- Keep `placeTextureIntents()` reclaim ownerless pages without pretending it can
+- [x] Keep `placeTextureIntents()` reclaim ownerless pages without pretending it can
   emit renderer updates.
-- Add tests for reclaiming ownerless pages during `placeTextureIntents()`.
-- Add tests for not reclaiming retained/reused pages in the same mutation.
-- Keep owner-based removal tests passing.
+- [x] Add tests for reclaiming ownerless pages during `placeTextureIntents()`.
+- [x] Add tests for not reclaiming retained/reused pages in the same mutation.
+- [x] Keep owner-based removal tests passing.
+
+Implementation notes:
+
+- `#packPendingTexturePlacements()` now returns both newly uploaded placements
+  and reclaimed physical texture ref ids.
+- `placeTextureIntents()` enables reclaim and deliberately ignores reclaimed ids
+  because pre-bake planning does not talk to the renderer.
+- Renderer-facing texture deltas merge owner-removal ids with reclaim ids, so a
+  physical page removed by either path is represented once.
+- Reclaim now also runs for removal-only texture deltas. The old
+  "freeable-but-still-resident" snapshot state was removed instead of preserved
+  as a compatibility layer.
 
 ## Phase 2: General Page Runway
 

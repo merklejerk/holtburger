@@ -47,8 +47,8 @@ Current facts:
   physical pages and returns the reclaimed ids to renderer-facing mutations.
 - Pending placement packing only packs new pending entries; it does not repack
   retained live entries.
-- The packer chooses the fewest pages, then the smallest allocated area, so
-  small waves naturally produce compact pages like `256x128`.
+- The packer chooses the fewest pages, then the smallest allocated area. Runtime
+  jobs materialize the selected page with one tier of runway.
 
 ## Dry Run Findings
 
@@ -184,12 +184,22 @@ Acceptance criteria:
 
 Task checklist:
 
-- Add page runway policy to `atlas-layout.ts` or the texture packing job
+- [x] Add page runway policy to `atlas-layout.ts` or the texture packing job
   protocol, applied after the winning pack attempt is selected.
-- Update packer tests for grown materialized page dimensions.
-- Keep overflow diagnostics based on attempted candidate sizes, not grown
+- [x] Update packer tests for grown materialized page dimensions.
+- [x] Keep overflow diagnostics based on attempted candidate sizes, not grown
   runway dimensions.
-- Keep placement rects based on original packed coordinates.
+- [x] Keep placement rects based on original packed coordinates.
+
+Implementation notes:
+
+- `pageRunway: "one-tier"` is an explicit layout/packing policy. Bare
+  `planAtlasLayout()` calls default to exact selected page sizes.
+- Runtime texture packing jobs request one-tier runway for all sample classes.
+- Runway grows the shorter side first; square pages grow both dimensions. Growth
+  is capped at the page max size.
+- Tests cover both RGBA and exact data pages through the shared atlas layout
+  path, with rects unchanged after materialized page growth.
 
 ## Phase 3: TextureUse Placement Resolution
 

@@ -45,6 +45,7 @@ function packTexturesWithAtlasLayout(
 			gutterPixels: job.page.gutterPixels ?? 0,
 			maxTextureCount: job.page.maxTextureCount ?? Number.MAX_SAFE_INTEGER,
 			maxTextureSize: Math.max(job.page.width, job.page.height),
+			pageRunway: job.page.pageRunway,
 			pageSelection: job.page.pageSelection,
 		},
 	});

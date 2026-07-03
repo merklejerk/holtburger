@@ -95,6 +95,7 @@ describe("browser texture manager", () => {
 					gutterEdgeMode: "clamp",
 					gutterPixels: 96,
 					height: 2048,
+					pageRunway: "one-tier",
 					pageSelection: "minimize-textures",
 					width: 2048,
 				},

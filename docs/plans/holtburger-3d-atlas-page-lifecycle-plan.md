@@ -277,12 +277,27 @@ Acceptance criteria:
 
 Task checklist:
 
-- Persist or reconstruct enough page facts to classify compatible insertion
+- [x] Persist or reconstruct enough page facts to classify compatible insertion
   targets.
-- Extend `atlas-layout.ts` with existing-page/locked-placement insertion support
+- [x] Extend `atlas-layout.ts` with existing-page/locked-placement insertion support
   instead of copying free-rect logic into `TextureManager`.
-- Route successful insertion through the same runtime placement update path.
-- Add tests for two-wave placement producing one page after absorption.
+- [x] Route successful insertion through the same runtime placement update path.
+- [x] Add tests for two-wave placement producing one page after absorption.
+
+Implementation notes:
+
+- Added `planAtlasPageInsertion()` to rebuild free rects from locked placements
+  and insert new entries without moving existing rects.
+- `TextureManager` now tries compatible existing pages before creating new pack
+  jobs. Successful absorption reuses the existing `textureRefId`, rebuilds that
+  page's pixels, and emits a normal replacement placement update.
+- Registry entries now persist `pageClassKey` and source `gutterPixels`; those
+  are the minimum page facts needed to classify compatible targets and rebuild
+  locked occupancy correctly.
+- Alias records can share one physical source rect, so absorption reconstructs
+  locked occupancy from unique physical placements, not every logical alias.
+- If no compatible page has room, the existing new-page packer path runs
+  unchanged.
 
 ## Phase 5: Cleanup And Diagnostics
 

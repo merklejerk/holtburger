@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planAtlasLayout } from "./atlas-layout";
+import { planAtlasLayout, planAtlasPageInsertion } from "./atlas-layout";
 
 describe("browser atlas layout planner", () => {
 	it("uses deterministic keys and memory-minimizing power-of-two page sizes", () => {
@@ -307,6 +307,83 @@ describe("browser atlas layout planner", () => {
 		expect(atlasFull.overflows).toMatchObject([
 			{ atlasEntryKey: "b", reason: "atlas-full" },
 		]);
+	});
+
+	it("inserts entries into locked existing pages without moving locked placements", () => {
+		const plan = planAtlasPageInsertion({
+			entries: [{ height: 16, key: "new", width: 16 }],
+			lockedPages: [
+				{
+					height: 64,
+					placements: [
+						{
+							atlasEntryKey: "old",
+							gutterPixels: 4,
+							height: 16,
+							textureIndex: 0,
+							width: 16,
+							x: 4,
+							y: 4,
+						},
+					],
+					textureIndex: 0,
+					width: 64,
+				},
+			],
+			policy: {
+				...createPolicy(),
+				gutterPixels: 4,
+			},
+		});
+
+		expect(plan.overflows).toEqual([]);
+		expect(plan.insertedPlacementsByEntryKey.get("new")).toMatchObject({
+			atlasEntryKey: "new",
+			gutterPixels: 4,
+			height: 16,
+			textureIndex: 0,
+			width: 16,
+			x: 28,
+			y: 4,
+		});
+		expect(plan.texturePages[0]?.placements).toEqual([
+			expect.objectContaining({ atlasEntryKey: "old", x: 4, y: 4 }),
+			expect.objectContaining({ atlasEntryKey: "new", x: 28, y: 4 }),
+		]);
+	});
+
+	it("reports insertion overflow when compatible existing pages have no vacancy", () => {
+		const plan = planAtlasPageInsertion({
+			entries: [{ height: 16, key: "new", width: 16 }],
+			lockedPages: [
+				{
+					height: 16,
+					placements: [
+						{
+							atlasEntryKey: "old",
+							gutterPixels: 0,
+							height: 16,
+							textureIndex: 0,
+							width: 16,
+							x: 0,
+							y: 0,
+						},
+					],
+					textureIndex: 0,
+					width: 16,
+				},
+			],
+			policy: createPolicy(),
+		});
+
+		expect(plan.overflows).toMatchObject([
+			{
+				atlasEntryKey: "new",
+				detail: expect.stringContaining("existing atlas texture"),
+				reason: "atlas-full",
+			},
+		]);
+		expect(plan.insertedPlacementsByEntryKey.size).toBe(0);
 	});
 });
 

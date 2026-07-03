@@ -2394,7 +2394,7 @@ describe("browser client runtime", () => {
 		await flushPromises();
 
 		expect(renderer.events).toEqual([
-			"texture:1:terrain-textured",
+			"texture:1:terrain-textured:prepared-texture:06000010",
 			"terrain-layer:3663069183:terrain-textured",
 		]);
 		expect(

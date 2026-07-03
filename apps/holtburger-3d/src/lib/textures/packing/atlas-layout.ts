@@ -1,4 +1,4 @@
-interface AtlasLayoutPolicy {
+export interface AtlasLayoutPolicy {
 	readonly maxTextureSize: number;
 	readonly maxTextureCount: number;
 	readonly gutterPixels: number;
@@ -10,19 +10,19 @@ interface AtlasLayoutPolicy {
 type AtlasLayoutPageSelection = "minimize-memory" | "minimize-textures";
 type AtlasLayoutPageRunway = "none" | "one-tier";
 
-interface AtlasLayoutEntry {
+export interface AtlasLayoutEntry {
 	readonly key: string;
 	readonly width: number;
 	readonly height: number;
 	readonly gutterPixels?: number;
 }
 
-interface AtlasLayoutCohort {
+export interface AtlasLayoutCohort {
 	readonly key: string;
 	readonly entryKeys: readonly string[];
 }
 
-interface AtlasTexturePlacement {
+export interface AtlasTexturePlacement {
 	readonly atlasEntryKey: string;
 	readonly textureIndex: number;
 	readonly x: number;
@@ -32,7 +32,7 @@ interface AtlasTexturePlacement {
 	readonly gutterPixels: number;
 }
 
-interface AtlasTexturePage {
+export interface AtlasTexturePage {
 	readonly textureIndex: number;
 	readonly width: number;
 	readonly height: number;
@@ -41,7 +41,7 @@ interface AtlasTexturePage {
 
 type AtlasLayoutOverflowReason = "source-too-large" | "atlas-full";
 
-interface AtlasLayoutOverflow {
+export interface AtlasLayoutOverflow {
 	readonly atlasEntryKey: string;
 	readonly reason: AtlasLayoutOverflowReason;
 	readonly detail: string;
@@ -53,6 +53,13 @@ interface AtlasLayoutPlan {
 	readonly placementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>;
 	readonly overflows: readonly AtlasLayoutOverflow[];
 	readonly overflowsByEntryKey: ReadonlyMap<string, AtlasLayoutOverflow>;
+}
+
+export interface AtlasPageInsertionPlan {
+	readonly insertedPlacementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>;
+	readonly overflows: readonly AtlasLayoutOverflow[];
+	readonly overflowsByEntryKey: ReadonlyMap<string, AtlasLayoutOverflow>;
+	readonly texturePages: readonly AtlasTexturePage[];
 }
 
 interface PaddedAtlasLayoutEntry {
@@ -161,6 +168,71 @@ export function planAtlasLayout(options: {
 		texturePages: selectedAttempt
 			? applyPageRunway(selectedAttempt.texturePages, policy)
 			: [],
+	};
+}
+
+export function planAtlasPageInsertion(options: {
+	readonly entries: readonly AtlasLayoutEntry[];
+	readonly lockedPages: readonly AtlasTexturePage[];
+	readonly policy: AtlasLayoutPolicy;
+	readonly cohorts?: readonly AtlasLayoutCohort[];
+}): AtlasPageInsertionPlan {
+	const policy = normalizeAtlasLayoutPolicy(options.policy);
+	const entries = dedupeAndSortAtlasLayoutEntries(options.entries, policy);
+	const cohorts = normalizeAtlasLayoutCohorts(options.cohorts ?? [], entries);
+	const pageStates = options.lockedPages
+		.slice()
+		.sort((left, right) => left.textureIndex - right.textureIndex)
+		.map(reconstructLockedAtlasPagePackState);
+	const insertedPlacementsByEntryKey = new Map<string, AtlasTexturePlacement>();
+	const packableEntries: PaddedAtlasLayoutEntry[] = [];
+	const overflows: AtlasLayoutOverflow[] = [];
+
+	for (const paddedEntry of createPaddedAtlasLayoutEntries(entries, policy)) {
+		if (
+			paddedEntry.paddedWidth > policy.maxTextureSize ||
+			paddedEntry.paddedHeight > policy.maxTextureSize
+		) {
+			overflows.push({
+				atlasEntryKey: paddedEntry.entry.key,
+				detail: `atlas entry ${paddedEntry.entry.key} is ${paddedEntry.entry.width}x${paddedEntry.entry.height} with ${paddedEntry.gutterPixels}px gutter, exceeding ${policy.maxTextureSize}px atlas capacity`,
+				reason: "source-too-large",
+			});
+			continue;
+		}
+		packableEntries.push(paddedEntry);
+	}
+
+	for (const unit of createAtlasPackingUnits(packableEntries, cohorts)) {
+		const placement = findBestUnitPagePlacement(unit, pageStates);
+		if (placement === null) {
+			overflows.push(...createAtlasExistingPageOverflows(unit));
+			continue;
+		}
+		commitUnitPagePlacement(
+			placement,
+			pageStates,
+			insertedPlacementsByEntryKey,
+		);
+	}
+
+	const sortedOverflows = overflows.sort((left, right) =>
+		left.atlasEntryKey.localeCompare(right.atlasEntryKey),
+	);
+	return {
+		insertedPlacementsByEntryKey,
+		overflows: sortedOverflows,
+		overflowsByEntryKey: new Map(
+			sortedOverflows.map(
+				(overflow) => [overflow.atlasEntryKey, overflow] as const,
+			),
+		),
+		texturePages: pageStates.map((page) => ({
+			height: page.height,
+			placements: page.placements,
+			textureIndex: page.textureIndex,
+			width: page.width,
+		})),
 	};
 }
 
@@ -462,6 +534,50 @@ function createAtlasPagePackState(
 	};
 }
 
+function reconstructLockedAtlasPagePackState(
+	page: AtlasTexturePage,
+): AtlasPagePackState {
+	const state = createAtlasPagePackState(page.textureIndex, page);
+	const paddedRects: AtlasFreeRect[] = [];
+	for (const placement of page.placements
+		.slice()
+		.sort((left, right) => left.atlasEntryKey.localeCompare(right.atlasEntryKey))) {
+		const paddedRect = createPaddedRectFromPlacement(placement);
+		if (
+			paddedRect.x < 0 ||
+			paddedRect.y < 0 ||
+			paddedRect.x + paddedRect.width > page.width ||
+			paddedRect.y + paddedRect.height > page.height
+		) {
+			throw new Error(
+				`Atlas locked placement ${placement.atlasEntryKey} exceeds page ${page.textureIndex}.`,
+			);
+		}
+		if (paddedRects.some((existing) => rectsIntersect(existing, paddedRect))) {
+			throw new Error(
+				`Atlas locked placement ${placement.atlasEntryKey} overlaps another locked placement on page ${page.textureIndex}.`,
+			);
+		}
+		paddedRects.push(paddedRect);
+		state.placements.push(placement);
+		state.freeRects = pruneContainedFreeRects(
+			splitFreeRects(state.freeRects, paddedRect),
+		);
+	}
+	return state;
+}
+
+function createPaddedRectFromPlacement(
+	placement: AtlasTexturePlacement,
+): AtlasFreeRect {
+	return {
+		height: placement.height + placement.gutterPixels * 2,
+		width: placement.width + placement.gutterPixels * 2,
+		x: placement.x - placement.gutterPixels,
+		y: placement.y - placement.gutterPixels,
+	};
+}
+
 function findBestUnitPagePlacement(
 	unit: AtlasPackingUnit,
 	pages: readonly AtlasPagePackState[],
@@ -559,6 +675,23 @@ function createAtlasUnitPageOverflows(
 				unit.entries.length === 1
 					? `atlas entry ${entry.entry.key} did not fit on a ${pageSize.width}x${pageSize.height} atlas texture`
 					: `atlas entry ${entry.entry.key} belongs to cohort ${unit.key}, which did not fit together on one ${pageSize.width}x${pageSize.height} atlas texture`,
+			reason: "atlas-full" as const,
+		}))
+		.sort((left, right) =>
+			left.atlasEntryKey.localeCompare(right.atlasEntryKey),
+		);
+}
+
+function createAtlasExistingPageOverflows(
+	unit: AtlasPackingUnit,
+): AtlasLayoutOverflow[] {
+	return unit.entries
+		.map((entry) => ({
+			atlasEntryKey: entry.entry.key,
+			detail:
+				unit.entries.length === 1
+					? `atlas entry ${entry.entry.key} did not fit any existing atlas texture`
+					: `atlas entry ${entry.entry.key} belongs to cohort ${unit.key}, which did not fit together on any existing atlas texture`,
 			reason: "atlas-full" as const,
 		}))
 		.sort((left, right) =>

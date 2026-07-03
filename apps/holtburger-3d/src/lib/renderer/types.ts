@@ -408,6 +408,44 @@ export interface RendererResourceSnapshot {
 	readonly terrainDrawUnits: number;
 }
 
+export type RendererObjectMaterialTextureRole =
+	| "base-color"
+	| "detail"
+	| "index"
+	| "palette";
+
+export type RendererObjectMaterialTextureDiagnostics =
+	| {
+			readonly drawUnitId: string;
+			readonly status: "missing-resource";
+	  }
+	| {
+			readonly drawUnitId: string;
+			readonly materialEntries: readonly RendererObjectMaterialEntryDiagnostics[];
+			readonly status: "resolved";
+			/** True when diagnostics had to prepare the payload that the next draw would use. */
+			readonly wasPreparedPayloadDirty: boolean;
+			readonly textureBindings: readonly RendererObjectMaterialTextureBindingDiagnostics[];
+	  };
+
+export interface RendererObjectMaterialEntryDiagnostics {
+	readonly baseColorRect: readonly [number, number, number, number];
+	readonly detailRect: readonly [number, number, number, number];
+	readonly detailTextureEnabled: boolean;
+	readonly indexRect: readonly [number, number, number, number];
+	readonly materialIds: readonly number[];
+	readonly paletteRect: readonly [number, number, number, number];
+	readonly slot: number;
+	readonly wrapMode: "clamp" | "repeat";
+}
+
+export interface RendererObjectMaterialTextureBindingDiagnostics {
+	readonly height: number;
+	readonly role: RendererObjectMaterialTextureRole;
+	readonly textureRefId: string;
+	readonly width: number;
+}
+
 interface StaticObjectMaterialPassDrawCallCounts {
 	readonly opaque: number;
 	readonly alphaTest: number;
@@ -694,6 +732,9 @@ export interface Renderer {
 	updateFrameState(state: FrameState): void;
 	subscribeTelemetry(listener: RendererFrameTelemetryListener): () => void;
 	createResourceSnapshot(): RendererResourceSnapshot;
+	createObjectMaterialTextureDiagnostics(
+		drawUnitIds: readonly string[],
+	): readonly RendererObjectMaterialTextureDiagnostics[];
 	createDiagnosticsSnapshot(): RendererSnapshot;
 	dispose(): void;
 }

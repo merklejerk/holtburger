@@ -64,7 +64,6 @@ import {
 	type TexturePlacementSnapshot,
 	type TextureUsagePurpose,
 } from "./placement";
-
 const FILTERABLE_ATLAS_GUTTER_PIXELS = 4;
 const EXACT_ATLAS_GUTTER_PIXELS = 0;
 const TERRAIN_COLOR_ATLAS_GUTTER_PIXELS = 96;
@@ -103,6 +102,27 @@ export interface TexturePlacementReferenceSnapshot {
 	readonly pageId: string;
 	readonly purpose: TextureUsagePurpose;
 	readonly rect: readonly [number, number, number, number];
+}
+
+export interface TexturePlacementResolutionSnapshot {
+	/** Current live owner/dependency count used by atlas reclamation. */
+	readonly activeReferenceCount: number;
+	/** Runtime texture page channel layout. */
+	readonly format: RuntimeTexturePlacement["format"];
+	/** Runtime texture page height in pixels. */
+	readonly height: number;
+	/** Logical texture-use id being resolved. */
+	readonly itemId: string;
+	/** Packer-local page id retained for atlas diagnostics. */
+	readonly pageId: string;
+	/** Renderer role that decides shader binding and atlas compatibility. */
+	readonly purpose: TextureUsagePurpose;
+	/** Sub-rectangle for this logical texture inside the runtime page. */
+	readonly rect: readonly [number, number, number, number];
+	/** Renderer texture page identity sampled by draw payloads. */
+	readonly textureRefId: string;
+	/** Runtime texture page width in pixels. */
+	readonly width: number;
 }
 
 export interface TextureAtlasPageInspectionSnapshot {
@@ -144,6 +164,7 @@ export class TextureManager {
 		string,
 		TexturePlacementRecord
 	>();
+	readonly #uploadedPlacementRevisionByTextureRefId = new Map<string, number>();
 	readonly #dependencyItemIdsByResourceId = new Map<string, Set<string>>();
 	readonly #pageLifecycleTotals: TextureAtlasPageLifecycleTotals = {
 		absorbed: 0,
@@ -441,6 +462,29 @@ export class TextureManager {
 			.sort((left, right) => left.itemId.localeCompare(right.itemId));
 	}
 
+	createPlacementResolutionSnapshot(
+		itemIds: readonly string[],
+	): readonly TexturePlacementResolutionSnapshot[] {
+		return uniqueSortedStrings(itemIds).flatMap((itemId) => {
+			const record = this.#placementRecordsByItemId.get(itemId);
+			return record
+				? [
+						{
+							activeReferenceCount: record.activeReferenceCount,
+							format: record.format,
+							height: record.height,
+							itemId,
+							pageId: record.pageId,
+							purpose: record.purpose,
+							rect: record.rect,
+							textureRefId: record.textureRefId,
+							width: record.width,
+						},
+					]
+				: [];
+		});
+	}
+
 	async applyStaticCommitDelta(
 		delta: StaticCoordinatorCommitDelta,
 	): Promise<TexturePlacementUpdate | null> {
@@ -504,9 +548,14 @@ export class TextureManager {
 				if (!textureKeys.has(staged.textureKey)) {
 					textureKeys.add(staged.textureKey);
 					if (staged.entry) {
+						// Pre-bake placement can modify a live page before this entry
+						// has an owner. First activation must upload the current page when
+						// that page revision has not yet been handed to the renderer.
 						if (
 							staged.entry.leaseCount === 0 &&
-							!this.#hasLeasedTextureRef(staged.entry.textureRefId) &&
+							this.#uploadedPlacementRevisionByTextureRefId.get(
+								staged.entry.textureRefId,
+							) !== staged.entry.placementRevision &&
 							!uploadedTextureRefIds.has(staged.entry.textureRefId)
 						) {
 							placements.push(staged.entry.runtimePlacement);
@@ -577,6 +626,7 @@ export class TextureManager {
 		}
 
 		this.#revision += 1;
+		this.#markUploadedTexturePlacements(placements);
 
 		return {
 			placements,
@@ -1037,18 +1087,29 @@ export class TextureManager {
 					runtimePlacement,
 					texturePage: repackPlan.layoutPage,
 				});
-				const activeReferenceCount =
-					this.#placementRecordsByItemId.get(existingEntry.itemId)
-						?.activeReferenceCount ?? existingEntry.leaseCount;
-				this.#recordPlacementEntry(existingEntry);
-				this.#setPlacementActiveReferenceCount(
+				const textureUseIds = createTextureUseIdsForRegistryEntry(
+					registry,
 					existingEntry,
-					activeReferenceCount,
 				);
+				for (const textureUseId of textureUseIds) {
+					const activeReferenceCount =
+						this.#placementRecordsByItemId.get(textureUseId)
+							?.activeReferenceCount ??
+						(textureUseId === existingEntry.itemId
+							? existingEntry.leaseCount
+							: 0);
+					this.#recordPlacementEntry(existingEntry, textureUseId);
+					this.#setPlacementActiveReferenceCount(
+						existingEntry,
+						activeReferenceCount,
+						textureUseId,
+					);
+				}
 				resolvedTexturePlacements.push(
-					...createResolvedTexturePlacementsForEntry(existingEntry, [
-						existingEntry.itemId,
-					]),
+					...createResolvedTexturePlacementsForEntry(
+						existingEntry,
+						textureUseIds,
+					),
 				);
 			}
 		}
@@ -1438,6 +1499,7 @@ export class TextureManager {
 	): void {
 		this.#placementRecordsByItemId.set(itemId, {
 			activeReferenceCount: entry.leaseCount,
+			format: entry.format,
 			height: entry.textureHeight,
 			itemId,
 			pageId: entry.pageId,
@@ -1451,13 +1513,14 @@ export class TextureManager {
 	#setPlacementActiveReferenceCount(
 		entry: VisualTextureRegistryEntry,
 		activeReferenceCount: number,
+		itemId = entry.itemId,
 	): void {
-		const record = this.#placementRecordsByItemId.get(entry.itemId);
+		const record = this.#placementRecordsByItemId.get(itemId);
 		if (!record) {
-			this.#recordPlacementEntry(entry);
-			const createdRecord = this.#placementRecordsByItemId.get(entry.itemId);
+			this.#recordPlacementEntry(entry, itemId);
+			const createdRecord = this.#placementRecordsByItemId.get(itemId);
 			if (!createdRecord) {
-				throw new Error(`Failed to record texture placement ${entry.itemId}.`);
+				throw new Error(`Failed to record texture placement ${itemId}.`);
 			}
 			createdRecord.activeReferenceCount = activeReferenceCount;
 			return;
@@ -1558,6 +1621,18 @@ export class TextureManager {
 				this.#placementRecordsByItemId.delete(itemId);
 			}
 		}
+		this.#uploadedPlacementRevisionByTextureRefId.delete(textureRefId);
+	}
+
+	#markUploadedTexturePlacements(
+		placements: readonly RuntimeTexturePlacement[],
+	): void {
+		for (const placement of placements) {
+			this.#uploadedPlacementRevisionByTextureRefId.set(
+				placement.textureRefId,
+				placement.placementRevision,
+			);
+		}
 	}
 }
 
@@ -1624,6 +1699,7 @@ interface VisualTextureRegistryEntry {
 
 interface TexturePlacementRecord {
 	activeReferenceCount: number;
+	readonly format: RuntimeTexturePlacement["format"];
 	readonly height: number;
 	readonly itemId: string;
 	readonly pageId: string;
@@ -2378,6 +2454,35 @@ function createRegistryEntryPhysicalPlacementKey(
 	entry: Pick<VisualTextureRegistryEntry, "physicalSourceKey" | "rect">,
 ): string {
 	return [entry.physicalSourceKey, entry.rect.join(",")].join("|");
+}
+
+function createTextureUseIdsForRegistryEntry(
+	registry: VisualTexturePlacementBucketRegistry,
+	entry: VisualTextureRegistryEntry,
+): readonly string[] {
+	const textureUseIds: string[] = [];
+	for (const [textureKey, registryEntry] of registry.entries) {
+		if (registryEntry !== entry) {
+			continue;
+		}
+		textureUseIds.push(parseTextureUseIdFromVisualTextureKey(registry, textureKey));
+	}
+	return uniqueSortedStrings(
+		textureUseIds.length === 0 ? [entry.itemId] : textureUseIds,
+	);
+}
+
+function parseTextureUseIdFromVisualTextureKey(
+	registry: VisualTexturePlacementBucketRegistry,
+	textureKey: VisualTextureKey,
+): string {
+	const prefix = `${registry.domain}:${registry.placementBucketKey}:`;
+	if (!textureKey.startsWith(prefix)) {
+		throw new Error(
+			`Texture key ${textureKey} does not belong to registry ${prefix}.`,
+		);
+	}
+	return textureKey.slice(prefix.length);
 }
 
 function uniquePendingTexturePlacements(

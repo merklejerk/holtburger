@@ -3,9 +3,12 @@ interface AtlasLayoutPolicy {
 	readonly maxTextureCount: number;
 	readonly gutterPixels: number;
 	readonly pageSelection?: AtlasLayoutPageSelection;
+	// Grows materialized page dimensions after selecting the winning pack attempt.
+	readonly pageRunway?: AtlasLayoutPageRunway;
 }
 
 type AtlasLayoutPageSelection = "minimize-memory" | "minimize-textures";
+type AtlasLayoutPageRunway = "none" | "one-tier";
 
 interface AtlasLayoutEntry {
 	readonly key: string;
@@ -155,8 +158,49 @@ export function planAtlasLayout(options: {
 			overflows.map((overflow) => [overflow.atlasEntryKey, overflow] as const),
 		),
 		placementsByEntryKey: selectedAttempt?.placementsByEntryKey ?? new Map(),
-		texturePages: selectedAttempt?.texturePages ?? [],
+		texturePages: selectedAttempt
+			? applyPageRunway(selectedAttempt.texturePages, policy)
+			: [],
 	};
+}
+
+function applyPageRunway(
+	texturePages: readonly AtlasTexturePage[],
+	policy: AtlasLayoutPolicy,
+): readonly AtlasTexturePage[] {
+	if (policy.pageRunway !== "one-tier") {
+		return texturePages;
+	}
+	return texturePages.map((page) => ({
+		...page,
+		...growAtlasPageOneTier(page, policy.maxTextureSize),
+	}));
+}
+
+function growAtlasPageOneTier(
+	page: Pick<AtlasTexturePage, "width" | "height">,
+	maxTextureSize: number,
+): Pick<AtlasTexturePage, "width" | "height"> {
+	if (page.width === page.height) {
+		return {
+			height: nextTextureSizeTier(page.height, maxTextureSize),
+			width: nextTextureSizeTier(page.width, maxTextureSize),
+		};
+	}
+	if (page.width < page.height) {
+		return {
+			height: page.height,
+			width: nextTextureSizeTier(page.width, maxTextureSize),
+		};
+	}
+	return {
+		height: nextTextureSizeTier(page.height, maxTextureSize),
+		width: page.width,
+	};
+}
+
+function nextTextureSizeTier(size: number, maxTextureSize: number): number {
+	return Math.min(size * 2, maxTextureSize);
 }
 
 function createPaddedAtlasLayoutEntries(
@@ -698,9 +742,17 @@ function normalizeAtlasLayoutPolicy(
 			"Atlas layout page selection must be minimize-memory or minimize-textures.",
 		);
 	}
+	if (
+		policy.pageRunway !== undefined &&
+		policy.pageRunway !== "none" &&
+		policy.pageRunway !== "one-tier"
+	) {
+		throw new Error("Atlas layout page runway must be none or one-tier.");
+	}
 	return {
 		...policy,
 		pageSelection: policy.pageSelection ?? "minimize-memory",
+		pageRunway: policy.pageRunway ?? "none",
 	};
 }
 

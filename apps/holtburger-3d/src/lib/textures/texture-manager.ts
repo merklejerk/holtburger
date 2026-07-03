@@ -1817,6 +1817,7 @@ function createTexturePackingPageConstraints({
 		gutterEdgeMode: "clamp",
 		gutterPixels,
 		height: MAX_RUNTIME_ATLAS_PAGE_SIZE,
+		pageRunway: "one-tier",
 		pageSelection: "minimize-textures",
 		width: MAX_RUNTIME_ATLAS_PAGE_SIZE,
 	};

@@ -19,6 +19,8 @@ interface TexturePackingPageConstraints {
 	readonly gutterEdgeMode?: "clamp" | "repeat";
 	readonly gutterPixels?: number;
 	readonly maxTextureCount?: number;
+	// Requests extra unused page space after the packer selects a winning layout.
+	readonly pageRunway?: "none" | "one-tier";
 	readonly pageSelection?: "minimize-memory" | "minimize-textures";
 }
 

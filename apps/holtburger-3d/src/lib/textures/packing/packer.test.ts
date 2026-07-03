@@ -41,6 +41,39 @@ describe("browser atlas texture packer", () => {
 		]);
 	});
 
+	it("materializes one-tier runway pages without moving RGBA rects", async () => {
+		const result = await new AtlasTexturePacker().pack({
+			...createJob(),
+			page: {
+				format: "rgba8",
+				height: 512,
+				pageRunway: "one-tier",
+				width: 512,
+			},
+			sources: [
+				createSource("a", 128, 128, [10, 0, 0, 255]),
+				createSource("b", 128, 128, [20, 0, 0, 255]),
+			],
+		});
+
+		expect(result.pages[0]).toMatchObject({
+			height: 256,
+			width: 256,
+		});
+		expect(result.rects).toEqual([
+			{
+				pageId: "pack-job:page:0",
+				rect: [0, 0, 128, 128],
+				textureUseId: "a",
+			},
+			{
+				pageId: "pack-job:page:0",
+				rect: [128, 0, 128, 128],
+				textureUseId: "b",
+			},
+		]);
+	});
+
 	it("duplicates clamped edge pixels into explicit gutter padding", async () => {
 		const result = await new AtlasTexturePacker().pack({
 			...createJob(),
@@ -185,6 +218,43 @@ describe("browser atlas texture packer", () => {
 		});
 		expect(Array.from(result.pages[0]?.pixels ?? [])).toEqual([
 			1, 1, 2, 2, 1, 1, 2, 2, 3, 3, 4, 4, 3, 3, 4, 4,
+		]);
+	});
+
+	it("materializes one-tier runway pages for exact data sources", async () => {
+		const result = await new AtlasTexturePacker().pack({
+			...createJob(),
+			page: {
+				format: "rg8",
+				height: 64,
+				pageRunway: "one-tier",
+				width: 64,
+			},
+			sources: [
+				{
+					source: {
+						format: "rg8",
+						height: 16,
+						kind: "texture-packing-pixel-source",
+						pixels: new Uint8Array(16 * 16 * 2),
+						width: 16,
+					},
+					textureUseId: "index16",
+				},
+			],
+		});
+
+		expect(result.pages[0]).toMatchObject({
+			format: "rg8",
+			height: 32,
+			width: 32,
+		});
+		expect(result.rects).toEqual([
+			{
+				pageId: "pack-job:page:0",
+				rect: [0, 0, 16, 16],
+				textureUseId: "index16",
+			},
 		]);
 	});
 

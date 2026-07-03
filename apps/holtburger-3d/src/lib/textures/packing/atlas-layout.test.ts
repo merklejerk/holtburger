@@ -58,6 +58,56 @@ describe("browser atlas layout planner", () => {
 		]);
 	});
 
+	it("grows selected pages by one runway tier without moving placements", () => {
+		const plan = planAtlasLayout({
+			entries: [
+				{ height: 128, key: "a", width: 128 },
+				{ height: 128, key: "b", width: 128 },
+			],
+			policy: {
+				...createPolicy(),
+				pageRunway: "one-tier",
+			},
+		});
+
+		expect(plan.texturePages).toMatchObject([
+			{
+				height: 256,
+				placements: [
+					{ atlasEntryKey: "a", x: 0, y: 0 },
+					{ atlasEntryKey: "b", x: 128, y: 0 },
+				],
+				width: 256,
+			},
+		]);
+	});
+
+	it("grows square runway pages on both dimensions and caps at max size", () => {
+		const square = planAtlasLayout({
+			entries: [{ height: 256, key: "square", width: 256 }],
+			policy: {
+				...createPolicy(),
+				pageRunway: "one-tier",
+			},
+		});
+		const maxed = planAtlasLayout({
+			entries: [{ height: 512, key: "maxed", width: 512 }],
+			policy: {
+				...createPolicy(),
+				pageRunway: "one-tier",
+			},
+		});
+
+		expect(square.texturePages[0]).toMatchObject({
+			height: 512,
+			width: 512,
+		});
+		expect(maxed.texturePages[0]).toMatchObject({
+			height: 512,
+			width: 512,
+		});
+	});
+
 	it("keeps cohort entries on one page when independent entries would split", () => {
 		const entries = [
 			{ height: 8, key: "terrain-wide-a", width: 300 },

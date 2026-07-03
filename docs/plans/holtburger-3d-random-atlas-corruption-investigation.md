@@ -250,6 +250,22 @@ Renderer:
 
 Goal: replace the current fix scaffolding with explicit texture page revision ownership so offline planning, repack, upload, and draw-time resolution share one contract.
 
+### Debug/Fix Separation Strategy
+
+The investigation branch mixed three kinds of changes:
+
+- durable bug fixes, such as stale page upload handling, alias repack updates, and WebGL state-cache invalidation;
+- stable diagnostics, such as selected draw unit geometry, resolved placements, page versions, and renderer binding summaries;
+- temporary probes, such as CPU/GPU rect hashes and framebuffer readback helpers.
+
+The plan treats those differently. Durable fixes stay. Temporary probes are deleted, not hidden behind flags. Stable diagnostics may stay only when they expose renderer contracts that are useful after the refactor; if a type change makes the same invariant structurally obvious, the diagnostic should shrink or disappear.
+
+Implementation rule:
+
+- Each phase should separate cleanup from structural change where practical. If a phase removes an incident-only diagnostic, commit that deletion with the phase that made the diagnostic unnecessary.
+- Do not keep tests for deleted probes, old partial placement shapes, or debug-only accounting.
+- Do not preserve a diagnostic field merely because a runtime panel currently displays it. The runtime panel is a low-priority consumer compared with clean texture/page ownership.
+
 ### Pre-Structural Commit Cleanup
 
 Before committing the current investigation work or starting the structural phases, split temporary diagnostics away from durable fixes.
@@ -382,6 +398,8 @@ Debt:
 
 ### Phase 3: Make Alias Sets Explicit
 
+Status: completed.
+
 Deliverables:
 
 - Add a registry-level physical entry record with:
@@ -394,6 +412,15 @@ Deliverables:
 - Scope alias sets by physical source plus compatible page policy. Same pixels with incompatible wrap/sample/page behavior must not collapse into one alias set.
 - Change repack and page-local absorption to update the physical entry once, then emit resolved placements for its alias set.
 
+Completed implementation:
+
+- Added `VisualTexturePhysicalEntry` as the shared committed placement record behind logical `VisualTextureRegistryEntry` aliases.
+- Moved the committed alias set onto `VisualTexturePhysicalEntry.textureUseIds`.
+- Changed alias creation to add logical texture-use ids to the shared physical entry instead of relying on registry-key parsing.
+- Changed page-local repack, placement resolution, page inspection, and atlas diagnostics to read page/rect/revision data from the shared physical entry.
+- Removed `parseTextureUseIdFromVisualTextureKey`; repack now emits moved placements from the explicit alias set.
+- Strengthened the alias repack regression so both logical aliases must resolve to the moved page version.
+
 Acceptance criteria:
 
 - Repack code does not parse texture keys to recover logical aliases.
@@ -404,6 +431,34 @@ Test strategy:
 
 - Replace `updates every logical alias when page-local repack moves a shared physical source` with a smaller test against the alias set invariant plus one integration test for repack.
 - Keep coverage for the bug class, but remove the diary-style registry archaeology once aliases are explicit.
+
+Debug cleanup:
+
+- Remove any diagnostics or tests that only exist to prove aliases can be rediscovered by parsing texture keys.
+- Keep resolved-placement diagnostics only if they report the explicit alias set/page-version relationship rather than the old inferred registry shape.
+
+Decision:
+
+- Kept logical `VisualTextureRegistryEntry` records for ownership, wrap/material policy, and lease counting, but made every logical alias point at a shared `VisualTexturePhysicalEntry` for page content, rect, revision, and alias-set state. This is the clean cut for the bug class without forcing Phase 4's payload/binding collapse into the same commit.
+
+Debt:
+
+- `VisualTextureRegistryEntry` still carries some mirrored physical fields (`textureRefId`, `rect`, `textureWidth`, `textureHeight`, `placementRevision`, and related diagnostic fields) for older call sites. Phase 4 should either delete those fields or confine them behind accessors so renderer payloads cannot combine stale logical copies with current physical placement state.
+- `physicalEntryId` is intentionally stable across repacks (`textureRefId|physicalSourceKey`) and does not encode rect. If a later phase needs per-revision identity, use `TexturePageVersion` rather than overloading this id.
+
+Verification:
+
+- `npm run test:ts -- --run src/lib/textures/texture-manager.test.ts` passed.
+- `npm run test:ts -- --run src/lib/runtime/client-runtime.test.ts src/lib/textures/texture-manager.test.ts src/lib/renderer/webgl2/webgl2-object-material-payloads.test.ts src/lib/renderer/webgl2/webgl2-terrain-payloads.test.ts src/lib/renderer/webgl2/webgl2-renderer.test.ts src/lib/runtime/static-commit-installer.test.ts` passed.
+- `npm run check` passed.
+- `npm run lint:ts` passed.
+- `git diff --check` passed.
+
+Resteering after Phase 3:
+
+- Phase 4 still makes sense, but it should start by deleting or confining mirrored physical fields on `VisualTextureRegistryEntry`; otherwise page-version payload work will continue to have two possible sources of truth.
+- The explicit alias set removed the need for registry-key parsing during repack. It did not remove the need for conservative dirtying yet.
+- Terrain and object-material paths already receive page versions, but they still consume placements through separate payload builders. Phase 4 should make those builders consume one production placement shape rather than hand-assembled fields.
 
 ### Phase 4: Collapse Placement And Binding Inputs Around Page Version
 
@@ -427,6 +482,12 @@ Test strategy:
 - Update payload tests to build placements through the shared page-version helper.
 - Delete tests that manually fabricate partial `ResolvedTexturePlacement` shapes once those shapes are no longer valid.
 
+Debug cleanup:
+
+- Revisit `rendererTextures` selection diagnostics after the shared placement input exists.
+- Keep page version, role, rect, dimensions, and texture binding summaries if they mirror the real payload contract.
+- Delete fields that duplicate production state only because older call sites accepted incomplete placement records.
+
 ### Phase 5: Renderer State Boundary Audit
 
 Deliverables:
@@ -446,31 +507,40 @@ Test strategy:
 - Keep one state-boundary regression for scene-domain target allocation until the helper exists.
 - After the helper lands, replace caller-specific tests with one helper-level test plus one integration test.
 
+Debug cleanup:
+
+- Do not add broad WebGL trace diagnostics as a substitute for a state-boundary abstraction.
+- If a runtime diagnostic is needed, expose the wrapper/helper state at the boundary, not raw per-draw probe data.
+
 ### Phase 6: Diagnostics Cutover And Probe Cleanup
 
 Deliverables:
 
-- Keep stable diagnostics:
+- Finish the diagnostic split started before the structural phases.
+- Keep stable diagnostics only where they expose active renderer contracts:
   - selected draw unit geometry bounds,
   - resolved texture placements,
   - texture refs/page versions used by prepared payloads.
-- Remove temporary diagnostics:
+- Remove incident-only diagnostics:
   - GPU rect readback probes,
   - per-rect CPU hashes,
   - mirrored/flipped hash variants,
-  - any fields that exist only to debug this incident.
+  - alias rediscovery output,
+  - any fields that exist only to debug this incident or bridge old placement shapes.
 - Delete the current GPU probe plumbing instead of preserving it behind a debug flag. If this class of issue returns, write a fresh focused probe for that investigation.
 
 Acceptance criteria:
 
 - Normal selection diagnostics explain what the renderer intends to draw without expensive GPU readback.
 - GPU rect readback probes, mirrored/flipped hash variants, and probe-specific diagnostics are removed.
+- Remaining selection diagnostics correspond to production composite types, not hand-assembled debug-only records.
 - No tests depend on debug-only probe output.
 
 Test strategy:
 
 - Delete probe-output assertions from general runtime diagnostics tests.
 - Delete focused GPU-probe tests with the probe implementation.
+- Rewrite or delete diagnostics tests that depend on legacy partial placement shapes once the production types prevent those shapes.
 
 ### Phase 7: Test Suite Cleanup And Clean Cutover
 

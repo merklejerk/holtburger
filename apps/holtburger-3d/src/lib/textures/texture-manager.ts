@@ -141,6 +141,12 @@ export class TextureManager {
 		TexturePlacementRecord
 	>();
 	readonly #dependencyItemIdsByResourceId = new Map<string, Set<string>>();
+	readonly #pageLifecycleTotals: TextureAtlasPageLifecycleTotals = {
+		absorbed: 0,
+		created: 0,
+		reclaimed: 0,
+		retained: 0,
+	};
 	#filteringMode: TextureFilteringMode;
 	#mutationQueue: Promise<void> = Promise.resolve();
 	#revision = 0;
@@ -252,6 +258,7 @@ export class TextureManager {
 				multiSourcePageCount: sumNumbers(
 					buckets.map((bucket) => bucket.multiSourcePageCount),
 				),
+				pageLifecycle: { ...this.#pageLifecycleTotals },
 				texturePageCount: textureRefs.size,
 				unmippedPageCount: pages.filter((page) => !page.mipmapsGenerated)
 					.length,
@@ -778,6 +785,7 @@ export class TextureManager {
 		const absorbedGroups = this.#absorbPendingTexturePlacementGroups(
 			groupPendingTexturePlacements(pendingPlacements),
 		);
+		this.#pageLifecycleTotals.absorbed += absorbedGroups.placements.length;
 		runtimePlacements.push(...absorbedGroups.placements);
 		const plannedGroups = this.#planPendingTexturePackingGroups(
 			absorbedGroups.remainingGroups,
@@ -792,9 +800,10 @@ export class TextureManager {
 		);
 
 		for (const packedGroup of packedGroups) {
-			runtimePlacements.push(
-				...this.#commitPackedTexturePlacementGroup(packedGroup),
-			);
+			const packedPlacements =
+				this.#commitPackedTexturePlacementGroup(packedGroup);
+			this.#pageLifecycleTotals.created += packedPlacements.length;
+			runtimePlacements.push(...packedPlacements);
 		}
 
 		return {
@@ -1221,18 +1230,20 @@ export class TextureManager {
 			}
 		}
 
-		const reclaimedTextureRefIds = this.#collectFullyFreeTextureRefIds(
+		const retention = this.#collectTextureRefRetentionForMutation(
 			retainedTextureRefIdsForMutation,
 		);
-		for (const textureRefId of reclaimedTextureRefIds) {
+		this.#pageLifecycleTotals.reclaimed += retention.reclaimed.length;
+		this.#pageLifecycleTotals.retained += retention.retained.length;
+		for (const textureRefId of retention.reclaimed) {
 			this.#deleteTextureRef(textureRefId);
 		}
-		return reclaimedTextureRefIds;
+		return retention.reclaimed;
 	}
 
-	#collectFullyFreeTextureRefIds(
+	#collectTextureRefRetentionForMutation(
 		retainedTextureRefIds: ReadonlySet<string>,
-	): readonly string[] {
+	): TextureRefRetentionForMutation {
 		const recordsByTextureRefId = new Map<string, TexturePlacementRecord[]>();
 		for (const record of this.#placementRecordsByItemId.values()) {
 			const records = recordsByTextureRefId.get(record.textureRefId) ?? [];
@@ -1240,20 +1251,27 @@ export class TextureManager {
 			recordsByTextureRefId.set(record.textureRefId, records);
 		}
 
-		const freeTextureRefIds: string[] = [];
+		const reclaimed: string[] = [];
+		const retained: string[] = [];
 		for (const [textureRefId, records] of recordsByTextureRefId) {
 			if (retainedTextureRefIds.has(textureRefId)) {
+				retained.push(textureRefId);
 				continue;
 			}
 			if (records.some((record) => record.activeReferenceCount > 0)) {
+				retained.push(textureRefId);
 				continue;
 			}
 			if (this.#hasLeasedTextureRef(textureRefId)) {
+				retained.push(textureRefId);
 				continue;
 			}
-			freeTextureRefIds.push(textureRefId);
+			reclaimed.push(textureRefId);
 		}
-		return freeTextureRefIds.sort();
+		return {
+			reclaimed: reclaimed.sort(),
+			retained: retained.sort(),
+		};
 	}
 
 	#hasLeasedTextureRef(textureRefId: string): boolean {
@@ -1351,6 +1369,18 @@ interface TexturePlacementRecord {
 	readonly rect: readonly [number, number, number, number];
 	readonly textureRefId: string;
 	readonly width: number;
+}
+
+interface TextureAtlasPageLifecycleTotals {
+	absorbed: number;
+	created: number;
+	reclaimed: number;
+	retained: number;
+}
+
+interface TextureRefRetentionForMutation {
+	readonly reclaimed: readonly string[];
+	readonly retained: readonly string[];
 }
 
 interface TextureAtlasBucketFacts {

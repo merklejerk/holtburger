@@ -78,16 +78,39 @@ Required discriminants:
 
 - source kind and source id:
   - render surface id for render-surface textures;
-  - palette id, palette domain, and palette replacements for palette textures;
+  - base palette id, palette domain, and normalized replacement range fingerprints for palette textures;
   - direct/dynamic source identity for runtime authored textures.
 - usage/role where it changes bytes or shader interpretation:
   - `rgba-color`, `rgba-detail`, `index8`, `index16`, `palette`, terrain mask/color/detail.
 - prepared output format/color interpretation.
-- sampler policy only where it changes physical atlas legality:
-  - wrap mode is required while atlas pages are sampled with fixed wrap mode;
-  - filter/mips/aniso belong here only if they require separate pages/sampler state rather than renderer sampler policy.
-- atlas/page class when shader or page layout requires separation:
-  - texture domain/purpose/page sample class/gutter policy as needed.
+- page sample class only where shader interpretation differs.
+
+Sampler axes that must not enter `TextureKey`:
+
+- material wrap mode;
+- global filtering mode;
+- mip generation policy;
+- anisotropy.
+
+Those axes belong elsewhere:
+
+- material wrap mode belongs to `TextureBindingId` / material binding data;
+- physical wrap belongs to `TexturePageClass` only when shader virtual wrap is unavailable;
+- filter/mips/aniso belong to renderer sampler policy derived from global filtering mode and sample class.
+
+Palette texture replacement policy:
+
+- Use one identity policy for all palette texture replacements.
+- Never use replacement palette asset ids in `TextureKey`.
+- Never use prepared/composed palette texture pixel hashes in `TextureKey`.
+- Replacement identity is the canonical list of final replacement ranges:
+  - `offset`;
+  - `count`;
+  - cheap deterministic 64-bit hash of the replacement range bytes/colors.
+- Sort normalized replacement ranges by `offset`, then `count`, then hash.
+- Use `repl=none` when there are no replacements.
+- The resolver may read replacement range color bytes needed to compute these fingerprints, but must not compose or load full prepared palette texture texels just to predict `TextureKey`.
+- Use one shared cheap 64-bit hash implementation for replacement range fingerprints. This is an identity fingerprint, not a cryptographic guarantee.
 
 Explicitly forbidden discriminants:
 
@@ -98,6 +121,10 @@ Explicitly forbidden discriminants:
 - object instance id;
 - bake task id;
 - generated batch id;
+- material wrap mode;
+- global filtering mode;
+- mip generation policy;
+- anisotropy;
 - placement revision;
 - renderer `textureRefId`.
 
@@ -110,7 +137,27 @@ Recommended discriminants:
 - material resource id or draw resource id;
 - material slot;
 - binding role: base color, detail, index, palette;
+- material wrap mode for bindings whose sampling semantics depend on wrap;
 - material variant signature if one material slot emits multiple consumer variants.
+
+### TexturePageClass
+
+Identifies physical atlas page compatibility. It may include renderer/domain constraints that affect packing or upload legality, but it is not canonical texture identity.
+
+Recommended discriminants:
+
+- texture domain/purpose when shader or page layout differs. Terrain and object pages remain separated in this refactor unless a later proof shows page/shader compatibility;
+- page sample class;
+- page format/gutter policy;
+- physical wrap mode only when the renderer cannot virtualize wrap in shader for that domain/sample class.
+
+Explicitly forbidden discriminants:
+
+- material binding id;
+- owner id;
+- global filtering mode;
+- mip generation policy;
+- anisotropy.
 
 ### TextureOwnerId
 
@@ -121,6 +168,10 @@ Recommended discriminants:
 - layer owner id for layer-owned textures;
 - visual resource id for reusable static object visual resources;
 - dynamic resource id for runtime visual resources.
+
+### Identity Serialization
+
+Internally, identity builders should accept structured inputs and return branded strings only at map or serialization boundaries. Diagnostics should print the relevant structured facts beside opaque ids. Do not make human-readable mega-strings the primary API shape.
 
 ## Phased Implementation
 
@@ -135,15 +186,23 @@ Recommended discriminants:
   - `TextureRequest`
 - Add deterministic builders:
   - `createMaterialTextureSourceKey`
+  - `createPaletteReplacementFingerprint`
+  - `createPaletteReplacementRecipeKey`
   - `createTextureKey`
   - `createTextureBindingId`
   - `createTextureOwnerId`
-- Build `TextureKey` from the existing material source identity plus sampler/page facts. Do not create a parallel canonicalization path beside current `sourceKey` and `physicalSourceKey` logic.
+  - `createTexturePageClass`
+- Build `TextureKey` from the existing material source identity plus shader interpretation facts. Do not create a parallel canonicalization path beside current `sourceKey` and `physicalSourceKey` logic.
+- Build `TexturePageClass` separately from `TextureKey`; sampler/page facts that are only physical compatibility constraints must not leak into canonical texture identity.
 
 **Acceptance criteria**
 
-- New tests prove `TextureKey` does not change across landblocks for the same source/sampler.
+- New tests prove `TextureKey` does not change across landblocks for the same source and shader interpretation.
 - New tests prove `TextureBindingId` and `TextureOwnerId` may differ while sharing a `TextureKey`.
+- New tests prove changing filter/mips/aniso does not change `TextureKey`.
+- New tests prove changing material wrap changes binding/page compatibility only where required, not source texture identity.
+- New tests prove palette texture keys are based on replacement range fingerprints, not replacement palette asset ids or prepared texture content hashes.
+- New tests prove replacement range canonicalization is stable across caller ordering.
 - No production behavior changes yet.
 - No adapter accepts legacy `textureUseId` values as a `TextureKey`.
 - New builder names do not preserve `textureUseId` language.
@@ -162,7 +221,9 @@ Recommended discriminants:
   - `bindingId`;
   - `textureKey`;
   - `ownerId` or owner ids where already known;
-  - source and sampler facts.
+  - source facts;
+  - material binding facts such as wrap;
+  - physical page compatibility facts.
 - Stop setting `bindingKey`, `placementItemId`, and `textureUseId` to the same string.
 - Replace `ObjectVisualTexturePlacementSnapshot.itemIdsByTextureUseId` with a snapshot lookup keyed by `TextureBindingId`, or remove the bridge entirely if the bake path can carry numeric placement ids alongside binding ids directly.
 - Update `static-material-texture-policy.ts`, terrain material planning, object material planning, and structured interior planning.
@@ -181,6 +242,7 @@ Recommended discriminants:
 **Deliverables**
 
 - Replace `VisualTextureKey = domain + bucket + textureUseId` with registry entries keyed by `TextureKey`.
+- Stop aliasing palette recipes by prepared `contentHash`; any lower-level content dedupe must not become canonical texture identity.
 - Replace `physicalEntry.textureUseIds` and implicit shared-entry aliasing with:
   - one physical entry per `TextureKey`;
   - explicit binding maps outside the physical entry.
@@ -195,6 +257,7 @@ Recommended discriminants:
 - No helper needs to “find aliases” by scanning registry entries.
 - A page move updates one texture-pool entry, then all active bindings derive from that entry.
 - The existing resident-page fuzz invariant remains and is expressed in terms of `TextureKey`.
+- Palette replacement fuzz covers runtime-authored replacement byte ranges and proves resolver-predictable keys do not require prepared texture texels.
 - `createTextureUseIdsForRegistryPhysicalEntry` and similar alias fanout helpers are gone.
 - `VisualTextureKey`, `VisualTexturePhysicalEntry.textureUseIds`, and shared mutable physical entries are gone.
 
@@ -307,10 +370,13 @@ Recommended discriminants:
   - Mitigation: enforce the shim policy above; each phase must delete the old equality bridge in the touched path before moving on.
 - **Risk: cleanup becomes a rename-only pass.**
   - Mitigation: Phase 7 audits behavior boundaries, tests, diagnostics, and type shapes, not just symbol names.
+- **Risk: cheap palette replacement fingerprints collide.**
+  - Mitigation: include `offset` and `count` outside the hash, use a shared deterministic 64-bit hash over replacement range bytes/colors, and treat a collision as acceptable visual-risk rather than a correctness/security guarantee. Do not upgrade to cryptographic hashes unless measured collisions become a real problem.
 
 ## Definition of Done
 
-- Same source/sampler texture in two landblocks maps to one `TextureKey`.
+- Same source and shader interpretation in two landblocks maps to one `TextureKey`.
+- Palette texture identity is resolver-predictable from base palette id, domain, usage, and replacement range fingerprints; it does not depend on replacement palette asset ids or prepared texture content hashes.
 - Distinct material consumers bind through distinct `TextureBindingId`s without creating duplicate texture pool entries.
 - Landblock eviction releases only owner references, not canonical texture identity.
 - No texture-manager registry entry shares a mutable physical placement object with another entry.
@@ -323,7 +389,4 @@ Recommended discriminants:
 
 ## Open Questions
 
-- Should filter/mip/aniso be part of `TextureKey`, or should renderer sampler state absorb them while only wrap/page class affects atlas identity?
-- Should terrain and object textures share a cross-domain pool when source/sampler match, or do shader/page-class differences justify domain separation?
-- Do palette replacement keys fully describe prepared palette texture bytes, or do we need additional palette source/version facts?
-- Should `TextureBindingId` be human-readable strings for diagnostics or structured objects serialized only at boundaries?
+- None currently. Re-open only with a concrete counterexample from ACE, ACViewer, or captured runtime data.

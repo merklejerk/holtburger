@@ -226,12 +226,12 @@ export class TextureManager {
 				entry.filteringMode = samplerPolicy.filteringMode;
 				entry.mipmapsGenerated = samplerPolicy.generateMipmaps;
 				entry.samplerPolicyKey = samplerPolicy.policyKey;
-				policiesByTextureRefId.set(entry.textureRefId, {
+				policiesByTextureRefId.set(entry.physicalEntry.textureRefId, {
 					anisotropy: samplerPolicy.anisotropy,
 					filteringMode: samplerPolicy.filteringMode,
 					mipmapsGenerated: samplerPolicy.generateMipmaps,
 					samplerPolicyKey: samplerPolicy.policyKey,
-					textureRefId: entry.textureRefId,
+					textureRefId: entry.physicalEntry.textureRefId,
 				});
 			}
 		}
@@ -561,13 +561,17 @@ export class TextureManager {
 						// that page revision has not yet been handed to the renderer.
 						if (
 							staged.entry.leaseCount === 0 &&
-							!uploadedTextureRefIds.has(staged.entry.textureRefId)
+							!uploadedTextureRefIds.has(
+								staged.entry.physicalEntry.textureRefId,
+							)
 						) {
 							const pendingUpload =
 								this.#consumeUnuploadedTexturePlacement(staged.entry);
 							if (pendingUpload) {
 								placements.push(pendingUpload);
-								uploadedTextureRefIds.add(staged.entry.textureRefId);
+								uploadedTextureRefIds.add(
+									staged.entry.physicalEntry.textureRefId,
+								);
 							}
 						}
 						staged.entry.leaseCount += 1;
@@ -617,17 +621,11 @@ export class TextureManager {
 			if (!entry) {
 				continue;
 			}
-			resolvedTexturePlacements.push({
-				pageVersion: {
-					placementRevision: entry.placementRevision,
-					textureRefId: entry.textureRefId,
-				},
-				rect: entry.rect,
-				textureHeight: entry.textureHeight,
-				textureRefId: entry.textureRefId,
-				textureUseId: textureUse.textureUseId,
-				textureWidth: entry.textureWidth,
-			});
+			resolvedTexturePlacements.push(
+				...createResolvedTexturePlacementsForEntry(entry, [
+					textureUse.textureUseId,
+				]),
+			);
 		}
 
 		if (
@@ -694,8 +692,8 @@ export class TextureManager {
 				);
 				deleteRegistryEntryAliases(registry, entry);
 				registry.revision += 1;
-				if (!this.#hasTextureRef(entry.textureRefId)) {
-					removedTextureRefIds.push(entry.textureRefId);
+				if (!this.#hasTextureRef(entry.physicalEntry.textureRefId)) {
+					removedTextureRefIds.push(entry.physicalEntry.textureRefId);
 				}
 			}
 		}
@@ -1008,8 +1006,8 @@ export class TextureManager {
 			});
 			runtimePlacements.push(runtimePlacement);
 			for (const existingEntry of existingPage.entries) {
-				existingEntry.placementRevision = placementRevision;
-				existingEntry.runtimePlacement = runtimePlacement;
+				existingEntry.physicalEntry.placementRevision = placementRevision;
+				existingEntry.physicalEntry.runtimePlacement = runtimePlacement;
 			}
 			for (const { entry, placement } of pagePlacements) {
 				const registryEntry = createRegistryEntryForAbsorbedPlacement({
@@ -1414,18 +1412,9 @@ export class TextureManager {
 					anisotropy: group.samplerPolicy.anisotropy,
 					domain: entry.domain,
 					filteringMode: group.samplerPolicy.filteringMode,
-					format: page.format,
-					gutterPixels: getRuntimeTexturePageGutterPixels(
-						group.domain,
-						entry.pagePolicy,
-					),
-					gutterEdgeMode:
-						createTexturePackingSourceGutterEdgeMode(entry.pagePolicy) ?? "clamp",
 					itemId: entry.textureUse.textureUseId,
 					leaseCount: 0,
 					mipmapsGenerated: group.samplerPolicy.generateMipmaps,
-					pageId,
-					pageClassKey: group.pageClassKey,
 					physicalEntry: createVisualTexturePhysicalEntry({
 						format: page.format,
 						gutterEdgeMode:
@@ -1448,23 +1437,14 @@ export class TextureManager {
 						textureWidth: page.width,
 						textureHeight: page.height,
 					}),
-					physicalSourceKey: entry.physicalSourceKey,
-					placementRevision,
 					purpose: classifyTextureUsagePurpose(
 						entry.textureUse.source,
 						entry.domain,
 					),
-					rect: rect.rect,
-					runtimePlacement: {
-						...runtimePlacements[runtimePlacements.length - 1]!,
-					},
 					sampleClass: group.pagePolicy.sampleClass,
 					samplerPolicyKey: group.samplerPolicy.policyKey,
 					source: entry.textureUse.source,
 					placementBucketKey: entry.placementBucketKey,
-					textureHeight: page.height,
-					textureRefId,
-					textureWidth: page.width,
 					wrapS: entry.pagePolicy.wrapS,
 					wrapT: entry.pagePolicy.wrapT,
 				};
@@ -1491,7 +1471,7 @@ export class TextureManager {
 	#hasTextureRef(textureRefId: string): boolean {
 		for (const registry of this.#placementBucketRegistries.values()) {
 			for (const entry of registry.entries.values()) {
-				if (entry.textureRefId === textureRefId) {
+				if (entry.physicalEntry.textureRefId === textureRefId) {
 					return true;
 				}
 			}
@@ -1594,7 +1574,9 @@ export class TextureManager {
 		const retainedTextureRefIdsForMutation = new Set(retainedTextureRefIds);
 		for (const placement of pendingPlacements) {
 			if (placement.entry) {
-				retainedTextureRefIdsForMutation.add(placement.entry.textureRefId);
+				retainedTextureRefIdsForMutation.add(
+					placement.entry.physicalEntry.textureRefId,
+				);
 			}
 		}
 
@@ -1645,7 +1627,10 @@ export class TextureManager {
 	#hasLeasedTextureRef(textureRefId: string): boolean {
 		for (const registry of this.#placementBucketRegistries.values()) {
 			for (const entry of registry.entries.values()) {
-				if (entry.textureRefId === textureRefId && entry.leaseCount > 0) {
+				if (
+					entry.physicalEntry.textureRefId === textureRefId &&
+					entry.leaseCount > 0
+				) {
 					return true;
 				}
 			}
@@ -1656,7 +1641,7 @@ export class TextureManager {
 	#deleteTextureRef(textureRefId: string): void {
 		for (const registry of this.#placementBucketRegistries.values()) {
 			for (const [textureKey, entry] of registry.entries) {
-				if (entry.textureRefId === textureRefId) {
+				if (entry.physicalEntry.textureRefId === textureRefId) {
 					registry.entries.delete(textureKey);
 				}
 			}
@@ -1685,8 +1670,8 @@ export class TextureManager {
 		entry: VisualTextureRegistryEntry,
 	): RuntimeTexturePlacement | null {
 		const pageVersionKey = createTexturePageVersionKey({
-			placementRevision: entry.placementRevision,
-			textureRefId: entry.textureRefId,
+			placementRevision: entry.physicalEntry.placementRevision,
+			textureRefId: entry.physicalEntry.textureRefId,
 		});
 		const placement =
 			this.#unuploadedTexturePlacementsByPageVersion.get(pageVersionKey) ?? null;
@@ -1750,30 +1735,15 @@ interface VisualTextureRegistryEntry {
 	anisotropy: number;
 	readonly domain: VisualTextureDomain;
 	filteringMode: TextureFilteringMode;
-	readonly format: RuntimeTexturePlacement["format"];
-	/** Padding reserved around this source inside its atlas page. */
-	readonly gutterPixels: number;
-	/** Edge sampling used to populate this physical source's gutter pixels. */
-	readonly gutterEdgeMode: "clamp" | "repeat";
 	readonly itemId: string;
 	readonly placementBucketKey: TexturePlacementBucketKey;
 	/** Shared committed placement state for every logical alias of this source. */
 	readonly physicalEntry: VisualTexturePhysicalEntry;
-	readonly physicalSourceKey: string;
 	readonly source: MaterialTextureDataUseIdentity;
-	readonly textureRefId: string;
-	readonly pageId: string;
-	/** Compatibility class used to decide whether later sources can share this page. */
-	readonly pageClassKey: string;
-	placementRevision: number;
 	readonly purpose: TextureUsagePurpose;
 	mipmapsGenerated: boolean;
 	readonly sampleClass: RuntimeTexturePagePolicy["sampleClass"];
 	samplerPolicyKey: string;
-	textureWidth: number;
-	textureHeight: number;
-	rect: readonly [number, number, number, number];
-	runtimePlacement: RuntimeTexturePlacement;
 	readonly wrapS: RuntimeTexturePagePolicy["wrapS"];
 	readonly wrapT: RuntimeTexturePagePolicy["wrapT"];
 	leaseCount: number;
@@ -1980,14 +1950,14 @@ function toPlannedTexturePlacement<
 	textureUseId: string,
 ): PlannedTexturePlacement<TPlacementItemId> {
 	return {
-		height: entry.textureHeight,
+		height: entry.physicalEntry.textureHeight,
 		itemId,
-		pageId: entry.pageId,
+		pageId: entry.physicalEntry.pageId,
 		purpose: entry.purpose,
-		rect: entry.rect,
-		textureRefId: entry.textureRefId,
+		rect: entry.physicalEntry.rect,
+		textureRefId: entry.physicalEntry.textureRefId,
 		textureUseId,
-		width: entry.textureWidth,
+		width: entry.physicalEntry.textureWidth,
 	};
 }
 
@@ -2008,7 +1978,7 @@ function findRegistryEntryBySource(
 ): VisualTextureRegistryEntry | null {
 	for (const entry of registry.entries.values()) {
 		if (
-			entry.physicalSourceKey === physicalSourceKey &&
+			entry.physicalEntry.physicalSourceKey === physicalSourceKey &&
 			entry.sampleClass === pagePolicy.sampleClass &&
 			(usesShaderVirtualWrap(domain, pagePolicy) ||
 				(entry.wrapS === pagePolicy.wrapS && entry.wrapT === pagePolicy.wrapT))
@@ -2076,7 +2046,9 @@ function uniqueSortedRegistryEntries(
 	registry: VisualTexturePlacementBucketRegistry,
 ): readonly VisualTextureRegistryEntry[] {
 	return Array.from(new Set(registry.entries.values())).sort((left, right) =>
-		left.textureRefId.localeCompare(right.textureRefId),
+		left.physicalEntry.textureRefId.localeCompare(
+			right.physicalEntry.textureRefId,
+		),
 	);
 }
 
@@ -2287,13 +2259,14 @@ function createExistingAtlasPagesForAbsorption(
 		if (
 			entry.domain !== group.domain ||
 			entry.placementBucketKey !== group.placementBucketKey ||
-			entry.pageClassKey !== group.pageClassKey
+			entry.physicalEntry.pageClassKey !== group.pageClassKey
 		) {
 			continue;
 		}
-		const pageEntries = entriesByTextureRefId.get(entry.textureRefId) ?? [];
+		const pageEntries =
+			entriesByTextureRefId.get(entry.physicalEntry.textureRefId) ?? [];
 		pageEntries.push(entry);
-		entriesByTextureRefId.set(entry.textureRefId, pageEntries);
+		entriesByTextureRefId.set(entry.physicalEntry.textureRefId, pageEntries);
 	}
 
 	return [...entriesByTextureRefId.values()]
@@ -2362,7 +2335,9 @@ function selectPageLocalRepackPlan(
 					...group.entries.map((entry) =>
 						getRuntimeTexturePageGutterPixels(group.domain, entry.pagePolicy),
 					),
-					...existingPage.physicalEntries.map((entry) => entry.gutterPixels),
+					...existingPage.physicalEntries.map(
+						(entry) => entry.physicalEntry.gutterPixels,
+					),
 				),
 				maxTextureCount: 1,
 				maxTextureSize: MAX_RUNTIME_ATLAS_PAGE_SIZE,
@@ -2476,16 +2451,9 @@ function createRegistryEntryForAbsorbedPlacement(options: {
 		anisotropy: options.group.samplerPolicy.anisotropy,
 		domain: options.entry.domain,
 		filteringMode: options.group.samplerPolicy.filteringMode,
-		format: options.texturePage.format,
-		gutterPixels: options.placement.gutterPixels,
-		gutterEdgeMode:
-			createTexturePackingSourceGutterEdgeMode(options.entry.pagePolicy) ??
-			"clamp",
 		itemId: options.entry.textureUse.textureUseId,
 		leaseCount: 0,
 		mipmapsGenerated: options.group.samplerPolicy.generateMipmaps,
-		pageClassKey: options.group.pageClassKey,
-		pageId: options.texturePage.pageId,
 		physicalEntry: createVisualTexturePhysicalEntry({
 			format: options.texturePage.format,
 			gutterEdgeMode:
@@ -2508,26 +2476,14 @@ function createRegistryEntryForAbsorbedPlacement(options: {
 			textureWidth: options.texturePage.width,
 			textureHeight: options.texturePage.height,
 		}),
-		physicalSourceKey: options.entry.physicalSourceKey,
 		placementBucketKey: options.entry.placementBucketKey,
-		placementRevision: options.placementRevision,
 		purpose: classifyTextureUsagePurpose(
 			options.entry.textureUse.source,
 			options.entry.domain,
 		),
-		rect: [
-			options.placement.x,
-			options.placement.y,
-			options.placement.width,
-			options.placement.height,
-		],
-		runtimePlacement: options.runtimePlacement,
 		sampleClass: options.group.pagePolicy.sampleClass,
 		samplerPolicyKey: options.group.samplerPolicy.policyKey,
 		source: options.entry.textureUse.source,
-		textureHeight: options.texturePage.height,
-		textureRefId: options.textureRefId,
-		textureWidth: options.texturePage.width,
 		wrapS: options.entry.pagePolicy.wrapS,
 		wrapT: options.entry.pagePolicy.wrapT,
 	};
@@ -2586,16 +2542,6 @@ function updateExistingRegistryEntryForPageLocalRepack(options: {
 	options.entry.physicalEntry.runtimePlacement = options.runtimePlacement;
 	options.entry.physicalEntry.textureHeight = options.texturePage.height;
 	options.entry.physicalEntry.textureWidth = options.texturePage.width;
-	options.entry.placementRevision = options.placementRevision;
-	options.entry.rect = [
-		options.placement.x,
-		options.placement.y,
-		options.placement.width,
-		options.placement.height,
-	];
-	options.entry.runtimePlacement = options.runtimePlacement;
-	options.entry.textureHeight = options.texturePage.height;
-	options.entry.textureWidth = options.texturePage.width;
 }
 
 function createResolvedTexturePlacementsForEntry(
@@ -2660,7 +2606,7 @@ function collectStagedTextureRefIds(
 ): ReadonlySet<string> {
 	return new Set(
 		stagedPlacements.flatMap((placement) =>
-			placement.entry ? [placement.entry.textureRefId] : [],
+			placement.entry ? [placement.entry.physicalEntry.textureRefId] : [],
 		),
 	);
 }
@@ -3121,7 +3067,9 @@ function countWrapModesForEntries(
 function countUniqueSources(
 	entries: readonly VisualTextureRegistryEntry[],
 ): number {
-	const sources = new Set(entries.map((entry) => entry.physicalSourceKey));
+	const sources = new Set(
+		entries.map((entry) => entry.physicalEntry.physicalSourceKey),
+	);
 
 	return sources.size;
 }

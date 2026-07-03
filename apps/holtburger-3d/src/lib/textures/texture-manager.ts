@@ -27,12 +27,15 @@ import {
 import {
 	AtlasTexturePacker,
 	blitTexturePackingSourceWithGutter,
+	createBlankTexturePackingPage,
 	type TexturePacker,
 } from "./packing/packer";
 import {
+	planAtlasLayout,
 	planAtlasPageInsertion,
 	type AtlasLayoutEntry,
 	type AtlasTexturePlacement,
+	type AtlasTexturePage,
 } from "./packing/atlas-layout";
 import type {
 	TexturePackingJob,
@@ -125,6 +128,7 @@ export interface TextureAtlasPageInspectionTexture {
 interface PackedTexturePlacementResult {
 	readonly placements: readonly RuntimeTexturePlacement[];
 	readonly reclaimedTextureRefIds: readonly string[];
+	readonly resolvedTexturePlacements: readonly ResolvedTexturePlacement[];
 }
 
 export class TextureManager {
@@ -528,6 +532,7 @@ export class TextureManager {
 			},
 		);
 		placements.push(...packedResult.placements);
+		resolvedTexturePlacements.push(...packedResult.resolvedTexturePlacements);
 		removedTextureRefIds = uniqueSortedStrings([
 			...removedTextureRefIds,
 			...packedResult.reclaimedTextureRefIds,
@@ -576,7 +581,9 @@ export class TextureManager {
 		return {
 			placements,
 			removedTextureRefIds,
-			resolvedTexturePlacements,
+			resolvedTexturePlacements: uniqueResolvedTexturePlacements(
+				resolvedTexturePlacements,
+			),
 			revision: this.#revision,
 		};
 	}
@@ -782,7 +789,7 @@ export class TextureManager {
 					options.retainedTextureRefIds,
 				)
 			: [];
-		const absorbedGroups = this.#absorbPendingTexturePlacementGroups(
+		const absorbedGroups = await this.#absorbPendingTexturePlacementGroups(
 			groupPendingTexturePlacements(pendingPlacements),
 		);
 		this.#pageLifecycleTotals.absorbed += absorbedGroups.placements.length;
@@ -809,21 +816,25 @@ export class TextureManager {
 		return {
 			placements: runtimePlacements,
 			reclaimedTextureRefIds,
+			resolvedTexturePlacements: absorbedGroups.resolvedTexturePlacements,
 		};
 	}
 
-	#absorbPendingTexturePlacementGroups(
+	async #absorbPendingTexturePlacementGroups(
 		groups: readonly PendingTexturePlacementGroup[],
-	): {
+	): Promise<{
 		readonly placements: readonly RuntimeTexturePlacement[];
 		readonly remainingGroups: readonly PendingTexturePlacementGroup[];
-	} {
+		readonly resolvedTexturePlacements: readonly ResolvedTexturePlacement[];
+	}> {
 		const placements: RuntimeTexturePlacement[] = [];
 		const remainingGroups: PendingTexturePlacementGroup[] = [];
+		const resolvedTexturePlacements: ResolvedTexturePlacement[] = [];
 
 		for (const group of groups) {
-			const result = this.#absorbPendingTexturePlacementGroup(group);
+			const result = await this.#absorbPendingTexturePlacementGroup(group);
 			placements.push(...result.placements);
+			resolvedTexturePlacements.push(...result.resolvedTexturePlacements);
 			if (result.remainingEntries.length > 0) {
 				remainingGroups.push({
 					...group,
@@ -832,17 +843,24 @@ export class TextureManager {
 			}
 		}
 
-		return { placements, remainingGroups };
+		return { placements, remainingGroups, resolvedTexturePlacements };
 	}
 
-	#absorbPendingTexturePlacementGroup(group: PendingTexturePlacementGroup): {
+	async #absorbPendingTexturePlacementGroup(
+		group: PendingTexturePlacementGroup,
+	): Promise<{
 		readonly placements: readonly RuntimeTexturePlacement[];
 		readonly remainingEntries: readonly PendingTexturePlacement[];
-	} {
+		readonly resolvedTexturePlacements: readonly ResolvedTexturePlacement[];
+	}> {
 		const registry = this.#getRegistry(group.domain, group.placementBucketKey);
 		const existingPages = createExistingAtlasPagesForAbsorption(registry, group);
 		if (existingPages.length === 0) {
-			return { placements: [], remainingEntries: group.entries };
+			return {
+				placements: [],
+				remainingEntries: group.entries,
+				resolvedTexturePlacements: [],
+			};
 		}
 
 		const insertionPlan = planAtlasPageInsertion({
@@ -872,8 +890,18 @@ export class TextureManager {
 				entry.textureUse.textureUseId,
 			),
 		);
-		if (insertedEntries.length === 0) {
-			return { placements: [], remainingEntries: group.entries };
+		if (insertedEntries.length < group.entries.length) {
+			const repackResult = await this.#tryPageLocalRepackTexturePlacementGroup(
+				group,
+				existingPages,
+				registry,
+			);
+			if (repackResult.placements.length > 0) {
+				return repackResult;
+			}
+			if (insertedEntries.length === 0) {
+				return repackResult;
+			}
 		}
 
 		const insertedEntriesByTextureUseId = new Map(
@@ -901,6 +929,7 @@ export class TextureManager {
 
 		const placementRevision = registry.revision + 1;
 		const runtimePlacements: RuntimeTexturePlacement[] = [];
+		const resolvedTexturePlacements: ResolvedTexturePlacement[] = [];
 		for (const [textureIndex, pagePlacements] of insertedPlacementsByPage) {
 			const existingPage = existingPages[textureIndex];
 			if (!existingPage) {
@@ -937,6 +966,11 @@ export class TextureManager {
 				for (const textureUseId of entry.textureUseIds) {
 					this.#recordPlacementEntry(registryEntry, textureUseId);
 				}
+				resolvedTexturePlacements.push(
+					...createResolvedTexturePlacementsForEntry(registryEntry, [
+						...entry.textureUseIds,
+					]),
+				);
 			}
 		}
 
@@ -945,6 +979,230 @@ export class TextureManager {
 		return {
 			placements: runtimePlacements,
 			remainingEntries: group.entries.filter((entry) => !insertedEntrySet.has(entry)),
+			resolvedTexturePlacements,
+		};
+	}
+
+	async #tryPageLocalRepackTexturePlacementGroup(
+		group: PendingTexturePlacementGroup,
+		existingPages: readonly ExistingAtlasPageForAbsorption[],
+		registry: VisualTexturePlacementBucketRegistry,
+	): Promise<{
+		readonly placements: readonly RuntimeTexturePlacement[];
+		readonly remainingEntries: readonly PendingTexturePlacement[];
+		readonly resolvedTexturePlacements: readonly ResolvedTexturePlacement[];
+	}> {
+		const repackPlan = selectPageLocalRepackPlan(group, existingPages);
+		if (!repackPlan) {
+			return {
+				placements: [],
+				remainingEntries: group.entries,
+				resolvedTexturePlacements: [],
+			};
+		}
+
+		const placementRevision = registry.revision + 1;
+		const runtimePlacement = await this.#materializePageLocalRepack({
+			group,
+			placementRevision,
+			repackPlan,
+		});
+		const placementByAtlasEntryKey = new Map(
+			repackPlan.layoutPage.placements.map(
+				(placement) => [placement.atlasEntryKey, placement] as const,
+			),
+		);
+		const resolvedTexturePlacements: ResolvedTexturePlacement[] = [];
+
+		for (const physicalEntry of repackPlan.existingPage.physicalEntries) {
+			const placement = placementByAtlasEntryKey.get(physicalEntry.itemId);
+			if (!placement) {
+				throw new Error(
+					`Page-local repack did not return placement for ${physicalEntry.itemId}.`,
+				);
+			}
+			const physicalPlacementKey =
+				createRegistryEntryPhysicalPlacementKey(physicalEntry);
+			for (const existingEntry of repackPlan.existingPage.entries) {
+				if (
+					createRegistryEntryPhysicalPlacementKey(existingEntry) !==
+					physicalPlacementKey
+				) {
+					continue;
+				}
+				updateExistingRegistryEntryForPageLocalRepack({
+					entry: existingEntry,
+					placement,
+					placementRevision,
+					runtimePlacement,
+					texturePage: repackPlan.layoutPage,
+				});
+				const activeReferenceCount =
+					this.#placementRecordsByItemId.get(existingEntry.itemId)
+						?.activeReferenceCount ?? existingEntry.leaseCount;
+				this.#recordPlacementEntry(existingEntry);
+				this.#setPlacementActiveReferenceCount(
+					existingEntry,
+					activeReferenceCount,
+				);
+				resolvedTexturePlacements.push(
+					...createResolvedTexturePlacementsForEntry(existingEntry, [
+						existingEntry.itemId,
+					]),
+				);
+			}
+		}
+
+		for (const pendingEntry of group.entries) {
+			const placement = placementByAtlasEntryKey.get(
+				pendingEntry.textureUse.textureUseId,
+			);
+			if (!placement) {
+				throw new Error(
+					`Page-local repack did not return placement for ${pendingEntry.textureUse.textureUseId}.`,
+				);
+			}
+			const registryEntry = createRegistryEntryForAbsorbedPlacement({
+				entry: pendingEntry,
+				group,
+				placement,
+				placementRevision,
+				runtimePlacement,
+				textureRefId: repackPlan.existingPage.textureRefId,
+				texturePage: {
+					...repackPlan.existingPage,
+					height: repackPlan.layoutPage.height,
+					width: repackPlan.layoutPage.width,
+				},
+			});
+			pendingEntry.entry = registryEntry;
+			for (const textureKey of pendingEntry.textureKeys) {
+				registry.entries.set(textureKey, registryEntry);
+			}
+			this.#recordPlacementEntry(registryEntry);
+			for (const textureUseId of pendingEntry.textureUseIds) {
+				this.#recordPlacementEntry(registryEntry, textureUseId);
+			}
+			resolvedTexturePlacements.push(
+				...createResolvedTexturePlacementsForEntry(registryEntry, [
+					...pendingEntry.textureUseIds,
+				]),
+			);
+		}
+
+		registry.revision = placementRevision;
+
+		return {
+			placements: [runtimePlacement],
+			remainingEntries: [],
+			resolvedTexturePlacements,
+		};
+	}
+
+	async #materializePageLocalRepack(options: {
+		readonly group: PendingTexturePlacementGroup;
+		readonly placementRevision: number;
+		readonly repackPlan: PageLocalRepackPlan;
+	}): Promise<RuntimeTexturePlacement> {
+		const { group, placementRevision, repackPlan } = options;
+		const pageConstraints = createTexturePackingPageConstraints(group);
+		const placementByAtlasEntryKey = new Map(
+			repackPlan.layoutPage.placements.map(
+				(placement) => [placement.atlasEntryKey, placement] as const,
+			),
+		);
+		const sources: PageLocalRepackMaterializationSource[] = [];
+
+		for (const entry of repackPlan.existingPage.physicalEntries) {
+			const placement = placementByAtlasEntryKey.get(entry.itemId);
+			if (!placement) {
+				throw new Error(
+					`Page-local repack did not return placement for existing source ${entry.itemId}.`,
+				);
+			}
+			const directSource = await this.#prepareMaterialTextureSource(entry.source);
+			const physicalSourceKey = createMaterialTexturePhysicalSourceKey(
+				entry.source,
+				directSource,
+			);
+			if (physicalSourceKey !== entry.physicalSourceKey) {
+				throw new Error(
+					`Page-local repack source ${entry.itemId} changed physical key from ${entry.physicalSourceKey} to ${physicalSourceKey}.`,
+				);
+			}
+			sources.push({
+				edgeMode: entry.gutterEdgeMode,
+				placement,
+				source: createTexturePackingPixelSource(directSource),
+			});
+		}
+
+		for (const entry of group.entries) {
+			const placement = placementByAtlasEntryKey.get(entry.textureUse.textureUseId);
+			if (!placement) {
+				throw new Error(
+					`Page-local repack did not return placement for incoming source ${entry.textureUse.textureUseId}.`,
+				);
+			}
+			sources.push({
+				edgeMode:
+					createTexturePackingSourceGutterEdgeMode(entry.pagePolicy) ?? "clamp",
+				placement,
+				source: createTexturePackingPixelSource(entry.source),
+			});
+		}
+
+		const pixels = createBlankTexturePackingPage({
+			fillRgba: pageConstraints.fillRgba,
+			format: pageConstraints.format,
+			height: repackPlan.layoutPage.height,
+			width: repackPlan.layoutPage.width,
+		});
+		for (const source of sources) {
+			if (source.source.format !== pageConstraints.format) {
+				throw new Error(
+					`Page-local repack expected ${pageConstraints.format} source, got ${source.source.format}.`,
+				);
+			}
+			blitTexturePackingSourceWithGutter({
+				destination: pixels,
+				destinationWidth: repackPlan.layoutPage.width,
+				edgeMode: source.edgeMode,
+				format: source.source.format,
+				gutterPixels: source.placement.gutterPixels,
+				source: source.source.pixels,
+				sourceHeight: source.source.height,
+				sourceWidth: source.source.width,
+				x: source.placement.x,
+				y: source.placement.y,
+			});
+		}
+
+		const firstPlacement = repackPlan.layoutPage.placements[0];
+		if (!firstPlacement) {
+			throw new Error("Page-local repack produced an empty page.");
+		}
+		const firstEntry = repackPlan.existingPage.entries[0];
+		if (!firstEntry) {
+			throw new Error("Page-local repack candidate has no existing entries.");
+		}
+		return {
+			...firstEntry.runtimePlacement,
+			anisotropy: group.samplerPolicy.anisotropy,
+			filteringMode: group.samplerPolicy.filteringMode,
+			height: repackPlan.layoutPage.height,
+			mipmapsGenerated: group.samplerPolicy.generateMipmaps,
+			pixels,
+			placementRevision,
+			rect: [
+				firstPlacement.x,
+				firstPlacement.y,
+				firstPlacement.width,
+				firstPlacement.height,
+			],
+			samplerPolicyKey: group.samplerPolicy.policyKey,
+			textureUseId: firstPlacement.atlasEntryKey,
+			width: repackPlan.layoutPage.width,
 		};
 	}
 
@@ -1082,6 +1340,8 @@ export class TextureManager {
 						group.domain,
 						entry.pagePolicy,
 					),
+					gutterEdgeMode:
+						createTexturePackingSourceGutterEdgeMode(entry.pagePolicy) ?? "clamp",
 					itemId: entry.textureUse.textureUseId,
 					leaseCount: 0,
 					mipmapsGenerated: group.samplerPolicy.generateMipmaps,
@@ -1338,6 +1598,8 @@ interface VisualTextureRegistryEntry {
 	readonly format: RuntimeTexturePlacement["format"];
 	/** Padding reserved around this source inside its atlas page. */
 	readonly gutterPixels: number;
+	/** Edge sampling used to populate this physical source's gutter pixels. */
+	readonly gutterEdgeMode: "clamp" | "repeat";
 	readonly itemId: string;
 	readonly placementBucketKey: TexturePlacementBucketKey;
 	readonly physicalSourceKey: string;
@@ -1351,9 +1613,9 @@ interface VisualTextureRegistryEntry {
 	mipmapsGenerated: boolean;
 	readonly sampleClass: RuntimeTexturePagePolicy["sampleClass"];
 	samplerPolicyKey: string;
-	readonly textureWidth: number;
-	readonly textureHeight: number;
-	readonly rect: readonly [number, number, number, number];
+	textureWidth: number;
+	textureHeight: number;
+	rect: readonly [number, number, number, number];
 	runtimePlacement: RuntimeTexturePlacement;
 	readonly wrapS: RuntimeTexturePagePolicy["wrapS"];
 	readonly wrapT: RuntimeTexturePagePolicy["wrapT"];
@@ -1467,10 +1729,23 @@ interface ExistingAtlasPageForAbsorption {
 	readonly format: RuntimeTexturePlacement["format"];
 	readonly height: number;
 	readonly pageId: string;
+	readonly physicalEntries: readonly VisualTextureRegistryEntry[];
 	readonly placements: readonly AtlasTexturePlacement[];
 	readonly pixels: Uint8Array;
 	readonly textureRefId: string;
 	readonly width: number;
+}
+
+interface PageLocalRepackPlan {
+	readonly existingPage: ExistingAtlasPageForAbsorption;
+	readonly layoutPage: AtlasTexturePage;
+	readonly packedArea: number;
+}
+
+interface PageLocalRepackMaterializationSource {
+	readonly edgeMode: "clamp" | "repeat";
+	readonly placement: AtlasTexturePlacement;
+	readonly source: TexturePackingPixelSource;
 }
 
 function createStaticVisualTextureUseCommit(
@@ -1849,12 +2124,14 @@ function createExistingAtlasPagesForAbsorption(
 			if (!firstEntry) {
 				throw new Error("Texture absorption page has no registry entries.");
 			}
+			const physicalEntries = uniquePhysicalTextureEntries(entries);
 			return {
 				entries: uniqueSortedTextureEntries(entries),
 				format: firstEntry.format,
 				height: firstEntry.textureHeight,
 				pageId: firstEntry.pageId,
-				placements: uniquePhysicalTextureEntries(entries).map(
+				physicalEntries,
+				placements: physicalEntries.map(
 					(entry): AtlasTexturePlacement => ({
 						atlasEntryKey: entry.itemId,
 						gutterPixels: entry.gutterPixels,
@@ -1885,6 +2162,75 @@ function createAtlasInsertionEntry(
 		key: entry.textureUse.textureUseId,
 		width: entry.source.width,
 	};
+}
+
+function selectPageLocalRepackPlan(
+	group: PendingTexturePlacementGroup,
+	existingPages: readonly ExistingAtlasPageForAbsorption[],
+): PageLocalRepackPlan | null {
+	let selected: PageLocalRepackPlan | null = null;
+	for (const existingPage of existingPages) {
+		const layout = planAtlasLayout({
+			cohorts: createTexturePackingCohorts(group)?.map((cohort) => ({
+				entryKeys: cohort.textureUseIds,
+				key: cohort.key,
+			})),
+			entries: [
+				...existingPage.physicalEntries.map(createAtlasEntryForExistingPhysicalEntry),
+				...group.entries.map(createAtlasInsertionEntry),
+			],
+			policy: {
+				gutterPixels: Math.max(
+					...group.entries.map((entry) =>
+						getRuntimeTexturePageGutterPixels(group.domain, entry.pagePolicy),
+					),
+					...existingPage.physicalEntries.map((entry) => entry.gutterPixels),
+				),
+				maxTextureCount: 1,
+				maxTextureSize: MAX_RUNTIME_ATLAS_PAGE_SIZE,
+				minTextureHeight: existingPage.height,
+				minTextureWidth: existingPage.width,
+				pageSelection: "minimize-memory",
+			},
+		});
+		const layoutPage = layout.texturePages[0];
+		if (layout.overflows.length > 0 || !layoutPage) {
+			continue;
+		}
+		const plan = {
+			existingPage,
+			layoutPage,
+			packedArea: layoutPage.width * layoutPage.height,
+		};
+		if (
+			selected === null ||
+			comparePageLocalRepackPlans(plan, selected) < 0
+		) {
+			selected = plan;
+		}
+	}
+	return selected;
+}
+
+function createAtlasEntryForExistingPhysicalEntry(
+	entry: VisualTextureRegistryEntry,
+): AtlasLayoutEntry {
+	return {
+		gutterPixels: entry.gutterPixels,
+		height: entry.rect[3],
+		key: entry.itemId,
+		width: entry.rect[2],
+	};
+}
+
+function comparePageLocalRepackPlans(
+	left: PageLocalRepackPlan,
+	right: PageLocalRepackPlan,
+): number {
+	return (
+		left.packedArea - right.packedArea ||
+		left.existingPage.textureRefId.localeCompare(right.existingPage.textureRefId)
+	);
 }
 
 function materializeAbsorbedTexturePage(options: {
@@ -1950,6 +2296,9 @@ function createRegistryEntryForAbsorbedPlacement(options: {
 		filteringMode: options.group.samplerPolicy.filteringMode,
 		format: options.texturePage.format,
 		gutterPixels: options.placement.gutterPixels,
+		gutterEdgeMode:
+			createTexturePackingSourceGutterEdgeMode(options.entry.pagePolicy) ??
+			"clamp",
 		itemId: options.entry.textureUse.textureUseId,
 		leaseCount: 0,
 		mipmapsGenerated: options.group.samplerPolicy.generateMipmaps,
@@ -1978,6 +2327,57 @@ function createRegistryEntryForAbsorbedPlacement(options: {
 		wrapS: options.entry.pagePolicy.wrapS,
 		wrapT: options.entry.pagePolicy.wrapT,
 	};
+}
+
+function updateExistingRegistryEntryForPageLocalRepack(options: {
+	readonly entry: VisualTextureRegistryEntry;
+	readonly placement: AtlasTexturePlacement;
+	readonly placementRevision: number;
+	readonly runtimePlacement: RuntimeTexturePlacement;
+	readonly texturePage: Pick<
+		ExistingAtlasPageForAbsorption,
+		"height" | "width"
+	>;
+}): void {
+	options.entry.placementRevision = options.placementRevision;
+	options.entry.rect = [
+		options.placement.x,
+		options.placement.y,
+		options.placement.width,
+		options.placement.height,
+	];
+	options.entry.runtimePlacement = options.runtimePlacement;
+	options.entry.textureHeight = options.texturePage.height;
+	options.entry.textureWidth = options.texturePage.width;
+}
+
+function createResolvedTexturePlacementsForEntry(
+	entry: VisualTextureRegistryEntry,
+	textureUseIds: readonly string[],
+): readonly ResolvedTexturePlacement[] {
+	return uniqueSortedStrings(textureUseIds).map((textureUseId) => ({
+		rect: entry.rect,
+		textureHeight: entry.textureHeight,
+		textureRefId: entry.textureRefId,
+		textureUseId,
+		textureWidth: entry.textureWidth,
+	}));
+}
+
+function uniqueResolvedTexturePlacements(
+	placements: readonly ResolvedTexturePlacement[],
+): readonly ResolvedTexturePlacement[] {
+	return Array.from(
+		new Map(
+			placements.map((placement) => [placement.textureUseId, placement] as const),
+		).values(),
+	).sort((left, right) => left.textureUseId.localeCompare(right.textureUseId));
+}
+
+function createRegistryEntryPhysicalPlacementKey(
+	entry: Pick<VisualTextureRegistryEntry, "physicalSourceKey" | "rect">,
+): string {
+	return [entry.physicalSourceKey, entry.rect.join(",")].join("|");
 }
 
 function uniquePendingTexturePlacements(

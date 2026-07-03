@@ -2,6 +2,8 @@ export interface AtlasLayoutPolicy {
 	readonly maxTextureSize: number;
 	readonly maxTextureCount: number;
 	readonly gutterPixels: number;
+	readonly minTextureWidth?: number;
+	readonly minTextureHeight?: number;
 	readonly pageSelection?: AtlasLayoutPageSelection;
 	// Grows materialized page dimensions after selecting the winning pack attempt.
 	readonly pageRunway?: AtlasLayoutPageRunway;
@@ -328,8 +330,14 @@ function createAtlasPageSizeCandidates(
 	entries: readonly PaddedAtlasLayoutEntry[],
 	policy: AtlasLayoutPolicy,
 ): AtlasPageSizeCandidate[] {
-	const minWidth = Math.max(...entries.map((entry) => entry.paddedWidth));
-	const minHeight = Math.max(...entries.map((entry) => entry.paddedHeight));
+	const minWidth = Math.max(
+		policy.minTextureWidth ?? 1,
+		...entries.map((entry) => entry.paddedWidth),
+	);
+	const minHeight = Math.max(
+		policy.minTextureHeight ?? 1,
+		...entries.map((entry) => entry.paddedHeight),
+	);
 	const candidates: AtlasPageSizeCandidate[] = [];
 	for (const width of createTextureSizeTiers(minWidth, policy.maxTextureSize)) {
 		for (const height of createTextureSizeTiers(
@@ -865,6 +873,38 @@ function normalizeAtlasLayoutPolicy(
 	}
 	if (!Number.isInteger(policy.gutterPixels) || policy.gutterPixels < 0) {
 		throw new Error("Atlas layout gutter must be a non-negative integer.");
+	}
+	if (
+		policy.minTextureWidth !== undefined &&
+		(!Number.isInteger(policy.minTextureWidth) || policy.minTextureWidth <= 0)
+	) {
+		throw new Error(
+			"Atlas layout minimum texture width must be a positive integer.",
+		);
+	}
+	if (
+		policy.minTextureHeight !== undefined &&
+		(!Number.isInteger(policy.minTextureHeight) || policy.minTextureHeight <= 0)
+	) {
+		throw new Error(
+			"Atlas layout minimum texture height must be a positive integer.",
+		);
+	}
+	if (
+		policy.minTextureWidth !== undefined &&
+		policy.minTextureWidth > policy.maxTextureSize
+	) {
+		throw new Error(
+			"Atlas layout minimum texture width must not exceed max texture size.",
+		);
+	}
+	if (
+		policy.minTextureHeight !== undefined &&
+		policy.minTextureHeight > policy.maxTextureSize
+	) {
+		throw new Error(
+			"Atlas layout minimum texture height must not exceed max texture size.",
+		);
 	}
 	if (
 		policy.pageSelection !== undefined &&

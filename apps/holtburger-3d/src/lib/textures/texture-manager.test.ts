@@ -328,6 +328,180 @@ describe("browser texture manager", () => {
 		});
 	});
 
+	it("grows and repacks one early palette page for a later compatible wave", async () => {
+		const assetService = new FixtureAssetService(null, { paletteSize: 46 });
+		const textureManager = new TextureManager({ assetService });
+		const firstUse = createPaletteTextureUseCommit({
+			drawUnitId: "building-a",
+			paletteId: 0x04000010,
+			replacementPaletteId: 0x04000110,
+			textureUseId: "building-a:palette",
+		});
+
+		const firstUpdate = await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedResources: [],
+			revision: 1,
+			textureUses: [firstUse],
+		});
+		const secondUpdate = await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedResources: [],
+			revision: 2,
+			textureUses: [1, 2, 3, 4].map((index) =>
+				createPaletteTextureUseCommit({
+					drawUnitId: `building-${index}`,
+					paletteId: 0x04000010 + index,
+					replacementPaletteId: 0x04000110 + index,
+					textureUseId: `building-${index}:palette`,
+				}),
+			),
+		});
+
+		const firstTextureRefId = firstUpdate?.placements[0]?.textureRefId;
+		expect(firstUpdate?.placements).toMatchObject([
+			{
+				height: 128,
+				textureRefId: firstTextureRefId,
+				width: 128,
+			},
+		]);
+		expect(secondUpdate?.placements).toMatchObject([
+			{
+				height: 128,
+				textureRefId: firstTextureRefId,
+				width: 256,
+			},
+		]);
+		expect(
+			new Set(
+				secondUpdate?.resolvedTexturePlacements.map(
+					(placement) => placement.textureUseId,
+				),
+			),
+		).toEqual(
+			new Set([
+				"building-a:palette",
+				"building-1:palette",
+				"building-2:palette",
+				"building-3:palette",
+				"building-4:palette",
+			]),
+		);
+		expect(textureManager.createDiagnosticsReport()).toMatchObject({
+			buckets: [
+				{
+					pages: [
+						expect.objectContaining({
+							height: 128,
+							uniqueSourceCount: 5,
+							width: 256,
+						}),
+					],
+					texturePageCount: 1,
+				},
+			],
+			summary: {
+				texturePageCount: 1,
+			},
+		});
+		expect(
+			assetService.requestedKeys.filter(
+				(key) => key.kind === "prepared-palette-texture",
+			),
+		).toHaveLength(6);
+	});
+
+	it("does not repack unrelated compatible pages in the same bucket", async () => {
+		const assetService = new FixtureAssetService(null, { paletteSize: 46 });
+		const texturePacker = new FixtureTexturePacker({
+			rectsByTextureUseId: new Map([
+				[
+					"building-a:palette",
+					{
+						pageHeight: 128,
+						pageId: "palette-page-a",
+						pageWidth: 128,
+						rect: [0, 0, 46, 46],
+					},
+				],
+				[
+					"building-z:palette",
+					{
+						pageHeight: 128,
+						pageId: "palette-page-z",
+						pageWidth: 128,
+						rect: [0, 0, 46, 46],
+					},
+				],
+			]),
+		});
+		const textureManager = new TextureManager({ assetService, texturePacker });
+
+		await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedResources: [],
+			revision: 1,
+			textureUses: [
+				createPaletteTextureUseCommit({
+					drawUnitId: "building-a",
+					paletteId: 0x04000010,
+					replacementPaletteId: 0x04000110,
+					textureUseId: "building-a:palette",
+				}),
+				createPaletteTextureUseCommit({
+					drawUnitId: "building-z",
+					paletteId: 0x04000020,
+					replacementPaletteId: 0x04000120,
+					textureUseId: "building-z:palette",
+				}),
+			],
+		});
+		const update = await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedResources: [],
+			revision: 2,
+			textureUses: [1, 2, 3, 4, 5, 6, 7].map((index) =>
+				createPaletteTextureUseCommit({
+					drawUnitId: `building-${index}`,
+					paletteId: 0x04000030 + index,
+					replacementPaletteId: 0x04000130 + index,
+					textureUseId: `building-${index}:palette`,
+				}),
+			),
+		});
+
+		expect(
+			update?.resolvedTexturePlacements.map(
+				(placement) => placement.textureUseId,
+			),
+		).not.toContain("building-z:palette");
+		expect(textureManager.createDiagnosticsReport()).toMatchObject({
+			buckets: [
+				{
+					pages: expect.arrayContaining([
+						expect.objectContaining({
+							height: 128,
+							uniqueSourceCount: 1,
+							width: 128,
+						}),
+						expect.objectContaining({
+							height: 128,
+							uniqueSourceCount: 8,
+							width: 256,
+						}),
+					]),
+					texturePageCount: 2,
+				},
+			],
+		});
+		expect(
+			assetService.requestedKeys.filter(
+				(key) => key.kind === "prepared-palette-texture",
+			),
+		).toHaveLength(10);
+	});
+
 	it("reports atlas occupancy as clipped union area for overlapping page rects", async () => {
 		const assetService = new FixtureAssetService();
 		const texturePacker = new FixtureTexturePacker({
@@ -1162,8 +1336,8 @@ describe("browser texture manager", () => {
 		]);
 		expect(textureManager.createDiagnosticsReport().summary.pageLifecycle).toEqual(
 			{
-				absorbed: 0,
-				created: 2,
+				absorbed: 1,
+				created: 1,
 				reclaimed: 0,
 				retained: 1,
 			},
@@ -2002,9 +2176,14 @@ describe("browser texture manager", () => {
 class FixtureAssetService implements AssetService {
 	readonly requestedKeys: HostAssetKey[] = [];
 	readonly #payloadOptions: PreparedTexturePayloadOptions | null;
+	readonly #paletteSize: number;
 
-	constructor(payloadOptions: PreparedTexturePayloadOptions | null = null) {
+	constructor(
+		payloadOptions: PreparedTexturePayloadOptions | null = null,
+		options: { readonly paletteSize?: number } = {},
+	) {
 		this.#payloadOptions = payloadOptions;
+		this.#paletteSize = options.paletteSize ?? 16;
 	}
 
 	async requestPreparedAsset(key: HostAssetKey): Promise<PreparedAsset> {
@@ -2013,7 +2192,7 @@ class FixtureAssetService implements AssetService {
 		if (key.kind === "prepared-palette-texture") {
 			return {
 				key,
-				payload: createPreparedPaletteTexturePayload(key.id),
+				payload: createPreparedPaletteTexturePayload(key.id, this.#paletteSize),
 				preparedAt: "test",
 				revision: 1,
 				sourceAssetId: `prepared-palette-texture/${key.id}`,
@@ -2333,6 +2512,29 @@ function createTextureUseCommit(options: {
 	};
 }
 
+function createPaletteTextureUseCommit(options: {
+	readonly drawUnitId: string;
+	readonly paletteId: number;
+	readonly replacementPaletteId: number;
+	readonly textureUseId: string;
+}): StaticCoordinatorCommitDelta["textureUses"][number] {
+	return {
+		domain: "outdoor-buildings",
+		owners: [{ drawUnitId: options.drawUnitId, kind: "draw-unit" }],
+		source: createPreparedPaletteUse(options.paletteId, [
+			{
+				count: 1,
+				offset: 3,
+				palette: {
+					kind: "palette",
+					paletteId: options.replacementPaletteId,
+				},
+			},
+		]),
+		textureUseId: options.textureUseId,
+	};
+}
+
 function createDynamicTextureUseCommit(options: {
 	readonly placementBucketKey: string;
 	readonly textureDomain: VisualTextureDomain;
@@ -2437,7 +2639,7 @@ function createPreparedPaletteUse(
 	};
 }
 
-function createPreparedPaletteTexturePayload(id: string) {
+function createPreparedPaletteTexturePayload(id: string, size = 16) {
 	const [basePaletteHex, query = ""] = id.split("?", 2);
 	const params = new URLSearchParams(query);
 	const domain = params.get("domain") ?? "index8";
@@ -2449,14 +2651,21 @@ function createPreparedPaletteTexturePayload(id: string) {
 	const replacements = parseFixturePreparedPaletteReplacements(
 		params.get("repl"),
 	);
-	const pixels = new Uint8Array(16 * 16 * 4);
+	const pixels = new Uint8Array(size * size * 4);
 	writeFixturePaletteColor(pixels, 0, [0x11, 0x22, 0x33, 0xff]);
 	writeFixturePaletteColor(pixels, 1, [0x44, 0x55, 0x66, 0x80]);
 	writeFixturePaletteColor(pixels, 2, [0xaa, 0xbb, 0xcc, 0xff]);
 	for (const replacement of replacements) {
 		if (replacement.paletteId === 0x04000020 && replacement.offset === 1) {
 			writeFixturePaletteColor(pixels, 1, [0x77, 0x88, 0x99, 0xff]);
+			continue;
 		}
+		writeFixturePaletteColor(pixels, replacement.offset, [
+			replacement.paletteId & 0xff,
+			(replacement.paletteId >> 8) & 0xff,
+			(replacement.paletteId >> 16) & 0xff,
+			0xff,
+		]);
 	}
 
 	return {
@@ -2478,7 +2687,7 @@ function createPreparedPaletteTexturePayload(id: string) {
 		domain,
 		format: "rgba8",
 		formatRaw: 0,
-		height: 16,
+		height: size,
 		kind: "prepared-palette-texture",
 		pixels,
 		provenance: {
@@ -2490,7 +2699,7 @@ function createPreparedPaletteTexturePayload(id: string) {
 		replacements,
 		residencyKind: "unknown",
 		sourceAssetKind: "prepared-palette-texture",
-		width: 16,
+		width: size,
 	};
 }
 

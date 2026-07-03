@@ -312,9 +312,21 @@ Deliverables:
 
 Acceptance criteria:
 
-- Diagnostics explain why a page count changed.
-- No dead reclaim flags remain.
-- No palette-specific packing logic was added.
+- [x] Diagnostics explain why a page count changed.
+- [x] No dead reclaim flags remain.
+- [x] No palette-specific packing logic was added.
+
+Implementation notes:
+
+- Atlas diagnostics now expose cumulative page lifecycle counters:
+  `created`, `absorbed`, `reclaimed`, and `retained`.
+- The resources overview and atlas page panel surface the lifecycle totals so
+  page-count changes are visible without opening the full diagnostics report.
+- `retained` counts pages that a reclaim pass saw and deliberately kept because
+  they were active, leased, or part of the current mutation.
+- This is lifecycle telemetry, not per-update event history. If we need a
+  timeline later, add an explicit bounded event ring rather than overloading the
+  snapshot summary.
 
 ## Risks
 

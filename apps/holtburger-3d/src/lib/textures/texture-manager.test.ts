@@ -317,6 +317,12 @@ describe("browser texture manager", () => {
 				},
 			],
 			summary: {
+				pageLifecycle: {
+					absorbed: 1,
+					created: 1,
+					reclaimed: 0,
+					retained: 1,
+				},
 				texturePageCount: 1,
 			},
 		});
@@ -1154,6 +1160,14 @@ describe("browser texture manager", () => {
 				itemId: "terrain-new:prepared-texture:06000020",
 			},
 		]);
+		expect(textureManager.createDiagnosticsReport().summary.pageLifecycle).toEqual(
+			{
+				absorbed: 0,
+				created: 2,
+				reclaimed: 0,
+				retained: 1,
+			},
+		);
 	});
 
 	it("reuses one placement across draw units that share prepared source", async () => {
@@ -1647,6 +1661,12 @@ describe("browser texture manager", () => {
 			"runtime-authored-dynamic:runtime-dynamic:runtime-spawn:1",
 		);
 		expect(textureManager.createDiagnosticsReport().summary).toMatchObject({
+			pageLifecycle: {
+				absorbed: 0,
+				created: 1,
+				reclaimed: 1,
+				retained: 0,
+			},
 			texturePageCount: 0,
 		});
 	});

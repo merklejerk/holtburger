@@ -2597,6 +2597,19 @@
 								<dt>Pages</dt>
 								<dd>{formatAtlasPageListSummary()}</dd>
 							</div>
+							<div>
+								<dt>Lifecycle</dt>
+								<dd>
+									created {runtimeOverview?.resources.atlas.summary
+										.pageLifecycle.created ?? 0} / absorbed
+									{runtimeOverview?.resources.atlas.summary.pageLifecycle
+										.absorbed ?? 0} / reclaimed
+									{runtimeOverview?.resources.atlas.summary.pageLifecycle
+										.reclaimed ?? 0} / retained
+									{runtimeOverview?.resources.atlas.summary.pageLifecycle
+										.retained ?? 0}
+								</dd>
+							</div>
 						</dl>
 
 						{#if filteredAtlasPages().length === 0}

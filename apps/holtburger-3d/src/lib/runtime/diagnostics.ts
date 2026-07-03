@@ -327,11 +327,19 @@ interface TextureAtlasDiagnosticsSummary {
 	readonly activeBucketCount: number;
 	readonly emptyBucketCount: number;
 	readonly texturePageCount: number;
+	readonly pageLifecycle: TextureAtlasPageLifecycleDiagnostics;
 	readonly multiSourcePageCount: number;
 	readonly entryAliasCount: number;
 	readonly mipmappedPageCount: number;
 	readonly unmippedPageCount: number;
 	readonly approximateBytes: number;
+}
+
+interface TextureAtlasPageLifecycleDiagnostics {
+	readonly absorbed: number;
+	readonly created: number;
+	readonly reclaimed: number;
+	readonly retained: number;
 }
 
 export interface TerrainTextureDiagnosticsReport {

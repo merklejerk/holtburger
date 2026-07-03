@@ -336,6 +336,12 @@ interface RuntimeTextureAtlasOverviewSnapshot {
 		readonly approximateBytes: number;
 		readonly bucketCount: number;
 		readonly entryAliasCount: number;
+		readonly pageLifecycle: {
+			readonly absorbed: number;
+			readonly created: number;
+			readonly reclaimed: number;
+			readonly retained: number;
+		};
 		readonly texturePageCount: number;
 	};
 }
@@ -4066,6 +4072,7 @@ function createRuntimeResourcesOverviewSnapshot(
 				approximateBytes: atlasReport.summary.approximateBytes,
 				bucketCount: atlasReport.summary.bucketCount,
 				entryAliasCount: atlasReport.summary.entryAliasCount,
+				pageLifecycle: atlasReport.summary.pageLifecycle,
 				texturePageCount: atlasReport.summary.texturePageCount,
 			},
 		},

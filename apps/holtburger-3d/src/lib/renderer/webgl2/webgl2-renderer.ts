@@ -5017,6 +5017,7 @@ function createRendererObjectMaterialTextureBindingDiagnostic(
 	}
 	return {
 		height: binding.height,
+		pageVersion: binding.pageVersion,
 		role,
 		textureRefId: binding.textureRefId,
 		width: binding.width,

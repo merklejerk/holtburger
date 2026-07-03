@@ -9,6 +9,7 @@ import type { TextureAtlasDiagnosticsReport } from "../runtime/diagnostics";
 import type {
 	SamplerPolicyUpdate,
 	TextureBindingOwner,
+	TexturePageVersion,
 	TexturePlacementUpdate,
 	ResolvedTexturePlacement,
 } from "../renderer/types";
@@ -115,6 +116,8 @@ export interface TexturePlacementResolutionSnapshot {
 	readonly itemId: string;
 	/** Packer-local page id retained for atlas diagnostics. */
 	readonly pageId: string;
+	/** Renderer page identity that owns this placement's rect. */
+	readonly pageVersion: TexturePageVersion;
 	/** Renderer role that decides shader binding and atlas compatibility. */
 	readonly purpose: TextureUsagePurpose;
 	/** Sub-rectangle for this logical texture inside the runtime page. */
@@ -475,6 +478,7 @@ export class TextureManager {
 							height: record.height,
 							itemId,
 							pageId: record.pageId,
+							pageVersion: record.pageVersion,
 							purpose: record.purpose,
 							rect: record.rect,
 							textureRefId: record.textureRefId,
@@ -609,6 +613,10 @@ export class TextureManager {
 				continue;
 			}
 			resolvedTexturePlacements.push({
+				pageVersion: {
+					placementRevision: entry.placementRevision,
+					textureRefId: entry.textureRefId,
+				},
 				rect: entry.rect,
 				textureHeight: entry.textureHeight,
 				textureRefId: entry.textureRefId,
@@ -1253,6 +1261,10 @@ export class TextureManager {
 			filteringMode: group.samplerPolicy.filteringMode,
 			height: repackPlan.layoutPage.height,
 			mipmapsGenerated: group.samplerPolicy.generateMipmaps,
+			pageVersion: {
+				placementRevision,
+				textureRefId: firstEntry.textureRefId,
+			},
 			pixels,
 			placementRevision,
 			rect: [
@@ -1374,6 +1386,10 @@ export class TextureManager {
 				format: page.format,
 				height: page.height,
 				mipmapsGenerated: group.samplerPolicy.generateMipmaps,
+				pageVersion: {
+					placementRevision,
+					textureRefId,
+				},
 				pixels: page.pixels,
 				placementRevision,
 				rect: firstRect.rect,
@@ -1503,6 +1519,10 @@ export class TextureManager {
 			height: entry.textureHeight,
 			itemId,
 			pageId: entry.pageId,
+			pageVersion: {
+				placementRevision: entry.placementRevision,
+				textureRefId: entry.textureRefId,
+			},
 			purpose: entry.purpose,
 			rect: entry.rect,
 			textureRefId: entry.textureRefId,
@@ -1703,6 +1723,7 @@ interface TexturePlacementRecord {
 	readonly height: number;
 	readonly itemId: string;
 	readonly pageId: string;
+	readonly pageVersion: TexturePageVersion;
 	readonly purpose: TextureUsagePurpose;
 	readonly rect: readonly [number, number, number, number];
 	readonly textureRefId: string;
@@ -2350,6 +2371,10 @@ function materializeAbsorbedTexturePage(options: {
 		filteringMode: options.samplerPolicy.filteringMode,
 		height: options.existingPage.height,
 		mipmapsGenerated: options.samplerPolicy.generateMipmaps,
+		pageVersion: {
+			placementRevision: options.placementRevision,
+			textureRefId: firstEntry.textureRefId,
+		},
 		pixels,
 		placementRevision: options.placementRevision,
 		samplerPolicyKey: options.samplerPolicy.policyKey,
@@ -2432,6 +2457,10 @@ function createResolvedTexturePlacementsForEntry(
 	textureUseIds: readonly string[],
 ): readonly ResolvedTexturePlacement[] {
 	return uniqueSortedStrings(textureUseIds).map((textureUseId) => ({
+		pageVersion: {
+			placementRevision: entry.placementRevision,
+			textureRefId: entry.textureRefId,
+		},
 		rect: entry.rect,
 		textureHeight: entry.textureHeight,
 		textureRefId: entry.textureRefId,

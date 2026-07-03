@@ -348,7 +348,10 @@ function resolveDetailPlacement(
 		}
 		if (
 			detailPlacement &&
-			detailPlacement.textureRefId !== placement.textureRefId
+			(detailPlacement.pageVersion.textureRefId !==
+				placement.pageVersion.textureRefId ||
+				detailPlacement.pageVersion.placementRevision !==
+					placement.pageVersion.placementRevision)
 		) {
 			return false;
 		}

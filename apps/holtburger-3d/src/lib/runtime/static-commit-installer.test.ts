@@ -536,6 +536,10 @@ function createTexturePlacementUpdate(
 		revision: 3,
 		resolvedTexturePlacements: [
 			{
+				pageVersion: {
+					placementRevision: 3,
+					textureRefId: "texture-ref-a",
+				},
 				rect: [0, 0, 1, 1],
 				textureHeight: 1,
 				textureRefId: "texture-ref-a",
@@ -574,6 +578,10 @@ function createTexturePlacementUpdateForVisualResource(
 		revision: 3,
 		resolvedTexturePlacements: [
 			{
+				pageVersion: {
+					placementRevision: 3,
+					textureRefId: "texture-ref-a",
+				},
 				rect: [0, 0, 1, 1],
 				textureHeight: 1,
 				textureRefId: "texture-ref-a",

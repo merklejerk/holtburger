@@ -1,5 +1,5 @@
 import type { StaticMaterialTableEntry } from "../../static/contracts";
-import type { ResolvedTexturePlacement } from "../types";
+import type { ResolvedTexturePlacement, TexturePageVersion } from "../types";
 import { MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW } from "../types";
 
 const DEFAULT_TEXTURE_RECT = [0, 0, 1, 1] as const;
@@ -24,6 +24,8 @@ export interface ObjectMaterialTextureBindingsByRole {
 
 export interface ObjectMaterialTextureBinding {
 	readonly height: number;
+	/** Page version that owns the rects sampled through this binding. */
+	readonly pageVersion: TexturePageVersion;
 	readonly texture: WebGLTexture;
 	/** Renderer texture reference resolved from the logical texture use id. */
 	readonly textureRefId: string;
@@ -235,6 +237,7 @@ function collectObjectMaterialTextureBinding(
 	}
 	setBinding({
 		height: placement.textureHeight,
+		pageVersion: placement.pageVersion,
 		texture,
 		textureRefId: placement.textureRefId,
 		width: placement.textureWidth,

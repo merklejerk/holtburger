@@ -52,6 +52,10 @@ describe("browser texture manager", () => {
 		expect(update).toMatchObject({
 			resolvedTexturePlacements: [
 				{
+					pageVersion: {
+						placementRevision: 1,
+						textureRefId: STABLE_TEXTURE_REF_ID,
+					},
 					rect: [0, 0, 1, 1],
 					textureHeight: 256,
 					textureRefId: STABLE_TEXTURE_REF_ID,
@@ -63,6 +67,10 @@ describe("browser texture manager", () => {
 				{
 					format: "rgba8",
 					filteringMode: "anisotropic-4x",
+					pageVersion: {
+						placementRevision: 1,
+						textureRefId: STABLE_TEXTURE_REF_ID,
+					},
 					height: 256,
 					mipmapsGenerated: true,
 					anisotropy: 4,
@@ -291,6 +299,7 @@ describe("browser texture manager", () => {
 		});
 
 		expect(texturePacker.jobs).toHaveLength(1);
+		const uploadedPageVersion = secondUpdate?.placements[0]?.pageVersion;
 		expect(secondUpdate?.placements).toEqual([
 			expect.objectContaining({
 				textureRefId: firstUpdate?.placements[0]?.textureRefId,
@@ -300,6 +309,7 @@ describe("browser texture manager", () => {
 		]);
 		expect(secondUpdate?.resolvedTexturePlacements).toEqual([
 			expect.objectContaining({
+				pageVersion: uploadedPageVersion,
 				textureRefId: firstUpdate?.placements[0]?.textureRefId,
 				textureUseId: "building-b:mask:06000020",
 			}),
@@ -791,10 +801,12 @@ describe("browser texture manager", () => {
 				textureUseId: "terrain-b:prepared-texture:06000010",
 			}),
 		);
+		const firstPageVersion = firstUpdate?.placements[0]?.pageVersion;
 
 		expect(firstUpdate).toMatchObject({
 			resolvedTexturePlacements: [
 				{
+					pageVersion: firstPageVersion,
 					rect: [2, 1, 1, 1],
 					textureHeight: 4,
 					textureUseId: "terrain-a:prepared-texture:06000010",
@@ -812,6 +824,7 @@ describe("browser texture manager", () => {
 		expect(secondUpdate).toMatchObject({
 			resolvedTexturePlacements: [
 				{
+					pageVersion: firstPageVersion,
 					rect: [2, 1, 1, 1],
 					textureHeight: 4,
 					textureUseId: "terrain-b:prepared-texture:06000010",
@@ -1146,6 +1159,7 @@ describe("browser texture manager", () => {
 		});
 
 		expect(texturePacker.jobs).toHaveLength(1);
+		const uploadedPageVersion = secondUpdate?.placements[0]?.pageVersion;
 		expect(secondUpdate?.placements).toEqual([
 			expect.objectContaining({
 				textureRefId: firstUpdate?.placements[0]?.textureRefId,
@@ -1153,6 +1167,7 @@ describe("browser texture manager", () => {
 		]);
 		expect(secondUpdate?.resolvedTexturePlacements).toEqual([
 			expect.objectContaining({
+				pageVersion: uploadedPageVersion,
 				textureRefId: firstUpdate?.placements[0]?.textureRefId,
 				textureUseId: inactiveTextureUse.textureUseId,
 			}),

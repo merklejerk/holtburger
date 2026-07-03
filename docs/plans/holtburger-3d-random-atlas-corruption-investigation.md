@@ -306,12 +306,21 @@ Suggested commit boundary:
 
 ### Phase 1: Model Texture Page Revision As A First-Class Identity
 
+Status: completed.
+
 Deliverables:
 
 - Introduce a compact composite type for renderer-visible page identity, tentatively `TexturePageVersion`, containing `textureRefId` and `placementRevision`.
 - Thread `TexturePageVersion` through `RuntimeTexturePlacement`, `ResolvedTexturePlacement`, and renderer binding records.
 - Use page-version comparisons at the mutation/update boundary. Keep the private uploaded-version map temporarily until Phase 2 makes planned mutations explicit.
 - Keep `textureRefId` available where renderer texture-object lookup needs it, but avoid passing a bare ref where freshness matters.
+
+Completed implementation:
+
+- Added `TexturePageVersion` to renderer contracts.
+- Added `pageVersion` to uploaded texture placements, resolved texture placements, object-material texture bindings, renderer binding diagnostics, and texture-manager placement resolution snapshots.
+- Updated terrain detail placement compatibility to compare page versions.
+- Updated placement test factories and assertions so resolved rects are proven to carry the page version that owns them.
 
 Acceptance criteria:
 
@@ -323,6 +332,14 @@ Test strategy:
 
 - Replace the current offline activation regression with a test that asserts an offline mutation produces a newer `TexturePageVersion` and commit emits that version.
 - Keep the behavior covered, but stop asserting the implementation detail that a side map noticed the revision.
+
+Decision:
+
+- Kept `#uploadedPlacementRevisionByTextureRefId` for now. This is intentional phase debt: until Phase 2 makes planned/offline mutations explicit, the side map is still the only durable record of which page versions have actually reached the renderer.
+
+Debt:
+
+- `textureRefId` and `placementRevision` still exist beside `pageVersion` on renderer-visible records. Later phases should collapse call sites toward `pageVersion` and leave bare refs only for physical WebGL texture lookup, sampler policy updates, removals, and debug labels.
 
 ### Phase 2: Separate Planned Atlas Mutations From Committed Renderer Pages
 

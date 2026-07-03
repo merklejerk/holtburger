@@ -2328,6 +2328,10 @@ function createTexturePlacementUpdate(
 				format: "rgba8",
 				height: 1,
 				mipmapsGenerated: false,
+				pageVersion: {
+					placementRevision: 1,
+					textureRefId,
+				},
 				pixels: new Uint8Array([255, 255, 255, 255]),
 				placementRevision: 1,
 				rect: [0, 0, 1, 1],
@@ -2343,6 +2347,10 @@ function createTexturePlacementUpdate(
 		removedTextureRefIds: [],
 		resolvedTexturePlacements: [
 			{
+				pageVersion: {
+					placementRevision: 1,
+					textureRefId,
+				},
 				rect: [0, 0, 1, 1],
 				textureHeight: 1,
 				textureRefId,

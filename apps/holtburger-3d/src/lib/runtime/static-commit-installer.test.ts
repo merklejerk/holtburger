@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { TexturePlacementUpdate } from "../renderer/types";
+import type {
+	ResolvedTexturePlacement,
+	TexturePlacementUpdate,
+} from "../renderer/types";
 import type {
 	StaticCoordinatorCommitDelta,
 	StaticDrawUnit,
@@ -534,19 +537,7 @@ function createTexturePlacementUpdate(
 		placements: [],
 		removedTextureRefIds: [],
 		revision: 3,
-		resolvedTexturePlacements: [
-			{
-				pageVersion: {
-					placementRevision: 3,
-					textureRefId: "texture-ref-a",
-				},
-				rect: [0, 0, 1, 1],
-				textureHeight: 1,
-				textureRefId: "texture-ref-a",
-				textureUseId,
-				textureWidth: 1,
-			},
-		],
+		resolvedTexturePlacements: [createResolvedTexturePlacement(textureUseId)],
 	};
 }
 
@@ -576,18 +567,23 @@ function createTexturePlacementUpdateForVisualResource(
 		placements: [],
 		removedTextureRefIds: [],
 		revision: 3,
-		resolvedTexturePlacements: [
-			{
-				pageVersion: {
-					placementRevision: 3,
-					textureRefId: "texture-ref-a",
-				},
-				rect: [0, 0, 1, 1],
-				textureHeight: 1,
-				textureRefId: "texture-ref-a",
-				textureUseId,
-				textureWidth: 1,
-			},
-		],
+		resolvedTexturePlacements: [createResolvedTexturePlacement(textureUseId)],
+	};
+}
+
+function createResolvedTexturePlacement(
+	textureUseId: string,
+): ResolvedTexturePlacement {
+	const textureRefId = "texture-ref-a";
+	return {
+		pageVersion: {
+			placementRevision: 3,
+			textureRefId,
+		},
+		rect: [0, 0, 1, 1],
+		textureHeight: 1,
+		textureRefId,
+		textureUseId,
+		textureWidth: 1,
 	};
 }

@@ -266,6 +266,12 @@ Implementation rule:
 - Each phase should separate cleanup from structural change where practical. If a phase removes an incident-only diagnostic, commit that deletion with the phase that made the diagnostic unnecessary.
 - Do not keep tests for deleted probes, old partial placement shapes, or debug-only accounting.
 - Do not preserve a diagnostic field merely because a runtime panel currently displays it. The runtime panel is a low-priority consumer compared with clean texture/page ownership.
+- When a fix and diagnostic are already mixed in one local checkpoint, split by intent before the next structural phase:
+  - keep the minimal behavior fix and its regression test,
+  - delete incident-only probes and their tests,
+  - keep stable diagnostics only if they now mirror production composite types,
+  - document any remaining diagnostic fields as intentional review surface, not architecture.
+- Do not attempt an archaeological perfect split if it would create risky churn. Make the next commit boundary clean and then continue with structural cutovers.
 
 ### Pre-Structural Commit Cleanup
 
@@ -621,8 +627,15 @@ Verification:
 
 ### Phase 7: Test Suite Cleanup And Clean Cutover
 
+Status: completed.
+
 Deliverables:
 
+- Audit tests and diagnostics together, because the investigation added both around the same bug path.
+- Classify each remaining diagnostic assertion as one of:
+  - stable production invariant,
+  - temporary probe residue,
+  - panel-formatting noise.
 - Remove transitional helpers introduced only for this investigation once page versions and alias sets are first-class.
 - Rewrite tests around public invariants:
   - page mutation emits a new page version,
@@ -631,11 +644,45 @@ Deliverables:
   - aliases share movement and revision updates.
 - Delete ossified tests that protect fake-packer pixel coordinates, legacy bare-ref assumptions, or temporary diagnostic fields.
 
+Completed implementation:
+
+- Audited renderer payload, runtime selection, static commit installer, and texture-manager tests for temporary probe assertions, stale partial placement records, and fake-packer coordinate lock-in.
+- Confirmed renderer payload tests already build resolved placements through helpers that require page versions.
+- Replaced duplicated inline `ResolvedTexturePlacement` fixtures in `static-commit-installer.test.ts` with `createResolvedTexturePlacement()`, so those tests cannot hand-roll a partial placement shape.
+- Kept exact rect assertions where they prove production pass-through contracts:
+  - a mocked packer rect appears in emitted placements,
+  - diagnostics report the same rect as the placement state,
+  - renderer payload arrays receive the resolved rect,
+  - occupancy math clips or unions known fixture rects.
+- Confirmed probe-only diagnostics and hash assertions are gone; the only remaining `readPixels` test symbol is part of the fake WebGL context surface, not an active probe assertion.
+
 Acceptance criteria:
 
+- Any test that survives Phase 7 protects a production contract, not an investigation artifact.
+- Diagnostic assertions only cover fields backed by production composite types such as page version, resolved placement, texture binding, and material entry geometry.
 - No test asserts an exact atlas coordinate unless the coordinate is part of an authored asset contract or public packing rule.
 - No test constructs a stale placement shape that production code cannot construct.
 - Focused texture, renderer payload, runtime, check, lint, and `git diff --check` all pass.
+
+Commit boundary:
+
+- Commit Phase 7 as a cleanup/cutover commit, not a behavior-fix commit.
+- If cleanup exposes that a diagnostic is still required only because code structure is weak, move that work into a structural phase instead of preserving the diagnostic as a permanent crutch.
+
+Decision:
+
+- Did not delete tests merely because they mention literal rects. The important distinction is whether the rect is an arbitrary packed coordinate or a fixture input whose propagation is the behavior under test. The surviving rect assertions are the latter.
+
+Debt:
+
+- `TextureManager` still has several broad integration tests that assert many fields at once. They protect real contracts now, but future texture-manager refactors should split them by invariant before changing behavior.
+
+Verification:
+
+- `npm run test:ts -- --run src/lib/runtime/client-runtime.test.ts src/lib/textures/texture-manager.test.ts src/lib/renderer/webgl2/webgl2-object-material-payloads.test.ts src/lib/renderer/webgl2/webgl2-terrain-payloads.test.ts src/lib/renderer/webgl2/webgl2-renderer.test.ts src/lib/runtime/static-commit-installer.test.ts` passed: 6 files, 138 tests.
+- `npm run check` passed.
+- `npm run lint:ts` passed.
+- `git diff --check` passed.
 
 ### Resteering Checkpoint
 

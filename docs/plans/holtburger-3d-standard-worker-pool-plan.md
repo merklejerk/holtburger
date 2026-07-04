@@ -1,6 +1,6 @@
 # Holtburger 3D Standard Worker Pool Plan
 
-Status: draft.
+Status: in progress.
 
 Related context:
 
@@ -165,52 +165,52 @@ Every standardized worker should use one envelope family:
 
 ```ts
 interface WorkerJobMessage<TInput> {
-	readonly kind: "job";
-	readonly requestId: string;
-	readonly input: TInput;
+  readonly kind: "job";
+  readonly requestId: string;
+  readonly input: TInput;
 }
 
 interface WorkerCancelMessage {
-	readonly kind: "cancel";
-	readonly requestId: string;
+  readonly kind: "cancel";
+  readonly requestId: string;
 }
 
 interface WorkerResultMessage<TOutput> {
-	readonly kind: "result";
-	readonly requestId: string;
-	readonly output: TOutput;
+  readonly kind: "result";
+  readonly requestId: string;
+  readonly output: TOutput;
 }
 
 interface WorkerErrorMessage {
-	readonly kind: "error";
-	readonly requestId: string;
-	readonly message: string;
-	readonly stack?: string;
+  readonly kind: "error";
+  readonly requestId: string;
+  readonly message: string;
+  readonly stack?: string;
 }
 
 interface WorkerProgressMessage<TProgress> {
-	readonly kind: "progress";
-	readonly requestId: string;
-	readonly event: TProgress;
+  readonly kind: "progress";
+  readonly requestId: string;
+  readonly event: TProgress;
 }
 
 interface WorkerServiceRequestMessage<TRequest> {
-	readonly kind: "service-request";
-	readonly requestId: string;
-	readonly serviceRequestId: string;
-	readonly request: TRequest;
+  readonly kind: "service-request";
+  readonly requestId: string;
+  readonly serviceRequestId: string;
+  readonly request: TRequest;
 }
 
 interface WorkerServiceResponseMessage<TResponse> {
-	readonly kind: "service-response";
-	readonly serviceRequestId: string;
-	readonly response: TResponse;
+  readonly kind: "service-response";
+  readonly serviceRequestId: string;
+  readonly response: TResponse;
 }
 
 interface WorkerServiceErrorMessage {
-	readonly kind: "service-error";
-	readonly serviceRequestId: string;
-	readonly message: string;
+  readonly kind: "service-error";
+  readonly serviceRequestId: string;
+  readonly message: string;
 }
 ```
 
@@ -220,40 +220,52 @@ Names can change during implementation, but the concepts should remain stable.
 
 ```ts
 interface WorkerPool<TInput, TOutput, TProgress = never> {
-	submit(input: TInput, options?: WorkerSubmitOptions<TProgress>): Promise<TOutput>;
-	submitHandle(
-		input: TInput,
-		options?: WorkerSubmitOptions<TProgress>,
-	): WorkerJobHandle<TOutput>;
-	createDiagnosticsSnapshot(): WorkerPoolDiagnosticsSnapshot;
-	dispose(): void;
+  submit(
+    input: TInput,
+    options?: WorkerSubmitOptions<TProgress>,
+  ): Promise<TOutput>;
+  submitHandle(
+    input: TInput,
+    options?: WorkerSubmitOptions<TProgress>,
+  ): WorkerJobHandle<TOutput>;
+  createDiagnosticsSnapshot(): WorkerPoolDiagnosticsSnapshot;
+  dispose(): void;
 }
 
 interface WorkerSubmitOptions<TProgress> {
-	readonly priority?: number;
-	readonly signal?: AbortSignal;
-	readonly onProgress?: (event: TProgress) => void;
-	readonly description?: WorkerJobDescription;
+  readonly priority?: number;
+  readonly signal?: AbortSignal;
+  readonly onProgress?: (event: TProgress) => void;
+  readonly description?: WorkerJobDescription;
 }
 
 interface WorkerJobHandle<TOutput> {
-	readonly requestId: string;
-	readonly result: Promise<TOutput>;
-	cancel(): void;
+  readonly requestId: string;
+  readonly result: Promise<TOutput>;
+  cancel(): void;
 }
 ```
 
 ### Pool Factory Options
 
 ```ts
-interface WorkerPoolOptions<TInput, TOutput, TProgress, TServiceRequest, TServiceResponse> {
-	readonly createWorker: () => Worker;
-	readonly size: number;
-	readonly transferInput?: (input: TInput) => readonly Transferable[];
-	readonly transferOutput?: (output: TOutput) => readonly Transferable[];
-	readonly describe?: (input: TInput) => WorkerJobDescription;
-	readonly dispatchMode?: "idle-workers" | "pipelined-workers";
-	readonly serviceHandler?: WorkerServiceHandler<TServiceRequest, TServiceResponse>;
+interface WorkerPoolOptions<
+  TInput,
+  TOutput,
+  TProgress,
+  TServiceRequest,
+  TServiceResponse,
+> {
+  readonly createWorker: () => Worker;
+  readonly size: number;
+  readonly transferInput?: (input: TInput) => readonly Transferable[];
+  readonly transferOutput?: (output: TOutput) => readonly Transferable[];
+  readonly describe?: (input: TInput) => WorkerJobDescription;
+  readonly dispatchMode?: "idle-workers" | "pipelined-workers";
+  readonly serviceHandler?: WorkerServiceHandler<
+    TServiceRequest,
+    TServiceResponse
+  >;
 }
 ```
 
@@ -266,15 +278,21 @@ a worker implementation is intentionally able to make progress on multiple in-fl
 ### Worker-Side Handler API
 
 ```ts
-installWorkerHandler<TInput, TOutput, TProgress, TServiceRequest, TServiceResponse>({
-	execute: async (input, context) => {
-		context.report({ phase: "started" });
-		const asset = await context.requestService({ kind: "prepared-asset", key });
-		return {
-			output: await runJob(input, asset, context.signal),
-			transfer: [],
-		};
-	},
+installWorkerHandler<
+  TInput,
+  TOutput,
+  TProgress,
+  TServiceRequest,
+  TServiceResponse
+>({
+  execute: async (input, context) => {
+    context.report({ phase: "started" });
+    const asset = await context.requestService({ kind: "prepared-asset", key });
+    return {
+      output: await runJob(input, asset, context.signal),
+      transfer: [],
+    };
+  },
 });
 ```
 
@@ -445,6 +463,8 @@ Steering decision:
 
 ### Phase 1: Worker Transport Primitive
 
+Status: complete as of 2026-07-04.
+
 Deliverables:
 
 - Add a reusable worker-pool module under `apps/holtburger-3d/src/lib/workers/` or a similarly
@@ -464,7 +484,35 @@ Acceptance criteria:
 - The primitive can post both input and output transfer lists.
 - The default scheduler keeps at most one active job per worker and exposes queued job diagnostics.
 
+Completion evidence:
+
+- Added `apps/holtburger-3d/src/lib/workers/pool.ts`.
+- Added `apps/holtburger-3d/src/lib/workers/pool.test.ts`.
+- Verified with `npm run test:ts -- src/lib/workers/pool.test.ts`.
+- Verified with `npm run check`.
+- Verified with `npm run lint:ts`.
+
+Decisions, debt, and spicy bits:
+
+- The first primitive is main-thread transport only. Worker-originated output transfer posting is
+  represented by the shared transfer-aware port shape, but the actual worker-side result transfer
+  hook belongs in Phase 2 with `installWorkerHandler`. This keeps Phase 1 from pretending a main
+  thread pool can transfer buffers it only receives.
+- Running cancellation rejects the caller immediately, sends a standard `cancel` message, and drops
+  late responses. It does not claim the worker stopped CPU work; cooperative observation belongs to
+  the Phase 2 handler context.
+- `dispatchMode: "pipelined-workers"` is typed but intentionally rejected for now. The north star is
+  central queue + idle worker dispatch; keeping an unimplemented escape hatch silent would be fake
+  flexibility.
+- Diagnostics expose queued jobs, active jobs, retained progress events, lifecycle counters, and
+  disposal state. They deliberately do not recreate old static-bake-specific snapshots.
+- Transfer extraction is an explicit domain hook (`transferInput`) and is tested with captured
+  transfer lists. Safe typed-array collection and output transfer extraction are deferred to
+  Phase 2.5 and Phase 2 respectively.
+
 ### Phase 2: Worker-Side Handler Primitive
+
+Status: pending.
 
 Deliverables:
 
@@ -481,6 +529,8 @@ Acceptance criteria:
 
 ### Phase 2.5: Transfer Hook Dry Run
 
+Status: pending.
+
 Deliverables:
 
 - Add utility helpers for safely collecting transfer lists from full-buffer typed arrays.
@@ -496,6 +546,8 @@ Acceptance criteria:
 - Texture packing result transfer extraction is ready before the texture packing migration.
 
 ### Phase 3: Migrate Simple One-Shot Workers
+
+Status: pending.
 
 Start with workers that do not need host-service callbacks:
 
@@ -526,6 +578,8 @@ Acceptance criteria:
 
 ### Phase 4: Host-Service Channel
 
+Status: pending.
+
 Deliverables:
 
 - Add standard service request/response routing to the pool and worker handler.
@@ -543,6 +597,8 @@ Acceptance criteria:
 
 ### Phase 5: Migrate Resolver-Style Workers
 
+Status: pending.
+
 Deliverables:
 
 - Migrate static resolver and dynamic visual recipe resolution to the standard pool/service model.
@@ -558,6 +614,8 @@ Acceptance criteria:
 - Domain adapter code is thin and mostly type mapping, not transport reimplementation.
 
 ### Phase 6: Resteering Checkpoint
+
+Status: pending.
 
 Reassess before using the primitive for texture pipeline refactors.
 
@@ -578,6 +636,8 @@ Deliverables:
 - Decide whether the primitive is ready for texture placement/transaction preparation work.
 
 ### Phase 7: Cleanup And Cutover
+
+Status: pending.
 
 Deliverables:
 
@@ -648,3 +708,8 @@ Acceptance criteria:
 
 - 2026-07-04: Created plan. Baseline duplicated worker plumbing measured at `1853` non-test lines
   across existing worker client, protocol, handler, and asset bridge files.
+- 2026-07-04: Completed Phase 1 with an app-local `StandardWorkerPool` primitive and focused tests.
+  The pool owns request ids, pending promise routing, central queue dispatch, disposal, queued and
+  running cancellation, stale-response dropping, progress callbacks, diagnostics, worker factory
+  injection, and explicit input transfer forwarding. Worker-side output transfer emission is
+  intentionally left for Phase 2's handler primitive.

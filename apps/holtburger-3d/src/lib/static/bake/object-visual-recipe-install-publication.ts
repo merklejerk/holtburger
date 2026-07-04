@@ -156,7 +156,6 @@ function createTextureBindings(input: {
 			},
 			pageClass: placement.pageClass,
 			textureKey: placement.textureKey,
-			textureUseId: requirement.bindingId,
 		});
 	}
 	return bindings;
@@ -212,10 +211,9 @@ function createPublishedTextureUses(input: {
 				samplingPolicy: createTextureSamplingPolicy(recipe.wrapMode),
 				source: recipe.dataUse,
 				textureKey: binding.textureKey,
-				textureUseId: binding.textureUseId,
 			};
 		})
-		.sort((left, right) => left.textureUseId.localeCompare(right.textureUseId));
+		.sort((left, right) => left.bindingId.localeCompare(right.bindingId));
 }
 
 function collectPublishedTextureUseOwners(input: {

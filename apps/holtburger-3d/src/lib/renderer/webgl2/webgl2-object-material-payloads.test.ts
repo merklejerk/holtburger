@@ -86,7 +86,7 @@ describe("WebGL2 static object payload builder", () => {
 					height: 64,
 					rect: [10, 11, 12, 13],
 					textureRefId: "index-ref",
-					textureUseId: "index-use",
+					textureBindingId: "index-use",
 					width: 32,
 				}),
 			],
@@ -96,7 +96,7 @@ describe("WebGL2 static object payload builder", () => {
 					height: 16,
 					rect: [20, 21, 22, 23],
 					textureRefId: "palette-ref",
-					textureUseId: "palette-use",
+					textureBindingId: "palette-use",
 					width: 256,
 				}),
 			],
@@ -106,7 +106,7 @@ describe("WebGL2 static object payload builder", () => {
 					height: 128,
 					rect: [30, 31, 32, 33],
 					textureRefId: "detail-ref",
-					textureUseId: "detail-use",
+					textureBindingId: "detail-use",
 					width: 128,
 				}),
 			],
@@ -191,7 +191,7 @@ describe("WebGL2 static object payload builder", () => {
 						height: 8,
 						rect: [4, 5, 6, 7],
 						textureRefId: "base-ref",
-						textureUseId: "base-use",
+						textureBindingId: "base-use",
 						width: 8,
 					}),
 				],
@@ -245,7 +245,7 @@ describe("WebGL2 static object payload builder", () => {
 					height: 8,
 					rect: [1, 2, 3, 4],
 					textureRefId: "base-ref",
-					textureUseId: "base-use",
+					textureBindingId: "base-use",
 					width: 8,
 				}),
 			],
@@ -323,7 +323,7 @@ function createPlacement(options: {
 	readonly height: number;
 	readonly rect: readonly [number, number, number, number];
 	readonly textureRefId: string;
-	readonly textureUseId: string;
+	readonly textureBindingId: string;
 	readonly width: number;
 }): ResolvedTexturePlacement {
 	return {
@@ -334,7 +334,7 @@ function createPlacement(options: {
 		rect: options.rect,
 		textureHeight: options.height,
 		textureRefId: options.textureRefId,
-		textureUseId: options.textureUseId,
+		textureBindingId: options.textureBindingId,
 		textureWidth: options.width,
 	};
 }

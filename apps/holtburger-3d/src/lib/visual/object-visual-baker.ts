@@ -55,7 +55,6 @@ export interface ObjectVisualTextureBinding {
 	readonly dependency: TextureResourceDependencies;
 	readonly pageClass: TexturePageClass;
 	readonly textureKey: TextureKey;
-	readonly textureUseId: string;
 }
 
 export interface ObjectVisualBakedRenderPart extends VisualGeometryPayload {

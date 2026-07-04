@@ -43,7 +43,7 @@ export interface AtlasTexturePage {
 
 type AtlasLayoutOverflowReason = "source-too-large" | "atlas-full";
 
-export interface AtlasLayoutOverflow {
+interface AtlasLayoutOverflow {
 	readonly atlasEntryKey: string;
 	readonly reason: AtlasLayoutOverflowReason;
 	readonly detail: string;

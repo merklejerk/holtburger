@@ -12,7 +12,7 @@ describe("terrain material family classifier", () => {
 			plan: createPlan({
 				layerEntries: [
 					createLayerEntry({
-						textureUseId: "terrain-base:06000010",
+						textureBindingId: "terrain-base:06000010",
 					}),
 				],
 			}),
@@ -38,16 +38,16 @@ describe("terrain material family classifier", () => {
 							{
 								alpha: createTextureRole({
 									role: "terrain-alpha",
-									textureUseId: "terrain-alpha:06000020",
+									textureBindingId: "terrain-alpha:06000020",
 									wrap: "clamp",
 								}),
 								rotation: 1,
 								terrain: createTextureRole({
-									textureUseId: "terrain-base:06000030",
+									textureBindingId: "terrain-base:06000030",
 								}),
 							},
 						],
-						textureUseId: "terrain-base:06000010",
+						textureBindingId: "terrain-base:06000010",
 					}),
 				],
 			}),
@@ -74,11 +74,11 @@ describe("terrain material family classifier", () => {
 				layerEntries: [
 					createLayerEntry({
 						pcode: 1,
-						textureUseId: "terrain-base:06000010",
+						textureBindingId: "terrain-base:06000010",
 					}),
 					createLayerEntry({
 						pcode: 2,
-						textureUseId: "terrain-base:06000020",
+						textureBindingId: "terrain-base:06000020",
 					}),
 				],
 			}),
@@ -103,13 +103,13 @@ describe("terrain material family classifier", () => {
 						role: "landscape",
 						texture: createTextureRole({
 							role: "detail",
-							textureUseId: "detail:06000040",
+							textureBindingId: "detail:06000040",
 						}),
 					},
 				],
 				layerEntries: [
 					createLayerEntry({
-						textureUseId: "terrain-base:06000010",
+						textureBindingId: "terrain-base:06000010",
 					}),
 				],
 			}),
@@ -131,16 +131,16 @@ describe("terrain material family classifier", () => {
 							{
 								alpha: createTextureRole({
 									role: "terrain-alpha",
-									textureUseId: null,
+									textureBindingId: null,
 									wrap: "clamp",
 								}),
 								rotation: 1,
 								terrain: createTextureRole({
-									textureUseId: "terrain-base:06000030",
+									textureBindingId: "terrain-base:06000030",
 								}),
 							},
 						],
-						textureUseId: "terrain-base:06000010",
+						textureBindingId: "terrain-base:06000010",
 					}),
 				],
 			}),
@@ -180,15 +180,15 @@ function createPlan(
 function createLayerEntry({
 	overlays = [],
 	pcode = 33825,
-	textureUseId,
+	textureBindingId,
 }: {
 	readonly overlays?: TerrainMaterialLayerPlan["layerEntries"][number]["overlays"];
 	readonly pcode?: number;
-	readonly textureUseId: string | null;
+	readonly textureBindingId: string | null;
 }): TerrainMaterialLayerPlan["layerEntries"][number] {
 	return {
 		allRoad: false,
-		base: createTextureRole({ textureUseId }),
+		base: createTextureRole({ textureBindingId }),
 		colorRefCount: 1,
 		maskRefCount: 0,
 		overlays,
@@ -201,7 +201,7 @@ function createLayerEntry({
 function createTextureRole({
 	role = "terrain-base",
 	texture = surfaceTexture(0x05000010),
-	textureUseId,
+	textureBindingId,
 	tiling = 1,
 	wrap = "repeat",
 }: {
@@ -212,14 +212,14 @@ function createTextureRole({
 		| "road-alpha"
 		| "detail";
 	readonly texture?: SurfaceTextureIdentity;
-	readonly textureUseId: string | null;
+	readonly textureBindingId: string | null;
 	readonly tiling?: number;
 	readonly wrap?: "repeat" | "clamp";
 }): TerrainMaterialLayerPlan["layerEntries"][number]["base"] {
 	return {
 		role,
 		texture,
-		textureUseId,
+		textureBindingId,
 		tiling,
 		wrap,
 	};

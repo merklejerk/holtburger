@@ -984,7 +984,7 @@ function createStaticObjectMaterialTableEntries(options: {
 }): readonly StaticMaterialTableEntry[] {
 	return options.partition.coarseTablePlan.entries.map((entry, slot) =>
 		createStaticMaterialTableEntry({
-			createTextureUseId: (dataUse, wrapMode) =>
+			createTextureBindingRef: (dataUse, wrapMode) =>
 				createStaticObjectTextureBindingReference({
 					dataUse,
 					domain: options.domain,

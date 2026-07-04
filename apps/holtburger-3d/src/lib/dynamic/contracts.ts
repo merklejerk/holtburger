@@ -688,7 +688,7 @@ export interface DynamicEntityTextureRequirement {
 	/** Physical atlas-page compatibility class for this texture. */
 	readonly pageClass: TexturePageClass;
 	/** Runtime texture-use id used for renderer binding and dependency pinning. */
-	readonly textureUseId: string;
+	readonly dynamicTextureSourceId: string;
 }
 
 export interface DynamicEntityUnsupportedMaterialReason {

@@ -3754,7 +3754,7 @@ class FakeRenderer implements Renderer {
 		this.textureUpdates.push(update);
 		this.events.push(
 			`texture:${update.revision}:${update.resolvedTexturePlacements
-				.map((placement) => placement.textureUseId)
+				.map((placement) => placement.bindingId)
 				.join(",")}`,
 		);
 	}
@@ -4733,7 +4733,7 @@ function createBakeTextureUse(
 	source: PreparedRgbaRenderSurfaceTextureUseIdentity,
 ): StaticBakeTextureUse {
 	const domain = "outdoor-terrain";
-	const textureUseId = `${drawUnitId}:prepared-texture:${source.renderSurface.renderSurfaceId
+	const textureBindingId = `${drawUnitId}:prepared-texture:${source.renderSurface.renderSurfaceId
 		.toString(16)
 		.padStart(8, "0")}`;
 	const pagePolicy = createRuntimeTexturePagePolicy(source);
@@ -4742,7 +4742,7 @@ function createBakeTextureUse(
 		bindingId: createTextureBindingId({
 			resourceId: "runtime-test-bake",
 			role: purpose,
-			slot: textureUseId,
+			slot: textureBindingId,
 		}),
 		domain,
 		ownerIds: [
@@ -4770,7 +4770,7 @@ function createBakeTextureUse(
 				usage: source.usage,
 			}),
 		}),
-		textureUseId,
+		textureBindingId,
 	};
 }
 

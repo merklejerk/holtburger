@@ -34,7 +34,6 @@ import type {
 
 export const MAX_TERRAIN_COLOR_PAGES_PER_DRAW = 4;
 export const MAX_TERRAIN_MASK_PAGES_PER_DRAW = 4;
-export const MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW = 1;
 export const MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW = 8;
 
 export interface FrameState {
@@ -223,7 +222,7 @@ interface TexturePlacement {
 	/** Page identity for the uploaded pixels. */
 	readonly pageVersion: TexturePageVersion;
 	readonly textureRefId: string;
-	readonly textureUseId: string;
+	readonly bindingId: TextureBindingId;
 	readonly placementRevision: number;
 	readonly filteringMode: TextureFilteringMode;
 	readonly sampleClass: TexturePageSampleClass;
@@ -312,7 +311,6 @@ interface DynamicRendererTextureUse {
 	readonly samplingPolicy?: StaticBakeTextureUse["samplingPolicy"];
 	readonly source: StaticBakeTextureUse["source"];
 	readonly textureKey: TextureKey;
-	readonly textureUseId: string;
 }
 
 interface DynamicRendererSkippedMaterial {
@@ -350,8 +348,6 @@ type DynamicRendererInstanceResidence =
 export interface ResolvedTexturePlacement {
 	/** Material consumer binding whose atlas placement was resolved. */
 	readonly bindingId: TextureBindingId;
-	/** Legacy logical texture-use id retained for diagnostics during cutover. */
-	readonly textureUseId: string;
 	/** Page identity that owns this rect. */
 	readonly pageVersion: TexturePageVersion;
 	readonly textureRefId: string;

@@ -2305,7 +2305,7 @@ function createOutdoorGeneratedSceneryLayerPayload(
 
 function createTexturedOutdoorGeneratedSceneryStaticObjectDrawUnit(
 	drawUnitId: string,
-	textureUseId: string,
+	textureBindingId: string,
 ): OutdoorGeneratedSceneryLayerPayload["drawUnits"][number] {
 	const base = createOutdoorGeneratedSceneryStaticObjectDrawUnit(drawUnitId);
 	return {
@@ -2313,15 +2313,15 @@ function createTexturedOutdoorGeneratedSceneryStaticObjectDrawUnit(
 		materialBucketKey: "family:texture-rgba|pass:opaque|material:08000010",
 		materialEntries: base.materialEntries.map((entry) => ({
 			...entry,
-			primaryTextureBindingId: textureUseId,
+			primaryTextureBindingId: textureBindingId,
 		})),
 		materialFamily: "texture-rgba",
-		textureBindingIds: [textureUseId],
+		textureBindingIds: [textureBindingId],
 	};
 }
 
 function createTexturePlacementUpdate(
-	textureUseId: string,
+	textureBindingId: string,
 	textureRefId: string,
 ): TexturePlacementUpdate {
 	return {
@@ -2342,7 +2342,7 @@ function createTexturePlacementUpdate(
 				sampleClass: "rgba-color",
 				samplerPolicyKey: "sample=rgba-color;filter=nearest;mips=off;aniso=1",
 				textureRefId,
-				textureUseId,
+				textureBindingId,
 				width: 1,
 				wrapS: "clamp-to-edge",
 				wrapT: "clamp-to-edge",
@@ -2351,7 +2351,7 @@ function createTexturePlacementUpdate(
 		removedTextureRefIds: [],
 		resolvedTexturePlacements: [
 			{
-				bindingId: textureUseId,
+				bindingId: textureBindingId,
 				pageVersion: {
 					placementRevision: 1,
 					textureRefId,
@@ -2359,7 +2359,7 @@ function createTexturePlacementUpdate(
 				rect: [0, 0, 1, 1],
 				textureHeight: 1,
 				textureRefId,
-				textureUseId,
+				textureBindingId,
 				textureWidth: 1,
 			},
 		],
@@ -2398,7 +2398,7 @@ function createDynamicResourceCommit(options: {
 				entityId: "dynamic-entity:windmill",
 				materialPlan: {
 					skipped: [],
-					textureUses: options.textureBindingIds.map((textureUseId) => ({
+					textureUses: options.textureBindingIds.map((textureBindingId) => ({
 						role: "base-color",
 						source: {
 							kind: "prepared-render-surface-texture-use",
@@ -2408,7 +2408,7 @@ function createDynamicResourceCommit(options: {
 							},
 							usage: "rgba-color",
 						},
-						textureUseId,
+						textureBindingId,
 					})),
 				},
 				parts: [

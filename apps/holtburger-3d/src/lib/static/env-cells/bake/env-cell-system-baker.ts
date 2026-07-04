@@ -758,7 +758,7 @@ function createStructuredInteriorMaterialTableEntries(options: {
 		.map(
 			([, entry], slot): StaticMaterialTableEntry =>
 				createStaticMaterialTableEntry({
-					createTextureUseId: (dataUse, wrapMode) => {
+					createTextureBindingRef: (dataUse, wrapMode) => {
 						const requirement =
 							createStructuredInteriorTextureBindingRequirement({
 							dataUse,

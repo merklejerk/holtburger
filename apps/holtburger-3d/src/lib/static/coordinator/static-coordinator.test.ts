@@ -1221,7 +1221,7 @@ describe("static coordinator", () => {
 			textureUses: [
 				createStaticObjectVisualTextureUse({
 					resourceId: retainedResource.resourceId,
-					textureUseId: "texture-use:retained",
+					textureBindingId: "texture-use:retained",
 				}),
 			],
 		});
@@ -1235,7 +1235,7 @@ describe("static coordinator", () => {
 			retainedResource,
 		]);
 		expect(
-			deltas[0]?.textureUses.map((textureUse) => textureUse.textureUseId),
+			deltas[0]?.textureUses.map((textureUse) => textureUse.textureBindingId),
 		).toEqual(["texture-use:retained"]);
 	});
 
@@ -1998,7 +1998,7 @@ function createObjectVisualRenderInstance(options: {
 
 function createStaticObjectVisualTextureUse(options: {
 	readonly resourceId: string;
-	readonly textureUseId: string;
+	readonly textureBindingId: string;
 }): StaticBakeTextureUse {
 	return {
 		domain: "outdoor-generated-scenery",
@@ -2009,7 +2009,7 @@ function createStaticObjectVisualTextureUse(options: {
 			},
 		],
 		source: { argb: 0xffffffff, kind: "solid-color" },
-		textureUseId: options.textureUseId,
+		textureBindingId: options.textureBindingId,
 	};
 }
 

@@ -115,7 +115,7 @@ export async function createTerrainTexturePlacementIntents(options: {
 			item.payload.scope.textureUses,
 		);
 		const plan = buildTerrainMaterialLayerPlan({
-			createTextureUseId: (textureUse) =>
+			createTextureBindingId: (textureUse) =>
 				createTerrainTextureBindingRequirement(item.task.ownerId, textureUse)
 					.bindingId,
 			payload: item.payload.scope,
@@ -239,7 +239,7 @@ function createTerrainGeometryDrawUnits(
 	texturePlacementSnapshot: TexturePlacementSnapshot,
 ): readonly TerrainGeometryStaticDrawUnit[] {
 	const terrainMaterialPlan = buildTerrainMaterialLayerPlan({
-		createTextureUseId: (textureUse) =>
+		createTextureBindingId: (textureUse) =>
 			createTerrainTextureBindingRequirement(textureUseScopeId, textureUse)
 				.bindingId,
 		payload,
@@ -529,15 +529,15 @@ function createTerrainPagePartitionContext(options: {
 	const colorPages = new Set<string>();
 	const detailPages = new Set<string>();
 	const maskPages = new Set<string>();
-	const addTextureUse = (textureUseId: string | null): string | null => {
-		if (!textureUseId) {
+	const addTextureUse = (textureBindingId: string | null): string | null => {
+		if (!textureBindingId) {
 			return null;
 		}
 		const placement =
-			options.texturePlacementSnapshot.placementsByItemId.get(textureUseId);
+			options.texturePlacementSnapshot.placementsByItemId.get(textureBindingId);
 		if (!placement) {
 			throw new Error(
-				`Terrain texture ${textureUseId} is missing a pre-bake placement.`,
+				`Terrain texture ${textureBindingId} is missing a pre-bake placement.`,
 			);
 		}
 		switch (placement.purpose) {
@@ -555,13 +555,13 @@ function createTerrainPagePartitionContext(options: {
 			case "object-index":
 			case "object-palette":
 				throw new Error(
-					`Terrain texture ${textureUseId} was placed with incompatible purpose ${placement.purpose}.`,
+					`Terrain texture ${textureBindingId} was placed with incompatible purpose ${placement.purpose}.`,
 				);
 		}
 	};
 
 	for (const detailRole of options.detailRoles) {
-		const error = addTextureUse(detailRole.texture.textureUseId);
+		const error = addTextureUse(detailRole.texture.textureBindingId);
 		if (error) {
 			return createInvalidTerrainPagePartitionContext(
 				colorPages,
@@ -573,7 +573,7 @@ function createTerrainPagePartitionContext(options: {
 	}
 	for (const entry of options.entries ?? []) {
 		for (const binding of collectTerrainLayerEntryTextureBindings(entry)) {
-			const error = addTextureUse(binding.textureUseId);
+			const error = addTextureUse(binding.textureBindingId);
 			if (error) {
 				return createInvalidTerrainPagePartitionContext(
 					colorPages,
@@ -1029,14 +1029,14 @@ function collectTerrainMaterialPlanTextureBindingIds(
 	const textureBindingIds = new Set<TextureBindingId>();
 	for (const entry of plan.layerEntries) {
 		for (const binding of collectTerrainLayerEntryTextureBindings(entry)) {
-			if (binding.textureUseId) {
-				textureBindingIds.add(binding.textureUseId);
+			if (binding.textureBindingId) {
+				textureBindingIds.add(binding.textureBindingId);
 			}
 		}
 	}
 	for (const detailRole of plan.detailRoles) {
-		if (detailRole.texture.textureUseId) {
-			textureBindingIds.add(detailRole.texture.textureUseId);
+		if (detailRole.texture.textureBindingId) {
+			textureBindingIds.add(detailRole.texture.textureBindingId);
 		}
 	}
 	return Array.from(textureBindingIds).sort();

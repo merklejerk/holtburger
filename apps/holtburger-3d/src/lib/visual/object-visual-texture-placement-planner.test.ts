@@ -43,12 +43,12 @@ describe("object visual texture placement planner", () => {
 			{
 				affinityKey: "static-object|batch:a",
 				domain: "outdoor-generated-scenery",
-				textureUseId: firstRequirement.bindingId,
+				bindingId: firstRequirement.bindingId,
 			},
 			{
 				affinityKey: "static-object|batch:b",
 				domain: "outdoor-generated-scenery",
-				textureUseId: secondRequirement.bindingId,
+				bindingId: secondRequirement.bindingId,
 			},
 		]);
 	});
@@ -79,8 +79,8 @@ describe("object visual texture placement planner", () => {
 		expect(intents).toHaveLength(1);
 		expect(intents[0]).toMatchObject({
 			affinityKey: "first",
+			bindingId: requirement.bindingId,
 			itemId: 0,
-			textureUseId: requirement.bindingId,
 		});
 	});
 
@@ -109,9 +109,9 @@ describe("object visual texture placement planner", () => {
 			{
 				affinityKey: "setup-model/02000001",
 				domain: "runtime-object-material",
+				bindingId: requirement.bindingId,
 				itemId: 0,
 				placementBucketKey,
-				textureUseId: requirement.bindingId,
 			},
 		]);
 	});
@@ -138,19 +138,19 @@ describe("object visual texture placement planner", () => {
 		});
 
 		expect(intents[0]).toMatchObject({
+			bindingId: requirement.bindingId,
 			itemId: 0,
 			placementBucketKey,
-			textureUseId: requirement.bindingId,
 		});
 	});
 });
 
-function createRequirement(textureUseId: string): TextureBindingRequirement {
+function createRequirement(textureBindingId: string): TextureBindingRequirement {
 	return {
 		bindingId: createTextureBindingId({
 			resourceId: "fixture-resource",
 			role: "object-base-color",
-			slot: textureUseId,
+			slot: textureBindingId,
 		}),
 		ownerIds: [
 			createTextureOwnerId({

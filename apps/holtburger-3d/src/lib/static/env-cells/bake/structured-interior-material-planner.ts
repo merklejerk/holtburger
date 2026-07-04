@@ -125,7 +125,7 @@ export function planStructuredInteriorCellMaterials(options: {
 	return { entries, materialPlansBySurfaceId };
 }
 
-export function createStructuredInteriorTextureBindingId(options: {
+function createStructuredInteriorTextureBindingId(options: {
 	readonly dataUse: MaterialTextureDataUseIdentity;
 	readonly task: StaticBakeTask;
 	readonly wrapMode: StaticMaterialTextureWrapMode;

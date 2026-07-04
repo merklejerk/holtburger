@@ -778,21 +778,21 @@ function createTransparentRenderState(): ObjectVisualMaterialRecipeBase["renderS
 	};
 }
 
-function createTextureBinding(textureUseId: string) {
+function createTextureBinding(textureBindingId: string) {
 	const bindingId = createTextureBindingId({
-		resourceId: `test-resource:${textureUseId}`,
+		resourceId: `test-resource:${textureBindingId}`,
 		role: "object-base-color",
-		slot: textureUseId,
+		slot: textureBindingId,
 	});
 	return {
 		bindingId,
 		dependency: {
-			resourceId: textureUseId,
+			resourceId: textureBindingId,
 			roles: [],
 		},
-		pageClass: `test-page-class:${textureUseId}`,
-		textureKey: `test-texture-key:${textureUseId}`,
-		textureUseId,
+		pageClass: `test-page-class:${textureBindingId}`,
+		textureKey: `test-texture-key:${textureBindingId}`,
+		textureBindingId,
 	};
 }
 

@@ -105,8 +105,6 @@ export interface TexturePlacementIntent<
 	readonly pageClass: TexturePageClass;
 	/** Opaque placement item id used by the packer and baker placement snapshot. */
 	readonly itemId: TPlacementItemId;
-	/** Runtime registry item id used for ownership and pin/release accounting. */
-	readonly textureUseId: string;
 	/** Atlas allocation namespace where compatible sources can be reused. */
 	readonly placementBucketKey: TexturePlacementBucketKey;
 	/** Exact renderer texture domain that must own the atlas registry entry. */
@@ -128,7 +126,6 @@ export interface TexturePlacement<
 	readonly ownerIds: readonly TextureOwnerId[];
 	readonly pageClass: TexturePageClass;
 	readonly itemId: TPlacementItemId;
-	readonly textureUseId: string;
 	readonly purpose: TextureUsagePurpose;
 	/** Renderer texture page identity used for shader binding legality. */
 	readonly textureRefId: string;
@@ -226,10 +223,7 @@ export function createTexturePlacementItemId(
 	return value as TexturePlacementItemId;
 }
 
-/**
- * Structural shape of current dynamic texture-use commits. Kept local so this
- * contract module does not depend on TextureManager's implementation module.
- */
+/** Structural shape of current dynamic texture commits. */
 export interface DynamicTexturePlacementUse {
 	readonly bindingId: TextureBindingId;
 	readonly ownerIds: readonly TextureOwnerId[];
@@ -238,8 +232,6 @@ export interface DynamicTexturePlacementUse {
 	readonly source: MaterialTextureDataUseIdentity;
 	readonly textureKey: TextureKey;
 	readonly textureDomain: VisualTextureDomain;
-	/** Material binding key that becomes the placement item id at this boundary. */
-	readonly textureUseId: string;
 }
 
 export function createStaticTexturePlacementIntent(
@@ -263,7 +255,6 @@ export function createStaticTexturePlacementIntent(
 		itemId: textureUse.bindingId,
 		ownerIds: identity.ownerIds,
 		pageClass: identity.pageClass,
-		textureUseId: textureUse.bindingId,
 		textureKey: identity.textureKey,
 		placementBucketKey:
 			options.placementBucketKey ??
@@ -315,10 +306,9 @@ export function createDynamicTexturePlacementIntent(
 		affinityKey: options.affinityKey ?? null,
 		bindingId: identity.bindingId,
 		domain: textureUse.textureDomain,
-		itemId: textureUse.textureUseId,
+		itemId: identity.bindingId,
 		ownerIds: identity.ownerIds,
 		pageClass: identity.pageClass,
-		textureUseId: textureUse.textureUseId,
 		textureKey: identity.textureKey,
 		placementBucketKey: options.placementBucketKey,
 		purpose,

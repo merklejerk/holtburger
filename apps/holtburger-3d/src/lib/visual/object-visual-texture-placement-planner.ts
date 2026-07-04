@@ -143,7 +143,6 @@ function createDynamicObjectVisualTextureUse(
 		source: requirement.source.dataUse,
 		textureKey: requirement.textureKey,
 		textureDomain: policy.textureDomain,
-		textureUseId: requirement.bindingId,
 	};
 	if (!requirement.samplingPolicy) {
 		return textureUse;

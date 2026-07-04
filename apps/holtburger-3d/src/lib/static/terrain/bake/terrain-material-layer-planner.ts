@@ -20,7 +20,7 @@ const ROAD_CORNER_MASKS = [0x0c00_0000, 0x0300_0000, 0x00c0_0000, 0x0030_0000];
 
 export interface TerrainMaterialLayerPlannerOptions {
 	readonly payload: TerrainStaticScopePayload;
-	readonly createTextureUseId: (
+	readonly createTextureBindingId: (
 		textureUse: TerrainTextureUseFacts,
 	) => TextureBindingId;
 	readonly maxLayerEntries?: number;
@@ -28,7 +28,7 @@ export interface TerrainMaterialLayerPlannerOptions {
 
 export function buildTerrainMaterialLayerPlan({
 	payload,
-	createTextureUseId,
+	createTextureBindingId,
 	maxLayerEntries = DEFAULT_TERRAIN_LAYER_LIMIT,
 }: TerrainMaterialLayerPlannerOptions): TerrainMaterialLayerPlan | null {
 	const pcodes = uniqueSortedNumbers(
@@ -38,7 +38,7 @@ export function buildTerrainMaterialLayerPlan({
 		return null;
 	}
 
-	const context = createPlannerContext(payload, createTextureUseId);
+	const context = createPlannerContext(payload, createTextureBindingId);
 	const layerEntries = pcodes
 		.flatMap((pcode) => buildTerrainMaterialLayerEntry(context, pcode))
 		.map((entry, slot) => ({ ...entry, slot }));
@@ -67,11 +67,11 @@ export function buildTerrainMaterialLayerPlan({
 interface PlannerContext {
 	readonly payload: TerrainStaticScopePayload;
 	readonly terrainByCode: ReadonlyMap<number, TerrainMaterialTypeFacts>;
-	readonly textureUseByRoleAndTexture: ReadonlyMap<
+	readonly textureBindingByRoleAndTexture: ReadonlyMap<
 		string,
 		TerrainTextureUseFacts
 	>;
-	readonly createTextureUseId: (
+	readonly createTextureBindingId: (
 		textureUse: TerrainTextureUseFacts,
 	) => TextureBindingId;
 	readonly fallbackReasons: TerrainMaterialFallbackReason[];
@@ -79,10 +79,10 @@ interface PlannerContext {
 
 function createPlannerContext(
 	payload: TerrainStaticScopePayload,
-	createTextureUseId: (textureUse: TerrainTextureUseFacts) => TextureBindingId,
+	createTextureBindingId: (textureUse: TerrainTextureUseFacts) => TextureBindingId,
 ): PlannerContext {
 	return {
-		createTextureUseId,
+		createTextureBindingId,
 		fallbackReasons: [],
 		payload,
 		terrainByCode: new Map(
@@ -91,7 +91,7 @@ function createPlannerContext(
 				entry,
 			]),
 		),
-		textureUseByRoleAndTexture: new Map(
+		textureBindingByRoleAndTexture: new Map(
 			payload.textureUses.map((textureUse) => [
 				createTextureUseKey(textureUse.role, textureUse.texture),
 				textureUse,
@@ -393,7 +393,7 @@ function createSurfaceBinding({
 	readonly tiling: number;
 	readonly wrap: TerrainMaterialTextureRoleBinding["wrap"];
 }): TerrainMaterialTextureRoleBinding {
-	const textureUse = context.textureUseByRoleAndTexture.get(
+	const textureUse = context.textureBindingByRoleAndTexture.get(
 		createTextureUseKey(role, texture),
 	);
 	if (!textureUse?.preparedTextureUse) {
@@ -408,8 +408,8 @@ function createSurfaceBinding({
 	return {
 		role,
 		texture,
-		textureUseId: textureUse?.preparedTextureUse
-			? context.createTextureUseId(textureUse)
+		textureBindingId: textureUse?.preparedTextureUse
+			? context.createTextureBindingId(textureUse)
 			: null,
 		tiling,
 		wrap,

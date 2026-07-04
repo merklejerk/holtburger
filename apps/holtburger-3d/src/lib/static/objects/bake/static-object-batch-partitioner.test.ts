@@ -478,25 +478,25 @@ describe("static object batch partitioner", () => {
 		expect(
 			intents.map((intent) => ({
 				affinityKey: intent.affinityKey,
+				bindingId: intent.bindingId,
 				itemId: intent.itemId,
 				purpose: intent.purpose,
-				textureUseId: intent.textureUseId,
 			})),
 		).toEqual([
 			{
 				affinityKey: expect.stringContaining("static-object|"),
-				itemId: 0,
-				textureUseId: expect.stringContaining(
+				bindingId: expect.stringContaining(
 					"slot=prepared-render-surface-texture-use%3A06000010%3Argba-color",
 				),
+				itemId: 0,
 				purpose: "object-base-color",
 			},
 			{
 				affinityKey: expect.stringContaining("static-object|"),
-				itemId: 1,
-				textureUseId: expect.stringContaining(
+				bindingId: expect.stringContaining(
 					"slot=prepared-render-surface-texture-use%3A06000011%3Argba-color",
 				),
+				itemId: 1,
 				purpose: "object-base-color",
 			},
 		]);
@@ -542,7 +542,7 @@ describe("static object batch partitioner", () => {
 		});
 
 		expect(intents.map((intent) => intent.itemId)).toEqual([0, 1]);
-		expect(intents.map((intent) => intent.textureUseId)).toEqual([
+		expect(intents.map((intent) => intent.bindingId)).toEqual([
 			expect.stringContaining(
 				"slot=prepared-render-surface-texture-use%3A06000010%3Argba-color|role=object-base-color|wrap=clamp-to-edge",
 			),
@@ -1217,7 +1217,7 @@ async function createTexturePlacementSnapshotForInput(
 					purpose: intent.purpose,
 					rect: [0, 0, 64, 64] as const,
 					textureRefId: `${intent.purpose}:texture-ref:0`,
-					textureUseId: intent.textureUseId,
+					textureBindingId: intent.textureBindingId,
 					width: 64,
 				},
 			]),

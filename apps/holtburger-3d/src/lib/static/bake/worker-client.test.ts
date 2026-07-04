@@ -3,7 +3,9 @@ import type {
 	StaticBakeJobInput,
 	StaticBakeJobResult,
 	StaticBakeTask,
+	TerrainGeometryStaticDrawUnit,
 } from "../contracts";
+import { createEmptyObjectVisualInstallSet } from "../../visual/object-visual-install-set";
 import { WorkerPoolStaticBaker } from "./worker-client";
 import type {
 	StaticBakeWorkerPort,
@@ -152,6 +154,49 @@ describe("static bake worker protocol", () => {
 		]);
 	});
 
+	it("posts baked static geometry buffers as result transfers", async () => {
+		const input = createInput();
+		const result = createResultWithTerrainDrawUnit(input);
+		const port = new FixtureWorkerPort();
+		installStaticBakeWorkerHandler(
+			{
+				async bake(): Promise<StaticBakeJobResult> {
+					return result;
+				},
+			},
+			port,
+		);
+
+		port.emitRequest({
+			input,
+			kind: "job",
+			requestId: "transport:3",
+		});
+		await port.waitForResponses(2);
+
+		const drawUnit = result.drawUnits[0] as TerrainGeometryStaticDrawUnit;
+		expect(port.responses).toMatchObject([
+			{
+				event: { kind: "started" },
+				kind: "progress",
+				requestId: "transport:3",
+			},
+			{
+				kind: "result",
+				requestId: "transport:3",
+			},
+		]);
+		expect(port.transfers).toEqual([
+			[],
+			[
+				drawUnit.positions.buffer,
+				drawUnit.texCoords.buffer,
+				drawUnit.layerSlots.buffer,
+				drawUnit.indices.buffer,
+			],
+		]);
+	});
+
 	it("assigns new bake jobs to idle workers before queueing behind busy workers", async () => {
 		const first = new FixtureWorkerPort();
 		const second = new FixtureWorkerPort();
@@ -219,6 +264,7 @@ describe("static bake worker protocol", () => {
 class FixtureWorkerPort implements StaticBakeWorkerPort {
 	readonly requests: StaticBakeWorkerRequest[] = [];
 	readonly responses: StaticBakeWorkerResponse[] = [];
+	readonly transfers: readonly Transferable[][] = [];
 	readonly #requestListeners = new Set<
 		(event: MessageEvent<StaticBakeWorkerRequest>) => void
 	>();
@@ -229,12 +275,14 @@ class FixtureWorkerPort implements StaticBakeWorkerPort {
 
 	postMessage(
 		message: StaticBakeWorkerRequest | StaticBakeWorkerResponse,
+		transfer: readonly Transferable[] = [],
 	): void {
 		if (message.kind === "job" || message.kind === "cancel") {
 			this.requests.push(message);
 			return;
 		}
 		this.responses.push(message);
+		this.transfers.push(transfer);
 		this.#flushWaiters();
 	}
 
@@ -351,6 +399,7 @@ function createResult(input: StaticBakeJobInput): StaticBakeJobResult {
 		drawUnits: [],
 		envCellStaticObjectPlacementRecords: [],
 		materialCoverage: [],
+		objectVisualInstallSet: createEmptyObjectVisualInstallSet(),
 		portalApertureResources: [],
 		revision: input.revision,
 		staticPortalGraphs: [],
@@ -361,5 +410,39 @@ function createResult(input: StaticBakeJobInput): StaticBakeJobResult {
 		task: input.task,
 		textureDependencies: [],
 		textureUses: [],
+	};
+}
+
+function createResultWithTerrainDrawUnit(
+	input: StaticBakeJobInput,
+): StaticBakeJobResult {
+	return {
+		...createResult(input),
+		drawUnits: [createTerrainDrawUnit(input.task.ownerId)],
+	};
+}
+
+function createTerrainDrawUnit(drawUnitId: string): TerrainGeometryStaticDrawUnit {
+	const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+	return {
+		coordinateSpace: "landblock-render-local",
+		domain: "outdoor-terrain",
+		drawUnitId,
+		indices: new Uint16Array([0, 1, 2]),
+		indexType: "uint16",
+		kind: "terrain-geometry",
+		landblockId: 0xda55ffff,
+		layerSlots: new Float32Array([0, 0, 0]),
+		materialBucketKey: "terrain-fixture",
+		materialFamily: "terrain-debug-flat",
+		positions,
+		primaryTextureBindingId: null,
+		sourceTriangleIds: [],
+		terrainFallbackReasons: [],
+		terrainMaterialPlan: null,
+		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
+		textureBindingIds: [],
+		triangleCount: 1,
+		vertexCount: positions.length / 3,
 	};
 }

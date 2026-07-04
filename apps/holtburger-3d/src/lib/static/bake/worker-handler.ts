@@ -5,6 +5,7 @@ import {
 	installWorkerHandler,
 	type InstalledWorkerHandler,
 } from "../../workers/handler";
+import { collectStaticBakeJobResultTransfers } from "./transfers";
 
 export function installStaticBakeWorkerHandler(
 	baker: StaticBaker,
@@ -17,7 +18,10 @@ export function installStaticBakeWorkerHandler(
 				(event) => context.report({ event, kind: "trace" }),
 				() => baker.bake(input),
 			);
-			return { output: result };
+			return {
+				output: result,
+				transfer: collectStaticBakeJobResultTransfers(result),
+			};
 		},
 		port,
 	});

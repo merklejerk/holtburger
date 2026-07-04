@@ -1,6 +1,6 @@
 # Holtburger 3D Streaming Pipeline Primitives Plan
 
-Status: Phase 1 complete; Phase 0 audit complete and remaining phases resteered on 2026-07-04.
+Status: Phase 2 complete; Phase 0 audit complete and remaining phases resteered on 2026-07-04.
 
 Related context:
 
@@ -591,6 +591,8 @@ Decisions and course corrections:
 Goal: apply the sidecar convention to the highest-value worker-created geometry outputs after the
 ownership rules exist.
 
+Status: complete.
+
 Steered target order:
 
 1. Add shared collector helpers for `VisualGeometryPayload` buffers:
@@ -640,6 +642,20 @@ Decisions and course corrections:
 
 - Phase 0 rejected resolver and recipe worker outputs as first transfer targets because they mix
   source facts and prepared asset references rather than clean worker-owned render buffers.
+- Implemented a shared visual geometry collector in
+  `apps/holtburger-3d/src/lib/visual/visual-geometry-transfers.ts`.
+- Implemented protocol-local collectors:
+  - `apps/holtburger-3d/src/lib/dynamic/visual-bake-transfers.ts`;
+  - `apps/holtburger-3d/src/lib/static/bake/transfers.ts`.
+- Wired dynamic and static bake worker handlers to include result transfer lists.
+- Static bake transfer extraction also includes `objectVisualInstallSet.renderInstances[].sourceToLandblockMatrix`.
+  Phase 0 did not call this out, but it is a worker-created typed-array payload crossing the same
+  result boundary.
+- Static bake transfer extraction deliberately does not include `StaticPortalApertureResource`
+  arrays because those are plain arrays rather than typed-array transfer candidates.
+- Added a defensive unsupported-kind error in the static draw-unit transfer collector. The production
+  type is exhaustive, but the focused test exposed that malformed fixtures otherwise fail with a
+  vague iterable error.
 
 ## Phase 3: Texture Lease Set Primitive
 

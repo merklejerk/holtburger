@@ -218,7 +218,9 @@ Internally, identity builders should accept structured inputs and return branded
 - `TexturePageClass` can carry physical wrap only when page compatibility needs it; virtualized material wrap stays out of the canonical texture key.
 - Concession: the new builders are not yet wired into `TexturePlacement` or `TextureManager`. Phase 2 must replace the current `bindingKey` / `placementItemId` / `textureUseId` equality bridge instead of adding adapters around it.
 
-### Phase 2: Split Static Material Requirements
+### Phase 2: Atomic Placement and Registry Identity Cutover
+
+**Course correction:** Phase 2 cannot honestly end at placement-contract changes while `TextureManager` still commits by `textureUseId`. That would require a public bridge from `TextureKey` back to legacy texture-use ids, which violates the shim policy and keeps the footgun loaded. This phase now owns the minimum registry cutover needed to make the placement split real. The old Phase 3 registry work is not a later cleanup; it is part of this atomic cutover.
 
 **Deliverables**
 
@@ -239,6 +241,11 @@ Internally, identity builders should accept structured inputs and return branded
 - Replace `ObjectVisualTexturePlacementSnapshot.itemIdsByTextureUseId` with a snapshot lookup keyed by `TextureBindingId`, or remove the bridge entirely if the bake path can carry numeric placement ids alongside binding ids directly.
 - Update `static-material-texture-policy.ts`, terrain material planning, object material planning, and structured interior planning.
 - Delete the current comment that presents binding key and placement item id equality as a bridge.
+- Replace `VisualTextureKey = domain + bucket + textureUseId` with registry entries keyed by `TextureKey`.
+- Replace owner maps with `TextureOwnerId -> Set<TextureKey>`.
+- Replace renderer update production with a resolved binding map that starts from `TextureBindingId` and resolves through `TextureKey`.
+- Delete `physicalEntry.textureUseIds` and implicit shared-entry aliasing during the cutover. Do not create a bridge object that keeps the alias model alive under a different name.
+- Stop aliasing palette recipes by prepared `contentHash`; lower-level content dedupe may exist later, but it must not define canonical texture identity.
 
 **Acceptance criteria**
 
@@ -247,30 +254,27 @@ Internally, identity builders should accept structured inputs and return branded
 - Existing bake tests are rewritten around the separated ids, not updated to preserve old string equality.
 - Any `LegacyTextureUseRequirement` or equivalent bridge introduced in this phase is deleted before the phase is complete.
 - The object-visual numeric placement path does not require a `textureUseId -> itemId` bridge after this phase.
+- No registry entries share mutable `physicalEntry` references.
+- A page move updates one texture-pool entry, then all active bindings derive from that entry.
+- Tests assert that owner churn in follow mode changes owners/bindings without changing canonical texture keys.
 
-### Phase 3: Replace TextureManager Registry Identity
+### Phase 3: TextureManager Fuzz and Palette Resolver Proof
 
 **Deliverables**
 
-- Replace `VisualTextureKey = domain + bucket + textureUseId` with registry entries keyed by `TextureKey`.
-- Stop aliasing palette recipes by prepared `contentHash`; any lower-level content dedupe must not become canonical texture identity.
-- Replace `physicalEntry.textureUseIds` and implicit shared-entry aliasing with:
-  - one physical entry per `TextureKey`;
-  - explicit binding maps outside the physical entry.
-- Replace owner maps with `TextureOwnerId -> Set<TextureKey>`.
-- Renderer update production emits resolved placements for `TextureBindingId`s by resolving through their `TextureKey`.
-- Delete `VisualTextureKey` once registry lookup uses `TextureKey`.
-- Delete the current three-layer alias shape where registry entries are keyed by logical use, deduped through shared `physicalEntry`, then repaired through `physicalEntry.textureUseIds`.
+- Add the stateful fuzz harness around the new commit model before renderer payload cutover continues.
+- Model follow-mode behavior explicitly: landblock owner add/remove, object visual reuse, page growth, page moves, texture eviction, and re-addition.
+- Generate palette replacement range recipes from runtime-authored replacement bytes and prove resolver-predictable keys do not require prepared texture texels.
+- Include a reproducer printer that logs operation sequence, active owners, active bindings, texture keys, page revisions, and atlas rects.
+- Keep the fuzz target close to `TextureManager` state, not browser controls or renderer draw code.
 
 **Acceptance criteria**
 
-- No registry entries share mutable `physicalEntry` references.
+- The fuzz harness can reproduce the follow-mode eviction/re-add class that motivated this plan, or it produces a narrower counterexample showing the bug lives outside texture commit state.
+- The existing resident-page invariant remains and is expressed in terms of `TextureKey`, not logical texture-use aliases.
 - No helper needs to “find aliases” by scanning registry entries.
-- A page move updates one texture-pool entry, then all active bindings derive from that entry.
-- The existing resident-page fuzz invariant remains and is expressed in terms of `TextureKey`.
-- Palette replacement fuzz covers runtime-authored replacement byte ranges and proves resolver-predictable keys do not require prepared texture texels.
-- `createTextureUseIdsForRegistryPhysicalEntry` and similar alias fanout helpers are gone.
-- `VisualTextureKey`, `VisualTexturePhysicalEntry.textureUseIds`, and shared mutable physical entries are gone.
+- Palette replacement fuzz covers runtime-authored replacement byte ranges with the single cheap-hash policy.
+- Tests do not assert old scoped `textureUseId` spellings.
 
 ### Phase 4: Renderer Binding Cutover
 
@@ -306,33 +310,27 @@ Internally, identity builders should accept structured inputs and return branded
 - Tests explicitly cover cross-landblock shared texture/source cases.
 - Visual resource ids do not change when only owner/landblock changes.
 
-### Phase 6: Stateful Follow-Mode Fuzz
+### Phase 6: Follow-Mode Scenario Regression And Diagnostics
 
 **Deliverables**
 
-- Move a minimal state-machine harness in before the registry rewrite and keep extending it through Phases 3-6. Waiting until after renderer cutover leaves the riskiest rewrite without a guardrail.
-- Extend the current texture-manager fuzz to model:
-  - `TextureKey`;
-  - `TextureBindingId`;
-  - `TextureOwnerId`;
-  - active owner sets;
-  - binding-to-key map;
-  - resident page revision per texture ref.
-- Add operation classes:
+- Extend the Phase 3 state-machine fuzz only if renderer cutover exposes new state that the manager-level model cannot see.
+- Add focused browser/harness scenarios for follow-mode streaming:
   - add landblock/layer;
   - evict landblock/layer;
   - re-add a previously evicted landblock;
-  - add consumers that share `TextureKey` across different owner ids;
-  - force page growth/repack.
-- Print binding id, texture key, owner id, page ref, logical page revision, latest resident page revision, seed, and operation history on failure.
+  - select objects whose materials share one `TextureKey` across different owner ids;
+  - force page growth/repack while bindings remain active.
+- Update selection diagnostics to print binding id, texture key, owner id, page ref, logical page revision, latest resident page revision, and atlas rect as separate fields.
+- Add a captured scenario for the `da55ffff` / `01002a1b` class of failures if the harness can reproduce it from checked-in or generated data.
 
 **Acceptance criteria**
 
 - Fuzz fails if an active binding points at a stale page revision.
 - Fuzz fails if two equivalent texture sources with different owner ids create distinct texture pool entries.
 - Fuzz fails if owner eviction releases a texture still retained by another owner.
-- The seed/history output is short enough to reproduce a failing sequence directly.
-- Phase 3 cannot be marked complete unless the fuzz model covers page move/repack for shared texture keys.
+- Scenario diagnostics can distinguish stale binding, stale texture key, stale resident page, and stale atlas rect without reading a composite string.
+- The captured follow-mode scenario either stays green or emits a short reproducer from the Phase 3 model.
 
 ### Phase 7: Holistic Cleanup And Compatibility Purge
 

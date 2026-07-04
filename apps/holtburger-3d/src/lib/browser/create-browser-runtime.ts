@@ -3,12 +3,7 @@ import type { PreparedAssetReader } from "../assets/contracts";
 import type { DynamicVisualBaker } from "../dynamic/visual-baker";
 import { WorkerPoolDynamicVisualBaker } from "../dynamic/visual-bake-worker-client";
 import type { DynamicVisualBakeWorkerPort } from "../dynamic/visual-bake-protocol";
-import {
-	createDynamicVisualRecipeMainAssetBridge,
-	DynamicVisualRecipeWorkerClient,
-	type DynamicVisualRecipeMainAssetBridge,
-	WorkerPoolDynamicVisualRecipeResolver,
-} from "../dynamic/visual-recipe-worker-client";
+import { WorkerPoolDynamicVisualRecipeResolver } from "../dynamic/visual-recipe-worker-client";
 import type { DynamicVisualRecipeResolver } from "../dynamic/visual-recipe-resolver";
 import type { DynamicVisualRecipeWorkerPort } from "../dynamic/visual-recipe-protocol";
 import { createBrowserRuntimeHost } from "../host/runtime-host";
@@ -36,14 +31,7 @@ import { EnvCellSystemGeometryResourceProvider } from "../static/env-cells/bake/
 import { StaticObjectBakeResourceProvider } from "../static/objects/bake/static-object-bake-resources";
 import { WorkerPoolStaticBaker } from "../static/bake/worker-client";
 import type { StaticBakeWorkerPort } from "../static/bake/protocol";
-import {
-	createStaticResolverMainAssetBridge,
-	type StaticResolverMainAssetBridge,
-} from "../static/resolver/asset-bridge";
-import {
-	StaticResolverWorkerClient,
-	WorkerPoolStaticResolver,
-} from "../static/resolver/worker-client";
+import { WorkerPoolStaticResolver } from "../static/resolver/worker-client";
 import type { StaticResolverWorkerPort } from "../static/resolver/protocol";
 import type { TexturePackingWorkerPort } from "../textures/packing/protocol";
 import type { TexturePacker } from "../textures/packing/packer";
@@ -131,10 +119,6 @@ interface DynamicVisualRecipeBrowserWorker extends DynamicVisualRecipeWorkerPort
 }
 
 export interface WorkerStaticResolverFactories {
-	readonly createBridge?: (
-		port: StaticResolverWorkerPort,
-		assetReader: PreparedAssetReader,
-	) => StaticResolverMainAssetBridge;
 	readonly createWorker?: () => StaticResolverBrowserWorker;
 }
 
@@ -146,22 +130,12 @@ export function createWorkerStaticResolver(
 	assertPositiveInteger(workerCount, "static resolver worker count");
 	const createWorker =
 		factories.createWorker ?? createStaticResolverBrowserWorker;
-	const createBridge =
-		factories.createBridge ?? createStaticResolverMainAssetBridge;
 
-	const resolvers = Array.from({ length: workerCount }, () => {
-		const worker = createWorker();
-		const bridge = createBridge(worker, assetReader);
-
-		return new StaticResolverWorkerClient(worker, {
-			disposePort: () => {
-				bridge.dispose();
-				worker.terminate();
-			},
-		});
+	return new WorkerPoolStaticResolver({
+		assetReader,
+		createWorker,
+		workerCount,
 	});
-
-	return new WorkerPoolStaticResolver(resolvers);
 }
 
 function createStaticResolverBrowserWorker(): StaticResolverBrowserWorker {
@@ -172,10 +146,6 @@ function createStaticResolverBrowserWorker(): StaticResolverBrowserWorker {
 }
 
 export interface WorkerDynamicVisualRecipeResolverFactories {
-	readonly createBridge?: (
-		port: DynamicVisualRecipeWorkerPort,
-		assetReader: PreparedAssetReader,
-	) => DynamicVisualRecipeMainAssetBridge;
 	readonly createWorker?: () => DynamicVisualRecipeBrowserWorker;
 }
 
@@ -190,22 +160,12 @@ export function createWorkerDynamicVisualRecipeResolver(
 	);
 	const createWorker =
 		factories.createWorker ?? createDynamicVisualRecipeBrowserWorker;
-	const createBridge =
-		factories.createBridge ?? createDynamicVisualRecipeMainAssetBridge;
 
-	const resolvers = Array.from({ length: workerCount }, () => {
-		const worker = createWorker();
-		const bridge = createBridge(worker, assetReader);
-
-		return new DynamicVisualRecipeWorkerClient(worker, {
-			disposePort: () => {
-				bridge.dispose();
-				worker.terminate();
-			},
-		});
+	return new WorkerPoolDynamicVisualRecipeResolver({
+		assetReader,
+		createWorker,
+		workerCount,
 	});
-
-	return new WorkerPoolDynamicVisualRecipeResolver(resolvers);
 }
 
 function createDynamicVisualRecipeBrowserWorker(): DynamicVisualRecipeBrowserWorker {

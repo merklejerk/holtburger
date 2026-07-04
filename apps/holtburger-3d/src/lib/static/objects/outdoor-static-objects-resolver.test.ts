@@ -26,7 +26,7 @@ import {
 } from "../../assets/keys";
 import type { StaticResolverJob } from "../contracts";
 import type { LandblockOutdoorLayerSourcePayloadDto } from "../source-payloads";
-import { RequestScopedPreparedAssetReader } from "../resolver/worker-asset-reader";
+import { createRequestScopedPreparedAssetReaderFromReader } from "../../workers/prepared-asset-service";
 import { OutdoorStaticObjectsResolver } from "./outdoor-static-objects-resolver";
 
 describe("browser outdoor static object resolver", () => {
@@ -115,7 +115,8 @@ describe("browser outdoor static object resolver", () => {
 		]);
 
 		const payload = await new OutdoorStaticObjectsResolver({
-			assetService,
+			assetService:
+				createRequestScopedPreparedAssetReaderFromReader(assetService),
 		}).resolve(createBuildingRequest());
 
 		expect(payload.scope.kind).toBe("outdoor-static-objects");
@@ -342,7 +343,8 @@ describe("browser outdoor static object resolver", () => {
 		]);
 
 		const payload = await new OutdoorStaticObjectsResolver({
-			assetService,
+			assetService:
+				createRequestScopedPreparedAssetReaderFromReader(assetService),
 		}).resolve(createBuildingRequest());
 
 		expect(payload.scope.kind).toBe("outdoor-static-objects");
@@ -554,7 +556,8 @@ describe("browser outdoor static object resolver", () => {
 		]);
 
 		const payload = await new OutdoorStaticObjectsResolver({
-			assetService: new RequestScopedPreparedAssetReader(assetService),
+			assetService:
+				createRequestScopedPreparedAssetReaderFromReader(assetService),
 		}).resolve(createBuildingRequest());
 
 		expect(payload.scope.kind).toBe("outdoor-static-objects");

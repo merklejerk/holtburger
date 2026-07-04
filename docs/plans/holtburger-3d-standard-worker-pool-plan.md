@@ -711,7 +711,7 @@ Decisions, debt, and spicy bits:
 
 ### Phase 5: Migrate Resolver-Style Workers
 
-Status: pending.
+Status: complete as of 2026-07-04.
 
 Deliverables:
 
@@ -726,6 +726,38 @@ Acceptance criteria:
 - Dynamic visual recipe resolution still works.
 - Prepared asset callback tests pass through the generic service path.
 - Domain adapter code is thin and mostly type mapping, not transport reimplementation.
+
+Completion evidence:
+
+- Migrated dynamic visual recipe resolution to `StandardWorkerPool`, `installWorkerHandler`, and the
+  prepared-asset service channel.
+- Migrated static resolver scope resolution and source fanout to one discriminated standard-pool
+  input/output union backed by the same worker implementation.
+- Deleted `apps/holtburger-3d/src/lib/static/resolver/asset-bridge.ts`.
+- Deleted `apps/holtburger-3d/src/lib/static/resolver/asset-bridge.test.ts`.
+- Deleted `apps/holtburger-3d/src/lib/static/resolver/worker-asset-reader.ts`.
+- Updated browser runtime factories to inject worker factories only; bridge factory seams are gone.
+- Verified no stale old bridge/service envelope names remain with `rg`.
+- Verified with
+  `npm run test:ts -- src/lib/dynamic/visual-recipe-worker-client.test.ts src/lib/static/resolver/worker-client.test.ts src/lib/browser/create-browser-runtime.test.ts src/lib/workers/prepared-asset-service.test.ts src/lib/textures/packing/worker-client.test.ts src/lib/dynamic/visual-bake-worker-client.test.ts src/lib/static/bake/worker-client.test.ts src/lib/static/objects/outdoor-static-objects-resolver.test.ts`.
+- Verified with `npm run check`.
+- Verified with `npm run lint:ts`.
+
+Decisions, debt, and spicy bits:
+
+- Static resolver uses one discriminated standard-pool input/output union instead of two separately
+  typed pools. The two job modes share worker construction, service routing, and scheduling while
+  preserving typed adapter methods at the domain boundary.
+- Dynamic visual recipe and static resolver prepared-asset reads now use the shared
+  `PreparedAssetServiceRequest` / `PreparedAssetServiceResponse` channel.
+- The request-scoped prepared asset reader now retains resolved promises for the lifetime of a worker
+  job scope. The previous `finally()`-only pending cache did not satisfy tests that expect duplicate
+  sequential prepared asset references to resolve from the same request scope.
+- Browser runtime bridge factory injection was intentionally removed. Tests can still inject worker
+  factories; the service handler is now the only main-thread callback path.
+- LOC checkpoint including migrated domain plumbing and shared worker primitives is `2136` lines,
+  down from Phase 3's `2191` but still above the original `1853` baseline. Phase 7 cleanup needs to
+  compress tests/diagnostics only where it reflects real deleted transport, not line-count golf.
 
 ### Phase 6: Resteering Checkpoint
 
@@ -843,3 +875,7 @@ Acceptance criteria:
   the pool and handler primitives, plus a prepared-asset service adapter and request-scoped worker
   reader. Resolver-style workers still need migration in Phase 5 before bespoke bridge files can be
   removed.
+- 2026-07-04: Completed Phase 5 by migrating static resolver and dynamic visual recipe workers to
+  the standard pool/service model. Static resolver uses one discriminated job union for scope and
+  source-fanout requests. Bespoke bridge and worker asset reader files were deleted, and prepared
+  asset de-duplication is handled by the shared request-scoped service reader.

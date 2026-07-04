@@ -41,7 +41,7 @@ describe("browser runtime routing", () => {
 		expect(shouldUseBrowserWorkerBaker("env-cell-system")).toBe(true);
 	});
 
-	it("backs static resolver worker bridges with the supplied asset reader", () => {
+	it("creates a static resolver worker pool", () => {
 		const assetReader: PreparedAssetReader = {
 			requestPreparedAsset: () =>
 				Promise.reject(new Error("test asset reader should not be called")),
@@ -51,20 +51,10 @@ describe("browser runtime routing", () => {
 			new FixtureStaticResolverWorker(),
 		];
 		const pendingWorkers = [...createdWorkers];
-		const bridgedReaders: PreparedAssetReader[] = [];
-		let disposedBridges = 0;
 		const resolver = createWorkerStaticResolver(
 			assetReader,
 			createdWorkers.length,
 			{
-				createBridge: (_port, bridgedAssetReader) => {
-					bridgedReaders.push(bridgedAssetReader);
-					return {
-						dispose: () => {
-							disposedBridges += 1;
-						},
-					};
-				},
 				createWorker: () => {
 					const worker = pendingWorkers.shift();
 					if (!worker) {
@@ -75,9 +65,7 @@ describe("browser runtime routing", () => {
 			},
 		);
 
-		expect(bridgedReaders).toEqual([assetReader, assetReader]);
 		disposeResolver(resolver);
-		expect(disposedBridges).toBe(2);
 		expect(createdWorkers.map((worker) => worker.terminated)).toEqual([
 			true,
 			true,
@@ -92,7 +80,6 @@ describe("browser runtime routing", () => {
 		const worker = new FixtureStaticResolverWorker();
 		const sourceRequest = createSourceRequest();
 		const resolver = createWorkerStaticResolver(assetReader, 1, {
-			createBridge: () => ({ dispose: () => {} }),
 			createWorker: () => worker,
 		});
 
@@ -100,14 +87,19 @@ describe("browser runtime routing", () => {
 
 		expect(worker.messages).toEqual([
 			{
-				kind: "resolve-landblock-scene-lod-source",
-				requestId: "resolver-source:0",
-				sourceRequest,
+				input: {
+					kind: "resolve-landblock-scene-lod-source",
+					sourceRequest,
+				},
+				kind: "job",
+				requestId: "resolver-job:0",
 			},
 		]);
 		expect(
 			worker.messages.some(
-				(message) => message.kind === "resolve-static-scope",
+				(message) =>
+					message.kind === "job" &&
+					message.input.kind === "resolve-static-scope",
 			),
 		).toBe(false);
 
@@ -117,16 +109,19 @@ describe("browser runtime routing", () => {
 			request: sourceRequest,
 		};
 		worker.emit({
-			kind: "landblock-scene-lod-source-resolved",
-			requestId: "resolver-source:0",
-			resolution,
+			kind: "result",
+			output: {
+				kind: "landblock-scene-lod-source-resolved",
+				resolution,
+			},
+			requestId: "resolver-job:0",
 		});
 
 		await expect(pending).resolves.toBe(resolution);
 		disposeResolver(resolver);
 	});
 
-	it("backs dynamic visual recipe resolver workers with the supplied asset reader", () => {
+	it("creates a dynamic visual recipe worker pool", () => {
 		const assetReader: PreparedAssetReader = {
 			requestPreparedAsset: () =>
 				Promise.reject(new Error("test asset reader should not be called")),
@@ -136,20 +131,10 @@ describe("browser runtime routing", () => {
 			new FixtureDynamicVisualRecipeWorker(),
 		];
 		const pendingWorkers = [...workers];
-		const bridgedReaders: PreparedAssetReader[] = [];
-		let disposedBridges = 0;
 		const resolver = createWorkerDynamicVisualRecipeResolver(
 			assetReader,
 			workers.length,
 			{
-				createBridge: (_port, bridgedAssetReader) => {
-					bridgedReaders.push(bridgedAssetReader);
-					return {
-						dispose: () => {
-							disposedBridges += 1;
-						},
-					};
-				},
 				createWorker: () => {
 					const worker = pendingWorkers.shift();
 					if (!worker) {
@@ -160,9 +145,7 @@ describe("browser runtime routing", () => {
 			},
 		);
 
-		expect(bridgedReaders).toEqual([assetReader, assetReader]);
 		disposeResolver(resolver);
-		expect(disposedBridges).toBe(2);
 		expect(workers.map((worker) => worker.terminated)).toEqual([true, true]);
 	});
 

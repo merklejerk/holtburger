@@ -3051,7 +3051,9 @@ function createStaticSelectionTexturePlacementDiagnostics(
 	});
 }
 
-function extractTextureBindingDid(dynamicTextureSourceId: string | null): string | null {
+function extractTextureBindingDid(
+	dynamicTextureSourceId: string | null,
+): string | null {
 	if (dynamicTextureSourceId === null) {
 		return null;
 	}
@@ -5186,7 +5188,8 @@ function createStaticDemandFromSceneInterest(
 			location: null,
 			lod: {
 				buildings: -1,
-				detail: -1,
+				explicitObjects: -1,
+				generatedScenery: -1,
 				envCells: -1,
 				terrain: -1,
 			},
@@ -5202,7 +5205,8 @@ function createStaticDemandFromSceneInterest(
 			},
 			lod: {
 				buildings: -1,
-				detail: -1,
+				explicitObjects: -1,
+				generatedScenery: -1,
 				envCells: 0,
 				terrain: -1,
 			},
@@ -5213,7 +5217,12 @@ function createStaticDemandFromSceneInterest(
 		buildings: interest.domains.includes("buildings")
 			? (interest.lod?.buildings ?? 0)
 			: -1,
-		detail: createLegacyDetailLodRadius(interest),
+		explicitObjects: interest.domains.includes("explicit-objects")
+			? (interest.lod?.explicitObjects ?? 0)
+			: -1,
+		generatedScenery: interest.domains.includes("generated-scenery")
+			? (interest.lod?.generatedScenery ?? 0)
+			: -1,
 		terrain: interest.domains.includes("terrain")
 			? (interest.lod?.terrain ?? 0)
 			: -1,
@@ -5229,18 +5238,6 @@ function createStaticDemandFromSceneInterest(
 		},
 		lod,
 	};
-}
-
-function createLegacyDetailLodRadius(
-	interest: Extract<RuntimeSceneInterest, { readonly kind: "outdoor-anchor" }>,
-): number {
-	const explicitObjectRadius = interest.domains.includes("explicit-objects")
-		? (interest.lod?.detail ?? 0)
-		: -1;
-	const generatedSceneryRadius = interest.domains.includes("generated-scenery")
-		? (interest.lod?.detail ?? 0)
-		: -1;
-	return Math.max(explicitObjectRadius, generatedSceneryRadius);
 }
 
 function nowMs(): number {

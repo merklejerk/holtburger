@@ -67,7 +67,10 @@ export interface StaticResolverScope {
 export interface StaticLodRadii {
 	readonly terrain: number;
 	readonly buildings: number;
-	readonly detail: number;
+	/** Outdoor explicit-object layer coverage radius. */
+	readonly explicitObjects: number;
+	/** Outdoor generated-scenery layer coverage radius. */
+	readonly generatedScenery: number;
 	readonly envCells: number;
 }
 

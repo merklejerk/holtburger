@@ -2184,7 +2184,7 @@ describe("browser client runtime", () => {
 		updateOutdoorSceneInterest(runtime, {
 			anchorLandblockId: landblockId,
 			domains: ["terrain", "generated-scenery"],
-			lod: { detail: 0, terrain: 0 },
+			lod: { generatedScenery: 0, terrain: 0 },
 		});
 		const generatedSceneryRequest = resolver.pendingRequests.find(
 			(request) => request.job.domain === "outdoor-generated-scenery",
@@ -2237,7 +2237,7 @@ describe("browser client runtime", () => {
 
 		updateOutdoorSceneInterest(runtime, {
 			domains: ["terrain", "buildings", "generated-scenery"],
-			lod: { buildings: 0, detail: 0, terrain: 0 },
+			lod: { buildings: 0, generatedScenery: 0, terrain: 0 },
 		});
 		const generatedSceneryRequest = resolver.pendingRequests.find(
 			(request) => request.job.domain === "outdoor-generated-scenery",
@@ -2287,12 +2287,12 @@ describe("browser client runtime", () => {
 							materialIds: [0x08000010],
 							slot: 0,
 						},
-						],
-						rendererTextures: {
-							drawUnitId: "static-draw-a",
-							status: "missing-resource",
-						},
-						sourceMapping: {
+					],
+					rendererTextures: {
+						drawUnitId: "static-draw-a",
+						status: "missing-resource",
+					},
+					sourceMapping: {
 						geometrySurfaceIds: [0],
 						partIndices: [0],
 						polygonCount: 1,
@@ -3802,22 +3802,22 @@ class FakeRenderer implements Renderer {
 		};
 	}
 
-		createDiagnosticsSnapshot(): RendererSnapshot {
-			this.diagnosticsSnapshotCount += 1;
-			return this.#snapshot;
-		}
+	createDiagnosticsSnapshot(): RendererSnapshot {
+		this.diagnosticsSnapshotCount += 1;
+		return this.#snapshot;
+	}
 
-		createObjectMaterialTextureDiagnostics(
-			drawUnitIds: readonly string[],
-		): readonly RendererObjectMaterialTextureDiagnostics[] {
-			return drawUnitIds.map((drawUnitId) => ({
-				drawUnitId,
-				status: "missing-resource",
-			}));
-		}
+	createObjectMaterialTextureDiagnostics(
+		drawUnitIds: readonly string[],
+	): readonly RendererObjectMaterialTextureDiagnostics[] {
+		return drawUnitIds.map((drawUnitId) => ({
+			drawUnitId,
+			status: "missing-resource",
+		}));
+	}
 
-		createResourceSnapshot(): RendererResourceSnapshot {
-			return {
+	createResourceSnapshot(): RendererResourceSnapshot {
+		return {
 			directEnvCellDrawCalls: this.#snapshot.directEnvCellDrawCalls,
 			dynamicDrawCalls: this.#snapshot.dynamicDrawCalls,
 			dynamicInstances: this.#snapshot.dynamicInstances,

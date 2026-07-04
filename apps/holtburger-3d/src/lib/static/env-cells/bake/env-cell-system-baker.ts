@@ -1020,14 +1020,15 @@ function requireObjectVisualPlacementItemId(options: {
 	const placementItemId = options.placementSnapshot.itemIdsByBindingId.get(
 		options.bindingId,
 	);
-	const placement = options.placementSnapshot.placementsByBindingId.get(
+	const bindingPlacement = options.placementSnapshot.placementsByBindingId.get(
 		options.bindingId,
 	);
-	if (placementItemId === undefined || !placement) {
+	if (placementItemId === undefined || !bindingPlacement) {
 		throw new Error(
 			`${options.subject} is missing object-visual placement item id for binding ${options.bindingId}.`,
 		);
 	}
+	const { placement } = bindingPlacement;
 	if (placement.itemId !== placementItemId) {
 		throw new Error(
 			`${options.subject} object-visual placement item ${placementItemId} resolved to mismatched placement ${placement.itemId} for binding ${options.bindingId}.`,

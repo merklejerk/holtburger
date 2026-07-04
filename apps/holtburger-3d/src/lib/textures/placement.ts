@@ -117,11 +117,10 @@ export interface TexturePlacementIntent<
 	readonly source: TexturePlacementSource;
 }
 
-/** CPU-side atlas assignment for one placement item. */
+/** CPU-side physical atlas assignment for one placement item. */
 export interface TexturePlacement<
 	TPlacementItemId extends TexturePlacementLookupId = string,
 > {
-	readonly bindingId: TextureBindingId;
 	readonly textureKey: TextureKey;
 	readonly ownerIds: readonly TextureOwnerId[];
 	readonly pageClass: TexturePageClass;
@@ -134,6 +133,16 @@ export interface TexturePlacement<
 	readonly rect: readonly [number, number, number, number];
 	readonly width: number;
 	readonly height: number;
+}
+
+/** Material-consumer binding resolved to a physical atlas placement. */
+interface TextureBindingPlacement<
+	TPlacementItemId extends TexturePlacementLookupId = string,
+> {
+	/** Material-consumer binding identity. This is not physical atlas identity. */
+	readonly bindingId: TextureBindingId;
+	/** Physical atlas placement shared by every binding with the same texture key/page class. */
+	readonly placement: TexturePlacement<TPlacementItemId>;
 }
 
 /** Compact baker input keyed by placement item id. */
@@ -156,7 +165,7 @@ export interface ObjectVisualTexturePlacementSnapshot extends TexturePlacementSn
 	/** Placement facts keyed by stable material binding id; avoids numeric bake-id collisions across batches. */
 	readonly placementsByBindingId: ReadonlyMap<
 		TextureBindingId,
-		TexturePlacement<TexturePlacementItemId>
+		TextureBindingPlacement<TexturePlacementItemId>
 	>;
 }
 

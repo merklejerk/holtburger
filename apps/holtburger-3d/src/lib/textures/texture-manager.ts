@@ -57,7 +57,7 @@ import {
 	createTexturePlacementItemId,
 	type ObjectVisualTexturePlacementIntent,
 	type ObjectVisualTexturePlacementSnapshot,
-	type TexturePlacement as PlannedTexturePlacement,
+	type TexturePlacement as PhysicalTexturePlacement,
 	type TexturePlacementBucketKey,
 	type TexturePlacementLookupId,
 	type TexturePlacementIntent,
@@ -395,7 +395,7 @@ export class TextureManager {
 
 			const placementsByItemId = new Map<
 				TPlacementItemId,
-				PlannedTexturePlacement<TPlacementItemId>
+				PhysicalTexturePlacement<TPlacementItemId>
 			>();
 			for (let index = 0; index < textureUses.length; index += 1) {
 				const textureUse = textureUses[index];
@@ -418,10 +418,9 @@ export class TextureManager {
 				}
 				placementsByItemId.set(
 					intent.itemId,
-					toPlannedTexturePlacement(
+					toPhysicalTexturePlacement(
 						entry,
 						intent.itemId,
-						textureUse.bindingId,
 					),
 				);
 			}
@@ -453,7 +452,10 @@ export class TextureManager {
 							`Object visual texture placement ${intent.bindingId} was not committed for item ${intent.itemId}.`,
 						);
 					}
-					return [intent.bindingId, placement] as const;
+					return [
+						intent.bindingId,
+						{ bindingId: intent.bindingId, placement },
+					] as const;
 				}),
 			),
 		};
@@ -2031,15 +2033,13 @@ function createVisualTextureUseCommitFromIntent(
 	};
 }
 
-function toPlannedTexturePlacement<
+function toPhysicalTexturePlacement<
 	TPlacementItemId extends TexturePlacementLookupId,
 >(
 	entry: VisualTextureRegistryEntry,
 	itemId: TPlacementItemId,
-	bindingId: TextureBindingId,
-): PlannedTexturePlacement<TPlacementItemId> {
+): PhysicalTexturePlacement<TPlacementItemId> {
 	return {
-		bindingId,
 		height: entry.physicalEntry.textureHeight,
 		itemId,
 		ownerIds: entry.ownerIds,

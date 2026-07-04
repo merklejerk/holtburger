@@ -978,6 +978,28 @@ export class TextureManager {
 			for (const existingEntry of existingPage.entries) {
 				existingEntry.physicalEntry.placementRevision = placementRevision;
 				existingEntry.physicalEntry.runtimePlacement = runtimePlacement;
+				const textureUseIds =
+					this.#createTextureUseIdsForRegistryEntry(existingEntry);
+				for (const textureUseId of textureUseIds) {
+					const activeReferenceCount =
+						this.#placementRecordsByItemId.get(textureUseId)
+							?.activeReferenceCount ??
+						(textureUseId === existingEntry.itemId
+							? existingEntry.leaseCount
+							: 0);
+					this.#recordPlacementEntry(existingEntry, textureUseId);
+					this.#setPlacementActiveReferenceCount(
+						existingEntry,
+						activeReferenceCount,
+						textureUseId,
+					);
+				}
+				resolvedTexturePlacements.push(
+					...createResolvedTexturePlacementsForEntry(
+						existingEntry,
+						textureUseIds,
+					),
+				);
 			}
 			for (const { entry, placement } of pagePlacements) {
 				const registryEntry = createRegistryEntryForAbsorbedPlacement({

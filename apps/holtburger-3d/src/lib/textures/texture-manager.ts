@@ -48,6 +48,7 @@ import type {
 	TexturePackingPixelSource,
 	TexturePackingResult,
 } from "./packing/protocol";
+import type { TextureLeaseSet } from "./leases";
 import {
 	createRuntimeTexturePagePolicy,
 	createRuntimeTextureSamplerPolicy,
@@ -539,6 +540,14 @@ export class TextureManager {
 			}
 			this.#dependencyItemIdsByResourceId.set(dependency.resourceId, itemIds);
 		}
+	}
+
+	pinTextureLeaseSet(leaseSet: TextureLeaseSet): void {
+		this.pinTextureResourceDependencies(leaseSet.dependencies);
+	}
+
+	releaseTextureLeaseResourceIds(resourceIds: readonly string[]): void {
+		this.releaseTextureResourceDependencies(resourceIds);
 	}
 
 	releaseTextureResourceDependencies(resourceIds: readonly string[]): void {

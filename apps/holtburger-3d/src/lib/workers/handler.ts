@@ -63,7 +63,7 @@ export interface WorkerExecuteContext<
 	requestService(request: TServiceRequest): Promise<TServiceResponse>;
 }
 
-export interface WorkerExecuteResult<TOutput> {
+interface WorkerExecuteResult<TOutput> {
 	readonly output: TOutput;
 	readonly transfer?: readonly Transferable[];
 }

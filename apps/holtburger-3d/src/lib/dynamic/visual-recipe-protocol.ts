@@ -31,12 +31,6 @@ export type DynamicVisualRecipeWorkerThreadMessage = WorkerHandlerOutputMessage<
 	PreparedAssetServiceRequest
 >;
 
-export type DynamicVisualRecipeWorkerResponse = WorkerPoolResponseMessage<
-	DynamicEntityRecipe,
-	never,
-	PreparedAssetServiceRequest
->;
-
 export type DynamicVisualRecipeWorkerPort = WorkerMessagePort<
 	WorkerPoolRequestMessage<
 		DynamicVisualRecipeWorkerRequestPayload,

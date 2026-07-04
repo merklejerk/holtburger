@@ -50,7 +50,7 @@ export type StaticResolverWorkerThreadMessage = WorkerHandlerOutputMessage<
 	PreparedAssetServiceRequest
 >;
 
-export type StaticResolverWorkerRequest = WorkerPoolRequestMessage<
+type StaticResolverWorkerRequest = WorkerPoolRequestMessage<
 	StaticResolverWorkerInput,
 	PreparedAssetServiceResponse
 >;

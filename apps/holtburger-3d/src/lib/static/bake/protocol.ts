@@ -23,16 +23,13 @@ export type StaticBakeWorkerProgress =
 			readonly event: StaticBakerTraceEvent;
 	  };
 
-export type StaticBakeWorkerMainMessage =
+export type StaticBakeWorkerRequest =
 	WorkerHandlerInputMessage<StaticBakeJobInput>;
 
-export type StaticBakeWorkerThreadMessage = WorkerHandlerOutputMessage<
+export type StaticBakeWorkerResponse = WorkerHandlerOutputMessage<
 	StaticBakeJobResult,
 	StaticBakeWorkerProgress
 >;
-
-export type StaticBakeWorkerRequest = StaticBakeWorkerMainMessage;
-export type StaticBakeWorkerResponse = StaticBakeWorkerThreadMessage;
 
 export type StaticBakeWorkerPort = WorkerMessagePort<
 	WorkerPoolRequestMessage<StaticBakeJobInput>,

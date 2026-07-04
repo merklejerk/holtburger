@@ -75,16 +75,13 @@ interface TexturePackingRect {
 	readonly rect: readonly [number, number, number, number];
 }
 
-export type TexturePackingWorkerMainMessage =
+export type TexturePackingWorkerRequest =
 	WorkerHandlerInputMessage<TexturePackingJob>;
 
-export type TexturePackingWorkerThreadMessage = WorkerHandlerOutputMessage<
+export type TexturePackingWorkerResponse = WorkerHandlerOutputMessage<
 	TexturePackingResult,
 	never
 >;
-
-export type TexturePackingWorkerRequest = TexturePackingWorkerMainMessage;
-export type TexturePackingWorkerResponse = TexturePackingWorkerThreadMessage;
 
 export type TexturePackingWorkerPort = WorkerMessagePort<
 	WorkerPoolRequestMessage<TexturePackingJob>,

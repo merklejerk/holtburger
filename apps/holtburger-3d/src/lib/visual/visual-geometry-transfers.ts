@@ -1,26 +1,7 @@
 import {
-	collectTransferableBinarySidecars,
 	type BinarySidecarView,
 } from "../workers/transfers";
 import type { VisualGeometryPayload } from "./visual-geometry";
-
-export function collectVisualGeometryPayloadTransfers(
-	payloads: Iterable<VisualGeometryPayload>,
-	labelPrefix = "Visual geometry payload",
-): readonly Transferable[] {
-	const sidecars: BinarySidecarView[] = [];
-	let index = 0;
-	for (const payload of payloads) {
-		sidecars.push(
-			...createVisualGeometryPayloadTransferSidecars(
-				payload,
-				`${labelPrefix} ${index}`,
-			),
-		);
-		index += 1;
-	}
-	return collectTransferableBinarySidecars(sidecars);
-}
 
 export function createVisualGeometryPayloadTransferSidecars(
 	payload: VisualGeometryPayload,

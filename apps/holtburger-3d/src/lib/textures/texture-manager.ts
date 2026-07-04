@@ -529,11 +529,11 @@ export class TextureManager {
 		};
 	}
 
-	pinTextureResourceDependencies(
+	#pinTextureResourceDependencies(
 		dependencies: readonly TextureResourceDependencies[],
 	): void {
 		for (const dependency of dependencies) {
-			this.releaseTextureResourceDependencies([dependency.resourceId]);
+			this.#releaseTextureResourceDependencies([dependency.resourceId]);
 			const itemIds = new Set(dependency.roles.flatMap((role) => role.itemIds));
 			for (const itemId of itemIds) {
 				this.#addPlacementDependencyReference(itemId, dependency.resourceId);
@@ -543,14 +543,14 @@ export class TextureManager {
 	}
 
 	pinTextureLeaseSet(leaseSet: TextureLeaseSet): void {
-		this.pinTextureResourceDependencies(leaseSet.dependencies);
+		this.#pinTextureResourceDependencies(leaseSet.dependencies);
 	}
 
 	releaseTextureLeaseResourceIds(resourceIds: readonly string[]): void {
-		this.releaseTextureResourceDependencies(resourceIds);
+		this.#releaseTextureResourceDependencies(resourceIds);
 	}
 
-	releaseTextureResourceDependencies(resourceIds: readonly string[]): void {
+	#releaseTextureResourceDependencies(resourceIds: readonly string[]): void {
 		for (const resourceId of resourceIds) {
 			const itemIds = this.#dependencyItemIdsByResourceId.get(resourceId);
 			if (!itemIds) {

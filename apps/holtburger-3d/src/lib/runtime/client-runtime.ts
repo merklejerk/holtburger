@@ -2155,7 +2155,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#textureManager.releaseTextureLeaseResourceIds(
 			collectStaticDrawUnitResourceIds(delta.removedResources),
 		);
-		commit.timing.releaseTextureDependenciesMs +=
+		commit.timing.releaseTextureLeasesMs +=
 			performance.now() - releaseStartedAtMs;
 		const textureApplyStartedAtMs = performance.now();
 		const textureUpdate =
@@ -2184,7 +2184,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#textureManager.pinTextureLeaseSet(
 			createTextureLeaseSet(delta.textureDependencies),
 		);
-		commit.timing.pinTextureDependenciesMs +=
+		commit.timing.pinTextureLeasesMs +=
 			performance.now() - pinStartedAtMs;
 		const staticLayerStartedAtMs = performance.now();
 		this.#applyInstalledStaticLayers(delta, installed);
@@ -3860,11 +3860,11 @@ function createEmptyStaticCommitInstallTiming(): MutableStaticCommitInstallTimin
 		installStaticCommitMs: 0,
 		materializeMs: 0,
 		materializeStartedAtMs: null,
-		pinTextureDependenciesMs: 0,
+		pinTextureLeasesMs: 0,
 		queryRecordsMs: 0,
 		refreshDebugOverlayMs: 0,
 		refreshEnvCellMembershipMs: 0,
-		releaseTextureDependenciesMs: 0,
+		releaseTextureLeasesMs: 0,
 		renderPassPlanMs: 0,
 		textureApplyMs: 0,
 		queuedMs: 0,
@@ -3883,11 +3883,11 @@ function toStaticCommitInstallTimingSnapshot(
 		dynamicVisualPrepMs: timing.dynamicVisualPrepMs,
 		installStaticCommitMs: timing.installStaticCommitMs,
 		materializeMs: timing.materializeMs,
-		pinTextureDependenciesMs: timing.pinTextureDependenciesMs,
+		pinTextureLeasesMs: timing.pinTextureLeasesMs,
 		queryRecordsMs: timing.queryRecordsMs,
 		refreshDebugOverlayMs: timing.refreshDebugOverlayMs,
 		refreshEnvCellMembershipMs: timing.refreshEnvCellMembershipMs,
-		releaseTextureDependenciesMs: timing.releaseTextureDependenciesMs,
+		releaseTextureLeasesMs: timing.releaseTextureLeasesMs,
 		renderPassPlanMs: timing.renderPassPlanMs,
 		textureApplyMs: timing.textureApplyMs,
 		queuedMs: timing.queuedMs,

@@ -20,7 +20,7 @@ export type TerrainMaterialFamilyClassification = Pick<
 	| "materialFamily"
 	| "primaryTextureBindingId"
 	| "terrainFallbackReasons"
-	| "textureUseIds"
+	| "textureBindingIds"
 >;
 
 export interface TerrainMaterialFamilyClassifierOptions {
@@ -62,19 +62,19 @@ export function classifyTerrainMaterialFamily({
 	}
 
 	if (requiresLayeredMaterial(plan)) {
-		const textureUseIds = collectTerrainLayeredTextureUseIds(plan);
+		const textureBindingIds = collectTerrainLayeredTextureBindingIds(plan);
 		return {
 			materialBucketKey: [
 				"shader:terrain-layered",
 				`domain:${domain}`,
 				"sampler:color-mask-detail",
-				`textures:${textureUseIds.join(",")}`,
+				`textures:${textureBindingIds.join(",")}`,
 				`signature:${plan.signature}`,
 			].join("|"),
 			materialFamily: "terrain-layered",
 			primaryTextureBindingId,
 			terrainFallbackReasons: [],
-			textureUseIds,
+			textureBindingIds,
 		};
 	}
 
@@ -88,7 +88,7 @@ export function classifyTerrainMaterialFamily({
 		materialFamily: "terrain-single-base-color",
 		primaryTextureBindingId,
 		terrainFallbackReasons: [],
-		textureUseIds: [primaryTextureBindingId],
+		textureBindingIds: [primaryTextureBindingId],
 	};
 }
 
@@ -180,24 +180,24 @@ function requiresLayeredMaterial(plan: TerrainMaterialLayerPlan): boolean {
 	);
 }
 
-function collectTerrainLayeredTextureUseIds(
+function collectTerrainLayeredTextureBindingIds(
 	plan: TerrainMaterialLayerPlan,
 ): readonly TextureBindingId[] {
-	const textureUseIds = new Set<TextureBindingId>();
+	const textureBindingIds = new Set<TextureBindingId>();
 	for (const entry of plan.layerEntries) {
 		for (const binding of collectLayerEntryTextureBindings(entry)) {
 			if (binding.textureUseId) {
-				textureUseIds.add(binding.textureUseId);
+				textureBindingIds.add(binding.textureUseId);
 			}
 		}
 	}
 	for (const detailRole of plan.detailRoles) {
 		if (detailRole.texture.textureUseId) {
-			textureUseIds.add(detailRole.texture.textureUseId);
+			textureBindingIds.add(detailRole.texture.textureUseId);
 		}
 	}
 
-	return [...textureUseIds];
+	return [...textureBindingIds];
 }
 
 function collectLayerEntryTextureBindings(
@@ -244,7 +244,7 @@ function createDebugFlatClassification({
 		materialFamily: "terrain-debug-flat",
 		primaryTextureBindingId: null,
 		terrainFallbackReasons: reasons,
-		textureUseIds: [],
+		textureBindingIds: [],
 	};
 }
 

@@ -11,6 +11,7 @@ import type {
 	TerrainGeometryStaticDrawUnit,
 } from "../static/contracts";
 import type { TextureResourceDependencies } from "../textures/placement";
+import { createTextureBindingId } from "../textures/identity";
 import {
 	createObjectVisualInstallSet,
 	type ObjectVisualDirectDrawUnit,
@@ -22,7 +23,9 @@ import { installStaticCommit } from "./static-commit-installer";
 describe("static commit installer", () => {
 	it("installs committed draw units directly from baker output", () => {
 		const drawUnit = createTerrainDrawUnit("terrain-textured", {
-			textureUseIds: ["terrain-textured:prepared-texture:06000010"],
+			textureBindingIds: [
+				createFixtureBindingId("terrain-textured:prepared-texture:06000010"),
+			],
 		});
 		const textureUpdate = createTexturePlacementUpdate(drawUnit);
 
@@ -40,7 +43,9 @@ describe("static commit installer", () => {
 
 	it("rejects textured draw units without resolved texture placements", () => {
 		const drawUnit = createTerrainDrawUnit("terrain-textured", {
-			textureUseIds: ["terrain-textured:prepared-texture:06000010"],
+			textureBindingIds: [
+				createFixtureBindingId("terrain-textured:prepared-texture:06000010"),
+			],
 		});
 
 		expect(() =>
@@ -50,9 +55,7 @@ describe("static commit installer", () => {
 				}),
 				textureUpdate: null,
 			}),
-		).toThrow(
-			/terrain-textured is missing resolved texture placements for terrain-textured:prepared-texture:06000010/,
-		);
+		).toThrow(/terrain-textured is missing resolved texture placements for binding\|/);
 	});
 
 	it("rejects textured structured-interior draw units without resolved texture placements", () => {
@@ -66,7 +69,7 @@ describe("static commit installer", () => {
 				textureUpdate: null,
 			}),
 		).toThrow(
-			/structured-interior-a is missing resolved texture placements for structured-interior-a:prepared-texture:06000010/,
+			/structured-interior-a is missing resolved texture placements for binding\|/,
 		);
 	});
 
@@ -181,7 +184,7 @@ describe("static commit installer", () => {
 				textureUpdate: null,
 			}),
 		).toThrow(
-			/visual-static-object-a is missing resolved texture placements for static-object-a:prepared-texture:0/,
+			/visual-static-object-a is missing resolved texture placements for binding\|/,
 		);
 	});
 
@@ -255,10 +258,10 @@ function isObjectVisualDirectDrawUnit(
 function createTerrainDrawUnit(
 	drawUnitId: string,
 	options: {
-		readonly textureUseIds?: readonly string[];
+		readonly textureBindingIds?: readonly string[];
 	} = {},
 ): TerrainGeometryStaticDrawUnit {
-	const textureUseIds = options.textureUseIds ?? [];
+	const textureBindingIds = options.textureBindingIds ?? [];
 
 	return {
 		coordinateSpace: "landblock-render-local",
@@ -270,20 +273,20 @@ function createTerrainDrawUnit(
 		landblockId: 0xda55ffff,
 		layerSlots: new Float32Array([0, 0, 0]),
 		materialBucketKey:
-			textureUseIds.length > 0
+			textureBindingIds.length > 0
 				? "shader:terrain-single-base-color"
 				: "shader:terrain-debug-flat",
 		materialFamily:
-			textureUseIds.length > 0
+			textureBindingIds.length > 0
 				? "terrain-single-base-color"
 				: "terrain-debug-flat",
 		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 1]),
-		primaryTextureBindingId: textureUseIds[0] ?? null,
+		primaryTextureBindingId: textureBindingIds[0] ?? null,
 		sourceTriangleIds: ["triangle-a"],
 		terrainFallbackReasons: [],
 		terrainMaterialPlan: null,
 		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
-		textureUseIds,
+		textureBindingIds,
 		triangleCount: 1,
 		vertexCount: 3,
 	};
@@ -292,7 +295,7 @@ function createTerrainDrawUnit(
 function createStaticObjectDrawUnit(
 	drawUnitId: string,
 ): StaticObjectGeometryStaticDrawUnit {
-	const textureUseIds = [`${drawUnitId}:prepared-texture:0`];
+	const textureBindingIds = [createFixtureBindingId(`${drawUnitId}:prepared-texture:0`)];
 	return {
 		coordinateSpace: "landblock-render-local",
 		domain: "outdoor-buildings",
@@ -314,7 +317,7 @@ function createStaticObjectDrawUnit(
 				materialEmissiveColor: [0, 0, 0],
 				materialIds: [1],
 				paletteTextureBindingId: null,
-				primaryTextureBindingId: textureUseIds[0]!,
+				primaryTextureBindingId: textureBindingIds[0]!,
 				primaryTextureWrapMode: "clamp",
 				renderState: createOpaqueRenderState(),
 				slot: 0,
@@ -343,7 +346,7 @@ function createStaticObjectDrawUnit(
 			triangleCount: 1,
 		},
 		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
-		textureUseIds,
+		textureBindingIds,
 		triangleCount: 1,
 		vertexCount: 3,
 	};
@@ -385,7 +388,7 @@ function createObjectVisualResource(
 			materialFamily: drawUnit.materialFamily,
 			materialPass: drawUnit.materialPass,
 			renderState: drawUnit.renderState,
-			textureUseIds: drawUnit.textureUseIds,
+			textureBindingIds: drawUnit.textureBindingIds,
 		},
 		kind: "static-object-visual-resource",
 		materialEntries: drawUnit.materialEntries,
@@ -396,7 +399,7 @@ function createObjectVisualResource(
 		renderState: drawUnit.renderState,
 		resourceId,
 		texCoords: drawUnit.texCoords,
-		textureUseIds: drawUnit.textureUseIds,
+		textureBindingIds: drawUnit.textureBindingIds,
 		triangleCount: drawUnit.triangleCount,
 		vertexCount: drawUnit.vertexCount,
 	};
@@ -438,7 +441,9 @@ function createObjectVisualRenderInstance(
 function createStructuredInteriorDrawUnit(
 	drawUnitId: string,
 ): StructuredInteriorGeometryStaticDrawUnit {
-	const textureUseIds = [`${drawUnitId}:prepared-texture:06000010`];
+	const textureBindingIds = [
+		createFixtureBindingId(`${drawUnitId}:prepared-texture:06000010`),
+	];
 	const renderState = createOpaqueRenderState();
 
 	return {
@@ -475,7 +480,7 @@ function createStructuredInteriorDrawUnit(
 				materialEmissiveColor: [0, 0, 0],
 				materialIds: [0x08000010],
 				paletteTextureBindingId: null,
-				primaryTextureBindingId: textureUseIds[0]!,
+				primaryTextureBindingId: textureBindingIds[0]!,
 				primaryTextureWrapMode: "repeat",
 				renderState,
 				slot: 0,
@@ -496,7 +501,7 @@ function createStructuredInteriorDrawUnit(
 				pass: "opaque",
 				slotId: 0,
 				surfaceId: 0x08000010,
-				textureUseIds,
+				textureBindingIds,
 			},
 		],
 		materialSlotIndices: new Float32Array([0, 0, 0]),
@@ -506,7 +511,7 @@ function createStructuredInteriorDrawUnit(
 		sourceTriangleIds: ["triangle-a"],
 		surfaceIds: [0x08000010],
 		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
-		textureUseIds,
+		textureBindingIds,
 		triangleCount: 1,
 		vertexCount: 3,
 	};
@@ -528,7 +533,7 @@ function createOpaqueRenderState(): StaticObjectGeometryStaticDrawUnit["renderSt
 function createTexturePlacementUpdate(
 	drawUnit: StaticDrawUnit,
 ): TexturePlacementUpdate {
-	const textureUseId = drawUnit.textureUseIds[0];
+	const textureUseId = drawUnit.textureBindingIds[0];
 	if (!textureUseId) {
 		throw new Error("Texture placement fixture needs a textured draw unit.");
 	}
@@ -558,7 +563,7 @@ function createTexturePlacementUpdateForDrawUnits(
 function createTexturePlacementUpdateForVisualResource(
 	resource: ObjectVisualResource,
 ): TexturePlacementUpdate {
-	const textureUseId = resource.textureUseIds[0];
+	const textureUseId = resource.textureBindingIds[0];
 	if (!textureUseId) {
 		throw new Error("Texture placement fixture needs a textured resource.");
 	}
@@ -576,6 +581,7 @@ function createResolvedTexturePlacement(
 ): ResolvedTexturePlacement {
 	const textureRefId = "texture-ref-a";
 	return {
+		bindingId: textureUseId,
 		pageVersion: {
 			placementRevision: 3,
 			textureRefId,
@@ -586,4 +592,12 @@ function createResolvedTexturePlacement(
 		textureUseId,
 		textureWidth: 1,
 	};
+}
+
+function createFixtureBindingId(slot: string): string {
+	return createTextureBindingId({
+		resourceId: "static-commit-installer-test",
+		role: "object-base-color",
+		slot,
+	});
 }

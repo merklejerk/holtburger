@@ -28,12 +28,12 @@ describe("browser atlas texture packer", () => {
 			{
 				pageId: "pack-job:page:0",
 				rect: [0, 0, 16, 16],
-				textureUseId: "a",
+				entryKey: "a",
 			},
 			{
 				pageId: "pack-job:page:0",
 				rect: [16, 0, 16, 16],
-				textureUseId: "b",
+				entryKey: "b",
 			},
 		]);
 		expect(Array.from(result.pages[0]?.pixels.slice(0, 4) ?? [])).toEqual([
@@ -64,12 +64,12 @@ describe("browser atlas texture packer", () => {
 			{
 				pageId: "pack-job:page:0",
 				rect: [0, 0, 128, 128],
-				textureUseId: "a",
+				entryKey: "a",
 			},
 			{
 				pageId: "pack-job:page:0",
 				rect: [128, 0, 128, 128],
-				textureUseId: "b",
+				entryKey: "b",
 			},
 		]);
 	});
@@ -94,7 +94,7 @@ describe("browser atlas texture packer", () => {
 						]),
 						width: 2,
 					},
-					textureUseId: "terrain-color",
+					entryKey: "terrain-color",
 				},
 			],
 		});
@@ -107,7 +107,7 @@ describe("browser atlas texture packer", () => {
 			{
 				pageId: "pack-job:page:0",
 				rect: [1, 1, 2, 2],
-				textureUseId: "terrain-color",
+				entryKey: "terrain-color",
 			},
 		]);
 		expect(
@@ -136,7 +136,7 @@ describe("browser atlas texture packer", () => {
 						width: 2,
 					},
 					gutterEdgeMode: "repeat",
-					textureUseId: "terrain-color",
+					entryKey: "terrain-color",
 				},
 			],
 		});
@@ -206,7 +206,7 @@ describe("browser atlas texture packer", () => {
 						pixels: new Uint8Array([1, 2, 3, 4]),
 						width: 2,
 					},
-					textureUseId: "index8",
+					entryKey: "index8",
 				},
 			],
 		});
@@ -239,7 +239,7 @@ describe("browser atlas texture packer", () => {
 						pixels: new Uint8Array(16 * 16 * 2),
 						width: 16,
 					},
-					textureUseId: "index16",
+					entryKey: "index16",
 				},
 			],
 		});
@@ -253,7 +253,7 @@ describe("browser atlas texture packer", () => {
 			{
 				pageId: "pack-job:page:0",
 				rect: [0, 0, 16, 16],
-				textureUseId: "index16",
+				entryKey: "index16",
 			},
 		]);
 	});
@@ -275,7 +275,7 @@ describe("browser atlas texture packer", () => {
 						pixels: new Uint8Array([0x34, 0x12, 0x78, 0x56]),
 						width: 2,
 					},
-					textureUseId: "index16",
+					entryKey: "index16",
 				},
 			],
 		});
@@ -322,7 +322,7 @@ describe("browser atlas texture packer", () => {
 							pixels: new Uint8Array([1]),
 							width: 1,
 						},
-						textureUseId: "short-index16",
+						entryKey: "short-index16",
 					},
 				],
 			}),
@@ -348,7 +348,7 @@ describe("browser atlas texture packer", () => {
 							pixels: new Uint8Array([1]),
 							width: 1,
 						},
-						textureUseId: "index8",
+						entryKey: "index8",
 					},
 				],
 			}),
@@ -371,7 +371,7 @@ function createJob(): TexturePackingJob {
 }
 
 function createSource(
-	textureUseId: string,
+	entryKey: string,
 	width: number,
 	height: number,
 	rgba: readonly [number, number, number, number],
@@ -388,7 +388,7 @@ function createSource(
 			pixels,
 			width,
 		},
-		textureUseId,
+		entryKey,
 	};
 }
 

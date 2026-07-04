@@ -592,11 +592,24 @@ Internally, identity builders should accept structured inputs and return branded
 - `TextureBindingRequirement.bindingKey`, `placementItemId`, and `textureUseId` remain in `textures/placement.ts` and planner call sites. They are the biggest conceptual fossil. Phase 10 should collapse them into explicit `bindingId` plus any truly separate numeric/object-visual placement id, instead of preserving the old triple.
 - `StaticMaterialTableEntry.*TextureKey` fields still hold source-key strings for static-authored entries. Phase 10 should either rename them to texture identity/source keys or move full resolver `TextureKey` construction earlier so the field names become literal.
 - Existing `sourceKey` / `physicalSourceKey` uses are source facts and physical prepared-source facts, not canonical handles. Keep them where they describe source data, but do not let them substitute for `TextureKey` at pool boundaries.
-- Dynamic/runtime identity did not expose a new blocker in this audit. Runtime-authored source keys appear to represent runtime-local content identity; leave deeper dynamic material cleanup to Phase 10 only if it blocks deletion of the old texture-use vocabulary.
+- Phase 9 did not initially identify dynamic/runtime identity as a blocker, but Phase 10 proved that was too optimistic: runtime-authored dynamic visual dependencies still pinned legacy `textureUseId` values and blocked renderer resource commits after the binding-id cutover. Dynamic material cleanup is therefore in scope where it touches the shared `TextureManager` commit path.
 
 ### Phase 10: Holistic Cleanup And Compatibility Purge
 
+**Status:** Complete.
+
 **Steering update:** Cleanup order matters. Start with public contract names that already carry `TextureBindingId`, then collapse planner triples, then remove manager item-id bridges, then clean packing protocol names. Do not add shims. If a rename reveals that two concepts are still actually distinct, split them into honest typed fields and delete the old composite field in the same phase.
+
+**Policy steering from answered questions:** This phase is no longer a rename-only sweep. It is the final contract pass that proves the design decisions above actually reached the code:
+
+- `TextureKey` is the canonical texture handle. `sourceKey` and `physicalSourceKey` may remain only as source/prepared-source facts, not as competing canonical handles.
+- `TextureBindingId` is the material-consumer handle. Material wrap may live there or in material binding data, but it must not leak into `TextureKey`.
+- Filtering, mip generation, and anisotropy are renderer/global sampler policy. They must not appear in `TextureKey`, `TexturePageClass`, registry keys, placement item keys, or binding ids.
+- `TexturePageClass` is atlas/page compatibility only. Keep physical wrap there only if the renderer cannot virtualize the material wrap behavior in shader.
+- Palette replacement identity has one production policy: normalized replacement ranges plus cheap deterministic 64-bit range-byte fingerprints. No replacement palette asset id fallback, no prepared-pixel hash fallback, no SHA-256.
+- Landblock id, source object/model id, visual resource id, draw unit id, bake task id, and runtime owner id are forbidden texture-pool discriminants. If they appear in a key, it must be a binding or owner key, not a texture key.
+- Any previous speculative stale-placement fix that is not required by Phase 5/8 fuzz invariants should be removed. The harness decides what is real; diagnostics do not get to drive architecture.
+- The final result must trend toward less code and less state. If non-test production SLOC remains above the baseline, the phase must record the specific alias/bridge/state-machine complexity that was deleted to justify it.
 
 **Deliverables**
 
@@ -618,11 +631,17 @@ Internally, identity builders should accept structured inputs and return branded
 - Delete empty compatibility wrappers that only convert one branded id to another branded id without changing domain meaning.
 - Collapse or remove any test factories that exist only to feed both old and new fields.
 - Collapse fixture APIs that require broad stubbing just to submit a texture commit. Those tests are telling us the production boundary is still too god-object-shaped.
+- Audit all remaining `sourceKey`, `physicalSourceKey`, and `textureRefId` fields. Rename any field that pretends to be canonical texture identity when it is actually source identity, prepared-source identity, or renderer page identity.
+- Audit texture key builders for forbidden discriminants: landblock, object/source model owner, visual resource, draw unit, bake task, wrap, filter, mip policy, anisotropy, placement revision, and renderer texture ref.
+- Audit page-class builders for sampler-policy leakage. Page class may describe page compatibility, not current renderer sampler settings.
+- Audit palette replacement builders for the one-policy rule. Delete any branch that prefers replacement palette asset ids, prepared palette texture hashes, or cryptographic hashing.
+- Audit the earlier stale-placement work against the Phase 5 reproducer. Delete any logic whose only justification was "hardening" rather than a failing invariant.
 - Re-run `rg` audits for forbidden identity mixing:
   - `textureUseId`;
   - `bindingKey`;
   - `placementItemId`;
   - `sourceKey`;
+  - `physicalSourceKey`;
   - `textureRefId`;
   - `Legacy`;
   - `Bridge`;
@@ -636,8 +655,32 @@ Internally, identity builders should accept structured inputs and return branded
 - No public boundary accepts old scoped texture-use strings.
 - No tests assert old scoped id spelling except fixtures explicitly outside this plan's scope.
 - No production file contains refactor shims named `Legacy`, `Bridge`, or `Compat`.
+- `TextureKey` builders reject or never receive owner/resource/sampler-policy discriminants.
+- `TexturePageClass` builders do not include filter, mip generation, anisotropy, binding id, owner id, or material scope.
+- Palette replacement identity has exactly one implementation path and it uses the shared cheap 64-bit range-byte fingerprint policy.
+- Remaining `sourceKey`, `physicalSourceKey`, and `textureRefId` names are source/prepared-source/page facts only; none are described or consumed as the canonical texture-pool handle.
+- Any retained stale-placement update logic is tied to a Phase 5/8 invariant or deleted.
 - The final diff removes more identity compatibility code than it adds.
 - Final non-test production SLOC in touched identity paths is lower than the plan baseline, or the remaining increase is explicitly accepted because a measurable alias/state-machine complexity class was deleted.
+
+**Phase notes**
+
+- Renamed public draw/resource arrays from `textureUseIds` to `textureBindingIds` where the values are material binding handles: static contracts, terrain/static object/env-cell draw units, visual geometry, recipe publication, runtime diagnostics, and renderer-facing fixtures.
+- Collapsed the production `TextureBindingRequirement` triple. `bindingKey`, `placementItemId`, and `textureUseId` no longer travel together as three names for one material consumer identity; production requirements now expose `bindingId` plus the remaining bake-time placement lookup only where that is actually distinct.
+- Deleted production `createStaticMaterialTextureUseId` / `createTerrainTextureUseId` minting. Static material policy now creates binding ids directly from material/resource binding axes instead of source/owner scoped texture-use strings.
+- Removed the `TextureManager` `#bindingIdByItemId` bridge and moved packing/update internals toward binding ids or neutral `entryKey`s. The packer protocol no longer calls its entries `textureUseId`.
+- Fixed a real dynamic/runtime cutover bug: `LocalDynamicVisualBaker` was still pinning dynamic texture dependencies by legacy `textureUseId`. Renderer resource sync then failed with `Cannot pin unknown texture placement item ...` after all assets and placements were ready. Dynamic dependencies now pin the live binding id used by the shared texture-manager placement records.
+- Kept the remaining singular `textureUseId` fields as documented debt, not compatibility. They survive in renderer placement DTOs, WebGL texture-resource lookup, terrain material layer output, and dynamic diagnostics where the field currently carries a binding id or renderer placement id. These are naming/API cleanup targets, not new identity primitives.
+- Audit result: production no longer contains plural `textureUseIds`, `bindingKey`, `#bindingIdByItemId`, or the deleted texture-use-id builder helpers. Remaining `placementItemId` occurrences are legitimate bake-time lookup plumbing for object visual material partitioning.
+- Audit result: `sourceKey` / `physicalSourceKey` remain source/prepared-source facts and are not used as competing canonical pool handles. `textureRefId` remains renderer page identity. No Phase 10 changes added owner/sampler policy discriminants to `TextureKey`.
+- Palette replacement policy remains the one-policy design from Phases 1-2: normalized ranges plus the shared cheap 64-bit range-byte fingerprint. No SHA or asset-id fallback was added.
+- SLOC metric: the Phase 10 diff is roughly code-neutral (`+657/-610` overall at validation time), with production complexity reduced by deleting the old static texture-use id minting helpers, the manager item-id-to-binding bridge, and stale triple-field requirements. The net line increase is accepted because it buys clearer contracts and less hidden state.
+- Validation:
+  - `npm run test:ts` passed: 87 files, 703 tests.
+  - `npm exec tsc -- --noEmit --pretty false` passed.
+  - `npm run lint:ts` passed.
+  - `npm run check` passed.
+  - `git diff --check` passed.
 
 ## Risks & Mitigations
 

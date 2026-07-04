@@ -498,7 +498,7 @@ describe("browser client runtime", () => {
 			materialPass: "opaque",
 			partIndex: 0,
 			sourceAssetId: "gfx-obj/01000020",
-			textureUseIds: [],
+			textureBindingIds: [],
 			triangleCount: 1,
 			vertexCount: 3,
 		});
@@ -2301,7 +2301,7 @@ describe("browser client runtime", () => {
 					},
 					texturePlacements: [],
 					textureUseCount: 0,
-					textureUseIds: [],
+					textureBindingIds: [],
 				},
 			],
 			kind: "outdoor-static-object-rendering",
@@ -2387,9 +2387,10 @@ describe("browser client runtime", () => {
 			staticCoordinator,
 		});
 		const textureUse = createPreparedTextureUse();
+		const bakeTextureUse = createBakeTextureUse("terrain-textured", textureUse);
 		const drawUnit = createTerrainDrawUnit("terrain-textured", 0xda55ffff, {
-			primaryTextureBindingId: "terrain-textured:prepared-texture:06000010",
-			textureUseIds: ["terrain-textured:prepared-texture:06000010"],
+			primaryTextureBindingId: bakeTextureUse.bindingId,
+			textureBindingIds: [bakeTextureUse.bindingId],
 		});
 
 		updateOutdoorSceneInterest(runtime);
@@ -2397,7 +2398,7 @@ describe("browser client runtime", () => {
 		await flushPromises();
 		completeBakerWork(baker, "outdoor-terrain", 0xda55ffff, {
 			drawUnits: [drawUnit],
-			textureUses: [createBakeTextureUse(drawUnit.drawUnitId, textureUse)],
+			textureUses: [bakeTextureUse],
 		});
 		await flushPromises();
 
@@ -2419,7 +2420,7 @@ describe("browser client runtime", () => {
 		await flushPromises();
 
 		expect(renderer.events).toEqual([
-			"texture:1:terrain-textured:prepared-texture:06000010",
+			`texture:1:${bakeTextureUse.bindingId}`,
 			"terrain-layer:3663069183:terrain-textured",
 		]);
 		expect(
@@ -2459,9 +2460,10 @@ describe("browser client runtime", () => {
 			staticCoordinator,
 		});
 		const textureUse = createPreparedTextureUse();
+		const bakeTextureUse = createBakeTextureUse("terrain-textured", textureUse);
 		const drawUnit = createTerrainDrawUnit("terrain-textured", 0xda55ffff, {
-			primaryTextureBindingId: "terrain-textured:prepared-texture:06000010",
-			textureUseIds: ["terrain-textured:prepared-texture:06000010"],
+			primaryTextureBindingId: bakeTextureUse.bindingId,
+			textureBindingIds: [bakeTextureUse.bindingId],
 		});
 
 		updateOutdoorSceneInterest(runtime);
@@ -2469,7 +2471,7 @@ describe("browser client runtime", () => {
 		await flushPromises();
 		completeBakerWork(baker, "outdoor-terrain", 0xda55ffff, {
 			drawUnits: [drawUnit],
-			textureUses: [createBakeTextureUse(drawUnit.drawUnitId, textureUse)],
+			textureUses: [bakeTextureUse],
 		});
 		await flushPromises();
 		assetService.resolveNext(
@@ -2488,8 +2490,7 @@ describe("browser client runtime", () => {
 						mipmapsGenerated: false,
 						samplerPolicyKey:
 							"sample=rgba-color;filter=nearest;mips=off;aniso=1",
-						textureRefId:
-							"texture-ref:outdoor-terrain:texture-placement-bucket|outdoor-terrain|terrain-color|static-authored:terrain-textured:prepared-texture:06000010",
+						textureRefId: expect.stringContaining(bakeTextureUse.bindingId),
 					},
 				],
 				revision: 2,
@@ -2516,9 +2517,10 @@ describe("browser client runtime", () => {
 			staticCoordinator,
 		});
 		const textureUse = createPreparedTextureUse();
+		const bakeTextureUse = createBakeTextureUse("terrain-textured", textureUse);
 		const drawUnit = createTerrainDrawUnit("terrain-textured", 0xda55ffff, {
-			primaryTextureBindingId: "terrain-textured:prepared-texture:06000010",
-			textureUseIds: ["terrain-textured:prepared-texture:06000010"],
+			primaryTextureBindingId: bakeTextureUse.bindingId,
+			textureBindingIds: [bakeTextureUse.bindingId],
 		});
 
 		updateOutdoorSceneInterest(runtime);
@@ -2526,7 +2528,7 @@ describe("browser client runtime", () => {
 		await flushPromises();
 		completeBakerWork(baker, "outdoor-terrain", 0xda55ffff, {
 			drawUnits: [drawUnit],
-			textureUses: [createBakeTextureUse(drawUnit.drawUnitId, textureUse)],
+			textureUses: [bakeTextureUse],
 		});
 		await flushPromises();
 
@@ -3041,7 +3043,7 @@ function createBakedDynamicVisualResourceForRecipe(
 				},
 				sourceAssetId: "gfx-obj/01000020",
 				texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
-				textureUseIds: [],
+				textureBindingIds: [],
 				triangleCount: 1,
 				vertexCount: 3,
 			},
@@ -4352,7 +4354,7 @@ function createStaticObjectDrawUnit(
 			triangleCount: 1,
 		},
 		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
-		textureUseIds: [],
+		textureBindingIds: [],
 		triangleCount: 1,
 		vertexCount: 3,
 	};
@@ -4400,7 +4402,7 @@ function createObjectVisualResource(options: {
 			materialFamily: drawUnit.materialFamily,
 			materialPass: drawUnit.materialPass,
 			renderState: drawUnit.renderState,
-			textureUseIds: [],
+			textureBindingIds: [],
 		},
 		materialEntries: drawUnit.materialEntries,
 		materialFamily: drawUnit.materialFamily,
@@ -4410,7 +4412,7 @@ function createObjectVisualResource(options: {
 		renderState: drawUnit.renderState,
 		resourceId: options.resourceId,
 		texCoords: drawUnit.texCoords,
-		textureUseIds: [],
+		textureBindingIds: [],
 		triangleCount: drawUnit.triangleCount,
 		vertexCount: drawUnit.vertexCount,
 	};
@@ -4518,7 +4520,7 @@ function createStructuredInteriorDrawUnit(options: {
 				pass: "opaque",
 				slotId: 0,
 				surfaceId: 0,
-				textureUseIds: [],
+				textureBindingIds: [],
 			},
 		],
 		materialSlotIndices: new Float32Array([0, 0, 0]),
@@ -4528,7 +4530,7 @@ function createStructuredInteriorDrawUnit(options: {
 		sourceTriangleIds: [`${options.drawUnitId}:triangle-0`],
 		surfaceIds: [0],
 		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
-		textureUseIds: [],
+		textureBindingIds: [],
 		triangleCount: 1,
 		vertexCount: 3,
 	};
@@ -4671,7 +4673,7 @@ function createTerrainDrawUnit(
 	options: {
 		readonly fallbackReasons?: readonly TerrainMaterialFallbackReason[];
 		readonly primaryTextureBindingId?: string | null;
-		readonly textureUseIds?: readonly string[];
+		readonly textureBindingIds?: readonly string[];
 	} = {},
 ): TerrainGeometryStaticDrawUnit {
 	return {
@@ -4694,7 +4696,7 @@ function createTerrainDrawUnit(
 		terrainFallbackReasons: options.fallbackReasons ?? [],
 		terrainMaterialPlan: null,
 		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
-		textureUseIds: options.textureUseIds ?? [],
+		textureBindingIds: options.textureBindingIds ?? [],
 		triangleCount: 1,
 		vertexCount: 3,
 	};
@@ -4960,7 +4962,7 @@ function createPreparedAsset(key: HostAssetKey, revision = 1): PreparedAsset {
 }
 
 async function resolvePendingDynamicAssetsUntil(
-	assetService: DeferredAssetService,
+	assetService: AssetService,
 	done: () => boolean,
 ): Promise<void> {
 	let resolvedCount = 0;
@@ -4969,21 +4971,26 @@ async function resolvePendingDynamicAssetsUntil(
 		if (done()) {
 			return;
 		}
-		while (assetService.pendingCount > 0) {
-			const key = assetService.pendingKeys[resolvedCount] ?? failKey();
-			resolvedCount += 1;
-			assetService.resolveNext(
-				key.kind === "prepared-texture"
-					? createPreparedTextureAsset(key)
-					: createPreparedAsset(key),
-			);
-			await flushRuntimeWork();
-			if (done()) {
-				return;
+		if (assetService instanceof DeferredAssetService) {
+			while (assetService.pendingCount > 0) {
+				const key = assetService.pendingKeys[resolvedCount] ?? failKey();
+				resolvedCount += 1;
+				assetService.resolveNext(
+					key.kind === "prepared-texture"
+						? createPreparedTextureAsset(key)
+						: createPreparedAsset(key),
+				);
+				await flushRuntimeWork();
+				if (done()) {
+					return;
+				}
 			}
 		}
 	}
-	throw new Error("Dynamic renderer resource sync did not complete.");
+	const snapshot = assetService.createSnapshot();
+	throw new Error(
+		`Dynamic renderer resource sync did not complete. pending=${JSON.stringify(snapshot.pending)} committed=${JSON.stringify(snapshot.committed)}`,
+	);
 }
 
 async function flushDynamicRendererResources(

@@ -542,7 +542,7 @@ function createRenderPart(options: {
 		materialSlotIndices,
 		renderState: firstPrimitive.renderState,
 		texCoords,
-		textureUseIds: uniqueSortedStrings(
+		textureBindingIds: uniqueSortedStrings(
 			materialEntries.flatMap((entry) =>
 				[
 					entry.primaryTextureBindingId,
@@ -659,7 +659,7 @@ function createSourceLocalPayload(options: {
 		positions,
 		renderState: options.renderState,
 		texCoords,
-		textureUseIds: uniqueSortedStrings(
+		textureBindingIds: uniqueSortedStrings(
 			materialEntries.flatMap((entry) =>
 				[
 					entry.primaryTextureBindingId,

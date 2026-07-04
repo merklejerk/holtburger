@@ -45,13 +45,11 @@ export interface ObjectVisualTexturePlacementRequirement {
 
 interface ObjectVisualTextureSourceRequirement {
 	readonly bindingId: TextureBindingId;
-	readonly bindingKey: string;
 	readonly ownerIds: readonly TextureOwnerId[];
 	readonly pageClass: TexturePageClass;
 	readonly samplingPolicy?: StaticBakeTextureUse["samplingPolicy"];
 	readonly source: TexturePlacementSource;
 	readonly textureKey: TextureKey;
-	readonly textureUseId: string;
 }
 
 export function createObjectVisualTexturePlacementIntents(input: {
@@ -124,7 +122,6 @@ function createStaticObjectVisualTextureUse(
 		pageClass: requirement.pageClass,
 		source: requirement.source.dataUse,
 		textureKey: requirement.textureKey,
-		textureUseId: requirement.bindingKey,
 	};
 	if (!requirement.samplingPolicy) {
 		return textureUse;
@@ -146,7 +143,7 @@ function createDynamicObjectVisualTextureUse(
 		source: requirement.source.dataUse,
 		textureKey: requirement.textureKey,
 		textureDomain: policy.textureDomain,
-		textureUseId: requirement.textureUseId,
+		textureUseId: requirement.bindingId,
 	};
 	if (!requirement.samplingPolicy) {
 		return textureUse;

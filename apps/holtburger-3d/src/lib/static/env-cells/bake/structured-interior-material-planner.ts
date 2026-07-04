@@ -77,7 +77,7 @@ export function planStructuredInteriorCellMaterials(options: {
 					pass: "opaque",
 					slotId: surface.slotId,
 					surfaceId: surface.surfaceId,
-					textureUseIds: [],
+					textureBindingIds: [],
 				};
 			}
 
@@ -106,7 +106,7 @@ export function planStructuredInteriorCellMaterials(options: {
 				pass: plan.pass,
 				slotId: surface.slotId,
 				surfaceId: surface.surfaceId,
-				textureUseIds: plan.textureRoles.map((role) =>
+				textureBindingIds: plan.textureRoles.map((role) =>
 					createStructuredInteriorTextureBindingId({
 						dataUse: role.dataUse,
 						task: options.task,
@@ -271,7 +271,7 @@ export function createStructuredInteriorMaterialCoverageReport(options: {
 			bucket.materialIds.add(planEntry.material.materialId);
 			bucket.textureRoleCount = Math.max(
 				bucket.textureRoleCount,
-				planEntry.textureUseIds.length,
+				planEntry.textureBindingIds.length,
 			);
 			bucket.triangleCount += surfaceTriangleCount;
 			bucketCounts.set(bucketKey, bucket);

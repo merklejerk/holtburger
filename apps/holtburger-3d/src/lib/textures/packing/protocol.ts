@@ -26,11 +26,11 @@ interface TexturePackingPageConstraints {
 
 interface TexturePackingCohort {
 	readonly key: string;
-	readonly textureUseIds: readonly string[];
+	readonly entryKeys: readonly string[];
 }
 
 interface TexturePackingSource {
-	readonly textureUseId: string;
+	readonly entryKey: string;
 	readonly gutterEdgeMode?: "clamp" | "repeat";
 	readonly source: TexturePackingPixelSource;
 }
@@ -60,7 +60,7 @@ interface TexturePackingPagePixels {
 }
 
 interface TexturePackingRect {
-	readonly textureUseId: string;
+	readonly entryKey: string;
 	readonly pageId: string;
 	readonly rect: readonly [number, number, number, number];
 }

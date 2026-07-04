@@ -152,7 +152,7 @@ describe("object visual static publication baker", () => {
 							pass: "opaque",
 							slotId: 0,
 							surfaceId: 12,
-							textureUseIds: [],
+							textureBindingIds: [],
 						},
 					],
 					memberId: "member-a",
@@ -427,7 +427,7 @@ function createRenderPart(options: {
 		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
 		renderState: createRenderState(),
 		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
-		textureUseIds: [],
+		textureBindingIds: [],
 		triangleCount: 1,
 		vertexCount: 3,
 	};

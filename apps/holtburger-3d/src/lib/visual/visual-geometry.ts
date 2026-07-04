@@ -94,7 +94,7 @@ export interface VisualGeometryPayload {
 	/** GPU texture-coordinate attribute payload. */
 	readonly texCoords: Float32Array;
 	/** Renderer material binding ids consumed by binding ownership. */
-	readonly textureUseIds: readonly TextureBindingId[];
+	readonly textureBindingIds: readonly TextureBindingId[];
 	/** Derived primitive count for diagnostics and renderer accounting. */
 	readonly triangleCount: number;
 	/** Derived vertex count for diagnostics and validation. */

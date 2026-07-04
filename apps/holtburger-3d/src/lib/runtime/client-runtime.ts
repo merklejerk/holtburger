@@ -628,7 +628,7 @@ interface StaticSelectionDrawUnitDiagnostics {
 	readonly sourceMapping: StaticSelectionSourceMappingSummaryDiagnostics;
 	readonly texturePlacements: readonly StaticSelectionTexturePlacementDiagnostics[];
 	readonly textureUseCount: number;
-	readonly textureUseIds: readonly string[];
+	readonly textureBindingIds: readonly string[];
 	readonly triangleCount: number;
 	readonly vertexCount: number;
 }
@@ -2848,13 +2848,13 @@ class ClientRuntimeImpl implements ClientRuntime {
 						sourceMappingCoverage,
 					),
 					texturePlacements: createStaticSelectionTexturePlacementDiagnostics(
-						drawUnit.textureUseIds,
+						drawUnit.textureBindingIds,
 						this.#textureManager.createPlacementResolutionSnapshot(
-							drawUnit.textureUseIds,
+							drawUnit.textureBindingIds,
 						),
 					),
-					textureUseCount: drawUnit.textureUseIds.length,
-					textureUseIds: drawUnit.textureUseIds,
+					textureUseCount: drawUnit.textureBindingIds.length,
+					textureBindingIds: drawUnit.textureBindingIds,
 					triangleCount: drawUnit.triangleCount,
 					vertexCount: drawUnit.vertexCount,
 				},
@@ -3030,13 +3030,13 @@ function createUniqueSortedNumbers(
 }
 
 function createStaticSelectionTexturePlacementDiagnostics(
-	textureUseIds: readonly string[],
+	textureBindingIds: readonly string[],
 	placements: readonly TexturePlacementResolutionSnapshot[],
 ): readonly StaticSelectionTexturePlacementDiagnostics[] {
 	const placementsByItemId = new Map(
 		placements.map((placement) => [placement.itemId, placement] as const),
 	);
-	return [...new Set(textureUseIds)].sort().map((itemId) => {
+	return [...new Set(textureBindingIds)].sort().map((itemId) => {
 		const placement = placementsByItemId.get(itemId);
 		return placement
 			? {
@@ -4569,7 +4569,7 @@ function createDynamicRendererVisualResource(
 				renderPartId: part.renderPartId,
 				sourceAssetId: part.sourceAssetId,
 				texCoords: part.texCoords,
-				textureUseIds: part.textureUseIds,
+				textureBindingIds: part.textureBindingIds,
 				triangleCount: part.triangleCount,
 				vertexCount: part.vertexCount,
 			})),

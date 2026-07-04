@@ -65,7 +65,7 @@ describe("texture placement vocabulary bridge", () => {
 
 		expect(createStaticTexturePlacementIntent(textureUse)).toMatchObject({
 			domain: "outdoor-terrain",
-			itemId: "terrain:mask:06000010",
+			itemId: textureUse.bindingId,
 			purpose: "terrain-mask",
 		});
 	});
@@ -151,7 +151,7 @@ describe("texture placement vocabulary bridge", () => {
 			}),
 		).toMatchObject({
 			affinityKey: "setup-model/020003e5",
-			itemId: "building:base:06000040",
+			itemId: textureUse.bindingId,
 		});
 	});
 
@@ -248,7 +248,7 @@ describe("texture placement vocabulary bridge", () => {
 
 		const intent = createStaticTexturePlacementIntent(textureUse);
 
-		expect(intent.itemId).toBe("building:palette:04000010:domain=index8");
+		expect(intent.itemId).toBe(textureUse.bindingId);
 		expect(intent.source).toMatchObject({
 			kind: "material-texture-data-use",
 			samplingPolicy: {

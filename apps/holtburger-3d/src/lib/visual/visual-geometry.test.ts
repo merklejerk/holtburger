@@ -27,7 +27,7 @@ describe("visual geometry payloads", () => {
 				depthWrite: true,
 			},
 			texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
-			textureUseIds: [],
+			textureBindingIds: [],
 			triangleCount: 1,
 			vertexCount: 3,
 		};

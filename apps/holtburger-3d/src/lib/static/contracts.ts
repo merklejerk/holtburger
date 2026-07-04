@@ -1548,7 +1548,7 @@ export interface TerrainGeometryStaticDrawUnit {
 	readonly sourceTriangleIds: readonly string[];
 	readonly primaryTextureBindingId: TextureBindingId | null;
 	/** Renderer material binding ids used by this draw unit. */
-	readonly textureUseIds: readonly TextureBindingId[];
+	readonly textureBindingIds: readonly TextureBindingId[];
 	readonly terrainMaterialPlan: TerrainMaterialLayerPlan | null;
 	readonly terrainFallbackReasons: readonly TerrainMaterialFallbackReason[];
 }
@@ -1576,7 +1576,7 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly spatialRecord: StaticSpatialRecord | null;
 	readonly materialEntries: readonly StaticMaterialTableEntry[];
 	/** Renderer material binding ids used by this draw unit. */
-	readonly textureUseIds: readonly TextureBindingId[];
+	readonly textureBindingIds: readonly TextureBindingId[];
 	readonly materialIds: readonly number[];
 }
 
@@ -1698,7 +1698,7 @@ export interface StructuredInteriorGeometryStaticDrawUnit {
 	readonly surfaceIds: readonly number[];
 	readonly materialIds: readonly number[];
 	/** Renderer material binding ids used by this draw unit. */
-	readonly textureUseIds: readonly TextureBindingId[];
+	readonly textureBindingIds: readonly TextureBindingId[];
 }
 
 export interface StructuredInteriorMaterialPlanEntry {
@@ -1713,7 +1713,7 @@ export interface StructuredInteriorMaterialPlanEntry {
 	readonly pass: StaticObjectMaterialPass;
 	readonly outcome: StaticMaterialRenderOutcome;
 	/** Renderer material binding ids used by this material plan entry. */
-	readonly textureUseIds: readonly TextureBindingId[];
+	readonly textureBindingIds: readonly TextureBindingId[];
 	readonly diagnostics: readonly StructuredInteriorMaterialDiagnostic[];
 }
 
@@ -1883,7 +1883,6 @@ export interface TerrainMaterialFallbackReason {
 export interface StaticBakeTextureUse {
 	/** Material-consumer binding identity. This is not canonical texture-pool identity. */
 	readonly bindingId: TextureBindingId;
-	readonly textureUseId: string;
 	readonly domain: StaticDomain;
 	/** Canonical texture-pool identity requested by this static texture use. */
 	readonly textureKey: TextureKey;

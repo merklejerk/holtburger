@@ -297,7 +297,7 @@ type StaticObjectVisualPayloadFields = Pick<
 	| "positions"
 	| "renderState"
 	| "texCoords"
-	| "textureUseIds"
+	| "textureBindingIds"
 	| "triangleCount"
 	| "vertexCount"
 >;
@@ -322,7 +322,7 @@ function createVisualResourcePayload(
 		positions: renderPart.positions,
 		renderState: renderPart.renderState,
 		texCoords: renderPart.texCoords,
-		textureUseIds: renderPart.textureUseIds,
+		textureBindingIds: renderPart.textureBindingIds,
 		triangleCount: renderPart.triangleCount,
 		vertexCount: renderPart.vertexCount,
 	};

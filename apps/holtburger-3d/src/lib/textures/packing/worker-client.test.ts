@@ -52,7 +52,7 @@ describe("browser texture packing worker protocol", () => {
 				{
 					pageId: "pack-job:1:page:0",
 					rect: [0, 0, 1, 1],
-					textureUseId: "terrain-a:prepared-texture:06000010",
+					entryKey: "terrain-a:prepared-texture:06000010",
 				},
 			],
 		});
@@ -123,7 +123,7 @@ describe("browser texture packing worker protocol", () => {
 					{
 						pageId: "pack-job:1:page:0",
 						rect: [0, 0, 1, 1],
-						textureUseId: "terrain-a:prepared-texture:06000010",
+						entryKey: "terrain-a:prepared-texture:06000010",
 					},
 				],
 			},
@@ -242,7 +242,7 @@ function createPackingJob(): TexturePackingJob {
 					pixels: new Uint8Array([255, 128, 0, 255]),
 					width: 1,
 				},
-				textureUseId: "terrain-a:prepared-texture:06000010",
+				entryKey: "terrain-a:prepared-texture:06000010",
 			},
 		],
 	};
@@ -266,7 +266,7 @@ function createPackingResult(job: TexturePackingJob): TexturePackingResult {
 			{
 				pageId: "pack-job:1:page:0",
 				rect: [0, 0, 1, 1],
-				textureUseId: "terrain-a:prepared-texture:06000010",
+				entryKey: "terrain-a:prepared-texture:06000010",
 			},
 		],
 	};

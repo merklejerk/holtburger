@@ -137,26 +137,26 @@ function createTextureBindings(input: {
 				`Object visual texture recipe ${textureRecipeId} resolves to missing placement item ${itemId}.`,
 			);
 		}
-		if (placement.textureUseId !== requirement.textureUseId) {
+		if (placement.bindingId !== requirement.bindingId) {
 			throw new Error(
-				`Object visual texture recipe ${textureRecipeId} placement item ${itemId} belongs to ${placement.textureUseId}, not ${requirement.textureUseId}.`,
+				`Object visual texture recipe ${textureRecipeId} placement item ${itemId} belongs to ${placement.bindingId}, not ${requirement.bindingId}.`,
 			);
 		}
 
 		bindings.set(textureRecipeId, {
 			bindingId: placement.bindingId,
 			dependency: {
-				resourceId: requirement.textureUseId,
+				resourceId: requirement.bindingId,
 				roles: [
 					{
-						itemIds: [requirement.textureUseId],
+						itemIds: [requirement.bindingId],
 						purpose: requirement.purpose,
 					},
 				],
 			},
 			pageClass: placement.pageClass,
 			textureKey: placement.textureKey,
-			textureUseId: requirement.textureUseId,
+			textureUseId: requirement.bindingId,
 		});
 	}
 	return bindings;
@@ -224,12 +224,12 @@ function collectPublishedTextureUseOwners(input: {
 }): readonly StaticTextureUseOwner[] {
 	return uniqueSortedStaticTextureUseOwners([
 		...input.installSet.directDrawUnits.flatMap((drawUnit) =>
-			drawUnit.textureUseIds.includes(input.bindingId)
+			drawUnit.textureBindingIds.includes(input.bindingId)
 				? [{ drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" as const }]
 				: [],
 		),
 		...input.installSet.visualResources.flatMap((resource) =>
-			resource.textureUseIds.includes(input.bindingId)
+			resource.textureBindingIds.includes(input.bindingId)
 				? [
 						{
 							kind: "static-object-visual-resource" as const,

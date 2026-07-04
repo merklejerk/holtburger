@@ -179,27 +179,31 @@ describe("static object batch partitioner", () => {
 			throw new Error("Expected building detail static object draw unit.");
 		}
 
-		const detailTextureBindingId = drawUnit.textureUseIds.find((bindingId) =>
+		const detailTextureBindingId = drawUnit.textureBindingIds.find((bindingId) =>
 			bindingId.includes("role=object-detail"),
 		);
 		expect(drawUnit.kind).toBe("static-object-geometry");
-		expect(drawUnit.textureUseIds).toHaveLength(2);
+		expect(drawUnit.textureBindingIds).toHaveLength(2);
 		expect(drawUnit.materialEntries[0]).toMatchObject({
 			detailTextureTiling: 7,
 			detailTextureBindingId,
 		});
 		expect(
 			result.textureUses.map((textureUse) => ({
-				id: textureUse.textureUseId,
+				id: textureUse.bindingId,
 				samplingPolicy: textureUse.samplingPolicy,
 				source: textureUse.source,
 			})),
 		).toEqual([
 			expect.objectContaining({
-				id: "outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
+				id: expect.stringContaining(
+					"slot=prepared-render-surface-texture-use%3A06000010%3Argba-color",
+				),
 			}),
 			{
-				id: "outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000030:rgba-detail:sampling:wrap=repeat,repeat",
+				id: expect.stringContaining(
+					"slot=prepared-render-surface-texture-use%3A06000030%3Argba-detail",
+				),
 				samplingPolicy: {
 					wrapS: "repeat",
 					wrapT: "repeat",
@@ -252,7 +256,7 @@ describe("static object batch partitioner", () => {
 					}),
 				],
 				materialFamily: "flat-color",
-				textureUseIds: [],
+				textureBindingIds: [],
 			}),
 		]);
 		expect(result.textureUses).toEqual([]);
@@ -482,15 +486,17 @@ describe("static object batch partitioner", () => {
 			{
 				affinityKey: expect.stringContaining("static-object|"),
 				itemId: 0,
-				textureUseId:
-					"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
+				textureUseId: expect.stringContaining(
+					"slot=prepared-render-surface-texture-use%3A06000010%3Argba-color",
+				),
 				purpose: "object-base-color",
 			},
 			{
 				affinityKey: expect.stringContaining("static-object|"),
 				itemId: 1,
-				textureUseId:
-					"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000011:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
+				textureUseId: expect.stringContaining(
+					"slot=prepared-render-surface-texture-use%3A06000011%3Argba-color",
+				),
 				purpose: "object-base-color",
 			},
 		]);
@@ -537,8 +543,12 @@ describe("static object batch partitioner", () => {
 
 		expect(intents.map((intent) => intent.itemId)).toEqual([0, 1]);
 		expect(intents.map((intent) => intent.textureUseId)).toEqual([
-			"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
-			"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
+			expect.stringContaining(
+				"slot=prepared-render-surface-texture-use%3A06000010%3Argba-color|role=object-base-color|wrap=clamp-to-edge",
+			),
+			expect.stringContaining(
+				"slot=prepared-render-surface-texture-use%3A06000010%3Argba-color|role=object-base-color|wrap=repeat",
+			),
 		]);
 	});
 
@@ -645,8 +655,8 @@ describe("static object batch partitioner", () => {
 		expect(materialEntry.paletteTextureBindingId).toContain(
 			"prepared-palette-texture-use",
 		);
-		expect(drawUnit.textureUseIds).toHaveLength(2);
-		expect(drawUnit.textureUseIds).toEqual(
+		expect(drawUnit.textureBindingIds).toHaveLength(2);
+		expect(drawUnit.textureBindingIds).toEqual(
 			expect.arrayContaining([
 				materialEntry.indexTextureBindingId,
 				materialEntry.paletteTextureBindingId,

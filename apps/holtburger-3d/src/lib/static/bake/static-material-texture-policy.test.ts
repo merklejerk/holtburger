@@ -14,7 +14,6 @@ import {
 	createStaticMaterialTextureBindingId,
 	createStaticMaterialTextureBindingRequirement,
 	createStaticMaterialTextureSamplingPolicy,
-	createStaticMaterialTextureUseId,
 } from "./static-material-texture-policy";
 
 describe("static material texture policy", () => {
@@ -58,31 +57,6 @@ describe("static material texture policy", () => {
 				wrapMode: "repeat",
 			}),
 		).toEqual({ wrapS: "clamp-to-edge", wrapT: "clamp-to-edge" });
-	});
-
-	it("includes sampling policy in static material texture-use identity", () => {
-		const dataUse = createPreparedTextureUse("rgba-color");
-
-		expect(
-			createStaticMaterialTextureUseId({
-				dataUse,
-				textureUseNamespace: "static-object-texture",
-				textureUseScopeId: "static-object-layer-a",
-				wrapMode: "clamp",
-			}),
-		).toBe(
-			"static-object-layer-a:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
-		);
-		expect(
-			createStaticMaterialTextureUseId({
-				dataUse,
-				textureUseNamespace: "static-object-texture",
-				textureUseScopeId: "static-object-layer-a",
-				wrapMode: "repeat",
-			}),
-		).toBe(
-			"static-object-layer-a:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
-		);
 	});
 
 	it("creates material binding identity separately from texture-use compatibility strings", () => {
@@ -140,15 +114,12 @@ describe("static material texture policy", () => {
 		expect(requirement).toMatchObject({
 			bindingId:
 				"binding|resource=static-object-layer-a%3Astatic-object-texture|slot=prepared-render-surface-texture-use%3A06000010%3Argba-color|role=object-base-color|wrap=repeat|variant=default",
-			bindingKey:
-				"static-object-layer-a:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
 			placementItemId:
 				"binding|resource=static-object-layer-a%3Astatic-object-texture|slot=prepared-render-surface-texture-use%3A06000010%3Argba-color|role=object-base-color|wrap=repeat|variant=default",
 			purpose: "object-base-color",
 			sourceKey: "prepared-render-surface-texture-use:06000010:rgba-color",
 		});
-		expect(textureUse.textureUseId).toBe(requirement.bindingKey);
-		expect(placementIntent.itemId).toBe(textureUse.textureUseId);
+		expect(placementIntent.itemId).toBe(textureUse.bindingId);
 		expect({
 			itemIds: [placementIntent.itemId],
 			purpose: requirement.purpose,
@@ -162,11 +133,34 @@ describe("static material texture policy", () => {
 function createTextureUseFromRequirement(
 	requirement: ReturnType<typeof createStaticMaterialTextureBindingRequirement>,
 ): StaticBakeTextureUse {
+	const textureKey = createTextureKey({
+		outputFormat: "rgba8",
+		sampleClass: "rgba-color",
+		sourceKey: createMaterialTextureSourceKey({
+			kind: "render-surface",
+			renderSurfaceId: 0x06000010,
+			usage: "rgba-color",
+		}),
+	});
 	const textureUse: StaticBakeTextureUse = {
+		bindingId: requirement.bindingId,
 		domain: "outdoor-buildings",
+		ownerIds: [
+			createTextureOwnerId({
+				kind: "layer",
+				layerOwnerId: "static-object-layer-a",
+			}),
+		],
 		owners: [],
+		pageClass: createTexturePageClass({
+			domain: "outdoor-generated-scenery",
+			format: "rgba8",
+			gutterPixels: 4,
+			purpose: requirement.purpose,
+			sampleClass: "rgba-color",
+		}),
 		source: requirement.source.dataUse,
-		textureUseId: requirement.bindingKey,
+		textureKey,
 	};
 	if (!requirement.samplingPolicy) {
 		return textureUse;

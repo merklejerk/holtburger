@@ -533,8 +533,8 @@ function createOpaqueRenderState(): StaticObjectGeometryStaticDrawUnit["renderSt
 function createTexturePlacementUpdate(
 	drawUnit: StaticDrawUnit,
 ): TexturePlacementUpdate {
-	const textureUseId = drawUnit.textureBindingIds[0];
-	if (!textureUseId) {
+	const textureBindingId = drawUnit.textureBindingIds[0];
+	if (!textureBindingId) {
 		throw new Error("Texture placement fixture needs a textured draw unit.");
 	}
 
@@ -542,7 +542,7 @@ function createTexturePlacementUpdate(
 		placements: [],
 		removedTextureRefIds: [],
 		revision: 3,
-		resolvedTexturePlacements: [createResolvedTexturePlacement(textureUseId)],
+		resolvedTexturePlacements: [createResolvedTexturePlacement(textureBindingId)],
 	};
 }
 
@@ -563,8 +563,8 @@ function createTexturePlacementUpdateForDrawUnits(
 function createTexturePlacementUpdateForVisualResource(
 	resource: ObjectVisualResource,
 ): TexturePlacementUpdate {
-	const textureUseId = resource.textureBindingIds[0];
-	if (!textureUseId) {
+	const textureBindingId = resource.textureBindingIds[0];
+	if (!textureBindingId) {
 		throw new Error("Texture placement fixture needs a textured resource.");
 	}
 
@@ -572,16 +572,16 @@ function createTexturePlacementUpdateForVisualResource(
 		placements: [],
 		removedTextureRefIds: [],
 		revision: 3,
-		resolvedTexturePlacements: [createResolvedTexturePlacement(textureUseId)],
+		resolvedTexturePlacements: [createResolvedTexturePlacement(textureBindingId)],
 	};
 }
 
 function createResolvedTexturePlacement(
-	textureUseId: string,
+	textureBindingId: string,
 ): ResolvedTexturePlacement {
 	const textureRefId = "texture-ref-a";
 	return {
-		bindingId: textureUseId,
+		bindingId: textureBindingId,
 		pageVersion: {
 			placementRevision: 3,
 			textureRefId,
@@ -589,7 +589,7 @@ function createResolvedTexturePlacement(
 		rect: [0, 0, 1, 1],
 		textureHeight: 1,
 		textureRefId,
-		textureUseId,
+		textureBindingId,
 		textureWidth: 1,
 	};
 }

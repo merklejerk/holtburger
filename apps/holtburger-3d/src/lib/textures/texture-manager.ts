@@ -421,7 +421,6 @@ export class TextureManager {
 					toPlannedTexturePlacement(
 						entry,
 						intent.itemId,
-						textureUse.bindingId,
 					),
 				);
 			}
@@ -1279,7 +1278,7 @@ export class TextureManager {
 				firstPlacement.height,
 			],
 			samplerPolicyKey: group.samplerPolicy.policyKey,
-			textureUseId: firstPlacement.atlasEntryKey,
+			bindingId: firstPlacement.atlasEntryKey as TextureBindingId,
 			width: repackPlan.layoutPage.width,
 		};
 	}
@@ -1401,7 +1400,7 @@ export class TextureManager {
 				sampleClass: group.pagePolicy.sampleClass,
 				samplerPolicyKey: group.samplerPolicy.policyKey,
 				textureRefId,
-				textureUseId: firstEntry.textureUse.bindingId,
+				bindingId: firstEntry.textureUse.bindingId,
 				wrapS: physicalWrapMode.wrapS,
 				wrapT: physicalWrapMode.wrapT,
 				width: page.width,
@@ -2025,7 +2024,6 @@ function toPlannedTexturePlacement<
 >(
 	entry: VisualTextureRegistryEntry,
 	itemId: TPlacementItemId,
-	entryKey: string,
 ): PlannedTexturePlacement<TPlacementItemId> {
 	return {
 		bindingId: entry.bindingId,
@@ -2038,7 +2036,6 @@ function toPlannedTexturePlacement<
 		rect: entry.physicalEntry.rect,
 		textureKey: entry.textureKey,
 		textureRefId: entry.physicalEntry.textureRefId,
-		textureUseId: entryKey,
 		width: entry.physicalEntry.textureWidth,
 	};
 }
@@ -2562,8 +2559,8 @@ function createResolvedTexturePlacementsForEntry(
 	bindingIds: readonly string[],
 ): readonly ResolvedTexturePlacement[] {
 	const physicalEntry = entry.physicalEntry;
-		return uniqueSortedStrings(bindingIds).map((bindingId) => ({
-			bindingId: bindingId as TextureBindingId,
+	return uniqueSortedStrings(bindingIds).map((bindingId) => ({
+		bindingId: bindingId as TextureBindingId,
 		pageVersion: {
 			placementRevision: physicalEntry.placementRevision,
 			textureRefId: physicalEntry.textureRefId,
@@ -2571,9 +2568,8 @@ function createResolvedTexturePlacementsForEntry(
 		rect: physicalEntry.rect,
 		textureHeight: physicalEntry.textureHeight,
 		textureRefId: physicalEntry.textureRefId,
-			textureUseId: bindingId,
-			textureWidth: physicalEntry.textureWidth,
-		}));
+		textureWidth: physicalEntry.textureWidth,
+	}));
 }
 
 function uniqueResolvedTexturePlacements(
@@ -2582,10 +2578,10 @@ function uniqueResolvedTexturePlacements(
 	return Array.from(
 		new Map(
 				placements.map(
-					(placement) => [placement.textureUseId, placement] as const,
+					(placement) => [placement.bindingId, placement] as const,
 				),
 			).values(),
-		).sort((left, right) => left.textureUseId.localeCompare(right.textureUseId));
+		).sort((left, right) => left.bindingId.localeCompare(right.bindingId));
 }
 
 function createRegistryEntryPhysicalPlacementKey(

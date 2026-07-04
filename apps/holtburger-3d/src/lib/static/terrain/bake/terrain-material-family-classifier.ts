@@ -47,7 +47,7 @@ export function classifyTerrainMaterialFamily({
 		});
 	}
 
-	const primaryTextureBindingId = plan.layerEntries[0]?.base.textureUseId;
+	const primaryTextureBindingId = plan.layerEntries[0]?.base.textureBindingId;
 	if (!primaryTextureBindingId) {
 		return createDebugFlatClassification({
 			domain,
@@ -186,14 +186,14 @@ function collectTerrainLayeredTextureBindingIds(
 	const textureBindingIds = new Set<TextureBindingId>();
 	for (const entry of plan.layerEntries) {
 		for (const binding of collectLayerEntryTextureBindings(entry)) {
-			if (binding.textureUseId) {
-				textureBindingIds.add(binding.textureUseId);
+			if (binding.textureBindingId) {
+				textureBindingIds.add(binding.textureBindingId);
 			}
 		}
 	}
 	for (const detailRole of plan.detailRoles) {
-		if (detailRole.texture.textureUseId) {
-			textureBindingIds.add(detailRole.texture.textureUseId);
+		if (detailRole.texture.textureBindingId) {
+			textureBindingIds.add(detailRole.texture.textureBindingId);
 		}
 	}
 
@@ -215,7 +215,7 @@ function findMissingTextureUseReason(
 	message: string,
 	entry: TerrainMaterialLayerEntry | null,
 ): TerrainMaterialFallbackReason | null {
-	if (binding.textureUseId) {
+	if (binding.textureBindingId) {
 		return null;
 	}
 

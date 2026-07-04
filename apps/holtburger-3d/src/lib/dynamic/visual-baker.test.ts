@@ -287,7 +287,7 @@ function createPlacementSnapshotForRecipe(
 				textureRefId:
 					options.textureRefIdsByItemIndex?.[index] ??
 					`${intent.purpose}:texture-ref:${index}`,
-				textureUseId: intent.textureUseId,
+				textureBindingId: intent.textureBindingId,
 				width: 16,
 			},
 		]),

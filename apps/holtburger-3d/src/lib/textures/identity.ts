@@ -73,7 +73,7 @@ export type MaterialTextureSourceKeyInput =
 			readonly usage: TextureSourceUsage;
 	  };
 
-export type TextureSourceUsage =
+type TextureSourceUsage =
 	| "rgba-color"
 	| "rgba-detail"
 	| "rgba-mask"
@@ -134,17 +134,6 @@ export interface TexturePageClassInput {
 	readonly gutterPixels: number;
 	/** Physical wrap only when the renderer cannot virtualize material wrap in shader. */
 	readonly physicalWrapMode?: TextureWrapMode;
-}
-
-export interface TextureRequest {
-	/** Canonical texture-pool entry requested by this material consumer. */
-	readonly textureKey: TextureKey;
-	/** Material binding that will consume the canonical texture. */
-	readonly bindingId: TextureBindingId;
-	/** Residency owners that keep this texture alive. */
-	readonly ownerIds: readonly TextureOwnerId[];
-	/** Physical atlas compatibility class for placement. */
-	readonly pageClass: TexturePageClass;
 }
 
 const FNV64_OFFSET = 0xcbf29ce484222325n;

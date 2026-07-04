@@ -1835,7 +1835,7 @@ export interface TerrainMaterialLayerEntry {
 export interface TerrainMaterialTextureRoleBinding {
 	readonly role: TerrainTextureUseFacts["role"];
 	readonly texture: SurfaceTextureIdentity;
-	readonly textureUseId: TextureBindingId | null;
+	readonly textureBindingId: TextureBindingId | null;
 	readonly tiling: number;
 	readonly wrap: "repeat" | "clamp";
 }

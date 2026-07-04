@@ -375,25 +375,25 @@ describe("browser landblock env-cell baker", () => {
 		expect(
 			intents.map((intent) => ({
 				affinityKey: intent.affinityKey,
+				bindingId: intent.bindingId,
 				itemId: intent.itemId,
 				purpose: intent.purpose,
-				textureUseId: intent.textureUseId,
 			})),
 		).toEqual([
 			{
 				affinityKey: expect.stringContaining("structured-interior|"),
-				itemId: 0,
-				textureUseId: expect.stringContaining(
+				bindingId: expect.stringContaining(
 					"slot=prepared-render-surface-texture-use%3A06000010%3Argba-color",
 				),
+				itemId: 0,
 				purpose: "object-base-color",
 			},
 			{
 				affinityKey: expect.stringContaining("structured-interior|"),
-				itemId: 1,
-				textureUseId: expect.stringContaining(
+				bindingId: expect.stringContaining(
 					"slot=prepared-render-surface-texture-use%3A06000020%3Argba-detail",
 				),
+				itemId: 1,
 				purpose: "object-detail",
 			},
 		]);
@@ -980,7 +980,7 @@ async function createStructuredInteriorPlacementSnapshot(
 					textureRefId: options.uniquePages
 						? `${intent.purpose}:texture-ref:${index}`
 						: `${intent.purpose}:texture-ref:0`,
-					textureUseId: intent.textureUseId,
+					textureBindingId: intent.textureBindingId,
 					width: 16,
 				},
 			]),

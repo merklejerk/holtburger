@@ -670,14 +670,15 @@ Internally, identity builders should accept structured inputs and return branded
 - Deleted production `createStaticMaterialTextureUseId` / `createTerrainTextureUseId` minting. Static material policy now creates binding ids directly from material/resource binding axes instead of source/owner scoped texture-use strings.
 - Removed the `TextureManager` `#bindingIdByItemId` bridge and moved packing/update internals toward binding ids or neutral `entryKey`s. The packer protocol no longer calls its entries `textureUseId`.
 - Fixed a real dynamic/runtime cutover bug: `LocalDynamicVisualBaker` was still pinning dynamic texture dependencies by legacy `textureUseId`. Renderer resource sync then failed with `Cannot pin unknown texture placement item ...` after all assets and placements were ready. Dynamic dependencies now pin the live binding id used by the shared texture-manager placement records.
-- Kept the remaining singular `textureUseId` fields as documented debt, not compatibility. They survive in renderer placement DTOs, WebGL texture-resource lookup, terrain material layer output, and dynamic diagnostics where the field currently carries a binding id or renderer placement id. These are naming/API cleanup targets, not new identity primitives.
-- Audit result: production no longer contains plural `textureUseIds`, `bindingKey`, `#bindingIdByItemId`, or the deleted texture-use-id builder helpers. Remaining `placementItemId` occurrences are legitimate bake-time lookup plumbing for object visual material partitioning.
+- Removed the remaining production `textureUseId` / `textureUseIds` spelling from runtime texture placement paths, renderer placement DTOs, object-visual placement planning, and static material adapter callbacks. Exact spelling now survives only in this historical plan text.
+- Audit result: production no longer contains `textureUseId`, plural `textureUseIds`, `bindingKey`, `#bindingIdByItemId`, or the deleted texture-use-id builder helpers. Remaining `placementItemId` occurrences are legitimate bake-time lookup plumbing for object visual material partitioning.
 - Audit result: `sourceKey` / `physicalSourceKey` remain source/prepared-source facts and are not used as competing canonical pool handles. `textureRefId` remains renderer page identity. No Phase 10 changes added owner/sampler policy discriminants to `TextureKey`.
 - Palette replacement policy remains the one-policy design from Phases 1-2: normalized ranges plus the shared cheap 64-bit range-byte fingerprint. No SHA or asset-id fallback was added.
 - SLOC metric: the Phase 10 diff is roughly code-neutral (`+657/-610` overall at validation time), with production complexity reduced by deleting the old static texture-use id minting helpers, the manager item-id-to-binding bridge, and stale triple-field requirements. The net line increase is accepted because it buys clearer contracts and less hidden state.
 - Validation:
   - `npm run test:ts` passed: 87 files, 703 tests.
   - `npm exec tsc -- --noEmit --pretty false` passed.
+  - `npm run lint:dead` passed.
   - `npm run lint:ts` passed.
   - `npm run check` passed.
   - `git diff --check` passed.

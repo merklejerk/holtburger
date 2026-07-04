@@ -327,7 +327,7 @@ function createDynamicTexturePlacementRequirement(options: {
 					options.requirement.dataUse,
 					textureDomain,
 				),
-				slot: options.requirement.textureUseId,
+				slot: options.requirement.dynamicTextureSourceId,
 			}),
 			samplingPolicy: options.requirement.samplingPolicy,
 			source: {
@@ -344,7 +344,7 @@ function createDynamicTexturePlacementRequirement(options: {
 				resourceId: resourceIdForDynamicTextureIdentity(options.recipe),
 				samplingPolicy: options.requirement.samplingPolicy,
 				textureDomain,
-				textureUseId: options.requirement.textureUseId,
+				dynamicTextureSourceId: options.requirement.dynamicTextureSourceId,
 			}),
 		},
 	};
@@ -356,7 +356,7 @@ function createRuntimeAuthoredDynamicTextureIdentity(options: {
 	readonly resourceId: string;
 	readonly samplingPolicy?: PendingDynamicEntityTextureRequirement["samplingPolicy"];
 	readonly textureDomain: VisualTextureDomain;
-	readonly textureUseId: string;
+	readonly dynamicTextureSourceId: string;
 }): {
 	readonly ownerIds: readonly TextureOwnerId[];
 	readonly pageClass: TexturePageClass;
@@ -393,7 +393,7 @@ function createRuntimeAuthoredDynamicTextureIdentity(options: {
 			sampleClass: pagePolicy.sampleClass,
 			sourceKey: createMaterialTextureSourceKey({
 				kind: "runtime",
-				sourceId: `dynamic:${options.textureUseId}`,
+				sourceId: `dynamic:${options.dynamicTextureSourceId}`,
 				usage:
 					options.dataUse.kind === "prepared-palette-texture-use"
 						? "palette-rgba"
@@ -606,7 +606,7 @@ function createPendingTextureRequirementsFromRecipes(options: {
 					dataUse: textureRecipe.dataUse,
 					wrapMode: textureRecipe.wrapMode,
 				}),
-				textureUseId: createDynamicTextureUseId(
+				dynamicTextureSourceId: createDynamicTextureSourceId(
 					options.resourceId,
 					role.plan,
 					role.role,
@@ -653,7 +653,7 @@ function dynamicRoleForTextureUsage(
 	}
 }
 
-function createDynamicTextureUseId(
+function createDynamicTextureSourceId(
 	resourceId: string,
 	plan: ObjectVisualMaterialPlan,
 	role: ObjectVisualMaterialPlan["textureRoles"][number],
@@ -809,7 +809,7 @@ function createDynamicObjectVisualTextureBindings(options: {
 						},
 						pageClass: requirement.pageClass,
 						textureKey: requirement.textureKey,
-						textureUseId: requirement.textureUseId,
+						dynamicTextureSourceId: requirement.dynamicTextureSourceId,
 					},
 				] as const;
 			},

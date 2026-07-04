@@ -526,7 +526,7 @@ interface DynamicSelectionTextureRequirementDiagnostics {
 	};
 	readonly materialId: number;
 	readonly role: string;
-	readonly textureUseId: string;
+	readonly dynamicTextureSourceId: string;
 }
 
 type DynamicSelectionTextureDataUseDiagnostics =
@@ -2961,10 +2961,10 @@ function summarizeDrawUnitMaterialEntry(
 	return {
 		alphaTest: entry.alphaTest,
 		blendMode: entry.renderState.blend.mode,
-		indexTextureDid: extractTextureUseDid(entry.indexTextureBindingId),
+		indexTextureDid: extractTextureBindingDid(entry.indexTextureBindingId),
 		materialIds: entry.materialIds,
-		paletteDid: extractTextureUseDid(entry.paletteTextureBindingId),
-		primaryTextureDid: extractTextureUseDid(entry.primaryTextureBindingId),
+		paletteDid: extractTextureBindingDid(entry.paletteTextureBindingId),
+		primaryTextureDid: extractTextureBindingDid(entry.primaryTextureBindingId),
 		slot: entry.slot,
 		wrapMode: entry.primaryTextureWrapMode,
 	};
@@ -3050,12 +3050,12 @@ function createStaticSelectionTexturePlacementDiagnostics(
 	});
 }
 
-function extractTextureUseDid(textureUseId: string | null): string | null {
-	if (textureUseId === null) {
+function extractTextureBindingDid(dynamicTextureSourceId: string | null): string | null {
+	if (dynamicTextureSourceId === null) {
 		return null;
 	}
-	const match = textureUseId.match(/:([0-9a-f]{8})(?::|$)/i);
-	return match?.[1] ?? textureUseId;
+	const match = dynamicTextureSourceId.match(/:([0-9a-f]{8})(?::|$)/i);
+	return match?.[1] ?? dynamicTextureSourceId;
 }
 
 function summarizeTextureRefs(
@@ -4457,7 +4457,7 @@ function createDynamicSelectionVisualDiagnostics(
 				key: requirement.key,
 				materialId: requirement.material.materialId,
 				role: requirement.role,
-				textureUseId: requirement.textureUseId,
+				dynamicTextureSourceId: requirement.dynamicTextureSourceId,
 			})),
 			textureRequirementCount: visual.textureRequirements.length,
 		};
@@ -4552,7 +4552,6 @@ function createDynamicRendererVisualResource(
 					samplingPolicy: requirement.samplingPolicy,
 					source: requirement.dataUse,
 					textureKey: requirement.textureKey,
-					textureUseId: requirement.textureUseId,
 				})),
 			},
 			parts: visual.renderParts.map((part) => ({
@@ -4608,7 +4607,6 @@ function createDynamicTextureUseCommits(
 		samplingPolicy: textureUse.samplingPolicy,
 		source: textureUse.source,
 		textureKey: textureUse.textureKey,
-		textureUseId: textureUse.textureUseId,
 	}));
 }
 

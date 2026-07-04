@@ -188,9 +188,9 @@ describe("WebGL2 terrain layered payload builder", () => {
 				["road-use", "road-ref"],
 				["overlay-alpha-use", "overlay-alpha-ref"],
 				["road-alpha-use", "road-alpha-ref"],
-			].map(([textureUseId, textureRefId]) => [
-				textureUseId,
-				createPlacement(textureUseId, textureRefId, [0, 0, 4, 4]),
+			].map(([textureBindingId, textureRefId]) => [
+				textureBindingId,
+				createPlacement(textureBindingId, textureRefId, [0, 0, 4, 4]),
 			]),
 		);
 		const textures = new Map<string, WebGLTexture>([
@@ -349,7 +349,7 @@ function createPlan(options: {
 
 function createRole(
 	role: TerrainMaterialTextureRoleBinding["role"],
-	textureUseId: string,
+	textureBindingId: string,
 	tiling: number,
 ): TerrainMaterialTextureRoleBinding {
 	return {
@@ -358,14 +358,14 @@ function createRole(
 			kind: "surface-texture",
 			surfaceTextureId: tiling,
 		},
-		textureUseId,
+		textureBindingId,
 		tiling,
 		wrap: "repeat",
 	};
 }
 
 function createPlacement(
-	textureUseId: string,
+	textureBindingId: string,
 	textureRefId: string,
 	rect: readonly [number, number, number, number],
 ): ResolvedTexturePlacement {
@@ -377,7 +377,7 @@ function createPlacement(
 		rect,
 		textureHeight: 256,
 		textureRefId,
-		textureUseId,
+		textureBindingId,
 		textureWidth: 128,
 	};
 }

@@ -16,7 +16,7 @@ export interface ObjectMaterialPreparedDrawPayload {
 	readonly textures: ObjectMaterialTextureBindingsByRole;
 }
 
-export interface ObjectMaterialTextureBindingsByRole {
+interface ObjectMaterialTextureBindingsByRole {
 	baseColor: ObjectMaterialTextureBinding | null;
 	detail: ObjectMaterialTextureBinding | null;
 	index: ObjectMaterialTextureBinding | null;
@@ -28,7 +28,7 @@ export interface ObjectMaterialTextureBinding {
 	/** Page version that owns the rects sampled through this binding. */
 	readonly pageVersion: TexturePageVersion;
 	readonly texture: WebGLTexture;
-	/** Renderer texture reference resolved from the logical texture use id. */
+	/** Renderer texture reference resolved from the material texture binding. */
 	readonly textureRefId: string;
 	readonly width: number;
 }

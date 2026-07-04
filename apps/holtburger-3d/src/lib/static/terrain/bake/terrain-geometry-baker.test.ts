@@ -151,7 +151,7 @@ describe("terrain geometry baker", () => {
 				allRoad: false,
 				base: expect.objectContaining({
 					role: "terrain-base",
-					textureUseId: primaryTextureBindingId,
+					textureBindingId: primaryTextureBindingId,
 					wrap: "repeat",
 				}),
 				pcode: 33825,

@@ -89,7 +89,7 @@ export function createStaticMaterialTextureRoleSchemaKey(
 }
 
 export function createStaticMaterialTableEntry(options: {
-	readonly createTextureUseId: StaticMaterialTextureBindingIdFactory;
+	readonly createTextureBindingRef: StaticMaterialTextureBindingIdFactory;
 	readonly materialIds: readonly number[];
 	readonly plan: ObjectVisualMaterialPlan;
 	readonly slot: number;
@@ -118,16 +118,16 @@ export function createStaticMaterialTableEntry(options: {
 				: "p8"
 			: null;
 	const primaryTextureRef = primaryTextureUse
-		? options.createTextureUseId(primaryTextureUse, options.textureWrapMode)
+		? options.createTextureBindingRef(primaryTextureUse, options.textureWrapMode)
 		: null;
 	const indexTextureRef = indexTextureUse
-		? options.createTextureUseId(indexTextureUse, options.textureWrapMode)
+		? options.createTextureBindingRef(indexTextureUse, options.textureWrapMode)
 		: null;
 	const paletteTextureRef = paletteTextureUse
-		? options.createTextureUseId(paletteTextureUse, options.textureWrapMode)
+		? options.createTextureBindingRef(paletteTextureUse, options.textureWrapMode)
 		: null;
 	const detailTextureRef = detailTextureUse
-		? options.createTextureUseId(detailTextureUse, options.textureWrapMode)
+		? options.createTextureBindingRef(detailTextureUse, options.textureWrapMode)
 		: null;
 
 	return {

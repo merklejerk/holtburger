@@ -60,7 +60,7 @@ describe("texture placement vocabulary bridge", () => {
 		const textureUse = createStaticTextureUse({
 			domain: "outdoor-terrain",
 			source: createPreparedDataUse("rgba-mask"),
-			textureUseId: "terrain:mask:06000010",
+			textureBindingId: "terrain:mask:06000010",
 		});
 
 		expect(createStaticTexturePlacementIntent(textureUse)).toMatchObject({
@@ -74,7 +74,7 @@ describe("texture placement vocabulary bridge", () => {
 		const textureUse = createDynamicTextureUse({
 			source: createPreparedDataUse("rgba-detail"),
 			textureDomain: "outdoor-generated-scenery",
-			textureUseId: "static-authored-dynamic:detail:06000020",
+			textureBindingId: "static-authored-dynamic:detail:06000020",
 		});
 
 		expect(
@@ -88,7 +88,7 @@ describe("texture placement vocabulary bridge", () => {
 			}),
 		).toMatchObject({
 			domain: "outdoor-generated-scenery",
-			itemId: "static-authored-dynamic:detail:06000020",
+			itemId: textureUse.bindingId,
 			placementBucketKey: createStaticAuthoredDynamicTexturePlacementBucketKey({
 				domain: "outdoor-generated-scenery",
 				ownerId: "static-layer-owner:generated:0xda55ffff",
@@ -102,7 +102,7 @@ describe("texture placement vocabulary bridge", () => {
 		const textureUse = createDynamicTextureUse({
 			source: createPreparedDataUse("index16"),
 			textureDomain: "runtime-object-material",
-			textureUseId: "runtime-authored-dynamic:index:06000030",
+			textureBindingId: "runtime-authored-dynamic:index:06000030",
 		});
 
 		expect(
@@ -115,7 +115,7 @@ describe("texture placement vocabulary bridge", () => {
 			}),
 		).toMatchObject({
 			domain: "runtime-object-material",
-			itemId: "runtime-authored-dynamic:index:06000030",
+			itemId: textureUse.bindingId,
 			placementBucketKey: createRuntimeAuthoredDynamicTexturePlacementBucketKey(
 				{
 					entityId: "runtime-spawn:1",
@@ -130,7 +130,7 @@ describe("texture placement vocabulary bridge", () => {
 		const textureUse = createDynamicTextureUse({
 			source: createPreparedDataUse("rgba-color"),
 			textureDomain: "runtime-object-material",
-			textureUseId: "runtime-authored-dynamic:base:06000031",
+			textureBindingId: "runtime-authored-dynamic:base:06000031",
 		});
 
 		expect(() => createDynamicTexturePlacementIntent(textureUse)).toThrow(
@@ -142,7 +142,7 @@ describe("texture placement vocabulary bridge", () => {
 		const textureUse = createStaticTextureUse({
 			domain: "outdoor-buildings",
 			source: createPreparedDataUse("rgba-color"),
-			textureUseId: "building:base:06000040",
+			textureBindingId: "building:base:06000040",
 		});
 
 		expect(
@@ -161,7 +161,7 @@ describe("texture placement vocabulary bridge", () => {
 			createStaticTextureUse({
 				domain: "outdoor-generated-scenery",
 				source,
-				textureUseId: "scenery:base:06000050:first",
+				textureBindingId: "scenery:base:06000050:first",
 			}),
 			{ affinityKey: "setup-model/020003e5" },
 		);
@@ -169,7 +169,7 @@ describe("texture placement vocabulary bridge", () => {
 			createStaticTextureUse({
 				domain: "outdoor-generated-scenery",
 				source,
-				textureUseId: "scenery:base:06000050:second",
+				textureBindingId: "scenery:base:06000050:second",
 			}),
 			{ affinityKey: "setup-model/020003e5:alternate" },
 		);
@@ -184,14 +184,14 @@ describe("texture placement vocabulary bridge", () => {
 			createStaticTextureUse({
 				domain: "outdoor-buildings",
 				source: createPreparedDataUse("rgba-color"),
-				textureUseId: "building:base:06000060",
+				textureBindingId: "building:base:06000060",
 			}),
 		);
 		const detailIntent = createStaticTexturePlacementIntent(
 			createStaticTextureUse({
 				domain: "outdoor-buildings",
 				source: createPreparedDataUse("rgba-detail"),
-				textureUseId: "building:detail:06000061",
+				textureBindingId: "building:detail:06000061",
 			}),
 		);
 
@@ -243,7 +243,7 @@ describe("texture placement vocabulary bridge", () => {
 		const textureUse = createStaticTextureUse({
 			domain: "outdoor-buildings",
 			source: dataUse,
-			textureUseId: "building:palette:04000010:domain=index8",
+			textureBindingId: "building:palette:04000010:domain=index8",
 		});
 
 		const intent = createStaticTexturePlacementIntent(textureUse);
@@ -277,7 +277,7 @@ describe("texture placement vocabulary bridge", () => {
 function createStaticTextureUse(options: {
 	readonly domain: VisualTextureDomain;
 	readonly source: MaterialTextureDataUseIdentity;
-	readonly textureUseId: string;
+	readonly textureBindingId: string;
 }): StaticBakeTextureUse {
 	if (options.domain === "runtime-object-material") {
 		throw new Error("Static texture uses cannot use runtime-object-material.");
@@ -290,7 +290,7 @@ function createStaticTextureUse(options: {
 				wrapT: "clamp-to-edge",
 			},
 			source: options.source,
-			textureUseId: options.textureUseId,
+			textureBindingId: options.textureBindingId,
 		}),
 		domain: options.domain,
 		owners: [],
@@ -299,14 +299,14 @@ function createStaticTextureUse(options: {
 			wrapT: "clamp-to-edge",
 		},
 		source: options.source,
-		textureUseId: options.textureUseId,
+		textureBindingId: options.textureBindingId,
 	};
 }
 
 function createDynamicTextureUse(options: {
 	readonly source: MaterialTextureDataUseIdentity;
 	readonly textureDomain: VisualTextureDomain;
-	readonly textureUseId: string;
+	readonly textureBindingId: string;
 }): DynamicTexturePlacementUse {
 	return {
 		...createPlacementTestIdentity({
@@ -316,7 +316,7 @@ function createDynamicTextureUse(options: {
 				wrapT: "repeat",
 			},
 			source: options.source,
-			textureUseId: options.textureUseId,
+			textureBindingId: options.textureBindingId,
 		}),
 		samplingPolicy: {
 			wrapS: "clamp-to-edge",
@@ -324,7 +324,7 @@ function createDynamicTextureUse(options: {
 		},
 		source: options.source,
 		textureDomain: options.textureDomain,
-		textureUseId: options.textureUseId,
+		textureBindingId: options.textureBindingId,
 	};
 }
 
@@ -332,7 +332,7 @@ function createPlacementTestIdentity(input: {
 	readonly domain: VisualTextureDomain;
 	readonly samplingPolicy: NonNullable<StaticBakeTextureUse["samplingPolicy"]>;
 	readonly source: MaterialTextureDataUseIdentity;
-	readonly textureUseId: string;
+	readonly textureBindingId: string;
 }): Pick<
 	StaticBakeTextureUse,
 	"bindingId" | "ownerIds" | "pageClass" | "textureKey"
@@ -348,7 +348,7 @@ function createPlacementTestIdentity(input: {
 		bindingId: createTextureBindingId({
 			resourceId: "placement-test",
 			role: purpose,
-			slot: input.textureUseId,
+			slot: input.textureBindingId,
 			wrapMode: input.samplingPolicy.wrapS,
 		}),
 		ownerIds: [],

@@ -321,10 +321,10 @@ function collectTerrainPageBinding(
 	colorPages: TerrainPreparedRolePageBindings,
 	maskPages: TerrainPreparedRolePageBindings,
 ): boolean {
-	if (!role.textureUseId) {
+	if (!role.textureBindingId) {
 		return false;
 	}
-	const resource = textureResources.get(role.textureUseId);
+	const resource = textureResources.get(role.textureBindingId);
 	if (!resource) {
 		return false;
 	}
@@ -348,8 +348,8 @@ function resolveDetailPlacement(
 ): TerrainResolvedTextureResource | null | false {
 	let detailResource: TerrainResolvedTextureResource | null = null;
 	for (const detailRole of plan.detailRoles) {
-		const resource = detailRole.texture.textureUseId
-			? textureResources.get(detailRole.texture.textureUseId)
+		const resource = detailRole.texture.textureBindingId
+			? textureResources.get(detailRole.texture.textureBindingId)
 			: undefined;
 		if (!resource) {
 			return false;
@@ -482,12 +482,12 @@ function resolvePlacementRect(
 	textureResources: ReadonlyMap<TextureBindingId, TerrainResolvedTextureResource>,
 	role: TerrainMaterialTextureRoleBinding,
 ): readonly [number, number, number, number] {
-	if (!role.textureUseId) {
+	if (!role.textureBindingId) {
 		return DEFAULT_TEXTURE_RECT;
 	}
 
 	return (
-		textureResources.get(role.textureUseId)?.placement.rect ??
+		textureResources.get(role.textureBindingId)?.placement.rect ??
 		DEFAULT_TEXTURE_RECT
 	);
 }
@@ -497,11 +497,11 @@ function resolvePlacementPage(
 	pageSlots: TerrainDrawUnitRolePageSlots,
 	role: TerrainMaterialTextureRoleBinding,
 ): number {
-	if (!role.textureUseId) {
+	if (!role.textureBindingId) {
 		return 0;
 	}
 
-	const resource = textureResources.get(role.textureUseId);
+	const resource = textureResources.get(role.textureBindingId);
 	if (!resource) {
 		return 0;
 	}

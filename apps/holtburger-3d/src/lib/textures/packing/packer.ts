@@ -211,7 +211,7 @@ function assertPixelLengthMatchesFormat(
 	}
 }
 
-export function getTexturePackingFormatBytesPerPixel(
+function getTexturePackingFormatBytesPerPixel(
 	format: TexturePackingPageFormat,
 ): number {
 	switch (format) {

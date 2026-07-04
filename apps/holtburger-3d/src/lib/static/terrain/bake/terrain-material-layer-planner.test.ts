@@ -22,7 +22,7 @@ describe("terrain material layer planner", () => {
 				allRoad: false,
 				base: expect.objectContaining({
 					texture: surfaceTexture(0x05000101),
-					textureUseId: "terrain-base:05000101",
+					textureBindingId: "terrain-base:05000101",
 					tiling: 2,
 					wrap: "repeat",
 				}),
@@ -31,7 +31,7 @@ describe("terrain material layer planner", () => {
 						alpha: expect.objectContaining({
 							role: "terrain-alpha",
 							texture: surfaceTexture(0x05000102),
-							textureUseId: "terrain-alpha:05000102",
+							textureBindingId: "terrain-alpha:05000102",
 							wrap: "clamp",
 						}),
 						rotation: 2,
@@ -81,11 +81,11 @@ describe("terrain material layer planner", () => {
 			expect.objectContaining({
 				alpha: expect.objectContaining({
 					texture: surfaceTexture(0x05000202),
-					textureUseId: "road-alpha:05000202",
+					textureBindingId: "road-alpha:05000202",
 				}),
 				road: expect.objectContaining({
 					texture: surfaceTexture(0x05000201),
-					textureUseId: "road:05000201",
+					textureBindingId: "road:05000201",
 				}),
 				rotation: 0,
 			}),
@@ -108,7 +108,7 @@ describe("terrain material layer planner", () => {
 		});
 
 		const plan = buildTerrainMaterialLayerPlan({
-			createTextureUseId,
+			createTextureBindingId,
 			maxLayerEntries: 2,
 			payload,
 		});
@@ -181,7 +181,7 @@ describe("terrain material layer planner", () => {
 
 function requirePlan(payload: TerrainStaticScopePayload) {
 	const plan = buildTerrainMaterialLayerPlan({
-		createTextureUseId,
+		createTextureBindingId,
 		payload,
 	});
 	if (!plan) {
@@ -191,7 +191,7 @@ function requirePlan(payload: TerrainStaticScopePayload) {
 	return plan;
 }
 
-function createTextureUseId(textureUse: TerrainTextureUseFacts): string {
+function createTextureBindingId(textureUse: TerrainTextureUseFacts): string {
 	return `${textureUse.role}:${textureUse.texture.surfaceTextureId.toString(16).padStart(8, "0")}`;
 }
 

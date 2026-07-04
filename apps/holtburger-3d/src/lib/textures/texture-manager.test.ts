@@ -74,7 +74,6 @@ describe("browser texture manager", () => {
 					textureHeight: 256,
 					textureRefId: STABLE_TEXTURE_REF_ID,
 					bindingId: STABLE_TERRAIN_BINDING_ID,
-					textureUseId: STABLE_TERRAIN_BINDING_ID,
 					textureWidth: 256,
 				},
 			],
@@ -95,7 +94,7 @@ describe("browser texture manager", () => {
 					samplerPolicyKey:
 						"sample=rgba-color;filter=anisotropic-4x;mips=on;aniso=4",
 					textureRefId: STABLE_TEXTURE_REF_ID,
-					textureUseId: STABLE_TERRAIN_BINDING_ID,
+					bindingId: STABLE_TERRAIN_BINDING_ID,
 					wrapS: "repeat",
 					wrapT: "repeat",
 					width: 256,
@@ -194,12 +193,12 @@ describe("browser texture manager", () => {
 				createTextureUseCommit({
 					drawUnitId: "terrain-a",
 					renderSurfaceId: 0x06000010,
-					textureUseId: "terrain-a:prepared-texture:06000010",
+					textureBindingId: "terrain-a:prepared-texture:06000010",
 				}),
 				createTextureUseCommit({
 					drawUnitId: "terrain-b",
 					renderSurfaceId: 0x06000020,
-					textureUseId: "terrain-b:prepared-texture:06000020",
+					textureBindingId: "terrain-b:prepared-texture:06000020",
 				}),
 			],
 		});
@@ -302,7 +301,7 @@ describe("browser texture manager", () => {
 					domain: "outdoor-buildings",
 					drawUnitId: "building-a",
 					renderSurfaceId: 0x06000010,
-					textureUseId: "building-a:mask:06000010",
+					textureBindingId: "building-a:mask:06000010",
 					usage: "rgba-mask",
 				}),
 			],
@@ -316,7 +315,7 @@ describe("browser texture manager", () => {
 					domain: "outdoor-buildings",
 					drawUnitId: "building-b",
 					renderSurfaceId: 0x06000020,
-					textureUseId: "building-b:mask:06000020",
+					textureBindingId: "building-b:mask:06000020",
 					usage: "rgba-mask",
 				}),
 			],
@@ -375,7 +374,7 @@ describe("browser texture manager", () => {
 			drawUnitId: "building-a",
 			paletteId: 0x04000010,
 			replacementPaletteId: 0x04000110,
-			textureUseId: "building-a:palette",
+			textureBindingId: "building-a:palette",
 		});
 
 		const firstUpdate = await textureManager.applyStaticCommitDelta({
@@ -393,7 +392,7 @@ describe("browser texture manager", () => {
 					drawUnitId: `building-${index}`,
 					paletteId: 0x04000010 + index,
 					replacementPaletteId: 0x04000110 + index,
-					textureUseId: `building-${index}:palette`,
+					textureBindingId: `building-${index}:palette`,
 				}),
 			),
 		});
@@ -461,13 +460,13 @@ describe("browser texture manager", () => {
 					drawUnitId: "building-a",
 					paletteId: 0x04000010,
 					replacementPaletteId: 0x04000110,
-					textureUseId: "building-a:palette",
+					textureBindingId: "building-a:palette",
 				}),
 				createPaletteTextureUseCommit({
 					drawUnitId: "building-a-secondary",
 					paletteId: 0x04000010,
 					replacementPaletteId: 0x04000110,
-					textureUseId: "building-a:palette-secondary",
+					textureBindingId: "building-a:palette-secondary",
 				}),
 			],
 		});
@@ -480,7 +479,7 @@ describe("browser texture manager", () => {
 					drawUnitId: `building-${index}`,
 					paletteId: 0x04000010 + index,
 					replacementPaletteId: 0x04000110 + index,
-					textureUseId: `building-${index}:palette`,
+					textureBindingId: `building-${index}:palette`,
 				}),
 			),
 		});
@@ -507,14 +506,14 @@ describe("browser texture manager", () => {
 		);
 		expect(
 			textureManager.createPlacementResolutionSnapshot([
-				buildingPalettePlacement.textureUseId,
-				secondaryPalettePlacement.textureUseId,
+				buildingPalettePlacement.bindingId,
+				secondaryPalettePlacement.bindingId,
 			]),
 		).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
 					bindingId: expect.stringContaining("building-a%3Apalette"),
-					itemId: buildingPalettePlacement.textureUseId,
+					itemId: buildingPalettePlacement.bindingId,
 					pageVersion: buildingPalettePlacement.pageVersion,
 					textureKey: expect.stringContaining("texture|"),
 					width: 256,
@@ -523,7 +522,7 @@ describe("browser texture manager", () => {
 					bindingId: expect.stringContaining(
 						"building-a%3Apalette-secondary",
 					),
-					itemId: secondaryPalettePlacement.textureUseId,
+					itemId: secondaryPalettePlacement.bindingId,
 					pageVersion: secondaryPalettePlacement.pageVersion,
 					textureKey: expect.stringContaining("texture|"),
 					width: 256,
@@ -567,13 +566,13 @@ describe("browser texture manager", () => {
 					drawUnitId: "building-a",
 					paletteId: 0x04000010,
 					replacementPaletteId: 0x04000110,
-					textureUseId: "building-a:palette",
+					textureBindingId: "building-a:palette",
 				}),
 				createPaletteTextureUseCommit({
 					drawUnitId: "building-z",
 					paletteId: 0x04000020,
 					replacementPaletteId: 0x04000120,
-					textureUseId: "building-z:palette",
+					textureBindingId: "building-z:palette",
 				}),
 			],
 		});
@@ -586,7 +585,7 @@ describe("browser texture manager", () => {
 					drawUnitId: `building-${index}`,
 					paletteId: 0x04000030 + index,
 					replacementPaletteId: 0x04000130 + index,
-					textureUseId: `building-${index}:palette`,
+					textureBindingId: `building-${index}:palette`,
 				}),
 			),
 		});
@@ -663,17 +662,17 @@ describe("browser texture manager", () => {
 				createTextureUseCommit({
 					drawUnitId: "terrain-a",
 					renderSurfaceId: 0x06000010,
-					textureUseId: "terrain-a:prepared-texture:06000010",
+					textureBindingId: "terrain-a:prepared-texture:06000010",
 				}),
 				createTextureUseCommit({
 					drawUnitId: "terrain-b",
 					renderSurfaceId: 0x06000020,
-					textureUseId: "terrain-b:prepared-texture:06000020",
+					textureBindingId: "terrain-b:prepared-texture:06000020",
 				}),
 				createTextureUseCommit({
 					drawUnitId: "terrain-c",
 					renderSurfaceId: 0x06000030,
-					textureUseId: "terrain-c:prepared-texture:06000030",
+					textureBindingId: "terrain-c:prepared-texture:06000030",
 				}),
 			],
 		});
@@ -700,22 +699,22 @@ describe("browser texture manager", () => {
 				createTextureUseCommit({
 					drawUnitId: "terrain-slice-a",
 					renderSurfaceId: 0x06000010,
-					textureUseId: "terrain-base-a",
+					textureBindingId: "terrain-base-a",
 				}),
 				createTextureUseCommit({
 					drawUnitId: "terrain-slice-a",
 					renderSurfaceId: 0x06000011,
-					textureUseId: "terrain-road",
+					textureBindingId: "terrain-road",
 				}),
 				createTextureUseCommit({
 					drawUnitId: "terrain-slice-b",
 					renderSurfaceId: 0x06000012,
-					textureUseId: "terrain-base-b",
+					textureBindingId: "terrain-base-b",
 				}),
 				createTextureUseCommit({
 					drawUnitId: "terrain-slice-b",
 					renderSurfaceId: 0x06000011,
-					textureUseId: "terrain-road",
+					textureBindingId: "terrain-road",
 				}),
 			],
 		});
@@ -745,25 +744,25 @@ describe("browser texture manager", () => {
 					domain: "outdoor-buildings",
 					drawUnitId: "terrain-a",
 					renderSurfaceId: 0x06000010,
-					textureUseId: "terrain-a:prepared-texture:06000010",
+					textureBindingId: "terrain-a:prepared-texture:06000010",
 				}),
 				createTextureUseCommit({
 					domain: "outdoor-buildings",
 					drawUnitId: "terrain-a",
 					renderSurfaceId: 0x06000020,
-					textureUseId: "terrain-a:prepared-texture:06000020",
+					textureBindingId: "terrain-a:prepared-texture:06000020",
 				}),
 				createTextureUseCommit({
 					domain: "outdoor-buildings",
 					drawUnitId: "terrain-b",
 					renderSurfaceId: 0x06000030,
-					textureUseId: "terrain-b:prepared-texture:06000030",
+					textureBindingId: "terrain-b:prepared-texture:06000030",
 				}),
 				createTextureUseCommit({
 					domain: "outdoor-buildings",
 					drawUnitId: "terrain-b",
 					renderSurfaceId: 0x06000040,
-					textureUseId: "terrain-b:prepared-texture:06000040",
+					textureBindingId: "terrain-b:prepared-texture:06000040",
 				}),
 			],
 		});
@@ -798,13 +797,13 @@ describe("browser texture manager", () => {
 					domain: "outdoor-buildings",
 					drawUnitId: "terrain-a",
 					renderSurfaceId: 0x06000010,
-					textureUseId: "terrain-a:prepared-texture:06000010",
+					textureBindingId: "terrain-a:prepared-texture:06000010",
 				}),
 				createTextureUseCommit({
 					domain: "outdoor-buildings",
 					drawUnitId: "terrain-b",
 					renderSurfaceId: 0x06000010,
-					textureUseId: "terrain-b:prepared-texture:06000010",
+					textureBindingId: "terrain-b:prepared-texture:06000010",
 				}),
 			],
 		});
@@ -829,14 +828,14 @@ describe("browser texture manager", () => {
 			createCommitDelta({
 				drawUnitId: "terrain-a",
 				outputFormat: "rgba8",
-				textureUseId: "terrain-a:prepared-texture:06000010",
+				textureBindingId: "terrain-a:prepared-texture:06000010",
 			}),
 		);
 		const secondUpdate = await textureManager.applyStaticCommitDelta(
 			createCommitDelta({
 				drawUnitId: "terrain-b",
 				outputFormat: "rgba8",
-				textureUseId: "terrain-b:prepared-texture:06000010",
+				textureBindingId: "terrain-b:prepared-texture:06000010",
 			}),
 		);
 		const firstPageVersion = firstUpdate?.placements[0]?.pageVersion;
@@ -911,12 +910,12 @@ describe("browser texture manager", () => {
 				createTextureUseCommit({
 					drawUnitId: "terrain-a",
 					renderSurfaceId: 0x06000010,
-					textureUseId: "terrain-a:prepared-texture:06000010",
+					textureBindingId: "terrain-a:prepared-texture:06000010",
 				}),
 				createTextureUseCommit({
 					drawUnitId: "terrain-a",
 					renderSurfaceId: 0x06000020,
-					textureUseId: "terrain-a:prepared-texture:06000020",
+					textureBindingId: "terrain-a:prepared-texture:06000020",
 				}),
 			],
 		});
@@ -964,14 +963,14 @@ describe("browser texture manager", () => {
 					domain: "outdoor-buildings",
 					drawUnitId: "static-a",
 					renderSurfaceId: 0x06000010,
-					textureUseId: "static-a:base:0",
+					textureBindingId: "static-a:base:0",
 					usage: "rgba-color",
 				}),
 				createTextureUseCommit({
 					domain: "outdoor-buildings",
 					drawUnitId: "static-a",
 					renderSurfaceId: 0x06000020,
-					textureUseId: "static-a:base:1",
+					textureBindingId: "static-a:base:1",
 					usage: "rgba-color",
 				}),
 			],
@@ -1029,14 +1028,14 @@ describe("browser texture manager", () => {
 					domain: "env-cell-system",
 					drawUnitId: "structured-interior-a",
 					renderSurfaceId: 0x06000010,
-					textureUseId: "structured-interior-a:base:0",
+					textureBindingId: "structured-interior-a:base:0",
 					usage: "rgba-color",
 				}),
 				createTextureUseCommit({
 					domain: "env-cell-system",
 					drawUnitId: "structured-interior-a",
 					renderSurfaceId: 0x06000020,
-					textureUseId: "structured-interior-a:base:1",
+					textureBindingId: "structured-interior-a:base:1",
 					usage: "rgba-color",
 				}),
 			],
@@ -1100,7 +1099,7 @@ describe("browser texture manager", () => {
 			drawUnitId: "terrain-a",
 			outputFormat: "rgba8",
 			renderSurfaceId: 0x06000010,
-			textureUseId: "terrain-pre-bake:prepared-texture:06000010",
+			textureBindingId: "terrain-pre-bake:prepared-texture:06000010",
 		});
 
 		const snapshot = await textureManager.placeTextureIntents({
@@ -1131,7 +1130,7 @@ describe("browser texture manager", () => {
 		const update = await textureManager.applyStaticCommitDelta({
 			...createCommitDelta({
 				outputFormat: "rgba8",
-				textureUseId: textureUse.textureUseId,
+				textureBindingId: textureUse.textureBindingId,
 			}),
 			textureUses: [
 				{
@@ -1141,8 +1140,8 @@ describe("browser texture manager", () => {
 		});
 		expect(update?.placements).toHaveLength(1);
 		expect(update?.placements[0]).toMatchObject({
+			bindingId: textureUse.bindingId,
 			textureRefId: expect.stringContaining("texture-placement-bucket"),
-			textureUseId: textureUse.bindingId,
 		});
 	});
 
@@ -1159,14 +1158,14 @@ describe("browser texture manager", () => {
 			drawUnitId: "object-a",
 			outputFormat: "rgba8",
 			renderSurfaceId: 0x06000010,
-			textureUseId: "object-a:prepared-texture:06000010",
+			textureBindingId: "object-a:prepared-texture:06000010",
 		});
 		const firstUpdate = await textureManager.applyStaticCommitDelta({
 			...createCommitDelta({
 				domain: "outdoor-explicit-objects",
 				drawUnitId: "object-a",
 				outputFormat: "rgba8",
-				textureUseId: activeTextureUse.textureUseId,
+				textureBindingId: activeTextureUse.textureBindingId,
 			}),
 			textureUses: [activeTextureUse],
 		});
@@ -1175,7 +1174,7 @@ describe("browser texture manager", () => {
 			drawUnitId: "object-b",
 			outputFormat: "rgba8",
 			renderSurfaceId: 0x06000020,
-			textureUseId: "object-b:prepared-texture:06000020",
+			textureBindingId: "object-b:prepared-texture:06000020",
 		});
 
 		await textureManager.placeTextureIntents({
@@ -1186,7 +1185,7 @@ describe("browser texture manager", () => {
 				domain: "outdoor-explicit-objects",
 				drawUnitId: "object-b",
 				outputFormat: "rgba8",
-				textureUseId: inactiveTextureUse.textureUseId,
+				textureBindingId: inactiveTextureUse.textureBindingId,
 			}),
 			revision: 2,
 			textureUses: [inactiveTextureUse],
@@ -1217,7 +1216,7 @@ describe("browser texture manager", () => {
 			drawUnitId: "generated-scenery-a",
 			outputFormat: "rgba8",
 			renderSurfaceId: 0x06000010,
-			textureUseId: "generated-scenery:prepared-texture:06000010",
+			textureBindingId: "generated-scenery:prepared-texture:06000010",
 		});
 
 		await textureManager.placeTextureIntents({
@@ -1229,7 +1228,7 @@ describe("browser texture manager", () => {
 				domain: "outdoor-generated-scenery",
 				drawUnitId: "generated-scenery-a",
 				outputFormat: "rgba8",
-				textureUseId: textureUse.textureUseId,
+				textureBindingId: textureUse.textureBindingId,
 			}),
 			textureUses: [
 				{
@@ -1241,8 +1240,8 @@ describe("browser texture manager", () => {
 		expect(texturePacker.jobs).toHaveLength(1);
 		expect(update?.placements).toHaveLength(1);
 		expect(update?.placements[0]).toMatchObject({
+			bindingId: textureUse.bindingId,
 			textureRefId: expect.stringContaining("texture-placement-bucket"),
-			textureUseId: textureUse.bindingId,
 		});
 	});
 
@@ -1254,14 +1253,14 @@ describe("browser texture manager", () => {
 			drawUnitId: "terrain-a",
 			outputFormat: "rgba8",
 			renderSurfaceId: 0x06000010,
-			textureUseId:
+			textureBindingId:
 				"terrain:0xda55ffff:prepared-texture:terrain-base:rgba-color:06000010",
 		});
 		const secondUse = createTextureUseCommit({
 			drawUnitId: "terrain-b",
 			outputFormat: "rgba8",
 			renderSurfaceId: 0x06000010,
-			textureUseId:
+			textureBindingId:
 				"terrain:0xd854ffff:prepared-texture:terrain-base:rgba-color:06000010",
 		});
 
@@ -1307,7 +1306,7 @@ describe("browser texture manager", () => {
 			drawUnitId: "terrain-a",
 			outputFormat: "rgba8",
 			renderSurfaceId: 0x06000010,
-			textureUseId: "terrain-pre-bake:prepared-texture:06000010",
+			textureBindingId: "terrain-pre-bake:prepared-texture:06000010",
 		});
 		await textureManager.placeTextureIntents({
 			intents: [createStaticPlacementIntent(textureUse)],
@@ -1376,7 +1375,7 @@ describe("browser texture manager", () => {
 			drawUnitId: "terrain-a",
 			outputFormat: "rgba8",
 			renderSurfaceId: 0x06000010,
-			textureUseId: "terrain-zombie:prepared-texture:06000010",
+			textureBindingId: "terrain-zombie:prepared-texture:06000010",
 		});
 		await textureManager.placeTextureIntents({
 			intents: [createStaticPlacementIntent(firstTextureUse)],
@@ -1387,7 +1386,7 @@ describe("browser texture manager", () => {
 			drawUnitId: "terrain-b",
 			outputFormat: "rgba8",
 			renderSurfaceId: 0x06000020,
-			textureUseId: "terrain-live:prepared-texture:06000020",
+			textureBindingId: "terrain-live:prepared-texture:06000020",
 		});
 		await textureManager.placeTextureIntents({
 			intents: [createStaticPlacementIntent(secondTextureUse)],
@@ -1416,7 +1415,7 @@ describe("browser texture manager", () => {
 			drawUnitId: "terrain-a",
 			outputFormat: "rgba8",
 			renderSurfaceId: 0x06000010,
-			textureUseId: "terrain-existing:prepared-texture:06000010",
+			textureBindingId: "terrain-existing:prepared-texture:06000010",
 		});
 		await textureManager.placeTextureIntents({
 			intents: [createStaticPlacementIntent(firstTextureUse)],
@@ -1426,13 +1425,13 @@ describe("browser texture manager", () => {
 			drawUnitId: "terrain-b",
 			outputFormat: "rgba8",
 			renderSurfaceId: 0x06000010,
-			textureUseId: "terrain-reused:prepared-texture:06000010",
+			textureBindingId: "terrain-reused:prepared-texture:06000010",
 		});
 		const newTextureUse = createTextureUseCommit({
 			drawUnitId: "terrain-c",
 			outputFormat: "rgba8",
 			renderSurfaceId: 0x06000020,
-			textureUseId: "terrain-new:prepared-texture:06000020",
+			textureBindingId: "terrain-new:prepared-texture:06000020",
 		});
 
 		const snapshot = await textureManager.placeTextureIntents({
@@ -1471,7 +1470,7 @@ describe("browser texture manager", () => {
 			drawUnitId: "terrain-a",
 			outputFormat: "rgba8",
 			renderSurfaceId: 0x06000010,
-			textureUseId: "terrain-active:prepared-texture:06000010",
+			textureBindingId: "terrain-active:prepared-texture:06000010",
 		});
 		await textureManager.placeTextureIntents({
 			intents: [createStaticPlacementIntent(activeTextureUse)],
@@ -1492,7 +1491,7 @@ describe("browser texture manager", () => {
 			drawUnitId: "terrain-b",
 			outputFormat: "rgba8",
 			renderSurfaceId: 0x06000020,
-			textureUseId: "terrain-new:prepared-texture:06000020",
+			textureBindingId: "terrain-new:prepared-texture:06000020",
 		});
 		await textureManager.placeTextureIntents({
 			intents: [createStaticPlacementIntent(newTextureUse)],
@@ -1531,14 +1530,14 @@ describe("browser texture manager", () => {
 			createCommitDelta({
 				drawUnitId: "terrain-a",
 				outputFormat: "rgba8",
-				textureUseId: "terrain-a:prepared-texture:06000010",
+				textureBindingId: "terrain-a:prepared-texture:06000010",
 			}),
 		);
 		const secondUpdate = await textureManager.applyStaticCommitDelta(
 			createCommitDelta({
 				drawUnitId: "terrain-b",
 				outputFormat: "rgba8",
-				textureUseId: "terrain-b:prepared-texture:06000010",
+				textureBindingId: "terrain-b:prepared-texture:06000010",
 			}),
 		);
 
@@ -1590,7 +1589,7 @@ describe("browser texture manager", () => {
 			createCommitDelta({
 				drawUnitId: "terrain-b",
 				outputFormat: "rgba8",
-				textureUseId: "terrain-b:prepared-texture:06000010",
+				textureBindingId: "terrain-b:prepared-texture:06000010",
 			}),
 		);
 
@@ -1722,7 +1721,7 @@ describe("browser texture manager", () => {
 						wrapS: "clamp-to-edge",
 						wrapT: "clamp-to-edge",
 					},
-					textureUseId: "building-clamp:06000010",
+					textureBindingId: "building-clamp:06000010",
 					usage: "rgba-color",
 				}),
 				createTextureUseCommit({
@@ -1733,7 +1732,7 @@ describe("browser texture manager", () => {
 						wrapS: "repeat",
 						wrapT: "repeat",
 					},
-					textureUseId: "building-repeat:06000020",
+					textureBindingId: "building-repeat:06000020",
 					usage: "rgba-color",
 				}),
 			],
@@ -1758,7 +1757,7 @@ describe("browser texture manager", () => {
 		});
 		expect(update?.placements).toMatchObject([
 			{
-				textureUseId: expect.stringContaining("slot=building-clamp%3A06000010"),
+				bindingId: expect.stringContaining("slot=building-clamp%3A06000010"),
 				wrapS: "clamp-to-edge",
 				wrapT: "clamp-to-edge",
 			},
@@ -1792,7 +1791,7 @@ describe("browser texture manager", () => {
 						wrapS: "clamp-to-edge",
 						wrapT: "clamp-to-edge",
 					},
-					textureUseId: "building-clamp:06000010",
+					textureBindingId: "building-clamp:06000010",
 					usage: "rgba-color",
 				}),
 			],
@@ -1810,7 +1809,7 @@ describe("browser texture manager", () => {
 						wrapS: "repeat",
 						wrapT: "repeat",
 					},
-					textureUseId: "building-repeat:06000010",
+					textureBindingId: "building-repeat:06000010",
 					usage: "rgba-color",
 				}),
 			],
@@ -1846,7 +1845,7 @@ describe("browser texture manager", () => {
 						wrapS: "clamp-to-edge",
 						wrapT: "clamp-to-edge",
 					},
-					textureUseId: "detail-a:06000010",
+					textureBindingId: "detail-a:06000010",
 					usage: "rgba-color",
 				}),
 			],
@@ -1863,7 +1862,7 @@ describe("browser texture manager", () => {
 						wrapS: "clamp-to-edge",
 						wrapT: "clamp-to-edge",
 					},
-					textureUseId: "dynamic-windmill-part-0:06000010",
+					textureBindingId: "dynamic-windmill-part-0:06000010",
 				}),
 			],
 		});
@@ -1920,14 +1919,14 @@ describe("browser texture manager", () => {
 					textureDomain: "runtime-object-material",
 					renderSurfaceId: 0x06000010,
 					resourceId: "dynamic-visual-resource:runtime-spawn:1",
-					textureUseId: "runtime-spawn:1:base:0",
+					textureBindingId: "runtime-spawn:1:base:0",
 				}),
 				createDynamicTextureUseCommit({
 					placementBucketKey: "runtime-dynamic:runtime-spawn:1",
 					textureDomain: "runtime-object-material",
 					renderSurfaceId: 0x06000020,
 					resourceId: "dynamic-visual-resource:runtime-spawn:1",
-					textureUseId: "runtime-spawn:1:base:1",
+					textureBindingId: "runtime-spawn:1:base:1",
 				}),
 			],
 		});
@@ -1989,14 +1988,14 @@ describe("browser texture manager", () => {
 					textureDomain: "runtime-object-material",
 					renderSurfaceId: 0x06000010,
 					resourceId: "dynamic-visual-resource:runtime-spawn:1",
-					textureUseId: "runtime-spawn:1:base:0",
+					textureBindingId: "runtime-spawn:1:base:0",
 				}),
 				createDynamicTextureUseCommit({
 					placementBucketKey: "runtime-dynamic:runtime-spawn:1",
 					textureDomain: "runtime-object-material",
 					renderSurfaceId: 0x06000020,
 					resourceId: "dynamic-visual-resource:runtime-spawn:1",
-					textureUseId: "runtime-spawn:1:base:1",
+					textureBindingId: "runtime-spawn:1:base:1",
 				}),
 			],
 		});
@@ -2041,7 +2040,7 @@ describe("browser texture manager", () => {
 					domain: "outdoor-generated-scenery",
 					drawUnitId: "detail-a",
 					renderSurfaceId: 0x06000010,
-					textureUseId: "detail-a:06000010",
+					textureBindingId: "detail-a:06000010",
 					usage: "rgba-color",
 				}),
 			],
@@ -2054,7 +2053,7 @@ describe("browser texture manager", () => {
 					textureDomain: "outdoor-generated-scenery",
 					renderSurfaceId: 0x06000010,
 					resourceId: "dynamic-windmill-part-0",
-					textureUseId: "dynamic-windmill-part-0:06000010",
+					textureBindingId: "dynamic-windmill-part-0:06000010",
 				}),
 			],
 		});
@@ -2126,13 +2125,13 @@ describe("browser texture manager", () => {
 						wrapT: "repeat",
 					},
 					renderSurfaceId: 0x06000010,
-					textureUseId: "static-a:index",
+					textureBindingId: "static-a:index",
 					usage: "index8",
 				}),
 				createPaletteTextureUseCommit({
 					drawUnitId: "static-a",
 					paletteId: 0x04000010,
-					textureUseId: "static-a:palette",
+					textureBindingId: "static-a:palette",
 				}),
 			],
 		});
@@ -2202,7 +2201,7 @@ describe("browser texture manager", () => {
 				rect: [0, 0, 2, 1],
 				sampleClass: "index8",
 				samplerPolicyKey: "sample=index8;filter=nearest;mips=off;aniso=1",
-				textureUseId: expect.stringContaining("slot=static-a%3Aindex"),
+				bindingId: expect.stringContaining("slot=static-a%3Aindex"),
 				width: 2,
 				wrapS: "clamp-to-edge",
 				wrapT: "clamp-to-edge",
@@ -2215,7 +2214,7 @@ describe("browser texture manager", () => {
 				rect: [0, 0, 16, 16],
 				sampleClass: "palette-rgba",
 				samplerPolicyKey: "sample=palette-rgba;filter=nearest;mips=off;aniso=1",
-				textureUseId: expect.stringContaining("slot=static-a%3Apalette"),
+				bindingId: expect.stringContaining("slot=static-a%3Apalette"),
 				width: 16,
 				wrapS: "clamp-to-edge",
 				wrapT: "clamp-to-edge",
@@ -2247,7 +2246,7 @@ describe("browser texture manager", () => {
 					paletteId: 0x04000010,
 					replacementPaletteId: 0x04000020,
 					replacementOffset: 1,
-					textureUseId: "static-a:palette",
+					textureBindingId: "static-a:palette",
 				}),
 			],
 		});
@@ -2278,12 +2277,12 @@ describe("browser texture manager", () => {
 				createPaletteTextureUseCommit({
 					drawUnitId: "static-a",
 					paletteId: 0x04000010,
-					textureUseId: "static-a:palette-a",
+					textureBindingId: "static-a:palette-a",
 				}),
 				createPaletteTextureUseCommit({
 					drawUnitId: "static-b",
 					paletteId: 0x04000011,
-					textureUseId: "static-b:palette-b",
+					textureBindingId: "static-b:palette-b",
 				}),
 			],
 		});
@@ -2333,13 +2332,13 @@ async function runTextureManagerFollowModeFuzz(seed: number): Promise<void> {
 		drawUnitId: "landblock-static/db56ffff/building/0001/01001117/base",
 		renderSurfaceId: 0x060039f2,
 		samplingPolicy: { wrapS: "clamp-to-edge", wrapT: "clamp-to-edge" },
-		textureUseId: "db56ffff:01001117:base:clamp",
+		textureBindingId: "db56ffff:01001117:base:clamp",
 	});
 	await addFuzzRenderSurfaceBinding(textureManager, state, {
 		drawUnitId: "landblock-static/da55ffff/building/0028/01002a1b/base",
 		renderSurfaceId: 0x060039f2,
 		samplingPolicy: { wrapS: "repeat", wrapT: "repeat" },
-		textureUseId: "da55ffff:01002a1b:base:repeat",
+		textureBindingId: "da55ffff:01002a1b:base:repeat",
 	});
 	assertFuzzSharedTextureKey(state, [
 		"db56ffff:01001117:base:clamp",
@@ -2354,7 +2353,7 @@ async function runTextureManagerFollowModeFuzz(seed: number): Promise<void> {
 		drawUnitId: "landblock-static/db56ffff/building/0001/01001117/base",
 		renderSurfaceId: 0x060039f2,
 		samplingPolicy: { wrapS: "clamp-to-edge", wrapT: "clamp-to-edge" },
-		textureUseId: "db56ffff:01001117:base:clamp",
+		textureBindingId: "db56ffff:01001117:base:clamp",
 	});
 
 	for (let index = 0; index < 5; index += 1) {
@@ -2362,7 +2361,7 @@ async function runTextureManagerFollowModeFuzz(seed: number): Promise<void> {
 			drawUnitId: `landblock-static/da55ffff/building/0028/palette-${index}`,
 			paletteId: 0x04000010 + index,
 			replacementPaletteId: 0x04000110 + index,
-			textureUseId: `da55ffff:01002a1b:palette:${index}`,
+			textureBindingId: `da55ffff:01002a1b:palette:${index}`,
 		});
 	}
 
@@ -2380,7 +2379,7 @@ async function runTextureManagerFollowModeFuzz(seed: number): Promise<void> {
 					drawUnitId: `landblock-static/${selectFuzzLandblock(random)}/building/${drawUnitIndex.toString().padStart(4, "0")}/surface-${surfaceIndex}`,
 					renderSurfaceId: 0x06004200 + surfaceIndex,
 					samplingPolicy: { wrapS: wrapMode, wrapT: wrapMode },
-					textureUseId: `fuzz:${drawUnitIndex}:surface:${surfaceIndex}:${wrapMode}`,
+					textureBindingId: `fuzz:${drawUnitIndex}:surface:${surfaceIndex}:${wrapMode}`,
 				});
 				break;
 			}
@@ -2398,7 +2397,7 @@ async function runTextureManagerFollowModeFuzz(seed: number): Promise<void> {
 					drawUnitId: `landblock-static/${selectFuzzLandblock(random)}/building/palette-${paletteIndex}`,
 					paletteId: 0x04000030 + paletteIndex,
 					replacementPaletteId: 0x04000130 + paletteIndex,
-					textureUseId: `fuzz:palette:${paletteIndex}`,
+					textureBindingId: `fuzz:palette:${paletteIndex}`,
 				});
 				break;
 			}
@@ -2438,7 +2437,7 @@ async function addFuzzRenderSurfaceBinding(
 		readonly drawUnitId: string;
 		readonly renderSurfaceId: number;
 		readonly samplingPolicy: StaticBakeTextureSamplingPolicy;
-		readonly textureUseId: string;
+		readonly textureBindingId: string;
 	},
 ): Promise<void> {
 	const textureUse = createTextureUseCommit({
@@ -2446,7 +2445,7 @@ async function addFuzzRenderSurfaceBinding(
 		drawUnitId: options.drawUnitId,
 		renderSurfaceId: options.renderSurfaceId,
 		samplingPolicy: options.samplingPolicy,
-		textureUseId: options.textureUseId,
+		textureBindingId: options.textureBindingId,
 		usage: "rgba-color",
 	});
 	state.operations.push({
@@ -2454,7 +2453,7 @@ async function addFuzzRenderSurfaceBinding(
 		kind: "add-render-surface",
 		renderSurfaceId: options.renderSurfaceId,
 		textureKey: textureUse.textureKey,
-		textureUseId: textureUse.textureUseId,
+		textureBindingId: textureUse.textureBindingId,
 		wrapS: options.samplingPolicy.wrapS,
 	});
 	await applyFuzzStaticCommit(textureManager, state, [textureUse]);
@@ -2468,14 +2467,14 @@ async function addFuzzPaletteBinding(
 		readonly drawUnitId: string;
 		readonly paletteId: number;
 		readonly replacementPaletteId: number;
-		readonly textureUseId: string;
+		readonly textureBindingId: string;
 	},
 ): Promise<void> {
 	const textureUse = createPaletteTextureUseCommit({
 		drawUnitId: options.drawUnitId,
 		paletteId: options.paletteId,
 		replacementPaletteId: options.replacementPaletteId,
-		textureUseId: options.textureUseId,
+		textureBindingId: options.textureBindingId,
 	});
 	state.operations.push({
 		drawUnitId: options.drawUnitId,
@@ -2483,7 +2482,7 @@ async function addFuzzPaletteBinding(
 		paletteId: options.paletteId,
 		replacementPaletteId: options.replacementPaletteId,
 		textureKey: textureUse.textureKey,
-		textureUseId: textureUse.textureUseId,
+		textureBindingId: textureUse.textureBindingId,
 	});
 	await applyFuzzStaticCommit(textureManager, state, [textureUse]);
 	trackFuzzActiveItem(state, options.drawUnitId, textureUse);
@@ -2744,7 +2743,7 @@ type TextureManagerFuzzOperation =
 			readonly kind: "add-render-surface";
 			readonly renderSurfaceId: number;
 			readonly textureKey: string;
-			readonly textureUseId: string;
+			readonly textureBindingId: string;
 			readonly wrapS: NonNullable<StaticBakeTextureSamplingPolicy["wrapS"]>;
 	  }
 	| {
@@ -2753,7 +2752,7 @@ type TextureManagerFuzzOperation =
 			readonly paletteId: number;
 			readonly replacementPaletteId: number;
 			readonly textureKey: string;
-			readonly textureUseId: string;
+			readonly textureBindingId: string;
 	  }
 	| {
 			readonly drawUnitId: string;
@@ -3000,26 +2999,22 @@ function getFixtureBindingSlots(
 function getResolvedPlacementSlots(
 	placements:
 		| readonly {
-				readonly bindingId?: string;
-				readonly textureUseId: string;
+				readonly bindingId: string;
 		  }[]
 		| undefined,
 ): readonly string[] {
 	return (placements ?? []).map((placement) =>
-		getFixtureBindingSlot(placement.bindingId ?? placement.textureUseId),
+		getFixtureBindingSlot(placement.bindingId),
 	);
 }
 
 function findResolvedPlacementBySlot<
 	T extends {
-		readonly bindingId?: string;
-		readonly textureUseId: string;
+		readonly bindingId: string;
 	},
 >(placements: readonly T[] | undefined, slot: string): T {
 	const placement = (placements ?? []).find(
-		(candidate) =>
-			getFixtureBindingSlot(candidate.bindingId ?? candidate.textureUseId) ===
-			slot,
+		(candidate) => getFixtureBindingSlot(candidate.bindingId) === slot,
 	);
 	if (placement === undefined) {
 		throw new Error(`Missing fixture placement for slot ${slot}.`);
@@ -3103,13 +3098,13 @@ function createCommitDelta(options: {
 	readonly outputFormat: "rgba8" | "dxt1";
 	readonly renderSurfaceId?: number;
 	readonly samplingPolicy?: StaticBakeTextureSamplingPolicy;
-	readonly textureUseId?: string;
+	readonly textureBindingId?: string;
 	readonly usage?: PreparedRgbaRenderSurfaceTextureUsage;
 }): StaticCoordinatorCommitDelta {
 	const drawUnitId = options.drawUnitId ?? "terrain-a";
 	const renderSurfaceId = options.renderSurfaceId ?? 0x06000010;
-	const textureUseId =
-		options.textureUseId ??
+	const textureBindingId =
+		options.textureBindingId ??
 		`${drawUnitId}:prepared-texture:${renderSurfaceId.toString(16).padStart(8, "0")}`;
 
 	return {
@@ -3130,7 +3125,7 @@ function createCommitDelta(options: {
 				outputFormat: options.outputFormat,
 				renderSurfaceId,
 				samplingPolicy: options.samplingPolicy,
-				textureUseId,
+				textureBindingId,
 				usage: options.usage,
 			}),
 		],
@@ -3143,7 +3138,7 @@ function createTextureUseCommit(options: {
 	readonly outputFormat?: "rgba8" | "dxt1";
 	readonly renderSurfaceId: number;
 	readonly samplingPolicy?: StaticBakeTextureSamplingPolicy;
-	readonly textureUseId: string;
+	readonly textureBindingId: string;
 	readonly usage?: PreparedRgbaRenderSurfaceTextureUsage;
 }): StaticCoordinatorCommitDelta["textureUses"][number] {
 	const domain = options.domain ?? "outdoor-terrain";
@@ -3164,7 +3159,7 @@ function createTextureUseCommit(options: {
 		owners,
 		samplingPolicy: options.samplingPolicy,
 		source,
-		textureUseId: options.textureUseId,
+		textureBindingId: options.textureBindingId,
 	});
 	return {
 		...identity,
@@ -3172,7 +3167,7 @@ function createTextureUseCommit(options: {
 		owners,
 		source,
 		samplingPolicy: options.samplingPolicy,
-		textureUseId: options.textureUseId,
+		textureBindingId: options.textureBindingId,
 	};
 }
 
@@ -3252,7 +3247,7 @@ function createPaletteTextureUseCommit(options: {
 	readonly paletteId: number;
 	readonly replacementOffset?: number;
 	readonly replacementPaletteId?: number;
-	readonly textureUseId: string;
+	readonly textureBindingId: string;
 }): StaticCoordinatorCommitDelta["textureUses"][number] {
 	const domain = "outdoor-buildings";
 	const owners = [{ drawUnitId: options.drawUnitId, kind: "draw-unit" }] as const;
@@ -3275,14 +3270,14 @@ function createPaletteTextureUseCommit(options: {
 		domain,
 		owners,
 		source,
-		textureUseId: options.textureUseId,
+		textureBindingId: options.textureBindingId,
 	});
 	return {
 		...identity,
 		domain,
 		owners,
 		source,
-		textureUseId: options.textureUseId,
+		textureBindingId: options.textureBindingId,
 	};
 }
 
@@ -3292,7 +3287,7 @@ function createDynamicTextureUseCommit(options: {
 	readonly renderSurfaceId: number;
 	readonly resourceId: string;
 	readonly samplingPolicy?: StaticBakeTextureSamplingPolicy;
-	readonly textureUseId: string;
+	readonly textureBindingId: string;
 	readonly usage?: PreparedRgbaRenderSurfaceTextureUsage;
 }): DynamicTextureUseCommit {
 	const source: DynamicTextureUseCommit["source"] = {
@@ -3313,7 +3308,7 @@ function createDynamicTextureUseCommit(options: {
 		owners: [owner],
 		samplingPolicy: options.samplingPolicy,
 		source,
-		textureUseId: options.textureUseId,
+		textureBindingId: options.textureBindingId,
 	});
 	return {
 		...identity,
@@ -3332,7 +3327,7 @@ function createDynamicTextureUseCommit(options: {
 		owner,
 		samplingPolicy: options.samplingPolicy,
 		source,
-		textureUseId: options.textureUseId,
+		textureBindingId: options.textureBindingId,
 	};
 }
 
@@ -3341,7 +3336,7 @@ function createFixtureTextureIdentity(input: {
 	readonly owners: readonly StaticBakeTextureUse["owners"][number][];
 	readonly samplingPolicy?: StaticBakeTextureSamplingPolicy;
 	readonly source: MaterialTextureDataUseIdentity;
-	readonly textureUseId: string;
+	readonly textureBindingId: string;
 }): Pick<
 	StaticBakeTextureUse,
 	"bindingId" | "ownerIds" | "pageClass" | "textureKey"
@@ -3357,7 +3352,7 @@ function createFixtureTextureIdentity(input: {
 		bindingId: createTextureBindingId({
 			resourceId: "fixture-texture-use",
 			role: purpose,
-			slot: input.textureUseId,
+			slot: input.textureBindingId,
 			wrapMode: input.samplingPolicy?.wrapS,
 		}),
 		ownerIds: input.owners.map(createFixtureTextureOwnerId),

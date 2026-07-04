@@ -4944,10 +4944,48 @@ function parsePreparedTextureUsage(
 
 function runtimeDiagnosticsSnapshotSummary(
 	snapshot: RuntimeDiagnosticsSnapshot,
-): Pick<RuntimeDiagnosticsSnapshot, "staticCommitInstall" | "status"> {
+): {
+	readonly staticCommitInstall: Omit<
+		RuntimeDiagnosticsSnapshot["staticCommitInstall"],
+		"committedCommits" | "failedCommits" | "pendingCommits"
+	> & {
+		readonly committedCommits: readonly StaticCommitInstallSummary[];
+		readonly failedCommits: readonly StaticCommitInstallSummary[];
+		readonly pendingCommits: readonly StaticCommitInstallSummary[];
+	};
+	readonly status: RuntimeDiagnosticsSnapshot["status"];
+} {
+	const staticCommitInstall = snapshot.staticCommitInstall;
 	return {
-		staticCommitInstall: snapshot.staticCommitInstall,
+		staticCommitInstall: {
+			...staticCommitInstall,
+			committedCommits: staticCommitInstall.committedCommits.map(
+				toStaticCommitInstallSummary,
+			),
+			failedCommits: staticCommitInstall.failedCommits.map(
+				toStaticCommitInstallSummary,
+			),
+			pendingCommits: staticCommitInstall.pendingCommits.map(
+				toStaticCommitInstallSummary,
+			),
+		},
 		status: snapshot.status,
+	};
+}
+
+interface StaticCommitInstallSummary {
+	readonly commitId: string;
+	readonly phase: string;
+	readonly revision: number;
+}
+
+function toStaticCommitInstallSummary(
+	commit: RuntimeDiagnosticsSnapshot["staticCommitInstall"]["committedCommits"][number],
+): StaticCommitInstallSummary {
+	return {
+		commitId: commit.commitId,
+		phase: commit.phase,
+		revision: commit.revision,
 	};
 }
 

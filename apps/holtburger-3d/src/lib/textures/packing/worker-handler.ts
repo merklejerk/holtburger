@@ -1,30 +1,23 @@
 import type { TexturePacker } from "./packer";
-import type {
-	TexturePackingWorkerMainMessage,
-	TexturePackingWorkerResponse,
-} from "./protocol";
+import type { TexturePackingWorkerGlobalPort } from "./protocol";
+import {
+	installWorkerHandler,
+	type InstalledWorkerHandler,
+} from "../../workers/handler";
+import { collectTexturePackingResultTransfers } from "./transfers";
 
-export async function handleTexturePackingWorkerRequest(
+export function installTexturePackingWorkerHandler(
 	packer: TexturePacker,
-	message: TexturePackingWorkerMainMessage,
-	postMessage: (response: TexturePackingWorkerResponse) => void,
-): Promise<void> {
-	if (message.kind === "cancel-texture-pack") {
-		return;
-	}
-
-	try {
-		const result = await packer.pack(message.job);
-		postMessage({
-			kind: "textures-packed",
-			requestId: message.requestId,
-			result,
-		});
-	} catch (error: unknown) {
-		postMessage({
-			kind: "texture-pack-failed",
-			message: error instanceof Error ? error.message : String(error),
-			requestId: message.requestId,
-		});
-	}
+	port: TexturePackingWorkerGlobalPort,
+): InstalledWorkerHandler {
+	return installWorkerHandler({
+		execute: async (job) => {
+			const result = await packer.pack(job);
+			return {
+				output: result,
+				transfer: collectTexturePackingResultTransfers(result),
+			};
+		},
+		port,
+	});
 }

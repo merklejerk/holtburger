@@ -1,4 +1,14 @@
 import type { VisualTextureDomain } from "../../static/contracts";
+import type {
+	WorkerHandlerPort,
+	WorkerHandlerInputMessage,
+	WorkerHandlerOutputMessage,
+} from "../../workers/handler";
+import type {
+	WorkerMessagePort,
+	WorkerPoolRequestMessage,
+	WorkerPoolResponseMessage,
+} from "../../workers/pool";
 
 export type TexturePackingPageFormat = "rgba8" | "r8" | "rg8";
 
@@ -66,47 +76,23 @@ interface TexturePackingRect {
 }
 
 export type TexturePackingWorkerMainMessage =
-	| {
-			readonly kind: "pack-textures";
-			readonly requestId: string;
-			readonly job: TexturePackingJob;
-	  }
-	| {
-			readonly kind: "cancel-texture-pack";
-			readonly requestId: string;
-	  };
+	WorkerHandlerInputMessage<TexturePackingJob>;
 
-export type TexturePackingWorkerThreadMessage =
-	| {
-			readonly kind: "textures-packed";
-			readonly requestId: string;
-			readonly result: TexturePackingResult;
-	  }
-	| {
-			readonly kind: "texture-pack-failed";
-			readonly requestId: string;
-			readonly message: string;
-	  };
+export type TexturePackingWorkerThreadMessage = WorkerHandlerOutputMessage<
+	TexturePackingResult,
+	never
+>;
 
 export type TexturePackingWorkerRequest = TexturePackingWorkerMainMessage;
 export type TexturePackingWorkerResponse = TexturePackingWorkerThreadMessage;
 
-export interface TexturePackingWorkerPort {
-	postMessage(message: TexturePackingWorkerMainMessage): void;
-	addEventListener(
-		type: "message",
-		listener: (event: MessageEvent<TexturePackingWorkerThreadMessage>) => void,
-	): void;
-	removeEventListener(
-		type: "message",
-		listener: (event: MessageEvent<TexturePackingWorkerThreadMessage>) => void,
-	): void;
-}
+export type TexturePackingWorkerPort = WorkerMessagePort<
+	WorkerPoolRequestMessage<TexturePackingJob>,
+	WorkerPoolResponseMessage<TexturePackingResult, never>
+>;
 
-export interface TexturePackingWorkerGlobalPort {
-	postMessage(message: TexturePackingWorkerThreadMessage): void;
-	addEventListener(
-		type: "message",
-		listener: (event: MessageEvent<TexturePackingWorkerMainMessage>) => void,
-	): void;
-}
+export type TexturePackingWorkerGlobalPort = WorkerHandlerPort<
+	TexturePackingJob,
+	TexturePackingResult,
+	never
+>;

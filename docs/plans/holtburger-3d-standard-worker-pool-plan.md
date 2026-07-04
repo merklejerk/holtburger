@@ -595,7 +595,7 @@ Decisions, debt, and spicy bits:
 
 ### Phase 3: Migrate Simple One-Shot Workers
 
-Status: pending.
+Status: complete as of 2026-07-04.
 
 Start with workers that do not need host-service callbacks:
 
@@ -623,6 +623,41 @@ Acceptance criteria:
 - Texture packing input pixel buffers are explicitly audited. They are copied before transfer or left
   cloned with a documented ownership reason; they are not directly transferred while still borrowed
   from prepared/direct material texture sources.
+
+Completion evidence:
+
+- Migrated texture packing transport to `StandardWorkerPool` and `installWorkerHandler`.
+- Migrated dynamic visual bake transport to `StandardWorkerPool` and `installWorkerHandler`.
+- Migrated static bake transport to `StandardWorkerPool` and `installWorkerHandler`.
+- Updated browser runtime worker factories so these pools own worker count and idle-worker dispatch.
+- Replaced old protocol tests with standard-envelope tests for texture packing, dynamic visual bake,
+  static bake, and browser runtime dynamic bake worker construction.
+- Verified with
+  `npm run test:ts -- src/lib/textures/packing/worker-client.test.ts src/lib/dynamic/visual-bake-worker-client.test.ts src/lib/static/bake/worker-client.test.ts src/lib/browser/create-browser-runtime.test.ts src/lib/workers/pool.test.ts src/lib/workers/handler.test.ts src/lib/workers/transfers.test.ts src/lib/textures/packing/transfers.test.ts`.
+- Verified with `npm run check`.
+- Verified with `npm run lint:ts`.
+
+Decisions, debt, and spicy bits:
+
+- The old texture packing, dynamic visual bake, and static bake custom envelope names are gone.
+  These workers now use standard `job`, `cancel`, `progress`, `result`, and `error` messages.
+- Texture packing result page pixels are transferred via
+  `collectTexturePackingResultTransfers(result)`. Texture packing input pixels are deliberately not
+  transferred because they are still borrowed from prepared/direct material texture sources.
+- Dynamic visual bake and static bake transfer hooks are intentionally empty for now. Their heavy
+  payload ownership is not proven safe in this phase, so the standard transport is explicit without
+  pretending those buffers are transferable.
+- Static bake progress survived as standard progress events. `started` and trace messages are mapped
+  through `StaticBakeWorkerProgress`, and static diagnostics are now a projection over generic pool
+  lifecycle timestamps plus request-local trace retention.
+- `StandardWorkerPool` diagnostics now include `queuedAtMs` and `stageStartedAtMs` because lifecycle
+  timestamps are a generic pool fact, not static-bake-specific transport trivia.
+- LOC checkpoint: the original 17-file baseline list is now `1469` lines, down from `1853`, because
+  three simple workers shed bespoke transport. Including the new shared worker primitives and the
+  texture transfer extractor, the current comparable plumbing slice is `2191` lines while resolver
+  and dynamic recipe workers are still unmigrated. This is acceptable mid-migration, but Phase 5 and
+  Phase 7 need to collapse the remaining bespoke service-worker plumbing to make the final 20%
+  reduction real.
 
 ### Phase 4: Host-Service Channel
 
@@ -768,3 +803,8 @@ Acceptance criteria:
 - 2026-07-04: Completed Phase 2.5 with full-buffer transfer helpers and a texture-packing result
   transfer extractor. Partial typed-array views fail loudly by default, and texture packing input
   buffers remain untransferred because their current owners are prepared/direct texture sources.
+- 2026-07-04: Completed Phase 3 by migrating texture packing, dynamic visual bake, and static bake
+  to the standard pool/handler primitives. Texture packing transfers worker-owned result page
+  pixels; borrowed input pixels remain cloned. Static bake diagnostics now project from generic pool
+  lifecycle facts plus standard progress events. Mid-migration LOC is temporarily higher when shared
+  primitives are counted because resolver-style workers have not moved to the shared service path.

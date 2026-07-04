@@ -3,57 +3,44 @@ import type {
 	StaticBakeJobResult,
 	StaticBakerTraceEvent,
 } from "../contracts";
+import type {
+	WorkerHandlerInputMessage,
+	WorkerHandlerOutputMessage,
+	WorkerHandlerPort,
+} from "../../workers/handler";
+import type {
+	WorkerMessagePort,
+	WorkerPoolRequestMessage,
+	WorkerPoolResponseMessage,
+} from "../../workers/pool";
 
-export type StaticBakeWorkerMainMessage = {
-	readonly kind: "bake-static-job";
-	readonly requestId: string;
-	readonly input: StaticBakeJobInput;
-};
-
-export type StaticBakeWorkerThreadMessage =
+export type StaticBakeWorkerProgress =
 	| {
-			readonly kind: "static-job-bake-started";
-			readonly requestId: string;
+			readonly kind: "started";
 	  }
 	| {
-			readonly kind: "static-job-bake-trace";
-			readonly requestId: string;
+			readonly kind: "trace";
 			readonly event: StaticBakerTraceEvent;
-	  }
-	| {
-			readonly kind: "static-job-baked";
-			readonly requestId: string;
-			readonly result: StaticBakeJobResult;
-	  }
-	| {
-			readonly kind: "static-job-bake-failed";
-			readonly requestId: string;
-			readonly message: string;
 	  };
+
+export type StaticBakeWorkerMainMessage =
+	WorkerHandlerInputMessage<StaticBakeJobInput>;
+
+export type StaticBakeWorkerThreadMessage = WorkerHandlerOutputMessage<
+	StaticBakeJobResult,
+	StaticBakeWorkerProgress
+>;
 
 export type StaticBakeWorkerRequest = StaticBakeWorkerMainMessage;
 export type StaticBakeWorkerResponse = StaticBakeWorkerThreadMessage;
 
-export interface StaticBakeWorkerPort {
-	postMessage(message: StaticBakeWorkerMainMessage): void;
-	addEventListener(
-		type: "message",
-		listener: (event: MessageEvent<StaticBakeWorkerThreadMessage>) => void,
-	): void;
-	removeEventListener(
-		type: "message",
-		listener: (event: MessageEvent<StaticBakeWorkerThreadMessage>) => void,
-	): void;
-}
+export type StaticBakeWorkerPort = WorkerMessagePort<
+	WorkerPoolRequestMessage<StaticBakeJobInput>,
+	WorkerPoolResponseMessage<StaticBakeJobResult, StaticBakeWorkerProgress>
+>;
 
-export interface StaticBakeWorkerGlobalPort {
-	postMessage(message: StaticBakeWorkerThreadMessage): void;
-	addEventListener(
-		type: "message",
-		listener: (event: MessageEvent<StaticBakeWorkerMainMessage>) => void,
-	): void;
-	removeEventListener(
-		type: "message",
-		listener: (event: MessageEvent<StaticBakeWorkerMainMessage>) => void,
-	): void;
-}
+export type StaticBakeWorkerGlobalPort = WorkerHandlerPort<
+	StaticBakeJobInput,
+	StaticBakeJobResult,
+	StaticBakeWorkerProgress
+>;

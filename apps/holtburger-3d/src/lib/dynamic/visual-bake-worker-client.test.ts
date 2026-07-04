@@ -12,10 +12,10 @@ import {
 	DynamicVisualBakeWorkerClient,
 	WorkerPoolDynamicVisualBaker,
 } from "./visual-bake-worker-client";
-import { handleDynamicVisualBakeWorkerRequest } from "./visual-bake-worker-handler";
+import { installDynamicVisualBakeWorkerHandler } from "./visual-bake-worker-handler";
 
 describe("dynamic visual bake worker protocol", () => {
-	it("posts dynamic visual bake inputs and resolves returned bake results", async () => {
+	it("posts standard dynamic visual bake inputs and resolves returned bake results", async () => {
 		const port = new FixtureWorkerPort();
 		const client = new DynamicVisualBakeWorkerClient(port);
 		const input = createInput();
@@ -24,15 +24,15 @@ describe("dynamic visual bake worker protocol", () => {
 		expect(port.requests).toEqual([
 			{
 				input,
-				kind: "bake-dynamic-visual",
+				kind: "job",
 				requestId: "dynamic-visual-bake:0",
 			},
 		]);
 
 		port.emit({
-			kind: "dynamic-visual-baked",
+			kind: "result",
+			output: createResult(input),
 			requestId: "dynamic-visual-bake:0",
-			result: createResult(input),
 		});
 
 		await expect(pending).resolves.toMatchObject({
@@ -42,93 +42,175 @@ describe("dynamic visual bake worker protocol", () => {
 		client.dispose();
 	});
 
-	it("turns baker handler failures into typed worker responses", async () => {
-		const input = createInput();
-		const responses: DynamicVisualBakeWorkerResponse[] = [];
-
-		await handleDynamicVisualBakeWorkerRequest(
+	it("turns baker handler failures into standard worker errors", async () => {
+		const port = new FixtureWorkerPort();
+		installDynamicVisualBakeWorkerHandler(
 			{
 				async bake(): Promise<DynamicVisualBakeResult> {
 					throw new Error("dynamic bake exploded");
 				},
 			},
-			{
-				input,
-				kind: "bake-dynamic-visual",
-				requestId: "dynamic-transport:1",
-			},
-			(response) => responses.push(response),
+			port,
 		);
 
-		expect(responses).toEqual([
-			{
-				kind: "dynamic-visual-bake-failed",
-				message: "dynamic bake exploded",
-				requestId: "dynamic-transport:1",
-			},
-		]);
+		port.emitRequest({
+			input: createInput(),
+			kind: "job",
+			requestId: "dynamic-transport:1",
+		});
+		await port.waitForResponses(1);
+
+		expect(port.responses[0]).toMatchObject({
+			kind: "error",
+			message: "dynamic bake exploded",
+			requestId: "dynamic-transport:1",
+		});
 	});
 
-	it("round-robins dynamic visual bake jobs across the worker pool", async () => {
-		const first = new RecordingBaker("first");
-		const second = new RecordingBaker("second");
-		const pool = new WorkerPoolDynamicVisualBaker([first, second]);
+	it("dispatches dynamic visual bake jobs through the standard central worker queue", async () => {
+		const first = new FixtureWorkerPort();
+		const second = new FixtureWorkerPort();
+		const workers = [first, second];
+		const pool = new WorkerPoolDynamicVisualBaker({
+			createWorker: () => {
+				const worker = workers.shift();
+				if (!worker) {
+					throw new Error("No fixture dynamic visual bake worker remains.");
+				}
+				return worker;
+			},
+			workerCount: 2,
+		});
+		const firstJob = pool.bake(createInput("dynamic:1"));
+		const secondJob = pool.bake(createInput("dynamic:2"));
+		const thirdJob = pool.bake(createInput("dynamic:3"));
 
-		await pool.bake(createInput("dynamic:1"));
-		await pool.bake(createInput("dynamic:2"));
-		await pool.bake(createInput("dynamic:3"));
+		expect(first.requests.map((request) => request.requestId)).toEqual([
+			"dynamic-visual-bake:0",
+		]);
+		expect(second.requests.map((request) => request.requestId)).toEqual([
+			"dynamic-visual-bake:1",
+		]);
 
-		expect(first.entityIds).toEqual(["dynamic:1", "dynamic:3"]);
-		expect(second.entityIds).toEqual(["dynamic:2"]);
+		first.emit({
+			kind: "result",
+			output: createResult(createInput("dynamic:1")),
+			requestId: "dynamic-visual-bake:0",
+		});
+		await expect(firstJob).resolves.toMatchObject({ revision: 1 });
+		expect(first.requests.map((request) => request.requestId)).toEqual([
+			"dynamic-visual-bake:0",
+			"dynamic-visual-bake:2",
+		]);
+
+		second.emit({
+			kind: "result",
+			output: createResult(createInput("dynamic:2")),
+			requestId: "dynamic-visual-bake:1",
+		});
+		first.emit({
+			kind: "result",
+			output: createResult(createInput("dynamic:3")),
+			requestId: "dynamic-visual-bake:2",
+		});
+
+		await expect(secondJob).resolves.toMatchObject({ revision: 1 });
+		await expect(thirdJob).resolves.toMatchObject({ revision: 1 });
+		pool.dispose();
 	});
 });
 
 class FixtureWorkerPort implements DynamicVisualBakeWorkerPort {
 	readonly requests: DynamicVisualBakeWorkerRequest[] = [];
-	readonly #listeners = new Set<
+	readonly responses: DynamicVisualBakeWorkerResponse[] = [];
+	readonly #requestListeners = new Set<
+		(event: MessageEvent<DynamicVisualBakeWorkerRequest>) => void
+	>();
+	readonly #responseListeners = new Set<
 		(event: MessageEvent<DynamicVisualBakeWorkerResponse>) => void
 	>();
+	#waiters: Array<() => void> = [];
 
-	postMessage(message: DynamicVisualBakeWorkerRequest): void {
-		this.requests.push(message);
+	postMessage(
+		message: DynamicVisualBakeWorkerRequest | DynamicVisualBakeWorkerResponse,
+	): void {
+		if (message.kind === "job" || message.kind === "cancel") {
+			this.requests.push(message);
+			return;
+		}
+		this.responses.push(message);
+		this.#flushWaiters();
 	}
 
 	addEventListener(
 		_type: "message",
-		listener: (event: MessageEvent<DynamicVisualBakeWorkerResponse>) => void,
+		listener:
+			| ((event: MessageEvent<DynamicVisualBakeWorkerResponse>) => void)
+			| ((event: MessageEvent<DynamicVisualBakeWorkerRequest>) => void),
 	): void {
-		this.#listeners.add(listener);
+		this.#responseListeners.add(
+			listener as (
+				event: MessageEvent<DynamicVisualBakeWorkerResponse>,
+			) => void,
+		);
+		this.#requestListeners.add(
+			listener as (event: MessageEvent<DynamicVisualBakeWorkerRequest>) => void,
+		);
 	}
 
 	removeEventListener(
 		_type: "message",
-		listener: (event: MessageEvent<DynamicVisualBakeWorkerResponse>) => void,
+		listener:
+			| ((event: MessageEvent<DynamicVisualBakeWorkerResponse>) => void)
+			| ((event: MessageEvent<DynamicVisualBakeWorkerRequest>) => void),
 	): void {
-		this.#listeners.delete(listener);
+		this.#responseListeners.delete(
+			listener as (
+				event: MessageEvent<DynamicVisualBakeWorkerResponse>,
+			) => void,
+		);
+		this.#requestListeners.delete(
+			listener as (event: MessageEvent<DynamicVisualBakeWorkerRequest>) => void,
+		);
 	}
 
 	emit(response: DynamicVisualBakeWorkerResponse): void {
 		const event = {
 			data: response,
 		} as MessageEvent<DynamicVisualBakeWorkerResponse>;
-		for (const listener of this.#listeners) {
+		for (const listener of this.#responseListeners) {
 			listener(event);
 		}
 	}
-}
 
-class RecordingBaker {
-	readonly entityIds: string[] = [];
+	emitRequest(request: DynamicVisualBakeWorkerRequest): void {
+		const event = {
+			data: request,
+		} as MessageEvent<DynamicVisualBakeWorkerRequest>;
+		for (const listener of this.#requestListeners) {
+			listener(event);
+		}
+	}
 
-	constructor(private readonly label: string) {}
-
-	bake(input: DynamicVisualBakeInput): Promise<DynamicVisualBakeResult> {
-		this.entityIds.push(input.recipe.entityId);
-		return Promise.resolve({
-			failures: [],
-			product: null,
-			revision: input.revision,
+	waitForResponses(count: number): Promise<void> {
+		if (this.responses.length >= count) {
+			return Promise.resolve();
+		}
+		return new Promise((resolve) => {
+			this.#waiters.push(() => {
+				if (this.responses.length >= count) {
+					resolve();
+				}
+			});
 		});
+	}
+
+	#flushWaiters(): void {
+		const waiters = this.#waiters;
+		this.#waiters = [];
+		for (const waiter of waiters) {
+			waiter();
+		}
 	}
 }
 

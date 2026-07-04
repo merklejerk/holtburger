@@ -87,6 +87,8 @@ export interface WorkerPoolJobDiagnostics {
 	readonly requestId: string;
 	readonly stage: "queued" | "running";
 	readonly priority: number;
+	readonly queuedAtMs: number;
+	readonly stageStartedAtMs: number;
 	readonly description?: WorkerJobDescription;
 	readonly cancellationRequested: boolean;
 }
@@ -113,6 +115,7 @@ interface QueuedWorkerJob<TInput, TOutput, TProgress> {
 	readonly input: TInput;
 	readonly priority: number;
 	readonly sequence: number;
+	readonly queuedAtMs: number;
 	readonly description?: WorkerJobDescription;
 	readonly signal?: AbortSignal;
 	readonly onAbort: () => void;
@@ -120,6 +123,7 @@ interface QueuedWorkerJob<TInput, TOutput, TProgress> {
 	readonly resolve: (output: TOutput) => void;
 	readonly reject: (error: Error) => void;
 	cancellationRequested: boolean;
+	stageStartedAtMs: number;
 	workerIndex?: number;
 }
 
@@ -204,6 +208,7 @@ export class StandardWorkerPool<TInput, TOutput, TProgress = never> {
 		const description = options.description ?? this.#describe?.(input);
 		let job: QueuedWorkerJob<TInput, TOutput, TProgress>;
 		const result = new Promise<TOutput>((resolve, reject) => {
+			const queuedAtMs = performance.now();
 			const onAbort = (): void => {
 				this.#cancelJob(requestId, new Error("Worker job was canceled."));
 			};
@@ -214,11 +219,13 @@ export class StandardWorkerPool<TInput, TOutput, TProgress = never> {
 				onAbort,
 				onProgress: options.onProgress,
 				priority: options.priority ?? 0,
+				queuedAtMs,
 				reject,
 				requestId,
 				resolve,
 				sequence: this.#nextSequence,
 				signal: options.signal,
+				stageStartedAtMs: queuedAtMs,
 			};
 		});
 
@@ -313,6 +320,7 @@ export class StandardWorkerPool<TInput, TOutput, TProgress = never> {
 			}
 
 			job.workerIndex = worker.index;
+			job.stageStartedAtMs = performance.now();
 			worker.activeRequestId = job.requestId;
 			this.#activeJobs.set(job.requestId, job);
 			worker.port.postMessage(
@@ -459,8 +467,10 @@ function createJobDiagnostics<TInput, TOutput, TProgress>(
 		cancellationRequested: job.cancellationRequested,
 		description: job.description,
 		priority: job.priority,
+		queuedAtMs: job.queuedAtMs,
 		requestId: job.requestId,
 		stage,
+		stageStartedAtMs: job.stageStartedAtMs,
 	};
 }
 

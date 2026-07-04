@@ -551,6 +551,10 @@ Internally, identity builders should accept structured inputs and return branded
 
 ### Phase 9: Simplification Audit And Resteer
 
+**Status:** Complete.
+
+**Steering update:** The answered identity questions are now reflected in the target model: no owner/source-instance discriminants in `TextureKey`, sampler policy split out of identity, material wrap kept on binding/page compatibility, one cheap palette replacement fingerprint policy, and resolver-predictable keys without prepared texel composition. The remaining risk is no longer conceptual uncertainty; it is cleanup debt from old field names and item-id bridges still carrying binding ids under `textureUseId` vocabulary.
+
 **Deliverables**
 
 - Measure non-test production SLOC for the touched texture identity paths against the pre-refactor baseline or first available commit before this plan's implementation.
@@ -577,11 +581,31 @@ Internally, identity builders should accept structured inputs and return branded
 - No new cleanup phase begins with unresolved uncertainty about palette replacement identity, sampler policy placement, or canonical handle ownership.
 - Dynamic/runtime identity debt is either resolved or explicitly moved to a named follow-up with its blocked boundary and desired shape.
 
+**Phase notes**
+
+- Baseline for the production SLOC metric is `f74b997f^`, the parent of the first texture identity-builder commit. Current touched non-test paths under `textures`, `static`, `visual`, and `renderer` are net **+1,042 lines** (`1601` insertions, `559` deletions).
+- The increase is concentrated in real new model code, not mostly shims: `textures/identity.ts`, `textures/material-texture-identity.ts`, `textures/palette-replacement-recipe.ts`, and `static/texture-owner-identity.ts` account for `684` added lines. `TextureManager` itself is net `-6` lines across the refactor so far.
+- This is acceptable only as an interim metric. The final metric must trend down or explicitly justify the remaining increase by deleted state-machine complexity. Phase 10 should therefore delete/rename old identity surfaces before adding any new production abstraction.
+- Production audit found `211` remaining hits for old identity or bridge vocabulary: `textureUseId`, `textureUseIds`, `bindingKey`, `placementItemId`, `Legacy`, `Bridge`, or `Compat`.
+- The largest remaining debt is `TextureManager` diagnostic/packing item-id vocabulary: `#bindingIdByItemId`, `#placementRecordsByItemId`, `textureUseIds` sets on pending entries, and placement publication helpers. These now mostly carry `TextureBindingId`s and should be renamed/collapsed around binding ids, not treated as texture identity.
+- Public/static payload debt remains in `static/contracts.ts`, `visual/visual-geometry.ts`, terrain material outputs, and recipe publication: fields named `textureUseIds` are typed as `TextureBindingId[]`. Phase 10 should cleanly rename those to `textureBindingIds`.
+- `TextureBindingRequirement.bindingKey`, `placementItemId`, and `textureUseId` remain in `textures/placement.ts` and planner call sites. They are the biggest conceptual fossil. Phase 10 should collapse them into explicit `bindingId` plus any truly separate numeric/object-visual placement id, instead of preserving the old triple.
+- `StaticMaterialTableEntry.*TextureKey` fields still hold source-key strings for static-authored entries. Phase 10 should either rename them to texture identity/source keys or move full resolver `TextureKey` construction earlier so the field names become literal.
+- Existing `sourceKey` / `physicalSourceKey` uses are source facts and physical prepared-source facts, not canonical handles. Keep them where they describe source data, but do not let them substitute for `TextureKey` at pool boundaries.
+- Dynamic/runtime identity did not expose a new blocker in this audit. Runtime-authored source keys appear to represent runtime-local content identity; leave deeper dynamic material cleanup to Phase 10 only if it blocks deletion of the old texture-use vocabulary.
+
 ### Phase 10: Holistic Cleanup And Compatibility Purge
+
+**Steering update:** Cleanup order matters. Start with public contract names that already carry `TextureBindingId`, then collapse planner triples, then remove manager item-id bridges, then clean packing protocol names. Do not add shims. If a rename reveals that two concepts are still actually distinct, split them into honest typed fields and delete the old composite field in the same phase.
 
 **Deliverables**
 
 - Remove or rename `textureUseId` in touched runtime texture paths.
+- Rename public arrays currently typed as `TextureBindingId[]` from `textureUseIds` to `textureBindingIds` in static contracts, visual geometry, terrain material outputs, draw units, recipe publication, and renderer consumers.
+- Collapse `TextureBindingRequirement.bindingKey`, `placementItemId`, and `textureUseId` into explicit `bindingId` plus any truly separate object-visual placement id. Do not keep three fields when they all carry the same material consumer identity.
+- Replace `TextureManager`'s item-id diagnostic bridge vocabulary with binding-id vocabulary where the values are binding ids, then delete `#bindingIdByItemId` if the record key itself can become `TextureBindingId`.
+- Rename packing protocol `textureUseId` fields to neutral atlas entry ids only if the packer still needs non-binding atlas entry keys; otherwise pass `TextureBindingId` through directly.
+- Resolve the static-authored `*TextureKey` naming debt by either moving resolver `TextureKey` facts into material entries or renaming the resource-key fields to a source/identity-key name that does not lie.
 - Delete alias helpers introduced to patch shared `physicalEntry` behavior.
 - Delete any speculative stale-placement workaround that Phase 5/8 did not require.
 - Delete tests that preserve old scoped `textureUseId` string formats.

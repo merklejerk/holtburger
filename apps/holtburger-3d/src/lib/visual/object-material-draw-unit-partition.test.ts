@@ -3,6 +3,7 @@ import type {
 	TextureBindingRequirement,
 	TexturePlacementSnapshot,
 } from "../textures/placement";
+import { createTextureBindingId } from "../textures/identity";
 import { createObjectMaterialDrawUnitPartitionKey } from "./object-material-draw-unit-partition";
 
 describe("object-material draw-unit partition contracts", () => {
@@ -136,6 +137,11 @@ function createRequirement(
 	purpose: TextureBindingRequirement["purpose"],
 ): TextureBindingRequirement {
 	return {
+		bindingId: createTextureBindingId({
+			resourceId: "fixture-resource",
+			role: purpose,
+			slot: placementItemId,
+		}),
 		bindingKey: `binding:${placementItemId}`,
 		placementItemId,
 		purpose,

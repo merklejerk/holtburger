@@ -121,12 +121,12 @@ function createTextureBindings(input: {
 			textureUseScopeId: input.textureUseScopeId,
 			wrapMode: recipe.wrapMode,
 		});
-		const itemId = input.texturePlacementSnapshot.itemIdsByTextureUseId.get(
-			requirement.textureUseId,
+		const itemId = input.texturePlacementSnapshot.itemIdsByBindingId.get(
+			requirement.bindingId,
 		);
 		if (itemId === undefined) {
 			throw new Error(
-				`Object visual texture recipe ${textureRecipeId} requires unplaced texture use ${requirement.textureUseId}.`,
+				`Object visual texture recipe ${textureRecipeId} requires unplaced texture binding ${requirement.bindingId}.`,
 			);
 		}
 		const placement =

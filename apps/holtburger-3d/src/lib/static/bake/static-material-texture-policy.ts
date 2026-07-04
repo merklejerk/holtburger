@@ -8,6 +8,10 @@ import type {
 	TexturePlacementSource,
 } from "../../textures/placement";
 import { classifyTextureUsagePurpose } from "../../textures/placement";
+import {
+	createTextureBindingId,
+	type TextureBindingId,
+} from "../../textures/identity";
 
 export type StaticMaterialTextureWrapMode = "clamp" | "repeat";
 
@@ -50,6 +54,24 @@ export function createStaticMaterialTextureUseId(options: {
 	].join(":");
 }
 
+export function createStaticMaterialTextureBindingId(options: {
+	readonly dataUse: MaterialTextureDataUseIdentity;
+	readonly textureUseNamespace: string;
+	readonly textureUseScopeId: string;
+	readonly wrapMode: StaticMaterialTextureWrapMode;
+	readonly domain: VisualTextureDomain;
+}): TextureBindingId {
+	return createTextureBindingId({
+		resourceId: `${options.textureUseScopeId}:${options.textureUseNamespace}`,
+		role: classifyTextureUsagePurpose(options.dataUse, options.domain),
+		slot: createMaterialTextureDataUseKey(options.dataUse),
+		wrapMode: createStaticMaterialTextureSamplingPolicy({
+			dataUse: options.dataUse,
+			wrapMode: options.wrapMode,
+		}).wrapS,
+	});
+}
+
 export function createStaticMaterialTextureBindingRequirement(options: {
 	readonly dataUse: MaterialTextureDataUseIdentity;
 	readonly textureUseNamespace: string;
@@ -63,12 +85,12 @@ export function createStaticMaterialTextureBindingRequirement(options: {
 		wrapMode: options.wrapMode,
 	});
 	const bindingKey = createStaticMaterialTextureUseId(options);
+	const bindingId = createStaticMaterialTextureBindingId(options);
 
 	return {
+		bindingId,
 		bindingKey,
-		// Phase 12 keeps the current renderer binding key as the placement item id.
-		// The equality is now local to this bridge rather than ambient pipeline state.
-		placementItemId: bindingKey,
+		placementItemId: bindingId,
 		textureUseId: bindingKey,
 		purpose: classifyTextureUsagePurpose(options.dataUse, options.domain),
 		samplingPolicy,

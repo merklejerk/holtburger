@@ -22,6 +22,7 @@ import type {
 	ObjectVisualTextureBindingRequirement,
 	ObjectVisualTexturePlacementSnapshot,
 } from "../../../textures/placement";
+import type { TextureBindingId } from "../../../textures/identity";
 import { emitStaticBakeWorkerTrace } from "../../bake/worker-trace";
 import { createStaticObjectMaterialCoverageReport } from "./static-object-material-coverage";
 import {
@@ -305,7 +306,7 @@ function createStaticObjectTextureRequirements(options: {
 				placementItemId: requireObjectVisualPlacementItemId({
 					placementSnapshot: options.placementSnapshot,
 					subject: "Static object material",
-					textureUseId: requirement.textureUseId,
+					bindingId: requirement.bindingId,
 				}),
 			};
 		});
@@ -931,16 +932,16 @@ function requireObjectVisualPlacementSnapshot(options: {
 }
 
 function requireObjectVisualPlacementItemId(options: {
+	readonly bindingId: TextureBindingId;
 	readonly placementSnapshot: ObjectVisualTexturePlacementSnapshot;
 	readonly subject: string;
-	readonly textureUseId: string;
 }) {
-	const placementItemId = options.placementSnapshot.itemIdsByTextureUseId.get(
-		options.textureUseId,
+	const placementItemId = options.placementSnapshot.itemIdsByBindingId.get(
+		options.bindingId,
 	);
 	if (placementItemId === undefined) {
 		throw new Error(
-			`${options.subject} is missing object-visual placement item id for ${options.textureUseId}.`,
+			`${options.subject} is missing object-visual placement item id for binding ${options.bindingId}.`,
 		);
 	}
 	return placementItemId;

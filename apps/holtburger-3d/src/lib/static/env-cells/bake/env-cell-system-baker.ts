@@ -28,6 +28,7 @@ import type {
 	TextureResourceDependencies,
 } from "../../../textures/placement";
 import { requireObjectVisualTexturePlacementSnapshot } from "../../../textures/placement";
+import type { TextureBindingId } from "../../../textures/identity";
 import { createLayerPeerRecordOwnerForStaticBakeTask } from "../../layer-owners";
 import {
 	AC_UNIT_SCALE,
@@ -73,7 +74,7 @@ import { createStructuredInteriorVisualBundleExpansion } from "./structured-inte
 
 const MAX_STRUCTURED_INTERIOR_MATERIAL_ENTRIES_PER_DRAW = 8;
 const EMPTY_TEXTURE_PLACEMENT_SNAPSHOT: ObjectVisualTexturePlacementSnapshot = {
-	itemIdsByTextureUseId: new Map(),
+	itemIdsByBindingId: new Map(),
 	placementsByItemId: new Map(),
 };
 
@@ -864,7 +865,7 @@ function createStructuredInteriorTextureRequirements(options: {
 				placementItemId: requireObjectVisualPlacementItemId({
 					placementSnapshot: options.placementSnapshot,
 					subject: "Structured interior material",
-					textureUseId: requirement.textureUseId,
+					bindingId: requirement.bindingId,
 				}),
 			};
 		});
@@ -1005,16 +1006,16 @@ function compareStructuredInteriorTriangleCandidates(
 }
 
 function requireObjectVisualPlacementItemId(options: {
+	readonly bindingId: TextureBindingId;
 	readonly placementSnapshot: ObjectVisualTexturePlacementSnapshot;
 	readonly subject: string;
-	readonly textureUseId: string;
 }) {
-	const placementItemId = options.placementSnapshot.itemIdsByTextureUseId.get(
-		options.textureUseId,
+	const placementItemId = options.placementSnapshot.itemIdsByBindingId.get(
+		options.bindingId,
 	);
 	if (placementItemId === undefined) {
 		throw new Error(
-			`${options.subject} is missing object-visual placement item id for ${options.textureUseId}.`,
+			`${options.subject} is missing object-visual placement item id for binding ${options.bindingId}.`,
 		);
 	}
 	return placementItemId;

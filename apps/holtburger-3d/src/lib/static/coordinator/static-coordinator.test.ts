@@ -54,6 +54,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -99,6 +100,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -131,6 +133,7 @@ describe("static coordinator", () => {
 		const coordinator = new StaticCoordinator({
 			resourceProvider: new RejectingResourceProvider("geometry offline"),
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -154,6 +157,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -221,6 +225,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -250,6 +255,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -292,6 +298,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -348,6 +355,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -393,6 +401,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -447,6 +456,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -473,6 +483,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -497,6 +508,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -522,6 +534,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -566,6 +579,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -626,6 +640,7 @@ describe("static coordinator", () => {
 		const emptyBaker = new DeferredStaticBaker();
 		const emptyCoordinator = new StaticCoordinator({
 			baker: emptyBaker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver: emptyResolver,
 		});
@@ -658,6 +673,7 @@ describe("static coordinator", () => {
 		const failedCoordinator = new StaticCoordinator({
 			resourceProvider: new RejectingResourceProvider("geometry offline"),
 			baker: new DeferredStaticBaker(),
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver: failedResolver,
 		});
@@ -682,6 +698,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -715,6 +732,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -745,6 +763,7 @@ describe("static coordinator", () => {
 		const resolver = new DeferredStaticResolver();
 		const coordinator = new StaticCoordinator({
 			baker: new DeferredStaticBaker(),
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -775,6 +794,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -852,6 +872,7 @@ describe("static coordinator", () => {
 		const commits: StaticScopePrepCommit[] = [];
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			dynamicVisualBaker,
 			dynamicVisualGeometryAssetReader: new EmptyPreparedAssetReader(),
@@ -911,6 +932,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -953,6 +975,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -983,6 +1006,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -1014,6 +1038,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -1085,6 +1110,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -1157,6 +1183,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -1217,6 +1244,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -1260,6 +1288,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -1466,6 +1495,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -1511,6 +1541,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -1605,6 +1636,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -1659,6 +1691,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -1748,6 +1781,7 @@ describe("static coordinator", () => {
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
+			textureIdentityAssetReader: new EmptyPreparedAssetReader(),
 			sourceReadyCoalescing: { maxWaitMs: 0 },
 			resolver,
 		});
@@ -2221,6 +2255,10 @@ function createDynamicRecipe(
 async function flushPromises(): Promise<void> {
 	await Promise.resolve();
 	await Promise.resolve();
+	await Promise.resolve();
+	await Promise.resolve();
+	await Promise.resolve();
+	await Promise.resolve();
 }
 
 function createPlacementSnapshot(): TexturePlacementSnapshot {
@@ -2228,7 +2266,7 @@ function createPlacementSnapshot(): TexturePlacementSnapshot {
 }
 
 function createObjectVisualPlacementSnapshot(): ObjectVisualTexturePlacementSnapshot {
-	return { itemIdsByTextureUseId: new Map(), placementsByItemId: new Map() };
+	return { itemIdsByBindingId: new Map(), placementsByItemId: new Map() };
 }
 
 function createPlacementSnapshots(): {

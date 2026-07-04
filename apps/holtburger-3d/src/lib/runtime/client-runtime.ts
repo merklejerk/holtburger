@@ -1016,7 +1016,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			const objectVisualPlacementSnapshot =
 				work.objectVisualPlacementIntents.length === 0
 					? {
-							itemIdsByTextureUseId: new Map(),
+							itemIdsByBindingId: new Map(),
 							placementsByItemId: new Map(),
 						}
 					: await this.#textureManager.placeObjectVisualTextureIntents({
@@ -2816,19 +2816,19 @@ class ClientRuntimeImpl implements ClientRuntime {
 						objectKind,
 					),
 			);
-				if (sourceMappingCoverage.length === 0) {
-					continue;
-				}
-				const rendererTextures =
-					this.#renderer.createObjectMaterialTextureDiagnostics([
-						drawUnit.drawUnitId,
-					])[0] ?? {
-						drawUnitId: drawUnit.drawUnitId,
-						status: "missing-resource",
-					};
+			if (sourceMappingCoverage.length === 0) {
+				continue;
+			}
+			const rendererTextures =
+				this.#renderer.createObjectMaterialTextureDiagnostics([
+					drawUnit.drawUnitId,
+				])[0] ?? {
+					drawUnitId: drawUnit.drawUnitId,
+					status: "missing-resource",
+				};
 
-				drawUnits.push({
-					diagnostics: {
+			drawUnits.push({
+				diagnostics: {
 					domain: drawUnit.domain,
 					drawUnitId: drawUnit.drawUnitId,
 					geometry: createStaticSelectionDrawUnitGeometryDiagnostics(drawUnit),
@@ -2837,10 +2837,10 @@ class ClientRuntimeImpl implements ClientRuntime {
 						summarizeDrawUnitMaterialEntry,
 					),
 					materialFamily: drawUnit.materialFamily,
-						materialIds: drawUnit.materialIds,
-						materialPass: drawUnit.materialPass,
-						rendererTextures,
-						sourceDrawUnitId: drawUnit.drawUnitId,
+					materialIds: drawUnit.materialIds,
+					materialPass: drawUnit.materialPass,
+					rendererTextures,
+					sourceDrawUnitId: drawUnit.drawUnitId,
 					sourceMapping: createStaticSelectionSourceMappingSummary(
 						sourceMappingCoverage,
 					),

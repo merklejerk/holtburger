@@ -8,6 +8,12 @@ import type {
 	TexturePlacementBucketKey,
 	TexturePlacementSource,
 } from "../textures/placement";
+import type {
+	TextureBindingId,
+	TextureKey,
+	TextureOwnerId,
+	TexturePageClass,
+} from "../textures/identity";
 import {
 	createObjectVisualDynamicTexturePlacementIntent,
 	createObjectVisualStaticTexturePlacementIntent,
@@ -38,32 +44,36 @@ export interface ObjectVisualTexturePlacementRequirement {
 }
 
 interface ObjectVisualTextureSourceRequirement {
+	readonly bindingId: TextureBindingId;
 	readonly bindingKey: string;
+	readonly ownerIds: readonly TextureOwnerId[];
+	readonly pageClass: TexturePageClass;
 	readonly samplingPolicy?: StaticBakeTextureUse["samplingPolicy"];
 	readonly source: TexturePlacementSource;
+	readonly textureKey: TextureKey;
 	readonly textureUseId: string;
 }
 
 export function createObjectVisualTexturePlacementIntents(input: {
 	readonly requirements: readonly ObjectVisualTexturePlacementRequirement[];
 }): readonly ObjectVisualTexturePlacementIntent[] {
-	const intentsByTextureUseId = new Map<
-		string,
+	const intentsByBindingId = new Map<
+		TextureBindingId,
 		ObjectVisualTexturePlacementIntent
 	>();
 
 	for (const item of input.requirements) {
-		if (intentsByTextureUseId.has(item.requirement.textureUseId)) {
+		if (intentsByBindingId.has(item.requirement.bindingId)) {
 			continue;
 		}
-		const itemId = createTexturePlacementItemId(intentsByTextureUseId.size);
-		intentsByTextureUseId.set(
-			item.requirement.textureUseId,
+		const itemId = createTexturePlacementItemId(intentsByBindingId.size);
+		intentsByBindingId.set(
+			item.requirement.bindingId,
 			createObjectVisualTexturePlacementIntent(item, itemId),
 		);
 	}
 
-	return [...intentsByTextureUseId.values()].sort(
+	return [...intentsByBindingId.values()].sort(
 		(left, right) => left.itemId - right.itemId,
 	);
 }
@@ -79,7 +89,11 @@ function createObjectVisualTexturePlacementIntent(
 				itemId,
 				{
 					affinityKey: item.policy.affinityKey,
+					bindingId: item.requirement.bindingId,
+					ownerIds: item.requirement.ownerIds,
+					pageClass: item.requirement.pageClass,
 					placementBucketKey: item.policy.placementBucketKey,
+					textureKey: item.requirement.textureKey,
 				},
 			);
 		case "dynamic":
@@ -88,7 +102,11 @@ function createObjectVisualTexturePlacementIntent(
 				itemId,
 				{
 					affinityKey: item.policy.affinityKey,
+					bindingId: item.requirement.bindingId,
+					ownerIds: item.requirement.ownerIds,
+					pageClass: item.requirement.pageClass,
 					placementBucketKey: item.policy.placementBucketKey,
+					textureKey: item.requirement.textureKey,
 				},
 			);
 	}

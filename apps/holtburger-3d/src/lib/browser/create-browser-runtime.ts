@@ -124,6 +124,7 @@ function createTauriStaticCoordinator(
 		baker,
 		dynamicVisualBaker,
 		dynamicVisualGeometryAssetReader: assetReader,
+		textureIdentityAssetReader: assetReader,
 		resolver,
 	});
 }

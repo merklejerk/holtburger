@@ -1,9 +1,11 @@
+import type { PreparedAssetReader } from "../../../assets/contracts";
 import type { StaticBakeJobPayload } from "../../contracts";
 import type { ObjectVisualTexturePlacementIntent } from "../../../textures/placement";
 import {
 	createObjectVisualTexturePlacementIntents,
 	type ObjectVisualTexturePlacementRequirement,
 } from "../../../visual/object-visual-texture-placement-planner";
+import { createMaterialTextureIdentityFacts } from "../../../textures/material-texture-identity";
 import { isCurrentlyStageableStaticObjectDataUse } from "../../objects/bake/static-object-renderability";
 import {
 	createStructuredInteriorTextureBindingRequirement,
@@ -12,10 +14,11 @@ import {
 } from "./structured-interior-material-planner";
 import { isRenderableObjectVisualMaterialPlan } from "../../objects/bake/static-object-renderability";
 
-export function createStructuredInteriorTexturePlacementIntents(input: {
+export async function createStructuredInteriorTexturePlacementIntents(input: {
+	readonly assetReader: PreparedAssetReader;
 	readonly items: readonly StaticBakeJobPayload[];
-}): readonly ObjectVisualTexturePlacementIntent[] {
-	const requirementsByTextureUseId = new Map<
+}): Promise<readonly ObjectVisualTexturePlacementIntent[]> {
+	const requirementsByBindingId = new Map<
 		string,
 		ObjectVisualTexturePlacementRequirement
 	>();
@@ -50,10 +53,17 @@ export function createStructuredInteriorTexturePlacementIntents(input: {
 							wrapMode,
 						},
 					);
-					if (requirementsByTextureUseId.has(requirement.textureUseId)) {
+					if (requirementsByBindingId.has(requirement.bindingId)) {
 						continue;
 					}
-					requirementsByTextureUseId.set(requirement.textureUseId, {
+					const identity = await createMaterialTextureIdentityFacts({
+						assetReader: input.assetReader,
+						dataUse: role.dataUse,
+						domain: item.task.domain,
+						purpose: requirement.purpose,
+						samplingPolicy: requirement.samplingPolicy,
+					});
+					requirementsByBindingId.set(requirement.bindingId, {
 						policy: {
 							affinityKey: createStructuredInteriorAffinityKey({
 								envCellId: envCell.identity.envCellId,
@@ -64,7 +74,12 @@ export function createStructuredInteriorTexturePlacementIntents(input: {
 							domain: "env-cell-system",
 							kind: "static-authored",
 						},
-						requirement,
+						requirement: {
+							...requirement,
+							ownerIds: [],
+							pageClass: identity.pageClass,
+							textureKey: identity.textureKey,
+						},
 					});
 				}
 			}
@@ -72,7 +87,7 @@ export function createStructuredInteriorTexturePlacementIntents(input: {
 	}
 
 	return createObjectVisualTexturePlacementIntents({
-		requirements: [...requirementsByTextureUseId.values()],
+		requirements: [...requirementsByBindingId.values()],
 	});
 }
 

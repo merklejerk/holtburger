@@ -9,6 +9,7 @@ import type {
 import type {
 	MaterialTextureDataUseIdentity,
 	PreparedRgbaRenderSurfaceTextureUsage,
+	StaticBakeTextureUse,
 	StaticBakeTextureSamplingPolicy,
 	StaticCoordinatorCommitDelta,
 	VisualTextureDomain,
@@ -28,6 +29,15 @@ import {
 	createStaticAuthoredDynamicTexturePlacementBucketKey,
 	createStaticTexturePlacementIntent,
 } from "./placement";
+import {
+	createMaterialTextureSourceKey,
+	createTextureBindingId,
+	createTextureKey,
+	createTextureOwnerId,
+	createTexturePageClass,
+} from "./identity";
+import { getRuntimeTexturePageGutterPixels } from "./material-texture-identity";
+import { createRuntimeTexturePagePolicy } from "./sampling-policy";
 
 const STATIC_TERRAIN_COLOR_BUCKET =
 	"texture-placement-bucket|outdoor-terrain|terrain-color|static-authored";
@@ -1079,7 +1089,7 @@ describe("browser texture manager", () => {
 		});
 
 		const snapshot = await textureManager.placeTextureIntents({
-			intents: [createStaticTexturePlacementIntent(textureUse)],
+			intents: [createStaticPlacementIntent(textureUse)],
 		});
 
 		const placement = snapshot.placementsByItemId.get(textureUse.textureUseId);
@@ -1154,7 +1164,7 @@ describe("browser texture manager", () => {
 		});
 
 		await textureManager.placeTextureIntents({
-			intents: [createStaticTexturePlacementIntent(inactiveTextureUse)],
+			intents: [createStaticPlacementIntent(inactiveTextureUse)],
 		});
 		const secondUpdate = await textureManager.applyStaticCommitDelta({
 			...createCommitDelta({
@@ -1196,7 +1206,7 @@ describe("browser texture manager", () => {
 		});
 
 		await textureManager.placeTextureIntents({
-			intents: [createStaticTexturePlacementIntent(textureUse)],
+			intents: [createStaticPlacementIntent(textureUse)],
 		});
 
 		const update = await textureManager.applyStaticCommitDelta({
@@ -1242,8 +1252,8 @@ describe("browser texture manager", () => {
 
 		const snapshot = await textureManager.placeTextureIntents({
 			intents: [
-				createStaticTexturePlacementIntent(firstUse),
-				createStaticTexturePlacementIntent(secondUse),
+				createStaticPlacementIntent(firstUse),
+				createStaticPlacementIntent(secondUse),
 			],
 		});
 
@@ -1287,7 +1297,7 @@ describe("browser texture manager", () => {
 			textureUseId: "terrain-pre-bake:prepared-texture:06000010",
 		});
 		await textureManager.placeTextureIntents({
-			intents: [createStaticTexturePlacementIntent(textureUse)],
+			intents: [createStaticPlacementIntent(textureUse)],
 		});
 
 		textureManager.pinTextureResourceDependencies([
@@ -1356,7 +1366,7 @@ describe("browser texture manager", () => {
 			textureUseId: "terrain-zombie:prepared-texture:06000010",
 		});
 		await textureManager.placeTextureIntents({
-			intents: [createStaticTexturePlacementIntent(firstTextureUse)],
+			intents: [createStaticPlacementIntent(firstTextureUse)],
 		});
 		expect(textureManager.createPlacementReferenceSnapshot()).toHaveLength(1);
 
@@ -1367,7 +1377,7 @@ describe("browser texture manager", () => {
 			textureUseId: "terrain-live:prepared-texture:06000020",
 		});
 		await textureManager.placeTextureIntents({
-			intents: [createStaticTexturePlacementIntent(secondTextureUse)],
+			intents: [createStaticPlacementIntent(secondTextureUse)],
 		});
 
 		expect(
@@ -1398,7 +1408,7 @@ describe("browser texture manager", () => {
 			textureUseId: "terrain-existing:prepared-texture:06000010",
 		});
 		await textureManager.placeTextureIntents({
-			intents: [createStaticTexturePlacementIntent(firstTextureUse)],
+			intents: [createStaticPlacementIntent(firstTextureUse)],
 		});
 
 		const reusedTextureUse = createTextureUseCommit({
@@ -1416,8 +1426,8 @@ describe("browser texture manager", () => {
 
 		const snapshot = await textureManager.placeTextureIntents({
 			intents: [
-				createStaticTexturePlacementIntent(reusedTextureUse),
-				createStaticTexturePlacementIntent(newTextureUse),
+				createStaticPlacementIntent(reusedTextureUse),
+				createStaticPlacementIntent(newTextureUse),
 			],
 		});
 
@@ -1449,7 +1459,7 @@ describe("browser texture manager", () => {
 			textureUseId: "terrain-active:prepared-texture:06000010",
 		});
 		await textureManager.placeTextureIntents({
-			intents: [createStaticTexturePlacementIntent(activeTextureUse)],
+			intents: [createStaticPlacementIntent(activeTextureUse)],
 		});
 		textureManager.pinTextureResourceDependencies([
 			{
@@ -1470,7 +1480,7 @@ describe("browser texture manager", () => {
 			textureUseId: "terrain-new:prepared-texture:06000020",
 		});
 		await textureManager.placeTextureIntents({
-			intents: [createStaticTexturePlacementIntent(newTextureUse)],
+			intents: [createStaticPlacementIntent(newTextureUse)],
 		});
 
 		expect(
@@ -1488,14 +1498,14 @@ describe("browser texture manager", () => {
 				itemId: "terrain-new:prepared-texture:06000020",
 			},
 		]);
-		expect(textureManager.createDiagnosticsReport().summary.pageLifecycle).toEqual(
-			{
-				absorbed: 1,
-				created: 1,
-				reclaimed: 0,
-				retained: 1,
-			},
-		);
+		expect(
+			textureManager.createDiagnosticsReport().summary.pageLifecycle,
+		).toEqual({
+			absorbed: 1,
+			created: 1,
+			reclaimed: 0,
+			retained: 1,
+		});
 	});
 
 	it("reuses one placement across draw units that share prepared source", async () => {
@@ -2664,6 +2674,81 @@ function createTextureUseCommit(options: {
 		samplingPolicy: options.samplingPolicy,
 		textureUseId: options.textureUseId,
 	};
+}
+
+function createStaticPlacementIntent(textureUse: StaticBakeTextureUse) {
+	if (textureUse.source.kind !== "prepared-render-surface-texture-use") {
+		throw new Error("Static placement fixture only supports render surfaces.");
+	}
+	const pagePolicy = createRuntimeTexturePagePolicy(
+		textureUse.source,
+		textureUse.samplingPolicy,
+	);
+	const purpose = classifyTextureUsagePurpose(
+		textureUse.source,
+		textureUse.domain,
+	);
+	const outputFormat = createStaticPlacementOutputFormat(textureUse.source);
+	const sourceKey = createMaterialTextureSourceKey({
+		kind: "render-surface",
+		renderSurfaceId: textureUse.source.renderSurface.renderSurfaceId,
+		usage: textureUse.source.usage,
+	});
+
+	return createStaticTexturePlacementIntent(textureUse, {
+		bindingId: createTextureBindingId({
+			resourceId: "fixture-static-placement",
+			role: purpose,
+			slot: textureUse.textureUseId,
+		}),
+		ownerIds: textureUse.owners.map((owner) =>
+			owner.kind === "draw-unit"
+				? createTextureOwnerId({
+						kind: "layer",
+						layerOwnerId: owner.drawUnitId,
+					})
+				: createTextureOwnerId({
+						kind: "visual-resource",
+						visualResourceId: owner.resourceId,
+					}),
+		),
+		pageClass: createTexturePageClass({
+			domain: textureUse.domain,
+			format: outputFormat,
+			gutterPixels: getRuntimeTexturePageGutterPixels(
+				textureUse.domain,
+				pagePolicy,
+			),
+			physicalWrapMode:
+				textureUse.domain === "outdoor-terrain" ? pagePolicy.wrapS : undefined,
+			purpose,
+			sampleClass: pagePolicy.sampleClass,
+		}),
+		textureKey: createTextureKey({
+			outputFormat,
+			sampleClass: pagePolicy.sampleClass,
+			sourceKey,
+		}),
+	});
+}
+
+function createStaticPlacementOutputFormat(
+	source: Extract<
+		StaticBakeTextureUse["source"],
+		{ readonly kind: "prepared-render-surface-texture-use" }
+	>,
+): "rgba8" | "index8" | "index16" {
+	switch (source.usage) {
+		case "index8":
+			return "index8";
+		case "index16":
+			return "index16";
+		case "rgba-color":
+		case "rgba-detail":
+		case "rgba-mask":
+		case "rgba-raw":
+			return "rgba8";
+	}
 }
 
 function createPaletteTextureUseCommit(options: {

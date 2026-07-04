@@ -293,15 +293,15 @@ function createPlacementSnapshotForRecipe(
 		]),
 	);
 	return {
-		itemIdsByTextureUseId: new Map(
-			intents.map((intent) => [intent.textureUseId, intent.itemId]),
+		itemIdsByBindingId: new Map(
+			intents.map((intent) => [intent.bindingId, intent.itemId]),
 		),
 		placementsByItemId,
 	};
 }
 
 function createEmptyPlacementSnapshot(): DynamicVisualBakeInput["texturePlacementSnapshot"] {
-	return { itemIdsByTextureUseId: new Map(), placementsByItemId: new Map() };
+	return { itemIdsByBindingId: new Map(), placementsByItemId: new Map() };
 }
 
 function createSourceAsset(

@@ -4,6 +4,13 @@ import {
 	createTexturePlacementBucketKey,
 	type TextureBindingRequirement,
 } from "../textures/placement";
+import {
+	createMaterialTextureSourceKey,
+	createTextureBindingId,
+	createTextureKey,
+	createTextureOwnerId,
+	createTexturePageClass,
+} from "../textures/identity";
 import { createObjectVisualTexturePlacementIntents } from "./object-visual-texture-placement-planner";
 
 describe("object visual texture placement planner", () => {
@@ -135,8 +142,26 @@ describe("object visual texture placement planner", () => {
 
 function createRequirement(textureUseId: string): TextureBindingRequirement {
 	return {
+		bindingId: createTextureBindingId({
+			resourceId: "fixture-resource",
+			role: "object-base-color",
+			slot: textureUseId,
+		}),
 		bindingKey: textureUseId,
 		placementItemId: textureUseId,
+		ownerIds: [
+			createTextureOwnerId({
+				kind: "layer",
+				layerOwnerId: "fixture-layer",
+			}),
+		],
+		pageClass: createTexturePageClass({
+			domain: "outdoor-generated-scenery",
+			format: "rgba8",
+			gutterPixels: 4,
+			purpose: "object-base-color",
+			sampleClass: "rgba-color",
+		}),
 		purpose: "object-base-color",
 		samplingPolicy: {
 			wrapS: "repeat",
@@ -158,6 +183,15 @@ function createRequirement(textureUseId: string): TextureBindingRequirement {
 			},
 		},
 		sourceKey: "prepared-render-surface-texture-use:06000010:rgba-color",
+		textureKey: createTextureKey({
+			outputFormat: "rgba8",
+			sampleClass: "rgba-color",
+			sourceKey: createMaterialTextureSourceKey({
+				kind: "render-surface",
+				renderSurfaceId: 0x06000010,
+				usage: "rgba-color",
+			}),
+		}),
 		textureUseId,
 	};
 }

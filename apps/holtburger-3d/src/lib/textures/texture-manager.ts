@@ -65,10 +65,18 @@ import {
 	type TexturePlacementSnapshot,
 	type TextureUsagePurpose,
 } from "./placement";
-const FILTERABLE_ATLAS_GUTTER_PIXELS = 4;
-const EXACT_ATLAS_GUTTER_PIXELS = 0;
-const TERRAIN_COLOR_ATLAS_GUTTER_PIXELS = 96;
-const TERRAIN_MASK_ATLAS_GUTTER_PIXELS = 16;
+import {
+	createMaterialTextureSourceKey,
+	createTextureBindingId,
+	createTextureKey,
+	createTextureOwnerId,
+	createTexturePageClass,
+	type TextureBindingId,
+	type TextureKey,
+	type TextureOwnerId,
+	type TexturePageClass,
+} from "./identity";
+import { getRuntimeTexturePageGutterPixels } from "./material-texture-identity";
 const MAX_RUNTIME_ATLAS_PAGE_SIZE = 2048;
 const TERRAIN_COLOR_ATLAS_FILL_RGBA = [128, 128, 128, 255] as const;
 const DEFAULT_TEXTURE_PACK_GROUP_MAX_CONCURRENCY = 8;
@@ -424,8 +432,8 @@ export class TextureManager {
 		});
 		return {
 			...snapshot,
-			itemIdsByTextureUseId: new Map(
-				rebasedIntents.map((intent) => [intent.textureUseId, intent.itemId]),
+			itemIdsByBindingId: new Map(
+				rebasedIntents.map((intent) => [intent.bindingId, intent.itemId]),
 			),
 		};
 	}
@@ -565,8 +573,9 @@ export class TextureManager {
 								staged.entry.physicalEntry.textureRefId,
 							)
 						) {
-							const pendingUpload =
-								this.#consumeUnuploadedTexturePlacement(staged.entry);
+							const pendingUpload = this.#consumeUnuploadedTexturePlacement(
+								staged.entry,
+							);
 							if (pendingUpload) {
 								placements.push(pendingUpload);
 								uploadedTextureRefIds.add(
@@ -915,7 +924,10 @@ export class TextureManager {
 		readonly resolvedTexturePlacements: readonly ResolvedTexturePlacement[];
 	}> {
 		const registry = this.#getRegistry(group.domain, group.placementBucketKey);
-		const existingPages = createExistingAtlasPagesForAbsorption(registry, group);
+		const existingPages = createExistingAtlasPagesForAbsorption(
+			registry,
+			group,
+		);
 		if (existingPages.length === 0) {
 			return {
 				placements: [],
@@ -1039,7 +1051,9 @@ export class TextureManager {
 		const insertedEntrySet = new Set(insertedEntries);
 		return {
 			placements: runtimePlacements,
-			remainingEntries: group.entries.filter((entry) => !insertedEntrySet.has(entry)),
+			remainingEntries: group.entries.filter(
+				(entry) => !insertedEntrySet.has(entry),
+			),
 			resolvedTexturePlacements,
 		};
 	}
@@ -1098,7 +1112,8 @@ export class TextureManager {
 					runtimePlacement,
 					texturePage: repackPlan.layoutPage,
 				});
-				const textureUseIds = createTextureUseIdsForRegistryEntry(existingEntry);
+				const textureUseIds =
+					createTextureUseIdsForRegistryEntry(existingEntry);
 				for (const textureUseId of textureUseIds) {
 					const activeReferenceCount =
 						this.#placementRecordsByItemId.get(textureUseId)
@@ -1189,7 +1204,9 @@ export class TextureManager {
 					`Page-local repack did not return placement for existing source ${entry.itemId}.`,
 				);
 			}
-			const directSource = await this.#prepareMaterialTextureSource(entry.source);
+			const directSource = await this.#prepareMaterialTextureSource(
+				entry.source,
+			);
 			const physicalSourceKey = createMaterialTexturePhysicalSourceKey(
 				entry.source,
 				directSource,
@@ -1207,7 +1224,9 @@ export class TextureManager {
 		}
 
 		for (const entry of group.entries) {
-			const placement = placementByAtlasEntryKey.get(entry.textureUse.textureUseId);
+			const placement = placementByAtlasEntryKey.get(
+				entry.textureUse.textureUseId,
+			);
 			if (!placement) {
 				throw new Error(
 					`Page-local repack did not return placement for incoming source ${entry.textureUse.textureUseId}.`,
@@ -1410,11 +1429,14 @@ export class TextureManager {
 				}
 				const registryEntry: VisualTextureRegistryEntry = {
 					anisotropy: group.samplerPolicy.anisotropy,
+					bindingId: entry.textureUse.bindingId,
 					domain: entry.domain,
 					filteringMode: group.samplerPolicy.filteringMode,
 					itemId: entry.textureUse.textureUseId,
 					leaseCount: 0,
 					mipmapsGenerated: group.samplerPolicy.generateMipmaps,
+					ownerIds: entry.textureUse.ownerIds,
+					pageClass: entry.textureUse.pageClass,
 					physicalEntry: createVisualTexturePhysicalEntry({
 						format: page.format,
 						gutterEdgeMode:
@@ -1444,6 +1466,7 @@ export class TextureManager {
 					sampleClass: group.pagePolicy.sampleClass,
 					samplerPolicyKey: group.samplerPolicy.policyKey,
 					source: entry.textureUse.source,
+					textureKey: entry.textureUse.textureKey,
 					placementBucketKey: entry.placementBucketKey,
 					wrapS: entry.pagePolicy.wrapS,
 					wrapT: entry.pagePolicy.wrapT,
@@ -1674,7 +1697,8 @@ export class TextureManager {
 			textureRefId: entry.physicalEntry.textureRefId,
 		});
 		const placement =
-			this.#unuploadedTexturePlacementsByPageVersion.get(pageVersionKey) ?? null;
+			this.#unuploadedTexturePlacementsByPageVersion.get(pageVersionKey) ??
+			null;
 		if (placement) {
 			this.#unuploadedTexturePlacementsByPageVersion.delete(pageVersionKey);
 		}
@@ -1704,11 +1728,15 @@ export class TextureManager {
 type RuntimeTexturePlacement = TexturePlacementUpdate["placements"][number];
 
 interface VisualTextureUseCommit {
+	readonly bindingId: TextureBindingId;
 	readonly domain: VisualTextureDomain;
+	readonly ownerIds: readonly TextureOwnerId[];
 	readonly owners: readonly TextureBindingOwner[];
+	readonly pageClass: TexturePageClass;
 	readonly samplingPolicy?: StaticBakeTextureUse["samplingPolicy"];
 	readonly source: MaterialTextureDataUseIdentity;
 	readonly placementBucketKey: TexturePlacementBucketKey;
+	readonly textureKey: TextureKey;
 	readonly textureUseId: string;
 }
 
@@ -1733,14 +1761,18 @@ interface VisualTexturePlacementBucketRegistry {
 
 interface VisualTextureRegistryEntry {
 	anisotropy: number;
+	readonly bindingId: TextureBindingId;
 	readonly domain: VisualTextureDomain;
 	filteringMode: TextureFilteringMode;
 	readonly itemId: string;
 	readonly placementBucketKey: TexturePlacementBucketKey;
+	readonly ownerIds: readonly TextureOwnerId[];
+	readonly pageClass: TexturePageClass;
 	/** Shared committed placement state for every logical alias of this source. */
 	readonly physicalEntry: VisualTexturePhysicalEntry;
 	readonly source: MaterialTextureDataUseIdentity;
 	readonly purpose: TextureUsagePurpose;
+	readonly textureKey: TextureKey;
 	mipmapsGenerated: boolean;
 	readonly sampleClass: RuntimeTexturePagePolicy["sampleClass"];
 	samplerPolicyKey: string;
@@ -1902,9 +1934,20 @@ function createStaticVisualTextureUseCommit(
 		textureUse.source,
 		textureUse.domain,
 	);
-	return {
+	const identity = createLegacyTexturePlacementIdentity({
 		domain: textureUse.domain,
 		owners: textureUse.owners,
+		purpose,
+		samplingPolicy: textureUse.samplingPolicy,
+		source: textureUse.source,
+		textureUseId: textureUse.textureUseId,
+	});
+	return {
+		bindingId: identity.bindingId,
+		domain: textureUse.domain,
+		ownerIds: identity.ownerIds,
+		owners: textureUse.owners,
+		pageClass: identity.pageClass,
 		samplingPolicy: textureUse.samplingPolicy,
 		source: textureUse.source,
 		placementBucketKey: createTexturePlacementBucketKey({
@@ -1912,6 +1955,7 @@ function createStaticVisualTextureUseCommit(
 			lifetime: { kind: "static-authored" },
 			purpose,
 		}),
+		textureKey: identity.textureKey,
 		textureUseId: textureUse.textureUseId,
 	};
 }
@@ -1919,12 +1963,28 @@ function createStaticVisualTextureUseCommit(
 function createDynamicVisualTextureUseCommit(
 	textureUse: DynamicTextureUseCommit,
 ): VisualTextureUseCommit {
-	return {
+	const purpose = classifyTextureUsagePurpose(
+		textureUse.source,
+		textureUse.textureDomain,
+	);
+	const identity = createLegacyTexturePlacementIdentity({
 		domain: textureUse.textureDomain,
 		owners: [textureUse.owner],
+		purpose,
+		samplingPolicy: textureUse.samplingPolicy,
+		source: textureUse.source,
+		textureUseId: textureUse.textureUseId,
+	});
+	return {
+		bindingId: identity.bindingId,
+		domain: textureUse.textureDomain,
+		ownerIds: identity.ownerIds,
+		owners: [textureUse.owner],
+		pageClass: identity.pageClass,
 		samplingPolicy: textureUse.samplingPolicy,
 		source: textureUse.source,
 		placementBucketKey: textureUse.placementBucketKey,
+		textureKey: identity.textureKey,
 		textureUseId: textureUse.textureUseId,
 	};
 }
@@ -1933,13 +1993,106 @@ function createVisualTextureUseCommitFromIntent(
 	intent: TexturePlacementIntent<TexturePlacementLookupId>,
 ): VisualTextureUseCommit {
 	return {
+		bindingId: intent.bindingId,
 		domain: intent.domain,
+		ownerIds: intent.ownerIds,
 		owners: [],
+		pageClass: intent.pageClass,
 		samplingPolicy: intent.source.samplingPolicy,
 		source: intent.source.dataUse,
 		placementBucketKey: intent.placementBucketKey,
+		textureKey: intent.textureKey,
 		textureUseId: intent.textureUseId,
 	};
+}
+
+function createLegacyTexturePlacementIdentity(input: {
+	readonly domain: VisualTextureDomain;
+	readonly owners: readonly TextureBindingOwner[];
+	readonly purpose: TextureUsagePurpose;
+	readonly samplingPolicy?: StaticBakeTextureUse["samplingPolicy"];
+	readonly source: MaterialTextureDataUseIdentity;
+	readonly textureUseId: string;
+}): Pick<
+	VisualTextureUseCommit,
+	"bindingId" | "textureKey" | "ownerIds" | "pageClass"
+> {
+	const pagePolicy = createRuntimeTexturePagePolicy(
+		input.source,
+		input.samplingPolicy,
+	);
+	const sourceKey = createMaterialTextureSourceKey({
+		kind: "runtime",
+		sourceId: `legacy:${input.textureUseId}`,
+		usage:
+			input.source.kind === "prepared-palette-texture-use"
+				? input.source.usage
+				: input.source.usage,
+	});
+	return {
+		bindingId: createTextureBindingId({
+			resourceId: "legacy-texture-use",
+			role: input.purpose,
+			slot: input.textureUseId,
+		}),
+		ownerIds: input.owners.map(createLegacyTextureOwnerId),
+		pageClass: createTexturePageClass({
+			domain: input.domain,
+			format: createLegacyTextureOutputFormat(input.source),
+			gutterPixels: getRuntimeTexturePageGutterPixels(input.domain, pagePolicy),
+			physicalWrapMode: usesShaderVirtualWrap(input.domain, pagePolicy)
+				? undefined
+				: pagePolicy.wrapS,
+			purpose: input.purpose,
+			sampleClass: pagePolicy.sampleClass,
+		}),
+		textureKey: createTextureKey({
+			outputFormat: createLegacyTextureOutputFormat(input.source),
+			sampleClass: pagePolicy.sampleClass,
+			sourceKey,
+		}),
+	};
+}
+
+function createLegacyTextureOwnerId(
+	owner: TextureBindingOwner,
+): TextureOwnerId {
+	switch (owner.kind) {
+		case "static-object-visual-resource":
+			return createTextureOwnerId({
+				kind: "visual-resource",
+				visualResourceId: owner.resourceId,
+			});
+		case "dynamic-visual-resource":
+			return createTextureOwnerId({
+				dynamicResourceId: owner.resourceId,
+				kind: "dynamic-resource",
+			});
+		case "draw-unit":
+			return createTextureOwnerId({
+				kind: "layer",
+				layerOwnerId: owner.drawUnitId,
+			});
+	}
+}
+
+function createLegacyTextureOutputFormat(
+	source: MaterialTextureDataUseIdentity,
+): "rgba8" | "index8" | "index16" {
+	if (source.kind === "prepared-palette-texture-use") {
+		return "rgba8";
+	}
+	switch (source.usage) {
+		case "index8":
+			return "index8";
+		case "index16":
+			return "index16";
+		case "rgba-color":
+		case "rgba-detail":
+		case "rgba-mask":
+		case "rgba-raw":
+			return "rgba8";
+	}
 }
 
 function toPlannedTexturePlacement<
@@ -1950,11 +2103,15 @@ function toPlannedTexturePlacement<
 	textureUseId: string,
 ): PlannedTexturePlacement<TPlacementItemId> {
 	return {
+		bindingId: entry.bindingId,
 		height: entry.physicalEntry.textureHeight,
 		itemId,
+		ownerIds: entry.ownerIds,
 		pageId: entry.physicalEntry.pageId,
+		pageClass: entry.pageClass,
 		purpose: entry.purpose,
 		rect: entry.physicalEntry.rect,
+		textureKey: entry.textureKey,
 		textureRefId: entry.physicalEntry.textureRefId,
 		textureUseId,
 		width: entry.physicalEntry.textureWidth,
@@ -2021,22 +2178,30 @@ function createRegistryEntryAliasForPagePolicy(
 	if (entry.wrapS === pagePolicy.wrapS && entry.wrapT === pagePolicy.wrapT) {
 		return {
 			...entry,
+			bindingId: textureUse.bindingId,
 			itemId: textureUse.textureUseId,
 			leaseCount: 0,
+			ownerIds: textureUse.ownerIds,
+			pageClass: textureUse.pageClass,
 			purpose: classifyTextureUsagePurpose(
 				textureUse.source,
 				textureUse.domain,
 			),
 			source: textureUse.source,
+			textureKey: textureUse.textureKey,
 		};
 	}
 
 	return {
 		...entry,
+		bindingId: textureUse.bindingId,
 		itemId: textureUse.textureUseId,
 		leaseCount: 0,
+		ownerIds: textureUse.ownerIds,
+		pageClass: textureUse.pageClass,
 		purpose: classifyTextureUsagePurpose(textureUse.source, textureUse.domain),
 		source: textureUse.source,
+		textureKey: textureUse.textureKey,
 		wrapS: pagePolicy.wrapS,
 		wrapT: pagePolicy.wrapT,
 	};
@@ -2327,7 +2492,9 @@ function selectPageLocalRepackPlan(
 				key: cohort.key,
 			})),
 			entries: [
-				...existingPage.physicalEntries.map(createAtlasEntryForExistingPhysicalEntry),
+				...existingPage.physicalEntries.map(
+					createAtlasEntryForExistingPhysicalEntry,
+				),
 				...group.entries.map(createAtlasInsertionEntry),
 			],
 			policy: {
@@ -2355,10 +2522,7 @@ function selectPageLocalRepackPlan(
 			layoutPage,
 			packedArea: layoutPage.width * layoutPage.height,
 		};
-		if (
-			selected === null ||
-			comparePageLocalRepackPlans(plan, selected) < 0
-		) {
+		if (selected === null || comparePageLocalRepackPlans(plan, selected) < 0) {
 			selected = plan;
 		}
 	}
@@ -2382,7 +2546,9 @@ function comparePageLocalRepackPlans(
 ): number {
 	return (
 		left.packedArea - right.packedArea ||
-		left.existingPage.textureRefId.localeCompare(right.existingPage.textureRefId)
+		left.existingPage.textureRefId.localeCompare(
+			right.existingPage.textureRefId,
+		)
 	);
 }
 
@@ -2397,7 +2563,9 @@ function materializeAbsorbedTexturePage(options: {
 }): RuntimeTexturePlacement {
 	const firstEntry = options.existingPage.entries[0];
 	if (!firstEntry) {
-		throw new Error("Cannot materialize absorbed texture page without entries.");
+		throw new Error(
+			"Cannot materialize absorbed texture page without entries.",
+		);
 	}
 	const pixels = new Uint8Array(options.existingPage.pixels);
 	for (const { entry, placement } of options.pagePlacements) {
@@ -2410,7 +2578,8 @@ function materializeAbsorbedTexturePage(options: {
 		blitTexturePackingSourceWithGutter({
 			destination: pixels,
 			destinationWidth: options.existingPage.width,
-			edgeMode: createTexturePackingSourceGutterEdgeMode(entry.pagePolicy) ?? "clamp",
+			edgeMode:
+				createTexturePackingSourceGutterEdgeMode(entry.pagePolicy) ?? "clamp",
 			format: source.format,
 			gutterPixels: placement.gutterPixels,
 			source: source.pixels,
@@ -2449,11 +2618,14 @@ function createRegistryEntryForAbsorbedPlacement(options: {
 }): VisualTextureRegistryEntry {
 	return {
 		anisotropy: options.group.samplerPolicy.anisotropy,
+		bindingId: options.entry.textureUse.bindingId,
 		domain: options.entry.domain,
 		filteringMode: options.group.samplerPolicy.filteringMode,
 		itemId: options.entry.textureUse.textureUseId,
 		leaseCount: 0,
 		mipmapsGenerated: options.group.samplerPolicy.generateMipmaps,
+		ownerIds: options.entry.textureUse.ownerIds,
+		pageClass: options.entry.textureUse.pageClass,
 		physicalEntry: createVisualTexturePhysicalEntry({
 			format: options.texturePage.format,
 			gutterEdgeMode:
@@ -2484,6 +2656,7 @@ function createRegistryEntryForAbsorbedPlacement(options: {
 		sampleClass: options.group.pagePolicy.sampleClass,
 		samplerPolicyKey: options.group.samplerPolicy.policyKey,
 		source: options.entry.textureUse.source,
+		textureKey: options.entry.textureUse.textureKey,
 		wrapS: options.entry.pagePolicy.wrapS,
 		wrapT: options.entry.pagePolicy.wrapT,
 	};
@@ -2510,7 +2683,9 @@ function createVisualTexturePhysicalEntry(options: {
 		gutterEdgeMode: options.gutterEdgeMode,
 		pageClassKey: options.pageClassKey,
 		pageId: options.pageId,
-		physicalEntryId: [options.textureRefId, options.physicalSourceKey].join("|"),
+		physicalEntryId: [options.textureRefId, options.physicalSourceKey].join(
+			"|",
+		),
 		physicalSourceKey: options.physicalSourceKey,
 		placementRevision: options.placementRevision,
 		rect: options.rect,
@@ -2567,7 +2742,9 @@ function uniqueResolvedTexturePlacements(
 ): readonly ResolvedTexturePlacement[] {
 	return Array.from(
 		new Map(
-			placements.map((placement) => [placement.textureUseId, placement] as const),
+			placements.map(
+				(placement) => [placement.textureUseId, placement] as const,
+			),
 		).values(),
 	).sort((left, right) => left.textureUseId.localeCompare(right.textureUseId));
 }
@@ -2801,32 +2978,6 @@ function createTexturePackingPageFormat(
 	}
 }
 
-function getRuntimeTexturePageGutterPixels(
-	domain: VisualTextureDomain,
-	pagePolicy: RuntimeTexturePagePolicy,
-): number {
-	if (domain === "outdoor-terrain") {
-		if (pagePolicy.sampleClass === "rgba-color") {
-			return Math.max(
-				FILTERABLE_ATLAS_GUTTER_PIXELS,
-				TERRAIN_COLOR_ATLAS_GUTTER_PIXELS,
-			);
-		}
-
-		if (pagePolicy.sampleClass === "rgba-mask") {
-			return Math.max(
-				EXACT_ATLAS_GUTTER_PIXELS,
-				TERRAIN_MASK_ATLAS_GUTTER_PIXELS,
-			);
-		}
-	}
-
-	return pagePolicy.sampleClass === "rgba-color" ||
-		pagePolicy.sampleClass === "rgba-detail"
-		? FILTERABLE_ATLAS_GUTTER_PIXELS
-		: EXACT_ATLAS_GUTTER_PIXELS;
-}
-
 function uniqueSortedStrings(values: readonly string[]): readonly string[] {
 	return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
@@ -2910,7 +3061,8 @@ function calculateTexturePackingEfficiency(
 		return 0;
 	}
 	const pagePixels =
-		firstEntry.physicalEntry.textureWidth * firstEntry.physicalEntry.textureHeight;
+		firstEntry.physicalEntry.textureWidth *
+		firstEntry.physicalEntry.textureHeight;
 	if (pagePixels <= 0) {
 		return 0;
 	}
@@ -2940,7 +3092,9 @@ function uniqueSortedTextureEntries(
 	return Array.from(new Set(entries)).sort((left, right) =>
 		[left.physicalEntry.textureRefId, left.itemId]
 			.join("|")
-			.localeCompare([right.physicalEntry.textureRefId, right.itemId].join("|")),
+			.localeCompare(
+				[right.physicalEntry.textureRefId, right.itemId].join("|"),
+			),
 	);
 }
 
@@ -2959,7 +3113,9 @@ function uniquePhysicalTextureEntries(
 	return [...entriesByPhysicalRect.values()].sort((left, right) =>
 		[left.physicalEntry.textureRefId, left.itemId]
 			.join("|")
-			.localeCompare([right.physicalEntry.textureRefId, right.itemId].join("|")),
+			.localeCompare(
+				[right.physicalEntry.textureRefId, right.itemId].join("|"),
+			),
 	);
 }
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
 	DynamicVisualBakeInput,
 	DynamicVisualBakeResult,
+	DynamicEntityRenderPart,
 } from "./contracts";
 import type {
 	DynamicVisualBakeWorkerPort,
@@ -35,6 +36,42 @@ describe("dynamic visual bake worker protocol", () => {
 			message: "dynamic bake exploded",
 			requestId: "dynamic-transport:1",
 		});
+	});
+
+	it("posts baked render part buffers as result transfers", async () => {
+		const input = createInput();
+		const result = createResultWithRenderPart(input);
+		const port = new FixtureWorkerPort();
+		installDynamicVisualBakeWorkerHandler(
+			{
+				async bake(): Promise<DynamicVisualBakeResult> {
+					return result;
+				},
+			},
+			port,
+		);
+
+		port.emitRequest({
+			input,
+			kind: "job",
+			requestId: "dynamic-transport:2",
+		});
+		await port.waitForResponses(1);
+
+		const part = result.product?.kind === "baked"
+			? result.product.resource.renderParts[0]
+			: null;
+		expect(part).not.toBeNull();
+		expect(port.responses[0]).toMatchObject({
+			kind: "result",
+			requestId: "dynamic-transport:2",
+		});
+		expect(port.transfers[0]).toEqual([
+			part?.positions.buffer,
+			part?.texCoords.buffer,
+			part?.materialSlotIndices.buffer,
+			part?.indices.buffer,
+		]);
 	});
 
 	it("dispatches dynamic visual bake jobs through the standard central worker queue", async () => {
@@ -93,6 +130,7 @@ describe("dynamic visual bake worker protocol", () => {
 class FixtureWorkerPort implements DynamicVisualBakeWorkerPort {
 	readonly requests: DynamicVisualBakeWorkerRequest[] = [];
 	readonly responses: DynamicVisualBakeWorkerResponse[] = [];
+	readonly transfers: readonly Transferable[][] = [];
 	readonly #requestListeners = new Set<
 		(event: MessageEvent<DynamicVisualBakeWorkerRequest>) => void
 	>();
@@ -103,12 +141,14 @@ class FixtureWorkerPort implements DynamicVisualBakeWorkerPort {
 
 	postMessage(
 		message: DynamicVisualBakeWorkerRequest | DynamicVisualBakeWorkerResponse,
+		transfer: readonly Transferable[] = [],
 	): void {
 		if (message.kind === "job" || message.kind === "cancel") {
 			this.requests.push(message);
 			return;
 		}
 		this.responses.push(message);
+		this.transfers.push(transfer);
 		this.#flushWaiters();
 	}
 
@@ -210,5 +250,60 @@ function createResult(input: DynamicVisualBakeInput): DynamicVisualBakeResult {
 		failures: [],
 		product: null,
 		revision: input.revision,
+	};
+}
+
+function createResultWithRenderPart(
+	input: DynamicVisualBakeInput,
+): DynamicVisualBakeResult {
+	return {
+		failures: [],
+		product: {
+			kind: "baked",
+			resource: {
+				entityId: input.recipe.entityId,
+				materialSlots: [],
+				materialSources: [],
+				paletteSources: [],
+				renderParts: [createRenderPart()],
+				resourceId: `${input.recipe.entityId}:visual-resource`,
+				sourceAssets: [],
+				textureDependencies: [],
+				textureRefs: [],
+				textureRequirements: [],
+			},
+		},
+		revision: input.revision,
+	};
+}
+
+function createRenderPart(): DynamicEntityRenderPart {
+	const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+	return {
+		bounds: null,
+		indices: new Uint16Array([0, 1, 2]),
+		indexType: "uint16",
+		materialEntries: [],
+		materialFamily: "flat-color",
+		materialPass: "opaque",
+		materialSlotIndices: new Float32Array([0, 0, 0]),
+		partIndex: 0,
+		positions,
+		renderPartId: "dynamic-render-part:0",
+		renderState: {
+			blend: {
+				dstFactor: null,
+				enabled: false,
+				mode: "opaque",
+				srcFactor: null,
+			},
+			depthTest: true,
+			depthWrite: true,
+		},
+		sourceAssetId: "source-asset:0",
+		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
+		textureBindingIds: [],
+		triangleCount: 1,
+		vertexCount: positions.length / 3,
 	};
 }

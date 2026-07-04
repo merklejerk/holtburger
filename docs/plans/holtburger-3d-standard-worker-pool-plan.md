@@ -761,7 +761,7 @@ Decisions, debt, and spicy bits:
 
 ### Phase 6: Resteering Checkpoint
 
-Status: pending.
+Status: complete as of 2026-07-04.
 
 Reassess before using the primitive for texture pipeline refactors.
 
@@ -780,6 +780,55 @@ Deliverables:
 - Update this plan with measured LOC deltas.
 - Record any remaining bespoke worker behavior and why it survived.
 - Decide whether the primitive is ready for texture placement/transaction preparation work.
+
+Checkpoint answers:
+
+- **Did the new primitive reduce boilerplate or just move it?** It reduced domain worker boilerplate
+  materially after Phase 5. Phase 5 alone was `738` insertions / `1600` deletions, mostly from
+  removing resolver bridges, worker-local prepared asset readers, and bespoke request maps. The
+  generic primitive is larger than a single old worker client, but it now covers all worker families.
+- **Are transfer lists complete for large typed-array payloads?** No. Texture packing result page
+  pixels are transferred. Other heavy payloads remain explicit non-transfers until ownership is
+  proven safe. This is honest but still debt for future texture transaction preparation.
+- **Did we delete obsolete diagnostics instead of preserving old transport-shaped snapshots?** Mostly.
+  Static bake diagnostics survived as a projection from generic pool lifecycle facts and progress
+  events. Old bridge/client diagnostics were not recreated.
+- **Is cancellation behavior sufficiently honest for streaming demand churn?** Yes for queued
+  cancellation, stale-result dropping, and service-await cancellation. CPU-heavy jobs still need
+  domain code to observe `context.signal` before we can claim cooperative runtime cancellation.
+- **Do resolver service callbacks still create main-thread pressure?** They are standardized and
+  request-scoped de-duped, but still synchronous demand on the main-thread asset reader. Future
+  texture transaction work should watch service request volume rather than assuming the channel
+  removes pressure.
+- **Did non-test worker plumbing LOC trend down after migrations?** Yes after Phase 5, but the final
+  measured slice is still above the original baseline when shared primitives are counted.
+
+Measured LOC:
+
+- Original duplicated worker plumbing baseline: `1853` lines.
+- Current migrated domain worker client/handler/protocol/transfer files plus shared worker
+  primitives: `2136` lines.
+- Current number is down from Phase 3's `2191`, but still not below the baseline. Phase 7 cleanup
+  must decide whether this is acceptable because responsibilities expanded to include service
+  routing and transfer helpers, or whether further reduction is available without obfuscating the
+  primitive.
+
+Remaining bespoke worker behavior:
+
+- Thin domain adapters named `WorkerPool*` remain. They no longer own private pending-promise maps or
+  idle-worker dispatch; they map domain methods to standard pool inputs/outputs.
+- `StaticBakeWorkerClient` keeps request metadata for diagnostics and trace retention. This is not
+  transport routing, but it is worker-adapter-local state worth revisiting if diagnostics get a
+  shared projection helper.
+- `apps/holtburger-3d/src/lib/static/fake-workers.ts` still uses pending arrays. That is intentional
+  test fixture behavior, not browser worker transport.
+
+Resteering decision:
+
+- Proceed to Phase 7 cleanup. The primitive is ready as the standard worker substrate for future
+  texture placement/transaction preparation experiments, with two explicit caveats: non-texture
+  transfer ownership remains unaudited, and cooperative CPU cancellation is only as good as domain
+  code's signal checks.
 
 ### Phase 7: Cleanup And Cutover
 
@@ -879,3 +928,7 @@ Acceptance criteria:
   the standard pool/service model. Static resolver uses one discriminated job union for scope and
   source-fanout requests. Bespoke bridge and worker asset reader files were deleted, and prepared
   asset de-duplication is handled by the shared request-scoped service reader.
+- 2026-07-04: Completed Phase 6 resteering. All worker families now use the standard transport and
+  stale bridge/custom envelope names are gone. Current measured plumbing plus shared primitives is
+  `2136` lines versus the original `1853` baseline, so Phase 7 must focus on honest cleanup and the
+  final LOC decision rather than forcing artificial compression.

@@ -970,18 +970,22 @@ async function createStructuredInteriorPlacementSnapshot(
 				intent.bindingId,
 				{
 					bindingId: intent.bindingId,
-					height: 16,
-					itemId: intent.itemId,
-					pageId: options.uniquePages
-						? `${intent.purpose}:page:${index}`
-						: `${intent.purpose}:page:0`,
-					purpose: intent.purpose,
-					rect: [0, 0, 16, 16] as const,
-					textureKey: intent.textureKey,
-					textureRefId: options.uniquePages
-						? `${intent.purpose}:texture-ref:${index}`
-						: `${intent.purpose}:texture-ref:0`,
-					width: 16,
+					placement: {
+						height: 16,
+						itemId: intent.itemId,
+						ownerIds: intent.ownerIds,
+						pageId: options.uniquePages
+							? `${intent.purpose}:page:${index}`
+							: `${intent.purpose}:page:0`,
+						pageClass: intent.pageClass,
+						purpose: intent.purpose,
+						rect: [0, 0, 16, 16] as const,
+						textureKey: intent.textureKey,
+						textureRefId: options.uniquePages
+							? `${intent.purpose}:texture-ref:${index}`
+							: `${intent.purpose}:texture-ref:0`,
+						width: 16,
+					},
 				},
 			]),
 		),
@@ -989,12 +993,13 @@ async function createStructuredInteriorPlacementSnapshot(
 			intents.map((intent, index) => [
 				intent.itemId,
 				{
-					bindingId: intent.bindingId,
 					height: 16,
 					itemId: intent.itemId,
+					ownerIds: intent.ownerIds,
 					pageId: options.uniquePages
 						? `${intent.purpose}:page:${index}`
 						: `${intent.purpose}:page:0`,
+					pageClass: intent.pageClass,
 					purpose: intent.purpose,
 					rect: [0, 0, 16, 16] as const,
 					textureKey: intent.textureKey,

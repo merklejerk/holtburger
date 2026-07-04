@@ -904,7 +904,7 @@ function createTerrainBakeTextureUses(
 			textureUsesById.set(
 				requirement.bindingId,
 				createTerrainStaticBakeTextureUse({
-					bindingId: placement.bindingId,
+					bindingId: requirement.bindingId,
 					ownerIds: createStaticTextureOwnerIds([
 						{ drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" },
 					]),

@@ -281,13 +281,15 @@ function createPlacementSnapshotForRecipe(
 			{
 				height: 16,
 				itemId: intent.itemId,
+				ownerIds: intent.ownerIds,
 				pageId: `${intent.purpose}:page:${index}`,
+				pageClass: intent.pageClass,
 				purpose: intent.purpose,
 				rect: [0, 0, 16, 16] as const,
+				textureKey: intent.textureKey,
 				textureRefId:
 					options.textureRefIdsByItemIndex?.[index] ??
 					`${intent.purpose}:texture-ref:${index}`,
-				textureBindingId: intent.textureBindingId,
 				width: 16,
 			},
 		]),
@@ -299,7 +301,10 @@ function createPlacementSnapshotForRecipe(
 		placementsByBindingId: new Map(
 			intents.map((intent) => [
 				intent.bindingId,
-				placementsByItemId.get(intent.itemId)!,
+				{
+					bindingId: intent.bindingId,
+					placement: placementsByItemId.get(intent.itemId)!,
+				},
 			]),
 		),
 		placementsByItemId,

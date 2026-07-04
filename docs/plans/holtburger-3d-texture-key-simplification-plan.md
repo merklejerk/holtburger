@@ -684,6 +684,47 @@ Internally, identity builders should accept structured inputs and return branded
   - `npm run harness:browser` passed after the binding-resolution fix. The sandboxed run cannot bind the local dev asset host; the successful run was unsandboxed.
   - `git diff --check` passed.
 
+### Phase 11: Split Physical Placement From Binding Resolution
+
+**Status:** Complete.
+
+**Steering update:** The browser harness fix proved that keeping `bindingId` on the physical placement shape is a structural footgun. A physical atlas placement describes canonical texture pixels on a page. A material binding resolution describes one consumer binding pointing at that physical placement. Those are different facts and should not share one flat object.
+
+**Deliverables**
+
+- Split CPU-side texture placement contracts into:
+  - physical placement: `TextureKey`, owner ids, page class, item id, purpose, page id/ref, rect, texture dimensions;
+  - binding placement: `TextureBindingId -> physical placement`.
+- Keep `TexturePlacementSnapshot.placementsByItemId` physical-only.
+- Keep `ObjectVisualTexturePlacementSnapshot.placementsByBindingId` as the explicit consumer lookup.
+- Update object visual recipe publication and bake guards to validate `bindingId -> itemId -> physical placement` without reading a binding id from the physical placement.
+- Update terrain/static bake paths to use the material requirement binding id for consumer identity and the physical placement for texture/page facts.
+- Keep renderer-facing `ResolvedTexturePlacement` consumer-resolved for now because the renderer map is keyed by binding id. Do not expand this phase into a renderer DTO migration unless the local split exposes a direct type lie there.
+- Rewrite tests that previously asserted `placement.bindingId` on physical placements.
+- Record browser harness validation for this split.
+
+**Acceptance criteria**
+
+- Physical `TexturePlacement` no longer has `bindingId`.
+- Any object that contains both a `bindingId` and a placement must be named as binding/resolution state, not physical placement state.
+- Shared `TextureKey` entries can produce many binding placements without copying a consumer id into the physical placement.
+- Object-visual placement publication cannot accidentally resolve through another binding's physical item id.
+- `npm run test:ts`, `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `git diff --check`, and `npm run harness:browser` pass.
+
+**Phase notes**
+
+- Split CPU-side `TexturePlacement` into physical atlas facts only. It no longer carries `bindingId`.
+- Added a named binding-placement wrapper for object-visual placement snapshots. `placementsByBindingId` now returns the consumer binding plus the shared physical placement, so the consumer id cannot be confused with physical atlas identity.
+- Terrain/static bake code now uses the material requirement binding id for consumer identity and physical placement only for page class, texture key, page/ref, and rect facts.
+- Renderer-facing `ResolvedTexturePlacement` intentionally remains consumer-resolved because the renderer placement map is keyed by binding id. This phase did not expand into renderer DTO migration.
+- Validation:
+  - `npm run test:ts` passed: 87 files, 703 tests.
+  - `npm exec tsc -- --noEmit --pretty false` passed.
+  - `npm run lint:dead` passed.
+  - `npm run lint:ts` passed.
+  - `npm run check` passed.
+  - `npm run harness:browser` passed unsandboxed. The sandboxed environment cannot bind the local dev asset host.
+
 ## Risks & Mitigations
 
 - **Risk: broad test churn.**

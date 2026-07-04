@@ -661,7 +661,7 @@ Decisions, debt, and spicy bits:
 
 ### Phase 4: Host-Service Channel
 
-Status: pending.
+Status: complete as of 2026-07-04.
 
 Deliverables:
 
@@ -677,6 +677,37 @@ Acceptance criteria:
 - Request-scoped prepared asset caching still prevents duplicate asset requests inside one worker
   job where appropriate.
 - Service failures reject the owning worker job with useful context.
+
+Completion evidence:
+
+- Extended `apps/holtburger-3d/src/lib/workers/pool.ts` with standard
+  `service-request`, `service-response`, and `service-error` routing.
+- Extended `apps/holtburger-3d/src/lib/workers/handler.ts` with
+  `context.requestService()`, request-scoped service response routing, cancellation cleanup, and
+  disposal cleanup.
+- Added `apps/holtburger-3d/src/lib/workers/prepared-asset-service.ts`.
+- Added service tests in `pool.test.ts`, `handler.test.ts`, and
+  `prepared-asset-service.test.ts`.
+- Verified with
+  `npm run test:ts -- src/lib/workers/pool.test.ts src/lib/workers/handler.test.ts src/lib/workers/prepared-asset-service.test.ts src/lib/textures/packing/worker-client.test.ts src/lib/dynamic/visual-bake-worker-client.test.ts src/lib/static/bake/worker-client.test.ts`.
+- Verified with `npm run check`.
+- Verified with `npm run lint:ts`.
+
+Decisions, debt, and spicy bits:
+
+- Service responses use explicit wrapper results (`{ response, transfer? }`) for the same reason
+  worker execute results do: raw domain objects can accidentally look like transport wrappers.
+- Pool service failures are sent back as `service-error`. The worker-side `requestService()` promise
+  rejects, and normal handler error normalization turns that into a failed owning worker job.
+- Late service responses after cancellation/disposal are dropped by the pool. Worker-side pending
+  service promises are rejected when a job is canceled so domain code waiting on
+  `context.requestService()` can unwind.
+- `createPreparedAssetServiceHandler()` centralizes the resolver/dynamic-recipe prepared asset view
+  shaping that was duplicated in bespoke bridge code.
+- `createRequestScopedPreparedAssetReader()` preserves per-job duplicate suppression by caching
+  in-flight prepared asset requests for the lifetime of one handler execution.
+- Resolver workers still use their bespoke bridges until Phase 5. Phase 4 created the standard
+  channel and adapter; it did not yet delete `asset-bridge.ts` or `worker-asset-reader.ts`.
 
 ### Phase 5: Migrate Resolver-Style Workers
 
@@ -808,3 +839,7 @@ Acceptance criteria:
   pixels; borrowed input pixels remain cloned. Static bake diagnostics now project from generic pool
   lifecycle facts plus standard progress events. Mid-migration LOC is temporarily higher when shared
   primitives are counted because resolver-style workers have not moved to the shared service path.
+- 2026-07-04: Completed Phase 4 by adding standard worker service request/response/error routing to
+  the pool and handler primitives, plus a prepared-asset service adapter and request-scoped worker
+  reader. Resolver-style workers still need migration in Phase 5 before bespoke bridge files can be
+  removed.

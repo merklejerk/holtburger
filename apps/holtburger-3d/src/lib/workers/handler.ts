@@ -3,39 +3,64 @@ import type {
 	WorkerJobMessage,
 	WorkerProgressMessage,
 	WorkerResultMessage,
+	WorkerServiceErrorMessage,
+	WorkerServiceRequestMessage,
+	WorkerServiceResponseMessage,
 } from "./pool";
 
-export type WorkerHandlerInputMessage<TInput> =
+export type WorkerHandlerInputMessage<TInput, TServiceResponse = never> =
 	| WorkerJobMessage<TInput>
 	| {
 			readonly kind: "cancel";
 			readonly requestId: string;
-	  };
+	  }
+	| WorkerServiceResponseMessage<TServiceResponse>
+	| WorkerServiceErrorMessage;
 
-export type WorkerHandlerOutputMessage<TOutput, TProgress> =
+export type WorkerHandlerOutputMessage<
+	TOutput,
+	TProgress,
+	TServiceRequest = never,
+> =
 	| WorkerResultMessage<TOutput>
 	| WorkerErrorMessage
-	| WorkerProgressMessage<TProgress>;
+	| WorkerProgressMessage<TProgress>
+	| WorkerServiceRequestMessage<TServiceRequest>;
 
-export interface WorkerHandlerPort<TInput, TOutput, TProgress> {
+export interface WorkerHandlerPort<
+	TInput,
+	TOutput,
+	TProgress,
+	TServiceRequest = never,
+	TServiceResponse = never,
+> {
 	postMessage(
-		message: WorkerHandlerOutputMessage<TOutput, TProgress>,
+		message: WorkerHandlerOutputMessage<TOutput, TProgress, TServiceRequest>,
 		transfer?: readonly Transferable[],
 	): void;
 	addEventListener(
 		type: "message",
-		listener: (event: MessageEvent<WorkerHandlerInputMessage<TInput>>) => void,
+		listener: (
+			event: MessageEvent<WorkerHandlerInputMessage<TInput, TServiceResponse>>,
+		) => void,
 	): void;
 	removeEventListener?(
 		type: "message",
-		listener: (event: MessageEvent<WorkerHandlerInputMessage<TInput>>) => void,
+		listener: (
+			event: MessageEvent<WorkerHandlerInputMessage<TInput, TServiceResponse>>,
+		) => void,
 	): void;
 }
 
-export interface WorkerExecuteContext<TProgress> {
+export interface WorkerExecuteContext<
+	TProgress,
+	TServiceRequest = never,
+	TServiceResponse = never,
+> {
 	readonly requestId: string;
 	readonly signal: AbortSignal;
 	report(event: TProgress, transfer?: readonly Transferable[]): void;
+	requestService(request: TServiceRequest): Promise<TServiceResponse>;
 }
 
 export interface WorkerExecuteResult<TOutput> {
@@ -43,11 +68,23 @@ export interface WorkerExecuteResult<TOutput> {
 	readonly transfer?: readonly Transferable[];
 }
 
-export interface WorkerHandlerOptions<TInput, TOutput, TProgress = never> {
-	readonly port: WorkerHandlerPort<TInput, TOutput, TProgress>;
+export interface WorkerHandlerOptions<
+	TInput,
+	TOutput,
+	TProgress = never,
+	TServiceRequest = never,
+	TServiceResponse = never,
+> {
+	readonly port: WorkerHandlerPort<
+		TInput,
+		TOutput,
+		TProgress,
+		TServiceRequest,
+		TServiceResponse
+	>;
 	readonly execute: (
 		input: TInput,
-		context: WorkerExecuteContext<TProgress>,
+		context: WorkerExecuteContext<TProgress, TServiceRequest, TServiceResponse>,
 	) => Promise<WorkerExecuteResult<TOutput>>;
 }
 
@@ -57,16 +94,40 @@ export interface InstalledWorkerHandler {
 
 interface ActiveWorkerJob {
 	readonly controller: AbortController;
+	readonly pendingServices: Set<string>;
 }
 
-export function installWorkerHandler<TInput, TOutput, TProgress = never>(
-	options: WorkerHandlerOptions<TInput, TOutput, TProgress>,
+interface PendingWorkerServiceRequest<TServiceResponse> {
+	readonly requestId: string;
+	readonly resolve: (response: TServiceResponse) => void;
+	readonly reject: (error: Error) => void;
+}
+
+export function installWorkerHandler<
+	TInput,
+	TOutput,
+	TProgress = never,
+	TServiceRequest = never,
+	TServiceResponse = never,
+>(
+	options: WorkerHandlerOptions<
+		TInput,
+		TOutput,
+		TProgress,
+		TServiceRequest,
+		TServiceResponse
+	>,
 ): InstalledWorkerHandler {
 	const activeJobs = new Map<string, ActiveWorkerJob>();
 	const canceledBeforeStart = new Set<string>();
+	const pendingServices = new Map<
+		string,
+		PendingWorkerServiceRequest<TServiceResponse>
+	>();
+	let nextServiceRequestIndex = 0;
 
 	const listener = (
-		event: MessageEvent<WorkerHandlerInputMessage<TInput>>,
+		event: MessageEvent<WorkerHandlerInputMessage<TInput, TServiceResponse>>,
 	): void => {
 		void handleMessage(event.data);
 	};
@@ -79,16 +140,28 @@ export function installWorkerHandler<TInput, TOutput, TProgress = never>(
 			for (const job of activeJobs.values()) {
 				job.controller.abort();
 			}
+			for (const service of pendingServices.values()) {
+				service.reject(new Error("Worker handler was disposed."));
+			}
 			activeJobs.clear();
+			pendingServices.clear();
 			canceledBeforeStart.clear();
 		},
 	};
 
 	async function handleMessage(
-		message: WorkerHandlerInputMessage<TInput>,
+		message: WorkerHandlerInputMessage<TInput, TServiceResponse>,
 	): Promise<void> {
 		if (message.kind === "cancel") {
 			cancelRequest(message.requestId);
+			return;
+		}
+		if (message.kind === "service-response") {
+			resolveServiceRequest(message);
+			return;
+		}
+		if (message.kind === "service-error") {
+			rejectServiceRequest(message);
 			return;
 		}
 
@@ -103,8 +176,16 @@ export function installWorkerHandler<TInput, TOutput, TProgress = never>(
 		}
 
 		const controller = new AbortController();
-		activeJobs.set(message.requestId, { controller });
-		const context: WorkerExecuteContext<TProgress> = {
+		const activeJob: ActiveWorkerJob = {
+			controller,
+			pendingServices: new Set(),
+		};
+		activeJobs.set(message.requestId, activeJob);
+		const context: WorkerExecuteContext<
+			TProgress,
+			TServiceRequest,
+			TServiceResponse
+		> = {
 			report: (event, transfer = []): void => {
 				if (controller.signal.aborted) {
 					return;
@@ -118,6 +199,8 @@ export function installWorkerHandler<TInput, TOutput, TProgress = never>(
 					transfer,
 				);
 			},
+			requestService: (request) =>
+				requestService(message.requestId, activeJob, request),
 			requestId: message.requestId,
 			signal: controller.signal,
 		};
@@ -158,6 +241,12 @@ export function installWorkerHandler<TInput, TOutput, TProgress = never>(
 			return;
 		}
 		activeJob.controller.abort();
+		for (const serviceRequestId of activeJob.pendingServices) {
+			const pending = pendingServices.get(serviceRequestId);
+			pending?.reject(new Error("Worker job was canceled."));
+			pendingServices.delete(serviceRequestId);
+		}
+		activeJob.pendingServices.clear();
 	}
 
 	function postCanceled(requestId: string): void {
@@ -166,6 +255,60 @@ export function installWorkerHandler<TInput, TOutput, TProgress = never>(
 			message: "Worker job was canceled.",
 			requestId,
 		});
+	}
+
+	function requestService(
+		requestId: string,
+		activeJob: ActiveWorkerJob,
+		request: TServiceRequest,
+	): Promise<TServiceResponse> {
+		if (activeJob.controller.signal.aborted) {
+			return Promise.reject(new Error("Worker job was canceled."));
+		}
+
+		const serviceRequestId = `${requestId}:service:${nextServiceRequestIndex}`;
+		nextServiceRequestIndex += 1;
+		activeJob.pendingServices.add(serviceRequestId);
+
+		return new Promise((resolve, reject) => {
+			pendingServices.set(serviceRequestId, {
+				reject,
+				requestId,
+				resolve,
+			});
+			options.port.postMessage({
+				kind: "service-request",
+				request,
+				requestId,
+				serviceRequestId,
+			});
+		});
+	}
+
+	function resolveServiceRequest(
+		message: WorkerServiceResponseMessage<TServiceResponse>,
+	): void {
+		const pending = pendingServices.get(message.serviceRequestId);
+		if (!pending) {
+			return;
+		}
+		pendingServices.delete(message.serviceRequestId);
+		activeJobs
+			.get(pending.requestId)
+			?.pendingServices.delete(message.serviceRequestId);
+		pending.resolve(message.response);
+	}
+
+	function rejectServiceRequest(message: WorkerServiceErrorMessage): void {
+		const pending = pendingServices.get(message.serviceRequestId);
+		if (!pending) {
+			return;
+		}
+		pendingServices.delete(message.serviceRequestId);
+		activeJobs
+			.get(pending.requestId)
+			?.pendingServices.delete(message.serviceRequestId);
+		pending.reject(new Error(message.message));
 	}
 }
 

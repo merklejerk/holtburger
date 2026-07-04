@@ -33,14 +33,40 @@ export interface WorkerProgressMessage<TProgress> {
 	readonly event: TProgress;
 }
 
-export type WorkerPoolRequestMessage<TInput> =
-	| WorkerJobMessage<TInput>
-	| WorkerCancelMessage;
+export interface WorkerServiceRequestMessage<TServiceRequest> {
+	readonly kind: "service-request";
+	readonly requestId: string;
+	readonly serviceRequestId: string;
+	readonly request: TServiceRequest;
+}
 
-export type WorkerPoolResponseMessage<TOutput, TProgress> =
+export interface WorkerServiceResponseMessage<TServiceResponse> {
+	readonly kind: "service-response";
+	readonly serviceRequestId: string;
+	readonly response: TServiceResponse;
+}
+
+export interface WorkerServiceErrorMessage {
+	readonly kind: "service-error";
+	readonly serviceRequestId: string;
+	readonly message: string;
+}
+
+export type WorkerPoolRequestMessage<TInput, TServiceResponse = never> =
+	| WorkerJobMessage<TInput>
+	| WorkerCancelMessage
+	| WorkerServiceResponseMessage<TServiceResponse>
+	| WorkerServiceErrorMessage;
+
+export type WorkerPoolResponseMessage<
+	TOutput,
+	TProgress,
+	TServiceRequest = never,
+> =
 	| WorkerResultMessage<TOutput>
 	| WorkerErrorMessage
-	| WorkerProgressMessage<TProgress>;
+	| WorkerProgressMessage<TProgress>
+	| WorkerServiceRequestMessage<TServiceRequest>;
 
 export interface WorkerMessagePort<TSend, TReceive> {
 	postMessage(message: TSend, transfer?: readonly Transferable[]): void;
@@ -70,10 +96,25 @@ export interface WorkerJobHandle<TOutput> {
 
 export type WorkerDispatchMode = "idle-workers" | "pipelined-workers";
 
-export interface WorkerPoolOptions<TInput, TOutput, TProgress = never> {
+export interface WorkerServiceHandlerResult<TServiceResponse> {
+	readonly response: TServiceResponse;
+	readonly transfer?: readonly Transferable[];
+}
+
+export type WorkerServiceHandler<TServiceRequest, TServiceResponse> = (
+	request: TServiceRequest,
+) => Promise<WorkerServiceHandlerResult<TServiceResponse>>;
+
+export interface WorkerPoolOptions<
+	TInput,
+	TOutput,
+	TProgress = never,
+	TServiceRequest = never,
+	TServiceResponse = never,
+> {
 	readonly createWorker: () => WorkerMessagePort<
-		WorkerPoolRequestMessage<TInput>,
-		WorkerPoolResponseMessage<TOutput, TProgress>
+		WorkerPoolRequestMessage<TInput, TServiceResponse>,
+		WorkerPoolResponseMessage<TOutput, TProgress, TServiceRequest>
 	>;
 	readonly size: number;
 	readonly transferInput?: (input: TInput) => readonly Transferable[];
@@ -81,6 +122,10 @@ export interface WorkerPoolOptions<TInput, TOutput, TProgress = never> {
 	readonly dispatchMode?: WorkerDispatchMode;
 	readonly requestIdPrefix?: string;
 	readonly progressEventLimit?: number;
+	readonly serviceHandler?: WorkerServiceHandler<
+		TServiceRequest,
+		TServiceResponse
+	>;
 }
 
 export interface WorkerPoolJobDiagnostics {
@@ -127,20 +172,40 @@ interface QueuedWorkerJob<TInput, TOutput, TProgress> {
 	workerIndex?: number;
 }
 
-interface WorkerSlot<TInput, TOutput, TProgress> {
+interface WorkerSlot<
+	TInput,
+	TOutput,
+	TProgress,
+	TServiceRequest,
+	TServiceResponse,
+> {
 	readonly index: number;
 	readonly port: WorkerMessagePort<
-		WorkerPoolRequestMessage<TInput>,
-		WorkerPoolResponseMessage<TOutput, TProgress>
+		WorkerPoolRequestMessage<TInput, TServiceResponse>,
+		WorkerPoolResponseMessage<TOutput, TProgress, TServiceRequest>
 	>;
 	readonly listener: (
-		event: MessageEvent<WorkerPoolResponseMessage<TOutput, TProgress>>,
+		event: MessageEvent<
+			WorkerPoolResponseMessage<TOutput, TProgress, TServiceRequest>
+		>,
 	) => void;
 	activeRequestId?: string;
 }
 
-export class StandardWorkerPool<TInput, TOutput, TProgress = never> {
-	readonly #workers: WorkerSlot<TInput, TOutput, TProgress>[];
+export class StandardWorkerPool<
+	TInput,
+	TOutput,
+	TProgress = never,
+	TServiceRequest = never,
+	TServiceResponse = never,
+> {
+	readonly #workers: WorkerSlot<
+		TInput,
+		TOutput,
+		TProgress,
+		TServiceRequest,
+		TServiceResponse
+	>[];
 	readonly #queuedJobs: QueuedWorkerJob<TInput, TOutput, TProgress>[] = [];
 	readonly #activeJobs = new Map<
 		string,
@@ -149,6 +214,10 @@ export class StandardWorkerPool<TInput, TOutput, TProgress = never> {
 	readonly #settledRequestIds = new Set<string>();
 	readonly #transferInput?: (input: TInput) => readonly Transferable[];
 	readonly #describe?: (input: TInput) => WorkerJobDescription;
+	readonly #serviceHandler?: WorkerServiceHandler<
+		TServiceRequest,
+		TServiceResponse
+	>;
 	readonly #requestIdPrefix: string;
 	readonly #progressEventLimit: number;
 	#nextRequestNumber = 0;
@@ -160,7 +229,15 @@ export class StandardWorkerPool<TInput, TOutput, TProgress = never> {
 	#disposed = false;
 	readonly #progressEvents: WorkerPoolProgressDiagnostics[] = [];
 
-	constructor(options: WorkerPoolOptions<TInput, TOutput, TProgress>) {
+	constructor(
+		options: WorkerPoolOptions<
+			TInput,
+			TOutput,
+			TProgress,
+			TServiceRequest,
+			TServiceResponse
+		>,
+	) {
 		if (options.size < 1) {
 			throw new Error("StandardWorkerPool requires at least one worker.");
 		}
@@ -172,12 +249,15 @@ export class StandardWorkerPool<TInput, TOutput, TProgress = never> {
 
 		this.#transferInput = options.transferInput;
 		this.#describe = options.describe;
+		this.#serviceHandler = options.serviceHandler;
 		this.#requestIdPrefix = options.requestIdPrefix ?? "worker-job";
 		this.#progressEventLimit = options.progressEventLimit ?? 50;
 		this.#workers = Array.from({ length: options.size }, (_, index) => {
 			const port = options.createWorker();
 			const listener = (
-				event: MessageEvent<WorkerPoolResponseMessage<TOutput, TProgress>>,
+				event: MessageEvent<
+					WorkerPoolResponseMessage<TOutput, TProgress, TServiceRequest>
+				>,
 			): void => {
 				this.#handleWorkerMessage(index, event.data);
 			};
@@ -336,7 +416,7 @@ export class StandardWorkerPool<TInput, TOutput, TProgress = never> {
 
 	#handleWorkerMessage(
 		workerIndex: number,
-		message: WorkerPoolResponseMessage<TOutput, TProgress>,
+		message: WorkerPoolResponseMessage<TOutput, TProgress, TServiceRequest>,
 	): void {
 		if (this.#disposed || this.#settledRequestIds.has(message.requestId)) {
 			return;
@@ -353,6 +433,11 @@ export class StandardWorkerPool<TInput, TOutput, TProgress = never> {
 			return;
 		}
 
+		if (message.kind === "service-request") {
+			this.#handleServiceRequest(workerIndex, message);
+			return;
+		}
+
 		this.#finishActiveJob(workerIndex, job);
 		if (message.kind === "result") {
 			this.#completedJobs += 1;
@@ -362,6 +447,58 @@ export class StandardWorkerPool<TInput, TOutput, TProgress = never> {
 			job.reject(createWorkerError(message));
 		}
 		this.#dispatchQueuedJobs();
+	}
+
+	#handleServiceRequest(
+		workerIndex: number,
+		message: WorkerServiceRequestMessage<TServiceRequest>,
+	): void {
+		const worker = this.#workers[workerIndex];
+		if (!worker || this.#settledRequestIds.has(message.requestId)) {
+			return;
+		}
+		if (!this.#serviceHandler) {
+			worker.port.postMessage({
+				kind: "service-error",
+				message: "Worker service request has no handler.",
+				serviceRequestId: message.serviceRequestId,
+			});
+			return;
+		}
+
+		void this.#serviceHandler(message.request).then(
+			(result) => {
+				if (
+					this.#disposed ||
+					this.#settledRequestIds.has(message.requestId) ||
+					!this.#activeJobs.has(message.requestId)
+				) {
+					return;
+				}
+				worker.port.postMessage(
+					{
+						kind: "service-response",
+						response: result.response,
+						serviceRequestId: message.serviceRequestId,
+					},
+					result.transfer,
+				);
+			},
+			(error: unknown) => {
+				if (
+					this.#disposed ||
+					this.#settledRequestIds.has(message.requestId) ||
+					!this.#activeJobs.has(message.requestId)
+				) {
+					return;
+				}
+				worker.port.postMessage({
+					kind: "service-error",
+					message: error instanceof Error ? error.message : String(error),
+					serviceRequestId: message.serviceRequestId,
+				});
+			},
+		);
 	}
 
 	#finishActiveJob(

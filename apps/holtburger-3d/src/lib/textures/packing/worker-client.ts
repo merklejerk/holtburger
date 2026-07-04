@@ -4,45 +4,7 @@ import type {
 	TexturePackingWorkerPort,
 } from "./protocol";
 import type { TexturePacker } from "./packer";
-import { StandardWorkerPool, type WorkerJobHandle } from "../../workers/pool";
-
-export type TexturePackingRequestHandle = WorkerJobHandle<TexturePackingResult>;
-
-export class TexturePackingWorkerClient {
-	readonly #pool: StandardWorkerPool<TexturePackingJob, TexturePackingResult>;
-
-	constructor(port: TexturePackingWorkerPort) {
-		this.#pool = new StandardWorkerPool({
-			createWorker: () => port,
-			requestIdPrefix: "texture-pack",
-			size: 1,
-		});
-	}
-
-	pack(job: TexturePackingJob): TexturePackingRequestHandle {
-		return this.#pool.submitHandle(job);
-	}
-
-	dispose(): void {
-		this.#pool.dispose();
-	}
-}
-
-export class WorkerTexturePacker implements TexturePacker {
-	readonly #client: TexturePackingWorkerClient;
-
-	constructor(port: TexturePackingWorkerPort) {
-		this.#client = new TexturePackingWorkerClient(port);
-	}
-
-	async pack(job: TexturePackingJob): Promise<TexturePackingResult> {
-		return this.#client.pack(job).result;
-	}
-
-	dispose(): void {
-		this.#client.dispose();
-	}
-}
+import { StandardWorkerPool } from "../../workers/pool";
 
 export class WorkerPoolTexturePacker implements TexturePacker {
 	readonly #pool: StandardWorkerPool<TexturePackingJob, TexturePackingResult>;

@@ -16,18 +16,19 @@ import type {
 	StaticResolverWorkerResponse,
 	StaticResolverWorkerThreadMessage,
 } from "./protocol";
-import { StaticResolverWorkerClient } from "./worker-client";
+import { WorkerPoolStaticResolver } from "./worker-client";
 import { installStaticResolverWorkerHandler } from "./worker-handler";
 
 describe("static resolver worker protocol", () => {
 	it("posts standard static scope requests and resolves returned payloads", async () => {
 		const port = new FixtureWorkerPort();
-		const client = new StaticResolverWorkerClient(
-			port,
-			new FixturePreparedAssetReader(),
-		);
+		const resolver = new WorkerPoolStaticResolver({
+			assetReader: new FixturePreparedAssetReader(),
+			createWorker: () => port,
+			workerCount: 1,
+		});
 		const job = createJob();
-		const pending = client.resolve(job);
+		const pending = resolver.resolve(job);
 
 		expect(port.requests).toEqual([
 			{
@@ -53,7 +54,7 @@ describe("static resolver worker protocol", () => {
 			job,
 			scope: { kind: "placeholder" },
 		});
-		client.dispose();
+		resolver.dispose();
 	});
 
 	it("turns resolver handler failures into standard worker errors", async () => {
@@ -87,13 +88,14 @@ describe("static resolver worker protocol", () => {
 
 	it("posts source-first requests and resolves multi-recipe responses", async () => {
 		const port = new FixtureWorkerPort();
-		const client = new StaticResolverWorkerClient(
-			port,
-			new FixturePreparedAssetReader(),
-		);
+		const resolver = new WorkerPoolStaticResolver({
+			assetReader: new FixturePreparedAssetReader(),
+			createWorker: () => port,
+			workerCount: 1,
+		});
 		const sourceRequest = createSourceRequest();
 		const resolution = createSourceResolution(sourceRequest);
-		const pending = client.resolveSource(sourceRequest);
+		const pending = resolver.resolveSource(sourceRequest);
 
 		expect(port.requests).toEqual([
 			{
@@ -116,7 +118,7 @@ describe("static resolver worker protocol", () => {
 		});
 
 		await expect(pending).resolves.toBe(resolution);
-		client.dispose();
+		resolver.dispose();
 	});
 
 	it("handles source-first worker requests with source-capable resolvers", async () => {

@@ -19,51 +19,6 @@ import {
 } from "../../workers/prepared-asset-service";
 import { StandardWorkerPool } from "../../workers/pool";
 
-export class StaticResolverWorkerClient
-	implements StaticResolver, StaticLandblockSceneLodSourceResolver
-{
-	readonly #pool: StandardStaticResolverPool;
-
-	constructor(
-		port: StaticResolverWorkerPort,
-		assetReader: PreparedAssetReader,
-	) {
-		this.#pool = new StandardStaticResolverPool({
-			assetReader,
-			createWorker: () => port,
-			workerCount: 1,
-		});
-	}
-
-	async resolve(job: StaticResolverJob): Promise<StaticScopePayload> {
-		const output = await this.#pool.submit({
-			job,
-			kind: "resolve-static-scope",
-		});
-		if (output.kind !== "static-scope-resolved") {
-			throw new Error("Static resolver worker returned a source resolution.");
-		}
-		return output.payload;
-	}
-
-	async resolveSource(
-		sourceRequest: StaticLandblockSceneLodSourceRequest,
-	): Promise<StaticLandblockSceneLodResolution> {
-		const output = await this.#pool.submit({
-			kind: "resolve-landblock-scene-lod-source",
-			sourceRequest,
-		});
-		if (output.kind !== "landblock-scene-lod-source-resolved") {
-			throw new Error("Static resolver worker returned a scope payload.");
-		}
-		return output.resolution;
-	}
-
-	dispose(): void {
-		this.#pool.dispose();
-	}
-}
-
 export class WorkerPoolStaticResolver
 	implements StaticResolver, StaticLandblockSceneLodSourceResolver
 {

@@ -8,40 +8,10 @@ import type {
 	DynamicVisualBakeWorkerRequest,
 	DynamicVisualBakeWorkerResponse,
 } from "./visual-bake-protocol";
-import {
-	DynamicVisualBakeWorkerClient,
-	WorkerPoolDynamicVisualBaker,
-} from "./visual-bake-worker-client";
+import { WorkerPoolDynamicVisualBaker } from "./visual-bake-worker-client";
 import { installDynamicVisualBakeWorkerHandler } from "./visual-bake-worker-handler";
 
 describe("dynamic visual bake worker protocol", () => {
-	it("posts standard dynamic visual bake inputs and resolves returned bake results", async () => {
-		const port = new FixtureWorkerPort();
-		const client = new DynamicVisualBakeWorkerClient(port);
-		const input = createInput();
-		const pending = client.bake(input);
-
-		expect(port.requests).toEqual([
-			{
-				input,
-				kind: "job",
-				requestId: "dynamic-visual-bake:0",
-			},
-		]);
-
-		port.emit({
-			kind: "result",
-			output: createResult(input),
-			requestId: "dynamic-visual-bake:0",
-		});
-
-		await expect(pending).resolves.toMatchObject({
-			product: null,
-			revision: input.revision,
-		});
-		client.dispose();
-	});
-
 	it("turns baker handler failures into standard worker errors", async () => {
 		const port = new FixtureWorkerPort();
 		installDynamicVisualBakeWorkerHandler(

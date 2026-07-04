@@ -15,38 +15,6 @@ import {
 } from "../workers/prepared-asset-service";
 import { StandardWorkerPool } from "../workers/pool";
 
-export class DynamicVisualRecipeWorkerClient implements DynamicVisualRecipeResolver {
-	readonly #pool: StandardWorkerPool<
-		DynamicVisualRecipeWorkerRequestPayload,
-		DynamicEntityRecipe,
-		never,
-		PreparedAssetServiceRequest,
-		PreparedAssetServiceResponse
-	>;
-
-	constructor(
-		port: DynamicVisualRecipeWorkerPort,
-		assetReader: PreparedAssetReader,
-	) {
-		this.#pool = new StandardWorkerPool({
-			createWorker: () => port,
-			requestIdPrefix: "dynamic-visual-recipe",
-			serviceHandler: createPreparedAssetServiceHandler(assetReader),
-			size: 1,
-		});
-	}
-
-	resolveRecipe(
-		request: DynamicVisualRecipeResolutionRequest,
-	): Promise<DynamicEntityRecipe> {
-		return this.#pool.submit(createWorkerRequestPayload(request));
-	}
-
-	dispose(): void {
-		this.#pool.dispose();
-	}
-}
-
 export class WorkerPoolDynamicVisualRecipeResolver implements DynamicVisualRecipeResolver {
 	readonly #pool: StandardWorkerPool<
 		DynamicVisualRecipeWorkerRequestPayload,

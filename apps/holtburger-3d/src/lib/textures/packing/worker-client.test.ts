@@ -7,21 +7,19 @@ import type {
 	TexturePackingWorkerRequest,
 	TexturePackingWorkerResponse,
 } from "./protocol";
-import {
-	TexturePackingWorkerClient,
-	WorkerPoolTexturePacker,
-	WorkerTexturePacker,
-} from "./worker-client";
+import { WorkerPoolTexturePacker } from "./worker-client";
 import { installTexturePackingWorkerHandler } from "./worker-handler";
 
 describe("browser texture packing worker protocol", () => {
 	it("posts standard typed packing jobs and resolves atlas page pixels plus rect metadata", async () => {
 		const port = new FixtureWorkerPort();
-		const client = new TexturePackingWorkerClient(port);
+		const packer = new WorkerPoolTexturePacker({
+			createWorker: () => port,
+			workerCount: 1,
+		});
 		const job = createPackingJob();
-		const handle = client.pack(job);
+		const result = packer.pack(job);
 
-		expect(handle.requestId).toBe("texture-pack:0");
 		expect(port.requests).toEqual([
 			{
 				input: job,
@@ -38,7 +36,7 @@ describe("browser texture packing worker protocol", () => {
 			requestId: "texture-pack:0",
 		});
 
-		await expect(handle.result).resolves.toMatchObject({
+		await expect(result).resolves.toMatchObject({
 			domain: "outdoor-terrain",
 			jobId: "pack-job:1",
 			pages: [
@@ -57,39 +55,7 @@ describe("browser texture packing worker protocol", () => {
 				},
 			],
 		});
-		client.dispose();
-	});
-
-	it("rejects canceled requests and discards late worker responses", async () => {
-		const port = new FixtureWorkerPort();
-		const client = new TexturePackingWorkerClient(port);
-		const job = createPackingJob();
-		const handle = client.pack(job);
-
-		handle.cancel();
-
-		expect(port.requests.at(-1)).toEqual({
-			kind: "cancel",
-			requestId: "texture-pack:0",
-		});
-		await expect(handle.result).rejects.toThrow("Worker job was canceled.");
-
-		port.emit({
-			kind: "result",
-			output: createPackingResult(job),
-			requestId: "texture-pack:0",
-		});
-
-		const nextHandle = client.pack(job);
-		port.emit({
-			kind: "result",
-			output: createPackingResult(job),
-			requestId: "texture-pack:1",
-		});
-		await expect(nextHandle.result).resolves.toMatchObject({
-			jobId: "pack-job:1",
-		});
-		client.dispose();
+		packer.dispose();
 	});
 
 	it("packs direct rgba sources in the worker handler and transfers result page pixels", async () => {
@@ -132,32 +98,6 @@ describe("browser texture packing worker protocol", () => {
 			255, 128, 0, 255,
 		]);
 		expect(port.transfers).toEqual([[response.output.pages[0]?.pixels.buffer]]);
-	});
-
-	it("adapts the request client to the texture packer interface", async () => {
-		const port = new FixtureWorkerPort();
-		const packer = new WorkerTexturePacker(port);
-		const job = createPackingJob();
-		const resultPromise = packer.pack(job);
-
-		expect(port.requests).toEqual([
-			{
-				input: job,
-				kind: "job",
-				requestId: "texture-pack:0",
-			},
-		]);
-
-		port.emit({
-			kind: "result",
-			output: createPackingResult(job),
-			requestId: "texture-pack:0",
-		});
-
-		await expect(resultPromise).resolves.toMatchObject({
-			jobId: "pack-job:1",
-		});
-		packer.dispose();
 	});
 
 	it("dispatches texture packing through the standard central worker queue", async () => {

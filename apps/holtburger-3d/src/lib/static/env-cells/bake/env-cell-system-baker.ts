@@ -56,7 +56,7 @@ import {
 } from "../../../visual/object-material-draw-unit-partition";
 import {
 	createStructuredInteriorTextureBindingRequirement,
-	createStructuredInteriorTextureUseId,
+	createStructuredInteriorTextureBindingId,
 	createStructuredInteriorMaterialCoverageReport,
 	getStructuredInteriorMaterialEntries,
 	planStructuredInteriorCellMaterials,
@@ -499,12 +499,13 @@ function createStructuredInteriorDrawUnit(options: {
 		textureUseIds: uniqueSortedStrings(
 			materialEntries.flatMap((entry) =>
 				[
-					entry.primaryTextureUseId,
-					entry.indexTextureUseId,
-					entry.paletteTextureUseId,
-					entry.detailTextureUseId,
+					entry.primaryTextureBindingId,
+					entry.indexTextureBindingId,
+					entry.paletteTextureBindingId,
+					entry.detailTextureBindingId,
 				].filter(
-					(textureUseId): textureUseId is string => textureUseId !== null,
+					(textureBindingId): textureBindingId is TextureBindingId =>
+						textureBindingId !== null,
 				),
 			),
 		),
@@ -759,7 +760,7 @@ function createStructuredInteriorMaterialTableEntries(options: {
 			([, entry], slot): StaticMaterialTableEntry =>
 				createStaticMaterialTableEntry({
 					createTextureUseId: (dataUse, wrapMode) =>
-						createStructuredInteriorTextureUseId({
+						createStructuredInteriorTextureBindingId({
 							dataUse,
 							task: options.task,
 							wrapMode,
@@ -1162,7 +1163,7 @@ function uniqueSortedNumbers(values: readonly number[]): readonly number[] {
 	return [...new Set(values)].sort((left, right) => left - right);
 }
 
-function uniqueSortedStrings(values: readonly string[]): readonly string[] {
+function uniqueSortedStrings<T extends string>(values: readonly T[]): readonly T[] {
 	return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 

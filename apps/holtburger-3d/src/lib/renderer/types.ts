@@ -348,7 +348,9 @@ type DynamicRendererInstanceResidence =
 	  };
 
 export interface ResolvedTexturePlacement {
-	/** Logical texture use id whose atlas placement was resolved. */
+	/** Material consumer binding whose atlas placement was resolved. */
+	readonly bindingId: TextureBindingId;
+	/** Legacy logical texture-use id retained for diagnostics during cutover. */
 	readonly textureUseId: string;
 	/** Page identity that owns this rect. */
 	readonly pageVersion: TexturePageVersion;

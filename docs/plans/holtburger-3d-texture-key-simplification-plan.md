@@ -449,6 +449,8 @@ Internally, identity builders should accept structured inputs and return branded
 
 ### Phase 6: Renderer Binding Cutover
 
+**Status:** Complete.
+
 **Deliverables**
 
 - Update `StaticMaterialTableEntry` texture fields from `*TextureUseId` to `*TextureBindingId`.
@@ -472,14 +474,26 @@ Internally, identity builders should accept structured inputs and return branded
 - Renderer tests prove two bindings with different wrap can resolve the same `TextureKey` while producing different wrap uniforms where required.
 - Renderer tests prove a page movement updates active binding resolution without stale copied placement payloads.
 
+**Phase notes**
+
+- Renderer placement maps now key resolved placements by `TextureBindingId`, not legacy texture-use item ids. WebGL object and terrain payload preparation resolve material entries through binding ids.
+- Static object, structured interior, terrain, dynamic visual, and reusable visual geometry payloads now carry branded `TextureBindingId` values for renderer material texture references.
+- `ResolvedTexturePlacement` now carries both `bindingId` and legacy `textureUseId`. Renderer code consumes `bindingId`; `textureUseId` remains diagnostics/publication residue until the cleanup phase deletes the remaining item-id terminology.
+- Terrain placement intents now use the binding id as the placement item id. This removed the terrain-only branch where bake-time draw units used legacy prepared texture ids while renderer placement snapshots used a different concept.
+- Object/structured/static material tests were rewritten to assert binding-id relationships instead of ossifying old scoped string spellings. Fixture placement records now include real binding ids, which caught stale test lies that previously produced `undefined` material bindings.
+- Spicy bit: public fields named `textureUseIds` still exist in draw units and visual payloads, but their renderer-facing values are now binding ids. This is a naming debt, not a compatibility path. Phase 7/cleanup must either rename them or remove them from reusable identity surfaces.
+- Spicy bit: `TextureManager` still has item-id bookkeeping for placement records and publication diagnostics. The renderer no longer consumes that as its lookup key, but the manager's internal `#bindingIdByItemId` bridge remains as a transition detail because `TexturePlacementUpdate` still publishes legacy diagnostic item ids.
+- Steering decision: do not add shims that accept both old and new renderer ids. Tests should construct `TextureBindingId`s through the real builders or compare producer relationships.
+
 ### Phase 7: Visual Resource Key Cleanup
 
 **Deliverables**
 
-- Replace `textureUseIds` in object visual resource keys with stable material binding layout and texture keys where resource identity truly depends on material texture identity.
+- Replace `textureUseIds` in object visual resource keys with stable material binding layout and texture keys where resource identity truly depends on material texture identity. Do not keep binding ids in reusable resource keys when they include resource/draw-unit scope.
 - Verify landblock-scoped owner ids cannot enter reusable visual resource keys.
 - If `TextureBindingId` contains resource or draw-unit scope, do not include it in reusable resource identity. Use slot/role/material layout plus `TextureKey` instead.
 - Remove resource-key tests that only assert legacy scoped texture-use id sorting.
+- Rename or delete renderer-facing `textureUseIds` fields after they stop participating in reusable resource identity. If a field remains for dependency pinning, name it `textureBindingIds`.
 
 **Acceptance criteria**
 

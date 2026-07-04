@@ -2,6 +2,7 @@ import type {
 	TerrainMaterialLayerPlan,
 	TerrainMaterialTextureRoleBinding,
 } from "../../static/contracts";
+import type { TextureBindingId } from "../../textures/identity";
 import type { ResolvedTexturePlacement } from "../types";
 import {
 	MAX_TERRAIN_COLOR_PAGES_PER_DRAW,
@@ -82,7 +83,7 @@ export function markTerrainPreparedLayeredPayloadDirty(
 export function prepareTerrainLayeredPayloadState(
 	state: TerrainPreparedLayeredPayloadState,
 	plan: TerrainMaterialLayerPlan,
-	placements: ReadonlyMap<string, ResolvedTexturePlacement>,
+	placements: ReadonlyMap<TextureBindingId, ResolvedTexturePlacement>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 ): TerrainPreparedLayeredPayload | null {
 	if (!state.isDirty) {
@@ -117,7 +118,7 @@ export function createTerrainPreparedLayeredPayload(): TerrainPreparedLayeredPay
 export function prepareTerrainLayeredPayload(
 	target: TerrainPreparedLayeredPayload,
 	plan: TerrainMaterialLayerPlan,
-	placements: ReadonlyMap<string, ResolvedTexturePlacement>,
+	placements: ReadonlyMap<TextureBindingId, ResolvedTexturePlacement>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 ): boolean {
 	resetTerrainLayeredPayload(target);
@@ -299,23 +300,23 @@ function resetTerrainLayerRects(layerRects: TerrainPreparedLayerRects): void {
 }
 
 function createTerrainTextureResources(
-	placements: ReadonlyMap<string, ResolvedTexturePlacement>,
+	placements: ReadonlyMap<TextureBindingId, ResolvedTexturePlacement>,
 	textures: ReadonlyMap<string, WebGLTexture>,
-): ReadonlyMap<string, TerrainResolvedTextureResource> {
-	const resources = new Map<string, TerrainResolvedTextureResource>();
-	for (const [textureUseId, placement] of placements) {
+): ReadonlyMap<TextureBindingId, TerrainResolvedTextureResource> {
+	const resources = new Map<TextureBindingId, TerrainResolvedTextureResource>();
+	for (const [bindingId, placement] of placements) {
 		const texture = textures.get(placement.textureRefId);
 		if (!texture) {
 			continue;
 		}
-		resources.set(textureUseId, { placement, texture });
+		resources.set(bindingId, { placement, texture });
 	}
 	return resources;
 }
 
 function collectTerrainPageBinding(
 	role: TerrainMaterialTextureRoleBinding,
-	textureResources: ReadonlyMap<string, TerrainResolvedTextureResource>,
+	textureResources: ReadonlyMap<TextureBindingId, TerrainResolvedTextureResource>,
 	pageSlots: TerrainDrawUnitRolePageSlots,
 	colorPages: TerrainPreparedRolePageBindings,
 	maskPages: TerrainPreparedRolePageBindings,
@@ -343,7 +344,7 @@ function collectTerrainPageBinding(
 
 function resolveDetailPlacement(
 	plan: TerrainMaterialLayerPlan,
-	textureResources: ReadonlyMap<string, TerrainResolvedTextureResource>,
+	textureResources: ReadonlyMap<TextureBindingId, TerrainResolvedTextureResource>,
 ): TerrainResolvedTextureResource | null | false {
 	let detailResource: TerrainResolvedTextureResource | null = null;
 	for (const detailRole of plan.detailRoles) {
@@ -372,7 +373,7 @@ function resolveDetailPlacement(
 function fillTerrainLayerRects(
 	target: TerrainPreparedLayerRects,
 	plan: TerrainMaterialLayerPlan,
-	textureResources: ReadonlyMap<string, TerrainResolvedTextureResource>,
+	textureResources: ReadonlyMap<TextureBindingId, TerrainResolvedTextureResource>,
 	pageSlots: TerrainDrawUnitRolePageSlots,
 ): void {
 	for (const layer of plan.layerEntries) {
@@ -462,7 +463,7 @@ function fillTerrainLayerRects(
 function fillTerrainDetailUniforms(
 	target: TerrainPreparedDetailUniforms,
 	plan: TerrainMaterialLayerPlan,
-	textureResources: ReadonlyMap<string, TerrainResolvedTextureResource>,
+	textureResources: ReadonlyMap<TextureBindingId, TerrainResolvedTextureResource>,
 	detailResource: TerrainResolvedTextureResource | null,
 ): void {
 	const detailRole = plan.detailRoles[0] ?? null;
@@ -478,7 +479,7 @@ function fillTerrainDetailUniforms(
 }
 
 function resolvePlacementRect(
-	textureResources: ReadonlyMap<string, TerrainResolvedTextureResource>,
+	textureResources: ReadonlyMap<TextureBindingId, TerrainResolvedTextureResource>,
 	role: TerrainMaterialTextureRoleBinding,
 ): readonly [number, number, number, number] {
 	if (!role.textureUseId) {
@@ -492,7 +493,7 @@ function resolvePlacementRect(
 }
 
 function resolvePlacementPage(
-	textureResources: ReadonlyMap<string, TerrainResolvedTextureResource>,
+	textureResources: ReadonlyMap<TextureBindingId, TerrainResolvedTextureResource>,
 	pageSlots: TerrainDrawUnitRolePageSlots,
 	role: TerrainMaterialTextureRoleBinding,
 ): number {

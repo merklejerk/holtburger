@@ -15,6 +15,7 @@ import {
 	type StaticMaterialTextureWrapMode,
 } from "../../bake/static-material-texture-policy";
 import type { TextureBindingRequirement } from "../../../textures/placement";
+import type { TextureBindingId } from "../../../textures/identity";
 import {
 	composeStaticMaterialDetailRole,
 	planStaticMaterialDetailRoles,
@@ -106,7 +107,7 @@ export function planStructuredInteriorCellMaterials(options: {
 				slotId: surface.slotId,
 				surfaceId: surface.surfaceId,
 				textureUseIds: plan.textureRoles.map((role) =>
-					createStructuredInteriorTextureUseId({
+					createStructuredInteriorTextureBindingId({
 						dataUse: role.dataUse,
 						task: options.task,
 						wrapMode: textureWrapMode,
@@ -124,12 +125,12 @@ export function planStructuredInteriorCellMaterials(options: {
 	return { entries, materialPlansBySurfaceId };
 }
 
-export function createStructuredInteriorTextureUseId(options: {
+export function createStructuredInteriorTextureBindingId(options: {
 	readonly dataUse: MaterialTextureDataUseIdentity;
 	readonly task: StaticBakeTask;
 	readonly wrapMode: StaticMaterialTextureWrapMode;
-}): string {
-	return createStructuredInteriorTextureBindingRequirement(options).bindingKey;
+}): TextureBindingId {
+	return createStructuredInteriorTextureBindingRequirement(options).bindingId;
 }
 
 export function createStructuredInteriorTextureBindingRequirement(options: {

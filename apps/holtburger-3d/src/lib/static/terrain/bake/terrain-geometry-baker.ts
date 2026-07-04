@@ -39,7 +39,10 @@ import type {
 	TextureUsagePurpose,
 } from "../../../textures/placement";
 import { classifyTextureUsagePurpose } from "../../../textures/placement";
-import { createTextureBindingId } from "../../../textures/identity";
+import {
+	createTextureBindingId,
+	type TextureBindingId,
+} from "../../../textures/identity";
 import { createMaterialTextureIdentityFacts } from "../../../textures/material-texture-identity";
 import { createMaterialTextureDataUseKey } from "../../bake/static-material-texture-policy";
 import { createStaticTextureOwnerIds } from "../../texture-owner-identity";
@@ -107,22 +110,22 @@ export async function createTerrainTexturePlacementIntents(options: {
 			continue;
 		}
 
-		const requirementByBindingKey = createTerrainTextureRequirementIndex(
+		const requirementByBindingId = createTerrainTextureRequirementIndex(
 			item.task.ownerId,
 			item.payload.scope.textureUses,
 		);
 		const plan = buildTerrainMaterialLayerPlan({
 			createTextureUseId: (textureUse) =>
 				createTerrainTextureBindingRequirement(item.task.ownerId, textureUse)
-					.bindingKey,
+					.bindingId,
 			payload: item.payload.scope,
 		});
 		if (!plan) {
 			continue;
 		}
 
-		for (const bindingKey of collectTerrainMaterialPlanTextureUseIds(plan)) {
-			const requirement = requirementByBindingKey.get(bindingKey);
+		for (const bindingId of collectTerrainMaterialPlanTextureUseIds(plan)) {
+			const requirement = requirementByBindingId.get(bindingId);
 			if (!requirement) {
 				continue;
 			}
@@ -238,7 +241,7 @@ function createTerrainGeometryDrawUnits(
 	const terrainMaterialPlan = buildTerrainMaterialLayerPlan({
 		createTextureUseId: (textureUse) =>
 			createTerrainTextureBindingRequirement(textureUseScopeId, textureUse)
-				.bindingKey,
+				.bindingId,
 		payload,
 	});
 	const slices = createTerrainGeometrySlices(
@@ -327,7 +330,7 @@ function createTerrainGeometryDrawUnit({
 		layerSlots,
 		materialBucketKey: material.materialBucketKey,
 		materialFamily: material.materialFamily,
-		primaryTextureUseId: material.primaryTextureUseId,
+		primaryTextureBindingId: material.primaryTextureBindingId,
 		positions,
 		sourceTriangleIds,
 		terrainFallbackReasons: material.terrainFallbackReasons,
@@ -858,7 +861,7 @@ function createTerrainBakeTextureUses(
 		return [];
 	}
 
-	const textureUsesById = new Map<string, StaticBakeTextureUse>();
+	const textureUsesById = new Map<TextureBindingId, StaticBakeTextureUse>();
 	const texturePlacementSnapshot = resolveTerrainTexturePlacementSnapshot(
 		input.texturePlacementSnapshot,
 	);
@@ -872,25 +875,25 @@ function createTerrainBakeTextureUses(
 				item.task.ownerId,
 				textureUse,
 			);
-			if (!boundTextureUseIds.has(requirement.bindingKey)) {
+			if (!boundTextureUseIds.has(requirement.bindingId)) {
 				continue;
 			}
 			const placement = texturePlacementSnapshot.placementsByItemId.get(
-				requirement.textureUseId,
+				requirement.bindingId,
 			);
 			if (!placement) {
 				throw new Error(
-					`Terrain draw unit ${drawUnit.drawUnitId} is missing texture placement ${requirement.textureUseId}.`,
+					`Terrain draw unit ${drawUnit.drawUnitId} is missing texture placement ${requirement.bindingId}.`,
 				);
 			}
 
-			const existing = textureUsesById.get(requirement.bindingKey);
+			const existing = textureUsesById.get(requirement.bindingId);
 			if (existing) {
 				const owners = uniqueSortedStaticTextureUseOwners([
 					...existing.owners,
 					{ drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" },
 				]);
-				textureUsesById.set(requirement.bindingKey, {
+				textureUsesById.set(requirement.bindingId, {
 					...existing,
 					ownerIds: createStaticTextureOwnerIds(owners),
 					owners,
@@ -899,7 +902,7 @@ function createTerrainBakeTextureUses(
 			}
 
 			textureUsesById.set(
-				requirement.bindingKey,
+				requirement.bindingId,
 				createTerrainStaticBakeTextureUse({
 					bindingId: placement.bindingId,
 					ownerIds: createStaticTextureOwnerIds([
@@ -988,7 +991,7 @@ function createTerrainStaticBakeTextureUse(options: {
 		pageClass: options.pageClass,
 		source: options.requirement.source.dataUse,
 		textureKey: options.textureKey,
-		textureUseId: options.requirement.bindingKey,
+		textureUseId: options.requirement.bindingId,
 	};
 	if (!options.requirement.samplingPolicy) {
 		return textureUse;
@@ -1020,14 +1023,13 @@ function createTerrainTextureRoleDependencies(
 	texturePlacementSnapshot: TexturePlacementSnapshot,
 ): readonly TextureResourceRoleDependency[] {
 	const itemIdsByPurpose = new Map<TextureUsagePurpose, Set<string>>();
-	for (const bindingKey of drawUnit.textureUseIds) {
-		// Terrain binding keys intentionally remain placement item ids during
-		// Phase 12; the placement snapshot is the authority for dependency purpose.
+	for (const bindingId of drawUnit.textureUseIds) {
+		// The placement snapshot is the authority for dependency purpose.
 		const placement =
-			texturePlacementSnapshot.placementsByItemId.get(bindingKey);
+			texturePlacementSnapshot.placementsByItemId.get(bindingId);
 		if (!placement) {
 			throw new Error(
-				`Terrain draw unit ${drawUnit.drawUnitId} is missing pre-bake texture placement ${bindingKey}.`,
+				`Terrain draw unit ${drawUnit.drawUnitId} is missing pre-bake texture placement ${bindingId}.`,
 			);
 		}
 		let itemIds = itemIdsByPurpose.get(placement.purpose);
@@ -1035,7 +1037,7 @@ function createTerrainTextureRoleDependencies(
 			itemIds = new Set<string>();
 			itemIdsByPurpose.set(placement.purpose, itemIds);
 		}
-		itemIds.add(bindingKey);
+		itemIds.add(bindingId);
 	}
 
 	return Array.from(itemIdsByPurpose, ([purpose, itemIds]) => ({
@@ -1046,8 +1048,8 @@ function createTerrainTextureRoleDependencies(
 
 function collectTerrainMaterialPlanTextureUseIds(
 	plan: TerrainMaterialLayerPlan,
-): readonly string[] {
-	const textureUseIds = new Set<string>();
+): readonly TextureBindingId[] {
+	const textureUseIds = new Set<TextureBindingId>();
 	for (const entry of plan.layerEntries) {
 		for (const binding of collectTerrainLayerEntryTextureBindings(entry)) {
 			if (binding.textureUseId) {
@@ -1066,7 +1068,7 @@ function collectTerrainMaterialPlanTextureUseIds(
 function createTerrainTextureRequirementIndex(
 	textureUseScopeId: string,
 	textureUses: readonly TerrainTextureUseFacts[],
-): ReadonlyMap<string, TextureBindingRequirement> {
+): ReadonlyMap<TextureBindingId, TextureBindingRequirement> {
 	return new Map(
 		textureUses
 			.flatMap((textureUse) =>
@@ -1079,7 +1081,7 @@ function createTerrainTextureRequirementIndex(
 						]
 					: [],
 			)
-			.map((requirement) => [requirement.bindingKey, requirement] as const),
+			.map((requirement) => [requirement.bindingId, requirement] as const),
 	);
 }
 

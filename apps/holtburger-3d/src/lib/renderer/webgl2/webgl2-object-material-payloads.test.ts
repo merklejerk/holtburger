@@ -34,7 +34,7 @@ describe("WebGL2 static object payload builder", () => {
 					indexedClipThreshold: 0.5,
 					materialColor: [1, 2, 3, 4],
 					materialEmissiveColor: [5, 6, 7],
-					primaryTextureUseId: "missing-base",
+					primaryTextureBindingId: "missing-base",
 					slot: 1,
 				}),
 			],
@@ -69,10 +69,10 @@ describe("WebGL2 static object payload builder", () => {
 			materialEntries: [
 				createMaterialEntry({
 					detailTextureTiling: 3,
-					detailTextureUseId: "detail-use",
-					indexTextureUseId: "index-use",
+					detailTextureBindingId: "detail-use",
+					indexTextureBindingId: "index-use",
 					indexedTextureFormat: "index16",
-					paletteTextureUseId: "palette-use",
+					paletteTextureBindingId: "palette-use",
 					primaryTextureWrapMode: "repeat",
 					slot: 2,
 				}),
@@ -170,7 +170,7 @@ describe("WebGL2 static object payload builder", () => {
 		const residentResource = createStaticResource({
 			materialEntries: [
 				createMaterialEntry({
-					primaryTextureUseId: "base-use",
+					primaryTextureBindingId: "base-use",
 					slot: 0,
 				}),
 			],
@@ -232,7 +232,7 @@ describe("WebGL2 static object payload builder", () => {
 		const resource = createStaticResource({
 			materialEntries: [
 				createMaterialEntry({
-					primaryTextureUseId: "base-use",
+					primaryTextureBindingId: "base-use",
 					slot: 0,
 				}),
 			],
@@ -304,15 +304,15 @@ function createMaterialEntry(
 	return {
 		alphaTest: options.alphaTest ?? 0,
 		detailTextureTiling: options.detailTextureTiling ?? 1,
-		detailTextureUseId: options.detailTextureUseId ?? null,
-		indexTextureUseId: options.indexTextureUseId ?? null,
+		detailTextureBindingId: options.detailTextureBindingId ?? null,
+		indexTextureBindingId: options.indexTextureBindingId ?? null,
 		indexedClipThreshold: options.indexedClipThreshold ?? -1,
 		indexedTextureFormat: options.indexedTextureFormat ?? null,
 		materialColor: options.materialColor ?? [1, 1, 1, 1],
 		materialEmissiveColor: options.materialEmissiveColor ?? [0, 0, 0],
 		materialIds: options.materialIds ?? [],
-		paletteTextureUseId: options.paletteTextureUseId ?? null,
-		primaryTextureUseId: options.primaryTextureUseId ?? null,
+		paletteTextureBindingId: options.paletteTextureBindingId ?? null,
+		primaryTextureBindingId: options.primaryTextureBindingId ?? null,
 		primaryTextureWrapMode: options.primaryTextureWrapMode ?? "clamp",
 		renderState: options.renderState ?? opaqueRenderState,
 		slot: options.slot,

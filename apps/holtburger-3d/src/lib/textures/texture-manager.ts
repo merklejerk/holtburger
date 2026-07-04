@@ -179,6 +179,7 @@ export class TextureManager {
 		VisualTextureEntryRef,
 		Set<string>
 	>();
+	readonly #bindingIdByItemId = new Map<string, TextureBindingId>();
 	readonly #placementRecordsByItemId = new Map<
 		string,
 		TexturePlacementRecord
@@ -642,7 +643,7 @@ export class TextureManager {
 			resolvedTexturePlacements.push(
 				...createResolvedTexturePlacementsForEntry(entry, [
 					textureUse.textureUseId,
-				]),
+				], this.#bindingIdByItemId),
 			);
 		}
 
@@ -735,6 +736,7 @@ export class TextureManager {
 			textureKey,
 		});
 		this.#recordTextureEntryItemId(entryRef, textureUse.textureUseId);
+		this.#bindingIdByItemId.set(textureUse.textureUseId, textureUse.bindingId);
 		if (existing) {
 			this.#recordPlacementEntry(existing, textureUse.textureUseId);
 			return {
@@ -998,6 +1000,7 @@ export class TextureManager {
 					...createResolvedTexturePlacementsForEntry(
 						existingEntry,
 						textureUseIds,
+						this.#bindingIdByItemId,
 					),
 				);
 			}
@@ -1022,7 +1025,7 @@ export class TextureManager {
 				resolvedTexturePlacements.push(
 					...createResolvedTexturePlacementsForEntry(registryEntry, [
 						...entry.textureUseIds,
-					]),
+					], this.#bindingIdByItemId),
 				);
 			}
 		}
@@ -1112,6 +1115,7 @@ export class TextureManager {
 					...createResolvedTexturePlacementsForEntry(
 						existingEntry,
 						textureUseIds,
+						this.#bindingIdByItemId,
 					),
 				);
 			}
@@ -1150,7 +1154,7 @@ export class TextureManager {
 			resolvedTexturePlacements.push(
 				...createResolvedTexturePlacementsForEntry(registryEntry, [
 					...pendingEntry.textureUseIds,
-				]),
+				], this.#bindingIdByItemId),
 			);
 		}
 
@@ -2554,9 +2558,11 @@ function updateExistingRegistryEntryForPageLocalRepack(options: {
 function createResolvedTexturePlacementsForEntry(
 	entry: VisualTextureRegistryEntry,
 	textureUseIds: readonly string[],
+	bindingIdByItemId?: ReadonlyMap<string, TextureBindingId>,
 ): readonly ResolvedTexturePlacement[] {
 	const physicalEntry = entry.physicalEntry;
 	return uniqueSortedStrings(textureUseIds).map((textureUseId) => ({
+		bindingId: bindingIdByItemId?.get(textureUseId) ?? entry.bindingId,
 		pageVersion: {
 			placementRevision: physicalEntry.placementRevision,
 			textureRefId: physicalEntry.textureRefId,

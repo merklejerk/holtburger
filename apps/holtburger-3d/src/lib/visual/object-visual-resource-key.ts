@@ -4,6 +4,7 @@ import type {
 	ObjectVisualResourceKey,
 	ObjectVisualSourceGeometryKey,
 } from "./object-visual-install-set";
+import type { TextureBindingId } from "../textures/identity";
 import type { VisualGeometryMaterialTableEntry } from "./visual-geometry";
 
 export interface ObjectVisualResourceKeyInput {
@@ -13,7 +14,7 @@ export interface ObjectVisualResourceKeyInput {
 	readonly materialFamily: ObjectVisualResourceKey["materialFamily"];
 	readonly materialPass: ObjectVisualResourceKey["materialPass"];
 	readonly renderState: ObjectVisualResourceKey["renderState"];
-	readonly textureUseIds: readonly string[];
+	readonly textureUseIds: readonly TextureBindingId[];
 }
 
 export function createObjectVisualResourceKey(
@@ -109,15 +110,15 @@ function createObjectVisualMaterialEntryKey(
 	return {
 		alphaTest: entry.alphaTest,
 		detailTextureTiling: entry.detailTextureTiling,
-		detailTextureUseId: entry.detailTextureUseId,
-		indexTextureUseId: entry.indexTextureUseId,
+		detailTextureBindingId: entry.detailTextureBindingId,
+		indexTextureBindingId: entry.indexTextureBindingId,
 		indexedClipThreshold: entry.indexedClipThreshold,
 		indexedTextureFormat: entry.indexedTextureFormat,
 		materialColor: entry.materialColor,
 		materialEmissiveColor: entry.materialEmissiveColor,
 		materialIds: [...entry.materialIds].sort((left, right) => left - right),
-		paletteTextureUseId: entry.paletteTextureUseId,
-		primaryTextureUseId: entry.primaryTextureUseId,
+		paletteTextureBindingId: entry.paletteTextureBindingId,
+		primaryTextureBindingId: entry.primaryTextureBindingId,
 		primaryTextureWrapMode: entry.primaryTextureWrapMode,
 		renderState: createObjectVisualRenderStateKey(entry.renderState),
 		slot: entry.slot,

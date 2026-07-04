@@ -1546,8 +1546,9 @@ export interface TerrainGeometryStaticDrawUnit {
 	readonly vertexCount: number;
 	readonly triangleCount: number;
 	readonly sourceTriangleIds: readonly string[];
-	readonly primaryTextureUseId: string | null;
-	readonly textureUseIds: readonly string[];
+	readonly primaryTextureBindingId: TextureBindingId | null;
+	/** Renderer material binding ids used by this draw unit. */
+	readonly textureUseIds: readonly TextureBindingId[];
 	readonly terrainMaterialPlan: TerrainMaterialLayerPlan | null;
 	readonly terrainFallbackReasons: readonly TerrainMaterialFallbackReason[];
 }
@@ -1574,7 +1575,8 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly sourceMappingCoverage: readonly StaticObjectSourceMappingCoverage[];
 	readonly spatialRecord: StaticSpatialRecord | null;
 	readonly materialEntries: readonly StaticMaterialTableEntry[];
-	readonly textureUseIds: readonly string[];
+	/** Renderer material binding ids used by this draw unit. */
+	readonly textureUseIds: readonly TextureBindingId[];
 	readonly materialIds: readonly number[];
 }
 
@@ -1610,10 +1612,10 @@ interface StaticObjectVisualResourceKey {
 	 */
 	readonly indexType: StaticObjectGeometryStaticDrawUnit["indexType"];
 	/**
-	 * Texture use ids are included so renderer texture bindings can move from
-	 * draw-unit ownership to visual-resource ownership without hidden side data.
+	 * Renderer material binding ids are included so texture bindings can live
+	 * with visual-resource ownership without hidden side data.
 	 */
-	readonly textureUseIds: readonly string[];
+	readonly textureUseIds: readonly TextureBindingId[];
 }
 
 export interface StaticObjectVisualResource extends VisualGeometryPayload {
@@ -1700,7 +1702,8 @@ export interface StructuredInteriorGeometryStaticDrawUnit {
 	readonly sourceTriangleIds: readonly string[];
 	readonly surfaceIds: readonly number[];
 	readonly materialIds: readonly number[];
-	readonly textureUseIds: readonly string[];
+	/** Renderer material binding ids used by this draw unit. */
+	readonly textureUseIds: readonly TextureBindingId[];
 }
 
 export interface StructuredInteriorMaterialPlanEntry {
@@ -1714,7 +1717,8 @@ export interface StructuredInteriorMaterialPlanEntry {
 		| "unsupported";
 	readonly pass: StaticObjectMaterialPass;
 	readonly outcome: StaticMaterialRenderOutcome;
-	readonly textureUseIds: readonly string[];
+	/** Renderer material binding ids used by this material plan entry. */
+	readonly textureUseIds: readonly TextureBindingId[];
 	readonly diagnostics: readonly StructuredInteriorMaterialDiagnostic[];
 }
 
@@ -1759,15 +1763,15 @@ export interface StaticMaterialTableEntry {
 	readonly renderState: StaticObjectRenderState;
 	readonly materialColor: readonly [number, number, number, number];
 	readonly materialEmissiveColor: readonly [number, number, number];
-	/** Material binding key for the entry's RGBA base-color texture, if present. */
-	readonly primaryTextureUseId: string | null;
-	/** Material binding key for the entry's indexed color texture, if present. */
-	readonly indexTextureUseId: string | null;
+	/** Material binding id for the entry's RGBA base-color texture, if present. */
+	readonly primaryTextureBindingId: TextureBindingId | null;
+	/** Material binding id for the entry's indexed color texture, if present. */
+	readonly indexTextureBindingId: TextureBindingId | null;
 	readonly indexedTextureFormat: "p8" | "index16" | null;
-	/** Material binding key for the entry's palette texture, if present. */
-	readonly paletteTextureUseId: string | null;
-	/** Material binding key for the entry's detail overlay texture, if present. */
-	readonly detailTextureUseId: string | null;
+	/** Material binding id for the entry's palette texture, if present. */
+	readonly paletteTextureBindingId: TextureBindingId | null;
+	/** Material binding id for the entry's detail overlay texture, if present. */
+	readonly detailTextureBindingId: TextureBindingId | null;
 	readonly detailTextureTiling: number;
 	readonly primaryTextureWrapMode: "clamp" | "repeat";
 }
@@ -1828,7 +1832,7 @@ export interface TerrainMaterialLayerEntry {
 export interface TerrainMaterialTextureRoleBinding {
 	readonly role: TerrainTextureUseFacts["role"];
 	readonly texture: SurfaceTextureIdentity;
-	readonly textureUseId: string | null;
+	readonly textureUseId: TextureBindingId | null;
 	readonly tiling: number;
 	readonly wrap: "repeat" | "clamp";
 }

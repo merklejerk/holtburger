@@ -3,6 +3,7 @@ import type {
 	StaticMaterialTableEntry,
 	StaticObjectRenderState,
 } from "../contracts";
+import type { TextureBindingId } from "../../textures/identity";
 import type {
 	ObjectVisualMaterialPlan,
 	ObjectVisualMaterialTextureUseRole,
@@ -12,11 +13,11 @@ import {
 	type StaticMaterialTextureWrapMode,
 } from "./static-material-texture-policy";
 
-export interface StaticMaterialTextureUseIdFactory {
+export interface StaticMaterialTextureBindingIdFactory {
 	(
 		dataUse: MaterialTextureDataUseIdentity,
 		wrapMode: StaticMaterialTextureWrapMode,
-	): string;
+	): TextureBindingId;
 }
 
 export function createStaticMaterialEntryKey(options: {
@@ -81,7 +82,7 @@ export function createStaticMaterialTextureRoleSchemaKey(
 }
 
 export function createStaticMaterialTableEntry(options: {
-	readonly createTextureUseId: StaticMaterialTextureUseIdFactory;
+	readonly createTextureUseId: StaticMaterialTextureBindingIdFactory;
 	readonly materialIds: readonly number[];
 	readonly plan: ObjectVisualMaterialPlan;
 	readonly slot: number;
@@ -113,21 +114,21 @@ export function createStaticMaterialTableEntry(options: {
 	return {
 		alphaTest: options.plan.alphaPolicy.alphaTest,
 		detailTextureTiling: resolveStaticMaterialDetailTextureTiling(options.plan),
-		detailTextureUseId: detailTextureUse
+		detailTextureBindingId: detailTextureUse
 			? options.createTextureUseId(detailTextureUse, options.textureWrapMode)
 			: null,
 		indexedClipThreshold: options.plan.alphaPolicy.indexedClipThreshold,
 		indexedTextureFormat,
-		indexTextureUseId: indexTextureUse
+		indexTextureBindingId: indexTextureUse
 			? options.createTextureUseId(indexTextureUse, options.textureWrapMode)
 			: null,
 		materialColor: options.plan.color,
 		materialEmissiveColor: options.plan.emissiveColor,
 		materialIds: options.materialIds,
-		paletteTextureUseId: paletteTextureUse
+		paletteTextureBindingId: paletteTextureUse
 			? options.createTextureUseId(paletteTextureUse, options.textureWrapMode)
 			: null,
-		primaryTextureUseId: primaryTextureUse
+		primaryTextureBindingId: primaryTextureUse
 			? options.createTextureUseId(primaryTextureUse, options.textureWrapMode)
 			: null,
 		primaryTextureWrapMode: options.textureWrapMode,

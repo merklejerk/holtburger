@@ -197,8 +197,8 @@ function createPublishedTextureUses(input: {
 				return [];
 			}
 			const owners = collectPublishedTextureUseOwners({
+				bindingId: binding.bindingId,
 				installSet: input.installSet,
-				textureUseId: binding.textureUseId,
 			});
 			if (owners.length === 0) {
 				return [];
@@ -219,17 +219,17 @@ function createPublishedTextureUses(input: {
 }
 
 function collectPublishedTextureUseOwners(input: {
+	readonly bindingId: ObjectVisualTextureBinding["bindingId"];
 	readonly installSet: ObjectVisualInstallSet;
-	readonly textureUseId: string;
 }): readonly StaticTextureUseOwner[] {
 	return uniqueSortedStaticTextureUseOwners([
 		...input.installSet.directDrawUnits.flatMap((drawUnit) =>
-			drawUnit.textureUseIds.includes(input.textureUseId)
+			drawUnit.textureUseIds.includes(input.bindingId)
 				? [{ drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" as const }]
 				: [],
 		),
 		...input.installSet.visualResources.flatMap((resource) =>
-			resource.textureUseIds.includes(input.textureUseId)
+			resource.textureUseIds.includes(input.bindingId)
 				? [
 						{
 							kind: "static-object-visual-resource" as const,
@@ -273,10 +273,10 @@ function createTextureRoleDependencies(
 	const index = new Set<string>();
 	const palette = new Set<string>();
 	for (const entry of entries) {
-		addNullableString(baseColor, entry.primaryTextureUseId);
-		addNullableString(detail, entry.detailTextureUseId);
-		addNullableString(index, entry.indexTextureUseId);
-		addNullableString(palette, entry.paletteTextureUseId);
+		addNullableString(baseColor, entry.primaryTextureBindingId);
+		addNullableString(detail, entry.detailTextureBindingId);
+		addNullableString(index, entry.indexTextureBindingId);
+		addNullableString(palette, entry.paletteTextureBindingId);
 	}
 
 	return [

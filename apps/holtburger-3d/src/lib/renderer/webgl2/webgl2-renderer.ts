@@ -54,6 +54,7 @@ import type {
 	StructuredInteriorGeometryStaticDrawUnit,
 	TerrainGeometryStaticDrawUnit,
 } from "../../static/contracts";
+import type { TextureBindingId } from "../../textures/identity";
 import {
 	type TextureFilteringMode,
 	type TextureWrapMode,
@@ -749,7 +750,10 @@ class Webgl2Renderer implements Renderer {
 		PortalApertureRangeResource
 	>();
 	readonly #textures = new Map<string, WebGLTexture>();
-	readonly #texturePlacements = new Map<string, ResolvedTexturePlacement>();
+	readonly #texturePlacements = new Map<
+		TextureBindingId,
+		ResolvedTexturePlacement
+	>();
 	readonly #staticLayerOwnershipByKey = new Map<
 		string,
 		StaticLayerResourceOwnership
@@ -1155,9 +1159,9 @@ class Webgl2Renderer implements Renderer {
 					}
 					gl.deleteTexture(texture);
 					this.#textures.delete(textureRefId);
-					for (const [textureUseId, placement] of this.#texturePlacements) {
+					for (const [bindingId, placement] of this.#texturePlacements) {
 						if (placement.textureRefId === textureRefId) {
-							this.#texturePlacements.delete(textureUseId);
+							this.#texturePlacements.delete(bindingId);
 						}
 					}
 				}
@@ -1176,7 +1180,7 @@ class Webgl2Renderer implements Renderer {
 		}
 
 		for (const placement of update.resolvedTexturePlacements) {
-			this.#texturePlacements.set(placement.textureUseId, placement);
+			this.#texturePlacements.set(placement.bindingId, placement);
 			shouldMarkAllStaticPayloadsDirty = true;
 			shouldMarkAllTerrainPayloadsDirty = true;
 		}
@@ -1882,8 +1886,8 @@ class Webgl2Renderer implements Renderer {
 		});
 
 		for (const resource of this.#terrainResources.values()) {
-			const placement = resource.primaryTextureUseId
-				? this.#texturePlacements.get(resource.primaryTextureUseId)
+			const placement = resource.primaryTextureBindingId
+				? this.#texturePlacements.get(resource.primaryTextureBindingId)
 				: undefined;
 			const texture = placement
 				? (this.#textures.get(placement.textureRefId) ?? null)
@@ -3541,7 +3545,7 @@ interface TerrainGeometryResource {
 	readonly drawUnitId: string;
 	readonly landblockId: TerrainGeometryStaticDrawUnit["landblockId"];
 	readonly materialFamily: TerrainGeometryStaticDrawUnit["materialFamily"];
-	readonly primaryTextureUseId: string | null;
+	readonly primaryTextureBindingId: TextureBindingId | null;
 	readonly preparedLayeredPayloadState: TerrainPreparedLayeredPayloadState;
 	readonly terrainMaterialPlan: TerrainGeometryStaticDrawUnit["terrainMaterialPlan"];
 	readonly indexCount: number;
@@ -4496,7 +4500,7 @@ function createTerrainGeometryResource(
 			drawUnit.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
 		landblockId: drawUnit.landblockId,
 		materialFamily: drawUnit.materialFamily,
-		primaryTextureUseId: drawUnit.primaryTextureUseId,
+		primaryTextureBindingId: drawUnit.primaryTextureBindingId,
 		preparedLayeredPayloadState: createTerrainPreparedLayeredPayloadState(),
 		terrainMaterialPlan: drawUnit.terrainMaterialPlan,
 		layerSlotBuffer,

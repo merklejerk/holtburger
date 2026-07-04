@@ -4,7 +4,7 @@ import type {
 	StaticBakeJobResult,
 	StaticBakeTask,
 } from "../contracts";
-import { StaticBakeWorkerClient, WorkerPoolStaticBaker } from "./worker-client";
+import { WorkerPoolStaticBaker } from "./worker-client";
 import type {
 	StaticBakeWorkerPort,
 	StaticBakeWorkerRequest,
@@ -16,9 +16,12 @@ import { emitStaticBakeWorkerTrace } from "./worker-trace";
 describe("static bake worker protocol", () => {
 	it("posts standard static bake inputs and resolves returned bake results", async () => {
 		const port = new FixtureWorkerPort();
-		const client = new StaticBakeWorkerClient(port);
+		const baker = new WorkerPoolStaticBaker({
+			createWorker: () => port,
+			workerCount: 1,
+		});
 		const input = createInput();
-		const pending = client.bake(input);
+		const pending = baker.bake(input);
 
 		expect(port.requests).toEqual([
 			{
@@ -27,7 +30,7 @@ describe("static bake worker protocol", () => {
 				requestId: "bake-job:0",
 			},
 		]);
-		expect(client.createDiagnosticsSnapshot().pendingJobs).toMatchObject([
+		expect(baker.createDiagnosticsSnapshot().pendingJobs).toMatchObject([
 			{
 				requestId: "bake-job:0",
 				stage: "executing",
@@ -48,7 +51,7 @@ describe("static bake worker protocol", () => {
 			kind: "progress",
 			requestId: "bake-job:0",
 		});
-		expect(client.createDiagnosticsSnapshot().pendingJobs).toMatchObject([
+		expect(baker.createDiagnosticsSnapshot().pendingJobs).toMatchObject([
 			{
 				requestId: "bake-job:0",
 				stage: "executing",
@@ -72,7 +75,7 @@ describe("static bake worker protocol", () => {
 			drawUnits: [],
 			task: input.task,
 		});
-		client.dispose();
+		baker.dispose();
 	});
 
 	it("turns baker handler failures into standard worker errors after started progress", async () => {

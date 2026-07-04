@@ -17,10 +17,7 @@ import type {
 	DynamicVisualRecipeWorkerThreadMessage,
 } from "./visual-recipe-protocol";
 import type { DynamicVisualRecipeResolutionRequest } from "./visual-recipe-resolver";
-import {
-	DynamicVisualRecipeWorkerClient,
-	WorkerPoolDynamicVisualRecipeResolver,
-} from "./visual-recipe-worker-client";
+import { WorkerPoolDynamicVisualRecipeResolver } from "./visual-recipe-worker-client";
 import { installDynamicVisualRecipeWorkerHandler } from "./visual-recipe-worker-handler";
 
 describe("dynamic visual recipe worker protocol", () => {
@@ -29,10 +26,14 @@ describe("dynamic visual recipe worker protocol", () => {
 		const assetReader = new FixturePreparedAssetReader(
 			new Error("test should not use main-thread reader"),
 		);
-		const client = new DynamicVisualRecipeWorkerClient(port, assetReader);
+		const resolver = new WorkerPoolDynamicVisualRecipeResolver({
+			assetReader,
+			createWorker: () => port,
+			workerCount: 1,
+		});
 		const request = createResolutionRequest();
 		const recipe = createRecipe(request);
-		const pending = client.resolveRecipe(request);
+		const pending = resolver.resolveRecipe(request);
 
 		expect(port.requests).toEqual([
 			{
@@ -49,7 +50,7 @@ describe("dynamic visual recipe worker protocol", () => {
 		});
 
 		await expect(pending).resolves.toBe(recipe);
-		client.dispose();
+		resolver.dispose();
 	});
 
 	it("routes prepared asset service requests through the pool service handler", async () => {

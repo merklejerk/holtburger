@@ -21,29 +21,6 @@ interface StaticBakeRequestDiagnostics {
 	readonly traceEvents: StaticBakerTraceEvent[];
 }
 
-export class StaticBakeWorkerClient implements StaticBaker {
-	readonly #baker: StandardStaticWorkerBaker;
-
-	constructor(port: StaticBakeWorkerPort) {
-		this.#baker = new StandardStaticWorkerBaker({
-			createWorker: () => port,
-			workerCount: 1,
-		});
-	}
-
-	bake(input: StaticBakeJobInput): Promise<StaticBakeJobResult> {
-		return this.#baker.bake(input);
-	}
-
-	createDiagnosticsSnapshot(): StaticBakerDiagnosticsSnapshot {
-		return this.#baker.createDiagnosticsSnapshot();
-	}
-
-	dispose(): void {
-		this.#baker.dispose();
-	}
-}
-
 export class WorkerPoolStaticBaker implements StaticBaker {
 	readonly #baker: StandardStaticWorkerBaker;
 

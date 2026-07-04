@@ -325,6 +325,125 @@ describe("standard worker pool", () => {
 			},
 		]);
 	});
+
+	it("routes worker service requests through the configured service handler", async () => {
+		const factory = new FixtureServiceWorkerFactory();
+		const pool = new StandardWorkerPool<
+			EchoInput,
+			EchoOutput,
+			EchoProgress,
+			{ readonly key: string },
+			{ readonly value: string }
+		>({
+			createWorker: () => factory.createWorker(),
+			requestIdPrefix: "service-worker",
+			serviceHandler: async (request) => ({
+				response: { value: `asset:${request.key}` },
+			}),
+			size: 1,
+		});
+		const result = pool.submit({ value: "needs-service" });
+
+		factory.workers[0]?.emit({
+			kind: "service-request",
+			request: { key: "06000010" },
+			requestId: "service-worker:0",
+			serviceRequestId: "service:1",
+		});
+		await Promise.resolve();
+
+		expect(factory.workers[0]?.messages.at(-1)).toEqual({
+			kind: "service-response",
+			response: { value: "asset:06000010" },
+			serviceRequestId: "service:1",
+		});
+
+		factory.workers[0]?.emit({
+			kind: "result",
+			output: { value: "done" },
+			requestId: "service-worker:0",
+		});
+		await expect(result).resolves.toEqual({ value: "done" });
+	});
+
+	it("turns service handler failures into worker service errors", async () => {
+		const factory = new FixtureServiceWorkerFactory();
+		const pool = new StandardWorkerPool<
+			EchoInput,
+			EchoOutput,
+			EchoProgress,
+			{ readonly key: string },
+			{ readonly value: string }
+		>({
+			createWorker: () => factory.createWorker(),
+			requestIdPrefix: "service-worker",
+			serviceHandler: async () => {
+				throw new Error("asset missing");
+			},
+			size: 1,
+		});
+
+		void pool.submit({ value: "needs-service" });
+		factory.workers[0]?.emit({
+			kind: "service-request",
+			request: { key: "missing" },
+			requestId: "service-worker:0",
+			serviceRequestId: "service:2",
+		});
+		await Promise.resolve();
+
+		expect(factory.workers[0]?.messages.at(-1)).toEqual({
+			kind: "service-error",
+			message: "asset missing",
+			serviceRequestId: "service:2",
+		});
+	});
+
+	it("drops service responses after job cancellation", async () => {
+		const factory = new FixtureServiceWorkerFactory();
+		let resolveService:
+			| ((result: { readonly response: { readonly value: string } }) => void)
+			| null = null;
+		const pool = new StandardWorkerPool<
+			EchoInput,
+			EchoOutput,
+			EchoProgress,
+			{ readonly key: string },
+			{ readonly value: string }
+		>({
+			createWorker: () => factory.createWorker(),
+			requestIdPrefix: "service-worker",
+			serviceHandler: async () =>
+				new Promise((resolve) => {
+					resolveService = resolve;
+				}),
+			size: 1,
+		});
+		const handle = pool.submitHandle({ value: "needs-service" });
+
+		factory.workers[0]?.emit({
+			kind: "service-request",
+			request: { key: "slow" },
+			requestId: "service-worker:0",
+			serviceRequestId: "service:3",
+		});
+		handle.cancel();
+		resolveService?.({ response: { value: "late" } });
+		await Promise.resolve();
+
+		expect(factory.workers[0]?.messages).toEqual([
+			{
+				input: { value: "needs-service" },
+				kind: "job",
+				requestId: "service-worker:0",
+			},
+			{
+				kind: "cancel",
+				requestId: "service-worker:0",
+			},
+		]);
+		await expect(handle.result).rejects.toThrow("Worker job was canceled.");
+	});
 });
 
 function createPool(
@@ -385,6 +504,61 @@ class FixtureWorkerPort implements WorkerMessagePort<
 
 	emit(response: EchoResponse): void {
 		const event = { data: response } as MessageEvent<EchoResponse>;
+		for (const listener of this.#listeners) {
+			listener(event);
+		}
+	}
+}
+
+type ServiceRequest = WorkerPoolRequestMessage<
+	EchoInput,
+	{ readonly value: string }
+>;
+type ServiceResponse = WorkerPoolResponseMessage<
+	EchoOutput,
+	EchoProgress,
+	{ readonly key: string }
+>;
+
+class FixtureServiceWorkerFactory {
+	readonly workers: FixtureServiceWorkerPort[] = [];
+
+	createWorker(): FixtureServiceWorkerPort {
+		const worker = new FixtureServiceWorkerPort();
+		this.workers.push(worker);
+		return worker;
+	}
+}
+
+class FixtureServiceWorkerPort implements WorkerMessagePort<
+	ServiceRequest,
+	ServiceResponse
+> {
+	readonly messages: ServiceRequest[] = [];
+	readonly #listeners = new Set<
+		(event: MessageEvent<ServiceResponse>) => void
+	>();
+
+	postMessage(message: ServiceRequest): void {
+		this.messages.push(message);
+	}
+
+	addEventListener(
+		_type: "message",
+		listener: (event: MessageEvent<ServiceResponse>) => void,
+	): void {
+		this.#listeners.add(listener);
+	}
+
+	removeEventListener(
+		_type: "message",
+		listener: (event: MessageEvent<ServiceResponse>) => void,
+	): void {
+		this.#listeners.delete(listener);
+	}
+
+	emit(response: ServiceResponse): void {
+		const event = { data: response } as MessageEvent<ServiceResponse>;
 		for (const listener of this.#listeners) {
 			listener(event);
 		}

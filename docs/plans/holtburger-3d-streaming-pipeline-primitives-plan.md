@@ -1,6 +1,6 @@
 # Holtburger 3D Streaming Pipeline Primitives Plan
 
-Status: Phase 5 complete; implementation stopped before Phase 6 by design.
+Status: Phase 6 complete; next architecture work is texture placement transaction remodeling.
 
 Related context:
 
@@ -297,8 +297,9 @@ Decisions and course corrections:
 - Phase 3 should avoid the initially sketched `TextureLeaseSet.resourceIds` field unless a later
   implementation step proves it is necessary. `TextureResourceDependencies.resourceId` already
   carries the release key.
-- Phase 6 should not introduce `VisualResourceBundle` before Phase 5 proves that one shared envelope
-  preserves static/dynamic distinctions better than smaller shared component types.
+- The next phase after Phase 5 should not introduce `VisualResourceBundle` before Phase 5 proves that
+  one shared envelope preserves static/dynamic distinctions better than smaller shared component
+  types.
 
 ### Resteering After Phase 0
 
@@ -311,8 +312,9 @@ The remaining phases should stay narrower than the original draft:
 - Phase 4 should cut over exactly the four production runtime pin/release call sites found in Phase
   0.
 - Phase 5 remains a required stop point before any shared visual install product is introduced.
-- Phase 6 should prefer shared components over a shared envelope unless the code proves the envelope
-  reduces complexity without flattening provenance-specific facts.
+- The post-Phase-5 path should prefer scoped cleanup and then shared components over a shared
+  envelope unless the code proves the envelope reduces complexity without flattening
+  provenance-specific facts.
 
 ## Dry Run Through Phase 5
 
@@ -326,11 +328,9 @@ Likely implementation:
   helpers:
 
   ```ts
-  type BinaryTransferOwnership = "owned-transferable" | "borrowed";
-
   interface BinarySidecarView<TView extends ArrayBufferView = ArrayBufferView> {
     readonly label: string;
-    readonly ownership: BinaryTransferOwnership;
+    readonly ownership: "owned-transferable" | "borrowed";
     readonly view: TView;
   }
   ```
@@ -484,8 +484,8 @@ Likely implementation:
 Expected code pressure:
 
 - Low. The cutover is deliberately four call sites.
-- Static timing diagnostics can keep the same bucket names (`releaseTextureDependenciesMs`,
-  `pinTextureDependenciesMs`) because the runtime behavior is unchanged.
+- Static timing diagnostics can keep the same behavior, but Phase 6 should revisit names if the
+  lease cutover makes dependency wording actively misleading.
 
 Do not do in Phase 4:
 
@@ -520,8 +520,8 @@ Stop/go criteria at Phase 5:
 - Stop this plan and hand off to a texture placement transaction remodel if sidecars and leases are
   complete and the remaining stutter bottleneck is still dominated by `placement-intents` main-thread
   preparation.
-- Continue to Phase 6 only if the static/dynamic install code now shows obvious duplication that can
-  be deleted by extracting a small shared component.
+- Continue toward install-product extraction only if the static/dynamic install code now shows
+  obvious duplication that can be deleted by extracting a small shared component.
 
 ## Phase 1: Binary Sidecar Ownership Convention
 
@@ -532,13 +532,11 @@ Status: complete.
 Target shape:
 
 ```ts
-type BinaryTransferOwnership = "owned-transferable" | "borrowed";
-
 interface BinarySidecarView<TView extends ArrayBufferView = ArrayBufferView> {
   /** Typed-array view carrying binary payload bytes. */
   readonly view: TView;
   /** Whether this DTO owns the bytes strongly enough to transfer the backing buffer. */
-  readonly ownership: BinaryTransferOwnership;
+  readonly ownership: "owned-transferable" | "borrowed";
   /** Human-readable transfer label used in errors and diagnostics. */
   readonly label: string;
 }
@@ -574,7 +572,6 @@ Decisions and course corrections:
 - Phase 0 selected texture packing result pages as the pilot because they are already
   worker-created, transferred, and covered by protocol-local tests.
 - Implemented the shared ownership helper in `apps/holtburger-3d/src/lib/workers/transfers.ts`:
-  - `BinaryTransferOwnership`;
   - `BinarySidecarView`;
   - `collectTransferableBinarySidecars(...)`;
   - `addTransferableBinarySidecar(...)`.
@@ -808,19 +805,82 @@ Decisions and course corrections:
   - shared `VisualGeometryPayload` transfer collection for renderer geometry bytes.
 - Defer any `RendererVisualResourceProduct` extraction until static and dynamic renderer resource
   shapes converge without optional-field soup.
-- Stop before Phase 6. The next useful remodel should target the texture placement transaction path:
-  separating off-thread/source preparation from the small ordered main-thread placement commit.
+- Stop before install-product extraction. Promote a scoped cleanup phase first, then hand off to a
+  texture placement transaction remodel that separates off-thread/source preparation from the small
+  ordered main-thread placement commit.
 - The lease cutover intentionally hides owner bookkeeping from `TextureManager`. The manager still
   owns residency pin/release mechanics, but it no longer needs runtime/static/dynamic owner concepts
   to be passed through the public install paths.
 - Temporary stutter diagnostics remain disposable. Prefer deleting obsolete probes when convenient
   instead of bending the new boundary types around them.
 
-## Phase 6: Extract The Smallest Honest Install Product Shape
+## Phase 6: Boundary Cleanup Before Texture Placement Remodel
+
+Goal: delete or clarify residue from the sidecar/lease cutover before starting the texture placement
+transaction remodel.
+
+Status: complete.
+
+Scope:
+
+- Delete obsolete temporary diagnostics from the stutter investigation when they describe old
+  pipeline internals rather than durable sidecar, lease, worker, or transaction concepts.
+- Rename or update diagnostics labels only when the current wording now actively misleads.
+- Prefer making low-level `TextureManager` dependency methods private if focused tests can still
+  cover the behavior through lease APIs.
+- If low-level methods must remain reachable for implementation or tests, add an explicit cleanup
+  note or doc comment explaining that runtime code should use lease-facing APIs.
+- Delete compatibility helpers, dead aliases, and tests that only preserve pre-sidecar or pre-lease
+  paths.
+
+Non-goals:
+
+- Do not remodel texture placement.
+- Do not extract renderer install products.
+- Do not add new diagnostics unless deleting old diagnostics would otherwise leave no way to verify
+  an active investigation question.
+- Do not preserve temporary probes just because tests or snapshots happen to mention them.
+
+Acceptance criteria:
+
+- `rg "pinTextureResourceDependencies|releaseTextureResourceDependencies" apps/holtburger-3d/src/lib --glob '!**/*.test.ts'`
+  shows no production runtime call sites outside the texture manager implementation.
+- `rg "VisualResourceBundle" apps/holtburger-3d/src docs/plans` shows no production type adoption
+  and only historical/plan discussion.
+- Temporary investigation diagnostics are deleted, or the plan records why a remaining diagnostic is
+  durable.
+- Runtime-facing texture residency code continues to use `TextureLeaseSet` and resource-id release
+  vocabulary.
+- Focused touched tests and `npm run check` pass.
+- This plan records what was deleted, what was retained, and why.
+
+Decisions and course corrections:
+
+- Promoted immediately after Phase 5 because the cleanup is useful before the texture placement
+  transaction remodel and should remain scoped to subtraction or sharper boundaries.
+- The cleanup bar is deletion or clarity. Diagnostics should not drive the next design.
+- Renamed static commit timing fields from dependency wording to lease wording:
+  - `pinTextureLeasesMs`;
+  - `releaseTextureLeasesMs`.
+- Made `TextureManager` dependency pin/release mechanics private implementation details:
+  - `#pinTextureResourceDependencies(...)`;
+  - `#releaseTextureResourceDependencies(...)`.
+- Updated texture manager tests to exercise the public lease API instead of preserving direct
+  dependency-method access.
+- `lint:dead` exposed two public-surface leftovers from earlier phases. Removed the unused
+  `collectVisualGeometryPayloadTransfers(...)` export and collapsed `BinaryTransferOwnership` into
+  the exported `BinarySidecarView.ownership` field.
+- Retained texture mutation queue diagnostics as durable rather than temporary. They measure the
+  next known bottleneck: cross-kind queue wait, mutation run time, placement-intent volume, and
+  phase timing inside the serialized texture transaction path.
+- Did not delete the stutter investigation worksheet. It is historical evidence and still documents
+  the benchmark and bottleneck attribution.
+
+## Phase 7: Extract The Smallest Honest Install Product Shape
 
 Goal: remove static/dynamic install duplication only where the real post-lease model supports it.
 
-Status: deferred by Phase 5.
+Status: deferred by Phase 5 and Phase 6.
 
 Possible outcomes:
 
@@ -865,11 +925,12 @@ Decisions and course corrections:
   smaller renderer-resource product, and only if it deletes real static/dynamic duplication without
   flattening layer replacement, scene publication, or dynamic resource refresh semantics.
 
-## Phase 7: Cleanup And Measurement
+## Phase 8: Final Cleanup And Measurement
 
 Goal: remove migration debris and verify the primitives improved clarity.
 
-Status: deferred.
+Status: deferred until after any future extraction or texture placement remodel that uses these
+primitives.
 
 Deliverables:
 
@@ -890,8 +951,8 @@ Acceptance criteria:
 
 Decisions and course corrections:
 
-- Deferred with Phase 6. Cleanup should be folded into the next texture placement transaction remodel
-  or a focused diagnostics cleanup pass.
+- Replaced by the scoped Phase 6 cleanup for immediate residue. Keep this final cleanup phase for
+  later work that actually extracts or remodels pipeline code.
 
 ## Risks And Mitigations
 

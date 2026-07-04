@@ -1343,17 +1343,19 @@ describe("browser texture manager", () => {
 			itemId: secondUse.bindingId,
 			purpose: "terrain-color",
 		});
-		textureManager.pinTextureResourceDependencies([
-			{
-				resourceId: "terrain-b",
-				roles: [
-					{
-						itemIds: [secondUse.bindingId],
-						purpose: "terrain-color",
-					},
-				],
-			},
-		]);
+		textureManager.pinTextureLeaseSet(
+			createTextureLeaseSet([
+				{
+					resourceId: "terrain-b",
+					roles: [
+						{
+							itemIds: [secondUse.bindingId],
+							purpose: "terrain-color",
+						},
+					],
+				},
+			]),
+		);
 		expect(
 			textureManager
 				.createPlacementReferenceSnapshot()
@@ -1379,17 +1381,19 @@ describe("browser texture manager", () => {
 		await textureManager.placeTextureIntents({
 			intents: [createStaticPlacementIntent(textureUse)],
 		});
-		textureManager.pinTextureResourceDependencies([
-			{
-				resourceId: "terrain-a",
-				roles: [
-					{
-						itemIds: [textureUse.bindingId],
-						purpose: "terrain-color",
-					},
-				],
-			},
-		]);
+		textureManager.pinTextureLeaseSet(
+			createTextureLeaseSet([
+				{
+					resourceId: "terrain-a",
+					roles: [
+						{
+							itemIds: [textureUse.bindingId],
+							purpose: "terrain-color",
+						},
+					],
+				},
+			]),
+		);
 
 		await textureManager.placeTextureIntents({
 			intents: [createStaticPlacementIntent(textureUse)],
@@ -1404,11 +1408,11 @@ describe("browser texture manager", () => {
 			itemId: textureUse.bindingId,
 		});
 		expect(() =>
-			textureManager.releaseTextureResourceDependencies(["terrain-a"]),
+			textureManager.releaseTextureLeaseResourceIds(["terrain-a"]),
 		).not.toThrow();
 	});
 
-	it("pins and releases baked draw-unit texture dependencies", async () => {
+	it("pins and releases baked draw-unit texture leases", async () => {
 		const textureManager = new TextureManager({
 			assetService: new FixtureAssetService(),
 		});
@@ -1422,17 +1426,19 @@ describe("browser texture manager", () => {
 			intents: [createStaticPlacementIntent(textureUse)],
 		});
 
-		textureManager.pinTextureResourceDependencies([
-			{
-				resourceId: "terrain-a",
-				roles: [
-					{
-						itemIds: [textureUse.bindingId],
-						purpose: "terrain-color",
-					},
-				],
-			},
-		]);
+		textureManager.pinTextureLeaseSet(
+			createTextureLeaseSet([
+				{
+					resourceId: "terrain-a",
+					roles: [
+						{
+							itemIds: [textureUse.bindingId],
+							purpose: "terrain-color",
+						},
+					],
+				},
+			]),
+		);
 		expect(textureManager.createPlacementReferenceSnapshot()).toMatchObject([
 			{
 				activeReferenceCount: 1,
@@ -1441,7 +1447,7 @@ describe("browser texture manager", () => {
 			},
 		]);
 
-		textureManager.releaseTextureResourceDependencies(["terrain-a"]);
+		textureManager.releaseTextureLeaseResourceIds(["terrain-a"]);
 		expect(textureManager.createPlacementReferenceSnapshot()).toMatchObject([
 			{
 				activeReferenceCount: 0,
@@ -1630,17 +1636,19 @@ describe("browser texture manager", () => {
 		await textureManager.placeTextureIntents({
 			intents: [createStaticPlacementIntent(activeTextureUse)],
 		});
-		textureManager.pinTextureResourceDependencies([
-			{
-				resourceId: "terrain-a",
-				roles: [
-					{
-						itemIds: [activeTextureUse.bindingId],
-						purpose: "terrain-color",
-					},
-				],
-			},
-		]);
+		textureManager.pinTextureLeaseSet(
+			createTextureLeaseSet([
+				{
+					resourceId: "terrain-a",
+					roles: [
+						{
+							itemIds: [activeTextureUse.bindingId],
+							purpose: "terrain-color",
+						},
+					],
+				},
+			]),
+		);
 
 		const newTextureUse = createTextureUseCommit({
 			drawUnitId: "terrain-b",

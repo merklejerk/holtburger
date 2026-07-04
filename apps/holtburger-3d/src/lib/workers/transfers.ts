@@ -1,12 +1,10 @@
 type PartialTypedArrayTransferPolicy = "reject" | "skip";
 
-export type BinaryTransferOwnership = "borrowed" | "owned-transferable";
-
 export interface BinarySidecarView<TView extends ArrayBufferView = ArrayBufferView> {
 	/** Human-readable transfer label used in errors and diagnostics. */
 	readonly label: string;
 	/** Whether this DTO owns the bytes strongly enough to transfer the backing buffer. */
-	readonly ownership: BinaryTransferOwnership;
+	readonly ownership: "borrowed" | "owned-transferable";
 	/** Typed-array view carrying binary payload bytes. */
 	readonly view: TView;
 }

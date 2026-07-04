@@ -206,11 +206,11 @@ export interface StaticCommitInstallTimingDiagnostics {
 	readonly dynamicVisualPrepMs: number;
 	readonly installStaticCommitMs: number;
 	readonly materializeMs: number;
-	readonly pinTextureDependenciesMs: number;
+	readonly pinTextureLeasesMs: number;
 	readonly queryRecordsMs: number;
 	readonly refreshDebugOverlayMs: number;
 	readonly refreshEnvCellMembershipMs: number;
-	readonly releaseTextureDependenciesMs: number;
+	readonly releaseTextureLeasesMs: number;
 	readonly renderPassPlanMs: number;
 	readonly textureApplyMs: number;
 	readonly queuedMs: number;

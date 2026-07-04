@@ -1,3 +1,5 @@
+import type { TextureBindingId } from "../textures/identity";
+
 /** Axis-aligned bounds in the payload owner's source coordinate space. */
 interface VisualGeometryBounds {
 	readonly min: VisualGeometryVec3;
@@ -57,10 +59,14 @@ export interface VisualGeometryMaterialTableEntry {
 	readonly materialColor: readonly [number, number, number, number];
 	readonly materialEmissiveColor: readonly [number, number, number];
 	readonly primaryTextureBindingId: TextureBindingId | null;
+	readonly primaryTextureKey: string | null;
 	readonly indexTextureBindingId: TextureBindingId | null;
+	readonly indexTextureKey: string | null;
 	readonly indexedTextureFormat: "p8" | "index16" | null;
 	readonly paletteTextureBindingId: TextureBindingId | null;
+	readonly paletteTextureKey: string | null;
 	readonly detailTextureBindingId: TextureBindingId | null;
+	readonly detailTextureKey: string | null;
 	readonly detailTextureTiling: number;
 	readonly primaryTextureWrapMode: "clamp" | "repeat";
 }
@@ -105,4 +111,3 @@ export function estimateVisualGeometryPayloadBufferBytes(
 		payload.indices.byteLength
 	);
 }
-import type { TextureBindingId } from "../textures/identity";

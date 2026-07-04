@@ -313,14 +313,18 @@ function createMaterialTableEntry(options: {
 		alphaTest: options.materialRecipe.alphaTest,
 		detailTextureTiling: options.materialRecipe.detailTextureTiling,
 		detailTextureBindingId: null,
+		detailTextureKey: null,
 		indexTextureBindingId: null,
+		indexTextureKey: null,
 		indexedClipThreshold: options.materialRecipe.indexedClipThreshold,
 		indexedTextureFormat: null,
 		materialColor: options.materialRecipe.materialColor,
 		materialEmissiveColor: options.materialRecipe.materialEmissiveColor,
 		materialIds: [options.materialRecipeId],
 		paletteTextureBindingId: null,
+		paletteTextureKey: null,
 		primaryTextureBindingId: null,
+		primaryTextureKey: null,
 		primaryTextureWrapMode: options.materialRecipe.primaryTextureWrapMode,
 		renderState: options.materialRecipe.renderState,
 		slot: options.slot,
@@ -335,42 +339,52 @@ function createMaterialTableEntry(options: {
 				family: "flat-color",
 				pass: options.materialRecipe.pass,
 			};
-		case "indexed-color":
+		case "indexed-color": {
+			const indexBinding = requireTextureBinding(
+				options.textureBindings,
+				options.materialRecipe.colorTextureRecipeId,
+			);
+			const paletteBinding = requireTextureBinding(
+				options.textureBindings,
+				options.materialRecipe.paletteTextureRecipeId,
+			);
 			return {
 				entry: {
 					...baseEntry,
-					indexTextureBindingId: requireTextureBinding(
-						options.textureBindings,
-						options.materialRecipe.colorTextureRecipeId,
-					).bindingId,
+					indexTextureBindingId: indexBinding.bindingId,
+					indexTextureKey: indexBinding.textureKey,
 					indexedTextureFormat: options.materialRecipe.indexedTextureFormat,
-					paletteTextureBindingId: requireTextureBinding(
-						options.textureBindings,
-						options.materialRecipe.paletteTextureRecipeId,
-					).bindingId,
+					paletteTextureBindingId: paletteBinding.bindingId,
+					paletteTextureKey: paletteBinding.textureKey,
 				},
 				family: "indexed-paletted",
 				pass: options.materialRecipe.pass,
 			};
-		case "texture-rgba":
+		}
+		case "texture-rgba": {
+			const detailBinding =
+				options.materialRecipe.detailTextureRecipeId === null
+					? null
+					: requireTextureBinding(
+							options.textureBindings,
+							options.materialRecipe.detailTextureRecipeId,
+						);
+			const rgbaBinding = requireTextureBinding(
+				options.textureBindings,
+				options.materialRecipe.rgbaTextureRecipeId,
+			);
 			return {
 				entry: {
 					...baseEntry,
-					detailTextureBindingId:
-						options.materialRecipe.detailTextureRecipeId === null
-							? null
-							: requireTextureBinding(
-									options.textureBindings,
-									options.materialRecipe.detailTextureRecipeId,
-								).bindingId,
-					primaryTextureBindingId: requireTextureBinding(
-						options.textureBindings,
-						options.materialRecipe.rgbaTextureRecipeId,
-					).bindingId,
+					detailTextureBindingId: detailBinding?.bindingId ?? null,
+					detailTextureKey: detailBinding?.textureKey ?? null,
+					primaryTextureBindingId: rgbaBinding.bindingId,
+					primaryTextureKey: rgbaBinding.textureKey,
 				},
 				family: "texture-rgba",
 				pass: options.materialRecipe.pass,
 			};
+		}
 		case "unsupported":
 			return null;
 	}

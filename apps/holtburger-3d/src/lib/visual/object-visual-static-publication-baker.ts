@@ -238,7 +238,6 @@ function createObjectVisualResource(
 			materialFamily: renderPart.materialFamily,
 			materialPass: renderPart.materialPass,
 			renderState: renderPart.renderState,
-			textureUseIds: renderPart.textureUseIds,
 		},
 		kind: "static-object-visual-resource",
 		resourceId,

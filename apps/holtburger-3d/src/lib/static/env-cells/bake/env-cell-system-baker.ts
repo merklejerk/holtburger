@@ -56,7 +56,6 @@ import {
 } from "../../../visual/object-material-draw-unit-partition";
 import {
 	createStructuredInteriorTextureBindingRequirement,
-	createStructuredInteriorTextureBindingId,
 	createStructuredInteriorMaterialCoverageReport,
 	getStructuredInteriorMaterialEntries,
 	planStructuredInteriorCellMaterials,
@@ -759,12 +758,18 @@ function createStructuredInteriorMaterialTableEntries(options: {
 		.map(
 			([, entry], slot): StaticMaterialTableEntry =>
 				createStaticMaterialTableEntry({
-					createTextureUseId: (dataUse, wrapMode) =>
-						createStructuredInteriorTextureBindingId({
+					createTextureUseId: (dataUse, wrapMode) => {
+						const requirement =
+							createStructuredInteriorTextureBindingRequirement({
 							dataUse,
 							task: options.task,
 							wrapMode,
-						}),
+						});
+						return {
+							bindingId: requirement.bindingId,
+							textureKey: requirement.sourceKey,
+						};
+					},
 					materialIds: uniqueSortedNumbers([...entry.materialIds]),
 					plan: entry.plan,
 					slot,

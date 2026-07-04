@@ -44,20 +44,34 @@ describe("object visual resource keys", () => {
 		expect(firstInstance.resourceId).toBe(secondInstance.resourceId);
 	});
 
-	it("normalizes material entry and texture-use ordering without dropping visual facts", () => {
+	it("normalizes material entry ordering and ignores scoped binding ids", () => {
 		const baseInput = createVisualKeyInput({
 			materialEntries: [
-				createMaterialEntry({ slot: 1, textureUseId: "texture-b" }),
-				createMaterialEntry({ slot: 0, textureUseId: "texture-a" }),
+				createMaterialEntry({
+					slot: 1,
+					textureBindingId: "binding:landblock-a:slot-b",
+					textureKey: "texture-key:b",
+				}),
+				createMaterialEntry({
+					slot: 0,
+					textureBindingId: "binding:landblock-a:slot-a",
+					textureKey: "texture-key:a",
+				}),
 			],
-			textureUseIds: ["texture-b", "texture-a", "texture-b"],
 		});
 		const reorderedInput = createVisualKeyInput({
 			materialEntries: [
-				createMaterialEntry({ slot: 0, textureUseId: "texture-a" }),
-				createMaterialEntry({ slot: 1, textureUseId: "texture-b" }),
+				createMaterialEntry({
+					slot: 0,
+					textureBindingId: "binding:landblock-b:slot-a",
+					textureKey: "texture-key:a",
+				}),
+				createMaterialEntry({
+					slot: 1,
+					textureBindingId: "binding:landblock-b:slot-b",
+					textureKey: "texture-key:b",
+				}),
 			],
-			textureUseIds: ["texture-a", "texture-b"],
 		});
 
 		expect(
@@ -67,6 +81,34 @@ describe("object visual resource keys", () => {
 		).toEqual(
 			createObjectVisualResourceKeyString(
 				createObjectVisualResourceKey(reorderedInput),
+			),
+		);
+
+		expect(
+			createObjectVisualResourceKeyString(
+				createObjectVisualResourceKey(
+					createVisualKeyInput({
+						materialEntries: [
+							createMaterialEntry({
+								textureBindingId: "binding:landblock-a:slot-a",
+								textureKey: "texture-key:a",
+							}),
+						],
+					}),
+				),
+			),
+		).not.toEqual(
+			createObjectVisualResourceKeyString(
+				createObjectVisualResourceKey(
+					createVisualKeyInput({
+						materialEntries: [
+							createMaterialEntry({
+								textureBindingId: "binding:landblock-a:slot-a",
+								textureKey: "texture-key:different",
+							}),
+						],
+					}),
+				),
 			),
 		);
 	});
@@ -157,7 +199,6 @@ function createVisualKeyInput(
 		materialFamily: "texture-rgba",
 		materialPass: "alpha-test",
 		renderState: createRenderState(),
-		textureUseIds: ["texture-a"],
 		...overrides,
 	};
 }
@@ -208,22 +249,28 @@ function createMaterialEntry(
 	options: {
 		readonly alphaTest?: number;
 		readonly slot?: number;
-		readonly textureUseId?: string;
+		readonly textureBindingId?: string;
+		readonly textureKey?: string;
 	} = {},
 ): StaticMaterialTableEntry {
-	const textureUseId = options.textureUseId ?? "texture-a";
+	const textureBindingId = options.textureBindingId ?? "binding:texture-a";
+	const textureKey = options.textureKey ?? "texture-key:a";
 	return {
 		alphaTest: options.alphaTest ?? 0.5,
-		detailTextureTiling: 1,
 		detailTextureBindingId: null,
+		detailTextureKey: null,
+		detailTextureTiling: 1,
 		indexedClipThreshold: 0,
 		indexedTextureFormat: null,
 		indexTextureBindingId: null,
+		indexTextureKey: null,
 		materialColor: [1, 1, 1, 1],
 		materialEmissiveColor: [0, 0, 0],
 		materialIds: [0x08000010],
 		paletteTextureBindingId: null,
-		primaryTextureBindingId: textureUseId,
+		paletteTextureKey: null,
+		primaryTextureBindingId: textureBindingId,
+		primaryTextureKey: textureKey,
 		primaryTextureWrapMode: "repeat",
 		renderState: createRenderState(),
 		slot: options.slot ?? 0,

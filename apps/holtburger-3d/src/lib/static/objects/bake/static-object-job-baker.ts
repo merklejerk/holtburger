@@ -985,7 +985,7 @@ function createStaticObjectMaterialTableEntries(options: {
 	return options.partition.coarseTablePlan.entries.map((entry, slot) =>
 		createStaticMaterialTableEntry({
 			createTextureUseId: (dataUse, wrapMode) =>
-				createStaticObjectTextureBindingId({
+				createStaticObjectTextureBindingReference({
 					dataUse,
 					domain: options.domain,
 					textureUseScopeId: options.textureUseScopeId,
@@ -1286,19 +1286,23 @@ function bakeStaticObjectPartitionGeometry(
 	};
 }
 
-function createStaticObjectTextureBindingId(options: {
+function createStaticObjectTextureBindingReference(options: {
 	readonly dataUse: MaterialTextureDataUseIdentity;
 	readonly domain: StaticBakeTask["domain"];
 	readonly textureUseScopeId: string;
 	readonly wrapMode: StaticObjectBatchPartition["textureWrapMode"];
-}): TextureBindingId {
-	return createStaticMaterialTextureBindingRequirement({
+}): { readonly bindingId: TextureBindingId; readonly textureKey: string } {
+	const requirement = createStaticMaterialTextureBindingRequirement({
 		dataUse: options.dataUse,
 		domain: options.domain,
 		textureUseNamespace: "static-object-texture",
 		textureUseScopeId: options.textureUseScopeId,
 		wrapMode: options.wrapMode,
-	}).bindingId;
+	});
+	return {
+		bindingId: requirement.bindingId,
+		textureKey: requirement.sourceKey,
+	};
 }
 
 function mergeTextureUses(

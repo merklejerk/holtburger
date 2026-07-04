@@ -70,6 +70,7 @@ type RuntimeDiagnosticsDomainReport =
 	| AssetServiceDiagnosticsReport
 	| DynamicDiagnosticsReport
 	| RendererDiagnosticsReport
+	| StaticCommitInstallDiagnosticsReport
 	| StaticCoordinatorDiagnosticsReport
 	| TerrainTextureDiagnosticsReport
 	| TextureAtlasDiagnosticsReport;
@@ -168,6 +169,51 @@ interface StaticObjectUploadSampleDiagnostics {
 	readonly drawUnitCount: number;
 	readonly uploadedBufferBytes: number;
 	readonly uploadMs: number;
+}
+
+export interface StaticCommitInstallDiagnosticsReport {
+	readonly kind: "static-commit-install";
+	readonly summary: StaticCommitInstallDiagnosticsSummary;
+	readonly committedCommits: readonly StaticCommitInstallCommitDiagnostics[];
+	readonly failedCommits: readonly StaticCommitInstallCommitDiagnostics[];
+	readonly pendingCommits: readonly StaticCommitInstallCommitDiagnostics[];
+}
+
+interface StaticCommitInstallDiagnosticsSummary {
+	readonly committed: number;
+	readonly failed: number;
+	readonly pending: number;
+	readonly slowestCommit: StaticCommitInstallCommitDiagnostics | null;
+}
+
+export interface StaticCommitInstallCommitDiagnostics {
+	/** Static coordinator commit id installed by the browser runtime. */
+	readonly commitId: string;
+	/** Current install lifecycle phase for this commit. */
+	readonly phase: "queued" | "materializing" | "materialized" | "failed";
+	/** Static scene interest revision that produced this commit. */
+	readonly revision: number;
+	/** Page-thread install timing breakdown for diagnosing browser stutter. */
+	readonly timing: StaticCommitInstallTimingDiagnostics;
+}
+
+export interface StaticCommitInstallTimingDiagnostics {
+	readonly applyDynamicPlacementsMs: number;
+	readonly applyEnvCellPublicationsMs: number;
+	readonly applyStaticLayersMs: number;
+	readonly applyTexturePlacementUpdateMs: number;
+	readonly dynamicRendererSyncMs: number;
+	readonly dynamicVisualPrepMs: number;
+	readonly installStaticCommitMs: number;
+	readonly materializeMs: number;
+	readonly pinTextureDependenciesMs: number;
+	readonly queryRecordsMs: number;
+	readonly refreshDebugOverlayMs: number;
+	readonly refreshEnvCellMembershipMs: number;
+	readonly releaseTextureDependenciesMs: number;
+	readonly renderPassPlanMs: number;
+	readonly textureApplyMs: number;
+	readonly queuedMs: number;
 }
 
 export interface StaticCoordinatorDiagnosticsReport {
@@ -290,7 +336,69 @@ interface StaticCoordinatorTimingSampleDiagnostics {
 export interface TextureAtlasDiagnosticsReport {
 	readonly kind: "texture-atlas";
 	readonly buckets: readonly TextureAtlasBucketDiagnostics[];
+	readonly mutations: TextureMutationDiagnostics;
 	readonly summary: TextureAtlasDiagnosticsSummary;
+}
+
+export interface TextureMutationDiagnostics {
+	readonly maxPendingQueueDepth: number;
+	readonly pending: number;
+	readonly recent: readonly TextureMutationSampleDiagnostics[];
+	readonly totalsByKind: Record<string, TextureMutationKindSummaryDiagnostics>;
+}
+
+export interface TextureMutationKindSummaryDiagnostics {
+	readonly count: number;
+	readonly maxQueueWaitMs: number;
+	readonly maxRunMs: number;
+	readonly outputPlacementCount: number;
+	readonly reclaimedTextureRefCount: number;
+	readonly resolvedPlacementCount: number;
+	readonly textureUseCount: number;
+	readonly totalQueueWaitMs: number;
+	readonly totalRunMs: number;
+}
+
+export interface TextureMutationSampleDiagnostics {
+	/** Monotonic sequence number for one texture-manager mutation. */
+	readonly sequence: number;
+	/** Caller-visible mutation class used to identify queue spam. */
+	readonly kind: string;
+	/** Number of texture uses or placement intents represented by the mutation. */
+	readonly textureUseCount: number;
+	/** Removed texture owners represented by the mutation. */
+	readonly removedOwnerCount: number;
+	/** Number of mutations already queued or running when this mutation was enqueued. */
+	readonly pendingAtEnqueue: number;
+	/** Time spent waiting behind previous texture mutations. */
+	readonly queueWaitMs: number;
+	/** Total wall time spent executing this mutation after it reached the queue head. */
+	readonly runMs: number;
+	readonly outputPlacementCount: number;
+	readonly reclaimedTextureRefCount: number;
+	readonly resolvedPlacementCount: number;
+	readonly pendingPlacementCount: number;
+	readonly pendingGroupCount: number;
+	readonly packedGroupCount: number;
+	readonly absorbedPlacementCount: number;
+	readonly pageLocalRepackCount: number;
+	readonly phases: TextureMutationPhaseDiagnostics;
+}
+
+export interface TextureMutationPhaseDiagnostics {
+	readonly absorbExistingPagesMs: number;
+	readonly commitPackedPagesMs: number;
+	readonly leaseAndRegistryMs: number;
+	readonly markUploadedMs: number;
+	readonly packPendingMs: number;
+	readonly pageLocalRepackMaterializeMs: number;
+	readonly planPackingGroupsMs: number;
+	readonly prepareSourcesMs: number;
+	readonly reclaimPagesMs: number;
+	readonly removeOwnerRefsMs: number;
+	readonly resolvedPlacementFanoutMs: number;
+	readonly stageTextureUsesMs: number;
+	readonly workerPackWaitMs: number;
 }
 
 interface TextureAtlasBucketDiagnostics {
@@ -457,6 +565,38 @@ export function createDynamicDiagnosticsReport(
 					record.resources.status === "setup-animation-ready",
 			).length,
 			staticAuthoredSeeds: snapshot.staticAuthoredCount,
+		},
+	};
+}
+
+export function createStaticCommitInstallDiagnosticsReport(input: {
+	readonly committedCommits: readonly StaticCommitInstallCommitDiagnostics[];
+	readonly failedCommits: readonly StaticCommitInstallCommitDiagnostics[];
+	readonly pendingCommits: readonly StaticCommitInstallCommitDiagnostics[];
+}): StaticCommitInstallDiagnosticsReport {
+	const commits = [
+		...input.committedCommits,
+		...input.failedCommits,
+		...input.pendingCommits,
+	];
+	const slowestCommit =
+		commits.length === 0
+			? null
+			: commits.reduce((slowest, commit) =>
+					commit.timing.materializeMs > slowest.timing.materializeMs
+						? commit
+						: slowest,
+				);
+	return {
+		committedCommits: input.committedCommits,
+		failedCommits: input.failedCommits,
+		kind: "static-commit-install",
+		pendingCommits: input.pendingCommits,
+		summary: {
+			committed: input.committedCommits.length,
+			failed: input.failedCommits.length,
+			pending: input.pendingCommits.length,
+			slowestCommit,
 		},
 	};
 }

@@ -33,6 +33,7 @@ try {
 		domains: options.domains,
 		headed: options.headed,
 		landblockIds: options.landblockIds,
+		lod: options.lod,
 		scenario: options.scenario,
 		settleDelayMs: options.settleDelayMs,
 		sequenceRepeatCount: options.sequenceRepeatCount,
@@ -64,6 +65,7 @@ function parseArgs(args) {
 		domains: DEFAULT_STATIC_DOMAINS,
 		headed: false,
 		landblockIds: [DEFAULT_LANDBLOCK_ID],
+		lod: null,
 		outputPath: null,
 		scenario: "landblock-sequence",
 		sequenceRepeatCount: 1,
@@ -93,6 +95,9 @@ function parseArgs(args) {
 				break;
 			case "--landblocks":
 				parsed.landblockIds = parseLandblocks(requireValue(args, ++index, arg));
+				break;
+			case "--layer-distance":
+				parsed.lod = parseUniformLayerDistance(requireValue(args, ++index, arg));
 				break;
 			case "--output":
 				parsed.outputPath = requireValue(args, ++index, arg);
@@ -159,6 +164,7 @@ Options:
   --landblock <hex>        Outdoor landblock to load. Default: 0xda55ffff
   --landblocks <csv>       Outdoor landblock sequence to load, in order.
   --domains <csv>          Static domains to request. Default: ${DEFAULT_STATIC_DOMAINS.join(",")}
+  --layer-distance <n>     Use one radius for every outdoor static layer.
   --repeat <count>         Repeat the landblock sequence. Default: 1
   --scenario <name>        Scenario: landblock-sequence, explicit-object-radius-expansion.
   --settle-delay-ms <ms>   Delay after each settled scene before continuing. Default: 0
@@ -200,6 +206,20 @@ function parseLandblocks(value) {
 	return landblocks;
 }
 
+function parseUniformLayerDistance(value) {
+	const radius = Number(value);
+	if (!Number.isInteger(radius) || radius < 0) {
+		throw new Error("--layer-distance must be a non-negative integer.");
+	}
+	return {
+		buildings: radius,
+		envCells: radius,
+		explicitObjects: radius,
+		generatedScenery: radius,
+		terrain: radius,
+	};
+}
+
 function parseScenario(value) {
 	if (
 		value !== "landblock-sequence" &&
@@ -237,6 +257,9 @@ function createDiagnosticsSummary(diagnostics, outputPath, errorMessage) {
 	const staticCoordinator = domains.find(
 		(domain) => domain.kind === "static-coordinator",
 	);
+	const staticCommitInstall = domains.find(
+		(domain) => domain.kind === "static-commit-install",
+	);
 	const textureAtlas = domains.find(
 		(domain) => domain.kind === "texture-atlas",
 	);
@@ -244,8 +267,10 @@ function createDiagnosticsSummary(diagnostics, outputPath, errorMessage) {
 		kind: "browser-pipeline-harness-summary",
 		errorMessage: errorMessage ?? null,
 		harnessScenario: diagnostics.harnessScenario ?? null,
+		harnessFrameDiagnostics: diagnostics.harnessFrameDiagnostics ?? null,
 		outputPath,
 		runtime: diagnostics.runtime,
+		staticCommitInstall: staticCommitInstall?.summary ?? null,
 		staticCoordinator: staticCoordinator?.summary ?? null,
 		staticCoordinatorTiming: staticCoordinator?.timingSummary ?? null,
 		textureAtlas: textureAtlas?.summary ?? null,
@@ -373,6 +398,7 @@ async function runBrowserHarness({
 	domains,
 	headed,
 	landblockIds,
+	lod,
 	scenario,
 	settleDelayMs,
 	sequenceRepeatCount,
@@ -427,6 +453,7 @@ async function runBrowserHarness({
 						client,
 						domains,
 						landblockIds,
+						lod,
 						sequenceRepeatCount,
 						settleDelayMs,
 						timeoutMs,
@@ -472,6 +499,7 @@ async function runLandblockSequenceScenario({
 	client,
 	domains,
 	landblockIds,
+	lod,
 	sequenceRepeatCount,
 	settleDelayMs,
 	timeoutMs,
@@ -480,11 +508,11 @@ async function runLandblockSequenceScenario({
 	const sequence = createLandblockSequence(landblockIds, sequenceRepeatCount);
 	for (let index = 0; index < sequence.length; index += 1) {
 		const landblockId = sequence[index];
-		const lod = {};
+		const stepLod = lod ?? {};
 		const overview = await requestOutdoorScene(client, {
 			domains,
 			landblockId,
-			lod,
+			lod: stepLod,
 			timeoutMs,
 		});
 		const diagnostics = await createDiagnosticsReport(client);
@@ -493,7 +521,7 @@ async function runLandblockSequenceScenario({
 				diagnostics,
 				index,
 				landblockId,
-				lod,
+				lod: stepLod,
 				overview,
 				stepName: "landblock-sequence",
 			}),
@@ -639,6 +667,9 @@ function createHarnessScenarioStep({
 	const staticCoordinator = domains.find(
 		(domain) => domain.kind === "static-coordinator",
 	);
+	const staticCommitInstall = domains.find(
+		(domain) => domain.kind === "static-commit-install",
+	);
 	const textureAtlas = domains.find(
 		(domain) => domain.kind === "texture-atlas",
 	);
@@ -704,6 +735,9 @@ async function samplePipelineTrace(client, samples, workerEventsByKey) {
 	const staticCoordinator = domains.find(
 		(domain) => domain.kind === "static-coordinator",
 	);
+	const staticCommitInstall = domains.find(
+		(domain) => domain.kind === "static-commit-install",
+	);
 	const textureAtlas = domains.find(
 		(domain) => domain.kind === "texture-atlas",
 	);
@@ -732,6 +766,7 @@ async function samplePipelineTrace(client, samples, workerEventsByKey) {
 			traceEventCount: job.traceEvents.length,
 		})),
 		renderer: diagnostics.runtime,
+		harnessFrameDiagnostics: diagnostics.harnessFrameDiagnostics ?? null,
 		sourceResolutions: sourceResolutions.map((resolution) => ({
 			ageMs: resolution.ageMs,
 			landblockHex: resolution.landblockHex,
@@ -744,6 +779,7 @@ async function samplePipelineTrace(client, samples, workerEventsByKey) {
 			status: resolution.status,
 			taskIds: resolution.taskIds,
 		})),
+		staticCommitInstall: staticCommitInstall ?? null,
 		staticCoordinator: staticCoordinator?.summary ?? null,
 		textureAtlas: textureAtlas?.summary ?? null,
 	});

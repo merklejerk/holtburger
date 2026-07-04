@@ -13,6 +13,7 @@
 		ManualStaticDomain,
 		RuntimeOverviewSnapshot,
 	} from "../lib/runtime/client-runtime";
+	import type { RendererFrameTelemetry } from "../lib/renderer/types";
 	import type { StaticSceneSelectionKey } from "../lib/runtime/scene-query/contracts";
 	import type { RuntimeDiagnosticsReport } from "../lib/runtime/diagnostics";
 	import {
@@ -32,7 +33,7 @@
 
 	type BrowserPipelineHarnessApi = {
 		readonly clearSceneInterest: () => RuntimeOverviewSnapshot;
-		readonly createDiagnosticsReport: () => RuntimeDiagnosticsReport;
+		readonly createDiagnosticsReport: () => BrowserPipelineHarnessDiagnosticsReport;
 		readonly createOverviewSnapshot: () => RuntimeOverviewSnapshot;
 		readonly createStaticSelectionDiagnosticsReport: (
 			selectionKey: StaticSceneSelectionKey,
@@ -67,15 +68,69 @@
 		readonly timeoutMs?: number;
 	};
 
+	type BrowserPipelineHarnessDiagnosticsReport = RuntimeDiagnosticsReport & {
+		/** Harness-only page-thread frame and long-task measurements. */
+		readonly harnessFrameDiagnostics: HarnessFrameDiagnostics;
+	};
+
+	type HarnessFrameDiagnostics = {
+		/** Monotonic browser timestamp when harness frame collection began. */
+		readonly startedAtMs: number;
+		/** Elapsed browser time covered by this diagnostic snapshot. */
+		readonly elapsedMs: number;
+		/** Main-thread requestAnimationFrame loop that drives ClientRuntime.tickFrame. */
+		readonly runtimeTick: HarnessLoopDiagnostics;
+		/** Renderer-owned requestAnimationFrame telemetry emitted by the WebGL renderer. */
+		readonly rendererFrame: HarnessRendererFrameDiagnostics;
+		/** Browser PerformanceObserver longtask entries, when supported by Chrome. */
+		readonly longTasks: HarnessLongTaskDiagnostics;
+	};
+
+	type HarnessLoopDiagnostics = {
+		readonly count: number;
+		readonly maxDeltaMs: number;
+		readonly maxHandlerMs: number;
+		readonly totalHandlerMs: number;
+		readonly over16Ms: number;
+		readonly over33Ms: number;
+		readonly over50Ms: number;
+		readonly over100Ms: number;
+		readonly recentSlowEvents: readonly HarnessSlowEvent[];
+	};
+
+	type HarnessRendererFrameDiagnostics = HarnessLoopDiagnostics & {
+		readonly maxRendererHandlerMs: number;
+		readonly totalRendererHandlerMs: number;
+	};
+
+	type HarnessLongTaskDiagnostics = {
+		readonly count: number;
+		readonly maxDurationMs: number;
+		readonly totalDurationMs: number;
+		readonly recentEntries: readonly HarnessSlowEvent[];
+		readonly supported: boolean;
+	};
+
+	type HarnessSlowEvent = {
+		readonly atMs: number;
+		readonly durationMs: number;
+		readonly kind: string;
+	};
+
 	type HarnessWindow = Window &
 		typeof globalThis & {
 			__HOLTBURGER_3D_HARNESS__?: BrowserPipelineHarnessApi;
 		};
 
+	const RECENT_SLOW_EVENT_LIMIT = 40;
+
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let runtime: ClientRuntime | null = null;
 	let runtimeFrameId: number | null = null;
+	let unsubscribeRuntimeFrameTelemetry: (() => void) | null = null;
+	let longTaskObserver: PerformanceObserver | null = null;
 	let statusText = $state("starting");
+	const frameDiagnostics = createMutableHarnessFrameDiagnostics();
 
 	onMount(() => {
 		if (!canvasElement) {
@@ -88,6 +143,10 @@
 			runtime.updateCameraState(
 				createFreeCameraFrameStateCamera(createFreeCameraState()),
 			);
+			unsubscribeRuntimeFrameTelemetry = runtime.subscribeFrameTelemetry(
+				recordRendererFrameTelemetry,
+			);
+			startLongTaskObserver();
 			startRuntimeFrameLoop();
 			installHarnessApi();
 			statusText = "ready";
@@ -97,6 +156,9 @@
 
 		return () => {
 			stopRuntimeFrameLoop();
+			stopLongTaskObserver();
+			unsubscribeRuntimeFrameTelemetry?.();
+			unsubscribeRuntimeFrameTelemetry = null;
 			delete harnessWindow().__HOLTBURGER_3D_HARNESS__;
 			runtime?.dispose();
 			runtime = null;
@@ -111,7 +173,7 @@
 				return currentRuntime.createOverviewSnapshot();
 			},
 			createDiagnosticsReport() {
-				return requireRuntime().createDiagnosticsReport();
+				return createHarnessDiagnosticsReport();
 			},
 			createOverviewSnapshot() {
 				return requireRuntime().createOverviewSnapshot();
@@ -287,8 +349,11 @@
 		}
 
 		const tick = (timestampMilliseconds: number) => {
+			const startedAt = performance.now();
+			recordRuntimeTickStart(startedAt);
 			runtimeFrameId = window.requestAnimationFrame(tick);
 			runtime?.tickFrame(timestampMilliseconds / 1000);
+			recordRuntimeTickEnd(startedAt, performance.now());
 		};
 		runtimeFrameId = window.requestAnimationFrame(tick);
 	}
@@ -299,6 +364,200 @@
 		}
 		window.cancelAnimationFrame(runtimeFrameId);
 		runtimeFrameId = null;
+	}
+
+	function createHarnessDiagnosticsReport(): BrowserPipelineHarnessDiagnosticsReport {
+		return {
+			...requireRuntime().createDiagnosticsReport(),
+			harnessFrameDiagnostics: createHarnessFrameDiagnosticsSnapshot(),
+		};
+	}
+
+	function createMutableHarnessFrameDiagnostics() {
+		const startedAtMs = performance.now();
+		return {
+			longTasks: {
+				count: 0,
+				maxDurationMs: 0,
+				recentEntries: [] as HarnessSlowEvent[],
+				supported: false,
+				totalDurationMs: 0,
+			},
+			rendererFrame: createMutableHarnessLoopDiagnostics(),
+			runtimeTick: createMutableHarnessLoopDiagnostics(),
+			startedAtMs,
+		};
+	}
+
+	function createMutableHarnessLoopDiagnostics() {
+		return {
+			count: 0,
+			lastAtMs: null as number | null,
+			maxDeltaMs: 0,
+			maxHandlerMs: 0,
+			maxRendererHandlerMs: 0,
+			over16Ms: 0,
+			over33Ms: 0,
+			over50Ms: 0,
+			over100Ms: 0,
+			recentSlowEvents: [] as HarnessSlowEvent[],
+			totalHandlerMs: 0,
+			totalRendererHandlerMs: 0,
+		};
+	}
+
+	function recordRuntimeTickStart(atMs: number): void {
+		const diagnostics = frameDiagnostics.runtimeTick;
+		if (diagnostics.lastAtMs !== null) {
+			diagnostics.maxDeltaMs = Math.max(
+				diagnostics.maxDeltaMs,
+				atMs - diagnostics.lastAtMs,
+			);
+		}
+		diagnostics.lastAtMs = atMs;
+		diagnostics.count += 1;
+	}
+
+	function recordRuntimeTickEnd(startedAtMs: number, endedAtMs: number): void {
+		recordLoopHandlerDuration(
+			frameDiagnostics.runtimeTick,
+			startedAtMs,
+			endedAtMs - startedAtMs,
+			"runtime-tick",
+		);
+	}
+
+	function recordRendererFrameTelemetry(
+		telemetry: RendererFrameTelemetry,
+	): void {
+		const atMs = performance.now();
+		const diagnostics = frameDiagnostics.rendererFrame;
+		if (diagnostics.lastAtMs !== null) {
+			diagnostics.maxDeltaMs = Math.max(
+				diagnostics.maxDeltaMs,
+				atMs - diagnostics.lastAtMs,
+			);
+		}
+		diagnostics.lastAtMs = atMs;
+		diagnostics.count = telemetry.frameCount;
+		diagnostics.maxRendererHandlerMs = Math.max(
+			diagnostics.maxRendererHandlerMs,
+			telemetry.frameHandlerMs,
+		);
+		diagnostics.totalRendererHandlerMs += telemetry.frameHandlerMs;
+		recordLoopHandlerDuration(
+			diagnostics,
+			atMs,
+			telemetry.frameHandlerMs,
+			"renderer-frame",
+		);
+	}
+
+	function recordLoopHandlerDuration(
+		diagnostics: ReturnType<typeof createMutableHarnessLoopDiagnostics>,
+		atMs: number,
+		durationMs: number,
+		kind: string,
+	): void {
+		diagnostics.maxHandlerMs = Math.max(diagnostics.maxHandlerMs, durationMs);
+		diagnostics.totalHandlerMs += durationMs;
+		if (durationMs > 16) {
+			diagnostics.over16Ms += 1;
+		}
+		if (durationMs > 33) {
+			diagnostics.over33Ms += 1;
+		}
+		if (durationMs > 50) {
+			diagnostics.over50Ms += 1;
+			appendSlowEvent(diagnostics.recentSlowEvents, {
+				atMs,
+				durationMs,
+				kind,
+			});
+		}
+		if (durationMs > 100) {
+			diagnostics.over100Ms += 1;
+		}
+	}
+
+	function startLongTaskObserver(): void {
+		if (
+			typeof PerformanceObserver === "undefined" ||
+			!PerformanceObserver.supportedEntryTypes.includes("longtask")
+		) {
+			frameDiagnostics.longTasks.supported = false;
+			return;
+		}
+		frameDiagnostics.longTasks.supported = true;
+		longTaskObserver = new PerformanceObserver((list) => {
+			for (const entry of list.getEntries()) {
+				recordLongTask(entry);
+			}
+		});
+		longTaskObserver.observe({ entryTypes: ["longtask"] });
+	}
+
+	function stopLongTaskObserver(): void {
+		longTaskObserver?.disconnect();
+		longTaskObserver = null;
+	}
+
+	function recordLongTask(entry: PerformanceEntry): void {
+		const diagnostics = frameDiagnostics.longTasks;
+		diagnostics.count += 1;
+		diagnostics.maxDurationMs = Math.max(
+			diagnostics.maxDurationMs,
+			entry.duration,
+		);
+		diagnostics.totalDurationMs += entry.duration;
+		appendSlowEvent(diagnostics.recentEntries, {
+			atMs: entry.startTime,
+			durationMs: entry.duration,
+			kind: entry.name || "longtask",
+		});
+	}
+
+	function appendSlowEvent(
+		events: HarnessSlowEvent[],
+		event: HarnessSlowEvent,
+	): void {
+		events.push(event);
+		if (events.length > RECENT_SLOW_EVENT_LIMIT) {
+			events.splice(0, events.length - RECENT_SLOW_EVENT_LIMIT);
+		}
+	}
+
+	function createHarnessFrameDiagnosticsSnapshot(): HarnessFrameDiagnostics {
+		const nowMs = performance.now();
+		return {
+			elapsedMs: nowMs - frameDiagnostics.startedAtMs,
+			longTasks: { ...frameDiagnostics.longTasks },
+			rendererFrame: createHarnessLoopDiagnosticsSnapshot(
+				frameDiagnostics.rendererFrame,
+			),
+			runtimeTick: createHarnessLoopDiagnosticsSnapshot(
+				frameDiagnostics.runtimeTick,
+			),
+			startedAtMs: frameDiagnostics.startedAtMs,
+		};
+	}
+
+	function createHarnessLoopDiagnosticsSnapshot(
+		diagnostics: ReturnType<typeof createMutableHarnessLoopDiagnostics>,
+	): HarnessRendererFrameDiagnostics {
+		return {
+			count: diagnostics.count,
+			maxDeltaMs: diagnostics.maxDeltaMs,
+			maxHandlerMs: diagnostics.maxHandlerMs,
+			maxRendererHandlerMs: diagnostics.maxRendererHandlerMs,
+			over16Ms: diagnostics.over16Ms,
+			over33Ms: diagnostics.over33Ms,
+			over50Ms: diagnostics.over50Ms,
+			over100Ms: diagnostics.over100Ms,
+			recentSlowEvents: [...diagnostics.recentSlowEvents],
+			totalHandlerMs: diagnostics.totalHandlerMs,
+			totalRendererHandlerMs: diagnostics.totalRendererHandlerMs,
+		};
 	}
 </script>
 

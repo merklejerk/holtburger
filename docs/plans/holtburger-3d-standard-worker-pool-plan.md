@@ -555,7 +555,7 @@ Decisions, debt, and spicy bits:
 
 ### Phase 2.5: Transfer Hook Dry Run
 
-Status: pending.
+Status: complete as of 2026-07-04.
 
 Deliverables:
 
@@ -570,6 +570,28 @@ Acceptance criteria:
 - Transfer helpers do not transfer a shared `ArrayBuffer` twice.
 - Partial views are handled deliberately, not accidentally detached.
 - Texture packing result transfer extraction is ready before the texture packing migration.
+
+Completion evidence:
+
+- Added `apps/holtburger-3d/src/lib/workers/transfers.ts`.
+- Added `apps/holtburger-3d/src/lib/workers/transfers.test.ts`.
+- Added `apps/holtburger-3d/src/lib/textures/packing/transfers.ts`.
+- Added `apps/holtburger-3d/src/lib/textures/packing/transfers.test.ts`.
+- Verified with
+  `npm run test:ts -- src/lib/workers/pool.test.ts src/lib/workers/handler.test.ts src/lib/workers/transfers.test.ts src/lib/textures/packing/transfers.test.ts`.
+- Verified with `npm run check`.
+- Verified with `npm run lint:ts`.
+
+Decisions, debt, and spicy bits:
+
+- Transfer collection only accepts full `ArrayBuffer` views by default and de-duplicates buffers
+  through a `Set<ArrayBuffer>`. Partial typed-array views throw unless the caller explicitly chooses
+  `partialViewPolicy: "skip"`.
+- The helper does not copy partial views. Copying is a domain ownership decision, and silently
+  copying here would hide memory pressure in the transport layer.
+- `collectTexturePackingResultTransfers()` is intentionally narrow: it collects
+  `TexturePackingResult.pages[].pixels` only. Texture packing input pixels remain borrowed from
+  prepared/direct material sources and are not transfer candidates in this phase.
 
 ### Phase 3: Migrate Simple One-Shot Workers
 
@@ -743,3 +765,6 @@ Acceptance criteria:
   envelopes as the pool, forwards progress/result transfer lists, exposes request-local abort
   signals, normalizes worker errors, and requires explicit `{ output, transfer? }` execute results
   to avoid ambiguous domain return shapes.
+- 2026-07-04: Completed Phase 2.5 with full-buffer transfer helpers and a texture-packing result
+  transfer extractor. Partial typed-array views fail loudly by default, and texture packing input
+  buffers remain untransferred because their current owners are prepared/direct texture sources.

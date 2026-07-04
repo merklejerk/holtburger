@@ -54,6 +54,14 @@
 - `TextureBindingRequirement.bindingKey`: material consumer binding key; should become `TextureBindingId`.
 - Static resource keys and layer owner keys: ownership/lifetime concepts; should feed `TextureOwnerId`, not `TextureKey`.
 
+**Runtime evidence from the bug reports**
+
+- The bug appears under follow-mode streaming where landblocks are evicted and new landblocks stream in.
+- Selection diagnostics show active renderer payloads can report `pageVersion.placementRevision` behind `latestResidentPageRevision` for the same page ref.
+- The stale state is visible at the texture commit/resolution boundary before guessing about shader or browser-control behavior.
+- Captured repros include cross-landblock buildings with shared material texture sources but different landblock/resource ownership.
+- The fuzz target must therefore exercise owner churn, placement revision movement, page repack/growth, and active binding resolution after eviction/re-add.
+
 ## Answered Design Decisions
 
 - **Aliases are the footgun we are deleting.** Sharing must be represented as many `TextureBindingId`s and `TextureOwnerId`s pointing at one immutable `TextureKey` entry. Do not preserve alias lists, alias scans, or shared mutable `physicalEntry` objects.
@@ -64,6 +72,9 @@
 - **Palette replacements have one identity policy.** Replacement palettes are not assets for identity purposes. All palette replacement identity is based on normalized replacement ranges with a cheap deterministic 64-bit byte hash; no asset-id-first or pixel-hash fallback is allowed.
 - **Resolver prediction wins over prepared pixels.** The resolver may read palette range bytes needed for fingerprints, but it must not compose/load full prepared palette textures merely to predict a `TextureKey`.
 - **Tests should ossify the new contract, not the migration.** Delete or rewrite tests that preserve old scoped strings, alias behavior, or equality between binding and placement ids.
+- **Speculative fixes are debt unless the model proves them.** Any earlier workaround that cannot be justified by a failing state-machine reproducer should be deleted during cleanup instead of defended as hardening.
+- **A texture source id means immutable texture content, not render ownership.** Render surface id, base palette id, or runtime-authored content id may enter `TextureKey`; source asset id, object instance id, landblock id, draw unit id, and visual resource id may not.
+- **The remaining renderer bridge is explicitly temporary.** Any map that exists only because renderer payloads still resolve by legacy item ids must be deleted by the renderer binding cutover. It must not grow behavior or become a second registry.
 
 ## North Stars
 
@@ -76,6 +87,7 @@
 - **No hidden aliases.** Multiple consumers may share one `TextureKey`, but that sharing must be represented as data flow through binding/owner maps, not shared mutable registry objects.
 - **Fail loudly at boundaries.** If a binding id is passed where a texture key is expected, or an owner id is used in pool identity, make it a type or validation error. Do not silently normalize it.
 - **Fuzz the state machine, not anecdotes.** Follow-mode streaming, eviction, re-addition, page growth, and cross-owner texture sharing must be covered by stateful tests that can print a useful reproducer.
+- **Reproduction before repair.** If Phase 5 cannot reproduce the observed stale revision class, it must produce a narrower proof that the fault lives outside `TextureManager` commit state before the plan proceeds.
 - **Diagnostics should explain identity.** Reports should show binding id, texture key, owner id, texture ref/page revision, and rect separately so future bugs do not require reverse-engineering a composite string.
 - **Do not optimize the wrong thing.** Some duplicate uploads are acceptable during cutover if they let us delete alias complexity and prove correctness. Re-introduce dedupe only through `TextureKey`.
 - **The final shape should be smaller.** A temporary non-test SLOC increase is acceptable during cutover, but the completed refactor should reduce production texture identity code and branch complexity. If the final diff only wraps old behavior in new names, the plan failed.
@@ -131,6 +143,7 @@ Explicitly forbidden discriminants:
 - draw unit id;
 - visual resource id;
 - object instance id;
+- source asset id when it names the object/model owner rather than immutable texture content;
 - bake task id;
 - generated batch id;
 - material wrap mode;
@@ -387,10 +400,17 @@ Internally, identity builders should accept structured inputs and return branded
 
 ### Phase 5: TextureManager Fuzz and Palette Resolver Proof
 
+**Status:** Complete.
+
+**Steering update:** This phase is now a correctness gate. The follow-mode bug survived multiple narrow patches, so the plan must stop treating fuzz as extra confidence and use it as the place where the state machine is made observable. No renderer cutover work should proceed until the manager-level model either reproduces stale placement revision skew or proves the stale state is introduced downstream.
+
 **Deliverables**
 
 - Add the stateful fuzz harness around the new commit model before renderer payload cutover continues.
 - Model follow-mode behavior explicitly: landblock owner add/remove, object visual reuse, page growth, page moves, texture eviction, and re-addition.
+- Maintain an independent model of active owners, active bindings, canonical texture keys, expected placement revisions, and expected resident page revisions.
+- Check invariants after every generated operation, not only at the end of a sequence.
+- Add fixed seeds for the captured `db56ffff` / `01001117` and `da55ffff` / `01002a1b` failure shapes using synthetic checked-in texture facts rather than runtime-only assets.
 - Generate palette replacement range recipes from runtime-authored replacement bytes and prove resolver-predictable keys do not require prepared texture texels.
 - Include a reproducer printer that logs operation sequence, active owners, active bindings, texture keys, page revisions, and atlas rects.
 - Keep the fuzz target close to `TextureManager` state, not browser controls or renderer draw code.
@@ -399,18 +419,33 @@ Internally, identity builders should accept structured inputs and return branded
 - Generate bindings that vary wrap while sharing one `TextureKey`, so the harness proves material sampling facts remain binding facts.
 - Generate sampler policy changes during active ownership, so filtering/mips/aniso are proven to update sampler state without changing texture identity.
 - Generate palette replacement recipes from normalized byte ranges and assert the resolver can predict keys without prepared texture pixel hashes.
+- Prefer a deterministic in-repo seeded harness over adding a fuzz dependency unless dependency value is proven. The important artifact is replayable operation history, not library branding.
+- Keep test helpers identity-aware. If a helper needs many stubs to build a texture commit, either collapse it into a focused fixture builder or fix the production API shape rather than expanding hollow mocks.
 
 **Acceptance criteria**
 
 - The fuzz harness can reproduce the follow-mode eviction/re-add class that motivated this plan, or it produces a narrower counterexample showing the bug lives outside texture commit state.
 - The existing resident-page invariant remains and is expressed in terms of `TextureKey`, not logical texture-use aliases.
 - An active binding may never point at a page version older than the resident texture page for its `TextureKey`.
+- `pageVersion.placementRevision` and `latestResidentPageRevision` are compared as first-class model facts for every active binding after every operation.
 - Owner eviction may only remove owner references. It must not invalidate the canonical texture entry while another owner or binding still references it.
 - Re-adding an owner with the same canonical texture must reuse the existing `TextureKey` entry or recreate an equivalent entry with no stale binding state carried across.
 - No helper needs to “find aliases” by scanning registry entries.
 - Palette replacement fuzz covers runtime-authored replacement byte ranges with the single cheap-hash policy.
 - Fuzz failures print separated binding id, texture key, owner id, page class, page revision, resident revision, and rect. They must not require decoding a composite id to understand the failure.
 - Tests do not assert old scoped `textureUseId` spellings.
+- If the manager-level fuzz cannot fail on the captured stale-revision shape, Phase 8 must own the next reproducer boundary explicitly instead of continuing to patch `TextureManager`.
+
+**Phase notes**
+
+- Added deterministic stateful fuzz coverage directly against `TextureManager` using real `applyStaticCommitDelta(...)`, owner removal, palette placement, page absorption, sampler policy updates, and placement-resolution snapshots.
+- The harness seeds the reported `db56ffff` / `01001117` and `da55ffff` / `01002a1b` shapes with synthetic checked-in texture facts, then continues with deterministic pseudo-random owner churn and texture additions.
+- The first harness run reproduced the stale-revision class before the fix. The minimal failure shape was: two bindings share one `TextureKey`; one owner is evicted and re-added; a later compatible texture is absorbed into the same page; the resident page revision advances, but an existing binding record still reports the old revision.
+- Root cause: the atlas absorption path updated existing registry entries' physical placement revision/runtime page, but did not refresh every binding/item placement record for those existing entries. Page-local repack already did this correctly; absorption was the missing branch.
+- Fix: when absorption advances a page revision, refresh placement records and resolved placements for every existing binding associated with each existing registry entry before recording the newly absorbed entries.
+- The older unit test for compatible absorption was rewritten because it ossified the bug by expecting only the newly absorbed binding in `resolvedTexturePlacements`. The correct contract is that a page revision change resolves all active bindings on that page.
+- Palette replacement fuzz uses runtime-authored byte ranges with the shared cheap fingerprint policy. It does not read prepared palette texture pixels to predict recipe keys.
+- Spicy bit: the fuzz invariant still probes active bindings through `createPlacementResolutionSnapshot(itemIds)`, which is the Phase 6 renderer bridge boundary. This is intentional for Phase 5 because the bug is visible there, but Phase 6 must delete the legacy item-id lookup bridge and move the same invariant to `TextureBindingId`.
 
 ### Phase 6: Renderer Binding Cutover
 
@@ -423,6 +458,8 @@ Internally, identity builders should accept structured inputs and return branded
 - Shape commit/update payloads so WebGL object and terrain payloads can resolve by binding id without rebuilding a `Map<textureUseId, placement>`.
 - Update WebGL2 object and terrain payload preparation to resolve through this split.
 - Delete renderer-facing payload fields that still expose texture pool identity as `*TextureUseId`.
+- Delete the current renderer lookup bridge that maps legacy item ids to registry entry refs.
+- Ensure renderer material payloads do not cache copied atlas rect/page-version state when they can resolve current placement through `TextureBindingId`.
 - Keep material wrap in material payload/binding data. Do not move wrap into `TextureKey` to make renderer lookup easier.
 - Keep filtering, mip generation, and anisotropy in renderer sampler policy. Do not serialize them through placement snapshots as identity facts.
 
@@ -433,6 +470,7 @@ Internally, identity builders should accept structured inputs and return branded
 - No renderer code assumes a binding id is a texture pool id.
 - No renderer helper accepts either `TextureBindingId` or `TextureKey` as a plain interchangeable string parameter.
 - Renderer tests prove two bindings with different wrap can resolve the same `TextureKey` while producing different wrap uniforms where required.
+- Renderer tests prove a page movement updates active binding resolution without stale copied placement payloads.
 
 ### Phase 7: Visual Resource Key Cleanup
 
@@ -462,6 +500,7 @@ Internally, identity builders should accept structured inputs and return branded
   - force page growth/repack while bindings remain active.
 - Update selection diagnostics to print binding id, texture key, owner id, page ref, logical page revision, latest resident page revision, and atlas rect as separate fields.
 - Add a captured scenario for the `da55ffff` / `01002a1b` class of failures if the harness can reproduce it from checked-in or generated data.
+- If Phase 5 proved the stale state is downstream of `TextureManager`, this phase becomes the primary reproducer phase and must model the exact downstream boundary that copied or failed to refresh placement state.
 
 **Acceptance criteria**
 
@@ -470,6 +509,7 @@ Internally, identity builders should accept structured inputs and return branded
 - Fuzz fails if owner eviction releases a texture still retained by another owner.
 - Scenario diagnostics can distinguish stale binding, stale texture key, stale resident page, and stale atlas rect without reading a composite string.
 - The captured follow-mode scenario either stays green or emits a short reproducer from the Phase 5 model.
+- Any fix for the original bug must point to a failing reproducer first, then the commit that turns it green. No more guessed patches, respectfully.
 
 ### Phase 9: Simplification Audit And Resteer
 
@@ -489,6 +529,8 @@ Internally, identity builders should accept structured inputs and return branded
   - no public path should present any of them as the canonical texture-pool handle.
 - Re-run forbidden-discriminant tests for `TextureKey`, `TexturePageClass`, and renderer sampler policy after the registry and renderer cutovers.
 - Resteer the final cleanup checklist based on actual remaining hits, not assumptions.
+- Identify and delete any earlier speculative fix that is not required by the fuzz/model invariants.
+- Record a before/after count for compatibility bridges, alias maps, owner maps, and plain-string public texture identity parameters.
 
 **Acceptance criteria**
 
@@ -503,6 +545,7 @@ Internally, identity builders should accept structured inputs and return branded
 
 - Remove or rename `textureUseId` in touched runtime texture paths.
 - Delete alias helpers introduced to patch shared `physicalEntry` behavior.
+- Delete any speculative stale-placement workaround that Phase 5/8 did not require.
 - Delete tests that preserve old scoped `textureUseId` string formats.
 - Delete all temporary types/functions/files containing `Legacy`, `Bridge`, or `Compat` from this refactor.
 - Remove bridge fields where both old and new identity are carried in the same object.
@@ -512,6 +555,7 @@ Internally, identity builders should accept structured inputs and return branded
 - Update diagnostics labels and docs.
 - Delete empty compatibility wrappers that only convert one branded id to another branded id without changing domain meaning.
 - Collapse or remove any test factories that exist only to feed both old and new fields.
+- Collapse fixture APIs that require broad stubbing just to submit a texture commit. Those tests are telling us the production boundary is still too god-object-shaped.
 - Re-run `rg` audits for forbidden identity mixing:
   - `textureUseId`;
   - `bindingKey`;

@@ -323,6 +323,11 @@ describe("browser texture manager", () => {
 			expect.objectContaining({
 				pageVersion: uploadedPageVersion,
 				textureRefId: firstUpdate?.placements[0]?.textureRefId,
+				textureUseId: "building-a:mask:06000010",
+			}),
+			expect.objectContaining({
+				pageVersion: uploadedPageVersion,
+				textureRefId: firstUpdate?.placements[0]?.textureRefId,
 				textureUseId: "building-b:mask:06000020",
 			}),
 		]);
@@ -2302,7 +2307,448 @@ describe("browser texture manager", () => {
 		);
 		expect(textureRefs.size).toBe(1);
 	});
+
+	it("fuzzes follow-mode owner churn without stale placement revisions", async () => {
+		const seeds = [0xdb56_1117, 0xda55_2a1b, 0xfeed_cafe, 0x0600_6d58];
+
+		for (const seed of seeds) {
+			await runTextureManagerFollowModeFuzz(seed);
+		}
+	});
 });
+
+async function runTextureManagerFollowModeFuzz(seed: number): Promise<void> {
+	const random = createSeededRandom(seed);
+	const state = createTextureManagerFuzzState(seed);
+	const textureManager = new TextureManager({
+		assetService: new FixtureAssetService(null, { paletteSize: 46 }),
+	});
+
+	await addFuzzRenderSurfaceBinding(textureManager, state, {
+		drawUnitId: "landblock-static/db56ffff/building/0001/01001117/base",
+		renderSurfaceId: 0x060039f2,
+		samplingPolicy: { wrapS: "clamp-to-edge", wrapT: "clamp-to-edge" },
+		textureUseId: "db56ffff:01001117:base:clamp",
+	});
+	await addFuzzRenderSurfaceBinding(textureManager, state, {
+		drawUnitId: "landblock-static/da55ffff/building/0028/01002a1b/base",
+		renderSurfaceId: 0x060039f2,
+		samplingPolicy: { wrapS: "repeat", wrapT: "repeat" },
+		textureUseId: "da55ffff:01002a1b:base:repeat",
+	});
+	assertFuzzSharedTextureKey(state, [
+		"db56ffff:01001117:base:clamp",
+		"da55ffff:01002a1b:base:repeat",
+	]);
+	await removeFuzzDrawUnit(
+		textureManager,
+		state,
+		"landblock-static/db56ffff/building/0001/01001117/base",
+	);
+	await addFuzzRenderSurfaceBinding(textureManager, state, {
+		drawUnitId: "landblock-static/db56ffff/building/0001/01001117/base",
+		renderSurfaceId: 0x060039f2,
+		samplingPolicy: { wrapS: "clamp-to-edge", wrapT: "clamp-to-edge" },
+		textureUseId: "db56ffff:01001117:base:clamp",
+	});
+
+	for (let index = 0; index < 5; index += 1) {
+		await addFuzzPaletteBinding(textureManager, state, {
+			drawUnitId: `landblock-static/da55ffff/building/0028/palette-${index}`,
+			paletteId: 0x04000010 + index,
+			replacementPaletteId: 0x04000110 + index,
+			textureUseId: `da55ffff:01002a1b:palette:${index}`,
+		});
+	}
+
+	for (let step = 0; step < 64; step += 1) {
+		const operation = randomInt(random, 0, 7);
+		switch (operation) {
+			case 0:
+			case 1:
+			case 2: {
+				const drawUnitIndex = randomInt(random, 0, 8);
+				const surfaceIndex = randomInt(random, 0, 3);
+				const wrapMode =
+					randomInt(random, 0, 2) === 0 ? "clamp-to-edge" : "repeat";
+				await addFuzzRenderSurfaceBinding(textureManager, state, {
+					drawUnitId: `landblock-static/${selectFuzzLandblock(random)}/building/${drawUnitIndex.toString().padStart(4, "0")}/surface-${surfaceIndex}`,
+					renderSurfaceId: 0x06004200 + surfaceIndex,
+					samplingPolicy: { wrapS: wrapMode, wrapT: wrapMode },
+					textureUseId: `fuzz:${drawUnitIndex}:surface:${surfaceIndex}:${wrapMode}`,
+				});
+				break;
+			}
+			case 3:
+			case 4: {
+				const owner = selectRandomActiveOwner(state, random);
+				if (owner) {
+					await removeFuzzDrawUnit(textureManager, state, owner);
+				}
+				break;
+			}
+			case 5: {
+				const paletteIndex = randomInt(random, 0, 10);
+				await addFuzzPaletteBinding(textureManager, state, {
+					drawUnitId: `landblock-static/${selectFuzzLandblock(random)}/building/palette-${paletteIndex}`,
+					paletteId: 0x04000030 + paletteIndex,
+					replacementPaletteId: 0x04000130 + paletteIndex,
+					textureUseId: `fuzz:palette:${paletteIndex}`,
+				});
+				break;
+			}
+			case 6: {
+				const filteringMode =
+					randomInt(random, 0, 2) === 0 ? "nearest" : "anisotropic-4x";
+				state.operations.push({ kind: "set-filtering", filteringMode });
+				recordFuzzSamplerPolicyUpdate(
+					state,
+					textureManager.setFilteringMode(filteringMode),
+				);
+				break;
+			}
+			default:
+				assertRuntimePaletteRecipeIsPredictable(state, random);
+				break;
+		}
+
+		assertNoStaleFuzzPlacementRevisions(textureManager, state);
+	}
+}
+
+function createTextureManagerFuzzState(seed: number): TextureManagerFuzzState {
+	return {
+		activeItemsByOwner: new Map(),
+		activeTextureKeyByItemId: new Map(),
+		latestPlacementRevisionByTextureRefId: new Map(),
+		operations: [{ kind: "seed", seed }],
+		revision: 1,
+	};
+}
+
+async function addFuzzRenderSurfaceBinding(
+	textureManager: TextureManager,
+	state: TextureManagerFuzzState,
+	options: {
+		readonly drawUnitId: string;
+		readonly renderSurfaceId: number;
+		readonly samplingPolicy: StaticBakeTextureSamplingPolicy;
+		readonly textureUseId: string;
+	},
+): Promise<void> {
+	const textureUse = createTextureUseCommit({
+		domain: "outdoor-buildings",
+		drawUnitId: options.drawUnitId,
+		renderSurfaceId: options.renderSurfaceId,
+		samplingPolicy: options.samplingPolicy,
+		textureUseId: options.textureUseId,
+		usage: "rgba-color",
+	});
+	state.operations.push({
+		drawUnitId: options.drawUnitId,
+		kind: "add-render-surface",
+		renderSurfaceId: options.renderSurfaceId,
+		textureKey: textureUse.textureKey,
+		textureUseId: textureUse.textureUseId,
+		wrapS: options.samplingPolicy.wrapS,
+	});
+	await applyFuzzStaticCommit(textureManager, state, [textureUse]);
+	trackFuzzActiveItem(state, options.drawUnitId, textureUse);
+}
+
+async function addFuzzPaletteBinding(
+	textureManager: TextureManager,
+	state: TextureManagerFuzzState,
+	options: {
+		readonly drawUnitId: string;
+		readonly paletteId: number;
+		readonly replacementPaletteId: number;
+		readonly textureUseId: string;
+	},
+): Promise<void> {
+	const textureUse = createPaletteTextureUseCommit({
+		drawUnitId: options.drawUnitId,
+		paletteId: options.paletteId,
+		replacementPaletteId: options.replacementPaletteId,
+		textureUseId: options.textureUseId,
+	});
+	state.operations.push({
+		drawUnitId: options.drawUnitId,
+		kind: "add-palette",
+		paletteId: options.paletteId,
+		replacementPaletteId: options.replacementPaletteId,
+		textureKey: textureUse.textureKey,
+		textureUseId: textureUse.textureUseId,
+	});
+	await applyFuzzStaticCommit(textureManager, state, [textureUse]);
+	trackFuzzActiveItem(state, options.drawUnitId, textureUse);
+}
+
+async function removeFuzzDrawUnit(
+	textureManager: TextureManager,
+	state: TextureManagerFuzzState,
+	drawUnitId: string,
+): Promise<void> {
+	state.operations.push({ drawUnitId, kind: "remove-draw-unit" });
+	const update = await textureManager.applyStaticCommitDelta({
+		addedDrawUnits: [],
+		removedResources: [{ drawUnitId, kind: "draw-unit" }],
+		revision: state.revision,
+		textureUses: [],
+	});
+	state.revision += 1;
+	for (const textureUseId of state.activeItemsByOwner.get(drawUnitId) ?? []) {
+		state.activeTextureKeyByItemId.delete(textureUseId);
+	}
+	state.activeItemsByOwner.delete(drawUnitId);
+	recordFuzzTexturePlacementUpdate(state, update);
+}
+
+async function applyFuzzStaticCommit(
+	textureManager: TextureManager,
+	state: TextureManagerFuzzState,
+	textureUses: readonly StaticCoordinatorCommitDelta["textureUses"][number][],
+): Promise<void> {
+	const update = await textureManager.applyStaticCommitDelta({
+		addedDrawUnits: [],
+		removedResources: [],
+		revision: state.revision,
+		textureUses,
+	});
+	state.revision += 1;
+	recordFuzzTexturePlacementUpdate(state, update);
+}
+
+function trackFuzzActiveItem(
+	state: TextureManagerFuzzState,
+	drawUnitId: string,
+	textureUse: StaticCoordinatorCommitDelta["textureUses"][number],
+): void {
+	const activeItems = state.activeItemsByOwner.get(drawUnitId) ?? new Set();
+	activeItems.add(textureUse.textureUseId);
+	state.activeItemsByOwner.set(drawUnitId, activeItems);
+	state.activeTextureKeyByItemId.set(textureUse.textureUseId, textureUse.textureKey);
+}
+
+function recordFuzzTexturePlacementUpdate(
+	state: TextureManagerFuzzState,
+	update: Awaited<ReturnType<TextureManager["applyStaticCommitDelta"]>>,
+): void {
+	if (!update) {
+		return;
+	}
+	for (const textureRefId of update.removedTextureRefIds) {
+		state.latestPlacementRevisionByTextureRefId.delete(textureRefId);
+	}
+	for (const placement of update.placements) {
+		state.latestPlacementRevisionByTextureRefId.set(
+			placement.textureRefId,
+			placement.pageVersion.placementRevision,
+		);
+	}
+}
+
+function recordFuzzSamplerPolicyUpdate(
+	state: TextureManagerFuzzState,
+	update: ReturnType<TextureManager["setFilteringMode"]>,
+): void {
+	if (!update) {
+		return;
+	}
+	for (const policy of update.policies) {
+		if (!state.latestPlacementRevisionByTextureRefId.has(policy.textureRefId)) {
+			throw new Error(
+				`Sampler policy update referenced unknown texture page ${policy.textureRefId}.\n${formatFuzzOperations(state)}`,
+			);
+		}
+	}
+}
+
+function assertNoStaleFuzzPlacementRevisions(
+	textureManager: TextureManager,
+	state: TextureManagerFuzzState,
+): void {
+	const activeItemIds = [...state.activeTextureKeyByItemId.keys()].sort();
+	const snapshots = textureManager.createPlacementResolutionSnapshot(activeItemIds);
+	if (snapshots.length !== activeItemIds.length) {
+		throw new Error(
+			`Expected ${activeItemIds.length} active placement snapshots, got ${snapshots.length}.\n${formatFuzzOperations(state)}`,
+		);
+	}
+	for (const snapshot of snapshots) {
+		const latestRevision = state.latestPlacementRevisionByTextureRefId.get(
+			snapshot.textureRefId,
+		);
+		if (latestRevision === undefined) {
+			throw new Error(
+				`Active binding ${snapshot.itemId} points at unknown texture page ${snapshot.textureRefId}.\n${formatFuzzOperations(state)}`,
+			);
+		}
+		if (snapshot.pageVersion.placementRevision !== latestRevision) {
+			throw new Error(
+				[
+					`Active binding ${snapshot.itemId} has stale placement revision.`,
+					`textureKey=${state.activeTextureKeyByItemId.get(snapshot.itemId)}`,
+					`textureRefId=${snapshot.textureRefId}`,
+					`bindingRevision=${snapshot.pageVersion.placementRevision}`,
+					`latestResidentRevision=${latestRevision}`,
+					`rect=${snapshot.rect.join(",")}`,
+					formatFuzzOperations(state),
+				].join("\n"),
+			);
+		}
+		if (snapshot.activeReferenceCount <= 0) {
+			throw new Error(
+				`Active binding ${snapshot.itemId} has non-positive active refs ${snapshot.activeReferenceCount}.\n${formatFuzzOperations(state)}`,
+			);
+		}
+	}
+}
+
+function assertFuzzSharedTextureKey(
+	state: TextureManagerFuzzState,
+	itemIds: readonly string[],
+): void {
+	const textureKeys = new Set(
+		itemIds.map((itemId) => state.activeTextureKeyByItemId.get(itemId)),
+	);
+	if (textureKeys.size !== 1 || textureKeys.has(undefined)) {
+		throw new Error(
+			`Expected shared TextureKey for ${itemIds.join(", ")}.\n${formatFuzzOperations(state)}`,
+		);
+	}
+}
+
+function assertRuntimePaletteRecipeIsPredictable(
+	state: TextureManagerFuzzState,
+	random: SeededRandom,
+): void {
+	const offset = randomInt(random, 0, 8);
+	const count = randomInt(random, 1, 4);
+	const rgbaBytes = createRuntimeAuthoredFuzzPaletteBytes(random, count);
+	const firstRecipe = createPaletteReplacementRecipeKey([
+		createPaletteReplacementFingerprint({ count, offset, rgbaBytes }),
+	]);
+	const secondRecipe = createPaletteReplacementRecipeKey([
+		createPaletteReplacementFingerprint({ count, offset, rgbaBytes }),
+	]);
+	state.operations.push({
+		count,
+		kind: "palette-recipe",
+		offset,
+		recipeKey: firstRecipe,
+	});
+	if (firstRecipe !== secondRecipe) {
+		throw new Error(
+			`Runtime-authored palette recipe was not deterministic.\n${formatFuzzOperations(state)}`,
+		);
+	}
+}
+
+function createRuntimeAuthoredFuzzPaletteBytes(
+	random: SeededRandom,
+	count: number,
+): Uint8Array {
+	const bytes = new Uint8Array(count * 4);
+	for (let index = 0; index < bytes.length; index += 1) {
+		bytes[index] = randomInt(random, 0, 256);
+	}
+	return bytes;
+}
+
+function selectRandomActiveOwner(
+	state: TextureManagerFuzzState,
+	random: SeededRandom,
+): string | null {
+	const owners = [...state.activeItemsByOwner.keys()].sort();
+	if (owners.length === 0) {
+		return null;
+	}
+	return owners[randomInt(random, 0, owners.length)] ?? null;
+}
+
+function selectFuzzLandblock(random: SeededRandom): string {
+	return ["db56ffff", "da55ffff", "d955ffff", "d854ffff"][
+		randomInt(random, 0, 4)
+	]!;
+}
+
+function createSeededRandom(seed: number): SeededRandom {
+	let state = seed >>> 0;
+	return () => {
+		state = (state + 0x6d2b79f5) >>> 0;
+		let value = state;
+		value = Math.imul(value ^ (value >>> 15), value | 1);
+		value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+		return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+	};
+}
+
+function randomInt(random: SeededRandom, min: number, maxExclusive: number): number {
+	return Math.floor(random() * (maxExclusive - min)) + min;
+}
+
+function formatFuzzOperations(state: TextureManagerFuzzState): string {
+	return JSON.stringify(
+		{
+			activeItemsByOwner: [...state.activeItemsByOwner].map(
+				([ownerId, itemIds]) => [ownerId, [...itemIds].sort()] as const,
+			),
+			latestPlacementRevisionByTextureRefId: [
+				...state.latestPlacementRevisionByTextureRefId,
+			],
+			operations: state.operations,
+		},
+		null,
+		2,
+	);
+}
+
+type SeededRandom = () => number;
+
+interface TextureManagerFuzzState {
+	readonly activeItemsByOwner: Map<string, Set<string>>;
+	readonly activeTextureKeyByItemId: Map<string, string>;
+	readonly latestPlacementRevisionByTextureRefId: Map<string, number>;
+	readonly operations: TextureManagerFuzzOperation[];
+	revision: number;
+}
+
+type TextureManagerFuzzOperation =
+	| {
+			readonly kind: "seed";
+			readonly seed: number;
+	  }
+	| {
+			readonly drawUnitId: string;
+			readonly kind: "add-render-surface";
+			readonly renderSurfaceId: number;
+			readonly textureKey: string;
+			readonly textureUseId: string;
+			readonly wrapS: NonNullable<StaticBakeTextureSamplingPolicy["wrapS"]>;
+	  }
+	| {
+			readonly drawUnitId: string;
+			readonly kind: "add-palette";
+			readonly paletteId: number;
+			readonly replacementPaletteId: number;
+			readonly textureKey: string;
+			readonly textureUseId: string;
+	  }
+	| {
+			readonly drawUnitId: string;
+			readonly kind: "remove-draw-unit";
+	  }
+	| {
+			readonly filteringMode: "anisotropic-4x" | "nearest";
+			readonly kind: "set-filtering";
+	  }
+	| {
+			readonly count: number;
+			readonly kind: "palette-recipe";
+			readonly offset: number;
+			readonly recipeKey: string;
+	  };
 
 class FixtureAssetService implements AssetService {
 	readonly requestedKeys: HostAssetKey[] = [];

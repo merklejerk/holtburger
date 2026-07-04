@@ -95,7 +95,6 @@ export interface DynamicTextureUseCommit {
 	readonly samplingPolicy?: StaticBakeTextureUse["samplingPolicy"];
 	readonly source: MaterialTextureDataUseIdentity;
 	readonly textureKey: TextureKey;
-	readonly textureUseId: string;
 }
 
 export interface DynamicTextureUseCommitDelta {
@@ -177,13 +176,11 @@ export class TextureManager {
 		TextureOwnerId,
 		Set<VisualTextureEntryRef>
 	>();
-	// Phase 6 deletes this renderer lookup bridge when material payloads resolve
-	// by TextureBindingId instead of legacy textureUseId item ids.
+	// Tracks all renderer binding ids that currently resolve through one texture entry.
 	readonly #itemIdsByTextureEntryRef = new Map<
 		VisualTextureEntryRef,
 		Set<string>
 	>();
-	readonly #bindingIdByItemId = new Map<string, TextureBindingId>();
 	readonly #placementRecordsByItemId = new Map<
 		string,
 		TexturePlacementRecord
@@ -416,7 +413,7 @@ export class TextureManager {
 					).entries.get(textureKey) ?? pendingPlacements.get(textureKey)?.entry;
 				if (!entry) {
 					throw new Error(
-						`Texture placement ${textureUse.textureUseId} was not committed after packing.`,
+						`Texture placement ${textureUse.bindingId} was not committed after packing.`,
 					);
 				}
 				placementsByItemId.set(
@@ -424,7 +421,7 @@ export class TextureManager {
 					toPlannedTexturePlacement(
 						entry,
 						intent.itemId,
-						textureUse.textureUseId,
+						textureUse.bindingId,
 					),
 				);
 			}
@@ -629,7 +626,7 @@ export class TextureManager {
 			const entry = placement.entry;
 			if (!entry) {
 				throw new Error(
-					`Texture placement ${placement.textureUse.textureUseId} was not committed after packing.`,
+					`Texture placement ${placement.textureUse.bindingId} was not committed after packing.`,
 				);
 			}
 			entry.leaseCount += placement.pendingLeaseCount;
@@ -648,8 +645,8 @@ export class TextureManager {
 			}
 			resolvedTexturePlacements.push(
 				...createResolvedTexturePlacementsForEntry(entry, [
-					textureUse.textureUseId,
-				], this.#bindingIdByItemId),
+					textureUse.bindingId,
+				]),
 			);
 		}
 
@@ -741,10 +738,9 @@ export class TextureManager {
 			placementBucketKey: textureUse.placementBucketKey,
 			textureKey,
 		});
-		this.#recordTextureEntryItemId(entryRef, textureUse.textureUseId);
-		this.#bindingIdByItemId.set(textureUse.textureUseId, textureUse.bindingId);
+		this.#recordTextureEntryItemId(entryRef, textureUse.bindingId);
 		if (existing) {
-			this.#recordPlacementEntry(existing, textureUse.textureUseId);
+			this.#recordPlacementEntry(existing, textureUse.bindingId);
 			return {
 				entry: existing,
 				entryRef,
@@ -760,7 +756,7 @@ export class TextureManager {
 		if (pending) {
 			addPendingPlacementOwners(pending, textureUse.owners);
 			pending.textureKeys.add(textureKey);
-			pending.textureUseIds.add(textureUse.textureUseId);
+			pending.bindingIds.add(textureUse.bindingId);
 			return {
 				entry: null,
 				entryRef,
@@ -788,7 +784,7 @@ export class TextureManager {
 			source: directSource,
 			placementBucketKey: textureUse.placementBucketKey,
 			textureKeys: new Set([textureKey]),
-			textureUseIds: new Set([textureUse.textureUseId]),
+			bindingIds: new Set([textureUse.bindingId]),
 			textureUse,
 			ownerKeys: new Set(textureUse.owners.map(createTextureBindingOwnerKey)),
 		};
@@ -902,11 +898,11 @@ export class TextureManager {
 			};
 		}
 
-		const insertionPlan = planAtlasPageInsertion({
-			cohorts: createTexturePackingCohorts(group)?.map((cohort) => ({
-				entryKeys: cohort.textureUseIds,
-				key: cohort.key,
-			})),
+			const insertionPlan = planAtlasPageInsertion({
+				cohorts: createTexturePackingCohorts(group)?.map((cohort) => ({
+					entryKeys: cohort.entryKeys,
+					key: cohort.key,
+				})),
 			entries: group.entries.map(createAtlasInsertionEntry),
 			lockedPages: existingPages.map((page, textureIndex) => ({
 				height: page.height,
@@ -926,7 +922,7 @@ export class TextureManager {
 		});
 		const insertedEntries = group.entries.filter((entry) =>
 			insertionPlan.insertedPlacementsByEntryKey.has(
-				entry.textureUse.textureUseId,
+				entry.textureUse.bindingId,
 			),
 		);
 		if (insertedEntries.length < group.entries.length) {
@@ -943,9 +939,9 @@ export class TextureManager {
 			}
 		}
 
-		const insertedEntriesByTextureUseId = new Map(
+		const insertedEntriesByTextureBindingId = new Map(
 			insertedEntries.map(
-				(entry) => [entry.textureUse.textureUseId, entry] as const,
+				(entry) => [entry.textureUse.bindingId, entry] as const,
 			),
 		);
 		const insertedPlacementsByPage = new Map<
@@ -956,7 +952,9 @@ export class TextureManager {
 			}>
 		>();
 		for (const placement of insertionPlan.insertedPlacementsByEntryKey.values()) {
-			const entry = insertedEntriesByTextureUseId.get(placement.atlasEntryKey);
+			const entry = insertedEntriesByTextureBindingId.get(
+				placement.atlasEntryKey as TextureBindingId,
+			);
 			if (!entry) {
 				continue;
 			}
@@ -986,27 +984,26 @@ export class TextureManager {
 			for (const existingEntry of existingPage.entries) {
 				existingEntry.physicalEntry.placementRevision = placementRevision;
 				existingEntry.physicalEntry.runtimePlacement = runtimePlacement;
-				const textureUseIds =
-					this.#createTextureUseIdsForRegistryEntry(existingEntry);
-				for (const textureUseId of textureUseIds) {
+				const bindingIds =
+					this.#createTextureBindingIdsForRegistryEntry(existingEntry);
+				for (const entryKey of bindingIds) {
 					const activeReferenceCount =
-						this.#placementRecordsByItemId.get(textureUseId)
+						this.#placementRecordsByItemId.get(entryKey)
 							?.activeReferenceCount ??
-						(textureUseId === existingEntry.itemId
+						(entryKey === existingEntry.itemId
 							? existingEntry.leaseCount
 							: 0);
-					this.#recordPlacementEntry(existingEntry, textureUseId);
+					this.#recordPlacementEntry(existingEntry, entryKey);
 					this.#setPlacementActiveReferenceCount(
 						existingEntry,
 						activeReferenceCount,
-						textureUseId,
+						entryKey,
 					);
 				}
 				resolvedTexturePlacements.push(
 					...createResolvedTexturePlacementsForEntry(
 						existingEntry,
-						textureUseIds,
-						this.#bindingIdByItemId,
+						bindingIds,
 					),
 				);
 			}
@@ -1025,13 +1022,13 @@ export class TextureManager {
 					registry.entries.set(textureKey, registryEntry);
 				}
 				this.#recordPlacementEntry(registryEntry);
-				for (const textureUseId of entry.textureUseIds) {
-					this.#recordPlacementEntry(registryEntry, textureUseId);
+				for (const entryKey of entry.bindingIds) {
+					this.#recordPlacementEntry(registryEntry, entryKey);
 				}
 				resolvedTexturePlacements.push(
 					...createResolvedTexturePlacementsForEntry(registryEntry, [
-						...entry.textureUseIds,
-					], this.#bindingIdByItemId),
+						...entry.bindingIds,
+					]),
 				);
 			}
 		}
@@ -1101,27 +1098,26 @@ export class TextureManager {
 					runtimePlacement,
 					texturePage: repackPlan.layoutPage,
 				});
-				const textureUseIds =
-					this.#createTextureUseIdsForRegistryEntry(existingEntry);
-				for (const textureUseId of textureUseIds) {
+				const bindingIds =
+					this.#createTextureBindingIdsForRegistryEntry(existingEntry);
+				for (const entryKey of bindingIds) {
 					const activeReferenceCount =
-						this.#placementRecordsByItemId.get(textureUseId)
+						this.#placementRecordsByItemId.get(entryKey)
 							?.activeReferenceCount ??
-						(textureUseId === existingEntry.itemId
+						(entryKey === existingEntry.itemId
 							? existingEntry.leaseCount
 							: 0);
-					this.#recordPlacementEntry(existingEntry, textureUseId);
+					this.#recordPlacementEntry(existingEntry, entryKey);
 					this.#setPlacementActiveReferenceCount(
 						existingEntry,
 						activeReferenceCount,
-						textureUseId,
+						entryKey,
 					);
 				}
 				resolvedTexturePlacements.push(
 					...createResolvedTexturePlacementsForEntry(
 						existingEntry,
-						textureUseIds,
-						this.#bindingIdByItemId,
+						bindingIds,
 					),
 				);
 			}
@@ -1129,11 +1125,11 @@ export class TextureManager {
 
 		for (const pendingEntry of group.entries) {
 			const placement = placementByAtlasEntryKey.get(
-				pendingEntry.textureUse.textureUseId,
+				pendingEntry.textureUse.bindingId,
 			);
 			if (!placement) {
 				throw new Error(
-					`Page-local repack did not return placement for ${pendingEntry.textureUse.textureUseId}.`,
+					`Page-local repack did not return placement for ${pendingEntry.textureUse.bindingId}.`,
 				);
 			}
 			const registryEntry = createRegistryEntryForAbsorbedPlacement({
@@ -1154,13 +1150,13 @@ export class TextureManager {
 				registry.entries.set(textureKey, registryEntry);
 			}
 			this.#recordPlacementEntry(registryEntry);
-			for (const textureUseId of pendingEntry.textureUseIds) {
-				this.#recordPlacementEntry(registryEntry, textureUseId);
+			for (const entryKey of pendingEntry.bindingIds) {
+				this.#recordPlacementEntry(registryEntry, entryKey);
 			}
 			resolvedTexturePlacements.push(
 				...createResolvedTexturePlacementsForEntry(registryEntry, [
-					...pendingEntry.textureUseIds,
-				], this.#bindingIdByItemId),
+					...pendingEntry.bindingIds,
+				]),
 			);
 		}
 
@@ -1215,11 +1211,11 @@ export class TextureManager {
 
 		for (const entry of group.entries) {
 			const placement = placementByAtlasEntryKey.get(
-				entry.textureUse.textureUseId,
+				entry.textureUse.bindingId,
 			);
 			if (!placement) {
 				throw new Error(
-					`Page-local repack did not return placement for incoming source ${entry.textureUse.textureUseId}.`,
+					`Page-local repack did not return placement for incoming source ${entry.textureUse.bindingId}.`,
 				);
 			}
 			sources.push({
@@ -1320,7 +1316,7 @@ export class TextureManager {
 							entry.pagePolicy,
 						),
 						source: createTexturePackingPixelSource(entry.source),
-						textureUseId: entry.textureUse.textureUseId,
+						entryKey: entry.textureUse.bindingId,
 					})),
 				},
 				placementRevision,
@@ -1334,22 +1330,22 @@ export class TextureManager {
 		const { group, packed, placementRevision } = packedGroup;
 		const runtimePlacements: RuntimeTexturePlacement[] = [];
 		const pageById = new Map(packed.pages.map((page) => [page.pageId, page]));
-		const rectByTextureUseId = new Map(
-			packed.rects.map((rect) => [rect.textureUseId, rect] as const),
+		const rectByTextureBindingId = new Map(
+			packed.rects.map((rect) => [rect.entryKey, rect] as const),
 		);
 		const entriesByPageId = new Map<string, PendingTexturePlacement[]>();
 
 		for (const entry of group.entries) {
-			const rect = rectByTextureUseId.get(entry.textureUse.textureUseId);
+			const rect = rectByTextureBindingId.get(entry.textureUse.bindingId);
 			if (!rect) {
 				throw new Error(
-					`Texture packing job for ${entry.textureUse.textureUseId} did not return a rect.`,
+					`Texture packing job for ${entry.textureUse.bindingId} did not return a rect.`,
 				);
 			}
 			const page = pageById.get(rect.pageId);
 			if (!page) {
 				throw new Error(
-					`Texture packing job for ${entry.textureUse.textureUseId} returned unknown page ${rect.pageId}.`,
+					`Texture packing job for ${entry.textureUse.bindingId} returned unknown page ${rect.pageId}.`,
 				);
 			}
 			const pageEntries = entriesByPageId.get(page.pageId) ?? [];
@@ -1366,12 +1362,12 @@ export class TextureManager {
 			if (!firstEntry) {
 				continue;
 			}
-			const firstRect = rectByTextureUseId.get(
-				firstEntry.textureUse.textureUseId,
+			const firstRect = rectByTextureBindingId.get(
+				firstEntry.textureUse.bindingId,
 			);
 			if (!firstRect) {
 				throw new Error(
-					`Texture packing job for ${firstEntry.textureUse.textureUseId} did not return a rect.`,
+					`Texture packing job for ${firstEntry.textureUse.bindingId} did not return a rect.`,
 				);
 			}
 			const physicalWrapMode = createPhysicalTexturePageWrapMode(group);
@@ -1405,16 +1401,16 @@ export class TextureManager {
 				sampleClass: group.pagePolicy.sampleClass,
 				samplerPolicyKey: group.samplerPolicy.policyKey,
 				textureRefId,
-				textureUseId: firstEntry.textureUse.textureUseId,
+				textureUseId: firstEntry.textureUse.bindingId,
 				wrapS: physicalWrapMode.wrapS,
 				wrapT: physicalWrapMode.wrapT,
 				width: page.width,
 			});
 			for (const entry of pageEntries) {
-				const rect = rectByTextureUseId.get(entry.textureUse.textureUseId);
+				const rect = rectByTextureBindingId.get(entry.textureUse.bindingId);
 				if (!rect) {
 					throw new Error(
-						`Texture packing job for ${entry.textureUse.textureUseId} did not return a rect.`,
+						`Texture packing job for ${entry.textureUse.bindingId} did not return a rect.`,
 					);
 				}
 				const registryEntry: VisualTextureRegistryEntry = {
@@ -1422,7 +1418,7 @@ export class TextureManager {
 					bindingId: entry.textureUse.bindingId,
 					domain: entry.domain,
 					filteringMode: group.samplerPolicy.filteringMode,
-					itemId: entry.textureUse.textureUseId,
+					itemId: entry.textureUse.bindingId,
 					leaseCount: 0,
 					mipmapsGenerated: group.samplerPolicy.generateMipmaps,
 					ownerIds: entry.textureUse.ownerIds,
@@ -1468,8 +1464,8 @@ export class TextureManager {
 					);
 				}
 				this.#recordPlacementEntry(registryEntry);
-				for (const textureUseId of entry.textureUseIds) {
-					this.#recordPlacementEntry(registryEntry, textureUseId);
+				for (const entryKey of entry.bindingIds) {
+					this.#recordPlacementEntry(registryEntry, entryKey);
 				}
 			}
 		}
@@ -1534,7 +1530,7 @@ export class TextureManager {
 		return null;
 	}
 
-	#createTextureUseIdsForRegistryEntry(
+	#createTextureBindingIdsForRegistryEntry(
 		entry: VisualTextureRegistryEntry,
 	): readonly string[] {
 		const physicalPlacementKey = createRegistryEntryPhysicalPlacementKey(entry);
@@ -1581,7 +1577,7 @@ export class TextureManager {
 		const physicalEntry = entry.physicalEntry;
 		this.#placementRecordsByItemId.set(itemId, {
 			activeReferenceCount: entry.leaseCount,
-			bindingId: this.#bindingIdByItemId.get(itemId) ?? entry.bindingId,
+			bindingId: itemId as TextureBindingId,
 			format: physicalEntry.format,
 			height: physicalEntry.textureHeight,
 			itemId,
@@ -1777,7 +1773,6 @@ interface VisualTextureUseCommit {
 	readonly source: MaterialTextureDataUseIdentity;
 	readonly placementBucketKey: TexturePlacementBucketKey;
 	readonly textureKey: TextureKey;
-	readonly textureUseId: string;
 }
 
 interface VisualTextureUseCommitDelta {
@@ -1916,7 +1911,7 @@ interface PendingTexturePlacement {
 	readonly textureUse: VisualTextureUseCommit;
 	readonly textureKeys: Set<VisualTextureKey>;
 	/** Texture-use ids that share this staged source placement. */
-	readonly textureUseIds: Set<string>;
+	readonly bindingIds: Set<string>;
 	readonly source: DirectMaterialTextureSource;
 	readonly physicalSourceKey: string;
 	readonly pagePolicy: RuntimeTexturePagePolicy;
@@ -1990,7 +1985,6 @@ function createStaticVisualTextureUseCommit(
 			purpose,
 		}),
 		textureKey: textureUse.textureKey,
-		textureUseId: textureUse.textureUseId,
 	};
 }
 
@@ -2007,7 +2001,6 @@ function createDynamicVisualTextureUseCommit(
 		source: textureUse.source,
 		placementBucketKey: textureUse.placementBucketKey,
 		textureKey: textureUse.textureKey,
-		textureUseId: textureUse.textureUseId,
 	};
 }
 
@@ -2024,7 +2017,6 @@ function createVisualTextureUseCommitFromIntent(
 		source: intent.source.dataUse,
 		placementBucketKey: intent.placementBucketKey,
 		textureKey: intent.textureKey,
-		textureUseId: intent.textureUseId,
 	};
 }
 
@@ -2033,7 +2025,7 @@ function toPlannedTexturePlacement<
 >(
 	entry: VisualTextureRegistryEntry,
 	itemId: TPlacementItemId,
-	textureUseId: string,
+	entryKey: string,
 ): PlannedTexturePlacement<TPlacementItemId> {
 	return {
 		bindingId: entry.bindingId,
@@ -2046,7 +2038,7 @@ function toPlannedTexturePlacement<
 		rect: entry.physicalEntry.rect,
 		textureKey: entry.textureKey,
 		textureRefId: entry.physicalEntry.textureRefId,
-		textureUseId,
+		textureUseId: entryKey,
 		width: entry.physicalEntry.textureWidth,
 	};
 }
@@ -2204,13 +2196,13 @@ function createVisualTextureEntryRef(input: {
 function createTextureRefId(
 	domain: VisualTextureDomain,
 	placementBucketKey: string,
-	textureUse: Pick<VisualTextureUseCommit, "textureUseId">,
+	textureUse: Pick<VisualTextureUseCommit, "bindingId">,
 ): string {
 	return [
 		"texture-ref",
 		domain,
 		placementBucketKey,
-		textureUse.textureUseId,
+		textureUse.bindingId,
 	].join(":");
 }
 
@@ -2324,7 +2316,7 @@ function createAtlasInsertionEntry(
 			entry.pagePolicy,
 		),
 		height: entry.source.height,
-		key: entry.textureUse.textureUseId,
+		key: entry.textureUse.bindingId,
 		width: entry.source.width,
 	};
 }
@@ -2336,10 +2328,10 @@ function selectPageLocalRepackPlan(
 	let selected: PageLocalRepackPlan | null = null;
 	for (const existingPage of existingPages) {
 		const layout = planAtlasLayout({
-			cohorts: createTexturePackingCohorts(group)?.map((cohort) => ({
-				entryKeys: cohort.textureUseIds,
-				key: cohort.key,
-			})),
+				cohorts: createTexturePackingCohorts(group)?.map((cohort) => ({
+					entryKeys: cohort.entryKeys,
+					key: cohort.key,
+				})),
 			entries: [
 				...existingPage.physicalEntries.map(
 					createAtlasEntryForExistingPhysicalEntry,
@@ -2470,7 +2462,7 @@ function createRegistryEntryForAbsorbedPlacement(options: {
 		bindingId: options.entry.textureUse.bindingId,
 		domain: options.entry.domain,
 		filteringMode: options.group.samplerPolicy.filteringMode,
-		itemId: options.entry.textureUse.textureUseId,
+		itemId: options.entry.textureUse.bindingId,
 		leaseCount: 0,
 		mipmapsGenerated: options.group.samplerPolicy.generateMipmaps,
 		ownerIds: options.entry.textureUse.ownerIds,
@@ -2567,12 +2559,11 @@ function updateExistingRegistryEntryForPageLocalRepack(options: {
 
 function createResolvedTexturePlacementsForEntry(
 	entry: VisualTextureRegistryEntry,
-	textureUseIds: readonly string[],
-	bindingIdByItemId?: ReadonlyMap<string, TextureBindingId>,
+	bindingIds: readonly string[],
 ): readonly ResolvedTexturePlacement[] {
 	const physicalEntry = entry.physicalEntry;
-	return uniqueSortedStrings(textureUseIds).map((textureUseId) => ({
-		bindingId: bindingIdByItemId?.get(textureUseId) ?? entry.bindingId,
+		return uniqueSortedStrings(bindingIds).map((bindingId) => ({
+			bindingId: bindingId as TextureBindingId,
 		pageVersion: {
 			placementRevision: physicalEntry.placementRevision,
 			textureRefId: physicalEntry.textureRefId,
@@ -2580,9 +2571,9 @@ function createResolvedTexturePlacementsForEntry(
 		rect: physicalEntry.rect,
 		textureHeight: physicalEntry.textureHeight,
 		textureRefId: physicalEntry.textureRefId,
-		textureUseId,
-		textureWidth: physicalEntry.textureWidth,
-	}));
+			textureUseId: bindingId,
+			textureWidth: physicalEntry.textureWidth,
+		}));
 }
 
 function uniqueResolvedTexturePlacements(
@@ -2590,11 +2581,11 @@ function uniqueResolvedTexturePlacements(
 ): readonly ResolvedTexturePlacement[] {
 	return Array.from(
 		new Map(
-			placements.map(
-				(placement) => [placement.textureUseId, placement] as const,
-			),
-		).values(),
-	).sort((left, right) => left.textureUseId.localeCompare(right.textureUseId));
+				placements.map(
+					(placement) => [placement.textureUseId, placement] as const,
+				),
+			).values(),
+		).sort((left, right) => left.textureUseId.localeCompare(right.textureUseId));
 }
 
 function createRegistryEntryPhysicalPlacementKey(
@@ -2688,19 +2679,19 @@ function createTexturePackingCohorts(
 		return undefined;
 	}
 
-	const textureUseIdsByOwnerKey = new Map<string, string[]>();
+	const bindingIdsByOwnerKey = new Map<string, string[]>();
 	for (const entry of group.entries) {
 		for (const ownerKey of entry.ownerKeys) {
-			const textureUseIds = textureUseIdsByOwnerKey.get(ownerKey) ?? [];
-			textureUseIds.push(entry.textureUse.textureUseId);
-			textureUseIdsByOwnerKey.set(ownerKey, textureUseIds);
+			const bindingIds = bindingIdsByOwnerKey.get(ownerKey) ?? [];
+			bindingIds.push(entry.textureUse.bindingId);
+			bindingIdsByOwnerKey.set(ownerKey, bindingIds);
 		}
 	}
 
-	return [...textureUseIdsByOwnerKey.entries()]
-		.map(([ownerKey, textureUseIds]) => ({
+	return [...bindingIdsByOwnerKey.entries()]
+		.map(([ownerKey, bindingIds]) => ({
+			entryKeys: uniqueSortedStrings(bindingIds),
 			key: `${group.pageClassKey}|${ownerKey}`,
-			textureUseIds: uniqueSortedStrings(textureUseIds),
 		}))
 		.sort((left, right) => left.key.localeCompare(right.key));
 }

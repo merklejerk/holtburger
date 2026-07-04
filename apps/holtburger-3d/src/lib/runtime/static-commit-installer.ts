@@ -64,22 +64,22 @@ function assertTexturedDrawUnitsHaveResolvedPlacements(
 	drawUnits: readonly StaticDrawUnit[],
 	placements: readonly ResolvedTexturePlacement[],
 ): void {
-	const committedTextureUseIds = new Set(
-		placements.map((placement) => placement.textureUseId),
+	const committedTextureBindingIds = new Set(
+		placements.map((placement) => placement.bindingId),
 	);
 
 	for (const drawUnit of drawUnits) {
-		const expectedTextureUseIds = drawUnit.textureUseIds;
-		if (expectedTextureUseIds.length === 0) {
+		const expectedTextureBindingIds = drawUnit.textureBindingIds;
+		if (expectedTextureBindingIds.length === 0) {
 			continue;
 		}
 
-		const missingTextureUseIds = expectedTextureUseIds.filter(
-			(textureUseId) => !committedTextureUseIds.has(textureUseId),
+		const missingTextureBindingIds = expectedTextureBindingIds.filter(
+			(textureBindingId) => !committedTextureBindingIds.has(textureBindingId),
 		);
-		if (missingTextureUseIds.length > 0) {
+		if (missingTextureBindingIds.length > 0) {
 			throw new Error(
-				`Static draw unit ${drawUnit.drawUnitId} is missing resolved texture placements for ${missingTextureUseIds.join(", ")}.`,
+				`Static draw unit ${drawUnit.drawUnitId} is missing resolved texture placements for ${missingTextureBindingIds.join(", ")}.`,
 			);
 		}
 	}
@@ -89,20 +89,20 @@ function assertTexturedObjectVisualResourcesHaveResolvedPlacements(
 	resources: readonly ObjectVisualResource[],
 	placements: readonly ResolvedTexturePlacement[],
 ): void {
-	const committedTextureUseIds = new Set(
-		placements.map((placement) => placement.textureUseId),
+	const committedTextureBindingIds = new Set(
+		placements.map((placement) => placement.bindingId),
 	);
 
 	for (const resource of resources) {
-		if (resource.textureUseIds.length === 0) {
+		if (resource.textureBindingIds.length === 0) {
 			continue;
 		}
-		const missingTextureUseIds = resource.textureUseIds.filter(
-			(textureUseId) => !committedTextureUseIds.has(textureUseId),
+		const missingTextureBindingIds = resource.textureBindingIds.filter(
+			(textureBindingId) => !committedTextureBindingIds.has(textureBindingId),
 		);
-		if (missingTextureUseIds.length > 0) {
+		if (missingTextureBindingIds.length > 0) {
 			throw new Error(
-				`Static object visual resource ${resource.resourceId} is missing resolved texture placements for ${missingTextureUseIds.join(", ")}.`,
+				`Static object visual resource ${resource.resourceId} is missing resolved texture placements for ${missingTextureBindingIds.join(", ")}.`,
 			);
 		}
 	}

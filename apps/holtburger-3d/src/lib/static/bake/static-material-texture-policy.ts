@@ -35,25 +35,6 @@ export function createMaterialTextureDataUseKey(
 	].join(":");
 }
 
-export function createStaticMaterialTextureUseId(options: {
-	readonly dataUse: MaterialTextureDataUseIdentity;
-	readonly textureUseNamespace: string;
-	readonly textureUseScopeId: string;
-	readonly wrapMode: StaticMaterialTextureWrapMode;
-}): string {
-	const samplingPolicy = createStaticMaterialTextureSamplingPolicy({
-		dataUse: options.dataUse,
-		wrapMode: options.wrapMode,
-	});
-
-	return [
-		options.textureUseScopeId,
-		options.textureUseNamespace,
-		createMaterialTextureDataUseKey(options.dataUse),
-		createStaticMaterialTextureSamplingPolicyKey(samplingPolicy),
-	].join(":");
-}
-
 export function createStaticMaterialTextureBindingId(options: {
 	readonly dataUse: MaterialTextureDataUseIdentity;
 	readonly textureUseNamespace: string;
@@ -84,14 +65,11 @@ export function createStaticMaterialTextureBindingRequirement(options: {
 		dataUse: options.dataUse,
 		wrapMode: options.wrapMode,
 	});
-	const bindingKey = createStaticMaterialTextureUseId(options);
 	const bindingId = createStaticMaterialTextureBindingId(options);
 
 	return {
 		bindingId,
-		bindingKey,
 		placementItemId: bindingId,
-		textureUseId: bindingKey,
 		purpose: classifyTextureUsagePurpose(options.dataUse, options.domain),
 		samplingPolicy,
 		source: createStaticMaterialTexturePlacementSource(
@@ -117,12 +95,6 @@ export function createStaticMaterialTextureSamplingPolicy(options: {
 		wrapS: "clamp-to-edge",
 		wrapT: "clamp-to-edge",
 	};
-}
-
-function createStaticMaterialTextureSamplingPolicyKey(
-	policy: StaticBakeTextureSamplingPolicy,
-): string {
-	return `sampling:wrap=${policy.wrapS},${policy.wrapT}`;
 }
 
 export function resolveRepeatedStaticMaterialPrimaryWrapMode(

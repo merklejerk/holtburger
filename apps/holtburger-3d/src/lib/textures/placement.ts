@@ -79,12 +79,8 @@ export interface TextureBindingRequirement<
 > {
 	/** Material-consumer binding identity. This is not canonical texture-pool identity. */
 	readonly bindingId: TextureBindingId;
-	/** Material-entry key referenced by draw units and renderer binding lookup. */
-	readonly bindingKey: string;
 	/** Packer/placement snapshot key used by bake-time material partition lookup. */
 	readonly placementItemId: TPlacementItemId;
-	/** Runtime texture-resource dependency item id used by pin/release accounting. */
-	readonly textureUseId: string;
 	/** Source dedupe key, including palette/subpalette identity where applicable. */
 	readonly sourceKey: string;
 	/** Shader/page purpose for the placement item. */
@@ -264,10 +260,10 @@ export function createStaticTexturePlacementIntent(
 		affinityKey: options.affinityKey ?? null,
 		bindingId: identity.bindingId,
 		domain: textureUse.domain,
-		itemId: textureUse.textureUseId,
+		itemId: textureUse.bindingId,
 		ownerIds: identity.ownerIds,
 		pageClass: identity.pageClass,
-		textureUseId: textureUse.textureUseId,
+		textureUseId: textureUse.bindingId,
 		textureKey: identity.textureKey,
 		placementBucketKey:
 			options.placementBucketKey ??

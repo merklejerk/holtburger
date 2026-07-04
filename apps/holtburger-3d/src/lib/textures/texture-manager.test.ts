@@ -43,7 +43,9 @@ import { createRuntimeTexturePagePolicy } from "./sampling-policy";
 
 const STATIC_TERRAIN_COLOR_BUCKET =
 	"texture-placement-bucket|outdoor-terrain|terrain-color|static-authored";
-const STABLE_TEXTURE_REF_ID = `texture-ref:outdoor-terrain:${STATIC_TERRAIN_COLOR_BUCKET}:terrain-a:prepared-texture:06000010`;
+const STABLE_TERRAIN_BINDING_ID =
+	"binding|resource=fixture-texture-use|slot=terrain-a%3Aprepared-texture%3A06000010|role=terrain-color|wrap=material-default|variant=default";
+const STABLE_TEXTURE_REF_ID = `texture-ref:outdoor-terrain:${STATIC_TERRAIN_COLOR_BUCKET}:${STABLE_TERRAIN_BINDING_ID}`;
 
 describe("browser texture manager", () => {
 	it("turns bake-local texture uses into runtime-owned texture page placements", async () => {
@@ -71,7 +73,8 @@ describe("browser texture manager", () => {
 					rect: [0, 0, 1, 1],
 					textureHeight: 256,
 					textureRefId: STABLE_TEXTURE_REF_ID,
-					textureUseId: "terrain-a:prepared-texture:06000010",
+					bindingId: STABLE_TERRAIN_BINDING_ID,
+					textureUseId: STABLE_TERRAIN_BINDING_ID,
 					textureWidth: 256,
 				},
 			],
@@ -92,7 +95,7 @@ describe("browser texture manager", () => {
 					samplerPolicyKey:
 						"sample=rgba-color;filter=anisotropic-4x;mips=on;aniso=4",
 					textureRefId: STABLE_TEXTURE_REF_ID,
-					textureUseId: "terrain-a:prepared-texture:06000010",
+					textureUseId: STABLE_TERRAIN_BINDING_ID,
 					wrapS: "repeat",
 					wrapT: "repeat",
 					width: 256,
@@ -120,8 +123,8 @@ describe("browser texture manager", () => {
 				placementRevision: 1,
 				sources: [
 					{
+						entryKey: STABLE_TERRAIN_BINDING_ID,
 						gutterEdgeMode: "repeat",
-						textureUseId: "terrain-a:prepared-texture:06000010",
 					},
 				],
 			},
@@ -160,7 +163,7 @@ describe("browser texture manager", () => {
 	it("packs compatible new texture uses into one shared page placement", async () => {
 		const assetService = new FixtureAssetService();
 		const texturePacker = new FixtureTexturePacker({
-			rectsByTextureUseId: new Map([
+			rectsByBindingSlot: new Map([
 				[
 					"terrain-a:prepared-texture:06000010",
 					{
@@ -214,12 +217,16 @@ describe("browser texture manager", () => {
 				},
 				sources: [
 					{
+						entryKey: expect.stringContaining(
+							"slot=terrain-a%3Aprepared-texture%3A06000010",
+						),
 						gutterEdgeMode: "repeat",
-						textureUseId: "terrain-a:prepared-texture:06000010",
 					},
 					{
+						entryKey: expect.stringContaining(
+							"slot=terrain-b%3Aprepared-texture%3A06000020",
+						),
 						gutterEdgeMode: "repeat",
-						textureUseId: "terrain-b:prepared-texture:06000020",
 					},
 				],
 			},
@@ -230,12 +237,16 @@ describe("browser texture manager", () => {
 			expect.objectContaining({
 				rect: [4, 4, 1, 1],
 				textureRefId: update?.placements[0]?.textureRefId,
-				textureUseId: "terrain-a:prepared-texture:06000010",
+				bindingId: expect.stringContaining(
+					"slot=terrain-a%3Aprepared-texture%3A06000010",
+				),
 			}),
 			expect.objectContaining({
 				rect: [5, 4, 1, 1],
 				textureRefId: update?.placements[0]?.textureRefId,
-				textureUseId: "terrain-b:prepared-texture:06000020",
+				bindingId: expect.stringContaining(
+					"slot=terrain-b%3Aprepared-texture%3A06000020",
+				),
 			}),
 		]);
 		expect(update?.placements[0]?.textureRefId).toContain("texture-page-ref");
@@ -248,26 +259,27 @@ describe("browser texture manager", () => {
 			uniqueSourceCount: 2,
 			width: 16,
 		});
-		expect(
-			textureManager.createPageInspectionSnapshot({
-				bucketId: "bucket-1",
-				pageId: "page-1",
-			}),
-		).toMatchObject({
+		const pageSnapshot = textureManager.createPageInspectionSnapshot({
+			bucketId: "bucket-1",
+			pageId: "page-1",
+		});
+		expect(pageSnapshot).toMatchObject({
 			format: "rgba8",
 			height: 16,
 			textures: [
 				expect.objectContaining({
-					itemId: "terrain-a:prepared-texture:06000010",
 					rect: [4, 4, 1, 1],
 				}),
 				expect.objectContaining({
-					itemId: "terrain-b:prepared-texture:06000020",
 					rect: [5, 4, 1, 1],
 				}),
 			],
 			width: 16,
 		});
+		expect(getPlacementItemSlots(pageSnapshot.textures)).toEqual([
+			"terrain-a:prepared-texture:06000010",
+			"terrain-b:prepared-texture:06000020",
+		]);
 	});
 
 	it("absorbs later compatible texture uses into an existing page", async () => {
@@ -319,16 +331,17 @@ describe("browser texture manager", () => {
 				height: 16,
 			}),
 		]);
+		expect(
+			getResolvedPlacementSlots(secondUpdate?.resolvedTexturePlacements),
+		).toEqual(["building-a:mask:06000010", "building-b:mask:06000020"]);
 		expect(secondUpdate?.resolvedTexturePlacements).toEqual([
 			expect.objectContaining({
 				pageVersion: uploadedPageVersion,
 				textureRefId: firstUpdate?.placements[0]?.textureRefId,
-				textureUseId: "building-a:mask:06000010",
 			}),
 			expect.objectContaining({
 				pageVersion: uploadedPageVersion,
 				textureRefId: firstUpdate?.placements[0]?.textureRefId,
-				textureUseId: "building-b:mask:06000020",
 			}),
 		]);
 		expect(textureManager.createDiagnosticsReport()).toMatchObject({
@@ -401,11 +414,7 @@ describe("browser texture manager", () => {
 			},
 		]);
 		expect(
-			new Set(
-				secondUpdate?.resolvedTexturePlacements.map(
-					(placement) => placement.textureUseId,
-				),
-			),
+			new Set(getResolvedPlacementSlots(secondUpdate?.resolvedTexturePlacements)),
 		).toEqual(
 			new Set([
 				"building-a:palette",
@@ -477,11 +486,7 @@ describe("browser texture manager", () => {
 		});
 
 		expect(
-			new Set(
-				secondUpdate?.resolvedTexturePlacements.map(
-					(placement) => placement.textureUseId,
-				),
-			),
+			new Set(getResolvedPlacementSlots(secondUpdate?.resolvedTexturePlacements)),
 		).toEqual(
 			new Set([
 				"building-a:palette",
@@ -492,19 +497,25 @@ describe("browser texture manager", () => {
 				"building-4:palette",
 			]),
 		);
+		const buildingPalettePlacement = findResolvedPlacementBySlot(
+			secondUpdate?.resolvedTexturePlacements,
+			"building-a:palette",
+		);
+		const secondaryPalettePlacement = findResolvedPlacementBySlot(
+			secondUpdate?.resolvedTexturePlacements,
+			"building-a:palette-secondary",
+		);
 		expect(
 			textureManager.createPlacementResolutionSnapshot([
-				"building-a:palette",
-				"building-a:palette-secondary",
+				buildingPalettePlacement.textureUseId,
+				secondaryPalettePlacement.textureUseId,
 			]),
 		).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
 					bindingId: expect.stringContaining("building-a%3Apalette"),
-					itemId: "building-a:palette",
-					pageVersion: secondUpdate?.resolvedTexturePlacements.find(
-						(placement) => placement.textureUseId === "building-a:palette",
-					)?.pageVersion,
+					itemId: buildingPalettePlacement.textureUseId,
+					pageVersion: buildingPalettePlacement.pageVersion,
 					textureKey: expect.stringContaining("texture|"),
 					width: 256,
 				}),
@@ -512,11 +523,8 @@ describe("browser texture manager", () => {
 					bindingId: expect.stringContaining(
 						"building-a%3Apalette-secondary",
 					),
-					itemId: "building-a:palette-secondary",
-					pageVersion: secondUpdate?.resolvedTexturePlacements.find(
-						(placement) =>
-							placement.textureUseId === "building-a:palette-secondary",
-					)?.pageVersion,
+					itemId: secondaryPalettePlacement.textureUseId,
+					pageVersion: secondaryPalettePlacement.pageVersion,
 					textureKey: expect.stringContaining("texture|"),
 					width: 256,
 				}),
@@ -527,7 +535,7 @@ describe("browser texture manager", () => {
 	it("does not repack unrelated compatible pages in the same bucket", async () => {
 		const assetService = new FixtureAssetService(null, { paletteSize: 46 });
 		const texturePacker = new FixtureTexturePacker({
-			rectsByTextureUseId: new Map([
+			rectsByBindingSlot: new Map([
 				[
 					"building-a:palette",
 					{
@@ -584,9 +592,7 @@ describe("browser texture manager", () => {
 		});
 
 		expect(
-			update?.resolvedTexturePlacements.map(
-				(placement) => placement.textureUseId,
-			),
+			getResolvedPlacementSlots(update?.resolvedTexturePlacements),
 		).not.toContain("building-z:palette");
 		expect(textureManager.createDiagnosticsReport()).toMatchObject({
 			buckets: [
@@ -617,7 +623,7 @@ describe("browser texture manager", () => {
 	it("reports atlas occupancy as clipped union area for overlapping page rects", async () => {
 		const assetService = new FixtureAssetService();
 		const texturePacker = new FixtureTexturePacker({
-			rectsByTextureUseId: new Map([
+			rectsByBindingSlot: new Map([
 				[
 					"terrain-a:prepared-texture:06000010",
 					{
@@ -716,7 +722,7 @@ describe("browser texture manager", () => {
 
 		expect(texturePacker.jobs[0]?.cohorts).toBeUndefined();
 		expect(
-			texturePacker.jobs[0]?.sources.map((source) => source.textureUseId),
+			getFixtureBindingSlots(texturePacker.jobs[0]?.sources.map((source) => source.entryKey)),
 		).toEqual(["terrain-base-a", "terrain-road", "terrain-base-b"]);
 	});
 
@@ -764,7 +770,7 @@ describe("browser texture manager", () => {
 
 		expect(texturePacker.jobs[0]?.cohorts).toBeUndefined();
 		expect(
-			texturePacker.jobs[0]?.sources.map((source) => source.textureUseId),
+			getFixtureBindingSlots(texturePacker.jobs[0]?.sources.map((source) => source.entryKey)),
 		).toEqual([
 			"terrain-a:prepared-texture:06000010",
 			"terrain-a:prepared-texture:06000020",
@@ -804,7 +810,7 @@ describe("browser texture manager", () => {
 		});
 
 		expect(
-			texturePacker.jobs[0]?.sources.map((source) => source.textureUseId),
+			getFixtureBindingSlots(texturePacker.jobs[0]?.sources.map((source) => source.entryKey)),
 		).toEqual(["terrain-a:prepared-texture:06000010"]);
 		expect(texturePacker.jobs[0]?.cohorts).toBeUndefined();
 	});
@@ -841,7 +847,6 @@ describe("browser texture manager", () => {
 					pageVersion: firstPageVersion,
 					rect: [2, 1, 1, 1],
 					textureHeight: 4,
-					textureUseId: "terrain-a:prepared-texture:06000010",
 					textureWidth: 4,
 				},
 			],
@@ -853,24 +858,29 @@ describe("browser texture manager", () => {
 				},
 			],
 		});
+		expect(getResolvedPlacementSlots(firstUpdate?.resolvedTexturePlacements)).toEqual([
+			"terrain-a:prepared-texture:06000010",
+		]);
 		expect(secondUpdate).toMatchObject({
 			resolvedTexturePlacements: [
 				{
 					pageVersion: firstPageVersion,
 					rect: [2, 1, 1, 1],
 					textureHeight: 4,
-					textureUseId: "terrain-b:prepared-texture:06000010",
 					textureWidth: 4,
 				},
 			],
 			placements: [],
 		});
+		expect(getResolvedPlacementSlots(secondUpdate?.resolvedTexturePlacements)).toEqual([
+			"terrain-b:prepared-texture:06000010",
+		]);
 	});
 
 	it("assigns draw-local terrain role-page slots from committed placements", async () => {
 		const assetService = new FixtureAssetService();
 		const texturePacker = new FixtureTexturePacker({
-			rectsByTextureUseId: new Map([
+			rectsByBindingSlot: new Map([
 				[
 					"terrain-a:prepared-texture:06000010",
 					{
@@ -911,19 +921,15 @@ describe("browser texture manager", () => {
 			],
 		});
 
-		expect(update?.resolvedTexturePlacements).toEqual([
-			expect.objectContaining({
-				textureUseId: "terrain-a:prepared-texture:06000010",
-			}),
-			expect.objectContaining({
-				textureUseId: "terrain-a:prepared-texture:06000020",
-			}),
+		expect(getResolvedPlacementSlots(update?.resolvedTexturePlacements)).toEqual([
+			"terrain-a:prepared-texture:06000010",
+			"terrain-a:prepared-texture:06000020",
 		]);
 	});
 
 	it("resolves static object base-color placements per draw unit", async () => {
 		const assetService = new FixtureAssetService();
-		const rectsByTextureUseId = new Map<
+		const rectsByBindingSlot = new Map<
 			string,
 			FixtureTexturePackerRectPlacement
 		>([
@@ -946,7 +952,7 @@ describe("browser texture manager", () => {
 				},
 			],
 		]);
-		const texturePacker = new FixtureTexturePacker({ rectsByTextureUseId });
+		const texturePacker = new FixtureTexturePacker({ rectsByBindingSlot });
 		const textureManager = new TextureManager({ assetService, texturePacker });
 
 		const update = await textureManager.applyStaticCommitDelta({
@@ -971,18 +977,14 @@ describe("browser texture manager", () => {
 			],
 		});
 
-		expect(update?.resolvedTexturePlacements).toEqual([
-			expect.objectContaining({
-				textureUseId: "static-a:base:0",
-			}),
-			expect.objectContaining({
-				textureUseId: "static-a:base:1",
-			}),
+		expect(getResolvedPlacementSlots(update?.resolvedTexturePlacements)).toEqual([
+			"static-a:base:0",
+			"static-a:base:1",
 		]);
 	});
 
 	it("assigns landblock env-cell texture uses to static role pages", async () => {
-		const rectsByTextureUseId = new Map<
+		const rectsByBindingSlot = new Map<
 			string,
 			FixtureTexturePackerRectPlacement
 		>([
@@ -1005,7 +1007,7 @@ describe("browser texture manager", () => {
 				},
 			],
 		]);
-		const texturePacker = new FixtureTexturePacker({ rectsByTextureUseId });
+		const texturePacker = new FixtureTexturePacker({ rectsByBindingSlot });
 		const textureManager = new TextureManager({
 			assetService: new FixtureAssetService(),
 			texturePacker,
@@ -1040,13 +1042,9 @@ describe("browser texture manager", () => {
 			],
 		});
 
-		expect(update?.resolvedTexturePlacements).toEqual([
-			expect.objectContaining({
-				textureUseId: "structured-interior-a:base:0",
-			}),
-			expect.objectContaining({
-				textureUseId: "structured-interior-a:base:1",
-			}),
+		expect(getResolvedPlacementSlots(update?.resolvedTexturePlacements)).toEqual([
+			"structured-interior-a:base:0",
+			"structured-interior-a:base:1",
 		]);
 		expect(texturePacker.jobs).toMatchObject([
 			{
@@ -1056,12 +1054,16 @@ describe("browser texture manager", () => {
 				},
 				sources: [
 					expect.objectContaining({
+						entryKey: expect.stringContaining(
+							"slot=structured-interior-a%3Abase%3A0",
+						),
 						gutterEdgeMode: "repeat",
-						textureUseId: "structured-interior-a:base:0",
 					}),
 					expect.objectContaining({
+						entryKey: expect.stringContaining(
+							"slot=structured-interior-a%3Abase%3A1",
+						),
 						gutterEdgeMode: "repeat",
-						textureUseId: "structured-interior-a:base:1",
 					}),
 				],
 			},
@@ -1105,10 +1107,10 @@ describe("browser texture manager", () => {
 			intents: [createStaticPlacementIntent(textureUse)],
 		});
 
-		const placement = snapshot.placementsByItemId.get(textureUse.textureUseId);
+		const placement = snapshot.placementsByItemId.get(textureUse.bindingId);
 		expect(placement).toMatchObject({
 			height: 256,
-			itemId: "terrain-pre-bake:prepared-texture:06000010",
+			itemId: textureUse.bindingId,
 			purpose: "terrain-color",
 			rect: [0, 0, 1, 1],
 			width: 256,
@@ -1119,7 +1121,7 @@ describe("browser texture manager", () => {
 			{
 				activeReferenceCount: 0,
 				freeable: true,
-				itemId: "terrain-pre-bake:prepared-texture:06000010",
+				itemId: textureUse.bindingId,
 				pageId: placement?.pageId,
 				purpose: "terrain-color",
 				rect: [0, 0, 1, 1],
@@ -1140,7 +1142,7 @@ describe("browser texture manager", () => {
 		expect(update?.placements).toHaveLength(1);
 		expect(update?.placements[0]).toMatchObject({
 			textureRefId: expect.stringContaining("texture-placement-bucket"),
-			textureUseId: textureUse.textureUseId,
+			textureUseId: textureUse.bindingId,
 		});
 	});
 
@@ -1201,7 +1203,7 @@ describe("browser texture manager", () => {
 			expect.objectContaining({
 				pageVersion: uploadedPageVersion,
 				textureRefId: firstUpdate?.placements[0]?.textureRefId,
-				textureUseId: inactiveTextureUse.textureUseId,
+				bindingId: inactiveTextureUse.bindingId,
 			}),
 		]);
 	});
@@ -1240,7 +1242,7 @@ describe("browser texture manager", () => {
 		expect(update?.placements).toHaveLength(1);
 		expect(update?.placements[0]).toMatchObject({
 			textureRefId: expect.stringContaining("texture-placement-bucket"),
-			textureUseId: textureUse.textureUseId,
+			textureUseId: textureUse.bindingId,
 		});
 	});
 
@@ -1270,11 +1272,9 @@ describe("browser texture manager", () => {
 			],
 		});
 
-		expect(snapshot.placementsByItemId.has(firstUse.textureUseId)).toBe(true);
-		expect(
-			snapshot.placementsByItemId.get(secondUse.textureUseId),
-		).toMatchObject({
-			itemId: secondUse.textureUseId,
+		expect(snapshot.placementsByItemId.has(firstUse.bindingId)).toBe(true);
+		expect(snapshot.placementsByItemId.get(secondUse.bindingId)).toMatchObject({
+			itemId: secondUse.bindingId,
 			purpose: "terrain-color",
 		});
 		textureManager.pinTextureResourceDependencies([
@@ -1282,7 +1282,7 @@ describe("browser texture manager", () => {
 				resourceId: "terrain-b",
 				roles: [
 					{
-						itemIds: [secondUse.textureUseId],
+						itemIds: [secondUse.bindingId],
 						purpose: "terrain-color",
 					},
 				],
@@ -1291,10 +1291,10 @@ describe("browser texture manager", () => {
 		expect(
 			textureManager
 				.createPlacementReferenceSnapshot()
-				.find((record) => record.itemId === secondUse.textureUseId),
+				.find((record) => record.itemId === secondUse.bindingId),
 		).toMatchObject({
 			activeReferenceCount: 1,
-			itemId: secondUse.textureUseId,
+			itemId: secondUse.bindingId,
 			purpose: "terrain-color",
 		});
 	});
@@ -1318,7 +1318,7 @@ describe("browser texture manager", () => {
 				resourceId: "terrain-a",
 				roles: [
 					{
-						itemIds: [textureUse.textureUseId],
+						itemIds: [textureUse.bindingId],
 						purpose: "terrain-color",
 					},
 				],
@@ -1328,7 +1328,7 @@ describe("browser texture manager", () => {
 			{
 				activeReferenceCount: 1,
 				freeable: false,
-				itemId: textureUse.textureUseId,
+				itemId: textureUse.bindingId,
 			},
 		]);
 
@@ -1337,7 +1337,7 @@ describe("browser texture manager", () => {
 			{
 				activeReferenceCount: 0,
 				freeable: true,
-				itemId: textureUse.textureUseId,
+				itemId: textureUse.bindingId,
 			},
 		]);
 	});
@@ -1353,7 +1353,7 @@ describe("browser texture manager", () => {
 			{
 				activeReferenceCount: 1,
 				freeable: false,
-				itemId: "terrain-a:prepared-texture:06000010",
+				itemId: STABLE_TERRAIN_BINDING_ID,
 			},
 		]);
 
@@ -1393,18 +1393,16 @@ describe("browser texture manager", () => {
 			intents: [createStaticPlacementIntent(secondTextureUse)],
 		});
 
+		const referenceSnapshot = textureManager.createPlacementReferenceSnapshot();
 		expect(
-			textureManager
-				.createPlacementReferenceSnapshot()
-				.map((entry) => ({
-					activeReferenceCount: entry.activeReferenceCount,
-					itemId: entry.itemId,
-				}))
-				.sort((left, right) => left.itemId.localeCompare(right.itemId)),
+			referenceSnapshot.map((entry) => ({
+				activeReferenceCount: entry.activeReferenceCount,
+				slot: getFixtureBindingSlot(entry.itemId),
+			})),
 		).toEqual([
 			{
 				activeReferenceCount: 0,
-				itemId: "terrain-live:prepared-texture:06000020",
+				slot: "terrain-live:prepared-texture:06000020",
 			},
 		]);
 	});
@@ -1444,15 +1442,19 @@ describe("browser texture manager", () => {
 			],
 		});
 
-		expect([...snapshot.placementsByItemId.keys()].sort()).toEqual([
+		expect(
+			getFixtureBindingSlots([...snapshot.placementsByItemId.keys()].sort()),
+		).toEqual([
 			"terrain-new:prepared-texture:06000020",
 			"terrain-reused:prepared-texture:06000010",
 		]);
 		expect(
-			textureManager
-				.createPlacementReferenceSnapshot()
-				.map((record) => record.itemId)
-				.sort(),
+			getFixtureBindingSlots(
+				textureManager
+					.createPlacementReferenceSnapshot()
+					.map((record) => record.itemId)
+					.sort(),
+			),
 		).toEqual([
 			"terrain-existing:prepared-texture:06000010",
 			"terrain-new:prepared-texture:06000020",
@@ -1479,7 +1481,7 @@ describe("browser texture manager", () => {
 				resourceId: "terrain-a",
 				roles: [
 					{
-						itemIds: [activeTextureUse.textureUseId],
+						itemIds: [activeTextureUse.bindingId],
 						purpose: "terrain-color",
 					},
 				],
@@ -1499,16 +1501,16 @@ describe("browser texture manager", () => {
 		expect(
 			textureManager.createPlacementReferenceSnapshot().map((record) => ({
 				activeReferenceCount: record.activeReferenceCount,
-				itemId: record.itemId,
+				slot: getFixtureBindingSlot(record.itemId),
 			})),
 		).toEqual([
 			{
 				activeReferenceCount: 1,
-				itemId: "terrain-active:prepared-texture:06000010",
+				slot: "terrain-active:prepared-texture:06000010",
 			},
 			{
 				activeReferenceCount: 0,
-				itemId: "terrain-new:prepared-texture:06000020",
+				slot: "terrain-new:prepared-texture:06000020",
 			},
 		]);
 		expect(
@@ -1546,7 +1548,9 @@ describe("browser texture manager", () => {
 			resolvedTexturePlacements: [
 				{
 					textureRefId: STABLE_TEXTURE_REF_ID,
-					textureUseId: "terrain-b:prepared-texture:06000010",
+					bindingId: expect.stringContaining(
+						"slot=terrain-b%3Aprepared-texture%3A06000010",
+					),
 				},
 			],
 			placements: [],
@@ -1596,7 +1600,9 @@ describe("browser texture manager", () => {
 			resolvedTexturePlacements: [
 				{
 					textureRefId: STABLE_TEXTURE_REF_ID,
-					textureUseId: "terrain-b:prepared-texture:06000010",
+					bindingId: expect.stringContaining(
+						"slot=terrain-b%3Aprepared-texture%3A06000010",
+					),
 				},
 			],
 			placements: [],
@@ -1741,18 +1747,18 @@ describe("browser texture manager", () => {
 			},
 			sources: [
 				{
+					entryKey: expect.stringContaining("slot=building-clamp%3A06000010"),
 					gutterEdgeMode: "clamp",
-					textureUseId: "building-clamp:06000010",
 				},
 				{
+					entryKey: expect.stringContaining("slot=building-repeat%3A06000020"),
 					gutterEdgeMode: "repeat",
-					textureUseId: "building-repeat:06000020",
 				},
 			],
 		});
 		expect(update?.placements).toMatchObject([
 			{
-				textureUseId: "building-clamp:06000010",
+				textureUseId: expect.stringContaining("slot=building-clamp%3A06000010"),
 				wrapS: "clamp-to-edge",
 				wrapT: "clamp-to-edge",
 			},
@@ -1814,8 +1820,8 @@ describe("browser texture manager", () => {
 		expect(secondUpdate?.placements).toEqual([]);
 		expect(secondUpdate?.resolvedTexturePlacements).toMatchObject([
 			{
+				bindingId: expect.stringContaining("slot=building-repeat%3A06000010"),
 				textureRefId: firstUpdate?.placements[0]?.textureRefId,
-				textureUseId: "building-repeat:06000010",
 			},
 		]);
 	});
@@ -1866,7 +1872,9 @@ describe("browser texture manager", () => {
 		expect(dynamicUpdate?.placements).toHaveLength(1);
 		expect(dynamicUpdate?.resolvedTexturePlacements).toMatchObject([
 			{
-				textureUseId: "dynamic-windmill-part-0:06000010",
+				bindingId: expect.stringContaining(
+					"slot=dynamic-windmill-part-0%3A06000010",
+				),
 			},
 		]);
 		expect(dynamicUpdate?.resolvedTexturePlacements[0]?.textureRefId).not.toBe(
@@ -1875,7 +1883,7 @@ describe("browser texture manager", () => {
 	});
 
 	it("packs runtime object-material dynamic texture refs in their own visual domain", async () => {
-		const rectsByTextureUseId = new Map<
+		const rectsByBindingSlot = new Map<
 			string,
 			FixtureTexturePackerRectPlacement
 		>([
@@ -1898,7 +1906,7 @@ describe("browser texture manager", () => {
 				},
 			],
 		]);
-		const texturePacker = new FixtureTexturePacker({ rectsByTextureUseId });
+		const texturePacker = new FixtureTexturePacker({ rectsByBindingSlot });
 		const textureManager = new TextureManager({
 			assetService: new FixtureAssetService(),
 			texturePacker,
@@ -1938,18 +1946,14 @@ describe("browser texture manager", () => {
 				texturePageCount: 1,
 			},
 		]);
-		expect(update?.resolvedTexturePlacements).toEqual([
-			expect.objectContaining({
-				textureUseId: "runtime-spawn:1:base:0",
-			}),
-			expect.objectContaining({
-				textureUseId: "runtime-spawn:1:base:1",
-			}),
+		expect(getResolvedPlacementSlots(update?.resolvedTexturePlacements)).toEqual([
+			"runtime-spawn:1:base:0",
+			"runtime-spawn:1:base:1",
 		]);
 	});
 
 	it("releases runtime object-material texture pages when the runtime visual owner is removed", async () => {
-		const rectsByTextureUseId = new Map<
+		const rectsByBindingSlot = new Map<
 			string,
 			FixtureTexturePackerRectPlacement
 		>([
@@ -1974,7 +1978,7 @@ describe("browser texture manager", () => {
 		]);
 		const textureManager = new TextureManager({
 			assetService: new FixtureAssetService(),
-			texturePacker: new FixtureTexturePacker({ rectsByTextureUseId }),
+			texturePacker: new FixtureTexturePacker({ rectsByBindingSlot }),
 		});
 
 		await textureManager.applyDynamicTextureUseDelta({
@@ -2157,11 +2161,11 @@ describe("browser texture manager", () => {
 					page: expect.objectContaining({ format: "r8" }),
 					sources: [
 						expect.objectContaining({
+							entryKey: expect.stringContaining("slot=static-a%3Aindex"),
 							source: expect.objectContaining({
 								format: "r8",
 								pixels: new Uint8Array([255, 255]),
 							}),
-							textureUseId: "static-a:index",
 						}),
 					],
 				}),
@@ -2169,12 +2173,12 @@ describe("browser texture manager", () => {
 					page: expect.objectContaining({ format: "rgba8" }),
 					sources: [
 						expect.objectContaining({
+							entryKey: expect.stringContaining("slot=static-a%3Apalette"),
 							source: expect.objectContaining({
 								format: "rgba8",
 								height: 16,
 								width: 16,
 							}),
-							textureUseId: "static-a:palette",
 						}),
 					],
 				}),
@@ -2182,7 +2186,10 @@ describe("browser texture manager", () => {
 		);
 		const palettePackingSource = texturePacker.jobs
 			.flatMap((job) => job.sources)
-			.find((source) => source.textureUseId === "static-a:palette")?.source;
+			.find(
+				(source) => getFixtureBindingSlot(source.entryKey) === "static-a:palette",
+			)
+			?.source;
 		expect(Array.from(palettePackingSource?.pixels.slice(0, 12) ?? [])).toEqual(
 			[0x11, 0x22, 0x33, 0xff, 0x44, 0x55, 0x66, 0x80, 0xaa, 0xbb, 0xcc, 0xff],
 		);
@@ -2195,7 +2202,7 @@ describe("browser texture manager", () => {
 				rect: [0, 0, 2, 1],
 				sampleClass: "index8",
 				samplerPolicyKey: "sample=index8;filter=nearest;mips=off;aniso=1",
-				textureUseId: "static-a:index",
+				textureUseId: expect.stringContaining("slot=static-a%3Aindex"),
 				width: 2,
 				wrapS: "clamp-to-edge",
 				wrapT: "clamp-to-edge",
@@ -2208,19 +2215,15 @@ describe("browser texture manager", () => {
 				rect: [0, 0, 16, 16],
 				sampleClass: "palette-rgba",
 				samplerPolicyKey: "sample=palette-rgba;filter=nearest;mips=off;aniso=1",
-				textureUseId: "static-a:palette",
+				textureUseId: expect.stringContaining("slot=static-a%3Apalette"),
 				width: 16,
 				wrapS: "clamp-to-edge",
 				wrapT: "clamp-to-edge",
 			},
 		]);
-		expect(update?.resolvedTexturePlacements).toMatchObject([
-			{
-				textureUseId: "static-a:index",
-			},
-			{
-				textureUseId: "static-a:palette",
-			},
+		expect(getResolvedPlacementSlots(update?.resolvedTexturePlacements)).toEqual([
+			"static-a:index",
+			"static-a:palette",
 		]);
 		expect(
 			Array.from(update?.placements[1]?.pixels.slice(0, 12) ?? []),
@@ -2298,13 +2301,9 @@ describe("browser texture manager", () => {
 		expect(texturePacker.jobs).toHaveLength(1);
 		expect(texturePacker.jobs[0]?.sources).toHaveLength(2);
 		expect(update?.placements).toHaveLength(1);
-		expect(update?.resolvedTexturePlacements).toMatchObject([
-			{
-				textureUseId: "static-a:palette-a",
-			},
-			{
-				textureUseId: "static-b:palette-b",
-			},
+		expect(getResolvedPlacementSlots(update?.resolvedTexturePlacements)).toEqual([
+			"static-a:palette-a",
+			"static-b:palette-b",
 		]);
 		const textureRefs = new Set(
 			update?.resolvedTexturePlacements.map(
@@ -2503,8 +2502,8 @@ async function removeFuzzDrawUnit(
 		textureUses: [],
 	});
 	state.revision += 1;
-	for (const textureUseId of state.activeItemsByOwner.get(drawUnitId) ?? []) {
-		state.activeTextureKeyByItemId.delete(textureUseId);
+	for (const bindingId of state.activeItemsByOwner.get(drawUnitId) ?? []) {
+		state.activeTextureKeyByItemId.delete(bindingId);
 	}
 	state.activeItemsByOwner.delete(drawUnitId);
 	recordFuzzTexturePlacementUpdate(state, update);
@@ -2531,9 +2530,9 @@ function trackFuzzActiveItem(
 	textureUse: StaticCoordinatorCommitDelta["textureUses"][number],
 ): void {
 	const activeItems = state.activeItemsByOwner.get(drawUnitId) ?? new Set();
-	activeItems.add(textureUse.textureUseId);
+	activeItems.add(textureUse.bindingId);
 	state.activeItemsByOwner.set(drawUnitId, activeItems);
-	state.activeTextureKeyByItemId.set(textureUse.textureUseId, textureUse.textureKey);
+	state.activeTextureKeyByItemId.set(textureUse.bindingId, textureUse.textureKey);
 }
 
 function recordFuzzTexturePlacementUpdate(
@@ -2613,8 +2612,9 @@ function assertNoStaleFuzzPlacementRevisions(
 
 function assertFuzzSharedTextureKey(
 	state: TextureManagerFuzzState,
-	itemIds: readonly string[],
+	slots: readonly string[],
 ): void {
+	const itemIds = slots.map((slot) => findFuzzActiveBindingIdBySlot(state, slot));
 	const textureKeys = new Set(
 		itemIds.map((itemId) => state.activeTextureKeyByItemId.get(itemId)),
 	);
@@ -2623,6 +2623,20 @@ function assertFuzzSharedTextureKey(
 			`Expected shared TextureKey for ${itemIds.join(", ")}.\n${formatFuzzOperations(state)}`,
 		);
 	}
+}
+
+function findFuzzActiveBindingIdBySlot(
+	state: TextureManagerFuzzState,
+	slot: string,
+): string {
+	for (const bindingId of state.activeTextureKeyByItemId.keys()) {
+		if (getFixtureBindingSlot(bindingId) === slot) {
+			return bindingId;
+		}
+	}
+	throw new Error(
+		`Expected active binding for fixture slot ${slot}.\n${formatFuzzOperations(state)}`,
+	);
 }
 
 function assertRuntimePaletteRecipeIsPredictable(
@@ -2881,19 +2895,18 @@ class FixtureTexturePacker implements TexturePacker {
 
 	async pack(job: TexturePackingJob): Promise<TexturePackingResult> {
 		this.jobs.push(job);
-		if (this.#options.rectsByTextureUseId) {
+		if (this.#options.rectsByBindingSlot) {
 			const pagesById = new Map<
 				string,
 				TexturePackingResult["pages"][number]
 			>();
 			const rects: TexturePackingResult["rects"] = [];
 			for (const source of job.sources) {
-				const placement = this.#options.rectsByTextureUseId.get(
-					source.textureUseId,
-				);
+				const bindingSlot = getFixtureBindingSlot(source.entryKey);
+				const placement = this.#options.rectsByBindingSlot.get(bindingSlot);
 				if (!placement) {
 					throw new Error(
-						`Missing fixture rect placement for ${source.textureUseId}.`,
+						`Missing fixture rect placement for ${bindingSlot} (${source.entryKey}).`,
 					);
 				}
 				pagesById.set(placement.pageId, {
@@ -2908,9 +2921,9 @@ class FixtureTexturePacker implements TexturePacker {
 					width: placement.pageWidth,
 				});
 				rects.push({
+					entryKey: source.entryKey,
 					pageId: placement.pageId,
 					rect: placement.rect,
-					textureUseId: source.textureUseId,
 				});
 			}
 
@@ -2949,11 +2962,11 @@ class FixtureTexturePacker implements TexturePacker {
 			],
 			placementRevision: job.placementRevision,
 			rects: job.sources.map((source) => ({
+				entryKey: source.entryKey,
 				pageId: `${job.jobId}:page:0`,
 				rect:
 					this.#options.rect ??
 					([0, 0, source.source.width, source.source.height] as const),
-				textureUseId: source.textureUseId,
 			})),
 		};
 	}
@@ -2964,10 +2977,64 @@ interface FixtureTexturePackerOptions {
 	readonly pageHeight?: number;
 	readonly pixels?: Uint8Array;
 	readonly rect?: readonly [number, number, number, number];
-	readonly rectsByTextureUseId?: ReadonlyMap<
+	readonly rectsByBindingSlot?: ReadonlyMap<
 		string,
 		FixtureTexturePackerRectPlacement
 	>;
+}
+
+function getFixtureBindingSlot(bindingId: string): string {
+	const slot = /(?:^|\|)slot=([^|]+)/u.exec(bindingId)?.[1];
+	if (slot === undefined) {
+		throw new Error(`Fixture binding id is missing a slot: ${bindingId}`);
+	}
+	return decodeURIComponent(slot);
+}
+
+function getFixtureBindingSlots(
+	bindingIds: readonly string[] | undefined,
+): readonly string[] {
+	return (bindingIds ?? []).map(getFixtureBindingSlot);
+}
+
+function getResolvedPlacementSlots(
+	placements:
+		| readonly {
+				readonly bindingId?: string;
+				readonly textureUseId: string;
+		  }[]
+		| undefined,
+): readonly string[] {
+	return (placements ?? []).map((placement) =>
+		getFixtureBindingSlot(placement.bindingId ?? placement.textureUseId),
+	);
+}
+
+function findResolvedPlacementBySlot<
+	T extends {
+		readonly bindingId?: string;
+		readonly textureUseId: string;
+	},
+>(placements: readonly T[] | undefined, slot: string): T {
+	const placement = (placements ?? []).find(
+		(candidate) =>
+			getFixtureBindingSlot(candidate.bindingId ?? candidate.textureUseId) ===
+			slot,
+	);
+	if (placement === undefined) {
+		throw new Error(`Missing fixture placement for slot ${slot}.`);
+	}
+	return placement;
+}
+
+function getPlacementItemSlots(
+	items:
+		| readonly {
+				readonly itemId: string;
+		  }[]
+		| undefined,
+): readonly string[] {
+	return (items ?? []).map((item) => getFixtureBindingSlot(item.itemId));
 }
 
 interface FixtureTexturePackerRectPlacement {
@@ -3129,11 +3196,7 @@ function createStaticPlacementIntent(textureUse: StaticBakeTextureUse) {
 	});
 
 	return createStaticTexturePlacementIntent(textureUse, {
-		bindingId: createTextureBindingId({
-			resourceId: "fixture-static-placement",
-			role: purpose,
-			slot: textureUse.textureUseId,
-		}),
+		bindingId: textureUse.bindingId,
 		ownerIds: textureUse.owners.map((owner) =>
 			owner.kind === "draw-unit"
 				? createTextureOwnerId({

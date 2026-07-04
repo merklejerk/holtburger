@@ -15,6 +15,8 @@ import { createObjectVisualTexturePlacementIntents } from "./object-visual-textu
 
 describe("object visual texture placement planner", () => {
 	it("allocates dense numeric ids while preserving static placement policy", () => {
+		const firstRequirement = createRequirement("texture-use:a");
+		const secondRequirement = createRequirement("texture-use:b");
 		const intents = createObjectVisualTexturePlacementIntents({
 			requirements: [
 				{
@@ -23,7 +25,7 @@ describe("object visual texture placement planner", () => {
 						domain: "outdoor-generated-scenery",
 						kind: "static-authored",
 					},
-					requirement: createRequirement("texture-use:a"),
+					requirement: firstRequirement,
 				},
 				{
 					policy: {
@@ -31,7 +33,7 @@ describe("object visual texture placement planner", () => {
 						domain: "outdoor-generated-scenery",
 						kind: "static-authored",
 					},
-					requirement: createRequirement("texture-use:b"),
+					requirement: secondRequirement,
 				},
 			],
 		});
@@ -41,17 +43,18 @@ describe("object visual texture placement planner", () => {
 			{
 				affinityKey: "static-object|batch:a",
 				domain: "outdoor-generated-scenery",
-				textureUseId: "texture-use:a",
+				textureUseId: firstRequirement.bindingId,
 			},
 			{
 				affinityKey: "static-object|batch:b",
 				domain: "outdoor-generated-scenery",
-				textureUseId: "texture-use:b",
+				textureUseId: secondRequirement.bindingId,
 			},
 		]);
 	});
 
 	it("dedupes texture uses before allocating ids", () => {
+		const requirement = createRequirement("texture-use:shared");
 		const intents = createObjectVisualTexturePlacementIntents({
 			requirements: [
 				{
@@ -60,7 +63,7 @@ describe("object visual texture placement planner", () => {
 						domain: "env-cell-system",
 						kind: "static-authored",
 					},
-					requirement: createRequirement("texture-use:shared"),
+					requirement,
 				},
 				{
 					policy: {
@@ -68,7 +71,7 @@ describe("object visual texture placement planner", () => {
 						domain: "env-cell-system",
 						kind: "static-authored",
 					},
-					requirement: createRequirement("texture-use:shared"),
+					requirement,
 				},
 			],
 		});
@@ -77,7 +80,7 @@ describe("object visual texture placement planner", () => {
 		expect(intents[0]).toMatchObject({
 			affinityKey: "first",
 			itemId: 0,
-			textureUseId: "texture-use:shared",
+			textureUseId: requirement.bindingId,
 		});
 	});
 
@@ -87,6 +90,7 @@ describe("object visual texture placement planner", () => {
 				entityId: "runtime-spawn:1",
 				purpose: "object-base-color",
 			});
+		const requirement = createRequirement("dynamic-texture-use:a");
 		const intents = createObjectVisualTexturePlacementIntents({
 			requirements: [
 				{
@@ -96,7 +100,7 @@ describe("object visual texture placement planner", () => {
 						placementBucketKey,
 						textureDomain: "runtime-object-material",
 					},
-					requirement: createRequirement("dynamic-texture-use:a"),
+					requirement,
 				},
 			],
 		});
@@ -107,7 +111,7 @@ describe("object visual texture placement planner", () => {
 				domain: "runtime-object-material",
 				itemId: 0,
 				placementBucketKey,
-				textureUseId: "dynamic-texture-use:a",
+				textureUseId: requirement.bindingId,
 			},
 		]);
 	});
@@ -118,6 +122,7 @@ describe("object visual texture placement planner", () => {
 			lifetime: { kind: "static-authored" },
 			purpose: "object-base-color",
 		});
+		const requirement = createRequirement("texture-use:explicit-bucket");
 		const intents = createObjectVisualTexturePlacementIntents({
 			requirements: [
 				{
@@ -127,7 +132,7 @@ describe("object visual texture placement planner", () => {
 						kind: "static-authored",
 						placementBucketKey,
 					},
-					requirement: createRequirement("texture-use:explicit-bucket"),
+					requirement,
 				},
 			],
 		});
@@ -135,7 +140,7 @@ describe("object visual texture placement planner", () => {
 		expect(intents[0]).toMatchObject({
 			itemId: 0,
 			placementBucketKey,
-			textureUseId: "texture-use:explicit-bucket",
+			textureUseId: requirement.bindingId,
 		});
 	});
 });
@@ -147,8 +152,6 @@ function createRequirement(textureUseId: string): TextureBindingRequirement {
 			role: "object-base-color",
 			slot: textureUseId,
 		}),
-		bindingKey: textureUseId,
-		placementItemId: textureUseId,
 		ownerIds: [
 			createTextureOwnerId({
 				kind: "layer",
@@ -192,6 +195,5 @@ function createRequirement(textureUseId: string): TextureBindingRequirement {
 				usage: "rgba-color",
 			}),
 		}),
-		textureUseId,
 	};
 }

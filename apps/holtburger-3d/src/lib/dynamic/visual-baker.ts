@@ -329,7 +329,6 @@ function createDynamicTexturePlacementRequirement(options: {
 				),
 				slot: options.requirement.textureUseId,
 			}),
-			bindingKey: options.requirement.textureUseId,
 			samplingPolicy: options.requirement.samplingPolicy,
 			source: {
 				dataUse: options.requirement.dataUse,
@@ -347,7 +346,6 @@ function createDynamicTexturePlacementRequirement(options: {
 				textureDomain,
 				textureUseId: options.requirement.textureUseId,
 			}),
-			textureUseId: options.requirement.textureUseId,
 		},
 	};
 }
@@ -804,7 +802,7 @@ function createDynamicObjectVisualTextureBindings(options: {
 							resourceId: options.resourceId,
 							roles: [
 								{
-									itemIds: [requirement.textureUseId],
+									itemIds: [requirement.bindingId],
 									purpose: classifyDynamicRequirementPurpose(requirement),
 								},
 							],

@@ -1936,7 +1936,7 @@ function createObjectVisualResource(resourceId: string): ObjectVisualResource {
 			},
 			material: {
 				materialEntryKey: "material:test",
-				textureUseIds: [],
+				textureBindingIds: [],
 			},
 		},
 		kind: "static-object-visual-resource",
@@ -1953,7 +1953,7 @@ function createObjectVisualResource(resourceId: string): ObjectVisualResource {
 		},
 		resourceId,
 		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
-		textureUseIds: [],
+		textureBindingIds: [],
 		triangleCount: 1,
 		vertexCount: 3,
 	};
@@ -2323,7 +2323,7 @@ function createStaticObjectDrawUnit(
 		sourceMappingCoverage: [],
 		spatialRecord: null,
 		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
-		textureUseIds: [],
+		textureBindingIds: [],
 		triangleCount: 1,
 		vertexCount: 3,
 	};
@@ -2350,7 +2350,7 @@ function createTerrainDrawUnit(
 		terrainFallbackReasons: [],
 		terrainMaterialPlan: null,
 		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
-		textureUseIds: [],
+		textureBindingIds: [],
 		triangleCount: 1,
 		vertexCount: 3,
 	};

@@ -28,17 +28,17 @@ function packTexturesWithAtlasLayout(
 				`Texture packing job ${job.jobId} expected ${job.page.format} sources, got ${source.format}.`,
 			);
 		}
-		assertPixelLengthMatchesFormat(job.jobId, entry.textureUseId, source);
+		assertPixelLengthMatchesFormat(job.jobId, entry.entryKey, source);
 	}
 
 	const layout = planAtlasLayout({
 		cohorts: (job.cohorts ?? []).map((cohort) => ({
-			entryKeys: cohort.textureUseIds,
+			entryKeys: cohort.entryKeys,
 			key: cohort.key,
 		})),
 		entries: job.sources.map((entry) => ({
 			height: entry.source.height,
-			key: entry.textureUseId,
+			key: entry.entryKey,
 			width: entry.source.width,
 		})),
 		policy: {
@@ -56,8 +56,8 @@ function packTexturesWithAtlasLayout(
 		);
 	}
 
-	const sourceByTextureUseId = new Map(
-		job.sources.map((entry) => [entry.textureUseId, entry] as const),
+	const sourceByEntryKey = new Map(
+		job.sources.map((entry) => [entry.entryKey, entry] as const),
 	);
 	const pages = layout.texturePages.map((layoutPage) => {
 		const pagePixels = createBlankTexturePackingPage({
@@ -67,7 +67,7 @@ function packTexturesWithAtlasLayout(
 			width: layoutPage.width,
 		});
 		for (const placement of layoutPage.placements) {
-			const entry = sourceByTextureUseId.get(placement.atlasEntryKey);
+			const entry = sourceByEntryKey.get(placement.atlasEntryKey);
 			if (!entry) {
 				throw new Error(
 					`Texture packing job ${job.jobId} layout referenced unknown source ${placement.atlasEntryKey}.`,
@@ -104,7 +104,7 @@ function packTexturesWithAtlasLayout(
 				placement.width,
 				placement.height,
 			] as const,
-			textureUseId: placement.atlasEntryKey,
+			entryKey: placement.atlasEntryKey,
 		})),
 	);
 
@@ -197,7 +197,7 @@ export function blitTexturePackingSourceWithGutter(options: {
 
 function assertPixelLengthMatchesFormat(
 	jobId: string,
-	textureUseId: string,
+	entryKey: string,
 	source: TexturePackingJob["sources"][number]["source"],
 ): void {
 	const expectedLength =
@@ -206,7 +206,7 @@ function assertPixelLengthMatchesFormat(
 		getTexturePackingFormatBytesPerPixel(source.format);
 	if (source.pixels.byteLength !== expectedLength) {
 		throw new Error(
-			`Texture packing job ${jobId} source ${textureUseId} expected ${expectedLength} bytes for ${source.format}, got ${source.pixels.byteLength}.`,
+			`Texture packing job ${jobId} source ${entryKey} expected ${expectedLength} bytes for ${source.format}, got ${source.pixels.byteLength}.`,
 		);
 	}
 }

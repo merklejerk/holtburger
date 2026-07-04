@@ -495,7 +495,7 @@ function createStructuredInteriorDrawUnit(options: {
 			options.slice.candidates.map((candidate) => candidate.surfaceId),
 		),
 		texCoords: geometry.texCoords,
-		textureUseIds: uniqueSortedStrings(
+		textureBindingIds: uniqueSortedStrings(
 			materialEntries.flatMap((entry) =>
 				[
 					entry.primaryTextureBindingId,
@@ -1175,11 +1175,11 @@ function uniqueSortedStrings<T extends string>(values: readonly T[]): readonly T
 function mergeTextureUses(
 	textureUses: readonly StaticBakeTextureUse[],
 ): readonly StaticBakeTextureUse[] {
-	const merged = new Map<string, StaticBakeTextureUse>();
+	const merged = new Map<TextureBindingId, StaticBakeTextureUse>();
 	for (const textureUse of textureUses) {
-		const existing = merged.get(textureUse.textureUseId);
+		const existing = merged.get(textureUse.bindingId);
 		if (existing) {
-			merged.set(textureUse.textureUseId, {
+			merged.set(textureUse.bindingId, {
 				...existing,
 				owners: uniqueSortedStaticTextureUseOwners([
 					...existing.owners,
@@ -1188,10 +1188,10 @@ function mergeTextureUses(
 			});
 			continue;
 		}
-		merged.set(textureUse.textureUseId, textureUse);
+		merged.set(textureUse.bindingId, textureUse);
 	}
 	return [...merged.values()].sort((left, right) =>
-		left.textureUseId.localeCompare(right.textureUseId),
+		left.bindingId.localeCompare(right.bindingId),
 	);
 }
 

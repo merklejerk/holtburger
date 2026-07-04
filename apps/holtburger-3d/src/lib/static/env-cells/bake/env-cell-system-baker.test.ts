@@ -300,11 +300,11 @@ describe("browser landblock env-cell baker", () => {
 				expect.objectContaining({
 					family: "texture-rgba",
 					outcome: "rendered",
-					textureUseIds: drawUnit.textureUseIds,
+					textureBindingIds: drawUnit.textureBindingIds,
 				}),
 			],
 		});
-		expect(drawUnit.textureUseIds).toHaveLength(1);
+		expect(drawUnit.textureBindingIds).toHaveLength(1);
 		expect(result.textureUses).toEqual([
 			expect.objectContaining({
 				domain: "env-cell-system",
@@ -326,8 +326,9 @@ describe("browser landblock env-cell baker", () => {
 					},
 					usage: "rgba-color",
 				},
-				textureUseId:
-					"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
+				bindingId: expect.stringContaining(
+					"slot=prepared-render-surface-texture-use%3A06000010%3Argba-color",
+				),
 			}),
 		]);
 	});
@@ -382,20 +383,22 @@ describe("browser landblock env-cell baker", () => {
 			{
 				affinityKey: expect.stringContaining("structured-interior|"),
 				itemId: 0,
-				textureUseId:
-					"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
+				textureUseId: expect.stringContaining(
+					"slot=prepared-render-surface-texture-use%3A06000010%3Argba-color",
+				),
 				purpose: "object-base-color",
 			},
 			{
 				affinityKey: expect.stringContaining("structured-interior|"),
 				itemId: 1,
-				textureUseId:
-					"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000020:rgba-detail:sampling:wrap=repeat,repeat",
+				textureUseId: expect.stringContaining(
+					"slot=prepared-render-surface-texture-use%3A06000020%3Argba-detail",
+				),
 				purpose: "object-detail",
 			},
 		]);
 		expect(intents.map((intent) => intent.bindingId)).toEqual(
-			drawUnit.textureUseIds,
+			drawUnit.textureBindingIds,
 		);
 	});
 
@@ -452,14 +455,14 @@ describe("browser landblock env-cell baker", () => {
 			throw new Error("Expected structured interior geometry draw unit.");
 		}
 
-		const detailTextureBindingId = drawUnit.textureUseIds.find((bindingId) =>
+		const detailTextureBindingId = drawUnit.textureBindingIds.find((bindingId) =>
 			bindingId.includes("role=object-detail"),
 		);
 		expect(drawUnit.materialEntries[0]).toMatchObject({
 			detailTextureTiling: 8,
 			detailTextureBindingId,
 		});
-		expect(drawUnit.textureUseIds).toHaveLength(2);
+		expect(drawUnit.textureBindingIds).toHaveLength(2);
 		expect(result.textureUses).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
@@ -475,8 +478,9 @@ describe("browser landblock env-cell baker", () => {
 						},
 						usage: "rgba-detail",
 					},
-					textureUseId:
-						"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000020:rgba-detail:sampling:wrap=repeat,repeat",
+					bindingId: expect.stringContaining(
+						"slot=prepared-render-surface-texture-use%3A06000020%3Argba-detail",
+					),
 				}),
 			]),
 		);

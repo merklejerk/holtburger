@@ -45,7 +45,7 @@ describe("terrain geometry baker", () => {
 			0, 0, 1, 0, 1, 1, 1, 0, 0, 1, 1, 1,
 		]);
 		expect(Array.from(drawUnit.layerSlots)).toEqual([0, 0, 0, 0, 0, 0]);
-		expect(drawUnit.textureUseIds).toEqual([]);
+		expect(drawUnit.textureBindingIds).toEqual([]);
 		expect(drawUnit.terrainMaterialPlan).toEqual(
 			expect.objectContaining({
 				layerEntries: [],
@@ -144,7 +144,7 @@ describe("terrain geometry baker", () => {
 			materialBucketKey: `shader:terrain-single-base-color|domain:outdoor-terrain|sampler:color-repeat-filterable|texture:${primaryTextureBindingId}`,
 			materialFamily: "terrain-single-base-color",
 			primaryTextureBindingId,
-			textureUseIds: [primaryTextureBindingId],
+			textureBindingIds: [primaryTextureBindingId],
 		});
 		expect(drawUnit.terrainMaterialPlan?.layerEntries).toEqual([
 			expect.objectContaining({
@@ -174,7 +174,6 @@ describe("terrain geometry baker", () => {
 					usage: "rgba-color",
 				},
 				textureKey: expect.stringContaining("texture|"),
-				textureUseId: primaryTextureBindingId,
 			}),
 		]);
 		expect(result.textureDependencies).toEqual([
@@ -237,13 +236,13 @@ describe("terrain geometry baker", () => {
 			"terrain:0xda55ffff:terrain-geometry:slice-0-page-1",
 		]);
 		expect(drawUnits.map((drawUnit) => drawUnit.triangleCount)).toEqual([8, 2]);
-		expect(drawUnits.map((drawUnit) => drawUnit.textureUseIds.length)).toEqual([
+		expect(drawUnits.map((drawUnit) => drawUnit.textureBindingIds.length)).toEqual([
 			4, 1,
 		]);
 		expect(result.textureDependencies).toHaveLength(2);
 		expect(result.textureDependencies[0]?.roles).toEqual([
 			{
-				itemIds: drawUnits[0]?.textureUseIds,
+				itemIds: drawUnits[0]?.textureBindingIds,
 				purpose: "terrain-color",
 			},
 		]);

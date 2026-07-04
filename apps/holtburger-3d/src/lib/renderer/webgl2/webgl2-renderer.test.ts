@@ -1544,7 +1544,7 @@ describe("WebGL2 structured interior rendering", () => {
 			createDynamicResourceCommit({
 				resourceId: "dynamic-windmill-part-0",
 				revision: 1,
-				textureUseIds: ["dynamic-windmill-part-0:06000010"],
+				textureBindingIds: ["dynamic-windmill-part-0:06000010"],
 			}),
 		);
 		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
@@ -1644,7 +1644,7 @@ describe("WebGL2 structured interior rendering", () => {
 			createDynamicResourceCommit({
 				resourceId: "dynamic-env-cell-part-0",
 				revision: 1,
-				textureUseIds: ["dynamic-env-cell-part-0:06000010"],
+				textureBindingIds: ["dynamic-env-cell-part-0:06000010"],
 			}),
 		);
 		renderer.commitDynamicInstances({
@@ -2115,7 +2115,7 @@ function createStructuredInteriorDrawUnit(
 				pass: "opaque",
 				slotId: 0,
 				surfaceId: 0x08000010,
-				textureUseIds: [],
+				textureBindingIds: [],
 			},
 		],
 		materialSlotIndices: new Float32Array([0, 0, 0]),
@@ -2134,7 +2134,7 @@ function createStructuredInteriorDrawUnit(
 		sourceTriangleIds: ["triangle-a"],
 		surfaceIds: [0x08000010],
 		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
-		textureUseIds: [],
+		textureBindingIds: [],
 		triangleCount: 1,
 		vertexCount: 3,
 	};
@@ -2231,7 +2231,7 @@ function createEnvCellStaticObjectDrawUnit(
 		],
 		spatialRecord: null,
 		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
-		textureUseIds: [],
+		textureBindingIds: [],
 		triangleCount: 1,
 		vertexCount: 3,
 	};
@@ -2316,7 +2316,7 @@ function createTexturedOutdoorGeneratedSceneryStaticObjectDrawUnit(
 			primaryTextureBindingId: textureUseId,
 		})),
 		materialFamily: "texture-rgba",
-		textureUseIds: [textureUseId],
+		textureBindingIds: [textureUseId],
 	};
 }
 
@@ -2387,7 +2387,7 @@ function countTextureBinds(
 function createDynamicResourceCommit(options: {
 	readonly resourceId: string;
 	readonly revision: number;
-	readonly textureUseIds: readonly string[];
+	readonly textureBindingIds: readonly string[];
 }): DynamicRendererResourceCommit {
 	const drawUnit = createOutdoorGeneratedSceneryStaticObjectDrawUnit(
 		"dynamic-visual-source",
@@ -2398,7 +2398,7 @@ function createDynamicResourceCommit(options: {
 				entityId: "dynamic-entity:windmill",
 				materialPlan: {
 					skipped: [],
-					textureUses: options.textureUseIds.map((textureUseId) => ({
+					textureUses: options.textureBindingIds.map((textureUseId) => ({
 						role: "base-color",
 						source: {
 							kind: "prepared-render-surface-texture-use",
@@ -2425,7 +2425,7 @@ function createDynamicResourceCommit(options: {
 						renderState: drawUnit.renderState,
 						sourceAssetId: "gfx-obj/01000010",
 						texCoords: drawUnit.texCoords,
-						textureUseIds: options.textureUseIds,
+						textureBindingIds: options.textureBindingIds,
 						triangleCount: drawUnit.triangleCount,
 						vertexCount: drawUnit.vertexCount,
 					},
@@ -2514,7 +2514,7 @@ function createOutdoorGeneratedSceneryStaticObjectVisualResource(
 		materialFamily: drawUnit.materialFamily,
 		materialPass,
 		renderState,
-		textureUseIds: drawUnit.textureUseIds,
+		textureBindingIds: drawUnit.textureBindingIds,
 	};
 
 	return {
@@ -2533,7 +2533,7 @@ function createOutdoorGeneratedSceneryStaticObjectVisualResource(
 		renderState,
 		resourceId,
 		texCoords: drawUnit.texCoords,
-		textureUseIds: drawUnit.textureUseIds,
+		textureBindingIds: drawUnit.textureBindingIds,
 		triangleCount: drawUnit.triangleCount,
 		vertexCount: drawUnit.vertexCount,
 	};
@@ -2648,7 +2648,7 @@ function createTerrainDrawUnit(
 		terrainFallbackReasons: [],
 		terrainMaterialPlan: null,
 		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
-		textureUseIds: [],
+		textureBindingIds: [],
 		triangleCount: 1,
 		vertexCount: 3,
 	};

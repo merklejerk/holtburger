@@ -870,7 +870,7 @@ function createStaticObjectGeometryBakeOutput(options: {
 		options.sourceIndex,
 		materialSlotByEntryKey,
 	);
-	const textureUseIds = uniqueSortedStrings(
+	const textureBindingIds = uniqueSortedStrings(
 		materialEntries.flatMap((entry) =>
 			[
 				entry.primaryTextureBindingId,
@@ -915,7 +915,7 @@ function createStaticObjectGeometryBakeOutput(options: {
 		spatialRecord: null,
 		texCoords: geometry.texCoords,
 		materialSlotIndices: geometry.materialSlotIndices,
-		textureUseIds,
+		textureBindingIds,
 		triangleCount: options.partition.triangleCount,
 		vertexCount: options.partition.triangleCount * 3,
 	};
@@ -1308,12 +1308,12 @@ function createStaticObjectTextureBindingReference(options: {
 function mergeTextureUses(
 	textureUses: readonly StaticBakeTextureUse[],
 ): readonly StaticBakeTextureUse[] {
-	const merged = new Map<string, StaticBakeTextureUse>();
+	const merged = new Map<TextureBindingId, StaticBakeTextureUse>();
 
 	for (const textureUse of textureUses) {
-		const existing = merged.get(textureUse.textureUseId);
+		const existing = merged.get(textureUse.bindingId);
 		if (existing) {
-			merged.set(textureUse.textureUseId, {
+			merged.set(textureUse.bindingId, {
 				...existing,
 				owners: uniqueSortedStaticTextureUseOwners([
 					...existing.owners,
@@ -1322,11 +1322,11 @@ function mergeTextureUses(
 			});
 			continue;
 		}
-		merged.set(textureUse.textureUseId, textureUse);
+		merged.set(textureUse.bindingId, textureUse);
 	}
 
 	return [...merged.values()].sort((left, right) =>
-		left.textureUseId.localeCompare(right.textureUseId),
+		left.bindingId.localeCompare(right.bindingId),
 	);
 }
 

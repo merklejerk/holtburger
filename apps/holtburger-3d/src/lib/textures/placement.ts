@@ -235,8 +235,12 @@ export function createTexturePlacementItemId(
  * contract module does not depend on TextureManager's implementation module.
  */
 export interface DynamicTexturePlacementUse {
+	readonly bindingId: TextureBindingId;
+	readonly ownerIds: readonly TextureOwnerId[];
+	readonly pageClass: TexturePageClass;
 	readonly samplingPolicy?: StaticBakeTextureSamplingPolicy;
 	readonly source: MaterialTextureDataUseIdentity;
+	readonly textureKey: TextureKey;
 	readonly textureDomain: VisualTextureDomain;
 	/** Material binding key that becomes the placement item id at this boundary. */
 	readonly textureUseId: string;
@@ -250,7 +254,12 @@ export function createStaticTexturePlacementIntent(
 		textureUse.source,
 		textureUse.domain,
 	);
-	const identity = requireTexturePlacementIdentity(options);
+	const identity = requireTexturePlacementIdentity({
+		bindingId: options.bindingId ?? textureUse.bindingId,
+		ownerIds: options.ownerIds ?? textureUse.ownerIds,
+		pageClass: options.pageClass ?? textureUse.pageClass,
+		textureKey: options.textureKey ?? textureUse.textureKey,
+	});
 	return {
 		affinityKey: options.affinityKey ?? null,
 		bindingId: identity.bindingId,
@@ -300,7 +309,12 @@ export function createDynamicTexturePlacementIntent(
 			"Dynamic texture placement intents require an explicit placement bucket key.",
 		);
 	}
-	const identity = requireTexturePlacementIdentity(options);
+	const identity = requireTexturePlacementIdentity({
+		bindingId: options.bindingId ?? textureUse.bindingId,
+		ownerIds: options.ownerIds ?? textureUse.ownerIds,
+		pageClass: options.pageClass ?? textureUse.pageClass,
+		textureKey: options.textureKey ?? textureUse.textureKey,
+	});
 	return {
 		affinityKey: options.affinityKey ?? null,
 		bindingId: identity.bindingId,

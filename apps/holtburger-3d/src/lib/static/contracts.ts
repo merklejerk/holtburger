@@ -17,6 +17,12 @@ import type {
 	TextureResourceDependencies,
 	TexturePlacementSnapshot,
 } from "../textures/placement";
+import type {
+	TextureBindingId,
+	TextureKey,
+	TextureOwnerId,
+	TexturePageClass,
+} from "../textures/identity";
 import type { ObjectVisualGeometryBuffer } from "../visual/object-visual-recipe-bundle";
 import type { ObjectVisualInstallSet } from "../visual/object-visual-install-set";
 import type { VisualGeometryPayload } from "../visual/visual-geometry";
@@ -1868,9 +1874,17 @@ export interface TerrainMaterialFallbackReason {
 }
 
 export interface StaticBakeTextureUse {
+	/** Material-consumer binding identity. This is not canonical texture-pool identity. */
+	readonly bindingId: TextureBindingId;
 	readonly textureUseId: string;
 	readonly domain: StaticDomain;
+	/** Canonical texture-pool identity requested by this static texture use. */
+	readonly textureKey: TextureKey;
+	/** Residency owners that retain the canonical texture entry. */
+	readonly ownerIds: readonly TextureOwnerId[];
 	readonly owners: readonly StaticTextureUseOwner[];
+	/** Physical atlas-page compatibility class for this texture use. */
+	readonly pageClass: TexturePageClass;
 	readonly source: MaterialTextureDataUseIdentity;
 	readonly samplingPolicy?: StaticBakeTextureSamplingPolicy;
 }

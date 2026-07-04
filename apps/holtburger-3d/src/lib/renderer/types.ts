@@ -25,6 +25,12 @@ import type {
 	TextureWrapMode,
 } from "../textures/sampling-policy";
 import type { TextureResourceDependencies } from "../textures/placement";
+import type {
+	TextureBindingId,
+	TextureKey,
+	TextureOwnerId,
+	TexturePageClass,
+} from "../textures/identity";
 
 export const MAX_TERRAIN_COLOR_PAGES_PER_DRAW = 4;
 export const MAX_TERRAIN_MASK_PAGES_PER_DRAW = 4;
@@ -299,9 +305,13 @@ interface DynamicRendererMaterialPlan {
 }
 
 interface DynamicRendererTextureUse {
+	readonly bindingId: TextureBindingId;
+	readonly ownerIds: readonly TextureOwnerId[];
+	readonly pageClass: TexturePageClass;
 	readonly role: string;
 	readonly samplingPolicy?: StaticBakeTextureUse["samplingPolicy"];
 	readonly source: StaticBakeTextureUse["source"];
+	readonly textureKey: TextureKey;
 	readonly textureUseId: string;
 }
 

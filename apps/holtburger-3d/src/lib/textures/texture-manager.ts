@@ -19,8 +19,8 @@ import type {
 	StaticBakeTextureUse,
 	StaticCoordinatorCommitDelta,
 	VisualTextureDomain,
-	StaticTextureUseOwner,
 } from "../static/contracts";
+import { createStaticTextureOwnerId } from "../static/texture-owner-identity";
 import {
 	collectStaticDrawUnitResourceIds,
 	collectStaticObjectVisualResourceIds,
@@ -66,11 +66,6 @@ import {
 	type TextureUsagePurpose,
 } from "./placement";
 import {
-	createMaterialTextureSourceKey,
-	createTextureBindingId,
-	createTextureKey,
-	createTextureOwnerId,
-	createTexturePageClass,
 	type TextureBindingId,
 	type TextureKey,
 	type TextureOwnerId,
@@ -89,18 +84,22 @@ interface TextureManagerOptions {
 }
 
 export interface DynamicTextureUseCommit {
+	readonly bindingId: TextureBindingId;
 	readonly textureDomain: VisualTextureDomain;
+	readonly ownerIds: readonly TextureOwnerId[];
+	readonly pageClass: TexturePageClass;
 	readonly placementBucketKey: TexturePlacementBucketKey;
 	readonly owner: TextureBindingOwner & {
 		readonly kind: "dynamic-visual-resource";
 	};
 	readonly samplingPolicy?: StaticBakeTextureUse["samplingPolicy"];
 	readonly source: MaterialTextureDataUseIdentity;
+	readonly textureKey: TextureKey;
 	readonly textureUseId: string;
 }
 
 export interface DynamicTextureUseCommitDelta {
-	readonly removedOwners: readonly DynamicTextureUseCommit["owner"][];
+	readonly removedOwnerIds: readonly TextureOwnerId[];
 	readonly textureUses: readonly DynamicTextureUseCommit[];
 }
 
@@ -170,7 +169,16 @@ export class TextureManager {
 		VisualTexturePlacementBucketRegistryKey,
 		VisualTexturePlacementBucketRegistry
 	>();
-	readonly #textureKeysByOwnerKey = new Map<string, Set<VisualTextureKey>>();
+	readonly #textureEntryRefsByOwnerId = new Map<
+		TextureOwnerId,
+		Set<VisualTextureEntryRef>
+	>();
+	// Phase 6 deletes this renderer lookup bridge when material payloads resolve
+	// by TextureBindingId instead of legacy textureUseId item ids.
+	readonly #itemIdsByTextureEntryRef = new Map<
+		VisualTextureEntryRef,
+		Set<string>
+	>();
 	readonly #placementRecordsByItemId = new Map<
 		string,
 		TexturePlacementRecord
@@ -289,8 +297,8 @@ export class TextureManager {
 				activeBucketCount,
 				bucketCount: buckets.length,
 				emptyBucketCount: buckets.length - activeBucketCount,
-				entryAliasCount: sumNumbers(
-					buckets.map((bucket) => bucket.entryAliasCount),
+				registryEntryCount: sumNumbers(
+					buckets.map((bucket) => bucket.registryEntryCount),
 				),
 				mipmappedPageCount: pages.filter((page) => page.mipmapsGenerated)
 					.length,
@@ -506,18 +514,20 @@ export class TextureManager {
 	): Promise<TexturePlacementUpdate | null> {
 		return this.#runTextureMutation(() =>
 			this.#applyVisualTextureUseDelta({
-				removedOwners: [
+				removedOwnerIds: [
 					...collectStaticDrawUnitResourceIds(delta.removedResources).map(
-						(drawUnitId): StaticTextureUseOwner => ({
-							drawUnitId,
-							kind: "draw-unit",
-						}),
+						(drawUnitId) =>
+							createStaticTextureOwnerId({
+								drawUnitId,
+								kind: "draw-unit",
+							}),
 					),
 					...collectStaticObjectVisualResourceIds(delta.removedResources).map(
-						(resourceId): StaticTextureUseOwner => ({
-							kind: "static-object-visual-resource",
-							resourceId,
-						}),
+						(resourceId) =>
+							createStaticTextureOwnerId({
+								kind: "static-object-visual-resource",
+								resourceId,
+							}),
 					),
 				],
 				textureUses: delta.textureUses.map(createStaticVisualTextureUseCommit),
@@ -530,7 +540,7 @@ export class TextureManager {
 	): Promise<TexturePlacementUpdate | null> {
 		return this.#runTextureMutation(() =>
 			this.#applyVisualTextureUseDelta({
-				removedOwners: delta.removedOwners,
+				removedOwnerIds: delta.removedOwnerIds,
 				textureUses: delta.textureUses.map(createDynamicVisualTextureUseCommit),
 			}),
 		);
@@ -540,7 +550,7 @@ export class TextureManager {
 		delta: VisualTextureUseCommitDelta,
 	): Promise<TexturePlacementUpdate | null> {
 		let removedTextureRefIds = this.#removeOwnerTextureRefs(
-			delta.removedOwners,
+			delta.removedOwnerIds,
 		);
 		const placements: RuntimeTexturePlacement[] = [];
 		const resolvedTexturePlacements: ResolvedTexturePlacement[] = [];
@@ -554,15 +564,14 @@ export class TextureManager {
 				pendingPlacements,
 			);
 			stagedPlacements.push(staged);
-			for (const owner of textureUse.owners) {
-				const ownerKey = createTextureBindingOwnerKey(owner);
-				let textureKeys = this.#textureKeysByOwnerKey.get(ownerKey);
-				if (!textureKeys) {
-					textureKeys = new Set<VisualTextureKey>();
-					this.#textureKeysByOwnerKey.set(ownerKey, textureKeys);
+			for (const ownerId of textureUse.ownerIds) {
+				let textureEntryRefs = this.#textureEntryRefsByOwnerId.get(ownerId);
+				if (!textureEntryRefs) {
+					textureEntryRefs = new Set<VisualTextureEntryRef>();
+					this.#textureEntryRefsByOwnerId.set(ownerId, textureEntryRefs);
 				}
-				if (!textureKeys.has(staged.textureKey)) {
-					textureKeys.add(staged.textureKey);
+				if (!textureEntryRefs.has(staged.entryRef)) {
+					textureEntryRefs.add(staged.entryRef);
 					if (staged.entry) {
 						// Pre-bake placement can modify a live page before this entry
 						// has an owner. First activation must upload the current page when
@@ -668,20 +677,19 @@ export class TextureManager {
 	}
 
 	#removeOwnerTextureRefs(
-		removedOwners: readonly TextureBindingOwner[],
+		removedOwnerIds: readonly TextureOwnerId[],
 	): readonly string[] {
 		const removedTextureRefIds: string[] = [];
 
-		for (const owner of removedOwners) {
-			const ownerKey = createTextureBindingOwnerKey(owner);
-			const textureKeys = this.#textureKeysByOwnerKey.get(ownerKey);
-			if (!textureKeys) {
+		for (const ownerId of removedOwnerIds) {
+			const textureEntryRefs = this.#textureEntryRefsByOwnerId.get(ownerId);
+			if (!textureEntryRefs) {
 				continue;
 			}
 
-			this.#textureKeysByOwnerKey.delete(ownerKey);
-			for (const textureKey of textureKeys) {
-				const entry = this.#findEntry(textureKey);
+			this.#textureEntryRefsByOwnerId.delete(ownerId);
+			for (const textureEntryRef of textureEntryRefs) {
+				const entry = this.#findEntryByRef(textureEntryRef);
 				if (!entry) {
 					continue;
 				}
@@ -699,7 +707,7 @@ export class TextureManager {
 					entry.domain,
 					entry.placementBucketKey,
 				);
-				deleteRegistryEntryAliases(registry, entry);
+				deleteRegistryEntry(registry, entry);
 				registry.revision += 1;
 				if (!this.#hasTextureRef(entry.physicalEntry.textureRefId)) {
 					removedTextureRefIds.push(entry.physicalEntry.textureRefId);
@@ -721,9 +729,17 @@ export class TextureManager {
 		);
 		const textureKey = createVisualTextureKey(textureUse);
 		const existing = registry.entries.get(textureKey);
+		const entryRef = createVisualTextureEntryRef({
+			domain: textureUse.domain,
+			placementBucketKey: textureUse.placementBucketKey,
+			textureKey,
+		});
+		this.#recordTextureEntryItemId(entryRef, textureUse.textureUseId);
 		if (existing) {
+			this.#recordPlacementEntry(existing, textureUse.textureUseId);
 			return {
 				entry: existing,
+				entryRef,
 				textureKey,
 			};
 		}
@@ -732,35 +748,14 @@ export class TextureManager {
 			source,
 			textureUse.samplingPolicy,
 		);
-		const existingSourceEntry = findRegistryEntryBySource(
-			registry,
-			createLogicalTexturePhysicalSourceKey(source),
-			pagePolicy,
-			textureUse.domain,
-		);
-		if (existingSourceEntry) {
-			const registryEntry = createRegistryEntryAliasForPagePolicy(
-				existingSourceEntry,
-				pagePolicy,
-				textureUse,
-			);
-			registry.entries.set(textureKey, registryEntry);
-			this.#recordPlacementEntry(registryEntry);
-			return {
-				entry: registryEntry,
-				textureKey,
-			};
-		}
-
-		const placementKey = createVisualTextureSourcePlacementKey(textureUse);
-		const pending = pendingPlacements.get(placementKey);
+		const pending = pendingPlacements.get(textureKey);
 		if (pending) {
 			addPendingPlacementOwners(pending, textureUse.owners);
 			pending.textureKeys.add(textureKey);
 			pending.textureUseIds.add(textureUse.textureUseId);
-			pendingPlacements.set(textureKey, pending);
 			return {
 				entry: null,
+				entryRef,
 				pending,
 				textureKey,
 			};
@@ -771,42 +766,6 @@ export class TextureManager {
 			source,
 			directSource,
 		);
-		const existingPhysicalSourceEntry = findRegistryEntryBySource(
-			registry,
-			physicalSourceKey,
-			pagePolicy,
-			textureUse.domain,
-		);
-		if (existingPhysicalSourceEntry) {
-			const registryEntry = createRegistryEntryAliasForPagePolicy(
-				existingPhysicalSourceEntry,
-				pagePolicy,
-				textureUse,
-			);
-			registry.entries.set(textureKey, registryEntry);
-			this.#recordPlacementEntry(registryEntry);
-			return {
-				entry: registryEntry,
-				textureKey,
-			};
-		}
-		const physicalPlacementKey = createVisualTexturePhysicalPlacementKey(
-			textureUse,
-			physicalSourceKey,
-		);
-		const pendingByPhysicalSource = pendingPlacements.get(physicalPlacementKey);
-		if (pendingByPhysicalSource) {
-			addPendingPlacementOwners(pendingByPhysicalSource, textureUse.owners);
-			pendingByPhysicalSource.textureKeys.add(textureKey);
-			pendingByPhysicalSource.textureUseIds.add(textureUse.textureUseId);
-			pendingPlacements.set(textureKey, pendingByPhysicalSource);
-			pendingPlacements.set(placementKey, pendingByPhysicalSource);
-			return {
-				entry: null,
-				pending: pendingByPhysicalSource,
-				textureKey,
-			};
-		}
 		const samplerPolicy = createRuntimeTextureSamplerPolicy({
 			filteringMode: this.#filteringMode,
 			sampleClass: pagePolicy.sampleClass,
@@ -825,12 +784,11 @@ export class TextureManager {
 			textureUse,
 			ownerKeys: new Set(textureUse.owners.map(createTextureBindingOwnerKey)),
 		};
-		pendingPlacements.set(placementKey, staged);
-		pendingPlacements.set(physicalPlacementKey, staged);
 		pendingPlacements.set(textureKey, staged);
 
 		return {
 			entry: null,
+			entryRef,
 			pending: staged,
 			textureKey,
 		};
@@ -1113,7 +1071,7 @@ export class TextureManager {
 					texturePage: repackPlan.layoutPage,
 				});
 				const textureUseIds =
-					createTextureUseIdsForRegistryEntry(existingEntry);
+					this.#createTextureUseIdsForRegistryEntry(existingEntry);
 				for (const textureUseId of textureUseIds) {
 					const activeReferenceCount =
 						this.#placementRecordsByItemId.get(textureUseId)
@@ -1455,7 +1413,6 @@ export class TextureManager {
 							...runtimePlacements[runtimePlacements.length - 1]!,
 						},
 						textureRefId,
-						textureUseIds: entry.textureUseIds,
 						textureWidth: page.width,
 						textureHeight: page.height,
 					}),
@@ -1525,15 +1482,64 @@ export class TextureManager {
 		return registry;
 	}
 
-	#findEntry(textureKey: VisualTextureKey): VisualTextureRegistryEntry | null {
+	#findEntryByRef(
+		entryRef: VisualTextureEntryRef,
+	): VisualTextureRegistryEntry | null {
 		for (const registry of this.#placementBucketRegistries.values()) {
-			const entry = registry.entries.get(textureKey);
-			if (entry) {
-				return entry;
+			for (const [textureKey, entry] of registry.entries) {
+				if (
+					createVisualTextureEntryRef({
+						domain: registry.domain,
+						placementBucketKey: registry.placementBucketKey,
+						textureKey,
+					}) === entryRef
+				) {
+					return entry;
+				}
 			}
 		}
 
 		return null;
+	}
+
+	#createTextureUseIdsForRegistryEntry(
+		entry: VisualTextureRegistryEntry,
+	): readonly string[] {
+		const physicalPlacementKey = createRegistryEntryPhysicalPlacementKey(entry);
+		const itemIds = new Set<string>();
+		for (const registry of this.#placementBucketRegistries.values()) {
+			for (const [textureKey, candidate] of registry.entries) {
+				if (
+					createRegistryEntryPhysicalPlacementKey(candidate) !==
+					physicalPlacementKey
+				) {
+					continue;
+				}
+				const entryRef = createVisualTextureEntryRef({
+					domain: registry.domain,
+					placementBucketKey: registry.placementBucketKey,
+					textureKey,
+				});
+				for (const itemId of this.#itemIdsByTextureEntryRef.get(entryRef) ?? [
+					candidate.itemId,
+				]) {
+					itemIds.add(itemId);
+				}
+			}
+		}
+		return uniqueSortedStrings([...itemIds]);
+	}
+
+	#recordTextureEntryItemId(
+		entryRef: VisualTextureEntryRef,
+		itemId: string,
+	): void {
+		let itemIds = this.#itemIdsByTextureEntryRef.get(entryRef);
+		if (!itemIds) {
+			itemIds = new Set<string>();
+			this.#itemIdsByTextureEntryRef.set(entryRef, itemIds);
+		}
+		itemIds.add(itemId);
 	}
 
 	#recordPlacementEntry(
@@ -1741,15 +1747,16 @@ interface VisualTextureUseCommit {
 }
 
 interface VisualTextureUseCommitDelta {
-	readonly removedOwners: readonly TextureBindingOwner[];
+	readonly removedOwnerIds: readonly TextureOwnerId[];
 	readonly textureUses: readonly VisualTextureUseCommit[];
 }
 
 type VisualTexturePlacementBucketRegistryKey = string & {
 	readonly __brand: "VisualTexturePlacementBucketRegistryKey";
 };
-type VisualTextureKey = string & {
-	readonly __brand: "VisualTextureKey";
+type VisualTextureKey = TextureKey;
+type VisualTextureEntryRef = string & {
+	readonly __brand: "VisualTextureEntryRef";
 };
 
 interface VisualTexturePlacementBucketRegistry {
@@ -1768,7 +1775,6 @@ interface VisualTextureRegistryEntry {
 	readonly placementBucketKey: TexturePlacementBucketKey;
 	readonly ownerIds: readonly TextureOwnerId[];
 	readonly pageClass: TexturePageClass;
-	/** Shared committed placement state for every logical alias of this source. */
 	readonly physicalEntry: VisualTexturePhysicalEntry;
 	readonly source: MaterialTextureDataUseIdentity;
 	readonly purpose: TextureUsagePurpose;
@@ -1784,8 +1790,6 @@ interface VisualTextureRegistryEntry {
 interface VisualTexturePhysicalEntry {
 	readonly physicalEntryId: string;
 	readonly physicalSourceKey: string;
-	/** Logical texture-use ids that share this physical source placement. */
-	readonly textureUseIds: Set<string>;
 	readonly format: RuntimeTexturePlacement["format"];
 	readonly gutterPixels: number;
 	readonly gutterEdgeMode: "clamp" | "repeat";
@@ -1827,7 +1831,7 @@ interface TextureRefRetentionForMutation {
 interface TextureAtlasBucketFacts {
 	readonly bucketId: string;
 	readonly domain: VisualTextureDomain;
-	readonly entryAliasCount: number;
+	readonly registryEntryCount: number;
 	readonly placementBucketKey: string;
 	readonly uniqueSourceCount: number;
 	readonly texturePageCount: number;
@@ -1859,11 +1863,13 @@ type StagedTexturePlacement =
 
 interface ExistingTexturePlacement {
 	readonly textureKey: VisualTextureKey;
+	readonly entryRef: VisualTextureEntryRef;
 	readonly entry: VisualTextureRegistryEntry;
 }
 
 interface PendingStagedTexturePlacement {
 	readonly textureKey: VisualTextureKey;
+	readonly entryRef: VisualTextureEntryRef;
 	readonly entry: null;
 	readonly pending: PendingTexturePlacement;
 }
@@ -1934,20 +1940,12 @@ function createStaticVisualTextureUseCommit(
 		textureUse.source,
 		textureUse.domain,
 	);
-	const identity = createLegacyTexturePlacementIdentity({
-		domain: textureUse.domain,
-		owners: textureUse.owners,
-		purpose,
-		samplingPolicy: textureUse.samplingPolicy,
-		source: textureUse.source,
-		textureUseId: textureUse.textureUseId,
-	});
 	return {
-		bindingId: identity.bindingId,
+		bindingId: textureUse.bindingId,
 		domain: textureUse.domain,
-		ownerIds: identity.ownerIds,
+		ownerIds: textureUse.ownerIds,
 		owners: textureUse.owners,
-		pageClass: identity.pageClass,
+		pageClass: textureUse.pageClass,
 		samplingPolicy: textureUse.samplingPolicy,
 		source: textureUse.source,
 		placementBucketKey: createTexturePlacementBucketKey({
@@ -1955,7 +1953,7 @@ function createStaticVisualTextureUseCommit(
 			lifetime: { kind: "static-authored" },
 			purpose,
 		}),
-		textureKey: identity.textureKey,
+		textureKey: textureUse.textureKey,
 		textureUseId: textureUse.textureUseId,
 	};
 }
@@ -1963,28 +1961,16 @@ function createStaticVisualTextureUseCommit(
 function createDynamicVisualTextureUseCommit(
 	textureUse: DynamicTextureUseCommit,
 ): VisualTextureUseCommit {
-	const purpose = classifyTextureUsagePurpose(
-		textureUse.source,
-		textureUse.textureDomain,
-	);
-	const identity = createLegacyTexturePlacementIdentity({
-		domain: textureUse.textureDomain,
-		owners: [textureUse.owner],
-		purpose,
-		samplingPolicy: textureUse.samplingPolicy,
-		source: textureUse.source,
-		textureUseId: textureUse.textureUseId,
-	});
 	return {
-		bindingId: identity.bindingId,
+		bindingId: textureUse.bindingId,
 		domain: textureUse.textureDomain,
-		ownerIds: identity.ownerIds,
+		ownerIds: textureUse.ownerIds,
 		owners: [textureUse.owner],
-		pageClass: identity.pageClass,
+		pageClass: textureUse.pageClass,
 		samplingPolicy: textureUse.samplingPolicy,
 		source: textureUse.source,
 		placementBucketKey: textureUse.placementBucketKey,
-		textureKey: identity.textureKey,
+		textureKey: textureUse.textureKey,
 		textureUseId: textureUse.textureUseId,
 	};
 }
@@ -2004,95 +1990,6 @@ function createVisualTextureUseCommitFromIntent(
 		textureKey: intent.textureKey,
 		textureUseId: intent.textureUseId,
 	};
-}
-
-function createLegacyTexturePlacementIdentity(input: {
-	readonly domain: VisualTextureDomain;
-	readonly owners: readonly TextureBindingOwner[];
-	readonly purpose: TextureUsagePurpose;
-	readonly samplingPolicy?: StaticBakeTextureUse["samplingPolicy"];
-	readonly source: MaterialTextureDataUseIdentity;
-	readonly textureUseId: string;
-}): Pick<
-	VisualTextureUseCommit,
-	"bindingId" | "textureKey" | "ownerIds" | "pageClass"
-> {
-	const pagePolicy = createRuntimeTexturePagePolicy(
-		input.source,
-		input.samplingPolicy,
-	);
-	const sourceKey = createMaterialTextureSourceKey({
-		kind: "runtime",
-		sourceId: `legacy:${input.textureUseId}`,
-		usage:
-			input.source.kind === "prepared-palette-texture-use"
-				? input.source.usage
-				: input.source.usage,
-	});
-	return {
-		bindingId: createTextureBindingId({
-			resourceId: "legacy-texture-use",
-			role: input.purpose,
-			slot: input.textureUseId,
-		}),
-		ownerIds: input.owners.map(createLegacyTextureOwnerId),
-		pageClass: createTexturePageClass({
-			domain: input.domain,
-			format: createLegacyTextureOutputFormat(input.source),
-			gutterPixels: getRuntimeTexturePageGutterPixels(input.domain, pagePolicy),
-			physicalWrapMode: usesShaderVirtualWrap(input.domain, pagePolicy)
-				? undefined
-				: pagePolicy.wrapS,
-			purpose: input.purpose,
-			sampleClass: pagePolicy.sampleClass,
-		}),
-		textureKey: createTextureKey({
-			outputFormat: createLegacyTextureOutputFormat(input.source),
-			sampleClass: pagePolicy.sampleClass,
-			sourceKey,
-		}),
-	};
-}
-
-function createLegacyTextureOwnerId(
-	owner: TextureBindingOwner,
-): TextureOwnerId {
-	switch (owner.kind) {
-		case "static-object-visual-resource":
-			return createTextureOwnerId({
-				kind: "visual-resource",
-				visualResourceId: owner.resourceId,
-			});
-		case "dynamic-visual-resource":
-			return createTextureOwnerId({
-				dynamicResourceId: owner.resourceId,
-				kind: "dynamic-resource",
-			});
-		case "draw-unit":
-			return createTextureOwnerId({
-				kind: "layer",
-				layerOwnerId: owner.drawUnitId,
-			});
-	}
-}
-
-function createLegacyTextureOutputFormat(
-	source: MaterialTextureDataUseIdentity,
-): "rgba8" | "index8" | "index16" {
-	if (source.kind === "prepared-palette-texture-use") {
-		return "rgba8";
-	}
-	switch (source.usage) {
-		case "index8":
-			return "index8";
-		case "index16":
-			return "index16";
-		case "rgba-color":
-		case "rgba-detail":
-		case "rgba-mask":
-		case "rgba-raw":
-			return "rgba8";
-	}
 }
 
 function toPlannedTexturePlacement<
@@ -2127,26 +2024,6 @@ function createVisualTexturePlacementBucketRegistryKey(
 	) as VisualTexturePlacementBucketRegistryKey;
 }
 
-function findRegistryEntryBySource(
-	registry: VisualTexturePlacementBucketRegistry,
-	physicalSourceKey: string,
-	pagePolicy: RuntimeTexturePagePolicy,
-	domain: VisualTextureDomain,
-): VisualTextureRegistryEntry | null {
-	for (const entry of registry.entries.values()) {
-		if (
-			entry.physicalEntry.physicalSourceKey === physicalSourceKey &&
-			entry.sampleClass === pagePolicy.sampleClass &&
-			(usesShaderVirtualWrap(domain, pagePolicy) ||
-				(entry.wrapS === pagePolicy.wrapS && entry.wrapT === pagePolicy.wrapT))
-		) {
-			return entry;
-		}
-	}
-
-	return null;
-}
-
 function createLogicalTexturePhysicalSourceKey(
 	source: MaterialTextureDataUseIdentity,
 ): string {
@@ -2169,44 +2046,6 @@ function createMaterialTexturePhysicalSourceKey(
 	return createLogicalTexturePhysicalSourceKey(logicalSource);
 }
 
-function createRegistryEntryAliasForPagePolicy(
-	entry: VisualTextureRegistryEntry,
-	pagePolicy: RuntimeTexturePagePolicy,
-	textureUse: VisualTextureUseCommit,
-): VisualTextureRegistryEntry {
-	entry.physicalEntry.textureUseIds.add(textureUse.textureUseId);
-	if (entry.wrapS === pagePolicy.wrapS && entry.wrapT === pagePolicy.wrapT) {
-		return {
-			...entry,
-			bindingId: textureUse.bindingId,
-			itemId: textureUse.textureUseId,
-			leaseCount: 0,
-			ownerIds: textureUse.ownerIds,
-			pageClass: textureUse.pageClass,
-			purpose: classifyTextureUsagePurpose(
-				textureUse.source,
-				textureUse.domain,
-			),
-			source: textureUse.source,
-			textureKey: textureUse.textureKey,
-		};
-	}
-
-	return {
-		...entry,
-		bindingId: textureUse.bindingId,
-		itemId: textureUse.textureUseId,
-		leaseCount: 0,
-		ownerIds: textureUse.ownerIds,
-		pageClass: textureUse.pageClass,
-		purpose: classifyTextureUsagePurpose(textureUse.source, textureUse.domain),
-		source: textureUse.source,
-		textureKey: textureUse.textureKey,
-		wrapS: pagePolicy.wrapS,
-		wrapT: pagePolicy.wrapT,
-	};
-}
-
 function uniqueSortedRegistryEntries(
 	registry: VisualTexturePlacementBucketRegistry,
 ): readonly VisualTextureRegistryEntry[] {
@@ -2217,7 +2056,7 @@ function uniqueSortedRegistryEntries(
 	);
 }
 
-function deleteRegistryEntryAliases(
+function deleteRegistryEntry(
 	registry: VisualTexturePlacementBucketRegistry,
 	entry: VisualTextureRegistryEntry,
 ): void {
@@ -2311,45 +2150,19 @@ function createPreparedPaletteReplacementsKey(
 function createVisualTextureKey(
 	textureUse: VisualTextureUseCommit,
 ): VisualTextureKey {
-	return [
-		textureUse.domain,
-		textureUse.placementBucketKey,
-		textureUse.textureUseId,
-	].join(":") as VisualTextureKey;
+	return textureUse.textureKey;
 }
 
-function createVisualTextureSourcePlacementKey(
-	textureUse: VisualTextureUseCommit,
-): string {
+function createVisualTextureEntryRef(input: {
+	readonly domain: VisualTextureDomain;
+	readonly placementBucketKey: TexturePlacementBucketKey;
+	readonly textureKey: VisualTextureKey;
+}): VisualTextureEntryRef {
 	return [
-		textureUse.domain,
-		textureUse.placementBucketKey,
-		createMaterialTextureDataUseKey(textureUse.source),
-		createTextureUseSamplingKey(textureUse),
-	].join(":");
-}
-
-function createVisualTexturePhysicalPlacementKey(
-	textureUse: VisualTextureUseCommit,
-	physicalSourceKey: string,
-): string {
-	return [
-		textureUse.domain,
-		textureUse.placementBucketKey,
-		physicalSourceKey,
-		createTextureUseSamplingKey(textureUse),
-	].join(":");
-}
-
-function createTextureUseSamplingKey(
-	textureUse: VisualTextureUseCommit,
-): string {
-	const samplingPolicy = textureUse.samplingPolicy;
-	if (!samplingPolicy) {
-		return "sampling:default";
-	}
-
-	return `sampling:wrap=${samplingPolicy.wrapS},${samplingPolicy.wrapT}`;
+		input.domain,
+		input.placementBucketKey,
+		input.textureKey,
+	].join(":") as VisualTextureEntryRef;
 }
 
 function createTextureRefId(
@@ -2644,7 +2457,6 @@ function createRegistryEntryForAbsorbedPlacement(options: {
 			],
 			runtimePlacement: options.runtimePlacement,
 			textureRefId: options.textureRefId,
-			textureUseIds: options.entry.textureUseIds,
 			textureWidth: options.texturePage.width,
 			textureHeight: options.texturePage.height,
 		}),
@@ -2673,7 +2485,6 @@ function createVisualTexturePhysicalEntry(options: {
 	readonly rect: readonly [number, number, number, number];
 	readonly runtimePlacement: RuntimeTexturePlacement;
 	readonly textureRefId: string;
-	readonly textureUseIds: ReadonlySet<string>;
 	readonly textureWidth: number;
 	readonly textureHeight: number;
 }): VisualTexturePhysicalEntry {
@@ -2691,7 +2502,6 @@ function createVisualTexturePhysicalEntry(options: {
 		rect: options.rect,
 		runtimePlacement: options.runtimePlacement,
 		textureRefId: options.textureRefId,
-		textureUseIds: new Set(options.textureUseIds),
 		textureWidth: options.textureWidth,
 		textureHeight: options.textureHeight,
 	};
@@ -2760,16 +2570,6 @@ function createRegistryEntryPhysicalPlacementKey(
 
 function createTexturePageVersionKey(pageVersion: TexturePageVersion): string {
 	return `${pageVersion.textureRefId}@${pageVersion.placementRevision}`;
-}
-
-function createTextureUseIdsForRegistryEntry(
-	entry: VisualTextureRegistryEntry,
-): readonly string[] {
-	return uniqueSortedStrings(
-		entry.physicalEntry.textureUseIds.size === 0
-			? [entry.itemId]
-			: [...entry.physicalEntry.textureUseIds],
-	);
 }
 
 function uniquePendingTexturePlacements(
@@ -2993,7 +2793,7 @@ function createTextureAtlasBucketDiagnostics(
 		approximateBytes: sumNumbers(pages.map((page) => page.approximateBytes)),
 		bucketId: `bucket-${bucketIndex + 1}`,
 		domain: registry.domain,
-		entryAliasCount: registry.entries.size,
+		registryEntryCount: registry.entries.size,
 		multiSourcePageCount: pages.filter((page) => page.uniqueSourceCount > 1)
 			.length,
 		pages,

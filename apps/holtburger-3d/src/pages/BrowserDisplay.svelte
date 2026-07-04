@@ -2528,9 +2528,9 @@
 									)}
 								</strong>
 								<small>
-									{runtimeOverview?.resources.atlas.summary.entryAliasCount ??
-										0}
-									texture aliases
+									{runtimeOverview?.resources.atlas.summary
+										.registryEntryCount ?? 0}
+									texture entries
 								</small>
 							</div>
 							<div class="browser-display__resource-card">

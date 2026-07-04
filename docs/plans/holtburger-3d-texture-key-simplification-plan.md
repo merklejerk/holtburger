@@ -332,29 +332,58 @@ Internally, identity builders should accept structured inputs and return branded
 
 ### Phase 4: Registry Identity Cutover
 
-**Course correction:** Once planners emit real `TextureRequest`s, the registry cutover can delete alias behavior instead of translating old scoped ids. This phase owns the minimum registry and commit-state change needed to make the placement split real.
+**Status:** Complete.
+
+**Course correction:** Once planners emit real `TextureRequest`s, the registry cutover can delete alias behavior instead of translating old scoped ids. Current evidence after Phase 3 shows one missing boundary: `StaticBakeTextureUse` and `DynamicTextureUseCommit` still reach `TextureManager` without planner-provided `TextureKey`, `TextureBindingId`, `TextureOwnerId`, and `TexturePageClass` facts. Phase 4 must first upgrade those commit payloads and their producers. Deleting `createLegacyTexturePlacementIdentity(...)` before that would only move the guessing into a different helper.
+
+**Steering update:** The answered identity questions make this a clean-cutover phase, not an adapter phase. `TextureManager` must stop treating `textureUseId` as a source of truth and must not create a replacement mega-id from owner, sampler, and source facts. Commit payloads may carry legacy renderer/dependency ids only while a downstream boundary still requires them, but registry identity, ownership, placement, and eviction decisions must use the separated planner facts exclusively.
 
 **Deliverables**
 
+- Extend static and dynamic texture-use commit payloads to carry planner-provided:
+  - `TextureBindingId`;
+  - `TextureKey`;
+  - `TextureOwnerId[]`;
+  - `TexturePageClass`.
+- Update static object visual publication, structured interior publication, terrain bake texture uses, and dynamic visual runtime commits to pass those facts from placement snapshots or material planning instead of deriving them in `TextureManager`.
 - Replace `VisualTextureKey = domain + bucket + textureUseId` with registry entries keyed by `TextureKey`.
-- Replace owner maps with `TextureOwnerId -> Set<TextureKey>`.
+- Replace owner maps with `TextureOwnerId -> TextureKey` ownership/lease state. A plain `Set<TextureKey>` is acceptable only if the commit model proves owner removal is always whole-owner removal; otherwise use a small explicit lease count keyed by `(TextureOwnerId, TextureKey)` rather than reintroducing aliases.
 - Replace renderer update production with a resolved binding map that starts from `TextureBindingId` and resolves through `TextureKey`.
 - Delete `physicalEntry.textureUseIds` and implicit shared-entry aliasing during the cutover. Do not create a bridge object that keeps the alias model alive under a different name.
 - Delete `createLegacyTexturePlacementIdentity(...)` at the start of this phase. Any caller that still needs it blocks the phase and must be converted rather than given a broader shim.
 - Use planner-provided `TextureKey`, `TextureBindingId`, `TextureOwnerId`, and `TexturePageClass`; do not rederive identity from old strings inside `TextureManager`.
 - Consume the Phase 3 palette recipe keys for palette texture `TextureKey`s. Do not derive palette identity from replacement palette asset ids or prepared `contentHash`.
 - Keep placement revisions, renderer `textureRefId`s, and atlas rects as mutable placement facts behind the `TextureKey` entry, never as key components.
+- Keep filtering, mip generation, and anisotropy entirely in sampler policy updates. They must not enter registry keys, owner maps, or page class derivation.
+- Keep material wrap on binding/material data. Only physical page incompatibility belongs in `TexturePageClass`; wrap must never become part of `TextureKey`.
+- Treat `sourceKey` and `physicalSourceKey` as source facts feeding `TextureKey`, not independent lookup handles inside the registry.
 
 **Acceptance criteria**
 
+- `StaticBakeTextureUse` and `DynamicTextureUseCommit` provide identity facts directly; `TextureManager` does not synthesize them from `textureUseId`, owners, or source bytes.
 - Texture placement requests use `TextureKey`.
 - No registry entries share mutable `physicalEntry` references.
 - A page move updates one texture-pool entry, then all active bindings derive from that entry.
 - Active binding lookup is `TextureBindingId -> TextureKey -> current placement`, not `TextureBindingId -> stale copied rect`.
+- Owner removal is expressed in `TextureOwnerId`s and cannot accidentally release a canonical texture still retained by another owner.
 - Tests assert that owner churn in follow mode changes owners/bindings without changing canonical texture keys.
 - No helper needs to “find aliases” by scanning registry entries.
 - `TextureManager` consumes planner-provided `TextureKey`, `TextureBindingId`, `TextureOwnerId`, and `TexturePageClass` from placement snapshots/commits. It must not derive canonical identity from old scoped strings except during the deleted-at-end migration step.
 - The current `createLegacyTexturePlacementIdentity(...)` helper is removed or the phase is not complete.
+- New tests should assert the negative space: landblock id, visual resource id, draw unit id, material wrap, filter, mip policy, anisotropy, placement revision, and renderer `textureRefId` do not affect registry `TextureKey` selection.
+- Any remaining `textureUseId` field at this phase boundary must be documented as a downstream renderer/dependency compatibility field, not registry identity. If it influences registry state, the phase is not complete.
+
+**Phase notes**
+
+- `StaticBakeTextureUse` and `DynamicTextureUseCommit` now carry planner-provided `bindingId`, `textureKey`, `ownerIds`, and `pageClass`. `TextureManager` consumes those facts directly and no longer builds canonical identity from old scoped `textureUseId` strings.
+- Deleted `createLegacyTexturePlacementIdentity(...)` and its owner/output-format helpers. Missing identity facts now fail at producer/test boundaries instead of being guessed in the manager.
+- Registry keys are canonical `TextureKey`s. The old `VisualTextureKey = domain + bucket + textureUseId` composite was collapsed to the branded `TextureKey`.
+- Owner lifetime state uses `TextureOwnerId -> registry entry ref` sets, not a lossy `TextureOwnerId -> TextureKey` map. This avoids the bucket-collision bug where the same canonical texture key could exist in multiple placement buckets and owner removal would find an arbitrary entry.
+- Removed shared mutable `physicalEntry.textureUseIds`. Multiple legacy renderer item ids are tracked in a separate entry-ref lookup bridge only for the downstream renderer/dependency boundary that still resolves by `textureUseId`.
+- Removed physical-source/content-hash dedupe from registry placement. Dedupe now happens through `TextureKey`; two different palette recipes with matching prepared bytes remain distinct canonical texture entries, though they may still pack onto the same atlas page.
+- Renamed atlas diagnostics from `entryAliasCount` to `registryEntryCount` so diagnostics stop presenting the new model as aliases.
+- Spicy bit: Phase 6 must delete the remaining `#itemIdsByTextureEntryRef` bridge by moving renderer material payloads and dependency pinning to `TextureBindingId`. Until then, it is an explicitly labeled compatibility seam, not registry identity.
+- Verification for this phase included `npm run check` and focused Vitest coverage for `texture-manager`, dynamic visual baking, object visual static publication, and terrain geometry baking.
 
 ### Phase 5: TextureManager Fuzz and Palette Resolver Proof
 
@@ -367,6 +396,9 @@ Internally, identity builders should accept structured inputs and return branded
 - Keep the fuzz target close to `TextureManager` state, not browser controls or renderer draw code.
 - Seed the model with the observed failure shape: an active binding whose reported placement revision lags the latest resident page revision after follow-mode eviction/re-add or page movement.
 - Generate equivalent texture sources across distinct owner ids and landblocks so the harness proves dedupe through `TextureKey`, not through scoped aliases.
+- Generate bindings that vary wrap while sharing one `TextureKey`, so the harness proves material sampling facts remain binding facts.
+- Generate sampler policy changes during active ownership, so filtering/mips/aniso are proven to update sampler state without changing texture identity.
+- Generate palette replacement recipes from normalized byte ranges and assert the resolver can predict keys without prepared texture pixel hashes.
 
 **Acceptance criteria**
 
@@ -377,6 +409,7 @@ Internally, identity builders should accept structured inputs and return branded
 - Re-adding an owner with the same canonical texture must reuse the existing `TextureKey` entry or recreate an equivalent entry with no stale binding state carried across.
 - No helper needs to “find aliases” by scanning registry entries.
 - Palette replacement fuzz covers runtime-authored replacement byte ranges with the single cheap-hash policy.
+- Fuzz failures print separated binding id, texture key, owner id, page class, page revision, resident revision, and rect. They must not require decoding a composite id to understand the failure.
 - Tests do not assert old scoped `textureUseId` spellings.
 
 ### Phase 6: Renderer Binding Cutover
@@ -450,6 +483,10 @@ Internally, identity builders should accept structured inputs and return branded
 - Audit dynamic texture identity:
   - identify whether runtime-authored source keys are truly runtime-local bytes or accidental static texture aliases;
   - decide whether dynamic palette/runtime replacements need their own asset-reader-backed planning boundary before final cleanup.
+- Audit remaining canonical-handle vocabulary:
+  - `sourceKey` / `physicalSourceKey` must be source facts only;
+  - `textureRefId` must be renderer page identity only;
+  - no public path should present any of them as the canonical texture-pool handle.
 - Re-run forbidden-discriminant tests for `TextureKey`, `TexturePageClass`, and renderer sampler policy after the registry and renderer cutovers.
 - Resteer the final cleanup checklist based on actual remaining hits, not assumptions.
 

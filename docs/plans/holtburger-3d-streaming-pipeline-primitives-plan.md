@@ -1,6 +1,6 @@
 # Holtburger 3D Streaming Pipeline Primitives Plan
 
-Status: Phase 4 complete; Phase 0 audit complete and remaining phases resteered on 2026-07-04.
+Status: Phase 5 complete; implementation stopped before Phase 6 by design.
 
 Related context:
 
@@ -763,6 +763,8 @@ Decisions and course corrections:
 
 Goal: reassess whether a shared visual install product is real after sidecars and leases are explicit.
 
+Status: complete.
+
 Questions to answer:
 
 - Which static and dynamic install DTO fields are now genuinely shared?
@@ -788,10 +790,37 @@ Decisions and course corrections:
 
 - Phase 0 strengthened this gate. Static and dynamic install products share ingredients, but they do
   not yet prove that one shared envelope is the simplest model.
+- Phases 1 and 2 made worker-created byte ownership isomorphic at the transfer boundary. Texture
+  packing pages, static bake geometry outputs, and dynamic visual bake geometry outputs now describe
+  owned typed-array sidecars through protocol-local collectors.
+- Phases 3 and 4 made texture residency isomorphic at the runtime boundary. Static layer installs
+  and dynamic visual resource syncs now pin through `TextureLeaseSet` and release by resource id.
+- The shared similarity is component-level, not envelope-level. Static install still means layer
+  replacement plus static scene/query publication. Dynamic install still means visual resource
+  refresh plus entity instance/resource commits.
+- Scene/query records should remain runtime publication concerns. They are not part of a renderer
+  install product unless a future renderer boundary proves it owns those records directly.
+- Reject `VisualResourceBundle` for this plan. A broad bundle would either hide provenance-specific
+  facts behind optional fields or preserve the current split under a more impressive name.
+- Preserve these smaller shared parts instead:
+  - `TextureLeaseSet` for texture residency lifetime;
+  - protocol-local transfer collectors for worker-owned binary outputs;
+  - shared `VisualGeometryPayload` transfer collection for renderer geometry bytes.
+- Defer any `RendererVisualResourceProduct` extraction until static and dynamic renderer resource
+  shapes converge without optional-field soup.
+- Stop before Phase 6. The next useful remodel should target the texture placement transaction path:
+  separating off-thread/source preparation from the small ordered main-thread placement commit.
+- The lease cutover intentionally hides owner bookkeeping from `TextureManager`. The manager still
+  owns residency pin/release mechanics, but it no longer needs runtime/static/dynamic owner concepts
+  to be passed through the public install paths.
+- Temporary stutter diagnostics remain disposable. Prefer deleting obsolete probes when convenient
+  instead of bending the new boundary types around them.
 
 ## Phase 6: Extract The Smallest Honest Install Product Shape
 
 Goal: remove static/dynamic install duplication only where the real post-lease model supports it.
+
+Status: deferred by Phase 5.
 
 Possible outcomes:
 
@@ -832,10 +861,15 @@ Decisions and course corrections:
 
 - If the shared shape requires many optional fields for static-only or dynamic-only facts, reject the
   shared envelope and extract smaller components instead.
+- Phase 5 rejected a broad install-product envelope for this plan. Future work should revisit only a
+  smaller renderer-resource product, and only if it deletes real static/dynamic duplication without
+  flattening layer replacement, scene publication, or dynamic resource refresh semantics.
 
 ## Phase 7: Cleanup And Measurement
 
 Goal: remove migration debris and verify the primitives improved clarity.
+
+Status: deferred.
 
 Deliverables:
 
@@ -856,7 +890,8 @@ Acceptance criteria:
 
 Decisions and course corrections:
 
-- To be filled during implementation.
+- Deferred with Phase 6. Cleanup should be folded into the next texture placement transaction remodel
+  or a focused diagnostics cleanup pass.
 
 ## Risks And Mitigations
 
@@ -894,6 +929,8 @@ Decisions and course corrections:
 - The codebase either has a small honest shared install product/component shape or a documented
   decision to defer extraction.
 - Obsolete direct transfer/lifetime compatibility paths are removed or have explicit cleanup notes.
+  Existing low-level `TextureManager` dependency methods remain as implementation/test coverage
+  behind the lease-facing runtime boundary.
 - The implementation preserves current rendering behavior.
 - App checks and focused tests pass.
 - This plan records final decisions, course corrections, and remaining follow-up work.
@@ -908,3 +945,11 @@ Closed during the dry run:
   `apps/holtburger-3d/src/lib/textures/leases.ts`, not in `placement.ts` or runtime install code.
 - `VisualResourceBundle` should be treated as retired for this plan unless Phase 5 proves that one
   shared envelope is clearer than smaller shared components.
+
+Closed during Phase 5:
+
+- `VisualResourceBundle` is rejected for this plan.
+- Pinning is explicit residency behavior, but owner identity is intentionally hidden from
+  `TextureManager` behind lease sets and resource-id releases.
+- The next architecture effort should be a texture placement transaction remodel, not a renderer
+  install-product extraction.

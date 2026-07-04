@@ -2266,7 +2266,11 @@ function createPlacementSnapshot(): TexturePlacementSnapshot {
 }
 
 function createObjectVisualPlacementSnapshot(): ObjectVisualTexturePlacementSnapshot {
-	return { itemIdsByBindingId: new Map(), placementsByItemId: new Map() };
+	return {
+		itemIdsByBindingId: new Map(),
+		placementsByBindingId: new Map(),
+		placementsByItemId: new Map(),
+	};
 }
 
 function createPlacementSnapshots(): {

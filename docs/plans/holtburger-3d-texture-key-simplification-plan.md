@@ -546,7 +546,7 @@ Internally, identity builders should accept structured inputs and return branded
 - Renderer texture diagnostics already print `latestResidentPageRevision` and `lastTexturePlacementUpdateRevision` beside material-entry page versions and rects. With the new snapshot fields, stale binding, stale canonical texture identity, stale resident page, and stale atlas rect can be distinguished without decoding a composite string.
 - Found and fixed a diagnostic-only alias bug: secondary placement records were reporting the canonical registry entry binding id instead of the specific item binding id. Rendering had already cut over to binding ids; this bug made diagnostics look more alias-shaped than the runtime path.
 - The Phase 5 manager fuzz remains the follow-mode regression boundary for `db56ffff` / `01001117` and `da55ffff` / `01002a1b`-style owner churn. It checks active binding page revisions against resident page revisions after add, evict, re-add, absorb, repack, and sampler-policy operations.
-- No browser harness was added in this phase because the audited renderer path resolves through `TextureBindingId -> placement` and did not introduce a second stale copied placement store. If a future capture proves browser/app state owns stale placement data independently, that exact boundary should get its own reproducer rather than expanding the manager fuzz.
+- Browser harness validation later found a distinct binding-resolution bug at the object-visual placement snapshot boundary: shared canonical texture entries were correctly deduped by `TextureKey`, but planned placements could still be stamped with the first registry-entry binding instead of the current requesting `TextureBindingId`. The fix was to key object-visual snapshots by binding id and to have planned placements preserve the current intent binding while sharing the physical texture entry.
 - Remaining debt: owner ids are still not printed directly in per-selection placement snapshots. Owner lifetime is visible through manager reference snapshots and active reference counts; Phase 9 should decide whether per-selection owner details are worth the extra surface.
 
 ### Phase 9: Simplification Audit And Resteer
@@ -681,6 +681,7 @@ Internally, identity builders should accept structured inputs and return branded
   - `npm run lint:dead` passed.
   - `npm run lint:ts` passed.
   - `npm run check` passed.
+  - `npm run harness:browser` passed after the binding-resolution fix. The sandboxed run cannot bind the local dev asset host; the successful run was unsandboxed.
   - `git diff --check` passed.
 
 ## Risks & Mitigations

@@ -965,6 +965,26 @@ async function createStructuredInteriorPlacementSnapshot(
 		itemIdsByBindingId: new Map(
 			intents.map((intent) => [intent.bindingId, intent.itemId]),
 		),
+		placementsByBindingId: new Map(
+			intents.map((intent, index) => [
+				intent.bindingId,
+				{
+					bindingId: intent.bindingId,
+					height: 16,
+					itemId: intent.itemId,
+					pageId: options.uniquePages
+						? `${intent.purpose}:page:${index}`
+						: `${intent.purpose}:page:0`,
+					purpose: intent.purpose,
+					rect: [0, 0, 16, 16] as const,
+					textureKey: intent.textureKey,
+					textureRefId: options.uniquePages
+						? `${intent.purpose}:texture-ref:${index}`
+						: `${intent.purpose}:texture-ref:0`,
+					width: 16,
+				},
+			]),
+		),
 		placementsByItemId: new Map(
 			intents.map((intent, index) => [
 				intent.itemId,
@@ -977,10 +997,10 @@ async function createStructuredInteriorPlacementSnapshot(
 						: `${intent.purpose}:page:0`,
 					purpose: intent.purpose,
 					rect: [0, 0, 16, 16] as const,
+					textureKey: intent.textureKey,
 					textureRefId: options.uniquePages
 						? `${intent.purpose}:texture-ref:${index}`
 						: `${intent.purpose}:texture-ref:0`,
-					textureBindingId: intent.textureBindingId,
 					width: 16,
 				},
 			]),
@@ -1271,6 +1291,7 @@ function createInput(
 		task,
 		texturePlacementSnapshot: {
 			itemIdsByBindingId: new Map(),
+			placementsByBindingId: new Map(),
 			placementsByItemId: new Map(),
 		},
 	};

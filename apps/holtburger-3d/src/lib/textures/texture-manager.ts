@@ -421,6 +421,7 @@ export class TextureManager {
 					toPlannedTexturePlacement(
 						entry,
 						intent.itemId,
+						textureUse.bindingId,
 					),
 				);
 			}
@@ -443,6 +444,17 @@ export class TextureManager {
 			...snapshot,
 			itemIdsByBindingId: new Map(
 				rebasedIntents.map((intent) => [intent.bindingId, intent.itemId]),
+			),
+			placementsByBindingId: new Map(
+				rebasedIntents.map((intent) => {
+					const placement = snapshot.placementsByItemId.get(intent.itemId);
+					if (!placement) {
+						throw new Error(
+							`Object visual texture placement ${intent.bindingId} was not committed for item ${intent.itemId}.`,
+						);
+					}
+					return [intent.bindingId, placement] as const;
+				}),
 			),
 		};
 	}
@@ -2024,9 +2036,10 @@ function toPlannedTexturePlacement<
 >(
 	entry: VisualTextureRegistryEntry,
 	itemId: TPlacementItemId,
+	bindingId: TextureBindingId,
 ): PlannedTexturePlacement<TPlacementItemId> {
 	return {
-		bindingId: entry.bindingId,
+		bindingId,
 		height: entry.physicalEntry.textureHeight,
 		itemId,
 		ownerIds: entry.ownerIds,

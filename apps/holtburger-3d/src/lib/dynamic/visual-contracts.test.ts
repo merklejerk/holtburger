@@ -59,6 +59,7 @@ describe("dynamic visual contracts", () => {
 			sourceGeometry: [],
 			texturePlacementSnapshot: {
 				itemIdsByBindingId: new Map(),
+				placementsByBindingId: new Map(),
 				placementsByItemId: new Map(),
 			},
 			texturePlanning: {

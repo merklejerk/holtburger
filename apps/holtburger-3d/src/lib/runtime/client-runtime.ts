@@ -1018,6 +1018,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 				work.objectVisualPlacementIntents.length === 0
 					? {
 							itemIdsByBindingId: new Map(),
+							placementsByBindingId: new Map(),
 							placementsByItemId: new Map(),
 						}
 					: await this.#textureManager.placeObjectVisualTextureIntents({

@@ -74,6 +74,7 @@ import { createStructuredInteriorVisualBundleExpansion } from "./structured-inte
 const MAX_STRUCTURED_INTERIOR_MATERIAL_ENTRIES_PER_DRAW = 8;
 const EMPTY_TEXTURE_PLACEMENT_SNAPSHOT: ObjectVisualTexturePlacementSnapshot = {
 	itemIdsByBindingId: new Map(),
+	placementsByBindingId: new Map(),
 	placementsByItemId: new Map(),
 };
 
@@ -1019,9 +1020,17 @@ function requireObjectVisualPlacementItemId(options: {
 	const placementItemId = options.placementSnapshot.itemIdsByBindingId.get(
 		options.bindingId,
 	);
-	if (placementItemId === undefined) {
+	const placement = options.placementSnapshot.placementsByBindingId.get(
+		options.bindingId,
+	);
+	if (placementItemId === undefined || !placement) {
 		throw new Error(
 			`${options.subject} is missing object-visual placement item id for binding ${options.bindingId}.`,
+		);
+	}
+	if (placement.itemId !== placementItemId) {
+		throw new Error(
+			`${options.subject} object-visual placement item ${placementItemId} resolved to mismatched placement ${placement.itemId} for binding ${options.bindingId}.`,
 		);
 	}
 	return placementItemId;

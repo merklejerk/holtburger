@@ -125,19 +125,18 @@ function createTextureBindings(input: {
 		const itemId = input.texturePlacementSnapshot.itemIdsByBindingId.get(
 			requirement.bindingId,
 		);
-		if (itemId === undefined) {
+		const placement = input.texturePlacementSnapshot.placementsByBindingId.get(
+			requirement.bindingId,
+		);
+		if (itemId === undefined || !placement) {
 			throw new Error(
 				`Object visual texture recipe ${textureRecipeId} requires unplaced texture binding ${requirement.bindingId}.`,
 			);
 		}
-		const placement =
-			input.texturePlacementSnapshot.placementsByItemId.get(itemId);
-		if (!placement) {
-			throw new Error(
-				`Object visual texture recipe ${textureRecipeId} resolves to missing placement item ${itemId}.`,
-			);
-		}
-		if (placement.bindingId !== requirement.bindingId) {
+		if (
+			placement.itemId !== itemId ||
+			placement.bindingId !== requirement.bindingId
+		) {
 			throw new Error(
 				`Object visual texture recipe ${textureRecipeId} placement item ${itemId} belongs to ${placement.bindingId}, not ${requirement.bindingId}.`,
 			);

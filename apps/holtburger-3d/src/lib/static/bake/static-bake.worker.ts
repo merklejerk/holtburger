@@ -6,7 +6,7 @@ import type {
 import { EnvCellSystemBaker } from "../env-cells/bake/env-cell-system-baker";
 import { StaticObjectJobBaker } from "../objects/bake/static-object-job-baker";
 import { TerrainGeometryStaticBaker } from "../terrain/bake/terrain-geometry-baker";
-import { handleStaticBakeWorkerRequest } from "./worker-handler";
+import { installStaticBakeWorkerHandler } from "./worker-handler";
 import type { StaticBakeWorkerGlobalPort } from "./protocol";
 
 class StaticBakeWorkerRouter implements StaticBaker {
@@ -52,8 +52,4 @@ const baker = new StaticBakeWorkerRouter({
 	terrainBaker: new TerrainGeometryStaticBaker(),
 });
 
-workerPort.addEventListener("message", (event) => {
-	void handleStaticBakeWorkerRequest(baker, event.data, (response) =>
-		workerPort.postMessage(response),
-	);
-});
+installStaticBakeWorkerHandler(baker, workerPort);

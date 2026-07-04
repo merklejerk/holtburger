@@ -188,18 +188,18 @@ describe("browser runtime routing", () => {
 		expect(workers[0]?.messages).toEqual([
 			{
 				input,
-				kind: "bake-dynamic-visual",
+				kind: "job",
 				requestId: "dynamic-visual-bake:0",
 			},
 		]);
 		workers[0]?.emit({
-			kind: "dynamic-visual-baked",
-			requestId: "dynamic-visual-bake:0",
-			result: {
+			kind: "result",
+			output: {
 				failures: [],
 				product: null,
 				revision: 1,
 			},
+			requestId: "dynamic-visual-bake:0",
 		});
 
 		await expect(pending).resolves.toMatchObject({

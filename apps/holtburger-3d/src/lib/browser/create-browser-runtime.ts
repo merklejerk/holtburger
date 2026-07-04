@@ -1,10 +1,7 @@
 import { HostBackedAssetService } from "../assets/asset-service";
 import type { PreparedAssetReader } from "../assets/contracts";
 import type { DynamicVisualBaker } from "../dynamic/visual-baker";
-import {
-	DynamicVisualBakeWorkerClient,
-	WorkerPoolDynamicVisualBaker,
-} from "../dynamic/visual-bake-worker-client";
+import { WorkerPoolDynamicVisualBaker } from "../dynamic/visual-bake-worker-client";
 import type { DynamicVisualBakeWorkerPort } from "../dynamic/visual-bake-protocol";
 import {
 	createDynamicVisualRecipeMainAssetBridge,
@@ -37,10 +34,8 @@ import type {
 import { ImmediateStaticBaker } from "../static/fake-workers";
 import { EnvCellSystemGeometryResourceProvider } from "../static/env-cells/bake/env-cell-system-geometry-resources";
 import { StaticObjectBakeResourceProvider } from "../static/objects/bake/static-object-bake-resources";
-import {
-	StaticBakeWorkerClient,
-	WorkerPoolStaticBaker,
-} from "../static/bake/worker-client";
+import { WorkerPoolStaticBaker } from "../static/bake/worker-client";
+import type { StaticBakeWorkerPort } from "../static/bake/protocol";
 import {
 	createStaticResolverMainAssetBridge,
 	type StaticResolverMainAssetBridge,
@@ -50,11 +45,9 @@ import {
 	WorkerPoolStaticResolver,
 } from "../static/resolver/worker-client";
 import type { StaticResolverWorkerPort } from "../static/resolver/protocol";
+import type { TexturePackingWorkerPort } from "../textures/packing/protocol";
 import type { TexturePacker } from "../textures/packing/packer";
-import {
-	WorkerPoolTexturePacker,
-	WorkerTexturePacker,
-} from "../textures/packing/worker-client";
+import { WorkerPoolTexturePacker } from "../textures/packing/worker-client";
 
 const DEFAULT_STATIC_RESOLVER_WORKER_COUNT = 2;
 const DEFAULT_STATIC_BAKER_WORKER_COUNT = 2;
@@ -225,18 +218,16 @@ function createDynamicVisualRecipeBrowserWorker(): DynamicVisualRecipeBrowserWor
 function createWorkerStaticBaker(workerCount: number): StaticBaker {
 	assertPositiveInteger(workerCount, "static baker worker count");
 
-	const bakers = Array.from({ length: workerCount }, () => {
-		const worker = new Worker(
-			new URL("../static/bake/static-bake.worker.ts", import.meta.url),
-			{ type: "module" },
-		);
-
-		return new StaticBakeWorkerClient(worker, {
-			disposePort: () => worker.terminate(),
-		});
+	return new WorkerPoolStaticBaker({
+		createWorker: () =>
+			new Worker(
+				new URL("../static/bake/static-bake.worker.ts", import.meta.url),
+				{
+					type: "module",
+				},
+			) as StaticBakeWorkerPort,
+		workerCount,
 	});
-
-	return new WorkerPoolStaticBaker(bakers);
 }
 
 interface DynamicVisualBakerBrowserWorker extends DynamicVisualBakeWorkerPort {
@@ -255,15 +246,10 @@ export function createWorkerDynamicVisualBaker(
 	const createWorker =
 		factories.createWorker ?? createDynamicVisualBakerBrowserWorker;
 
-	const bakers = Array.from({ length: workerCount }, () => {
-		const worker = createWorker();
-
-		return new DynamicVisualBakeWorkerClient(worker, {
-			disposePort: () => worker.terminate(),
-		});
+	return new WorkerPoolDynamicVisualBaker({
+		createWorker,
+		workerCount,
 	});
-
-	return new WorkerPoolDynamicVisualBaker(bakers);
 }
 
 function createDynamicVisualBakerBrowserWorker(): DynamicVisualBakerBrowserWorker {
@@ -276,18 +262,17 @@ function createDynamicVisualBakerBrowserWorker(): DynamicVisualBakerBrowserWorke
 function createWorkerTexturePacker(workerCount: number): TexturePacker {
 	assertPositiveInteger(workerCount, "texture packing worker count");
 
-	const packers = Array.from({ length: workerCount }, () => {
-		const worker = new Worker(
-			new URL("../textures/packing/texture-packing.worker.ts", import.meta.url),
-			{ type: "module" },
-		);
-
-		return new WorkerTexturePacker(worker, {
-			disposePort: () => worker.terminate(),
-		});
+	return new WorkerPoolTexturePacker({
+		createWorker: () =>
+			new Worker(
+				new URL(
+					"../textures/packing/texture-packing.worker.ts",
+					import.meta.url,
+				),
+				{ type: "module" },
+			) as TexturePackingWorkerPort,
+		workerCount,
 	});
-
-	return new WorkerPoolTexturePacker(packers);
 }
 
 function assertPositiveInteger(value: number, label: string): void {

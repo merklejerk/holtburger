@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import type {
 	StaticBakeJobInput,
 	StaticBakeJobResult,
-	StaticBaker,
 	StaticBakeTask,
 } from "../contracts";
 import { StaticBakeWorkerClient, WorkerPoolStaticBaker } from "./worker-client";
@@ -11,10 +10,11 @@ import type {
 	StaticBakeWorkerRequest,
 	StaticBakeWorkerResponse,
 } from "./protocol";
-import { handleStaticBakeWorkerRequest } from "./worker-handler";
+import { installStaticBakeWorkerHandler } from "./worker-handler";
+import { emitStaticBakeWorkerTrace } from "./worker-trace";
 
 describe("static bake worker protocol", () => {
-	it("posts static bake inputs and resolves returned bake results", async () => {
+	it("posts standard static bake inputs and resolves returned bake results", async () => {
 		const port = new FixtureWorkerPort();
 		const client = new StaticBakeWorkerClient(port);
 		const input = createInput();
@@ -23,33 +23,49 @@ describe("static bake worker protocol", () => {
 		expect(port.requests).toEqual([
 			{
 				input,
-				kind: "bake-static-job",
+				kind: "job",
 				requestId: "bake-job:0",
 			},
 		]);
 		expect(client.createDiagnosticsSnapshot().pendingJobs).toMatchObject([
 			{
-				taskId: input.task.taskId,
 				requestId: "bake-job:0",
-				stage: "queued",
+				stage: "executing",
+				taskId: input.task.taskId,
 			},
 		]);
 
 		port.emit({
-			kind: "static-job-bake-started",
+			event: { kind: "started" },
+			kind: "progress",
+			requestId: "bake-job:0",
+		});
+		port.emit({
+			event: {
+				event: { atMs: 12, details: { drawUnits: 1 }, stage: "fixture" },
+				kind: "trace",
+			},
+			kind: "progress",
 			requestId: "bake-job:0",
 		});
 		expect(client.createDiagnosticsSnapshot().pendingJobs).toMatchObject([
 			{
-				taskId: input.task.taskId,
 				requestId: "bake-job:0",
 				stage: "executing",
+				taskId: input.task.taskId,
+				traceEvents: [
+					{
+						details: { drawUnits: 1 },
+						stage: "fixture",
+					},
+				],
 			},
 		]);
+
 		port.emit({
-			kind: "static-job-baked",
+			kind: "result",
+			output: createResult(input),
 			requestId: "bake-job:0",
-			result: createResult(input),
 		});
 
 		await expect(pending).resolves.toMatchObject({
@@ -59,123 +75,227 @@ describe("static bake worker protocol", () => {
 		client.dispose();
 	});
 
-	it("turns baker handler failures into typed worker responses", async () => {
-		const input = createInput();
-		const responses: StaticBakeWorkerResponse[] = [];
-
-		await handleStaticBakeWorkerRequest(
+	it("turns baker handler failures into standard worker errors after started progress", async () => {
+		const port = new FixtureWorkerPort();
+		installStaticBakeWorkerHandler(
 			{
 				async bake(): Promise<StaticBakeJobResult> {
 					throw new Error("unsupported bake payload");
 				},
 			},
-			{
-				input,
-				kind: "bake-static-job",
-				requestId: "transport:1",
-			},
-			(response) => responses.push(response),
+			port,
 		);
 
-		expect(responses).toEqual([
+		port.emitRequest({
+			input: createInput(),
+			kind: "job",
+			requestId: "transport:1",
+		});
+		await port.waitForResponses(2);
+
+		expect(port.responses[0]).toEqual({
+			event: { kind: "started" },
+			kind: "progress",
+			requestId: "transport:1",
+		});
+		expect(port.responses[1]).toMatchObject({
+			kind: "error",
+			message: "unsupported bake payload",
+			requestId: "transport:1",
+		});
+	});
+
+	it("preserves static bake trace events through standard progress", async () => {
+		const input = createInput();
+		const port = new FixtureWorkerPort();
+		installStaticBakeWorkerHandler(
 			{
-				kind: "static-job-bake-started",
-				requestId: "transport:1",
+				async bake(): Promise<StaticBakeJobResult> {
+					emitStaticBakeWorkerTrace("fixture-stage", { textures: 2 });
+					return createResult(input);
+				},
+			},
+			port,
+		);
+
+		port.emitRequest({
+			input,
+			kind: "job",
+			requestId: "transport:2",
+		});
+		await port.waitForResponses(3);
+
+		expect(port.responses).toMatchObject([
+			{
+				event: { kind: "started" },
+				kind: "progress",
+				requestId: "transport:2",
 			},
 			{
-				kind: "static-job-bake-failed",
-				message: "unsupported bake payload",
-				requestId: "transport:1",
+				event: {
+					event: {
+						details: { textures: 2 },
+						stage: "fixture-stage",
+					},
+					kind: "trace",
+				},
+				kind: "progress",
+				requestId: "transport:2",
+			},
+			{
+				kind: "result",
+				requestId: "transport:2",
 			},
 		]);
 	});
 
 	it("assigns new bake jobs to idle workers before queueing behind busy workers", async () => {
-		const first = new ControlledStaticBaker();
-		const second = new ControlledStaticBaker();
-		const pool = new WorkerPoolStaticBaker([first, second]);
+		const first = new FixtureWorkerPort();
+		const second = new FixtureWorkerPort();
+		const workers = [first, second];
+		const pool = new WorkerPoolStaticBaker({
+			createWorker: () => {
+				const worker = workers.shift();
+				if (!worker) {
+					throw new Error("No fixture static bake worker remains.");
+				}
+				return worker;
+			},
+			workerCount: 2,
+		});
 		const firstJob = pool.bake(createInput("task-1"));
 		const secondJob = pool.bake(createInput("task-2"));
-
-		expect(first.inputs.map((input) => input.task.taskId)).toEqual(["task-1"]);
-		expect(second.inputs.map((input) => input.task.taskId)).toEqual(["task-2"]);
-
-		first.resolveNext();
-		await firstJob;
 		const thirdJob = pool.bake(createInput("task-3"));
-		expect(first.inputs.map((input) => input.task.taskId)).toEqual([
-			"task-1",
-			"task-3",
+
+		expect(first.requests.map((request) => request.requestId)).toEqual([
+			"bake-job:0",
+		]);
+		expect(second.requests.map((request) => request.requestId)).toEqual([
+			"bake-job:1",
+		]);
+		expect(pool.createDiagnosticsSnapshot().pendingJobs).toMatchObject([
+			{ requestId: "bake-job:2", stage: "queued", taskId: "task-3" },
+			{ requestId: "bake-job:0", stage: "executing", taskId: "task-1" },
+			{ requestId: "bake-job:1", stage: "executing", taskId: "task-2" },
 		]);
 
-		first.resolveNext();
-		await thirdJob;
-		const fourthJob = pool.bake(createInput("task-4"));
-		expect(first.inputs.map((input) => input.task.taskId)).toEqual([
-			"task-1",
-			"task-3",
-			"task-4",
+		first.emit({
+			kind: "result",
+			output: createResult(createInput("task-1")),
+			requestId: "bake-job:0",
+		});
+		await expect(firstJob).resolves.toMatchObject({
+			task: { taskId: "task-1" },
+		});
+		expect(first.requests.map((request) => request.requestId)).toEqual([
+			"bake-job:0",
+			"bake-job:2",
 		]);
-		expect(second.inputs.map((input) => input.task.taskId)).toEqual(["task-2"]);
 
-		first.resolveNext();
-		second.resolveNext();
-		await Promise.all([secondJob, fourthJob]);
+		second.emit({
+			kind: "result",
+			output: createResult(createInput("task-2")),
+			requestId: "bake-job:1",
+		});
+		first.emit({
+			kind: "result",
+			output: createResult(createInput("task-3")),
+			requestId: "bake-job:2",
+		});
+
+		await expect(secondJob).resolves.toMatchObject({
+			task: { taskId: "task-2" },
+		});
+		await expect(thirdJob).resolves.toMatchObject({
+			task: { taskId: "task-3" },
+		});
+		pool.dispose();
 	});
 });
 
 class FixtureWorkerPort implements StaticBakeWorkerPort {
 	readonly requests: StaticBakeWorkerRequest[] = [];
-	readonly #listeners = new Set<
+	readonly responses: StaticBakeWorkerResponse[] = [];
+	readonly #requestListeners = new Set<
+		(event: MessageEvent<StaticBakeWorkerRequest>) => void
+	>();
+	readonly #responseListeners = new Set<
 		(event: MessageEvent<StaticBakeWorkerResponse>) => void
 	>();
+	#waiters: Array<() => void> = [];
 
-	postMessage(message: StaticBakeWorkerRequest): void {
-		this.requests.push(message);
+	postMessage(
+		message: StaticBakeWorkerRequest | StaticBakeWorkerResponse,
+	): void {
+		if (message.kind === "job" || message.kind === "cancel") {
+			this.requests.push(message);
+			return;
+		}
+		this.responses.push(message);
+		this.#flushWaiters();
 	}
 
 	addEventListener(
 		_type: "message",
-		listener: (event: MessageEvent<StaticBakeWorkerResponse>) => void,
+		listener:
+			| ((event: MessageEvent<StaticBakeWorkerResponse>) => void)
+			| ((event: MessageEvent<StaticBakeWorkerRequest>) => void),
 	): void {
-		this.#listeners.add(listener);
+		this.#responseListeners.add(
+			listener as (event: MessageEvent<StaticBakeWorkerResponse>) => void,
+		);
+		this.#requestListeners.add(
+			listener as (event: MessageEvent<StaticBakeWorkerRequest>) => void,
+		);
 	}
 
 	removeEventListener(
 		_type: "message",
-		listener: (event: MessageEvent<StaticBakeWorkerResponse>) => void,
+		listener:
+			| ((event: MessageEvent<StaticBakeWorkerResponse>) => void)
+			| ((event: MessageEvent<StaticBakeWorkerRequest>) => void),
 	): void {
-		this.#listeners.delete(listener);
+		this.#responseListeners.delete(
+			listener as (event: MessageEvent<StaticBakeWorkerResponse>) => void,
+		);
+		this.#requestListeners.delete(
+			listener as (event: MessageEvent<StaticBakeWorkerRequest>) => void,
+		);
 	}
 
 	emit(response: StaticBakeWorkerResponse): void {
 		const event = { data: response } as MessageEvent<StaticBakeWorkerResponse>;
-		for (const listener of this.#listeners) {
+		for (const listener of this.#responseListeners) {
 			listener(event);
 		}
 	}
-}
 
-class ControlledStaticBaker implements StaticBaker {
-	readonly inputs: StaticBakeJobInput[] = [];
-	readonly #pending: Array<{
-		readonly input: StaticBakeJobInput;
-		readonly resolve: (result: StaticBakeJobResult) => void;
-	}> = [];
+	emitRequest(request: StaticBakeWorkerRequest): void {
+		const event = { data: request } as MessageEvent<StaticBakeWorkerRequest>;
+		for (const listener of this.#requestListeners) {
+			listener(event);
+		}
+	}
 
-	bake(input: StaticBakeJobInput): Promise<StaticBakeJobResult> {
-		this.inputs.push(input);
+	waitForResponses(count: number): Promise<void> {
+		if (this.responses.length >= count) {
+			return Promise.resolve();
+		}
 		return new Promise((resolve) => {
-			this.#pending.push({ input, resolve });
+			this.#waiters.push(() => {
+				if (this.responses.length >= count) {
+					resolve();
+				}
+			});
 		});
 	}
 
-	resolveNext(): void {
-		const pending = this.#pending.shift();
-		if (!pending) {
-			throw new Error("No pending static bake job exists.");
+	#flushWaiters(): void {
+		const waiters = this.#waiters;
+		this.#waiters = [];
+		for (const waiter of waiters) {
+			waiter();
 		}
-		pending.resolve(createResult(pending.input));
 	}
 }
 
@@ -211,11 +331,11 @@ function createInput(
 			},
 			sourceRevision: 1,
 		},
-		revision: 1,
 		resources: {
 			envCellCellStructureGeometry: [],
 			staticObjectSourceGeometry: [],
 		},
+		revision: 1,
 		task,
 	};
 }
@@ -226,10 +346,10 @@ function createResult(input: StaticBakeJobInput): StaticBakeJobResult {
 		buildRevision: 1,
 		domain: input.domain,
 		drawUnits: [],
+		envCellStaticObjectPlacementRecords: [],
 		materialCoverage: [],
 		portalApertureResources: [],
 		revision: input.revision,
-		envCellStaticObjectPlacementRecords: [],
 		staticPortalGraphs: [],
 		staticPortalInteriorRecords: [],
 		staticSourceMappings: [],

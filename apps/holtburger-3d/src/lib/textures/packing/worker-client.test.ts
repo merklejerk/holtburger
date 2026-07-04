@@ -3,18 +3,19 @@ import { ShelfTexturePacker } from "./packer";
 import type {
 	TexturePackingJob,
 	TexturePackingResult,
+	TexturePackingWorkerPort,
 	TexturePackingWorkerRequest,
 	TexturePackingWorkerResponse,
-	TexturePackingWorkerPort,
 } from "./protocol";
 import {
 	TexturePackingWorkerClient,
+	WorkerPoolTexturePacker,
 	WorkerTexturePacker,
 } from "./worker-client";
-import { handleTexturePackingWorkerRequest } from "./worker-handler";
+import { installTexturePackingWorkerHandler } from "./worker-handler";
 
 describe("browser texture packing worker protocol", () => {
-	it("posts typed packing jobs and resolves atlas page pixels plus rect metadata", async () => {
+	it("posts standard typed packing jobs and resolves atlas page pixels plus rect metadata", async () => {
 		const port = new FixtureWorkerPort();
 		const client = new TexturePackingWorkerClient(port);
 		const job = createPackingJob();
@@ -23,8 +24,8 @@ describe("browser texture packing worker protocol", () => {
 		expect(handle.requestId).toBe("texture-pack:0");
 		expect(port.requests).toEqual([
 			{
-				job,
-				kind: "pack-textures",
+				input: job,
+				kind: "job",
 				requestId: "texture-pack:0",
 			},
 		]);
@@ -32,9 +33,9 @@ describe("browser texture packing worker protocol", () => {
 		expect(JSON.stringify(port.requests[0])).not.toContain("drawUnit");
 
 		port.emit({
-			kind: "textures-packed",
+			kind: "result",
+			output: createPackingResult(job),
 			requestId: "texture-pack:0",
-			result: createPackingResult(job),
 		});
 
 		await expect(handle.result).resolves.toMatchObject({
@@ -50,9 +51,9 @@ describe("browser texture packing worker protocol", () => {
 			],
 			rects: [
 				{
+					entryKey: "terrain-a:prepared-texture:06000010",
 					pageId: "pack-job:1:page:0",
 					rect: [0, 0, 1, 1],
-					entryKey: "terrain-a:prepared-texture:06000010",
 				},
 			],
 		});
@@ -68,24 +69,22 @@ describe("browser texture packing worker protocol", () => {
 		handle.cancel();
 
 		expect(port.requests.at(-1)).toEqual({
-			kind: "cancel-texture-pack",
+			kind: "cancel",
 			requestId: "texture-pack:0",
 		});
-		await expect(handle.result).rejects.toThrow(
-			"Texture packing request was canceled.",
-		);
+		await expect(handle.result).rejects.toThrow("Worker job was canceled.");
 
 		port.emit({
-			kind: "textures-packed",
+			kind: "result",
+			output: createPackingResult(job),
 			requestId: "texture-pack:0",
-			result: createPackingResult(job),
 		});
 
 		const nextHandle = client.pack(job);
 		port.emit({
-			kind: "textures-packed",
+			kind: "result",
+			output: createPackingResult(job),
 			requestId: "texture-pack:1",
-			result: createPackingResult(job),
 		});
 		await expect(nextHandle.result).resolves.toMatchObject({
 			jobId: "pack-job:1",
@@ -93,24 +92,20 @@ describe("browser texture packing worker protocol", () => {
 		client.dispose();
 	});
 
-	it("packs direct rgba sources in the worker handler", async () => {
-		const responses: TexturePackingWorkerResponse[] = [];
+	it("packs direct rgba sources in the worker handler and transfers result page pixels", async () => {
+		const port = new FixtureWorkerPort();
+		installTexturePackingWorkerHandler(new ShelfTexturePacker(), port);
 
-		await handleTexturePackingWorkerRequest(
-			new ShelfTexturePacker(),
-			{
-				job: createPackingJob(),
-				kind: "pack-textures",
-				requestId: "texture-pack:7",
-			},
-			(response) => responses.push(response),
-		);
-
-		expect(responses).toHaveLength(1);
-		expect(responses[0]).toMatchObject({
-			kind: "textures-packed",
+		port.emitRequest({
+			input: createPackingJob(),
+			kind: "job",
 			requestId: "texture-pack:7",
-			result: {
+		});
+		await port.waitForResponses(1);
+
+		expect(port.responses[0]).toMatchObject({
+			kind: "result",
+			output: {
 				pages: [
 					{
 						format: "rgba8",
@@ -121,19 +116,22 @@ describe("browser texture packing worker protocol", () => {
 				],
 				rects: [
 					{
+						entryKey: "terrain-a:prepared-texture:06000010",
 						pageId: "pack-job:1:page:0",
 						rect: [0, 0, 1, 1],
-						entryKey: "terrain-a:prepared-texture:06000010",
 					},
 				],
 			},
+			requestId: "texture-pack:7",
 		});
-		expect(
-			Array.from(
-				(responses[0] as { result: TexturePackingResult }).result.pages[0]
-					?.pixels ?? [],
-			),
-		).toEqual([255, 128, 0, 255]);
+		const response = port.responses[0];
+		if (response?.kind !== "result") {
+			throw new Error("Expected texture packing result response.");
+		}
+		expect(Array.from(response.output.pages[0]?.pixels ?? [])).toEqual([
+			255, 128, 0, 255,
+		]);
+		expect(port.transfers).toEqual([[response.output.pages[0]?.pixels.buffer]]);
 	});
 
 	it("adapts the request client to the texture packer interface", async () => {
@@ -144,16 +142,16 @@ describe("browser texture packing worker protocol", () => {
 
 		expect(port.requests).toEqual([
 			{
-				job,
-				kind: "pack-textures",
+				input: job,
+				kind: "job",
 				requestId: "texture-pack:0",
 			},
 		]);
 
 		port.emit({
-			kind: "textures-packed",
+			kind: "result",
+			output: createPackingResult(job),
 			requestId: "texture-pack:0",
-			result: createPackingResult(job),
 		});
 
 		await expect(resultPromise).resolves.toMatchObject({
@@ -162,28 +160,82 @@ describe("browser texture packing worker protocol", () => {
 		packer.dispose();
 	});
 
-	it("turns packer failures into typed worker responses", async () => {
-		const responses: TexturePackingWorkerResponse[] = [];
+	it("dispatches texture packing through the standard central worker queue", async () => {
+		const first = new FixtureWorkerPort();
+		const second = new FixtureWorkerPort();
+		const workers = [first, second];
+		const packer = new WorkerPoolTexturePacker({
+			createWorker: () => {
+				const worker = workers.shift();
+				if (!worker) {
+					throw new Error("No fixture texture packing worker remains.");
+				}
+				return worker;
+			},
+			workerCount: 2,
+		});
+		const firstJob = packer.pack(createPackingJob("pack-job:1"));
+		const secondJob = packer.pack(createPackingJob("pack-job:2"));
+		const thirdJob = packer.pack(createPackingJob("pack-job:3"));
 
-		await handleTexturePackingWorkerRequest(
+		expect(first.requests.map((request) => request.requestId)).toEqual([
+			"texture-pack:0",
+		]);
+		expect(second.requests.map((request) => request.requestId)).toEqual([
+			"texture-pack:1",
+		]);
+
+		first.emit({
+			kind: "result",
+			output: createPackingResult(createPackingJob("pack-job:1")),
+			requestId: "texture-pack:0",
+		});
+		await expect(firstJob).resolves.toMatchObject({ jobId: "pack-job:1" });
+		expect(first.requests.map((request) => request.requestId)).toEqual([
+			"texture-pack:0",
+			"texture-pack:2",
+		]);
+
+		second.emit({
+			kind: "result",
+			output: createPackingResult(createPackingJob("pack-job:2")),
+			requestId: "texture-pack:1",
+		});
+		first.emit({
+			kind: "result",
+			output: createPackingResult(createPackingJob("pack-job:3")),
+			requestId: "texture-pack:2",
+		});
+
+		await expect(secondJob).resolves.toMatchObject({ jobId: "pack-job:2" });
+		await expect(thirdJob).resolves.toMatchObject({ jobId: "pack-job:3" });
+		packer.dispose();
+	});
+
+	it("turns packer failures into standard worker errors", async () => {
+		const port = new FixtureWorkerPort();
+		installTexturePackingWorkerHandler(
 			{
 				async pack(): Promise<TexturePackingResult> {
 					throw new Error("source does not fit");
 				},
 			},
-			{
-				job: createPackingJob(),
-				kind: "pack-textures",
-				requestId: "texture-pack:8",
-			},
-			(response) => responses.push(response),
+			port,
 		);
 
-		expect(responses).toEqual([
+		port.emitRequest({
+			input: createPackingJob(),
+			kind: "job",
+			requestId: "texture-pack:8",
+		});
+		await port.waitForResponses(1);
+
+		expect(port.responses).toEqual([
 			{
-				kind: "texture-pack-failed",
+				kind: "error",
 				message: "source does not fit",
 				requestId: "texture-pack:8",
+				stack: expect.any(String) as string,
 			},
 		]);
 	});
@@ -191,42 +243,106 @@ describe("browser texture packing worker protocol", () => {
 
 class FixtureWorkerPort implements TexturePackingWorkerPort {
 	readonly requests: TexturePackingWorkerRequest[] = [];
-	readonly #listeners = new Set<
+	readonly responses: TexturePackingWorkerResponse[] = [];
+	readonly transfers: readonly Transferable[][] = [];
+	terminated = false;
+	readonly #requestListeners = new Set<
+		(event: MessageEvent<TexturePackingWorkerRequest>) => void
+	>();
+	readonly #responseListeners = new Set<
 		(event: MessageEvent<TexturePackingWorkerResponse>) => void
 	>();
+	#waiters: Array<() => void> = [];
 
-	postMessage(message: TexturePackingWorkerRequest): void {
-		this.requests.push(message);
+	postMessage(
+		message: TexturePackingWorkerRequest | TexturePackingWorkerResponse,
+		transfer: readonly Transferable[] = [],
+	): void {
+		if (message.kind === "job" || message.kind === "cancel") {
+			this.requests.push(message);
+			return;
+		}
+		this.responses.push(message);
+		this.transfers.push(transfer);
+		this.#flushWaiters();
 	}
 
 	addEventListener(
 		_type: "message",
-		listener: (event: MessageEvent<TexturePackingWorkerResponse>) => void,
+		listener:
+			| ((event: MessageEvent<TexturePackingWorkerResponse>) => void)
+			| ((event: MessageEvent<TexturePackingWorkerRequest>) => void),
 	): void {
-		this.#listeners.add(listener);
+		this.#responseListeners.add(
+			listener as (event: MessageEvent<TexturePackingWorkerResponse>) => void,
+		);
+		this.#requestListeners.add(
+			listener as (event: MessageEvent<TexturePackingWorkerRequest>) => void,
+		);
 	}
 
 	removeEventListener(
 		_type: "message",
-		listener: (event: MessageEvent<TexturePackingWorkerResponse>) => void,
+		listener:
+			| ((event: MessageEvent<TexturePackingWorkerResponse>) => void)
+			| ((event: MessageEvent<TexturePackingWorkerRequest>) => void),
 	): void {
-		this.#listeners.delete(listener);
+		this.#responseListeners.delete(
+			listener as (event: MessageEvent<TexturePackingWorkerResponse>) => void,
+		);
+		this.#requestListeners.delete(
+			listener as (event: MessageEvent<TexturePackingWorkerRequest>) => void,
+		);
+	}
+
+	terminate(): void {
+		this.terminated = true;
 	}
 
 	emit(response: TexturePackingWorkerResponse): void {
 		const event = {
 			data: response,
 		} as MessageEvent<TexturePackingWorkerResponse>;
-		for (const listener of this.#listeners) {
+		for (const listener of this.#responseListeners) {
 			listener(event);
+		}
+	}
+
+	emitRequest(request: TexturePackingWorkerRequest): void {
+		const event = {
+			data: request,
+		} as MessageEvent<TexturePackingWorkerRequest>;
+		for (const listener of this.#requestListeners) {
+			listener(event);
+		}
+	}
+
+	waitForResponses(count: number): Promise<void> {
+		if (this.responses.length >= count) {
+			return Promise.resolve();
+		}
+		return new Promise((resolve) => {
+			this.#waiters.push(() => {
+				if (this.responses.length >= count) {
+					resolve();
+				}
+			});
+		});
+	}
+
+	#flushWaiters(): void {
+		const waiters = this.#waiters;
+		this.#waiters = [];
+		for (const waiter of waiters) {
+			waiter();
 		}
 	}
 }
 
-function createPackingJob(): TexturePackingJob {
+function createPackingJob(jobId = "pack-job:1"): TexturePackingJob {
 	return {
 		domain: "outdoor-terrain",
-		jobId: "pack-job:1",
+		jobId,
 		page: {
 			format: "rgba8",
 			height: 2,
@@ -235,6 +351,7 @@ function createPackingJob(): TexturePackingJob {
 		placementRevision: 3,
 		sources: [
 			{
+				entryKey: "terrain-a:prepared-texture:06000010",
 				source: {
 					format: "rgba8",
 					height: 1,
@@ -242,7 +359,6 @@ function createPackingJob(): TexturePackingJob {
 					pixels: new Uint8Array([255, 128, 0, 255]),
 					width: 1,
 				},
-				entryKey: "terrain-a:prepared-texture:06000010",
 			},
 		],
 	};
@@ -256,7 +372,7 @@ function createPackingResult(job: TexturePackingJob): TexturePackingResult {
 			{
 				format: "rgba8",
 				height: 2,
-				pageId: "pack-job:1:page:0",
+				pageId: `${job.jobId}:page:0`,
 				pixels: new Uint8Array(16),
 				width: 2,
 			},
@@ -264,9 +380,9 @@ function createPackingResult(job: TexturePackingJob): TexturePackingResult {
 		placementRevision: job.placementRevision,
 		rects: [
 			{
-				pageId: "pack-job:1:page:0",
-				rect: [0, 0, 1, 1],
 				entryKey: "terrain-a:prepared-texture:06000010",
+				pageId: `${job.jobId}:page:0`,
+				rect: [0, 0, 1, 1],
 			},
 		],
 	};

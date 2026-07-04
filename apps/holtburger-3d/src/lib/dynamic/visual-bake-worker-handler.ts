@@ -1,26 +1,18 @@
 import type { DynamicVisualBaker } from "./visual-baker";
-import type {
-	DynamicVisualBakeWorkerRequest,
-	DynamicVisualBakeWorkerResponse,
-} from "./visual-bake-protocol";
+import type { DynamicVisualBakeWorkerGlobalPort } from "./visual-bake-protocol";
+import {
+	installWorkerHandler,
+	type InstalledWorkerHandler,
+} from "../workers/handler";
 
-export async function handleDynamicVisualBakeWorkerRequest(
+export function installDynamicVisualBakeWorkerHandler(
 	baker: DynamicVisualBaker,
-	message: DynamicVisualBakeWorkerRequest,
-	postMessage: (response: DynamicVisualBakeWorkerResponse) => void,
-): Promise<void> {
-	try {
-		const result = await baker.bake(message.input);
-		postMessage({
-			kind: "dynamic-visual-baked",
-			requestId: message.requestId,
-			result,
-		});
-	} catch (error: unknown) {
-		postMessage({
-			kind: "dynamic-visual-bake-failed",
-			message: error instanceof Error ? error.message : String(error),
-			requestId: message.requestId,
-		});
-	}
+	port: DynamicVisualBakeWorkerGlobalPort,
+): InstalledWorkerHandler {
+	return installWorkerHandler({
+		execute: async (input) => ({
+			output: await baker.bake(input),
+		}),
+		port,
+	});
 }

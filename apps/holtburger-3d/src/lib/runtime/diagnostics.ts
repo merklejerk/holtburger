@@ -296,7 +296,7 @@ export interface TextureAtlasDiagnosticsReport {
 interface TextureAtlasBucketDiagnostics {
 	readonly bucketId: string;
 	readonly domain: VisualTextureDomain;
-	readonly entryAliasCount: number;
+	readonly registryEntryCount: number;
 	readonly placementBucketKey: string;
 	readonly uniqueSourceCount: number;
 	readonly texturePageCount: number;
@@ -329,7 +329,7 @@ interface TextureAtlasDiagnosticsSummary {
 	readonly texturePageCount: number;
 	readonly pageLifecycle: TextureAtlasPageLifecycleDiagnostics;
 	readonly multiSourcePageCount: number;
-	readonly entryAliasCount: number;
+	readonly registryEntryCount: number;
 	readonly mipmappedPageCount: number;
 	readonly unmippedPageCount: number;
 	readonly approximateBytes: number;

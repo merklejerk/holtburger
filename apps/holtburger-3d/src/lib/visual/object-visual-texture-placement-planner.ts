@@ -117,9 +117,13 @@ function createStaticObjectVisualTextureUse(
 	policy: ObjectVisualStaticTexturePlacementPolicy,
 ): StaticBakeTextureUse {
 	const textureUse: StaticBakeTextureUse = {
+		bindingId: requirement.bindingId,
 		domain: policy.domain,
+		ownerIds: requirement.ownerIds,
 		owners: [],
+		pageClass: requirement.pageClass,
 		source: requirement.source.dataUse,
+		textureKey: requirement.textureKey,
 		textureUseId: requirement.bindingKey,
 	};
 	if (!requirement.samplingPolicy) {
@@ -136,7 +140,11 @@ function createDynamicObjectVisualTextureUse(
 	policy: ObjectVisualDynamicTexturePlacementPolicy,
 ): DynamicTexturePlacementUse {
 	const textureUse: DynamicTexturePlacementUse = {
+		bindingId: requirement.bindingId,
+		ownerIds: requirement.ownerIds,
+		pageClass: requirement.pageClass,
 		source: requirement.source.dataUse,
+		textureKey: requirement.textureKey,
 		textureDomain: policy.textureDomain,
 		textureUseId: requirement.textureUseId,
 	};

@@ -39,7 +39,12 @@ import type {
 	TexturePlacementItemId,
 	TextureResourceDependencies,
 } from "../textures/placement";
-import type { TextureBindingId } from "../textures/identity";
+import type {
+	TextureBindingId,
+	TextureKey,
+	TextureOwnerId,
+	TexturePageClass,
+} from "../textures/identity";
 
 export type DynamicEntityId = string;
 export const RUNTIME_AUTHORED_DYNAMIC_RESOURCE_FAMILY =
@@ -676,6 +681,12 @@ export interface DynamicEntityTextureRequirement {
 	readonly placementItemId: TexturePlacementItemId;
 	/** Material-consumer binding identity used to resolve numeric placement ids. */
 	readonly bindingId: TextureBindingId;
+	/** Canonical texture-pool identity. */
+	readonly textureKey: TextureKey;
+	/** Residency owners that retain this dynamic texture. */
+	readonly ownerIds: readonly TextureOwnerId[];
+	/** Physical atlas-page compatibility class for this texture. */
+	readonly pageClass: TexturePageClass;
 	/** Runtime texture-use id used for renderer binding and dependency pinning. */
 	readonly textureUseId: string;
 }

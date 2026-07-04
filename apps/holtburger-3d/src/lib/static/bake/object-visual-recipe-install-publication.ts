@@ -23,6 +23,7 @@ import type {
 import { createObjectVisualStaticInstallSet } from "../../visual/object-visual-static-publication-baker";
 import type { ObjectVisualStaticPublicationMetadata } from "../../visual/object-visual-static-publication";
 import type { ObjectVisualInstallSet } from "../../visual/object-visual-install-set";
+import { createStaticTextureOwnerIds } from "../texture-owner-identity";
 
 export interface StaticObjectVisualRecipeInstallPublication {
 	readonly installSet: ObjectVisualInstallSet;
@@ -143,6 +144,7 @@ function createTextureBindings(input: {
 		}
 
 		bindings.set(textureRecipeId, {
+			bindingId: placement.bindingId,
 			dependency: {
 				resourceId: requirement.textureUseId,
 				roles: [
@@ -152,6 +154,8 @@ function createTextureBindings(input: {
 					},
 				],
 			},
+			pageClass: placement.pageClass,
+			textureKey: placement.textureKey,
 			textureUseId: requirement.textureUseId,
 		});
 	}
@@ -200,10 +204,14 @@ function createPublishedTextureUses(input: {
 				return [];
 			}
 			return {
+				bindingId: binding.bindingId,
 				domain: input.domain,
+				ownerIds: createStaticTextureOwnerIds(owners),
 				owners,
+				pageClass: binding.pageClass,
 				samplingPolicy: createTextureSamplingPolicy(recipe.wrapMode),
 				source: recipe.dataUse,
+				textureKey: binding.textureKey,
 				textureUseId: binding.textureUseId,
 			};
 		})

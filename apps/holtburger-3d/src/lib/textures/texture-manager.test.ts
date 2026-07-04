@@ -31,6 +31,8 @@ import {
 } from "./placement";
 import {
 	createMaterialTextureSourceKey,
+	createPaletteReplacementFingerprint,
+	createPaletteReplacementRecipeKey,
 	createTextureBindingId,
 	createTextureKey,
 	createTextureOwnerId,
@@ -432,7 +434,7 @@ describe("browser texture manager", () => {
 		).toHaveLength(6);
 	});
 
-	it("updates every logical alias when page-local repack moves a shared physical source", async () => {
+	it("updates every binding item when page-local repack moves a shared texture key", async () => {
 		const assetService = new FixtureAssetService(null, { paletteSize: 46 });
 		const textureManager = new TextureManager({ assetService });
 
@@ -448,10 +450,10 @@ describe("browser texture manager", () => {
 					textureUseId: "building-a:palette",
 				}),
 				createPaletteTextureUseCommit({
-					drawUnitId: "building-a-alias",
+					drawUnitId: "building-a-secondary",
 					paletteId: 0x04000010,
 					replacementPaletteId: 0x04000110,
-					textureUseId: "building-a:palette-alias",
+					textureUseId: "building-a:palette-secondary",
 				}),
 			],
 		});
@@ -478,7 +480,7 @@ describe("browser texture manager", () => {
 		).toEqual(
 			new Set([
 				"building-a:palette",
-				"building-a:palette-alias",
+				"building-a:palette-secondary",
 				"building-1:palette",
 				"building-2:palette",
 				"building-3:palette",
@@ -488,7 +490,7 @@ describe("browser texture manager", () => {
 		expect(
 			textureManager.createPlacementResolutionSnapshot([
 				"building-a:palette",
-				"building-a:palette-alias",
+				"building-a:palette-secondary",
 			]),
 		).toEqual(
 			expect.arrayContaining([
@@ -500,10 +502,10 @@ describe("browser texture manager", () => {
 					width: 256,
 				}),
 				expect.objectContaining({
-					itemId: "building-a:palette-alias",
+					itemId: "building-a:palette-secondary",
 					pageVersion: secondUpdate?.resolvedTexturePlacements.find(
 						(placement) =>
-							placement.textureUseId === "building-a:palette-alias",
+							placement.textureUseId === "building-a:palette-secondary",
 					)?.pageVersion,
 					width: 256,
 				}),
@@ -1231,7 +1233,7 @@ describe("browser texture manager", () => {
 		});
 	});
 
-	it("pins pre-bake placement aliases that share one packed texture source", async () => {
+	it("pins pre-bake placement bindings that share one texture key", async () => {
 		const textureManager = new TextureManager({
 			assetService: new FixtureAssetService(),
 		});
@@ -1753,7 +1755,7 @@ describe("browser texture manager", () => {
 		).toHaveProperty("size", 1);
 	});
 
-	it("reuses a static object atlas rect for later authored wrap aliases", async () => {
+	it("reuses a static object atlas rect for later authored wrap bindings", async () => {
 		const texturePacker = new FixtureTexturePacker();
 		const textureManager = new TextureManager({
 			assetService: new FixtureAssetService(),
@@ -1833,7 +1835,7 @@ describe("browser texture manager", () => {
 			],
 		});
 		const dynamicUpdate = await textureManager.applyDynamicTextureUseDelta({
-			removedOwners: [],
+			removedOwnerIds: [],
 			textureUses: [
 				createDynamicTextureUseCommit({
 					placementBucketKey: "batch-a",
@@ -1892,7 +1894,7 @@ describe("browser texture manager", () => {
 		});
 
 		const update = await textureManager.applyDynamicTextureUseDelta({
-			removedOwners: [],
+			removedOwnerIds: [],
 			textureUses: [
 				createDynamicTextureUseCommit({
 					placementBucketKey: "runtime-dynamic:runtime-spawn:1",
@@ -1965,7 +1967,7 @@ describe("browser texture manager", () => {
 		});
 
 		await textureManager.applyDynamicTextureUseDelta({
-			removedOwners: [],
+			removedOwnerIds: [],
 			textureUses: [
 				createDynamicTextureUseCommit({
 					placementBucketKey: "runtime-dynamic:runtime-spawn:1",
@@ -1985,11 +1987,11 @@ describe("browser texture manager", () => {
 		});
 
 		const releaseUpdate = await textureManager.applyDynamicTextureUseDelta({
-			removedOwners: [
-				{
-					kind: "dynamic-visual-resource",
-					resourceId: "dynamic-visual-resource:runtime-spawn:1",
-				},
+			removedOwnerIds: [
+				createTextureOwnerId({
+					dynamicResourceId: "dynamic-visual-resource:runtime-spawn:1",
+					kind: "dynamic-resource",
+				}),
 			],
 			textureUses: [],
 		});
@@ -2030,7 +2032,7 @@ describe("browser texture manager", () => {
 			],
 		});
 		await textureManager.applyDynamicTextureUseDelta({
-			removedOwners: [],
+			removedOwnerIds: [],
 			textureUses: [
 				createDynamicTextureUseCommit({
 					placementBucketKey: "batch-a",
@@ -2043,11 +2045,11 @@ describe("browser texture manager", () => {
 		});
 
 		const releaseUpdate = await textureManager.applyDynamicTextureUseDelta({
-			removedOwners: [
-				{
-					kind: "dynamic-visual-resource",
-					resourceId: "dynamic-windmill-part-0",
-				},
+			removedOwnerIds: [
+				createTextureOwnerId({
+					dynamicResourceId: "dynamic-windmill-part-0",
+					kind: "dynamic-resource",
+				}),
 			],
 			textureUses: [],
 		});
@@ -2101,38 +2103,22 @@ describe("browser texture manager", () => {
 			removedResources: [],
 			revision: 1,
 			textureUses: [
-				{
+				createTextureUseCommit({
 					domain: "outdoor-buildings",
-					owners: [{ drawUnitId: "static-a", kind: "draw-unit" }],
+					drawUnitId: "static-a",
 					samplingPolicy: {
 						wrapS: "repeat",
 						wrapT: "repeat",
 					},
-					source: {
-						kind: "prepared-render-surface-texture-use",
-						renderSurface: {
-							kind: "render-surface",
-							renderSurfaceId: 0x06000010,
-						},
-						usage: "index8",
-					},
+					renderSurfaceId: 0x06000010,
 					textureUseId: "static-a:index",
-				},
-				{
-					domain: "outdoor-buildings",
-					owners: [{ drawUnitId: "static-a", kind: "draw-unit" }],
-					source: {
-						domain: "index8",
-						kind: "prepared-palette-texture-use",
-						palette: {
-							kind: "palette",
-							paletteId: 0x04000010,
-						},
-						replacements: [],
-						usage: "palette-rgba",
-					},
+					usage: "index8",
+				}),
+				createPaletteTextureUseCommit({
+					drawUnitId: "static-a",
+					paletteId: 0x04000010,
 					textureUseId: "static-a:palette",
-				},
+				}),
 			],
 		});
 
@@ -2242,30 +2228,13 @@ describe("browser texture manager", () => {
 			removedResources: [],
 			revision: 1,
 			textureUses: [
-				{
-					domain: "outdoor-buildings",
-					owners: [{ drawUnitId: "static-a", kind: "draw-unit" }],
-					source: {
-						domain: "index8",
-						kind: "prepared-palette-texture-use",
-						palette: {
-							kind: "palette",
-							paletteId: 0x04000010,
-						},
-						replacements: [
-							{
-								count: 1,
-								offset: 1,
-								palette: {
-									kind: "palette",
-									paletteId: 0x04000020,
-								},
-							},
-						],
-						usage: "palette-rgba",
-					},
+				createPaletteTextureUseCommit({
+					drawUnitId: "static-a",
+					paletteId: 0x04000010,
+					replacementPaletteId: 0x04000020,
+					replacementOffset: 1,
 					textureUseId: "static-a:palette",
-				},
+				}),
 			],
 		});
 
@@ -2282,7 +2251,7 @@ describe("browser texture manager", () => {
 		]);
 	});
 
-	it("aliases different palette recipes by prepared content hash", async () => {
+	it("keeps different palette recipes distinct even when prepared bytes match", async () => {
 		const assetService = new FixtureAssetService();
 		const texturePacker = new FixtureTexturePacker();
 		const textureManager = new TextureManager({ assetService, texturePacker });
@@ -2292,18 +2261,16 @@ describe("browser texture manager", () => {
 			removedResources: [],
 			revision: 1,
 			textureUses: [
-				{
-					domain: "outdoor-buildings",
-					owners: [{ drawUnitId: "static-a", kind: "draw-unit" }],
-					source: createPreparedPaletteUse(0x04000010),
+				createPaletteTextureUseCommit({
+					drawUnitId: "static-a",
+					paletteId: 0x04000010,
 					textureUseId: "static-a:palette-a",
-				},
-				{
-					domain: "outdoor-buildings",
-					owners: [{ drawUnitId: "static-b", kind: "draw-unit" }],
-					source: createPreparedPaletteUse(0x04000011),
+				}),
+				createPaletteTextureUseCommit({
+					drawUnitId: "static-b",
+					paletteId: 0x04000011,
 					textureUseId: "static-b:palette-b",
-				},
+				}),
 			],
 		});
 
@@ -2318,7 +2285,7 @@ describe("browser texture manager", () => {
 			},
 		]);
 		expect(texturePacker.jobs).toHaveLength(1);
-		expect(texturePacker.jobs[0]?.sources).toHaveLength(1);
+		expect(texturePacker.jobs[0]?.sources).toHaveLength(2);
 		expect(update?.placements).toHaveLength(1);
 		expect(update?.resolvedTexturePlacements).toMatchObject([
 			{
@@ -2660,17 +2627,31 @@ function createTextureUseCommit(options: {
 	readonly textureUseId: string;
 	readonly usage?: PreparedRgbaRenderSurfaceTextureUsage;
 }): StaticCoordinatorCommitDelta["textureUses"][number] {
-	return {
-		domain: options.domain ?? "outdoor-terrain",
-		owners: [{ drawUnitId: options.drawUnitId, kind: "draw-unit" }],
-		source: {
-			kind: "prepared-render-surface-texture-use",
-			renderSurface: {
-				kind: "render-surface",
-				renderSurfaceId: options.renderSurfaceId,
-			},
-			usage: options.usage ?? "rgba-color",
+	const domain = options.domain ?? "outdoor-terrain";
+	const owners = [{ drawUnitId: options.drawUnitId, kind: "draw-unit" }] as const;
+	const source: Extract<
+		StaticBakeTextureUse["source"],
+		{ readonly kind: "prepared-render-surface-texture-use" }
+	> = {
+		kind: "prepared-render-surface-texture-use",
+		renderSurface: {
+			kind: "render-surface",
+			renderSurfaceId: options.renderSurfaceId,
 		},
+		usage: options.usage ?? "rgba-color",
+	};
+	const identity = createFixtureTextureIdentity({
+		domain,
+		owners,
+		samplingPolicy: options.samplingPolicy,
+		source,
+		textureUseId: options.textureUseId,
+	});
+	return {
+		...identity,
+		domain,
+		owners,
+		source,
 		samplingPolicy: options.samplingPolicy,
 		textureUseId: options.textureUseId,
 	};
@@ -2754,22 +2735,38 @@ function createStaticPlacementOutputFormat(
 function createPaletteTextureUseCommit(options: {
 	readonly drawUnitId: string;
 	readonly paletteId: number;
-	readonly replacementPaletteId: number;
+	readonly replacementOffset?: number;
+	readonly replacementPaletteId?: number;
 	readonly textureUseId: string;
 }): StaticCoordinatorCommitDelta["textureUses"][number] {
+	const domain = "outdoor-buildings";
+	const owners = [{ drawUnitId: options.drawUnitId, kind: "draw-unit" }] as const;
+	const source = createPreparedPaletteUse(
+		options.paletteId,
+		options.replacementPaletteId === undefined
+			? []
+			: [
+					{
+						count: 1,
+						offset: options.replacementOffset ?? 3,
+						palette: {
+							kind: "palette",
+							paletteId: options.replacementPaletteId,
+						},
+					},
+				],
+	);
+	const identity = createFixtureTextureIdentity({
+		domain,
+		owners,
+		source,
+		textureUseId: options.textureUseId,
+	});
 	return {
-		domain: "outdoor-buildings",
-		owners: [{ drawUnitId: options.drawUnitId, kind: "draw-unit" }],
-		source: createPreparedPaletteUse(options.paletteId, [
-			{
-				count: 1,
-				offset: 3,
-				palette: {
-					kind: "palette",
-					paletteId: options.replacementPaletteId,
-				},
-			},
-		]),
+		...identity,
+		domain,
+		owners,
+		source,
 		textureUseId: options.textureUseId,
 	};
 }
@@ -2792,7 +2789,19 @@ function createDynamicTextureUseCommit(options: {
 		usage: options.usage ?? "rgba-color",
 	};
 	const purpose = classifyTextureUsagePurpose(source, options.textureDomain);
+	const owner = {
+		kind: "dynamic-visual-resource",
+		resourceId: options.resourceId,
+	} as const;
+	const identity = createFixtureTextureIdentity({
+		domain: options.textureDomain,
+		owners: [owner],
+		samplingPolicy: options.samplingPolicy,
+		source,
+		textureUseId: options.textureUseId,
+	});
 	return {
+		...identity,
 		placementBucketKey:
 			options.textureDomain === "runtime-object-material"
 				? createRuntimeAuthoredDynamicTexturePlacementBucketKey({
@@ -2805,14 +2814,132 @@ function createDynamicTextureUseCommit(options: {
 						purpose,
 					}),
 		textureDomain: options.textureDomain,
-		owner: {
-			kind: "dynamic-visual-resource",
-			resourceId: options.resourceId,
-		},
+		owner,
 		samplingPolicy: options.samplingPolicy,
 		source,
 		textureUseId: options.textureUseId,
 	};
+}
+
+function createFixtureTextureIdentity(input: {
+	readonly domain: VisualTextureDomain;
+	readonly owners: readonly StaticBakeTextureUse["owners"][number][];
+	readonly samplingPolicy?: StaticBakeTextureSamplingPolicy;
+	readonly source: MaterialTextureDataUseIdentity;
+	readonly textureUseId: string;
+}): Pick<
+	StaticBakeTextureUse,
+	"bindingId" | "ownerIds" | "pageClass" | "textureKey"
+> {
+	const pagePolicy = createRuntimeTexturePagePolicy(
+		input.source,
+		input.samplingPolicy,
+	);
+	const purpose = classifyTextureUsagePurpose(input.source, input.domain);
+	const outputFormat = createFixtureTextureOutputFormat(input.source);
+	const sourceKey = createFixtureTextureSourceKey(input.source);
+	return {
+		bindingId: createTextureBindingId({
+			resourceId: "fixture-texture-use",
+			role: purpose,
+			slot: input.textureUseId,
+			wrapMode: input.samplingPolicy?.wrapS,
+		}),
+		ownerIds: input.owners.map(createFixtureTextureOwnerId),
+		pageClass: createTexturePageClass({
+			domain: input.domain,
+			format: outputFormat,
+			gutterPixels: getRuntimeTexturePageGutterPixels(
+				input.domain,
+				pagePolicy,
+			),
+			physicalWrapMode:
+				input.domain === "outdoor-terrain" ? pagePolicy.wrapS : undefined,
+			purpose,
+			sampleClass: pagePolicy.sampleClass,
+		}),
+		textureKey: createTextureKey({
+			outputFormat,
+			sampleClass: pagePolicy.sampleClass,
+			sourceKey,
+		}),
+	};
+}
+
+function createFixtureTextureOwnerId(
+	owner: StaticBakeTextureUse["owners"][number],
+) {
+	switch (owner.kind) {
+		case "draw-unit":
+			return createTextureOwnerId({
+				kind: "layer",
+				layerOwnerId: owner.drawUnitId,
+			});
+		case "static-object-visual-resource":
+			return createTextureOwnerId({
+				kind: "visual-resource",
+				visualResourceId: owner.resourceId,
+			});
+		case "dynamic-visual-resource":
+			return createTextureOwnerId({
+				dynamicResourceId: owner.resourceId,
+				kind: "dynamic-resource",
+			});
+	}
+}
+
+function createFixtureTextureSourceKey(
+	source: MaterialTextureDataUseIdentity,
+) {
+	if (source.kind === "prepared-palette-texture-use") {
+		return createMaterialTextureSourceKey({
+			basePaletteId: source.palette.paletteId,
+			domain: source.domain,
+			kind: "palette",
+			replacementRecipeKey: createPaletteReplacementRecipeKey(
+				source.replacements.map((replacement) =>
+					createPaletteReplacementFingerprint({
+						count: replacement.count,
+						offset: replacement.offset,
+						rgbaBytes: createFixturePaletteReplacementBytes(
+							replacement.palette.paletteId,
+							replacement.count,
+						),
+					}),
+				),
+			),
+			usage: source.usage,
+		});
+	}
+
+	return createMaterialTextureSourceKey({
+		kind: "render-surface",
+		renderSurfaceId: source.renderSurface.renderSurfaceId,
+		usage: source.usage,
+	});
+}
+
+function createFixturePaletteReplacementBytes(
+	paletteId: number,
+	count: number,
+): Uint8Array {
+	const bytes = new Uint8Array(count * 4);
+	for (let index = 0; index < count; index += 1) {
+		bytes[index * 4] = paletteId & 0xff;
+		bytes[index * 4 + 1] = (paletteId >> 8) & 0xff;
+		bytes[index * 4 + 2] = (paletteId >> 16) & 0xff;
+		bytes[index * 4 + 3] = 255;
+	}
+	return bytes;
+}
+
+function createFixtureTextureOutputFormat(
+	source: MaterialTextureDataUseIdentity,
+): "rgba8" | "index8" | "index16" {
+	if (source.kind === "prepared-palette-texture-use") {
+		return "rgba8";
+	}
+	return createStaticPlacementOutputFormat(source);
 }
 
 interface PreparedTexturePayloadOptions {

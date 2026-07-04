@@ -93,6 +93,16 @@ import {
 	type RuntimeDiagnosticsSnapshot,
 } from "./client-runtime";
 import {
+	createMaterialTextureSourceKey,
+	createTextureBindingId,
+	createTextureKey,
+	createTextureOwnerId,
+	createTexturePageClass,
+} from "../textures/identity";
+import { getRuntimeTexturePageGutterPixels } from "../textures/material-texture-identity";
+import { createRuntimeTexturePagePolicy } from "../textures/sampling-policy";
+import { classifyTextureUsagePurpose } from "../textures/placement";
+import {
 	FIRST_RUNTIME_SPAWN_FIXTURE,
 	createFirstRuntimeSpawnFixtureRequest,
 } from "./runtime-spawn-fixtures";
@@ -4705,12 +4715,14 @@ function createImmediateStaticCoordinator(options: {
 	readonly baker: DeferredStaticBaker;
 	readonly resolver: DeferredStaticResolver;
 }): StaticCoordinator {
+	const assetReader = createResolvingAssetService();
 	return new StaticCoordinator({
 		baker: options.baker,
 		sourceReadyCoalescing: { maxWaitMs: 0 },
 		dynamicVisualBaker: new StaticAuthoredTestDynamicVisualBaker(),
-		dynamicVisualGeometryAssetReader: createResolvingAssetService(),
+		dynamicVisualGeometryAssetReader: assetReader,
 		resolver: options.resolver,
+		textureIdentityAssetReader: assetReader,
 	});
 }
 
@@ -4718,13 +4730,45 @@ function createBakeTextureUse(
 	drawUnitId: string,
 	source: PreparedRgbaRenderSurfaceTextureUseIdentity,
 ): StaticBakeTextureUse {
+	const domain = "outdoor-terrain";
+	const textureUseId = `${drawUnitId}:prepared-texture:${source.renderSurface.renderSurfaceId
+		.toString(16)
+		.padStart(8, "0")}`;
+	const pagePolicy = createRuntimeTexturePagePolicy(source);
+	const purpose = classifyTextureUsagePurpose(source, domain);
 	return {
-		domain: "outdoor-terrain",
+		bindingId: createTextureBindingId({
+			resourceId: "runtime-test-bake",
+			role: purpose,
+			slot: textureUseId,
+		}),
+		domain,
+		ownerIds: [
+			createTextureOwnerId({
+				kind: "layer",
+				layerOwnerId: drawUnitId,
+			}),
+		],
 		owners: [{ drawUnitId, kind: "draw-unit" }],
+		pageClass: createTexturePageClass({
+			domain,
+			format: "rgba8",
+			gutterPixels: getRuntimeTexturePageGutterPixels(domain, pagePolicy),
+			physicalWrapMode: pagePolicy.wrapS,
+			purpose,
+			sampleClass: pagePolicy.sampleClass,
+		}),
 		source,
-		textureUseId: `${drawUnitId}:prepared-texture:${source.renderSurface.renderSurfaceId
-			.toString(16)
-			.padStart(8, "0")}`,
+		textureKey: createTextureKey({
+			outputFormat: "rgba8",
+			sampleClass: pagePolicy.sampleClass,
+			sourceKey: createMaterialTextureSourceKey({
+				kind: "render-surface",
+				renderSurfaceId: source.renderSurface.renderSurfaceId,
+				usage: source.usage,
+			}),
+		}),
+		textureUseId,
 	};
 }
 

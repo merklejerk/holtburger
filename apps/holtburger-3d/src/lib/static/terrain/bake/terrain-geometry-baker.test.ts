@@ -160,9 +160,12 @@ describe("terrain geometry baker", () => {
 			}),
 		]);
 		expect(result.textureUses).toEqual([
-			{
+			expect.objectContaining({
+				bindingId: expect.stringContaining("binding|"),
 				domain: "outdoor-terrain",
+				ownerIds: [expect.stringContaining("owner=layer|")],
 				owners: [{ drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" }],
+				pageClass: expect.stringContaining("page-class|"),
 				source: {
 					kind: "prepared-render-surface-texture-use",
 					renderSurface: {
@@ -171,9 +174,10 @@ describe("terrain geometry baker", () => {
 					},
 					usage: "rgba-color",
 				},
+				textureKey: expect.stringContaining("texture|"),
 				textureUseId:
 					"terrain:0xda55ffff:prepared-texture:terrain-base:rgba-color:06000010",
-			},
+			}),
 		]);
 		expect(result.textureDependencies).toEqual([
 			{
@@ -409,13 +413,16 @@ async function createTexturePlacementSnapshot(
 			intents.map((intent, index) => [
 				intent.itemId,
 				{
+					bindingId: intent.bindingId,
 					height: 16,
 					itemId: intent.itemId,
 					pageId: options.uniqueColorPages
 						? `${intent.purpose}:page:${index}`
 						: `${intent.purpose}:page:0`,
+					pageClass: intent.pageClass,
 					purpose: intent.purpose,
 					rect: [0, 0, 16, 16] as const,
+					textureKey: intent.textureKey,
 					width: 16,
 				},
 			]),

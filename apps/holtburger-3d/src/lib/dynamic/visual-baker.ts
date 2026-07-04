@@ -87,7 +87,7 @@ interface DynamicMaterialSlotFacts {
 
 type PendingDynamicEntityTextureRequirement = Omit<
 	DynamicEntityTextureRequirement,
-	"bindingId" | "placementItemId"
+	"bindingId" | "ownerIds" | "pageClass" | "placementItemId" | "textureKey"
 >;
 
 export class LocalDynamicVisualBaker implements DynamicVisualBaker {
@@ -279,11 +279,14 @@ export function createDynamicVisualTexturePlanning(
 		(item): DynamicEntityTextureRequirement => ({
 			...item.pendingRequirement,
 			bindingId: item.placementRequirement.requirement.bindingId,
+			ownerIds: item.placementRequirement.requirement.ownerIds,
+			pageClass: item.placementRequirement.requirement.pageClass,
 			placementItemId: requireDynamicTexturePlanningItemId({
 				bindingId: item.placementRequirement.requirement.bindingId,
 				entityId: recipe.entityId,
 				placementItemIdByBindingId,
 			}),
+			textureKey: item.placementRequirement.requirement.textureKey,
 		}),
 	);
 	return {
@@ -796,6 +799,7 @@ function createDynamicObjectVisualTextureBindings(options: {
 				return [
 					textureRecipeId,
 					{
+						bindingId: requirement.bindingId,
 						dependency: {
 							resourceId: options.resourceId,
 							roles: [
@@ -805,6 +809,8 @@ function createDynamicObjectVisualTextureBindings(options: {
 								},
 							],
 						},
+						pageClass: requirement.pageClass,
+						textureKey: requirement.textureKey,
 						textureUseId: requirement.textureUseId,
 					},
 				] as const;

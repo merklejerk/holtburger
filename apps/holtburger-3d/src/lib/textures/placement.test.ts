@@ -13,6 +13,16 @@ import {
 	createStaticAuthoredTexturePlacementBucketKey,
 	type DynamicTexturePlacementUse,
 } from "./placement";
+import {
+	createMaterialTextureSourceKey,
+	createPaletteReplacementFingerprint,
+	createPaletteReplacementRecipeKey,
+	createTextureBindingId,
+	createTextureKey,
+	createTexturePageClass,
+} from "./identity";
+import { getRuntimeTexturePageGutterPixels } from "./material-texture-identity";
+import { createRuntimeTexturePagePolicy } from "./sampling-policy";
 
 describe("texture placement vocabulary bridge", () => {
 	it.each([
@@ -273,6 +283,15 @@ function createStaticTextureUse(options: {
 		throw new Error("Static texture uses cannot use runtime-object-material.");
 	}
 	return {
+		...createPlacementTestIdentity({
+			domain: options.domain,
+			samplingPolicy: {
+				wrapS: "repeat",
+				wrapT: "clamp-to-edge",
+			},
+			source: options.source,
+			textureUseId: options.textureUseId,
+		}),
 		domain: options.domain,
 		owners: [],
 		samplingPolicy: {
@@ -290,6 +309,15 @@ function createDynamicTextureUse(options: {
 	readonly textureUseId: string;
 }): DynamicTexturePlacementUse {
 	return {
+		...createPlacementTestIdentity({
+			domain: options.textureDomain,
+			samplingPolicy: {
+				wrapS: "clamp-to-edge",
+				wrapT: "repeat",
+			},
+			source: options.source,
+			textureUseId: options.textureUseId,
+		}),
 		samplingPolicy: {
 			wrapS: "clamp-to-edge",
 			wrapT: "repeat",
@@ -298,6 +326,111 @@ function createDynamicTextureUse(options: {
 		textureDomain: options.textureDomain,
 		textureUseId: options.textureUseId,
 	};
+}
+
+function createPlacementTestIdentity(input: {
+	readonly domain: VisualTextureDomain;
+	readonly samplingPolicy: NonNullable<StaticBakeTextureUse["samplingPolicy"]>;
+	readonly source: MaterialTextureDataUseIdentity;
+	readonly textureUseId: string;
+}): Pick<
+	StaticBakeTextureUse,
+	"bindingId" | "ownerIds" | "pageClass" | "textureKey"
+> {
+	const pagePolicy = createRuntimeTexturePagePolicy(
+		input.source,
+		input.samplingPolicy,
+	);
+	const purpose = classifyTextureUsagePurpose(input.source, input.domain);
+	const outputFormat = createPlacementTestOutputFormat(input.source);
+	const sourceKey = createPlacementTestSourceKey(input.source);
+	return {
+		bindingId: createTextureBindingId({
+			resourceId: "placement-test",
+			role: purpose,
+			slot: input.textureUseId,
+			wrapMode: input.samplingPolicy.wrapS,
+		}),
+		ownerIds: [],
+		pageClass: createTexturePageClass({
+			domain: input.domain,
+			format: outputFormat,
+			gutterPixels: getRuntimeTexturePageGutterPixels(
+				input.domain,
+				pagePolicy,
+			),
+			physicalWrapMode:
+				input.domain === "outdoor-terrain" ? pagePolicy.wrapS : undefined,
+			purpose,
+			sampleClass: pagePolicy.sampleClass,
+		}),
+		textureKey: createTextureKey({
+			outputFormat,
+			sampleClass: pagePolicy.sampleClass,
+			sourceKey,
+		}),
+	};
+}
+
+function createPlacementTestSourceKey(source: MaterialTextureDataUseIdentity) {
+	if (source.kind === "prepared-palette-texture-use") {
+		return createMaterialTextureSourceKey({
+			basePaletteId: source.palette.paletteId,
+			domain: source.domain,
+			kind: "palette",
+			replacementRecipeKey: createPaletteReplacementRecipeKey(
+				source.replacements.map((replacement) =>
+					createPaletteReplacementFingerprint({
+						count: replacement.count,
+						offset: replacement.offset,
+						rgbaBytes: createPlacementTestPaletteBytes(
+							replacement.palette.paletteId,
+							replacement.count,
+						),
+					}),
+				),
+			),
+			usage: source.usage,
+		});
+	}
+	return createMaterialTextureSourceKey({
+		kind: "render-surface",
+		renderSurfaceId: source.renderSurface.renderSurfaceId,
+		usage: source.usage,
+	});
+}
+
+function createPlacementTestPaletteBytes(
+	paletteId: number,
+	count: number,
+): Uint8Array {
+	const bytes = new Uint8Array(count * 4);
+	for (let index = 0; index < count; index += 1) {
+		bytes[index * 4] = paletteId & 0xff;
+		bytes[index * 4 + 1] = (paletteId >> 8) & 0xff;
+		bytes[index * 4 + 2] = (paletteId >> 16) & 0xff;
+		bytes[index * 4 + 3] = 255;
+	}
+	return bytes;
+}
+
+function createPlacementTestOutputFormat(
+	source: MaterialTextureDataUseIdentity,
+): "rgba8" | "index8" | "index16" {
+	if (source.kind === "prepared-palette-texture-use") {
+		return "rgba8";
+	}
+	switch (source.usage) {
+		case "index8":
+			return "index8";
+		case "index16":
+			return "index16";
+		case "rgba-color":
+		case "rgba-detail":
+		case "rgba-mask":
+		case "rgba-raw":
+			return "rgba8";
+	}
 }
 
 function createPreparedDataUse(

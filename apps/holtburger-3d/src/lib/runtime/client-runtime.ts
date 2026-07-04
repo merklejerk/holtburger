@@ -171,6 +171,7 @@ import {
 	createStaticAuthoredDynamicTexturePlacementBucketKey,
 	type TexturePlacementBucketKey,
 } from "../textures/placement";
+import { createTextureOwnerId } from "../textures/identity";
 import type { PlacementTransformDto } from "../host/contracts";
 import { translateBounds } from "./scene-query/geometry";
 
@@ -337,7 +338,7 @@ interface RuntimeTextureAtlasOverviewSnapshot {
 		readonly activeBucketCount: number;
 		readonly approximateBytes: number;
 		readonly bucketCount: number;
-		readonly entryAliasCount: number;
+		readonly registryEntryCount: number;
 		readonly pageLifecycle: {
 			readonly absorbed: number;
 			readonly created: number;
@@ -2257,10 +2258,12 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#textureManager.releaseTextureResourceDependencies(removedResourceIds);
 		const textureUpdate =
 			await this.#textureManager.applyDynamicTextureUseDelta({
-				removedOwners: removedResourceIds.map((resourceId) => ({
-					kind: "dynamic-visual-resource",
-					resourceId,
-				})),
+				removedOwnerIds: removedResourceIds.map((resourceId) =>
+					createTextureOwnerId({
+						dynamicResourceId: resourceId,
+						kind: "dynamic-resource",
+					}),
+				),
 				textureUses: resources.flatMap((resource) =>
 					createDynamicTextureUseCommits(resource, snapshot.records),
 				),
@@ -4197,7 +4200,7 @@ function createRuntimeResourcesOverviewSnapshot(
 				activeBucketCount: atlasReport.summary.activeBucketCount,
 				approximateBytes: atlasReport.summary.approximateBytes,
 				bucketCount: atlasReport.summary.bucketCount,
-				entryAliasCount: atlasReport.summary.entryAliasCount,
+				registryEntryCount: atlasReport.summary.registryEntryCount,
 				pageLifecycle: atlasReport.summary.pageLifecycle,
 				texturePageCount: atlasReport.summary.texturePageCount,
 			},
@@ -4542,9 +4545,13 @@ function createDynamicRendererVisualResource(
 			materialPlan: {
 				skipped: [],
 				textureUses: visual.textureRequirements.map((requirement) => ({
+					bindingId: requirement.bindingId,
+					ownerIds: requirement.ownerIds,
+					pageClass: requirement.pageClass,
 					role: requirement.role,
 					samplingPolicy: requirement.samplingPolicy,
 					source: requirement.dataUse,
+					textureKey: requirement.textureKey,
 					textureUseId: requirement.textureUseId,
 				})),
 			},
@@ -4586,6 +4593,9 @@ function createDynamicTextureUseCommits(
 	}
 	const { textureDomain } = record.presentation.policy;
 	return resource.materialPlan.textureUses.map((textureUse) => ({
+		bindingId: textureUse.bindingId,
+		ownerIds: textureUse.ownerIds,
+		pageClass: textureUse.pageClass,
 		placementBucketKey: createDynamicTextureUsePlacementBucketKey(
 			record,
 			textureUse.source,
@@ -4597,6 +4607,7 @@ function createDynamicTextureUseCommits(
 		},
 		samplingPolicy: textureUse.samplingPolicy,
 		source: textureUse.source,
+		textureKey: textureUse.textureKey,
 		textureUseId: textureUse.textureUseId,
 	}));
 }

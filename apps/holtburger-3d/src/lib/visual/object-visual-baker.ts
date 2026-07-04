@@ -3,6 +3,11 @@ import {
 	writeTransformedPosition,
 } from "../math/ac-placement-transform";
 import type { TextureResourceDependencies } from "../textures/placement";
+import type {
+	TextureBindingId,
+	TextureKey,
+	TexturePageClass,
+} from "../textures/identity";
 import { MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW } from "../renderer/types";
 import {
 	createObjectVisualTriangleMaterialBindingKey,
@@ -46,7 +51,10 @@ export interface ObjectVisualBakeInput {
 }
 
 export interface ObjectVisualTextureBinding {
+	readonly bindingId: TextureBindingId;
 	readonly dependency: TextureResourceDependencies;
+	readonly pageClass: TexturePageClass;
+	readonly textureKey: TextureKey;
 	readonly textureUseId: string;
 }
 

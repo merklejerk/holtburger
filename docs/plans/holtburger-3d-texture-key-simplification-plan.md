@@ -220,6 +220,8 @@ Internally, identity builders should accept structured inputs and return branded
 
 ### Phase 2: Palette Range Identity Prerequisite
 
+**Status:** Complete.
+
 **Course correction:** The atomic placement/registry cutover needs resolver-predictable `TextureKey`s for palette textures. Current prepared palette payloads expose the composed palette texture pixels and old replacement triples, while `AssetService` only exposes full prepared assets. A clean cutover would otherwise be forced to keep replacement palette ids or prepared `contentHash` in identity. This phase adds the missing cheap palette-range identity boundary first.
 
 **Deliverables**
@@ -237,6 +239,13 @@ Internally, identity builders should accept structured inputs and return branded
 - No new code path introduces a fallback identity based on replacement palette asset id when bytes are unavailable.
 - Tests prove two replacement sources with the same range bytes produce one recipe key even when their source labels differ.
 - Tests prove two replacement ranges with the same source label but different bytes produce different recipe keys.
+
+**Phase notes**
+
+- Reused the existing `palette/<id>` prepared asset route instead of adding a new host route. The resolver reads the replacement palette's color table and fingerprints only the requested range; it does not request or compose `prepared-palette-texture` pixels.
+- Added a shared static replacement recipe helper that converts DAT ARGB palette colors to the same RGBA byte range format accepted by `createPaletteReplacementFingerprint(...)`.
+- The palette id remains a fetch address and diagnostic label only. It is not part of the returned fingerprint or recipe key.
+- Runtime-authored replacements can feed the Phase 1 byte-range builder directly; static replacement palette assets now converge on that same byte policy.
 
 ### Phase 3: Atomic Placement and Registry Identity Cutover
 

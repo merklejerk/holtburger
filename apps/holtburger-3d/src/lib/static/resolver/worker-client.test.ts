@@ -1,36 +1,51 @@
 import { describe, expect, it } from "vitest";
 import type {
+	HostAssetKey,
+	PreparedAsset,
+	PreparedAssetReader,
+} from "../../assets/contracts";
+import type {
 	StaticLandblockSceneLodResolution,
 	StaticLandblockSceneLodSourceRequest,
 	StaticResolverJob,
 	StaticScopePayload,
 } from "../contracts";
 import type {
+	StaticResolverWorkerMainMessage,
 	StaticResolverWorkerPort,
-	StaticResolverWorkerRequest,
 	StaticResolverWorkerResponse,
+	StaticResolverWorkerThreadMessage,
 } from "./protocol";
 import { StaticResolverWorkerClient } from "./worker-client";
-import { handleStaticResolverWorkerRequest } from "./worker-handler";
+import { installStaticResolverWorkerHandler } from "./worker-handler";
 
 describe("static resolver worker protocol", () => {
-	it("posts concrete static work requests and resolves returned payloads", async () => {
+	it("posts standard static scope requests and resolves returned payloads", async () => {
 		const port = new FixtureWorkerPort();
-		const client = new StaticResolverWorkerClient(port);
+		const client = new StaticResolverWorkerClient(
+			port,
+			new FixturePreparedAssetReader(),
+		);
 		const job = createJob();
 		const pending = client.resolve(job);
 
 		expect(port.requests).toEqual([
 			{
-				job,
-				kind: "resolve-static-scope",
+				input: {
+					job,
+					kind: "resolve-static-scope",
+				},
+				kind: "job",
 				requestId: "resolver-job:0",
 			},
 		]);
 
 		port.emit({
-			kind: "static-scope-resolved",
-			payload: createPayload(job),
+			kind: "result",
+			output: {
+				kind: "static-scope-resolved",
+				payload: createPayload(job),
+			},
 			requestId: "resolver-job:0",
 		});
 
@@ -41,52 +56,63 @@ describe("static resolver worker protocol", () => {
 		client.dispose();
 	});
 
-	it("turns resolver handler failures into typed worker responses", async () => {
+	it("turns resolver handler failures into standard worker errors", async () => {
 		const job = createJob();
-		const responses: StaticResolverWorkerResponse[] = [];
-
-		await handleStaticResolverWorkerRequest(
+		const port = new FixtureWorkerPort();
+		installStaticResolverWorkerHandler(
 			() => ({
 				async resolve(): Promise<StaticScopePayload> {
 					throw new Error("missing terrain root");
 				},
 			}),
-			{
-				job,
-				kind: "resolve-static-scope",
-				requestId: "transport:1",
-			},
-			(response) => responses.push(response),
+			port,
 		);
 
-		expect(responses).toEqual([
-			{
-				kind: "static-scope-resolve-failed",
-				message: "missing terrain root",
-				requestId: "transport:1",
+		port.emitRequest({
+			input: {
+				job,
+				kind: "resolve-static-scope",
 			},
-		]);
+			kind: "job",
+			requestId: "transport:1",
+		});
+		await port.waitForResponses(1);
+
+		expect(port.responses[0]).toMatchObject({
+			kind: "error",
+			message: "missing terrain root",
+			requestId: "transport:1",
+		});
 	});
 
 	it("posts source-first requests and resolves multi-recipe responses", async () => {
 		const port = new FixtureWorkerPort();
-		const client = new StaticResolverWorkerClient(port);
+		const client = new StaticResolverWorkerClient(
+			port,
+			new FixturePreparedAssetReader(),
+		);
 		const sourceRequest = createSourceRequest();
 		const resolution = createSourceResolution(sourceRequest);
 		const pending = client.resolveSource(sourceRequest);
 
 		expect(port.requests).toEqual([
 			{
-				kind: "resolve-landblock-scene-lod-source",
-				requestId: "resolver-source:0",
-				sourceRequest,
+				input: {
+					kind: "resolve-landblock-scene-lod-source",
+					sourceRequest,
+				},
+				kind: "job",
+				requestId: "resolver-job:0",
 			},
 		]);
 
 		port.emit({
-			kind: "landblock-scene-lod-source-resolved",
-			requestId: "resolver-source:0",
-			resolution,
+			kind: "result",
+			output: {
+				kind: "landblock-scene-lod-source-resolved",
+				resolution,
+			},
+			requestId: "resolver-job:0",
 		});
 
 		await expect(pending).resolves.toBe(resolution);
@@ -96,9 +122,8 @@ describe("static resolver worker protocol", () => {
 	it("handles source-first worker requests with source-capable resolvers", async () => {
 		const sourceRequest = createSourceRequest();
 		const resolution = createSourceResolution(sourceRequest);
-		const responses: StaticResolverWorkerResponse[] = [];
-
-		await handleStaticResolverWorkerRequest(
+		const port = new FixtureWorkerPort();
+		installStaticResolverWorkerHandler(
 			() => ({
 				async resolve(): Promise<StaticScopePayload> {
 					throw new Error("static-scope path should not run");
@@ -107,97 +132,172 @@ describe("static resolver worker protocol", () => {
 					return resolution;
 				},
 			}),
-			{
-				kind: "resolve-landblock-scene-lod-source",
-				requestId: "transport:source",
-				sourceRequest,
-			},
-			(response) => responses.push(response),
+			port,
 		);
 
-		expect(responses).toEqual([
+		port.emitRequest({
+			input: {
+				kind: "resolve-landblock-scene-lod-source",
+				sourceRequest,
+			},
+			kind: "job",
+			requestId: "transport:source",
+		});
+		await port.waitForResponses(1);
+
+		expect(port.responses).toEqual([
 			{
-				kind: "landblock-scene-lod-source-resolved",
+				kind: "result",
+				output: {
+					kind: "landblock-scene-lod-source-resolved",
+					resolution,
+				},
 				requestId: "transport:source",
-				resolution,
 			},
 		]);
 	});
 
 	it("constructs a fresh resolver for each static scope request", async () => {
 		const job = createJob();
-		const responses: StaticResolverWorkerResponse[] = [];
+		const port = new FixtureWorkerPort();
 		let resolverCount = 0;
+		installStaticResolverWorkerHandler(() => {
+			resolverCount += 1;
+			return {
+				async resolve(): Promise<StaticScopePayload> {
+					return createPayload(job);
+				},
+			};
+		}, port);
 
-		await handleStaticResolverWorkerRequest(
-			() => {
-				resolverCount += 1;
-				return {
-					async resolve(): Promise<StaticScopePayload> {
-						return createPayload(job);
-					},
-				};
-			},
-			{
+		port.emitRequest({
+			input: {
 				job,
 				kind: "resolve-static-scope",
-				requestId: "transport:1",
 			},
-			(response) => responses.push(response),
-		);
-		await handleStaticResolverWorkerRequest(
-			() => {
-				resolverCount += 1;
-				return {
-					async resolve(): Promise<StaticScopePayload> {
-						return createPayload(job);
-					},
-				};
-			},
-			{
+			kind: "job",
+			requestId: "transport:1",
+		});
+		await port.waitForResponses(1);
+		port.emitRequest({
+			input: {
 				job,
 				kind: "resolve-static-scope",
-				requestId: "transport:2",
 			},
-			(response) => responses.push(response),
-		);
+			kind: "job",
+			requestId: "transport:2",
+		});
+		await port.waitForResponses(2);
 
 		expect(resolverCount).toBe(2);
-		expect(responses).toHaveLength(2);
+		expect(port.responses).toHaveLength(2);
 	});
 });
 
 class FixtureWorkerPort implements StaticResolverWorkerPort {
-	readonly requests: StaticResolverWorkerRequest[] = [];
-	readonly #listeners = new Set<
+	readonly requests: StaticResolverWorkerMainMessage[] = [];
+	readonly responses: StaticResolverWorkerThreadMessage[] = [];
+	readonly #requestListeners = new Set<
+		(event: MessageEvent<StaticResolverWorkerMainMessage>) => void
+	>();
+	readonly #responseListeners = new Set<
 		(event: MessageEvent<StaticResolverWorkerResponse>) => void
 	>();
+	#waiters: Array<() => void> = [];
 
-	postMessage(message: StaticResolverWorkerRequest): void {
-		this.requests.push(message);
+	postMessage(
+		message:
+			| StaticResolverWorkerMainMessage
+			| StaticResolverWorkerThreadMessage,
+	): void {
+		if (
+			message.kind === "job" ||
+			message.kind === "cancel" ||
+			message.kind === "service-response" ||
+			message.kind === "service-error"
+		) {
+			this.requests.push(message);
+			return;
+		}
+		this.responses.push(message);
+		this.#flushWaiters();
 	}
 
 	addEventListener(
 		_type: "message",
-		listener: (event: MessageEvent<StaticResolverWorkerResponse>) => void,
+		listener:
+			| ((event: MessageEvent<StaticResolverWorkerResponse>) => void)
+			| ((event: MessageEvent<StaticResolverWorkerMainMessage>) => void),
 	): void {
-		this.#listeners.add(listener);
+		this.#responseListeners.add(
+			listener as (event: MessageEvent<StaticResolverWorkerResponse>) => void,
+		);
+		this.#requestListeners.add(
+			listener as (
+				event: MessageEvent<StaticResolverWorkerMainMessage>,
+			) => void,
+		);
 	}
 
 	removeEventListener(
 		_type: "message",
-		listener: (event: MessageEvent<StaticResolverWorkerResponse>) => void,
+		listener:
+			| ((event: MessageEvent<StaticResolverWorkerResponse>) => void)
+			| ((event: MessageEvent<StaticResolverWorkerMainMessage>) => void),
 	): void {
-		this.#listeners.delete(listener);
+		this.#responseListeners.delete(
+			listener as (event: MessageEvent<StaticResolverWorkerResponse>) => void,
+		);
+		this.#requestListeners.delete(
+			listener as (
+				event: MessageEvent<StaticResolverWorkerMainMessage>,
+			) => void,
+		);
 	}
 
 	emit(response: StaticResolverWorkerResponse): void {
 		const event = {
 			data: response,
 		} as MessageEvent<StaticResolverWorkerResponse>;
-		for (const listener of this.#listeners) {
+		for (const listener of this.#responseListeners) {
 			listener(event);
 		}
+	}
+
+	emitRequest(request: StaticResolverWorkerMainMessage): void {
+		const event = {
+			data: request,
+		} as MessageEvent<StaticResolverWorkerMainMessage>;
+		for (const listener of this.#requestListeners) {
+			listener(event);
+		}
+	}
+
+	waitForResponses(count: number): Promise<void> {
+		if (this.responses.length >= count) {
+			return Promise.resolve();
+		}
+		return new Promise((resolve) => {
+			this.#waiters.push(() => {
+				if (this.responses.length >= count) {
+					resolve();
+				}
+			});
+		});
+	}
+
+	#flushWaiters(): void {
+		const waiters = this.#waiters;
+		this.#waiters = [];
+		for (const waiter of waiters) {
+			waiter();
+		}
+	}
+}
+
+class FixturePreparedAssetReader implements PreparedAssetReader {
+	requestPreparedAsset(key: HostAssetKey): Promise<PreparedAsset> {
+		return Promise.reject(new Error(`Unexpected asset request ${key.id}.`));
 	}
 }
 

@@ -12,15 +12,9 @@ import type {
 import { OutdoorStaticObjectsResolver } from "../objects/outdoor-static-objects-resolver";
 import { TerrainStaticScopeResolver } from "../terrain/terrain-resolver";
 import { LandblockSceneLodSourceResolver } from "./landblock-scene-lod-source-resolver";
-import { handleStaticResolverWorkerRequest } from "./worker-handler";
-import type {
-	StaticResolverWorkerGlobalPort,
-	StaticResolverWorkerMainMessage,
-} from "./protocol";
-import {
-	RequestScopedPreparedAssetReader,
-	StaticResolverWorkerPreparedAssetReader,
-} from "./worker-asset-reader";
+import { installStaticResolverWorkerHandler } from "./worker-handler";
+import type { StaticResolverWorkerGlobalPort } from "./protocol";
+import { createRequestScopedPreparedAssetReader } from "../../workers/prepared-asset-service";
 
 const workerPort = self as unknown as StaticResolverWorkerGlobalPort;
 
@@ -65,10 +59,6 @@ class StaticResolverRouter
 	}
 }
 
-const workerAssetReader = new StaticResolverWorkerPreparedAssetReader(
-	workerPort,
-);
-
 function createStaticResolver(
 	assetReader: PreparedAssetReader,
 ): StaticResolver {
@@ -85,16 +75,8 @@ function createStaticResolver(
 	});
 }
 
-workerPort.addEventListener(
-	"message",
-	(event: MessageEvent<StaticResolverWorkerMainMessage>) => {
-		void handleStaticResolverWorkerRequest(
-			() =>
-				createStaticResolver(
-					new RequestScopedPreparedAssetReader(workerAssetReader),
-				),
-			event.data,
-			(response) => workerPort.postMessage(response),
-		);
-	},
+installStaticResolverWorkerHandler(
+	(context) =>
+		createStaticResolver(createRequestScopedPreparedAssetReader(context)),
+	workerPort,
 );

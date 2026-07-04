@@ -51,7 +51,7 @@ describe("prepared asset worker service", () => {
 		expect(context.requests).toEqual([{ key, kind: "prepared-asset" }]);
 	});
 
-	it("clears request-scoped entries after resolution", async () => {
+	it("retains request-scoped entries after resolution", async () => {
 		const key: HostAssetKey = { id: "02000001", kind: "gfx-obj" };
 		const asset = createPreparedAsset(key);
 		const context = new FixtureWorkerExecuteContext(asset);
@@ -60,10 +60,7 @@ describe("prepared asset worker service", () => {
 		await reader.requestPreparedAsset(key);
 		await reader.requestPreparedAsset(key);
 
-		expect(context.requests).toEqual([
-			{ key, kind: "prepared-asset" },
-			{ key, kind: "prepared-asset" },
-		]);
+		expect(context.requests).toEqual([{ key, kind: "prepared-asset" }]);
 	});
 });
 

@@ -2,54 +2,63 @@ import type {
 	StaticLandblockSceneLodSourceResolver,
 	StaticResolver,
 } from "../contracts";
+import {
+	installWorkerHandler,
+	type InstalledWorkerHandler,
+	type WorkerExecuteContext,
+} from "../../workers/handler";
 import type {
-	StaticResolverWorkerMainMessage,
-	StaticResolverWorkerResponse,
+	PreparedAssetServiceRequest,
+	PreparedAssetServiceResponse,
+} from "../../workers/prepared-asset-service";
+import type { StaticResolverWorkerGlobalPort } from "./protocol";
+import type {
+	StaticResolverWorkerInput,
+	StaticResolverWorkerOutput,
 } from "./protocol";
 
-export type StaticResolverFactory = () => StaticResolver &
-	Partial<StaticLandblockSceneLodSourceResolver>;
+export type StaticResolverFactory = (
+	context: WorkerExecuteContext<
+		never,
+		PreparedAssetServiceRequest,
+		PreparedAssetServiceResponse
+	>,
+) => StaticResolver & Partial<StaticLandblockSceneLodSourceResolver>;
 
-export async function handleStaticResolverWorkerRequest(
+export function installStaticResolverWorkerHandler(
 	createResolver: StaticResolverFactory,
-	message: StaticResolverWorkerMainMessage,
-	postMessage: (response: StaticResolverWorkerResponse) => void,
-): Promise<void> {
-	if (
-		message.kind !== "resolve-static-scope" &&
-		message.kind !== "resolve-landblock-scene-lod-source"
-	) {
-		return;
-	}
-
-	try {
-		const resolver = createResolver();
-		if (message.kind === "resolve-landblock-scene-lod-source") {
-			if (!resolver.resolveSource) {
-				throw new Error(
-					"Static resolver worker does not support source fanout.",
-				);
+	port: StaticResolverWorkerGlobalPort,
+): InstalledWorkerHandler {
+	return installWorkerHandler<
+		StaticResolverWorkerInput,
+		StaticResolverWorkerOutput,
+		never,
+		PreparedAssetServiceRequest,
+		PreparedAssetServiceResponse
+	>({
+		execute: async (input, context) => {
+			const resolver = createResolver(context);
+			if (input.kind === "resolve-landblock-scene-lod-source") {
+				if (!resolver.resolveSource) {
+					throw new Error(
+						"Static resolver worker does not support source fanout.",
+					);
+				}
+				return {
+					output: {
+						kind: "landblock-scene-lod-source-resolved",
+						resolution: await resolver.resolveSource(input.sourceRequest),
+					},
+				};
 			}
-			const resolution = await resolver.resolveSource(message.sourceRequest);
-			postMessage({
-				kind: "landblock-scene-lod-source-resolved",
-				requestId: message.requestId,
-				resolution,
-			});
-			return;
-		}
 
-		const payload = await resolver.resolve(message.job);
-		postMessage({
-			kind: "static-scope-resolved",
-			payload,
-			requestId: message.requestId,
-		});
-	} catch (error: unknown) {
-		postMessage({
-			kind: "static-scope-resolve-failed",
-			message: error instanceof Error ? error.message : String(error),
-			requestId: message.requestId,
-		});
-	}
+			return {
+				output: {
+					kind: "static-scope-resolved",
+					payload: await resolver.resolve(input.job),
+				},
+			};
+		},
+		port,
+	});
 }

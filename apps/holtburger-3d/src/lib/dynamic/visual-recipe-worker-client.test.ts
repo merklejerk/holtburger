@@ -11,45 +11,40 @@ import type {
 } from "./contracts";
 import { createDynamicVisualResourceId } from "./contracts";
 import type {
-	DynamicVisualRecipeWorkerGlobalPort,
 	DynamicVisualRecipeWorkerMainMessage,
 	DynamicVisualRecipeWorkerPort,
+	DynamicVisualRecipeWorkerRequestPayload,
 	DynamicVisualRecipeWorkerThreadMessage,
 } from "./visual-recipe-protocol";
 import type { DynamicVisualRecipeResolutionRequest } from "./visual-recipe-resolver";
 import {
-	createDynamicVisualRecipeMainAssetBridge,
 	DynamicVisualRecipeWorkerClient,
+	WorkerPoolDynamicVisualRecipeResolver,
 } from "./visual-recipe-worker-client";
-import { handleDynamicVisualRecipeWorkerRequest } from "./visual-recipe-worker-handler";
+import { installDynamicVisualRecipeWorkerHandler } from "./visual-recipe-worker-handler";
 
 describe("dynamic visual recipe worker protocol", () => {
-	it("posts runtime-authored recipe requests without main-thread asset readers", async () => {
+	it("posts standard runtime-authored recipe requests without main-thread asset readers", async () => {
 		const port = new FixtureWorkerPort();
-		const client = new DynamicVisualRecipeWorkerClient(port);
+		const assetReader = new FixturePreparedAssetReader(
+			new Error("test should not use main-thread reader"),
+		);
+		const client = new DynamicVisualRecipeWorkerClient(port, assetReader);
 		const request = createResolutionRequest();
 		const recipe = createRecipe(request);
 		const pending = client.resolveRecipe(request);
 
 		expect(port.requests).toEqual([
 			{
-				kind: "resolve-dynamic-visual-recipe",
-				request: {
-					animationSelection: request.animationSelection,
-					baseTransform: request.baseTransform,
-					entityId: request.entityId,
-					materialPolicy: request.materialPolicy,
-					modelData: request.modelData,
-					setupModelId: request.setupModelId,
-					source: request.source,
-				},
+				input: createWorkerRequest(request),
+				kind: "job",
 				requestId: "dynamic-visual-recipe:0",
 			},
 		]);
 
 		port.emit({
-			kind: "dynamic-visual-recipe-resolved",
-			recipe,
+			kind: "result",
+			output: recipe,
 			requestId: "dynamic-visual-recipe:0",
 		});
 
@@ -57,171 +52,182 @@ describe("dynamic visual recipe worker protocol", () => {
 		client.dispose();
 	});
 
-	it("turns resolver handler failures into typed worker responses", async () => {
-		const responses: DynamicVisualRecipeWorkerThreadMessage[] = [];
-		const request = createResolutionRequest();
-
-		await handleDynamicVisualRecipeWorkerRequest(
-			new FixturePreparedAssetReader(new Error("setup asset missing")),
-			{
-				kind: "resolve-dynamic-visual-recipe",
-				request: createWorkerRequest(request),
-				requestId: "dynamic-recipe:failure",
-			},
-			(response) => responses.push(response),
-		);
-
-		expect(responses).toEqual([
-			{
-				kind: "dynamic-visual-recipe-resolve-failed",
-				message: "setup asset missing",
-				requestId: "dynamic-recipe:failure",
-			},
-		]);
-	});
-
-	it("round-trips prepared asset requests through the dynamic resolver bridge with resolver-light views", async () => {
-		const channel = new FixtureWorkerChannel();
+	it("routes prepared asset service requests through the pool service handler", async () => {
+		const port = new FixtureWorkerPort();
 		const key = createHostAssetKey("render-surface", 0x06000010);
 		const asset = createPreparedAsset(key, {
-			defaultPaletteId: 0x04000010,
-			dependencies: { paletteAssetIds: ["palette/04000010"] },
-			format: "p8",
-			formatRaw: 0x29,
-			height: 4,
 			kind: "render-surface",
-			provenance: {
-				detail: null,
-				errorCode: null,
-				source: "repo-local-hba",
-				sourceAssetKind: "render-surface",
-			},
-			renderSurfaceId: 0x06000010,
-			residencyKind: "unknown",
-			sourceAssetKind: "render-surface",
-			sourceByteLength: 16,
 			sourceBytes: new Uint8Array([1, 2, 3, 4]),
-			unknown: 0,
-			width: 4,
 		});
-		const reader = new FixturePreparedAssetReader(asset);
-		const bridge = createDynamicVisualRecipeMainAssetBridge(
-			channel.mainPort,
-			reader,
-		);
+		const assetReader = new FixturePreparedAssetReader(asset);
+		const resolver = new WorkerPoolDynamicVisualRecipeResolver({
+			assetReader,
+			createWorker: () => port,
+			workerCount: 1,
+		});
 
-		channel.workerPort.postMessage({
-			key,
-			kind: "prepared-asset-requested",
-			requestId: "dynamic-asset:1",
+		void resolver.resolveRecipe(createResolutionRequest());
+		port.emit({
+			kind: "service-request",
+			request: { key, kind: "prepared-asset" },
+			requestId: "dynamic-visual-recipe:0",
+			serviceRequestId: "dynamic-service:1",
 		});
 		await Promise.resolve();
+		await Promise.resolve();
 
-		expect(reader.requests).toEqual([key]);
-		expect(channel.mainMessages).toEqual([
-			{
-				asset: expect.objectContaining({
+		expect(assetReader.requests).toEqual([key]);
+		expect(port.requests.at(-1)).toMatchObject({
+			kind: "service-response",
+			response: {
+				asset: {
 					key,
 					payload: expect.not.objectContaining({
 						sourceBytes: expect.any(Uint8Array),
-					}),
-				}),
-				kind: "prepared-asset-request-resolved",
-				requestId: "dynamic-asset:1",
+					}) as PreparedAsset["payload"],
+				},
 			},
-		]);
+			serviceRequestId: "dynamic-service:1",
+		});
 		expect(asset.payload).toHaveProperty("sourceBytes");
-		bridge.dispose();
+	});
+
+	it("turns resolver handler service failures into standard worker errors", async () => {
+		const port = new FixtureWorkerPort();
+		installDynamicVisualRecipeWorkerHandler(port);
+		const request = createResolutionRequest();
+
+		port.emitRequest({
+			input: createWorkerRequest(request),
+			kind: "job",
+			requestId: "dynamic-recipe:failure",
+		});
+		await port.waitForResponses(1);
+		expect(port.responses[0]).toMatchObject({
+			kind: "service-request",
+			requestId: "dynamic-recipe:failure",
+		});
+
+		const serviceRequest = port.responses[0];
+		if (serviceRequest?.kind !== "service-request") {
+			throw new Error("Expected service request.");
+		}
+		port.emitRequest({
+			kind: "service-error",
+			message: "setup asset missing",
+			serviceRequestId: serviceRequest.serviceRequestId,
+		});
+		await port.waitForResponses(2);
+
+		expect(port.responses[1]).toMatchObject({
+			kind: "error",
+			message: "setup asset missing",
+			requestId: "dynamic-recipe:failure",
+		});
 	});
 });
 
 class FixtureWorkerPort implements DynamicVisualRecipeWorkerPort {
 	readonly requests: DynamicVisualRecipeWorkerMainMessage[] = [];
-	readonly #listeners = new Set<
+	readonly responses: DynamicVisualRecipeWorkerThreadMessage[] = [];
+	readonly #requestListeners = new Set<
+		(event: MessageEvent<DynamicVisualRecipeWorkerMainMessage>) => void
+	>();
+	readonly #responseListeners = new Set<
 		(event: MessageEvent<DynamicVisualRecipeWorkerThreadMessage>) => void
 	>();
+	#waiters: Array<() => void> = [];
 
-	postMessage(message: DynamicVisualRecipeWorkerMainMessage): void {
-		this.requests.push(message);
+	postMessage(
+		message:
+			| DynamicVisualRecipeWorkerMainMessage
+			| DynamicVisualRecipeWorkerThreadMessage,
+	): void {
+		if (
+			message.kind === "job" ||
+			message.kind === "cancel" ||
+			message.kind === "service-response" ||
+			message.kind === "service-error"
+		) {
+			this.requests.push(message);
+			return;
+		}
+		this.responses.push(message);
+		this.#flushWaiters();
 	}
 
 	addEventListener(
 		_type: "message",
-		listener: (
-			event: MessageEvent<DynamicVisualRecipeWorkerThreadMessage>,
-		) => void,
+		listener:
+			| ((event: MessageEvent<DynamicVisualRecipeWorkerThreadMessage>) => void)
+			| ((event: MessageEvent<DynamicVisualRecipeWorkerMainMessage>) => void),
 	): void {
-		this.#listeners.add(listener);
+		this.#responseListeners.add(
+			listener as (
+				event: MessageEvent<DynamicVisualRecipeWorkerThreadMessage>,
+			) => void,
+		);
+		this.#requestListeners.add(
+			listener as (
+				event: MessageEvent<DynamicVisualRecipeWorkerMainMessage>,
+			) => void,
+		);
 	}
 
 	removeEventListener(
 		_type: "message",
-		listener: (
-			event: MessageEvent<DynamicVisualRecipeWorkerThreadMessage>,
-		) => void,
+		listener:
+			| ((event: MessageEvent<DynamicVisualRecipeWorkerThreadMessage>) => void)
+			| ((event: MessageEvent<DynamicVisualRecipeWorkerMainMessage>) => void),
 	): void {
-		this.#listeners.delete(listener);
+		this.#responseListeners.delete(
+			listener as (
+				event: MessageEvent<DynamicVisualRecipeWorkerThreadMessage>,
+			) => void,
+		);
+		this.#requestListeners.delete(
+			listener as (
+				event: MessageEvent<DynamicVisualRecipeWorkerMainMessage>,
+			) => void,
+		);
 	}
 
-	emit(response: DynamicVisualRecipeWorkerThreadMessage): void {
-		const event = {
-			data: response,
-		} as MessageEvent<DynamicVisualRecipeWorkerThreadMessage>;
-		for (const listener of this.#listeners) {
-			listener(event);
-		}
-	}
-}
-
-class FixtureWorkerChannel {
-	readonly mainMessages: DynamicVisualRecipeWorkerMainMessage[] = [];
-	readonly #mainListeners = new Set<
-		(event: MessageEvent<DynamicVisualRecipeWorkerThreadMessage>) => void
-	>();
-	readonly #workerListeners = new Set<
-		(event: MessageEvent<DynamicVisualRecipeWorkerMainMessage>) => void
-	>();
-
-	readonly mainPort: DynamicVisualRecipeWorkerPort = {
-		addEventListener: (_type, listener) => {
-			this.#mainListeners.add(listener);
-		},
-		postMessage: (message) => {
-			this.mainMessages.push(message);
-			this.#emitWorkerMessage(message);
-		},
-		removeEventListener: (_type, listener) => {
-			this.#mainListeners.delete(listener);
-		},
-	};
-
-	readonly workerPort: DynamicVisualRecipeWorkerGlobalPort = {
-		addEventListener: (_type, listener) => {
-			this.#workerListeners.add(listener);
-		},
-		postMessage: (message) => {
-			this.#emitThreadMessage(message);
-		},
-		removeEventListener: (_type, listener) => {
-			this.#workerListeners.delete(listener);
-		},
-	};
-
-	#emitThreadMessage(message: DynamicVisualRecipeWorkerThreadMessage): void {
+	emit(message: DynamicVisualRecipeWorkerThreadMessage): void {
 		const event = {
 			data: message,
 		} as MessageEvent<DynamicVisualRecipeWorkerThreadMessage>;
-		for (const listener of this.#mainListeners) {
+		for (const listener of this.#responseListeners) {
 			listener(event);
 		}
 	}
 
-	#emitWorkerMessage(message: DynamicVisualRecipeWorkerMainMessage): void {
+	emitRequest(message: DynamicVisualRecipeWorkerMainMessage): void {
 		const event = {
 			data: message,
 		} as MessageEvent<DynamicVisualRecipeWorkerMainMessage>;
-		for (const listener of this.#workerListeners) {
+		for (const listener of this.#requestListeners) {
 			listener(event);
+		}
+	}
+
+	waitForResponses(count: number): Promise<void> {
+		if (this.responses.length >= count) {
+			return Promise.resolve();
+		}
+		return new Promise((resolve) => {
+			this.#waiters.push(() => {
+				if (this.responses.length >= count) {
+					resolve();
+				}
+			});
+		});
+	}
+
+	#flushWaiters(): void {
+		const waiters = this.#waiters;
+		this.#waiters = [];
+		for (const waiter of waiters) {
+			waiter();
 		}
 	}
 }
@@ -269,7 +275,7 @@ function createResolutionRequest(): DynamicVisualRecipeResolutionRequest {
 
 function createWorkerRequest(
 	request: DynamicVisualRecipeResolutionRequest,
-): Omit<DynamicVisualRecipeResolutionRequest, "assetReader"> {
+): DynamicVisualRecipeWorkerRequestPayload {
 	return {
 		animationSelection: request.animationSelection,
 		baseTransform: request.baseTransform,
@@ -339,16 +345,10 @@ function createPreparedAsset(
 
 function createPlacement() {
 	return {
-		orientation: {
-			w: 1,
-			x: 0,
-			y: 0,
-			z: 0,
+		frame: {
+			origin: { x: 0, y: 0, z: 0 },
+			angles: { w: 1, x: 0, y: 0, z: 0 },
 		},
-		origin: {
-			x: 0,
-			y: 0,
-			z: 0,
-		},
+		position: { x: 0, y: 0, z: 0 },
 	};
 }

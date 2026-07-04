@@ -1,3 +1,4 @@
+import type { PreparedAssetReader } from "../../assets/contracts";
 import type {
 	StaticLandblockSceneLodResolution,
 	StaticLandblockSceneLodSourceRequest,
@@ -7,222 +8,133 @@ import type {
 	StaticScopePayload,
 } from "../contracts";
 import type {
+	StaticResolverWorkerInput,
+	StaticResolverWorkerOutput,
 	StaticResolverWorkerPort,
-	StaticResolverWorkerThreadMessage,
 } from "./protocol";
-
-interface PendingResolverRequest {
-	readonly resolve: (payload: unknown) => void;
-	readonly reject: (error: Error) => void;
-}
-
-interface StaticResolverWorkerClientOptions {
-	readonly disposePort?: () => void;
-}
+import {
+	createPreparedAssetServiceHandler,
+	type PreparedAssetServiceRequest,
+	type PreparedAssetServiceResponse,
+} from "../../workers/prepared-asset-service";
+import { StandardWorkerPool } from "../../workers/pool";
 
 export class StaticResolverWorkerClient
 	implements StaticResolver, StaticLandblockSceneLodSourceResolver
 {
-	readonly #port: StaticResolverWorkerPort;
-	readonly #disposePort: (() => void) | null;
-	readonly #pending = new Map<string, PendingResolverRequest>();
-	#nextRequestIndex = 0;
-	#disposed = false;
-	readonly #onMessage = (
-		event: MessageEvent<StaticResolverWorkerThreadMessage>,
-	): void => {
-		this.#handleResponse(event.data);
-	};
+	readonly #pool: StandardStaticResolverPool;
 
 	constructor(
 		port: StaticResolverWorkerPort,
-		options: StaticResolverWorkerClientOptions = {},
+		assetReader: PreparedAssetReader,
 	) {
-		this.#port = port;
-		this.#disposePort = options.disposePort ?? null;
-		this.#port.addEventListener("message", this.#onMessage);
-	}
-
-	resolve(job: StaticResolverJob): Promise<StaticScopePayload> {
-		if (this.#disposed) {
-			return Promise.reject(
-				new Error("Static resolver worker client was disposed."),
-			);
-		}
-
-		const requestId = `resolver-job:${this.#nextRequestIndex}`;
-		this.#nextRequestIndex += 1;
-
-		return new Promise((resolve, reject) => {
-			this.#pending.set(requestId, {
-				reject,
-				resolve: (payload) => resolve(payload as StaticScopePayload),
-			});
-			this.#port.postMessage({
-				job,
-				kind: "resolve-static-scope",
-				requestId,
-			});
+		this.#pool = new StandardStaticResolverPool({
+			assetReader,
+			createWorker: () => port,
+			workerCount: 1,
 		});
 	}
 
-	resolveSource(
+	async resolve(job: StaticResolverJob): Promise<StaticScopePayload> {
+		const output = await this.#pool.submit({
+			job,
+			kind: "resolve-static-scope",
+		});
+		if (output.kind !== "static-scope-resolved") {
+			throw new Error("Static resolver worker returned a source resolution.");
+		}
+		return output.payload;
+	}
+
+	async resolveSource(
 		sourceRequest: StaticLandblockSceneLodSourceRequest,
 	): Promise<StaticLandblockSceneLodResolution> {
-		if (this.#disposed) {
-			return Promise.reject(
-				new Error("Static resolver worker client was disposed."),
-			);
-		}
-
-		const requestId = `resolver-source:${this.#nextRequestIndex}`;
-		this.#nextRequestIndex += 1;
-
-		return new Promise((resolve, reject) => {
-			this.#pending.set(requestId, {
-				reject,
-				resolve: (payload) =>
-					resolve(payload as StaticLandblockSceneLodResolution),
-			});
-			this.#port.postMessage({
-				kind: "resolve-landblock-scene-lod-source",
-				requestId,
-				sourceRequest,
-			});
+		const output = await this.#pool.submit({
+			kind: "resolve-landblock-scene-lod-source",
+			sourceRequest,
 		});
+		if (output.kind !== "landblock-scene-lod-source-resolved") {
+			throw new Error("Static resolver worker returned a scope payload.");
+		}
+		return output.resolution;
 	}
 
 	dispose(): void {
-		if (this.#disposed) {
-			return;
-		}
-
-		this.#disposed = true;
-		this.#port.removeEventListener("message", this.#onMessage);
-		for (const pending of this.#pending.values()) {
-			pending.reject(new Error("Static resolver worker client was disposed."));
-		}
-		this.#pending.clear();
-		this.#disposePort?.();
-	}
-
-	#handleResponse(response: StaticResolverWorkerThreadMessage): void {
-		if (
-			response.kind !== "static-scope-resolved" &&
-			response.kind !== "landblock-scene-lod-source-resolved" &&
-			response.kind !== "static-scope-resolve-failed"
-		) {
-			return;
-		}
-
-		const pending = this.#pending.get(response.requestId);
-		if (!pending) {
-			return;
-		}
-
-		this.#pending.delete(response.requestId);
-		if (response.kind === "static-scope-resolve-failed") {
-			pending.reject(new Error(response.message));
-			return;
-		}
-
-		pending.resolve(
-			response.kind === "static-scope-resolved"
-				? response.payload
-				: response.resolution,
-		);
+		this.#pool.dispose();
 	}
 }
 
 export class WorkerPoolStaticResolver
 	implements StaticResolver, StaticLandblockSceneLodSourceResolver
 {
-	readonly #resolvers: readonly (StaticResolver &
-		Partial<StaticLandblockSceneLodSourceResolver>)[];
-	#nextResolverIndex = 0;
-	#disposed = false;
+	readonly #pool: StandardStaticResolverPool;
 
-	constructor(
-		resolvers: readonly (StaticResolver &
-			Partial<StaticLandblockSceneLodSourceResolver>)[],
-	) {
-		if (resolvers.length === 0) {
-			throw new Error(
-				"WorkerPoolStaticResolver requires at least one resolver.",
-			);
-		}
-
-		this.#resolvers = resolvers;
+	constructor(options: {
+		readonly assetReader: PreparedAssetReader;
+		readonly createWorker: () => StaticResolverWorkerPort;
+		readonly workerCount: number;
+	}) {
+		this.#pool = new StandardStaticResolverPool(options);
 	}
 
-	resolve(job: StaticResolverJob): Promise<StaticScopePayload> {
-		if (this.#disposed) {
-			return Promise.reject(
-				new Error("WorkerPoolStaticResolver has been disposed."),
-			);
+	async resolve(job: StaticResolverJob): Promise<StaticScopePayload> {
+		const output = await this.#pool.submit({
+			job,
+			kind: "resolve-static-scope",
+		});
+		if (output.kind !== "static-scope-resolved") {
+			throw new Error("Static resolver worker returned a source resolution.");
 		}
-
-		const resolver = this.#resolvers[this.#nextResolverIndex];
-		if (!resolver) {
-			return Promise.reject(
-				new Error("WorkerPoolStaticResolver has no active resolver."),
-			);
-		}
-
-		this.#nextResolverIndex =
-			(this.#nextResolverIndex + 1) % this.#resolvers.length;
-
-		return resolver.resolve(job);
+		return output.payload;
 	}
 
-	resolveSource(
+	async resolveSource(
 		request: StaticLandblockSceneLodSourceRequest,
 	): Promise<StaticLandblockSceneLodResolution> {
-		if (this.#disposed) {
-			return Promise.reject(
-				new Error("WorkerPoolStaticResolver has been disposed."),
-			);
+		const output = await this.#pool.submit({
+			kind: "resolve-landblock-scene-lod-source",
+			sourceRequest: request,
+		});
+		if (output.kind !== "landblock-scene-lod-source-resolved") {
+			throw new Error("Static resolver worker returned a scope payload.");
 		}
-
-		const resolver = this.#resolvers[this.#nextResolverIndex];
-		if (!resolver) {
-			return Promise.reject(
-				new Error("WorkerPoolStaticResolver has no active resolver."),
-			);
-		}
-		if (!resolver.resolveSource) {
-			return Promise.reject(
-				new Error(
-					"WorkerPoolStaticResolver source resolution requires source-capable workers.",
-				),
-			);
-		}
-
-		this.#nextResolverIndex =
-			(this.#nextResolverIndex + 1) % this.#resolvers.length;
-
-		return resolver.resolveSource(request);
+		return output.resolution;
 	}
 
 	dispose(): void {
-		if (this.#disposed) {
-			return;
-		}
-
-		this.#disposed = true;
-		for (const resolver of this.#resolvers) {
-			disposeIfAvailable(resolver);
-		}
+		this.#pool.dispose();
 	}
 }
 
-function disposeIfAvailable(value: unknown): void {
-	if (
-		typeof value === "object" &&
-		value !== null &&
-		"dispose" in value &&
-		typeof value.dispose === "function"
-	) {
-		value.dispose();
+class StandardStaticResolverPool {
+	readonly #pool: StandardWorkerPool<
+		StaticResolverWorkerInput,
+		StaticResolverWorkerOutput,
+		never,
+		PreparedAssetServiceRequest,
+		PreparedAssetServiceResponse
+	>;
+
+	constructor(options: {
+		readonly assetReader: PreparedAssetReader;
+		readonly createWorker: () => StaticResolverWorkerPort;
+		readonly workerCount: number;
+	}) {
+		this.#pool = new StandardWorkerPool({
+			createWorker: options.createWorker,
+			requestIdPrefix: "resolver-job",
+			serviceHandler: createPreparedAssetServiceHandler(options.assetReader),
+			size: options.workerCount,
+		});
+	}
+
+	submit(
+		input: StaticResolverWorkerInput,
+	): Promise<StaticResolverWorkerOutput> {
+		return this.#pool.submit(input);
+	}
+
+	dispose(): void {
+		this.#pool.dispose();
 	}
 }

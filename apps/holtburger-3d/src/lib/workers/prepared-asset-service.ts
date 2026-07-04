@@ -45,10 +45,18 @@ export function createRequestScopedPreparedAssetReader<
 >(
 	context: WorkerExecuteContext<TProgress, TServiceRequest, TServiceResponse>,
 ): PreparedAssetReader {
-	return new RequestScopedPreparedAssetServiceReader(context);
+	return createRequestScopedPreparedAssetReaderFromReader(
+		new PreparedAssetServiceContextReader(context),
+	);
 }
 
-class RequestScopedPreparedAssetServiceReader<
+export function createRequestScopedPreparedAssetReaderFromReader(
+	reader: PreparedAssetReader,
+): PreparedAssetReader {
+	return new RequestScopedPreparedAssetReader(reader);
+}
+
+class PreparedAssetServiceContextReader<
 	TProgress,
 	TServiceRequest extends PreparedAssetServiceRequest,
 	TServiceResponse extends PreparedAssetServiceResponse,
@@ -58,12 +66,29 @@ class RequestScopedPreparedAssetServiceReader<
 		TServiceRequest,
 		TServiceResponse
 	>;
-	readonly #pending = new Map<string, Promise<PreparedAsset>>();
 
 	constructor(
 		context: WorkerExecuteContext<TProgress, TServiceRequest, TServiceResponse>,
 	) {
 		this.#context = context;
+	}
+
+	requestPreparedAsset(key: HostAssetKey): Promise<PreparedAsset> {
+		return this.#context
+			.requestService({
+				kind: "prepared-asset",
+				key,
+			} as TServiceRequest)
+			.then((response) => response.asset);
+	}
+}
+
+class RequestScopedPreparedAssetReader implements PreparedAssetReader {
+	readonly #pending = new Map<string, Promise<PreparedAsset>>();
+	readonly #reader: PreparedAssetReader;
+
+	constructor(reader: PreparedAssetReader) {
+		this.#reader = reader;
 	}
 
 	requestPreparedAsset(key: HostAssetKey): Promise<PreparedAsset> {
@@ -73,15 +98,7 @@ class RequestScopedPreparedAssetServiceReader<
 			return pending;
 		}
 
-		const next = this.#context
-			.requestService({
-				kind: "prepared-asset",
-				key,
-			} as TServiceRequest)
-			.then((response) => response.asset)
-			.finally(() => {
-				this.#pending.delete(cacheKey);
-			});
+		const next = this.#reader.requestPreparedAsset(key);
 		this.#pending.set(cacheKey, next);
 		return next;
 	}

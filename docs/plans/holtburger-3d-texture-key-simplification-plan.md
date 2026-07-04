@@ -487,9 +487,11 @@ Internally, identity builders should accept structured inputs and return branded
 
 ### Phase 7: Visual Resource Key Cleanup
 
+**Status:** Complete.
+
 **Deliverables**
 
-- Replace `textureUseIds` in object visual resource keys with stable material binding layout and texture keys where resource identity truly depends on material texture identity. Do not keep binding ids in reusable resource keys when they include resource/draw-unit scope.
+- Replace `textureUseIds` in object visual resource keys with stable material binding layout and texture identity keys where resource identity truly depends on material texture identity. Do not keep binding ids in reusable resource keys when they include resource/draw-unit scope.
 - Verify landblock-scoped owner ids cannot enter reusable visual resource keys.
 - If `TextureBindingId` contains resource or draw-unit scope, do not include it in reusable resource identity. Use slot/role/material layout plus `TextureKey` instead.
 - Remove resource-key tests that only assert legacy scoped texture-use id sorting.
@@ -500,6 +502,15 @@ Internally, identity builders should accept structured inputs and return branded
 - Same source visual resource in different landblocks can share resource identity when geometry/material/pool texture identity match.
 - Tests explicitly cover cross-landblock shared texture/source cases.
 - Visual resource ids do not change when only owner/landblock changes.
+
+**Phase notes**
+
+- Removed `textureUseIds` from reusable object visual resource keys. Resource key serialization no longer includes scoped renderer binding ids.
+- Added stable texture identity key fields to static/object visual material entries beside the renderer binding ids. The renderer still consumes `*TextureBindingId`; resource-key comparison consumes `*TextureKey` fields.
+- Course correction: full `TextureKey` is not available at `StaticMaterialTableEntry` creation without moving resolver texture identity work earlier. Static-authored entries therefore store the resolver-predictable `TextureBindingRequirement.sourceKey` in the `*TextureKey` fields. Dynamic/object-visual bindings use their already resolved texture key. This is the cleanest available boundary for Phase 7 and avoids decoding scoped binding strings.
+- Resource key tests now prove scoped binding id changes do not change reusable resource identity, while stable texture identity key changes do.
+- Spicy bit: the field names are still `*TextureKey` even though static-authored values are source keys at this boundary. The cleanup phase should either rename these to `*TextureIdentityKey` or move texture-key resolution earlier so the names become literal.
+- Remaining naming debt: draw units and visual payloads still expose `textureUseIds` arrays whose renderer-facing values are `TextureBindingId`s. This is not part of reusable resource identity anymore, but the cleanup phase should rename it to `textureBindingIds` where the field remains.
 
 ### Phase 8: Follow-Mode Scenario Regression And Diagnostics
 

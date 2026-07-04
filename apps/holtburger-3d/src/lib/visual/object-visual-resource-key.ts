@@ -4,7 +4,6 @@ import type {
 	ObjectVisualResourceKey,
 	ObjectVisualSourceGeometryKey,
 } from "./object-visual-install-set";
-import type { TextureBindingId } from "../textures/identity";
 import type { VisualGeometryMaterialTableEntry } from "./visual-geometry";
 
 export interface ObjectVisualResourceKeyInput {
@@ -14,7 +13,6 @@ export interface ObjectVisualResourceKeyInput {
 	readonly materialFamily: ObjectVisualResourceKey["materialFamily"];
 	readonly materialPass: ObjectVisualResourceKey["materialPass"];
 	readonly renderState: ObjectVisualResourceKey["renderState"];
-	readonly textureUseIds: readonly TextureBindingId[];
 }
 
 export function createObjectVisualResourceKey(
@@ -28,7 +26,6 @@ export function createObjectVisualResourceKey(
 		materialFamily: input.materialFamily,
 		materialPass: input.materialPass,
 		renderState: input.renderState,
-		textureUseIds: input.textureUseIds,
 	};
 }
 
@@ -50,7 +47,6 @@ export function createObjectVisualResourceKeyString(
 		materialFamily: key.materialFamily,
 		materialPass: key.materialPass,
 		renderState: createObjectVisualRenderStateKey(key.renderState),
-		textureUseIds: createUniqueSortedStrings(key.textureUseIds),
 	});
 }
 
@@ -110,25 +106,17 @@ function createObjectVisualMaterialEntryKey(
 	return {
 		alphaTest: entry.alphaTest,
 		detailTextureTiling: entry.detailTextureTiling,
-		detailTextureBindingId: entry.detailTextureBindingId,
-		indexTextureBindingId: entry.indexTextureBindingId,
+		detailTextureKey: entry.detailTextureKey,
+		indexTextureKey: entry.indexTextureKey,
 		indexedClipThreshold: entry.indexedClipThreshold,
 		indexedTextureFormat: entry.indexedTextureFormat,
 		materialColor: entry.materialColor,
 		materialEmissiveColor: entry.materialEmissiveColor,
 		materialIds: [...entry.materialIds].sort((left, right) => left - right),
-		paletteTextureBindingId: entry.paletteTextureBindingId,
-		primaryTextureBindingId: entry.primaryTextureBindingId,
+		paletteTextureKey: entry.paletteTextureKey,
+		primaryTextureKey: entry.primaryTextureKey,
 		primaryTextureWrapMode: entry.primaryTextureWrapMode,
 		renderState: createObjectVisualRenderStateKey(entry.renderState),
 		slot: entry.slot,
 	};
-}
-
-function createUniqueSortedStrings(
-	values: readonly string[],
-): readonly string[] {
-	return Array.from(new Set(values)).sort((left, right) =>
-		left.localeCompare(right),
-	);
 }

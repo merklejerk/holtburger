@@ -13,7 +13,6 @@ import type {
 	VisualGeometryPayload,
 	VisualGeometryRenderState,
 } from "./visual-geometry";
-import type { TextureBindingId } from "../textures/identity";
 
 export type ObjectVisualDirectDrawUnit = Extract<
 	StaticDrawUnit,
@@ -38,8 +37,6 @@ export interface ObjectVisualResourceKey {
 	readonly materialEntries: readonly VisualGeometryMaterialTableEntry[];
 	/** GPU index element width required by the resource upload. */
 	readonly indexType: VisualGeometryPayload["indexType"];
-	/** Renderer texture bindings owned by this reusable resource. */
-	readonly textureUseIds: readonly TextureBindingId[];
 }
 
 export interface ObjectVisualResource extends VisualGeometryPayload {

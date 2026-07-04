@@ -17,7 +17,14 @@ export interface StaticMaterialTextureBindingIdFactory {
 	(
 		dataUse: MaterialTextureDataUseIdentity,
 		wrapMode: StaticMaterialTextureWrapMode,
-	): TextureBindingId;
+	): StaticMaterialTextureBindingReference;
+}
+
+interface StaticMaterialTextureBindingReference {
+	/** Renderer material binding id for this consumer role. */
+	readonly bindingId: TextureBindingId;
+	/** Stable texture identity key shared across equivalent consumers. */
+	readonly textureKey: string;
 }
 
 export function createStaticMaterialEntryKey(options: {
@@ -110,27 +117,35 @@ export function createStaticMaterialTableEntry(options: {
 				? "index16"
 				: "p8"
 			: null;
+	const primaryTextureRef = primaryTextureUse
+		? options.createTextureUseId(primaryTextureUse, options.textureWrapMode)
+		: null;
+	const indexTextureRef = indexTextureUse
+		? options.createTextureUseId(indexTextureUse, options.textureWrapMode)
+		: null;
+	const paletteTextureRef = paletteTextureUse
+		? options.createTextureUseId(paletteTextureUse, options.textureWrapMode)
+		: null;
+	const detailTextureRef = detailTextureUse
+		? options.createTextureUseId(detailTextureUse, options.textureWrapMode)
+		: null;
 
 	return {
 		alphaTest: options.plan.alphaPolicy.alphaTest,
 		detailTextureTiling: resolveStaticMaterialDetailTextureTiling(options.plan),
-		detailTextureBindingId: detailTextureUse
-			? options.createTextureUseId(detailTextureUse, options.textureWrapMode)
-			: null,
+		detailTextureBindingId: detailTextureRef?.bindingId ?? null,
+		detailTextureKey: detailTextureRef?.textureKey ?? null,
 		indexedClipThreshold: options.plan.alphaPolicy.indexedClipThreshold,
 		indexedTextureFormat,
-		indexTextureBindingId: indexTextureUse
-			? options.createTextureUseId(indexTextureUse, options.textureWrapMode)
-			: null,
+		indexTextureBindingId: indexTextureRef?.bindingId ?? null,
+		indexTextureKey: indexTextureRef?.textureKey ?? null,
 		materialColor: options.plan.color,
 		materialEmissiveColor: options.plan.emissiveColor,
 		materialIds: options.materialIds,
-		paletteTextureBindingId: paletteTextureUse
-			? options.createTextureUseId(paletteTextureUse, options.textureWrapMode)
-			: null,
-		primaryTextureBindingId: primaryTextureUse
-			? options.createTextureUseId(primaryTextureUse, options.textureWrapMode)
-			: null,
+		paletteTextureBindingId: paletteTextureRef?.bindingId ?? null,
+		paletteTextureKey: paletteTextureRef?.textureKey ?? null,
+		primaryTextureBindingId: primaryTextureRef?.bindingId ?? null,
+		primaryTextureKey: primaryTextureRef?.textureKey ?? null,
 		primaryTextureWrapMode: options.textureWrapMode,
 		renderState: createStaticMaterialRenderState(options.plan.blend),
 		slot: options.slot,

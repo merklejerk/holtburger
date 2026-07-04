@@ -1611,11 +1611,6 @@ interface StaticObjectVisualResourceKey {
 	 * different index element widths cannot share the same index buffer upload.
 	 */
 	readonly indexType: StaticObjectGeometryStaticDrawUnit["indexType"];
-	/**
-	 * Renderer material binding ids are included so texture bindings can live
-	 * with visual-resource ownership without hidden side data.
-	 */
-	readonly textureUseIds: readonly TextureBindingId[];
 }
 
 export interface StaticObjectVisualResource extends VisualGeometryPayload {
@@ -1765,13 +1760,21 @@ export interface StaticMaterialTableEntry {
 	readonly materialEmissiveColor: readonly [number, number, number];
 	/** Material binding id for the entry's RGBA base-color texture, if present. */
 	readonly primaryTextureBindingId: TextureBindingId | null;
+	/** Stable texture identity key for reusable material-resource comparison. */
+	readonly primaryTextureKey: string | null;
 	/** Material binding id for the entry's indexed color texture, if present. */
 	readonly indexTextureBindingId: TextureBindingId | null;
+	/** Stable texture identity key for reusable material-resource comparison. */
+	readonly indexTextureKey: string | null;
 	readonly indexedTextureFormat: "p8" | "index16" | null;
 	/** Material binding id for the entry's palette texture, if present. */
 	readonly paletteTextureBindingId: TextureBindingId | null;
+	/** Stable texture identity key for reusable material-resource comparison. */
+	readonly paletteTextureKey: string | null;
 	/** Material binding id for the entry's detail overlay texture, if present. */
 	readonly detailTextureBindingId: TextureBindingId | null;
+	/** Stable texture identity key for reusable material-resource comparison. */
+	readonly detailTextureKey: string | null;
 	readonly detailTextureTiling: number;
 	readonly primaryTextureWrapMode: "clamp" | "repeat";
 }

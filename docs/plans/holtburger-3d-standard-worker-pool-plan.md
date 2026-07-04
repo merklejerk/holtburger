@@ -512,7 +512,7 @@ Decisions, debt, and spicy bits:
 
 ### Phase 2: Worker-Side Handler Primitive
 
-Status: pending.
+Status: complete as of 2026-07-04.
 
 Deliverables:
 
@@ -526,6 +526,32 @@ Acceptance criteria:
 - Domain worker handlers can be expressed as `execute(input, context)`.
 - Worker-side error normalization is shared.
 - Cancellation behavior is documented and tested honestly.
+
+Completion evidence:
+
+- Added `apps/holtburger-3d/src/lib/workers/handler.ts`.
+- Added `apps/holtburger-3d/src/lib/workers/handler.test.ts`.
+- Verified with `npm run test:ts -- src/lib/workers/pool.test.ts src/lib/workers/handler.test.ts`.
+- Verified with `npm run check`.
+- Verified with `npm run lint:ts`.
+
+Decisions, debt, and spicy bits:
+
+- `installWorkerHandler` is port-injected instead of directly binding `self`. Worker entrypoints can
+  still pass the browser worker global, while tests can use deterministic fixture ports.
+- Handler executors must return `{ output, transfer? }`. Supporting both raw output and wrapped
+  output looked ergonomic, but it creates an ambiguous contract for any domain result that happens
+  to contain an `output` field. Explicit wins here.
+- The handler owns standard job/cancel/progress/result/error envelopes, error normalization, output
+  transfer forwarding, progress transfer forwarding, listener disposal, and request-local
+  `AbortSignal` state.
+- Cancel-before-start is represented by a canceled request-id set and returns a standard cancellation
+  error if the job later arrives. Running cancellation aborts the request signal and suppresses a
+  late success, but it still depends on domain code observing `context.signal` to stop expensive CPU
+  work promptly.
+- Service callbacks are intentionally absent in this phase. Adding them now would force resolver
+  behavior into a primitive that has not migrated any resolver worker yet; Phase 4 remains the right
+  place.
 
 ### Phase 2.5: Transfer Hook Dry Run
 
@@ -713,3 +739,7 @@ Acceptance criteria:
   running cancellation, stale-response dropping, progress callbacks, diagnostics, worker factory
   injection, and explicit input transfer forwarding. Worker-side output transfer emission is
   intentionally left for Phase 2's handler primitive.
+- 2026-07-04: Completed Phase 2 with `installWorkerHandler`. The handler uses the same standard
+  envelopes as the pool, forwards progress/result transfer lists, exposes request-local abort
+  signals, normalizes worker errors, and requires explicit `{ output, transfer? }` execute results
+  to avoid ambiguous domain return shapes.

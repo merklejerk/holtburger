@@ -80,6 +80,7 @@ const EMPTY_TEXTURE_PLACEMENT_SNAPSHOT: TexturePlacementSnapshot = {
 const EMPTY_OBJECT_VISUAL_TEXTURE_PLACEMENT_SNAPSHOT: ObjectVisualTexturePlacementSnapshot =
 	{
 		itemIdsByBindingId: new Map(),
+		placementsByBindingId: new Map(),
 		placementsByItemId: new Map(),
 	};
 

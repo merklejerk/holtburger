@@ -1206,6 +1206,22 @@ async function createTexturePlacementSnapshotForInput(
 		itemIdsByBindingId: new Map(
 			intents.map((intent) => [intent.bindingId, intent.itemId]),
 		),
+		placementsByBindingId: new Map(
+			intents.map((intent) => [
+				intent.bindingId,
+				{
+					bindingId: intent.bindingId,
+					height: 64,
+					itemId: intent.itemId,
+					pageId: `${intent.purpose}:page:0`,
+					purpose: intent.purpose,
+					rect: [0, 0, 64, 64] as const,
+					textureKey: intent.textureKey,
+					textureRefId: `${intent.purpose}:texture-ref:0`,
+					width: 64,
+				},
+			]),
+		),
 		placementsByItemId: new Map(
 			intents.map((intent) => [
 				intent.itemId,
@@ -1216,8 +1232,8 @@ async function createTexturePlacementSnapshotForInput(
 					pageId: `${intent.purpose}:page:0`,
 					purpose: intent.purpose,
 					rect: [0, 0, 64, 64] as const,
+					textureKey: intent.textureKey,
 					textureRefId: `${intent.purpose}:texture-ref:0`,
-					textureBindingId: intent.textureBindingId,
 					width: 64,
 				},
 			]),

@@ -348,6 +348,7 @@ function createDynamicVisualBakeInput(
 		sourceGeometry: [],
 		texturePlacementSnapshot: {
 			itemIdsByBindingId: new Map(),
+			placementsByBindingId: new Map(),
 			placementsByItemId: new Map(),
 		},
 		texturePlanning: {

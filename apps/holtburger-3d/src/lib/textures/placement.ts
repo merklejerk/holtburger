@@ -153,6 +153,11 @@ export interface ObjectVisualTexturePlacementSnapshot extends TexturePlacementSn
 		TextureBindingId,
 		TexturePlacementItemId
 	>;
+	/** Placement facts keyed by stable material binding id; avoids numeric bake-id collisions across batches. */
+	readonly placementsByBindingId: ReadonlyMap<
+		TextureBindingId,
+		TexturePlacement<TexturePlacementItemId>
+	>;
 }
 
 export function isObjectVisualTexturePlacementSnapshot(

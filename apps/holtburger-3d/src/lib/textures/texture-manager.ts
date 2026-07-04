@@ -5,7 +5,11 @@ import {
 	prepareDirectMaterialTextureSource,
 } from "../assets/preparation/prepared-texture-source";
 import type { DirectMaterialTextureSource } from "../assets/preparation/prepared-texture-source";
-import type { TextureAtlasDiagnosticsReport } from "../runtime/diagnostics";
+import type {
+	TextureAtlasDiagnosticsReport,
+	TextureMutationPhaseDiagnostics,
+	TextureMutationSampleDiagnostics,
+} from "../runtime/diagnostics";
 import type {
 	SamplerPolicyUpdate,
 	TextureBindingOwner,
@@ -75,6 +79,7 @@ import { getRuntimeTexturePageGutterPixels } from "./material-texture-identity";
 const MAX_RUNTIME_ATLAS_PAGE_SIZE = 2048;
 const TERRAIN_COLOR_ATLAS_FILL_RGBA = [128, 128, 128, 255] as const;
 const DEFAULT_TEXTURE_PACK_GROUP_MAX_CONCURRENCY = 8;
+const TEXTURE_MUTATION_DIAGNOSTICS_LIMIT = 1_000;
 
 interface TextureManagerOptions {
 	readonly assetService: AssetService;
@@ -164,6 +169,44 @@ interface PackedTexturePlacementResult {
 	readonly resolvedTexturePlacements: readonly ResolvedTexturePlacement[];
 }
 
+type TextureMutationKind =
+	| "dynamic-texture-commit"
+	| "placement-intents"
+	| "static-commit";
+
+interface TextureMutationProfile {
+	readonly sequence: number;
+	readonly kind: TextureMutationKind;
+	readonly pendingAtEnqueue: number;
+	readonly removedOwnerCount: number;
+	readonly textureUseCount: number;
+	absorbedPlacementCount: number;
+	outputPlacementCount: number;
+	packedGroupCount: number;
+	pageLocalRepackCount: number;
+	pendingGroupCount: number;
+	pendingPlacementCount: number;
+	reclaimedTextureRefCount: number;
+	resolvedPlacementCount: number;
+	readonly phases: MutableTextureMutationPhaseDiagnostics;
+}
+
+type MutableTextureMutationPhaseDiagnostics = {
+	-readonly [Key in keyof TextureMutationPhaseDiagnostics]: TextureMutationPhaseDiagnostics[Key];
+};
+
+interface TextureMutationKindTotals {
+	count: number;
+	maxQueueWaitMs: number;
+	maxRunMs: number;
+	outputPlacementCount: number;
+	reclaimedTextureRefCount: number;
+	resolvedPlacementCount: number;
+	textureUseCount: number;
+	totalQueueWaitMs: number;
+	totalRunMs: number;
+}
+
 export class TextureManager {
 	readonly #assetService: AssetService;
 	readonly #texturePacker: TexturePacker;
@@ -197,9 +240,17 @@ export class TextureManager {
 		reclaimed: 0,
 		retained: 0,
 	};
+	readonly #textureMutationTotalsByKind = new Map<
+		TextureMutationKind,
+		TextureMutationKindTotals
+	>();
+	readonly #recentTextureMutations: TextureMutationSampleDiagnostics[] = [];
 	#filteringMode: TextureFilteringMode;
+	#maxTextureMutationPendingQueueDepth = 0;
 	#mutationQueue: Promise<void> = Promise.resolve();
+	#pendingTextureMutationCount = 0;
 	#revision = 0;
+	#textureMutationSequence = 0;
 
 	constructor(options: TextureManagerOptions) {
 		this.#assetService = options.assetService;
@@ -293,6 +344,7 @@ export class TextureManager {
 		return {
 			buckets,
 			kind: "texture-atlas",
+			mutations: this.#createTextureMutationDiagnostics(),
 			summary: {
 				approximateBytes: sumNumbers(
 					Array.from(textureRefs.values(), (page) => page.approximateBytes),
@@ -372,7 +424,13 @@ export class TextureManager {
 	>(input: {
 		readonly intents: readonly TexturePlacementIntent<TPlacementItemId>[];
 	}): Promise<TexturePlacementSnapshot<TPlacementItemId>> {
-		return this.#runTextureMutation(async () => {
+		return this.#runTextureMutation(
+			"placement-intents",
+			{
+				removedOwnerCount: 0,
+				textureUseCount: input.intents.length,
+			},
+			async (profile) => {
 			const pendingPlacements = new Map<string, PendingTexturePlacement>();
 			const stagedPlacements: StagedTexturePlacement[] = [];
 			const textureUses = input.intents.map((intent) =>
@@ -381,7 +439,11 @@ export class TextureManager {
 
 			for (const textureUse of textureUses) {
 				stagedPlacements.push(
-					await this.#stageTexturePlacement(textureUse, pendingPlacements),
+					await this.#stageTexturePlacement(
+						textureUse,
+						pendingPlacements,
+						profile,
+					),
 				);
 			}
 
@@ -391,7 +453,13 @@ export class TextureManager {
 					reclaimZeroReferencePages: true,
 					retainedTextureRefIds: collectStagedTextureRefIds(stagedPlacements),
 				},
+				profile,
 			);
+			profile.outputPlacementCount += packedResult.placements.length;
+			profile.reclaimedTextureRefCount +=
+				packedResult.reclaimedTextureRefIds.length;
+			profile.resolvedPlacementCount +=
+				packedResult.resolvedTexturePlacements.length;
 			this.#recordUnuploadedTexturePlacements(packedResult.placements);
 
 			const placementsByItemId = new Map<
@@ -424,7 +492,8 @@ export class TextureManager {
 			}
 
 			return { placementsByItemId };
-		});
+			},
+		);
 	}
 
 	async placeObjectVisualTextureIntents(input: {
@@ -527,56 +596,82 @@ export class TextureManager {
 	async applyStaticCommitDelta(
 		delta: StaticCoordinatorCommitDelta,
 	): Promise<TexturePlacementUpdate | null> {
-		return this.#runTextureMutation(() =>
-			this.#applyVisualTextureUseDelta({
-				removedOwnerIds: [
-					...collectStaticDrawUnitResourceIds(delta.removedResources).map(
-						(drawUnitId) =>
-							createStaticTextureOwnerId({
-								drawUnitId,
-								kind: "draw-unit",
-							}),
-					),
-					...collectStaticObjectVisualResourceIds(delta.removedResources).map(
-						(resourceId) =>
-							createStaticTextureOwnerId({
-								kind: "static-object-visual-resource",
-								resourceId,
-							}),
-					),
-				],
-				textureUses: delta.textureUses.map(createStaticVisualTextureUseCommit),
-			}),
+		const removedOwnerIds = [
+			...collectStaticDrawUnitResourceIds(delta.removedResources).map(
+				(drawUnitId) =>
+					createStaticTextureOwnerId({
+						drawUnitId,
+						kind: "draw-unit",
+					}),
+			),
+			...collectStaticObjectVisualResourceIds(delta.removedResources).map(
+				(resourceId) =>
+					createStaticTextureOwnerId({
+						kind: "static-object-visual-resource",
+						resourceId,
+					}),
+			),
+		];
+		const textureUses = delta.textureUses.map(createStaticVisualTextureUseCommit);
+		return this.#runTextureMutation(
+			"static-commit",
+			{
+				removedOwnerCount: removedOwnerIds.length,
+				textureUseCount: textureUses.length,
+			},
+			(profile) =>
+				this.#applyVisualTextureUseDelta(
+					{
+						removedOwnerIds,
+						textureUses,
+					},
+					profile,
+				),
 		);
 	}
 
 	async applyDynamicTextureUseDelta(
 		delta: DynamicTextureUseCommitDelta,
 	): Promise<TexturePlacementUpdate | null> {
-		return this.#runTextureMutation(() =>
-			this.#applyVisualTextureUseDelta({
-				removedOwnerIds: delta.removedOwnerIds,
-				textureUses: delta.textureUses.map(createDynamicVisualTextureUseCommit),
-			}),
+		const textureUses = delta.textureUses.map(createDynamicVisualTextureUseCommit);
+		return this.#runTextureMutation(
+			"dynamic-texture-commit",
+			{
+				removedOwnerCount: delta.removedOwnerIds.length,
+				textureUseCount: textureUses.length,
+			},
+			(profile) =>
+				this.#applyVisualTextureUseDelta(
+					{
+						removedOwnerIds: delta.removedOwnerIds,
+						textureUses,
+					},
+					profile,
+				),
 		);
 	}
 
 	async #applyVisualTextureUseDelta(
 		delta: VisualTextureUseCommitDelta,
+		profile: TextureMutationProfile,
 	): Promise<TexturePlacementUpdate | null> {
+		const removeStartedAtMs = performance.now();
 		let removedTextureRefIds = this.#removeOwnerTextureRefs(
 			delta.removedOwnerIds,
 		);
+		profile.phases.removeOwnerRefsMs += performance.now() - removeStartedAtMs;
 		const placements: RuntimeTexturePlacement[] = [];
 		const resolvedTexturePlacements: ResolvedTexturePlacement[] = [];
 		const pendingPlacements = new Map<string, PendingTexturePlacement>();
 		const stagedPlacements: StagedTexturePlacement[] = [];
 		const uploadedTextureRefIds = new Set<string>();
 
+		const stageStartedAtMs = performance.now();
 		for (const textureUse of delta.textureUses) {
 			const staged = await this.#stageTexturePlacement(
 				textureUse,
 				pendingPlacements,
+				profile,
 			);
 			stagedPlacements.push(staged);
 			for (const ownerId of textureUse.ownerIds) {
@@ -618,6 +713,7 @@ export class TextureManager {
 				}
 			}
 		}
+		profile.phases.stageTextureUsesMs += performance.now() - stageStartedAtMs;
 
 		const packedResult = await this.#packPendingTexturePlacements(
 			uniquePendingTexturePlacements(pendingPlacements),
@@ -625,6 +721,7 @@ export class TextureManager {
 				reclaimZeroReferencePages: true,
 				retainedTextureRefIds: collectStagedTextureRefIds(stagedPlacements),
 			},
+			profile,
 		);
 		placements.push(...packedResult.placements);
 		resolvedTexturePlacements.push(...packedResult.resolvedTexturePlacements);
@@ -633,6 +730,7 @@ export class TextureManager {
 			...packedResult.reclaimedTextureRefIds,
 		]);
 
+		const leaseStartedAtMs = performance.now();
 		for (const placement of uniquePendingTexturePlacements(pendingPlacements)) {
 			const entry = placement.entry;
 			if (!entry) {
@@ -646,7 +744,9 @@ export class TextureManager {
 				entry.leaseCount,
 			);
 		}
+		profile.phases.leaseAndRegistryMs += performance.now() - leaseStartedAtMs;
 
+		const resolveStartedAtMs = performance.now();
 		for (const textureUse of delta.textureUses) {
 			const textureKey = createVisualTextureKey(textureUse);
 			const entry =
@@ -669,6 +769,8 @@ export class TextureManager {
 				this.#placementRecordsByItemId.values(),
 			),
 		);
+		profile.phases.resolvedPlacementFanoutMs +=
+			performance.now() - resolveStartedAtMs;
 
 		if (
 			placements.length === 0 &&
@@ -679,7 +781,12 @@ export class TextureManager {
 		}
 
 		this.#revision += 1;
+		const markStartedAtMs = performance.now();
 		this.#markTexturePlacementsUploaded(placements);
+		profile.phases.markUploadedMs += performance.now() - markStartedAtMs;
+		profile.outputPlacementCount += placements.length;
+		profile.reclaimedTextureRefCount += removedTextureRefIds.length;
+		profile.resolvedPlacementCount += resolvedTexturePlacements.length;
 
 		return {
 			placements,
@@ -691,13 +798,133 @@ export class TextureManager {
 		};
 	}
 
-	#runTextureMutation<T>(operation: () => Promise<T>): Promise<T> {
-		const result = this.#mutationQueue.then(operation, operation);
+	#runTextureMutation<T>(
+		kind: TextureMutationKind,
+		input: {
+			readonly removedOwnerCount: number;
+			readonly textureUseCount: number;
+		},
+		operation: (profile: TextureMutationProfile) => Promise<T>,
+	): Promise<T> {
+		const enqueuedAtMs = performance.now();
+		const profile = this.#createTextureMutationProfile(kind, input);
+		const result = this.#mutationQueue.then(
+			() => this.#executeTextureMutation(operation, profile, enqueuedAtMs),
+			() => this.#executeTextureMutation(operation, profile, enqueuedAtMs),
+		);
 		this.#mutationQueue = result.then(
 			() => undefined,
 			() => undefined,
 		);
 		return result;
+	}
+
+	async #executeTextureMutation<T>(
+		operation: (profile: TextureMutationProfile) => Promise<T>,
+		profile: TextureMutationProfile,
+		enqueuedAtMs: number,
+	): Promise<T> {
+		const startedAtMs = performance.now();
+		const queueWaitMs = startedAtMs - enqueuedAtMs;
+		try {
+			return await operation(profile);
+		} finally {
+			const runMs = performance.now() - startedAtMs;
+			this.#pendingTextureMutationCount -= 1;
+			this.#recordTextureMutationSample(profile, queueWaitMs, runMs);
+		}
+	}
+
+	#createTextureMutationProfile(
+		kind: TextureMutationKind,
+		input: {
+			readonly removedOwnerCount: number;
+			readonly textureUseCount: number;
+		},
+	): TextureMutationProfile {
+		const pendingAtEnqueue = this.#pendingTextureMutationCount;
+		this.#pendingTextureMutationCount += 1;
+		this.#maxTextureMutationPendingQueueDepth = Math.max(
+			this.#maxTextureMutationPendingQueueDepth,
+			this.#pendingTextureMutationCount,
+		);
+
+		return {
+			absorbedPlacementCount: 0,
+			kind,
+			outputPlacementCount: 0,
+			packedGroupCount: 0,
+			pageLocalRepackCount: 0,
+			pendingAtEnqueue,
+			pendingGroupCount: 0,
+			pendingPlacementCount: 0,
+			phases: createEmptyTextureMutationPhaseDiagnostics(),
+			reclaimedTextureRefCount: 0,
+			removedOwnerCount: input.removedOwnerCount,
+			resolvedPlacementCount: 0,
+			sequence: ++this.#textureMutationSequence,
+			textureUseCount: input.textureUseCount,
+		};
+	}
+
+	#recordTextureMutationSample(
+		profile: TextureMutationProfile,
+		queueWaitMs: number,
+		runMs: number,
+	): void {
+		const sample: TextureMutationSampleDiagnostics = {
+			absorbedPlacementCount: profile.absorbedPlacementCount,
+			kind: profile.kind,
+			outputPlacementCount: profile.outputPlacementCount,
+			packedGroupCount: profile.packedGroupCount,
+			pageLocalRepackCount: profile.pageLocalRepackCount,
+			pendingAtEnqueue: profile.pendingAtEnqueue,
+			pendingGroupCount: profile.pendingGroupCount,
+			pendingPlacementCount: profile.pendingPlacementCount,
+			phases: { ...profile.phases },
+			queueWaitMs,
+			reclaimedTextureRefCount: profile.reclaimedTextureRefCount,
+			removedOwnerCount: profile.removedOwnerCount,
+			resolvedPlacementCount: profile.resolvedPlacementCount,
+			runMs,
+			sequence: profile.sequence,
+			textureUseCount: profile.textureUseCount,
+		};
+		this.#recentTextureMutations.push(sample);
+		if (this.#recentTextureMutations.length > TEXTURE_MUTATION_DIAGNOSTICS_LIMIT) {
+			this.#recentTextureMutations.splice(
+				0,
+				this.#recentTextureMutations.length -
+					TEXTURE_MUTATION_DIAGNOSTICS_LIMIT,
+			);
+		}
+
+		const totals =
+			this.#textureMutationTotalsByKind.get(profile.kind) ??
+			createEmptyTextureMutationKindTotals();
+		totals.count += 1;
+		totals.maxQueueWaitMs = Math.max(totals.maxQueueWaitMs, queueWaitMs);
+		totals.maxRunMs = Math.max(totals.maxRunMs, runMs);
+		totals.outputPlacementCount += profile.outputPlacementCount;
+		totals.reclaimedTextureRefCount += profile.reclaimedTextureRefCount;
+		totals.resolvedPlacementCount += profile.resolvedPlacementCount;
+		totals.textureUseCount += profile.textureUseCount;
+		totals.totalQueueWaitMs += queueWaitMs;
+		totals.totalRunMs += runMs;
+		this.#textureMutationTotalsByKind.set(profile.kind, totals);
+	}
+
+	#createTextureMutationDiagnostics(): TextureAtlasDiagnosticsReport["mutations"] {
+		return {
+			maxPendingQueueDepth: this.#maxTextureMutationPendingQueueDepth,
+			pending: this.#pendingTextureMutationCount,
+			recent: [...this.#recentTextureMutations],
+			totalsByKind: Object.fromEntries(
+				Array.from(this.#textureMutationTotalsByKind.entries()).map(
+					([kind, totals]) => [kind, { ...totals }],
+				),
+			),
+		};
 	}
 
 	#removeOwnerTextureRefs(
@@ -745,6 +972,7 @@ export class TextureManager {
 	async #stageTexturePlacement(
 		textureUse: VisualTextureUseCommit,
 		pendingPlacements: Map<string, PendingTexturePlacement>,
+		profile: TextureMutationProfile,
 	): Promise<StagedTexturePlacement> {
 		const source = textureUse.source;
 		const registry = this.#getRegistry(
@@ -785,7 +1013,7 @@ export class TextureManager {
 			};
 		}
 
-		const directSource = await this.#prepareMaterialTextureSource(source);
+		const directSource = await this.#prepareMaterialTextureSource(source, profile);
 		const physicalSourceKey = createMaterialTexturePhysicalSourceKey(
 			source,
 			directSource,
@@ -820,11 +1048,15 @@ export class TextureManager {
 
 	async #prepareMaterialTextureSource(
 		source: MaterialTextureDataUseIdentity,
+		profile: TextureMutationProfile,
 	): Promise<DirectMaterialTextureSource> {
+		const startedAtMs = performance.now();
 		const prepared = await this.#assetService.requestPreparedAsset(
 			createMaterialTextureHostKey(source),
 		);
-		return prepareDirectMaterialTextureSource(prepared, source);
+		const directSource = prepareDirectMaterialTextureSource(prepared, source);
+		profile.phases.prepareSourcesMs += performance.now() - startedAtMs;
+		return directSource;
 	}
 
 	async #packPendingTexturePlacements(
@@ -833,22 +1065,37 @@ export class TextureManager {
 			readonly reclaimZeroReferencePages: boolean;
 			readonly retainedTextureRefIds: ReadonlySet<string>;
 		},
+		profile: TextureMutationProfile,
 	): Promise<PackedTexturePlacementResult> {
+		const packStartedAtMs = performance.now();
 		const runtimePlacements: RuntimeTexturePlacement[] = [];
+		profile.pendingPlacementCount += pendingPlacements.length;
+		const reclaimStartedAtMs = performance.now();
 		const reclaimedTextureRefIds = options.reclaimZeroReferencePages
 			? this.#reclaimZeroReferencePagesForTextureMutation(
 					pendingPlacements,
 					options.retainedTextureRefIds,
 				)
 			: [];
+		profile.phases.reclaimPagesMs += performance.now() - reclaimStartedAtMs;
+		const groupedPlacements = groupPendingTexturePlacements(pendingPlacements);
+		profile.pendingGroupCount += groupedPlacements.length;
+		const absorbStartedAtMs = performance.now();
 		const absorbedGroups = await this.#absorbPendingTexturePlacementGroups(
-			groupPendingTexturePlacements(pendingPlacements),
+			groupedPlacements,
+			profile,
 		);
+		profile.phases.absorbExistingPagesMs +=
+			performance.now() - absorbStartedAtMs;
+		profile.absorbedPlacementCount += absorbedGroups.placements.length;
 		this.#pageLifecycleTotals.absorbed += absorbedGroups.placements.length;
 		runtimePlacements.push(...absorbedGroups.placements);
+		const planStartedAtMs = performance.now();
 		const plannedGroups = this.#planPendingTexturePackingGroups(
 			absorbedGroups.remainingGroups,
 		);
+		profile.phases.planPackingGroupsMs += performance.now() - planStartedAtMs;
+		const workerStartedAtMs = performance.now();
 		const packedGroups = await mapWithConcurrency(
 			plannedGroups,
 			this.#packGroupMaxConcurrency,
@@ -857,13 +1104,19 @@ export class TextureManager {
 				packed: await this.#texturePacker.pack(plannedGroup.job),
 			}),
 		);
+		profile.phases.workerPackWaitMs += performance.now() - workerStartedAtMs;
+		profile.packedGroupCount += packedGroups.length;
 
+		const commitPackedStartedAtMs = performance.now();
 		for (const packedGroup of packedGroups) {
 			const packedPlacements =
 				this.#commitPackedTexturePlacementGroup(packedGroup);
 			this.#pageLifecycleTotals.created += packedPlacements.length;
 			runtimePlacements.push(...packedPlacements);
 		}
+		profile.phases.commitPackedPagesMs +=
+			performance.now() - commitPackedStartedAtMs;
+		profile.phases.packPendingMs += performance.now() - packStartedAtMs;
 
 		return {
 			placements: runtimePlacements,
@@ -874,6 +1127,7 @@ export class TextureManager {
 
 	async #absorbPendingTexturePlacementGroups(
 		groups: readonly PendingTexturePlacementGroup[],
+		profile: TextureMutationProfile,
 	): Promise<{
 		readonly placements: readonly RuntimeTexturePlacement[];
 		readonly remainingGroups: readonly PendingTexturePlacementGroup[];
@@ -884,7 +1138,10 @@ export class TextureManager {
 		const resolvedTexturePlacements: ResolvedTexturePlacement[] = [];
 
 		for (const group of groups) {
-			const result = await this.#absorbPendingTexturePlacementGroup(group);
+			const result = await this.#absorbPendingTexturePlacementGroup(
+				group,
+				profile,
+			);
 			placements.push(...result.placements);
 			resolvedTexturePlacements.push(...result.resolvedTexturePlacements);
 			if (result.remainingEntries.length > 0) {
@@ -900,6 +1157,7 @@ export class TextureManager {
 
 	async #absorbPendingTexturePlacementGroup(
 		group: PendingTexturePlacementGroup,
+		profile: TextureMutationProfile,
 	): Promise<{
 		readonly placements: readonly RuntimeTexturePlacement[];
 		readonly remainingEntries: readonly PendingTexturePlacement[];
@@ -950,6 +1208,7 @@ export class TextureManager {
 				group,
 				existingPages,
 				registry,
+				profile,
 			);
 			if (repackResult.placements.length > 0) {
 				return repackResult;
@@ -1062,6 +1321,7 @@ export class TextureManager {
 		group: PendingTexturePlacementGroup,
 		existingPages: readonly ExistingAtlasPageForAbsorption[],
 		registry: VisualTexturePlacementBucketRegistry,
+		profile: TextureMutationProfile,
 	): Promise<{
 		readonly placements: readonly RuntimeTexturePlacement[];
 		readonly remainingEntries: readonly PendingTexturePlacement[];
@@ -1077,11 +1337,16 @@ export class TextureManager {
 		}
 
 		const placementRevision = registry.revision + 1;
+		const materializeStartedAtMs = performance.now();
 		const runtimePlacement = await this.#materializePageLocalRepack({
 			group,
 			placementRevision,
 			repackPlan,
+			profile,
 		});
+		profile.phases.pageLocalRepackMaterializeMs +=
+			performance.now() - materializeStartedAtMs;
+		profile.pageLocalRepackCount += 1;
 		const placementByAtlasEntryKey = new Map(
 			repackPlan.layoutPage.placements.map(
 				(placement) => [placement.atlasEntryKey, placement] as const,
@@ -1180,9 +1445,10 @@ export class TextureManager {
 	async #materializePageLocalRepack(options: {
 		readonly group: PendingTexturePlacementGroup;
 		readonly placementRevision: number;
+		readonly profile: TextureMutationProfile;
 		readonly repackPlan: PageLocalRepackPlan;
 	}): Promise<RuntimeTexturePlacement> {
-		const { group, placementRevision, repackPlan } = options;
+		const { group, placementRevision, profile, repackPlan } = options;
 		const pageConstraints = createTexturePackingPageConstraints(group);
 		const placementByAtlasEntryKey = new Map(
 			repackPlan.layoutPage.placements.map(
@@ -1200,6 +1466,7 @@ export class TextureManager {
 			}
 			const directSource = await this.#prepareMaterialTextureSource(
 				entry.source,
+				profile,
 			);
 			const physicalSourceKey = createMaterialTexturePhysicalSourceKey(
 				entry.source,
@@ -3132,6 +3399,38 @@ function calculateIntervalUnionLength(
 		total += activeEnd - activeStart;
 	}
 	return total;
+}
+
+function createEmptyTextureMutationPhaseDiagnostics(): MutableTextureMutationPhaseDiagnostics {
+	return {
+		absorbExistingPagesMs: 0,
+		commitPackedPagesMs: 0,
+		leaseAndRegistryMs: 0,
+		markUploadedMs: 0,
+		packPendingMs: 0,
+		pageLocalRepackMaterializeMs: 0,
+		planPackingGroupsMs: 0,
+		prepareSourcesMs: 0,
+		reclaimPagesMs: 0,
+		removeOwnerRefsMs: 0,
+		resolvedPlacementFanoutMs: 0,
+		stageTextureUsesMs: 0,
+		workerPackWaitMs: 0,
+	};
+}
+
+function createEmptyTextureMutationKindTotals(): TextureMutationKindTotals {
+	return {
+		count: 0,
+		maxQueueWaitMs: 0,
+		maxRunMs: 0,
+		outputPlacementCount: 0,
+		reclaimedTextureRefCount: 0,
+		resolvedPlacementCount: 0,
+		textureUseCount: 0,
+		totalQueueWaitMs: 0,
+		totalRunMs: 0,
+	};
 }
 
 function uniqueSortedNumbers(values: readonly number[]): readonly number[] {

@@ -59,9 +59,12 @@ import {
 	createAssetServiceDiagnosticsReport,
 	createConsoleRuntimeDiagnostics,
 	createDynamicDiagnosticsReport,
+	createStaticCommitInstallDiagnosticsReport,
 	type RendererDiagnosticsSummary,
 	type RuntimeDiagnostics,
 	type RuntimeDiagnosticsReport,
+	type StaticCommitInstallCommitDiagnostics,
+	type StaticCommitInstallTimingDiagnostics,
 	type StaticCoordinatorDiagnosticsReport,
 	type StaticCoordinatorTaskReportDiagnostics,
 	type TerrainTextureDiagnosticsReport,
@@ -758,18 +761,12 @@ interface RuntimeRenderPolicySnapshot {
 }
 
 interface StaticCommitInstallSnapshot {
-	readonly pendingCommits: readonly StaticCommitInstallCommitSnapshot[];
-	readonly committedCommits: readonly StaticCommitInstallCommitSnapshot[];
-	readonly failedCommits: readonly StaticCommitInstallCommitSnapshot[];
+	readonly pendingCommits: readonly StaticCommitInstallCommitDiagnostics[];
+	readonly committedCommits: readonly StaticCommitInstallCommitDiagnostics[];
+	readonly failedCommits: readonly StaticCommitInstallCommitDiagnostics[];
 	readonly envCellResourceMembershipRevision: number;
 	readonly committedStaticDirectDrawUnits: number;
 	readonly sourceStaticDirectDrawUnits: number;
-}
-
-interface StaticCommitInstallCommitSnapshot {
-	readonly commitId: string;
-	readonly phase: StaticCommitInstallPhase;
-	readonly revision: number;
 }
 
 type StaticCommitInstallPhase =
@@ -780,9 +777,17 @@ type StaticCommitInstallPhase =
 
 interface MutableStaticCommitInstall {
 	readonly commitId: string;
+	readonly enqueuedAtMs: number;
 	phase: StaticCommitInstallPhase;
 	readonly revision: number;
+	readonly timing: MutableStaticCommitInstallTiming;
 }
+
+type MutableStaticCommitInstallTiming = {
+	-readonly [Key in keyof StaticCommitInstallTimingDiagnostics]: StaticCommitInstallTimingDiagnostics[Key];
+} & {
+	materializeStartedAtMs: number | null;
+};
 
 export interface ClientRuntime {
 	createRuntimeSpawn(request: RuntimeDynamicSpawnRequest): DynamicEntityId;
@@ -945,7 +950,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		string,
 		MutableStaticCommitInstall
 	>();
-	#committedStaticCommitInstalls: StaticCommitInstallCommitSnapshot[] = [];
+	#committedStaticCommitInstalls: StaticCommitInstallCommitDiagnostics[] = [];
 	readonly #committedStaticDirectDrawUnitsById = new Map<
 		string,
 		StaticDrawUnit
@@ -1530,6 +1535,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 					kind: "static-coordinator",
 					...createStaticCoordinatorDiagnosticsReport(this.#lastStaticSnapshot),
 				},
+				createStaticCommitInstallDiagnosticsReport(
+					snapshot.staticCommitInstall,
+				),
 				this.#textureManager.createDiagnosticsReport(),
 				createTerrainTextureDiagnosticsReport(
 					this.#recentTerrainTextureFallbacks,
@@ -2095,8 +2103,10 @@ class ClientRuntimeImpl implements ClientRuntime {
 	): MutableStaticCommitInstall {
 		const commit: MutableStaticCommitInstall = {
 			commitId: delta.commitId,
+			enqueuedAtMs: performance.now(),
 			phase: "queued",
 			revision: delta.revision,
+			timing: createEmptyStaticCommitInstallTiming(),
 		};
 		this.#staticCommitInstallCommits.set(delta.commitId, commit);
 		return commit;
@@ -2104,7 +2114,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 
 	#createStaticCommitInstallCommitSnapshots(
 		...phases: StaticCommitInstallPhase[]
-	): StaticCommitInstallCommitSnapshot[] {
+	): StaticCommitInstallCommitDiagnostics[] {
 		const phaseSet = new Set(phases);
 		return Array.from(this.#staticCommitInstallCommits.values())
 			.filter((commit) => phaseSet.has(commit.phase))
@@ -2136,33 +2146,61 @@ class ClientRuntimeImpl implements ClientRuntime {
 		commitEnvelope: StaticScopePrepCommit,
 	): Promise<void> {
 		const delta = commitEnvelope.staticCommit;
+		const commit = this.#requireStaticCommitInstall(delta.commitId);
+		const materializeStartedAtMs = performance.now();
+		commit.timing.materializeStartedAtMs = materializeStartedAtMs;
+		commit.timing.queuedMs = materializeStartedAtMs - commit.enqueuedAtMs;
+		const releaseStartedAtMs = performance.now();
 		this.#textureManager.releaseTextureResourceDependencies(
 			collectStaticDrawUnitResourceIds(delta.removedResources),
 		);
+		commit.timing.releaseTextureDependenciesMs +=
+			performance.now() - releaseStartedAtMs;
+		const textureApplyStartedAtMs = performance.now();
 		const textureUpdate =
 			await this.#textureManager.applyStaticCommitDelta(delta);
+		commit.timing.textureApplyMs +=
+			performance.now() - textureApplyStartedAtMs;
 		if (this.#disposed) {
 			return;
 		}
 
+		const installStartedAtMs = performance.now();
 		const installed = installStaticCommit({
 			commit: delta,
 			textureUpdate,
 		});
+		commit.timing.installStaticCommitMs += performance.now() - installStartedAtMs;
 		this.#updateCommittedStaticDirectDrawUnits(delta, installed);
 		this.#clearStaticLayersForRemovedResources(installed.removedResources);
 		if (installed.textureUpdate) {
+			const rendererTextureStartedAtMs = performance.now();
 			this.#renderer.applyTexturePlacementUpdate(installed.textureUpdate);
+			commit.timing.applyTexturePlacementUpdateMs +=
+				performance.now() - rendererTextureStartedAtMs;
 		}
+		const pinStartedAtMs = performance.now();
 		this.#textureManager.pinTextureResourceDependencies(
 			delta.textureDependencies,
 		);
+		commit.timing.pinTextureDependenciesMs +=
+			performance.now() - pinStartedAtMs;
+		const staticLayerStartedAtMs = performance.now();
 		this.#applyInstalledStaticLayers(delta, installed);
+		commit.timing.applyStaticLayersMs +=
+			performance.now() - staticLayerStartedAtMs;
+		const envCellStartedAtMs = performance.now();
 		this.#applyEnvCellSystemLayerPublications(
 			createEnvCellSystemLayerPublications(delta, installed),
 		);
+		commit.timing.applyEnvCellPublicationsMs +=
+			performance.now() - envCellStartedAtMs;
+		const refreshMembershipStartedAtMs = performance.now();
 		this.#refreshEnvCellResourceMembership();
+		commit.timing.refreshEnvCellMembershipMs +=
+			performance.now() - refreshMembershipStartedAtMs;
 		this.#warnAboutStaticFallbacks(delta);
+		const queryStartedAtMs = performance.now();
 		this.#staticSceneQuery.removeStaticResources(installed.removedResources);
 		this.#staticSceneQuery.applyStaticPeerRecords({
 			envCellStaticObjectPlacementRecords:
@@ -2173,13 +2211,30 @@ class ClientRuntimeImpl implements ClientRuntime {
 			spatialRecords: installed.staticSpatialRecords,
 			visibilityRecords: installed.staticVisibilityRecords,
 		});
+		commit.timing.queryRecordsMs += performance.now() - queryStartedAtMs;
+		const dynamicPlacementStartedAtMs = performance.now();
 		this.#dynamicEntityController.ingestStaticPlacements(
 			commitEnvelope.dynamicPlacements,
 		);
+		commit.timing.applyDynamicPlacementsMs +=
+			performance.now() - dynamicPlacementStartedAtMs;
+		const dynamicPrepStartedAtMs = performance.now();
 		this.#applyStaticAuthoredDynamicVisualPrep(commitEnvelope);
+		commit.timing.dynamicVisualPrepMs +=
+			performance.now() - dynamicPrepStartedAtMs;
+		const dynamicSyncStartedAtMs = performance.now();
 		this.#enqueueDynamicRendererResourceSync();
+		commit.timing.dynamicRendererSyncMs +=
+			performance.now() - dynamicSyncStartedAtMs;
+		const renderPlanStartedAtMs = performance.now();
 		this.#updateRenderPassPlan();
+		commit.timing.renderPassPlanMs += performance.now() - renderPlanStartedAtMs;
+		const debugOverlayStartedAtMs = performance.now();
 		this.#refreshSceneDebugOverlay();
+		commit.timing.refreshDebugOverlayMs +=
+			performance.now() - debugOverlayStartedAtMs;
+		commit.timing.materializeMs =
+			performance.now() - materializeStartedAtMs;
 		this.#markStaticCommitInstall(delta, "materialized");
 		this.#staticCoordinator.markCommitMaterialized(delta);
 		this.#committedStaticCommitInstalls = appendBounded(
@@ -3782,11 +3837,57 @@ function appendBounded<T>(entries: readonly T[], entry: T, limit: number): T[] {
 
 function toStaticCommitInstallCommitSnapshot(
 	commit: MutableStaticCommitInstall,
-): StaticCommitInstallCommitSnapshot {
+): StaticCommitInstallCommitDiagnostics {
 	return {
 		commitId: commit.commitId,
 		phase: commit.phase,
 		revision: commit.revision,
+		timing: toStaticCommitInstallTimingSnapshot(commit.timing),
+	};
+}
+
+function createEmptyStaticCommitInstallTiming(): MutableStaticCommitInstallTiming {
+	return {
+		applyDynamicPlacementsMs: 0,
+		applyEnvCellPublicationsMs: 0,
+		applyStaticLayersMs: 0,
+		applyTexturePlacementUpdateMs: 0,
+		dynamicRendererSyncMs: 0,
+		dynamicVisualPrepMs: 0,
+		installStaticCommitMs: 0,
+		materializeMs: 0,
+		materializeStartedAtMs: null,
+		pinTextureDependenciesMs: 0,
+		queryRecordsMs: 0,
+		refreshDebugOverlayMs: 0,
+		refreshEnvCellMembershipMs: 0,
+		releaseTextureDependenciesMs: 0,
+		renderPassPlanMs: 0,
+		textureApplyMs: 0,
+		queuedMs: 0,
+	};
+}
+
+function toStaticCommitInstallTimingSnapshot(
+	timing: MutableStaticCommitInstallTiming,
+): StaticCommitInstallTimingDiagnostics {
+	return {
+		applyDynamicPlacementsMs: timing.applyDynamicPlacementsMs,
+		applyEnvCellPublicationsMs: timing.applyEnvCellPublicationsMs,
+		applyStaticLayersMs: timing.applyStaticLayersMs,
+		applyTexturePlacementUpdateMs: timing.applyTexturePlacementUpdateMs,
+		dynamicRendererSyncMs: timing.dynamicRendererSyncMs,
+		dynamicVisualPrepMs: timing.dynamicVisualPrepMs,
+		installStaticCommitMs: timing.installStaticCommitMs,
+		materializeMs: timing.materializeMs,
+		pinTextureDependenciesMs: timing.pinTextureDependenciesMs,
+		queryRecordsMs: timing.queryRecordsMs,
+		refreshDebugOverlayMs: timing.refreshDebugOverlayMs,
+		refreshEnvCellMembershipMs: timing.refreshEnvCellMembershipMs,
+		releaseTextureDependenciesMs: timing.releaseTextureDependenciesMs,
+		renderPassPlanMs: timing.renderPassPlanMs,
+		textureApplyMs: timing.textureApplyMs,
+		queuedMs: timing.queuedMs,
 	};
 }
 

@@ -895,6 +895,102 @@ Results:
 
 ## Next Steps
 
+### 2026-07-04 Automation Resteer
+
+User still observes corruption after the texture-key simplification work, and the visible trigger remains scene-interest changes under follow-mode style streaming. Manual repro/debug is too slow and too lossy for this class of bug.
+
+New direction:
+
+- Move repro orchestration into the browser harness so Codex can drive scene-interest churn directly.
+- Exercise repeated outdoor-anchor updates across multiple landblocks, forcing landblock eviction, re-add, page churn, and renderer upload/update ordering in the real browser/runtime/WebGL path.
+- Record per-hop runtime, static coordinator, and texture-atlas diagnostics in the harness output.
+- Use diagnostics invariants first; only add screenshot/canvas or GPU readback probes after the harness can produce a concrete failing hop or prove the current diagnostic surface is blind.
+
+Implementation started:
+
+- `BrowserPipelineHarness.svelte` now exposes `waitForStaticSceneReady(...)` through the harness API.
+- `browser-pipeline-harness.mjs` now accepts `--landblocks <csv>`, `--repeat <count>`, and `--settle-delay-ms <ms>` and records a `harnessScenario` step summary.
+
+Initial churn result:
+
+```sh
+npm run harness:browser -- --landblocks 0xda55ffff,0xdb56ffff,0xdc56ffff,0xd956ffff,0xda55ffff --repeat 2 --timeout-ms 180000 --output /tmp/holtburger-atlas-churn.json
+```
+
+- The first churn run reproduced a real texture lifetime bug before any visual probe work:
+  - `static commit install static-commit:2:evict failed at revision 2`
+  - `Texture placement item ... reference count cannot become -1`
+- Root cause: `TextureManager` conflated logical owner leases with static draw-unit dependency pins in `activeReferenceCount`. Re-planning an already-pinned placement could overwrite the derived active count with `entry.leaseCount`, losing the dependency pin. Later eviction then released the pin and underflowed.
+- Fix shape: split `leaseReferenceCount` from dependency resource pins, track dependency resource ids by placement item id, and derive `activeReferenceCount = leaseReferenceCount + dependencyPinCount`. Replanning and repacking now preserve lease counts and recompute active counts from first principles.
+- Added focused regression coverage in `texture-manager.test.ts`: re-planning an existing pinned binding must preserve the active reference and releasing the dependency must not underflow.
+- The churn harness readiness predicate was also corrected: static coordinator `committed` is a lifetime counter while `requested` is active task count, so churn readiness must use `committed >= requested` instead of equality.
+
+Verification:
+
+- `npm run test:ts -- --run src/lib/textures/texture-manager.test.ts` passed: 43 tests.
+- `npm run check` passed.
+- Two-hop churn run passed with `errorMessage: null`, no error-like trace samples, and atlas page churn (`created: 111`, `reclaimed: 76`).
+- Ten-hop churn run passed with `errorMessage: null`, 10 scene-interest revisions, `installedStaticDrawUnits === sourceStaticDrawUnits` for every hop, `pendingStaticCommitInstallCount` max 0, static coordinator failed max 0, no error-like trace samples, and atlas page churn (`created: 288`, `reclaimed: 252`, `absorbed: 131`).
+
+Next debugging rule:
+
+- This fixes a concrete churn-time atlas lifetime bug, but it does not prove the user-visible corruption is gone because the current browser harness asserts diagnostics, not framebuffer correctness.
+- If visual corruption still reproduces after this fix, add a targeted renderer/GPU-facing probe:
+  - first choice: compare renderer texture-placement/page-version data against draw-time bindings for repeated return hops to the same landblock;
+  - second choice: add a small framebuffer/screenshot checksum probe for stable static regions after scene settle.
+- Do not restore broad old hash probes by default.
+
+### 2026-07-04 Explicit Object Radius Repro
+
+User provided a reliable repro:
+
+1. Start with terrain radius 1, building radius 1, explicit object radius 0, generated scenery radius 0, and every other radius 0.
+2. Set the outdoor anchor to `dc560000`.
+3. Wait for settle.
+4. Set explicit object radius to 1.
+5. The explicit object `outdoor-static-object:outdoor-explicit-objects:dc56ffff:landblock-static/dc56ffff/object/0004/0200024b` renders with the wrong texture.
+
+Two separate bugs were found.
+
+First bug: explicit object and generated scenery radii were coupled.
+
+- The browser UI exposed separate radii, but runtime demand collapsed them through `detail: Math.max(explicitObjectRadius, generatedSceneryRadius)`.
+- That made generated scenery expand when only explicit objects were expanded, matching the user's observation that more generated scenery appeared in more landblocks.
+- Fix: replace `StaticLodRadii.detail` with independent `explicitObjects` and `generatedScenery` fields, and keep demand planning independent for `outdoor-explicit-objects` and `outdoor-generated-scenery`.
+- Regression: `demand-planner.test.ts` now asserts explicit object radius 1 plus generated scenery radius 0 requests 9 explicit-object tasks and 1 generated-scenery task.
+
+Second bug: renderer placement updates could miss existing bindings on an uploaded page.
+
+- The new browser harness scenario reproduced the exact target object and captured selection diagnostics before and after the explicit radius expansion.
+- Before the fix, after the final settle:
+  - texture manager placement for the target was rect `[788, 4, 128, 256]`, page `1024x1024`, placement revision 5.
+  - renderer object-material diagnostics for the same draw unit still sampled rect `[4, 4, 128, 256]`, page `512x512`, placement revision 2.
+- Root cause: texture page growth/repack updated canonical placement records, but `TexturePlacementUpdate.resolvedTexturePlacements` did not guarantee publication of every existing logical binding on each uploaded page. The renderer is a subscriber to those updates; if an existing binding moved but was not included in the update payload, its renderer placement map stayed stale.
+- Fix: after each texture mutation finishes updating placement records, append canonical resolved placements for every binding currently on every uploaded page version. Final dedupe keeps the canonical record, so renderer subscribers receive the same page version and rect exposed by `createPlacementResolutionSnapshot`.
+- Regression: `texture-manager.test.ts` now covers canonical placement publication when an existing binding is resubmitted during page growth, and updates the offline-placement absorption assertion to expect all residents on the uploaded page.
+
+Verification:
+
+```sh
+npm run test:ts -- --run src/lib/static/demand-planner.test.ts src/lib/runtime/client-runtime.test.ts src/lib/textures/texture-manager.test.ts
+npm run check
+npm run lint:ts
+npm run harness:browser -- --scenario explicit-object-radius-expansion --timeout-ms 180000 --output /tmp/holtburger-explicit-radius-repro-after.json
+git diff --check
+```
+
+Results:
+
+- Focused TypeScript tests passed: 3 files, 96 tests.
+- `npm run check` passed.
+- `npm run lint:ts` passed.
+- Browser repro passed with `errorMessage: null`.
+- After the final settle, target renderer diagnostics matched texture manager placement exactly: rect `[788, 4, 128, 256]`, page `1024x1024`, placement revision 5.
+- Requested static task count changed from 21 to 29, exactly the expected +8 for expanding explicit objects from radius 0 to radius 1. Generated scenery stayed anchor-only while its radius remained 0.
+- `git diff --check` passed.
+
+## Previous Next Steps
+
 1. Rebuild/reload the 3D client and try to reproduce the `0xdc56ffff/object/0003/02000248` corruption again.
 2. If it reproduces after the structural follow-up, capture the selected-object diagnostic report and inspect page-version and placement identity:
    - resolved placement page version,

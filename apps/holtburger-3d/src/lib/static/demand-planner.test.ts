@@ -9,7 +9,8 @@ describe("static demand planner", () => {
 		const { layerTasks } = planStaticDemand(
 			createOutdoorDemand(focusLandblockId, {
 				buildings: 9,
-				detail: 1,
+				explicitObjects: 1,
+				generatedScenery: 1,
 				envCells: 0,
 				terrain: 1,
 			}),
@@ -51,7 +52,8 @@ describe("static demand planner", () => {
 		const [task] = planStaticDemand(
 			createOutdoorDemand(0xda55ffff, {
 				buildings: -1,
-				detail: -1,
+				explicitObjects: -1,
+				generatedScenery: -1,
 				envCells: -1,
 				terrain: 0,
 			}),
@@ -78,7 +80,8 @@ describe("static demand planner", () => {
 		const { sourceRequests } = planStaticDemand(
 			createOutdoorDemand(0xda55ffff, {
 				buildings: -1,
-				detail: -1,
+				explicitObjects: -1,
+				generatedScenery: -1,
 				envCells: -1,
 				terrain: 0,
 			}),
@@ -107,7 +110,8 @@ describe("static demand planner", () => {
 		const { sourceRequests } = planStaticDemand(
 			createOutdoorDemand(0xda55ffff, {
 				buildings: 0,
-				detail: 0,
+				explicitObjects: 0,
+				generatedScenery: 0,
 				envCells: 0,
 				terrain: 0,
 			}),
@@ -164,7 +168,8 @@ describe("static demand planner", () => {
 		const { sourceRequests } = planStaticDemand(
 			createOutdoorDemand(0xda55ffff, {
 				buildings: 1,
-				detail: 1,
+				explicitObjects: 1,
+				generatedScenery: 1,
 				envCells: 1,
 				terrain: 1,
 			}),
@@ -185,17 +190,39 @@ describe("static demand planner", () => {
 		]);
 	});
 
+	it("keeps explicit object and generated scenery radii independent", () => {
+		const { layerTasks } = planStaticDemand(
+			createOutdoorDemand(0xdc56ffff, {
+				buildings: 1,
+				envCells: 0,
+				explicitObjects: 1,
+				generatedScenery: 0,
+				terrain: 1,
+			}),
+			5,
+		);
+
+		expect(
+			layerTasks.filter((task) => task.domain === "outdoor-explicit-objects"),
+		).toHaveLength(9);
+		expect(
+			layerTasks.filter((task) => task.domain === "outdoor-generated-scenery"),
+		).toHaveLength(1);
+	});
+
 	it("normalizes domain radii without letting non-terrain domains exceed terrain", () => {
 		expect(
 			normalizeOutdoorLodRadii({
 				buildings: 3.9,
-				detail: 2.1,
+				explicitObjects: 2.1,
+				generatedScenery: 2.1,
 				envCells: 9,
 				terrain: 1.8,
 			}),
 		).toEqual({
 			buildings: 1,
-			detail: 1,
+			explicitObjects: 1,
+			generatedScenery: 1,
 			envCells: 1,
 			terrain: 1,
 		});
@@ -205,7 +232,8 @@ describe("static demand planner", () => {
 		const { retainedLayerOwners, layerTasks } = planStaticDemand(
 			createOutdoorDemand(0xda55ffff, {
 				buildings: -1,
-				detail: -1,
+				explicitObjects: -1,
+				generatedScenery: -1,
 				envCells: 1,
 				terrain: 1,
 			}),
@@ -242,7 +270,8 @@ describe("static demand planner", () => {
 				},
 				lod: {
 					buildings: -1,
-					detail: -1,
+					explicitObjects: -1,
+					generatedScenery: -1,
 					envCells: -1,
 					terrain: -1,
 				},
@@ -292,7 +321,8 @@ describe("static demand planner", () => {
 					},
 					lod: {
 						buildings: -1,
-						detail: -1,
+						explicitObjects: -1,
+						generatedScenery: -1,
 						envCells: -1,
 						terrain: -1,
 					},
@@ -334,7 +364,8 @@ describe("static demand planner", () => {
 				},
 				lod: {
 					buildings: 4,
-					detail: 4,
+					explicitObjects: 4,
+					generatedScenery: 4,
 					envCells: 4,
 					terrain: 4,
 				},

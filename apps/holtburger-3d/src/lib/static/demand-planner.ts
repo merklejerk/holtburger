@@ -83,13 +83,13 @@ export function planStaticDemand(
 	addOutdoorDomainRequests(layerTasks, {
 		domain: "outdoor-explicit-objects",
 		focusLandblockId: landblockId,
-		radius: lod.detail,
+		radius: lod.explicitObjects,
 		revision,
 	});
 	addOutdoorDomainRequests(layerTasks, {
 		domain: "outdoor-generated-scenery",
 		focusLandblockId: landblockId,
-		radius: lod.detail,
+		radius: lod.generatedScenery,
 		revision,
 	});
 	addOutdoorDomainRequests(layerTasks, {
@@ -117,7 +117,8 @@ export function normalizeOutdoorLodRadii(lod: StaticLodRadii): StaticLodRadii {
 	return {
 		terrain,
 		buildings: Math.min(normalizeRadius(lod.buildings), terrain),
-		detail: Math.min(normalizeRadius(lod.detail), terrain),
+		explicitObjects: Math.min(normalizeRadius(lod.explicitObjects), terrain),
+		generatedScenery: Math.min(normalizeRadius(lod.generatedScenery), terrain),
 		envCells: Math.min(normalizeRadius(lod.envCells), terrain),
 	};
 }

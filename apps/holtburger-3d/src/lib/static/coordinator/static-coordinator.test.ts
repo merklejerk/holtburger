@@ -169,7 +169,8 @@ describe("static coordinator", () => {
 			},
 			lod: {
 				buildings: -1,
-				detail: -1,
+				explicitObjects: -1,
+				generatedScenery: -1,
 				envCells: -1,
 				terrain: 1,
 			},
@@ -183,7 +184,8 @@ describe("static coordinator", () => {
 			},
 			lod: {
 				buildings: -1,
-				detail: -1,
+				explicitObjects: -1,
+				generatedScenery: -1,
 				envCells: -1,
 				terrain: 1,
 			},
@@ -417,7 +419,8 @@ describe("static coordinator", () => {
 			},
 			lod: {
 				buildings: -1,
-				detail: -1,
+				explicitObjects: -1,
+				generatedScenery: -1,
 				envCells: 0,
 				terrain: -1,
 			},
@@ -470,7 +473,13 @@ describe("static coordinator", () => {
 
 		bakeTasksForDemand(coordinator, {
 			location: null,
-			lod: { buildings: -1, detail: -1, envCells: -1, terrain: -1 },
+			lod: {
+				buildings: -1,
+				explicitObjects: -1,
+				generatedScenery: -1,
+				envCells: -1,
+				terrain: -1,
+			},
 		});
 		await sourceReady?.continueWithPlacement(createPlacementSnapshots());
 
@@ -521,7 +530,13 @@ describe("static coordinator", () => {
 
 		bakeTasksForDemand(coordinator, {
 			location: null,
-			lod: { buildings: -1, detail: -1, envCells: -1, terrain: -1 },
+			lod: {
+				buildings: -1,
+				explicitObjects: -1,
+				generatedScenery: -1,
+				envCells: -1,
+				terrain: -1,
+			},
 		});
 		resolver.completeSource(sourceRequestId);
 		await flushPromises();
@@ -544,7 +559,13 @@ describe("static coordinator", () => {
 			resolver.pendingSourceRequests[0]?.requestId ?? "";
 		bakeTasksForDemand(coordinator, {
 			location: null,
-			lod: { buildings: -1, detail: -1, envCells: -1, terrain: -1 },
+			lod: {
+				buildings: -1,
+				explicitObjects: -1,
+				generatedScenery: -1,
+				envCells: -1,
+				terrain: -1,
+			},
 		});
 		const [newTask] = bakeTasksForDemand(
 			coordinator,
@@ -627,7 +648,13 @@ describe("static coordinator", () => {
 
 		bakeTasksForDemand(coordinator, {
 			location: null,
-			lod: { buildings: -1, detail: -1, envCells: -1, terrain: -1 },
+			lod: {
+				buildings: -1,
+				explicitObjects: -1,
+				generatedScenery: -1,
+				envCells: -1,
+				terrain: -1,
+			},
 		});
 		expect(coordinator.createSnapshot().ownerStates).toEqual([]);
 	});
@@ -838,7 +865,8 @@ describe("static coordinator", () => {
 			location: null,
 			lod: {
 				buildings: -1,
-				detail: -1,
+				explicitObjects: -1,
+				generatedScenery: -1,
 				terrain: -1,
 				envCells: -1,
 			},
@@ -987,7 +1015,8 @@ describe("static coordinator", () => {
 			location: null,
 			lod: {
 				buildings: -1,
-				detail: -1,
+				explicitObjects: -1,
+				generatedScenery: -1,
 				envCells: -1,
 				terrain: -1,
 			},
@@ -1050,7 +1079,8 @@ describe("static coordinator", () => {
 			},
 			lod: {
 				buildings: -1,
-				detail: -1,
+				explicitObjects: -1,
+				generatedScenery: -1,
 				terrain: 1,
 				envCells: -1,
 			},
@@ -1122,7 +1152,8 @@ describe("static coordinator", () => {
 			},
 			lod: {
 				buildings: -1,
-				detail: -1,
+				explicitObjects: -1,
+				generatedScenery: -1,
 				envCells: -1,
 				terrain: 1,
 			},
@@ -1151,7 +1182,8 @@ describe("static coordinator", () => {
 			},
 			lod: {
 				buildings: -1,
-				detail: -1,
+				explicitObjects: -1,
+				generatedScenery: -1,
 				envCells: -1,
 				terrain: 0,
 			},
@@ -1302,7 +1334,8 @@ describe("static coordinator", () => {
 			},
 			lod: {
 				buildings: 0,
-				detail: -1,
+				explicitObjects: -1,
+				generatedScenery: -1,
 				terrain: 0,
 				envCells: -1,
 			},
@@ -1527,7 +1560,8 @@ describe("static coordinator", () => {
 			location: null,
 			lod: {
 				buildings: -1,
-				detail: -1,
+				explicitObjects: -1,
+				generatedScenery: -1,
 				terrain: -1,
 				envCells: -1,
 			},
@@ -1553,7 +1587,8 @@ describe("static coordinator", () => {
 			},
 			lod: {
 				buildings: -1,
-				detail: -1,
+				explicitObjects: -1,
+				generatedScenery: -1,
 				envCells: -1,
 				terrain: 1,
 			},
@@ -1615,7 +1650,8 @@ describe("static coordinator", () => {
 			},
 			lod: {
 				buildings: -1,
-				detail: -1,
+				explicitObjects: -1,
+				generatedScenery: -1,
 				envCells: -1,
 				terrain: 0,
 			},
@@ -1649,7 +1685,8 @@ describe("static coordinator", () => {
 			},
 			lod: {
 				buildings: -1,
-				detail: -1,
+				explicitObjects: -1,
+				generatedScenery: -1,
 				envCells: 0,
 				terrain: -1,
 			},
@@ -1706,7 +1743,8 @@ describe("static coordinator", () => {
 			},
 			lod: {
 				buildings: -1,
-				detail: -1,
+				explicitObjects: -1,
+				generatedScenery: -1,
 				envCells: 0,
 				terrain: -1,
 			},
@@ -1795,7 +1833,8 @@ describe("static coordinator", () => {
 			},
 			lod: {
 				buildings: -1,
-				detail: -1,
+				explicitObjects: -1,
+				generatedScenery: -1,
 				envCells: 1,
 				terrain: 1,
 			},
@@ -1851,7 +1890,8 @@ function createSingleTerrainDemand(landblockId: number): StaticDemand {
 		},
 		lod: {
 			buildings: -1,
-			detail: -1,
+			explicitObjects: -1,
+			generatedScenery: -1,
 			terrain: 0,
 			envCells: -1,
 		},
@@ -1866,7 +1906,8 @@ function createSingleOutdoorObjectDemand(landblockId: number): StaticDemand {
 		},
 		lod: {
 			buildings: -1,
-			detail: 0,
+			explicitObjects: 0,
+			generatedScenery: 0,
 			terrain: 0,
 			envCells: -1,
 		},

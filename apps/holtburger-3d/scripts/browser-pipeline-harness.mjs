@@ -15,6 +15,9 @@ const DEFAULT_STATIC_DOMAINS = [
 	"terrain",
 ];
 const READY_KIND = "holtburger-3d-dev-asset-host-ready";
+const DEFAULT_LANDBLOCK_ID = "0xda55ffff";
+const EXPLICIT_OBJECT_RADIUS_EXPANSION_TARGET =
+	"outdoor-static-object:outdoor-explicit-objects:dc56ffff:landblock-static/dc56ffff/object/0004/0200024b";
 
 const options = parseArgs(process.argv.slice(2));
 const childProcesses = [];
@@ -29,7 +32,11 @@ try {
 		chromePath: options.chromePath,
 		domains: options.domains,
 		headed: options.headed,
-		landblockId: options.landblockId,
+		landblockIds: options.landblockIds,
+		scenario: options.scenario,
+		settleDelayMs: options.settleDelayMs,
+		sequenceRepeatCount: options.sequenceRepeatCount,
+		targetObjectId: options.targetObjectId,
 		timeoutMs: options.timeoutMs,
 		viteUrl,
 	});
@@ -56,8 +63,12 @@ function parseArgs(args) {
 		chromePath: process.env.CHROME_PATH ?? DEFAULT_CHROME_PATH,
 		domains: DEFAULT_STATIC_DOMAINS,
 		headed: false,
-		landblockId: "0xda55ffff",
+		landblockIds: [DEFAULT_LANDBLOCK_ID],
 		outputPath: null,
+		scenario: "landblock-sequence",
+		sequenceRepeatCount: 1,
+		settleDelayMs: 0,
+		targetObjectId: EXPLICIT_OBJECT_RADIUS_EXPANSION_TARGET,
 		timeoutMs: 180_000,
 		verbose: false,
 		viteUrl: null,
@@ -78,10 +89,37 @@ function parseArgs(args) {
 				parsed.headed = true;
 				break;
 			case "--landblock":
-				parsed.landblockId = requireValue(args, ++index, arg);
+				parsed.landblockIds = [requireValue(args, ++index, arg)];
+				break;
+			case "--landblocks":
+				parsed.landblockIds = parseLandblocks(requireValue(args, ++index, arg));
 				break;
 			case "--output":
 				parsed.outputPath = requireValue(args, ++index, arg);
+				break;
+			case "--repeat":
+				parsed.sequenceRepeatCount = Number(requireValue(args, ++index, arg));
+				if (
+					!Number.isInteger(parsed.sequenceRepeatCount) ||
+					parsed.sequenceRepeatCount <= 0
+				) {
+					throw new Error("--repeat must be a positive integer.");
+				}
+				break;
+			case "--scenario":
+				parsed.scenario = parseScenario(requireValue(args, ++index, arg));
+				break;
+			case "--settle-delay-ms":
+				parsed.settleDelayMs = Number(requireValue(args, ++index, arg));
+				if (
+					!Number.isFinite(parsed.settleDelayMs) ||
+					parsed.settleDelayMs < 0
+				) {
+					throw new Error("--settle-delay-ms must be a non-negative number.");
+				}
+				break;
+			case "--target-object":
+				parsed.targetObjectId = requireValue(args, ++index, arg);
 				break;
 			case "--timeout-ms":
 				parsed.timeoutMs = Number(requireValue(args, ++index, arg));
@@ -119,7 +157,12 @@ function printHelp() {
 
 Options:
   --landblock <hex>        Outdoor landblock to load. Default: 0xda55ffff
+  --landblocks <csv>       Outdoor landblock sequence to load, in order.
   --domains <csv>          Static domains to request. Default: ${DEFAULT_STATIC_DOMAINS.join(",")}
+  --repeat <count>         Repeat the landblock sequence. Default: 1
+  --scenario <name>        Scenario: landblock-sequence, explicit-object-radius-expansion.
+  --settle-delay-ms <ms>   Delay after each settled scene before continuing. Default: 0
+  --target-object <id>     Static object id for explicit-object-radius-expansion diagnostics.
   --headed                 Launch visible Chrome instead of headless Chrome.
   --output <path>          Write full diagnostics JSON to a file.
   --timeout-ms <ms>        Scene settle timeout. Default: 180000
@@ -144,6 +187,29 @@ function parseDomains(value) {
 		);
 	}
 	return domains;
+}
+
+function parseLandblocks(value) {
+	const landblocks = value
+		.split(",")
+		.map((landblock) => landblock.trim())
+		.filter((landblock) => landblock.length > 0);
+	if (landblocks.length === 0) {
+		throw new Error("--landblocks must contain at least one landblock id.");
+	}
+	return landblocks;
+}
+
+function parseScenario(value) {
+	if (
+		value !== "landblock-sequence" &&
+		value !== "explicit-object-radius-expansion"
+	) {
+		throw new Error(
+			"--scenario must be landblock-sequence or explicit-object-radius-expansion.",
+		);
+	}
+	return value;
 }
 
 async function writeDiagnosticsOutput(diagnostics, outputPath, errorMessage) {
@@ -177,6 +243,7 @@ function createDiagnosticsSummary(diagnostics, outputPath, errorMessage) {
 	return {
 		kind: "browser-pipeline-harness-summary",
 		errorMessage: errorMessage ?? null,
+		harnessScenario: diagnostics.harnessScenario ?? null,
 		outputPath,
 		runtime: diagnostics.runtime,
 		staticCoordinator: staticCoordinator?.summary ?? null,
@@ -305,7 +372,11 @@ async function runBrowserHarness({
 	chromePath,
 	domains,
 	headed,
-	landblockId,
+	landblockIds,
+	scenario,
+	settleDelayMs,
+	sequenceRepeatCount,
+	targetObjectId,
 	timeoutMs,
 	viteUrl,
 }) {
@@ -340,12 +411,28 @@ async function runBrowserHarness({
 		await waitForHarnessApi(client, timeoutMs);
 		let errorMessage = null;
 		const traceCollector = collectPipelineTrace(client, timeoutMs);
+		const scenarioSteps = [];
 		try {
-			await evaluate(
-				client,
-				"globalThis.__HOLTBURGER_3D_HARNESS__.requestOutdoorScene",
-				[{ domains, landblockId, timeoutMs }],
-			);
+			if (scenario === "explicit-object-radius-expansion") {
+				scenarioSteps.push(
+					...(await runExplicitObjectRadiusExpansionScenario({
+						client,
+						targetObjectId,
+						timeoutMs,
+					})),
+				);
+			} else {
+				scenarioSteps.push(
+					...(await runLandblockSequenceScenario({
+						client,
+						domains,
+						landblockIds,
+						sequenceRepeatCount,
+						settleDelayMs,
+						timeoutMs,
+					})),
+				);
+			}
 		} catch (error) {
 			errorMessage = error instanceof Error ? error.message : String(error);
 		}
@@ -355,11 +442,217 @@ async function runBrowserHarness({
 			"globalThis.__HOLTBURGER_3D_HARNESS__.createDiagnosticsReport",
 			[],
 		);
+		diagnostics.harnessScenario = {
+			domains,
+			kind: "browser-pipeline-harness-scenario",
+			landblockIds,
+			repeat: sequenceRepeatCount,
+			scenario,
+			settleDelayMs,
+			steps: scenarioSteps,
+			targetObjectId:
+				scenario === "explicit-object-radius-expansion" ? targetObjectId : null,
+		};
 		diagnostics.harnessTrace = harnessTrace;
 		return { diagnostics, errorMessage };
 	} finally {
 		client.close();
 	}
+}
+
+function createLandblockSequence(landblockIds, repeatCount) {
+	const sequence = [];
+	for (let repeatIndex = 0; repeatIndex < repeatCount; repeatIndex += 1) {
+		sequence.push(...landblockIds);
+	}
+	return sequence;
+}
+
+async function runLandblockSequenceScenario({
+	client,
+	domains,
+	landblockIds,
+	sequenceRepeatCount,
+	settleDelayMs,
+	timeoutMs,
+}) {
+	const steps = [];
+	const sequence = createLandblockSequence(landblockIds, sequenceRepeatCount);
+	for (let index = 0; index < sequence.length; index += 1) {
+		const landblockId = sequence[index];
+		const lod = {};
+		const overview = await requestOutdoorScene(client, {
+			domains,
+			landblockId,
+			lod,
+			timeoutMs,
+		});
+		const diagnostics = await createDiagnosticsReport(client);
+		steps.push(
+			createHarnessScenarioStep({
+				diagnostics,
+				index,
+				landblockId,
+				lod,
+				overview,
+				stepName: "landblock-sequence",
+			}),
+		);
+		if (settleDelayMs > 0 && index < sequence.length - 1) {
+			await delay(settleDelayMs);
+		}
+	}
+	return steps;
+}
+
+async function runExplicitObjectRadiusExpansionScenario({
+	client,
+	targetObjectId,
+	timeoutMs,
+}) {
+	const targetSelectionKey = parseOutdoorStaticObjectId(targetObjectId);
+	const domains = DEFAULT_STATIC_DOMAINS;
+	const landblockId = "0xdc560000";
+	const initialLod = {
+		buildings: 1,
+		envCells: 0,
+		explicitObjects: 0,
+		generatedScenery: 0,
+		terrain: 1,
+	};
+	const expandedLod = {
+		...initialLod,
+		explicitObjects: 1,
+	};
+	const scenarioInputs = [
+		{
+			landblockId,
+			lod: initialLod,
+			stepName: "initial-explicit-radius-0",
+		},
+		{
+			landblockId,
+			lod: expandedLod,
+			stepName: "expanded-explicit-radius-1",
+		},
+	];
+	const steps = [];
+	for (let index = 0; index < scenarioInputs.length; index += 1) {
+		const input = scenarioInputs[index];
+		const overview = await requestOutdoorScene(client, {
+			domains,
+			landblockId: input.landblockId,
+			lod: input.lod,
+			timeoutMs,
+		});
+		const diagnostics = await createDiagnosticsReport(client);
+		const targetSelection = await createStaticSelectionDiagnosticsReport(
+			client,
+			targetSelectionKey,
+		);
+		steps.push(
+			createHarnessScenarioStep({
+				diagnostics,
+				index,
+				landblockId: input.landblockId,
+				lod: input.lod,
+				overview,
+				stepName: input.stepName,
+				targetSelection,
+			}),
+		);
+	}
+	return steps;
+}
+
+async function requestOutdoorScene(client, options) {
+	return evaluate(
+		client,
+		"globalThis.__HOLTBURGER_3D_HARNESS__.requestOutdoorScene",
+		[options],
+	);
+}
+
+async function createDiagnosticsReport(client) {
+	return evaluate(
+		client,
+		"globalThis.__HOLTBURGER_3D_HARNESS__.createDiagnosticsReport",
+		[],
+	);
+}
+
+async function createStaticSelectionDiagnosticsReport(client, selectionKey) {
+	return evaluate(
+		client,
+		"globalThis.__HOLTBURGER_3D_HARNESS__.createStaticSelectionDiagnosticsReport",
+		[selectionKey],
+	);
+}
+
+function parseOutdoorStaticObjectId(value) {
+	const prefix = "outdoor-static-object:";
+	if (!value.startsWith(prefix)) {
+		throw new Error(`Target object id must start with ${prefix}: ${value}.`);
+	}
+	const withoutPrefix = value.slice(prefix.length);
+	const parts = withoutPrefix.split(":");
+	if (parts.length !== 3) {
+		throw new Error(`Target object id is invalid: ${value}.`);
+	}
+	const [domain, landblockHex, instanceId] = parts;
+	if (
+		domain !== "outdoor-buildings" &&
+		domain !== "outdoor-explicit-objects" &&
+		domain !== "outdoor-generated-scenery"
+	) {
+		throw new Error(`Target object domain is invalid: ${domain}.`);
+	}
+	return {
+		domain,
+		instanceId,
+		itemKind: "outdoor-static-object",
+		landblockId: parseHexLandblockId(landblockHex),
+	};
+}
+
+function parseHexLandblockId(value) {
+	const parsed = Number.parseInt(
+		value.startsWith("0x") || value.startsWith("0X") ? value.slice(2) : value,
+		16,
+	);
+	if (!Number.isInteger(parsed)) {
+		throw new Error(`Invalid landblock id ${value}.`);
+	}
+	return parsed >>> 0;
+}
+
+function createHarnessScenarioStep({
+	diagnostics,
+	index,
+	landblockId,
+	lod,
+	overview,
+	stepName,
+	targetSelection,
+}) {
+	const domains = Array.isArray(diagnostics.domains) ? diagnostics.domains : [];
+	const staticCoordinator = domains.find(
+		(domain) => domain.kind === "static-coordinator",
+	);
+	const textureAtlas = domains.find(
+		(domain) => domain.kind === "texture-atlas",
+	);
+	return {
+		index,
+		landblockId,
+		lod,
+		runtime: diagnostics.runtime,
+		staticCoordinator: staticCoordinator?.summary ?? null,
+		staticOverview: overview.static,
+		stepName,
+		targetSelection: targetSelection ?? null,
+		textureAtlas: textureAtlas?.summary ?? null,
+	};
 }
 
 function collectPipelineTrace(client, timeoutMs) {

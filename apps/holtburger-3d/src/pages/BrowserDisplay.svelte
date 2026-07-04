@@ -336,7 +336,8 @@
 				selectedDemandDomains(),
 				{
 					buildings: buildingRadius,
-					detail: Math.max(explicitObjectRadius, generatedSceneryRadius),
+					explicitObjects: explicitObjectRadius,
+					generatedScenery: generatedSceneryRadius,
 					terrain: terrainRadius,
 					envCells: envCellRadius,
 				},
@@ -1216,7 +1217,8 @@
 			enabled: followModeEnabled,
 			lod: {
 				buildings: buildingRadius,
-				detail: Math.max(explicitObjectRadius, generatedSceneryRadius),
+				explicitObjects: explicitObjectRadius,
+				generatedScenery: generatedSceneryRadius,
 				terrain: terrainRadius,
 				envCells: envCellRadius,
 			},

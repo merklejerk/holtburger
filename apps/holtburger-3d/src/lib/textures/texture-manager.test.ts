@@ -413,7 +413,9 @@ describe("browser texture manager", () => {
 			},
 		]);
 		expect(
-			new Set(getResolvedPlacementSlots(secondUpdate?.resolvedTexturePlacements)),
+			new Set(
+				getResolvedPlacementSlots(secondUpdate?.resolvedTexturePlacements),
+			),
 		).toEqual(
 			new Set([
 				"building-a:palette",
@@ -445,6 +447,57 @@ describe("browser texture manager", () => {
 				(key) => key.kind === "prepared-palette-texture",
 			),
 		).toHaveLength(6);
+	});
+
+	it("publishes canonical placements when an existing binding is resubmitted during page growth", async () => {
+		const assetService = new FixtureAssetService(null, { paletteSize: 46 });
+		const textureManager = new TextureManager({ assetService });
+		const firstUse = createPaletteTextureUseCommit({
+			drawUnitId: "building-a",
+			paletteId: 0x04000010,
+			replacementPaletteId: 0x04000110,
+			textureBindingId: "building-a:palette",
+		});
+
+		await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedResources: [],
+			revision: 1,
+			textureUses: [firstUse],
+		});
+		const secondUpdate = await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedResources: [],
+			revision: 2,
+			textureUses: [
+				firstUse,
+				...[1, 2, 3, 4].map((index) =>
+					createPaletteTextureUseCommit({
+						drawUnitId: `building-${index}`,
+						paletteId: 0x04000010 + index,
+						replacementPaletteId: 0x04000110 + index,
+						textureBindingId: `building-${index}:palette`,
+					}),
+				),
+			],
+		});
+
+		const publishedPlacement = findResolvedPlacementBySlot(
+			secondUpdate?.resolvedTexturePlacements,
+			"building-a:palette",
+		);
+		const [canonicalPlacement] =
+			textureManager.createPlacementResolutionSnapshot([
+				publishedPlacement.bindingId,
+			]);
+		expect(canonicalPlacement).toBeDefined();
+		expect(publishedPlacement).toMatchObject({
+			pageVersion: canonicalPlacement?.pageVersion,
+			rect: canonicalPlacement?.rect,
+			textureHeight: canonicalPlacement?.height,
+			textureRefId: canonicalPlacement?.textureRefId,
+			textureWidth: canonicalPlacement?.width,
+		});
 	});
 
 	it("updates every binding item when page-local repack moves a shared texture key", async () => {
@@ -485,7 +538,9 @@ describe("browser texture manager", () => {
 		});
 
 		expect(
-			new Set(getResolvedPlacementSlots(secondUpdate?.resolvedTexturePlacements)),
+			new Set(
+				getResolvedPlacementSlots(secondUpdate?.resolvedTexturePlacements),
+			),
 		).toEqual(
 			new Set([
 				"building-a:palette",
@@ -519,9 +574,7 @@ describe("browser texture manager", () => {
 					width: 256,
 				}),
 				expect.objectContaining({
-					bindingId: expect.stringContaining(
-						"building-a%3Apalette-secondary",
-					),
+					bindingId: expect.stringContaining("building-a%3Apalette-secondary"),
 					itemId: secondaryPalettePlacement.bindingId,
 					pageVersion: secondaryPalettePlacement.pageVersion,
 					textureKey: expect.stringContaining("texture|"),
@@ -721,7 +774,9 @@ describe("browser texture manager", () => {
 
 		expect(texturePacker.jobs[0]?.cohorts).toBeUndefined();
 		expect(
-			getFixtureBindingSlots(texturePacker.jobs[0]?.sources.map((source) => source.entryKey)),
+			getFixtureBindingSlots(
+				texturePacker.jobs[0]?.sources.map((source) => source.entryKey),
+			),
 		).toEqual(["terrain-base-a", "terrain-road", "terrain-base-b"]);
 	});
 
@@ -769,7 +824,9 @@ describe("browser texture manager", () => {
 
 		expect(texturePacker.jobs[0]?.cohorts).toBeUndefined();
 		expect(
-			getFixtureBindingSlots(texturePacker.jobs[0]?.sources.map((source) => source.entryKey)),
+			getFixtureBindingSlots(
+				texturePacker.jobs[0]?.sources.map((source) => source.entryKey),
+			),
 		).toEqual([
 			"terrain-a:prepared-texture:06000010",
 			"terrain-a:prepared-texture:06000020",
@@ -809,7 +866,9 @@ describe("browser texture manager", () => {
 		});
 
 		expect(
-			getFixtureBindingSlots(texturePacker.jobs[0]?.sources.map((source) => source.entryKey)),
+			getFixtureBindingSlots(
+				texturePacker.jobs[0]?.sources.map((source) => source.entryKey),
+			),
 		).toEqual(["terrain-a:prepared-texture:06000010"]);
 		expect(texturePacker.jobs[0]?.cohorts).toBeUndefined();
 	});
@@ -857,9 +916,9 @@ describe("browser texture manager", () => {
 				},
 			],
 		});
-		expect(getResolvedPlacementSlots(firstUpdate?.resolvedTexturePlacements)).toEqual([
-			"terrain-a:prepared-texture:06000010",
-		]);
+		expect(
+			getResolvedPlacementSlots(firstUpdate?.resolvedTexturePlacements),
+		).toEqual(["terrain-a:prepared-texture:06000010"]);
 		expect(secondUpdate).toMatchObject({
 			resolvedTexturePlacements: [
 				{
@@ -871,9 +930,9 @@ describe("browser texture manager", () => {
 			],
 			placements: [],
 		});
-		expect(getResolvedPlacementSlots(secondUpdate?.resolvedTexturePlacements)).toEqual([
-			"terrain-b:prepared-texture:06000010",
-		]);
+		expect(
+			getResolvedPlacementSlots(secondUpdate?.resolvedTexturePlacements),
+		).toEqual(["terrain-b:prepared-texture:06000010"]);
 	});
 
 	it("assigns draw-local terrain role-page slots from committed placements", async () => {
@@ -920,7 +979,9 @@ describe("browser texture manager", () => {
 			],
 		});
 
-		expect(getResolvedPlacementSlots(update?.resolvedTexturePlacements)).toEqual([
+		expect(
+			getResolvedPlacementSlots(update?.resolvedTexturePlacements),
+		).toEqual([
 			"terrain-a:prepared-texture:06000010",
 			"terrain-a:prepared-texture:06000020",
 		]);
@@ -976,10 +1037,9 @@ describe("browser texture manager", () => {
 			],
 		});
 
-		expect(getResolvedPlacementSlots(update?.resolvedTexturePlacements)).toEqual([
-			"static-a:base:0",
-			"static-a:base:1",
-		]);
+		expect(
+			getResolvedPlacementSlots(update?.resolvedTexturePlacements),
+		).toEqual(["static-a:base:0", "static-a:base:1"]);
 	});
 
 	it("assigns landblock env-cell texture uses to static role pages", async () => {
@@ -1041,10 +1101,9 @@ describe("browser texture manager", () => {
 			],
 		});
 
-		expect(getResolvedPlacementSlots(update?.resolvedTexturePlacements)).toEqual([
-			"structured-interior-a:base:0",
-			"structured-interior-a:base:1",
-		]);
+		expect(
+			getResolvedPlacementSlots(update?.resolvedTexturePlacements),
+		).toEqual(["structured-interior-a:base:0", "structured-interior-a:base:1"]);
 		expect(texturePacker.jobs).toMatchObject([
 			{
 				domain: "env-cell-system",
@@ -1198,13 +1257,20 @@ describe("browser texture manager", () => {
 				textureRefId: firstUpdate?.placements[0]?.textureRefId,
 			}),
 		]);
-		expect(secondUpdate?.resolvedTexturePlacements).toEqual([
-			expect.objectContaining({
-				pageVersion: uploadedPageVersion,
-				textureRefId: firstUpdate?.placements[0]?.textureRefId,
-				bindingId: inactiveTextureUse.bindingId,
-			}),
-		]);
+		expect(secondUpdate?.resolvedTexturePlacements).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					pageVersion: uploadedPageVersion,
+					textureRefId: firstUpdate?.placements[0]?.textureRefId,
+					bindingId: activeTextureUse.bindingId,
+				}),
+				expect.objectContaining({
+					pageVersion: uploadedPageVersion,
+					textureRefId: firstUpdate?.placements[0]?.textureRefId,
+					bindingId: inactiveTextureUse.bindingId,
+				}),
+			]),
+		);
 	});
 
 	it("reuses static-authored non-terrain pre-bake placements during commit", async () => {
@@ -1296,6 +1362,49 @@ describe("browser texture manager", () => {
 			itemId: secondUse.bindingId,
 			purpose: "terrain-color",
 		});
+	});
+
+	it("preserves active references when re-planning an existing binding", async () => {
+		const textureManager = new TextureManager({
+			assetService: new FixtureAssetService(),
+		});
+		const textureUse = createTextureUseCommit({
+			drawUnitId: "terrain-a",
+			outputFormat: "rgba8",
+			renderSurfaceId: 0x06000010,
+			textureBindingId: "terrain-active:prepared-texture:06000010",
+		});
+
+		await textureManager.placeTextureIntents({
+			intents: [createStaticPlacementIntent(textureUse)],
+		});
+		textureManager.pinTextureResourceDependencies([
+			{
+				resourceId: "terrain-a",
+				roles: [
+					{
+						itemIds: [textureUse.bindingId],
+						purpose: "terrain-color",
+					},
+				],
+			},
+		]);
+
+		await textureManager.placeTextureIntents({
+			intents: [createStaticPlacementIntent(textureUse)],
+		});
+
+		expect(
+			textureManager
+				.createPlacementReferenceSnapshot()
+				.find((record) => record.itemId === textureUse.bindingId),
+		).toMatchObject({
+			activeReferenceCount: 1,
+			itemId: textureUse.bindingId,
+		});
+		expect(() =>
+			textureManager.releaseTextureResourceDependencies(["terrain-a"]),
+		).not.toThrow();
 	});
 
 	it("pins and releases baked draw-unit texture dependencies", async () => {
@@ -1945,10 +2054,9 @@ describe("browser texture manager", () => {
 				texturePageCount: 1,
 			},
 		]);
-		expect(getResolvedPlacementSlots(update?.resolvedTexturePlacements)).toEqual([
-			"runtime-spawn:1:base:0",
-			"runtime-spawn:1:base:1",
-		]);
+		expect(
+			getResolvedPlacementSlots(update?.resolvedTexturePlacements),
+		).toEqual(["runtime-spawn:1:base:0", "runtime-spawn:1:base:1"]);
 	});
 
 	it("releases runtime object-material texture pages when the runtime visual owner is removed", async () => {
@@ -2186,9 +2294,9 @@ describe("browser texture manager", () => {
 		const palettePackingSource = texturePacker.jobs
 			.flatMap((job) => job.sources)
 			.find(
-				(source) => getFixtureBindingSlot(source.entryKey) === "static-a:palette",
-			)
-			?.source;
+				(source) =>
+					getFixtureBindingSlot(source.entryKey) === "static-a:palette",
+			)?.source;
 		expect(Array.from(palettePackingSource?.pixels.slice(0, 12) ?? [])).toEqual(
 			[0x11, 0x22, 0x33, 0xff, 0x44, 0x55, 0x66, 0x80, 0xaa, 0xbb, 0xcc, 0xff],
 		);
@@ -2220,10 +2328,9 @@ describe("browser texture manager", () => {
 				wrapT: "clamp-to-edge",
 			},
 		]);
-		expect(getResolvedPlacementSlots(update?.resolvedTexturePlacements)).toEqual([
-			"static-a:index",
-			"static-a:palette",
-		]);
+		expect(
+			getResolvedPlacementSlots(update?.resolvedTexturePlacements),
+		).toEqual(["static-a:index", "static-a:palette"]);
 		expect(
 			Array.from(update?.placements[1]?.pixels.slice(0, 12) ?? []),
 		).toEqual([
@@ -2300,10 +2407,9 @@ describe("browser texture manager", () => {
 		expect(texturePacker.jobs).toHaveLength(1);
 		expect(texturePacker.jobs[0]?.sources).toHaveLength(2);
 		expect(update?.placements).toHaveLength(1);
-		expect(getResolvedPlacementSlots(update?.resolvedTexturePlacements)).toEqual([
-			"static-a:palette-a",
-			"static-b:palette-b",
-		]);
+		expect(
+			getResolvedPlacementSlots(update?.resolvedTexturePlacements),
+		).toEqual(["static-a:palette-a", "static-b:palette-b"]);
 		const textureRefs = new Set(
 			update?.resolvedTexturePlacements.map(
 				(placement) => placement.textureRefId,
@@ -2531,7 +2637,10 @@ function trackFuzzActiveItem(
 	const activeItems = state.activeItemsByOwner.get(drawUnitId) ?? new Set();
 	activeItems.add(textureUse.bindingId);
 	state.activeItemsByOwner.set(drawUnitId, activeItems);
-	state.activeTextureKeyByItemId.set(textureUse.bindingId, textureUse.textureKey);
+	state.activeTextureKeyByItemId.set(
+		textureUse.bindingId,
+		textureUse.textureKey,
+	);
 }
 
 function recordFuzzTexturePlacementUpdate(
@@ -2573,7 +2682,8 @@ function assertNoStaleFuzzPlacementRevisions(
 	state: TextureManagerFuzzState,
 ): void {
 	const activeItemIds = [...state.activeTextureKeyByItemId.keys()].sort();
-	const snapshots = textureManager.createPlacementResolutionSnapshot(activeItemIds);
+	const snapshots =
+		textureManager.createPlacementResolutionSnapshot(activeItemIds);
 	if (snapshots.length !== activeItemIds.length) {
 		throw new Error(
 			`Expected ${activeItemIds.length} active placement snapshots, got ${snapshots.length}.\n${formatFuzzOperations(state)}`,
@@ -2613,7 +2723,9 @@ function assertFuzzSharedTextureKey(
 	state: TextureManagerFuzzState,
 	slots: readonly string[],
 ): void {
-	const itemIds = slots.map((slot) => findFuzzActiveBindingIdBySlot(state, slot));
+	const itemIds = slots.map((slot) =>
+		findFuzzActiveBindingIdBySlot(state, slot),
+	);
 	const textureKeys = new Set(
 		itemIds.map((itemId) => state.activeTextureKeyByItemId.get(itemId)),
 	);
@@ -2703,7 +2815,11 @@ function createSeededRandom(seed: number): SeededRandom {
 	};
 }
 
-function randomInt(random: SeededRandom, min: number, maxExclusive: number): number {
+function randomInt(
+	random: SeededRandom,
+	min: number,
+	maxExclusive: number,
+): number {
 	return Math.floor(random() * (maxExclusive - min)) + min;
 }
 
@@ -3142,7 +3258,9 @@ function createTextureUseCommit(options: {
 	readonly usage?: PreparedRgbaRenderSurfaceTextureUsage;
 }): StaticCoordinatorCommitDelta["textureUses"][number] {
 	const domain = options.domain ?? "outdoor-terrain";
-	const owners = [{ drawUnitId: options.drawUnitId, kind: "draw-unit" }] as const;
+	const owners = [
+		{ drawUnitId: options.drawUnitId, kind: "draw-unit" },
+	] as const;
 	const source: Extract<
 		StaticBakeTextureUse["source"],
 		{ readonly kind: "prepared-render-surface-texture-use" }
@@ -3250,7 +3368,9 @@ function createPaletteTextureUseCommit(options: {
 	readonly textureBindingId: string;
 }): StaticCoordinatorCommitDelta["textureUses"][number] {
 	const domain = "outdoor-buildings";
-	const owners = [{ drawUnitId: options.drawUnitId, kind: "draw-unit" }] as const;
+	const owners = [
+		{ drawUnitId: options.drawUnitId, kind: "draw-unit" },
+	] as const;
 	const source = createPreparedPaletteUse(
 		options.paletteId,
 		options.replacementPaletteId === undefined
@@ -3359,10 +3479,7 @@ function createFixtureTextureIdentity(input: {
 		pageClass: createTexturePageClass({
 			domain: input.domain,
 			format: outputFormat,
-			gutterPixels: getRuntimeTexturePageGutterPixels(
-				input.domain,
-				pagePolicy,
-			),
+			gutterPixels: getRuntimeTexturePageGutterPixels(input.domain, pagePolicy),
 			physicalWrapMode:
 				input.domain === "outdoor-terrain" ? pagePolicy.wrapS : undefined,
 			purpose,
@@ -3398,9 +3515,7 @@ function createFixtureTextureOwnerId(
 	}
 }
 
-function createFixtureTextureSourceKey(
-	source: MaterialTextureDataUseIdentity,
-) {
+function createFixtureTextureSourceKey(source: MaterialTextureDataUseIdentity) {
 	if (source.kind === "prepared-palette-texture-use") {
 		return createMaterialTextureSourceKey({
 			basePaletteId: source.palette.paletteId,

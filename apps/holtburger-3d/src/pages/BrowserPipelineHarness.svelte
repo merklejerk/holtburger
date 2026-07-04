@@ -13,6 +13,7 @@
 		ManualStaticDomain,
 		RuntimeOverviewSnapshot,
 	} from "../lib/runtime/client-runtime";
+	import type { StaticSceneSelectionKey } from "../lib/runtime/scene-query/contracts";
 	import type { RuntimeDiagnosticsReport } from "../lib/runtime/diagnostics";
 	import {
 		createFreeCameraFrameStateCamera,
@@ -33,11 +34,17 @@
 		readonly clearSceneInterest: () => RuntimeOverviewSnapshot;
 		readonly createDiagnosticsReport: () => RuntimeDiagnosticsReport;
 		readonly createOverviewSnapshot: () => RuntimeOverviewSnapshot;
+		readonly createStaticSelectionDiagnosticsReport: (
+			selectionKey: StaticSceneSelectionKey,
+		) => ReturnType<ClientRuntime["createStaticSelectionDiagnosticsReport"]>;
 		readonly requestOutdoorScene: (
 			options: BrowserPipelineHarnessOutdoorSceneOptions,
 		) => Promise<RuntimeOverviewSnapshot>;
 		readonly waitForStatus: (
 			status: RuntimeOverviewSnapshot["status"],
+			options?: BrowserPipelineHarnessWaitOptions,
+		) => Promise<RuntimeOverviewSnapshot>;
+		readonly waitForStaticSceneReady: (
 			options?: BrowserPipelineHarnessWaitOptions,
 		) => Promise<RuntimeOverviewSnapshot>;
 	};
@@ -47,7 +54,8 @@
 		readonly domains?: readonly ManualStaticDomain[];
 		readonly lod?: {
 			readonly buildings?: number;
-			readonly detail?: number;
+			readonly explicitObjects?: number;
+			readonly generatedScenery?: number;
 			readonly terrain?: number;
 			readonly envCells?: number;
 		};
@@ -108,6 +116,11 @@
 			createOverviewSnapshot() {
 				return requireRuntime().createOverviewSnapshot();
 			},
+			createStaticSelectionDiagnosticsReport(selectionKey) {
+				return requireRuntime().createStaticSelectionDiagnosticsReport(
+					selectionKey,
+				);
+			},
 			async requestOutdoorScene(options) {
 				const currentRuntime = requireRuntime();
 				const lod = options.lod ?? {};
@@ -117,12 +130,10 @@
 					kind: "outdoor-anchor",
 					lod: {
 						buildings: lod.buildings ?? DEFAULT_BUILDING_LOD_RADIUS,
-						detail:
-							lod.detail ??
-							Math.max(
-								DEFAULT_EXPLICIT_OBJECT_LOD_RADIUS,
-								DEFAULT_GENERATED_SCENERY_LOD_RADIUS,
-							),
+						explicitObjects:
+							lod.explicitObjects ?? DEFAULT_EXPLICIT_OBJECT_LOD_RADIUS,
+						generatedScenery:
+							lod.generatedScenery ?? DEFAULT_GENERATED_SCENERY_LOD_RADIUS,
 						envCells: lod.envCells ?? DEFAULT_ENV_CELL_LOD_RADIUS,
 						terrain: lod.terrain ?? DEFAULT_TERRAIN_LOD_RADIUS,
 					},
@@ -134,6 +145,9 @@
 			},
 			waitForStatus(status, options) {
 				return waitForRuntimeStatus(status, options);
+			},
+			waitForStaticSceneReady(options) {
+				return waitForStaticSceneReady(options);
 			},
 		};
 	}
@@ -248,7 +262,8 @@
 			staticOverview.requested > 0 &&
 			staticOverview.resolving === 0 &&
 			staticOverview.baking === 0 &&
-			staticOverview.committed === staticOverview.requested &&
+			// `committed` is lifetime commits; `requested` is active tasks.
+			staticOverview.committed >= staticOverview.requested &&
 			runtimeOverview.pendingStaticCommitInstallCount === 0 &&
 			runtimeOverview.installedStaticDrawUnits ===
 				runtimeOverview.sourceStaticDrawUnits

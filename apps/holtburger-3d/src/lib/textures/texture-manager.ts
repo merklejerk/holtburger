@@ -190,6 +190,7 @@ export class TextureManager {
 		RuntimeTexturePlacement
 	>();
 	readonly #dependencyItemIdsByResourceId = new Map<string, Set<string>>();
+	readonly #dependencyResourceIdsByItemId = new Map<string, Set<string>>();
 	readonly #pageLifecycleTotals: TextureAtlasPageLifecycleTotals = {
 		absorbed: 0,
 		created: 0,
@@ -418,10 +419,7 @@ export class TextureManager {
 				}
 				placementsByItemId.set(
 					intent.itemId,
-					toPhysicalTexturePlacement(
-						entry,
-						intent.itemId,
-					),
+					toPhysicalTexturePlacement(entry, intent.itemId),
 				);
 			}
 
@@ -468,7 +466,7 @@ export class TextureManager {
 			this.releaseTextureResourceDependencies([dependency.resourceId]);
 			const itemIds = new Set(dependency.roles.flatMap((role) => role.itemIds));
 			for (const itemId of itemIds) {
-				this.#changePlacementActiveReferenceCount(itemId, 1);
+				this.#addPlacementDependencyReference(itemId, dependency.resourceId);
 			}
 			this.#dependencyItemIdsByResourceId.set(dependency.resourceId, itemIds);
 		}
@@ -482,7 +480,7 @@ export class TextureManager {
 			}
 			this.#dependencyItemIdsByResourceId.delete(resourceId);
 			for (const itemId of itemIds) {
-				this.#changePlacementActiveReferenceCount(itemId, -1);
+				this.#removePlacementDependencyReference(itemId, resourceId);
 			}
 		}
 	}
@@ -610,7 +608,7 @@ export class TextureManager {
 							}
 						}
 						staged.entry.leaseCount += 1;
-						this.#setPlacementActiveReferenceCount(
+						this.#setPlacementLeaseReferenceCountsForRegistryEntry(
 							staged.entry,
 							staged.entry.leaseCount,
 						);
@@ -643,7 +641,10 @@ export class TextureManager {
 				);
 			}
 			entry.leaseCount += placement.pendingLeaseCount;
-			this.#setPlacementActiveReferenceCount(entry, entry.leaseCount);
+			this.#setPlacementLeaseReferenceCountsForRegistryEntry(
+				entry,
+				entry.leaseCount,
+			);
 		}
 
 		for (const textureUse of delta.textureUses) {
@@ -662,6 +663,12 @@ export class TextureManager {
 				]),
 			);
 		}
+		resolvedTexturePlacements.push(
+			...createResolvedTexturePlacementsForUploadedPages(
+				placements,
+				this.#placementRecordsByItemId.values(),
+			),
+		);
 
 		if (
 			placements.length === 0 &&
@@ -712,7 +719,7 @@ export class TextureManager {
 				}
 
 				entry.leaseCount -= 1;
-				this.#setPlacementActiveReferenceCount(
+				this.#setPlacementLeaseReferenceCountsForRegistryEntry(
 					entry,
 					Math.max(entry.leaseCount, 0),
 				);
@@ -911,11 +918,11 @@ export class TextureManager {
 			};
 		}
 
-			const insertionPlan = planAtlasPageInsertion({
-				cohorts: createTexturePackingCohorts(group)?.map((cohort) => ({
-					entryKeys: cohort.entryKeys,
-					key: cohort.key,
-				})),
+		const insertionPlan = planAtlasPageInsertion({
+			cohorts: createTexturePackingCohorts(group)?.map((cohort) => ({
+				entryKeys: cohort.entryKeys,
+				key: cohort.key,
+			})),
 			entries: group.entries.map(createAtlasInsertionEntry),
 			lockedPages: existingPages.map((page, textureIndex) => ({
 				height: page.height,
@@ -1000,24 +1007,18 @@ export class TextureManager {
 				const bindingIds =
 					this.#createTextureBindingIdsForRegistryEntry(existingEntry);
 				for (const entryKey of bindingIds) {
-					const activeReferenceCount =
-						this.#placementRecordsByItemId.get(entryKey)
-							?.activeReferenceCount ??
-						(entryKey === existingEntry.itemId
-							? existingEntry.leaseCount
-							: 0);
+					const leaseReferenceCount =
+						this.#placementRecordsByItemId.get(entryKey)?.leaseReferenceCount ??
+						(entryKey === existingEntry.itemId ? existingEntry.leaseCount : 0);
 					this.#recordPlacementEntry(existingEntry, entryKey);
-					this.#setPlacementActiveReferenceCount(
+					this.#setPlacementLeaseReferenceCount(
 						existingEntry,
-						activeReferenceCount,
+						leaseReferenceCount,
 						entryKey,
 					);
 				}
 				resolvedTexturePlacements.push(
-					...createResolvedTexturePlacementsForEntry(
-						existingEntry,
-						bindingIds,
-					),
+					...createResolvedTexturePlacementsForEntry(existingEntry, bindingIds),
 				);
 			}
 			for (const { entry, placement } of pagePlacements) {
@@ -1114,24 +1115,18 @@ export class TextureManager {
 				const bindingIds =
 					this.#createTextureBindingIdsForRegistryEntry(existingEntry);
 				for (const entryKey of bindingIds) {
-					const activeReferenceCount =
-						this.#placementRecordsByItemId.get(entryKey)
-							?.activeReferenceCount ??
-						(entryKey === existingEntry.itemId
-							? existingEntry.leaseCount
-							: 0);
+					const leaseReferenceCount =
+						this.#placementRecordsByItemId.get(entryKey)?.leaseReferenceCount ??
+						(entryKey === existingEntry.itemId ? existingEntry.leaseCount : 0);
 					this.#recordPlacementEntry(existingEntry, entryKey);
-					this.#setPlacementActiveReferenceCount(
+					this.#setPlacementLeaseReferenceCount(
 						existingEntry,
-						activeReferenceCount,
+						leaseReferenceCount,
 						entryKey,
 					);
 				}
 				resolvedTexturePlacements.push(
-					...createResolvedTexturePlacementsForEntry(
-						existingEntry,
-						bindingIds,
-					),
+					...createResolvedTexturePlacementsForEntry(existingEntry, bindingIds),
 				);
 			}
 		}
@@ -1571,6 +1566,30 @@ export class TextureManager {
 		return uniqueSortedStrings([...itemIds]);
 	}
 
+	#createTextureBindingIdsForLogicalRegistryEntry(
+		entry: VisualTextureRegistryEntry,
+	): readonly string[] {
+		const itemIds = new Set<string>();
+		for (const registry of this.#placementBucketRegistries.values()) {
+			for (const [textureKey, candidate] of registry.entries) {
+				if (candidate !== entry) {
+					continue;
+				}
+				const entryRef = createVisualTextureEntryRef({
+					domain: registry.domain,
+					placementBucketKey: registry.placementBucketKey,
+					textureKey,
+				});
+				for (const itemId of this.#itemIdsByTextureEntryRef.get(entryRef) ?? [
+					candidate.itemId,
+				]) {
+					itemIds.add(itemId);
+				}
+			}
+		}
+		return uniqueSortedStrings([...itemIds]);
+	}
+
 	#recordTextureEntryItemId(
 		entryRef: VisualTextureEntryRef,
 		itemId: string,
@@ -1588,8 +1607,13 @@ export class TextureManager {
 		itemId = entry.itemId,
 	): void {
 		const physicalEntry = entry.physicalEntry;
+		const leaseReferenceCount =
+			this.#placementRecordsByItemId.get(itemId)?.leaseReferenceCount ??
+			entry.leaseCount;
 		this.#placementRecordsByItemId.set(itemId, {
-			activeReferenceCount: entry.leaseCount,
+			activeReferenceCount:
+				leaseReferenceCount +
+				this.#getPlacementDependencyReferenceCount(itemId),
 			bindingId: itemId as TextureBindingId,
 			format: physicalEntry.format,
 			height: physicalEntry.textureHeight,
@@ -1604,12 +1628,13 @@ export class TextureManager {
 			textureRefId: physicalEntry.textureRefId,
 			textureKey: entry.textureKey,
 			width: physicalEntry.textureWidth,
+			leaseReferenceCount,
 		});
 	}
 
-	#setPlacementActiveReferenceCount(
+	#setPlacementLeaseReferenceCount(
 		entry: VisualTextureRegistryEntry,
-		activeReferenceCount: number,
+		leaseReferenceCount: number,
 		itemId = entry.itemId,
 	): void {
 		const record = this.#placementRecordsByItemId.get(itemId);
@@ -1619,24 +1644,76 @@ export class TextureManager {
 			if (!createdRecord) {
 				throw new Error(`Failed to record texture placement ${itemId}.`);
 			}
-			createdRecord.activeReferenceCount = activeReferenceCount;
+			createdRecord.leaseReferenceCount = leaseReferenceCount;
+			createdRecord.activeReferenceCount =
+				leaseReferenceCount +
+				this.#getPlacementDependencyReferenceCount(itemId);
 			return;
 		}
-		record.activeReferenceCount = activeReferenceCount;
+		record.leaseReferenceCount = leaseReferenceCount;
+		record.activeReferenceCount =
+			leaseReferenceCount + this.#getPlacementDependencyReferenceCount(itemId);
 	}
 
-	#changePlacementActiveReferenceCount(itemId: string, delta: number): void {
+	#setPlacementLeaseReferenceCountsForRegistryEntry(
+		entry: VisualTextureRegistryEntry,
+		leaseReferenceCount: number,
+	): void {
+		for (const itemId of this.#createTextureBindingIdsForLogicalRegistryEntry(
+			entry,
+		)) {
+			this.#setPlacementLeaseReferenceCount(entry, leaseReferenceCount, itemId);
+		}
+	}
+
+	#addPlacementDependencyReference(itemId: string, resourceId: string): void {
+		this.#requirePlacementRecord(itemId);
+		let resourceIds = this.#dependencyResourceIdsByItemId.get(itemId);
+		if (!resourceIds) {
+			resourceIds = new Set<string>();
+			this.#dependencyResourceIdsByItemId.set(itemId, resourceIds);
+		}
+		resourceIds.add(resourceId);
+		this.#refreshPlacementActiveReferenceCount(itemId);
+	}
+
+	#removePlacementDependencyReference(
+		itemId: string,
+		resourceId: string,
+	): void {
+		this.#requirePlacementRecord(itemId);
+		const resourceIds = this.#dependencyResourceIdsByItemId.get(itemId);
+		if (!resourceIds?.delete(resourceId)) {
+			throw new Error(
+				`Texture placement item ${itemId} is not pinned by resource ${resourceId}.`,
+			);
+		}
+		if (resourceIds.size === 0) {
+			this.#dependencyResourceIdsByItemId.delete(itemId);
+		}
+		this.#refreshPlacementActiveReferenceCount(itemId);
+	}
+
+	#refreshPlacementActiveReferenceCount(itemId: string): void {
 		const record = this.#placementRecordsByItemId.get(itemId);
 		if (!record) {
 			throw new Error(`Cannot pin unknown texture placement item ${itemId}.`);
 		}
-		const nextCount = record.activeReferenceCount + delta;
-		if (nextCount < 0) {
-			throw new Error(
-				`Texture placement item ${itemId} reference count cannot become ${nextCount}.`,
-			);
+		record.activeReferenceCount =
+			record.leaseReferenceCount +
+			this.#getPlacementDependencyReferenceCount(itemId);
+	}
+
+	#requirePlacementRecord(itemId: string): TexturePlacementRecord {
+		const record = this.#placementRecordsByItemId.get(itemId);
+		if (!record) {
+			throw new Error(`Cannot pin unknown texture placement item ${itemId}.`);
 		}
-		record.activeReferenceCount = nextCount;
+		return record;
+	}
+
+	#getPlacementDependencyReferenceCount(itemId: string): number {
+		return this.#dependencyResourceIdsByItemId.get(itemId)?.size ?? 0;
 	}
 
 	#reclaimZeroReferencePagesForTextureMutation(
@@ -1851,6 +1928,8 @@ interface TexturePlacementRecord {
 	readonly format: RuntimeTexturePlacement["format"];
 	readonly height: number;
 	readonly itemId: string;
+	/** Logical owner leases, excluding draw-unit dependency pins. */
+	leaseReferenceCount: number;
 	readonly pageId: string;
 	readonly pageVersion: TexturePageVersion;
 	readonly purpose: TextureUsagePurpose;
@@ -2196,11 +2275,9 @@ function createVisualTextureEntryRef(input: {
 	readonly placementBucketKey: TexturePlacementBucketKey;
 	readonly textureKey: VisualTextureKey;
 }): VisualTextureEntryRef {
-	return [
-		input.domain,
-		input.placementBucketKey,
-		input.textureKey,
-	].join(":") as VisualTextureEntryRef;
+	return [input.domain, input.placementBucketKey, input.textureKey].join(
+		":",
+	) as VisualTextureEntryRef;
 }
 
 function createTextureRefId(
@@ -2208,12 +2285,9 @@ function createTextureRefId(
 	placementBucketKey: string,
 	textureUse: Pick<VisualTextureUseCommit, "bindingId">,
 ): string {
-	return [
-		"texture-ref",
-		domain,
-		placementBucketKey,
-		textureUse.bindingId,
-	].join(":");
+	return ["texture-ref", domain, placementBucketKey, textureUse.bindingId].join(
+		":",
+	);
 }
 
 function createTexturePageRefId(
@@ -2338,10 +2412,10 @@ function selectPageLocalRepackPlan(
 	let selected: PageLocalRepackPlan | null = null;
 	for (const existingPage of existingPages) {
 		const layout = planAtlasLayout({
-				cohorts: createTexturePackingCohorts(group)?.map((cohort) => ({
-					entryKeys: cohort.entryKeys,
-					key: cohort.key,
-				})),
+			cohorts: createTexturePackingCohorts(group)?.map((cohort) => ({
+				entryKeys: cohort.entryKeys,
+				key: cohort.key,
+			})),
 			entries: [
 				...existingPage.physicalEntries.map(
 					createAtlasEntryForExistingPhysicalEntry,
@@ -2585,16 +2659,49 @@ function createResolvedTexturePlacementsForEntry(
 	}));
 }
 
+function createResolvedTexturePlacementsForUploadedPages(
+	placements: readonly RuntimeTexturePlacement[],
+	records: Iterable<TexturePlacementRecord>,
+): readonly ResolvedTexturePlacement[] {
+	const uploadedPageVersionKeys = new Set(
+		placements.map((placement) =>
+			createTexturePageVersionKey(placement.pageVersion),
+		),
+	);
+	if (uploadedPageVersionKeys.size === 0) {
+		return [];
+	}
+
+	return Array.from(records)
+		.filter((record) =>
+			uploadedPageVersionKeys.has(
+				createTexturePageVersionKey(record.pageVersion),
+			),
+		)
+		.map(createResolvedTexturePlacementForRecord);
+}
+
+function createResolvedTexturePlacementForRecord(
+	record: TexturePlacementRecord,
+): ResolvedTexturePlacement {
+	return {
+		bindingId: record.bindingId,
+		pageVersion: record.pageVersion,
+		rect: record.rect,
+		textureHeight: record.height,
+		textureRefId: record.textureRefId,
+		textureWidth: record.width,
+	};
+}
+
 function uniqueResolvedTexturePlacements(
 	placements: readonly ResolvedTexturePlacement[],
 ): readonly ResolvedTexturePlacement[] {
 	return Array.from(
 		new Map(
-				placements.map(
-					(placement) => [placement.bindingId, placement] as const,
-				),
-			).values(),
-		).sort((left, right) => left.bindingId.localeCompare(right.bindingId));
+			placements.map((placement) => [placement.bindingId, placement] as const),
+		).values(),
+	).sort((left, right) => left.bindingId.localeCompare(right.bindingId));
 }
 
 function createRegistryEntryPhysicalPlacementKey(

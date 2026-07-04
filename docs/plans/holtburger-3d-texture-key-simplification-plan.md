@@ -177,6 +177,8 @@ Internally, identity builders should accept structured inputs and return branded
 
 ### Phase 1: Introduce Named Identity Types
 
+**Status:** Complete.
+
 **Deliverables**
 
 - Add explicit types near `textures/placement.ts` or a new colocated `textures/identity.ts`:
@@ -206,6 +208,15 @@ Internally, identity builders should accept structured inputs and return branded
 - No production behavior changes yet.
 - No adapter accepts legacy `textureUseId` values as a `TextureKey`.
 - New builder names do not preserve `textureUseId` language.
+
+**Phase notes**
+
+- Added the new identity vocabulary as an isolated module before rewiring production call sites. This keeps Phase 1 behavior-neutral while giving later phases typed boundaries to cut toward.
+- Palette replacement identity now has one policy in the target API: final replacement ranges are identified by `offset`, `count`, and a cheap FNV-1a 64-bit hash of RGBA range bytes. Replacement palette asset ids and prepared texture content hashes are not accepted by the builder.
+- `TextureKey` inputs intentionally exclude owner scope, material wrap, filtering, mip generation, anisotropy, placement revision, and renderer texture refs.
+- `TextureBindingId` carries material wrap because the material consumer owns that sampling fact.
+- `TexturePageClass` can carry physical wrap only when page compatibility needs it; virtualized material wrap stays out of the canonical texture key.
+- Concession: the new builders are not yet wired into `TexturePlacement` or `TextureManager`. Phase 2 must replace the current `bindingKey` / `placementItemId` / `textureUseId` equality bridge instead of adding adapters around it.
 
 ### Phase 2: Split Static Material Requirements
 

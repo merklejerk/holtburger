@@ -21,6 +21,7 @@ import { createStaticMaterialTextureSamplingPolicy } from "../static/bake/static
 import type {
 	MaterialTextureDataUseIdentity,
 	StaticObjectSourceGeometrySidecar,
+	VisualTextureDomain,
 } from "../static/contracts";
 import {
 	type ObjectVisualMaterialFallbackReason,
@@ -35,6 +36,22 @@ import {
 	type TexturePlacementBucketKey,
 	type TextureUsagePurpose,
 } from "../textures/placement";
+import {
+	createMaterialTextureSourceKey,
+	createTextureBindingId,
+	createTextureKey,
+	createTextureOwnerId,
+	createTexturePageClass,
+	type TextureBindingId,
+	type TextureKey,
+	type TextureOwnerId,
+	type TexturePageClass,
+} from "../textures/identity";
+import { getRuntimeTexturePageGutterPixels } from "../textures/material-texture-identity";
+import {
+	createRuntimeTexturePagePolicy,
+	type RuntimeTexturePagePolicy,
+} from "../textures/sampling-policy";
 import {
 	createObjectVisualTexturePlacementIntents,
 	type ObjectVisualTexturePlacementRequirement,
@@ -70,7 +87,7 @@ interface DynamicMaterialSlotFacts {
 
 type PendingDynamicEntityTextureRequirement = Omit<
 	DynamicEntityTextureRequirement,
-	"placementItemId"
+	"bindingId" | "placementItemId"
 >;
 
 export class LocalDynamicVisualBaker implements DynamicVisualBaker {
@@ -241,24 +258,31 @@ export function createDynamicVisualTexturePlanning(
 			resourceId,
 			textureRecipes: recipePlan.textureRecipes,
 		});
-	const placementIntents = createObjectVisualTexturePlacementIntents({
-		requirements: pendingTextureRequirements.map((requirement) =>
-			createDynamicTexturePlacementRequirement({
+	const placementRequirements = pendingTextureRequirements.map(
+		(requirement) => ({
+			pendingRequirement: requirement,
+			placementRequirement: createDynamicTexturePlacementRequirement({
 				recipe,
 				requirement,
 			}),
+		}),
+	);
+	const placementIntents = createObjectVisualTexturePlacementIntents({
+		requirements: placementRequirements.map(
+			(item) => item.placementRequirement,
 		),
 	});
-	const placementItemIdByTextureUseId = new Map(
-		placementIntents.map((intent) => [intent.textureUseId, intent.itemId]),
+	const placementItemIdByBindingId = new Map(
+		placementIntents.map((intent) => [intent.bindingId, intent.itemId]),
 	);
-	const textureRequirements = pendingTextureRequirements.map(
-		(requirement): DynamicEntityTextureRequirement => ({
-			...requirement,
+	const textureRequirements = placementRequirements.map(
+		(item): DynamicEntityTextureRequirement => ({
+			...item.pendingRequirement,
+			bindingId: item.placementRequirement.requirement.bindingId,
 			placementItemId: requireDynamicTexturePlanningItemId({
+				bindingId: item.placementRequirement.requirement.bindingId,
 				entityId: recipe.entityId,
-				placementItemIdByTextureUseId,
-				textureUseId: requirement.textureUseId,
+				placementItemIdByBindingId,
 			}),
 		}),
 	);
@@ -294,6 +318,14 @@ function createDynamicTexturePlacementRequirement(options: {
 			textureDomain,
 		},
 		requirement: {
+			bindingId: createTextureBindingId({
+				resourceId: `dynamic:${options.recipe.entityId}`,
+				role: classifyTextureUsagePurpose(
+					options.requirement.dataUse,
+					textureDomain,
+				),
+				slot: options.requirement.textureUseId,
+			}),
 			bindingKey: options.requirement.textureUseId,
 			samplingPolicy: options.requirement.samplingPolicy,
 			source: {
@@ -301,25 +333,129 @@ function createDynamicTexturePlacementRequirement(options: {
 				kind: "material-texture-data-use",
 				samplingPolicy: options.requirement.samplingPolicy,
 			},
+			...createRuntimeAuthoredDynamicTextureIdentity({
+				dataUse: options.requirement.dataUse,
+				purpose: classifyTextureUsagePurpose(
+					options.requirement.dataUse,
+					textureDomain,
+				),
+				resourceId: resourceIdForDynamicTextureIdentity(options.recipe),
+				samplingPolicy: options.requirement.samplingPolicy,
+				textureDomain,
+				textureUseId: options.requirement.textureUseId,
+			}),
 			textureUseId: options.requirement.textureUseId,
 		},
 	};
 }
 
+function createRuntimeAuthoredDynamicTextureIdentity(options: {
+	readonly dataUse: MaterialTextureDataUseIdentity;
+	readonly purpose: TextureUsagePurpose;
+	readonly resourceId: string;
+	readonly samplingPolicy?: PendingDynamicEntityTextureRequirement["samplingPolicy"];
+	readonly textureDomain: VisualTextureDomain;
+	readonly textureUseId: string;
+}): {
+	readonly ownerIds: readonly TextureOwnerId[];
+	readonly pageClass: TexturePageClass;
+	readonly textureKey: TextureKey;
+} {
+	const pagePolicy = createRuntimeTexturePagePolicy(
+		options.dataUse,
+		options.samplingPolicy,
+	);
+	const outputFormat = createDynamicTextureOutputFormat(options.dataUse);
+	return {
+		ownerIds: [
+			createTextureOwnerId({
+				dynamicResourceId: options.resourceId,
+				kind: "dynamic-resource",
+			}),
+		],
+		pageClass: createTexturePageClass({
+			domain: options.textureDomain,
+			format: outputFormat,
+			gutterPixels: getRuntimeTexturePageGutterPixels(
+				options.textureDomain,
+				pagePolicy,
+			),
+			physicalWrapMode: createDynamicTexturePhysicalWrapMode(
+				options.textureDomain,
+				pagePolicy,
+			),
+			purpose: options.purpose,
+			sampleClass: pagePolicy.sampleClass,
+		}),
+		textureKey: createTextureKey({
+			outputFormat,
+			sampleClass: pagePolicy.sampleClass,
+			sourceKey: createMaterialTextureSourceKey({
+				kind: "runtime",
+				sourceId: `dynamic:${options.textureUseId}`,
+				usage:
+					options.dataUse.kind === "prepared-palette-texture-use"
+						? "palette-rgba"
+						: options.dataUse.usage,
+			}),
+		}),
+	};
+}
+
+function resourceIdForDynamicTextureIdentity(
+	recipe: DynamicVisualBakeInput["recipe"],
+): string {
+	return createDynamicVisualResourceId(recipe.entityId);
+}
+
+function createDynamicTextureOutputFormat(
+	dataUse: MaterialTextureDataUseIdentity,
+): "rgba8" | "index8" | "index16" {
+	if (dataUse.kind === "prepared-palette-texture-use") {
+		return "rgba8";
+	}
+	switch (dataUse.usage) {
+		case "index8":
+			return "index8";
+		case "index16":
+			return "index16";
+		case "rgba-color":
+		case "rgba-detail":
+		case "rgba-mask":
+		case "rgba-raw":
+			return "rgba8";
+	}
+}
+
+function createDynamicTexturePhysicalWrapMode(
+	domain: VisualTextureDomain,
+	pagePolicy: RuntimeTexturePagePolicy,
+): RuntimeTexturePagePolicy["wrapS"] | undefined {
+	if (domain !== "outdoor-terrain" && pagePolicy.sampleClass !== "rgba-mask") {
+		return undefined;
+	}
+	if (pagePolicy.wrapS !== pagePolicy.wrapT) {
+		throw new Error(
+			`Dynamic texture page class cannot encode mixed physical wrap modes ${pagePolicy.wrapS},${pagePolicy.wrapT}.`,
+		);
+	}
+	return pagePolicy.wrapS;
+}
+
 function requireDynamicTexturePlanningItemId(options: {
+	readonly bindingId: TextureBindingId;
 	readonly entityId: string;
-	readonly placementItemIdByTextureUseId: ReadonlyMap<
-		string,
+	readonly placementItemIdByBindingId: ReadonlyMap<
+		TextureBindingId,
 		TexturePlacementItemId
 	>;
-	readonly textureUseId: string;
 }): TexturePlacementItemId {
-	const placementItemId = options.placementItemIdByTextureUseId.get(
-		options.textureUseId,
+	const placementItemId = options.placementItemIdByBindingId.get(
+		options.bindingId,
 	);
 	if (placementItemId === undefined) {
 		throw new Error(
-			`Dynamic visual ${options.entityId} has no planned placement item id for texture use ${options.textureUseId}.`,
+			`Dynamic visual ${options.entityId} has no planned placement item id for binding ${options.bindingId}.`,
 		);
 	}
 	return placementItemId;
@@ -622,23 +758,21 @@ function resolveDynamicTextureRequirementPlacementItemIds(options: {
 	return options.textureRequirements.map((requirement) => ({
 		...requirement,
 		placementItemId: requireDynamicPlacementItemId({
+			bindingId: requirement.bindingId,
 			texturePlacementSnapshot: options.texturePlacementSnapshot,
-			textureUseId: requirement.textureUseId,
 		}),
 	}));
 }
 
 function requireDynamicPlacementItemId(options: {
+	readonly bindingId: TextureBindingId;
 	readonly texturePlacementSnapshot: DynamicVisualBakeInput["texturePlacementSnapshot"];
-	readonly textureUseId: string;
 }) {
 	const placementItemId =
-		options.texturePlacementSnapshot.itemIdsByTextureUseId.get(
-			options.textureUseId,
-		);
+		options.texturePlacementSnapshot.itemIdsByBindingId.get(options.bindingId);
 	if (placementItemId === undefined) {
 		throw new Error(
-			`Dynamic visual texture planning is missing object-visual placement item id for ${options.textureUseId}.`,
+			`Dynamic visual texture planning is missing object-visual placement item id for binding ${options.bindingId}.`,
 		);
 	}
 	return placementItemId;

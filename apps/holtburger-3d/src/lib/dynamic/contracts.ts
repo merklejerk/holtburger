@@ -39,6 +39,7 @@ import type {
 	TexturePlacementItemId,
 	TextureResourceDependencies,
 } from "../textures/placement";
+import type { TextureBindingId } from "../textures/identity";
 
 export type DynamicEntityId = string;
 export const RUNTIME_AUTHORED_DYNAMIC_RESOURCE_FAMILY =
@@ -673,6 +674,8 @@ export interface DynamicEntityTextureRequirement {
 	readonly samplingPolicy: StaticBakeTextureSamplingPolicy;
 	/** Numeric bake-time placement lookup id. */
 	readonly placementItemId: TexturePlacementItemId;
+	/** Material-consumer binding identity used to resolve numeric placement ids. */
+	readonly bindingId: TextureBindingId;
 	/** Runtime texture-use id used for renderer binding and dependency pinning. */
 	readonly textureUseId: string;
 }

@@ -1,3 +1,4 @@
+import type { PreparedAssetReader } from "../../../assets/contracts";
 import type { StaticBakeJobPayload, StaticScopePayload } from "../../contracts";
 import { createStaticMaterialTextureBindingRequirement } from "../../bake/static-material-texture-policy";
 import type { ObjectVisualTexturePlacementIntent } from "../../../textures/placement";
@@ -5,14 +6,16 @@ import {
 	createObjectVisualTexturePlacementIntents,
 	type ObjectVisualTexturePlacementRequirement,
 } from "../../../visual/object-visual-texture-placement-planner";
+import { createMaterialTextureIdentityFacts } from "../../../textures/material-texture-identity";
 import { createObjectVisualSourcePayload } from "./object-visual-source-payload";
 import { partitionStaticObjectBatches } from "./static-object-batch-partitioner";
 import { isCurrentlyStageableStaticObjectDataUse } from "./static-object-renderability";
 
-export function createStaticObjectTexturePlacementIntents(input: {
+export async function createStaticObjectTexturePlacementIntents(input: {
+	readonly assetReader: PreparedAssetReader;
 	readonly items: readonly StaticBakeJobPayload[];
-}): readonly ObjectVisualTexturePlacementIntent[] {
-	const requirementsByTextureUseId = new Map<
+}): Promise<readonly ObjectVisualTexturePlacementIntent[]> {
+	const requirementsByBindingId = new Map<
 		string,
 		ObjectVisualTexturePlacementRequirement
 	>();
@@ -36,10 +39,17 @@ export function createStaticObjectTexturePlacementIntents(input: {
 						textureUseScopeId: item.task.ownerId,
 						wrapMode: entry.textureWrapMode,
 					});
-					if (requirementsByTextureUseId.has(requirement.textureUseId)) {
+					if (requirementsByBindingId.has(requirement.bindingId)) {
 						continue;
 					}
-					requirementsByTextureUseId.set(requirement.textureUseId, {
+					const identity = await createMaterialTextureIdentityFacts({
+						assetReader: input.assetReader,
+						dataUse,
+						domain: item.task.domain,
+						purpose: requirement.purpose,
+						samplingPolicy: requirement.samplingPolicy,
+					});
+					requirementsByBindingId.set(requirement.bindingId, {
 						policy: {
 							affinityKey: createStaticObjectPlacementAffinityKey({
 								landblockId: payload.landblock.landblockId,
@@ -49,7 +59,12 @@ export function createStaticObjectTexturePlacementIntents(input: {
 							domain: payload.domain,
 							kind: "static-authored",
 						},
-						requirement,
+						requirement: {
+							...requirement,
+							ownerIds: [],
+							pageClass: identity.pageClass,
+							textureKey: identity.textureKey,
+						},
 					});
 				}
 			}
@@ -57,7 +72,7 @@ export function createStaticObjectTexturePlacementIntents(input: {
 	}
 
 	return createObjectVisualTexturePlacementIntents({
-		requirements: [...requirementsByTextureUseId.values()],
+		requirements: [...requirementsByBindingId.values()],
 	});
 }
 

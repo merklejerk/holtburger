@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type {
+	PreparedAsset,
+	PreparedAssetReader,
+} from "../../../assets/contracts";
+import type {
 	StaticBakeJobInput,
 	StaticBakeTask,
 	TerrainGeometryStaticDrawUnit,
@@ -11,8 +15,8 @@ import {
 } from "./terrain-geometry-baker";
 
 describe("terrain geometry baker", () => {
-	it("converts terrain mesh facts into a geometry-only draw unit", () => {
-		const input = createTerrainBakeInput();
+	it("converts terrain mesh facts into a geometry-only draw unit", async () => {
+		const input = await createTerrainBakeInput();
 
 		const result = bakeTerrainGeometry(input);
 		const drawUnit = requireTerrainDrawUnit(result.drawUnits[0]);
@@ -96,8 +100,8 @@ describe("terrain geometry baker", () => {
 		]);
 	});
 
-	it("uses uint32 indices when baked terrain vertices exceed uint16 capacity", () => {
-		const input = createTerrainBakeInput({
+	it("uses uint32 indices when baked terrain vertices exceed uint16 capacity", async () => {
+		const input = await createTerrainBakeInput({
 			triangleCount: 21_846,
 		});
 
@@ -111,8 +115,8 @@ describe("terrain geometry baker", () => {
 		expect(drawUnit.indices[65_537]).toBe(65_537);
 	});
 
-	it("uses uint16 indices at the uint16 maximum vertex boundary", () => {
-		const input = createTerrainBakeInput({
+	it("uses uint16 indices at the uint16 maximum vertex boundary", async () => {
+		const input = await createTerrainBakeInput({
 			triangleCount: 21_845,
 		});
 
@@ -126,8 +130,8 @@ describe("terrain geometry baker", () => {
 		expect(drawUnit.indices[65_534]).toBe(65_534);
 	});
 
-	it("emits bake-local prepared texture uses without renderer texture refs", () => {
-		const input = createTerrainBakeInput({ includeTextureUse: true });
+	it("emits bake-local prepared texture uses without renderer texture refs", async () => {
+		const input = await createTerrainBakeInput({ includeTextureUse: true });
 
 		const result = bakeTerrainGeometry(input);
 		const drawUnit = requireTerrainDrawUnit(result.drawUnits[0]);
@@ -195,11 +199,12 @@ describe("terrain geometry baker", () => {
 		expect(JSON.stringify(result)).not.toContain("texture-ref");
 	});
 
-	it("discovers terrain placement intents before bake", () => {
-		const input = createTerrainBakeInput({ includeTextureUse: true });
+	it("discovers terrain placement intents before bake", async () => {
+		const input = await createTerrainBakeInput({ includeTextureUse: true });
 
 		expect(
-			createTerrainTexturePlacementIntents({
+			await createTerrainTexturePlacementIntents({
+				assetReader: new EmptyPreparedAssetReader(),
 				items: [{ payload: input.payload, task: input.task }],
 			}),
 		).toEqual([
@@ -212,11 +217,11 @@ describe("terrain geometry baker", () => {
 		]);
 	});
 
-	it("splits terrain draw units by final terrain color pages", () => {
+	it("splits terrain draw units by final terrain color pages", async () => {
 		const pcodes = Array.from({ length: 5 }, (_value, index) =>
 			encodeTerrainPcode(index + 1),
 		);
-		const input = createTerrainBakeInput({
+		const input = await createTerrainBakeInput({
 			pcodes,
 			terrainTypeCodes: pcodes.map((pcode) => decodeRepeatedTerrainCode(pcode)),
 			textureUseSurfaceTextureIds: pcodes.map(
@@ -245,9 +250,9 @@ describe("terrain geometry baker", () => {
 		]);
 	});
 
-	it("fails terrain baking when a required texture is missing pre-bake placement", () => {
+	it("fails terrain baking when a required texture is missing pre-bake placement", async () => {
 		const input = {
-			...createTerrainBakeInput({ includeTextureUse: true }),
+			...(await createTerrainBakeInput({ includeTextureUse: true })),
 			texturePlacementSnapshot: {
 				placementsByItemId: new Map(),
 			},
@@ -258,11 +263,11 @@ describe("terrain geometry baker", () => {
 		);
 	});
 
-	it("partitions terrain geometry by bounded material draw slices", () => {
+	it("partitions terrain geometry by bounded material draw slices", async () => {
 		const pcodes = Array.from({ length: 9 }, (_value, index) =>
 			encodeTerrainPcode(index + 1),
 		);
-		const input = createTerrainBakeInput({
+		const input = await createTerrainBakeInput({
 			pcodes,
 			terrainTypeCodes: pcodes.map((pcode) => decodeRepeatedTerrainCode(pcode)),
 		});
@@ -298,11 +303,11 @@ describe("terrain geometry baker", () => {
 		expect(result.staticSourceMappings).toHaveLength(18);
 	});
 
-	it("assigns terrain texture-use owners to the material slice that binds them", () => {
+	it("assigns terrain texture-use owners to the material slice that binds them", async () => {
 		const pcodes = Array.from({ length: 9 }, (_value, index) =>
 			encodeTerrainPcode(index + 1),
 		);
-		const input = createTerrainBakeInput({
+		const input = await createTerrainBakeInput({
 			pcodes,
 			terrainTypeCodes: pcodes.map((pcode) => decodeRepeatedTerrainCode(pcode)),
 			textureUseSurfaceTextureIds: pcodes.map(
@@ -353,7 +358,7 @@ function requireTerrainDrawUnit(
 	return drawUnit as TerrainGeometryStaticDrawUnit;
 }
 
-function createTerrainBakeInput(
+async function createTerrainBakeInput(
 	options: {
 		readonly includeTextureUse?: boolean;
 		readonly pcodes?: readonly number[];
@@ -362,7 +367,7 @@ function createTerrainBakeInput(
 		readonly textureUseSurfaceTextureIds?: readonly number[];
 		readonly uniqueColorPages?: boolean;
 	} = {},
-): StaticBakeJobInput {
+): Promise<StaticBakeJobInput> {
 	const task = createTerrainTask(0xda55ffff);
 	const payload = createTerrainPayload(options, 0xda55ffff);
 	const input: StaticBakeJobInput = {
@@ -384,15 +389,19 @@ function createTerrainBakeInput(
 	};
 	return {
 		...input,
-		texturePlacementSnapshot: createTexturePlacementSnapshot(input, options),
+		texturePlacementSnapshot: await createTexturePlacementSnapshot(
+			input,
+			options,
+		),
 	};
 }
 
-function createTexturePlacementSnapshot(
+async function createTexturePlacementSnapshot(
 	input: StaticBakeJobInput,
 	options: { readonly uniqueColorPages?: boolean },
-): NonNullable<StaticBakeJobInput["texturePlacementSnapshot"]> {
-	const intents = createTerrainTexturePlacementIntents({
+): Promise<NonNullable<StaticBakeJobInput["texturePlacementSnapshot"]>> {
+	const intents = await createTerrainTexturePlacementIntents({
+		assetReader: new EmptyPreparedAssetReader(),
 		items: [{ payload: input.payload, task: input.task }],
 	});
 	return {
@@ -412,6 +421,14 @@ function createTexturePlacementSnapshot(
 			]),
 		),
 	};
+}
+
+class EmptyPreparedAssetReader implements PreparedAssetReader {
+	async requestPreparedAsset(): Promise<PreparedAsset> {
+		throw new Error(
+			"terrain texture placement test did not expect asset reads",
+		);
+	}
 }
 
 function createTerrainTask(landblockId: number): StaticBakeTask {

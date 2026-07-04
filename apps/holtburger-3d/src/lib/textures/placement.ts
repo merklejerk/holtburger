@@ -4,6 +4,12 @@ import type {
 	StaticBakeTextureUse,
 	VisualTextureDomain,
 } from "../static/contracts";
+import type {
+	TextureBindingId,
+	TextureKey,
+	TextureOwnerId,
+	TexturePageClass,
+} from "./identity";
 
 /** Shader/page purpose used to group compatible placement items before baking. */
 export type TextureUsagePurpose =
@@ -71,6 +77,8 @@ export type TexturePlacementSource = TexturePlacementMaterialSource;
 export interface TextureBindingRequirement<
 	TPlacementItemId extends TexturePlacementLookupId = string,
 > {
+	/** Material-consumer binding identity. This is not canonical texture-pool identity. */
+	readonly bindingId: TextureBindingId;
 	/** Material-entry key referenced by draw units and renderer binding lookup. */
 	readonly bindingKey: string;
 	/** Packer/placement snapshot key used by bake-time material partition lookup. */
@@ -91,6 +99,14 @@ export interface TextureBindingRequirement<
 export interface TexturePlacementIntent<
 	TPlacementItemId extends TexturePlacementLookupId = string,
 > {
+	/** Material-consumer binding identity that requested this placement. */
+	readonly bindingId: TextureBindingId;
+	/** Canonical texture-pool identity requested by this placement. */
+	readonly textureKey: TextureKey;
+	/** Residency owners that keep this texture alive. */
+	readonly ownerIds: readonly TextureOwnerId[];
+	/** Physical atlas-page compatibility class for this placement. */
+	readonly pageClass: TexturePageClass;
 	/** Opaque placement item id used by the packer and baker placement snapshot. */
 	readonly itemId: TPlacementItemId;
 	/** Runtime registry item id used for ownership and pin/release accounting. */
@@ -111,6 +127,10 @@ export interface TexturePlacementIntent<
 export interface TexturePlacement<
 	TPlacementItemId extends TexturePlacementLookupId = string,
 > {
+	readonly bindingId: TextureBindingId;
+	readonly textureKey: TextureKey;
+	readonly ownerIds: readonly TextureOwnerId[];
+	readonly pageClass: TexturePageClass;
 	readonly itemId: TPlacementItemId;
 	readonly textureUseId: string;
 	readonly purpose: TextureUsagePurpose;
@@ -136,13 +156,16 @@ export interface TexturePlacementSnapshot<
 /** Object-visual placement snapshot keyed by numeric bake-time item ids. */
 export interface ObjectVisualTexturePlacementSnapshot extends TexturePlacementSnapshot<TexturePlacementItemId> {
 	/** Boundary bridge from renderer/runtime binding ids to numeric bake ids. */
-	readonly itemIdsByTextureUseId: ReadonlyMap<string, TexturePlacementItemId>;
+	readonly itemIdsByBindingId: ReadonlyMap<
+		TextureBindingId,
+		TexturePlacementItemId
+	>;
 }
 
 export function isObjectVisualTexturePlacementSnapshot(
 	snapshot: TexturePlacementSnapshot | ObjectVisualTexturePlacementSnapshot,
 ): snapshot is ObjectVisualTexturePlacementSnapshot {
-	return "itemIdsByTextureUseId" in snapshot;
+	return "itemIdsByBindingId" in snapshot;
 }
 
 export function requireObjectVisualTexturePlacementSnapshot(
@@ -182,6 +205,14 @@ export interface TextureResourceRoleDependency {
 }
 
 export interface TexturePlacementIntentOptions {
+	/** Material-consumer binding identity that requested this placement. */
+	readonly bindingId?: TextureBindingId;
+	/** Canonical texture-pool identity requested by this placement. */
+	readonly textureKey?: TextureKey;
+	/** Residency owners that keep this texture alive. */
+	readonly ownerIds?: readonly TextureOwnerId[];
+	/** Physical atlas-page compatibility class for this placement. */
+	readonly pageClass?: TexturePageClass;
 	/** Caller-owned opaque clustering hint for the packer. */
 	readonly affinityKey?: string | null;
 	/** Explicit dynamic placement bucket when caller owns runtime/static lifetime. */
@@ -219,11 +250,16 @@ export function createStaticTexturePlacementIntent(
 		textureUse.source,
 		textureUse.domain,
 	);
+	const identity = requireTexturePlacementIdentity(options);
 	return {
 		affinityKey: options.affinityKey ?? null,
+		bindingId: identity.bindingId,
 		domain: textureUse.domain,
 		itemId: textureUse.textureUseId,
+		ownerIds: identity.ownerIds,
+		pageClass: identity.pageClass,
 		textureUseId: textureUse.textureUseId,
+		textureKey: identity.textureKey,
 		placementBucketKey:
 			options.placementBucketKey ??
 			createTexturePlacementBucketKey({
@@ -264,17 +300,50 @@ export function createDynamicTexturePlacementIntent(
 			"Dynamic texture placement intents require an explicit placement bucket key.",
 		);
 	}
+	const identity = requireTexturePlacementIdentity(options);
 	return {
 		affinityKey: options.affinityKey ?? null,
+		bindingId: identity.bindingId,
 		domain: textureUse.textureDomain,
 		itemId: textureUse.textureUseId,
+		ownerIds: identity.ownerIds,
+		pageClass: identity.pageClass,
 		textureUseId: textureUse.textureUseId,
+		textureKey: identity.textureKey,
 		placementBucketKey: options.placementBucketKey,
 		purpose,
 		source: createTexturePlacementMaterialSource(
 			textureUse.source,
 			textureUse.samplingPolicy,
 		),
+	};
+}
+
+function requireTexturePlacementIdentity(
+	options: TexturePlacementIntentOptions,
+): Required<
+	Pick<
+		TexturePlacementIntentOptions,
+		"bindingId" | "textureKey" | "ownerIds" | "pageClass"
+	>
+> {
+	if (!options.bindingId) {
+		throw new Error("Texture placement intents require a bindingId.");
+	}
+	if (!options.textureKey) {
+		throw new Error("Texture placement intents require a textureKey.");
+	}
+	if (!options.ownerIds) {
+		throw new Error("Texture placement intents require ownerIds.");
+	}
+	if (!options.pageClass) {
+		throw new Error("Texture placement intents require a pageClass.");
+	}
+	return {
+		bindingId: options.bindingId,
+		ownerIds: options.ownerIds,
+		pageClass: options.pageClass,
+		textureKey: options.textureKey,
 	};
 }
 

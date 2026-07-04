@@ -283,7 +283,7 @@ function createBakeInput(recipe: StaticLayerRecipe): StaticBakeJobInput {
 		recipe.payload.job.domain === "outdoor-terrain"
 			? undefined
 			: {
-					itemIdsByTextureUseId: new Map(),
+					itemIdsByBindingId: new Map(),
 					kind: "object-visual-texture-placement-snapshot" as const,
 					placementsByItemId: new Map(),
 				};

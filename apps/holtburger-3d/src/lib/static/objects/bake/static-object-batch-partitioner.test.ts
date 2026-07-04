@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type {
+	HostAssetKey,
+	PreparedAsset,
+	PreparedAssetReader,
+} from "../../../assets/contracts";
+import type {
 	OutdoorStaticObjectsScopePayload,
 	StaticBakeJobInput,
 	StaticBakeTask,
@@ -10,6 +15,7 @@ import type {
 	StaticObjectTextureRefFacts,
 } from "../../contracts";
 import type { ObjectVisualTexturePlacementSnapshot } from "../../../textures/placement";
+import { describeHostAssetKey } from "../../../assets/keys";
 import { bakeStaticObjectJob } from "./static-object-job-baker";
 import {
 	partitionStaticObjectBatches,
@@ -130,13 +136,13 @@ describe("static object batch partitioner", () => {
 		]);
 	});
 
-	it("fails hard when a bake input omits a referenced geometry sidecar", () => {
+	it("fails hard when a bake input omits a referenced geometry sidecar", async () => {
 		const payload = createPayload({
 			materials: [createTexturedMaterial(0x08000010)],
 			textureRefs: createRgbaTextureRefs(),
 		});
 		const input = {
-			...createBakeInput(payload),
+			...(await createBakeInput(payload)),
 			resources: {
 				envCellCellStructureGeometry: [],
 				staticObjectSourceGeometry: [],
@@ -148,7 +154,7 @@ describe("static object batch partitioner", () => {
 		);
 	});
 
-	it("composes resolved building detail overlays into rendered draw units", () => {
+	it("composes resolved building detail overlays into rendered draw units", async () => {
 		const payload = createPayload({
 			detailRoles: [
 				{
@@ -165,7 +171,7 @@ describe("static object batch partitioner", () => {
 			materials: [createTexturedMaterial(0x08000010)],
 			textureRefs: [...createRgbaTextureRefs(), ...createDetailTextureRefs()],
 		});
-		const result = bakeStaticObjectJob(createBakeInput(payload));
+		const result = bakeStaticObjectJob(await createBakeInput(payload));
 		const drawUnit = result.objectVisualInstallSet.directDrawUnits.find(
 			(candidate) => candidate.kind === "static-object-geometry",
 		);
@@ -218,7 +224,7 @@ describe("static object batch partitioner", () => {
 		});
 	});
 
-	it("bakes opaque flat-color partitions into rendered draw units without texture uses", () => {
+	it("bakes opaque flat-color partitions into rendered draw units without texture uses", async () => {
 		const payload = createPayload({
 			materials: [
 				createSolidMaterial(0x08000010, {
@@ -229,7 +235,7 @@ describe("static object batch partitioner", () => {
 				}),
 			],
 		});
-		const input = createBakeInput(payload);
+		const input = await createBakeInput(payload);
 
 		const result = bakeStaticObjectJob(input);
 
@@ -283,12 +289,12 @@ describe("static object batch partitioner", () => {
 		]);
 	});
 
-	it("bakes alpha-test texture-rgba partitions into rendered draw units", () => {
+	it("bakes alpha-test texture-rgba partitions into rendered draw units", async () => {
 		const payload = createPayload({
 			materials: [createTexturedMaterial(0x08000010, { surfaceType: 0x4 })],
 			textureRefs: createRgbaTextureRefs(),
 		});
-		const input = createBakeInput(payload);
+		const input = await createBakeInput(payload);
 
 		const result = bakeStaticObjectJob(input);
 		const drawUnit = result.objectVisualInstallSet.directDrawUnits[0];
@@ -306,12 +312,12 @@ describe("static object batch partitioner", () => {
 		expect(result.textureUses).toHaveLength(1);
 	});
 
-	it("bakes Base1ClipMap indexed partitions with retail index cutoff", () => {
+	it("bakes Base1ClipMap indexed partitions with retail index cutoff", async () => {
 		const payload = createPayload({
 			materials: [createIndexedMaterial(0x08000010, { surfaceType: 0x4 })],
 			textureRefs: createIndexedTextureRefs(),
 		});
-		const input = createBakeInput(payload);
+		const input = await createBakeInput(payload);
 
 		const result = bakeStaticObjectJob(input);
 		const drawUnit = result.objectVisualInstallSet.directDrawUnits[0];
@@ -444,7 +450,7 @@ describe("static object batch partitioner", () => {
 		});
 	});
 
-	it("discovers static object texture placement intents before baking", () => {
+	it("discovers static object texture placement intents before baking", async () => {
 		const payload = createPayload({
 			materials: [
 				createTexturedMaterial(0x08000010),
@@ -461,9 +467,10 @@ describe("static object batch partitioner", () => {
 				}),
 			],
 		});
-		const bakeInput = createBakeInput(payload);
+		const bakeInput = await createBakeInput(payload);
 
-		const intents = createStaticObjectTexturePlacementIntents({
+		const intents = await createStaticObjectTexturePlacementIntents({
+			assetReader: createStaticObjectPlacementAssetReader(),
 			items: [{ payload: bakeInput.payload, task: bakeInput.task }],
 		});
 
@@ -492,7 +499,7 @@ describe("static object batch partitioner", () => {
 		]);
 	});
 
-	it("discovers static object placement intents for mixed wrap entries", () => {
+	it("discovers static object placement intents for mixed wrap entries", async () => {
 		const payload = createPayload({
 			materials: [
 				createTexturedMaterial(0x08000010),
@@ -517,7 +524,7 @@ describe("static object batch partitioner", () => {
 				polygonId: 0,
 			})),
 		};
-		const bakeInput = createBakeInput({
+		const bakeInput = await createBakeInput({
 			...payload,
 			materialSlots: payload.materialSlots.map((slot, index) => ({
 				...slot,
@@ -526,7 +533,8 @@ describe("static object batch partitioner", () => {
 			sourceAssets: [{ ...source, parts: [updatedPart] }],
 		});
 
-		const intents = createStaticObjectTexturePlacementIntents({
+		const intents = await createStaticObjectTexturePlacementIntents({
+			assetReader: createStaticObjectPlacementAssetReader(),
 			items: [{ payload: bakeInput.payload, task: bakeInput.task }],
 		});
 
@@ -537,7 +545,7 @@ describe("static object batch partitioner", () => {
 		]);
 	});
 
-	it("reports compact material coverage by rendered, deferred, and unsupported buckets", () => {
+	it("reports compact material coverage by rendered, deferred, and unsupported buckets", async () => {
 		const payload = createPayload({
 			materials: [
 				createTexturedMaterial(0x08000010),
@@ -549,7 +557,7 @@ describe("static object batch partitioner", () => {
 			],
 			textureRefs: [...createRgbaTextureRefs(), ...createIndexedTextureRefs()],
 		});
-		const input = createBakeInput(payload);
+		const input = await createBakeInput(payload);
 
 		const result = bakeStaticObjectJob(input);
 
@@ -615,12 +623,12 @@ describe("static object batch partitioner", () => {
 		});
 	});
 
-	it("bakes indexed paletted partitions with separate index and palette texture uses", () => {
+	it("bakes indexed paletted partitions with separate index and palette texture uses", async () => {
 		const payload = createPayload({
 			materials: [createIndexedMaterial(0x08000013)],
 			textureRefs: createIndexedTextureRefs(),
 		});
-		const result = bakeStaticObjectJob(createBakeInput(payload));
+		const result = bakeStaticObjectJob(await createBakeInput(payload));
 		const drawUnit = result.objectVisualInstallSet.directDrawUnits[0];
 
 		expect(drawUnit).toMatchObject({
@@ -705,7 +713,7 @@ describe("static object batch partitioner", () => {
 		]);
 	});
 
-	it("bakes static object placement and source scale into render-local positions", () => {
+	it("bakes static object placement and source scale into render-local positions", async () => {
 		const payload = createPayload({
 			materials: [createTexturedMaterial(0x08000010)],
 			objectPlacement: createPlacement({ x: 10, y: 20, z: 30 }),
@@ -713,7 +721,7 @@ describe("static object batch partitioner", () => {
 			sourceScale: { x: 2, y: 3, z: 4 },
 			textureRefs: createRgbaTextureRefs(),
 		});
-		const input = createBakeInput(payload);
+		const input = await createBakeInput(payload);
 
 		const result = bakeStaticObjectJob(input);
 		const drawUnit = result.objectVisualInstallSet.directDrawUnits[0];
@@ -727,7 +735,7 @@ describe("static object batch partitioner", () => {
 		]);
 	});
 
-	it("bakes fan triangles from the same polygon and material as distinct geometry", () => {
+	it("bakes fan triangles from the same polygon and material as distinct geometry", async () => {
 		const payload = createPayload({
 			materials: [createTexturedMaterial(0x08000010)],
 			partPositions: createPartPositions(2),
@@ -756,7 +764,7 @@ describe("static object batch partitioner", () => {
 				},
 			],
 		};
-		const input = createBakeInput({
+		const input = await createBakeInput({
 			...payload,
 			sourceAssets: [
 				{
@@ -1108,9 +1116,9 @@ function createPayload(options: {
 	};
 }
 
-function createBakeInput(
+async function createBakeInput(
 	payload: OutdoorStaticObjectsScopePayload,
-): StaticBakeJobInput {
+): Promise<StaticBakeJobInput> {
 	const domain = payload.domain;
 	const ownerKey = {
 		kind: staticObjectLayerOwnerKindForDomain(domain),
@@ -1175,19 +1183,21 @@ function createBakeInput(
 	};
 	return {
 		...input,
-		texturePlacementSnapshot: createTexturePlacementSnapshotForInput(input),
+		texturePlacementSnapshot:
+			await createTexturePlacementSnapshotForInput(input),
 	};
 }
 
-function createTexturePlacementSnapshotForInput(
+async function createTexturePlacementSnapshotForInput(
 	input: StaticBakeJobInput,
-): ObjectVisualTexturePlacementSnapshot {
-	const intents = createStaticObjectTexturePlacementIntents({
+): Promise<ObjectVisualTexturePlacementSnapshot> {
+	const intents = await createStaticObjectTexturePlacementIntents({
+		assetReader: createStaticObjectPlacementAssetReader(),
 		items: [{ payload: input.payload, task: input.task }],
 	});
 	return {
-		itemIdsByTextureUseId: new Map(
-			intents.map((intent) => [intent.textureUseId, intent.itemId]),
+		itemIdsByBindingId: new Map(
+			intents.map((intent) => [intent.bindingId, intent.itemId]),
 		),
 		placementsByItemId: new Map(
 			intents.map((intent) => [
@@ -1204,6 +1214,56 @@ function createTexturePlacementSnapshotForInput(
 				},
 			]),
 		),
+	};
+}
+
+function createStaticObjectPlacementAssetReader(): PreparedAssetReader {
+	const paletteAsset = createPaletteAsset(
+		0x04000010,
+		Array.from({ length: 128 }, (_value, index) => 0xff000000 | index),
+	);
+	const assetsByKey = new Map([
+		[describeHostAssetKey(paletteAsset.key), paletteAsset],
+	]);
+	return {
+		async requestPreparedAsset(key: HostAssetKey): Promise<PreparedAsset> {
+			const asset = assetsByKey.get(describeHostAssetKey(key));
+			if (!asset) {
+				throw new Error(
+					`Missing static object placement fixture asset ${describeHostAssetKey(key)}.`,
+				);
+			}
+			return asset;
+		},
+	};
+}
+
+function createPaletteAsset(
+	paletteId: number,
+	colorsArgb: readonly number[],
+): PreparedAsset {
+	return {
+		key: {
+			id: paletteId.toString(16).padStart(8, "0"),
+			kind: "palette",
+		},
+		payload: {
+			colorCount: colorsArgb.length,
+			colorsArgb,
+			kind: "palette",
+			paletteId,
+			provenance: {
+				detail: null,
+				errorCode: null,
+				source: "app-local-stub",
+				sourceAssetKind: "palette",
+			},
+			residencyKind: "unknown",
+			sourceAssetKind: "palette",
+		},
+		preparedAt: "fixture",
+		revision: 1,
+		sourceAssetId: `palette/${paletteId.toString(16).padStart(8, "0")}`,
 	};
 }
 

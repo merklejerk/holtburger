@@ -79,7 +79,7 @@ const EMPTY_TEXTURE_PLACEMENT_SNAPSHOT: TexturePlacementSnapshot = {
 };
 const EMPTY_OBJECT_VISUAL_TEXTURE_PLACEMENT_SNAPSHOT: ObjectVisualTexturePlacementSnapshot =
 	{
-		itemIdsByTextureUseId: new Map(),
+		itemIdsByBindingId: new Map(),
 		placementsByItemId: new Map(),
 	};
 
@@ -133,6 +133,7 @@ export interface StaticCoordinatorOptions {
 	readonly sourceReadyCoalescing?: Partial<StaticCoordinatorSourceReadyCoalescingOptions>;
 	readonly dynamicVisualBaker?: DynamicVisualBaker;
 	readonly dynamicVisualGeometryAssetReader?: PreparedAssetReader;
+	readonly textureIdentityAssetReader?: PreparedAssetReader;
 }
 
 export interface StaticCoordinatorSourceReadyCoalescingOptions {
@@ -145,6 +146,7 @@ export class StaticCoordinator {
 	readonly #resourceProvider: StaticBakeResourceProvider;
 	readonly #dynamicVisualBaker: DynamicVisualBaker | null;
 	readonly #dynamicVisualGeometryAssetReader: PreparedAssetReader | null;
+	readonly #textureIdentityAssetReader: PreparedAssetReader | null;
 	readonly #sourceReadyCoalescing: StaticCoordinatorSourceReadyCoalescingOptions;
 	#sourceReadyHandler: StaticSourceReadyHandler = (work) =>
 		work.continueWithPlacement({
@@ -189,6 +191,8 @@ export class StaticCoordinator {
 		this.#dynamicVisualBaker = options.dynamicVisualBaker ?? null;
 		this.#dynamicVisualGeometryAssetReader =
 			options.dynamicVisualGeometryAssetReader ?? null;
+		this.#textureIdentityAssetReader =
+			options.textureIdentityAssetReader ?? null;
 		this.#sourceReadyCoalescing = {
 			maxWaitMs:
 				options.sourceReadyCoalescing?.maxWaitMs ??
@@ -198,6 +202,17 @@ export class StaticCoordinator {
 
 	setSourceReadyHandler(handler: StaticSourceReadyHandler): void {
 		this.#sourceReadyHandler = handler;
+	}
+
+	#requireTextureIdentityAssetReader(
+		domain: StaticDomain,
+	): PreparedAssetReader {
+		if (!this.#textureIdentityAssetReader) {
+			throw new Error(
+				`Static coordinator cannot plan ${domain} texture identities without a texture identity asset reader.`,
+			);
+		}
+		return this.#textureIdentityAssetReader;
 	}
 
 	reconcileStaticDemand(demand: StaticDemand): StaticRetentionReconciliation {
@@ -581,14 +596,19 @@ export class StaticCoordinator {
 				createDynamicVisualTexturePlanning(recipe),
 			),
 		);
+		const textureIdentityAssetReader = this.#requireTextureIdentityAssetReader(
+			options.pendingGroup.domain,
+		);
 		const objectVisualPlacementIntents = [
 			...(isStaticObjectDomain(options.pendingGroup.domain)
-				? createStaticObjectTexturePlacementIntents({
+				? await createStaticObjectTexturePlacementIntents({
+						assetReader: textureIdentityAssetReader,
 						items: options.items,
 					})
 				: []),
 			...(options.pendingGroup.domain === "env-cell-system"
-				? createStructuredInteriorTexturePlacementIntents({
+				? await createStructuredInteriorTexturePlacementIntents({
+						assetReader: textureIdentityAssetReader,
 						items: options.items,
 					})
 				: []),
@@ -598,7 +618,8 @@ export class StaticCoordinator {
 		];
 		const terrainPlacementIntents =
 			options.pendingGroup.domain === "outdoor-terrain"
-				? createTerrainTexturePlacementIntents({
+				? await createTerrainTexturePlacementIntents({
+						assetReader: textureIdentityAssetReader,
 						items: options.items,
 					})
 				: [];

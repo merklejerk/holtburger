@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type {
+	PreparedAsset,
+	PreparedAssetReader,
+} from "../../../assets/contracts";
+import type {
 	EnvCellCellStructureGeometrySidecar,
 	LandblockEnvCellStaticFacts,
 	EnvCellSystemStaticScopePayload,
@@ -222,7 +226,7 @@ describe("browser landblock env-cell baker", () => {
 		);
 	});
 
-	it("omits structured-interior draw units when all material sources are missing", () => {
+	it("omits structured-interior draw units when all material sources are missing", async () => {
 		const input = createInputWithRenderableCellStructure({
 			includeMaterialSources: false,
 		});
@@ -235,7 +239,7 @@ describe("browser landblock env-cell baker", () => {
 				staticObjectSourceGeometry: [],
 			},
 			texturePlacementSnapshot:
-				createStructuredInteriorPlacementSnapshot(input),
+				await createStructuredInteriorPlacementSnapshot(input),
 		});
 
 		expect(result.objectVisualInstallSet.directDrawUnits).toEqual([]);
@@ -259,7 +263,7 @@ describe("browser landblock env-cell baker", () => {
 		]);
 	});
 
-	it("emits structured-interior texture uses for textured cell materials", () => {
+	it("emits structured-interior texture uses for textured cell materials", async () => {
 		const input = createInputWithRenderableCellStructure({
 			materialSources: [createTexturedMaterialSource(0x08000010)],
 			textureRefs: createRgbaTextureRefs(),
@@ -273,7 +277,7 @@ describe("browser landblock env-cell baker", () => {
 				staticObjectSourceGeometry: [],
 			},
 			texturePlacementSnapshot:
-				createStructuredInteriorPlacementSnapshot(input),
+				await createStructuredInteriorPlacementSnapshot(input),
 		});
 		const drawUnit = result.objectVisualInstallSet.directDrawUnits[0];
 		if (!drawUnit || drawUnit.kind !== "structured-interior-geometry") {
@@ -332,7 +336,7 @@ describe("browser landblock env-cell baker", () => {
 		]);
 	});
 
-	it("discovers structured-interior placement intents before env-cell baking", () => {
+	it("discovers structured-interior placement intents before env-cell baking", async () => {
 		const input = createInputWithRenderableCellStructure({
 			detailRoles: [
 				{
@@ -351,7 +355,8 @@ describe("browser landblock env-cell baker", () => {
 		});
 		const envCell = requireFirstEnvCell(input);
 
-		const intents = createStructuredInteriorTexturePlacementIntents({
+		const intents = await createStructuredInteriorTexturePlacementIntents({
+			assetReader: new EmptyPreparedAssetReader(),
 			items: [{ payload: input.payload, task: input.task }],
 		});
 		const result = bakeEnvCellSystem({
@@ -361,7 +366,7 @@ describe("browser landblock env-cell baker", () => {
 				staticObjectSourceGeometry: [],
 			},
 			texturePlacementSnapshot:
-				createStructuredInteriorPlacementSnapshot(input),
+				await createStructuredInteriorPlacementSnapshot(input),
 		});
 		const drawUnit = result.objectVisualInstallSet.directDrawUnits.find(
 			(candidate) => candidate.kind === "structured-interior-geometry",
@@ -414,11 +419,11 @@ describe("browser landblock env-cell baker", () => {
 				},
 			}),
 		).toThrow(
-			/Structured interior material is missing object-visual placement item id for env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat/,
+			/Structured interior material is missing object-visual placement item id for binding binding\|resource=env-cell-system%3A0xda55ffff%3Astructured-interior-texture/,
 		);
 	});
 
-	it("composes environment detail roles onto structured-interior textured materials", () => {
+	it("composes environment detail roles onto structured-interior textured materials", async () => {
 		const input = createInputWithRenderableCellStructure({
 			detailRoles: [
 				{
@@ -444,7 +449,7 @@ describe("browser landblock env-cell baker", () => {
 				staticObjectSourceGeometry: [],
 			},
 			texturePlacementSnapshot:
-				createStructuredInteriorPlacementSnapshot(input),
+				await createStructuredInteriorPlacementSnapshot(input),
 		});
 		const drawUnit = result.objectVisualInstallSet.directDrawUnits[0];
 		if (!drawUnit || drawUnit.kind !== "structured-interior-geometry") {
@@ -949,16 +954,17 @@ function createDetailTextureRefs(): readonly StaticObjectTextureRefFacts[] {
 	];
 }
 
-function createStructuredInteriorPlacementSnapshot(
+async function createStructuredInteriorPlacementSnapshot(
 	input: StaticBakeJobInput,
 	options: { readonly uniquePages?: boolean } = {},
-): NonNullable<StaticBakeJobInput["texturePlacementSnapshot"]> {
-	const intents = createStructuredInteriorTexturePlacementIntents({
+): Promise<NonNullable<StaticBakeJobInput["texturePlacementSnapshot"]>> {
+	const intents = await createStructuredInteriorTexturePlacementIntents({
+		assetReader: new EmptyPreparedAssetReader(),
 		items: [{ payload: input.payload, task: input.task }],
 	});
 	return {
-		itemIdsByTextureUseId: new Map(
-			intents.map((intent) => [intent.textureUseId, intent.itemId]),
+		itemIdsByBindingId: new Map(
+			intents.map((intent) => [intent.bindingId, intent.itemId]),
 		),
 		placementsByItemId: new Map(
 			intents.map((intent, index) => [
@@ -980,6 +986,14 @@ function createStructuredInteriorPlacementSnapshot(
 			]),
 		),
 	};
+}
+
+class EmptyPreparedAssetReader implements PreparedAssetReader {
+	async requestPreparedAsset(): Promise<PreparedAsset> {
+		throw new Error(
+			"structured interior placement test did not expect asset reads",
+		);
+	}
 }
 
 function createStaticObjectSourceAsset(
@@ -1256,7 +1270,7 @@ function createInput(
 		},
 		task,
 		texturePlacementSnapshot: {
-			itemIdsByTextureUseId: new Map(),
+			itemIdsByBindingId: new Map(),
 			placementsByItemId: new Map(),
 		},
 	};

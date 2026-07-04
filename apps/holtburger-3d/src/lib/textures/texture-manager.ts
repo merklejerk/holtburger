@@ -115,6 +115,8 @@ export interface TexturePlacementReferenceSnapshot {
 export interface TexturePlacementResolutionSnapshot {
 	/** Current live owner/dependency count used by atlas reclamation. */
 	readonly activeReferenceCount: number;
+	/** Material-consumer binding that resolves to this placement. */
+	readonly bindingId: TextureBindingId;
 	/** Runtime texture page channel layout. */
 	readonly format: RuntimeTexturePlacement["format"];
 	/** Runtime texture page height in pixels. */
@@ -131,6 +133,8 @@ export interface TexturePlacementResolutionSnapshot {
 	readonly rect: readonly [number, number, number, number];
 	/** Renderer texture page identity sampled by draw payloads. */
 	readonly textureRefId: string;
+	/** Canonical texture-pool identity resolved by this binding. */
+	readonly textureKey: TextureKey;
 	/** Runtime texture page width in pixels. */
 	readonly width: number;
 }
@@ -495,6 +499,7 @@ export class TextureManager {
 				? [
 						{
 							activeReferenceCount: record.activeReferenceCount,
+							bindingId: record.bindingId,
 							format: record.format,
 							height: record.height,
 							itemId,
@@ -503,6 +508,7 @@ export class TextureManager {
 							purpose: record.purpose,
 							rect: record.rect,
 							textureRefId: record.textureRefId,
+							textureKey: record.textureKey,
 							width: record.width,
 						},
 					]
@@ -1575,6 +1581,7 @@ export class TextureManager {
 		const physicalEntry = entry.physicalEntry;
 		this.#placementRecordsByItemId.set(itemId, {
 			activeReferenceCount: entry.leaseCount,
+			bindingId: this.#bindingIdByItemId.get(itemId) ?? entry.bindingId,
 			format: physicalEntry.format,
 			height: physicalEntry.textureHeight,
 			itemId,
@@ -1586,6 +1593,7 @@ export class TextureManager {
 			purpose: entry.purpose,
 			rect: physicalEntry.rect,
 			textureRefId: physicalEntry.textureRefId,
+			textureKey: entry.textureKey,
 			width: physicalEntry.textureWidth,
 		});
 	}
@@ -1831,6 +1839,7 @@ interface VisualTexturePhysicalEntry {
 
 interface TexturePlacementRecord {
 	activeReferenceCount: number;
+	readonly bindingId: TextureBindingId;
 	readonly format: RuntimeTexturePlacement["format"];
 	readonly height: number;
 	readonly itemId: string;
@@ -1839,6 +1848,7 @@ interface TexturePlacementRecord {
 	readonly purpose: TextureUsagePurpose;
 	readonly rect: readonly [number, number, number, number];
 	readonly textureRefId: string;
+	readonly textureKey: TextureKey;
 	readonly width: number;
 }
 

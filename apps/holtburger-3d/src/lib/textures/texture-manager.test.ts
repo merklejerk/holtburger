@@ -500,18 +500,24 @@ describe("browser texture manager", () => {
 		).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
+					bindingId: expect.stringContaining("building-a%3Apalette"),
 					itemId: "building-a:palette",
 					pageVersion: secondUpdate?.resolvedTexturePlacements.find(
 						(placement) => placement.textureUseId === "building-a:palette",
 					)?.pageVersion,
+					textureKey: expect.stringContaining("texture|"),
 					width: 256,
 				}),
 				expect.objectContaining({
+					bindingId: expect.stringContaining(
+						"building-a%3Apalette-secondary",
+					),
 					itemId: "building-a:palette-secondary",
 					pageVersion: secondUpdate?.resolvedTexturePlacements.find(
 						(placement) =>
 							placement.textureUseId === "building-a:palette-secondary",
 					)?.pageVersion,
+					textureKey: expect.stringContaining("texture|"),
 					width: 256,
 				}),
 			]),

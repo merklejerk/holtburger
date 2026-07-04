@@ -216,13 +216,13 @@ Internally, identity builders should accept structured inputs and return branded
 - `TextureKey` inputs intentionally exclude owner scope, material wrap, filtering, mip generation, anisotropy, placement revision, and renderer texture refs.
 - `TextureBindingId` carries material wrap because the material consumer owns that sampling fact.
 - `TexturePageClass` can carry physical wrap only when page compatibility needs it; virtualized material wrap stays out of the canonical texture key.
-- Concession: the new builders are not yet wired into `TexturePlacement` or `TextureManager`. Phase 2 must first provide resolver-predictable palette recipe keys, then Phase 3 must replace the current `bindingKey` / `placementItemId` / `textureUseId` equality bridge instead of adding adapters around it.
+- Concession: the new builders are not yet wired into `TexturePlacement` or `TextureManager`. Phase 2 first provides resolver-predictable palette recipe keys; Phase 3 then moves identity creation to the planner edge so the current `bindingKey` / `placementItemId` / `textureUseId` equality bridge can be deleted instead of wrapped.
 
 ### Phase 2: Palette Range Identity Prerequisite
 
 **Status:** Complete.
 
-**Course correction:** The atomic placement/registry cutover needs resolver-predictable `TextureKey`s for palette textures. Current prepared palette payloads expose the composed palette texture pixels and old replacement triples, while `AssetService` only exposes full prepared assets. A clean cutover would otherwise be forced to keep replacement palette ids or prepared `contentHash` in identity. This phase adds the missing cheap palette-range identity boundary first.
+**Course correction:** The placement and registry cutovers need resolver-predictable `TextureKey`s for palette textures. Current prepared palette payloads expose the composed palette texture pixels and old replacement triples, while `AssetService` only exposes full prepared assets. A clean cutover would otherwise be forced to keep replacement palette ids or prepared `contentHash` in identity. This phase adds the missing cheap palette-range identity boundary first.
 
 **Deliverables**
 
@@ -247,13 +247,13 @@ Internally, identity builders should accept structured inputs and return branded
 - The palette id remains a fetch address and diagnostic label only. It is not part of the returned fingerprint or recipe key.
 - Runtime-authored replacements can feed the Phase 1 byte-range builder directly; static replacement palette assets now converge on that same byte policy.
 
-### Phase 3: Atomic Placement and Registry Identity Cutover
+### Phase 3: Planner-Edge Texture Request Cutover
 
-**Course correction:** Placement-contract changes cannot honestly end while `TextureManager` still commits by `textureUseId`. That would require a public bridge from `TextureKey` back to legacy texture-use ids, which violates the shim policy and keeps the footgun loaded. This phase owns the minimum registry cutover needed to make the placement split real.
+**Course correction:** Placement-contract changes cannot honestly start inside `TextureManager`. Static planners currently create synchronous scoped `textureUseId` strings, while palette `TextureKey` prediction now requires palette metadata. If `TextureManager` keeps deriving canonical identity from old placement ids, the next registry change would either guess, keep aliases, or rebuild palette identity from prepared texture pixels. This phase moves identity creation to the planning edge first.
 
 **Deliverables**
 
-- Update placement identity contracts together, not one boundary at a time:
+- Update material/planning identity contracts together, not one boundary at a time:
   - `TextureBindingRequirement`;
   - `TexturePlacementIntent`;
   - `TexturePlacement`;
@@ -262,32 +262,58 @@ Internally, identity builders should accept structured inputs and return branded
 - Carry separated identity through those contracts:
   - `bindingId`;
   - `textureKey`;
-  - `ownerId` or owner ids where already known;
+  - `ownerIds` where already known;
+  - `pageClass`;
   - source facts;
   - material binding facts such as wrap;
-  - physical page compatibility facts.
+  - physical page compatibility facts without filter/mip/aniso policy.
 - Stop setting `bindingKey`, `placementItemId`, and `textureUseId` to the same string.
 - Replace `ObjectVisualTexturePlacementSnapshot.itemIdsByTextureUseId` with a snapshot lookup keyed by `TextureBindingId`, or remove the bridge entirely if the bake path can carry numeric placement ids alongside binding ids directly.
 - Update `static-material-texture-policy.ts`, terrain material planning, object material planning, and structured interior planning.
 - Delete the current comment that presents binding key and placement item id equality as a bridge.
+- Give static planners access to the asset reader needed for Phase 2 palette replacement recipe keys.
+- Build `TextureKey` from:
+  - render-surface source id plus usage/output interpretation for render-surface textures;
+  - base palette id, palette domain, usage/output interpretation, and replacement range recipe for palette textures;
+  - runtime source id plus usage/output interpretation for runtime-authored textures.
+- Build `TextureBindingId` from the material consumer facts, including wrap where the material binding semantics depend on wrap.
+- Build `TexturePageClass` from placement compatibility facts only. Do not include filtering, mip generation, anisotropy, binding id, owner id, or material scope.
+- Keep prepared full texture loading for actual pixels only; do not use prepared palette `contentHash` or replacement palette ids for `TextureKey`.
+
+**Acceptance criteria**
+
+- Material entries and placement intents carry `TextureBindingId`, `TextureKey`, and `TexturePageClass` as separate fields.
+- Static planners can compute palette texture keys before requesting composed prepared palette texture pixels.
+- Existing bake tests are rewritten around separated ids, not updated to preserve old string equality.
+- Any `LegacyTextureUseRequirement` or equivalent bridge introduced in this phase is deleted before the phase is complete.
+- The object-visual numeric placement path does not require a `textureUseId -> itemId` bridge after this phase.
+- Tests assert that owner or landblock churn changes owners/bindings without changing canonical texture keys.
+- Tests prove filter, mip generation, and anisotropy are absent from planner-produced texture keys and page classes.
+- Tests prove material wrap changes `TextureBindingId` and, where needed, physical page class, but not `TextureKey`.
+- Tests prove replacement palette asset ids are fetch inputs only, not texture identity.
+
+### Phase 4: Registry Identity Cutover
+
+**Course correction:** Once planners emit real `TextureRequest`s, the registry cutover can delete alias behavior instead of translating old scoped ids. This phase owns the minimum registry and commit-state change needed to make the placement split real.
+
+**Deliverables**
+
 - Replace `VisualTextureKey = domain + bucket + textureUseId` with registry entries keyed by `TextureKey`.
 - Replace owner maps with `TextureOwnerId -> Set<TextureKey>`.
 - Replace renderer update production with a resolved binding map that starts from `TextureBindingId` and resolves through `TextureKey`.
 - Delete `physicalEntry.textureUseIds` and implicit shared-entry aliasing during the cutover. Do not create a bridge object that keeps the alias model alive under a different name.
-- Consume the Phase 2 palette recipe keys for palette texture `TextureKey`s. Do not derive palette identity from replacement palette asset ids or prepared `contentHash`.
+- Use planner-provided `TextureKey`, `TextureBindingId`, `TextureOwnerId`, and `TexturePageClass`; do not rederive identity from old strings inside `TextureManager`.
+- Consume the Phase 3 palette recipe keys for palette texture `TextureKey`s. Do not derive palette identity from replacement palette asset ids or prepared `contentHash`.
 
 **Acceptance criteria**
 
-- Material entries bind through `TextureBindingId`.
 - Texture placement requests use `TextureKey`.
-- Existing bake tests are rewritten around the separated ids, not updated to preserve old string equality.
-- Any `LegacyTextureUseRequirement` or equivalent bridge introduced in this phase is deleted before the phase is complete.
-- The object-visual numeric placement path does not require a `textureUseId -> itemId` bridge after this phase.
 - No registry entries share mutable `physicalEntry` references.
 - A page move updates one texture-pool entry, then all active bindings derive from that entry.
 - Tests assert that owner churn in follow mode changes owners/bindings without changing canonical texture keys.
+- No helper needs to “find aliases” by scanning registry entries.
 
-### Phase 4: TextureManager Fuzz and Palette Resolver Proof
+### Phase 5: TextureManager Fuzz and Palette Resolver Proof
 
 **Deliverables**
 
@@ -305,7 +331,7 @@ Internally, identity builders should accept structured inputs and return branded
 - Palette replacement fuzz covers runtime-authored replacement byte ranges with the single cheap-hash policy.
 - Tests do not assert old scoped `textureUseId` spellings.
 
-### Phase 5: Renderer Binding Cutover
+### Phase 6: Renderer Binding Cutover
 
 **Deliverables**
 
@@ -324,7 +350,7 @@ Internally, identity builders should accept structured inputs and return branded
 - No renderer code assumes a binding id is a texture pool id.
 - No renderer helper accepts either `TextureBindingId` or `TextureKey` as a plain interchangeable string parameter.
 
-### Phase 6: Visual Resource Key Cleanup
+### Phase 7: Visual Resource Key Cleanup
 
 **Deliverables**
 
@@ -339,11 +365,11 @@ Internally, identity builders should accept structured inputs and return branded
 - Tests explicitly cover cross-landblock shared texture/source cases.
 - Visual resource ids do not change when only owner/landblock changes.
 
-### Phase 7: Follow-Mode Scenario Regression And Diagnostics
+### Phase 8: Follow-Mode Scenario Regression And Diagnostics
 
 **Deliverables**
 
-- Extend the Phase 4 state-machine fuzz only if renderer cutover exposes new state that the manager-level model cannot see.
+- Extend the Phase 5 state-machine fuzz only if renderer cutover exposes new state that the manager-level model cannot see.
 - Add focused browser/harness scenarios for follow-mode streaming:
   - add landblock/layer;
   - evict landblock/layer;
@@ -359,9 +385,9 @@ Internally, identity builders should accept structured inputs and return branded
 - Fuzz fails if two equivalent texture sources with different owner ids create distinct texture pool entries.
 - Fuzz fails if owner eviction releases a texture still retained by another owner.
 - Scenario diagnostics can distinguish stale binding, stale texture key, stale resident page, and stale atlas rect without reading a composite string.
-- The captured follow-mode scenario either stays green or emits a short reproducer from the Phase 4 model.
+- The captured follow-mode scenario either stays green or emits a short reproducer from the Phase 5 model.
 
-### Phase 8: Holistic Cleanup And Compatibility Purge
+### Phase 9: Holistic Cleanup And Compatibility Purge
 
 **Deliverables**
 
@@ -407,7 +433,7 @@ Internally, identity builders should accept structured inputs and return branded
 - **Risk: temporary adapter layer becomes permanent.**
   - Mitigation: enforce the shim policy above; each phase must delete the old equality bridge in the touched path before moving on.
 - **Risk: cleanup becomes a rename-only pass.**
-  - Mitigation: Phase 8 audits behavior boundaries, tests, diagnostics, and type shapes, not just symbol names.
+  - Mitigation: Phase 9 audits behavior boundaries, tests, diagnostics, and type shapes, not just symbol names.
 - **Risk: cheap palette replacement fingerprints collide.**
   - Mitigation: include `offset` and `count` outside the hash, use a shared deterministic 64-bit hash over replacement range bytes/colors, and treat a collision as acceptable visual-risk rather than a correctness/security guarantee. Do not upgrade to cryptographic hashes unless measured collisions become a real problem.
 

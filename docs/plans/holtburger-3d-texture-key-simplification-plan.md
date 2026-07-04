@@ -514,6 +514,10 @@ Internally, identity builders should accept structured inputs and return branded
 
 ### Phase 8: Follow-Mode Scenario Regression And Diagnostics
 
+**Status:** Complete.
+
+**Steering update:** Phase 5 already reproduced the stale page-revision class inside the `TextureManager` state machine and turned it into a deterministic regression. After the Phase 6 renderer binding cutover, no new independent renderer-owned placement cache appeared in the audited path. Phase 8 therefore stays focused on separated diagnostics and on keeping the Phase 5 model as the canonical follow-mode reproducer, instead of adding a browser harness that would duplicate the same state boundary with more stubs.
+
 **Deliverables**
 
 - Extend the Phase 5 state-machine fuzz only if renderer cutover exposes new state that the manager-level model cannot see.
@@ -535,6 +539,15 @@ Internally, identity builders should accept structured inputs and return branded
 - Scenario diagnostics can distinguish stale binding, stale texture key, stale resident page, and stale atlas rect without reading a composite string.
 - The captured follow-mode scenario either stays green or emits a short reproducer from the Phase 5 model.
 - Any fix for the original bug must point to a failing reproducer first, then the commit that turns it green. No more guessed patches, respectfully.
+
+**Phase notes**
+
+- Selection/runtime texture placement snapshots now expose `bindingId` and `textureKey` as separate facts beside `itemId`, `textureRefId`, `pageVersion`, atlas `rect`, and `activeReferenceCount`.
+- Renderer texture diagnostics already print `latestResidentPageRevision` and `lastTexturePlacementUpdateRevision` beside material-entry page versions and rects. With the new snapshot fields, stale binding, stale canonical texture identity, stale resident page, and stale atlas rect can be distinguished without decoding a composite string.
+- Found and fixed a diagnostic-only alias bug: secondary placement records were reporting the canonical registry entry binding id instead of the specific item binding id. Rendering had already cut over to binding ids; this bug made diagnostics look more alias-shaped than the runtime path.
+- The Phase 5 manager fuzz remains the follow-mode regression boundary for `db56ffff` / `01001117` and `da55ffff` / `01002a1b`-style owner churn. It checks active binding page revisions against resident page revisions after add, evict, re-add, absorb, repack, and sampler-policy operations.
+- No browser harness was added in this phase because the audited renderer path resolves through `TextureBindingId -> placement` and did not introduce a second stale copied placement store. If a future capture proves browser/app state owns stale placement data independently, that exact boundary should get its own reproducer rather than expanding the manager fuzz.
+- Remaining debt: owner ids are still not printed directly in per-selection placement snapshots. Owner lifetime is visible through manager reference snapshots and active reference counts; Phase 9 should decide whether per-selection owner details are worth the extra surface.
 
 ### Phase 9: Simplification Audit And Resteer
 

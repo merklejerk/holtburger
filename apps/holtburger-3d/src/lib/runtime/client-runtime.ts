@@ -175,6 +175,7 @@ import {
 	type TexturePlacementBucketKey,
 } from "../textures/placement";
 import { createTextureOwnerId } from "../textures/identity";
+import { createTextureLeaseSet } from "../textures/leases";
 import type { PlacementTransformDto } from "../host/contracts";
 import { translateBounds } from "./scene-query/geometry";
 
@@ -2151,7 +2152,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		commit.timing.materializeStartedAtMs = materializeStartedAtMs;
 		commit.timing.queuedMs = materializeStartedAtMs - commit.enqueuedAtMs;
 		const releaseStartedAtMs = performance.now();
-		this.#textureManager.releaseTextureResourceDependencies(
+		this.#textureManager.releaseTextureLeaseResourceIds(
 			collectStaticDrawUnitResourceIds(delta.removedResources),
 		);
 		commit.timing.releaseTextureDependenciesMs +=
@@ -2180,8 +2181,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 				performance.now() - rendererTextureStartedAtMs;
 		}
 		const pinStartedAtMs = performance.now();
-		this.#textureManager.pinTextureResourceDependencies(
-			delta.textureDependencies,
+		this.#textureManager.pinTextureLeaseSet(
+			createTextureLeaseSet(delta.textureDependencies),
 		);
 		commit.timing.pinTextureDependenciesMs +=
 			performance.now() - pinStartedAtMs;
@@ -2311,7 +2312,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			...this.#committedDynamicVisualResourceIds,
 		].filter((resourceId) => !nextResourceIds.has(resourceId));
 
-		this.#textureManager.releaseTextureResourceDependencies(removedResourceIds);
+		this.#textureManager.releaseTextureLeaseResourceIds(removedResourceIds);
 		const textureUpdate =
 			await this.#textureManager.applyDynamicTextureUseDelta({
 				removedOwnerIds: removedResourceIds.map((resourceId) =>
@@ -2330,8 +2331,10 @@ class ClientRuntimeImpl implements ClientRuntime {
 		if (textureUpdate) {
 			this.#renderer.applyTexturePlacementUpdate(textureUpdate);
 		}
-		this.#textureManager.pinTextureResourceDependencies(
-			resources.flatMap((resource) => resource.textureDependencies),
+		this.#textureManager.pinTextureLeaseSet(
+			createTextureLeaseSet(
+				resources.flatMap((resource) => resource.textureDependencies),
+			),
 		);
 
 		this.#dynamicRendererResourceRevision += 1;

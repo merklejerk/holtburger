@@ -1,6 +1,6 @@
 # Holtburger 3D Streaming Pipeline Primitives Plan
 
-Status: Phase 3 complete; Phase 0 audit complete and remaining phases resteered on 2026-07-04.
+Status: Phase 4 complete; Phase 0 audit complete and remaining phases resteered on 2026-07-04.
 
 Related context:
 
@@ -718,6 +718,8 @@ Decisions and course corrections:
 
 Goal: make static and dynamic texture residency install/release mechanically comparable.
 
+Status: complete.
+
 Deliverables:
 
 - Convert the two static commit install call sites in
@@ -744,6 +746,18 @@ Decisions and course corrections:
 
 - Phase 0 found exactly four production direct runtime call sites; this phase should not expand into
   renderer install-product extraction.
+- Converted the four runtime call sites in `apps/holtburger-3d/src/lib/runtime/client-runtime.ts`:
+  - static release uses `releaseTextureLeaseResourceIds(...)`;
+  - static pin uses `pinTextureLeaseSet(createTextureLeaseSet(...))`;
+  - dynamic release uses `releaseTextureLeaseResourceIds(...)`;
+  - dynamic pin uses `pinTextureLeaseSet(createTextureLeaseSet(...))`.
+- Production direct calls to `pinTextureResourceDependencies(...)` and
+  `releaseTextureResourceDependencies(...)` now remain only inside `TextureManager`.
+- Runtime static commit timing diagnostics kept their existing names. The test helper now strips
+  timing details in exact diagnostic comparisons because these tests care about commit phase and
+  residency behavior, not sub-millisecond timing values.
+- Did not move lease construction into `static-commit-installer.ts` and did not change renderer
+  install DTOs.
 
 ## Phase 5: Resteer Before Visual Install Product Extraction
 

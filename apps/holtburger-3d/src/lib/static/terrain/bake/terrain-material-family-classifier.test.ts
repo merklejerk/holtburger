@@ -22,7 +22,7 @@ describe("terrain material family classifier", () => {
 			materialBucketKey:
 				"shader:terrain-single-base-color|domain:outdoor-terrain|sampler:color-repeat-filterable|texture:terrain-base:06000010",
 			materialFamily: "terrain-single-base-color",
-			primaryTextureUseId: "terrain-base:06000010",
+			primaryTextureBindingId: "terrain-base:06000010",
 			terrainFallbackReasons: [],
 			textureUseIds: ["terrain-base:06000010"],
 		});
@@ -57,7 +57,7 @@ describe("terrain material family classifier", () => {
 			materialBucketKey:
 				"shader:terrain-layered|domain:outdoor-terrain|sampler:color-mask-detail|textures:terrain-base:06000010,terrain-base:06000030,terrain-alpha:06000020|signature:test-plan",
 			materialFamily: "terrain-layered",
-			primaryTextureUseId: "terrain-base:06000010",
+			primaryTextureBindingId: "terrain-base:06000010",
 			textureUseIds: [
 				"terrain-base:06000010",
 				"terrain-base:06000030",
@@ -86,7 +86,7 @@ describe("terrain material family classifier", () => {
 
 		expect(classification).toMatchObject({
 			materialFamily: "terrain-layered",
-			primaryTextureUseId: "terrain-base:06000010",
+			primaryTextureBindingId: "terrain-base:06000010",
 			textureUseIds: ["terrain-base:06000010", "terrain-base:06000020"],
 		});
 		expect(classification.terrainFallbackReasons).toEqual([]);

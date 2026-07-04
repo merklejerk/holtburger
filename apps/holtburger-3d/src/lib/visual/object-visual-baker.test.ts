@@ -15,6 +15,7 @@ import {
 	type ObjectVisualTextureRecipeId,
 } from "./object-visual-recipe-bundle";
 import { bakeObjectVisuals } from "./object-visual-baker";
+import { createTextureBindingId } from "../textures/identity";
 
 const IDENTITY_TRANSFORM = [
 	1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
@@ -331,15 +332,19 @@ describe("object visual baker", () => {
 			sourcePartIndex: null,
 		});
 
+		const indexBinding = createTextureBinding("index-use");
+		const paletteBinding = createTextureBinding("palette-use");
+		const rgbaBinding = createTextureBinding("rgba-use");
+		const detailBinding = createTextureBinding("detail-use");
 		const result = bakeObjectVisuals({
 			bundle,
 			geometryBuffers: new Map([[TEST_BUFFER.bufferId, TEST_BUFFER]]),
 			renderPartIdPrefix: "texture-role-fixture",
 			textureBindings: new Map([
-				[indexTextureRecipeId, createTextureBinding("index-use")],
-				[paletteTextureRecipeId, createTextureBinding("palette-use")],
-				[rgbaTextureRecipeId, createTextureBinding("rgba-use")],
-				[detailTextureRecipeId, createTextureBinding("detail-use")],
+				[indexTextureRecipeId, indexBinding],
+				[paletteTextureRecipeId, paletteBinding],
+				[rgbaTextureRecipeId, rgbaBinding],
+				[detailTextureRecipeId, detailBinding],
 			]),
 		});
 
@@ -351,16 +356,16 @@ describe("object visual baker", () => {
 		);
 
 		expect(indexedPart?.materialEntries[0]).toMatchObject({
-			indexTextureUseId: "index-use",
+			indexTextureBindingId: indexBinding.bindingId,
 			indexedClipThreshold: 8,
 			indexedTextureFormat: "index16",
 			materialColor: [0.9, 0.9, 0.9, 1],
-			paletteTextureUseId: "palette-use",
+			paletteTextureBindingId: paletteBinding.bindingId,
 		});
 		expect(rgbaPart?.materialEntries[0]).toMatchObject({
 			detailTextureTiling: 5,
-			detailTextureUseId: "detail-use",
-			primaryTextureUseId: "rgba-use",
+			detailTextureBindingId: detailBinding.bindingId,
+			primaryTextureBindingId: rgbaBinding.bindingId,
 			primaryTextureWrapMode: "clamp",
 		});
 		expect(
@@ -774,11 +779,19 @@ function createTransparentRenderState(): ObjectVisualMaterialRecipeBase["renderS
 }
 
 function createTextureBinding(textureUseId: string) {
+	const bindingId = createTextureBindingId({
+		resourceId: `test-resource:${textureUseId}`,
+		role: "object-base-color",
+		slot: textureUseId,
+	});
 	return {
+		bindingId,
 		dependency: {
 			resourceId: textureUseId,
 			roles: [],
 		},
+		pageClass: `test-page-class:${textureUseId}`,
+		textureKey: `test-texture-key:${textureUseId}`,
 		textureUseId,
 	};
 }

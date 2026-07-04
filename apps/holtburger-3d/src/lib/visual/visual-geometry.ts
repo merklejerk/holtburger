@@ -56,11 +56,11 @@ export interface VisualGeometryMaterialTableEntry {
 	readonly renderState: VisualGeometryRenderState;
 	readonly materialColor: readonly [number, number, number, number];
 	readonly materialEmissiveColor: readonly [number, number, number];
-	readonly primaryTextureUseId: string | null;
-	readonly indexTextureUseId: string | null;
+	readonly primaryTextureBindingId: TextureBindingId | null;
+	readonly indexTextureBindingId: TextureBindingId | null;
 	readonly indexedTextureFormat: "p8" | "index16" | null;
-	readonly paletteTextureUseId: string | null;
-	readonly detailTextureUseId: string | null;
+	readonly paletteTextureBindingId: TextureBindingId | null;
+	readonly detailTextureBindingId: TextureBindingId | null;
 	readonly detailTextureTiling: number;
 	readonly primaryTextureWrapMode: "clamp" | "repeat";
 }
@@ -87,8 +87,8 @@ export interface VisualGeometryPayload {
 	readonly renderState: VisualGeometryRenderState;
 	/** GPU texture-coordinate attribute payload. */
 	readonly texCoords: Float32Array;
-	/** Texture-use identities consumed by renderer binding ownership. */
-	readonly textureUseIds: readonly string[];
+	/** Renderer material binding ids consumed by binding ownership. */
+	readonly textureUseIds: readonly TextureBindingId[];
 	/** Derived primitive count for diagnostics and renderer accounting. */
 	readonly triangleCount: number;
 	/** Derived vertex count for diagnostics and validation. */
@@ -105,3 +105,4 @@ export function estimateVisualGeometryPayloadBufferBytes(
 		payload.indices.byteLength
 	);
 }
+import type { TextureBindingId } from "../textures/identity";

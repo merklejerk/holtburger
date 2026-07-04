@@ -179,17 +179,14 @@ describe("static object batch partitioner", () => {
 			throw new Error("Expected building detail static object draw unit.");
 		}
 
-		expect(drawUnit).toMatchObject({
-			kind: "static-object-geometry",
-			textureUseIds: [
-				"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
-				"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000030:rgba-detail:sampling:wrap=repeat,repeat",
-			],
-		});
+		const detailTextureBindingId = drawUnit.textureUseIds.find((bindingId) =>
+			bindingId.includes("role=object-detail"),
+		);
+		expect(drawUnit.kind).toBe("static-object-geometry");
+		expect(drawUnit.textureUseIds).toHaveLength(2);
 		expect(drawUnit.materialEntries[0]).toMatchObject({
 			detailTextureTiling: 7,
-			detailTextureUseId:
-				"outdoor-buildings:0xda55ffff:static-object-texture:prepared-render-surface-texture-use:06000030:rgba-detail:sampling:wrap=repeat,repeat",
+			detailTextureBindingId,
 		});
 		expect(
 			result.textureUses.map((textureUse) => ({
@@ -251,7 +248,7 @@ describe("static object batch partitioner", () => {
 							1,
 						],
 						materialEmissiveColor: [0.25, 0.25, 0.25],
-						primaryTextureUseId: null,
+						primaryTextureBindingId: null,
 					}),
 				],
 				materialFamily: "flat-color",
@@ -643,16 +640,16 @@ describe("static object batch partitioner", () => {
 			throw new Error("Expected indexed static object material entry.");
 		}
 		expect(materialEntry.indexedTextureFormat).toBe("p8");
-		expect(materialEntry.primaryTextureUseId).toBeNull();
-		expect(materialEntry.indexTextureUseId).toContain("index8");
-		expect(materialEntry.paletteTextureUseId).toContain(
+		expect(materialEntry.primaryTextureBindingId).toBeNull();
+		expect(materialEntry.indexTextureBindingId).toContain("index8");
+		expect(materialEntry.paletteTextureBindingId).toContain(
 			"prepared-palette-texture-use",
 		);
 		expect(drawUnit.textureUseIds).toHaveLength(2);
 		expect(drawUnit.textureUseIds).toEqual(
 			expect.arrayContaining([
-				materialEntry.indexTextureUseId,
-				materialEntry.paletteTextureUseId,
+				materialEntry.indexTextureBindingId,
+				materialEntry.paletteTextureBindingId,
 			]),
 		);
 		expect(result.textureUses.map((textureUse) => textureUse.source)).toEqual(
@@ -1203,6 +1200,7 @@ async function createTexturePlacementSnapshotForInput(
 			intents.map((intent) => [
 				intent.itemId,
 				{
+					bindingId: intent.bindingId,
 					height: 64,
 					itemId: intent.itemId,
 					pageId: `${intent.purpose}:page:0`,

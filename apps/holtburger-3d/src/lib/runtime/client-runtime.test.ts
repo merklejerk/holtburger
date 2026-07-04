@@ -2388,7 +2388,7 @@ describe("browser client runtime", () => {
 		});
 		const textureUse = createPreparedTextureUse();
 		const drawUnit = createTerrainDrawUnit("terrain-textured", 0xda55ffff, {
-			primaryTextureUseId: "terrain-textured:prepared-texture:06000010",
+			primaryTextureBindingId: "terrain-textured:prepared-texture:06000010",
 			textureUseIds: ["terrain-textured:prepared-texture:06000010"],
 		});
 
@@ -2460,7 +2460,7 @@ describe("browser client runtime", () => {
 		});
 		const textureUse = createPreparedTextureUse();
 		const drawUnit = createTerrainDrawUnit("terrain-textured", 0xda55ffff, {
-			primaryTextureUseId: "terrain-textured:prepared-texture:06000010",
+			primaryTextureBindingId: "terrain-textured:prepared-texture:06000010",
 			textureUseIds: ["terrain-textured:prepared-texture:06000010"],
 		});
 
@@ -2517,7 +2517,7 @@ describe("browser client runtime", () => {
 		});
 		const textureUse = createPreparedTextureUse();
 		const drawUnit = createTerrainDrawUnit("terrain-textured", 0xda55ffff, {
-			primaryTextureUseId: "terrain-textured:prepared-texture:06000010",
+			primaryTextureBindingId: "terrain-textured:prepared-texture:06000010",
 			textureUseIds: ["terrain-textured:prepared-texture:06000010"],
 		});
 
@@ -4281,15 +4281,15 @@ function createStaticObjectDrawUnit(
 			{
 				alphaTest: 0,
 				detailTextureTiling: 1,
-				detailTextureUseId: null,
-				indexTextureUseId: null,
+				detailTextureBindingId: null,
+				indexTextureBindingId: null,
 				indexedClipThreshold: 0,
 				indexedTextureFormat: null,
 				materialColor: [1, 1, 1, 1],
 				materialEmissiveColor: [0, 0, 0],
 				materialIds: [0x08000010],
-				paletteTextureUseId: null,
-				primaryTextureUseId: null,
+				paletteTextureBindingId: null,
+				primaryTextureBindingId: null,
 				primaryTextureWrapMode: "clamp",
 				renderState,
 				slot: 0,
@@ -4492,15 +4492,15 @@ function createStructuredInteriorDrawUnit(options: {
 			{
 				alphaTest: 0,
 				detailTextureTiling: 1,
-				detailTextureUseId: null,
-				indexTextureUseId: null,
+				detailTextureBindingId: null,
+				indexTextureBindingId: null,
 				indexedClipThreshold: 0,
 				indexedTextureFormat: null,
 				materialColor: [1, 1, 1, 1],
 				materialEmissiveColor: [0, 0, 0],
 				materialIds: [material.materialId],
-				paletteTextureUseId: null,
-				primaryTextureUseId: null,
+				paletteTextureBindingId: null,
+				primaryTextureBindingId: null,
 				primaryTextureWrapMode: "clamp",
 				renderState,
 				slot: 0,
@@ -4670,7 +4670,7 @@ function createTerrainDrawUnit(
 	landblockId: number,
 	options: {
 		readonly fallbackReasons?: readonly TerrainMaterialFallbackReason[];
-		readonly primaryTextureUseId?: string | null;
+		readonly primaryTextureBindingId?: string | null;
 		readonly textureUseIds?: readonly string[];
 	} = {},
 ): TerrainGeometryStaticDrawUnit {
@@ -4682,13 +4682,13 @@ function createTerrainDrawUnit(
 		indices: new Uint16Array([0, 1, 2]),
 		kind: "terrain-geometry",
 		landblockId,
-		materialBucketKey: options.primaryTextureUseId
-			? `shader:terrain-single-base-color|domain:outdoor-terrain|sampler:color-repeat-filterable|placement:0|texture:${options.primaryTextureUseId}`
+		materialBucketKey: options.primaryTextureBindingId
+			? `shader:terrain-single-base-color|domain:outdoor-terrain|sampler:color-repeat-filterable|placement:0|texture:${options.primaryTextureBindingId}`
 			: "shader:terrain-debug-flat|domain:outdoor-terrain|sampler:none|placement:none",
-		materialFamily: options.primaryTextureUseId
+		materialFamily: options.primaryTextureBindingId
 			? "terrain-single-base-color"
 			: "terrain-debug-flat",
-		primaryTextureUseId: options.primaryTextureUseId ?? null,
+		primaryTextureBindingId: options.primaryTextureBindingId ?? null,
 		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 1]),
 		sourceTriangleIds: ["triangle-a"],
 		terrainFallbackReasons: options.fallbackReasons ?? [],

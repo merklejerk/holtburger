@@ -5,6 +5,7 @@ import type {
 	TerrainMaterialTextureRoleBinding,
 	TerrainGeometryStaticDrawUnit,
 } from "../../contracts";
+import type { TextureBindingId } from "../../../textures/identity";
 
 const MAX_TERRAIN_LAYER_ENTRIES_PER_DRAW = 8;
 const MAX_TERRAIN_OVERLAYS_PER_LAYER = 3;
@@ -17,7 +18,7 @@ export type TerrainMaterialFamilyClassification = Pick<
 	TerrainGeometryStaticDrawUnit,
 	| "materialBucketKey"
 	| "materialFamily"
-	| "primaryTextureUseId"
+	| "primaryTextureBindingId"
 	| "terrainFallbackReasons"
 	| "textureUseIds"
 >;
@@ -46,8 +47,8 @@ export function classifyTerrainMaterialFamily({
 		});
 	}
 
-	const primaryTextureUseId = plan.layerEntries[0]?.base.textureUseId;
-	if (!primaryTextureUseId) {
+	const primaryTextureBindingId = plan.layerEntries[0]?.base.textureUseId;
+	if (!primaryTextureBindingId) {
 		return createDebugFlatClassification({
 			domain,
 			reasons: [
@@ -71,7 +72,7 @@ export function classifyTerrainMaterialFamily({
 				`signature:${plan.signature}`,
 			].join("|"),
 			materialFamily: "terrain-layered",
-			primaryTextureUseId,
+			primaryTextureBindingId,
 			terrainFallbackReasons: [],
 			textureUseIds,
 		};
@@ -82,12 +83,12 @@ export function classifyTerrainMaterialFamily({
 			"shader:terrain-single-base-color",
 			`domain:${domain}`,
 			"sampler:color-repeat-filterable",
-			`texture:${primaryTextureUseId}`,
+			`texture:${primaryTextureBindingId}`,
 		].join("|"),
 		materialFamily: "terrain-single-base-color",
-		primaryTextureUseId,
+		primaryTextureBindingId,
 		terrainFallbackReasons: [],
-		textureUseIds: [primaryTextureUseId],
+		textureUseIds: [primaryTextureBindingId],
 	};
 }
 
@@ -181,8 +182,8 @@ function requiresLayeredMaterial(plan: TerrainMaterialLayerPlan): boolean {
 
 function collectTerrainLayeredTextureUseIds(
 	plan: TerrainMaterialLayerPlan,
-): readonly string[] {
-	const textureUseIds = new Set<string>();
+): readonly TextureBindingId[] {
+	const textureUseIds = new Set<TextureBindingId>();
 	for (const entry of plan.layerEntries) {
 		for (const binding of collectLayerEntryTextureBindings(entry)) {
 			if (binding.textureUseId) {
@@ -241,7 +242,7 @@ function createDebugFlatClassification({
 			"placement:none",
 		].join("|"),
 		materialFamily: "terrain-debug-flat",
-		primaryTextureUseId: null,
+		primaryTextureBindingId: null,
 		terrainFallbackReasons: reasons,
 		textureUseIds: [],
 	};

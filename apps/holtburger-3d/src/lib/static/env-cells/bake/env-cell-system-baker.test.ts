@@ -300,15 +300,11 @@ describe("browser landblock env-cell baker", () => {
 				expect.objectContaining({
 					family: "texture-rgba",
 					outcome: "rendered",
-					textureUseIds: [
-						"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
-					],
+					textureUseIds: drawUnit.textureUseIds,
 				}),
 			],
-			textureUseIds: [
-				"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
-			],
 		});
+		expect(drawUnit.textureUseIds).toHaveLength(1);
 		expect(result.textureUses).toEqual([
 			expect.objectContaining({
 				domain: "env-cell-system",
@@ -398,7 +394,7 @@ describe("browser landblock env-cell baker", () => {
 				purpose: "object-detail",
 			},
 		]);
-		expect(intents.map((intent) => intent.textureUseId)).toEqual(
+		expect(intents.map((intent) => intent.bindingId)).toEqual(
 			drawUnit.textureUseIds,
 		);
 	});
@@ -456,15 +452,14 @@ describe("browser landblock env-cell baker", () => {
 			throw new Error("Expected structured interior geometry draw unit.");
 		}
 
+		const detailTextureBindingId = drawUnit.textureUseIds.find((bindingId) =>
+			bindingId.includes("role=object-detail"),
+		);
 		expect(drawUnit.materialEntries[0]).toMatchObject({
 			detailTextureTiling: 8,
-			detailTextureUseId:
-				"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000020:rgba-detail:sampling:wrap=repeat,repeat",
+			detailTextureBindingId,
 		});
-		expect(drawUnit.textureUseIds).toEqual([
-			"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
-			"env-cell-system:0xda55ffff:structured-interior-texture:prepared-render-surface-texture-use:06000020:rgba-detail:sampling:wrap=repeat,repeat",
-		]);
+		expect(drawUnit.textureUseIds).toHaveLength(2);
 		expect(result.textureUses).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
@@ -970,6 +965,7 @@ async function createStructuredInteriorPlacementSnapshot(
 			intents.map((intent, index) => [
 				intent.itemId,
 				{
+					bindingId: intent.bindingId,
 					height: 16,
 					itemId: intent.itemId,
 					pageId: options.uniquePages

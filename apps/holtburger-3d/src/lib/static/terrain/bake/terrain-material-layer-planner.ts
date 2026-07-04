@@ -11,6 +11,7 @@ import type {
 	TerrainStaticScopePayload,
 	TerrainTextureUseFacts,
 } from "../../contracts";
+import type { TextureBindingId } from "../../../textures/identity";
 
 const DEFAULT_TERRAIN_LAYER_LIMIT = 8;
 const ROAD_TYPE_TERRAIN_CODE = 3;
@@ -19,7 +20,9 @@ const ROAD_CORNER_MASKS = [0x0c00_0000, 0x0300_0000, 0x00c0_0000, 0x0030_0000];
 
 export interface TerrainMaterialLayerPlannerOptions {
 	readonly payload: TerrainStaticScopePayload;
-	readonly createTextureUseId: (textureUse: TerrainTextureUseFacts) => string;
+	readonly createTextureUseId: (
+		textureUse: TerrainTextureUseFacts,
+	) => TextureBindingId;
 	readonly maxLayerEntries?: number;
 }
 
@@ -68,13 +71,15 @@ interface PlannerContext {
 		string,
 		TerrainTextureUseFacts
 	>;
-	readonly createTextureUseId: (textureUse: TerrainTextureUseFacts) => string;
+	readonly createTextureUseId: (
+		textureUse: TerrainTextureUseFacts,
+	) => TextureBindingId;
 	readonly fallbackReasons: TerrainMaterialFallbackReason[];
 }
 
 function createPlannerContext(
 	payload: TerrainStaticScopePayload,
-	createTextureUseId: (textureUse: TerrainTextureUseFacts) => string,
+	createTextureUseId: (textureUse: TerrainTextureUseFacts) => TextureBindingId,
 ): PlannerContext {
 	return {
 		createTextureUseId,

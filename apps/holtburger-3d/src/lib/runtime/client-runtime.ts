@@ -503,11 +503,11 @@ interface DynamicSelectionRendererIdentityDiagnostics {
 }
 
 interface DynamicSelectionIndexedMaterialDiagnostics {
-	readonly detailTextureUseId: string | null;
+	readonly detailTextureBindingId: string | null;
 	readonly indexedTextureFormat: "index16" | "p8" | null;
-	readonly indexTextureUseId: string | null;
+	readonly indexTextureBindingId: string | null;
 	readonly materialIds: readonly number[];
-	readonly paletteTextureUseId: string | null;
+	readonly paletteTextureBindingId: string | null;
 	readonly partIndex: number;
 	readonly sourceAssetId: string;
 	readonly slot: number;
@@ -2961,10 +2961,10 @@ function summarizeDrawUnitMaterialEntry(
 	return {
 		alphaTest: entry.alphaTest,
 		blendMode: entry.renderState.blend.mode,
-		indexTextureDid: extractTextureUseDid(entry.indexTextureUseId),
+		indexTextureDid: extractTextureUseDid(entry.indexTextureBindingId),
 		materialIds: entry.materialIds,
-		paletteDid: extractTextureUseDid(entry.paletteTextureUseId),
-		primaryTextureDid: extractTextureUseDid(entry.primaryTextureUseId),
+		paletteDid: extractTextureUseDid(entry.paletteTextureBindingId),
+		primaryTextureDid: extractTextureUseDid(entry.primaryTextureBindingId),
 		slot: entry.slot,
 		wrapMode: entry.primaryTextureWrapMode,
 	};
@@ -4485,11 +4485,11 @@ function createDynamicSelectionIndexedMaterialDiagnostics(
 		part.materialEntries
 			.filter((entry) => entry.indexedTextureFormat !== null)
 			.map((entry) => ({
-				detailTextureUseId: entry.detailTextureUseId,
+				detailTextureBindingId: entry.detailTextureBindingId,
 				indexedTextureFormat: entry.indexedTextureFormat,
-				indexTextureUseId: entry.indexTextureUseId,
+				indexTextureBindingId: entry.indexTextureBindingId,
 				materialIds: entry.materialIds,
-				paletteTextureUseId: entry.paletteTextureUseId,
+				paletteTextureBindingId: entry.paletteTextureBindingId,
 				partIndex: part.partIndex,
 				sourceAssetId: part.sourceAssetId,
 				slot: entry.slot,

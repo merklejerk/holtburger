@@ -33,6 +33,7 @@ import {
 	OBJECT_MATERIAL_FRAGMENT_SHADERS,
 	TERRAIN_FRAGMENT_SHADER,
 } from "./webgl2-renderer";
+import { createTextureBindingId } from "../../textures/identity";
 
 let pendingFrame: FrameRequestCallback | null = null;
 
@@ -294,9 +295,12 @@ describe("WebGL2 structured interior rendering", () => {
 		vi.stubGlobal("cancelAnimationFrame", () => {});
 		vi.stubGlobal("window", { devicePixelRatio: 1 });
 		const renderer = createWebgl2Renderer(canvas);
+		const textureBindingId = createRendererTestTextureBindingId(
+			"object-texture-use",
+		);
 
 		renderer.applyTexturePlacementUpdate(
-			createTexturePlacementUpdate("object-texture-use", "object-texture-ref"),
+			createTexturePlacementUpdate(textureBindingId, "object-texture-ref"),
 		);
 		const atlasTexture = gl.createTexture.mock.results.at(-1)?.value;
 		renderer.setOutdoorGeneratedSceneryLayer(
@@ -305,7 +309,7 @@ describe("WebGL2 structured interior rendering", () => {
 				drawUnits: [
 					createTexturedOutdoorGeneratedSceneryStaticObjectDrawUnit(
 						"textured-static-object",
-						"object-texture-use",
+						textureBindingId,
 					),
 				],
 			}),
@@ -2073,15 +2077,15 @@ function createStructuredInteriorDrawUnit(
 			{
 				alphaTest: 0,
 				detailTextureTiling: 1,
-				detailTextureUseId: null,
+				detailTextureBindingId: null,
 				indexedClipThreshold: -1,
 				indexedTextureFormat: null,
-				indexTextureUseId: null,
+				indexTextureBindingId: null,
 				materialColor: [1, 0, 0, 1],
 				materialEmissiveColor: [0, 0, 0],
 				materialIds: [0x08000010],
-				paletteTextureUseId: null,
-				primaryTextureUseId: null,
+				paletteTextureBindingId: null,
+				primaryTextureBindingId: null,
 				primaryTextureWrapMode: "clamp",
 				renderState: {
 					blend: {
@@ -2170,15 +2174,15 @@ function createEnvCellStaticObjectDrawUnit(
 			{
 				alphaTest: 0,
 				detailTextureTiling: 1,
-				detailTextureUseId: null,
-				indexTextureUseId: null,
+				detailTextureBindingId: null,
+				indexTextureBindingId: null,
 				indexedClipThreshold: 0,
 				indexedTextureFormat: null,
 				materialColor: [1, 1, 1, 1],
 				materialEmissiveColor: [0, 0, 0],
 				materialIds: [0x08000010],
-				paletteTextureUseId: null,
-				primaryTextureUseId: null,
+				paletteTextureBindingId: null,
+				primaryTextureBindingId: null,
 				primaryTextureWrapMode: "clamp",
 				renderState,
 				slot: 0,
@@ -2309,7 +2313,7 @@ function createTexturedOutdoorGeneratedSceneryStaticObjectDrawUnit(
 		materialBucketKey: "family:texture-rgba|pass:opaque|material:08000010",
 		materialEntries: base.materialEntries.map((entry) => ({
 			...entry,
-			primaryTextureUseId: textureUseId,
+			primaryTextureBindingId: textureUseId,
 		})),
 		materialFamily: "texture-rgba",
 		textureUseIds: [textureUseId],
@@ -2347,6 +2351,7 @@ function createTexturePlacementUpdate(
 		removedTextureRefIds: [],
 		resolvedTexturePlacements: [
 			{
+				bindingId: textureUseId,
 				pageVersion: {
 					placementRevision: 1,
 					textureRefId,
@@ -2360,6 +2365,14 @@ function createTexturePlacementUpdate(
 		],
 		revision: 1,
 	};
+}
+
+function createRendererTestTextureBindingId(label: string): string {
+	return createTextureBindingId({
+		resourceId: "renderer-test-resource",
+		role: "object-base-color",
+		slot: label,
+	});
 }
 
 function countTextureBinds(
@@ -2630,7 +2643,7 @@ function createTerrainDrawUnit(
 		materialBucketKey: "family:terrain-debug-flat|material:debug",
 		materialFamily: "terrain-debug-flat",
 		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
-		primaryTextureUseId: null,
+		primaryTextureBindingId: null,
 		sourceTriangleIds: ["terrain-triangle-a"],
 		terrainFallbackReasons: [],
 		terrainMaterialPlan: null,

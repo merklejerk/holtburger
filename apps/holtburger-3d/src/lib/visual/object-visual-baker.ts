@@ -119,12 +119,15 @@ export function bakeObjectVisuals(
 			renderParts.flatMap((part) =>
 				part.materialEntries.flatMap((entry) =>
 					[
-						entry.primaryTextureUseId,
-						entry.indexTextureUseId,
-						entry.paletteTextureUseId,
-						entry.detailTextureUseId,
+						entry.primaryTextureBindingId,
+						entry.indexTextureBindingId,
+						entry.paletteTextureBindingId,
+						entry.detailTextureBindingId,
 					].filter(
-						(textureUseId): textureUseId is string => textureUseId !== null,
+						(
+							textureBindingId,
+						): textureBindingId is TextureBindingId =>
+							textureBindingId !== null,
 					),
 				),
 			),
@@ -309,15 +312,15 @@ function createMaterialTableEntry(options: {
 	const baseEntry = {
 		alphaTest: options.materialRecipe.alphaTest,
 		detailTextureTiling: options.materialRecipe.detailTextureTiling,
-		detailTextureUseId: null,
-		indexTextureUseId: null,
+		detailTextureBindingId: null,
+		indexTextureBindingId: null,
 		indexedClipThreshold: options.materialRecipe.indexedClipThreshold,
 		indexedTextureFormat: null,
 		materialColor: options.materialRecipe.materialColor,
 		materialEmissiveColor: options.materialRecipe.materialEmissiveColor,
 		materialIds: [options.materialRecipeId],
-		paletteTextureUseId: null,
-		primaryTextureUseId: null,
+		paletteTextureBindingId: null,
+		primaryTextureBindingId: null,
 		primaryTextureWrapMode: options.materialRecipe.primaryTextureWrapMode,
 		renderState: options.materialRecipe.renderState,
 		slot: options.slot,
@@ -336,15 +339,15 @@ function createMaterialTableEntry(options: {
 			return {
 				entry: {
 					...baseEntry,
-					indexTextureUseId: requireTextureBinding(
+					indexTextureBindingId: requireTextureBinding(
 						options.textureBindings,
 						options.materialRecipe.colorTextureRecipeId,
-					).textureUseId,
+					).bindingId,
 					indexedTextureFormat: options.materialRecipe.indexedTextureFormat,
-					paletteTextureUseId: requireTextureBinding(
+					paletteTextureBindingId: requireTextureBinding(
 						options.textureBindings,
 						options.materialRecipe.paletteTextureRecipeId,
-					).textureUseId,
+					).bindingId,
 				},
 				family: "indexed-paletted",
 				pass: options.materialRecipe.pass,
@@ -353,17 +356,17 @@ function createMaterialTableEntry(options: {
 			return {
 				entry: {
 					...baseEntry,
-					detailTextureUseId:
+					detailTextureBindingId:
 						options.materialRecipe.detailTextureRecipeId === null
 							? null
 							: requireTextureBinding(
 									options.textureBindings,
 									options.materialRecipe.detailTextureRecipeId,
-								).textureUseId,
-					primaryTextureUseId: requireTextureBinding(
+								).bindingId,
+					primaryTextureBindingId: requireTextureBinding(
 						options.textureBindings,
 						options.materialRecipe.rgbaTextureRecipeId,
-					).textureUseId,
+					).bindingId,
 				},
 				family: "texture-rgba",
 				pass: options.materialRecipe.pass,
@@ -528,12 +531,15 @@ function createRenderPart(options: {
 		textureUseIds: uniqueSortedStrings(
 			materialEntries.flatMap((entry) =>
 				[
-					entry.primaryTextureUseId,
-					entry.indexTextureUseId,
-					entry.paletteTextureUseId,
-					entry.detailTextureUseId,
+					entry.primaryTextureBindingId,
+					entry.indexTextureBindingId,
+					entry.paletteTextureBindingId,
+					entry.detailTextureBindingId,
 				].filter(
-					(textureUseId): textureUseId is string => textureUseId !== null,
+					(
+						textureBindingId,
+					): textureBindingId is TextureBindingId =>
+						textureBindingId !== null,
 				),
 			),
 		),
@@ -642,12 +648,15 @@ function createSourceLocalPayload(options: {
 		textureUseIds: uniqueSortedStrings(
 			materialEntries.flatMap((entry) =>
 				[
-					entry.primaryTextureUseId,
-					entry.indexTextureUseId,
-					entry.paletteTextureUseId,
-					entry.detailTextureUseId,
+					entry.primaryTextureBindingId,
+					entry.indexTextureBindingId,
+					entry.paletteTextureBindingId,
+					entry.detailTextureBindingId,
 				].filter(
-					(textureUseId): textureUseId is string => textureUseId !== null,
+					(
+						textureBindingId,
+					): textureBindingId is TextureBindingId =>
+						textureBindingId !== null,
 				),
 			),
 		),
@@ -716,7 +725,7 @@ function createPartitionKey(primitive: RenderablePrimitive): string {
 		`roleLayout:${primitive.materialTextureRoleLayoutKey}`,
 		`roleSchema:${primitive.materialTextureRoleSchemaKey}`,
 		`sourcePart:${primitive.sourcePartIndex ?? "none"}`,
-		`textures:${primitive.materialEntry.primaryTextureUseId ?? ""}:${primitive.materialEntry.indexTextureUseId ?? ""}:${primitive.materialEntry.paletteTextureUseId ?? ""}:${primitive.materialEntry.detailTextureUseId ?? ""}`,
+		`textures:${primitive.materialEntry.primaryTextureBindingId ?? ""}:${primitive.materialEntry.indexTextureBindingId ?? ""}:${primitive.materialEntry.paletteTextureBindingId ?? ""}:${primitive.materialEntry.detailTextureBindingId ?? ""}`,
 	].join("|");
 }
 
@@ -729,10 +738,10 @@ function createMaterialTableEntryKey(
 ): string {
 	return [
 		entry.materialIds.join(","),
-		entry.primaryTextureUseId ?? "",
-		entry.indexTextureUseId ?? "",
-		entry.paletteTextureUseId ?? "",
-		entry.detailTextureUseId ?? "",
+		entry.primaryTextureBindingId ?? "",
+		entry.indexTextureBindingId ?? "",
+		entry.paletteTextureBindingId ?? "",
+		entry.detailTextureBindingId ?? "",
 		entry.materialColor.join(","),
 	].join("|");
 }
@@ -753,17 +762,17 @@ function uniqueMaterialEntries(
 }
 
 function uniqueTextureDependencies(
-	textureUseIds: readonly string[],
+	textureBindingIds: readonly TextureBindingId[],
 	textureBindings: ReadonlyMap<
 		ObjectVisualTextureRecipeId,
 		ObjectVisualTextureBinding
 	>,
 ): readonly TextureResourceDependencies[] {
-	const requestedTextureUseIds = new Set(textureUseIds);
+	const requestedTextureBindingIds = new Set(textureBindingIds);
 	const dependenciesByKey = new Map<string, TextureResourceDependencies>();
 	for (const binding of textureBindings.values()) {
-		if (requestedTextureUseIds.has(binding.textureUseId)) {
-			dependenciesByKey.set(binding.textureUseId, binding.dependency);
+		if (requestedTextureBindingIds.has(binding.bindingId)) {
+			dependenciesByKey.set(binding.bindingId, binding.dependency);
 		}
 	}
 	return [...dependenciesByKey.entries()]
@@ -798,7 +807,7 @@ function compareRenderablePrimitives(
 	);
 }
 
-function uniqueSortedStrings(values: readonly string[]): readonly string[] {
+function uniqueSortedStrings<T extends string>(values: readonly T[]): readonly T[] {
 	return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 

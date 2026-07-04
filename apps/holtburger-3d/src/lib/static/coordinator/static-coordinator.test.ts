@@ -2345,7 +2345,7 @@ function createTerrainDrawUnit(
 		materialBucketKey: "shader:terrain-debug-flat",
 		materialFamily: "terrain-debug-flat",
 		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 1]),
-		primaryTextureUseId: null,
+		primaryTextureBindingId: null,
 		sourceTriangleIds: ["triangle-a"],
 		terrainFallbackReasons: [],
 		terrainMaterialPlan: null,

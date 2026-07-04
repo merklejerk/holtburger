@@ -31,7 +31,7 @@ describe("terrain geometry baker", () => {
 			materialBucketKey:
 				"shader:terrain-debug-flat|domain:outdoor-terrain|sampler:none|placement:none",
 			materialFamily: "terrain-debug-flat",
-			primaryTextureUseId: null,
+			primaryTextureBindingId: null,
 			triangleCount: 2,
 			vertexCount: 6,
 		});
@@ -135,24 +135,23 @@ describe("terrain geometry baker", () => {
 
 		const result = bakeTerrainGeometry(input);
 		const drawUnit = requireTerrainDrawUnit(result.drawUnits[0]);
+		const primaryTextureBindingId = drawUnit.primaryTextureBindingId;
+		if (!primaryTextureBindingId) {
+			throw new Error("Expected terrain primary texture binding id.");
+		}
 
 		expect(drawUnit).toMatchObject({
-			materialBucketKey:
-				"shader:terrain-single-base-color|domain:outdoor-terrain|sampler:color-repeat-filterable|texture:terrain:0xda55ffff:prepared-texture:terrain-base:rgba-color:06000010",
+			materialBucketKey: `shader:terrain-single-base-color|domain:outdoor-terrain|sampler:color-repeat-filterable|texture:${primaryTextureBindingId}`,
 			materialFamily: "terrain-single-base-color",
-			primaryTextureUseId:
-				"terrain:0xda55ffff:prepared-texture:terrain-base:rgba-color:06000010",
-			textureUseIds: [
-				"terrain:0xda55ffff:prepared-texture:terrain-base:rgba-color:06000010",
-			],
+			primaryTextureBindingId,
+			textureUseIds: [primaryTextureBindingId],
 		});
 		expect(drawUnit.terrainMaterialPlan?.layerEntries).toEqual([
 			expect.objectContaining({
 				allRoad: false,
 				base: expect.objectContaining({
 					role: "terrain-base",
-					textureUseId:
-						"terrain:0xda55ffff:prepared-texture:terrain-base:rgba-color:06000010",
+					textureUseId: primaryTextureBindingId,
 					wrap: "repeat",
 				}),
 				pcode: 33825,
@@ -175,8 +174,7 @@ describe("terrain geometry baker", () => {
 					usage: "rgba-color",
 				},
 				textureKey: expect.stringContaining("texture|"),
-				textureUseId:
-					"terrain:0xda55ffff:prepared-texture:terrain-base:rgba-color:06000010",
+				textureUseId: primaryTextureBindingId,
 			}),
 		]);
 		expect(result.textureDependencies).toEqual([
@@ -184,9 +182,7 @@ describe("terrain geometry baker", () => {
 				resourceId: drawUnit.drawUnitId,
 				roles: [
 					{
-						itemIds: [
-							"terrain:0xda55ffff:prepared-texture:terrain-base:rgba-color:06000010",
-						],
+						itemIds: [primaryTextureBindingId],
 						purpose: "terrain-color",
 					},
 				],
@@ -214,8 +210,7 @@ describe("terrain geometry baker", () => {
 		).toEqual([
 			expect.objectContaining({
 				affinityKey: "terrain:terrain:0xda55ffff",
-				itemId:
-					"terrain:0xda55ffff:prepared-texture:terrain-base:rgba-color:06000010",
+				itemId: expect.stringContaining("binding|"),
 				purpose: "terrain-color",
 			}),
 		]);
@@ -263,7 +258,7 @@ describe("terrain geometry baker", () => {
 		};
 
 		expect(() => bakeTerrainGeometry(input)).toThrow(
-			/Terrain texture terrain:0xda55ffff:prepared-texture:terrain-base:rgba-color:06000010 is missing a pre-bake placement/,
+			/Terrain texture binding\|resource=terrain%3A0xda55ffff%3Aterrain-texture/,
 		);
 	});
 

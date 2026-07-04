@@ -77,7 +77,7 @@ describe("dynamic visual baker", () => {
 			0, 0, 0, 1, 0, 0, 0, 1, 0,
 		]);
 		expect(product.resource.renderParts[0]?.textureUseIds).toEqual([
-			product.resource.textureRequirements[0]?.textureUseId,
+			product.resource.textureRequirements[0]?.bindingId,
 		]);
 		expect(
 			product.resource.objectVisual?.geometryBuffers.has(
@@ -167,12 +167,12 @@ describe("dynamic visual baker", () => {
 			{
 				partIndex: 0,
 				renderPartId: "dynamic-visual-resource:runtime:test:render-part:0",
-				textureUseIds: [product.resource.textureRequirements[0]?.textureUseId],
+				textureUseIds: [product.resource.textureRequirements[0]?.bindingId],
 			},
 			{
 				partIndex: 0,
 				renderPartId: "dynamic-visual-resource:runtime:test:render-part:1",
-				textureUseIds: [product.resource.textureRequirements[1]?.textureUseId],
+				textureUseIds: [product.resource.textureRequirements[1]?.bindingId],
 			},
 		]);
 	});

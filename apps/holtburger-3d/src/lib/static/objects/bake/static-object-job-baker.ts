@@ -26,6 +26,7 @@ import type {
 } from "../../contracts";
 import { uniqueSortedStaticTextureUseOwners } from "../../contracts";
 import type { TextureResourceDependencies } from "../../../textures/placement";
+import type { TextureBindingId } from "../../../textures/identity";
 import { requireObjectVisualTexturePlacementSnapshot } from "../../../textures/placement";
 import { createLayerPeerRecordOwnerForStaticBakeTask } from "../../layer-owners";
 import {
@@ -872,11 +873,14 @@ function createStaticObjectGeometryBakeOutput(options: {
 	const textureUseIds = uniqueSortedStrings(
 		materialEntries.flatMap((entry) =>
 			[
-				entry.primaryTextureUseId,
-				entry.indexTextureUseId,
-				entry.paletteTextureUseId,
-				entry.detailTextureUseId,
-			].filter((textureUseId): textureUseId is string => textureUseId !== null),
+				entry.primaryTextureBindingId,
+				entry.indexTextureBindingId,
+				entry.paletteTextureBindingId,
+				entry.detailTextureBindingId,
+			].filter(
+				(textureBindingId): textureBindingId is TextureBindingId =>
+					textureBindingId !== null,
+			),
 		),
 	);
 	const materialEntry = materialEntries[0];
@@ -981,7 +985,7 @@ function createStaticObjectMaterialTableEntries(options: {
 	return options.partition.coarseTablePlan.entries.map((entry, slot) =>
 		createStaticMaterialTableEntry({
 			createTextureUseId: (dataUse, wrapMode) =>
-				createStaticObjectTextureUseId({
+				createStaticObjectTextureBindingId({
 					dataUse,
 					domain: options.domain,
 					textureUseScopeId: options.textureUseScopeId,
@@ -1282,19 +1286,19 @@ function bakeStaticObjectPartitionGeometry(
 	};
 }
 
-function createStaticObjectTextureUseId(options: {
+function createStaticObjectTextureBindingId(options: {
 	readonly dataUse: MaterialTextureDataUseIdentity;
 	readonly domain: StaticBakeTask["domain"];
 	readonly textureUseScopeId: string;
 	readonly wrapMode: StaticObjectBatchPartition["textureWrapMode"];
-}): string {
+}): TextureBindingId {
 	return createStaticMaterialTextureBindingRequirement({
 		dataUse: options.dataUse,
 		domain: options.domain,
 		textureUseNamespace: "static-object-texture",
 		textureUseScopeId: options.textureUseScopeId,
 		wrapMode: options.wrapMode,
-	}).bindingKey;
+	}).bindingId;
 }
 
 function mergeTextureUses(
@@ -1322,7 +1326,7 @@ function mergeTextureUses(
 	);
 }
 
-function uniqueSortedStrings(values: readonly string[]): readonly string[] {
+function uniqueSortedStrings<T extends string>(values: readonly T[]): readonly T[] {
 	return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 

@@ -23,6 +23,7 @@ import {
 	TextureManager,
 	type DynamicTextureUseCommit,
 } from "./texture-manager";
+import { createTextureLeaseSet } from "./leases";
 import {
 	classifyTextureUsagePurpose,
 	createRuntimeAuthoredDynamicTexturePlacementBucketKey,
@@ -1441,6 +1442,51 @@ describe("browser texture manager", () => {
 		]);
 
 		textureManager.releaseTextureResourceDependencies(["terrain-a"]);
+		expect(textureManager.createPlacementReferenceSnapshot()).toMatchObject([
+			{
+				activeReferenceCount: 0,
+				freeable: true,
+				itemId: textureUse.bindingId,
+			},
+		]);
+	});
+
+	it("pins and releases texture lease sets by resource id", async () => {
+		const textureManager = new TextureManager({
+			assetService: new FixtureAssetService(),
+		});
+		const textureUse = createTextureUseCommit({
+			drawUnitId: "terrain-a",
+			outputFormat: "rgba8",
+			renderSurfaceId: 0x06000010,
+			textureBindingId: "terrain-lease-set:prepared-texture:06000010",
+		});
+		await textureManager.placeTextureIntents({
+			intents: [createStaticPlacementIntent(textureUse)],
+		});
+
+		textureManager.pinTextureLeaseSet(
+			createTextureLeaseSet([
+				{
+					resourceId: "terrain-a",
+					roles: [
+						{
+							itemIds: [textureUse.bindingId],
+							purpose: "terrain-color",
+						},
+					],
+				},
+			]),
+		);
+		expect(textureManager.createPlacementReferenceSnapshot()).toMatchObject([
+			{
+				activeReferenceCount: 1,
+				freeable: false,
+				itemId: textureUse.bindingId,
+			},
+		]);
+
+		textureManager.releaseTextureLeaseResourceIds(["terrain-a"]);
 		expect(textureManager.createPlacementReferenceSnapshot()).toMatchObject([
 			{
 				activeReferenceCount: 0,

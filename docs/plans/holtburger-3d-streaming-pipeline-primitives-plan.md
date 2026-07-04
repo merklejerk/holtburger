@@ -1,6 +1,6 @@
 # Holtburger 3D Streaming Pipeline Primitives Plan
 
-Status: Phase 2 complete; Phase 0 audit complete and remaining phases resteered on 2026-07-04.
+Status: Phase 3 complete; Phase 0 audit complete and remaining phases resteered on 2026-07-04.
 
 Related context:
 
@@ -661,6 +661,8 @@ Decisions and course corrections:
 
 Goal: turn the existing dependency pin/release behavior into an explicit lease-set boundary.
 
+Status: complete.
+
 Candidate shape:
 
 ```ts
@@ -699,6 +701,18 @@ Decisions and course corrections:
 
 - Phase 0 showed that `TextureResourceDependencies.resourceId` already carries the release identity,
   so this phase should not add a parallel `resourceIds` field unless implementation proves the need.
+- Implemented lease-set vocabulary in `apps/holtburger-3d/src/lib/textures/leases.ts`:
+  - `TextureLeaseSet`;
+  - `EMPTY_TEXTURE_LEASE_SET`;
+  - `createTextureLeaseSet(...)`;
+  - `collectTextureLeaseResourceIds(...)`.
+- `createTextureLeaseSet(...)` rejects duplicate `resourceId` values. That keeps producer ambiguity
+  visible instead of allowing the lease abstraction to hide it.
+- Added `TextureManager.pinTextureLeaseSet(...)` and
+  `TextureManager.releaseTextureLeaseResourceIds(...)`.
+- Kept the existing low-level `pinTextureResourceDependencies(...)` and
+  `releaseTextureResourceDependencies(...)` methods for internal/test coverage during the cutover.
+- Did not add `mergeTextureLeaseSets(...)`; Phase 4 call sites do not need it yet.
 
 ## Phase 4: Cut Runtime Install Paths Over To Lease Sets
 

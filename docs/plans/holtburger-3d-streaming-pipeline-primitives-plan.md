@@ -1,6 +1,6 @@
 # Holtburger 3D Streaming Pipeline Primitives Plan
 
-Status: draft; Phase 0 audit complete and remaining phases resteered on 2026-07-04.
+Status: Phase 1 complete; Phase 0 audit complete and remaining phases resteered on 2026-07-04.
 
 Related context:
 
@@ -527,6 +527,8 @@ Stop/go criteria at Phase 5:
 
 Goal: make typed-array ownership explicit for worker DTOs without adding a broad sidecar framework.
 
+Status: complete.
+
 Target shape:
 
 ```ts
@@ -571,6 +573,18 @@ Decisions and course corrections:
 
 - Phase 0 selected texture packing result pages as the pilot because they are already
   worker-created, transferred, and covered by protocol-local tests.
+- Implemented the shared ownership helper in `apps/holtburger-3d/src/lib/workers/transfers.ts`:
+  - `BinaryTransferOwnership`;
+  - `BinarySidecarView`;
+  - `collectTransferableBinarySidecars(...)`;
+  - `addTransferableBinarySidecar(...)`.
+- `collectTexturePackingResultTransfers(...)` remains protocol-local in
+  `apps/holtburger-3d/src/lib/textures/packing/transfers.ts` and now delegates to the ownership-aware
+  helper.
+- Borrowed sidecars fail loudly when passed to the transferable collector. Phase 1 deliberately did
+  not add a skip mode for borrowed views because the pilot collector should only pass owned result
+  pages.
+- No worker input protocols were migrated.
 
 ## Phase 2: Transfer Worker-Owned Geometry Outputs
 

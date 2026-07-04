@@ -9,7 +9,7 @@ export interface WorkerJobMessage<TInput> {
 	readonly input: TInput;
 }
 
-export interface WorkerCancelMessage {
+interface WorkerCancelMessage {
 	readonly kind: "cancel";
 	readonly requestId: string;
 }
@@ -94,9 +94,9 @@ export interface WorkerJobHandle<TOutput> {
 	cancel(): void;
 }
 
-export type WorkerDispatchMode = "idle-workers" | "pipelined-workers";
+type WorkerDispatchMode = "idle-workers" | "pipelined-workers";
 
-export interface WorkerServiceHandlerResult<TServiceResponse> {
+interface WorkerServiceHandlerResult<TServiceResponse> {
 	readonly response: TServiceResponse;
 	readonly transfer?: readonly Transferable[];
 }
@@ -128,7 +128,7 @@ export interface WorkerPoolOptions<
 	>;
 }
 
-export interface WorkerPoolJobDiagnostics {
+interface WorkerPoolJobDiagnostics {
 	readonly requestId: string;
 	readonly stage: "queued" | "running";
 	readonly priority: number;

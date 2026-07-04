@@ -340,14 +340,14 @@ export interface TextureAtlasDiagnosticsReport {
 	readonly summary: TextureAtlasDiagnosticsSummary;
 }
 
-export interface TextureMutationDiagnostics {
+interface TextureMutationDiagnostics {
 	readonly maxPendingQueueDepth: number;
 	readonly pending: number;
 	readonly recent: readonly TextureMutationSampleDiagnostics[];
 	readonly totalsByKind: Record<string, TextureMutationKindSummaryDiagnostics>;
 }
 
-export interface TextureMutationKindSummaryDiagnostics {
+interface TextureMutationKindSummaryDiagnostics {
 	readonly count: number;
 	readonly maxQueueWaitMs: number;
 	readonly maxRunMs: number;

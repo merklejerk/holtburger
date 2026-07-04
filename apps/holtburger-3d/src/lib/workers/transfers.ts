@@ -1,4 +1,4 @@
-export type PartialTypedArrayTransferPolicy = "reject" | "skip";
+type PartialTypedArrayTransferPolicy = "reject" | "skip";
 
 export interface TransferableViewOptions {
 	readonly label?: string;

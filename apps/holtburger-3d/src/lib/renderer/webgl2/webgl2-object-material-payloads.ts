@@ -52,37 +52,6 @@ export interface ObjectMaterialPreparedUniforms {
 	readonly wrapModes: Int32Array;
 }
 
-export interface ObjectMaterialPreparedDrawPayloadState {
-	readonly payload: ObjectMaterialPreparedDrawPayload;
-	isDirty: boolean;
-}
-
-export function createObjectMaterialPreparedDrawPayloadState(): ObjectMaterialPreparedDrawPayloadState {
-	return {
-		isDirty: true,
-		payload: createObjectMaterialPreparedDrawPayload(),
-	};
-}
-
-export function markObjectMaterialPreparedDrawPayloadDirty(
-	state: ObjectMaterialPreparedDrawPayloadState,
-): void {
-	state.isDirty = true;
-}
-
-export function prepareObjectMaterialDrawPayloadState(
-	state: ObjectMaterialPreparedDrawPayloadState,
-	resource: ObjectMaterialPayloadResource,
-	textureBindings: ObjectMaterialTextureBindingLookup,
-): ObjectMaterialPreparedDrawPayload {
-	if (state.isDirty) {
-		prepareObjectMaterialDrawPayload(state.payload, resource, textureBindings);
-		state.isDirty = false;
-	}
-
-	return state.payload;
-}
-
 export function createObjectMaterialPreparedDrawPayload(): ObjectMaterialPreparedDrawPayload {
 	return {
 		materialUniforms: createObjectMaterialUniformScratch(),

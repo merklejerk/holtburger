@@ -70,25 +70,21 @@ import {
 	type Webgl2StencilState,
 } from "../../../lib/webgl2/webgl2-state-cache";
 import {
-	createObjectMaterialPreparedDrawPayloadState,
-	markObjectMaterialPreparedDrawPayloadDirty,
-	prepareObjectMaterialDrawPayloadState,
+	createObjectMaterialPreparedDrawPayload,
+	prepareObjectMaterialDrawPayload,
 	type ObjectMaterialPreparedUniforms,
 	type ObjectMaterialPreparedDrawPayload,
-	type ObjectMaterialPreparedDrawPayloadState,
 	type ObjectMaterialTextureBinding,
 } from "./webgl2-object-material-payloads";
 import {
-	createTerrainPreparedLayeredPayloadState,
-	markTerrainPreparedLayeredPayloadDirty,
-	prepareTerrainLayeredPayloadState,
+	createTerrainPreparedLayeredPayload,
+	prepareTerrainLayeredPayload,
 	TERRAIN_LAYERED_MAX_LAYER_ENTRIES,
 	TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER,
 	TERRAIN_LAYERED_MAX_ROADS_PER_LAYER,
 	type TerrainPreparedDetailUniforms,
 	type TerrainPreparedLayerRects,
 	type TerrainPreparedLayeredPayload,
-	type TerrainPreparedLayeredPayloadState,
 	type TerrainPreparedRolePageBindings,
 } from "./webgl2-terrain-payloads";
 import { Webgl2RendererTextureBindingTable } from "./webgl2-texture-bindings";
@@ -750,6 +746,10 @@ class Webgl2Renderer implements Renderer {
 		PortalApertureRangeResource
 	>();
 	readonly #textureBindings = new Webgl2RendererTextureBindingTable();
+	readonly #objectMaterialPreparedDrawPayloadScratch =
+		createObjectMaterialPreparedDrawPayload();
+	readonly #terrainPreparedLayeredPayloadScratch =
+		createTerrainPreparedLayeredPayload();
 	readonly #staticLayerOwnershipByKey = new Map<
 		string,
 		StaticLayerResourceOwnership
@@ -1139,20 +1139,12 @@ class Webgl2Renderer implements Renderer {
 	}
 
 	applyTexturePlacementUpdate(update: TexturePlacementUpdate): void {
-		const { changed } = this.#runUnmanagedWebglStateMutation((gl) =>
+		this.#runUnmanagedWebglStateMutation((gl) =>
 			this.#textureBindings.applyPlacementUpdate(update, {
 				createTexture: (placement) => createTexturePage(gl, placement),
 				deleteTexture: (texture) => gl.deleteTexture(texture),
 			}),
 		);
-
-		// Prepared payloads hold WebGLTexture handles. Without a reverse
-		// texture-ref owner map, texture page adds/replacements/removals must
-		// conservatively dirty all live payloads.
-		if (changed) {
-			this.#markAllObjectMaterialPreparedPayloadsDirty();
-			this.#markAllTerrainPreparedPayloadsDirty();
-		}
 	}
 
 	applySamplerPolicyUpdate(update: SamplerPolicyUpdate): void {
@@ -1219,7 +1211,6 @@ class Webgl2Renderer implements Renderer {
 				};
 			}
 
-			const wasPreparedPayloadDirty = resource.preparedDrawPayloadState.isDirty;
 			const payload = this.#getObjectMaterialPreparedPayload(resource);
 			return {
 				drawUnitId,
@@ -1230,7 +1221,6 @@ class Webgl2Renderer implements Renderer {
 				status: "resolved",
 				textureBindings:
 					createRendererObjectMaterialTextureBindingDiagnostics(payload),
-				wasPreparedPayloadDirty,
 			};
 		});
 	}
@@ -2723,29 +2713,28 @@ class Webgl2Renderer implements Renderer {
 			return null;
 		}
 
-		return prepareTerrainLayeredPayloadState(
-			resource.preparedLayeredPayloadState,
-			plan,
-			this.#textureBindings,
-		);
-	}
-
-	#markAllTerrainPreparedPayloadsDirty(): void {
-		for (const resource of this.#terrainResources.values()) {
-			markTerrainPreparedLayeredPayloadDirty(
-				resource.preparedLayeredPayloadState,
-			);
+		if (
+			!prepareTerrainLayeredPayload(
+				this.#terrainPreparedLayeredPayloadScratch,
+				plan,
+				this.#textureBindings,
+			)
+		) {
+			return null;
 		}
+
+		return this.#terrainPreparedLayeredPayloadScratch;
 	}
 
 	#getObjectMaterialPreparedPayload(
 		resource: ObjectMaterialGeometryResource,
 	): ObjectMaterialPreparedDrawPayload {
-		return prepareObjectMaterialDrawPayloadState(
-			resource.preparedDrawPayloadState,
+		prepareObjectMaterialDrawPayload(
+			this.#objectMaterialPreparedDrawPayloadScratch,
 			resource,
 			this.#textureBindings,
 		);
+		return this.#objectMaterialPreparedDrawPayloadScratch;
 	}
 
 	#findObjectMaterialResource(
@@ -2828,31 +2817,6 @@ class Webgl2Renderer implements Renderer {
 		this.#transparentStaticObjectDrawEntryPool[poolIndex] = entry;
 		this.#transparentStaticObjectDrawEntryPoolActiveCount += 1;
 		this.#nearTransparentStaticObjectDrawEntries.push(entry);
-	}
-
-	#markAllObjectMaterialPreparedPayloadsDirty(): void {
-		for (const resource of this.#staticObjectResources.values()) {
-			markObjectMaterialPreparedDrawPayloadDirty(
-				resource.preparedDrawPayloadState,
-			);
-		}
-		for (const resource of this.#staticObjectVisualResources.values()) {
-			markObjectMaterialPreparedDrawPayloadDirty(
-				resource.preparedDrawPayloadState,
-			);
-		}
-		for (const resources of this.#dynamicGeometryResources.values()) {
-			for (const resource of resources) {
-				markObjectMaterialPreparedDrawPayloadDirty(
-					resource.preparedDrawPayloadState,
-				);
-			}
-		}
-		for (const resource of this.#structuredInteriorResources.values()) {
-			markObjectMaterialPreparedDrawPayloadDirty(
-				resource.preparedDrawPayloadState,
-			);
-		}
 	}
 
 	#resizeToDisplaySize(): void {
@@ -3500,7 +3464,6 @@ interface TerrainGeometryResource {
 	readonly landblockId: TerrainGeometryStaticDrawUnit["landblockId"];
 	readonly materialFamily: TerrainGeometryStaticDrawUnit["materialFamily"];
 	readonly primaryTextureBindingId: TextureBindingId | null;
-	readonly preparedLayeredPayloadState: TerrainPreparedLayeredPayloadState;
 	readonly terrainMaterialPlan: TerrainGeometryStaticDrawUnit["terrainMaterialPlan"];
 	readonly indexCount: number;
 	readonly indexType: GLenum;
@@ -3521,7 +3484,6 @@ interface StaticObjectGeometryResource {
 	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
 	readonly materialPass: StaticObjectGeometryStaticDrawUnit["materialPass"];
 	readonly materialEntries: StaticObjectGeometryStaticDrawUnit["materialEntries"];
-	readonly preparedDrawPayloadState: ObjectMaterialPreparedDrawPayloadState;
 	readonly renderState: StaticObjectRenderState;
 	readonly localSortCenter: StaticObjectSortMetadata["center"];
 	readonly sortPolicy: StaticObjectSortMetadata["policy"];
@@ -3545,7 +3507,6 @@ interface StaticObjectVisualGeometryResource {
 	readonly materialFamily: StaticObjectVisualResource["materialFamily"];
 	readonly materialPass: StaticObjectVisualResource["materialPass"];
 	readonly materialEntries: StaticObjectVisualResource["materialEntries"];
-	readonly preparedDrawPayloadState: ObjectMaterialPreparedDrawPayloadState;
 	readonly renderState: StaticObjectRenderState;
 	readonly uploadedBufferBytes: number;
 	readonly indexCount: number;
@@ -3567,7 +3528,6 @@ interface DynamicVisualGeometryResource {
 	readonly materialFamily: DynamicRendererVisualPart["materialFamily"];
 	readonly materialPass: DynamicRendererVisualPart["materialPass"];
 	readonly materialEntries: DynamicRendererVisualPart["materialEntries"];
-	readonly preparedDrawPayloadState: ObjectMaterialPreparedDrawPayloadState;
 	readonly renderState: StaticObjectRenderState;
 	readonly uploadedBufferBytes: number;
 	readonly indexCount: number;
@@ -3687,7 +3647,6 @@ interface StructuredInteriorGeometryResource {
 	readonly envCellId: StructuredInteriorGeometryStaticDrawUnit["envCellId"];
 	readonly materialFamily: StructuredInteriorGeometryStaticDrawUnit["materialFamily"];
 	readonly materialEntries: StructuredInteriorGeometryStaticDrawUnit["materialEntries"];
-	readonly preparedDrawPayloadState: ObjectMaterialPreparedDrawPayloadState;
 	readonly renderState: StaticObjectRenderState;
 	readonly indexCount: number;
 	readonly indexType: GLenum;
@@ -4455,7 +4414,6 @@ function createTerrainGeometryResource(
 		landblockId: drawUnit.landblockId,
 		materialFamily: drawUnit.materialFamily,
 		primaryTextureBindingId: drawUnit.primaryTextureBindingId,
-		preparedLayeredPayloadState: createTerrainPreparedLayeredPayloadState(),
 		terrainMaterialPlan: drawUnit.terrainMaterialPlan,
 		layerSlotBuffer,
 		positionBuffer,
@@ -4546,7 +4504,6 @@ function createStaticObjectGeometryResource(
 		materialEntries: drawUnit.materialEntries,
 		materialFamily: drawUnit.materialFamily,
 		materialPass: drawUnit.materialPass,
-		preparedDrawPayloadState: createObjectMaterialPreparedDrawPayloadState(),
 		materialSlotBuffer,
 		positionBuffer,
 		renderState: drawUnit.renderState,
@@ -4587,7 +4544,6 @@ function createStaticObjectVisualGeometryResource(
 		materialPass: resource.materialPass,
 		materialSlotBuffer: uploadedGeometry.materialSlotBuffer,
 		positionBuffer: uploadedGeometry.positionBuffer,
-		preparedDrawPayloadState: createObjectMaterialPreparedDrawPayloadState(),
 		renderState: resource.renderState,
 		resourceId: resource.resourceId,
 		texCoordBuffer: uploadedGeometry.texCoordBuffer,
@@ -4624,7 +4580,6 @@ function createDynamicVisualGeometryResource(
 		materialSlotBuffer: uploadedGeometry.materialSlotBuffer,
 		partIndex: part.partIndex,
 		positionBuffer: uploadedGeometry.positionBuffer,
-		preparedDrawPayloadState: createObjectMaterialPreparedDrawPayloadState(),
 		renderState: part.renderState,
 		texCoordBuffer: uploadedGeometry.texCoordBuffer,
 		triangleCount: part.triangleCount,
@@ -4795,7 +4750,6 @@ function createStructuredInteriorGeometryResource(
 		materialFamily: drawUnit.materialFamily,
 		materialSlotBuffer,
 		positionBuffer,
-		preparedDrawPayloadState: createObjectMaterialPreparedDrawPayloadState(),
 		renderState: drawUnit.renderState,
 		texCoordBuffer,
 		triangleCount: drawUnit.triangleCount,

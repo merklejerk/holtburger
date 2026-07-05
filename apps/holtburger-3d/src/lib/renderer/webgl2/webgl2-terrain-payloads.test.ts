@@ -7,10 +7,7 @@ import type { TextureBindingId } from "../../textures/identity";
 import type { ResolvedTexturePlacement } from "../types";
 import {
 	createTerrainPreparedLayeredPayload,
-	createTerrainPreparedLayeredPayloadState,
-	markTerrainPreparedLayeredPayloadDirty,
 	prepareTerrainLayeredPayload,
-	prepareTerrainLayeredPayloadState,
 	type TerrainTextureBindingLookup,
 } from "./webgl2-terrain-payloads";
 
@@ -250,8 +247,8 @@ describe("WebGL2 terrain layered payload builder", () => {
 		).toBe(false);
 	});
 
-	it("keeps resource-owned payload state dirty when rebuild fails", () => {
-		const state = createTerrainPreparedLayeredPayloadState();
+	it("reuses scratch while reflecting current texture residency", () => {
+		const scratch = createTerrainPreparedLayeredPayload();
 		const base = createRole("terrain-base", "base-use", 1);
 		const plan = createPlan({
 			layer: {
@@ -267,32 +264,21 @@ describe("WebGL2 terrain layered payload builder", () => {
 			["base-ref", createTexture()],
 		]);
 
-		const firstPayload = prepareTerrainLayeredPayloadState(
-			state,
+		const firstPrepared = prepareTerrainLayeredPayload(
+			scratch,
 			plan,
 			createTextureBindingLookup(placements, textures),
 		);
-		expect(firstPayload).not.toBeNull();
-		expect(state.isDirty).toBe(false);
-		expect(firstPayload?.layerRects.baseColorPages[1]).toBe(0);
+		expect(firstPrepared).toBe(true);
+		expect(scratch.layerRects.baseColorPages[1]).toBe(0);
 
 		textures.delete("base-ref");
-		const unchangedPayload = prepareTerrainLayeredPayloadState(
-			state,
+		const failedPrepared = prepareTerrainLayeredPayload(
+			scratch,
 			plan,
 			createTextureBindingLookup(placements, textures),
 		);
-		expect(unchangedPayload).toBe(firstPayload);
-		expect(state.isDirty).toBe(false);
-
-		markTerrainPreparedLayeredPayloadDirty(state);
-		const failedPayload = prepareTerrainLayeredPayloadState(
-			state,
-			plan,
-			createTextureBindingLookup(placements, textures),
-		);
-		expect(failedPayload).toBeNull();
-		expect(state.isDirty).toBe(true);
+		expect(failedPrepared).toBe(false);
 	});
 });
 

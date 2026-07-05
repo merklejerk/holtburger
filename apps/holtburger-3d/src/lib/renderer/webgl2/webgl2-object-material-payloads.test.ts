@@ -7,10 +7,7 @@ import type { TextureBindingId } from "../../textures/identity";
 import type { ResolvedTexturePlacement } from "../types";
 import {
 	createObjectMaterialPreparedDrawPayload,
-	createObjectMaterialPreparedDrawPayloadState,
-	markObjectMaterialPreparedDrawPayloadDirty,
 	prepareObjectMaterialDrawPayload,
-	prepareObjectMaterialDrawPayloadState,
 	type ObjectMaterialPayloadResource,
 	type ObjectMaterialTextureBindingLookup,
 } from "./webgl2-object-material-payloads";
@@ -241,8 +238,8 @@ describe("WebGL2 static object payload builder", () => {
 		);
 	});
 
-	it("rebuilds resource-owned payload state only when marked dirty", () => {
-		const state = createObjectMaterialPreparedDrawPayloadState();
+	it("reuses scratch while reflecting current texture residency", () => {
+		const scratch = createObjectMaterialPreparedDrawPayload();
 		const texture = createTexture();
 		const resource = createStaticResource({
 			materialEntries: [
@@ -267,27 +264,18 @@ describe("WebGL2 static object payload builder", () => {
 		]);
 		const textures = new Map<string, WebGLTexture>([["base-ref", texture]]);
 
-		const firstPayload = prepareObjectMaterialDrawPayloadState(
-			state,
+		prepareObjectMaterialDrawPayload(
+			scratch,
 			resource,
 			createTextureBindingLookup(placements, textures),
 		);
-		expect(state.isDirty).toBe(false);
-		expect(firstPayload.textures.baseColor?.texture).toBe(texture);
+		expect(scratch.textures.baseColor?.texture).toBe(texture);
 
 		textures.delete("base-ref");
-		const unchangedPayload = prepareObjectMaterialDrawPayloadState(
-			state,
-			resource,
-			createTextureBindingLookup(placements, textures),
-		);
-		expect(unchangedPayload).toBe(firstPayload);
-		expect(unchangedPayload.textures.baseColor?.texture).toBe(texture);
 
-		markObjectMaterialPreparedDrawPayloadDirty(state);
 		expect(() =>
-			prepareObjectMaterialDrawPayloadState(
-				state,
+			prepareObjectMaterialDrawPayload(
+				scratch,
 				resource,
 				createTextureBindingLookup(placements, textures),
 			),

@@ -442,8 +442,6 @@ export type RendererObjectMaterialTextureDiagnostics =
 			readonly drawUnitId: string;
 			readonly materialEntries: readonly RendererObjectMaterialEntryDiagnostics[];
 			readonly status: "resolved";
-			/** True when diagnostics had to prepare the payload that the next draw would use. */
-			readonly wasPreparedPayloadDirty: boolean;
 			readonly textureBindings: readonly RendererObjectMaterialTextureBindingDiagnostics[];
 	  };
 

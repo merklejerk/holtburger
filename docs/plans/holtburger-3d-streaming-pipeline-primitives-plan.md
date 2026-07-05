@@ -1,7 +1,8 @@
 # Holtburger 3D Streaming Pipeline Primitives Plan
 
-Status: Phase 6 complete; Phase 7 renderer texture binding readiness primitive planned before the
-texture placement transaction remodel.
+Status: complete for the scoped primitive plan. Phase 9 install-product extraction is rejected as a
+current implementation target; the next architecture effort should be the texture placement
+transaction remodel.
 
 Related context:
 
@@ -26,7 +27,8 @@ standardizes those artifacts in a conservative order:
 3. an install-product shape discovered from the simplified sidecar and lease model, not assumed up
    front;
 4. renderer-facing texture binding readiness so visuals can be installed separately from physical
-   texture residency without rendering placeholders.
+   texture residency without rendering placeholders;
+5. renderer scratch preparation that avoids caching resolved texture bindings on resources.
 
 ## North Stars
 
@@ -1098,7 +1100,8 @@ Decisions and course corrections:
 
 Goal: remove static/dynamic install duplication only where the real post-lease model supports it.
 
-Status: deferred by Phase 5, Phase 6, Phase 7, and Phase 8.
+Status: rejected for the scoped primitive plan; defer any smaller renderer-resource product until a
+future pipeline remodel proves it deletes real duplication.
 
 Possible outcomes:
 
@@ -1144,13 +1147,21 @@ Decisions and course corrections:
   flattening layer replacement, scene publication, or dynamic resource refresh semantics.
 - Phase 8 was promoted ahead of this extraction because deleting renderer prepared texture binding
   caches removes a more direct coupling and reduces the need for shared install-product ceremony.
+- Final audit keeps this phase rejected. Current static commit install still owns static-specific
+  layer replacement, static scene query records, env-cell/portal publications, material coverage
+  warnings, static-authored dynamic prep, and scene-interest settlement. Dynamic renderer sync still
+  owns dynamic resource refresh, dynamic owner texture-use deltas, dynamic resource commits, and
+  instance sync. A shared envelope would mostly be optional fields around two different workflows.
+- The honest shared pieces already exist as smaller primitives: binary sidecar ownership,
+  `TextureLeaseSet`, renderer texture binding readiness, and renderer-owned scratch preparation.
+  Adding `VisualInstallProduct` now would increase ceremony without collapsing meaningful code.
 
 ## Phase 10: Final Cleanup And Measurement
 
 Goal: remove migration debris and verify the primitives improved clarity.
 
-Status: deferred until after any future extraction or texture placement remodel that uses these
-primitives.
+Status: complete for this scoped primitive plan. Broader cleanup remains part of the future texture
+placement transaction remodel.
 
 Deliverables:
 
@@ -1173,6 +1184,15 @@ Decisions and course corrections:
 
 - Replaced by the scoped Phase 6 cleanup for immediate residue. Keep this final cleanup phase for
   later work that actually extracts or remodels pipeline code.
+- Final audit found no additional primitive-plan code cleanup to perform after Phase 8. The broad
+  install-product extraction is rejected, so there are no compatibility wrappers or DTO aliases from
+  that extraction to delete.
+- Temporary stutter-investigation diagnostics are retained where they still measure the current
+  texture transaction path. Do not preserve them to shape the future design; delete or rebuild them
+  during the texture placement transaction remodel when the measured internals change.
+- Verification for the final code state is the same focused gate used by Phases 7 and 8:
+  WebGL2 renderer/payload tests, `npm run check`, `npm run lint:dead`, `npm run lint:ts`, and
+  `git diff --check`.
 
 ## Risks And Mitigations
 
@@ -1253,3 +1273,14 @@ Closed during Phase 7 planning:
   textures.
 - Renderer texture binding state is a derived cache/readiness table. It must not own authoritative
   texture residency lifetime.
+
+Closed during Phase 8:
+
+- Renderer resources should not cache resolved texture binding payloads. Reusable renderer-owned
+  scratch preserves allocation control without broad dirtying or stale WebGL handle risk.
+
+Closed during final audit:
+
+- Do not implement `VisualInstallProduct` in this scoped primitive plan. Static and dynamic install
+  workflows still differ in important domain semantics, and the useful shared pieces have already
+  been extracted as smaller primitives.

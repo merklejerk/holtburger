@@ -455,8 +455,8 @@ describe("browser landblock env-cell baker", () => {
 			throw new Error("Expected structured interior geometry draw unit.");
 		}
 
-		const detailTextureBindingId = drawUnit.textureBindingIds.find((bindingId) =>
-			bindingId.includes("role=object-detail"),
+		const detailTextureBindingId = drawUnit.textureBindingIds.find(
+			(bindingId) => bindingId.includes("role=object-detail"),
 		);
 		expect(drawUnit.materialEntries[0]).toMatchObject({
 			detailTextureTiling: 8,

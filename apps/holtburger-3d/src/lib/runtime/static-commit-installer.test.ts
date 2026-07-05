@@ -55,7 +55,9 @@ describe("static commit installer", () => {
 				}),
 				textureUpdate: null,
 			}),
-		).toThrow(/terrain-textured is missing resolved texture placements for binding\|/);
+		).toThrow(
+			/terrain-textured is missing resolved texture placements for binding\|/,
+		);
 	});
 
 	it("rejects textured structured-interior draw units without resolved texture placements", () => {
@@ -295,7 +297,9 @@ function createTerrainDrawUnit(
 function createStaticObjectDrawUnit(
 	drawUnitId: string,
 ): StaticObjectGeometryStaticDrawUnit {
-	const textureBindingIds = [createFixtureBindingId(`${drawUnitId}:prepared-texture:0`)];
+	const textureBindingIds = [
+		createFixtureBindingId(`${drawUnitId}:prepared-texture:0`),
+	];
 	return {
 		coordinateSpace: "landblock-render-local",
 		domain: "outdoor-buildings",
@@ -542,7 +546,9 @@ function createTexturePlacementUpdate(
 		placements: [],
 		removedTextureRefIds: [],
 		revision: 3,
-		resolvedTexturePlacements: [createResolvedTexturePlacement(textureBindingId)],
+		resolvedTexturePlacements: [
+			createResolvedTexturePlacement(textureBindingId),
+		],
 	};
 }
 
@@ -572,7 +578,9 @@ function createTexturePlacementUpdateForVisualResource(
 		placements: [],
 		removedTextureRefIds: [],
 		revision: 3,
-		resolvedTexturePlacements: [createResolvedTexturePlacement(textureBindingId)],
+		resolvedTexturePlacements: [
+			createResolvedTexturePlacement(textureBindingId),
+		],
 	};
 }
 

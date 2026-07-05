@@ -355,10 +355,7 @@ function createPlacementTestIdentity(input: {
 		pageClass: createTexturePageClass({
 			domain: input.domain,
 			format: outputFormat,
-			gutterPixels: getRuntimeTexturePageGutterPixels(
-				input.domain,
-				pagePolicy,
-			),
+			gutterPixels: getRuntimeTexturePageGutterPixels(input.domain, pagePolicy),
 			physicalWrapMode:
 				input.domain === "outdoor-terrain" ? pagePolicy.wrapS : undefined,
 			purpose,

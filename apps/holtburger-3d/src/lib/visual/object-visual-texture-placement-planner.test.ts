@@ -145,7 +145,9 @@ describe("object visual texture placement planner", () => {
 	});
 });
 
-function createRequirement(textureBindingId: string): TextureBindingRequirement {
+function createRequirement(
+	textureBindingId: string,
+): TextureBindingRequirement {
 	return {
 		bindingId: createTextureBindingId({
 			resourceId: "fixture-resource",

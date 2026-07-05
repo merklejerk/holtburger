@@ -58,9 +58,10 @@ describe("dynamic visual bake worker protocol", () => {
 		});
 		await port.waitForResponses(1);
 
-		const part = result.product?.kind === "baked"
-			? result.product.resource.renderParts[0]
-			: null;
+		const part =
+			result.product?.kind === "baked"
+				? result.product.resource.renderParts[0]
+				: null;
 		expect(part).not.toBeNull();
 		expect(port.responses[0]).toMatchObject({
 			kind: "result",

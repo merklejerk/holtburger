@@ -1,6 +1,8 @@
 type PartialTypedArrayTransferPolicy = "reject" | "skip";
 
-export interface BinarySidecarView<TView extends ArrayBufferView = ArrayBufferView> {
+export interface BinarySidecarView<
+	TView extends ArrayBufferView = ArrayBufferView,
+> {
 	/** Human-readable transfer label used in errors and diagnostics. */
 	readonly label: string;
 	/** Whether this DTO owns the bytes strongly enough to transfer the backing buffer. */

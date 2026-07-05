@@ -1162,7 +1162,9 @@ class Webgl2Renderer implements Renderer {
 				texture: this.#textureBindings.getTexture(policy.textureRefId),
 			}))
 			.filter(
-				(entry): entry is {
+				(
+					entry,
+				): entry is {
 					readonly policy: SamplerPolicyUpdate["policies"][number];
 					readonly texture: WebGLTexture;
 				} => entry.texture !== null,
@@ -1226,9 +1228,8 @@ class Webgl2Renderer implements Renderer {
 					payload,
 				),
 				status: "resolved",
-				textureBindings: createRendererObjectMaterialTextureBindingDiagnostics(
-					payload,
-				),
+				textureBindings:
+					createRendererObjectMaterialTextureBindingDiagnostics(payload),
 				wasPreparedPayloadDirty,
 			};
 		});

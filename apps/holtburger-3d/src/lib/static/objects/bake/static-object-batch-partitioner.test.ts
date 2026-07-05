@@ -179,8 +179,8 @@ describe("static object batch partitioner", () => {
 			throw new Error("Expected building detail static object draw unit.");
 		}
 
-		const detailTextureBindingId = drawUnit.textureBindingIds.find((bindingId) =>
-			bindingId.includes("role=object-detail"),
+		const detailTextureBindingId = drawUnit.textureBindingIds.find(
+			(bindingId) => bindingId.includes("role=object-detail"),
 		);
 		expect(drawUnit.kind).toBe("static-object-geometry");
 		expect(drawUnit.textureBindingIds).toHaveLength(2);

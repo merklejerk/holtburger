@@ -432,67 +432,68 @@ export class TextureManager {
 				textureUseCount: input.intents.length,
 			},
 			async (profile) => {
-			const pendingPlacements = new Map<string, PendingTexturePlacement>();
-			const stagedPlacements: StagedTexturePlacement[] = [];
-			const textureUses = input.intents.map((intent) =>
-				createVisualTextureUseCommitFromIntent(intent),
-			);
-
-			for (const textureUse of textureUses) {
-				stagedPlacements.push(
-					await this.#stageTexturePlacement(
-						textureUse,
-						pendingPlacements,
-						profile,
-					),
+				const pendingPlacements = new Map<string, PendingTexturePlacement>();
+				const stagedPlacements: StagedTexturePlacement[] = [];
+				const textureUses = input.intents.map((intent) =>
+					createVisualTextureUseCommitFromIntent(intent),
 				);
-			}
 
-			const packedResult = await this.#packPendingTexturePlacements(
-				uniquePendingTexturePlacements(pendingPlacements),
-				{
-					reclaimZeroReferencePages: true,
-					retainedTextureRefIds: collectStagedTextureRefIds(stagedPlacements),
-				},
-				profile,
-			);
-			profile.outputPlacementCount += packedResult.placements.length;
-			profile.reclaimedTextureRefCount +=
-				packedResult.reclaimedTextureRefIds.length;
-			profile.resolvedPlacementCount +=
-				packedResult.resolvedTexturePlacements.length;
-			this.#recordUnuploadedTexturePlacements(packedResult.placements);
-
-			const placementsByItemId = new Map<
-				TPlacementItemId,
-				PhysicalTexturePlacement<TPlacementItemId>
-			>();
-			for (let index = 0; index < textureUses.length; index += 1) {
-				const textureUse = textureUses[index];
-				const intent = input.intents[index];
-				if (!textureUse || !intent) {
-					throw new Error(
-						"Texture placement intent commit lost item ordering.",
+				for (const textureUse of textureUses) {
+					stagedPlacements.push(
+						await this.#stageTexturePlacement(
+							textureUse,
+							pendingPlacements,
+							profile,
+						),
 					);
 				}
-				const textureKey = createVisualTextureKey(textureUse);
-				const entry =
-					this.#getRegistry(
-						textureUse.domain,
-						textureUse.placementBucketKey,
-					).entries.get(textureKey) ?? pendingPlacements.get(textureKey)?.entry;
-				if (!entry) {
-					throw new Error(
-						`Texture placement ${textureUse.bindingId} was not committed after packing.`,
+
+				const packedResult = await this.#packPendingTexturePlacements(
+					uniquePendingTexturePlacements(pendingPlacements),
+					{
+						reclaimZeroReferencePages: true,
+						retainedTextureRefIds: collectStagedTextureRefIds(stagedPlacements),
+					},
+					profile,
+				);
+				profile.outputPlacementCount += packedResult.placements.length;
+				profile.reclaimedTextureRefCount +=
+					packedResult.reclaimedTextureRefIds.length;
+				profile.resolvedPlacementCount +=
+					packedResult.resolvedTexturePlacements.length;
+				this.#recordUnuploadedTexturePlacements(packedResult.placements);
+
+				const placementsByItemId = new Map<
+					TPlacementItemId,
+					PhysicalTexturePlacement<TPlacementItemId>
+				>();
+				for (let index = 0; index < textureUses.length; index += 1) {
+					const textureUse = textureUses[index];
+					const intent = input.intents[index];
+					if (!textureUse || !intent) {
+						throw new Error(
+							"Texture placement intent commit lost item ordering.",
+						);
+					}
+					const textureKey = createVisualTextureKey(textureUse);
+					const entry =
+						this.#getRegistry(
+							textureUse.domain,
+							textureUse.placementBucketKey,
+						).entries.get(textureKey) ??
+						pendingPlacements.get(textureKey)?.entry;
+					if (!entry) {
+						throw new Error(
+							`Texture placement ${textureUse.bindingId} was not committed after packing.`,
+						);
+					}
+					placementsByItemId.set(
+						intent.itemId,
+						toPhysicalTexturePlacement(entry, intent.itemId),
 					);
 				}
-				placementsByItemId.set(
-					intent.itemId,
-					toPhysicalTexturePlacement(entry, intent.itemId),
-				);
-			}
 
-			return { placementsByItemId };
+				return { placementsByItemId };
 			},
 		);
 	}
@@ -621,7 +622,9 @@ export class TextureManager {
 					}),
 			),
 		];
-		const textureUses = delta.textureUses.map(createStaticVisualTextureUseCommit);
+		const textureUses = delta.textureUses.map(
+			createStaticVisualTextureUseCommit,
+		);
 		return this.#runTextureMutation(
 			"static-commit",
 			{
@@ -642,7 +645,9 @@ export class TextureManager {
 	async applyDynamicTextureUseDelta(
 		delta: DynamicTextureUseCommitDelta,
 	): Promise<TexturePlacementUpdate | null> {
-		const textureUses = delta.textureUses.map(createDynamicVisualTextureUseCommit);
+		const textureUses = delta.textureUses.map(
+			createDynamicVisualTextureUseCommit,
+		);
 		return this.#runTextureMutation(
 			"dynamic-texture-commit",
 			{
@@ -900,7 +905,9 @@ export class TextureManager {
 			textureUseCount: profile.textureUseCount,
 		};
 		this.#recentTextureMutations.push(sample);
-		if (this.#recentTextureMutations.length > TEXTURE_MUTATION_DIAGNOSTICS_LIMIT) {
+		if (
+			this.#recentTextureMutations.length > TEXTURE_MUTATION_DIAGNOSTICS_LIMIT
+		) {
 			this.#recentTextureMutations.splice(
 				0,
 				this.#recentTextureMutations.length -
@@ -1022,7 +1029,10 @@ export class TextureManager {
 			};
 		}
 
-		const directSource = await this.#prepareMaterialTextureSource(source, profile);
+		const directSource = await this.#prepareMaterialTextureSource(
+			source,
+			profile,
+		);
 		const physicalSourceKey = createMaterialTexturePhysicalSourceKey(
 			source,
 			directSource,

@@ -118,13 +118,19 @@ export function createStaticMaterialTableEntry(options: {
 				: "p8"
 			: null;
 	const primaryTextureRef = primaryTextureUse
-		? options.createTextureBindingRef(primaryTextureUse, options.textureWrapMode)
+		? options.createTextureBindingRef(
+				primaryTextureUse,
+				options.textureWrapMode,
+			)
 		: null;
 	const indexTextureRef = indexTextureUse
 		? options.createTextureBindingRef(indexTextureUse, options.textureWrapMode)
 		: null;
 	const paletteTextureRef = paletteTextureUse
-		? options.createTextureBindingRef(paletteTextureUse, options.textureWrapMode)
+		? options.createTextureBindingRef(
+				paletteTextureUse,
+				options.textureWrapMode,
+			)
 		: null;
 	const detailTextureRef = detailTextureUse
 		? options.createTextureBindingRef(detailTextureUse, options.textureWrapMode)

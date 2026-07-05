@@ -422,7 +422,9 @@ function createResultWithTerrainDrawUnit(
 	};
 }
 
-function createTerrainDrawUnit(drawUnitId: string): TerrainGeometryStaticDrawUnit {
+function createTerrainDrawUnit(
+	drawUnitId: string,
+): TerrainGeometryStaticDrawUnit {
 	const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
 	return {
 		coordinateSpace: "landblock-render-local",

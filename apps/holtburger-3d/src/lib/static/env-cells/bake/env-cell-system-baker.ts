@@ -762,10 +762,10 @@ function createStructuredInteriorMaterialTableEntries(options: {
 					createTextureBindingRef: (dataUse, wrapMode) => {
 						const requirement =
 							createStructuredInteriorTextureBindingRequirement({
-							dataUse,
-							task: options.task,
-							wrapMode,
-						});
+								dataUse,
+								task: options.task,
+								wrapMode,
+							});
 						return {
 							bindingId: requirement.bindingId,
 							textureKey: requirement.sourceKey,
@@ -1178,7 +1178,9 @@ function uniqueSortedNumbers(values: readonly number[]): readonly number[] {
 	return [...new Set(values)].sort((left, right) => left - right);
 }
 
-function uniqueSortedStrings<T extends string>(values: readonly T[]): readonly T[] {
+function uniqueSortedStrings<T extends string>(
+	values: readonly T[],
+): readonly T[] {
 	return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 

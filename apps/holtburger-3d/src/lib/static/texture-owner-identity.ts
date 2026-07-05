@@ -1,5 +1,8 @@
 import type { StaticTextureUseOwner } from "./contracts";
-import { createTextureOwnerId, type TextureOwnerId } from "../textures/identity";
+import {
+	createTextureOwnerId,
+	type TextureOwnerId,
+} from "../textures/identity";
 
 /** Converts static texture residency owners into canonical owner ids for texture retention. */
 export function createStaticTextureOwnerId(

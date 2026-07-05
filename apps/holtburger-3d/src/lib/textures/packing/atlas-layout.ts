@@ -58,7 +58,10 @@ interface AtlasLayoutPlan {
 }
 
 export interface AtlasPageInsertionPlan {
-	readonly insertedPlacementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>;
+	readonly insertedPlacementsByEntryKey: ReadonlyMap<
+		string,
+		AtlasTexturePlacement
+	>;
 	readonly overflows: readonly AtlasLayoutOverflow[];
 	readonly overflowsByEntryKey: ReadonlyMap<string, AtlasLayoutOverflow>;
 	readonly texturePages: readonly AtlasTexturePage[];
@@ -549,7 +552,9 @@ function reconstructLockedAtlasPagePackState(
 	const paddedRects: AtlasFreeRect[] = [];
 	for (const placement of page.placements
 		.slice()
-		.sort((left, right) => left.atlasEntryKey.localeCompare(right.atlasEntryKey))) {
+		.sort((left, right) =>
+			left.atlasEntryKey.localeCompare(right.atlasEntryKey),
+		)) {
 		const paddedRect = createPaddedRectFromPlacement(placement);
 		if (
 			paddedRect.x < 0 ||

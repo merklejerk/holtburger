@@ -904,7 +904,7 @@ Decisions and course corrections:
 Goal: make renderer-facing texture binding readiness explicit so renderer resources can be installed
 without pretending every required texture is physically resident immediately.
 
-Status: planned.
+Status: implemented in Phase 7.
 
 Target shape:
 
@@ -948,7 +948,9 @@ Deliverables:
 
   interface RendererTextureBindingTable {
     getState(bindingId: TextureBindingId): RendererTextureBindingState;
-    getResident(bindingId: TextureBindingId): ResidentRendererTextureBinding | null;
+    getResident(
+      bindingId: TextureBindingId,
+    ): ResidentRendererTextureBinding | null;
   }
   ```
 
@@ -1004,13 +1006,31 @@ Decisions and course corrections:
   preparation return `false`. Use them as the primary pending-binding coverage.
 - Existing WebGL2 renderer tests already cover invalidation after `applyTexturePlacementUpdate(...)`.
   Add only targeted coverage for table transitions and renderer invalidation.
+- Implemented `Webgl2RendererTextureBindingTable` as the single WebGL2-local owner of renderer GPU
+  texture mirrors and binding readiness state. Unknown bindings are pending by lookup, resident
+  bindings require both placement metadata and a live `WebGLTexture`, and failed bindings are
+  inspectable but non-resident.
+- Cut `Webgl2Renderer` over from parallel `#textures` and `#texturePlacements` maps to the table.
+  Sampler policy updates still need texture-ref lookup, so the table exposes `getTexture(...)` as a
+  renderer-local GPU mirror read.
+- Migrated object-material and terrain payload preparation to consume resident bindings through a
+  narrow lookup interface. The payload builders no longer know how renderer placement state is
+  stored.
+- Kept conservative prepared-payload dirtying. This is a concession, not a north-star endpoint:
+  current prepared payload states still cache WebGL texture handles, so texture placement updates
+  must still dirty broadly until a later cleanup deletes or reshapes those caches.
+- Added dedicated table tests for pending, resident, removed, and failed states. Existing payload and
+  renderer tests now exercise the new lookup boundary instead of raw placement/texture maps.
+- Spicy bit: Phase 7 exposes that renderer prepared payload caching is probably buying less than its
+  complexity cost. The clean next cut is likely to keep reusable scratch buffers but stop caching
+  resolved texture bindings per resource.
 
 Open implementation questions for Phase 7:
 
-- Should failed binding state be public diagnostic state immediately, or should the first cut only
-  model it in the table API until the texture service can produce real failures?
-- Should the readiness table expose aggregate diagnostics, such as resident/pending/failed counts,
-  or should that wait until the texture ingestion service exists?
+- Failed binding state is modeled in the table API now, but no aggregate diagnostics were added. Real
+  failed-state production should wait for the future texture ingestion service.
+- Aggregate resident/pending/failed counts should wait. Adding diagnostics now would shape the
+  primitive around observability before the ingestion model exists.
 
 ## Phase 8: Extract The Smallest Honest Install Product Shape
 

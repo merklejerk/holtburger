@@ -23,13 +23,44 @@ describe("texture lease sets", () => {
 		]);
 	});
 
-	it("rejects duplicate resource ids instead of hiding producer ambiguity", () => {
-		expect(() =>
-			createTextureLeaseSet([
-				createDependency("terrain-a"),
-				createDependency("terrain-a"),
+	it("coalesces duplicate resource ids into one lease dependency", () => {
+		const leaseSet = createTextureLeaseSet([
+			createDependency("visual-a", [
+				{ itemIds: ["base-a", "base-a"], purpose: "object-base-color" },
 			]),
-		).toThrow("Texture lease set contains duplicate resource id terrain-a.");
+			createDependency("visual-b", [
+				{ itemIds: ["base-b"], purpose: "object-base-color" },
+			]),
+			createDependency("visual-a", [
+				{ itemIds: ["detail-a"], purpose: "object-detail" },
+				{ itemIds: ["base-a", "base-c"], purpose: "object-base-color" },
+			]),
+		]);
+
+		expect(leaseSet.dependencies).toEqual([
+			{
+				resourceId: "visual-a",
+				roles: [
+					{
+						itemIds: ["base-a", "base-c"],
+						purpose: "object-base-color",
+					},
+					{
+						itemIds: ["detail-a"],
+						purpose: "object-detail",
+					},
+				],
+			},
+			{
+				resourceId: "visual-b",
+				roles: [
+					{
+						itemIds: ["base-b"],
+						purpose: "object-base-color",
+					},
+				],
+			},
+		]);
 	});
 
 	it("provides an empty lease set singleton", () => {
@@ -38,14 +69,17 @@ describe("texture lease sets", () => {
 	});
 });
 
-function createDependency(resourceId: string): TextureResourceDependencies {
+function createDependency(
+	resourceId: string,
+	roles: TextureResourceDependencies["roles"] = [
+		{
+			itemIds: [`${resourceId}:texture`],
+			purpose: "terrain-color",
+		},
+	],
+): TextureResourceDependencies {
 	return {
 		resourceId,
-		roles: [
-			{
-				itemIds: [`${resourceId}:texture`],
-				purpose: "terrain-color",
-			},
-		],
+		roles,
 	};
 }

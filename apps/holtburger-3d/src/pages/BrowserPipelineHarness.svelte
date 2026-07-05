@@ -41,6 +41,9 @@
 		readonly requestOutdoorScene: (
 			options: BrowserPipelineHarnessOutdoorSceneOptions,
 		) => Promise<RuntimeOverviewSnapshot>;
+		readonly requestInteriorCell: (
+			options: BrowserPipelineHarnessInteriorCellOptions,
+		) => Promise<RuntimeOverviewSnapshot>;
 		readonly waitForStatus: (
 			status: RuntimeOverviewSnapshot["status"],
 			options?: BrowserPipelineHarnessWaitOptions,
@@ -60,6 +63,12 @@
 			readonly terrain?: number;
 			readonly envCells?: number;
 		};
+		readonly timeoutMs?: number;
+	};
+
+	type BrowserPipelineHarnessInteriorCellOptions = {
+		readonly envCellId: number | string;
+		readonly landblockId: number | string;
 		readonly timeoutMs?: number;
 	};
 
@@ -205,6 +214,18 @@
 					timeoutMs: options.timeoutMs,
 				});
 			},
+			async requestInteriorCell(options) {
+				const currentRuntime = requireRuntime();
+				currentRuntime.updateSceneInterest({
+					envCellId: parseUnsignedHexId(options.envCellId, "env cell"),
+					kind: "interior-cell",
+					landblockId: parseLandblockId(options.landblockId),
+					source: "manual",
+				});
+				return waitForStaticSceneReady({
+					timeoutMs: options.timeoutMs,
+				});
+			},
 			waitForStatus(status, options) {
 				return waitForRuntimeStatus(status, options);
 			},
@@ -226,9 +247,13 @@
 	}
 
 	function parseLandblockId(value: number | string): number {
+		return parseUnsignedHexId(value, "landblock");
+	}
+
+	function parseUnsignedHexId(value: number | string, label: string): number {
 		if (typeof value === "number") {
 			if (!Number.isInteger(value)) {
-				throw new Error(`Harness landblock id must be an integer: ${value}.`);
+				throw new Error(`Harness ${label} id must be an integer: ${value}.`);
 			}
 			return value;
 		}
@@ -241,7 +266,7 @@
 			16,
 		);
 		if (!Number.isInteger(parsed)) {
-			throw new Error(`Harness landblock id is invalid: ${value}.`);
+			throw new Error(`Harness ${label} id is invalid: ${value}.`);
 		}
 		return parsed;
 	}

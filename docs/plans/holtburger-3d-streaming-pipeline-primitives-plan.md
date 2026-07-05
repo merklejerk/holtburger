@@ -1032,11 +1032,73 @@ Open implementation questions for Phase 7:
 - Aggregate resident/pending/failed counts should wait. Adding diagnostics now would shape the
   primitive around observability before the ingestion model exists.
 
-## Phase 8: Extract The Smallest Honest Install Product Shape
+## Phase 8: Remove Renderer Prepared Texture Binding Caches
+
+Goal: keep renderer payload preparation allocation-controlled without caching resolved texture
+bindings or WebGL texture handles on individual resources.
+
+Status: implemented in Phase 8.
+
+Why this phase exists:
+
+- Phase 7 made texture binding readiness explicit, but the renderer still keeps per-resource prepared
+  payload state.
+- Those prepared payloads cache resolved `WebGLTexture` handles, so any texture placement update
+  still forces broad dirtying across unrelated terrain and object resources.
+- The cache is not a clean lifetime model. It is derived draw-call scratch data stored on resources,
+  which makes renderer installation and texture readiness more coupled than they need to be.
+
+Deliverables:
+
+- Remove object-material and terrain prepared-payload dirty state wrappers:
+  - `ObjectMaterialPreparedDrawPayloadState`;
+  - `TerrainPreparedLayeredPayloadState`;
+  - dirty-marker helpers and stateful prepare helpers.
+- Keep reusable renderer-owned scratch payloads so draw preparation does not allocate typed arrays per
+  draw.
+- Remove `preparedDrawPayloadState` and `preparedLayeredPayloadState` fields from renderer resource
+  records.
+- Remove broad prepared-payload invalidation from `applyTexturePlacementUpdate(...)`.
+- Remove diagnostics that describe cache dirtiness instead of real renderer state.
+- Update focused tests to assert direct scratch preparation and pending/resident behavior rather than
+  dirty-cache behavior.
+
+Acceptance criteria:
+
+- Texture placement updates no longer walk every object and terrain resource just to dirty cached
+  payloads.
+- Object-material and terrain payload preparation still reuses caller-provided scratch buffers.
+- Pending required bindings still skip/not prepare affected draw units.
+- Resident bindings preserve current draw behavior.
+- Renderer diagnostics no longer expose `wasPreparedPayloadDirty`.
+- Focused WebGL2 renderer/payload tests, `npm run check`, and `npm run lint:dead` pass.
+
+Decisions and course corrections:
+
+- Promoted ahead of install-product extraction because it removes a concrete renderer-side coupling
+  that now blocks the cleaner pipeline shape.
+- This phase intentionally does not add precise reverse dirtying, generational snapshots, or frame
+  budgeting. The simpler answer is to delete the cache that needed dirtying.
+- The retained performance primitive is scratch reuse, not semantic caching. This keeps allocation
+  control without making renderer resources own derived texture readiness.
+- Deleted the object-material and terrain prepared-payload state wrappers. The payload builders now
+  expose only direct scratch preparation APIs.
+- Moved reusable object-material and layered-terrain scratch payloads onto `Webgl2Renderer`.
+  Individual renderer resources no longer own resolved texture binding payloads.
+- Removed broad object/terrain dirty walks from `applyTexturePlacementUpdate(...)`. Texture
+  placement updates now only mutate the renderer binding table and GPU texture mirror.
+- Removed `wasPreparedPayloadDirty` from object-material diagnostics because it described a deleted
+  cache rather than durable renderer state.
+- Spicy bit: this trades cached uniform payload reuse for per-draw scratch rewriting. That is the
+  cleaner default because it deletes invalidation bookkeeping and stale WebGL handle risk; if uniform
+  prep later profiles hot, the next optimization should be explicit and measured rather than
+  reintroducing hidden per-resource residency caches.
+
+## Phase 9: Extract The Smallest Honest Install Product Shape
 
 Goal: remove static/dynamic install duplication only where the real post-lease model supports it.
 
-Status: deferred by Phase 5, Phase 6, and Phase 7.
+Status: deferred by Phase 5, Phase 6, Phase 7, and Phase 8.
 
 Possible outcomes:
 
@@ -1080,8 +1142,10 @@ Decisions and course corrections:
 - Phase 5 rejected a broad install-product envelope for this plan. Future work should revisit only a
   smaller renderer-resource product, and only if it deletes real static/dynamic duplication without
   flattening layer replacement, scene publication, or dynamic resource refresh semantics.
+- Phase 8 was promoted ahead of this extraction because deleting renderer prepared texture binding
+  caches removes a more direct coupling and reduces the need for shared install-product ceremony.
 
-## Phase 9: Final Cleanup And Measurement
+## Phase 10: Final Cleanup And Measurement
 
 Goal: remove migration debris and verify the primitives improved clarity.
 

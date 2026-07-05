@@ -25,11 +25,6 @@ export interface TerrainPreparedLayeredPayload {
 	readonly maskPages: TerrainPreparedRolePageBindings;
 }
 
-export interface TerrainPreparedLayeredPayloadState {
-	readonly payload: TerrainPreparedLayeredPayload;
-	isDirty: boolean;
-}
-
 export interface TerrainPreparedRolePageBindings {
 	readonly sizes: Float32Array;
 	readonly textures: (WebGLTexture | null)[];
@@ -63,36 +58,6 @@ export interface TerrainPreparedLayerRects {
 	readonly roadMaskRects: Float32Array;
 	readonly roadRotations: Int32Array;
 	readonly roadTilings: Float32Array;
-}
-
-export function createTerrainPreparedLayeredPayloadState(): TerrainPreparedLayeredPayloadState {
-	return {
-		isDirty: true,
-		payload: createTerrainPreparedLayeredPayload(),
-	};
-}
-
-export function markTerrainPreparedLayeredPayloadDirty(
-	state: TerrainPreparedLayeredPayloadState,
-): void {
-	state.isDirty = true;
-}
-
-export function prepareTerrainLayeredPayloadState(
-	state: TerrainPreparedLayeredPayloadState,
-	plan: TerrainMaterialLayerPlan,
-	textureBindings: TerrainTextureBindingLookup,
-): TerrainPreparedLayeredPayload | null {
-	if (!state.isDirty) {
-		return state.payload;
-	}
-
-	if (!prepareTerrainLayeredPayload(state.payload, plan, textureBindings)) {
-		return null;
-	}
-	state.isDirty = false;
-
-	return state.payload;
 }
 
 export function createTerrainPreparedLayeredPayload(): TerrainPreparedLayeredPayload {

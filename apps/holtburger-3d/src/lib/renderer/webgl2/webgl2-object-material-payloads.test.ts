@@ -3,6 +3,7 @@ import type {
 	StaticMaterialTableEntry,
 	StaticObjectRenderState,
 } from "../../static/contracts";
+import type { TextureBindingId } from "../../textures/identity";
 import type { ResolvedTexturePlacement } from "../types";
 import {
 	createObjectMaterialPreparedDrawPayload,
@@ -11,6 +12,7 @@ import {
 	prepareObjectMaterialDrawPayload,
 	prepareObjectMaterialDrawPayloadState,
 	type ObjectMaterialPayloadResource,
+	type ObjectMaterialTextureBindingLookup,
 } from "./webgl2-object-material-payloads";
 
 const opaqueRenderState: StaticObjectRenderState = {
@@ -41,7 +43,11 @@ describe("WebGL2 static object payload builder", () => {
 			materialFamily: "flat-color",
 		});
 
-		prepareObjectMaterialDrawPayload(scratch, resource, new Map(), new Map());
+		prepareObjectMaterialDrawPayload(
+			scratch,
+			resource,
+			createTextureBindingLookup(),
+		);
 
 		expect(
 			Array.from(scratch.materialUniforms.baseColorRects.slice(4, 8)),
@@ -117,7 +123,11 @@ describe("WebGL2 static object payload builder", () => {
 			["detail-ref", detailTexture],
 		]);
 
-		prepareObjectMaterialDrawPayload(scratch, resource, placements, textures);
+		prepareObjectMaterialDrawPayload(
+			scratch,
+			resource,
+			createTextureBindingLookup(placements, textures),
+		);
 
 		expect(scratch.materialUniforms.indexedTextureFormats[2]).toBe(1);
 		expect(
@@ -184,25 +194,26 @@ describe("WebGL2 static object payload builder", () => {
 		prepareObjectMaterialDrawPayload(
 			scratch,
 			residentResource,
-			new Map([
-				[
-					"base-use",
-					createPlacement({
-						height: 8,
-						rect: [4, 5, 6, 7],
-						textureRefId: "base-ref",
-						textureBindingId: "base-use",
-						width: 8,
-					}),
-				],
-			]),
-			new Map([["base-ref", texture]]),
+			createTextureBindingLookup(
+				new Map([
+					[
+						"base-use",
+						createPlacement({
+							height: 8,
+							rect: [4, 5, 6, 7],
+							textureRefId: "base-ref",
+							textureBindingId: "base-use",
+							width: 8,
+						}),
+					],
+				]),
+				new Map([["base-ref", texture]]),
+			),
 		);
 		prepareObjectMaterialDrawPayload(
 			scratch,
 			fallbackResource,
-			new Map(),
-			new Map(),
+			createTextureBindingLookup(),
 		);
 
 		expect(
@@ -220,7 +231,11 @@ describe("WebGL2 static object payload builder", () => {
 		});
 
 		expect(() =>
-			prepareObjectMaterialDrawPayload(scratch, resource, new Map(), new Map()),
+			prepareObjectMaterialDrawPayload(
+				scratch,
+				resource,
+				createTextureBindingLookup(),
+			),
 		).toThrow(
 			"Object material resource test-draw-unit has no material table entries.",
 		);
@@ -255,8 +270,7 @@ describe("WebGL2 static object payload builder", () => {
 		const firstPayload = prepareObjectMaterialDrawPayloadState(
 			state,
 			resource,
-			placements,
-			textures,
+			createTextureBindingLookup(placements, textures),
 		);
 		expect(state.isDirty).toBe(false);
 		expect(firstPayload.textures.baseColor?.texture).toBe(texture);
@@ -265,8 +279,7 @@ describe("WebGL2 static object payload builder", () => {
 		const unchangedPayload = prepareObjectMaterialDrawPayloadState(
 			state,
 			resource,
-			placements,
-			textures,
+			createTextureBindingLookup(placements, textures),
 		);
 		expect(unchangedPayload).toBe(firstPayload);
 		expect(unchangedPayload.textures.baseColor?.texture).toBe(texture);
@@ -276,8 +289,7 @@ describe("WebGL2 static object payload builder", () => {
 			prepareObjectMaterialDrawPayloadState(
 				state,
 				resource,
-				placements,
-				textures,
+				createTextureBindingLookup(placements, textures),
 			),
 		).toThrow(
 			"Object material resource test-draw-unit is missing resident base-color texture binding.",
@@ -316,6 +328,38 @@ function createMaterialEntry(
 		primaryTextureWrapMode: options.primaryTextureWrapMode ?? "clamp",
 		renderState: options.renderState ?? opaqueRenderState,
 		slot: options.slot,
+	};
+}
+
+function createTextureBindingLookup(
+	placements: ReadonlyMap<string, ResolvedTexturePlacement> = new Map(),
+	textures: ReadonlyMap<string, WebGLTexture> = new Map(),
+): ObjectMaterialTextureBindingLookup {
+	return {
+		getResident(bindingId: TextureBindingId) {
+			const placement = placements.get(bindingId);
+			const texture = placement ? textures.get(placement.textureRefId) : null;
+			if (!placement || !texture) {
+				return null;
+			}
+			return {
+				bindingId,
+				placement,
+				texture,
+			};
+		},
+		getState(bindingId: TextureBindingId) {
+			const placement = placements.get(bindingId);
+			const texture = placement ? textures.get(placement.textureRefId) : null;
+			if (!placement || !texture) {
+				return { bindingId, kind: "pending" };
+			}
+			return {
+				bindingId,
+				kind: "resident",
+				placement,
+			};
+		},
 	};
 }
 

@@ -34,7 +34,6 @@ import type {
 	RendererStaticLayerVisibility,
 	TerrainLayerPayload,
 	TexturePlacementUpdate,
-	ResolvedTexturePlacement,
 } from "../types";
 import {
 	DEFAULT_RENDERER_STATIC_LAYER_VISIBILITY,
@@ -92,6 +91,7 @@ import {
 	type TerrainPreparedLayeredPayloadState,
 	type TerrainPreparedRolePageBindings,
 } from "./webgl2-terrain-payloads";
+import { Webgl2RendererTextureBindingTable } from "./webgl2-texture-bindings";
 
 type DirectEnvCellPortalFrameWorkPlan = Extract<
 	PortalFrameWorkPlan,
@@ -749,11 +749,7 @@ class Webgl2Renderer implements Renderer {
 		string,
 		PortalApertureRangeResource
 	>();
-	readonly #textures = new Map<string, WebGLTexture>();
-	readonly #texturePlacements = new Map<
-		TextureBindingId,
-		ResolvedTexturePlacement
-	>();
+	readonly #textureBindings = new Webgl2RendererTextureBindingTable();
 	readonly #staticLayerOwnershipByKey = new Map<
 		string,
 		StaticLayerResourceOwnership
@@ -1143,55 +1139,18 @@ class Webgl2Renderer implements Renderer {
 	}
 
 	applyTexturePlacementUpdate(update: TexturePlacementUpdate): void {
-		let shouldMarkAllStaticPayloadsDirty =
-			update.removedTextureRefIds.length > 0;
-		let shouldMarkAllTerrainPayloadsDirty =
-			update.removedTextureRefIds.length > 0;
-		if (
-			update.removedTextureRefIds.length > 0 ||
-			update.placements.length > 0
-		) {
-			this.#runUnmanagedWebglStateMutation((gl) => {
-				for (const textureRefId of update.removedTextureRefIds) {
-					const texture = this.#textures.get(textureRefId);
-					if (!texture) {
-						continue;
-					}
-					gl.deleteTexture(texture);
-					this.#textures.delete(textureRefId);
-					for (const [bindingId, placement] of this.#texturePlacements) {
-						if (placement.textureRefId === textureRefId) {
-							this.#texturePlacements.delete(bindingId);
-						}
-					}
-				}
-
-				for (const placement of update.placements) {
-					const texture = createTexturePage(gl, placement);
-					const previousTexture = this.#textures.get(placement.textureRefId);
-					if (previousTexture) {
-						gl.deleteTexture(previousTexture);
-					}
-					this.#textures.set(placement.textureRefId, texture);
-					shouldMarkAllStaticPayloadsDirty = true;
-					shouldMarkAllTerrainPayloadsDirty = true;
-				}
-			});
-		}
-
-		for (const placement of update.resolvedTexturePlacements) {
-			this.#texturePlacements.set(placement.bindingId, placement);
-			shouldMarkAllStaticPayloadsDirty = true;
-			shouldMarkAllTerrainPayloadsDirty = true;
-		}
+		const { changed } = this.#runUnmanagedWebglStateMutation((gl) =>
+			this.#textureBindings.applyPlacementUpdate(update, {
+				createTexture: (placement) => createTexturePage(gl, placement),
+				deleteTexture: (texture) => gl.deleteTexture(texture),
+			}),
+		);
 
 		// Prepared payloads hold WebGLTexture handles. Without a reverse
 		// texture-ref owner map, texture page adds/replacements/removals must
 		// conservatively dirty all live payloads.
-		if (shouldMarkAllStaticPayloadsDirty) {
+		if (changed) {
 			this.#markAllObjectMaterialPreparedPayloadsDirty();
-		}
-		if (shouldMarkAllTerrainPayloadsDirty) {
 			this.#markAllTerrainPreparedPayloadsDirty();
 		}
 	}
@@ -1200,7 +1159,7 @@ class Webgl2Renderer implements Renderer {
 		const residentPolicies = update.policies
 			.map((policy) => ({
 				policy,
-				texture: this.#textures.get(policy.textureRefId) ?? null,
+				texture: this.#textureBindings.getTexture(policy.textureRefId),
 			}))
 			.filter(
 				(entry): entry is {
@@ -1310,9 +1269,9 @@ class Webgl2Renderer implements Renderer {
 		for (const resource of this.#portalApertureResources.values()) {
 			resource.dispose();
 		}
-		for (const texture of this.#textures.values()) {
-			this.#gl.deleteTexture(texture);
-		}
+		this.#textureBindings.clear({
+			deleteTexture: (texture) => this.#gl.deleteTexture(texture),
+		});
 		this.#terrainResources.clear();
 		this.#staticObjectResources.clear();
 		this.#staticObjectVisualResources.clear();
@@ -1325,8 +1284,6 @@ class Webgl2Renderer implements Renderer {
 		this.#envCellStaticObjectResourceIdsByEnvCellKey.clear();
 		this.#portalApertureResources.clear();
 		this.#portalApertureRangesById.clear();
-		this.#textures.clear();
-		this.#texturePlacements.clear();
 		this.#staticLayerOwnershipByKey.clear();
 		this.#recentDynamicResourceCommits.length = 0;
 		this.#lastDynamicDrawCalls = 0;
@@ -1886,12 +1843,10 @@ class Webgl2Renderer implements Renderer {
 		});
 
 		for (const resource of this.#terrainResources.values()) {
-			const placement = resource.primaryTextureBindingId
-				? this.#texturePlacements.get(resource.primaryTextureBindingId)
-				: undefined;
-			const texture = placement
-				? (this.#textures.get(placement.textureRefId) ?? null)
+			const residentPrimaryTexture = resource.primaryTextureBindingId
+				? this.#textureBindings.getResident(resource.primaryTextureBindingId)
 				: null;
+			const texture = residentPrimaryTexture?.texture ?? null;
 			const useTexture =
 				resource.materialFamily === "terrain-single-base-color" &&
 				texture !== null;
@@ -1916,15 +1871,15 @@ class Webgl2Renderer implements Renderer {
 			gl.uniform1i(this.#terrainProgram.uniforms.uTexture, 0);
 			gl.uniform4f(
 				this.#terrainProgram.uniforms.uTextureRect,
-				placement?.rect[0] ?? 0,
-				placement?.rect[1] ?? 0,
-				placement?.rect[2] ?? 1,
-				placement?.rect[3] ?? 1,
+				residentPrimaryTexture?.placement.rect[0] ?? 0,
+				residentPrimaryTexture?.placement.rect[1] ?? 0,
+				residentPrimaryTexture?.placement.rect[2] ?? 1,
+				residentPrimaryTexture?.placement.rect[3] ?? 1,
 			);
 			gl.uniform2f(
 				this.#terrainProgram.uniforms.uTextureSize,
-				placement?.textureWidth ?? 1,
-				placement?.textureHeight ?? 1,
+				residentPrimaryTexture?.placement.textureWidth ?? 1,
+				residentPrimaryTexture?.placement.textureHeight ?? 1,
 			);
 			gl.uniform1i(
 				this.#terrainProgram.uniforms.uUseTexture,
@@ -2770,8 +2725,7 @@ class Webgl2Renderer implements Renderer {
 		return prepareTerrainLayeredPayloadState(
 			resource.preparedLayeredPayloadState,
 			plan,
-			this.#texturePlacements,
-			this.#textures,
+			this.#textureBindings,
 		);
 	}
 
@@ -2789,8 +2743,7 @@ class Webgl2Renderer implements Renderer {
 		return prepareObjectMaterialDrawPayloadState(
 			resource.preparedDrawPayloadState,
 			resource,
-			this.#texturePlacements,
-			this.#textures,
+			this.#textureBindings,
 		);
 	}
 

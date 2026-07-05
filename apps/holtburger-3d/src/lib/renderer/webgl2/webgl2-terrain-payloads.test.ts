@@ -3,6 +3,7 @@ import type {
 	TerrainMaterialLayerPlan,
 	TerrainMaterialTextureRoleBinding,
 } from "../../static/contracts";
+import type { TextureBindingId } from "../../textures/identity";
 import type { ResolvedTexturePlacement } from "../types";
 import {
 	createTerrainPreparedLayeredPayload,
@@ -10,6 +11,7 @@ import {
 	markTerrainPreparedLayeredPayloadDirty,
 	prepareTerrainLayeredPayload,
 	prepareTerrainLayeredPayloadState,
+	type TerrainTextureBindingLookup,
 } from "./webgl2-terrain-payloads";
 
 describe("WebGL2 terrain layered payload builder", () => {
@@ -48,10 +50,7 @@ describe("WebGL2 terrain layered payload builder", () => {
 		const roadMaskTexture = createTexture();
 		const detailTexture = createTexture();
 		const placements = new Map<string, ResolvedTexturePlacement>([
-			[
-				"base-use",
-				createPlacement("base-use", "base-ref", [10, 11, 12, 13]),
-			],
+			["base-use", createPlacement("base-use", "base-ref", [10, 11, 12, 13])],
 			[
 				"overlay-use",
 				createPlacement("overlay-use", "overlay-ref", [20, 21, 22, 23]),
@@ -64,10 +63,7 @@ describe("WebGL2 terrain layered payload builder", () => {
 					[30, 31, 32, 33],
 				),
 			],
-			[
-				"road-use",
-				createPlacement("road-use", "road-ref", [40, 41, 42, 43]),
-			],
+			["road-use", createPlacement("road-use", "road-ref", [40, 41, 42, 43])],
 			[
 				"road-alpha-use",
 				createPlacement("road-alpha-use", "road-alpha-ref", [50, 51, 52, 53]),
@@ -87,7 +83,11 @@ describe("WebGL2 terrain layered payload builder", () => {
 		]);
 
 		expect(
-			prepareTerrainLayeredPayload(scratch, plan, placements, textures),
+			prepareTerrainLayeredPayload(
+				scratch,
+				plan,
+				createTextureBindingLookup(placements, textures),
+			),
 		).toBe(true);
 
 		expect(scratch.colorPages.textures[0]).toBe(baseTexture);
@@ -143,7 +143,7 @@ describe("WebGL2 terrain layered payload builder", () => {
 		});
 
 		expect(
-			prepareTerrainLayeredPayload(scratch, plan, new Map(), new Map()),
+			prepareTerrainLayeredPayload(scratch, plan, createTextureBindingLookup()),
 		).toBe(false);
 	});
 
@@ -203,8 +203,12 @@ describe("WebGL2 terrain layered payload builder", () => {
 			["road-alpha-ref", createTexture()],
 		]);
 
-		expect(
-			() => prepareTerrainLayeredPayload(scratch, plan, placements, textures),
+		expect(() =>
+			prepareTerrainLayeredPayload(
+				scratch,
+				plan,
+				createTextureBindingLookup(placements, textures),
+			),
 		).toThrow("exceeded color texture page capacity 4");
 	});
 
@@ -221,10 +225,7 @@ describe("WebGL2 terrain layered payload builder", () => {
 			},
 		});
 		const placements = new Map<string, ResolvedTexturePlacement>([
-			[
-				"base-use",
-				createPlacement("base-use", "base-ref", [0, 0, 4, 4]),
-			],
+			["base-use", createPlacement("base-use", "base-ref", [0, 0, 4, 4])],
 			[
 				"detail-a-use",
 				createPlacement("detail-a-use", "detail-a-ref", [0, 0, 8, 8]),
@@ -241,7 +242,11 @@ describe("WebGL2 terrain layered payload builder", () => {
 		]);
 
 		expect(
-			prepareTerrainLayeredPayload(scratch, plan, placements, textures),
+			prepareTerrainLayeredPayload(
+				scratch,
+				plan,
+				createTextureBindingLookup(placements, textures),
+			),
 		).toBe(false);
 	});
 
@@ -256,10 +261,7 @@ describe("WebGL2 terrain layered payload builder", () => {
 			},
 		});
 		const placements = new Map<string, ResolvedTexturePlacement>([
-			[
-				"base-use",
-				createPlacement("base-use", "base-ref", [1, 2, 3, 4]),
-			],
+			["base-use", createPlacement("base-use", "base-ref", [1, 2, 3, 4])],
 		]);
 		const textures = new Map<string, WebGLTexture>([
 			["base-ref", createTexture()],
@@ -268,8 +270,7 @@ describe("WebGL2 terrain layered payload builder", () => {
 		const firstPayload = prepareTerrainLayeredPayloadState(
 			state,
 			plan,
-			placements,
-			textures,
+			createTextureBindingLookup(placements, textures),
 		);
 		expect(firstPayload).not.toBeNull();
 		expect(state.isDirty).toBe(false);
@@ -279,8 +280,7 @@ describe("WebGL2 terrain layered payload builder", () => {
 		const unchangedPayload = prepareTerrainLayeredPayloadState(
 			state,
 			plan,
-			placements,
-			textures,
+			createTextureBindingLookup(placements, textures),
 		);
 		expect(unchangedPayload).toBe(firstPayload);
 		expect(state.isDirty).toBe(false);
@@ -289,8 +289,7 @@ describe("WebGL2 terrain layered payload builder", () => {
 		const failedPayload = prepareTerrainLayeredPayloadState(
 			state,
 			plan,
-			placements,
-			textures,
+			createTextureBindingLookup(placements, textures),
 		);
 		expect(failedPayload).toBeNull();
 		expect(state.isDirty).toBe(true);
@@ -361,6 +360,38 @@ function createRole(
 		textureBindingId,
 		tiling,
 		wrap: "repeat",
+	};
+}
+
+function createTextureBindingLookup(
+	placements: ReadonlyMap<string, ResolvedTexturePlacement> = new Map(),
+	textures: ReadonlyMap<string, WebGLTexture> = new Map(),
+): TerrainTextureBindingLookup {
+	return {
+		getResident(bindingId: TextureBindingId) {
+			const placement = placements.get(bindingId);
+			const texture = placement ? textures.get(placement.textureRefId) : null;
+			if (!placement || !texture) {
+				return null;
+			}
+			return {
+				bindingId,
+				placement,
+				texture,
+			};
+		},
+		getState(bindingId: TextureBindingId) {
+			const placement = placements.get(bindingId);
+			const texture = placement ? textures.get(placement.textureRefId) : null;
+			if (!placement || !texture) {
+				return { bindingId, kind: "pending" };
+			}
+			return {
+				bindingId,
+				kind: "resident",
+				placement,
+			};
+		},
 	};
 }
 

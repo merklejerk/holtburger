@@ -236,9 +236,9 @@ describe("terrain geometry baker", () => {
 			"terrain:0xda55ffff:terrain-geometry:slice-0-page-1",
 		]);
 		expect(drawUnits.map((drawUnit) => drawUnit.triangleCount)).toEqual([8, 2]);
-		expect(drawUnits.map((drawUnit) => drawUnit.textureBindingIds.length)).toEqual([
-			4, 1,
-		]);
+		expect(
+			drawUnits.map((drawUnit) => drawUnit.textureBindingIds.length),
+		).toEqual([4, 1]);
 		expect(result.textureDependencies).toHaveLength(2);
 		expect(result.textureDependencies[0]?.roles).toEqual([
 			{

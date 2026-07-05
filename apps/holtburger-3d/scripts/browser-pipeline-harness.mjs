@@ -97,7 +97,9 @@ function parseArgs(args) {
 				parsed.landblockIds = parseLandblocks(requireValue(args, ++index, arg));
 				break;
 			case "--layer-distance":
-				parsed.lod = parseUniformLayerDistance(requireValue(args, ++index, arg));
+				parsed.lod = parseUniformLayerDistance(
+					requireValue(args, ++index, arg),
+				);
 				break;
 			case "--output":
 				parsed.outputPath = requireValue(args, ++index, arg);

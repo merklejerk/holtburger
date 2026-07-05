@@ -123,9 +123,7 @@ export function bakeObjectVisuals(
 						entry.paletteTextureBindingId,
 						entry.detailTextureBindingId,
 					].filter(
-						(
-							textureBindingId,
-						): textureBindingId is TextureBindingId =>
+						(textureBindingId): textureBindingId is TextureBindingId =>
 							textureBindingId !== null,
 					),
 				),
@@ -549,9 +547,7 @@ function createRenderPart(options: {
 					entry.paletteTextureBindingId,
 					entry.detailTextureBindingId,
 				].filter(
-					(
-						textureBindingId,
-					): textureBindingId is TextureBindingId =>
+					(textureBindingId): textureBindingId is TextureBindingId =>
 						textureBindingId !== null,
 				),
 			),
@@ -666,9 +662,7 @@ function createSourceLocalPayload(options: {
 					entry.paletteTextureBindingId,
 					entry.detailTextureBindingId,
 				].filter(
-					(
-						textureBindingId,
-					): textureBindingId is TextureBindingId =>
+					(textureBindingId): textureBindingId is TextureBindingId =>
 						textureBindingId !== null,
 				),
 			),
@@ -820,7 +814,9 @@ function compareRenderablePrimitives(
 	);
 }
 
-function uniqueSortedStrings<T extends string>(values: readonly T[]): readonly T[] {
+function uniqueSortedStrings<T extends string>(
+	values: readonly T[],
+): readonly T[] {
 	return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 

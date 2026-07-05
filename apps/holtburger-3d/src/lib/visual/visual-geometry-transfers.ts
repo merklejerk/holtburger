@@ -1,6 +1,4 @@
-import {
-	type BinarySidecarView,
-} from "../workers/transfers";
+import { type BinarySidecarView } from "../workers/transfers";
 import type { VisualGeometryPayload } from "./visual-geometry";
 
 export function createVisualGeometryPayloadTransferSidecars(

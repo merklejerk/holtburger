@@ -295,9 +295,8 @@ describe("WebGL2 structured interior rendering", () => {
 		vi.stubGlobal("cancelAnimationFrame", () => {});
 		vi.stubGlobal("window", { devicePixelRatio: 1 });
 		const renderer = createWebgl2Renderer(canvas);
-		const textureBindingId = createRendererTestTextureBindingId(
-			"object-texture-use",
-		);
+		const textureBindingId =
+			createRendererTestTextureBindingId("object-texture-use");
 
 		renderer.applyTexturePlacementUpdate(
 			createTexturePlacementUpdate(textureBindingId, "object-texture-ref"),
@@ -2380,7 +2379,8 @@ function countTextureBinds(
 	texture: WebGLTexture | undefined,
 ): number {
 	return gl.bindTexture.mock.calls.filter(
-		([target, boundTexture]) => target === gl.TEXTURE_2D && boundTexture === texture,
+		([target, boundTexture]) =>
+			target === gl.TEXTURE_2D && boundTexture === texture,
 	).length;
 }
 

@@ -1,4 +1,7 @@
-import type { ResolvedTexturePlacement, TexturePlacementUpdate } from "../renderer/types";
+import type {
+	ResolvedTexturePlacement,
+	TexturePlacementUpdate,
+} from "../renderer/types";
 import type {
 	StaticCoordinatorCommitDelta,
 	StaticDrawUnit,

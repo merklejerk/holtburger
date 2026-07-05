@@ -79,7 +79,9 @@ interface PlannerContext {
 
 function createPlannerContext(
 	payload: TerrainStaticScopePayload,
-	createTextureBindingId: (textureUse: TerrainTextureUseFacts) => TextureBindingId,
+	createTextureBindingId: (
+		textureUse: TerrainTextureUseFacts,
+	) => TextureBindingId,
 ): PlannerContext {
 	return {
 		createTextureBindingId,

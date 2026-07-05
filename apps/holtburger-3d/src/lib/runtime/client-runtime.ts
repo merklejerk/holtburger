@@ -2160,8 +2160,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		const textureApplyStartedAtMs = performance.now();
 		const textureUpdate =
 			await this.#textureManager.applyStaticCommitDelta(delta);
-		commit.timing.textureApplyMs +=
-			performance.now() - textureApplyStartedAtMs;
+		commit.timing.textureApplyMs += performance.now() - textureApplyStartedAtMs;
 		if (this.#disposed) {
 			return;
 		}
@@ -2171,7 +2170,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 			commit: delta,
 			textureUpdate,
 		});
-		commit.timing.installStaticCommitMs += performance.now() - installStartedAtMs;
+		commit.timing.installStaticCommitMs +=
+			performance.now() - installStartedAtMs;
 		this.#updateCommittedStaticDirectDrawUnits(delta, installed);
 		this.#clearStaticLayersForRemovedResources(installed.removedResources);
 		if (installed.textureUpdate) {
@@ -2184,8 +2184,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#textureManager.pinTextureLeaseSet(
 			createTextureLeaseSet(delta.textureDependencies),
 		);
-		commit.timing.pinTextureLeasesMs +=
-			performance.now() - pinStartedAtMs;
+		commit.timing.pinTextureLeasesMs += performance.now() - pinStartedAtMs;
 		const staticLayerStartedAtMs = performance.now();
 		this.#applyInstalledStaticLayers(delta, installed);
 		commit.timing.applyStaticLayersMs +=
@@ -2234,8 +2233,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#refreshSceneDebugOverlay();
 		commit.timing.refreshDebugOverlayMs +=
 			performance.now() - debugOverlayStartedAtMs;
-		commit.timing.materializeMs =
-			performance.now() - materializeStartedAtMs;
+		commit.timing.materializeMs = performance.now() - materializeStartedAtMs;
 		this.#markStaticCommitInstall(delta, "materialized");
 		this.#staticCoordinator.markCommitMaterialized(delta);
 		this.#committedStaticCommitInstalls = appendBounded(

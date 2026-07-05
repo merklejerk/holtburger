@@ -349,6 +349,155 @@ So the worker is helping, but it does not move the whole placement transaction o
 
 Page-local repack is a notable architectural trap even though it was not the top offender in these particular captures. If an incoming group mostly fits an existing atlas page but requires repacking, `#materializePageLocalRepack()` prepares sources, allocates a new page buffer, and blits sources with gutters on the main thread.
 
+## Proposed Pipeline Redesign Direction
+
+Status: proposed.
+
+The next architecture direction is not to make the current serialized mutation queue smarter. The
+cleaner target is a pipeline where provenance-specific entrypoints fan into a shared visual
+materialization middle, while texture ordering, batching, placement, and residency are owned by a
+texture-domain service.
+
+### Shape
+
+Entrypoints stay provenance-specific:
+
+- static interest produces resolved static layer work;
+- static-authored dynamics and generated scenery produce resolved authored visual work;
+- runtime dynamic spawns/refreshes produce resolved dynamic visual work.
+
+After source resolution, work should converge into a shared materialization shape:
+
+```ts
+const ticket = textureService.ingestTextures(textureDemand);
+const bakeBindings = await ticket.bakeBindings;
+const baked = await visualBakePool.submit({ source, bakeBindings });
+const residency = await ticket.residency;
+installVisual({ baked, residency, publication });
+```
+
+The visual pipeline should not manually snapshot atlas state, run placement planning, retry stale
+plans, or commit texture registries. That orchestration belongs inside the texture domain.
+
+### Domains And Boundaries
+
+- **Provenance resolvers**
+  - Main orchestration plus existing resolver workers where applicable.
+  - Own static interest, dynamic spawn/update, source facts, and publication intent.
+  - Output resolved visual work and texture demand.
+- **Texture ingestion service**
+  - Owns batching, deduplication, ordering, and readiness promises for texture demand.
+  - Coalesces requests across callers by texture domain, page class, purpose, and compatible source
+    facts.
+  - Exposes staged readiness: bake bindings first, physical residency later.
+- **Texture preparation**
+  - Worker-preferred.
+  - Prepares source pixels/metadata and binary sidecars outside the atlas commit lock.
+- **Texture planning and page materialization**
+  - Worker-preferred.
+  - New-page packing and existing-page repack planning/materialization should both move off the main
+    thread where feasible.
+  - Page-local repack on the main thread is a known bad shape.
+- **Texture commit**
+  - Main thread, narrow, and exclusive only where mutable atlas/renderer state requires it.
+  - Commits page records, placement registries, renderer texture updates, and lease-visible
+    residency state.
+- **Visual baking**
+  - Worker-preferred.
+  - Consumes bake bindings/page grouping, not necessarily final physical atlas rects.
+  - Produces geometry, material slot data, and texture dependency declarations.
+- **Renderer install/publication**
+  - Main thread.
+  - Static layer publication and dynamic resource/entity publication remain distinct.
+  - Renderer texture binding readiness decides whether installed draw units/resources are renderable.
+
+### Bake Bindings Versus Physical Placement
+
+Current `TexturePlacementSnapshot` carries physical placement data, but bake-time consumers mostly
+need binding/page compatibility facts:
+
+- binding or placement item id;
+- texture purpose;
+- page class;
+- bake page/group identity;
+- texture key for dependency emission and validation.
+
+The remodel should split bake-facing assignment from render-facing physical residency. This lets
+visual baking proceed once page grouping is known, while page pixels and renderer texture residency
+can finish on their own schedule.
+
+### Renderer Texture Binding Readiness Primitive
+
+Before the larger remodel, add a renderer primitive that makes binding readiness explicit:
+
+- pending required bindings make affected draw units/resources not renderable yet;
+- resident bindings preserve current rendering behavior;
+- failed bindings are skipped with inspectable diagnostics;
+- no placeholder or fallback texture rendering should be introduced.
+
+This primitive is tracked in
+`docs/plans/holtburger-3d-streaming-pipeline-primitives-plan.md` as the next planned phase. It
+protects the larger redesign from pulling final physical texture placement too early into visual
+baking or install.
+
+Expected sequence after the primitive:
+
+1. Renderer resources can be installed with stable texture binding ids.
+2. Required bindings that are not resident make affected draw units/resources not renderable yet.
+3. `TexturePlacementUpdate` transitions bindings to resident and dirties prepared payloads.
+4. Later texture ingestion work can fulfill bindings asynchronously without changing the renderer
+   resource identity.
+
+The primitive does not solve the main stutter by itself. It creates the render boundary needed for
+the larger remodel.
+
+### Queue Policy
+
+Queues are acceptable only where they represent real shared mutable state:
+
+- worker-pool queues are fine;
+- texture-domain ingestion batching is fine;
+- a narrow texture commit mutex is fine.
+
+The pipeline should avoid hidden broad queues that perform source preparation, await worker packing,
+materialize repacks, mutate registries, and publish snapshots in one lane. That is the measured
+stutter shape.
+
+The larger remodel should avoid exposing snapshot/plan/commit retries to each visual caller. In real
+streaming conditions, per-visual calls that each run their own placement plan would create contention
+and stale-plan retries. The texture domain should own batching and ordering behind a narrow service
+boundary:
+
+```ts
+const ticket = textureService.ingestTextures(textureDemand);
+const bakeBindings = await ticket.bakeBindings;
+const baked = await visualBakePool.submit({ source, bakeBindings });
+const residency = await ticket.residency;
+installVisual({ baked, residency, publication });
+```
+
+The texture service may queue internally, but that queue should be a domain scheduler rather than a
+hidden render-pipeline lane. Its job is to coalesce demand, dedupe source work, plan compatible pages,
+materialize page pixels off-thread, and commit small ordered atlas/renderer updates.
+
+Steering constraints:
+
+- Unknown renderer bindings can initially be interpreted as pending at lookup time; explicit failed
+  states need a future texture ingestion/service failure source to become useful.
+- Deliberate caller-side batches are not sufficient as the only batching mechanism. Real streaming
+  needs texture-domain coalescing across static layers, static-authored dynamics, and runtime
+  dynamics.
+- Avoid mutexing the whole texture domain across preparation, planning, page materialization, and
+  commit. That recreates the measured broad queue problem.
+- Bake-facing page assignments and render-facing physical placement should be split, but the exact
+  DTO names should be proven by the texture ingestion service design rather than invented in the
+  renderer binding primitive phase.
+
+North star:
+
+> Prepare in parallel, coordinate texture demand in one texture domain, commit narrowly, publish
+> explicitly.
+
 ## Cleanup Checklist
 
 - Temporary diagnostics are intentionally left in place for review:

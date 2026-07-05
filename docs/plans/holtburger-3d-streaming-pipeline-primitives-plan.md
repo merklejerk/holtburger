@@ -1,6 +1,7 @@
 # Holtburger 3D Streaming Pipeline Primitives Plan
 
-Status: Phase 6 complete; next architecture work is texture placement transaction remodeling.
+Status: Phase 6 complete; Phase 7 renderer texture binding readiness primitive planned before the
+texture placement transaction remodel.
 
 Related context:
 
@@ -23,7 +24,9 @@ standardizes those artifacts in a conservative order:
 1. binary sidecar ownership for typed-array payloads crossing worker boundaries;
 2. explicit texture/resource lease sets for residency lifetime;
 3. an install-product shape discovered from the simplified sidecar and lease model, not assumed up
-   front.
+   front;
+4. renderer-facing texture binding readiness so visuals can be installed separately from physical
+   texture residency without rendering placeholders.
 
 ## North Stars
 
@@ -83,6 +86,8 @@ In scope:
 - making texture residency leases explicit in the texture/runtime install boundary;
 - converting static and dynamic renderer install paths to the same lease-set vocabulary where
   practical;
+- making renderer texture binding readiness explicit before the broader texture placement
+  transaction remodel;
 - auditing the post-lease static/dynamic install products before extracting any shared visual
   install product;
 - deleting or renaming obsolete temporary diagnostics and compatibility shims when they block the
@@ -95,6 +100,7 @@ Out of scope:
 - adding a global pipeline cancellation/currentness framework;
 - adding deep generational snapshot/proposal infrastructure;
 - changing renderer draw behavior except where required by the new boundary types;
+- rendering placeholder or fallback textures for pending bindings;
 - moving browser/Tauri pipeline types into shared Rust crates or other app layers.
 
 ## Current Verified Facts
@@ -144,6 +150,23 @@ Existing lifetime and install behavior:
 - `apps/holtburger-3d/src/lib/renderer/types.ts`
   - static layer payloads, dynamic visual resource commits, and texture placement updates already
     contain the future install-product ingredients, but they are not one shared product shape.
+
+Existing renderer texture binding behavior:
+
+- `apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-renderer.ts`
+  - keeps renderer-owned WebGL texture objects in `#textures`, keyed by `textureRefId`;
+  - keeps resolved material binding placements in `#texturePlacements`, keyed by
+    `TextureBindingId`;
+  - applies `TexturePlacementUpdate` by deleting removed texture refs, uploading/replacing page
+    textures, and recording `bindingId -> ResolvedTexturePlacement`;
+  - conservatively dirties all object-material and terrain prepared payloads after texture placement
+    changes because there is not yet a reverse binding-to-prepared-payload invalidation model.
+- `apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-object-material-payloads.ts`
+  - resolves object material texture bindings only when both a resolved placement and WebGL texture
+    are resident; missing bindings remain unbound and required material resources are skipped.
+- `apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-terrain-payloads.ts`
+  - resolves terrain page bindings only when resident placement and WebGL texture state are
+    available; required missing bindings make a terrain payload not renderable.
 
 ## Phase 0: Baseline And Naming Audit
 
@@ -876,11 +899,124 @@ Decisions and course corrections:
 - Did not delete the stutter investigation worksheet. It is historical evidence and still documents
   the benchmark and bottleneck attribution.
 
-## Phase 7: Extract The Smallest Honest Install Product Shape
+## Phase 7: Renderer Texture Binding Readiness Primitive
+
+Goal: make renderer-facing texture binding readiness explicit so renderer resources can be installed
+without pretending every required texture is physically resident immediately.
+
+Status: planned.
+
+Target shape:
+
+```ts
+type RendererTextureBindingState =
+  | {
+      readonly kind: "pending";
+      readonly bindingId: TextureBindingId;
+    }
+  | {
+      readonly kind: "resident";
+      readonly bindingId: TextureBindingId;
+      readonly placement: ResolvedTexturePlacement;
+    }
+  | {
+      readonly kind: "failed";
+      readonly bindingId: TextureBindingId;
+      readonly reason: string;
+    };
+```
+
+The exact naming may change during implementation. The important contract is readiness, not
+placeholder rendering.
+
+Deliverables:
+
+- Add a WebGL2-local texture binding table module, likely
+  `apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-texture-bindings.ts`.
+- Move the current renderer texture maps behind a readiness-aware table:
+  - `textureRefId -> WebGLTexture` remains the renderer-owned GPU texture mirror;
+  - `TextureBindingId -> RendererTextureBindingState` replaces raw
+    `TextureBindingId -> ResolvedTexturePlacement` access.
+- Keep the first table intentionally boring:
+
+  ```ts
+  interface ResidentRendererTextureBinding {
+    readonly bindingId: TextureBindingId;
+    readonly placement: ResolvedTexturePlacement;
+    readonly texture: WebGLTexture;
+  }
+
+  interface RendererTextureBindingTable {
+    getState(bindingId: TextureBindingId): RendererTextureBindingState;
+    getResident(bindingId: TextureBindingId): ResidentRendererTextureBinding | null;
+  }
+  ```
+
+- Adapt `Webgl2Renderer.applyTexturePlacementUpdate(...)` to update the table while preserving WebGL
+  texture creation/deletion ownership in the renderer.
+- Treat unknown required bindings as `pending` at lookup time unless an explicit `failed` state has
+  been recorded. This preserves current behavior while making readiness inspectable.
+- Add explicit `markFailed(bindingId, reason)` or equivalent only if the implementation can keep it
+  renderer-local and testable without inventing the future texture ingestion service.
+- Update object-material and terrain payload preparation to consume resident bindings through the
+  table API instead of parallel raw placement and texture maps.
+- Keep prepared payload invalidation conservative unless the implementation naturally exposes a
+  smaller affected-binding set.
+- Add focused renderer tests proving resident, pending, and failed binding behavior.
+
+Non-goals:
+
+- Do not add fallback/checkerboard rendering.
+- Do not make renderer binding state authoritative for texture residency lifetime.
+- Do not add the texture ingestion service yet.
+- Do not attempt precise dirtying by reverse binding ownership unless it falls out naturally. The
+  current conservative invalidation is acceptable for this primitive.
+- Do not require every layer/resource install call to pre-register pending bindings in the first
+  pass. Missing required bindings can be interpreted as pending until the texture service exists.
+
+Acceptance criteria:
+
+- Draw units or renderer resources that require pending texture bindings are skipped/not prepared,
+  not rendered with placeholder textures.
+- Resident bindings preserve current rendering behavior.
+- Failed bindings are skipped and produce diagnostics or inspectable state.
+- Texture placement updates transition bindings to resident and dirty affected prepared payloads at
+  least as safely as the current conservative invalidation.
+- Renderer texture lifetime remains a GPU mirror only. Texture residency ownership stays in the
+  texture service/manager and lease model.
+- No broad pipeline remodel, texture placement transaction rewrite, or install-product extraction is
+  included in this phase.
+- Focused WebGL2 renderer/payload tests, `npm run check`, and `npm run lint:dead` pass.
+
+Decisions and course corrections:
+
+- Planned after Phase 6 because the larger pipeline redesign needs a renderer boundary that can
+  represent non-resident required bindings without installing fake fallback textures.
+- The primitive should formalize behavior the renderer already has implicitly: resources with missing
+  required bindings are not renderable yet.
+- This phase should not introduce a new texture lifetime owner. Renderer binding state is derived
+  from committed texture placement updates and WebGL texture residency.
+- Implementation should be moderate but localized. The renderer currently passes `#texturePlacements`
+  and `#textures` into exactly the payload-preparation seams Phase 7 needs.
+- Existing object-material payload tests already prove resident and missing-required behavior. Migrate
+  them to the table API instead of duplicating coverage.
+- Existing terrain payload tests already prove missing required bindings make terrain payload
+  preparation return `false`. Use them as the primary pending-binding coverage.
+- Existing WebGL2 renderer tests already cover invalidation after `applyTexturePlacementUpdate(...)`.
+  Add only targeted coverage for table transitions and renderer invalidation.
+
+Open implementation questions for Phase 7:
+
+- Should failed binding state be public diagnostic state immediately, or should the first cut only
+  model it in the table API until the texture service can produce real failures?
+- Should the readiness table expose aggregate diagnostics, such as resident/pending/failed counts,
+  or should that wait until the texture ingestion service exists?
+
+## Phase 8: Extract The Smallest Honest Install Product Shape
 
 Goal: remove static/dynamic install duplication only where the real post-lease model supports it.
 
-Status: deferred by Phase 5 and Phase 6.
+Status: deferred by Phase 5, Phase 6, and Phase 7.
 
 Possible outcomes:
 
@@ -925,7 +1061,7 @@ Decisions and course corrections:
   smaller renderer-resource product, and only if it deletes real static/dynamic duplication without
   flattening layer replacement, scene publication, or dynamic resource refresh semantics.
 
-## Phase 8: Final Cleanup And Measurement
+## Phase 9: Final Cleanup And Measurement
 
 Goal: remove migration debris and verify the primitives improved clarity.
 
@@ -982,11 +1118,21 @@ Decisions and course corrections:
   - Mitigation: prefer deleting temporary diagnostics over maintaining compatibility. Rebuild durable
     diagnostics from the new sidecar, lease, and install-product concepts if needed.
 
+- **Risk: pending texture bindings become placeholder rendering.**
+  - Mitigation: pending and failed bindings should make affected draw units/resources not renderable.
+    Do not introduce fallback textures in the binding readiness primitive.
+
+- **Risk: renderer binding state becomes a second residency owner.**
+  - Mitigation: renderer binding state is a derived GPU/cache mirror of committed texture placement
+    updates. Texture lifetime remains owned by the texture service/manager and `TextureLeaseSet`.
+
 ## Definition Of Done
 
 - Binary typed-array ownership is explicit for migrated worker DTOs.
 - Worker-created texture and geometry outputs have protocol-local transfer collectors.
 - Static and dynamic texture residency use a shared lease-set vocabulary.
+- Renderer texture binding readiness is explicit, and pending required bindings skip affected draw
+  units/resources instead of rendering placeholders.
 - The codebase either has a small honest shared install product/component shape or a documented
   decision to defer extraction.
 - Obsolete direct transfer/lifetime compatibility paths are removed or have explicit cleanup notes.
@@ -1014,3 +1160,12 @@ Closed during Phase 5:
   `TextureManager` behind lease sets and resource-id releases.
 - The next architecture effort should be a texture placement transaction remodel, not a renderer
   install-product extraction.
+
+Closed during Phase 7 planning:
+
+- Renderer texture binding readiness should be added as a primitive before the broader texture
+  placement transaction remodel.
+- Pending required texture bindings should skip affected draw units/resources, not render fallback
+  textures.
+- Renderer texture binding state is a derived cache/readiness table. It must not own authoritative
+  texture residency lifetime.

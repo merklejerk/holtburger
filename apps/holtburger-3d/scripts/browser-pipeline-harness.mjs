@@ -31,6 +31,8 @@ try {
 		assetHostUrl,
 		chromePath: options.chromePath,
 		domains: options.domains,
+		dungeonId: options.dungeonId,
+		envCellId: options.envCellId,
 		headed: options.headed,
 		landblockIds: options.landblockIds,
 		lod: options.lod,
@@ -63,6 +65,8 @@ function parseArgs(args) {
 		assetHostUrl: null,
 		chromePath: process.env.CHROME_PATH ?? DEFAULT_CHROME_PATH,
 		domains: DEFAULT_STATIC_DOMAINS,
+		dungeonId: null,
+		envCellId: null,
 		headed: false,
 		landblockIds: [DEFAULT_LANDBLOCK_ID],
 		lod: null,
@@ -86,6 +90,12 @@ function parseArgs(args) {
 				break;
 			case "--domains":
 				parsed.domains = parseDomains(requireValue(args, ++index, arg));
+				break;
+			case "--dungeon":
+				parsed.dungeonId = requireValue(args, ++index, arg);
+				break;
+			case "--env-cell":
+				parsed.envCellId = requireValue(args, ++index, arg);
 				break;
 			case "--headed":
 				parsed.headed = true;
@@ -165,10 +175,12 @@ function printHelp() {
 Options:
   --landblock <hex>        Outdoor landblock to load. Default: 0xda55ffff
   --landblocks <csv>       Outdoor landblock sequence to load, in order.
+  --dungeon <hex>          Dungeon landblock prefix or id for dungeon-cell scenario.
+  --env-cell <hex>         Optional env-cell id for dungeon-cell scenario.
   --domains <csv>          Static domains to request. Default: ${DEFAULT_STATIC_DOMAINS.join(",")}
   --layer-distance <n>     Use one radius for every outdoor static layer.
   --repeat <count>         Repeat the landblock sequence. Default: 1
-  --scenario <name>        Scenario: landblock-sequence, explicit-object-radius-expansion.
+  --scenario <name>        Scenario: landblock-sequence, explicit-object-radius-expansion, dungeon-cell.
   --settle-delay-ms <ms>   Delay after each settled scene before continuing. Default: 0
   --target-object <id>     Static object id for explicit-object-radius-expansion diagnostics.
   --headed                 Launch visible Chrome instead of headless Chrome.
@@ -225,10 +237,11 @@ function parseUniformLayerDistance(value) {
 function parseScenario(value) {
 	if (
 		value !== "landblock-sequence" &&
-		value !== "explicit-object-radius-expansion"
+		value !== "explicit-object-radius-expansion" &&
+		value !== "dungeon-cell"
 	) {
 		throw new Error(
-			"--scenario must be landblock-sequence or explicit-object-radius-expansion.",
+			"--scenario must be landblock-sequence, explicit-object-radius-expansion, or dungeon-cell.",
 		);
 	}
 	return value;
@@ -398,6 +411,8 @@ async function runBrowserHarness({
 	assetHostUrl,
 	chromePath,
 	domains,
+	dungeonId,
+	envCellId,
 	headed,
 	landblockIds,
 	lod,
@@ -449,6 +464,15 @@ async function runBrowserHarness({
 						timeoutMs,
 					})),
 				);
+			} else if (scenario === "dungeon-cell") {
+				scenarioSteps.push(
+					await runDungeonCellScenario({
+						client,
+						dungeonId,
+						envCellId,
+						timeoutMs,
+					}),
+				);
 			} else {
 				scenarioSteps.push(
 					...(await runLandblockSequenceScenario({
@@ -473,6 +497,8 @@ async function runBrowserHarness({
 		);
 		diagnostics.harnessScenario = {
 			domains,
+			dungeonId: scenario === "dungeon-cell" ? dungeonId : null,
+			envCellId: scenario === "dungeon-cell" ? envCellId : null,
 			kind: "browser-pipeline-harness-scenario",
 			landblockIds,
 			repeat: sequenceRepeatCount,
@@ -595,10 +621,45 @@ async function runExplicitObjectRadiusExpansionScenario({
 	return steps;
 }
 
+async function runDungeonCellScenario({
+	client,
+	dungeonId,
+	envCellId,
+	timeoutMs,
+}) {
+	if (!dungeonId) {
+		throw new Error("--scenario dungeon-cell requires --dungeon.");
+	}
+	const target = createDungeonCellTarget(dungeonId, envCellId);
+	const overview = await requestInteriorCell(client, {
+		envCellId: target.envCellId,
+		landblockId: target.landblockId,
+		timeoutMs,
+	});
+	const diagnostics = await createDiagnosticsReport(client);
+	return createHarnessScenarioStep({
+		diagnostics,
+		envCellId: target.envCellId,
+		index: 0,
+		landblockId: target.landblockId,
+		lod: null,
+		overview,
+		stepName: "dungeon-cell",
+	});
+}
+
 async function requestOutdoorScene(client, options) {
 	return evaluate(
 		client,
 		"globalThis.__HOLTBURGER_3D_HARNESS__.requestOutdoorScene",
+		[options],
+	);
+}
+
+async function requestInteriorCell(client, options) {
+	return evaluate(
+		client,
+		"globalThis.__HOLTBURGER_3D_HARNESS__.requestInteriorCell",
 		[options],
 	);
 }
@@ -656,8 +717,25 @@ function parseHexLandblockId(value) {
 	return parsed >>> 0;
 }
 
+function createDungeonCellTarget(dungeonId, envCellId) {
+	const landblockId = parseDungeonLandblockId(dungeonId);
+	return {
+		envCellId:
+			envCellId === null || envCellId === undefined
+				? ((landblockId & 0xffff0000) | 0x0100) >>> 0
+				: parseHexLandblockId(envCellId),
+		landblockId,
+	};
+}
+
+function parseDungeonLandblockId(value) {
+	const parsed = parseHexLandblockId(value);
+	return parsed <= 0xffff ? ((parsed << 16) | 0xffff) >>> 0 : parsed;
+}
+
 function createHarnessScenarioStep({
 	diagnostics,
+	envCellId,
 	index,
 	landblockId,
 	lod,
@@ -677,6 +755,7 @@ function createHarnessScenarioStep({
 	);
 	return {
 		index,
+		envCellId: envCellId ?? null,
 		landblockId,
 		lod,
 		runtime: diagnostics.runtime,

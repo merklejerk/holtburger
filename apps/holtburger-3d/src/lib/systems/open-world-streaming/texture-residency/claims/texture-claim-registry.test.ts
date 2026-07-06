@@ -179,6 +179,27 @@ describe("OpenWorldTextureClaimRegistry", () => {
 		});
 	});
 
+	it("retires accepted noop page builds back to the pre-build state", () => {
+		const registry = new OpenWorldTextureClaimRegistry();
+		const bucketKey = createBucketKey("terrain-color");
+		const snapshot = registry.retainTextureBindings(
+			ownerId("owner:terrain"),
+			bucketKey,
+			[createBinding("terrain-color", bucketKey)],
+		);
+		const page = registry.createPage({
+			bucketKey,
+			entryIds: [snapshot.entries[0].id],
+		});
+		const token = registry.reservePageBuild(page.id);
+
+		expect(registry.acceptPageBuildNoop(page.id, token)).toBe("accepted");
+		expect(registry.createBucketSnapshot(bucketKey).pages[0]).toMatchObject({
+			reservationToken: null,
+			state: "planned",
+		});
+	});
+
 	it("groups pending binding requirements by replacement bucket", () => {
 		const terrainBucketKey = createBucketKey("terrain-color");
 		const objectBucketKey = createBucketKey("object-palette");

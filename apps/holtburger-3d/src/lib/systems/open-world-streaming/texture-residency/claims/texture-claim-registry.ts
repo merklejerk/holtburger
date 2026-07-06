@@ -100,6 +100,7 @@ interface MutableTexturePage {
 	lastActiveState: Exclude<OpenWorldTexturePageRecord["state"], "reclaimable">;
 	reservationToken: OpenWorldTexturePageReservationToken | null;
 	state: OpenWorldTexturePageRecord["state"];
+	stateBeforeBuild: OpenWorldActiveTexturePageState | null;
 }
 
 type OpenWorldActiveTexturePageState = Exclude<
@@ -210,6 +211,7 @@ export class OpenWorldTextureClaimRegistry {
 			lastActiveState: input.state ?? "planned",
 			reservationToken: null,
 			state: input.state ?? "planned",
+			stateBeforeBuild: null,
 		};
 		this.#nextPageNumber += 1;
 		this.#pagesById.set(page.id, page);
@@ -231,6 +233,7 @@ export class OpenWorldTextureClaimRegistry {
 		);
 		this.#nextReservationNumber += 1;
 		page.reservationToken = token;
+		page.stateBeforeBuild = page.state;
 		page.lastActiveState = "building";
 		page.state = "building";
 		return token;
@@ -245,8 +248,25 @@ export class OpenWorldTextureClaimRegistry {
 			return "stale";
 		}
 		page.reservationToken = null;
+		page.stateBeforeBuild = null;
 		page.lastActiveState = "resident";
 		page.state = "resident";
+		this.#refreshPageReclaimableState(page);
+		return "accepted";
+	}
+
+	acceptPageBuildNoop(
+		pageId: OpenWorldTexturePageId,
+		token: OpenWorldTexturePageReservationToken,
+	): "accepted" | "stale" {
+		const page = this.#requirePage(pageId);
+		if (page.reservationToken !== token) {
+			return "stale";
+		}
+		page.reservationToken = null;
+		page.state = page.stateBeforeBuild ?? "planned";
+		page.lastActiveState = page.state;
+		page.stateBeforeBuild = null;
 		this.#refreshPageReclaimableState(page);
 		return "accepted";
 	}

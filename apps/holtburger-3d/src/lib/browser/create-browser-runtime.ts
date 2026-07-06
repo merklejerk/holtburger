@@ -12,6 +12,12 @@ import {
 	createClientRuntime,
 	type ClientRuntime,
 } from "../runtime/client-runtime";
+import {
+	createOpenWorldStreamingClientRuntime,
+	DEFAULT_BROWSER_RUNTIME_PIPELINE,
+	type BrowserRuntimePipelineMode,
+} from "../systems/open-world-streaming";
+import type { OpenWorldStreamingBoundaryAdapters } from "../systems/open-world-streaming/adapters";
 import { CompositeStaticBakeResourceProvider } from "../static/bake/resources";
 import { StaticCoordinator } from "../static/coordinator/static-coordinator";
 import type {
@@ -43,10 +49,30 @@ const DEFAULT_DYNAMIC_VISUAL_RECIPE_RESOLVER_WORKER_COUNT = 1;
 const DEFAULT_DYNAMIC_VISUAL_BAKER_WORKER_COUNT = 1;
 const DEFAULT_TEXTURE_PACKING_WORKER_COUNT = 2;
 
-export function createBrowserRuntime(canvas: HTMLCanvasElement): ClientRuntime {
+export interface CreateBrowserRuntimeOptions {
+	readonly runtimePipeline?: BrowserRuntimePipelineMode;
+}
+
+export function createBrowserRuntime(
+	canvas: HTMLCanvasElement,
+	options: CreateBrowserRuntimeOptions = {},
+): ClientRuntime {
 	const renderer = createWebgl2Renderer(canvas);
 	const host = createBrowserRuntimeHost();
 	const assetService = new HostBackedAssetService({ host });
+	const runtimePipeline =
+		options.runtimePipeline ?? DEFAULT_BROWSER_RUNTIME_PIPELINE;
+
+	if (runtimePipeline === "open-world-streaming") {
+		return createOpenWorldStreamingClientRuntime({
+			adapters: createOpenWorldStreamingBoundaryAdapters({
+				assetService,
+				host,
+				renderer,
+			}),
+		});
+	}
+
 	const hostSnapshot = host.createSnapshot();
 	const dynamicVisualBaker = hostSnapshot.isAvailable
 		? createWorkerDynamicVisualBaker(DEFAULT_DYNAMIC_VISUAL_BAKER_WORKER_COUNT)
@@ -73,6 +99,42 @@ export function createBrowserRuntime(canvas: HTMLCanvasElement): ClientRuntime {
 		staticCoordinator,
 		texturePacker,
 	});
+}
+
+function createOpenWorldStreamingBoundaryAdapters(options: {
+	readonly assetService: PreparedAssetReader & HostBackedAssetService;
+	readonly host: ReturnType<typeof createBrowserRuntimeHost>;
+	readonly renderer: ReturnType<typeof createWebgl2Renderer>;
+}): OpenWorldStreamingBoundaryAdapters {
+	return {
+		assets: {
+			assetService: options.assetService,
+			host: options.host,
+		},
+		renderer: {
+			renderer: options.renderer,
+		},
+		workers: {
+			createDynamicVisualBaker: () =>
+				createWorkerDynamicVisualBaker(
+					DEFAULT_DYNAMIC_VISUAL_BAKER_WORKER_COUNT,
+				),
+			createDynamicVisualRecipeResolver: () =>
+				createWorkerDynamicVisualRecipeResolver(
+					options.assetService,
+					DEFAULT_DYNAMIC_VISUAL_RECIPE_RESOLVER_WORKER_COUNT,
+				),
+			createStaticBaker: () =>
+				createWorkerStaticBaker(DEFAULT_STATIC_BAKER_WORKER_COUNT),
+			createStaticSourceResolver: () =>
+				createWorkerStaticResolver(
+					options.assetService,
+					DEFAULT_STATIC_RESOLVER_WORKER_COUNT,
+				),
+			createTexturePacker: () =>
+				createWorkerTexturePacker(DEFAULT_TEXTURE_PACKING_WORKER_COUNT),
+		},
+	};
 }
 
 function createTauriStaticCoordinator(

@@ -314,19 +314,19 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Create `apps/holtburger-3d/src/lib/systems/open-world-streaming`.
-- [ ] Add public module surfaces for composition, scheduling, owners, texture residency, scene commits, diagnostics, and testing.
-- [ ] Add legacy asset, worker, and renderer adapter placeholders with typed contracts.
-- [ ] Add replacement-native diagnostics and atlas-inspection contracts.
-- [ ] Add direct replacement contracts for composition, commits, readiness, diagnostics, and atlas inspection before adding compatibility projections.
-- [ ] Add only the minimal harness comparison summary needed for benchmark parity, using replacement-native metrics as the source of truth.
-- [ ] Add any temporary legacy-shaped diagnostic projection outside replacement internals, only if a current consumer blocks migration.
-- [ ] Add `BrowserRuntimePipelineMode = "legacy" | "open-world-streaming"`.
-- [ ] Add `createBrowserRuntime(canvas, { runtimePipeline })`.
-- [ ] Add harness CLI parsing for `--runtime-pipeline`.
-- [ ] Pass the selected pipeline through the `/harness/browser-pipeline` query string.
-- [ ] Keep `BrowserDisplay.svelte` on the default legacy path.
-- [ ] Add focused compile tests for composition wiring.
+- [x] Create `apps/holtburger-3d/src/lib/systems/open-world-streaming`.
+- [x] Add public module surfaces for realized composition, adapter, diagnostics, scene commit, texture commit/readiness, and testing support contracts.
+- [x] Add legacy asset, worker, and renderer adapter placeholders with typed contracts.
+- [x] Add replacement-native diagnostics and atlas-inspection contracts.
+- [x] Add direct replacement contracts for composition, commits, readiness, diagnostics, and atlas inspection before adding compatibility projections.
+- [x] Add only the minimal harness comparison summary needed for benchmark parity, using replacement-native metrics as the source of truth.
+- [x] Add any temporary legacy-shaped diagnostic projection outside replacement internals, only if a current consumer blocks migration.
+- [x] Add `BrowserRuntimePipelineMode = "legacy" | "open-world-streaming"`.
+- [x] Add `createBrowserRuntime(canvas, { runtimePipeline })`.
+- [x] Add harness CLI parsing for `--runtime-pipeline`.
+- [x] Pass the selected pipeline through the `/harness/browser-pipeline` query string.
+- [x] Keep `BrowserDisplay.svelte` on the default legacy path.
+- [x] Add focused compile tests for composition wiring.
 
 Decisions and course corrections:
 
@@ -335,6 +335,13 @@ Decisions and course corrections:
 - Keep existing worker entrypoints in place and consume them through adapters.
 - Reuse static resolver and baker transforms directly through adapters; do not wrap `StaticCoordinator` as the replacement orchestrator.
 - Keep replacement diagnostics native to replacement concepts; put temporary compatibility summaries outside the replacement internals.
+- Phase 1 completed on 2026-07-06.
+- Added `--scenario instantiate-only` so the harness can smoke-test replacement composition without pretending the replacement can settle static scene readiness before terrain exists.
+- Added a `ClientRuntime`-shaped outer adapter for browser/harness compatibility. This is a deletion-targeted shim pressure point for Phase 14, not a replacement-internal contract.
+- Boundary audit after Phase 1 found no `StaticCoordinator`, `StaticSourceReadyWork`, `StaticCoordinatorCommitDelta`, or `TextureManager` imports in the new tree. The only `staticCommitInstall` reference is the legacy-shaped field required by the outer `ClientRuntime` shim.
+- Did not keep empty per-domain barrel files for future folders. `knip` correctly flagged those as unused files, so future phases should create domain modules when they add real behavior. The architecture README keeps the target tree policy in view.
+- The replacement runtime currently returns legacy-shaped `RuntimeDiagnosticsReport` only at the outer `ClientRuntime` boundary. Native diagnostics remain in `open-world-streaming/diagnostics/contracts.ts`.
+- Verification: `npm run check`, `npm run lint:ts`, `npm run lint:dead`, focused `npm run test:ts -- src/lib/systems/open-world-streaming/composition/runtime-pipeline.test.ts src/lib/browser/create-browser-runtime.test.ts`, and `npm run harness:browser -- --scenario instantiate-only --runtime-pipeline open-world-streaming --timeout-ms 30000`.
 
 ### Phase 2: Resteering Checkpoint 1 - Composition Boundary Review
 

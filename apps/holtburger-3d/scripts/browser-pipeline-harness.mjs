@@ -36,6 +36,7 @@ try {
 		headed: options.headed,
 		landblockIds: options.landblockIds,
 		lod: options.lod,
+		runtimePipeline: options.runtimePipeline,
 		scenario: options.scenario,
 		settleDelayMs: options.settleDelayMs,
 		sequenceRepeatCount: options.sequenceRepeatCount,
@@ -71,6 +72,7 @@ function parseArgs(args) {
 		landblockIds: [DEFAULT_LANDBLOCK_ID],
 		lod: null,
 		outputPath: null,
+		runtimePipeline: "legacy",
 		scenario: "landblock-sequence",
 		sequenceRepeatCount: 1,
 		settleDelayMs: 0,
@@ -122,6 +124,11 @@ function parseArgs(args) {
 				) {
 					throw new Error("--repeat must be a positive integer.");
 				}
+				break;
+			case "--runtime-pipeline":
+				parsed.runtimePipeline = parseRuntimePipeline(
+					requireValue(args, ++index, arg),
+				);
 				break;
 			case "--scenario":
 				parsed.scenario = parseScenario(requireValue(args, ++index, arg));
@@ -180,7 +187,8 @@ Options:
   --domains <csv>          Static domains to request. Default: ${DEFAULT_STATIC_DOMAINS.join(",")}
   --layer-distance <n>     Use one radius for every outdoor static layer.
   --repeat <count>         Repeat the landblock sequence. Default: 1
-  --scenario <name>        Scenario: landblock-sequence, explicit-object-radius-expansion, dungeon-cell.
+  --runtime-pipeline <name> Runtime pipeline: legacy, open-world-streaming. Default: legacy
+  --scenario <name>        Scenario: instantiate-only, landblock-sequence, explicit-object-radius-expansion, dungeon-cell.
   --settle-delay-ms <ms>   Delay after each settled scene before continuing. Default: 0
   --target-object <id>     Static object id for explicit-object-radius-expansion diagnostics.
   --headed                 Launch visible Chrome instead of headless Chrome.
@@ -236,15 +244,23 @@ function parseUniformLayerDistance(value) {
 
 function parseScenario(value) {
 	if (
+		value !== "instantiate-only" &&
 		value !== "landblock-sequence" &&
 		value !== "explicit-object-radius-expansion" &&
 		value !== "dungeon-cell"
 	) {
 		throw new Error(
-			"--scenario must be landblock-sequence, explicit-object-radius-expansion, or dungeon-cell.",
+			"--scenario must be instantiate-only, landblock-sequence, explicit-object-radius-expansion, or dungeon-cell.",
 		);
 	}
 	return value;
+}
+
+function parseRuntimePipeline(value) {
+	if (value === "legacy" || value === "open-world-streaming") {
+		return value;
+	}
+	throw new Error("--runtime-pipeline must be legacy or open-world-streaming.");
 }
 
 async function writeDiagnosticsOutput(diagnostics, outputPath, errorMessage) {
@@ -285,6 +301,7 @@ function createDiagnosticsSummary(diagnostics, outputPath, errorMessage) {
 		harnessFrameDiagnostics: diagnostics.harnessFrameDiagnostics ?? null,
 		outputPath,
 		runtime: diagnostics.runtime,
+		runtimePipeline: diagnostics.runtimePipeline ?? null,
 		staticCommitInstall: staticCommitInstall?.summary ?? null,
 		staticCoordinator: staticCoordinator?.summary ?? null,
 		staticCoordinatorTiming: staticCoordinator?.timingSummary ?? null,
@@ -416,6 +433,7 @@ async function runBrowserHarness({
 	headed,
 	landblockIds,
 	lod,
+	runtimePipeline,
 	scenario,
 	settleDelayMs,
 	sequenceRepeatCount,
@@ -425,7 +443,7 @@ async function runBrowserHarness({
 }) {
 	const userDataDir = await mkdtemp(join(tmpdir(), "holtburger-3d-browser-"));
 	tempDirs.push(userDataDir);
-	const pageUrl = `${viteUrl}/harness/browser-pipeline?assetHost=${encodeURIComponent(assetHostUrl)}`;
+	const pageUrl = `${viteUrl}/harness/browser-pipeline?assetHost=${encodeURIComponent(assetHostUrl)}&runtime-pipeline=${encodeURIComponent(runtimePipeline)}`;
 	const child = spawn(
 		chromePath,
 		[
@@ -456,7 +474,13 @@ async function runBrowserHarness({
 		const traceCollector = collectPipelineTrace(client, timeoutMs);
 		const scenarioSteps = [];
 		try {
-			if (scenario === "explicit-object-radius-expansion") {
+			if (scenario === "instantiate-only") {
+				scenarioSteps.push(
+					await runInstantiateOnlyScenario({
+						client,
+					}),
+				);
+			} else if (scenario === "explicit-object-radius-expansion") {
 				scenarioSteps.push(
 					...(await runExplicitObjectRadiusExpansionScenario({
 						client,
@@ -502,6 +526,7 @@ async function runBrowserHarness({
 			kind: "browser-pipeline-harness-scenario",
 			landblockIds,
 			repeat: sequenceRepeatCount,
+			runtimePipeline,
 			scenario,
 			settleDelayMs,
 			steps: scenarioSteps,
@@ -521,6 +546,25 @@ function createLandblockSequence(landblockIds, repeatCount) {
 		sequence.push(...landblockIds);
 	}
 	return sequence;
+}
+
+async function runInstantiateOnlyScenario({ client }) {
+	const overview = await evaluate(
+		client,
+		"globalThis.__HOLTBURGER_3D_HARNESS__.createOverviewSnapshot",
+		[],
+	);
+	const diagnostics = await evaluate(
+		client,
+		"globalThis.__HOLTBURGER_3D_HARNESS__.createDiagnosticsReport",
+		[],
+	);
+	return {
+		diagnosticsStatus: diagnostics.runtime?.status ?? null,
+		kind: "instantiate-only",
+		runtimePipeline: diagnostics.runtimePipeline ?? null,
+		status: overview.status,
+	};
 }
 
 async function runLandblockSequenceScenario({

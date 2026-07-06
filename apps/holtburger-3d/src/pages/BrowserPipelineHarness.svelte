@@ -2,6 +2,10 @@
 	import { onMount } from "svelte";
 	import { createBrowserRuntime } from "../lib/browser/create-browser-runtime";
 	import {
+		parseBrowserRuntimePipelineMode,
+		type BrowserRuntimePipelineMode,
+	} from "../lib/systems/open-world-streaming";
+	import {
 		DEFAULT_BUILDING_LOD_RADIUS,
 		DEFAULT_ENV_CELL_LOD_RADIUS,
 		DEFAULT_EXPLICIT_OBJECT_LOD_RADIUS,
@@ -80,6 +84,8 @@
 	type BrowserPipelineHarnessDiagnosticsReport = RuntimeDiagnosticsReport & {
 		/** Harness-only page-thread frame and long-task measurements. */
 		readonly harnessFrameDiagnostics: HarnessFrameDiagnostics;
+		/** Runtime pipeline selected by the harness URL. */
+		readonly runtimePipeline: BrowserRuntimePipelineMode;
 	};
 
 	type HarnessFrameDiagnostics = {
@@ -139,6 +145,7 @@
 	let unsubscribeRuntimeFrameTelemetry: (() => void) | null = null;
 	let longTaskObserver: PerformanceObserver | null = null;
 	let statusText = $state("starting");
+	let runtimePipeline: BrowserRuntimePipelineMode = "legacy";
 	const frameDiagnostics = createMutableHarnessFrameDiagnostics();
 
 	onMount(() => {
@@ -148,7 +155,10 @@
 		}
 
 		try {
-			runtime = createBrowserRuntime(canvasElement);
+			runtimePipeline = parseBrowserRuntimePipelineMode(
+				new URLSearchParams(window.location.search).get("runtime-pipeline"),
+			);
+			runtime = createBrowserRuntime(canvasElement, { runtimePipeline });
 			runtime.updateCameraState(
 				createFreeCameraFrameStateCamera(createFreeCameraState()),
 			);
@@ -395,6 +405,7 @@
 		return {
 			...requireRuntime().createDiagnosticsReport(),
 			harnessFrameDiagnostics: createHarnessFrameDiagnosticsSnapshot(),
+			runtimePipeline,
 		};
 	}
 

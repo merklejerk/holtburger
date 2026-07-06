@@ -566,20 +566,29 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Define page build input/output protocol.
-- [ ] Classify reusable `texture-packing.worker.ts` responsibilities versus new page-build responsibilities.
-- [ ] Keep page build reservation tokens in replacement page-build state, not in the worker adapter.
-- [ ] Consume claim-registry page reservation tokens instead of minting worker-owned lifecycle tokens.
-- [ ] Implement worker client and handler.
-- [ ] Add token validation.
-- [ ] Add texture commit DTO and applier.
-- [ ] Add stale/noop/failure tests.
-- [ ] Add diagnostics for page build queue and commit timings.
+- [x] Define page build input/output protocol.
+- [x] Classify reusable `texture-packing.worker.ts` responsibilities versus new page-build responsibilities.
+- [x] Keep page build reservation tokens in replacement page-build state, not in the worker adapter.
+- [x] Consume claim-registry page reservation tokens instead of minting worker-owned lifecycle tokens.
+- [x] Implement worker client and handler.
+- [x] Add token validation.
+- [x] Add texture commit DTO and applier.
+- [x] Add stale/noop/failure tests.
+- [x] Add diagnostics for page build queue and commit timings.
 
 Decisions and course corrections:
 
 - Phase 5 dry-run: `texture-packing.worker.ts` can produce packed pages and pixels, but replacement-owned reservation/noop/stale-result policy must wrap it.
 - Phase 6 steering: page-build protocol should accept explicit page ids and reservation tokens from replacement state, and should return enough data to update or noop those reservations without becoming the source of lifecycle truth.
+- Phase 7 completed on 2026-07-06.
+- Added a replacement-native page-build protocol under `texture-residency/page-build`. The worker protocol carries page ids and reservation tokens minted by the claim registry and intentionally does not expose legacy `placementRevision`.
+- Added `WorkerPoolOpenWorldTexturePageBuilder` and `installOpenWorldTexturePageBuildWorkerHandler` around the standard worker pool/handler infrastructure. The existing `texture-packing.worker.ts` remains a reusable adapter candidate, not the replacement lifecycle contract.
+- Extended the claim registry with accepted noop settlement so page-build results can retire reservations without pretending a texture upload occurred.
+- Added token-validating page-build settlement. Stale results produce no commits; accepted page updates emit texture commits; accepted noops clear reservations without renderer mutation.
+- Added a texture commit applier adapter that maps replacement commits to current renderer `TexturePlacementUpdate` calls.
+- Spicy bit: current renderer texture upload DTO still requires an upload `bindingId` even though page upload is not conceptually owned by one binding. The replacement commit marks this as `uploadBindingId` and confines the wart to the renderer adapter boundary.
+- Concession: Phase 7 defines diagnostics-relevant worker queue timing via the standard worker pool descriptions and tests the protocol/settlement path, but it does not yet surface those metrics in browser UI diagnostics. Phase 9 should review whether replacement-native diagnostics are enough before adding UI projections.
+- Verification: `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run format:check`, and focused `npm run test:ts -- src/lib/systems/open-world-streaming/texture-residency/claims/texture-claim-registry.test.ts src/lib/systems/open-world-streaming/texture-residency/page-build/page-build.test.ts src/lib/systems/open-world-streaming/texture-residency/commits/texture-commit-applier.test.ts`.
 
 ### Phase 8: Static Terrain Vertical Slice
 
@@ -604,6 +613,7 @@ Task checklist:
 - [ ] Retain terrain texture bindings.
 - [ ] Produce terrain bake inputs from bake-facing placement facts.
 - [ ] Introduce a minimal artifact runner before terrain harness settlement, so terrain does not re-create `StaticCoordinator` continuations.
+- [ ] Adapt page-build settlement and texture commit applier through terrain artifact flow without importing renderer update DTOs into terrain domain code.
 - [ ] Emit terrain layer commits.
 - [ ] Apply terrain commits to renderer and scene query.
 - [ ] Run terrain-only harness.
@@ -611,6 +621,7 @@ Task checklist:
 Decisions and course corrections:
 
 - Phase 5 dry-run: terrain vertical slice should adapt existing resolver/baker transforms, but must not wrap `StaticCoordinator` or depend on same-commit texture residency.
+- Phase 7 steering: terrain should consume page-build and texture-commit services through artifact-runner ports. Terrain source/bake code should not know about renderer `TexturePlacementUpdate` or the temporary `uploadBindingId` adapter wart.
 
 ### Phase 9: Resteering Checkpoint 3 - Terrain Vertical Slice Review
 

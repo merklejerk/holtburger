@@ -47,35 +47,6 @@ export function createEmptyLegacyStaticDiagnosticsSnapshot(): RuntimeDiagnostics
 	};
 }
 
-export function createEmptyLegacyStaticSceneQueryOverviewSnapshot(): RuntimeOverviewSnapshot["staticSceneQuery"] {
-	return {
-		envCellLandblockCount: 0,
-		envCellRecordCount: 0,
-		outdoorRecordCount: 0,
-	};
-}
-
-export function createEmptyLegacyStaticSceneQueryDiagnosticsSnapshot(): RuntimeDiagnosticsSnapshot["staticSceneQuery"] {
-	return {
-		committedEnvCellLandblockCount: 0,
-		committedEnvCellPortalGraphRecordCount: 0,
-		committedEnvCellPortalInteriorRecordCount: 0,
-		committedEnvCellSourceMappingRecordCount: 0,
-		committedEnvCellSpatialRecordCount: 0,
-		committedEnvCellVisibilityRecordCount: 0,
-		envCellLandblockCount: 0,
-		envCellRecordCount: 0,
-		envCellResidencyBspAcceptedCandidateCount: 0,
-		envCellResidencyBspFallbackCount: 0,
-		envCellResidencyBspTestedCandidateCount: 0,
-		envCellResidencyCoarseCandidateCount: 0,
-		landblockBucketCount: 0,
-		outdoorRecordCount: 0,
-		terrainLandblockCount: 0,
-		terrainRecordCount: 0,
-	};
-}
-
 function createEmptyLegacyStaticBakerDiagnosticsSnapshot(): RuntimeDiagnosticsSnapshot["static"]["staticBakerDiagnostics"] {
 	return {
 		kind: "static-baker",

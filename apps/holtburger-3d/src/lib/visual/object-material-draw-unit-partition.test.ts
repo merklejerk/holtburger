@@ -130,6 +130,44 @@ describe("object-material draw-unit partition contracts", () => {
 			"Object-like material texture placement base-a has incompatible purpose object-detail; expected object-base-color.",
 		);
 	});
+
+	it("groups pending object-material placements without requiring texture refs", () => {
+		const key = createObjectMaterialDrawUnitPartitionKey({
+			includeConcreteEntryInKey: false,
+			material: createMaterialInput(),
+			texturePlacementReadinessByItemId: new Map([
+				["base-a", { kind: "pending" }],
+			]),
+			texturePlacementSnapshot: {
+				itemIdsByBindingId: new Map(),
+				placementsByBindingId: new Map(),
+				placementsByItemId: new Map(),
+			},
+			textureRequirements: [createRequirement("base-a", "object-base-color")],
+		});
+
+		expect(key.textureBindingTuple.key).toBe("object-base-color:pending");
+	});
+
+	it("rejects failed object-material placement readiness loudly", () => {
+		expect(() =>
+			createObjectMaterialDrawUnitPartitionKey({
+				includeConcreteEntryInKey: false,
+				material: createMaterialInput(),
+				texturePlacementReadinessByItemId: new Map([
+					["base-a", { kind: "failed", reason: "fixture failure" }],
+				]),
+				texturePlacementSnapshot: {
+					itemIdsByBindingId: new Map(),
+					placementsByBindingId: new Map(),
+					placementsByItemId: new Map(),
+				},
+				textureRequirements: [createRequirement("base-a", "object-base-color")],
+			}),
+		).toThrow(
+			"Object-like material texture placement base-a failed: fixture failure.",
+		);
+	});
 });
 
 function createRequirement(

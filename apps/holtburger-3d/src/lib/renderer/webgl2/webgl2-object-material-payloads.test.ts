@@ -40,11 +40,13 @@ describe("WebGL2 static object payload builder", () => {
 			materialFamily: "flat-color",
 		});
 
-		prepareObjectMaterialDrawPayload(
-			scratch,
-			resource,
-			createTextureBindingLookup(),
-		);
+		expect(
+			prepareObjectMaterialDrawPayload(
+				scratch,
+				resource,
+				createTextureBindingLookup(),
+			),
+		).toBe(true);
 
 		expect(
 			Array.from(scratch.materialUniforms.baseColorRects.slice(4, 8)),
@@ -120,11 +122,13 @@ describe("WebGL2 static object payload builder", () => {
 			["detail-ref", detailTexture],
 		]);
 
-		prepareObjectMaterialDrawPayload(
-			scratch,
-			resource,
-			createTextureBindingLookup(placements, textures),
-		);
+		expect(
+			prepareObjectMaterialDrawPayload(
+				scratch,
+				resource,
+				createTextureBindingLookup(placements, textures),
+			),
+		).toBe(true);
 
 		expect(scratch.materialUniforms.indexedTextureFormats[2]).toBe(1);
 		expect(
@@ -188,30 +192,34 @@ describe("WebGL2 static object payload builder", () => {
 			materialFamily: "flat-color",
 		});
 
-		prepareObjectMaterialDrawPayload(
-			scratch,
-			residentResource,
-			createTextureBindingLookup(
-				new Map([
-					[
-						"base-use",
-						createPlacement({
-							height: 8,
-							rect: [4, 5, 6, 7],
-							textureRefId: "base-ref",
-							textureBindingId: "base-use",
-							width: 8,
-						}),
-					],
-				]),
-				new Map([["base-ref", texture]]),
+		expect(
+			prepareObjectMaterialDrawPayload(
+				scratch,
+				residentResource,
+				createTextureBindingLookup(
+					new Map([
+						[
+							"base-use",
+							createPlacement({
+								height: 8,
+								rect: [4, 5, 6, 7],
+								textureRefId: "base-ref",
+								textureBindingId: "base-use",
+								width: 8,
+							}),
+						],
+					]),
+					new Map([["base-ref", texture]]),
+				),
 			),
-		);
-		prepareObjectMaterialDrawPayload(
-			scratch,
-			fallbackResource,
-			createTextureBindingLookup(),
-		);
+		).toBe(true);
+		expect(
+			prepareObjectMaterialDrawPayload(
+				scratch,
+				fallbackResource,
+				createTextureBindingLookup(),
+			),
+		).toBe(true);
 
 		expect(
 			Array.from(scratch.materialUniforms.baseColorRects.slice(0, 4)),
@@ -264,20 +272,43 @@ describe("WebGL2 static object payload builder", () => {
 		]);
 		const textures = new Map<string, WebGLTexture>([["base-ref", texture]]);
 
-		prepareObjectMaterialDrawPayload(
-			scratch,
-			resource,
-			createTextureBindingLookup(placements, textures),
-		);
+		expect(
+			prepareObjectMaterialDrawPayload(
+				scratch,
+				resource,
+				createTextureBindingLookup(placements, textures),
+			),
+		).toBe(true);
 		expect(scratch.textures.baseColor?.texture).toBe(texture);
 
 		textures.delete("base-ref");
+
+		expect(
+			prepareObjectMaterialDrawPayload(
+				scratch,
+				resource,
+				createTextureBindingLookup(placements, textures),
+			),
+		).toBe(false);
+	});
+
+	it("throws for failed required texture bindings", () => {
+		const scratch = createObjectMaterialPreparedDrawPayload();
+		const resource = createStaticResource({
+			materialEntries: [
+				createMaterialEntry({
+					primaryTextureBindingId: "base-use",
+					slot: 0,
+				}),
+			],
+			materialFamily: "texture-rgba",
+		});
 
 		expect(() =>
 			prepareObjectMaterialDrawPayload(
 				scratch,
 				resource,
-				createTextureBindingLookup(placements, textures),
+				createTextureBindingLookup(new Map(), new Map(), new Set(["base-use"])),
 			),
 		).toThrow(
 			"Object material resource test-draw-unit is missing resident base-color texture binding.",
@@ -322,6 +353,7 @@ function createMaterialEntry(
 function createTextureBindingLookup(
 	placements: ReadonlyMap<string, ResolvedTexturePlacement> = new Map(),
 	textures: ReadonlyMap<string, WebGLTexture> = new Map(),
+	failedBindingIds: ReadonlySet<string> = new Set(),
 ): ObjectMaterialTextureBindingLookup {
 	return {
 		getResident(bindingId: TextureBindingId) {
@@ -337,6 +369,9 @@ function createTextureBindingLookup(
 			};
 		},
 		getState(bindingId: TextureBindingId) {
+			if (failedBindingIds.has(bindingId)) {
+				return { bindingId, kind: "failed", reason: "fixture failure" };
+			}
 			const placement = placements.get(bindingId);
 			const texture = placement ? textures.get(placement.textureRefId) : null;
 			if (!placement || !texture) {

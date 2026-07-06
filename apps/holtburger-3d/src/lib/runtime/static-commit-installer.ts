@@ -1,7 +1,4 @@
-import type {
-	ResolvedTexturePlacement,
-	TexturePlacementUpdate,
-} from "../renderer/types";
+import type { TexturePlacementUpdate } from "../renderer/types";
 import type {
 	StaticCoordinatorCommitDelta,
 	StaticDrawUnit,
@@ -20,8 +17,24 @@ import type {
 
 export interface StaticCommitInstallInput {
 	readonly commit: StaticCoordinatorCommitDelta;
+	readonly textureReadiness?: readonly StaticCommitTextureBindingReadiness[];
 	readonly textureUpdate: TexturePlacementUpdate | null;
 }
+
+type StaticCommitTextureBindingReadiness =
+	| {
+			readonly bindingId: string;
+			readonly kind: "resident";
+	  }
+	| {
+			readonly bindingId: string;
+			readonly kind: "pending";
+	  }
+	| {
+			readonly bindingId: string;
+			readonly kind: "failed";
+			readonly reason: string;
+	  };
 
 export interface StaticCommitInstallResult {
 	readonly installedDrawUnits: readonly StaticDrawUnit[];
@@ -40,13 +53,13 @@ export function installStaticCommit(
 	input: StaticCommitInstallInput,
 ): StaticCommitInstallResult {
 	const objectVisualInstallSet = input.commit.objectVisualInstallSet;
-	assertTexturedDrawUnitsHaveResolvedPlacements(
+	assertTexturedDrawUnitsHaveTextureReadiness(
 		input.commit.addedDrawUnits,
-		input.textureUpdate?.resolvedTexturePlacements ?? [],
+		createStaticCommitTextureReadiness(input),
 	);
-	assertTexturedObjectVisualResourcesHaveResolvedPlacements(
+	assertTexturedObjectVisualResourcesHaveTextureReadiness(
 		objectVisualInstallSet.visualResources,
-		input.textureUpdate?.resolvedTexturePlacements ?? [],
+		createStaticCommitTextureReadiness(input),
 	);
 
 	return {
@@ -63,14 +76,35 @@ export function installStaticCommit(
 	};
 }
 
-function assertTexturedDrawUnitsHaveResolvedPlacements(
-	drawUnits: readonly StaticDrawUnit[],
-	placements: readonly ResolvedTexturePlacement[],
-): void {
-	const committedTextureBindingIds = new Set(
-		placements.map((placement) => placement.bindingId),
+function createStaticCommitTextureReadiness(
+	input: StaticCommitInstallInput,
+): ReadonlyMap<string, StaticCommitTextureBindingReadiness> {
+	if (input.textureReadiness) {
+		return new Map(
+			input.textureReadiness.map((readiness) => [
+				readiness.bindingId,
+				readiness,
+			]),
+		);
+	}
+	return new Map(
+		(input.textureUpdate?.resolvedTexturePlacements ?? []).map((placement) => [
+			placement.bindingId,
+			{
+				bindingId: placement.bindingId,
+				kind: "resident" as const,
+			},
+		]),
 	);
+}
 
+function assertTexturedDrawUnitsHaveTextureReadiness(
+	drawUnits: readonly StaticDrawUnit[],
+	readinessByBindingId: ReadonlyMap<
+		string,
+		StaticCommitTextureBindingReadiness
+	>,
+): void {
 	for (const drawUnit of drawUnits) {
 		const expectedTextureBindingIds = drawUnit.textureBindingIds;
 		if (expectedTextureBindingIds.length === 0) {
@@ -78,35 +112,70 @@ function assertTexturedDrawUnitsHaveResolvedPlacements(
 		}
 
 		const missingTextureBindingIds = expectedTextureBindingIds.filter(
-			(textureBindingId) => !committedTextureBindingIds.has(textureBindingId),
+			(textureBindingId) => !readinessByBindingId.has(textureBindingId),
 		);
 		if (missingTextureBindingIds.length > 0) {
 			throw new Error(
 				`Static draw unit ${drawUnit.drawUnitId} is missing resolved texture placements for ${missingTextureBindingIds.join(", ")}.`,
 			);
 		}
+		assertNoFailedTextureReadiness(
+			`Static draw unit ${drawUnit.drawUnitId}`,
+			expectedTextureBindingIds,
+			readinessByBindingId,
+		);
 	}
 }
 
-function assertTexturedObjectVisualResourcesHaveResolvedPlacements(
+function assertTexturedObjectVisualResourcesHaveTextureReadiness(
 	resources: readonly ObjectVisualResource[],
-	placements: readonly ResolvedTexturePlacement[],
+	readinessByBindingId: ReadonlyMap<
+		string,
+		StaticCommitTextureBindingReadiness
+	>,
 ): void {
-	const committedTextureBindingIds = new Set(
-		placements.map((placement) => placement.bindingId),
-	);
-
 	for (const resource of resources) {
 		if (resource.textureBindingIds.length === 0) {
 			continue;
 		}
 		const missingTextureBindingIds = resource.textureBindingIds.filter(
-			(textureBindingId) => !committedTextureBindingIds.has(textureBindingId),
+			(textureBindingId) => !readinessByBindingId.has(textureBindingId),
 		);
 		if (missingTextureBindingIds.length > 0) {
 			throw new Error(
 				`Static object visual resource ${resource.resourceId} is missing resolved texture placements for ${missingTextureBindingIds.join(", ")}.`,
 			);
 		}
+		assertNoFailedTextureReadiness(
+			`Static object visual resource ${resource.resourceId}`,
+			resource.textureBindingIds,
+			readinessByBindingId,
+		);
 	}
+}
+
+function assertNoFailedTextureReadiness(
+	subject: string,
+	textureBindingIds: readonly string[],
+	readinessByBindingId: ReadonlyMap<
+		string,
+		StaticCommitTextureBindingReadiness
+	>,
+): void {
+	const failed = textureBindingIds
+		.map((bindingId) => readinessByBindingId.get(bindingId))
+		.filter(
+			(
+				readiness,
+			): readiness is Extract<
+				StaticCommitTextureBindingReadiness,
+				{ readonly kind: "failed" }
+			> => readiness?.kind === "failed",
+		);
+	if (failed.length === 0) {
+		return;
+	}
+	throw new Error(
+		`${subject} has failed texture bindings: ${failed.map((readiness) => `${readiness.bindingId} (${readiness.reason})`).join(", ")}.`,
+	);
 }

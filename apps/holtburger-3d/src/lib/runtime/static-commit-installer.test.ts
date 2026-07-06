@@ -60,6 +60,51 @@ describe("static commit installer", () => {
 		);
 	});
 
+	it("accepts textured draw units with pending texture readiness", () => {
+		const textureBindingId = createFixtureBindingId(
+			"terrain-textured:prepared-texture:06000010",
+		);
+		const drawUnit = createTerrainDrawUnit("terrain-textured", {
+			textureBindingIds: [textureBindingId],
+		});
+
+		const installed = installStaticCommit({
+			commit: createCommitDelta({
+				addedDrawUnits: [drawUnit],
+			}),
+			textureReadiness: [{ bindingId: textureBindingId, kind: "pending" }],
+			textureUpdate: null,
+		});
+
+		expect(installed.installedDrawUnits).toEqual([drawUnit]);
+		expect(installed.textureUpdate).toBeNull();
+	});
+
+	it("rejects textured draw units with failed texture readiness", () => {
+		const textureBindingId = createFixtureBindingId(
+			"terrain-textured:prepared-texture:06000010",
+		);
+		const drawUnit = createTerrainDrawUnit("terrain-textured", {
+			textureBindingIds: [textureBindingId],
+		});
+
+		expect(() =>
+			installStaticCommit({
+				commit: createCommitDelta({
+					addedDrawUnits: [drawUnit],
+				}),
+				textureReadiness: [
+					{
+						bindingId: textureBindingId,
+						kind: "failed",
+						reason: "fixture failure",
+					},
+				],
+				textureUpdate: null,
+			}),
+		).toThrow(/terrain-textured has failed texture bindings: binding\|/);
+	});
+
 	it("rejects textured structured-interior draw units without resolved texture placements", () => {
 		const drawUnit = createStructuredInteriorDrawUnit("structured-interior-a");
 
@@ -188,6 +233,30 @@ describe("static commit installer", () => {
 		).toThrow(
 			/visual-static-object-a is missing resolved texture placements for binding\|/,
 		);
+	});
+
+	it("accepts textured static object visual resources with pending texture readiness", () => {
+		const drawUnit = createStaticObjectDrawUnit("static-object-a");
+		const visualResource = createObjectVisualResource(
+			"visual-static-object-a",
+			drawUnit,
+		);
+
+		const installed = installStaticCommit({
+			commit: createCommitDelta({
+				addedDrawUnits: [],
+				objectVisualResources: [visualResource],
+			}),
+			textureReadiness: visualResource.textureBindingIds.map((bindingId) => ({
+				bindingId,
+				kind: "pending" as const,
+			})),
+			textureUpdate: null,
+		});
+
+		expect(installed.objectVisualInstallSet.visualResources).toEqual([
+			visualResource,
+		]);
 	});
 
 	it("preserves removed resources without expanding old fine draw-unit ids", () => {

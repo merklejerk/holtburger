@@ -36,10 +36,12 @@ import {
 	createEmptyLegacyDynamicRuntimeSnapshot,
 	createEmptyLegacyStaticDiagnosticsSnapshot,
 	createEmptyLegacyStaticOverviewSnapshot,
-	createEmptyLegacyStaticSceneQueryDiagnosticsSnapshot,
-	createEmptyLegacyStaticSceneQueryOverviewSnapshot,
 } from "../testing/empty-runtime-snapshots";
 import { OpenWorldStreamingController } from "./open-world-streaming-controller";
+import type {
+	OpenWorldStreamingControllerSnapshot,
+	OpenWorldStreamingTerrainInterest,
+} from "./open-world-streaming-controller";
 
 export interface OpenWorldStreamingClientRuntimeOptions {
 	readonly adapters: OpenWorldStreamingBoundaryAdapters;
@@ -72,7 +74,7 @@ export function createOpenWorldStreamingClientRuntime(
 
 class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 	readonly #assetService: AssetService;
-	readonly #controller = new OpenWorldStreamingController();
+	readonly #controller: OpenWorldStreamingController;
 	readonly #eventListeners = new Set<RuntimeEventListener>();
 	readonly #host: RuntimeHost;
 	readonly #renderer: Renderer;
@@ -91,6 +93,12 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 		this.#assetService = adapters.assets.assetService;
 		this.#host = adapters.assets.host;
 		this.#renderer = adapters.renderer.renderer;
+		this.#controller = new OpenWorldStreamingController({
+			assetReader: adapters.assets.assetService,
+			createStaticBaker: adapters.workers.createStaticBaker,
+			createStaticResolver: adapters.workers.createStaticSourceResolver,
+			renderer: this.#renderer,
+		});
 		this.#unsubscribeRendererTelemetry = this.#renderer.subscribeTelemetry(
 			(telemetry) => {
 				for (const listener of this.#frameTelemetryListeners) {
@@ -124,7 +132,12 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 		this.#assertUsable();
 		this.#sceneInterest = interest;
 		this.#sceneInterestRevision += 1;
-		this.#controller.updateSceneInterest(interest.kind !== "none");
+		this.#controller.updateTerrainInterest(
+			createTerrainInterestFromRuntimeSceneInterest(
+				interest,
+				this.#sceneInterestRevision,
+			),
+		);
 		this.#emitEvent({
 			interest,
 			kind: "scene-interest-updated",
@@ -148,9 +161,11 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 		return null;
 	}
 
-	queryTerrainLandblockBounds(): StaticSceneTerrainLandblockBounds | null {
+	queryTerrainLandblockBounds(options: {
+		readonly landblockId: number;
+	}): StaticSceneTerrainLandblockBounds | null {
 		this.#assertUsable();
-		return null;
+		return this.#controller.queryTerrainLandblockBounds(options);
 	}
 
 	queryEnvCellResourceMembership(): EnvCellResourceMembership | null {
@@ -248,7 +263,8 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 
 	createOverviewSnapshot(): RuntimeOverviewSnapshot {
 		const rendererResources = this.#renderer.createResourceSnapshot();
-		const staticOverview = createEmptyLegacyStaticOverviewSnapshot();
+		const controller = this.#controller.createSnapshot();
+		const staticOverview = createLegacyStaticOverviewFromController(controller);
 		return {
 			assets: this.#assetService.createOverviewSnapshot(),
 			currentCameraResidency: this.#currentCameraResidency,
@@ -285,12 +301,13 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 			},
 			sceneInterest: this.#sceneInterest,
 			static: staticOverview,
-			staticSceneQuery: createEmptyLegacyStaticSceneQueryOverviewSnapshot(),
+			staticSceneQuery: controller.staticSceneQueryOverview,
 			status: this.#createStatus(),
 		};
 	}
 
 	createDiagnosticsSnapshot(): RuntimeDiagnosticsSnapshot {
+		const controller = this.#controller.createSnapshot();
 		return {
 			assets: this.#assetService.createSnapshot(),
 			currentCameraResidency: this.#currentCameraResidency,
@@ -311,7 +328,7 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 			},
 			renderer: this.#renderer.createDiagnosticsSnapshot(),
 			sceneInterest: this.#sceneInterest,
-			static: createEmptyLegacyStaticDiagnosticsSnapshot(),
+			static: createLegacyStaticDiagnosticsFromController(controller),
 			staticCommitInstall: {
 				committedCommits: [],
 				committedStaticDirectDrawUnits: 0,
@@ -320,7 +337,7 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 				pendingCommits: [],
 				sourceStaticDirectDrawUnits: 0,
 			},
-			staticSceneQuery: createEmptyLegacyStaticSceneQueryDiagnosticsSnapshot(),
+			staticSceneQuery: controller.staticSceneQuery,
 			status: this.#createStatus(),
 		};
 	}
@@ -328,6 +345,7 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 	createDiagnosticsReport(): RuntimeDiagnosticsReport {
 		const renderer = this.#renderer.createDiagnosticsSnapshot();
 		const nativeDiagnostics = this.#controller.createDiagnosticsSnapshot();
+		const controller = this.#controller.createSnapshot();
 		return {
 			domains: [
 				{
@@ -411,7 +429,7 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 				committedStaticCommitInstallCount:
 					nativeDiagnostics.sceneCommits.applied,
 				envCellResourceMembershipRevision: 0,
-				installedStaticDrawUnits: 0,
+				installedStaticDrawUnits: controller.terrain.installedDrawUnits,
 				pendingStaticCommitInstallCount: nativeDiagnostics.sceneCommits.pending,
 				portalFrameWorkPlan: {
 					kind: "legacy-render-pass",
@@ -421,7 +439,7 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 				renderPassKind: DEFAULT_RENDER_PASS_PLAN.kind,
 				sceneInterest:
 					this.#sceneInterest.kind === "none" ? null : this.#sceneInterest.kind,
-				sourceStaticDrawUnits: 0,
+				sourceStaticDrawUnits: controller.terrain.sourceDrawUnits,
 				status: this.#createStatus(),
 				textureFilteringMode: this.#textureFilteringMode,
 			},
@@ -500,5 +518,51 @@ function createStaticObjectUploadSample(
 		landblockId: `0x${upload.landblockId.toString(16).padStart(8, "0")}`,
 		uploadMs: upload.uploadMs,
 		uploadedBufferBytes: upload.uploadedBufferBytes,
+	};
+}
+
+function createTerrainInterestFromRuntimeSceneInterest(
+	interest: RuntimeSceneInterest,
+	revision: number,
+): OpenWorldStreamingTerrainInterest | null {
+	if (
+		interest.kind !== "outdoor-anchor" ||
+		!interest.domains.includes("terrain") ||
+		(interest.lod?.terrain ?? 0) < 0
+	) {
+		return null;
+	}
+	return {
+		anchorLandblockId: interest.anchorLandblockId,
+		radius: interest.lod?.terrain ?? 0,
+		revision,
+	};
+}
+
+function createLegacyStaticOverviewFromController(
+	controller: OpenWorldStreamingControllerSnapshot,
+): RuntimeOverviewSnapshot["static"] {
+	return {
+		...createEmptyLegacyStaticOverviewSnapshot(),
+		baking: controller.terrain.baking,
+		committed: controller.terrain.committed,
+		latestTerrainPayload: controller.terrain.latestTerrainPayload,
+		requested: controller.terrain.requested,
+		resolving: controller.terrain.resolving,
+	};
+}
+
+function createLegacyStaticDiagnosticsFromController(
+	controller: OpenWorldStreamingControllerSnapshot,
+): RuntimeDiagnosticsSnapshot["static"] {
+	return {
+		...createEmptyLegacyStaticDiagnosticsSnapshot(),
+		baking: controller.terrain.baking,
+		committed: controller.terrain.committed,
+		committedDrawUnits: controller.terrain.installedDrawUnits,
+		failed: controller.terrain.failed,
+		latestTerrainPayload: controller.terrain.latestTerrainPayload,
+		requested: controller.terrain.requested,
+		resolving: controller.terrain.resolving,
 	};
 }

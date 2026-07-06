@@ -154,6 +154,13 @@ describe("OpenWorldTextureClaimRegistry", () => {
 				state: "planned",
 			}),
 		]);
+		expect(registry.createSnapshot()).toMatchObject({
+			bucketCount: 2,
+			claimCount: 2,
+			entryCount: 2,
+			pageBuildsInFlight: 1,
+			pageCount: 2,
+		});
 	});
 
 	it("rejects stale page build tokens without mutating resident state", () => {

@@ -363,20 +363,27 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Review import graph for `src/lib/systems/open-world-streaming`.
-- [ ] Review adapter module names and contracts.
-- [ ] Confirm new contracts are replacement-native and any compatibility layer is outside replacement internals.
-- [ ] Confirm diagnostics and atlas-inspection contracts do not import `TextureManager` internals or clone legacy snapshot shapes.
-- [ ] Confirm harness comparison summary is minimal and does not become a replacement diagnostic contract.
-- [ ] Validate `--runtime-pipeline` harness flow manually or with a focused smoke test.
-- [ ] Record shims and deletion targets in this plan.
-- [ ] Dry-run Phase 3 and Phase 4 against the current source tree.
-- [ ] Identify dependency/order changes, boundary leaks, shims, deletion targets, and test risks for the next implementation span.
-- [ ] Update future phases if the skeleton created boundary debt.
+- [x] Review import graph for `src/lib/systems/open-world-streaming`.
+- [x] Review adapter module names and contracts.
+- [x] Confirm new contracts are replacement-native and any compatibility layer is outside replacement internals.
+- [x] Confirm diagnostics and atlas-inspection contracts do not import `TextureManager` internals or clone legacy snapshot shapes.
+- [x] Confirm harness comparison summary is minimal and does not become a replacement diagnostic contract.
+- [x] Validate `--runtime-pipeline` harness flow manually or with a focused smoke test.
+- [x] Record shims and deletion targets in this plan.
+- [x] Dry-run Phase 3 and Phase 4 against the current source tree.
+- [x] Identify dependency/order changes, boundary leaks, shims, deletion targets, and test risks for the next implementation span.
+- [x] Update future phases if the skeleton created boundary debt.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 2 completed on 2026-07-06.
+- Import audit found the new tree imports legacy-facing app contracts only at explicit adapter, outer `ClientRuntime` shim, and test fixture boundaries. No new tree file imports `StaticCoordinator`, `StaticSourceReadyWork`, `StaticCoordinatorCommitDelta`, or `TextureManager`.
+- The remaining `staticCommitInstall` property is required only because the outer `ClientRuntime` shim must return the legacy `RuntimeDiagnosticsSnapshot` shape. This is tracked for Phase 14 cutover deletion.
+- Adapter names are acceptable for Phase 1, but `testing/empty-runtime-snapshots.ts` is really a legacy `ClientRuntime` shim fixture. Rename or delete it when Phase 14 removes the legacy-shaped runtime boundary.
+- Harness comparison remains minimal: `runtimePipeline` plus the `instantiate-only` scenario. It must not grow into a second diagnostics contract.
+- Dry-running Phase 3 showed terrain bake grouping currently depends on `placement.pageId`, object-material grouping depends on `placement.textureRefId`, and both throw on missing placements. Phase 3 must introduce separate bake-facing page compatibility facts and renderer-facing binding readiness before relaxing renderer/install assertions.
+- Dry-running Phase 4 showed `static/layer-owners.ts` and `static/demand-planner.ts` contain reusable owner-key transforms, but static coordinator revisions/currentness must not be promoted into the replacement owner registry.
+- Test risk: existing `static-coordinator`, `texture-manager`, and `static-commit-installer` tests encode retired orchestration assumptions. Phase 3 and Phase 4 should add replacement-local tests instead of mutating those suites unless the behavior is a reusable transform.
 
 ### Phase 3: Readiness Contract Unlock
 
@@ -401,15 +408,19 @@ Task checklist:
 - [ ] Complete placement snapshot consumer audit.
 - [ ] Define bake-facing texture placement facts.
 - [ ] Define renderer-facing texture binding readiness facts.
+- [ ] Keep `TexturePlacementSnapshot` and `ObjectVisualTexturePlacementSnapshot` behind legacy transform/adapters; do not make them replacement contracts with new names.
+- [ ] Split page compatibility/grouping identity from renderer texture residency identity.
 - [ ] Adapt terrain bake grouping.
 - [ ] Adapt object-material draw-unit grouping.
+- [ ] Distinguish pending placement from missing-not-in-flight placement before relaxing errors.
 - [ ] Harden object-material renderer preparation for pending required bindings.
 - [ ] Relax `installStaticCommit(...)` same-commit assertions behind readiness-aware validation.
 - [ ] Add tests for pending, resident, missing, and failed binding states.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 2 dry-run: terrain grouping currently reads `placement.pageId` for color/detail/mask page partitioning. Replacement bake-facing facts should preserve compatibility grouping without implying an uploaded renderer page.
+- Phase 2 dry-run: object-material grouping currently reads `placement.textureRefId` and throws when a placement is absent. Replacement readiness must separate `pending` from `failed/missing`, otherwise Phase 3 will just move the same exception to a new DTO.
 
 ### Phase 4: Owner Registry And Eviction Core
 
@@ -433,11 +444,14 @@ Task checklist:
 - [ ] Add static owner derivation adapter from existing demand planning.
 - [ ] Add runtime entity owner entrypoints.
 - [ ] Add owner deletion and artifact pruning hooks.
+- [ ] Keep owner currentness local to `MaterializationOwnerRegistry`; do not use static coordinator revisions as the primary stale-work rule.
+- [ ] Define renderer/scene-query teardown ports before calling existing renderer setters directly.
 - [ ] Add tests for stale work rejection after eviction.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 2 dry-run: reuse `createLayerOwnerKeyId(...)` and demand-planner owner-key derivation as transforms through adapters, but do not wrap static coordinator owner state.
+- Phase 2 dry-run: existing teardown is spread through `ClientRuntimeImpl` renderer setters, scene-query records, dynamic state, and texture manager owner references. Phase 4 should define narrow teardown ports first so owner eviction does not inherit the runtime god-object shape.
 
 ### Phase 5: Resteering Checkpoint 2 - Owner Model Review
 

@@ -485,17 +485,24 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Review static owner id derivation.
-- [ ] Review runtime entity owner lifecycle.
-- [ ] Review stale artifact rejection tests.
-- [ ] Review teardown adapter boundaries and shim usage.
-- [ ] Dry-run Phase 6, Phase 7, and Phase 8 against the current source tree.
-- [ ] Identify dependency/order changes, boundary leaks, shims, deletion targets, and test risks for the next implementation span.
-- [ ] Update texture claim requirements from owner-model findings.
+- [x] Review static owner id derivation.
+- [x] Review runtime entity owner lifecycle.
+- [x] Review stale artifact rejection tests.
+- [x] Review teardown adapter boundaries and shim usage.
+- [x] Dry-run Phase 6, Phase 7, and Phase 8 against the current source tree.
+- [x] Identify dependency/order changes, boundary leaks, shims, deletion targets, and test risks for the next implementation span.
+- [x] Update texture claim requirements from owner-model findings.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 5 completed on 2026-07-06.
+- Owner model review accepted the Phase 4 shape: owner ids are explicit, static-authored dynamic ownership remains parented to static layer owners for the first cut, and stale-work rejection is token-based instead of revision-based.
+- Deleted unused owner barrel exports in Phase 4. Keep importing concrete owner modules until multiple consumers prove a public owner surface is useful.
+- Dry-running Phase 6 showed `TextureManager` has useful concepts for multi-owner entries and deferred reclamation, but its lease/pin/global mutation lane vocabulary must not be copied. Phase 6 should model owner claims as replacement-native `(ownerId, bucketKey) -> binding set` state.
+- Dry-running Phase 6 also showed existing texture placement bucket keys can be reused as compatibility inputs, but replacement buckets should be typed locally and fed through adapters so old `TexturePlacementBucketKey` does not become the owner-claim contract.
+- Dry-running Phase 7 showed `texture-packing.worker.ts` can remain a layout/pixel-materialization adapter, but reservation tokens, accepted noop handling, and texture commit emission belong to replacement page-build state.
+- Dry-running Phase 8 showed terrain can use existing source resolver and `TerrainGeometryStaticBaker` through worker adapters, but the vertical slice needs an artifact runner before harness settlement can be honest.
+- Test risk: existing `texture-manager.test.ts` is architecture-preserving for the old global mutation lane. Phase 6 should add replacement-local texture claim tests rather than migrating that suite wholesale.
 
 ### Phase 6: Texture Claim And Bucket Placement Core
 
@@ -518,15 +525,17 @@ Task checklist:
 
 - [ ] Define texture binding requirement shape.
 - [ ] Define texture entry and page record shapes.
+- [ ] Define replacement-native bucket keys instead of exposing legacy `TexturePlacementBucketKey` as the claim contract.
 - [ ] Implement owner claim registry.
 - [ ] Implement bucket virtual page registry.
 - [ ] Implement retain replacement semantics.
 - [ ] Implement owner-wide release semantics.
+- [ ] Keep lease/pin compatibility out of the replacement claim model; use owner claims and explicit installed-resource guards only if proven necessary.
 - [ ] Add tests for shared entries, replacement, release, and reclaim eligibility.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 5 dry-run: reuse old texture placement identities as adapter inputs only. Replacement claim state should be `(MaterializationOwnerId, bucketKey, binding requirements)` and should not expose lease/pin semantics.
 
 ### Phase 7: Page Build Worker And Texture Commits
 
@@ -551,6 +560,7 @@ Task checklist:
 
 - [ ] Define page build input/output protocol.
 - [ ] Classify reusable `texture-packing.worker.ts` responsibilities versus new page-build responsibilities.
+- [ ] Keep page build reservation tokens in replacement page-build state, not in the worker adapter.
 - [ ] Implement worker client and handler.
 - [ ] Add token validation.
 - [ ] Add texture commit DTO and applier.
@@ -559,7 +569,7 @@ Task checklist:
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 5 dry-run: `texture-packing.worker.ts` can produce packed pages and pixels, but replacement-owned reservation/noop/stale-result policy must wrap it.
 
 ### Phase 8: Static Terrain Vertical Slice
 
@@ -583,13 +593,14 @@ Task checklist:
 - [ ] Resolve landblock scene source for terrain.
 - [ ] Retain terrain texture bindings.
 - [ ] Produce terrain bake inputs from bake-facing placement facts.
+- [ ] Introduce a minimal artifact runner before terrain harness settlement, so terrain does not re-create `StaticCoordinator` continuations.
 - [ ] Emit terrain layer commits.
 - [ ] Apply terrain commits to renderer and scene query.
 - [ ] Run terrain-only harness.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 5 dry-run: terrain vertical slice should adapt existing resolver/baker transforms, but must not wrap `StaticCoordinator` or depend on same-commit texture residency.
 
 ### Phase 9: Resteering Checkpoint 3 - Terrain Vertical Slice Review
 

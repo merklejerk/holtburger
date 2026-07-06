@@ -447,18 +447,25 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Define materialization owner id types.
-- [ ] Add static owner derivation adapter from existing demand planning.
-- [ ] Add runtime entity owner entrypoints.
-- [ ] Add owner deletion and artifact pruning hooks.
-- [ ] Keep owner currentness local to `MaterializationOwnerRegistry`; do not use static coordinator revisions as the primary stale-work rule.
-- [ ] Define renderer/scene-query teardown ports before calling existing renderer setters directly.
-- [ ] Add tests for stale work rejection after eviction.
+- [x] Define materialization owner id types.
+- [x] Add static owner derivation adapter from existing demand planning.
+- [x] Add runtime entity owner entrypoints.
+- [x] Add owner deletion and artifact pruning hooks.
+- [x] Keep owner currentness local to `MaterializationOwnerRegistry`; do not use static coordinator revisions as the primary stale-work rule.
+- [x] Define renderer/scene-query teardown ports before calling existing renderer setters directly.
+- [x] Add tests for stale work rejection after eviction.
 
 Decisions and course corrections:
 
 - Phase 2 dry-run: reuse `createLayerOwnerKeyId(...)` and demand-planner owner-key derivation as transforms through adapters, but do not wrap static coordinator owner state.
 - Phase 2 dry-run: existing teardown is spread through `ClientRuntimeImpl` renderer setters, scene-query records, dynamic state, and texture manager owner references. Phase 4 should define narrow teardown ports first so owner eviction does not inherit the runtime god-object shape.
+- Phase 4 completed on 2026-07-06.
+- Added `MaterializationOwnerRegistry` with owner-local currentness tokens. Eviction invalidates late artifact tokens, and re-demanding an owner creates a fresh token without using static coordinator revisions.
+- Added explicit owner id constructors for static layers, runtime entities, and static-authored dynamic children. Static-authored dynamic owners are parented to the originating static layer owner for the first cut.
+- Added `createStaticLayerOwnersFromDemand(...)` as a legacy transform adapter around `planStaticDemand(...)`. This reuses demand planning without importing or wrapping static coordinator state.
+- Added teardown ports for renderer static layers, scene-query static layers, and runtime entities before wiring owner eviction into runtime mutation.
+- Deleted the owner barrel after `knip` flagged unused ceremonial exports. Later phases should import concrete owner modules until a public surface is actually consumed.
+- Verification: `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run format:check`, and focused `npm run test:ts -- src/lib/systems/open-world-streaming/owners/owner-registry.test.ts`.
 
 ### Phase 5: Resteering Checkpoint 2 - Owner Model Review
 

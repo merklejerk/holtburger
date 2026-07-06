@@ -523,19 +523,27 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Define texture binding requirement shape.
-- [ ] Define texture entry and page record shapes.
-- [ ] Define replacement-native bucket keys instead of exposing legacy `TexturePlacementBucketKey` as the claim contract.
-- [ ] Implement owner claim registry.
-- [ ] Implement bucket virtual page registry.
-- [ ] Implement retain replacement semantics.
-- [ ] Implement owner-wide release semantics.
-- [ ] Keep lease/pin compatibility out of the replacement claim model; use owner claims and explicit installed-resource guards only if proven necessary.
-- [ ] Add tests for shared entries, replacement, release, and reclaim eligibility.
+- [x] Define texture binding requirement shape.
+- [x] Define texture entry and page record shapes.
+- [x] Define replacement-native bucket keys instead of exposing legacy `TexturePlacementBucketKey` as the claim contract.
+- [x] Implement owner claim registry.
+- [x] Implement bucket virtual page registry.
+- [x] Implement retain replacement semantics.
+- [x] Implement owner-wide release semantics.
+- [x] Keep lease/pin compatibility out of the replacement claim model; use owner claims and explicit installed-resource guards only if proven necessary.
+- [x] Add tests for shared entries, replacement, release, and reclaim eligibility.
 
 Decisions and course corrections:
 
 - Phase 5 dry-run: reuse old texture placement identities as adapter inputs only. Replacement claim state should be `(MaterializationOwnerId, bucketKey, binding requirements)` and should not expose lease/pin semantics.
+- Phase 6 completed on 2026-07-06.
+- Added `open-world-streaming/texture-residency/claims` with replacement-native bucket keys and an `OpenWorldTextureClaimRegistry`.
+- The registry treats `retainTextureBindings(ownerId, bucketKey, bindings)` as full replacement for that owner and bucket. Entries are shared by canonical texture/page/source facts, and owner release only marks entries/pages reclaimable.
+- Added virtual page records and reservation tokens in the claim/page state. A stale page-build token is rejected without mutating page state; an accepted token advances the page to resident.
+- Reclaimable pages remember their last active state. If an entry is claimed again before physical deletion, the virtual page stops reporting as reclaimable instead of lying about deletion.
+- Spicy bit: Phase 6 intentionally did not expose compatibility adapters from legacy `TexturePlacementBucketKey` into the claim registry. That adapter belongs at the future domain source boundary, not in the replacement claim contract.
+- Concession: Phase 6 does not yet assign entries to pages through real packing or emit texture commits. Phase 7 owns worker/page-build protocol and commit emission.
+- Verification: `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run format:check`, and focused `npm run test:ts -- src/lib/systems/open-world-streaming/texture-residency/claims/texture-claim-registry.test.ts`.
 
 ### Phase 7: Page Build Worker And Texture Commits
 
@@ -561,6 +569,7 @@ Task checklist:
 - [ ] Define page build input/output protocol.
 - [ ] Classify reusable `texture-packing.worker.ts` responsibilities versus new page-build responsibilities.
 - [ ] Keep page build reservation tokens in replacement page-build state, not in the worker adapter.
+- [ ] Consume claim-registry page reservation tokens instead of minting worker-owned lifecycle tokens.
 - [ ] Implement worker client and handler.
 - [ ] Add token validation.
 - [ ] Add texture commit DTO and applier.
@@ -570,6 +579,7 @@ Task checklist:
 Decisions and course corrections:
 
 - Phase 5 dry-run: `texture-packing.worker.ts` can produce packed pages and pixels, but replacement-owned reservation/noop/stale-result policy must wrap it.
+- Phase 6 steering: page-build protocol should accept explicit page ids and reservation tokens from replacement state, and should return enough data to update or noop those reservations without becoming the source of lifecycle truth.
 
 ### Phase 8: Static Terrain Vertical Slice
 

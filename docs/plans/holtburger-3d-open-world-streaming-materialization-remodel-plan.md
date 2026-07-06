@@ -405,22 +405,29 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Complete placement snapshot consumer audit.
-- [ ] Define bake-facing texture placement facts.
-- [ ] Define renderer-facing texture binding readiness facts.
-- [ ] Keep `TexturePlacementSnapshot` and `ObjectVisualTexturePlacementSnapshot` behind legacy transform/adapters; do not make them replacement contracts with new names.
-- [ ] Split page compatibility/grouping identity from renderer texture residency identity.
-- [ ] Adapt terrain bake grouping.
-- [ ] Adapt object-material draw-unit grouping.
-- [ ] Distinguish pending placement from missing-not-in-flight placement before relaxing errors.
-- [ ] Harden object-material renderer preparation for pending required bindings.
-- [ ] Relax `installStaticCommit(...)` same-commit assertions behind readiness-aware validation.
-- [ ] Add tests for pending, resident, missing, and failed binding states.
+- [x] Complete placement snapshot consumer audit.
+- [x] Define bake-facing texture placement facts.
+- [x] Define renderer-facing texture binding readiness facts.
+- [x] Keep `TexturePlacementSnapshot` and `ObjectVisualTexturePlacementSnapshot` behind legacy transform/adapters; do not make them replacement contracts with new names.
+- [x] Split page compatibility/grouping identity from renderer texture residency identity.
+- [x] Adapt terrain bake grouping.
+- [x] Adapt object-material draw-unit grouping.
+- [x] Distinguish pending placement from missing-not-in-flight placement before relaxing errors.
+- [x] Harden object-material renderer preparation for pending required bindings.
+- [x] Relax `installStaticCommit(...)` same-commit assertions behind readiness-aware validation.
+- [x] Add tests for pending, resident, missing, and failed binding states.
 
 Decisions and course corrections:
 
 - Phase 2 dry-run: terrain grouping currently reads `placement.pageId` for color/detail/mask page partitioning. Replacement bake-facing facts should preserve compatibility grouping without implying an uploaded renderer page.
 - Phase 2 dry-run: object-material grouping currently reads `placement.textureRefId` and throws when a placement is absent. Replacement readiness must separate `pending` from `failed/missing`, otherwise Phase 3 will just move the same exception to a new DTO.
+- Phase 3 completed on 2026-07-06.
+- Added replacement bake-facing page compatibility facts under `open-world-streaming/texture-residency/placement` and a legacy placement-snapshot adapter. This keeps `TexturePlacementSnapshot` outside the replacement contract while preserving terrain/object page grouping facts for later phases.
+- Added optional texture readiness to `installStaticCommit(...)`. When omitted, legacy same-commit behavior remains strict. When supplied, pending bindings are accepted, failed bindings throw loudly, and static payloads can install before texture residency.
+- Changed object-material draw payload preparation to return non-renderable for pending required bindings instead of throwing from the render path. Failed or missing-not-in-flight bindings still throw.
+- Added optional object-material placement readiness to partition-key creation so pending placements can group explicitly as `pending`, while failed placement readiness still throws.
+- Concession: Phase 3 unlocks contracts and hot-path readiness behavior but does not yet route terrain or object domains through the replacement artifact runner. The full replacement terrain path remains Phase 8.
+- Verification: `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run format:check`, and focused `npm run test:ts -- src/lib/visual/object-material-draw-unit-partition.test.ts src/lib/systems/open-world-streaming/adapters/legacy-texture-placement-adapter.test.ts src/lib/runtime/static-commit-installer.test.ts src/lib/renderer/webgl2/webgl2-object-material-payloads.test.ts`.
 
 ### Phase 4: Owner Registry And Eviction Core
 

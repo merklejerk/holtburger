@@ -1212,6 +1212,14 @@ class Webgl2Renderer implements Renderer {
 			}
 
 			const payload = this.#getObjectMaterialPreparedPayload(resource);
+			if (!payload) {
+				return {
+					drawUnitId,
+					materialEntries: [],
+					status: "resolved",
+					textureBindings: [],
+				};
+			}
 			return {
 				drawUnitId,
 				materialEntries: createRendererObjectMaterialEntryDiagnostics(
@@ -1985,11 +1993,16 @@ class Webgl2Renderer implements Renderer {
 					this.#stateCache,
 					resource.renderState,
 				);
-				this.#drawStaticMaterialResource(
-					resource,
-					multiplyMat4(objectToRenderMatrix, partMatrix),
-					mvp,
-				);
+				if (
+					!this.#drawStaticMaterialResource(
+						resource,
+						multiplyMat4(objectToRenderMatrix, partMatrix),
+						mvp,
+					)
+				) {
+					skipped += 1;
+					continue;
+				}
 				drawCalls += 1;
 			}
 		}
@@ -2364,11 +2377,15 @@ class Webgl2Renderer implements Renderer {
 				this.#appendTransparentStaticObjectResource(resource);
 				continue;
 			}
-			this.#drawStaticMaterialResource(
-				resource,
-				this.#createResourceTransform(resource),
-				mvp,
-			);
+			if (
+				!this.#drawStaticMaterialResource(
+					resource,
+					this.#createResourceTransform(resource),
+					mvp,
+				)
+			) {
+				continue;
+			}
 			this.#recordBakedStaticObjectDirectDraw(resource);
 			drawCalls += 1;
 		}
@@ -2402,11 +2419,15 @@ class Webgl2Renderer implements Renderer {
 				this.#stateCache,
 				this.#flatVisionModeEnabled,
 			);
-			this.#drawStaticMaterialResource(
-				resource,
-				this.#createResourceTransform(resource),
-				mvp,
-			);
+			if (
+				!this.#drawStaticMaterialResource(
+					resource,
+					this.#createResourceTransform(resource),
+					mvp,
+				)
+			) {
+				continue;
+			}
 			drawCalls += 1;
 		}
 
@@ -2416,11 +2437,15 @@ class Webgl2Renderer implements Renderer {
 				this.#stateCache,
 				resource.renderState,
 			);
-			this.#drawStaticMaterialResource(
-				resource,
-				this.#createResourceTransform(resource),
-				mvp,
-			);
+			if (
+				!this.#drawStaticMaterialResource(
+					resource,
+					this.#createResourceTransform(resource),
+					mvp,
+				)
+			) {
+				continue;
+			}
 			this.#recordBakedStaticObjectDirectDraw(resource);
 			drawCalls += 1;
 		}
@@ -2473,13 +2498,17 @@ class Webgl2Renderer implements Renderer {
 				this.#stateCache,
 				resource.renderState,
 			);
-			this.#drawStaticMaterialResource(
-				resource,
-				entry.instance
-					? this.#createStaticObjectInstanceTransform(entry.instance)
-					: this.#createResourceTransform(resource),
-				mvp,
-			);
+			if (
+				!this.#drawStaticMaterialResource(
+					resource,
+					entry.instance
+						? this.#createStaticObjectInstanceTransform(entry.instance)
+						: this.#createResourceTransform(resource),
+					mvp,
+				)
+			) {
+				continue;
+			}
 			if (entry.instance) {
 				this.#lastStaticObjectDirectRenderInstanceDrawCalls += 1;
 				this.#lastStaticObjectNearTransparentDirectRenderInstanceDrawCalls += 1;
@@ -2517,16 +2546,24 @@ class Webgl2Renderer implements Renderer {
 			return 0;
 		}
 		if (group.length < 2) {
-			this.#drawStaticMaterialResource(
-				first.resource,
-				this.#createStaticObjectInstanceTransform(first.instance),
-				mvp,
-			);
+			if (
+				!this.#drawStaticMaterialResource(
+					first.resource,
+					this.#createStaticObjectInstanceTransform(first.instance),
+					mvp,
+				)
+			) {
+				return 0;
+			}
 			this.#lastStaticObjectDirectRenderInstanceDrawCalls += 1;
 			return 1;
 		}
 
-		this.#drawStaticMaterialResourceInstanced(first.resource, group, mvp);
+		if (
+			!this.#drawStaticMaterialResourceInstanced(first.resource, group, mvp)
+		) {
+			return 0;
+		}
 		this.#lastStaticObjectInstancedRenderInstanceDrawCalls += 1;
 		this.#lastStaticObjectInstancedRenderInstances += group.length;
 		return 1;
@@ -2577,9 +2614,12 @@ class Webgl2Renderer implements Renderer {
 		resource: ObjectMaterialGeometryResource,
 		objectTransform: Float32Array,
 		mvp: Float32Array,
-	): void {
+	): boolean {
 		const gl = this.#gl;
 		const program = this.#bindStaticMaterialResourcePayload(resource, mvp);
+		if (!program) {
+			return false;
+		}
 		gl.uniformMatrix4fv(
 			program.uniforms.uObjectTransform,
 			false,
@@ -2588,15 +2628,19 @@ class Webgl2Renderer implements Renderer {
 		gl.uniform1i(program.uniforms.uUseInstanceObjectTransform, 0);
 		this.#stateCache.bindVertexArray(resource.vertexArray);
 		gl.drawElements(gl.TRIANGLES, resource.indexCount, resource.indexType, 0);
+		return true;
 	}
 
 	#drawStaticMaterialResourceInstanced(
 		resource: StaticObjectVisualGeometryResource,
 		group: readonly StaticObjectInstanceDrawResource[],
 		mvp: Float32Array,
-	): void {
+	): boolean {
 		const gl = this.#gl;
 		const program = this.#bindStaticMaterialResourcePayload(resource, mvp);
+		if (!program) {
+			return false;
+		}
 		this.#writeStaticObjectInstanceTransforms(group);
 		gl.uniform1i(program.uniforms.uUseInstanceObjectTransform, 1);
 		this.#stateCache.bindVertexArray(resource.vertexArray);
@@ -2608,18 +2652,22 @@ class Webgl2Renderer implements Renderer {
 			0,
 			group.length,
 		);
+		return true;
 	}
 
 	#bindStaticMaterialResourcePayload(
 		resource: ObjectMaterialGeometryResource,
 		mvp: Float32Array,
-	): ObjectMaterialGeometryProgram {
+	): ObjectMaterialGeometryProgram | null {
 		const gl = this.#gl;
 		const program = this.#staticObjectPrograms[resource.materialFamily];
 		this.#stateCache.useProgram(program.program);
 		gl.uniformMatrix4fv(program.uniforms.uModelViewProjection, false, mvp);
-		const { materialUniforms, textures } =
-			this.#getObjectMaterialPreparedPayload(resource);
+		const payload = this.#getObjectMaterialPreparedPayload(resource);
+		if (!payload) {
+			return null;
+		}
+		const { materialUniforms, textures } = payload;
 
 		uploadObjectMaterialTextureBinding(
 			gl,
@@ -2728,12 +2776,16 @@ class Webgl2Renderer implements Renderer {
 
 	#getObjectMaterialPreparedPayload(
 		resource: ObjectMaterialGeometryResource,
-	): ObjectMaterialPreparedDrawPayload {
-		prepareObjectMaterialDrawPayload(
-			this.#objectMaterialPreparedDrawPayloadScratch,
-			resource,
-			this.#textureBindings,
-		);
+	): ObjectMaterialPreparedDrawPayload | null {
+		if (
+			!prepareObjectMaterialDrawPayload(
+				this.#objectMaterialPreparedDrawPayloadScratch,
+				resource,
+				this.#textureBindings,
+			)
+		) {
+			return null;
+		}
 		return this.#objectMaterialPreparedDrawPayloadScratch;
 	}
 

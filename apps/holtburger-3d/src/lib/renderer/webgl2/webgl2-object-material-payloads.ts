@@ -68,7 +68,7 @@ export function prepareObjectMaterialDrawPayload(
 	target: ObjectMaterialPreparedDrawPayload,
 	resource: ObjectMaterialPayloadResource,
 	textureBindings: ObjectMaterialTextureBindingLookup,
-): void {
+): boolean {
 	if (resource.materialEntries.length === 0) {
 		throw new Error(
 			`Object material resource ${resource.drawUnitId} has no material table entries.`,
@@ -83,7 +83,11 @@ export function prepareObjectMaterialDrawPayload(
 		resource,
 		textureBindings,
 	);
-	validateObjectMaterialTextureBindings(target.textures, resource);
+	return validateObjectMaterialTextureBindings(
+		target.textures,
+		resource,
+		textureBindings,
+	);
 }
 
 export interface ObjectMaterialTextureBindingLookup {
@@ -279,22 +283,68 @@ function writeObjectMaterialTextureEntry(
 function validateObjectMaterialTextureBindings(
 	textures: ObjectMaterialTextureBindingsByRole,
 	resource: ObjectMaterialPayloadResource,
-): void {
+	textureBindings: ObjectMaterialTextureBindingLookup,
+): boolean {
 	if (resource.materialFamily === "texture-rgba" && !textures.baseColor) {
+		if (
+			hasPendingObjectMaterialBinding(
+				resource,
+				textureBindings,
+				(entry) => entry.primaryTextureBindingId,
+			)
+		) {
+			return false;
+		}
 		throw new Error(
 			`Object material resource ${resource.drawUnitId} is missing resident base-color texture binding.`,
 		);
 	}
 	if (resource.materialFamily === "indexed-paletted") {
 		if (!textures.index) {
+			if (
+				hasPendingObjectMaterialBinding(
+					resource,
+					textureBindings,
+					(entry) => entry.indexTextureBindingId,
+				)
+			) {
+				return false;
+			}
 			throw new Error(
 				`Object material resource ${resource.drawUnitId} is missing resident index texture binding.`,
 			);
 		}
 		if (!textures.palette) {
+			if (
+				hasPendingObjectMaterialBinding(
+					resource,
+					textureBindings,
+					(entry) => entry.paletteTextureBindingId,
+				)
+			) {
+				return false;
+			}
 			throw new Error(
 				`Object material resource ${resource.drawUnitId} is missing resident palette texture binding.`,
 			);
 		}
 	}
+	return true;
+}
+
+function hasPendingObjectMaterialBinding(
+	resource: ObjectMaterialPayloadResource,
+	textureBindings: ObjectMaterialTextureBindingLookup,
+	selectBindingId: (entry: StaticMaterialTableEntry) => TextureBindingId | null,
+): boolean {
+	for (const entry of resource.materialEntries) {
+		const bindingId = selectBindingId(entry);
+		if (!bindingId) {
+			continue;
+		}
+		if (textureBindings.getState?.(bindingId).kind === "pending") {
+			return true;
+		}
+	}
+	return false;
 }

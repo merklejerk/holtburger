@@ -58,6 +58,15 @@ export interface ObjectMaterialTextureRequirement {
 	readonly purpose: TextureUsagePurpose;
 }
 
+export type ObjectMaterialTexturePlacementReadiness =
+	| {
+			readonly kind: "pending";
+	  }
+	| {
+			readonly kind: "failed";
+			readonly reason: string;
+	  };
+
 interface ObjectMaterialTextureBindingTuple {
 	readonly key: string;
 	readonly bindings: readonly ObjectMaterialTextureBindingTupleEntry[];
@@ -78,11 +87,16 @@ export function createObjectMaterialDrawUnitPartitionKey(options: {
 	readonly texturePlacementSnapshot:
 		| ObjectVisualTexturePlacementSnapshot
 		| undefined;
+	readonly texturePlacementReadinessByItemId?: ReadonlyMap<
+		TexturePlacementItemId,
+		ObjectMaterialTexturePlacementReadiness
+	>;
 	readonly textureRequirements: readonly ObjectMaterialTextureRequirement[];
 }): ObjectMaterialDrawUnitPartitionKey {
 	const textureBindingTuple = createObjectMaterialTextureBindingTuple({
 		diagnosticSubject: options.diagnosticSubject,
 		placementSnapshot: options.texturePlacementSnapshot,
+		readinessByItemId: options.texturePlacementReadinessByItemId,
 		requirements: options.textureRequirements,
 	});
 	const material = createObjectMaterialPartitionAxis({
@@ -167,6 +181,12 @@ function createObjectMaterialPartitionAxis(options: {
 function createObjectMaterialTextureBindingTuple(options: {
 	readonly diagnosticSubject?: string;
 	readonly placementSnapshot: ObjectVisualTexturePlacementSnapshot | undefined;
+	readonly readinessByItemId:
+		| ReadonlyMap<
+				TexturePlacementItemId,
+				ObjectMaterialTexturePlacementReadiness
+		  >
+		| undefined;
 	readonly requirements: readonly ObjectMaterialTextureRequirement[];
 }): ObjectMaterialTextureBindingTuple {
 	if (!options.placementSnapshot) {
@@ -199,7 +219,21 @@ function createObjectMaterialTextureBindingTuple(options: {
 			requirement.placementItemId,
 		);
 		if (!placement) {
+			const readiness = options.readinessByItemId?.get(
+				requirement.placementItemId,
+			);
+			if (readiness?.kind === "pending") {
+				return {
+					purpose,
+					textureRefId: "pending",
+				};
+			}
 			const subject = options.diagnosticSubject ?? "Object-like material";
+			if (readiness?.kind === "failed") {
+				throw new Error(
+					`${subject} texture placement ${requirement.placementItemId} failed: ${readiness.reason}.`,
+				);
+			}
 			throw new Error(
 				`${subject} texture placement snapshot is missing ${requirement.placementItemId}.`,
 			);

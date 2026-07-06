@@ -672,18 +672,28 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Capture harness metrics.
-- [ ] Review import graph for new system.
-- [ ] Review diagnostics clarity.
-- [ ] Identify any diagnostic shim that belongs outside the replacement pipeline or should be deleted.
-- [ ] Migrate any touched surviving diagnostics consumer to replacement-native diagnostics instead of extending a shim.
-- [ ] Dry-run Phase 10, Phase 11, and Phase 12 against the current source tree.
-- [ ] Identify dependency/order changes, boundary leaks, shims, deletion targets, and test risks for the next implementation span.
-- [ ] Update plan decisions and future tasks.
+- [x] Capture harness metrics.
+- [x] Review import graph for new system.
+- [x] Review diagnostics clarity.
+- [x] Identify any diagnostic shim that belongs outside the replacement pipeline or should be deleted.
+- [x] Migrate any touched surviving diagnostics consumer to replacement-native diagnostics instead of extending a shim.
+- [x] Dry-run Phase 10, Phase 11, and Phase 12 against the current source tree.
+- [x] Identify dependency/order changes, boundary leaks, shims, deletion targets, and test risks for the next implementation span.
+- [x] Update plan decisions and future tasks.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 9 completed on 2026-07-06.
+- Terrain harness comparison: radius-1 replacement terrain settled with 9 terrain commits, 20 terrain draw units, renderer `error: null`, max renderer delta about 42.8 ms, one 58 ms long task, and no frame gaps over 50 ms or 100 ms. This materially avoids the legacy severe blackout profile from the investigation worksheet.
+- Import audit found no `StaticCoordinator`, `StaticSourceReadyWork`, `StaticCoordinatorCommitDelta`, or `TextureManager` orchestration imports in replacement internals. Current legacy pressure points are the outer `ClientRuntime` shim, the renderer texture update adapter, the bake-facing legacy placement snapshot required by existing bakers, and tests.
+- Diagnostics review found hard-coded replacement texture residency counts in the controller. Added `OpenWorldTextureClaimRegistry.createSnapshot()` and wired controller diagnostics to replacement-native bucket, claim, and in-flight page-build counts instead of cloning old texture-manager snapshots or lying with zeros.
+- The browser harness still reads legacy-shaped runtime report fields such as `committedStaticCommitInstallCount`, `pendingStaticCommitInstallCount`, and `staticOverview`. This remains an outer runtime/harness shim and must not become a replacement diagnostics contract.
+- Terrain's synthetic purpose-scoped texture pages are acceptable only for the Phase 8 vertical slice. Phase 10 must not extend synthetic resident texture pages to object domains unless a later steering step explicitly chooses that as a short-lived shim with a deletion trigger.
+- Dry-running Phase 10 showed outdoor buildings, explicit objects, and generated scenery can reuse `StaticLandblockSceneLodSourceResolver.resolveSource(...)`, `createStaticObjectTexturePlacementIntents(...)`, and the static bake worker transforms, but they need object-visual commit application and real page-build/materialization integration before they can satisfy the direct-contract policy.
+- Dry-running Phase 10 also showed the next outdoor domain should introduce a small shared static-layer artifact spine only where terrain/object behavior is actually common. Do not build a broad replacement `StaticCoordinator` clone.
+- Dry-running Phase 11 showed env-cell work is not just another outdoor object layer. It needs env-cell system commits, `StaticSceneQuery.setEnvCellSystemLayer(...)`, renderer `setEnvCellSystemLayer(...)`, portal/interior/visibility records, and env-cell resource membership ports before dense landblocks can be trusted.
+- Dry-running Phase 12 showed runtime-authored dynamics should reuse existing dynamic visual recipe and bake workers through adapters, but lifecycle/currentness must move to materialization owners and direct resource/instance commits rather than `ClientRuntimeImpl` prep revisions.
+- Verification: `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run format:check`, focused `npm run test:ts -- src/lib/systems/open-world-streaming/texture-residency/claims/texture-claim-registry.test.ts src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts`, and `npm run harness:browser -- --runtime-pipeline open-world-streaming --domains terrain --layer-distance 1 --timeout-ms 60000`.
 
 ### Phase 10: Outdoor Static Object Domains
 
@@ -701,12 +711,16 @@ Acceptance criteria:
 - Outdoor object texture placement uses bucket-scoped scheduling and owner claims.
 - Static-authored dynamic resources are parent-owned by static layer owner for first cut.
 - Outdoor static object domains do not expose legacy static coordinator commit shapes, texture placement snapshots, or global texture mutation diagnostics as replacement contracts.
+- Object domains use real replacement texture claim/page-build/commit flow or an explicitly tracked temporary shim; they do not inherit the Phase 8 synthetic terrain texture-page shortcut.
 
 Task checklist:
 
+- [ ] Extract shared static-layer artifact-runner primitives only where terrain and object domains have proven common behavior.
 - [ ] Adapt building source/bake/commit path.
 - [ ] Adapt explicit object source/bake/commit path.
 - [ ] Adapt generated scenery source/bake/commit path.
+- [ ] Add object-visual commit application to renderer and scene query without routing through legacy static commit installer.
+- [ ] Route object texture placement through replacement claim, page-build, and texture commit services.
 - [ ] Adapt static-authored dynamic child resource commits.
 - [ ] Migrate direct outdoor-domain consumers to replacement scene, texture, and diagnostics contracts; add legacy-side shims only for consumers that cannot move in this phase.
 - [ ] Run terrain plus generated scenery benchmark.
@@ -736,6 +750,7 @@ Task checklist:
 
 - [ ] Adapt env-cell source resolution.
 - [ ] Adapt structured interior texture retain and bake.
+- [ ] Define env-cell renderer, scene-query, and resource-membership apply ports before wiring commits.
 - [ ] Emit env-cell system commits.
 - [ ] Apply portal records and resource membership.
 - [ ] Migrate direct env-cell overlay/query consumers to replacement commits and query records where feasible.
@@ -766,6 +781,7 @@ Task checklist:
 
 - [ ] Add runtime entity owner entrypoint.
 - [ ] Adapt dynamic recipe resolution.
+- [ ] Reuse dynamic visual resolver and bake workers through adapters, not `ClientRuntimeImpl` prep revision state.
 - [ ] Retain runtime-authored dynamic texture bindings.
 - [ ] Emit runtime dynamic resource commits.
 - [ ] Emit dynamic instance projections from committed runtime state.

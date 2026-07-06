@@ -82,6 +82,19 @@ export interface OpenWorldTextureBucketSnapshot {
 	readonly pages: readonly OpenWorldTexturePageRecord[];
 }
 
+export interface OpenWorldTextureClaimRegistrySnapshot {
+	/** Number of buckets with claimed entries or virtual pages. */
+	readonly bucketCount: number;
+	/** Number of owner binding claims currently retained. */
+	readonly claimCount: number;
+	/** Number of shared texture entries tracked by the registry. */
+	readonly entryCount: number;
+	/** Number of virtual pages currently reserved for page-build work. */
+	readonly pageBuildsInFlight: number;
+	/** Number of virtual pages tracked by the registry. */
+	readonly pageCount: number;
+}
+
 interface MutableTextureEntry {
 	readonly bucketKey: OpenWorldTextureBucketKey;
 	readonly id: OpenWorldTextureEntryId;
@@ -289,6 +302,31 @@ export class OpenWorldTextureClaimRegistry {
 			bucketKey,
 			entries,
 			pages,
+		};
+	}
+
+	createSnapshot(): OpenWorldTextureClaimRegistrySnapshot {
+		let claimCount = 0;
+		for (const ownerClaims of this.#bindingIdsByOwnerId.values()) {
+			for (const bindingClaims of ownerClaims.values()) {
+				claimCount += bindingClaims.size;
+			}
+		}
+		let pageBuildsInFlight = 0;
+		for (const page of this.#pagesById.values()) {
+			if (page.reservationToken !== null) {
+				pageBuildsInFlight += 1;
+			}
+		}
+		return {
+			bucketCount: new Set([
+				...this.#pageIdsByBucketKey.keys(),
+				...[...this.#entriesById.values()].map((entry) => entry.bucketKey),
+			]).size,
+			claimCount,
+			entryCount: this.#entriesById.size,
+			pageBuildsInFlight,
+			pageCount: this.#pagesById.size,
 		};
 	}
 

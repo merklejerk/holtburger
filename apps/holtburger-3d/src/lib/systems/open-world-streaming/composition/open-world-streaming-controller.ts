@@ -124,6 +124,7 @@ export class OpenWorldStreamingController {
 
 	createDiagnosticsSnapshot(): OpenWorldStreamingDiagnosticsSnapshot {
 		const ownerSnapshot = this.#owners.createSnapshot();
+		const textureSnapshot = this.#textureClaims.createSnapshot();
 		return {
 			artifacts: {
 				inFlight:
@@ -166,9 +167,9 @@ export class OpenWorldStreamingController {
 				),
 			},
 			textureResidency: {
-				bucketCount: 0,
-				claimCount: 0,
-				pageBuildsInFlight: 0,
+				bucketCount: textureSnapshot.bucketCount,
+				claimCount: textureSnapshot.claimCount,
+				pageBuildsInFlight: textureSnapshot.pageBuildsInFlight,
 			},
 		};
 	}

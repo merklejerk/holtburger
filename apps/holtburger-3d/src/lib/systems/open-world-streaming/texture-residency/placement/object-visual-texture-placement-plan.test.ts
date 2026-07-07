@@ -18,47 +18,44 @@ import type {
 } from "../../../../textures/identity";
 import type { MaterializationOwnerId } from "../../owners/owner-id";
 import { OpenWorldTextureClaimRegistry } from "../claims/texture-claim-registry";
-import { DirectOpenWorldTexturePageBuilder } from "../page-build/direct-page-builder";
 import { DirectOpenWorldObjectVisualAtlasBuilder } from "./object-visual-atlas-builder";
-import { buildObjectVisualTexturePlacementPlan } from "./object-visual-texture-placement-plan";
+import { reserveObjectVisualTexturePlacements } from "./object-visual-texture-placement-plan";
 
-describe("buildObjectVisualTexturePlacementPlan", () => {
-	it("packs object visual material textures into replacement texture commits", async () => {
+describe("reserveObjectVisualTexturePlacements", () => {
+	it("creates bake-facing placement snapshots and page-build requests", async () => {
 		const assetReader = new FixturePreparedAssetReader();
 		const textureClaims = new OpenWorldTextureClaimRegistry();
 		const intent = createIntent({ itemNumber: 1 });
 
-		const plan = await buildObjectVisualTexturePlacementPlan({
+		const reservation = await reserveObjectVisualTexturePlacements({
 			atlasBuilder: createDirectAtlasBuilder(assetReader),
 			filteringMode: "nearest",
 			intents: [intent],
 			ownerId: ownerId("static-layer:outdoor-generated-scenery:0xda55ffff"),
-			pageBuilder: new DirectOpenWorldTexturePageBuilder({ assetReader }),
 			textureClaims,
 		});
 
 		expect(assetReader.requests).toEqual([
-			createPreparedTextureHostKey(createTextureUse()),
 			createPreparedTextureHostKey(createTextureUse()),
 		]);
 		expect(textureClaims.createSnapshot()).toMatchObject({
 			bucketCount: 1,
 			claimCount: 1,
 			entryCount: 1,
-			pageBuildsInFlight: 0,
+			pageBuildsInFlight: 1,
 			pageCount: 1,
 			pageCountByState: {
-				building: 0,
+				building: 1,
 				planned: 0,
 				reclaimable: 0,
-				resident: 1,
+				resident: 0,
 			},
 		});
 		expect(
-			plan.placementSnapshot.itemIdsByBindingId.get(intent.bindingId),
+			reservation.placementSnapshot.itemIdsByBindingId.get(intent.bindingId),
 		).toBe(createTexturePlacementItemId(0));
 		expect(
-			plan.placementSnapshot.placementsByItemId.get(
+			reservation.placementSnapshot.placementsByItemId.get(
 				createTexturePlacementItemId(0),
 			),
 		).toMatchObject({
@@ -67,50 +64,40 @@ describe("buildObjectVisualTexturePlacementPlan", () => {
 			rect: [4, 4, 1, 1],
 			textureKey: intent.textureKey,
 		});
-		expect(plan.textureCommits).toEqual([
+		expect(reservation.pageBuildRequests).toEqual([
 			expect.objectContaining({
-				bindingUpdates: [
+				entries: [
 					expect.objectContaining({
-						bindingId: intent.bindingId,
-						readiness: expect.objectContaining({
-							kind: "resident",
-							rect: [4, 4, 1, 1],
-						}),
+						bindingIds: [intent.bindingId],
+						dataUse: createTextureUse(),
+						rect: [4, 4, 1, 1],
 					}),
 				],
-				kind: "texture-commit",
-				pageUpdates: [
-					expect.objectContaining({
-						format: "rgba8",
-						height: expect.any(Number) as number,
-						sampleClass: "rgba-color",
-						uploadBindingId: intent.bindingId,
-						width: expect.any(Number) as number,
-					}),
-				],
+				page: expect.objectContaining({
+					format: "rgba8",
+					height: expect.any(Number) as number,
+					sampleClass: "rgba-color",
+					width: expect.any(Number) as number,
+				}),
 			}),
 		]);
-		expect(plan.stageTimings.map((timing) => timing.stage)).toEqual([
+		expect(reservation.stageTimings.map((timing) => timing.stage)).toEqual([
 			"texture-source-preparation-chunk",
 			"texture-source-preparation",
 			"texture-layout",
 			"texture-placement-reservation-page",
 			"texture-placement-reservation",
-			"texture-page-build",
-			"texture-page-source-preparation",
-			"texture-page-materialization",
 		]);
 	});
 
 	it("does not require source intents for other owners already retained in the bucket", async () => {
 		const assetReader = new FixturePreparedAssetReader();
 		const textureClaims = new OpenWorldTextureClaimRegistry();
-		await buildObjectVisualTexturePlacementPlan({
+		await reserveObjectVisualTexturePlacements({
 			atlasBuilder: createDirectAtlasBuilder(assetReader),
 			filteringMode: "nearest",
 			intents: [createIntent({ itemNumber: 1 })],
 			ownerId: ownerId("static-layer:outdoor-generated-scenery:0xda55ffff"),
-			pageBuilder: new DirectOpenWorldTexturePageBuilder({ assetReader }),
 			textureClaims,
 		});
 
@@ -119,23 +106,27 @@ describe("buildObjectVisualTexturePlacementPlan", () => {
 			itemNumber: 2,
 			textureKey: textureKey("texture:object-base:second"),
 		});
-		const secondPlan = await buildObjectVisualTexturePlacementPlan({
+		const secondReservation = await reserveObjectVisualTexturePlacements({
 			atlasBuilder: createDirectAtlasBuilder(assetReader),
 			filteringMode: "nearest",
 			intents: [secondIntent],
 			ownerId: ownerId("static-layer:outdoor-generated-scenery:0xda56ffff"),
-			pageBuilder: new DirectOpenWorldTexturePageBuilder({ assetReader }),
 			textureClaims,
 		});
 
 		expect(
-			secondPlan.placementSnapshot.itemIdsByBindingId.has(
+			secondReservation.placementSnapshot.itemIdsByBindingId.has(
 				secondIntent.bindingId,
 			),
 		).toBe(true);
-		expect(secondPlan.textureCommits).toHaveLength(1);
-		expect(secondPlan.textureCommits[0]?.bindingUpdates).toEqual([
-			expect.objectContaining({ bindingId: secondIntent.bindingId }),
+		expect(secondReservation.pageBuildRequests).toEqual([
+			expect.objectContaining({
+				entries: [
+					expect.objectContaining({
+						bindingIds: [secondIntent.bindingId],
+					}),
+				],
+			}),
 		]);
 	});
 
@@ -153,22 +144,27 @@ describe("buildObjectVisualTexturePlacementPlan", () => {
 			textureKey: textureKey("texture:object-base:second"),
 		});
 
-		const plan = await buildObjectVisualTexturePlacementPlan({
+		const reservation = await reserveObjectVisualTexturePlacements({
 			atlasBuilder: createDirectAtlasBuilder(assetReader),
 			filteringMode: "nearest",
 			intents: [firstIntent, secondIntent],
 			ownerId: ownerId("static-layer:env-cell-system:0xda55ffff"),
-			pageBuilder: new DirectOpenWorldTexturePageBuilder({ assetReader }),
 			textureClaims,
 		});
 
 		expect(
-			plan.placementSnapshot.itemIdsByBindingId.get(firstIntent.bindingId),
+			reservation.placementSnapshot.itemIdsByBindingId.get(
+				firstIntent.bindingId,
+			),
 		).toBe(createTexturePlacementItemId(0));
 		expect(
-			plan.placementSnapshot.itemIdsByBindingId.get(secondIntent.bindingId),
+			reservation.placementSnapshot.itemIdsByBindingId.get(
+				secondIntent.bindingId,
+			),
 		).toBe(createTexturePlacementItemId(1));
-		expect([...plan.placementSnapshot.placementsByItemId.keys()]).toEqual([
+		expect([
+			...reservation.placementSnapshot.placementsByItemId.keys(),
+		]).toEqual([
 			createTexturePlacementItemId(0),
 			createTexturePlacementItemId(1),
 		]);

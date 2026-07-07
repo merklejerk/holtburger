@@ -20,10 +20,7 @@ import {
 	type OpenWorldTextureBucketSnapshot,
 	type OpenWorldTextureEntryId,
 } from "../claims/texture-claim-registry";
-import type { OpenWorldStreamingTextureCommit } from "../commits/contracts";
-import { settleOpenWorldTexturePageBuildResult } from "../page-build/page-build-results";
 import type { OpenWorldTexturePageBuildInput } from "../page-build/protocol";
-import type { OpenWorldTexturePageBuilder } from "../page-build/worker-client";
 import { createMaterialTexturePlacementBucketKey } from "./material-texture-placement-policy";
 import type {
 	OpenWorldMaterialTextureAtlasBuilder,
@@ -31,19 +28,6 @@ import type {
 } from "./object-visual-atlas-builder";
 
 const MAX_RUNTIME_ATLAS_PAGE_SIZE = 2048;
-
-export interface OpenWorldMaterialTexturePlacementPlanOptions<
-	TItemId extends TexturePlacementLookupId,
-	TIntent extends TexturePlacementIntent<TItemId>,
-> {
-	readonly atlasBuilder: OpenWorldMaterialTextureAtlasBuilder;
-	readonly filteringMode: TextureFilteringMode;
-	readonly intents: readonly TIntent[];
-	readonly jobPrefix: string;
-	readonly ownerId: MaterializationOwnerId;
-	readonly pageBuilder: OpenWorldTexturePageBuilder;
-	readonly textureClaims: OpenWorldTextureClaimRegistry;
-}
 
 export interface OpenWorldMaterialTexturePlacementReservationOptions<
 	TItemId extends TexturePlacementLookupId,
@@ -57,17 +41,6 @@ export interface OpenWorldMaterialTexturePlacementReservationOptions<
 	readonly textureClaims: OpenWorldTextureClaimRegistry;
 }
 
-export interface OpenWorldMaterialTexturePlacementPlan<
-	TItemId extends TexturePlacementLookupId,
-> {
-	readonly bindingPlacements: readonly {
-		readonly bindingId: TextureBindingId;
-		readonly placement: TexturePlacement<TItemId>;
-	}[];
-	readonly stageTimings: readonly OpenWorldStreamingStaticTaskStageTiming[];
-	readonly textureCommits: readonly OpenWorldStreamingTextureCommit[];
-}
-
 export interface OpenWorldMaterialTexturePlacementReservation<
 	TItemId extends TexturePlacementLookupId,
 > {
@@ -79,27 +52,6 @@ export interface OpenWorldMaterialTexturePlacementReservation<
 	/** Immutable page-build work products; these may settle after bake work starts. */
 	readonly pageBuildRequests: readonly OpenWorldTexturePageBuildInput[];
 	readonly stageTimings: readonly OpenWorldStreamingStaticTaskStageTiming[];
-}
-
-export async function buildMaterialTexturePlacementPlan<
-	TItemId extends TexturePlacementLookupId,
-	TIntent extends TexturePlacementIntent<TItemId>,
->(
-	options: OpenWorldMaterialTexturePlacementPlanOptions<TItemId, TIntent>,
-): Promise<OpenWorldMaterialTexturePlacementPlan<TItemId>> {
-	const reservation = await reserveMaterialTexturePlacements<TItemId, TIntent>(
-		options,
-	);
-	const pageBuild = await buildReservedMaterialTexturePages({
-		pageBuilder: options.pageBuilder,
-		pageBuildRequests: reservation.pageBuildRequests,
-		textureClaims: options.textureClaims,
-	});
-	return {
-		bindingPlacements: reservation.bindingPlacements,
-		stageTimings: [...reservation.stageTimings, ...pageBuild.stageTimings],
-		textureCommits: pageBuild.textureCommits,
-	};
 }
 
 export async function reserveMaterialTexturePlacements<
@@ -146,40 +98,6 @@ export async function reserveMaterialTexturePlacements<
 		bindingPlacements,
 		pageBuildRequests,
 		stageTimings,
-	};
-}
-
-export async function buildReservedMaterialTexturePages(options: {
-	readonly pageBuilder: OpenWorldTexturePageBuilder;
-	readonly pageBuildRequests: readonly OpenWorldTexturePageBuildInput[];
-	readonly textureClaims: OpenWorldTextureClaimRegistry;
-}): Promise<{
-	readonly stageTimings: readonly OpenWorldStreamingStaticTaskStageTiming[];
-	readonly textureCommits: readonly OpenWorldStreamingTextureCommit[];
-}> {
-	const timing = new TexturePlacementStageTimer();
-	const textureCommits: OpenWorldStreamingTextureCommit[] = [];
-	for (const request of options.pageBuildRequests) {
-		const output = await timing.measure("texture-page-build", () =>
-			options.pageBuilder.buildPage(request),
-		);
-		timing.append(output.stageTimings);
-		const settlement = settleOpenWorldTexturePageBuildResult(
-			options.textureClaims,
-			output,
-		);
-		if (settlement.kind === "stale") {
-			throw new Error(
-				`Texture page build unexpectedly became stale for ${request.pageId}.`,
-			);
-		}
-		if (settlement.commit) {
-			textureCommits.push(settlement.commit);
-		}
-	}
-	return {
-		stageTimings: timing.createSnapshot(),
-		textureCommits,
 	};
 }
 

@@ -23,6 +23,13 @@ export interface OpenWorldTexturePageBuildTaskRequest {
 	readonly sourceTaskId: string;
 }
 
+export interface OpenWorldTexturePageBuildTaskSettlement {
+	readonly error: string | null;
+	readonly jobId: string;
+	readonly pageId: OpenWorldTexturePageBuildInput["pageId"];
+	readonly status: "accepted" | "committed" | "failed" | "stale-rejected";
+}
+
 export interface OpenWorldTexturePageBuildTaskDiagnosticsSnapshot {
 	readonly active: readonly OpenWorldTexturePageBuildActiveTaskDiagnostics[];
 	readonly recent: readonly OpenWorldTexturePageBuildTaskTimingDiagnostics[];
@@ -87,11 +94,15 @@ export class OpenWorldTexturePageBuildTaskStream {
 		this.#textureClaims = options.textureClaims;
 	}
 
-	schedule(request: OpenWorldTexturePageBuildTaskRequest): void {
-		for (const pageBuildRequest of request.pageBuildRequests) {
-			this.#queuedCount += 1;
-			void this.#runTask(request, pageBuildRequest);
-		}
+	schedule(
+		request: OpenWorldTexturePageBuildTaskRequest,
+	): Promise<readonly OpenWorldTexturePageBuildTaskSettlement[]> {
+		return Promise.all(
+			request.pageBuildRequests.map((pageBuildRequest) => {
+				this.#queuedCount += 1;
+				return this.#runTask(request, pageBuildRequest);
+			}),
+		);
 	}
 
 	createDiagnosticsSnapshot(): OpenWorldTexturePageBuildTaskDiagnosticsSnapshot {
@@ -131,7 +142,7 @@ export class OpenWorldTexturePageBuildTaskStream {
 	async #runTask(
 		request: OpenWorldTexturePageBuildTaskRequest,
 		pageBuildRequest: OpenWorldTexturePageBuildInput,
-	): Promise<void> {
+	): Promise<OpenWorldTexturePageBuildTaskSettlement> {
 		const startedAtMs = nowMs();
 		const activeTask: ActiveTexturePageBuildTask = {
 			bucketKey: pageBuildRequest.bucketKey,
@@ -154,7 +165,11 @@ export class OpenWorldTexturePageBuildTaskStream {
 					stageTimings: output.stageTimings,
 					status: "stale-rejected",
 				});
-				return;
+				return createTaskSettlement({
+					error: null,
+					pageBuildRequest,
+					status: "stale-rejected",
+				});
 			}
 			const settlement = settleOpenWorldTexturePageBuildResult(
 				this.#textureClaims,
@@ -169,7 +184,11 @@ export class OpenWorldTexturePageBuildTaskStream {
 					stageTimings: output.stageTimings,
 					status: "stale-rejected",
 				});
-				return;
+				return createTaskSettlement({
+					error: null,
+					pageBuildRequest,
+					status: "stale-rejected",
+				});
 			}
 			this.#acceptedCount += 1;
 			if (settlement.commit) {
@@ -181,6 +200,11 @@ export class OpenWorldTexturePageBuildTaskStream {
 				durationMs: nowMs() - startedAtMs,
 				error: null,
 				stageTimings: output.stageTimings,
+				status: settlement.commit ? "committed" : "accepted",
+			});
+			return createTaskSettlement({
+				error: null,
+				pageBuildRequest,
 				status: settlement.commit ? "committed" : "accepted",
 			});
 		} catch (error) {
@@ -199,6 +223,11 @@ export class OpenWorldTexturePageBuildTaskStream {
 				durationMs: nowMs() - startedAtMs,
 				error: message,
 				stageTimings: [],
+				status: "failed",
+			});
+			return createTaskSettlement({
+				error: message,
+				pageBuildRequest,
 				status: "failed",
 			});
 		} finally {
@@ -247,6 +276,19 @@ export class OpenWorldTexturePageBuildTaskStream {
 			waiter();
 		}
 	}
+}
+
+function createTaskSettlement(input: {
+	readonly error: string | null;
+	readonly pageBuildRequest: OpenWorldTexturePageBuildInput;
+	readonly status: OpenWorldTexturePageBuildTaskSettlement["status"];
+}): OpenWorldTexturePageBuildTaskSettlement {
+	return {
+		error: input.error,
+		jobId: input.pageBuildRequest.jobId,
+		pageId: input.pageBuildRequest.pageId,
+		status: input.status,
+	};
 }
 
 function compareActiveTasks(

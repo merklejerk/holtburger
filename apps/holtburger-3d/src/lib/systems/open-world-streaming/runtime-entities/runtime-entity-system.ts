@@ -29,6 +29,7 @@ import {
 import { OpenWorldTextureClaimRegistry } from "../texture-residency/claims/texture-claim-registry";
 import { reserveObjectVisualTexturePlacements } from "../texture-residency/placement/object-visual-texture-placement-plan";
 import type { OpenWorldTexturePageBuildInput } from "../texture-residency/page-build/protocol";
+import type { OpenWorldTexturePageBuildTaskSettlement } from "../texture-residency/page-build/texture-page-build-task-stream";
 import type { OpenWorldObjectVisualAtlasBuilder } from "../texture-residency/atlas-build/object-visual-atlas-builder";
 import {
 	createDynamicRendererInstances,
@@ -44,7 +45,7 @@ export interface OpenWorldRuntimeEntitySystemOptions {
 	readonly renderer: OpenWorldRuntimeEntityRendererPort;
 	readonly scheduleTexturePageBuilds: (
 		request: OpenWorldRuntimeEntityTexturePageBuildRequest,
-	) => void;
+	) => Promise<readonly OpenWorldTexturePageBuildTaskSettlement[]>;
 	readonly textureClaims: OpenWorldTextureClaimRegistry;
 }
 
@@ -96,6 +97,13 @@ type DynamicPrepResult =
 	| "skipped"
 	| "stale";
 
+type DynamicPrepStage =
+	| "dynamic-bake"
+	| "recipe-resolution"
+	| "source-geometry-preparation"
+	| "texture-page-build-wait"
+	| "texture-placement-reservation";
+
 export interface OpenWorldRuntimeEntityDiagnosticsSnapshot {
 	readonly animation: {
 		readonly catchUpTruncationCount: number;
@@ -115,6 +123,7 @@ export interface OpenWorldRuntimeEntityDiagnosticsSnapshot {
 		readonly missingRecipeCount: number;
 		readonly recipeResolvedCount: number;
 		readonly staleCount: number;
+		readonly recentStageTimings: readonly OpenWorldRuntimeEntityPrepStageTiming[];
 		readonly states: Record<DynamicPrepState, number>;
 		readonly skippedVisualCount: number;
 		readonly started: number;
@@ -129,6 +138,13 @@ interface OpenWorldRuntimeEntityPrepFailure {
 	readonly phase: "bake" | "prep";
 }
 
+interface OpenWorldRuntimeEntityPrepStageTiming {
+	readonly durationMs: number;
+	readonly entityId: string;
+	readonly ownerId: string;
+	readonly stage: DynamicPrepStage;
+}
+
 const RECENT_RUNTIME_ENTITY_DIAGNOSTICS_LIMIT = 20;
 
 export class OpenWorldRuntimeEntitySystem {
@@ -141,7 +157,7 @@ export class OpenWorldRuntimeEntitySystem {
 	readonly #renderer: OpenWorldRuntimeEntityRendererPort;
 	readonly #scheduleTexturePageBuilds: (
 		request: OpenWorldRuntimeEntityTexturePageBuildRequest,
-	) => void;
+	) => Promise<readonly OpenWorldTexturePageBuildTaskSettlement[]>;
 	readonly #staticChildOwnerIdsByParentId = new Map<
 		MaterializationOwnerId,
 		Set<MaterializationOwnerId>
@@ -172,6 +188,8 @@ export class OpenWorldRuntimeEntitySystem {
 	>();
 	readonly #recentCatchUpTruncations: DynamicAnimationCatchUpTruncation[] = [];
 	readonly #recentPrepFailures: OpenWorldRuntimeEntityPrepFailure[] = [];
+	readonly #recentPrepStageTimings: OpenWorldRuntimeEntityPrepStageTiming[] =
+		[];
 
 	constructor(options: OpenWorldRuntimeEntitySystemOptions) {
 		this.#assetReader = options.assetReader;
@@ -317,6 +335,7 @@ export class OpenWorldRuntimeEntitySystem {
 				missingRecipeCount: this.#missingRecipeCount,
 				recipeResolvedCount: this.#recipeResolvedCount,
 				recentFailures: [...this.#recentPrepFailures],
+				recentStageTimings: [...this.#recentPrepStageTimings],
 				staleCount: this.#stalePrepCount,
 				states: this.#createPrepStateCounts(),
 				skippedVisualCount: this.#skippedVisualCount,
@@ -343,10 +362,15 @@ export class OpenWorldRuntimeEntitySystem {
 				this.#setPrepState(request, "missingRecipe");
 				return "missingRecipe";
 			}
-			const recipe = await this.#requireRecipeResolver().resolveRecipe({
-				...recipeRequest,
-				assetReader: this.#assetReader,
-			});
+			const recipe = await this.#measurePrepStage(
+				request,
+				"recipe-resolution",
+				() =>
+					this.#requireRecipeResolver().resolveRecipe({
+						...recipeRequest,
+						assetReader: this.#assetReader,
+					}),
+			);
 			if (!this.#isCurrent(request)) {
 				this.#recordStalePrep(request);
 				return "stale";
@@ -365,44 +389,78 @@ export class OpenWorldRuntimeEntitySystem {
 			}
 			this.#setPrepState(request, "reservingTextures");
 			const texturePlanning = createDynamicVisualTexturePlanning(recipe);
-			const textureReservation = await reserveObjectVisualTexturePlacements({
-				atlasBuilder: this.#objectVisualAtlasBuilder,
-				filteringMode: "nearest",
-				intents: texturePlanning.placementIntents,
-				ownerId: request.ownerId,
-				textureClaims: this.#textureClaims,
-			});
-			if (!this.#isCurrent(request)) {
-				this.#recordStalePrep(request);
-				return "stale";
-			}
-			this.#setPrepState(request, "baking");
-			const sourceGeometry = await createDynamicVisualBakeSourceGeometry(
-				this.#assetReader,
-				[recipe],
+			const textureReservation = await this.#measurePrepStage(
+				request,
+				"texture-placement-reservation",
+				() =>
+					reserveObjectVisualTexturePlacements({
+						atlasBuilder: this.#objectVisualAtlasBuilder,
+						filteringMode: "nearest",
+						intents: texturePlanning.placementIntents,
+						ownerId: request.ownerId,
+						textureClaims: this.#textureClaims,
+					}),
 			);
 			if (!this.#isCurrent(request)) {
 				this.#recordStalePrep(request);
 				return "stale";
 			}
-			const result = await this.#requireDynamicBaker().bake({
-				recipe,
-				revision: this.#nextRendererRevision(),
-				sourceGeometry,
-				texturePlacementSnapshot: textureReservation.placementSnapshot,
-				texturePlanning,
-			});
+			this.#setPrepState(request, "baking");
+			const sourceGeometry = await this.#measurePrepStage(
+				request,
+				"source-geometry-preparation",
+				() => createDynamicVisualBakeSourceGeometry(this.#assetReader, [recipe]),
+			);
+			if (!this.#isCurrent(request)) {
+				this.#recordStalePrep(request);
+				return "stale";
+			}
+			const result = await this.#measurePrepStage(request, "dynamic-bake", () =>
+				this.#requireDynamicBaker().bake({
+					recipe,
+					revision: this.#nextRendererRevision(),
+					sourceGeometry,
+					texturePlacementSnapshot: textureReservation.placementSnapshot,
+					texturePlanning,
+				}),
+			);
 			if (!this.#isCurrent(request)) {
 				this.#recordStalePrep(request);
 				return "stale";
 			}
 			this.#setPrepState(request, "waitingForTexturePages");
-			this.#scheduleTexturePageBuilds({
-				isCurrent: () => this.#isCurrent(request),
-				ownerId: request.ownerId,
-				pageBuildRequests: textureReservation.pageBuildRequests,
-				sourceTaskId: String(request.entityId),
-			});
+			const pageBuildSettlements = await this.#measurePrepStage(
+				request,
+				"texture-page-build-wait",
+				() =>
+					this.#scheduleTexturePageBuilds({
+						isCurrent: () => this.#isCurrent(request),
+						ownerId: request.ownerId,
+						pageBuildRequests: textureReservation.pageBuildRequests,
+						sourceTaskId: String(request.entityId),
+					}),
+			);
+			if (!this.#isCurrent(request)) {
+				this.#recordStalePrep(request);
+				return "stale";
+			}
+			const pageBuildFailure =
+				createDynamicPrepTexturePageFailure(pageBuildSettlements);
+			if (pageBuildFailure !== null) {
+				this.#prepFailureCount += 1;
+				this.#recordPrepFailure({
+					entityId: request.entityId,
+					message: pageBuildFailure,
+					ownerId: request.ownerId,
+					phase: "prep",
+				});
+				this.#controller.skipDynamicVisual(request.entityId, {
+					kind: "invalid-recipe",
+					message: pageBuildFailure,
+				});
+				this.#setPrepState(request, "failed");
+				return "failed";
+			}
 			const product = result.product;
 			if (product?.kind === "baked") {
 				this.#bakeSuccessCount += 1;
@@ -536,6 +594,28 @@ export class OpenWorldRuntimeEntitySystem {
 		);
 	}
 
+	async #measurePrepStage<T>(
+		request: DynamicPrepRequest,
+		stage: DynamicPrepStage,
+		run: () => Promise<T>,
+	): Promise<T> {
+		const startedAtMs = nowMs();
+		try {
+			return await run();
+		} finally {
+			pushRecent(
+				this.#recentPrepStageTimings,
+				{
+					durationMs: nowMs() - startedAtMs,
+					entityId: request.entityId,
+					ownerId: request.ownerId,
+					stage,
+				},
+				RECENT_RUNTIME_ENTITY_DIAGNOSTICS_LIMIT,
+			);
+		}
+	}
+
 	#addStaticChildOwner(
 		parentOwnerId: MaterializationOwnerId,
 		childOwnerId: MaterializationOwnerId,
@@ -652,9 +732,29 @@ function isTerminalPrepState(state: DynamicPrepState): boolean {
 	);
 }
 
+function createDynamicPrepTexturePageFailure(
+	settlements: readonly OpenWorldTexturePageBuildTaskSettlement[],
+): string | null {
+	const failed = settlements.find((settlement) => settlement.status === "failed");
+	if (failed) {
+		return `Texture page build ${failed.jobId} failed: ${failed.error ?? "unknown error"}.`;
+	}
+	const stale = settlements.find(
+		(settlement) => settlement.status === "stale-rejected",
+	);
+	if (stale) {
+		return `Texture page build ${stale.jobId} was rejected as stale.`;
+	}
+	return null;
+}
+
 function pushRecent<T>(items: T[], item: T, limit: number): void {
 	items.push(item);
 	if (items.length > limit) {
 		items.splice(0, items.length - limit);
 	}
+}
+
+function nowMs(): number {
+	return globalThis.performance?.now?.() ?? Date.now();
 }

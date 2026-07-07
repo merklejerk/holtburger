@@ -18,6 +18,7 @@ import type {
 	DynamicRendererInstanceCommit,
 	DynamicRendererResourceCommit,
 } from "../../../renderer/types";
+import type { TextureBindingId } from "../../../textures/identity";
 import type {
 	StaticAuthoredDynamicPlacementRecord,
 	StaticObjectSourceIdentity,
@@ -26,6 +27,7 @@ import { MaterializationOwnerRegistry } from "../owners/owner-registry";
 import type { MaterializationOwnerId } from "../owners/owner-id";
 import { OpenWorldTextureClaimRegistry } from "../texture-residency/claims/texture-claim-registry";
 import type { OpenWorldObjectVisualAtlasBuilder } from "../texture-residency/atlas-build/object-visual-atlas-builder";
+import type { OpenWorldTexturePageBuildTaskSettlement } from "../texture-residency/page-build/texture-page-build-task-stream";
 import {
 	OpenWorldRuntimeEntitySystem,
 	type OpenWorldRuntimeEntityTexturePageBuildRequest,
@@ -225,12 +227,95 @@ describe("OpenWorldRuntimeEntitySystem", () => {
 			},
 		});
 	});
+
+	it("waits for dynamic texture page settlements before publishing baked visuals", async () => {
+		const renderer = new FixtureDynamicRenderer();
+		const owners = new MaterializationOwnerRegistry();
+		const pageBuilds = new DeferredTexturePageBuildScheduler();
+		const system = createSystem({
+			owners,
+			renderer,
+			scheduleTexturePageBuilds: (request) => pageBuilds.schedule(request),
+		});
+		const parentOwnerId =
+			"static-layer:outdoor-buildings:0xda55ffff" as MaterializationOwnerId;
+
+		system.ingestStaticAuthoredPlacements({
+			parentOwnerId,
+			placements: [createStaticAuthoredPlacement(parentOwnerId)],
+		});
+		await waitFor(
+			() =>
+				system.createDiagnosticsSnapshot().prep.states.waitingForTexturePages ===
+				1,
+		);
+
+		expect(renderer.resourceCommits).toEqual([]);
+
+		pageBuilds.resolveAll("committed");
+		await waitFor(() =>
+			renderer.resourceCommits.some(
+				(commit) => commit.addedVisualResources.length === 1,
+			),
+		);
+
+		expect(system.createDiagnosticsSnapshot()).toMatchObject({
+			prep: {
+				bakeSuccessCount: 1,
+				states: {
+					ready: 1,
+					waitingForTexturePages: 0,
+				},
+			},
+		});
+	});
+
+	it("fails dynamic prep when texture page builds fail", async () => {
+		const renderer = new FixtureDynamicRenderer();
+		const owners = new MaterializationOwnerRegistry();
+		const pageBuilds = new DeferredTexturePageBuildScheduler();
+		const system = createSystem({
+			owners,
+			renderer,
+			scheduleTexturePageBuilds: (request) => pageBuilds.schedule(request),
+		});
+		const parentOwnerId =
+			"static-layer:outdoor-buildings:0xda55ffff" as MaterializationOwnerId;
+
+		system.ingestStaticAuthoredPlacements({
+			parentOwnerId,
+			placements: [createStaticAuthoredPlacement(parentOwnerId)],
+		});
+		await waitFor(
+			() =>
+				system.createDiagnosticsSnapshot().prep.states.waitingForTexturePages ===
+				1,
+		);
+
+		pageBuilds.resolveAll("failed");
+		await waitFor(() => system.createDiagnosticsSnapshot().prep.failed === 1);
+
+		expect(renderer.resourceCommits).toEqual([]);
+		expect(system.createDiagnosticsSnapshot()).toMatchObject({
+			prep: {
+				bakeSuccessCount: 0,
+				failed: 1,
+				states: {
+					failed: 1,
+					ready: 0,
+				},
+			},
+		});
+	});
 });
 
 function createSystem(options: {
 	readonly baker?: DynamicVisualBaker;
 	readonly owners: MaterializationOwnerRegistry;
 	readonly renderer: FixtureDynamicRenderer;
+	readonly scheduleTexturePageBuilds?: (
+		request: OpenWorldRuntimeEntityTexturePageBuildRequest,
+	) => Promise<readonly OpenWorldTexturePageBuildTaskSettlement[]>;
 }): OpenWorldRuntimeEntitySystem {
 	return new OpenWorldRuntimeEntitySystem({
 		assetReader: createUnusedAssetReader(),
@@ -241,6 +326,10 @@ function createSystem(options: {
 		renderer: options.renderer,
 		scheduleTexturePageBuilds: (request) => {
 			options.renderer.scheduledTexturePageBuilds.push(request);
+			if (options.scheduleTexturePageBuilds) {
+				return options.scheduleTexturePageBuilds(request);
+			}
+			return Promise.resolve([]);
 		},
 		textureClaims: new OpenWorldTextureClaimRegistry(),
 	});
@@ -327,6 +416,50 @@ class FixtureDynamicRenderer {
 	}
 }
 
+class DeferredTexturePageBuildScheduler {
+	readonly #pending: Array<{
+		readonly request: OpenWorldRuntimeEntityTexturePageBuildRequest;
+		readonly resolve: (
+			settlements: readonly OpenWorldTexturePageBuildTaskSettlement[],
+		) => void;
+	}> = [];
+
+	schedule(
+		request: OpenWorldRuntimeEntityTexturePageBuildRequest,
+	): Promise<readonly OpenWorldTexturePageBuildTaskSettlement[]> {
+		return new Promise((resolve) => {
+			this.#pending.push({ request, resolve });
+		});
+	}
+
+	resolveAll(status: OpenWorldTexturePageBuildTaskSettlement["status"]): void {
+		for (const pending of this.#pending.splice(0)) {
+			const settlements = pending.request.pageBuildRequests.map(
+				(pageBuildRequest) => ({
+					error: status === "failed" ? "fixture page build failed" : null,
+					jobId: pageBuildRequest.jobId,
+					pageId: pageBuildRequest.pageId,
+					status,
+				}),
+			);
+			pending.resolve(
+				settlements.length > 0
+					? settlements
+					: [
+							{
+								error:
+									status === "failed" ? "fixture page build failed" : null,
+								jobId: "texture-task:fixture",
+								pageId:
+									"texture-page:fixture" as OpenWorldTexturePageBuildTaskSettlement["pageId"],
+								status,
+							},
+						],
+			);
+		}
+	}
+}
+
 function createBakedResource(entityId: string): BakedDynamicVisualResource {
 	return {
 		entityId,
@@ -363,7 +496,7 @@ function createBakedResource(entityId: string): BakedDynamicVisualResource {
 		],
 		resourceId: createDynamicVisualResourceId(entityId),
 		sourceAssets: [createBakedSourceAsset()],
-		textureDependencies: [],
+		textureDependencies: ["binding:dynamic-fixture" as TextureBindingId],
 		textureRefs: [],
 		textureRequirements: [],
 	};

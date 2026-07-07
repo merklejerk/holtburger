@@ -3340,7 +3340,7 @@ Decisions and course corrections:
   - `dc58` all-domain dynamic instance commits dropped from 1504 to 19, dynamic resource commits from 234 to 8, and max resources per commit from 162 to 41. Strict ready time changed from 94.9s to 91.2s, long tasks from 873 to 844, and static apply from 109.0ms total / 22.5ms max to 98.7ms total / 19.3ms max.
 - Spicy bit: Phase 50 fixed the renderer commit storm, but it did not fix the long train of browser long tasks. That is expected and now better attributed. Remaining wall time and long tasks still track dynamic visual texture/page work: page diagnostics continue to show static-authored generated-scenery `texture-page-source-preparation` around 80-90ms and page task durations around 160-180ms in the all-domain run. Phase 51 should not reopen renderer commit batching; it should move the dynamic visual texture/source/page work to the worksheet's worker-owned/direct-contract shape.
 
-### Phase 51: Dynamic Visual Texture Work Closure
+### Phase 51: Dynamic Visual Page Settlement Closure
 
 North-star check:
 
@@ -3359,36 +3359,87 @@ Current code delta:
 
 Deliverables:
 
-- Move dynamic visual source-geometry preparation into a worker-owned or worker-compatible transform. If an existing dynamic baker already owns the right worker boundary, migrate the pre-bake source prep into its request payload builder rather than adding another main-thread stage.
-- Ensure object visual texture source preparation, layout search, packing, guttered blits, and page materialization are scheduled through direct texture/page task contracts, not hidden inside runtime entity prep.
-- Canonicalize dynamic visual texture placement results so static-authored dynamic readiness can wait on `textureReservation`, `pageBuild`, and `rendererTextureCommit` terminal facts.
-- Add direct diagnostics that separate dynamic visual recipe resolution, texture placement reservation, source geometry preparation, dynamic bake worker wait, page source preparation, page materialization, and renderer apply.
-- Remove or collapse any helper that only exists to preserve the old split between static material coverage and dynamic visual materialization.
+- Make dynamic visual page-build scheduling return direct terminal settlements instead of fire-and-forget work hidden behind runtime prep.
+- Canonicalize dynamic visual texture placement results so static-authored dynamic readiness waits on `textureReservation` and `pageBuild` terminal facts before publishing baked renderer resources.
+- Add direct diagnostics that separate dynamic visual recipe resolution, texture placement reservation, source geometry preparation, dynamic bake wait, and texture page-build wait without fitting legacy lifecycle outputs.
+- Keep the source-geometry worker-boundary move out of this phase after dry-run proof that it requires a real bake/asset worker contract redesign.
 
 Acceptance criteria:
 
-- Static-authored dynamic visual prep no longer performs source-geometry preparation, packing/page materialization, or renderer texture mutation as untracked runtime prep work.
+- Static-authored dynamic visual prep cannot mark a baked visual ready before its scheduled texture pages are committed, accepted as current noops, or failed explicitly.
 - Page-build readiness can explain every pending dynamic visual texture dependency without legacy material lifecycle terms.
-- `dc58` terrain+generated-scenery and all-domain harnesses show no long task train proportional to static-authored dynamic page count.
 - Focused dynamic visual, texture residency, page-build, renderer binding, and controller tests pass.
+- The dry run records whether remaining long tasks are still proportional to static-authored dynamic source/page work and steers the next phase instead of pretending this phase solved it.
 - No production shim preserves old texture-manager or legacy diagnostics vocabulary.
 
 Task checklist:
 
-- [ ] Map dynamic visual texture preparation against the static material placement worker split and delete duplicate or weaker helper paths where possible. Start with `OpenWorldRuntimeEntitySystem.#prepareEntity(...)`, `createDynamicVisualBakeSourceGeometry(...)`, `reserveObjectVisualTexturePlacements(...)`, and the object visual page-build task stream.
-- [ ] Move dynamic source-geometry preparation behind the chosen worker-owned transform boundary.
-- [ ] Ensure texture placement reservation returns direct terminal facts for dynamic visual owners.
-- [ ] Ensure dynamic page build scheduling reports page source preparation, materialization, upload readiness, and stale cancellation directly.
-- [ ] Update diagnostics contracts, harness readiness, and status text without fitting the data to legacy diagnostic outputs.
-- [ ] Add focused tests for dynamic texture terminal states, stale page builds, texture dependency readiness, and renderer binding safety.
+- [x] Map dynamic visual texture preparation against the static material placement worker split. Current hot surface is `OpenWorldRuntimeEntitySystem.#prepareEntity(...)`, `createDynamicVisualBakeSourceGeometry(...)`, `reserveObjectVisualTexturePlacements(...)`, and the object visual page-build task stream.
+- [x] Ensure texture placement reservation and page scheduling return direct terminal facts for dynamic visual owners.
+- [x] Ensure dynamic page build scheduling reports committed, accepted, failed, and stale-rejected terminal settlements directly.
+- [x] Update diagnostics contracts without fitting the data to legacy diagnostic outputs.
+- [x] Add focused tests for dynamic texture terminal states, stale page builds, texture dependency readiness, and renderer binding safety.
+- [x] Dry-run Phase 52 after implementation and steer its worker-contract target before implementation starts.
+- [ ] Rerun `dc58` all-domain and `da55` all-domain radius-1 harnesses after Phase 52, because the `dc58` terrain+generated-scenery dry run proves this phase alone still leaves the dynamic worker-boundary gap open.
+
+Decisions and course corrections:
+
+- Phase 51 intentionally narrowed after implementation dry-run. The direct page settlement contract landed, but the original "dynamic visual texture work closure" title was too broad: moving `createDynamicVisualBakeSourceGeometry(...)` behind a worker-owned boundary requires a redesigned dynamic visual prep/bake worker contract with access to prepared geometry assets. The current bake worker accepts already-built `sourceGeometry` sidecars and has no `PreparedAssetReader` bridge.
+- Runtime prep now waits for page-build settlements before publishing baked dynamic visual resources. Failed or stale page builds fail the dynamic prep loudly instead of publishing a visual with dishonest texture readiness.
+- Direct prep diagnostics now expose `recipe-resolution`, `texture-placement-reservation`, `source-geometry-preparation`, `dynamic-bake`, and `texture-page-build-wait`. These are attribution facts, not a new legacy lifecycle.
+- Dry-run evidence: `/tmp/holtburger-phase51-dc58-terrain-generated-r1.json` settled with 162 ready static-authored runtime entities, 228 committed page tasks, zero material readiness issues, and zero prep failures. It still recorded 842 long tasks totaling about 55.9s, with strict readiness around 69.1s. The top prep wait attribution shows long async recipe-resolution waits around 54-56s and page-build waits around 137-140ms. This phase improved correctness and observability but did not satisfy the worksheet worker-ownership target by itself.
+- Resteer: insert Phase 52 for a first-class dynamic visual prep worker contract. Performance rebaseline and reclamation move later so benchmarks are run after the source-geometry/prep gap is closed.
+
+### Phase 52: Dynamic Visual Prep Worker Contract
+
+North-star check:
+
+- The [worksheet texture split](./holtburger-3d-open-world-streaming-stutter-investigation-worksheet.md) remains the implementation north star. Dynamic visual prep should send immutable recipe/source facts to worker-owned transforms, while the main loop keeps placement reservation, owner currentness, renderer mutation, and diagnostics authority. Do not make `OpenWorldRuntimeEntitySystem.#prepareEntity(...)` a forever coordinator for source preparation just because it currently has the `PreparedAssetReader`.
+
+Owning authority:
+
+- Dynamic visual recipe/prep worker protocol, prepared-asset access boundary, dynamic source geometry sidecars, dynamic bake request construction, runtime prep state, and direct diagnostics.
+
+Current code delta:
+
+- `OpenWorldRuntimeEntitySystem.#prepareEntity(...)` still builds source geometry by calling `createDynamicVisualBakeSourceGeometry(this.#assetReader, [recipe])` before invoking the dynamic bake worker.
+- `DynamicVisualBakeInput` requires `sourceGeometry`, and `WorkerPoolDynamicVisualBaker` submits that complete input to `visual-bake.worker.ts`.
+- `visual-bake.worker.ts` installs `LocalDynamicVisualBaker`, which has no prepared-asset reader or asset request bridge. It can bake prepared sidecars, but it cannot currently request gfx-obj payloads itself.
+- `createDynamicVisualBakeSourceGeometry(...)` is a pure enough source-prep transform once given `PreparedAssetReader`, but the boundary is in the wrong place for the worksheet target.
+
+Deliverables:
+
+- Define a direct dynamic visual prep worker request that carries recipe identity, immutable recipe/source facts, texture planning, placement snapshot, and revision without requiring main-loop-created source geometry sidecars.
+- Give the prep worker an honest prepared-asset access path, or split a worker-compatible source-geometry preparation worker from the bake worker if that is cleaner. The chosen path must not borrow mutable main-thread cache buffers or smuggle a legacy asset shim into replacement internals.
+- Move `createDynamicVisualBakeSourceGeometry(...)` out of `OpenWorldRuntimeEntitySystem.#prepareEntity(...)` production flow. Runtime prep may construct the request and enforce currentness, but source geometry sidecar creation must be worker-owned for browser composition.
+- Preserve direct terminal states: recipe resolved, texture reservation accepted, source prep failed, bake failed, page build failed, stale, ready.
+- Update focused tests so a dynamic visual cannot reach the bake/product publication path until worker-owned source prep has completed or failed explicitly.
+- Delete or collapse any helper that only existed because runtime prep and dynamic bake were split around prebuilt source geometry.
+
+Acceptance criteria:
+
+- Browser production composition uses the worker-owned dynamic prep/source-geometry path; direct/local implementations are test-only or worker-internal.
+- `OpenWorldRuntimeEntitySystem.#prepareEntity(...)` no longer performs dynamic source-geometry preparation or passes main-loop-created sidecars into production dynamic baking.
+- Prep diagnostics distinguish worker wall time from main-loop currentness/renderer work without introducing legacy vocabulary.
+- Failed source asset preparation fails loudly and cannot publish a partial visual.
+- Focused dynamic visual worker, runtime entity, controller, and texture readiness tests pass.
+
+Task checklist:
+
+- [ ] Dry-run the current dynamic bake worker and prepared-asset worker patterns before choosing a protocol shape.
+- [ ] Define the worker request/result contracts with typed failure reasons and transfer ownership.
+- [ ] Move source-geometry sidecar creation behind the worker boundary for browser composition.
+- [ ] Keep currentness/page settlement checks in runtime prep and prove stale worker results do not publish.
+- [ ] Update diagnostics and harness summary extraction for source-prep worker wait/failure facts.
+- [ ] Run focused dynamic worker/client/handler tests, runtime entity tests, controller tests, and texture readiness tests.
 - [ ] Rerun `dc58` terrain+generated-scenery, `dc58` all-domain, and `da55` all-domain radius-1 harnesses and record output paths.
-- [ ] Dry-run Phases 52-54 after implementation and steer their thresholds, cleanup targets, and verification commands before implementation starts.
+- [ ] Dry-run Phase 53 after implementation and steer benchmark thresholds before implementation starts.
 
 Decisions and course corrections:
 
 - Pending.
 
-### Phase 52: Performance Steering Rebaseline After Dynamic Closure
+### Phase 53: Performance Steering Rebaseline After Dynamic Closure
 
 North-star check:
 
@@ -3400,11 +3451,11 @@ Owning authority:
 
 Deliverables:
 
-- Re-run the Phase 49 matrix after Phases 50-51.
-- Compare static artifact completion time, strict scene readiness time, long task counts, renderer frame deltas, runtime prep terminal counts, page-build timings, and material readiness summaries.
+- Re-run the Phase 49 matrix after Phases 50-52.
+- Compare static artifact completion time, strict scene readiness time, long task counts, renderer frame deltas, runtime prep terminal counts, page-build timings, source-prep worker timings, and material readiness summaries.
 - Decide whether any measured browser-main-loop stage still needs a budget/yield after dynamic closure.
 - Decide whether reclamation should remain deferred or become active based on byte accounting and ownerless-page evidence.
-- Update Phases 53-54 from evidence.
+- Update Phases 54-55 from evidence.
 
 Acceptance criteria:
 
@@ -3421,13 +3472,13 @@ Task checklist:
 - [ ] Re-run `da55` all-domain radius-1 benchmark.
 - [ ] Attribute top long tasks from direct diagnostics and harness frame data.
 - [ ] Decide whether any budget/yield phase is justified.
-- [ ] Dry-run Phases 53-54 against the benchmark findings and steer thresholds, cleanup targets, and verification commands before implementation starts.
+- [ ] Dry-run Phases 54-55 against the benchmark findings and steer thresholds, cleanup targets, and verification commands before implementation starts.
 
 Decisions and course corrections:
 
 - Pending.
 
-### Phase 53: Measured Texture Reclamation And Removal Commits
+### Phase 54: Measured Texture Reclamation And Removal Commits
 
 North-star check:
 
@@ -3444,7 +3495,7 @@ Current code delta:
 
 Deliverables:
 
-- Use Phase 52 evidence to decide whether ownerless renderer-resident pages need active reclamation now. If not, record the measured threshold that would trigger the scheduler later.
+- Use Phase 53 evidence to decide whether ownerless renderer-resident pages need active reclamation now. If not, record the measured threshold that would trigger the scheduler later.
 - Canonicalize enough page byte accounting to make memory pressure decisions meaningful. If exact GPU bytes remain unavailable, define the approximation and its known blind spots in code and diagnostics.
 - Add a direct reclamation policy surface that selects ownerless resident pages only when pressure exceeds the chosen threshold.
 - Emit texture commits with `pageRemovals` for selected pages and apply them through the existing `removedTextureRefIds` renderer path.
@@ -3462,20 +3513,20 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Dry-run the Phase 52 benchmark outputs and choose `defer`, `warn`, or `remove` policy with an explicit byte threshold.
+- [ ] Dry-run the Phase 53 benchmark outputs and choose `defer`, `warn`, or `remove` policy with an explicit byte threshold.
 - [ ] Add canonical page byte accounting or a named approximation in texture residency diagnostics.
 - [ ] Add reclaim scheduling API to the texture residency authority, not to owner release.
 - [ ] Emit `pageRemovals` from the texture commit stream when policy selects pages.
 - [ ] Update renderer binding tests for removed page refs and claimed binding safety.
 - [ ] Update harness diagnostics to expose removal counts without recreating legacy texture-manager counters.
 - [ ] Run focused texture residency/commit/renderer/controller tests and an eviction/replacement browser harness scenario.
-- [ ] Dry-run Phase 54 after implementation and steer final deletion targets.
+- [ ] Dry-run Phase 55 after implementation and steer final deletion targets.
 
 Decisions and course corrections:
 
 - Pending.
 
-### Phase 54: Final Vestigial Wipe And Plan Closeout
+### Phase 55: Final Vestigial Wipe And Plan Closeout
 
 North-star check:
 

@@ -82,6 +82,18 @@ export interface OpenWorldStreamingDiagnosticsSnapshot {
 			/** Entity prep requests with no visual recipe to resolve. */
 			readonly missingRecipeCount: number;
 			readonly recipeResolvedCount: number;
+			/** Recent dynamic prep stage timings recorded at the direct runtime-entity boundary. */
+			readonly recentStageTimings: readonly {
+				readonly durationMs: number;
+				readonly entityId: string;
+				readonly ownerId: string;
+				readonly stage:
+					| "dynamic-bake"
+					| "recipe-resolution"
+					| "source-geometry-preparation"
+					| "texture-page-build-wait"
+					| "texture-placement-reservation";
+			}[];
 			/** Prep requests abandoned because their materialization owner token was replaced or evicted. */
 			readonly staleCount: number;
 			/** Current prep records by direct replacement state. */

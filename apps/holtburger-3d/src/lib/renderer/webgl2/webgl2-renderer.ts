@@ -78,6 +78,7 @@ import {
 } from "./webgl2-object-material-payloads";
 import {
 	createTerrainPreparedLayeredPayload,
+	hasDeferredTerrainLayeredTextureReadiness,
 	prepareTerrainLayeredPayload,
 	TERRAIN_LAYERED_MAX_LAYER_ENTRIES,
 	TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER,
@@ -1864,7 +1865,15 @@ class Webgl2Renderer implements Renderer {
 				);
 			}
 			if (resource.materialFamily === "terrain-layered" && !useLayered) {
-				this.#warnTerrainLayeredFallback(resource);
+				const deferredTextureReadiness = resource.terrainMaterialPlan
+					? hasDeferredTerrainLayeredTextureReadiness(
+							resource.terrainMaterialPlan,
+							this.#textureBindings,
+						)
+					: false;
+				if (!deferredTextureReadiness) {
+					this.#warnTerrainLayeredFallback(resource);
+				}
 			}
 			this.#stateCache.bindTexture2D(0, useTexture ? texture : null);
 			gl.uniform1i(this.#terrainProgram.uniforms.uTexture, 0);

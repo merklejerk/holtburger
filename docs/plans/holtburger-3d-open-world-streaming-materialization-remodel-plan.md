@@ -1988,16 +1988,24 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Reread worksheet Requirement 5, Requirement 7, Requirement 13, Requirement 14, and the final implementation notes before editing code.
-- [ ] Add or update replacement texture policy types with comments for every field whose meaning affects sharing, currentness, or worker ownership.
-- [ ] Add policy resolver tests for `static-domain`, `static-owner`, and `runtime-owner`.
-- [ ] Replace direct `createOpenWorldTextureBucketKey({ scope: { kind: "static-domain" } })` usage in the material placement primitive with the policy resolver.
-- [ ] Identify every surviving `placementBucketKey` consumer and classify it as direct migration, deletion, or legacy-edge shim.
-- [ ] Update this phase with any deliberate deviation from the worksheet.
+- [x] Reread worksheet Requirement 5, Requirement 7, Requirement 13, Requirement 14, and the final implementation notes before editing code.
+- [x] Add or update replacement texture policy types with comments for every field whose meaning affects sharing, currentness, or worker ownership.
+- [x] Add policy resolver tests for `static-domain`, `static-owner`, and `runtime-owner`.
+- [x] Replace direct `createOpenWorldTextureBucketKey({ scope: { kind: "static-domain" } })` usage in the material placement primitive with the policy resolver.
+- [x] Identify every surviving `placementBucketKey` consumer and classify it as direct migration, deletion, or legacy-edge shim.
+- [x] Update this phase with any deliberate deviation from the worksheet.
 
 Decisions and course corrections:
 
-- Pending.
+- Added `TexturePlacementPolicy` to `apps/holtburger-3d/src/lib/textures/placement.ts` as the direct replacement contract carried by every `TexturePlacementIntent`. The policy records bucket scope, source stability, currentness authority, and page-build ownership. It intentionally lives beside the existing placement intent because the policy must travel with every producer before the Phase 20 deletion pass removes ignored legacy bucket fields.
+- Added `createMaterialTexturePlacementBucketKey(...)` in `apps/holtburger-3d/src/lib/systems/open-world-streaming/texture-residency/placement/material-texture-placement-policy.ts` and routed `buildMaterialTexturePlacementPlan(...)` through it. The material placement primitive no longer hardcodes `static-domain` from only domain and purpose.
+- The policy resolver rejects owner-specific source content in shared `static-domain` buckets and rejects owner-scoped buckets for content-stable sources. This is intentionally stricter than the previous code so bucket scope cannot become decorative.
+- Dynamic visual planning now emits replacement policy directly: runtime-authored dynamic textures use `runtime-owner` scope with `runtime-customized` source stability, while content-stable static-authored dynamic textures use shared `static-domain` scope. This aligns the active replacement policy with the worksheet even though the old `placementBucketKey` field still exists.
+- Surviving `placementBucketKey` fields are Phase 20 deletion targets, not replacement truth. Current consumers are `apps/holtburger-3d/src/lib/textures/placement.ts`, `apps/holtburger-3d/src/lib/visual/object-visual-texture-placement-planner.ts`, dynamic visual planning, low-level placement tests, and legacy runtime contract types. Phase 20 must either migrate each to `TexturePlacementPolicy` or isolate any remaining compatibility at an edge.
+- Deliberate temporary deviation: `placementBucketKey` remains on `TexturePlacementIntent` for this phase to keep the codebase compiling while the direct policy is introduced. The replacement material placement primitive ignores the old field by design and uses `TexturePlacementPolicy`; Phase 20 owns deleting or isolating the old field so tests stop implying it is replacement behavior.
+- Verification: focused `npm run test:ts -- --run src/lib/textures/placement.test.ts src/lib/visual/object-visual-texture-placement-planner.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/material-texture-placement-policy.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/material-texture-placement-plan.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/object-visual-texture-placement-plan.test.ts` passed.
+- Verification: `npm run check` passed.
+- Verification: `npm run lint` passed.
 
 ### Phase 20: Intent Producer Migration And Dead Policy Deletion
 

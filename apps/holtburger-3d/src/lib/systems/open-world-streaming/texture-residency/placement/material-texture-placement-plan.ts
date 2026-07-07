@@ -13,7 +13,6 @@ import type { TextureBindingId } from "../../../../textures/identity";
 import type { TexturePackingPageFormat } from "../../../../textures/packing/protocol";
 import type { MaterializationOwnerId } from "../../owners/owner-id";
 import type { OpenWorldStreamingStaticTaskStageTiming } from "../../diagnostics/contracts";
-import { createOpenWorldTextureBucketKey } from "../claims/bucket-key";
 import type { OpenWorldTextureBucketKey } from "../claims/bucket-key";
 import {
 	OpenWorldTextureClaimRegistry,
@@ -23,6 +22,7 @@ import {
 } from "../claims/texture-claim-registry";
 import type { OpenWorldStreamingTextureCommit } from "../commits/contracts";
 import { settleOpenWorldTexturePageBuildResult } from "../page-build/page-build-results";
+import { createMaterialTexturePlacementBucketKey } from "./material-texture-placement-policy";
 import type { OpenWorldMaterialTextureAtlasBuilder } from "./object-visual-atlas-builder";
 
 const MAX_RUNTIME_ATLAS_PAGE_SIZE = 2048;
@@ -99,11 +99,7 @@ function groupMaterialTextureIntentsByBucket<
 ): ReadonlyMap<OpenWorldTextureBucketKey, readonly TIntent[]> {
 	const grouped = new Map<OpenWorldTextureBucketKey, TIntent[]>();
 	for (const intent of intents) {
-		const bucketKey = createOpenWorldTextureBucketKey({
-			domain: intent.domain,
-			purpose: intent.purpose,
-			scope: { kind: "static-domain" },
-		});
+		const bucketKey = createMaterialTexturePlacementBucketKey(intent);
 		const bucket = grouped.get(bucketKey);
 		if (bucket) {
 			bucket.push(intent);

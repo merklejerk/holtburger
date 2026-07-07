@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { PreparedRenderSurfaceTextureUseIdentity } from "../../../../static/contracts";
-import type { TexturePlacementIntent } from "../../../../textures/placement";
+import type {
+	TexturePlacementIntent,
+	TexturePlacementPolicy,
+} from "../../../../textures/placement";
 import type {
 	TextureBindingId,
 	TextureKey,
@@ -112,6 +115,7 @@ function createTerrainIntent(): TexturePlacementIntent {
 		pageClass: pageClass("page-class:terrain-color"),
 		placementBucketKey:
 			"fixture-bucket:unused" as TexturePlacementIntent["placementBucketKey"],
+		placementPolicy: staticDomainPolicy(),
 		purpose: "terrain-color",
 		source: {
 			dataUse: source,
@@ -150,4 +154,13 @@ function pageClass(value: string): TexturePageClass {
 
 function textureKey(value: string): TextureKey {
 	return value as TextureKey;
+}
+
+function staticDomainPolicy(): TexturePlacementPolicy {
+	return {
+		bucketScope: { kind: "static-domain" },
+		ownerCurrentness: { kind: "placement-plan-owner" },
+		pageBuild: { kind: "worker-owned" },
+		sourceStability: { kind: "content-stable" },
+	};
 }

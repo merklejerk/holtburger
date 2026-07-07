@@ -66,10 +66,53 @@ describe("OpenWorldStreamingController terrain slice", () => {
 			yieldedPasses: 5,
 		});
 	});
+
+	it("keeps replacement source requests split by static layer domain", async () => {
+		const renderer = new FixtureTerrainRenderer();
+		const resolver = new FixtureTerrainResolver({
+			generatedScenery: createGeneratedSceneryScopePayload(),
+			terrain: createTerrainScopePayload(),
+		});
+		const controller = new OpenWorldStreamingController({
+			assetReader: createUnusedAssetReader(),
+			createDynamicVisualBaker: failIfDynamicWorkerFactoryIsCalled,
+			createDynamicVisualRecipeResolver: failIfDynamicWorkerFactoryIsCalled,
+			createStaticBaker: () => new FixtureTerrainBaker(),
+			createStaticResolver: () => resolver,
+			createTexturePacker: () => createUnusedTexturePacker(),
+			renderer,
+		});
+
+		controller.updateStaticInterest({
+			anchorLandblockId: 0xda55ffff,
+			lod: {
+				buildings: -1,
+				envCells: -1,
+				explicitObjects: -1,
+				generatedScenery: 0,
+				terrain: 0,
+			},
+			revision: 1,
+		});
+		await waitFor(() => resolver.sourceRequests.length === 2);
+
+		expect(
+			resolver.sourceRequests.map((request) =>
+				request.requestedLayers.map((layer) => layer.kind),
+			),
+		).toEqual([["terrain"], ["outdoor-generated-scenery"]]);
+		expect(resolver.sourceRequests.map((request) => request.sourceLod)).toEqual(
+			[0, 3],
+		);
+	});
 });
 
 class FixtureTerrainRenderer {
 	readonly anchorLandblockIds: (number | null)[] = [];
+	readonly generatedSceneryLayers: Array<{
+		readonly landblockId: number;
+		readonly payload: unknown;
+	}> = [];
 	readonly terrainLayers: Array<{
 		readonly landblockId: number;
 		readonly payload: TerrainLayerPayload | null;
@@ -86,6 +129,14 @@ class FixtureTerrainRenderer {
 
 	setStaticRenderAnchorLandblockId(anchorLandblockId: number | null): void {
 		this.anchorLandblockIds.push(anchorLandblockId);
+	}
+
+	setOutdoorBuildingsLayer(): void {}
+
+	setOutdoorExplicitObjectsLayer(): void {}
+
+	setOutdoorGeneratedSceneryLayer(landblockId: number, payload: unknown): void {
+		this.generatedSceneryLayers.push({ landblockId, payload });
 	}
 
 	setTerrainLayer(
@@ -113,22 +164,49 @@ function createUnusedTexturePacker(): TexturePacker {
 }
 
 class FixtureTerrainResolver implements StaticLandblockSceneLodSourceResolver {
-	constructor(readonly payload: StaticScopePayload) {}
+	readonly sourceRequests: StaticLandblockSceneLodSourceRequest[] = [];
+
+	constructor(
+		readonly payloads:
+			| StaticScopePayload
+			| {
+					readonly generatedScenery: StaticScopePayload;
+					readonly terrain: StaticScopePayload;
+			  },
+	) {}
 
 	async resolveSource(
 		request: StaticLandblockSceneLodSourceRequest,
 	): Promise<StaticLandblockSceneLodResolution> {
+		this.sourceRequests.push(request);
+		const payload = this.#selectPayload(request);
 		return {
 			dynamicPlacements: [],
 			dynamicRecipes: [],
 			recipes: [
 				{
-					payload: this.payload,
+					payload,
 					targetOwnerKey: request.requestedLayers[0]!.targetOwnerKey,
 				},
 			],
 			request,
 		};
+	}
+
+	#selectPayload(
+		request: StaticLandblockSceneLodSourceRequest,
+	): StaticScopePayload {
+		if (!("terrain" in this.payloads)) {
+			return this.payloads;
+		}
+		const layerKind = request.requestedLayers[0]?.kind;
+		if (layerKind === "terrain") {
+			return this.payloads.terrain;
+		}
+		if (layerKind === "outdoor-generated-scenery") {
+			return this.payloads.generatedScenery;
+		}
+		throw new Error(`Unexpected fixture layer kind ${layerKind ?? "<none>"}.`);
 	}
 }
 
@@ -137,15 +215,18 @@ class FixtureTerrainBaker implements StaticBaker {
 		return {
 			atlasRegistryUpdates: [],
 			buildRevision: input.payload.sourceRevision,
-			domain: "outdoor-terrain",
-			drawUnits: [
-				{
-					drawUnitId: "terrain:draw:1",
-					kind: "terrain-geometry",
-					landblockId: 0xda55ffff,
-					textureBindingIds: [],
-				},
-			],
+			domain: input.domain,
+			drawUnits:
+				input.domain === "outdoor-terrain"
+					? [
+							{
+								drawUnitId: "terrain:draw:1",
+								kind: "terrain-geometry",
+								landblockId: 0xda55ffff,
+								textureBindingIds: [],
+							},
+						]
+					: [],
 			envCellStaticObjectPlacementRecords: [],
 			materialCoverage: [],
 			objectVisualInstallSet: {
@@ -235,6 +316,51 @@ function createTerrainScopePayload(): StaticScopePayload {
 		} as TerrainStaticScopePayload,
 		sourceRevision: 1,
 	};
+}
+
+function createGeneratedSceneryScopePayload(): StaticScopePayload {
+	return {
+		job: {
+			domain: "outdoor-generated-scenery",
+			scope: {
+				kind: "landblock",
+				landblockId: 0xda55ffff,
+			},
+		},
+		scope: {
+			authoredDynamicPlacements: [],
+			buildingTransitionApertures: [],
+			domain: "outdoor-generated-scenery",
+			landblock: {
+				kind: "landblock-source",
+				landblockId: 0xda55ffff,
+				source: "outdoor",
+			},
+			kind: "outdoor-static-objects",
+			materialSlots: [],
+			materialSources: [],
+			missingRefs: [],
+			objects: [],
+			paletteSources: [],
+			regionRenderProfile: {
+				detailRoles: [],
+				identity: {
+					kind: "region-render-profile",
+					regionNumber: 1,
+				},
+			},
+			sourceAssets: [],
+			sourceSpatial: {
+				bounds: null,
+				coordinateSpace: "landblock-render-local",
+				outdoorBvh: null,
+				outdoorBvhItemCount: 0,
+				outdoorBvhNodeCount: 0,
+			},
+			textureRefs: [],
+		},
+		sourceRevision: 1,
+	} as StaticScopePayload;
 }
 
 function createUnusedAssetReader(): PreparedAssetReader {

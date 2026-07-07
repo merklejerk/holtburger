@@ -522,11 +522,11 @@ flat in int vLayerSlot;
 
 out vec4 fragColor;
 
-vec2 legacyAlphaUv(vec2 uv) {
+vec2 sourceAlphaUv(vec2 uv) {
 	return vec2(uv.x, 1.0 - uv.y);
 }
 
-vec2 rotateLegacyAlphaUv(vec2 uv, int rotation) {
+vec2 rotateSourceAlphaUv(vec2 uv, int rotation) {
 	if (rotation == 1) {
 		return vec2(1.0 - uv.y, uv.x);
 	}
@@ -614,7 +614,7 @@ float terrainDetailFade() {
 }
 
 float sampleMask(int page, vec4 rect, int rotation) {
-	vec2 maskUv = rotateLegacyAlphaUv(legacyAlphaUv(vTexCoord), rotation);
+	vec2 maskUv = rotateSourceAlphaUv(sourceAlphaUv(vTexCoord), rotation);
 	return sampleMaskPage(page, rect, maskUv);
 }
 
@@ -792,7 +792,7 @@ class Webgl2Renderer implements Renderer {
 	#staticRenderAnchorLandblockId: number | null = null;
 	#renderPassPlan: RenderPassPlan = { kind: "single-surface-resident" };
 	#portalFrameWorkPlan: PortalFrameWorkPlan = {
-		kind: "legacy-render-pass",
+		kind: "render-pass",
 		mode: "single-surface-resident",
 		renderPassPlan: { kind: "single-surface-resident" },
 	};

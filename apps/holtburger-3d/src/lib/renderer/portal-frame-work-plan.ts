@@ -16,26 +16,26 @@ import type {
 	RenderPassPlan,
 } from "./types";
 
-export function createLegacyPortalFrameWorkPlan(options: {
+export function createRenderPassPortalFrameWorkPlan(options: {
 	readonly flatVisionModeEnabled: boolean;
 	readonly renderPassPlan: RenderPassPlan;
 }): PortalFrameWorkPlan {
 	if (options.flatVisionModeEnabled) {
 		return {
-			kind: "legacy-render-pass",
+			kind: "render-pass",
 			mode: "flat-resident-diagnostic",
 			renderPassPlan: options.renderPassPlan,
 		};
 	}
 	if (options.renderPassPlan.kind === "portal-scene-domains") {
 		return {
-			kind: "legacy-render-pass",
-			mode: "legacy-scene-domain-composite",
+			kind: "render-pass",
+			mode: "scene-domain-composite",
 			renderPassPlan: options.renderPassPlan,
 		};
 	}
 	return {
-		kind: "legacy-render-pass",
+		kind: "render-pass",
 		mode: "single-surface-resident",
 		renderPassPlan: options.renderPassPlan,
 	};
@@ -48,13 +48,13 @@ export function portalFrameWorkPlanEquals(
 	if (left.kind !== right.kind || left.mode !== right.mode) {
 		return false;
 	}
-	if (left.kind === "legacy-render-pass") {
+	if (left.kind === "render-pass") {
 		return (
-			right.kind === "legacy-render-pass" &&
+			right.kind === "render-pass" &&
 			renderPassPlanEquals(left.renderPassPlan, right.renderPassPlan)
 		);
 	}
-	if (right.kind === "legacy-render-pass") {
+	if (right.kind === "render-pass") {
 		return false;
 	}
 	return (

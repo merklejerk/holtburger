@@ -32,7 +32,7 @@ export type TexturePlacementItemId = number & {
 };
 
 /** Placement lookup key supported by the current terrain and object-visual paths. */
-export type TexturePlacementLookupId = string | TexturePlacementItemId;
+type TexturePlacementLookupId = string | TexturePlacementItemId;
 
 /** Lifetime/churn policy that decides how broadly placement may be shared. */
 type TexturePlacementBucketLifetime =

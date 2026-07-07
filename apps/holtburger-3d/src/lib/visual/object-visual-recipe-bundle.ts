@@ -223,7 +223,7 @@ export interface ObjectVisualPartRecipe {
 /** Material binding for a source primitive subset within a part recipe. */
 export interface ObjectVisualPartMaterialBinding {
 	readonly geometrySurfaceId: number;
-	/** Source triangle material variant, such as legacy sampler policy, covered by this binding. */
+	/** Source triangle material variant, such as sampler policy, covered by this binding. */
 	readonly materialVariantSignature: ObjectVisualMaterialVariantSignature;
 	readonly materialRecipeId: ObjectVisualMaterialRecipeId;
 	readonly materialSlot: number;

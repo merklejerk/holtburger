@@ -1,6 +1,6 @@
 import type { TextureUsagePurpose } from "../../../../textures/placement";
 
-/** Replacement-owned atlas namespace. Legacy placement bucket keys are adapter inputs only. */
+/** Replacement-owned atlas namespace for texture placement buckets. */
 export type OpenWorldTextureBucketKey = string & {
 	readonly __brand: "OpenWorldTextureBucketKey";
 };

@@ -538,7 +538,7 @@ export class OpenWorldStreamingController {
 	): Promise<void> {
 		this.#frameBudgetYieldedPasses = 0;
 		const staticDemandPlan = createStaticDemandPlan(interest);
-		this.#sourceResolutionCache.reset(staticDemandPlan.sourceRequests);
+		this.#sourceResolutionCache.reset();
 		const tasks = staticDemandPlan.layerTasks.filter(
 			(task) =>
 				task.domain === "outdoor-terrain" ||
@@ -1207,7 +1207,6 @@ function createStaticDemandPlan(
 }
 
 class OpenWorldStaticSourceResolutionCache implements StaticLandblockSceneLodSourceResolver {
-	#plannedRequests: readonly StaticLandblockSceneLodSourceRequest[] = [];
 	readonly #resolveSource: (
 		request: StaticLandblockSceneLodSourceRequest,
 	) => Promise<StaticLandblockSceneLodResolution>;
@@ -1224,52 +1223,22 @@ class OpenWorldStaticSourceResolutionCache implements StaticLandblockSceneLodSou
 		this.#resolveSource = resolveSource;
 	}
 
-	reset(requests: readonly StaticLandblockSceneLodSourceRequest[]): void {
-		this.#plannedRequests = requests;
+	reset(): void {
 		this.#inFlightByKey.clear();
 	}
 
 	resolveSource(
 		request: StaticLandblockSceneLodSourceRequest,
 	): Promise<StaticLandblockSceneLodResolution> {
-		const coalescedRequest = this.#findCoalescedRequest(request);
-		const key = createStaticSourceRequestKey(coalescedRequest);
+		const key = createStaticSourceRequestKey(request);
 		const existing = this.#inFlightByKey.get(key);
 		if (existing) {
 			return existing;
 		}
-		const pending = this.#resolveSource(coalescedRequest);
+		const pending = this.#resolveSource(request);
 		this.#inFlightByKey.set(key, pending);
 		return pending;
 	}
-
-	#findCoalescedRequest(
-		request: StaticLandblockSceneLodSourceRequest,
-	): StaticLandblockSceneLodSourceRequest {
-		return (
-			this.#plannedRequests.find(
-				(candidate) =>
-					candidate.context === request.context &&
-					candidate.landblockId === request.landblockId &&
-					candidate.sourceLod >= request.sourceLod &&
-					request.requestedLayers.every((layer) =>
-						containsStaticSourceLayer(candidate, layer),
-					),
-			) ?? request
-		);
-	}
-}
-
-function containsStaticSourceLayer(
-	request: StaticLandblockSceneLodSourceRequest,
-	layer: StaticLandblockSceneLodSourceRequest["requestedLayers"][number],
-): boolean {
-	return request.requestedLayers.some(
-		(candidate) =>
-			candidate.kind === layer.kind &&
-			candidate.targetOwnerKey.kind === layer.targetOwnerKey.kind &&
-			candidate.targetOwnerKey.landblockId === layer.targetOwnerKey.landblockId,
-	);
 }
 
 function createStaticSourceRequestKey(

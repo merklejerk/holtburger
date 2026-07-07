@@ -1230,12 +1230,60 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Inspect terrain source resolver result delivery and identify whether wall time is worker wait, transfer/deserialization, or main-thread assimilation.
-- [ ] Inspect env-cell and generated-scenery bake/intent/placement loops for chunking or worker-boundary opportunities.
-- [ ] Implement the smallest direct replacement remediation that splits a measured hot single-stage browser task.
-- [ ] Add replacement-native diagnostics for the new split or transfer boundary.
+- [x] Inspect terrain source resolver result delivery and identify whether wall time is worker wait, transfer/deserialization, or main-thread assimilation.
+- [x] Inspect env-cell and generated-scenery bake/intent/placement loops for chunking or worker-boundary opportunities.
+- [x] Implement the smallest direct replacement remediation that splits a measured hot single-stage browser task.
+- [x] Add replacement-native diagnostics for the new split or transfer boundary.
+- [x] Classify every touched consumer as direct migration, deletion, legacy-edge shim, or durable adapter.
+- [x] Run focused tests for the touched replacement systems.
+- [x] Run replacement `da55` generated-scenery, env-cell, and all-domain harness cases.
+- [x] Run app checks.
+- [x] Update cleanup targets.
+
+Decisions and course corrections:
+
+- Phase 13C split replacement source resolution at the runner request boundary. `OpenWorldStaticSourceResolutionCache` still deduplicates identical requests, but it no longer upgrades a runner's layer-specific request to a broader all-layer landblock source request. This keeps terrain, object, and env-cell source results independently delivered to the browser instead of creating one larger worker result per landblock.
+- This is a direct replacement composition change, not a legacy shim. The shared legacy demand planner still produces grouped source request opportunities for older paths, while the replacement composition chooses the smaller result boundary it wants.
+- Consumer classification: `OpenWorldStaticSourceResolutionCache` is direct replacement infrastructure; the controller test was migrated to assert direct replacement request splitting; no legacy-edge shim was added. Existing `browser-runtime-adapter` compatibility remains the previously named deletion-targeted shim.
+- Phase 13C harness results:
+  - `da55` terrain plus generated scenery: ready in 14.0 s, 15 long tasks, 264 ms max long task, 1.7 s total long-task time, max renderer frame delta 278 ms, max renderer handler 6.9 ms, max runtime handler 2.3 ms. Native diagnostics reported 90 frame-budget yields, 18 applied scene commits, 69 resident virtual texture pages, 305 claims, 44 active static-authored runtime entities, 40 successful bakes, 2 catch-up truncations, 2 dropped hook frames, and no prep failures.
+  - `da55` terrain plus env-cells: ready in 14.8 s, 4 long tasks, 528 ms max long task, 1.1 s total long-task time, max renderer frame delta 546 ms, max renderer handler 14.8 ms, max runtime handler 0.1 ms. Native diagnostics reported 90 frame-budget yields, 18 applied scene commits, 20 resident virtual texture pages, 365 claims, no runtime entities, and no failed static tasks.
+  - `da55` all domains: ready in 28.6 s, 16 long tasks, 527 ms max long task, 2.7 s total long-task time, max renderer frame delta 543 ms, max renderer handler 38.4 ms, max runtime handler 5.1 ms. Native diagnostics reported 225 frame-budget yields, 45 applied scene commits, 121 resident virtual texture pages, 772 claims, 44 active static-authored runtime entities, 40 successful bakes, 16 catch-up truncations, 16 dropped hook frames, and no prep failures.
+- Resteer: Phase 13C materially improves the all-domain max long task and max frame delta from Phase 13B's 576 ms / 588 ms to 527 ms / 543 ms, but readiness regresses from 23.2 s to 28.6 s because splitting source results duplicates source resolver work that was previously coalesced. This is smoother, but not a clean cutover endpoint.
+- Narrowed bottleneck: terrain `resolve-source` is now split from all-layer landblock delivery, dropping the all-domain terrain center source stage from about 3.5 s in Phase 13B to about 0.8 s in Phase 13C. Remaining hot wall-time stages are env-cell `resolve-source` up to about 4.2 s, env-cell `bake` up to about 1.6 s, generated-scenery `bake` up to about 1.0 s, generated-scenery `resolve-source` up to about 0.8 s, and env-cell `create-texture-intents` up to about 527 ms.
+- Rejected experiment: budgeted yielding inside static object and structured-interior texture intent planners was tested and discarded before commit. It raised generated-scenery readiness to about 19.1 s and worsened generated max frame delta to about 295 ms because the stage timing absorbed hundreds of timer yields without reducing the relevant browser long-task profile. The next remediation should not be naive per-material `setTimeout(0)` yielding inside planners.
+- Resteer: insert Phase 13D before browser runtime cutover. It should recover the readiness regression by reusing landblock scene source loading while keeping domain-specific result delivery, and it should target env-cell source projection and intent planning with a real boundary change rather than timer-yield sprinkling.
+- Verification: `npm run check`, `npm run lint:ts`, focused `npm run test:ts -- src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts src/lib/systems/open-world-streaming/static-layers/terrain/terrain-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/outdoor-objects/outdoor-object-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/env-cells/env-cell-artifact-runner.test.ts`, and the three Phase 13C replacement harness cases above. `npm run format:check` still fails on pre-existing untouched files: `src/lib/host/runtime-host.ts`, `src/lib/systems/open-world-streaming/composition/client-runtime-adapter.ts`, and `src/lib/systems/open-world-streaming/runtime-entities/renderer-commits.ts`.
+
+### Phase 13D: Source Reuse With Domain-Specific Result Delivery Resteer
+
+Deliverables:
+
+- Start only after Phase 13C is complete.
+- Recover the Phase 13C readiness regression without returning to all-layer source result delivery.
+- Reuse landblock scene LoD source loading across replacement domain requests while projecting and delivering terrain, object, and env-cell results independently.
+- Investigate env-cell source projection and texture-intent planning as the next browser-facing bottlenecks.
+- Keep bake work on worker boundaries and avoid main-thread planner timer-yield loops unless measured evidence shows they reduce browser long tasks without unacceptable readiness cost.
+- Keep the universal contract migration rule active: migrate direct contracts first, shim legacy only at an edge, and prefer an incomplete legacy projection over dishonest replacement diagnostics.
+- Re-run `da55` generated-scenery, env-cell, and all-domain replacement harness cases after remediation.
+
+Acceptance criteria:
+
+- `da55` all-domain replacement run preserves or improves Phase 13C max long-task duration and max frame delta while materially reducing the readiness regression.
+- Replacement source delivery remains domain-specific; no runner receives all-layer source payloads merely for compatibility or cache convenience.
+- Env-cell source projection and env-cell texture-intent planning are either split, moved off the main thread, or explicitly routed into a smaller follow-up with measured replacement-native evidence.
+- No naive per-material timer-yield loop is added to planner internals without measured improvement in browser long-task metrics.
+- Any touched consumer is migrated directly, deleted, explicitly edge-shimmed, or classified as a durable adapter before the phase is complete.
+- `npm run check`, `npm run lint:ts`, focused tests, and the Phase 13D harness matrix pass.
+
+Task checklist:
+
+- [ ] Inspect `LandblockSceneLodSourceResolver` and worker request flow for reusable scene payload loading with domain-specific projection.
+- [ ] Add replacement-owned source projection/cache behavior that avoids duplicate scene asset resolution while preserving layer-specific worker results.
+- [ ] Investigate env-cell texture-intent planner CPU shape without adding naive timer-yield loops.
+- [ ] Add or update replacement-native diagnostics needed to prove source reuse versus result delivery.
 - [ ] Classify every touched consumer as direct migration, deletion, legacy-edge shim, or durable adapter.
-- [ ] Run focused tests for the touched replacement systems.
+- [ ] Run focused tests for touched replacement/source systems.
 - [ ] Run replacement `da55` generated-scenery, env-cell, and all-domain harness cases.
 - [ ] Run app checks.
 - [ ] Update cleanup targets.
@@ -1248,7 +1296,7 @@ Decisions and course corrections:
 
 Deliverables:
 
-- Start only after Phase 13C is complete.
+- Start only after Phase 13D is complete.
 - Switch `createBrowserRuntime(...)` to the replacement composition.
 - Keep the harness switch only if needed for one short verification window.
 - Remove obsolete UI assumptions about legacy static coordinator diagnostics and migrate surviving panels to replacement-native diagnostics.

@@ -389,6 +389,58 @@ describe("OpenWorldStreamingController terrain slice", () => {
 			},
 		});
 	});
+
+	it("does not report no-part-instance recipe skips as material readiness issues", async () => {
+		const renderer = new FixtureTerrainRenderer();
+		const controller = new OpenWorldStreamingController({
+			assetReader: createUnusedAssetReader(),
+			createDynamicVisualBaker: failIfDynamicWorkerFactoryIsCalled,
+			createDynamicVisualRecipeResolver: failIfDynamicWorkerFactoryIsCalled,
+			createObjectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder,
+			createStaticBaker: () =>
+				new FixtureTerrainBaker({
+					staticObjectBakeDiagnostics: [
+						createNoPartInstancesStaticObjectBakeDiagnostic(),
+					],
+				}),
+			createStaticResolver: () =>
+				new FixtureTerrainResolver({
+					buildings: createOutdoorObjectsScopePayload("outdoor-buildings"),
+					generatedScenery: createOutdoorObjectsScopePayload(
+						"outdoor-generated-scenery",
+					),
+					terrain: createTerrainScopePayload(),
+				}),
+			createTexturePageBuilder: createUnusedTexturePageBuilder,
+			renderer,
+		});
+
+		controller.updateStaticInterest({
+			anchorLandblockId: 0xda55ffff,
+			lod: {
+				buildings: -1,
+				envCells: -1,
+				explicitObjects: -1,
+				generatedScenery: 0,
+				terrain: 0,
+			},
+			revision: 1,
+		});
+		await waitFor(
+			() =>
+				controller.createSnapshot().terrain.committed === 1 &&
+				renderer.generatedSceneryLayers.length === 1,
+		);
+
+		expect(
+			controller.createDiagnosticsSnapshot().materialReadiness,
+		).toMatchObject({
+			recentIssues: [],
+			summary: {
+				pipelineBugIssueCount: 0,
+			},
+		});
+	});
 });
 
 class FixtureTerrainRenderer {
@@ -831,6 +883,22 @@ function createSkippedStaticObjectBakeDiagnostic(): StaticObjectBakeDiagnostics 
 		visualRecipePublication: {
 			kind: "published",
 			partInstanceCount: 1,
+		},
+	};
+}
+
+function createNoPartInstancesStaticObjectBakeDiagnostic(): StaticObjectBakeDiagnostics {
+	return {
+		...createSkippedStaticObjectBakeDiagnostic(),
+		drawUnitCount: 1,
+		renderablePartitionCount: 1,
+		skippedPartitionCount: 0,
+		skippedPartitions: [],
+		visualRecipePublication: {
+			kind: "skipped",
+			missingDependencySourceIds: [],
+			partInstanceCount: 0,
+			reason: "no-part-instances",
 		},
 	};
 }

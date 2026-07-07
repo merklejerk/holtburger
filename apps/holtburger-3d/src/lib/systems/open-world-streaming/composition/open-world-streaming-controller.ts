@@ -1962,6 +1962,9 @@ function createStaticObjectBakeIssues(input: {
 		if (publication.kind !== "skipped") {
 			return skippedPartitionIssues;
 		}
+		if (publication.reason === "no-part-instances") {
+			return skippedPartitionIssues;
+		}
 		const missingDependencies =
 			publication.missingDependencySourceIds.length > 0
 				? `missing=${publication.missingDependencySourceIds.join(",")}`

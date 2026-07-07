@@ -2026,17 +2026,25 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Migrate static object placement planning.
-- [ ] Migrate structured interior/env-cell placement planning.
-- [ ] Migrate terrain placement intents.
-- [ ] Migrate dynamic visual texture planning.
-- [ ] Delete or isolate ignored `placementBucketKey` fields from replacement internals.
-- [ ] Rewrite tests that preserve old bucket lifetime assumptions.
-- [ ] Run `npm run check` and focused texture placement tests.
+- [x] Migrate static object placement planning.
+- [x] Migrate structured interior/env-cell placement planning.
+- [x] Migrate terrain placement intents.
+- [x] Migrate dynamic visual texture planning.
+- [x] Delete or isolate ignored `placementBucketKey` fields from replacement internals.
+- [x] Rewrite tests that preserve old bucket lifetime assumptions.
+- [x] Run `npm run check` and focused texture placement tests.
 
 Decisions and course corrections:
 
-- Pending.
+- Deleted the retired `TexturePlacementBucketKey` namespace from `apps/holtburger-3d/src/lib/textures/placement.ts`, including static-authored, static-authored-dynamic, runtime-authored-dynamic, and generic bucket key constructors. Replacement bucket identity now comes only from `TexturePlacementPolicy` plus the open-world texture bucket resolver.
+- Removed `placementBucketKey` from `TexturePlacementIntent`, `TexturePlacementIntentOptions`, and `ObjectVisualTexturePlacementRequirement` policy shapes. TypeScript now requires replacement placement intents to carry `placementPolicy`, and there is no second bucket field for the replacement material placement primitive to ignore.
+- Static object, structured interior/env-cell, and terrain producers now feed the shared static-domain replacement policy through `createStaticTexturePlacementIntent(...)`. Runtime-authored and static-authored dynamic producers feed explicit replacement policy through `createDynamicVisualTexturePlanning(...)`.
+- Deleted tests that asserted owner-keyed static-authored dynamic bucket strings. Those tests preserved the behavior the worksheet wanted us to remove. Replacement bucket decisions are now covered by `material-texture-placement-policy.test.ts`.
+- Renamed the old runtime atlas overview/UI field from `placementBucketKey` to `atlasBucketKey` in `apps/holtburger-3d/src/lib/runtime/client-runtime.ts` and `apps/holtburger-3d/src/pages/BrowserDisplay.svelte`. This keeps the atlas overview as a UI/debug contract without preserving the retired placement-bucket vocabulary.
+- Search audit: `rg "placementBucketKey|TexturePlacementBucketKey|createStaticAuthoredTexturePlacementBucketKey|createStaticAuthoredDynamicTexturePlacementBucketKey|createRuntimeAuthoredDynamicTexturePlacementBucketKey|createTexturePlacementBucketKey|fixture-bucket:unused" apps/holtburger-3d/src apps/holtburger-3d/scripts` now finds only the replacement bucket resolver/test names, not the retired field or constructors.
+- Verification: focused `npm run test:ts -- --run src/lib/textures/placement.test.ts src/lib/dynamic/visual-contracts.test.ts src/lib/visual/object-visual-texture-placement-planner.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/material-texture-placement-policy.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/material-texture-placement-plan.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/object-visual-texture-placement-plan.test.ts` passed.
+- Verification: `npm run check` passed.
+- Verification: `npm run lint` passed.
 
 ### Phase 21: Placement Reservation And Page Build Split
 

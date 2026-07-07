@@ -113,8 +113,6 @@ function createTerrainIntent(): TexturePlacementIntent {
 		itemId: "terrain:item:1",
 		ownerIds: [],
 		pageClass: pageClass("page-class:terrain-color"),
-		placementBucketKey:
-			"fixture-bucket:unused" as TexturePlacementIntent["placementBucketKey"],
 		placementPolicy: staticDomainPolicy(),
 		purpose: "terrain-color",
 		source: {

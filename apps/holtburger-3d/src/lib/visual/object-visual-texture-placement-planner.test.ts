@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
-import {
-	createRuntimeAuthoredDynamicTexturePlacementBucketKey,
-	createTexturePlacementBucketKey,
-	type TextureBindingRequirement,
-	type TexturePlacementPolicy,
+import type {
+	TextureBindingRequirement,
+	TexturePlacementPolicy,
 } from "../textures/placement";
 import {
 	createMaterialTextureSourceKey,
@@ -85,12 +83,8 @@ describe("object visual texture placement planner", () => {
 		});
 	});
 
-	it("uses explicit dynamic placement buckets", () => {
-		const placementBucketKey =
-			createRuntimeAuthoredDynamicTexturePlacementBucketKey({
-				entityId: "runtime-spawn:1",
-				purpose: "object-base-color",
-			});
+	it("preserves explicit dynamic placement policy", () => {
+		const placementPolicy = runtimeOwnerPolicy("runtime-spawn:1");
 		const requirement = createRequirement("dynamic-texture-use:a");
 		const intents = createObjectVisualTexturePlacementIntents({
 			requirements: [
@@ -98,8 +92,7 @@ describe("object visual texture placement planner", () => {
 					policy: {
 						affinityKey: "setup-model/02000001",
 						kind: "dynamic",
-						placementBucketKey,
-						placementPolicy: runtimeOwnerPolicy("runtime-spawn:1"),
+						placementPolicy,
 						textureDomain: "runtime-object-material",
 					},
 					requirement,
@@ -113,37 +106,9 @@ describe("object visual texture placement planner", () => {
 				domain: "runtime-object-material",
 				bindingId: requirement.bindingId,
 				itemId: 0,
-				placementBucketKey,
+				placementPolicy,
 			},
 		]);
-	});
-
-	it("honors explicit static placement buckets", () => {
-		const placementBucketKey = createTexturePlacementBucketKey({
-			domain: "env-cell-system",
-			lifetime: { kind: "static-authored" },
-			purpose: "object-base-color",
-		});
-		const requirement = createRequirement("texture-use:explicit-bucket");
-		const intents = createObjectVisualTexturePlacementIntents({
-			requirements: [
-				{
-					policy: {
-						affinityKey: null,
-						domain: "env-cell-system",
-						kind: "static-authored",
-						placementBucketKey,
-					},
-					requirement,
-				},
-			],
-		});
-
-		expect(intents[0]).toMatchObject({
-			bindingId: requirement.bindingId,
-			itemId: 0,
-			placementBucketKey,
-		});
 	});
 });
 

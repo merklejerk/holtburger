@@ -1634,7 +1634,7 @@
 			page.format,
 			page.pageId,
 			formatAtlasPageOrdinal(page.pageId),
-			page.placementBucketKey,
+			page.atlasBucketKey,
 			page.sampleClass,
 			formatAtlasPageSamplingEffects(page.sampleClass),
 			`${page.width}x${page.height}`,
@@ -2601,7 +2601,7 @@
 								{#each filteredAtlasPages() as page (`${page.bucketId}:${page.pageId}`)}
 									<div
 										class="browser-display__atlas-row"
-										title={page.placementBucketKey}
+										title={page.atlasBucketKey}
 									>
 										<div>
 											<strong>

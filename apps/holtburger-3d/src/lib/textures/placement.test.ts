@@ -7,10 +7,7 @@ import type {
 import {
 	classifyTextureUsagePurpose,
 	createDynamicTexturePlacementIntent,
-	createRuntimeAuthoredDynamicTexturePlacementBucketKey,
-	createStaticAuthoredDynamicTexturePlacementBucketKey,
 	createStaticTexturePlacementIntent,
-	createStaticAuthoredTexturePlacementBucketKey,
 	type DynamicTexturePlacementUse,
 	type TexturePlacementPolicy,
 } from "./placement";
@@ -80,22 +77,12 @@ describe("texture placement vocabulary bridge", () => {
 
 		expect(
 			createDynamicTexturePlacementIntent(textureUse, {
-				placementBucketKey:
-					createStaticAuthoredDynamicTexturePlacementBucketKey({
-						domain: "outdoor-generated-scenery",
-						ownerId: "static-layer-owner:generated:0xda55ffff",
-						purpose: "object-detail",
-					}),
 				placementPolicy: staticDomainPolicy(),
 			}),
 		).toMatchObject({
 			domain: "outdoor-generated-scenery",
 			itemId: textureUse.bindingId,
-			placementBucketKey: createStaticAuthoredDynamicTexturePlacementBucketKey({
-				domain: "outdoor-generated-scenery",
-				ownerId: "static-layer-owner:generated:0xda55ffff",
-				purpose: "object-detail",
-			}),
+			placementPolicy: staticDomainPolicy(),
 			purpose: "object-detail",
 		});
 	});
@@ -109,27 +96,17 @@ describe("texture placement vocabulary bridge", () => {
 
 		expect(
 			createDynamicTexturePlacementIntent(textureUse, {
-				placementBucketKey:
-					createRuntimeAuthoredDynamicTexturePlacementBucketKey({
-						entityId: "runtime-spawn:1",
-						purpose: "object-index",
-					}),
 				placementPolicy: runtimeOwnerPolicy("runtime-spawn:1"),
 			}),
 		).toMatchObject({
 			domain: "runtime-object-material",
 			itemId: textureUse.bindingId,
-			placementBucketKey: createRuntimeAuthoredDynamicTexturePlacementBucketKey(
-				{
-					entityId: "runtime-spawn:1",
-					purpose: "object-index",
-				},
-			),
+			placementPolicy: runtimeOwnerPolicy("runtime-spawn:1"),
 			purpose: "object-index",
 		});
 	});
 
-	it("requires dynamic placement intents to declare their bucket lifetime", () => {
+	it("requires dynamic placement intents to declare replacement policy", () => {
 		const textureUse = createDynamicTextureUse({
 			source: createPreparedDataUse("rgba-color"),
 			textureDomain: "runtime-object-material",
@@ -137,7 +114,7 @@ describe("texture placement vocabulary bridge", () => {
 		});
 
 		expect(() => createDynamicTexturePlacementIntent(textureUse)).toThrow(
-			"Dynamic texture placement intents require an explicit placement bucket key.",
+			"Dynamic texture placement intents require an explicit replacement placement policy.",
 		);
 	});
 
@@ -156,89 +133,6 @@ describe("texture placement vocabulary bridge", () => {
 			affinityKey: "setup-model/020003e5",
 			itemId: textureUse.bindingId,
 		});
-	});
-
-	it("derives one static-authored bucket across different placement affinities", () => {
-		const source = createPreparedDataUse("rgba-color");
-		const firstIntent = createStaticTexturePlacementIntent(
-			createStaticTextureUse({
-				domain: "outdoor-generated-scenery",
-				source,
-				textureBindingId: "scenery:base:06000050:first",
-			}),
-			{ affinityKey: "setup-model/020003e5" },
-		);
-		const secondIntent = createStaticTexturePlacementIntent(
-			createStaticTextureUse({
-				domain: "outdoor-generated-scenery",
-				source,
-				textureBindingId: "scenery:base:06000050:second",
-			}),
-			{ affinityKey: "setup-model/020003e5:alternate" },
-		);
-
-		expect(createStaticAuthoredTexturePlacementBucketKey(firstIntent)).toBe(
-			createStaticAuthoredTexturePlacementBucketKey(secondIntent),
-		);
-	});
-
-	it("keeps static-authored buckets separated by shader purpose", () => {
-		const baseColorIntent = createStaticTexturePlacementIntent(
-			createStaticTextureUse({
-				domain: "outdoor-buildings",
-				source: createPreparedDataUse("rgba-color"),
-				textureBindingId: "building:base:06000060",
-			}),
-		);
-		const detailIntent = createStaticTexturePlacementIntent(
-			createStaticTextureUse({
-				domain: "outdoor-buildings",
-				source: createPreparedDataUse("rgba-detail"),
-				textureBindingId: "building:detail:06000061",
-			}),
-		);
-
-		expect(
-			createStaticAuthoredTexturePlacementBucketKey(baseColorIntent),
-		).not.toBe(createStaticAuthoredTexturePlacementBucketKey(detailIntent));
-	});
-
-	it("derives static-authored dynamic buckets from static owner lifetime", () => {
-		const firstBucket = createStaticAuthoredDynamicTexturePlacementBucketKey({
-			domain: "outdoor-generated-scenery",
-			ownerId: "static-layer-owner:generated:0xda55ffff",
-			purpose: "object-base-color",
-		});
-		const secondBucket = createStaticAuthoredDynamicTexturePlacementBucketKey({
-			domain: "outdoor-generated-scenery",
-			ownerId: "static-layer-owner:generated:0xda55ffff",
-			purpose: "object-base-color",
-		});
-		const otherOwnerBucket =
-			createStaticAuthoredDynamicTexturePlacementBucketKey({
-				domain: "outdoor-generated-scenery",
-				ownerId: "static-layer-owner:generated:0xda56ffff",
-				purpose: "object-base-color",
-			});
-
-		expect(firstBucket).toBe(secondBucket);
-		expect(firstBucket).not.toBe(otherOwnerBucket);
-	});
-
-	it("keeps runtime-authored dynamic buckets out of static-authored dynamic buckets", () => {
-		const staticAuthoredBucket =
-			createStaticAuthoredDynamicTexturePlacementBucketKey({
-				domain: "outdoor-explicit-objects",
-				ownerId: "static-layer-owner:explicit:0xda55ffff",
-				purpose: "object-index",
-			});
-		const runtimeAuthoredBucket =
-			createRuntimeAuthoredDynamicTexturePlacementBucketKey({
-				entityId: "runtime-spawn:1",
-				purpose: "object-index",
-			});
-
-		expect(runtimeAuthoredBucket).not.toBe(staticAuthoredBucket);
 	});
 
 	it("preserves prepared palette recipe identity in the placement source", () => {

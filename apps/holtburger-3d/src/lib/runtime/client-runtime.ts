@@ -174,15 +174,16 @@ interface RuntimeTextureAtlasOverviewSnapshot {
 }
 
 interface RuntimeTextureAtlasBucketOverview {
+	readonly atlasBucketKey: string;
 	readonly bucketId: string;
 	readonly domain: string;
 	readonly pages: readonly RuntimeTextureAtlasPageOverview[];
-	readonly placementBucketKey: string;
 	readonly texturePageCount: number;
 	readonly uniqueSourceCount: number;
 }
 
 export interface RuntimeTextureAtlasPageOverview {
+	readonly atlasBucketKey: string;
 	readonly bucketId: string;
 	readonly bucketLabel: string;
 	readonly domain: string;
@@ -190,7 +191,6 @@ export interface RuntimeTextureAtlasPageOverview {
 	readonly height: number;
 	readonly packingEfficiency: number;
 	readonly pageId: string;
-	readonly placementBucketKey: string;
 	readonly sampleClass: string;
 	readonly textureCount: number;
 	readonly width: number;

@@ -30,11 +30,8 @@ import {
 import { describeStaticObjectCanonicalGeometryIdentity } from "../static/objects/static-object-source-assets";
 import {
 	classifyTextureUsagePurpose,
-	createRuntimeAuthoredDynamicTexturePlacementBucketKey,
-	createStaticAuthoredDynamicTexturePlacementBucketKey,
 	type TexturePlacementPolicy,
 	type TexturePlacementItemId,
-	type TexturePlacementBucketKey,
 	type TextureUsagePurpose,
 } from "../textures/placement";
 import {
@@ -311,14 +308,6 @@ function createDynamicTexturePlacementRequirement(options: {
 		policy: {
 			affinityKey: createDynamicTextureAffinityKey(options.recipe),
 			kind: "dynamic",
-			placementBucketKey: createDynamicTexturePlacementBucketKey({
-				purpose: classifyTextureUsagePurpose(
-					options.requirement.dataUse,
-					textureDomain,
-				),
-				recipe: options.recipe,
-				textureDomain,
-			}),
 			placementPolicy: createDynamicTexturePlacementPolicy({
 				recipe: options.recipe,
 				textureDomain,
@@ -501,35 +490,6 @@ function requireDynamicTexturePlanningItemId(options: {
 		);
 	}
 	return placementItemId;
-}
-
-function createDynamicTexturePlacementBucketKey(options: {
-	readonly purpose: TextureUsagePurpose;
-	readonly recipe: DynamicVisualBakeInput["recipe"];
-	readonly textureDomain:
-		| "runtime-object-material"
-		| Exclude<
-				DynamicVisualBakeInput["recipe"]["visual"]["materialPolicy"]["detailRolePolicy"],
-				{ readonly kind: "runtime-authored-none" }
-		  >["domain"];
-}): TexturePlacementBucketKey {
-	const { purpose, recipe, textureDomain } = options;
-	if (textureDomain === "runtime-object-material") {
-		return createRuntimeAuthoredDynamicTexturePlacementBucketKey({
-			entityId: recipe.entityId,
-			purpose,
-		});
-	}
-	if (recipe.source.kind !== "static-authored") {
-		throw new Error(
-			`Dynamic recipe ${recipe.entityId} cannot use static texture domain ${textureDomain} without static source ownership.`,
-		);
-	}
-	return createStaticAuthoredDynamicTexturePlacementBucketKey({
-		domain: textureDomain,
-		ownerId: recipe.source.owner.ownerId,
-		purpose,
-	});
 }
 
 function requireDynamicVisualTexturePlanning(options: {

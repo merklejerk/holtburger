@@ -5,7 +5,6 @@ import type {
 import type {
 	DynamicTexturePlacementUse,
 	ObjectVisualTexturePlacementIntent,
-	TexturePlacementBucketKey,
 	TexturePlacementPolicy,
 	TexturePlacementSource,
 } from "../textures/placement";
@@ -29,14 +28,12 @@ interface ObjectVisualStaticTexturePlacementPolicy {
 	readonly affinityKey: string | null;
 	readonly domain: StaticBakeTextureUse["domain"];
 	readonly kind: "static-authored";
-	readonly placementBucketKey?: TexturePlacementBucketKey;
 	readonly placementPolicy?: TexturePlacementPolicy;
 }
 
 interface ObjectVisualDynamicTexturePlacementPolicy {
 	readonly affinityKey: string | null;
 	readonly kind: "dynamic";
-	readonly placementBucketKey: TexturePlacementBucketKey;
 	readonly placementPolicy: TexturePlacementPolicy;
 	readonly textureDomain: VisualTextureDomain;
 }
@@ -93,7 +90,6 @@ function createObjectVisualTexturePlacementIntent(
 					bindingId: item.requirement.bindingId,
 					ownerIds: item.requirement.ownerIds,
 					pageClass: item.requirement.pageClass,
-					placementBucketKey: item.policy.placementBucketKey,
 					placementPolicy: item.policy.placementPolicy,
 					textureKey: item.requirement.textureKey,
 				},
@@ -107,7 +103,6 @@ function createObjectVisualTexturePlacementIntent(
 					bindingId: item.requirement.bindingId,
 					ownerIds: item.requirement.ownerIds,
 					pageClass: item.requirement.pageClass,
-					placementBucketKey: item.policy.placementBucketKey,
 					placementPolicy: item.policy.placementPolicy,
 					textureKey: item.requirement.textureKey,
 				},

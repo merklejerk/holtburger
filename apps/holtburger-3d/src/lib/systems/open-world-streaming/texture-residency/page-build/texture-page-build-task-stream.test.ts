@@ -40,6 +40,9 @@ describe("OpenWorldTexturePageBuildTaskStream", () => {
 		await stream.waitForIdle();
 
 		expect(commits).toHaveLength(1);
+		expect(commits[0]).toMatchObject({
+			pageRemovals: [],
+		});
 		expect(
 			fixture.registry.createBucketSnapshot(fixture.bucketKey).pages[0],
 		).toMatchObject({
@@ -120,6 +123,7 @@ describe("OpenWorldTexturePageBuildTaskStream", () => {
 				],
 				bucketKey: fixture.bucketKey,
 				kind: "texture-commit",
+				pageRemovals: [],
 				pageUpdates: [],
 			}),
 		]);

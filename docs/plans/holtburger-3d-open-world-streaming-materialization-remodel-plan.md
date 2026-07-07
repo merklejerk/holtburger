@@ -3523,55 +3523,120 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Dry-run the Phase 53 benchmark outputs and choose `defer`, `warn`, or `remove` policy with an explicit evidence threshold.
-- [ ] Verify texture residency diagnostics already expose ownerless page counts, pending renderer removal count, and byte estimate state.
-- [ ] Verify owner release does not synchronously repack, rebuild, upload, or remove renderer textures.
-- [ ] Verify no active `pageRemovals` commit path runs under the current zero-pressure policy.
-- [ ] Run focused texture residency/commit/renderer/controller tests and cite Phase 53 harness outputs as the zero-ownerless-page evidence.
-- [ ] Dry-run Phase 55 after implementation and steer final deletion targets.
+- [x] Dry-run the Phase 53 benchmark outputs and choose `defer`, `warn`, or `remove` policy with an explicit evidence threshold.
+- [x] Verify texture residency diagnostics already expose ownerless page counts, pending renderer removal count, and byte estimate state.
+- [x] Verify owner release does not synchronously repack, rebuild, upload, or remove renderer textures.
+- [x] Verify no active `pageRemovals` commit path runs under the current zero-pressure policy.
+- [x] Run focused texture residency/commit/renderer/controller tests and cite Phase 53 harness outputs as the zero-ownerless-page evidence.
+- [x] Dry-run Phase 55 after implementation and steer final deletion targets.
+
+Decisions and course corrections:
+
+- Chose `defer`. The Phase 53 matrix reported zero `textureResidency.ownerlessPages.total` for terrain-only, terrain+generated, terrain+env, `dc58` all-domain, and `da55` all-domain scenarios. Active renderer removal now requires both a harness scenario with nonzero retained ownerless resident pages and canonical byte accounting or an explicit measured pressure threshold.
+- `OpenWorldTextureClaimRegistry.releaseTextureOwner(...)` remains a cheap ownership update: it removes owner/binding membership and refreshes reclaimable state, but it does not repack, rebuild, upload, delete entries, or emit renderer removals.
+- Existing texture residency diagnostics already expose ownerless page counts, pending renderer removal count, ownerless resident disposition, and the non-canonical byte estimate state. Phase 54 tightened controller coverage so this policy cannot quietly disappear.
+- Page-build commits are still zero-pressure commits. Focused page-build coverage now asserts `pageRemovals: []` for accepted and failed page-build settlement.
+- Verification passed with `npm run check` and `npm run test:ts -- --run src/lib/systems/open-world-streaming/texture-residency/claims/texture-claim-registry.test.ts src/lib/systems/open-world-streaming/texture-residency/commits/texture-commit-applier.test.ts src/lib/systems/open-world-streaming/texture-residency/page-build/texture-page-build-task-stream.test.ts src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts src/lib/renderer/webgl2/webgl2-texture-bindings.test.ts`.
+- Phase 55 dry-run found no production hits for `StaticCoordinator`, `TextureManager`, `staticOverview`, ignored placement policy, old static commit counters, or legacy materialization lifecycle terms under `src/lib`. The remaining cleanup target is narrower and more annoying: delete or rename replacement-internal compatibility wording/projections so the hard-cutover tree does not imply a surviving legacy diagnostic contract.
+
+### Phase 55: Replacement Contract And Terminology Wipe
+
+North-star check:
+
+- The [worksheet replacement model](./holtburger-3d-open-world-streaming-stutter-investigation-worksheet.md) stays authoritative: replacement contracts describe owners, artifacts, claims, pages, commits, readiness, and renderer application directly. Legacy-shaped names, compatibility projections, and architecture-preserving tests should not survive inside the replacement system.
+
+Owning authority:
+
+- Replacement diagnostics contracts, texture residency vocabulary, direct builder boundaries, tests, and hard-cutover cleanup.
+
+Current code delta:
+
+- Phase 54 dry-run found that broad retired production names are already gone from `src/lib`: `StaticCoordinator`, `TextureManager`, `staticOverview`, ignored placement policy, old static commit counters, and legacy materialization lifecycle terms had no production hits.
+- `apps/holtburger-3d/src/lib/systems/open-world-streaming/diagnostics/contracts.ts` still contains a "Deletion-targeted compatibility projection" comment adjacent to replacement static task timing types. That is a smell: replacement diagnostics should be direct, and any surviving compatibility projection needs a named outside consumer and deletion trigger.
+- `TexturePageClass` comments in dynamic contracts and texture claim requirements use "compatibility class" language. That may be legitimate atlas/page placement vocabulary, but Phase 55 must verify it is not preserving old texture-manager semantics. If it is legitimate, rename the comments toward "page format class" or similarly direct terminology.
+- `DirectOpenWorldObjectVisualAtlasBuilder` and `DirectOpenWorldTexturePageBuilder` are production worker implementations plus test fixtures, not old-pipeline builders. Phase 55 should verify their imports terminate at worker/test boundaries and keep or rename only if the "Direct" prefix is now confusing against replacement-native contracts.
+
+Deliverables:
+
+- Search production and tests for retired architecture names: `StaticCoordinator`, `TextureManager`, `staticOverview`, ignored placement policy, old static commit counters, old materialization lifecycle terms, legacy diagnostic categories, and replacement-internal `compatibility` comments.
+- Remove replacement-internal compatibility projection comments or move any truly temporary projection to the legacy, harness, UI, or adapter boundary with a named consumer and deletion trigger.
+- Rename misleading "compatibility class" comments where they refer to durable page placement format rather than legacy compatibility.
+- Verify direct builders are worker-internal direct implementations, not a surviving parallel main-thread materialization path. Rename only if the name misleads more than it clarifies.
+- Delete or rewrite tests that preserve legacy bucket lifetimes, old commit ordering, shim-only diagnostics, or broad coverage parity.
+- Keep adapters that cross durable boundaries; remove shims that exist only to preserve retired DTO shapes.
+
+Acceptance criteria:
+
+- Searches for `StaticCoordinator`, `TextureManager`, `staticOverview`, old static commit counters, ignored placement fields, legacy diagnostic categories, and old materialization lifecycle terms have no production replacement hits.
+- `compatibility` hits inside `open-world-streaming` are either gone or refer to a durable technical concept with replacement-native names. They must not describe preserving legacy diagnostics or old DTO shapes.
+- Any surviving shim has a named outside consumer, a deletion trigger, and lives outside replacement internals.
+- Direct builders are proven worker-internal or renamed to a replacement-native term.
+- New open-world streaming code follows domain/system source-tree policy.
+- `npm run check`, `npm run lint`, and focused diagnostics/texture/readiness tests pass.
+
+Task checklist:
+
+- [ ] Search production and tests for legacy coordinator/texture manager/materialization/diagnostic terms.
+- [ ] Audit `open-world-streaming` and dynamic texture contracts for `compatibility` wording.
+- [ ] Delete or move replacement-internal compatibility projections.
+- [ ] Rename durable page-class comments away from legacy-shaped terminology if needed.
+- [ ] Verify direct builders terminate at worker/test boundaries.
+- [ ] Delete or rewrite obsolete tests that preserve retired architecture.
+- [ ] Run `npm run check`.
+- [ ] Run `npm run lint`.
+- [ ] Run focused diagnostics, texture residency, material readiness, and worker-boundary tests.
+- [ ] Dry-run Phase 56 and steer the final harness/checklist targets.
 
 Decisions and course corrections:
 
 - Pending.
 
-### Phase 55: Final Vestigial Wipe And Plan Closeout
+### Phase 56: Final Harness Evidence And Plan Closeout
 
 North-star check:
 
-- The finish line includes deletion. No vestigial materialization code, misleading tests, stale shims, or obsolete docs survive as living architecture.
+- The finish line includes deletion and proof. The source tree should match the replacement model, and the plan should close only after harness evidence, lint/dead-code checks, and remaining deferrals are written down with owners.
 
 Owning authority:
 
-- Source tree ownership, tests, docs, and hard-cutover cleanup.
+- Browser harness, dead-code checks, plan Definition of Done, worksheet handoff, and final hard-cutover evidence.
+
+Current code delta:
+
+- Phase 53 established the current benchmark matrix and worker-attribution evidence. Phase 56 reruns the final matrix after the terminology/shim wipe to prove cleanup did not regress readiness.
+- Phase 54 deliberately deferred active renderer page reclamation because ownerless pages remained zero and byte accounting is not canonical. Phase 56 must preserve that as an explicit deferral rather than smuggling in a scheduler during cleanup.
 
 Deliverables:
 
-- Delete old static coordinator, texture manager mutation, legacy diagnostic snapshot, legacy materialization lifecycle, or ignored placement-policy references that are no longer needed after Phases 44-53.
-- Delete or rewrite tests that preserve legacy bucket lifetimes, old commit ordering, shim-only diagnostics, or broad coverage parity.
-- Verify direct builders are test-only or worker-internal.
-- Update this plan and the worksheet handoff with final evidence and intentionally deferred work.
-- Commit the final cleanup separately from behavior changes.
+- Run final static and TypeScript quality gates: `npm run check`, `npm run lint`, and `npm run lint:dead`.
+- Run focused texture residency, material readiness, diagnostics, page-build, renderer binding, and controller tests.
+- Run terrain-only, terrain+generated, terrain+env, `dc58` all-domain, and `da55` all-domain browser harness scenarios.
+- Update the Definition of Done with exact pass/fail evidence.
+- Update the worksheet/design handoff status and list remaining deferrals with reason, evidence requirement, and owner.
+- Commit the closeout separately from Phase 55 cleanup.
 
 Acceptance criteria:
 
-- Searches for `StaticCoordinator`, `TextureManager`, `staticOverview`, old static commit counters, ignored placement fields, legacy diagnostic categories, and direct production builders have no production replacement hits.
-- No production shim survives unless it crosses a durable host, worker, renderer, diagnostics export, or harness boundary without preserving retired concepts.
-- New open-world streaming code follows domain/system source-tree policy.
-- `npm run check`, `npm run lint`, `npm run lint:dead`, focused texture/material/readiness tests, and browser harness scenarios pass.
-- The Definition of Done is updated truthfully and any remaining deferral has a reason, evidence requirement, and owner.
+- Final harness evidence has zero material readiness issues, zero failed dynamic prep, and no new main-thread budget justification unless the harness produces fresh main-loop CPU evidence.
+- `textureResidency.ownerlessPages` and `byteEstimate` are reported in final evidence, and active page reclamation remains deferred unless the explicit Phase 54 threshold is met.
+- `npm run check`, `npm run lint`, `npm run lint:dead`, focused tests, and final browser harness scenarios pass or any failure is documented as an explicit blocker.
+- Definition of Done no longer claims unverified behavior.
+- This plan links back to the worksheet as the design north star and records any deliberate deviations.
 
 Task checklist:
 
-- [ ] Search for legacy coordinator/texture manager/materialization/diagnostic terms.
-- [ ] Delete stale shims and compatibility fields.
-- [ ] Delete or rewrite obsolete tests.
 - [ ] Run `npm run check`.
 - [ ] Run `npm run lint`.
 - [ ] Run `npm run lint:dead`.
-- [ ] Run focused texture residency/material/readiness tests.
-- [ ] Run terrain, generated scenery, env-cell, `dc58` all-domain, and `da55` all-domain browser harness scenarios.
-- [ ] Update worksheet/design cross-reference status.
-- [ ] Record final remaining deferrals, if any.
+- [ ] Run focused texture residency/material/readiness/diagnostics/renderer/controller tests.
+- [ ] Run terrain-only browser harness scenario.
+- [ ] Run terrain+generated browser harness scenario.
+- [ ] Run terrain+env browser harness scenario.
+- [ ] Run `dc58` all-domain browser harness scenario.
+- [ ] Run `da55` all-domain browser harness scenario.
+- [ ] Update Definition of Done evidence.
+- [ ] Update worksheet/design handoff status.
+- [ ] Record final remaining deferrals with reason, evidence requirement, and owner.
 
 Decisions and course corrections:
 

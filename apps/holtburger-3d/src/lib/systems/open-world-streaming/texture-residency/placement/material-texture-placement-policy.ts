@@ -34,7 +34,7 @@ export function createMaterialTexturePlacementBucketKey(
 function validateMaterialTexturePlacementPolicy(
 	intent: TexturePlacementIntent<TexturePlacementLookupId>,
 ): void {
-	const { bucketScope, pageBuild, sourceStability } = intent.placementPolicy;
+	const { bucketScope, sourceStability } = intent.placementPolicy;
 	if (
 		bucketScope.kind === "static-domain" &&
 		sourceStability.kind !== "content-stable"
@@ -50,14 +50,6 @@ function validateMaterialTexturePlacementPolicy(
 	) {
 		throw new Error(
 			`Texture binding ${intent.bindingId} uses an owner-scoped bucket without owner-specific source content.`,
-		);
-	}
-	if (
-		pageBuild.kind === "main-thread-measured-exception" &&
-		pageBuild.reason.length === 0
-	) {
-		throw new Error(
-			`Texture binding ${intent.bindingId} declares an empty main-thread page-build exception reason.`,
 		);
 	}
 }

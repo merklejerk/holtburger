@@ -3072,15 +3072,20 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Search producers of `placementPolicy`, `sourceStability`, `bucketScope`, and `pageBuild`.
-- [ ] Classify each producer as terrain, outdoor object, env-cell, generated scenery, runtime-authored dynamic, or static-authored dynamic.
-- [ ] Compare classifications against the worksheet and current source facts.
-- [ ] Delete ignored compatibility fields or convert them into direct replacement facts.
-- [ ] Add regression tests for at least one static-domain share case and one owner-specific isolation case.
+- [x] Search producers of `placementPolicy`, `sourceStability`, `bucketScope`, and `pageBuild`.
+- [x] Classify each producer as terrain, outdoor object, env-cell, generated scenery, runtime-authored dynamic, or static-authored dynamic.
+- [x] Compare classifications against the worksheet and current source facts.
+- [x] Delete ignored compatibility fields or convert them into direct replacement facts.
+- [x] Add regression tests for at least one static-domain share case and one owner-specific isolation case.
 
 Decisions and course corrections:
 
-- Pending.
+- Producer audit found static terrain, outdoor object, generated scenery, and env-cell material intents using `createStaticDomainTexturePlacementPolicy()`, which now carries only `bucketScope: static-domain` and `sourceStability: content-stable`. Runtime-authored dynamic material intents in `dynamic/visual-baker.ts` use `bucketScope: runtime-owner` with `sourceStability: owner-specific/runtime-customized`. Static-authored dynamic detail roles fall back to static-domain/content-stable only when the dynamic recipe source is static-authored.
+- Deleted `ownerCurrentness` and `pageBuild` from `TexturePlacementPolicy`. Both were set everywhere but not used by replacement bucket resolution or page-build scheduling. Page-build ownership is now expressed by the actual worker page-build pipeline, not by a decorative field on every intent.
+- No terrain-only, generated-scenery-only, or env-cell-only bucket branch was needed. The surviving resolver is still `material-texture-placement-policy.ts`, which maps explicit source stability and bucket scope into `static-domain`, `static-owner`, or `runtime-owner` bucket keys.
+- Added policy tests for static-owner isolation and for rejecting content-stable sources in owner-scoped buckets. Existing tests continue to cover static-domain sharing and runtime-owner isolation.
+- Spicy bit: `generated-scenery` currently shares static-domain buckets because its texture sources are content-stable DAT/prepared material facts, not generated/tint-baked pixels. That is correct for the current code; if future generated scenery bakes placement-specific or tint-baked pixels, the producer must switch to `static-owner` with `sourceStability: owner-specific` rather than adding a domain special case.
+- Verification: `npm run check`, `npm run lint`, and focused `npm run test:ts -- --run src/lib/systems/open-world-streaming/texture-residency/placement/material-texture-placement-policy.test.ts src/lib/textures/placement.test.ts src/lib/visual/object-visual-texture-placement-planner.test.ts src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/material-texture-placement-plan.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/object-visual-texture-placement-plan.test.ts`.
 
 ### Phase 46: Material Readiness And Renderer Capability Closure
 

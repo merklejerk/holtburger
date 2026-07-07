@@ -68,6 +68,20 @@ describe("createMaterialTexturePlacementBucketKey", () => {
 		);
 	});
 
+	it("isolates owner-specific static-authored textures by static owner", () => {
+		expect(
+			createMaterialTexturePlacementBucketKey(
+				createIntent({
+					domain: "outdoor-generated-scenery",
+					policy: staticOwnerPolicy("static-layer:generated:da55ffff"),
+					purpose: "object-base-color",
+				}),
+			),
+		).toBe(
+			"open-world-texture-bucket|domain=outdoor-generated-scenery|purpose=object-base-color|scope=static-owner:static-layer%3Agenerated%3Ada55ffff",
+		);
+	});
+
 	it("rejects owner-specific content in shared static-domain buckets", () => {
 		expect(() =>
 			createMaterialTexturePlacementBucketKey(
@@ -84,6 +98,24 @@ describe("createMaterialTexturePlacementBucketKey", () => {
 				}),
 			),
 		).toThrow("cannot use a static-domain bucket for owner-specific source");
+	});
+
+	it("rejects content-stable sources in owner-scoped buckets", () => {
+		expect(() =>
+			createMaterialTexturePlacementBucketKey(
+				createIntent({
+					domain: "runtime-object-material",
+					policy: {
+						bucketScope: {
+							kind: "runtime-owner",
+							ownerId: "runtime-spawn:1",
+						},
+						sourceStability: { kind: "content-stable" },
+					},
+					purpose: "object-base-color",
+				}),
+			),
+		).toThrow("uses an owner-scoped bucket without owner-specific source");
 	});
 });
 
@@ -119,8 +151,6 @@ function createIntent(input: {
 function staticDomainPolicy(): TexturePlacementPolicy {
 	return {
 		bucketScope: { kind: "static-domain" },
-		ownerCurrentness: { kind: "placement-plan-owner" },
-		pageBuild: { kind: "worker-owned" },
 		sourceStability: { kind: "content-stable" },
 	};
 }
@@ -128,11 +158,19 @@ function staticDomainPolicy(): TexturePlacementPolicy {
 function runtimeOwnerPolicy(ownerId: string): TexturePlacementPolicy {
 	return {
 		bucketScope: { kind: "runtime-owner", ownerId },
-		ownerCurrentness: { kind: "placement-plan-owner" },
-		pageBuild: { kind: "worker-owned" },
 		sourceStability: {
 			kind: "owner-specific",
 			reason: "runtime-customized",
+		},
+	};
+}
+
+function staticOwnerPolicy(ownerId: string): TexturePlacementPolicy {
+	return {
+		bucketScope: { kind: "static-owner", ownerId },
+		sourceStability: {
+			kind: "owner-specific",
+			reason: "generated",
 		},
 	};
 }

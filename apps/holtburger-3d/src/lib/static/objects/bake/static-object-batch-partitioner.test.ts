@@ -563,8 +563,6 @@ describe("static object batch partitioner", () => {
 				itemId: 0,
 				placementPolicy: {
 					bucketScope: { kind: "static-domain" },
-					ownerCurrentness: { kind: "placement-plan-owner" },
-					pageBuild: { kind: "worker-owned" },
 					sourceStability: { kind: "content-stable" },
 				},
 				purpose: "object-base-color",
@@ -577,8 +575,6 @@ describe("static object batch partitioner", () => {
 				itemId: 1,
 				placementPolicy: {
 					bucketScope: { kind: "static-domain" },
-					ownerCurrentness: { kind: "placement-plan-owner" },
-					pageBuild: { kind: "worker-owned" },
 					sourceStability: { kind: "content-stable" },
 				},
 				purpose: "object-base-color",

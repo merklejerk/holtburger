@@ -24,6 +24,7 @@ describe("OpenWorldTerrainArtifactRunner", () => {
 		const runner = new OpenWorldTerrainArtifactRunner({
 			assetReader: createUnusedAssetReader(),
 			baker,
+			frameBudget: createFixtureFrameBudget(),
 			resolver,
 			textureClaims: new OpenWorldTextureClaimRegistry(),
 		});
@@ -217,5 +218,11 @@ function createUnusedAssetReader(): PreparedAssetReader {
 		async requestPreparedAsset(): Promise<never> {
 			throw new Error("Fixture asset reader should not be used.");
 		},
+	};
+}
+
+function createFixtureFrameBudget() {
+	return {
+		async yieldToFrameBudget(): Promise<void> {},
 	};
 }

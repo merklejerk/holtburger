@@ -24,6 +24,10 @@ import { OpenWorldTextureClaimRegistry } from "../../texture-residency/claims/te
 import type { OpenWorldStreamingTextureCommit } from "../../texture-residency/commits/contracts";
 import { buildObjectVisualTexturePlacementPlan } from "../../texture-residency/placement/object-visual-texture-placement-plan";
 import type { OpenWorldObjectVisualAtlasBuilder } from "../../texture-residency/placement/object-visual-atlas-builder";
+import {
+	yieldToStaticMaterializationFrameBudget,
+	type OpenWorldStaticMaterializationFrameBudget,
+} from "../frame-budget";
 
 type OutdoorObjectLayerPayload =
 	| OutdoorBuildingsLayerPayload
@@ -33,6 +37,7 @@ type OutdoorObjectLayerPayload =
 export interface OpenWorldOutdoorObjectArtifactRunnerOptions {
 	readonly assetReader: PreparedAssetReader;
 	readonly baker: StaticBaker;
+	readonly frameBudget: OpenWorldStaticMaterializationFrameBudget;
 	readonly resolver: StaticLandblockSceneLodSourceResolver;
 	readonly objectVisualAtlasBuilder: OpenWorldObjectVisualAtlasBuilder;
 	readonly textureClaims: OpenWorldTextureClaimRegistry;
@@ -56,6 +61,7 @@ export interface OpenWorldOutdoorObjectLayerCommit {
 export class OpenWorldOutdoorObjectArtifactRunner {
 	readonly #assetReader: PreparedAssetReader;
 	readonly #baker: StaticBaker;
+	readonly #frameBudget: OpenWorldStaticMaterializationFrameBudget;
 	readonly #resourceProvider: StaticObjectBakeResourceProvider;
 	readonly #resolver: StaticLandblockSceneLodSourceResolver;
 	readonly #objectVisualAtlasBuilder: OpenWorldObjectVisualAtlasBuilder;
@@ -64,6 +70,7 @@ export class OpenWorldOutdoorObjectArtifactRunner {
 	constructor(options: OpenWorldOutdoorObjectArtifactRunnerOptions) {
 		this.#assetReader = options.assetReader;
 		this.#baker = options.baker;
+		this.#frameBudget = options.frameBudget;
 		this.#resourceProvider = new StaticObjectBakeResourceProvider({
 			assetReader: options.assetReader,
 		});
@@ -79,6 +86,7 @@ export class OpenWorldOutdoorObjectArtifactRunner {
 		const resolved = await timing.measure("resolve-source", () =>
 			this.#resolveObjectRecipe(request.task),
 		);
+		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const sourcePayload = requireOutdoorObjectSourcePayload(resolved);
 		const textureIntents = await timing.measure("create-texture-intents", () =>
 			createStaticObjectTexturePlacementIntents({
@@ -86,6 +94,7 @@ export class OpenWorldOutdoorObjectArtifactRunner {
 				items: [{ payload: resolved, task: request.task }],
 			}),
 		);
+		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const texturePlan = await timing.measure("texture-placement", () =>
 			buildObjectVisualTexturePlacementPlan({
 				atlasBuilder: this.#objectVisualAtlasBuilder,
@@ -95,6 +104,7 @@ export class OpenWorldOutdoorObjectArtifactRunner {
 				textureClaims: this.#textureClaims,
 			}),
 		);
+		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const bakeInput = await timing.measure("create-bake-resources", () =>
 			this.#createOutdoorObjectBakeJobInput(
 				request.task,
@@ -102,9 +112,11 @@ export class OpenWorldOutdoorObjectArtifactRunner {
 				texturePlan.placementSnapshot,
 			),
 		);
+		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const baked = await timing.measure("bake", () =>
 			this.#baker.bake(bakeInput),
 		);
+		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const payload = timing.measureSync("assemble-commit", () =>
 			createOutdoorObjectLayerPayload({
 				baked,

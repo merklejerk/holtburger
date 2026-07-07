@@ -207,6 +207,7 @@ export class OpenWorldStreamingController {
 	#runtimeEntities: OpenWorldRuntimeEntitySystem | null = null;
 	#objectVisualAtlasBuilder: OpenWorldObjectVisualAtlasBuilder | null = null;
 	#texturePacker: TexturePacker | null = null;
+	#frameBudgetYieldedPasses = 0;
 	readonly #deferredOutdoorRendererLayers = {
 		buildings: new Map<
 			number,
@@ -443,7 +444,7 @@ export class OpenWorldStreamingController {
 				},
 			],
 			frameBudget: {
-				yieldedPasses: 0,
+				yieldedPasses: this.#frameBudgetYieldedPasses,
 			},
 			kind: "open-world-streaming-diagnostics",
 			owners: {
@@ -535,6 +536,7 @@ export class OpenWorldStreamingController {
 		runId: number,
 		interest: OpenWorldStreamingStaticInterest,
 	): Promise<void> {
+		this.#frameBudgetYieldedPasses = 0;
 		const staticDemandPlan = createStaticDemandPlan(interest);
 		this.#sourceResolutionCache.reset(staticDemandPlan.sourceRequests);
 		const tasks = staticDemandPlan.layerTasks.filter(
@@ -1085,6 +1087,9 @@ export class OpenWorldStreamingController {
 			this.#terrainRunner = new OpenWorldTerrainArtifactRunner({
 				assetReader: this.#options.assetReader,
 				baker: this.#options.createStaticBaker(),
+				frameBudget: {
+					yieldToFrameBudget: () => this.#yieldToFrameBudget(),
+				},
 				resolver: this.#sourceResolutionCache,
 				textureClaims: this.#textureClaims,
 			});
@@ -1097,6 +1102,9 @@ export class OpenWorldStreamingController {
 			this.#outdoorObjectRunner = new OpenWorldOutdoorObjectArtifactRunner({
 				assetReader: this.#options.assetReader,
 				baker: this.#options.createStaticBaker(),
+				frameBudget: {
+					yieldToFrameBudget: () => this.#yieldToFrameBudget(),
+				},
 				objectVisualAtlasBuilder: this.#requireObjectVisualAtlasBuilder(),
 				resolver: this.#sourceResolutionCache,
 				textureClaims: this.#textureClaims,
@@ -1110,12 +1118,22 @@ export class OpenWorldStreamingController {
 			this.#envCellRunner = new OpenWorldEnvCellArtifactRunner({
 				assetReader: this.#options.assetReader,
 				baker: this.#options.createStaticBaker(),
+				frameBudget: {
+					yieldToFrameBudget: () => this.#yieldToFrameBudget(),
+				},
 				objectVisualAtlasBuilder: this.#requireObjectVisualAtlasBuilder(),
 				resolver: this.#sourceResolutionCache,
 				textureClaims: this.#textureClaims,
 			});
 		}
 		return this.#envCellRunner;
+	}
+
+	async #yieldToFrameBudget(): Promise<void> {
+		this.#frameBudgetYieldedPasses += 1;
+		await new Promise<void>((resolve) => {
+			globalThis.setTimeout(resolve, 0);
+		});
 	}
 
 	#requireRuntimeEntities(): OpenWorldRuntimeEntitySystem {

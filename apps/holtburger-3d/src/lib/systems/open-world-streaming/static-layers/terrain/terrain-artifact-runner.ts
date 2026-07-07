@@ -25,10 +25,15 @@ import {
 	type OpenWorldTextureBindingRequirement,
 } from "../../texture-residency/claims/texture-claim-registry";
 import type { OpenWorldStreamingTextureCommit } from "../../texture-residency/commits/contracts";
+import {
+	yieldToStaticMaterializationFrameBudget,
+	type OpenWorldStaticMaterializationFrameBudget,
+} from "../frame-budget";
 
 export interface OpenWorldTerrainArtifactRunnerOptions {
 	readonly assetReader: PreparedAssetReader;
 	readonly baker: StaticBaker;
+	readonly frameBudget: OpenWorldStaticMaterializationFrameBudget;
 	readonly resolver: StaticLandblockSceneLodSourceResolver;
 	readonly textureClaims: OpenWorldTextureClaimRegistry;
 }
@@ -56,12 +61,14 @@ interface OpenWorldTerrainTextureReadiness {
 export class OpenWorldTerrainArtifactRunner {
 	readonly #assetReader: PreparedAssetReader;
 	readonly #baker: StaticBaker;
+	readonly #frameBudget: OpenWorldStaticMaterializationFrameBudget;
 	readonly #resolver: StaticLandblockSceneLodSourceResolver;
 	readonly #textureClaims: OpenWorldTextureClaimRegistry;
 
 	constructor(options: OpenWorldTerrainArtifactRunnerOptions) {
 		this.#assetReader = options.assetReader;
 		this.#baker = options.baker;
+		this.#frameBudget = options.frameBudget;
 		this.#resolver = options.resolver;
 		this.#textureClaims = options.textureClaims;
 	}
@@ -73,6 +80,7 @@ export class OpenWorldTerrainArtifactRunner {
 		const resolved = await timing.measure("resolve-source", () =>
 			this.#resolveTerrainRecipe(request.task),
 		);
+		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const sourcePayload = requireTerrainSourcePayload(resolved);
 		const textureIntents = await timing.measure("create-texture-intents", () =>
 			createTerrainTexturePlacementIntents({
@@ -80,9 +88,11 @@ export class OpenWorldTerrainArtifactRunner {
 				items: [{ payload: resolved, task: request.task }],
 			}),
 		);
+		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const texturePlan = timing.measureSync("texture-placement", () =>
 			this.#createBakeTexturePlan(request, textureIntents),
 		);
+		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const bakeInput = timing.measureSync("create-bake-resources", () =>
 			createTerrainBakeJobInput(
 				request.task,
@@ -90,9 +100,11 @@ export class OpenWorldTerrainArtifactRunner {
 				texturePlan.placementSnapshot,
 			),
 		);
+		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const baked = await timing.measure("bake", () =>
 			this.#baker.bake(bakeInput),
 		);
+		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const payload = timing.measureSync("assemble-commit", () => ({
 			drawUnits: baked.drawUnits.filter(
 				(drawUnit) => drawUnit.kind === "terrain-geometry",

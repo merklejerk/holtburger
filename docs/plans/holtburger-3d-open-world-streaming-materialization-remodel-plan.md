@@ -2092,31 +2092,38 @@ Decisions and course corrections:
 
 Deliverables:
 
-- Move texture source preparation, layout search, packing, guttered blits, page rebuilds, and page pixel materialization behind a worker-owned page-build boundary unless a measured browser or WebGL constraint forces a narrow exception.
-- Rework `DirectOpenWorldObjectVisualAtlasBuilder` so it is either a durable worker-boundary adapter or is deleted in favor of a more honest page-build worker client.
+- Split worker ownership into two honest products:
+  - a worker-owned placement-layout artifact that prepares sources, gathers source dimensions, runs layout search, and returns layout/rect facts without page pixels;
+  - a worker-owned page-materialization artifact that prepares sources from source identities, applies guttered blits, builds page pixels, and returns page-build outputs for replacement settlement.
+- Move texture source preparation, layout search, guttered blits, page rebuilds, and page pixel materialization off the main thread unless a measured browser or WebGL constraint forces a narrow exception.
+- Rework `DirectOpenWorldObjectVisualAtlasBuilder` so it is either a test-only direct implementation or is deleted in favor of an honest worker-owned placement-layout client.
 - Keep main-loop authority limited to reservation, validation, commit publication, renderer texture upload, and diagnostics export.
 - Make page-build diagnostics replacement-native: source preparation, worker wait, transfer, settlement, stale rejection, and commit publication.
 
 Acceptance criteria:
 
-- Browser-mode page pixel materialization does not prepare sources or blit atlas pages on the main thread for normal object/terrain/dynamic material pages.
-- Tests can run with a direct in-process page builder, but production composition uses the worker-owned boundary.
-- Page-build worker inputs do not borrow mutable cache buffers unsafely.
+- Browser-mode placement layout and page pixel materialization do not prepare sources, search layouts, or blit atlas pages on the main thread for normal object/terrain/dynamic material pages.
+- Tests can run with direct in-process layout/page builders, but production composition uses worker-owned boundaries.
+- Page-build worker inputs carry immutable source identities and layout facts, not prepared pixel buffers borrowed from mutable main-thread caches.
 - Slow worker page builds do not block unrelated scene commit application except where explicit owner/currentness dependencies require waiting.
 - Diagnostics distinguish worker wall time from browser delivery/assimilation time.
 
 Task checklist:
 
-- [ ] Define worker page-build protocol from the Phase 21 page-build request DTO.
-- [ ] Move source preparation into the worker path or prove and document a narrow exception.
-- [ ] Move packer layout/materialization into the page-build artifact boundary.
-- [ ] Validate transferable ownership for page pixels and prepared sources.
+- [ ] Define a worker placement-layout protocol from source identities, page policy, and replacement entry ids.
+- [ ] Change Phase 21 page-build requests to carry source identities plus immutable layout facts instead of prepared pixel buffers.
+- [ ] Move source preparation for both layout and page materialization into worker paths, or prove and document a narrow exception.
+- [ ] Move layout search into the placement-layout artifact boundary.
+- [ ] Move guttered blits and page pixel materialization into the page-materialization artifact boundary.
+- [ ] Validate transferable ownership for page pixels and worker-prepared sources.
+- [ ] Remove `DirectOpenWorldTexturePageBuilder` from production composition; keep it only for tests or delete it if worker fixtures cover the same behavior.
 - [ ] Add stale page-build result rejection tests.
 - [ ] Run browser harness cases that previously exposed texture placement long-task pressure.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 22 dry-run found that the earlier wording was too monolithic. Phase 21 made bake depend on placement/layout facts before page pixels exist. If Phase 22 moves layout search into a single page-build worker call, bake either waits for page pixels again or the worker must retain hidden mutable layout/source state between layout and page materialization. Both options violate the design doc north star to migrate direct contracts and keep replacement-owned reservation/currentness honest.
+- Resteer: Phase 22 must produce a worker-owned layout artifact first, then worker-owned page materialization. Main-thread reservation remains the authority that creates replacement pages and reservation tokens after layout facts return. Page-build requests must then use source identities and layout rects, not prepared pixel buffers, so workers can materialize pages without reading mutable placement state.
 
 ### Phase 23: Loose Texture Readiness And Commit Ordering
 

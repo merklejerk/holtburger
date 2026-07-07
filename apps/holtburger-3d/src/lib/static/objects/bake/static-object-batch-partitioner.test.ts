@@ -262,6 +262,77 @@ describe("static object batch partitioner", () => {
 		expect(result.textureUses).toEqual([]);
 	});
 
+	it("bakes flat-color building detail overlays into rendered draw units", async () => {
+		const payload = createPayload({
+			detailRoles: [
+				{
+					fadeFar: 1,
+					fadeNear: 0,
+					role: "building",
+					texture: {
+						kind: "surface-texture",
+						surfaceTextureId: 0x05000030,
+					},
+					tiling: 7,
+				},
+			],
+			materials: [createSolidMaterial(0x08000010)],
+			textureRefs: createDetailTextureRefs(),
+		});
+		const result = bakeStaticObjectJob(await createBakeInput(payload));
+		const drawUnit = result.objectVisualInstallSet.directDrawUnits.find(
+			(candidate) => candidate.kind === "static-object-geometry",
+		);
+		if (!drawUnit || drawUnit.kind !== "static-object-geometry") {
+			throw new Error("Expected flat-color detail static object draw unit.");
+		}
+
+		const detailTextureBindingId =
+			drawUnit.materialEntries[0]?.detailTextureBindingId;
+		if (!detailTextureBindingId) {
+			throw new Error("Expected flat-color detail material binding.");
+		}
+		expect(drawUnit).toMatchObject({
+			materialFamily: "flat-color",
+			materialPass: "opaque",
+			textureBindingIds: [detailTextureBindingId],
+		});
+		expect(drawUnit.materialEntries[0]).toMatchObject({
+			detailTextureBindingId,
+			detailTextureTiling: 7,
+			primaryTextureBindingId: null,
+		});
+		expect(result.materialCoverage[0]).toMatchObject({
+			deferredTriangleCount: 0,
+			renderedTriangleCount: 1,
+		});
+		expect(
+			result.textureUses.map((textureUse) => ({
+				id: textureUse.bindingId,
+				samplingPolicy: textureUse.samplingPolicy,
+				source: textureUse.source,
+			})),
+		).toEqual([
+			{
+				id: expect.stringContaining(
+					"slot=prepared-render-surface-texture-use%3A06000030%3Argba-detail",
+				),
+				samplingPolicy: {
+					wrapS: "repeat",
+					wrapT: "repeat",
+				},
+				source: {
+					kind: "prepared-render-surface-texture-use",
+					renderSurface: {
+						kind: "render-surface",
+						renderSurfaceId: 0x06000030,
+					},
+					usage: "rgba-detail",
+				},
+			},
+		]);
+	});
+
 	it("keeps material color constants as table entries inside compatible partitions", () => {
 		const payload = createPayload({
 			materials: [

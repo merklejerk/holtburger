@@ -126,6 +126,7 @@ export interface ObjectVisualMaterialRecipeBase {
 }
 
 interface ObjectVisualDirectColorMaterialRecipe extends ObjectVisualMaterialRecipeBase {
+	readonly detailTextureRecipeId: ObjectVisualTextureRecipeId | null;
 	readonly family: "direct-color";
 }
 

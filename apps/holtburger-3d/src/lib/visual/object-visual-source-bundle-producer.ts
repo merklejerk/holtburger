@@ -478,6 +478,19 @@ function createMaterialRecipe(
 		case "flat-color":
 			return {
 				...base,
+				detailTextureRecipeId: findTextureRole(
+					plan.textureRoles,
+					"detail-overlay",
+				)
+					? requireTextureRecipeId(
+							registry,
+							requireTextureRole(plan.textureRoles, "detail-overlay").dataUse,
+							resolveTextureRoleWrapMode(
+								requireTextureRole(plan.textureRoles, "detail-overlay"),
+								spec.textureWrapMode,
+							),
+						)
+					: null,
 				family: "direct-color",
 			};
 		case "indexed-paletted":

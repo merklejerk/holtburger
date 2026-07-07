@@ -24,6 +24,7 @@ import {
 	classifyObjectVisualMaterial,
 	type ObjectVisualMaterialFallbackReason,
 	type ObjectVisualMaterialPlan,
+	type ObjectVisualMaterialTextureUseRole,
 } from "../../../visual/object-visual-material-planner";
 import { isRenderableObjectVisualMaterialPlan } from "../../objects/bake/static-object-renderability";
 
@@ -117,7 +118,6 @@ export function createStructuredInteriorMaterialPlanner(options: {
 				payload: options.payload,
 			});
 		materialPlansByMaterialId.set(material.identity.materialId, plan);
-		const textureWrapMode = resolveStructuredInteriorPlanTextureWrapMode(plan);
 		return {
 			entry: {
 				diagnostics: plan.fallbackReasons.map((reason) =>
@@ -141,7 +141,7 @@ export function createStructuredInteriorMaterialPlanner(options: {
 					createStructuredInteriorTextureBindingId({
 						dataUse: role.dataUse,
 						task: options.task,
-						wrapMode: textureWrapMode,
+						wrapMode: resolveStructuredInteriorTextureRoleWrapMode(plan, role),
 					}),
 				),
 			},
@@ -232,6 +232,16 @@ export function resolveStructuredInteriorPlanTextureWrapMode(
 	return resolveRepeatedStaticMaterialPrimaryWrapMode(
 		plan.textureRoles.map((role) => role.dataUse),
 	);
+}
+
+export function resolveStructuredInteriorTextureRoleWrapMode(
+	plan: ObjectVisualMaterialPlan,
+	role: ObjectVisualMaterialTextureUseRole,
+): StaticMaterialTextureWrapMode {
+	if (role.role === "detail-overlay" && role.tiling > 1) {
+		return "repeat";
+	}
+	return resolveStructuredInteriorPlanTextureWrapMode(plan);
 }
 
 function classifyStructuredInteriorMaterial(options: {

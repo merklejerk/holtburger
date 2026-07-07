@@ -9,7 +9,9 @@ export function isRenderableObjectVisualMaterialPlan(
 		plan.family === "flat-color" &&
 		isRenderableStaticObjectPass(plan.pass, plan.alphaPolicy.mode) &&
 		plan.renderCoverage === "classified-render-candidate" &&
-		plan.textureRoles.length === 0
+		isCurrentlyStageableFlatColorDataUseLayout(
+			plan.textureRoles.map((role) => role.dataUse),
+		)
 	) {
 		return true;
 	}
@@ -31,8 +33,8 @@ export function isRenderableStaticObjectPartition(
 		partition.family === "flat-color" &&
 		isRenderableStaticObjectPass(partition.pass, partition.alphaMode) &&
 		partition.renderCoverage === "classified-render-candidate" &&
-		partition.coarseTablePlan.entries.every(
-			(entry) => entry.textureDataUses.length === 0,
+		partition.coarseTablePlan.entries.every((entry) =>
+			isCurrentlyStageableFlatColorDataUseLayout(entry.textureDataUses),
 		)
 	) {
 		return true;
@@ -71,6 +73,16 @@ export function isCurrentlyStageableStaticObjectDataUse(
 				dataUse.usage === "index8" ||
 				dataUse.usage === "index16")) ||
 		dataUse?.kind === "prepared-palette-texture-use"
+	);
+}
+
+function isCurrentlyStageableFlatColorDataUseLayout(
+	dataUses: readonly MaterialTextureDataUseIdentity[],
+): boolean {
+	return dataUses.every(
+		(use) =>
+			use.kind === "prepared-render-surface-texture-use" &&
+			use.usage === "rgba-detail",
 	);
 }
 

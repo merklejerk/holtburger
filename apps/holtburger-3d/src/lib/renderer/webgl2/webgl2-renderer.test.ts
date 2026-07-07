@@ -127,13 +127,14 @@ describe("WebGL2 static object specialized shader contract", () => {
 		);
 	});
 
-	it("keeps flat-color shader free of object texture samplers", () => {
+	it("keeps flat-color shader free of base/index/palette samplers while supporting detail overlays", () => {
 		const shader = OBJECT_MATERIAL_FRAGMENT_SHADERS["flat-color"];
 		expect(shader).not.toContain("uObjectBaseColorTexture");
 		expect(shader).not.toContain("uObjectIndexTexture");
 		expect(shader).not.toContain("uObjectPaletteTexture");
-		expect(shader).not.toContain("uObjectDetailTexture");
+		expect(shader).toContain("uObjectDetailTexture");
 		expect(shader).not.toContain("uMaterialModes");
+		expect(shader).toContain("vec4 sampleDetailOverlay(vec2 uv)");
 		expect(shader).toContain(
 			"vec3 rgb = min(baseColor.rgb * uMaterialColors[slot].rgb + uMaterialEmissiveColors[slot], vec3(1.0));",
 		);
@@ -141,17 +142,20 @@ describe("WebGL2 static object specialized shader contract", () => {
 });
 
 describe("WebGL2 static object detail shader contract", () => {
-	it("composes detail overlays as a second repeat-sampled material role", () => {
-		const shader = OBJECT_MATERIAL_FRAGMENT_SHADERS["texture-rgba"];
-		expect(shader).toContain("uniform sampler2D uObjectDetailTexture;");
-		expect(shader).toContain("vec4 sampleDetailOverlay(vec2 uv)");
-		expect(shader).toContain(
-			"vec2 localUv = fract(uv * uMaterialDetailTilings[slot]);",
-		);
-		expect(shader).toContain(
-			"rgb = clamp(rgb * (detailColor.rgb + (1.0 - detailAlpha)), vec3(0.0), vec3(1.0));",
-		);
-	});
+	it.each(["flat-color", "texture-rgba"] as const)(
+		"composes detail overlays for %s as a repeat-sampled material role",
+		(family) => {
+			const shader = OBJECT_MATERIAL_FRAGMENT_SHADERS[family];
+			expect(shader).toContain("uniform sampler2D uObjectDetailTexture;");
+			expect(shader).toContain("vec4 sampleDetailOverlay(vec2 uv)");
+			expect(shader).toContain(
+				"vec2 localUv = fract(uv * uMaterialDetailTilings[slot]);",
+			);
+			expect(shader).toContain(
+				"rgb = clamp(rgb * (detailColor.rgb + (1.0 - detailAlpha)), vec3(0.0), vec3(1.0));",
+			);
+		},
+	);
 });
 
 describe("WebGL2 static object transparent pass helpers", () => {

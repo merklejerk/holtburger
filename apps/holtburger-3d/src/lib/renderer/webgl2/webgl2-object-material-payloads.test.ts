@@ -65,6 +65,61 @@ describe("WebGL2 static object payload builder", () => {
 		expect(scratch.textures.palette).toBeNull();
 	});
 
+	it("prepares flat-color detail overlays without requiring a base texture", () => {
+		const scratch = createObjectMaterialPreparedDrawPayload();
+		const detailTexture = createTexture();
+		const resource = createStaticResource({
+			materialEntries: [
+				createMaterialEntry({
+					detailTextureBindingId: "detail-use",
+					detailTextureTiling: 9,
+					slot: 3,
+				}),
+			],
+			materialFamily: "flat-color",
+		});
+		const placements = new Map<string, ResolvedTexturePlacement>([
+			[
+				"detail-use",
+				createPlacement({
+					height: 128,
+					rect: [12, 13, 14, 15],
+					textureRefId: "detail-ref",
+					textureBindingId: "detail-use",
+					width: 64,
+				}),
+			],
+		]);
+
+		expect(
+			prepareObjectMaterialDrawPayload(
+				scratch,
+				resource,
+				createTextureBindingLookup(
+					placements,
+					new Map([["detail-ref", detailTexture]]),
+				),
+			),
+		).toBe(true);
+
+		expect(scratch.textures.baseColor).toBeNull();
+		expect(scratch.textures.detail).toEqual({
+			height: 128,
+			pageVersion: {
+				placementRevision: 1,
+				textureRefId: "detail-ref",
+			},
+			texture: detailTexture,
+			textureRefId: "detail-ref",
+			width: 64,
+		});
+		expect(
+			Array.from(scratch.materialUniforms.detailRects.slice(12, 16)),
+		).toEqual([12, 13, 14, 15]);
+		expect(scratch.materialUniforms.detailEnabled[3]).toBe(1);
+		expect(scratch.materialUniforms.detailTilings[3]).toBe(9);
+	});
+
 	it("prepares resident role pages and indexed material uniforms", () => {
 		const scratch = createObjectMaterialPreparedDrawPayload();
 		const indexTexture = createTexture();

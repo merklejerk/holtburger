@@ -3,6 +3,7 @@ import type {
 	OpenWorldStreamingDiagnosticsSnapshot,
 	OpenWorldStreamingStaticTaskStageTiming,
 	OpenWorldStreamingStaticTaskDiagnostics,
+	OpenWorldStreamingTexturePageBuildTaskDiagnostics,
 } from "../diagnostics/contracts";
 import type { Renderer } from "../../../renderer/types";
 import { StaticSceneQuery } from "../../../runtime/static-scene-query";
@@ -51,7 +52,9 @@ import type {
 } from "../../../runtime/scene-query/merged-scene-query-contracts";
 import type { StaticSceneEnvCellBounds } from "../../../runtime/scene-query/contracts";
 import type { OpenWorldObjectVisualAtlasBuilder } from "../texture-residency/placement/object-visual-atlas-builder";
+import type { OpenWorldTexturePageBuildInput } from "../texture-residency/page-build/protocol";
 import type { OpenWorldTexturePageBuilder } from "../texture-residency/page-build/worker-client";
+import { OpenWorldTexturePageBuildTaskStream } from "../texture-residency/page-build/texture-page-build-task-stream";
 import type {
 	DynamicEntityId,
 	DynamicEntityRenderResidence,
@@ -210,6 +213,7 @@ export class OpenWorldStreamingController {
 	#runtimeEntities: OpenWorldRuntimeEntitySystem | null = null;
 	#objectVisualAtlasBuilder: OpenWorldObjectVisualAtlasBuilder | null = null;
 	#texturePageBuilder: OpenWorldTexturePageBuilder | null = null;
+	#texturePageBuildTaskStream: OpenWorldTexturePageBuildTaskStream | null = null;
 	#frameBudgetYieldedPasses = 0;
 	readonly #deferredOutdoorRendererLayers = {
 		buildings: new Map<
@@ -488,6 +492,9 @@ export class OpenWorldStreamingController {
 				},
 				pageBuildsInFlight: textureSnapshot.pageBuildsInFlight,
 			},
+			texturePageBuildTasks:
+				this.#texturePageBuildTaskStream?.createDiagnosticsSnapshot() ??
+				createEmptyTexturePageBuildTaskDiagnosticsSnapshot(),
 			runtimeEntities: {
 				active: dynamicSnapshot.activeEntityCount,
 				animation: runtimeEntityDiagnostics.animation,
@@ -670,6 +677,11 @@ export class OpenWorldStreamingController {
 				return;
 			}
 			if (commit?.kind === "terrain-layer-commit") {
+				this.#scheduleTexturePageBuilds({
+					pageBuildRequests: commit.texturePageBuildRequests,
+					request,
+					runId,
+				});
 				this.#recordApplyTiming({
 					apply: () =>
 						this.#applyTerrainCommit(commit, interest.anchorLandblockId),
@@ -679,6 +691,11 @@ export class OpenWorldStreamingController {
 					startedAtMs,
 				});
 			} else if (commit?.kind === "outdoor-object-layer-commit") {
+				this.#scheduleTexturePageBuilds({
+					pageBuildRequests: commit.texturePageBuildRequests,
+					request,
+					runId,
+				});
 				this.#recordApplyTiming({
 					apply: () => this.#applyOutdoorObjectCommit(commit),
 					drawUnits: commit.payload.drawUnits.length,
@@ -687,6 +704,11 @@ export class OpenWorldStreamingController {
 					startedAtMs,
 				});
 			} else if (commit?.kind === "env-cell-system-layer-commit") {
+				this.#scheduleTexturePageBuilds({
+					pageBuildRequests: commit.texturePageBuildRequests,
+					request,
+					runId,
+				});
 				this.#recordApplyTiming({
 					apply: () => this.#applyEnvCellCommit(commit),
 					drawUnits:
@@ -788,6 +810,27 @@ export class OpenWorldStreamingController {
 		});
 	}
 
+	#scheduleTexturePageBuilds(options: {
+		readonly pageBuildRequests: readonly OpenWorldTexturePageBuildInput[];
+		readonly request: StaticLayerRunRequest;
+		readonly runId: number;
+	}): void {
+		if (options.pageBuildRequests.length === 0) {
+			return;
+		}
+		this.#requireTexturePageBuildTaskStream().schedule({
+			isCurrent: () =>
+				this.#isCurrentRun(options.runId) &&
+				this.#owners.isCurrent({
+					ownerId: options.request.owner.id,
+					token: options.request.token,
+				}),
+			ownerId: options.request.owner.id,
+			pageBuildRequests: options.pageBuildRequests,
+			sourceTaskId: options.request.task.taskId,
+		});
+	}
+
 	#recordStaticTaskTiming(input: {
 		readonly applyMs: number;
 		readonly drawUnits: number;
@@ -817,15 +860,6 @@ export class OpenWorldStreamingController {
 	}
 
 	#applyEnvCellCommit(commit: OpenWorldEnvCellSystemLayerCommit): void {
-		for (const textureCommit of commit.textureCommits) {
-			applyOpenWorldStreamingTextureCommit(this.#renderer, textureCommit, {
-				revision:
-					this.#terrainProgress.committed +
-					this.#outdoorObjectProgress.committed +
-					this.#envCellProgress.committed +
-					1,
-			});
-		}
 		this.#staticSceneQuery.setEnvCellSystemLayer(commit.payload);
 		this.#envCellResourceMembershipByLandblock =
 			createEnvCellResourceMembershipIndex([
@@ -859,15 +893,6 @@ export class OpenWorldStreamingController {
 	}
 
 	#applyOutdoorObjectCommit(commit: OpenWorldOutdoorObjectLayerCommit): void {
-		for (const textureCommit of commit.textureCommits) {
-			applyOpenWorldStreamingTextureCommit(this.#renderer, textureCommit, {
-				revision:
-					this.#terrainProgress.committed +
-					this.#outdoorObjectProgress.committed +
-					this.#envCellProgress.committed +
-					1,
-			});
-		}
 		this.#staticSceneQuery.applyStaticPeerRecords({
 			sourceMappings: commit.payload.sourceMappingRecords,
 			spatialRecords: commit.payload.spatialRecords,
@@ -908,11 +933,6 @@ export class OpenWorldStreamingController {
 		commit: OpenWorldTerrainLayerCommit,
 		anchorLandblockId: number,
 	): void {
-		for (const textureCommit of commit.textureCommits) {
-			applyOpenWorldStreamingTextureCommit(this.#renderer, textureCommit, {
-				revision: this.#terrainProgress.committed + 1,
-			});
-		}
 		this.#staticSceneQuery.ingestTerrain(
 			commit.sourcePayload,
 			anchorLandblockId,
@@ -1085,7 +1105,6 @@ export class OpenWorldStreamingController {
 				resolver: this.#sourceResolutionCache,
 				textureAtlasBuilder: this.#requireObjectVisualAtlasBuilder(),
 				textureClaims: this.#textureClaims,
-				texturePageBuilder: this.#requireTexturePageBuilder(),
 			});
 		}
 		return this.#terrainRunner;
@@ -1102,7 +1121,6 @@ export class OpenWorldStreamingController {
 				objectVisualAtlasBuilder: this.#requireObjectVisualAtlasBuilder(),
 				resolver: this.#sourceResolutionCache,
 				textureClaims: this.#textureClaims,
-				texturePageBuilder: this.#requireTexturePageBuilder(),
 			});
 		}
 		return this.#outdoorObjectRunner;
@@ -1119,7 +1137,6 @@ export class OpenWorldStreamingController {
 				objectVisualAtlasBuilder: this.#requireObjectVisualAtlasBuilder(),
 				resolver: this.#sourceResolutionCache,
 				textureClaims: this.#textureClaims,
-				texturePageBuilder: this.#requireTexturePageBuilder(),
 			});
 		}
 		return this.#envCellRunner;
@@ -1142,8 +1159,10 @@ export class OpenWorldStreamingController {
 				objectVisualAtlasBuilder: this.#requireObjectVisualAtlasBuilder(),
 				owners: this.#owners,
 				renderer: this.#renderer,
+				scheduleTexturePageBuilds: (request) => {
+					this.#requireTexturePageBuildTaskStream().schedule(request);
+				},
 				textureClaims: this.#textureClaims,
-				texturePageBuilder: this.#requireTexturePageBuilder(),
 			});
 		}
 		return this.#runtimeEntities;
@@ -1162,6 +1181,26 @@ export class OpenWorldStreamingController {
 			this.#texturePageBuilder = this.#options.createTexturePageBuilder();
 		}
 		return this.#texturePageBuilder;
+	}
+
+	#requireTexturePageBuildTaskStream(): OpenWorldTexturePageBuildTaskStream {
+		if (!this.#texturePageBuildTaskStream) {
+			this.#texturePageBuildTaskStream =
+				new OpenWorldTexturePageBuildTaskStream({
+					onCommit: (commit) => {
+						applyOpenWorldStreamingTextureCommit(this.#renderer, commit, {
+							revision:
+								this.#terrainProgress.committed +
+								this.#outdoorObjectProgress.committed +
+								this.#envCellProgress.committed +
+								1,
+						});
+					},
+					pageBuilder: this.#requireTexturePageBuilder(),
+					textureClaims: this.#textureClaims,
+				});
+		}
+		return this.#texturePageBuildTaskStream;
 	}
 
 	#requireStaticSourceResolver(): StaticLandblockSceneLodSourceResolver {
@@ -1714,6 +1753,21 @@ function createEmptyRuntimeEntityDiagnosticsSnapshot(): OpenWorldRuntimeEntityDi
 			recentFailures: [],
 			skippedVisualCount: 0,
 			started: 0,
+		},
+	};
+}
+
+function createEmptyTexturePageBuildTaskDiagnosticsSnapshot(): OpenWorldStreamingTexturePageBuildTaskDiagnostics {
+	return {
+		active: [],
+		recent: [],
+		summary: {
+			accepted: 0,
+			active: 0,
+			committed: 0,
+			failed: 0,
+			queued: 0,
+			staleRejected: 0,
 		},
 	};
 }

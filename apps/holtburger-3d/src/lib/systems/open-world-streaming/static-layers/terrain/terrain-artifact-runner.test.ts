@@ -16,7 +16,6 @@ import { OpenWorldTextureClaimRegistry } from "../../texture-residency/claims/te
 import { OpenWorldTerrainArtifactRunner } from "./terrain-artifact-runner";
 import type { MaterializationOwnerId } from "../../owners/owner-id";
 import type { OpenWorldMaterialTextureAtlasBuilder } from "../../texture-residency/placement/object-visual-atlas-builder";
-import type { OpenWorldTexturePageBuilder } from "../../texture-residency/page-build/worker-client";
 
 describe("OpenWorldTerrainArtifactRunner", () => {
 	it("resolves and bakes terrain into a replacement terrain layer commit", async () => {
@@ -30,7 +29,6 @@ describe("OpenWorldTerrainArtifactRunner", () => {
 			resolver,
 			textureAtlasBuilder: createUnusedTextureAtlasBuilder(),
 			textureClaims: new OpenWorldTextureClaimRegistry(),
-			texturePageBuilder: createUnusedTexturePageBuilder(),
 		});
 
 		const commit = await runner.run({
@@ -63,7 +61,7 @@ describe("OpenWorldTerrainArtifactRunner", () => {
 				kind: "terrain",
 				landblockId: 0xda55ffff,
 			},
-			textureCommits: [],
+			texturePageBuildRequests: [],
 			textureReadiness: [{ bindingId: "terrain-binding:1", kind: "pending" }],
 		});
 		expect(commit.stageTimings.map((timing) => timing.stage)).toEqual([
@@ -72,7 +70,6 @@ describe("OpenWorldTerrainArtifactRunner", () => {
 			"texture-placement-reservation",
 			"create-bake-resources",
 			"bake",
-			"texture-page-build",
 			"assemble-commit",
 		]);
 	});
@@ -230,14 +227,6 @@ function createUnusedTextureAtlasBuilder(): OpenWorldMaterialTextureAtlasBuilder
 	return {
 		async planAtlasPlacement(): Promise<never> {
 			throw new Error("Fixture texture atlas builder should not be used.");
-		},
-	};
-}
-
-function createUnusedTexturePageBuilder(): OpenWorldTexturePageBuilder {
-	return {
-		async buildPage(): Promise<never> {
-			throw new Error("Fixture texture page builder should not be used.");
 		},
 	};
 }

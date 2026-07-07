@@ -38,6 +38,7 @@ export interface OpenWorldStreamingDiagnosticsSnapshot {
 			readonly reason: "page-size-not-yet-canonical";
 		};
 	};
+	readonly texturePageBuildTasks: OpenWorldStreamingTexturePageBuildTaskDiagnostics;
 	readonly runtimeEntities: {
 		readonly active: number;
 		readonly nonRenderable: number;
@@ -137,6 +138,37 @@ export interface OpenWorldStreamingStaticTaskDiagnostics {
 		readonly maxDurationMs: number;
 		readonly totalApplyMs: number;
 		readonly maxApplyMs: number;
+	};
+}
+
+/** Replacement-owned page-build task diagnostics after scene/texture stream decoupling. */
+export interface OpenWorldStreamingTexturePageBuildTaskDiagnostics {
+	readonly active: readonly {
+		readonly bucketKey: string;
+		readonly elapsedMs: number;
+		readonly jobId: string;
+		readonly ownerId: string;
+		readonly pageId: string;
+		readonly sourceTaskId: string;
+	}[];
+	readonly recent: readonly {
+		readonly bucketKey: string;
+		readonly durationMs: number;
+		readonly error: string | null;
+		readonly jobId: string;
+		readonly ownerId: string;
+		readonly pageId: string;
+		readonly sourceTaskId: string;
+		readonly stageTimings: readonly OpenWorldStreamingStaticTaskStageTiming[];
+		readonly status: "accepted" | "committed" | "failed" | "stale-rejected";
+	}[];
+	readonly summary: {
+		readonly accepted: number;
+		readonly active: number;
+		readonly committed: number;
+		readonly failed: number;
+		readonly queued: number;
+		readonly staleRejected: number;
 	};
 }
 

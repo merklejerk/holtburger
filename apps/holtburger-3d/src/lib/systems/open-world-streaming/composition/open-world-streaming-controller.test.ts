@@ -66,7 +66,15 @@ describe("OpenWorldStreamingController terrain slice", () => {
 			pending: 0,
 		});
 		expect(controller.createDiagnosticsSnapshot().frameBudget).toEqual({
-			yieldedPasses: 6,
+			yieldedPasses: 5,
+		});
+		expect(controller.createDiagnosticsSnapshot().texturePageBuildTasks.summary).toEqual({
+			accepted: 0,
+			active: 0,
+			committed: 0,
+			failed: 0,
+			queued: 0,
+			staleRejected: 0,
 		});
 	});
 

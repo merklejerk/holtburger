@@ -15,7 +15,6 @@ import type { StaticAuthoredDynamicPlacementRecord } from "../../../static/contr
 import type {
 	DynamicRendererResourceCommit,
 	DynamicRendererInstanceCommit,
-	TexturePlacementUpdate,
 } from "../../../renderer/types";
 import type { DynamicEntityRenderResidence } from "../../../dynamic/contracts";
 import {
@@ -29,10 +28,8 @@ import {
 } from "../owners/owner-id";
 import { OpenWorldTextureClaimRegistry } from "../texture-residency/claims/texture-claim-registry";
 import { reserveObjectVisualTexturePlacements } from "../texture-residency/placement/object-visual-texture-placement-plan";
-import { buildReservedMaterialTexturePages } from "../texture-residency/placement/material-texture-placement-plan";
-import type { OpenWorldTexturePageBuilder } from "../texture-residency/page-build/worker-client";
+import type { OpenWorldTexturePageBuildInput } from "../texture-residency/page-build/protocol";
 import type { OpenWorldObjectVisualAtlasBuilder } from "../texture-residency/placement/object-visual-atlas-builder";
-import { applyOpenWorldStreamingTextureCommit } from "../texture-residency/commits/texture-commit-applier";
 import {
 	createDynamicRendererInstances,
 	createDynamicRendererVisualResources,
@@ -44,15 +41,23 @@ export interface OpenWorldRuntimeEntitySystemOptions {
 	readonly createDynamicVisualRecipeResolver: () => DynamicVisualRecipeResolver;
 	readonly objectVisualAtlasBuilder: OpenWorldObjectVisualAtlasBuilder;
 	readonly owners: MaterializationOwnerRegistry;
-	readonly texturePageBuilder: OpenWorldTexturePageBuilder;
 	readonly renderer: OpenWorldRuntimeEntityRendererPort;
+	readonly scheduleTexturePageBuilds: (
+		request: OpenWorldRuntimeEntityTexturePageBuildRequest,
+	) => void;
 	readonly textureClaims: OpenWorldTextureClaimRegistry;
 }
 
 export interface OpenWorldRuntimeEntityRendererPort {
-	applyTexturePlacementUpdate(update: TexturePlacementUpdate): void;
 	commitDynamicResources(commit: DynamicRendererResourceCommit): void;
 	commitDynamicInstances(commit: DynamicRendererInstanceCommit): void;
+}
+
+export interface OpenWorldRuntimeEntityTexturePageBuildRequest {
+	readonly isCurrent: () => boolean;
+	readonly ownerId: MaterializationOwnerId;
+	readonly pageBuildRequests: readonly OpenWorldTexturePageBuildInput[];
+	readonly sourceTaskId: string;
 }
 
 interface DynamicPrepRequest {
@@ -101,12 +106,14 @@ export class OpenWorldRuntimeEntitySystem {
 	readonly #objectVisualAtlasBuilder: OpenWorldObjectVisualAtlasBuilder;
 	readonly #owners: MaterializationOwnerRegistry;
 	readonly #renderer: OpenWorldRuntimeEntityRendererPort;
+	readonly #scheduleTexturePageBuilds: (
+		request: OpenWorldRuntimeEntityTexturePageBuildRequest,
+	) => void;
 	readonly #staticChildOwnerIdsByParentId = new Map<
 		MaterializationOwnerId,
 		Set<MaterializationOwnerId>
 	>();
 	readonly #textureClaims: OpenWorldTextureClaimRegistry;
-	readonly #texturePageBuilder: OpenWorldTexturePageBuilder;
 	#dynamicVisualBaker: DynamicVisualBaker | null = null;
 	#dynamicVisualRecipeResolver: DynamicVisualRecipeResolver | null = null;
 	#lastFrameTimeSeconds = 0;
@@ -140,8 +147,8 @@ export class OpenWorldRuntimeEntitySystem {
 		this.#objectVisualAtlasBuilder = options.objectVisualAtlasBuilder;
 		this.#owners = options.owners;
 		this.#renderer = options.renderer;
+		this.#scheduleTexturePageBuilds = options.scheduleTexturePageBuilds;
 		this.#textureClaims = options.textureClaims;
-		this.#texturePageBuilder = options.texturePageBuilder;
 	}
 
 	createRuntimeEntity(request: RuntimeDynamicSpawnRequest): DynamicEntityId {
@@ -304,19 +311,15 @@ export class OpenWorldRuntimeEntitySystem {
 			if (!this.#isCurrent(request)) {
 				return;
 			}
-			const texturePageBuild = await buildReservedMaterialTexturePages({
-				pageBuilder: this.#texturePageBuilder,
-				pageBuildRequests: textureReservation.pageBuildRequests,
-				textureClaims: this.#textureClaims,
-			});
 			if (!this.#isCurrent(request)) {
 				return;
 			}
-			for (const commit of texturePageBuild.textureCommits) {
-				applyOpenWorldStreamingTextureCommit(this.#renderer, commit, {
-					revision: this.#nextRendererRevision(),
-				});
-			}
+			this.#scheduleTexturePageBuilds({
+				isCurrent: () => this.#isCurrent(request),
+				ownerId: request.ownerId,
+				pageBuildRequests: textureReservation.pageBuildRequests,
+				sourceTaskId: String(request.entityId),
+			});
 			const product = result.product;
 			if (product?.kind === "baked") {
 				this.#bakeSuccessCount += 1;

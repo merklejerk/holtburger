@@ -291,6 +291,22 @@ export class OpenWorldTextureClaimRegistry {
 		return "accepted";
 	}
 
+	rejectPageBuild(
+		pageId: OpenWorldTexturePageId,
+		token: OpenWorldTexturePageReservationToken,
+	): "accepted" | "stale" {
+		const page = this.#requirePage(pageId);
+		if (page.reservationToken !== token) {
+			return "stale";
+		}
+		page.reservationToken = null;
+		page.state = page.stateBeforeBuild ?? "planned";
+		page.lastActiveState = page.state;
+		page.stateBeforeBuild = null;
+		this.#refreshPageReclaimableState(page);
+		return "accepted";
+	}
+
 	createBucketSnapshot(
 		bucketKey: OpenWorldTextureBucketKey,
 	): OpenWorldTextureBucketSnapshot {

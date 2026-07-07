@@ -2152,17 +2152,25 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Audit current `buildReservedMaterialTexturePages(...)` call sites in `static-layers/terrain`, `static-layers/outdoor-objects`, `static-layers/env-cells`, and `runtime-entities`.
-- [ ] Add a controller-owned texture task queue/settlement reducer under `texture-residency/page-build` or `texture-residency/commits`, not inside domain runners.
-- [ ] Change domain runners to return bake-facing placement plus page-build requests as commit dependencies, rather than completed texture commits.
-- [ ] Add owner/currentness checks for late texture task output.
-- [ ] Add stale output tests by evicting/replacing an owner while page-build work is in flight.
-- [ ] Add diagnostics for task state, stale rejection, page-build failure, and accepted commit publication.
-- [ ] Run focused texture residency and static layer tests before browser harness.
+- [x] Audit current `buildReservedMaterialTexturePages(...)` call sites in `static-layers/terrain`, `static-layers/outdoor-objects`, `static-layers/env-cells`, and `runtime-entities`.
+- [x] Add a controller-owned texture task queue/settlement reducer under `texture-residency/page-build` or `texture-residency/commits`, not inside domain runners.
+- [x] Change domain runners to return bake-facing placement plus page-build requests as commit dependencies, rather than completed texture commits.
+- [x] Add owner/currentness checks for late texture task output.
+- [x] Add stale output tests by evicting/replacing an owner while page-build work is in flight.
+- [x] Add diagnostics for task state, stale rejection, page-build failure, and accepted commit publication.
+- [x] Run focused texture residency and static layer tests before browser harness.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 23 completed the production call-site cut: terrain, outdoor-object, env-cell, and runtime-entity paths no longer call `buildReservedMaterialTexturePages(...)` in production materialization. Static layer commits now carry `texturePageBuildRequests`; the controller schedules those requests through a replacement-owned task stream after owner/currentness validation.
+- Added `OpenWorldTexturePageBuildTaskStream` under `texture-residency/page-build`. It owns queued/active/recent task diagnostics, calls the worker-backed page builder, settles accepted outputs through `OpenWorldTextureClaimRegistry`, publishes texture commits through the controller callback, and rejects stale/failed outputs without renderer mutation.
+- Added `OpenWorldTextureClaimRegistry.rejectPageBuild(...)` so stale owner output and failed page-build jobs can retire the reservation instead of leaving replacement diagnostics stuck with phantom in-flight pages.
+- Runtime entity materialization now schedules texture page-build requests through the same controller-owned stream instead of applying texture commits inside `OpenWorldRuntimeEntitySystem`. Dynamic visual publication remains a Phase 24 readiness concern; this phase only moved page-build settlement and renderer texture upload out of runtime prep.
+- Replacement diagnostics now expose `texturePageBuildTasks` with active tasks, recent task timings, queue/accepted/committed/failed/stale counts, owner id, source task id, bucket key, and page id. This is direct replacement evidence, not a legacy texture-manager projection.
+- Spicy bit: static scene commits can now be counted as applied while their texture page tasks are still running. That is the intended loose ordering model, but it means readiness/fidelity consumers must stop treating scene commit settlement as proof that all bindings are resident. Phase 24 owns renderer readiness gates; Phase 25 owns making material/readiness diagnostics impossible to misread.
+- Concession: focused unit tests prove the task stream's accepted and stale-currentness paths directly, and static runner tests prove the commit dependency shape. The real terrain/object/env-cell/static-authored dynamic page tasks are covered by the browser harness, which now shows `texturePageBuildTasks` committing independently. Building full source-free material fixtures for every domain would require either fake DAT material identities or preserving fixture-only legacy assumptions, so that coverage is intentionally harness-backed for this phase.
+- Verification: `npm run check`, `npm run lint`, focused `npm run test:ts -- --run src/lib/systems/open-world-streaming/texture-residency/claims/texture-claim-registry.test.ts src/lib/systems/open-world-streaming/texture-residency/page-build/texture-page-build-task-stream.test.ts src/lib/systems/open-world-streaming/texture-residency/page-build/page-build.test.ts src/lib/systems/open-world-streaming/static-layers/terrain/terrain-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/outdoor-objects/outdoor-object-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/env-cells/env-cell-artifact-runner.test.ts src/lib/systems/open-world-streaming/runtime-entities/runtime-entity-system.test.ts src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts`, and `npm run harness:browser` passed.
+- Harness note: terrain flat-color warnings remain visible after this phase. That is not papered over by the texture task stream; Phase 27 remains the owner for terrain role/readiness and shader-input investigation.
 
 ### Phase 24: Renderer Readiness Gates And Late Texture Binding
 

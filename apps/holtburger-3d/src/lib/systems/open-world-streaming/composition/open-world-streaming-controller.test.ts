@@ -252,6 +252,38 @@ describe("OpenWorldStreamingController terrain slice", () => {
 		});
 	});
 
+	it("does not treat rendered material coverage as a readiness issue", async () => {
+		const controller = new OpenWorldStreamingController({
+			assetReader: createUnusedAssetReader(),
+			createDynamicVisualBaker: failIfDynamicWorkerFactoryIsCalled,
+			createDynamicVisualRecipeResolver: failIfDynamicWorkerFactoryIsCalled,
+			createObjectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder,
+			createStaticBaker: () =>
+				new FixtureTerrainBaker([createRenderedMaterialCoverage()]),
+			createStaticResolver: () =>
+				new FixtureTerrainResolver(createTerrainScopePayload()),
+			createTexturePageBuilder: createUnusedTexturePageBuilder,
+			renderer: new FixtureTerrainRenderer(),
+		});
+
+		controller.updateTerrainInterest({
+			anchorLandblockId: 0xda55ffff,
+			radius: 0,
+			revision: 1,
+		});
+		await waitFor(() => controller.createSnapshot().terrain.committed === 1);
+
+		expect(
+			controller.createDiagnosticsSnapshot().materialReadiness,
+		).toMatchObject({
+			recentIssues: [],
+			summary: {
+				deferredMaterialIssueCount: 0,
+				unsupportedMaterialIssueCount: 0,
+			},
+		});
+	});
+
 	it("reports terrain material fallback reasons as replacement readiness issues", async () => {
 		const controller = new OpenWorldStreamingController({
 			assetReader: createUnusedAssetReader(),
@@ -669,6 +701,37 @@ function createUnsupportedMaterialCoverage(): StaticMaterialCoverageReport {
 			},
 		],
 		unsupportedTriangleCount: 12,
+	};
+}
+
+function createRenderedMaterialCoverage(): StaticMaterialCoverageReport {
+	return {
+		buckets: [
+			{
+				family: "texture-rgba",
+				filteringMode: "none",
+				materialCount: 1,
+				outcome: "rendered",
+				partitionCount: 1,
+				pass: "opaque",
+				textureRoleCount: 1,
+				triangleCount: 12,
+			},
+		],
+		coverageKey: "fixture:rendered-coverage",
+		coverageKind: "terrain",
+		deferredTriangleCount: 0,
+		detailRoleCount: 0,
+		domain: "outdoor-terrain",
+		fallbackReasonCount: 0,
+		fallbackReasonCounts: [],
+		landblockId: 0xda55ffff,
+		materialCount: 1,
+		partitionCount: 1,
+		renderedTriangleCount: 12,
+		triangleCount: 12,
+		unrenderedBuckets: [],
+		unsupportedTriangleCount: 0,
 	};
 }
 

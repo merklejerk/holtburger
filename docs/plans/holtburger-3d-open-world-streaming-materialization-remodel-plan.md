@@ -2507,18 +2507,30 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Audit `apps/holtburger-3d/src/lib/textures/placement.ts` for optional defaults and legacy placement fields that replacement callers can still accidentally use.
-- [ ] Make replacement placement policy required at the type level for static and dynamic placement intent creation, or split input types so legacy texture-use facts cannot omit replacement policy.
-- [ ] Audit `material-texture-placement-policy.ts`, `object-visual-texture-placement-plan.ts`, `static-material-texture-policy.test.ts`, `placement.test.ts`, terrain bake tests, and object visual tests for old bucket parity expectations.
-- [ ] Classify `ownerIds`, `pageClass`, `textureKey`, and bake-facing item ids as durable bake/renderer facts, adapter inputs, or vestigial fields before deleting or renaming them.
-- [ ] Remove or isolate any production use of ignored `placementBucketKey` facts.
-- [ ] Add readiness tests that prove material coverage alone does not mark a resource renderable.
-- [ ] Update all touched consumers as direct migrations, deletions, edge shims, or durable adapters in the phase decisions.
-- [ ] Run focused placement/material-readiness tests and `npm run check`.
+- [x] Audit `apps/holtburger-3d/src/lib/textures/placement.ts` for optional defaults and legacy placement fields that replacement callers can still accidentally use.
+- [x] Make replacement placement policy required at the type level for static and dynamic placement intent creation, or split input types so legacy texture-use facts cannot omit replacement policy.
+- [x] Audit `material-texture-placement-policy.ts`, `object-visual-texture-placement-plan.ts`, `static-material-texture-policy.test.ts`, `placement.test.ts`, terrain bake tests, and object visual tests for old bucket parity expectations.
+- [x] Classify `ownerIds`, `pageClass`, `textureKey`, and bake-facing item ids as durable bake/renderer facts, adapter inputs, or vestigial fields before deleting or renaming them.
+- [x] Remove or isolate any production use of ignored `placementBucketKey` facts.
+- [x] Add readiness tests that prove material coverage alone does not mark a resource renderable.
+- [x] Update all touched consumers as direct migrations, deletions, edge shims, or durable adapters in the phase decisions.
+- [x] Run focused placement/material-readiness tests and `npm run check`.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 32 completed on 2026-07-07.
+- Tightened the placement intent API: `TexturePlacementIntentOptions.placementPolicy` is now required at the type level, and `createStaticTexturePlacementIntent(...)`, `createObjectVisualStaticTexturePlacementIntent(...)`, `createDynamicTexturePlacementIntent(...)`, and `createObjectVisualDynamicTexturePlacementIntent(...)` no longer accept omitted replacement policy. The old runtime throw tests were deleted because the compiler is now the guard.
+- Split internal identity validation away from `TexturePlacementIntentOptions` so replacement policy is required only at the API boundary, not smuggled into helper shapes that only validate binding/owner/page identity.
+- Placement field classification:
+  - `textureKey` remains durable canonical texture identity used for source dedupe and renderer/bake placement facts.
+  - `pageClass` remains durable atlas compatibility policy used by placement planning and renderer legality.
+  - `ownerIds` remains an adapter/bake bridge while older static/dynamic texture-use facts still carry texture-owner vocabulary; replacement ownership authority is still `MaterializationOwnerId` plus texture claim owner state.
+  - Static `itemId` and object-visual numeric bake ids remain bake-facing lookup facts, not residency ownership.
+- Legacy bucket audit: no production replacement path references old `placementBucketKey` or `TexturePlacementBucketKey`. The remaining `createMaterialTexturePlacementBucketKey(...)` uses replacement `TexturePlacementPolicy` and `OpenWorldTextureBucketKey`, so it is direct replacement contract, not legacy parity.
+- Readiness cleanup: added a controller test proving rendered material coverage reports do not create material readiness issues. Unsupported/deferred coverage remains the source of readiness issues; coverage itself stays diagnostic evidence, not proof of render readiness.
+- Consumer classification: placement intent callers are direct migrations; deleted omission tests were architecture-preserving tests; `material-texture-placement-policy.ts` remains the durable replacement policy reducer; no edge shim was added.
+- Spicy bit: leaving `placementPolicy` optional with a runtime throw was a polite lie. It made the new contract look optional to TypeScript and would let dead-shape tests keep old call forms alive.
+- Verification: `npm run check`, `npm run lint`, focused `npm run test:ts -- --run src/lib/textures/placement.test.ts src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts src/lib/visual/object-visual-texture-placement-planner.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/material-texture-placement-policy.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/object-visual-texture-placement-plan.test.ts`.
 
 ### Phase 33: Renderer And Domain Diagnostics Contract Cleanup
 

@@ -15,11 +15,12 @@ import type { StaticResolverWorkerGlobalPort } from "./protocol";
 import type {
 	StaticResolverWorkerInput,
 	StaticResolverWorkerOutput,
+	StaticResolverWorkerProgress,
 } from "./protocol";
 
 export type StaticResolverFactory = (
 	context: WorkerExecuteContext<
-		never,
+		StaticResolverWorkerProgress,
 		PreparedAssetServiceRequest,
 		PreparedAssetServiceResponse
 	>,
@@ -32,7 +33,7 @@ export function installStaticResolverWorkerHandler(
 	return installWorkerHandler<
 		StaticResolverWorkerInput,
 		StaticResolverWorkerOutput,
-		never,
+		StaticResolverWorkerProgress,
 		PreparedAssetServiceRequest,
 		PreparedAssetServiceResponse
 	>({
@@ -48,6 +49,21 @@ export function installStaticResolverWorkerHandler(
 					output: {
 						kind: "landblock-scene-lod-source-resolved",
 						resolution: await resolver.resolveSource(input.sourceRequest),
+					},
+				};
+			}
+			if (input.kind === "stream-landblock-scene-lod-source") {
+				if (!resolver.resolveProjectedSources) {
+					throw new Error(
+						"Static resolver worker does not support projected source streaming.",
+					);
+				}
+				await resolver.resolveProjectedSources(input.sourceRequest, (event) =>
+					context.report(event),
+				);
+				return {
+					output: {
+						kind: "landblock-scene-lod-source-stream-complete",
 					},
 				};
 			}

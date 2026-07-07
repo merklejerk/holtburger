@@ -10,6 +10,7 @@ import type {
 	StaticBakeJobResult,
 	StaticBaker,
 	StaticLandblockSceneLodResolution,
+	StaticLandblockSceneLodSourceProjectionEvent,
 	StaticLandblockSceneLodSourceRequest,
 	StaticLandblockSceneLodSourceResolver,
 	StaticScopePayload,
@@ -67,10 +68,13 @@ describe("OpenWorldStreamingController terrain slice", () => {
 		});
 	});
 
-	it("keeps replacement source requests split by static layer domain", async () => {
+	it("keeps source delivery split by domain and reports direct source work", async () => {
 		const renderer = new FixtureTerrainRenderer();
 		const resolver = new FixtureTerrainResolver({
-			generatedScenery: createGeneratedSceneryScopePayload(),
+			buildings: createOutdoorObjectsScopePayload("outdoor-buildings"),
+			generatedScenery: createOutdoorObjectsScopePayload(
+				"outdoor-generated-scenery",
+			),
 			terrain: createTerrainScopePayload(),
 		});
 		const controller = new OpenWorldStreamingController({
@@ -86,7 +90,7 @@ describe("OpenWorldStreamingController terrain slice", () => {
 		controller.updateStaticInterest({
 			anchorLandblockId: 0xda55ffff,
 			lod: {
-				buildings: -1,
+				buildings: 0,
 				envCells: -1,
 				explicitObjects: -1,
 				generatedScenery: 0,
@@ -94,16 +98,102 @@ describe("OpenWorldStreamingController terrain slice", () => {
 			},
 			revision: 1,
 		});
-		await waitFor(() => resolver.sourceRequests.length === 2);
+		await waitFor(
+			() =>
+				controller.createSnapshot().terrain.committed === 1 &&
+				renderer.generatedSceneryLayers.length === 1,
+		);
 
+		expect(resolver.sourceRequests).toHaveLength(3);
 		expect(
 			resolver.sourceRequests.map((request) =>
 				request.requestedLayers.map((layer) => layer.kind),
 			),
-		).toEqual([["terrain"], ["outdoor-generated-scenery"]]);
+		).toEqual([
+			["terrain"],
+			["outdoor-buildings"],
+			["outdoor-generated-scenery"],
+		]);
 		expect(resolver.sourceRequests.map((request) => request.sourceLod)).toEqual(
-			[0, 3],
+			[0, 1, 3],
 		);
+		expect(controller.createDiagnosticsSnapshot().sourceResolution).toEqual({
+			directRequests: 3,
+			maxProjectedAssimilationMs: 0,
+			maxProjectedDeliveryMs: 0,
+			maxProjectedMs: 0,
+			maxProjectedWaitersReleased: 0,
+			projectedAssimilationMs: 0,
+			projectedDeliveryMs: 0,
+			projectedDynamicPlacementCount: 0,
+			projectedDynamicRecipeCount: 0,
+			projectedMs: 0,
+			projectedRecipeCount: 0,
+			projectedResults: 0,
+			projectedWaiterReleaseCount: 0,
+			reusedRequests: 0,
+			sourceStreamRequests: 0,
+		});
+	});
+
+	it("streams broad source work as domain-specific runner results", async () => {
+		const renderer = new FixtureTerrainRenderer();
+		const resolver = new FixtureStreamingTerrainResolver({
+			buildings: createOutdoorObjectsScopePayload("outdoor-buildings"),
+			generatedScenery: createOutdoorObjectsScopePayload(
+				"outdoor-generated-scenery",
+			),
+			terrain: createTerrainScopePayload(),
+		});
+		const controller = new OpenWorldStreamingController({
+			assetReader: createUnusedAssetReader(),
+			createDynamicVisualBaker: failIfDynamicWorkerFactoryIsCalled,
+			createDynamicVisualRecipeResolver: failIfDynamicWorkerFactoryIsCalled,
+			createStaticBaker: () => new FixtureTerrainBaker(),
+			createStaticResolver: () => resolver,
+			createTexturePacker: () => createUnusedTexturePacker(),
+			renderer,
+		});
+
+		controller.updateStaticInterest({
+			anchorLandblockId: 0xda55ffff,
+			lod: {
+				buildings: 0,
+				envCells: -1,
+				explicitObjects: -1,
+				generatedScenery: 0,
+				terrain: 0,
+			},
+			revision: 1,
+		});
+		await waitFor(
+			() =>
+				controller.createSnapshot().terrain.committed === 1 &&
+				renderer.generatedSceneryLayers.length === 1,
+		);
+
+		expect(resolver.sourceRequests).toHaveLength(0);
+		expect(resolver.streamRequests).toHaveLength(1);
+		expect(
+			resolver.streamRequests[0]?.requestedLayers.map((layer) => layer.kind),
+		).toEqual(["terrain", "outdoor-buildings", "outdoor-generated-scenery"]);
+		expect(controller.createDiagnosticsSnapshot().sourceResolution).toEqual({
+			directRequests: 0,
+			maxProjectedAssimilationMs: expect.any(Number),
+			maxProjectedDeliveryMs: 0,
+			maxProjectedMs: 1,
+			maxProjectedWaitersReleased: 0,
+			projectedAssimilationMs: expect.any(Number),
+			projectedDeliveryMs: 0,
+			projectedDynamicPlacementCount: 0,
+			projectedDynamicRecipeCount: 0,
+			projectedMs: 3,
+			projectedRecipeCount: 3,
+			projectedResults: 3,
+			projectedWaiterReleaseCount: 0,
+			reusedRequests: 2,
+			sourceStreamRequests: 1,
+		});
 	});
 });
 
@@ -171,6 +261,7 @@ class FixtureTerrainResolver implements StaticLandblockSceneLodSourceResolver {
 			| StaticScopePayload
 			| {
 					readonly generatedScenery: StaticScopePayload;
+					readonly buildings: StaticScopePayload;
 					readonly terrain: StaticScopePayload;
 			  },
 	) {}
@@ -179,34 +270,72 @@ class FixtureTerrainResolver implements StaticLandblockSceneLodSourceResolver {
 		request: StaticLandblockSceneLodSourceRequest,
 	): Promise<StaticLandblockSceneLodResolution> {
 		this.sourceRequests.push(request);
-		const payload = this.#selectPayload(request);
 		return {
 			dynamicPlacements: [],
 			dynamicRecipes: [],
-			recipes: [
-				{
-					payload,
-					targetOwnerKey: request.requestedLayers[0]!.targetOwnerKey,
-				},
-			],
+			recipes: request.requestedLayers.map((layer) => ({
+				payload: this.selectPayloadForLayer(layer.kind),
+				targetOwnerKey: layer.targetOwnerKey,
+			})),
 			request,
 		};
 	}
 
-	#selectPayload(
-		request: StaticLandblockSceneLodSourceRequest,
+	protected selectPayloadForLayer(
+		layerKind: StaticLandblockSceneLodSourceRequest["requestedLayers"][number]["kind"],
 	): StaticScopePayload {
 		if (!("terrain" in this.payloads)) {
 			return this.payloads;
 		}
-		const layerKind = request.requestedLayers[0]?.kind;
 		if (layerKind === "terrain") {
 			return this.payloads.terrain;
+		}
+		if (layerKind === "outdoor-buildings") {
+			return this.payloads.buildings;
 		}
 		if (layerKind === "outdoor-generated-scenery") {
 			return this.payloads.generatedScenery;
 		}
 		throw new Error(`Unexpected fixture layer kind ${layerKind ?? "<none>"}.`);
+	}
+}
+
+class FixtureStreamingTerrainResolver extends FixtureTerrainResolver {
+	readonly streamRequests: StaticLandblockSceneLodSourceRequest[] = [];
+
+	override async resolveProjectedSources(
+		request: StaticLandblockSceneLodSourceRequest,
+		onProjection: (
+			event: StaticLandblockSceneLodSourceProjectionEvent,
+		) => void,
+	): Promise<void> {
+		this.streamRequests.push(request);
+		for (const layer of request.requestedLayers) {
+			onProjection({
+				diagnostics: {
+					dynamicPlacementCount: 0,
+					dynamicRecipeCount: 0,
+					projectionMs: 1,
+					recipeCount: 1,
+				},
+				kind: "landblock-scene-lod-source-projected",
+				resolution: {
+					dynamicPlacements: [],
+					dynamicRecipes: [],
+					recipes: [
+						{
+							payload: this.selectPayloadForLayer(layer.kind),
+							targetOwnerKey: layer.targetOwnerKey,
+						},
+					],
+					request: {
+						...request,
+						requestedLayers: [layer],
+						sourceLod: sourceLodForFixtureLayer(layer.kind),
+					},
+				},
+			});
+		}
 	}
 }
 
@@ -231,7 +360,7 @@ class FixtureTerrainBaker implements StaticBaker {
 			materialCoverage: [],
 			objectVisualInstallSet: {
 				directDrawUnits: [],
-				instancedRenderInstances: [],
+				renderInstances: [],
 				instancedResources: [],
 				visualResources: [],
 			},
@@ -318,10 +447,29 @@ function createTerrainScopePayload(): StaticScopePayload {
 	};
 }
 
-function createGeneratedSceneryScopePayload(): StaticScopePayload {
+function sourceLodForFixtureLayer(
+	kind: StaticLandblockSceneLodSourceRequest["requestedLayers"][number]["kind"],
+): StaticLandblockSceneLodSourceRequest["sourceLod"] {
+	switch (kind) {
+		case "terrain":
+			return 0;
+		case "outdoor-buildings":
+			return 1;
+		case "outdoor-explicit-objects":
+			return 2;
+		case "outdoor-generated-scenery":
+			return 3;
+		case "env-cell-system":
+			return 4;
+	}
+}
+
+function createOutdoorObjectsScopePayload(
+	domain: "outdoor-buildings" | "outdoor-generated-scenery",
+): StaticScopePayload {
 	return {
 		job: {
-			domain: "outdoor-generated-scenery",
+			domain,
 			scope: {
 				kind: "landblock",
 				landblockId: 0xda55ffff,
@@ -330,7 +478,7 @@ function createGeneratedSceneryScopePayload(): StaticScopePayload {
 		scope: {
 			authoredDynamicPlacements: [],
 			buildingTransitionApertures: [],
-			domain: "outdoor-generated-scenery",
+			domain,
 			landblock: {
 				kind: "landblock-source",
 				landblockId: 0xda55ffff,

@@ -10,6 +10,7 @@ import type {
 	OutdoorStaticObjectsScopePayload,
 	StaticAuthoredDynamicPlacementRecord,
 	StaticBakeJobInput,
+	StaticBakeJobResult,
 	StaticBaker,
 	StaticLandblockSceneLodSourceRequest,
 	StaticLandblockSceneLodSourceResolver,
@@ -28,6 +29,7 @@ import {
 	yieldToStaticMaterializationFrameBudget,
 	type OpenWorldStaticMaterializationFrameBudget,
 } from "../frame-budget";
+import { bakeStaticJobWithBoundaryDiagnostics } from "../static-bake-boundary-diagnostics";
 
 type OutdoorObjectLayerPayload =
 	| OutdoorBuildingsLayerPayload
@@ -92,6 +94,10 @@ export class OpenWorldOutdoorObjectArtifactRunner {
 			createStaticObjectTexturePlacementIntents({
 				assetReader: this.#assetReader,
 				items: [{ payload: resolved, task: request.task }],
+				planningBudget: {
+					yieldToFrameBudget: () =>
+						yieldToStaticMaterializationFrameBudget(this.#frameBudget),
+				},
 			}),
 		);
 		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
@@ -114,12 +120,12 @@ export class OpenWorldOutdoorObjectArtifactRunner {
 		);
 		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const baked = await timing.measure("bake", () =>
-			this.#baker.bake(bakeInput),
+			bakeStaticJobWithBoundaryDiagnostics(this.#baker, bakeInput),
 		);
 		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const payload = timing.measureSync("assemble-commit", () =>
 			createOutdoorObjectLayerPayload({
-				baked,
+				baked: baked.result,
 				domain: sourcePayload.domain,
 				task: request.task,
 			}),
@@ -129,7 +135,11 @@ export class OpenWorldOutdoorObjectArtifactRunner {
 			ownerId: request.ownerId,
 			payload,
 			sourcePayload,
-			stageTimings: [...timing.createSnapshot(), ...texturePlan.stageTimings],
+			stageTimings: [
+				...timing.createSnapshot(),
+				...baked.stageTimings,
+				...texturePlan.stageTimings,
+			],
 			staticAuthoredDynamicPlacements:
 				sourcePayload.authoredDynamicPlacements.map((placement) => ({
 					kind: "outdoor-static-object-dynamic-placement",
@@ -257,7 +267,7 @@ function requireOutdoorObjectSourcePayload(
 }
 
 function createOutdoorObjectLayerPayload(input: {
-	readonly baked: Awaited<ReturnType<StaticBaker["bake"]>>;
+	readonly baked: StaticBakeJobResult;
 	readonly domain: OutdoorStaticObjectDomain;
 	readonly task: StaticLayerTaskRequest;
 }): OutdoorObjectLayerPayload {

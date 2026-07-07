@@ -1,5 +1,6 @@
 import type {
 	StaticLandblockSceneLodResolution,
+	StaticLandblockSceneLodSourceProjectionEvent,
 	StaticLandblockSceneLodSourceRequest,
 	StaticResolverJob,
 	StaticScopePayload,
@@ -27,6 +28,10 @@ export type StaticResolverWorkerInput =
 	| {
 			readonly kind: "resolve-landblock-scene-lod-source";
 			readonly sourceRequest: StaticLandblockSceneLodSourceRequest;
+	  }
+	| {
+			readonly kind: "stream-landblock-scene-lod-source";
+			readonly sourceRequest: StaticLandblockSceneLodSourceRequest;
 	  };
 
 export type StaticResolverWorkerOutput =
@@ -37,7 +42,13 @@ export type StaticResolverWorkerOutput =
 	| {
 			readonly kind: "landblock-scene-lod-source-resolved";
 			readonly resolution: StaticLandblockSceneLodResolution;
+	  }
+	| {
+			readonly kind: "landblock-scene-lod-source-stream-complete";
 	  };
+
+export type StaticResolverWorkerProgress =
+	StaticLandblockSceneLodSourceProjectionEvent;
 
 export type StaticResolverWorkerMainMessage = WorkerHandlerInputMessage<
 	StaticResolverWorkerInput,
@@ -46,7 +57,7 @@ export type StaticResolverWorkerMainMessage = WorkerHandlerInputMessage<
 
 export type StaticResolverWorkerThreadMessage = WorkerHandlerOutputMessage<
 	StaticResolverWorkerOutput,
-	never,
+	StaticResolverWorkerProgress,
 	PreparedAssetServiceRequest
 >;
 
@@ -57,7 +68,7 @@ type StaticResolverWorkerRequest = WorkerPoolRequestMessage<
 
 export type StaticResolverWorkerResponse = WorkerPoolResponseMessage<
 	StaticResolverWorkerOutput,
-	never,
+	StaticResolverWorkerProgress,
 	PreparedAssetServiceRequest
 >;
 
@@ -69,7 +80,7 @@ export type StaticResolverWorkerPort = WorkerMessagePort<
 export type StaticResolverWorkerGlobalPort = WorkerHandlerPort<
 	StaticResolverWorkerInput,
 	StaticResolverWorkerOutput,
-	never,
+	StaticResolverWorkerProgress,
 	PreparedAssetServiceRequest,
 	PreparedAssetServiceResponse
 >;

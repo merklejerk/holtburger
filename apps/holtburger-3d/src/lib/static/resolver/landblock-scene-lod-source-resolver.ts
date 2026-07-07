@@ -15,6 +15,7 @@ import type {
 	StaticDomain,
 	StaticLandblockSceneLodLayerRequest,
 	StaticLandblockSceneLodResolution,
+	StaticLandblockSceneLodSourceProjectionEvent,
 	StaticLandblockSceneLodSourceRequest,
 	StaticLandblockSceneLodSourceResolver,
 	StaticResolver,
@@ -95,6 +96,73 @@ export class LandblockSceneLodSourceResolver implements StaticLandblockSceneLodS
 		return { dynamicPlacements, dynamicRecipes, recipes, request };
 	}
 
+	async resolveProjectedSources(
+		request: StaticLandblockSceneLodSourceRequest,
+		onProjection: (
+			event: StaticLandblockSceneLodSourceProjectionEvent,
+		) => void,
+	): Promise<void> {
+		const sceneAsset = await this.#assetService.requestPreparedAsset(
+			createLandblockSceneLodHostAssetKey(
+				request.landblockId,
+				request.sourceLod,
+			),
+		);
+		const scenePayload = requireLandblockSceneLodPayload(sceneAsset);
+		validateScenePayloadForRequest(scenePayload, request);
+
+		for (const layerRequest of request.requestedLayers) {
+			const projectionStartedAtMs = nowMs();
+			const job = createStaticResolverJob(request, layerRequest);
+			const resolver = createProjectedLayerResolver({
+				assetService: this.#assetService,
+				layerKind: layerRequest.kind,
+				sceneAsset,
+				scenePayload,
+			});
+			const payload = await resolver.resolve(job);
+			const owner = createStaticAuthoredDynamicPlacementOwner({
+				domain: job.domain,
+				targetOwnerKey: layerRequest.targetOwnerKey,
+			});
+			const dynamicPlacements = createStaticAuthoredDynamicPlacementRecords({
+				owner,
+				payload,
+			});
+			const dynamicRecipes = await this.#resolveStaticAuthoredDynamicRecipes({
+				job,
+				payload,
+				targetOwnerKey: layerRequest.targetOwnerKey,
+			});
+			onProjection({
+				diagnostics: {
+					completedAtEpochMs: Date.now(),
+					dynamicPlacementCount: dynamicPlacements.length,
+					dynamicRecipeCount: dynamicRecipes.length,
+					projectionMs: nowMs() - projectionStartedAtMs,
+					recipeCount: 1,
+				},
+				kind: "landblock-scene-lod-source-projected",
+				resolution: {
+					dynamicPlacements,
+					dynamicRecipes,
+					recipes: [
+						{
+							payload,
+							targetOwnerKey: layerRequest.targetOwnerKey,
+						},
+					],
+					request: {
+						context: request.context,
+						landblockId: request.landblockId,
+						requestedLayers: [layerRequest],
+						sourceLod: sourceLodForSceneLayer(layerRequest.kind),
+					},
+				},
+			});
+		}
+	}
+
 	async #resolveStaticAuthoredDynamicRecipes(options: {
 		readonly job: StaticResolverJob;
 		readonly payload: StaticScopePayload;
@@ -120,6 +188,10 @@ export class LandblockSceneLodSourceResolver implements StaticLandblockSceneLodS
 			),
 		);
 	}
+}
+
+function nowMs(): number {
+	return globalThis.performance?.now() ?? Date.now();
 }
 
 function createStaticAuthoredDynamicPlacementRecords(options: {
@@ -285,6 +357,23 @@ function staticDomainForSceneLodLayer(
 			return "outdoor-generated-scenery";
 		case "env-cell-system":
 			return "env-cell-system";
+	}
+}
+
+function sourceLodForSceneLayer(
+	kind: StaticLandblockSceneLodLayerRequest["kind"],
+): StaticLandblockSceneLodSourceRequest["sourceLod"] {
+	switch (kind) {
+		case "terrain":
+			return 0;
+		case "outdoor-buildings":
+			return 1;
+		case "outdoor-explicit-objects":
+			return 2;
+		case "outdoor-generated-scenery":
+			return 3;
+		case "env-cell-system":
+			return 4;
 	}
 }
 

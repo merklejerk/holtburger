@@ -31,6 +31,18 @@ describe("browser texture packing worker protocol", () => {
 		expect(JSON.stringify(port.requests[0])).not.toContain("drawUnit");
 
 		port.emit({
+			event: {
+				completedAtEpochMs: Date.now(),
+				kind: "result-ready",
+				pageCount: 1,
+				pagePixelByteLength: 16,
+				rectCount: 1,
+				transferCount: 1,
+			},
+			kind: "progress",
+			requestId: "texture-pack:0",
+		});
+		port.emit({
 			kind: "result",
 			output: createPackingResult(job),
 			requestId: "texture-pack:0",
@@ -58,6 +70,48 @@ describe("browser texture packing worker protocol", () => {
 		packer.dispose();
 	});
 
+	it("returns direct texture packing worker boundary diagnostics", async () => {
+		const port = new FixtureWorkerPort();
+		const packer = new WorkerPoolTexturePacker({
+			createWorker: () => port,
+			workerCount: 1,
+		});
+		const job = createPackingJob();
+		const result = packer.packWithDiagnostics(job);
+
+		port.emit({
+			event: {
+				completedAtEpochMs: Date.now(),
+				kind: "result-ready",
+				pageCount: 2,
+				pagePixelByteLength: 64,
+				rectCount: 3,
+				transferCount: 2,
+			},
+			kind: "progress",
+			requestId: "texture-pack:0",
+		});
+		port.emit({
+			kind: "result",
+			output: createPackingResult(job),
+			requestId: "texture-pack:0",
+		});
+
+		await expect(result).resolves.toMatchObject({
+			diagnostics: {
+				deliveryMs: expect.any(Number),
+				pageCount: 2,
+				pagePixelByteLength: 64,
+				rectCount: 3,
+				transferCount: 2,
+			},
+			result: {
+				jobId: "pack-job:1",
+			},
+		});
+		packer.dispose();
+	});
+
 	it("packs direct rgba sources in the worker handler and transfers result page pixels", async () => {
 		const port = new FixtureWorkerPort();
 		installTexturePackingWorkerHandler(new ShelfTexturePacker(), port);
@@ -67,9 +121,20 @@ describe("browser texture packing worker protocol", () => {
 			kind: "job",
 			requestId: "texture-pack:7",
 		});
-		await port.waitForResponses(1);
+		await port.waitForResponses(2);
 
 		expect(port.responses[0]).toMatchObject({
+			event: {
+				kind: "result-ready",
+				pageCount: 1,
+				pagePixelByteLength: 4,
+				rectCount: 1,
+				transferCount: 1,
+			},
+			kind: "progress",
+			requestId: "texture-pack:7",
+		});
+		expect(port.responses[1]).toMatchObject({
 			kind: "result",
 			output: {
 				pages: [
@@ -90,14 +155,17 @@ describe("browser texture packing worker protocol", () => {
 			},
 			requestId: "texture-pack:7",
 		});
-		const response = port.responses[0];
+		const response = port.responses[1];
 		if (response?.kind !== "result") {
 			throw new Error("Expected texture packing result response.");
 		}
 		expect(Array.from(response.output.pages[0]?.pixels ?? [])).toEqual([
 			255, 128, 0, 255,
 		]);
-		expect(port.transfers).toEqual([[response.output.pages[0]?.pixels.buffer]]);
+		expect(port.transfers).toEqual([
+			[],
+			[response.output.pages[0]?.pixels.buffer],
+		]);
 	});
 
 	it("dispatches texture packing through the standard central worker queue", async () => {
@@ -126,6 +194,18 @@ describe("browser texture packing worker protocol", () => {
 		]);
 
 		first.emit({
+			event: {
+				completedAtEpochMs: Date.now(),
+				kind: "result-ready",
+				pageCount: 1,
+				pagePixelByteLength: 16,
+				rectCount: 1,
+				transferCount: 1,
+			},
+			kind: "progress",
+			requestId: "texture-pack:0",
+		});
+		first.emit({
 			kind: "result",
 			output: createPackingResult(createPackingJob("pack-job:1")),
 			requestId: "texture-pack:0",
@@ -137,9 +217,33 @@ describe("browser texture packing worker protocol", () => {
 		]);
 
 		second.emit({
+			event: {
+				completedAtEpochMs: Date.now(),
+				kind: "result-ready",
+				pageCount: 1,
+				pagePixelByteLength: 16,
+				rectCount: 1,
+				transferCount: 1,
+			},
+			kind: "progress",
+			requestId: "texture-pack:1",
+		});
+		second.emit({
 			kind: "result",
 			output: createPackingResult(createPackingJob("pack-job:2")),
 			requestId: "texture-pack:1",
+		});
+		first.emit({
+			event: {
+				completedAtEpochMs: Date.now(),
+				kind: "result-ready",
+				pageCount: 1,
+				pagePixelByteLength: 16,
+				rectCount: 1,
+				transferCount: 1,
+			},
+			kind: "progress",
+			requestId: "texture-pack:2",
 		});
 		first.emit({
 			kind: "result",
@@ -262,11 +366,14 @@ class FixtureWorkerPort implements TexturePackingWorkerPort {
 			return Promise.resolve();
 		}
 		return new Promise((resolve) => {
-			this.#waiters.push(() => {
+			const waiter = () => {
 				if (this.responses.length >= count) {
 					resolve();
+				} else {
+					this.#waiters.push(waiter);
 				}
-			});
+			};
+			this.#waiters.push(waiter);
 		});
 	}
 

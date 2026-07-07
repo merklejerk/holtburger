@@ -13,6 +13,7 @@ import type {
 	StaticDemandPlan,
 	StaticBaker,
 	StaticLandblockSceneLodResolution,
+	StaticLandblockSceneLodSourceProjectionEvent,
 	StaticLandblockSceneLodSourceRequest,
 	StaticLandblockSceneLodSourceResolver,
 	StaticLayerTaskRequest,
@@ -200,9 +201,14 @@ export class OpenWorldStreamingController {
 	#envCellRunner: OpenWorldEnvCellArtifactRunner | null = null;
 	#outdoorObjectRunner: OpenWorldOutdoorObjectArtifactRunner | null = null;
 	#staticSourceResolver: StaticLandblockSceneLodSourceResolver | null = null;
-	readonly #sourceResolutionCache = new OpenWorldStaticSourceResolutionCache(
-		(request) => this.#requireStaticSourceResolver().resolveSource(request),
-	);
+	readonly #sourceResolutionCache = new OpenWorldStaticSourceResolutionCache({
+		resolveProjectedSources: (request, onProjection) => {
+			const resolver = this.#requireStaticSourceResolver();
+			return resolver.resolveProjectedSources?.(request, onProjection) ?? null;
+		},
+		resolveSource: (request) =>
+			this.#requireStaticSourceResolver().resolveSource(request),
+	});
 	#terrainRunner: OpenWorldTerrainArtifactRunner | null = null;
 	#runtimeEntities: OpenWorldRuntimeEntitySystem | null = null;
 	#objectVisualAtlasBuilder: OpenWorldObjectVisualAtlasBuilder | null = null;
@@ -478,6 +484,7 @@ export class OpenWorldStreamingController {
 						this.#envCellProgress.failed,
 				),
 			},
+			sourceResolution: this.#sourceResolutionCache.createDiagnosticsSnapshot(),
 			textureResidency: {
 				byteEstimate: {
 					approximateBytes: null,
@@ -538,7 +545,7 @@ export class OpenWorldStreamingController {
 	): Promise<void> {
 		this.#frameBudgetYieldedPasses = 0;
 		const staticDemandPlan = createStaticDemandPlan(interest);
-		this.#sourceResolutionCache.reset();
+		this.#sourceResolutionCache.reset(staticDemandPlan.sourceRequests);
 		const tasks = staticDemandPlan.layerTasks.filter(
 			(task) =>
 				task.domain === "outdoor-terrain" ||
@@ -1210,35 +1217,322 @@ class OpenWorldStaticSourceResolutionCache implements StaticLandblockSceneLodSou
 	readonly #resolveSource: (
 		request: StaticLandblockSceneLodSourceRequest,
 	) => Promise<StaticLandblockSceneLodResolution>;
+	readonly #resolveProjectedSources: (
+		request: StaticLandblockSceneLodSourceRequest,
+		onProjection: (
+			event: StaticLandblockSceneLodSourceProjectionEvent,
+		) => void,
+	) => Promise<void> | null;
 	readonly #inFlightByKey = new Map<
 		string,
 		Promise<StaticLandblockSceneLodResolution>
 	>();
+	readonly #completedProjectedByKey = new Map<
+		string,
+		StaticLandblockSceneLodResolution
+	>();
+	readonly #projectedWaitersByKey = new Map<
+		string,
+		Array<{
+			readonly reject: (error: Error) => void;
+			readonly resolve: (resolution: StaticLandblockSceneLodResolution) => void;
+		}>
+	>();
+	readonly #streamsByKey = new Map<string, Promise<void>>();
+	#plannedRequests: readonly StaticLandblockSceneLodSourceRequest[] = [];
+	#directRequests = 0;
+	#sourceStreamRequests = 0;
+	#projectedResults = 0;
+	#reusedRequests = 0;
+	#projectedRecipeCount = 0;
+	#projectedDynamicPlacementCount = 0;
+	#projectedDynamicRecipeCount = 0;
+	#projectedMs = 0;
+	#maxProjectedMs = 0;
+	#projectedDeliveryMs = 0;
+	#maxProjectedDeliveryMs = 0;
+	#projectedAssimilationMs = 0;
+	#maxProjectedAssimilationMs = 0;
+	#projectedWaiterReleaseCount = 0;
+	#maxProjectedWaitersReleased = 0;
 
-	constructor(
-		resolveSource: (
+	constructor(options: {
+		readonly resolveProjectedSources: (
 			request: StaticLandblockSceneLodSourceRequest,
-		) => Promise<StaticLandblockSceneLodResolution>,
-	) {
-		this.#resolveSource = resolveSource;
+			onProjection: (
+				event: StaticLandblockSceneLodSourceProjectionEvent,
+			) => void,
+		) => Promise<void> | null;
+		readonly resolveSource: (
+			request: StaticLandblockSceneLodSourceRequest,
+		) => Promise<StaticLandblockSceneLodResolution>;
+	}) {
+		this.#resolveProjectedSources = options.resolveProjectedSources;
+		this.#resolveSource = options.resolveSource;
 	}
 
-	reset(): void {
+	reset(plannedRequests: readonly StaticLandblockSceneLodSourceRequest[]): void {
+		const staleError = new Error("Projected source request was superseded.");
+		for (const waiters of this.#projectedWaitersByKey.values()) {
+			for (const waiter of waiters) {
+				waiter.reject(staleError);
+			}
+		}
+		this.#completedProjectedByKey.clear();
 		this.#inFlightByKey.clear();
+		this.#plannedRequests = plannedRequests;
+		this.#projectedWaitersByKey.clear();
+		this.#streamsByKey.clear();
+		this.#directRequests = 0;
+		this.#sourceStreamRequests = 0;
+		this.#projectedResults = 0;
+		this.#reusedRequests = 0;
+		this.#projectedRecipeCount = 0;
+		this.#projectedDynamicPlacementCount = 0;
+		this.#projectedDynamicRecipeCount = 0;
+		this.#projectedMs = 0;
+		this.#maxProjectedMs = 0;
+		this.#projectedDeliveryMs = 0;
+		this.#maxProjectedDeliveryMs = 0;
+		this.#projectedAssimilationMs = 0;
+		this.#maxProjectedAssimilationMs = 0;
+		this.#projectedWaiterReleaseCount = 0;
+		this.#maxProjectedWaitersReleased = 0;
+	}
+
+	createDiagnosticsSnapshot(): OpenWorldStreamingDiagnosticsSnapshot["sourceResolution"] {
+		return {
+			directRequests: this.#directRequests,
+			maxProjectedAssimilationMs: this.#maxProjectedAssimilationMs,
+			maxProjectedDeliveryMs: this.#maxProjectedDeliveryMs,
+			maxProjectedMs: this.#maxProjectedMs,
+			maxProjectedWaitersReleased: this.#maxProjectedWaitersReleased,
+			projectedAssimilationMs: this.#projectedAssimilationMs,
+			projectedDeliveryMs: this.#projectedDeliveryMs,
+			projectedDynamicPlacementCount: this.#projectedDynamicPlacementCount,
+			projectedDynamicRecipeCount: this.#projectedDynamicRecipeCount,
+			projectedMs: this.#projectedMs,
+			projectedRecipeCount: this.#projectedRecipeCount,
+			projectedResults: this.#projectedResults,
+			projectedWaiterReleaseCount: this.#projectedWaiterReleaseCount,
+			reusedRequests: this.#reusedRequests,
+			sourceStreamRequests: this.#sourceStreamRequests,
+		};
 	}
 
 	resolveSource(
 		request: StaticLandblockSceneLodSourceRequest,
 	): Promise<StaticLandblockSceneLodResolution> {
-		const key = createStaticSourceRequestKey(request);
-		const existing = this.#inFlightByKey.get(key);
+		const requestKey = createStaticSourceRequestKey(request);
+		const projected = this.#completedProjectedByKey.get(requestKey);
+		if (projected) {
+			this.#projectedResults += 1;
+			this.#reusedRequests += 1;
+			return Promise.resolve(projected);
+		}
+		const coalescedRequest = this.#findReusablePlannedRequest(request);
+		if (coalescedRequest) {
+			this.#projectedResults += 1;
+			const streamKey = createStaticSourceRequestKey(coalescedRequest);
+			if (this.#streamsByKey.has(streamKey)) {
+				this.#reusedRequests += 1;
+			} else if (
+				!this.#startProjectedSourceStream(streamKey, coalescedRequest)
+			) {
+				this.#projectedResults -= 1;
+				return this.#resolveDirectSource(request, requestKey);
+			}
+			return this.#waitForProjectedResolution(requestKey);
+		}
+
+		return this.#resolveDirectSource(request, requestKey);
+	}
+
+	#resolveDirectSource(
+		request: StaticLandblockSceneLodSourceRequest,
+		requestKey: string,
+	): Promise<StaticLandblockSceneLodResolution> {
+		const existing = this.#inFlightByKey.get(requestKey);
 		if (existing) {
+			this.#reusedRequests += 1;
 			return existing;
 		}
+		this.#directRequests += 1;
 		const pending = this.#resolveSource(request);
-		this.#inFlightByKey.set(key, pending);
+		this.#inFlightByKey.set(requestKey, pending);
 		return pending;
 	}
+
+	#findReusablePlannedRequest(
+		request: StaticLandblockSceneLodSourceRequest,
+	): StaticLandblockSceneLodSourceRequest | null {
+		const requestKey = createStaticSourceRequestKey(request);
+		const candidate = this.#plannedRequests.find((plannedRequest) => {
+			if (createStaticSourceRequestKey(plannedRequest) === requestKey) {
+				return false;
+			}
+			return (
+				plannedRequest.context === request.context &&
+				plannedRequest.landblockId === request.landblockId &&
+				plannedRequest.sourceLod >= request.sourceLod &&
+				request.requestedLayers.every((requestedLayer) =>
+					plannedRequest.requestedLayers.some((candidateLayer) =>
+						containsStaticSourceLayer(candidateLayer, requestedLayer),
+					),
+				)
+			);
+		});
+		return candidate ?? null;
+	}
+
+	#startProjectedSourceStream(
+		streamKey: string,
+		request: StaticLandblockSceneLodSourceRequest,
+	): boolean {
+		const expectedProjectionKeys = new Set(
+			request.requestedLayers.map((layerRequest) =>
+				createStaticSourceRequestKey({
+					context: request.context,
+					landblockId: request.landblockId,
+					requestedLayers: [layerRequest],
+					sourceLod: sourceLodForProjectedLayer(layerRequest.kind),
+				}),
+			),
+		);
+		const stream = this.#resolveProjectedSources(request, (event) => {
+			const assimilationStartedAtMs = nowMs();
+			if (event.diagnostics.completedAtEpochMs !== undefined) {
+				const deliveryMs = Math.max(
+					0,
+					Date.now() - event.diagnostics.completedAtEpochMs,
+				);
+				this.#projectedDeliveryMs += deliveryMs;
+				this.#maxProjectedDeliveryMs = Math.max(
+					this.#maxProjectedDeliveryMs,
+					deliveryMs,
+				);
+			}
+			const projectionKey = createStaticSourceRequestKey(event.resolution.request);
+			expectedProjectionKeys.delete(projectionKey);
+			this.#completedProjectedByKey.set(projectionKey, event.resolution);
+			this.#projectedRecipeCount += event.diagnostics.recipeCount;
+			this.#projectedDynamicPlacementCount +=
+				event.diagnostics.dynamicPlacementCount;
+			this.#projectedDynamicRecipeCount += event.diagnostics.dynamicRecipeCount;
+			this.#projectedMs += event.diagnostics.projectionMs;
+			this.#maxProjectedMs = Math.max(
+				this.#maxProjectedMs,
+				event.diagnostics.projectionMs,
+			);
+			const waiters = this.#projectedWaitersByKey.get(projectionKey);
+			const waiterCount = waiters?.length ?? 0;
+			this.#projectedWaiterReleaseCount += waiterCount;
+			this.#maxProjectedWaitersReleased = Math.max(
+				this.#maxProjectedWaitersReleased,
+				waiterCount,
+			);
+			if (waiters) {
+				this.#projectedWaitersByKey.delete(projectionKey);
+				for (const waiter of waiters) {
+					waiter.resolve(event.resolution);
+				}
+			}
+			const assimilationMs = nowMs() - assimilationStartedAtMs;
+			this.#projectedAssimilationMs += assimilationMs;
+			this.#maxProjectedAssimilationMs = Math.max(
+				this.#maxProjectedAssimilationMs,
+				assimilationMs,
+			);
+		});
+		if (!stream) {
+			return false;
+		}
+		this.#sourceStreamRequests += 1;
+		const pending = stream
+			.then(() => {
+				if (expectedProjectionKeys.size === 0) {
+					return;
+				}
+				const missingError = new Error(
+					"Projected source stream completed without producing every requested runner result.",
+				);
+				for (const projectionKey of expectedProjectionKeys) {
+					const waiters = this.#projectedWaitersByKey.get(projectionKey);
+					if (!waiters) {
+						continue;
+					}
+					this.#projectedWaitersByKey.delete(projectionKey);
+					for (const waiter of waiters) {
+						waiter.reject(missingError);
+					}
+				}
+			})
+			.catch((error: unknown) => {
+				const normalizedError =
+					error instanceof Error ? error : new Error(String(error));
+				for (const projectionKey of expectedProjectionKeys) {
+					const waiters = this.#projectedWaitersByKey.get(projectionKey);
+					if (!waiters) {
+						continue;
+					}
+					this.#projectedWaitersByKey.delete(projectionKey);
+					for (const waiter of waiters) {
+						waiter.reject(normalizedError);
+					}
+				}
+			})
+			.finally(() => {
+				this.#streamsByKey.delete(streamKey);
+			});
+		this.#streamsByKey.set(streamKey, pending);
+		return true;
+	}
+
+	#waitForProjectedResolution(
+		requestKey: string,
+	): Promise<StaticLandblockSceneLodResolution> {
+		const projected = this.#completedProjectedByKey.get(requestKey);
+		if (projected) {
+			return Promise.resolve(projected);
+		}
+		return new Promise((resolve, reject) => {
+			const waiters = this.#projectedWaitersByKey.get(requestKey);
+			if (waiters) {
+				waiters.push({ reject, resolve });
+			} else {
+				this.#projectedWaitersByKey.set(requestKey, [{ reject, resolve }]);
+			}
+		});
+	}
+}
+
+function sourceLodForProjectedLayer(
+	layerKind: StaticLandblockSceneLodSourceRequest["requestedLayers"][number]["kind"],
+): StaticLandblockSceneLodSourceRequest["sourceLod"] {
+	if (layerKind === "terrain") {
+		return 0;
+	}
+	if (layerKind === "outdoor-buildings") {
+		return 1;
+	}
+	if (layerKind === "outdoor-explicit-objects") {
+		return 2;
+	}
+	if (layerKind === "outdoor-generated-scenery") {
+		return 3;
+	}
+	return 4;
+}
+
+function containsStaticSourceLayer(
+	candidate: StaticLandblockSceneLodSourceRequest["requestedLayers"][number],
+	requested: StaticLandblockSceneLodSourceRequest["requestedLayers"][number],
+): boolean {
+	return (
+		candidate.kind === requested.kind &&
+		candidate.targetOwnerKey.kind === requested.targetOwnerKey.kind &&
+		candidate.targetOwnerKey.landblockId === requested.targetOwnerKey.landblockId
+	);
 }
 
 function createStaticSourceRequestKey(

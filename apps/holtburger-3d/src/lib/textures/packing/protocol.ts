@@ -61,6 +61,23 @@ export interface TexturePackingResult {
 	readonly rects: readonly TexturePackingRect[];
 }
 
+export interface TexturePackingWorkerResultReadyProgress {
+	/** Worker wall-clock timestamp immediately before result postMessage. */
+	readonly completedAtEpochMs: number;
+	/** Packed page pixel bytes sent with the worker result. */
+	readonly pagePixelByteLength: number;
+	/** Packed pages returned by the worker result. */
+	readonly pageCount: number;
+	/** Packed rects returned by the worker result. */
+	readonly rectCount: number;
+	readonly kind: "result-ready";
+	/** Transferable objects sent with the worker result. */
+	readonly transferCount: number;
+}
+
+export type TexturePackingWorkerProgress =
+	TexturePackingWorkerResultReadyProgress;
+
 interface TexturePackingPagePixels {
 	readonly pageId: string;
 	readonly width: number;
@@ -80,16 +97,16 @@ export type TexturePackingWorkerRequest =
 
 export type TexturePackingWorkerResponse = WorkerHandlerOutputMessage<
 	TexturePackingResult,
-	never
+	TexturePackingWorkerProgress
 >;
 
 export type TexturePackingWorkerPort = WorkerMessagePort<
 	WorkerPoolRequestMessage<TexturePackingJob>,
-	WorkerPoolResponseMessage<TexturePackingResult, never>
+	WorkerPoolResponseMessage<TexturePackingResult, TexturePackingWorkerProgress>
 >;
 
 export type TexturePackingWorkerGlobalPort = WorkerHandlerPort<
 	TexturePackingJob,
 	TexturePackingResult,
-	never
+	TexturePackingWorkerProgress
 >;

@@ -9,6 +9,7 @@ import type {
 	EnvCellSystemStaticScopePayload,
 	StaticAuthoredDynamicPlacementRecord,
 	StaticBakeJobInput,
+	StaticBakeJobResult,
 	StaticBaker,
 	StaticLandblockSceneLodSourceRequest,
 	StaticLandblockSceneLodSourceResolver,
@@ -18,9 +19,9 @@ import type {
 	StructuredInteriorGeometryStaticDrawUnit,
 } from "../../../../static/contracts";
 import { EnvCellSystemGeometryResourceProvider } from "../../../../static/env-cells/bake/env-cell-system-geometry-resources";
-import { createStructuredInteriorTexturePlacementIntents } from "../../../../static/env-cells/bake/structured-interior-placement-planner";
+import { createStructuredInteriorTexturePlacementIntentResult } from "../../../../static/env-cells/bake/structured-interior-placement-planner";
 import { StaticObjectBakeResourceProvider } from "../../../../static/objects/bake/static-object-bake-resources";
-import { createStaticObjectTexturePlacementIntents } from "../../../../static/objects/bake/static-object-placement-planner";
+import { createStaticObjectTexturePlacementIntentResult } from "../../../../static/objects/bake/static-object-placement-planner";
 import {
 	createOutdoorPortalProjectionRoot,
 	createStaticPortalProjection,
@@ -34,6 +35,7 @@ import {
 	yieldToStaticMaterializationFrameBudget,
 	type OpenWorldStaticMaterializationFrameBudget,
 } from "../frame-budget";
+import { bakeStaticJobWithBoundaryDiagnostics } from "../static-bake-boundary-diagnostics";
 
 export interface OpenWorldEnvCellArtifactRunnerOptions {
 	readonly assetReader: PreparedAssetReader;
@@ -103,7 +105,7 @@ export class OpenWorldEnvCellArtifactRunner {
 			buildObjectVisualTexturePlacementPlan({
 				atlasBuilder: this.#objectVisualAtlasBuilder,
 				filteringMode: "nearest",
-				intents: textureIntents,
+				intents: textureIntents.intents,
 				ownerId: request.ownerId,
 				textureClaims: this.#textureClaims,
 			}),
@@ -118,12 +120,12 @@ export class OpenWorldEnvCellArtifactRunner {
 		);
 		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const baked = await timing.measure("bake", () =>
-			this.#baker.bake(bakeInput),
+			bakeStaticJobWithBoundaryDiagnostics(this.#baker, bakeInput),
 		);
 		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const payload = timing.measureSync("assemble-commit", () =>
 			createEnvCellSystemLayerPayload({
-				baked,
+				baked: baked.result,
 				sourcePayload,
 				task: request.task,
 			}),
@@ -133,7 +135,12 @@ export class OpenWorldEnvCellArtifactRunner {
 			ownerId: request.ownerId,
 			payload,
 			sourcePayload,
-			stageTimings: [...timing.createSnapshot(), ...texturePlan.stageTimings],
+			stageTimings: [
+				...timing.createSnapshot(),
+				...baked.stageTimings,
+				...textureIntents.stageTimings,
+				...texturePlan.stageTimings,
+			],
 			staticAuthoredDynamicPlacements: sourcePayload.envCells.flatMap(
 				(envCell) =>
 					envCell.authoredDynamicPlacements.map((placement) => ({
@@ -173,20 +180,53 @@ export class OpenWorldEnvCellArtifactRunner {
 
 	async #createTexturePlacementIntents(
 		item: Parameters<
-			typeof createStructuredInteriorTexturePlacementIntents
+			typeof createStructuredInteriorTexturePlacementIntentResult
 		>[0]["items"][number],
-	) {
+	): Promise<{
+		readonly intents: Awaited<
+			ReturnType<typeof createStructuredInteriorTexturePlacementIntentResult>
+		>["intents"];
+		readonly stageTimings: readonly OpenWorldStreamingStaticTaskStageTiming[];
+	}> {
 		const items = [item];
-		return [
-			...(await createStructuredInteriorTexturePlacementIntents({
-				assetReader: this.#assetReader,
-				items,
-			})),
-			...(await createStaticObjectTexturePlacementIntents({
-				assetReader: this.#assetReader,
-				items,
-			})),
-		];
+		const structuredInterior =
+			await measureLocalStage("texture-intent-structured-interior", () =>
+				createStructuredInteriorTexturePlacementIntentResult({
+					assetReader: this.#assetReader,
+					items,
+					planningBudget: this.#createTextureIntentPlanningBudget(),
+				}),
+			);
+		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
+		const staticObject = await measureLocalStage(
+			"texture-intent-static-object",
+			() =>
+				createStaticObjectTexturePlacementIntentResult({
+					assetReader: this.#assetReader,
+					items,
+					planningBudget: this.#createTextureIntentPlanningBudget(),
+				}),
+		);
+		return {
+			intents: [
+				...structuredInterior.value.intents,
+				...staticObject.value.intents,
+			],
+			stageTimings: [
+				structuredInterior.stageTiming,
+				staticObject.stageTiming,
+				...structuredInterior.value.stageTimings,
+				...staticObject.value.stageTimings,
+			],
+		};
+	}
+
+	#createTextureIntentPlanningBudget() {
+		return {
+			maxMsBeforeYield: 4,
+			yieldToFrameBudget: () =>
+				yieldToStaticMaterializationFrameBudget(this.#frameBudget),
+		};
 	}
 
 	async #createEnvCellBakeJobInput(
@@ -208,6 +248,24 @@ export class OpenWorldEnvCellArtifactRunner {
 			texturePlacementSnapshot,
 		};
 	}
+}
+
+async function measureLocalStage<T>(
+	stage: OpenWorldStreamingStaticTaskStageTiming["stage"],
+	createValue: () => Promise<T>,
+): Promise<{
+	readonly stageTiming: OpenWorldStreamingStaticTaskStageTiming;
+	readonly value: T;
+}> {
+	const startedAtMs = nowMs();
+	const value = await createValue();
+	return {
+		stageTiming: {
+			durationMs: nowMs() - startedAtMs,
+			stage,
+		},
+		value,
+	};
 }
 
 class StaticArtifactStageTimer {
@@ -280,7 +338,7 @@ function requireEnvCellSourcePayload(
 }
 
 function createEnvCellSystemLayerPayload(input: {
-	readonly baked: Awaited<ReturnType<StaticBaker["bake"]>>;
+	readonly baked: StaticBakeJobResult;
 	readonly sourcePayload: EnvCellSystemStaticScopePayload;
 	readonly task: StaticLayerTaskRequest;
 }): EnvCellSystemLayerPayload {

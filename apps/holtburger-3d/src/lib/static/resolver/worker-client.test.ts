@@ -6,6 +6,7 @@ import type {
 } from "../../assets/contracts";
 import type {
 	StaticLandblockSceneLodResolution,
+	StaticLandblockSceneLodSourceProjectionEvent,
 	StaticLandblockSceneLodSourceRequest,
 	StaticResolverJob,
 	StaticScopePayload,
@@ -121,6 +122,53 @@ describe("static resolver worker protocol", () => {
 		resolver.dispose();
 	});
 
+	it("streams projected source results through worker progress", async () => {
+		const port = new FixtureWorkerPort();
+		const resolver = new WorkerPoolStaticResolver({
+			assetReader: new FixturePreparedAssetReader(),
+			createWorker: () => port,
+			workerCount: 1,
+		});
+		const sourceRequest = createSourceRequest();
+		const resolution = createSourceResolution(sourceRequest);
+		const projected: StaticLandblockSceneLodResolution[] = [];
+		const pending = resolver.resolveProjectedSources(sourceRequest, (event) => {
+			projected.push(event.resolution);
+		});
+
+		expect(port.requests).toEqual([
+			{
+				input: {
+					kind: "stream-landblock-scene-lod-source",
+					sourceRequest,
+				},
+				kind: "job",
+				requestId: "resolver-job:0",
+			},
+		]);
+
+		port.emit({
+			event: {
+				diagnostics: createProjectionDiagnostics(),
+				kind: "landblock-scene-lod-source-projected",
+				resolution,
+			},
+			kind: "progress",
+			requestId: "resolver-job:0",
+		});
+		port.emit({
+			kind: "result",
+			output: {
+				kind: "landblock-scene-lod-source-stream-complete",
+			},
+			requestId: "resolver-job:0",
+		});
+
+		await expect(pending).resolves.toBeUndefined();
+		expect(projected).toEqual([resolution]);
+		resolver.dispose();
+	});
+
 	it("handles source-first worker requests with source-capable resolvers", async () => {
 		const sourceRequest = createSourceRequest();
 		const resolution = createSourceResolution(sourceRequest);
@@ -155,6 +203,64 @@ describe("static resolver worker protocol", () => {
 					resolution,
 				},
 				requestId: "transport:source",
+			},
+		]);
+	});
+
+	it("handles projected source stream worker requests", async () => {
+		const sourceRequest = createSourceRequest();
+		const resolution = createSourceResolution(sourceRequest);
+		const port = new FixtureWorkerPort();
+		installStaticResolverWorkerHandler(
+			() => ({
+				async resolve(): Promise<StaticScopePayload> {
+					throw new Error("static-scope path should not run");
+				},
+				async resolveSource(): Promise<StaticLandblockSceneLodResolution> {
+					throw new Error("direct source path should not run");
+				},
+				async resolveProjectedSources(
+					_request: StaticLandblockSceneLodSourceRequest,
+					onProjection: (
+						event: StaticLandblockSceneLodSourceProjectionEvent,
+					) => void,
+				): Promise<void> {
+					onProjection({
+						diagnostics: createProjectionDiagnostics(),
+						kind: "landblock-scene-lod-source-projected",
+						resolution,
+					});
+				},
+			}),
+			port,
+		);
+
+		port.emitRequest({
+			input: {
+				kind: "stream-landblock-scene-lod-source",
+				sourceRequest,
+			},
+			kind: "job",
+			requestId: "transport:stream",
+		});
+		await port.waitForResponses(2);
+
+		expect(port.responses).toEqual([
+			{
+				event: {
+					diagnostics: createProjectionDiagnostics(),
+					kind: "landblock-scene-lod-source-projected",
+					resolution,
+				},
+				kind: "progress",
+				requestId: "transport:stream",
+			},
+			{
+				kind: "result",
+				output: {
+					kind: "landblock-scene-lod-source-stream-complete",
+				},
+				requestId: "transport:stream",
 			},
 		]);
 	});
@@ -346,6 +452,7 @@ function createSourceResolution(
 ): StaticLandblockSceneLodResolution {
 	const job = createJob();
 	return {
+		dynamicPlacements: [],
 		dynamicRecipes: [],
 		recipes: [
 			{
@@ -357,5 +464,14 @@ function createSourceResolution(
 			},
 		],
 		request,
+	};
+}
+
+function createProjectionDiagnostics(): StaticLandblockSceneLodSourceProjectionEvent["diagnostics"] {
+	return {
+		dynamicPlacementCount: 0,
+		dynamicRecipeCount: 0,
+		projectionMs: 1,
+		recipeCount: 1,
 	};
 }

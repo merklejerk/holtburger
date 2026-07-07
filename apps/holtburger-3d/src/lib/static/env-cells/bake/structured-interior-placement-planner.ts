@@ -6,22 +6,51 @@ import {
 	type ObjectVisualTexturePlacementRequirement,
 } from "../../../visual/object-visual-texture-placement-planner";
 import { createMaterialTextureIdentityFacts } from "../../../textures/material-texture-identity";
+import type { MaterialTextureIdentityFacts } from "../../../textures/material-texture-identity";
 import { isCurrentlyStageableStaticObjectDataUse } from "../../objects/bake/static-object-renderability";
 import {
 	createStructuredInteriorTextureBindingRequirement,
-	planStructuredInteriorCellMaterials,
+	createStructuredInteriorMaterialPlanner,
 	resolveStructuredInteriorPlanTextureWrapMode,
 } from "./structured-interior-material-planner";
 import { isRenderableObjectVisualMaterialPlan } from "../../objects/bake/static-object-renderability";
 
+export interface StructuredInteriorTexturePlacementIntentResult {
+	readonly intents: readonly ObjectVisualTexturePlacementIntent[];
+	readonly stageTimings: readonly StructuredInteriorTexturePlacementIntentStageTiming[];
+}
+
+export interface StructuredInteriorTexturePlacementIntentStageTiming {
+	readonly durationMs: number;
+	readonly itemCount: number;
+	readonly stage: "texture-intent-chunk" | "texture-intent-aggregation";
+}
+
 export async function createStructuredInteriorTexturePlacementIntents(input: {
 	readonly assetReader: PreparedAssetReader;
 	readonly items: readonly StaticBakeJobPayload[];
+	readonly planningBudget?: TextureIntentPlanningBudget;
 }): Promise<readonly ObjectVisualTexturePlacementIntent[]> {
+	return (
+		await createStructuredInteriorTexturePlacementIntentResult(input)
+	).intents;
+}
+
+export async function createStructuredInteriorTexturePlacementIntentResult(input: {
+	readonly assetReader: PreparedAssetReader;
+	readonly items: readonly StaticBakeJobPayload[];
+	readonly planningBudget?: TextureIntentPlanningBudget;
+}): Promise<StructuredInteriorTexturePlacementIntentResult> {
 	const requirementsByBindingId = new Map<
 		string,
 		ObjectVisualTexturePlacementRequirement
 	>();
+	const budget = createTextureIntentPlanningBudget(input.planningBudget);
+	const identityFactsByRoleKey = new Map<
+		string,
+		Promise<MaterialTextureIdentityFacts>
+	>();
+	const chunkTimings: StructuredInteriorTexturePlacementIntentStageTiming[] = [];
 
 	for (const item of input.items) {
 		if (
@@ -31,13 +60,19 @@ export async function createStructuredInteriorTexturePlacementIntents(input: {
 			continue;
 		}
 
+		const materialPlanner = createStructuredInteriorMaterialPlanner({
+			payload: item.payload.scope,
+			task: item.task,
+		});
 		for (const envCell of item.payload.scope.envCells) {
-			const materialPlan = planStructuredInteriorCellMaterials({
+			await budget.yieldIfNeeded();
+			const materialPlan = await materialPlanner.planCellMaterialsWithBudget({
 				envCell,
-				payload: item.payload.scope,
-				task: item.task,
+				planningBudget: input.planningBudget,
 			});
 			for (const [surfaceId, plan] of materialPlan.materialPlansBySurfaceId) {
+				const chunkStartedAtMs = nowMs();
+				let chunkItemCount = 0;
 				if (!isRenderableObjectVisualMaterialPlan(plan)) {
 					continue;
 				}
@@ -56,7 +91,9 @@ export async function createStructuredInteriorTexturePlacementIntents(input: {
 					if (requirementsByBindingId.has(requirement.bindingId)) {
 						continue;
 					}
-					const identity = await createMaterialTextureIdentityFacts({
+					await budget.yieldIfNeeded();
+					const identity = await resolveCachedMaterialTextureIdentityFacts({
+						cache: identityFactsByRoleKey,
 						assetReader: input.assetReader,
 						dataUse: role.dataUse,
 						domain: item.task.domain,
@@ -81,14 +118,118 @@ export async function createStructuredInteriorTexturePlacementIntents(input: {
 							textureKey: identity.textureKey,
 						},
 					});
+					chunkItemCount += 1;
 				}
+				recordChunkTiming({
+					itemCount: chunkItemCount,
+					startedAtMs: chunkStartedAtMs,
+					timings: chunkTimings,
+				});
+				await budget.yieldIfNeeded();
 			}
+			await budget.yieldIfNeeded();
 		}
 	}
 
-	return createObjectVisualTexturePlacementIntents({
+	const aggregationStartedAtMs = nowMs();
+	const intents = createObjectVisualTexturePlacementIntents({
 		requirements: [...requirementsByBindingId.values()],
 	});
+	chunkTimings.push({
+		durationMs: nowMs() - aggregationStartedAtMs,
+		itemCount: intents.length,
+		stage: "texture-intent-aggregation",
+	});
+	return {
+		intents,
+		stageTimings: chunkTimings,
+	};
+}
+
+interface TextureIntentPlanningBudget {
+	/** Cooperative yield hook used by replacement runners to split long planners. */
+	readonly yieldToFrameBudget: () => Promise<void>;
+	/** Main-thread planning slice before yielding. Defaults to one short tasklet. */
+	readonly maxMsBeforeYield?: number;
+}
+
+function createTextureIntentPlanningBudget(
+	budget: TextureIntentPlanningBudget | undefined,
+) {
+	let lastYieldAtMs = nowMs();
+	return {
+		async yieldIfNeeded(): Promise<void> {
+			if (!budget) {
+				return;
+			}
+			if (nowMs() - lastYieldAtMs < (budget.maxMsBeforeYield ?? 8)) {
+				return;
+			}
+			await budget.yieldToFrameBudget();
+			lastYieldAtMs = nowMs();
+		},
+	};
+}
+
+function recordChunkTiming(input: {
+	readonly itemCount: number;
+	readonly startedAtMs: number;
+	readonly timings: StructuredInteriorTexturePlacementIntentStageTiming[];
+}): void {
+	if (input.itemCount === 0) {
+		return;
+	}
+	input.timings.push({
+		durationMs: nowMs() - input.startedAtMs,
+		itemCount: input.itemCount,
+		stage: "texture-intent-chunk",
+	});
+}
+
+function resolveCachedMaterialTextureIdentityFacts(input: {
+	readonly assetReader: PreparedAssetReader;
+	readonly cache: Map<string, Promise<MaterialTextureIdentityFacts>>;
+	readonly dataUse: Parameters<typeof createMaterialTextureIdentityFacts>[0]["dataUse"];
+	readonly domain: Parameters<typeof createMaterialTextureIdentityFacts>[0]["domain"];
+	readonly purpose: Parameters<typeof createMaterialTextureIdentityFacts>[0]["purpose"];
+	readonly samplingPolicy: Parameters<
+		typeof createMaterialTextureIdentityFacts
+	>[0]["samplingPolicy"];
+}): Promise<MaterialTextureIdentityFacts> {
+	const key = createMaterialTextureIdentityRoleKey(input);
+	const existing = input.cache.get(key);
+	if (existing) {
+		return existing;
+	}
+	const pending = createMaterialTextureIdentityFacts({
+		assetReader: input.assetReader,
+		dataUse: input.dataUse,
+		domain: input.domain,
+		purpose: input.purpose,
+		samplingPolicy: input.samplingPolicy,
+	});
+	input.cache.set(key, pending);
+	return pending;
+}
+
+function createMaterialTextureIdentityRoleKey(input: {
+	readonly dataUse: Parameters<typeof createMaterialTextureIdentityFacts>[0]["dataUse"];
+	readonly domain: Parameters<typeof createMaterialTextureIdentityFacts>[0]["domain"];
+	readonly purpose: Parameters<typeof createMaterialTextureIdentityFacts>[0]["purpose"];
+	readonly samplingPolicy: Parameters<
+		typeof createMaterialTextureIdentityFacts
+	>[0]["samplingPolicy"];
+}): string {
+	return JSON.stringify([
+		input.domain,
+		input.purpose,
+		input.samplingPolicy ?? null,
+		input.dataUse,
+	]);
+}
+
+function nowMs(): number {
+	return globalThis.performance?.now() ?? Date.now();
 }
 
 function createStructuredInteriorAffinityKey(input: {

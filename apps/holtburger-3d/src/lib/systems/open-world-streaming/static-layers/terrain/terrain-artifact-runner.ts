@@ -29,6 +29,7 @@ import {
 	yieldToStaticMaterializationFrameBudget,
 	type OpenWorldStaticMaterializationFrameBudget,
 } from "../frame-budget";
+import { bakeStaticJobWithBoundaryDiagnostics } from "../static-bake-boundary-diagnostics";
 
 export interface OpenWorldTerrainArtifactRunnerOptions {
 	readonly assetReader: PreparedAssetReader;
@@ -102,29 +103,31 @@ export class OpenWorldTerrainArtifactRunner {
 		);
 		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const baked = await timing.measure("bake", () =>
-			this.#baker.bake(bakeInput),
+			bakeStaticJobWithBoundaryDiagnostics(this.#baker, bakeInput),
 		);
 		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const payload = timing.measureSync("assemble-commit", () => ({
-			drawUnits: baked.drawUnits.filter(
+			drawUnits: baked.result.drawUnits.filter(
 				(drawUnit) => drawUnit.kind === "terrain-geometry",
 			),
 			generationId: `${request.task.taskId}:terrain`,
 			kind: "terrain" as const,
 			landblockId: request.task.scope.landblockId,
-			materialCoverage: baked.materialCoverage,
-			sourceMappingRecords: baked.staticSourceMappings,
-			spatialRecords: baked.staticSpatialRecords,
-			textureUses: baked.textureUses,
+			materialCoverage: baked.result.materialCoverage,
+			sourceMappingRecords: baked.result.staticSourceMappings,
+			spatialRecords: baked.result.staticSpatialRecords,
+			textureUses: baked.result.textureUses,
 		}));
 		return {
 			kind: "terrain-layer-commit",
 			ownerId: request.ownerId,
 			payload,
 			sourcePayload,
-			stageTimings: timing.createSnapshot(),
+			stageTimings: [...timing.createSnapshot(), ...baked.stageTimings],
 			textureCommit: texturePlan.textureCommit,
-			textureReadiness: createPendingTerrainTextureReadiness(baked.drawUnits),
+			textureReadiness: createPendingTerrainTextureReadiness(
+				baked.result.drawUnits,
+			),
 		};
 	}
 

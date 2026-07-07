@@ -68,6 +68,18 @@ describe("static bake worker protocol", () => {
 		]);
 
 		port.emit({
+			event: {
+				completedAtEpochMs: Date.now(),
+				drawUnitCount: 0,
+				kind: "result-ready",
+				objectVisualResourceCount: 0,
+				transferByteLength: 0,
+				transferCount: 0,
+			},
+			kind: "progress",
+			requestId: "bake-job:0",
+		});
+		port.emit({
 			kind: "result",
 			output: createResult(input),
 			requestId: "bake-job:0",
@@ -110,6 +122,54 @@ describe("static bake worker protocol", () => {
 		});
 	});
 
+	it("returns direct worker boundary diagnostics for worker-backed bake jobs", async () => {
+		const port = new FixtureWorkerPort();
+		const baker = new WorkerPoolStaticBaker({
+			createWorker: () => port,
+			workerCount: 1,
+		});
+		const input = createInput();
+		const pending = baker.bakeWithDiagnostics(input);
+
+		port.emit({
+			event: { kind: "started" },
+			kind: "progress",
+			requestId: "bake-job:0",
+		});
+		port.emit({
+			event: {
+				completedAtEpochMs: Date.now(),
+				drawUnitCount: 1,
+				kind: "result-ready",
+				objectVisualResourceCount: 2,
+				transferByteLength: 128,
+				transferCount: 4,
+			},
+			kind: "progress",
+			requestId: "bake-job:0",
+		});
+		port.emit({
+			kind: "result",
+			output: createResult(input),
+			requestId: "bake-job:0",
+		});
+
+		await expect(pending).resolves.toMatchObject({
+			diagnostics: {
+				deliveryMs: expect.any(Number),
+				drawUnitCount: 1,
+				objectVisualResourceCount: 2,
+				transferByteLength: 128,
+				transferCount: 4,
+				waitMs: expect.any(Number),
+			},
+			result: {
+				task: input.task,
+			},
+		});
+		baker.dispose();
+	});
+
 	it("preserves static bake trace events through standard progress", async () => {
 		const input = createInput();
 		const port = new FixtureWorkerPort();
@@ -128,7 +188,7 @@ describe("static bake worker protocol", () => {
 			kind: "job",
 			requestId: "transport:2",
 		});
-		await port.waitForResponses(3);
+		await port.waitForResponses(4);
 
 		expect(port.responses).toMatchObject([
 			{
@@ -143,6 +203,17 @@ describe("static bake worker protocol", () => {
 						stage: "fixture-stage",
 					},
 					kind: "trace",
+				},
+				kind: "progress",
+				requestId: "transport:2",
+			},
+			{
+				event: {
+					drawUnitCount: 0,
+					kind: "result-ready",
+					objectVisualResourceCount: 0,
+					transferByteLength: 0,
+					transferCount: 0,
 				},
 				kind: "progress",
 				requestId: "transport:2",
@@ -172,7 +243,7 @@ describe("static bake worker protocol", () => {
 			kind: "job",
 			requestId: "transport:3",
 		});
-		await port.waitForResponses(2);
+		await port.waitForResponses(3);
 
 		const drawUnit = result.drawUnits[0] as TerrainGeometryStaticDrawUnit;
 		expect(port.responses).toMatchObject([
@@ -182,11 +253,27 @@ describe("static bake worker protocol", () => {
 				requestId: "transport:3",
 			},
 			{
+				event: {
+					drawUnitCount: 1,
+					kind: "result-ready",
+					objectVisualResourceCount: 0,
+					transferByteLength:
+						drawUnit.positions.byteLength +
+						drawUnit.texCoords.byteLength +
+						drawUnit.layerSlots.byteLength +
+						drawUnit.indices.byteLength,
+					transferCount: 4,
+				},
+				kind: "progress",
+				requestId: "transport:3",
+			},
+			{
 				kind: "result",
 				requestId: "transport:3",
 			},
 		]);
 		expect(port.transfers).toEqual([
+			[],
 			[],
 			[
 				drawUnit.positions.buffer,
@@ -333,11 +420,14 @@ class FixtureWorkerPort implements StaticBakeWorkerPort {
 			return Promise.resolve();
 		}
 		return new Promise((resolve) => {
-			this.#waiters.push(() => {
+			const waiter = () => {
 				if (this.responses.length >= count) {
 					resolve();
+				} else {
+					this.#waiters.push(waiter);
 				}
-			});
+			};
+			this.#waiters.push(waiter);
 		});
 	}
 

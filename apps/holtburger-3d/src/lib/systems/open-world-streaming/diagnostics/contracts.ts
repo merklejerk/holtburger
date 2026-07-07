@@ -114,13 +114,13 @@ export interface OpenWorldStreamingDiagnosticsSnapshot {
 export interface OpenWorldStreamingMaterialReadinessDiagnostics {
 	readonly recentIssues: readonly OpenWorldStreamingMaterialReadinessIssue[];
 	readonly summary: {
-		readonly deferredMaterialIssueCount: number;
+		readonly deferredRendererCapabilityIssueCount: number;
 		readonly failedTextureDependencyCount: number;
 		readonly pendingTextureDependencyCount: number;
 		readonly pipelineBugIssueCount: number;
-		readonly skippedStaticObjectPartitionCount: number;
+		readonly skippedGeometryIssueCount: number;
 		readonly terrainMaterialIssueCount: number;
-		readonly unsupportedMaterialIssueCount: number;
+		readonly unsupportedSourceMaterialIssueCount: number;
 	};
 }
 
@@ -143,28 +143,33 @@ type OpenWorldStreamingMaterialReadinessIssue =
 			readonly sourceTaskId: string;
 	  }
 	| {
-			readonly kind: "deferred-material" | "unsupported-material";
-			readonly coverageKey: string;
-			readonly coverageKind: string;
+			readonly kind:
+				| "renderer-capability-deferred"
+				| "unsupported-source-material";
 			readonly domain: string;
-			readonly family: string;
+			readonly materialFamily: string;
 			readonly landblockId: number | null;
 			readonly materialCount: number;
 			readonly ownerId: string;
 			readonly partitionCount: number;
-			readonly pass: string;
+			readonly renderPass: string;
 			readonly reasonCodes: readonly string[];
+			readonly sourceEvidence: {
+				readonly kind: "static-material-coverage";
+				readonly reportKey: string;
+				readonly reportKind: string;
+			};
 			readonly taskId: string;
 			readonly triangleCount: number;
 	  }
 	| {
-			readonly kind: "skipped-static-object-partition";
+			readonly kind: "skipped-geometry";
 			readonly alphaMode: string;
-			readonly family: string;
+			readonly materialFamily: string;
 			readonly landblockId: number;
 			readonly materialCount: number;
 			readonly ownerId: string;
-			readonly pass: string;
+			readonly renderPass: string;
 			readonly reason: string;
 			readonly renderCoverage: string;
 			readonly sliceId: string;

@@ -30,7 +30,7 @@ import {
 } from "../static/bake/static-material-plan-primitives";
 
 const BYTE_MAX = 255;
-const LEGACY_OPACITY_BYTE_SCALE = 255;
+const SOURCE_OPACITY_BYTE_SCALE = 255;
 const SURFACE_TYPE_BASE1_CLIP_MAP = 0x4;
 const SURFACE_TYPE_TRANSLUCENT = 0x10;
 const SURFACE_TYPE_DIFFUSE = 0x20;
@@ -642,7 +642,7 @@ function deriveMaterialBehavior(material: ObjectVisualMaterialSourceFacts): {
 	readonly emissiveScale: number;
 	readonly unsupportedSurfaceFlags: readonly string[];
 } {
-	const opacity = normalizeLegacyOpacity(material.translucency);
+	const opacity = normalizeSourceOpacity(material.translucency);
 	const diffuseScale = hasSurfaceFlag(
 		material.surfaceType,
 		SURFACE_TYPE_DIFFUSE,
@@ -862,10 +862,10 @@ function indexedTextureFormat(formatRaw: number): "p8" | "index16" | null {
 	}
 }
 
-function normalizeLegacyOpacity(translucency: number): number {
+function normalizeSourceOpacity(translucency: number): number {
 	const normalized =
 		translucency > 1
-			? 1 - Math.min(translucency, LEGACY_OPACITY_BYTE_SCALE) / BYTE_MAX
+			? 1 - Math.min(translucency, SOURCE_OPACITY_BYTE_SCALE) / BYTE_MAX
 			: 1 - translucency;
 	return clampUnit(normalized);
 }

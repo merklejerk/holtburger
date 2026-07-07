@@ -1,6 +1,6 @@
 import type { AssetService } from "../../../assets/contracts";
 import type { DynamicEntityId } from "../../../dynamic/contracts";
-import { createLegacyPortalFrameWorkPlan } from "../../../renderer/portal-frame-work-plan";
+import { createRenderPassPortalFrameWorkPlan } from "../../../renderer/portal-frame-work-plan";
 import type {
 	FrameState,
 	Renderer,
@@ -456,9 +456,9 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 	}
 
 	#createPortalFrameWorkPlan(): ReturnType<
-		typeof createLegacyPortalFrameWorkPlan
+		typeof createRenderPassPortalFrameWorkPlan
 	> {
-		return createLegacyPortalFrameWorkPlan({
+		return createRenderPassPortalFrameWorkPlan({
 			flatVisionModeEnabled: this.#flatVisionModeEnabled,
 			renderPassPlan: DEFAULT_RENDER_PASS_PLAN,
 		});

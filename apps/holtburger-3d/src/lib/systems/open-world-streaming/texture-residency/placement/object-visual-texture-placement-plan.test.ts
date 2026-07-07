@@ -198,7 +198,7 @@ function createIntent(input: {
 		ownerIds: [],
 		pageClass: pageClass("page-class:object-base"),
 		placementBucketKey:
-			"legacy-bucket:unused" as ObjectVisualTexturePlacementIntent["placementBucketKey"],
+			"fixture-bucket:unused" as ObjectVisualTexturePlacementIntent["placementBucketKey"],
 		purpose: "object-base-color",
 		source: {
 			dataUse: source,

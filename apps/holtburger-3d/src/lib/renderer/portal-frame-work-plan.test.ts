@@ -1,36 +1,36 @@
 import { describe, expect, it } from "vitest";
 import {
-	createLegacyPortalFrameWorkPlan,
+	createRenderPassPortalFrameWorkPlan,
 	portalFrameWorkPlanEquals,
 } from "./portal-frame-work-plan";
 import type { PortalFrameWorkPlan } from "./types";
 
 describe("portal frame work plan", () => {
-	it("classifies legacy render pass modes explicitly", () => {
+	it("classifies render pass work modes explicitly", () => {
 		expect(
-			createLegacyPortalFrameWorkPlan({
+			createRenderPassPortalFrameWorkPlan({
 				flatVisionModeEnabled: false,
 				renderPassPlan: { kind: "single-surface-resident" },
 			}),
 		).toEqual({
-			kind: "legacy-render-pass",
+			kind: "render-pass",
 			mode: "single-surface-resident",
 			renderPassPlan: { kind: "single-surface-resident" },
 		});
 
 		expect(
-			createLegacyPortalFrameWorkPlan({
+			createRenderPassPortalFrameWorkPlan({
 				flatVisionModeEnabled: true,
 				renderPassPlan: { kind: "single-surface-resident" },
 			}),
 		).toEqual({
-			kind: "legacy-render-pass",
+			kind: "render-pass",
 			mode: "flat-resident-diagnostic",
 			renderPassPlan: { kind: "single-surface-resident" },
 		});
 
 		expect(
-			createLegacyPortalFrameWorkPlan({
+			createRenderPassPortalFrameWorkPlan({
 				flatVisionModeEnabled: false,
 				renderPassPlan: {
 					baseScene: { kind: "exterior", landblockId: 0xf418ffff },
@@ -39,8 +39,8 @@ describe("portal frame work plan", () => {
 				},
 			}),
 		).toEqual({
-			kind: "legacy-render-pass",
-			mode: "legacy-scene-domain-composite",
+			kind: "render-pass",
+			mode: "scene-domain-composite",
 			renderPassPlan: {
 				baseScene: { kind: "exterior", landblockId: 0xf418ffff },
 				kind: "portal-scene-domains",

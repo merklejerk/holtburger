@@ -41,7 +41,7 @@ interface StaticBakeWorkerResultReadyDiagnostics {
 	readonly transferCount: number;
 }
 
-/** Direct diagnostics for the static bake worker boundary, not a legacy coordinator snapshot. */
+/** Direct diagnostics for the static bake worker boundary. */
 interface StaticBakeWorkerBoundaryDiagnostics {
 	/** Worker wall-clock timestamp immediately before result postMessage. */
 	readonly completedAtEpochMs: number;

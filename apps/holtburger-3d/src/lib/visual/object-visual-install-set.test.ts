@@ -6,7 +6,7 @@ import {
 } from "./object-visual-install-set";
 
 describe("object visual install sets", () => {
-	it("creates an empty publication without implicit legacy buckets", () => {
+	it("creates an empty publication without implicit buckets", () => {
 		expect(createEmptyObjectVisualInstallSet()).toEqual({
 			directDrawUnits: [],
 			dynamicAnimationPartBindings: [],

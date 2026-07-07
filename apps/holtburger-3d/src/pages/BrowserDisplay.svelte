@@ -1737,9 +1737,9 @@
 	}
 
 	function formatPortalFrameWorkPlan(plan: PortalFrameWorkPlan): string {
-		if (plan.kind === "legacy-render-pass") {
-			return `legacy ${plan.mode}`;
-		}
+	if (plan.kind === "render-pass") {
+		return plan.mode;
+	}
 		if (plan.mode === "portal-projection") {
 			const graph = plan.layeredGraph;
 			const baseEntryResources =

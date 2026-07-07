@@ -22,7 +22,7 @@ interface OpenWorldStreamingTextureBindingResolution {
 	readonly readiness: OpenWorldStreamingTextureBindingReadiness;
 }
 
-/** Replacement-native readiness states; these are not legacy placement snapshots. */
+/** Replacement-native readiness states for texture bindings. */
 type OpenWorldStreamingTextureBindingReadiness =
 	| {
 			readonly kind: "resident";

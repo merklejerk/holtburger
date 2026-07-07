@@ -206,7 +206,7 @@ export interface TexturePlacementUpdate {
 export interface TexturePageVersion {
 	/** Renderer texture object identity for this atlas page. */
 	readonly textureRefId: string;
-	/** Monotonic page content revision within the texture manager bucket. */
+	/** Monotonic page content revision within the placement bucket. */
 	readonly placementRevision: number;
 }
 
@@ -496,11 +496,11 @@ export type RenderPassPlan =
 
 export type PortalFrameWorkPlan =
 	| {
-			readonly kind: "legacy-render-pass";
+			readonly kind: "render-pass";
 			readonly mode:
 				| "single-surface-resident"
 				| "flat-resident-diagnostic"
-				| "legacy-scene-domain-composite";
+				| "scene-domain-composite";
 			readonly renderPassPlan: RenderPassPlan;
 	  }
 	| {

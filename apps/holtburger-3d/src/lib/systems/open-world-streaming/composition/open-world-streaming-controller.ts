@@ -667,7 +667,7 @@ export class OpenWorldStreamingController {
 					durationMs: nowMs() - startedAtMs,
 					error: null,
 					request,
-					stages: getStaticCommitStageTimings(commit),
+					stages: getStaticTaskStageTimings(commit),
 					status: "stale-rejected",
 				});
 				return;
@@ -678,7 +678,7 @@ export class OpenWorldStreamingController {
 						this.#applyTerrainCommit(commit, interest.anchorLandblockId),
 					drawUnits: commit.payload.drawUnits.length,
 					request,
-					stages: getStaticCommitStageTimings(commit),
+					stages: getStaticTaskStageTimings(commit),
 					startedAtMs,
 				});
 			} else if (commit?.kind === "outdoor-object-layer-commit") {
@@ -686,7 +686,7 @@ export class OpenWorldStreamingController {
 					apply: () => this.#applyOutdoorObjectCommit(commit),
 					drawUnits: commit.payload.drawUnits.length,
 					request,
-					stages: getStaticCommitStageTimings(commit),
+					stages: getStaticTaskStageTimings(commit),
 					startedAtMs,
 				});
 			} else if (commit?.kind === "env-cell-system-layer-commit") {
@@ -696,7 +696,7 @@ export class OpenWorldStreamingController {
 						commit.payload.structuredInteriorDrawUnits.length +
 						commit.payload.envCellStaticObjectDrawUnits.length,
 					request,
-					stages: getStaticCommitStageTimings(commit),
+					stages: getStaticTaskStageTimings(commit),
 					startedAtMs,
 				});
 			}
@@ -1724,7 +1724,7 @@ function createEmptyRuntimeEntityDiagnosticsSnapshot(): OpenWorldRuntimeEntityDi
 	};
 }
 
-function getStaticCommitStageTimings(
+function getStaticTaskStageTimings(
 	commit:
 		| OpenWorldTerrainLayerCommit
 		| OpenWorldOutdoorObjectLayerCommit

@@ -54,6 +54,15 @@ import {
 	DirectOpenWorldObjectVisualAtlasBuilder,
 	type OpenWorldObjectVisualAtlasBuilder,
 } from "../texture-residency/placement/object-visual-atlas-builder";
+import type {
+	DynamicEntityId,
+	DynamicEntityRenderResidence,
+	DynamicRuntimeSnapshot,
+} from "../../../dynamic/contracts";
+import type { RuntimeDynamicSpawnRequest } from "../../../dynamic/dynamic-entity-controller";
+import type { DynamicVisualBaker } from "../../../dynamic/visual-baker";
+import type { DynamicVisualRecipeResolver } from "../../../dynamic/visual-recipe-resolver";
+import { OpenWorldRuntimeEntitySystem } from "../runtime-entities/runtime-entity-system";
 
 export interface OpenWorldStreamingControllerOptions {
 	readonly assetReader: PreparedAssetReader;
@@ -66,7 +75,11 @@ export interface OpenWorldStreamingControllerOptions {
 		| "setOutdoorGeneratedSceneryLayer"
 		| "setEnvCellSystemLayer"
 		| "setTerrainLayer"
+		| "commitDynamicResources"
+		| "commitDynamicInstances"
 	>;
+	readonly createDynamicVisualBaker: () => DynamicVisualBaker;
+	readonly createDynamicVisualRecipeResolver: () => DynamicVisualRecipeResolver;
 	readonly createTexturePacker: () => TexturePacker;
 	readonly createObjectVisualAtlasBuilder?: () => OpenWorldObjectVisualAtlasBuilder;
 	readonly createStaticBaker: () => StaticBaker;
@@ -98,6 +111,7 @@ export interface OpenWorldStreamingStaticInterest {
 }
 
 export interface OpenWorldStreamingControllerSnapshot {
+	readonly dynamic: DynamicRuntimeSnapshot;
 	readonly envCells: OpenWorldStreamingEnvCellProgressSnapshot;
 	readonly outdoorObjects: OpenWorldStreamingOutdoorObjectProgressSnapshot;
 	readonly staticSceneQuery: ReturnType<StaticSceneQuery["createSnapshot"]>;
@@ -187,6 +201,7 @@ export class OpenWorldStreamingController {
 		(request) => this.#requireStaticSourceResolver().resolveSource(request),
 	);
 	#terrainRunner: OpenWorldTerrainArtifactRunner | null = null;
+	#runtimeEntities: OpenWorldRuntimeEntitySystem | null = null;
 	#objectVisualAtlasBuilder: OpenWorldObjectVisualAtlasBuilder | null = null;
 	#texturePacker: TexturePacker | null = null;
 	readonly #deferredOutdoorRendererLayers = {
@@ -307,6 +322,34 @@ export class OpenWorldStreamingController {
 		void this.#runStaticInterest(runId, interest);
 	}
 
+	createRuntimeEntity(request: RuntimeDynamicSpawnRequest): DynamicEntityId {
+		this.#assertUsable();
+		return this.#requireRuntimeEntities().createRuntimeEntity(request);
+	}
+
+	destroyRuntimeEntity(entityId: DynamicEntityId): boolean {
+		this.#assertUsable();
+		return this.#requireRuntimeEntities().destroyRuntimeEntity(entityId);
+	}
+
+	updateRuntimeEntityRenderResidence(
+		entityId: DynamicEntityId,
+		renderResidence: DynamicEntityRenderResidence,
+		frameTimeSeconds: number,
+	): boolean {
+		this.#assertUsable();
+		return this.#requireRuntimeEntities().updateRuntimeEntityRenderResidence(
+			entityId,
+			renderResidence,
+			frameTimeSeconds,
+		);
+	}
+
+	tickFrame(timeSeconds: number): void {
+		this.#assertUsable();
+		this.#runtimeEntities?.tick(timeSeconds);
+	}
+
 	queryTerrainLandblockBounds(
 		options: Parameters<StaticSceneQuery["queryTerrainLandblockBounds"]>[0],
 	): ReturnType<StaticSceneQuery["queryTerrainLandblockBounds"]> {
@@ -352,6 +395,9 @@ export class OpenWorldStreamingController {
 
 	createSnapshot(): OpenWorldStreamingControllerSnapshot {
 		return {
+			dynamic:
+				this.#runtimeEntities?.createSnapshot() ??
+				createEmptyDynamicRuntimeSnapshot(),
 			envCells: this.#envCellProgress,
 			outdoorObjects: this.#outdoorObjectProgress,
 			staticSceneQuery: this.#staticSceneQuery.createSnapshot(),
@@ -363,6 +409,9 @@ export class OpenWorldStreamingController {
 	createDiagnosticsSnapshot(): OpenWorldStreamingDiagnosticsSnapshot {
 		const ownerSnapshot = this.#owners.createSnapshot();
 		const textureSnapshot = this.#textureClaims.createSnapshot();
+		const dynamicSnapshot =
+			this.#runtimeEntities?.createSnapshot() ??
+			createEmptyDynamicRuntimeSnapshot();
 		return {
 			artifacts: {
 				inFlight:
@@ -426,6 +475,12 @@ export class OpenWorldStreamingController {
 				bucketCount: textureSnapshot.bucketCount,
 				claimCount: textureSnapshot.claimCount,
 				pageBuildsInFlight: textureSnapshot.pageBuildsInFlight,
+			},
+			runtimeEntities: {
+				active: dynamicSnapshot.activeEntityCount,
+				nonRenderable: dynamicSnapshot.nonRenderableEntityCount,
+				runtimeAuthored: dynamicSnapshot.runtimeSpawnCount,
+				staticAuthored: dynamicSnapshot.staticAuthoredCount,
 			},
 			staticTasks: createStaticTaskDiagnostics({
 				active: [...this.#activeStaticTasksByTaskId.values()],
@@ -503,6 +558,7 @@ export class OpenWorldStreamingController {
 		});
 		for (const owner of this.#owners.createSnapshot().current) {
 			if (owner.kind === "static-layer" && !targetOwnerIds.has(owner.id)) {
+				this.#runtimeEntities?.removeStaticAuthoredChildrenForParent(owner.id);
 				this.#owners.evict(owner.id);
 			}
 		}
@@ -767,6 +823,10 @@ export class OpenWorldStreamingController {
 				]),
 			]);
 		this.#publishOrDeferEnvCellRendererLayer(commit.payload);
+		this.#requireRuntimeEntities().ingestStaticAuthoredPlacements({
+			parentOwnerId: commit.ownerId,
+			placements: commit.staticAuthoredDynamicPlacements,
+		});
 		const drawUnitCount =
 			commit.payload.structuredInteriorDrawUnits.length +
 			commit.payload.envCellStaticObjectDrawUnits.length;
@@ -809,6 +869,10 @@ export class OpenWorldStreamingController {
 				);
 				break;
 		}
+		this.#requireRuntimeEntities().ingestStaticAuthoredPlacements({
+			parentOwnerId: commit.ownerId,
+			placements: commit.staticAuthoredDynamicPlacements,
+		});
 		this.#outdoorObjectProgress = {
 			...this.#outdoorObjectProgress,
 			committed: this.#outdoorObjectProgress.committed + 1,
@@ -1036,6 +1100,22 @@ export class OpenWorldStreamingController {
 		return this.#envCellRunner;
 	}
 
+	#requireRuntimeEntities(): OpenWorldRuntimeEntitySystem {
+		if (!this.#runtimeEntities) {
+			this.#runtimeEntities = new OpenWorldRuntimeEntitySystem({
+				assetReader: this.#options.assetReader,
+				createDynamicVisualBaker: this.#options.createDynamicVisualBaker,
+				createDynamicVisualRecipeResolver:
+					this.#options.createDynamicVisualRecipeResolver,
+				objectVisualAtlasBuilder: this.#requireObjectVisualAtlasBuilder(),
+				owners: this.#owners,
+				renderer: this.#renderer,
+				textureClaims: this.#textureClaims,
+			});
+		}
+		return this.#runtimeEntities;
+	}
+
 	#requireObjectVisualAtlasBuilder(): OpenWorldObjectVisualAtlasBuilder {
 		if (!this.#objectVisualAtlasBuilder) {
 			this.#objectVisualAtlasBuilder =
@@ -1206,6 +1286,16 @@ function createEmptyEnvCellProgress(): OpenWorldStreamingEnvCellProgressSnapshot
 		requested: 0,
 		resolving: 0,
 		sourceDrawUnits: 0,
+	};
+}
+
+function createEmptyDynamicRuntimeSnapshot(): DynamicRuntimeSnapshot {
+	return {
+		activeEntityCount: 0,
+		nonRenderableEntityCount: 0,
+		records: [],
+		runtimeSpawnCount: 0,
+		staticAuthoredCount: 0,
 	};
 }
 

@@ -150,6 +150,15 @@ This tree is a policy boundary, not just a folder name. New materialization conc
 - Diagnostics follow the same rule as every other contract: replacement diagnostics are direct; legacy diagnostic snapshots are shims.
 - Each steering checkpoint must dry-run the remaining phases up to the next steering checkpoint and explicitly classify touched consumers as direct migration, legacy-edge shim, deletion, or durable adapter. If the answer is not clear, pause the phase before adding compatibility code.
 
+Universal contract migration rule:
+
+- Start from the direct replacement contract the new system actually wants.
+- Migrate surviving consumers to that contract before translating anything.
+- If a consumer cannot move yet, add the translation at that consumer's edge and name it as a shim.
+- Do not put legacy-shaped DTOs, lifecycle timing, diagnostic categories, report fields, or test expectations inside replacement internals.
+- Let edge shims be partial, awkward, or temporarily broken when the alternative is making replacement contracts dishonest.
+- Apply the rule to diagnostics with the same strictness as runtime, renderer, texture, scene-query, harness, and UI contracts. Diagnostics are not an exception where legacy shape compatibility may re-enter replacement internals.
+
 Boundary decision order:
 
 1. **Migrate direct.** If the consumer is expected to survive cutover, update it to the replacement-native contract.
@@ -997,6 +1006,7 @@ Deliverables:
 - Materialize static-authored dynamic placement records and recipes emitted by static layers.
 - Publish runtime-authored dynamic resource commits and dynamic instance commits.
 - Keep render residence separate from runtime entity lifetime.
+- Apply the universal contract migration rule to runtime entity creation, destruction, render residence, diagnostics, and static-authored dynamic children before adding any legacy projection.
 
 Acceptance criteria:
 
@@ -1006,26 +1016,33 @@ Acceptance criteria:
 - Render-residence changes suppress or restore publication without destroying materialized resources.
 - Runtime entity consumers that survive cutover use replacement entity/resource/instance contracts directly.
 - Legacy runtime entity projections are edge shims only and must not preserve `ClientRuntimeImpl` prep revisions, diagnostic categories, or lifecycle timing as replacement concepts.
+- Any runtime entity consumer that cannot migrate directly must be listed as a legacy-edge shim with a deletion trigger; the replacement runtime-entity model stays canonical even if that shim is incomplete.
 
 Task checklist:
 
-- [ ] Add runtime entity owner entrypoint.
-- [ ] Add static-authored dynamic child owner/parent membership entrypoint.
-- [ ] Adapt dynamic recipe resolution.
-- [ ] Reuse dynamic visual resolver and bake workers through adapters, not `ClientRuntimeImpl` prep revision state.
-- [ ] Retain runtime-authored dynamic texture bindings.
-- [ ] Retain static-authored dynamic texture bindings from parent-owned placement records and recipes.
-- [ ] Emit runtime dynamic resource commits.
-- [ ] Emit static-authored dynamic resource commits.
-- [ ] Emit dynamic instance projections from committed runtime state.
-- [ ] Emit dynamic instance projections from committed static-authored dynamic state.
-- [ ] Migrate durable runtime-entity diagnostics and UI consumers to direct replacement contracts.
-- [ ] Name every runtime-entity compatibility shim with its blocked consumer, dishonest-field risk, deletion trigger, and target cleanup phase.
-- [ ] Add create/destroy/residence tests.
+- [x] Add runtime entity owner entrypoint.
+- [x] Add static-authored dynamic child owner/parent membership entrypoint.
+- [x] Adapt dynamic recipe resolution.
+- [x] Reuse dynamic visual resolver and bake workers through adapters, not `ClientRuntimeImpl` prep revision state.
+- [x] Retain runtime-authored dynamic texture bindings.
+- [x] Retain static-authored dynamic texture bindings from parent-owned placement records and recipes.
+- [x] Emit runtime dynamic resource commits.
+- [x] Emit static-authored dynamic resource commits.
+- [x] Emit dynamic instance projections from committed runtime state.
+- [x] Emit dynamic instance projections from committed static-authored dynamic state.
+- [x] Migrate durable runtime-entity diagnostics and UI consumers to direct replacement contracts.
+- [x] Name every runtime-entity compatibility shim with its blocked consumer, dishonest-field risk, deletion trigger, and target cleanup phase.
+- [x] Verify no runtime-entity shim preserves legacy prep revisions, lifecycle timing, or diagnostic categories as replacement concepts.
+- [x] Add create/destroy/residence tests.
 
 Decisions and course corrections:
 
-- Pending.
+- Added `open-world-streaming/runtime-entities` as the replacement-owned dynamic lifecycle and publication system. It reuses existing dynamic recipe resolution, bake sidecar creation, visual texture planning, and dynamic bake workers as transform adapters, but owner currentness, texture claims, renderer publication, and render residence now live in the replacement system.
+- Runtime-authored entities now retain `runtime-entity:*` materialization owners, run dynamic visual prep through replacement texture placement, publish direct dynamic renderer resource commits, and publish dynamic instance commits. Destroy releases runtime state, renderer resources/instances, replacement texture claims, and owner membership.
+- Static-authored dynamic placement records emitted by outdoor object and env-cell static layers now carry the replacement static parent owner id and are materialized as `static-authored-dynamic:*` child owners. Re-materializing a parent owner replaces its child set before adding new children so stale static-authored children do not linger.
+- Render residence is explicitly separate from entity lifetime: no-residence suppresses instance publication while keeping the visual resource resident, and restoring residence republishes instances without re-preparing the resource.
+- Native replacement diagnostics now expose runtime entity counts under `open-world-streaming.runtimeEntities`. The outer `ClientRuntime` diagnostics snapshot still returns an empty legacy-shaped dynamic snapshot. Compatibility shim: `browser-runtime-adapter` legacy dynamic snapshot. Blocked consumer: old `ClientRuntime` diagnostics snapshot shape. Dishonest-field risk: backfilling old dynamic prep categories would preserve `ClientRuntimeImpl` lifecycle timing as replacement truth. Deletion trigger: Phase 14 diagnostics/UI migration, with final deletion in Phase 16.
+- Spicy bit: dynamic prep currently logs failed prep/bake as replacement runtime warnings and marks the entity non-renderable. That is intentionally louder than the previous silent conversion, but Phase 13 should decide whether these warnings need structured replacement diagnostics before browser cutover.
 
 ### Phase 13: Resteering Checkpoint 4 - Full-Domain Behavior Review
 
@@ -1040,6 +1057,7 @@ Deliverables:
 - Review source-tree policy violations.
 - Review whether replacement-native diagnostics are enough for debugging streaming failures without legacy compatibility crutches.
 - Review whether every surviving consumer has a migration path to direct replacement contracts before browser cutover.
+- Reapply the universal contract migration rule to every touched browser, harness, UI, diagnostics, renderer, texture, runtime entity, scene-query, and test consumer.
 - Dry-run Phase 14 through the next steering phase and specifically decide whether to migrate direct, break temporarily, or delete each legacy-shaped consumer before adding more shims.
 - Convert any diagnostics/harness consumer discovered during the dry run to direct replacement contracts unless it is explicitly named as a short-lived legacy-edge shim.
 
@@ -1051,6 +1069,7 @@ Acceptance criteria:
 - Any legacy-compatible shim is outside replacement internals and has a deletion target.
 - No shim is allowed to become the canonical contract for a surviving browser, harness, UI, or diagnostics consumer.
 - Diagnostics are judged against replacement truth first. Legacy diagnostic projections may be incomplete during migration, but replacement diagnostics may not clone or launder legacy categories to keep dashboards green.
+- Each touched consumer is classified using the universal contract migration rule before compatibility code is added.
 - The next implementation span through the cutover deletion audit has been dry-run against the current source tree.
 
 Task checklist:
@@ -1063,6 +1082,7 @@ Task checklist:
 - [ ] Audit compatibility shims and move/delete anything that pressures replacement internals toward legacy shapes.
 - [ ] For each remaining shim, choose direct consumer migration or explicit Phase 16 deletion.
 - [ ] For every surviving browser, harness, UI, diagnostics, and test consumer, choose one path: migrate to direct replacement contract, leave as named legacy-edge shim, or delete.
+- [ ] Delete or quarantine diagnostics/report projections that only exist to keep legacy output shapes looking complete.
 - [ ] Dry-run Phase 14 against the current source tree.
 - [ ] Identify dependency/order changes, boundary leaks, shims, deletion targets, and test risks for browser runtime cutover.
 - [ ] Update cleanup targets.
@@ -1079,6 +1099,7 @@ Deliverables:
 - Keep the harness switch only if needed for one short verification window.
 - Remove obsolete UI assumptions about legacy static coordinator diagnostics and migrate surviving panels to replacement-native diagnostics.
 - Prefer temporary broken or partial legacy diagnostic reports over backfilling old fields from replacement data after cutover.
+- Migrate surviving browser, harness, UI, and diagnostics consumers directly to replacement contracts before adding any cutover shim.
 
 Acceptance criteria:
 
@@ -1087,6 +1108,7 @@ Acceptance criteria:
 - Surviving UI and diagnostics panels read direct replacement contracts instead of legacy-shaped runtime snapshots.
 - Any remaining harness comparison shim is isolated, named as temporary, and scheduled for Phase 16 deletion.
 - Browser cutover does not require legacy-shaped diagnostics to remain complete. Any temporary report gaps are tracked at the legacy edge instead of backfilled inside replacement internals.
+- Cutover does not preserve a compatibility projection merely because an old diagnostic panel, benchmark summary, or test expects it.
 - `npm run check`, `npm run lint:ts`, and focused tests pass.
 
 Task checklist:
@@ -1096,6 +1118,7 @@ Task checklist:
 - [ ] Delete or isolate any legacy-shaped UI/harness projection that is not needed after the cutover window.
 - [ ] Break or delete legacy-shaped diagnostics consumers that do not justify a named shim.
 - [ ] Replace architecture-preserving diagnostic tests with tests over replacement-native contracts, or delete them if they only validate legacy projection completeness.
+- [ ] Verify every surviving cutover consumer either reads the direct replacement contract or has a named, deletion-targeted edge shim.
 - [ ] Update browser harness expectations.
 - [ ] Run app checks.
 - [ ] Run benchmark matrix.

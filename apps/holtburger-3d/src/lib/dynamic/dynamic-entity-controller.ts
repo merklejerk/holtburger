@@ -117,7 +117,8 @@ export class DynamicEntityController {
 
 	ingestStaticPlacements(
 		records: readonly StaticAuthoredDynamicPlacementRecord[],
-	): void {
+	): readonly DynamicEntityId[] {
+		const entityIds: DynamicEntityId[] = [];
 		for (const record of records) {
 			if (
 				!isOutdoorDynamicPlacementRecord(record) &&
@@ -127,7 +128,9 @@ export class DynamicEntityController {
 			}
 			const entityRecord = createDynamicEntityRecord(record);
 			this.#store.upsert(entityRecord);
+			entityIds.push(entityRecord.id);
 		}
+		return entityIds;
 	}
 
 	retainLayerOwners(layerOwners: readonly LayerOwnerKey[]): void {
@@ -154,6 +157,26 @@ export class DynamicEntityController {
 		this.#store.remove(entityId);
 		this.#releaseRecordState(record);
 		return true;
+	}
+
+	removeStaticAuthoredLayerOwner(ownerId: string): readonly DynamicEntityId[] {
+		const removedEntityIds: DynamicEntityId[] = [];
+		for (const record of this.#store.records()) {
+			if (
+				record.source.kind !== "static-authored" ||
+				record.provenance.kind === "runtime-spawn" ||
+				record.provenance.layerOwnerId !== ownerId
+			) {
+				continue;
+			}
+			const removed = this.#store.remove(record.id);
+			if (removed === null) {
+				continue;
+			}
+			this.#releaseRecordState(removed);
+			removedEntityIds.push(removed.id);
+		}
+		return removedEntityIds;
 	}
 
 	updateRuntimeSpawn(
@@ -246,6 +269,20 @@ export class DynamicEntityController {
 				sourceResidence: record.sourceResidence,
 			},
 		};
+	}
+
+	createStaticAuthoredVisualRecipeRequests(
+		ownerId: string,
+	): readonly DynamicVisualRecipeResolutionPayload[] {
+		return this.#store
+			.records()
+			.filter(
+				(record) =>
+					record.source.kind === "static-authored" &&
+					record.provenance.kind !== "runtime-spawn" &&
+					record.provenance.layerOwnerId === ownerId,
+			)
+			.map(createStaticAuthoredVisualRecipeRequest);
 	}
 
 	applyResolvedDynamicRecipe(recipe: DynamicEntityRecipe): boolean {
@@ -576,6 +613,44 @@ function createRuntimeDynamicEntityRecord(
 		resources: resourceState,
 		source,
 		sourceResidence: request.sourceResidence,
+	};
+}
+
+function createStaticAuthoredVisualRecipeRequest(
+	record: DynamicEntityRecord,
+): DynamicVisualRecipeResolutionPayload {
+	if (
+		record.source.kind !== "static-authored" ||
+		record.provenance.kind === "runtime-spawn"
+	) {
+		throw new Error(
+			`Dynamic entity ${record.id} is not a static-authored dynamic record.`,
+		);
+	}
+	const materialPlanningIdentity =
+		record.presentation.policy.materialPlanningIdentity;
+	if (materialPlanningIdentity.kind !== "setup-backed-visual") {
+		throw new Error(
+			`Static-authored dynamic ${record.id} cannot resolve visual recipe with material planning identity ${materialPlanningIdentity.kind}.`,
+		);
+	}
+	return {
+		animationSelection: record.presentation.visualSource.animationSelection,
+		baseTransform: record.baseTransform,
+		entityId: record.id,
+		materialPolicy: {
+			detailRolePolicy: record.presentation.policy.materialDetailRolePolicy,
+			materialPlanningDomain: record.presentation.policy.materialPlanningDomain,
+			visualObject: materialPlanningIdentity.visualObject,
+		},
+		modelData: record.presentation.visualSource.modelData,
+		setupModelId: record.presentation.visualSource.setupModelId,
+		source: {
+			kind: "static-authored",
+			owner: record.provenance.owner,
+			placementId: record.id,
+			sourceResidence: record.sourceResidence,
+		},
 	};
 }
 

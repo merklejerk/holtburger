@@ -23,6 +23,8 @@ describe("OpenWorldStreamingController terrain slice", () => {
 		const renderer = new FixtureTerrainRenderer();
 		const controller = new OpenWorldStreamingController({
 			assetReader: createUnusedAssetReader(),
+			createDynamicVisualBaker: failIfDynamicWorkerFactoryIsCalled,
+			createDynamicVisualRecipeResolver: failIfDynamicWorkerFactoryIsCalled,
 			createStaticBaker: () => new FixtureTerrainBaker(),
 			createStaticResolver: () =>
 				new FixtureTerrainResolver(createTerrainScopePayload()),
@@ -75,6 +77,10 @@ class FixtureTerrainRenderer {
 		this.textureUpdates.push(update);
 	}
 
+	commitDynamicResources(): void {}
+
+	commitDynamicInstances(): void {}
+
 	setStaticRenderAnchorLandblockId(anchorLandblockId: number | null): void {
 		this.anchorLandblockIds.push(anchorLandblockId);
 	}
@@ -85,6 +91,10 @@ class FixtureTerrainRenderer {
 	): void {
 		this.terrainLayers.push({ landblockId, payload });
 	}
+}
+
+function failIfDynamicWorkerFactoryIsCalled(): never {
+	throw new Error("Dynamic worker factory should not be used by terrain slice test.");
 }
 
 function createUnusedTexturePacker(): TexturePacker {

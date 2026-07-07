@@ -3028,16 +3028,21 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Trace `reserveMaterialTexturePlacements(...)` through terrain, outdoor objects, env-cells, and runtime entities.
-- [ ] Extract small functions or types so bucket retain, layout request creation, page reservation, binding placement creation, and page-build request creation are independently named.
-- [ ] Add or rename atlas-build DTO fields to distinguish source facts from page pixels.
-- [ ] Verify source preparation work in the production browser path happens inside atlas/page-build workers.
-- [ ] Add tests that fail if page materialization or source pixel preparation is reintroduced into the browser placement path.
-- [ ] Record any measured main-thread exception with a reason; otherwise delete exception paths.
+- [x] Trace `reserveMaterialTexturePlacements(...)` through terrain, outdoor objects, env-cells, and runtime entities.
+- [x] Extract small functions or types so bucket retain, layout request creation, page reservation, binding placement creation, and page-build request creation are independently named.
+- [x] Add or rename atlas-build DTO fields to distinguish source facts from page pixels.
+- [x] Verify source preparation work in the production browser path happens inside atlas/page-build workers.
+- [x] Add or update tests so browser composition and placement contracts do not depend on direct browser-side source preparation.
+- [x] Record any measured main-thread exception with a reason; otherwise delete exception paths.
 
 Decisions and course corrections:
 
-- Pending.
+- `OpenWorldObjectVisualAtlasPlacementOutput` now carries `sourceFacts` alongside `pages` and `rects`. The source-fact type is intentionally not exported as a public import surface yet; consumers should depend on the atlas output contract, not start passing source-fact DTOs around as a new mini-pipeline.
+- `object-visual-atlas-builder.ts` now records `texture-source-fact-preparation*` timings for atlas layout. `texture-page-source-preparation` remains owned by the page-build worker. This names the duplication honestly instead of hiding both operations under one `texture-source-preparation` bucket.
+- Source fact preparation and page pixel preparation still both read prepared assets in their respective workers. This is deliberate for now: sharing pixels across the atlas worker and page-build worker would introduce transfer/cache coupling before measurement proves the duplication matters. Phase 49 should re-open this only if worker-side duplicate preparation dominates wall time or produces measurable browser pressure.
+- `material-texture-placement-plan.ts` was split into named reservation steps: bucket placement plan creation, touched-entry selection, atlas layout input creation, atlas output validation, page reservation, bake-facing placement creation, and page-build request creation. The placement path no longer needs to know how source pixels are prepared.
+- Direct builder audit found only worker entrypoint and test usage: `object-visual-atlas.worker.ts`, `page-build.worker.ts`, and focused tests. Production browser composition still creates `WorkerPoolOpenWorldObjectVisualAtlasBuilder` and worker-backed page builders through `create-browser-runtime.ts`.
+- Verification: `npm run check`, `npm run lint`, and focused `npm run test:ts -- --run src/lib/systems/open-world-streaming/texture-residency/placement/material-texture-placement-plan.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/object-visual-texture-placement-plan.test.ts src/lib/systems/open-world-streaming/texture-residency/atlas-build/object-visual-atlas-worker-client.test.ts src/lib/systems/open-world-streaming/texture-residency/page-build/page-build.test.ts src/lib/browser/create-browser-runtime.test.ts`.
 
 ### Phase 45: Placement Policy Input Audit
 

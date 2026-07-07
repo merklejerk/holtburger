@@ -59,8 +59,21 @@ export interface OpenWorldObjectVisualAtlasPlacementOutput {
 	readonly pages: readonly OpenWorldObjectVisualAtlasPlacementPage[];
 	/** Packed rects keyed by replacement entry id. */
 	readonly rects: readonly OpenWorldObjectVisualAtlasPlacementRect[];
+	/** Worker-owned immutable source dimensions and format facts used by layout. */
+	readonly sourceFacts: readonly OpenWorldObjectVisualAtlasSourceFact[];
 	/** Worker- or direct-builder-local stage timings. */
 	readonly stageTimings: readonly OpenWorldStreamingStaticTaskStageTiming[];
+}
+
+interface OpenWorldObjectVisualAtlasSourceFact {
+	/** Shared texture entry whose source was inspected by the atlas worker. */
+	readonly entryKey: OpenWorldTextureEntryId;
+	/** Prepared source pixel format required by the layout/page format. */
+	readonly format: TexturePackingPageFormat;
+	/** Prepared source height in pixels. */
+	readonly height: number;
+	/** Prepared source width in pixels. */
+	readonly width: number;
 }
 
 interface OpenWorldObjectVisualAtlasPlacementPage {
@@ -122,11 +135,11 @@ async function planObjectVisualAtlasPlacement(options: {
 	readonly input: OpenWorldObjectVisualAtlasBuildInput;
 }): Promise<OpenWorldObjectVisualAtlasPlacementOutput> {
 	const timings: OpenWorldStreamingStaticTaskStageTiming[] = [];
-	const sources = await measureStage(
+	const sourceFacts = await measureStage(
 		timings,
-		"texture-source-preparation",
+		"texture-source-fact-preparation",
 		() =>
-			prepareTexturePackingSources({
+			prepareTextureSourceFacts({
 				assetReader: options.assetReader,
 				entries: options.input.entries,
 				timings,
@@ -139,31 +152,24 @@ async function planObjectVisualAtlasPlacement(options: {
 		async () =>
 			planTexturePlacementLayout({
 				input: options.input,
-				sources,
+				sourceFacts,
 			}),
-		sources.length,
+		sourceFacts.length,
 	);
 	return {
 		pages: layout.pages,
 		rects: layout.rects,
+		sourceFacts,
 		stageTimings: timings,
 	};
 }
 
-async function prepareTexturePackingSources(options: {
+async function prepareTextureSourceFacts(options: {
 	readonly assetReader: PreparedAssetReader;
 	readonly entries: readonly OpenWorldObjectVisualAtlasBuildEntry[];
 	readonly timings: OpenWorldStreamingStaticTaskStageTiming[];
-}): Promise<
-	readonly {
-		readonly entry: OpenWorldObjectVisualAtlasBuildEntry;
-		readonly source: TexturePackingPixelSource;
-	}[]
-> {
-	const results: Array<{
-		readonly entry: OpenWorldObjectVisualAtlasBuildEntry;
-		readonly source: TexturePackingPixelSource;
-	}> = [];
+}): Promise<readonly OpenWorldObjectVisualAtlasSourceFact[]> {
+	const results: OpenWorldObjectVisualAtlasSourceFact[] = [];
 	for (
 		let batchStart = 0;
 		batchStart < options.entries.length;
@@ -178,14 +184,24 @@ async function prepareTexturePackingSources(options: {
 				batch.map((entry) =>
 					measureStage(
 						options.timings,
-						"texture-source-preparation-chunk",
-						async () => ({
-							entry,
-							source: await prepareMaterialTexturePackingSource({
+						"texture-source-fact-preparation-chunk",
+						async () => {
+							const source = await prepareMaterialTexturePackingSource({
 								assetReader: options.assetReader,
 								dataUse: entry.dataUse,
-							}),
-						}),
+							});
+							assertPixelLengthMatchesFormat(
+								"source-fact-preparation",
+								entry.entryId,
+								source,
+							);
+							return {
+								entryKey: entry.entryId,
+								format: source.format,
+								height: source.height,
+								width: source.width,
+							};
+						},
 						1,
 					),
 				),
@@ -197,7 +213,7 @@ async function prepareTexturePackingSources(options: {
 		) {
 			await measureStage(
 				options.timings,
-				"texture-source-preparation-yield",
+				"texture-source-fact-preparation-yield",
 				yieldToBrowserTaskQueue,
 				batch.length,
 			);
@@ -208,33 +224,24 @@ async function prepareTexturePackingSources(options: {
 
 function planTexturePlacementLayout(options: {
 	readonly input: OpenWorldObjectVisualAtlasBuildInput;
-	readonly sources: readonly {
-		readonly entry: OpenWorldObjectVisualAtlasBuildEntry;
-		readonly source: TexturePackingPixelSource;
-	}[];
+	readonly sourceFacts: readonly OpenWorldObjectVisualAtlasSourceFact[];
 }): {
 	readonly pages: readonly OpenWorldObjectVisualAtlasPlacementPage[];
 	readonly rects: readonly OpenWorldObjectVisualAtlasPlacementRect[];
 } {
-	for (const entry of options.sources) {
-		const { source } = entry;
-		if (source.format !== options.input.page.format) {
+	for (const sourceFact of options.sourceFacts) {
+		if (sourceFact.format !== options.input.page.format) {
 			throw new Error(
-				`Texture layout job ${options.input.jobId} expected ${options.input.page.format} sources, got ${source.format}.`,
+				`Texture layout job ${options.input.jobId} expected ${options.input.page.format} sources, got ${sourceFact.format}.`,
 			);
 		}
-		assertPixelLengthMatchesFormat(
-			options.input.jobId,
-			entry.entry.entryId,
-			source,
-		);
 	}
 
 	const layout = planAtlasLayout({
-		entries: options.sources.map(({ entry, source }) => ({
-			height: source.height,
-			key: entry.entryId,
-			width: source.width,
+		entries: options.sourceFacts.map((sourceFact) => ({
+			height: sourceFact.height,
+			key: sourceFact.entryKey,
+			width: sourceFact.width,
 		})),
 		policy: {
 			gutterPixels: options.input.page.gutterPixels,

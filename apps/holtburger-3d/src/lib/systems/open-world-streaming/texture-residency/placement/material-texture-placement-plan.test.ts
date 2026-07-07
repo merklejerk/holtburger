@@ -79,6 +79,12 @@ class FixtureAtlasBuilder implements OpenWorldMaterialTextureAtlasBuilder {
 				pageId: "fixture-page",
 				rect: [96, 96, 1, 1] as const,
 			})),
+			sourceFacts: input.entries.map((entry) => ({
+				entryKey: entry.entryId,
+				format: input.page.format,
+				height: 1,
+				width: 1,
+			})),
 			stageTimings: [],
 		};
 	}

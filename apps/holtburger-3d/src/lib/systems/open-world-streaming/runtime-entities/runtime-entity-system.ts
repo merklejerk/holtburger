@@ -28,7 +28,9 @@ import {
 	type MaterializationOwnerId,
 } from "../owners/owner-id";
 import { OpenWorldTextureClaimRegistry } from "../texture-residency/claims/texture-claim-registry";
-import { buildObjectVisualTexturePlacementPlan } from "../texture-residency/placement/object-visual-texture-placement-plan";
+import { reserveObjectVisualTexturePlacements } from "../texture-residency/placement/object-visual-texture-placement-plan";
+import { buildReservedMaterialTexturePages } from "../texture-residency/placement/material-texture-placement-plan";
+import type { OpenWorldTexturePageBuilder } from "../texture-residency/page-build/worker-client";
 import type { OpenWorldObjectVisualAtlasBuilder } from "../texture-residency/placement/object-visual-atlas-builder";
 import { applyOpenWorldStreamingTextureCommit } from "../texture-residency/commits/texture-commit-applier";
 import {
@@ -42,6 +44,7 @@ export interface OpenWorldRuntimeEntitySystemOptions {
 	readonly createDynamicVisualRecipeResolver: () => DynamicVisualRecipeResolver;
 	readonly objectVisualAtlasBuilder: OpenWorldObjectVisualAtlasBuilder;
 	readonly owners: MaterializationOwnerRegistry;
+	readonly texturePageBuilder: OpenWorldTexturePageBuilder;
 	readonly renderer: OpenWorldRuntimeEntityRendererPort;
 	readonly textureClaims: OpenWorldTextureClaimRegistry;
 }
@@ -103,6 +106,7 @@ export class OpenWorldRuntimeEntitySystem {
 		Set<MaterializationOwnerId>
 	>();
 	readonly #textureClaims: OpenWorldTextureClaimRegistry;
+	readonly #texturePageBuilder: OpenWorldTexturePageBuilder;
 	#dynamicVisualBaker: DynamicVisualBaker | null = null;
 	#dynamicVisualRecipeResolver: DynamicVisualRecipeResolver | null = null;
 	#lastFrameTimeSeconds = 0;
@@ -137,6 +141,7 @@ export class OpenWorldRuntimeEntitySystem {
 		this.#owners = options.owners;
 		this.#renderer = options.renderer;
 		this.#textureClaims = options.textureClaims;
+		this.#texturePageBuilder = options.texturePageBuilder;
 	}
 
 	createRuntimeEntity(request: RuntimeDynamicSpawnRequest): DynamicEntityId {
@@ -272,7 +277,7 @@ export class OpenWorldRuntimeEntitySystem {
 				return;
 			}
 			const texturePlanning = createDynamicVisualTexturePlanning(recipe);
-			const texturePlan = await buildObjectVisualTexturePlacementPlan({
+			const textureReservation = await reserveObjectVisualTexturePlacements({
 				atlasBuilder: this.#objectVisualAtlasBuilder,
 				filteringMode: "nearest",
 				intents: texturePlanning.placementIntents,
@@ -281,11 +286,6 @@ export class OpenWorldRuntimeEntitySystem {
 			});
 			if (!this.#isCurrent(request)) {
 				return;
-			}
-			for (const commit of texturePlan.textureCommits) {
-				applyOpenWorldStreamingTextureCommit(this.#renderer, commit, {
-					revision: this.#nextRendererRevision(),
-				});
 			}
 			const sourceGeometry = await createDynamicVisualBakeSourceGeometry(
 				this.#assetReader,
@@ -298,11 +298,24 @@ export class OpenWorldRuntimeEntitySystem {
 				recipe,
 				revision: this.#nextRendererRevision(),
 				sourceGeometry,
-				texturePlacementSnapshot: texturePlan.placementSnapshot,
+				texturePlacementSnapshot: textureReservation.placementSnapshot,
 				texturePlanning,
 			});
 			if (!this.#isCurrent(request)) {
 				return;
+			}
+			const texturePageBuild = await buildReservedMaterialTexturePages({
+				pageBuilder: this.#texturePageBuilder,
+				pageBuildRequests: textureReservation.pageBuildRequests,
+				textureClaims: this.#textureClaims,
+			});
+			if (!this.#isCurrent(request)) {
+				return;
+			}
+			for (const commit of texturePageBuild.textureCommits) {
+				applyOpenWorldStreamingTextureCommit(this.#renderer, commit, {
+					revision: this.#nextRendererRevision(),
+				});
 			}
 			const product = result.product;
 			if (product?.kind === "baked") {

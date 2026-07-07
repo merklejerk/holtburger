@@ -16,7 +16,6 @@ import type {
 	StaticScopePayload,
 	TerrainStaticScopePayload,
 } from "../../../static/contracts";
-import type { TexturePacker } from "../../../textures/packing/packer";
 import { OpenWorldStreamingController } from "./open-world-streaming-controller";
 
 describe("OpenWorldStreamingController terrain slice", () => {
@@ -29,7 +28,6 @@ describe("OpenWorldStreamingController terrain slice", () => {
 			createStaticBaker: () => new FixtureTerrainBaker(),
 			createStaticResolver: () =>
 				new FixtureTerrainResolver(createTerrainScopePayload()),
-			createTexturePacker: () => createUnusedTexturePacker(),
 			renderer,
 		});
 
@@ -64,7 +62,7 @@ describe("OpenWorldStreamingController terrain slice", () => {
 			pending: 0,
 		});
 		expect(controller.createDiagnosticsSnapshot().frameBudget).toEqual({
-			yieldedPasses: 5,
+			yieldedPasses: 6,
 		});
 	});
 
@@ -83,7 +81,6 @@ describe("OpenWorldStreamingController terrain slice", () => {
 			createDynamicVisualRecipeResolver: failIfDynamicWorkerFactoryIsCalled,
 			createStaticBaker: () => new FixtureTerrainBaker(),
 			createStaticResolver: () => resolver,
-			createTexturePacker: () => createUnusedTexturePacker(),
 			renderer,
 		});
 
@@ -151,7 +148,6 @@ describe("OpenWorldStreamingController terrain slice", () => {
 			createDynamicVisualRecipeResolver: failIfDynamicWorkerFactoryIsCalled,
 			createStaticBaker: () => new FixtureTerrainBaker(),
 			createStaticResolver: () => resolver,
-			createTexturePacker: () => createUnusedTexturePacker(),
 			renderer,
 		});
 
@@ -241,16 +237,6 @@ function failIfDynamicWorkerFactoryIsCalled(): never {
 	throw new Error(
 		"Dynamic worker factory should not be used by terrain slice test.",
 	);
-}
-
-function createUnusedTexturePacker(): TexturePacker {
-	return {
-		pack() {
-			throw new Error(
-				"Texture packer should not be used by terrain slice test.",
-			);
-		},
-	};
 }
 
 class FixtureTerrainResolver implements StaticLandblockSceneLodSourceResolver {

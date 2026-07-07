@@ -98,7 +98,6 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 				adapters.workers.createDynamicVisualRecipeResolver,
 			createStaticBaker: adapters.workers.createStaticBaker,
 			createStaticResolver: adapters.workers.createStaticSourceResolver,
-			createTexturePacker: adapters.workers.createTexturePacker,
 			renderer: this.#renderer,
 			staticPublicationMode: options.staticPublicationMode,
 		});

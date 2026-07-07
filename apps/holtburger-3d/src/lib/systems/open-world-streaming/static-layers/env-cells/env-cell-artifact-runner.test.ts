@@ -15,6 +15,7 @@ import type {
 import { createEmptyObjectVisualInstallSet } from "../../../../visual/object-visual-install-set";
 import type { MaterializationOwnerId } from "../../owners/owner-id";
 import { OpenWorldTextureClaimRegistry } from "../../texture-residency/claims/texture-claim-registry";
+import type { OpenWorldTexturePageBuilder } from "../../texture-residency/page-build/worker-client";
 import type { OpenWorldObjectVisualAtlasBuilder } from "../../texture-residency/placement/object-visual-atlas-builder";
 import { OpenWorldEnvCellArtifactRunner } from "./env-cell-artifact-runner";
 
@@ -30,6 +31,7 @@ describe("OpenWorldEnvCellArtifactRunner", () => {
 			objectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder(),
 			resolver,
 			textureClaims: new OpenWorldTextureClaimRegistry(),
+			texturePageBuilder: createUnusedTexturePageBuilder(),
 		});
 
 		const commit = await runner.run({
@@ -203,9 +205,19 @@ function createFixtureFrameBudget() {
 
 function createUnusedObjectVisualAtlasBuilder(): OpenWorldObjectVisualAtlasBuilder {
 	return {
-		buildAtlas() {
+		planAtlasPlacement() {
 			throw new Error(
 				"Object visual atlas builder should not be used by empty env-cell test payload.",
+			);
+		},
+	};
+}
+
+function createUnusedTexturePageBuilder(): OpenWorldTexturePageBuilder {
+	return {
+		buildPage() {
+			throw new Error(
+				"Texture page builder should not be used by empty env-cell test payload.",
 			);
 		},
 	};

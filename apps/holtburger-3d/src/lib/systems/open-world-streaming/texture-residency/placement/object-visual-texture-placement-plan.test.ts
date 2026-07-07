@@ -16,9 +16,9 @@ import type {
 	TextureKey,
 	TexturePageClass,
 } from "../../../../textures/identity";
-import { AtlasTexturePacker } from "../../../../textures/packing/packer";
 import type { MaterializationOwnerId } from "../../owners/owner-id";
 import { OpenWorldTextureClaimRegistry } from "../claims/texture-claim-registry";
+import { DirectOpenWorldTexturePageBuilder } from "../page-build/direct-page-builder";
 import { DirectOpenWorldObjectVisualAtlasBuilder } from "./object-visual-atlas-builder";
 import { buildObjectVisualTexturePlacementPlan } from "./object-visual-texture-placement-plan";
 
@@ -33,6 +33,7 @@ describe("buildObjectVisualTexturePlacementPlan", () => {
 			filteringMode: "nearest",
 			intents: [intent],
 			ownerId: ownerId("static-layer:outdoor-generated-scenery:0xda55ffff"),
+			pageBuilder: new DirectOpenWorldTexturePageBuilder(),
 			textureClaims,
 		});
 
@@ -91,9 +92,10 @@ describe("buildObjectVisualTexturePlacementPlan", () => {
 		expect(plan.stageTimings.map((timing) => timing.stage)).toEqual([
 			"texture-source-preparation-chunk",
 			"texture-source-preparation",
-			"texture-packing",
-			"texture-page-settlement-page",
-			"texture-page-settlement",
+			"texture-layout",
+			"texture-placement-reservation-page",
+			"texture-placement-reservation",
+			"texture-page-build",
 		]);
 	});
 
@@ -105,6 +107,7 @@ describe("buildObjectVisualTexturePlacementPlan", () => {
 			filteringMode: "nearest",
 			intents: [createIntent({ itemNumber: 1 })],
 			ownerId: ownerId("static-layer:outdoor-generated-scenery:0xda55ffff"),
+			pageBuilder: new DirectOpenWorldTexturePageBuilder(),
 			textureClaims,
 		});
 
@@ -118,6 +121,7 @@ describe("buildObjectVisualTexturePlacementPlan", () => {
 			filteringMode: "nearest",
 			intents: [secondIntent],
 			ownerId: ownerId("static-layer:outdoor-generated-scenery:0xda56ffff"),
+			pageBuilder: new DirectOpenWorldTexturePageBuilder(),
 			textureClaims,
 		});
 
@@ -151,6 +155,7 @@ describe("buildObjectVisualTexturePlacementPlan", () => {
 			filteringMode: "nearest",
 			intents: [firstIntent, secondIntent],
 			ownerId: ownerId("static-layer:env-cell-system:0xda55ffff"),
+			pageBuilder: new DirectOpenWorldTexturePageBuilder(),
 			textureClaims,
 		});
 
@@ -181,7 +186,6 @@ class FixturePreparedAssetReader implements PreparedAssetReader {
 function createDirectAtlasBuilder(assetReader: PreparedAssetReader) {
 	return new DirectOpenWorldObjectVisualAtlasBuilder({
 		assetReader,
-		texturePacker: new AtlasTexturePacker(),
 	});
 }
 

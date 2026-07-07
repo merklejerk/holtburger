@@ -26,6 +26,7 @@ import type {
 import { MaterializationOwnerRegistry } from "../owners/owner-registry";
 import type { MaterializationOwnerId } from "../owners/owner-id";
 import { OpenWorldTextureClaimRegistry } from "../texture-residency/claims/texture-claim-registry";
+import type { OpenWorldTexturePageBuilder } from "../texture-residency/page-build/worker-client";
 import type { OpenWorldObjectVisualAtlasBuilder } from "../texture-residency/placement/object-visual-atlas-builder";
 import { OpenWorldRuntimeEntitySystem } from "./runtime-entity-system";
 
@@ -167,6 +168,7 @@ function createSystem(options: {
 		owners: options.owners,
 		renderer: options.renderer,
 		textureClaims: new OpenWorldTextureClaimRegistry(),
+		texturePageBuilder: createUnusedTexturePageBuilder(),
 	});
 }
 
@@ -403,9 +405,19 @@ function createUnusedAssetReader(): PreparedAssetReader {
 
 function createUnusedObjectVisualAtlasBuilder(): OpenWorldObjectVisualAtlasBuilder {
 	return {
-		async buildAtlas() {
+		async planAtlasPlacement() {
 			throw new Error(
 				"Atlas builder should not be used without texture intents.",
+			);
+		},
+	};
+}
+
+function createUnusedTexturePageBuilder(): OpenWorldTexturePageBuilder {
+	return {
+		async buildPage() {
+			throw new Error(
+				"Texture page builder should not be used without texture intents.",
 			);
 		},
 	};

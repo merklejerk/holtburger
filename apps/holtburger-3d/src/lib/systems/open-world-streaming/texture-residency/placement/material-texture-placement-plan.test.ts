@@ -12,12 +12,16 @@ import type {
 } from "../../../../textures/identity";
 import type { MaterializationOwnerId } from "../../owners/owner-id";
 import { OpenWorldTextureClaimRegistry } from "../claims/texture-claim-registry";
+import { DirectOpenWorldTexturePageBuilder } from "../page-build/direct-page-builder";
 import type {
 	OpenWorldMaterialTextureAtlasBuildInput,
-	OpenWorldMaterialTextureAtlasBuildOutput,
+	OpenWorldMaterialTextureAtlasPlacementOutput,
 	OpenWorldMaterialTextureAtlasBuilder,
 } from "./object-visual-atlas-builder";
-import { buildMaterialTexturePlacementPlan } from "./material-texture-placement-plan";
+import {
+	buildMaterialTexturePlacementPlan,
+	reserveMaterialTexturePlacements,
+} from "./material-texture-placement-plan";
 
 describe("buildMaterialTexturePlacementPlan", () => {
 	it("uses packed page output for terrain-shaped string placement ids", async () => {
@@ -34,6 +38,7 @@ describe("buildMaterialTexturePlacementPlan", () => {
 			intents: [intent],
 			jobPrefix: "fixture-terrain",
 			ownerId: ownerId("static-layer:terrain:0xda55ffff"),
+			pageBuilder: new DirectOpenWorldTexturePageBuilder(),
 			textureClaims,
 		});
 
@@ -47,7 +52,7 @@ describe("buildMaterialTexturePlacementPlan", () => {
 				bindingId: intent.bindingId,
 				placement: expect.objectContaining({
 					itemId: "terrain:item:1",
-					rect: [1, 1, 2, 2],
+					rect: [96, 96, 2, 2],
 				}),
 			}),
 		]);
@@ -58,18 +63,59 @@ describe("buildMaterialTexturePlacementPlan", () => {
 						bindingId: intent.bindingId,
 						readiness: expect.objectContaining({
 							kind: "resident",
-							rect: [1, 1, 2, 2],
-							textureHeight: 4,
-							textureWidth: 4,
+							rect: [96, 96, 2, 2],
+							textureHeight: 256,
+							textureWidth: 256,
 						}),
 					}),
 				],
 				pageUpdates: [
 					expect.objectContaining({
-						height: 4,
-						pixels: new Uint8Array(4 * 4 * 4),
+						height: 256,
+						pixels: expect.any(Uint8Array),
 						sampleClass: "rgba-color",
-						width: 4,
+						width: 256,
+					}),
+				],
+			}),
+		]);
+	});
+
+	it("creates bake-facing reservations before page pixels are built", async () => {
+		const atlasBuilder = new FixtureAtlasBuilder();
+		const textureClaims = new OpenWorldTextureClaimRegistry();
+		const intent = createTerrainIntent();
+
+		const reservation = await reserveMaterialTexturePlacements<
+			string,
+			TexturePlacementIntent
+		>({
+			atlasBuilder,
+			filteringMode: "nearest",
+			intents: [intent],
+			jobPrefix: "fixture-terrain",
+			ownerId: ownerId("static-layer:terrain:0xda55ffff"),
+			textureClaims,
+		});
+
+		expect(reservation.bindingPlacements).toEqual([
+			expect.objectContaining({
+				bindingId: intent.bindingId,
+				placement: expect.objectContaining({
+					itemId: "terrain:item:1",
+					rect: [96, 96, 2, 2],
+				}),
+			}),
+		]);
+		expect(reservation.pageBuildRequests).toEqual([
+			expect.objectContaining({
+				entries: [
+					expect.objectContaining({
+						rect: [96, 96, 2, 2],
+						source: expect.objectContaining({
+							kind: "open-world-texture-page-build-pixel-source",
+							pixels: expect.any(Uint8Array),
+						}),
 					}),
 				],
 			}),
@@ -80,24 +126,32 @@ describe("buildMaterialTexturePlacementPlan", () => {
 class FixtureAtlasBuilder implements OpenWorldMaterialTextureAtlasBuilder {
 	readonly inputs: OpenWorldMaterialTextureAtlasBuildInput[] = [];
 
-	async buildAtlas(
+	async planAtlasPlacement(
 		input: OpenWorldMaterialTextureAtlasBuildInput,
-	): Promise<OpenWorldMaterialTextureAtlasBuildOutput> {
+	): Promise<OpenWorldMaterialTextureAtlasPlacementOutput> {
 		this.inputs.push(input);
 		return {
 			pages: [
 				{
-					format: "rgba8",
-					height: 4,
+					height: 256,
 					pageId: "fixture-page",
-					pixels: new Uint8Array(4 * 4 * 4),
-					width: 4,
+					width: 256,
 				},
 			],
 			rects: input.entries.map((entry) => ({
 				entryKey: entry.entryId,
 				pageId: "fixture-page",
-				rect: [1, 1, 2, 2] as const,
+				rect: [96, 96, 2, 2] as const,
+			})),
+			sources: input.entries.map((entry) => ({
+				entry,
+				source: {
+					format: "rgba8",
+					height: 2,
+					kind: "texture-packing-pixel-source",
+					pixels: new Uint8Array(2 * 2 * 4),
+					width: 2,
+				},
 			})),
 			stageTimings: [],
 		};

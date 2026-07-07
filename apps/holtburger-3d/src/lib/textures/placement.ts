@@ -364,7 +364,8 @@ export function createDynamicTexturePlacementIntent(
 	};
 }
 
-function createStaticDomainTexturePlacementPolicy(): TexturePlacementPolicy {
+/** Replacement policy for content-stable static material textures shared by domain/purpose. */
+export function createStaticDomainTexturePlacementPolicy(): TexturePlacementPolicy {
 	return {
 		bucketScope: { kind: "static-domain" },
 		ownerCurrentness: { kind: "placement-plan-owner" },

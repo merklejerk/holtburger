@@ -28,7 +28,7 @@ interface ObjectVisualStaticTexturePlacementPolicy {
 	readonly affinityKey: string | null;
 	readonly domain: StaticBakeTextureUse["domain"];
 	readonly kind: "static-authored";
-	readonly placementPolicy?: TexturePlacementPolicy;
+	readonly placementPolicy: TexturePlacementPolicy;
 }
 
 interface ObjectVisualDynamicTexturePlacementPolicy {

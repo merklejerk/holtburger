@@ -1,6 +1,9 @@
 import type { PreparedAssetReader } from "../../../assets/contracts";
 import type { StaticBakeJobPayload } from "../../contracts";
-import type { ObjectVisualTexturePlacementIntent } from "../../../textures/placement";
+import {
+	createStaticDomainTexturePlacementPolicy,
+	type ObjectVisualTexturePlacementIntent,
+} from "../../../textures/placement";
 import {
 	createObjectVisualTexturePlacementIntents,
 	type ObjectVisualTexturePlacementRequirement,
@@ -110,6 +113,7 @@ export async function createStructuredInteriorTexturePlacementIntentResult(input
 							}),
 							domain: "env-cell-system",
 							kind: "static-authored",
+							placementPolicy: createStaticDomainTexturePlacementPolicy(),
 						},
 						requirement: {
 							...requirement,

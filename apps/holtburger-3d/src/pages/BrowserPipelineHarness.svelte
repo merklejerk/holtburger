@@ -20,6 +20,7 @@
 	import type { RendererFrameTelemetry } from "../lib/renderer/types";
 	import type { StaticSceneSelectionKey } from "../lib/runtime/scene-query/contracts";
 	import type { RuntimeDiagnosticsReport } from "../lib/runtime/diagnostics";
+	import type { OpenWorldStreamingDiagnosticsSnapshot } from "../lib/systems/open-world-streaming/diagnostics/contracts";
 	import type { OpenWorldStreamingStaticPublicationMode } from "../lib/systems/open-world-streaming/composition/open-world-streaming-controller";
 	import {
 		createFreeCameraFrameStateCamera,
@@ -425,6 +426,18 @@
 		overview: RuntimeOverviewSnapshot,
 		diagnostics: RuntimeDiagnosticsReport,
 	): boolean {
+		if (runtimePipeline === "open-world-streaming") {
+			const openWorld = findOpenWorldDiagnostics(diagnostics);
+			return (
+				openWorld !== null &&
+				openWorld.artifacts.inFlight === 0 &&
+				openWorld.sceneCommits.pending === 0 &&
+				openWorld.staticTasks.summary.requested > 0 &&
+				openWorld.staticTasks.summary.completed >=
+					openWorld.staticTasks.summary.requested &&
+				openWorld.staticTasks.summary.failed === 0
+			);
+		}
 		const staticOverview = overview.static;
 		const runtimeOverview = diagnostics.runtime;
 		return (
@@ -443,11 +456,27 @@
 		overview: RuntimeOverviewSnapshot,
 		diagnostics?: RuntimeDiagnosticsReport,
 	): string {
+		const openWorld = diagnostics
+			? findOpenWorldDiagnostics(diagnostics)
+			: null;
+		if (runtimePipeline === "open-world-streaming" && openWorld) {
+			return `${overview.status} openWorld static ${openWorld.staticTasks.summary.completed}/${openWorld.staticTasks.summary.requested} inFlight=${openWorld.artifacts.inFlight} commitsPending=${openWorld.sceneCommits.pending} runtimeEntities=${openWorld.runtimeEntities.active}`;
+		}
 		const staticOverview = overview.static;
 		const installText = diagnostics
 			? ` installPending=${diagnostics.runtime.pendingStaticCommitInstallCount} installed=${diagnostics.runtime.installedStaticDrawUnits}/${diagnostics.runtime.sourceStaticDrawUnits}`
 			: "";
 		return `${overview.status} static ${staticOverview.committed}/${staticOverview.requested} resolving=${staticOverview.resolving} baking=${staticOverview.baking}${installText}`;
+	}
+
+	function findOpenWorldDiagnostics(
+		diagnostics: RuntimeDiagnosticsReport,
+	): OpenWorldStreamingDiagnosticsSnapshot | null {
+		const domain = diagnostics.domains.find(
+			(candidate) => candidate.kind === "open-world-streaming",
+		);
+		return (domain?.summary ??
+			null) as OpenWorldStreamingDiagnosticsSnapshot | null;
 	}
 
 	function startRuntimeFrameLoop(): void {

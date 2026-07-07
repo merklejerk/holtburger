@@ -44,7 +44,10 @@ import {
 } from "./contracts";
 import type { DynamicVisualRecipeResolutionPayload } from "./visual-recipe-resolver";
 import { createLayerOwnerKeyId } from "../static/layer-owners";
-import { DynamicAnimationPlayer } from "./dynamic-animation-player";
+import {
+	DynamicAnimationPlayer,
+	type DynamicAnimationCatchUpTruncation,
+} from "./dynamic-animation-player";
 import { DynamicEntityStore } from "./dynamic-entity-store";
 import {
 	shouldUpdateDynamicAnimationForCadence,
@@ -70,6 +73,10 @@ type DynamicEntityTextureDomain = VisualTextureDomain;
 
 export interface DynamicEntityControllerOptions {
 	readonly onResourcesChanged?: () => void;
+	/** Emits capped hook replay events so callers can aggregate diagnostics without parsing logs. */
+	readonly onAnimationCatchUpTruncated?: (
+		truncation: DynamicAnimationCatchUpTruncation,
+	) => void;
 	readonly placementTracker?: DynamicPlacementTracker;
 	readonly store?: DynamicEntityStore;
 }
@@ -98,7 +105,7 @@ export interface RuntimeDynamicSpawnRequest {
 }
 
 export class DynamicEntityController {
-	readonly #animationPlayer = new DynamicAnimationPlayer();
+	readonly #animationPlayer: DynamicAnimationPlayer;
 	readonly #lastAnimationUpdateAtSecondsByEntityId = new Map<
 		DynamicEntityId,
 		number
@@ -109,6 +116,9 @@ export class DynamicEntityController {
 	#nextRuntimeSpawnOrdinal = 1;
 
 	constructor(options: DynamicEntityControllerOptions = {}) {
+		this.#animationPlayer = new DynamicAnimationPlayer({
+			onCatchUpTruncated: options.onAnimationCatchUpTruncated,
+		});
 		this.#placementTracker =
 			options.placementTracker ?? new DynamicPlacementTracker();
 		this.#store = options.store ?? new DynamicEntityStore();

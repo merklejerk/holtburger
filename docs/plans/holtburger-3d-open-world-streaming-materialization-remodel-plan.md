@@ -1131,15 +1131,60 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Inspect dynamic animation catch-up call sites and static-authored dynamic publication timing.
-- [ ] Implement the chosen static-authored animation start policy.
-- [ ] Replace normal-path per-entity catch-up warning spam with replacement-native aggregate diagnostics.
-- [ ] Add runtime entity diagnostic counters/timings for prep, bake, commits, non-renderable outcomes, and animation catch-up decisions.
-- [ ] Add texture residency memory and page lifecycle diagnostics to the replacement diagnostics contract.
-- [ ] Migrate replacement harness readiness to native open-world diagnostics.
-- [ ] Migrate replacement harness summary output to native open-world diagnostics.
-- [ ] Keep any legacy runtime report projection at the harness or runtime edge and record its deletion trigger.
-- [ ] Run focused dynamic/runtime-entity tests.
+- [x] Inspect dynamic animation catch-up call sites and static-authored dynamic publication timing.
+- [x] Implement the chosen static-authored animation start policy.
+- [x] Replace normal-path per-entity catch-up warning spam with replacement-native aggregate diagnostics.
+- [x] Add runtime entity diagnostic counters/timings for prep, bake, commits, non-renderable outcomes, and animation catch-up decisions.
+- [x] Add texture residency memory and page lifecycle diagnostics to the replacement diagnostics contract.
+- [x] Migrate replacement harness readiness to native open-world diagnostics.
+- [x] Migrate replacement harness summary output to native open-world diagnostics.
+- [x] Keep any legacy runtime report projection at the harness or runtime edge and record its deletion trigger.
+- [x] Run focused dynamic/runtime-entity tests.
+- [x] Run replacement `da55` generated-scenery, env-cell, and all-domain harness cases.
+- [x] Run app checks.
+- [x] Update cleanup targets.
+
+Decisions and course corrections:
+
+- Static-authored dynamic animation hook catch-up is now reported through replacement-native runtime entity diagnostics instead of normal-path `console.warn` spam. The shared animation player still caps replay to the latest authored hook frames; it now emits structured truncation facts to callers. The replacement runtime entity system aggregates catch-up count, dropped hook frames, and recent samples.
+- Async replacement dynamic prep now publishes renderer instance commits at the latest known frame time instead of always using `0`. That removes a fake timestamp from the replacement publication contract.
+- Runtime entity diagnostics now report prep starts, recipe resolutions, bake successes/failures, skipped visuals, recent prep failures, dynamic resource commits, dynamic instance commits, max resources/instances per commit, and animation catch-up truncation. This is direct replacement truth, not a clone of legacy dynamic prep diagnostics.
+- Texture residency diagnostics now report entry count, virtual page count by lifecycle state, in-flight page builds, and byte-estimate status. Exact approximate bytes remain intentionally `null` with reason `page-size-not-yet-canonical`; this is more honest than projecting legacy texture atlas byte totals onto replacement virtual pages before renderer page sizing is canonical.
+- Browser harness readiness now uses direct `open-world-streaming` diagnostics for replacement runs: static task requested/completed/failed, artifact in-flight count, and scene commit pending count. Legacy runtime counters remain only as the outer `ClientRuntime` report shim for legacy/historical comparison.
+- Browser harness summaries and trace samples now expose `openWorldStreaming` directly for replacement runs while keeping `staticCoordinator`, `staticCommitInstall`, and `textureAtlas` summaries as legacy-edge fields.
+- Phase 13A replacement harness results:
+  - `da55` terrain plus generated scenery: ready in 12.6 s, 16 long tasks, 304 ms max long task, 1.9 s total long-task time, max renderer frame delta 319 ms, max renderer handler 8.4 ms, max runtime handler 1.4 ms. Native diagnostics reported 44 active static-authored runtime entities, 4 non-renderable entities, 40 successful bakes, 0 prep failures, 33 catch-up truncations, 40 dropped hook frames, 69 resident virtual texture pages, 305 claims, and no page builds in flight.
+  - `da55` terrain plus env-cells: ready in 11.5 s, 6 long tasks, 577 ms max long task, 1.2 s total long-task time, max renderer frame delta 590 ms, max renderer handler 14.7 ms, max runtime handler 0.1 ms. Native diagnostics reported no runtime entities, 20 resident virtual texture pages, 365 claims, and no page builds in flight.
+  - `da55` all domains: ready in 22.8 s, 20 long tasks, 561 ms max long task, 3.1 s total long-task time, max renderer frame delta 577 ms, max renderer handler 43.3 ms, max runtime handler 3.1 ms. Native diagnostics reported 45 applied scene commits, 121 resident virtual texture pages, 772 claims, 44 active static-authored runtime entities, 40 successful bakes, 13 catch-up truncations, 13 dropped hook frames, and no prep failures.
+- Resteer: Phase 13A made the pipeline honest and removed the console-warning trap, but it did not make `da55` all-domain cutover-safe. The next bottleneck is now clear: static materialization and texture placement still create pre-ready long tasks, and dynamic instance/resource publication is unbudgeted enough to create hundreds of commits during generated-scenery activation. Insert Phase 13B before browser cutover.
+- Verification: `npm run check`, `npm run lint:ts`, focused `npm run test:ts -- src/lib/dynamic/dynamic-animation-player.test.ts src/lib/systems/open-world-streaming/runtime-entities/runtime-entity-system.test.ts src/lib/systems/open-world-streaming/texture-residency/claims/texture-claim-registry.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/object-visual-texture-placement-plan.test.ts src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts`, and the three Phase 13A replacement harness cases above. `npm run format:check` still fails on pre-existing untouched files: `src/lib/host/runtime-host.ts`, `src/lib/systems/open-world-streaming/composition/client-runtime-adapter.ts`, `src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts`, and `src/lib/systems/open-world-streaming/runtime-entities/renderer-commits.ts`.
+
+### Phase 13B: Static Materialization Frame Budget Resteer
+
+Deliverables:
+
+- Reduce replacement `da55` all-domain pre-ready long tasks before browser cutover.
+- Add or apply frame-budgeted publication for expensive replacement work that still runs on the main thread, prioritizing object texture placement/page settlement, static commit application, and dynamic resource/instance publication churn.
+- Keep replacement-native diagnostics as the steering source; do not use legacy static coordinator, static commit install, texture atlas, or dynamic prep snapshots as targets.
+- Use the Phase 13A native diagnostics to identify whether the next remediation belongs in static task scheduling, texture residency/page build batching, dynamic commit coalescing, renderer publication, or a deliberately deferred visual publication policy.
+- Re-run `da55` generated-scenery, env-cell, and all-domain replacement harness cases after remediation.
+
+Acceptance criteria:
+
+- `da55` all-domain replacement run materially improves max long-task duration and max frame delta from the Phase 13A run, or produces a narrower native-diagnostics bottleneck that justifies a smaller follow-up before cutover.
+- Generated-scenery dynamic activation remains console-warning clean and continues to expose catch-up behavior through native diagnostics.
+- Texture residency diagnostics continue to expose page lifecycle, claim, and byte-estimate status directly.
+- Browser harness readiness and summary continue to use direct `open-world-streaming` diagnostics for replacement runs.
+- No new legacy-shaped diagnostics, timing fields, DTO projections, or architecture-preserving tests are added inside replacement internals.
+- `npm run check`, `npm run lint:ts`, focused tests, and the Phase 13B harness matrix pass.
+
+Task checklist:
+
+- [ ] Analyze Phase 13A native stage timings and renderer/runtime frame diagnostics.
+- [ ] Decide whether the first remediation target is texture placement/page settlement, static commit application, dynamic commit coalescing, or renderer publication.
+- [ ] Implement the smallest direct replacement remediation that reduces main-thread burst pressure.
+- [ ] Add or update native diagnostics needed to prove the remediation.
+- [ ] Run focused tests for the touched replacement systems.
 - [ ] Run replacement `da55` generated-scenery, env-cell, and all-domain harness cases.
 - [ ] Run app checks.
 - [ ] Update cleanup targets.
@@ -1152,7 +1197,7 @@ Decisions and course corrections:
 
 Deliverables:
 
-- Start only after Phase 13A is complete.
+- Start only after Phase 13B is complete.
 - Switch `createBrowserRuntime(...)` to the replacement composition.
 - Keep the harness switch only if needed for one short verification window.
 - Remove obsolete UI assumptions about legacy static coordinator diagnostics and migrate surviving panels to replacement-native diagnostics.

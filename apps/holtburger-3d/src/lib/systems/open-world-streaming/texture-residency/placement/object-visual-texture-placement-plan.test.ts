@@ -44,6 +44,12 @@ describe("buildObjectVisualTexturePlacementPlan", () => {
 			entryCount: 1,
 			pageBuildsInFlight: 0,
 			pageCount: 1,
+			pageCountByState: {
+				building: 0,
+				planned: 0,
+				reclaimable: 0,
+				resident: 1,
+			},
 		});
 		expect(
 			plan.placementSnapshot.itemIdsByBindingId.get(intent.bindingId),

@@ -306,6 +306,7 @@ async function writeDiagnosticsOutput(diagnostics, outputPath, errorMessage) {
 
 function createDiagnosticsSummary(diagnostics, outputPath, errorMessage) {
 	const domains = Array.isArray(diagnostics.domains) ? diagnostics.domains : [];
+	const openWorldStreaming = findOpenWorldStreamingDomain(domains);
 	const staticCoordinator = domains.find(
 		(domain) => domain.kind === "static-coordinator",
 	);
@@ -320,6 +321,7 @@ function createDiagnosticsSummary(diagnostics, outputPath, errorMessage) {
 		errorMessage: errorMessage ?? null,
 		harnessScenario: diagnostics.harnessScenario ?? null,
 		harnessFrameDiagnostics: diagnostics.harnessFrameDiagnostics ?? null,
+		openWorldStreaming: openWorldStreaming?.summary ?? null,
 		outputPath,
 		runtime: diagnostics.runtime,
 		runtimePipeline: diagnostics.runtimePipeline ?? null,
@@ -810,6 +812,7 @@ function createHarnessScenarioStep({
 	targetSelection,
 }) {
 	const domains = Array.isArray(diagnostics.domains) ? diagnostics.domains : [];
+	const openWorldStreaming = findOpenWorldStreamingDomain(domains);
 	const staticCoordinator = domains.find(
 		(domain) => domain.kind === "static-coordinator",
 	);
@@ -824,6 +827,7 @@ function createHarnessScenarioStep({
 		envCellId: envCellId ?? null,
 		landblockId,
 		lod,
+		openWorldStreaming: openWorldStreaming?.summary ?? null,
 		runtime: diagnostics.runtime,
 		staticCoordinator: staticCoordinator?.summary ?? null,
 		staticOverview: overview.static,
@@ -879,6 +883,7 @@ async function samplePipelineTrace(client, samples, workerEventsByKey) {
 	}
 
 	const domains = Array.isArray(diagnostics.domains) ? diagnostics.domains : [];
+	const openWorldStreaming = findOpenWorldStreamingDomain(domains);
 	const staticCoordinator = domains.find(
 		(domain) => domain.kind === "static-coordinator",
 	);
@@ -914,6 +919,7 @@ async function samplePipelineTrace(client, samples, workerEventsByKey) {
 		})),
 		renderer: diagnostics.runtime,
 		harnessFrameDiagnostics: diagnostics.harnessFrameDiagnostics ?? null,
+		openWorldStreaming: openWorldStreaming?.summary ?? null,
 		sourceResolutions: sourceResolutions.map((resolution) => ({
 			ageMs: resolution.ageMs,
 			landblockHex: resolution.landblockHex,
@@ -956,6 +962,10 @@ async function samplePipelineTrace(client, samples, workerEventsByKey) {
 			}
 		}
 	}
+}
+
+function findOpenWorldStreamingDomain(domains) {
+	return domains.find((domain) => domain.kind === "open-world-streaming");
 }
 
 function waitForChromeDevToolsUrl(child) {

@@ -62,7 +62,10 @@ import type {
 import type { RuntimeDynamicSpawnRequest } from "../../../dynamic/dynamic-entity-controller";
 import type { DynamicVisualBaker } from "../../../dynamic/visual-baker";
 import type { DynamicVisualRecipeResolver } from "../../../dynamic/visual-recipe-resolver";
-import { OpenWorldRuntimeEntitySystem } from "../runtime-entities/runtime-entity-system";
+import {
+	OpenWorldRuntimeEntitySystem,
+	type OpenWorldRuntimeEntityDiagnosticsSnapshot,
+} from "../runtime-entities/runtime-entity-system";
 
 export interface OpenWorldStreamingControllerOptions {
 	readonly assetReader: PreparedAssetReader;
@@ -412,6 +415,9 @@ export class OpenWorldStreamingController {
 		const dynamicSnapshot =
 			this.#runtimeEntities?.createSnapshot() ??
 			createEmptyDynamicRuntimeSnapshot();
+		const runtimeEntityDiagnostics =
+			this.#runtimeEntities?.createDiagnosticsSnapshot() ??
+			createEmptyRuntimeEntityDiagnosticsSnapshot();
 		return {
 			artifacts: {
 				inFlight:
@@ -472,13 +478,25 @@ export class OpenWorldStreamingController {
 				),
 			},
 			textureResidency: {
+				byteEstimate: {
+					approximateBytes: null,
+					reason: "page-size-not-yet-canonical",
+				},
 				bucketCount: textureSnapshot.bucketCount,
 				claimCount: textureSnapshot.claimCount,
+				entryCount: textureSnapshot.entryCount,
+				pages: {
+					...textureSnapshot.pageCountByState,
+					total: textureSnapshot.pageCount,
+				},
 				pageBuildsInFlight: textureSnapshot.pageBuildsInFlight,
 			},
 			runtimeEntities: {
 				active: dynamicSnapshot.activeEntityCount,
+				animation: runtimeEntityDiagnostics.animation,
+				commits: runtimeEntityDiagnostics.commits,
 				nonRenderable: dynamicSnapshot.nonRenderableEntityCount,
+				prep: runtimeEntityDiagnostics.prep,
 				runtimeAuthored: dynamicSnapshot.runtimeSpawnCount,
 				staticAuthored: dynamicSnapshot.staticAuthoredCount,
 			},
@@ -1401,6 +1419,31 @@ function createStaticTaskDiagnostics(input: {
 			requested: input.requested,
 			totalApplyMs: sum(input.recent.map((timing) => timing.applyMs)),
 			totalDurationMs: sum(input.recent.map((timing) => timing.durationMs)),
+		},
+	};
+}
+
+function createEmptyRuntimeEntityDiagnosticsSnapshot(): OpenWorldRuntimeEntityDiagnosticsSnapshot {
+	return {
+		animation: {
+			catchUpTruncationCount: 0,
+			droppedHookFrameCount: 0,
+			recentCatchUpTruncations: [],
+		},
+		commits: {
+			dynamicInstanceCommitCount: 0,
+			dynamicResourceCommitCount: 0,
+			maxInstancesPerCommit: 0,
+			maxResourcesPerCommit: 0,
+		},
+		prep: {
+			bakeFailureCount: 0,
+			bakeSuccessCount: 0,
+			failed: 0,
+			recipeResolvedCount: 0,
+			recentFailures: [],
+			skippedVisualCount: 0,
+			started: 0,
 		},
 	};
 }

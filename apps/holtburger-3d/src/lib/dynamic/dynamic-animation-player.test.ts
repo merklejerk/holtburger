@@ -368,36 +368,41 @@ describe("dynamic animation player", () => {
 	});
 
 	it("caps crossed hook catch-up to the latest eight authored frames", () => {
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		try {
-			const player = new DynamicAnimationPlayer();
-			const payload = createAnimationPayload({
+		const truncations: unknown[] = [];
+		const player = new DynamicAnimationPlayer({
+			onCatchUpTruncated: (truncation) => truncations.push(truncation),
+		});
+		const payload = createAnimationPayload({
+			frameCount: 20,
+			hooksByFrame: Array.from({ length: 20 }, (_, frameIndex) =>
+				frameIndex === 0
+					? []
+					: [createUnsupportedHook({ hookType: 200 + frameIndex })],
+			),
+			objectPositionFrames: [],
+			partCount: 1,
+		});
+
+		const started = player.update(createRecord({ payload }), 0);
+		const hitched = player.update(
+			started.record,
+			12 / DYNAMIC_ANIMATION_FRAME_RATE_FPS,
+		);
+
+		expect(truncations).toEqual([
+			expect.objectContaining({
+				dispatchedFrameCount: 8,
+				droppedFrameCount: 4,
 				frameCount: 20,
-				hooksByFrame: Array.from({ length: 20 }, (_, frameIndex) =>
-					frameIndex === 0
-						? []
-						: [createUnsupportedHook({ hookType: 200 + frameIndex })],
-				),
-				objectPositionFrames: [],
-				partCount: 1,
-			});
-
-			const started = player.update(createRecord({ payload }), 0);
-			const hitched = player.update(
-				started.record,
-				12 / DYNAMIC_ANIMATION_FRAME_RATE_FPS,
-			);
-
-			expect(hitched.record.animation.playback).toMatchObject({
-				lastDispatchedHookFrame: {
-					frameIndex: 12,
-					loopIteration: 0,
-				},
-				status: "playing",
-			});
-		} finally {
-			warn.mockRestore();
-		}
+			}),
+		]);
+		expect(hitched.record.animation.playback).toMatchObject({
+			lastDispatchedHookFrame: {
+				frameIndex: 12,
+				loopIteration: 0,
+			},
+			status: "playing",
+		});
 	});
 
 	it("advances the hook cursor across hookless crossed frames", () => {

@@ -1,6 +1,10 @@
 import type { PreparedAssetReader } from "../../../assets/contracts";
 import type { DynamicEntityId } from "../../../dynamic/contracts";
-import { DynamicEntityController, type RuntimeDynamicSpawnRequest } from "../../../dynamic/dynamic-entity-controller";
+import {
+	DynamicEntityController,
+	type RuntimeDynamicSpawnRequest,
+} from "../../../dynamic/dynamic-entity-controller";
+import type { DynamicAnimationCatchUpTruncation } from "../../../dynamic/dynamic-animation-player";
 import { createDynamicVisualBakeSourceGeometry } from "../../../dynamic/visual-bake-sidecars";
 import {
 	createDynamicVisualTexturePlanning,
@@ -14,7 +18,10 @@ import type {
 	TexturePlacementUpdate,
 } from "../../../renderer/types";
 import type { DynamicEntityRenderResidence } from "../../../dynamic/contracts";
-import { MaterializationOwnerRegistry, type MaterializationOwnerToken } from "../owners/owner-registry";
+import {
+	MaterializationOwnerRegistry,
+	type MaterializationOwnerToken,
+} from "../owners/owner-registry";
 import {
 	createRuntimeEntityMaterializationOwner,
 	createStaticAuthoredDynamicMaterializationOwner,
@@ -51,9 +58,41 @@ interface DynamicPrepRequest {
 	readonly token: MaterializationOwnerToken;
 }
 
+export interface OpenWorldRuntimeEntityDiagnosticsSnapshot {
+	readonly animation: {
+		readonly catchUpTruncationCount: number;
+		readonly droppedHookFrameCount: number;
+		readonly recentCatchUpTruncations: readonly DynamicAnimationCatchUpTruncation[];
+	};
+	readonly commits: {
+		readonly dynamicInstanceCommitCount: number;
+		readonly dynamicResourceCommitCount: number;
+		readonly maxInstancesPerCommit: number;
+		readonly maxResourcesPerCommit: number;
+	};
+	readonly prep: {
+		readonly bakeFailureCount: number;
+		readonly bakeSuccessCount: number;
+		readonly failed: number;
+		readonly recipeResolvedCount: number;
+		readonly skippedVisualCount: number;
+		readonly started: number;
+		readonly recentFailures: readonly OpenWorldRuntimeEntityPrepFailure[];
+	};
+}
+
+interface OpenWorldRuntimeEntityPrepFailure {
+	readonly entityId: string;
+	readonly message: string;
+	readonly ownerId: string;
+	readonly phase: "bake" | "prep";
+}
+
+const RECENT_RUNTIME_ENTITY_DIAGNOSTICS_LIMIT = 20;
+
 export class OpenWorldRuntimeEntitySystem {
 	readonly #assetReader: PreparedAssetReader;
-	readonly #controller = new DynamicEntityController();
+	readonly #controller: DynamicEntityController;
 	readonly #createDynamicVisualBaker: () => DynamicVisualBaker;
 	readonly #createDynamicVisualRecipeResolver: () => DynamicVisualRecipeResolver;
 	readonly #objectVisualAtlasBuilder: OpenWorldObjectVisualAtlasBuilder;
@@ -66,11 +105,31 @@ export class OpenWorldRuntimeEntitySystem {
 	readonly #textureClaims: OpenWorldTextureClaimRegistry;
 	#dynamicVisualBaker: DynamicVisualBaker | null = null;
 	#dynamicVisualRecipeResolver: DynamicVisualRecipeResolver | null = null;
+	#lastFrameTimeSeconds = 0;
 	#rendererRevision = 0;
 	readonly #committedResourceIds = new Set<string>();
+	#animationCatchUpTruncationCount = 0;
+	#bakeFailureCount = 0;
+	#bakeSuccessCount = 0;
+	#dynamicInstanceCommitCount = 0;
+	#dynamicResourceCommitCount = 0;
+	#droppedHookFrameCount = 0;
+	#maxInstancesPerCommit = 0;
+	#maxResourcesPerCommit = 0;
+	#prepFailureCount = 0;
+	#prepStartedCount = 0;
+	#recipeResolvedCount = 0;
+	#skippedVisualCount = 0;
+	readonly #recentCatchUpTruncations: DynamicAnimationCatchUpTruncation[] = [];
+	readonly #recentPrepFailures: OpenWorldRuntimeEntityPrepFailure[] = [];
 
 	constructor(options: OpenWorldRuntimeEntitySystemOptions) {
 		this.#assetReader = options.assetReader;
+		this.#controller = new DynamicEntityController({
+			onAnimationCatchUpTruncated: (truncation) => {
+				this.#recordAnimationCatchUpTruncation(truncation);
+			},
+		});
 		this.#createDynamicVisualBaker = options.createDynamicVisualBaker;
 		this.#createDynamicVisualRecipeResolver =
 			options.createDynamicVisualRecipeResolver;
@@ -152,6 +211,7 @@ export class OpenWorldRuntimeEntitySystem {
 	}
 
 	tick(frameTimeSeconds: number): void {
+		this.#lastFrameTimeSeconds = frameTimeSeconds;
 		if (this.#controller.tick(frameTimeSeconds)) {
 			this.#commitRendererInstances(frameTimeSeconds);
 		}
@@ -161,13 +221,40 @@ export class OpenWorldRuntimeEntitySystem {
 		return this.#controller.createSnapshot();
 	}
 
+	createDiagnosticsSnapshot(): OpenWorldRuntimeEntityDiagnosticsSnapshot {
+		return {
+			animation: {
+				catchUpTruncationCount: this.#animationCatchUpTruncationCount,
+				droppedHookFrameCount: this.#droppedHookFrameCount,
+				recentCatchUpTruncations: [...this.#recentCatchUpTruncations],
+			},
+			commits: {
+				dynamicInstanceCommitCount: this.#dynamicInstanceCommitCount,
+				dynamicResourceCommitCount: this.#dynamicResourceCommitCount,
+				maxInstancesPerCommit: this.#maxInstancesPerCommit,
+				maxResourcesPerCommit: this.#maxResourcesPerCommit,
+			},
+			prep: {
+				bakeFailureCount: this.#bakeFailureCount,
+				bakeSuccessCount: this.#bakeSuccessCount,
+				failed: this.#prepFailureCount,
+				recipeResolvedCount: this.#recipeResolvedCount,
+				recentFailures: [...this.#recentPrepFailures],
+				skippedVisualCount: this.#skippedVisualCount,
+				started: this.#prepStartedCount,
+			},
+		};
+	}
+
 	async #prepareEntity(request: DynamicPrepRequest): Promise<void> {
+		this.#prepStartedCount += 1;
 		try {
 			const recipeRequest =
 				this.#controller.createRuntimeVisualRecipeRequest(request.entityId) ??
 				this.#controller
 					.createStaticAuthoredVisualRecipeRequests(
-						this.#staticParentOwnerIdForChild(request.ownerId) ?? request.ownerId,
+						this.#staticParentOwnerIdForChild(request.ownerId) ??
+							request.ownerId,
 					)
 					.find((candidate) => candidate.entityId === request.entityId);
 			if (!recipeRequest) {
@@ -180,6 +267,7 @@ export class OpenWorldRuntimeEntitySystem {
 			if (!this.#isCurrent(request)) {
 				return;
 			}
+			this.#recipeResolvedCount += 1;
 			if (!this.#controller.applyResolvedDynamicRecipe(recipe)) {
 				return;
 			}
@@ -218,35 +306,52 @@ export class OpenWorldRuntimeEntitySystem {
 			}
 			const product = result.product;
 			if (product?.kind === "baked") {
+				this.#bakeSuccessCount += 1;
 				this.#controller.applyBakedDynamicVisual(product.resource);
 			} else if (product?.kind === "skipped") {
+				this.#skippedVisualCount += 1;
 				this.#controller.skipDynamicVisual(product.entityId, product.reason);
 			} else {
+				this.#bakeFailureCount += 1;
+				this.#prepFailureCount += 1;
 				for (const failure of result.failures) {
-					console.warn("[holtburger-3d][open-world-dynamic-bake]", failure);
+					this.#recordPrepFailure({
+						entityId: request.entityId,
+						message: failure.message,
+						ownerId: request.ownerId,
+						phase: "bake",
+					});
 				}
 				this.#controller.skipDynamicVisual(request.entityId, {
 					kind: "invalid-recipe",
 					message: result.failures.map((failure) => failure.message).join("; "),
 				});
 			}
-			this.#commitRendererState(0);
+			this.#commitRendererState(this.#lastFrameTimeSeconds);
 		} catch (error) {
 			if (!this.#isCurrent(request)) {
 				return;
 			}
-			console.warn("[holtburger-3d][open-world-dynamic-prep]", error);
+			this.#prepFailureCount += 1;
+			this.#recordPrepFailure({
+				entityId: request.entityId,
+				message: error instanceof Error ? error.message : String(error),
+				ownerId: request.ownerId,
+				phase: "prep",
+			});
 			this.#controller.skipDynamicVisual(request.entityId, {
 				kind: "invalid-recipe",
 				message: error instanceof Error ? error.message : String(error),
 			});
-			this.#commitRendererState(0);
+			this.#commitRendererState(this.#lastFrameTimeSeconds);
 		}
 	}
 
 	#commitRendererState(frameTimeSeconds: number): void {
 		const snapshot = this.#controller.createSnapshot();
-		const resources = snapshot.records.flatMap(createDynamicRendererVisualResources);
+		const resources = snapshot.records.flatMap(
+			createDynamicRendererVisualResources,
+		);
 		const nextResourceIds = new Set(
 			resources.map((resource) => resource.resourceId),
 		);
@@ -258,6 +363,11 @@ export class OpenWorldRuntimeEntitySystem {
 			removedVisualResourceIds,
 			revision: this.#nextRendererRevision(),
 		});
+		this.#dynamicResourceCommitCount += 1;
+		this.#maxResourcesPerCommit = Math.max(
+			this.#maxResourcesPerCommit,
+			resources.length,
+		);
 		this.#committedResourceIds.clear();
 		for (const resourceId of nextResourceIds) {
 			this.#committedResourceIds.add(resourceId);
@@ -266,13 +376,39 @@ export class OpenWorldRuntimeEntitySystem {
 	}
 
 	#commitRendererInstances(frameTimeSeconds: number): void {
+		const instances = this.#controller
+			.createSnapshot()
+			.records.flatMap(createDynamicRendererInstances);
 		this.#renderer.commitDynamicInstances({
 			frameTimeSeconds,
-			instances: this.#controller
-				.createSnapshot()
-				.records.flatMap(createDynamicRendererInstances),
+			instances,
 			revision: this.#nextRendererRevision(),
 		});
+		this.#dynamicInstanceCommitCount += 1;
+		this.#maxInstancesPerCommit = Math.max(
+			this.#maxInstancesPerCommit,
+			instances.length,
+		);
+	}
+
+	#recordAnimationCatchUpTruncation(
+		truncation: DynamicAnimationCatchUpTruncation,
+	): void {
+		this.#animationCatchUpTruncationCount += 1;
+		this.#droppedHookFrameCount += truncation.droppedFrameCount;
+		pushRecent(
+			this.#recentCatchUpTruncations,
+			truncation,
+			RECENT_RUNTIME_ENTITY_DIAGNOSTICS_LIMIT,
+		);
+	}
+
+	#recordPrepFailure(failure: OpenWorldRuntimeEntityPrepFailure): void {
+		pushRecent(
+			this.#recentPrepFailures,
+			failure,
+			RECENT_RUNTIME_ENTITY_DIAGNOSTICS_LIMIT,
+		);
 	}
 
 	#addStaticChildOwner(
@@ -288,7 +424,8 @@ export class OpenWorldRuntimeEntitySystem {
 	#staticParentOwnerIdForChild(
 		childOwnerId: MaterializationOwnerId,
 	): MaterializationOwnerId | null {
-		for (const [parentOwnerId, childOwnerIds] of this.#staticChildOwnerIdsByParentId) {
+		for (const [parentOwnerId, childOwnerIds] of this
+			.#staticChildOwnerIdsByParentId) {
 			if (childOwnerIds.has(childOwnerId)) {
 				return parentOwnerId;
 			}
@@ -304,7 +441,8 @@ export class OpenWorldRuntimeEntitySystem {
 	}
 
 	#requireRecipeResolver(): DynamicVisualRecipeResolver {
-		this.#dynamicVisualRecipeResolver ??= this.#createDynamicVisualRecipeResolver();
+		this.#dynamicVisualRecipeResolver ??=
+			this.#createDynamicVisualRecipeResolver();
 		return this.#dynamicVisualRecipeResolver;
 	}
 
@@ -316,5 +454,12 @@ export class OpenWorldRuntimeEntitySystem {
 	#nextRendererRevision(): number {
 		this.#rendererRevision += 1;
 		return this.#rendererRevision;
+	}
+}
+
+function pushRecent<T>(items: T[], item: T, limit: number): void {
+	items.push(item);
+	if (items.length > limit) {
+		items.splice(0, items.length - limit);
 	}
 }

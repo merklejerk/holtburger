@@ -160,6 +160,12 @@ describe("OpenWorldTextureClaimRegistry", () => {
 			entryCount: 2,
 			pageBuildsInFlight: 1,
 			pageCount: 2,
+			pageCountByState: {
+				building: 1,
+				planned: 1,
+				reclaimable: 0,
+				resident: 0,
+			},
 		});
 	});
 

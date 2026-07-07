@@ -36,10 +36,12 @@ import {
 } from "../textures/placement";
 import {
 	createMaterialTextureSourceKey,
+	createPaletteReplacementRecipeKey,
 	createTextureBindingId,
 	createTextureKey,
 	createTextureOwnerId,
 	createTexturePageClass,
+	type MaterialTextureSourceKey,
 	type TextureBindingId,
 	type TextureKey,
 	type TextureOwnerId,
@@ -300,23 +302,25 @@ function createDynamicTexturePlacementRequirement(options: {
 		"runtime-authored-none"
 			? "runtime-object-material"
 			: options.recipe.visual.materialPolicy.detailRolePolicy.domain;
+	const placementPolicy = createDynamicTexturePlacementPolicy({
+		recipe: options.recipe,
+		textureDomain,
+	});
+	const purpose = classifyTextureUsagePurpose(
+		options.requirement.dataUse,
+		textureDomain,
+	);
 	return {
 		policy: {
 			affinityKey: createDynamicTextureAffinityKey(options.recipe),
 			kind: "dynamic",
-			placementPolicy: createDynamicTexturePlacementPolicy({
-				recipe: options.recipe,
-				textureDomain,
-			}),
+			placementPolicy,
 			textureDomain,
 		},
 		requirement: {
 			bindingId: createTextureBindingId({
 				resourceId: `dynamic:${options.recipe.entityId}`,
-				role: classifyTextureUsagePurpose(
-					options.requirement.dataUse,
-					textureDomain,
-				),
+				role: purpose,
 				slot: options.requirement.dynamicTextureSourceId,
 			}),
 			samplingPolicy: options.requirement.samplingPolicy,
@@ -325,12 +329,10 @@ function createDynamicTexturePlacementRequirement(options: {
 				kind: "material-texture-data-use",
 				samplingPolicy: options.requirement.samplingPolicy,
 			},
-			...createRuntimeAuthoredDynamicTextureIdentity({
+			...createDynamicMaterialTextureIdentity({
 				dataUse: options.requirement.dataUse,
-				purpose: classifyTextureUsagePurpose(
-					options.requirement.dataUse,
-					textureDomain,
-				),
+				placementPolicy,
+				purpose,
 				resourceId: resourceIdForDynamicTextureIdentity(options.recipe),
 				samplingPolicy: options.requirement.samplingPolicy,
 				textureDomain,
@@ -372,8 +374,9 @@ function createDynamicTexturePlacementPolicy(options: {
 	};
 }
 
-function createRuntimeAuthoredDynamicTextureIdentity(options: {
+function createDynamicMaterialTextureIdentity(options: {
 	readonly dataUse: MaterialTextureDataUseIdentity;
+	readonly placementPolicy: TexturePlacementPolicy;
 	readonly purpose: TextureUsagePurpose;
 	readonly resourceId: string;
 	readonly samplingPolicy?: PendingDynamicEntityTextureRequirement["samplingPolicy"];
@@ -413,16 +416,56 @@ function createRuntimeAuthoredDynamicTextureIdentity(options: {
 		textureKey: createTextureKey({
 			outputFormat,
 			sampleClass: pagePolicy.sampleClass,
-			sourceKey: createMaterialTextureSourceKey({
-				kind: "runtime",
-				sourceId: `dynamic:${options.dynamicTextureSourceId}`,
-				usage:
-					options.dataUse.kind === "prepared-palette-texture-use"
-						? "palette-rgba"
-						: options.dataUse.usage,
+			sourceKey: createDynamicMaterialTextureSourceKey({
+				dataUse: options.dataUse,
+				dynamicTextureSourceId: options.dynamicTextureSourceId,
+				placementPolicy: options.placementPolicy,
 			}),
 		}),
 	};
+}
+
+function createDynamicMaterialTextureSourceKey(options: {
+	readonly dataUse: MaterialTextureDataUseIdentity;
+	readonly dynamicTextureSourceId: string;
+	readonly placementPolicy: TexturePlacementPolicy;
+}): MaterialTextureSourceKey {
+	if (options.placementPolicy.sourceStability.kind === "content-stable") {
+		return createContentStableDynamicMaterialTextureSourceKey(options.dataUse);
+	}
+
+	return createMaterialTextureSourceKey({
+		kind: "runtime",
+		sourceId: `dynamic:${options.dynamicTextureSourceId}`,
+		usage:
+			options.dataUse.kind === "prepared-palette-texture-use"
+				? "palette-rgba"
+				: options.dataUse.usage,
+	});
+}
+
+function createContentStableDynamicMaterialTextureSourceKey(
+	dataUse: MaterialTextureDataUseIdentity,
+): MaterialTextureSourceKey {
+	if (dataUse.kind !== "prepared-palette-texture-use") {
+		return createMaterialTextureSourceKey({
+			kind: "render-surface",
+			renderSurfaceId: dataUse.renderSurface.renderSurfaceId,
+			usage: dataUse.usage,
+		});
+	}
+	if (dataUse.replacements.length > 0) {
+		throw new Error(
+			"Content-stable dynamic palette textures with replacement ranges require palette replacement fingerprints before canonical texture identity can be assigned.",
+		);
+	}
+	return createMaterialTextureSourceKey({
+		basePaletteId: dataUse.palette.paletteId,
+		domain: dataUse.domain,
+		kind: "palette",
+		replacementRecipeKey: createPaletteReplacementRecipeKey([]),
+		usage: dataUse.usage,
+	});
 }
 
 function resourceIdForDynamicTextureIdentity(

@@ -33,11 +33,12 @@ describe("buildObjectVisualTexturePlacementPlan", () => {
 			filteringMode: "nearest",
 			intents: [intent],
 			ownerId: ownerId("static-layer:outdoor-generated-scenery:0xda55ffff"),
-			pageBuilder: new DirectOpenWorldTexturePageBuilder(),
+			pageBuilder: new DirectOpenWorldTexturePageBuilder({ assetReader }),
 			textureClaims,
 		});
 
 		expect(assetReader.requests).toEqual([
+			createPreparedTextureHostKey(createTextureUse()),
 			createPreparedTextureHostKey(createTextureUse()),
 		]);
 		expect(textureClaims.createSnapshot()).toMatchObject({
@@ -96,6 +97,8 @@ describe("buildObjectVisualTexturePlacementPlan", () => {
 			"texture-placement-reservation-page",
 			"texture-placement-reservation",
 			"texture-page-build",
+			"texture-page-source-preparation",
+			"texture-page-materialization",
 		]);
 	});
 
@@ -107,7 +110,7 @@ describe("buildObjectVisualTexturePlacementPlan", () => {
 			filteringMode: "nearest",
 			intents: [createIntent({ itemNumber: 1 })],
 			ownerId: ownerId("static-layer:outdoor-generated-scenery:0xda55ffff"),
-			pageBuilder: new DirectOpenWorldTexturePageBuilder(),
+			pageBuilder: new DirectOpenWorldTexturePageBuilder({ assetReader }),
 			textureClaims,
 		});
 
@@ -121,7 +124,7 @@ describe("buildObjectVisualTexturePlacementPlan", () => {
 			filteringMode: "nearest",
 			intents: [secondIntent],
 			ownerId: ownerId("static-layer:outdoor-generated-scenery:0xda56ffff"),
-			pageBuilder: new DirectOpenWorldTexturePageBuilder(),
+			pageBuilder: new DirectOpenWorldTexturePageBuilder({ assetReader }),
 			textureClaims,
 		});
 
@@ -155,7 +158,7 @@ describe("buildObjectVisualTexturePlacementPlan", () => {
 			filteringMode: "nearest",
 			intents: [firstIntent, secondIntent],
 			ownerId: ownerId("static-layer:env-cell-system:0xda55ffff"),
-			pageBuilder: new DirectOpenWorldTexturePageBuilder(),
+			pageBuilder: new DirectOpenWorldTexturePageBuilder({ assetReader }),
 			textureClaims,
 		});
 

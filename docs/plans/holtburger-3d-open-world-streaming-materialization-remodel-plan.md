@@ -41,7 +41,7 @@ The desired model is not a small tuning pass. It changes ownership, scheduling, 
 
 ### Primary Reference Sources
 
-- `docs/plans/holtburger-3d-open-world-streaming-stutter-investigation-worksheet.md`
+- [Open-world streaming stutter investigation worksheet](./holtburger-3d-open-world-streaming-stutter-investigation-worksheet.md)
 - `apps/holtburger-3d/src/lib/browser/create-browser-runtime.ts`
 - `apps/holtburger-3d/src/lib/runtime/client-runtime.ts`
 - `apps/holtburger-3d/src/lib/static/coordinator/static-coordinator.ts`
@@ -71,7 +71,7 @@ The desired model is not a small tuning pass. It changes ownership, scheduling, 
 ## North Stars
 
 - **Open-world streaming should feel continuous.** Radius-1 loading must not create browser blackouts, and the design should scale toward larger radii by keeping browser-owned work small instead of batching bigger bursts.
-- **The worksheet remains the design guardrail.** `docs/plans/holtburger-3d-open-world-streaming-stutter-investigation-worksheet.md` is historical evidence, but its replacement model requirements remain the target shape for texture policy, worker ownership, commit ordering, and readiness. Before changing texture placement, material coverage, page builds, renderer readiness, or diagnostics, reread the relevant worksheet requirement and record any deliberate deviation in this plan.
+- **The worksheet remains the design guardrail.** The [open-world streaming stutter investigation worksheet](./holtburger-3d-open-world-streaming-stutter-investigation-worksheet.md) is historical evidence, but its replacement model requirements remain the target shape for texture policy, worker ownership, commit ordering, and readiness. Every phase after Phase 18 must be checked against the worksheet's root-cause direction before implementation starts. Before changing texture placement, material coverage, page builds, renderer readiness, or diagnostics, reread the relevant worksheet requirement and record any deliberate deviation in this plan.
 - **Budgeting is a measured fallback, not an architecture.** Worker wall time is not a frame-stutter bug by itself. Add frame budgets only for proven browser-main-loop CPU offenders that cannot be deleted, moved off-thread, or collapsed into a smaller direct contract.
 - **The future 3D client is the real target.** Browser mode is the proving ground, but shared app-local abstractions should be judged against a traditional replacement client with richer rendering, motion, visibility, animation, and interaction needs.
 - **Ownership should be boring and explicit.** Currentness, eviction, and cleanup should start from owner membership and owner-indexed resources, not broad revision folklore or reverse-materialization DTOs.
@@ -2110,28 +2110,68 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Define a worker placement-layout protocol from source identities, page policy, and replacement entry ids.
-- [ ] Change Phase 21 page-build requests to carry source identities plus immutable layout facts instead of prepared pixel buffers.
-- [ ] Move source preparation for both layout and page materialization into worker paths, or prove and document a narrow exception.
-- [ ] Move layout search into the placement-layout artifact boundary.
-- [ ] Move guttered blits and page pixel materialization into the page-materialization artifact boundary.
-- [ ] Validate transferable ownership for page pixels and worker-prepared sources.
-- [ ] Remove `DirectOpenWorldTexturePageBuilder` from production composition; keep it only for tests or delete it if worker fixtures cover the same behavior.
-- [ ] Add stale page-build result rejection tests.
-- [ ] Run browser harness cases that previously exposed texture placement long-task pressure.
+- [x] Define a worker placement-layout protocol from source identities, page policy, and replacement entry ids.
+- [x] Change Phase 21 page-build requests to carry source identities plus immutable layout facts instead of prepared pixel buffers.
+- [x] Move source preparation for both layout and page materialization into worker paths, or prove and document a narrow exception.
+- [x] Move layout search into the placement-layout artifact boundary.
+- [x] Move guttered blits and page pixel materialization into the page-materialization artifact boundary.
+- [x] Validate transferable ownership for page pixels and worker-prepared sources.
+- [x] Remove `DirectOpenWorldTexturePageBuilder` from production composition; keep it only for tests or delete it if worker fixtures cover the same behavior.
+- [x] Add stale page-build result rejection tests.
+- [x] Run browser harness cases that previously exposed texture placement long-task pressure.
 
 Decisions and course corrections:
 
 - Phase 22 dry-run found that the earlier wording was too monolithic. Phase 21 made bake depend on placement/layout facts before page pixels exist. If Phase 22 moves layout search into a single page-build worker call, bake either waits for page pixels again or the worker must retain hidden mutable layout/source state between layout and page materialization. Both options violate the design doc north star to migrate direct contracts and keep replacement-owned reservation/currentness honest.
 - Resteer: Phase 22 must produce a worker-owned layout artifact first, then worker-owned page materialization. Main-thread reservation remains the authority that creates replacement pages and reservation tokens after layout facts return. Page-build requests must then use source identities and layout rects, not prepared pixel buffers, so workers can materialize pages without reading mutable placement state.
+- Phase 22 completed the worker-owned split without preserving the old packing worker shape. Browser composition now creates `WorkerPoolOpenWorldObjectVisualAtlasBuilder` from `object-visual-atlas.worker.ts` and `WorkerPoolOpenWorldTexturePageBuilder` from `page-build.worker.ts`; direct builders remain test and worker-internal implementations, not production composition fallbacks.
+- Page-build requests now carry `dataUse` source identities plus immutable rect/gutter facts. Prepared pixel buffers no longer cross from caller-side placement into page-build requests, which keeps the replacement contract honest and avoids borrowing mutable main-thread cache state.
+- Source preparation now lives in `texture-residency/material-texture-source.ts` and is used by both the layout worker implementation and the page materialization worker implementation. This duplicates worker-side preparation today because layout needs source dimensions before reservation and page materialization needs source pixels after reservation. That is a deliberate stateless boundary, not a hidden worker cache.
+- Replacement diagnostics now include worker-side `texture-page-source-preparation` and `texture-page-materialization` timings in addition to the caller-observed `texture-page-build` wait. The browser-facing timing is still allowed to include queue/wait/delivery; the worker substages are the source of truth for expensive pixel work.
+- Current debt carried into Phase 23: static and runtime artifact runners still await `buildReservedMaterialTexturePages(...)` before returning their scene/runtime commits. Worker-owned page pixels are real, but texture commit publication is not yet independently scheduled from scene publication.
+- Current debt carried into Phase 24/25: material coverage and readiness diagnostics still reuse broad static material coverage summaries from `static-object-material-coverage.ts`. Those summaries are diagnostic-only and do not yet distinguish every replacement readiness/fidelity state that the worksheet target model needs.
+- Verification: `npm run check`, `npm run lint`, focused `npm run test:ts -- --run src/lib/systems/open-world-streaming/texture-residency/placement/material-texture-placement-plan.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/object-visual-texture-placement-plan.test.ts src/lib/systems/open-world-streaming/texture-residency/page-build/page-build.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/object-visual-atlas-worker-client.test.ts src/lib/systems/open-world-streaming/static-layers/terrain/terrain-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/outdoor-objects/outdoor-object-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/env-cells/env-cell-artifact-runner.test.ts src/lib/systems/open-world-streaming/runtime-entities/runtime-entity-system.test.ts src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts`, and `npm run harness:browser` passed.
 
-### Phase 23: Loose Texture Readiness And Commit Ordering
+### Phase 23: Texture Commit Stream Decoupling
 
 Deliverables:
 
-- Make visual/scene publication tolerant of pending texture bindings.
-- Replace object visual recipe publication throws for unplaced/pending bindings with dependency publication and non-renderable readiness.
+- Split texture page-build settlement from static/runtime scene commit completion in the production controller path.
+- Replace the current runner-local `await buildReservedMaterialTexturePages(...)` sequencing in terrain, outdoor-object, env-cell, and runtime-entity paths with a controller-owned texture task stream.
+- Keep reservation/currentness authority in the main replacement state: page-build workers receive immutable requests and reservation tokens; the controller settles late worker outputs only if the owner and token are still current.
+- Publish texture commits through the existing renderer texture commit adapter independently from scene/runtime commits.
+- Add native diagnostics for queued, running, accepted, stale, failed, and committed texture tasks by owner id and bucket key.
+
+Acceptance criteria:
+
+- Static layer runners can return scene commits while related page-build tasks are still running.
+- Texture commits can arrive before or after scene/visual commits without violating owner currentness.
+- Releasing or replacing an owner before a page-build worker returns causes stale texture output to be rejected without renderer mutation.
+- The controller diagnostics can answer which owner/bucket/page is waiting, running, stale, failed, or committed without consulting legacy runtime categories.
+- Tests cover terrain, static object, env-cell, and runtime entity texture tasks settling after scene commit publication.
+
+Task checklist:
+
+- [ ] Audit current `buildReservedMaterialTexturePages(...)` call sites in `static-layers/terrain`, `static-layers/outdoor-objects`, `static-layers/env-cells`, and `runtime-entities`.
+- [ ] Add a controller-owned texture task queue/settlement reducer under `texture-residency/page-build` or `texture-residency/commits`, not inside domain runners.
+- [ ] Change domain runners to return bake-facing placement plus page-build requests as commit dependencies, rather than completed texture commits.
+- [ ] Add owner/currentness checks for late texture task output.
+- [ ] Add stale output tests by evicting/replacing an owner while page-build work is in flight.
+- [ ] Add diagnostics for task state, stale rejection, page-build failure, and accepted commit publication.
+- [ ] Run focused texture residency and static layer tests before browser harness.
+
+Decisions and course corrections:
+
+- Pending.
+
+### Phase 24: Renderer Readiness Gates And Late Texture Binding
+
+Deliverables:
+
+- Make visual/scene publication tolerant of pending texture bindings now that Phase 23 can publish texture commits independently.
+- Replace object visual recipe publication throws for unplaced/pending bindings with explicit dependency records and non-renderable readiness.
 - Change object-material renderer prep so pending, failed, and missing required bindings skip draw/resource preparation without throwing in the render hot path.
+- Add a late-binding path so an already-installed visual resource becomes renderable after its texture commit arrives, without rebaking its geometry.
 - Add upstream diagnostics for missing-not-in-flight texture bindings as replacement pipeline bugs.
 
 Acceptance criteria:
@@ -2144,43 +2184,41 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Update `createStaticObjectVisualRecipeInstallPublication(...)` and related bake/publication paths to publish dependency facts without requiring resident texture pages.
-- [ ] Update renderer object-material prep to return a skippable result for missing/failed bindings.
-- [ ] Add upstream readiness diagnostics for missing-not-in-flight bindings.
-- [ ] Add ordering tests for static object visual resources.
-- [ ] Add ordering tests for terrain draw units.
-- [ ] Verify no renderer hot-path warning spam is introduced.
+- [ ] Audit texture-readiness assumptions in `renderer-commits.ts`, static object visual recipe publication, terrain commit application, and renderer texture placement lookup.
+- [ ] Define a replacement-native visual texture dependency state: pending, resident, failed, missing-not-in-flight.
+- [ ] Update static object visual publication to carry dependency facts without requiring resident pages.
+- [ ] Update terrain draw-unit publication to tolerate pending terrain texture bindings without falling back to flat-color success.
+- [ ] Update renderer prep/apply ports to install non-renderable resources and promote them when texture commits arrive.
+- [ ] Add focused ordering tests for object materials and terrain.
+- [ ] Verify browser harness output does not contain renderer hot-path warning spam.
 
 Decisions and course corrections:
 
 - Pending.
 
-### Phase 24: Replacement Material Coverage And Diagnostics Truth
+### Phase 25: Replacement Material Coverage And Readiness Diagnostics
 
 Deliverables:
 
 - Rebuild material coverage and texture readiness diagnostics around replacement concepts rather than legacy parity.
 - Keep `static-object-material-coverage.ts` diagnostic-only. It must not gate behavior or hide unsupported/deferred material cases as if they were handled.
 - Replace remaining `console.warn` triage paths in static object partition skipping and recipe publication with structured replacement-native diagnostics or artifact failure records.
-- Report material support, skipped partitions, dependency readiness, page-build failures, and unsupported fidelity separately.
+- Report material support, skipped partitions, dependency readiness, page-build failures, unsupported fidelity, and terrain texture role readiness separately.
+- Migrate surviving harness/UI diagnostics directly to replacement reports; any old report shape must be a named edge shim or deleted.
 
 Acceptance criteria:
 
-- Coverage reports clearly distinguish:
-  - renderable material support;
-  - intentionally deferred fidelity;
-  - unsupported source/material facts;
-  - pending texture readiness;
-  - failed texture/page-build dependencies;
-  - pipeline bugs such as missing-not-in-flight bindings.
+- Coverage reports clearly distinguish renderable material support, intentionally deferred fidelity, unsupported source/material facts, pending texture readiness, failed texture/page-build dependencies, and pipeline bugs such as missing-not-in-flight bindings.
 - No diagnostic consumer requires old static coordinator, static commit install, or texture manager categories.
 - Deferred/unsupported material coverage cannot be mistaken for successful rendering in harness summaries.
 - Static object skipped partitions and recipe publication failures are visible through replacement diagnostics without console-only evidence.
+- Terrain-specific texture roles such as color/detail/mask are reported as role readiness within the replacement texture residency model, not as bespoke terrain success/failure categories.
 
 Task checklist:
 
 - [ ] Audit every consumer of `StaticMaterialCoverageReport`.
-- [ ] Define replacement-native material coverage/readiness issue records.
+- [ ] Audit `static-object-material-coverage.ts`, `object-visual-material-planner.ts`, and `static-object-renderability.ts` against the worksheet target model.
+- [ ] Define replacement-native material coverage/readiness issue records under `open-world-streaming/diagnostics` or a static-layer-local diagnostics module.
 - [ ] Replace static object skipped-partition console warnings.
 - [ ] Replace static object visual recipe publication console warnings.
 - [ ] Update harness summaries to show replacement material/readiness truth without legacy-shaped projections.
@@ -2190,17 +2228,20 @@ Decisions and course corrections:
 
 - Pending.
 
-### Phase 25: Material Fidelity Expansion
+### Phase 26: Material Fidelity Backlog And First Fidelity Slice
 
 Deliverables:
 
-- After policy, readiness, and diagnostics are honest, expand material rendering support deliberately by material family.
+- Build a measured material fidelity backlog from direct replacement coverage/readiness reports, not from legacy visual fallback categories alone.
 - Use `apps/holtburger-3d/src/lib/visual/object-visual-material-planner.ts` and `apps/holtburger-3d/src/lib/static/objects/bake/static-object-renderability.ts` as the current support boundary.
-- Classify detail overlays, additive, inverse alpha, unusual translucent, unsupported surface flags, missing palette/render-surface, and terrain shader capacity issues as explicit fidelity work items.
-- Implement one material family or shader capability at a time with fixtures that prove visual/resource behavior rather than preserving old fallback categories.
+- Classify detail overlays, additive, inverse alpha, unusual translucent, unsupported surface flags, missing palette/render-surface, terrain shader capacity issues, and terrain role/page capacity issues as explicit fidelity work items.
+- Implement the first selected material family or shader capability with fixtures that prove visual/resource behavior rather than preserving old fallback categories.
+- Keep unsupported material cases explicit and visible after the first slice.
 
 Acceptance criteria:
 
+- The backlog names source-data evidence, renderer/shader behavior, bake/material table implications, diagnostics impact, and harness scenario for each candidate fidelity family.
+- The selected first slice has focused fixture evidence and at least one browser harness scenario that can reveal regressions.
 - Each newly supported material case has a source-data reason, renderer/shader behavior, bake/material table representation, and coverage diagnostic update.
 - Unsupported material cases remain explicit and visible.
 - No material fidelity change adds compatibility shims or bends replacement texture policy.
@@ -2208,7 +2249,7 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Create a material fidelity backlog from current `fallbackReasonCounts` and source fixtures.
+- [ ] Create a material fidelity backlog from current coverage/readiness reports and representative source fixtures.
 - [ ] Pick the first fidelity family based on measured coverage impact and implementation risk.
 - [ ] Add focused fixture/harness evidence for that family.
 - [ ] Update material planner, renderability, bake output, renderer shader/material payloads, and diagnostics as needed.
@@ -2218,11 +2259,69 @@ Decisions and course corrections:
 
 - Pending.
 
-### Phase 26: Texture Remodel Cleanup And Verification
+### Phase 27: Terrain Texture Role And Flat-Color Audit
 
 Deliverables:
 
-- Delete dead placement fields, ignored policy paths, obsolete tests, stale diagnostic categories, and temporary shims introduced by Phases 19-25.
+- Investigate the current terrain flat-color symptom through the replacement texture/readiness model rather than adding terrain-special rendering paths.
+- Audit terrain color/detail/mask role placement, page commit application, draw-unit material payloads, and renderer shader inputs against the same direct contract used by object materials.
+- Remove or collapse any terrain-only workaround that duplicates shared material placement/page-build semantics.
+- Add diagnostics that explain terrain role readiness and shader input readiness without preserving old terrain-specific synthetic commit assumptions.
+
+Acceptance criteria:
+
+- Terrain no longer renders as flat color when the source data and page commits provide the required color/detail/mask roles.
+- If terrain still cannot render full fidelity for a source-data reason, diagnostics identify the missing role, page, sampler, shader input, or unsupported fidelity case.
+- Terrain role buckets remain an application of replacement texture policy; they are not a separate terrain materialization pipeline.
+- Tests cover terrain role readiness and renderer input binding at the replacement contract level.
+- Browser terrain and all-domain harness runs prove terrain material visibility without reintroducing main-thread texture placement bursts.
+
+Task checklist:
+
+- [ ] Trace terrain texture intents from `terrain-geometry-baker` through reservation, page build, texture commit, terrain scene commit, and renderer material inputs.
+- [ ] Compare terrain role buckets with object material color/detail/index/palette buckets to identify real role differences versus accidental bespoke handling.
+- [ ] Add or migrate terrain readiness diagnostics for color/detail/mask roles.
+- [ ] Fix the smallest shared-contract gap that explains flat-color terrain.
+- [ ] Delete any terrain-only workaround made obsolete by the shared fix.
+- [ ] Run terrain-focused and all-domain browser harness cases.
+
+Decisions and course corrections:
+
+- Pending.
+
+### Phase 28: Resteering Checkpoint 6 - Material/Readiness Model Review
+
+Deliverables:
+
+- Dry-run Phase 29 against the current code after texture stream decoupling, renderer readiness, diagnostics, fidelity, and terrain-role work.
+- Recheck all touched code against the worksheet north star before cleanup begins.
+- Classify every remaining compatibility projection as direct migration, deletion, legacy-edge shim, or durable adapter.
+- Decide whether any remaining material/fidelity work blocks cleanup or should be explicitly deferred as future rendering scope.
+
+Acceptance criteria:
+
+- The plan records whether the remaining issues are architecture debt, material fidelity backlog, renderer capability backlog, diagnostics debt, or acceptable future scope.
+- No phase proceeds with a legacy-shaped diagnostic or test expectation inside replacement internals.
+- Every remaining shim has a deletion task or is promoted to a durable adapter with a real post-cutover boundary reason.
+- The cleanup phase is specific enough to execute without guessing.
+
+Task checklist:
+
+- [ ] Dry-run cleanup and final verification from the current code tree.
+- [ ] Audit imports for direct builder production usage, ignored placement fields, and diagnostic compatibility projections.
+- [ ] Audit tests for legacy bucket/readiness/diagnostic parity assumptions.
+- [ ] Update Phase 29 cleanup tasks with concrete file/symbol targets.
+- [ ] Record any explicitly deferred material fidelity work with evidence and owner.
+
+Decisions and course corrections:
+
+- Pending.
+
+### Phase 29: Texture Remodel Cleanup And Verification
+
+Deliverables:
+
+- Delete dead placement fields, ignored policy paths, obsolete tests, stale diagnostic categories, and temporary shims introduced by Phases 19-28.
 - Re-run dead-code, type, lint, unit, and browser harness verification.
 - Update this plan and the worksheet cross-reference with final evidence and any remaining intentionally deferred material fidelity.
 
@@ -2231,12 +2330,16 @@ Acceptance criteria:
 - No replacement code references ignored legacy placement policy fields.
 - No replacement tests preserve old bucket/lifetime assumptions.
 - No production shim survives unless it crosses a durable host, worker, renderer, diagnostics export, or harness boundary without preserving retired concepts.
+- Direct builders remain test-only or worker-internal; production browser composition uses worker-owned layout/page-build boundaries.
 - `npm run check`, `npm run lint`, `npm run lint:dead`, focused texture/material tests, and browser harness scenarios pass.
 - The plan records every remaining deferral with a reason and evidence required to reactivate it.
 
 Task checklist:
 
 - [ ] Delete temporary migration shims and old compatibility fields.
+- [ ] Delete or unexport direct builder APIs that are no longer needed outside tests/worker entrypoints.
+- [ ] Delete any terrain-only workaround replaced by the shared readiness/material policy.
+- [ ] Delete diagnostic compatibility projections that preserve old material/texture categories.
 - [ ] Run `npm run check`.
 - [ ] Run `npm run lint`.
 - [ ] Run `npm run lint:dead`.

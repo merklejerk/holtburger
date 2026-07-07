@@ -8,6 +8,8 @@ import type {
 	StaticLandblockSceneLodSourceResolver,
 	StaticResolver,
 } from "../../../static/contracts";
+import type { OpenWorldTexturePageBuilder } from "../texture-residency/page-build/worker-client";
+import type { OpenWorldObjectVisualAtlasBuilder } from "../texture-residency/placement/object-visual-atlas-builder";
 
 /** Durable browser/host boundary consumed by the replacement system. */
 export interface OpenWorldStreamingBoundaryAdapters {
@@ -31,7 +33,9 @@ interface OpenWorldStreamingRendererAdapter {
 interface OpenWorldStreamingWorkerAdapters {
 	readonly createDynamicVisualBaker: () => DynamicVisualBaker;
 	readonly createDynamicVisualRecipeResolver: () => DynamicVisualRecipeResolver;
+	readonly createObjectVisualAtlasBuilder: () => OpenWorldObjectVisualAtlasBuilder;
 	readonly createStaticBaker: () => StaticBaker;
 	readonly createStaticSourceResolver: () => StaticResolver &
 		StaticLandblockSceneLodSourceResolver;
+	readonly createTexturePageBuilder: () => OpenWorldTexturePageBuilder;
 }

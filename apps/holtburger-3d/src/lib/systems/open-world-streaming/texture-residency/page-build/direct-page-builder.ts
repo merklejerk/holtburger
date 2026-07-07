@@ -1,16 +1,26 @@
+import type { PreparedAssetReader } from "../../../../assets/contracts";
+import type { TexturePackingPixelSource } from "../../../../textures/packing/protocol";
+import type { OpenWorldStreamingStaticTaskStageTiming } from "../../diagnostics/contracts";
+import { prepareMaterialTexturePackingSource } from "../material-texture-source";
 import type {
 	OpenWorldTexturePageBuildFormat,
 	OpenWorldTexturePageBuildInput,
 	OpenWorldTexturePageBuildOutput,
-	OpenWorldTexturePageBuildPixelSource,
 } from "./protocol";
 import type { OpenWorldTexturePageBuilder } from "./worker-client";
 
-/** Main-thread page materializer used until Phase 22 moves page builds behind workers. */
+/** Direct page materializer used by tests and by the page-build worker implementation. */
 export class DirectOpenWorldTexturePageBuilder implements OpenWorldTexturePageBuilder {
+	readonly #assetReader: PreparedAssetReader;
+
+	constructor(options: { readonly assetReader: PreparedAssetReader }) {
+		this.#assetReader = options.assetReader;
+	}
+
 	async buildPage(
 		input: OpenWorldTexturePageBuildInput,
 	): Promise<OpenWorldTexturePageBuildOutput> {
+		const timing = new TexturePageBuildStageTimer();
 		if (input.entries.length === 0) {
 			return {
 				bucketKey: input.bucketKey,
@@ -19,36 +29,58 @@ export class DirectOpenWorldTexturePageBuilder implements OpenWorldTexturePageBu
 				pageId: input.pageId,
 				reason: "page build request had no entries",
 				reservationToken: input.reservationToken,
+				stageTimings: timing.createSnapshot(),
 			};
 		}
 
-		const pixels = createBlankPagePixels({
-			format: input.page.format,
-			height: input.page.height,
-			width: input.page.width,
-		});
-		for (const entry of input.entries) {
-			assertSourceMatchesPageFormat(input.jobId, entry.entryId, {
-				pageFormat: input.page.format,
-				source: entry.source,
-			});
-			assertRectMatchesSource(input.jobId, entry.entryId, {
-				rect: entry.rect,
-				source: entry.source,
-			});
-			blitTexturePageBuildSourceWithGutter({
-				destination: pixels,
-				destinationWidth: input.page.width,
-				edgeMode: entry.gutterEdgeMode,
-				format: input.page.format,
-				gutterPixels: entry.gutterPixels,
-				source: entry.source.pixels,
-				sourceHeight: entry.source.height,
-				sourceWidth: entry.source.width,
-				x: entry.rect[0],
-				y: entry.rect[1],
-			});
-		}
+		const preparedEntries = await timing.measure(
+			"texture-page-source-preparation",
+			() =>
+				Promise.all(
+					input.entries.map(async (entry) => ({
+						entry,
+						source: await prepareMaterialTexturePackingSource({
+							assetReader: this.#assetReader,
+							dataUse: entry.dataUse,
+						}),
+					})),
+				),
+			input.entries.length,
+		);
+		const pixels = timing.measureSync(
+			"texture-page-materialization",
+			() => {
+				const pagePixels = createBlankPagePixels({
+					format: input.page.format,
+					height: input.page.height,
+					width: input.page.width,
+				});
+				for (const { entry, source } of preparedEntries) {
+					assertSourceMatchesPageFormat(input.jobId, entry.entryId, {
+						pageFormat: input.page.format,
+						source,
+					});
+					assertRectMatchesSource(input.jobId, entry.entryId, {
+						rect: entry.rect,
+						source,
+					});
+					blitTexturePageBuildSourceWithGutter({
+						destination: pagePixels,
+						destinationWidth: input.page.width,
+						edgeMode: entry.gutterEdgeMode,
+						format: input.page.format,
+						gutterPixels: entry.gutterPixels,
+						source: source.pixels,
+						sourceHeight: source.height,
+						sourceWidth: source.width,
+						x: entry.rect[0],
+						y: entry.rect[1],
+					});
+				}
+				return pagePixels;
+			},
+			input.entries.length,
+		);
 
 		return {
 			bucketKey: input.bucketKey,
@@ -67,6 +99,7 @@ export class DirectOpenWorldTexturePageBuilder implements OpenWorldTexturePageBu
 				})),
 			),
 			reservationToken: input.reservationToken,
+			stageTimings: timing.createSnapshot(),
 		};
 	}
 }
@@ -135,7 +168,7 @@ function assertSourceMatchesPageFormat(
 	entryId: string,
 	options: {
 		readonly pageFormat: OpenWorldTexturePageBuildFormat;
-		readonly source: OpenWorldTexturePageBuildPixelSource;
+		readonly source: TexturePackingPixelSource;
 	},
 ): void {
 	if (options.source.format !== options.pageFormat) {
@@ -159,7 +192,7 @@ function assertRectMatchesSource(
 	entryId: string,
 	options: {
 		readonly rect: readonly [number, number, number, number];
-		readonly source: OpenWorldTexturePageBuildPixelSource;
+		readonly source: TexturePackingPixelSource;
 	},
 ): void {
 	if (
@@ -199,4 +232,50 @@ function resolveGutterSourceCoordinate(
 
 function clamp(value: number, min: number, max: number): number {
 	return Math.min(Math.max(value, min), max);
+}
+
+class TexturePageBuildStageTimer {
+	readonly #timings: OpenWorldStreamingStaticTaskStageTiming[] = [];
+
+	async measure<T>(
+		stage: OpenWorldStreamingStaticTaskStageTiming["stage"],
+		createValue: () => Promise<T>,
+		itemCount?: number,
+	): Promise<T> {
+		const startedAtMs = nowMs();
+		try {
+			return await createValue();
+		} finally {
+			this.#timings.push({
+				durationMs: nowMs() - startedAtMs,
+				...(itemCount === undefined ? {} : { itemCount }),
+				stage,
+			});
+		}
+	}
+
+	measureSync<T>(
+		stage: OpenWorldStreamingStaticTaskStageTiming["stage"],
+		createValue: () => T,
+		itemCount?: number,
+	): T {
+		const startedAtMs = nowMs();
+		try {
+			return createValue();
+		} finally {
+			this.#timings.push({
+				durationMs: nowMs() - startedAtMs,
+				...(itemCount === undefined ? {} : { itemCount }),
+				stage,
+			});
+		}
+	}
+
+	createSnapshot(): readonly OpenWorldStreamingStaticTaskStageTiming[] {
+		return this.#timings;
+	}
+}
+
+function nowMs(): number {
+	return typeof performance !== "undefined" ? performance.now() : Date.now();
 }

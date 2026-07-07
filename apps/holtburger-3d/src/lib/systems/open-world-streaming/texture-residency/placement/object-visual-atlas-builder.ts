@@ -1,10 +1,4 @@
 import type { PreparedAssetReader } from "../../../../assets/contracts";
-import {
-	createPreparedPaletteTextureHostKey,
-	createPreparedTextureHostKey,
-	prepareDirectMaterialTextureSource,
-	type DirectMaterialTextureSource,
-} from "../../../../assets/preparation/prepared-texture-source";
 import { planAtlasLayout } from "../../../../textures/packing/atlas-layout";
 import type {
 	MaterialTextureDataUseIdentity,
@@ -16,6 +10,7 @@ import type {
 	TexturePackingPixelSource,
 } from "../../../../textures/packing/protocol";
 import type { OpenWorldStreamingStaticTaskStageTiming } from "../../diagnostics/contracts";
+import { prepareMaterialTexturePackingSource } from "../material-texture-source";
 import type { OpenWorldTextureEntryId } from "../claims/texture-claim-registry";
 
 const TEXTURE_SOURCE_PREPARATION_BATCH_SIZE = 8;
@@ -64,8 +59,6 @@ export interface OpenWorldObjectVisualAtlasPlacementOutput {
 	readonly pages: readonly OpenWorldObjectVisualAtlasPlacementPage[];
 	/** Packed rects keyed by replacement entry id. */
 	readonly rects: readonly OpenWorldObjectVisualAtlasPlacementRect[];
-	/** Prepared source pixels retained only for the page-build request product. */
-	readonly sources: readonly OpenWorldObjectVisualAtlasPreparedSource[];
 	/** Worker- or direct-builder-local stage timings. */
 	readonly stageTimings: readonly OpenWorldStreamingStaticTaskStageTiming[];
 }
@@ -86,13 +79,6 @@ export interface OpenWorldObjectVisualAtlasPlacementRect {
 	readonly pageId: string;
 	/** Content rect inside the page, excluding gutters. */
 	readonly rect: readonly [number, number, number, number];
-}
-
-export interface OpenWorldObjectVisualAtlasPreparedSource {
-	/** Shared logical texture entry and source identity used by page-build requests. */
-	readonly entry: OpenWorldObjectVisualAtlasBuildEntry;
-	/** Prepared pixels for the page-build request product. */
-	readonly source: TexturePackingPixelSource;
 }
 
 export interface OpenWorldObjectVisualAtlasBuilder {
@@ -162,7 +148,6 @@ async function planObjectVisualAtlasPlacement(options: {
 	return {
 		pages: layout.pages,
 		rects: layout.rects,
-		sources,
 		stageTimings: timings,
 	};
 }
@@ -195,13 +180,13 @@ async function prepareTexturePackingSources(options: {
 				batch.map((entry) =>
 					measureStage(
 						options.timings,
-						"texture-source-preparation-chunk",
-						async () => ({
-							entry,
-							source: await prepareTexturePackingSource({
-								assetReader: options.assetReader,
-								dataUse: entry.dataUse,
-							}),
+							"texture-source-preparation-chunk",
+							async () => ({
+								entry,
+								source: await prepareMaterialTexturePackingSource({
+									assetReader: options.assetReader,
+									dataUse: entry.dataUse,
+								}),
 						}),
 						1,
 					),
@@ -223,61 +208,12 @@ async function prepareTexturePackingSources(options: {
 	return results;
 }
 
-async function prepareTexturePackingSource(options: {
-	readonly assetReader: PreparedAssetReader;
-	readonly dataUse: MaterialTextureDataUseIdentity;
-}): Promise<TexturePackingPixelSource> {
-	const prepared = await options.assetReader.requestPreparedAsset(
-		createMaterialTextureHostKey(options.dataUse),
-	);
-	return createTexturePackingPixelSource(
-		prepareDirectMaterialTextureSource(prepared, options.dataUse),
-	);
-}
-
-function createMaterialTextureHostKey(source: MaterialTextureDataUseIdentity) {
-	if (source.kind === "prepared-palette-texture-use") {
-		return createPreparedPaletteTextureHostKey(source);
-	}
-
-	return createPreparedTextureHostKey(source);
-}
-
-function createTexturePackingPixelSource(
-	source: DirectMaterialTextureSource,
-): TexturePackingPixelSource {
-	if (source.kind === "direct-rgba-texture-source") {
-		return {
-			format: "rgba8",
-			height: source.height,
-			kind: "texture-packing-pixel-source",
-			pixels: source.pixels,
-			width: source.width,
-		};
-	}
-
-	if (source.kind === "direct-index-texture-source") {
-		return {
-			format: source.usage === "index8" ? "r8" : "rg8",
-			height: source.height,
-			kind: "texture-packing-pixel-source",
-			pixels: source.indices,
-			width: source.width,
-		};
-	}
-
-	return {
-		format: "rgba8",
-		height: source.height,
-		kind: "texture-packing-pixel-source",
-		pixels: source.pixels,
-		width: source.width,
-	};
-}
-
 function planTexturePlacementLayout(options: {
 	readonly input: OpenWorldObjectVisualAtlasBuildInput;
-	readonly sources: readonly OpenWorldObjectVisualAtlasPreparedSource[];
+	readonly sources: readonly {
+		readonly entry: OpenWorldObjectVisualAtlasBuildEntry;
+		readonly source: TexturePackingPixelSource;
+	}[];
 }): {
 	readonly pages: readonly OpenWorldObjectVisualAtlasPlacementPage[];
 	readonly rects: readonly OpenWorldObjectVisualAtlasPlacementRect[];

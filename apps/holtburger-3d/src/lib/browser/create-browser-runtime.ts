@@ -10,6 +10,14 @@ import { createBrowserRuntimeHost } from "../host/runtime-host";
 import { createWebgl2Renderer } from "../renderer/webgl2/webgl2-renderer";
 import type { ClientRuntime } from "../runtime/client-runtime";
 import { createOpenWorldStreamingClientRuntime } from "../systems/open-world-streaming";
+import type { OpenWorldObjectVisualAtlasBuilder } from "../systems/open-world-streaming/texture-residency/placement/object-visual-atlas-builder";
+import { WorkerPoolOpenWorldObjectVisualAtlasBuilder } from "../systems/open-world-streaming/texture-residency/placement/object-visual-atlas-worker-client";
+import type { OpenWorldObjectVisualAtlasWorkerPort } from "../systems/open-world-streaming/texture-residency/placement/object-visual-atlas-worker-protocol";
+import type { OpenWorldTexturePageBuildWorkerPort } from "../systems/open-world-streaming/texture-residency/page-build/protocol";
+import {
+	WorkerPoolOpenWorldTexturePageBuilder,
+	type OpenWorldTexturePageBuilder,
+} from "../systems/open-world-streaming/texture-residency/page-build/worker-client";
 import type { OpenWorldStreamingStaticPublicationMode } from "../systems/open-world-streaming/composition/open-world-streaming-controller";
 import type { OpenWorldStreamingBoundaryAdapters } from "../systems/open-world-streaming/adapters";
 import type {
@@ -26,6 +34,8 @@ const DEFAULT_STATIC_RESOLVER_WORKER_COUNT = 2;
 const DEFAULT_STATIC_BAKER_WORKER_COUNT = 2;
 const DEFAULT_DYNAMIC_VISUAL_RECIPE_RESOLVER_WORKER_COUNT = 1;
 const DEFAULT_DYNAMIC_VISUAL_BAKER_WORKER_COUNT = 1;
+const DEFAULT_TEXTURE_LAYOUT_WORKER_COUNT = 2;
+const DEFAULT_TEXTURE_PAGE_BUILD_WORKER_COUNT = 2;
 
 export interface CreateBrowserRuntimeOptions {
 	readonly staticPublicationMode?: OpenWorldStreamingStaticPublicationMode;
@@ -72,12 +82,24 @@ function createOpenWorldStreamingBoundaryAdapters(options: {
 					options.assetService,
 					DEFAULT_DYNAMIC_VISUAL_RECIPE_RESOLVER_WORKER_COUNT,
 				),
+			createObjectVisualAtlasBuilder: () =>
+				createWorkerObjectVisualAtlasBuilder(
+					options.assetService,
+					DEFAULT_TEXTURE_LAYOUT_WORKER_COUNT,
+					{ host: options.host },
+				),
 			createStaticBaker: () =>
 				createWorkerStaticBaker(DEFAULT_STATIC_BAKER_WORKER_COUNT),
 			createStaticSourceResolver: () =>
 				createWorkerStaticResolver(
 					options.assetService,
 					DEFAULT_STATIC_RESOLVER_WORKER_COUNT,
+					{ host: options.host },
+				),
+			createTexturePageBuilder: () =>
+				createWorkerTexturePageBuilder(
+					options.assetService,
+					DEFAULT_TEXTURE_PAGE_BUILD_WORKER_COUNT,
 					{ host: options.host },
 				),
 		},
@@ -89,6 +111,16 @@ interface StaticResolverBrowserWorker extends StaticResolverWorkerPort {
 }
 
 interface DynamicVisualRecipeBrowserWorker extends DynamicVisualRecipeWorkerPort {
+	terminate(): void;
+}
+
+interface ObjectVisualAtlasBrowserWorker
+	extends OpenWorldObjectVisualAtlasWorkerPort {
+	terminate(): void;
+}
+
+interface TexturePageBuildBrowserWorker
+	extends OpenWorldTexturePageBuildWorkerPort {
 	terminate(): void;
 }
 
@@ -193,6 +225,69 @@ function createDynamicVisualBakerBrowserWorker(): DynamicVisualBakerBrowserWorke
 		new URL("../dynamic/visual-bake.worker.ts", import.meta.url),
 		{ type: "module" },
 	) as DynamicVisualBakerBrowserWorker;
+}
+
+interface WorkerObjectVisualAtlasBuilderFactories {
+	readonly createWorker?: () => ObjectVisualAtlasBrowserWorker;
+	readonly host?: ReturnType<typeof createBrowserRuntimeHost>;
+}
+
+function createWorkerObjectVisualAtlasBuilder(
+	assetReader: PreparedAssetReader,
+	workerCount: number,
+	factories: WorkerObjectVisualAtlasBuilderFactories = {},
+): OpenWorldObjectVisualAtlasBuilder {
+	assertPositiveInteger(workerCount, "texture layout worker count");
+	const createWorker =
+		factories.createWorker ?? createObjectVisualAtlasBrowserWorker;
+
+	return new WorkerPoolOpenWorldObjectVisualAtlasBuilder({
+		assetReader,
+		createWorker,
+		host: factories.host,
+		workerCount,
+	});
+}
+
+function createObjectVisualAtlasBrowserWorker(): ObjectVisualAtlasBrowserWorker {
+	return new Worker(
+		new URL(
+			"../systems/open-world-streaming/texture-residency/placement/object-visual-atlas.worker.ts",
+			import.meta.url,
+		),
+		{ type: "module" },
+	) as ObjectVisualAtlasBrowserWorker;
+}
+
+interface WorkerTexturePageBuilderFactories {
+	readonly createWorker?: () => TexturePageBuildBrowserWorker;
+	readonly host?: ReturnType<typeof createBrowserRuntimeHost>;
+}
+
+function createWorkerTexturePageBuilder(
+	assetReader: PreparedAssetReader,
+	workerCount: number,
+	factories: WorkerTexturePageBuilderFactories = {},
+): OpenWorldTexturePageBuilder {
+	assertPositiveInteger(workerCount, "texture page build worker count");
+	const createWorker = factories.createWorker ?? createTexturePageBuildWorker;
+
+	return new WorkerPoolOpenWorldTexturePageBuilder({
+		assetReader,
+		createWorker,
+		host: factories.host,
+		workerCount,
+	});
+}
+
+function createTexturePageBuildWorker(): TexturePageBuildBrowserWorker {
+	return new Worker(
+		new URL(
+			"../systems/open-world-streaming/texture-residency/page-build/page-build.worker.ts",
+			import.meta.url,
+		),
+		{ type: "module" },
+	) as TexturePageBuildBrowserWorker;
 }
 
 function assertPositiveInteger(value: number, label: string): void {

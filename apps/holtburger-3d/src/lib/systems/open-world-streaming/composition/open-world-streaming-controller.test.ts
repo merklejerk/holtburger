@@ -16,6 +16,8 @@ import type {
 	StaticScopePayload,
 	TerrainStaticScopePayload,
 } from "../../../static/contracts";
+import type { OpenWorldTexturePageBuilder } from "../texture-residency/page-build/worker-client";
+import type { OpenWorldObjectVisualAtlasBuilder } from "../texture-residency/placement/object-visual-atlas-builder";
 import { OpenWorldStreamingController } from "./open-world-streaming-controller";
 
 describe("OpenWorldStreamingController terrain slice", () => {
@@ -25,9 +27,11 @@ describe("OpenWorldStreamingController terrain slice", () => {
 			assetReader: createUnusedAssetReader(),
 			createDynamicVisualBaker: failIfDynamicWorkerFactoryIsCalled,
 			createDynamicVisualRecipeResolver: failIfDynamicWorkerFactoryIsCalled,
+			createObjectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder,
 			createStaticBaker: () => new FixtureTerrainBaker(),
 			createStaticResolver: () =>
 				new FixtureTerrainResolver(createTerrainScopePayload()),
+			createTexturePageBuilder: createUnusedTexturePageBuilder,
 			renderer,
 		});
 
@@ -79,8 +83,10 @@ describe("OpenWorldStreamingController terrain slice", () => {
 			assetReader: createUnusedAssetReader(),
 			createDynamicVisualBaker: failIfDynamicWorkerFactoryIsCalled,
 			createDynamicVisualRecipeResolver: failIfDynamicWorkerFactoryIsCalled,
+			createObjectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder,
 			createStaticBaker: () => new FixtureTerrainBaker(),
 			createStaticResolver: () => resolver,
+			createTexturePageBuilder: createUnusedTexturePageBuilder,
 			renderer,
 		});
 
@@ -146,8 +152,10 @@ describe("OpenWorldStreamingController terrain slice", () => {
 			assetReader: createUnusedAssetReader(),
 			createDynamicVisualBaker: failIfDynamicWorkerFactoryIsCalled,
 			createDynamicVisualRecipeResolver: failIfDynamicWorkerFactoryIsCalled,
+			createObjectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder,
 			createStaticBaker: () => new FixtureTerrainBaker(),
 			createStaticResolver: () => resolver,
+			createTexturePageBuilder: createUnusedTexturePageBuilder,
 			renderer,
 		});
 
@@ -237,6 +245,26 @@ function failIfDynamicWorkerFactoryIsCalled(): never {
 	throw new Error(
 		"Dynamic worker factory should not be used by terrain slice test.",
 	);
+}
+
+function createUnusedObjectVisualAtlasBuilder(): OpenWorldObjectVisualAtlasBuilder {
+	return {
+		planAtlasPlacement(): Promise<never> {
+			return Promise.reject(
+				new Error("Texture layout builder should not be used by this test."),
+			);
+		},
+	};
+}
+
+function createUnusedTexturePageBuilder(): OpenWorldTexturePageBuilder {
+	return {
+		buildPage(): Promise<never> {
+			return Promise.reject(
+				new Error("Texture page builder should not be used by this test."),
+			);
+		},
+	};
 }
 
 class FixtureTerrainResolver implements StaticLandblockSceneLodSourceResolver {

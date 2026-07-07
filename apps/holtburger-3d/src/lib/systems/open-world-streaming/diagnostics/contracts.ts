@@ -189,6 +189,8 @@ export interface OpenWorldStreamingStaticTaskStageTiming {
 		| "texture-source-preparation-yield"
 		| "texture-layout"
 		| "texture-page-build"
+		| "texture-page-materialization"
+		| "texture-page-source-preparation"
 		| "create-bake-resources"
 		| "bake"
 		| "bake-worker-wait"

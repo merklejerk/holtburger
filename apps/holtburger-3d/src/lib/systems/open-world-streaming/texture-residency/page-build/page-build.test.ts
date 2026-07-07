@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import type {
+	PreparedAsset,
+	PreparedAssetReader,
+} from "../../../../assets/contracts";
+import { createPreparedTextureHostKey } from "../../../../assets/preparation/prepared-texture-source";
+import type { PreparedRenderSurfaceTextureUseIdentity } from "../../../../static/contracts";
 import type { TextureBindingId } from "../../../../textures/identity";
 import type {
 	OpenWorldTexturePageBuildInput,
@@ -10,6 +16,7 @@ import type {
 } from "./protocol";
 import { WorkerPoolOpenWorldTexturePageBuilder } from "./worker-client";
 import { installOpenWorldTexturePageBuildWorkerHandler } from "./worker-handler";
+import { DirectOpenWorldTexturePageBuilder } from "./direct-page-builder";
 import { createOpenWorldTextureBucketKey } from "../claims/bucket-key";
 import {
 	OpenWorldTextureClaimRegistry,
@@ -23,9 +30,25 @@ import type {
 } from "../../../../textures/identity";
 
 describe("open-world texture page build", () => {
+	it("materializes page pixels from source identities", async () => {
+		const builder = new DirectOpenWorldTexturePageBuilder({
+			assetReader: new FixturePreparedAssetReader(),
+		});
+		const input = createPageBuildInput();
+
+		await expect(builder.buildPage(input)).resolves.toMatchObject({
+			kind: "page-update",
+			page: {
+				pixels: new Uint8Array([255, 128, 0, 255]),
+			},
+			placements: [{ bindingId: bindingId("binding:terrain") }],
+		});
+	});
+
 	it("dispatches replacement-native page build jobs through the worker pool", async () => {
 		const port = new FixturePageBuildWorkerPort();
 		const builder = new WorkerPoolOpenWorldTexturePageBuilder({
+			assetReader: createUnusedAssetReader(),
 			createWorker: () => port,
 			workerCount: 1,
 		});
@@ -59,6 +82,7 @@ describe("open-world texture page build", () => {
 	it("exposes page build queue diagnostics from the worker pool", () => {
 		const port = new FixturePageBuildWorkerPort();
 		const builder = new WorkerPoolOpenWorldTexturePageBuilder({
+			assetReader: createUnusedAssetReader(),
 			createWorker: () => port,
 			workerCount: 1,
 		});
@@ -100,13 +124,14 @@ describe("open-world texture page build", () => {
 	it("runs page builds in the worker handler and transfers page pixels", async () => {
 		const port = new FixturePageBuildWorkerPort();
 		installOpenWorldTexturePageBuildWorkerHandler(
-			{
+			() => ({
 				async buildPage(
 					input: OpenWorldTexturePageBuildInput,
 				): Promise<OpenWorldTexturePageBuildOutput> {
 					return createPageBuildOutput(input);
 				},
-			},
+			}),
+			createUnusedAssetReader,
 			port,
 		);
 		const input = createPageBuildInput();
@@ -137,11 +162,12 @@ describe("open-world texture page build", () => {
 	it("turns page builder failures into standard worker errors", async () => {
 		const port = new FixturePageBuildWorkerPort();
 		installOpenWorldTexturePageBuildWorkerHandler(
-			{
+			() => ({
 				async buildPage(): Promise<OpenWorldTexturePageBuildOutput> {
 					throw new Error("page source missing");
 				},
-			},
+			}),
+			createUnusedAssetReader,
 			port,
 		);
 
@@ -391,18 +417,12 @@ function createPageBuildInput(
 		entries: [
 			{
 				bindingIds: [bindingId("binding:terrain")],
+				dataUse: createTextureUse(),
 				entryId:
 					"entry:terrain" as OpenWorldTexturePageBuildInput["entries"][number]["entryId"],
 				gutterEdgeMode: "clamp",
 				gutterPixels: 0,
 				rect: [0, 0, 1, 1],
-				source: {
-					format: "rgba8",
-					height: 1,
-					kind: "open-world-texture-page-build-pixel-source",
-					pixels: new Uint8Array([255, 128, 0, 255]),
-					width: 1,
-				},
 			},
 		],
 		jobId: options.jobId ?? "page-build:terrain",
@@ -447,6 +467,84 @@ function createPageBuildOutput(
 			},
 		],
 		reservationToken: input.reservationToken,
+	};
+}
+
+function createTextureUse(): PreparedRenderSurfaceTextureUseIdentity {
+	return {
+		kind: "prepared-render-surface-texture-use",
+		renderSurface: {
+			kind: "render-surface",
+			renderSurfaceId: 0x06000010,
+		},
+		usage: "rgba-color",
+	};
+}
+
+function createUnusedAssetReader(): PreparedAssetReader {
+	return {
+		requestPreparedAsset(): Promise<never> {
+			throw new Error("Fixture asset reader should not be used.");
+		},
+	};
+}
+
+class FixturePreparedAssetReader implements PreparedAssetReader {
+	requestPreparedAsset(): Promise<PreparedAsset> {
+		return Promise.resolve({
+			key: createPreparedTextureHostKey(createTextureUse()),
+			payload: createPreparedTexturePayload(),
+			preparedAt: "test",
+			revision: 1,
+			sourceAssetId: "prepared-texture/06000010",
+		});
+	}
+}
+
+function createPreparedTexturePayload() {
+	const bytes = new Uint8Array([255, 128, 0, 255]);
+	return {
+		colorSpace: "linear",
+		dependencies: {
+			renderSurfaceAssetIds: ["render-surface/06000010"],
+		},
+		diagnostics: {
+			decodeMs: 0,
+			downsampleMs: 0,
+			encodeMs: 0,
+			generatedByteLength: bytes.byteLength,
+			generatedLevelCount: 1,
+			totalMs: 0,
+		},
+		kind: "prepared-texture",
+		levels: [
+			{
+				byteLength: bytes.byteLength,
+				bytes,
+				format: "A8R8G8B8",
+				formatRaw: 0,
+				height: 1,
+				level: 0,
+				width: 1,
+			},
+		],
+		mipPolicy: "none",
+		outputFormat: "rgba8",
+		provenance: {
+			assetId: "prepared-texture/06000010",
+			collectedAt: "test",
+			source: "host",
+		},
+		renderSurfaceId: 0x06000010,
+		residencyKind: "unknown",
+		sourceAssetKind: "prepared-texture",
+		sourceByteLength: bytes.byteLength,
+		sourceFormat: "A8R8G8B8",
+		sourceFormatRaw: 0,
+		sourceHash: "hash",
+		sourceHeight: 1,
+		sourceWidth: 1,
+		usage: "color",
 	};
 }
 

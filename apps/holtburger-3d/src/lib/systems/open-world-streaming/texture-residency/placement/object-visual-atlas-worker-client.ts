@@ -1,5 +1,4 @@
 import type { PreparedAssetReader } from "../../../../assets/contracts";
-import type { RuntimeHost } from "../../../../host/runtime-contracts";
 import {
 	createHostPreparedAssetServiceHandler,
 	createPreparedAssetServiceHandler,
@@ -10,23 +9,18 @@ import {
 	StandardWorkerPool,
 	type WorkerPoolDiagnosticsSnapshot,
 } from "../../../../workers/pool";
+import type { RuntimeHost } from "../../../../host/runtime-contracts";
 import type {
-	OpenWorldTexturePageBuildInput,
-	OpenWorldTexturePageBuildOutput,
-	OpenWorldTexturePageBuildWorkerPort,
-} from "./protocol";
+	OpenWorldObjectVisualAtlasBuildInput,
+	OpenWorldObjectVisualAtlasBuilder,
+	OpenWorldObjectVisualAtlasPlacementOutput,
+} from "./object-visual-atlas-builder";
+import type { OpenWorldObjectVisualAtlasWorkerPort } from "./object-visual-atlas-worker-protocol";
 
-export interface OpenWorldTexturePageBuilder {
-	buildPage(
-		input: OpenWorldTexturePageBuildInput,
-	): Promise<OpenWorldTexturePageBuildOutput>;
-	dispose?(): void;
-}
-
-export class WorkerPoolOpenWorldTexturePageBuilder implements OpenWorldTexturePageBuilder {
+export class WorkerPoolOpenWorldObjectVisualAtlasBuilder implements OpenWorldObjectVisualAtlasBuilder {
 	readonly #pool: StandardWorkerPool<
-		OpenWorldTexturePageBuildInput,
-		OpenWorldTexturePageBuildOutput,
+		OpenWorldObjectVisualAtlasBuildInput,
+		OpenWorldObjectVisualAtlasPlacementOutput,
 		never,
 		PreparedAssetServiceRequest,
 		PreparedAssetServiceResponse
@@ -34,17 +28,17 @@ export class WorkerPoolOpenWorldTexturePageBuilder implements OpenWorldTexturePa
 
 	constructor(options: {
 		readonly assetReader: PreparedAssetReader;
-		readonly createWorker: () => OpenWorldTexturePageBuildWorkerPort;
+		readonly createWorker: () => OpenWorldObjectVisualAtlasWorkerPort;
 		readonly host?: RuntimeHost;
 		readonly workerCount: number;
 	}) {
 		this.#pool = new StandardWorkerPool({
 			createWorker: options.createWorker,
 			describe: (input) => ({
-				label: "open-world-texture-page-build",
+				label: "open-world-texture-layout",
 				taskId: input.jobId,
 			}),
-			requestIdPrefix: "open-world-texture-page-build",
+			requestIdPrefix: "open-world-texture-layout",
 			serviceHandler: options.host
 				? createHostPreparedAssetServiceHandler(options.host)
 				: createPreparedAssetServiceHandler(options.assetReader),
@@ -52,9 +46,9 @@ export class WorkerPoolOpenWorldTexturePageBuilder implements OpenWorldTexturePa
 		});
 	}
 
-	buildPage(
-		input: OpenWorldTexturePageBuildInput,
-	): Promise<OpenWorldTexturePageBuildOutput> {
+	planAtlasPlacement(
+		input: OpenWorldObjectVisualAtlasBuildInput,
+	): Promise<OpenWorldObjectVisualAtlasPlacementOutput> {
 		return this.#pool.submit(input);
 	}
 

@@ -28,10 +28,8 @@ import {
 } from "../../../../static/portal-graphs";
 import type { MaterializationOwnerId } from "../../owners/owner-id";
 import { OpenWorldTextureClaimRegistry } from "../../texture-residency/claims/texture-claim-registry";
-import type { OpenWorldStreamingTextureCommit } from "../../texture-residency/commits/contracts";
 import { reserveObjectVisualTexturePlacements } from "../../texture-residency/placement/object-visual-texture-placement-plan";
-import { buildReservedMaterialTexturePages } from "../../texture-residency/placement/material-texture-placement-plan";
-import type { OpenWorldTexturePageBuilder } from "../../texture-residency/page-build/worker-client";
+import type { OpenWorldTexturePageBuildInput } from "../../texture-residency/page-build/protocol";
 import type { OpenWorldObjectVisualAtlasBuilder } from "../../texture-residency/placement/object-visual-atlas-builder";
 import {
 	yieldToStaticMaterializationFrameBudget,
@@ -46,7 +44,6 @@ export interface OpenWorldEnvCellArtifactRunnerOptions {
 	readonly resolver: StaticLandblockSceneLodSourceResolver;
 	readonly objectVisualAtlasBuilder: OpenWorldObjectVisualAtlasBuilder;
 	readonly textureClaims: OpenWorldTextureClaimRegistry;
-	readonly texturePageBuilder: OpenWorldTexturePageBuilder;
 }
 
 export interface OpenWorldEnvCellArtifactRequest {
@@ -61,7 +58,7 @@ export interface OpenWorldEnvCellSystemLayerCommit {
 	readonly sourcePayload: EnvCellSystemStaticScopePayload;
 	readonly stageTimings: readonly OpenWorldStreamingStaticTaskStageTiming[];
 	readonly staticAuthoredDynamicPlacements: readonly StaticAuthoredDynamicPlacementRecord[];
-	readonly textureCommits: readonly OpenWorldStreamingTextureCommit[];
+	readonly texturePageBuildRequests: readonly OpenWorldTexturePageBuildInput[];
 }
 
 export class OpenWorldEnvCellArtifactRunner {
@@ -72,7 +69,6 @@ export class OpenWorldEnvCellArtifactRunner {
 	readonly #resolver: StaticLandblockSceneLodSourceResolver;
 	readonly #objectVisualAtlasBuilder: OpenWorldObjectVisualAtlasBuilder;
 	readonly #textureClaims: OpenWorldTextureClaimRegistry;
-	readonly #texturePageBuilder: OpenWorldTexturePageBuilder;
 
 	constructor(options: OpenWorldEnvCellArtifactRunnerOptions) {
 		this.#assetReader = options.assetReader;
@@ -87,7 +83,6 @@ export class OpenWorldEnvCellArtifactRunner {
 		this.#resolver = options.resolver;
 		this.#objectVisualAtlasBuilder = options.objectVisualAtlasBuilder;
 		this.#textureClaims = options.textureClaims;
-		this.#texturePageBuilder = options.texturePageBuilder;
 	}
 
 	async run(
@@ -130,14 +125,6 @@ export class OpenWorldEnvCellArtifactRunner {
 			bakeStaticJobWithBoundaryDiagnostics(this.#baker, bakeInput),
 		);
 		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
-		const texturePageBuild = await timing.measure("texture-page-build", () =>
-			buildReservedMaterialTexturePages({
-				pageBuilder: this.#texturePageBuilder,
-				pageBuildRequests: textureReservation.pageBuildRequests,
-				textureClaims: this.#textureClaims,
-			}),
-		);
-		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const payload = timing.measureSync("assemble-commit", () =>
 			createEnvCellSystemLayerPayload({
 				baked: baked.result,
@@ -155,7 +142,6 @@ export class OpenWorldEnvCellArtifactRunner {
 				...baked.stageTimings,
 				...textureIntents.stageTimings,
 				...textureReservation.stageTimings,
-				...texturePageBuild.stageTimings,
 			],
 			staticAuthoredDynamicPlacements: sourcePayload.envCells.flatMap(
 				(envCell) =>
@@ -170,7 +156,7 @@ export class OpenWorldEnvCellArtifactRunner {
 						placement,
 					})),
 			),
-			textureCommits: texturePageBuild.textureCommits,
+			texturePageBuildRequests: textureReservation.pageBuildRequests,
 		};
 	}
 

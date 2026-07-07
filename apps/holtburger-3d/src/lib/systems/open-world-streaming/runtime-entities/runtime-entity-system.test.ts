@@ -17,7 +17,6 @@ import type {
 import type {
 	DynamicRendererInstanceCommit,
 	DynamicRendererResourceCommit,
-	TexturePlacementUpdate,
 } from "../../../renderer/types";
 import type {
 	StaticAuthoredDynamicPlacementRecord,
@@ -26,9 +25,11 @@ import type {
 import { MaterializationOwnerRegistry } from "../owners/owner-registry";
 import type { MaterializationOwnerId } from "../owners/owner-id";
 import { OpenWorldTextureClaimRegistry } from "../texture-residency/claims/texture-claim-registry";
-import type { OpenWorldTexturePageBuilder } from "../texture-residency/page-build/worker-client";
 import type { OpenWorldObjectVisualAtlasBuilder } from "../texture-residency/placement/object-visual-atlas-builder";
-import { OpenWorldRuntimeEntitySystem } from "./runtime-entity-system";
+import {
+	OpenWorldRuntimeEntitySystem,
+	type OpenWorldRuntimeEntityTexturePageBuildRequest,
+} from "./runtime-entity-system";
 
 describe("OpenWorldRuntimeEntitySystem", () => {
 	it("materializes and destroys runtime-authored dynamic entities through direct renderer commits", async () => {
@@ -167,8 +168,10 @@ function createSystem(options: {
 		objectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder(),
 		owners: options.owners,
 		renderer: options.renderer,
+		scheduleTexturePageBuilds: (request) => {
+			options.renderer.scheduledTexturePageBuilds.push(request);
+		},
 		textureClaims: new OpenWorldTextureClaimRegistry(),
-		texturePageBuilder: createUnusedTexturePageBuilder(),
 	});
 }
 
@@ -211,11 +214,8 @@ class FixtureDynamicBaker implements DynamicVisualBaker {
 class FixtureDynamicRenderer {
 	readonly instanceCommits: DynamicRendererInstanceCommit[] = [];
 	readonly resourceCommits: DynamicRendererResourceCommit[] = [];
-	readonly textureUpdates: TexturePlacementUpdate[] = [];
-
-	applyTexturePlacementUpdate(update: TexturePlacementUpdate): void {
-		this.textureUpdates.push(update);
-	}
+	readonly scheduledTexturePageBuilds: OpenWorldRuntimeEntityTexturePageBuildRequest[] =
+		[];
 
 	commitDynamicResources(commit: DynamicRendererResourceCommit): void {
 		this.resourceCommits.push(commit);
@@ -408,16 +408,6 @@ function createUnusedObjectVisualAtlasBuilder(): OpenWorldObjectVisualAtlasBuild
 		async planAtlasPlacement() {
 			throw new Error(
 				"Atlas builder should not be used without texture intents.",
-			);
-		},
-	};
-}
-
-function createUnusedTexturePageBuilder(): OpenWorldTexturePageBuilder {
-	return {
-		async buildPage() {
-			throw new Error(
-				"Texture page builder should not be used without texture intents.",
 			);
 		},
 	};

@@ -19,12 +19,10 @@ import type {
 import type { MaterializationOwnerId } from "../../owners/owner-id";
 import type { OpenWorldStreamingStaticTaskStageTiming } from "../../diagnostics/contracts";
 import { OpenWorldTextureClaimRegistry } from "../../texture-residency/claims/texture-claim-registry";
-import type { OpenWorldStreamingTextureCommit } from "../../texture-residency/commits/contracts";
 import {
-	buildReservedMaterialTexturePages,
 	reserveMaterialTexturePlacements,
 } from "../../texture-residency/placement/material-texture-placement-plan";
-import type { OpenWorldTexturePageBuilder } from "../../texture-residency/page-build/worker-client";
+import type { OpenWorldTexturePageBuildInput } from "../../texture-residency/page-build/protocol";
 import type { OpenWorldMaterialTextureAtlasBuilder } from "../../texture-residency/placement/object-visual-atlas-builder";
 import {
 	yieldToStaticMaterializationFrameBudget,
@@ -39,7 +37,6 @@ export interface OpenWorldTerrainArtifactRunnerOptions {
 	readonly resolver: StaticLandblockSceneLodSourceResolver;
 	readonly textureAtlasBuilder: OpenWorldMaterialTextureAtlasBuilder;
 	readonly textureClaims: OpenWorldTextureClaimRegistry;
-	readonly texturePageBuilder: OpenWorldTexturePageBuilder;
 }
 
 export interface OpenWorldTerrainArtifactRequest {
@@ -53,7 +50,7 @@ export interface OpenWorldTerrainLayerCommit {
 	readonly payload: TerrainLayerPayload;
 	readonly sourcePayload: TerrainStaticScopePayload;
 	readonly stageTimings: readonly OpenWorldStreamingStaticTaskStageTiming[];
-	readonly textureCommits: readonly OpenWorldStreamingTextureCommit[];
+	readonly texturePageBuildRequests: readonly OpenWorldTexturePageBuildInput[];
 	readonly textureReadiness: readonly OpenWorldTerrainTextureReadiness[];
 }
 
@@ -69,7 +66,6 @@ export class OpenWorldTerrainArtifactRunner {
 	readonly #resolver: StaticLandblockSceneLodSourceResolver;
 	readonly #textureAtlasBuilder: OpenWorldMaterialTextureAtlasBuilder;
 	readonly #textureClaims: OpenWorldTextureClaimRegistry;
-	readonly #texturePageBuilder: OpenWorldTexturePageBuilder;
 
 	constructor(options: OpenWorldTerrainArtifactRunnerOptions) {
 		this.#assetReader = options.assetReader;
@@ -78,7 +74,6 @@ export class OpenWorldTerrainArtifactRunner {
 		this.#resolver = options.resolver;
 		this.#textureAtlasBuilder = options.textureAtlasBuilder;
 		this.#textureClaims = options.textureClaims;
-		this.#texturePageBuilder = options.texturePageBuilder;
 	}
 
 	async run(
@@ -124,14 +119,6 @@ export class OpenWorldTerrainArtifactRunner {
 			bakeStaticJobWithBoundaryDiagnostics(this.#baker, bakeInput),
 		);
 		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
-		const texturePageBuild = await timing.measure("texture-page-build", () =>
-			buildReservedMaterialTexturePages({
-				pageBuilder: this.#texturePageBuilder,
-				pageBuildRequests: textureReservation.pageBuildRequests,
-				textureClaims: this.#textureClaims,
-			}),
-		);
-		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const payload = timing.measureSync("assemble-commit", () => ({
 			drawUnits: baked.result.drawUnits.filter(
 				(drawUnit) => drawUnit.kind === "terrain-geometry",
@@ -153,9 +140,8 @@ export class OpenWorldTerrainArtifactRunner {
 				...timing.createSnapshot(),
 				...baked.stageTimings,
 				...textureReservation.stageTimings,
-				...texturePageBuild.stageTimings,
 			],
-			textureCommits: texturePageBuild.textureCommits,
+			texturePageBuildRequests: textureReservation.pageBuildRequests,
 			textureReadiness: createPendingTerrainTextureReadiness(
 				baked.result.drawUnits,
 			),

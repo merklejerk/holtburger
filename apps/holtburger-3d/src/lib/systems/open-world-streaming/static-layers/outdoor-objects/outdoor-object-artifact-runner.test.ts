@@ -15,7 +15,6 @@ import type {
 import { createEmptyObjectVisualInstallSet } from "../../../../visual/object-visual-install-set";
 import type { MaterializationOwnerId } from "../../owners/owner-id";
 import { OpenWorldTextureClaimRegistry } from "../../texture-residency/claims/texture-claim-registry";
-import type { OpenWorldTexturePageBuilder } from "../../texture-residency/page-build/worker-client";
 import type { OpenWorldObjectVisualAtlasBuilder } from "../../texture-residency/placement/object-visual-atlas-builder";
 import { OpenWorldOutdoorObjectArtifactRunner } from "./outdoor-object-artifact-runner";
 
@@ -33,7 +32,6 @@ describe("OpenWorldOutdoorObjectArtifactRunner", () => {
 			objectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder(),
 			resolver,
 			textureClaims: new OpenWorldTextureClaimRegistry(),
-			texturePageBuilder: createUnusedTexturePageBuilder(),
 		});
 
 		const commit = await runner.run({
@@ -66,7 +64,7 @@ describe("OpenWorldOutdoorObjectArtifactRunner", () => {
 				kind: "outdoor-generated-scenery",
 				landblockId: 0xda55ffff,
 			},
-			textureCommits: [],
+			texturePageBuildRequests: [],
 		});
 	});
 });
@@ -204,16 +202,6 @@ function createUnusedObjectVisualAtlasBuilder(): OpenWorldObjectVisualAtlasBuild
 		planAtlasPlacement() {
 			throw new Error(
 				"Object visual atlas builder should not be used by empty outdoor object test payload.",
-			);
-		},
-	};
-}
-
-function createUnusedTexturePageBuilder(): OpenWorldTexturePageBuilder {
-	return {
-		buildPage() {
-			throw new Error(
-				"Texture page builder should not be used by empty outdoor object test payload.",
 			);
 		},
 	};

@@ -13,7 +13,10 @@ import {
 	type PreparedAssetServiceRequest,
 	type PreparedAssetServiceResponse,
 } from "../workers/prepared-asset-service";
-import { StandardWorkerPool } from "../workers/pool";
+import {
+	StandardWorkerPool,
+	type WorkerPoolDiagnosticsSnapshot,
+} from "../workers/pool";
 
 export class WorkerPoolDynamicVisualRecipeResolver implements DynamicVisualRecipeResolver {
 	readonly #pool: StandardWorkerPool<
@@ -41,6 +44,10 @@ export class WorkerPoolDynamicVisualRecipeResolver implements DynamicVisualRecip
 		request: DynamicVisualRecipeResolutionRequest,
 	): Promise<DynamicEntityRecipe> {
 		return this.#pool.submit(createWorkerRequestPayload(request));
+	}
+
+	createDiagnosticsSnapshot(): WorkerPoolDiagnosticsSnapshot {
+		return this.#pool.createDiagnosticsSnapshot();
 	}
 
 	dispose(): void {

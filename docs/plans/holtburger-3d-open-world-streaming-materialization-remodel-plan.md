@@ -3472,21 +3472,25 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add or expose direct worker-pool diagnostics for dynamic recipe resolution and dynamic visual prep before interpreting long `recipe-resolution` or `dynamic-visual-prep-worker` waits as main-loop work.
-- [ ] Re-run `dc58` terrain-only radius-1 benchmark.
-- [ ] Re-run `dc58` terrain+generated-scenery radius-1 benchmark.
-- [ ] Re-run `dc58` terrain+env-cells radius-1 benchmark.
-- [ ] Re-run `dc58` all-domain radius-1 benchmark.
-- [ ] Re-run `da55` all-domain radius-1 benchmark.
-- [ ] Attribute top long tasks from direct diagnostics and harness frame data.
-- [ ] Decide whether any budget/yield phase is justified.
-- [ ] Dry-run Phases 54-55 against the benchmark findings and steer thresholds, cleanup targets, and verification commands before implementation starts.
+- [x] Add or expose direct worker-pool diagnostics for dynamic recipe resolution and dynamic visual prep before interpreting long `recipe-resolution` or `dynamic-visual-prep-worker` waits as main-loop work.
+- [x] Re-run `dc58` terrain-only radius-1 benchmark.
+- [x] Re-run `dc58` terrain+generated-scenery radius-1 benchmark.
+- [x] Re-run `dc58` terrain+env-cells radius-1 benchmark.
+- [x] Re-run `dc58` all-domain radius-1 benchmark.
+- [x] Re-run `da55` all-domain radius-1 benchmark.
+- [x] Attribute top long tasks from direct diagnostics and harness frame data.
+- [x] Decide whether any budget/yield phase is justified.
+- [x] Dry-run Phases 54-55 against the benchmark findings and steer thresholds, cleanup targets, and verification commands before implementation starts.
 
 Decisions and course corrections:
 
-- Pending.
+- Added generic `StandardWorkerPool` job timing and service timing diagnostics: active service requests, recent service timings, service request/failure counts, and recent job queued/running/total timings. Dynamic visual recipe resolution and dynamic visual prep now expose those snapshots through `runtimeEntities.prepWorkers`.
+- Benchmark evidence shows the suspicious `recipe-resolution` stage is mostly worker queue wall time, not service wait or browser-side source prep. In `dc58` all-domain, the recent 50 recipe jobs reported about 2,851.0s queued vs 35.6s running, with 1,137 service requests and effectively zero recent service wait. The dynamic prep worker recent 50 jobs reported about 8.8s running and no meaningful queue/service wait. Terrain+generated shows the same shape: about 2,011.2s queued vs 27.4s running for recent recipe jobs.
+- No main-thread budget/yield phase is justified from this evidence. The remaining `dc58` strict readiness cost is primarily a deliberately serialized worker queue. If startup wall time becomes the priority, the next direct move is recipe worker concurrency or recipe batching, not a renderer or runtime prep budget.
+- Harness evidence: `/tmp/holtburger-phase53b-dc58-terrain-r1.json` settled in about 3.1s with 1 long task; `/tmp/holtburger-phase53b-dc58-terrain-generated-r1.json` settled in about 67.8s with 820 long tasks; `/tmp/holtburger-phase53b-dc58-terrain-env-r1.json` settled in about 6.6s with 3 long tasks; `/tmp/holtburger-phase53b-dc58-all-domain-r1.json` settled in about 93.8s with 868 long tasks; `/tmp/holtburger-phase53b-da55-all-domain-r1.json` settled in about 23.8s with 52 long tasks. All runs reported zero material readiness issues and zero failed dynamic prep.
+- Reclamation steer: all Phase 53 runs reported zero ownerless pages, and `textureResidency.byteEstimate.approximateBytes` is still `null` with reason `page-size-not-yet-canonical`. Phase 54 should not create an active renderer-removal scheduler. It should close the measured-reclamation phase by making the deferral explicit, preserving cheap owner release, and recording the pressure evidence needed before active removal is introduced.
 
-### Phase 54: Measured Texture Reclamation And Removal Commits
+### Phase 54: Measured Texture Reclamation Deferral
 
 North-star check:
 
@@ -3503,31 +3507,27 @@ Current code delta:
 
 Deliverables:
 
-- Use Phase 53 evidence to decide whether ownerless renderer-resident pages need active reclamation now. If not, record the measured threshold that would trigger the scheduler later.
-- Canonicalize enough page byte accounting to make memory pressure decisions meaningful. If exact GPU bytes remain unavailable, define the approximation and its known blind spots in code and diagnostics.
-- Add a direct reclamation policy surface that selects ownerless resident pages only when pressure exceeds the chosen threshold.
-- Emit texture commits with `pageRemovals` for selected pages and apply them through the existing `removedTextureRefIds` renderer path.
-- Add registry state for pages that have been scheduled for renderer removal or removed, if the current `reclaimable` state is no longer precise enough.
+- Use Phase 53 evidence to decide whether ownerless renderer-resident pages need active reclamation now. Current evidence says `defer`.
+- Make the deferral explicit in diagnostics and the plan: active renderer removal requires nonzero retained ownerless pages plus canonical byte accounting or an explicit measured pressure threshold.
+- Do not add a reclamation scheduler, page removal commit path, or new page lifecycle state without pressure evidence.
 - Keep owner release idempotent and cheap; it must not synchronously repack, rebuild, upload, or remove renderer textures.
+- Verify no existing code path emits renderer page removals under the current zero-pressure policy.
 
 Acceptance criteria:
 
 - No renderer removal is emitted without a measured threshold or explicit harness scenario proving pressure.
-- Removal commits are visible as direct replacement texture commits, not hidden inside owner release or diagnostics projection.
-- Diagnostics report retained ownerless pages, pending renderer removals, removed pages, and byte pressure using replacement-owned names.
-- Reclaiming an ownerless page cannot leave a currently claimed binding pointing at a removed texture ref.
+- Diagnostics continue to report retained ownerless pages, pending renderer removals, and byte-pressure state using replacement-owned names.
+- Owner release remains separate from page deletion, repack, rebuild, upload, or renderer removal.
 - Focused claim-registry, page-build, texture commit, renderer binding, and controller tests pass.
-- A browser harness sequence proves at least one retained ownerless page and, if enabled by threshold, one renderer removal commit.
+- Browser harness evidence records zero ownerless pages for the Phase 53 matrix and therefore documents active reclamation as deferred.
 
 Task checklist:
 
-- [ ] Dry-run the Phase 53 benchmark outputs and choose `defer`, `warn`, or `remove` policy with an explicit byte threshold.
-- [ ] Add canonical page byte accounting or a named approximation in texture residency diagnostics.
-- [ ] Add reclaim scheduling API to the texture residency authority, not to owner release.
-- [ ] Emit `pageRemovals` from the texture commit stream when policy selects pages.
-- [ ] Update renderer binding tests for removed page refs and claimed binding safety.
-- [ ] Update harness diagnostics to expose removal counts without recreating legacy texture-manager counters.
-- [ ] Run focused texture residency/commit/renderer/controller tests and an eviction/replacement browser harness scenario.
+- [ ] Dry-run the Phase 53 benchmark outputs and choose `defer`, `warn`, or `remove` policy with an explicit evidence threshold.
+- [ ] Verify texture residency diagnostics already expose ownerless page counts, pending renderer removal count, and byte estimate state.
+- [ ] Verify owner release does not synchronously repack, rebuild, upload, or remove renderer textures.
+- [ ] Verify no active `pageRemovals` commit path runs under the current zero-pressure policy.
+- [ ] Run focused texture residency/commit/renderer/controller tests and cite Phase 53 harness outputs as the zero-ownerless-page evidence.
 - [ ] Dry-run Phase 55 after implementation and steer final deletion targets.
 
 Decisions and course corrections:

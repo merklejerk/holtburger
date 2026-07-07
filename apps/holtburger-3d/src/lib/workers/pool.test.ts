@@ -357,6 +357,18 @@ describe("standard worker pool", () => {
 			response: { value: "asset:06000010" },
 			serviceRequestId: "service:1",
 		});
+		expect(pool.createDiagnosticsSnapshot()).toMatchObject({
+			activeServiceRequests: [],
+			recentServiceTimings: [
+				{
+					requestId: "service-worker:0",
+					serviceRequestId: "service:1",
+					status: "succeeded",
+				},
+			],
+			serviceRequestFailures: 0,
+			serviceRequests: 1,
+		});
 
 		factory.workers[0]?.emit({
 			kind: "result",
@@ -364,6 +376,12 @@ describe("standard worker pool", () => {
 			requestId: "service-worker:0",
 		});
 		await expect(result).resolves.toEqual({ value: "done" });
+		expect(pool.createDiagnosticsSnapshot().recentJobTimings).toMatchObject([
+			{
+				requestId: "service-worker:0",
+				status: "succeeded",
+			},
+		]);
 	});
 
 	it("turns service handler failures into worker service errors", async () => {
@@ -396,6 +414,17 @@ describe("standard worker pool", () => {
 			kind: "service-error",
 			message: "asset missing",
 			serviceRequestId: "service:2",
+		});
+		expect(pool.createDiagnosticsSnapshot()).toMatchObject({
+			recentServiceTimings: [
+				{
+					requestId: "service-worker:0",
+					serviceRequestId: "service:2",
+					status: "failed",
+				},
+			],
+			serviceRequestFailures: 1,
+			serviceRequests: 1,
 		});
 	});
 

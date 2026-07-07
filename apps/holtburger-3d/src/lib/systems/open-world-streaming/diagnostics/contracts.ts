@@ -1,3 +1,5 @@
+import type { WorkerPoolDiagnosticsSnapshot } from "../../../workers/pool";
+
 /** Replacement-native diagnostics for owner-indexed open-world streaming. */
 export interface OpenWorldStreamingDiagnosticsSnapshot {
 	readonly kind: "open-world-streaming-diagnostics";
@@ -111,6 +113,10 @@ export interface OpenWorldStreamingDiagnosticsSnapshot {
 			readonly skippedVisualCount: number;
 			readonly started: number;
 			readonly recentFailures: readonly OpenWorldRuntimeEntityPrepFailureDiagnostics[];
+		};
+		readonly prepWorkers: {
+			readonly recipeResolution: WorkerPoolDiagnosticsSnapshot | null;
+			readonly visualPrep: WorkerPoolDiagnosticsSnapshot | null;
 		};
 	};
 	readonly sceneCommits: {

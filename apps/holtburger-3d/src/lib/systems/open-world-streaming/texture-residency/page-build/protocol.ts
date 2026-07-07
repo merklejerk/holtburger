@@ -1,4 +1,5 @@
 import type { TextureBindingId } from "../../../../textures/identity";
+import type { MaterialTextureDataUseIdentity } from "../../../../static/contracts";
 import type {
 	TextureFilteringMode,
 	TexturePageSampleClass,
@@ -10,6 +11,10 @@ import type {
 	WorkerHandlerPort,
 } from "../../../../workers/handler";
 import type {
+	PreparedAssetServiceRequest,
+	PreparedAssetServiceResponse,
+} from "../../../../workers/prepared-asset-service";
+import type {
 	WorkerMessagePort,
 	WorkerPoolRequestMessage,
 	WorkerPoolResponseMessage,
@@ -20,6 +25,7 @@ import type {
 	OpenWorldTexturePageId,
 	OpenWorldTexturePageReservationToken,
 } from "../claims/texture-claim-registry";
+import type { OpenWorldStreamingStaticTaskStageTiming } from "../../diagnostics/contracts";
 
 export type OpenWorldTexturePageBuildFormat = "rgba8" | "r8" | "rg8";
 
@@ -66,27 +72,14 @@ interface OpenWorldTexturePageBuildEntry {
 	readonly entryId: OpenWorldTextureEntryId;
 	/** Material bindings that resolve to this entry once the page is accepted. */
 	readonly bindingIds: readonly TextureBindingId[];
+	/** Source identity prepared inside the page-build worker. */
+	readonly dataUse: MaterialTextureDataUseIdentity;
 	/** Gutter edge behavior used while expanding source pixels into the page. */
 	readonly gutterEdgeMode: "clamp" | "repeat";
 	/** Gutter width in pixels reserved around this source. */
 	readonly gutterPixels: number;
 	/** Content rect inside the virtual page, excluding gutter pixels. */
 	readonly rect: readonly [number, number, number, number];
-	/** Source pixels already prepared for page materialization. */
-	readonly source: OpenWorldTexturePageBuildPixelSource;
-}
-
-export interface OpenWorldTexturePageBuildPixelSource {
-	/** Pixel-source marker keeps raw image facts distinct from placement metadata. */
-	readonly kind: "open-world-texture-page-build-pixel-source";
-	/** Source pixel format. */
-	readonly format: OpenWorldTexturePageBuildFormat;
-	/** Source height in pixels. */
-	readonly height: number;
-	/** Source pixels in row-major order. */
-	readonly pixels: Uint8Array;
-	/** Source width in pixels. */
-	readonly width: number;
 }
 
 export type OpenWorldTexturePageBuildOutput =
@@ -118,6 +111,8 @@ interface OpenWorldTexturePageBuildBaseOutput {
 	readonly pageId: OpenWorldTexturePageId;
 	/** Reservation token that must still match replacement state. */
 	readonly reservationToken: OpenWorldTexturePageReservationToken;
+	/** Worker-owned page-build stage timings. */
+	readonly stageTimings: readonly OpenWorldStreamingStaticTaskStageTiming[];
 }
 
 export interface OpenWorldTexturePageBuildPixelPage extends OpenWorldTexturePageBuildPage {
@@ -135,18 +130,34 @@ export interface OpenWorldTexturePageBuildPlacement {
 }
 
 export type OpenWorldTexturePageBuildWorkerRequest =
-	WorkerHandlerInputMessage<OpenWorldTexturePageBuildInput>;
+	WorkerHandlerInputMessage<
+		OpenWorldTexturePageBuildInput,
+		PreparedAssetServiceResponse
+	>;
 
 export type OpenWorldTexturePageBuildWorkerResponse =
-	WorkerHandlerOutputMessage<OpenWorldTexturePageBuildOutput, never>;
+	WorkerHandlerOutputMessage<
+		OpenWorldTexturePageBuildOutput,
+		never,
+		PreparedAssetServiceRequest
+	>;
 
 export type OpenWorldTexturePageBuildWorkerPort = WorkerMessagePort<
-	WorkerPoolRequestMessage<OpenWorldTexturePageBuildInput>,
-	WorkerPoolResponseMessage<OpenWorldTexturePageBuildOutput, never>
+	WorkerPoolRequestMessage<
+		OpenWorldTexturePageBuildInput,
+		PreparedAssetServiceResponse
+	>,
+	WorkerPoolResponseMessage<
+		OpenWorldTexturePageBuildOutput,
+		never,
+		PreparedAssetServiceRequest
+	>
 >;
 
 export type OpenWorldTexturePageBuildWorkerGlobalPort = WorkerHandlerPort<
 	OpenWorldTexturePageBuildInput,
 	OpenWorldTexturePageBuildOutput,
-	never
+	never,
+	PreparedAssetServiceRequest,
+	PreparedAssetServiceResponse
 >;

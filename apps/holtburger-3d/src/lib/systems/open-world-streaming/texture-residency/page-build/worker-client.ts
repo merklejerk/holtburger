@@ -1,3 +1,11 @@
+import type { PreparedAssetReader } from "../../../../assets/contracts";
+import type { RuntimeHost } from "../../../../host/runtime-contracts";
+import {
+	createHostPreparedAssetServiceHandler,
+	createPreparedAssetServiceHandler,
+	type PreparedAssetServiceRequest,
+	type PreparedAssetServiceResponse,
+} from "../../../../workers/prepared-asset-service";
 import {
 	StandardWorkerPool,
 	type WorkerPoolDiagnosticsSnapshot,
@@ -18,11 +26,16 @@ export interface OpenWorldTexturePageBuilder {
 export class WorkerPoolOpenWorldTexturePageBuilder implements OpenWorldTexturePageBuilder {
 	readonly #pool: StandardWorkerPool<
 		OpenWorldTexturePageBuildInput,
-		OpenWorldTexturePageBuildOutput
+		OpenWorldTexturePageBuildOutput,
+		never,
+		PreparedAssetServiceRequest,
+		PreparedAssetServiceResponse
 	>;
 
 	constructor(options: {
+		readonly assetReader: PreparedAssetReader;
 		readonly createWorker: () => OpenWorldTexturePageBuildWorkerPort;
+		readonly host?: RuntimeHost;
 		readonly workerCount: number;
 	}) {
 		this.#pool = new StandardWorkerPool({
@@ -32,9 +45,10 @@ export class WorkerPoolOpenWorldTexturePageBuilder implements OpenWorldTexturePa
 				taskId: input.jobId,
 			}),
 			requestIdPrefix: "open-world-texture-page-build",
+			serviceHandler: options.host
+				? createHostPreparedAssetServiceHandler(options.host)
+				: createPreparedAssetServiceHandler(options.assetReader),
 			size: options.workerCount,
-			transferInput: (input) =>
-				input.entries.map((entry) => entry.source.pixels.buffer),
 		});
 	}
 

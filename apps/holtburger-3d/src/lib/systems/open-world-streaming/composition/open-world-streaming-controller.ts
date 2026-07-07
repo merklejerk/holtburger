@@ -50,11 +50,7 @@ import type {
 	ScenePickRequest,
 } from "../../../runtime/scene-query/merged-scene-query-contracts";
 import type { StaticSceneEnvCellBounds } from "../../../runtime/scene-query/contracts";
-import {
-	DirectOpenWorldObjectVisualAtlasBuilder,
-	type OpenWorldObjectVisualAtlasBuilder,
-} from "../texture-residency/placement/object-visual-atlas-builder";
-import { DirectOpenWorldTexturePageBuilder } from "../texture-residency/page-build/direct-page-builder";
+import type { OpenWorldObjectVisualAtlasBuilder } from "../texture-residency/placement/object-visual-atlas-builder";
 import type { OpenWorldTexturePageBuilder } from "../texture-residency/page-build/worker-client";
 import type {
 	DynamicEntityId,
@@ -85,9 +81,10 @@ export interface OpenWorldStreamingControllerOptions {
 	>;
 	readonly createDynamicVisualBaker: () => DynamicVisualBaker;
 	readonly createDynamicVisualRecipeResolver: () => DynamicVisualRecipeResolver;
-	readonly createObjectVisualAtlasBuilder?: () => OpenWorldObjectVisualAtlasBuilder;
+	readonly createObjectVisualAtlasBuilder: () => OpenWorldObjectVisualAtlasBuilder;
 	readonly createStaticBaker: () => StaticBaker;
 	readonly createStaticResolver: () => StaticLandblockSceneLodSourceResolver;
+	readonly createTexturePageBuilder: () => OpenWorldTexturePageBuilder;
 	readonly staticPublicationMode?: OpenWorldStreamingStaticPublicationMode;
 }
 
@@ -1155,17 +1152,14 @@ export class OpenWorldStreamingController {
 	#requireObjectVisualAtlasBuilder(): OpenWorldObjectVisualAtlasBuilder {
 		if (!this.#objectVisualAtlasBuilder) {
 			this.#objectVisualAtlasBuilder =
-				this.#options.createObjectVisualAtlasBuilder?.() ??
-				new DirectOpenWorldObjectVisualAtlasBuilder({
-					assetReader: this.#options.assetReader,
-				});
+				this.#options.createObjectVisualAtlasBuilder();
 		}
 		return this.#objectVisualAtlasBuilder;
 	}
 
 	#requireTexturePageBuilder(): OpenWorldTexturePageBuilder {
 		if (!this.#texturePageBuilder) {
-			this.#texturePageBuilder = new DirectOpenWorldTexturePageBuilder();
+			this.#texturePageBuilder = this.#options.createTexturePageBuilder();
 		}
 		return this.#texturePageBuilder;
 	}

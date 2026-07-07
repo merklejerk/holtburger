@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 
+import type {
+	PreparedAsset,
+	PreparedAssetReader,
+} from "../../../../assets/contracts";
+import { createPreparedTextureHostKey } from "../../../../assets/preparation/prepared-texture-source";
 import type { PreparedRenderSurfaceTextureUseIdentity } from "../../../../static/contracts";
 import type {
 	TexturePlacementIntent,
@@ -38,7 +43,9 @@ describe("buildMaterialTexturePlacementPlan", () => {
 			intents: [intent],
 			jobPrefix: "fixture-terrain",
 			ownerId: ownerId("static-layer:terrain:0xda55ffff"),
-			pageBuilder: new DirectOpenWorldTexturePageBuilder(),
+			pageBuilder: new DirectOpenWorldTexturePageBuilder({
+				assetReader: new FixturePreparedAssetReader(),
+			}),
 			textureClaims,
 		});
 
@@ -52,7 +59,7 @@ describe("buildMaterialTexturePlacementPlan", () => {
 				bindingId: intent.bindingId,
 				placement: expect.objectContaining({
 					itemId: "terrain:item:1",
-					rect: [96, 96, 2, 2],
+					rect: [96, 96, 1, 1],
 				}),
 			}),
 		]);
@@ -63,7 +70,7 @@ describe("buildMaterialTexturePlacementPlan", () => {
 						bindingId: intent.bindingId,
 						readiness: expect.objectContaining({
 							kind: "resident",
-							rect: [96, 96, 2, 2],
+							rect: [96, 96, 1, 1],
 							textureHeight: 256,
 							textureWidth: 256,
 						}),
@@ -103,7 +110,7 @@ describe("buildMaterialTexturePlacementPlan", () => {
 				bindingId: intent.bindingId,
 				placement: expect.objectContaining({
 					itemId: "terrain:item:1",
-					rect: [96, 96, 2, 2],
+					rect: [96, 96, 1, 1],
 				}),
 			}),
 		]);
@@ -111,11 +118,8 @@ describe("buildMaterialTexturePlacementPlan", () => {
 			expect.objectContaining({
 				entries: [
 					expect.objectContaining({
-						rect: [96, 96, 2, 2],
-						source: expect.objectContaining({
-							kind: "open-world-texture-page-build-pixel-source",
-							pixels: expect.any(Uint8Array),
-						}),
+						dataUse: intent.source.dataUse,
+						rect: [96, 96, 1, 1],
 					}),
 				],
 			}),
@@ -141,17 +145,7 @@ class FixtureAtlasBuilder implements OpenWorldMaterialTextureAtlasBuilder {
 			rects: input.entries.map((entry) => ({
 				entryKey: entry.entryId,
 				pageId: "fixture-page",
-				rect: [96, 96, 2, 2] as const,
-			})),
-			sources: input.entries.map((entry) => ({
-				entry,
-				source: {
-					format: "rgba8",
-					height: 2,
-					kind: "texture-packing-pixel-source",
-					pixels: new Uint8Array(2 * 2 * 4),
-					width: 2,
-				},
+				rect: [96, 96, 1, 1] as const,
 			})),
 			stageTimings: [],
 		};
@@ -189,6 +183,65 @@ function createTextureUse(): PreparedRenderSurfaceTextureUseIdentity {
 			renderSurfaceId: 0x06000010,
 		},
 		usage: "rgba-color",
+	};
+}
+
+class FixturePreparedAssetReader implements PreparedAssetReader {
+	requestPreparedAsset(): Promise<PreparedAsset> {
+		return Promise.resolve({
+			key: createPreparedTextureHostKey(createTextureUse()),
+			payload: createPreparedTexturePayload(),
+			preparedAt: "test",
+			revision: 1,
+			sourceAssetId: "prepared-texture/06000010",
+		});
+	}
+}
+
+function createPreparedTexturePayload() {
+	const bytes = new Uint8Array([255, 128, 0, 255]);
+	return {
+		colorSpace: "linear",
+		dependencies: {
+			renderSurfaceAssetIds: ["render-surface/06000010"],
+		},
+		diagnostics: {
+			decodeMs: 0,
+			downsampleMs: 0,
+			encodeMs: 0,
+			generatedByteLength: bytes.byteLength,
+			generatedLevelCount: 1,
+			totalMs: 0,
+		},
+		kind: "prepared-texture",
+		levels: [
+			{
+				byteLength: bytes.byteLength,
+				bytes,
+				format: "A8R8G8B8",
+				formatRaw: 0,
+				height: 1,
+				level: 0,
+				width: 1,
+			},
+		],
+		mipPolicy: "none",
+		outputFormat: "rgba8",
+		provenance: {
+			assetId: "prepared-texture/06000010",
+			collectedAt: "test",
+			source: "host",
+		},
+		renderSurfaceId: 0x06000010,
+		residencyKind: "unknown",
+		sourceAssetKind: "prepared-texture",
+		sourceByteLength: bytes.byteLength,
+		sourceFormat: "A8R8G8B8",
+		sourceFormatRaw: 0,
+		sourceHash: "hash",
+		sourceHeight: 1,
+		sourceWidth: 1,
+		usage: "color",
 	};
 }
 

@@ -3,6 +3,7 @@ import type {
 	TextureBindingRequirement,
 	TexturePlacementPolicy,
 } from "../textures/placement";
+import { createStaticDomainTexturePlacementPolicy } from "../textures/placement";
 import {
 	createMaterialTextureSourceKey,
 	createTextureBindingId,
@@ -16,6 +17,7 @@ describe("object visual texture placement planner", () => {
 	it("allocates dense numeric ids while preserving static placement policy", () => {
 		const firstRequirement = createRequirement("texture-use:a");
 		const secondRequirement = createRequirement("texture-use:b");
+		const placementPolicy = createStaticDomainTexturePlacementPolicy();
 		const intents = createObjectVisualTexturePlacementIntents({
 			requirements: [
 				{
@@ -23,6 +25,7 @@ describe("object visual texture placement planner", () => {
 						affinityKey: "static-object|batch:a",
 						domain: "outdoor-generated-scenery",
 						kind: "static-authored",
+						placementPolicy,
 					},
 					requirement: firstRequirement,
 				},
@@ -31,6 +34,7 @@ describe("object visual texture placement planner", () => {
 						affinityKey: "static-object|batch:b",
 						domain: "outdoor-generated-scenery",
 						kind: "static-authored",
+						placementPolicy,
 					},
 					requirement: secondRequirement,
 				},
@@ -43,17 +47,20 @@ describe("object visual texture placement planner", () => {
 				affinityKey: "static-object|batch:a",
 				domain: "outdoor-generated-scenery",
 				bindingId: firstRequirement.bindingId,
+				placementPolicy,
 			},
 			{
 				affinityKey: "static-object|batch:b",
 				domain: "outdoor-generated-scenery",
 				bindingId: secondRequirement.bindingId,
+				placementPolicy,
 			},
 		]);
 	});
 
 	it("dedupes texture uses before allocating ids", () => {
 		const requirement = createRequirement("texture-use:shared");
+		const placementPolicy = createStaticDomainTexturePlacementPolicy();
 		const intents = createObjectVisualTexturePlacementIntents({
 			requirements: [
 				{
@@ -61,6 +68,7 @@ describe("object visual texture placement planner", () => {
 						affinityKey: "first",
 						domain: "env-cell-system",
 						kind: "static-authored",
+						placementPolicy,
 					},
 					requirement,
 				},
@@ -69,6 +77,7 @@ describe("object visual texture placement planner", () => {
 						affinityKey: "second",
 						domain: "env-cell-system",
 						kind: "static-authored",
+						placementPolicy,
 					},
 					requirement,
 				},

@@ -2341,18 +2341,31 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Compare `static-object-material-coverage.ts` against `object-visual-material-planner.ts`, `static-object-renderability.ts`, and the worksheet root-cause direction.
-- [ ] Audit `createStaticObjectTexturePlacementIntents(...)`, `object-visual-texture-placement-planner.ts`, and placement policy tests for legacy bucket-field drift.
-- [ ] Classify each material/fidelity item as contract bug, renderer capability backlog, source-data limitation, or acceptable future scope.
-- [ ] Classify the remaining `visual/object-visual-baker.ts` unsupported material warning: either replace it with Phase 27 material-readiness diagnostics or prove it belongs to a non-static-object renderer-fidelity backlog.
-- [ ] Audit env-cell material coverage from `structured-interior-material-planner.ts` and `env-cell-system-baker.ts` so interior material coverage does not stay hidden behind env-cell-specific warning paths.
-- [ ] Pick and implement at most one first slice if it is contract-shaped and low risk.
-- [ ] Update diagnostics from Phase 27 so the backlog remains measurable.
-- [ ] Run generated scenery, explicit object, and env-cell harness cases that exercise static object materials.
+- [x] Compare `static-object-material-coverage.ts` against `object-visual-material-planner.ts`, `static-object-renderability.ts`, and the worksheet root-cause direction.
+- [x] Audit `createStaticObjectTexturePlacementIntents(...)`, `object-visual-texture-placement-planner.ts`, and placement policy tests for legacy bucket-field drift.
+- [x] Classify each material/fidelity item as contract bug, renderer capability backlog, source-data limitation, or acceptable future scope.
+- [x] Classify the remaining `visual/object-visual-baker.ts` unsupported material warning: either replace it with Phase 27 material-readiness diagnostics or prove it belongs to a non-static-object renderer-fidelity backlog.
+- [x] Audit env-cell material coverage from `structured-interior-material-planner.ts` and `env-cell-system-baker.ts` so interior material coverage does not stay hidden behind env-cell-specific warning paths.
+- [x] Pick and implement at most one first slice if it is contract-shaped and low risk.
+- [x] Update diagnostics from Phase 27 so the backlog remains measurable.
+- [x] Run generated scenery, explicit object, and env-cell harness cases that exercise static object materials.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 28 completed on 2026-07-07.
+- Audit classification against the worksheet:
+  - `missing-render-surface` and `missing-palette` in `object-visual-material-planner.ts` are source-data/resolution limitations or asset-reader gaps. They remain `unsupported-material` diagnostics and should not become renderer fallbacks.
+  - `unsupported-surface-flag` is architecture/material-contract debt until every AC surface flag has a named renderer/material meaning. It remains unsupported and measurable through material readiness.
+  - `detail-overlay-render-deferred` is renderer-fidelity backlog when the detail role is unsupported for a static family or when an otherwise unrenderable pass blocks detail composition. Supported building/environment detail overlays already flow through `detail-overlay` texture roles.
+  - `translucent-render-deferred`, additive, inverse alpha, and unusual translucent blends are renderer capability backlog. The planner names the blend/pass and keeps them deferred instead of forcing them through opaque/static buckets.
+  - Indexed palette requirements are contract-supported when both index render surface and palette source resolve. Missing palette/render-surface stays unsupported; index/palette/detail texture requirements remain explicit texture roles and page purposes.
+- Low-risk slice implemented: object-visual static placement requirements now require an explicit `TexturePlacementPolicy`. Static object and structured-interior placement planners pass `createStaticDomainTexturePlacementPolicy()` directly instead of relying on an optional static-domain default in `object-visual-texture-placement-planner.ts`. This aligns static object material placement with the replacement bucket policy contract and prevents future callers from silently inheriting legacy-style bucket defaults.
+- `createStaticTexturePlacementIntent(...)` still has a generic static-domain default because terrain still uses that helper directly. Phase 29 owns terrain isomorphism and should decide whether to remove that default after terrain placement is reconciled.
+- Removed the structured-interior material omission `console.warn` from `env-cell-system-baker.ts`. The same source facts already flow through `createStructuredInteriorMaterialCoverageReport(...)`, static bake material coverage, and Phase 27 `materialReadiness`; keeping a parallel env-cell material warning would preserve a diagnostics side channel.
+- The remaining `visual/object-visual-baker.ts` unsupported material warning is generic visual-baker behavior, not the static-object material contract source of truth. Static object replacement paths now expose unsupported/deferred material facts before bake through coverage/readiness diagnostics. Phase 32 should delete or replace the generic warning after confirming dynamic/runtime visual consumers have equivalent direct diagnostics.
+- Remaining env-cell warnings in `env-cell-system-baker.ts` and `env-cell-system-resolver.ts` are geometry/publication/BVH diagnostics, not material coverage diagnostics. Phase 30/32 should classify them as direct diagnostics, deletion, or durable debug output.
+- Harness note: `npm run harness:browser -- --domains generated-scenery,explicit-objects,env-cells --layer-distance 0 --timeout-ms 60000` timed out with zero open-world owners/static tasks, so it did not exercise the target material paths. Rerunning with terrain included (`--domains terrain,generated-scenery,explicit-objects,env-cells --layer-distance 0 --timeout-ms 60000`) passed with 4 ready artifacts, 4 applied scene commits, 11 committed texture page builds, 0 failed static tasks, 0 failed texture page builds, and 2 structured-interior `deferred-material` readiness issues.
+- Verification: `npm run check`, focused `npm run test:ts -- --run src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/visual/object-visual-texture-placement-planner.test.ts src/lib/textures/placement.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/material-texture-placement-policy.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/object-visual-texture-placement-plan.test.ts`, focused `npm run test:ts -- --run src/lib/static/env-cells/bake/env-cell-system-baker.test.ts src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/visual/object-visual-texture-placement-planner.test.ts src/lib/textures/placement.test.ts`, and browser harness as noted.
 
 ### Phase 29: Terrain Texture Role And Flat-Color Audit
 

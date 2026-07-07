@@ -6,7 +6,10 @@ import type {
 	StaticScopePayload,
 } from "../../contracts";
 import { createStaticMaterialTextureBindingRequirement } from "../../bake/static-material-texture-policy";
-import type { ObjectVisualTexturePlacementIntent } from "../../../textures/placement";
+import {
+	createStaticDomainTexturePlacementPolicy,
+	type ObjectVisualTexturePlacementIntent,
+} from "../../../textures/placement";
 import {
 	createObjectVisualTexturePlacementIntents,
 	type ObjectVisualTexturePlacementRequirement,
@@ -99,6 +102,7 @@ export async function createStaticObjectTexturePlacementIntentResult(input: {
 					}),
 					domain: payload.domain,
 					kind: "static-authored",
+					placementPolicy: createStaticDomainTexturePlacementPolicy(),
 				},
 				requirement: {
 					...requirement,

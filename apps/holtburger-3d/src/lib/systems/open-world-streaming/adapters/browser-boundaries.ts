@@ -1,5 +1,5 @@
 import type { AssetService } from "../../../assets/contracts";
-import type { DynamicVisualBaker } from "../../../dynamic/visual-baker";
+import type { DynamicVisualPrepper } from "../../../dynamic/visual-prepper";
 import type { DynamicVisualRecipeResolver } from "../../../dynamic/visual-recipe-resolver";
 import type { RuntimeHost } from "../../../host/runtime-contracts";
 import type { Renderer } from "../../../renderer/types";
@@ -31,7 +31,7 @@ interface OpenWorldStreamingRendererAdapter {
 
 /** Existing worker-backed transforms exposed as factories, not eager work. */
 interface OpenWorldStreamingWorkerAdapters {
-	readonly createDynamicVisualBaker: () => DynamicVisualBaker;
+	readonly createDynamicVisualPrepper: () => DynamicVisualPrepper;
 	readonly createDynamicVisualRecipeResolver: () => DynamicVisualRecipeResolver;
 	readonly createObjectVisualAtlasBuilder: () => OpenWorldObjectVisualAtlasBuilder;
 	readonly createStaticBaker: () => StaticBaker;

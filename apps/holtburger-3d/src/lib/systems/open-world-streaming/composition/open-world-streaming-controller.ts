@@ -65,7 +65,7 @@ import type {
 	DynamicRuntimeSnapshot,
 } from "../../../dynamic/contracts";
 import type { RuntimeDynamicSpawnRequest } from "../../../dynamic/dynamic-entity-controller";
-import type { DynamicVisualBaker } from "../../../dynamic/visual-baker";
+import type { DynamicVisualPrepper } from "../../../dynamic/visual-prepper";
 import type { DynamicVisualRecipeResolver } from "../../../dynamic/visual-recipe-resolver";
 import {
 	OpenWorldRuntimeEntitySystem,
@@ -88,7 +88,7 @@ export interface OpenWorldStreamingControllerOptions {
 		| "commitDynamicResources"
 		| "commitDynamicInstances"
 	>;
-	readonly createDynamicVisualBaker: () => DynamicVisualBaker;
+	readonly createDynamicVisualPrepper: () => DynamicVisualPrepper;
 	readonly createDynamicVisualRecipeResolver: () => DynamicVisualRecipeResolver;
 	readonly createObjectVisualAtlasBuilder: () => OpenWorldObjectVisualAtlasBuilder;
 	readonly createStaticBaker: () => StaticBaker;
@@ -1273,7 +1273,7 @@ export class OpenWorldStreamingController {
 		if (!this.#runtimeEntities) {
 			this.#runtimeEntities = new OpenWorldRuntimeEntitySystem({
 				assetReader: this.#options.assetReader,
-				createDynamicVisualBaker: this.#options.createDynamicVisualBaker,
+				createDynamicVisualPrepper: this.#options.createDynamicVisualPrepper,
 				createDynamicVisualRecipeResolver:
 					this.#options.createDynamicVisualRecipeResolver,
 				objectVisualAtlasBuilder: this.#requireObjectVisualAtlasBuilder(),

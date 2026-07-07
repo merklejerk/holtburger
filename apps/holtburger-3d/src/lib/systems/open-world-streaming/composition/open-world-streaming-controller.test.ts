@@ -28,7 +28,7 @@ describe("OpenWorldStreamingController terrain slice", () => {
 		const renderer = new FixtureTerrainRenderer();
 		const controller = new OpenWorldStreamingController({
 			assetReader: createUnusedAssetReader(),
-			createDynamicVisualBaker: failIfDynamicWorkerFactoryIsCalled,
+			createDynamicVisualPrepper: failIfDynamicWorkerFactoryIsCalled,
 			createDynamicVisualRecipeResolver: failIfDynamicWorkerFactoryIsCalled,
 			createObjectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder,
 			createStaticBaker: () => new FixtureTerrainBaker(),
@@ -94,7 +94,7 @@ describe("OpenWorldStreamingController terrain slice", () => {
 		});
 		const controller = new OpenWorldStreamingController({
 			assetReader: createUnusedAssetReader(),
-			createDynamicVisualBaker: failIfDynamicWorkerFactoryIsCalled,
+			createDynamicVisualPrepper: failIfDynamicWorkerFactoryIsCalled,
 			createDynamicVisualRecipeResolver: failIfDynamicWorkerFactoryIsCalled,
 			createObjectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder,
 			createStaticBaker: () => new FixtureTerrainBaker(),
@@ -156,7 +156,7 @@ describe("OpenWorldStreamingController terrain slice", () => {
 		const renderer = new FixtureTerrainRenderer();
 		const controller = new OpenWorldStreamingController({
 			assetReader: createUnusedAssetReader(),
-			createDynamicVisualBaker: failIfDynamicWorkerFactoryIsCalled,
+			createDynamicVisualPrepper: failIfDynamicWorkerFactoryIsCalled,
 			createDynamicVisualRecipeResolver: failIfDynamicWorkerFactoryIsCalled,
 			createObjectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder,
 			createStaticBaker: () => new FixtureTerrainBaker(),
@@ -193,7 +193,7 @@ describe("OpenWorldStreamingController terrain slice", () => {
 		});
 		const controller = new OpenWorldStreamingController({
 			assetReader: createUnusedAssetReader(),
-			createDynamicVisualBaker: failIfDynamicWorkerFactoryIsCalled,
+			createDynamicVisualPrepper: failIfDynamicWorkerFactoryIsCalled,
 			createDynamicVisualRecipeResolver: failIfDynamicWorkerFactoryIsCalled,
 			createObjectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder,
 			createStaticBaker: () => new FixtureTerrainBaker(),
@@ -246,7 +246,7 @@ describe("OpenWorldStreamingController terrain slice", () => {
 	it("reports replacement material readiness issues from static coverage evidence", async () => {
 		const controller = new OpenWorldStreamingController({
 			assetReader: createUnusedAssetReader(),
-			createDynamicVisualBaker: failIfDynamicWorkerFactoryIsCalled,
+			createDynamicVisualPrepper: failIfDynamicWorkerFactoryIsCalled,
 			createDynamicVisualRecipeResolver: failIfDynamicWorkerFactoryIsCalled,
 			createObjectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder,
 			createStaticBaker: () =>
@@ -289,7 +289,7 @@ describe("OpenWorldStreamingController terrain slice", () => {
 	it("does not treat rendered material coverage as a readiness issue", async () => {
 		const controller = new OpenWorldStreamingController({
 			assetReader: createUnusedAssetReader(),
-			createDynamicVisualBaker: failIfDynamicWorkerFactoryIsCalled,
+			createDynamicVisualPrepper: failIfDynamicWorkerFactoryIsCalled,
 			createDynamicVisualRecipeResolver: failIfDynamicWorkerFactoryIsCalled,
 			createObjectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder,
 			createStaticBaker: () =>
@@ -321,7 +321,7 @@ describe("OpenWorldStreamingController terrain slice", () => {
 	it("reports terrain material fallback reasons as replacement readiness issues", async () => {
 		const controller = new OpenWorldStreamingController({
 			assetReader: createUnusedAssetReader(),
-			createDynamicVisualBaker: failIfDynamicWorkerFactoryIsCalled,
+			createDynamicVisualPrepper: failIfDynamicWorkerFactoryIsCalled,
 			createDynamicVisualRecipeResolver: failIfDynamicWorkerFactoryIsCalled,
 			createObjectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder,
 			createStaticBaker: () =>
@@ -364,7 +364,7 @@ describe("OpenWorldStreamingController terrain slice", () => {
 		const renderer = new FixtureTerrainRenderer();
 		const controller = new OpenWorldStreamingController({
 			assetReader: createUnusedAssetReader(),
-			createDynamicVisualBaker: failIfDynamicWorkerFactoryIsCalled,
+			createDynamicVisualPrepper: failIfDynamicWorkerFactoryIsCalled,
 			createDynamicVisualRecipeResolver: failIfDynamicWorkerFactoryIsCalled,
 			createObjectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder,
 			createStaticBaker: () =>
@@ -424,7 +424,7 @@ describe("OpenWorldStreamingController terrain slice", () => {
 		const renderer = new FixtureTerrainRenderer();
 		const controller = new OpenWorldStreamingController({
 			assetReader: createUnusedAssetReader(),
-			createDynamicVisualBaker: failIfDynamicWorkerFactoryIsCalled,
+			createDynamicVisualPrepper: failIfDynamicWorkerFactoryIsCalled,
 			createDynamicVisualRecipeResolver: failIfDynamicWorkerFactoryIsCalled,
 			createObjectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder,
 			createStaticBaker: () =>

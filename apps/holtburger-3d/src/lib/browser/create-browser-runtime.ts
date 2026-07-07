@@ -1,8 +1,8 @@
 import { HostBackedAssetService } from "../assets/asset-service";
 import type { PreparedAssetReader } from "../assets/contracts";
-import type { DynamicVisualBaker } from "../dynamic/visual-baker";
-import { WorkerPoolDynamicVisualBaker } from "../dynamic/visual-bake-worker-client";
-import type { DynamicVisualBakeWorkerPort } from "../dynamic/visual-bake-protocol";
+import type { DynamicVisualPrepper } from "../dynamic/visual-prepper";
+import { WorkerPoolDynamicVisualPrepper } from "../dynamic/visual-prep-worker-client";
+import type { DynamicVisualPrepWorkerPort } from "../dynamic/visual-prep-protocol";
 import { WorkerPoolDynamicVisualRecipeResolver } from "../dynamic/visual-recipe-worker-client";
 import type { DynamicVisualRecipeResolver } from "../dynamic/visual-recipe-resolver";
 import type { DynamicVisualRecipeWorkerPort } from "../dynamic/visual-recipe-protocol";
@@ -33,7 +33,7 @@ import type { StaticResolverWorkerPort } from "../static/resolver/protocol";
 const DEFAULT_STATIC_RESOLVER_WORKER_COUNT = 2;
 const DEFAULT_STATIC_BAKER_WORKER_COUNT = 2;
 const DEFAULT_DYNAMIC_VISUAL_RECIPE_RESOLVER_WORKER_COUNT = 1;
-const DEFAULT_DYNAMIC_VISUAL_BAKER_WORKER_COUNT = 1;
+const DEFAULT_DYNAMIC_VISUAL_PREP_WORKER_COUNT = 1;
 const DEFAULT_TEXTURE_LAYOUT_WORKER_COUNT = 2;
 const DEFAULT_TEXTURE_PAGE_BUILD_WORKER_COUNT = 2;
 
@@ -73,9 +73,10 @@ function createOpenWorldStreamingBoundaryAdapters(options: {
 			renderer: options.renderer,
 		},
 		workers: {
-			createDynamicVisualBaker: () =>
-				createWorkerDynamicVisualBaker(
-					DEFAULT_DYNAMIC_VISUAL_BAKER_WORKER_COUNT,
+			createDynamicVisualPrepper: () =>
+				createWorkerDynamicVisualPrepper(
+					options.assetService,
+					DEFAULT_DYNAMIC_VISUAL_PREP_WORKER_COUNT,
 				),
 			createDynamicVisualRecipeResolver: () =>
 				createWorkerDynamicVisualRecipeResolver(
@@ -196,33 +197,35 @@ function createWorkerStaticBaker(workerCount: number): StaticBaker {
 	});
 }
 
-interface DynamicVisualBakerBrowserWorker extends DynamicVisualBakeWorkerPort {
+interface DynamicVisualPrepBrowserWorker extends DynamicVisualPrepWorkerPort {
 	terminate(): void;
 }
 
-interface WorkerDynamicVisualBakerFactories {
-	readonly createWorker?: () => DynamicVisualBakerBrowserWorker;
+interface WorkerDynamicVisualPrepperFactories {
+	readonly createWorker?: () => DynamicVisualPrepBrowserWorker;
 }
 
-export function createWorkerDynamicVisualBaker(
+export function createWorkerDynamicVisualPrepper(
+	assetReader: PreparedAssetReader,
 	workerCount: number,
-	factories: WorkerDynamicVisualBakerFactories = {},
-): DynamicVisualBaker {
-	assertPositiveInteger(workerCount, "dynamic visual baker worker count");
+	factories: WorkerDynamicVisualPrepperFactories = {},
+): DynamicVisualPrepper {
+	assertPositiveInteger(workerCount, "dynamic visual prep worker count");
 	const createWorker =
-		factories.createWorker ?? createDynamicVisualBakerBrowserWorker;
+		factories.createWorker ?? createDynamicVisualPrepBrowserWorker;
 
-	return new WorkerPoolDynamicVisualBaker({
+	return new WorkerPoolDynamicVisualPrepper({
+		assetReader,
 		createWorker,
 		workerCount,
 	});
 }
 
-function createDynamicVisualBakerBrowserWorker(): DynamicVisualBakerBrowserWorker {
+function createDynamicVisualPrepBrowserWorker(): DynamicVisualPrepBrowserWorker {
 	return new Worker(
-		new URL("../dynamic/visual-bake.worker.ts", import.meta.url),
+		new URL("../dynamic/visual-prep.worker.ts", import.meta.url),
 		{ type: "module" },
-	) as DynamicVisualBakerBrowserWorker;
+	) as DynamicVisualPrepBrowserWorker;
 }
 
 interface WorkerObjectVisualAtlasBuilderFactories {

@@ -5,11 +5,11 @@ import {
 	createDynamicVisualResourceId,
 	type BakedDynamicVisualResource,
 	type DynamicEntityRecipe,
-	type DynamicVisualBakeInput,
 	type DynamicVisualBakeResult,
+	type DynamicVisualPrepInput,
 } from "../../../dynamic/contracts";
 import type { RuntimeDynamicSpawnRequest } from "../../../dynamic/dynamic-entity-controller";
-import type { DynamicVisualBaker } from "../../../dynamic/visual-baker";
+import type { DynamicVisualPrepper } from "../../../dynamic/visual-prepper";
 import type {
 	DynamicVisualRecipeResolutionRequest,
 	DynamicVisualRecipeResolver,
@@ -202,8 +202,8 @@ describe("OpenWorldRuntimeEntitySystem", () => {
 	it("marks in-flight static-authored dynamic prep stale after parent eviction", async () => {
 		const renderer = new FixtureDynamicRenderer();
 		const owners = new MaterializationOwnerRegistry();
-		const baker = new DeferredDynamicBaker();
-		const system = createSystem({ baker, owners, renderer });
+		const prepper = new DeferredDynamicPrepper();
+		const system = createSystem({ owners, prepper, renderer });
 		const parentOwnerId =
 			"static-layer:outdoor-buildings:0xda55ffff" as MaterializationOwnerId;
 
@@ -211,10 +211,10 @@ describe("OpenWorldRuntimeEntitySystem", () => {
 			parentOwnerId,
 			placements: [createStaticAuthoredPlacement(parentOwnerId)],
 		});
-		await waitFor(() => baker.pendingCount === 1);
+		await waitFor(() => prepper.pendingCount === 1);
 
 		system.removeStaticAuthoredChildrenForParent(parentOwnerId);
-		baker.resolveAll();
+		prepper.resolveAll();
 		await waitFor(() => system.createDiagnosticsSnapshot().prep.staleCount === 1);
 
 		expect(renderer.resourceCommits).toEqual([]);
@@ -310,8 +310,8 @@ describe("OpenWorldRuntimeEntitySystem", () => {
 });
 
 function createSystem(options: {
-	readonly baker?: DynamicVisualBaker;
 	readonly owners: MaterializationOwnerRegistry;
+	readonly prepper?: DynamicVisualPrepper;
 	readonly renderer: FixtureDynamicRenderer;
 	readonly scheduleTexturePageBuilds?: (
 		request: OpenWorldRuntimeEntityTexturePageBuildRequest,
@@ -319,7 +319,8 @@ function createSystem(options: {
 }): OpenWorldRuntimeEntitySystem {
 	return new OpenWorldRuntimeEntitySystem({
 		assetReader: createUnusedAssetReader(),
-		createDynamicVisualBaker: () => options.baker ?? new FixtureDynamicBaker(),
+		createDynamicVisualPrepper: () =>
+			options.prepper ?? new FixtureDynamicPrepper(),
 		createDynamicVisualRecipeResolver: () => new FixtureDynamicRecipeResolver(),
 		objectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder(),
 		owners: options.owners,
@@ -358,8 +359,8 @@ class FixtureDynamicRecipeResolver implements DynamicVisualRecipeResolver {
 	}
 }
 
-class FixtureDynamicBaker implements DynamicVisualBaker {
-	async bake(input: DynamicVisualBakeInput): Promise<DynamicVisualBakeResult> {
+class FixtureDynamicPrepper implements DynamicVisualPrepper {
+	async prepare(input: DynamicVisualPrepInput): Promise<DynamicVisualBakeResult> {
 		return {
 			failures: [],
 			product: {
@@ -371,9 +372,9 @@ class FixtureDynamicBaker implements DynamicVisualBaker {
 	}
 }
 
-class DeferredDynamicBaker implements DynamicVisualBaker {
+class DeferredDynamicPrepper implements DynamicVisualPrepper {
 	readonly #pending: Array<{
-		readonly input: DynamicVisualBakeInput;
+		readonly input: DynamicVisualPrepInput;
 		readonly resolve: (result: DynamicVisualBakeResult) => void;
 	}> = [];
 
@@ -381,7 +382,7 @@ class DeferredDynamicBaker implements DynamicVisualBaker {
 		return this.#pending.length;
 	}
 
-	async bake(input: DynamicVisualBakeInput): Promise<DynamicVisualBakeResult> {
+	async prepare(input: DynamicVisualPrepInput): Promise<DynamicVisualBakeResult> {
 		return new Promise((resolve) => {
 			this.#pending.push({ input, resolve });
 		});

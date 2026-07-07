@@ -3380,7 +3380,7 @@ Task checklist:
 - [x] Update diagnostics contracts without fitting the data to legacy diagnostic outputs.
 - [x] Add focused tests for dynamic texture terminal states, stale page builds, texture dependency readiness, and renderer binding safety.
 - [x] Dry-run Phase 52 after implementation and steer its worker-contract target before implementation starts.
-- [ ] Rerun `dc58` all-domain and `da55` all-domain radius-1 harnesses after Phase 52, because the `dc58` terrain+generated-scenery dry run proves this phase alone still leaves the dynamic worker-boundary gap open.
+- [x] Rerun `dc58` all-domain and `da55` all-domain radius-1 harnesses after Phase 52, because the `dc58` terrain+generated-scenery dry run proves this phase alone still leaves the dynamic worker-boundary gap open.
 
 Decisions and course corrections:
 
@@ -3400,7 +3400,7 @@ Owning authority:
 
 - Dynamic visual recipe/prep worker protocol, prepared-asset access boundary, dynamic source geometry sidecars, dynamic bake request construction, runtime prep state, and direct diagnostics.
 
-Current code delta:
+Current code delta before this phase:
 
 - `OpenWorldRuntimeEntitySystem.#prepareEntity(...)` still builds source geometry by calling `createDynamicVisualBakeSourceGeometry(this.#assetReader, [recipe])` before invoking the dynamic bake worker.
 - `DynamicVisualBakeInput` requires `sourceGeometry`, and `WorkerPoolDynamicVisualBaker` submits that complete input to `visual-bake.worker.ts`.
@@ -3426,18 +3426,24 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Dry-run the current dynamic bake worker and prepared-asset worker patterns before choosing a protocol shape.
-- [ ] Define the worker request/result contracts with typed failure reasons and transfer ownership.
-- [ ] Move source-geometry sidecar creation behind the worker boundary for browser composition.
-- [ ] Keep currentness/page settlement checks in runtime prep and prove stale worker results do not publish.
-- [ ] Update diagnostics and harness summary extraction for source-prep worker wait/failure facts.
-- [ ] Run focused dynamic worker/client/handler tests, runtime entity tests, controller tests, and texture readiness tests.
-- [ ] Rerun `dc58` terrain+generated-scenery, `dc58` all-domain, and `da55` all-domain radius-1 harnesses and record output paths.
-- [ ] Dry-run Phase 53 after implementation and steer benchmark thresholds before implementation starts.
+- [x] Dry-run the current dynamic bake worker and prepared-asset worker patterns before choosing a protocol shape.
+- [x] Define the worker request/result contracts with typed failure reasons and transfer ownership.
+- [x] Move source-geometry sidecar creation behind the worker boundary for browser composition.
+- [x] Keep currentness/page settlement checks in runtime prep and prove stale worker results do not publish.
+- [x] Update diagnostics and harness summary extraction for source-prep worker wait/failure facts.
+- [x] Run focused dynamic worker/client/handler tests, runtime entity tests, controller tests, and texture readiness tests.
+- [x] Rerun `dc58` terrain+generated-scenery, `dc58` all-domain, and `da55` all-domain radius-1 harnesses and record output paths.
+- [x] Dry-run Phase 53 after implementation and steer benchmark thresholds before implementation starts.
 
 Decisions and course corrections:
 
-- Pending.
+- Added `DynamicVisualPrepper` as the production worker boundary. Browser composition now creates `WorkerPoolDynamicVisualPrepper`, which sends `DynamicVisualPrepInput` across `visual-prep.worker.ts`; the worker uses the prepared-asset service to request geometry assets and runs `createDynamicVisualBakeSourceGeometry(...)` plus the pure `bakeDynamicVisuals(...)` transform off the main loop.
+- Deleted the old production dynamic bake worker files (`visual-bake-worker-client.ts`, `visual-bake-worker-handler.ts`, `visual-bake-protocol.ts`, and `visual-bake.worker.ts`). `visual-baker.ts` remains as the pure domain bake transform and no longer exports the unused `DynamicVisualBaker` interface.
+- Spicy bit: the first Phase 52 harness attempt failed all 162 `dc58` generated-scenery dynamic preps because the existing prepared-asset service intentionally returned resolver-safe gfx-obj views with render vertex buffers stripped. That view is correct for recipe resolution, but dishonest for worker-owned geometry prep. The fix was an explicit `payloadView: "resolver" | "full"` option on `createPreparedAssetServiceHandler(...)`; recipe workers keep the resolver view, while dynamic prep workers request full prepared assets. This is a direct contract, not a legacy shim.
+- Runtime prep no longer calls `createDynamicVisualBakeSourceGeometry(...)` or passes main-loop-created sidecars into production dynamic baking. It records one direct `dynamic-visual-prep-worker` wait stage, then keeps owner currentness, page settlement, and renderer publication on the runtime side.
+- Verification: `npm run check`; focused `npm run test:ts -- --run src/lib/dynamic/visual-prep-worker-client.test.ts src/lib/workers/prepared-asset-service.test.ts src/lib/browser/create-browser-runtime.test.ts src/lib/systems/open-world-streaming/runtime-entities/runtime-entity-system.test.ts src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts`; `npm run lint`.
+- Harness evidence: `/tmp/holtburger-phase52-dc58-terrain-generated-r2.json` settled terrain+generated-scenery with 162 ready dynamic visuals, 228 committed page tasks, zero material readiness issues, strict readiness around 70.2s, and 856 long tasks totaling about 56.9s. `/tmp/holtburger-phase52-dc58-all-domain-r1.json` settled all domains with 162 ready dynamic visuals, 250 committed page tasks, zero material readiness issues, strict readiness around 97.2s, and 905 long tasks totaling about 78.5s. `/tmp/holtburger-phase52-da55-all-domain-r1.json` settled all domains with 44 ready dynamic visuals, 155 committed page tasks, zero material readiness issues, strict readiness around 24.4s, and 51 long tasks totaling about 4.9s.
+- Resteer for Phase 53: moving dynamic source-geometry prep behind the worker boundary restored the target contract but did not materially improve `dc58` long-task volume. Current prep timings still show large `recipe-resolution` wall times, but those timings include queue/service/worker wait and are not sufficient proof of main-loop blocking. Phase 53 must add or expose worker-pool attribution before adding budgets.
 
 ### Phase 53: Performance Steering Rebaseline After Dynamic Closure
 
@@ -3453,6 +3459,7 @@ Deliverables:
 
 - Re-run the Phase 49 matrix after Phases 50-52.
 - Compare static artifact completion time, strict scene readiness time, long task counts, renderer frame deltas, runtime prep terminal counts, page-build timings, source-prep worker timings, and material readiness summaries.
+- Expose enough dynamic recipe/prep worker-pool diagnostics to distinguish queued worker wall time, service-request wait, worker execution, and main-loop commit/apply time.
 - Decide whether any measured browser-main-loop stage still needs a budget/yield after dynamic closure.
 - Decide whether reclamation should remain deferred or become active based on byte accounting and ownerless-page evidence.
 - Update Phases 54-55 from evidence.
@@ -3465,6 +3472,7 @@ Acceptance criteria:
 
 Task checklist:
 
+- [ ] Add or expose direct worker-pool diagnostics for dynamic recipe resolution and dynamic visual prep before interpreting long `recipe-resolution` or `dynamic-visual-prep-worker` waits as main-loop work.
 - [ ] Re-run `dc58` terrain-only radius-1 benchmark.
 - [ ] Re-run `dc58` terrain+generated-scenery radius-1 benchmark.
 - [ ] Re-run `dc58` terrain+env-cells radius-1 benchmark.

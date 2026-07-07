@@ -32,8 +32,13 @@ export type PreparedAssetServiceResponse =
 			readonly revision: number;
 	  };
 
+export type PreparedAssetServicePayloadView = "full" | "resolver";
+
 export function createPreparedAssetServiceHandler(
 	assetReader: PreparedAssetReader,
+	options: {
+		readonly payloadView: PreparedAssetServicePayloadView;
+	} = { payloadView: "resolver" },
 ): WorkerServiceHandler<
 	PreparedAssetServiceRequest,
 	PreparedAssetServiceResponse
@@ -45,7 +50,7 @@ export function createPreparedAssetServiceHandler(
 		const asset = await assetReader.requestPreparedAsset(request.key);
 		return {
 			response: {
-				asset: createWorkerPreparedAssetView(asset),
+				asset: createWorkerPreparedAssetView(asset, options.payloadView),
 				kind: "prepared-asset",
 			},
 		};
@@ -151,6 +156,7 @@ class PreparedAssetServiceContextReader<
 						response: response.response,
 						revision: response.revision,
 					}),
+					"resolver",
 				);
 			});
 	}
@@ -177,7 +183,14 @@ class RequestScopedPreparedAssetReader implements PreparedAssetReader {
 	}
 }
 
-function createWorkerPreparedAssetView(asset: PreparedAsset): PreparedAsset {
+function createWorkerPreparedAssetView(
+	asset: PreparedAsset,
+	payloadView: PreparedAssetServicePayloadView,
+): PreparedAsset {
+	if (payloadView === "full") {
+		return asset;
+	}
+
 	return createResolverEnvCellPreparedAssetView(
 		createResolverGfxObjPreparedAssetView(
 			createResolverRenderSurfacePreparedAssetView(asset),

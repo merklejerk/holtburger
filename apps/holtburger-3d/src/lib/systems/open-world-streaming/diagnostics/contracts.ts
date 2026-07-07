@@ -88,9 +88,8 @@ export interface OpenWorldStreamingDiagnosticsSnapshot {
 				readonly entityId: string;
 				readonly ownerId: string;
 				readonly stage:
-					| "dynamic-bake"
+					| "dynamic-visual-prep-worker"
 					| "recipe-resolution"
-					| "source-geometry-preparation"
 					| "texture-page-build-wait"
 					| "texture-placement-reservation";
 			}[];

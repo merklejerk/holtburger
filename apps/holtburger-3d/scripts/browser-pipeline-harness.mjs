@@ -791,7 +791,6 @@ function createHarnessScenarioStep({
 		lod,
 		openWorldStreaming: openWorldStreaming?.summary ?? null,
 		runtime: diagnostics.runtime,
-		staticOverview: overview.static,
 		stepName,
 		targetSelection: targetSelection ?? null,
 	};

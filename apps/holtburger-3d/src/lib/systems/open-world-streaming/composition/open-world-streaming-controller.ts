@@ -172,6 +172,8 @@ interface ActiveStaticTaskTiming {
 	readonly taskId: string;
 }
 
+type StaticTaskRunKey = `${number}:${string}`;
+
 interface StaticTaskTiming {
 	readonly applyMs: number;
 	readonly domain: StaticLayerTaskRequest["domain"];
@@ -253,8 +255,8 @@ export class OpenWorldStreamingController {
 		OpenWorldEnvCellSystemLayerCommit["payload"]
 	>();
 	readonly #textureClaims = new OpenWorldTextureClaimRegistry();
-	readonly #activeStaticTasksByTaskId = new Map<
-		string,
+	readonly #activeStaticTasksByRunTaskId = new Map<
+		StaticTaskRunKey,
 		ActiveStaticTaskTiming
 	>();
 	#disposed = false;
@@ -334,7 +336,7 @@ export class OpenWorldStreamingController {
 			this.#terrainProgress = createEmptyTerrainProgress();
 			this.#outdoorObjectProgress = createEmptyOutdoorObjectProgress();
 			this.#envCellProgress = createEmptyEnvCellProgress();
-			this.#activeStaticTasksByTaskId.clear();
+			this.#activeStaticTasksByRunTaskId.clear();
 			this.#envCellResourceMembershipByLandblock =
 				createEnvCellResourceMembershipIndex([]);
 			this.#renderer.setStaticRenderAnchorLandblockId(null);
@@ -522,7 +524,7 @@ export class OpenWorldStreamingController {
 				staticAuthored: dynamicSnapshot.staticAuthoredCount,
 			},
 			staticTasks: createStaticTaskDiagnostics({
-				active: [...this.#activeStaticTasksByTaskId.values()],
+				active: [...this.#activeStaticTasksByRunTaskId.values()],
 				nowMs: nowMs(),
 				recent: this.#recentStaticTaskTimings,
 				requested:
@@ -582,6 +584,7 @@ export class OpenWorldStreamingController {
 			...createEmptyEnvCellProgress(),
 			requested: envCellTasks.length,
 		};
+		this.#activeStaticTasksByRunTaskId.clear();
 		this.#clearDeferredDenseRendererLayers();
 		const targetOwnerIds = new Set<MaterializationOwnerId>();
 		const requests = tasks.map((task) => {
@@ -631,7 +634,8 @@ export class OpenWorldStreamingController {
 			return;
 		}
 		const startedAtMs = nowMs();
-		this.#activeStaticTasksByTaskId.set(request.task.taskId, {
+		const activeTaskKey = createStaticTaskRunKey(runId, request.task.taskId);
+		this.#activeStaticTasksByRunTaskId.set(activeTaskKey, {
 			domain: request.task.domain,
 			ownerId: request.owner.id,
 			phase: "materializing",
@@ -712,6 +716,7 @@ export class OpenWorldStreamingController {
 						this.#applyTerrainCommit(commit, interest.anchorLandblockId),
 					drawUnits: commit.payload.drawUnits.length,
 					request,
+					runId,
 					stages: getStaticTaskStageTimings(commit),
 					startedAtMs,
 				});
@@ -733,6 +738,7 @@ export class OpenWorldStreamingController {
 					apply: () => this.#applyOutdoorObjectCommit(commit),
 					drawUnits: commit.payload.drawUnits.length,
 					request,
+					runId,
 					stages: getStaticTaskStageTimings(commit),
 					startedAtMs,
 				});
@@ -756,6 +762,7 @@ export class OpenWorldStreamingController {
 						commit.payload.structuredInteriorDrawUnits.length +
 						commit.payload.envCellStaticObjectDrawUnits.length,
 					request,
+					runId,
 					stages: getStaticTaskStageTimings(commit),
 					startedAtMs,
 				});
@@ -790,8 +797,8 @@ export class OpenWorldStreamingController {
 				};
 			}
 		} finally {
+			this.#activeStaticTasksByRunTaskId.delete(activeTaskKey);
 			if (this.#isCurrentRun(runId)) {
-				this.#activeStaticTasksByTaskId.delete(request.task.taskId);
 				this.#terrainProgress = {
 					...this.#terrainProgress,
 					baking: 0,
@@ -825,17 +832,21 @@ export class OpenWorldStreamingController {
 			readonly owner: { readonly id: MaterializationOwnerId };
 			readonly task: StaticLayerTaskRequest;
 		};
+		readonly runId: number;
 		readonly stages: readonly OpenWorldStreamingStaticTaskStageTiming[];
 		readonly startedAtMs: number;
 	}): void {
 		const applyStartedAtMs = nowMs();
-		this.#activeStaticTasksByTaskId.set(options.request.task.taskId, {
-			domain: options.request.task.domain,
-			ownerId: options.request.owner.id,
-			phase: "applying",
-			startedAtMs: applyStartedAtMs,
-			taskId: options.request.task.taskId,
-		});
+		this.#activeStaticTasksByRunTaskId.set(
+			createStaticTaskRunKey(options.runId, options.request.task.taskId),
+			{
+				domain: options.request.task.domain,
+				ownerId: options.request.owner.id,
+				phase: "applying",
+				startedAtMs: applyStartedAtMs,
+				taskId: options.request.task.taskId,
+			},
+		);
 		options.apply();
 		this.#publishDeferredDenseRendererLayersIfStaticReady();
 		const completedAtMs = nowMs();
@@ -2088,6 +2099,13 @@ function sum(values: readonly number[]): number {
 
 function nowMs(): number {
 	return globalThis.performance?.now() ?? Date.now();
+}
+
+function createStaticTaskRunKey(
+	runId: number,
+	taskId: string,
+): StaticTaskRunKey {
+	return `${runId}:${taskId}`;
 }
 
 function stringifyError(error: unknown): string {

@@ -35,17 +35,18 @@ import type {
 import type { TextureFilteringMode } from "../../../textures/sampling-policy";
 import type { TextureAtlasPageInspectionSnapshot } from "../../../textures/texture-manager";
 import type { OpenWorldStreamingBoundaryAdapters } from "../adapters/browser-boundaries";
-import {
-	createEmptyLegacyDynamicRuntimeSnapshot,
-	createEmptyLegacyStaticDiagnosticsSnapshot,
-	createEmptyLegacyStaticOverviewSnapshot,
-} from "../testing/empty-runtime-snapshots";
+import { createEmptyLegacyDynamicRuntimeSnapshot } from "../testing/empty-runtime-snapshots";
 import { OpenWorldStreamingController } from "./open-world-streaming-controller";
 import type {
-	OpenWorldStreamingControllerSnapshot,
 	OpenWorldStreamingStaticInterest,
 	OpenWorldStreamingStaticPublicationMode,
 } from "./open-world-streaming-controller";
+import type { OpenWorldStreamingDiagnosticsSnapshot } from "../diagnostics/contracts";
+import {
+	CLIENT_RUNTIME_LEGACY_SHIM_DIAGNOSTIC,
+	createLegacyStaticDiagnosticsFromController,
+	createLegacyStaticOverviewFromController,
+} from "./client-runtime-legacy-shim";
 
 export interface OpenWorldStreamingClientRuntimeOptions {
 	readonly adapters: OpenWorldStreamingBoundaryAdapters;
@@ -69,6 +70,7 @@ const DEFAULT_CAMERA_RESIDENCY: RuntimeCameraResidency = {
 	kind: "unknown",
 	landblockId: null,
 };
+
 const DEFAULT_TEXTURE_FILTERING_MODE: TextureFilteringMode = "nearest";
 
 export function createOpenWorldStreamingClientRuntime(
@@ -376,7 +378,14 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 
 	createDiagnosticsReport(): RuntimeDiagnosticsReport {
 		const renderer = this.#renderer.createDiagnosticsSnapshot();
-		const nativeDiagnostics = this.#controller.createDiagnosticsSnapshot();
+		const controllerDiagnostics = this.#controller.createDiagnosticsSnapshot();
+		const nativeDiagnostics: OpenWorldStreamingDiagnosticsSnapshot = {
+			...controllerDiagnostics,
+			compatibilityShims: [
+				...controllerDiagnostics.compatibilityShims,
+				CLIENT_RUNTIME_LEGACY_SHIM_DIAGNOSTIC,
+			],
+		};
 		const controller = this.#controller.createSnapshot();
 		return {
 			domains: [
@@ -590,65 +599,5 @@ function createStaticInterestFromRuntimeSceneInterest(
 				: -1,
 		},
 		revision,
-	};
-}
-
-function createLegacyStaticOverviewFromController(
-	controller: OpenWorldStreamingControllerSnapshot,
-): RuntimeOverviewSnapshot["static"] {
-	return {
-		...createEmptyLegacyStaticOverviewSnapshot(),
-		baking:
-			controller.terrain.baking +
-			controller.outdoorObjects.baking +
-			controller.envCells.baking,
-		committed:
-			controller.terrain.committed +
-			controller.outdoorObjects.committed +
-			controller.envCells.committed,
-		latestEnvCellSystemPayload: controller.envCells.latestEnvCellSystemPayload,
-		latestTerrainPayload: controller.terrain.latestTerrainPayload,
-		requested:
-			controller.terrain.requested +
-			controller.outdoorObjects.requested +
-			controller.envCells.requested,
-		resolving:
-			controller.terrain.resolving +
-			controller.outdoorObjects.resolving +
-			controller.envCells.resolving,
-	};
-}
-
-function createLegacyStaticDiagnosticsFromController(
-	controller: OpenWorldStreamingControllerSnapshot,
-): RuntimeDiagnosticsSnapshot["static"] {
-	return {
-		...createEmptyLegacyStaticDiagnosticsSnapshot(),
-		baking:
-			controller.terrain.baking +
-			controller.outdoorObjects.baking +
-			controller.envCells.baking,
-		committed:
-			controller.terrain.committed +
-			controller.outdoorObjects.committed +
-			controller.envCells.committed,
-		committedDrawUnits:
-			controller.terrain.installedDrawUnits +
-			controller.outdoorObjects.installedDrawUnits +
-			controller.envCells.installedDrawUnits,
-		failed:
-			controller.terrain.failed +
-			controller.outdoorObjects.failed +
-			controller.envCells.failed,
-		latestEnvCellSystemPayload: controller.envCells.latestEnvCellSystemPayload,
-		latestTerrainPayload: controller.terrain.latestTerrainPayload,
-		requested:
-			controller.terrain.requested +
-			controller.outdoorObjects.requested +
-			controller.envCells.requested,
-		resolving:
-			controller.terrain.resolving +
-			controller.outdoorObjects.resolving +
-			controller.envCells.resolving,
 	};
 }

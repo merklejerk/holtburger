@@ -73,7 +73,7 @@ function parseArgs(args) {
 		landblockIds: [DEFAULT_LANDBLOCK_ID],
 		lod: null,
 		outputPath: null,
-		runtimePipeline: "legacy",
+		runtimePipeline: "open-world-streaming",
 		scenario: "landblock-sequence",
 		sequenceRepeatCount: 1,
 		settleDelayMs: 0,
@@ -194,7 +194,7 @@ Options:
   --domains <csv>          Static domains to request. Default: ${DEFAULT_STATIC_DOMAINS.join(",")}
   --layer-distance <n>     Use one radius for every outdoor static layer.
   --repeat <count>         Repeat the landblock sequence. Default: 1
-  --runtime-pipeline <name> Runtime pipeline: legacy, open-world-streaming. Default: legacy
+  --runtime-pipeline <name> Runtime pipeline: legacy, open-world-streaming. Default: open-world-streaming
   --scenario <name>        Scenario: instantiate-only, landblock-sequence, explicit-object-radius-expansion, dungeon-cell.
   --settle-delay-ms <ms>   Delay after each settled scene before continuing. Default: 0
   --static-publication <mode> Static renderer publication: normal, suppress-dense-renderer, defer-dense-renderer-until-ready. Default: defer-dense-renderer-until-ready
@@ -321,10 +321,25 @@ function createDiagnosticsSummary(diagnostics, outputPath, errorMessage) {
 		errorMessage: errorMessage ?? null,
 		harnessScenario: diagnostics.harnessScenario ?? null,
 		harnessFrameDiagnostics: diagnostics.harnessFrameDiagnostics ?? null,
+		legacyDiagnostics: createLegacyDiagnosticsSummary({
+			staticCommitInstall,
+			staticCoordinator,
+			textureAtlas,
+		}),
 		openWorldStreaming: openWorldStreaming?.summary ?? null,
 		outputPath,
 		runtime: diagnostics.runtime,
 		runtimePipeline: diagnostics.runtimePipeline ?? null,
+	};
+}
+
+function createLegacyDiagnosticsSummary({
+	staticCommitInstall,
+	staticCoordinator,
+	textureAtlas,
+}) {
+	return {
+		deletionTarget: "Phase 16 legacy pipeline deletion",
 		staticCommitInstall: staticCommitInstall?.summary ?? null,
 		staticCoordinator: staticCoordinator?.summary ?? null,
 		staticCoordinatorTiming: staticCoordinator?.timingSummary ?? null,
@@ -826,14 +841,17 @@ function createHarnessScenarioStep({
 		index,
 		envCellId: envCellId ?? null,
 		landblockId,
+		legacyDiagnostics: createLegacyDiagnosticsSummary({
+			staticCommitInstall,
+			staticCoordinator,
+			textureAtlas,
+		}),
 		lod,
 		openWorldStreaming: openWorldStreaming?.summary ?? null,
 		runtime: diagnostics.runtime,
-		staticCoordinator: staticCoordinator?.summary ?? null,
 		staticOverview: overview.static,
 		stepName,
 		targetSelection: targetSelection ?? null,
-		textureAtlas: textureAtlas?.summary ?? null,
 	};
 }
 
@@ -899,42 +917,46 @@ async function samplePipelineTrace(client, samples, workerEventsByKey) {
 
 	samples.push({
 		atMs: Date.now(),
-		inFlightTasks: (staticCoordinator?.inFlightTasks ?? []).map((task) => ({
-			activeBakeBatchId: task.activeBakeBatchId,
-			activeBakeStage: task.activeBakeStage,
-			activeBakeStageAgeMs: task.activeBakeStageAgeMs,
-			domain: task.domain,
-			phase: task.phase,
-			scopeKey: task.scopeKey,
-		})),
-		pendingJobs: pendingJobs.map((job) => ({
-			bakeBatchId: job.bakeBatchId,
-			domain: job.domain,
-			itemCount: job.itemCount,
-			lastTraceStage: job.traceEvents.at(-1)?.stage ?? null,
-			requestId: job.requestId,
-			stage: job.stage,
-			stageAgeMs: job.stageAgeMs,
-			traceEventCount: job.traceEvents.length,
-		})),
-		renderer: diagnostics.runtime,
 		harnessFrameDiagnostics: diagnostics.harnessFrameDiagnostics ?? null,
+		legacyDiagnostics: {
+			...createLegacyDiagnosticsSummary({
+				staticCommitInstall,
+				staticCoordinator,
+				textureAtlas,
+			}),
+			inFlightTasks: (staticCoordinator?.inFlightTasks ?? []).map((task) => ({
+				activeBakeBatchId: task.activeBakeBatchId,
+				activeBakeStage: task.activeBakeStage,
+				activeBakeStageAgeMs: task.activeBakeStageAgeMs,
+				domain: task.domain,
+				phase: task.phase,
+				scopeKey: task.scopeKey,
+			})),
+			pendingJobs: pendingJobs.map((job) => ({
+				bakeBatchId: job.bakeBatchId,
+				domain: job.domain,
+				itemCount: job.itemCount,
+				lastTraceStage: job.traceEvents.at(-1)?.stage ?? null,
+				requestId: job.requestId,
+				stage: job.stage,
+				stageAgeMs: job.stageAgeMs,
+				traceEventCount: job.traceEvents.length,
+			})),
+			sourceResolutions: sourceResolutions.map((resolution) => ({
+				ageMs: resolution.ageMs,
+				landblockHex: resolution.landblockHex,
+				layerKinds: resolution.layerKinds,
+				recipeCount: resolution.recipeCount,
+				requestId: resolution.requestId,
+				requestSeq: resolution.requestSeq,
+				resolverMs: resolution.resolverMs,
+				sourceLod: resolution.sourceLod,
+				status: resolution.status,
+				taskIds: resolution.taskIds,
+			})),
+		},
 		openWorldStreaming: openWorldStreaming?.summary ?? null,
-		sourceResolutions: sourceResolutions.map((resolution) => ({
-			ageMs: resolution.ageMs,
-			landblockHex: resolution.landblockHex,
-			layerKinds: resolution.layerKinds,
-			recipeCount: resolution.recipeCount,
-			requestId: resolution.requestId,
-			requestSeq: resolution.requestSeq,
-			resolverMs: resolution.resolverMs,
-			sourceLod: resolution.sourceLod,
-			status: resolution.status,
-			taskIds: resolution.taskIds,
-		})),
-		staticCommitInstall: staticCommitInstall ?? null,
-		staticCoordinator: staticCoordinator?.summary ?? null,
-		textureAtlas: textureAtlas?.summary ?? null,
+		renderer: diagnostics.runtime,
 	});
 
 	if (samples.length > 600) {

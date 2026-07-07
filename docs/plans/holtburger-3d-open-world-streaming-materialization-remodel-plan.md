@@ -70,7 +70,8 @@ The desired model is not a small tuning pass. It changes ownership, scheduling, 
 
 ## North Stars
 
-- **Open-world streaming should feel continuous.** Radius-1 loading must not create browser blackouts, and the design should scale toward larger radii by budgeting main-loop work instead of batching bigger bursts.
+- **Open-world streaming should feel continuous.** Radius-1 loading must not create browser blackouts, and the design should scale toward larger radii by keeping browser-owned work small instead of batching bigger bursts.
+- **Budgeting is a measured fallback, not an architecture.** Worker wall time is not a frame-stutter bug by itself. Add frame budgets only for proven browser-main-loop CPU offenders that cannot be deleted, moved off-thread, or collapsed into a smaller direct contract.
 - **The future 3D client is the real target.** Browser mode is the proving ground, but shared app-local abstractions should be judged against a traditional replacement client with richer rendering, motion, visibility, animation, and interaction needs.
 - **Ownership should be boring and explicit.** Currentness, eviction, and cleanup should start from owner membership and owner-indexed resources, not broad revision folklore or reverse-materialization DTOs.
 - **Texture residency is a streaming system concern.** Bucket policy, retain/release semantics, page reservations, and binding readiness belong with the open-world materialization model, not in a generic texture junk drawer.
@@ -1714,6 +1715,7 @@ Deliverables:
 - Migrate surviving browser, harness, UI, and diagnostics consumers directly to replacement contracts before adding any cutover shim.
 - Treat any cutover breakage in legacy-shaped diagnostics or panels as a consumer migration problem, not a reason to backfill old fields into the replacement runtime.
 - Make diagnostic consumer migration part of the cutover, not polish afterward. Panels, harness summaries, and tests that survive Phase 14 should speak replacement-native diagnostics; legacy-shaped projections are allowed only as named edge shims with Phase 16 deletion triggers.
+- Do not add broad frame-budget APIs during cutover for worker-side wall time or already-passing frame metrics; only budget measured browser-main-loop offenders after deletion, off-thread movement, and direct-contract simplification have failed.
 
 Acceptance criteria:
 
@@ -1726,25 +1728,35 @@ Acceptance criteria:
 - Cutover does not preserve a compatibility projection merely because an old diagnostic panel, benchmark summary, or test expects it.
 - Cutover may temporarily leave legacy diagnostic output incomplete or broken when preserving it would distort replacement contracts.
 - Every touched browser, harness, UI, diagnostics, and test consumer is either migrated to a direct replacement contract, deleted, or left behind a named deletion-targeted edge shim.
+- Worker wait, bake wait, packing wait, or source-resolution wall time alone does not block cutover unless it creates stale output, dishonest readiness, queue starvation, or a measured browser-frame violation.
 - `npm run check`, `npm run lint:ts`, and focused tests pass.
 
 Task checklist:
 
-- [ ] Switch runtime composition.
-- [ ] Migrate diagnostics panels and overview snapshots to replacement-native contracts.
-- [ ] Delete or isolate any legacy-shaped UI/harness projection that is not needed after the cutover window.
-- [ ] Break or delete legacy-shaped diagnostics consumers that do not justify a named shim.
-- [ ] Replace architecture-preserving diagnostic tests with tests over replacement-native contracts, or delete them if they only validate legacy projection completeness.
-- [ ] Split any mixed adapter/shim module so durable boundary adapters can survive Phase 16 without carrying compatibility code.
-- [ ] Verify every surviving cutover consumer either reads the direct replacement contract or has a named, deletion-targeted edge shim.
-- [ ] Record any intentionally broken or incomplete legacy-edge shim, including owner, dishonest-field risk, and Phase 16 deletion trigger.
-- [ ] Update browser harness expectations.
-- [ ] Run app checks.
-- [ ] Run benchmark matrix.
+- [x] Switch runtime composition.
+- [x] Migrate diagnostics panels and overview snapshots to replacement-native contracts.
+- [x] Delete or isolate any legacy-shaped UI/harness projection that is not needed after the cutover window.
+- [x] Break or delete legacy-shaped diagnostics consumers that do not justify a named shim.
+- [x] Replace architecture-preserving diagnostic tests with tests over replacement-native contracts, or delete them if they only validate legacy projection completeness.
+- [x] Split any mixed adapter/shim module so durable boundary adapters can survive Phase 16 without carrying compatibility code.
+- [x] Verify every surviving cutover consumer either reads the direct replacement contract or has a named, deletion-targeted edge shim.
+- [x] Record any intentionally broken or incomplete legacy-edge shim, including owner, dishonest-field risk, and Phase 16 deletion trigger.
+- [x] Update browser harness expectations.
+- [x] Run app checks.
+- [x] Run benchmark matrix.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 14 switched `DEFAULT_BROWSER_RUNTIME_PIPELINE` and the browser harness default to `open-world-streaming`. `BrowserDisplay` calls `createBrowserRuntime(...)` without an override, so the normal browser route now uses replacement composition by default. The legacy pipeline remains available only as an explicit pipeline option for the short verification window and Phase 15/16 deletion audit.
+- The browser harness summary and trace contract now expose replacement-native `openWorldStreaming` diagnostics as the first-class data. Legacy `staticCoordinator`, `staticCommitInstall`, `staticCoordinatorTiming`, and `textureAtlas` projections were moved under `legacyDiagnostics` with a `Phase 16 legacy pipeline deletion` target and are allowed to be `null` on the replacement path.
+- The replacement controller no longer reports the outer `ClientRuntime` compatibility projection as its own internal shim. The remaining legacy `ClientRuntime` overview/diagnostics snapshot projection is isolated in `composition/client-runtime-legacy-shim.ts` and reported by the browser runtime adapter as a deletion-targeted shim. This keeps the durable adapter from owning the shim implementation.
+- UI diagnostic migration did not require a visual panel rewrite: `BrowserDisplay` opens the raw runtime diagnostics report, and the surviving harness/UI readiness logic already reads the `open-world-streaming` diagnostics domain directly. The old texture-atlas inspector is inert on the replacement path because replacement overview atlas pages are empty; Phase 16 should delete or replace that legacy inspector rather than backfilling replacement atlas pages into the old texture-manager shape.
+- Phase 14 honored the worker-budget steering rule. No broad frame-budget API was added for worker/source/packing wall time; the all-domain default harness stayed inside the recovered frame profile.
+- Phase 14 verification: `npm run check`, `npm run lint:ts`, and focused `npm run test:ts -- src/lib/systems/open-world-streaming/composition/runtime-pipeline.test.ts src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts` passed.
+- Phase 14 default browser harness evidence:
+  - `npm run harness:browser -- --domains terrain --layer-distance 0 --timeout-ms 60000` selected `open-world-streaming` without an explicit runtime flag, completed 1/1 static task, failed 0, rendered 3 terrain draw units, reported one startup long task at about 60 ms, and kept renderer/runtime frame deltas below 50 ms.
+  - `npm run harness:browser -- --domains terrain,generated-scenery,buildings,explicit-objects,env-cells --layer-distance 1 --timeout-ms 60000 --output /tmp/holtburger-phase14-default-all-domain.json` selected `open-world-streaming` without an explicit runtime flag, completed 45/45 static tasks, failed 0, reported 6 long tasks, max long task about 176 ms, max renderer frame delta about 151.4 ms, max runtime tick delta about 151.4 ms, and left legacy diagnostics null under the deletion-targeted `legacyDiagnostics` edge.
+- Debt for Phase 15/16: delete the explicit legacy runtime switch after any final comparison run, delete `composition/client-runtime-legacy-shim.ts`, delete `testing/empty-runtime-snapshots.ts` if no other shim consumes it, and replace or remove the legacy texture-atlas page inspector instead of teaching replacement texture residency to mimic `TextureManager` inspection snapshots.
 
 ### Phase 15: Resteering Checkpoint 5 - Cutover Deletion Audit
 

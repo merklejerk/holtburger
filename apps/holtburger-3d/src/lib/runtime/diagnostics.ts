@@ -20,6 +20,7 @@ import type {
 	TextureWrapMode,
 } from "../textures/sampling-policy";
 import type { DynamicRuntimeSnapshot } from "../dynamic/contracts";
+import type { OpenWorldStreamingDiagnosticsSnapshot } from "../systems/open-world-streaming/diagnostics/contracts";
 
 export interface RuntimeDiagnostics {
 	warn(event: RuntimeWarningEvent): void;
@@ -119,7 +120,7 @@ interface RendererDiagnosticsReport {
 
 export interface OpenWorldStreamingDiagnosticsReport {
 	readonly kind: "open-world-streaming";
-	readonly summary: unknown;
+	readonly summary: OpenWorldStreamingDiagnosticsSnapshot;
 }
 
 export interface RendererDiagnosticsSummary {

@@ -16,6 +16,7 @@ import type {
 	TexturePlacementIntent,
 	TexturePlacementSnapshot,
 } from "../../../../textures/placement";
+import type { TextureFilteringMode } from "../../../../textures/sampling-policy";
 import type { MaterializationOwnerId } from "../../owners/owner-id";
 import type { OpenWorldStreamingStaticTaskStageTiming } from "../../diagnostics/contracts";
 import type { OpenWorldTexturePageBuildInput } from "../../texture-residency/page-build/protocol";
@@ -35,6 +36,7 @@ export interface OpenWorldTerrainArtifactRunnerOptions {
 }
 
 export interface OpenWorldTerrainArtifactRequest {
+	readonly filteringMode: TextureFilteringMode;
 	readonly isCurrent: () => boolean;
 	readonly ownerId: MaterializationOwnerId;
 	readonly task: StaticLayerTaskRequest;
@@ -93,7 +95,7 @@ export class OpenWorldTerrainArtifactRunner {
 					string,
 					TexturePlacementIntent
 				>({
-					filteringMode: "nearest",
+					filteringMode: request.filteringMode,
 					intents: textureIntents,
 					isCurrent: request.isCurrent,
 					jobPrefix: "open-world-terrain",

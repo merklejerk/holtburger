@@ -10,6 +10,7 @@ import type { DynamicVisualPrepper } from "../../../dynamic/visual-prepper";
 import type { DynamicVisualRecipeResolver } from "../../../dynamic/visual-recipe-resolver";
 import type { StaticAuthoredDynamicPlacementRecord } from "../../../static/contracts";
 import type { TextureBindingId } from "../../../textures/identity";
+import type { TextureFilteringMode } from "../../../textures/sampling-policy";
 import type {
 	DynamicRendererResourceCommit,
 	DynamicRendererInstanceCommit,
@@ -37,6 +38,7 @@ export interface OpenWorldRuntimeEntitySystemOptions {
 	readonly assetReader: PreparedAssetReader;
 	readonly createDynamicVisualPrepper: () => DynamicVisualPrepper;
 	readonly createDynamicVisualRecipeResolver: () => DynamicVisualRecipeResolver;
+	readonly getTextureFilteringMode: () => TextureFilteringMode;
 	readonly owners: MaterializationOwnerRegistry;
 	readonly renderer: OpenWorldRuntimeEntityRendererPort;
 	readonly scheduleTexturePageBuilds: (
@@ -151,6 +153,7 @@ export class OpenWorldRuntimeEntitySystem {
 	readonly #controller: DynamicEntityController;
 	readonly #createDynamicVisualPrepper: () => DynamicVisualPrepper;
 	readonly #createDynamicVisualRecipeResolver: () => DynamicVisualRecipeResolver;
+	readonly #getTextureFilteringMode: () => TextureFilteringMode;
 	readonly #owners: MaterializationOwnerRegistry;
 	readonly #renderer: OpenWorldRuntimeEntityRendererPort;
 	readonly #scheduleTexturePageBuilds: (
@@ -199,6 +202,7 @@ export class OpenWorldRuntimeEntitySystem {
 		this.#createDynamicVisualPrepper = options.createDynamicVisualPrepper;
 		this.#createDynamicVisualRecipeResolver =
 			options.createDynamicVisualRecipeResolver;
+		this.#getTextureFilteringMode = options.getTextureFilteringMode;
 		this.#owners = options.owners;
 		this.#renderer = options.renderer;
 		this.#scheduleTexturePageBuilds = options.scheduleTexturePageBuilds;
@@ -399,7 +403,7 @@ export class OpenWorldRuntimeEntitySystem {
 				"texture-placement-reservation",
 				() =>
 					this.#textureResidency.reserveObjectVisualPlacements({
-						filteringMode: "nearest",
+						filteringMode: this.#getTextureFilteringMode(),
 						intents: texturePlanning.placementIntents,
 						isCurrent: () => this.#isCurrent(request),
 						ownerId: request.ownerId,

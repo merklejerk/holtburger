@@ -33,6 +33,7 @@ describe("OpenWorldEnvCellArtifactRunner", () => {
 		});
 
 		const commit = await runner.run({
+			filteringMode: "anisotropic-4x",
 			isCurrent: () => true,
 			ownerId:
 				"static-layer:env-cell-system:0xda55ffff" as MaterializationOwnerId,
@@ -71,6 +72,7 @@ describe("OpenWorldEnvCellArtifactRunner", () => {
 function createFixtureTextureResidency(): OpenWorldTextureResidencyService {
 	const atlasBuilder = createUnusedObjectVisualAtlasBuilder();
 	return new OpenWorldTextureResidencyService({
+		applySamplerPolicyUpdate: () => {},
 		applyTextureCommits: () => {},
 		objectVisualAtlasBuilder: atlasBuilder,
 		textureAtlasBuilder: atlasBuilder,

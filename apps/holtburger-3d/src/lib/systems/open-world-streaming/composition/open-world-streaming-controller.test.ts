@@ -509,6 +509,8 @@ class FixtureTerrainRenderer {
 		this.textureUpdates.push(update);
 	}
 
+	applySamplerPolicyUpdate(): void {}
+
 	commitDynamicResources(): void {}
 
 	commitDynamicInstances(): void {}

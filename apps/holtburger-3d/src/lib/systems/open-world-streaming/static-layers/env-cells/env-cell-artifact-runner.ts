@@ -23,6 +23,7 @@ import { EnvCellSystemGeometryResourceProvider } from "../../../../static/env-ce
 import { createStructuredInteriorTexturePlacementIntentResult } from "../../../../static/env-cells/bake/structured-interior-placement-planner";
 import { StaticObjectBakeResourceProvider } from "../../../../static/objects/bake/static-object-bake-resources";
 import { createStaticObjectTexturePlacementIntentResult } from "../../../../static/objects/bake/static-object-placement-planner";
+import type { TextureFilteringMode } from "../../../../textures/sampling-policy";
 import {
 	createOutdoorPortalProjectionRoot,
 	createStaticPortalProjection,
@@ -45,6 +46,7 @@ export interface OpenWorldEnvCellArtifactRunnerOptions {
 }
 
 export interface OpenWorldEnvCellArtifactRequest {
+	readonly filteringMode: TextureFilteringMode;
 	readonly isCurrent: () => boolean;
 	readonly ownerId: MaterializationOwnerId;
 	readonly task: StaticLayerTaskRequest;
@@ -103,7 +105,7 @@ export class OpenWorldEnvCellArtifactRunner {
 			"texture-placement-reservation",
 			() =>
 				this.#textureResidency.reserveObjectVisualPlacements({
-					filteringMode: "nearest",
+					filteringMode: request.filteringMode,
 					intents: textureIntents.intents,
 					isCurrent: request.isCurrent,
 					ownerId: request.ownerId,

@@ -359,6 +359,7 @@ function createSystem(options: {
 		createDynamicVisualPrepper: () =>
 			options.prepper ?? new FixtureDynamicPrepper(),
 		createDynamicVisualRecipeResolver: () => new FixtureDynamicRecipeResolver(),
+		getTextureFilteringMode: () => "anisotropic-4x",
 		owners: options.owners,
 		renderer: options.renderer,
 		scheduleTexturePageBuilds: (request) => {
@@ -375,6 +376,7 @@ function createSystem(options: {
 function createFixtureTextureResidency(): OpenWorldTextureResidencyService {
 	const atlasBuilder = createUnusedObjectVisualAtlasBuilder();
 	return new OpenWorldTextureResidencyService({
+		applySamplerPolicyUpdate: () => {},
 		applyTextureCommits: () => {},
 		objectVisualAtlasBuilder: atlasBuilder,
 		textureAtlasBuilder: atlasBuilder,

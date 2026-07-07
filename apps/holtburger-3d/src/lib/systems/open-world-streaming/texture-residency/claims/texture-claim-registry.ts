@@ -3,6 +3,7 @@ import type {
 	TextureKey,
 	TexturePageClass,
 } from "../../../../textures/identity";
+import type { TexturePageSampleClass } from "../../../../textures/sampling-policy";
 import type { TextureUsagePurpose } from "../../../../textures/placement";
 import type { MaterialTextureDataUseIdentity } from "../../../../static/contracts";
 import type { MaterializationOwnerId } from "../../owners/owner-id";
@@ -72,6 +73,8 @@ export interface OpenWorldTexturePageRecord {
 	readonly assignedPixelCount: number;
 	/** Build reservation token when this page has in-flight worker work. */
 	readonly reservationToken: OpenWorldTexturePageReservationToken | null;
+	/** Renderer-facing sample class that controls sampler policy derivation. */
+	readonly sampleClass: TexturePageSampleClass;
 	/** Last active page state retained while this page is ownerless and reclaimable. */
 	readonly ownerlessRetainedState: OpenWorldActiveTexturePageState | null;
 	/** Page lifecycle state before renderer-facing texture commits are emitted. */
@@ -251,6 +254,7 @@ interface MutableTexturePage {
 	>;
 	lastActiveState: Exclude<OpenWorldTexturePageRecord["state"], "reclaimable">;
 	reservationToken: OpenWorldTexturePageReservationToken | null;
+	readonly sampleClass: TexturePageSampleClass;
 	state: OpenWorldTexturePageRecord["state"];
 	stateBeforeBuild: OpenWorldActiveTexturePageState | null;
 	readonly textureRefId: string;
@@ -344,6 +348,7 @@ export class OpenWorldTextureClaimRegistry {
 		readonly bucketKey: OpenWorldTextureBucketKey;
 		readonly entryIds: readonly OpenWorldTextureEntryId[];
 		readonly placements?: readonly OpenWorldTexturePagePlacementInput[];
+		readonly sampleClass: TexturePageSampleClass;
 		readonly state?: OpenWorldActiveTexturePageState;
 		readonly textureHeight?: number;
 		readonly textureRefId?: string;
@@ -408,6 +413,7 @@ export class OpenWorldTextureClaimRegistry {
 			pageBuildFactsByEntryId,
 			placementsByEntryId,
 			reservationToken: null,
+			sampleClass: input.sampleClass,
 			state: input.state ?? "planned",
 			stateBeforeBuild: null,
 			textureHeight: input.textureHeight ?? null,
@@ -1055,6 +1061,7 @@ function snapshotPage(page: MutableTexturePage): OpenWorldTexturePageRecord {
 		ownerlessRetainedState:
 			page.state === "reclaimable" ? page.lastActiveState : null,
 		reservationToken: page.reservationToken,
+		sampleClass: page.sampleClass,
 		state: page.state,
 		textureHeight: page.textureHeight,
 		texturePixelCount:

@@ -197,11 +197,29 @@ interface DebugOverlayTrianglePrimitive {
 }
 
 export interface TexturePlacementUpdate {
+	readonly bindingReadinessUpdates: readonly TextureBindingReadinessUpdate[];
 	readonly placements: readonly TexturePlacement[];
 	readonly removedTextureRefIds: readonly string[];
 	readonly resolvedTexturePlacements: readonly ResolvedTexturePlacement[];
 	readonly revision: number;
 }
+
+type TextureBindingReadinessUpdate =
+	| {
+			readonly bindingId: TextureBindingId;
+			readonly kind: "pending";
+			readonly reason: string;
+	  }
+	| {
+			readonly bindingId: TextureBindingId;
+			readonly kind: "failed";
+			readonly reason: string;
+	  }
+	| {
+			readonly bindingId: TextureBindingId;
+			readonly kind: "missing-not-in-flight";
+			readonly reason: string;
+	  };
 
 export interface TexturePageVersion {
 	/** Renderer texture object identity for this atlas page. */

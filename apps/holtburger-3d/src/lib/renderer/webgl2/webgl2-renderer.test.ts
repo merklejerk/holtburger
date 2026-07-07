@@ -2324,9 +2324,11 @@ function createTexturePlacementUpdate(
 	textureRefId: string,
 ): TexturePlacementUpdate {
 	return {
+		bindingReadinessUpdates: [],
 		placements: [
 			{
 				anisotropy: 1,
+				bindingId: textureBindingId,
 				filteringMode: "nearest",
 				format: "rgba8",
 				height: 1,
@@ -2341,7 +2343,6 @@ function createTexturePlacementUpdate(
 				sampleClass: "rgba-color",
 				samplerPolicyKey: "sample=rgba-color;filter=nearest;mips=off;aniso=1",
 				textureRefId,
-				textureBindingId,
 				width: 1,
 				wrapS: "clamp-to-edge",
 				wrapT: "clamp-to-edge",
@@ -2358,7 +2359,6 @@ function createTexturePlacementUpdate(
 				rect: [0, 0, 1, 1],
 				textureHeight: 1,
 				textureRefId,
-				textureBindingId,
 				textureWidth: 1,
 			},
 		],

@@ -2468,18 +2468,26 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Audit imports of `buildReservedMaterialTexturePages`, `DirectOpenWorldTexturePageBuilder`, and `DirectOpenWorldObjectVisualAtlasBuilder`.
-- [ ] Confirm production callers use `reserveMaterialTexturePlacements(...)` or `reserveObjectVisualTexturePlacements(...)` and controller-owned page-build tasks, not synchronous build-plan helpers.
-- [ ] Delete or move `buildMaterialTexturePlacementPlan(...)`, `buildObjectVisualTexturePlacementPlan(...)`, and `buildReservedMaterialTexturePages(...)` behind test-only or worker-internal boundaries.
-- [ ] Replace direct build-plan tests with reservation tests plus page-build worker/settlement tests.
-- [ ] Keep worker handlers as the only non-test callers of `DirectOpenWorldTexturePageBuilder` and `DirectOpenWorldObjectVisualAtlasBuilder`.
-- [ ] Move any direct-builder fixtures into test-only helpers if production modules no longer need them.
-- [ ] Add or update tests for worker-client page-build output, object-visual atlas worker output, and controller settlement.
-- [ ] Run `npm run check`, focused worker/page-build/placement tests, and all-domain browser harness.
+- [x] Audit imports of `buildReservedMaterialTexturePages`, `DirectOpenWorldTexturePageBuilder`, and `DirectOpenWorldObjectVisualAtlasBuilder`.
+- [x] Confirm production callers use `reserveMaterialTexturePlacements(...)` or `reserveObjectVisualTexturePlacements(...)` and controller-owned page-build tasks, not synchronous build-plan helpers.
+- [x] Delete or move `buildMaterialTexturePlacementPlan(...)`, `buildObjectVisualTexturePlacementPlan(...)`, and `buildReservedMaterialTexturePages(...)` behind test-only or worker-internal boundaries.
+- [x] Replace direct build-plan tests with reservation tests plus page-build worker/settlement tests.
+- [x] Keep worker handlers as the only non-test callers of `DirectOpenWorldTexturePageBuilder` and `DirectOpenWorldObjectVisualAtlasBuilder`.
+- [x] Move any direct-builder fixtures into test-only helpers if production modules no longer need them.
+- [x] Add or update tests for worker-client page-build output, object-visual atlas worker output, and controller settlement.
+- [x] Run `npm run check`, focused worker/page-build/placement tests, and all-domain browser harness.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 31 completed on 2026-07-07.
+- Deleted the synchronous public build-plan helpers: `buildMaterialTexturePlacementPlan(...)`, `buildObjectVisualTexturePlacementPlan(...)`, and `buildReservedMaterialTexturePages(...)`. Replacement production paths now expose reservation APIs only; page pixels flow through page-build task settlement.
+- Production caller audit: `terrain-artifact-runner.ts`, `outdoor-object-artifact-runner.ts`, `env-cell-artifact-runner.ts`, and `runtime-entity-system.ts` already use `reserveMaterialTexturePlacements(...)` or `reserveObjectVisualTexturePlacements(...)` and then let the controller/task stream settle `pageBuildRequests`. No production static/runtime materialization path calls the removed synchronous helpers.
+- Direct builder boundary audit: `DirectOpenWorldTexturePageBuilder` remains imported only by `page-build.worker.ts` and `page-build.test.ts`; `DirectOpenWorldObjectVisualAtlasBuilder` remains imported only by `object-visual-atlas.worker.ts` and the object visual placement test. That keeps direct builders worker-internal or test-local.
+- Test steer: `material-texture-placement-plan.test.ts` now covers bake-facing reservations and page-build requests, not immediate resident texture commits. `object-visual-texture-placement-plan.test.ts` now asserts placement snapshots, claim registry building state, and page-build requests. Page pixel materialization and settlement remain covered by `page-build.test.ts`.
+- Spicy bit: this phase removed an attractive but wrong API rather than adding another guard around it. The previous helper name made it too easy for future production code to await page pixels before bake, recreating the worksheet's main-thread texture transaction shape.
+- Harness evidence: `npm run harness:browser -- --domains terrain,generated-scenery,explicit-objects,env-cells --layer-distance 0 --timeout-ms 60000 --output /tmp/holtburger-phase31-all-domain-r0.json` passed with 4 ready artifacts, 4 applied scene commits, 11 resident texture pages, 11 accepted/committed page builds, 0 active page builds, 0 pending texture dependencies, 0 failed texture dependencies, 3 terrain draw units, 26,989 rendered triangles, max long task about 118 ms, and max renderer frame delta about 118.8 ms.
+- Remaining debt after Phase 31: the all-domain harness still reports 2 structured-interior `deferred-material` readiness issues. That is unchanged from Phase 29 and remains Phase 35's first triage target.
+- Verification: `npm run check`, `npm run lint`, focused `npm run test:ts -- --run src/lib/systems/open-world-streaming/texture-residency/placement/material-texture-placement-plan.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/object-visual-texture-placement-plan.test.ts src/lib/systems/open-world-streaming/texture-residency/page-build/page-build.test.ts`, and the all-domain browser harness above.
 
 ### Phase 32: Static Placement And Material Readiness Contract Cleanup
 

@@ -9,7 +9,7 @@ Identify why `apps/holtburger-3d` scene loading is sluggish and why loading stal
 
 This worksheet is diagnostic only. No renderer or streaming fix should be made until the expensive paths are measured and attributed.
 
-Final handoff: the replacement open-world streaming materialization plan used this worksheet as the baseline evidence and now owns the implementation record. Keep this worksheet for the original problem statement, benchmark contract, and investigation history.
+Final handoff: the replacement open-world streaming materialization plan used this worksheet as the baseline evidence and now owns the implementation record. Phase 56 of that plan reran the terrain, terrain+generated, terrain+env, `dc58` all-domain, and `da55` all-domain browser harness matrix and closed the final implementation evidence. Keep this worksheet for the original problem statement, benchmark contract, and investigation history.
 
 ## User Concern
 

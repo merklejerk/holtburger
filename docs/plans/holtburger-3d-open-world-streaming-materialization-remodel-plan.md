@@ -1,7 +1,7 @@
 # Holtburger 3D Open World Streaming Materialization Remodel Plan
 
 Date: 2026-07-06
-Status: executed; post-cutover triage active; worksheet remains the implementation north star.
+Status: executed; final closeout complete; worksheet remains the implementation north star and historical evidence.
 
 ## Context And Boundaries
 
@@ -816,7 +816,7 @@ Task checklist:
 - [x] Migrate direct env-cell overlay/query consumers to replacement commits and query records where feasible before adding any legacy diagnostic/report projection.
 - [x] Name every env-cell compatibility shim with its blocked consumer, dishonest-field risk, deletion trigger, and target cleanup phase.
 - [x] Run env-cell-focused harnesses.
-- [ ] Compare dense landblock metrics, including `da55`.
+- [x] Compare dense landblock metrics, including `da55`; later harness matrices and Phase 56 final evidence close this stale Phase 11 checkbox.
 
 Decisions and course corrections:
 
@@ -859,10 +859,10 @@ Task checklist:
 - [x] Identify whether the remaining bottleneck is scheduling order, source resolution, texture placement, page packing, bake work, renderer upload, or harness settle criteria.
 - [x] Replace the single sequential static-interest loop with a budgeted/resumable runner if scheduling is the bottleneck.
 - [x] Move remaining prepared-asset service work out of the browser main-thread service handler, or otherwise frame-budget that boundary, if worker source resolution still produces repeated long tasks.
-- [ ] Reconcile the Phase 7 page-build protocol with object atlas layout, because the current protocol assumes page ids are known before layout while object visual packing discovers page count during packing.
+- [x] Reconcile the Phase 7 page-build protocol with object atlas layout; later texture/page-build remediation replaced this as the worker-owned page-build split.
 - [x] Re-run terrain plus env-cells radius 1.
 - [x] Re-run all-domain radius 1 with the 60s timeout.
-- [ ] Update Phase 12 assumptions after the static path settles.
+- [x] Update Phase 12 assumptions after the static path settles; superseded by the Phase 13 steering chain and final Phase 56 evidence.
 
 Decisions and course corrections:
 
@@ -1296,7 +1296,7 @@ Acceptance criteria:
 Task checklist:
 
 - [x] Inspect `LandblockSceneLodSourceResolver` and worker request flow for reusable scene payload loading with domain-specific projection.
-- [ ] Add replacement-owned source projection/cache behavior that avoids duplicate scene asset resolution while preserving layer-specific worker results.
+- [x] Add replacement-owned source projection/cache behavior that avoids duplicate scene asset resolution while preserving layer-specific worker results; completed by the later worker-side source projection boundary.
 - [x] Investigate env-cell texture-intent planner CPU shape without adding naive timer-yield loops.
 - [x] Add or update replacement-native diagnostics needed to prove source reuse versus result delivery.
 - [x] Migrate touched diagnostics, harness, and tests directly to the replacement source-resolution contract before adding any compatibility projection.
@@ -1349,7 +1349,7 @@ Task checklist:
 - [x] Implement shared source loading with domain-specific worker responses.
 - [x] Verify runner-facing results stay domain-specific with focused controller/source tests.
 - [x] Run replacement `da55` generated-scenery, env-cell, and all-domain harness cases.
-- [ ] Dry-run Phase 14 through the next steering checkpoint and update consumer classifications.
+- [x] Dry-run Phase 14 through the next steering checkpoint and update consumer classifications; completed by the Phase 13F dry-run and later cutover phases.
 
 Decisions and course corrections:
 
@@ -1393,7 +1393,7 @@ Task checklist:
 - [x] Update source/static-task diagnostics only if the new evidence needs direct replacement fields; do not clone legacy coordinator output.
 - [x] Run focused tests for touched resolver, controller, env-cell runner, texture, or renderer boundaries.
 - [x] Run replacement `da55` generated-scenery, env-cell, and all-domain harness cases.
-- [ ] Update Phase 14 and Phase 15 if the dry run exposes new cutover or deletion work.
+- [x] Update Phase 14 and Phase 15 if the dry run exposes new cutover or deletion work; superseded by the completed cutover/deletion phases.
 
 Decisions and course corrections:
 
@@ -1433,7 +1433,7 @@ Task checklist:
 - [x] Preserve reusable transform behavior for legacy callers unless they opt into the new scheduling contract.
 - [x] Add focused tests for the decomposed planner behavior and open-world env-cell runner integration.
 - [x] Run replacement `da55` generated-scenery, env-cell, and all-domain harness cases.
-- [ ] Decide whether deferred dense renderer publication readiness needs a follow-up phase before Phase 14.
+- [x] Decide whether deferred dense renderer publication readiness needs a follow-up phase before Phase 14; later steering did not require a separate pre-Phase-14 publication-readiness phase.
 
 Decisions and course corrections:
 
@@ -1472,7 +1472,7 @@ Task checklist:
 - [x] Preserve the reusable material planner cache only if it still removes real repeated work.
 - [x] Add focused tests for chunk ordering, dedupe behavior, and replacement runner integration.
 - [x] Run replacement `da55` generated-scenery, env-cell, and all-domain harness cases.
-- [ ] Decide whether deferred dense renderer publication readiness needs a follow-up phase before Phase 14.
+- [x] Decide whether deferred dense renderer publication readiness needs a follow-up phase before Phase 14; later steering did not require a separate pre-Phase-14 publication-readiness phase.
 
 Decisions and course corrections:
 
@@ -1513,8 +1513,8 @@ Task checklist:
 - [x] Add native chunk/worker diagnostics sufficient to prove no single planner chunk remains hundreds of milliseconds.
 - [x] Preserve source projection and domain-sized runner result contracts.
 - [x] Add focused tests for the new boundary and replacement runner integration.
-- [ ] Run replacement `da55` generated-scenery, env-cell, and all-domain harness cases.
-- [ ] Decide whether deferred dense renderer publication readiness needs a follow-up phase before Phase 14.
+- [x] Run replacement `da55` generated-scenery, env-cell, and all-domain harness cases; later harness matrices and Phase 56 final evidence close this stale checkbox.
+- [x] Decide whether deferred dense renderer publication readiness needs a follow-up phase before Phase 14; later steering did not require a separate pre-Phase-14 publication-readiness phase.
 
 Decisions and course corrections:
 
@@ -1556,11 +1556,11 @@ Task checklist:
 - [x] Inspect static bake worker, resolver worker, and texture page-build worker response paths for transfer/deserialization blind spots.
 - [x] Add direct replacement diagnostics for the measured worker-result boundary.
 - [x] Classify every diagnostics consumer touched by the new worker-result evidence as direct migration, deletion, legacy-edge shim, or durable adapter before adding compatibility fields.
-- [ ] Implement the smallest split or moved boundary that removes the all-domain max task.
+- [x] Implement the smallest split or moved boundary that removes the all-domain max task; superseded by later source/texture/runtime-entity remediation and verified by Phase 56 max-frame evidence.
 - [x] Preserve source projection, intent chunk diagnostics, and domain-sized runner result contracts.
 - [x] Add focused tests for the new worker-result boundary and replacement runner integration.
 - [x] Run replacement `da55` generated-scenery, env-cell, and all-domain harness cases.
-- [ ] Decide whether deferred dense renderer publication readiness needs a follow-up phase before Phase 14.
+- [x] Decide whether deferred dense renderer publication readiness needs a follow-up phase before Phase 14; later steering did not require a separate pre-Phase-14 publication-readiness phase.
 
 Decisions and course corrections:
 
@@ -1599,11 +1599,11 @@ Task checklist:
 
 - [x] Inspect resolver worker progress/result delivery and source cache waiter release paths for browser-side delivery/assimilation blind spots.
 - [x] Add direct source projection delivery diagnostics without cloning legacy resolver snapshots.
-- [ ] Implement the smallest measured split or budgeted assimilation boundary that removes the env-cell/all-domain max task.
+- [x] Implement the smallest measured split or budgeted assimilation boundary that removes the env-cell/all-domain max task; superseded by later source/texture/runtime-entity remediation and verified by Phase 56 max-frame evidence.
 - [x] Preserve source projection, intent chunk diagnostics, bake worker-boundary diagnostics, and domain-sized runner result contracts.
 - [x] Add focused tests for source projection delivery diagnostics and replacement source cache integration.
 - [x] Run replacement `da55` generated-scenery, env-cell, and all-domain harness cases.
-- [ ] Decide whether deferred dense renderer publication readiness needs a follow-up phase before Phase 14.
+- [x] Decide whether deferred dense renderer publication readiness needs a follow-up phase before Phase 14; later steering did not require a separate pre-Phase-14 publication-readiness phase.
 
 Decisions and course corrections:
 
@@ -3632,22 +3632,33 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Run `npm run check`.
-- [ ] Run `npm run lint`.
-- [ ] Run `npm run lint:dead`.
-- [ ] Run focused texture residency/material/readiness/diagnostics/renderer/controller tests.
-- [ ] Run terrain-only browser harness scenario.
-- [ ] Run terrain+generated browser harness scenario.
-- [ ] Run terrain+env browser harness scenario.
-- [ ] Run `dc58` all-domain browser harness scenario.
-- [ ] Run `da55` all-domain browser harness scenario.
-- [ ] Update Definition of Done evidence.
-- [ ] Update worksheet/design handoff status.
-- [ ] Record final remaining deferrals with reason, evidence requirement, and owner.
+- [x] Run `npm run check`.
+- [x] Run `npm run lint`.
+- [x] Run `npm run lint:dead`.
+- [x] Run focused texture residency/material/readiness/diagnostics/renderer/controller tests.
+- [x] Run terrain-only browser harness scenario.
+- [x] Run terrain+generated browser harness scenario.
+- [x] Run terrain+env browser harness scenario.
+- [x] Run `dc58` all-domain browser harness scenario.
+- [x] Run `da55` all-domain browser harness scenario.
+- [x] Update Definition of Done evidence.
+- [x] Update worksheet/design handoff status.
+- [x] Record final remaining deferrals with reason, evidence requirement, and owner.
 
 Decisions and course corrections:
 
-- Pending.
+- Quality gates passed: `npm run check`, `npm run lint`, `npm run lint:dead`, and focused tests covering texture residency claims, texture commits, page builds, atlas worker client, placement policy/plans, controller diagnostics, runtime entities, and WebGL2 texture bindings. Focused Vitest result: 11 files and 61 tests passed.
+- Final harness evidence passed all five scenarios with `errorMessage: null`, `runtimePipeline: "open-world-streaming"`, zero material readiness issues, zero failed dynamic prep, zero in-flight page builds at settle, zero active page-build tasks at settle, and zero ownerless pages.
+- Harness matrix:
+  - `/tmp/holtburger-phase56-dc58-terrain-r1.json`: 9 ready artifacts, 9 applied scene commits, 31 resident pages, ownerless pages total 0, readiness about 3.1s, 2 long tasks, max long task about 60ms, max renderer frame delta about 54.7ms.
+  - `/tmp/holtburger-phase56-dc58-terrain-generated-r1.json`: 18 ready artifacts, 18 applied scene commits, 228 resident pages, ownerless pages total 0, readiness about 67.9s, 823 long tasks, max long task about 114ms, max renderer frame delta about 115.6ms.
+  - `/tmp/holtburger-phase56-dc58-terrain-env-r1.json`: 18 ready artifacts, 18 applied scene commits, 39 resident pages, ownerless pages total 0, readiness about 6.6s, 2 long tasks, max long task about 117ms, max renderer frame delta about 116.2ms.
+  - `/tmp/holtburger-phase56-dc58-all-domain-r1.json`: 45 ready artifacts, 45 applied scene commits, 250 resident pages, ownerless pages total 0, readiness about 91.6s, 842 long tasks, max long task about 165ms, max renderer frame delta about 145ms.
+  - `/tmp/holtburger-phase56-da55-all-domain-r1.json`: 45 ready artifacts, 45 applied scene commits, 155 resident pages, ownerless pages total 0, readiness about 23.9s, 50 long tasks, max long task about 181ms, max renderer frame delta about 156.4ms.
+- Reclamation remains deferred by evidence. Every final harness run reported `textureResidency.ownerlessPages.total: 0`, `ownerlessPagePolicy.pendingRendererRemovalPageCount: 0`, and `byteEstimate.approximateBytes: null` with reason `page-size-not-yet-canonical`. Reactivation requires nonzero retained ownerless resident pages plus canonical byte accounting or an explicit measured pressure threshold. Owner: texture residency policy/page accounting.
+- Generated-scenery and `dc58` all-domain startup wall time remain spicy. The Phase 56 numbers match the known Phase 53/54 profile rather than a Phase 55 cleanup regression. Do not add a main-thread budget API as a cleanup epilogue; if startup wall time becomes the next product priority, the direct follow-up is generated/static-authored dynamic recipe worker concurrency, batching, or workload reduction with fresh attribution. Owner: runtime entity/static-authored dynamic worker pipeline.
+- Worksheet handoff is still valid: the worksheet is historical evidence and this remodel plan is the implementation record. No new deliberate deviation from the worksheet was introduced during Phase 55/56 closeout.
+- Completion audit found stale unchecked boxes in rejected/resteered Phase 11-13 checkpoints. They are now marked as completed-by-later-phase or superseded-by-cutover so the plan no longer presents historical course-correction tasks as active remaining work.
 
 ## Risks And Mitigations
 
@@ -3755,6 +3766,22 @@ Mitigation:
 - Material coverage remains diagnostic-only and cannot be mistaken for successful rendering.
 - No tests preserve ignored placement policy fields, old bucket lifetime assumptions, or legacy diagnostic parity.
 - `npm run check`, `npm run lint`, and focused test suites pass from `apps/holtburger-3d`.
+
+### Final DoD Evidence
+
+- Default browser runtime path: final harness reports `runtimePipeline: "open-world-streaming"` for every Phase 56 scenario.
+- `dc58` radius-1 all-domain benchmark: `/tmp/holtburger-phase56-dc58-all-domain-r1.json` passed with 45 ready artifacts, 45 applied scene commits, zero material readiness issues, zero failed dynamic prep, and max renderer frame delta about 145ms.
+- Dense `da55` radius-1 all-domain benchmark: `/tmp/holtburger-phase56-da55-all-domain-r1.json` passed with 45 ready artifacts, 45 applied scene commits, zero material readiness issues, zero failed dynamic prep, and max renderer frame delta about 156.4ms.
+- Texture/scene ordering and readiness: final harness matrix had zero pending scene commits, zero in-flight page builds, zero active page-build tasks at settle, and zero material readiness issues.
+- Owner claims and reclamation: final harness matrix had ownerless page totals of 0, pending renderer removals of 0, and non-canonical byte estimates recorded explicitly.
+- Deletion/source-tree policy: Phase 55 live-code searches found no production/test hits for retired static coordinator, texture manager, `staticOverview`, ignored placement, old static commit counter, or legacy diagnostic terms; replacement-internal compatibility wording was removed.
+- Quality gates: `npm run check`, `npm run lint`, `npm run lint:dead`, and focused texture/material/readiness/diagnostics/renderer/controller tests passed from `apps/holtburger-3d`.
+
+### Remaining Deferrals
+
+- Active renderer page reclamation remains deferred until there is both nonzero retained ownerless resident page evidence and canonical byte accounting or an explicit measured pressure threshold. Owner: texture residency policy/page accounting.
+- Canonical texture memory byte accounting remains unresolved; current diagnostics honestly report `approximateBytes: null` and `reason: "page-size-not-yet-canonical"`. Owner: renderer texture residency/accounting.
+- Generated/static-authored dynamic startup wall time remains high on `dc58` terrain+generated and all-domain runs. This is not a cleanup blocker, but future product work should start with worker concurrency, batching, or workload reduction rather than broad main-thread budgeting. Owner: runtime entity/static-authored dynamic worker pipeline.
 
 ## Open Questions
 

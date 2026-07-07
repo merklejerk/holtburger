@@ -38,6 +38,8 @@ export interface OpenWorldStreamingDiagnosticsSnapshot {
 			readonly reason: "page-size-not-yet-canonical";
 		};
 	};
+	/** Replacement-native material and texture readiness issues. */
+	readonly materialReadiness: OpenWorldStreamingMaterialReadinessDiagnostics;
 	readonly texturePageBuildTasks: OpenWorldStreamingTexturePageBuildTaskDiagnostics;
 	readonly runtimeEntities: {
 		readonly active: number;
@@ -107,6 +109,73 @@ export interface OpenWorldStreamingDiagnosticsSnapshot {
 	};
 	readonly compatibilityShims: readonly OpenWorldStreamingShimDiagnostics[];
 }
+
+/** Replacement-native material and texture readiness diagnostics. */
+export interface OpenWorldStreamingMaterialReadinessDiagnostics {
+	readonly recentIssues: readonly OpenWorldStreamingMaterialReadinessIssue[];
+	readonly summary: {
+		readonly deferredMaterialIssueCount: number;
+		readonly failedTextureDependencyCount: number;
+		readonly pendingTextureDependencyCount: number;
+		readonly pipelineBugIssueCount: number;
+		readonly skippedStaticObjectPartitionCount: number;
+		readonly unsupportedMaterialIssueCount: number;
+	};
+}
+
+type OpenWorldStreamingMaterialReadinessIssue =
+	| {
+			readonly kind: "pending-texture-dependency";
+			readonly bucketKey: string;
+			readonly elapsedMs: number;
+			readonly ownerId: string;
+			readonly pageId: string;
+			readonly sourceTaskId: string;
+	  }
+	| {
+			readonly kind: "failed-texture-dependency";
+			readonly bucketKey: string;
+			readonly durationMs: number;
+			readonly error: string;
+			readonly ownerId: string;
+			readonly pageId: string;
+			readonly sourceTaskId: string;
+	  }
+	| {
+			readonly kind: "deferred-material" | "unsupported-material";
+			readonly coverageKey: string;
+			readonly coverageKind: string;
+			readonly domain: string;
+			readonly family: string;
+			readonly landblockId: number | null;
+			readonly materialCount: number;
+			readonly ownerId: string;
+			readonly partitionCount: number;
+			readonly pass: string;
+			readonly reasonCodes: readonly string[];
+			readonly taskId: string;
+			readonly triangleCount: number;
+	  }
+	| {
+			readonly kind: "skipped-static-object-partition";
+			readonly alphaMode: string;
+			readonly family: string;
+			readonly landblockId: number;
+			readonly materialCount: number;
+			readonly ownerId: string;
+			readonly pass: string;
+			readonly reason: string;
+			readonly renderCoverage: string;
+			readonly sliceId: string;
+			readonly taskId: string;
+			readonly triangleCount: number;
+	  }
+	| {
+			readonly kind: "pipeline-bug";
+			readonly message: string;
+			readonly ownerId: string;
+			readonly taskId: string;
+	  };
 
 /** Aggregated replacement diagnostics for capped dynamic animation hook replay. */
 interface OpenWorldRuntimeEntityAnimationCatchUpDiagnostics {

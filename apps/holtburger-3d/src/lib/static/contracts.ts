@@ -1401,10 +1401,13 @@ export interface StaticObjectBakeDiagnostics {
 	readonly uniqueSourceCount: number;
 	readonly uniqueSourcePartGeometryCount: number;
 	readonly uniqueSourceTriangleCount: number;
+	readonly visualRecipePublication: StaticObjectVisualRecipePublicationDiagnostics;
 	readonly drawUnitCount: number;
 	readonly partitionCount: number;
 	readonly renderablePartitionCount: number;
 	readonly skippedPartitionCount: number;
+	/** Non-renderable partitions retained as replacement diagnostics evidence. */
+	readonly skippedPartitions: readonly StaticObjectSkippedPartitionDiagnostics[];
 	readonly instancedVisualResourceCount: number;
 	readonly instancedRenderInstanceCount: number;
 	readonly instancedSourceTriangleCount: number;
@@ -1412,6 +1415,29 @@ export interface StaticObjectBakeDiagnostics {
 	readonly estimatedAvoidedFlattenedTriangleCount: number;
 	readonly estimatedAvoidedFlattenedTypedArrayBytes: number;
 	readonly retainedTransparentOutdoorGeneratedSceneryPartitionReasons: StaticObjectRetainedTransparentPartitionReasonCounts;
+}
+
+export type StaticObjectVisualRecipePublicationDiagnostics =
+	| {
+			readonly kind: "published";
+			readonly partInstanceCount: number;
+	  }
+	| {
+			readonly kind: "skipped";
+			readonly missingDependencySourceIds: readonly string[];
+			readonly partInstanceCount: number;
+			readonly reason: "missing-dependencies" | "no-part-instances";
+	  };
+
+export interface StaticObjectSkippedPartitionDiagnostics {
+	readonly alphaMode: string;
+	readonly family: string;
+	readonly materialCount: number;
+	readonly pass: string;
+	readonly reason: string;
+	readonly renderCoverage: string;
+	readonly sliceId: string;
+	readonly triangleCount: number;
 }
 
 export interface StaticObjectRetainedTransparentPartitionReasonCounts {

@@ -23,6 +23,8 @@ import type {
 	StaticLayerPeerRecordOwner,
 	StaticObjectInstanceFacts,
 	StaticObjectRetainedTransparentPartitionReasonCounts,
+	StaticObjectSkippedPartitionDiagnostics,
+	StaticObjectVisualRecipePublicationDiagnostics,
 } from "../../contracts";
 import { uniqueSortedStaticTextureUseOwners } from "../../contracts";
 import type { TextureResourceDependencies } from "../../../textures/placement";
@@ -284,14 +286,12 @@ function bakeStaticObjectJobPayload(
 		landblockId: formatHex32(scope.landblock.landblockId),
 		partitionCount: partitionPlan.partitions.length,
 	});
-	const renderablePartitions = partitionPlan.partitions.filter((partition) => {
-		if (isRenderableStaticObjectPartition(partition)) {
-			return true;
-		}
-
-		warnAboutSkippedStaticObjectPartition(item.task, scope, partition);
-		return false;
-	});
+	const renderablePartitions = partitionPlan.partitions.filter(
+		isRenderableStaticObjectPartition,
+	);
+	const skippedPartitions = partitionPlan.partitions
+		.filter((partition) => !isRenderableStaticObjectPartition(partition))
+		.map(createSkippedStaticObjectPartitionDiagnostics);
 	const bakedPartitions = renderablePartitions;
 	const drawUnits = bakedPartitions.map((partition) =>
 		createStaticObjectGeometryBakeOutput({
@@ -371,8 +371,10 @@ function bakeStaticObjectJobPayload(
 			},
 			partitionPlan,
 			payload: scope,
+			recipePublication: recipePublication.diagnostics,
 			retainedBakedPartitions: bakedPartitions,
 			sourceIndex,
+			skippedPartitions,
 			renderablePartitionCount: renderablePartitions.length,
 		}),
 		materialCoverage: partitionPlan.materialCoverage,
@@ -395,6 +397,7 @@ function createStaticObjectRecipePublication(options: {
 	readonly resourceIdPrefix: string;
 	readonly task: StaticBakeTask;
 }): {
+	readonly diagnostics: StaticObjectVisualRecipePublicationDiagnostics;
 	readonly installSet: ReturnType<typeof createObjectVisualInstallSet>;
 	readonly textureDependencies: readonly TextureResourceDependencies[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
@@ -404,22 +407,29 @@ function createStaticObjectRecipePublication(options: {
 		payload: options.payload,
 	});
 	if (expansion.resolution.kind === "missing-dependencies") {
-		console.warn(
-			`Skipped static object visual recipe publication for ${options.task.ownerId}; missing ${expansion.resolution.missingDependencies
-				.map((dependency) => dependency.sourceId)
-				.join(", ")}.`,
-		);
 		return {
+			diagnostics: {
+				kind: "skipped",
+				missingDependencySourceIds:
+					expansion.resolution.missingDependencies.map(
+						(dependency) => dependency.sourceId,
+					),
+				partInstanceCount: 0,
+				reason: "missing-dependencies",
+			},
 			installSet: createObjectVisualInstallSet({}),
 			textureDependencies: [],
 			textureUses: [],
 		};
 	}
 	if (expansion.resolution.bundle.partInstances.length === 0) {
-		console.warn(
-			`Skipped static object visual recipe publication for ${options.task.ownerId}; no visual part instances were resolved.`,
-		);
 		return {
+			diagnostics: {
+				kind: "skipped",
+				missingDependencySourceIds: [],
+				partInstanceCount: 0,
+				reason: "no-part-instances",
+			},
 			installSet: createObjectVisualInstallSet({}),
 			textureDependencies: [],
 			textureUses: [],
@@ -430,7 +440,7 @@ function createStaticObjectRecipePublication(options: {
 		owner: createLayerPeerRecordOwner(options.task),
 		payload: options.payload,
 	});
-	return createStaticObjectVisualRecipeInstallPublication({
+	const recipePublication = createStaticObjectVisualRecipeInstallPublication({
 		bundle: expansion.resolution.bundle,
 		domain: options.task.domain,
 		geometryBuffers: expansion.geometryBuffers,
@@ -443,6 +453,13 @@ function createStaticObjectRecipePublication(options: {
 		textureUseNamespace: "static-object-texture",
 		textureUseScopeId: options.resourceIdPrefix,
 	});
+	return {
+		diagnostics: {
+			kind: "published",
+			partInstanceCount: expansion.resolution.bundle.partInstances.length,
+		},
+		...recipePublication,
+	};
 }
 
 function createStaticObjectBakeDiagnostics(options: {
@@ -454,7 +471,9 @@ function createStaticObjectBakeDiagnostics(options: {
 	readonly payload: ObjectVisualSourcePayload;
 	readonly partitionPlan: ReturnType<typeof partitionStaticObjectBatches>;
 	readonly retainedBakedPartitions: readonly StaticObjectBatchPartition[];
+	readonly recipePublication: StaticObjectVisualRecipePublicationDiagnostics;
 	readonly sourceIndex: StaticObjectBakeSourceIndex;
+	readonly skippedPartitions: readonly StaticObjectSkippedPartitionDiagnostics[];
 	readonly renderablePartitionCount: number;
 	readonly drawUnits: readonly StaticObjectGeometryStaticDrawUnit[];
 }): StaticObjectBakeDiagnostics {
@@ -514,13 +533,13 @@ function createStaticObjectBakeDiagnostics(options: {
 				payload: options.payload,
 				sourceIndex: options.sourceIndex,
 			}),
-		skippedPartitionCount:
-			options.partitionPlan.partitions.length -
-			options.renderablePartitionCount,
+		skippedPartitionCount: options.skippedPartitions.length,
+		skippedPartitions: options.skippedPartitions,
 		taskId: options.input.task.taskId,
 		uniqueSourceCount: uniqueSourceKeys.size,
 		uniqueSourcePartGeometryCount: uniqueSourcePartGeometryKeys.size,
 		uniqueSourceTriangleCount,
+		visualRecipePublication: options.recipePublication,
 	};
 }
 
@@ -821,25 +840,19 @@ function createDrawUnitSpatialRecord(
 	};
 }
 
-function warnAboutSkippedStaticObjectPartition(
-	task: StaticBakeTask,
-	payload: ObjectVisualSourcePayload,
+function createSkippedStaticObjectPartitionDiagnostics(
 	partition: StaticObjectBatchPartition,
-): void {
-	console.warn(
-		`browser skipped non-renderable static object partition ${partition.sliceId}.`,
-		{
-			domain: task.domain,
-			landblockId: payload.landblock.landblockId,
-			materialFamily: partition.family,
-			materialPass: partition.pass,
-			partitionId: partition.sliceId,
-			reason: partition.reason,
-			renderCoverage: partition.renderCoverage,
-			triangleCount: partition.triangleCount,
-			taskId: task.taskId,
-		},
-	);
+): StaticObjectSkippedPartitionDiagnostics {
+	return {
+		alphaMode: partition.alphaMode,
+		family: partition.family,
+		materialCount: partition.materialIds.length,
+		pass: partition.pass,
+		reason: partition.reason,
+		renderCoverage: partition.renderCoverage,
+		sliceId: partition.sliceId,
+		triangleCount: partition.triangleCount,
+	};
 }
 
 interface StaticObjectGeometryBakeOutput {

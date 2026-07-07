@@ -13,6 +13,8 @@ import type {
 	StaticLandblockSceneLodSourceProjectionEvent,
 	StaticLandblockSceneLodSourceRequest,
 	StaticLandblockSceneLodSourceResolver,
+	StaticMaterialCoverageReport,
+	StaticObjectBakeDiagnostics,
 	StaticScopePayload,
 	TerrainStaticScopePayload,
 } from "../../../static/contracts";
@@ -68,7 +70,9 @@ describe("OpenWorldStreamingController terrain slice", () => {
 		expect(controller.createDiagnosticsSnapshot().frameBudget).toEqual({
 			yieldedPasses: 5,
 		});
-		expect(controller.createDiagnosticsSnapshot().texturePageBuildTasks.summary).toEqual({
+		expect(
+			controller.createDiagnosticsSnapshot().texturePageBuildTasks.summary,
+		).toEqual({
 			accepted: 0,
 			active: 0,
 			committed: 0,
@@ -205,6 +209,105 @@ describe("OpenWorldStreamingController terrain slice", () => {
 			projectedWaiterReleaseCount: 0,
 			reusedRequests: 2,
 			sourceStreamRequests: 1,
+		});
+	});
+
+	it("reports replacement material readiness issues from static coverage evidence", async () => {
+		const controller = new OpenWorldStreamingController({
+			assetReader: createUnusedAssetReader(),
+			createDynamicVisualBaker: failIfDynamicWorkerFactoryIsCalled,
+			createDynamicVisualRecipeResolver: failIfDynamicWorkerFactoryIsCalled,
+			createObjectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder,
+			createStaticBaker: () =>
+				new FixtureTerrainBaker([createUnsupportedMaterialCoverage()]),
+			createStaticResolver: () =>
+				new FixtureTerrainResolver(createTerrainScopePayload()),
+			createTexturePageBuilder: createUnusedTexturePageBuilder,
+			renderer: new FixtureTerrainRenderer(),
+		});
+
+		controller.updateTerrainInterest({
+			anchorLandblockId: 0xda55ffff,
+			radius: 0,
+			revision: 1,
+		});
+		await waitFor(() => controller.createSnapshot().terrain.committed === 1);
+
+		expect(
+			controller.createDiagnosticsSnapshot().materialReadiness,
+		).toMatchObject({
+			recentIssues: [
+				{
+					coverageKey: "fixture:coverage",
+					family: "unsupported",
+					kind: "unsupported-material",
+					reasonCodes: ["fixture-unsupported"],
+					taskId: "1:landblock:da55ffff:outdoor-terrain",
+				},
+			],
+			summary: {
+				unsupportedMaterialIssueCount: 1,
+			},
+		});
+	});
+
+	it("reports skipped static object partitions as replacement material readiness issues", async () => {
+		const renderer = new FixtureTerrainRenderer();
+		const controller = new OpenWorldStreamingController({
+			assetReader: createUnusedAssetReader(),
+			createDynamicVisualBaker: failIfDynamicWorkerFactoryIsCalled,
+			createDynamicVisualRecipeResolver: failIfDynamicWorkerFactoryIsCalled,
+			createObjectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder,
+			createStaticBaker: () =>
+				new FixtureTerrainBaker({
+					staticObjectBakeDiagnostics: [
+						createSkippedStaticObjectBakeDiagnostic(),
+					],
+				}),
+			createStaticResolver: () =>
+				new FixtureTerrainResolver({
+					buildings: createOutdoorObjectsScopePayload("outdoor-buildings"),
+					generatedScenery: createOutdoorObjectsScopePayload(
+						"outdoor-generated-scenery",
+					),
+					terrain: createTerrainScopePayload(),
+				}),
+			createTexturePageBuilder: createUnusedTexturePageBuilder,
+			renderer,
+		});
+
+		controller.updateStaticInterest({
+			anchorLandblockId: 0xda55ffff,
+			lod: {
+				buildings: -1,
+				envCells: -1,
+				explicitObjects: -1,
+				generatedScenery: 0,
+				terrain: 0,
+			},
+			revision: 1,
+		});
+		await waitFor(
+			() =>
+				controller.createSnapshot().terrain.committed === 1 &&
+				renderer.generatedSceneryLayers.length === 1,
+		);
+
+		expect(
+			controller.createDiagnosticsSnapshot().materialReadiness,
+		).toMatchObject({
+			recentIssues: [
+				{
+					family: "indexed-paletted",
+					kind: "skipped-static-object-partition",
+					reason: "fixture deferred material",
+					sliceId: "fixture:partition",
+					taskId: "1:landblock:da55ffff:outdoor-generated-scenery",
+				},
+			],
+			summary: {
+				skippedStaticObjectPartitionCount: 1,
+			},
 		});
 	});
 });
@@ -360,6 +463,27 @@ class FixtureStreamingTerrainResolver extends FixtureTerrainResolver {
 }
 
 class FixtureTerrainBaker implements StaticBaker {
+	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
+	readonly staticObjectBakeDiagnostics: readonly StaticObjectBakeDiagnostics[];
+
+	constructor(
+		options:
+			| readonly StaticMaterialCoverageReport[]
+			| {
+					readonly materialCoverage?: readonly StaticMaterialCoverageReport[];
+					readonly staticObjectBakeDiagnostics?: readonly StaticObjectBakeDiagnostics[];
+			  } = {},
+	) {
+		if (Array.isArray(options)) {
+			this.materialCoverage = options;
+			this.staticObjectBakeDiagnostics = [];
+			return;
+		}
+		this.materialCoverage = options.materialCoverage ?? [];
+		this.staticObjectBakeDiagnostics =
+			options.staticObjectBakeDiagnostics ?? [];
+	}
+
 	async bake(input: StaticBakeJobInput): Promise<StaticBakeJobResult> {
 		return {
 			atlasRegistryUpdates: [],
@@ -377,7 +501,7 @@ class FixtureTerrainBaker implements StaticBaker {
 						]
 					: [],
 			envCellStaticObjectPlacementRecords: [],
-			materialCoverage: [],
+			materialCoverage: this.materialCoverage,
 			objectVisualInstallSet: {
 				directDrawUnits: [],
 				renderInstances: [],
@@ -386,7 +510,7 @@ class FixtureTerrainBaker implements StaticBaker {
 			},
 			portalApertureResources: [],
 			revision: input.revision,
-			staticObjectBakeDiagnostics: [],
+			staticObjectBakeDiagnostics: this.staticObjectBakeDiagnostics,
 			staticPortalGraphs: [],
 			staticPortalInteriorRecords: [],
 			staticSourceMappings: [],
@@ -464,6 +588,97 @@ function createTerrainScopePayload(): StaticScopePayload {
 			textureUses: [],
 		} as TerrainStaticScopePayload,
 		sourceRevision: 1,
+	};
+}
+
+function createUnsupportedMaterialCoverage(): StaticMaterialCoverageReport {
+	return {
+		buckets: [
+			{
+				family: "unsupported",
+				filteringMode: "none",
+				materialCount: 1,
+				outcome: "unsupported",
+				partitionCount: 1,
+				pass: "opaque",
+				textureRoleCount: 0,
+				triangleCount: 12,
+			},
+		],
+		coverageKey: "fixture:coverage",
+		coverageKind: "terrain",
+		deferredTriangleCount: 0,
+		detailRoleCount: 0,
+		domain: "outdoor-terrain",
+		fallbackReasonCount: 1,
+		fallbackReasonCounts: [{ code: "fixture-unsupported", count: 1 }],
+		landblockId: 0xda55ffff,
+		materialCount: 1,
+		partitionCount: 1,
+		renderedTriangleCount: 0,
+		triangleCount: 12,
+		unrenderedBuckets: [
+			{
+				family: "unsupported",
+				materialCount: 1,
+				outcome: "unsupported",
+				partitionCount: 1,
+				pass: "opaque",
+				reasonCodes: ["fixture-unsupported"],
+				triangleCount: 12,
+			},
+		],
+		unsupportedTriangleCount: 12,
+	};
+}
+
+function createSkippedStaticObjectBakeDiagnostic(): StaticObjectBakeDiagnostics {
+	return {
+		buildingObjectCount: 0,
+		domain: "outdoor-generated-scenery",
+		drawUnitCount: 0,
+		estimatedAvoidedFlattenedTriangleCount: 0,
+		estimatedAvoidedFlattenedTypedArrayBytes: 0,
+		estimatedInstancedSourceTypedArrayBytes: 0,
+		explicitObjectCount: 0,
+		generatedInstanceCount: 1,
+		instancedRenderInstanceCount: 0,
+		instancedSourceTriangleCount: 0,
+		instancedVisualResourceCount: 0,
+		kind: "static-object-bake-diagnostics",
+		landblockId: 0xda55ffff,
+		objectCount: 1,
+		partitionCount: 1,
+		renderablePartitionCount: 0,
+		retainedTransparentOutdoorGeneratedSceneryPartitionReasons: {
+			explicitObject: 0,
+			missingGeneratedFacts: 0,
+			missingInstanceBounds: 0,
+			repeatedGeneratedSourceRetainedByPartitionPolicy: 0,
+			unsupportedMaterialBucket: 1,
+			oneOffGeneratedSource: 0,
+		},
+		skippedPartitionCount: 1,
+		skippedPartitions: [
+			{
+				alphaMode: "opaque",
+				family: "indexed-paletted",
+				materialCount: 1,
+				pass: "opaque",
+				reason: "fixture deferred material",
+				renderCoverage: "deferred",
+				sliceId: "fixture:partition",
+				triangleCount: 12,
+			},
+		],
+		taskId: "fixture:task",
+		uniqueSourceCount: 1,
+		uniqueSourcePartGeometryCount: 1,
+		uniqueSourceTriangleCount: 12,
+		visualRecipePublication: {
+			kind: "published",
+			partInstanceCount: 1,
+		},
 	};
 }
 

@@ -15,6 +15,7 @@ import type {
 	StaticLandblockSceneLodSourceRequest,
 	StaticLandblockSceneLodSourceResolver,
 	StaticLayerTaskRequest,
+	StaticObjectBakeDiagnostics,
 	StaticObjectGeometryStaticDrawUnit,
 	StaticScopePayload,
 } from "../../../../static/contracts";
@@ -22,9 +23,7 @@ import { StaticObjectBakeResourceProvider } from "../../../../static/objects/bak
 import { createStaticObjectTexturePlacementIntents } from "../../../../static/objects/bake/static-object-placement-planner";
 import type { MaterializationOwnerId } from "../../owners/owner-id";
 import { OpenWorldTextureClaimRegistry } from "../../texture-residency/claims/texture-claim-registry";
-import {
-	reserveObjectVisualTexturePlacements,
-} from "../../texture-residency/placement/object-visual-texture-placement-plan";
+import { reserveObjectVisualTexturePlacements } from "../../texture-residency/placement/object-visual-texture-placement-plan";
 import type { OpenWorldTexturePageBuildInput } from "../../texture-residency/page-build/protocol";
 import type { OpenWorldObjectVisualAtlasBuilder } from "../../texture-residency/placement/object-visual-atlas-builder";
 import {
@@ -59,6 +58,7 @@ export interface OpenWorldOutdoorObjectLayerCommit {
 	readonly sourcePayload: OutdoorStaticObjectsScopePayload;
 	readonly stageTimings: readonly OpenWorldStreamingStaticTaskStageTiming[];
 	readonly staticAuthoredDynamicPlacements: readonly StaticAuthoredDynamicPlacementRecord[];
+	readonly staticObjectBakeDiagnostics: readonly StaticObjectBakeDiagnostics[];
 	readonly texturePageBuildRequests: readonly OpenWorldTexturePageBuildInput[];
 }
 
@@ -155,6 +155,7 @@ export class OpenWorldOutdoorObjectArtifactRunner {
 					},
 					placement,
 				})),
+			staticObjectBakeDiagnostics: baked.result.staticObjectBakeDiagnostics,
 			texturePageBuildRequests: textureReservation.pageBuildRequests,
 		};
 	}

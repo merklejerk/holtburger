@@ -29,7 +29,7 @@ import {
 import { OpenWorldTextureClaimRegistry } from "../texture-residency/claims/texture-claim-registry";
 import { reserveObjectVisualTexturePlacements } from "../texture-residency/placement/object-visual-texture-placement-plan";
 import type { OpenWorldTexturePageBuildInput } from "../texture-residency/page-build/protocol";
-import type { OpenWorldObjectVisualAtlasBuilder } from "../texture-residency/placement/object-visual-atlas-builder";
+import type { OpenWorldObjectVisualAtlasBuilder } from "../texture-residency/atlas-build/object-visual-atlas-builder";
 import {
 	createDynamicRendererInstances,
 	createDynamicRendererVisualResources,

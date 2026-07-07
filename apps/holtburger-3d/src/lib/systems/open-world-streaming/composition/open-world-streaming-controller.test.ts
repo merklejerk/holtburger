@@ -20,7 +20,7 @@ import type {
 	TerrainStaticScopePayload,
 } from "../../../static/contracts";
 import type { OpenWorldTexturePageBuilder } from "../texture-residency/page-build/worker-client";
-import type { OpenWorldObjectVisualAtlasBuilder } from "../texture-residency/placement/object-visual-atlas-builder";
+import type { OpenWorldObjectVisualAtlasBuilder } from "../texture-residency/atlas-build/object-visual-atlas-builder";
 import { OpenWorldStreamingController } from "./open-world-streaming-controller";
 
 describe("OpenWorldStreamingController terrain slice", () => {

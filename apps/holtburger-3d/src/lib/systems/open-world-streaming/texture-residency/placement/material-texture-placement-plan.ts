@@ -25,7 +25,7 @@ import { createMaterialTexturePlacementBucketKey } from "./material-texture-plac
 import type {
 	OpenWorldMaterialTextureAtlasBuilder,
 	OpenWorldObjectVisualAtlasPlacementRect,
-} from "./object-visual-atlas-builder";
+} from "../atlas-build/object-visual-atlas-builder";
 
 const MAX_RUNTIME_ATLAS_PAGE_SIZE = 2048;
 

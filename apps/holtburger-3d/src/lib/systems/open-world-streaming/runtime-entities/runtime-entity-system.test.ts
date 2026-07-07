@@ -25,7 +25,7 @@ import type {
 import { MaterializationOwnerRegistry } from "../owners/owner-registry";
 import type { MaterializationOwnerId } from "../owners/owner-id";
 import { OpenWorldTextureClaimRegistry } from "../texture-residency/claims/texture-claim-registry";
-import type { OpenWorldObjectVisualAtlasBuilder } from "../texture-residency/placement/object-visual-atlas-builder";
+import type { OpenWorldObjectVisualAtlasBuilder } from "../texture-residency/atlas-build/object-visual-atlas-builder";
 import {
 	OpenWorldRuntimeEntitySystem,
 	type OpenWorldRuntimeEntityTexturePageBuildRequest,

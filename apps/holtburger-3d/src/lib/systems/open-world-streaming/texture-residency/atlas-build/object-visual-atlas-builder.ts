@@ -103,9 +103,7 @@ export type OpenWorldMaterialTextureAtlasBuilder =
 export class DirectOpenWorldObjectVisualAtlasBuilder implements OpenWorldObjectVisualAtlasBuilder {
 	readonly #assetReader: PreparedAssetReader;
 
-	constructor(options: {
-		readonly assetReader: PreparedAssetReader;
-	}) {
+	constructor(options: { readonly assetReader: PreparedAssetReader }) {
 		this.#assetReader = options.assetReader;
 	}
 
@@ -180,13 +178,13 @@ async function prepareTexturePackingSources(options: {
 				batch.map((entry) =>
 					measureStage(
 						options.timings,
-							"texture-source-preparation-chunk",
-							async () => ({
-								entry,
-								source: await prepareMaterialTexturePackingSource({
-									assetReader: options.assetReader,
-									dataUse: entry.dataUse,
-								}),
+						"texture-source-preparation-chunk",
+						async () => ({
+							entry,
+							source: await prepareMaterialTexturePackingSource({
+								assetReader: options.assetReader,
+								dataUse: entry.dataUse,
+							}),
 						}),
 						1,
 					),

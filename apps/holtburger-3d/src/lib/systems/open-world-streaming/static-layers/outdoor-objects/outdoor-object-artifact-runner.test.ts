@@ -15,7 +15,7 @@ import type {
 import { createEmptyObjectVisualInstallSet } from "../../../../visual/object-visual-install-set";
 import type { MaterializationOwnerId } from "../../owners/owner-id";
 import { OpenWorldTextureClaimRegistry } from "../../texture-residency/claims/texture-claim-registry";
-import type { OpenWorldObjectVisualAtlasBuilder } from "../../texture-residency/placement/object-visual-atlas-builder";
+import type { OpenWorldObjectVisualAtlasBuilder } from "../../texture-residency/atlas-build/object-visual-atlas-builder";
 import { OpenWorldOutdoorObjectArtifactRunner } from "./outdoor-object-artifact-runner";
 
 describe("OpenWorldOutdoorObjectArtifactRunner", () => {

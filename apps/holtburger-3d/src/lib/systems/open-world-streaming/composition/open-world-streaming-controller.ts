@@ -55,7 +55,7 @@ import type {
 	ScenePickRequest,
 } from "../../../runtime/scene-query/merged-scene-query-contracts";
 import type { StaticSceneEnvCellBounds } from "../../../runtime/scene-query/contracts";
-import type { OpenWorldObjectVisualAtlasBuilder } from "../texture-residency/placement/object-visual-atlas-builder";
+import type { OpenWorldObjectVisualAtlasBuilder } from "../texture-residency/atlas-build/object-visual-atlas-builder";
 import type { OpenWorldTexturePageBuildInput } from "../texture-residency/page-build/protocol";
 import type { OpenWorldTexturePageBuilder } from "../texture-residency/page-build/worker-client";
 import { OpenWorldTexturePageBuildTaskStream } from "../texture-residency/page-build/texture-page-build-task-stream";

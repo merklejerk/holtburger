@@ -2944,16 +2944,26 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Audit imports from `systems/open-world-streaming` into `static`, `visual`, `textures`, `runtime`, and `renderer` modules.
-- [ ] Classify each cross-tree import as durable transform, durable adapter, legacy shim, or deletion target.
-- [ ] Move worker-owned atlas builder modules if Phase 35 proves a clearer owner folder.
-- [ ] Move or rename material readiness code if Phase 36 proves `static-object-material-coverage.ts` is no longer the owning concept.
-- [ ] Delete compatibility barrels or aliases created only to avoid import churn.
-- [ ] Run `npm run check`, `npm run lint`, `npm run lint:dead`, and focused tests touched by moves.
+- [x] Audit imports from `systems/open-world-streaming` into `static`, `visual`, `textures`, `runtime`, and `renderer` modules.
+- [x] Classify each cross-tree import as durable transform, durable adapter, legacy shim, or deletion target.
+- [x] Move worker-owned atlas builder modules if Phase 35 proves a clearer owner folder.
+- [x] Move or rename material readiness code if Phase 36 proves `static-object-material-coverage.ts` is no longer the owning concept.
+- [x] Delete compatibility barrels or aliases created only to avoid import churn.
+- [x] Run `npm run check`, `npm run lint`, `npm run lint:dead`, and focused tests touched by moves.
 
 Decisions and course corrections:
 
-- Pending.
+- Cross-tree audit classification:
+  - Durable transforms: `static/contracts`, static source/bake/resource helpers, `visual` object-visual recipe/install primitives, and `textures` identity/sampling/packing primitives. These are not lifecycle authorities and remain outside `systems/open-world-streaming`.
+  - Durable adapters/ports: browser runtime creation, worker URLs/ports, renderer mutation ports, runtime diagnostics export plumbing, and harness composition.
+  - Replacement authorities: owner registry, texture claims, atlas-build scheduling, placement reservation, page-build settlement, texture commits, static layer runners, runtime entities, diagnostics, and controller composition remain under `systems/open-world-streaming`.
+  - Legacy shim/deletion targets: no surviving `staticOverview` or old static commit counter imports were found after Phase 40; no compatibility barrel was added for Phase 42 moves.
+- Moved object visual atlas build modules from `texture-residency/placement` to `texture-residency/atlas-build`: `object-visual-atlas-builder.ts`, worker client, worker protocol, worker handler, worker entrypoint, and worker-client test. This separates worker-owned atlas layout/source-preparation boundary from placement reservation policy.
+- Updated all imports and browser worker URLs to the new `atlas-build` path. Placement plans now import the atlas-build boundary as a sibling; production browser composition imports the worker-backed builder directly from `atlas-build`.
+- Deliberate non-move: `static/objects/bake/static-object-material-coverage.ts` remains in static object bake. It produces static bake evidence; replacement readiness classification consumes that evidence in `open-world-streaming` diagnostics. Moving the evidence producer into diagnostics would couple bake output to readiness policy and recreate the drift this plan is avoiding.
+- Deliberate non-move: generic `textures/packing`, `textures/identity`, and renderer contracts remain neutral shared transforms/contracts, not open-world lifecycle authorities.
+- Spicy bit: `git mv` could not run inside the sandbox because creating `.git/index.lock` was blocked, so the files were moved with plain filesystem `mv`; Git will detect the renames at commit time. No compatibility aliases were introduced.
+- Verification: `npm run check`, `npm run lint`, focused `npm run test:ts -- --run src/lib/systems/open-world-streaming/texture-residency/atlas-build/object-visual-atlas-worker-client.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/object-visual-texture-placement-plan.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/material-texture-placement-plan.test.ts src/lib/browser/create-browser-runtime.test.ts`, and targeted Prettier check for moved atlas-build/placement/browser runtime files.
 
 ### Phase 43: Texture Remodel Final Verification And Hard Cutover
 

@@ -15,7 +15,7 @@ import type {
 import { OpenWorldTextureClaimRegistry } from "../../texture-residency/claims/texture-claim-registry";
 import { OpenWorldTerrainArtifactRunner } from "./terrain-artifact-runner";
 import type { MaterializationOwnerId } from "../../owners/owner-id";
-import type { OpenWorldMaterialTextureAtlasBuilder } from "../../texture-residency/placement/object-visual-atlas-builder";
+import type { OpenWorldMaterialTextureAtlasBuilder } from "../../texture-residency/atlas-build/object-visual-atlas-builder";
 
 describe("OpenWorldTerrainArtifactRunner", () => {
 	it("resolves and bakes terrain into a replacement terrain layer commit", async () => {

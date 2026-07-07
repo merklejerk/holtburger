@@ -17,11 +17,10 @@ import type {
 	OpenWorldObjectVisualAtlasPlacementOutput,
 } from "./object-visual-atlas-builder";
 
-export type OpenWorldObjectVisualAtlasWorkerRequest =
-	WorkerHandlerInputMessage<
-		OpenWorldObjectVisualAtlasBuildInput,
-		PreparedAssetServiceResponse
-	>;
+export type OpenWorldObjectVisualAtlasWorkerRequest = WorkerHandlerInputMessage<
+	OpenWorldObjectVisualAtlasBuildInput,
+	PreparedAssetServiceResponse
+>;
 
 export type OpenWorldObjectVisualAtlasWorkerResponse =
 	WorkerHandlerOutputMessage<

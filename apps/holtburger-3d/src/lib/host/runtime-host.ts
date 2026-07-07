@@ -41,7 +41,9 @@ class TauriRuntimeHost implements RuntimeHost {
 		});
 	}
 
-	async lookupAssetResponse(key: HostAssetKey): Promise<RuntimeHostAssetResponse> {
+	async lookupAssetResponse(
+		key: HostAssetKey,
+	): Promise<RuntimeHostAssetResponse> {
 		const requestId = `asset-${this.#nextRequestIndex++}`;
 		const request = createHostAssetLookupRequest(key, requestId);
 
@@ -121,7 +123,9 @@ class HttpRuntimeHost implements RuntimeHost {
 		});
 	}
 
-	async lookupAssetResponse(key: HostAssetKey): Promise<RuntimeHostAssetResponse> {
+	async lookupAssetResponse(
+		key: HostAssetKey,
+	): Promise<RuntimeHostAssetResponse> {
 		const requestId = `asset-${this.#nextRequestIndex++}`;
 		const request = createHostAssetLookupRequest(key, requestId);
 

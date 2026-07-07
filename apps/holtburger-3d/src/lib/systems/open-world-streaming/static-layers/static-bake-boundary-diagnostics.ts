@@ -20,9 +20,7 @@ interface StaticBakeWorkerBoundaryDiagnostics {
 
 interface DiagnosticStaticBaker extends StaticBaker {
 	/** Optional richer worker-boundary bake path exposed by worker-backed bakers. */
-	bakeWithDiagnostics(
-		input: StaticBakeJobInput,
-	): Promise<{
+	bakeWithDiagnostics(input: StaticBakeJobInput): Promise<{
 		readonly diagnostics: StaticBakeWorkerBoundaryDiagnostics | null;
 		readonly result: StaticBakeJobResult;
 	}>;

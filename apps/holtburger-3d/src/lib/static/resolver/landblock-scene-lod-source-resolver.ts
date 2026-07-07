@@ -98,9 +98,7 @@ export class LandblockSceneLodSourceResolver implements StaticLandblockSceneLodS
 
 	async resolveProjectedSources(
 		request: StaticLandblockSceneLodSourceRequest,
-		onProjection: (
-			event: StaticLandblockSceneLodSourceProjectionEvent,
-		) => void,
+		onProjection: (event: StaticLandblockSceneLodSourceProjectionEvent) => void,
 	): Promise<void> {
 		const sceneAsset = await this.#assetService.requestPreparedAsset(
 			createLandblockSceneLodHostAssetKey(

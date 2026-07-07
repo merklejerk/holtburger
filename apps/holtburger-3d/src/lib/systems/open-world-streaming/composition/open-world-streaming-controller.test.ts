@@ -305,9 +305,7 @@ class FixtureStreamingTerrainResolver extends FixtureTerrainResolver {
 
 	override async resolveProjectedSources(
 		request: StaticLandblockSceneLodSourceRequest,
-		onProjection: (
-			event: StaticLandblockSceneLodSourceProjectionEvent,
-		) => void,
+		onProjection: (event: StaticLandblockSceneLodSourceProjectionEvent) => void,
 	): Promise<void> {
 		this.streamRequests.push(request);
 		for (const layer of request.requestedLayers) {

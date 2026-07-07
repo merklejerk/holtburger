@@ -75,6 +75,18 @@ export interface OpenWorldObjectVisualAtlasBuilder {
 	dispose?(): void;
 }
 
+/** Generic material-texture atlas input used by static and runtime texture placement. */
+export type OpenWorldMaterialTextureAtlasBuildInput =
+	OpenWorldObjectVisualAtlasBuildInput;
+
+/** Generic material-texture atlas output used by static and runtime texture placement. */
+export type OpenWorldMaterialTextureAtlasBuildOutput =
+	OpenWorldObjectVisualAtlasBuildOutput;
+
+/** Generic material-texture atlas builder used by static and runtime texture placement. */
+export type OpenWorldMaterialTextureAtlasBuilder =
+	OpenWorldObjectVisualAtlasBuilder;
+
 export class DirectOpenWorldObjectVisualAtlasBuilder implements OpenWorldObjectVisualAtlasBuilder {
 	readonly #assetReader: PreparedAssetReader;
 	readonly #texturePacker: TexturePacker;

@@ -369,6 +369,8 @@ export interface OpenWorldStreamingStaticTaskStageTiming {
 /** Replacement-native texture page inspection contract. */
 export interface OpenWorldStreamingTexturePageInspectionSnapshot {
 	readonly kind: "open-world-streaming-texture-page";
+	/** Sum of assigned entry rect areas on this page, excluding gutters. */
+	readonly assignedPixelCount: number;
 	readonly bucketKey: string;
 	readonly pageId: string;
 	readonly state:
@@ -379,6 +381,8 @@ export interface OpenWorldStreamingTexturePageInspectionSnapshot {
 		| "missing";
 	/** Last accepted renderer upload retained for interactive inspection. */
 	readonly preview: OpenWorldStreamingTexturePageInspectionPreview | null;
+	/** Total runtime texture page pixel count when dimensions are known. */
+	readonly texturePixelCount: number | null;
 	readonly entries: readonly {
 		/** Shared logical entry identity used by claims, pages, and diagnostics. */
 		readonly id: string;

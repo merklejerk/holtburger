@@ -455,6 +455,43 @@ describe("OpenWorldTextureClaimRegistry", () => {
 		});
 	});
 
+	it("reports assigned and total texture page pixel counts", () => {
+		const registry = new OpenWorldTextureClaimRegistry();
+		const bucketKey = createBucketKey("terrain-color");
+		const snapshot = registry.retainTextureBindings(
+			ownerId("owner:terrain"),
+			bucketKey,
+			[
+				createBinding("terrain-a", bucketKey, {
+					textureKey: textureKey("texture:terrain-a"),
+				}),
+				createBinding("terrain-b", bucketKey, {
+					textureKey: textureKey("texture:terrain-b"),
+				}),
+			],
+		);
+		const [firstEntry, secondEntry] = snapshot.entries;
+		if (!firstEntry || !secondEntry) {
+			throw new Error("Expected two retained texture entries.");
+		}
+
+		registry.createPage({
+			bucketKey,
+			entryIds: [firstEntry.id, secondEntry.id],
+			placements: [
+				{ entryId: firstEntry.id, rect: [0, 0, 8, 4] },
+				{ entryId: secondEntry.id, rect: [12, 0, 3, 5] },
+			],
+			textureHeight: 16,
+			textureWidth: 32,
+		});
+
+		expect(registry.createBucketSnapshot(bucketKey).pages[0]).toMatchObject({
+			assignedPixelCount: 47,
+			texturePixelCount: 512,
+		});
+	});
+
 	it("retires accepted noop page builds back to the pre-build state", () => {
 		const registry = new OpenWorldTextureClaimRegistry();
 		const bucketKey = createBucketKey("terrain-color");

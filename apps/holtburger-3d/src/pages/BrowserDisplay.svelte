@@ -1696,6 +1696,10 @@
 			: page.purposes.join(", ");
 	}
 
+	function formatAssignedPixelRatio(ratio: number | null): string {
+		return ratio === null ? "unknown" : `${(ratio * 100).toFixed(1)}%`;
+	}
+
 	function inspectTexturePage(page: RuntimeTexturePageOverview): void {
 		if (!runtime) {
 			return;
@@ -2664,6 +2668,7 @@
 											</small>
 										</div>
 										<div class="browser-display__texture-page-metrics">
+											<span>{formatAssignedPixelRatio(page.assignedPixelRatio)} used</span>
 											<span>{page.entryCount} entries</span>
 											<span>{page.ownerCount} owners</span>
 										</div>

@@ -569,18 +569,21 @@ export class OpenWorldStreamingController {
 		);
 		if (!page) {
 			return {
+				assignedPixelCount: 0,
 				bucketKey: input.bucketKey,
 				entries: [],
 				kind: "open-world-streaming-texture-page",
 				pageId: input.pageId,
 				preview: null,
 				state: "missing",
+				texturePixelCount: null,
 			};
 		}
 		const entriesById = new Map(
 			bucket.entries.map((entry) => [entry.id, entry]),
 		);
 		return {
+			assignedPixelCount: page.assignedPixelCount,
 			bucketKey: input.bucketKey,
 			entries: page.entryIds.map((entryId) => {
 				const entry = entriesById.get(entryId);
@@ -598,6 +601,7 @@ export class OpenWorldStreamingController {
 					createTexturePagePreviewKey(input.bucketKey, input.pageId),
 				) ?? null,
 			state: page.state,
+			texturePixelCount: page.texturePixelCount,
 		};
 	}
 

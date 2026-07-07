@@ -3120,15 +3120,22 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Run a terrain and all-domain harness sample and inspect `materialReadiness.summary` plus recent issues.
-- [ ] Trace every static coverage consumer.
-- [ ] Add or adjust direct readiness classifications for intentional flat color versus broken fallback.
-- [ ] Update BrowserDisplay material status only if it currently hides direct readiness truth.
-- [ ] Add focused readiness tests around coverage evidence, terrain material issues, and renderer-capability deferrals.
+- [x] Run a terrain and all-domain harness sample and inspect `materialReadiness.summary` plus recent issues.
+- [x] Trace every static coverage consumer.
+- [x] Add or adjust direct readiness classifications for intentional flat color versus broken fallback.
+- [x] Update BrowserDisplay material status only if it currently hides direct readiness truth.
+- [x] Add focused readiness tests around coverage evidence, terrain material issues, and renderer-capability deferrals.
 
 Decisions and course corrections:
 
-- Pending.
+- No production code change was needed in this phase. The current controller readiness path already treats `StaticMaterialCoverageReport` as `sourceEvidence` for direct readiness issues and does not report rendered coverage as a readiness issue.
+- Coverage consumers remain appropriately scoped: static object/env-cell bake produces coverage evidence, renderer/static layer contracts can carry coverage payloads, and `open-world-streaming-controller.ts` maps unrendered buckets into `renderer-capability-deferred` or `unsupported-source-material` diagnostics with `sourceEvidence.kind === "static-material-coverage"`.
+- Intentional flat color remains a valid renderable material family, not a readiness issue. Renderer/object-material tests already cover flat-color defaults and flat-color detail overlays without requiring resident base textures. No `intentional-flat-color` diagnostic was added because no renderer, harness, or UI consumer currently needs to distinguish valid flat color from broken fallback outside existing readiness categories.
+- BrowserDisplay already reads direct `openWorldDiagnostics.materialReadiness.summary` and does not recreate static coverage reports or legacy material categories, so no UI change was needed.
+- Harness evidence:
+  - `/tmp/holtburger-phase46-terrain-r0.json`: settled with 1/1 static task complete, 3/3 committed page builds, 3 resident texture pages, 0 material readiness issues, 0 pending/failed texture dependencies.
+  - `/tmp/holtburger-phase46-all-domain-r0.json`: settled with 5/5 static tasks complete, 15/15 committed page builds, 15 resident texture pages, 0 material readiness issues, 0 pending/failed texture dependencies.
+- Verification: focused `npm run test:ts -- --run src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/static/env-cells/bake/env-cell-system-baker.test.ts src/lib/renderer/webgl2/webgl2-object-material-payloads.test.ts src/lib/visual/object-visual-material-planner.test.ts`, plus the two browser harness samples above.
 
 ### Phase 47: Diagnostics Contract Cleanup And Harness Migration
 

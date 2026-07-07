@@ -28,7 +28,7 @@ interface StaticBakeRequestDiagnostics {
 }
 
 /** Worker handoff counters captured immediately before the bake worker posts its result. */
-export interface StaticBakeWorkerResultReadyDiagnostics {
+interface StaticBakeWorkerResultReadyDiagnostics {
 	/** Worker wall-clock timestamp immediately before result postMessage. */
 	readonly completedAtEpochMs: number;
 	/** Draw units in the result, used as a compact result-size proxy. */
@@ -42,7 +42,7 @@ export interface StaticBakeWorkerResultReadyDiagnostics {
 }
 
 /** Direct diagnostics for the static bake worker boundary, not a legacy coordinator snapshot. */
-export interface StaticBakeWorkerBoundaryDiagnostics {
+interface StaticBakeWorkerBoundaryDiagnostics {
 	/** Worker wall-clock timestamp immediately before result postMessage. */
 	readonly completedAtEpochMs: number;
 	/** Main-thread delay from worker result-ready progress to resolved result delivery. */
@@ -230,7 +230,10 @@ class StandardStaticWorkerBaker implements StaticBaker {
 		const resolvedAtEpochMs = Date.now();
 		return {
 			completedAtEpochMs: resultReady.completedAtEpochMs,
-			deliveryMs: Math.max(0, resolvedAtEpochMs - resultReady.completedAtEpochMs),
+			deliveryMs: Math.max(
+				0,
+				resolvedAtEpochMs - resultReady.completedAtEpochMs,
+			),
 			drawUnitCount: resultReady.drawUnitCount,
 			objectVisualResourceCount: resultReady.objectVisualResourceCount,
 			resolvedAtEpochMs,
@@ -240,7 +243,10 @@ class StandardStaticWorkerBaker implements StaticBaker {
 			waitMs:
 				request.startedAtEpochMs === null
 					? null
-					: Math.max(0, resultReady.completedAtEpochMs - request.startedAtEpochMs),
+					: Math.max(
+							0,
+							resultReady.completedAtEpochMs - request.startedAtEpochMs,
+						),
 		};
 	}
 

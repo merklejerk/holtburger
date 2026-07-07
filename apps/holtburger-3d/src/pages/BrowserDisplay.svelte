@@ -75,12 +75,10 @@
 	import type { TextureFilteringMode } from "../lib/textures/sampling-policy";
 	import DiagnosticsModal from "../lib/ui/DiagnosticsModal.svelte";
 	import PerformanceOverlay from "../lib/ui/PerformanceOverlay.svelte";
-	import TextureAtlasPageInspectorModal from "../lib/ui/TextureAtlasPageInspectorModal.svelte";
 	import {
 		PerformanceMetricsTracker,
 		type PerformanceMetricsSnapshot,
 	} from "../lib/ui/performance-metrics";
-	import type { TextureAtlasPageInspectionSnapshot } from "../lib/textures/texture-manager";
 
 	type BrowserPanelTab =
 		| "navigate"
@@ -182,9 +180,6 @@
 	let diagnosticsReportText = $state<string | null>(null);
 	let selectedDiagnosticsReportText = $state<string | null>(null);
 	let selectedDiagnosticsReportTitle = $state("Selection");
-	let atlasInspectionSnapshot =
-		$state<TextureAtlasPageInspectionSnapshot | null>(null);
-	let atlasInspectionLabel = $state("");
 	let selectedScenePick = $state<SelectedScenePick | null>(null);
 	let spawnForm = $state<BrowserSpawnFormState>(
 		createDefaultBrowserSpawnFormState(),
@@ -577,11 +572,6 @@
 
 	function closeSelectedDiagnosticsReport(): void {
 		selectedDiagnosticsReportText = null;
-	}
-
-	function closeAtlasInspection(): void {
-		atlasInspectionSnapshot = null;
-		atlasInspectionLabel = "";
 	}
 
 	function updateSpawnFormField<K extends keyof BrowserSpawnFormState>(
@@ -1686,21 +1676,6 @@
 		}
 	}
 
-	function inspectAtlasPage(page: RuntimeTextureAtlasPageOverview): void {
-		if (!runtime) {
-			return;
-		}
-		const snapshot = runtime.createTextureAtlasPageInspectionSnapshot({
-			bucketId: page.bucketId,
-			pageId: page.pageId,
-		});
-		if (!snapshot) {
-			return;
-		}
-		atlasInspectionSnapshot = snapshot;
-		atlasInspectionLabel = `${page.bucketLabel} / ${formatAtlasPageOrdinal(page.pageId)}`;
-	}
-
 	function formatPercent(value: number): string {
 		return `${(value * 100).toFixed(1)}%`;
 	}
@@ -2643,16 +2618,6 @@
 										<div class="browser-display__atlas-metrics">
 											<span>{page.textureCount} tex</span>
 											<span>{formatPercent(page.packingEfficiency)}</span>
-											<button
-												aria-label="Inspect atlas page {page.bucketLabel} {formatAtlasPageOrdinal(
-													page.pageId,
-												)}"
-												title="Inspect atlas page"
-												type="button"
-												onclick={() => inspectAtlasPage(page)}
-											>
-												⌕
-											</button>
 										</div>
 									</div>
 								{/each}
@@ -2986,14 +2951,6 @@
 			title={selectedDiagnosticsReportTitle}
 			titleId="browser-display-selection-diagnostics-title"
 			onClose={closeSelectedDiagnosticsReport}
-		/>
-	{/if}
-
-	{#if atlasInspectionSnapshot !== null}
-		<TextureAtlasPageInspectorModal
-			label={atlasInspectionLabel}
-			snapshot={atlasInspectionSnapshot}
-			onClose={closeAtlasInspection}
 		/>
 	{/if}
 </section>

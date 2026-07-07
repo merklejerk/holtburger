@@ -8,34 +8,15 @@ import type { DynamicVisualRecipeResolver } from "../dynamic/visual-recipe-resol
 import type { DynamicVisualRecipeWorkerPort } from "../dynamic/visual-recipe-protocol";
 import { createBrowserRuntimeHost } from "../host/runtime-host";
 import { createWebgl2Renderer } from "../renderer/webgl2/webgl2-renderer";
-import {
-	createClientRuntime,
-	type ClientRuntime,
-} from "../runtime/client-runtime";
-import {
-	createOpenWorldStreamingClientRuntime,
-	DEFAULT_BROWSER_RUNTIME_PIPELINE,
-	type BrowserRuntimePipelineMode,
-} from "../systems/open-world-streaming";
+import type { ClientRuntime } from "../runtime/client-runtime";
+import { createOpenWorldStreamingClientRuntime } from "../systems/open-world-streaming";
 import type { OpenWorldStreamingStaticPublicationMode } from "../systems/open-world-streaming/composition/open-world-streaming-controller";
 import type { OpenWorldStreamingBoundaryAdapters } from "../systems/open-world-streaming/adapters";
-import { CompositeStaticBakeResourceProvider } from "../static/bake/resources";
-import { StaticCoordinator } from "../static/coordinator/static-coordinator";
 import type {
-	StaticBakeJobInput,
-	StaticBakeJobResult,
 	StaticBaker,
-	StaticBakerDiagnosticsSnapshot,
-	StaticLandblockSceneLodResolution,
-	StaticLandblockSceneLodSourceRequest,
 	StaticLandblockSceneLodSourceResolver,
-	StaticResolverJob,
 	StaticResolver,
-	StaticScopePayload,
 } from "../static/contracts";
-import { ImmediateStaticBaker } from "../static/fake-workers";
-import { EnvCellSystemGeometryResourceProvider } from "../static/env-cells/bake/env-cell-system-geometry-resources";
-import { StaticObjectBakeResourceProvider } from "../static/objects/bake/static-object-bake-resources";
 import { WorkerPoolStaticBaker } from "../static/bake/worker-client";
 import type { StaticBakeWorkerPort } from "../static/bake/protocol";
 import { WorkerPoolStaticResolver } from "../static/resolver/worker-client";
@@ -51,7 +32,6 @@ const DEFAULT_DYNAMIC_VISUAL_BAKER_WORKER_COUNT = 1;
 const DEFAULT_TEXTURE_PACKING_WORKER_COUNT = 2;
 
 export interface CreateBrowserRuntimeOptions {
-	readonly runtimePipeline?: BrowserRuntimePipelineMode;
 	readonly staticPublicationMode?: OpenWorldStreamingStaticPublicationMode;
 }
 
@@ -62,45 +42,14 @@ export function createBrowserRuntime(
 	const renderer = createWebgl2Renderer(canvas);
 	const host = createBrowserRuntimeHost();
 	const assetService = new HostBackedAssetService({ host });
-	const runtimePipeline =
-		options.runtimePipeline ?? DEFAULT_BROWSER_RUNTIME_PIPELINE;
 
-	if (runtimePipeline === "open-world-streaming") {
-		return createOpenWorldStreamingClientRuntime({
-			adapters: createOpenWorldStreamingBoundaryAdapters({
-				assetService,
-				host,
-				renderer,
-			}),
-			staticPublicationMode: options.staticPublicationMode,
-		});
-	}
-
-	const hostSnapshot = host.createSnapshot();
-	const dynamicVisualBaker = hostSnapshot.isAvailable
-		? createWorkerDynamicVisualBaker(DEFAULT_DYNAMIC_VISUAL_BAKER_WORKER_COUNT)
-		: undefined;
-	const staticCoordinator = hostSnapshot.isAvailable
-		? createTauriStaticCoordinator(assetService, dynamicVisualBaker)
-		: undefined;
-	const texturePacker = hostSnapshot.isAvailable
-		? createWorkerTexturePacker(DEFAULT_TEXTURE_PACKING_WORKER_COUNT)
-		: undefined;
-	const dynamicVisualRecipeResolver = hostSnapshot.isAvailable
-		? createWorkerDynamicVisualRecipeResolver(
-				assetService,
-				DEFAULT_DYNAMIC_VISUAL_RECIPE_RESOLVER_WORKER_COUNT,
-			)
-		: undefined;
-
-	return createClientRuntime({
-		host,
-		assetService,
-		dynamicVisualBaker,
-		dynamicVisualRecipeResolver,
-		renderer,
-		staticCoordinator,
-		texturePacker,
+	return createOpenWorldStreamingClientRuntime({
+		adapters: createOpenWorldStreamingBoundaryAdapters({
+			assetService,
+			host,
+			renderer,
+		}),
+		staticPublicationMode: options.staticPublicationMode,
 	});
 }
 
@@ -139,41 +88,6 @@ function createOpenWorldStreamingBoundaryAdapters(options: {
 				createWorkerTexturePacker(DEFAULT_TEXTURE_PACKING_WORKER_COUNT),
 		},
 	};
-}
-
-function createTauriStaticCoordinator(
-	assetReader: PreparedAssetReader,
-	dynamicVisualBaker: DynamicVisualBaker | undefined,
-): StaticCoordinator {
-	const terrainResolver = createWorkerStaticResolver(
-		assetReader,
-		DEFAULT_STATIC_RESOLVER_WORKER_COUNT,
-	);
-	const workerBaker = createWorkerStaticBaker(
-		DEFAULT_STATIC_BAKER_WORKER_COUNT,
-	);
-	const placeholderBaker = new ImmediateStaticBaker();
-	const resolver = new BrowserStaticResolver({
-		terrainResolver,
-	});
-	const baker = new BrowserStaticBaker({
-		placeholderBaker,
-		workerBaker,
-	});
-
-	return new StaticCoordinator({
-		resourceProvider: new CompositeStaticBakeResourceProvider([
-			new StaticObjectBakeResourceProvider({
-				assetReader,
-			}),
-			new EnvCellSystemGeometryResourceProvider(),
-		]),
-		baker,
-		dynamicVisualBaker,
-		dynamicVisualGeometryAssetReader: assetReader,
-		textureIdentityAssetReader: assetReader,
-		resolver,
-	});
 }
 
 interface StaticResolverBrowserWorker extends StaticResolverWorkerPort {
@@ -306,123 +220,5 @@ function createWorkerTexturePacker(workerCount: number): TexturePacker {
 function assertPositiveInteger(value: number, label: string): void {
 	if (!Number.isInteger(value) || value < 1) {
 		throw new Error(`${label} must be a positive integer. Received ${value}.`);
-	}
-}
-
-class BrowserStaticResolver
-	implements StaticResolver, StaticLandblockSceneLodSourceResolver
-{
-	readonly #sceneLodSourceResolver: StaticLandblockSceneLodSourceResolver;
-	#disposed = false;
-
-	constructor(options: {
-		readonly terrainResolver: StaticResolver &
-			StaticLandblockSceneLodSourceResolver;
-	}) {
-		this.#sceneLodSourceResolver = options.terrainResolver;
-	}
-
-	resolve(job: StaticResolverJob): Promise<StaticScopePayload> {
-		if (this.#disposed) {
-			return Promise.reject(
-				new Error("BrowserStaticResolver has been disposed."),
-			);
-		}
-
-		return Promise.reject(
-			new Error(
-				`BrowserStaticResolver direct static-scope resolution is retired; use resolveSource for ${job.domain}.`,
-			),
-		);
-	}
-
-	resolveSource(
-		request: StaticLandblockSceneLodSourceRequest,
-	): Promise<StaticLandblockSceneLodResolution> {
-		if (this.#disposed) {
-			return Promise.reject(
-				new Error("BrowserStaticResolver has been disposed."),
-			);
-		}
-
-		return this.#sceneLodSourceResolver.resolveSource(request);
-	}
-
-	dispose(): void {
-		if (this.#disposed) {
-			return;
-		}
-
-		this.#disposed = true;
-		disposeIfAvailable(this.#sceneLodSourceResolver);
-	}
-}
-
-class BrowserStaticBaker implements StaticBaker {
-	readonly #workerBaker: StaticBaker;
-	readonly #placeholderBaker: StaticBaker;
-	#disposed = false;
-
-	constructor(options: {
-		readonly workerBaker: StaticBaker;
-		readonly placeholderBaker: StaticBaker;
-	}) {
-		this.#workerBaker = options.workerBaker;
-		this.#placeholderBaker = options.placeholderBaker;
-	}
-
-	bake(input: StaticBakeJobInput): Promise<StaticBakeJobResult> {
-		if (this.#disposed) {
-			return Promise.reject(new Error("BrowserStaticBaker has been disposed."));
-		}
-
-		if (shouldUseBrowserWorkerBaker(input.domain)) {
-			return this.#workerBaker.bake(input);
-		}
-
-		return this.#placeholderBaker.bake(input);
-	}
-
-	createDiagnosticsSnapshot(): StaticBakerDiagnosticsSnapshot {
-		return (
-			this.#workerBaker.createDiagnosticsSnapshot?.() ?? {
-				kind: "static-baker",
-				pendingJobs: [],
-				workerCount: null,
-			}
-		);
-	}
-
-	dispose(): void {
-		if (this.#disposed) {
-			return;
-		}
-
-		this.#disposed = true;
-		disposeIfAvailable(this.#workerBaker);
-		disposeIfAvailable(this.#placeholderBaker);
-	}
-}
-
-export function shouldUseBrowserWorkerBaker(
-	domain: StaticBakeJobInput["domain"],
-): boolean {
-	return (
-		domain === "outdoor-terrain" ||
-		domain === "outdoor-buildings" ||
-		domain === "outdoor-explicit-objects" ||
-		domain === "outdoor-generated-scenery" ||
-		domain === "env-cell-system"
-	);
-}
-
-function disposeIfAvailable(value: unknown): void {
-	if (
-		typeof value === "object" &&
-		value !== null &&
-		"dispose" in value &&
-		typeof value.dispose === "function"
-	) {
-		value.dispose();
 	}
 }

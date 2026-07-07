@@ -33,7 +33,7 @@ export interface OpenWorldObjectVisualAtlasBuildInput {
 	readonly entries: readonly OpenWorldObjectVisualAtlasBuildEntry[];
 }
 
-export interface OpenWorldObjectVisualAtlasBuildPage {
+interface OpenWorldObjectVisualAtlasBuildPage {
 	/** Physical page pixel format. */
 	readonly format: TexturePackingPageFormat;
 	/** Gutter edge behavior for page materialization. */
@@ -50,7 +50,7 @@ export interface OpenWorldObjectVisualAtlasBuildPage {
 	readonly width: number;
 }
 
-export interface OpenWorldObjectVisualAtlasBuildEntry {
+interface OpenWorldObjectVisualAtlasBuildEntry {
 	/** Shared logical texture entry being packed. */
 	readonly entryId: OpenWorldTextureEntryId;
 	/** Source identity used to request prepared pixels inside the builder. */
@@ -98,7 +98,7 @@ export class DirectOpenWorldObjectVisualAtlasBuilder implements OpenWorldObjectV
 	}
 }
 
-export async function buildObjectVisualAtlas(options: {
+async function buildObjectVisualAtlas(options: {
 	readonly assetReader: PreparedAssetReader;
 	readonly input: OpenWorldObjectVisualAtlasBuildInput;
 	readonly texturePacker: TexturePacker;
@@ -107,11 +107,12 @@ export async function buildObjectVisualAtlas(options: {
 	const sources = await measureStage(
 		timings,
 		"texture-source-preparation",
-		() => prepareTexturePackingSources({
-			assetReader: options.assetReader,
-			entries: options.input.entries,
-			timings,
-		}),
+		() =>
+			prepareTexturePackingSources({
+				assetReader: options.assetReader,
+				entries: options.input.entries,
+				timings,
+			}),
 		options.input.entries.length,
 	);
 	const packed = await measureStage(
@@ -186,7 +187,10 @@ async function prepareTexturePackingSources(options: {
 				),
 			)),
 		);
-		if (batchStart + TEXTURE_SOURCE_PREPARATION_BATCH_SIZE < options.entries.length) {
+		if (
+			batchStart + TEXTURE_SOURCE_PREPARATION_BATCH_SIZE <
+			options.entries.length
+		) {
 			await measureStage(
 				options.timings,
 				"texture-source-preparation-yield",

@@ -13,7 +13,6 @@ import type {
 	StaticPortalProjectionRecord,
 	StaticSourceMappingRecord,
 	StaticSpatialRecord,
-	StaticTextureUseOwner,
 	StaticVisibilityRecord,
 	StructuredInteriorGeometryStaticDrawUnit,
 	TerrainGeometryStaticDrawUnit,
@@ -57,13 +56,6 @@ export interface StaticLandblockLayerOwnershipKey {
 }
 
 export type StaticLandblockLayerGenerationId = string;
-
-export type StaticLandblockLayerPayload =
-	| TerrainLayerPayload
-	| OutdoorBuildingsLayerPayload
-	| OutdoorExplicitObjectsLayerPayload
-	| OutdoorGeneratedSceneryLayerPayload
-	| EnvCellSystemLayerPayload;
 
 interface StaticLandblockLayerPayloadBase {
 	readonly generationId: StaticLandblockLayerGenerationId;
@@ -236,29 +228,6 @@ interface TexturePlacement {
 	readonly format: "rgba8" | "r8" | "rg8";
 	readonly pixels: Uint8Array;
 	readonly rect: readonly [number, number, number, number];
-}
-
-type DynamicTextureBindingOwner = {
-	/** Texture residency owned by a dynamic renderer visual resource. */
-	readonly kind: "dynamic-visual-resource";
-	readonly resourceId: string;
-};
-
-export type TextureBindingOwner =
-	| StaticTextureUseOwner
-	| DynamicTextureBindingOwner;
-
-export function createTextureBindingOwnerKey(
-	owner: TextureBindingOwner,
-): string {
-	switch (owner.kind) {
-		case "draw-unit":
-			return `draw-unit:${owner.drawUnitId}`;
-		case "static-object-visual-resource":
-			return `static-object-visual-resource:${owner.resourceId}`;
-		case "dynamic-visual-resource":
-			return `dynamic-visual-resource:${owner.resourceId}`;
-	}
 }
 
 type DynamicRendererResourceId = string;
@@ -613,7 +582,7 @@ export interface PortalProjectionFrameOutdoorCrossingPlan {
 	readonly linkId: string;
 }
 
-export interface PortalProjectionFrameDiagnostics {
+interface PortalProjectionFrameDiagnostics {
 	readonly componentCount: number;
 	readonly cyclicComponentCount: number;
 	readonly componentInternalEdgeCount: number;

@@ -24,23 +24,9 @@ import {
 	createWorkerDynamicVisualBaker,
 	createWorkerDynamicVisualRecipeResolver,
 	createWorkerStaticResolver,
-	shouldUseBrowserWorkerBaker,
 } from "./create-browser-runtime";
 
 describe("browser runtime routing", () => {
-	it("routes split outdoor object domains through worker baking", () => {
-		for (const domain of [
-			"outdoor-explicit-objects",
-			"outdoor-generated-scenery",
-		] as const) {
-			expect(shouldUseBrowserWorkerBaker(domain)).toBe(true);
-		}
-	});
-
-	it("routes env-cell bundles through worker baking", () => {
-		expect(shouldUseBrowserWorkerBaker("env-cell-system")).toBe(true);
-	});
-
 	it("creates a static resolver worker pool", () => {
 		const assetReader: PreparedAssetReader = {
 			requestPreparedAsset: () =>

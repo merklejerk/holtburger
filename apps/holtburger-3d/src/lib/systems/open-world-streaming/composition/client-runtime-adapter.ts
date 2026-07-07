@@ -1,6 +1,5 @@
 import type { AssetService } from "../../../assets/contracts";
 import type { DynamicEntityId } from "../../../dynamic/contracts";
-import type { RuntimeHost } from "../../../host/runtime-contracts";
 import { createLegacyPortalFrameWorkPlan } from "../../../renderer/portal-frame-work-plan";
 import type {
 	FrameState,
@@ -17,7 +16,6 @@ import type {
 import {
 	type ClientRuntime,
 	type RuntimeCameraResidency,
-	type RuntimeDiagnosticsSnapshot,
 	type RuntimeEvent,
 	type RuntimeOverviewSnapshot,
 	type RuntimeSceneInterest,
@@ -33,20 +31,13 @@ import type {
 	ScenePickRequest,
 } from "../../../runtime/scene-query/merged-scene-query-contracts";
 import type { TextureFilteringMode } from "../../../textures/sampling-policy";
-import type { TextureAtlasPageInspectionSnapshot } from "../../../textures/texture-manager";
 import type { OpenWorldStreamingBoundaryAdapters } from "../adapters/browser-boundaries";
-import { createEmptyLegacyDynamicRuntimeSnapshot } from "../testing/empty-runtime-snapshots";
 import { OpenWorldStreamingController } from "./open-world-streaming-controller";
 import type {
+	OpenWorldStreamingControllerSnapshot,
 	OpenWorldStreamingStaticInterest,
 	OpenWorldStreamingStaticPublicationMode,
 } from "./open-world-streaming-controller";
-import type { OpenWorldStreamingDiagnosticsSnapshot } from "../diagnostics/contracts";
-import {
-	CLIENT_RUNTIME_LEGACY_SHIM_DIAGNOSTIC,
-	createLegacyStaticDiagnosticsFromController,
-	createLegacyStaticOverviewFromController,
-} from "./client-runtime-legacy-shim";
 
 export interface OpenWorldStreamingClientRuntimeOptions {
 	readonly adapters: OpenWorldStreamingBoundaryAdapters;
@@ -83,7 +74,6 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 	readonly #assetService: AssetService;
 	readonly #controller: OpenWorldStreamingController;
 	readonly #eventListeners = new Set<RuntimeEventListener>();
-	readonly #host: RuntimeHost;
 	readonly #renderer: Renderer;
 	readonly #unsubscribeRendererTelemetry: () => void;
 	#currentCamera: FrameState["camera"] = DEFAULT_CAMERA;
@@ -100,7 +90,6 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 	constructor(options: OpenWorldStreamingClientRuntimeOptions) {
 		const adapters = options.adapters;
 		this.#assetService = adapters.assets.assetService;
-		this.#host = adapters.assets.host;
 		this.#renderer = adapters.renderer.renderer;
 		this.#controller = new OpenWorldStreamingController({
 			assetReader: adapters.assets.assetService,
@@ -126,7 +115,9 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 
 	readonly #frameTelemetryListeners = new Set<RuntimeFrameTelemetryListener>();
 
-	createRuntimeSpawn(request: Parameters<ClientRuntime["createRuntimeSpawn"]>[0]): DynamicEntityId {
+	createRuntimeSpawn(
+		request: Parameters<ClientRuntime["createRuntimeSpawn"]>[0],
+	): DynamicEntityId {
 		this.#assertUsable();
 		return this.#controller.createRuntimeEntity(request);
 	}
@@ -138,7 +129,9 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 
 	updateRuntimeSpawnRenderResidence(
 		entityId: DynamicEntityId,
-		renderResidence: Parameters<ClientRuntime["updateRuntimeSpawnRenderResidence"]>[1],
+		renderResidence: Parameters<
+			ClientRuntime["updateRuntimeSpawnRenderResidence"]
+		>[1],
 	): boolean {
 		this.#assertUsable();
 		return this.#controller.updateRuntimeEntityRenderResidence(
@@ -231,18 +224,6 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 		);
 	}
 
-	createTextureAtlasPageInspectionSnapshot(input: {
-		readonly bucketId: string;
-		readonly pageId: string;
-	}): TextureAtlasPageInspectionSnapshot | null {
-		this.#assertUsable();
-		this.#controller.createAtlasInspectionSnapshot({
-			bucketKey: input.bucketId,
-			pageId: input.pageId,
-		});
-		return null;
-	}
-
 	setSceneDebugSelection(): void {
 		this.#assertUsable();
 	}
@@ -298,7 +279,8 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 	createOverviewSnapshot(): RuntimeOverviewSnapshot {
 		const rendererResources = this.#renderer.createResourceSnapshot();
 		const controller = this.#controller.createSnapshot();
-		const staticOverview = createLegacyStaticOverviewFromController(controller);
+		const staticOverview =
+			createRuntimeStaticOverviewFromController(controller);
 		return {
 			assets: this.#assetService.createOverviewSnapshot(),
 			currentCameraResidency: this.#currentCameraResidency,
@@ -340,53 +322,9 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 		};
 	}
 
-	createDiagnosticsSnapshot(): RuntimeDiagnosticsSnapshot {
-		const controller = this.#controller.createSnapshot();
-		return {
-			assets: this.#assetService.createSnapshot(),
-			currentCameraResidency: this.#currentCameraResidency,
-			currentPortalOverlapResidency: EMPTY_RUNTIME_PORTAL_OVERLAP_RESIDENCY,
-			debugOverlays: {
-				envCellAabbCount: 0,
-				envCellAabbsVisible: this.#envCellAabbDebugOverlayVisible,
-				flatVisionModeEnabled: this.#flatVisionModeEnabled,
-				portalCount: 0,
-				portalsVisible: this.#envCellPortalDebugOverlayVisible,
-			},
-			dynamic: createEmptyLegacyDynamicRuntimeSnapshot(),
-			host: this.#host.createSnapshot(),
-			portalFrameWorkPlan: this.#createPortalFrameWorkPlan(),
-			renderPassPlan: DEFAULT_RENDER_PASS_PLAN,
-			renderPolicy: {
-				textureFilteringMode: this.#textureFilteringMode,
-			},
-			renderer: this.#renderer.createDiagnosticsSnapshot(),
-			sceneInterest: this.#sceneInterest,
-			static: createLegacyStaticDiagnosticsFromController(controller),
-			staticCommitInstall: {
-				committedCommits: [],
-				committedStaticDirectDrawUnits: 0,
-				envCellResourceMembershipRevision: 0,
-				failedCommits: [],
-				pendingCommits: [],
-				sourceStaticDirectDrawUnits: 0,
-			},
-			staticSceneQuery: controller.staticSceneQuery,
-			status: this.#createStatus(),
-		};
-	}
-
 	createDiagnosticsReport(): RuntimeDiagnosticsReport {
 		const renderer = this.#renderer.createDiagnosticsSnapshot();
-		const controllerDiagnostics = this.#controller.createDiagnosticsSnapshot();
-		const nativeDiagnostics: OpenWorldStreamingDiagnosticsSnapshot = {
-			...controllerDiagnostics,
-			compatibilityShims: [
-				...controllerDiagnostics.compatibilityShims,
-				CLIENT_RUNTIME_LEGACY_SHIM_DIAGNOSTIC,
-			],
-		};
-		const controller = this.#controller.createSnapshot();
+		const nativeDiagnostics = this.#controller.createDiagnosticsSnapshot();
 		return {
 			domains: [
 				{
@@ -471,26 +409,8 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 			],
 			kind: "runtime-diagnostics-report",
 			runtime: {
-				committedStaticCommitInstallCount:
-					nativeDiagnostics.sceneCommits.applied,
-				envCellResourceMembershipRevision: 0,
-				installedStaticDrawUnits:
-					controller.terrain.installedDrawUnits +
-					controller.outdoorObjects.installedDrawUnits +
-					controller.envCells.installedDrawUnits,
-				pendingStaticCommitInstallCount: nativeDiagnostics.sceneCommits.pending,
-				portalFrameWorkPlan: {
-					kind: "legacy-render-pass",
-					mode: "single-surface-resident",
-					renderPassKind: DEFAULT_RENDER_PASS_PLAN.kind,
-				},
-				renderPassKind: DEFAULT_RENDER_PASS_PLAN.kind,
 				sceneInterest:
 					this.#sceneInterest.kind === "none" ? null : this.#sceneInterest.kind,
-				sourceStaticDrawUnits:
-					controller.terrain.sourceDrawUnits +
-					controller.outdoorObjects.sourceDrawUnits +
-					controller.envCells.sourceDrawUnits,
 				status: this.#createStatus(),
 				textureFilteringMode: this.#textureFilteringMode,
 			},
@@ -599,5 +519,31 @@ function createStaticInterestFromRuntimeSceneInterest(
 				: -1,
 		},
 		revision,
+	};
+}
+
+function createRuntimeStaticOverviewFromController(
+	controller: OpenWorldStreamingControllerSnapshot,
+): RuntimeOverviewSnapshot["static"] {
+	return {
+		baking:
+			controller.terrain.baking +
+			controller.outdoorObjects.baking +
+			controller.envCells.baking,
+		committed:
+			controller.terrain.committed +
+			controller.outdoorObjects.committed +
+			controller.envCells.committed,
+		latestEnvCellSystemPayload: controller.envCells.latestEnvCellSystemPayload,
+		latestTerrainPayload: controller.terrain.latestTerrainPayload,
+		requested:
+			controller.terrain.requested +
+			controller.outdoorObjects.requested +
+			controller.envCells.requested,
+		resolving:
+			controller.terrain.resolving +
+			controller.outdoorObjects.resolving +
+			controller.envCells.resolving,
+		revision: 0,
 	};
 }

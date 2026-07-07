@@ -23,7 +23,7 @@ interface OpenWorldStreamingTextureBindingResolution {
 }
 
 /** Replacement-native readiness states; these are not legacy placement snapshots. */
-export type OpenWorldStreamingTextureBindingReadiness =
+type OpenWorldStreamingTextureBindingReadiness =
 	| {
 			readonly kind: "resident";
 			readonly pageVersion: {
@@ -83,20 +83,4 @@ interface OpenWorldStreamingTexturePageRemoval {
 	readonly pageId: string;
 	readonly reason: "reclaimed" | "repacked";
 	readonly textureRefId: string;
-}
-
-export function summarizeOpenWorldStreamingTextureCommit(
-	commit: OpenWorldStreamingTextureCommit,
-): {
-	readonly bindingRemovalCount: number;
-	readonly bindingUpdateCount: number;
-	readonly pageRemovalCount: number;
-	readonly pageUpdateCount: number;
-} {
-	return {
-		bindingRemovalCount: commit.bindingRemovals.length,
-		bindingUpdateCount: commit.bindingUpdates.length,
-		pageRemovalCount: commit.pageRemovals.length,
-		pageUpdateCount: commit.pageUpdates.length,
-	};
 }

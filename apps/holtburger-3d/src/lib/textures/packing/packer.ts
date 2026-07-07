@@ -117,7 +117,7 @@ function packTexturesWithAtlasLayout(
 	};
 }
 
-export function createBlankTexturePackingPage(options: {
+function createBlankTexturePackingPage(options: {
 	readonly width: number;
 	readonly height: number;
 	readonly format: TexturePackingPageFormat;
@@ -148,7 +148,7 @@ function createPageId(jobId: string, pageIndex: number): string {
 	return `${jobId}:page:${pageIndex}`;
 }
 
-export function blitTexturePackingSourceWithGutter(options: {
+function blitTexturePackingSourceWithGutter(options: {
 	readonly destination: Uint8Array;
 	readonly destinationWidth: number;
 	readonly edgeMode: "clamp" | "repeat";

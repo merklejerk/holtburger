@@ -2,10 +2,6 @@
 	import { onMount } from "svelte";
 	import { createBrowserRuntime } from "../lib/browser/create-browser-runtime";
 	import {
-		parseBrowserRuntimePipelineMode,
-		type BrowserRuntimePipelineMode,
-	} from "../lib/systems/open-world-streaming";
-	import {
 		DEFAULT_BUILDING_LOD_RADIUS,
 		DEFAULT_ENV_CELL_LOD_RADIUS,
 		DEFAULT_EXPLICIT_OBJECT_LOD_RADIUS,
@@ -86,8 +82,8 @@
 	type BrowserPipelineHarnessDiagnosticsReport = RuntimeDiagnosticsReport & {
 		/** Harness-only page-thread frame and long-task measurements. */
 		readonly harnessFrameDiagnostics: HarnessFrameDiagnostics;
-		/** Runtime pipeline selected by the harness URL. */
-		readonly runtimePipeline: BrowserRuntimePipelineMode;
+		/** Runtime pipeline used by the harness. */
+		readonly runtimePipeline: "open-world-streaming";
 		/** Static renderer publication policy selected by the harness URL. */
 		readonly staticPublicationMode: OpenWorldStreamingStaticPublicationMode;
 	};
@@ -171,7 +167,6 @@
 	let unsubscribeRuntimeFrameTelemetry: (() => void) | null = null;
 	let longTaskObserver: PerformanceObserver | null = null;
 	let statusText = $state("starting");
-	let runtimePipeline: BrowserRuntimePipelineMode = "open-world-streaming";
 	let staticPublicationMode: OpenWorldStreamingStaticPublicationMode =
 		"defer-dense-renderer-until-ready";
 	const frameDiagnostics = createMutableHarnessFrameDiagnostics();
@@ -188,14 +183,10 @@
 		}
 
 		try {
-			runtimePipeline = parseBrowserRuntimePipelineMode(
-				new URLSearchParams(window.location.search).get("runtime-pipeline"),
-			);
 			staticPublicationMode = parseStaticPublicationMode(
 				new URLSearchParams(window.location.search).get("static-publication"),
 			);
 			runtime = createBrowserRuntime(canvasElement, {
-				runtimePipeline,
 				staticPublicationMode,
 			});
 			runtime.updateCameraState(
@@ -426,29 +417,16 @@
 		overview: RuntimeOverviewSnapshot,
 		diagnostics: RuntimeDiagnosticsReport,
 	): boolean {
-		if (runtimePipeline === "open-world-streaming") {
-			const openWorld = findOpenWorldDiagnostics(diagnostics);
-			return (
-				openWorld !== null &&
-				openWorld.artifacts.inFlight === 0 &&
-				openWorld.sceneCommits.pending === 0 &&
-				openWorld.staticTasks.summary.requested > 0 &&
-				openWorld.staticTasks.summary.completed >=
-					openWorld.staticTasks.summary.requested &&
-				openWorld.staticTasks.summary.failed === 0
-			);
-		}
-		const staticOverview = overview.static;
-		const runtimeOverview = diagnostics.runtime;
+		overview;
+		const openWorld = findOpenWorldDiagnostics(diagnostics);
 		return (
-			staticOverview.requested > 0 &&
-			staticOverview.resolving === 0 &&
-			staticOverview.baking === 0 &&
-			// `committed` is lifetime commits; `requested` is active tasks.
-			staticOverview.committed >= staticOverview.requested &&
-			runtimeOverview.pendingStaticCommitInstallCount === 0 &&
-			runtimeOverview.installedStaticDrawUnits ===
-				runtimeOverview.sourceStaticDrawUnits
+			openWorld !== null &&
+			openWorld.artifacts.inFlight === 0 &&
+			openWorld.sceneCommits.pending === 0 &&
+			openWorld.staticTasks.summary.requested > 0 &&
+			openWorld.staticTasks.summary.completed >=
+				openWorld.staticTasks.summary.requested &&
+			openWorld.staticTasks.summary.failed === 0
 		);
 	}
 
@@ -459,14 +437,10 @@
 		const openWorld = diagnostics
 			? findOpenWorldDiagnostics(diagnostics)
 			: null;
-		if (runtimePipeline === "open-world-streaming" && openWorld) {
+		if (openWorld) {
 			return `${overview.status} openWorld static ${openWorld.staticTasks.summary.completed}/${openWorld.staticTasks.summary.requested} inFlight=${openWorld.artifacts.inFlight} commitsPending=${openWorld.sceneCommits.pending} runtimeEntities=${openWorld.runtimeEntities.active}`;
 		}
-		const staticOverview = overview.static;
-		const installText = diagnostics
-			? ` installPending=${diagnostics.runtime.pendingStaticCommitInstallCount} installed=${diagnostics.runtime.installedStaticDrawUnits}/${diagnostics.runtime.sourceStaticDrawUnits}`
-			: "";
-		return `${overview.status} static ${staticOverview.committed}/${staticOverview.requested} resolving=${staticOverview.resolving} baking=${staticOverview.baking}${installText}`;
+		return `${overview.status} openWorld diagnostics unavailable`;
 	}
 
 	function findOpenWorldDiagnostics(
@@ -506,7 +480,7 @@
 		return {
 			...requireRuntime().createDiagnosticsReport(),
 			harnessFrameDiagnostics: createHarnessFrameDiagnosticsSnapshot(),
-			runtimePipeline,
+			runtimePipeline: "open-world-streaming",
 			staticPublicationMode,
 		};
 	}

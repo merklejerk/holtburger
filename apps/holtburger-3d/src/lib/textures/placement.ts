@@ -91,7 +91,7 @@ export interface TextureBindingRequirement<
 	readonly samplingPolicy: StaticBakeTextureSamplingPolicy | undefined;
 }
 
-/** CPU-side request for TextureManager to assign one opaque item to an atlas page. */
+/** CPU-side request to assign one opaque texture item to an atlas page. */
 export interface TexturePlacementIntent<
 	TPlacementItemId extends TexturePlacementLookupId = string,
 > {

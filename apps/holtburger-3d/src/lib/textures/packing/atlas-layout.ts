@@ -24,7 +24,7 @@ export interface AtlasLayoutCohort {
 	readonly entryKeys: readonly string[];
 }
 
-export interface AtlasTexturePlacement {
+interface AtlasTexturePlacement {
 	readonly atlasEntryKey: string;
 	readonly textureIndex: number;
 	readonly x: number;

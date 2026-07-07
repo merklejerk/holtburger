@@ -61,7 +61,7 @@ export interface TexturePackingResult {
 	readonly rects: readonly TexturePackingRect[];
 }
 
-export interface TexturePackingWorkerResultReadyProgress {
+interface TexturePackingWorkerResultReadyProgress {
 	/** Worker wall-clock timestamp immediately before result postMessage. */
 	readonly completedAtEpochMs: number;
 	/** Packed page pixel bytes sent with the worker result. */

@@ -76,18 +76,6 @@ export function createEnvCellResourceMembershipIndex(
 	return byLandblock;
 }
 
-export function envCellResourceMembershipSnapshotsEqual(
-	left: readonly EnvCellResourceMembership[],
-	right: readonly EnvCellResourceMembership[],
-): boolean {
-	if (left.length !== right.length) {
-		return false;
-	}
-	return left.every((leftEntry, index) =>
-		envCellResourceMembershipEquals(leftEntry, right[index]),
-	);
-}
-
 function getOrCreateMembership(
 	memberships: Map<string, MutableEnvCellResourceMembership>,
 	landblockId: number,
@@ -107,27 +95,6 @@ function getOrCreateMembership(
 	};
 	memberships.set(key, membership);
 	return membership;
-}
-
-function envCellResourceMembershipEquals(
-	left: EnvCellResourceMembership,
-	right: EnvCellResourceMembership | undefined,
-): boolean {
-	return (
-		right !== undefined &&
-		left.landblockId === right.landblockId &&
-		left.envCellId === right.envCellId &&
-		left.sharedEnvCellStaticObjectDrawUnits ===
-			right.sharedEnvCellStaticObjectDrawUnits &&
-		stringArraysEqual(
-			left.structuredInteriorDrawUnitIds,
-			right.structuredInteriorDrawUnitIds,
-		) &&
-		stringArraysEqual(
-			left.envCellStaticObjectDrawUnitIds,
-			right.envCellStaticObjectDrawUnitIds,
-		)
-	);
 }
 
 function createEnvCellResourceKey(
@@ -167,14 +134,4 @@ function compareNumbers(left: number, right: number): number {
 
 function compareStrings(left: string, right: string): number {
 	return left.localeCompare(right);
-}
-
-function stringArraysEqual(
-	left: readonly string[],
-	right: readonly string[],
-): boolean {
-	return (
-		left.length === right.length &&
-		left.every((leftValue, index) => leftValue === right[index])
-	);
 }

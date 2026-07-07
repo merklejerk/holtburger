@@ -7,7 +7,11 @@ import type {
 	DynamicRendererInstance,
 	DynamicRendererVisualResource,
 } from "../../../renderer/types";
-import { AC_UNIT_SCALE, buildAcPlacementMatrix, multiplyMat4 } from "../../../math/ac-placement-transform";
+import {
+	AC_UNIT_SCALE,
+	buildAcPlacementMatrix,
+	multiplyMat4,
+} from "../../../math/ac-placement-transform";
 import type { PlacementTransformDto } from "../../../host/contracts";
 
 const IDENTITY_DYNAMIC_PART_PLACEMENT: PlacementTransformDto = {
@@ -81,7 +85,9 @@ export function createDynamicRendererInstances(
 		{
 			entityId: record.id,
 			instanceId: createDynamicRendererInstanceId(record),
-			objectToRenderMatrix: Array.from(createDynamicObjectToRenderMatrix(record)),
+			objectToRenderMatrix: Array.from(
+				createDynamicObjectToRenderMatrix(record),
+			),
 			partToObjectMatrices,
 			renderResidence: toRendererResidence(record.effectiveResidence),
 			resourceId: createDynamicRendererVisualResourceId(record),
@@ -89,7 +95,7 @@ export function createDynamicRendererInstances(
 	];
 }
 
-export function createDynamicRendererVisualResourceId(
+function createDynamicRendererVisualResourceId(
 	record: Pick<DynamicEntitySummaryDto, "id">,
 ): string {
 	return createDynamicVisualResourceId(record.id);
@@ -131,7 +137,9 @@ function createDynamicPartToObjectMatrices(
 ): DynamicRendererInstance["partToObjectMatrices"] {
 	if (record.animation.playback.status === "playing") {
 		return record.animation.playback.partPoses.map((pose) => ({
-			matrix: Array.from(buildAcPlacementMatrix(pose.localPlacement, AC_UNIT_SCALE)),
+			matrix: Array.from(
+				buildAcPlacementMatrix(pose.localPlacement, AC_UNIT_SCALE),
+			),
 			partIndex: pose.partIndex,
 		}));
 	}
@@ -165,7 +173,10 @@ function createDynamicObjectRootOmegaPlacement(
 }
 
 function toRendererResidence(
-	residence: Exclude<DynamicEntityRenderResidence, { readonly kind: "no-residence" }>,
+	residence: Exclude<
+		DynamicEntityRenderResidence,
+		{ readonly kind: "no-residence" }
+	>,
 ): DynamicRendererInstance["renderResidence"] {
 	return residence;
 }

@@ -28,6 +28,7 @@ import { reserveObjectVisualTexturePlacements } from "../texture-residency/place
 import type { OpenWorldTexturePageBuildInput } from "../texture-residency/page-build/protocol";
 import type { OpenWorldTexturePageBuildTaskSettlement } from "../texture-residency/page-build/texture-page-build-task-stream";
 import type { OpenWorldObjectVisualAtlasBuilder } from "../texture-residency/atlas-build/object-visual-atlas-builder";
+import type { WorkerPoolDiagnosticsSnapshot } from "../../../workers/pool";
 import {
 	createDynamicRendererInstances,
 	createDynamicRendererVisualResources,
@@ -124,6 +125,10 @@ export interface OpenWorldRuntimeEntityDiagnosticsSnapshot {
 		readonly skippedVisualCount: number;
 		readonly started: number;
 		readonly recentFailures: readonly OpenWorldRuntimeEntityPrepFailure[];
+	};
+	readonly prepWorkers: {
+		readonly recipeResolution: WorkerPoolDiagnosticsSnapshot | null;
+		readonly visualPrep: WorkerPoolDiagnosticsSnapshot | null;
 	};
 }
 
@@ -336,6 +341,12 @@ export class OpenWorldRuntimeEntitySystem {
 				states: this.#createPrepStateCounts(),
 				skippedVisualCount: this.#skippedVisualCount,
 				started: this.#prepStartedCount,
+			},
+			prepWorkers: {
+				recipeResolution: createWorkerDiagnosticsSnapshot(
+					this.#dynamicVisualRecipeResolver,
+				),
+				visualPrep: createWorkerDiagnosticsSnapshot(this.#dynamicVisualPrepper),
 			},
 		};
 	}
@@ -746,4 +757,24 @@ function pushRecent<T>(items: T[], item: T, limit: number): void {
 
 function nowMs(): number {
 	return globalThis.performance?.now?.() ?? Date.now();
+}
+
+function createWorkerDiagnosticsSnapshot(
+	worker: unknown,
+): WorkerPoolDiagnosticsSnapshot | null {
+	if (!hasWorkerDiagnostics(worker)) {
+		return null;
+	}
+	return worker.createDiagnosticsSnapshot();
+}
+
+function hasWorkerDiagnostics(
+	worker: unknown,
+): worker is { createDiagnosticsSnapshot(): WorkerPoolDiagnosticsSnapshot } {
+	return (
+		typeof worker === "object" &&
+		worker !== null &&
+		"createDiagnosticsSnapshot" in worker &&
+		typeof worker.createDiagnosticsSnapshot === "function"
+	);
 }

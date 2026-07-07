@@ -10,7 +10,10 @@ import {
 	type PreparedAssetServiceRequest,
 	type PreparedAssetServiceResponse,
 } from "../workers/prepared-asset-service";
-import { StandardWorkerPool } from "../workers/pool";
+import {
+	StandardWorkerPool,
+	type WorkerPoolDiagnosticsSnapshot,
+} from "../workers/pool";
 
 export class WorkerPoolDynamicVisualPrepper implements DynamicVisualPrepper {
 	readonly #pool: StandardWorkerPool<
@@ -38,6 +41,10 @@ export class WorkerPoolDynamicVisualPrepper implements DynamicVisualPrepper {
 
 	prepare(input: DynamicVisualPrepInput): Promise<DynamicVisualBakeResult> {
 		return this.#pool.submit(input);
+	}
+
+	createDiagnosticsSnapshot(): WorkerPoolDiagnosticsSnapshot {
+		return this.#pool.createDiagnosticsSnapshot();
 	}
 
 	dispose(): void {

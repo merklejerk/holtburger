@@ -529,6 +529,7 @@ export class OpenWorldStreamingController {
 				commits: runtimeEntityDiagnostics.commits,
 				nonRenderable: dynamicSnapshot.nonRenderableEntityCount,
 				prep: runtimeEntityDiagnostics.prep,
+				prepWorkers: runtimeEntityDiagnostics.prepWorkers,
 				runtimeAuthored: dynamicSnapshot.runtimeSpawnCount,
 				staticAuthored: dynamicSnapshot.staticAuthoredCount,
 			},
@@ -2070,6 +2071,10 @@ function createEmptyRuntimeEntityDiagnosticsSnapshot(): OpenWorldRuntimeEntityDi
 			},
 			skippedVisualCount: 0,
 			started: 0,
+		},
+		prepWorkers: {
+			recipeResolution: null,
+			visualPrep: null,
 		},
 	};
 }

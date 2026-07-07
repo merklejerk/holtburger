@@ -107,6 +107,16 @@ describe("dynamic visual prep worker protocol", () => {
 			},
 			kind: "prepared-asset",
 		});
+		expect(pool.createDiagnosticsSnapshot()).toMatchObject({
+			recentServiceTimings: [
+				{
+					requestId: "dynamic-visual-prep:0",
+					serviceRequestId: "service:1",
+					status: "succeeded",
+				},
+			],
+			serviceRequests: 1,
+		});
 
 		worker.emit({
 			kind: "result",

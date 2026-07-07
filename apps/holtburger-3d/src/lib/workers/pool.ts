@@ -143,15 +143,41 @@ export interface WorkerPoolProgressDiagnostics {
 	readonly event: unknown;
 }
 
+interface WorkerPoolServiceRequestDiagnostics {
+	readonly elapsedMs: number;
+	readonly requestId: string;
+	readonly serviceRequestId: string;
+}
+
+export interface WorkerPoolServiceTimingDiagnostics {
+	readonly durationMs: number;
+	readonly requestId: string;
+	readonly serviceRequestId: string;
+	readonly status: "failed" | "succeeded";
+}
+
+export interface WorkerPoolJobTimingDiagnostics {
+	readonly queuedMs: number;
+	readonly requestId: string;
+	readonly runningMs: number;
+	readonly status: "canceled" | "failed" | "succeeded";
+	readonly totalMs: number;
+}
+
 export interface WorkerPoolDiagnosticsSnapshot {
 	readonly workerCount: number;
 	readonly queuedJobs: readonly WorkerPoolJobDiagnostics[];
 	readonly activeJobs: readonly WorkerPoolJobDiagnostics[];
+	readonly activeServiceRequests: readonly WorkerPoolServiceRequestDiagnostics[];
+	readonly recentJobTimings: readonly WorkerPoolJobTimingDiagnostics[];
+	readonly recentServiceTimings: readonly WorkerPoolServiceTimingDiagnostics[];
 	readonly progressEvents: readonly WorkerPoolProgressDiagnostics[];
 	readonly submittedJobs: number;
 	readonly completedJobs: number;
 	readonly failedJobs: number;
 	readonly canceledJobs: number;
+	readonly serviceRequests: number;
+	readonly serviceRequestFailures: number;
 	readonly disposed: boolean;
 }
 
@@ -192,6 +218,12 @@ interface WorkerSlot<
 	activeRequestId?: string;
 }
 
+interface PendingWorkerServiceRequestDiagnostics {
+	readonly requestId: string;
+	readonly serviceRequestId: string;
+	readonly startedAtMs: number;
+}
+
 export class StandardWorkerPool<
 	TInput,
 	TOutput,
@@ -226,8 +258,16 @@ export class StandardWorkerPool<
 	#completedJobs = 0;
 	#failedJobs = 0;
 	#canceledJobs = 0;
+	#serviceRequests = 0;
+	#serviceRequestFailures = 0;
 	#disposed = false;
 	readonly #progressEvents: WorkerPoolProgressDiagnostics[] = [];
+	readonly #activeServiceRequestsByServiceRequestId = new Map<
+		string,
+		PendingWorkerServiceRequestDiagnostics
+	>();
+	#recentServiceTimings: WorkerPoolServiceTimingDiagnostics[] = [];
+	#recentJobTimings: WorkerPoolJobTimingDiagnostics[] = [];
 
 	constructor(
 		options: WorkerPoolOptions<
@@ -342,10 +382,18 @@ export class StandardWorkerPool<
 	}
 
 	createDiagnosticsSnapshot(): WorkerPoolDiagnosticsSnapshot {
+		const now = performance.now();
 		return {
 			activeJobs: Array.from(this.#activeJobs.values(), (job) =>
 				createJobDiagnostics(job, "running"),
 			),
+			activeServiceRequests: [
+				...this.#activeServiceRequestsByServiceRequestId.values(),
+			].map((request) => ({
+				elapsedMs: now - request.startedAtMs,
+				requestId: request.requestId,
+				serviceRequestId: request.serviceRequestId,
+			})),
 			canceledJobs: this.#canceledJobs,
 			completedJobs: this.#completedJobs,
 			disposed: this.#disposed,
@@ -354,6 +402,10 @@ export class StandardWorkerPool<
 			queuedJobs: this.#queuedJobs.map((job) =>
 				createJobDiagnostics(job, "queued"),
 			),
+			recentJobTimings: [...this.#recentJobTimings],
+			recentServiceTimings: [...this.#recentServiceTimings],
+			serviceRequestFailures: this.#serviceRequestFailures,
+			serviceRequests: this.#serviceRequests,
 			submittedJobs: this.#submittedJobs,
 			workerCount: this.#workers.length,
 		};
@@ -375,6 +427,7 @@ export class StandardWorkerPool<
 			this.#settledRequestIds.add(job.requestId);
 			job.signal?.removeEventListener("abort", job.onAbort);
 			job.reject(disposalError);
+			this.#dropActiveServiceRequestsForJob(job.requestId);
 		}
 		this.#activeJobs.clear();
 
@@ -441,9 +494,11 @@ export class StandardWorkerPool<
 		this.#finishActiveJob(workerIndex, job);
 		if (message.kind === "result") {
 			this.#completedJobs += 1;
+			this.#recordJobTiming(job, "succeeded");
 			job.resolve(message.output);
 		} else {
 			this.#failedJobs += 1;
+			this.#recordJobTiming(job, "failed");
 			job.reject(createWorkerError(message));
 		}
 		this.#dispatchQueuedJobs();
@@ -466,8 +521,21 @@ export class StandardWorkerPool<
 			return;
 		}
 
+		const serviceStartedAtMs = performance.now();
+		this.#serviceRequests += 1;
+		this.#activeServiceRequestsByServiceRequestId.set(message.serviceRequestId, {
+			requestId: message.requestId,
+			serviceRequestId: message.serviceRequestId,
+			startedAtMs: serviceStartedAtMs,
+		});
 		void this.#serviceHandler(message.request).then(
 			(result) => {
+				this.#recordServiceTiming({
+					requestId: message.requestId,
+					serviceRequestId: message.serviceRequestId,
+					startedAtMs: serviceStartedAtMs,
+					status: "succeeded",
+				});
 				if (
 					this.#disposed ||
 					this.#settledRequestIds.has(message.requestId) ||
@@ -485,6 +553,13 @@ export class StandardWorkerPool<
 				);
 			},
 			(error: unknown) => {
+				this.#serviceRequestFailures += 1;
+				this.#recordServiceTiming({
+					requestId: message.requestId,
+					serviceRequestId: message.serviceRequestId,
+					startedAtMs: serviceStartedAtMs,
+					status: "failed",
+				});
 				if (
 					this.#disposed ||
 					this.#settledRequestIds.has(message.requestId) ||
@@ -507,6 +582,7 @@ export class StandardWorkerPool<
 	): void {
 		this.#activeJobs.delete(job.requestId);
 		this.#settledRequestIds.add(job.requestId);
+		this.#dropActiveServiceRequestsForJob(job.requestId);
 		job.signal?.removeEventListener("abort", job.onAbort);
 		const worker = this.#workers[workerIndex];
 		if (worker?.activeRequestId === job.requestId) {
@@ -521,6 +597,7 @@ export class StandardWorkerPool<
 		if (queuedIndex >= 0) {
 			const [job] = this.#queuedJobs.splice(queuedIndex, 1);
 			if (job) {
+				this.#recordJobTiming(job, "canceled");
 				this.#settleCanceledQueuedJob(job, error);
 			}
 			return;
@@ -534,8 +611,10 @@ export class StandardWorkerPool<
 		const workerIndex = activeJob.workerIndex;
 		this.#activeJobs.delete(requestId);
 		this.#settledRequestIds.add(requestId);
+		this.#dropActiveServiceRequestsForJob(requestId);
 		activeJob.signal?.removeEventListener("abort", activeJob.onAbort);
 		this.#canceledJobs += 1;
+		this.#recordJobTiming(activeJob, "canceled");
 		activeJob.reject(error);
 
 		if (workerIndex !== undefined) {
@@ -581,6 +660,63 @@ export class StandardWorkerPool<
 				0,
 				this.#progressEvents.length - this.#progressEventLimit,
 			);
+		}
+	}
+
+	#recordJobTiming(
+		job: QueuedWorkerJob<TInput, TOutput, TProgress>,
+		status: WorkerPoolJobTimingDiagnostics["status"],
+	): void {
+		const now = performance.now();
+		const runningMs =
+			job.workerIndex === undefined ? 0 : Math.max(0, now - job.stageStartedAtMs);
+		const queuedMs =
+			job.workerIndex === undefined
+				? Math.max(0, now - job.queuedAtMs)
+				: Math.max(0, job.stageStartedAtMs - job.queuedAtMs);
+		this.#recentJobTimings.push({
+			queuedMs,
+			requestId: job.requestId,
+			runningMs,
+			status,
+			totalMs: Math.max(0, now - job.queuedAtMs),
+		});
+		if (this.#recentJobTimings.length > this.#progressEventLimit) {
+			this.#recentJobTimings.splice(
+				0,
+				this.#recentJobTimings.length - this.#progressEventLimit,
+			);
+		}
+	}
+
+	#recordServiceTiming(input: {
+		readonly requestId: string;
+		readonly serviceRequestId: string;
+		readonly startedAtMs: number;
+		readonly status: WorkerPoolServiceTimingDiagnostics["status"];
+	}): void {
+		this.#activeServiceRequestsByServiceRequestId.delete(input.serviceRequestId);
+		this.#recentServiceTimings.push({
+			durationMs: performance.now() - input.startedAtMs,
+			requestId: input.requestId,
+			serviceRequestId: input.serviceRequestId,
+			status: input.status,
+		});
+		if (this.#recentServiceTimings.length > this.#progressEventLimit) {
+			this.#recentServiceTimings.splice(
+				0,
+				this.#recentServiceTimings.length - this.#progressEventLimit,
+			);
+		}
+	}
+
+	#dropActiveServiceRequestsForJob(requestId: string): void {
+		for (const [serviceRequestId, request] of [
+			...this.#activeServiceRequestsByServiceRequestId,
+		]) {
+			if (request.requestId === requestId) {
+				this.#activeServiceRequestsByServiceRequestId.delete(serviceRequestId);
+			}
 		}
 	}
 }

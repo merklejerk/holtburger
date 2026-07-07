@@ -440,15 +440,7 @@ export class OpenWorldStreamingController {
 					this.#envCellProgress.committed,
 				staleRejected: 0,
 			},
-			compatibilityShims: [
-				{
-					deletionTarget: "Phase 14 browser runtime cutover",
-					kind: "compatibility-shim",
-					owner: "browser-runtime-adapter",
-					reason:
-						"ClientRuntime still requires legacy-shaped overview and diagnostics snapshots.",
-				},
-			],
+			compatibilityShims: [],
 			frameBudget: {
 				yieldedPasses: this.#frameBudgetYieldedPasses,
 			},

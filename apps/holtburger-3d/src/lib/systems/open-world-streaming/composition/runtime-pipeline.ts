@@ -1,7 +1,7 @@
 export type BrowserRuntimePipelineMode = "legacy" | "open-world-streaming";
 
 export const DEFAULT_BROWSER_RUNTIME_PIPELINE: BrowserRuntimePipelineMode =
-	"legacy";
+	"open-world-streaming";
 
 export function parseBrowserRuntimePipelineMode(
 	value: string | null | undefined,

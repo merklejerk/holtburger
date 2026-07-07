@@ -171,7 +171,7 @@
 	let unsubscribeRuntimeFrameTelemetry: (() => void) | null = null;
 	let longTaskObserver: PerformanceObserver | null = null;
 	let statusText = $state("starting");
-	let runtimePipeline: BrowserRuntimePipelineMode = "legacy";
+	let runtimePipeline: BrowserRuntimePipelineMode = "open-world-streaming";
 	let staticPublicationMode: OpenWorldStreamingStaticPublicationMode =
 		"defer-dense-renderer-until-ready";
 	const frameDiagnostics = createMutableHarnessFrameDiagnostics();

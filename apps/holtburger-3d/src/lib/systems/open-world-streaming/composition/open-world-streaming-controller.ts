@@ -746,6 +746,7 @@ export class OpenWorldStreamingController {
 				return;
 			}
 			if (commit?.kind === "terrain-layer-commit") {
+				this.#applyTextureCommits(commit.textureCommits, request.task.revision);
 				this.#scheduleTexturePageBuilds({
 					pageBuildRequests: commit.texturePageBuildRequests,
 					request,
@@ -769,6 +770,7 @@ export class OpenWorldStreamingController {
 					startedAtMs,
 				});
 			} else if (commit?.kind === "outdoor-object-layer-commit") {
+				this.#applyTextureCommits(commit.textureCommits, request.task.revision);
 				this.#scheduleTexturePageBuilds({
 					pageBuildRequests: commit.texturePageBuildRequests,
 					request,
@@ -791,6 +793,7 @@ export class OpenWorldStreamingController {
 					startedAtMs,
 				});
 			} else if (commit?.kind === "env-cell-system-layer-commit") {
+				this.#applyTextureCommits(commit.textureCommits, request.task.revision);
 				this.#scheduleTexturePageBuilds({
 					pageBuildRequests: commit.texturePageBuildRequests,
 					request,
@@ -928,6 +931,17 @@ export class OpenWorldStreamingController {
 			pageBuildRequests: options.pageBuildRequests,
 			sourceTaskId: options.request.task.taskId,
 		});
+	}
+
+	#applyTextureCommits(
+		commits: readonly OpenWorldStreamingTextureCommit[],
+		revision: number,
+	): void {
+		for (const commit of commits) {
+			applyOpenWorldStreamingTextureCommit(this.#renderer, commit, {
+				revision,
+			});
+		}
 	}
 
 	#recordMaterialCoverageIssues(input: {

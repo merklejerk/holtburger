@@ -104,6 +104,7 @@ describe("static material texture policy", () => {
 				sampleClass: "rgba-color",
 			}),
 			placementPolicy: createStaticDomainTexturePlacementPolicy(),
+			sourceKey: requirement.sourceKey,
 			textureKey: createTextureKey({
 				outputFormat: "rgba8",
 				sampleClass: "rgba-color",

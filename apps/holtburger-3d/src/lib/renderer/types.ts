@@ -388,6 +388,8 @@ export interface RendererSnapshot {
 	readonly outdoorGeneratedSceneryStaticObjectUploadedBufferBytes: number;
 	readonly recentStaticObjectUploads: readonly StaticObjectUploadDiagnostics[];
 	readonly terrainDrawUnits: number;
+	/** Material mode each resident terrain draw unit will use in the renderer. */
+	readonly terrainMaterialDiagnostics: readonly RendererTerrainMaterialDiagnostics[];
 	readonly directEnvCellDrawCalls: number;
 	readonly dynamicVisualResources: number;
 	readonly dynamicVisualResourceTextureUses: number;
@@ -397,6 +399,32 @@ export interface RendererSnapshot {
 	readonly recentDynamicResourceCommits: readonly DynamicRendererResourceCommitDiagnostics[];
 	readonly renderedTriangles: number;
 	readonly debugOverlayPrimitives: number;
+}
+
+export interface RendererTerrainMaterialDiagnostics {
+	readonly drawUnitId: string;
+	readonly fallbackReasons: readonly string[];
+	readonly landblockId: number;
+	readonly materialFamily:
+		| "terrain-debug-flat"
+		| "terrain-single-base-color"
+		| "terrain-layered";
+	readonly mode:
+		| "debug-flat"
+		| "flat-fallback"
+		| "layered"
+		| "single-base-color";
+	readonly nonResidentTextureBindings: readonly RendererTerrainTextureBindingDiagnostics[];
+	readonly textureBindingCount: number;
+}
+
+export interface RendererTerrainTextureBindingDiagnostics {
+	readonly bindingId: TextureBindingId;
+	readonly state:
+		| "failed"
+		| "missing-not-in-flight"
+		| "pending"
+		| "resident-without-texture";
 }
 
 export interface RendererResourceSnapshot {

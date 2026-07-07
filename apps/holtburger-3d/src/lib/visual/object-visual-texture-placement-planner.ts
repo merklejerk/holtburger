@@ -19,6 +19,7 @@ import {
 	createObjectVisualStaticTexturePlacementIntent,
 	createTexturePlacementItemId,
 } from "../textures/placement";
+import { createMaterialTextureDataUseKey } from "../static/bake/static-material-texture-policy";
 
 type ObjectVisualTexturePlacementPolicy =
 	| ObjectVisualStaticTexturePlacementPolicy
@@ -91,6 +92,7 @@ function createObjectVisualTexturePlacementIntent(
 					ownerIds: item.requirement.ownerIds,
 					pageClass: item.requirement.pageClass,
 					placementPolicy: item.policy.placementPolicy,
+					sourceKey: createObjectVisualTextureSourceKey(item.requirement),
 					textureKey: item.requirement.textureKey,
 				},
 			);
@@ -104,9 +106,19 @@ function createObjectVisualTexturePlacementIntent(
 					ownerIds: item.requirement.ownerIds,
 					pageClass: item.requirement.pageClass,
 					placementPolicy: item.policy.placementPolicy,
+					sourceKey: createObjectVisualTextureSourceKey(item.requirement),
 					textureKey: item.requirement.textureKey,
 				},
 			);
+	}
+}
+
+function createObjectVisualTextureSourceKey(
+	requirement: ObjectVisualTextureSourceRequirement,
+): string {
+	switch (requirement.source.kind) {
+		case "material-texture-data-use":
+			return createMaterialTextureDataUseKey(requirement.source.dataUse);
 	}
 }
 

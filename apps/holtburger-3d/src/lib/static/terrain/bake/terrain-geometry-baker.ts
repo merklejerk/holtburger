@@ -153,6 +153,7 @@ export async function createTerrainTexturePlacementIntents(options: {
 						ownerIds: [],
 						pageClass: identity.pageClass,
 						placementPolicy: createStaticDomainTexturePlacementPolicy(),
+						sourceKey: requirement.sourceKey,
 						textureKey: identity.textureKey,
 					},
 				),

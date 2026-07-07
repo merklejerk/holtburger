@@ -23,6 +23,7 @@ import {
 	reserveMaterialTexturePlacements,
 } from "../../texture-residency/placement/material-texture-placement-plan";
 import type { OpenWorldTexturePageBuildInput } from "../../texture-residency/page-build/protocol";
+import type { OpenWorldStreamingTextureCommit } from "../../texture-residency/commits/contracts";
 import type { OpenWorldMaterialTextureAtlasBuilder } from "../../texture-residency/atlas-build/object-visual-atlas-builder";
 import {
 	yieldToStaticMaterializationFrameBudget,
@@ -51,6 +52,7 @@ export interface OpenWorldTerrainLayerCommit {
 	readonly sourcePayload: TerrainStaticScopePayload;
 	readonly stageTimings: readonly OpenWorldStreamingStaticTaskStageTiming[];
 	readonly texturePageBuildRequests: readonly OpenWorldTexturePageBuildInput[];
+	readonly textureCommits: readonly OpenWorldStreamingTextureCommit[];
 	readonly textureReadiness: readonly OpenWorldTerrainTextureReadiness[];
 }
 
@@ -142,6 +144,7 @@ export class OpenWorldTerrainArtifactRunner {
 				...textureReservation.stageTimings,
 			],
 			texturePageBuildRequests: textureReservation.pageBuildRequests,
+			textureCommits: textureReservation.textureCommits,
 			textureReadiness: createPendingTerrainTextureReadiness(
 				baked.result.drawUnits,
 			),

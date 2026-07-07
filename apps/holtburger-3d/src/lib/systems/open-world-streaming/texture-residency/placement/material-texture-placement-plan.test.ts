@@ -57,6 +57,208 @@ describe("reserveMaterialTexturePlacements", () => {
 			}),
 		]);
 	});
+
+	it("reuses resident entry placements without planning another page build", async () => {
+		const atlasBuilder = new FixtureAtlasBuilder();
+		const textureClaims = new OpenWorldTextureClaimRegistry();
+		const intent = createTerrainIntent();
+		const owner = ownerId("static-layer:terrain:0xda55ffff");
+
+		const first = await reserveMaterialTexturePlacements<
+			string,
+			TexturePlacementIntent
+		>({
+			atlasBuilder,
+			filteringMode: "nearest",
+			intents: [intent],
+			jobPrefix: "fixture-terrain",
+			ownerId: owner,
+			textureClaims,
+		});
+		const firstPageBuild = first.pageBuildRequests[0];
+		expect(firstPageBuild).toBeDefined();
+		textureClaims.acceptPageBuild(
+			firstPageBuild.pageId,
+			firstPageBuild.reservationToken,
+		);
+
+		const reused = await reserveMaterialTexturePlacements<
+			string,
+			TexturePlacementIntent
+		>({
+			atlasBuilder,
+			filteringMode: "nearest",
+			intents: [intent],
+			jobPrefix: "fixture-terrain",
+			ownerId: owner,
+			textureClaims,
+		});
+
+		expect(atlasBuilder.inputs).toHaveLength(1);
+		expect(reused.pageBuildRequests).toEqual([]);
+		expect(reused.textureCommits).toEqual([
+			expect.objectContaining({
+				bindingUpdates: [
+					expect.objectContaining({
+						bindingId: intent.bindingId,
+						readiness: expect.objectContaining({
+							kind: "resident",
+							textureRefId: `${firstPageBuild.pageId}:texture`,
+						}),
+					}),
+				],
+				pageUpdates: [],
+			}),
+		]);
+		expect(reused.bindingPlacements).toEqual([
+			expect.objectContaining({
+				bindingId: intent.bindingId,
+				placement: expect.objectContaining({
+					pageId: firstPageBuild.pageId,
+					rect: [96, 96, 1, 1],
+					textureRefId: `${firstPageBuild.pageId}:texture`,
+				}),
+			}),
+		]);
+		expect(textureClaims.createSnapshot()).toMatchObject({
+			entryCount: 1,
+			pageCount: 1,
+			pageCountByState: {
+				resident: 1,
+			},
+		});
+	});
+
+	it("reuses in-flight entry placements without planning another page build", async () => {
+		const atlasBuilder = new FixtureAtlasBuilder();
+		const textureClaims = new OpenWorldTextureClaimRegistry();
+		const firstIntent = createTerrainIntent({
+			bindingId: bindingId("terrain-binding:color:first"),
+			itemId: "terrain:item:first",
+		});
+		const secondIntent = createTerrainIntent({
+			bindingId: bindingId("terrain-binding:color:second"),
+			itemId: "terrain:item:second",
+		});
+
+		const first = await reserveMaterialTexturePlacements<
+			string,
+			TexturePlacementIntent
+		>({
+			atlasBuilder,
+			filteringMode: "nearest",
+			intents: [firstIntent],
+			jobPrefix: "fixture-terrain",
+			ownerId: ownerId("static-layer:terrain:first"),
+			textureClaims,
+		});
+		const firstPageBuild = first.pageBuildRequests[0];
+		expect(firstPageBuild).toBeDefined();
+
+		const reused = await reserveMaterialTexturePlacements<
+			string,
+			TexturePlacementIntent
+		>({
+			atlasBuilder,
+			filteringMode: "nearest",
+			intents: [secondIntent],
+			jobPrefix: "fixture-terrain",
+			ownerId: ownerId("static-layer:terrain:second"),
+			textureClaims,
+		});
+
+		expect(atlasBuilder.inputs).toHaveLength(1);
+		expect(reused.pageBuildRequests).toEqual([]);
+		expect(reused.textureCommits).toEqual([]);
+		expect(reused.bindingPlacements).toEqual([
+			expect.objectContaining({
+				bindingId: secondIntent.bindingId,
+				placement: expect.objectContaining({
+					itemId: "terrain:item:second",
+					pageId: firstPageBuild.pageId,
+					rect: [96, 96, 1, 1],
+					textureRefId: `${firstPageBuild.pageId}:texture`,
+				}),
+			}),
+		]);
+		expect(textureClaims.createSnapshot()).toMatchObject({
+			claimCount: 2,
+			entryCount: 1,
+			pageBuildsInFlight: 1,
+			pageCount: 1,
+			pageCountByState: {
+				building: 1,
+			},
+		});
+	});
+
+	it("reuses reclaimable resident placements when a texture entry is claimed again", async () => {
+		const atlasBuilder = new FixtureAtlasBuilder();
+		const textureClaims = new OpenWorldTextureClaimRegistry();
+		const intent = createTerrainIntent();
+		const firstOwner = ownerId("static-layer:terrain:first");
+		const secondOwner = ownerId("static-layer:terrain:second");
+
+		const first = await reserveMaterialTexturePlacements<
+			string,
+			TexturePlacementIntent
+		>({
+			atlasBuilder,
+			filteringMode: "nearest",
+			intents: [intent],
+			jobPrefix: "fixture-terrain",
+			ownerId: firstOwner,
+			textureClaims,
+		});
+		const firstPageBuild = first.pageBuildRequests[0];
+		expect(firstPageBuild).toBeDefined();
+		textureClaims.acceptPageBuild(
+			firstPageBuild.pageId,
+			firstPageBuild.reservationToken,
+		);
+		textureClaims.releaseTextureOwner(firstOwner);
+
+		const reused = await reserveMaterialTexturePlacements<
+			string,
+			TexturePlacementIntent
+		>({
+			atlasBuilder,
+			filteringMode: "nearest",
+			intents: [intent],
+			jobPrefix: "fixture-terrain",
+			ownerId: secondOwner,
+			textureClaims,
+		});
+
+		expect(atlasBuilder.inputs).toHaveLength(1);
+		expect(reused.pageBuildRequests).toEqual([]);
+		expect(reused.textureCommits).toEqual([
+			expect.objectContaining({
+				bindingUpdates: [
+					expect.objectContaining({
+						bindingId: intent.bindingId,
+						readiness: expect.objectContaining({
+							kind: "resident",
+							textureRefId: `${firstPageBuild.pageId}:texture`,
+						}),
+					}),
+				],
+				pageUpdates: [],
+			}),
+		]);
+		expect(reused.bindingPlacements[0]?.placement).toMatchObject({
+			pageId: firstPageBuild.pageId,
+			textureRefId: `${firstPageBuild.pageId}:texture`,
+		});
+		expect(textureClaims.createSnapshot()).toMatchObject({
+			claimCount: 1,
+			entryCount: 1,
+			pageCount: 1,
+			pageCountByState: {
+				resident: 1,
+			},
+		});
+	});
 });
 
 class FixtureAtlasBuilder implements OpenWorldMaterialTextureAtlasBuilder {
@@ -90,13 +292,15 @@ class FixtureAtlasBuilder implements OpenWorldMaterialTextureAtlasBuilder {
 	}
 }
 
-function createTerrainIntent(): TexturePlacementIntent {
+function createTerrainIntent(
+	overrides: Partial<TexturePlacementIntent> = {},
+): TexturePlacementIntent {
 	const source = createTextureUse();
 	return {
 		affinityKey: "terrain:da55ffff",
-		bindingId: bindingId("terrain-binding:color:1"),
+		bindingId: overrides.bindingId ?? bindingId("terrain-binding:color:1"),
 		domain: "outdoor-terrain",
-		itemId: "terrain:item:1",
+		itemId: overrides.itemId ?? "terrain:item:1",
 		ownerIds: [],
 		pageClass: pageClass("page-class:terrain-color"),
 		placementPolicy: staticDomainPolicy(),
@@ -109,6 +313,7 @@ function createTerrainIntent(): TexturePlacementIntent {
 				wrapT: "repeat",
 			},
 		},
+		sourceKey: "prepared:06000010:rgba-color",
 		textureKey: textureKey("texture:terrain-color:1"),
 	};
 }

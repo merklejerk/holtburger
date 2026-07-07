@@ -1,11 +1,7 @@
 import type { TextureBindingId } from "../../../../textures/identity";
 import type { OpenWorldTextureClaimRegistry } from "../claims/texture-claim-registry";
 import type { OpenWorldStreamingTextureCommit } from "../commits/contracts";
-import type {
-	OpenWorldTexturePageBuildOutput,
-	OpenWorldTexturePageBuildPixelPage,
-	OpenWorldTexturePageBuildPlacement,
-} from "./protocol";
+import type { OpenWorldTexturePageBuildOutput } from "./protocol";
 
 export type OpenWorldTexturePageBuildSettlement =
 	| {
@@ -41,19 +37,36 @@ export function settleOpenWorldTexturePageBuildResult(
 	}
 
 	return {
-		commit: createOpenWorldStreamingTextureCommitFromPageUpdate(result),
+		commit: createOpenWorldStreamingTextureCommitFromPageUpdate(
+			registry,
+			result,
+		),
 		kind: "accepted",
 	};
 }
 
 function createOpenWorldStreamingTextureCommitFromPageUpdate(
+	registry: OpenWorldTextureClaimRegistry,
 	result: Extract<
 		OpenWorldTexturePageBuildOutput,
 		{ readonly kind: "page-update" }
 	>,
 ): OpenWorldStreamingTextureCommit {
-	const bindingUpdates = result.placements.map((placement) =>
-		createResidentBindingResolution(result.page, placement),
+	const bindingUpdates = registry
+		.createResidentBindingPlacementsForPage({
+			pageId: result.pageId,
+			textureHeight: result.page.height,
+			textureRefId: result.page.textureRefId,
+			textureWidth: result.page.width,
+		})
+		.map((placement) =>
+			createResidentBindingResolution({
+				bindingId: placement.bindingId,
+				rect: placement.rect,
+				textureHeight: placement.textureHeight,
+				textureRefId: placement.textureRefId,
+				textureWidth: placement.textureWidth,
+			}),
 	);
 	return {
 		bindingRemovals: [],
@@ -72,28 +85,34 @@ function createOpenWorldStreamingTextureCommitFromPageUpdate(
 	};
 }
 
-function createResidentBindingResolution(
-	page: OpenWorldTexturePageBuildPixelPage,
-	placement: OpenWorldTexturePageBuildPlacement,
-): OpenWorldStreamingTextureCommit["bindingUpdates"][number] {
+function createResidentBindingResolution(input: {
+	readonly bindingId: TextureBindingId;
+	readonly rect: readonly [number, number, number, number];
+	readonly textureHeight: number;
+	readonly textureRefId: string;
+	readonly textureWidth: number;
+}): OpenWorldStreamingTextureCommit["bindingUpdates"][number] {
 	return {
-		bindingId: placement.bindingId,
+		bindingId: input.bindingId,
 		readiness: {
 			kind: "resident",
 			pageVersion: {
 				placementRevision: 0,
-				textureRefId: page.textureRefId,
+				textureRefId: input.textureRefId,
 			},
-			rect: placement.rect,
-			textureHeight: page.height,
-			textureRefId: page.textureRefId,
-			textureWidth: page.width,
+			rect: input.rect,
+			textureHeight: input.textureHeight,
+			textureRefId: input.textureRefId,
+			textureWidth: input.textureWidth,
 		},
 	};
 }
 
 function requireUploadBindingId(
-	placements: readonly OpenWorldTexturePageBuildPlacement[],
+	placements: Extract<
+		OpenWorldTexturePageBuildOutput,
+		{ readonly kind: "page-update" }
+	>["placements"],
 ): TextureBindingId {
 	const bindingId = placements[0]?.bindingId;
 	if (!bindingId) {

@@ -66,6 +66,7 @@ export interface RendererDiagnosticsSummary {
 	readonly staticObjectUploadSummary: StaticObjectUploadSummaryDiagnostics;
 	readonly staticObjectVisualResources: number;
 	readonly terrainDrawUnits: number;
+	readonly terrainMaterialDiagnostics: RendererSnapshot["terrainMaterialDiagnostics"];
 }
 
 interface StaticObjectUploadSummaryDiagnostics {

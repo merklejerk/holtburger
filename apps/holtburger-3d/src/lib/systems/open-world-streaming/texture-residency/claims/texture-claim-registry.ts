@@ -73,6 +73,44 @@ export interface OpenWorldTexturePageRecord {
 	readonly ownerlessRetainedState: OpenWorldActiveTexturePageState | null;
 	/** Page lifecycle state before renderer-facing texture commits are emitted. */
 	readonly state: "planned" | "building" | "resident" | "reclaimable";
+	/** Renderer-facing texture ref owned by this virtual page. */
+	readonly textureRefId: string;
+	/** Runtime texture page height in pixels when known by placement planning. */
+	readonly textureHeight: number | null;
+	/** Runtime texture page width in pixels when known by placement planning. */
+	readonly textureWidth: number | null;
+}
+
+export interface OpenWorldTextureEntryPlacementRecord {
+	/** Shared logical entry placed on an accepted or reusable page. */
+	readonly entryId: OpenWorldTextureEntryId;
+	/** Virtual page currently carrying this entry. */
+	readonly pageId: OpenWorldTexturePageId;
+	/** Current page state; building pages are reusable for bake work but not renderer-resident yet. */
+	readonly pageState: "building" | "reclaimable" | "resident";
+	/** Content rect inside the virtual page, excluding gutter pixels. */
+	readonly rect: readonly [number, number, number, number];
+	/** Renderer-facing texture ref for the virtual page. */
+	readonly textureRefId: string;
+	/** Runtime texture page height in pixels. */
+	readonly textureHeight: number;
+	/** Runtime texture page width in pixels. */
+	readonly textureWidth: number;
+}
+
+export interface OpenWorldTextureResidentBindingPlacementRecord {
+	/** Material-consumer binding currently resolving through the page. */
+	readonly bindingId: TextureBindingId;
+	/** Shared logical entry carrying the binding. */
+	readonly entryId: OpenWorldTextureEntryId;
+	/** Content rect inside the virtual page, excluding gutter pixels. */
+	readonly rect: readonly [number, number, number, number];
+	/** Renderer-facing texture ref for the virtual page. */
+	readonly textureRefId: string;
+	/** Runtime texture page height in pixels. */
+	readonly textureHeight: number;
+	/** Runtime texture page width in pixels. */
+	readonly textureWidth: number;
 }
 
 export interface OpenWorldTextureBucketSnapshot {
@@ -142,10 +180,17 @@ interface MutableTexturePage {
 	readonly bucketKey: OpenWorldTextureBucketKey;
 	readonly entryIds: Set<OpenWorldTextureEntryId>;
 	readonly id: OpenWorldTexturePageId;
+	readonly placementsByEntryId: Map<
+		OpenWorldTextureEntryId,
+		readonly [number, number, number, number]
+	>;
 	lastActiveState: Exclude<OpenWorldTexturePageRecord["state"], "reclaimable">;
 	reservationToken: OpenWorldTexturePageReservationToken | null;
 	state: OpenWorldTexturePageRecord["state"];
 	stateBeforeBuild: OpenWorldActiveTexturePageState | null;
+	readonly textureRefId: string;
+	readonly textureHeight: number | null;
+	readonly textureWidth: number | null;
 }
 
 type OpenWorldActiveTexturePageState = Exclude<
@@ -233,7 +278,14 @@ export class OpenWorldTextureClaimRegistry {
 	createPage(input: {
 		readonly bucketKey: OpenWorldTextureBucketKey;
 		readonly entryIds: readonly OpenWorldTextureEntryId[];
+		readonly placements?: readonly {
+			readonly entryId: OpenWorldTextureEntryId;
+			readonly rect: readonly [number, number, number, number];
+		}[];
 		readonly state?: OpenWorldActiveTexturePageState;
+		readonly textureHeight?: number;
+		readonly textureRefId?: string;
+		readonly textureWidth?: number;
 	}): OpenWorldTexturePageRecord {
 		for (const entryId of input.entryIds) {
 			const entry = this.#entriesById.get(entryId);
@@ -248,21 +300,121 @@ export class OpenWorldTextureClaimRegistry {
 				);
 			}
 		}
+		const entryIdSet = new Set(input.entryIds);
+		const placementsByEntryId = new Map<
+			OpenWorldTextureEntryId,
+			readonly [number, number, number, number]
+		>();
+		for (const placement of input.placements ?? []) {
+			if (!entryIdSet.has(placement.entryId)) {
+				throw new Error(
+					`Cannot assign placement for entry ${placement.entryId} that is not on the texture page.`,
+				);
+			}
+			if (placementsByEntryId.has(placement.entryId)) {
+				throw new Error(
+					`Cannot assign multiple placements for texture entry ${placement.entryId}.`,
+				);
+			}
+			placementsByEntryId.set(placement.entryId, placement.rect);
+		}
+
+		const pageId = createTexturePageId(input.bucketKey, this.#nextPageNumber);
 
 		const page: MutableTexturePage = {
 			bucketKey: input.bucketKey,
 			entryIds: new Set(input.entryIds),
-			id: createTexturePageId(input.bucketKey, this.#nextPageNumber),
+			id: pageId,
 			lastActiveState: input.state ?? "planned",
+			placementsByEntryId,
 			reservationToken: null,
 			state: input.state ?? "planned",
 			stateBeforeBuild: null,
+			textureHeight: input.textureHeight ?? null,
+			textureRefId: input.textureRefId ?? `${pageId}:texture`,
+			textureWidth: input.textureWidth ?? null,
 		};
 		this.#nextPageNumber += 1;
 		this.#pagesById.set(page.id, page);
 		getOrCreatePageIds(this.#pageIdsByBucketKey, input.bucketKey).add(page.id);
 		this.#refreshPageReclaimableState(page);
 		return snapshotPage(page);
+	}
+
+	findReusableEntryPlacement(
+		entryId: OpenWorldTextureEntryId,
+	): OpenWorldTextureEntryPlacementRecord | null {
+		for (const page of this.#pagesById.values()) {
+			if (!page.entryIds.has(entryId)) {
+				continue;
+			}
+			this.#refreshPageReclaimableState(page);
+			if (!isReusablePageState(page)) {
+				continue;
+			}
+			const rect = page.placementsByEntryId.get(entryId);
+			if (!rect) {
+				throw new Error(
+					`Texture entry ${entryId} is on reusable page ${page.id} without placement facts.`,
+				);
+			}
+			if (page.textureHeight === null || page.textureWidth === null) {
+				throw new Error(
+					`Texture entry ${entryId} is on reusable page ${page.id} without page dimensions.`,
+				);
+			}
+			return {
+				entryId,
+				pageId: page.id,
+				pageState: requireReusablePageState(page.state),
+				rect,
+				textureHeight: page.textureHeight,
+				textureRefId: page.textureRefId,
+				textureWidth: page.textureWidth,
+			};
+		}
+		return null;
+	}
+
+	createResidentBindingPlacementsForPage(input: {
+		readonly pageId: OpenWorldTexturePageId;
+		readonly textureHeight: number;
+		readonly textureRefId: string;
+		readonly textureWidth: number;
+	}): readonly OpenWorldTextureResidentBindingPlacementRecord[] {
+		const page = this.#requirePage(input.pageId);
+		if (page.textureRefId !== input.textureRefId) {
+			throw new Error(
+				`Texture page ${input.pageId} accepted texture ref ${input.textureRefId}, but registry expected ${page.textureRefId}.`,
+			);
+		}
+		const bindingPlacements: OpenWorldTextureResidentBindingPlacementRecord[] =
+			[];
+		for (const entryId of [...page.entryIds].sort()) {
+			const entry = this.#entriesById.get(entryId);
+			if (!entry) {
+				throw new Error(
+					`Texture page ${input.pageId} references missing entry ${entryId}.`,
+				);
+			}
+			const rect = page.placementsByEntryId.get(entryId);
+			if (!rect) {
+				throw new Error(
+					`Texture page ${input.pageId} is missing placement facts for entry ${entryId}.`,
+				);
+			}
+			for (const bindingId of [...entry.bindingIds].sort()) {
+				bindingPlacements.push({
+					bindingId,
+					entryId,
+					rect,
+					textureHeight: input.textureHeight,
+					textureRefId: input.textureRefId,
+					textureWidth: input.textureWidth,
+				});
+			}
+		}
+		return bindingPlacements;
 	}
 
 	reservePageBuild(
@@ -416,7 +568,10 @@ export class OpenWorldTextureClaimRegistry {
 		const key = createTextureEntryKey(binding);
 		const existingId = this.#entryIdsByKey.get(key);
 		if (existingId) {
-			return this.#entriesById.get(existingId) ?? failMissingEntry(existingId);
+			const entry =
+				this.#entriesById.get(existingId) ?? failMissingEntry(existingId);
+			assertCompatibleTextureEntry(entry, binding);
+			return entry;
 		}
 
 		const entry: MutableTextureEntry = {
@@ -533,13 +688,28 @@ export function groupTextureBindingRequirementsByBucket(
 function createTextureEntryKey(
 	binding: OpenWorldTextureBindingRequirement,
 ): string {
-	return [
-		binding.bucketKey,
-		binding.textureKey,
-		binding.pageClass,
-		binding.purpose,
-		binding.sourceKey,
-	].join("\n");
+	return [binding.bucketKey, binding.textureKey].join("\n");
+}
+
+function assertCompatibleTextureEntry(
+	entry: MutableTextureEntry,
+	binding: OpenWorldTextureBindingRequirement,
+): void {
+	if (entry.pageClass !== binding.pageClass) {
+		throw new Error(
+			`Texture ${binding.textureKey} in bucket ${binding.bucketKey} changed page class from ${entry.pageClass} to ${binding.pageClass}.`,
+		);
+	}
+	if (entry.purpose !== binding.purpose) {
+		throw new Error(
+			`Texture ${binding.textureKey} in bucket ${binding.bucketKey} changed purpose from ${entry.purpose} to ${binding.purpose}.`,
+		);
+	}
+	if (entry.sourceKey !== binding.sourceKey) {
+		throw new Error(
+			`Texture ${binding.textureKey} in bucket ${binding.bucketKey} changed source key from ${entry.sourceKey} to ${binding.sourceKey}.`,
+		);
+	}
 }
 
 function createTextureEntryId(
@@ -621,7 +791,27 @@ function snapshotPage(page: MutableTexturePage): OpenWorldTexturePageRecord {
 			page.state === "reclaimable" ? page.lastActiveState : null,
 		reservationToken: page.reservationToken,
 		state: page.state,
+		textureHeight: page.textureHeight,
+		textureRefId: page.textureRefId,
+		textureWidth: page.textureWidth,
 	};
+}
+
+function isReusablePageState(page: MutableTexturePage): boolean {
+	return (
+		page.state === "building" ||
+		page.state === "resident" ||
+		(page.state === "reclaimable" && page.lastActiveState === "resident")
+	);
+}
+
+function requireReusablePageState(
+	state: MutableTexturePage["state"],
+): OpenWorldTextureEntryPlacementRecord["pageState"] {
+	if (state === "building" || state === "resident" || state === "reclaimable") {
+		return state;
+	}
+	throw new Error(`Texture page state ${state} is not reusable.`);
 }
 
 function compareEntries(

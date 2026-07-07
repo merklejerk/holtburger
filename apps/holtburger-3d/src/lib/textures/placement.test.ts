@@ -64,6 +64,7 @@ describe("texture placement vocabulary bridge", () => {
 		expect(
 			createStaticTexturePlacementIntent(textureUse, {
 				placementPolicy: staticDomainPolicy(),
+				sourceKey: "source:terrain-mask",
 			}),
 		).toMatchObject({
 			domain: "outdoor-terrain",
@@ -83,6 +84,7 @@ describe("texture placement vocabulary bridge", () => {
 		expect(
 			createDynamicTexturePlacementIntent(textureUse, {
 				placementPolicy: staticDomainPolicy(),
+				sourceKey: "source:object-detail",
 			}),
 		).toMatchObject({
 			domain: "outdoor-generated-scenery",
@@ -102,6 +104,7 @@ describe("texture placement vocabulary bridge", () => {
 		expect(
 			createDynamicTexturePlacementIntent(textureUse, {
 				placementPolicy: runtimeOwnerPolicy("runtime-spawn:1"),
+				sourceKey: "source:object-index",
 			}),
 		).toMatchObject({
 			domain: "runtime-object-material",
@@ -122,6 +125,7 @@ describe("texture placement vocabulary bridge", () => {
 			createStaticTexturePlacementIntent(textureUse, {
 				affinityKey: "setup-model/020003e5",
 				placementPolicy: staticDomainPolicy(),
+				sourceKey: "source:building-base",
 			}),
 		).toMatchObject({
 			affinityKey: "setup-model/020003e5",
@@ -139,6 +143,7 @@ describe("texture placement vocabulary bridge", () => {
 
 		const intent = createStaticTexturePlacementIntent(textureUse, {
 			placementPolicy: staticDomainPolicy(),
+			sourceKey: "source:building-palette",
 		});
 
 		expect(intent.itemId).toBe(textureUse.bindingId);

@@ -31,6 +31,7 @@ import type { MaterializationOwnerId } from "../../owners/owner-id";
 import { OpenWorldTextureClaimRegistry } from "../../texture-residency/claims/texture-claim-registry";
 import { reserveObjectVisualTexturePlacements } from "../../texture-residency/placement/object-visual-texture-placement-plan";
 import type { OpenWorldTexturePageBuildInput } from "../../texture-residency/page-build/protocol";
+import type { OpenWorldStreamingTextureCommit } from "../../texture-residency/commits/contracts";
 import type { OpenWorldObjectVisualAtlasBuilder } from "../../texture-residency/atlas-build/object-visual-atlas-builder";
 import {
 	yieldToStaticMaterializationFrameBudget,
@@ -61,6 +62,7 @@ export interface OpenWorldEnvCellSystemLayerCommit {
 	readonly staticAuthoredDynamicPlacements: readonly StaticAuthoredDynamicPlacementRecord[];
 	readonly staticObjectBakeDiagnostics: readonly StaticObjectBakeDiagnostics[];
 	readonly texturePageBuildRequests: readonly OpenWorldTexturePageBuildInput[];
+	readonly textureCommits: readonly OpenWorldStreamingTextureCommit[];
 }
 
 export class OpenWorldEnvCellArtifactRunner {
@@ -160,6 +162,7 @@ export class OpenWorldEnvCellArtifactRunner {
 			),
 			staticObjectBakeDiagnostics: baked.result.staticObjectBakeDiagnostics,
 			texturePageBuildRequests: textureReservation.pageBuildRequests,
+			textureCommits: textureReservation.textureCommits,
 		};
 	}
 

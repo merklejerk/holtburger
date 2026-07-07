@@ -1211,9 +1211,7 @@ class OpenWorldStaticSourceResolutionCache implements StaticLandblockSceneLodSou
 	) => Promise<StaticLandblockSceneLodResolution>;
 	readonly #resolveProjectedSources: (
 		request: StaticLandblockSceneLodSourceRequest,
-		onProjection: (
-			event: StaticLandblockSceneLodSourceProjectionEvent,
-		) => void,
+		onProjection: (event: StaticLandblockSceneLodSourceProjectionEvent) => void,
 	) => Promise<void> | null;
 	readonly #inFlightByKey = new Map<
 		string,
@@ -1263,7 +1261,9 @@ class OpenWorldStaticSourceResolutionCache implements StaticLandblockSceneLodSou
 		this.#resolveSource = options.resolveSource;
 	}
 
-	reset(plannedRequests: readonly StaticLandblockSceneLodSourceRequest[]): void {
+	reset(
+		plannedRequests: readonly StaticLandblockSceneLodSourceRequest[],
+	): void {
 		const staleError = new Error("Projected source request was superseded.");
 		for (const waiters of this.#projectedWaitersByKey.values()) {
 			for (const waiter of waiters) {
@@ -1404,7 +1404,9 @@ class OpenWorldStaticSourceResolutionCache implements StaticLandblockSceneLodSou
 					deliveryMs,
 				);
 			}
-			const projectionKey = createStaticSourceRequestKey(event.resolution.request);
+			const projectionKey = createStaticSourceRequestKey(
+				event.resolution.request,
+			);
 			expectedProjectionKeys.delete(projectionKey);
 			this.#completedProjectedByKey.set(projectionKey, event.resolution);
 			this.#projectedRecipeCount += event.diagnostics.recipeCount;
@@ -1523,7 +1525,8 @@ function containsStaticSourceLayer(
 	return (
 		candidate.kind === requested.kind &&
 		candidate.targetOwnerKey.kind === requested.targetOwnerKey.kind &&
-		candidate.targetOwnerKey.landblockId === requested.targetOwnerKey.landblockId
+		candidate.targetOwnerKey.landblockId ===
+			requested.targetOwnerKey.landblockId
 	);
 }
 

@@ -61,9 +61,7 @@ class StaticResolverRouter
 
 	resolveProjectedSources(
 		request: StaticLandblockSceneLodSourceRequest,
-		onProjection: (
-			event: StaticLandblockSceneLodSourceProjectionEvent,
-		) => void,
+		onProjection: (event: StaticLandblockSceneLodSourceProjectionEvent) => void,
 	): Promise<void> {
 		if (!this.#landblockSceneLodSourceResolver.resolveProjectedSources) {
 			throw new Error("Landblock scene LoD source resolver cannot stream.");

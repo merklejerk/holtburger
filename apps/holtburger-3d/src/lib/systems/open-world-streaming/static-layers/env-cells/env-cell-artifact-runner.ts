@@ -189,14 +189,15 @@ export class OpenWorldEnvCellArtifactRunner {
 		readonly stageTimings: readonly OpenWorldStreamingStaticTaskStageTiming[];
 	}> {
 		const items = [item];
-		const structuredInterior =
-			await measureLocalStage("texture-intent-structured-interior", () =>
+		const structuredInterior = await measureLocalStage(
+			"texture-intent-structured-interior",
+			() =>
 				createStructuredInteriorTexturePlacementIntentResult({
 					assetReader: this.#assetReader,
 					items,
 					planningBudget: this.#createTextureIntentPlanningBudget(),
 				}),
-			);
+		);
 		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const staticObject = await measureLocalStage(
 			"texture-intent-static-object",

@@ -65,9 +65,7 @@ export class WorkerPoolStaticResolver
 
 	async resolveProjectedSources(
 		request: StaticLandblockSceneLodSourceRequest,
-		onProjection: (
-			event: StaticLandblockSceneLodSourceProjectionEvent,
-		) => void,
+		onProjection: (event: StaticLandblockSceneLodSourceProjectionEvent) => void,
 	): Promise<void> {
 		const output = await this.#pool.submit(
 			{

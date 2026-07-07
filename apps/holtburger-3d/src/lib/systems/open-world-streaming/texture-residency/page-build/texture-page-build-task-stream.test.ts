@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import type {
 	TextureBindingId,
@@ -93,24 +93,19 @@ describe("OpenWorldTexturePageBuildTaskStream", () => {
 	it("publishes failed binding readiness when page builds throw", async () => {
 		const fixture = createTextureTaskFixture();
 		const commits: OpenWorldStreamingTextureCommit[] = [];
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 		const stream = new OpenWorldTexturePageBuildTaskStream({
 			onCommit: (commit) => commits.push(commit),
 			pageBuilder: new FailingPageBuilder(new Error("fixture build failed")),
 			textureClaims: fixture.registry,
 		});
 
-		try {
-			stream.schedule({
-				isCurrent: () => true,
-				ownerId: fixture.ownerId,
-				pageBuildRequests: [fixture.input],
-				sourceTaskId: "static-task:failed",
-			});
-			await stream.waitForIdle();
-		} finally {
-			warn.mockRestore();
-		}
+		stream.schedule({
+			isCurrent: () => true,
+			ownerId: fixture.ownerId,
+			pageBuildRequests: [fixture.input],
+			sourceTaskId: "static-task:failed",
+		});
+		await stream.waitForIdle();
 
 		expect(commits).toEqual([
 			expect.objectContaining({
@@ -134,13 +129,21 @@ describe("OpenWorldTexturePageBuildTaskStream", () => {
 			reservationToken: null,
 			state: "planned",
 		});
-		expect(stream.createDiagnosticsSnapshot().summary).toEqual({
-			accepted: 0,
-			active: 0,
-			committed: 0,
-			failed: 1,
-			queued: 1,
-			staleRejected: 0,
+		expect(stream.createDiagnosticsSnapshot()).toMatchObject({
+			recent: [
+				{
+					error: "fixture build failed",
+					status: "failed",
+				},
+			],
+			summary: {
+				accepted: 0,
+				active: 0,
+				committed: 0,
+				failed: 1,
+				queued: 1,
+				staleRejected: 0,
+			},
 		});
 	});
 });

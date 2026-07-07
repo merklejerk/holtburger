@@ -1,6 +1,7 @@
 import type {
 	OpenWorldStreamingAtlasInspectionSnapshot,
 	OpenWorldStreamingDiagnosticsSnapshot,
+	OpenWorldStreamingMaterialReadinessDiagnostics,
 	OpenWorldStreamingStaticTaskStageTiming,
 	OpenWorldStreamingStaticTaskDiagnostics,
 	OpenWorldStreamingTexturePageBuildTaskDiagnostics,
@@ -18,6 +19,8 @@ import type {
 	StaticLandblockSceneLodSourceRequest,
 	StaticLandblockSceneLodSourceResolver,
 	StaticLayerTaskRequest,
+	StaticMaterialCoverageReport,
+	StaticObjectBakeDiagnostics,
 	TerrainStaticScopePayloadSummary,
 } from "../../../static/contracts";
 import { MaterializationOwnerRegistry } from "../owners/owner-registry";
@@ -67,6 +70,8 @@ import {
 	OpenWorldRuntimeEntitySystem,
 	type OpenWorldRuntimeEntityDiagnosticsSnapshot,
 } from "../runtime-entities/runtime-entity-system";
+
+const RECENT_MATERIAL_READINESS_ISSUE_LIMIT = 80;
 
 export interface OpenWorldStreamingControllerOptions {
 	readonly assetReader: PreparedAssetReader;
@@ -178,6 +183,9 @@ interface StaticTaskTiming {
 	readonly taskId: string;
 }
 
+type OpenWorldStreamingMaterialReadinessIssue =
+	OpenWorldStreamingMaterialReadinessDiagnostics["recentIssues"][number];
+
 interface StaticLayerRunRequest {
 	readonly owner: {
 		readonly id: MaterializationOwnerId;
@@ -213,7 +221,8 @@ export class OpenWorldStreamingController {
 	#runtimeEntities: OpenWorldRuntimeEntitySystem | null = null;
 	#objectVisualAtlasBuilder: OpenWorldObjectVisualAtlasBuilder | null = null;
 	#texturePageBuilder: OpenWorldTexturePageBuilder | null = null;
-	#texturePageBuildTaskStream: OpenWorldTexturePageBuildTaskStream | null = null;
+	#texturePageBuildTaskStream: OpenWorldTexturePageBuildTaskStream | null =
+		null;
 	#frameBudgetYieldedPasses = 0;
 	readonly #deferredOutdoorRendererLayers = {
 		buildings: new Map<
@@ -248,6 +257,8 @@ export class OpenWorldStreamingController {
 		ActiveStaticTaskTiming
 	>();
 	#disposed = false;
+	#recentMaterialReadinessIssues: OpenWorldStreamingMaterialReadinessIssue[] =
+		[];
 	#recentStaticTaskTimings: StaticTaskTiming[] = [];
 	#activeSceneInterest = false;
 	#runSequence = 0;
@@ -426,6 +437,9 @@ export class OpenWorldStreamingController {
 		const runtimeEntityDiagnostics =
 			this.#runtimeEntities?.createDiagnosticsSnapshot() ??
 			createEmptyRuntimeEntityDiagnosticsSnapshot();
+		const texturePageBuildTasks =
+			this.#texturePageBuildTaskStream?.createDiagnosticsSnapshot() ??
+			createEmptyTexturePageBuildTaskDiagnosticsSnapshot();
 		return {
 			artifacts: {
 				inFlight:
@@ -492,9 +506,11 @@ export class OpenWorldStreamingController {
 				},
 				pageBuildsInFlight: textureSnapshot.pageBuildsInFlight,
 			},
-			texturePageBuildTasks:
-				this.#texturePageBuildTaskStream?.createDiagnosticsSnapshot() ??
-				createEmptyTexturePageBuildTaskDiagnosticsSnapshot(),
+			materialReadiness: createMaterialReadinessDiagnostics({
+				recentIssues: this.#recentMaterialReadinessIssues,
+				texturePageBuildTasks,
+			}),
+			texturePageBuildTasks,
 			runtimeEntities: {
 				active: dynamicSnapshot.activeEntityCount,
 				animation: runtimeEntityDiagnostics.animation,
@@ -682,6 +698,10 @@ export class OpenWorldStreamingController {
 					request,
 					runId,
 				});
+				this.#recordMaterialCoverageIssues({
+					materialCoverage: commit.payload.materialCoverage,
+					request,
+				});
 				this.#recordApplyTiming({
 					apply: () =>
 						this.#applyTerrainCommit(commit, interest.anchorLandblockId),
@@ -696,6 +716,14 @@ export class OpenWorldStreamingController {
 					request,
 					runId,
 				});
+				this.#recordMaterialCoverageIssues({
+					materialCoverage: commit.payload.materialCoverage,
+					request,
+				});
+				this.#recordStaticObjectBakeIssues({
+					diagnostics: commit.staticObjectBakeDiagnostics,
+					request,
+				});
 				this.#recordApplyTiming({
 					apply: () => this.#applyOutdoorObjectCommit(commit),
 					drawUnits: commit.payload.drawUnits.length,
@@ -708,6 +736,14 @@ export class OpenWorldStreamingController {
 					pageBuildRequests: commit.texturePageBuildRequests,
 					request,
 					runId,
+				});
+				this.#recordMaterialCoverageIssues({
+					materialCoverage: commit.payload.materialCoverage,
+					request,
+				});
+				this.#recordStaticObjectBakeIssues({
+					diagnostics: commit.staticObjectBakeDiagnostics,
+					request,
 				});
 				this.#recordApplyTiming({
 					apply: () => this.#applyEnvCellCommit(commit),
@@ -732,7 +768,6 @@ export class OpenWorldStreamingController {
 				stages: [],
 				status: "failed",
 			});
-			console.warn("[holtburger-3d][open-world-static]", error);
 			if (request.task.domain === "outdoor-terrain") {
 				this.#terrainProgress = {
 					...this.#terrainProgress,
@@ -829,6 +864,45 @@ export class OpenWorldStreamingController {
 			pageBuildRequests: options.pageBuildRequests,
 			sourceTaskId: options.request.task.taskId,
 		});
+	}
+
+	#recordMaterialCoverageIssues(input: {
+		readonly materialCoverage: readonly StaticMaterialCoverageReport[];
+		readonly request: StaticLayerRunRequest;
+	}): void {
+		const issues = createMaterialCoverageIssues({
+			materialCoverage: input.materialCoverage,
+			ownerId: input.request.owner.id,
+			taskId: input.request.task.taskId,
+		});
+		if (issues.length === 0) {
+			return;
+		}
+		this.#recordMaterialReadinessIssues(issues);
+	}
+
+	#recordStaticObjectBakeIssues(input: {
+		readonly diagnostics: readonly StaticObjectBakeDiagnostics[];
+		readonly request: StaticLayerRunRequest;
+	}): void {
+		const issues = createStaticObjectBakeIssues({
+			diagnostics: input.diagnostics,
+			ownerId: input.request.owner.id,
+			taskId: input.request.task.taskId,
+		});
+		if (issues.length === 0) {
+			return;
+		}
+		this.#recordMaterialReadinessIssues(issues);
+	}
+
+	#recordMaterialReadinessIssues(
+		issues: readonly OpenWorldStreamingMaterialReadinessIssue[],
+	): void {
+		this.#recentMaterialReadinessIssues = [
+			...this.#recentMaterialReadinessIssues,
+			...issues,
+		].slice(-RECENT_MATERIAL_READINESS_ISSUE_LIMIT);
 	}
 
 	#recordStaticTaskTiming(input: {
@@ -1730,6 +1804,158 @@ function createStaticTaskDiagnostics(input: {
 			totalDurationMs: sum(input.recent.map((timing) => timing.durationMs)),
 		},
 	};
+}
+
+function createMaterialReadinessDiagnostics(input: {
+	readonly recentIssues: readonly OpenWorldStreamingMaterialReadinessIssue[];
+	readonly texturePageBuildTasks: OpenWorldStreamingTexturePageBuildTaskDiagnostics;
+}): OpenWorldStreamingMaterialReadinessDiagnostics {
+	const pendingTextureIssues =
+		input.texturePageBuildTasks.active.map<OpenWorldStreamingMaterialReadinessIssue>(
+			(task) => ({
+				bucketKey: task.bucketKey,
+				elapsedMs: task.elapsedMs,
+				kind: "pending-texture-dependency",
+				ownerId: task.ownerId,
+				pageId: task.pageId,
+				sourceTaskId: task.sourceTaskId,
+			}),
+		);
+	const failedTextureIssues =
+		input.texturePageBuildTasks.recent.flatMap<OpenWorldStreamingMaterialReadinessIssue>(
+			(task) =>
+				task.status === "failed" && task.error
+					? [
+							{
+								bucketKey: task.bucketKey,
+								durationMs: task.durationMs,
+								error: task.error,
+								kind: "failed-texture-dependency",
+								ownerId: task.ownerId,
+								pageId: task.pageId,
+								sourceTaskId: task.sourceTaskId,
+							},
+						]
+					: [],
+		);
+	const recentIssues = [
+		...input.recentIssues,
+		...pendingTextureIssues,
+		...failedTextureIssues,
+	].slice(-RECENT_MATERIAL_READINESS_ISSUE_LIMIT);
+	return {
+		recentIssues,
+		summary: {
+			deferredMaterialIssueCount: countMaterialReadinessIssues(
+				recentIssues,
+				"deferred-material",
+			),
+			failedTextureDependencyCount: countMaterialReadinessIssues(
+				recentIssues,
+				"failed-texture-dependency",
+			),
+			pendingTextureDependencyCount: countMaterialReadinessIssues(
+				recentIssues,
+				"pending-texture-dependency",
+			),
+			pipelineBugIssueCount: countMaterialReadinessIssues(
+				recentIssues,
+				"pipeline-bug",
+			),
+			skippedStaticObjectPartitionCount: countMaterialReadinessIssues(
+				recentIssues,
+				"skipped-static-object-partition",
+			),
+			unsupportedMaterialIssueCount: countMaterialReadinessIssues(
+				recentIssues,
+				"unsupported-material",
+			),
+		},
+	};
+}
+
+function countMaterialReadinessIssues(
+	issues: readonly OpenWorldStreamingMaterialReadinessIssue[],
+	kind: OpenWorldStreamingMaterialReadinessIssue["kind"],
+): number {
+	return issues.filter((issue) => issue.kind === kind).length;
+}
+
+function createMaterialCoverageIssues(input: {
+	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
+	readonly ownerId: MaterializationOwnerId;
+	readonly taskId: string;
+}): readonly OpenWorldStreamingMaterialReadinessIssue[] {
+	return input.materialCoverage.flatMap((coverage) =>
+		coverage.unrenderedBuckets.map((bucket) => ({
+			coverageKey: coverage.coverageKey,
+			coverageKind: coverage.coverageKind,
+			domain: coverage.domain,
+			family: bucket.family,
+			kind:
+				bucket.outcome === "unsupported"
+					? "unsupported-material"
+					: "deferred-material",
+			landblockId: coverage.landblockId,
+			materialCount: bucket.materialCount,
+			ownerId: input.ownerId,
+			partitionCount: bucket.partitionCount,
+			pass: bucket.pass,
+			reasonCodes: bucket.reasonCodes,
+			taskId: input.taskId,
+			triangleCount: bucket.triangleCount,
+		})),
+	);
+}
+
+function createStaticObjectBakeIssues(input: {
+	readonly diagnostics: readonly StaticObjectBakeDiagnostics[];
+	readonly ownerId: MaterializationOwnerId;
+	readonly taskId: string;
+}): readonly OpenWorldStreamingMaterialReadinessIssue[] {
+	return input.diagnostics.flatMap((diagnostic) => {
+		const skippedPartitionIssues =
+			diagnostic.skippedPartitions.map<OpenWorldStreamingMaterialReadinessIssue>(
+				(partition) => ({
+					alphaMode: partition.alphaMode,
+					family: partition.family,
+					kind: "skipped-static-object-partition",
+					landblockId: diagnostic.landblockId,
+					materialCount: partition.materialCount,
+					ownerId: input.ownerId,
+					pass: partition.pass,
+					reason: partition.reason,
+					renderCoverage: partition.renderCoverage,
+					sliceId: partition.sliceId,
+					taskId: input.taskId,
+					triangleCount: partition.triangleCount,
+				}),
+			);
+		const publication = diagnostic.visualRecipePublication;
+		if (publication.kind !== "skipped") {
+			return skippedPartitionIssues;
+		}
+		const missingDependencies =
+			publication.missingDependencySourceIds.length > 0
+				? `missing=${publication.missingDependencySourceIds.join(",")}`
+				: null;
+		const message = [
+			`Static object visual recipe publication skipped: ${publication.reason}`,
+			`partInstances=${publication.partInstanceCount}`,
+			missingDependencies,
+		]
+			.filter((part): part is string => part !== null)
+			.join("; ");
+		return [
+			...skippedPartitionIssues,
+			{
+				kind: "pipeline-bug",
+				message,
+				ownerId: input.ownerId,
+				taskId: input.taskId,
+			},
+		];
+	});
 }
 
 function createEmptyRuntimeEntityDiagnosticsSnapshot(): OpenWorldRuntimeEntityDiagnosticsSnapshot {

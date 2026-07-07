@@ -201,7 +201,6 @@ export class OpenWorldTexturePageBuildTaskStream {
 				stageTimings: [],
 				status: "failed",
 			});
-			console.warn("[holtburger-3d][open-world-texture-page-build]", error);
 		} finally {
 			this.#activeTasksByJobId.delete(pageBuildRequest.jobId);
 			this.#notifyIdleWaitersIfIdle();

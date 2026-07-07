@@ -2302,17 +2302,25 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Audit consumers of `StaticMaterialCoverageReport` in `static/contracts.ts`, env-cell bakers, static object partitioning, renderer types, diagnostics, and harness projections.
-- [ ] Audit `static-object-material-coverage.ts`, `object-visual-material-planner.ts`, `static-object-renderability.ts`, `static-bake-boundary-diagnostics.ts`, and controller diagnostics against the worksheet.
-- [ ] Add replacement issue record types under `systems/open-world-streaming/diagnostics` or domain-local diagnostics modules.
-- [ ] Replace console warnings in static object skipped partitions and visual recipe publication with structured records.
-- [ ] Replace page-build failure console-only reporting with structured readiness/failure diagnostics.
-- [ ] Update browser harness summaries to consume direct replacement diagnostics or an explicitly named edge shim.
-- [ ] Delete or rewrite tests that treat legacy diagnostic parity as correctness.
+- [x] Audit consumers of `StaticMaterialCoverageReport` in `static/contracts.ts`, env-cell bakers, static object partitioning, renderer types, diagnostics, and harness projections.
+- [x] Audit `static-object-material-coverage.ts`, `object-visual-material-planner.ts`, `static-object-renderability.ts`, `static-bake-boundary-diagnostics.ts`, and controller diagnostics against the worksheet.
+- [x] Add replacement issue record types under `systems/open-world-streaming/diagnostics` or domain-local diagnostics modules.
+- [x] Replace console warnings in static object skipped partitions and visual recipe publication with structured records.
+- [x] Replace page-build failure console-only reporting with structured readiness/failure diagnostics.
+- [x] Update browser harness summaries to consume direct replacement diagnostics or an explicitly named edge shim.
+- [x] Delete or rewrite tests that treat legacy diagnostic parity as correctness.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 27 completed on 2026-07-07.
+- Added `OpenWorldStreamingMaterialReadinessDiagnostics` to the replacement diagnostics snapshot. It records pending texture dependencies from active page-build tasks, failed texture dependencies from recent page-build failures, unsupported/deferred material coverage evidence, skipped static object partitions, and pipeline bugs such as skipped static visual recipe publication.
+- `StaticMaterialCoverageReport` remains imported evidence from the static bakers, but replacement diagnostics now translate its unrendered buckets into replacement issue records. It does not gate replacement behavior and is not treated as the replacement diagnostics contract.
+- Static object skipped partitions now flow through `StaticObjectBakeDiagnostics.skippedPartitions` instead of `console.warn`. The controller reports them as `skipped-static-object-partition` readiness issues with slice id, family, pass, render coverage, reason, material count, and triangle count.
+- Static object visual recipe publication now records `published` or `skipped` diagnostics. Skipped publication is reported as a replacement `pipeline-bug` issue with missing dependency evidence when present.
+- Page-build failures no longer rely on a page-build catch-block warning. Failure visibility comes from texture page-build task diagnostics and failed binding readiness commits.
+- Browser harness audit: `BrowserPipelineHarness.svelte` and `scripts/browser-pipeline-harness.mjs` consume the replacement `openWorldStreaming` snapshot and `staticTasks` summary. They do not require old static coordinator, static commit installer, or texture-manager categories, so no compatibility shim was added.
+- Remaining console warnings found by audit are not Phase 27 static-object/page-build replacements: `visual/object-visual-baker.ts` still warns for unsupported generic visual material baking, and env-cell system bake/resolver code still has console diagnostics. Phase 28 should decide whether the visual material warning is a static-object material-contract issue or renderer-fidelity backlog. Phase 30/32 should classify the env-cell warnings as direct diagnostics, deletion, or acceptable debug-only evidence.
+- Verification: `npm run check`, `npm run lint`, focused `npm run test:ts -- --run src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts src/lib/systems/open-world-streaming/texture-residency/page-build/texture-page-build-task-stream.test.ts src/lib/static/objects/bake/static-object-batch-partitioner.test.ts`, and touched-file Prettier.
 
 ### Phase 28: Static Object Material Contract Reconciliation
 
@@ -2336,6 +2344,8 @@ Task checklist:
 - [ ] Compare `static-object-material-coverage.ts` against `object-visual-material-planner.ts`, `static-object-renderability.ts`, and the worksheet root-cause direction.
 - [ ] Audit `createStaticObjectTexturePlacementIntents(...)`, `object-visual-texture-placement-planner.ts`, and placement policy tests for legacy bucket-field drift.
 - [ ] Classify each material/fidelity item as contract bug, renderer capability backlog, source-data limitation, or acceptable future scope.
+- [ ] Classify the remaining `visual/object-visual-baker.ts` unsupported material warning: either replace it with Phase 27 material-readiness diagnostics or prove it belongs to a non-static-object renderer-fidelity backlog.
+- [ ] Audit env-cell material coverage from `structured-interior-material-planner.ts` and `env-cell-system-baker.ts` so interior material coverage does not stay hidden behind env-cell-specific warning paths.
 - [ ] Pick and implement at most one first slice if it is contract-shaped and low risk.
 - [ ] Update diagnostics from Phase 27 so the backlog remains measurable.
 - [ ] Run generated scenery, explicit object, and env-cell harness cases that exercise static object materials.
@@ -2393,7 +2403,7 @@ Acceptance criteria:
 Task checklist:
 
 - [ ] Dry-run worker-boundary cleanup, source-tree cleanup, and final verification from the current code tree.
-- [ ] Audit direct builder production usage, ignored placement fields, diagnostic compatibility projections, and old runtime/harness shims.
+- [ ] Audit direct builder production usage, ignored placement fields, diagnostic compatibility projections, old runtime/harness shims, and remaining env-cell/visual console diagnostics.
 - [ ] Audit tests for legacy bucket/readiness/diagnostic parity assumptions.
 - [ ] Update Phases 31-33 with concrete file/symbol targets.
 - [ ] Record explicitly deferred material fidelity work with evidence and reactivation criteria.
@@ -2422,6 +2432,7 @@ Acceptance criteria:
 Task checklist:
 
 - [ ] Audit imports of `buildReservedMaterialTexturePages`, `DirectOpenWorldTexturePageBuilder`, and `DirectOpenWorldObjectVisualAtlasBuilder`.
+- [ ] Specifically reconcile `texture-residency/placement/material-texture-placement-plan.ts` and `object-visual-texture-placement-plan.ts`, which still call `buildReservedMaterialTexturePages(...)` before the bake-facing plan is returned.
 - [ ] Delete production-facing direct page-build APIs or move them behind test/worker-only module boundaries.
 - [ ] Audit page-build worker payloads to confirm source identities and immutable layout facts, not prepared pixel buffers, cross the production boundary.
 - [ ] Replace any production direct-builder tests with worker-client/handler tests where feasible.

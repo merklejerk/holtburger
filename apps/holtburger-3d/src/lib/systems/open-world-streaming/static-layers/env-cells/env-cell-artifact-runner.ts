@@ -14,6 +14,7 @@ import type {
 	StaticLandblockSceneLodSourceRequest,
 	StaticLandblockSceneLodSourceResolver,
 	StaticLayerTaskRequest,
+	StaticObjectBakeDiagnostics,
 	StaticObjectGeometryStaticDrawUnit,
 	StaticScopePayload,
 	StructuredInteriorGeometryStaticDrawUnit,
@@ -58,6 +59,7 @@ export interface OpenWorldEnvCellSystemLayerCommit {
 	readonly sourcePayload: EnvCellSystemStaticScopePayload;
 	readonly stageTimings: readonly OpenWorldStreamingStaticTaskStageTiming[];
 	readonly staticAuthoredDynamicPlacements: readonly StaticAuthoredDynamicPlacementRecord[];
+	readonly staticObjectBakeDiagnostics: readonly StaticObjectBakeDiagnostics[];
 	readonly texturePageBuildRequests: readonly OpenWorldTexturePageBuildInput[];
 }
 
@@ -156,6 +158,7 @@ export class OpenWorldEnvCellArtifactRunner {
 						placement,
 					})),
 			),
+			staticObjectBakeDiagnostics: baked.result.staticObjectBakeDiagnostics,
 			texturePageBuildRequests: textureReservation.pageBuildRequests,
 		};
 	}

@@ -54,6 +54,7 @@ import {
 	planStructuredInteriorCellMaterials,
 	resolveStructuredInteriorMaterialSurfaceId,
 	resolveStructuredInteriorPlanTextureWrapMode,
+	resolveStructuredInteriorTextureRoleWrapMode,
 } from "./structured-interior-material-planner";
 import { isRenderableObjectVisualMaterialPlan } from "../../objects/bake/static-object-renderability";
 
@@ -368,7 +369,23 @@ function createMaterialRecipe(
 
 	switch (plan.family) {
 		case "flat-color":
-			return { ...base, family: "direct-color" };
+			return {
+				...base,
+				detailTextureRecipeId: findTextureRole(
+					plan.textureRoles,
+					"detail-overlay",
+				)
+					? requireTextureRecipeId(
+							registry,
+							requireTextureRole(plan.textureRoles, "detail-overlay").dataUse,
+							resolveStructuredInteriorTextureRoleWrapMode(
+								plan,
+								requireTextureRole(plan.textureRoles, "detail-overlay"),
+							),
+						)
+					: null,
+				family: "direct-color",
+			};
 		case "indexed-paletted":
 			return {
 				...base,
@@ -398,7 +415,10 @@ function createMaterialRecipe(
 					? requireTextureRecipeId(
 							registry,
 							requireTextureRole(plan.textureRoles, "detail-overlay").dataUse,
-							getPlanWrapMode(plan),
+							resolveStructuredInteriorTextureRoleWrapMode(
+								plan,
+								requireTextureRole(plan.textureRoles, "detail-overlay"),
+							),
 						)
 					: null,
 				family: "texture-rgba",
@@ -446,8 +466,8 @@ function createTextureRecipes(options: {
 		if (!isRenderableObjectVisualMaterialPlan(plan)) {
 			continue;
 		}
-		const wrapMode = getPlanWrapMode(plan);
 		for (const role of plan.textureRoles) {
+			const wrapMode = resolveStructuredInteriorTextureRoleWrapMode(plan, role);
 			const textureId = requireTextureRecipeId(
 				options.registry,
 				role.dataUse,
@@ -502,7 +522,10 @@ function createTextureRecipeKeys(
 					return [];
 				}
 				return plan.textureRoles.map((role) =>
-					createTextureRecipeKey(role.dataUse, getPlanWrapMode(plan)),
+					createTextureRecipeKey(
+						role.dataUse,
+						resolveStructuredInteriorTextureRoleWrapMode(plan, role),
+					),
 				);
 			}),
 		),

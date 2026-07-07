@@ -325,14 +325,24 @@ function createMaterialTableEntry(options: {
 	};
 
 	switch (options.materialRecipe.family) {
-		case "direct-color":
+		case "direct-color": {
+			const detailBinding =
+				options.materialRecipe.detailTextureRecipeId === null
+					? null
+					: requireTextureBinding(
+							options.textureBindings,
+							options.materialRecipe.detailTextureRecipeId,
+						);
 			return {
 				entry: {
 					...baseEntry,
+					detailTextureBindingId: detailBinding?.bindingId ?? null,
+					detailTextureKey: detailBinding?.textureKey ?? null,
 				},
 				family: "flat-color",
 				pass: options.materialRecipe.pass,
 			};
+		}
 		case "indexed-color": {
 			const indexBinding = requireTextureBinding(
 				options.textureBindings,

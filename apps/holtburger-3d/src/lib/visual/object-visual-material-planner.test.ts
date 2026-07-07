@@ -457,6 +457,36 @@ describe("object visual material planner", () => {
 		expect(plan.fallbackReasons).toEqual([]);
 	});
 
+	it("composes resolved building detail roles onto flat-color static materials", () => {
+		const payload = {
+			...createPayload(),
+			materialSources: [createMaterial()],
+			textureRefs: createDetailTextureRefs(),
+		} satisfies OutdoorStaticObjectsScopePayload;
+
+		const plan = planObjectVisualMaterials(payload);
+
+		expect(plan.materialPlans[0]).toMatchObject({
+			family: "flat-color",
+			renderCoverage: "classified-render-candidate",
+			textureRoles: [
+				{
+					dataUse: {
+						kind: "prepared-render-surface-texture-use",
+						renderSurface: {
+							kind: "render-surface",
+							renderSurfaceId: 0x06000020,
+						},
+						usage: "rgba-detail",
+					},
+					role: "detail-overlay",
+					tiling: 8,
+				},
+			],
+		});
+		expect(plan.fallbackReasons).toEqual([]);
+	});
+
 	it("rejects textured materials whose selected render surface was not resolved", () => {
 		const plan = classifyObjectVisualMaterial({
 			material: createTexturedMaterial(),

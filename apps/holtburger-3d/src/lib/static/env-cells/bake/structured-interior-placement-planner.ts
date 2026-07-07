@@ -14,7 +14,7 @@ import { isCurrentlyStageableStaticObjectDataUse } from "../../objects/bake/stat
 import {
 	createStructuredInteriorTextureBindingRequirement,
 	createStructuredInteriorMaterialPlanner,
-	resolveStructuredInteriorPlanTextureWrapMode,
+	resolveStructuredInteriorTextureRoleWrapMode,
 } from "./structured-interior-material-planner";
 import { isRenderableObjectVisualMaterialPlan } from "../../objects/bake/static-object-renderability";
 
@@ -79,7 +79,6 @@ export async function createStructuredInteriorTexturePlacementIntentResult(input
 				if (!isRenderableObjectVisualMaterialPlan(plan)) {
 					continue;
 				}
-				const wrapMode = resolveStructuredInteriorPlanTextureWrapMode(plan);
 				for (const role of plan.textureRoles) {
 					if (!isCurrentlyStageableStaticObjectDataUse(role.dataUse)) {
 						continue;
@@ -88,7 +87,10 @@ export async function createStructuredInteriorTexturePlacementIntentResult(input
 						{
 							dataUse: role.dataUse,
 							task: item.task,
-							wrapMode,
+							wrapMode: resolveStructuredInteriorTextureRoleWrapMode(
+								plan,
+								role,
+							),
 						},
 					);
 					if (requirementsByBindingId.has(requirement.bindingId)) {

@@ -2764,17 +2764,27 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Audit `static-object-renderability.ts`, `object-visual-material-planner.ts`, `static-material-detail-roles.ts`, `structured-interior-material-planner.ts`, `structured-interior-visual-bundle-producer.ts`, and `env-cell-system-baker.ts` against the renderer material resource contract.
-- [ ] Compare renderability predicates against actual draw-unit resource creation in `object-visual-static-publication-baker.ts` and renderer material binding code.
-- [ ] Decide whether flat-color plus detail roles should become a first-class direct material plan, a composed texture plan, or a documented renderer fidelity deferral.
-- [ ] Fix the skipped-partition reason path so diagnostics name the actual missing stageability reason.
-- [ ] Add or update focused tests for structured interiors, outdoor-building detail overlays, and skipped partition classification.
-- [ ] Re-run all-domain harness and record readiness counts plus triangle impact.
-- [ ] Run `npm run check`, `npm run lint`, and focused static material/renderability tests.
+- [x] Audit `static-object-renderability.ts`, `object-visual-material-planner.ts`, `static-material-detail-roles.ts`, `structured-interior-material-planner.ts`, `structured-interior-visual-bundle-producer.ts`, and `env-cell-system-baker.ts` against the renderer material resource contract.
+- [x] Compare renderability predicates against actual draw-unit resource creation in `object-visual-static-publication-baker.ts` and renderer material binding code.
+- [x] Decide whether flat-color plus detail roles should become a first-class direct material plan, a composed texture plan, or a documented renderer fidelity deferral.
+- [x] Fix the skipped-partition reason path so diagnostics name the actual missing stageability reason.
+- [x] Add or update focused tests for structured interiors, outdoor-building detail overlays, and skipped partition classification.
+- [x] Re-run all-domain harness and record readiness counts plus triangle impact.
+- [x] Run `npm run check`, `npm run lint`, and focused static material/renderability tests.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 38 fixed the renderer capability backlog rather than documenting it as future fidelity work. The direct contract now treats flat-color plus detail overlay as a stageable material plan. This follows the worksheet north star because the authored detail role already existed in the replacement planner, texture placement, material table, and renderer payload shape; the broken part was the old "flat color means no texture roles" predicate.
+- `static-object-renderability.ts` now allows flat-color plans and partitions with no texture roles or detail-only `rgba-detail` roles. Arbitrary flat-color base/index/palette roles remain non-stageable.
+- `webgl2-renderer.ts` now generates flat-color object material shaders with the detail overlay sampler/uniform path. Spicy bit: flat-color shaders are no longer sampler-free. That is intentional because the material model now supports flat base color plus an optional repeat-sampled detail overlay; it does not turn flat-color into texture-rgba.
+- `ObjectVisualDirectColorMaterialRecipe` now carries `detailTextureRecipeId: ObjectVisualTextureRecipeId | null`, and `object-visual-baker.ts` binds it into `detailTextureBindingId`/`detailTextureKey`. This closed the recipe publication gap where partition planning knew about flat-color detail roles but installed visual resources could not bind them.
+- Outdoor/static and structured-interior recipe producers now populate direct-color detail texture recipes. Structured interiors also use role-specific wrapping via `resolveStructuredInteriorTextureRoleWrapMode(...)`, so detail overlays with tiling greater than 1 use repeat sampling even when the flat-color base plan itself has no primary texture.
+- The skipped-geometry `reason: "compatible static object material partition"` issue disappeared as a consequence of making flat-color detail-only partitions stageable. No diagnostic shim was added; the material path now matches the renderer capability.
+- Focused tests were added for flat-color detail composition in `object-visual-material-planner.test.ts`, renderer payload binding in `webgl2-object-material-payloads.test.ts`, flat-color detail shader support in `webgl2-renderer.test.ts`, outdoor static object baking in `static-object-batch-partitioner.test.ts`, and structured-interior baking in `env-cell-system-baker.test.ts`.
+- Verification: `npm run test:ts -- --run src/lib/renderer/webgl2/webgl2-renderer.test.ts src/lib/renderer/webgl2/webgl2-object-material-payloads.test.ts src/lib/visual/object-visual-material-planner.test.ts src/lib/visual/object-visual-baker.test.ts src/lib/visual/object-visual-recipe-bundle.test.ts src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/static/env-cells/bake/env-cell-system-baker.test.ts` passed with 115 tests.
+- Verification: `npm run check` passed.
+- Harness verification: `npm run harness:browser -- --layer-distance 1 --timeout-ms 60000 --output /tmp/holtburger-phase38-all-domain-r1.json` settled with `errorMessage: null`, 45 requested/completed static tasks, 45 applied scene commits, readiness summary counts of zero `deferredRendererCapabilityIssueCount`, zero `skippedGeometryIssueCount`, zero `pipelineBugIssueCount`, zero unsupported source and terrain material issues, and 3 `pendingTextureDependencyCount`. The remaining pending issues are two `object-base-color` pages and one `object-index` page for `static-layer:outdoor-generated-scenery:0xdb56ffff`, which remains Phase 39 scope.
+- Harness frame evidence: 6 long tasks, max 179 ms, renderer frame `over50Ms: 0`, and runtime tick `over50Ms: 0`.
 
 ### Phase 39: Texture Dependency Settlement And Page-Build Readiness Truth
 

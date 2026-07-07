@@ -311,7 +311,7 @@ function createObjectMaterialFragmentShader(
 ): string {
 	const usesBaseColor = family === "texture-rgba";
 	const usesIndexed = family === "indexed-paletted";
-	const usesDetail = family !== "flat-color";
+	const usesDetail = true;
 	return `#version 300 es
 precision highp float;
 precision highp int;

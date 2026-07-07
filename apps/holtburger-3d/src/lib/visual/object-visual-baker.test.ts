@@ -732,6 +732,7 @@ function createDirectColorMaterialRecipe(
 ): ObjectVisualMaterialRecipe {
 	return {
 		...createMaterialRecipeBase(overrides),
+		detailTextureRecipeId: null,
 		family: "direct-color",
 		materialColor,
 		pass: "opaque",

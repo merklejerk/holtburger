@@ -486,6 +486,87 @@ describe("browser landblock env-cell baker", () => {
 		);
 	});
 
+	it("composes environment detail roles onto structured-interior flat-color materials", async () => {
+		const input = createInputWithRenderableCellStructure({
+			detailRoles: [
+				{
+					fadeFar: 256,
+					fadeNear: 128,
+					role: "environment",
+					texture: {
+						kind: "surface-texture",
+						surfaceTextureId: 0x05000020,
+					},
+					tiling: 8,
+				},
+			],
+			materialSources: [
+				createStaticObjectMaterialSource({ materialId: 0x08000010 }),
+			],
+			textureRefs: createDetailTextureRefs(),
+		});
+		const envCell = requireFirstEnvCell(input);
+
+		const result = bakeEnvCellSystem({
+			...input,
+			resources: {
+				envCellCellStructureGeometry: [createGeometrySidecar(envCell)],
+				staticObjectSourceGeometry: [],
+			},
+			texturePlacementSnapshot:
+				await createStructuredInteriorPlacementSnapshot(input),
+		});
+		const drawUnit = result.objectVisualInstallSet.directDrawUnits[0];
+		if (!drawUnit || drawUnit.kind !== "structured-interior-geometry") {
+			throw new Error("Expected structured interior geometry draw unit.");
+		}
+
+		const detailTextureBindingId =
+			drawUnit.materialEntries[0]?.detailTextureBindingId;
+		if (!detailTextureBindingId) {
+			throw new Error("Expected structured-interior detail material binding.");
+		}
+		expect(drawUnit).toMatchObject({
+			materialFamily: "flat-color",
+			materialPlan: [
+				expect.objectContaining({
+					family: "flat-color",
+					outcome: "rendered",
+					textureBindingIds: [detailTextureBindingId],
+				}),
+			],
+			textureBindingIds: [detailTextureBindingId],
+		});
+		expect(drawUnit.materialEntries[0]).toMatchObject({
+			detailTextureBindingId,
+			detailTextureTiling: 8,
+			primaryTextureBindingId: null,
+		});
+		expect(result.materialCoverage[0]).toMatchObject({
+			deferredTriangleCount: 0,
+			renderedTriangleCount: 1,
+		});
+		expect(result.textureUses).toEqual([
+			expect.objectContaining({
+				samplingPolicy: {
+					wrapS: "repeat",
+					wrapT: "repeat",
+				},
+				source: {
+					kind: "prepared-render-surface-texture-use",
+					renderSurface: {
+						kind: "render-surface",
+						renderSurfaceId: 0x06000020,
+					},
+					usage: "rgba-detail",
+				},
+				bindingId: expect.stringContaining(
+					"slot=prepared-render-surface-texture-use%3A06000020%3Argba-detail",
+				),
+			}),
+		]);
+	});
+
 	it("bakes env-cell local placement into render-local positions", () => {
 		const input = createInputWithRenderableCellStructure({
 			localPlacement: {

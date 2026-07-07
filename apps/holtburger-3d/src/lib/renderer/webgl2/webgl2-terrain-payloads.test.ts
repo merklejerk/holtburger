@@ -7,6 +7,7 @@ import type { TextureBindingId } from "../../textures/identity";
 import type { ResolvedTexturePlacement } from "../types";
 import {
 	createTerrainPreparedLayeredPayload,
+	hasDeferredTerrainLayeredTextureReadiness,
 	prepareTerrainLayeredPayload,
 	type TerrainTextureBindingLookup,
 } from "./webgl2-terrain-payloads";
@@ -141,6 +142,64 @@ describe("WebGL2 terrain layered payload builder", () => {
 
 		expect(
 			prepareTerrainLayeredPayload(scratch, plan, createTextureBindingLookup()),
+		).toBe(false);
+		expect(
+			hasDeferredTerrainLayeredTextureReadiness(
+				plan,
+				createTextureBindingLookup(),
+			),
+		).toBe(true);
+	});
+
+	it("identifies failed terrain bindings as deferred readiness", () => {
+		const plan = createPlan({
+			layer: {
+				base: createRole("terrain-base", "base-use", 1),
+				overlays: [],
+				roads: [],
+			},
+		});
+
+		expect(
+			hasDeferredTerrainLayeredTextureReadiness(
+				plan,
+				createTextureBindingLookup(
+					new Map(),
+					new Map(),
+					new Map([
+						["base-use", { kind: "failed", reason: "fixture failure" }],
+					]),
+				),
+			),
+		).toBe(true);
+	});
+
+	it("does not classify missing-not-in-flight terrain bindings as deferred readiness", () => {
+		const plan = createPlan({
+			layer: {
+				base: createRole("terrain-base", "base-use", 1),
+				overlays: [],
+				roads: [],
+			},
+		});
+
+		expect(
+			hasDeferredTerrainLayeredTextureReadiness(
+				plan,
+				createTextureBindingLookup(
+					new Map(),
+					new Map(),
+					new Map([
+						[
+							"base-use",
+							{
+								kind: "missing-not-in-flight",
+								reason: "fixture missing",
+							},
+						],
+					]),
+				),
+			),
 		).toBe(false);
 	});
 
@@ -280,6 +339,43 @@ describe("WebGL2 terrain layered payload builder", () => {
 		);
 		expect(failedPrepared).toBe(false);
 	});
+
+	it("late-binds resident terrain textures without changing the plan", () => {
+		const scratch = createTerrainPreparedLayeredPayload();
+		const base = createRole("terrain-base", "base-use", 1);
+		const plan = createPlan({
+			layer: {
+				base,
+				overlays: [],
+				roads: [],
+			},
+		});
+		const placements = new Map<string, ResolvedTexturePlacement>();
+		const textures = new Map<string, WebGLTexture>();
+
+		expect(
+			prepareTerrainLayeredPayload(
+				scratch,
+				plan,
+				createTextureBindingLookup(placements, textures),
+			),
+		).toBe(false);
+
+		placements.set(
+			"base-use",
+			createPlacement("base-use", "base-ref", [1, 2, 3, 4]),
+		);
+		textures.set("base-ref", createTexture());
+
+		expect(
+			prepareTerrainLayeredPayload(
+				scratch,
+				plan,
+				createTextureBindingLookup(placements, textures),
+			),
+		).toBe(true);
+		expect(scratch.layerRects.baseColorPages[1]).toBe(0);
+	});
 });
 
 function createPlan(options: {
@@ -352,6 +448,11 @@ function createRole(
 function createTextureBindingLookup(
 	placements: ReadonlyMap<string, ResolvedTexturePlacement> = new Map(),
 	textures: ReadonlyMap<string, WebGLTexture> = new Map(),
+	stateOverrides: ReadonlyMap<
+		string,
+		| { readonly kind: "failed"; readonly reason: string }
+		| { readonly kind: "missing-not-in-flight"; readonly reason: string }
+	> = new Map(),
 ): TerrainTextureBindingLookup {
 	return {
 		getResident(bindingId: TextureBindingId) {
@@ -367,6 +468,10 @@ function createTextureBindingLookup(
 			};
 		},
 		getState(bindingId: TextureBindingId) {
+			const stateOverride = stateOverrides.get(bindingId);
+			if (stateOverride) {
+				return { bindingId, ...stateOverride };
+			}
 			const placement = placements.get(bindingId);
 			const texture = placement ? textures.get(placement.textureRefId) : null;
 			if (!placement || !texture) {

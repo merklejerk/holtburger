@@ -292,7 +292,72 @@ describe("WebGL2 static object payload builder", () => {
 		).toBe(false);
 	});
 
-	it("throws for failed required texture bindings", () => {
+	it("late-binds resident object textures without changing the resource", () => {
+		const scratch = createObjectMaterialPreparedDrawPayload();
+		const texture = createTexture();
+		const resource = createStaticResource({
+			materialEntries: [
+				createMaterialEntry({
+					primaryTextureBindingId: "base-use",
+					slot: 0,
+				}),
+			],
+			materialFamily: "texture-rgba",
+		});
+		const placements = new Map<string, ResolvedTexturePlacement>();
+		const textures = new Map<string, WebGLTexture>();
+
+		expect(
+			prepareObjectMaterialDrawPayload(
+				scratch,
+				resource,
+				createTextureBindingLookup(placements, textures),
+			),
+		).toBe(false);
+
+		placements.set(
+			"base-use",
+			createPlacement({
+				height: 4,
+				rect: [0, 0, 1, 1],
+				textureRefId: "base-ref",
+				width: 4,
+			}),
+		);
+		textures.set("base-ref", texture);
+
+		expect(
+			prepareObjectMaterialDrawPayload(
+				scratch,
+				resource,
+				createTextureBindingLookup(placements, textures),
+			),
+		).toBe(true);
+		expect(scratch.textures.baseColor?.texture).toBe(texture);
+	});
+
+	it("returns false for failed required texture bindings", () => {
+		const scratch = createObjectMaterialPreparedDrawPayload();
+		const resource = createStaticResource({
+			materialEntries: [
+				createMaterialEntry({
+					primaryTextureBindingId: "base-use",
+					slot: 0,
+				}),
+			],
+			materialFamily: "texture-rgba",
+		});
+
+		expect(
+			prepareObjectMaterialDrawPayload(
+				scratch,
+				resource,
+				createTextureBindingLookup(new Map(), new Map(), new Set(["base-use"])),
+			),
+		).toBe(false);
+	});
+
+	it("throws for missing-not-in-flight required texture bindings", () => {
 		const scratch = createObjectMaterialPreparedDrawPayload();
 		const resource = createStaticResource({
 			materialEntries: [
@@ -308,7 +373,12 @@ describe("WebGL2 static object payload builder", () => {
 			prepareObjectMaterialDrawPayload(
 				scratch,
 				resource,
-				createTextureBindingLookup(new Map(), new Map(), new Set(["base-use"])),
+				createTextureBindingLookup(
+					new Map(),
+					new Map(),
+					new Set(),
+					new Set(["base-use"]),
+				),
 			),
 		).toThrow(
 			"Object material resource test-draw-unit is missing resident base-color texture binding.",
@@ -354,6 +424,7 @@ function createTextureBindingLookup(
 	placements: ReadonlyMap<string, ResolvedTexturePlacement> = new Map(),
 	textures: ReadonlyMap<string, WebGLTexture> = new Map(),
 	failedBindingIds: ReadonlySet<string> = new Set(),
+	missingBindingIds: ReadonlySet<string> = new Set(),
 ): ObjectMaterialTextureBindingLookup {
 	return {
 		getResident(bindingId: TextureBindingId) {
@@ -371,6 +442,13 @@ function createTextureBindingLookup(
 		getState(bindingId: TextureBindingId) {
 			if (failedBindingIds.has(bindingId)) {
 				return { bindingId, kind: "failed", reason: "fixture failure" };
+			}
+			if (missingBindingIds.has(bindingId)) {
+				return {
+					bindingId,
+					kind: "missing-not-in-flight",
+					reason: "fixture missing",
+				};
 			}
 			const placement = placements.get(bindingId);
 			const texture = placement ? textures.get(placement.textureRefId) : null;

@@ -2264,17 +2264,24 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Audit `runtime-entities/renderer-commits.ts`, static layer scene commit application, `webgl2-object-material-payloads.ts`, `webgl2-terrain-payloads.ts`, and `webgl2-renderer.ts`.
-- [ ] Update object-material validation to treat failed readiness as non-renderable while preserving upstream bug reporting for missing-not-in-flight.
-- [ ] Update terrain layered payload prep or its call site to distinguish pending/failed readiness from unsupported shader/input defects.
-- [ ] Remove or gate `#warnTerrainLayeredFallback(...)` behind upstream readiness diagnostics.
-- [ ] Add renderer tests for object-material scene-before-texture, texture-before-scene, failed binding, and missing-not-in-flight cases.
-- [ ] Add terrain tests for pending, failed, resident, and late-resident binding states.
-- [ ] Run terrain-focused and object-material harness scenarios.
+- [x] Audit `runtime-entities/renderer-commits.ts`, static layer scene commit application, `webgl2-object-material-payloads.ts`, `webgl2-terrain-payloads.ts`, and `webgl2-renderer.ts`.
+- [x] Update object-material validation to treat failed readiness as non-renderable while preserving upstream bug reporting for missing-not-in-flight.
+- [x] Update terrain layered payload prep or its call site to distinguish pending/failed readiness from unsupported shader/input defects.
+- [x] Remove or gate `#warnTerrainLayeredFallback(...)` behind upstream readiness diagnostics.
+- [x] Add renderer tests for object-material scene-before-texture, texture-before-scene, failed binding, and missing-not-in-flight cases.
+- [x] Add terrain tests for pending, failed, resident, and late-resident binding states.
+- [x] Run terrain-focused and object-material harness scenarios.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 26 completed on 2026-07-07.
+- Object material draw payload prep now treats explicit failed binding readiness the same as pending readiness: the installed resource is non-renderable for that frame and draw prep returns `false` instead of throwing. Explicit `missing-not-in-flight` remains outside the deferred-readiness path and still throws as a pipeline bug.
+- Added `hasDeferredTerrainLayeredTextureReadiness(...)` as a renderer-local classifier over terrain material plans. It returns true only when every unsatisfied required terrain role is pending or failed; missing binding ids, missing-not-in-flight states, and unsupported page/shader conditions are not classified as normal readiness.
+- `Webgl2Renderer` now gates `#warnTerrainLayeredFallback(...)` behind that terrain readiness classifier. Normal pending/failed texture readiness skips quietly; unsupported terrain-role or shader-capacity defects still have a visible warning until Phase 29 replaces terrain-role diagnostics with structured replacement records.
+- Added late-binding tests for object material and terrain prep: a resource/plan can return non-renderable while bindings are pending and become renderable after resident placement appears, without changing the resource or rebaking geometry.
+- Concession: Phase 26 did not replace the actual terrain fallback renderer path or solve terrain flat-color fidelity. That remains Phase 29. This phase only prevents normal texture readiness from being reported as a renderer fallback defect.
+- Verification: `npm run check`, `npm run lint`, focused `npm run test:ts -- --run src/lib/renderer/webgl2/webgl2-object-material-payloads.test.ts src/lib/renderer/webgl2/webgl2-terrain-payloads.test.ts src/lib/renderer/webgl2/webgl2-texture-bindings.test.ts`, touched-file `npm exec prettier -- --check src/lib/renderer/webgl2/webgl2-object-material-payloads.ts src/lib/renderer/webgl2/webgl2-object-material-payloads.test.ts src/lib/renderer/webgl2/webgl2-terrain-payloads.ts src/lib/renderer/webgl2/webgl2-terrain-payloads.test.ts src/lib/renderer/webgl2/webgl2-renderer.ts`, `npm run harness:browser -- --domains terrain --layer-distance 0 --timeout-ms 60000`, and `npm run harness:browser -- --domains terrain,generated-scenery --layer-distance 0 --timeout-ms 60000`.
+- Verification note: the captured terrain harness log at `/tmp/holtburger-phase26-terrain-harness.log` had no matches for `terrain draw unit`, `terrain-debug-flat`, `rendered with terrain-debug-flat`, or `[holtburger-3d]`.
 
 ### Phase 27: Replacement Material Coverage And Readiness Diagnostics
 

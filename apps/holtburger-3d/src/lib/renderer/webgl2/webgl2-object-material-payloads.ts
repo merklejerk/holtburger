@@ -287,7 +287,7 @@ function validateObjectMaterialTextureBindings(
 ): boolean {
 	if (resource.materialFamily === "texture-rgba" && !textures.baseColor) {
 		if (
-			hasPendingObjectMaterialBinding(
+			hasDeferredObjectMaterialBinding(
 				resource,
 				textureBindings,
 				(entry) => entry.primaryTextureBindingId,
@@ -302,7 +302,7 @@ function validateObjectMaterialTextureBindings(
 	if (resource.materialFamily === "indexed-paletted") {
 		if (!textures.index) {
 			if (
-				hasPendingObjectMaterialBinding(
+				hasDeferredObjectMaterialBinding(
 					resource,
 					textureBindings,
 					(entry) => entry.indexTextureBindingId,
@@ -316,7 +316,7 @@ function validateObjectMaterialTextureBindings(
 		}
 		if (!textures.palette) {
 			if (
-				hasPendingObjectMaterialBinding(
+				hasDeferredObjectMaterialBinding(
 					resource,
 					textureBindings,
 					(entry) => entry.paletteTextureBindingId,
@@ -332,7 +332,7 @@ function validateObjectMaterialTextureBindings(
 	return true;
 }
 
-function hasPendingObjectMaterialBinding(
+function hasDeferredObjectMaterialBinding(
 	resource: ObjectMaterialPayloadResource,
 	textureBindings: ObjectMaterialTextureBindingLookup,
 	selectBindingId: (entry: StaticMaterialTableEntry) => TextureBindingId | null,
@@ -342,7 +342,8 @@ function hasPendingObjectMaterialBinding(
 		if (!bindingId) {
 			continue;
 		}
-		if (textureBindings.getState?.(bindingId).kind === "pending") {
+		const state = textureBindings.getState?.(bindingId);
+		if (state?.kind === "pending" || state?.kind === "failed") {
 			return true;
 		}
 	}

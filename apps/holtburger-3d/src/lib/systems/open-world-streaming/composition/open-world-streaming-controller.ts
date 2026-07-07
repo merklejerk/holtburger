@@ -333,6 +333,7 @@ export class OpenWorldStreamingController {
 		this.#activeSceneInterest = interest !== null;
 		const runId = ++this.#runSequence;
 		if (!interest) {
+			this.#evictStaticOwners(new Set());
 			this.#terrainProgress = createEmptyTerrainProgress();
 			this.#outdoorObjectProgress = createEmptyOutdoorObjectProgress();
 			this.#envCellProgress = createEmptyEnvCellProgress();
@@ -514,6 +515,7 @@ export class OpenWorldStreamingController {
 						textureSnapshot.ownerlessPageCountByRetainedState.planned +
 						textureSnapshot.ownerlessPageCountByRetainedState.resident,
 				},
+				ownerlessPagePolicy: textureSnapshot.ownerlessPagePolicy,
 				pageBuildsInFlight: textureSnapshot.pageBuildsInFlight,
 			},
 			materialReadiness: createMaterialReadinessDiagnostics({
@@ -606,12 +608,7 @@ export class OpenWorldStreamingController {
 				token: this.#owners.retain(owner),
 			};
 		});
-		for (const owner of this.#owners.createSnapshot().current) {
-			if (owner.kind === "static-layer" && !targetOwnerIds.has(owner.id)) {
-				this.#runtimeEntities?.removeStaticAuthoredChildrenForParent(owner.id);
-				this.#owners.evict(owner.id);
-			}
-		}
+		this.#evictStaticOwners(targetOwnerIds);
 
 		let nextRequestIndex = 0;
 		const workerCount = Math.min(
@@ -1187,6 +1184,17 @@ export class OpenWorldStreamingController {
 			this.#envCellProgress.committed +
 			this.#envCellProgress.failed;
 		return settled >= requested;
+	}
+
+	#evictStaticOwners(retainedOwnerIds: ReadonlySet<MaterializationOwnerId>): void {
+		for (const owner of this.#owners.createSnapshot().current) {
+			if (owner.kind !== "static-layer" || retainedOwnerIds.has(owner.id)) {
+				continue;
+			}
+			this.#runtimeEntities?.removeStaticAuthoredChildrenForParent(owner.id);
+			this.#owners.evict(owner.id);
+			this.#textureClaims.releaseTextureOwner(owner.id);
+		}
 	}
 
 	#clearDeferredDenseRendererLayers(): void {

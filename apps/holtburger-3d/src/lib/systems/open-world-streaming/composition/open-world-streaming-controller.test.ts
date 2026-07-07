@@ -152,6 +152,36 @@ describe("OpenWorldStreamingController terrain slice", () => {
 		});
 	});
 
+	it("evicts static owners when static interest is cleared", async () => {
+		const renderer = new FixtureTerrainRenderer();
+		const controller = new OpenWorldStreamingController({
+			assetReader: createUnusedAssetReader(),
+			createDynamicVisualBaker: failIfDynamicWorkerFactoryIsCalled,
+			createDynamicVisualRecipeResolver: failIfDynamicWorkerFactoryIsCalled,
+			createObjectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder,
+			createStaticBaker: () => new FixtureTerrainBaker(),
+			createStaticResolver: () =>
+				new FixtureTerrainResolver(createTerrainScopePayload()),
+			createTexturePageBuilder: createUnusedTexturePageBuilder,
+			renderer,
+		});
+
+		controller.updateTerrainInterest({
+			anchorLandblockId: 0xda55ffff,
+			radius: 0,
+			revision: 1,
+		});
+		await waitFor(() => controller.createSnapshot().terrain.committed === 1);
+
+		controller.updateStaticInterest(null);
+
+		expect(renderer.anchorLandblockIds).toEqual([0xda55ffff, null]);
+		expect(controller.createDiagnosticsSnapshot().owners).toEqual({
+			current: 0,
+			evicted: 1,
+		});
+	});
+
 	it("streams broad source work as domain-specific runner results", async () => {
 		const renderer = new FixtureTerrainRenderer();
 		const resolver = new FixtureStreamingTerrainResolver({

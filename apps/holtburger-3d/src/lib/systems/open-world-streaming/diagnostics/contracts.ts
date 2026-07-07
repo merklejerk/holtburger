@@ -40,6 +40,15 @@ export interface OpenWorldStreamingDiagnosticsSnapshot {
 			readonly resident: number;
 			readonly total: number;
 		};
+		/** Direct policy for ownerless retained pages; not a legacy leak detector. */
+		readonly ownerlessPagePolicy: {
+			readonly residentDisposition: "cached-for-reuse";
+			readonly rendererRemoval: {
+				readonly kind: "deferred-until-measured-pressure";
+				readonly pressureThresholdBytes: number | null;
+			};
+			readonly pendingRendererRemovalPageCount: number;
+		};
 		readonly pageBuildsInFlight: number;
 		/** Replacement-owned byte accounting is not exact until renderer page sizing is canonical. */
 		readonly byteEstimate: {

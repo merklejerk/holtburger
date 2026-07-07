@@ -130,7 +130,7 @@ export class OpenWorldEnvCellArtifactRunner {
 							domain: "env-cell-system",
 							key: request.task.ownerKey,
 							kind: "layer-owner",
-							ownerId: request.task.ownerId,
+							ownerId: request.ownerId,
 						},
 						placement,
 					})),

@@ -125,7 +125,7 @@ export class OpenWorldOutdoorObjectArtifactRunner {
 						domain: sourcePayload.domain,
 						key: request.task.ownerKey,
 						kind: "layer-owner",
-						ownerId: request.task.ownerId,
+						ownerId: request.ownerId,
 					},
 					placement,
 				})),

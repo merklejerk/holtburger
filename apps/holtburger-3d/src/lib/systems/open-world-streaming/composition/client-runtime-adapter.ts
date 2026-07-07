@@ -90,6 +90,7 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 	#envCellAabbDebugOverlayVisible = false;
 	#envCellPortalDebugOverlayVisible = false;
 	#flatVisionModeEnabled = false;
+	#lastFrameTimeSeconds = 0;
 	#sceneInterest: RuntimeSceneInterest = { kind: "none" };
 	#sceneInterestRevision = 0;
 	#textureFilteringMode: TextureFilteringMode = DEFAULT_TEXTURE_FILTERING_MODE;
@@ -101,6 +102,9 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 		this.#renderer = adapters.renderer.renderer;
 		this.#controller = new OpenWorldStreamingController({
 			assetReader: adapters.assets.assetService,
+			createDynamicVisualBaker: adapters.workers.createDynamicVisualBaker,
+			createDynamicVisualRecipeResolver:
+				adapters.workers.createDynamicVisualRecipeResolver,
 			createStaticBaker: adapters.workers.createStaticBaker,
 			createStaticResolver: adapters.workers.createStaticSourceResolver,
 			createTexturePacker: adapters.workers.createTexturePacker,
@@ -120,20 +124,26 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 
 	readonly #frameTelemetryListeners = new Set<RuntimeFrameTelemetryListener>();
 
-	createRuntimeSpawn(): DynamicEntityId {
-		throw new Error(
-			"Runtime-authored dynamic entities are not implemented in the open-world streaming pipeline yet.",
+	createRuntimeSpawn(request: Parameters<ClientRuntime["createRuntimeSpawn"]>[0]): DynamicEntityId {
+		this.#assertUsable();
+		return this.#controller.createRuntimeEntity(request);
+	}
+
+	removeRuntimeSpawn(entityId: DynamicEntityId): boolean {
+		this.#assertUsable();
+		return this.#controller.destroyRuntimeEntity(entityId);
+	}
+
+	updateRuntimeSpawnRenderResidence(
+		entityId: DynamicEntityId,
+		renderResidence: Parameters<ClientRuntime["updateRuntimeSpawnRenderResidence"]>[1],
+	): boolean {
+		this.#assertUsable();
+		return this.#controller.updateRuntimeEntityRenderResidence(
+			entityId,
+			renderResidence,
+			this.#lastFrameTimeSeconds,
 		);
-	}
-
-	removeRuntimeSpawn(): boolean {
-		this.#assertUsable();
-		return false;
-	}
-
-	updateRuntimeSpawnRenderResidence(): boolean {
-		this.#assertUsable();
-		return false;
 	}
 
 	updateSceneInterest(interest: RuntimeSceneInterest): void {
@@ -275,6 +285,8 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 		if (this.#disposed) {
 			return;
 		}
+		this.#lastFrameTimeSeconds = timeSeconds;
+		this.#controller.tickFrame(timeSeconds);
 		this.#renderer.updateFrameState({
 			camera: this.#currentCamera,
 			timeSeconds,

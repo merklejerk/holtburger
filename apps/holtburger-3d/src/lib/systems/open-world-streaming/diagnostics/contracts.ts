@@ -23,6 +23,12 @@ export interface OpenWorldStreamingDiagnosticsSnapshot {
 		readonly claimCount: number;
 		readonly pageBuildsInFlight: number;
 	};
+	readonly runtimeEntities: {
+		readonly active: number;
+		readonly nonRenderable: number;
+		readonly runtimeAuthored: number;
+		readonly staticAuthored: number;
+	};
 	readonly sceneCommits: {
 		readonly pending: number;
 		readonly applied: number;

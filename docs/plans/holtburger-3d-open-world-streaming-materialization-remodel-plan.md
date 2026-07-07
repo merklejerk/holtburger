@@ -1781,20 +1781,28 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Run import/dead-code inspection for old runtime, texture manager, and static coordinator paths.
-- [ ] Classify remaining adapters and shims.
-- [ ] Split or rename any module whose role is ambiguous between durable adapter and compatibility shim.
-- [ ] Verify no surviving consumer depends on shim-only field names, timing assumptions, or legacy diagnostic categories.
-- [ ] Verify every incomplete legacy-edge diagnostic or runtime projection is either deleted in Phase 16 or documented as an out-of-scope survivor.
-- [ ] Identify tests that preserve retired architecture.
-- [ ] Dry-run Phase 16 cleanup against the current source tree.
-- [ ] Identify dependency/order changes, boundary leaks, shims, deletion targets, and test risks for hard cleanup.
-- [ ] Update Phase 16 cleanup checklist with concrete file/module targets.
-- [ ] Confirm benchmark matrix still passes on the replacement path.
+- [x] Run import/dead-code inspection for old runtime, texture manager, and static coordinator paths.
+- [x] Classify remaining adapters and shims.
+- [x] Split or rename any module whose role is ambiguous between durable adapter and compatibility shim.
+- [x] Verify no surviving consumer depends on shim-only field names, timing assumptions, or legacy diagnostic categories.
+- [x] Verify every incomplete legacy-edge diagnostic or runtime projection is either deleted in Phase 16 or documented as an out-of-scope survivor.
+- [x] Identify tests that preserve retired architecture.
+- [x] Dry-run Phase 16 cleanup against the current source tree.
+- [x] Identify dependency/order changes, boundary leaks, shims, deletion targets, and test risks for hard cleanup.
+- [x] Update Phase 16 cleanup checklist with concrete file/module targets.
+- [x] Confirm benchmark matrix still passes on the replacement path.
 
 Decisions and course corrections:
 
-- Pending.
+- Import audit found the old production materialization path still reachable only through the explicit legacy option in `createBrowserRuntime(...)`: `createClientRuntime(...)`, `ClientRuntimeImpl`, `StaticCoordinator`, `TextureManager`, `installStaticCommit(...)`, and env-cell legacy publication helpers are no longer selected by normal browser or default harness routes.
+- The explicit `runtimePipeline` switch is now the main cutover shim. Phase 16 should remove the `"legacy"` mode from `BrowserRuntimePipelineMode`, `parseBrowserRuntimePipelineMode(...)`, `BrowserPipelineHarness.svelte`, and `scripts/browser-pipeline-harness.mjs` before deleting the old runtime modules. Leaving the switch alive would keep the old architecture artificially reachable.
+- Remaining shims are concrete and deletion-targeted: `composition/client-runtime-legacy-shim.ts`, `testing/empty-runtime-snapshots.ts`, harness `legacyDiagnostics`, and the old `ClientRuntime` legacy snapshot methods on the replacement adapter. None should survive Phase 16 in production code.
+- Durable adapters are still valid at host/worker/renderer boundaries: browser host/assets, static resolver worker, static bake worker, dynamic visual workers, texture packing worker, and renderer mutation adapters. These reuse transforms or external boundaries and do not justify keeping the old runtime coordinator.
+- UI audit found the legacy texture atlas inspector path still wired through `BrowserDisplay.svelte`, `TextureAtlasPageInspectorModal.svelte`, `RuntimeTextureAtlasPageOverview`, and `TextureAtlasPageInspectionSnapshot`. It is inert on the replacement path because replacement overview atlas pages are empty, but Phase 16 should delete or replace it rather than projecting replacement texture residency into the old `TextureManager` inspection shape.
+- Architecture-preserving tests to delete or rewrite in Phase 16: `src/lib/runtime/client-runtime.test.ts`, `src/lib/static/coordinator/static-coordinator.test.ts`, `src/lib/textures/texture-manager.test.ts`, plus legacy-only portions of `src/lib/runtime/static-commit-installer.test.ts` and `src/lib/runtime/env-cell-system-layer-publication.test.ts`. Keep tests only where they prove reusable pure transforms or replacement contracts.
+- `npm run lint:dead` was run as an audit and currently fails on unused exports: `createDynamicRendererVisualResourceId`, `buildObjectVisualAtlas`, `OpenWorldStreamingDiagnosticsReport`, static bake/source projection diagnostic exported types, structured-interior/static-object stage timing exported types, object visual atlas build exported types, and texture packing result-ready exported types. Phase 16 should delete or unexport these if they remain unused after hard cleanup.
+- Dry-run order for Phase 16: remove the explicit legacy runtime switch, delete legacy UI/harness projections, delete the old runtime/static/texture orchestration modules and their architecture-preserving tests, then run dead-code cleanup on any now-orphaned contracts. This order avoids keeping code live only because a diagnostic or test still expects it.
+- Replacement benchmark matrix was confirmed immediately before this audit in Phase 14: default terrain radius 0 and default all-domain radius 1 selected `open-world-streaming`, completed all requested tasks, and stayed within the recovered frame profile. No Phase 15 production code changed after that benchmark.
 
 ### Phase 16: Hard Cutover Cleanup
 
@@ -1828,15 +1836,17 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Remove old runtime orchestration modules; keep only durable boundary adapters where the boundary still exists.
-- [ ] Remove old texture manager paths no longer used.
-- [ ] Remove old static coordinator continuation path if fully replaced.
-- [ ] Delete shims that translate replacement artifacts back into retired legacy shapes.
+- [ ] Remove the explicit legacy runtime switch: delete `"legacy"` from `BrowserRuntimePipelineMode`, `parseBrowserRuntimePipelineMode(...)`, `BrowserPipelineHarness.svelte`, and `scripts/browser-pipeline-harness.mjs`.
+- [ ] Remove old runtime orchestration modules: delete `src/lib/runtime/client-runtime.ts` implementation paths that only serve `ClientRuntimeImpl`, or split durable shared runtime types into a smaller replacement-owned contract before deleting the implementation.
+- [ ] Remove old texture manager paths no longer used: delete `src/lib/textures/texture-manager.ts`, `TextureAtlasPageInspectionSnapshot`, `RuntimeTextureAtlasPageOverview`, and the legacy atlas inspector UI unless a replacement-native inspector is built from `OpenWorldStreamingAtlasInspectionSnapshot`.
+- [ ] Remove old static coordinator continuation path: delete `src/lib/static/coordinator/static-coordinator.ts` and any `StaticCoordinator*` contracts that are not reusable static source/bake transforms.
+- [ ] Delete shims that translate replacement artifacts back into retired legacy shapes: `src/lib/systems/open-world-streaming/composition/client-runtime-legacy-shim.ts`, `src/lib/systems/open-world-streaming/testing/empty-runtime-snapshots.ts`, harness `legacyDiagnostics`, and replacement adapter legacy snapshot projection methods.
 - [ ] Audit remaining adapters and classify each as host, worker, renderer, diagnostics, harness, or delete.
 - [ ] Verify surviving adapters do not expose shim-only fields, old diagnostic categories, or legacy timing/order assumptions.
 - [ ] Delete legacy diagnostic projections rather than keeping them alive by inventing compatibility fields from replacement data.
-- [ ] Classify `client-runtime.test.ts`, `static-coordinator.test.ts`, `texture-manager.test.ts`, and renderer tests as keep, rewrite, split, or delete.
-- [ ] Remove obsolete diagnostics and tests.
+- [ ] Delete or rewrite architecture-preserving tests: `src/lib/runtime/client-runtime.test.ts`, `src/lib/static/coordinator/static-coordinator.test.ts`, `src/lib/textures/texture-manager.test.ts`, and legacy-only portions of `src/lib/runtime/static-commit-installer.test.ts` and `src/lib/runtime/env-cell-system-layer-publication.test.ts`.
+- [ ] Remove obsolete diagnostics and tests, including any remaining `static-coordinator`, `static-commit-install`, and `texture-atlas` report categories from normal replacement outputs.
+- [ ] Resolve current `npm run lint:dead` findings: unused `createDynamicRendererVisualResourceId`, `buildObjectVisualAtlas`, `OpenWorldStreamingDiagnosticsReport`, static bake/source projection diagnostic exported types, structured/static-object timing exported types, object visual atlas build exported types, and texture packing result-ready exported types.
 - [ ] Run `npm run check`.
 - [ ] Run `npm run lint`.
 - [ ] Run benchmark matrix one final time.

@@ -2809,17 +2809,24 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Trace `pending-texture-dependency` creation in `open-world-streaming-controller.ts` through `TexturePageBuildTaskStream`, `page-build-results.ts`, `texture-commit-applier.ts`, and renderer texture application.
-- [ ] Reproduce the persisted generated-scenery pending pages with harness output and, if needed, temporary direct diagnostics that are deleted before commit.
-- [ ] Add direct page-build readiness fields to `diagnostics/contracts.ts` only if current fields cannot explain the state honestly.
-- [ ] Decide and implement harness settlement policy for pending page builds.
-- [ ] Add focused texture residency/page-build tests for accepted, stale, noop, failed, and owner-released paths.
-- [ ] Re-run all-domain harness with and without settle delay and record readiness counts.
-- [ ] Run `npm run check`, `npm run lint`, and focused texture residency/page-build tests.
+- [x] Trace `pending-texture-dependency` creation in `open-world-streaming-controller.ts` through `TexturePageBuildTaskStream`, `page-build-results.ts`, `texture-commit-applier.ts`, and renderer texture application.
+- [x] Reproduce the persisted generated-scenery pending pages with harness output and, if needed, temporary direct diagnostics that are deleted before commit.
+- [x] Add direct page-build readiness fields to `diagnostics/contracts.ts` only if current fields cannot explain the state honestly.
+- [x] Decide and implement harness settlement policy for pending page builds.
+- [x] Add focused texture residency/page-build tests for accepted, stale, noop, failed, and owner-released paths.
+- [x] Re-run all-domain harness with and without settle delay and record readiness counts.
+- [x] Run `npm run check`, `npm run lint`, and focused texture residency/page-build tests.
 
 Decisions and course corrections:
 
-- Pending.
+- The 3 generated-scenery `pending-texture-dependency` records from Phase 38 were not stale owner state, renderer upload failure, or missing texture commit application. They were two `object-base-color` pages and one `object-index` page sampled while worker page builds were still in flight for `static-layer:outdoor-generated-scenery:0xdb56ffff`.
+- Spicy bit: the earlier `--settle-delay-ms 1500` evidence was misleading. `browser-pipeline-harness.mjs` only applies `settleDelayMs` between sequence entries, so a single-landblock run did not wait after the final settled sample. The direct diagnostics were honest; the harness readiness gate was too loose.
+- Changed `BrowserPipelineHarness.svelte` readiness so a static scene is not considered settled until replacement artifacts are idle, scene commits are applied, static tasks are complete, texture page builds are quiescent, and material readiness reports zero pending or failed texture dependencies. The harness status text now exposes `pageBuilds` and `pendingTextures` so this wait state is visible instead of disguised as static completion.
+- No new `diagnostics/contracts.ts` fields were added. Current replacement-native diagnostics already identify the necessary states: `textureResidency.pageBuildsInFlight`, `texturePageBuildTasks.active/recent/summary`, `materialReadiness.summary`, and scene commit counters. Adding another diagnostic layer here would be the trap we called out: fitting the new model to a debugging desire instead of letting ownership boundaries speak.
+- Focused test coverage was already present for page-build completion, stale rejection, accepted noop settlement, failed page-build reporting, and owner release/reclaimable behavior in `page-build.test.ts`, `texture-page-build-task-stream.test.ts`, and `texture-claim-registry.test.ts`. Phase 39 verified those direct contracts rather than adding duplicate harness-shaped tests.
+- Harness verification without settle delay: `npm run harness:browser -- --layer-distance 1 --timeout-ms 60000 --output /tmp/holtburger-phase39-all-domain-r1.json` settled with `errorMessage: null`, 45 requested/completed static tasks, 45 applied scene commits, 149 resident texture pages, 149 accepted/committed page builds, `pageBuildsInFlight: 0`, zero pending or failed texture dependencies, 11 long tasks, max long task about 180 ms, and zero renderer/runtime frames over 50 ms.
+- Harness verification with a real between-step settle delay exposed a separate harness/request-scope bug: `npm run harness:browser -- --layer-distance 1 --repeat 2 --settle-delay-ms 1500 --timeout-ms 60000 --output /tmp/holtburger-phase39-all-domain-r2-settle.json` timed out with texture readiness clean (`pageBuilds=0`, `pendingTextures=0`) but static request/commit accounting inconsistent (`staticTasks.completed=49/45`, `artifacts.inFlight=1`, `sceneCommits.pending=41`). This is not the Phase 38 texture dependency failure. Phase 40 now owns request-scoped harness readiness cleanup while deleting legacy-shaped harness shims.
+- Verification: `npm run check`, focused `npm run test:ts -- --run src/lib/systems/open-world-streaming/texture-residency/page-build/page-build.test.ts src/lib/systems/open-world-streaming/texture-residency/page-build/texture-page-build-task-stream.test.ts src/lib/systems/open-world-streaming/texture-residency/claims/texture-claim-registry.test.ts`, and the harness runs above.
 
 ### Phase 40: Runtime, Harness, And UI Shim Deletion
 
@@ -2831,6 +2838,7 @@ Deliverables:
 
 - Delete `RuntimeOverviewSnapshot.static` and `createRuntimeStaticOverviewFromController(...)`.
 - Remove `staticOverview` from `browser-pipeline-harness.mjs` scenario samples once `openWorldStreaming` and material readiness diagnostics provide direct evidence.
+- Make harness static readiness request-scoped enough that repeated landblock sequences do not combine old and new static task/commit counters into an impossible state such as `completed > requested`.
 - Migrate `BrowserDisplay.svelte` status/resource/material panels from legacy-shaped overview fields to direct replacement diagnostics where the panel still needs to survive.
 - Remove tests that assert old runtime overview/static diagnostic parity.
 - Record every surviving adapter and prove it crosses a durable boundary rather than preserving a retired concept.
@@ -2840,15 +2848,18 @@ Acceptance criteria:
 - `client-runtime-adapter.ts` contains durable app/runtime adapter logic only; it does not project replacement materialization into old static coordinator-shaped summaries.
 - `RuntimeOverviewSnapshot` no longer has static coordinator-style materialization counters.
 - `browser-pipeline-harness.mjs` and `BrowserPipelineHarness.svelte` consume direct `open-world-streaming` diagnostics or named durable harness composition data.
+- A repeated harness sequence with `--repeat 2 --settle-delay-ms 1500` either settles cleanly or reports a direct request-scoped replacement diagnostic explaining the active request, pending commits, and remaining artifacts without relying on `staticOverview`.
 - No production code has `staticOverview`, `committedStaticCommitInstallCount`, `pendingStaticCommitInstallCount`, or old static commit lifecycle counters for the replacement pipeline.
 - Every surviving adapter is named as host asset access, worker transport, renderer mutation, diagnostics export plumbing, or harness composition.
 
 Task checklist:
 
 - [ ] Search `apps/holtburger-3d/src` and `apps/holtburger-3d/scripts` for `staticOverview`, `RuntimeOverviewSnapshot.static`, old static commit counters, and legacy diagnostics snapshots.
+- [ ] Trace repeated harness sequence readiness from `browser-pipeline-harness.mjs` into `BrowserPipelineHarness.svelte` and replacement `openWorldStreaming` diagnostics; identify whether request identity, cumulative counters, or scene commit ownership is the source of `completed > requested`.
 - [ ] Migrate BrowserDisplay polling and panels to `runtime.createDiagnosticsReport()` direct replacement domains.
 - [ ] Delete `createRuntimeStaticOverviewFromController(...)` and the `RuntimeStaticOverviewSnapshot` interface.
 - [ ] Remove `staticOverview` from harness sample output and downstream assertions.
+- [ ] Fix repeated-sequence readiness/accounting without adding legacy static overview fields back into the readiness decision.
 - [ ] Delete obsolete tests instead of updating them to preserve old overview shape.
 - [ ] Run `npm run check`, `npm run lint`, `npm run lint:dead`, and browser harness.
 

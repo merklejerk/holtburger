@@ -507,6 +507,14 @@ export class OpenWorldStreamingController {
 					...textureSnapshot.pageCountByState,
 					total: textureSnapshot.pageCount,
 				},
+				ownerlessEntries: textureSnapshot.ownerlessEntryCount,
+				ownerlessPages: {
+					...textureSnapshot.ownerlessPageCountByRetainedState,
+					total:
+						textureSnapshot.ownerlessPageCountByRetainedState.building +
+						textureSnapshot.ownerlessPageCountByRetainedState.planned +
+						textureSnapshot.ownerlessPageCountByRetainedState.resident,
+				},
 				pageBuildsInFlight: textureSnapshot.pageBuildsInFlight,
 			},
 			materialReadiness: createMaterialReadinessDiagnostics({

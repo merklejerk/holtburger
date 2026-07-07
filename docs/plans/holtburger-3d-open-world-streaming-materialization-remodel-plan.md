@@ -2898,17 +2898,28 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Audit `OpenWorldTextureClaimRegistry` owner release, page reservation, and snapshot fields.
-- [ ] Audit renderer texture binding readiness for ownerless or reclaimed pages.
-- [ ] Define ownerless page lifecycle states and diagnostics fields.
-- [ ] Implement explicit reclamation policy or document why it remains deferred with measurable risk.
-- [ ] Delete replacement-facing lease/pin naming that is no longer structurally accurate.
-- [ ] Add focused claim registry/page-build/texture commit readiness tests.
-- [ ] Run `npm run check`, `npm run lint`, focused texture residency tests, and all-domain harness.
+- [x] Audit `OpenWorldTextureClaimRegistry` owner release, page reservation, and snapshot fields.
+- [x] Audit renderer texture binding readiness for ownerless or reclaimed pages.
+- [x] Define ownerless page lifecycle states and diagnostics fields.
+- [x] Implement explicit reclamation policy or document why it remains deferred with measurable risk.
+- [x] Delete replacement-facing lease/pin naming that is no longer structurally accurate.
+- [x] Add focused claim registry/page-build/texture commit readiness tests.
+- [x] Run `npm run check`, `npm run lint`, focused texture residency tests, and all-domain harness.
 
 Decisions and course corrections:
 
-- Pending.
+- Audit result: `OpenWorldTextureClaimRegistry.releaseTextureOwner(...)` is already cheap and idempotent. It removes owner binding claims and refreshes entry/page reclaimable state; it does not delete entries, delete pages, repack, rebuild, or mutate renderer state.
+- Defined the ownerless lifecycle currently implemented by the replacement texture residency model:
+  - Claimed entries/pages: at least one current owner still references the entry, and page state remains `planned`, `building`, or `resident`.
+  - Ownerless retained planned pages: `state: "reclaimable"` with `ownerlessRetainedState: "planned"`; no renderer texture is implied.
+  - Ownerless renderer-resident retained pages: `state: "reclaimable"` with `ownerlessRetainedState: "resident"`; the renderer texture may still exist as cache, but no current owner is implied.
+  - In-flight rebuild dependency: `state: "building"` with a reservation token; release does not cancel the worker directly, and settlement/currentness decides whether the page returns to reclaimable retained state.
+  - Renderer-removal pending and removed: not implemented as a residency policy in Phase 41. The texture commit contract and renderer applier already support `pageRemovals`/`removedTextureRefIds`, but no pressure or eviction policy currently decides when to emit those commits for ownerless pages.
+- Added direct diagnostics to the claim registry and open-world diagnostics: `ownerlessEntryCount`, `ownerlessPageCountByRetainedState`, `textureResidency.ownerlessEntries`, and `textureResidency.ownerlessPages`. BrowserDisplay now surfaces total ownerless pages in the texture status row.
+- Binding readiness remains honest under the retained-cache policy: release does not emit resident readiness for unowned bindings, and page build settlement after release marks the page reclaimable with retained resident state. Actual renderer removal remains explicit and would need a future texture commit with page removals.
+- Deliberate deferral: explicit page reclamation/removal is deferred until there is a measured memory-pressure or eviction policy. Adding eager reclamation now would either hide renderer mutation inside owner release or invent unmeasured churn, both of which contradict the worksheet owner-claim model.
+- Lease/pin audit: no replacement texture-residency code uses lease/pin terminology. Remaining `textures/leases.ts` and renderer pin wording are outside this replacement owner-claim contract and refer to older shared texture/renderer resource concepts, so Phase 41 did not churn them.
+- Verification: `npm run check`, `npm run lint`, focused `npm run test:ts -- --run src/lib/systems/open-world-streaming/texture-residency/claims/texture-claim-registry.test.ts src/lib/systems/open-world-streaming/texture-residency/page-build/texture-page-build-task-stream.test.ts src/lib/systems/open-world-streaming/texture-residency/page-build/page-build.test.ts src/lib/systems/open-world-streaming/texture-residency/commits/texture-commit-applier.test.ts src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts`, and `npm run harness:browser -- --layer-distance 1 --timeout-ms 60000 --output /tmp/holtburger-phase41-all-domain-r1.json`. Harness settled with 45 requested/completed static tasks, 45 applied scene commits, 149 resident pages, 0 reclaimable pages, 0 ownerless entries/pages, 0 in-flight page builds, and zero material readiness issues.
 
 ### Phase 42: Source-Tree Ownership Cleanup
 

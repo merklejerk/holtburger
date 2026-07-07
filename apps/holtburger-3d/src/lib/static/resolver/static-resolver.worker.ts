@@ -4,6 +4,7 @@ import type { PreparedAssetReader } from "../../assets/contracts";
 import type {
 	StaticResolver,
 	StaticLandblockSceneLodResolution,
+	StaticLandblockSceneLodSourceProjectionEvent,
 	StaticLandblockSceneLodSourceRequest,
 	StaticLandblockSceneLodSourceResolver,
 	StaticResolverJob,
@@ -56,6 +57,21 @@ class StaticResolverRouter
 		request: StaticLandblockSceneLodSourceRequest,
 	): Promise<StaticLandblockSceneLodResolution> {
 		return this.#landblockSceneLodSourceResolver.resolveSource(request);
+	}
+
+	resolveProjectedSources(
+		request: StaticLandblockSceneLodSourceRequest,
+		onProjection: (
+			event: StaticLandblockSceneLodSourceProjectionEvent,
+		) => void,
+	): Promise<void> {
+		if (!this.#landblockSceneLodSourceResolver.resolveProjectedSources) {
+			throw new Error("Landblock scene LoD source resolver cannot stream.");
+		}
+		return this.#landblockSceneLodSourceResolver.resolveProjectedSources(
+			request,
+			onProjection,
+		);
 	}
 }
 

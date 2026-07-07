@@ -18,11 +18,31 @@ export function installStaticBakeWorkerHandler(
 				(event) => context.report({ event, kind: "trace" }),
 				() => baker.bake(input),
 			);
+			const transfer = collectStaticBakeJobResultTransfers(result);
+			context.report({
+				completedAtEpochMs: Date.now(),
+				drawUnitCount: result.drawUnits.length,
+				kind: "result-ready",
+				objectVisualResourceCount:
+					result.objectVisualInstallSet.visualResources.length,
+				transferByteLength: sumTransferByteLength(transfer),
+				transferCount: transfer.length,
+			});
 			return {
 				output: result,
-				transfer: collectStaticBakeJobResultTransfers(result),
+				transfer,
 			};
 		},
 		port,
 	});
+}
+
+function sumTransferByteLength(transfers: readonly Transferable[]): number {
+	let total = 0;
+	for (const transfer of transfers) {
+		if (transfer instanceof ArrayBuffer) {
+			total += transfer.byteLength;
+		}
+	}
+	return total;
 }

@@ -222,92 +222,98 @@ async function buildBucketTextureCommit(options: {
 
 	timing.measureSync("texture-page-settlement", () => {
 		for (const [packedPageId, rects] of rectsByPageId) {
-			const page = packedPageById.get(packedPageId);
-			if (!page) {
-				throw new Error(
-					`Packed page ${packedPageId} is missing pixel payload.`,
-				);
-			}
-			const entryIds = rects.map(
-				(rect) => rect.entryKey as OpenWorldTextureEntryId,
-			);
-			const virtualPage = options.textureClaims.createPage({
-				bucketKey: options.bucketKey,
-				entryIds,
-			});
-			const reservationToken = options.textureClaims.reservePageBuild(
-				virtualPage.id,
-			);
-			const textureRefId = `${virtualPage.id}:texture`;
-			const pageBindingPlacements = rects.flatMap((rect) => {
-				const entry = sourceByEntryId.get(
-					rect.entryKey as OpenWorldTextureEntryId,
-				);
-				if (!entry) {
-					throw new Error(
-						`Packed rect referenced unknown entry ${rect.entryKey}.`,
-					);
-				}
-				return entry.bindingIds.flatMap((bindingId) => {
-					const intent = intentByBindingId.get(bindingId);
-					if (!intent) {
-						return [];
+			timing.measureSync(
+				"texture-page-settlement-page",
+				() => {
+					const page = packedPageById.get(packedPageId);
+					if (!page) {
+						throw new Error(
+							`Packed page ${packedPageId} is missing pixel payload.`,
+						);
 					}
-					const placement: TexturePlacement<TexturePlacementItemId> = {
-						height: rect.rect[3],
-						itemId: intent.itemId,
-						ownerIds: [],
-						pageClass: intent.pageClass,
-						pageId: virtualPage.id,
-						purpose: intent.purpose,
-						rect: rect.rect,
-						textureKey: intent.textureKey,
-						textureRefId,
-						width: rect.rect[2],
-					};
-					return {
-						bindingId,
-						placement,
-					};
-				});
-			});
-			const settlement = settleOpenWorldTexturePageBuildResult(
-				options.textureClaims,
-				{
-					bucketKey: options.bucketKey,
-					jobId: `open-world-object-visual:${options.bucketKey}:${packedPageId}`,
-					kind: "page-update",
-					page: {
-						anisotropy: samplerPolicy.anisotropy,
-						filteringMode: samplerPolicy.filteringMode,
-						format: page.format,
-						height: page.height,
-						mipmapsGenerated: samplerPolicy.generateMipmaps,
-						pixels: page.pixels,
-						sampleClass: pagePolicy.sampleClass,
-						samplerPolicyKey: samplerPolicy.policyKey,
-						textureRefId,
-						width: page.width,
-						wrapS: "clamp-to-edge",
-						wrapT: "clamp-to-edge",
-					},
-					pageId: virtualPage.id,
-					placements: pageBindingPlacements.map((placement) => ({
-						bindingId: placement.bindingId,
-						rect: placement.placement.rect,
-					})),
-					reservationToken,
+					const entryIds = rects.map(
+						(rect) => rect.entryKey as OpenWorldTextureEntryId,
+					);
+					const virtualPage = options.textureClaims.createPage({
+						bucketKey: options.bucketKey,
+						entryIds,
+					});
+					const reservationToken = options.textureClaims.reservePageBuild(
+						virtualPage.id,
+					);
+					const textureRefId = `${virtualPage.id}:texture`;
+					const pageBindingPlacements = rects.flatMap((rect) => {
+						const entry = sourceByEntryId.get(
+							rect.entryKey as OpenWorldTextureEntryId,
+						);
+						if (!entry) {
+							throw new Error(
+								`Packed rect referenced unknown entry ${rect.entryKey}.`,
+							);
+						}
+						return entry.bindingIds.flatMap((bindingId) => {
+							const intent = intentByBindingId.get(bindingId);
+							if (!intent) {
+								return [];
+							}
+							const placement: TexturePlacement<TexturePlacementItemId> = {
+								height: rect.rect[3],
+								itemId: intent.itemId,
+								ownerIds: [],
+								pageClass: intent.pageClass,
+								pageId: virtualPage.id,
+								purpose: intent.purpose,
+								rect: rect.rect,
+								textureKey: intent.textureKey,
+								textureRefId,
+								width: rect.rect[2],
+							};
+							return {
+								bindingId,
+								placement,
+							};
+						});
+					});
+					const settlement = settleOpenWorldTexturePageBuildResult(
+						options.textureClaims,
+						{
+							bucketKey: options.bucketKey,
+							jobId: `open-world-object-visual:${options.bucketKey}:${packedPageId}`,
+							kind: "page-update",
+							page: {
+								anisotropy: samplerPolicy.anisotropy,
+								filteringMode: samplerPolicy.filteringMode,
+								format: page.format,
+								height: page.height,
+								mipmapsGenerated: samplerPolicy.generateMipmaps,
+								pixels: page.pixels,
+								sampleClass: pagePolicy.sampleClass,
+								samplerPolicyKey: samplerPolicy.policyKey,
+								textureRefId,
+								width: page.width,
+								wrapS: "clamp-to-edge",
+								wrapT: "clamp-to-edge",
+							},
+							pageId: virtualPage.id,
+							placements: pageBindingPlacements.map((placement) => ({
+								bindingId: placement.bindingId,
+								rect: placement.placement.rect,
+							})),
+							reservationToken,
+						},
+					);
+					if (settlement.kind === "stale") {
+						throw new Error(
+							`Object visual page build unexpectedly became stale for ${virtualPage.id}.`,
+						);
+					}
+					if (settlement.commit) {
+						textureCommits.push(settlement.commit);
+					}
+					bindingPlacements.push(...pageBindingPlacements);
 				},
+				rects.length,
 			);
-			if (settlement.kind === "stale") {
-				throw new Error(
-					`Object visual page build unexpectedly became stale for ${virtualPage.id}.`,
-				);
-			}
-			if (settlement.commit) {
-				textureCommits.push(settlement.commit);
-			}
-			bindingPlacements.push(...pageBindingPlacements);
 		}
 	});
 
@@ -339,6 +345,7 @@ class TexturePlacementStageTimer {
 	measureSync<T>(
 		stage: OpenWorldStreamingStaticTaskStageTiming["stage"],
 		createValue: () => T,
+		itemCount?: number,
 	): T {
 		const startedAtMs = nowMs();
 		try {
@@ -346,6 +353,7 @@ class TexturePlacementStageTimer {
 		} finally {
 			this.#timings.push({
 				durationMs: nowMs() - startedAtMs,
+				...(itemCount === undefined ? {} : { itemCount }),
 				stage,
 			});
 		}

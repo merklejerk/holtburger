@@ -138,17 +138,21 @@ This tree is a policy boundary, not just a folder name. New materialization conc
 - Default to **migrate direct contracts, shim legacy** for every replacement boundary. When a consumer is touched, first try to move it to the replacement-native contract. Add a shim only after identifying the blocked legacy consumer and why immediate migration would create more churn than value.
 - Migrate durable consumers to direct replacement contracts as early as practical.
 - Add shims only on the legacy side, harness side, or UI migration edge when a consumer cannot move yet.
+- Treat adapters and shims as different tools. An adapter crosses a durable external boundary while preserving the replacement model; a shim preserves an old consumer shape and is debt by definition.
 - Treat shims as temporary compatibility debt, not as neutral adapters.
 - Do not let shims define replacement naming, field layout, timing assumptions, diagnostics categories, tests, or source-tree placement.
 - Treat legacy-shaped diagnostics, benchmark summaries, UI panels, and tests as consumers to migrate, break, or shim at the edge. They are not evidence that the replacement core should preserve old categories.
 - Apply this policy to every contract surface: runtime composition, diagnostics, benchmark summaries, texture residency, source resolution, worker DTOs, renderer apply ports, scene query publication, UI panels, harness scenarios, and tests.
 - Prefer breaking and updating a legacy-shaped consumer over preserving a dishonest compatibility projection in the replacement pipeline.
 - Prefer a visibly incomplete or temporarily broken legacy shim over a compatibility layer that teaches the replacement system old concepts.
+- A shim may be lossy, partial, or ugly if that keeps the replacement contract honest. A direct replacement contract may not become lossy, partial, or legacy-shaped just to keep an old report, test, panel, or DTO alive.
 - If a phase introduces a shim, record the owning consumer, reason, deletion trigger, and target cleanup phase in that phase's decisions.
 - If a consumer is meant to survive cutover, it must be migrated to the direct replacement contract before Phase 16 begins.
 - Adapters may survive cutover only when they isolate a durable external boundary such as host assets, workers, renderer mutation, diagnostics export, or harness composition.
-- Diagnostics follow the same rule as every other contract: replacement diagnostics are direct; legacy diagnostic snapshots are shims.
+- Diagnostics follow the same rule as every other contract: replacement diagnostics are direct; legacy diagnostic snapshots are shims. Diagnostic compatibility is never a reason to move old categories into replacement internals.
 - Each steering checkpoint must dry-run the remaining phases up to the next steering checkpoint and explicitly classify touched consumers as direct migration, legacy-edge shim, deletion, or durable adapter. If the answer is not clear, pause the phase before adding compatibility code.
+- Do not use legacy report parity as evidence that the replacement contract is correct. A replacement diagnostic is correct when it explains the replacement model's actual ownership, scheduling, transfer, commit, and readiness behavior.
+- If a legacy diagnostic report, benchmark summary, panel, or test becomes incomplete after a direct contract migration, leave that incompleteness at the legacy edge until the consumer is migrated or deleted. Do not backfill compatibility fields into replacement internals to make the old output look healthy.
 
 Universal contract migration rule:
 
@@ -159,6 +163,7 @@ Universal contract migration rule:
 - Let edge shims be partial, awkward, or temporarily broken when the alternative is making replacement contracts dishonest.
 - Apply the rule to diagnostics with the same strictness as runtime, renderer, texture, scene-query, harness, and UI contracts. Diagnostics are not an exception where legacy shape compatibility may re-enter replacement internals.
 - When the direct replacement contract breaks a legacy consumer, prefer fixing, deleting, or edge-shimming that consumer over adding a compatibility field to the replacement core.
+- When adding diagnostics, first name the behavior the replacement system needs to prove. Then migrate or shim consumers around that behavior. Do not start from a legacy output field and work backward.
 - During implementation, a phase is not complete until every touched consumer has been classified as direct migration, deletion, legacy-edge shim, or durable adapter.
 - During cleanup, every shim is guilty until deleted. Adapters may survive only when their boundary remains real after the old pipeline is gone.
 
@@ -168,6 +173,12 @@ Boundary decision order:
 2. **Delete.** If the consumer only preserves legacy architecture, remove it instead of translating it.
 3. **Shim at the edge.** If immediate migration is too disruptive, add a named shim at the legacy, harness, UI migration, or runtime-adapter edge.
 4. **Keep as durable adapter.** Only keep adapter code when it isolates an external boundary the replacement system will still need after cutover.
+
+Adapter versus shim test:
+
+- **Adapter:** "This boundary still exists after hard cutover, and the translation does not preserve retired concepts." Examples: host asset access, worker message transport, renderer mutation ports, diagnostics export plumbing, and harness composition.
+- **Shim:** "This exists because an old consumer still expects an old shape." Examples: legacy runtime snapshots, old diagnostic categories, benchmark summaries that mirror retired fields, UI panels that assume static coordinator timing, and tests that preserve old orchestration contracts.
+- If a module both adapts a durable boundary and preserves an old consumer shape, split the durable adapter from the temporary shim so Phase 16 can delete the shim without damaging the boundary.
 
 Before adding a shim, record:
 
@@ -1262,6 +1273,8 @@ Deliverables:
 - Start only after Phase 13C is complete.
 - Recover the Phase 13C readiness regression without returning to all-layer source result delivery.
 - Reuse landblock scene LoD source loading across replacement domain requests while projecting and delivering terrain, object, and env-cell results independently.
+- Treat source reuse as a direct replacement composition contract: runners ask for the layer result they need, cache/coalescing may reuse broader source work internally, and only edge consumers may receive compatibility projections.
+- Let replacement source diagnostics change shape to describe the new model honestly. Do not preserve legacy resolver diagnostics or harness summary fields inside replacement internals.
 - Investigate env-cell source projection and texture-intent planning as the next browser-facing bottlenecks.
 - Keep bake work on worker boundaries and avoid main-thread planner timer-yield loops unless measured evidence shows they reduce browser long tasks without unacceptable readiness cost.
 - Keep the universal contract migration rule active: migrate direct contracts first, shim legacy only at an edge, and prefer an incomplete legacy projection over dishonest replacement diagnostics.
@@ -1271,6 +1284,8 @@ Acceptance criteria:
 
 - `da55` all-domain replacement run preserves or improves Phase 13C max long-task duration and max frame delta while materially reducing the readiness regression.
 - Replacement source delivery remains domain-specific; no runner receives all-layer source payloads merely for compatibility or cache convenience.
+- Replacement diagnostics report source reuse, runner-specific projection, and actual source submissions in replacement-native terms. Legacy resolver diagnostic parity is not an acceptance target.
+- Any legacy-shaped harness or UI summary that cannot migrate directly is named as an edge shim and may be incomplete rather than forcing replacement diagnostics to mimic old output.
 - Env-cell source projection and env-cell texture-intent planning are either split, moved off the main thread, or explicitly routed into a smaller follow-up with measured replacement-native evidence.
 - No naive per-material timer-yield loop is added to planner internals without measured improvement in browser long-task metrics.
 - Any touched consumer is migrated directly, deleted, explicitly edge-shimmed, or classified as a durable adapter before the phase is complete.
@@ -1278,40 +1293,438 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Inspect `LandblockSceneLodSourceResolver` and worker request flow for reusable scene payload loading with domain-specific projection.
+- [x] Inspect `LandblockSceneLodSourceResolver` and worker request flow for reusable scene payload loading with domain-specific projection.
 - [ ] Add replacement-owned source projection/cache behavior that avoids duplicate scene asset resolution while preserving layer-specific worker results.
-- [ ] Investigate env-cell texture-intent planner CPU shape without adding naive timer-yield loops.
-- [ ] Add or update replacement-native diagnostics needed to prove source reuse versus result delivery.
-- [ ] Classify every touched consumer as direct migration, deletion, legacy-edge shim, or durable adapter.
-- [ ] Run focused tests for touched replacement/source systems.
-- [ ] Run replacement `da55` generated-scenery, env-cell, and all-domain harness cases.
-- [ ] Run app checks.
-- [ ] Update cleanup targets.
+- [x] Investigate env-cell texture-intent planner CPU shape without adding naive timer-yield loops.
+- [x] Add or update replacement-native diagnostics needed to prove source reuse versus result delivery.
+- [x] Migrate touched diagnostics, harness, and tests directly to the replacement source-resolution contract before adding any compatibility projection.
+- [x] If a legacy diagnostics or harness shim is unavoidable, record its blocked consumer, dishonest-field risk, deletion trigger, and cleanup phase.
+- [x] Classify every touched consumer as direct migration, deletion, legacy-edge shim, or durable adapter.
+- [x] Run focused tests for touched replacement/source systems.
+- [x] Run replacement `da55` generated-scenery, env-cell, and all-domain harness cases.
+- [x] Run app checks.
+- [x] Update cleanup targets.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 13D will use the universal contract migration rule as a hard gate, not as guidance text. Source reuse may coalesce broad landblock scene work internally, but the replacement runner contract remains domain-specific result delivery.
+- Diagnostics course correction: source-resolution diagnostics are allowed to break legacy resolver/harness expectations. The replacement contract should explain actual submitted source work, runner reuse, and projected runner results; any old-shape summary belongs at the harness/UI/runtime-adapter edge and must be deletion-targeted.
+- Consumer classification target for the phase: source cache/controller/tests are direct replacement consumers; resolver worker and prepared asset boundaries are durable adapters; browser runtime/harness legacy reports remain edge shims only if they cannot migrate directly in Phase 13D.
+- Phase 13D uncovered a real source-reuse tradeoff rather than a clean fix. Cache-level coalescing can recover readiness or preserve frame smoothness, but the tested variants did not satisfy both acceptance gates at once.
+- Rejected experiment: all-layer internal coalescing reused one broad source result per landblock and projected runner results afterward. It recovered all-domain readiness to about 23.4 s and reported `sourceResolution` as 45 projected results, 36 reused requests, and 0 direct requests, but regressed all-domain max long task/frame delta to about 587 ms / 600 ms versus Phase 13C's 527 ms / 543 ms. The likely cause is terrain waiting on and receiving work shaped by env-cell/all-layer source preparation again, even though runners receive projected results.
+- Rejected experiment: terrain-direct plus non-terrain coalescing preserved all-domain max long task/frame delta at about 518 ms / 531 ms, but readiness only improved from Phase 13C's 28.6 s to about 27.7 s. That is not a material readiness recovery, and it regressed generated/env-cell focused readiness because those two-domain cases had no reusable non-terrain peer.
+- Rejected experiment: outdoor-source coalescing with env-cells isolated improved all-domain readiness to about 25.6 s and produced the intended direct diagnostics shape, 9 direct terrain/env source submissions plus 36 projected non-env runner results and 27 reused runner requests. It still missed the frame gate at about 544 ms max long task and 561 ms max frame delta, so it does not satisfy Phase 13D acceptance.
+- Current evidence points away from more controller-cache policy tuning. The next remediation should move source reuse/projection to a boundary that can reuse landblock scene source loading while emitting runner/domain-sized worker results, instead of choosing between duplicate resolver jobs and broad browser-facing source assimilation.
+- Env-cell source projection remains the dominant unresolved shape issue. Env-cell focused runs stayed direct under the accepted diagnostic policy, but center env-cell source resolution still reached about 5.0 s wall time in the rejected variants. Do not hide that behind legacy diagnostics or timer-yield planner loops.
+- Verification while investigating Phase 13D: `npm run check`, `npm run lint:ts`, focused `npm run test:ts -- src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts src/lib/systems/open-world-streaming/static-layers/terrain/terrain-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/outdoor-objects/outdoor-object-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/env-cells/env-cell-artifact-runner.test.ts`, and the three `da55` harness matrices described above. Phase 13D is not complete because the source-reuse implementation did not satisfy its all-domain readiness plus frame acceptance criteria.
+
+### Phase 13E: Worker-Side Source Projection Boundary Resteer
+
+Deliverables:
+
+- Start only after the Phase 13D cache-level variants are either reverted or intentionally narrowed.
+- Move source reuse/projection closer to the resolver worker or prepared landblock scene source boundary so repeated domain jobs can share source loading without returning broad all-layer payloads to the browser composition cache.
+- Keep replacement runner contracts domain-specific and direct. If a legacy harness/UI summary cannot consume the new source diagnostics, shim only at that edge.
+- Preserve or improve Phase 13C all-domain max long task and max frame delta while materially reducing the Phase 13C readiness regression.
+- Use replacement-native diagnostics to distinguish actual source submissions, shared source loads, worker-side projections, browser-delivered result size, and runner reuse.
+- Decide whether env-cell source projection can be split from env-cell texture-intent planning in this phase or whether it needs its own narrower remediation phase before Phase 14.
+- Dry-run Phase 14 through the next steering phase after the worker-side source boundary is proven.
+
+Acceptance criteria:
+
+- `da55` all-domain replacement run improves Phase 13C readiness materially and keeps max long task/frame delta at or below Phase 13C's 527 ms / 543 ms baseline.
+- No replacement runner receives all-layer source payloads for cache convenience.
+- Browser-delivered source results are domain-sized or otherwise measured small enough to avoid the broad-result assimilation spike seen in Phase 13D.
+- Source diagnostics are replacement-native and do not clone legacy resolver diagnostics. Any legacy-shaped projection is named as an edge shim with a deletion trigger.
+- Env-cell source and texture-intent bottlenecks are either remediated or explicitly scheduled before Phase 14 with measured evidence.
+- `npm run check`, `npm run lint:ts`, focused tests, and the `da55` generated/env-cell/all-domain harness matrix pass.
+
+Task checklist:
+
+- [x] Revert or narrow unaccepted Phase 13D cache-level source coalescing before building the worker-side boundary.
+- [x] Inspect static resolver worker request lifetime and prepared landblock scene asset ownership for a reusable source-load cache that does not reuse broad result payloads.
+- [x] Add worker-side or resolver-side source projection diagnostics: source loads, projected layer results, browser result sizes, and projection timings.
+- [x] Implement shared source loading with domain-specific worker responses.
+- [x] Verify runner-facing results stay domain-specific with focused controller/source tests.
+- [x] Run replacement `da55` generated-scenery, env-cell, and all-domain harness cases.
+- [ ] Dry-run Phase 14 through the next steering checkpoint and update consumer classifications.
+
+Decisions and course corrections:
+
+- Phase 13E implemented a worker/resolver-side projection boundary that streams one domain-sized projected result per runner layer instead of returning broad all-layer source payloads to the browser composition cache. This preserves the direct runner contract while allowing one shared source stream per landblock.
+- Added replacement-native source-resolution diagnostics for direct source requests, source stream requests, projected runner results, runner reuse, projected static recipe count, projected dynamic placement/recipe counts, total projection time, and max projection time. This intentionally does not clone legacy `StaticSourceResolutionDiagnostics`.
+- Correctness fix: projected source waiters now reject on superseded interest, stream failure, or stream completion without the expected runner result. Multiple waiters for the same projected key are preserved instead of overwritten.
+- Consumer classification: controller source cache and source-resolution diagnostics are direct replacement contracts; static resolver worker transport is a durable worker adapter; focused tests were migrated directly to the replacement projection contract; no new legacy-edge shim was added.
+- Verification passed before harness: `npm run check`, `npm run lint:ts`, focused `npm run test:ts -- src/lib/static/resolver/worker-client.test.ts src/lib/static/resolver/landblock-scene-lod-source-resolver.test.ts src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts src/lib/systems/open-world-streaming/static-layers/terrain/terrain-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/outdoor-objects/outdoor-object-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/env-cells/env-cell-artifact-runner.test.ts`.
+- Phase 13E harness evidence: `da55` terrain plus generated scenery was ready in about 12.2 s with 14 long tasks, 268 ms max long task, 281 ms max frame delta, 9 source stream requests, 18 projected runner results, 9 reused runner requests, 18 projected recipes, 44 projected dynamic placements, and 44 projected dynamic recipes.
+- Phase 13E harness evidence: `da55` terrain plus env-cells was ready in about 10.4 s with 4 long tasks, 576 ms max long task, 588 ms max frame delta, 9 source stream requests, 18 projected runner results, 9 reused runner requests, 18 projected recipes, and no projected dynamic placements or recipes.
+- Phase 13E harness evidence: `da55` all domains was ready in about 20.6 s with 18 long tasks, 579 ms max long task, 591 ms max frame delta, 9 source stream requests, 45 projected runner results, 36 reused runner requests, 45 projected recipes, 44 projected dynamic placements, and 44 projected dynamic recipes.
+- Phase 13E is not complete and must not be committed yet. It materially improves Phase 13C all-domain readiness from about 28.6 s to about 20.6 s, but it fails the Phase 13C frame gate of 527 ms max long task and 543 ms max frame delta. The env-cell-focused case also regresses the Phase 13C env-cell max long task/frame from about 528 ms / 546 ms to about 576 ms / 588 ms.
+- Course correction: the next remediation should keep the direct worker-side projection contract, but split or budget the env-cell-heavy browser-facing assimilation/apply path before Phase 14. More legacy-shaped diagnostics would be a trap here; the current native source diagnostics already show the source stream count and projected payload mix.
+
+### Phase 13F: Env-Cell Projection And Apply Frame-Gate Resteer
+
+Deliverables:
+
+- Start only after Phase 13E has documented the failed frame gate and left the worker-side projection boundary uncommitted.
+- Dry-run Phase 14 through the next steering checkpoint before adding more compatibility code, and classify touched consumers as direct migration, deletion, legacy-edge shim, or durable adapter.
+- Identify whether the remaining >570 ms browser stalls come from env-cell projected result assimilation, env-cell texture-intent planning, env-cell scene commit apply, renderer env-cell install, or a combination of those boundaries.
+- Split or frame-budget the narrowest replacement-owned env-cell-heavy browser boundary that preserves domain-specific runner results and does not recreate broad source payloads.
+- Keep source diagnostics direct and native. If a harness or UI summary cannot consume the richer source-resolution contract, shim only at that edge and record the deletion trigger.
+- Decide whether Phase 14 can proceed after this phase or whether another measured pre-cutover remediation is required.
+
+Acceptance criteria:
+
+- `da55` all-domain replacement run keeps the Phase 13E readiness recovery materially better than Phase 13C and brings max long task/frame delta back at or below Phase 13C's 527 ms / 543 ms gate.
+- `da55` terrain plus env-cells does not regress the Phase 13C env-cell frame gate after the remediation.
+- No replacement runner receives all-layer source payloads for cache convenience.
+- Browser-delivered source results remain domain-sized and native source diagnostics continue to report actual source streams, projected runner results, runner reuse, projected payload counts, and projection timing.
+- Any touched consumer is migrated directly, deleted, explicitly edge-shimmed, or classified as a durable adapter before the phase is complete.
+- `npm run check`, `npm run lint:ts`, focused tests, and the `da55` generated/env-cell/all-domain harness matrix pass.
+
+Task checklist:
+
+- [x] Dry-run Phase 14 through the next steering checkpoint and record consumer classifications before implementation.
+- [x] Inspect env-cell projected-result assimilation, texture-intent planning, scene commit apply, and renderer install timings with replacement-native evidence.
+- [x] Implement the smallest direct replacement remediation for the measured env-cell-heavy browser boundary.
+- [x] Preserve the worker-side projection contract and domain-specific runner result delivery.
+- [x] Update source/static-task diagnostics only if the new evidence needs direct replacement fields; do not clone legacy coordinator output.
+- [x] Run focused tests for touched resolver, controller, env-cell runner, texture, or renderer boundaries.
+- [x] Run replacement `da55` generated-scenery, env-cell, and all-domain harness cases.
+- [ ] Update Phase 14 and Phase 15 if the dry run exposes new cutover or deletion work.
+
+Decisions and course corrections:
+
+- Phase 13F dry-run of Phase 14 found the known cutover consumers: `BrowserDisplay.svelte`, `BrowserPipelineHarness.svelte`, `createBrowserRuntime(...)`, `OpenWorldStreamingClientRuntimeAdapter`, legacy `RuntimeDiagnosticsReport` projections, and legacy runtime/static/texture tests. Durable consumers should migrate directly to replacement diagnostics and overview contracts. The outer `ClientRuntime` adapter remains the only named legacy-edge shim pressure point; source-resolution and env-cell diagnostics stay direct replacement contracts.
+- Native evidence from Phase 13E showed env-cell commit apply and renderer install were not the primary >570 ms source. Env-cell apply stayed around 20-25 ms while `create-texture-intents` reported 576-580 ms on heavy env-cell tasks. Final deferred dense renderer publication is also currently invisible to the open-world readiness gate, but it is not the first all-domain max-frame offender.
+- Implemented an optional direct planning-budget hook for structured-interior and static-object texture-intent planners, enabled only by replacement open-world runners. Legacy callers keep existing behavior unless they opt in. This is a reusable transform scheduling hook, not a legacy shim.
+- Verification passed before harness: `npm run check`, `npm run lint:ts`, and focused `npm run test:ts -- src/lib/static/env-cells/bake/env-cell-system-baker.test.ts src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/systems/open-world-streaming/static-layers/env-cells/env-cell-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/outdoor-objects/outdoor-object-artifact-runner.test.ts src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts`.
+- Phase 13F harness evidence: `da55` terrain plus generated scenery was ready in about 11.7 s with 13 long tasks, 266 ms max long task, 280 ms max frame delta, 9 source stream requests, 18 projected runner results, 9 reused runner requests, and 99 frame-budget yields.
+- Phase 13F harness evidence: `da55` terrain plus env-cells was ready in about 10.5 s with 4 long tasks, 526 ms max long task, 539 ms max frame delta, 9 source stream requests, 18 projected runner results, 9 reused runner requests, and 101 frame-budget yields. This no longer regresses the Phase 13C env-cell frame gate.
+- Phase 13F harness evidence: `da55` all domains was ready in about 21.9 s with 16 long tasks, 578 ms max long task, 590 ms max frame delta, 9 source stream requests, 45 projected runner results, 36 reused runner requests, and 246 frame-budget yields.
+- Phase 13F is not complete and must not be committed yet. It fixes the env-cell-only acceptance gate, but all-domain still fails Phase 13C's 527 ms / 543 ms frame gate.
+- Course correction: the optional planner-budget hook yielded after planner checkpoints, but the heaviest all-domain env-cell `create-texture-intents` work still measured about 592 ms because the expensive work occurs inside `planStructuredInteriorCellMaterials(...)` before the new checkpoints. The next remediation must decompose or cache structured-interior material planning itself, not add more edge yields around it.
+
+### Phase 13G: Structured-Interior Material Planning Decomposition
+
+Deliverables:
+
+- Start only after Phase 13F has documented the failed all-domain frame gate and left the planning-budget hook uncommitted.
+- Inspect `planStructuredInteriorCellMaterials(...)` and its inputs to identify the smallest domain-native decomposition point for heavy env-cell material planning.
+- Split, cache, or move the structured-interior material planning work so replacement env-cell texture-intent planning can yield before any single browser task exceeds the Phase 13C frame gate.
+- Keep planner contracts direct and reusable. Do not introduce diagnostics or DTOs shaped like the legacy static coordinator.
+- Re-evaluate deferred dense renderer publication readiness after the structured-interior planner spike is fixed; schedule a separate publication-readiness phase only if measured evidence still shows post-ready renderer flush stalls.
+
+Acceptance criteria:
+
+- `da55` all-domain replacement run keeps the Phase 13E readiness recovery materially better than Phase 13C and brings max long task/frame delta back at or below Phase 13C's 527 ms / 543 ms gate.
+- `da55` terrain plus env-cells remains at or below Phase 13C's env-cell frame gate.
+- No replacement runner receives all-layer source payloads for cache convenience.
+- Browser-delivered source results remain domain-sized and native source/static-task diagnostics prove the new planner decomposition.
+- Any touched consumer is migrated directly, deleted, explicitly edge-shimmed, or classified as a durable adapter before the phase is complete.
+- `npm run check`, `npm run lint:ts`, focused tests, and the `da55` generated/env-cell/all-domain harness matrix pass.
+
+Task checklist:
+
+- [x] Inspect structured-interior material planning internals and identify the heavy synchronous loop.
+- [x] Implement a direct replacement-friendly decomposition, cache, or worker boundary for structured-interior material planning.
+- [x] Preserve reusable transform behavior for legacy callers unless they opt into the new scheduling contract.
+- [x] Add focused tests for the decomposed planner behavior and open-world env-cell runner integration.
+- [x] Run replacement `da55` generated-scenery, env-cell, and all-domain harness cases.
+- [ ] Decide whether deferred dense renderer publication readiness needs a follow-up phase before Phase 14.
+
+Decisions and course corrections:
+
+- Phase 13G introduced a reusable `StructuredInteriorMaterialPlanner` context that precomputes payload-wide material lookup/detail-role state and caches object-visual material plans by material id. The existing synchronous `planStructuredInteriorCellMaterials(...)` remains available for legacy/reusable callers, while replacement texture-intent planning uses the budgeted planner path.
+- Consumer classification: structured-interior material planning remains a reusable transform; the replacement env-cell placement planner is a direct consumer of the budgeted contract; legacy callers keep the synchronous wrapper; no legacy-edge shim was added.
+- Verification passed before harness: `npm run check`, `npm run lint:ts`, and focused `npm run test:ts -- src/lib/static/env-cells/bake/env-cell-system-baker.test.ts src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/systems/open-world-streaming/static-layers/env-cells/env-cell-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/outdoor-objects/outdoor-object-artifact-runner.test.ts src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts`.
+- Phase 13G harness evidence: `da55` terrain plus generated scenery was ready in about 12.3 s with 15 long tasks, 294 ms max long task, 306 ms max frame delta, 9 source stream requests, 18 projected runner results, 9 reused runner requests, and 99 frame-budget yields.
+- Phase 13G harness evidence: `da55` terrain plus env-cells was ready in about 10.8 s with 4 long tasks, 591 ms max long task, 603 ms max frame delta, 9 source stream requests, 18 projected runner results, 9 reused runner requests, and 97 frame-budget yields. This regressed the Phase 13F env-cell frame result and fails the Phase 13C env-cell frame gate.
+- Phase 13G harness evidence: `da55` all domains was ready in about 21.4 s with 19 long tasks, 538 ms max long task, 550 ms max frame delta, 9 source stream requests, 45 projected runner results, 36 reused runner requests, and 241 frame-budget yields. This is close to, but still above, the Phase 13C all-domain 527 ms / 543 ms frame gate.
+- Phase 13G is not complete and must not be committed yet. The cached planner reduced the heavy structured-interior stage in the all-domain trace, but the env-cell-only trace still showed a heavy `create-texture-intents` stage around 602 ms on a single env-cell landblock.
+- Course correction: caching material classification by material id is useful but insufficient. The next remediation must split env-cell texture-intent creation below the per-landblock/per-env-cell task boundary, or move the remaining structured-interior intent expansion to a worker-owned/direct replacement boundary. More wrapper-level yields will not fix a single synchronous planner call that still runs for hundreds of milliseconds.
+
+### Phase 13H: Env-Cell Texture Intent Chunk Boundary
+
+Deliverables:
+
+- Start only after Phase 13G has documented the failed env-cell/all-domain frame gates and left the cached material planner uncommitted.
+- Split env-cell structured-interior texture-intent creation into smaller replacement-owned chunks, or move that intent expansion to a worker boundary that returns domain-native intent results.
+- Keep the reusable material planner cache if it remains beneficial, but do not treat it as the final remediation.
+- Preserve direct replacement source diagnostics and domain-sized source result delivery.
+- Decide after measured evidence whether deferred dense renderer publication readiness still needs its own follow-up before Phase 14.
+
+Acceptance criteria:
+
+- `da55` all-domain replacement run keeps the Phase 13E readiness recovery materially better than Phase 13C and brings max long task/frame delta back at or below Phase 13C's 527 ms / 543 ms gate.
+- `da55` terrain plus env-cells is at or below Phase 13C's env-cell frame gate.
+- No replacement runner receives all-layer source payloads for cache convenience.
+- Native static-task diagnostics show the remaining env-cell `create-texture-intents` chunks no longer produce a single hundreds-of-ms browser task.
+- Any touched consumer is migrated directly, deleted, explicitly edge-shimmed, or classified as a durable adapter before the phase is complete.
+- `npm run check`, `npm run lint:ts`, focused tests, and the `da55` generated/env-cell/all-domain harness matrix pass.
+
+Task checklist:
+
+- [x] Inspect env-cell texture-intent creation data dependencies enough to choose chunking versus worker ownership.
+- [x] Implement the chosen direct replacement chunk/worker boundary.
+- [x] Preserve the reusable material planner cache only if it still removes real repeated work.
+- [x] Add focused tests for chunk ordering, dedupe behavior, and replacement runner integration.
+- [x] Run replacement `da55` generated-scenery, env-cell, and all-domain harness cases.
+- [ ] Decide whether deferred dense renderer publication readiness needs a follow-up phase before Phase 14.
+
+Decisions and course corrections:
+
+- Phase 13H implemented a role-level material texture identity cache inside structured-interior texture-intent creation and yields before env-cell, surface, and identity-cache-miss boundaries. This keeps the direct replacement scheduling contract and does not add a legacy shim.
+- Consumer classification: structured-interior placement planning remains a reusable transform; replacement runners opt into cooperative scheduling; legacy callers may benefit from identity dedupe but do not depend on the replacement frame-budget contract; no legacy-edge shim was added.
+- Verification passed before harness: `npm run check`, `npm run lint:ts`, and focused `npm run test:ts -- src/lib/static/env-cells/bake/env-cell-system-baker.test.ts src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/systems/open-world-streaming/static-layers/env-cells/env-cell-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/outdoor-objects/outdoor-object-artifact-runner.test.ts src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts`.
+- Phase 13H harness evidence: `da55` terrain plus generated scenery was ready in about 11.9 s with 11 long tasks, 259 ms max long task, 271 ms max frame delta, 9 source stream requests, 18 projected runner results, 9 reused runner requests, and 99 frame-budget yields.
+- Phase 13H harness evidence: `da55` terrain plus env-cells was ready in about 10.7 s with 4 long tasks, 533 ms max long task, 545 ms max frame delta, 9 source stream requests, 18 projected runner results, 9 reused runner requests, and 97 frame-budget yields. This is very close to, but still above, the Phase 13C env-cell long-task gate.
+- Phase 13H harness evidence: `da55` all domains was ready in about 21.3 s with 15 long tasks, 548 ms max long task, 560 ms max frame delta, 9 source stream requests, 45 projected runner results, 36 reused runner requests, and 241 frame-budget yields. This still fails the Phase 13C all-domain 527 ms / 543 ms frame gate.
+- Phase 13H is not complete and must not be committed yet. Role-level identity caching improved generated-scenery and kept readiness recovered, but it did not eliminate the env-cell/all-domain long browser tasks.
+- Diagnostic gap: `create-texture-intents` stage timings are wall-clock durations and include cooperative yields, so they no longer prove whether a single browser task is hundreds of milliseconds. The harness long-task/frame gate remains authoritative, but the next remediation needs direct chunk/worker evidence instead of relying only on stage wall-clock.
+- Course correction: more main-thread wrapper yields and small caches are now low-confidence. The next remediation should either move structured-interior texture-intent expansion behind a worker-owned direct replacement boundary or introduce chunk diagnostics fine-grained enough to prove sub-task durations while making the planner actually resumable between chunks.
+
+### Phase 13I: Texture Intent Worker Boundary Or Resumable Chunk Resteer
+
+Deliverables:
+
+- Start only after Phase 13H has documented the failed env-cell/all-domain frame gates and left role-level identity caching uncommitted.
+- Choose between a worker-owned structured-interior texture-intent expansion boundary and a genuinely resumable main-thread chunker based on current code dependencies.
+- If using a worker boundary, keep worker messages domain-native and direct; do not return legacy coordinator DTOs or static source diagnostics.
+- If using resumable chunks, add native diagnostics that distinguish chunk count, max chunk CPU time, yielded chunk count, and final intent aggregation time.
+- Preserve domain-sized source result delivery and the source projection diagnostics from Phase 13E.
+- Decide after measured evidence whether deferred dense renderer publication readiness still needs its own follow-up before Phase 14.
+
+Acceptance criteria:
+
+- `da55` all-domain replacement run keeps the Phase 13E readiness recovery materially better than Phase 13C and brings max long task/frame delta back at or below Phase 13C's 527 ms / 543 ms gate.
+- `da55` terrain plus env-cells is at or below Phase 13C's env-cell frame gate.
+- No replacement runner receives all-layer source payloads for cache convenience.
+- Native diagnostics prove the new intent boundary with direct chunk or worker evidence, not legacy coordinator snapshots.
+- Any touched consumer is migrated directly, deleted, explicitly edge-shimmed, or classified as a durable adapter before the phase is complete.
+- `npm run check`, `npm run lint:ts`, focused tests, and the `da55` generated/env-cell/all-domain harness matrix pass.
+
+Task checklist:
+
+- [x] Inspect structured-interior intent dependencies to choose worker boundary versus resumable chunks.
+- [x] Implement the chosen direct replacement intent boundary.
+- [x] Add native chunk/worker diagnostics sufficient to prove no single planner chunk remains hundreds of milliseconds.
+- [x] Preserve source projection and domain-sized runner result contracts.
+- [x] Add focused tests for the new boundary and replacement runner integration.
+- [ ] Run replacement `da55` generated-scenery, env-cell, and all-domain harness cases.
+- [ ] Decide whether deferred dense renderer publication readiness needs a follow-up phase before Phase 14.
+
+Decisions and course corrections:
+
+- Phase 13I chose a genuinely resumable main-thread chunker over a worker boundary for the first attempt. A worker boundary would have to carry prepared asset access and palette fingerprinting through a new direct worker contract, while the current code could first prove chunk CPU with lower blast radius.
+- Added replacement-native `texture-intent-chunk` and `texture-intent-aggregation` stage timings with `itemCount`. These are direct static-task diagnostics, not legacy coordinator snapshots.
+- Phase 13I preserved source projection and domain-sized runner result contracts; no replacement runner receives all-layer source payloads.
+- Consumer classification: structured-interior placement planning remains a reusable transform; replacement env-cell runner consumes the direct chunk diagnostics through existing task timing; no legacy-edge shim was added.
+- Verification passed before harness: `npm run check`, `npm run lint:ts`, and focused `npm run test:ts -- src/lib/static/env-cells/bake/env-cell-system-baker.test.ts src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/systems/open-world-streaming/static-layers/env-cells/env-cell-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/outdoor-objects/outdoor-object-artifact-runner.test.ts src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts`.
+- Phase 13I harness evidence: `da55` terrain plus env-cells was ready in about 10.6 s with 5 long tasks, 517 ms max long task, 530 ms max frame delta, 9 source stream requests, 18 projected runner results, 9 reused runner requests, and 97 frame-budget yields. This satisfies the Phase 13C env-cell frame gate.
+- Phase 13I harness evidence: `da55` all domains was ready in about 21.1 s with 17 long tasks, 564 ms max long task, 577 ms max frame delta, 9 source stream requests, 45 projected runner results, 36 reused runner requests, and 241 frame-budget yields. This fails the Phase 13C all-domain 527 ms / 543 ms frame gate. The generated-scenery case was not rerun after this failure because the phase was already rejected.
+- Phase 13I is not complete and must not be committed yet. The direct chunk diagnostics show the new `texture-intent-chunk` entries are tiny, so texture-intent CPU is no longer the proven single-task culprit.
+- Course correction: all-domain max-frame failure now points toward env-cell bake output transfer/deserialization, heavy env-cell source/result assimilation, or another worker-result delivery boundary. Renderer apply and renderer frame handlers remain small in the failing trace. The next remediation should instrument and split the env-cell bake/source transfer boundary before adding more planner chunks.
+
+### Phase 13J: Env-Cell Worker Result Transfer Boundary
+
+Deliverables:
+
+- Start only after Phase 13I has documented that resumable texture-intent chunks satisfy the env-cell-focused gate but all-domain still fails.
+- Add direct replacement diagnostics that distinguish env-cell bake worker wait time, worker result transfer/deserialization, main-thread result assimilation, texture commit apply, and renderer publication work where practical.
+- Define those diagnostics from replacement behavior first: worker wait, transfer/deserialization, assimilation, apply, publication, readiness, and frame-budget impact. Do not preserve old static coordinator, texture manager, or harness summary categories in the replacement runner just to keep old output stable.
+- Decide whether the remaining all-domain max task comes from static bake worker output, resolver/source projection output, texture page-build output, or deferred dense renderer publication.
+- Split or move the measured worker-result delivery boundary without changing replacement runner contracts back to broad all-layer source payloads.
+- Preserve native source diagnostics, intent chunk diagnostics, and domain-sized runner result delivery.
+- If a legacy harness, panel, or snapshot cannot consume the new transfer-boundary diagnostics, add a named edge shim or let that report be visibly incomplete until Phase 14/16 migration deletes or rewrites it.
+- Decide after measured evidence whether deferred dense renderer publication readiness still needs its own follow-up before Phase 14.
+
+Acceptance criteria:
+
+- `da55` all-domain replacement run keeps the Phase 13E readiness recovery materially better than Phase 13C and brings max long task/frame delta back at or below Phase 13C's 527 ms / 543 ms gate.
+- `da55` terrain plus env-cells remains at or below Phase 13C's env-cell frame gate.
+- No replacement runner receives all-layer source payloads for cache convenience.
+- Native diagnostics prove the remaining worker-result/transfer boundary with direct replacement evidence, not legacy coordinator snapshots.
+- No legacy-shaped diagnostic field is added to replacement internals as a substitute for migrating or edge-shimming an old consumer.
+- Any touched consumer is migrated directly, deleted, explicitly edge-shimmed, or classified as a durable adapter before the phase is complete.
+- `npm run check`, `npm run lint:ts`, focused tests, and the `da55` generated/env-cell/all-domain harness matrix pass.
+
+Task checklist:
+
+- [x] Inspect static bake worker, resolver worker, and texture page-build worker response paths for transfer/deserialization blind spots.
+- [x] Add direct replacement diagnostics for the measured worker-result boundary.
+- [x] Classify every diagnostics consumer touched by the new worker-result evidence as direct migration, deletion, legacy-edge shim, or durable adapter before adding compatibility fields.
+- [ ] Implement the smallest split or moved boundary that removes the all-domain max task.
+- [x] Preserve source projection, intent chunk diagnostics, and domain-sized runner result contracts.
+- [x] Add focused tests for the new worker-result boundary and replacement runner integration.
+- [x] Run replacement `da55` generated-scenery, env-cell, and all-domain harness cases.
+- [ ] Decide whether deferred dense renderer publication readiness needs a follow-up phase before Phase 14.
+
+Decisions and course corrections:
+
+- Steering note: Phase 13J should treat diagnostics as a proof tool, not as a compatibility surface. If the direct transfer-boundary contract breaks old summaries, the correct first move is to migrate the surviving consumer or isolate a legacy-edge shim, not to teach the replacement runner old categories.
+- Phase 13J added a direct worker-boundary diagnostic event from the static bake worker immediately before result delivery, plus replacement-native `bake-worker-wait` and `bake-result-transfer` task stages consumed by terrain, outdoor-object, and env-cell runners. This is a durable worker-adapter diagnostic, not a legacy coordinator snapshot.
+- Consumer classification: static bake worker transport is a durable adapter; open-world static runners are direct replacement diagnostics consumers; runner tests and worker protocol tests were migrated directly; no legacy-edge shim was added.
+- Verification passed before harness: `npm run check`, `npm run lint:ts`, and focused `npm run test:ts -- src/lib/static/bake/worker-client.test.ts src/lib/systems/open-world-streaming/static-layers/env-cells/env-cell-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/outdoor-objects/outdoor-object-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/terrain/terrain-artifact-runner.test.ts`.
+- Phase 13J harness evidence: `da55` terrain plus generated scenery was ready in about 11.9 s request duration with 13 long tasks, 276 ms max long task, 290 ms max frame delta, 9 source stream requests, 18 projected runner results, and 9 reused runner requests. Max generated-scenery `bake-worker-wait` was about 989 ms, while max generated-scenery `bake-result-transfer` was about 14 ms.
+- Phase 13J harness evidence: `da55` terrain plus env-cells was ready in about 10.2 s request duration with 4 long tasks, 579 ms max long task, 591 ms max frame delta, 9 source stream requests, 18 projected runner results, and 9 reused runner requests. Max env-cell `bake-worker-wait` was about 1.59 s, but that is worker-side time; max env-cell `bake-result-transfer` was about 87 ms for the center landblock result.
+- Phase 13J harness evidence: `da55` all domains was ready in about 20.9 s request duration with 16 long tasks, 557 ms max long task, 569 ms max frame delta, 9 source stream requests, 45 projected runner results, and 36 reused runner requests. Max all-domain `bake-result-transfer` was about 80 ms and max renderer frame handler was about 42 ms.
+- Phase 13J is not complete and must not be committed yet. The direct worker-boundary diagnostics falsify the working theory that static bake result transfer/deserialization is the main 500 ms browser-task culprit. The remaining all-domain/env-cell gate failure is now more likely source projection result delivery/assimilation, large source-projection progress delivery, readiness sequencing around source-stream completion, or another browser-side task adjacent to source/result publication.
+- Course correction: do not keep tuning bake result transfer or legacy-shaped diagnostics. The next remediation should instrument and, if proven, split the resolver/source projection delivery boundary with the same direct-contract policy: worker-side source projection may stay broad internally, but browser-facing projected result delivery and assimilation must be domain-sized, budgeted, and measured.
+
+### Phase 13K: Source Projection Delivery Boundary Resteer
+
+Deliverables:
+
+- Start only after Phase 13J has documented that static bake result transfer is measurable but not the dominant 500 ms browser-task source.
+- Add direct replacement diagnostics for resolver/source projection result delivery: worker-side projection completion, projected payload delivery/deserialization, main-thread source result assimilation, and cache waiter release timing.
+- Keep source diagnostics replacement-native. Do not backfill legacy resolver or harness fields to make old summaries look complete.
+- Split or budget the measured browser-facing source projection delivery/assimilation boundary if it is the remaining long-task source.
+- Preserve domain-sized runner result contracts, texture-intent chunk diagnostics, and static bake worker-boundary diagnostics.
+- Decide with measured evidence whether deferred dense renderer publication readiness still needs a follow-up before Phase 14.
+
+Acceptance criteria:
+
+- `da55` all-domain replacement run keeps the Phase 13E readiness recovery materially better than Phase 13C and brings max long task/frame delta back at or below Phase 13C's 527 ms / 543 ms gate.
+- `da55` terrain plus env-cells remains at or below Phase 13C's env-cell frame gate.
+- No replacement runner receives all-layer source payloads for cache convenience.
+- Native diagnostics prove source projection delivery/assimilation or rule it out with direct replacement evidence.
+- No legacy-shaped diagnostic field is added to replacement internals as a substitute for migrating or edge-shimming an old consumer.
+- Any touched consumer is migrated directly, deleted, explicitly edge-shimmed, or classified as a durable adapter before the phase is complete.
+- `npm run check`, `npm run lint:ts`, focused tests, and the `da55` generated/env-cell/all-domain harness matrix pass.
+
+Task checklist:
+
+- [x] Inspect resolver worker progress/result delivery and source cache waiter release paths for browser-side delivery/assimilation blind spots.
+- [x] Add direct source projection delivery diagnostics without cloning legacy resolver snapshots.
+- [ ] Implement the smallest measured split or budgeted assimilation boundary that removes the env-cell/all-domain max task.
+- [x] Preserve source projection, intent chunk diagnostics, bake worker-boundary diagnostics, and domain-sized runner result contracts.
+- [x] Add focused tests for source projection delivery diagnostics and replacement source cache integration.
+- [x] Run replacement `da55` generated-scenery, env-cell, and all-domain harness cases.
+- [ ] Decide whether deferred dense renderer publication readiness needs a follow-up phase before Phase 14.
+
+Decisions and course corrections:
+
+- Phase 13K added direct source projection delivery diagnostics: browser delivery/deserialization timing from worker completion to cache callback, main-thread source result assimilation timing, and projected waiter release counts. These are replacement-native source stream facts and do not clone legacy resolver snapshots.
+- Consumer classification: resolver worker projection progress remains a durable worker adapter; source cache diagnostics are direct replacement diagnostics; controller diagnostics tests were migrated directly to the expanded source-resolution contract; no legacy-edge shim was added.
+- Verification passed before harness: `npm run check`, `npm run lint:ts`, and focused `npm run test:ts -- src/lib/static/resolver/worker-client.test.ts src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts`.
+- Phase 13K harness probe evidence: `da55` all domains was ready in about 21.2 s request duration with 17 long tasks, 588 ms max long task, 599.5 ms max frame delta, 9 source stream requests, 45 projected runner results, and 36 reused runner requests. Source projection delivery was not the culprit: max projected delivery was about 40 ms and max projected assimilation was about 0.1 ms.
+- Phase 13K is not complete and must not be committed yet. The direct diagnostics falsify the working theory that source projection delivery, source result assimilation, or cache waiter release is the remaining 500 ms browser-task source.
+- Course correction: stop tuning source delivery. The remaining evidence points toward texture residency/page-build continuation work or another browser-side continuation adjacent to texture placement and object visual atlas building. The next remediation should instrument texture placement, page build, and page publication boundaries with direct replacement diagnostics before changing scheduling.
+
+### Phase 13L: Texture Residency Page-Build Continuation Resteer
+
+Deliverables:
+
+- Start only after Phase 13K has documented that source projection delivery/assimilation is measurable but not the dominant 500 ms browser-task source.
+- Add direct replacement diagnostics for texture placement, object visual atlas building, texture source preparation, packing worker wait, packing result delivery, page settlement, and binding update publication.
+- Distinguish wall-clock waits from main-thread CPU chunks. Existing texture stage wall timings are useful but not enough because they include awaits and do not prove browser task size.
+- Split or budget the measured texture residency/page-build continuation boundary if it is the remaining long-task source.
+- Preserve source projection delivery diagnostics, texture-intent chunk diagnostics, static bake worker-boundary diagnostics, and domain-sized runner result contracts.
+- Decide with measured evidence whether deferred dense renderer publication readiness still needs a follow-up before Phase 14.
+
+Acceptance criteria:
+
+- `da55` all-domain replacement run keeps the Phase 13E readiness recovery materially better than Phase 13C and brings max long task/frame delta back at or below Phase 13C's 527 ms / 543 ms gate.
+- `da55` terrain plus env-cells remains at or below Phase 13C's env-cell frame gate.
+- No replacement runner receives all-layer source payloads for cache convenience.
+- Native diagnostics prove the texture residency/page-build continuation boundary or rule it out with direct replacement evidence.
+- No legacy-shaped diagnostic field is added to replacement internals as a substitute for migrating or edge-shimming an old consumer.
+- Any touched consumer is migrated directly, deleted, explicitly edge-shimmed, or classified as a durable adapter before the phase is complete.
+- `npm run check`, `npm run lint:ts`, focused tests, and the `da55` generated/env-cell/all-domain harness matrix pass.
+
+Task checklist:
+
+- [x] Inspect object visual atlas builder, texture placement plan, texture packing worker, and texture commit apply paths for browser-side continuation blind spots.
+- [x] Add direct texture residency/page-build diagnostics without cloning legacy `TextureManager` snapshots.
+- [x] Implement the smallest measured split or budgeted page-build/settlement boundary that removes the all-domain max task.
+- [x] Preserve source projection delivery diagnostics, intent chunk diagnostics, bake worker-boundary diagnostics, and domain-sized runner result contracts.
+- [x] Add focused tests for texture residency/page-build diagnostics and replacement runner integration.
+- [x] Run replacement `da55` generated-scenery, env-cell, and all-domain harness cases.
+- [x] Decide whether deferred dense renderer publication readiness needs a follow-up phase before Phase 14.
+
+Decisions and course corrections:
+
+- Phase 13L added direct texture residency/page-build diagnostics for texture source preparation chunks, cooperative source-preparation yields, texture packing worker result transfer, and per-page settlement. These are replacement-native static task stages and do not clone legacy `TextureManager` snapshots.
+- Phase 13L split object visual texture source preparation into small browser-side batches before dispatching texture packing. The first measured split uses 8 texture entries per batch, reports `texture-source-preparation-chunk` per entry, and yields between batches so page-build continuation work can no longer hide inside one opaque `texture-placement` wall time.
+- Texture packing workers now emit a direct `result-ready` progress event immediately before result transfer. `WorkerPoolTexturePacker.packWithDiagnostics()` records worker wait and delivery timing so texture packing can be separated from browser delivery/deserialization without introducing legacy-shaped diagnostics.
+- Consumer classification: texture packing worker progress is a durable worker adapter; texture residency/page-build stages are direct replacement diagnostics; touched tests were migrated to direct contracts. No legacy-edge shim was added.
+- Verification before harness passed: `npm run check`, `npm run lint:ts`, and focused `npm run test:ts -- src/lib/textures/packing/worker-client.test.ts src/lib/systems/open-world-streaming/static-layers/env-cells/env-cell-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/outdoor-objects/outdoor-object-artifact-runner.test.ts`.
+- Phase 13L harness evidence:
+  - `da55` terrain plus generated-scenery was ready in about 11.7 s with 11 long tasks, 270 ms max long task, 283 ms max frame delta, 9 source stream requests, 18 projected runner results, 9 reused runner requests, 18 completed static tasks, and no failures.
+  - `da55` terrain plus env-cells was ready in about 11.2 s with 4 long tasks, 532 ms max long task, 543.6 ms max frame delta, 9 source stream requests, 18 projected runner results, 9 reused runner requests, 18 completed static tasks, and no failures.
+  - `da55` all domains was ready in about 22.1 s with 18 long tasks, 521 ms max long task, 532.9 ms max frame delta, 9 source stream requests, 45 projected runner results, 36 reused runner requests, 45 completed static tasks, and no failures.
+- Phase 13L is not complete and must not be committed yet. It fixes the all-domain Phase 13C gate while preserving the Phase 13E readiness recovery, but the env-cell-focused case narrowly misses the env-cell gate at 532 ms max long task and 543.6 ms max frame delta.
+- Course correction: deferred dense renderer publication is not the next bottleneck; the all-domain renderer handler stayed at about 45 ms and the focused env-cell renderer handler stayed at about 12 ms. The remaining work should target the env-cell browser-side CPU continuation exposed by the new direct texture/source diagnostics, not renderer publication or legacy diagnostic projection.
+
+### Phase 13M: Env-Cell Tail Frame-Budget Resteer
+
+Deliverables:
+
+- Start only after Phase 13L has documented the all-domain recovery and the narrow env-cell-focused gate miss.
+- Dry-run Phase 14 from the current tree and steer only the work required before browser runtime cutover.
+- Use Phase 13L and 13M direct diagnostics to identify the remaining env-cell browser-side CPU chunk. Prefer removing, moving, or reusing the proven hot continuation over adding broader retries, compatibility projections, renderer publication work, or fine-grained main-thread budgeting.
+- Keep the universal contract migration rule active: migrate direct contracts first, shim legacy only at an edge, and prefer an incomplete legacy projection over dishonest replacement diagnostics.
+- Preserve source projection delivery diagnostics, texture residency/page-build diagnostics, static bake worker-boundary diagnostics, and domain-sized runner result contracts.
+
+Acceptance criteria:
+
+- `da55` terrain plus env-cells is at or below Phase 13C's env-cell frame gate.
+- `da55` all-domain replacement run remains at or below Phase 13C's 527 ms / 543 ms frame gate and preserves the Phase 13E readiness recovery.
+- No replacement runner receives all-layer source payloads for cache convenience.
+- No legacy-shaped diagnostic field is added to replacement internals as a substitute for migrating or edge-shimming an old consumer.
+- No broad budget API is added to the static-object partitioner merely to slice main-thread work that should be removed, moved off-thread, or reused from a worker-owned result.
+- Any touched consumer is migrated directly, deleted, explicitly edge-shimmed, or classified as a durable adapter before the phase is complete.
+- `npm run check`, `npm run lint:ts`, focused tests, and the `da55` env-cell/all-domain harness cases pass.
+
+Task checklist:
+
+- [x] Dry-run Phase 14 against the current tree and record any pre-cutover blocker exposed by the Phase 13L evidence.
+- [x] Inspect Phase 13L stage diagnostics for the env-cell-focused max frame offender.
+- [x] Remove the static-object texture-intent dependency on full static-object partitioning so the replacement browser path does not run the proven hot partition continuation on the main thread.
+- [x] Preserve the generated-scenery and all-domain gains from Phase 13L.
+- [x] Run focused tests and app checks.
+- [x] Run replacement `da55` env-cell and all-domain harness cases.
+
+Decisions and course corrections:
+
+- Phase 13M added direct env-cell texture-intent substages for structured-interior intent planning, static-object intent planning, static-object partitioning, and static-object entry processing. These are replacement-native diagnostics; no legacy `TextureManager` or static coordinator field was cloned.
+- Phase 13M evidence: the focused env-cell rerun passed the Phase 13C frame gate at about 525 ms max long task and 536.7 ms max frame delta, but all-domain regressed to about 575 ms max long task and 590.3 ms max frame delta.
+- The new substages proved the all-domain regression is not worker slowness. Worker waits remain large but harmless by themselves; the browser long task correlates with main-thread `texture-intent-static-object-partition`, measured around 575 ms for `db56` env-cell.
+- Rejected course: adding a budgeted async variant to `partitionStaticObjectBatches`. It adds broad partitioner API complexity, still leaves the hot static-object partition model on the browser thread, and only tries to make a worker-shaped problem look scheduler-shaped. The partial budgeted-partitioner change was removed.
+- Resteer result: the cleanest Phase 13M fix was subtraction. Static-object texture intent planning does not need draw-unit partition groups; it needs texture binding requirements. The replacement path now collects requirements directly from payload material slots and per-part material slots, preserving binding ids, wrap policy, material/palette variants, and direct diagnostics while avoiding full candidate sort/group/split on the browser thread.
+- Consumer classification: static-object texture intent result diagnostics are direct replacement diagnostics; `partitionStaticObjectBatches` remains a bake-time helper and was not given a broad budget API; no legacy-edge shim was added.
+- Phase 14 dry-run: no remaining frame-budget blocker is exposed by Phase 13M evidence. Browser cutover can proceed next, but it must still migrate or delete surviving legacy-shaped runtime, harness, UI, and diagnostics consumers rather than backfilling replacement internals.
+- Phase 13M accepted harness evidence:
+  - `da55` terrain plus env-cells was ready in about 10.0 s with 2 long tasks, 122 ms max long task, 117.7 ms max frame delta, 9 source stream requests, 18 projected runner results, 9 reused runner requests, 18 completed static tasks, and no failures.
+  - `da55` all domains was ready in about 19.8 s with 6 long tasks, 182 ms max long task, 156 ms max frame delta, 9 source stream requests, 45 projected runner results, 36 reused runner requests, 45 completed static tasks, and no failures.
+- Phase 13M final diagnostics show the formerly hot static-object intent path is no longer the browser-frame offender: all-domain `create-texture-intents` max was about 116 ms, `texture-intent-static-object` max was about 18 ms, and `texture-intent-static-object-requirements` stayed below the top-stage cutoff. The remaining large wall times are worker waits, source resolution, texture placement, packing, and bake waits that do not break the frame gate.
+- Verification for acceptance: `npm run check`, `npm run lint:ts`, focused `npm run test:ts -- src/lib/static/bake/worker-client.test.ts src/lib/static/resolver/worker-client.test.ts src/lib/textures/packing/worker-client.test.ts src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/systems/open-world-streaming/static-layers/terrain/terrain-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/outdoor-objects/outdoor-object-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/env-cells/env-cell-artifact-runner.test.ts src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts`, and the two `da55` replacement harness gates.
+- Verification after removing the rejected budgeted-partitioner path: focused `npm run test:ts -- src/lib/static/objects/bake/static-object-batch-partitioner.test.ts src/lib/systems/open-world-streaming/static-layers/env-cells/env-cell-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/outdoor-objects/outdoor-object-artifact-runner.test.ts` and `npm run check` passed.
 
 ### Phase 14: Browser Runtime Cutover
 
 Deliverables:
 
-- Start only after Phase 13D is complete.
+- Start only after Phase 13M is complete.
 - Switch `createBrowserRuntime(...)` to the replacement composition.
 - Keep the harness switch only if needed for one short verification window.
 - Remove obsolete UI assumptions about legacy static coordinator diagnostics and migrate surviving panels to replacement-native diagnostics.
 - Prefer temporary broken or partial legacy diagnostic reports over backfilling old fields from replacement data after cutover.
 - Migrate surviving browser, harness, UI, and diagnostics consumers directly to replacement contracts before adding any cutover shim.
 - Treat any cutover breakage in legacy-shaped diagnostics or panels as a consumer migration problem, not a reason to backfill old fields into the replacement runtime.
+- Make diagnostic consumer migration part of the cutover, not polish afterward. Panels, harness summaries, and tests that survive Phase 14 should speak replacement-native diagnostics; legacy-shaped projections are allowed only as named edge shims with Phase 16 deletion triggers.
 
 Acceptance criteria:
 
 - Browser display and browser harness use the replacement runtime path by default.
 - Legacy runtime path is not used by normal app routes.
 - Surviving UI and diagnostics panels read direct replacement contracts instead of legacy-shaped runtime snapshots.
+- Every remaining translation module is named as either a durable adapter or a deletion-targeted shim; mixed adapter/shim modules are split before cutover is accepted.
 - Any remaining harness comparison shim is isolated, named as temporary, and scheduled for Phase 16 deletion.
 - Browser cutover does not require legacy-shaped diagnostics to remain complete. Any temporary report gaps are tracked at the legacy edge instead of backfilled inside replacement internals.
 - Cutover does not preserve a compatibility projection merely because an old diagnostic panel, benchmark summary, or test expects it.
+- Cutover may temporarily leave legacy diagnostic output incomplete or broken when preserving it would distort replacement contracts.
 - Every touched browser, harness, UI, diagnostics, and test consumer is either migrated to a direct replacement contract, deleted, or left behind a named deletion-targeted edge shim.
 - `npm run check`, `npm run lint:ts`, and focused tests pass.
 
@@ -1322,6 +1735,7 @@ Task checklist:
 - [ ] Delete or isolate any legacy-shaped UI/harness projection that is not needed after the cutover window.
 - [ ] Break or delete legacy-shaped diagnostics consumers that do not justify a named shim.
 - [ ] Replace architecture-preserving diagnostic tests with tests over replacement-native contracts, or delete them if they only validate legacy projection completeness.
+- [ ] Split any mixed adapter/shim module so durable boundary adapters can survive Phase 16 without carrying compatibility code.
 - [ ] Verify every surviving cutover consumer either reads the direct replacement contract or has a named, deletion-targeted edge shim.
 - [ ] Record any intentionally broken or incomplete legacy-edge shim, including owner, dishonest-field risk, and Phase 16 deletion trigger.
 - [ ] Update browser harness expectations.
@@ -1345,6 +1759,7 @@ Acceptance criteria:
 
 - Every shim has a deletion task.
 - Every remaining adapter has a durable boundary reason.
+- No compatibility shim is misclassified as an adapter merely because it lives near host, worker, renderer, diagnostics export, or harness code.
 - No normal browser or harness path depends on the old runtime pipeline.
 - Every surviving consumer is either on a direct replacement contract or explicitly out of Phase 16 scope.
 - The hard cutover cleanup phase has been dry-run against the current source tree.
@@ -1356,6 +1771,7 @@ Task checklist:
 
 - [ ] Run import/dead-code inspection for old runtime, texture manager, and static coordinator paths.
 - [ ] Classify remaining adapters and shims.
+- [ ] Split or rename any module whose role is ambiguous between durable adapter and compatibility shim.
 - [ ] Verify no surviving consumer depends on shim-only field names, timing assumptions, or legacy diagnostic categories.
 - [ ] Verify every incomplete legacy-edge diagnostic or runtime projection is either deleted in Phase 16 or documented as an out-of-scope survivor.
 - [ ] Identify tests that preserve retired architecture.
@@ -1390,6 +1806,7 @@ Acceptance criteria:
 - No test requires the old architecture to exist.
 - No remaining adapter preserves old ownership, scheduling, same-commit, global texture mutation, or lease/pin semantics.
 - Every remaining adapter has a durable boundary reason documented by its module name, README, or tests.
+- Every compatibility module named as a shim in earlier phases is deleted, rewritten as a direct consumer, or explicitly moved out of production scope.
 - No shim remains in production code after hard cutover.
 - Replacement contracts use replacement concepts and do not expose legacy static coordinator, static commit install, texture manager snapshots, or legacy timing/order assumptions.
 - Replacement diagnostics remain direct and honest; deleted legacy dashboards, broken transitional projections, or rewritten tests are acceptable outcomes.
@@ -1404,6 +1821,7 @@ Task checklist:
 - [ ] Remove old static coordinator continuation path if fully replaced.
 - [ ] Delete shims that translate replacement artifacts back into retired legacy shapes.
 - [ ] Audit remaining adapters and classify each as host, worker, renderer, diagnostics, harness, or delete.
+- [ ] Verify surviving adapters do not expose shim-only fields, old diagnostic categories, or legacy timing/order assumptions.
 - [ ] Delete legacy diagnostic projections rather than keeping them alive by inventing compatibility fields from replacement data.
 - [ ] Classify `client-runtime.test.ts`, `static-coordinator.test.ts`, `texture-manager.test.ts`, and renderer tests as keep, rewrite, split, or delete.
 - [ ] Remove obsolete diagnostics and tests.

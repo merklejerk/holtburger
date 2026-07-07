@@ -11,11 +11,23 @@ export function installTexturePackingWorkerHandler(
 	port: TexturePackingWorkerGlobalPort,
 ): InstalledWorkerHandler {
 	return installWorkerHandler({
-		execute: async (job) => {
+		execute: async (job, context) => {
 			const result = await packer.pack(job);
+			const transfer = collectTexturePackingResultTransfers(result);
+			context.report({
+				completedAtEpochMs: Date.now(),
+				kind: "result-ready",
+				pageCount: result.pages.length,
+				pagePixelByteLength: result.pages.reduce(
+					(total, page) => total + page.pixels.byteLength,
+					0,
+				),
+				rectCount: result.rects.length,
+				transferCount: transfer.length,
+			});
 			return {
 				output: result,
-				transfer: collectTexturePackingResultTransfers(result),
+				transfer,
 			};
 		},
 		port,

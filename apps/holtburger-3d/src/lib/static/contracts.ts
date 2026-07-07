@@ -183,6 +183,26 @@ export interface StaticLandblockSceneLodResolution {
 	readonly recipes: readonly StaticLayerRecipe[];
 }
 
+export interface StaticLandblockSceneLodSourceProjectionEvent {
+	readonly kind: "landblock-scene-lod-source-projected";
+	/** Worker-side timing and payload-size facts for the projected runner result. */
+	readonly diagnostics: StaticLandblockSceneLodSourceProjectionDiagnostics;
+	readonly resolution: StaticLandblockSceneLodResolution;
+}
+
+export interface StaticLandblockSceneLodSourceProjectionDiagnostics {
+	/** Worker wall-clock timestamp immediately before the projected result is posted to the browser. */
+	readonly completedAtEpochMs?: number;
+	/** Dynamic placement records delivered to the browser for this runner result. */
+	readonly dynamicPlacementCount: number;
+	/** Dynamic recipes delivered to the browser for this runner result. */
+	readonly dynamicRecipeCount: number;
+	/** Static layer recipes delivered to the browser for this runner result. */
+	readonly recipeCount: number;
+	/** Worker-side milliseconds spent resolving this projected layer result. */
+	readonly projectionMs: number;
+}
+
 export interface StaticSourceResolutionDiagnostics {
 	/** Coordinator-local sequence for source request submission order. */
 	readonly requestSeq: number;
@@ -212,6 +232,12 @@ export interface StaticLandblockSceneLodSourceResolver {
 	resolveSource(
 		request: StaticLandblockSceneLodSourceRequest,
 	): Promise<StaticLandblockSceneLodResolution>;
+	resolveProjectedSources?(
+		request: StaticLandblockSceneLodSourceRequest,
+		onProjection: (
+			event: StaticLandblockSceneLodSourceProjectionEvent,
+		) => void,
+	): Promise<void>;
 }
 
 export interface StaticRetentionReconciliation {

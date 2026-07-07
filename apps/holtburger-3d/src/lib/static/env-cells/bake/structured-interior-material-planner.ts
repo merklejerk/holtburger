@@ -35,6 +35,23 @@ export interface StructuredInteriorCellMaterialPlan {
 	>;
 }
 
+export interface StructuredInteriorMaterialPlanner {
+	planCellMaterials(options: {
+		readonly envCell: LandblockEnvCellStaticFacts;
+	}): StructuredInteriorCellMaterialPlan;
+	planCellMaterialsWithBudget(options: {
+		readonly envCell: LandblockEnvCellStaticFacts;
+		readonly planningBudget?: StructuredInteriorMaterialPlanningBudget;
+	}): Promise<StructuredInteriorCellMaterialPlan>;
+}
+
+export interface StructuredInteriorMaterialPlanningBudget {
+	/** Cooperative yield hook used by replacement runners to split long planners. */
+	readonly yieldToFrameBudget: () => Promise<void>;
+	/** Main-thread planning slice before yielding. Defaults to one short tasklet. */
+	readonly maxMsBeforeYield?: number;
+}
+
 export function resolveStructuredInteriorMaterialSurfaceId(
 	envCell: LandblockEnvCellStaticFacts,
 	geometrySurfaceId: number,
@@ -45,31 +62,40 @@ export function resolveStructuredInteriorMaterialSurfaceId(
 	return slotSurface?.surfaceId ?? null;
 }
 
-export function planStructuredInteriorCellMaterials(options: {
-	readonly envCell: LandblockEnvCellStaticFacts;
+export function createStructuredInteriorMaterialPlanner(options: {
 	readonly payload: EnvCellSystemStaticScopePayload;
 	readonly task: StaticBakeTask;
-}): StructuredInteriorCellMaterialPlan {
+}): StructuredInteriorMaterialPlanner {
 	const materialSourcesById = new Map(
 		options.payload.materialSources.map((source) => [
 			source.identity.materialId,
 			source,
 		]),
 	);
-	const materialPlansBySurfaceId = new Map<number, ObjectVisualMaterialPlan>();
-	const entries = options.envCell.surfaces
-		.map((surface): StructuredInteriorMaterialPlanEntry => {
-			const material = materialSourcesById.get(surface.material.materialId);
-			if (!material) {
-				const diagnostic: StructuredInteriorMaterialDiagnostic = {
-					code: "missing-cell-structure-material-source",
-					material: surface.material,
-					message:
-						"Env-cell cell-structure material source was not resolved; structured-interior surface is not renderable.",
-					surfaceId: surface.surfaceId,
-				};
+	const detailRoles = planStaticMaterialDetailRoles({
+		detailRoles: options.payload.regionRenderProfile.detailRoles,
+		textureRefs: options.payload.textureRefs,
+	});
+	const materialPlansByMaterialId = new Map<number, ObjectVisualMaterialPlan>();
 
-				return {
+	const createEntry = (
+		surface: LandblockEnvCellStaticFacts["surfaces"][number],
+	): {
+		readonly entry: StructuredInteriorMaterialPlanEntry;
+		readonly plan: ObjectVisualMaterialPlan | null;
+	} => {
+		const material = materialSourcesById.get(surface.material.materialId);
+		if (!material) {
+			const diagnostic: StructuredInteriorMaterialDiagnostic = {
+				code: "missing-cell-structure-material-source",
+				material: surface.material,
+				message:
+					"Env-cell cell-structure material source was not resolved; structured-interior surface is not renderable.",
+				surfaceId: surface.surfaceId,
+			};
+
+			return {
+				entry: {
 					diagnostics: [diagnostic],
 					family: "unsupported",
 					material: surface.material,
@@ -78,17 +104,22 @@ export function planStructuredInteriorCellMaterials(options: {
 					slotId: surface.slotId,
 					surfaceId: surface.surfaceId,
 					textureBindingIds: [],
-				};
-			}
+				},
+				plan: null,
+			};
+		}
 
-			const plan = classifyStructuredInteriorMaterial({
+		const plan =
+			materialPlansByMaterialId.get(material.identity.materialId) ??
+			classifyStructuredInteriorMaterial({
+				detailRoles,
 				material,
 				payload: options.payload,
 			});
-			const textureWrapMode =
-				resolveStructuredInteriorPlanTextureWrapMode(plan);
-			materialPlansBySurfaceId.set(surface.surfaceId, plan);
-			return {
+		materialPlansByMaterialId.set(material.identity.materialId, plan);
+		const textureWrapMode = resolveStructuredInteriorPlanTextureWrapMode(plan);
+		return {
+			entry: {
 				diagnostics: plan.fallbackReasons.map((reason) =>
 					createStructuredInteriorDiagnostic({
 						material: surface.material,
@@ -113,16 +144,64 @@ export function planStructuredInteriorCellMaterials(options: {
 						wrapMode: textureWrapMode,
 					}),
 				),
-			};
-		})
-		.sort(
-			(left, right) =>
-				left.slotId - right.slotId ||
-				left.surfaceId - right.surfaceId ||
-				left.material.materialId - right.material.materialId,
-		);
+			},
+			plan,
+		};
+	};
 
-	return { entries, materialPlansBySurfaceId };
+	const createPlan = (
+		entries: readonly StructuredInteriorMaterialPlanEntry[],
+		materialPlansBySurfaceId: ReadonlyMap<number, ObjectVisualMaterialPlan>,
+	): StructuredInteriorCellMaterialPlan => ({
+		entries: [...entries].sort(compareStructuredInteriorMaterialEntries),
+		materialPlansBySurfaceId,
+	});
+
+	return {
+		planCellMaterials({ envCell }) {
+			const materialPlansBySurfaceId = new Map<
+				number,
+				ObjectVisualMaterialPlan
+			>();
+			const entries: StructuredInteriorMaterialPlanEntry[] = [];
+			for (const surface of envCell.surfaces) {
+				const planned = createEntry(surface);
+				entries.push(planned.entry);
+				if (planned.plan) {
+					materialPlansBySurfaceId.set(surface.surfaceId, planned.plan);
+				}
+			}
+			return createPlan(entries, materialPlansBySurfaceId);
+		},
+		async planCellMaterialsWithBudget({ envCell, planningBudget }) {
+			const budget = createStructuredInteriorPlanningBudget(planningBudget);
+			const materialPlansBySurfaceId = new Map<
+				number,
+				ObjectVisualMaterialPlan
+			>();
+			const entries: StructuredInteriorMaterialPlanEntry[] = [];
+			for (const surface of envCell.surfaces) {
+				await budget.yieldIfNeeded();
+				const planned = createEntry(surface);
+				entries.push(planned.entry);
+				if (planned.plan) {
+					materialPlansBySurfaceId.set(surface.surfaceId, planned.plan);
+				}
+			}
+			return createPlan(entries, materialPlansBySurfaceId);
+		},
+	};
+}
+
+export function planStructuredInteriorCellMaterials(options: {
+	readonly envCell: LandblockEnvCellStaticFacts;
+	readonly payload: EnvCellSystemStaticScopePayload;
+	readonly task: StaticBakeTask;
+}): StructuredInteriorCellMaterialPlan {
+	return createStructuredInteriorMaterialPlanner({
+		payload: options.payload,
+		task: options.task,
+	}).planCellMaterials({ envCell: options.envCell });
 }
 
 function createStructuredInteriorTextureBindingId(options: {
@@ -156,6 +235,7 @@ export function resolveStructuredInteriorPlanTextureWrapMode(
 }
 
 function classifyStructuredInteriorMaterial(options: {
+	readonly detailRoles: ReturnType<typeof planStaticMaterialDetailRoles>;
 	readonly material: StaticObjectMaterialSourceFacts;
 	readonly payload: EnvCellSystemStaticScopePayload;
 }): ObjectVisualMaterialPlan {
@@ -167,13 +247,43 @@ function classifyStructuredInteriorMaterial(options: {
 		textureRefs: options.payload.textureRefs,
 	});
 	return composeStaticMaterialDetailRole({
-		detailRoles: planStaticMaterialDetailRoles({
-			detailRoles: options.payload.regionRenderProfile.detailRoles,
-			textureRefs: options.payload.textureRefs,
-		}),
+		detailRoles: options.detailRoles,
 		domain: "env-cell-system",
 		plan: basePlan,
 	});
+}
+
+function compareStructuredInteriorMaterialEntries(
+	left: StructuredInteriorMaterialPlanEntry,
+	right: StructuredInteriorMaterialPlanEntry,
+): number {
+	return (
+		left.slotId - right.slotId ||
+		left.surfaceId - right.surfaceId ||
+		left.material.materialId - right.material.materialId
+	);
+}
+
+function createStructuredInteriorPlanningBudget(
+	budget: StructuredInteriorMaterialPlanningBudget | undefined,
+) {
+	let lastYieldAtMs = nowMs();
+	return {
+		async yieldIfNeeded(): Promise<void> {
+			if (!budget) {
+				return;
+			}
+			if (nowMs() - lastYieldAtMs < (budget.maxMsBeforeYield ?? 8)) {
+				return;
+			}
+			await budget.yieldToFrameBudget();
+			lastYieldAtMs = nowMs();
+		},
+	};
+}
+
+function nowMs(): number {
+	return globalThis.performance?.now() ?? Date.now();
 }
 
 function createStructuredInteriorDiagnostic(options: {

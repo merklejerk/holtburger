@@ -16,8 +16,11 @@ import type {
 	TexturePackingPixelSource,
 	TexturePackingResult,
 } from "../../../../textures/packing/protocol";
+import type { TexturePackingResultWithDiagnostics } from "../../../../textures/packing/worker-client";
 import type { OpenWorldStreamingStaticTaskStageTiming } from "../../diagnostics/contracts";
 import type { OpenWorldTextureEntryId } from "../claims/texture-claim-registry";
+
+const TEXTURE_SOURCE_PREPARATION_BATCH_SIZE = 8;
 
 export interface OpenWorldObjectVisualAtlasBuildInput {
 	/** Caller-owned job id used for diagnostics, not lifecycle currentness. */
@@ -104,35 +107,124 @@ export async function buildObjectVisualAtlas(options: {
 	const sources = await measureStage(
 		timings,
 		"texture-source-preparation",
-		() =>
-			Promise.all(
-				options.input.entries.map(async (entry) => ({
-					entry,
-					source: await prepareTexturePackingSource({
-						assetReader: options.assetReader,
-						dataUse: entry.dataUse,
-					}),
-				})),
-			),
-	);
-	const packed = await measureStage(timings, "texture-packing", () =>
-		options.texturePacker.pack({
-			domain: options.input.domain,
-			jobId: options.input.jobId,
-			page: options.input.page,
-			placementRevision: 0,
-			sources: sources.map(({ entry, source }) => ({
-				entryKey: entry.entryId,
-				gutterEdgeMode: entry.gutterEdgeMode,
-				source,
-			})),
+		() => prepareTexturePackingSources({
+			assetReader: options.assetReader,
+			entries: options.input.entries,
+			timings,
 		}),
+		options.input.entries.length,
 	);
+	const packed = await measureStage(
+		timings,
+		"texture-packing",
+		() =>
+			packTexturesWithBoundaryDiagnostics(options.texturePacker, {
+				domain: options.input.domain,
+				jobId: options.input.jobId,
+				page: options.input.page,
+				placementRevision: 0,
+				sources: sources.map(({ entry, source }) => ({
+					entryKey: entry.entryId,
+					gutterEdgeMode: entry.gutterEdgeMode,
+					source,
+				})),
+			}),
+		sources.length,
+	);
+	if (packed.diagnostics && packed.diagnostics.deliveryMs !== null) {
+		timings.push({
+			durationMs: packed.diagnostics.deliveryMs,
+			itemCount: packed.diagnostics.pageCount,
+			stage: "texture-packing-result-transfer",
+		});
+	}
 	return {
-		pages: packed.pages,
-		rects: packed.rects,
+		pages: packed.result.pages,
+		rects: packed.result.rects,
 		stageTimings: timings,
 	};
+}
+
+async function prepareTexturePackingSources(options: {
+	readonly assetReader: PreparedAssetReader;
+	readonly entries: readonly OpenWorldObjectVisualAtlasBuildEntry[];
+	readonly timings: OpenWorldStreamingStaticTaskStageTiming[];
+}): Promise<
+	readonly {
+		readonly entry: OpenWorldObjectVisualAtlasBuildEntry;
+		readonly source: TexturePackingPixelSource;
+	}[]
+> {
+	const results: Array<{
+		readonly entry: OpenWorldObjectVisualAtlasBuildEntry;
+		readonly source: TexturePackingPixelSource;
+	}> = [];
+	for (
+		let batchStart = 0;
+		batchStart < options.entries.length;
+		batchStart += TEXTURE_SOURCE_PREPARATION_BATCH_SIZE
+	) {
+		const batch = options.entries.slice(
+			batchStart,
+			batchStart + TEXTURE_SOURCE_PREPARATION_BATCH_SIZE,
+		);
+		results.push(
+			...(await Promise.all(
+				batch.map((entry) =>
+					measureStage(
+						options.timings,
+						"texture-source-preparation-chunk",
+						async () => ({
+							entry,
+							source: await prepareTexturePackingSource({
+								assetReader: options.assetReader,
+								dataUse: entry.dataUse,
+							}),
+						}),
+						1,
+					),
+				),
+			)),
+		);
+		if (batchStart + TEXTURE_SOURCE_PREPARATION_BATCH_SIZE < options.entries.length) {
+			await measureStage(
+				options.timings,
+				"texture-source-preparation-yield",
+				yieldToBrowserTaskQueue,
+				batch.length,
+			);
+		}
+	}
+	return results;
+}
+
+async function packTexturesWithBoundaryDiagnostics(
+	texturePacker: TexturePacker,
+	job: TexturePackingJob,
+): Promise<TexturePackingResultWithDiagnostics> {
+	if (hasDiagnosticTexturePacker(texturePacker)) {
+		return texturePacker.packWithDiagnostics(job);
+	}
+	return {
+		diagnostics: null,
+		result: await texturePacker.pack(job),
+	};
+}
+
+interface DiagnosticTexturePacker extends TexturePacker {
+	/** Optional richer worker-boundary pack path exposed by worker-backed packers. */
+	packWithDiagnostics(
+		job: TexturePackingJob,
+	): Promise<TexturePackingResultWithDiagnostics>;
+}
+
+function hasDiagnosticTexturePacker(
+	texturePacker: TexturePacker,
+): texturePacker is DiagnosticTexturePacker {
+	return (
+		"packWithDiagnostics" in texturePacker &&
+		typeof texturePacker.packWithDiagnostics === "function"
+	);
 }
 
 async function prepareTexturePackingSource(options: {
@@ -191,6 +283,7 @@ async function measureStage<T>(
 	timings: OpenWorldStreamingStaticTaskStageTiming[],
 	stage: OpenWorldStreamingStaticTaskStageTiming["stage"],
 	createValue: () => Promise<T>,
+	itemCount?: number,
 ): Promise<T> {
 	const startedAtMs = nowMs();
 	try {
@@ -198,6 +291,7 @@ async function measureStage<T>(
 	} finally {
 		timings.push({
 			durationMs: nowMs() - startedAtMs,
+			...(itemCount === undefined ? {} : { itemCount }),
 			stage,
 		});
 	}
@@ -205,4 +299,10 @@ async function measureStage<T>(
 
 function nowMs(): number {
 	return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+function yieldToBrowserTaskQueue(): Promise<void> {
+	return new Promise((resolve) => {
+		globalThis.setTimeout(resolve, 0);
+	});
 }

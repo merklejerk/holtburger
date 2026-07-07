@@ -68,6 +68,38 @@ export interface OpenWorldStreamingDiagnosticsSnapshot {
 		readonly pending: number;
 		readonly applied: number;
 	};
+	readonly sourceResolution: {
+		/** Worker/source requests submitted without broad-result projection. */
+		readonly directRequests: number;
+		/** Broad source streams submitted for worker-side projected runner results. */
+		readonly sourceStreamRequests: number;
+		/** Runner requests satisfied from an already submitted source request. */
+		readonly reusedRequests: number;
+		/** Runner-specific results projected from broader source resolutions. */
+		readonly projectedResults: number;
+		/** Static recipes delivered through projected runner results. */
+		readonly projectedRecipeCount: number;
+		/** Dynamic placements delivered through projected runner results. */
+		readonly projectedDynamicPlacementCount: number;
+		/** Dynamic recipes delivered through projected runner results. */
+		readonly projectedDynamicRecipeCount: number;
+		/** Sum of worker-side projection time for projected runner results. */
+		readonly projectedMs: number;
+		/** Maximum worker-side projection time for a projected runner result. */
+		readonly maxProjectedMs: number;
+		/** Sum of browser delivery/deserialization time for projected runner results when measured. */
+		readonly projectedDeliveryMs: number;
+		/** Maximum browser delivery/deserialization time for a projected runner result when measured. */
+		readonly maxProjectedDeliveryMs: number;
+		/** Sum of main-thread source result assimilation and waiter release time. */
+		readonly projectedAssimilationMs: number;
+		/** Maximum main-thread source result assimilation and waiter release time. */
+		readonly maxProjectedAssimilationMs: number;
+		/** Waiters released by projected source result delivery. */
+		readonly projectedWaiterReleaseCount: number;
+		/** Maximum waiter count released by a single projected source result. */
+		readonly maxProjectedWaitersReleased: number;
+	};
 	readonly staticTasks: OpenWorldStreamingStaticTaskDiagnostics;
 	readonly frameBudget: {
 		readonly yieldedPasses: number;
@@ -139,15 +171,29 @@ interface OpenWorldStreamingShimDiagnostics {
 /** Materialization substage timing owned by replacement diagnostics. */
 export interface OpenWorldStreamingStaticTaskStageTiming {
 	readonly durationMs: number;
+	readonly itemCount?: number;
 	readonly stage:
 		| "resolve-source"
 		| "create-texture-intents"
+		| "texture-intent-structured-interior"
+		| "texture-intent-static-object"
+		| "texture-intent-static-object-partition"
+		| "texture-intent-static-object-requirements"
+		| "texture-intent-static-object-entry"
+		| "texture-intent-chunk"
+		| "texture-intent-aggregation"
 		| "texture-placement"
 		| "texture-source-preparation"
+		| "texture-source-preparation-chunk"
+		| "texture-source-preparation-yield"
 		| "texture-packing"
+		| "texture-packing-result-transfer"
 		| "texture-page-settlement"
+		| "texture-page-settlement-page"
 		| "create-bake-resources"
 		| "bake"
+		| "bake-worker-wait"
+		| "bake-result-transfer"
 		| "assemble-commit";
 }
 

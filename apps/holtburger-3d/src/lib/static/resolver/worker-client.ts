@@ -1,6 +1,7 @@
 import type { PreparedAssetReader } from "../../assets/contracts";
 import type {
 	StaticLandblockSceneLodResolution,
+	StaticLandblockSceneLodSourceProjectionEvent,
 	StaticLandblockSceneLodSourceRequest,
 	StaticLandblockSceneLodSourceResolver,
 	StaticResolverJob,
@@ -18,7 +19,10 @@ import {
 	type PreparedAssetServiceRequest,
 	type PreparedAssetServiceResponse,
 } from "../../workers/prepared-asset-service";
-import { StandardWorkerPool } from "../../workers/pool";
+import {
+	StandardWorkerPool,
+	type WorkerSubmitOptions,
+} from "../../workers/pool";
 import type { RuntimeHost } from "../../host/runtime-contracts";
 
 export class WorkerPoolStaticResolver
@@ -59,6 +63,26 @@ export class WorkerPoolStaticResolver
 		return output.resolution;
 	}
 
+	async resolveProjectedSources(
+		request: StaticLandblockSceneLodSourceRequest,
+		onProjection: (
+			event: StaticLandblockSceneLodSourceProjectionEvent,
+		) => void,
+	): Promise<void> {
+		const output = await this.#pool.submit(
+			{
+				kind: "stream-landblock-scene-lod-source",
+				sourceRequest: request,
+			},
+			{ onProgress: onProjection },
+		);
+		if (output.kind !== "landblock-scene-lod-source-stream-complete") {
+			throw new Error(
+				"Static resolver worker returned a non-stream source resolution.",
+			);
+		}
+	}
+
 	dispose(): void {
 		this.#pool.dispose();
 	}
@@ -68,7 +92,7 @@ class StandardStaticResolverPool {
 	readonly #pool: StandardWorkerPool<
 		StaticResolverWorkerInput,
 		StaticResolverWorkerOutput,
-		never,
+		StaticLandblockSceneLodSourceProjectionEvent,
 		PreparedAssetServiceRequest,
 		PreparedAssetServiceResponse
 	>;
@@ -91,8 +115,9 @@ class StandardStaticResolverPool {
 
 	submit(
 		input: StaticResolverWorkerInput,
+		options: WorkerSubmitOptions<StaticLandblockSceneLodSourceProjectionEvent> = {},
 	): Promise<StaticResolverWorkerOutput> {
-		return this.#pool.submit(input);
+		return this.#pool.submit(input, options);
 	}
 
 	dispose(): void {

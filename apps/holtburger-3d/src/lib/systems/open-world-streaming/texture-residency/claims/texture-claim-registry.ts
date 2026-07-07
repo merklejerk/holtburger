@@ -69,6 +69,8 @@ export interface OpenWorldTexturePageRecord {
 	readonly entryIds: readonly OpenWorldTextureEntryId[];
 	/** Build reservation token when this page has in-flight worker work. */
 	readonly reservationToken: OpenWorldTexturePageReservationToken | null;
+	/** Last active page state retained while this page is ownerless and reclaimable. */
+	readonly ownerlessRetainedState: OpenWorldActiveTexturePageState | null;
 	/** Page lifecycle state before renderer-facing texture commits are emitted. */
 	readonly state: "planned" | "building" | "resident" | "reclaimable";
 }
@@ -87,6 +89,14 @@ export interface OpenWorldTextureClaimRegistrySnapshot {
 	readonly bucketCount: number;
 	/** Number of owner binding claims currently retained. */
 	readonly claimCount: number;
+	/** Number of tracked texture entries with zero current owners. */
+	readonly ownerlessEntryCount: number;
+	/** Ownerless reclaimable pages grouped by the active state they retain. */
+	readonly ownerlessPageCountByRetainedState: {
+		readonly building: number;
+		readonly planned: number;
+		readonly resident: number;
+	};
 	/** Number of shared texture entries tracked by the registry. */
 	readonly entryCount: number;
 	/** Number of virtual pages currently reserved for page-build work. */
@@ -335,7 +345,18 @@ export class OpenWorldTextureClaimRegistry {
 				claimCount += bindingClaims.size;
 			}
 		}
+		let ownerlessEntryCount = 0;
+		for (const entry of this.#entriesById.values()) {
+			if (entry.ownerIds.size === 0) {
+				ownerlessEntryCount += 1;
+			}
+		}
 		let pageBuildsInFlight = 0;
+		const ownerlessPageCountByRetainedState = {
+			building: 0,
+			planned: 0,
+			resident: 0,
+		};
 		const pageCountByState = {
 			building: 0,
 			planned: 0,
@@ -345,6 +366,9 @@ export class OpenWorldTextureClaimRegistry {
 		for (const page of this.#pagesById.values()) {
 			this.#refreshPageReclaimableState(page);
 			pageCountByState[page.state] += 1;
+			if (page.state === "reclaimable") {
+				ownerlessPageCountByRetainedState[page.lastActiveState] += 1;
+			}
 			if (page.reservationToken !== null) {
 				pageBuildsInFlight += 1;
 			}
@@ -356,6 +380,8 @@ export class OpenWorldTextureClaimRegistry {
 			]).size,
 			claimCount,
 			entryCount: this.#entriesById.size,
+			ownerlessEntryCount,
+			ownerlessPageCountByRetainedState,
 			pageBuildsInFlight,
 			pageCount: this.#pagesById.size,
 			pageCountByState,
@@ -553,6 +579,8 @@ function snapshotPage(page: MutableTexturePage): OpenWorldTexturePageRecord {
 		bucketKey: page.bucketKey,
 		entryIds: [...page.entryIds].sort(),
 		id: page.id,
+		ownerlessRetainedState:
+			page.state === "reclaimable" ? page.lastActiveState : null,
 		reservationToken: page.reservationToken,
 		state: page.state,
 	};

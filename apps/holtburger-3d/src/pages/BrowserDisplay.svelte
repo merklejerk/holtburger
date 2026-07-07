@@ -2755,14 +2755,15 @@
 										.total} builds
 									{openWorldDiagnostics.textureResidency.pageBuildsInFlight} pending
 									{openWorldDiagnostics.materialReadiness.summary
-										.pendingTextureDependencyCount}
+										.pendingTextureDependencyCount} ownerless
+									{openWorldDiagnostics.textureResidency.ownerlessPages.total}
 								{:else}
 									pending
 								{/if}
 							</dd>
 							{@render copyOverlay(
 								openWorldDiagnostics
-									? `pages ${openWorldDiagnostics.textureResidency.pages.resident}/${openWorldDiagnostics.textureResidency.pages.total} builds ${openWorldDiagnostics.textureResidency.pageBuildsInFlight} pending ${openWorldDiagnostics.materialReadiness.summary.pendingTextureDependencyCount}`
+									? `pages ${openWorldDiagnostics.textureResidency.pages.resident}/${openWorldDiagnostics.textureResidency.pages.total} builds ${openWorldDiagnostics.textureResidency.pageBuildsInFlight} pending ${openWorldDiagnostics.materialReadiness.summary.pendingTextureDependencyCount} ownerless ${openWorldDiagnostics.textureResidency.ownerlessPages.total}`
 									: "pending",
 								"Textures",
 							)}

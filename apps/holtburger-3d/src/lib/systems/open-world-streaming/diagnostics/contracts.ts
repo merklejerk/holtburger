@@ -31,6 +31,15 @@ export interface OpenWorldStreamingDiagnosticsSnapshot {
 			readonly resident: number;
 			readonly total: number;
 		};
+		/** Texture entries with no current owner claims. */
+		readonly ownerlessEntries: number;
+		/** Reclaimable ownerless pages grouped by retained renderer/build state. */
+		readonly ownerlessPages: {
+			readonly building: number;
+			readonly planned: number;
+			readonly resident: number;
+			readonly total: number;
+		};
 		readonly pageBuildsInFlight: number;
 		/** Replacement-owned byte accounting is not exact until renderer page sizing is canonical. */
 		readonly byteEstimate: {

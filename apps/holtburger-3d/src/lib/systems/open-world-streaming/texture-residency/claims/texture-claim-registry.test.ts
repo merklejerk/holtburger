@@ -82,15 +82,50 @@ describe("OpenWorldTextureClaimRegistry", () => {
 		expect(snapshot.entries).toEqual([
 			expect.objectContaining({
 				id: entrySnapshot.entries[0].id,
+				ownerIds: [],
 				state: "reclaimable",
 			}),
 		]);
 		expect(snapshot.pages).toEqual([
 			expect.objectContaining({
 				id: page.id,
+				ownerlessRetainedState: "resident",
 				state: "reclaimable",
 			}),
 		]);
+		expect(registry.createSnapshot()).toMatchObject({
+			claimCount: 0,
+			ownerlessEntryCount: 1,
+			ownerlessPageCountByRetainedState: {
+				building: 0,
+				planned: 0,
+				resident: 1,
+			},
+			pageCountByState: {
+				reclaimable: 1,
+			},
+		});
+	});
+
+	it("keeps owner release idempotent and cheap for retained renderer pages", () => {
+		const registry = new OpenWorldTextureClaimRegistry();
+		const bucketKey = createBucketKey("terrain-detail");
+		const owner = ownerId("owner:terrain");
+		const entrySnapshot = registry.retainTextureBindings(owner, bucketKey, [
+			createBinding("detail", bucketKey),
+		]);
+		registry.createPage({
+			bucketKey,
+			entryIds: [entrySnapshot.entries[0].id],
+			state: "resident",
+		});
+
+		registry.releaseTextureOwner(owner);
+		const afterFirstRelease = registry.createSnapshot();
+		registry.releaseTextureOwner(owner);
+		const afterSecondRelease = registry.createSnapshot();
+
+		expect(afterSecondRelease).toEqual(afterFirstRelease);
 	});
 
 	it("restores reclaimable pages when their entries are claimed again", () => {
@@ -111,8 +146,40 @@ describe("OpenWorldTextureClaimRegistry", () => {
 		registry.retainTextureBindings(owner, bucketKey, [binding]);
 
 		expect(registry.createBucketSnapshot(bucketKey).pages).toEqual([
-			expect.objectContaining({ state: "resident" }),
+			expect.objectContaining({
+				ownerlessRetainedState: null,
+				state: "resident",
+			}),
 		]);
+	});
+
+	it("settles accepted page builds after owner release as reclaimable retained pages", () => {
+		const registry = new OpenWorldTextureClaimRegistry();
+		const bucketKey = createBucketKey("object-base-color");
+		const owner = ownerId("owner:object");
+		const snapshot = registry.retainTextureBindings(owner, bucketKey, [
+			createBinding("base-color", bucketKey),
+		]);
+		const page = registry.createPage({
+			bucketKey,
+			entryIds: [snapshot.entries[0].id],
+		});
+		const token = registry.reservePageBuild(page.id);
+
+		registry.releaseTextureOwner(owner);
+
+		expect(registry.acceptPageBuild(page.id, token)).toBe("accepted");
+		expect(registry.createBucketSnapshot(bucketKey).pages[0]).toMatchObject({
+			ownerlessRetainedState: "resident",
+			reservationToken: null,
+			state: "reclaimable",
+		});
+		expect(registry.createSnapshot()).toMatchObject({
+			pageBuildsInFlight: 0,
+			ownerlessPageCountByRetainedState: {
+				resident: 1,
+			},
+		});
 	});
 
 	it("keeps bucket page reservations independent", () => {
@@ -158,6 +225,12 @@ describe("OpenWorldTextureClaimRegistry", () => {
 			bucketCount: 2,
 			claimCount: 2,
 			entryCount: 2,
+			ownerlessEntryCount: 0,
+			ownerlessPageCountByRetainedState: {
+				building: 0,
+				planned: 0,
+				resident: 0,
+			},
 			pageBuildsInFlight: 1,
 			pageCount: 2,
 			pageCountByState: {

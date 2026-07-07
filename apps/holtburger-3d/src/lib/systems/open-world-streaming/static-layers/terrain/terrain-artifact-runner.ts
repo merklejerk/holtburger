@@ -18,13 +18,8 @@ import type {
 } from "../../../../textures/placement";
 import type { MaterializationOwnerId } from "../../owners/owner-id";
 import type { OpenWorldStreamingStaticTaskStageTiming } from "../../diagnostics/contracts";
-import { OpenWorldTextureClaimRegistry } from "../../texture-residency/claims/texture-claim-registry";
-import {
-	reserveMaterialTexturePlacements,
-} from "../../texture-residency/placement/material-texture-placement-plan";
 import type { OpenWorldTexturePageBuildInput } from "../../texture-residency/page-build/protocol";
-import type { OpenWorldStreamingTextureCommit } from "../../texture-residency/commits/contracts";
-import type { OpenWorldMaterialTextureAtlasBuilder } from "../../texture-residency/atlas-build/object-visual-atlas-builder";
+import type { OpenWorldTextureResidencyService } from "../../texture-residency/texture-residency-service";
 import {
 	yieldToStaticMaterializationFrameBudget,
 	type OpenWorldStaticMaterializationFrameBudget,
@@ -36,11 +31,11 @@ export interface OpenWorldTerrainArtifactRunnerOptions {
 	readonly baker: StaticBaker;
 	readonly frameBudget: OpenWorldStaticMaterializationFrameBudget;
 	readonly resolver: StaticLandblockSceneLodSourceResolver;
-	readonly textureAtlasBuilder: OpenWorldMaterialTextureAtlasBuilder;
-	readonly textureClaims: OpenWorldTextureClaimRegistry;
+	readonly textureResidency: OpenWorldTextureResidencyService;
 }
 
 export interface OpenWorldTerrainArtifactRequest {
+	readonly isCurrent: () => boolean;
 	readonly ownerId: MaterializationOwnerId;
 	readonly task: StaticLayerTaskRequest;
 }
@@ -52,7 +47,6 @@ export interface OpenWorldTerrainLayerCommit {
 	readonly sourcePayload: TerrainStaticScopePayload;
 	readonly stageTimings: readonly OpenWorldStreamingStaticTaskStageTiming[];
 	readonly texturePageBuildRequests: readonly OpenWorldTexturePageBuildInput[];
-	readonly textureCommits: readonly OpenWorldStreamingTextureCommit[];
 	readonly textureReadiness: readonly OpenWorldTerrainTextureReadiness[];
 }
 
@@ -66,16 +60,14 @@ export class OpenWorldTerrainArtifactRunner {
 	readonly #baker: StaticBaker;
 	readonly #frameBudget: OpenWorldStaticMaterializationFrameBudget;
 	readonly #resolver: StaticLandblockSceneLodSourceResolver;
-	readonly #textureAtlasBuilder: OpenWorldMaterialTextureAtlasBuilder;
-	readonly #textureClaims: OpenWorldTextureClaimRegistry;
+	readonly #textureResidency: OpenWorldTextureResidencyService;
 
 	constructor(options: OpenWorldTerrainArtifactRunnerOptions) {
 		this.#assetReader = options.assetReader;
 		this.#baker = options.baker;
 		this.#frameBudget = options.frameBudget;
 		this.#resolver = options.resolver;
-		this.#textureAtlasBuilder = options.textureAtlasBuilder;
-		this.#textureClaims = options.textureClaims;
+		this.#textureResidency = options.textureResidency;
 	}
 
 	async run(
@@ -97,13 +89,16 @@ export class OpenWorldTerrainArtifactRunner {
 		const textureReservation = await timing.measure(
 			"texture-placement-reservation",
 			() =>
-				reserveMaterialTexturePlacements<string, TexturePlacementIntent>({
-					atlasBuilder: this.#textureAtlasBuilder,
+				this.#textureResidency.reserveMaterialPlacements<
+					string,
+					TexturePlacementIntent
+				>({
 					filteringMode: "nearest",
 					intents: textureIntents,
+					isCurrent: request.isCurrent,
 					jobPrefix: "open-world-terrain",
 					ownerId: request.ownerId,
-					textureClaims: this.#textureClaims,
+					revision: request.task.revision,
 				}),
 		);
 		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
@@ -144,7 +139,6 @@ export class OpenWorldTerrainArtifactRunner {
 				...textureReservation.stageTimings,
 			],
 			texturePageBuildRequests: textureReservation.pageBuildRequests,
-			textureCommits: textureReservation.textureCommits,
 			textureReadiness: createPendingTerrainTextureReadiness(
 				baked.result.drawUnits,
 			),

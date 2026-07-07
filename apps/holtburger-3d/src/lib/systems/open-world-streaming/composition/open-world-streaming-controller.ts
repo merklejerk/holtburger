@@ -58,6 +58,7 @@ import type {
 } from "../../../runtime/scene-query/merged-scene-query-contracts";
 import type { StaticSceneEnvCellBounds } from "../../../runtime/scene-query/contracts";
 import type { OpenWorldObjectVisualAtlasBuilder } from "../texture-residency/atlas-build/object-visual-atlas-builder";
+import { OpenWorldTextureResidencyService } from "../texture-residency/texture-residency-service";
 import type { OpenWorldTexturePageBuildInput } from "../texture-residency/page-build/protocol";
 import type { OpenWorldTexturePageBuilder } from "../texture-residency/page-build/worker-client";
 import { OpenWorldTexturePageBuildTaskStream } from "../texture-residency/page-build/texture-page-build-task-stream";
@@ -229,6 +230,7 @@ export class OpenWorldStreamingController {
 	#terrainRunner: OpenWorldTerrainArtifactRunner | null = null;
 	#runtimeEntities: OpenWorldRuntimeEntitySystem | null = null;
 	#objectVisualAtlasBuilder: OpenWorldObjectVisualAtlasBuilder | null = null;
+	#textureResidency: OpenWorldTextureResidencyService | null = null;
 	#texturePageBuilder: OpenWorldTexturePageBuilder | null = null;
 	#texturePageBuildTaskStream: OpenWorldTexturePageBuildTaskStream | null =
 		null;
@@ -717,16 +719,34 @@ export class OpenWorldStreamingController {
 			const commit =
 				request.task.domain === "outdoor-terrain"
 					? await this.#requireTerrainRunner().run({
+							isCurrent: () =>
+								this.#isCurrentRun(runId) &&
+								this.#owners.isCurrent({
+									ownerId: request.owner.id,
+									token: request.token,
+								}),
 							ownerId: request.owner.id,
 							task: request.task,
 						})
 					: isOutdoorObjectTask(request.task)
 						? await this.#requireOutdoorObjectRunner().run({
+								isCurrent: () =>
+									this.#isCurrentRun(runId) &&
+									this.#owners.isCurrent({
+										ownerId: request.owner.id,
+										token: request.token,
+									}),
 								ownerId: request.owner.id,
 								task: request.task,
 							})
 						: isEnvCellTask(request.task)
 							? await this.#requireEnvCellRunner().run({
+									isCurrent: () =>
+										this.#isCurrentRun(runId) &&
+										this.#owners.isCurrent({
+											ownerId: request.owner.id,
+											token: request.token,
+										}),
 									ownerId: request.owner.id,
 									task: request.task,
 								})
@@ -750,7 +770,6 @@ export class OpenWorldStreamingController {
 				return;
 			}
 			if (commit?.kind === "terrain-layer-commit") {
-				this.#applyTextureCommits(commit.textureCommits, request.task.revision);
 				this.#scheduleTexturePageBuilds({
 					pageBuildRequests: commit.texturePageBuildRequests,
 					request,
@@ -774,7 +793,6 @@ export class OpenWorldStreamingController {
 					startedAtMs,
 				});
 			} else if (commit?.kind === "outdoor-object-layer-commit") {
-				this.#applyTextureCommits(commit.textureCommits, request.task.revision);
 				this.#scheduleTexturePageBuilds({
 					pageBuildRequests: commit.texturePageBuildRequests,
 					request,
@@ -797,7 +815,6 @@ export class OpenWorldStreamingController {
 					startedAtMs,
 				});
 			} else if (commit?.kind === "env-cell-system-layer-commit") {
-				this.#applyTextureCommits(commit.textureCommits, request.task.revision);
 				this.#scheduleTexturePageBuilds({
 					pageBuildRequests: commit.texturePageBuildRequests,
 					request,
@@ -1257,7 +1274,7 @@ export class OpenWorldStreamingController {
 			}
 			this.#runtimeEntities?.removeStaticAuthoredChildrenForParent(owner.id);
 			this.#owners.evict(owner.id);
-			this.#textureClaims.releaseTextureOwner(owner.id);
+			this.#requireTextureResidency().releaseOwner(owner.id);
 		}
 	}
 
@@ -1287,8 +1304,7 @@ export class OpenWorldStreamingController {
 					yieldToFrameBudget: () => this.#yieldToFrameBudget(),
 				},
 				resolver: this.#sourceResolutionCache,
-				textureAtlasBuilder: this.#requireObjectVisualAtlasBuilder(),
-				textureClaims: this.#textureClaims,
+				textureResidency: this.#requireTextureResidency(),
 			});
 		}
 		return this.#terrainRunner;
@@ -1302,9 +1318,8 @@ export class OpenWorldStreamingController {
 				frameBudget: {
 					yieldToFrameBudget: () => this.#yieldToFrameBudget(),
 				},
-				objectVisualAtlasBuilder: this.#requireObjectVisualAtlasBuilder(),
 				resolver: this.#sourceResolutionCache,
-				textureClaims: this.#textureClaims,
+				textureResidency: this.#requireTextureResidency(),
 			});
 		}
 		return this.#outdoorObjectRunner;
@@ -1318,9 +1333,8 @@ export class OpenWorldStreamingController {
 				frameBudget: {
 					yieldToFrameBudget: () => this.#yieldToFrameBudget(),
 				},
-				objectVisualAtlasBuilder: this.#requireObjectVisualAtlasBuilder(),
 				resolver: this.#sourceResolutionCache,
-				textureClaims: this.#textureClaims,
+				textureResidency: this.#requireTextureResidency(),
 			});
 		}
 		return this.#envCellRunner;
@@ -1340,12 +1354,11 @@ export class OpenWorldStreamingController {
 				createDynamicVisualPrepper: this.#options.createDynamicVisualPrepper,
 				createDynamicVisualRecipeResolver:
 					this.#options.createDynamicVisualRecipeResolver,
-				objectVisualAtlasBuilder: this.#requireObjectVisualAtlasBuilder(),
 				owners: this.#owners,
 				renderer: this.#renderer,
 				scheduleTexturePageBuilds: (request) =>
 					this.#requireTexturePageBuildTaskStream().schedule(request),
-				textureClaims: this.#textureClaims,
+				textureResidency: this.#requireTextureResidency(),
 			});
 		}
 		return this.#runtimeEntities;
@@ -1357,6 +1370,19 @@ export class OpenWorldStreamingController {
 				this.#options.createObjectVisualAtlasBuilder();
 		}
 		return this.#objectVisualAtlasBuilder;
+	}
+
+	#requireTextureResidency(): OpenWorldTextureResidencyService {
+		if (!this.#textureResidency) {
+			this.#textureResidency = new OpenWorldTextureResidencyService({
+				applyTextureCommits: (commits, revision) =>
+					this.#applyTextureCommits(commits, revision),
+				objectVisualAtlasBuilder: this.#requireObjectVisualAtlasBuilder(),
+				textureAtlasBuilder: this.#requireObjectVisualAtlasBuilder(),
+				textureClaims: this.#textureClaims,
+			});
+		}
+		return this.#textureResidency;
 	}
 
 	#requireTexturePageBuilder(): OpenWorldTexturePageBuilder {
@@ -1457,7 +1483,10 @@ function createStaticDemandPlan(
 	);
 }
 
-function createTexturePagePreviewKey(bucketKey: string, pageId: string): string {
+function createTexturePagePreviewKey(
+	bucketKey: string,
+	pageId: string,
+): string {
 	return `${bucketKey}\n${pageId}`;
 }
 

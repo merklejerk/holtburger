@@ -15,7 +15,10 @@
 	} from "../lib/runtime/client-runtime";
 	import type { RendererFrameTelemetry } from "../lib/renderer/types";
 	import type { StaticSceneSelectionKey } from "../lib/runtime/scene-query/contracts";
-	import type { RuntimeDiagnosticsReport } from "../lib/runtime/diagnostics";
+	import type {
+		RendererDiagnosticsSummary,
+		RuntimeDiagnosticsReport,
+	} from "../lib/runtime/diagnostics";
 	import type { OpenWorldStreamingDiagnosticsSnapshot } from "../lib/systems/open-world-streaming/diagnostics/contracts";
 	import type { OpenWorldStreamingStaticPublicationMode } from "../lib/systems/open-world-streaming/composition/open-world-streaming-controller";
 	import {
@@ -422,8 +425,10 @@
 
 	function staticSceneIsReady(diagnostics: RuntimeDiagnosticsReport): boolean {
 		const openWorld = findOpenWorldDiagnostics(diagnostics);
+		const renderer = findRendererDiagnostics(diagnostics);
 		return (
 			openWorld !== null &&
+			renderer !== null &&
 			openWorld.artifacts.inFlight === 0 &&
 			openWorld.sceneCommits.pending === 0 &&
 			openWorld.textureResidency.pageBuildsInFlight === 0 &&
@@ -463,9 +468,10 @@
 		const openWorld = diagnostics
 			? findOpenWorldDiagnostics(diagnostics)
 			: null;
+		const renderer = diagnostics ? findRendererDiagnostics(diagnostics) : null;
 		if (openWorld) {
 			const prep = openWorld.runtimeEntities.prep;
-			return `${overview.status} openWorld static requested=${openWorld.staticTasks.summary.requested} activeTasks=${openWorld.staticTasks.summary.active} recentCompleted=${openWorld.staticTasks.summary.completed} inFlight=${openWorld.artifacts.inFlight} commitsPending=${openWorld.sceneCommits.pending} pageBuilds=${openWorld.textureResidency.pageBuildsInFlight} pendingTextures=${openWorld.materialReadiness.summary.pendingTextureDependencyCount} runtimeEntities=${openWorld.runtimeEntities.active} runtimePrep=${prep.started}/${runtimePrepTerminalCount(openWorld)}`;
+			return `${overview.status} openWorld static requested=${openWorld.staticTasks.summary.requested} activeTasks=${openWorld.staticTasks.summary.active} recentCompleted=${openWorld.staticTasks.summary.completed} inFlight=${openWorld.artifacts.inFlight} commitsPending=${openWorld.sceneCommits.pending} pageBuilds=${openWorld.textureResidency.pageBuildsInFlight} pendingTextures=${openWorld.materialReadiness.summary.pendingTextureDependencyCount} runtimeEntities=${openWorld.runtimeEntities.active} runtimePrep=${prep.started}/${runtimePrepTerminalCount(openWorld)} dynamicDraws=${renderer?.dynamicDrawCalls ?? "?"}`;
 		}
 		return `${overview.status} openWorld diagnostics unavailable`;
 	}
@@ -478,6 +484,17 @@
 		);
 		return (domain?.summary ??
 			null) as OpenWorldStreamingDiagnosticsSnapshot | null;
+	}
+
+	function findRendererDiagnostics(
+		diagnostics: RuntimeDiagnosticsReport,
+	): RendererDiagnosticsSummary | null {
+		for (const domain of diagnostics.domains) {
+			if (domain.kind === "renderer") {
+				return domain.summary;
+			}
+		}
+		return null;
 	}
 
 	function startRuntimeFrameLoop(): void {

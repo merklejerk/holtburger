@@ -760,7 +760,6 @@ class Webgl2Renderer implements Renderer {
 	#recentDynamicResourceCommits: DynamicRendererResourceCommitDiagnostics[] =
 		[];
 	#lastDynamicDrawCalls = 0;
-	#lastSkippedDynamicSubmissions = 0;
 	readonly #warnedMissingPortalApertureRangeIds = new Set<string>();
 	readonly #terrainProgram: TerrainGeometryProgram;
 	readonly #staticObjectPrograms: Readonly<
@@ -1079,15 +1078,12 @@ class Webgl2Renderer implements Renderer {
 			return;
 		}
 		this.#dynamicInstances.clear();
-		let skipped = 0;
 		for (const instance of commit.instances) {
 			if (!this.#dynamicVisualResources.has(instance.resourceId)) {
-				skipped += 1;
 				continue;
 			}
 			this.#dynamicInstances.set(instance.instanceId, instance);
 		}
-		this.#lastSkippedDynamicSubmissions = skipped;
 		this.#lastDynamicDrawCalls = 0;
 		this.#stateCache.invalidate();
 	}
@@ -1287,7 +1283,6 @@ class Webgl2Renderer implements Renderer {
 		this.#staticLayerOwnershipByKey.clear();
 		this.#recentDynamicResourceCommits.length = 0;
 		this.#lastDynamicDrawCalls = 0;
-		this.#lastSkippedDynamicSubmissions = 0;
 		this.#warnedMissingPortalApertureRangeIds.clear();
 		this.#terrainProgram.dispose();
 		for (const program of Object.values(this.#staticObjectPrograms)) {
@@ -1959,14 +1954,12 @@ class Webgl2Renderer implements Renderer {
 		const gl = this.#gl;
 		const mvp = createModelViewProjectionMatrix(this.#frameState, aspectRatio);
 		let drawCalls = 0;
-		let skipped = 0;
 		for (const instance of this.#dynamicInstances.values()) {
 			if (!shouldDrawDynamicInstanceInDomain(instance, domain)) {
 				continue;
 			}
 			const resources = this.#dynamicGeometryResources.get(instance.resourceId);
 			if (!resources || resources.length === 0) {
-				skipped += 1;
 				continue;
 			}
 			const partMatrixByIndex = new Map(
@@ -1982,7 +1975,6 @@ class Webgl2Renderer implements Renderer {
 			for (const resource of resources) {
 				const partMatrix = partMatrixByIndex.get(resource.partIndex);
 				if (!partMatrix) {
-					skipped += 1;
 					continue;
 				}
 				applyObjectMaterialRenderState(
@@ -1997,14 +1989,12 @@ class Webgl2Renderer implements Renderer {
 						mvp,
 					)
 				) {
-					skipped += 1;
 					continue;
 				}
 				drawCalls += 1;
 			}
 		}
 		this.#lastDynamicDrawCalls += drawCalls;
-		this.#lastSkippedDynamicSubmissions += skipped;
 		return drawCalls;
 	}
 
@@ -2918,7 +2908,6 @@ class Webgl2Renderer implements Renderer {
 			]),
 			recentDynamicResourceCommits: [...this.#recentDynamicResourceCommits],
 			recentStaticObjectUploads: [...this.#recentStaticObjectUploads],
-			skippedDynamicSubmissions: this.#lastSkippedDynamicSubmissions,
 			sceneDomainTargets: this.#createSceneDomainTargetSnapshot(),
 			staticDrawUnits:
 				this.#terrainResources.size +
@@ -2972,9 +2961,9 @@ class Webgl2Renderer implements Renderer {
 				].map((resource) => resource.uploadedBufferBytes),
 			),
 			terrainDrawUnits: this.#terrainResources.size,
-			terrainMaterialDiagnostics: [
-				...this.#terrainResources.values(),
-			].map((resource) => this.#createTerrainMaterialDiagnostic(resource)),
+			terrainMaterialDiagnostics: [...this.#terrainResources.values()].map(
+				(resource) => this.#createTerrainMaterialDiagnostic(resource),
+			),
 			directEnvCellDrawCalls: this.#lastDirectEnvCellDrawCalls,
 		};
 	}

@@ -35,6 +35,7 @@ export interface RendererDiagnosticsSummary {
 	readonly canvasWidth: number;
 	readonly debugOverlayPrimitives: number;
 	readonly directEnvCellDrawCalls: number;
+	readonly dynamicDrawCalls: number;
 	readonly dynamicInstances: number;
 	readonly dynamicVisualResourceTextureUses: number;
 	readonly dynamicVisualResources: number;
@@ -50,7 +51,6 @@ export interface RendererDiagnosticsSummary {
 	readonly outdoorGeneratedSceneryStaticObjectVisualResources: number;
 	readonly renderedTriangles: number;
 	readonly renderPassKind: RenderPassPlan["kind"];
-	readonly skippedDynamicSubmissions: number;
 	readonly staticDrawUnits: number;
 	readonly staticObjectBakedDirectDrawCalls: number;
 	readonly staticObjectDirectRenderInstanceDrawCalls: number;

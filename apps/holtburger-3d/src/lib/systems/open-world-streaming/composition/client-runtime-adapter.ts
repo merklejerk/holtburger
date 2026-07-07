@@ -325,6 +325,7 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 						canvasWidth: renderer.canvasWidth,
 						debugOverlayPrimitives: renderer.debugOverlayPrimitives,
 						directEnvCellDrawCalls: renderer.directEnvCellDrawCalls,
+						dynamicDrawCalls: renderer.dynamicDrawCalls,
 						dynamicInstances: renderer.dynamicInstances,
 						dynamicVisualResourceTextureUses:
 							renderer.dynamicVisualResourceTextureUses,
@@ -347,7 +348,6 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 							renderer.outdoorGeneratedSceneryStaticObjectVisualResources,
 						renderedTriangles: renderer.renderedTriangles,
 						renderPassKind: renderer.renderPassPlan.kind,
-						skippedDynamicSubmissions: renderer.skippedDynamicSubmissions,
 						staticDrawUnits: renderer.staticDrawUnits,
 						staticObjectBakedDirectDrawCalls:
 							renderer.staticObjectBakedDirectDrawCalls,
@@ -390,8 +390,7 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 						},
 						staticObjectVisualResources: renderer.staticObjectVisualResources,
 						terrainDrawUnits: renderer.terrainDrawUnits,
-						terrainMaterialDiagnostics:
-							renderer.terrainMaterialDiagnostics,
+						terrainMaterialDiagnostics: renderer.terrainMaterialDiagnostics,
 					},
 				},
 				{

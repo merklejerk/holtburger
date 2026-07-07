@@ -2647,7 +2647,7 @@ Decisions and course corrections:
 - Added atlas worker diagnostics proof in `object-visual-atlas-worker-client.test.ts`: queued and active atlas layout jobs now expose `open-world-texture-layout` worker-pool diagnostics with task ids.
 - Added worker handler proof that atlas jobs use request-scoped prepared asset access. The fake builder intentionally calls `assetReader.requestPreparedAsset(...)`; the test proves that becomes a worker service request instead of a browser-side direct asset read.
 - Transfer/copy decision: atlas layout output is layout-only (`pages`, `rects`, `stageTimings`) and intentionally carries no page pixels, so the atlas worker response has no transferable pixel buffers to detach. Prepared texture bytes are consumed inside the worker through the request-scoped prepared asset service. Page pixel transfer remains owned and tested by the texture page-build worker.
-- Source-tree decision: do not move `object-visual-atlas-builder.ts` yet. The module is already inside `systems/open-world-streaming/texture-residency/placement`, which is the current owner of placement reservation and layout. Phase 40 can still rename/move it if the readiness and reclamation phases reveal a cleaner `atlas-build` owner.
+- Source-tree decision: do not move `object-visual-atlas-builder.ts` yet. The module is already inside `systems/open-world-streaming/texture-residency/placement`, which is the current owner of placement reservation and layout. Phase 42 can still rename/move it if the readiness and reclamation phases reveal a cleaner `atlas-build` owner.
 - Durable adapter classification: `WorkerPoolOpenWorldObjectVisualAtlasBuilder` is a worker transport adapter; `object-visual-atlas.worker.ts` is a worker entrypoint that may instantiate the direct builder internally. The direct builder is not a production browser composition path.
 - Spicy bit: the phase mostly exposed plan lag, not missing architecture. The missing work was proof and ledger hygiene; rewriting the existing worker boundary would have been churn cosplay.
 - Verification: `npm run check`, `npm run lint`, focused `npm run test:ts -- --run src/lib/browser/create-browser-runtime.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/object-visual-atlas-worker-client.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/object-visual-texture-placement-plan.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/material-texture-placement-plan.test.ts src/lib/textures/packing/worker-client.test.ts`.
@@ -2701,6 +2701,10 @@ Decisions and course corrections:
 
 ### Phase 37: Deferred Fidelity And Material Backlog Triage
 
+Design north star:
+
+- The [open-world streaming stutter investigation worksheet](./holtburger-3d-open-world-streaming-stutter-investigation-worksheet.md) remains the implementation north star for this phase. Triage should move the code toward direct replacement contracts: worker-owned texture work, owner-indexed residency, direct readiness facts, and renderer capability truth. Do not preserve a legacy diagnostic shape just because it is convenient for identifying a missing feature.
+
 Deliverables:
 
 - Convert remaining material/fidelity limitations into explicit backlog records with source evidence, renderer capability requirement, and reactivation criteria.
@@ -2709,26 +2713,105 @@ Deliverables:
 
 Acceptance criteria:
 
-- Every remaining `deferred-material`, `unsupported-material`, skipped static partition, and terrain material issue is classified as contract bug, source-data limitation, renderer capability backlog, or acceptable future scope.
-- Structured-interior deferred-material issues from Phase 28/29 harness runs are either fixed or documented with exact file/symbol ownership and reactivation criteria.
+- Every remaining `renderer-capability-deferred`, `unsupported-source-material`, `skipped-geometry`, `pending-texture-dependency`, and terrain material issue is classified as contract bug, source-data limitation, renderer capability backlog, texture readiness backlog, or acceptable future scope.
+- Structured-interior renderer-capability issues are either fixed or documented with exact file/symbol ownership and reactivation criteria.
 - The remodel does not close with unexplained flat-color, missing-texture, or warning-only material behavior.
 - Plan decisions name any deliberate deviation from the worksheet and why it is not blocking the hard cutover.
 
 Task checklist:
 
-- [ ] Re-run all-domain harness and capture `materialReadiness.recentIssues` plus texture page-build summaries.
-- [ ] Start with the two structured-interior `deferred-material` records proven by `/tmp/holtburger-phase29-all-domain-r0.json`; do not broaden this phase until those are explained.
-- [ ] Triage structured-interior deferred-material issues back through `structured-interior-material-planner.ts`, `env-cell-system-baker.ts`, and renderer pass support.
-- [ ] Triage remaining unsupported material cases through `object-visual-material-planner.ts` and `object-visual-baker.ts`.
-- [ ] Triage skipped partitions through static object partition diagnostics and renderer capability.
-- [ ] Update this plan with each accepted deferral and deletion/fix target.
-- [ ] Add focused tests for any fixed contract bug; do not add tests that simply assert a feature remains missing.
+- [x] Re-run all-domain harness and capture `materialReadiness.recentIssues` plus texture page-build summaries.
+- [x] Start with structured-interior direct readiness records from the latest all-domain harness instead of older coverage-shaped Phase 28/29 records.
+- [x] Triage structured-interior renderer-capability issues back through `structured-interior-material-planner.ts`, `structured-interior-visual-bundle-producer.ts`, `env-cell-system-baker.ts`, and renderer pass support.
+- [x] Triage unsupported material cases through `object-visual-material-planner.ts` and `object-visual-baker.ts`.
+- [x] Triage skipped partitions through static object partition diagnostics and renderer capability.
+- [x] Update this plan with each accepted deferral and deletion/fix target.
+- [x] Add focused tests for any fixed contract bug; do not add tests that simply assert a feature remains missing.
+
+Decisions and course corrections:
+
+- Phase 37 all-domain harness after the no-part-instance fix settled with `errorMessage: null`, 45 requested/completed static tasks, 45 applied scene commits, readiness summary counts of 15 `deferredRendererCapabilityIssueCount`, 3 `pendingTextureDependencyCount`, 2 `skippedGeometryIssueCount`, zero `pipelineBugIssueCount`, zero `unsupportedSourceMaterialIssueCount`, and zero terrain material issues.
+- Contract bug fixed: `createStaticObjectBakeIssues(...)` in `composition/open-world-streaming-controller.ts` no longer reports `visualRecipePublication.reason === "no-part-instances"` as a material readiness pipeline bug. `static-object-job-baker.ts` can legitimately skip recipe publication when there are no visual recipe part instances while still producing direct draw units or no geometry to report. Reporting that as a replacement pipeline bug was diagnostic cosplay, respectfully.
+- Focused regression: `open-world-streaming-controller.test.ts` now covers no-part-instance recipe skips and asserts they do not create material readiness issues.
+- Structured-interior capability backlog: `structured-interior-material-planner.ts`, `structured-interior-visual-bundle-producer.ts`, and `env-cell-system-baker.ts` gate renderability through `isRenderableObjectVisualMaterialPlan(...)` in `static-object-renderability.ts`. Current renderability accepts flat-color only when `textureRoles.length === 0`; structured-interior flat-color plus detail roles therefore becomes `renderer-capability-deferred`. Latest all-domain evidence: 8 env-cell records, 2,918 triangles total across opaque and transparent passes.
+- Outdoor-building detail-overlay backlog: `object-visual-material-planner.ts` emits `detail-overlay-render-deferred`, and `static-object-renderability.ts` treats flat-color partitions with texture data uses as not renderable. Latest all-domain evidence: 7 outdoor-building renderer-capability records, 70 opaque triangles and zero transparent triangles. This is low visual weight but still a real renderer/material capability gap, so Phase 38 must either render it directly or explicitly reclassify it with measured evidence.
+- Skipped-geometry backlog: `static-object-batch-partitioner.ts` can label a skipped partition with `reason: "compatible static object material partition"` while `static-object-job-baker.ts` reports it through `skippedPartitions`. Latest all-domain evidence is 2 outdoor-building flat-color opaque records, 70 triangles total. Phase 38 must make that classification structurally honest: either the renderer can stage the partition, or the diagnostic must name the actual missing capability instead of saying "compatible" from a skipped path.
+- Texture readiness backlog: the latest all-domain run still reported 3 `pending-texture-dependency` issues and 3 `pageBuildsInFlight`. A follow-up run with `--settle-delay-ms 1500` kept the same pending dependency shape, so this is not just an immediate sampling artifact. Phase 39 owns page-build settlement/readiness truth.
+- Unsupported source materials were not present in the latest all-domain run. Do not add compatibility shims for absent unsupported cases; keep direct failure paths loud if new source facts appear.
+- Verification: focused `npm run test:ts -- --run src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts` passed.
+- Harness verification: `npm run harness:browser -- --layer-distance 1 --timeout-ms 60000 --output /tmp/holtburger-phase37-all-domain-r1.json` settled with `errorMessage: null`, 45 requested/completed static tasks, 45 applied scene commits, 6 long tasks with max 166 ms, renderer frame `over50Ms: 0`, and runtime tick `over50Ms: 0`.
+
+### Phase 38: Renderer Capability And Material Fidelity Closure
+
+Design north star:
+
+- Follow the [worksheet replacement model](./holtburger-3d-open-world-streaming-stutter-investigation-worksheet.md): material readiness should describe renderer capability and source facts directly. Migrate direct contracts first; if legacy consumers need compatibility, shim the legacy side, not the new material path.
+
+Deliverables:
+
+- Close or explicitly defer the structured-interior flat-color plus detail-role capability gap currently gated by `isRenderableObjectVisualMaterialPlan(...)`.
+- Close or explicitly defer outdoor-building flat-color detail-overlay renderability currently surfaced by `detail-overlay-render-deferred`.
+- Make skipped geometry diagnostics structurally honest when `static-object-batch-partitioner.ts` says a partition is compatible but `static-object-job-baker.ts` still reports it as skipped.
+- Keep terrain role buckets on the shared replacement placement/claim/page-build/commit path; do not add terrain-only renderer bypasses to solve object material gaps.
+
+Acceptance criteria:
+
+- Latest all-domain harness has no unexplained `renderer-capability-deferred` or `skipped-geometry` issues. Any remaining issue has exact owner file/symbol, renderer capability requirement, triangle/material impact, and reactivation criteria in this plan.
+- `isRenderableObjectVisualMaterialPlan(...)` and `isRenderableStaticObjectPartition(...)` agree with the renderer’s actual stageable material resources instead of using broad family-only shortcuts.
+- `detail-overlay-render-deferred` is either rendered through direct material resources or remains a named renderer fidelity backlog with evidence that it is not blocking hard cutover.
+- `skipped-geometry` never uses `reason: "compatible static object material partition"` without also naming the missing renderer/material capability.
+- Focused tests cover any changed renderability classification and do not assert legacy coverage parity.
+
+Task checklist:
+
+- [ ] Audit `static-object-renderability.ts`, `object-visual-material-planner.ts`, `static-material-detail-roles.ts`, `structured-interior-material-planner.ts`, `structured-interior-visual-bundle-producer.ts`, and `env-cell-system-baker.ts` against the renderer material resource contract.
+- [ ] Compare renderability predicates against actual draw-unit resource creation in `object-visual-static-publication-baker.ts` and renderer material binding code.
+- [ ] Decide whether flat-color plus detail roles should become a first-class direct material plan, a composed texture plan, or a documented renderer fidelity deferral.
+- [ ] Fix the skipped-partition reason path so diagnostics name the actual missing stageability reason.
+- [ ] Add or update focused tests for structured interiors, outdoor-building detail overlays, and skipped partition classification.
+- [ ] Re-run all-domain harness and record readiness counts plus triangle impact.
+- [ ] Run `npm run check`, `npm run lint`, and focused static material/renderability tests.
 
 Decisions and course corrections:
 
 - Pending.
 
-### Phase 38: Runtime, Harness, And UI Shim Deletion
+### Phase 39: Texture Dependency Settlement And Page-Build Readiness Truth
+
+Design north star:
+
+- The [worksheet texture split](./holtburger-3d-open-world-streaming-stutter-investigation-worksheet.md) stays authoritative: placement reservation and owner/currentness are replacement main-loop facts; source preparation, layout search, packing, guttered blits, and page materialization are worker-owned transforms; readiness diagnostics must report the direct state instead of hiding pending pages behind old lifecycle terms.
+
+Deliverables:
+
+- Explain and fix or intentionally defer the 3 `pending-texture-dependency` records for `static-layer:outdoor-generated-scenery:0xdb56ffff` that persisted after a 1500 ms settle delay.
+- Make page-build task stream completion, stale completion, owner release, and renderer texture commit readiness diagnosable without legacy static overview counters.
+- Decide whether harness settlement should wait for page-build quiescence when scene commits have applied but texture dependencies are still pending.
+- Ensure page-build in-flight diagnostics distinguish queued worker work, active worker materialization, stale completion, rejected build, accepted noop, accepted resident page, and renderer upload/application.
+
+Acceptance criteria:
+
+- A settled all-domain harness either has `pendingTextureDependencyCount: 0` and `pageBuildsInFlight: 0`, or the plan records an explicit policy that settlement may finish with retained in-flight texture work and gives the UI/harness a direct readiness state for that condition.
+- `TexturePageBuildTaskStream`, `OpenWorldTextureClaimRegistry`, and `applyTexturePageBuildResult(...)` agree on currentness and stale build handling.
+- Pending texture dependencies identify whether they are waiting on worker page build, claim registry acceptance, texture commit application, renderer upload, or stale owner state.
+- No legacy static overview field is needed to decide whether material resources are ready.
+- Focused tests cover page-build completion, stale completion after owner release, failed build reporting, and accepted noop reporting.
+
+Task checklist:
+
+- [ ] Trace `pending-texture-dependency` creation in `open-world-streaming-controller.ts` through `TexturePageBuildTaskStream`, `page-build-results.ts`, `texture-commit-applier.ts`, and renderer texture application.
+- [ ] Reproduce the persisted generated-scenery pending pages with harness output and, if needed, temporary direct diagnostics that are deleted before commit.
+- [ ] Add direct page-build readiness fields to `diagnostics/contracts.ts` only if current fields cannot explain the state honestly.
+- [ ] Decide and implement harness settlement policy for pending page builds.
+- [ ] Add focused texture residency/page-build tests for accepted, stale, noop, failed, and owner-released paths.
+- [ ] Re-run all-domain harness with and without settle delay and record readiness counts.
+- [ ] Run `npm run check`, `npm run lint`, and focused texture residency/page-build tests.
+
+Decisions and course corrections:
+
+- Pending.
+
+### Phase 40: Runtime, Harness, And UI Shim Deletion
 
 Design north star:
 
@@ -2763,7 +2846,7 @@ Decisions and course corrections:
 
 - Pending.
 
-### Phase 39: Ownerless Page Reclamation And Eviction Truth
+### Phase 41: Ownerless Page Reclamation And Eviction Truth
 
 Design north star:
 
@@ -2799,7 +2882,7 @@ Decisions and course corrections:
 
 - Pending.
 
-### Phase 40: Source-Tree Ownership Cleanup
+### Phase 42: Source-Tree Ownership Cleanup
 
 Design north star:
 
@@ -2807,7 +2890,7 @@ Design north star:
 
 Deliverables:
 
-- Move or rename modules whose current location hides the owning system after Phases 35-39.
+- Move or rename modules whose current location hides the owning system after Phases 35-41.
 - Keep durable adapters explicit for host assets, worker transport, renderer mutation, diagnostics export plumbing, and harness composition.
 - Delete concept-bucket leftovers that exist only because the old source tree grouped by broad nouns such as `textures`, `static`, or `visual`.
 - Update imports and tests after moves without leaving compatibility barrel exports that hide retired ownership.
@@ -2833,11 +2916,11 @@ Decisions and course corrections:
 
 - Pending.
 
-### Phase 41: Texture Remodel Final Verification And Hard Cutover
+### Phase 43: Texture Remodel Final Verification And Hard Cutover
 
 Deliverables:
 
-- Delete dead placement fields, ignored policy paths, obsolete tests, stale diagnostic categories, and temporary shims introduced by Phases 19-40.
+- Delete dead placement fields, ignored policy paths, obsolete tests, stale diagnostic categories, and temporary shims introduced by Phases 19-42.
 - Re-run dead-code, type, lint, unit, and browser harness verification.
 - Update this plan and the worksheet cross-reference with final evidence and any remaining intentionally deferred material fidelity.
 

@@ -55,6 +55,20 @@ describe("OpenWorldRuntimeEntitySystem", () => {
 			}),
 		]);
 		expect(renderer.instanceCommits.at(-1)?.instances).toHaveLength(1);
+		expect(system.createDiagnosticsSnapshot()).toMatchObject({
+			commits: {
+				dynamicInstanceCommitCount: expect.any(Number),
+				dynamicResourceCommitCount: expect.any(Number),
+				maxInstancesPerCommit: 1,
+				maxResourcesPerCommit: 1,
+			},
+			prep: {
+				bakeSuccessCount: 1,
+				failed: 0,
+				recipeResolvedCount: 1,
+				started: 1,
+			},
+		});
 
 		expect(system.destroyRuntimeEntity(entityId)).toBe(true);
 
@@ -70,7 +84,9 @@ describe("OpenWorldRuntimeEntitySystem", () => {
 		const owners = new MaterializationOwnerRegistry();
 		const system = createSystem({ owners, renderer });
 		const entityId = system.createRuntimeEntity(createRuntimeSpawnRequest());
-		await waitFor(() => renderer.instanceCommits.at(-1)?.instances.length === 1);
+		await waitFor(
+			() => renderer.instanceCommits.at(-1)?.instances.length === 1,
+		);
 
 		expect(
 			system.updateRuntimeEntityRenderResidence(
@@ -80,7 +96,9 @@ describe("OpenWorldRuntimeEntitySystem", () => {
 			),
 		).toBe(true);
 
-		expect(renderer.resourceCommits.at(-1)?.addedVisualResources).toHaveLength(1);
+		expect(renderer.resourceCommits.at(-1)?.addedVisualResources).toHaveLength(
+			1,
+		);
 		expect(renderer.instanceCommits.at(-1)).toMatchObject({
 			frameTimeSeconds: 12,
 			instances: [],
@@ -129,7 +147,9 @@ describe("OpenWorldRuntimeEntitySystem", () => {
 		system.removeStaticAuthoredChildrenForParent(parentOwnerId);
 
 		expect(renderer.resourceCommits.at(-1)?.removedVisualResourceIds).toEqual([
-			expect.stringContaining("dynamic-visual-resource:static-authored-outdoor"),
+			expect.stringContaining(
+				"dynamic-visual-resource:static-authored-outdoor",
+			),
 		]);
 		expect(owners.createSnapshot().current).toEqual([]);
 	});
@@ -374,7 +394,9 @@ function createStaticAuthoredPlacement(
 function createUnusedAssetReader(): PreparedAssetReader {
 	return {
 		async requestPreparedAsset() {
-			throw new Error("Asset reader should not be used by runtime entity test.");
+			throw new Error(
+				"Asset reader should not be used by runtime entity test.",
+			);
 		},
 	};
 }
@@ -382,7 +404,9 @@ function createUnusedAssetReader(): PreparedAssetReader {
 function createUnusedObjectVisualAtlasBuilder(): OpenWorldObjectVisualAtlasBuilder {
 	return {
 		async buildAtlas() {
-			throw new Error("Atlas builder should not be used without texture intents.");
+			throw new Error(
+				"Atlas builder should not be used without texture intents.",
+			);
 		},
 	};
 }

@@ -93,6 +93,13 @@ export interface OpenWorldTextureClaimRegistrySnapshot {
 	readonly pageBuildsInFlight: number;
 	/** Number of virtual pages tracked by the registry. */
 	readonly pageCount: number;
+	/** Virtual page count grouped by replacement lifecycle state. */
+	readonly pageCountByState: {
+		readonly building: number;
+		readonly planned: number;
+		readonly reclaimable: number;
+		readonly resident: number;
+	};
 }
 
 interface MutableTextureEntry {
@@ -313,7 +320,15 @@ export class OpenWorldTextureClaimRegistry {
 			}
 		}
 		let pageBuildsInFlight = 0;
+		const pageCountByState = {
+			building: 0,
+			planned: 0,
+			reclaimable: 0,
+			resident: 0,
+		};
 		for (const page of this.#pagesById.values()) {
+			this.#refreshPageReclaimableState(page);
+			pageCountByState[page.state] += 1;
 			if (page.reservationToken !== null) {
 				pageBuildsInFlight += 1;
 			}
@@ -327,6 +342,7 @@ export class OpenWorldTextureClaimRegistry {
 			entryCount: this.#entriesById.size,
 			pageBuildsInFlight,
 			pageCount: this.#pagesById.size,
+			pageCountByState,
 		};
 	}
 

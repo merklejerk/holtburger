@@ -21,13 +21,48 @@ export interface OpenWorldStreamingDiagnosticsSnapshot {
 	readonly textureResidency: {
 		readonly bucketCount: number;
 		readonly claimCount: number;
+		/** Shared logical texture entries tracked by the replacement claim registry. */
+		readonly entryCount: number;
+		/** Virtual atlas pages grouped by replacement lifecycle state. */
+		readonly pages: {
+			readonly building: number;
+			readonly planned: number;
+			readonly reclaimable: number;
+			readonly resident: number;
+			readonly total: number;
+		};
 		readonly pageBuildsInFlight: number;
+		/** Replacement-owned byte accounting is not exact until renderer page sizing is canonical. */
+		readonly byteEstimate: {
+			readonly approximateBytes: number | null;
+			readonly reason: "page-size-not-yet-canonical";
+		};
 	};
 	readonly runtimeEntities: {
 		readonly active: number;
 		readonly nonRenderable: number;
 		readonly runtimeAuthored: number;
 		readonly staticAuthored: number;
+		readonly animation: {
+			readonly catchUpTruncationCount: number;
+			readonly droppedHookFrameCount: number;
+			readonly recentCatchUpTruncations: readonly OpenWorldRuntimeEntityAnimationCatchUpDiagnostics[];
+		};
+		readonly commits: {
+			readonly dynamicInstanceCommitCount: number;
+			readonly dynamicResourceCommitCount: number;
+			readonly maxInstancesPerCommit: number;
+			readonly maxResourcesPerCommit: number;
+		};
+		readonly prep: {
+			readonly bakeFailureCount: number;
+			readonly bakeSuccessCount: number;
+			readonly failed: number;
+			readonly recipeResolvedCount: number;
+			readonly skippedVisualCount: number;
+			readonly started: number;
+			readonly recentFailures: readonly OpenWorldRuntimeEntityPrepFailureDiagnostics[];
+		};
 	};
 	readonly sceneCommits: {
 		readonly pending: number;
@@ -38,6 +73,23 @@ export interface OpenWorldStreamingDiagnosticsSnapshot {
 		readonly yieldedPasses: number;
 	};
 	readonly compatibilityShims: readonly OpenWorldStreamingShimDiagnostics[];
+}
+
+/** Aggregated replacement diagnostics for capped dynamic animation hook replay. */
+interface OpenWorldRuntimeEntityAnimationCatchUpDiagnostics {
+	readonly animationAssetId: string;
+	readonly dispatchedFrameCount: number;
+	readonly droppedFrameCount: number;
+	readonly entityId: string;
+	readonly frameCount: number;
+}
+
+/** Recent replacement-owned dynamic prep failures. */
+interface OpenWorldRuntimeEntityPrepFailureDiagnostics {
+	readonly entityId: string;
+	readonly message: string;
+	readonly ownerId: string;
+	readonly phase: "bake" | "prep";
 }
 
 /** Replacement-owned task timing for the static materialization scheduler. */

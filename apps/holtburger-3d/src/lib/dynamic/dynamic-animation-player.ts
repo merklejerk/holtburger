@@ -22,6 +22,20 @@ interface PlaybackUpdate {
 	readonly record: DynamicEntityRecord;
 }
 
+export interface DynamicAnimationCatchUpTruncation {
+	readonly animationAssetId: string;
+	readonly dispatchedFrameCount: number;
+	readonly droppedFrameCount: number;
+	readonly entityId: string;
+	readonly frameCount: number;
+}
+
+export interface DynamicAnimationPlayerOptions {
+	readonly onCatchUpTruncated?: (
+		truncation: DynamicAnimationCatchUpTruncation,
+	) => void;
+}
+
 interface SampledAnimationFrame {
 	readonly absoluteFrameIndex: number;
 	readonly currentFrameIndex: number;
@@ -59,6 +73,13 @@ interface CrossedHookDispatchResult {
 /** Samples default setup animations into dynamic entity runtime pose state. */
 export class DynamicAnimationPlayer {
 	readonly #hookDispatcher = new DynamicHookDispatcher();
+	readonly #onCatchUpTruncated:
+		| ((truncation: DynamicAnimationCatchUpTruncation) => void)
+		| null;
+
+	constructor(options: DynamicAnimationPlayerOptions = {}) {
+		this.#onCatchUpTruncated = options.onCatchUpTruncated ?? null;
+	}
 
 	update(record: DynamicEntityRecord, timeSeconds: number): PlaybackUpdate {
 		if (record.resources.setupAnimation.status !== "ready") {
@@ -166,6 +187,7 @@ export class DynamicAnimationPlayer {
 			animationAssetId: options.animationAssetId,
 			entityId: options.entityId,
 			frameCount: options.frameCount,
+			onCatchUpTruncated: this.#onCatchUpTruncated,
 			previousHookFrame: options.previousHookFrame,
 			sampled: options.sampled,
 			startedAtSeconds: options.startedAtSeconds,
@@ -471,6 +493,9 @@ function createCrossedHookFrames(options: {
 	readonly animationAssetId: string;
 	readonly entityId: string;
 	readonly frameCount: number;
+	readonly onCatchUpTruncated:
+		| ((truncation: DynamicAnimationCatchUpTruncation) => void)
+		| null;
 	readonly previousHookFrame: DynamicAnimationHookFrameKey | null;
 	readonly sampled: SampledAnimationFrame;
 	readonly startedAtSeconds: number;
@@ -492,7 +517,7 @@ function createCrossedHookFrames(options: {
 		crossedFrameCount - MAX_CROSSED_HOOK_FRAMES_PER_UPDATE,
 	);
 	if (droppedFrameCount > 0) {
-		console.warn("[holtburger-3d][dynamic-animation-hook-catchup-truncated]", {
+		options.onCatchUpTruncated?.({
 			animationAssetId: options.animationAssetId,
 			dispatchedFrameCount: MAX_CROSSED_HOOK_FRAMES_PER_UPDATE,
 			droppedFrameCount,

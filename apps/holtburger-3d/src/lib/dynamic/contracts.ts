@@ -695,7 +695,7 @@ export interface DynamicEntityTextureRequirement {
 	readonly textureKey: TextureKey;
 	/** Residency owners that retain this dynamic texture. */
 	readonly ownerIds: readonly TextureOwnerId[];
-	/** Physical atlas-page compatibility class for this texture. */
+	/** Physical atlas-page format class for this texture. */
 	readonly pageClass: TexturePageClass;
 	/** Runtime texture-use id used for renderer binding and dependency pinning. */
 	readonly dynamicTextureSourceId: string;

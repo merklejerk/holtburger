@@ -29,7 +29,7 @@ export interface OpenWorldTextureBindingRequirement {
 	readonly bucketKey: OpenWorldTextureBucketKey;
 	/** Optional packer clustering hint owned by the originating domain adapter. */
 	readonly affinityKey?: string | null;
-	/** Physical page compatibility class. */
+	/** Physical page format class. */
 	readonly pageClass: TexturePageClass;
 	/** Shader/page role for compatible placement reuse. */
 	readonly purpose: TextureUsagePurpose;
@@ -48,7 +48,7 @@ interface OpenWorldTextureEntryRecord {
 	readonly bindingIds: readonly TextureBindingId[];
 	/** Owners currently claiming this entry. Empty entries are reclaimable. */
 	readonly ownerIds: readonly MaterializationOwnerId[];
-	/** Physical page compatibility class. */
+	/** Physical page format class. */
 	readonly pageClass: TexturePageClass;
 	/** Shader/page role for compatible placement reuse. */
 	readonly purpose: TextureUsagePurpose;

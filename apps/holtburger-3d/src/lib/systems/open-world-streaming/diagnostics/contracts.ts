@@ -42,7 +42,7 @@ export interface OpenWorldStreamingDiagnosticsSnapshot {
 			readonly resident: number;
 			readonly total: number;
 		};
-		/** Direct policy for ownerless retained pages; not a legacy leak detector. */
+		/** Direct policy for ownerless retained pages. */
 		readonly ownerlessPagePolicy: {
 			readonly residentDisposition: "cached-for-reuse";
 			readonly rendererRemoval: {
@@ -330,7 +330,6 @@ interface OpenWorldStreamingStaticTaskTimingDiagnostics {
 	readonly stages: readonly OpenWorldStreamingStaticTaskStageTiming[];
 }
 
-/** Deletion-targeted compatibility projection outside replacement internals. */
 /** Materialization substage timing owned by replacement diagnostics. */
 export interface OpenWorldStreamingStaticTaskStageTiming {
 	readonly durationMs: number;

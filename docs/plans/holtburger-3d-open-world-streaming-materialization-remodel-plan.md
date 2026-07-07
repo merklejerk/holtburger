@@ -3576,20 +3576,26 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Search production and tests for legacy coordinator/texture manager/materialization/diagnostic terms.
-- [ ] Audit `open-world-streaming` and dynamic texture contracts for `compatibility` wording.
-- [ ] Delete or move replacement-internal compatibility projections.
-- [ ] Rename durable page-class comments away from legacy-shaped terminology if needed.
-- [ ] Verify direct builders terminate at worker/test boundaries.
-- [ ] Delete or rewrite obsolete tests that preserve retired architecture.
-- [ ] Run `npm run check`.
-- [ ] Run `npm run lint`.
-- [ ] Run focused diagnostics, texture residency, material readiness, and worker-boundary tests.
-- [ ] Dry-run Phase 56 and steer the final harness/checklist targets.
+- [x] Search production and tests for legacy coordinator/texture manager/materialization/diagnostic terms.
+- [x] Audit `open-world-streaming` and dynamic texture contracts for `compatibility` wording.
+- [x] Delete or move replacement-internal compatibility projections.
+- [x] Rename durable page-class comments away from legacy-shaped terminology if needed.
+- [x] Verify direct builders terminate at worker/test boundaries.
+- [x] Delete or rewrite obsolete tests that preserve retired architecture.
+- [x] Run `npm run check`.
+- [x] Run `npm run lint`.
+- [x] Run focused diagnostics, texture residency, material readiness, and worker-boundary tests.
+- [x] Dry-run Phase 56 and steer the final harness/checklist targets.
 
 Decisions and course corrections:
 
-- Pending.
+- Production/test search under `apps/holtburger-3d/src` and `apps/holtburger-3d/scripts` found no live hits for `StaticCoordinator`, `TextureManager`, `staticOverview`, ignored placement policy, old static commit counters, legacy diagnostic categories, or old materialization lifecycle terms. Historical references remain only in this plan.
+- Removed replacement-internal compatibility/legacy wording from `open-world-streaming` comments and renamed page-class comments to page-format language. The `TexturePageClass` field is still legitimate placement policy: it describes physical page format constraints, not old texture-manager compatibility.
+- Deleted the stale "Deletion-targeted compatibility projection" comment in diagnostics contracts. `OpenWorldStreamingStaticTaskStageTiming` is replacement-native substage timing, not a surviving projection.
+- Direct builders are retained without renaming. Search showed `DirectOpenWorldObjectVisualAtlasBuilder` is used by the atlas worker and colocated placement tests, while `DirectOpenWorldTexturePageBuilder` is used by the page-build worker and colocated page-build tests. They are direct worker implementations, not a production browser-side parallel materialization path.
+- Test audit found no obvious tests preserving ignored placement policy fields, old bucket lifetime assumptions, `staticOverview`, old coordinator/manager names, or shim/legacy diagnostic parity.
+- Phase 56 dry-run confirmed the required scripts exist in `apps/holtburger-3d/package.json`: `check`, `lint`, `lint:dead`, `test:ts`, and `harness:browser`. The harness supports `--landblock`, `--domains`, `--layer-distance`, `--timeout-ms`, and `--output`, so final evidence should reuse the Phase 53/54 matrix rather than inventing a new benchmark shape.
+- Verification passed with `npm run check`, `npm run lint`, and `npm run test:ts -- --run src/lib/systems/open-world-streaming/diagnostics/contracts.ts src/lib/systems/open-world-streaming/texture-residency/claims/texture-claim-registry.test.ts src/lib/systems/open-world-streaming/texture-residency/commits/texture-commit-applier.test.ts src/lib/systems/open-world-streaming/texture-residency/page-build/page-build.test.ts src/lib/systems/open-world-streaming/texture-residency/page-build/texture-page-build-task-stream.test.ts src/lib/systems/open-world-streaming/texture-residency/atlas-build/object-visual-atlas-worker-client.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/material-texture-placement-policy.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/material-texture-placement-plan.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/object-visual-texture-placement-plan.test.ts src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts src/lib/systems/open-world-streaming/runtime-entities/runtime-entity-system.test.ts src/lib/renderer/webgl2/webgl2-texture-bindings.test.ts`.
 
 ### Phase 56: Final Harness Evidence And Plan Closeout
 
@@ -3605,6 +3611,7 @@ Current code delta:
 
 - Phase 53 established the current benchmark matrix and worker-attribution evidence. Phase 56 reruns the final matrix after the terminology/shim wipe to prove cleanup did not regress readiness.
 - Phase 54 deliberately deferred active renderer page reclamation because ownerless pages remained zero and byte accounting is not canonical. Phase 56 must preserve that as an explicit deferral rather than smuggling in a scheduler during cleanup.
+- Phase 55 removed the remaining replacement-internal compatibility wording and proved direct builders are worker/test-boundary implementations, not a live old-pipeline path.
 
 Deliverables:
 
@@ -3722,7 +3729,7 @@ Mitigation:
 
 Mitigation:
 
-- Treat the worksheet as the design guardrail for Phases 19-41.
+- Treat the worksheet as the design guardrail for all remediation and closeout phases.
 - Record deliberate deviations in the phase decisions before implementation proceeds.
 - Prefer pausing a phase over landing a convenient contract that contradicts static-authored dynamic sharing, worker-owned page build, loose readiness, or direct replacement diagnostics.
 

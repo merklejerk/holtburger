@@ -67,6 +67,8 @@ export interface OpenWorldTexturePageRecord {
 	readonly bucketKey: OpenWorldTextureBucketKey;
 	/** Entries currently assigned to this virtual page. */
 	readonly entryIds: readonly OpenWorldTextureEntryId[];
+	/** Sum of assigned entry rect areas on this page, excluding gutters. */
+	readonly assignedPixelCount: number;
 	/** Build reservation token when this page has in-flight worker work. */
 	readonly reservationToken: OpenWorldTexturePageReservationToken | null;
 	/** Last active page state retained while this page is ownerless and reclaimable. */
@@ -77,6 +79,8 @@ export interface OpenWorldTexturePageRecord {
 	readonly textureRefId: string;
 	/** Runtime texture page height in pixels when known by placement planning. */
 	readonly textureHeight: number | null;
+	/** Total runtime texture page pixel count when dimensions are known. */
+	readonly texturePixelCount: number | null;
 	/** Runtime texture page width in pixels when known by placement planning. */
 	readonly textureWidth: number | null;
 }
@@ -784,6 +788,7 @@ function snapshotEntry(
 
 function snapshotPage(page: MutableTexturePage): OpenWorldTexturePageRecord {
 	return {
+		assignedPixelCount: calculateAssignedPixelCount(page.placementsByEntryId),
 		bucketKey: page.bucketKey,
 		entryIds: [...page.entryIds].sort(),
 		id: page.id,
@@ -792,9 +797,32 @@ function snapshotPage(page: MutableTexturePage): OpenWorldTexturePageRecord {
 		reservationToken: page.reservationToken,
 		state: page.state,
 		textureHeight: page.textureHeight,
+		texturePixelCount:
+			page.textureHeight === null || page.textureWidth === null
+				? null
+				: page.textureHeight * page.textureWidth,
 		textureRefId: page.textureRefId,
 		textureWidth: page.textureWidth,
 	};
+}
+
+function calculateAssignedPixelCount(
+	placementsByEntryId: ReadonlyMap<
+		OpenWorldTextureEntryId,
+		readonly [number, number, number, number]
+	>,
+): number {
+	let assignedPixelCount = 0;
+	for (const [entryId, rect] of placementsByEntryId) {
+		const [, , width, height] = rect;
+		if (width < 0 || height < 0) {
+			throw new Error(
+				`Texture entry ${entryId} has invalid negative placement size ${width}x${height}.`,
+			);
+		}
+		assignedPixelCount += width * height;
+	}
+	return assignedPixelCount;
 }
 
 function isReusablePageState(page: MutableTexturePage): boolean {

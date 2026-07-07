@@ -419,6 +419,11 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 			nativeSnapshot.bucketKey as OpenWorldTextureBucketKey,
 		);
 		return {
+			assignedPixelCount: nativeSnapshot.assignedPixelCount,
+			assignedPixelRatio: createAssignedPixelRatio({
+				assignedPixelCount: nativeSnapshot.assignedPixelCount,
+				texturePixelCount: nativeSnapshot.texturePixelCount,
+			}),
 			bucket: {
 				domain: bucketParts.domain,
 				key: nativeSnapshot.bucketKey,
@@ -451,6 +456,7 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 							wrapT: nativeSnapshot.preview.wrapT,
 						},
 			state: nativeSnapshot.state,
+			texturePixelCount: nativeSnapshot.texturePixelCount,
 		};
 	}
 
@@ -563,6 +569,11 @@ function createRuntimeTextureBucketOverview(
 				return entry;
 			});
 			return {
+				assignedPixelCount: page.assignedPixelCount,
+				assignedPixelRatio: createAssignedPixelRatio({
+					assignedPixelCount: page.assignedPixelCount,
+					texturePixelCount: page.texturePixelCount,
+				}),
 				bindingCount: sumCounts(
 					pageEntries,
 					(entry) => entry.bindingIds.length,
@@ -579,6 +590,7 @@ function createRuntimeTextureBucketOverview(
 				scope: bucketParts.scope,
 				sourceCount: uniqueCount(pageEntries.map((entry) => entry.sourceKey)),
 				state: page.state,
+				texturePixelCount: page.texturePixelCount,
 			};
 		}),
 		purpose: bucketParts.purpose,
@@ -600,6 +612,16 @@ function sumCounts<T>(
 	count: (value: T) => number,
 ): number {
 	return values.reduce((total, value) => total + count(value), 0);
+}
+
+function createAssignedPixelRatio(input: {
+	readonly assignedPixelCount: number;
+	readonly texturePixelCount: number | null;
+}): number | null {
+	if (input.texturePixelCount === null || input.texturePixelCount <= 0) {
+		return null;
+	}
+	return input.assignedPixelCount / input.texturePixelCount;
 }
 
 function createStaticObjectUploadSample(

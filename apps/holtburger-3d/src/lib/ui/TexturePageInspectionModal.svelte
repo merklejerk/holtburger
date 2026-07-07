@@ -430,6 +430,18 @@
 			? "none"
 			: `${preview.width}x${preview.height} ${preview.format} / ${preview.sampleClass}`;
 	}
+
+	function formatAssignedPixels(snapshot: RuntimeTexturePageInspectionSnapshot): string {
+		const ratio =
+			snapshot.assignedPixelRatio === null
+				? "unknown"
+				: `${(snapshot.assignedPixelRatio * 100).toFixed(1)}%`;
+		const total =
+			snapshot.texturePixelCount === null
+				? "unknown"
+				: String(snapshot.texturePixelCount);
+		return `${ratio} / ${snapshot.assignedPixelCount} of ${total}`;
+	}
 </script>
 
 <svelte:window onpointerdown={handleWindowPointerDown} />
@@ -545,6 +557,10 @@
 							<div>
 								<dt>Placements</dt>
 								<dd>{snapshot.preview?.placements.length ?? 0}</dd>
+							</div>
+							<div>
+								<dt>Assigned pixels</dt>
+								<dd>{formatAssignedPixels(snapshot)}</dd>
 							</div>
 							<div>
 								<dt>Entries</dt>

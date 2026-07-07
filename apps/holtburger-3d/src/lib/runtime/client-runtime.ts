@@ -163,6 +163,8 @@ interface RuntimeTextureBucketOverview {
 }
 
 export interface RuntimeTexturePageOverview {
+	readonly assignedPixelCount: number;
+	readonly assignedPixelRatio: number | null;
 	readonly bindingCount: number;
 	readonly bucketKey: string;
 	readonly domain: string;
@@ -176,9 +178,12 @@ export interface RuntimeTexturePageOverview {
 	readonly scope: string;
 	readonly sourceCount: number;
 	readonly state: "planned" | "building" | "resident" | "reclaimable";
+	readonly texturePixelCount: number | null;
 }
 
 export interface RuntimeTexturePageInspectionSnapshot {
+	readonly assignedPixelCount: number;
+	readonly assignedPixelRatio: number | null;
 	readonly bucket: {
 		readonly domain: string;
 		readonly key: string;
@@ -195,6 +200,7 @@ export interface RuntimeTexturePageInspectionSnapshot {
 		| "resident"
 		| "reclaimable"
 		| "missing";
+	readonly texturePixelCount: number | null;
 }
 
 export interface RuntimeTexturePageInspectionPreview {

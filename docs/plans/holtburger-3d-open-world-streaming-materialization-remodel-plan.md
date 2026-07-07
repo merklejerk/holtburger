@@ -2424,25 +2424,35 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Dry-run worker-boundary cleanup, placement/readiness cleanup, diagnostics cleanup, source-tree cleanup, and final verification from the current code tree.
-- [ ] Audit direct builder production usage in `material-texture-placement-plan.ts`, `object-visual-texture-placement-plan.ts`, `direct-page-builder.ts`, `page-build.worker.ts`, `object-visual-atlas-builder.ts`, and `object-visual-atlas.worker.ts`.
-- [ ] Audit placement and readiness contract drift in `placement.ts`, `material-texture-placement-policy.ts`, terrain/object/static tests, and `open-world-streaming-controller.ts`.
-- [ ] Audit diagnostic compatibility projections in `client-runtime-adapter.ts`, `browser-pipeline-harness.mjs`, renderer fallback warnings, visual baker warnings, and env-cell warnings.
-- [ ] Audit tests for legacy bucket/readiness/diagnostic parity assumptions.
-- [ ] Update Phases 31-36 with any ordering changes discovered by the dry run.
-- [ ] Record explicitly deferred material fidelity work with evidence and reactivation criteria.
+- [x] Dry-run worker-boundary cleanup, placement/readiness cleanup, diagnostics cleanup, source-tree cleanup, and final verification from the current code tree.
+- [x] Audit direct builder production usage in `material-texture-placement-plan.ts`, `object-visual-texture-placement-plan.ts`, `direct-page-builder.ts`, `page-build.worker.ts`, `object-visual-atlas-builder.ts`, and `object-visual-atlas.worker.ts`.
+- [x] Audit placement and readiness contract drift in `placement.ts`, `material-texture-placement-policy.ts`, terrain/object/static tests, and `open-world-streaming-controller.ts`.
+- [x] Audit diagnostic compatibility projections in `client-runtime-adapter.ts`, `browser-pipeline-harness.mjs`, renderer fallback warnings, visual baker warnings, and env-cell warnings.
+- [x] Audit tests for legacy bucket/readiness/diagnostic parity assumptions.
+- [x] Update Phases 31-36 with any ordering changes discovered by the dry run.
+- [x] Record explicitly deferred material fidelity work with evidence and reactivation criteria.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 30 completed on 2026-07-07.
+- Worksheet recheck: Requirements 5, 7, 13, 14, and the page-build split still steer the remaining work. The target remains explicit replacement bucket policy, static-authored dynamic sharing by parent/static-domain where content-stable, terrain/object isomorphic placement, multi-owner texture claims, loose scene/texture ordering, and worker-owned source preparation/page materialization.
+- Dry-run finding for Phase 31: production terrain, outdoor object, env-cell, and runtime-entity artifact runners already call `reserveMaterialTexturePlacements(...)` or `reserveObjectVisualTexturePlacements(...)`, then hand `pageBuildRequests` to the controller's task stream. The risk is no longer broad production use of synchronous page building; the risk is the misleading exported `buildMaterialTexturePlacementPlan(...)`, `buildObjectVisualTexturePlacementPlan(...)`, and `buildReservedMaterialTexturePages(...)` trapdoor plus tests that still treat direct builders as the normal plan path.
+- Phase 31 is therefore steered toward deleting or test-isolating synchronous builder convenience APIs and rewriting tests around reservation plus worker/page-build settlement. This is a cleaner cut than wrapping the direct path with more policy.
+- Dry-run finding for Phase 32: Phase 29 removed the implicit runtime behavior from `createStaticTexturePlacementIntent(...)` at runtime, but `TexturePlacementIntentOptions.placementPolicy` is still optional at the type level. That weakens the direct contract and should be tightened instead of relying on runtime throws forever. `createObjectVisualStaticTexturePlacementIntent(...)` and `createDynamicTexturePlacementIntent(...)` need the same type-level audit.
+- Phase 32 should also decide whether legacy `ownerIds`, `pageClass`, and old texture-use identity fields are adapter inputs, bake-facing facts, or vestigial fields. Do not delete them blindly; classify them against current static bake consumers first.
+- Dry-run finding for Phase 33: remaining materialization-ish `console.warn(...)` sites are concrete: terrain layered fallback in `webgl2-renderer.ts`, unsupported visual material in `visual/object-visual-baker.ts`, structured-interior missing recipe dependencies and geometry surface omissions in `env-cell-system-baker.ts`, and env-cell BVH/static placement omissions in `env-cell-system-resolver.ts`. Some are renderer/debug smoke alarms, not all are material-readiness defects.
+- Dry-run finding for Phase 34: `client-runtime-adapter.ts` still projects replacement diagnostics into `RuntimeOverviewSnapshot.static`, and `browser-pipeline-harness.mjs` still stores `staticOverview` beside replacement `openWorldStreaming`. That is an edge projection, but it remains a shim-shaped consumer that should be migrated or deleted before final cutover.
+- Dry-run finding for Phase 35: the currently proven unresolved fidelity issue is the two structured-interior `deferred-material` readiness records from the Phase 29 all-domain harness. Treat them as the first backlog triage target; terrain has zero material issues in the same run.
+- Classification summary: direct migration targets are placement intent option types, placement/readiness tests, page-build tests, and harness diagnostics consumers. Deletion targets are direct synchronous build-plan helpers if no production caller remains, warning-text-only tests, and legacy-shaped overview projections that survive only for old reports. Durable adapters are worker handlers, renderer texture commit appliers, asset readers, and harness composition. Edge shims are `client-runtime-adapter.ts` overview projection and harness `staticOverview` until migrated.
+- Spicy bit: the code shape is better than the phase text assumed. The trap is not that production still uses the direct builders everywhere; it is that the API and tests make the wrong path look blessed. Leaving that around would quietly teach future code to reintroduce the worksheet's original stutter mechanism.
 
 ### Phase 31: Worker Boundary And Production Page-Build Cutover
 
 Deliverables:
 
-- Split placement reservation from page pixel construction in `texture-residency/placement/material-texture-placement-plan.ts`.
-- Split object-visual atlas planning from page pixel construction in `texture-residency/placement/object-visual-texture-placement-plan.ts`.
-- Route production material page construction through `WorkerPoolOpenWorldTexturePageBuilder` and `object-visual-atlas.worker.ts`/page-build worker handlers instead of direct builders.
+- Preserve the current production split where terrain, outdoor object, env-cell, and runtime-entity runners call reservation APIs and the controller owns page-build task settlement.
+- Delete or test-isolate synchronous convenience helpers in `texture-residency/placement/material-texture-placement-plan.ts` and `texture-residency/placement/object-visual-texture-placement-plan.ts`.
+- Route tests that need page pixels through worker-client/handler settlement or explicitly named worker-internal direct builders.
 - Keep direct builders test-only or worker-internal, with names/import paths that make that status obvious.
 - Remove or rename APIs that imply `buildReservedMaterialTexturePages(...)` is production-safe from the browser main loop.
 
@@ -2451,6 +2461,7 @@ Acceptance criteria:
 - No production static or runtime materialization path calls `buildReservedMaterialTexturePages(...)`.
 - `DirectOpenWorldTexturePageBuilder` and `DirectOpenWorldObjectVisualAtlasBuilder` are imported only by tests or worker handlers.
 - Production bake-facing placement plans return immutable placement/source facts and reservations, not already materialized page pixels.
+- `buildMaterialTexturePlacementPlan(...)` and `buildObjectVisualTexturePlacementPlan(...)` are deleted, renamed as test-only helpers, or otherwise made impossible to import from production modules.
 - Any remaining synchronous source-preparation work on the browser main thread is measured, named, and accepted as a deliberate exception against the worksheet.
 - Tests cover the worker-client/handler path and stale/noop/failure settlement rather than direct-builder production shortcuts.
 - Browser harness does not show a new main-thread packing/page-materialization blackout.
@@ -2458,8 +2469,9 @@ Acceptance criteria:
 Task checklist:
 
 - [ ] Audit imports of `buildReservedMaterialTexturePages`, `DirectOpenWorldTexturePageBuilder`, and `DirectOpenWorldObjectVisualAtlasBuilder`.
-- [ ] Replace `buildMaterialTexturePlacementPlan(...)` production behavior so it reserves placement and emits page-build tasks instead of awaiting page materialization before bake.
-- [ ] Replace `buildOpenWorldObjectVisualTexturePlacementPlan(...)` production behavior so object visual atlas page construction happens in the worker-owned task stream.
+- [ ] Confirm production callers use `reserveMaterialTexturePlacements(...)` or `reserveObjectVisualTexturePlacements(...)` and controller-owned page-build tasks, not synchronous build-plan helpers.
+- [ ] Delete or move `buildMaterialTexturePlacementPlan(...)`, `buildObjectVisualTexturePlacementPlan(...)`, and `buildReservedMaterialTexturePages(...)` behind test-only or worker-internal boundaries.
+- [ ] Replace direct build-plan tests with reservation tests plus page-build worker/settlement tests.
 - [ ] Keep worker handlers as the only non-test callers of `DirectOpenWorldTexturePageBuilder` and `DirectOpenWorldObjectVisualAtlasBuilder`.
 - [ ] Move any direct-builder fixtures into test-only helpers if production modules no longer need them.
 - [ ] Add or update tests for worker-client page-build output, object-visual atlas worker output, and controller settlement.
@@ -2488,7 +2500,9 @@ Acceptance criteria:
 Task checklist:
 
 - [ ] Audit `apps/holtburger-3d/src/lib/textures/placement.ts` for optional defaults and legacy placement fields that replacement callers can still accidentally use.
+- [ ] Make replacement placement policy required at the type level for static and dynamic placement intent creation, or split input types so legacy texture-use facts cannot omit replacement policy.
 - [ ] Audit `material-texture-placement-policy.ts`, `object-visual-texture-placement-plan.ts`, `static-material-texture-policy.test.ts`, `placement.test.ts`, terrain bake tests, and object visual tests for old bucket parity expectations.
+- [ ] Classify `ownerIds`, `pageClass`, `textureKey`, and bake-facing item ids as durable bake/renderer facts, adapter inputs, or vestigial fields before deleting or renaming them.
 - [ ] Remove or isolate any production use of ignored `placementBucketKey` facts.
 - [ ] Add readiness tests that prove material coverage alone does not mark a resource renderable.
 - [ ] Update all touched consumers as direct migrations, deletions, edge shims, or durable adapters in the phase decisions.
@@ -2517,8 +2531,10 @@ Task checklist:
 
 - [ ] Audit `webgl2-renderer.ts` `#warnTerrainLayeredFallback(...)` and its tests after Phase 29 terrain readiness diagnostics.
 - [ ] Audit `visual/object-visual-baker.ts` warning paths and decide whether dynamic/runtime visual consumers need a direct diagnostic before deletion.
+- [ ] Replace unsupported visual material warning text with structured diagnostics when the unsupported recipe is expected to survive into dynamic/runtime visual paths.
 - [ ] Audit `static/env-cells/bake/env-cell-system-baker.ts` warnings for material, geometry, publication, and BVH categories.
 - [ ] Audit `static/env-cells/env-cell-system-resolver.ts` BVH warnings for whether they belong in replacement diagnostics or debug-only tooling.
+- [ ] Keep browser interaction warnings in `BrowserDisplay.svelte` and spawn seed resolver warnings out of this phase unless they preserve materialization/streaming pipeline concepts.
 - [ ] Migrate surviving diagnostics consumers in `client-runtime-adapter.ts`, `BrowserPipelineHarness.svelte`, and `browser-pipeline-harness.mjs` to direct replacement contracts where practical.
 - [ ] Add tests for any new structured diagnostics and delete tests that only preserve warning text.
 
@@ -2546,6 +2562,8 @@ Acceptance criteria:
 Task checklist:
 
 - [ ] Audit production imports for `StaticCoordinator`, `TextureManager`, old static commit counters, old diagnostics snapshots, and legacy-shaped runtime projections.
+- [ ] Replace or delete `createRuntimeStaticOverviewFromController(...)` output where it is only preserving old `RuntimeOverviewSnapshot.static` expectations.
+- [ ] Migrate `browser-pipeline-harness.mjs` scenario samples away from `staticOverview` when `openWorldStreaming` already contains the direct replacement evidence.
 - [ ] Delete or migrate old compatibility projections from runtime, harness, UI diagnostics, and tests.
 - [ ] Delete obsolete tests that preserve retired orchestration contracts; replace only tests needed for replacement behavior.
 - [ ] Rename or move modules whose source-tree location now hides the owning system.
@@ -2574,6 +2592,7 @@ Acceptance criteria:
 Task checklist:
 
 - [ ] Re-run all-domain harness and capture `materialReadiness.recentIssues` plus texture page-build summaries.
+- [ ] Start with the two structured-interior `deferred-material` records proven by `/tmp/holtburger-phase29-all-domain-r0.json`; do not broaden this phase until those are explained.
 - [ ] Triage structured-interior deferred-material issues back through `structured-interior-material-planner.ts`, `env-cell-system-baker.ts`, and renderer pass support.
 - [ ] Triage remaining unsupported material cases through `object-visual-material-planner.ts` and `object-visual-baker.ts`.
 - [ ] Triage skipped partitions through static object partition diagnostics and renderer capability.

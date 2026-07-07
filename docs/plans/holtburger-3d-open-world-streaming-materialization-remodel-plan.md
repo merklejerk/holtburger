@@ -2067,16 +2067,26 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Introduce placement reservation DTOs and page-build request DTOs.
-- [ ] Split material placement tests into reservation tests and page-build/commit tests.
-- [ ] Update terrain artifact runner to consume reservation facts and emit page-build work separately.
-- [ ] Update outdoor object and env-cell artifact runners to consume reservation facts and emit page-build work separately.
-- [ ] Update runtime entity materialization to consume reservation facts and emit page-build work separately.
-- [ ] Record any temporary sequencing concession with a deletion trigger.
+- [x] Introduce placement reservation DTOs and page-build request DTOs.
+- [x] Split material placement tests into reservation tests and page-build/commit tests.
+- [x] Update terrain artifact runner to consume reservation facts and emit page-build work separately.
+- [x] Update outdoor object and env-cell artifact runners to consume reservation facts and emit page-build work separately.
+- [x] Update runtime entity materialization to consume reservation facts and emit page-build work separately.
+- [x] Record any temporary sequencing concession with a deletion trigger.
 
 Decisions and course corrections:
 
-- Pending.
+- Split `apps/holtburger-3d/src/lib/systems/open-world-streaming/texture-residency/placement/material-texture-placement-plan.ts` into explicit reservation and page-build products. `reserveMaterialTexturePlacements(...)` now returns bake-facing `bindingPlacements` plus immutable `pageBuildRequests`; `buildReservedMaterialTexturePages(...)` consumes those requests through an injected `OpenWorldTexturePageBuilder` and settles accepted results through replacement residency tokens.
+- Changed the object visual atlas builder from `buildAtlas(...)` to `planAtlasPlacement(...)` in `apps/holtburger-3d/src/lib/systems/open-world-streaming/texture-residency/placement/object-visual-atlas-builder.ts`. It now prepares source dimensions/pixels and runs layout planning without returning page pixel payloads. Stage timing changed from `texture-packing` / `texture-packing-result-transfer` to `texture-layout`.
+- Tightened `OpenWorldTexturePageBuildInput` in `apps/holtburger-3d/src/lib/systems/open-world-streaming/texture-residency/page-build/protocol.ts` so each entry carries `rect`, `gutterPixels`, and `gutterEdgeMode`. This fixes the prior dishonest contract where a page-build worker could not materialize a page without reaching back into hidden placement state.
+- Added `DirectOpenWorldTexturePageBuilder` as the temporary Phase 21 materializer in `apps/holtburger-3d/src/lib/systems/open-world-streaming/texture-residency/page-build/direct-page-builder.ts`. This preserves a separate page-build boundary before Phase 22 moves page materialization behind workers.
+- Updated terrain, outdoor object, env-cell, and runtime dynamic producers to reserve placement before bake and build pages afterward. Static layer commits still return texture commits with the layer commit in this phase; Phase 23 owns loosening texture readiness and commit ordering so texture commits can publish independently of scene/visual commits.
+- Removed the open-world streaming composition dependency on `createTexturePacker` and deleted `apps/holtburger-3d/src/lib/textures/packing/texture-packing.worker.ts` after `knip` proved it was unused by the remodeled production path. The lower-level packing utility remains only where it is still directly tested.
+- Temporary concession: page-build requests still carry prepared pixel sources because source preparation remains caller-side. Deletion trigger: Phase 22 must move source preparation, layout search, guttered blits, and page pixel materialization behind the page-build worker boundary, or explicitly record a measured browser/WebGL exception.
+- Temporary concession: static page-build work is sequenced after bake but still before the layer commit returns. Deletion trigger: Phase 23 must allow texture commits/readiness to publish before or after scene commits without making static scene publication wait for page pixels.
+- Verification: focused `npm run test:ts -- --run src/lib/systems/open-world-streaming/texture-residency/placement/material-texture-placement-plan.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/object-visual-texture-placement-plan.test.ts src/lib/systems/open-world-streaming/texture-residency/page-build/page-build.test.ts src/lib/systems/open-world-streaming/static-layers/terrain/terrain-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/outdoor-objects/outdoor-object-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/env-cells/env-cell-artifact-runner.test.ts src/lib/systems/open-world-streaming/runtime-entities/runtime-entity-system.test.ts src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts` passed.
+- Verification: `npm run check` passed.
+- Verification: `npm run lint` passed.
 
 ### Phase 22: Worker-Owned Page Build Artifact
 

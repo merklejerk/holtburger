@@ -393,6 +393,9 @@ function createPageBuildInput(
 				bindingIds: [bindingId("binding:terrain")],
 				entryId:
 					"entry:terrain" as OpenWorldTexturePageBuildInput["entries"][number]["entryId"],
+				gutterEdgeMode: "clamp",
+				gutterPixels: 0,
+				rect: [0, 0, 1, 1],
 				source: {
 					format: "rgba8",
 					height: 1,

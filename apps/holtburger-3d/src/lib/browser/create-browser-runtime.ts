@@ -21,15 +21,11 @@ import { WorkerPoolStaticBaker } from "../static/bake/worker-client";
 import type { StaticBakeWorkerPort } from "../static/bake/protocol";
 import { WorkerPoolStaticResolver } from "../static/resolver/worker-client";
 import type { StaticResolverWorkerPort } from "../static/resolver/protocol";
-import type { TexturePackingWorkerPort } from "../textures/packing/protocol";
-import type { TexturePacker } from "../textures/packing/packer";
-import { WorkerPoolTexturePacker } from "../textures/packing/worker-client";
 
 const DEFAULT_STATIC_RESOLVER_WORKER_COUNT = 2;
 const DEFAULT_STATIC_BAKER_WORKER_COUNT = 2;
 const DEFAULT_DYNAMIC_VISUAL_RECIPE_RESOLVER_WORKER_COUNT = 1;
 const DEFAULT_DYNAMIC_VISUAL_BAKER_WORKER_COUNT = 1;
-const DEFAULT_TEXTURE_PACKING_WORKER_COUNT = 2;
 
 export interface CreateBrowserRuntimeOptions {
 	readonly staticPublicationMode?: OpenWorldStreamingStaticPublicationMode;
@@ -84,8 +80,6 @@ function createOpenWorldStreamingBoundaryAdapters(options: {
 					DEFAULT_STATIC_RESOLVER_WORKER_COUNT,
 					{ host: options.host },
 				),
-			createTexturePacker: () =>
-				createWorkerTexturePacker(DEFAULT_TEXTURE_PACKING_WORKER_COUNT),
 		},
 	};
 }
@@ -199,22 +193,6 @@ function createDynamicVisualBakerBrowserWorker(): DynamicVisualBakerBrowserWorke
 		new URL("../dynamic/visual-bake.worker.ts", import.meta.url),
 		{ type: "module" },
 	) as DynamicVisualBakerBrowserWorker;
-}
-
-function createWorkerTexturePacker(workerCount: number): TexturePacker {
-	assertPositiveInteger(workerCount, "texture packing worker count");
-
-	return new WorkerPoolTexturePacker({
-		createWorker: () =>
-			new Worker(
-				new URL(
-					"../textures/packing/texture-packing.worker.ts",
-					import.meta.url,
-				),
-				{ type: "module" },
-			) as TexturePackingWorkerPort,
-		workerCount,
-	});
 }
 
 function assertPositiveInteger(value: number, label: string): void {

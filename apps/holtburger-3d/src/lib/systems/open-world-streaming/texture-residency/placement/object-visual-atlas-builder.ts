@@ -5,18 +5,16 @@ import {
 	prepareDirectMaterialTextureSource,
 	type DirectMaterialTextureSource,
 } from "../../../../assets/preparation/prepared-texture-source";
+import { planAtlasLayout } from "../../../../textures/packing/atlas-layout";
 import type {
 	MaterialTextureDataUseIdentity,
 	VisualTextureDomain,
 } from "../../../../static/contracts";
-import type { TexturePacker } from "../../../../textures/packing/packer";
 import type {
 	TexturePackingJob,
 	TexturePackingPageFormat,
 	TexturePackingPixelSource,
-	TexturePackingResult,
 } from "../../../../textures/packing/protocol";
-import type { TexturePackingResultWithDiagnostics } from "../../../../textures/packing/worker-client";
 import type { OpenWorldStreamingStaticTaskStageTiming } from "../../diagnostics/contracts";
 import type { OpenWorldTextureEntryId } from "../claims/texture-claim-registry";
 
@@ -42,6 +40,8 @@ interface OpenWorldObjectVisualAtlasBuildPage {
 	readonly gutterPixels: number;
 	/** Runtime page height in pixels. */
 	readonly height: number;
+	/** Optional cap on physical texture pages a layout may use. */
+	readonly maxTextureCount?: number;
 	/** Atlas runway policy for oversized or multi-page jobs. */
 	readonly pageRunway: TexturePackingJob["page"]["pageRunway"];
 	/** Atlas page selection policy. */
@@ -59,19 +59,46 @@ interface OpenWorldObjectVisualAtlasBuildEntry {
 	readonly gutterEdgeMode: TexturePackingJob["sources"][number]["gutterEdgeMode"];
 }
 
-export interface OpenWorldObjectVisualAtlasBuildOutput {
-	/** Packed page pixels ready for replacement page settlement. */
-	readonly pages: TexturePackingResult["pages"];
+export interface OpenWorldObjectVisualAtlasPlacementOutput {
+	/** Planned virtual page layouts. Does not contain page pixels. */
+	readonly pages: readonly OpenWorldObjectVisualAtlasPlacementPage[];
 	/** Packed rects keyed by replacement entry id. */
-	readonly rects: TexturePackingResult["rects"];
+	readonly rects: readonly OpenWorldObjectVisualAtlasPlacementRect[];
+	/** Prepared source pixels retained only for the page-build request product. */
+	readonly sources: readonly OpenWorldObjectVisualAtlasPreparedSource[];
 	/** Worker- or direct-builder-local stage timings. */
 	readonly stageTimings: readonly OpenWorldStreamingStaticTaskStageTiming[];
 }
 
+interface OpenWorldObjectVisualAtlasPlacementPage {
+	/** Layout-local page id used before replacement residency assigns virtual pages. */
+	readonly pageId: string;
+	/** Runtime page height in pixels. */
+	readonly height: number;
+	/** Runtime page width in pixels. */
+	readonly width: number;
+}
+
+export interface OpenWorldObjectVisualAtlasPlacementRect {
+	/** Shared texture entry placed by this rect. */
+	readonly entryKey: OpenWorldTextureEntryId;
+	/** Layout-local page id containing this rect. */
+	readonly pageId: string;
+	/** Content rect inside the page, excluding gutters. */
+	readonly rect: readonly [number, number, number, number];
+}
+
+export interface OpenWorldObjectVisualAtlasPreparedSource {
+	/** Shared logical texture entry and source identity used by page-build requests. */
+	readonly entry: OpenWorldObjectVisualAtlasBuildEntry;
+	/** Prepared pixels for the page-build request product. */
+	readonly source: TexturePackingPixelSource;
+}
+
 export interface OpenWorldObjectVisualAtlasBuilder {
-	buildAtlas(
+	planAtlasPlacement(
 		input: OpenWorldObjectVisualAtlasBuildInput,
-	): Promise<OpenWorldObjectVisualAtlasBuildOutput>;
+	): Promise<OpenWorldObjectVisualAtlasPlacementOutput>;
 	dispose?(): void;
 }
 
@@ -80,8 +107,8 @@ export type OpenWorldMaterialTextureAtlasBuildInput =
 	OpenWorldObjectVisualAtlasBuildInput;
 
 /** Generic material-texture atlas output used by static and runtime texture placement. */
-export type OpenWorldMaterialTextureAtlasBuildOutput =
-	OpenWorldObjectVisualAtlasBuildOutput;
+export type OpenWorldMaterialTextureAtlasPlacementOutput =
+	OpenWorldObjectVisualAtlasPlacementOutput;
 
 /** Generic material-texture atlas builder used by static and runtime texture placement. */
 export type OpenWorldMaterialTextureAtlasBuilder =
@@ -89,32 +116,27 @@ export type OpenWorldMaterialTextureAtlasBuilder =
 
 export class DirectOpenWorldObjectVisualAtlasBuilder implements OpenWorldObjectVisualAtlasBuilder {
 	readonly #assetReader: PreparedAssetReader;
-	readonly #texturePacker: TexturePacker;
 
 	constructor(options: {
 		readonly assetReader: PreparedAssetReader;
-		readonly texturePacker: TexturePacker;
 	}) {
 		this.#assetReader = options.assetReader;
-		this.#texturePacker = options.texturePacker;
 	}
 
-	async buildAtlas(
+	async planAtlasPlacement(
 		input: OpenWorldObjectVisualAtlasBuildInput,
-	): Promise<OpenWorldObjectVisualAtlasBuildOutput> {
-		return buildObjectVisualAtlas({
+	): Promise<OpenWorldObjectVisualAtlasPlacementOutput> {
+		return planObjectVisualAtlasPlacement({
 			assetReader: this.#assetReader,
 			input,
-			texturePacker: this.#texturePacker,
 		});
 	}
 }
 
-async function buildObjectVisualAtlas(options: {
+async function planObjectVisualAtlasPlacement(options: {
 	readonly assetReader: PreparedAssetReader;
 	readonly input: OpenWorldObjectVisualAtlasBuildInput;
-	readonly texturePacker: TexturePacker;
-}): Promise<OpenWorldObjectVisualAtlasBuildOutput> {
+}): Promise<OpenWorldObjectVisualAtlasPlacementOutput> {
 	const timings: OpenWorldStreamingStaticTaskStageTiming[] = [];
 	const sources = await measureStage(
 		timings,
@@ -127,33 +149,20 @@ async function buildObjectVisualAtlas(options: {
 			}),
 		options.input.entries.length,
 	);
-	const packed = await measureStage(
+	const layout = await measureStage(
 		timings,
-		"texture-packing",
-		() =>
-			packTexturesWithBoundaryDiagnostics(options.texturePacker, {
-				domain: options.input.domain,
-				jobId: options.input.jobId,
-				page: options.input.page,
-				placementRevision: 0,
-				sources: sources.map(({ entry, source }) => ({
-					entryKey: entry.entryId,
-					gutterEdgeMode: entry.gutterEdgeMode,
-					source,
-				})),
+		"texture-layout",
+		async () =>
+			planTexturePlacementLayout({
+				input: options.input,
+				sources,
 			}),
 		sources.length,
 	);
-	if (packed.diagnostics && packed.diagnostics.deliveryMs !== null) {
-		timings.push({
-			durationMs: packed.diagnostics.deliveryMs,
-			itemCount: packed.diagnostics.pageCount,
-			stage: "texture-packing-result-transfer",
-		});
-	}
 	return {
-		pages: packed.result.pages,
-		rects: packed.result.rects,
+		pages: layout.pages,
+		rects: layout.rects,
+		sources,
 		stageTimings: timings,
 	};
 }
@@ -214,35 +223,6 @@ async function prepareTexturePackingSources(options: {
 	return results;
 }
 
-async function packTexturesWithBoundaryDiagnostics(
-	texturePacker: TexturePacker,
-	job: TexturePackingJob,
-): Promise<TexturePackingResultWithDiagnostics> {
-	if (hasDiagnosticTexturePacker(texturePacker)) {
-		return texturePacker.packWithDiagnostics(job);
-	}
-	return {
-		diagnostics: null,
-		result: await texturePacker.pack(job),
-	};
-}
-
-interface DiagnosticTexturePacker extends TexturePacker {
-	/** Optional richer worker-boundary pack path exposed by worker-backed packers. */
-	packWithDiagnostics(
-		job: TexturePackingJob,
-	): Promise<TexturePackingResultWithDiagnostics>;
-}
-
-function hasDiagnosticTexturePacker(
-	texturePacker: TexturePacker,
-): texturePacker is DiagnosticTexturePacker {
-	return (
-		"packWithDiagnostics" in texturePacker &&
-		typeof texturePacker.packWithDiagnostics === "function"
-	);
-}
-
 async function prepareTexturePackingSource(options: {
 	readonly assetReader: PreparedAssetReader;
 	readonly dataUse: MaterialTextureDataUseIdentity;
@@ -293,6 +273,106 @@ function createTexturePackingPixelSource(
 		pixels: source.pixels,
 		width: source.width,
 	};
+}
+
+function planTexturePlacementLayout(options: {
+	readonly input: OpenWorldObjectVisualAtlasBuildInput;
+	readonly sources: readonly OpenWorldObjectVisualAtlasPreparedSource[];
+}): {
+	readonly pages: readonly OpenWorldObjectVisualAtlasPlacementPage[];
+	readonly rects: readonly OpenWorldObjectVisualAtlasPlacementRect[];
+} {
+	for (const entry of options.sources) {
+		const { source } = entry;
+		if (source.format !== options.input.page.format) {
+			throw new Error(
+				`Texture layout job ${options.input.jobId} expected ${options.input.page.format} sources, got ${source.format}.`,
+			);
+		}
+		assertPixelLengthMatchesFormat(
+			options.input.jobId,
+			entry.entry.entryId,
+			source,
+		);
+	}
+
+	const layout = planAtlasLayout({
+		entries: options.sources.map(({ entry, source }) => ({
+			height: source.height,
+			key: entry.entryId,
+			width: source.width,
+		})),
+		policy: {
+			gutterPixels: options.input.page.gutterPixels,
+			maxTextureCount:
+				options.input.page.maxTextureCount ?? Number.MAX_SAFE_INTEGER,
+			maxTextureSize: Math.max(
+				options.input.page.width,
+				options.input.page.height,
+			),
+			pageRunway: options.input.page.pageRunway,
+			pageSelection: options.input.page.pageSelection,
+		},
+	});
+	if (layout.overflows.length > 0) {
+		const overflow = layout.overflows[0];
+		throw new Error(
+			`Texture layout job ${options.input.jobId} could not place ${overflow?.atlasEntryKey ?? "a texture"}: ${overflow?.detail ?? "atlas capacity was exceeded"}.`,
+		);
+	}
+
+	return {
+		pages: layout.texturePages.map((page) => ({
+			height: page.height,
+			pageId: createPageId(options.input.jobId, page.textureIndex),
+			width: page.width,
+		})),
+		rects: layout.texturePages.flatMap((page) =>
+			page.placements.map((placement) => ({
+				entryKey: placement.atlasEntryKey as OpenWorldTextureEntryId,
+				pageId: createPageId(options.input.jobId, page.textureIndex),
+				rect: [
+					placement.x,
+					placement.y,
+					placement.width,
+					placement.height,
+				] as const,
+			})),
+		),
+	};
+}
+
+function assertPixelLengthMatchesFormat(
+	jobId: string,
+	entryId: string,
+	source: TexturePackingPixelSource,
+): void {
+	const expectedLength =
+		source.width *
+		source.height *
+		getTexturePackingFormatBytesPerPixel(source.format);
+	if (source.pixels.byteLength !== expectedLength) {
+		throw new Error(
+			`Texture layout job ${jobId} source ${entryId} expected ${expectedLength} bytes for ${source.format}, got ${source.pixels.byteLength}.`,
+		);
+	}
+}
+
+function createPageId(jobId: string, pageIndex: number): string {
+	return `${jobId}:page:${pageIndex}`;
+}
+
+function getTexturePackingFormatBytesPerPixel(
+	format: TexturePackingPageFormat,
+): number {
+	switch (format) {
+		case "rgba8":
+			return 4;
+		case "r8":
+			return 1;
+		case "rg8":
+			return 2;
+	}
 }
 
 async function measureStage<T>(

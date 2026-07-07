@@ -1,4 +1,6 @@
 import { getRuntimeTexturePageGutterPixels } from "../../../../textures/material-texture-identity";
+import type { TextureBindingId } from "../../../../textures/identity";
+import type { TexturePackingPageFormat } from "../../../../textures/packing/protocol";
 import type {
 	TexturePlacement,
 	TexturePlacementIntent,
@@ -9,10 +11,8 @@ import {
 	createRuntimeTextureSamplerPolicy,
 	type TextureFilteringMode,
 } from "../../../../textures/sampling-policy";
-import type { TextureBindingId } from "../../../../textures/identity";
-import type { TexturePackingPageFormat } from "../../../../textures/packing/protocol";
-import type { MaterializationOwnerId } from "../../owners/owner-id";
 import type { OpenWorldStreamingStaticTaskStageTiming } from "../../diagnostics/contracts";
+import type { MaterializationOwnerId } from "../../owners/owner-id";
 import type { OpenWorldTextureBucketKey } from "../claims/bucket-key";
 import {
 	OpenWorldTextureClaimRegistry,
@@ -22,12 +22,34 @@ import {
 } from "../claims/texture-claim-registry";
 import type { OpenWorldStreamingTextureCommit } from "../commits/contracts";
 import { settleOpenWorldTexturePageBuildResult } from "../page-build/page-build-results";
+import type {
+	OpenWorldTexturePageBuildInput,
+	OpenWorldTexturePageBuildPixelSource,
+} from "../page-build/protocol";
+import type { OpenWorldTexturePageBuilder } from "../page-build/worker-client";
 import { createMaterialTexturePlacementBucketKey } from "./material-texture-placement-policy";
-import type { OpenWorldMaterialTextureAtlasBuilder } from "./object-visual-atlas-builder";
+import type {
+	OpenWorldMaterialTextureAtlasBuilder,
+	OpenWorldObjectVisualAtlasPlacementRect,
+	OpenWorldObjectVisualAtlasPreparedSource,
+} from "./object-visual-atlas-builder";
 
 const MAX_RUNTIME_ATLAS_PAGE_SIZE = 2048;
 
 export interface OpenWorldMaterialTexturePlacementPlanOptions<
+	TItemId extends TexturePlacementLookupId,
+	TIntent extends TexturePlacementIntent<TItemId>,
+> {
+	readonly atlasBuilder: OpenWorldMaterialTextureAtlasBuilder;
+	readonly filteringMode: TextureFilteringMode;
+	readonly intents: readonly TIntent[];
+	readonly jobPrefix: string;
+	readonly ownerId: MaterializationOwnerId;
+	readonly pageBuilder: OpenWorldTexturePageBuilder;
+	readonly textureClaims: OpenWorldTextureClaimRegistry;
+}
+
+export interface OpenWorldMaterialTexturePlacementReservationOptions<
 	TItemId extends TexturePlacementLookupId,
 	TIntent extends TexturePlacementIntent<TItemId>,
 > {
@@ -50,19 +72,56 @@ export interface OpenWorldMaterialTexturePlacementPlan<
 	readonly textureCommits: readonly OpenWorldStreamingTextureCommit[];
 }
 
+export interface OpenWorldMaterialTexturePlacementReservation<
+	TItemId extends TexturePlacementLookupId,
+> {
+	/** Bake-facing placements produced before page pixels are materialized. */
+	readonly bindingPlacements: readonly {
+		readonly bindingId: TextureBindingId;
+		readonly placement: TexturePlacement<TItemId>;
+	}[];
+	/** Immutable page-build work products; these may settle after bake work starts. */
+	readonly pageBuildRequests: readonly OpenWorldTexturePageBuildInput[];
+	readonly stageTimings: readonly OpenWorldStreamingStaticTaskStageTiming[];
+}
+
 export async function buildMaterialTexturePlacementPlan<
 	TItemId extends TexturePlacementLookupId,
 	TIntent extends TexturePlacementIntent<TItemId>,
 >(
 	options: OpenWorldMaterialTexturePlacementPlanOptions<TItemId, TIntent>,
 ): Promise<OpenWorldMaterialTexturePlacementPlan<TItemId>> {
+	const reservation = await reserveMaterialTexturePlacements<TItemId, TIntent>(
+		options,
+	);
+	const pageBuild = await buildReservedMaterialTexturePages({
+		pageBuilder: options.pageBuilder,
+		pageBuildRequests: reservation.pageBuildRequests,
+		textureClaims: options.textureClaims,
+	});
+	return {
+		bindingPlacements: reservation.bindingPlacements,
+		stageTimings: [...reservation.stageTimings, ...pageBuild.stageTimings],
+		textureCommits: pageBuild.textureCommits,
+	};
+}
+
+export async function reserveMaterialTexturePlacements<
+	TItemId extends TexturePlacementLookupId,
+	TIntent extends TexturePlacementIntent<TItemId>,
+>(
+	options: OpenWorldMaterialTexturePlacementReservationOptions<
+		TItemId,
+		TIntent
+	>,
+): Promise<OpenWorldMaterialTexturePlacementReservation<TItemId>> {
 	const intentsByBucket = groupMaterialTextureIntentsByBucket(options.intents);
 	const bindingPlacements: Array<{
 		readonly bindingId: TextureBindingId;
 		readonly placement: TexturePlacement<TItemId>;
 	}> = [];
+	const pageBuildRequests: OpenWorldTexturePageBuildInput[] = [];
 	const stageTimings: OpenWorldStreamingStaticTaskStageTiming[] = [];
-	const textureCommits: OpenWorldStreamingTextureCommit[] = [];
 
 	for (const [bucketKey, intents] of intentsByBucket) {
 		const snapshot = options.textureClaims.retainTextureBindings(
@@ -70,7 +129,10 @@ export async function buildMaterialTexturePlacementPlan<
 			bucketKey,
 			intents.map((intent) => createBindingRequirement(bucketKey, intent)),
 		);
-		const bucketPlan = await buildBucketTextureCommit<TItemId, TIntent>({
+		const bucketReservation = await reserveBucketTexturePlacements<
+			TItemId,
+			TIntent
+		>({
 			atlasBuilder: options.atlasBuilder,
 			bucketKey,
 			filteringMode: options.filteringMode,
@@ -79,14 +141,47 @@ export async function buildMaterialTexturePlacementPlan<
 			snapshot,
 			textureClaims: options.textureClaims,
 		});
-		bindingPlacements.push(...bucketPlan.bindingPlacements);
-		stageTimings.push(...bucketPlan.stageTimings);
-		textureCommits.push(...bucketPlan.textureCommits);
+		bindingPlacements.push(...bucketReservation.bindingPlacements);
+		pageBuildRequests.push(...bucketReservation.pageBuildRequests);
+		stageTimings.push(...bucketReservation.stageTimings);
 	}
 
 	return {
 		bindingPlacements,
+		pageBuildRequests,
 		stageTimings,
+	};
+}
+
+export async function buildReservedMaterialTexturePages(options: {
+	readonly pageBuilder: OpenWorldTexturePageBuilder;
+	readonly pageBuildRequests: readonly OpenWorldTexturePageBuildInput[];
+	readonly textureClaims: OpenWorldTextureClaimRegistry;
+}): Promise<{
+	readonly stageTimings: readonly OpenWorldStreamingStaticTaskStageTiming[];
+	readonly textureCommits: readonly OpenWorldStreamingTextureCommit[];
+}> {
+	const timing = new TexturePlacementStageTimer();
+	const textureCommits: OpenWorldStreamingTextureCommit[] = [];
+	for (const request of options.pageBuildRequests) {
+		const output = await timing.measure("texture-page-build", () =>
+			options.pageBuilder.buildPage(request),
+		);
+		const settlement = settleOpenWorldTexturePageBuildResult(
+			options.textureClaims,
+			output,
+		);
+		if (settlement.kind === "stale") {
+			throw new Error(
+				`Texture page build unexpectedly became stale for ${request.pageId}.`,
+			);
+		}
+		if (settlement.commit) {
+			textureCommits.push(settlement.commit);
+		}
+	}
+	return {
+		stageTimings: timing.createSnapshot(),
 		textureCommits,
 	};
 }
@@ -125,7 +220,7 @@ function createBindingRequirement(
 	};
 }
 
-async function buildBucketTextureCommit<
+async function reserveBucketTexturePlacements<
 	TItemId extends TexturePlacementLookupId,
 	TIntent extends TexturePlacementIntent<TItemId>,
 >(options: {
@@ -136,7 +231,7 @@ async function buildBucketTextureCommit<
 	readonly jobPrefix: string;
 	readonly snapshot: OpenWorldTextureBucketSnapshot;
 	readonly textureClaims: OpenWorldTextureClaimRegistry;
-}): Promise<OpenWorldMaterialTexturePlacementPlan<TItemId>> {
+}): Promise<OpenWorldMaterialTexturePlacementReservation<TItemId>> {
 	const timing = new TexturePlacementStageTimer();
 	const intentByBindingId = new Map(
 		options.intents.map((intent) => [intent.bindingId, intent] as const),
@@ -150,10 +245,14 @@ async function buildBucketTextureCommit<
 		filteringMode: options.filteringMode,
 		sampleClass: pagePolicy.sampleClass,
 	});
+	const pageGutterPixels = getRuntimeTexturePageGutterPixels(
+		firstIntent.domain,
+		pagePolicy,
+	);
 	const touchedEntries = options.snapshot.entries.filter((entry) =>
 		entry.bindingIds.some((bindingId) => intentByBindingId.has(bindingId)),
 	);
-	const packed = await options.atlasBuilder.buildAtlas({
+	const planned = await options.atlasBuilder.planAtlasPlacement({
 		domain: firstIntent.domain,
 		entries: touchedEntries.map((entry) => {
 			const intent = requireIntentForEntry(entry.bindingIds, intentByBindingId);
@@ -170,45 +269,43 @@ async function buildBucketTextureCommit<
 		page: {
 			format: createTexturePackingPageFormat(pagePolicy.sampleClass),
 			gutterEdgeMode: "clamp",
-			gutterPixels: getRuntimeTexturePageGutterPixels(
-				firstIntent.domain,
-				pagePolicy,
-			),
+			gutterPixels: pageGutterPixels,
 			height: MAX_RUNTIME_ATLAS_PAGE_SIZE,
 			pageRunway: "one-tier",
 			pageSelection: "minimize-textures",
 			width: MAX_RUNTIME_ATLAS_PAGE_SIZE,
 		},
 	});
-	timing.append(packed.stageTimings);
+	timing.append(planned.stageTimings);
 
-	const packedPageById = new Map(
-		packed.pages.map((page) => [page.pageId, page] as const),
-	);
 	const sourceByEntryId = new Map(
 		touchedEntries.map((entry) => [entry.id, entry]),
 	);
-	const rectsByPageId = groupBy(packed.rects, (rect) => rect.pageId);
+	const preparedSourceByEntryId = new Map(
+		planned.sources.map((source) => [source.entry.entryId, source] as const),
+	);
+	const plannedPageById = new Map(
+		planned.pages.map((page) => [page.pageId, page] as const),
+	);
+	const rectsByPageId = groupBy(planned.rects, (rect) => rect.pageId);
 	const bindingPlacements: Array<{
 		readonly bindingId: TextureBindingId;
 		readonly placement: TexturePlacement<TItemId>;
 	}> = [];
-	const textureCommits: OpenWorldStreamingTextureCommit[] = [];
+	const pageBuildRequests: OpenWorldTexturePageBuildInput[] = [];
 
-	timing.measureSync("texture-page-settlement", () => {
-		for (const [packedPageId, rects] of rectsByPageId) {
+	timing.measureSync("texture-placement-reservation", () => {
+		for (const [plannedPageId, rects] of rectsByPageId) {
 			timing.measureSync(
-				"texture-page-settlement-page",
+				"texture-placement-reservation-page",
 				() => {
-					const page = packedPageById.get(packedPageId);
+					const page = plannedPageById.get(plannedPageId);
 					if (!page) {
 						throw new Error(
-							`Packed page ${packedPageId} is missing pixel payload.`,
+							`Planned page ${plannedPageId} is missing layout facts.`,
 						);
 					}
-					const entryIds = rects.map(
-						(rect) => rect.entryKey as OpenWorldTextureEntryId,
-					);
+					const entryIds = rects.map((rect) => rect.entryKey);
 					const virtualPage = options.textureClaims.createPage({
 						bucketKey: options.bucketKey,
 						entryIds,
@@ -218,12 +315,10 @@ async function buildBucketTextureCommit<
 					);
 					const textureRefId = `${virtualPage.id}:texture`;
 					const pageBindingPlacements = rects.flatMap((rect) => {
-						const entry = sourceByEntryId.get(
-							rect.entryKey as OpenWorldTextureEntryId,
-						);
+						const entry = sourceByEntryId.get(rect.entryKey);
 						if (!entry) {
 							throw new Error(
-								`Packed rect referenced unknown entry ${rect.entryKey}.`,
+								`Planned rect referenced unknown entry ${rect.entryKey}.`,
 							);
 						}
 						return entry.bindingIds.flatMap((bindingId) => {
@@ -249,42 +344,33 @@ async function buildBucketTextureCommit<
 							};
 						});
 					});
-					const settlement = settleOpenWorldTexturePageBuildResult(
-						options.textureClaims,
-						{
-							bucketKey: options.bucketKey,
-							jobId: `${options.jobPrefix}:${options.bucketKey}:${packedPageId}`,
-							kind: "page-update",
-							page: {
-								anisotropy: samplerPolicy.anisotropy,
-								filteringMode: samplerPolicy.filteringMode,
-								format: page.format,
-								height: page.height,
-								mipmapsGenerated: samplerPolicy.generateMipmaps,
-								pixels: page.pixels,
-								sampleClass: pagePolicy.sampleClass,
-								samplerPolicyKey: samplerPolicy.policyKey,
-								textureRefId,
-								width: page.width,
-								wrapS: pagePolicy.wrapS,
-								wrapT: pagePolicy.wrapT,
-							},
-							pageId: virtualPage.id,
-							placements: pageBindingPlacements.map((placement) => ({
-								bindingId: placement.bindingId,
-								rect: placement.placement.rect,
-							})),
-							reservationToken,
+					pageBuildRequests.push({
+						bucketKey: options.bucketKey,
+						entries: rects.map((rect) =>
+							createPageBuildRequestEntry({
+								gutterPixels: pageGutterPixels,
+								intentByBindingId,
+								preparedSourceByEntryId,
+								rect,
+								sourceByEntryId,
+							}),
+						),
+						jobId: `${options.jobPrefix}:${options.bucketKey}:${plannedPageId}`,
+						page: {
+							anisotropy: samplerPolicy.anisotropy,
+							filteringMode: samplerPolicy.filteringMode,
+							format: createTexturePackingPageFormat(pagePolicy.sampleClass),
+							height: page.height,
+							mipmapsGenerated: samplerPolicy.generateMipmaps,
+							sampleClass: pagePolicy.sampleClass,
+							samplerPolicyKey: samplerPolicy.policyKey,
+							width: page.width,
+							wrapS: pagePolicy.wrapS,
+							wrapT: pagePolicy.wrapT,
 						},
-					);
-					if (settlement.kind === "stale") {
-						throw new Error(
-							`Texture page build unexpectedly became stale for ${virtualPage.id}.`,
-						);
-					}
-					if (settlement.commit) {
-						textureCommits.push(settlement.commit);
-					}
+						pageId: virtualPage.id,
+						reservationToken,
+					});
 					bindingPlacements.push(...pageBindingPlacements);
 				},
 				rects.length,
@@ -294,13 +380,88 @@ async function buildBucketTextureCommit<
 
 	return {
 		bindingPlacements,
+		pageBuildRequests,
 		stageTimings: timing.createSnapshot(),
-		textureCommits,
+	};
+}
+
+function createPageBuildRequestEntry<
+	TItemId extends TexturePlacementLookupId,
+	TIntent extends TexturePlacementIntent<TItemId>,
+>(options: {
+	readonly gutterPixels: number;
+	readonly intentByBindingId: ReadonlyMap<TextureBindingId, TIntent>;
+	readonly preparedSourceByEntryId: ReadonlyMap<
+		OpenWorldTextureEntryId,
+		OpenWorldObjectVisualAtlasPreparedSource
+	>;
+	readonly rect: OpenWorldObjectVisualAtlasPlacementRect;
+	readonly sourceByEntryId: ReadonlyMap<
+		OpenWorldTextureEntryId,
+		OpenWorldTextureBucketSnapshot["entries"][number]
+	>;
+}): OpenWorldTexturePageBuildInput["entries"][number] {
+	const sourceEntry = options.sourceByEntryId.get(options.rect.entryKey);
+	if (!sourceEntry) {
+		throw new Error(
+			`Cannot create page-build entry for unknown texture entry ${options.rect.entryKey}.`,
+		);
+	}
+	const prepared = options.preparedSourceByEntryId.get(options.rect.entryKey);
+	if (!prepared) {
+		throw new Error(
+			`Cannot create page-build entry without prepared source ${options.rect.entryKey}.`,
+		);
+	}
+	const bindingIds = sourceEntry.bindingIds.filter((bindingId) =>
+		options.intentByBindingId.has(bindingId),
+	);
+	if (bindingIds.length === 0) {
+		throw new Error(
+			`Cannot create page-build entry ${options.rect.entryKey} without live binding ids.`,
+		);
+	}
+	return {
+		bindingIds,
+		entryId: sourceEntry.id,
+		gutterEdgeMode: prepared.entry.gutterEdgeMode ?? "clamp",
+		gutterPixels: options.gutterPixels,
+		rect: options.rect.rect,
+		source: createPageBuildPixelSource(prepared.source),
+	};
+}
+
+function createPageBuildPixelSource(
+	source: OpenWorldObjectVisualAtlasPreparedSource["source"],
+): OpenWorldTexturePageBuildPixelSource {
+	return {
+		format: source.format,
+		height: source.height,
+		kind: "open-world-texture-page-build-pixel-source",
+		pixels: source.pixels,
+		width: source.width,
 	};
 }
 
 class TexturePlacementStageTimer {
 	readonly #timings: OpenWorldStreamingStaticTaskStageTiming[] = [];
+
+	async measure<T>(
+		stage: OpenWorldStreamingStaticTaskStageTiming["stage"],
+		createValue: () => Promise<T>,
+		itemCount?: number,
+	): Promise<T> {
+		const startedAtMs = nowMs();
+		try {
+			return await createValue();
+		} finally {
+			this.#timings.push({
+				durationMs: nowMs() - startedAtMs,
+				...(itemCount === undefined ? {} : { itemCount }),
+				stage,
+			});
+		}
+	}
 
 	measureSync<T>(
 		stage: OpenWorldStreamingStaticTaskStageTiming["stage"],

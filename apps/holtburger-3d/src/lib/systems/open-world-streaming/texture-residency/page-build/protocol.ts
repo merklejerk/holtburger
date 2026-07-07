@@ -21,7 +21,7 @@ import type {
 	OpenWorldTexturePageReservationToken,
 } from "../claims/texture-claim-registry";
 
-type OpenWorldTexturePageBuildFormat = "rgba8" | "r8" | "rg8";
+export type OpenWorldTexturePageBuildFormat = "rgba8" | "r8" | "rg8";
 
 export interface OpenWorldTexturePageBuildInput {
 	/** Caller-owned job id used for diagnostics, not lifecycle currentness. */
@@ -66,11 +66,17 @@ interface OpenWorldTexturePageBuildEntry {
 	readonly entryId: OpenWorldTextureEntryId;
 	/** Material bindings that resolve to this entry once the page is accepted. */
 	readonly bindingIds: readonly TextureBindingId[];
+	/** Gutter edge behavior used while expanding source pixels into the page. */
+	readonly gutterEdgeMode: "clamp" | "repeat";
+	/** Gutter width in pixels reserved around this source. */
+	readonly gutterPixels: number;
+	/** Content rect inside the virtual page, excluding gutter pixels. */
+	readonly rect: readonly [number, number, number, number];
 	/** Source pixels already prepared for page materialization. */
 	readonly source: OpenWorldTexturePageBuildPixelSource;
 }
 
-interface OpenWorldTexturePageBuildPixelSource {
+export interface OpenWorldTexturePageBuildPixelSource {
 	/** Pixel-source marker keeps raw image facts distinct from placement metadata. */
 	readonly kind: "open-world-texture-page-build-pixel-source";
 	/** Source pixel format. */

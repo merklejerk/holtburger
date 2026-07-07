@@ -20,7 +20,11 @@ import type { MaterializationOwnerId } from "../../owners/owner-id";
 import type { OpenWorldStreamingStaticTaskStageTiming } from "../../diagnostics/contracts";
 import { OpenWorldTextureClaimRegistry } from "../../texture-residency/claims/texture-claim-registry";
 import type { OpenWorldStreamingTextureCommit } from "../../texture-residency/commits/contracts";
-import { buildMaterialTexturePlacementPlan } from "../../texture-residency/placement/material-texture-placement-plan";
+import {
+	buildReservedMaterialTexturePages,
+	reserveMaterialTexturePlacements,
+} from "../../texture-residency/placement/material-texture-placement-plan";
+import type { OpenWorldTexturePageBuilder } from "../../texture-residency/page-build/worker-client";
 import type { OpenWorldMaterialTextureAtlasBuilder } from "../../texture-residency/placement/object-visual-atlas-builder";
 import {
 	yieldToStaticMaterializationFrameBudget,
@@ -35,6 +39,7 @@ export interface OpenWorldTerrainArtifactRunnerOptions {
 	readonly resolver: StaticLandblockSceneLodSourceResolver;
 	readonly textureAtlasBuilder: OpenWorldMaterialTextureAtlasBuilder;
 	readonly textureClaims: OpenWorldTextureClaimRegistry;
+	readonly texturePageBuilder: OpenWorldTexturePageBuilder;
 }
 
 export interface OpenWorldTerrainArtifactRequest {
@@ -64,6 +69,7 @@ export class OpenWorldTerrainArtifactRunner {
 	readonly #resolver: StaticLandblockSceneLodSourceResolver;
 	readonly #textureAtlasBuilder: OpenWorldMaterialTextureAtlasBuilder;
 	readonly #textureClaims: OpenWorldTextureClaimRegistry;
+	readonly #texturePageBuilder: OpenWorldTexturePageBuilder;
 
 	constructor(options: OpenWorldTerrainArtifactRunnerOptions) {
 		this.#assetReader = options.assetReader;
@@ -72,6 +78,7 @@ export class OpenWorldTerrainArtifactRunner {
 		this.#resolver = options.resolver;
 		this.#textureAtlasBuilder = options.textureAtlasBuilder;
 		this.#textureClaims = options.textureClaims;
+		this.#texturePageBuilder = options.texturePageBuilder;
 	}
 
 	async run(
@@ -90,27 +97,39 @@ export class OpenWorldTerrainArtifactRunner {
 			}),
 		);
 		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
-		const texturePlan = await timing.measure("texture-placement", () =>
-			buildMaterialTexturePlacementPlan<string, TexturePlacementIntent>({
-				atlasBuilder: this.#textureAtlasBuilder,
-				filteringMode: "nearest",
-				intents: textureIntents,
-				jobPrefix: "open-world-terrain",
-				ownerId: request.ownerId,
-				textureClaims: this.#textureClaims,
-			}),
+		const textureReservation = await timing.measure(
+			"texture-placement-reservation",
+			() =>
+				reserveMaterialTexturePlacements<string, TexturePlacementIntent>({
+					atlasBuilder: this.#textureAtlasBuilder,
+					filteringMode: "nearest",
+					intents: textureIntents,
+					jobPrefix: "open-world-terrain",
+					ownerId: request.ownerId,
+					textureClaims: this.#textureClaims,
+				}),
 		);
 		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const bakeInput = timing.measureSync("create-bake-resources", () =>
 			createTerrainBakeJobInput(
 				request.task,
 				resolved,
-				createTerrainTexturePlacementSnapshot(texturePlan.bindingPlacements),
+				createTerrainTexturePlacementSnapshot(
+					textureReservation.bindingPlacements,
+				),
 			),
 		);
 		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const baked = await timing.measure("bake", () =>
 			bakeStaticJobWithBoundaryDiagnostics(this.#baker, bakeInput),
+		);
+		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
+		const texturePageBuild = await timing.measure("texture-page-build", () =>
+			buildReservedMaterialTexturePages({
+				pageBuilder: this.#texturePageBuilder,
+				pageBuildRequests: textureReservation.pageBuildRequests,
+				textureClaims: this.#textureClaims,
+			}),
 		);
 		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const payload = timing.measureSync("assemble-commit", () => ({
@@ -133,9 +152,10 @@ export class OpenWorldTerrainArtifactRunner {
 			stageTimings: [
 				...timing.createSnapshot(),
 				...baked.stageTimings,
-				...texturePlan.stageTimings,
+				...textureReservation.stageTimings,
+				...texturePageBuild.stageTimings,
 			],
-			textureCommits: texturePlan.textureCommits,
+			textureCommits: texturePageBuild.textureCommits,
 			textureReadiness: createPendingTerrainTextureReadiness(
 				baked.result.drawUnits,
 			),

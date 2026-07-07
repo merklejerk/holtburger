@@ -10,10 +10,24 @@ import type { MaterializationOwnerId } from "../../owners/owner-id";
 import type { OpenWorldStreamingStaticTaskStageTiming } from "../../diagnostics/contracts";
 import { OpenWorldTextureClaimRegistry } from "../claims/texture-claim-registry";
 import type { OpenWorldStreamingTextureCommit } from "../commits/contracts";
+import type { OpenWorldTexturePageBuildInput } from "../page-build/protocol";
+import type { OpenWorldTexturePageBuilder } from "../page-build/worker-client";
 import type { OpenWorldObjectVisualAtlasBuilder } from "./object-visual-atlas-builder";
-import { buildMaterialTexturePlacementPlan } from "./material-texture-placement-plan";
+import {
+	buildReservedMaterialTexturePages,
+	reserveMaterialTexturePlacements,
+} from "./material-texture-placement-plan";
 
 export interface OpenWorldObjectVisualTexturePlacementPlanOptions {
+	readonly atlasBuilder: OpenWorldObjectVisualAtlasBuilder;
+	readonly filteringMode: "nearest" | "linear" | "anisotropic-4x";
+	readonly intents: readonly ObjectVisualTexturePlacementIntent[];
+	readonly ownerId: MaterializationOwnerId;
+	readonly pageBuilder: OpenWorldTexturePageBuilder;
+	readonly textureClaims: OpenWorldTextureClaimRegistry;
+}
+
+export interface OpenWorldObjectVisualTexturePlacementReservationOptions {
 	readonly atlasBuilder: OpenWorldObjectVisualAtlasBuilder;
 	readonly filteringMode: "nearest" | "linear" | "anisotropic-4x";
 	readonly intents: readonly ObjectVisualTexturePlacementIntent[];
@@ -27,11 +41,33 @@ export interface OpenWorldObjectVisualTexturePlacementPlan {
 	readonly textureCommits: readonly OpenWorldStreamingTextureCommit[];
 }
 
+export interface OpenWorldObjectVisualTexturePlacementReservation {
+	readonly pageBuildRequests: readonly OpenWorldTexturePageBuildInput[];
+	readonly placementSnapshot: ObjectVisualTexturePlacementSnapshot;
+	readonly stageTimings: readonly OpenWorldStreamingStaticTaskStageTiming[];
+}
+
 export async function buildObjectVisualTexturePlacementPlan(
 	options: OpenWorldObjectVisualTexturePlacementPlanOptions,
 ): Promise<OpenWorldObjectVisualTexturePlacementPlan> {
+	const reservation = await reserveObjectVisualTexturePlacements(options);
+	const pageBuild = await buildReservedMaterialTexturePages({
+		pageBuilder: options.pageBuilder,
+		pageBuildRequests: reservation.pageBuildRequests,
+		textureClaims: options.textureClaims,
+	});
+	return {
+		placementSnapshot: reservation.placementSnapshot,
+		stageTimings: [...reservation.stageTimings, ...pageBuild.stageTimings],
+		textureCommits: pageBuild.textureCommits,
+	};
+}
+
+export async function reserveObjectVisualTexturePlacements(
+	options: OpenWorldObjectVisualTexturePlacementReservationOptions,
+): Promise<OpenWorldObjectVisualTexturePlacementReservation> {
 	const intents = createBakeLocalObjectVisualIntents(options.intents);
-	const materialPlan = await buildMaterialTexturePlacementPlan<
+	const reservation = await reserveMaterialTexturePlacements<
 		TexturePlacementItemId,
 		ObjectVisualTexturePlacementIntent
 	>({
@@ -42,6 +78,21 @@ export async function buildObjectVisualTexturePlacementPlan(
 		ownerId: options.ownerId,
 		textureClaims: options.textureClaims,
 	});
+	return {
+		pageBuildRequests: reservation.pageBuildRequests,
+		placementSnapshot: createObjectVisualPlacementSnapshot(
+			reservation.bindingPlacements,
+		),
+		stageTimings: reservation.stageTimings,
+	};
+}
+
+function createObjectVisualPlacementSnapshot(
+	bindingPlacements: readonly {
+		readonly bindingId: TextureBindingId;
+		readonly placement: TexturePlacement<TexturePlacementItemId>;
+	}[],
+): ObjectVisualTexturePlacementSnapshot {
 	const placementsByItemId = new Map<
 		TexturePlacementItemId,
 		TexturePlacement<TexturePlacementItemId>
@@ -58,20 +109,16 @@ export async function buildObjectVisualTexturePlacementPlan(
 		}
 	>();
 
-	for (const binding of materialPlan.bindingPlacements) {
+	for (const binding of bindingPlacements) {
 		itemIdsByBindingId.set(binding.bindingId, binding.placement.itemId);
 		placementsByBindingId.set(binding.bindingId, binding);
 		placementsByItemId.set(binding.placement.itemId, binding.placement);
 	}
 
 	return {
-		placementSnapshot: {
-			itemIdsByBindingId,
-			placementsByBindingId,
-			placementsByItemId,
-		},
-		stageTimings: materialPlan.stageTimings,
-		textureCommits: materialPlan.textureCommits,
+		itemIdsByBindingId,
+		placementsByBindingId,
+		placementsByItemId,
 	};
 }
 

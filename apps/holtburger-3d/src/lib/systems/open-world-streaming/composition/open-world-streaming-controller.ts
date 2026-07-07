@@ -50,11 +50,12 @@ import type {
 	ScenePickRequest,
 } from "../../../runtime/scene-query/merged-scene-query-contracts";
 import type { StaticSceneEnvCellBounds } from "../../../runtime/scene-query/contracts";
-import type { TexturePacker } from "../../../textures/packing/packer";
 import {
 	DirectOpenWorldObjectVisualAtlasBuilder,
 	type OpenWorldObjectVisualAtlasBuilder,
 } from "../texture-residency/placement/object-visual-atlas-builder";
+import { DirectOpenWorldTexturePageBuilder } from "../texture-residency/page-build/direct-page-builder";
+import type { OpenWorldTexturePageBuilder } from "../texture-residency/page-build/worker-client";
 import type {
 	DynamicEntityId,
 	DynamicEntityRenderResidence,
@@ -84,7 +85,6 @@ export interface OpenWorldStreamingControllerOptions {
 	>;
 	readonly createDynamicVisualBaker: () => DynamicVisualBaker;
 	readonly createDynamicVisualRecipeResolver: () => DynamicVisualRecipeResolver;
-	readonly createTexturePacker: () => TexturePacker;
 	readonly createObjectVisualAtlasBuilder?: () => OpenWorldObjectVisualAtlasBuilder;
 	readonly createStaticBaker: () => StaticBaker;
 	readonly createStaticResolver: () => StaticLandblockSceneLodSourceResolver;
@@ -212,7 +212,7 @@ export class OpenWorldStreamingController {
 	#terrainRunner: OpenWorldTerrainArtifactRunner | null = null;
 	#runtimeEntities: OpenWorldRuntimeEntitySystem | null = null;
 	#objectVisualAtlasBuilder: OpenWorldObjectVisualAtlasBuilder | null = null;
-	#texturePacker: TexturePacker | null = null;
+	#texturePageBuilder: OpenWorldTexturePageBuilder | null = null;
 	#frameBudgetYieldedPasses = 0;
 	readonly #deferredOutdoorRendererLayers = {
 		buildings: new Map<
@@ -528,7 +528,7 @@ export class OpenWorldStreamingController {
 	dispose(): void {
 		this.#disposed = true;
 		this.#objectVisualAtlasBuilder?.dispose?.();
-		this.#texturePacker?.dispose?.();
+		this.#texturePageBuilder?.dispose?.();
 	}
 
 	async #runStaticInterest(
@@ -1088,6 +1088,7 @@ export class OpenWorldStreamingController {
 				resolver: this.#sourceResolutionCache,
 				textureAtlasBuilder: this.#requireObjectVisualAtlasBuilder(),
 				textureClaims: this.#textureClaims,
+				texturePageBuilder: this.#requireTexturePageBuilder(),
 			});
 		}
 		return this.#terrainRunner;
@@ -1104,6 +1105,7 @@ export class OpenWorldStreamingController {
 				objectVisualAtlasBuilder: this.#requireObjectVisualAtlasBuilder(),
 				resolver: this.#sourceResolutionCache,
 				textureClaims: this.#textureClaims,
+				texturePageBuilder: this.#requireTexturePageBuilder(),
 			});
 		}
 		return this.#outdoorObjectRunner;
@@ -1120,6 +1122,7 @@ export class OpenWorldStreamingController {
 				objectVisualAtlasBuilder: this.#requireObjectVisualAtlasBuilder(),
 				resolver: this.#sourceResolutionCache,
 				textureClaims: this.#textureClaims,
+				texturePageBuilder: this.#requireTexturePageBuilder(),
 			});
 		}
 		return this.#envCellRunner;
@@ -1143,6 +1146,7 @@ export class OpenWorldStreamingController {
 				owners: this.#owners,
 				renderer: this.#renderer,
 				textureClaims: this.#textureClaims,
+				texturePageBuilder: this.#requireTexturePageBuilder(),
 			});
 		}
 		return this.#runtimeEntities;
@@ -1154,17 +1158,16 @@ export class OpenWorldStreamingController {
 				this.#options.createObjectVisualAtlasBuilder?.() ??
 				new DirectOpenWorldObjectVisualAtlasBuilder({
 					assetReader: this.#options.assetReader,
-					texturePacker: this.#requireTexturePacker(),
 				});
 		}
 		return this.#objectVisualAtlasBuilder;
 	}
 
-	#requireTexturePacker(): TexturePacker {
-		if (!this.#texturePacker) {
-			this.#texturePacker = this.#options.createTexturePacker();
+	#requireTexturePageBuilder(): OpenWorldTexturePageBuilder {
+		if (!this.#texturePageBuilder) {
+			this.#texturePageBuilder = new DirectOpenWorldTexturePageBuilder();
 		}
-		return this.#texturePacker;
+		return this.#texturePageBuilder;
 	}
 
 	#requireStaticSourceResolver(): StaticLandblockSceneLodSourceResolver {

@@ -8,7 +8,6 @@ import type {
 	StaticLandblockSceneLodSourceResolver,
 	StaticResolver,
 } from "../../../static/contracts";
-import type { TexturePacker } from "../../../textures/packing/packer";
 
 /** Durable browser/host boundary consumed by the replacement system. */
 export interface OpenWorldStreamingBoundaryAdapters {
@@ -35,5 +34,4 @@ interface OpenWorldStreamingWorkerAdapters {
 	readonly createStaticBaker: () => StaticBaker;
 	readonly createStaticSourceResolver: () => StaticResolver &
 		StaticLandblockSceneLodSourceResolver;
-	readonly createTexturePacker: () => TexturePacker;
 }

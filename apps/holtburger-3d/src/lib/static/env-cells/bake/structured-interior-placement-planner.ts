@@ -20,7 +20,7 @@ export interface StructuredInteriorTexturePlacementIntentResult {
 	readonly stageTimings: readonly StructuredInteriorTexturePlacementIntentStageTiming[];
 }
 
-export interface StructuredInteriorTexturePlacementIntentStageTiming {
+interface StructuredInteriorTexturePlacementIntentStageTiming {
 	readonly durationMs: number;
 	readonly itemCount: number;
 	readonly stage: "texture-intent-chunk" | "texture-intent-aggregation";
@@ -31,9 +31,8 @@ export async function createStructuredInteriorTexturePlacementIntents(input: {
 	readonly items: readonly StaticBakeJobPayload[];
 	readonly planningBudget?: TextureIntentPlanningBudget;
 }): Promise<readonly ObjectVisualTexturePlacementIntent[]> {
-	return (
-		await createStructuredInteriorTexturePlacementIntentResult(input)
-	).intents;
+	return (await createStructuredInteriorTexturePlacementIntentResult(input))
+		.intents;
 }
 
 export async function createStructuredInteriorTexturePlacementIntentResult(input: {
@@ -50,7 +49,8 @@ export async function createStructuredInteriorTexturePlacementIntentResult(input
 		string,
 		Promise<MaterialTextureIdentityFacts>
 	>();
-	const chunkTimings: StructuredInteriorTexturePlacementIntentStageTiming[] = [];
+	const chunkTimings: StructuredInteriorTexturePlacementIntentStageTiming[] =
+		[];
 
 	for (const item of input.items) {
 		if (
@@ -189,9 +189,15 @@ function recordChunkTiming(input: {
 function resolveCachedMaterialTextureIdentityFacts(input: {
 	readonly assetReader: PreparedAssetReader;
 	readonly cache: Map<string, Promise<MaterialTextureIdentityFacts>>;
-	readonly dataUse: Parameters<typeof createMaterialTextureIdentityFacts>[0]["dataUse"];
-	readonly domain: Parameters<typeof createMaterialTextureIdentityFacts>[0]["domain"];
-	readonly purpose: Parameters<typeof createMaterialTextureIdentityFacts>[0]["purpose"];
+	readonly dataUse: Parameters<
+		typeof createMaterialTextureIdentityFacts
+	>[0]["dataUse"];
+	readonly domain: Parameters<
+		typeof createMaterialTextureIdentityFacts
+	>[0]["domain"];
+	readonly purpose: Parameters<
+		typeof createMaterialTextureIdentityFacts
+	>[0]["purpose"];
 	readonly samplingPolicy: Parameters<
 		typeof createMaterialTextureIdentityFacts
 	>[0]["samplingPolicy"];
@@ -213,9 +219,15 @@ function resolveCachedMaterialTextureIdentityFacts(input: {
 }
 
 function createMaterialTextureIdentityRoleKey(input: {
-	readonly dataUse: Parameters<typeof createMaterialTextureIdentityFacts>[0]["dataUse"];
-	readonly domain: Parameters<typeof createMaterialTextureIdentityFacts>[0]["domain"];
-	readonly purpose: Parameters<typeof createMaterialTextureIdentityFacts>[0]["purpose"];
+	readonly dataUse: Parameters<
+		typeof createMaterialTextureIdentityFacts
+	>[0]["dataUse"];
+	readonly domain: Parameters<
+		typeof createMaterialTextureIdentityFacts
+	>[0]["domain"];
+	readonly purpose: Parameters<
+		typeof createMaterialTextureIdentityFacts
+	>[0]["purpose"];
 	readonly samplingPolicy: Parameters<
 		typeof createMaterialTextureIdentityFacts
 	>[0]["samplingPolicy"];

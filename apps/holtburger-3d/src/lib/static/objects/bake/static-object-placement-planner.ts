@@ -33,7 +33,7 @@ export interface StaticObjectTexturePlacementIntentResult {
 	readonly stageTimings: readonly StaticObjectTexturePlacementIntentStageTiming[];
 }
 
-export interface StaticObjectTexturePlacementIntentStageTiming {
+interface StaticObjectTexturePlacementIntentStageTiming {
 	readonly durationMs: number;
 	readonly itemCount: number;
 	readonly stage:
@@ -210,7 +210,9 @@ type StaticObjectTextureMaterialSlot =
 	| StaticObjectMaterialSlotFacts
 	| StaticObjectPartMaterialSlotFacts;
 
-function createMaterialSlotUseKey(slot: StaticObjectTextureMaterialSlot): string {
+function createMaterialSlotUseKey(
+	slot: StaticObjectTextureMaterialSlot,
+): string {
 	return createObjectVisualMaterialUseKey(
 		slot.material,
 		slot.paletteOverride,

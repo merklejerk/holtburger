@@ -15,7 +15,7 @@ interface TexturePackingRequestDiagnostics {
 }
 
 /** Worker handoff counters captured immediately before the pack worker posts its result. */
-export interface TexturePackingResultReadyDiagnostics {
+interface TexturePackingResultReadyDiagnostics {
 	/** Worker wall-clock timestamp immediately before result postMessage. */
 	readonly completedAtEpochMs: number;
 	/** Packed page pixel bytes sent with the worker result. */
@@ -131,7 +131,10 @@ export class WorkerPoolTexturePacker implements TexturePacker {
 		}
 		const resolvedAtEpochMs = Date.now();
 		return {
-			deliveryMs: Math.max(0, resolvedAtEpochMs - resultReady.completedAtEpochMs),
+			deliveryMs: Math.max(
+				0,
+				resolvedAtEpochMs - resultReady.completedAtEpochMs,
+			),
 			pageCount: resultReady.pageCount,
 			pagePixelByteLength: resultReady.pagePixelByteLength,
 			rectCount: resultReady.rectCount,

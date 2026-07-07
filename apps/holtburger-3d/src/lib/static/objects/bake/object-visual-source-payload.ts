@@ -1,8 +1,6 @@
 import type {
 	EnvCellSystemStaticScopePayload,
-	OutdoorStaticObjectDomain,
 	StaticBakeJobPayload,
-	StaticDomain,
 	StaticObjectSourceIdentity,
 } from "../../contracts";
 import type { ObjectVisualSourcePayload } from "../../../visual/object-visual-source-payload";
@@ -79,20 +77,6 @@ function isEnvCellStaticObjectDynamicSource(
 ): boolean {
 	return (
 		source.sourceAssetKind === "setup-model" && source.defaultAnimation !== null
-	);
-}
-
-export function isStaticObjectDomain(
-	domain: StaticDomain,
-): domain is Extract<
-	StaticDomain,
-	OutdoorStaticObjectDomain | "env-cell-system"
-> {
-	return (
-		domain === "outdoor-buildings" ||
-		domain === "outdoor-explicit-objects" ||
-		domain === "outdoor-generated-scenery" ||
-		domain === "env-cell-system"
 	);
 }
 

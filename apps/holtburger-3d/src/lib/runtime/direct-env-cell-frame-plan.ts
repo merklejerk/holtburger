@@ -1,11 +1,8 @@
 import type {
-	PortalApertureFrameDiagnostics,
-	PortalApertureGeometryResourcePlan,
 	PortalBaseOverlapEnvCellPlan,
 	PortalBaseOverlapPlan,
 	PortalBaseOverlapReason,
 	PortalProjectionFrameBaseEntryPlan,
-	PortalProjectionFrameDiagnostics,
 	PortalProjectionFrameGraphPlan,
 	PortalProjectionFrameMaskEdgePlan,
 	PortalProjectionFrameOutdoorCrossingPlan,
@@ -296,104 +293,6 @@ export function createPortalProjectionFramePlan(
 	};
 }
 
-export function combineOutdoorPortalProjectionFramePlans(
-	plans: readonly PortalFrameWorkPlan[],
-): PortalFrameWorkPlan | null {
-	const directPlans = plans.filter(
-		(
-			plan,
-		): plan is Extract<
-			PortalFrameWorkPlan,
-			{ readonly kind: "direct-env-cell"; readonly mode: "portal-projection" }
-		> =>
-			plan.kind === "direct-env-cell" &&
-			plan.mode === "portal-projection" &&
-			plan.layeredGraph.baseEntry.scene.kind === "outdoor-target",
-	);
-	if (directPlans.length === 0) {
-		return null;
-	}
-	if (directPlans.length === 1) {
-		return directPlans[0];
-	}
-
-	const firstPlan = directPlans[0];
-	if (!firstPlan) {
-		return null;
-	}
-
-	const renderEntries: PortalProjectionFrameRenderEntryPlan[] = [];
-	const maskEdges: PortalProjectionFrameMaskEdgePlan[] = [];
-	const apertureResources: PortalApertureGeometryResourcePlan[] = [];
-	const renderEntryIdsByLayer = new Map<number, number[]>();
-	let renderEntryOffset = 0;
-	let maskEdgeOffset = 0;
-
-	for (const plan of directPlans) {
-		const graph = plan.layeredGraph;
-		for (const entry of graph.renderEntries) {
-			renderEntries.push({
-				...entry,
-				incomingMaskEdgeIds: entry.incomingMaskEdgeIds.map(
-					(edgeId) => edgeId + maskEdgeOffset,
-				),
-				renderEntryId: entry.renderEntryId + renderEntryOffset,
-			});
-		}
-		for (const edge of graph.maskEdges) {
-			maskEdges.push({
-				...edge,
-				edgeId: edge.edgeId + maskEdgeOffset,
-				renderEntryId: edge.renderEntryId + renderEntryOffset,
-			});
-		}
-		for (const layer of graph.renderLayers) {
-			const renderEntryIds = renderEntryIdsByLayer.get(layer.renderLayer) ?? [];
-			renderEntryIds.push(
-				...layer.renderEntryIds.map(
-					(renderEntryId) => renderEntryId + renderEntryOffset,
-				),
-			);
-			renderEntryIdsByLayer.set(layer.renderLayer, renderEntryIds);
-		}
-		apertureResources.push(...graph.apertureResources);
-		renderEntryOffset += graph.renderEntries.length;
-		maskEdgeOffset += graph.maskEdges.length;
-	}
-
-	const renderLayers = [...renderEntryIdsByLayer]
-		.sort(([leftLayer], [rightLayer]) => leftLayer - rightLayer)
-		.map(([renderLayer, renderEntryIds]) => ({
-			renderEntryIds,
-			renderLayer,
-		}));
-	const graph: PortalProjectionFrameGraphPlan = {
-		apertureResources,
-		baseEntry: firstPlan.layeredGraph.baseEntry,
-		diagnostics: combinePortalApertureFrameDiagnostics(
-			directPlans.map((plan) => plan.layeredGraph.diagnostics),
-		),
-		maskEdges,
-		outdoorCrossings: [],
-		projectionDiagnostics: combinePortalProjectionFrameDiagnostics(
-			directPlans.map((plan) => plan.layeredGraph.projectionDiagnostics),
-			renderEntries.length,
-			renderLayers,
-		),
-		renderEntries,
-		renderLayers,
-	};
-
-	return {
-		baseOverlap: combinePortalBaseOverlapPlans(
-			directPlans.map((plan) => plan.baseOverlap),
-		),
-		kind: "direct-env-cell",
-		layeredGraph: graph,
-		mode: "portal-projection",
-	};
-}
-
 function createPortalBaseOverlapPlan(options: {
 	readonly indexes: PortalFrameIndexes;
 	readonly landblockId: number;
@@ -463,51 +362,6 @@ function createEmptyPortalBaseOverlapPlan(): PortalBaseOverlapPlan {
 		envCells: [],
 		overlapSignature: "none",
 		requiresExteriorSeed: false,
-	};
-}
-
-function combinePortalBaseOverlapPlans(
-	plans: readonly PortalBaseOverlapPlan[],
-): PortalBaseOverlapPlan {
-	const activePlans = plans.filter((plan) => plan.overlapSignature !== "none");
-	if (activePlans.length === 0) {
-		return createEmptyPortalBaseOverlapPlan();
-	}
-	const envCellByKey = new Map<string, PortalBaseOverlapEnvCellPlan>();
-	for (const plan of activePlans) {
-		for (const envCell of plan.envCells) {
-			const key = `${envCell.landblockId}:${envCell.envCellId}`;
-			const existing = envCellByKey.get(key);
-			if (!existing) {
-				envCellByKey.set(key, envCell);
-				continue;
-			}
-			envCellByKey.set(key, {
-				...existing,
-				reasons: [...existing.reasons, ...envCell.reasons].sort(
-					comparePortalBaseOverlapReasons,
-				),
-			});
-		}
-	}
-	const envCells = [...envCellByKey.values()].sort(
-		(left, right) =>
-			left.landblockId - right.landblockId || left.envCellId - right.envCellId,
-	);
-	return {
-		diagnostics: {
-			envCellCount: envCells.length,
-			missingResourceEnvCellCount: activePlans.reduce(
-				(count, plan) => count + plan.diagnostics.missingResourceEnvCellCount,
-				0,
-			),
-		},
-		envCells,
-		overlapSignature: activePlans
-			.map((plan) => plan.overlapSignature)
-			.sort()
-			.join("|"),
-		requiresExteriorSeed: activePlans.some((plan) => plan.requiresExteriorSeed),
 	};
 }
 
@@ -581,111 +435,6 @@ function createPortalProjectionOutdoorCrossings(options: {
 		outdoorCrossingsSkippedByLayerCap,
 		outdoorCrossingsSkippedByUnselectedTarget,
 	};
-}
-
-function combinePortalApertureFrameDiagnostics(
-	diagnostics: readonly PortalApertureFrameDiagnostics[],
-): PortalApertureFrameDiagnostics {
-	return diagnostics.reduce(
-		(total, current) => ({
-			buildingTransitionEdges:
-				total.buildingTransitionEdges + current.buildingTransitionEdges,
-			dedupedGeometryResources:
-				total.dedupedGeometryResources + current.dedupedGeometryResources,
-			duplicateMaskEdges: total.duplicateMaskEdges + current.duplicateMaskEdges,
-			envCellPortalEdges: total.envCellPortalEdges + current.envCellPortalEdges,
-			selectedMaskEdges: total.selectedMaskEdges + current.selectedMaskEdges,
-			transitionRootCandidateCount:
-				total.transitionRootCandidateCount +
-				current.transitionRootCandidateCount,
-			transitionRootCount:
-				total.transitionRootCount + current.transitionRootCount,
-			transitionRootsRejectedNotSeenOutside:
-				total.transitionRootsRejectedNotSeenOutside +
-				current.transitionRootsRejectedNotSeenOutside,
-			transitionRootsRejectedUnknownSeenOutside:
-				total.transitionRootsRejectedUnknownSeenOutside +
-				current.transitionRootsRejectedUnknownSeenOutside,
-		}),
-		{
-			buildingTransitionEdges: 0,
-			dedupedGeometryResources: 0,
-			duplicateMaskEdges: 0,
-			envCellPortalEdges: 0,
-			selectedMaskEdges: 0,
-			transitionRootCandidateCount: 0,
-			transitionRootCount: 0,
-			transitionRootsRejectedNotSeenOutside: 0,
-			transitionRootsRejectedUnknownSeenOutside: 0,
-		},
-	);
-}
-
-function combinePortalProjectionFrameDiagnostics(
-	diagnostics: readonly PortalProjectionFrameDiagnostics[],
-	renderEntryCount: number,
-	renderLayers: readonly { readonly renderLayer: number }[],
-): PortalProjectionFrameDiagnostics {
-	const maxSelectedRenderLayer = Math.max(
-		0,
-		...renderLayers.map((layer) => layer.renderLayer),
-	);
-	return diagnostics.reduce(
-		(total, current) => ({
-			componentCount: total.componentCount + current.componentCount,
-			componentInternalEdgeCount:
-				total.componentInternalEdgeCount + current.componentInternalEdgeCount,
-			cyclicComponentCount:
-				total.cyclicComponentCount + current.cyclicComponentCount,
-			maskEdgesSkippedByLayerCap:
-				total.maskEdgesSkippedByLayerCap + current.maskEdgesSkippedByLayerCap,
-			maskEdgesSkippedByMaxMaskEdges:
-				total.maskEdgesSkippedByMaxMaskEdges +
-				current.maskEdgesSkippedByMaxMaskEdges,
-			maxProjectionRenderLayer: Math.max(
-				total.maxProjectionRenderLayer,
-				current.maxProjectionRenderLayer,
-			),
-			maxSelectedRenderLayer,
-			missingResourceMembershipCount:
-				total.missingResourceMembershipCount +
-				current.missingResourceMembershipCount,
-			outdoorCrossingCount:
-				total.outdoorCrossingCount + current.outdoorCrossingCount,
-			outdoorCrossingsSkippedByLayerCap:
-				total.outdoorCrossingsSkippedByLayerCap +
-				current.outdoorCrossingsSkippedByLayerCap,
-			outdoorCrossingsSkippedByUnselectedTarget:
-				total.outdoorCrossingsSkippedByUnselectedTarget +
-				current.outdoorCrossingsSkippedByUnselectedTarget,
-			projectedEnvCellCount:
-				total.projectedEnvCellCount + current.projectedEnvCellCount,
-			renderEntriesSkippedByLayerCap:
-				total.renderEntriesSkippedByLayerCap +
-				current.renderEntriesSkippedByLayerCap,
-			renderEntriesSkippedByMaxRenderEntries:
-				total.renderEntriesSkippedByMaxRenderEntries +
-				current.renderEntriesSkippedByMaxRenderEntries,
-			renderEntryCount,
-		}),
-		{
-			componentCount: 0,
-			componentInternalEdgeCount: 0,
-			cyclicComponentCount: 0,
-			maskEdgesSkippedByLayerCap: 0,
-			maskEdgesSkippedByMaxMaskEdges: 0,
-			maxProjectionRenderLayer: 0,
-			maxSelectedRenderLayer,
-			missingResourceMembershipCount: 0,
-			outdoorCrossingCount: 0,
-			outdoorCrossingsSkippedByLayerCap: 0,
-			outdoorCrossingsSkippedByUnselectedTarget: 0,
-			projectedEnvCellCount: 0,
-			renderEntriesSkippedByLayerCap: 0,
-			renderEntriesSkippedByMaxRenderEntries: 0,
-			renderEntryCount,
-		},
-	);
 }
 
 function createPortalProjectionFrameBaseEntry(options: {

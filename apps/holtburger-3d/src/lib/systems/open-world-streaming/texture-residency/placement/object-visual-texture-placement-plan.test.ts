@@ -88,8 +88,10 @@ describe("buildObjectVisualTexturePlacementPlan", () => {
 			}),
 		]);
 		expect(plan.stageTimings.map((timing) => timing.stage)).toEqual([
+			"texture-source-preparation-chunk",
 			"texture-source-preparation",
 			"texture-packing",
+			"texture-page-settlement-page",
 			"texture-page-settlement",
 		]);
 	});

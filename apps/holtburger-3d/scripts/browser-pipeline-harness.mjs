@@ -36,7 +36,6 @@ try {
 		headed: options.headed,
 		landblockIds: options.landblockIds,
 		lod: options.lod,
-		runtimePipeline: options.runtimePipeline,
 		scenario: options.scenario,
 		settleDelayMs: options.settleDelayMs,
 		sequenceRepeatCount: options.sequenceRepeatCount,
@@ -73,7 +72,6 @@ function parseArgs(args) {
 		landblockIds: [DEFAULT_LANDBLOCK_ID],
 		lod: null,
 		outputPath: null,
-		runtimePipeline: "open-world-streaming",
 		scenario: "landblock-sequence",
 		sequenceRepeatCount: 1,
 		settleDelayMs: 0,
@@ -126,11 +124,6 @@ function parseArgs(args) {
 				) {
 					throw new Error("--repeat must be a positive integer.");
 				}
-				break;
-			case "--runtime-pipeline":
-				parsed.runtimePipeline = parseRuntimePipeline(
-					requireValue(args, ++index, arg),
-				);
 				break;
 			case "--scenario":
 				parsed.scenario = parseScenario(requireValue(args, ++index, arg));
@@ -194,7 +187,6 @@ Options:
   --domains <csv>          Static domains to request. Default: ${DEFAULT_STATIC_DOMAINS.join(",")}
   --layer-distance <n>     Use one radius for every outdoor static layer.
   --repeat <count>         Repeat the landblock sequence. Default: 1
-  --runtime-pipeline <name> Runtime pipeline: legacy, open-world-streaming. Default: open-world-streaming
   --scenario <name>        Scenario: instantiate-only, landblock-sequence, explicit-object-radius-expansion, dungeon-cell.
   --settle-delay-ms <ms>   Delay after each settled scene before continuing. Default: 0
   --static-publication <mode> Static renderer publication: normal, suppress-dense-renderer, defer-dense-renderer-until-ready. Default: defer-dense-renderer-until-ready
@@ -264,13 +256,6 @@ function parseScenario(value) {
 	return value;
 }
 
-function parseRuntimePipeline(value) {
-	if (value === "legacy" || value === "open-world-streaming") {
-		return value;
-	}
-	throw new Error("--runtime-pipeline must be legacy or open-world-streaming.");
-}
-
 function parseStaticPublicationMode(value) {
 	if (
 		value === "normal" ||
@@ -307,43 +292,15 @@ async function writeDiagnosticsOutput(diagnostics, outputPath, errorMessage) {
 function createDiagnosticsSummary(diagnostics, outputPath, errorMessage) {
 	const domains = Array.isArray(diagnostics.domains) ? diagnostics.domains : [];
 	const openWorldStreaming = findOpenWorldStreamingDomain(domains);
-	const staticCoordinator = domains.find(
-		(domain) => domain.kind === "static-coordinator",
-	);
-	const staticCommitInstall = domains.find(
-		(domain) => domain.kind === "static-commit-install",
-	);
-	const textureAtlas = domains.find(
-		(domain) => domain.kind === "texture-atlas",
-	);
 	return {
 		kind: "browser-pipeline-harness-summary",
 		errorMessage: errorMessage ?? null,
 		harnessScenario: diagnostics.harnessScenario ?? null,
 		harnessFrameDiagnostics: diagnostics.harnessFrameDiagnostics ?? null,
-		legacyDiagnostics: createLegacyDiagnosticsSummary({
-			staticCommitInstall,
-			staticCoordinator,
-			textureAtlas,
-		}),
 		openWorldStreaming: openWorldStreaming?.summary ?? null,
 		outputPath,
 		runtime: diagnostics.runtime,
 		runtimePipeline: diagnostics.runtimePipeline ?? null,
-	};
-}
-
-function createLegacyDiagnosticsSummary({
-	staticCommitInstall,
-	staticCoordinator,
-	textureAtlas,
-}) {
-	return {
-		deletionTarget: "Phase 16 legacy pipeline deletion",
-		staticCommitInstall: staticCommitInstall?.summary ?? null,
-		staticCoordinator: staticCoordinator?.summary ?? null,
-		staticCoordinatorTiming: staticCoordinator?.timingSummary ?? null,
-		textureAtlas: textureAtlas?.summary ?? null,
 	};
 }
 
@@ -471,7 +428,6 @@ async function runBrowserHarness({
 	headed,
 	landblockIds,
 	lod,
-	runtimePipeline,
 	scenario,
 	settleDelayMs,
 	sequenceRepeatCount,
@@ -482,7 +438,7 @@ async function runBrowserHarness({
 }) {
 	const userDataDir = await mkdtemp(join(tmpdir(), "holtburger-3d-browser-"));
 	tempDirs.push(userDataDir);
-	const pageUrl = `${viteUrl}/harness/browser-pipeline?assetHost=${encodeURIComponent(assetHostUrl)}&runtime-pipeline=${encodeURIComponent(runtimePipeline)}&static-publication=${encodeURIComponent(staticPublicationMode)}`;
+	const pageUrl = `${viteUrl}/harness/browser-pipeline?assetHost=${encodeURIComponent(assetHostUrl)}&static-publication=${encodeURIComponent(staticPublicationMode)}`;
 	const child = spawn(
 		chromePath,
 		[
@@ -565,7 +521,7 @@ async function runBrowserHarness({
 			kind: "browser-pipeline-harness-scenario",
 			landblockIds,
 			repeat: sequenceRepeatCount,
-			runtimePipeline,
+			runtimePipeline: "open-world-streaming",
 			scenario,
 			settleDelayMs,
 			steps: scenarioSteps,
@@ -828,24 +784,10 @@ function createHarnessScenarioStep({
 }) {
 	const domains = Array.isArray(diagnostics.domains) ? diagnostics.domains : [];
 	const openWorldStreaming = findOpenWorldStreamingDomain(domains);
-	const staticCoordinator = domains.find(
-		(domain) => domain.kind === "static-coordinator",
-	);
-	const staticCommitInstall = domains.find(
-		(domain) => domain.kind === "static-commit-install",
-	);
-	const textureAtlas = domains.find(
-		(domain) => domain.kind === "texture-atlas",
-	);
 	return {
 		index,
 		envCellId: envCellId ?? null,
 		landblockId,
-		legacyDiagnostics: createLegacyDiagnosticsSummary({
-			staticCommitInstall,
-			staticCoordinator,
-			textureAtlas,
-		}),
 		lod,
 		openWorldStreaming: openWorldStreaming?.summary ?? null,
 		runtime: diagnostics.runtime,
@@ -857,7 +799,6 @@ function createHarnessScenarioStep({
 
 function collectPipelineTrace(client, timeoutMs) {
 	const samples = [];
-	const workerEventsByKey = new Map();
 	let stopped = false;
 	const sampleIntervalMs = 1000;
 	const startedAt = Date.now();
@@ -866,29 +807,26 @@ function collectPipelineTrace(client, timeoutMs) {
 		if (stopped || Date.now() - startedAt > timeoutMs + sampleIntervalMs) {
 			return;
 		}
-		void samplePipelineTrace(client, samples, workerEventsByKey);
+		void samplePipelineTrace(client, samples);
 	}, sampleIntervalMs);
 
-	void samplePipelineTrace(client, samples, workerEventsByKey);
+	void samplePipelineTrace(client, samples);
 
 	return {
 		async stop() {
 			stopped = true;
 			clearInterval(interval);
-			await samplePipelineTrace(client, samples, workerEventsByKey);
+			await samplePipelineTrace(client, samples);
 			return {
 				kind: "browser-pipeline-harness-trace",
 				samples,
-				workerEvents: Array.from(workerEventsByKey.values()).sort(
-					(left, right) =>
-						left.atMs - right.atMs || left.key.localeCompare(right.key),
-				),
+				workerEvents: [],
 			};
 		},
 	};
 }
 
-async function samplePipelineTrace(client, samples, workerEventsByKey) {
+async function samplePipelineTrace(client, samples) {
 	let diagnostics;
 	try {
 		diagnostics = await evaluate(
@@ -902,87 +840,16 @@ async function samplePipelineTrace(client, samples, workerEventsByKey) {
 
 	const domains = Array.isArray(diagnostics.domains) ? diagnostics.domains : [];
 	const openWorldStreaming = findOpenWorldStreamingDomain(domains);
-	const staticCoordinator = domains.find(
-		(domain) => domain.kind === "static-coordinator",
-	);
-	const staticCommitInstall = domains.find(
-		(domain) => domain.kind === "static-commit-install",
-	);
-	const textureAtlas = domains.find(
-		(domain) => domain.kind === "texture-atlas",
-	);
-	const staticBaker = staticCoordinator?.staticBaker ?? null;
-	const pendingJobs = staticBaker?.pendingJobs ?? [];
-	const sourceResolutions = staticCoordinator?.sourceResolutions ?? [];
 
 	samples.push({
 		atMs: Date.now(),
 		harnessFrameDiagnostics: diagnostics.harnessFrameDiagnostics ?? null,
-		legacyDiagnostics: {
-			...createLegacyDiagnosticsSummary({
-				staticCommitInstall,
-				staticCoordinator,
-				textureAtlas,
-			}),
-			inFlightTasks: (staticCoordinator?.inFlightTasks ?? []).map((task) => ({
-				activeBakeBatchId: task.activeBakeBatchId,
-				activeBakeStage: task.activeBakeStage,
-				activeBakeStageAgeMs: task.activeBakeStageAgeMs,
-				domain: task.domain,
-				phase: task.phase,
-				scopeKey: task.scopeKey,
-			})),
-			pendingJobs: pendingJobs.map((job) => ({
-				bakeBatchId: job.bakeBatchId,
-				domain: job.domain,
-				itemCount: job.itemCount,
-				lastTraceStage: job.traceEvents.at(-1)?.stage ?? null,
-				requestId: job.requestId,
-				stage: job.stage,
-				stageAgeMs: job.stageAgeMs,
-				traceEventCount: job.traceEvents.length,
-			})),
-			sourceResolutions: sourceResolutions.map((resolution) => ({
-				ageMs: resolution.ageMs,
-				landblockHex: resolution.landblockHex,
-				layerKinds: resolution.layerKinds,
-				recipeCount: resolution.recipeCount,
-				requestId: resolution.requestId,
-				requestSeq: resolution.requestSeq,
-				resolverMs: resolution.resolverMs,
-				sourceLod: resolution.sourceLod,
-				status: resolution.status,
-				taskIds: resolution.taskIds,
-			})),
-		},
 		openWorldStreaming: openWorldStreaming?.summary ?? null,
 		renderer: diagnostics.runtime,
 	});
 
 	if (samples.length > 600) {
 		samples.splice(0, samples.length - 600);
-	}
-
-	for (const job of pendingJobs) {
-		for (const event of job.traceEvents) {
-			const key = [
-				job.requestId,
-				job.bakeBatchId,
-				event.atMs,
-				event.stage,
-				JSON.stringify(event.details),
-			].join("|");
-			if (!workerEventsByKey.has(key)) {
-				workerEventsByKey.set(key, {
-					...event,
-					bakeBatchId: job.bakeBatchId,
-					domain: job.domain,
-					itemCount: job.itemCount,
-					key,
-					requestId: job.requestId,
-				});
-			}
-		}
 	}
 }
 

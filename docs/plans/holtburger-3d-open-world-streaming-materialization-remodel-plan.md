@@ -1836,24 +1836,34 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Remove the explicit legacy runtime switch: delete `"legacy"` from `BrowserRuntimePipelineMode`, `parseBrowserRuntimePipelineMode(...)`, `BrowserPipelineHarness.svelte`, and `scripts/browser-pipeline-harness.mjs`.
-- [ ] Remove old runtime orchestration modules: delete `src/lib/runtime/client-runtime.ts` implementation paths that only serve `ClientRuntimeImpl`, or split durable shared runtime types into a smaller replacement-owned contract before deleting the implementation.
-- [ ] Remove old texture manager paths no longer used: delete `src/lib/textures/texture-manager.ts`, `TextureAtlasPageInspectionSnapshot`, `RuntimeTextureAtlasPageOverview`, and the legacy atlas inspector UI unless a replacement-native inspector is built from `OpenWorldStreamingAtlasInspectionSnapshot`.
-- [ ] Remove old static coordinator continuation path: delete `src/lib/static/coordinator/static-coordinator.ts` and any `StaticCoordinator*` contracts that are not reusable static source/bake transforms.
-- [ ] Delete shims that translate replacement artifacts back into retired legacy shapes: `src/lib/systems/open-world-streaming/composition/client-runtime-legacy-shim.ts`, `src/lib/systems/open-world-streaming/testing/empty-runtime-snapshots.ts`, harness `legacyDiagnostics`, and replacement adapter legacy snapshot projection methods.
-- [ ] Audit remaining adapters and classify each as host, worker, renderer, diagnostics, harness, or delete.
-- [ ] Verify surviving adapters do not expose shim-only fields, old diagnostic categories, or legacy timing/order assumptions.
-- [ ] Delete legacy diagnostic projections rather than keeping them alive by inventing compatibility fields from replacement data.
-- [ ] Delete or rewrite architecture-preserving tests: `src/lib/runtime/client-runtime.test.ts`, `src/lib/static/coordinator/static-coordinator.test.ts`, `src/lib/textures/texture-manager.test.ts`, and legacy-only portions of `src/lib/runtime/static-commit-installer.test.ts` and `src/lib/runtime/env-cell-system-layer-publication.test.ts`.
-- [ ] Remove obsolete diagnostics and tests, including any remaining `static-coordinator`, `static-commit-install`, and `texture-atlas` report categories from normal replacement outputs.
-- [ ] Resolve current `npm run lint:dead` findings: unused `createDynamicRendererVisualResourceId`, `buildObjectVisualAtlas`, `OpenWorldStreamingDiagnosticsReport`, static bake/source projection diagnostic exported types, structured/static-object timing exported types, object visual atlas build exported types, and texture packing result-ready exported types.
-- [ ] Run `npm run check`.
-- [ ] Run `npm run lint`.
-- [ ] Run benchmark matrix one final time.
+- [x] Remove the explicit legacy runtime switch: delete `"legacy"` from `BrowserRuntimePipelineMode`, `parseBrowserRuntimePipelineMode(...)`, `BrowserPipelineHarness.svelte`, and `scripts/browser-pipeline-harness.mjs`.
+- [x] Remove old runtime orchestration modules: delete `src/lib/runtime/client-runtime.ts` implementation paths that only serve `ClientRuntimeImpl`, or split durable shared runtime types into a smaller replacement-owned contract before deleting the implementation.
+- [x] Remove old texture manager paths no longer used: delete `src/lib/textures/texture-manager.ts`, `TextureAtlasPageInspectionSnapshot`, `RuntimeTextureAtlasPageOverview`, and the legacy atlas inspector UI unless a replacement-native inspector is built from `OpenWorldStreamingAtlasInspectionSnapshot`.
+- [x] Remove old static coordinator continuation path: delete `src/lib/static/coordinator/static-coordinator.ts` and any `StaticCoordinator*` contracts that are not reusable static source/bake transforms.
+- [x] Delete shims that translate replacement artifacts back into retired legacy shapes: `src/lib/systems/open-world-streaming/composition/client-runtime-legacy-shim.ts`, `src/lib/systems/open-world-streaming/testing/empty-runtime-snapshots.ts`, harness `legacyDiagnostics`, and replacement adapter legacy snapshot projection methods.
+- [x] Audit remaining adapters and classify each as host, worker, renderer, diagnostics, harness, or delete.
+- [x] Verify surviving adapters do not expose shim-only fields, old diagnostic categories, or legacy timing/order assumptions.
+- [x] Delete legacy diagnostic projections rather than keeping them alive by inventing compatibility fields from replacement data.
+- [x] Delete or rewrite architecture-preserving tests: `src/lib/runtime/client-runtime.test.ts`, `src/lib/static/coordinator/static-coordinator.test.ts`, `src/lib/textures/texture-manager.test.ts`, and legacy-only portions of `src/lib/runtime/static-commit-installer.test.ts` and `src/lib/runtime/env-cell-system-layer-publication.test.ts`.
+- [x] Remove obsolete diagnostics and tests, including any remaining `static-coordinator`, `static-commit-install`, and `texture-atlas` report categories from normal replacement outputs.
+- [x] Resolve current `npm run lint:dead` findings: unused `createDynamicRendererVisualResourceId`, `buildObjectVisualAtlas`, `OpenWorldStreamingDiagnosticsReport`, static bake/source projection diagnostic exported types, structured/static-object timing exported types, object visual atlas build exported types, and texture packing result-ready exported types.
+- [x] Run `npm run check`.
+- [x] Run `npm run lint`.
+- [x] Run benchmark matrix one final time.
 
 Decisions and course corrections:
 
-- Pending.
+- Deleted the explicit browser/runtime pipeline selector and made `createBrowserRuntime(...)` always compose the open-world streaming runtime. The browser harness now records `runtimePipeline: "open-world-streaming"` as scenario metadata, not as a selectable compatibility mode.
+- Split `src/lib/runtime/client-runtime.ts` down to durable runtime contracts and deleted `ClientRuntimeImpl`, the old static coordinator path, the global texture manager, static commit installer, env-cell legacy publication helper, fake workers, compatibility snapshots, legacy runtime pipeline switch tests, and the texture atlas inspector UI.
+- Replaced the remaining legacy-shaped runtime diagnostics projection with a narrow runtime summary plus direct `open-world-streaming` and `renderer` domain reports. Static coordinator, static commit install, texture manager, texture atlas inspection, and legacy diagnostics categories are no longer synthesized from replacement data.
+- Adapter audit after deletion: host/asset access, static resolver worker, static bake worker, dynamic visual workers, texture packing worker, renderer mutation, diagnostics export, and browser harness composition remain as durable adapters. No production shim remains to translate replacement artifacts back into retired static coordinator, static commit installer, or texture manager shapes.
+- Worker-budget steering: Phase 16 did not add any broad budget API for worker/source/packing wall time. Worker waits remain acceptable unless they create stale output, queue starvation, dishonest readiness, or measured browser-main-loop delivery/assimilation spikes.
+- Dead-code cleanup removed or narrowed unused public exports after hard cutover, including old scene-commit placeholder helpers, static coordinator contracts, static source-resolution snapshot types, texture packing result-ready DTO exports, object visual atlas builder internals, and stale `TextureManager` comment vocabulary.
+- Test migration: one object-visual texture placement test was updated to assert the replacement-native texture source preparation, packing result transfer, and page settlement diagnostic stages rather than the older coarse stage list.
+- Concession: the renderer still has an internal `legacy-render-pass` mode name for the current single-surface render path. Phase 16 stopped exposing that name through runtime diagnostics, but a later renderer naming cleanup may still be worthwhile if portal-frame terminology becomes confusing.
+- Verification: `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and full `npm run test:ts` passed.
+- Verification: `npm run harness:browser -- --domains terrain --layer-distance 0 --output /tmp/holtburger-phase16-terrain-r0.json` passed with one ready artifact, one applied scene commit, zero pending scene commits, no compatibility shims, runtime diagnostics limited to status/scene interest/filtering, max long task about 59 ms, and max renderer frame delta about 44 ms.
+- Verification: `npm run harness:browser -- --layer-distance 1 --output /tmp/holtburger-phase16-all-domain-r1.json` passed with 45 ready artifacts, 45 applied scene commits, zero pending scene commits, 121 resident texture pages, 44 static-authored runtime entities, no compatibility shims, max long task about 183 ms, and request readiness about 19.5 s.
 
 ## Risks And Mitigations
 

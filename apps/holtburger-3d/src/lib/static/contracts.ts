@@ -8,10 +8,7 @@ import type {
 	EnvCellSystemLayerSourcePayloadDto,
 	LandblockOutdoorLayerSourcePayloadDto,
 } from "./source-payloads";
-import type {
-	DynamicEntityRecipe,
-	DynamicVisualBakeResult,
-} from "../dynamic/contracts";
+import type { DynamicEntityRecipe } from "../dynamic/contracts";
 import type {
 	ObjectVisualTexturePlacementSnapshot,
 	TextureResourceDependencies,
@@ -112,7 +109,7 @@ export interface LayerOwnerKey {
 	readonly landblockId: number;
 }
 
-export type LayerOwnerLifecycle =
+type LayerOwnerLifecycle =
 	| "desired"
 	| "resolving"
 	| "baking"
@@ -190,7 +187,7 @@ export interface StaticLandblockSceneLodSourceProjectionEvent {
 	readonly resolution: StaticLandblockSceneLodResolution;
 }
 
-export interface StaticLandblockSceneLodSourceProjectionDiagnostics {
+interface StaticLandblockSceneLodSourceProjectionDiagnostics {
 	/** Worker wall-clock timestamp immediately before the projected result is posted to the browser. */
 	readonly completedAtEpochMs?: number;
 	/** Dynamic placement records delivered to the browser for this runner result. */
@@ -203,50 +200,14 @@ export interface StaticLandblockSceneLodSourceProjectionDiagnostics {
 	readonly projectionMs: number;
 }
 
-export interface StaticSourceResolutionDiagnostics {
-	/** Coordinator-local sequence for source request submission order. */
-	readonly requestSeq: number;
-	/** Coordinator-local request id for correlating active and recent source work. */
-	readonly requestId: string;
-	readonly revision: number;
-	/** Normalized outdoor landblock id requested from the scene LoD source. */
-	readonly landblockId: number;
-	/** String form used by browser diagnostics and console reports. */
-	readonly landblockHex: string;
-	readonly context: StaticLandblockSceneLodSourceRequest["context"];
-	readonly sourceLod: StaticLandblockSceneLodSourceRequest["sourceLod"];
-	readonly layerKinds: readonly StaticLandblockSceneLodLayerRequest["kind"][];
-	readonly taskIds: readonly string[];
-	readonly ownerIds: readonly string[];
-	readonly status: "pending" | "resolved" | "failed";
-	readonly submittedAtMs: number;
-	readonly ageMs: number;
-	readonly resolverMs: number | null;
-	readonly recipeCount: number | null;
-	readonly dynamicPlacementCount: number | null;
-	readonly dynamicRecipeCount: number | null;
-	readonly error: string | null;
-}
-
 export interface StaticLandblockSceneLodSourceResolver {
 	resolveSource(
 		request: StaticLandblockSceneLodSourceRequest,
 	): Promise<StaticLandblockSceneLodResolution>;
 	resolveProjectedSources?(
 		request: StaticLandblockSceneLodSourceRequest,
-		onProjection: (
-			event: StaticLandblockSceneLodSourceProjectionEvent,
-		) => void,
+		onProjection: (event: StaticLandblockSceneLodSourceProjectionEvent) => void,
 	): Promise<void>;
-}
-
-export interface StaticRetentionReconciliation {
-	/** Reconciliation run that accepted this scene-interest demand. */
-	readonly runId: string;
-	/** Layer tasks retained or created by the run, keyed by layer owner. */
-	readonly layerTasks: readonly StaticLayerTaskStatus[];
-	readonly retainedLayerOwners: readonly LayerOwnerKey[];
-	readonly removedResources: readonly StaticResourceKey[];
 }
 
 export type StaticResourceKey =
@@ -267,24 +228,6 @@ interface StaticPortalApertureResourceKey {
 interface StaticObjectVisualResourceResourceKey {
 	readonly kind: "static-object-visual-resource";
 	readonly resourceId: string;
-}
-
-export function collectStaticDrawUnitResourceIds(
-	resources: readonly StaticResourceKey[],
-): readonly string[] {
-	return resources.flatMap((resource) =>
-		resource.kind === "draw-unit" ? [resource.drawUnitId] : [],
-	);
-}
-
-export function collectStaticObjectVisualResourceIds(
-	resources: readonly StaticResourceKey[],
-): readonly string[] {
-	return resources.flatMap((resource) =>
-		resource.kind === "static-object-visual-resource"
-			? [resource.resourceId]
-			: [],
-	);
 }
 
 export type StaticTextureUseOwner =
@@ -1967,89 +1910,6 @@ interface StaticBakerJobDiagnostics {
 	readonly traceEvents: readonly StaticBakerTraceEvent[];
 }
 
-export interface StaticCoordinatorSnapshot {
-	readonly revision: number;
-	readonly requested: number;
-	readonly resolving: number;
-	readonly baking: number;
-	readonly committed: number;
-	readonly failed: number;
-	readonly committedDrawUnits: number;
-	readonly ownerStates: readonly LayerOwnerState[];
-	readonly layerTasks: readonly StaticLayerTaskStatus[];
-	readonly latestTerrainPayload: TerrainStaticScopePayloadSummary | null;
-	readonly latestOutdoorStaticObjectsPayload: OutdoorStaticObjectsPayloadSummary | null;
-	readonly latestEnvCellSystemPayload: EnvCellSystemPayloadSummary | null;
-	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
-	readonly staticObjectBakeDiagnostics: readonly StaticObjectBakeDiagnostics[];
-	readonly recentTiming: readonly StaticCoordinatorTimingDiagnostics[];
-	readonly staticBakerDiagnostics: StaticBakerDiagnosticsSnapshot | null;
-	readonly sourceResolutionDiagnostics: readonly StaticSourceResolutionDiagnostics[];
-}
-
-export interface StaticCoordinatorOverviewSnapshot {
-	/** Coordinator revision for browser-facing status summaries. */
-	readonly revision: number;
-	/** Number of active static layer tasks not yet settled. */
-	readonly requested: number;
-	/** Number of active layer tasks currently resolving source payloads. */
-	readonly resolving: number;
-	/** Number of active layer tasks currently baking renderable payloads. */
-	readonly baking: number;
-	/** Number of static layer tasks committed since coordinator creation. */
-	readonly committed: number;
-	/** Most recent terrain payload summary for browser diagnostics. */
-	readonly latestTerrainPayload: TerrainStaticScopePayloadSummary | null;
-	/** Most recent env-cell payload summary for browser diagnostics. */
-	readonly latestEnvCellSystemPayload: EnvCellSystemPayloadSummary | null;
-}
-
-export interface StaticCoordinatorTimingDiagnostics {
-	readonly kind: "static-coordinator-timing";
-	readonly domain: StaticDomain;
-	readonly revision: number;
-	readonly taskId: string;
-	readonly scopeKey: string;
-	readonly resolverMs: number | null;
-	readonly placementIntentMs: number | null;
-	readonly texturePlacementMs: number | null;
-	readonly resourceMs: number | null;
-	readonly bakeMs: number | null;
-	readonly commitMs: number | null;
-}
-
-export interface StaticCoordinatorCommitDelta {
-	/** Stable identity for this exact static commit. */
-	readonly commitId: string;
-	readonly addedDrawUnits: readonly StaticDrawUnit[];
-	readonly addedPortalApertureResources: readonly StaticPortalApertureResource[];
-	readonly removedResources: readonly StaticResourceKey[];
-	readonly textureUses: readonly StaticBakeTextureUse[];
-	readonly textureDependencies: readonly TextureResourceDependencies[];
-	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
-	readonly objectVisualInstallSet: ObjectVisualInstallSet;
-	readonly staticSpatialRecords: readonly StaticSpatialRecord[];
-	readonly staticVisibilityRecords: readonly StaticVisibilityRecord[];
-	readonly staticPortalInteriorRecords: readonly StaticPortalInteriorRecord[];
-	readonly staticPortalGraphs: readonly StaticPortalGraphRecord[];
-	readonly staticSourceMappings: readonly StaticSourceMappingRecord[];
-	readonly envCellStaticObjectPlacementRecords: readonly EnvCellStaticObjectPlacementRecord[];
-	/** Static layer tasks whose products are represented by this commit. */
-	readonly tasks: readonly StaticBakeTask[];
-	readonly revision: number;
-}
-
-export interface StaticScopePrepCommit {
-	/** Static-only commit payload. */
-	readonly staticCommit: StaticCoordinatorCommitDelta;
-	/** Static-authored dynamic placements whose residency is gated by this commit. */
-	readonly dynamicPlacements: readonly StaticAuthoredDynamicPlacementRecord[];
-	/** Resolved static-authored dynamic recipes scoped to this commit. */
-	readonly dynamicRecipes: readonly DynamicEntityRecipe[];
-	/** Baked dynamic visuals produced from sibling source-resolution recipes. */
-	readonly dynamicVisualBakeResults: readonly DynamicVisualBakeResult[];
-}
-
 type PortalApertureResourceSourceKind =
 	| "env-cell-portal"
 	| "building-transition";
@@ -2110,55 +1970,6 @@ interface StaticBuildingTransitionApertureRangeSource {
 	readonly sourceDid: number;
 	readonly landblockId: number;
 	readonly targetEnvCellId: number;
-}
-
-export interface StaticCoordinatorSourcePayloadDelta {
-	readonly payload: StaticScopePayload;
-	readonly revision: number;
-	/** Layer task that accepted the resolved source payload. */
-	readonly task: StaticLayerTaskStatus;
-}
-
-type StaticLayerTaskPhase =
-	| "requested"
-	| "resolving"
-	| "source-resolved"
-	| "baking"
-	| "committed"
-	| "materializing"
-	| "materialized"
-	| "empty"
-	| "failed"
-	| "canceled";
-
-export type StaticActiveBakeStage =
-	| "source-ready-handler"
-	| "resources"
-	| "static-baker"
-	| "dynamic-visual-baker"
-	| "commit-synthesis";
-
-export interface StaticLayerTaskStatus {
-	/** Opaque task identifier for diagnostics; layer owner identity remains the semantic key. */
-	readonly taskId: string;
-	/** Layer owner whose static product is produced by this task. */
-	readonly ownerKey: LayerOwnerKey;
-	/** Stable string form of `ownerKey` for map keys and compact diagnostics. */
-	readonly ownerId: string;
-	readonly revision: number;
-	readonly domain: StaticDomain;
-	readonly scopeKey: string;
-	readonly phase: StaticLayerTaskPhase;
-	/** Monotonic timestamp, in milliseconds, when the task entered `phase`. */
-	readonly phaseStartedAtMs: number;
-	/** Elapsed milliseconds spent in the current phase when this snapshot was created. */
-	readonly phaseAgeMs: number;
-	/** Current coordinator-side bake stage, for diagnosing long-running active bake closures. */
-	readonly activeBakeStage: StaticActiveBakeStage | null;
-	/** Monotonic timestamp, in milliseconds, when the active bake stage began. */
-	readonly activeBakeStageStartedAtMs: number | null;
-	/** Elapsed milliseconds spent in the active bake stage when this snapshot was created. */
-	readonly activeBakeStageAgeMs: number | null;
 }
 
 export interface EnvCellSystemPayloadSummary {

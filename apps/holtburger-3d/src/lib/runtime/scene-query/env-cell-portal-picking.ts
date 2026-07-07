@@ -112,7 +112,7 @@ function envCellMatchesPortalPickRequest(
 	);
 }
 
-export function triangulateEnvCellPortalAperture(
+function triangulateEnvCellPortalAperture(
 	points: EnvCellPortalScenePickDetails["portalAperture"]["points"],
 	matrix: Float32Array,
 	translation: readonly [number, number, number],

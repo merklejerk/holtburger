@@ -45,7 +45,7 @@ export interface StructuredInteriorMaterialPlanner {
 	}): Promise<StructuredInteriorCellMaterialPlan>;
 }
 
-export interface StructuredInteriorMaterialPlanningBudget {
+interface StructuredInteriorMaterialPlanningBudget {
 	/** Cooperative yield hook used by replacement runners to split long planners. */
 	readonly yieldToFrameBudget: () => Promise<void>;
 	/** Main-thread planning slice before yielding. Defaults to one short tasklet. */

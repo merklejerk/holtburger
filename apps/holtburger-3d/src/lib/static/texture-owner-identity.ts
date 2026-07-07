@@ -5,7 +5,7 @@ import {
 } from "../textures/identity";
 
 /** Converts static texture residency owners into canonical owner ids for texture retention. */
-export function createStaticTextureOwnerId(
+function createStaticTextureOwnerId(
 	owner: StaticTextureUseOwner,
 ): TextureOwnerId {
 	switch (owner.kind) {

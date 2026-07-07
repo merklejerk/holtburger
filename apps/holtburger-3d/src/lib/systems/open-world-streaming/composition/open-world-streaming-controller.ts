@@ -1,9 +1,9 @@
 import type {
-	OpenWorldStreamingAtlasInspectionSnapshot,
 	OpenWorldStreamingDiagnosticsSnapshot,
 	OpenWorldStreamingMaterialReadinessDiagnostics,
 	OpenWorldStreamingStaticTaskStageTiming,
 	OpenWorldStreamingStaticTaskDiagnostics,
+	OpenWorldStreamingTexturePageInspectionSnapshot,
 	OpenWorldStreamingTexturePageBuildTaskDiagnostics,
 } from "../diagnostics/contracts";
 import type { Renderer } from "../../../renderer/types";
@@ -31,6 +31,7 @@ import {
 	type MaterializationOwnerId,
 } from "../owners/owner-id";
 import { OpenWorldTextureClaimRegistry } from "../texture-residency/claims/texture-claim-registry";
+import type { OpenWorldTextureBucketKey } from "../texture-residency/claims/bucket-key";
 import {
 	OpenWorldTerrainArtifactRunner,
 	type OpenWorldTerrainLayerCommit,
@@ -45,6 +46,7 @@ import {
 } from "../static-layers/env-cells/env-cell-artifact-runner";
 import type { PreparedAssetReader } from "../../../assets/contracts";
 import { applyOpenWorldStreamingTextureCommit } from "../texture-residency/commits/texture-commit-applier";
+import type { OpenWorldStreamingTextureCommit } from "../texture-residency/commits/contracts";
 import {
 	createEnvCellResourceMembershipIndex,
 	createEnvCellResourceMembershipSnapshot,
@@ -189,6 +191,10 @@ interface StaticTaskTiming {
 type OpenWorldStreamingMaterialReadinessIssue =
 	OpenWorldStreamingMaterialReadinessDiagnostics["recentIssues"][number];
 
+type OpenWorldTexturePageInspectionPreview = NonNullable<
+	OpenWorldStreamingTexturePageInspectionSnapshot["preview"]
+>;
+
 interface StaticLayerRunRequest {
 	readonly owner: {
 		readonly id: MaterializationOwnerId;
@@ -226,6 +232,10 @@ export class OpenWorldStreamingController {
 	#texturePageBuilder: OpenWorldTexturePageBuilder | null = null;
 	#texturePageBuildTaskStream: OpenWorldTexturePageBuildTaskStream | null =
 		null;
+	readonly #texturePagePreviewsByKey = new Map<
+		string,
+		OpenWorldTexturePageInspectionPreview
+	>();
 	#frameBudgetYieldedPasses = 0;
 	readonly #deferredOutdoorRendererLayers = {
 		buildings: new Map<
@@ -547,16 +557,47 @@ export class OpenWorldStreamingController {
 		};
 	}
 
-	createAtlasInspectionSnapshot(input: {
+	createTexturePageInspectionSnapshot(input: {
 		readonly bucketKey: string;
 		readonly pageId: string;
-	}): OpenWorldStreamingAtlasInspectionSnapshot {
+	}): OpenWorldStreamingTexturePageInspectionSnapshot {
+		const bucket = this.#textureClaims.createBucketSnapshot(
+			input.bucketKey as OpenWorldTextureBucketKey,
+		);
+		const page = bucket.pages.find(
+			(candidate) => candidate.id === input.pageId,
+		);
+		if (!page) {
+			return {
+				bucketKey: input.bucketKey,
+				entries: [],
+				kind: "open-world-streaming-texture-page",
+				pageId: input.pageId,
+				preview: null,
+				state: "missing",
+			};
+		}
+		const entriesById = new Map(
+			bucket.entries.map((entry) => [entry.id, entry]),
+		);
 		return {
 			bucketKey: input.bucketKey,
-			claims: [],
-			kind: "open-world-streaming-atlas-page",
+			entries: page.entryIds.map((entryId) => {
+				const entry = entriesById.get(entryId);
+				if (!entry) {
+					throw new Error(
+						`Texture page ${page.id} references missing entry ${entryId}.`,
+					);
+				}
+				return entry;
+			}),
+			kind: "open-world-streaming-texture-page",
 			pageId: input.pageId,
-			state: "missing",
+			preview:
+				this.#texturePagePreviewsByKey.get(
+					createTexturePagePreviewKey(input.bucketKey, input.pageId),
+				) ?? null,
+			state: page.state,
 		};
 	}
 
@@ -1312,6 +1353,7 @@ export class OpenWorldStreamingController {
 			this.#texturePageBuildTaskStream =
 				new OpenWorldTexturePageBuildTaskStream({
 					onCommit: (commit) => {
+						this.#recordTexturePageInspectionPreviews(commit);
 						applyOpenWorldStreamingTextureCommit(this.#renderer, commit, {
 							revision:
 								this.#terrainProgress.committed +
@@ -1325,6 +1367,41 @@ export class OpenWorldStreamingController {
 				});
 		}
 		return this.#texturePageBuildTaskStream;
+	}
+
+	#recordTexturePageInspectionPreviews(
+		commit: OpenWorldStreamingTextureCommit,
+	): void {
+		for (const removal of commit.pageRemovals) {
+			this.#texturePagePreviewsByKey.delete(
+				createTexturePagePreviewKey(commit.bucketKey, removal.pageId),
+			);
+		}
+		for (const update of commit.pageUpdates) {
+			this.#texturePagePreviewsByKey.set(
+				createTexturePagePreviewKey(commit.bucketKey, update.pageId),
+				{
+					format: update.format,
+					height: update.height,
+					pixels: new Uint8Array(update.pixels),
+					placements: commit.bindingUpdates.flatMap((bindingUpdate) =>
+						bindingUpdate.readiness.kind === "resident" &&
+						bindingUpdate.readiness.textureRefId === update.textureRefId
+							? [
+									{
+										bindingId: bindingUpdate.bindingId,
+										rect: bindingUpdate.readiness.rect,
+									},
+								]
+							: [],
+					),
+					sampleClass: update.sampleClass,
+					width: update.width,
+					wrapS: update.wrapS,
+					wrapT: update.wrapT,
+				},
+			);
+		}
 	}
 
 	#requireStaticSourceResolver(): StaticLandblockSceneLodSourceResolver {
@@ -1360,6 +1437,10 @@ function createStaticDemandPlan(
 		},
 		interest.revision,
 	);
+}
+
+function createTexturePagePreviewKey(bucketKey: string, pageId: string): string {
+	return `${bucketKey}\n${pageId}`;
 }
 
 class OpenWorldStaticSourceResolutionCache implements StaticLandblockSceneLodSourceResolver {

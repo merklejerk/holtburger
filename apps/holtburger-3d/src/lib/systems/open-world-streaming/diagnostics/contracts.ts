@@ -366,9 +366,9 @@ export interface OpenWorldStreamingStaticTaskStageTiming {
 		| "assemble-commit";
 }
 
-/** Replacement-native atlas/page inspection contract. */
-export interface OpenWorldStreamingAtlasInspectionSnapshot {
-	readonly kind: "open-world-streaming-atlas-page";
+/** Replacement-native texture page inspection contract. */
+export interface OpenWorldStreamingTexturePageInspectionSnapshot {
+	readonly kind: "open-world-streaming-texture-page";
 	readonly bucketKey: string;
 	readonly pageId: string;
 	readonly state:
@@ -377,8 +377,46 @@ export interface OpenWorldStreamingAtlasInspectionSnapshot {
 		| "building"
 		| "reclaimable"
 		| "missing";
-	readonly claims: readonly {
-		readonly ownerId: string;
-		readonly textureBindingId: string;
+	/** Last accepted renderer upload retained for interactive inspection. */
+	readonly preview: OpenWorldStreamingTexturePageInspectionPreview | null;
+	readonly entries: readonly {
+		/** Shared logical entry identity used by claims, pages, and diagnostics. */
+		readonly id: string;
+		/** Material-consumer bindings currently resolving through this entry. */
+		readonly bindingIds: readonly string[];
+		/** Owners currently retaining this entry. */
+		readonly ownerIds: readonly string[];
+		/** Physical page format class. */
+		readonly pageClass: string;
+		/** Shader/page role for compatible placement reuse. */
+		readonly purpose: string;
+		/** Prepared source dedupe key used before pixel materialization. */
+		readonly sourceKey: string;
+		/** Entry lifecycle state from the claim registry's point of view. */
+		readonly state: "claimed" | "reclaimable";
+		/** Canonical texture identity, excluding owner and binding lifetime. */
+		readonly textureKey: string;
 	}[];
+}
+
+interface OpenWorldStreamingTexturePageInspectionPreview {
+	/** Renderer texture page pixel format. */
+	readonly format: "rgba8" | "r8" | "rg8";
+	/** Runtime page height in pixels. */
+	readonly height: number;
+	/** Complete page pixels from the last accepted upload. */
+	readonly pixels: Uint8Array;
+	/** Binding rects accepted with the last page upload. */
+	readonly placements: readonly {
+		readonly bindingId: string;
+		readonly rect: readonly [number, number, number, number];
+	}[];
+	/** Renderer sample class for shader interpretation. */
+	readonly sampleClass: string;
+	/** Runtime page width in pixels. */
+	readonly width: number;
+	/** Horizontal wrap mode. */
+	readonly wrapS: string;
+	/** Vertical wrap mode. */
+	readonly wrapT: string;
 }

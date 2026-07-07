@@ -5,11 +5,8 @@ import {
 	type RuntimeDynamicSpawnRequest,
 } from "../../../dynamic/dynamic-entity-controller";
 import type { DynamicAnimationCatchUpTruncation } from "../../../dynamic/dynamic-animation-player";
-import { createDynamicVisualBakeSourceGeometry } from "../../../dynamic/visual-bake-sidecars";
-import {
-	createDynamicVisualTexturePlanning,
-	type DynamicVisualBaker,
-} from "../../../dynamic/visual-baker";
+import { createDynamicVisualTexturePlanning } from "../../../dynamic/visual-baker";
+import type { DynamicVisualPrepper } from "../../../dynamic/visual-prepper";
 import type { DynamicVisualRecipeResolver } from "../../../dynamic/visual-recipe-resolver";
 import type { StaticAuthoredDynamicPlacementRecord } from "../../../static/contracts";
 import type {
@@ -38,7 +35,7 @@ import {
 
 export interface OpenWorldRuntimeEntitySystemOptions {
 	readonly assetReader: PreparedAssetReader;
-	readonly createDynamicVisualBaker: () => DynamicVisualBaker;
+	readonly createDynamicVisualPrepper: () => DynamicVisualPrepper;
 	readonly createDynamicVisualRecipeResolver: () => DynamicVisualRecipeResolver;
 	readonly objectVisualAtlasBuilder: OpenWorldObjectVisualAtlasBuilder;
 	readonly owners: MaterializationOwnerRegistry;
@@ -98,9 +95,8 @@ type DynamicPrepResult =
 	| "stale";
 
 type DynamicPrepStage =
-	| "dynamic-bake"
+	| "dynamic-visual-prep-worker"
 	| "recipe-resolution"
-	| "source-geometry-preparation"
 	| "texture-page-build-wait"
 	| "texture-placement-reservation";
 
@@ -150,7 +146,7 @@ const RECENT_RUNTIME_ENTITY_DIAGNOSTICS_LIMIT = 20;
 export class OpenWorldRuntimeEntitySystem {
 	readonly #assetReader: PreparedAssetReader;
 	readonly #controller: DynamicEntityController;
-	readonly #createDynamicVisualBaker: () => DynamicVisualBaker;
+	readonly #createDynamicVisualPrepper: () => DynamicVisualPrepper;
 	readonly #createDynamicVisualRecipeResolver: () => DynamicVisualRecipeResolver;
 	readonly #objectVisualAtlasBuilder: OpenWorldObjectVisualAtlasBuilder;
 	readonly #owners: MaterializationOwnerRegistry;
@@ -163,7 +159,7 @@ export class OpenWorldRuntimeEntitySystem {
 		Set<MaterializationOwnerId>
 	>();
 	readonly #textureClaims: OpenWorldTextureClaimRegistry;
-	#dynamicVisualBaker: DynamicVisualBaker | null = null;
+	#dynamicVisualPrepper: DynamicVisualPrepper | null = null;
 	#dynamicVisualRecipeResolver: DynamicVisualRecipeResolver | null = null;
 	#lastFrameTimeSeconds = 0;
 	#rendererRevision = 0;
@@ -198,7 +194,7 @@ export class OpenWorldRuntimeEntitySystem {
 				this.#recordAnimationCatchUpTruncation(truncation);
 			},
 		});
-		this.#createDynamicVisualBaker = options.createDynamicVisualBaker;
+		this.#createDynamicVisualPrepper = options.createDynamicVisualPrepper;
 		this.#createDynamicVisualRecipeResolver =
 			options.createDynamicVisualRecipeResolver;
 		this.#objectVisualAtlasBuilder = options.objectVisualAtlasBuilder;
@@ -406,20 +402,13 @@ export class OpenWorldRuntimeEntitySystem {
 				return "stale";
 			}
 			this.#setPrepState(request, "baking");
-			const sourceGeometry = await this.#measurePrepStage(
+			const result = await this.#measurePrepStage(
 				request,
-				"source-geometry-preparation",
-				() => createDynamicVisualBakeSourceGeometry(this.#assetReader, [recipe]),
-			);
-			if (!this.#isCurrent(request)) {
-				this.#recordStalePrep(request);
-				return "stale";
-			}
-			const result = await this.#measurePrepStage(request, "dynamic-bake", () =>
-				this.#requireDynamicBaker().bake({
+				"dynamic-visual-prep-worker",
+				() =>
+					this.#requireDynamicPrepper().prepare({
 					recipe,
 					revision: this.#nextRendererRevision(),
-					sourceGeometry,
 					texturePlacementSnapshot: textureReservation.placementSnapshot,
 					texturePlanning,
 				}),
@@ -696,9 +685,9 @@ export class OpenWorldRuntimeEntitySystem {
 		return this.#dynamicVisualRecipeResolver;
 	}
 
-	#requireDynamicBaker(): DynamicVisualBaker {
-		this.#dynamicVisualBaker ??= this.#createDynamicVisualBaker();
-		return this.#dynamicVisualBaker;
+	#requireDynamicPrepper(): DynamicVisualPrepper {
+		this.#dynamicVisualPrepper ??= this.#createDynamicVisualPrepper();
+		return this.#dynamicVisualPrepper;
 	}
 
 	#nextRendererRevision(): number {

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { PreparedAssetReader } from "../assets/contracts";
 import type {
-	DynamicVisualBakeWorkerMainMessage,
-	DynamicVisualBakeWorkerPort,
-	DynamicVisualBakeWorkerThreadMessage,
-} from "../dynamic/visual-bake-protocol";
-import type { DynamicVisualBakeInput } from "../dynamic/contracts";
+	DynamicVisualPrepWorkerMainMessage,
+	DynamicVisualPrepWorkerPort,
+	DynamicVisualPrepWorkerThreadMessage,
+} from "../dynamic/visual-prep-protocol";
+import type { DynamicVisualPrepInput } from "../dynamic/contracts";
 import type {
 	DynamicVisualRecipeWorkerMainMessage,
 	DynamicVisualRecipeWorkerPort,
@@ -32,7 +32,7 @@ import type {
 	OpenWorldObjectVisualAtlasWorkerResponse,
 } from "../systems/open-world-streaming/texture-residency/atlas-build/object-visual-atlas-worker-protocol";
 import {
-	createWorkerDynamicVisualBaker,
+	createWorkerDynamicVisualPrepper,
 	createWorkerDynamicVisualRecipeResolver,
 	createWorkerObjectVisualAtlasBuilder,
 	createWorkerStaticResolver,
@@ -147,30 +147,34 @@ describe("browser runtime routing", () => {
 		expect(workers.map((worker) => worker.terminated)).toEqual([true, true]);
 	});
 
-	it("creates a separate dynamic visual bake worker pool", async () => {
+	it("creates a separate dynamic visual prep worker pool", async () => {
 		const workers = [
-			new FixtureDynamicVisualBakeWorker(),
-			new FixtureDynamicVisualBakeWorker(),
+			new FixtureDynamicVisualPrepWorker(),
+			new FixtureDynamicVisualPrepWorker(),
 		];
 		const pendingWorkers = [...workers];
-		const baker = createWorkerDynamicVisualBaker(workers.length, {
+		const assetReader: PreparedAssetReader = {
+			requestPreparedAsset: () =>
+				Promise.reject(new Error("test asset reader should not be called")),
+		};
+		const prepper = createWorkerDynamicVisualPrepper(assetReader, workers.length, {
 			createWorker: () => {
 				const worker = pendingWorkers.shift();
 				if (!worker) {
-					throw new Error("No fixture dynamic visual bake worker left.");
+					throw new Error("No fixture dynamic visual prep worker left.");
 				}
 				return worker;
 			},
 		});
 
-		const input = createDynamicVisualBakeInput("dynamic-visual:test");
-		const pending = baker.bake(input);
+		const input = createDynamicVisualPrepInput("dynamic-visual:test");
+		const pending = prepper.prepare(input);
 
 		expect(workers[0]?.messages).toEqual([
 			{
 				input,
 				kind: "job",
-				requestId: "dynamic-visual-bake:0",
+				requestId: "dynamic-visual-prep:0",
 			},
 		]);
 		workers[0]?.emit({
@@ -180,13 +184,13 @@ describe("browser runtime routing", () => {
 				product: null,
 				revision: 1,
 			},
-			requestId: "dynamic-visual-bake:0",
+			requestId: "dynamic-visual-prep:0",
 		});
 
 		await expect(pending).resolves.toMatchObject({
 			revision: 1,
 		});
-		disposeResolver(baker);
+		disposeResolver(prepper);
 		expect(workers.map((worker) => worker.terminated)).toEqual([true, true]);
 	});
 
@@ -308,21 +312,21 @@ class FixtureDynamicVisualRecipeWorker implements DynamicVisualRecipeWorkerPort 
 	}
 }
 
-class FixtureDynamicVisualBakeWorker implements DynamicVisualBakeWorkerPort {
-	readonly messages: DynamicVisualBakeWorkerMainMessage[] = [];
+class FixtureDynamicVisualPrepWorker implements DynamicVisualPrepWorkerPort {
+	readonly messages: DynamicVisualPrepWorkerMainMessage[] = [];
 	readonly #listeners = new Set<
-		(event: MessageEvent<DynamicVisualBakeWorkerThreadMessage>) => void
+		(event: MessageEvent<DynamicVisualPrepWorkerThreadMessage>) => void
 	>();
 	terminated = false;
 
-	postMessage(message: DynamicVisualBakeWorkerMainMessage): void {
+	postMessage(message: DynamicVisualPrepWorkerMainMessage): void {
 		this.messages.push(message);
 	}
 
 	addEventListener(
 		_type: "message",
 		listener: (
-			event: MessageEvent<DynamicVisualBakeWorkerThreadMessage>,
+			event: MessageEvent<DynamicVisualPrepWorkerThreadMessage>,
 		) => void,
 	): void {
 		this.#listeners.add(listener);
@@ -331,7 +335,7 @@ class FixtureDynamicVisualBakeWorker implements DynamicVisualBakeWorkerPort {
 	removeEventListener(
 		_type: "message",
 		listener: (
-			event: MessageEvent<DynamicVisualBakeWorkerThreadMessage>,
+			event: MessageEvent<DynamicVisualPrepWorkerThreadMessage>,
 		) => void,
 	): void {
 		this.#listeners.delete(listener);
@@ -341,10 +345,10 @@ class FixtureDynamicVisualBakeWorker implements DynamicVisualBakeWorkerPort {
 		this.terminated = true;
 	}
 
-	emit(message: DynamicVisualBakeWorkerThreadMessage): void {
+	emit(message: DynamicVisualPrepWorkerThreadMessage): void {
 		const event = {
 			data: message,
-		} as MessageEvent<DynamicVisualBakeWorkerThreadMessage>;
+		} as MessageEvent<DynamicVisualPrepWorkerThreadMessage>;
 		for (const listener of this.#listeners) {
 			listener(event);
 		}
@@ -407,13 +411,12 @@ function disposeResolver(resolver: unknown): void {
 	resolver.dispose();
 }
 
-function createDynamicVisualBakeInput(
+function createDynamicVisualPrepInput(
 	entityId: string,
-): DynamicVisualBakeInput {
+): DynamicVisualPrepInput {
 	return {
-		recipe: { entityId } as DynamicVisualBakeInput["recipe"],
+		recipe: { entityId } as DynamicVisualPrepInput["recipe"],
 		revision: 1,
-		sourceGeometry: [],
 		texturePlacementSnapshot: {
 			itemIdsByBindingId: new Map(),
 			placementsByBindingId: new Map(),

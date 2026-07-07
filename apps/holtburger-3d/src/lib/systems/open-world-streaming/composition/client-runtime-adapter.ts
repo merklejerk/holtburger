@@ -92,7 +92,7 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 		this.#renderer = adapters.renderer.renderer;
 		this.#controller = new OpenWorldStreamingController({
 			assetReader: adapters.assets.assetService,
-			createDynamicVisualBaker: adapters.workers.createDynamicVisualBaker,
+			createDynamicVisualPrepper: adapters.workers.createDynamicVisualPrepper,
 			createDynamicVisualRecipeResolver:
 				adapters.workers.createDynamicVisualRecipeResolver,
 			createObjectVisualAtlasBuilder:

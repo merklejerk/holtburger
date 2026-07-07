@@ -73,10 +73,6 @@ import type {
 	ObjectVisualSourceAssetFacts,
 } from "../visual/object-visual-source-payload";
 
-export interface DynamicVisualBaker {
-	bake(input: DynamicVisualBakeInput): Promise<DynamicVisualBakeResult>;
-}
-
 interface DynamicMaterialSlotFacts {
 	readonly identity: DynamicVisualMaterialSlotIdentity;
 	readonly partIndex: number;
@@ -88,7 +84,7 @@ type PendingDynamicEntityTextureRequirement = Omit<
 	"bindingId" | "ownerIds" | "pageClass" | "placementItemId" | "textureKey"
 >;
 
-export class LocalDynamicVisualBaker implements DynamicVisualBaker {
+export class LocalDynamicVisualBaker {
 	async bake(input: DynamicVisualBakeInput): Promise<DynamicVisualBakeResult> {
 		return bakeDynamicVisuals(input);
 	}

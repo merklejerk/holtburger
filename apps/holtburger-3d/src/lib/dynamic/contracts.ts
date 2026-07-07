@@ -254,6 +254,16 @@ export interface DynamicVisualBakeInput {
 	readonly texturePlanning: DynamicVisualTexturePlanning;
 }
 
+export interface DynamicVisualPrepInput {
+	/** Effective visual recipe for exactly one dynamic entity. */
+	readonly recipe: DynamicEntityRecipe;
+	readonly revision: number;
+	/** Texture placements assigned before baking so baked resources can declare legal dependencies. */
+	readonly texturePlacementSnapshot: ObjectVisualTexturePlacementSnapshot;
+	/** Material planning results produced during pre-bake texture placement discovery. */
+	readonly texturePlanning: DynamicVisualTexturePlanning;
+}
+
 /** Pre-bake dynamic visual texture work discovered from source facts. */
 export interface DynamicVisualTexturePlanning {
 	/** Stable entity whose visual recipe produced these placement intents. */

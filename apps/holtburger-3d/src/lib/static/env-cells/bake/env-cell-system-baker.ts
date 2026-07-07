@@ -298,11 +298,6 @@ function createStructuredInteriorObjectVisualPublication(options: {
 	);
 	const recipePublications = publications.flatMap((publication) => {
 		if (publication.resolution.kind === "missing-dependencies") {
-			console.warn(
-				`Skipped structured interior visual recipe publication for ${options.task.ownerId}; missing ${publication.resolution.missingDependencies
-					.map((dependency) => dependency.sourceId)
-					.join(", ")}.`,
-			);
 			return [];
 		}
 		if (publication.publicationMetadata === null) {

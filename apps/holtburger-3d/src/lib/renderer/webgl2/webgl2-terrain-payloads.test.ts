@@ -7,7 +7,6 @@ import type { TextureBindingId } from "../../textures/identity";
 import type { ResolvedTexturePlacement } from "../types";
 import {
 	createTerrainPreparedLayeredPayload,
-	hasDeferredTerrainLayeredTextureReadiness,
 	prepareTerrainLayeredPayload,
 	type TerrainTextureBindingLookup,
 } from "./webgl2-terrain-payloads";
@@ -142,64 +141,6 @@ describe("WebGL2 terrain layered payload builder", () => {
 
 		expect(
 			prepareTerrainLayeredPayload(scratch, plan, createTextureBindingLookup()),
-		).toBe(false);
-		expect(
-			hasDeferredTerrainLayeredTextureReadiness(
-				plan,
-				createTextureBindingLookup(),
-			),
-		).toBe(true);
-	});
-
-	it("identifies failed terrain bindings as deferred readiness", () => {
-		const plan = createPlan({
-			layer: {
-				base: createRole("terrain-base", "base-use", 1),
-				overlays: [],
-				roads: [],
-			},
-		});
-
-		expect(
-			hasDeferredTerrainLayeredTextureReadiness(
-				plan,
-				createTextureBindingLookup(
-					new Map(),
-					new Map(),
-					new Map([
-						["base-use", { kind: "failed", reason: "fixture failure" }],
-					]),
-				),
-			),
-		).toBe(true);
-	});
-
-	it("does not classify missing-not-in-flight terrain bindings as deferred readiness", () => {
-		const plan = createPlan({
-			layer: {
-				base: createRole("terrain-base", "base-use", 1),
-				overlays: [],
-				roads: [],
-			},
-		});
-
-		expect(
-			hasDeferredTerrainLayeredTextureReadiness(
-				plan,
-				createTextureBindingLookup(
-					new Map(),
-					new Map(),
-					new Map([
-						[
-							"base-use",
-							{
-								kind: "missing-not-in-flight",
-								reason: "fixture missing",
-							},
-						],
-					]),
-				),
-			),
 		).toBe(false);
 	});
 

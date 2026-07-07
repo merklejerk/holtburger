@@ -160,28 +160,6 @@ export function prepareTerrainLayeredPayload(
 	return true;
 }
 
-export function hasDeferredTerrainLayeredTextureReadiness(
-	plan: TerrainMaterialLayerPlan,
-	textureBindings: TerrainTextureBindingLookup,
-): boolean {
-	let hasDeferredBinding = false;
-	for (const role of collectTerrainTextureRoles(plan)) {
-		if (!role.textureBindingId) {
-			return false;
-		}
-		if (textureBindings.getResident(role.textureBindingId)) {
-			continue;
-		}
-		const state = textureBindings.getState?.(role.textureBindingId);
-		if (state?.kind === "pending" || state?.kind === "failed") {
-			hasDeferredBinding = true;
-			continue;
-		}
-		return false;
-	}
-	return hasDeferredBinding;
-}
-
 export interface TerrainTextureBindingLookup {
 	getResident(
 		bindingId: TextureBindingId,

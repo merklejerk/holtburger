@@ -198,9 +198,6 @@ function expandRenderablePrimitives(
 						`Object visual material recipe ${binding.materialRecipeId} did not produce a renderable material entry.`,
 					);
 				}
-				console.warn(
-					`Skipped unsupported object visual material ${binding.materialRecipeId}: ${materialRecipe.reason}`,
-				);
 				continue;
 			}
 			primitives.push({

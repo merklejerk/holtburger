@@ -3208,15 +3208,21 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Audit `texture-claim-registry.ts`, page-build settlement, texture commit creation, and renderer apply removal support.
-- [ ] Choose cached/reclaimable/removal threshold policy for first cut.
-- [ ] Implement removal commit scheduling or record the threshold evidence needed before implementation.
-- [ ] Add tests for owner release and page reuse/removal.
-- [ ] Run a harness scenario that evicts or replaces interest and inspect ownerless diagnostics.
+- [x] Audit `texture-claim-registry.ts`, page-build settlement, texture commit creation, and renderer apply removal support.
+- [x] Choose cached/reclaimable/removal threshold policy for first cut.
+- [x] Implement removal commit scheduling or record the threshold evidence needed before implementation.
+- [x] Add tests for owner release and page reuse/removal.
+- [x] Run a harness scenario that evicts or replaces interest and inspect ownerless diagnostics.
 
 Decisions and course corrections:
 
-- Pending.
+- Audit result: the renderer-facing removal plumbing already exists. `OpenWorldStreamingTextureCommit.pageRemovals` maps through `createTexturePlacementUpdate(...)` into `TexturePlacementUpdate.removedTextureRefIds`, and WebGL texture bindings consume removed texture refs. No scheduler was emitting ownerless page removals.
+- Static owner eviction had a real lifecycle gap: runtime entities already called `textureClaims.releaseTextureOwner(...)` on eviction, but static layer eviction only evicted the owner registry entry. Phase 48 centralized static owner eviction in `OpenWorldStreamingController.#evictStaticOwners(...)` and now releases static texture claims when interest changes or clears.
+- First-cut policy: ownerless resident pages are retained as cached-for-reuse reclaimable pages. Renderer removal is explicitly deferred until Phase 49 provides measured memory-pressure evidence and Phase 50 turns that evidence into a direct removal scheduler. This matches the worksheet owner-claim model because owner release remains cheap and never hides renderer mutation, repack, or deletion work.
+- Added `ownerlessPagePolicy` to the texture claim registry snapshot and replacement diagnostics. It records `residentDisposition: "cached-for-reuse"`, `rendererRemoval.kind: "deferred-until-measured-pressure"`, `pressureThresholdBytes: null`, and `pendingRendererRemovalPageCount: 0`. This is not a legacy leak detector; it is the current residency policy surfaced directly.
+- Harness evidence: `npm run harness:browser -- --domains terrain --landblocks 0xda55ffff,0xda56ffff --layer-distance 0 --timeout-ms 60000 --output /tmp/holtburger-phase48-ownerless-sequence.json` settled. After the second landblock, diagnostics reported `owners.evicted: 1`, `claimCount: 8`, `entryCount: 19`, `ownerlessEntries: 11`, `pages.reclaimable: 3`, `pages.resident: 3`, `ownerlessPages.resident: 3`, and the cached-for-reuse/deferred-removal policy above.
+- Spicy bit: before the static-owner release fix, the same harness sequence reported `owners.evicted: 1` but `ownerlessEntries: 0` and `ownerlessPages.total: 0`. That was dishonest lifecycle accounting, not just missing diagnostics.
+- Verification: `npm run check`, `npm run lint`, focused `npm run test:ts -- --run src/lib/systems/open-world-streaming/texture-residency/claims/texture-claim-registry.test.ts src/lib/systems/open-world-streaming/texture-residency/commits/texture-commit-applier.test.ts src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts`, and the browser harness sequence above.
 
 ### Phase 49: Performance Steering And Benchmark Rebaseline
 
@@ -3253,12 +3259,56 @@ Task checklist:
 - [ ] Run `da55` all-domain radius-1 benchmark.
 - [ ] Attribute top long tasks from direct diagnostics.
 - [ ] Decide whether any frame-budget phase is justified.
+- [ ] Dry-run Phases 50-51 against the benchmark findings and steer their thresholds, cleanup targets, and verification commands before implementation starts.
 
 Decisions and course corrections:
 
 - Pending.
 
-### Phase 50: Final Vestigial Wipe And Plan Closeout
+### Phase 50: Measured Texture Reclamation And Removal Commits
+
+North-star check:
+
+- The [worksheet owner-claim model](./holtburger-3d-open-world-streaming-stutter-investigation-worksheet.md) remains authoritative: release marks ownership truth; reclamation is a separate measured policy that emits explicit renderer commits.
+
+Owning authority:
+
+- Texture residency policy, committed page map, texture commit creation, renderer apply, and diagnostics.
+
+Deliverables:
+
+- Use Phase 49 evidence to decide whether ownerless renderer-resident pages need active reclamation now. If not, record the measured threshold that would trigger the scheduler later.
+- Canonicalize enough page byte accounting to make memory pressure decisions meaningful. If exact GPU bytes remain unavailable, define the approximation and its known blind spots in code and diagnostics.
+- Add a direct reclamation policy surface that selects ownerless resident pages only when pressure exceeds the chosen threshold.
+- Emit texture commits with `pageRemovals` for selected pages and apply them through the existing `removedTextureRefIds` renderer path.
+- Add registry state for pages that have been scheduled for renderer removal or removed, if the current `reclaimable` state is no longer precise enough.
+- Keep owner release idempotent and cheap; it must not synchronously repack, rebuild, upload, or remove renderer textures.
+
+Acceptance criteria:
+
+- No renderer removal is emitted without a measured threshold or explicit harness scenario proving pressure.
+- Removal commits are visible as direct replacement texture commits, not hidden inside owner release or diagnostics projection.
+- Diagnostics report retained ownerless pages, pending renderer removals, removed pages, and byte pressure using replacement-owned names.
+- Reclaiming an ownerless page cannot leave a currently claimed binding pointing at a removed texture ref.
+- Focused claim-registry, page-build, texture commit, renderer binding, and controller tests pass.
+- A browser harness sequence proves at least one retained ownerless page and, if enabled by threshold, one renderer removal commit.
+
+Task checklist:
+
+- [ ] Dry-run the Phase 49 benchmark outputs and choose `defer`, `warn`, or `remove` policy with an explicit byte threshold.
+- [ ] Add canonical page byte accounting or a named approximation in texture residency diagnostics.
+- [ ] Add reclaim scheduling API to the texture residency authority, not to owner release.
+- [ ] Emit `pageRemovals` from the texture commit stream when policy selects pages.
+- [ ] Update renderer binding tests for removed page refs and claimed binding safety.
+- [ ] Update harness diagnostics to expose removal counts without recreating legacy texture-manager counters.
+- [ ] Run focused texture residency/commit/renderer/controller tests and an eviction/replacement browser harness scenario.
+- [ ] Dry-run Phase 51 after implementation and steer final deletion targets.
+
+Decisions and course corrections:
+
+- Pending.
+
+### Phase 51: Final Vestigial Wipe And Plan Closeout
 
 North-star check:
 
@@ -3270,7 +3320,7 @@ Owning authority:
 
 Deliverables:
 
-- Delete old static coordinator, texture manager mutation, legacy diagnostic snapshot, legacy materialization lifecycle, or ignored placement-policy references that are no longer needed after Phases 44-49.
+- Delete old static coordinator, texture manager mutation, legacy diagnostic snapshot, legacy materialization lifecycle, or ignored placement-policy references that are no longer needed after Phases 44-50.
 - Delete or rewrite tests that preserve legacy bucket lifetimes, old commit ordering, shim-only diagnostics, or broad coverage parity.
 - Verify direct builders are test-only or worker-internal.
 - Update this plan and the worksheet handoff with final evidence and intentionally deferred work.

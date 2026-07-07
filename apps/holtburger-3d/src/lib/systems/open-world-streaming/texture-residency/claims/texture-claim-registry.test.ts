@@ -101,6 +101,14 @@ describe("OpenWorldTextureClaimRegistry", () => {
 				planned: 0,
 				resident: 1,
 			},
+			ownerlessPagePolicy: {
+				pendingRendererRemovalPageCount: 0,
+				rendererRemoval: {
+					kind: "deferred-until-measured-pressure",
+					pressureThresholdBytes: null,
+				},
+				residentDisposition: "cached-for-reuse",
+			},
 			pageCountByState: {
 				reclaimable: 1,
 			},

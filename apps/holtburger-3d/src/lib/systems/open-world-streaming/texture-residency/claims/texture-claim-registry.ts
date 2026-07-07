@@ -97,6 +97,8 @@ export interface OpenWorldTextureClaimRegistrySnapshot {
 		readonly planned: number;
 		readonly resident: number;
 	};
+	/** Current ownerless page retention/removal policy owned by texture residency. */
+	readonly ownerlessPagePolicy: OpenWorldTextureOwnerlessPagePolicySnapshot;
 	/** Number of shared texture entries tracked by the registry. */
 	readonly entryCount: number;
 	/** Number of virtual pages currently reserved for page-build work. */
@@ -110,6 +112,19 @@ export interface OpenWorldTextureClaimRegistrySnapshot {
 		readonly reclaimable: number;
 		readonly resident: number;
 	};
+}
+
+interface OpenWorldTextureOwnerlessPagePolicySnapshot {
+	/** Disposition for ownerless renderer-resident pages before memory pressure exists. */
+	readonly residentDisposition: "cached-for-reuse";
+	/** Renderer removal is explicit policy work, never a side effect of owner release. */
+	readonly rendererRemoval: {
+		readonly kind: "deferred-until-measured-pressure";
+		/** Null means no measured pressure threshold has been chosen yet. */
+		readonly pressureThresholdBytes: number | null;
+	};
+	/** Pages selected by policy but not yet emitted as texture removal commits. */
+	readonly pendingRendererRemovalPageCount: number;
 }
 
 interface MutableTextureEntry {
@@ -382,6 +397,7 @@ export class OpenWorldTextureClaimRegistry {
 			entryCount: this.#entriesById.size,
 			ownerlessEntryCount,
 			ownerlessPageCountByRetainedState,
+			ownerlessPagePolicy: OWNERLESS_PAGE_POLICY,
 			pageBuildsInFlight,
 			pageCount: this.#pagesById.size,
 			pageCountByState,
@@ -470,6 +486,15 @@ export class OpenWorldTextureClaimRegistry {
 		return page;
 	}
 }
+
+const OWNERLESS_PAGE_POLICY: OpenWorldTextureOwnerlessPagePolicySnapshot = {
+	pendingRendererRemovalPageCount: 0,
+	rendererRemoval: {
+		kind: "deferred-until-measured-pressure",
+		pressureThresholdBytes: null,
+	},
+	residentDisposition: "cached-for-reuse",
+};
 
 export function groupTextureBindingRequirementsByBucket(
 	bindings: readonly OpenWorldTextureBindingRequirement[],

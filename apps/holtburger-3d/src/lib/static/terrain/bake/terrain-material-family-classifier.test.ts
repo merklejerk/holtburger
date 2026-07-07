@@ -92,6 +92,44 @@ describe("terrain material family classifier", () => {
 		expect(classification.terrainFallbackReasons).toEqual([]);
 	});
 
+	it("does not force clamped non-alpha terrain roles to debug flat", () => {
+		const classification = classifyTerrainMaterialFamily({
+			domain: "outdoor-terrain",
+			plan: createPlan({
+				layerEntries: [
+					createLayerEntry({
+						roads: [
+							{
+								alpha: createTextureRole({
+									role: "road-alpha",
+									textureBindingId: "road-alpha:06000030",
+									wrap: "clamp",
+								}),
+								road: createTextureRole({
+									role: "road",
+									textureBindingId: "road:06000020",
+									wrap: "clamp",
+								}),
+								rotation: 0,
+							},
+						],
+						textureBindingId: "terrain-base:06000010",
+					}),
+				],
+			}),
+		});
+
+		expect(classification).toMatchObject({
+			materialFamily: "terrain-layered",
+			textureBindingIds: [
+				"terrain-base:06000010",
+				"road:06000020",
+				"road-alpha:06000030",
+			],
+		});
+		expect(classification.terrainFallbackReasons).toEqual([]);
+	});
+
 	it("classifies prepared landscape detail as layered terrain", () => {
 		const classification = classifyTerrainMaterialFamily({
 			domain: "outdoor-terrain",
@@ -180,10 +218,12 @@ function createPlan(
 function createLayerEntry({
 	overlays = [],
 	pcode = 33825,
+	roads = [],
 	textureBindingId,
 }: {
 	readonly overlays?: TerrainMaterialLayerPlan["layerEntries"][number]["overlays"];
 	readonly pcode?: number;
+	readonly roads?: TerrainMaterialLayerPlan["layerEntries"][number]["roads"];
 	readonly textureBindingId: string | null;
 }): TerrainMaterialLayerPlan["layerEntries"][number] {
 	return {
@@ -193,7 +233,7 @@ function createLayerEntry({
 		maskRefCount: 0,
 		overlays,
 		pcode,
-		roads: [],
+		roads,
 		slot: 0,
 	};
 }

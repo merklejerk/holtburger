@@ -16,6 +16,7 @@ import type {
 	StaticMaterialCoverageReport,
 	StaticObjectBakeDiagnostics,
 	StaticScopePayload,
+	TerrainGeometryStaticDrawUnit,
 	TerrainStaticScopePayload,
 } from "../../../static/contracts";
 import type { OpenWorldTexturePageBuilder } from "../texture-residency/page-build/worker-client";
@@ -251,6 +252,48 @@ describe("OpenWorldStreamingController terrain slice", () => {
 		});
 	});
 
+	it("reports terrain material fallback reasons as replacement readiness issues", async () => {
+		const controller = new OpenWorldStreamingController({
+			assetReader: createUnusedAssetReader(),
+			createDynamicVisualBaker: failIfDynamicWorkerFactoryIsCalled,
+			createDynamicVisualRecipeResolver: failIfDynamicWorkerFactoryIsCalled,
+			createObjectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder,
+			createStaticBaker: () =>
+				new FixtureTerrainBaker({
+					terrainDrawUnits: [createTerrainFallbackDrawUnit()],
+				}),
+			createStaticResolver: () =>
+				new FixtureTerrainResolver(createTerrainScopePayload()),
+			createTexturePageBuilder: createUnusedTexturePageBuilder,
+			renderer: new FixtureTerrainRenderer(),
+		});
+
+		controller.updateTerrainInterest({
+			anchorLandblockId: 0xda55ffff,
+			radius: 0,
+			revision: 1,
+		});
+		await waitFor(() => controller.createSnapshot().terrain.committed === 1);
+
+		expect(
+			controller.createDiagnosticsSnapshot().materialReadiness,
+		).toMatchObject({
+			recentIssues: [
+				{
+					code: "unsupported-material-binding",
+					drawUnitId: "terrain:draw:fallback",
+					kind: "terrain-material-issue",
+					message: "fixture terrain role unsupported",
+					taskId: "1:landblock:da55ffff:outdoor-terrain",
+					textureId: 0x05000010,
+				},
+			],
+			summary: {
+				terrainMaterialIssueCount: 1,
+			},
+		});
+	});
+
 	it("reports skipped static object partitions as replacement material readiness issues", async () => {
 		const renderer = new FixtureTerrainRenderer();
 		const controller = new OpenWorldStreamingController({
@@ -465,6 +508,7 @@ class FixtureStreamingTerrainResolver extends FixtureTerrainResolver {
 class FixtureTerrainBaker implements StaticBaker {
 	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
 	readonly staticObjectBakeDiagnostics: readonly StaticObjectBakeDiagnostics[];
+	readonly terrainDrawUnits: readonly TerrainGeometryStaticDrawUnit[];
 
 	constructor(
 		options:
@@ -472,16 +516,21 @@ class FixtureTerrainBaker implements StaticBaker {
 			| {
 					readonly materialCoverage?: readonly StaticMaterialCoverageReport[];
 					readonly staticObjectBakeDiagnostics?: readonly StaticObjectBakeDiagnostics[];
+					readonly terrainDrawUnits?: readonly TerrainGeometryStaticDrawUnit[];
 			  } = {},
 	) {
 		if (Array.isArray(options)) {
 			this.materialCoverage = options;
 			this.staticObjectBakeDiagnostics = [];
+			this.terrainDrawUnits = [createTerrainDrawUnit()];
 			return;
 		}
 		this.materialCoverage = options.materialCoverage ?? [];
 		this.staticObjectBakeDiagnostics =
 			options.staticObjectBakeDiagnostics ?? [];
+		this.terrainDrawUnits = options.terrainDrawUnits ?? [
+			createTerrainDrawUnit(),
+		];
 	}
 
 	async bake(input: StaticBakeJobInput): Promise<StaticBakeJobResult> {
@@ -490,16 +539,7 @@ class FixtureTerrainBaker implements StaticBaker {
 			buildRevision: input.payload.sourceRevision,
 			domain: input.domain,
 			drawUnits:
-				input.domain === "outdoor-terrain"
-					? [
-							{
-								drawUnitId: "terrain:draw:1",
-								kind: "terrain-geometry",
-								landblockId: 0xda55ffff,
-								textureBindingIds: [],
-							},
-						]
-					: [],
+				input.domain === "outdoor-terrain" ? this.terrainDrawUnits : [],
 			envCellStaticObjectPlacementRecords: [],
 			materialCoverage: this.materialCoverage,
 			objectVisualInstallSet: {
@@ -630,6 +670,52 @@ function createUnsupportedMaterialCoverage(): StaticMaterialCoverageReport {
 		],
 		unsupportedTriangleCount: 12,
 	};
+}
+
+function createTerrainDrawUnit(
+	options: Partial<TerrainGeometryStaticDrawUnit> = {},
+): TerrainGeometryStaticDrawUnit {
+	return {
+		coordinateSpace: "landblock-render-local",
+		domain: "outdoor-terrain",
+		drawUnitId: "terrain:draw:1",
+		indexType: "uint16",
+		indices: new Uint16Array(),
+		kind: "terrain-geometry",
+		landblockId: 0xda55ffff,
+		layerSlots: new Float32Array(),
+		materialBucketKey: "terrain:fixture",
+		materialFamily: "terrain-single-base-color",
+		positions: new Float32Array(),
+		primaryTextureBindingId: null,
+		sourceTriangleIds: [],
+		terrainFallbackReasons: [],
+		terrainMaterialPlan: null,
+		texCoords: new Float32Array(),
+		textureBindingIds: [],
+		triangleCount: 0,
+		vertexCount: 0,
+		...options,
+	};
+}
+
+function createTerrainFallbackDrawUnit(): TerrainGeometryStaticDrawUnit {
+	return createTerrainDrawUnit({
+		drawUnitId: "terrain:draw:fallback",
+		materialBucketKey: "terrain:fixture:fallback",
+		materialFamily: "terrain-debug-flat",
+		terrainFallbackReasons: [
+			{
+				code: "unsupported-material-binding",
+				message: "fixture terrain role unsupported",
+				pcode: 12,
+				texture: {
+					kind: "surface-texture",
+					surfaceTextureId: 0x05000010,
+				},
+			},
+		],
+	});
 }
 
 function createSkippedStaticObjectBakeDiagnostic(): StaticObjectBakeDiagnostics {

@@ -61,9 +61,18 @@ describe("texture placement vocabulary bridge", () => {
 			textureBindingId: "terrain:mask:06000010",
 		});
 
-		expect(createStaticTexturePlacementIntent(textureUse)).toMatchObject({
+		expect(() => createStaticTexturePlacementIntent(textureUse)).toThrow(
+			"Static texture placement intents require an explicit replacement placement policy.",
+		);
+
+		expect(
+			createStaticTexturePlacementIntent(textureUse, {
+				placementPolicy: staticDomainPolicy(),
+			}),
+		).toMatchObject({
 			domain: "outdoor-terrain",
 			itemId: textureUse.bindingId,
+			placementPolicy: staticDomainPolicy(),
 			purpose: "terrain-mask",
 		});
 	});
@@ -128,6 +137,7 @@ describe("texture placement vocabulary bridge", () => {
 		expect(
 			createStaticTexturePlacementIntent(textureUse, {
 				affinityKey: "setup-model/020003e5",
+				placementPolicy: staticDomainPolicy(),
 			}),
 		).toMatchObject({
 			affinityKey: "setup-model/020003e5",
@@ -143,7 +153,9 @@ describe("texture placement vocabulary bridge", () => {
 			textureBindingId: "building:palette:04000010:domain=index8",
 		});
 
-		const intent = createStaticTexturePlacementIntent(textureUse);
+		const intent = createStaticTexturePlacementIntent(textureUse, {
+			placementPolicy: staticDomainPolicy(),
+		});
 
 		expect(intent.itemId).toBe(textureUse.bindingId);
 		expect(intent.source).toMatchObject({

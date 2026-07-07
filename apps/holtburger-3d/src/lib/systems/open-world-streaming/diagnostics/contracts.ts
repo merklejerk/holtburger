@@ -119,6 +119,7 @@ export interface OpenWorldStreamingMaterialReadinessDiagnostics {
 		readonly pendingTextureDependencyCount: number;
 		readonly pipelineBugIssueCount: number;
 		readonly skippedStaticObjectPartitionCount: number;
+		readonly terrainMaterialIssueCount: number;
 		readonly unsupportedMaterialIssueCount: number;
 	};
 }
@@ -169,6 +170,18 @@ type OpenWorldStreamingMaterialReadinessIssue =
 			readonly sliceId: string;
 			readonly taskId: string;
 			readonly triangleCount: number;
+	  }
+	| {
+			readonly kind: "terrain-material-issue";
+			readonly code: string;
+			readonly drawUnitId: string;
+			readonly landblockId: number;
+			readonly materialFamily: string;
+			readonly message: string;
+			readonly ownerId: string;
+			readonly pcode: number | null;
+			readonly taskId: string;
+			readonly textureId: number | null;
 	  }
 	| {
 			readonly kind: "pipeline-bug";

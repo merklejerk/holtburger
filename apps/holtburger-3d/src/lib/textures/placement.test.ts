@@ -224,8 +224,6 @@ function createDynamicTextureUse(options: {
 function staticDomainPolicy(): TexturePlacementPolicy {
 	return {
 		bucketScope: { kind: "static-domain" },
-		ownerCurrentness: { kind: "placement-plan-owner" },
-		pageBuild: { kind: "worker-owned" },
 		sourceStability: { kind: "content-stable" },
 	};
 }
@@ -233,8 +231,6 @@ function staticDomainPolicy(): TexturePlacementPolicy {
 function runtimeOwnerPolicy(ownerId: string): TexturePlacementPolicy {
 	return {
 		bucketScope: { kind: "runtime-owner", ownerId },
-		ownerCurrentness: { kind: "placement-plan-owner" },
-		pageBuild: { kind: "worker-owned" },
 		sourceStability: {
 			kind: "owner-specific",
 			reason: "runtime-customized",

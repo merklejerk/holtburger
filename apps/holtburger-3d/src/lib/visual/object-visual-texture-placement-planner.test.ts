@@ -179,8 +179,6 @@ function createRequirement(
 function runtimeOwnerPolicy(ownerId: string): TexturePlacementPolicy {
 	return {
 		bucketScope: { kind: "runtime-owner", ownerId },
-		ownerCurrentness: { kind: "placement-plan-owner" },
-		pageBuild: { kind: "worker-owned" },
 		sourceStability: {
 			kind: "owner-specific",
 			reason: "runtime-customized",

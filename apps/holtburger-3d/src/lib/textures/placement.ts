@@ -230,35 +230,9 @@ type TexturePlacementBucketScope =
 			readonly ownerId: string;
 	  };
 
-/** Currentness authority for placement work using this policy. */
-type TexturePlacementOwnerCurrentness =
-	| {
-			/** The artifact runner supplies the current materialization owner. */
-			readonly kind: "placement-plan-owner";
-	  }
-	| {
-			/** A known owner id controls currentness for this placement work. */
-			readonly kind: "explicit-owner";
-			readonly ownerId: string;
-	  };
-
-/** Page pixel build ownership for this material texture placement. */
-type TexturePlacementPageBuildPolicy =
-	| {
-			/** Normal production path: source prep, packing, gutters, and pixels are worker-owned. */
-			readonly kind: "worker-owned";
-	  }
-	| {
-			/** Narrow exception that must be justified by measured constraints. */
-			readonly kind: "main-thread-measured-exception";
-			readonly reason: string;
-	  };
-
 /** Replacement-native material texture placement policy. */
 export interface TexturePlacementPolicy {
 	readonly bucketScope: TexturePlacementBucketScope;
-	readonly ownerCurrentness: TexturePlacementOwnerCurrentness;
-	readonly pageBuild: TexturePlacementPageBuildPolicy;
 	readonly sourceStability: TexturePlacementSourceStability;
 }
 
@@ -362,8 +336,6 @@ export function createDynamicTexturePlacementIntent(
 export function createStaticDomainTexturePlacementPolicy(): TexturePlacementPolicy {
 	return {
 		bucketScope: { kind: "static-domain" },
-		ownerCurrentness: { kind: "placement-plan-owner" },
-		pageBuild: { kind: "worker-owned" },
 		sourceStability: { kind: "content-stable" },
 	};
 }

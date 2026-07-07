@@ -78,6 +78,7 @@ The desired model is not a small tuning pass. It changes ownership, scheduling, 
 - **Loose commit ordering should be normal.** Scene commits and texture commits should be independently applicable, with unresolved bindings producing non-renderable resources and loud upstream diagnostics instead of renderer hot-path surprises.
 - **Reuse transforms, not old architecture.** Existing resolvers, bakers, workers, and renderer APIs are useful through adapters; legacy scheduling, lease/pin vocabulary, same-commit assumptions, and global mutation lanes are replacement targets.
 - **Migrate direct contracts, shim legacy.** Replacement-owned systems should expose the contracts they actually want. Durable consumers should migrate directly to those contracts. Compatibility projections for legacy DTOs, timing assumptions, diagnostics snapshots, tests, or UI expectations are shims outside replacement internals and must be deletion-targeted.
+- **A broken shim is better than a dishonest core.** If legacy consumers cannot immediately understand replacement-native data, let the legacy edge carry the awkward projection or temporary breakage. Do not distort replacement contracts, diagnostics, source layout, or tests to keep old shapes looking alive.
 - **The source tree should explain the system.** New code should be organized by owning workflow/domain so a maintainer can follow open-world materialization without spelunking through concept buckets.
 - **Diagnostics should be honest to the new model.** Replacement diagnostics should describe owners, artifacts, bucket lanes, claims, page builds, commits, readiness, stale rejection, and frame-budget behavior. The replacement diagnostics contract may break legacy consumers. Legacy-compatible diagnostic shims belong on the legacy, harness, or UI migration side and must be temporary.
 - **Dual operation is temporary by design.** The parallel pipeline exists to derisk the cutover, not to become a second permanent runtime.
@@ -128,6 +129,7 @@ This tree is a policy boundary, not just a folder name. New materialization conc
 - Distinguish adapters from shims. Adapters isolate durable boundaries such as host assets, workers, renderer mutation, diagnostics, or harness composition. Shims preserve temporary compatibility with legacy shapes and must be deleted when the legacy system they bridge is removed.
 - New replacement contracts should be direct and native to the replacement model. If an existing consumer cannot migrate immediately, add a legacy-side shim instead of weakening the replacement contract.
 - Treat legacy-shaped DTOs, event ordering, diagnostics, UI projections, benchmark summaries, and architecture-preserving tests as compatibility pressure. Keep that pressure outside replacement internals.
+- When replacing a contract, migrate surviving consumers directly to the replacement shape before adding any compatibility projection. Only add the projection after naming the blocked legacy consumer and deletion trigger.
 - Do not recreate legacy diagnostic snapshots inside the replacement system. If benchmark, UI comparison, or temporary panels need legacy-shaped diagnostics, put that shim at the harness, UI migration, or legacy runtime boundary and track it for deletion.
 - Prefer changing diagnostics consumers to the replacement contract over bending the replacement contract toward old snapshots.
 
@@ -138,6 +140,7 @@ This tree is a policy boundary, not just a folder name. New materialization conc
 - Treat shims as temporary compatibility debt, not as neutral adapters.
 - Do not let shims define replacement naming, field layout, timing assumptions, diagnostics categories, tests, or source-tree placement.
 - Prefer breaking and updating a legacy-shaped consumer over preserving a dishonest compatibility projection in the replacement pipeline.
+- Prefer a visibly incomplete or temporarily broken legacy shim over a compatibility layer that teaches the replacement system old concepts.
 - If a phase introduces a shim, record the owning consumer, reason, deletion trigger, and target cleanup phase in that phase's decisions.
 - If a consumer is meant to survive cutover, it must be migrated to the direct replacement contract before Phase 16 begins.
 - Adapters may survive cutover only when they isolate a durable external boundary such as host assets, workers, renderer mutation, diagnostics export, or harness composition.
@@ -709,26 +712,38 @@ Acceptance criteria:
 
 - Terrain plus generated scenery radius-1 harness avoids the legacy severe stutter profile.
 - Outdoor object texture placement uses bucket-scoped scheduling and owner claims.
-- Static-authored dynamic resources are parent-owned by static layer owner for first cut.
+- Static-authored dynamic placement records emitted by outdoor object layers are parent-owned by static layer owner for first cut; resource and instance materialization is handled by Phase 12.
 - Outdoor static object domains do not expose legacy static coordinator commit shapes, texture placement snapshots, or global texture mutation diagnostics as replacement contracts.
 - Object domains use real replacement texture claim/page-build/commit flow or an explicitly tracked temporary shim; they do not inherit the Phase 8 synthetic terrain texture-page shortcut.
+- Any legacy-shaped outdoor diagnostics or runtime summaries are produced only by the outer runtime/harness shim, and may be incomplete if the alternative would pollute the replacement contract.
 
 Task checklist:
 
-- [ ] Extract shared static-layer artifact-runner primitives only where terrain and object domains have proven common behavior.
-- [ ] Adapt building source/bake/commit path.
-- [ ] Adapt explicit object source/bake/commit path.
-- [ ] Adapt generated scenery source/bake/commit path.
-- [ ] Add object-visual commit application to renderer and scene query without routing through legacy static commit installer.
-- [ ] Route object texture placement through replacement claim, page-build, and texture commit services.
-- [ ] Adapt static-authored dynamic child resource commits.
-- [ ] Migrate direct outdoor-domain consumers to replacement scene, texture, and diagnostics contracts; add legacy-side shims only for consumers that cannot move in this phase.
-- [ ] Run terrain plus generated scenery benchmark.
-- [ ] Compare texture atlas page lifecycle diagnostics with legacy.
+- [x] Extract shared static-layer artifact-runner primitives only where terrain and object domains have proven common behavior.
+- [x] Adapt building source/bake/commit path.
+- [x] Adapt explicit object source/bake/commit path.
+- [x] Adapt generated scenery source/bake/commit path.
+- [x] Add object-visual commit application to renderer and scene query without routing through legacy static commit installer.
+- [x] Route object texture placement through replacement claim, page-build, and texture commit services.
+- [x] Emit parent-owned static-authored dynamic placement records and move child resource materialization to Phase 12.
+- [x] Migrate direct outdoor-domain consumers to replacement scene, texture, and diagnostics contracts; add legacy-side shims only for consumers that cannot move in this phase.
+- [x] Name every outdoor-domain compatibility shim with its blocked consumer, dishonest-field risk, deletion trigger, and target cleanup phase.
+- [x] Run terrain plus generated scenery benchmark.
+- [x] Compare texture atlas page lifecycle diagnostics with legacy.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 10 completed on 2026-07-06.
+- Added `OpenWorldOutdoorObjectArtifactRunner` under `static-layers/outdoor-objects`. It reuses `StaticLandblockSceneLodSourceResolver`, `StaticObjectBakeResourceProvider`, `createStaticObjectTexturePlacementIntents(...)`, and `StaticBaker` as transforms/adapters, but does not wrap `StaticCoordinator` or route through `installStaticCommit(...)`.
+- Source LoD is now derived from outdoor object layer kind: buildings use LoD 1, explicit objects use LoD 2, and generated scenery uses LoD 3. The first harness run exposed the bug by failing generated scenery requests against scene LoD 0.
+- Added a replacement object visual texture placement plan that retains owner claims, packs current-task object texture entries, emits replacement texture commits, and provides the legacy bake-facing `ObjectVisualTexturePlacementSnapshot` only at the baker adapter edge.
+- Spicy bit: bucket snapshots include entries retained by other owners. The object placement plan now builds commits only for entries touched by the current task because the claim registry intentionally does not store legacy source DTOs needed to rebuild unrelated entries. Broader cross-owner repack policy is deferred to Phase 13 review.
+- Reused `StaticObjectBakeResourceProvider` so object bake jobs receive prepared gfx geometry sidecars. This is a durable transform adapter, not a coordinator shim.
+- Static-authored dynamic placement records are emitted with parent static-layer ownership, but dynamic recipe baking, dynamic resource commits, and dynamic instance publication are moved to Phase 12. Pulling them into Phase 10 would start the runtime-entity system early and risk preserving `ClientRuntimeImpl` dynamic prep revisions.
+- Outdoor-domain compatibility shim: the outer `browser-runtime-adapter` still projects replacement outdoor progress into legacy-shaped runtime counters for the harness. Blocked consumer: browser harness/runtime report. Dishonest-field risk: legacy fields such as `installedStaticDrawUnits` and `staticOverview` do not fully describe generated scenery visual resources. Deletion trigger: Phase 14 diagnostics migration, with final deletion in Phase 16.
+- Concession: object texture packing and page pixel materialization currently run synchronously in the object placement plan rather than through the Phase 7 page-build worker. The replacement contract is direct, but Phase 13 must decide whether to move object page builds off the main loop before cutover.
+- Performance debt: terrain plus generated scenery radius-1 settled and rendered generated scenery, but still showed `maxDeltaMs` around 490 ms and 17 long tasks with a max around 445 ms. This is better than the original severe blackout profile but still violates the continuous-streaming north star; Phase 13 should review frame-budgeting and worker coverage before browser cutover.
+- Verification: `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run format:check`, focused `npm run test:ts -- src/lib/systems/open-world-streaming/static-layers/outdoor-objects/outdoor-object-artifact-runner.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/object-visual-texture-placement-plan.test.ts src/lib/systems/open-world-streaming/composition/runtime-pipeline.test.ts src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts src/lib/systems/open-world-streaming/static-layers/terrain/terrain-artifact-runner.test.ts`, `npm run harness:browser -- --runtime-pipeline open-world-streaming --domains terrain,generated-scenery --layer-distance 1 --timeout-ms 60000`, and `npm run harness:browser -- --runtime-pipeline open-world-streaming --domains terrain,buildings,explicit-objects,generated-scenery --layer-distance 0 --timeout-ms 60000`.
 
 ### Phase 11: Env-Cell System Domain
 
@@ -745,6 +760,7 @@ Acceptance criteria:
 - All-domain radius-1 harness settles through replacement pipeline.
 - Portal/interior picking and debug overlays remain correct.
 - Env-cell diagnostics and portal records are replacement-native; any legacy overlay projection is outside the env-cell domain path.
+- Any legacy env-cell overlay or diagnostics projection is allowed to be partial or temporarily broken rather than forcing env-cell commits to mimic legacy static coordinator snapshots.
 
 Task checklist:
 
@@ -754,6 +770,7 @@ Task checklist:
 - [ ] Emit env-cell system commits.
 - [ ] Apply portal records and resource membership.
 - [ ] Migrate direct env-cell overlay/query consumers to replacement commits and query records where feasible.
+- [ ] Name every env-cell compatibility shim with its blocked consumer, dishonest-field risk, deletion trigger, and target cleanup phase.
 - [ ] Run env-cell-focused harnesses.
 - [ ] Compare dense landblock metrics, including `da55`.
 
@@ -767,25 +784,33 @@ Deliverables:
 
 - Add runtime entity create/destroy entrypoints to the replacement path.
 - Adapt dynamic visual recipe resolution and baking into artifact flow.
+- Materialize static-authored dynamic placement records and recipes emitted by static layers.
 - Publish runtime-authored dynamic resource commits and dynamic instance commits.
 - Keep render residence separate from runtime entity lifetime.
 
 Acceptance criteria:
 
 - Runtime spawned entities materialize through the replacement texture and visual path.
+- Static-authored dynamic children emitted by outdoor object and env-cell static layers materialize through parent-owned dynamic records without preserving legacy prep revisions.
 - Destroying an entity removes runtime state, renderer resources/instances, query records, diagnostics, and texture claims by owner.
 - Render-residence changes suppress or restore publication without destroying materialized resources.
 - Runtime entity consumers that survive cutover use replacement entity/resource/instance contracts directly.
+- Legacy runtime entity projections are edge shims only and must not preserve `ClientRuntimeImpl` prep revisions, diagnostic categories, or lifecycle timing as replacement concepts.
 
 Task checklist:
 
 - [ ] Add runtime entity owner entrypoint.
+- [ ] Add static-authored dynamic child owner/parent membership entrypoint.
 - [ ] Adapt dynamic recipe resolution.
 - [ ] Reuse dynamic visual resolver and bake workers through adapters, not `ClientRuntimeImpl` prep revision state.
 - [ ] Retain runtime-authored dynamic texture bindings.
+- [ ] Retain static-authored dynamic texture bindings from parent-owned placement records and recipes.
 - [ ] Emit runtime dynamic resource commits.
+- [ ] Emit static-authored dynamic resource commits.
 - [ ] Emit dynamic instance projections from committed runtime state.
+- [ ] Emit dynamic instance projections from committed static-authored dynamic state.
 - [ ] Migrate durable runtime-entity diagnostics and UI consumers to direct replacement contracts.
+- [ ] Name every runtime-entity compatibility shim with its blocked consumer, dishonest-field risk, deletion trigger, and target cleanup phase.
 - [ ] Add create/destroy/residence tests.
 
 Decisions and course corrections:
@@ -805,6 +830,7 @@ Deliverables:
 - Review source-tree policy violations.
 - Review whether replacement-native diagnostics are enough for debugging streaming failures without legacy compatibility crutches.
 - Review whether every surviving consumer has a migration path to direct replacement contracts before browser cutover.
+- Dry-run Phase 14 through the next steering phase and specifically decide whether to migrate, break, or delete each legacy-shaped consumer before adding more shims.
 
 Acceptance criteria:
 
@@ -813,6 +839,7 @@ Acceptance criteria:
 - Any remaining legacy dependency is explicitly categorized as adapter, reusable transform, shim, or deletion target.
 - Any legacy-compatible shim is outside replacement internals and has a deletion target.
 - No shim is allowed to become the canonical contract for a surviving browser, harness, UI, or diagnostics consumer.
+- Diagnostics are judged against replacement truth first. Legacy diagnostic projections may be incomplete during migration, but replacement diagnostics may not clone or launder legacy categories to keep dashboards green.
 - The next implementation span through the cutover deletion audit has been dry-run against the current source tree.
 
 Task checklist:
@@ -822,6 +849,7 @@ Task checklist:
 - [ ] Review diagnostics output.
 - [ ] Audit compatibility shims and move/delete anything that pressures replacement internals toward legacy shapes.
 - [ ] For each remaining shim, choose direct consumer migration or explicit Phase 16 deletion.
+- [ ] For every surviving browser, harness, UI, diagnostics, and test consumer, choose one path: migrate to direct replacement contract, leave as named legacy-edge shim, or delete.
 - [ ] Dry-run Phase 14 against the current source tree.
 - [ ] Identify dependency/order changes, boundary leaks, shims, deletion targets, and test risks for browser runtime cutover.
 - [ ] Update cleanup targets.
@@ -844,6 +872,7 @@ Acceptance criteria:
 - Legacy runtime path is not used by normal app routes.
 - Surviving UI and diagnostics panels read direct replacement contracts instead of legacy-shaped runtime snapshots.
 - Any remaining harness comparison shim is isolated, named as temporary, and scheduled for Phase 16 deletion.
+- Browser cutover does not require legacy-shaped diagnostics to remain complete. Any temporary report gaps are tracked at the legacy edge instead of backfilled inside replacement internals.
 - `npm run check`, `npm run lint:ts`, and focused tests pass.
 
 Task checklist:
@@ -851,6 +880,7 @@ Task checklist:
 - [ ] Switch runtime composition.
 - [ ] Migrate diagnostics panels and overview snapshots to replacement-native contracts.
 - [ ] Delete or isolate any legacy-shaped UI/harness projection that is not needed after the cutover window.
+- [ ] Replace architecture-preserving diagnostic tests with tests over replacement-native contracts, or delete them if they only validate legacy projection completeness.
 - [ ] Update browser harness expectations.
 - [ ] Run app checks.
 - [ ] Run benchmark matrix.
@@ -875,12 +905,14 @@ Acceptance criteria:
 - Every surviving consumer is either on a direct replacement contract or explicitly out of Phase 16 scope.
 - The hard cutover cleanup phase has been dry-run against the current source tree.
 - Cleanup scope is specific enough to run without guessing which code is still live.
+- The audit has identified any remaining legacy diagnostic, harness, or UI projection that was intentionally allowed to be incomplete during migration.
 
 Task checklist:
 
 - [ ] Run import/dead-code inspection for old runtime, texture manager, and static coordinator paths.
 - [ ] Classify remaining adapters and shims.
 - [ ] Verify no surviving consumer depends on shim-only field names, timing assumptions, or legacy diagnostic categories.
+- [ ] Verify every incomplete legacy-edge diagnostic or runtime projection is either deleted in Phase 16 or documented as an out-of-scope survivor.
 - [ ] Identify tests that preserve retired architecture.
 - [ ] Dry-run Phase 16 cleanup against the current source tree.
 - [ ] Identify dependency/order changes, boundary leaks, shims, deletion targets, and test risks for hard cleanup.
@@ -914,6 +946,7 @@ Acceptance criteria:
 - Every remaining adapter has a durable boundary reason documented by its module name, README, or tests.
 - No shim remains in production code after hard cutover.
 - Replacement contracts use replacement concepts and do not expose legacy static coordinator, static commit install, texture manager snapshots, or legacy timing/order assumptions.
+- Replacement diagnostics remain direct and honest; deleted legacy dashboards, broken transitional projections, or rewritten tests are acceptable outcomes.
 - Remaining tests prove replacement behavior or reusable pure transforms, not retired orchestration contracts.
 - Dead code tooling does not report newly orphaned modules.
 - Source tree contains the replacement system as the authoritative pipeline.
@@ -925,6 +958,7 @@ Task checklist:
 - [ ] Remove old static coordinator continuation path if fully replaced.
 - [ ] Delete shims that translate replacement artifacts back into retired legacy shapes.
 - [ ] Audit remaining adapters and classify each as host, worker, renderer, diagnostics, harness, or delete.
+- [ ] Delete legacy diagnostic projections rather than keeping them alive by inventing compatibility fields from replacement data.
 - [ ] Classify `client-runtime.test.ts`, `static-coordinator.test.ts`, `texture-manager.test.ts`, and renderer tests as keep, rewrite, split, or delete.
 - [ ] Remove obsolete diagnostics and tests.
 - [ ] Run `npm run check`.
@@ -985,6 +1019,7 @@ Mitigation:
 - Keep shims outside replacement internals and name them as compatibility projections.
 - Require each shim to record its consumer, deletion trigger, and cleanup phase.
 - Delete or rewrite tests that lock in shim-only field names, legacy timing assumptions, or legacy diagnostic categories.
+- Accept temporary legacy-edge breakage or incomplete reports when the alternative would make replacement diagnostics dishonest.
 
 ### Risk: Renderer APIs Force Synchronous Main-Thread Bursts
 

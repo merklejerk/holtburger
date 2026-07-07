@@ -40,7 +40,7 @@ import {
 import { OpenWorldStreamingController } from "./open-world-streaming-controller";
 import type {
 	OpenWorldStreamingControllerSnapshot,
-	OpenWorldStreamingTerrainInterest,
+	OpenWorldStreamingStaticInterest,
 } from "./open-world-streaming-controller";
 
 export interface OpenWorldStreamingClientRuntimeOptions {
@@ -132,8 +132,8 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 		this.#assertUsable();
 		this.#sceneInterest = interest;
 		this.#sceneInterestRevision += 1;
-		this.#controller.updateTerrainInterest(
-			createTerrainInterestFromRuntimeSceneInterest(
+		this.#controller.updateStaticInterest(
+			createStaticInterestFromRuntimeSceneInterest(
 				interest,
 				this.#sceneInterestRevision,
 			),
@@ -429,7 +429,9 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 				committedStaticCommitInstallCount:
 					nativeDiagnostics.sceneCommits.applied,
 				envCellResourceMembershipRevision: 0,
-				installedStaticDrawUnits: controller.terrain.installedDrawUnits,
+				installedStaticDrawUnits:
+					controller.terrain.installedDrawUnits +
+					controller.outdoorObjects.installedDrawUnits,
 				pendingStaticCommitInstallCount: nativeDiagnostics.sceneCommits.pending,
 				portalFrameWorkPlan: {
 					kind: "legacy-render-pass",
@@ -439,7 +441,9 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 				renderPassKind: DEFAULT_RENDER_PASS_PLAN.kind,
 				sceneInterest:
 					this.#sceneInterest.kind === "none" ? null : this.#sceneInterest.kind,
-				sourceStaticDrawUnits: controller.terrain.sourceDrawUnits,
+				sourceStaticDrawUnits:
+					controller.terrain.sourceDrawUnits +
+					controller.outdoorObjects.sourceDrawUnits,
 				status: this.#createStatus(),
 				textureFilteringMode: this.#textureFilteringMode,
 			},
@@ -521,20 +525,29 @@ function createStaticObjectUploadSample(
 	};
 }
 
-function createTerrainInterestFromRuntimeSceneInterest(
+function createStaticInterestFromRuntimeSceneInterest(
 	interest: RuntimeSceneInterest,
 	revision: number,
-): OpenWorldStreamingTerrainInterest | null {
-	if (
-		interest.kind !== "outdoor-anchor" ||
-		!interest.domains.includes("terrain") ||
-		(interest.lod?.terrain ?? 0) < 0
-	) {
+): OpenWorldStreamingStaticInterest | null {
+	if (interest.kind !== "outdoor-anchor") {
 		return null;
 	}
 	return {
 		anchorLandblockId: interest.anchorLandblockId,
-		radius: interest.lod?.terrain ?? 0,
+		lod: {
+			buildings: interest.domains.includes("buildings")
+				? (interest.lod?.buildings ?? 0)
+				: -1,
+			explicitObjects: interest.domains.includes("explicit-objects")
+				? (interest.lod?.explicitObjects ?? 0)
+				: -1,
+			generatedScenery: interest.domains.includes("generated-scenery")
+				? (interest.lod?.generatedScenery ?? 0)
+				: -1,
+			terrain: interest.domains.includes("terrain")
+				? (interest.lod?.terrain ?? 0)
+				: -1,
+		},
 		revision,
 	};
 }
@@ -544,11 +557,14 @@ function createLegacyStaticOverviewFromController(
 ): RuntimeOverviewSnapshot["static"] {
 	return {
 		...createEmptyLegacyStaticOverviewSnapshot(),
-		baking: controller.terrain.baking,
-		committed: controller.terrain.committed,
+		baking: controller.terrain.baking + controller.outdoorObjects.baking,
+		committed:
+			controller.terrain.committed + controller.outdoorObjects.committed,
 		latestTerrainPayload: controller.terrain.latestTerrainPayload,
-		requested: controller.terrain.requested,
-		resolving: controller.terrain.resolving,
+		requested:
+			controller.terrain.requested + controller.outdoorObjects.requested,
+		resolving:
+			controller.terrain.resolving + controller.outdoorObjects.resolving,
 	};
 }
 
@@ -557,12 +573,17 @@ function createLegacyStaticDiagnosticsFromController(
 ): RuntimeDiagnosticsSnapshot["static"] {
 	return {
 		...createEmptyLegacyStaticDiagnosticsSnapshot(),
-		baking: controller.terrain.baking,
-		committed: controller.terrain.committed,
-		committedDrawUnits: controller.terrain.installedDrawUnits,
-		failed: controller.terrain.failed,
+		baking: controller.terrain.baking + controller.outdoorObjects.baking,
+		committed:
+			controller.terrain.committed + controller.outdoorObjects.committed,
+		committedDrawUnits:
+			controller.terrain.installedDrawUnits +
+			controller.outdoorObjects.installedDrawUnits,
+		failed: controller.terrain.failed + controller.outdoorObjects.failed,
 		latestTerrainPayload: controller.terrain.latestTerrainPayload,
-		requested: controller.terrain.requested,
-		resolving: controller.terrain.resolving,
+		requested:
+			controller.terrain.requested + controller.outdoorObjects.requested,
+		resolving:
+			controller.terrain.resolving + controller.outdoorObjects.resolving,
 	};
 }

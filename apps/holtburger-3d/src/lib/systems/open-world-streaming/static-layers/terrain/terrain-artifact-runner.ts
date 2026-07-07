@@ -17,6 +17,7 @@ import type {
 	TexturePlacementSnapshot,
 } from "../../../../textures/placement";
 import type { MaterializationOwnerId } from "../../owners/owner-id";
+import type { OpenWorldStreamingStaticTaskStageTiming } from "../../diagnostics/contracts";
 import { createOpenWorldTextureBucketKey } from "../../texture-residency/claims/bucket-key";
 import type { OpenWorldTextureBucketKey } from "../../texture-residency/claims/bucket-key";
 import {
@@ -42,6 +43,7 @@ export interface OpenWorldTerrainLayerCommit {
 	readonly ownerId: MaterializationOwnerId;
 	readonly payload: TerrainLayerPayload;
 	readonly sourcePayload: TerrainStaticScopePayload;
+	readonly stageTimings: readonly OpenWorldStreamingStaticTaskStageTiming[];
 	readonly textureCommit: OpenWorldStreamingTextureCommit | null;
 	readonly textureReadiness: readonly OpenWorldTerrainTextureReadiness[];
 }
@@ -67,32 +69,48 @@ export class OpenWorldTerrainArtifactRunner {
 	async run(
 		request: OpenWorldTerrainArtifactRequest,
 	): Promise<OpenWorldTerrainLayerCommit> {
-		const resolved = await this.#resolveTerrainRecipe(request.task);
+		const timing = new StaticArtifactStageTimer();
+		const resolved = await timing.measure("resolve-source", () =>
+			this.#resolveTerrainRecipe(request.task),
+		);
 		const sourcePayload = requireTerrainSourcePayload(resolved);
-		const texturePlan = await this.#createBakeTexturePlan(request, resolved);
-		const baked = await this.#baker.bake(
+		const textureIntents = await timing.measure("create-texture-intents", () =>
+			createTerrainTexturePlacementIntents({
+				assetReader: this.#assetReader,
+				items: [{ payload: resolved, task: request.task }],
+			}),
+		);
+		const texturePlan = timing.measureSync("texture-placement", () =>
+			this.#createBakeTexturePlan(request, textureIntents),
+		);
+		const bakeInput = timing.measureSync("create-bake-resources", () =>
 			createTerrainBakeJobInput(
 				request.task,
 				resolved,
 				texturePlan.placementSnapshot,
 			),
 		);
+		const baked = await timing.measure("bake", () =>
+			this.#baker.bake(bakeInput),
+		);
+		const payload = timing.measureSync("assemble-commit", () => ({
+			drawUnits: baked.drawUnits.filter(
+				(drawUnit) => drawUnit.kind === "terrain-geometry",
+			),
+			generationId: `${request.task.taskId}:terrain`,
+			kind: "terrain" as const,
+			landblockId: request.task.scope.landblockId,
+			materialCoverage: baked.materialCoverage,
+			sourceMappingRecords: baked.staticSourceMappings,
+			spatialRecords: baked.staticSpatialRecords,
+			textureUses: baked.textureUses,
+		}));
 		return {
 			kind: "terrain-layer-commit",
 			ownerId: request.ownerId,
-			payload: {
-				drawUnits: baked.drawUnits.filter(
-					(drawUnit) => drawUnit.kind === "terrain-geometry",
-				),
-				generationId: `${request.task.taskId}:terrain`,
-				kind: "terrain",
-				landblockId: request.task.scope.landblockId,
-				materialCoverage: baked.materialCoverage,
-				sourceMappingRecords: baked.staticSourceMappings,
-				spatialRecords: baked.staticSpatialRecords,
-				textureUses: baked.textureUses,
-			},
+			payload,
 			sourcePayload,
+			stageTimings: timing.createSnapshot(),
 			textureCommit: texturePlan.textureCommit,
 			textureReadiness: createPendingTerrainTextureReadiness(baked.drawUnits),
 		};
@@ -118,17 +136,13 @@ export class OpenWorldTerrainArtifactRunner {
 		return recipe.payload;
 	}
 
-	async #createBakeTexturePlan(
+	#createBakeTexturePlan(
 		request: OpenWorldTerrainArtifactRequest,
-		payload: StaticScopePayload,
-	): Promise<{
+		intents: readonly TexturePlacementIntent[],
+	): {
 		readonly placementSnapshot: TexturePlacementSnapshot;
 		readonly textureCommit: OpenWorldStreamingTextureCommit | null;
-	}> {
-		const intents = await createTerrainTexturePlacementIntents({
-			assetReader: this.#assetReader,
-			items: [{ payload, task: request.task }],
-		});
+	} {
 		const claimsByBucket = new Map<
 			OpenWorldTextureBucketKey,
 			OpenWorldTextureBindingRequirement[]
@@ -235,6 +249,48 @@ export class OpenWorldTerrainArtifactRunner {
 						},
 		};
 	}
+}
+
+class StaticArtifactStageTimer {
+	readonly #timings: OpenWorldStreamingStaticTaskStageTiming[] = [];
+
+	async measure<T>(
+		stage: OpenWorldStreamingStaticTaskStageTiming["stage"],
+		createValue: () => Promise<T>,
+	): Promise<T> {
+		const startedAtMs = nowMs();
+		try {
+			return await createValue();
+		} finally {
+			this.#timings.push({
+				durationMs: nowMs() - startedAtMs,
+				stage,
+			});
+		}
+	}
+
+	measureSync<T>(
+		stage: OpenWorldStreamingStaticTaskStageTiming["stage"],
+		createValue: () => T,
+	): T {
+		const startedAtMs = nowMs();
+		try {
+			return createValue();
+		} finally {
+			this.#timings.push({
+				durationMs: nowMs() - startedAtMs,
+				stage,
+			});
+		}
+	}
+
+	createSnapshot(): readonly OpenWorldStreamingStaticTaskStageTiming[] {
+		return this.#timings;
+	}
+}
+
+function nowMs(): number {
+	return typeof performance !== "undefined" ? performance.now() : Date.now();
 }
 
 function createTerrainBakeJobInput(

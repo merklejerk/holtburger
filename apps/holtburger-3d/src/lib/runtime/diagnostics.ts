@@ -69,6 +69,7 @@ type PortalFrameWorkPlanDiagnostics =
 type RuntimeDiagnosticsDomainReport =
 	| AssetServiceDiagnosticsReport
 	| DynamicDiagnosticsReport
+	| OpenWorldStreamingDiagnosticsReport
 	| RendererDiagnosticsReport
 	| StaticCommitInstallDiagnosticsReport
 	| StaticCoordinatorDiagnosticsReport
@@ -114,6 +115,11 @@ interface DynamicDiagnosticsSummary {
 interface RendererDiagnosticsReport {
 	readonly kind: "renderer";
 	readonly summary: RendererDiagnosticsSummary;
+}
+
+export interface OpenWorldStreamingDiagnosticsReport {
+	readonly kind: "open-world-streaming";
+	readonly summary: unknown;
 }
 
 export interface RendererDiagnosticsSummary {

@@ -15,8 +15,10 @@ import type {
 	TextureKey,
 	TexturePageClass,
 } from "../../../../textures/identity";
+import { AtlasTexturePacker } from "../../../../textures/packing/packer";
 import type { MaterializationOwnerId } from "../../owners/owner-id";
 import { OpenWorldTextureClaimRegistry } from "../claims/texture-claim-registry";
+import { DirectOpenWorldObjectVisualAtlasBuilder } from "./object-visual-atlas-builder";
 import { buildObjectVisualTexturePlacementPlan } from "./object-visual-texture-placement-plan";
 
 describe("buildObjectVisualTexturePlacementPlan", () => {
@@ -26,7 +28,7 @@ describe("buildObjectVisualTexturePlacementPlan", () => {
 		const intent = createIntent({ itemNumber: 1 });
 
 		const plan = await buildObjectVisualTexturePlacementPlan({
-			assetReader,
+			atlasBuilder: createDirectAtlasBuilder(assetReader),
 			filteringMode: "nearest",
 			intents: [intent],
 			ownerId: ownerId("static-layer:outdoor-generated-scenery:0xda55ffff"),
@@ -45,11 +47,13 @@ describe("buildObjectVisualTexturePlacementPlan", () => {
 		});
 		expect(
 			plan.placementSnapshot.itemIdsByBindingId.get(intent.bindingId),
-		).toBe(intent.itemId);
+		).toBe(createTexturePlacementItemId(0));
 		expect(
-			plan.placementSnapshot.placementsByItemId.get(intent.itemId),
+			plan.placementSnapshot.placementsByItemId.get(
+				createTexturePlacementItemId(0),
+			),
 		).toMatchObject({
-			itemId: intent.itemId,
+			itemId: createTexturePlacementItemId(0),
 			purpose: "object-base-color",
 			rect: [4, 4, 1, 1],
 			textureKey: intent.textureKey,
@@ -77,13 +81,18 @@ describe("buildObjectVisualTexturePlacementPlan", () => {
 				],
 			}),
 		]);
+		expect(plan.stageTimings.map((timing) => timing.stage)).toEqual([
+			"texture-source-preparation",
+			"texture-packing",
+			"texture-page-settlement",
+		]);
 	});
 
 	it("does not require source intents for other owners already retained in the bucket", async () => {
 		const assetReader = new FixturePreparedAssetReader();
 		const textureClaims = new OpenWorldTextureClaimRegistry();
 		await buildObjectVisualTexturePlacementPlan({
-			assetReader,
+			atlasBuilder: createDirectAtlasBuilder(assetReader),
 			filteringMode: "nearest",
 			intents: [createIntent({ itemNumber: 1 })],
 			ownerId: ownerId("static-layer:outdoor-generated-scenery:0xda55ffff"),
@@ -96,7 +105,7 @@ describe("buildObjectVisualTexturePlacementPlan", () => {
 			textureKey: textureKey("texture:object-base:second"),
 		});
 		const secondPlan = await buildObjectVisualTexturePlacementPlan({
-			assetReader,
+			atlasBuilder: createDirectAtlasBuilder(assetReader),
 			filteringMode: "nearest",
 			intents: [secondIntent],
 			ownerId: ownerId("static-layer:outdoor-generated-scenery:0xda56ffff"),
@@ -113,6 +122,40 @@ describe("buildObjectVisualTexturePlacementPlan", () => {
 			expect.objectContaining({ bindingId: secondIntent.bindingId }),
 		]);
 	});
+
+	it("assigns bake-local item ids when upstream planners reuse numeric ids", async () => {
+		const assetReader = new FixturePreparedAssetReader();
+		const textureClaims = new OpenWorldTextureClaimRegistry();
+		const firstIntent = createIntent({
+			bindingId: bindingId("binding:object-base:first"),
+			itemNumber: 0,
+			textureKey: textureKey("texture:object-base:first"),
+		});
+		const secondIntent = createIntent({
+			bindingId: bindingId("binding:object-base:second"),
+			itemNumber: 0,
+			textureKey: textureKey("texture:object-base:second"),
+		});
+
+		const plan = await buildObjectVisualTexturePlacementPlan({
+			atlasBuilder: createDirectAtlasBuilder(assetReader),
+			filteringMode: "nearest",
+			intents: [firstIntent, secondIntent],
+			ownerId: ownerId("static-layer:env-cell-system:0xda55ffff"),
+			textureClaims,
+		});
+
+		expect(
+			plan.placementSnapshot.itemIdsByBindingId.get(firstIntent.bindingId),
+		).toBe(createTexturePlacementItemId(0));
+		expect(
+			plan.placementSnapshot.itemIdsByBindingId.get(secondIntent.bindingId),
+		).toBe(createTexturePlacementItemId(1));
+		expect([...plan.placementSnapshot.placementsByItemId.keys()]).toEqual([
+			createTexturePlacementItemId(0),
+			createTexturePlacementItemId(1),
+		]);
+	});
 });
 
 class FixturePreparedAssetReader implements PreparedAssetReader {
@@ -124,6 +167,13 @@ class FixturePreparedAssetReader implements PreparedAssetReader {
 		this.requests.push(key);
 		return createPreparedAsset();
 	}
+}
+
+function createDirectAtlasBuilder(assetReader: PreparedAssetReader) {
+	return new DirectOpenWorldObjectVisualAtlasBuilder({
+		assetReader,
+		texturePacker: new AtlasTexturePacker(),
+	});
 }
 
 function createIntent(input: {

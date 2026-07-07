@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { PreparedAssetReader } from "../../../../assets/contracts";
 import type {
+	EnvCellSystemStaticScopePayload,
 	StaticBakeJobInput,
 	StaticBakeJobResult,
 	StaticBaker,
@@ -10,26 +11,29 @@ import type {
 	StaticLandblockSceneLodSourceResolver,
 	StaticLayerTaskRequest,
 	StaticScopePayload,
-	TerrainStaticScopePayload,
 } from "../../../../static/contracts";
-import { OpenWorldTextureClaimRegistry } from "../../texture-residency/claims/texture-claim-registry";
-import { OpenWorldTerrainArtifactRunner } from "./terrain-artifact-runner";
+import { createEmptyObjectVisualInstallSet } from "../../../../visual/object-visual-install-set";
 import type { MaterializationOwnerId } from "../../owners/owner-id";
+import { OpenWorldTextureClaimRegistry } from "../../texture-residency/claims/texture-claim-registry";
+import type { OpenWorldObjectVisualAtlasBuilder } from "../../texture-residency/placement/object-visual-atlas-builder";
+import { OpenWorldEnvCellArtifactRunner } from "./env-cell-artifact-runner";
 
-describe("OpenWorldTerrainArtifactRunner", () => {
-	it("resolves and bakes terrain into a replacement terrain layer commit", async () => {
-		const task = createTerrainTask();
-		const resolver = new FixtureTerrainResolver(createTerrainScopePayload());
-		const baker = new FixtureTerrainBaker();
-		const runner = new OpenWorldTerrainArtifactRunner({
+describe("OpenWorldEnvCellArtifactRunner", () => {
+	it("resolves LoD 4 env-cell sources and emits direct env-cell commits", async () => {
+		const task = createEnvCellTask();
+		const resolver = new FixtureEnvCellResolver(createEnvCellScopePayload());
+		const baker = new FixtureEnvCellBaker();
+		const runner = new OpenWorldEnvCellArtifactRunner({
 			assetReader: createUnusedAssetReader(),
 			baker,
+			objectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder(),
 			resolver,
 			textureClaims: new OpenWorldTextureClaimRegistry(),
 		});
 
 		const commit = await runner.run({
-			ownerId: "static-layer:terrain:0xda55ffff" as MaterializationOwnerId,
+			ownerId:
+				"static-layer:env-cell-system:0xda55ffff" as MaterializationOwnerId,
 			task,
 		});
 
@@ -39,40 +43,30 @@ describe("OpenWorldTerrainArtifactRunner", () => {
 				landblockId: 0xda55ffff,
 				requestedLayers: [
 					{
-						kind: "terrain",
+						kind: "env-cell-system",
 						targetOwnerKey: task.ownerKey,
 					},
 				],
-				sourceLod: 0,
+				sourceLod: 4,
 			},
 		]);
 		expect(baker.inputs[0]).toMatchObject({
-			domain: "outdoor-terrain",
+			domain: "env-cell-system",
 			revision: 1,
 			task,
 		});
 		expect(commit).toMatchObject({
-			kind: "terrain-layer-commit",
+			kind: "env-cell-system-layer-commit",
 			payload: {
-				drawUnits: [expect.objectContaining({ drawUnitId: "terrain:draw:1" })],
-				kind: "terrain",
+				kind: "env-cell-system",
 				landblockId: 0xda55ffff,
 			},
-			textureCommit: null,
-			textureReadiness: [{ bindingId: "terrain-binding:1", kind: "pending" }],
+			textureCommits: [],
 		});
-		expect(commit.stageTimings.map((timing) => timing.stage)).toEqual([
-			"resolve-source",
-			"create-texture-intents",
-			"texture-placement",
-			"create-bake-resources",
-			"bake",
-			"assemble-commit",
-		]);
 	});
 });
 
-class FixtureTerrainResolver implements StaticLandblockSceneLodSourceResolver {
+class FixtureEnvCellResolver implements StaticLandblockSceneLodSourceResolver {
 	readonly sourceRequests: StaticLandblockSceneLodSourceRequest[] = [];
 
 	constructor(readonly payload: StaticScopePayload) {}
@@ -95,7 +89,7 @@ class FixtureTerrainResolver implements StaticLandblockSceneLodSourceResolver {
 	}
 }
 
-class FixtureTerrainBaker implements StaticBaker {
+class FixtureEnvCellBaker implements StaticBaker {
 	readonly inputs: StaticBakeJobInput[] = [];
 
 	async bake(input: StaticBakeJobInput): Promise<StaticBakeJobResult> {
@@ -103,23 +97,11 @@ class FixtureTerrainBaker implements StaticBaker {
 		return {
 			atlasRegistryUpdates: [],
 			buildRevision: input.payload.sourceRevision,
-			domain: "outdoor-terrain",
-			drawUnits: [
-				{
-					drawUnitId: "terrain:draw:1",
-					kind: "terrain-geometry",
-					landblockId: 0xda55ffff,
-					textureBindingIds: ["terrain-binding:1"],
-				},
-			],
+			domain: "env-cell-system",
+			drawUnits: [],
 			envCellStaticObjectPlacementRecords: [],
 			materialCoverage: [],
-			objectVisualInstallSet: {
-				directDrawUnits: [],
-				instancedRenderInstances: [],
-				instancedResources: [],
-				visualResources: [],
-			},
+			objectVisualInstallSet: createEmptyObjectVisualInstallSet(),
 			portalApertureResources: [],
 			revision: input.revision,
 			staticObjectBakeDiagnostics: [],
@@ -131,54 +113,56 @@ class FixtureTerrainBaker implements StaticBaker {
 			task: input.task,
 			textureDependencies: [],
 			textureUses: [],
-		} as StaticBakeJobResult;
+		};
 	}
 }
 
-function createTerrainTask(): StaticLayerTaskRequest {
+function createEnvCellTask(): StaticLayerTaskRequest {
 	return {
-		domain: "outdoor-terrain",
-		ownerId: "static-layer:terrain:0xda55ffff",
+		domain: "env-cell-system",
+		ownerId: "static-layer:env-cell-system:0xda55ffff",
 		ownerKey: {
-			kind: "terrain",
+			kind: "env-cell-system",
 			landblockId: 0xda55ffff,
 		},
-		priority: 0,
+		priority: 10,
 		revision: 1,
 		scope: {
 			kind: "landblock",
 			landblockId: 0xda55ffff,
 		},
 		scopeKey: "landblock:da55ffff",
-		taskId: "1:landblock:da55ffff:outdoor-terrain",
+		taskId: "1:landblock:da55ffff:env-cell-system",
 	};
 }
 
-function createTerrainScopePayload(): StaticScopePayload {
+function createEnvCellScopePayload(): StaticScopePayload {
 	return {
 		job: {
-			domain: "outdoor-terrain",
+			domain: "env-cell-system",
 			scope: {
 				kind: "landblock",
 				landblockId: 0xda55ffff,
 			},
 		},
 		scope: {
-			kind: "terrain",
+			acceptedEnvCellIds: [],
+			envCells: [],
+			kind: "env-cell-system",
 			landblock: {
 				kind: "landblock-source",
 				landblockId: 0xda55ffff,
 				source: "outdoor",
 			},
-			mesh: {
-				quadCount: 0,
-				quads: [],
-				triangleCount: 0,
-				triangles: [],
-				vertexCount: 0,
-				vertices: [],
-			},
+			materialSources: [],
 			missingRefs: [],
+			paletteSources: [],
+			portalApertureResources: [],
+			portalConnectivityGraph: {
+				edges: [],
+				nodes: [],
+			},
+			portalLinks: [],
 			regionRenderProfile: {
 				detailRoles: [],
 				identity: {
@@ -186,28 +170,18 @@ function createTerrainScopePayload(): StaticScopePayload {
 					regionNumber: 1,
 				},
 			},
-			sourceSpatial: {
-				terrainBvh: {
+			residencySpatial: {
+				envCellSystemBvh: {
 					items: [],
 					nodes: [],
 				},
+				envCellSystemBvhItemCount: 0,
+				envCellSystemBvhNodeCount: 0,
 			},
-			terrainMaterial: {
-				alphaMapCount: 0,
-				identity: {
-					kind: "terrain-material",
-					regionNumber: 1,
-				},
-				materialKind: "terrain-material",
-				pcodeEncoding: "unknown",
-				roadAlphaMapCount: 0,
-				roadAlphaMaps: [],
-				terrainAlphaMaps: [],
-				terrainTypeCount: 0,
-				terrainTypes: [],
-			},
-			textureUses: [],
-		} as TerrainStaticScopePayload,
+			sourceAssets: [],
+			textureRefs: [],
+			visibilityDiagnostics: [],
+		} as EnvCellSystemStaticScopePayload,
 		sourceRevision: 1,
 	};
 }
@@ -216,6 +190,16 @@ function createUnusedAssetReader(): PreparedAssetReader {
 	return {
 		async requestPreparedAsset(): Promise<never> {
 			throw new Error("Fixture asset reader should not be used.");
+		},
+	};
+}
+
+function createUnusedObjectVisualAtlasBuilder(): OpenWorldObjectVisualAtlasBuilder {
+	return {
+		buildAtlas() {
+			throw new Error(
+				"Object visual atlas builder should not be used by empty env-cell test payload.",
+			);
 		},
 	};
 }

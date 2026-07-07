@@ -40,6 +40,7 @@ try {
 		scenario: options.scenario,
 		settleDelayMs: options.settleDelayMs,
 		sequenceRepeatCount: options.sequenceRepeatCount,
+		staticPublicationMode: options.staticPublicationMode,
 		targetObjectId: options.targetObjectId,
 		timeoutMs: options.timeoutMs,
 		viteUrl,
@@ -76,6 +77,7 @@ function parseArgs(args) {
 		scenario: "landblock-sequence",
 		sequenceRepeatCount: 1,
 		settleDelayMs: 0,
+		staticPublicationMode: "defer-dense-renderer-until-ready",
 		targetObjectId: EXPLICIT_OBJECT_RADIUS_EXPANSION_TARGET,
 		timeoutMs: 180_000,
 		verbose: false,
@@ -142,6 +144,11 @@ function parseArgs(args) {
 					throw new Error("--settle-delay-ms must be a non-negative number.");
 				}
 				break;
+			case "--static-publication":
+				parsed.staticPublicationMode = parseStaticPublicationMode(
+					requireValue(args, ++index, arg),
+				);
+				break;
 			case "--target-object":
 				parsed.targetObjectId = requireValue(args, ++index, arg);
 				break;
@@ -190,6 +197,7 @@ Options:
   --runtime-pipeline <name> Runtime pipeline: legacy, open-world-streaming. Default: legacy
   --scenario <name>        Scenario: instantiate-only, landblock-sequence, explicit-object-radius-expansion, dungeon-cell.
   --settle-delay-ms <ms>   Delay after each settled scene before continuing. Default: 0
+  --static-publication <mode> Static renderer publication: normal, suppress-dense-renderer, defer-dense-renderer-until-ready. Default: defer-dense-renderer-until-ready
   --target-object <id>     Static object id for explicit-object-radius-expansion diagnostics.
   --headed                 Launch visible Chrome instead of headless Chrome.
   --output <path>          Write full diagnostics JSON to a file.
@@ -261,6 +269,19 @@ function parseRuntimePipeline(value) {
 		return value;
 	}
 	throw new Error("--runtime-pipeline must be legacy or open-world-streaming.");
+}
+
+function parseStaticPublicationMode(value) {
+	if (
+		value === "normal" ||
+		value === "suppress-dense-renderer" ||
+		value === "defer-dense-renderer-until-ready"
+	) {
+		return value;
+	}
+	throw new Error(
+		"--static-publication must be normal, suppress-dense-renderer, or defer-dense-renderer-until-ready.",
+	);
 }
 
 async function writeDiagnosticsOutput(diagnostics, outputPath, errorMessage) {
@@ -437,13 +458,14 @@ async function runBrowserHarness({
 	scenario,
 	settleDelayMs,
 	sequenceRepeatCount,
+	staticPublicationMode,
 	targetObjectId,
 	timeoutMs,
 	viteUrl,
 }) {
 	const userDataDir = await mkdtemp(join(tmpdir(), "holtburger-3d-browser-"));
 	tempDirs.push(userDataDir);
-	const pageUrl = `${viteUrl}/harness/browser-pipeline?assetHost=${encodeURIComponent(assetHostUrl)}&runtime-pipeline=${encodeURIComponent(runtimePipeline)}`;
+	const pageUrl = `${viteUrl}/harness/browser-pipeline?assetHost=${encodeURIComponent(assetHostUrl)}&runtime-pipeline=${encodeURIComponent(runtimePipeline)}&static-publication=${encodeURIComponent(staticPublicationMode)}`;
 	const child = spawn(
 		chromePath,
 		[

@@ -15,6 +15,7 @@ import type {
 import { createEmptyObjectVisualInstallSet } from "../../../../visual/object-visual-install-set";
 import type { MaterializationOwnerId } from "../../owners/owner-id";
 import { OpenWorldTextureClaimRegistry } from "../../texture-residency/claims/texture-claim-registry";
+import type { OpenWorldObjectVisualAtlasBuilder } from "../../texture-residency/placement/object-visual-atlas-builder";
 import { OpenWorldOutdoorObjectArtifactRunner } from "./outdoor-object-artifact-runner";
 
 describe("OpenWorldOutdoorObjectArtifactRunner", () => {
@@ -27,6 +28,7 @@ describe("OpenWorldOutdoorObjectArtifactRunner", () => {
 		const runner = new OpenWorldOutdoorObjectArtifactRunner({
 			assetReader: createUnusedAssetReader(),
 			baker,
+			objectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder(),
 			resolver,
 			textureClaims: new OpenWorldTextureClaimRegistry(),
 		});
@@ -184,6 +186,16 @@ function createUnusedAssetReader(): PreparedAssetReader {
 	return {
 		async requestPreparedAsset(): Promise<never> {
 			throw new Error("Fixture asset reader should not be used.");
+		},
+	};
+}
+
+function createUnusedObjectVisualAtlasBuilder(): OpenWorldObjectVisualAtlasBuilder {
+	return {
+		buildAtlas() {
+			throw new Error(
+				"Object visual atlas builder should not be used by empty outdoor object test payload.",
+			);
 		},
 	};
 }

@@ -28,7 +28,10 @@ import type {
 	StaticSceneTerrainLandblockBounds,
 } from "../../../runtime/scene-query/contracts";
 import type { EnvCellResourceMembership } from "../../../runtime/env-cell-resource-membership";
-import type { ScenePickHit } from "../../../runtime/scene-query/merged-scene-query-contracts";
+import type {
+	ScenePickHit,
+	ScenePickRequest,
+} from "../../../runtime/scene-query/merged-scene-query-contracts";
 import type { TextureFilteringMode } from "../../../textures/sampling-policy";
 import type { TextureAtlasPageInspectionSnapshot } from "../../../textures/texture-manager";
 import type { OpenWorldStreamingBoundaryAdapters } from "../adapters/browser-boundaries";
@@ -41,10 +44,12 @@ import { OpenWorldStreamingController } from "./open-world-streaming-controller"
 import type {
 	OpenWorldStreamingControllerSnapshot,
 	OpenWorldStreamingStaticInterest,
+	OpenWorldStreamingStaticPublicationMode,
 } from "./open-world-streaming-controller";
 
 export interface OpenWorldStreamingClientRuntimeOptions {
 	readonly adapters: OpenWorldStreamingBoundaryAdapters;
+	readonly staticPublicationMode?: OpenWorldStreamingStaticPublicationMode;
 }
 
 type RuntimeFrameTelemetryListener = (
@@ -69,7 +74,7 @@ const DEFAULT_TEXTURE_FILTERING_MODE: TextureFilteringMode = "nearest";
 export function createOpenWorldStreamingClientRuntime(
 	options: OpenWorldStreamingClientRuntimeOptions,
 ): ClientRuntime {
-	return new OpenWorldStreamingClientRuntimeAdapter(options.adapters);
+	return new OpenWorldStreamingClientRuntimeAdapter(options);
 }
 
 class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
@@ -89,7 +94,8 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 	#sceneInterestRevision = 0;
 	#textureFilteringMode: TextureFilteringMode = DEFAULT_TEXTURE_FILTERING_MODE;
 
-	constructor(adapters: OpenWorldStreamingBoundaryAdapters) {
+	constructor(options: OpenWorldStreamingClientRuntimeOptions) {
+		const adapters = options.adapters;
 		this.#assetService = adapters.assets.assetService;
 		this.#host = adapters.assets.host;
 		this.#renderer = adapters.renderer.renderer;
@@ -97,7 +103,9 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 			assetReader: adapters.assets.assetService,
 			createStaticBaker: adapters.workers.createStaticBaker,
 			createStaticResolver: adapters.workers.createStaticSourceResolver,
+			createTexturePacker: adapters.workers.createTexturePacker,
 			renderer: this.#renderer,
+			staticPublicationMode: options.staticPublicationMode,
 		});
 		this.#unsubscribeRendererTelemetry = this.#renderer.subscribeTelemetry(
 			(telemetry) => {
@@ -156,9 +164,12 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 		return DEFAULT_CAMERA_RESIDENCY;
 	}
 
-	queryEnvCellBounds(): StaticSceneEnvCellBounds | null {
+	queryEnvCellBounds(options: {
+		readonly envCellId: number;
+		readonly landblockId: number;
+	}): StaticSceneEnvCellBounds | null {
 		this.#assertUsable();
-		return null;
+		return this.#controller.queryEnvCellBounds(options);
 	}
 
 	queryTerrainLandblockBounds(options: {
@@ -168,9 +179,12 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 		return this.#controller.queryTerrainLandblockBounds(options);
 	}
 
-	queryEnvCellResourceMembership(): EnvCellResourceMembership | null {
+	queryEnvCellResourceMembership(options: {
+		readonly envCellId: number;
+		readonly landblockId: number;
+	}): EnvCellResourceMembership | null {
 		this.#assertUsable();
-		return null;
+		return this.#controller.queryEnvCellResourceMembership(options);
 	}
 
 	setCurrentCameraResidency(residency: RuntimeCameraResidency): void {
@@ -178,9 +192,15 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 		this.#currentCameraResidency = residency;
 	}
 
-	pickSceneRay(): ScenePickHit | null {
+	pickSceneRay(request: ScenePickRequest): ScenePickHit | null {
 		this.#assertUsable();
-		return null;
+		return this.#controller.pickSceneRay({
+			...request,
+			filters: {
+				...request.filters,
+				includeEnvCellPortals: this.#envCellPortalDebugOverlayVisible,
+			},
+		});
 	}
 
 	createStaticSelectionDiagnosticsReport(): ReturnType<
@@ -423,6 +443,10 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 						terrainDrawUnits: renderer.terrainDrawUnits,
 					},
 				},
+				{
+					kind: "open-world-streaming",
+					summary: nativeDiagnostics,
+				},
 			],
 			kind: "runtime-diagnostics-report",
 			runtime: {
@@ -431,7 +455,8 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 				envCellResourceMembershipRevision: 0,
 				installedStaticDrawUnits:
 					controller.terrain.installedDrawUnits +
-					controller.outdoorObjects.installedDrawUnits,
+					controller.outdoorObjects.installedDrawUnits +
+					controller.envCells.installedDrawUnits,
 				pendingStaticCommitInstallCount: nativeDiagnostics.sceneCommits.pending,
 				portalFrameWorkPlan: {
 					kind: "legacy-render-pass",
@@ -443,7 +468,8 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 					this.#sceneInterest.kind === "none" ? null : this.#sceneInterest.kind,
 				sourceStaticDrawUnits:
 					controller.terrain.sourceDrawUnits +
-					controller.outdoorObjects.sourceDrawUnits,
+					controller.outdoorObjects.sourceDrawUnits +
+					controller.envCells.sourceDrawUnits,
 				status: this.#createStatus(),
 				textureFilteringMode: this.#textureFilteringMode,
 			},
@@ -538,6 +564,9 @@ function createStaticInterestFromRuntimeSceneInterest(
 			buildings: interest.domains.includes("buildings")
 				? (interest.lod?.buildings ?? 0)
 				: -1,
+			envCells: interest.domains.includes("env-cells")
+				? (interest.lod?.envCells ?? 0)
+				: -1,
 			explicitObjects: interest.domains.includes("explicit-objects")
 				? (interest.lod?.explicitObjects ?? 0)
 				: -1,
@@ -557,14 +586,24 @@ function createLegacyStaticOverviewFromController(
 ): RuntimeOverviewSnapshot["static"] {
 	return {
 		...createEmptyLegacyStaticOverviewSnapshot(),
-		baking: controller.terrain.baking + controller.outdoorObjects.baking,
+		baking:
+			controller.terrain.baking +
+			controller.outdoorObjects.baking +
+			controller.envCells.baking,
 		committed:
-			controller.terrain.committed + controller.outdoorObjects.committed,
+			controller.terrain.committed +
+			controller.outdoorObjects.committed +
+			controller.envCells.committed,
+		latestEnvCellSystemPayload: controller.envCells.latestEnvCellSystemPayload,
 		latestTerrainPayload: controller.terrain.latestTerrainPayload,
 		requested:
-			controller.terrain.requested + controller.outdoorObjects.requested,
+			controller.terrain.requested +
+			controller.outdoorObjects.requested +
+			controller.envCells.requested,
 		resolving:
-			controller.terrain.resolving + controller.outdoorObjects.resolving,
+			controller.terrain.resolving +
+			controller.outdoorObjects.resolving +
+			controller.envCells.resolving,
 	};
 }
 
@@ -573,17 +612,31 @@ function createLegacyStaticDiagnosticsFromController(
 ): RuntimeDiagnosticsSnapshot["static"] {
 	return {
 		...createEmptyLegacyStaticDiagnosticsSnapshot(),
-		baking: controller.terrain.baking + controller.outdoorObjects.baking,
+		baking:
+			controller.terrain.baking +
+			controller.outdoorObjects.baking +
+			controller.envCells.baking,
 		committed:
-			controller.terrain.committed + controller.outdoorObjects.committed,
+			controller.terrain.committed +
+			controller.outdoorObjects.committed +
+			controller.envCells.committed,
 		committedDrawUnits:
 			controller.terrain.installedDrawUnits +
-			controller.outdoorObjects.installedDrawUnits,
-		failed: controller.terrain.failed + controller.outdoorObjects.failed,
+			controller.outdoorObjects.installedDrawUnits +
+			controller.envCells.installedDrawUnits,
+		failed:
+			controller.terrain.failed +
+			controller.outdoorObjects.failed +
+			controller.envCells.failed,
+		latestEnvCellSystemPayload: controller.envCells.latestEnvCellSystemPayload,
 		latestTerrainPayload: controller.terrain.latestTerrainPayload,
 		requested:
-			controller.terrain.requested + controller.outdoorObjects.requested,
+			controller.terrain.requested +
+			controller.outdoorObjects.requested +
+			controller.envCells.requested,
 		resolving:
-			controller.terrain.resolving + controller.outdoorObjects.resolving,
+			controller.terrain.resolving +
+			controller.outdoorObjects.resolving +
+			controller.envCells.resolving,
 	};
 }

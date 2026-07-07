@@ -135,16 +135,35 @@ This tree is a policy boundary, not just a folder name. New materialization conc
 
 ### Migration Policy
 
+- Default to **migrate direct contracts, shim legacy** for every replacement boundary. When a consumer is touched, first try to move it to the replacement-native contract. Add a shim only after identifying the blocked legacy consumer and why immediate migration would create more churn than value.
 - Migrate durable consumers to direct replacement contracts as early as practical.
 - Add shims only on the legacy side, harness side, or UI migration edge when a consumer cannot move yet.
 - Treat shims as temporary compatibility debt, not as neutral adapters.
 - Do not let shims define replacement naming, field layout, timing assumptions, diagnostics categories, tests, or source-tree placement.
+- Treat legacy-shaped diagnostics, benchmark summaries, UI panels, and tests as consumers to migrate, break, or shim at the edge. They are not evidence that the replacement core should preserve old categories.
+- Apply this policy to every contract surface: runtime composition, diagnostics, benchmark summaries, texture residency, source resolution, worker DTOs, renderer apply ports, scene query publication, UI panels, harness scenarios, and tests.
 - Prefer breaking and updating a legacy-shaped consumer over preserving a dishonest compatibility projection in the replacement pipeline.
 - Prefer a visibly incomplete or temporarily broken legacy shim over a compatibility layer that teaches the replacement system old concepts.
 - If a phase introduces a shim, record the owning consumer, reason, deletion trigger, and target cleanup phase in that phase's decisions.
 - If a consumer is meant to survive cutover, it must be migrated to the direct replacement contract before Phase 16 begins.
 - Adapters may survive cutover only when they isolate a durable external boundary such as host assets, workers, renderer mutation, diagnostics export, or harness composition.
 - Diagnostics follow the same rule as every other contract: replacement diagnostics are direct; legacy diagnostic snapshots are shims.
+- Each steering checkpoint must dry-run the remaining phases up to the next steering checkpoint and explicitly classify touched consumers as direct migration, legacy-edge shim, deletion, or durable adapter. If the answer is not clear, pause the phase before adding compatibility code.
+
+Boundary decision order:
+
+1. **Migrate direct.** If the consumer is expected to survive cutover, update it to the replacement-native contract.
+2. **Delete.** If the consumer only preserves legacy architecture, remove it instead of translating it.
+3. **Shim at the edge.** If immediate migration is too disruptive, add a named shim at the legacy, harness, UI migration, or runtime-adapter edge.
+4. **Keep as durable adapter.** Only keep adapter code when it isolates an external boundary the replacement system will still need after cutover.
+
+Before adding a shim, record:
+
+- Blocked consumer.
+- Why direct migration is not the right next move.
+- Which replacement contract remains canonical.
+- Dishonest-field or legacy-concept risk.
+- Deletion trigger and target cleanup phase.
 
 ### Core Model
 
@@ -764,19 +783,210 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Adapt env-cell source resolution.
-- [ ] Adapt structured interior texture retain and bake.
-- [ ] Define env-cell renderer, scene-query, and resource-membership apply ports before wiring commits.
-- [ ] Emit env-cell system commits.
-- [ ] Apply portal records and resource membership.
-- [ ] Migrate direct env-cell overlay/query consumers to replacement commits and query records where feasible.
-- [ ] Name every env-cell compatibility shim with its blocked consumer, dishonest-field risk, deletion trigger, and target cleanup phase.
-- [ ] Run env-cell-focused harnesses.
+- [x] Adapt env-cell source resolution through the existing static source resolver, using env-cell source LoD 4 without importing coordinator state.
+- [x] Adapt structured interior and env-cell static-object texture retain and bake.
+- [x] Define env-cell renderer, scene-query, and resource-membership apply ports before wiring commits.
+- [x] Emit env-cell system commits from replacement-native bake results, including structured interior draw units, env-cell static-object draw units, portal projections, resource membership, and static-authored dynamic placement records.
+- [x] Apply portal records and resource membership.
+- [x] Migrate direct env-cell overlay/query consumers to replacement commits and query records where feasible before adding any legacy diagnostic/report projection.
+- [x] Name every env-cell compatibility shim with its blocked consumer, dishonest-field risk, deletion trigger, and target cleanup phase.
+- [x] Run env-cell-focused harnesses.
 - [ ] Compare dense landblock metrics, including `da55`.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 11 implementation is steered toward a dedicated `static-layers/env-cells` domain runner rather than reusing the legacy env-cell publication helper. The helper is shaped around legacy static coordinator commit deltas and install results; using it would smuggle old commit vocabulary into the replacement domain.
+- Env-cell source resolution should request the env-cell system layer directly from `StaticLandblockSceneLodSourceResolver` at source LoD 4. That keeps the useful resolver transform while avoiding `StaticCoordinator` ownership and scheduling.
+- Env-cell texture placement must combine structured interior intents with static object intents. Dense env-cell bakes can include both interior geometry and static-object geometry, so a structured-interior-only plan produces dishonest readiness and missing object-visual placement ids.
+- Env-cell payload assembly should be direct and replacement-native: payloads own portal projections, structured interior draw units, env-cell static-object draw units, source resource membership, and parent-owned static-authored dynamic placement records. Legacy static install summaries can be projected later only at the runtime/harness edge.
+- Env-cell compatibility shim: the outer `ClientRuntime`/browser-runtime adapter may project replacement env-cell progress into legacy-shaped runtime counters for the harness. Blocked consumer: browser harness/runtime report and any un-migrated debug overlay still reading legacy reports. Dishonest-field risk: legacy installed/source draw-unit counters cannot fully explain portal/resource membership or independently committed texture readiness. Deletion trigger: Phase 14 diagnostics/UI migration, with final deletion in Phase 16.
+- While integrating env-cells with outdoor object domains, the replacement object-visual placement plan was changed to assign bake-local numeric item ids itself. Concatenating structured-interior and static-object placement intents exposed reused upstream item ids, which caused `placementsByItemId` collisions and incorrect purpose lookups such as structured interiors reading `object-palette` placements as `object-base-color` placements.
+- Direct env-cell query consumers were migrated through replacement controller ports for env-cell bounds, resource membership, and static ray picking. The outer runtime adapter remains a temporary `ClientRuntime` edge, but it now forwards to direct replacement query state instead of returning null.
+- Verification passed for the env-cell-focused slice: `npm run check`, focused `npm run test:ts -- src/lib/systems/open-world-streaming/static-layers/env-cells/env-cell-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/outdoor-objects/outdoor-object-artifact-runner.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/object-visual-texture-placement-plan.test.ts src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts src/lib/systems/open-world-streaming/composition/runtime-pipeline.test.ts`, and `npm run harness:browser -- --runtime-pipeline open-world-streaming --domains terrain,env-cells --layer-distance 1 --timeout-ms 60000`.
+- Blocking course correction: all-domain radius-1 did not settle. At 60s it reported 27 of 45 static commits applied, 18 pending, 9 long tasks, and max frame delta around 624 ms. At 120s it still reported 39 of 45 applied, 6 pending, 528 long tasks, and max frame delta around 642 ms. This violates the Phase 11 all-domain acceptance criterion and the continuous-streaming north star.
+- Likely cause from the dry run and harness trace: all-domain static work is still processed as a long sequential task chain, while object/env-cell placement, packing, baking, and renderer uploads can keep producing main-thread long tasks. Phase 12 must not start until this is resteered, because runtime dynamics would add more materialization pressure on top of an already failing static path.
+
+### Phase 11A: Full-Domain Static Settlement Resteer
+
+Deliverables:
+
+- Diagnose why all-domain radius-1 stalls with pending static commits after 120 seconds.
+- Split the current sequential static-layer run into budgeted, resumable work or otherwise prove a narrower bottleneck.
+- Move any remaining object/env-cell texture packing or materialization work off the main loop when it is responsible for repeated long tasks.
+- Add replacement-native progress diagnostics that identify the active owner/domain/task when all-domain settlement is slow.
+- Migrate any touched durable diagnostics or harness consumer to the direct replacement diagnostics contract where practical.
+- Preserve direct replacement contracts; if a legacy-shaped progress report is still needed, implement it as a legacy-edge shim and allow it to be incomplete rather than distorting replacement diagnostics.
+
+Acceptance criteria:
+
+- All-domain radius-1 harness settles through the replacement pipeline within the standard 60s timeout.
+- The same run has no repeated long-task plateau caused by replacement static materialization.
+- Terrain plus env-cells remains green after the scheduler/materialization changes.
+- Any new settlement diagnostics are replacement-native; any legacy report projection is named as a temporary shim with consumer, dishonest-field risk, deletion trigger, and cleanup phase.
+- The plan records any remaining frame-budget debt with a deletion or follow-up target before Phase 12 starts.
+
+Task checklist:
+
+- [x] Capture per-domain task duration and active-task diagnostics in replacement-native form.
+- [x] Update any touched durable harness/diagnostics consumer to read the replacement diagnostics contract directly before adding compatibility projection.
+- [x] If a legacy progress/report shim remains necessary, keep it at the runtime, harness, or UI migration edge and record its deletion trigger.
+- [x] Reclassify settlement diagnostics under the migration invariant: replacement diagnostics are direct contracts; legacy runtime report fields are an outer-edge shim and may be incomplete.
+- [x] Identify whether the remaining bottleneck is scheduling order, source resolution, texture placement, page packing, bake work, renderer upload, or harness settle criteria.
+- [x] Replace the single sequential static-interest loop with a budgeted/resumable runner if scheduling is the bottleneck.
+- [x] Move remaining prepared-asset service work out of the browser main-thread service handler, or otherwise frame-budget that boundary, if worker source resolution still produces repeated long tasks.
+- [ ] Reconcile the Phase 7 page-build protocol with object atlas layout, because the current protocol assumes page ids are known before layout while object visual packing discovers page count during packing.
+- [x] Re-run terrain plus env-cells radius 1.
+- [x] Re-run all-domain radius 1 with the 60s timeout.
+- [ ] Update Phase 12 assumptions after the static path settles.
+
+Decisions and course corrections:
+
+- Added replacement-native static task diagnostics with active task arrays, per-domain task timing, apply timing, and substage timings for object/env-cell materialization. Legacy runtime reports still receive only an outer edge projection; replacement diagnostics now carry the actionable timing truth.
+- Diagnostics resteer: do not fit replacement diagnostics against legacy runtime snapshot outputs. The legacy runtime report is allowed to be partial, awkward, or temporarily broken; the replacement `open-world-streaming` diagnostics contract is the truth source for Phase 11A and later steering.
+- Bounded static materialization concurrency fixed the first settlement blocker but not the stutter blocker. A 6-wide all-domain radius-1 run settled 45 of 45 commits in about 60.7s, but still recorded 223 long tasks, a max long task around 515 ms, and a late repeated 80 ms long-task plateau.
+- Routing object visual atlas packing through the injected worker-backed `TexturePacker` did not materially improve the long-task profile. It also exposed a direct-model gap: the Phase 7 page-build protocol reserves one page before dispatch, while object visual packing discovers page count and layout during packing. Do not force object domains into that protocol shape without redesigning the page-build contract.
+- Replacement source resolution now reuses `planStaticDemand(...).sourceRequests` through a run-local coalescing resolver cache instead of making each static domain resolve the same landblock independently. This preserves the direct demand contract and reuses the existing source fanout transform without importing `StaticCoordinator` scheduling.
+- Coalesced source resolution materially improved settlement: the all-domain radius-1 harness settled 45 of 45 commits in about 24.2s. Native timing dropped total static task duration from about 279.8s to about 121.3s in the compared diagnostic runs.
+- The same coalesced-source harness still failed the stutter acceptance: it recorded 204 long tasks, max long task around 822 ms, max frame delta around 900 ms, and a late repeated 80-96 ms long-task plateau. Phase 11A remains incomplete.
+- Lowering static materialization concurrency to 1 kept all-domain settlement inside the 60s gate at about 28.4s and improved long-task count from 204 to 150, with max long task around 609 ms and max frame delta around 651 ms. Keep this as a partial frame-budget improvement, not as Phase 11A completion.
+- Failed experiment: adding browser-task yields inside object texture identity/source-prep loops made the all-domain run worse, settling around 41.4s with 231 long tasks. The plateau is not solved by sprinkling task yields into those loops; do not repeat that patch without stronger attribution.
+- Added a direct raw host asset response boundary so static resolver workers can prepare host asset DTOs inside workers instead of always using the browser main-thread `PreparedAssetService` handler. This is a replacement-side worker/host adapter, not a legacy diagnostic shim.
+- Raw worker-side asset preparation kept all-domain settlement inside the 60s gate at about 30.5s and improved the worst observed long task from the coalesced/concurrency-1 run, but still recorded about 160 long tasks and a max frame delta around 568 ms. Phase 11A remains incomplete.
+- Failed experiment: transferring static bake input geometry buffers into bake workers did not improve the stutter profile. A run settled in about 31.7s but recorded 172 long tasks, max long task around 620 ms, and max frame delta around 663 ms. Some source geometry arrays are partial views, and even after safely skipping those transfers the result was worse; the experiment was reverted to avoid vestigial optimization code.
+- Domain isolation changed the attribution. Terrain-only radius-1 is effectively clean, settling in about 1.6s with one 57 ms long task. Terrain plus generated scenery settles in about 14.0s with 16 long tasks and intermittent spikes up to about 306 ms. Terrain plus env-cells settles in about 21.8s but records 77 long tasks, max long task around 884 ms, max frame delta around 930 ms, and a repeated 50-60 ms plateau.
+- Renderer diagnostics for the terrain plus env-cells run report about 1,991 static draw units, 1,243 static object baked direct draw calls, and small measured renderer handler time. This suggests the stutter is no longer only replacement materialization scheduling; steady-state renderer/browser/GPU work or WebGL command submission for dense env-cell static objects is now part of the Phase 11 blocker.
+- Current course correction: Phase 12 must not start until the plan distinguishes materialization long tasks from steady-state renderer/browser long tasks and either reduces the env-cell static-object draw surface or explicitly moves that work behind a frame-budgeted renderer strategy. This is not a diagnostics-shape problem; do not launder legacy diagnostic fields to make the run look green.
+
+### Phase 11B: Renderer And Browser Long-Task Attribution Resteer
+
+Deliverables:
+
+- Separate materialization long tasks from steady-state render/browser/GPU long tasks for terrain, generated scenery, env-cells, and all-domain radius-1 runs.
+- Add replacement-native or harness-local timing evidence that can identify whether repeated long tasks occur before static readiness, during commit application, or after the scene is fully settled.
+- Inspect env-cell static-object renderer paths and identify why dense env-cells produce thousands of direct draw calls in the replacement path.
+- Choose a concrete frame-budget strategy before Phase 12: reduce env-cell draw-call surface, batch/instance env-cell static objects, cull or defer dense env-cell layers, or explicitly add renderer scheduling work as a new phase.
+- Dry-run Phase 12 through Phase 13 after the renderer attribution and decide whether dynamic entity materialization can safely start.
+
+Acceptance criteria:
+
+- The plan records whether the remaining Phase 11A red metrics are materialization, commit application, renderer draw submission, browser rendering, GC, or unknown.
+- Terrain plus env-cells either passes the frame-budget gate or has a concrete renderer remediation phase inserted before runtime dynamics.
+- All-domain radius-1 still settles inside 60s after any attribution instrumentation.
+- Any new diagnostics remain replacement-native or harness-local; no legacy runtime snapshot field becomes the source of truth.
+- Phase 12 assumptions are updated with the renderer/frame-budget finding.
+
+Task checklist:
+
+- [x] Add or extract timing evidence that buckets long tasks as pre-ready, apply-time, or post-ready.
+- [x] Inspect env-cell renderer/static-object draw-call paths and identify durable adapter versus replacement-owned work.
+- [x] Compare terrain-only, terrain plus generated scenery, terrain plus env-cells, and all-domain runs using the same attribution.
+- [x] Decide whether to implement immediate env-cell draw-call reduction or insert a dedicated renderer remediation phase before Phase 12.
+- [x] Dry-run Phase 12 through Phase 13 against the renderer finding.
+- [x] Update Phase 12 assumptions.
+
+Decisions and course corrections:
+
+- Added harness-local long-task attribution buckets for `beforeStaticRequest`, `beforeStaticReady`, `crossingStaticReady`, and `afterStaticReady`, plus the latest static readiness timing. This is harness evidence, not a replacement diagnostics contract or legacy runtime snapshot shape.
+- Attribution matrix:
+  - Terrain-only radius-1 settled in about 1.5s and had one 59 ms long task before the static request started. Treat this as page/bootstrap noise, not replacement materialization.
+  - Terrain plus generated scenery settled in about 13.8s with 17 long tasks. Thirteen occurred before static readiness, three after readiness, and one before request. The max long task was about 276 ms.
+  - Terrain plus env-cells settled in about 13.4s with 6 long tasks. Five occurred before static readiness and one before request; none occurred after readiness. The max long task was about 562 ms.
+  - All-domain radius-1 settled in about 30.9s with 168 long tasks. 165 occurred before static readiness, two after readiness, and one before request. The repeated late 70-90 ms plateau is still pre-ready because readiness arrives near the end of the run.
+- Renderer inspection found env-cell static objects currently install as baked direct static-object draw units, producing about 1,243 static-object baked direct draw calls in the terrain plus env-cells run and about 1,851 in the all-domain run. That is real renderer debt, but Phase 11B attribution does not support treating steady-state renderer submission as the primary Phase 11 blocker.
+- Stage timing in the all-domain run points instead at pre-ready materialization pressure: texture placement totals about 8.3s across object/env-cell domains, bake waits about 10.0s, create-bake-resources about 2.3s, and create-texture-intents about 2.4s. Apply time totals only about 207 ms, with max apply under 35 ms.
+- Course correction: do not insert a renderer remediation phase before Phase 12 solely for env-cell draw-call count. Insert a materialization-pressure remediation phase first. Renderer draw-call reduction remains debt for Phase 13 benchmark review unless future attribution shows post-ready renderer long tasks dominate.
+- Dry-run Phase 12/13: runtime-authored dynamics would add dynamic visual resolution, texture placement, bake-resource assembly, worker responses, and renderer commits on top of the exact pre-ready pressure surface that is still red. Phase 12 remains blocked until the object/env-cell static materialization pressure is reduced or made frame-budget honest.
+- Phase 12 assumption update: dynamic entities may reuse the same object-visual transforms, but they cannot inherit the current object/env-cell texture-placement and bake-result message profile as-is. Runtime dynamics need either a lower-pressure placement/resource path or a scheduler that can prove main-thread long tasks stay bounded.
+
+### Phase 11C: Object Materialization Pressure Remediation
+
+Deliverables:
+
+- Attribute or reduce pre-ready object/env-cell materialization long tasks now shown by Phase 11B.
+- Add terrain substage diagnostics or otherwise explain terrain's long-duration tasks, since terrain currently reports task duration without stage breakdown.
+- Reduce main-thread pressure in object/env-cell texture placement, create-texture-intents, create-bake-resources, bake-result handling, or worker message boundaries.
+- Reconcile the Phase 7 page-build protocol/object atlas layout gap before relying on object texture placement for runtime dynamics.
+- Keep compatibility projections at the runtime/harness edge; do not fit replacement diagnostics to old static coordinator or texture-manager reports.
+
+Acceptance criteria:
+
+- All-domain radius-1 still settles inside 60s.
+- All-domain radius-1 no longer has the repeated pre-ready long-task plateau caused by object/env-cell materialization.
+- Terrain plus generated scenery and terrain plus env-cells remain green under the attribution harness.
+- Stage diagnostics explain the dominant pre-ready work well enough to guide Phase 12.
+- Phase 12 assumptions are updated after the materialization pressure remediation.
+
+Task checklist:
+
+- [x] Add terrain stage diagnostics or a documented reason terrain remains stage-less.
+- [x] Inspect object/env-cell texture placement and create-bake-resource loops for main-thread CPU bursts.
+- [x] Inspect worker response DTO sizes and structured-clone pressure for object/env-cell bake results.
+- [x] Reconcile or redesign the object atlas page-build protocol gap from Phase 7.
+- [x] Implement the smallest remediation that actually reduces pre-ready long tasks.
+- [x] Run terrain-only, terrain plus generated scenery, terrain plus env-cells, and all-domain attribution harnesses.
+- [x] Update Phase 12 assumptions.
+
+Decisions and course corrections:
+
+- Added terrain stage timings to replacement-native static task diagnostics. Terrain commits now report `resolve-source`, `create-texture-intents`, `texture-placement`, `create-bake-resources`, `bake`, and `assemble-commit` instead of appearing as opaque terrain task duration.
+- Terrain-only radius-1 with stage diagnostics remained clean: it settled in about 1.5s and recorded only one pre-request long task. Terrain stage timing showed the center landblock spends most time in source resolution, not terrain bake, texture placement, or apply.
+- All-domain radius-1 with terrain stages still settled inside 60s at about 31.1s, but remained red: 162 long tasks, 158 before static readiness, max long task about 537 ms, and the repeated pre-ready 70-90 ms plateau persisted.
+- Updated all-domain stage totals show terrain source resolution accounts for about 7.2s, while object/env-cell domains still dominate the actionable pre-ready pressure: texture placement about 8.4s, bake waits about 10.1s, create-bake-resources about 2.4s, and create-texture-intents about 2.4s.
+- Static bake result transfer and texture packing result transfer were already present at the worker-handler boundary. The missing-looking result transfer was not the gap.
+- Failed experiment: wiring texture packing source pixels as `transferInput` detached prepared asset cache buffers. Subsequent material texture preparations saw zero-length texture arrays, producing errors such as `Prepared texture 06003789 expected 1048576 rgba8 bytes, got 0`. This proves texture packing input pixels are currently borrowed from shared prepared-asset cache state, not owned job buffers. Do not transfer packing inputs unless the placement path first copies or re-owns source pixels, or the prepared-asset cache contract changes.
+- Follow-up experiment: copying prepared texture bytes into owned packing job sources and then transferring those source pixels avoided cache corruption, but did not reduce the red gate. Terrain plus generated scenery stayed roughly flat or slightly worse, and all-domain radius-1 still recorded about 162 long tasks with the same pre-ready plateau. The copy-plus-transfer path was removed rather than kept as vestigial optimization code.
+- Added object texture placement substages under replacement-native diagnostics: `texture-source-preparation`, `texture-packing`, and `texture-page-settlement`. These are diagnostic children of the existing `texture-placement` stage, so they are used for attribution rather than exclusive accounting.
+- Final all-domain radius-1 attribution with substage diagnostics still settled inside 60s at about 30.3s, but stayed red: 167 long tasks, 163 before static readiness, max long task about 570 ms, and max frame delta about 614 ms.
+- The final substage split shows object texture placement is not dominated by page settlement. Across all object/env-cell domains, `texture-source-preparation` totals about 3.9s, `texture-packing` about 4.3s, and `texture-page-settlement` about 4 ms. The worst object domain remains generated scenery, with about 1.6s in source preparation and about 2.5s in packing.
+- Current course correction: reducing structured-clone pressure for texture packing input requires an ownership redesign that avoids duplicating large source buffers on the main thread. Candidate directions are worker-local prepared texture access, a prepared-asset cache contract that can loan transferable buffers without corrupting later consumers, or moving source preparation into the same worker that packs. Phase 11C should pick one deliberately; do not smuggle it in as a hidden worker-pool optimization.
+- Reconciled the Phase 7 page-build/object atlas protocol gap with a replacement-native object visual atlas build boundary. Object atlas layout is a multi-page pack job whose pages are discovered by the packer; main-thread page settlement now consumes packed pages and creates replacement virtual pages after layout instead of pretending object pages are known before dispatch. This is a direct replacement contract, not a legacy page-build shim.
+- Removed the worker-backed object visual atlas builder experiment after measurement. It prepared texture sources inside the atlas worker through the existing prepared-asset service and lowered reported `texture-packing`, but increased reported `texture-source-preparation`; all-domain radius-1 regressed to about 34.3s with 181 long tasks, 177 before static readiness, max long task about 634 ms, and max frame delta about 675 ms. Keeping it would be vestigial optimization code.
+- Kept the direct object visual atlas boundary because it fixes the object/page-build model without requiring the failed worker hop. The direct-boundary run settled all-domain radius-1 in about 31.0s with 155 long tasks, 152 before static readiness, max long task about 529 ms, and max frame delta about 572 ms. That is a modest improvement from the previous substage run, but the repeated pre-ready plateau remains.
+- Direct-boundary stage totals: `resolve-source` about 7.2s, `texture-placement` about 8.2s, `bake` about 10.3s, `texture-source-preparation` about 3.9s, `texture-packing` about 4.3s, and `texture-page-settlement` about 3 ms. Apply remains small at about 203 ms total with max apply about 35 ms, and renderer upload summaries remain small. The remaining stutter is not explained by page settlement, texture commit apply, or measured renderer upload.
+- Course correction: Phase 11C reconciled the object atlas contract and found no placement-only micro-remediation that clears the gate. The next work must distinguish worker wait time from browser/render work while partially loaded dense static layers are already visible. Phase 12 remains blocked; insert a renderer/draw-surface frame-budget remediation before runtime dynamics.
+- Phase 11D completed the smallest effective remediation: dense static renderer publication is deferred until the static request has fully materialized. This removes the repeated pre-ready plateau while preserving direct object atlas contracts and native diagnostics. Phase 12 can proceed, but runtime dynamics must not assume progressive dense static renderer publication is already solved.
+
+### Phase 11D: Pre-Ready Draw Surface And Frame-Budget Resteer
+
+Deliverables:
+
+- Determine whether the repeated pre-ready long-task plateau is caused by partially loaded scene draw surface, browser/GPU presentation, worker result cadence, or remaining materialization CPU.
+- Compare all-domain runs with static commit application disabled, delayed, or reduced for dense object/env-cell surfaces to isolate renderer/browser work from worker materialization waits.
+- If renderer/browser draw surface is implicated, implement the smallest honest remediation: defer dense non-terrain static draw publication, batch/instance env-cell/static-object draw units, reduce direct draw-call surface, or add a frame-budgeted publication strategy.
+- Keep replacement diagnostics direct. Any harness convenience summary must read the native `open-world-streaming` diagnostics report instead of inventing legacy-shaped timing fields.
+- Dry-run Phase 12 through Phase 13 after this attribution and decide whether dynamic entities can start.
+
+Acceptance criteria:
+
+- All-domain radius-1 settles inside 60s.
+- The repeated pre-ready 70-90 ms long-task plateau is removed or attributed to a named browser/GPU limitation with a concrete remediation phase before Phase 12.
+- Terrain plus generated scenery and terrain plus env-cells remain green under the attribution harness.
+- Native diagnostics identify whether remaining long tasks are materialization, worker result delivery, commit publication, renderer/browser draw surface, or unknown.
+- Phase 12 assumptions are updated before dynamic materialization starts.
+
+Task checklist:
+
+- [x] Add a harness/runtime experiment toggle that can delay or suppress dense static commit publication without changing materialization work.
+- [x] Run all-domain radius-1 with normal publication and with delayed/suppressed dense object/env-cell publication.
+- [x] Compare native static task timings, long-task attribution, renderer frame telemetry, and renderer draw/upload summaries.
+- [x] Choose and implement the smallest draw-surface or publication-cadence remediation that reduces the pre-ready plateau.
+- [x] Re-run terrain-only, terrain plus generated scenery, terrain plus env-cells, and all-domain attribution harnesses.
+- [x] Update Phase 12 assumptions.
+
+Decisions and course corrections:
+
+- Added a replacement-owned static publication mode with three values: `normal`, `suppress-dense-renderer`, and `defer-dense-renderer-until-ready`. `suppress-dense-renderer` is harness attribution only. `defer-dense-renderer-until-ready` is now the replacement default.
+- The attribution toggle leaves materialization, texture commits, scene-query publication, progress accounting, and native diagnostics intact. It only changes dense renderer layer publication for outdoor object and env-cell layers, so the comparison isolates draw-surface pressure without creating a dishonest legacy diagnostic shim.
+- All-domain normal publication reproduced the red profile: about 30.9s to readiness, 162 long tasks, 159 before static readiness, max long task about 592 ms, total long-task time about 12.1s, and renderer frame handler time about 3.4s.
+- All-domain `suppress-dense-renderer` settled in about 22.3s with 15 long tasks, 14 before static readiness, total long-task time about 2.5s, and renderer frame handler time about 362 ms. This proves dense renderer draw surface, not texture/page settlement or commit apply, caused the repeated pre-ready plateau.
+- Implemented `defer-dense-renderer-until-ready`: dense static renderer layers are queued while static materialization is active and flushed when all requested static tasks have settled. Terrain still publishes normally. Texture commits and scene-query state still apply as commits arrive.
+- All-domain deferred publication settled in about 22.4s with 19 long tasks, 16 before static readiness, total long-task time about 3.0s, and renderer frame handler time about 439 ms. The repeated 70-90 ms pre-ready plateau was removed. Two short post-ready long tasks remained around the dense renderer flush.
+- Focused defer-mode matrix:
+  - Terrain-only settled in about 1.5s with one pre-request long task and no pre-ready long tasks.
+  - Terrain plus generated scenery settled in about 19.8s with 13 long tasks and no repeated pre-ready draw-surface plateau.
+  - Terrain plus env-cells settled in about 19.8s with 7 long tasks and no repeated pre-ready draw-surface plateau.
+- Concession: this is a deliberate visibility tradeoff. Dense non-terrain static visuals now appear after static materialization rather than progressively during the request. It is cleaner than stuttering while partially loaded dense layers render, but Phase 13 should revisit progressive publication with batching/instancing or a real renderer frame budget.
+- Phase 12 assumption update: runtime-authored dynamics may start after this phase, but dynamic renderer publication must avoid recreating the old problem. Dynamic visuals should publish through an explicit frame-budgeted or low-density path, not by adding unbounded dense draw surface while materialization is still active.
 
 ### Phase 12: Runtime-Authored Dynamic Entities
 
@@ -830,7 +1040,8 @@ Deliverables:
 - Review source-tree policy violations.
 - Review whether replacement-native diagnostics are enough for debugging streaming failures without legacy compatibility crutches.
 - Review whether every surviving consumer has a migration path to direct replacement contracts before browser cutover.
-- Dry-run Phase 14 through the next steering phase and specifically decide whether to migrate, break, or delete each legacy-shaped consumer before adding more shims.
+- Dry-run Phase 14 through the next steering phase and specifically decide whether to migrate direct, break temporarily, or delete each legacy-shaped consumer before adding more shims.
+- Convert any diagnostics/harness consumer discovered during the dry run to direct replacement contracts unless it is explicitly named as a short-lived legacy-edge shim.
 
 Acceptance criteria:
 
@@ -847,6 +1058,8 @@ Task checklist:
 - [ ] Run benchmark matrix.
 - [ ] Capture and compare long task, frame gap, resolver, placement, bake, commit, and renderer metrics.
 - [ ] Review diagnostics output.
+- [ ] Review whether diagnostics are steering the replacement model or merely preserving old report shapes; delete or edge-isolate the latter.
+- [ ] Dry-run the remaining phases up to Phase 16 and classify every touched consumer as direct migration, legacy-edge shim, deletion, or durable adapter before adding compatibility code.
 - [ ] Audit compatibility shims and move/delete anything that pressures replacement internals toward legacy shapes.
 - [ ] For each remaining shim, choose direct consumer migration or explicit Phase 16 deletion.
 - [ ] For every surviving browser, harness, UI, diagnostics, and test consumer, choose one path: migrate to direct replacement contract, leave as named legacy-edge shim, or delete.
@@ -865,6 +1078,7 @@ Deliverables:
 - Switch `createBrowserRuntime(...)` to the replacement composition.
 - Keep the harness switch only if needed for one short verification window.
 - Remove obsolete UI assumptions about legacy static coordinator diagnostics and migrate surviving panels to replacement-native diagnostics.
+- Prefer temporary broken or partial legacy diagnostic reports over backfilling old fields from replacement data after cutover.
 
 Acceptance criteria:
 
@@ -880,6 +1094,7 @@ Task checklist:
 - [ ] Switch runtime composition.
 - [ ] Migrate diagnostics panels and overview snapshots to replacement-native contracts.
 - [ ] Delete or isolate any legacy-shaped UI/harness projection that is not needed after the cutover window.
+- [ ] Break or delete legacy-shaped diagnostics consumers that do not justify a named shim.
 - [ ] Replace architecture-preserving diagnostic tests with tests over replacement-native contracts, or delete them if they only validate legacy projection completeness.
 - [ ] Update browser harness expectations.
 - [ ] Run app checks.
@@ -1020,6 +1235,7 @@ Mitigation:
 - Require each shim to record its consumer, deletion trigger, and cleanup phase.
 - Delete or rewrite tests that lock in shim-only field names, legacy timing assumptions, or legacy diagnostic categories.
 - Accept temporary legacy-edge breakage or incomplete reports when the alternative would make replacement diagnostics dishonest.
+- Apply the same rule to diagnostics and benchmark tooling: migrate direct contracts first, shim legacy only at the edge, and never use legacy report parity as the replacement design target.
 
 ### Risk: Renderer APIs Force Synchronous Main-Thread Bursts
 

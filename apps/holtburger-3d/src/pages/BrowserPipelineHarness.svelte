@@ -20,6 +20,7 @@
 	import type { RendererFrameTelemetry } from "../lib/renderer/types";
 	import type { StaticSceneSelectionKey } from "../lib/runtime/scene-query/contracts";
 	import type { RuntimeDiagnosticsReport } from "../lib/runtime/diagnostics";
+	import type { OpenWorldStreamingStaticPublicationMode } from "../lib/systems/open-world-streaming/composition/open-world-streaming-controller";
 	import {
 		createFreeCameraFrameStateCamera,
 		createFreeCameraState,
@@ -86,6 +87,8 @@
 		readonly harnessFrameDiagnostics: HarnessFrameDiagnostics;
 		/** Runtime pipeline selected by the harness URL. */
 		readonly runtimePipeline: BrowserRuntimePipelineMode;
+		/** Static renderer publication policy selected by the harness URL. */
+		readonly staticPublicationMode: OpenWorldStreamingStaticPublicationMode;
 	};
 
 	type HarnessFrameDiagnostics = {
@@ -93,6 +96,8 @@
 		readonly startedAtMs: number;
 		/** Elapsed browser time covered by this diagnostic snapshot. */
 		readonly elapsedMs: number;
+		/** Harness-observed lifecycle timing for the latest static scene request. */
+		readonly staticReadiness: StaticReadinessTimeline;
 		/** Main-thread requestAnimationFrame loop that drives ClientRuntime.tickFrame. */
 		readonly runtimeTick: HarnessLoopDiagnostics;
 		/** Renderer-owned requestAnimationFrame telemetry emitted by the WebGL renderer. */
@@ -122,8 +127,22 @@
 		readonly count: number;
 		readonly maxDurationMs: number;
 		readonly totalDurationMs: number;
+		readonly attribution: HarnessLongTaskAttributionDiagnostics;
 		readonly recentEntries: readonly HarnessSlowEvent[];
 		readonly supported: boolean;
+	};
+
+	type HarnessLongTaskAttributionDiagnostics = {
+		readonly beforeStaticRequest: HarnessLongTaskBucketDiagnostics;
+		readonly beforeStaticReady: HarnessLongTaskBucketDiagnostics;
+		readonly crossingStaticReady: HarnessLongTaskBucketDiagnostics;
+		readonly afterStaticReady: HarnessLongTaskBucketDiagnostics;
+	};
+
+	type HarnessLongTaskBucketDiagnostics = {
+		count: number;
+		maxDurationMs: number;
+		totalDurationMs: number;
 	};
 
 	type HarnessSlowEvent = {
@@ -137,6 +156,12 @@
 			__HOLTBURGER_3D_HARNESS__?: BrowserPipelineHarnessApi;
 		};
 
+	type StaticReadinessTimeline = {
+		lastReadyAtMs: number | null;
+		lastRequestDurationMs: number | null;
+		lastRequestStartedAtMs: number | null;
+	};
+
 	const RECENT_SLOW_EVENT_LIMIT = 40;
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
@@ -146,7 +171,14 @@
 	let longTaskObserver: PerformanceObserver | null = null;
 	let statusText = $state("starting");
 	let runtimePipeline: BrowserRuntimePipelineMode = "legacy";
+	let staticPublicationMode: OpenWorldStreamingStaticPublicationMode =
+		"defer-dense-renderer-until-ready";
 	const frameDiagnostics = createMutableHarnessFrameDiagnostics();
+	const staticReadinessTimeline: StaticReadinessTimeline = {
+		lastReadyAtMs: null,
+		lastRequestDurationMs: null,
+		lastRequestStartedAtMs: null,
+	};
 
 	onMount(() => {
 		if (!canvasElement) {
@@ -158,7 +190,13 @@
 			runtimePipeline = parseBrowserRuntimePipelineMode(
 				new URLSearchParams(window.location.search).get("runtime-pipeline"),
 			);
-			runtime = createBrowserRuntime(canvasElement, { runtimePipeline });
+			staticPublicationMode = parseStaticPublicationMode(
+				new URLSearchParams(window.location.search).get("static-publication"),
+			);
+			runtime = createBrowserRuntime(canvasElement, {
+				runtimePipeline,
+				staticPublicationMode,
+			});
 			runtime.updateCameraState(
 				createFreeCameraFrameStateCamera(createFreeCameraState()),
 			);
@@ -260,6 +298,24 @@
 		return parseUnsignedHexId(value, "landblock");
 	}
 
+	function parseStaticPublicationMode(
+		value: string | null,
+	): OpenWorldStreamingStaticPublicationMode {
+		if (value === null || value.length === 0) {
+			return "defer-dense-renderer-until-ready";
+		}
+		if (
+			value === "normal" ||
+			value === "suppress-dense-renderer" ||
+			value === "defer-dense-renderer-until-ready"
+		) {
+			return value;
+		}
+		throw new Error(
+			`Unsupported static publication mode "${value}". Expected normal, suppress-dense-renderer, or defer-dense-renderer-until-ready.`,
+		);
+	}
+
 	function parseUnsignedHexId(value: number | string, label: string): number {
 		if (typeof value === "number") {
 			if (!Number.isInteger(value)) {
@@ -321,6 +377,7 @@
 		const pollMs = options.pollMs ?? DEFAULT_WAIT_POLL_MS;
 		const timeoutMs = options.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS;
 		const startedAt = performance.now();
+		recordStaticSceneRequestStarted(startedAt);
 
 		return new Promise((resolve, reject) => {
 			const poll = () => {
@@ -329,6 +386,7 @@
 					const diagnostics = requireRuntime().createDiagnosticsReport();
 					statusText = createStatusText(overview);
 					if (staticSceneIsReady(overview, diagnostics)) {
+						recordStaticSceneReady(performance.now());
 						resolve(overview);
 						return;
 					}
@@ -347,6 +405,20 @@
 			};
 			poll();
 		});
+	}
+
+	function recordStaticSceneRequestStarted(atMs: number): void {
+		staticReadinessTimeline.lastRequestStartedAtMs = atMs;
+		staticReadinessTimeline.lastReadyAtMs = null;
+		staticReadinessTimeline.lastRequestDurationMs = null;
+	}
+
+	function recordStaticSceneReady(atMs: number): void {
+		staticReadinessTimeline.lastReadyAtMs = atMs;
+		staticReadinessTimeline.lastRequestDurationMs =
+			staticReadinessTimeline.lastRequestStartedAtMs === null
+				? null
+				: atMs - staticReadinessTimeline.lastRequestStartedAtMs;
 	}
 
 	function staticSceneIsReady(
@@ -406,6 +478,7 @@
 			...requireRuntime().createDiagnosticsReport(),
 			harnessFrameDiagnostics: createHarnessFrameDiagnosticsSnapshot(),
 			runtimePipeline,
+			staticPublicationMode,
 		};
 	}
 
@@ -413,6 +486,7 @@
 		const startedAtMs = performance.now();
 		return {
 			longTasks: {
+				attribution: createMutableLongTaskAttributionDiagnostics(),
 				count: 0,
 				maxDurationMs: 0,
 				recentEntries: [] as HarnessSlowEvent[],
@@ -422,6 +496,23 @@
 			rendererFrame: createMutableHarnessLoopDiagnostics(),
 			runtimeTick: createMutableHarnessLoopDiagnostics(),
 			startedAtMs,
+		};
+	}
+
+	function createMutableLongTaskAttributionDiagnostics(): HarnessLongTaskAttributionDiagnostics {
+		return {
+			afterStaticReady: createMutableLongTaskBucketDiagnostics(),
+			beforeStaticReady: createMutableLongTaskBucketDiagnostics(),
+			beforeStaticRequest: createMutableLongTaskBucketDiagnostics(),
+			crossingStaticReady: createMutableLongTaskBucketDiagnostics(),
+		};
+	}
+
+	function createMutableLongTaskBucketDiagnostics(): HarnessLongTaskBucketDiagnostics {
+		return {
+			count: 0,
+			maxDurationMs: 0,
+			totalDurationMs: 0,
 		};
 	}
 
@@ -546,11 +637,58 @@
 			entry.duration,
 		);
 		diagnostics.totalDurationMs += entry.duration;
+		recordLongTaskAttribution(entry.startTime, entry.duration);
 		appendSlowEvent(diagnostics.recentEntries, {
 			atMs: entry.startTime,
 			durationMs: entry.duration,
 			kind: entry.name || "longtask",
 		});
+	}
+
+	function recordLongTaskAttribution(atMs: number, durationMs: number): void {
+		const startedAtMs = staticReadinessTimeline.lastRequestStartedAtMs;
+		const readyAtMs = staticReadinessTimeline.lastReadyAtMs;
+		if (startedAtMs === null || atMs < startedAtMs) {
+			recordLongTaskBucket(
+				frameDiagnostics.longTasks.attribution.beforeStaticRequest,
+				durationMs,
+			);
+			return;
+		}
+		if (readyAtMs === null) {
+			recordLongTaskBucket(
+				frameDiagnostics.longTasks.attribution.beforeStaticReady,
+				durationMs,
+			);
+			return;
+		}
+		if (atMs < readyAtMs && atMs + durationMs > readyAtMs) {
+			recordLongTaskBucket(
+				frameDiagnostics.longTasks.attribution.crossingStaticReady,
+				durationMs,
+			);
+			return;
+		}
+		if (atMs >= readyAtMs) {
+			recordLongTaskBucket(
+				frameDiagnostics.longTasks.attribution.afterStaticReady,
+				durationMs,
+			);
+			return;
+		}
+		recordLongTaskBucket(
+			frameDiagnostics.longTasks.attribution.beforeStaticReady,
+			durationMs,
+		);
+	}
+
+	function recordLongTaskBucket(
+		bucket: HarnessLongTaskBucketDiagnostics,
+		durationMs: number,
+	): void {
+		bucket.count += 1;
+		bucket.maxDurationMs = Math.max(bucket.maxDurationMs, durationMs);
+		bucket.totalDurationMs += durationMs;
 	}
 
 	function appendSlowEvent(
@@ -567,14 +705,31 @@
 		const nowMs = performance.now();
 		return {
 			elapsedMs: nowMs - frameDiagnostics.startedAtMs,
-			longTasks: { ...frameDiagnostics.longTasks },
+			longTasks: {
+				...frameDiagnostics.longTasks,
+				attribution: createHarnessLongTaskAttributionSnapshot(
+					frameDiagnostics.longTasks.attribution,
+				),
+			},
 			rendererFrame: createHarnessLoopDiagnosticsSnapshot(
 				frameDiagnostics.rendererFrame,
 			),
 			runtimeTick: createHarnessLoopDiagnosticsSnapshot(
 				frameDiagnostics.runtimeTick,
 			),
+			staticReadiness: { ...staticReadinessTimeline },
 			startedAtMs: frameDiagnostics.startedAtMs,
+		};
+	}
+
+	function createHarnessLongTaskAttributionSnapshot(
+		attribution: HarnessLongTaskAttributionDiagnostics,
+	): HarnessLongTaskAttributionDiagnostics {
+		return {
+			afterStaticReady: { ...attribution.afterStaticReady },
+			beforeStaticReady: { ...attribution.beforeStaticReady },
+			beforeStaticRequest: { ...attribution.beforeStaticRequest },
+			crossingStaticReady: { ...attribution.crossingStaticReady },
 		};
 	}
 

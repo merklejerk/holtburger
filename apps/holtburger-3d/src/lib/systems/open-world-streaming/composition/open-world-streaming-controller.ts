@@ -458,7 +458,6 @@ export class OpenWorldStreamingController {
 					this.#envCellProgress.committed,
 				staleRejected: 0,
 			},
-			compatibilityShims: [],
 			frameBudget: {
 				yieldedPasses: this.#frameBudgetYieldedPasses,
 			},

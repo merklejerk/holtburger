@@ -3165,15 +3165,20 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Search `RuntimeDiagnosticsReport`, `compatibilityShims`, `staticOverview`, old static commit counters, and old texture manager/static coordinator diagnostic names.
-- [ ] Classify each hit.
-- [ ] Migrate surviving harness/UI reads to `OpenWorldStreamingDiagnosticsSnapshot`.
-- [ ] Delete tests that assert shim-only field names or old diagnostic parity.
-- [ ] Update this phase decisions with any temporary shim owner, blocked consumer, and deletion trigger.
+- [x] Search `RuntimeDiagnosticsReport`, `compatibilityShims`, `staticOverview`, old static commit counters, and old texture manager/static coordinator diagnostic names.
+- [x] Classify each hit.
+- [x] Migrate surviving harness/UI reads to `OpenWorldStreamingDiagnosticsSnapshot`.
+- [x] Delete tests that assert shim-only field names or old diagnostic parity.
+- [x] Update this phase decisions with any temporary shim owner, blocked consumer, and deletion trigger.
 
 Decisions and course corrections:
 
-- Pending.
+- Deleted `compatibilityShims` from `OpenWorldStreamingDiagnosticsSnapshot` and from `open-world-streaming-controller.ts`. It was always empty and lived inside the replacement diagnostics contract, which made shim bookkeeping look like replacement truth.
+- `RuntimeDiagnosticsReport` remains as durable diagnostics export plumbing. It wraps renderer diagnostics and the direct `OpenWorldStreamingDiagnosticsSnapshot`; it no longer carries `staticOverview`, old static commit counters, static coordinator snapshots, or texture manager mutation lanes.
+- `BrowserPipelineHarness.svelte` already used direct open-world diagnostics for static readiness. Phase 47 tightened it by removing the unused overview argument from `staticSceneIsReady(...)` and by populating live status text from `createStatusText(overview, diagnostics)` during polling.
+- Search results after cleanup: no `compatibilityShims`, `staticOverview`, old static commit counters, `StaticCoordinator`, or `TextureManager` references remain in `apps/holtburger-3d/src` or `apps/holtburger-3d/scripts`. Remaining `RuntimeDiagnosticsReport` references are the runtime API type, the runtime adapter implementation, and harness export typing.
+- No shim-only tests needed deletion in this phase; none were found asserting the removed `compatibilityShims` field or old diagnostic parity.
+- Verification: `npm run check`, `npm run lint`, focused `npm run test:ts -- --run src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts src/lib/browser/create-browser-runtime.test.ts`, and `npm run harness:browser -- --domains terrain --layer-distance 0 --timeout-ms 60000 --output /tmp/holtburger-phase47-terrain-r0.json`.
 
 ### Phase 48: Ownerless Residency And Page Reclamation Policy
 

@@ -116,7 +116,6 @@ export interface OpenWorldStreamingDiagnosticsSnapshot {
 	readonly frameBudget: {
 		readonly yieldedPasses: number;
 	};
-	readonly compatibilityShims: readonly OpenWorldStreamingShimDiagnostics[];
 }
 
 /** Replacement-native material and texture readiness diagnostics. */
@@ -289,13 +288,6 @@ interface OpenWorldStreamingStaticTaskTimingDiagnostics {
 }
 
 /** Deletion-targeted compatibility projection outside replacement internals. */
-interface OpenWorldStreamingShimDiagnostics {
-	readonly deletionTarget: string;
-	readonly kind: "compatibility-shim";
-	readonly owner: "browser-runtime-adapter" | "browser-harness" | "ui";
-	readonly reason: string;
-}
-
 /** Materialization substage timing owned by replacement diagnostics. */
 export interface OpenWorldStreamingStaticTaskStageTiming {
 	readonly durationMs: number;

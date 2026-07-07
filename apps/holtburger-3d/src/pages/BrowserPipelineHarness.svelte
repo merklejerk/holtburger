@@ -376,8 +376,8 @@
 				try {
 					const overview = requireRuntime().createOverviewSnapshot();
 					const diagnostics = requireRuntime().createDiagnosticsReport();
-					statusText = createStatusText(overview);
-					if (staticSceneIsReady(overview, diagnostics)) {
+					statusText = createStatusText(overview, diagnostics);
+					if (staticSceneIsReady(diagnostics)) {
 						recordStaticSceneReady(performance.now());
 						resolve(overview);
 						return;
@@ -413,11 +413,7 @@
 				: atMs - staticReadinessTimeline.lastRequestStartedAtMs;
 	}
 
-	function staticSceneIsReady(
-		overview: RuntimeOverviewSnapshot,
-		diagnostics: RuntimeDiagnosticsReport,
-	): boolean {
-		overview;
+	function staticSceneIsReady(diagnostics: RuntimeDiagnosticsReport): boolean {
 		const openWorld = findOpenWorldDiagnostics(diagnostics);
 		return (
 			openWorld !== null &&

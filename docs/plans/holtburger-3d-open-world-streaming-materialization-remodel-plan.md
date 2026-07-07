@@ -1,7 +1,7 @@
 # Holtburger 3D Open World Streaming Materialization Remodel Plan
 
 Date: 2026-07-06
-Status: executed.
+Status: executed; post-cutover triage active.
 
 ## Context And Boundaries
 
@@ -691,7 +691,7 @@ Decisions and course corrections:
 - Course correction: direct `StaticResolver.resolve(...)` cannot request `landblock-scene-lod-outdoor-layer` because that key is resolver-local and has no host route. The terrain runner now calls `StaticLandblockSceneLodSourceResolver.resolveSource(...)` and selects the terrain recipe from the fanout.
 - The open-world controller now maps scene interest to terrain owner demand, owns owner currentness, applies texture commits before terrain scene commits for this vertical slice, and publishes terrain into the renderer plus `StaticSceneQuery`.
 - The outer `ClientRuntime` adapter projects replacement terrain progress into legacy-shaped harness counters. This is a shim at the runtime boundary, not a replacement-internal diagnostics contract, and remains targeted for Phase 14/16 cutover cleanup.
-- Spicy bit: terrain currently emits purpose-scoped synthetic resident texture pages for the vertical slice. This avoids debug-flat terrain and exercises loose texture/scene commit application, but real page builds and pixel materialization still need Phase 9 review before more static domains lean on the pattern.
+- Spicy bit: the initial terrain vertical slice emitted purpose-scoped synthetic resident texture pages. This avoided debug-flat terrain and exercised loose texture/scene commit application, but real page builds and pixel materialization still needed Phase 9/18 follow-up before more static domains leaned on the pattern.
 - The synthetic terrain texture commit groups pages by terrain purpose rather than binding id. A browser harness run exposed that one page per binding exceeded the renderer's terrain page-role capacity; grouping by purpose matches the terrain material role model and keeps the temporary commit honest enough for Phase 8.
 - Verification: `npm run check`, focused `npm run test:ts -- src/lib/systems/open-world-streaming/composition/runtime-pipeline.test.ts src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts src/lib/systems/open-world-streaming/static-layers/terrain/terrain-artifact-runner.test.ts src/lib/systems/open-world-streaming/texture-residency/commits/texture-commit-applier.test.ts`, `npm run lint:ts`, `npm run lint:dead`, and `npm run format:check`.
 - Harness verification: `npm run harness:browser -- --runtime-pipeline open-world-streaming --domains terrain --layer-distance 0 --timeout-ms 60000` settled with renderer `error: null`, 1 terrain commit, 3 terrain draw units, max renderer delta about 41.6 ms, and no frame gaps over 50 ms or 100 ms.
@@ -1899,6 +1899,62 @@ Decisions and course corrections:
 - Final verification after Phase 16 hard cutover commit and Phase 17 documentation changes: `npm run check`, `npm run lint`, and full `npm run test:ts` passed from `apps/holtburger-3d`.
 - The stutter investigation worksheet is now marked as historical evidence and points at this plan as the implementation record.
 - Remaining debt: renderer internals still use the `legacy-render-pass` name for the current single-surface render mode. This is no longer exposed through runtime diagnostics and is not a materialization shim, but a future renderer terminology cleanup may reduce confusion.
+
+### Phase 18: Post-Cutover Issue Triage
+
+Deliverables:
+
+- Maintain a rolling triage queue for issues discovered after the hard cutover.
+- Investigate one active issue at a time from evidence before changing code.
+- Record each issue's root cause, fix, verification, commit, and any follow-up debt.
+- Keep triage decisions attached to this implementation record so context from the remodel remains available.
+
+Acceptance criteria:
+
+- Each active issue has a concrete symptom, reproduction path or evidence source, suspected owning system, and severity.
+- Each fix preserves the replacement model and does not restore retired orchestration, compatibility shims, or legacy-shaped diagnostics.
+- Each resolved issue records verification commands or harness evidence.
+- Deferred issues include the reason for deferral and the evidence that would make them active again.
+- Periodic steering notes distinguish root-cause fixes from polish, instrumentation, or policy debt.
+
+Triage rules:
+
+- Start from current code and measured behavior, not plan memory.
+- Prefer deleting, simplifying, or direct-contract fixes before adding new abstractions.
+- Temporary diagnostics are allowed during investigation, but must either be removed or promoted into replacement-native diagnostics.
+- Do not add compatibility projections to make an old shape look healthy.
+- One issue per commit unless multiple symptoms share the same proven root cause.
+- If an issue points at a larger design gap, pause and add a steering note before widening scope.
+
+Active issue:
+
+- None yet.
+
+Queue:
+
+- Vestigial reference cleanup: remove code-side references to the retired pipeline and update renderer/work-plan terminology so only historical docs mention the deleted architecture.
+
+Resolved:
+
+- Terrain rendered as flat color.
+  - Symptom: terrain material sampling was resident but visually constant.
+  - Evidence: `OpenWorldTerrainArtifactRunner` emitted synthetic purpose-scoped `1x1` pages with constant RGBA pixels for `terrain-color`, `terrain-detail`, and `terrain-mask`.
+  - Root cause: Phase 8's vertical-slice texture shim survived the hard cutover, so terrain used real material intents but discarded the real prepared texture pixels before baking/committing.
+  - Fix: removed terrain's synthetic texture-plan path and routed terrain through the same shared material texture placement/page-build path used by object-like visuals. Terrain now emits plural texture commits like the other static artifact runners and differs only by its placement intents and bake-facing string placement ids.
+  - Resteer: avoid domain-specific packer/settlement clones. If a future terrain bug requires texture placement changes, make the shared material placement primitive stricter rather than adding terrain-owned page-build logic.
+  - Verification: `npm run check`; `npm run lint`; full `npm run test:ts`; focused `npm run test:ts -- --run src/lib/systems/open-world-streaming/texture-residency/placement/material-texture-placement-plan.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/object-visual-texture-placement-plan.test.ts src/lib/systems/open-world-streaming/static-layers/terrain/terrain-artifact-runner.test.ts`; `npm run harness:browser -- --domains terrain --layer-distance 0 --timeout-ms 60000 --output /tmp/holtburger-terrain-real-texture-r0.json`.
+
+Deferred:
+
+- Texture page reclamation policy: ownerless resident pages still need measured memory-pressure policy before eager reclaim/repack is designed.
+- Texture residency byte estimates: page byte accounting remains non-canonical until page dimensions/formats are represented as authoritative residency facts.
+- Renderer readiness model: still needs a minimal contract for missing/pending bindings that reports loudly without hot-path noise.
+- Renderer terminology cleanup beyond materialization: any remaining renderer-local naming should be handled only when it improves current renderer concepts, not as historical cleanup theater.
+
+Steering notes:
+
+- Phase 18 is an operational triage phase over the replacement system. It must not reopen the old dual-pipeline migration or turn the executed remodel plan into an unbounded feature wishlist.
+- User steering: worker wall time alone is not a browser-stutter bug. Do not add broad budgeting for slow workers unless delivery, assimilation, queue starvation, stale output, or frame metrics prove a main-loop problem.
 
 ## Risks And Mitigations
 

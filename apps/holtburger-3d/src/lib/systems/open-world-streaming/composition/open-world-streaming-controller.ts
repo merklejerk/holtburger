@@ -911,14 +911,10 @@ export class OpenWorldStreamingController {
 		commit: OpenWorldTerrainLayerCommit,
 		anchorLandblockId: number,
 	): void {
-		if (commit.textureCommit) {
-			applyOpenWorldStreamingTextureCommit(
-				this.#renderer,
-				commit.textureCommit,
-				{
-					revision: this.#terrainProgress.committed + 1,
-				},
-			);
+		for (const textureCommit of commit.textureCommits) {
+			applyOpenWorldStreamingTextureCommit(this.#renderer, textureCommit, {
+				revision: this.#terrainProgress.committed + 1,
+			});
 		}
 		this.#staticSceneQuery.ingestTerrain(
 			commit.sourcePayload,
@@ -1090,6 +1086,7 @@ export class OpenWorldStreamingController {
 					yieldToFrameBudget: () => this.#yieldToFrameBudget(),
 				},
 				resolver: this.#sourceResolutionCache,
+				textureAtlasBuilder: this.#requireObjectVisualAtlasBuilder(),
 				textureClaims: this.#textureClaims,
 			});
 		}

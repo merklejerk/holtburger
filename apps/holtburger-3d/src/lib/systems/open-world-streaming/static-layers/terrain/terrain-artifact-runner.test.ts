@@ -15,6 +15,7 @@ import type {
 import { OpenWorldTextureClaimRegistry } from "../../texture-residency/claims/texture-claim-registry";
 import { OpenWorldTerrainArtifactRunner } from "./terrain-artifact-runner";
 import type { MaterializationOwnerId } from "../../owners/owner-id";
+import type { OpenWorldMaterialTextureAtlasBuilder } from "../../texture-residency/placement/object-visual-atlas-builder";
 
 describe("OpenWorldTerrainArtifactRunner", () => {
 	it("resolves and bakes terrain into a replacement terrain layer commit", async () => {
@@ -26,6 +27,7 @@ describe("OpenWorldTerrainArtifactRunner", () => {
 			baker,
 			frameBudget: createFixtureFrameBudget(),
 			resolver,
+			textureAtlasBuilder: createUnusedTextureAtlasBuilder(),
 			textureClaims: new OpenWorldTextureClaimRegistry(),
 		});
 
@@ -59,7 +61,7 @@ describe("OpenWorldTerrainArtifactRunner", () => {
 				kind: "terrain",
 				landblockId: 0xda55ffff,
 			},
-			textureCommit: null,
+			textureCommits: [],
 			textureReadiness: [{ bindingId: "terrain-binding:1", kind: "pending" }],
 		});
 		expect(commit.stageTimings.map((timing) => timing.stage)).toEqual([
@@ -217,6 +219,14 @@ function createUnusedAssetReader(): PreparedAssetReader {
 	return {
 		async requestPreparedAsset(): Promise<never> {
 			throw new Error("Fixture asset reader should not be used.");
+		},
+	};
+}
+
+function createUnusedTextureAtlasBuilder(): OpenWorldMaterialTextureAtlasBuilder {
+	return {
+		async buildAtlas(): Promise<never> {
+			throw new Error("Fixture texture atlas builder should not be used.");
 		},
 	};
 }

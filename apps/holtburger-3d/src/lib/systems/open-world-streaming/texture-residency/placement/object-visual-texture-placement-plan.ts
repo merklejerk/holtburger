@@ -10,7 +10,7 @@ import type { MaterializationOwnerId } from "../../owners/owner-id";
 import type { OpenWorldStreamingStaticTaskStageTiming } from "../../diagnostics/contracts";
 import { OpenWorldTextureClaimRegistry } from "../claims/texture-claim-registry";
 import type { OpenWorldTexturePageBuildInput } from "../page-build/protocol";
-import type { OpenWorldObjectVisualAtlasBuilder } from "./object-visual-atlas-builder";
+import type { OpenWorldObjectVisualAtlasBuilder } from "../atlas-build/object-visual-atlas-builder";
 import { reserveMaterialTexturePlacements } from "./material-texture-placement-plan";
 
 export interface OpenWorldObjectVisualTexturePlacementReservationOptions {

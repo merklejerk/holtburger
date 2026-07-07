@@ -23,7 +23,7 @@ import {
 	reserveMaterialTexturePlacements,
 } from "../../texture-residency/placement/material-texture-placement-plan";
 import type { OpenWorldTexturePageBuildInput } from "../../texture-residency/page-build/protocol";
-import type { OpenWorldMaterialTextureAtlasBuilder } from "../../texture-residency/placement/object-visual-atlas-builder";
+import type { OpenWorldMaterialTextureAtlasBuilder } from "../../texture-residency/atlas-build/object-visual-atlas-builder";
 import {
 	yieldToStaticMaterializationFrameBudget,
 	type OpenWorldStaticMaterializationFrameBudget,

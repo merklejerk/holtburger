@@ -16,7 +16,9 @@ import type {
 import type { OpenWorldObjectVisualAtlasWorkerGlobalPort } from "./object-visual-atlas-worker-protocol";
 
 export function installOpenWorldObjectVisualAtlasWorkerHandler(
-	createBuilder: (assetReader: PreparedAssetReader) => OpenWorldObjectVisualAtlasBuilder,
+	createBuilder: (
+		assetReader: PreparedAssetReader,
+	) => OpenWorldObjectVisualAtlasBuilder,
 	createAssetReader: (
 		context: WorkerExecuteContext<
 			never,
@@ -34,9 +36,9 @@ export function installOpenWorldObjectVisualAtlasWorkerHandler(
 		PreparedAssetServiceResponse
 	>({
 		execute: async (input, context) => ({
-			output: await createBuilder(createAssetReader(context)).planAtlasPlacement(
-				input,
-			),
+			output: await createBuilder(
+				createAssetReader(context),
+			).planAtlasPlacement(input),
 		}),
 		port,
 	});

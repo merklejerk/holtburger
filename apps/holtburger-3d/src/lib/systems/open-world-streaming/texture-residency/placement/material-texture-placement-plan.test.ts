@@ -16,7 +16,7 @@ import type {
 	OpenWorldMaterialTextureAtlasBuildInput,
 	OpenWorldMaterialTextureAtlasPlacementOutput,
 	OpenWorldMaterialTextureAtlasBuilder,
-} from "./object-visual-atlas-builder";
+} from "../atlas-build/object-visual-atlas-builder";
 import { reserveMaterialTexturePlacements } from "./material-texture-placement-plan";
 
 describe("reserveMaterialTexturePlacements", () => {

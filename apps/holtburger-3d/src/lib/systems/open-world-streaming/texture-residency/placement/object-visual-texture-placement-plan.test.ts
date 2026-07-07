@@ -18,7 +18,7 @@ import type {
 } from "../../../../textures/identity";
 import type { MaterializationOwnerId } from "../../owners/owner-id";
 import { OpenWorldTextureClaimRegistry } from "../claims/texture-claim-registry";
-import { DirectOpenWorldObjectVisualAtlasBuilder } from "./object-visual-atlas-builder";
+import { DirectOpenWorldObjectVisualAtlasBuilder } from "../atlas-build/object-visual-atlas-builder";
 import { reserveObjectVisualTexturePlacements } from "./object-visual-texture-placement-plan";
 
 describe("reserveObjectVisualTexturePlacements", () => {

@@ -10,9 +10,9 @@ import { createBrowserRuntimeHost } from "../host/runtime-host";
 import { createWebgl2Renderer } from "../renderer/webgl2/webgl2-renderer";
 import type { ClientRuntime } from "../runtime/client-runtime";
 import { createOpenWorldStreamingClientRuntime } from "../systems/open-world-streaming";
-import type { OpenWorldObjectVisualAtlasBuilder } from "../systems/open-world-streaming/texture-residency/placement/object-visual-atlas-builder";
-import { WorkerPoolOpenWorldObjectVisualAtlasBuilder } from "../systems/open-world-streaming/texture-residency/placement/object-visual-atlas-worker-client";
-import type { OpenWorldObjectVisualAtlasWorkerPort } from "../systems/open-world-streaming/texture-residency/placement/object-visual-atlas-worker-protocol";
+import type { OpenWorldObjectVisualAtlasBuilder } from "../systems/open-world-streaming/texture-residency/atlas-build/object-visual-atlas-builder";
+import { WorkerPoolOpenWorldObjectVisualAtlasBuilder } from "../systems/open-world-streaming/texture-residency/atlas-build/object-visual-atlas-worker-client";
+import type { OpenWorldObjectVisualAtlasWorkerPort } from "../systems/open-world-streaming/texture-residency/atlas-build/object-visual-atlas-worker-protocol";
 import type { OpenWorldTexturePageBuildWorkerPort } from "../systems/open-world-streaming/texture-residency/page-build/protocol";
 import {
 	WorkerPoolOpenWorldTexturePageBuilder,
@@ -250,7 +250,7 @@ export function createWorkerObjectVisualAtlasBuilder(
 function createObjectVisualAtlasBrowserWorker(): ObjectVisualAtlasBrowserWorker {
 	return new Worker(
 		new URL(
-			"../systems/open-world-streaming/texture-residency/placement/object-visual-atlas.worker.ts",
+			"../systems/open-world-streaming/texture-residency/atlas-build/object-visual-atlas.worker.ts",
 			import.meta.url,
 		),
 		{ type: "module" },

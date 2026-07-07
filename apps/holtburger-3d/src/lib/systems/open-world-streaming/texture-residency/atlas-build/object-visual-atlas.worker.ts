@@ -5,7 +5,8 @@ import { DirectOpenWorldObjectVisualAtlasBuilder } from "./object-visual-atlas-b
 import { installOpenWorldObjectVisualAtlasWorkerHandler } from "./object-visual-atlas-worker-handler";
 import type { OpenWorldObjectVisualAtlasWorkerGlobalPort } from "./object-visual-atlas-worker-protocol";
 
-const workerPort = self as unknown as OpenWorldObjectVisualAtlasWorkerGlobalPort;
+const workerPort =
+	self as unknown as OpenWorldObjectVisualAtlasWorkerGlobalPort;
 
 installOpenWorldObjectVisualAtlasWorkerHandler(
 	(assetReader) => new DirectOpenWorldObjectVisualAtlasBuilder({ assetReader }),

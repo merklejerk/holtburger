@@ -25,12 +25,12 @@ import type { OpenWorldTextureEntryId } from "../systems/open-world-streaming/te
 import type {
 	OpenWorldObjectVisualAtlasBuildInput,
 	OpenWorldObjectVisualAtlasPlacementOutput,
-} from "../systems/open-world-streaming/texture-residency/placement/object-visual-atlas-builder";
+} from "../systems/open-world-streaming/texture-residency/atlas-build/object-visual-atlas-builder";
 import type {
 	OpenWorldObjectVisualAtlasWorkerPort,
 	OpenWorldObjectVisualAtlasWorkerRequest,
 	OpenWorldObjectVisualAtlasWorkerResponse,
-} from "../systems/open-world-streaming/texture-residency/placement/object-visual-atlas-worker-protocol";
+} from "../systems/open-world-streaming/texture-residency/atlas-build/object-visual-atlas-worker-protocol";
 import {
 	createWorkerDynamicVisualBaker,
 	createWorkerDynamicVisualRecipeResolver,

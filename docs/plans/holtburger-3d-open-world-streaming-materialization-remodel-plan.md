@@ -3315,18 +3315,30 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Map the current `ingestStaticAuthoredPlacements(...)`, `#prepareEntity(...)`, `#commitRendererResources(...)`, and `#commitRendererInstances(...)` call graph against the worksheet's commit-ordering model before editing.
-- [ ] Add explicit static-authored dynamic prep records and terminal states in the open-world streaming runtime-entity system or a colocated static-authored dynamic submodule.
-- [ ] Replace per-entity full renderer publication with coalesced resource and instance commits for static-authored batches.
-- [ ] Add stale-token handling that records terminal `stale` instead of leaving readiness to infer dropped work.
-- [ ] Update diagnostics contracts and harness readiness to consume direct static-authored dynamic terminal counts.
-- [ ] Add focused tests for batch commit sizes, parent eviction cancellation, stale prep, runtime-authored parity, and readiness terminal accounting.
-- [ ] Rerun `dc58` terrain+generated-scenery and `dc58` all-domain radius-1 harnesses and record output paths.
-- [ ] Dry-run Phases 51-54 after implementation and steer their thresholds, cleanup targets, and verification commands before implementation starts.
+- [x] Map the current `ingestStaticAuthoredPlacements(...)`, `#prepareEntity(...)`, `#commitRendererResources(...)`, and `#commitRendererInstances(...)` call graph against the worksheet's commit-ordering model before editing.
+- [x] Add explicit static-authored dynamic prep records and terminal states in the open-world streaming runtime-entity system or a colocated static-authored dynamic submodule.
+- [x] Replace per-entity full renderer publication with coalesced resource and instance commits for static-authored batches.
+- [x] Add stale-token handling that records terminal `stale` instead of leaving readiness to infer dropped work.
+- [x] Update diagnostics contracts and harness readiness to consume direct static-authored dynamic terminal counts.
+- [x] Add focused tests for batch commit sizes, parent eviction cancellation, stale prep, runtime-authored parity, and readiness terminal accounting.
+- [x] Rerun `dc58` terrain+generated-scenery and `dc58` all-domain radius-1 harnesses and record output paths.
+- [x] Dry-run Phases 51-54 after implementation and steer their thresholds, cleanup targets, and verification commands before implementation starts.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 50 kept the static-authored dynamic closure inside `OpenWorldRuntimeEntitySystem` instead of creating a new parallel scheduler module. That was deliberate addition-through-subtraction: the existing system already owns runtime-authored and static-authored dynamic records, owner tokens, dynamic renderer commits, and dynamic animation ticks. Splitting a new module before moving texture work in Phase 51 would have added another coordination boundary without removing the current bottleneck.
+- Added direct prep records keyed by materialization owner token with states `queued`, `resolvingRecipe`, `reservingTextures`, `baking`, `waitingForTexturePages`, `ready`, `skipped`, `failed`, `stale`, and `missingRecipe`. Diagnostics now expose `runtimeEntities.prep.states` and `runtimeEntities.prep.staleCount`. The harness terminal count now includes stale prep, so owner eviction or replacement does not leave readiness waiting on work that correctly died.
+- Static-authored dynamic prep now runs as a parent batch. Each entity can still resolve and bake concurrently, but renderer publication happens once per parent batch after the batch settles. Runtime-authored prep still publishes immediately when its individual prep completes.
+- Dynamic resource commits now send deltas. Before Phase 50, `#commitRendererState(...)` re-sent every ready dynamic visual resource on each publication. After Phase 50, it sends only newly resident resources plus removed ids. The renderer already supports incremental dynamic resource commits, so this deletes broad republishing instead of preserving it behind a shim.
+- Static-authored animation instance commits are deferred while any static-authored prep record is nonterminal. This avoids publishing full dynamic instance snapshots every animation tick during static-authored loading. The batch settle commit publishes the final snapshot; normal ticks resume after prep is terminal.
+- Focused tests added coverage for bounded static-authored batch resource publication and for parent eviction staling in-flight prep without publishing a zombie dynamic visual. Existing runtime-authored dynamic behavior remains covered.
+- Harness evidence:
+  - `dc58` terrain+generated-scenery: `npm run harness:browser -- --landblock 0xdc58ffff --domains terrain,generated-scenery --layer-distance 1 --timeout-ms 180000 --output /tmp/holtburger-phase50-dc58-terrain-generated-r1-batched-instances.json`
+  - `dc58` all-domain: `npm run harness:browser -- --landblock 0xdc58ffff --layer-distance 1 --timeout-ms 180000 --output /tmp/holtburger-phase50-dc58-all-domain-r1-batched-instances.json`
+- Phase 49 to Phase 50 comparison:
+  - Terrain+generated-scenery dynamic instance commits dropped from 1426 to 20, dynamic resource commits from 180 to 8, and max resources per commit from 162 to 41. Strict ready time changed from 73.3s to 68.5s, long tasks from 889 to 832, and static apply from 32.7ms total / 12.3ms max to 22.9ms total / 9.9ms max.
+  - `dc58` all-domain dynamic instance commits dropped from 1504 to 19, dynamic resource commits from 234 to 8, and max resources per commit from 162 to 41. Strict ready time changed from 94.9s to 91.2s, long tasks from 873 to 844, and static apply from 109.0ms total / 22.5ms max to 98.7ms total / 19.3ms max.
+- Spicy bit: Phase 50 fixed the renderer commit storm, but it did not fix the long train of browser long tasks. That is expected and now better attributed. Remaining wall time and long tasks still track dynamic visual texture/page work: page diagnostics continue to show static-authored generated-scenery `texture-page-source-preparation` around 80-90ms and page task durations around 160-180ms in the all-domain run. Phase 51 should not reopen renderer commit batching; it should move the dynamic visual texture/source/page work to the worksheet's worker-owned/direct-contract shape.
 
 ### Phase 51: Dynamic Visual Texture Work Closure
 
@@ -3343,6 +3355,7 @@ Current code delta:
 - Static layer material coverage now uses the replacement material placement primitive, but static-authored dynamic visuals still enter texture work through `OpenWorldRuntimeEntitySystem.#prepareEntity(...)`.
 - `#prepareEntity(...)` calls `reserveObjectVisualTexturePlacements(...)` and `createDynamicVisualBakeSourceGeometry(...)` before dynamic baking, then schedules page builds afterward. That keeps expensive source preparation and layout-adjacent work close to runtime prep instead of making it a first-class worker-owned materialization transform.
 - Phase 49 page-build diagnostics show dynamic/static-authored object pages with repeated `texture-page-source-preparation` stages around 80-104ms for `dc58`, and `da55` generated-scenery page materialization/source-prep stages up to roughly 130-143ms. These page tasks are no longer hidden, but the dynamic visual path still does not share the same direct scheduling and readiness model as static material coverage.
+- Phase 50 reduced `dc58` all-domain dynamic renderer commits to 19 instance commits and 8 resource commits, but strict readiness still takes 91.2s and records 844 long tasks. That means the next phase should target dynamic visual source preparation, texture page source preparation, page materialization, and readiness ownership rather than adding another renderer commit throttle.
 
 Deliverables:
 
@@ -3362,7 +3375,7 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Map dynamic visual texture preparation against the static material placement worker split and delete duplicate or weaker helper paths where possible.
+- [ ] Map dynamic visual texture preparation against the static material placement worker split and delete duplicate or weaker helper paths where possible. Start with `OpenWorldRuntimeEntitySystem.#prepareEntity(...)`, `createDynamicVisualBakeSourceGeometry(...)`, `reserveObjectVisualTexturePlacements(...)`, and the object visual page-build task stream.
 - [ ] Move dynamic source-geometry preparation behind the chosen worker-owned transform boundary.
 - [ ] Ensure texture placement reservation returns direct terminal facts for dynamic visual owners.
 - [ ] Ensure dynamic page build scheduling reports page source preparation, materialization, upload readiness, and stale cancellation directly.

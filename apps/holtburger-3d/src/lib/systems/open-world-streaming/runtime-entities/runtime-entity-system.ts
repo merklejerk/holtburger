@@ -61,10 +61,40 @@ export interface OpenWorldRuntimeEntityTexturePageBuildRequest {
 }
 
 interface DynamicPrepRequest {
+	readonly authoring: "runtime-authored" | "static-authored";
 	readonly entityId: DynamicEntityId;
 	readonly ownerId: MaterializationOwnerId;
 	readonly token: MaterializationOwnerToken;
 }
+
+type DynamicPrepState =
+	| "baking"
+	| "failed"
+	| "missingRecipe"
+	| "queued"
+	| "ready"
+	| "reservingTextures"
+	| "resolvingRecipe"
+	| "skipped"
+	| "stale"
+	| "waitingForTexturePages";
+
+interface DynamicPrepRecord {
+	readonly authoring: DynamicPrepRequest["authoring"];
+	readonly entityId: DynamicEntityId;
+	readonly ownerId: MaterializationOwnerId;
+	readonly state: DynamicPrepState;
+	readonly startedAtMs: number;
+	readonly terminalAtMs: number | null;
+	readonly token: MaterializationOwnerToken;
+}
+
+type DynamicPrepResult =
+	| "failed"
+	| "missingRecipe"
+	| "ready"
+	| "skipped"
+	| "stale";
 
 export interface OpenWorldRuntimeEntityDiagnosticsSnapshot {
 	readonly animation: {
@@ -84,6 +114,8 @@ export interface OpenWorldRuntimeEntityDiagnosticsSnapshot {
 		readonly failed: number;
 		readonly missingRecipeCount: number;
 		readonly recipeResolvedCount: number;
+		readonly staleCount: number;
+		readonly states: Record<DynamicPrepState, number>;
 		readonly skippedVisualCount: number;
 		readonly started: number;
 		readonly recentFailures: readonly OpenWorldRuntimeEntityPrepFailure[];
@@ -133,6 +165,11 @@ export class OpenWorldRuntimeEntitySystem {
 	#prepStartedCount = 0;
 	#recipeResolvedCount = 0;
 	#skippedVisualCount = 0;
+	#stalePrepCount = 0;
+	readonly #prepRecordsByOwnerId = new Map<
+		MaterializationOwnerId,
+		DynamicPrepRecord
+	>();
 	readonly #recentCatchUpTruncations: DynamicAnimationCatchUpTruncation[] = [];
 	readonly #recentPrepFailures: OpenWorldRuntimeEntityPrepFailure[] = [];
 
@@ -157,7 +194,16 @@ export class OpenWorldRuntimeEntitySystem {
 		const entityId = this.#controller.createRuntimeSpawn(request);
 		const owner = createRuntimeEntityMaterializationOwner(entityId);
 		const token = this.#owners.replace(owner);
-		this.#prepareEntity({ entityId, ownerId: owner.id, token });
+		this.#prepareEntity({
+			authoring: "runtime-authored",
+			entityId,
+			ownerId: owner.id,
+			token,
+		}).then((result) => {
+			if (result !== "stale") {
+				this.#commitRendererState(0);
+			}
+		});
 		this.#commitRendererState(0);
 		return entityId;
 	}
@@ -170,6 +216,7 @@ export class OpenWorldRuntimeEntitySystem {
 		const owner = createRuntimeEntityMaterializationOwner(entityId);
 		this.#owners.evict(owner.id);
 		this.#textureClaims.releaseTextureOwner(owner.id);
+		this.#prepRecordsByOwnerId.delete(owner.id);
 		this.#commitRendererState(0);
 		return true;
 	}
@@ -195,6 +242,7 @@ export class OpenWorldRuntimeEntitySystem {
 	}): void {
 		this.removeStaticAuthoredChildrenForParent(input.parentOwnerId);
 		const entityIds = this.#controller.ingestStaticPlacements(input.placements);
+		const requests: DynamicPrepRequest[] = [];
 		for (const entityId of entityIds) {
 			const owner = createStaticAuthoredDynamicMaterializationOwner({
 				childId: entityId,
@@ -202,9 +250,16 @@ export class OpenWorldRuntimeEntitySystem {
 			});
 			const token = this.#owners.replace(owner);
 			this.#addStaticChildOwner(input.parentOwnerId, owner.id);
-			this.#prepareEntity({ entityId, ownerId: owner.id, token });
+			requests.push({
+				authoring: "static-authored",
+				entityId,
+				ownerId: owner.id,
+				token,
+			});
 		}
-		this.#commitRendererState(0);
+		if (requests.length > 0) {
+			this.#prepareStaticAuthoredBatch(requests);
+		}
 	}
 
 	removeStaticAuthoredChildrenForParent(
@@ -219,14 +274,21 @@ export class OpenWorldRuntimeEntitySystem {
 			});
 			this.#owners.evict(owner.id);
 			this.#textureClaims.releaseTextureOwner(owner.id);
+			this.#prepRecordsByOwnerId.delete(owner.id);
 		}
 		this.#staticChildOwnerIdsByParentId.delete(parentOwnerId);
-		this.#commitRendererState(0);
+		if (removedEntityIds.length > 0) {
+			this.#commitRendererState(0);
+		}
 	}
 
 	tick(frameTimeSeconds: number): void {
 		this.#lastFrameTimeSeconds = frameTimeSeconds;
 		if (this.#controller.tick(frameTimeSeconds)) {
+			// Static-authored prep publishes the final batch snapshot; per-frame snapshots during prep recreate the old commit storm.
+			if (this.#hasInFlightStaticAuthoredPrep()) {
+				return;
+			}
 			this.#commitRendererInstances(frameTimeSeconds);
 		}
 	}
@@ -255,15 +317,19 @@ export class OpenWorldRuntimeEntitySystem {
 				missingRecipeCount: this.#missingRecipeCount,
 				recipeResolvedCount: this.#recipeResolvedCount,
 				recentFailures: [...this.#recentPrepFailures],
+				staleCount: this.#stalePrepCount,
+				states: this.#createPrepStateCounts(),
 				skippedVisualCount: this.#skippedVisualCount,
 				started: this.#prepStartedCount,
 			},
 		};
 	}
 
-	async #prepareEntity(request: DynamicPrepRequest): Promise<void> {
+	async #prepareEntity(request: DynamicPrepRequest): Promise<DynamicPrepResult> {
 		this.#prepStartedCount += 1;
+		this.#setPrepState(request, "queued");
 		try {
+			this.#setPrepState(request, "resolvingRecipe");
 			const recipeRequest =
 				this.#controller.createRuntimeVisualRecipeRequest(request.entityId) ??
 				this.#controller
@@ -274,19 +340,30 @@ export class OpenWorldRuntimeEntitySystem {
 					.find((candidate) => candidate.entityId === request.entityId);
 			if (!recipeRequest) {
 				this.#missingRecipeCount += 1;
-				return;
+				this.#setPrepState(request, "missingRecipe");
+				return "missingRecipe";
 			}
 			const recipe = await this.#requireRecipeResolver().resolveRecipe({
 				...recipeRequest,
 				assetReader: this.#assetReader,
 			});
 			if (!this.#isCurrent(request)) {
-				return;
+				this.#recordStalePrep(request);
+				return "stale";
 			}
 			this.#recipeResolvedCount += 1;
 			if (!this.#controller.applyResolvedDynamicRecipe(recipe)) {
-				return;
+				this.#recordPrepFailure({
+					entityId: request.entityId,
+					message: "Resolved recipe no longer applies to the dynamic entity.",
+					ownerId: request.ownerId,
+					phase: "prep",
+				});
+				this.#prepFailureCount += 1;
+				this.#setPrepState(request, "failed");
+				return "failed";
 			}
+			this.#setPrepState(request, "reservingTextures");
 			const texturePlanning = createDynamicVisualTexturePlanning(recipe);
 			const textureReservation = await reserveObjectVisualTexturePlacements({
 				atlasBuilder: this.#objectVisualAtlasBuilder,
@@ -296,14 +373,17 @@ export class OpenWorldRuntimeEntitySystem {
 				textureClaims: this.#textureClaims,
 			});
 			if (!this.#isCurrent(request)) {
-				return;
+				this.#recordStalePrep(request);
+				return "stale";
 			}
+			this.#setPrepState(request, "baking");
 			const sourceGeometry = await createDynamicVisualBakeSourceGeometry(
 				this.#assetReader,
 				[recipe],
 			);
 			if (!this.#isCurrent(request)) {
-				return;
+				this.#recordStalePrep(request);
+				return "stale";
 			}
 			const result = await this.#requireDynamicBaker().bake({
 				recipe,
@@ -313,11 +393,10 @@ export class OpenWorldRuntimeEntitySystem {
 				texturePlanning,
 			});
 			if (!this.#isCurrent(request)) {
-				return;
+				this.#recordStalePrep(request);
+				return "stale";
 			}
-			if (!this.#isCurrent(request)) {
-				return;
-			}
+			this.#setPrepState(request, "waitingForTexturePages");
 			this.#scheduleTexturePageBuilds({
 				isCurrent: () => this.#isCurrent(request),
 				ownerId: request.ownerId,
@@ -328,9 +407,13 @@ export class OpenWorldRuntimeEntitySystem {
 			if (product?.kind === "baked") {
 				this.#bakeSuccessCount += 1;
 				this.#controller.applyBakedDynamicVisual(product.resource);
+				this.#setPrepState(request, "ready");
+				return "ready";
 			} else if (product?.kind === "skipped") {
 				this.#skippedVisualCount += 1;
 				this.#controller.skipDynamicVisual(product.entityId, product.reason);
+				this.#setPrepState(request, "skipped");
+				return "skipped";
 			} else {
 				this.#bakeFailureCount += 1;
 				this.#prepFailureCount += 1;
@@ -346,11 +429,13 @@ export class OpenWorldRuntimeEntitySystem {
 					kind: "invalid-recipe",
 					message: result.failures.map((failure) => failure.message).join("; "),
 				});
+				this.#setPrepState(request, "failed");
+				return "failed";
 			}
-			this.#commitRendererState(this.#lastFrameTimeSeconds);
 		} catch (error) {
 			if (!this.#isCurrent(request)) {
-				return;
+				this.#recordStalePrep(request);
+				return "stale";
 			}
 			this.#prepFailureCount += 1;
 			this.#recordPrepFailure({
@@ -363,6 +448,18 @@ export class OpenWorldRuntimeEntitySystem {
 				kind: "invalid-recipe",
 				message: error instanceof Error ? error.message : String(error),
 			});
+			this.#setPrepState(request, "failed");
+			return "failed";
+		}
+	}
+
+	async #prepareStaticAuthoredBatch(
+		requests: readonly DynamicPrepRequest[],
+	): Promise<void> {
+		const results = await Promise.all(
+			requests.map((request) => this.#prepareEntity(request)),
+		);
+		if (results.some((result) => result !== "stale")) {
 			this.#commitRendererState(this.#lastFrameTimeSeconds);
 		}
 	}
@@ -375,19 +472,27 @@ export class OpenWorldRuntimeEntitySystem {
 		const nextResourceIds = new Set(
 			resources.map((resource) => resource.resourceId),
 		);
+		const addedVisualResources = resources.filter(
+			(resource) => !this.#committedResourceIds.has(resource.resourceId),
+		);
 		const removedVisualResourceIds = [...this.#committedResourceIds].filter(
 			(resourceId) => !nextResourceIds.has(resourceId),
 		);
-		this.#renderer.commitDynamicResources({
-			addedVisualResources: resources,
-			removedVisualResourceIds,
-			revision: this.#nextRendererRevision(),
-		});
-		this.#dynamicResourceCommitCount += 1;
-		this.#maxResourcesPerCommit = Math.max(
-			this.#maxResourcesPerCommit,
-			resources.length,
-		);
+		if (
+			addedVisualResources.length > 0 ||
+			removedVisualResourceIds.length > 0
+		) {
+			this.#renderer.commitDynamicResources({
+				addedVisualResources,
+				removedVisualResourceIds,
+				revision: this.#nextRendererRevision(),
+			});
+			this.#dynamicResourceCommitCount += 1;
+			this.#maxResourcesPerCommit = Math.max(
+				this.#maxResourcesPerCommit,
+				addedVisualResources.length,
+			);
+		}
 		this.#committedResourceIds.clear();
 		for (const resourceId of nextResourceIds) {
 			this.#committedResourceIds.add(resourceId);
@@ -453,6 +558,51 @@ export class OpenWorldRuntimeEntitySystem {
 		return null;
 	}
 
+	#setPrepState(request: DynamicPrepRequest, state: DynamicPrepState): void {
+		const existing = this.#prepRecordsByOwnerId.get(request.ownerId);
+		if (
+			existing !== undefined &&
+			existing.token !== request.token &&
+			state !== "queued"
+		) {
+			return;
+		}
+		this.#prepRecordsByOwnerId.set(request.ownerId, {
+			authoring: request.authoring,
+			entityId: request.entityId,
+			ownerId: request.ownerId,
+			startedAtMs: existing?.startedAtMs ?? performance.now(),
+			state,
+			terminalAtMs: isTerminalPrepState(state) ? performance.now() : null,
+			token: request.token,
+		});
+	}
+
+	#recordStalePrep(request: DynamicPrepRequest): void {
+		this.#stalePrepCount += 1;
+		this.#setPrepState(request, "stale");
+	}
+
+	#createPrepStateCounts(): Record<DynamicPrepState, number> {
+		const counts = createEmptyPrepStateCounts();
+		for (const record of this.#prepRecordsByOwnerId.values()) {
+			counts[record.state] += 1;
+		}
+		return counts;
+	}
+
+	#hasInFlightStaticAuthoredPrep(): boolean {
+		for (const record of this.#prepRecordsByOwnerId.values()) {
+			if (
+				record.authoring === "static-authored" &&
+				!isTerminalPrepState(record.state)
+			) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	#isCurrent(request: DynamicPrepRequest): boolean {
 		return this.#owners.isCurrent({
 			ownerId: request.ownerId,
@@ -475,6 +625,31 @@ export class OpenWorldRuntimeEntitySystem {
 		this.#rendererRevision += 1;
 		return this.#rendererRevision;
 	}
+}
+
+function createEmptyPrepStateCounts(): Record<DynamicPrepState, number> {
+	return {
+		baking: 0,
+		failed: 0,
+		missingRecipe: 0,
+		queued: 0,
+		ready: 0,
+		reservingTextures: 0,
+		resolvingRecipe: 0,
+		skipped: 0,
+		stale: 0,
+		waitingForTexturePages: 0,
+	};
+}
+
+function isTerminalPrepState(state: DynamicPrepState): boolean {
+	return (
+		state === "failed" ||
+		state === "missingRecipe" ||
+		state === "ready" ||
+		state === "skipped" ||
+		state === "stale"
+	);
 }
 
 function pushRecent<T>(items: T[], item: T, limit: number): void {

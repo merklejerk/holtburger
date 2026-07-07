@@ -451,6 +451,7 @@
 			prep.bakeSuccessCount +
 			prep.failed +
 			prep.missingRecipeCount +
+			prep.staleCount +
 			prep.skippedVisualCount
 		);
 	}

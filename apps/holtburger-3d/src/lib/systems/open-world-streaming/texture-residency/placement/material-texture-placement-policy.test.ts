@@ -99,8 +99,6 @@ function createIntent(input: {
 		itemId: "item:fixture",
 		ownerIds: [],
 		pageClass: "page-class:fixture" as TexturePageClass,
-		placementBucketKey:
-			"legacy-placement-bucket:ignored" as TexturePlacementIntent["placementBucketKey"],
 		placementPolicy: input.policy,
 		purpose: input.purpose,
 		source: {

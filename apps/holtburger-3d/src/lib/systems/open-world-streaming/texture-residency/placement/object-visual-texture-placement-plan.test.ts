@@ -198,8 +198,6 @@ function createIntent(input: {
 		itemId: createTexturePlacementItemId(input.itemNumber),
 		ownerIds: [],
 		pageClass: pageClass("page-class:object-base"),
-		placementBucketKey:
-			"fixture-bucket:unused" as ObjectVisualTexturePlacementIntent["placementBucketKey"],
 		placementPolicy: staticDomainPolicy(),
 		purpose: "object-base-color",
 		source: {

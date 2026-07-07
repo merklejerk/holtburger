@@ -10,10 +10,6 @@ import {
 	type DynamicVisualMaterialPolicy,
 	type DynamicVisualRecipe,
 } from "./contracts";
-import {
-	createRuntimeAuthoredDynamicTexturePlacementBucketKey,
-	createStaticAuthoredDynamicTexturePlacementBucketKey,
-} from "../textures/placement";
 
 describe("dynamic visual contracts", () => {
 	it("keeps static-authored and runtime-authored recipes isomorphic at the visual boundary", () => {
@@ -27,26 +23,6 @@ describe("dynamic visual contracts", () => {
 			Object.keys(runtimeRecipe.visual).sort(),
 		);
 		expect(staticRecipe.visual).toBe(runtimeRecipe.visual);
-	});
-
-	it("uses dynamic-owned texture placement bucket identities", () => {
-		expect(
-			createStaticAuthoredDynamicTexturePlacementBucketKey({
-				domain: "outdoor-buildings",
-				ownerId: "outdoor-buildings:0xda55ffff",
-				purpose: "object-base-color",
-			}),
-		).toBe(
-			"texture-placement-bucket|outdoor-buildings|object-base-color|static-authored-dynamic:outdoor-buildings:0xda55ffff",
-		);
-		expect(
-			createRuntimeAuthoredDynamicTexturePlacementBucketKey({
-				entityId: "runtime-dynamic:1",
-				purpose: "object-base-color",
-			}),
-		).toBe(
-			"texture-placement-bucket|runtime-object-material|object-base-color|runtime-authored-dynamic:runtime-dynamic:1",
-		);
 	});
 
 	it("models visual bake output as baked resources or entity-local skips", () => {

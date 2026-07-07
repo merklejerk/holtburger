@@ -1063,8 +1063,8 @@ Deliverables:
 
 Acceptance criteria:
 
-- Replacement pipeline materially reduces max frame gap and long task profile.
-- Texture memory and page lifecycle behavior are understood.
+- Replacement pipeline materially reduces max frame gap and long task profile, or any blocking counterexample is routed into an immediate pre-cutover remediation phase.
+- Texture memory and page lifecycle behavior are understood, or diagnostic gaps are routed into an immediate pre-cutover remediation phase.
 - Any remaining legacy dependency is explicitly categorized as adapter, reusable transform, shim, or deletion target.
 - Any legacy-compatible shim is outside replacement internals and has a deletion target.
 - No shim is allowed to become the canonical contract for a surviving browser, harness, UI, or diagnostics consumer.
@@ -1074,17 +1074,74 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Run benchmark matrix.
-- [ ] Capture and compare long task, frame gap, resolver, placement, bake, commit, and renderer metrics.
-- [ ] Review diagnostics output.
-- [ ] Review whether diagnostics are steering the replacement model or merely preserving old report shapes; delete or edge-isolate the latter.
-- [ ] Dry-run the remaining phases up to Phase 16 and classify every touched consumer as direct migration, legacy-edge shim, deletion, or durable adapter before adding compatibility code.
-- [ ] Audit compatibility shims and move/delete anything that pressures replacement internals toward legacy shapes.
-- [ ] For each remaining shim, choose direct consumer migration or explicit Phase 16 deletion.
-- [ ] For every surviving browser, harness, UI, diagnostics, and test consumer, choose one path: migrate to direct replacement contract, leave as named legacy-edge shim, or delete.
-- [ ] Delete or quarantine diagnostics/report projections that only exist to keep legacy output shapes looking complete.
-- [ ] Dry-run Phase 14 against the current source tree.
-- [ ] Identify dependency/order changes, boundary leaks, shims, deletion targets, and test risks for browser runtime cutover.
+- [x] Run benchmark matrix.
+- [x] Capture and compare long task, frame gap, resolver, placement, bake, commit, and renderer metrics.
+- [x] Review diagnostics output.
+- [x] Review whether diagnostics are steering the replacement model or merely preserving old report shapes; delete or edge-isolate the latter.
+- [x] Dry-run the remaining phases up to Phase 16 and classify every touched consumer as direct migration, legacy-edge shim, deletion, or durable adapter before adding compatibility code.
+- [x] Audit compatibility shims and move/delete anything that pressures replacement internals toward legacy shapes.
+- [x] For each remaining shim, choose direct consumer migration or explicit Phase 16 deletion.
+- [x] For every surviving browser, harness, UI, diagnostics, and test consumer, choose one path: migrate to direct replacement contract, leave as named legacy-edge shim, or delete.
+- [x] Delete or quarantine diagnostics/report projections that only exist to keep legacy output shapes looking complete.
+- [x] Dry-run Phase 14 against the current source tree.
+- [x] Identify dependency/order changes, boundary leaks, shims, deletion targets, and test risks for browser runtime cutover.
+- [x] Update cleanup targets.
+
+Decisions and course corrections:
+
+- Phase 13 benchmark matrix:
+  - Replacement `dc58`, radius 1, all domains: ready in 16.2 s, 15 long tasks, 286 ms max long task, 2.1 s total long-task time, max renderer frame delta 302 ms, max renderer handler 32.7 ms, max runtime tick handler 3.4 ms. Native open-world diagnostics reported 207 current owners, 45 ready artifacts, 15 texture buckets, 469 texture claims, 162 active static-authored runtime entities, 97 non-renderable runtime entities, 45 applied scene commits, and no failed static tasks.
+  - Legacy `dc58`, radius 1, all domains: ready in 17.8 s, 161 long tasks, 741 ms max long task, 13.1 s total long-task time, max renderer frame delta 742 ms. The replacement path materially improves this stress case.
+  - Replacement `da55`, radius 1, all domains: ready in 22.7 s, 19 long tasks, 536 ms max long task, 3.0 s total long-task time, max renderer frame delta 551 ms, max renderer handler 38.5 ms, max runtime tick handler 4.8 ms. Native open-world diagnostics reported 89 current owners, 45 ready artifacts, 17 texture buckets, 772 texture claims, 44 active static-authored runtime entities, 4 non-renderable runtime entities, 45 applied scene commits, and no failed static tasks.
+  - Legacy `da55`, radius 1, all domains: ready in 15.8 s, 33 long tasks, 498 ms max long task, 4.7 s total long-task time, max renderer frame delta 514 ms. The replacement path reduces total long-task time but is not cleanly better on readiness or max gap for this landblock, so `da55` blocks cutover confidence.
+  - Replacement `da55`, terrain plus generated scenery: ready in 12.3 s, 15 long tasks, 287 ms max long task, 1.8 s total long-task time, 44 active static-authored runtime entities, and 4 non-renderable runtime entities. This focused run reproduces most remaining replacement long-task pressure without env-cells.
+  - Replacement `da55`, terrain plus env-cells: ready in 11.9 s, 6 long tasks, 596 ms max long task, 1.3 s total long-task time, and no runtime entities. Env-cells still have static materialization spikes, but generated scenery is the more immediate cutover blocker because it also activates dynamic publication and animation pressure.
+- Resteer: insert Phase 13A before browser runtime cutover. Phase 14 must not start until generated-scenery dynamic publication, animation catch-up, and native diagnostics are cleaned up enough that `da55` no longer depends on legacy-shaped reports or noisy console warnings to explain behavior.
+- The repeated `[holtburger-3d][dynamic-animation-hook-catchup-truncated]` warnings are not a legacy-diagnostics issue. They expose a real replacement behavior problem: static-authored dynamic entities can start animation publication late enough to dispatch or drop many crossed hook frames. Phase 13A should fix the animation/materialization start policy and aggregate this into replacement-native diagnostics instead of normal per-entity console spam.
+- Replacement texture diagnostics are directionally honest but not complete enough to claim memory behavior is understood. They expose bucket count, claim count, and in-flight page builds, but not retained page count, approximate bytes, reclaimed page count, or pressure by owner/domain. Phase 13A must add replacement-native texture residency memory diagnostics instead of projecting legacy `textureAtlas` snapshots into the replacement contract.
+- Harness readiness and summary output are still compatibility-pressure consumers. `BrowserPipelineHarness.svelte` still uses the outer legacy-shaped `RuntimeDiagnosticsReport.runtime` fields such as `pendingStaticCommitInstallCount`, `installedStaticDrawUnits`, and `sourceStaticDrawUnits`; `scripts/browser-pipeline-harness.mjs` still summarizes legacy domains such as `static-coordinator`, `static-commit-install`, and `texture-atlas`. These must migrate directly to `domains[].kind === "open-world-streaming"` for replacement runs, with any legacy report projection left as a harness-edge shim.
+- Consumer classification from the Phase 14 dry run:
+  - Direct migration: browser harness readiness, browser harness summary, debug/diagnostic UI that survives cutover, replacement benchmark assertions, static readiness reporting, texture residency reporting, runtime entity reporting, scene commit reporting, and replacement pipeline tests.
+  - Legacy-edge shim: the current outer `ClientRuntime`-shaped runtime report in `browser-runtime-adapter`, only while legacy browser display and harness comparison still exist. It may remain incomplete or awkward and must not become the canonical replacement diagnostics shape.
+  - Durable adapters: host asset access, static resolver workers, bake resource providers, renderer resource/instance commit boundaries, dynamic visual recipe transforms, and renderer query publication boundaries.
+  - Deletion targets: legacy static coordinator diagnostics, legacy static commit installer diagnostics, legacy texture atlas snapshot projections, legacy dynamic prep diagnostics, tests that assert legacy report completeness, and any bridge whose only consumer is the retired legacy runtime path.
+- The universal rule is now the default for the rest of the plan: migrate direct contracts first, shim legacy only at an edge, and prefer an incomplete legacy projection over dishonest replacement diagnostics. Diagnostics are not exempt.
+
+### Phase 13A: Dynamic Publication and Native Diagnostics Resteer
+
+Deliverables:
+
+- Rework static-authored generated-scenery dynamic materialization so newly materialized entities do not trigger unbounded animation hook catch-up during initial publication.
+- Decide and implement a replacement-native animation start policy for static-authored dynamic entities: publish at a truthful current pose without replaying stale hook history, or explicitly budget hook replay if gameplay semantics require it.
+- Add replacement-native runtime entity diagnostics for prep, bake, non-renderable outcomes, animation catch-up truncation, dynamic resource commits, dynamic instance commits, and static-authored child ownership.
+- Add replacement-native texture residency memory diagnostics: retained page count, approximate bytes or byte-estimate inputs, reclaimed page count, claim count by owner/domain where practical, and in-flight page builds.
+- Migrate open-world browser harness readiness and summary reporting to direct `open-world-streaming` diagnostics for replacement runs.
+- Leave legacy-shaped runtime, static coordinator, static commit install, texture atlas, and dynamic prep reports as legacy-edge shims only; do not backfill them inside replacement internals.
+- Re-run the replacement `da55` generated-scenery and env-cell focused harness cases and the `da55` all-domain case after the remediation.
+
+Acceptance criteria:
+
+- Static-authored generated-scenery materialization no longer produces repeated normal-path `dynamic-animation-hook-catchup-truncated` console warnings.
+- Replacement-native diagnostics explain dynamic prep/bake outcomes, animation catch-up decisions, runtime entity counts, texture memory pressure, texture page lifecycle, and scene commit state without relying on legacy report fields.
+- Browser harness readiness for `--runtime-pipeline open-world-streaming` reads direct open-world diagnostics rather than legacy runtime counter projections.
+- Browser harness summary surfaces open-world diagnostics directly for replacement runs.
+- `da55` generated-scenery and all-domain runs improve or produce a clear next bottleneck with native attribution.
+- Any remaining legacy-shaped diagnostic projection is named as a harness, UI migration, or legacy runtime shim with a Phase 16 deletion target.
+- `npm run check`, `npm run lint:ts`, and focused tests pass.
+
+Task checklist:
+
+- [ ] Inspect dynamic animation catch-up call sites and static-authored dynamic publication timing.
+- [ ] Implement the chosen static-authored animation start policy.
+- [ ] Replace normal-path per-entity catch-up warning spam with replacement-native aggregate diagnostics.
+- [ ] Add runtime entity diagnostic counters/timings for prep, bake, commits, non-renderable outcomes, and animation catch-up decisions.
+- [ ] Add texture residency memory and page lifecycle diagnostics to the replacement diagnostics contract.
+- [ ] Migrate replacement harness readiness to native open-world diagnostics.
+- [ ] Migrate replacement harness summary output to native open-world diagnostics.
+- [ ] Keep any legacy runtime report projection at the harness or runtime edge and record its deletion trigger.
+- [ ] Run focused dynamic/runtime-entity tests.
+- [ ] Run replacement `da55` generated-scenery, env-cell, and all-domain harness cases.
+- [ ] Run app checks.
 - [ ] Update cleanup targets.
 
 Decisions and course corrections:
@@ -1095,6 +1152,7 @@ Decisions and course corrections:
 
 Deliverables:
 
+- Start only after Phase 13A is complete.
 - Switch `createBrowserRuntime(...)` to the replacement composition.
 - Keep the harness switch only if needed for one short verification window.
 - Remove obsolete UI assumptions about legacy static coordinator diagnostics and migrate surviving panels to replacement-native diagnostics.

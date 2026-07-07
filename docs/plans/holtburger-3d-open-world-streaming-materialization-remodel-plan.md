@@ -2573,39 +2573,114 @@ Decisions and course corrections:
 - Spicy bit: deleting `hasDeferredTerrainLayeredTextureReadiness(...)` was the tell. Once the warning was gone, the helper had no design job left. Keeping it would have made tests protect a dead diagnostic pathway.
 - Verification: `npm run check`, `npm run lint`, focused `npm run test:ts -- --run src/lib/renderer/webgl2/webgl2-renderer.test.ts src/lib/renderer/webgl2/webgl2-terrain-payloads.test.ts src/lib/visual/object-visual-baker.test.ts src/lib/static/env-cells/bake/env-cell-system-baker.test.ts src/lib/static/env-cells/env-cell-system-resolver.test.ts src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts`.
 
-### Phase 34: Runtime/Harness Shim And Source-Tree Wipe
+### Phase 34: Runtime/Harness Shim Audit And Resteer
 
 Deliverables:
 
-- Delete vestigial pipeline references from production code after surviving consumers have migrated to direct replacement contracts.
-- Remove runtime/harness projections that preserve old static coordinator, texture manager, or legacy diagnostics categories.
-- Keep durable adapters only for host assets, worker transport, renderer mutation, diagnostics export plumbing, and harness composition when they do not preserve retired concepts.
-- Align remaining source tree locations with domain/system ownership.
+- Close the current broad cleanup phase by auditing what is still unresolved against the [open-world streaming stutter investigation worksheet](./holtburger-3d-open-world-streaming-stutter-investigation-worksheet.md).
+- Split unresolved work into implementation phases that are grounded in current code, not issue symptoms.
+- Classify every remaining touched consumer as direct migration, deletion, legacy-edge shim, or durable adapter.
+- Preserve the design north star explicitly: worker-owned source preparation/layout/page build where feasible, replacement-native diagnostics, direct contracts, and hard vestigial wipe.
 
 Acceptance criteria:
 
-- No production replacement code references old static coordinator, texture manager mutation, ignored placement fields, old diagnostics snapshots, or old materialization lifecycle concepts.
-- `client-runtime-adapter.ts` contains only durable app/runtime adapter logic, not legacy-shaped materialization truth.
-- `browser-pipeline-harness.mjs` and `BrowserPipelineHarness.svelte` read replacement-native diagnostics or named edge shims scheduled for deletion.
-- No tests preserve ignored placement policy fields, old bucket lifetime assumptions, or legacy diagnostic parity.
-- Source-tree placement explains ownership; no new broad concept dumping grounds are created.
+- The plan identifies concrete current-code gaps instead of bug-expression triage buckets.
+- The next phases link back to the worksheet and name the current files/symbols they will change or delete.
+- Any unresolved Phase 34 cleanup task is moved into a later phase with acceptance criteria and a verification path.
+- Final hard cutover remains deletion-oriented; no compatibility projection is rebranded as durable architecture.
 
 Task checklist:
 
-- [ ] Audit production imports for `StaticCoordinator`, `TextureManager`, old static commit counters, old diagnostics snapshots, and legacy-shaped runtime projections.
-- [ ] Replace or delete `createRuntimeStaticOverviewFromController(...)` output where it is only preserving old `RuntimeOverviewSnapshot.static` expectations.
-- [ ] Migrate `browser-pipeline-harness.mjs` scenario samples away from `staticOverview` when `openWorldStreaming` already contains the direct replacement evidence.
-- [ ] Delete or migrate old compatibility projections from runtime, harness, UI diagnostics, and tests.
-- [ ] Delete obsolete tests that preserve retired orchestration contracts; replace only tests needed for replacement behavior.
-- [ ] Rename or move modules whose source-tree location now hides the owning system.
-- [ ] Record every surviving adapter with its durable boundary reason.
-- [ ] Run `npm run lint:dead` and resolve every replacement-related finding by deletion or direct migration.
+- [x] Audit production imports for `StaticCoordinator`, `TextureManager`, old static commit counters, old diagnostics snapshots, and legacy-shaped runtime projections.
+- [x] Identify runtime/harness/UI projections that still preserve old static overview shape.
+- [x] Audit material coverage and readiness code for places where diagnostics may be smuggling old broad static concepts into replacement truth.
+- [x] Audit texture placement/page-build code for worksheet deviations around main-thread source preparation, layout, packing, and page materialization.
+- [x] Move unresolved deletion and migration work into concrete follow-up phases instead of leaving it as one oversized cleanup bucket.
+- [x] Dry-run the next phases through hard cutover and revise ordering.
+
+Decisions and course corrections:
+
+- Phase 34 completed as a closeout/resteer phase, not as the final wipe. The original Phase 34 scope mixed four different jobs: worker-ownership gaps, diagnostics contract shape, UI/harness shim deletion, and source-tree/hard-cutover cleanup. Keeping that as one phase would encourage hand-wavy deletion.
+- Import audit found no replacement-internal imports of `StaticCoordinator` or `TextureManager`, which is good. The remaining vestigial pressure is now mostly at consumers and boundaries: `client-runtime-adapter.ts` still projects `RuntimeOverviewSnapshot.static`, `browser-pipeline-harness.mjs` still includes `staticOverview`, and `BrowserDisplay.svelte` still reads the legacy-shaped overview for browser panels.
+- Current-code gap against the worksheet: `DirectOpenWorldObjectVisualAtlasBuilder` in `texture-residency/placement/object-visual-atlas-builder.ts` still performs `texture-source-preparation` and `texture-layout` on the browser side. The worksheet's target model says source preparation, layout search, guttered blits, and page rebuilds should be worker-owned unless a measured constraint proves a narrow exception.
+- Current-code gap against the worksheet: `reserveMaterialTexturePlacements(...)` in `texture-residency/placement/material-texture-placement-plan.ts` has a good replacement-native reservation/page-build shape, but production object atlas layout still reaches that shape through a direct builder. That is cleaner than the legacy `TextureManager` lane, but it has not landed the worker-owned source/layout part of the design.
+- Current-code gap against the worksheet: `static-object-material-coverage.ts` remains a broad static material coverage report. It is useful evidence, but if it becomes the surviving readiness contract it will preserve static-era categories instead of the replacement model's direct material readiness facts.
+- Current-code gap against the migration policy: `RuntimeOverviewSnapshot.static`, `createRuntimeStaticOverviewFromController(...)`, and harness `staticOverview` are shims. They are allowed only as deletion-targeted edge projections and must not survive the hard cutover.
+- Resteer: split the remaining work into worker-owned material atlas work, direct material/readiness diagnostics, deferred fidelity triage, runtime/harness/UI shim deletion, source-tree ownership cleanup, and final hard cutover.
+
+### Phase 35: Worker-Owned Material Atlas Source And Layout
+
+Design north star:
+
+- Follow the [worksheet's texture split](./holtburger-3d-open-world-streaming-stutter-investigation-worksheet.md): placement reservation and authoritative registry updates stay in the replacement main-loop service, while expensive source preparation, layout search, packing, guttered blits, and page rebuilds move to worker-owned transforms unless measured evidence proves a narrow exception.
+
+Deliverables:
+
+- Replace production use of `DirectOpenWorldObjectVisualAtlasBuilder` with a worker-backed material atlas builder that preserves the direct replacement contract from `object-visual-atlas-builder.ts`.
+- Define the data ownership contract for prepared texture pixels before transfer. The implementation must not detach shared prepared-asset cache buffers as the Phase 11C failed experiment did.
+- Keep `reserveMaterialTexturePlacements(...)` as the reservation/page-build contract and move only the expensive atlas source/layout work behind the builder boundary.
+- Keep direct builders test-only, worker-internal, or explicitly named debug fallbacks; production browser composition should not silently choose main-thread atlas source/layout.
+- Add replacement-native worker-boundary diagnostics for source preparation, layout, page count, source count, and transfer/copy behavior.
+
+Acceptance criteria:
+
+- Browser production composition injects a worker-backed `OpenWorldMaterialTextureAtlasBuilder` for object/env-cell/runtime material placement.
+- No production browser path uses `DirectOpenWorldObjectVisualAtlasBuilder` for object visual material atlas work.
+- Prepared texture transfer/copy semantics are explicit and tested; shared asset-cache buffers are not detached.
+- Texture placement diagnostics distinguish source preparation, layout, page-build request settlement, and renderer texture commit apply without recreating legacy `TextureManager` mutation categories.
+- All-domain radius-1 harness remains settled inside the existing gate and records worker-boundary evidence for material atlas jobs.
+
+Task checklist:
+
+- [ ] Inspect `create-browser-runtime.ts` composition and every `OpenWorldMaterialTextureAtlasBuilder` provider.
+- [ ] Design the worker request/response DTO around owned or copy-safe pixel buffers, not borrowed prepared-asset cache views.
+- [ ] Implement the worker-backed atlas source/layout builder beside `object-visual-atlas-builder.ts` or move the module under a clearer `texture-residency/atlas-build/` owner if that improves navigation.
+- [ ] Keep `DirectOpenWorldObjectVisualAtlasBuilder` only for tests, worker handler internals, or an explicitly named non-production harness path.
+- [ ] Wire production open-world streaming composition to the worker-backed builder.
+- [ ] Add tests for transfer safety, worker diagnostics, and production composition selection.
+- [ ] Run `npm run check`, `npm run lint`, focused texture placement/packing tests, and all-domain browser harness.
 
 Decisions and course corrections:
 
 - Pending.
 
-### Phase 35: Deferred Fidelity And Material Backlog Triage
+### Phase 36: Direct Material Readiness Contract
+
+Design north star:
+
+- Diagnostics are not exempt from migration policy. Replacement diagnostics must explain replacement ownership, material readiness, texture dependency readiness, and renderer capability facts directly; broad legacy static coverage reports may feed evidence but must not become the surviving contract.
+
+Deliverables:
+
+- Split material readiness from broad static material coverage where the replacement controller currently consumes or exposes coverage facts.
+- Introduce or consolidate a direct replacement material-readiness contract under `systems/open-world-streaming/diagnostics` or the owning static-layer domain.
+- Make terrain, outdoor objects, env-cells, and runtime-authored visuals report the same readiness vocabulary for rendered, pending texture dependency, failed texture dependency, deferred renderer capability, unsupported source material, and skipped geometry.
+- Decide whether `static-object-material-coverage.ts` remains a source-evidence transform, moves under the owning system, or is replaced by replacement-native reporting.
+- Update BrowserDisplay/harness diagnostics consumers to read the direct readiness contract rather than broad static coverage summaries.
+
+Acceptance criteria:
+
+- Remaining flat-color, missing-texture, deferred, and unsupported material behavior is explainable through direct replacement readiness diagnostics.
+- `StaticMaterialCoverageReport` is not the canonical replacement readiness contract.
+- Renderer-local warning paths are not required to discover material readiness failures.
+- Tests prove readiness classification from planner/baker facts to controller diagnostics without asserting legacy coverage parity.
+- The plan records any deliberate deviation from the worksheet with evidence and reactivation criteria.
+
+Task checklist:
+
+- [ ] Trace current readiness facts through `static-object-material-coverage.ts`, `open-world-streaming-controller.ts`, `object-visual-material-planner.ts`, `structured-interior-material-planner.ts`, terrain payload readiness, and renderer binding readiness.
+- [ ] Define the replacement readiness issue/event type and owner/domain identity fields.
+- [ ] Migrate controller diagnostics to emit direct readiness facts.
+- [ ] Migrate BrowserDisplay and browser harness summaries to direct readiness diagnostics.
+- [ ] Delete or demote tests that preserve broad coverage reports as the final truth source.
+- [ ] Add focused tests for readiness classification and texture dependency readiness.
+- [ ] Run `npm run check`, `npm run lint`, focused material/readiness tests, and terrain plus all-domain browser harness.
+
+Decisions and course corrections:
+
+- Pending.
+
+### Phase 37: Deferred Fidelity And Material Backlog Triage
 
 Deliverables:
 
@@ -2634,11 +2709,116 @@ Decisions and course corrections:
 
 - Pending.
 
-### Phase 36: Texture Remodel Final Verification And Hard Cutover
+### Phase 38: Runtime, Harness, And UI Shim Deletion
+
+Design north star:
+
+- Migrate direct contracts, shim legacy. At this point surviving browser UI and harness consumers should use replacement-native diagnostics and overview contracts directly. Legacy-shaped runtime snapshots should be deleted, not made healthier.
 
 Deliverables:
 
-- Delete dead placement fields, ignored policy paths, obsolete tests, stale diagnostic categories, and temporary shims introduced by Phases 19-35.
+- Delete `RuntimeOverviewSnapshot.static` and `createRuntimeStaticOverviewFromController(...)`.
+- Remove `staticOverview` from `browser-pipeline-harness.mjs` scenario samples once `openWorldStreaming` and material readiness diagnostics provide direct evidence.
+- Migrate `BrowserDisplay.svelte` status/resource/material panels from legacy-shaped overview fields to direct replacement diagnostics where the panel still needs to survive.
+- Remove tests that assert old runtime overview/static diagnostic parity.
+- Record every surviving adapter and prove it crosses a durable boundary rather than preserving a retired concept.
+
+Acceptance criteria:
+
+- `client-runtime-adapter.ts` contains durable app/runtime adapter logic only; it does not project replacement materialization into old static coordinator-shaped summaries.
+- `RuntimeOverviewSnapshot` no longer has static coordinator-style materialization counters.
+- `browser-pipeline-harness.mjs` and `BrowserPipelineHarness.svelte` consume direct `open-world-streaming` diagnostics or named durable harness composition data.
+- No production code has `staticOverview`, `committedStaticCommitInstallCount`, `pendingStaticCommitInstallCount`, or old static commit lifecycle counters for the replacement pipeline.
+- Every surviving adapter is named as host asset access, worker transport, renderer mutation, diagnostics export plumbing, or harness composition.
+
+Task checklist:
+
+- [ ] Search `apps/holtburger-3d/src` and `apps/holtburger-3d/scripts` for `staticOverview`, `RuntimeOverviewSnapshot.static`, old static commit counters, and legacy diagnostics snapshots.
+- [ ] Migrate BrowserDisplay polling and panels to `runtime.createDiagnosticsReport()` direct replacement domains.
+- [ ] Delete `createRuntimeStaticOverviewFromController(...)` and the `RuntimeStaticOverviewSnapshot` interface.
+- [ ] Remove `staticOverview` from harness sample output and downstream assertions.
+- [ ] Delete obsolete tests instead of updating them to preserve old overview shape.
+- [ ] Run `npm run check`, `npm run lint`, `npm run lint:dead`, and browser harness.
+
+Decisions and course corrections:
+
+- Pending.
+
+### Phase 39: Ownerless Page Reclamation And Eviction Truth
+
+Design north star:
+
+- Releases should follow the [worksheet owner-claim model](./holtburger-3d-open-world-streaming-stutter-investigation-worksheet.md): cheap owner-claim mutations first, with page deletion, repack, and renderer removal treated as separate policy decisions that must not be hidden inside owner release or legacy lease/pin vocabulary.
+
+Deliverables:
+
+- Define the exact states for ownerless resident pages: retained cache, reclaimable, in-flight rebuild dependency, renderer-resident, renderer-removal pending, and removed.
+- Implement or explicitly defer page reclamation policy in `texture-residency/claims`, page-build, and texture commit diagnostics.
+- Ensure `releaseTextureOwner(ownerId)`-style behavior remains idempotent and cheap; cleanup must be explicit and separately diagnosable.
+- Prove binding readiness stays honest when ownerless pages remain resident or are reclaimed.
+- Remove any remaining lease/pin terms that leak into replacement contracts unless they refer to a durable renderer-installed-resource guard.
+
+Acceptance criteria:
+
+- Owner release does not trigger broad repack/page materialization work.
+- Diagnostics can explain resident pages with zero current owners without implying a leak or a live owner.
+- Reclamation/removal emits direct texture commits and readiness transitions when it actually mutates renderer state.
+- Tests cover owner release, retained ownerless pages, explicit reclamation, stale page-build completion after release, and renderer readiness after reclamation.
+- The implementation matches the worksheet release/currentness requirements or records a deliberate deviation.
+
+Task checklist:
+
+- [ ] Audit `OpenWorldTextureClaimRegistry` owner release, page reservation, and snapshot fields.
+- [ ] Audit renderer texture binding readiness for ownerless or reclaimed pages.
+- [ ] Define ownerless page lifecycle states and diagnostics fields.
+- [ ] Implement explicit reclamation policy or document why it remains deferred with measurable risk.
+- [ ] Delete replacement-facing lease/pin naming that is no longer structurally accurate.
+- [ ] Add focused claim registry/page-build/texture commit readiness tests.
+- [ ] Run `npm run check`, `npm run lint`, focused texture residency tests, and all-domain harness.
+
+Decisions and course corrections:
+
+- Pending.
+
+### Phase 40: Source-Tree Ownership Cleanup
+
+Design north star:
+
+- The source tree should explain the system. New replacement code should be organized by owning workflow/domain, while reusable legacy transforms should be intentionally named as adapters or promoted only with evidence.
+
+Deliverables:
+
+- Move or rename modules whose current location hides the owning system after Phases 35-39.
+- Keep durable adapters explicit for host assets, worker transport, renderer mutation, diagnostics export plumbing, and harness composition.
+- Delete concept-bucket leftovers that exist only because the old source tree grouped by broad nouns such as `textures`, `static`, or `visual`.
+- Update imports and tests after moves without leaving compatibility barrel exports that hide retired ownership.
+
+Acceptance criteria:
+
+- Open-world streaming materialization can be followed from composition through scheduling, owners, texture residency, static layers, scene commits, diagnostics, and tests without jumping through legacy concept folders except at named adapter boundaries.
+- No replacement production module imports old orchestration internals.
+- Reusable transforms outside `systems/open-world-streaming` have neutral names and are not lifecycle authorities.
+- No new broad dumping-ground directory is created.
+- `npm run lint:dead` has no replacement-related dead exports after moves/deletions.
+
+Task checklist:
+
+- [ ] Audit imports from `systems/open-world-streaming` into `static`, `visual`, `textures`, `runtime`, and `renderer` modules.
+- [ ] Classify each cross-tree import as durable transform, durable adapter, legacy shim, or deletion target.
+- [ ] Move worker-owned atlas builder modules if Phase 35 proves a clearer owner folder.
+- [ ] Move or rename material readiness code if Phase 36 proves `static-object-material-coverage.ts` is no longer the owning concept.
+- [ ] Delete compatibility barrels or aliases created only to avoid import churn.
+- [ ] Run `npm run check`, `npm run lint`, `npm run lint:dead`, and focused tests touched by moves.
+
+Decisions and course corrections:
+
+- Pending.
+
+### Phase 41: Texture Remodel Final Verification And Hard Cutover
+
+Deliverables:
+
+- Delete dead placement fields, ignored policy paths, obsolete tests, stale diagnostic categories, and temporary shims introduced by Phases 19-40.
 - Re-run dead-code, type, lint, unit, and browser harness verification.
 - Update this plan and the worksheet cross-reference with final evidence and any remaining intentionally deferred material fidelity.
 
@@ -2648,6 +2828,7 @@ Acceptance criteria:
 - No replacement tests preserve old bucket/lifetime assumptions.
 - No production shim survives unless it crosses a durable host, worker, renderer, diagnostics export, or harness boundary without preserving retired concepts.
 - Direct builders remain test-only or worker-internal; production browser composition uses worker-owned layout/page-build boundaries.
+- No production replacement code references old static coordinator, texture manager mutation, old diagnostics snapshots, old materialization lifecycle concepts, or ignored placement policy fields.
 - `npm run check`, `npm run lint`, `npm run lint:dead`, focused texture/material tests, and browser harness scenarios pass.
 - The plan records every remaining deferral with a reason and evidence required to reactivate it.
 
@@ -2657,6 +2838,7 @@ Task checklist:
 - [ ] Delete or unexport direct builder APIs that are no longer needed outside tests/worker entrypoints.
 - [ ] Delete any terrain-only workaround replaced by the shared readiness/material policy.
 - [ ] Delete diagnostic compatibility projections that preserve old material/texture categories.
+- [ ] Search for `StaticCoordinator`, `TextureManager`, `staticOverview`, old static commit counters, ignored placement fields, legacy diagnostic categories, and direct production atlas builders.
 - [ ] Run `npm run check`.
 - [ ] Run `npm run lint`.
 - [ ] Run `npm run lint:dead`.
@@ -2748,7 +2930,7 @@ Mitigation:
 
 Mitigation:
 
-- Treat the worksheet as the design guardrail for Phases 19-36.
+- Treat the worksheet as the design guardrail for Phases 19-41.
 - Record deliberate deviations in the phase decisions before implementation proceeds.
 - Prefer pausing a phase over landing a convenient contract that contradicts static-authored dynamic sharing, worker-owned page build, loose readiness, or direct replacement diagnostics.
 

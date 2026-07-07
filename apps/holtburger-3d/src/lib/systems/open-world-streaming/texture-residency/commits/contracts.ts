@@ -8,7 +8,7 @@ import type { OpenWorldTexturePageReservationToken } from "../claims/texture-cla
 
 /** Texture commit emitted independently from scene commits. */
 export interface OpenWorldStreamingTextureCommit {
-	readonly bindingRemovals: readonly string[];
+	readonly bindingRemovals: readonly TextureBindingId[];
 	readonly bindingUpdates: readonly OpenWorldStreamingTextureBindingResolution[];
 	readonly bucketKey: string;
 	readonly kind: "texture-commit";
@@ -17,7 +17,7 @@ export interface OpenWorldStreamingTextureCommit {
 }
 
 /** Renderer-facing binding readiness produced by texture residency. */
-interface OpenWorldStreamingTextureBindingResolution {
+export interface OpenWorldStreamingTextureBindingResolution {
 	readonly bindingId: TextureBindingId;
 	readonly readiness: OpenWorldStreamingTextureBindingReadiness;
 }
@@ -41,6 +41,10 @@ type OpenWorldStreamingTextureBindingReadiness =
 	  }
 	| {
 			readonly kind: "failed";
+			readonly message: string;
+	  }
+	| {
+			readonly kind: "missing-not-in-flight";
 			readonly message: string;
 	  };
 

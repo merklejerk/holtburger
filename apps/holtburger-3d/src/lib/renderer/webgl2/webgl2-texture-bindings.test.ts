@@ -59,6 +59,7 @@ describe("WebGL2 renderer texture binding table", () => {
 
 		const change = table.applyPlacementUpdate(
 			{
+				bindingReadinessUpdates: [],
 				placements: [],
 				removedTextureRefIds: ["removed-ref"],
 				resolvedTexturePlacements: [],
@@ -97,6 +98,62 @@ describe("WebGL2 renderer texture binding table", () => {
 		});
 		expect(table.getResident(bindingId)).toBeNull();
 	});
+
+	it("applies readiness-only updates without creating GPU textures", () => {
+		const table = new Webgl2RendererTextureBindingTable();
+		const pendingBindingId = createTestBindingId("pending-update");
+		const failedBindingId = createTestBindingId("failed-update");
+		const missingBindingId = createTestBindingId("missing-update");
+
+		const change = table.applyPlacementUpdate(
+			{
+				bindingReadinessUpdates: [
+					{
+						bindingId: pendingBindingId,
+						kind: "pending",
+						reason: "page-building",
+					},
+					{
+						bindingId: failedBindingId,
+						kind: "failed",
+						reason: "page build failed",
+					},
+					{
+						bindingId: missingBindingId,
+						kind: "missing-not-in-flight",
+						reason: "binding was not scheduled",
+					},
+				],
+				placements: [],
+				removedTextureRefIds: [],
+				resolvedTexturePlacements: [],
+				revision: 3,
+			},
+			{
+				createTexture: () => {
+					throw new Error("readiness-only update must not create textures");
+				},
+				deleteTexture: () => undefined,
+			},
+		);
+
+		expect(change.changed).toBe(true);
+		expect(table.getState(pendingBindingId)).toEqual({
+			bindingId: pendingBindingId,
+			kind: "pending",
+			reason: "page-building",
+		});
+		expect(table.getState(failedBindingId)).toEqual({
+			bindingId: failedBindingId,
+			kind: "failed",
+			reason: "page build failed",
+		});
+		expect(table.getState(missingBindingId)).toEqual({
+			bindingId: missingBindingId,
+			kind: "missing-not-in-flight",
+			reason: "binding was not scheduled",
+		});
+	});
 });
 
 function createTexturePlacementUpdate(
@@ -104,9 +161,11 @@ function createTexturePlacementUpdate(
 	textureRefId: string,
 ): TexturePlacementUpdate {
 	return {
+		bindingReadinessUpdates: [],
 		placements: [
 			{
 				anisotropy: 1,
+				bindingId: textureBindingId,
 				filteringMode: "nearest",
 				format: "rgba8",
 				height: 1,
@@ -120,7 +179,6 @@ function createTexturePlacementUpdate(
 				rect: [0, 0, 1, 1],
 				sampleClass: "rgba-color",
 				samplerPolicyKey: "sample=rgba-color;filter=nearest;mips=off;aniso=1",
-				textureBindingId,
 				textureRefId,
 				width: 1,
 				wrapS: "clamp-to-edge",
@@ -136,7 +194,6 @@ function createTexturePlacementUpdate(
 					textureRefId,
 				},
 				rect: [0, 0, 1, 1],
-				textureBindingId,
 				textureHeight: 1,
 				textureRefId,
 				textureWidth: 1,

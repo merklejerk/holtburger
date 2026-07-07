@@ -8,6 +8,7 @@ export type RendererTextureBindingState =
 	| {
 			readonly kind: "pending";
 			readonly bindingId: TextureBindingId;
+			readonly reason?: string;
 	  }
 	| {
 			readonly kind: "resident";
@@ -16,6 +17,11 @@ export type RendererTextureBindingState =
 	  }
 	| {
 			readonly kind: "failed";
+			readonly bindingId: TextureBindingId;
+			readonly reason: string;
+	  }
+	| {
+			readonly kind: "missing-not-in-flight";
 			readonly bindingId: TextureBindingId;
 			readonly reason: string;
 	  };
@@ -98,6 +104,15 @@ export class Webgl2RendererTextureBindingTable {
 				bindingId: placement.bindingId,
 				kind: "resident",
 				placement,
+			});
+			changed = true;
+		}
+
+		for (const readiness of update.bindingReadinessUpdates) {
+			this.#states.set(readiness.bindingId, {
+				bindingId: readiness.bindingId,
+				kind: readiness.kind,
+				reason: readiness.reason,
 			});
 			changed = true;
 		}

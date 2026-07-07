@@ -2226,17 +2226,24 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Audit `OpenWorldStreamingTextureCommit`, `TexturePlacementUpdate`, `Webgl2RendererTextureBindingTable`, `OpenWorldTexturePageBuildTaskStream`, and `settleOpenWorldTexturePageBuildResult(...)`.
-- [ ] Define the minimal readiness update DTO in `texture-residency/commits/contracts.ts`.
-- [ ] Map readiness updates to renderer texture binding state in `texture-commit-applier.ts`.
-- [ ] Add `TexturePlacementUpdate` support for failure/readiness-only binding updates.
-- [ ] Emit failed binding updates from `texture-page-build-task-stream.ts`.
-- [ ] Add focused tests in `texture-commit-applier.test.ts`, `texture-page-build-task-stream.test.ts`, and `webgl2-texture-bindings.test.ts`.
-- [ ] Record any deliberate renderer-adapter wart and its deletion trigger.
+- [x] Audit `OpenWorldStreamingTextureCommit`, `TexturePlacementUpdate`, `Webgl2RendererTextureBindingTable`, `OpenWorldTexturePageBuildTaskStream`, and `settleOpenWorldTexturePageBuildResult(...)`.
+- [x] Define the minimal readiness update DTO in `texture-residency/commits/contracts.ts`.
+- [x] Map readiness updates to renderer texture binding state in `texture-commit-applier.ts`.
+- [x] Add `TexturePlacementUpdate` support for failure/readiness-only binding updates.
+- [x] Emit failed binding updates from `texture-page-build-task-stream.ts`.
+- [x] Add focused tests in `texture-commit-applier.test.ts`, `texture-page-build-task-stream.test.ts`, and `webgl2-texture-bindings.test.ts`.
+- [x] Record any deliberate renderer-adapter wart and its deletion trigger.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 25 completed on 2026-07-07.
+- `OpenWorldStreamingTextureCommit` now carries typed `TextureBindingId` removals and exported binding-resolution records while keeping readiness variants replacement-native. Added explicit `missing-not-in-flight` readiness so pipeline bugs do not get collapsed into generic page-build failure.
+- `TexturePlacementUpdate` now has `bindingReadinessUpdates` for pending, failed, and missing-not-in-flight state changes. Resident readiness still flows through `resolvedTexturePlacements` because renderer upload and resident placement are already split there.
+- `Webgl2RendererTextureBindingTable` now accepts readiness-only updates without creating WebGL textures. Unknown bindings still read as implicit pending, but explicit pending updates can carry a reason for upstream diagnostics.
+- `OpenWorldTexturePageBuildTaskStream` now emits a failure texture commit for every binding id carried by a failed page-build request before recording failed task diagnostics. This moves failed dependency state through the texture commit stream instead of waiting for renderer draw prep to discover it.
+- Deliberate concession: the page-build failure catch still logs an upstream `console.warn` after emitting the failure commit. This is not renderer hot-path logging, but Phase 27 should replace console-only failure visibility with structured replacement diagnostics.
+- Verification: `npm run check`, `npm run lint`, focused `npm run test:ts -- --run src/lib/systems/open-world-streaming/texture-residency/commits/texture-commit-applier.test.ts src/lib/systems/open-world-streaming/texture-residency/page-build/texture-page-build-task-stream.test.ts src/lib/renderer/webgl2/webgl2-texture-bindings.test.ts`, and touched-file `npm exec prettier -- --check src/lib/systems/open-world-streaming/texture-residency/page-build/texture-page-build-task-stream.test.ts src/lib/systems/open-world-streaming/texture-residency/page-build/texture-page-build-task-stream.ts`.
+- Verification note: full `npm run format:check` remains blocked by unrelated pre-existing formatting warnings outside this phase's touched files.
 
 ### Phase 26: Renderer Resource Readiness And Late Binding
 

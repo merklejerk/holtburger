@@ -1,7 +1,6 @@
 import type { MaterializationOwnerId } from "../../owners/owner-id";
-import type {
-	OpenWorldTextureClaimRegistry,
-} from "../claims/texture-claim-registry";
+import type { TextureBindingId } from "../../../../textures/identity";
+import type { OpenWorldTextureClaimRegistry } from "../claims/texture-claim-registry";
 import type { OpenWorldTextureBucketKey } from "../claims/bucket-key";
 import type { OpenWorldStreamingTextureCommit } from "../commits/contracts";
 import { settleOpenWorldTexturePageBuildResult } from "./page-build-results";
@@ -185,12 +184,20 @@ export class OpenWorldTexturePageBuildTaskStream {
 				status: settlement.commit ? "committed" : "accepted",
 			});
 		} catch (error) {
+			const message = stringifyError(error);
 			this.#rejectPageBuild(pageBuildRequest);
+			const failureCommit = createFailedTexturePageBuildCommit(
+				pageBuildRequest,
+				message,
+			);
+			if (failureCommit) {
+				this.#onCommit(failureCommit);
+			}
 			this.#failedCount += 1;
 			this.#recordTaskTiming({
 				activeTask,
 				durationMs: nowMs() - startedAtMs,
-				error: stringifyError(error),
+				error: message,
 				stageTimings: [],
 				status: "failed",
 			});
@@ -256,6 +263,42 @@ function compareActiveTasks(
 
 function stringifyError(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
+}
+
+function createFailedTexturePageBuildCommit(
+	pageBuildRequest: OpenWorldTexturePageBuildInput,
+	message: string,
+): OpenWorldStreamingTextureCommit | null {
+	const bindingIds = collectPageBuildBindingIds(pageBuildRequest);
+	if (bindingIds.length === 0) {
+		return null;
+	}
+	return {
+		bindingRemovals: [],
+		bindingUpdates: bindingIds.map((bindingId) => ({
+			bindingId,
+			readiness: {
+				kind: "failed",
+				message,
+			},
+		})),
+		bucketKey: pageBuildRequest.bucketKey,
+		kind: "texture-commit",
+		pageRemovals: [],
+		pageUpdates: [],
+	};
+}
+
+function collectPageBuildBindingIds(
+	pageBuildRequest: OpenWorldTexturePageBuildInput,
+): readonly TextureBindingId[] {
+	const bindingIds = new Set<TextureBindingId>();
+	for (const entry of pageBuildRequest.entries) {
+		for (const bindingId of entry.bindingIds) {
+			bindingIds.add(bindingId);
+		}
+	}
+	return [...bindingIds].sort();
 }
 
 function nowMs(): number {

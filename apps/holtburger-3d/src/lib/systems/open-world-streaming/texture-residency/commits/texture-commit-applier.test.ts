@@ -13,6 +13,7 @@ describe("open-world texture commit applier", () => {
 		const commit = createTextureCommit();
 
 		expect(createTexturePlacementUpdate(commit, 7)).toMatchObject({
+			bindingReadinessUpdates: [],
 			placements: [
 				{
 					bindingId: bindingId("binding:terrain"),
@@ -52,6 +53,62 @@ describe("open-world texture commit applier", () => {
 
 		expect(updates).toHaveLength(1);
 		expect(updates[0]?.revision).toBe(3);
+	});
+
+	it("maps non-resident readiness updates without requiring page uploads", () => {
+		const commit: OpenWorldStreamingTextureCommit = {
+			bindingRemovals: [],
+			bindingUpdates: [
+				{
+					bindingId: bindingId("binding:pending"),
+					readiness: {
+						kind: "pending",
+						reason: "page-building",
+					},
+				},
+				{
+					bindingId: bindingId("binding:failed"),
+					readiness: {
+						kind: "failed",
+						message: "page build failed",
+					},
+				},
+				{
+					bindingId: bindingId("binding:missing"),
+					readiness: {
+						kind: "missing-not-in-flight",
+						message: "binding was never scheduled",
+					},
+				},
+			],
+			bucketKey: "bucket:readiness",
+			kind: "texture-commit",
+			pageRemovals: [],
+			pageUpdates: [],
+		};
+
+		expect(createTexturePlacementUpdate(commit, 11)).toMatchObject({
+			bindingReadinessUpdates: [
+				{
+					bindingId: bindingId("binding:pending"),
+					kind: "pending",
+					reason: "page-building",
+				},
+				{
+					bindingId: bindingId("binding:failed"),
+					kind: "failed",
+					reason: "page build failed",
+				},
+				{
+					bindingId: bindingId("binding:missing"),
+					kind: "missing-not-in-flight",
+					reason: "binding was never scheduled",
+				},
+			],
+			placements: [],
+			resolvedTexturePlacements: [],
+			revision: 11,
+		});
 	});
 });
 

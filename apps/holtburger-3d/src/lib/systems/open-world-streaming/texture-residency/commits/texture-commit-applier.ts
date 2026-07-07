@@ -1,5 +1,8 @@
 import type { TexturePlacementUpdate } from "../../../../renderer/types";
-import type { OpenWorldStreamingTextureCommit } from "./contracts";
+import type {
+	OpenWorldStreamingTextureBindingResolution,
+	OpenWorldStreamingTextureCommit,
+} from "./contracts";
 
 export interface OpenWorldStreamingTextureRendererPort {
 	applyTexturePlacementUpdate(update: TexturePlacementUpdate): void;
@@ -20,6 +23,9 @@ export function createTexturePlacementUpdate(
 	revision: number,
 ): TexturePlacementUpdate {
 	return {
+		bindingReadinessUpdates: commit.bindingUpdates.flatMap(
+			createTextureBindingReadinessUpdate,
+		),
 		placements: commit.pageUpdates.map((page) => ({
 			anisotropy: page.anisotropy,
 			bindingId: page.uploadBindingId,
@@ -65,4 +71,38 @@ export function createTexturePlacementUpdate(
 		}),
 		revision,
 	};
+}
+
+function createTextureBindingReadinessUpdate(
+	binding: OpenWorldStreamingTextureBindingResolution,
+): TexturePlacementUpdate["bindingReadinessUpdates"][number][] {
+	const readiness = binding.readiness;
+	switch (readiness.kind) {
+		case "resident":
+			return [];
+		case "pending":
+			return [
+				{
+					bindingId: binding.bindingId,
+					kind: "pending",
+					reason: readiness.reason,
+				},
+			];
+		case "failed":
+			return [
+				{
+					bindingId: binding.bindingId,
+					kind: "failed",
+					reason: readiness.message,
+				},
+			];
+		case "missing-not-in-flight":
+			return [
+				{
+					bindingId: binding.bindingId,
+					kind: "missing-not-in-flight",
+					reason: readiness.message,
+				},
+			];
+	}
 }

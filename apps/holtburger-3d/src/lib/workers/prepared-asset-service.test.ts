@@ -30,6 +30,7 @@ describe("prepared asset worker service", () => {
 					key,
 					revision: 1,
 				},
+				kind: "prepared-asset",
 			},
 		});
 		expect(reader.requests).toEqual([key]);
@@ -104,7 +105,7 @@ class FixtureWorkerExecuteContext implements WorkerExecuteContext<
 		request: PreparedAssetServiceRequest,
 	): Promise<PreparedAssetServiceResponse> {
 		this.requests.push(request);
-		return Promise.resolve({ asset: this.#asset });
+		return Promise.resolve({ asset: this.#asset, kind: "prepared-asset" });
 	}
 }
 

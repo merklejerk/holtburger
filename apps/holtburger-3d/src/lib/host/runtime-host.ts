@@ -7,7 +7,11 @@ import {
 	createHostAssetLookupRequest,
 	prepareHostAssetResponse,
 } from "../assets/preparation";
-import type { RuntimeHost, RuntimeHostSnapshot } from "./runtime-contracts";
+import type {
+	RuntimeHost,
+	RuntimeHostAssetResponse,
+	RuntimeHostSnapshot,
+} from "./runtime-contracts";
 import {
 	assetLookupResponseDtoSchema,
 	type AssetLookupResponseDto,
@@ -28,18 +32,26 @@ class TauriRuntimeHost implements RuntimeHost {
 		key: HostAssetKey,
 		revision: number,
 	): Promise<PreparedAsset> {
+		const { requestId, response } = await this.lookupAssetResponse(key);
+		return prepareHostAssetResponse({
+			key,
+			requestId,
+			response,
+			revision,
+		});
+	}
+
+	async lookupAssetResponse(key: HostAssetKey): Promise<RuntimeHostAssetResponse> {
 		const requestId = `asset-${this.#nextRequestIndex++}`;
 		const request = createHostAssetLookupRequest(key, requestId);
 
 		try {
 			const response = await lookupTauriAsset(request);
 			this.#lastFailure = null;
-			return prepareHostAssetResponse({
-				key,
+			return {
 				requestId,
 				response,
-				revision,
-			});
+			};
 		} catch (error) {
 			this.#lastFailure =
 				error instanceof Error ? error.message : String(error);
@@ -59,6 +71,10 @@ class UnavailableRuntimeHost implements RuntimeHost {
 	constructor(private readonly message = "Tauri host is unavailable.") {}
 
 	lookupAsset(): Promise<PreparedAsset> {
+		return Promise.reject(new Error(this.message));
+	}
+
+	lookupAssetResponse(): Promise<RuntimeHostAssetResponse> {
 		return Promise.reject(new Error(this.message));
 	}
 
@@ -96,6 +112,16 @@ class HttpRuntimeHost implements RuntimeHost {
 		key: HostAssetKey,
 		revision: number,
 	): Promise<PreparedAsset> {
+		const { requestId, response } = await this.lookupAssetResponse(key);
+		return prepareHostAssetResponse({
+			key,
+			requestId,
+			response,
+			revision,
+		});
+	}
+
+	async lookupAssetResponse(key: HostAssetKey): Promise<RuntimeHostAssetResponse> {
 		const requestId = `asset-${this.#nextRequestIndex++}`;
 		const request = createHostAssetLookupRequest(key, requestId);
 
@@ -104,12 +130,10 @@ class HttpRuntimeHost implements RuntimeHost {
 				? await this.#lookupBinaryAsset(request)
 				: await this.#lookupJsonAsset(request);
 			this.#lastFailure = null;
-			return prepareHostAssetResponse({
-				key,
+			return {
 				requestId,
 				response,
-				revision,
-			});
+			};
 		} catch (error) {
 			this.#lastFailure =
 				error instanceof Error ? error.message : String(error);

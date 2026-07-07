@@ -4,6 +4,7 @@ import type {
 	OutdoorExplicitObjectsLayerPayload,
 	OutdoorGeneratedSceneryLayerPayload,
 } from "../../../../renderer/types";
+import type { OpenWorldStreamingStaticTaskStageTiming } from "../../diagnostics/contracts";
 import type {
 	OutdoorStaticObjectDomain,
 	OutdoorStaticObjectsScopePayload,
@@ -22,6 +23,7 @@ import type { MaterializationOwnerId } from "../../owners/owner-id";
 import { OpenWorldTextureClaimRegistry } from "../../texture-residency/claims/texture-claim-registry";
 import type { OpenWorldStreamingTextureCommit } from "../../texture-residency/commits/contracts";
 import { buildObjectVisualTexturePlacementPlan } from "../../texture-residency/placement/object-visual-texture-placement-plan";
+import type { OpenWorldObjectVisualAtlasBuilder } from "../../texture-residency/placement/object-visual-atlas-builder";
 
 type OutdoorObjectLayerPayload =
 	| OutdoorBuildingsLayerPayload
@@ -32,6 +34,7 @@ export interface OpenWorldOutdoorObjectArtifactRunnerOptions {
 	readonly assetReader: PreparedAssetReader;
 	readonly baker: StaticBaker;
 	readonly resolver: StaticLandblockSceneLodSourceResolver;
+	readonly objectVisualAtlasBuilder: OpenWorldObjectVisualAtlasBuilder;
 	readonly textureClaims: OpenWorldTextureClaimRegistry;
 }
 
@@ -45,6 +48,7 @@ export interface OpenWorldOutdoorObjectLayerCommit {
 	readonly ownerId: MaterializationOwnerId;
 	readonly payload: OutdoorObjectLayerPayload;
 	readonly sourcePayload: OutdoorStaticObjectsScopePayload;
+	readonly stageTimings: readonly OpenWorldStreamingStaticTaskStageTiming[];
 	readonly staticAuthoredDynamicPlacements: readonly StaticAuthoredDynamicPlacementRecord[];
 	readonly textureCommits: readonly OpenWorldStreamingTextureCommit[];
 }
@@ -54,6 +58,7 @@ export class OpenWorldOutdoorObjectArtifactRunner {
 	readonly #baker: StaticBaker;
 	readonly #resourceProvider: StaticObjectBakeResourceProvider;
 	readonly #resolver: StaticLandblockSceneLodSourceResolver;
+	readonly #objectVisualAtlasBuilder: OpenWorldObjectVisualAtlasBuilder;
 	readonly #textureClaims: OpenWorldTextureClaimRegistry;
 
 	constructor(options: OpenWorldOutdoorObjectArtifactRunnerOptions) {
@@ -63,40 +68,56 @@ export class OpenWorldOutdoorObjectArtifactRunner {
 			assetReader: options.assetReader,
 		});
 		this.#resolver = options.resolver;
+		this.#objectVisualAtlasBuilder = options.objectVisualAtlasBuilder;
 		this.#textureClaims = options.textureClaims;
 	}
 
 	async run(
 		request: OpenWorldOutdoorObjectArtifactRequest,
 	): Promise<OpenWorldOutdoorObjectLayerCommit> {
-		const resolved = await this.#resolveObjectRecipe(request.task);
+		const timing = new StaticArtifactStageTimer();
+		const resolved = await timing.measure("resolve-source", () =>
+			this.#resolveObjectRecipe(request.task),
+		);
 		const sourcePayload = requireOutdoorObjectSourcePayload(resolved);
-		const texturePlan = await buildObjectVisualTexturePlacementPlan({
-			assetReader: this.#assetReader,
-			filteringMode: "nearest",
-			intents: await createStaticObjectTexturePlacementIntents({
+		const textureIntents = await timing.measure("create-texture-intents", () =>
+			createStaticObjectTexturePlacementIntents({
 				assetReader: this.#assetReader,
 				items: [{ payload: resolved, task: request.task }],
 			}),
-			ownerId: request.ownerId,
-			textureClaims: this.#textureClaims,
-		});
-		const baked = await this.#baker.bake(
-			await this.#createOutdoorObjectBakeJobInput(
+		);
+		const texturePlan = await timing.measure("texture-placement", () =>
+			buildObjectVisualTexturePlacementPlan({
+				atlasBuilder: this.#objectVisualAtlasBuilder,
+				filteringMode: "nearest",
+				intents: textureIntents,
+				ownerId: request.ownerId,
+				textureClaims: this.#textureClaims,
+			}),
+		);
+		const bakeInput = await timing.measure("create-bake-resources", () =>
+			this.#createOutdoorObjectBakeJobInput(
 				request.task,
 				resolved,
 				texturePlan.placementSnapshot,
 			),
 		);
-		return {
-			kind: "outdoor-object-layer-commit",
-			ownerId: request.ownerId,
-			payload: createOutdoorObjectLayerPayload({
+		const baked = await timing.measure("bake", () =>
+			this.#baker.bake(bakeInput),
+		);
+		const payload = timing.measureSync("assemble-commit", () =>
+			createOutdoorObjectLayerPayload({
 				baked,
 				domain: sourcePayload.domain,
 				task: request.task,
 			}),
+		);
+		return {
+			kind: "outdoor-object-layer-commit",
+			ownerId: request.ownerId,
+			payload,
 			sourcePayload,
+			stageTimings: [...timing.createSnapshot(), ...texturePlan.stageTimings],
 			staticAuthoredDynamicPlacements:
 				sourcePayload.authoredDynamicPlacements.map((placement) => ({
 					kind: "outdoor-static-object-dynamic-placement",
@@ -151,6 +172,48 @@ export class OpenWorldOutdoorObjectArtifactRunner {
 			texturePlacementSnapshot,
 		};
 	}
+}
+
+class StaticArtifactStageTimer {
+	readonly #timings: OpenWorldStreamingStaticTaskStageTiming[] = [];
+
+	async measure<T>(
+		stage: OpenWorldStreamingStaticTaskStageTiming["stage"],
+		createValue: () => Promise<T>,
+	): Promise<T> {
+		const startedAtMs = nowMs();
+		try {
+			return await createValue();
+		} finally {
+			this.#timings.push({
+				durationMs: nowMs() - startedAtMs,
+				stage,
+			});
+		}
+	}
+
+	measureSync<T>(
+		stage: OpenWorldStreamingStaticTaskStageTiming["stage"],
+		createValue: () => T,
+	): T {
+		const startedAtMs = nowMs();
+		try {
+			return createValue();
+		} finally {
+			this.#timings.push({
+				durationMs: nowMs() - startedAtMs,
+				stage,
+			});
+		}
+	}
+
+	createSnapshot(): readonly OpenWorldStreamingStaticTaskStageTiming[] {
+		return this.#timings;
+	}
+}
+
+function nowMs(): number {
+	return typeof performance !== "undefined" ? performance.now() : Date.now();
 }
 
 function createOutdoorObjectSourceRequest(

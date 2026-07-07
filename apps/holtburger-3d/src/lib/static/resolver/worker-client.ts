@@ -13,11 +13,13 @@ import type {
 	StaticResolverWorkerPort,
 } from "./protocol";
 import {
+	createHostPreparedAssetServiceHandler,
 	createPreparedAssetServiceHandler,
 	type PreparedAssetServiceRequest,
 	type PreparedAssetServiceResponse,
 } from "../../workers/prepared-asset-service";
 import { StandardWorkerPool } from "../../workers/pool";
+import type { RuntimeHost } from "../../host/runtime-contracts";
 
 export class WorkerPoolStaticResolver
 	implements StaticResolver, StaticLandblockSceneLodSourceResolver
@@ -27,6 +29,7 @@ export class WorkerPoolStaticResolver
 	constructor(options: {
 		readonly assetReader: PreparedAssetReader;
 		readonly createWorker: () => StaticResolverWorkerPort;
+		readonly host?: RuntimeHost;
 		readonly workerCount: number;
 	}) {
 		this.#pool = new StandardStaticResolverPool(options);
@@ -73,12 +76,15 @@ class StandardStaticResolverPool {
 	constructor(options: {
 		readonly assetReader: PreparedAssetReader;
 		readonly createWorker: () => StaticResolverWorkerPort;
+		readonly host?: RuntimeHost;
 		readonly workerCount: number;
 	}) {
 		this.#pool = new StandardWorkerPool({
 			createWorker: options.createWorker,
 			requestIdPrefix: "resolver-job",
-			serviceHandler: createPreparedAssetServiceHandler(options.assetReader),
+			serviceHandler: options.host
+				? createHostPreparedAssetServiceHandler(options.host)
+				: createPreparedAssetServiceHandler(options.assetReader),
 			size: options.workerCount,
 		});
 	}

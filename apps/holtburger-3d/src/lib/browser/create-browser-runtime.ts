@@ -17,6 +17,7 @@ import {
 	DEFAULT_BROWSER_RUNTIME_PIPELINE,
 	type BrowserRuntimePipelineMode,
 } from "../systems/open-world-streaming";
+import type { OpenWorldStreamingStaticPublicationMode } from "../systems/open-world-streaming/composition/open-world-streaming-controller";
 import type { OpenWorldStreamingBoundaryAdapters } from "../systems/open-world-streaming/adapters";
 import { CompositeStaticBakeResourceProvider } from "../static/bake/resources";
 import { StaticCoordinator } from "../static/coordinator/static-coordinator";
@@ -51,6 +52,7 @@ const DEFAULT_TEXTURE_PACKING_WORKER_COUNT = 2;
 
 export interface CreateBrowserRuntimeOptions {
 	readonly runtimePipeline?: BrowserRuntimePipelineMode;
+	readonly staticPublicationMode?: OpenWorldStreamingStaticPublicationMode;
 }
 
 export function createBrowserRuntime(
@@ -70,6 +72,7 @@ export function createBrowserRuntime(
 				host,
 				renderer,
 			}),
+			staticPublicationMode: options.staticPublicationMode,
 		});
 	}
 
@@ -130,6 +133,7 @@ function createOpenWorldStreamingBoundaryAdapters(options: {
 				createWorkerStaticResolver(
 					options.assetService,
 					DEFAULT_STATIC_RESOLVER_WORKER_COUNT,
+					{ host: options.host },
 				),
 			createTexturePacker: () =>
 				createWorkerTexturePacker(DEFAULT_TEXTURE_PACKING_WORKER_COUNT),
@@ -182,6 +186,7 @@ interface DynamicVisualRecipeBrowserWorker extends DynamicVisualRecipeWorkerPort
 
 export interface WorkerStaticResolverFactories {
 	readonly createWorker?: () => StaticResolverBrowserWorker;
+	readonly host?: ReturnType<typeof createBrowserRuntimeHost>;
 }
 
 export function createWorkerStaticResolver(
@@ -196,6 +201,7 @@ export function createWorkerStaticResolver(
 	return new WorkerPoolStaticResolver({
 		assetReader,
 		createWorker,
+		host: factories.host,
 		workerCount,
 	});
 }

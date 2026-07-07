@@ -1,18 +1,25 @@
 import type {
 	OpenWorldStreamingAtlasInspectionSnapshot,
 	OpenWorldStreamingDiagnosticsSnapshot,
+	OpenWorldStreamingStaticTaskStageTiming,
+	OpenWorldStreamingStaticTaskDiagnostics,
 } from "../diagnostics/contracts";
 import type { Renderer } from "../../../renderer/types";
 import { StaticSceneQuery } from "../../../runtime/static-scene-query";
 import { planStaticDemand } from "../../../static/demand-planner";
 import type {
+	EnvCellSystemPayloadSummary,
 	OutdoorStaticObjectsPayloadSummary,
+	StaticDemandPlan,
 	StaticBaker,
+	StaticLandblockSceneLodResolution,
+	StaticLandblockSceneLodSourceRequest,
 	StaticLandblockSceneLodSourceResolver,
 	StaticLayerTaskRequest,
 	TerrainStaticScopePayloadSummary,
 } from "../../../static/contracts";
 import { MaterializationOwnerRegistry } from "../owners/owner-registry";
+import type { MaterializationOwnerToken } from "../owners/owner-registry";
 import {
 	createStaticLayerMaterializationOwner,
 	type MaterializationOwnerId,
@@ -26,8 +33,27 @@ import {
 	OpenWorldOutdoorObjectArtifactRunner,
 	type OpenWorldOutdoorObjectLayerCommit,
 } from "../static-layers/outdoor-objects/outdoor-object-artifact-runner";
+import {
+	OpenWorldEnvCellArtifactRunner,
+	type OpenWorldEnvCellSystemLayerCommit,
+} from "../static-layers/env-cells/env-cell-artifact-runner";
 import type { PreparedAssetReader } from "../../../assets/contracts";
 import { applyOpenWorldStreamingTextureCommit } from "../texture-residency/commits/texture-commit-applier";
+import {
+	createEnvCellResourceMembershipIndex,
+	createEnvCellResourceMembershipSnapshot,
+	type EnvCellResourceMembership,
+} from "../../../runtime/env-cell-resource-membership";
+import type {
+	ScenePickHit,
+	ScenePickRequest,
+} from "../../../runtime/scene-query/merged-scene-query-contracts";
+import type { StaticSceneEnvCellBounds } from "../../../runtime/scene-query/contracts";
+import type { TexturePacker } from "../../../textures/packing/packer";
+import {
+	DirectOpenWorldObjectVisualAtlasBuilder,
+	type OpenWorldObjectVisualAtlasBuilder,
+} from "../texture-residency/placement/object-visual-atlas-builder";
 
 export interface OpenWorldStreamingControllerOptions {
 	readonly assetReader: PreparedAssetReader;
@@ -38,11 +64,20 @@ export interface OpenWorldStreamingControllerOptions {
 		| "setOutdoorBuildingsLayer"
 		| "setOutdoorExplicitObjectsLayer"
 		| "setOutdoorGeneratedSceneryLayer"
+		| "setEnvCellSystemLayer"
 		| "setTerrainLayer"
 	>;
+	readonly createTexturePacker: () => TexturePacker;
+	readonly createObjectVisualAtlasBuilder?: () => OpenWorldObjectVisualAtlasBuilder;
 	readonly createStaticBaker: () => StaticBaker;
 	readonly createStaticResolver: () => StaticLandblockSceneLodSourceResolver;
+	readonly staticPublicationMode?: OpenWorldStreamingStaticPublicationMode;
 }
+
+export type OpenWorldStreamingStaticPublicationMode =
+	| "normal"
+	| "suppress-dense-renderer"
+	| "defer-dense-renderer-until-ready";
 
 export interface OpenWorldStreamingTerrainInterest {
 	readonly anchorLandblockId: number;
@@ -54,6 +89,7 @@ export interface OpenWorldStreamingStaticInterest {
 	readonly anchorLandblockId: number;
 	readonly lod: {
 		readonly buildings: number;
+		readonly envCells: number;
 		readonly explicitObjects: number;
 		readonly generatedScenery: number;
 		readonly terrain: number;
@@ -62,6 +98,7 @@ export interface OpenWorldStreamingStaticInterest {
 }
 
 export interface OpenWorldStreamingControllerSnapshot {
+	readonly envCells: OpenWorldStreamingEnvCellProgressSnapshot;
 	readonly outdoorObjects: OpenWorldStreamingOutdoorObjectProgressSnapshot;
 	readonly staticSceneQuery: ReturnType<StaticSceneQuery["createSnapshot"]>;
 	readonly staticSceneQueryOverview: ReturnType<
@@ -92,15 +129,100 @@ interface OpenWorldStreamingOutdoorObjectProgressSnapshot {
 	readonly sourceDrawUnits: number;
 }
 
+interface OpenWorldStreamingEnvCellProgressSnapshot {
+	readonly baking: number;
+	readonly committed: number;
+	readonly failed: number;
+	readonly installedDrawUnits: number;
+	readonly latestEnvCellSystemPayload: EnvCellSystemPayloadSummary | null;
+	readonly requested: number;
+	readonly resolving: number;
+	readonly sourceDrawUnits: number;
+}
+
+interface ActiveStaticTaskTiming {
+	readonly domain: StaticLayerTaskRequest["domain"];
+	readonly ownerId: MaterializationOwnerId;
+	readonly phase: "materializing" | "applying";
+	readonly startedAtMs: number;
+	readonly taskId: string;
+}
+
+interface StaticTaskTiming {
+	readonly applyMs: number;
+	readonly domain: StaticLayerTaskRequest["domain"];
+	readonly drawUnits: number;
+	readonly durationMs: number;
+	readonly error: string | null;
+	readonly ownerId: MaterializationOwnerId;
+	readonly stages: readonly OpenWorldStreamingStaticTaskStageTiming[];
+	readonly status: "committed" | "failed" | "stale-rejected";
+	readonly taskId: string;
+}
+
+interface StaticLayerRunRequest {
+	readonly owner: {
+		readonly id: MaterializationOwnerId;
+	};
+	readonly task: StaticLayerTaskRequest;
+	readonly token: MaterializationOwnerToken;
+}
+
+const STATIC_MATERIALIZATION_CONCURRENCY = 1;
+const DEFAULT_STATIC_PUBLICATION_MODE: OpenWorldStreamingStaticPublicationMode =
+	"defer-dense-renderer-until-ready";
+
 export class OpenWorldStreamingController {
 	readonly #owners = new MaterializationOwnerRegistry();
 	readonly #options: OpenWorldStreamingControllerOptions;
 	readonly #renderer: OpenWorldStreamingControllerOptions["renderer"];
 	readonly #staticSceneQuery = new StaticSceneQuery();
+	#envCellResourceMembershipByLandblock = createEnvCellResourceMembershipIndex(
+		[],
+	);
+	#envCellRunner: OpenWorldEnvCellArtifactRunner | null = null;
 	#outdoorObjectRunner: OpenWorldOutdoorObjectArtifactRunner | null = null;
+	#staticSourceResolver: StaticLandblockSceneLodSourceResolver | null = null;
+	readonly #sourceResolutionCache = new OpenWorldStaticSourceResolutionCache(
+		(request) => this.#requireStaticSourceResolver().resolveSource(request),
+	);
 	#terrainRunner: OpenWorldTerrainArtifactRunner | null = null;
+	#objectVisualAtlasBuilder: OpenWorldObjectVisualAtlasBuilder | null = null;
+	#texturePacker: TexturePacker | null = null;
+	readonly #deferredOutdoorRendererLayers = {
+		buildings: new Map<
+			number,
+			Extract<
+				OpenWorldOutdoorObjectLayerCommit["payload"],
+				{ readonly kind: "outdoor-buildings" }
+			>
+		>(),
+		explicitObjects: new Map<
+			number,
+			Extract<
+				OpenWorldOutdoorObjectLayerCommit["payload"],
+				{ readonly kind: "outdoor-explicit-objects" }
+			>
+		>(),
+		generatedScenery: new Map<
+			number,
+			Extract<
+				OpenWorldOutdoorObjectLayerCommit["payload"],
+				{ readonly kind: "outdoor-generated-scenery" }
+			>
+		>(),
+	};
+	readonly #deferredEnvCellRendererLayers = new Map<
+		number,
+		OpenWorldEnvCellSystemLayerCommit["payload"]
+	>();
 	readonly #textureClaims = new OpenWorldTextureClaimRegistry();
+	readonly #activeStaticTasksByTaskId = new Map<
+		string,
+		ActiveStaticTaskTiming
+	>();
 	#disposed = false;
+	#recentStaticTaskTimings: StaticTaskTiming[] = [];
 	#activeSceneInterest = false;
 	#runSequence = 0;
 	#terrainProgress: OpenWorldStreamingTerrainProgressSnapshot = {
@@ -119,6 +241,16 @@ export class OpenWorldStreamingController {
 		failed: 0,
 		installedDrawUnits: 0,
 		latestOutdoorObjectPayload: null,
+		requested: 0,
+		resolving: 0,
+		sourceDrawUnits: 0,
+	};
+	#envCellProgress: OpenWorldStreamingEnvCellProgressSnapshot = {
+		baking: 0,
+		committed: 0,
+		failed: 0,
+		installedDrawUnits: 0,
+		latestEnvCellSystemPayload: null,
 		requested: 0,
 		resolving: 0,
 		sourceDrawUnits: 0,
@@ -143,6 +275,7 @@ export class OpenWorldStreamingController {
 						anchorLandblockId: interest.anchorLandblockId,
 						lod: {
 							buildings: -1,
+							envCells: -1,
 							explicitObjects: -1,
 							generatedScenery: -1,
 							terrain: interest.radius,
@@ -162,6 +295,10 @@ export class OpenWorldStreamingController {
 		if (!interest) {
 			this.#terrainProgress = createEmptyTerrainProgress();
 			this.#outdoorObjectProgress = createEmptyOutdoorObjectProgress();
+			this.#envCellProgress = createEmptyEnvCellProgress();
+			this.#activeStaticTasksByTaskId.clear();
+			this.#envCellResourceMembershipByLandblock =
+				createEnvCellResourceMembershipIndex([]);
 			this.#renderer.setStaticRenderAnchorLandblockId(null);
 			return;
 		}
@@ -176,8 +313,46 @@ export class OpenWorldStreamingController {
 		return this.#staticSceneQuery.queryTerrainLandblockBounds(options);
 	}
 
+	queryEnvCellBounds(options: {
+		readonly envCellId: number;
+		readonly landblockId: number;
+	}): StaticSceneEnvCellBounds | null {
+		return this.#staticSceneQuery.queryEnvCellBounds(options);
+	}
+
+	queryEnvCellResourceMembership(options: {
+		readonly envCellId: number;
+		readonly landblockId: number;
+	}): EnvCellResourceMembership | null {
+		return (
+			this.#envCellResourceMembershipByLandblock
+				.get(options.landblockId)
+				?.get(options.envCellId) ?? null
+		);
+	}
+
+	pickSceneRay(request: ScenePickRequest): ScenePickHit | null {
+		const staticHit = this.#staticSceneQuery.pickRay({
+			context: request.context,
+			filters: request.filters,
+			ray: request.ray,
+		});
+		if (!staticHit) {
+			return null;
+		}
+		return {
+			bounds: staticHit.bounds,
+			distance: staticHit.distance,
+			hitPoint: staticHit.hitPoint,
+			kind: "scene-pick-hit",
+			source: "static",
+			staticHit,
+		};
+	}
+
 	createSnapshot(): OpenWorldStreamingControllerSnapshot {
 		return {
+			envCells: this.#envCellProgress,
 			outdoorObjects: this.#outdoorObjectProgress,
 			staticSceneQuery: this.#staticSceneQuery.createSnapshot(),
 			staticSceneQueryOverview: this.#staticSceneQuery.createOverviewSnapshot(),
@@ -194,10 +369,13 @@ export class OpenWorldStreamingController {
 					this.#terrainProgress.resolving +
 					this.#terrainProgress.baking +
 					this.#outdoorObjectProgress.resolving +
-					this.#outdoorObjectProgress.baking,
+					this.#outdoorObjectProgress.baking +
+					this.#envCellProgress.resolving +
+					this.#envCellProgress.baking,
 				ready:
 					this.#terrainProgress.committed +
-					this.#outdoorObjectProgress.committed,
+					this.#outdoorObjectProgress.committed +
+					this.#envCellProgress.committed,
 				staleRejected: 0,
 			},
 			compatibilityShims: [
@@ -219,6 +397,7 @@ export class OpenWorldStreamingController {
 			},
 			pipeline: {
 				selectedRuntimePipeline: "open-world-streaming",
+				staticPublicationMode: this.#staticPublicationMode(),
 				status: this.#disposed
 					? "disposed"
 					: this.#activeSceneInterest
@@ -228,7 +407,8 @@ export class OpenWorldStreamingController {
 			sceneCommits: {
 				applied:
 					this.#terrainProgress.committed +
-					this.#outdoorObjectProgress.committed,
+					this.#outdoorObjectProgress.committed +
+					this.#envCellProgress.committed,
 				pending: Math.max(
 					0,
 					this.#terrainProgress.requested -
@@ -236,7 +416,10 @@ export class OpenWorldStreamingController {
 						this.#terrainProgress.failed +
 						this.#outdoorObjectProgress.requested -
 						this.#outdoorObjectProgress.committed -
-						this.#outdoorObjectProgress.failed,
+						this.#outdoorObjectProgress.failed +
+						this.#envCellProgress.requested -
+						this.#envCellProgress.committed -
+						this.#envCellProgress.failed,
 				),
 			},
 			textureResidency: {
@@ -244,6 +427,15 @@ export class OpenWorldStreamingController {
 				claimCount: textureSnapshot.claimCount,
 				pageBuildsInFlight: textureSnapshot.pageBuildsInFlight,
 			},
+			staticTasks: createStaticTaskDiagnostics({
+				active: [...this.#activeStaticTasksByTaskId.values()],
+				nowMs: nowMs(),
+				recent: this.#recentStaticTaskTimings,
+				requested:
+					this.#terrainProgress.requested +
+					this.#outdoorObjectProgress.requested +
+					this.#envCellProgress.requested,
+			}),
 		};
 	}
 
@@ -262,17 +454,27 @@ export class OpenWorldStreamingController {
 
 	dispose(): void {
 		this.#disposed = true;
+		this.#objectVisualAtlasBuilder?.dispose?.();
+		this.#texturePacker?.dispose?.();
 	}
 
 	async #runStaticInterest(
 		runId: number,
 		interest: OpenWorldStreamingStaticInterest,
 	): Promise<void> {
-		const tasks = createStaticLayerTasks(interest);
+		const staticDemandPlan = createStaticDemandPlan(interest);
+		this.#sourceResolutionCache.reset(staticDemandPlan.sourceRequests);
+		const tasks = staticDemandPlan.layerTasks.filter(
+			(task) =>
+				task.domain === "outdoor-terrain" ||
+				isOutdoorObjectTask(task) ||
+				isEnvCellTask(task),
+		);
 		const terrainTasks = tasks.filter(
 			(task) => task.domain === "outdoor-terrain",
 		);
 		const outdoorObjectTasks = tasks.filter(isOutdoorObjectTask);
+		const envCellTasks = tasks.filter(isEnvCellTask);
 		this.#terrainProgress = {
 			...createEmptyTerrainProgress(),
 			requested: terrainTasks.length,
@@ -281,6 +483,11 @@ export class OpenWorldStreamingController {
 			...createEmptyOutdoorObjectProgress(),
 			requested: outdoorObjectTasks.length,
 		};
+		this.#envCellProgress = {
+			...createEmptyEnvCellProgress(),
+			requested: envCellTasks.length,
+		};
+		this.#clearDeferredDenseRendererLayers();
 		const targetOwnerIds = new Set<MaterializationOwnerId>();
 		const requests = tasks.map((task) => {
 			const owner = createStaticLayerMaterializationOwner({
@@ -300,86 +507,279 @@ export class OpenWorldStreamingController {
 			}
 		}
 
-		for (const request of requests) {
-			if (!this.#isCurrentRun(runId)) {
-				return;
-			}
-			this.#terrainProgress = {
-				...this.#terrainProgress,
-				resolving:
-					request.task.domain === "outdoor-terrain"
-						? this.#terrainProgress.resolving + 1
-						: this.#terrainProgress.resolving,
-			};
-			this.#outdoorObjectProgress = {
-				...this.#outdoorObjectProgress,
-				resolving: isOutdoorObjectTask(request.task)
-					? this.#outdoorObjectProgress.resolving + 1
-					: this.#outdoorObjectProgress.resolving,
-			};
-			try {
-				const commit =
-					request.task.domain === "outdoor-terrain"
-						? await this.#requireTerrainRunner().run({
+		let nextRequestIndex = 0;
+		const workerCount = Math.min(
+			STATIC_MATERIALIZATION_CONCURRENCY,
+			requests.length,
+		);
+		await Promise.all(
+			Array.from({ length: workerCount }, async () => {
+				while (this.#isCurrentRun(runId)) {
+					const request = requests[nextRequestIndex];
+					nextRequestIndex += 1;
+					if (!request) {
+						return;
+					}
+					await this.#runStaticLayerRequest(runId, interest, request);
+				}
+			}),
+		);
+	}
+
+	async #runStaticLayerRequest(
+		runId: number,
+		interest: OpenWorldStreamingStaticInterest,
+		request: StaticLayerRunRequest,
+	): Promise<void> {
+		if (!this.#isCurrentRun(runId)) {
+			return;
+		}
+		const startedAtMs = nowMs();
+		this.#activeStaticTasksByTaskId.set(request.task.taskId, {
+			domain: request.task.domain,
+			ownerId: request.owner.id,
+			phase: "materializing",
+			startedAtMs,
+			taskId: request.task.taskId,
+		});
+		this.#terrainProgress = {
+			...this.#terrainProgress,
+			resolving:
+				request.task.domain === "outdoor-terrain"
+					? this.#terrainProgress.resolving + 1
+					: this.#terrainProgress.resolving,
+		};
+		this.#outdoorObjectProgress = {
+			...this.#outdoorObjectProgress,
+			resolving: isOutdoorObjectTask(request.task)
+				? this.#outdoorObjectProgress.resolving + 1
+				: this.#outdoorObjectProgress.resolving,
+		};
+		this.#envCellProgress = {
+			...this.#envCellProgress,
+			resolving: isEnvCellTask(request.task)
+				? this.#envCellProgress.resolving + 1
+				: this.#envCellProgress.resolving,
+		};
+		try {
+			const commit =
+				request.task.domain === "outdoor-terrain"
+					? await this.#requireTerrainRunner().run({
+							ownerId: request.owner.id,
+							task: request.task,
+						})
+					: isOutdoorObjectTask(request.task)
+						? await this.#requireOutdoorObjectRunner().run({
 								ownerId: request.owner.id,
 								task: request.task,
 							})
-						: isOutdoorObjectTask(request.task)
-							? await this.#requireOutdoorObjectRunner().run({
+						: isEnvCellTask(request.task)
+							? await this.#requireEnvCellRunner().run({
 									ownerId: request.owner.id,
 									task: request.task,
 								})
 							: null;
-				if (
-					!this.#isCurrentRun(runId) ||
-					!this.#owners.isCurrent({
-						ownerId: request.owner.id,
-						token: request.token,
-					})
-				) {
-					return;
-				}
-				if (commit?.kind === "terrain-layer-commit") {
-					this.#applyTerrainCommit(commit, interest.anchorLandblockId);
-				} else if (commit?.kind === "outdoor-object-layer-commit") {
-					this.#applyOutdoorObjectCommit(commit);
-				}
-			} catch (error) {
-				if (!this.#isCurrentRun(runId)) {
-					return;
-				}
-				console.warn("[holtburger-3d][open-world-static]", error);
-				if (request.task.domain === "outdoor-terrain") {
-					this.#terrainProgress = {
-						...this.#terrainProgress,
-						failed: this.#terrainProgress.failed + 1,
-					};
-				} else if (isOutdoorObjectTask(request.task)) {
-					this.#outdoorObjectProgress = {
-						...this.#outdoorObjectProgress,
-						failed: this.#outdoorObjectProgress.failed + 1,
-					};
-				}
-			} finally {
-				if (this.#isCurrentRun(runId)) {
-					this.#terrainProgress = {
-						...this.#terrainProgress,
-						baking: 0,
-						resolving:
-							request.task.domain === "outdoor-terrain"
-								? Math.max(0, this.#terrainProgress.resolving - 1)
-								: this.#terrainProgress.resolving,
-					};
-					this.#outdoorObjectProgress = {
-						...this.#outdoorObjectProgress,
-						baking: 0,
-						resolving: isOutdoorObjectTask(request.task)
-							? Math.max(0, this.#outdoorObjectProgress.resolving - 1)
-							: this.#outdoorObjectProgress.resolving,
-					};
-				}
+			if (
+				!this.#isCurrentRun(runId) ||
+				!this.#owners.isCurrent({
+					ownerId: request.owner.id,
+					token: request.token,
+				})
+			) {
+				this.#recordStaticTaskTiming({
+					applyMs: 0,
+					drawUnits: 0,
+					durationMs: nowMs() - startedAtMs,
+					error: null,
+					request,
+					stages: getStaticCommitStageTimings(commit),
+					status: "stale-rejected",
+				});
+				return;
+			}
+			if (commit?.kind === "terrain-layer-commit") {
+				this.#recordApplyTiming({
+					apply: () =>
+						this.#applyTerrainCommit(commit, interest.anchorLandblockId),
+					drawUnits: commit.payload.drawUnits.length,
+					request,
+					stages: getStaticCommitStageTimings(commit),
+					startedAtMs,
+				});
+			} else if (commit?.kind === "outdoor-object-layer-commit") {
+				this.#recordApplyTiming({
+					apply: () => this.#applyOutdoorObjectCommit(commit),
+					drawUnits: commit.payload.drawUnits.length,
+					request,
+					stages: getStaticCommitStageTimings(commit),
+					startedAtMs,
+				});
+			} else if (commit?.kind === "env-cell-system-layer-commit") {
+				this.#recordApplyTiming({
+					apply: () => this.#applyEnvCellCommit(commit),
+					drawUnits:
+						commit.payload.structuredInteriorDrawUnits.length +
+						commit.payload.envCellStaticObjectDrawUnits.length,
+					request,
+					stages: getStaticCommitStageTimings(commit),
+					startedAtMs,
+				});
+			}
+		} catch (error) {
+			if (!this.#isCurrentRun(runId)) {
+				return;
+			}
+			this.#recordStaticTaskTiming({
+				applyMs: 0,
+				drawUnits: 0,
+				durationMs: nowMs() - startedAtMs,
+				error: stringifyError(error),
+				request,
+				stages: [],
+				status: "failed",
+			});
+			console.warn("[holtburger-3d][open-world-static]", error);
+			if (request.task.domain === "outdoor-terrain") {
+				this.#terrainProgress = {
+					...this.#terrainProgress,
+					failed: this.#terrainProgress.failed + 1,
+				};
+			} else if (isOutdoorObjectTask(request.task)) {
+				this.#outdoorObjectProgress = {
+					...this.#outdoorObjectProgress,
+					failed: this.#outdoorObjectProgress.failed + 1,
+				};
+			} else if (isEnvCellTask(request.task)) {
+				this.#envCellProgress = {
+					...this.#envCellProgress,
+					failed: this.#envCellProgress.failed + 1,
+				};
+			}
+		} finally {
+			if (this.#isCurrentRun(runId)) {
+				this.#activeStaticTasksByTaskId.delete(request.task.taskId);
+				this.#terrainProgress = {
+					...this.#terrainProgress,
+					baking: 0,
+					resolving:
+						request.task.domain === "outdoor-terrain"
+							? Math.max(0, this.#terrainProgress.resolving - 1)
+							: this.#terrainProgress.resolving,
+				};
+				this.#outdoorObjectProgress = {
+					...this.#outdoorObjectProgress,
+					baking: 0,
+					resolving: isOutdoorObjectTask(request.task)
+						? Math.max(0, this.#outdoorObjectProgress.resolving - 1)
+						: this.#outdoorObjectProgress.resolving,
+				};
+				this.#envCellProgress = {
+					...this.#envCellProgress,
+					baking: 0,
+					resolving: isEnvCellTask(request.task)
+						? Math.max(0, this.#envCellProgress.resolving - 1)
+						: this.#envCellProgress.resolving,
+				};
 			}
 		}
+	}
+
+	#recordApplyTiming(options: {
+		readonly apply: () => void;
+		readonly drawUnits: number;
+		readonly request: {
+			readonly owner: { readonly id: MaterializationOwnerId };
+			readonly task: StaticLayerTaskRequest;
+		};
+		readonly stages: readonly OpenWorldStreamingStaticTaskStageTiming[];
+		readonly startedAtMs: number;
+	}): void {
+		const applyStartedAtMs = nowMs();
+		this.#activeStaticTasksByTaskId.set(options.request.task.taskId, {
+			domain: options.request.task.domain,
+			ownerId: options.request.owner.id,
+			phase: "applying",
+			startedAtMs: applyStartedAtMs,
+			taskId: options.request.task.taskId,
+		});
+		options.apply();
+		this.#publishDeferredDenseRendererLayersIfStaticReady();
+		const completedAtMs = nowMs();
+		this.#recordStaticTaskTiming({
+			applyMs: completedAtMs - applyStartedAtMs,
+			drawUnits: options.drawUnits,
+			durationMs: completedAtMs - options.startedAtMs,
+			error: null,
+			request: options.request,
+			stages: options.stages,
+			status: "committed",
+		});
+	}
+
+	#recordStaticTaskTiming(input: {
+		readonly applyMs: number;
+		readonly drawUnits: number;
+		readonly durationMs: number;
+		readonly error: string | null;
+		readonly request: {
+			readonly owner: { readonly id: MaterializationOwnerId };
+			readonly task: StaticLayerTaskRequest;
+		};
+		readonly stages: readonly OpenWorldStreamingStaticTaskStageTiming[];
+		readonly status: StaticTaskTiming["status"];
+	}): void {
+		this.#recentStaticTaskTimings = [
+			...this.#recentStaticTaskTimings,
+			{
+				applyMs: input.applyMs,
+				domain: input.request.task.domain,
+				drawUnits: input.drawUnits,
+				durationMs: input.durationMs,
+				error: input.error,
+				ownerId: input.request.owner.id,
+				stages: input.stages,
+				status: input.status,
+				taskId: input.request.task.taskId,
+			},
+		].slice(-80);
+	}
+
+	#applyEnvCellCommit(commit: OpenWorldEnvCellSystemLayerCommit): void {
+		for (const textureCommit of commit.textureCommits) {
+			applyOpenWorldStreamingTextureCommit(this.#renderer, textureCommit, {
+				revision:
+					this.#terrainProgress.committed +
+					this.#outdoorObjectProgress.committed +
+					this.#envCellProgress.committed +
+					1,
+			});
+		}
+		this.#staticSceneQuery.setEnvCellSystemLayer(commit.payload);
+		this.#envCellResourceMembershipByLandblock =
+			createEnvCellResourceMembershipIndex([
+				...queryEnvCellResourceMembershipExceptLandblock(
+					this.#envCellResourceMembershipByLandblock,
+					commit.payload.landblockId,
+				),
+				...createEnvCellResourceMembershipSnapshot([
+					...commit.payload.structuredInteriorDrawUnits,
+					...commit.payload.envCellStaticObjectDrawUnits,
+				]),
+			]);
+		this.#publishOrDeferEnvCellRendererLayer(commit.payload);
+		const drawUnitCount =
+			commit.payload.structuredInteriorDrawUnits.length +
+			commit.payload.envCellStaticObjectDrawUnits.length;
+		this.#envCellProgress = {
+			...this.#envCellProgress,
+			committed: this.#envCellProgress.committed + 1,
+			installedDrawUnits:
+				this.#envCellProgress.installedDrawUnits + drawUnitCount,
+			latestEnvCellSystemPayload: createEnvCellPayloadSummary(
+				commit.sourcePayload,
+			),
+			sourceDrawUnits: this.#envCellProgress.sourceDrawUnits + drawUnitCount,
+		};
 	}
 
 	#applyOutdoorObjectCommit(commit: OpenWorldOutdoorObjectLayerCommit): void {
@@ -388,6 +788,7 @@ export class OpenWorldStreamingController {
 				revision:
 					this.#terrainProgress.committed +
 					this.#outdoorObjectProgress.committed +
+					this.#envCellProgress.committed +
 					1,
 			});
 		}
@@ -397,20 +798,13 @@ export class OpenWorldStreamingController {
 		});
 		switch (commit.payload.kind) {
 			case "outdoor-buildings":
-				this.#renderer.setOutdoorBuildingsLayer(
-					commit.payload.landblockId,
-					commit.payload,
-				);
+				this.#publishOrDeferOutdoorBuildingsRendererLayer(commit.payload);
 				break;
 			case "outdoor-explicit-objects":
-				this.#renderer.setOutdoorExplicitObjectsLayer(
-					commit.payload.landblockId,
-					commit.payload,
-				);
+				this.#publishOrDeferOutdoorExplicitObjectsRendererLayer(commit.payload);
 				break;
 			case "outdoor-generated-scenery":
-				this.#renderer.setOutdoorGeneratedSceneryLayer(
-					commit.payload.landblockId,
+				this.#publishOrDeferOutdoorGeneratedSceneryRendererLayer(
 					commit.payload,
 				);
 				break;
@@ -464,6 +858,142 @@ export class OpenWorldStreamingController {
 		};
 	}
 
+	#publishOrDeferEnvCellRendererLayer(
+		payload: OpenWorldEnvCellSystemLayerCommit["payload"],
+	): void {
+		if (this.#staticPublicationMode() === "suppress-dense-renderer") {
+			return;
+		}
+		if (this.#shouldDeferDenseRendererPublication()) {
+			this.#deferredEnvCellRendererLayers.set(payload.landblockId, payload);
+			return;
+		}
+		this.#renderer.setEnvCellSystemLayer(payload.landblockId, payload);
+	}
+
+	#publishOrDeferOutdoorBuildingsRendererLayer(
+		payload: Extract<
+			OpenWorldOutdoorObjectLayerCommit["payload"],
+			{ readonly kind: "outdoor-buildings" }
+		>,
+	): void {
+		if (this.#staticPublicationMode() === "suppress-dense-renderer") {
+			return;
+		}
+		if (this.#shouldDeferDenseRendererPublication()) {
+			this.#deferredOutdoorRendererLayers.buildings.set(
+				payload.landblockId,
+				payload,
+			);
+			return;
+		}
+		this.#renderer.setOutdoorBuildingsLayer(payload.landblockId, payload);
+	}
+
+	#publishOrDeferOutdoorExplicitObjectsRendererLayer(
+		payload: Extract<
+			OpenWorldOutdoorObjectLayerCommit["payload"],
+			{ readonly kind: "outdoor-explicit-objects" }
+		>,
+	): void {
+		if (this.#staticPublicationMode() === "suppress-dense-renderer") {
+			return;
+		}
+		if (this.#shouldDeferDenseRendererPublication()) {
+			this.#deferredOutdoorRendererLayers.explicitObjects.set(
+				payload.landblockId,
+				payload,
+			);
+			return;
+		}
+		this.#renderer.setOutdoorExplicitObjectsLayer(payload.landblockId, payload);
+	}
+
+	#publishOrDeferOutdoorGeneratedSceneryRendererLayer(
+		payload: Extract<
+			OpenWorldOutdoorObjectLayerCommit["payload"],
+			{ readonly kind: "outdoor-generated-scenery" }
+		>,
+	): void {
+		if (this.#staticPublicationMode() === "suppress-dense-renderer") {
+			return;
+		}
+		if (this.#shouldDeferDenseRendererPublication()) {
+			this.#deferredOutdoorRendererLayers.generatedScenery.set(
+				payload.landblockId,
+				payload,
+			);
+			return;
+		}
+		this.#renderer.setOutdoorGeneratedSceneryLayer(
+			payload.landblockId,
+			payload,
+		);
+	}
+
+	#publishDeferredDenseRendererLayersIfStaticReady(): void {
+		if (
+			this.#staticPublicationMode() !== "defer-dense-renderer-until-ready" ||
+			!this.#allRequestedStaticTasksSettled()
+		) {
+			return;
+		}
+		for (const [landblockId, payload] of this.#deferredOutdoorRendererLayers
+			.buildings) {
+			this.#renderer.setOutdoorBuildingsLayer(landblockId, payload);
+		}
+		for (const [landblockId, payload] of this.#deferredOutdoorRendererLayers
+			.explicitObjects) {
+			this.#renderer.setOutdoorExplicitObjectsLayer(landblockId, payload);
+		}
+		for (const [landblockId, payload] of this.#deferredOutdoorRendererLayers
+			.generatedScenery) {
+			this.#renderer.setOutdoorGeneratedSceneryLayer(landblockId, payload);
+		}
+		for (const [landblockId, payload] of this.#deferredEnvCellRendererLayers) {
+			this.#renderer.setEnvCellSystemLayer(landblockId, payload);
+		}
+		this.#clearDeferredDenseRendererLayers();
+	}
+
+	#shouldDeferDenseRendererPublication(): boolean {
+		return (
+			this.#staticPublicationMode() === "defer-dense-renderer-until-ready" &&
+			!this.#allRequestedStaticTasksSettled()
+		);
+	}
+
+	#allRequestedStaticTasksSettled(): boolean {
+		const requested =
+			this.#terrainProgress.requested +
+			this.#outdoorObjectProgress.requested +
+			this.#envCellProgress.requested;
+		if (requested === 0) {
+			return false;
+		}
+		const settled =
+			this.#terrainProgress.committed +
+			this.#terrainProgress.failed +
+			this.#outdoorObjectProgress.committed +
+			this.#outdoorObjectProgress.failed +
+			this.#envCellProgress.committed +
+			this.#envCellProgress.failed;
+		return settled >= requested;
+	}
+
+	#clearDeferredDenseRendererLayers(): void {
+		this.#deferredOutdoorRendererLayers.buildings.clear();
+		this.#deferredOutdoorRendererLayers.explicitObjects.clear();
+		this.#deferredOutdoorRendererLayers.generatedScenery.clear();
+		this.#deferredEnvCellRendererLayers.clear();
+	}
+
+	#staticPublicationMode(): OpenWorldStreamingStaticPublicationMode {
+		return (
+			this.#options.staticPublicationMode ?? DEFAULT_STATIC_PUBLICATION_MODE
+		);
+	}
+
 	#isCurrentRun(runId: number): boolean {
 		return !this.#disposed && this.#runSequence === runId;
 	}
@@ -473,7 +1003,7 @@ export class OpenWorldStreamingController {
 			this.#terrainRunner = new OpenWorldTerrainArtifactRunner({
 				assetReader: this.#options.assetReader,
 				baker: this.#options.createStaticBaker(),
-				resolver: this.#options.createStaticResolver(),
+				resolver: this.#sourceResolutionCache,
 				textureClaims: this.#textureClaims,
 			});
 		}
@@ -485,11 +1015,51 @@ export class OpenWorldStreamingController {
 			this.#outdoorObjectRunner = new OpenWorldOutdoorObjectArtifactRunner({
 				assetReader: this.#options.assetReader,
 				baker: this.#options.createStaticBaker(),
-				resolver: this.#options.createStaticResolver(),
+				objectVisualAtlasBuilder: this.#requireObjectVisualAtlasBuilder(),
+				resolver: this.#sourceResolutionCache,
 				textureClaims: this.#textureClaims,
 			});
 		}
 		return this.#outdoorObjectRunner;
+	}
+
+	#requireEnvCellRunner(): OpenWorldEnvCellArtifactRunner {
+		if (!this.#envCellRunner) {
+			this.#envCellRunner = new OpenWorldEnvCellArtifactRunner({
+				assetReader: this.#options.assetReader,
+				baker: this.#options.createStaticBaker(),
+				objectVisualAtlasBuilder: this.#requireObjectVisualAtlasBuilder(),
+				resolver: this.#sourceResolutionCache,
+				textureClaims: this.#textureClaims,
+			});
+		}
+		return this.#envCellRunner;
+	}
+
+	#requireObjectVisualAtlasBuilder(): OpenWorldObjectVisualAtlasBuilder {
+		if (!this.#objectVisualAtlasBuilder) {
+			this.#objectVisualAtlasBuilder =
+				this.#options.createObjectVisualAtlasBuilder?.() ??
+				new DirectOpenWorldObjectVisualAtlasBuilder({
+					assetReader: this.#options.assetReader,
+					texturePacker: this.#requireTexturePacker(),
+				});
+		}
+		return this.#objectVisualAtlasBuilder;
+	}
+
+	#requireTexturePacker(): TexturePacker {
+		if (!this.#texturePacker) {
+			this.#texturePacker = this.#options.createTexturePacker();
+		}
+		return this.#texturePacker;
+	}
+
+	#requireStaticSourceResolver(): StaticLandblockSceneLodSourceResolver {
+		if (!this.#staticSourceResolver) {
+			this.#staticSourceResolver = this.#options.createStaticResolver();
+		}
+		return this.#staticSourceResolver;
 	}
 
 	#assertUsable(): void {
@@ -499,9 +1069,9 @@ export class OpenWorldStreamingController {
 	}
 }
 
-function createStaticLayerTasks(
+function createStaticDemandPlan(
 	interest: OpenWorldStreamingStaticInterest,
-): readonly StaticLayerTaskRequest[] {
+): StaticDemandPlan {
 	return planStaticDemand(
 		{
 			location: {
@@ -510,16 +1080,94 @@ function createStaticLayerTasks(
 			},
 			lod: {
 				buildings: interest.lod.buildings,
-				envCells: -1,
+				envCells: interest.lod.envCells,
 				explicitObjects: interest.lod.explicitObjects,
 				generatedScenery: interest.lod.generatedScenery,
 				terrain: interest.lod.terrain,
 			},
 		},
 		interest.revision,
-	).layerTasks.filter(
-		(task) => task.domain === "outdoor-terrain" || isOutdoorObjectTask(task),
 	);
+}
+
+class OpenWorldStaticSourceResolutionCache implements StaticLandblockSceneLodSourceResolver {
+	#plannedRequests: readonly StaticLandblockSceneLodSourceRequest[] = [];
+	readonly #resolveSource: (
+		request: StaticLandblockSceneLodSourceRequest,
+	) => Promise<StaticLandblockSceneLodResolution>;
+	readonly #inFlightByKey = new Map<
+		string,
+		Promise<StaticLandblockSceneLodResolution>
+	>();
+
+	constructor(
+		resolveSource: (
+			request: StaticLandblockSceneLodSourceRequest,
+		) => Promise<StaticLandblockSceneLodResolution>,
+	) {
+		this.#resolveSource = resolveSource;
+	}
+
+	reset(requests: readonly StaticLandblockSceneLodSourceRequest[]): void {
+		this.#plannedRequests = requests;
+		this.#inFlightByKey.clear();
+	}
+
+	resolveSource(
+		request: StaticLandblockSceneLodSourceRequest,
+	): Promise<StaticLandblockSceneLodResolution> {
+		const coalescedRequest = this.#findCoalescedRequest(request);
+		const key = createStaticSourceRequestKey(coalescedRequest);
+		const existing = this.#inFlightByKey.get(key);
+		if (existing) {
+			return existing;
+		}
+		const pending = this.#resolveSource(coalescedRequest);
+		this.#inFlightByKey.set(key, pending);
+		return pending;
+	}
+
+	#findCoalescedRequest(
+		request: StaticLandblockSceneLodSourceRequest,
+	): StaticLandblockSceneLodSourceRequest {
+		return (
+			this.#plannedRequests.find(
+				(candidate) =>
+					candidate.context === request.context &&
+					candidate.landblockId === request.landblockId &&
+					candidate.sourceLod >= request.sourceLod &&
+					request.requestedLayers.every((layer) =>
+						containsStaticSourceLayer(candidate, layer),
+					),
+			) ?? request
+		);
+	}
+}
+
+function containsStaticSourceLayer(
+	request: StaticLandblockSceneLodSourceRequest,
+	layer: StaticLandblockSceneLodSourceRequest["requestedLayers"][number],
+): boolean {
+	return request.requestedLayers.some(
+		(candidate) =>
+			candidate.kind === layer.kind &&
+			candidate.targetOwnerKey.kind === layer.targetOwnerKey.kind &&
+			candidate.targetOwnerKey.landblockId === layer.targetOwnerKey.landblockId,
+	);
+}
+
+function createStaticSourceRequestKey(
+	request: StaticLandblockSceneLodSourceRequest,
+): string {
+	return [
+		request.context,
+		String(request.landblockId),
+		String(request.sourceLod),
+		...request.requestedLayers.map(
+			(layer) =>
+				`${layer.kind}:${layer.targetOwnerKey.kind}:${layer.targetOwnerKey.landblockId}`,
+		),
+	].join("|");
 }
 
 function createEmptyTerrainProgress(): OpenWorldStreamingTerrainProgressSnapshot {
@@ -542,6 +1190,19 @@ function createEmptyOutdoorObjectProgress(): OpenWorldStreamingOutdoorObjectProg
 		failed: 0,
 		installedDrawUnits: 0,
 		latestOutdoorObjectPayload: null,
+		requested: 0,
+		resolving: 0,
+		sourceDrawUnits: 0,
+	};
+}
+
+function createEmptyEnvCellProgress(): OpenWorldStreamingEnvCellProgressSnapshot {
+	return {
+		baking: 0,
+		committed: 0,
+		failed: 0,
+		installedDrawUnits: 0,
+		latestEnvCellSystemPayload: null,
 		requested: 0,
 		resolving: 0,
 		sourceDrawUnits: 0,
@@ -588,12 +1249,130 @@ function createOutdoorObjectPayloadSummary(
 	};
 }
 
+function createEnvCellPayloadSummary(
+	payload: OpenWorldEnvCellSystemLayerCommit["sourcePayload"],
+): EnvCellSystemPayloadSummary {
+	return {
+		acceptedEnvCellCount: payload.acceptedEnvCellIds.length,
+		envCellCount: payload.envCells.length,
+		landblockId: payload.landblock.landblockId,
+		missingRefCount: payload.missingRefs.length,
+		portalCount: payload.envCells.reduce(
+			(total, envCell) => total + envCell.portals.length,
+			0,
+		),
+		portalLinkCount: payload.portalLinks.length,
+		staticObjectPlacementCount: payload.envCells.reduce(
+			(total, envCell) => total + envCell.staticObjectPlacements.length,
+			0,
+		),
+		visibilityDiagnosticCount: payload.visibilityDiagnostics.length,
+		visibleCellCount: payload.envCells.filter(
+			(envCell) => envCell.visibleEnvCellIds.length > 0,
+		).length,
+	};
+}
+
+function createStaticTaskDiagnostics(input: {
+	readonly active: readonly ActiveStaticTaskTiming[];
+	readonly nowMs: number;
+	readonly recent: readonly StaticTaskTiming[];
+	readonly requested: number;
+}): OpenWorldStreamingStaticTaskDiagnostics {
+	const completed = input.recent.filter(
+		(timing) => timing.status === "committed",
+	);
+	const failed = input.recent.filter((timing) => timing.status === "failed");
+	return {
+		active: input.active.map((active) => ({
+			domain: active.domain,
+			elapsedMs: input.nowMs - active.startedAtMs,
+			ownerId: active.ownerId,
+			phase: active.phase,
+			taskId: active.taskId,
+		})),
+		recent: input.recent.map((timing) => ({
+			applyMs: timing.applyMs,
+			domain: timing.domain,
+			drawUnits: timing.drawUnits,
+			durationMs: timing.durationMs,
+			error: timing.error,
+			ownerId: timing.ownerId,
+			stages: timing.stages,
+			status: timing.status,
+			taskId: timing.taskId,
+		})),
+		summary: {
+			active: input.active.length,
+			completed: completed.length,
+			failed: failed.length,
+			maxApplyMs: maxOrZero(input.recent.map((timing) => timing.applyMs)),
+			maxDurationMs: maxOrZero(input.recent.map((timing) => timing.durationMs)),
+			requested: input.requested,
+			totalApplyMs: sum(input.recent.map((timing) => timing.applyMs)),
+			totalDurationMs: sum(input.recent.map((timing) => timing.durationMs)),
+		},
+	};
+}
+
+function getStaticCommitStageTimings(
+	commit:
+		| OpenWorldTerrainLayerCommit
+		| OpenWorldOutdoorObjectLayerCommit
+		| OpenWorldEnvCellSystemLayerCommit
+		| null,
+): readonly OpenWorldStreamingStaticTaskStageTiming[] {
+	if (
+		commit?.kind === "terrain-layer-commit" ||
+		commit?.kind === "outdoor-object-layer-commit" ||
+		commit?.kind === "env-cell-system-layer-commit"
+	) {
+		return commit.stageTimings;
+	}
+	return [];
+}
+
+function queryEnvCellResourceMembershipExceptLandblock(
+	index: ReadonlyMap<number, ReadonlyMap<number, EnvCellResourceMembership>>,
+	landblockId: number,
+): readonly EnvCellResourceMembership[] {
+	return [...index.entries()].flatMap(
+		([candidateLandblockId, membershipsByEnvCell]) =>
+			candidateLandblockId === landblockId
+				? []
+				: [...membershipsByEnvCell.values()],
+	);
+}
+
+function maxOrZero(values: readonly number[]): number {
+	return values.length === 0 ? 0 : Math.max(...values);
+}
+
+function sum(values: readonly number[]): number {
+	return values.reduce((total, value) => total + value, 0);
+}
+
+function nowMs(): number {
+	return globalThis.performance?.now() ?? Date.now();
+}
+
+function stringifyError(error: unknown): string {
+	if (error instanceof Error) {
+		return error.message;
+	}
+	return String(error);
+}
+
 function isOutdoorObjectTask(task: StaticLayerTaskRequest): boolean {
 	return (
 		task.domain === "outdoor-buildings" ||
 		task.domain === "outdoor-explicit-objects" ||
 		task.domain === "outdoor-generated-scenery"
 	);
+}
+
+function isEnvCellTask(task: StaticLayerTaskRequest): boolean {
+	return task.domain === "env-cell-system";
 }
 
 function toStaticLayerOwnerKind(
@@ -609,8 +1388,6 @@ function toStaticLayerOwnerKind(
 		case "outdoor-generated-scenery":
 			return "outdoor-generated-scenery";
 		case "env-cell-system":
-			throw new Error(
-				"Env-cell system is not wired into open-world streaming yet.",
-			);
+			return "env-cell-system";
 	}
 }

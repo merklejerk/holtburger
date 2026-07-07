@@ -61,6 +61,14 @@ describe("OpenWorldTerrainArtifactRunner", () => {
 			textureCommit: null,
 			textureReadiness: [{ bindingId: "terrain-binding:1", kind: "pending" }],
 		});
+		expect(commit.stageTimings.map((timing) => timing.stage)).toEqual([
+			"resolve-source",
+			"create-texture-intents",
+			"texture-placement",
+			"create-bake-resources",
+			"bake",
+			"assemble-commit",
+		]);
 	});
 });
 

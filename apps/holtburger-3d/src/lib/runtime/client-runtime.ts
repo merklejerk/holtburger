@@ -129,50 +129,53 @@ interface RuntimeDebugOverlaySnapshot {
 }
 
 interface RuntimeResourcesOverviewSnapshot {
-	readonly atlas: RuntimeTextureAtlasOverviewSnapshot;
 	readonly renderer: RendererResourceSnapshot;
+	readonly textureResidency: RuntimeTextureResidencyOverviewSnapshot;
 }
 
-interface RuntimeTextureAtlasOverviewSnapshot {
-	readonly buckets: readonly RuntimeTextureAtlasBucketOverview[];
+interface RuntimeTextureResidencyOverviewSnapshot {
+	readonly buckets: readonly RuntimeTextureBucketOverview[];
 	readonly summary: {
 		readonly activeBucketCount: number;
-		readonly approximateBytes: number;
+		readonly approximateBytes: number | null;
 		readonly bucketCount: number;
-		readonly pageLifecycle: {
-			readonly absorbed: number;
-			readonly created: number;
-			readonly reclaimed: number;
-			readonly retained: number;
+		readonly pageStates: {
+			readonly building: number;
+			readonly planned: number;
+			readonly reclaimable: number;
+			readonly resident: number;
 		};
 		readonly registryEntryCount: number;
 		readonly texturePageCount: number;
 	};
 }
 
-interface RuntimeTextureAtlasBucketOverview {
-	readonly atlasBucketKey: string;
-	readonly bucketId: string;
+interface RuntimeTextureBucketOverview {
+	readonly bucketKey: string;
 	readonly domain: string;
-	readonly pages: readonly RuntimeTextureAtlasPageOverview[];
-	readonly texturePageCount: number;
+	readonly entryCount: number;
+	readonly ownerCount: number;
+	readonly pages: readonly RuntimeTexturePageOverview[];
+	readonly pageCount: number;
+	readonly purpose: string;
+	readonly scope: string;
 	readonly uniqueSourceCount: number;
 }
 
-export interface RuntimeTextureAtlasPageOverview {
-	readonly atlasBucketKey: string;
-	readonly bucketId: string;
-	readonly bucketLabel: string;
+export interface RuntimeTexturePageOverview {
+	readonly bindingCount: number;
+	readonly bucketKey: string;
 	readonly domain: string;
-	readonly format: string;
-	readonly height: number;
-	readonly packingEfficiency: number;
+	readonly entryCount: number;
+	readonly hasBuildReservation: boolean;
+	readonly ownerCount: number;
+	readonly ownerlessRetainedState: "building" | "planned" | "resident" | null;
+	readonly pageClasses: readonly string[];
 	readonly pageId: string;
-	readonly sampleClass: string;
-	readonly textureCount: number;
-	readonly width: number;
-	readonly wrapS: string;
-	readonly wrapT: string;
+	readonly purposes: readonly string[];
+	readonly scope: string;
+	readonly sourceCount: number;
+	readonly state: "planned" | "building" | "resident" | "reclaimable";
 }
 
 export interface ClientRuntime {

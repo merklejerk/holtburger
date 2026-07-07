@@ -5,7 +5,10 @@ import type {
 	TextureKey,
 	TexturePageClass,
 } from "../../../../textures/identity";
-import { createOpenWorldTextureBucketKey } from "./bucket-key";
+import {
+	createOpenWorldTextureBucketKey,
+	parseOpenWorldTextureBucketKey,
+} from "./bucket-key";
 import {
 	OpenWorldTextureClaimRegistry,
 	groupTextureBindingRequirementsByBucket,
@@ -14,6 +17,23 @@ import {
 import type { MaterializationOwnerId } from "../../owners/owner-id";
 
 describe("OpenWorldTextureClaimRegistry", () => {
+	it("parses texture bucket keys for replacement-native resource inspection", () => {
+		const bucketKey = createOpenWorldTextureBucketKey({
+			domain: "outdoor terrain",
+			purpose: "terrain-color",
+			scope: {
+				kind: "static-owner",
+				ownerId: "terrain owner",
+			},
+		});
+
+		expect(parseOpenWorldTextureBucketKey(bucketKey)).toEqual({
+			domain: "outdoor terrain",
+			purpose: "terrain-color",
+			scope: "static-owner:terrain owner",
+		});
+	});
+
 	it("shares one texture entry across multiple owners", () => {
 		const registry = new OpenWorldTextureClaimRegistry();
 		const bucketKey = createBucketKey("terrain-color");
@@ -113,6 +133,51 @@ describe("OpenWorldTextureClaimRegistry", () => {
 				reclaimable: 1,
 			},
 		});
+	});
+
+	it("creates deterministic snapshots for every retained bucket", () => {
+		const registry = new OpenWorldTextureClaimRegistry();
+		const objectBucketKey = createBucketKey("object-base-color");
+		const terrainBucketKey = createBucketKey("terrain-color");
+		const objectEntrySnapshot = registry.retainTextureBindings(
+			ownerId("owner:object"),
+			objectBucketKey,
+			[createBinding("object", objectBucketKey)],
+		);
+		const terrainEntrySnapshot = registry.retainTextureBindings(
+			ownerId("owner:terrain"),
+			terrainBucketKey,
+			[createBinding("terrain-color", terrainBucketKey)],
+		);
+		registry.createPage({
+			bucketKey: terrainBucketKey,
+			entryIds: [terrainEntrySnapshot.entries[0].id],
+		});
+		registry.createPage({
+			bucketKey: objectBucketKey,
+			entryIds: [objectEntrySnapshot.entries[0].id],
+		});
+
+		expect(registry.createBucketSnapshots()).toEqual([
+			expect.objectContaining({
+				bucketKey: objectBucketKey,
+				entries: [
+					expect.objectContaining({
+						textureKey: textureKey("texture:object"),
+					}),
+				],
+				pages: [expect.objectContaining({ bucketKey: objectBucketKey })],
+			}),
+			expect.objectContaining({
+				bucketKey: terrainBucketKey,
+				entries: [
+					expect.objectContaining({
+						textureKey: textureKey("texture:terrain-color"),
+					}),
+				],
+				pages: [expect.objectContaining({ bucketKey: terrainBucketKey })],
+			}),
+		]);
 	});
 
 	it("keeps owner release idempotent and cheap for retained renderer pages", () => {

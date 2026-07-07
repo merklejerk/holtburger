@@ -1887,7 +1887,7 @@ export interface StaticBakeTextureUse {
 	/** Residency owners that retain the canonical texture entry. */
 	readonly ownerIds: readonly TextureOwnerId[];
 	readonly owners: readonly StaticTextureUseOwner[];
-	/** Physical atlas-page compatibility class for this texture use. */
+	/** Physical atlas-page format class for this texture use. */
 	readonly pageClass: TexturePageClass;
 	readonly source: MaterialTextureDataUseIdentity;
 	readonly samplingPolicy?: StaticBakeTextureSamplingPolicy;

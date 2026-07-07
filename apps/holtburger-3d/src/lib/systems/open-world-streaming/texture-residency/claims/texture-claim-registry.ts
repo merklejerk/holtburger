@@ -353,6 +353,12 @@ export class OpenWorldTextureClaimRegistry {
 		};
 	}
 
+	createBucketSnapshots(): readonly OpenWorldTextureBucketSnapshot[] {
+		return [...this.#collectBucketKeys()]
+			.sort()
+			.map((bucketKey) => this.createBucketSnapshot(bucketKey));
+	}
+
 	createSnapshot(): OpenWorldTextureClaimRegistrySnapshot {
 		let claimCount = 0;
 		for (const ownerClaims of this.#bindingIdsByOwnerId.values()) {
@@ -484,6 +490,13 @@ export class OpenWorldTextureClaimRegistry {
 			throw new Error(`Unknown texture page: ${pageId}.`);
 		}
 		return page;
+	}
+
+	#collectBucketKeys(): ReadonlySet<OpenWorldTextureBucketKey> {
+		return new Set([
+			...this.#pageIdsByBucketKey.keys(),
+			...[...this.#entriesById.values()].map((entry) => entry.bucketKey),
+		]);
 	}
 }
 

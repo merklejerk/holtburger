@@ -1,7 +1,7 @@
 # Holtburger 3D Open World Streaming Materialization Remodel Plan
 
 Date: 2026-07-06
-Status: executed; final closeout complete; worksheet remains the implementation north star and historical evidence.
+Status: executed; final closeout complete; post-closeout issue triage active; worksheet remains the implementation north star and historical evidence.
 
 ## Context And Boundaries
 
@@ -3659,6 +3659,60 @@ Decisions and course corrections:
 - Generated-scenery and `dc58` all-domain startup wall time remain spicy. The Phase 56 numbers match the known Phase 53/54 profile rather than a Phase 55 cleanup regression. Do not add a main-thread budget API as a cleanup epilogue; if startup wall time becomes the next product priority, the direct follow-up is generated/static-authored dynamic recipe worker concurrency, batching, or workload reduction with fresh attribution. Owner: runtime entity/static-authored dynamic worker pipeline.
 - Worksheet handoff is still valid: the worksheet is historical evidence and this remodel plan is the implementation record. No new deliberate deviation from the worksheet was introduced during Phase 55/56 closeout.
 - Completion audit found stale unchecked boxes in rejected/resteered Phase 11-13 checkpoints. They are now marked as completed-by-later-phase or superseded-by-cutover so the plan no longer presents historical course-correction tasks as active remaining work.
+
+### Phase 57: Ongoing Post-Closeout Issue Triage
+
+North-star check:
+
+- The [worksheet replacement model](./holtburger-3d-open-world-streaming-stutter-investigation-worksheet.md) remains the design guardrail even after closeout. Issue fixes should move the code toward direct replacement contracts, worker-owned expensive work, explicit owner/currentness state, loose readiness, and hard deletion of vestigial concepts.
+- Bugs should be explained by current code paths before fixes land. No papering over symptoms, no diagnostics-shaped design, and no compatibility projection inside replacement internals just to make a report look healthier.
+
+Owning authority:
+
+- Post-closeout issue intake, classification, fix sequencing, verification evidence, and debt tracking for `apps/holtburger-3d` open-world streaming.
+
+Triage policy:
+
+- Treat each user-fed issue as an implementation mini-phase under Phase 57 unless it exposes a design gap large enough to require a new numbered phase.
+- Start each issue by grounding the observed behavior in current code and, where relevant, the worksheet target model. If the failure cannot be proven from code, harness output, diagnostics, or a focused reproduction, add temporary diagnostics or a harness probe and remove them before closeout unless they become durable replacement-native diagnostics.
+- Classify the issue before editing:
+  - **Contract bug:** current code violates direct replacement contracts or worksheet model.
+  - **Renderer/material fidelity backlog:** current code is honest but rendering capability is incomplete.
+  - **Performance regression:** current code regresses measured harness/frame behavior.
+  - **Diagnostics gap:** replacement diagnostics are missing direct evidence needed to explain behavior.
+  - **Vestigial pressure:** code, tests, or docs preserve retired concepts, old DTO shapes, or misleading compatibility vocabulary.
+- Prefer structural fixes that delete or collapse bad shapes. Do not add shims inside replacement internals. If an edge shim is unavoidable, record the blocked consumer, dishonest-field risk, deletion trigger, and owner.
+- Keep issue verification scoped to blast radius: focused tests for narrow contract fixes, harness scenarios for rendering/readiness/performance changes, and `npm run check`/`npm run lint` when touching shared contracts or broad code.
+- Update this phase after each issue with the diagnosis, files touched, verification, remaining debt, and spicy bits. Commit issue fixes separately when the user asks for a commit or when an issue phase is explicitly closed under the ongoing goal.
+
+Acceptance criteria for each issue:
+
+- The root cause is documented with current-code evidence.
+- The fix aligns with the worksheet north stars or records a deliberate deviation with reason and reactivation criteria.
+- No vestigial pipeline reference, legacy diagnostic shape, or compatibility shim is introduced into replacement internals.
+- Tests and/or harness evidence are strong enough for the issue's blast radius.
+- Any remaining debt is recorded with owner and trigger.
+
+Issue ledger:
+
+- Issue 57.1: Resources tab reports `0` for atlas pages, atlas memory/texture entries, active buckets, and draw calls while the scene visibly renders and other counters such as static draw units/dynamic visuals are nonzero. Classification: UI/runtime overview contract bug plus vestigial atlas-summary vocabulary. Root cause: `OpenWorldStreamingClientRuntimeAdapter.createOverviewSnapshot()` hardcoded `resources.atlas` to an empty old atlas overview even though replacement texture residency diagnostics report real bucket, entry, and page counts. Fix: runtime overview atlas summary now derives from replacement `textureResidency`; atlas memory is nullable and displays `unknown` while byte accounting is non-canonical; the UI page-state row uses replacement page states (`planned`, `building`, `resident`, `reclaimable`) instead of old lifecycle labels. Verification: `npm run check`, focused `open-world-streaming-controller.test.ts`, `npm run lint`, and terrain-only harness `/tmp/holtburger-phase57-issue1-terrain-resources.json` passed with diagnostics showing 3 buckets, 84 entries, and 31 resident pages. Remaining caveat: the resources tab draw-call row still only shows env/dynamic draw calls because static draw-call totals live in renderer diagnostics, not `RendererResourceSnapshot`; treat that as a separate UI contract issue if the row remains confusing. Status: fixed, awaiting review/commit.
+- Issue 57.2: Atlas page list still shows no rows after Issue 57.1 because the runtime overview summary is replacement-backed but `resources.atlas.buckets` remains empty. Classification: UI/runtime overview contract migration, not a legacy atlas inspector compatibility fix. Root cause: the resources panel still consumed an old atlas-row contract with dimensions, wrapping, sample class, and packing efficiency, while replacement texture residency only exposed aggregate counts and per-bucket snapshots were available only by explicit bucket key. Fix: replaced the runtime overview contract with `resources.textureResidency`, added deterministic replacement bucket snapshot enumeration, parseable bucket-key parts, and texture-page rows derived from replacement entry/page state (`domain`, `scope`, page lifecycle state, classes, purposes, entry/owner/source counts, and build reservation state). The resources panel was renamed from atlas pages to texture pages and no longer displays fields the replacement pipeline does not publish honestly. Verification: `npm run check`, focused texture-claim-registry and controller tests, `npm run lint`, and terrain-only harness `/tmp/holtburger-phase57-issue2-texture-residency.json` passed; harness diagnostics showed 3 bucket rows, 84 entries, 31 resident pages, and the first bucket exposing 13 page rows. Remaining caveat: byte accounting remains `unknown` until renderer page sizing becomes canonical; no fake memory or packing-efficiency fields were added. Status: fixed, awaiting review/commit.
+
+Task checklist:
+
+- [ ] Record each incoming issue with observed behavior, repro context, and suspected owning system.
+- [ ] Classify each issue before editing.
+- [ ] Investigate root cause from current code, diagnostics, harness output, or focused probes.
+- [ ] Implement the smallest structural fix that moves the code toward the replacement model.
+- [ ] Remove temporary probes or promote them to durable replacement-native diagnostics.
+- [ ] Run focused tests and harness scenarios appropriate to the issue.
+- [ ] Record decisions, debt, spicy bits, and verification per issue.
+- [ ] Commit each closed issue when commit is requested or when the issue mini-phase is explicitly closed.
+
+Decisions and course corrections:
+
+- Opened Phase 57 after Phase 56 closeout so ongoing issue work keeps the remodel context and north stars without pretending the implementation closeout is unfinished.
+- Issue 57.2 deliberately renamed the runtime resource contract from `atlas` to `textureResidency` instead of adapting replacement data into the retired atlas inspector shape. This follows the Phase 57 policy to migrate direct contracts and shim legacy only at edges; no legacy shim was added for the resources tab.
 
 ## Risks And Mitigations
 

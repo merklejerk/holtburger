@@ -60,7 +60,7 @@
 		RuntimeSceneDebugSelection,
 		RuntimeSceneInterestSource,
 		RuntimeOverviewSnapshot,
-		RuntimeTextureAtlasPageOverview,
+		RuntimeTexturePageOverview,
 	} from "../lib/runtime/client-runtime";
 	import type {
 		PortalFrameNodeResources,
@@ -178,7 +178,7 @@
 	let runtimeOverview = $state<RuntimeOverviewSnapshot | null>(null);
 	let openWorldDiagnostics =
 		$state<OpenWorldStreamingDiagnosticsSnapshot | null>(null);
-	let atlasPageFilter = $state("");
+	let texturePageFilter = $state("");
 	let cameraState = $state<FreeCameraState>(createFreeCameraState());
 	let diagnosticsReportText = $state<string | null>(null);
 	let selectedDiagnosticsReportText = $state<string | null>(null);
@@ -1620,82 +1620,76 @@
 		return `0x${value.toString(16).padStart(8, "0")}`;
 	}
 
-	function filteredAtlasPages(): readonly RuntimeTextureAtlasPageOverview[] {
-		const filterTokens = atlasPageFilter
+	function filteredTexturePages(): readonly RuntimeTexturePageOverview[] {
+		const filterTokens = texturePageFilter
 			.trim()
 			.toLowerCase()
 			.split(/\s+/)
 			.filter((token) => token.length > 0);
 		const pages =
-			runtimeOverview?.resources.atlas.buckets.flatMap(
+			runtimeOverview?.resources.textureResidency.buckets.flatMap(
 				(bucket) => bucket.pages,
 			) ?? [];
 		if (filterTokens.length === 0) {
 			return pages;
 		}
 		return pages.filter((page) => {
-			const searchableText = createAtlasPageSearchText(page);
+			const searchableText = createTexturePageSearchText(page);
 			return filterTokens.every((token) => searchableText.includes(token));
 		});
 	}
 
-	function createAtlasPageSearchText(
-		page: RuntimeTextureAtlasPageOverview,
+	function createTexturePageSearchText(
+		page: RuntimeTexturePageOverview,
 	): string {
 		return [
-			page.bucketId,
-			page.bucketLabel,
+			page.bucketKey,
 			page.domain,
-			page.format,
 			page.pageId,
-			formatAtlasPageOrdinal(page.pageId),
-			page.atlasBucketKey,
-			page.sampleClass,
-			formatAtlasPageSamplingEffects(page.sampleClass),
-			`${page.width}x${page.height}`,
-			page.wrapS,
-			page.wrapT,
+			formatTexturePageOrdinal(page.pageId),
+			page.scope,
+			page.state,
+			page.ownerlessRetainedState ?? "",
+			page.hasBuildReservation ? "reserved" : "unreserved",
+			...page.pageClasses,
+			...page.purposes,
 		]
 			.join(" ")
 			.toLowerCase();
 	}
 
-	function formatAtlasPageListSummary(): string {
+	function formatTexturePageListSummary(): string {
 		const totalPages =
-			runtimeOverview?.resources.atlas.summary.texturePageCount ?? 0;
-		const shownPages = filteredAtlasPages().length;
-		return atlasPageFilter.trim().length === 0
+			runtimeOverview?.resources.textureResidency.summary.texturePageCount ?? 0;
+		const shownPages = filteredTexturePages().length;
+		return texturePageFilter.trim().length === 0
 			? `${totalPages} total`
 			: `${shownPages} shown / ${totalPages} total`;
 	}
 
-	function formatAtlasPageOrdinal(pageId: string): string {
-		return pageId.replace(/^page-/, "");
+	function formatTexturePageOrdinal(pageId: string): string {
+		const markerIndex = pageId.lastIndexOf(":page:");
+		return markerIndex < 0
+			? pageId
+			: pageId.slice(markerIndex + ":page:".length);
 	}
 
-	function formatAtlasPageSamplingEffects(sampleClass: string): string {
-		switch (sampleClass) {
-			case "index8":
-			case "index16":
-			case "palette-rgba":
-				return "nearest / no mips / data";
-			case "rgba-color":
-			case "rgba-detail":
-				return "filterable / mips";
-			case "rgba-mask":
-				return "filterable / no mips / mask";
-			case "rgba-exact":
-				return "filterable / no mips / exact";
-			default:
-				return sampleClass;
+	function formatTexturePageClasses(page: RuntimeTexturePageOverview): string {
+		return page.pageClasses.length === 0
+			? "no classes"
+			: page.pageClasses.join(", ");
+	}
+
+	function formatTexturePagePurposes(page: RuntimeTexturePageOverview): string {
+		return page.purposes.length === 0
+			? "no purposes"
+			: page.purposes.join(", ");
+	}
+
+	function formatByteCount(bytes: number | null): string {
+		if (bytes === null) {
+			return "unknown";
 		}
-	}
-
-	function formatPercent(value: number): string {
-		return `${(value * 100).toFixed(1)}%`;
-	}
-
-	function formatByteCount(bytes: number): string {
 		if (bytes >= 1024 * 1024) {
 			return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 		}
@@ -2500,27 +2494,27 @@
 						<h2>Runtime Resources</h2>
 						<div class="browser-display__resource-grid">
 							<div class="browser-display__resource-card">
-								<span>Atlas Pages</span>
+								<span>Texture Pages</span>
 								<strong>
-									{runtimeOverview?.resources.atlas.summary.texturePageCount ??
-										0}
+									{runtimeOverview?.resources.textureResidency.summary
+										.texturePageCount ?? 0}
 								</strong>
 								<small>
-									{runtimeOverview?.resources.atlas.summary.activeBucketCount ??
-										0}
+									{runtimeOverview?.resources.textureResidency.summary
+										.activeBucketCount ?? 0}
 									active buckets
 								</small>
 							</div>
 							<div class="browser-display__resource-card">
-								<span>Atlas Memory</span>
+								<span>Texture Memory</span>
 								<strong>
 									{formatByteCount(
-										runtimeOverview?.resources.atlas.summary.approximateBytes ??
-											0,
+										runtimeOverview?.resources.textureResidency.summary
+											.approximateBytes ?? null,
 									)}
 								</strong>
 								<small>
-									{runtimeOverview?.resources.atlas.summary
+									{runtimeOverview?.resources.textureResidency.summary
 										.registryEntryCount ?? 0}
 									texture entries
 								</small>
@@ -2567,18 +2561,18 @@
 					</section>
 
 					<section
-						class="browser-display__control-group browser-display__control-group--atlas-pages"
+						class="browser-display__control-group browser-display__control-group--texture-pages"
 					>
-						<h2>Atlas Pages</h2>
+						<h2>Texture Pages</h2>
 						<label class="browser-display__field">
 							<span>Filter</span>
 							<input
 								autocomplete="off"
-								placeholder="bucket, domain, format, wrap"
+								placeholder="bucket, domain, purpose, state"
 								spellcheck="false"
-								value={atlasPageFilter}
+								value={texturePageFilter}
 								oninput={(event) => {
-									atlasPageFilter = (event.currentTarget as HTMLInputElement)
+									texturePageFilter = (event.currentTarget as HTMLInputElement)
 										.value;
 								}}
 							/>
@@ -2587,24 +2581,24 @@
 						<dl class="browser-display__status">
 							<div>
 								<dt>Pages</dt>
-								<dd>{formatAtlasPageListSummary()}</dd>
+								<dd>{formatTexturePageListSummary()}</dd>
 							</div>
 							<div>
-								<dt>Lifecycle</dt>
+								<dt>Page states</dt>
 								<dd>
-									created {runtimeOverview?.resources.atlas.summary
-										.pageLifecycle.created ?? 0} / absorbed
-									{runtimeOverview?.resources.atlas.summary.pageLifecycle
-										.absorbed ?? 0} / reclaimed
-									{runtimeOverview?.resources.atlas.summary.pageLifecycle
-										.reclaimed ?? 0} / retained
-									{runtimeOverview?.resources.atlas.summary.pageLifecycle
-										.retained ?? 0}
+									planned {runtimeOverview?.resources.textureResidency.summary
+										.pageStates.planned ?? 0} / building
+									{runtimeOverview?.resources.textureResidency.summary
+										.pageStates.building ?? 0} / resident
+									{runtimeOverview?.resources.textureResidency.summary
+										.pageStates.resident ?? 0} / reclaimable
+									{runtimeOverview?.resources.textureResidency.summary
+										.pageStates.reclaimable ?? 0}
 								</dd>
 							</div>
 						</dl>
 
-						{#if filteredAtlasPages().length === 0}
+						{#if filteredTexturePages().length === 0}
 							<dl class="browser-display__status">
 								<div>
 									<dt>Matches</dt>
@@ -2612,27 +2606,25 @@
 								</div>
 							</dl>
 						{:else}
-							<div class="browser-display__atlas-list">
-								{#each filteredAtlasPages() as page (`${page.bucketId}:${page.pageId}`)}
+							<div class="browser-display__texture-page-list">
+								{#each filteredTexturePages() as page (`${page.bucketKey}:${page.pageId}`)}
 									<div
-										class="browser-display__atlas-row"
-										title={page.atlasBucketKey}
+										class="browser-display__texture-page-row"
+										title={page.bucketKey}
 									>
 										<div>
 											<strong>
-												{page.bucketLabel} / {formatAtlasPageOrdinal(
-													page.pageId,
-												)}
+												{page.domain} / {formatTexturePageOrdinal(page.pageId)}
 											</strong>
 											<small>
-												{page.format} / {page.width}x{page.height} / {formatAtlasPageSamplingEffects(
-													page.sampleClass,
-												)}
+												{page.state} / {page.scope} / {formatTexturePageClasses(
+													page,
+												)} / {formatTexturePagePurposes(page)}
 											</small>
 										</div>
-										<div class="browser-display__atlas-metrics">
-											<span>{page.textureCount} tex</span>
-											<span>{formatPercent(page.packingEfficiency)}</span>
+										<div class="browser-display__texture-page-metrics">
+											<span>{page.entryCount} entries</span>
+											<span>{page.ownerCount} owners</span>
 										</div>
 									</div>
 								{/each}
@@ -3225,7 +3217,7 @@
 		font-size: 12px;
 	}
 
-	.browser-display__control-group--atlas-pages {
+	.browser-display__control-group--texture-pages {
 		align-content: start;
 		grid-template-rows: max-content max-content max-content minmax(0, 1fr);
 		min-height: 0;
@@ -3373,7 +3365,7 @@
 		line-height: 1.25;
 	}
 
-	.browser-display__atlas-list {
+	.browser-display__texture-page-list {
 		display: grid;
 		align-content: start;
 		gap: 5px;
@@ -3382,7 +3374,7 @@
 		padding-right: 2px;
 	}
 
-	.browser-display__atlas-row {
+	.browser-display__texture-page-row {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) auto;
 		align-items: center;
@@ -3393,26 +3385,26 @@
 		background: rgba(1, 9, 8, 0.38);
 	}
 
-	.browser-display__atlas-row strong,
-	.browser-display__atlas-row small {
+	.browser-display__texture-page-row strong,
+	.browser-display__texture-page-row small {
 		display: block;
 		overflow-wrap: anywhere;
 	}
 
-	.browser-display__atlas-row strong {
+	.browser-display__texture-page-row strong {
 		color: #fff7cf;
 		font-size: 12px;
 		font-weight: 700;
 	}
 
-	.browser-display__atlas-row small {
+	.browser-display__texture-page-row small {
 		margin-top: 3px;
 		color: rgba(241, 255, 246, 0.74);
 		font-size: 10px;
 		line-height: 1.3;
 	}
 
-	.browser-display__atlas-metrics {
+	.browser-display__texture-page-metrics {
 		display: grid;
 		justify-items: end;
 		gap: 3px;

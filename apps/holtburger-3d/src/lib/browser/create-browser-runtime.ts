@@ -114,13 +114,11 @@ interface DynamicVisualRecipeBrowserWorker extends DynamicVisualRecipeWorkerPort
 	terminate(): void;
 }
 
-interface ObjectVisualAtlasBrowserWorker
-	extends OpenWorldObjectVisualAtlasWorkerPort {
+interface ObjectVisualAtlasBrowserWorker extends OpenWorldObjectVisualAtlasWorkerPort {
 	terminate(): void;
 }
 
-interface TexturePageBuildBrowserWorker
-	extends OpenWorldTexturePageBuildWorkerPort {
+interface TexturePageBuildBrowserWorker extends OpenWorldTexturePageBuildWorkerPort {
 	terminate(): void;
 }
 
@@ -232,7 +230,7 @@ interface WorkerObjectVisualAtlasBuilderFactories {
 	readonly host?: ReturnType<typeof createBrowserRuntimeHost>;
 }
 
-function createWorkerObjectVisualAtlasBuilder(
+export function createWorkerObjectVisualAtlasBuilder(
 	assetReader: PreparedAssetReader,
 	workerCount: number,
 	factories: WorkerObjectVisualAtlasBuilderFactories = {},

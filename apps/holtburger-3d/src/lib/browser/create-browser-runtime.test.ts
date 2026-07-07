@@ -19,10 +19,22 @@ import type {
 import type {
 	StaticLandblockSceneLodResolution,
 	StaticLandblockSceneLodSourceRequest,
+	PreparedRenderSurfaceTextureUseIdentity,
 } from "../static/contracts";
+import type { OpenWorldTextureEntryId } from "../systems/open-world-streaming/texture-residency/claims/texture-claim-registry";
+import type {
+	OpenWorldObjectVisualAtlasBuildInput,
+	OpenWorldObjectVisualAtlasPlacementOutput,
+} from "../systems/open-world-streaming/texture-residency/placement/object-visual-atlas-builder";
+import type {
+	OpenWorldObjectVisualAtlasWorkerPort,
+	OpenWorldObjectVisualAtlasWorkerRequest,
+	OpenWorldObjectVisualAtlasWorkerResponse,
+} from "../systems/open-world-streaming/texture-residency/placement/object-visual-atlas-worker-protocol";
 import {
 	createWorkerDynamicVisualBaker,
 	createWorkerDynamicVisualRecipeResolver,
+	createWorkerObjectVisualAtlasBuilder,
 	createWorkerStaticResolver,
 } from "./create-browser-runtime";
 
@@ -177,6 +189,50 @@ describe("browser runtime routing", () => {
 		disposeResolver(baker);
 		expect(workers.map((worker) => worker.terminated)).toEqual([true, true]);
 	});
+
+	it("creates an object visual atlas worker pool for material layout", async () => {
+		const assetReader: PreparedAssetReader = {
+			requestPreparedAsset: () =>
+				Promise.reject(new Error("test asset reader should not be called")),
+		};
+		const workers = [
+			new FixtureObjectVisualAtlasWorker(),
+			new FixtureObjectVisualAtlasWorker(),
+		];
+		const pendingWorkers = [...workers];
+		const builder = createWorkerObjectVisualAtlasBuilder(
+			assetReader,
+			workers.length,
+			{
+				createWorker: () => {
+					const worker = pendingWorkers.shift();
+					if (!worker) {
+						throw new Error("No fixture object visual atlas worker left.");
+					}
+					return worker;
+				},
+			},
+		);
+		const input = createAtlasInput();
+		const pending = builder.planAtlasPlacement(input);
+
+		expect(workers[0]?.messages).toEqual([
+			{
+				input,
+				kind: "job",
+				requestId: "open-world-texture-layout:0",
+			},
+		]);
+		workers[0]?.emit({
+			kind: "result",
+			output: createAtlasOutput(),
+			requestId: "open-world-texture-layout:0",
+		});
+
+		await expect(pending).resolves.toEqual(createAtlasOutput());
+		disposeResolver(builder);
+		expect(workers.map((worker) => worker.terminated)).toEqual([true, true]);
+	});
 });
 
 class FixtureStaticResolverWorker implements StaticResolverWorkerPort {
@@ -295,6 +351,49 @@ class FixtureDynamicVisualBakeWorker implements DynamicVisualBakeWorkerPort {
 	}
 }
 
+class FixtureObjectVisualAtlasWorker implements OpenWorldObjectVisualAtlasWorkerPort {
+	readonly messages: OpenWorldObjectVisualAtlasWorkerRequest[] = [];
+	readonly #listeners = new Set<
+		(event: MessageEvent<OpenWorldObjectVisualAtlasWorkerResponse>) => void
+	>();
+	terminated = false;
+
+	postMessage(message: OpenWorldObjectVisualAtlasWorkerRequest): void {
+		this.messages.push(message);
+	}
+
+	addEventListener(
+		_type: "message",
+		listener: (
+			event: MessageEvent<OpenWorldObjectVisualAtlasWorkerResponse>,
+		) => void,
+	): void {
+		this.#listeners.add(listener);
+	}
+
+	removeEventListener(
+		_type: "message",
+		listener: (
+			event: MessageEvent<OpenWorldObjectVisualAtlasWorkerResponse>,
+		) => void,
+	): void {
+		this.#listeners.delete(listener);
+	}
+
+	terminate(): void {
+		this.terminated = true;
+	}
+
+	emit(message: OpenWorldObjectVisualAtlasWorkerResponse): void {
+		const event = {
+			data: message,
+		} as MessageEvent<OpenWorldObjectVisualAtlasWorkerResponse>;
+		for (const listener of this.#listeners) {
+			listener(event);
+		}
+	}
+}
+
 function disposeResolver(resolver: unknown): void {
 	if (
 		typeof resolver !== "object" ||
@@ -350,5 +449,59 @@ function createSourceRequest(): StaticLandblockSceneLodSourceRequest {
 			},
 		],
 		sourceLod: 3,
+	};
+}
+
+function createAtlasInput(): OpenWorldObjectVisualAtlasBuildInput {
+	return {
+		domain: "outdoor-generated-scenery",
+		entries: [
+			{
+				dataUse: createTextureUse(),
+				entryId: "entry:object-base" as OpenWorldTextureEntryId,
+				gutterEdgeMode: "clamp",
+			},
+		],
+		jobId: "layout:object-base",
+		page: {
+			format: "rgba8",
+			gutterEdgeMode: "clamp",
+			gutterPixels: 1,
+			height: 256,
+			pageRunway: "one-tier",
+			pageSelection: "minimize-textures",
+			width: 256,
+		},
+	};
+}
+
+function createAtlasOutput(): OpenWorldObjectVisualAtlasPlacementOutput {
+	return {
+		pages: [{ height: 256, pageId: "layout:object-base:page:0", width: 256 }],
+		rects: [
+			{
+				entryKey: "entry:object-base" as OpenWorldTextureEntryId,
+				pageId: "layout:object-base:page:0",
+				rect: [1, 1, 1, 1],
+			},
+		],
+		stageTimings: [
+			{
+				count: 1,
+				durationMs: 1,
+				stage: "texture-layout",
+			},
+		],
+	};
+}
+
+function createTextureUse(): PreparedRenderSurfaceTextureUseIdentity {
+	return {
+		kind: "prepared-render-surface-texture-use",
+		renderSurface: {
+			kind: "render-surface",
+			renderSurfaceId: 0x06000010,
+		},
+		usage: "rgba-color",
 	};
 }

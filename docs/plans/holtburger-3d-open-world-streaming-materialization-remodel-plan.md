@@ -2602,8 +2602,8 @@ Decisions and course corrections:
 
 - Phase 34 completed as a closeout/resteer phase, not as the final wipe. The original Phase 34 scope mixed four different jobs: worker-ownership gaps, diagnostics contract shape, UI/harness shim deletion, and source-tree/hard-cutover cleanup. Keeping that as one phase would encourage hand-wavy deletion.
 - Import audit found no replacement-internal imports of `StaticCoordinator` or `TextureManager`, which is good. The remaining vestigial pressure is now mostly at consumers and boundaries: `client-runtime-adapter.ts` still projects `RuntimeOverviewSnapshot.static`, `browser-pipeline-harness.mjs` still includes `staticOverview`, and `BrowserDisplay.svelte` still reads the legacy-shaped overview for browser panels.
-- Current-code gap against the worksheet: `DirectOpenWorldObjectVisualAtlasBuilder` in `texture-residency/placement/object-visual-atlas-builder.ts` still performs `texture-source-preparation` and `texture-layout` on the browser side. The worksheet's target model says source preparation, layout search, guttered blits, and page rebuilds should be worker-owned unless a measured constraint proves a narrow exception.
-- Current-code gap against the worksheet: `reserveMaterialTexturePlacements(...)` in `texture-residency/placement/material-texture-placement-plan.ts` has a good replacement-native reservation/page-build shape, but production object atlas layout still reaches that shape through a direct builder. That is cleaner than the legacy `TextureManager` lane, but it has not landed the worker-owned source/layout part of the design.
+- Phase 34 audit risk against the worksheet: `DirectOpenWorldObjectVisualAtlasBuilder` in `texture-residency/placement/object-visual-atlas-builder.ts` still performs `texture-source-preparation` and `texture-layout`. Phase 35 must prove production browser composition reaches that direct builder only inside a worker entrypoint, because the worksheet's target model says source preparation, layout search, guttered blits, and page rebuilds should be worker-owned unless a measured constraint proves a narrow exception.
+- Phase 34 audit risk against the worksheet: `reserveMaterialTexturePlacements(...)` in `texture-residency/placement/material-texture-placement-plan.ts` has a good replacement-native reservation/page-build shape, but Phase 35 must verify production object atlas layout reaches that shape through a worker-backed builder rather than a browser-side direct builder.
 - Current-code gap against the worksheet: `static-object-material-coverage.ts` remains a broad static material coverage report. It is useful evidence, but if it becomes the surviving readiness contract it will preserve static-era categories instead of the replacement model's direct material readiness facts.
 - Current-code gap against the migration policy: `RuntimeOverviewSnapshot.static`, `createRuntimeStaticOverviewFromController(...)`, and harness `staticOverview` are shims. They are allowed only as deletion-targeted edge projections and must not survive the hard cutover.
 - Resteer: split the remaining work into worker-owned material atlas work, direct material/readiness diagnostics, deferred fidelity triage, runtime/harness/UI shim deletion, source-tree ownership cleanup, and final hard cutover.
@@ -2632,17 +2632,27 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Inspect `create-browser-runtime.ts` composition and every `OpenWorldMaterialTextureAtlasBuilder` provider.
-- [ ] Design the worker request/response DTO around owned or copy-safe pixel buffers, not borrowed prepared-asset cache views.
-- [ ] Implement the worker-backed atlas source/layout builder beside `object-visual-atlas-builder.ts` or move the module under a clearer `texture-residency/atlas-build/` owner if that improves navigation.
-- [ ] Keep `DirectOpenWorldObjectVisualAtlasBuilder` only for tests, worker handler internals, or an explicitly named non-production harness path.
-- [ ] Wire production open-world streaming composition to the worker-backed builder.
-- [ ] Add tests for transfer safety, worker diagnostics, and production composition selection.
-- [ ] Run `npm run check`, `npm run lint`, focused texture placement/packing tests, and all-domain browser harness.
+- [x] Inspect `create-browser-runtime.ts` composition and every `OpenWorldMaterialTextureAtlasBuilder` provider.
+- [x] Design the worker request/response DTO around owned or copy-safe pixel buffers, not borrowed prepared-asset cache views.
+- [x] Implement the worker-backed atlas source/layout builder beside `object-visual-atlas-builder.ts` or move the module under a clearer `texture-residency/atlas-build/` owner if that improves navigation.
+- [x] Keep `DirectOpenWorldObjectVisualAtlasBuilder` only for tests, worker handler internals, or an explicitly named non-production harness path.
+- [x] Wire production open-world streaming composition to the worker-backed builder.
+- [x] Add tests for transfer safety, worker diagnostics, and production composition selection.
+- [x] Run `npm run check`, `npm run lint`, focused texture placement/packing tests, and all-domain browser harness.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 35 found that the core worker-owned atlas boundary had already landed before the phase ledger caught up. `create-browser-runtime.ts` composes `WorkerPoolOpenWorldObjectVisualAtlasBuilder`, and production browser composition no longer instantiates `DirectOpenWorldObjectVisualAtlasBuilder` directly.
+- Added production-composition proof by exporting and testing `createWorkerObjectVisualAtlasBuilder(...)` in `create-browser-runtime.test.ts`. This matches the existing worker factory tests for static resolver and dynamic visual workers.
+- Added atlas worker diagnostics proof in `object-visual-atlas-worker-client.test.ts`: queued and active atlas layout jobs now expose `open-world-texture-layout` worker-pool diagnostics with task ids.
+- Added worker handler proof that atlas jobs use request-scoped prepared asset access. The fake builder intentionally calls `assetReader.requestPreparedAsset(...)`; the test proves that becomes a worker service request instead of a browser-side direct asset read.
+- Transfer/copy decision: atlas layout output is layout-only (`pages`, `rects`, `stageTimings`) and intentionally carries no page pixels, so the atlas worker response has no transferable pixel buffers to detach. Prepared texture bytes are consumed inside the worker through the request-scoped prepared asset service. Page pixel transfer remains owned and tested by the texture page-build worker.
+- Source-tree decision: do not move `object-visual-atlas-builder.ts` yet. The module is already inside `systems/open-world-streaming/texture-residency/placement`, which is the current owner of placement reservation and layout. Phase 40 can still rename/move it if the readiness and reclamation phases reveal a cleaner `atlas-build` owner.
+- Durable adapter classification: `WorkerPoolOpenWorldObjectVisualAtlasBuilder` is a worker transport adapter; `object-visual-atlas.worker.ts` is a worker entrypoint that may instantiate the direct builder internally. The direct builder is not a production browser composition path.
+- Spicy bit: the phase mostly exposed plan lag, not missing architecture. The missing work was proof and ledger hygiene; rewriting the existing worker boundary would have been churn cosplay.
+- Verification: `npm run check`, `npm run lint`, focused `npm run test:ts -- --run src/lib/browser/create-browser-runtime.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/object-visual-atlas-worker-client.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/object-visual-texture-placement-plan.test.ts src/lib/systems/open-world-streaming/texture-residency/placement/material-texture-placement-plan.test.ts src/lib/textures/packing/worker-client.test.ts`.
+- Harness verification: `npm run harness:browser -- --layer-distance 1 --timeout-ms 60000 --output /tmp/holtburger-phase35-all-domain-r1.json` settled with `errorMessage: null`, 45 requested/completed static tasks, 45 applied scene commits, 17 texture buckets, 146 resident texture pages, 2 page builds still in flight at sample time, 8 long tasks with max 167 ms, renderer frame `over50Ms: 0`, and runtime tick `over50Ms: 0`.
+- Carried debt: the harness still reports 15 deferred material issues, 10 pipeline-bug material readiness issues, 2 skipped static-object partitions, and 2 pending texture dependencies at sample time. These are not atlas worker-boundary failures; they remain Phase 36/37 readiness and fidelity triage inputs.
 
 ### Phase 36: Direct Material Readiness Contract
 

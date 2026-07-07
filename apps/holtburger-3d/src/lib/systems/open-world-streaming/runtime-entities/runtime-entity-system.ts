@@ -9,6 +9,7 @@ import { createDynamicVisualTexturePlanning } from "../../../dynamic/visual-bake
 import type { DynamicVisualPrepper } from "../../../dynamic/visual-prepper";
 import type { DynamicVisualRecipeResolver } from "../../../dynamic/visual-recipe-resolver";
 import type { StaticAuthoredDynamicPlacementRecord } from "../../../static/contracts";
+import type { TextureBindingId } from "../../../textures/identity";
 import type {
 	DynamicRendererResourceCommit,
 	DynamicRendererInstanceCommit,
@@ -23,11 +24,9 @@ import {
 	createStaticAuthoredDynamicMaterializationOwner,
 	type MaterializationOwnerId,
 } from "../owners/owner-id";
-import { OpenWorldTextureClaimRegistry } from "../texture-residency/claims/texture-claim-registry";
-import { reserveObjectVisualTexturePlacements } from "../texture-residency/placement/object-visual-texture-placement-plan";
 import type { OpenWorldTexturePageBuildInput } from "../texture-residency/page-build/protocol";
 import type { OpenWorldTexturePageBuildTaskSettlement } from "../texture-residency/page-build/texture-page-build-task-stream";
-import type { OpenWorldObjectVisualAtlasBuilder } from "../texture-residency/atlas-build/object-visual-atlas-builder";
+import type { OpenWorldTextureResidencyService } from "../texture-residency/texture-residency-service";
 import type { WorkerPoolDiagnosticsSnapshot } from "../../../workers/pool";
 import {
 	createDynamicRendererInstances,
@@ -38,13 +37,12 @@ export interface OpenWorldRuntimeEntitySystemOptions {
 	readonly assetReader: PreparedAssetReader;
 	readonly createDynamicVisualPrepper: () => DynamicVisualPrepper;
 	readonly createDynamicVisualRecipeResolver: () => DynamicVisualRecipeResolver;
-	readonly objectVisualAtlasBuilder: OpenWorldObjectVisualAtlasBuilder;
 	readonly owners: MaterializationOwnerRegistry;
 	readonly renderer: OpenWorldRuntimeEntityRendererPort;
 	readonly scheduleTexturePageBuilds: (
 		request: OpenWorldRuntimeEntityTexturePageBuildRequest,
 	) => Promise<readonly OpenWorldTexturePageBuildTaskSettlement[]>;
-	readonly textureClaims: OpenWorldTextureClaimRegistry;
+	readonly textureResidency: OpenWorldTextureResidencyService;
 }
 
 export interface OpenWorldRuntimeEntityRendererPort {
@@ -153,7 +151,6 @@ export class OpenWorldRuntimeEntitySystem {
 	readonly #controller: DynamicEntityController;
 	readonly #createDynamicVisualPrepper: () => DynamicVisualPrepper;
 	readonly #createDynamicVisualRecipeResolver: () => DynamicVisualRecipeResolver;
-	readonly #objectVisualAtlasBuilder: OpenWorldObjectVisualAtlasBuilder;
 	readonly #owners: MaterializationOwnerRegistry;
 	readonly #renderer: OpenWorldRuntimeEntityRendererPort;
 	readonly #scheduleTexturePageBuilds: (
@@ -163,7 +160,7 @@ export class OpenWorldRuntimeEntitySystem {
 		MaterializationOwnerId,
 		Set<MaterializationOwnerId>
 	>();
-	readonly #textureClaims: OpenWorldTextureClaimRegistry;
+	readonly #textureResidency: OpenWorldTextureResidencyService;
 	#dynamicVisualPrepper: DynamicVisualPrepper | null = null;
 	#dynamicVisualRecipeResolver: DynamicVisualRecipeResolver | null = null;
 	#lastFrameTimeSeconds = 0;
@@ -202,11 +199,10 @@ export class OpenWorldRuntimeEntitySystem {
 		this.#createDynamicVisualPrepper = options.createDynamicVisualPrepper;
 		this.#createDynamicVisualRecipeResolver =
 			options.createDynamicVisualRecipeResolver;
-		this.#objectVisualAtlasBuilder = options.objectVisualAtlasBuilder;
 		this.#owners = options.owners;
 		this.#renderer = options.renderer;
 		this.#scheduleTexturePageBuilds = options.scheduleTexturePageBuilds;
-		this.#textureClaims = options.textureClaims;
+		this.#textureResidency = options.textureResidency;
 	}
 
 	createRuntimeEntity(request: RuntimeDynamicSpawnRequest): DynamicEntityId {
@@ -234,7 +230,7 @@ export class OpenWorldRuntimeEntitySystem {
 		}
 		const owner = createRuntimeEntityMaterializationOwner(entityId);
 		this.#owners.evict(owner.id);
-		this.#textureClaims.releaseTextureOwner(owner.id);
+		this.#textureResidency.releaseOwner(owner.id);
 		this.#prepRecordsByOwnerId.delete(owner.id);
 		this.#commitRendererState(0);
 		return true;
@@ -292,7 +288,7 @@ export class OpenWorldRuntimeEntitySystem {
 				parentStaticLayerOwnerId: parentOwnerId,
 			});
 			this.#owners.evict(owner.id);
-			this.#textureClaims.releaseTextureOwner(owner.id);
+			this.#textureResidency.releaseOwner(owner.id);
 			this.#prepRecordsByOwnerId.delete(owner.id);
 		}
 		this.#staticChildOwnerIdsByParentId.delete(parentOwnerId);
@@ -351,7 +347,9 @@ export class OpenWorldRuntimeEntitySystem {
 		};
 	}
 
-	async #prepareEntity(request: DynamicPrepRequest): Promise<DynamicPrepResult> {
+	async #prepareEntity(
+		request: DynamicPrepRequest,
+	): Promise<DynamicPrepResult> {
 		this.#prepStartedCount += 1;
 		this.#setPrepState(request, "queued");
 		try {
@@ -400,12 +398,12 @@ export class OpenWorldRuntimeEntitySystem {
 				request,
 				"texture-placement-reservation",
 				() =>
-					reserveObjectVisualTexturePlacements({
-						atlasBuilder: this.#objectVisualAtlasBuilder,
+					this.#textureResidency.reserveObjectVisualPlacements({
 						filteringMode: "nearest",
 						intents: texturePlanning.placementIntents,
+						isCurrent: () => this.#isCurrent(request),
 						ownerId: request.ownerId,
-						textureClaims: this.#textureClaims,
+						revision: this.#nextRendererRevision(),
 					}),
 			);
 			if (!this.#isCurrent(request)) {
@@ -418,11 +416,11 @@ export class OpenWorldRuntimeEntitySystem {
 				"dynamic-visual-prep-worker",
 				() =>
 					this.#requireDynamicPrepper().prepare({
-					recipe,
-					revision: this.#nextRendererRevision(),
-					texturePlacementSnapshot: textureReservation.placementSnapshot,
-					texturePlanning,
-				}),
+						recipe,
+						revision: this.#nextRendererRevision(),
+						texturePlacementSnapshot: textureReservation.placementSnapshot,
+						texturePlanning,
+					}),
 			);
 			if (!this.#isCurrent(request)) {
 				this.#recordStalePrep(request);
@@ -463,6 +461,29 @@ export class OpenWorldRuntimeEntitySystem {
 			}
 			const product = result.product;
 			if (product?.kind === "baked") {
+				const residencyFailure = await this.#waitForDynamicTextureResidency(
+					request,
+					collectBakedDynamicVisualTextureBindingIds(product.resource),
+				);
+				if (!this.#isCurrent(request)) {
+					this.#recordStalePrep(request);
+					return "stale";
+				}
+				if (residencyFailure !== null) {
+					this.#prepFailureCount += 1;
+					this.#recordPrepFailure({
+						entityId: request.entityId,
+						message: residencyFailure,
+						ownerId: request.ownerId,
+						phase: "prep",
+					});
+					this.#controller.skipDynamicVisual(request.entityId, {
+						kind: "invalid-recipe",
+						message: residencyFailure,
+					});
+					this.#setPrepState(request, "failed");
+					return "failed";
+				}
 				this.#bakeSuccessCount += 1;
 				this.#controller.applyBakedDynamicVisual(product.resource);
 				this.#setPrepState(request, "ready");
@@ -705,6 +726,27 @@ export class OpenWorldRuntimeEntitySystem {
 		this.#rendererRevision += 1;
 		return this.#rendererRevision;
 	}
+
+	async #waitForDynamicTextureResidency(
+		request: DynamicPrepRequest,
+		bindingIds: readonly TextureBindingId[],
+	): Promise<string | null> {
+		while (this.#isCurrent(request)) {
+			const issues =
+				this.#textureResidency.createBindingResidencyIssues(bindingIds);
+			if (issues.length === 0) {
+				return null;
+			}
+			const nonWaitableIssues = issues.filter(
+				(issue) => issue.state !== "page-building",
+			);
+			if (nonWaitableIssues.length > 0) {
+				return createDynamicPrepTextureResidencyFailure(nonWaitableIssues);
+			}
+			await yieldToTextureResidencyWait();
+		}
+		return null;
+	}
 }
 
 function createEmptyPrepStateCounts(): Record<DynamicPrepState, number> {
@@ -735,7 +777,9 @@ function isTerminalPrepState(state: DynamicPrepState): boolean {
 function createDynamicPrepTexturePageFailure(
 	settlements: readonly OpenWorldTexturePageBuildTaskSettlement[],
 ): string | null {
-	const failed = settlements.find((settlement) => settlement.status === "failed");
+	const failed = settlements.find(
+		(settlement) => settlement.status === "failed",
+	);
 	if (failed) {
 		return `Texture page build ${failed.jobId} failed: ${failed.error ?? "unknown error"}.`;
 	}
@@ -746,6 +790,42 @@ function createDynamicPrepTexturePageFailure(
 		return `Texture page build ${stale.jobId} was rejected as stale.`;
 	}
 	return null;
+}
+
+function createDynamicPrepTextureResidencyFailure(
+	issues: readonly ReturnType<
+		OpenWorldTextureResidencyService["createBindingResidencyIssues"]
+	>[number][],
+): string | null {
+	if (issues.length === 0) {
+		return null;
+	}
+	const sample = issues
+		.slice(0, 3)
+		.map(
+			(issue) =>
+				`${issue.bindingId}:${issue.state}${issue.pageId ? `:${issue.pageId}` : ""}`,
+		)
+		.join(", ");
+	return `Dynamic visual texture dependencies were not resident after texture page wait (${issues.length} unresolved; ${sample}).`;
+}
+
+function collectBakedDynamicVisualTextureBindingIds(input: {
+	readonly renderParts: readonly {
+		readonly textureBindingIds: readonly TextureBindingId[];
+	}[];
+}): readonly TextureBindingId[] {
+	return [
+		...new Set(
+			input.renderParts.flatMap((part) => [...part.textureBindingIds]),
+		),
+	].sort();
+}
+
+async function yieldToTextureResidencyWait(): Promise<void> {
+	await new Promise<void>((resolve) => {
+		globalThis.setTimeout(resolve, 0);
+	});
 }
 
 function pushRecent<T>(items: T[], item: T, limit: number): void {

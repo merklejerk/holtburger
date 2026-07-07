@@ -27,6 +27,7 @@ import { MaterializationOwnerRegistry } from "../owners/owner-registry";
 import type { MaterializationOwnerId } from "../owners/owner-id";
 import { OpenWorldTextureClaimRegistry } from "../texture-residency/claims/texture-claim-registry";
 import type { OpenWorldObjectVisualAtlasBuilder } from "../texture-residency/atlas-build/object-visual-atlas-builder";
+import { OpenWorldTextureResidencyService } from "../texture-residency/texture-residency-service";
 import type { OpenWorldTexturePageBuildTaskSettlement } from "../texture-residency/page-build/texture-page-build-task-stream";
 import {
 	OpenWorldRuntimeEntitySystem,
@@ -215,7 +216,9 @@ describe("OpenWorldRuntimeEntitySystem", () => {
 
 		system.removeStaticAuthoredChildrenForParent(parentOwnerId);
 		prepper.resolveAll();
-		await waitFor(() => system.createDiagnosticsSnapshot().prep.staleCount === 1);
+		await waitFor(
+			() => system.createDiagnosticsSnapshot().prep.staleCount === 1,
+		);
 
 		expect(renderer.resourceCommits).toEqual([]);
 		expect(owners.createSnapshot().current).toEqual([]);
@@ -246,8 +249,8 @@ describe("OpenWorldRuntimeEntitySystem", () => {
 		});
 		await waitFor(
 			() =>
-				system.createDiagnosticsSnapshot().prep.states.waitingForTexturePages ===
-				1,
+				system.createDiagnosticsSnapshot().prep.states
+					.waitingForTexturePages === 1,
 		);
 
 		expect(renderer.resourceCommits).toEqual([]);
@@ -288,8 +291,8 @@ describe("OpenWorldRuntimeEntitySystem", () => {
 		});
 		await waitFor(
 			() =>
-				system.createDiagnosticsSnapshot().prep.states.waitingForTexturePages ===
-				1,
+				system.createDiagnosticsSnapshot().prep.states
+					.waitingForTexturePages === 1,
 		);
 
 		pageBuilds.resolveAll("failed");
@@ -300,6 +303,40 @@ describe("OpenWorldRuntimeEntitySystem", () => {
 			prep: {
 				bakeSuccessCount: 0,
 				failed: 1,
+				states: {
+					failed: 1,
+					ready: 0,
+				},
+			},
+		});
+	});
+
+	it("fails dynamic prep when baked render bindings are not resident after texture wait", async () => {
+		const renderer = new FixtureDynamicRenderer();
+		const owners = new MaterializationOwnerRegistry();
+		const system = createSystem({
+			owners,
+			prepper: new FixtureDynamicPrepper({
+				textureBindingIds: ["binding:unresolved-dynamic" as TextureBindingId],
+			}),
+			renderer,
+		});
+
+		system.createRuntimeEntity(createRuntimeSpawnRequest());
+		await waitFor(() => system.createDiagnosticsSnapshot().prep.failed === 1);
+
+		expect(renderer.resourceCommits).toEqual([]);
+		expect(system.createDiagnosticsSnapshot()).toMatchObject({
+			prep: {
+				bakeSuccessCount: 0,
+				failed: 1,
+				recentFailures: [
+					expect.objectContaining({
+						message: expect.stringContaining(
+							"Dynamic visual texture dependencies were not resident",
+						),
+					}),
+				],
 				states: {
 					failed: 1,
 					ready: 0,
@@ -322,7 +359,6 @@ function createSystem(options: {
 		createDynamicVisualPrepper: () =>
 			options.prepper ?? new FixtureDynamicPrepper(),
 		createDynamicVisualRecipeResolver: () => new FixtureDynamicRecipeResolver(),
-		objectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder(),
 		owners: options.owners,
 		renderer: options.renderer,
 		scheduleTexturePageBuilds: (request) => {
@@ -332,6 +368,16 @@ function createSystem(options: {
 			}
 			return Promise.resolve([]);
 		},
+		textureResidency: createFixtureTextureResidency(),
+	});
+}
+
+function createFixtureTextureResidency(): OpenWorldTextureResidencyService {
+	const atlasBuilder = createUnusedObjectVisualAtlasBuilder();
+	return new OpenWorldTextureResidencyService({
+		applyTextureCommits: () => {},
+		objectVisualAtlasBuilder: atlasBuilder,
+		textureAtlasBuilder: atlasBuilder,
 		textureClaims: new OpenWorldTextureClaimRegistry(),
 	});
 }
@@ -360,12 +406,20 @@ class FixtureDynamicRecipeResolver implements DynamicVisualRecipeResolver {
 }
 
 class FixtureDynamicPrepper implements DynamicVisualPrepper {
-	async prepare(input: DynamicVisualPrepInput): Promise<DynamicVisualBakeResult> {
+	constructor(
+		readonly options: {
+			readonly textureBindingIds?: readonly TextureBindingId[];
+		} = {},
+	) {}
+
+	async prepare(
+		input: DynamicVisualPrepInput,
+	): Promise<DynamicVisualBakeResult> {
 		return {
 			failures: [],
 			product: {
 				kind: "baked",
-				resource: createBakedResource(input.recipe.entityId),
+				resource: createBakedResource(input.recipe.entityId, this.options),
 			},
 			revision: input.revision,
 		};
@@ -382,7 +436,9 @@ class DeferredDynamicPrepper implements DynamicVisualPrepper {
 		return this.#pending.length;
 	}
 
-	async prepare(input: DynamicVisualPrepInput): Promise<DynamicVisualBakeResult> {
+	async prepare(
+		input: DynamicVisualPrepInput,
+	): Promise<DynamicVisualBakeResult> {
 		return new Promise((resolve) => {
 			this.#pending.push({ input, resolve });
 		});
@@ -448,8 +504,7 @@ class DeferredTexturePageBuildScheduler {
 					? settlements
 					: [
 							{
-								error:
-									status === "failed" ? "fixture page build failed" : null,
+								error: status === "failed" ? "fixture page build failed" : null,
 								jobId: "texture-task:fixture",
 								pageId:
 									"texture-page:fixture" as OpenWorldTexturePageBuildTaskSettlement["pageId"],
@@ -461,7 +516,12 @@ class DeferredTexturePageBuildScheduler {
 	}
 }
 
-function createBakedResource(entityId: string): BakedDynamicVisualResource {
+function createBakedResource(
+	entityId: string,
+	options: {
+		readonly textureBindingIds?: readonly TextureBindingId[];
+	} = {},
+): BakedDynamicVisualResource {
 	return {
 		entityId,
 		materialSlots: [],
@@ -490,14 +550,14 @@ function createBakedResource(entityId: string): BakedDynamicVisualResource {
 				},
 				sourceAssetId: "setup-model/020003e5",
 				texCoords: new Float32Array(),
-				textureBindingIds: [],
+				textureBindingIds: options.textureBindingIds ?? [],
 				triangleCount: 1,
 				vertexCount: 3,
 			},
 		],
 		resourceId: createDynamicVisualResourceId(entityId),
 		sourceAssets: [createBakedSourceAsset()],
-		textureDependencies: ["binding:dynamic-fixture" as TextureBindingId],
+		textureDependencies: [],
 		textureRefs: [],
 		textureRequirements: [],
 	};

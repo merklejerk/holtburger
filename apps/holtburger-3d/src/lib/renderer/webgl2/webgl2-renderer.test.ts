@@ -1560,22 +1560,17 @@ describe("WebGL2 structured interior rendering", () => {
 		});
 		renderer.commitDynamicInstances({
 			frameTimeSeconds: 1,
-			instances: [
-				createDynamicRendererInstance("dynamic-windmill-part-0"),
-				createDynamicRendererInstance("missing-dynamic-resource"),
-			],
+			instances: [createDynamicRendererInstance("dynamic-windmill-part-0")],
 			revision: 2,
 		});
 		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
 			dynamicDrawCalls: 0,
 			dynamicInstances: 1,
-			skippedDynamicSubmissions: 1,
 		});
 		pendingFrame?.(16);
 		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
 			dynamicDrawCalls: 1,
 			dynamicInstances: 1,
-			skippedDynamicSubmissions: 1,
 		});
 		expect(gl.drawElementsCalls.at(-1)).toMatchObject({
 			count: 3,

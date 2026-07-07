@@ -198,6 +198,21 @@ export interface OpenWorldTextureClaimRegistrySnapshot {
 	};
 }
 
+export interface OpenWorldTextureBindingResidencyIssue {
+	/** Material-consumer binding that was expected to be renderer-resident. */
+	readonly bindingId: TextureBindingId;
+	/** Virtual page carrying the binding's shared entry, when one exists. */
+	readonly pageId: OpenWorldTexturePageId | null;
+	/** Replacement texture-residency state found for the binding. */
+	readonly state:
+		| "binding-unclaimed"
+		| "missing-page"
+		| "page-building"
+		| "page-planned"
+		| "page-reclaimable"
+		| "resident-page-missing-dimensions";
+}
+
 interface OpenWorldTextureOwnerlessPagePolicySnapshot {
 	/** Disposition for ownerless renderer-resident pages before memory pressure exists. */
 	readonly residentDisposition: "cached-for-reuse";
@@ -635,6 +650,49 @@ export class OpenWorldTextureClaimRegistry {
 		return "accepted";
 	}
 
+	createBindingResidencyIssues(
+		bindingIds: readonly TextureBindingId[],
+	): readonly OpenWorldTextureBindingResidencyIssue[] {
+		const issues: OpenWorldTextureBindingResidencyIssue[] = [];
+		for (const bindingId of [...new Set(bindingIds)].sort()) {
+			const entry = this.#findEntryForBinding(bindingId);
+			if (!entry) {
+				issues.push({
+					bindingId,
+					pageId: null,
+					state: "binding-unclaimed",
+				});
+				continue;
+			}
+			const page = this.#findPageForEntry(entry.id);
+			if (!page) {
+				issues.push({
+					bindingId,
+					pageId: null,
+					state: "missing-page",
+				});
+				continue;
+			}
+			this.#refreshPageReclaimableState(page);
+			if (page.state !== "resident") {
+				issues.push({
+					bindingId,
+					pageId: page.id,
+					state: pageStateToBindingResidencyIssueState(page.state),
+				});
+				continue;
+			}
+			if (page.textureHeight === null || page.textureWidth === null) {
+				issues.push({
+					bindingId,
+					pageId: page.id,
+					state: "resident-page-missing-dimensions",
+				});
+			}
+		}
+		return issues;
+	}
+
 	createBucketSnapshot(
 		bucketKey: OpenWorldTextureBucketKey,
 	): OpenWorldTextureBucketSnapshot {
@@ -798,6 +856,28 @@ export class OpenWorldTextureClaimRegistry {
 		return page;
 	}
 
+	#findEntryForBinding(
+		bindingId: TextureBindingId,
+	): MutableTextureEntry | null {
+		for (const entry of this.#entriesById.values()) {
+			if (entry.bindingIds.has(bindingId)) {
+				return entry;
+			}
+		}
+		return null;
+	}
+
+	#findPageForEntry(
+		entryId: OpenWorldTextureEntryId,
+	): MutableTexturePage | null {
+		for (const page of this.#pagesById.values()) {
+			if (page.entryIds.has(entryId)) {
+				return page;
+			}
+		}
+		return null;
+	}
+
 	#createPagePlacementRecords(
 		page: MutableTexturePage,
 	): readonly OpenWorldTexturePagePlacementRecord[] {
@@ -828,6 +908,21 @@ const OWNERLESS_PAGE_POLICY: OpenWorldTextureOwnerlessPagePolicySnapshot = {
 	},
 	residentDisposition: "cached-for-reuse",
 };
+
+function pageStateToBindingResidencyIssueState(
+	state: OpenWorldTexturePageRecord["state"],
+): OpenWorldTextureBindingResidencyIssue["state"] {
+	switch (state) {
+		case "building":
+			return "page-building";
+		case "planned":
+			return "page-planned";
+		case "reclaimable":
+			return "page-reclaimable";
+		case "resident":
+			throw new Error("Resident pages are not residency issues.");
+	}
+}
 
 export function groupTextureBindingRequirementsByBucket(
 	bindings: readonly OpenWorldTextureBindingRequirement[],

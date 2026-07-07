@@ -13,6 +13,7 @@ import type {
 	TerrainStaticScopePayload,
 } from "../../../../static/contracts";
 import { OpenWorldTextureClaimRegistry } from "../../texture-residency/claims/texture-claim-registry";
+import { OpenWorldTextureResidencyService } from "../../texture-residency/texture-residency-service";
 import { OpenWorldTerrainArtifactRunner } from "./terrain-artifact-runner";
 import type { MaterializationOwnerId } from "../../owners/owner-id";
 import type { OpenWorldMaterialTextureAtlasBuilder } from "../../texture-residency/atlas-build/object-visual-atlas-builder";
@@ -27,11 +28,11 @@ describe("OpenWorldTerrainArtifactRunner", () => {
 			baker,
 			frameBudget: createFixtureFrameBudget(),
 			resolver,
-			textureAtlasBuilder: createUnusedTextureAtlasBuilder(),
-			textureClaims: new OpenWorldTextureClaimRegistry(),
+			textureResidency: createFixtureTextureResidency(),
 		});
 
 		const commit = await runner.run({
+			isCurrent: () => true,
 			ownerId: "static-layer:terrain:0xda55ffff" as MaterializationOwnerId,
 			task,
 		});
@@ -74,6 +75,16 @@ describe("OpenWorldTerrainArtifactRunner", () => {
 		]);
 	});
 });
+
+function createFixtureTextureResidency(): OpenWorldTextureResidencyService {
+	const atlasBuilder = createUnusedTextureAtlasBuilder();
+	return new OpenWorldTextureResidencyService({
+		applyTextureCommits: () => {},
+		objectVisualAtlasBuilder: atlasBuilder,
+		textureAtlasBuilder: atlasBuilder,
+		textureClaims: new OpenWorldTextureClaimRegistry(),
+	});
+}
 
 class FixtureTerrainResolver implements StaticLandblockSceneLodSourceResolver {
 	readonly sourceRequests: StaticLandblockSceneLodSourceRequest[] = [];

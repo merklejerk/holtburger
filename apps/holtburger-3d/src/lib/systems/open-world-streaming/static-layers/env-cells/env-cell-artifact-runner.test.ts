@@ -15,6 +15,7 @@ import type {
 import { createEmptyObjectVisualInstallSet } from "../../../../visual/object-visual-install-set";
 import type { MaterializationOwnerId } from "../../owners/owner-id";
 import { OpenWorldTextureClaimRegistry } from "../../texture-residency/claims/texture-claim-registry";
+import { OpenWorldTextureResidencyService } from "../../texture-residency/texture-residency-service";
 import type { OpenWorldObjectVisualAtlasBuilder } from "../../texture-residency/atlas-build/object-visual-atlas-builder";
 import { OpenWorldEnvCellArtifactRunner } from "./env-cell-artifact-runner";
 
@@ -27,12 +28,12 @@ describe("OpenWorldEnvCellArtifactRunner", () => {
 			assetReader: createUnusedAssetReader(),
 			baker,
 			frameBudget: createFixtureFrameBudget(),
-			objectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder(),
 			resolver,
-			textureClaims: new OpenWorldTextureClaimRegistry(),
+			textureResidency: createFixtureTextureResidency(),
 		});
 
 		const commit = await runner.run({
+			isCurrent: () => true,
 			ownerId:
 				"static-layer:env-cell-system:0xda55ffff" as MaterializationOwnerId,
 			task,
@@ -66,6 +67,16 @@ describe("OpenWorldEnvCellArtifactRunner", () => {
 		});
 	});
 });
+
+function createFixtureTextureResidency(): OpenWorldTextureResidencyService {
+	const atlasBuilder = createUnusedObjectVisualAtlasBuilder();
+	return new OpenWorldTextureResidencyService({
+		applyTextureCommits: () => {},
+		objectVisualAtlasBuilder: atlasBuilder,
+		textureAtlasBuilder: atlasBuilder,
+		textureClaims: new OpenWorldTextureClaimRegistry(),
+	});
+}
 
 class FixtureEnvCellResolver implements StaticLandblockSceneLodSourceResolver {
 	readonly sourceRequests: StaticLandblockSceneLodSourceRequest[] = [];

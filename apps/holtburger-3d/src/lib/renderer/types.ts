@@ -395,7 +395,6 @@ export interface RendererSnapshot {
 	readonly dynamicVisualResourceTextureUses: number;
 	readonly dynamicInstances: number;
 	readonly dynamicDrawCalls: number;
-	readonly skippedDynamicSubmissions: number;
 	readonly recentDynamicResourceCommits: readonly DynamicRendererResourceCommitDiagnostics[];
 	readonly renderedTriangles: number;
 	readonly debugOverlayPrimitives: number;

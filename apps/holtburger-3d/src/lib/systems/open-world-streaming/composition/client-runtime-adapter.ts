@@ -19,6 +19,7 @@ import {
 	type RuntimeEvent,
 	type RuntimeOverviewSnapshot,
 	type RuntimeSceneInterest,
+	type RuntimeTexturePageInspectionSnapshot,
 } from "../../../runtime/client-runtime";
 import { EMPTY_RUNTIME_PORTAL_OVERLAP_RESIDENCY } from "../../../runtime/portal-base-overlap";
 import type {
@@ -32,7 +33,10 @@ import type {
 } from "../../../runtime/scene-query/merged-scene-query-contracts";
 import type { TextureFilteringMode } from "../../../textures/sampling-policy";
 import type { OpenWorldStreamingBoundaryAdapters } from "../adapters/browser-boundaries";
-import { parseOpenWorldTextureBucketKey } from "../texture-residency/claims/bucket-key";
+import {
+	parseOpenWorldTextureBucketKey,
+	type OpenWorldTextureBucketKey,
+} from "../texture-residency/claims/bucket-key";
 import { OpenWorldStreamingController } from "./open-world-streaming-controller";
 import type {
 	OpenWorldStreamingStaticInterest,
@@ -400,6 +404,51 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 				status: this.#createStatus(),
 				textureFilteringMode: this.#textureFilteringMode,
 			},
+		};
+	}
+
+	createTexturePageInspectionSnapshot(input: {
+		readonly bucketKey: string;
+		readonly pageId: string;
+	}): RuntimeTexturePageInspectionSnapshot {
+		const nativeSnapshot =
+			this.#controller.createTexturePageInspectionSnapshot(input);
+		const bucketParts = parseOpenWorldTextureBucketKey(
+			nativeSnapshot.bucketKey as OpenWorldTextureBucketKey,
+		);
+		return {
+			bucket: {
+				domain: bucketParts.domain,
+				key: nativeSnapshot.bucketKey,
+				purpose: bucketParts.purpose,
+				scope: bucketParts.scope,
+			},
+			entries: nativeSnapshot.entries.map((entry) => ({
+				bindingIds: entry.bindingIds,
+				id: entry.id,
+				ownerIds: entry.ownerIds,
+				pageClass: entry.pageClass,
+				purpose: entry.purpose,
+				sourceKey: entry.sourceKey,
+				state: entry.state,
+				textureKey: entry.textureKey,
+			})),
+			kind: "runtime-texture-page-inspection",
+			pageId: nativeSnapshot.pageId,
+			preview:
+				nativeSnapshot.preview === null
+					? null
+					: {
+							format: nativeSnapshot.preview.format,
+							height: nativeSnapshot.preview.height,
+							pixels: nativeSnapshot.preview.pixels,
+							placements: nativeSnapshot.preview.placements,
+							sampleClass: nativeSnapshot.preview.sampleClass,
+							width: nativeSnapshot.preview.width,
+							wrapS: nativeSnapshot.preview.wrapS,
+							wrapT: nativeSnapshot.preview.wrapT,
+						},
+			state: nativeSnapshot.state,
 		};
 	}
 

@@ -60,6 +60,7 @@
 		RuntimeSceneDebugSelection,
 		RuntimeSceneInterestSource,
 		RuntimeOverviewSnapshot,
+		RuntimeTexturePageInspectionSnapshot,
 		RuntimeTexturePageOverview,
 	} from "../lib/runtime/client-runtime";
 	import type {
@@ -75,6 +76,7 @@
 	import type { TextureFilteringMode } from "../lib/textures/sampling-policy";
 	import DiagnosticsModal from "../lib/ui/DiagnosticsModal.svelte";
 	import PerformanceOverlay from "../lib/ui/PerformanceOverlay.svelte";
+	import TexturePageInspectionModal from "../lib/ui/TexturePageInspectionModal.svelte";
 	import {
 		PerformanceMetricsTracker,
 		type PerformanceMetricsSnapshot,
@@ -179,6 +181,9 @@
 	let openWorldDiagnostics =
 		$state<OpenWorldStreamingDiagnosticsSnapshot | null>(null);
 	let texturePageFilter = $state("");
+	let texturePageInspectionSnapshot =
+		$state<RuntimeTexturePageInspectionSnapshot | null>(null);
+	let texturePageInspectionLabel = $state("");
 	let cameraState = $state<FreeCameraState>(createFreeCameraState());
 	let diagnosticsReportText = $state<string | null>(null);
 	let selectedDiagnosticsReportText = $state<string | null>(null);
@@ -587,6 +592,11 @@
 
 	function closeSelectedDiagnosticsReport(): void {
 		selectedDiagnosticsReportText = null;
+	}
+
+	function closeTexturePageInspection(): void {
+		texturePageInspectionSnapshot = null;
+		texturePageInspectionLabel = "";
 	}
 
 	function updateSpawnFormField<K extends keyof BrowserSpawnFormState>(
@@ -1686,6 +1696,32 @@
 			: page.purposes.join(", ");
 	}
 
+	function inspectTexturePage(page: RuntimeTexturePageOverview): void {
+		if (!runtime) {
+			return;
+		}
+		texturePageInspectionSnapshot = runtime.createTexturePageInspectionSnapshot(
+			{
+				bucketKey: page.bucketKey,
+				pageId: page.pageId,
+			},
+		);
+		texturePageInspectionLabel = `${page.domain} / ${formatTexturePageOrdinal(
+			page.pageId,
+		)}`;
+	}
+
+	function handleTexturePageRowKeydown(
+		event: KeyboardEvent,
+		page: RuntimeTexturePageOverview,
+	): void {
+		if (event.key !== "Enter" && event.key !== " ") {
+			return;
+		}
+		event.preventDefault();
+		inspectTexturePage(page);
+	}
+
 	function formatByteCount(bytes: number | null): string {
 		if (bytes === null) {
 			return "unknown";
@@ -2610,7 +2646,12 @@
 								{#each filteredTexturePages() as page (`${page.bucketKey}:${page.pageId}`)}
 									<div
 										class="browser-display__texture-page-row"
+										role="button"
+										tabindex="0"
 										title={page.bucketKey}
+										onclick={() => inspectTexturePage(page)}
+										onkeydown={(event) =>
+											handleTexturePageRowKeydown(event, page)}
 									>
 										<div>
 											<strong>
@@ -2937,6 +2978,14 @@
 			title={selectedDiagnosticsReportTitle}
 			titleId="browser-display-selection-diagnostics-title"
 			onClose={closeSelectedDiagnosticsReport}
+		/>
+	{/if}
+
+	{#if texturePageInspectionSnapshot !== null}
+		<TexturePageInspectionModal
+			label={texturePageInspectionLabel}
+			snapshot={texturePageInspectionSnapshot}
+			onClose={closeTexturePageInspection}
 		/>
 	{/if}
 </section>
@@ -3383,6 +3432,17 @@
 		border: 1px solid rgba(91, 255, 187, 0.2);
 		border-radius: 4px;
 		background: rgba(1, 9, 8, 0.38);
+		cursor: pointer;
+		transition:
+			background-color 0.15s ease,
+			border-color 0.15s ease;
+	}
+
+	.browser-display__texture-page-row:hover,
+	.browser-display__texture-page-row:focus-visible {
+		border-color: rgba(255, 214, 102, 0.8);
+		background: rgba(9, 38, 31, 0.66);
+		outline: none;
 	}
 
 	.browser-display__texture-page-row strong,

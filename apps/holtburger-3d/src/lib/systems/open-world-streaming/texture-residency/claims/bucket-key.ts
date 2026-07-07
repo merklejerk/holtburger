@@ -153,7 +153,9 @@ function parseTextureUsagePurpose(
 	bucketKey: OpenWorldTextureBucketKey,
 ): TextureUsagePurpose {
 	if (!TEXTURE_USAGE_PURPOSES.has(value)) {
-		throw new Error(`Texture bucket key has invalid purpose ${value}: ${bucketKey}.`);
+		throw new Error(
+			`Texture bucket key has invalid purpose ${value}: ${bucketKey}.`,
+		);
 	}
 	return value as TextureUsagePurpose;
 }

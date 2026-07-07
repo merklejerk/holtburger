@@ -178,6 +178,50 @@ export interface RuntimeTexturePageOverview {
 	readonly state: "planned" | "building" | "resident" | "reclaimable";
 }
 
+export interface RuntimeTexturePageInspectionSnapshot {
+	readonly bucket: {
+		readonly domain: string;
+		readonly key: string;
+		readonly purpose: string;
+		readonly scope: string;
+	};
+	readonly entries: readonly RuntimeTexturePageInspectionEntry[];
+	readonly kind: "runtime-texture-page-inspection";
+	readonly pageId: string;
+	readonly preview: RuntimeTexturePageInspectionPreview | null;
+	readonly state:
+		| "planned"
+		| "building"
+		| "resident"
+		| "reclaimable"
+		| "missing";
+}
+
+export interface RuntimeTexturePageInspectionPreview {
+	readonly format: "rgba8" | "r8" | "rg8";
+	readonly height: number;
+	readonly pixels: Uint8Array;
+	readonly placements: readonly {
+		readonly bindingId: string;
+		readonly rect: readonly [number, number, number, number];
+	}[];
+	readonly sampleClass: string;
+	readonly width: number;
+	readonly wrapS: string;
+	readonly wrapT: string;
+}
+
+export interface RuntimeTexturePageInspectionEntry {
+	readonly bindingIds: readonly string[];
+	readonly id: string;
+	readonly ownerIds: readonly string[];
+	readonly pageClass: string;
+	readonly purpose: string;
+	readonly sourceKey: string;
+	readonly state: "claimed" | "reclaimable";
+	readonly textureKey: string;
+}
+
 export interface ClientRuntime {
 	createRuntimeSpawn(request: RuntimeDynamicSpawnRequest): DynamicEntityId;
 	removeRuntimeSpawn(entityId: DynamicEntityId): boolean;
@@ -225,6 +269,10 @@ export interface ClientRuntime {
 	updateCameraState(camera: FrameState["camera"]): void;
 	tickFrame(timeSeconds: number): void;
 	createOverviewSnapshot(): RuntimeOverviewSnapshot;
+	createTexturePageInspectionSnapshot(input: {
+		readonly bucketKey: string;
+		readonly pageId: string;
+	}): RuntimeTexturePageInspectionSnapshot;
 	createDiagnosticsReport(): RuntimeDiagnosticsReport;
 	subscribeFrameTelemetry(listener: RuntimeFrameTelemetryListener): () => void;
 	subscribeEvents(listener: RuntimeEventListener): () => void;

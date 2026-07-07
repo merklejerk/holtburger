@@ -130,10 +130,18 @@ describe("WorkerPoolOpenWorldObjectVisualAtlasBuilder", () => {
 			kind: "result",
 			output: {
 				pages: [{ pageId: "asset:prepared-texture/06000010" }],
+				sourceFacts: [
+					{
+						entryKey: "entry:terrain",
+						format: "rgba8",
+						height: 1,
+						width: 1,
+					},
+				],
 				stageTimings: [
 					{
 						count: 1,
-						stage: "texture-source-preparation",
+						stage: "texture-source-fact-preparation",
 					},
 				],
 			},
@@ -275,11 +283,21 @@ class AssetReadingFixtureAtlasBuilder implements OpenWorldObjectVisualAtlasBuild
 					rect: [0, 0, 1, 1],
 				},
 			],
+			sourceFacts: [
+				{
+					entryKey:
+						input.entries[0]?.entryId ??
+						("entry:none" as OpenWorldTextureEntryId),
+					format: "rgba8",
+					height: 1,
+					width: 1,
+				},
+			],
 			stageTimings: [
 				{
 					count: 1,
 					durationMs: 1,
-					stage: "texture-source-preparation",
+					stage: "texture-source-fact-preparation",
 				},
 			],
 		};
@@ -335,6 +353,14 @@ function createLayoutOutput(): OpenWorldObjectVisualAtlasPlacementOutput {
 				entryKey: "entry:terrain" as OpenWorldTextureEntryId,
 				pageId: "layout:terrain:page:0",
 				rect: [0, 0, 1, 1],
+			},
+		],
+		sourceFacts: [
+			{
+				entryKey: "entry:terrain" as OpenWorldTextureEntryId,
+				format: "rgba8",
+				height: 1,
+				width: 1,
 			},
 		],
 		stageTimings: [],

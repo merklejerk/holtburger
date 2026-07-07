@@ -485,6 +485,14 @@ function createAtlasOutput(): OpenWorldObjectVisualAtlasPlacementOutput {
 				rect: [1, 1, 1, 1],
 			},
 		],
+		sourceFacts: [
+			{
+				entryKey: "entry:object-base" as OpenWorldTextureEntryId,
+				format: "rgba8",
+				height: 1,
+				width: 1,
+			},
+		],
 		stageTimings: [
 			{
 				count: 1,

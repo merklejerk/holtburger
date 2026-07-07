@@ -82,8 +82,8 @@ describe("reserveObjectVisualTexturePlacements", () => {
 			}),
 		]);
 		expect(reservation.stageTimings.map((timing) => timing.stage)).toEqual([
-			"texture-source-preparation-chunk",
-			"texture-source-preparation",
+			"texture-source-fact-preparation-chunk",
+			"texture-source-fact-preparation",
 			"texture-layout",
 			"texture-placement-reservation-page",
 			"texture-placement-reservation",

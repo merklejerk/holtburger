@@ -16,6 +16,8 @@ import type {
 	RendererFrameTelemetryListener,
 	RendererResourceSnapshot,
 	RendererSnapshot,
+	RendererTerrainMaterialDiagnostics,
+	RendererTerrainTextureBindingDiagnostics,
 	StaticObjectUploadDiagnostics,
 	RenderPassPlan,
 	PortalProjectionFrameGraphPlan,
@@ -2970,8 +2972,79 @@ class Webgl2Renderer implements Renderer {
 				].map((resource) => resource.uploadedBufferBytes),
 			),
 			terrainDrawUnits: this.#terrainResources.size,
+			terrainMaterialDiagnostics: [
+				...this.#terrainResources.values(),
+			].map((resource) => this.#createTerrainMaterialDiagnostic(resource)),
 			directEnvCellDrawCalls: this.#lastDirectEnvCellDrawCalls,
 		};
+	}
+
+	#createTerrainMaterialDiagnostic(
+		resource: TerrainGeometryResource,
+	): RendererTerrainMaterialDiagnostics {
+		const textureBindingIds = collectTerrainResourceTextureBindingIds(resource);
+		const nonResidentTextureBindings =
+			this.#createTerrainTextureBindingDiagnostics(textureBindingIds);
+		const fallbackReasons = collectTerrainResourceFallbackReasonCodes(resource);
+		if (resource.materialFamily === "terrain-debug-flat") {
+			return {
+				drawUnitId: resource.drawUnitId,
+				fallbackReasons,
+				landblockId: resource.landblockId,
+				materialFamily: resource.materialFamily,
+				mode: "debug-flat",
+				nonResidentTextureBindings,
+				textureBindingCount: textureBindingIds.length,
+			};
+		}
+		if (resource.materialFamily === "terrain-single-base-color") {
+			const primaryTextureResident =
+				resource.primaryTextureBindingId !== null &&
+				this.#textureBindings.getResident(resource.primaryTextureBindingId) !==
+					null;
+			return {
+				drawUnitId: resource.drawUnitId,
+				fallbackReasons,
+				landblockId: resource.landblockId,
+				materialFamily: resource.materialFamily,
+				mode: primaryTextureResident ? "single-base-color" : "flat-fallback",
+				nonResidentTextureBindings,
+				textureBindingCount: textureBindingIds.length,
+			};
+		}
+		return {
+			drawUnitId: resource.drawUnitId,
+			fallbackReasons,
+			landblockId: resource.landblockId,
+			materialFamily: resource.materialFamily,
+			mode:
+				resource.terrainMaterialPlan !== null &&
+				this.#getTerrainPreparedLayeredPayload(resource) !== null
+					? "layered"
+					: "flat-fallback",
+			nonResidentTextureBindings,
+			textureBindingCount: textureBindingIds.length,
+		};
+	}
+
+	#createTerrainTextureBindingDiagnostics(
+		textureBindingIds: readonly TextureBindingId[],
+	): readonly RendererTerrainTextureBindingDiagnostics[] {
+		const diagnostics: RendererTerrainTextureBindingDiagnostics[] = [];
+		for (const bindingId of textureBindingIds) {
+			const state = this.#textureBindings.getState(bindingId);
+			if (state.kind === "resident") {
+				if (!this.#textureBindings.getResident(bindingId)) {
+					diagnostics.push({
+						bindingId,
+						state: "resident-without-texture",
+					});
+				}
+				continue;
+			}
+			diagnostics.push({ bindingId, state: state.kind });
+		}
+		return diagnostics;
 	}
 
 	#createFrameTelemetry(): RendererFrameTelemetry {
@@ -5236,6 +5309,60 @@ function isTransparentStaticObjectInstanceDrawResource(
 	resource: StaticObjectInstanceDrawResource,
 ): boolean {
 	return isTransparentObjectMaterialResource(resource.resource);
+}
+
+function collectTerrainResourceTextureBindingIds(
+	resource: TerrainGeometryResource,
+): readonly TextureBindingId[] {
+	const explicitTextureBindingIds = (
+		resource as {
+			readonly textureBindingIds?: readonly TextureBindingId[];
+		}
+	).textureBindingIds;
+	if (explicitTextureBindingIds) {
+		return [...new Set(explicitTextureBindingIds)];
+	}
+
+	const textureBindingIds = new Set<TextureBindingId>();
+	if (resource.primaryTextureBindingId) {
+		textureBindingIds.add(resource.primaryTextureBindingId);
+	}
+	for (const role of collectTerrainResourceTextureRoles(resource)) {
+		if (role.textureBindingId) {
+			textureBindingIds.add(role.textureBindingId);
+		}
+	}
+	return [...textureBindingIds];
+}
+
+function collectTerrainResourceTextureRoles(
+	resource: TerrainGeometryResource,
+): readonly { readonly textureBindingId: TextureBindingId | null }[] {
+	const plan = resource.terrainMaterialPlan;
+	if (!plan) {
+		return [];
+	}
+	return [
+		...plan.detailRoles.map((role) => role.texture),
+		...plan.layerEntries.flatMap((entry) => [
+			entry.base,
+			...entry.overlays.flatMap((overlay) => [overlay.terrain, overlay.alpha]),
+			...entry.roads.flatMap((road) => [road.road, road.alpha]),
+		]),
+	];
+}
+
+function collectTerrainResourceFallbackReasonCodes(
+	resource: TerrainGeometryResource,
+): readonly string[] {
+	const fallbackReasons = (
+		resource as {
+			readonly terrainFallbackReasons?: readonly {
+				readonly reasonCodes: readonly string[];
+			}[];
+		}
+	).terrainFallbackReasons;
+	return fallbackReasons?.flatMap((reason) => reason.reasonCodes) ?? [];
 }
 
 function isStaticObjectGeometryResource(

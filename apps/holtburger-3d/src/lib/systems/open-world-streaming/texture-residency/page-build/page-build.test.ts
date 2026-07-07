@@ -247,6 +247,47 @@ describe("open-world texture page build", () => {
 		});
 	});
 
+	it("settles accepted page updates for bindings claimed while the page was building", () => {
+		const { registry, input } = createReservedRegistryPage();
+		registry.retainTextureBindings(ownerId("owner:terrain-reuse"), input.bucketKey, [
+			{
+				bindingId: bindingId("binding:terrain-reuse"),
+				bucketKey: input.bucketKey,
+				pageClass: pageClass("page-class:terrain"),
+				purpose: "terrain-color",
+				sourceKey: "source:terrain",
+				textureKey: textureKey("texture:terrain"),
+			},
+		]);
+
+		const settlement = settleOpenWorldTexturePageBuildResult(
+			registry,
+			createPageBuildOutput(input),
+		);
+
+		expect(settlement).toMatchObject({
+			commit: {
+				bindingUpdates: [
+					expect.objectContaining({
+						bindingId: bindingId("binding:terrain"),
+						readiness: expect.objectContaining({
+							kind: "resident",
+							textureRefId: "texture-ref:terrain",
+						}),
+					}),
+					expect.objectContaining({
+						bindingId: bindingId("binding:terrain-reuse"),
+						readiness: expect.objectContaining({
+							kind: "resident",
+							textureRefId: "texture-ref:terrain",
+						}),
+					}),
+				],
+			},
+			kind: "accepted",
+		});
+	});
+
 	it("settles accepted noops without texture commits", () => {
 		const { registry, input } = createReservedRegistryPage();
 
@@ -396,6 +437,10 @@ function createReservedRegistryPage(): {
 	const page = registry.createPage({
 		bucketKey,
 		entryIds: [snapshot.entries[0].id],
+		placements: [{ entryId: snapshot.entries[0].id, rect: [0, 0, 1, 1] }],
+		textureHeight: 1,
+		textureRefId: "texture-ref:terrain",
+		textureWidth: 1,
 	});
 	const reservationToken = registry.reservePageBuild(page.id);
 	return {

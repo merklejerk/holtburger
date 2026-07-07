@@ -115,14 +115,14 @@ interface OpenWorldTexturePageBuildBaseOutput {
 	readonly stageTimings: readonly OpenWorldStreamingStaticTaskStageTiming[];
 }
 
-export interface OpenWorldTexturePageBuildPixelPage extends OpenWorldTexturePageBuildPage {
+interface OpenWorldTexturePageBuildPixelPage extends OpenWorldTexturePageBuildPage {
 	/** Complete page pixels ready for renderer upload. */
 	readonly pixels: Uint8Array;
 	/** Renderer texture reference to update. */
 	readonly textureRefId: string;
 }
 
-export interface OpenWorldTexturePageBuildPlacement {
+interface OpenWorldTexturePageBuildPlacement {
 	/** Material-consumer binding resolved by this placement. */
 	readonly bindingId: TextureBindingId;
 	/** Rect inside the uploaded page. */

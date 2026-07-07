@@ -68,6 +68,8 @@ export interface TexturePlacementIntent<
 	readonly bindingId: TextureBindingId;
 	/** Canonical texture-pool identity requested by this placement. */
 	readonly textureKey: TextureKey;
+	/** Prepared source identity retained for consistency checks and inspection. */
+	readonly sourceKey: string;
 	/** Residency owners that keep this texture alive. */
 	readonly ownerIds: readonly TextureOwnerId[];
 	/** Physical atlas-page compatibility class for this placement. */
@@ -187,6 +189,8 @@ export interface TexturePlacementIntentOptions {
 	readonly bindingId?: TextureBindingId;
 	/** Canonical texture-pool identity requested by this placement. */
 	readonly textureKey?: TextureKey;
+	/** Prepared source identity retained for consistency checks and inspection. */
+	readonly sourceKey: string;
 	/** Residency owners that keep this texture alive. */
 	readonly ownerIds?: readonly TextureOwnerId[];
 	/** Physical atlas-page compatibility class for this placement. */
@@ -280,6 +284,7 @@ export function createStaticTexturePlacementIntent(
 		ownerIds: identity.ownerIds,
 		pageClass: identity.pageClass,
 		textureKey: identity.textureKey,
+		sourceKey: options.sourceKey,
 		placementPolicy: options.placementPolicy,
 		purpose,
 		source: createTexturePlacementMaterialSource(
@@ -323,6 +328,7 @@ export function createDynamicTexturePlacementIntent(
 		ownerIds: identity.ownerIds,
 		pageClass: identity.pageClass,
 		textureKey: identity.textureKey,
+		sourceKey: options.sourceKey,
 		placementPolicy: options.placementPolicy,
 		purpose,
 		source: createTexturePlacementMaterialSource(

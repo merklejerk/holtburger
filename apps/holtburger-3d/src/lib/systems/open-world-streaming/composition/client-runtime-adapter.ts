@@ -390,6 +390,8 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 						},
 						staticObjectVisualResources: renderer.staticObjectVisualResources,
 						terrainDrawUnits: renderer.terrainDrawUnits,
+						terrainMaterialDiagnostics:
+							renderer.terrainMaterialDiagnostics,
 					},
 				},
 				{

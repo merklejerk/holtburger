@@ -57,6 +57,81 @@ describe("OpenWorldTextureClaimRegistry", () => {
 		});
 	});
 
+	it("uses bucket and canonical texture key as texture entry identity", () => {
+		const registry = new OpenWorldTextureClaimRegistry();
+		const bucketKey = createBucketKey("terrain-color");
+
+		registry.retainTextureBindings(ownerId("owner:a"), bucketKey, [
+			createBinding("terrain-a", bucketKey, {
+				bindingId: bindingId("binding:terrain-owner-a"),
+				textureKey: textureKey("texture:shared-terrain"),
+			}),
+		]);
+		const snapshot = registry.retainTextureBindings(ownerId("owner:b"), bucketKey, [
+			createBinding("terrain-b", bucketKey, {
+				bindingId: bindingId("binding:terrain-owner-b"),
+				textureKey: textureKey("texture:shared-terrain"),
+			}),
+		]);
+
+		expect(snapshot.entries).toEqual([
+			expect.objectContaining({
+				bindingIds: [
+					bindingId("binding:terrain-owner-a"),
+					bindingId("binding:terrain-owner-b"),
+				],
+				sourceKey: "source:shared",
+				textureKey: textureKey("texture:shared-terrain"),
+			}),
+		]);
+	});
+
+	it("fails loudly when one canonical texture key maps to conflicting source facts", () => {
+		const registry = new OpenWorldTextureClaimRegistry();
+		const bucketKey = createBucketKey("terrain-color");
+
+		registry.retainTextureBindings(ownerId("owner:a"), bucketKey, [
+			createBinding("terrain-a", bucketKey, {
+				sourceKey: "source:first",
+				textureKey: textureKey("texture:shared-terrain"),
+			}),
+		]);
+
+		expect(() =>
+			registry.retainTextureBindings(ownerId("owner:b"), bucketKey, [
+				createBinding("terrain-b", bucketKey, {
+					sourceKey: "source:second",
+					textureKey: textureKey("texture:shared-terrain"),
+				}),
+			]),
+		).toThrow(
+			"changed source key from source:first to source:second",
+		);
+	});
+
+	it("fails loudly when one canonical texture key maps to a conflicting page class", () => {
+		const registry = new OpenWorldTextureClaimRegistry();
+		const bucketKey = createBucketKey("terrain-color");
+
+		registry.retainTextureBindings(ownerId("owner:a"), bucketKey, [
+			createBinding("terrain-a", bucketKey, {
+				pageClass: pageClass("page-class:first"),
+				textureKey: textureKey("texture:shared-terrain"),
+			}),
+		]);
+
+		expect(() =>
+			registry.retainTextureBindings(ownerId("owner:b"), bucketKey, [
+				createBinding("terrain-b", bucketKey, {
+					pageClass: pageClass("page-class:second"),
+					textureKey: textureKey("texture:shared-terrain"),
+				}),
+			]),
+		).toThrow(
+			"changed page class from page-class:first to page-class:second",
+		);
+	});
+
 	it("replaces an owner's full binding set for one bucket", () => {
 		const registry = new OpenWorldTextureClaimRegistry();
 		const bucketKey = createBucketKey("object-base-color");
@@ -338,6 +413,48 @@ describe("OpenWorldTextureClaimRegistry", () => {
 		});
 	});
 
+	it("exposes reusable entry placement facts after page build reservation", () => {
+		const registry = new OpenWorldTextureClaimRegistry();
+		const bucketKey = createBucketKey("terrain-color");
+		const snapshot = registry.retainTextureBindings(
+			ownerId("owner:terrain"),
+			bucketKey,
+			[createBinding("terrain", bucketKey)],
+		);
+		const entryId = snapshot.entries[0].id;
+		const page = registry.createPage({
+			bucketKey,
+			entryIds: [entryId],
+			placements: [{ entryId, rect: [3, 5, 7, 11] }],
+			textureHeight: 64,
+			textureWidth: 128,
+		});
+
+		expect(registry.findReusableEntryPlacement(entryId)).toBeNull();
+		const token = registry.reservePageBuild(page.id);
+
+		expect(registry.findReusableEntryPlacement(entryId)).toEqual({
+			entryId,
+			pageId: page.id,
+			pageState: "building",
+			rect: [3, 5, 7, 11],
+			textureHeight: 64,
+			textureRefId: `${page.id}:texture`,
+			textureWidth: 128,
+		});
+		registry.acceptPageBuild(page.id, token);
+
+		expect(registry.findReusableEntryPlacement(entryId)).toEqual({
+			entryId,
+			pageId: page.id,
+			pageState: "resident",
+			rect: [3, 5, 7, 11],
+			textureHeight: 64,
+			textureRefId: `${page.id}:texture`,
+			textureWidth: 128,
+		});
+	});
+
 	it("retires accepted noop page builds back to the pre-build state", () => {
 		const registry = new OpenWorldTextureClaimRegistry();
 		const bucketKey = createBucketKey("terrain-color");
@@ -426,16 +543,17 @@ function createBucketKey(
 function createBinding(
 	name: string,
 	bucketKey: ReturnType<typeof createBucketKey>,
+	overrides: Partial<OpenWorldTextureBindingRequirement> = {},
 ): OpenWorldTextureBindingRequirement {
 	return {
-		bindingId: bindingId(`binding:${name}`),
+		bindingId: overrides.bindingId ?? bindingId(`binding:${name}`),
 		bucketKey,
-		pageClass: pageClass(
+		pageClass: overrides.pageClass ?? pageClass(
 			`page-class:${name.includes("terrain") ? "terrain" : "object"}`,
 		),
-		purpose: purposeFromBucketKey(bucketKey),
-		sourceKey: "source:shared",
-		textureKey: textureKey(
+		purpose: overrides.purpose ?? purposeFromBucketKey(bucketKey),
+		sourceKey: overrides.sourceKey ?? "source:shared",
+		textureKey: overrides.textureKey ?? textureKey(
 			`texture:${name.replace("-a", "").replace("-b", "")}`,
 		),
 	};

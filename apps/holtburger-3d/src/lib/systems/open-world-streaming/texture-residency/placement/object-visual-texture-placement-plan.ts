@@ -10,6 +10,7 @@ import type { MaterializationOwnerId } from "../../owners/owner-id";
 import type { OpenWorldStreamingStaticTaskStageTiming } from "../../diagnostics/contracts";
 import { OpenWorldTextureClaimRegistry } from "../claims/texture-claim-registry";
 import type { OpenWorldTexturePageBuildInput } from "../page-build/protocol";
+import type { OpenWorldStreamingTextureCommit } from "../commits/contracts";
 import type { OpenWorldObjectVisualAtlasBuilder } from "../atlas-build/object-visual-atlas-builder";
 import { reserveMaterialTexturePlacements } from "./material-texture-placement-plan";
 
@@ -25,6 +26,7 @@ export interface OpenWorldObjectVisualTexturePlacementReservation {
 	readonly pageBuildRequests: readonly OpenWorldTexturePageBuildInput[];
 	readonly placementSnapshot: ObjectVisualTexturePlacementSnapshot;
 	readonly stageTimings: readonly OpenWorldStreamingStaticTaskStageTiming[];
+	readonly textureCommits: readonly OpenWorldStreamingTextureCommit[];
 }
 
 export async function reserveObjectVisualTexturePlacements(
@@ -48,6 +50,7 @@ export async function reserveObjectVisualTexturePlacements(
 			reservation.bindingPlacements,
 		),
 		stageTimings: reservation.stageTimings,
+		textureCommits: reservation.textureCommits,
 	};
 }
 

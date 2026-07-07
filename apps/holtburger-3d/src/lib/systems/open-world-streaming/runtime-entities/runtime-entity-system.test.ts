@@ -155,15 +155,86 @@ describe("OpenWorldRuntimeEntitySystem", () => {
 		]);
 		expect(owners.createSnapshot().current).toEqual([]);
 	});
+
+	it("coalesces static-authored dynamic renderer publication by parent batch", async () => {
+		const renderer = new FixtureDynamicRenderer();
+		const owners = new MaterializationOwnerRegistry();
+		const system = createSystem({ owners, renderer });
+		const parentOwnerId =
+			"static-layer:outdoor-buildings:0xda55ffff" as MaterializationOwnerId;
+
+		system.ingestStaticAuthoredPlacements({
+			parentOwnerId,
+			placements: [
+				createStaticAuthoredPlacement(parentOwnerId, "building-0"),
+				createStaticAuthoredPlacement(parentOwnerId, "building-1"),
+			],
+		});
+		await waitFor(() =>
+			renderer.resourceCommits.some(
+				(commit) => commit.addedVisualResources.length === 2,
+			),
+		);
+
+		expect(
+			renderer.resourceCommits.filter(
+				(commit) => commit.addedVisualResources.length > 0,
+			),
+		).toHaveLength(1);
+		expect(renderer.instanceCommits.at(-1)?.instances).toHaveLength(2);
+		expect(system.createDiagnosticsSnapshot()).toMatchObject({
+			commits: {
+				dynamicResourceCommitCount: 1,
+				maxResourcesPerCommit: 2,
+			},
+			prep: {
+				bakeSuccessCount: 2,
+				started: 2,
+				states: {
+					ready: 2,
+				},
+			},
+		});
+	});
+
+	it("marks in-flight static-authored dynamic prep stale after parent eviction", async () => {
+		const renderer = new FixtureDynamicRenderer();
+		const owners = new MaterializationOwnerRegistry();
+		const baker = new DeferredDynamicBaker();
+		const system = createSystem({ baker, owners, renderer });
+		const parentOwnerId =
+			"static-layer:outdoor-buildings:0xda55ffff" as MaterializationOwnerId;
+
+		system.ingestStaticAuthoredPlacements({
+			parentOwnerId,
+			placements: [createStaticAuthoredPlacement(parentOwnerId)],
+		});
+		await waitFor(() => baker.pendingCount === 1);
+
+		system.removeStaticAuthoredChildrenForParent(parentOwnerId);
+		baker.resolveAll();
+		await waitFor(() => system.createDiagnosticsSnapshot().prep.staleCount === 1);
+
+		expect(renderer.resourceCommits).toEqual([]);
+		expect(owners.createSnapshot().current).toEqual([]);
+		expect(system.createDiagnosticsSnapshot()).toMatchObject({
+			prep: {
+				bakeSuccessCount: 0,
+				staleCount: 1,
+				started: 1,
+			},
+		});
+	});
 });
 
 function createSystem(options: {
+	readonly baker?: DynamicVisualBaker;
 	readonly owners: MaterializationOwnerRegistry;
 	readonly renderer: FixtureDynamicRenderer;
 }): OpenWorldRuntimeEntitySystem {
 	return new OpenWorldRuntimeEntitySystem({
 		assetReader: createUnusedAssetReader(),
-		createDynamicVisualBaker: () => new FixtureDynamicBaker(),
+		createDynamicVisualBaker: () => options.baker ?? new FixtureDynamicBaker(),
 		createDynamicVisualRecipeResolver: () => new FixtureDynamicRecipeResolver(),
 		objectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder(),
 		owners: options.owners,
@@ -208,6 +279,36 @@ class FixtureDynamicBaker implements DynamicVisualBaker {
 			},
 			revision: input.revision,
 		};
+	}
+}
+
+class DeferredDynamicBaker implements DynamicVisualBaker {
+	readonly #pending: Array<{
+		readonly input: DynamicVisualBakeInput;
+		readonly resolve: (result: DynamicVisualBakeResult) => void;
+	}> = [];
+
+	get pendingCount(): number {
+		return this.#pending.length;
+	}
+
+	async bake(input: DynamicVisualBakeInput): Promise<DynamicVisualBakeResult> {
+		return new Promise((resolve) => {
+			this.#pending.push({ input, resolve });
+		});
+	}
+
+	resolveAll(): void {
+		for (const pending of this.#pending.splice(0)) {
+			pending.resolve({
+				failures: [],
+				product: {
+					kind: "baked",
+					resource: createBakedResource(pending.input.recipe.entityId),
+				},
+				revision: pending.input.revision,
+			});
+		}
 	}
 }
 
@@ -354,6 +455,7 @@ function createRuntimeSpawnRequest(): RuntimeDynamicSpawnRequest {
 
 function createStaticAuthoredPlacement(
 	parentOwnerId: MaterializationOwnerId,
+	instanceId = "building-0",
 ): StaticAuthoredDynamicPlacementRecord {
 	return {
 		kind: "outdoor-static-object-dynamic-placement",
@@ -376,7 +478,7 @@ function createStaticAuthoredPlacement(
 				origin: { x: 0, y: 0, z: 0 },
 			},
 			object: {
-				instanceId: "building-0",
+				instanceId,
 				objectKind: "building",
 			},
 			setupModelId: 0x020003e5,

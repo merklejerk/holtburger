@@ -82,6 +82,21 @@ export interface OpenWorldStreamingDiagnosticsSnapshot {
 			/** Entity prep requests with no visual recipe to resolve. */
 			readonly missingRecipeCount: number;
 			readonly recipeResolvedCount: number;
+			/** Prep requests abandoned because their materialization owner token was replaced or evicted. */
+			readonly staleCount: number;
+			/** Current prep records by direct replacement state. */
+			readonly states: {
+				readonly baking: number;
+				readonly failed: number;
+				readonly missingRecipe: number;
+				readonly queued: number;
+				readonly ready: number;
+				readonly reservingTextures: number;
+				readonly resolvingRecipe: number;
+				readonly skipped: number;
+				readonly stale: number;
+				readonly waitingForTexturePages: number;
+			};
 			readonly skippedVisualCount: number;
 			readonly started: number;
 			readonly recentFailures: readonly OpenWorldRuntimeEntityPrepFailureDiagnostics[];

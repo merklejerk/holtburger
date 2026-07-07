@@ -1279,9 +1279,8 @@ export class OpenWorldStreamingController {
 				objectVisualAtlasBuilder: this.#requireObjectVisualAtlasBuilder(),
 				owners: this.#owners,
 				renderer: this.#renderer,
-				scheduleTexturePageBuilds: (request) => {
-					this.#requireTexturePageBuildTaskStream().schedule(request);
-				},
+				scheduleTexturePageBuilds: (request) =>
+					this.#requireTexturePageBuildTaskStream().schedule(request),
 				textureClaims: this.#textureClaims,
 			});
 		}
@@ -2055,6 +2054,7 @@ function createEmptyRuntimeEntityDiagnosticsSnapshot(): OpenWorldRuntimeEntityDi
 			missingRecipeCount: 0,
 			recipeResolvedCount: 0,
 			recentFailures: [],
+			recentStageTimings: [],
 			staleCount: 0,
 			states: {
 				baking: 0,

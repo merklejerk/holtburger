@@ -107,6 +107,8 @@ export interface TexturePlacementIntent<
 	readonly itemId: TPlacementItemId;
 	/** Atlas allocation namespace where compatible sources can be reused. */
 	readonly placementBucketKey: TexturePlacementBucketKey;
+	/** Replacement residency policy that controls atlas sharing and page-build ownership. */
+	readonly placementPolicy: TexturePlacementPolicy;
 	/** Exact renderer texture domain that must own the atlas registry entry. */
 	readonly domain: VisualTextureDomain;
 	/** Page compatibility and shader role for the item. */
@@ -224,6 +226,75 @@ export interface TexturePlacementIntentOptions {
 	readonly affinityKey?: string | null;
 	/** Explicit dynamic placement bucket when caller owns runtime/static lifetime. */
 	readonly placementBucketKey?: TexturePlacementBucketKey;
+	/** Replacement-native atlas sharing and page-build policy. */
+	readonly placementPolicy?: TexturePlacementPolicy;
+}
+
+/** Describes whether the same canonical source pixels may be shared across owners. */
+type TexturePlacementSourceStability =
+	| {
+			/** Canonical source identity is enough to share physical placement. */
+			readonly kind: "content-stable";
+	  }
+	| {
+			/** Pixel identity depends on owner, placement, generation, tint, or runtime state. */
+			readonly kind: "owner-specific";
+			readonly reason:
+				| "generated"
+				| "placement-specific"
+				| "runtime-customized"
+				| "tint-baked"
+				| "measured-exception";
+			readonly detail?: string;
+	  };
+
+/** Replacement bucket sharing scope for compatible material texture pages. */
+type TexturePlacementBucketScope =
+	| {
+			/** Broad static content can share compatible pages across streaming owners. */
+			readonly kind: "static-domain";
+	  }
+	| {
+			/** Static content whose pixels or identity are specific to one streaming owner. */
+			readonly kind: "static-owner";
+			readonly ownerId: string;
+	  }
+	| {
+			/** Runtime-authored content isolated by the mutating runtime owner. */
+			readonly kind: "runtime-owner";
+			readonly ownerId: string;
+	  };
+
+/** Currentness authority for placement work using this policy. */
+type TexturePlacementOwnerCurrentness =
+	| {
+			/** The artifact runner supplies the current materialization owner. */
+			readonly kind: "placement-plan-owner";
+	  }
+	| {
+			/** A known owner id controls currentness for this placement work. */
+			readonly kind: "explicit-owner";
+			readonly ownerId: string;
+	  };
+
+/** Page pixel build ownership for this material texture placement. */
+type TexturePlacementPageBuildPolicy =
+	| {
+			/** Normal production path: source prep, packing, gutters, and pixels are worker-owned. */
+			readonly kind: "worker-owned";
+	  }
+	| {
+			/** Narrow exception that must be justified by measured constraints. */
+			readonly kind: "main-thread-measured-exception";
+			readonly reason: string;
+	  };
+
+/** Replacement-native material texture placement policy. */
+export interface TexturePlacementPolicy {
+	readonly bucketScope: TexturePlacementBucketScope;
+	readonly ownerCurrentness: TexturePlacementOwnerCurrentness;
+	readonly pageBuild: TexturePlacementPageBuildPolicy;
+	readonly sourceStability: TexturePlacementSourceStability;
 }
 
 export function createTexturePlacementItemId(
@@ -277,6 +348,8 @@ export function createStaticTexturePlacementIntent(
 				lifetime: { kind: "static-authored" },
 				purpose,
 			}),
+		placementPolicy:
+			options.placementPolicy ?? createStaticDomainTexturePlacementPolicy(),
 		purpose,
 		source: createTexturePlacementMaterialSource(
 			textureUse.source,
@@ -310,6 +383,11 @@ export function createDynamicTexturePlacementIntent(
 			"Dynamic texture placement intents require an explicit placement bucket key.",
 		);
 	}
+	if (!options.placementPolicy) {
+		throw new Error(
+			"Dynamic texture placement intents require an explicit replacement placement policy.",
+		);
+	}
 	const identity = requireTexturePlacementIdentity({
 		bindingId: options.bindingId ?? textureUse.bindingId,
 		ownerIds: options.ownerIds ?? textureUse.ownerIds,
@@ -325,11 +403,21 @@ export function createDynamicTexturePlacementIntent(
 		pageClass: identity.pageClass,
 		textureKey: identity.textureKey,
 		placementBucketKey: options.placementBucketKey,
+		placementPolicy: options.placementPolicy,
 		purpose,
 		source: createTexturePlacementMaterialSource(
 			textureUse.source,
 			textureUse.samplingPolicy,
 		),
+	};
+}
+
+function createStaticDomainTexturePlacementPolicy(): TexturePlacementPolicy {
+	return {
+		bucketScope: { kind: "static-domain" },
+		ownerCurrentness: { kind: "placement-plan-owner" },
+		pageBuild: { kind: "worker-owned" },
+		sourceStability: { kind: "content-stable" },
 	};
 }
 

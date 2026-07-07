@@ -12,6 +12,7 @@ import {
 	createStaticTexturePlacementIntent,
 	createStaticAuthoredTexturePlacementBucketKey,
 	type DynamicTexturePlacementUse,
+	type TexturePlacementPolicy,
 } from "./placement";
 import {
 	createMaterialTextureSourceKey,
@@ -85,6 +86,7 @@ describe("texture placement vocabulary bridge", () => {
 						ownerId: "static-layer-owner:generated:0xda55ffff",
 						purpose: "object-detail",
 					}),
+				placementPolicy: staticDomainPolicy(),
 			}),
 		).toMatchObject({
 			domain: "outdoor-generated-scenery",
@@ -112,6 +114,7 @@ describe("texture placement vocabulary bridge", () => {
 						entityId: "runtime-spawn:1",
 						purpose: "object-index",
 					}),
+				placementPolicy: runtimeOwnerPolicy("runtime-spawn:1"),
 			}),
 		).toMatchObject({
 			domain: "runtime-object-material",
@@ -325,6 +328,27 @@ function createDynamicTextureUse(options: {
 		source: options.source,
 		textureDomain: options.textureDomain,
 		textureBindingId: options.textureBindingId,
+	};
+}
+
+function staticDomainPolicy(): TexturePlacementPolicy {
+	return {
+		bucketScope: { kind: "static-domain" },
+		ownerCurrentness: { kind: "placement-plan-owner" },
+		pageBuild: { kind: "worker-owned" },
+		sourceStability: { kind: "content-stable" },
+	};
+}
+
+function runtimeOwnerPolicy(ownerId: string): TexturePlacementPolicy {
+	return {
+		bucketScope: { kind: "runtime-owner", ownerId },
+		ownerCurrentness: { kind: "placement-plan-owner" },
+		pageBuild: { kind: "worker-owned" },
+		sourceStability: {
+			kind: "owner-specific",
+			reason: "runtime-customized",
+		},
 	};
 }
 

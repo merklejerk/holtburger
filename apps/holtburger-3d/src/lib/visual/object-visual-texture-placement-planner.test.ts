@@ -3,6 +3,7 @@ import {
 	createRuntimeAuthoredDynamicTexturePlacementBucketKey,
 	createTexturePlacementBucketKey,
 	type TextureBindingRequirement,
+	type TexturePlacementPolicy,
 } from "../textures/placement";
 import {
 	createMaterialTextureSourceKey,
@@ -98,6 +99,7 @@ describe("object visual texture placement planner", () => {
 						affinityKey: "setup-model/02000001",
 						kind: "dynamic",
 						placementBucketKey,
+						placementPolicy: runtimeOwnerPolicy("runtime-spawn:1"),
 						textureDomain: "runtime-object-material",
 					},
 					requirement,
@@ -197,5 +199,17 @@ function createRequirement(
 				usage: "rgba-color",
 			}),
 		}),
+	};
+}
+
+function runtimeOwnerPolicy(ownerId: string): TexturePlacementPolicy {
+	return {
+		bucketScope: { kind: "runtime-owner", ownerId },
+		ownerCurrentness: { kind: "placement-plan-owner" },
+		pageBuild: { kind: "worker-owned" },
+		sourceStability: {
+			kind: "owner-specific",
+			reason: "runtime-customized",
+		},
 	};
 }

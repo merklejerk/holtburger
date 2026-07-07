@@ -32,6 +32,7 @@ import {
 	classifyTextureUsagePurpose,
 	createRuntimeAuthoredDynamicTexturePlacementBucketKey,
 	createStaticAuthoredDynamicTexturePlacementBucketKey,
+	type TexturePlacementPolicy,
 	type TexturePlacementItemId,
 	type TexturePlacementBucketKey,
 	type TextureUsagePurpose,
@@ -318,6 +319,10 @@ function createDynamicTexturePlacementRequirement(options: {
 				recipe: options.recipe,
 				textureDomain,
 			}),
+			placementPolicy: createDynamicTexturePlacementPolicy({
+				recipe: options.recipe,
+				textureDomain,
+			}),
 			textureDomain,
 		},
 		requirement: {
@@ -347,6 +352,42 @@ function createDynamicTexturePlacementRequirement(options: {
 				dynamicTextureSourceId: options.requirement.dynamicTextureSourceId,
 			}),
 		},
+	};
+}
+
+function createDynamicTexturePlacementPolicy(options: {
+	readonly recipe: DynamicVisualBakeInput["recipe"];
+	readonly textureDomain:
+		| "runtime-object-material"
+		| Exclude<
+				DynamicVisualBakeInput["recipe"]["visual"]["materialPolicy"]["detailRolePolicy"],
+				{ readonly kind: "runtime-authored-none" }
+		  >["domain"];
+}): TexturePlacementPolicy {
+	if (options.textureDomain === "runtime-object-material") {
+		return {
+			bucketScope: {
+				kind: "runtime-owner",
+				ownerId: options.recipe.entityId,
+			},
+			ownerCurrentness: { kind: "placement-plan-owner" },
+			pageBuild: { kind: "worker-owned" },
+			sourceStability: {
+				kind: "owner-specific",
+				reason: "runtime-customized",
+			},
+		};
+	}
+	if (options.recipe.source.kind !== "static-authored") {
+		throw new Error(
+			`Dynamic recipe ${options.recipe.entityId} cannot use static texture policy for non-static source ownership.`,
+		);
+	}
+	return {
+		bucketScope: { kind: "static-domain" },
+		ownerCurrentness: { kind: "placement-plan-owner" },
+		pageBuild: { kind: "worker-owned" },
+		sourceStability: { kind: "content-stable" },
 	};
 }
 

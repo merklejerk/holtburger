@@ -9,6 +9,7 @@ import type { PreparedRenderSurfaceTextureUseIdentity } from "../../../../static
 import {
 	createTexturePlacementItemId,
 	type ObjectVisualTexturePlacementIntent,
+	type TexturePlacementPolicy,
 } from "../../../../textures/placement";
 import type {
 	TextureBindingId,
@@ -199,6 +200,7 @@ function createIntent(input: {
 		pageClass: pageClass("page-class:object-base"),
 		placementBucketKey:
 			"fixture-bucket:unused" as ObjectVisualTexturePlacementIntent["placementBucketKey"],
+		placementPolicy: staticDomainPolicy(),
 		purpose: "object-base-color",
 		source: {
 			dataUse: source,
@@ -294,4 +296,13 @@ function pageClass(value: string): TexturePageClass {
 
 function textureKey(value: string): TextureKey {
 	return value as TextureKey;
+}
+
+function staticDomainPolicy(): TexturePlacementPolicy {
+	return {
+		bucketScope: { kind: "static-domain" },
+		ownerCurrentness: { kind: "placement-plan-owner" },
+		pageBuild: { kind: "worker-owned" },
+		sourceStability: { kind: "content-stable" },
+	};
 }

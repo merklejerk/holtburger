@@ -81,6 +81,26 @@ describe("OpenWorldStreamingController terrain slice", () => {
 			queued: 0,
 			staleRejected: 0,
 		});
+		expect(controller.createDiagnosticsSnapshot().textureResidency).toMatchObject({
+			byteEstimate: {
+				approximateBytes: null,
+				reason: "page-size-not-yet-canonical",
+			},
+			ownerlessPagePolicy: {
+				pendingRendererRemovalPageCount: 0,
+				rendererRemoval: {
+					kind: "deferred-until-measured-pressure",
+					pressureThresholdBytes: null,
+				},
+				residentDisposition: "cached-for-reuse",
+			},
+			ownerlessPages: {
+				building: 0,
+				planned: 0,
+				resident: 0,
+				total: 0,
+			},
+		});
 	});
 
 	it("keeps source delivery split by domain and reports direct source work", async () => {

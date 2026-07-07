@@ -239,15 +239,19 @@ describe("OpenWorldStreamingController terrain slice", () => {
 		).toMatchObject({
 			recentIssues: [
 				{
-					coverageKey: "fixture:coverage",
-					family: "unsupported",
-					kind: "unsupported-material",
+					kind: "unsupported-source-material",
+					materialFamily: "unsupported",
 					reasonCodes: ["fixture-unsupported"],
+					sourceEvidence: {
+						kind: "static-material-coverage",
+						reportKey: "fixture:coverage",
+						reportKind: "terrain",
+					},
 					taskId: "1:landblock:da55ffff:outdoor-terrain",
 				},
 			],
 			summary: {
-				unsupportedMaterialIssueCount: 1,
+				unsupportedSourceMaterialIssueCount: 1,
 			},
 		});
 	});
@@ -278,8 +282,8 @@ describe("OpenWorldStreamingController terrain slice", () => {
 		).toMatchObject({
 			recentIssues: [],
 			summary: {
-				deferredMaterialIssueCount: 0,
-				unsupportedMaterialIssueCount: 0,
+				deferredRendererCapabilityIssueCount: 0,
+				unsupportedSourceMaterialIssueCount: 0,
 			},
 		});
 	});
@@ -373,15 +377,15 @@ describe("OpenWorldStreamingController terrain slice", () => {
 		).toMatchObject({
 			recentIssues: [
 				{
-					family: "indexed-paletted",
-					kind: "skipped-static-object-partition",
+					kind: "skipped-geometry",
+					materialFamily: "indexed-paletted",
 					reason: "fixture deferred material",
 					sliceId: "fixture:partition",
 					taskId: "1:landblock:da55ffff:outdoor-generated-scenery",
 				},
 			],
 			summary: {
-				skippedStaticObjectPartitionCount: 1,
+				skippedGeometryIssueCount: 1,
 			},
 		});
 	});

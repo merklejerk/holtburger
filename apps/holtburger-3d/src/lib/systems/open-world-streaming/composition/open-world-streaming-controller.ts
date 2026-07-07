@@ -1866,9 +1866,9 @@ function createMaterialReadinessDiagnostics(input: {
 	return {
 		recentIssues,
 		summary: {
-			deferredMaterialIssueCount: countMaterialReadinessIssues(
+			deferredRendererCapabilityIssueCount: countMaterialReadinessIssues(
 				recentIssues,
-				"deferred-material",
+				"renderer-capability-deferred",
 			),
 			failedTextureDependencyCount: countMaterialReadinessIssues(
 				recentIssues,
@@ -1882,17 +1882,17 @@ function createMaterialReadinessDiagnostics(input: {
 				recentIssues,
 				"pipeline-bug",
 			),
-			skippedStaticObjectPartitionCount: countMaterialReadinessIssues(
+			skippedGeometryIssueCount: countMaterialReadinessIssues(
 				recentIssues,
-				"skipped-static-object-partition",
+				"skipped-geometry",
 			),
 			terrainMaterialIssueCount: countMaterialReadinessIssues(
 				recentIssues,
 				"terrain-material-issue",
 			),
-			unsupportedMaterialIssueCount: countMaterialReadinessIssues(
+			unsupportedSourceMaterialIssueCount: countMaterialReadinessIssues(
 				recentIssues,
-				"unsupported-material",
+				"unsupported-source-material",
 			),
 		},
 	};
@@ -1912,20 +1912,23 @@ function createMaterialCoverageIssues(input: {
 }): readonly OpenWorldStreamingMaterialReadinessIssue[] {
 	return input.materialCoverage.flatMap((coverage) =>
 		coverage.unrenderedBuckets.map((bucket) => ({
-			coverageKey: coverage.coverageKey,
-			coverageKind: coverage.coverageKind,
 			domain: coverage.domain,
-			family: bucket.family,
+			materialFamily: bucket.family,
 			kind:
 				bucket.outcome === "unsupported"
-					? "unsupported-material"
-					: "deferred-material",
+					? "unsupported-source-material"
+					: "renderer-capability-deferred",
 			landblockId: coverage.landblockId,
 			materialCount: bucket.materialCount,
 			ownerId: input.ownerId,
 			partitionCount: bucket.partitionCount,
-			pass: bucket.pass,
+			renderPass: bucket.pass,
 			reasonCodes: bucket.reasonCodes,
+			sourceEvidence: {
+				kind: "static-material-coverage",
+				reportKey: coverage.coverageKey,
+				reportKind: coverage.coverageKind,
+			},
 			taskId: input.taskId,
 			triangleCount: bucket.triangleCount,
 		})),
@@ -1942,14 +1945,14 @@ function createStaticObjectBakeIssues(input: {
 			diagnostic.skippedPartitions.map<OpenWorldStreamingMaterialReadinessIssue>(
 				(partition) => ({
 					alphaMode: partition.alphaMode,
-					family: partition.family,
-					kind: "skipped-static-object-partition",
+					kind: "skipped-geometry",
 					landblockId: diagnostic.landblockId,
+					materialFamily: partition.family,
 					materialCount: partition.materialCount,
 					ownerId: input.ownerId,
-					pass: partition.pass,
 					reason: partition.reason,
 					renderCoverage: partition.renderCoverage,
+					renderPass: partition.pass,
 					sliceId: partition.sliceId,
 					taskId: input.taskId,
 					triangleCount: partition.triangleCount,

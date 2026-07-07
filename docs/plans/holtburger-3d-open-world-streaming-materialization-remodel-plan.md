@@ -2678,17 +2678,26 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Trace current readiness facts through `static-object-material-coverage.ts`, `open-world-streaming-controller.ts`, `object-visual-material-planner.ts`, `structured-interior-material-planner.ts`, terrain payload readiness, and renderer binding readiness.
-- [ ] Define the replacement readiness issue/event type and owner/domain identity fields.
-- [ ] Migrate controller diagnostics to emit direct readiness facts.
-- [ ] Migrate BrowserDisplay and browser harness summaries to direct readiness diagnostics.
-- [ ] Delete or demote tests that preserve broad coverage reports as the final truth source.
-- [ ] Add focused tests for readiness classification and texture dependency readiness.
-- [ ] Run `npm run check`, `npm run lint`, focused material/readiness tests, and terrain plus all-domain browser harness.
+- [x] Trace current readiness facts through `static-object-material-coverage.ts`, `open-world-streaming-controller.ts`, `object-visual-material-planner.ts`, `structured-interior-material-planner.ts`, terrain payload readiness, and renderer binding readiness.
+- [x] Define the replacement readiness issue/event type and owner/domain identity fields.
+- [x] Migrate controller diagnostics to emit direct readiness facts.
+- [x] Migrate BrowserDisplay and browser harness summaries to direct readiness diagnostics.
+- [x] Delete or demote tests that preserve broad coverage reports as the final truth source.
+- [x] Add focused tests for readiness classification and texture dependency readiness.
+- [x] Run `npm run check`, `npm run lint`, focused material/readiness tests, and terrain plus all-domain browser harness.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 36 changed the direct readiness contract instead of preserving coverage-shaped issue identity. `OpenWorldStreamingMaterialReadinessIssue` now reports `renderer-capability-deferred`, `unsupported-source-material`, and `skipped-geometry` for the material paths that previously surfaced as `deferred-material`, `unsupported-material`, and `skipped-static-object-partition`.
+- `StaticMaterialCoverageReport` remains source evidence, not canonical replacement readiness. Coverage identifiers now live under `sourceEvidence: { kind: "static-material-coverage", reportKey, reportKind }` when a readiness issue originates from broad static material coverage.
+- Summary counters were renamed to direct vocabulary: `deferredRendererCapabilityIssueCount`, `unsupportedSourceMaterialIssueCount`, and `skippedGeometryIssueCount`.
+- BrowserDisplay and the browser harness do not currently hard-code material readiness fields; they serialize the direct open-world diagnostics. No UI shim was needed in this phase.
+- Focused controller tests now assert the direct readiness vocabulary and source-evidence shape. This prevents future code from treating `coverageKey`/`coverageKind` as the replacement issue identity.
+- Spicy bit: this is still a projection from broad static coverage evidence. The code is more honest now, but Phase 37 still has to decide which of the reported renderer-capability deferrals are real fidelity backlog versus contract bugs.
+- Verification: `npm run check`, `npm run lint`, and focused `npm run test:ts -- --run src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts`.
+- Harness verification: `npm run harness:browser -- --domains terrain --layer-distance 1 --timeout-ms 60000 --output /tmp/holtburger-phase36-terrain-r1.json` settled with `errorMessage: null`, 9 requested/completed static tasks, 9 applied scene commits, zero material readiness issues, 2 long tasks with max 61 ms, renderer frame `over50Ms: 0`, and runtime tick `over50Ms: 0`.
+- Harness verification: `npm run harness:browser -- --layer-distance 1 --timeout-ms 60000 --output /tmp/holtburger-phase36-all-domain-r1.json` settled with `errorMessage: null`, 45 requested/completed static tasks, 45 applied scene commits, direct readiness summary counts of 15 `deferredRendererCapabilityIssueCount`, 10 `pipelineBugIssueCount`, 2 `skippedGeometryIssueCount`, 3 `pendingTextureDependencyCount`, zero unsupported source material issues, 6 long tasks with max 166 ms, renderer frame `over50Ms: 0`, and runtime tick `over50Ms: 0`.
+- Carried debt: Phase 37 should start from the all-domain direct readiness counts, especially renderer-capability deferrals and pipeline-bug issues. The remaining issues are now expressed in direct replacement vocabulary instead of broad coverage identity.
 
 ### Phase 37: Deferred Fidelity And Material Backlog Triage
 

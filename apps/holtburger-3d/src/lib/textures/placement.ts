@@ -181,6 +181,8 @@ export interface TextureResourceRoleDependency {
 }
 
 export interface TexturePlacementIntentOptions {
+	/** Replacement-native atlas sharing and page-build policy. */
+	readonly placementPolicy: TexturePlacementPolicy;
 	/** Material-consumer binding identity that requested this placement. */
 	readonly bindingId?: TextureBindingId;
 	/** Canonical texture-pool identity requested by this placement. */
@@ -191,8 +193,6 @@ export interface TexturePlacementIntentOptions {
 	readonly pageClass?: TexturePageClass;
 	/** Caller-owned opaque clustering hint for the packer. */
 	readonly affinityKey?: string | null;
-	/** Replacement-native atlas sharing and page-build policy. */
-	readonly placementPolicy?: TexturePlacementPolicy;
 }
 
 /** Describes whether the same canonical source pixels may be shared across owners. */
@@ -286,7 +286,7 @@ export interface DynamicTexturePlacementUse {
 
 export function createStaticTexturePlacementIntent(
 	textureUse: StaticBakeTextureUse,
-	options: TexturePlacementIntentOptions = {},
+	options: TexturePlacementIntentOptions,
 ): TexturePlacementIntent {
 	const purpose = classifyTextureUsagePurpose(
 		textureUse.source,
@@ -298,11 +298,6 @@ export function createStaticTexturePlacementIntent(
 		pageClass: options.pageClass ?? textureUse.pageClass,
 		textureKey: options.textureKey ?? textureUse.textureKey,
 	});
-	if (!options.placementPolicy) {
-		throw new Error(
-			"Static texture placement intents require an explicit replacement placement policy.",
-		);
-	}
 	return {
 		affinityKey: options.affinityKey ?? null,
 		bindingId: identity.bindingId,
@@ -323,7 +318,7 @@ export function createStaticTexturePlacementIntent(
 export function createObjectVisualStaticTexturePlacementIntent(
 	textureUse: StaticBakeTextureUse,
 	itemId: TexturePlacementItemId,
-	options: TexturePlacementIntentOptions = {},
+	options: TexturePlacementIntentOptions,
 ): ObjectVisualTexturePlacementIntent {
 	const intent = createStaticTexturePlacementIntent(textureUse, options);
 	return {
@@ -334,17 +329,12 @@ export function createObjectVisualStaticTexturePlacementIntent(
 
 export function createDynamicTexturePlacementIntent(
 	textureUse: DynamicTexturePlacementUse,
-	options: TexturePlacementIntentOptions = {},
+	options: TexturePlacementIntentOptions,
 ): TexturePlacementIntent {
 	const purpose = classifyTextureUsagePurpose(
 		textureUse.source,
 		textureUse.textureDomain,
 	);
-	if (!options.placementPolicy) {
-		throw new Error(
-			"Dynamic texture placement intents require an explicit replacement placement policy.",
-		);
-	}
 	const identity = requireTexturePlacementIdentity({
 		bindingId: options.bindingId ?? textureUse.bindingId,
 		ownerIds: options.ownerIds ?? textureUse.ownerIds,
@@ -378,14 +368,17 @@ export function createStaticDomainTexturePlacementPolicy(): TexturePlacementPoli
 	};
 }
 
-function requireTexturePlacementIdentity(
-	options: TexturePlacementIntentOptions,
-): Required<
-	Pick<
-		TexturePlacementIntentOptions,
-		"bindingId" | "textureKey" | "ownerIds" | "pageClass"
-	>
-> {
+function requireTexturePlacementIdentity(options: {
+	readonly bindingId?: TextureBindingId;
+	readonly textureKey?: TextureKey;
+	readonly ownerIds?: readonly TextureOwnerId[];
+	readonly pageClass?: TexturePageClass;
+}): {
+	readonly bindingId: TextureBindingId;
+	readonly textureKey: TextureKey;
+	readonly ownerIds: readonly TextureOwnerId[];
+	readonly pageClass: TexturePageClass;
+} {
 	if (!options.bindingId) {
 		throw new Error("Texture placement intents require a bindingId.");
 	}
@@ -409,7 +402,7 @@ function requireTexturePlacementIdentity(
 export function createObjectVisualDynamicTexturePlacementIntent(
 	textureUse: DynamicTexturePlacementUse,
 	itemId: TexturePlacementItemId,
-	options: TexturePlacementIntentOptions = {},
+	options: TexturePlacementIntentOptions,
 ): ObjectVisualTexturePlacementIntent {
 	const intent = createDynamicTexturePlacementIntent(textureUse, options);
 	return {

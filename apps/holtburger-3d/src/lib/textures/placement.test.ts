@@ -61,10 +61,6 @@ describe("texture placement vocabulary bridge", () => {
 			textureBindingId: "terrain:mask:06000010",
 		});
 
-		expect(() => createStaticTexturePlacementIntent(textureUse)).toThrow(
-			"Static texture placement intents require an explicit replacement placement policy.",
-		);
-
 		expect(
 			createStaticTexturePlacementIntent(textureUse, {
 				placementPolicy: staticDomainPolicy(),
@@ -113,18 +109,6 @@ describe("texture placement vocabulary bridge", () => {
 			placementPolicy: runtimeOwnerPolicy("runtime-spawn:1"),
 			purpose: "object-index",
 		});
-	});
-
-	it("requires dynamic placement intents to declare replacement policy", () => {
-		const textureUse = createDynamicTextureUse({
-			source: createPreparedDataUse("rgba-color"),
-			textureDomain: "runtime-object-material",
-			textureBindingId: "runtime-authored-dynamic:base:06000031",
-		});
-
-		expect(() => createDynamicTexturePlacementIntent(textureUse)).toThrow(
-			"Dynamic texture placement intents require an explicit replacement placement policy.",
-		);
 	});
 
 	it("passes affinity keys through without interpretation", () => {

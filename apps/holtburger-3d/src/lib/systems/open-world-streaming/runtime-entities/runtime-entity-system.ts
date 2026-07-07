@@ -82,6 +82,7 @@ export interface OpenWorldRuntimeEntityDiagnosticsSnapshot {
 		readonly bakeFailureCount: number;
 		readonly bakeSuccessCount: number;
 		readonly failed: number;
+		readonly missingRecipeCount: number;
 		readonly recipeResolvedCount: number;
 		readonly skippedVisualCount: number;
 		readonly started: number;
@@ -127,6 +128,7 @@ export class OpenWorldRuntimeEntitySystem {
 	#droppedHookFrameCount = 0;
 	#maxInstancesPerCommit = 0;
 	#maxResourcesPerCommit = 0;
+	#missingRecipeCount = 0;
 	#prepFailureCount = 0;
 	#prepStartedCount = 0;
 	#recipeResolvedCount = 0;
@@ -250,6 +252,7 @@ export class OpenWorldRuntimeEntitySystem {
 				bakeFailureCount: this.#bakeFailureCount,
 				bakeSuccessCount: this.#bakeSuccessCount,
 				failed: this.#prepFailureCount,
+				missingRecipeCount: this.#missingRecipeCount,
 				recipeResolvedCount: this.#recipeResolvedCount,
 				recentFailures: [...this.#recentPrepFailures],
 				skippedVisualCount: this.#skippedVisualCount,
@@ -270,6 +273,7 @@ export class OpenWorldRuntimeEntitySystem {
 					)
 					.find((candidate) => candidate.entityId === request.entityId);
 			if (!recipeRequest) {
+				this.#missingRecipeCount += 1;
 				return;
 			}
 			const recipe = await this.#requireRecipeResolver().resolveRecipe({

@@ -79,6 +79,8 @@ export interface OpenWorldStreamingDiagnosticsSnapshot {
 			readonly bakeFailureCount: number;
 			readonly bakeSuccessCount: number;
 			readonly failed: number;
+			/** Entity prep requests with no visual recipe to resolve. */
+			readonly missingRecipeCount: number;
 			readonly recipeResolvedCount: number;
 			readonly skippedVisualCount: number;
 			readonly started: number;

@@ -32,6 +32,7 @@
 	];
 	const DEFAULT_WAIT_TIMEOUT_MS = 120_000;
 	const DEFAULT_WAIT_POLL_MS = 250;
+	const STATIC_READY_STABLE_POLL_COUNT = 2;
 
 	type BrowserPipelineHarnessApi = {
 		readonly clearSceneInterest: () => RuntimeOverviewSnapshot;
@@ -369,6 +370,7 @@
 		const pollMs = options.pollMs ?? DEFAULT_WAIT_POLL_MS;
 		const timeoutMs = options.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS;
 		const startedAt = performance.now();
+		let readyPollCount = 0;
 		recordStaticSceneRequestStarted(startedAt);
 
 		return new Promise((resolve, reject) => {
@@ -378,9 +380,14 @@
 					const diagnostics = requireRuntime().createDiagnosticsReport();
 					statusText = createStatusText(overview, diagnostics);
 					if (staticSceneIsReady(diagnostics)) {
-						recordStaticSceneReady(performance.now());
-						resolve(overview);
-						return;
+						readyPollCount += 1;
+						if (readyPollCount >= STATIC_READY_STABLE_POLL_COUNT) {
+							recordStaticSceneReady(performance.now());
+							resolve(overview);
+							return;
+						}
+					} else {
+						readyPollCount = 0;
 					}
 					if (performance.now() - startedAt >= timeoutMs) {
 						reject(
@@ -422,9 +429,29 @@
 			openWorld.textureResidency.pageBuildsInFlight === 0 &&
 			openWorld.materialReadiness.summary.pendingTextureDependencyCount === 0 &&
 			openWorld.materialReadiness.summary.failedTextureDependencyCount === 0 &&
+			runtimePrepIsSettled(openWorld) &&
 			openWorld.staticTasks.summary.requested > 0 &&
 			openWorld.staticTasks.summary.active === 0 &&
 			openWorld.staticTasks.summary.failed === 0
+		);
+	}
+
+	function runtimePrepIsSettled(
+		openWorld: OpenWorldStreamingDiagnosticsSnapshot,
+	): boolean {
+		const prep = openWorld.runtimeEntities.prep;
+		return prep.started === runtimePrepTerminalCount(openWorld);
+	}
+
+	function runtimePrepTerminalCount(
+		openWorld: OpenWorldStreamingDiagnosticsSnapshot,
+	): number {
+		const prep = openWorld.runtimeEntities.prep;
+		return (
+			prep.bakeSuccessCount +
+			prep.failed +
+			prep.missingRecipeCount +
+			prep.skippedVisualCount
 		);
 	}
 
@@ -436,7 +463,8 @@
 			? findOpenWorldDiagnostics(diagnostics)
 			: null;
 		if (openWorld) {
-			return `${overview.status} openWorld static requested=${openWorld.staticTasks.summary.requested} activeTasks=${openWorld.staticTasks.summary.active} recentCompleted=${openWorld.staticTasks.summary.completed} inFlight=${openWorld.artifacts.inFlight} commitsPending=${openWorld.sceneCommits.pending} pageBuilds=${openWorld.textureResidency.pageBuildsInFlight} pendingTextures=${openWorld.materialReadiness.summary.pendingTextureDependencyCount} runtimeEntities=${openWorld.runtimeEntities.active}`;
+			const prep = openWorld.runtimeEntities.prep;
+			return `${overview.status} openWorld static requested=${openWorld.staticTasks.summary.requested} activeTasks=${openWorld.staticTasks.summary.active} recentCompleted=${openWorld.staticTasks.summary.completed} inFlight=${openWorld.artifacts.inFlight} commitsPending=${openWorld.sceneCommits.pending} pageBuilds=${openWorld.textureResidency.pageBuildsInFlight} pendingTextures=${openWorld.materialReadiness.summary.pendingTextureDependencyCount} runtimeEntities=${openWorld.runtimeEntities.active} runtimePrep=${prep.started}/${runtimePrepTerminalCount(openWorld)}`;
 		}
 		return `${overview.status} openWorld diagnostics unavailable`;
 	}

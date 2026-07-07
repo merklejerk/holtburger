@@ -2052,6 +2052,7 @@ function createEmptyRuntimeEntityDiagnosticsSnapshot(): OpenWorldRuntimeEntityDi
 			bakeFailureCount: 0,
 			bakeSuccessCount: 0,
 			failed: 0,
+			missingRecipeCount: 0,
 			recipeResolvedCount: 0,
 			recentFailures: [],
 			skippedVisualCount: 0,

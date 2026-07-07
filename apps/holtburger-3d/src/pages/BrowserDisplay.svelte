@@ -73,7 +73,10 @@
 	import type { StaticSceneSelectionKey } from "../lib/runtime/scene-query/contracts";
 	import type { ScenePickHit } from "../lib/runtime/scene-query/merged-scene-query-contracts";
 	import { describeStaticSceneSelectionKey } from "../lib/runtime/scene-query/static-selection-keys";
-	import type { TextureFilteringMode } from "../lib/textures/sampling-policy";
+	import {
+		DEFAULT_TEXTURE_FILTERING_MODE,
+		type TextureFilteringMode,
+	} from "../lib/textures/sampling-policy";
 	import DiagnosticsModal from "../lib/ui/DiagnosticsModal.svelte";
 	import PerformanceOverlay from "../lib/ui/PerformanceOverlay.svelte";
 	import TexturePageInspectionModal from "../lib/ui/TexturePageInspectionModal.svelte";
@@ -209,8 +212,9 @@
 		readonly context: ParsedLocationInput | null;
 		moved: boolean;
 	} | null = null;
-	let selectedTextureFilteringMode =
-		$state<TextureFilteringMode>("anisotropic-4x");
+	let selectedTextureFilteringMode = $state<TextureFilteringMode>(
+		DEFAULT_TEXTURE_FILTERING_MODE,
+	);
 	let performanceMetrics = $state<PerformanceMetricsSnapshot>({
 		fps: 0,
 		frameMs: 0,

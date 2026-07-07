@@ -32,6 +32,7 @@ describe("OpenWorldTerrainArtifactRunner", () => {
 		});
 
 		const commit = await runner.run({
+			filteringMode: "anisotropic-4x",
 			isCurrent: () => true,
 			ownerId: "static-layer:terrain:0xda55ffff" as MaterializationOwnerId,
 			task,
@@ -79,6 +80,7 @@ describe("OpenWorldTerrainArtifactRunner", () => {
 function createFixtureTextureResidency(): OpenWorldTextureResidencyService {
 	const atlasBuilder = createUnusedTextureAtlasBuilder();
 	return new OpenWorldTextureResidencyService({
+		applySamplerPolicyUpdate: () => {},
 		applyTextureCommits: () => {},
 		objectVisualAtlasBuilder: atlasBuilder,
 		textureAtlasBuilder: atlasBuilder,

@@ -35,6 +35,7 @@ describe("OpenWorldOutdoorObjectArtifactRunner", () => {
 		});
 
 		const commit = await runner.run({
+			filteringMode: "anisotropic-4x",
 			isCurrent: () => true,
 			ownerId:
 				"static-layer:outdoor-generated-scenery:0xda55ffff" as MaterializationOwnerId,
@@ -73,6 +74,7 @@ describe("OpenWorldOutdoorObjectArtifactRunner", () => {
 function createFixtureTextureResidency(): OpenWorldTextureResidencyService {
 	const atlasBuilder = createUnusedObjectVisualAtlasBuilder();
 	return new OpenWorldTextureResidencyService({
+		applySamplerPolicyUpdate: () => {},
 		applyTextureCommits: () => {},
 		objectVisualAtlasBuilder: atlasBuilder,
 		textureAtlasBuilder: atlasBuilder,

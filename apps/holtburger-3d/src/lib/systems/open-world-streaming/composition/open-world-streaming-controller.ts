@@ -57,6 +57,10 @@ import type {
 	ScenePickRequest,
 } from "../../../runtime/scene-query/merged-scene-query-contracts";
 import type { StaticSceneEnvCellBounds } from "../../../runtime/scene-query/contracts";
+import {
+	DEFAULT_TEXTURE_FILTERING_MODE,
+	type TextureFilteringMode,
+} from "../../../textures/sampling-policy";
 import type { OpenWorldObjectVisualAtlasBuilder } from "../texture-residency/atlas-build/object-visual-atlas-builder";
 import { OpenWorldTextureResidencyService } from "../texture-residency/texture-residency-service";
 import type { OpenWorldTexturePageBuildInput } from "../texture-residency/page-build/protocol";
@@ -82,6 +86,7 @@ export interface OpenWorldStreamingControllerOptions {
 	readonly renderer: Pick<
 		Renderer,
 		| "applyTexturePlacementUpdate"
+		| "applySamplerPolicyUpdate"
 		| "setStaticRenderAnchorLandblockId"
 		| "setOutdoorBuildingsLayer"
 		| "setOutdoorExplicitObjectsLayer"
@@ -276,6 +281,7 @@ export class OpenWorldStreamingController {
 		[];
 	#recentStaticTaskTimings: StaticTaskTiming[] = [];
 	#activeSceneInterest = false;
+	#textureFilteringMode: TextureFilteringMode = DEFAULT_TEXTURE_FILTERING_MODE;
 	#runSequence = 0;
 	#terrainProgress: OpenWorldStreamingTerrainProgressSnapshot = {
 		baking: 0,
@@ -719,6 +725,7 @@ export class OpenWorldStreamingController {
 			const commit =
 				request.task.domain === "outdoor-terrain"
 					? await this.#requireTerrainRunner().run({
+							filteringMode: this.#textureFilteringMode,
 							isCurrent: () =>
 								this.#isCurrentRun(runId) &&
 								this.#owners.isCurrent({
@@ -730,6 +737,7 @@ export class OpenWorldStreamingController {
 						})
 					: isOutdoorObjectTask(request.task)
 						? await this.#requireOutdoorObjectRunner().run({
+								filteringMode: this.#textureFilteringMode,
 								isCurrent: () =>
 									this.#isCurrentRun(runId) &&
 									this.#owners.isCurrent({
@@ -741,6 +749,7 @@ export class OpenWorldStreamingController {
 							})
 						: isEnvCellTask(request.task)
 							? await this.#requireEnvCellRunner().run({
+									filteringMode: this.#textureFilteringMode,
 									isCurrent: () =>
 										this.#isCurrentRun(runId) &&
 										this.#owners.isCurrent({
@@ -963,6 +972,18 @@ export class OpenWorldStreamingController {
 				revision,
 			});
 		}
+	}
+
+	setTextureFilteringMode(filteringMode: TextureFilteringMode): void {
+		this.#textureFilteringMode = filteringMode;
+		this.#requireTextureResidency().applyResidentSamplerPolicy({
+			filteringMode,
+			revision:
+				this.#terrainProgress.committed +
+				this.#outdoorObjectProgress.committed +
+				this.#envCellProgress.committed +
+				1,
+		});
 	}
 
 	#recordMaterialCoverageIssues(input: {
@@ -1354,6 +1375,7 @@ export class OpenWorldStreamingController {
 				createDynamicVisualPrepper: this.#options.createDynamicVisualPrepper,
 				createDynamicVisualRecipeResolver:
 					this.#options.createDynamicVisualRecipeResolver,
+				getTextureFilteringMode: () => this.#textureFilteringMode,
 				owners: this.#owners,
 				renderer: this.#renderer,
 				scheduleTexturePageBuilds: (request) =>
@@ -1375,6 +1397,8 @@ export class OpenWorldStreamingController {
 	#requireTextureResidency(): OpenWorldTextureResidencyService {
 		if (!this.#textureResidency) {
 			this.#textureResidency = new OpenWorldTextureResidencyService({
+				applySamplerPolicyUpdate: (update) =>
+					this.#renderer.applySamplerPolicyUpdate(update),
 				applyTextureCommits: (commits, revision) =>
 					this.#applyTextureCommits(commits, revision),
 				objectVisualAtlasBuilder: this.#requireObjectVisualAtlasBuilder(),
@@ -1399,6 +1423,14 @@ export class OpenWorldStreamingController {
 					onCommit: (commit) => {
 						this.#recordTexturePageInspectionPreviews(commit);
 						applyOpenWorldStreamingTextureCommit(this.#renderer, commit, {
+							revision:
+								this.#terrainProgress.committed +
+								this.#outdoorObjectProgress.committed +
+								this.#envCellProgress.committed +
+								1,
+						});
+						this.#textureResidency?.applyResidentSamplerPolicy({
+							filteringMode: this.#textureFilteringMode,
 							revision:
 								this.#terrainProgress.committed +
 								this.#outdoorObjectProgress.committed +

@@ -4,7 +4,11 @@ import type {
 	TexturePlacementLookupId,
 } from "../../../textures/placement";
 import type { TextureBindingId } from "../../../textures/identity";
-import type { TextureFilteringMode } from "../../../textures/sampling-policy";
+import {
+	createRuntimeTextureSamplerPolicy,
+	type TextureFilteringMode,
+} from "../../../textures/sampling-policy";
+import type { SamplerPolicyUpdate } from "../../../renderer/types";
 import type { MaterializationOwnerId } from "../owners/owner-id";
 import type {
 	OpenWorldMaterialTextureAtlasBuilder,
@@ -21,6 +25,7 @@ import type { OpenWorldObjectVisualTexturePlacementReservation } from "./placeme
 import { reserveObjectVisualTexturePlacements } from "./placement/object-visual-texture-placement-plan";
 
 export interface OpenWorldTextureResidencyServiceOptions {
+	readonly applySamplerPolicyUpdate: (update: SamplerPolicyUpdate) => void;
 	readonly applyTextureCommits: (
 		commits: readonly OpenWorldStreamingTextureCommit[],
 		revision: number,
@@ -40,11 +45,13 @@ export class OpenWorldTextureResidencyService {
 		commits: readonly OpenWorldStreamingTextureCommit[],
 		revision: number,
 	) => void;
+	readonly #applySamplerPolicyUpdate: (update: SamplerPolicyUpdate) => void;
 	readonly #objectVisualAtlasBuilder: OpenWorldObjectVisualAtlasBuilder;
 	readonly #textureAtlasBuilder: OpenWorldMaterialTextureAtlasBuilder;
 	readonly #textureClaims: OpenWorldTextureClaimRegistry;
 
 	constructor(options: OpenWorldTextureResidencyServiceOptions) {
+		this.#applySamplerPolicyUpdate = options.applySamplerPolicyUpdate;
 		this.#applyTextureCommits = options.applyTextureCommits;
 		this.#objectVisualAtlasBuilder = options.objectVisualAtlasBuilder;
 		this.#textureAtlasBuilder = options.textureAtlasBuilder;
@@ -59,6 +66,36 @@ export class OpenWorldTextureResidencyService {
 		bindingIds: readonly TextureBindingId[],
 	): readonly OpenWorldTextureBindingResidencyIssue[] {
 		return this.#textureClaims.createBindingResidencyIssues(bindingIds);
+	}
+
+	applyResidentSamplerPolicy(options: {
+		readonly filteringMode: TextureFilteringMode;
+		readonly revision: number;
+	}): void {
+		const policies = this.#textureClaims
+			.createBucketSnapshots()
+			.flatMap((bucket) => bucket.pages)
+			.filter((page) => page.state === "resident")
+			.map((page) => {
+				const samplerPolicy = createRuntimeTextureSamplerPolicy({
+					filteringMode: options.filteringMode,
+					sampleClass: page.sampleClass,
+				});
+				return {
+					anisotropy: samplerPolicy.anisotropy,
+					filteringMode: samplerPolicy.filteringMode,
+					mipmapsGenerated: samplerPolicy.generateMipmaps,
+					samplerPolicyKey: samplerPolicy.policyKey,
+					textureRefId: page.textureRefId,
+				};
+			});
+		if (policies.length === 0) {
+			return;
+		}
+		this.#applySamplerPolicyUpdate({
+			policies,
+			revision: options.revision,
+		});
 	}
 
 	async reserveMaterialPlacements<

@@ -12,11 +12,12 @@ import { OpenWorldTextureClaimRegistry } from "../claims/texture-claim-registry"
 import type { OpenWorldTexturePageBuildInput } from "../page-build/protocol";
 import type { OpenWorldStreamingTextureCommit } from "../commits/contracts";
 import type { OpenWorldObjectVisualAtlasBuilder } from "../atlas-build/object-visual-atlas-builder";
+import type { TextureFilteringMode } from "../../../../textures/sampling-policy";
 import { reserveMaterialTexturePlacements } from "./material-texture-placement-plan";
 
 export interface OpenWorldObjectVisualTexturePlacementReservationOptions {
 	readonly atlasBuilder: OpenWorldObjectVisualAtlasBuilder;
-	readonly filteringMode: "nearest" | "linear" | "anisotropic-4x";
+	readonly filteringMode: TextureFilteringMode;
 	readonly intents: readonly ObjectVisualTexturePlacementIntent[];
 	readonly ownerId: MaterializationOwnerId;
 	readonly textureClaims: OpenWorldTextureClaimRegistry;

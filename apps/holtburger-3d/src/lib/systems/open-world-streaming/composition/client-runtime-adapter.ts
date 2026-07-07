@@ -31,7 +31,10 @@ import type {
 	ScenePickHit,
 	ScenePickRequest,
 } from "../../../runtime/scene-query/merged-scene-query-contracts";
-import type { TextureFilteringMode } from "../../../textures/sampling-policy";
+import {
+	DEFAULT_TEXTURE_FILTERING_MODE,
+	type TextureFilteringMode,
+} from "../../../textures/sampling-policy";
 import type { OpenWorldStreamingBoundaryAdapters } from "../adapters/browser-boundaries";
 import {
 	parseOpenWorldTextureBucketKey,
@@ -65,8 +68,6 @@ const DEFAULT_CAMERA_RESIDENCY: RuntimeCameraResidency = {
 	kind: "unknown",
 	landblockId: null,
 };
-
-const DEFAULT_TEXTURE_FILTERING_MODE: TextureFilteringMode = "nearest";
 
 export function createOpenWorldStreamingClientRuntime(
 	options: OpenWorldStreamingClientRuntimeOptions,
@@ -263,6 +264,7 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 	setTextureFilteringMode(filteringMode: TextureFilteringMode): void {
 		this.#assertUsable();
 		this.#textureFilteringMode = filteringMode;
+		this.#controller.setTextureFilteringMode(filteringMode);
 	}
 
 	updateCameraState(camera: FrameState["camera"]): void {

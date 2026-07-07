@@ -21,6 +21,7 @@ import type {
 } from "../../../../static/contracts";
 import { StaticObjectBakeResourceProvider } from "../../../../static/objects/bake/static-object-bake-resources";
 import { createStaticObjectTexturePlacementIntents } from "../../../../static/objects/bake/static-object-placement-planner";
+import type { TextureFilteringMode } from "../../../../textures/sampling-policy";
 import type { MaterializationOwnerId } from "../../owners/owner-id";
 import type { OpenWorldTexturePageBuildInput } from "../../texture-residency/page-build/protocol";
 import type { OpenWorldTextureResidencyService } from "../../texture-residency/texture-residency-service";
@@ -44,6 +45,7 @@ export interface OpenWorldOutdoorObjectArtifactRunnerOptions {
 }
 
 export interface OpenWorldOutdoorObjectArtifactRequest {
+	readonly filteringMode: TextureFilteringMode;
 	readonly isCurrent: () => boolean;
 	readonly ownerId: MaterializationOwnerId;
 	readonly task: StaticLayerTaskRequest;
@@ -103,7 +105,7 @@ export class OpenWorldOutdoorObjectArtifactRunner {
 			"texture-placement-reservation",
 			() =>
 				this.#textureResidency.reserveObjectVisualPlacements({
-					filteringMode: "nearest",
+					filteringMode: request.filteringMode,
 					intents: textureIntents,
 					isCurrent: request.isCurrent,
 					ownerId: request.ownerId,

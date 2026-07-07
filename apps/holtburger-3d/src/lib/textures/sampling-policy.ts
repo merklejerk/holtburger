@@ -5,6 +5,9 @@ import type {
 
 export type TextureFilteringMode = "nearest" | "linear" | "anisotropic-4x";
 
+export const DEFAULT_TEXTURE_FILTERING_MODE: TextureFilteringMode =
+	"anisotropic-4x";
+
 export type TexturePageSampleClass =
 	| "index8"
 	| "index16"

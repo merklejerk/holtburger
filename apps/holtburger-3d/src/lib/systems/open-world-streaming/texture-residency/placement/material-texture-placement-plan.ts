@@ -693,6 +693,7 @@ function reserveAtlasLayoutPage<
 				sourceByEntryId: options.sourceByEntryId,
 			}),
 		),
+		sampleClass: options.bucketPlan.pagePolicy.sampleClass,
 		textureHeight: options.page.height,
 		textureWidth: options.page.width,
 	});

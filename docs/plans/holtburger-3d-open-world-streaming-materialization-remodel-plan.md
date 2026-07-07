@@ -71,7 +71,7 @@ The desired model is not a small tuning pass. It changes ownership, scheduling, 
 ## North Stars
 
 - **Open-world streaming should feel continuous.** Radius-1 loading must not create browser blackouts, and the design should scale toward larger radii by keeping browser-owned work small instead of batching bigger bursts.
-- **The worksheet remains the design guardrail.** The [open-world streaming stutter investigation worksheet](./holtburger-3d-open-world-streaming-stutter-investigation-worksheet.md) is historical evidence, but its replacement model requirements remain the target shape for texture policy, worker ownership, commit ordering, and readiness. Every phase after Phase 18 must be checked against the worksheet's root-cause direction before implementation starts. Before changing texture placement, material coverage, page builds, renderer readiness, or diagnostics, reread the relevant worksheet requirement and record any deliberate deviation in this plan.
+- **The worksheet is the implementation north star.** The [open-world streaming stutter investigation worksheet](./holtburger-3d-open-world-streaming-stutter-investigation-worksheet.md) is historical evidence, but its replacement model requirements remain the target shape for texture policy, worker ownership, commit ordering, and readiness. Every phase after Phase 18 must be checked against the worksheet's root-cause direction before implementation starts. Before changing texture placement, material coverage, page builds, renderer readiness, or diagnostics, reread the relevant worksheet requirement and record any deliberate deviation in this plan. If current code and this remodel plan disagree, pause and reconcile against the worksheet before landing code.
 - **Budgeting is a measured fallback, not an architecture.** Worker wall time is not a frame-stutter bug by itself. Add frame budgets only for proven browser-main-loop CPU offenders that cannot be deleted, moved off-thread, or collapsed into a smaller direct contract.
 - **The future 3D client is the real target.** Browser mode is the proving ground, but shared app-local abstractions should be judged against a traditional replacement client with richer rendering, motion, visibility, animation, and interaction needs.
 - **Ownership should be boring and explicit.** Currentness, eviction, and cleanup should start from owner membership and owner-indexed resources, not broad revision folklore or reverse-materialization DTOs.
@@ -2167,128 +2167,191 @@ Decisions and course corrections:
 - Added `OpenWorldTextureClaimRegistry.rejectPageBuild(...)` so stale owner output and failed page-build jobs can retire the reservation instead of leaving replacement diagnostics stuck with phantom in-flight pages.
 - Runtime entity materialization now schedules texture page-build requests through the same controller-owned stream instead of applying texture commits inside `OpenWorldRuntimeEntitySystem`. Dynamic visual publication remains a Phase 24 readiness concern; this phase only moved page-build settlement and renderer texture upload out of runtime prep.
 - Replacement diagnostics now expose `texturePageBuildTasks` with active tasks, recent task timings, queue/accepted/committed/failed/stale counts, owner id, source task id, bucket key, and page id. This is direct replacement evidence, not a legacy texture-manager projection.
-- Spicy bit: static scene commits can now be counted as applied while their texture page tasks are still running. That is the intended loose ordering model, but it means readiness/fidelity consumers must stop treating scene commit settlement as proof that all bindings are resident. Phase 24 owns renderer readiness gates; Phase 25 owns making material/readiness diagnostics impossible to misread.
+- Spicy bit: static scene commits can now be counted as applied while their texture page tasks are still running. That is the intended loose ordering model, but it means readiness/fidelity consumers must stop treating scene commit settlement as proof that all bindings are resident. Phase 25 owns direct texture readiness and failure commits; Phase 26 owns renderer readiness gates; Phase 27 owns making material/readiness diagnostics impossible to misread.
 - Concession: focused unit tests prove the task stream's accepted and stale-currentness paths directly, and static runner tests prove the commit dependency shape. The real terrain/object/env-cell/static-authored dynamic page tasks are covered by the browser harness, which now shows `texturePageBuildTasks` committing independently. Building full source-free material fixtures for every domain would require either fake DAT material identities or preserving fixture-only legacy assumptions, so that coverage is intentionally harness-backed for this phase.
 - Verification: `npm run check`, `npm run lint`, focused `npm run test:ts -- --run src/lib/systems/open-world-streaming/texture-residency/claims/texture-claim-registry.test.ts src/lib/systems/open-world-streaming/texture-residency/page-build/texture-page-build-task-stream.test.ts src/lib/systems/open-world-streaming/texture-residency/page-build/page-build.test.ts src/lib/systems/open-world-streaming/static-layers/terrain/terrain-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/outdoor-objects/outdoor-object-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/env-cells/env-cell-artifact-runner.test.ts src/lib/systems/open-world-streaming/runtime-entities/runtime-entity-system.test.ts src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts`, and `npm run harness:browser` passed.
-- Harness note: terrain flat-color warnings remain visible after this phase. That is not papered over by the texture task stream; Phase 27 remains the owner for terrain role/readiness and shader-input investigation.
+- Harness note: terrain flat-color warnings remain visible after this phase. That is not papered over by the texture task stream; Phase 29 remains the owner for terrain role/readiness and shader-input investigation.
 
-### Phase 24: Renderer Readiness Gates And Late Texture Binding
+### Phase 24: Material/Readiness Resteer And Current Phase Closeout
 
 Deliverables:
 
-- Make visual/scene publication tolerant of pending texture bindings now that Phase 23 can publish texture commits independently.
-- Replace object visual recipe publication throws for unplaced/pending bindings with explicit dependency records and non-renderable readiness.
-- Change object-material renderer prep so pending, failed, and missing required bindings skip draw/resource preparation without throwing in the render hot path.
-- Add a late-binding path so an already-installed visual resource becomes renderable after its texture commit arrives, without rebaking its geometry.
-- Add upstream diagnostics for missing-not-in-flight texture bindings as replacement pipeline bugs.
+- Close the previous broad renderer-readiness phase as a resteer, not as completed implementation.
+- Re-ground the remaining plan in the worksheet north star before writing more remediation code.
+- Replace the broad Phase 24-29 tail with narrower phases that start from current code seams and target design contracts.
+- Classify the known materialization drift as implementation debt, diagnostics debt, renderer-readiness debt, terrain role debt, worker-boundary debt, or cleanup debt.
 
 Acceptance criteria:
 
-- A scene/visual commit referencing known pending bindings can be applied before the matching texture commit.
-- A texture commit can make already-installed visual resources renderable without rebaking the visual.
-- Missing-not-in-flight bindings are reported by commit/apply or pipeline diagnostics, not by repeated renderer hot-path logging or exceptions.
-- Failed page builds mark affected bindings failed and keep affected resources non-renderable.
-- Tests cover scene-before-texture and texture-before-scene ordering for object materials and terrain.
+- The worksheet is linked from the North Stars and named as the implementation guardrail for the remaining phases.
+- The phase records concrete current-code findings instead of bug-expression-only triage.
+- The following phases have file/symbol targets, direct-contract requirements, acceptance criteria, and deletion targets.
+- The plan does not claim renderer readiness, material diagnostics, terrain fidelity, or cleanup implementation has landed.
 
 Task checklist:
 
-- [ ] Audit texture-readiness assumptions in `renderer-commits.ts`, static object visual recipe publication, terrain commit application, and renderer texture placement lookup.
-- [ ] Define a replacement-native visual texture dependency state: pending, resident, failed, missing-not-in-flight.
-- [ ] Update static object visual publication to carry dependency facts without requiring resident pages.
-- [ ] Update terrain draw-unit publication to tolerate pending terrain texture bindings without falling back to flat-color success.
-- [ ] Update renderer prep/apply ports to install non-renderable resources and promote them when texture commits arrive.
-- [ ] Add focused ordering tests for object materials and terrain.
-- [ ] Verify browser harness output does not contain renderer hot-path warning spam.
+- [x] Recheck the remaining plan tail against the [open-world streaming stutter investigation worksheet](./holtburger-3d-open-world-streaming-stutter-investigation-worksheet.md).
+- [x] Audit current code seams for readiness, diagnostics, material coverage, terrain fallback, page-build failures, and direct-builder/test-only boundaries.
+- [x] Close the broad renderer-readiness phase as split/replaced.
+- [x] Add replacement-native follow-up phases with concrete current files and target contracts.
+- [x] Preserve the hard-cutover and vestigial-code wipe as an explicit cleanup destination.
+
+Decisions and course corrections:
+
+- Phase 24 closed as a planning/resteering phase. The earlier renderer-readiness scope was too broad and mixed readiness state, renderer behavior, diagnostics, terrain role fidelity, and cleanup. Implementation is split into Phases 25-33.
+- Current code finding: `apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-texture-bindings.ts` has pending/resident/failed state internally, but `apps/holtburger-3d/src/lib/renderer/types.ts` and `apps/holtburger-3d/src/lib/systems/open-world-streaming/texture-residency/commits/texture-commit-applier.ts` do not yet provide a direct failure/readiness update contract for page-build failures.
+- Current code finding: `apps/holtburger-3d/src/lib/systems/open-world-streaming/texture-residency/page-build/texture-page-build-task-stream.ts` rejects failed page builds and logs, but failed binding readiness is not yet a first-class texture commit consumed by the renderer.
+- Current code finding: `apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-object-material-payloads.ts` already skips pending required object-material bindings, but failed and missing-not-in-flight readiness still need a replacement-owned upstream reporting path instead of renderer hot-path exception behavior.
+- Current code finding: `apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-renderer.ts` still warns from `#warnTerrainLayeredFallback(...)` when terrain layered payload preparation fails. That is renderer-local symptom logging; it must be replaced with readiness diagnostics from the owning pipeline.
+- Current code finding: `apps/holtburger-3d/src/lib/static/objects/bake/static-object-material-coverage.ts` and `StaticMaterialCoverageReport` remain broad static diagnostics. They are useful evidence, but they are not the replacement material/readiness contract.
+- Current code finding: `apps/holtburger-3d/src/lib/systems/open-world-streaming/texture-residency/placement/material-texture-placement-plan.ts` still exposes `buildReservedMaterialTexturePages(...)`. Production materialization should use page-build task streaming after Phase 23; any remaining direct use must be test-only, worker-internal, or deleted.
+
+### Phase 25: Direct Texture Readiness And Failure Commits
+
+Deliverables:
+
+- Add a direct replacement texture-readiness update contract that can express pending, resident, failed, and missing-not-in-flight without preserving legacy diagnostic categories.
+- Extend `OpenWorldStreamingTextureCommit` in `texture-residency/commits/contracts.ts` only with replacement-owned readiness facts.
+- Extend `createTexturePlacementUpdate(...)` and `TexturePlacementUpdate` so renderer texture binding state can be updated for failures and explicit readiness changes, not just resident page placements.
+- Make `OpenWorldTexturePageBuildTaskStream` emit failed binding readiness commits when a page build fails.
+- Keep failure reporting upstream of renderer draw loops.
+
+Acceptance criteria:
+
+- A failed page build marks every affected binding failed through the texture commit stream.
+- Renderer texture binding state can represent failed readiness without requiring a WebGL texture update.
+- Missing-not-in-flight is detectable as a pipeline/apply bug from replacement state, not inferred from repeated draw failures.
+- No replacement contract reuses old `TextureManager` lease/pin/mutation vocabulary.
+- Tests cover successful page update commits, failed page-build commits, stale rejected builds, and renderer binding-state updates.
+
+Task checklist:
+
+- [ ] Audit `OpenWorldStreamingTextureCommit`, `TexturePlacementUpdate`, `Webgl2RendererTextureBindingTable`, `OpenWorldTexturePageBuildTaskStream`, and `settleOpenWorldTexturePageBuildResult(...)`.
+- [ ] Define the minimal readiness update DTO in `texture-residency/commits/contracts.ts`.
+- [ ] Map readiness updates to renderer texture binding state in `texture-commit-applier.ts`.
+- [ ] Add `TexturePlacementUpdate` support for failure/readiness-only binding updates.
+- [ ] Emit failed binding updates from `texture-page-build-task-stream.ts`.
+- [ ] Add focused tests in `texture-commit-applier.test.ts`, `texture-page-build-task-stream.test.ts`, and `webgl2-texture-bindings.test.ts`.
+- [ ] Record any deliberate renderer-adapter wart and its deletion trigger.
 
 Decisions and course corrections:
 
 - Pending.
 
-### Phase 25: Replacement Material Coverage And Readiness Diagnostics
+### Phase 26: Renderer Resource Readiness And Late Binding
 
 Deliverables:
 
-- Rebuild material coverage and texture readiness diagnostics around replacement concepts rather than legacy parity.
-- Keep `static-object-material-coverage.ts` diagnostic-only. It must not gate behavior or hide unsupported/deferred material cases as if they were handled.
-- Replace remaining `console.warn` triage paths in static object partition skipping and recipe publication with structured replacement-native diagnostics or artifact failure records.
-- Report material support, skipped partitions, dependency readiness, page-build failures, unsupported fidelity, and terrain texture role readiness separately.
-- Migrate surviving harness/UI diagnostics directly to replacement reports; any old report shape must be a named edge shim or deleted.
+- Make installed object-material and terrain resources explicitly non-renderable while required bindings are pending or failed.
+- Ensure resident texture commits promote already-installed resources on the next render/resource-prep pass without rebaking geometry or republishing scene commits.
+- Remove renderer hot-path logging for normal pending/failed readiness; renderer draw prep should skip quietly and diagnostics should come from Phase 25/27 contracts.
+- Preserve renderer WebGL mutation as a durable adapter boundary without teaching replacement internals renderer-specific DTO shapes.
 
 Acceptance criteria:
 
-- Coverage reports clearly distinguish renderable material support, intentionally deferred fidelity, unsupported source/material facts, pending texture readiness, failed texture/page-build dependencies, and pipeline bugs such as missing-not-in-flight bindings.
-- No diagnostic consumer requires old static coordinator, static commit install, or texture manager categories.
-- Deferred/unsupported material coverage cannot be mistaken for successful rendering in harness summaries.
-- Static object skipped partitions and recipe publication failures are visible through replacement diagnostics without console-only evidence.
-- Terrain-specific texture roles such as color/detail/mask are reported as role readiness within the replacement texture residency model, not as bespoke terrain success/failure categories.
+- Scene-before-texture and texture-before-scene ordering works for object materials and terrain.
+- Pending and failed readiness do not throw from `prepareObjectMaterialDrawPayload(...)`, `prepareTerrainLayeredPayload(...)`, or `Webgl2Renderer` draw hot paths.
+- Missing-not-in-flight remains loud through commit/apply diagnostics rather than repeated renderer warnings.
+- Late resident texture commits make installed resources renderable without geometry rebake.
+- Browser harness output does not contain repeated terrain layered fallback warnings for normal pending readiness.
 
 Task checklist:
 
-- [ ] Audit every consumer of `StaticMaterialCoverageReport`.
-- [ ] Audit `static-object-material-coverage.ts`, `object-visual-material-planner.ts`, and `static-object-renderability.ts` against the worksheet target model.
-- [ ] Define replacement-native material coverage/readiness issue records under `open-world-streaming/diagnostics` or a static-layer-local diagnostics module.
-- [ ] Replace static object skipped-partition console warnings.
-- [ ] Replace static object visual recipe publication console warnings.
-- [ ] Update harness summaries to show replacement material/readiness truth without legacy-shaped projections.
-- [ ] Delete or rewrite tests that treat diagnostic parity as correctness.
+- [ ] Audit `runtime-entities/renderer-commits.ts`, static layer scene commit application, `webgl2-object-material-payloads.ts`, `webgl2-terrain-payloads.ts`, and `webgl2-renderer.ts`.
+- [ ] Update object-material validation to treat failed readiness as non-renderable while preserving upstream bug reporting for missing-not-in-flight.
+- [ ] Update terrain layered payload prep or its call site to distinguish pending/failed readiness from unsupported shader/input defects.
+- [ ] Remove or gate `#warnTerrainLayeredFallback(...)` behind upstream readiness diagnostics.
+- [ ] Add renderer tests for object-material scene-before-texture, texture-before-scene, failed binding, and missing-not-in-flight cases.
+- [ ] Add terrain tests for pending, failed, resident, and late-resident binding states.
+- [ ] Run terrain-focused and object-material harness scenarios.
 
 Decisions and course corrections:
 
 - Pending.
 
-### Phase 26: Material Fidelity Backlog And First Fidelity Slice
+### Phase 27: Replacement Material Coverage And Readiness Diagnostics
 
 Deliverables:
 
-- Build a measured material fidelity backlog from direct replacement coverage/readiness reports, not from legacy visual fallback categories alone.
-- Use `apps/holtburger-3d/src/lib/visual/object-visual-material-planner.ts` and `apps/holtburger-3d/src/lib/static/objects/bake/static-object-renderability.ts` as the current support boundary.
-- Classify detail overlays, additive, inverse alpha, unusual translucent, unsupported surface flags, missing palette/render-surface, terrain shader capacity issues, and terrain role/page capacity issues as explicit fidelity work items.
-- Implement the first selected material family or shader capability with fixtures that prove visual/resource behavior rather than preserving old fallback categories.
-- Keep unsupported material cases explicit and visible after the first slice.
+- Define replacement-native material/readiness issue records that describe source support, partition skips, texture dependency readiness, page-build failures, terrain role readiness, unsupported fidelity, and pipeline bugs.
+- Keep `StaticMaterialCoverageReport` as imported evidence until deleted or isolated, but do not let it define replacement diagnostics.
+- Replace console-only diagnostics in static object partitioning, visual recipe publication, bake boundaries, and page-build failures with structured replacement diagnostics or artifact failures.
+- Migrate surviving harness/UI consumers directly to replacement diagnostics; any compatibility projection must be an edge shim with a deletion trigger.
 
 Acceptance criteria:
 
-- The backlog names source-data evidence, renderer/shader behavior, bake/material table implications, diagnostics impact, and harness scenario for each candidate fidelity family.
-- The selected first slice has focused fixture evidence and at least one browser harness scenario that can reveal regressions.
-- Each newly supported material case has a source-data reason, renderer/shader behavior, bake/material table representation, and coverage diagnostic update.
-- Unsupported material cases remain explicit and visible.
-- No material fidelity change adds compatibility shims or bends replacement texture policy.
-- Terrain page capacity/draw splitting changes use the shared placement/page-build model.
+- Coverage/readiness reports distinguish renderable support, intentionally deferred fidelity, unsupported source/material facts, pending texture readiness, failed dependencies, and missing-not-in-flight pipeline bugs.
+- `static-object-material-coverage.ts` does not gate replacement behavior and cannot make unsupported/deferred material cases look successful.
+- Static object skipped partitions and recipe publication failures are visible without relying on `console.warn`.
+- Harness summaries do not require old static coordinator, static commit install, or texture manager categories.
+- Tests prove replacement diagnostic records from replacement behavior, not legacy report parity.
 
 Task checklist:
 
-- [ ] Create a material fidelity backlog from current coverage/readiness reports and representative source fixtures.
-- [ ] Pick the first fidelity family based on measured coverage impact and implementation risk.
-- [ ] Add focused fixture/harness evidence for that family.
-- [ ] Update material planner, renderability, bake output, renderer shader/material payloads, and diagnostics as needed.
-- [ ] Rerun relevant browser harness scenarios.
+- [ ] Audit consumers of `StaticMaterialCoverageReport` in `static/contracts.ts`, env-cell bakers, static object partitioning, renderer types, diagnostics, and harness projections.
+- [ ] Audit `static-object-material-coverage.ts`, `object-visual-material-planner.ts`, `static-object-renderability.ts`, `static-bake-boundary-diagnostics.ts`, and controller diagnostics against the worksheet.
+- [ ] Add replacement issue record types under `systems/open-world-streaming/diagnostics` or domain-local diagnostics modules.
+- [ ] Replace console warnings in static object skipped partitions and visual recipe publication with structured records.
+- [ ] Replace page-build failure console-only reporting with structured readiness/failure diagnostics.
+- [ ] Update browser harness summaries to consume direct replacement diagnostics or an explicitly named edge shim.
+- [ ] Delete or rewrite tests that treat legacy diagnostic parity as correctness.
 
 Decisions and course corrections:
 
 - Pending.
 
-### Phase 27: Terrain Texture Role And Flat-Color Audit
+### Phase 28: Static Object Material Contract Reconciliation
 
 Deliverables:
 
-- Investigate the current terrain flat-color symptom through the replacement texture/readiness model rather than adding terrain-special rendering paths.
-- Audit terrain color/detail/mask role placement, page commit application, draw-unit material payloads, and renderer shader inputs against the same direct contract used by object materials.
+- Audit what failed to land or was intentionally scoped out from `static-object-material-coverage.ts` compared with the worksheet target design.
+- Reconcile static object material planning, renderability, placement policy, bake output, and diagnostics around direct replacement contracts.
+- Build a material fidelity backlog from source-data evidence and replacement diagnostics, not from old fallback categories.
+- Implement the first small fidelity or material-contract slice only if the audit identifies a low-risk contract correction; otherwise record the backlog and defer rendering feature work explicitly.
+
+Acceptance criteria:
+
+- The audit lists every unsupported/deferred material family with source evidence, current file/symbol owner, target contract, and whether it is architecture debt or renderer-fidelity backlog.
+- Detail overlays, additive, inverse alpha, unusual translucent, unsupported surface flags, missing palette/render-surface, and palette/index/detail texture requirements are classified explicitly.
+- Static object material placement uses `TexturePlacementPolicy` and replacement bucket policy directly, without ignored `placementBucketKey` fields.
+- Any implemented first slice has fixture evidence and updates planner, renderability, bake output, renderer payload, and diagnostics coherently.
+- Unsupported material cases remain visible after the phase.
+
+Task checklist:
+
+- [ ] Compare `static-object-material-coverage.ts` against `object-visual-material-planner.ts`, `static-object-renderability.ts`, and the worksheet root-cause direction.
+- [ ] Audit `createStaticObjectTexturePlacementIntents(...)`, `object-visual-texture-placement-planner.ts`, and placement policy tests for legacy bucket-field drift.
+- [ ] Classify each material/fidelity item as contract bug, renderer capability backlog, source-data limitation, or acceptable future scope.
+- [ ] Pick and implement at most one first slice if it is contract-shaped and low risk.
+- [ ] Update diagnostics from Phase 27 so the backlog remains measurable.
+- [ ] Run generated scenery, explicit object, and env-cell harness cases that exercise static object materials.
+
+Decisions and course corrections:
+
+- Pending.
+
+### Phase 29: Terrain Texture Role And Flat-Color Audit
+
+Deliverables:
+
+- Investigate terrain flat-color rendering through the shared texture readiness/material contract rather than terrain-special rendering paths.
+- Audit terrain color/detail/mask role placement, page commit application, draw-unit material payloads, shader sampler inputs, and terrain page capacity.
+- Compare terrain role buckets with object material color/detail/index/palette purposes and document real role differences versus accidental bespoke handling.
 - Remove or collapse any terrain-only workaround that duplicates shared material placement/page-build semantics.
-- Add diagnostics that explain terrain role readiness and shader input readiness without preserving old terrain-specific synthetic commit assumptions.
 
 Acceptance criteria:
 
-- Terrain no longer renders as flat color when the source data and page commits provide the required color/detail/mask roles.
-- If terrain still cannot render full fidelity for a source-data reason, diagnostics identify the missing role, page, sampler, shader input, or unsupported fidelity case.
-- Terrain role buckets remain an application of replacement texture policy; they are not a separate terrain materialization pipeline.
+- Terrain no longer renders flat color when source data and page commits provide required color/detail/mask roles.
+- If terrain cannot render full fidelity for a source-data or shader-capacity reason, diagnostics name the missing role, page, sampler, shader input, or unsupported fidelity.
+- Terrain role buckets remain an application of replacement texture policy, not a separate terrain materialization pipeline.
 - Tests cover terrain role readiness and renderer input binding at the replacement contract level.
-- Browser terrain and all-domain harness runs prove terrain material visibility without reintroducing main-thread texture placement bursts.
+- Terrain and all-domain browser harness runs prove terrain material visibility without reintroducing main-thread texture placement bursts.
 
 Task checklist:
 
-- [ ] Trace terrain texture intents from `terrain-geometry-baker` through reservation, page build, texture commit, terrain scene commit, and renderer material inputs.
-- [ ] Compare terrain role buckets with object material color/detail/index/palette buckets to identify real role differences versus accidental bespoke handling.
-- [ ] Add or migrate terrain readiness diagnostics for color/detail/mask roles.
+- [ ] Trace terrain texture intents from the terrain static layer through reservation, page build, texture commit, scene commit, and `prepareTerrainLayeredPayload(...)`.
+- [ ] Audit terrain role page grouping and renderer page-role capacity against object material bucket/purpose grouping.
+- [ ] Add terrain role readiness diagnostics using Phase 27 records.
 - [ ] Fix the smallest shared-contract gap that explains flat-color terrain.
 - [ ] Delete any terrain-only workaround made obsolete by the shared fix.
 - [ ] Run terrain-focused and all-domain browser harness cases.
@@ -2297,39 +2360,97 @@ Decisions and course corrections:
 
 - Pending.
 
-### Phase 28: Resteering Checkpoint 6 - Material/Readiness Model Review
+### Phase 30: Resteering Checkpoint 6 - Readiness/Diagnostics Review
 
 Deliverables:
 
-- Dry-run Phase 29 against the current code after texture stream decoupling, renderer readiness, diagnostics, fidelity, and terrain-role work.
-- Recheck all touched code against the worksheet north star before cleanup begins.
-- Classify every remaining compatibility projection as direct migration, deletion, legacy-edge shim, or durable adapter.
-- Decide whether any remaining material/fidelity work blocks cleanup or should be explicitly deferred as future rendering scope.
+- Dry-run Phases 31-33 against the current code after direct readiness, renderer late binding, diagnostics, static object reconciliation, and terrain role work.
+- Recheck every touched contract against the worksheet north star before worker-boundary cleanup begins.
+- Classify every touched consumer as direct migration, deletion, legacy-edge shim, or durable adapter.
+- Decide whether any remaining material/fidelity issue blocks cleanup or should be explicitly deferred as renderer backlog.
 
 Acceptance criteria:
 
-- The plan records whether the remaining issues are architecture debt, material fidelity backlog, renderer capability backlog, diagnostics debt, or acceptable future scope.
-- No phase proceeds with a legacy-shaped diagnostic or test expectation inside replacement internals.
+- The plan records whether remaining issues are architecture debt, material fidelity backlog, renderer capability backlog, diagnostics debt, worker-boundary debt, or acceptable future scope.
+- No phase proceeds with a legacy-shaped diagnostic, DTO, or test expectation inside replacement internals.
 - Every remaining shim has a deletion task or is promoted to a durable adapter with a real post-cutover boundary reason.
-- The cleanup phase is specific enough to execute without guessing.
+- The cleanup phases are specific enough to execute without guessing.
 
 Task checklist:
 
-- [ ] Dry-run cleanup and final verification from the current code tree.
-- [ ] Audit imports for direct builder production usage, ignored placement fields, and diagnostic compatibility projections.
+- [ ] Dry-run worker-boundary cleanup, source-tree cleanup, and final verification from the current code tree.
+- [ ] Audit direct builder production usage, ignored placement fields, diagnostic compatibility projections, and old runtime/harness shims.
 - [ ] Audit tests for legacy bucket/readiness/diagnostic parity assumptions.
-- [ ] Update Phase 29 cleanup tasks with concrete file/symbol targets.
-- [ ] Record any explicitly deferred material fidelity work with evidence and owner.
+- [ ] Update Phases 31-33 with concrete file/symbol targets.
+- [ ] Record explicitly deferred material fidelity work with evidence and reactivation criteria.
 
 Decisions and course corrections:
 
 - Pending.
 
-### Phase 29: Texture Remodel Cleanup And Verification
+### Phase 31: Worker Boundary And Synchronous Artifact Cleanup
 
 Deliverables:
 
-- Delete dead placement fields, ignored policy paths, obsolete tests, stale diagnostic categories, and temporary shims introduced by Phases 19-28.
+- Prove production browser material pages use worker-owned source preparation, layout/search where applicable, packing, guttered blits, and page materialization, or document a measured exception.
+- Delete or isolate synchronous direct material page build entrypoints that can accidentally re-enter production materialization.
+- Keep direct builders test-only or worker-internal, with names/import paths that make that status obvious.
+- Remove old direct texture commit paths that duplicate the Phase 23 task stream.
+
+Acceptance criteria:
+
+- No production static or runtime materialization path calls `buildReservedMaterialTexturePages(...)`.
+- `DirectOpenWorldTexturePageBuilder` and `DirectOpenWorldObjectVisualAtlasBuilder` are used only by tests or worker handlers.
+- Any remaining synchronous source-preparation work on the browser main thread is measured, named, and accepted as a deliberate exception against the worksheet.
+- Tests cover the worker-client/handler path rather than direct-builder production shortcuts.
+- Browser harness does not show a new main-thread packing/page-materialization blackout.
+
+Task checklist:
+
+- [ ] Audit imports of `buildReservedMaterialTexturePages`, `DirectOpenWorldTexturePageBuilder`, and `DirectOpenWorldObjectVisualAtlasBuilder`.
+- [ ] Delete production-facing direct page-build APIs or move them behind test/worker-only module boundaries.
+- [ ] Audit page-build worker payloads to confirm source identities and immutable layout facts, not prepared pixel buffers, cross the production boundary.
+- [ ] Replace any production direct-builder tests with worker-client/handler tests where feasible.
+- [ ] Run all-domain browser harness and compare long-task/frame-gap evidence against the worksheet baseline.
+
+Decisions and course corrections:
+
+- Pending.
+
+### Phase 32: Vestigial Contract And Source-Tree Wipe
+
+Deliverables:
+
+- Delete vestigial pipeline references from production code after surviving consumers have migrated to direct replacement contracts.
+- Remove ignored placement fields, old bucket compatibility vocabulary, stale diagnostic categories, and architecture-preserving tests.
+- Keep durable adapters only for host assets, worker transport, renderer mutation, diagnostics export plumbing, and harness composition when they do not preserve retired concepts.
+- Align remaining source tree locations with domain/system ownership.
+
+Acceptance criteria:
+
+- No production replacement code references old static coordinator, texture manager mutation, ignored `placementBucketKey`, old diagnostic parity snapshots, or old materialization lifecycle concepts.
+- No tests preserve ignored placement policy fields, old bucket lifetime assumptions, or legacy diagnostic parity.
+- Any surviving adapter passes the adapter-versus-shim test in this plan.
+- Source-tree placement explains ownership; no new broad concept dumping grounds are created.
+- Dead-code lint is green without keeping compatibility fossils alive.
+
+Task checklist:
+
+- [ ] Audit production imports for `StaticCoordinator`, `TextureManager`, ignored placement fields, old diagnostics snapshots, and legacy-shaped runtime projections.
+- [ ] Delete or migrate old compatibility projections from runtime, harness, UI diagnostics, and tests.
+- [ ] Delete obsolete tests that preserve retired orchestration contracts; replace only tests needed for replacement behavior.
+- [ ] Rename or move modules whose source-tree location now hides the owning system.
+- [ ] Run `npm run lint:dead` and resolve every replacement-related finding by deletion or direct migration.
+
+Decisions and course corrections:
+
+- Pending.
+
+### Phase 33: Texture Remodel Final Verification And Hard Cutover
+
+Deliverables:
+
+- Delete dead placement fields, ignored policy paths, obsolete tests, stale diagnostic categories, and temporary shims introduced by Phases 19-32.
 - Re-run dead-code, type, lint, unit, and browser harness verification.
 - Update this plan and the worksheet cross-reference with final evidence and any remaining intentionally deferred material fidelity.
 
@@ -2439,7 +2560,7 @@ Mitigation:
 
 Mitigation:
 
-- Treat the worksheet as the design guardrail for Phases 19-26.
+- Treat the worksheet as the design guardrail for Phases 19-33.
 - Record deliberate deviations in the phase decisions before implementation proceeds.
 - Prefer pausing a phase over landing a convenient contract that contradicts static-authored dynamic sharing, worker-owned page build, loose readiness, or direct replacement diagnostics.
 

@@ -1,4 +1,5 @@
 import type { WorkerPoolDiagnosticsSnapshot } from "../../../workers/pool";
+import type { OpenWorldTextureBucketSnapshot } from "../texture-residency/claims/texture-claim-registry";
 
 /** Replacement-native diagnostics for owner-indexed open-world streaming. */
 export interface OpenWorldStreamingDiagnosticsSnapshot {
@@ -21,6 +22,8 @@ export interface OpenWorldStreamingDiagnosticsSnapshot {
 		readonly staleRejected: number;
 	};
 	readonly textureResidency: {
+		/** Direct replacement-owned bucket/page snapshots for resource inspection. */
+		readonly buckets: readonly OpenWorldTextureBucketSnapshot[];
 		readonly bucketCount: number;
 		readonly claimCount: number;
 		/** Shared logical texture entries tracked by the replacement claim registry. */

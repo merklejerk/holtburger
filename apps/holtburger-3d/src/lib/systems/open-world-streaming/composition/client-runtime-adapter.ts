@@ -32,6 +32,7 @@ import type {
 } from "../../../runtime/scene-query/merged-scene-query-contracts";
 import type { TextureFilteringMode } from "../../../textures/sampling-policy";
 import type { OpenWorldStreamingBoundaryAdapters } from "../adapters/browser-boundaries";
+import { parseOpenWorldTextureBucketKey } from "../texture-residency/claims/bucket-key";
 import { OpenWorldStreamingController } from "./open-world-streaming-controller";
 import type {
 	OpenWorldStreamingStaticInterest,
@@ -296,22 +297,9 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 				textureFilteringMode: this.#textureFilteringMode,
 			},
 			resources: {
-				atlas: {
-					buckets: [],
-					summary: {
-						activeBucketCount: 0,
-						approximateBytes: 0,
-						bucketCount: 0,
-						pageLifecycle: {
-							absorbed: 0,
-							created: 0,
-							reclaimed: 0,
-							retained: 0,
-						},
-						registryEntryCount: 0,
-						texturePageCount: 0,
-					},
-				},
+				textureResidency: createRuntimeTextureResidencyOverview(
+					this.#controller.createDiagnosticsSnapshot().textureResidency,
+				),
 				renderer: rendererResources,
 			},
 			sceneInterest: this.#sceneInterest,
@@ -473,6 +461,94 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 			throw new Error("Open world streaming runtime has been disposed.");
 		}
 	}
+}
+
+type OpenWorldTextureResidencyOverview = ReturnType<
+	OpenWorldStreamingController["createDiagnosticsSnapshot"]
+>["textureResidency"];
+
+function createRuntimeTextureResidencyOverview(
+	textureResidency: OpenWorldTextureResidencyOverview,
+): RuntimeOverviewSnapshot["resources"]["textureResidency"] {
+	return {
+		buckets: textureResidency.buckets.map(createRuntimeTextureBucketOverview),
+		summary: {
+			activeBucketCount: textureResidency.bucketCount,
+			approximateBytes: textureResidency.byteEstimate.approximateBytes,
+			bucketCount: textureResidency.bucketCount,
+			pageStates: {
+				building: textureResidency.pages.building,
+				planned: textureResidency.pages.planned,
+				reclaimable: textureResidency.pages.reclaimable,
+				resident: textureResidency.pages.resident,
+			},
+			registryEntryCount: textureResidency.entryCount,
+			texturePageCount: textureResidency.pages.total,
+		},
+	};
+}
+
+function createRuntimeTextureBucketOverview(
+	bucket: OpenWorldTextureResidencyOverview["buckets"][number],
+): RuntimeOverviewSnapshot["resources"]["textureResidency"]["buckets"][number] {
+	const bucketParts = parseOpenWorldTextureBucketKey(bucket.bucketKey);
+	const ownerIds = new Set(bucket.entries.flatMap((entry) => entry.ownerIds));
+	const sourceKeys = new Set(bucket.entries.map((entry) => entry.sourceKey));
+	const entriesById = new Map(bucket.entries.map((entry) => [entry.id, entry]));
+	return {
+		bucketKey: bucket.bucketKey,
+		domain: bucketParts.domain,
+		entryCount: bucket.entries.length,
+		ownerCount: ownerIds.size,
+		pageCount: bucket.pages.length,
+		pages: bucket.pages.map((page) => {
+			const pageEntries = page.entryIds.map((entryId) => {
+				const entry = entriesById.get(entryId);
+				if (!entry) {
+					throw new Error(
+						`Texture page ${page.id} references missing entry ${entryId}.`,
+					);
+				}
+				return entry;
+			});
+			return {
+				bindingCount: sumCounts(
+					pageEntries,
+					(entry) => entry.bindingIds.length,
+				),
+				bucketKey: bucket.bucketKey,
+				domain: bucketParts.domain,
+				entryCount: page.entryIds.length,
+				hasBuildReservation: page.reservationToken !== null,
+				ownerCount: uniqueCount(pageEntries.flatMap((entry) => entry.ownerIds)),
+				ownerlessRetainedState: page.ownerlessRetainedState,
+				pageClasses: uniqueSorted(pageEntries.map((entry) => entry.pageClass)),
+				pageId: page.id,
+				purposes: uniqueSorted(pageEntries.map((entry) => entry.purpose)),
+				scope: bucketParts.scope,
+				sourceCount: uniqueCount(pageEntries.map((entry) => entry.sourceKey)),
+				state: page.state,
+			};
+		}),
+		purpose: bucketParts.purpose,
+		scope: bucketParts.scope,
+		uniqueSourceCount: sourceKeys.size,
+	};
+}
+
+function uniqueSorted(values: readonly string[]): readonly string[] {
+	return [...new Set(values)].sort();
+}
+
+function uniqueCount(values: readonly string[]): number {
+	return new Set(values).size;
+}
+
+function sumCounts<T>(
+	values: readonly T[],
+	count: (value: T) => number,
+): number {
+	return values.reduce((total, value) => total + count(value), 0);
 }
 
 function createStaticObjectUploadSample(

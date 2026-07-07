@@ -435,6 +435,7 @@ export class OpenWorldStreamingController {
 	createDiagnosticsSnapshot(): OpenWorldStreamingDiagnosticsSnapshot {
 		const ownerSnapshot = this.#owners.createSnapshot();
 		const textureSnapshot = this.#textureClaims.createSnapshot();
+		const textureBuckets = this.#textureClaims.createBucketSnapshots();
 		const dynamicSnapshot =
 			this.#runtimeEntities?.createSnapshot() ??
 			createEmptyDynamicRuntimeSnapshot();
@@ -500,6 +501,7 @@ export class OpenWorldStreamingController {
 					approximateBytes: null,
 					reason: "page-size-not-yet-canonical",
 				},
+				buckets: textureBuckets,
 				bucketCount: textureSnapshot.bucketCount,
 				claimCount: textureSnapshot.claimCount,
 				entryCount: textureSnapshot.entryCount,
@@ -1187,7 +1189,9 @@ export class OpenWorldStreamingController {
 		return settled >= requested;
 	}
 
-	#evictStaticOwners(retainedOwnerIds: ReadonlySet<MaterializationOwnerId>): void {
+	#evictStaticOwners(
+		retainedOwnerIds: ReadonlySet<MaterializationOwnerId>,
+	): void {
 		for (const owner of this.#owners.createSnapshot().current) {
 			if (owner.kind !== "static-layer" || retainedOwnerIds.has(owner.id)) {
 				continue;

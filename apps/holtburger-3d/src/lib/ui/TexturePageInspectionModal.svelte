@@ -5,6 +5,9 @@
 		RuntimeTexturePageInspectionSnapshot,
 	} from "../runtime/client-runtime";
 
+	type RuntimeTexturePageInspectionPlacement =
+		RuntimeTexturePageInspectionPreview["placements"][number];
+
 	interface Props {
 		readonly label: string;
 		readonly onClose: () => void;
@@ -46,8 +49,14 @@
 	const CHECKERBOARD_CELL_PIXELS = 16;
 
 	$effect(() => {
-		selectedEntryId = snapshot.entries[0]?.id ?? null;
-		selectedPlacementBindingId = snapshot.preview?.placements[0]?.bindingId ?? null;
+		const firstPlacement = snapshot.preview?.placements[0] ?? null;
+		selectedPlacementBindingId = firstPlacement?.bindingId ?? null;
+		selectedEntryId =
+			firstPlacement === null
+				? (snapshot.entries[0]?.id ?? null)
+				: (findEntryForBindingId(firstPlacement.bindingId)?.id ??
+					snapshot.entries[0]?.id ??
+					null);
 		sourceCanvas =
 			snapshot.preview === null ? null : createSourceCanvas(snapshot.preview);
 		fittedPreview = null;
@@ -99,7 +108,43 @@
 
 	function selectEntry(entry: RuntimeTexturePageInspectionEntry): void {
 		selectedEntryId = entry.id;
+		if (
+			selectedPlacementBindingId === null ||
+			!entry.bindingIds.includes(selectedPlacementBindingId)
+		) {
+			selectedPlacementBindingId = findFirstPlacementForEntry(entry)?.bindingId ?? null;
+		}
 		activeDetailTab = "entry";
+	}
+
+	function selectPlacement(
+		placement: RuntimeTexturePageInspectionPlacement | null,
+	): void {
+		if (placement === null) {
+			selectedPlacementBindingId = null;
+			return;
+		}
+		selectedPlacementBindingId = placement.bindingId;
+		selectedEntryId = findEntryForBindingId(placement.bindingId)?.id ?? null;
+		activeDetailTab = "entry";
+	}
+
+	function findEntryForBindingId(
+		bindingId: string,
+	): RuntimeTexturePageInspectionEntry | null {
+		return (
+			snapshot.entries.find((entry) => entry.bindingIds.includes(bindingId)) ?? null
+		);
+	}
+
+	function findFirstPlacementForEntry(
+		entry: RuntimeTexturePageInspectionEntry,
+	): RuntimeTexturePageInspectionPlacement | null {
+		return (
+			snapshot.preview?.placements.find((placement) =>
+				entry.bindingIds.includes(placement.bindingId),
+			) ?? null
+		);
 	}
 
 	function resetView(): void {
@@ -264,7 +309,7 @@
 		const wasClick = !dragState.moved;
 		dragState = null;
 		if (wasClick) {
-			selectedPlacementBindingId = findPlacementAtEvent(event)?.bindingId ?? null;
+			selectPlacement(findPlacementAtEvent(event));
 		}
 	}
 

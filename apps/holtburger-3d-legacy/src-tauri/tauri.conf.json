@@ -1,12 +1,12 @@
 {
 	"$schema": "https://schema.tauri.app/config/2",
-	"productName": "Holtburger 3D",
+	"productName": "Holtburger 3D Legacy",
 	"version": "0.1.0",
-	"identifier": "io.github.merklejerk.holtburger-3d",
+	"identifier": "io.github.merklejerk.holtburger-3d-legacy",
 	"build": {
 		"beforeDevCommand": "npm run dev",
 		"beforeBuildCommand": "npm run build",
-		"devUrl": "http://127.0.0.1:1420",
+		"devUrl": "http://127.0.0.1:1420/browser",
 		"frontendDist": "../dist"
 	},
 	"app": {

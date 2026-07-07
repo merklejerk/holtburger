@@ -1,5 +1,5 @@
 {
-	"name": "holtburger-3d",
+	"name": "holtburger-3d-legacy",
 	"private": true,
 	"version": "0.0.0",
 	"type": "module",
@@ -16,6 +16,8 @@
 		"lint:rust": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
 		"format": "prettier --write .",
 		"format:check": "prettier --check .",
+		"harness:browser": "node scripts/browser-pipeline-harness.mjs",
+		"profile": "bash scripts/profile.sh",
 		"tauri": "tauri",
 		"tauri:dev": "tauri dev",
 		"tauri:build": "tauri build"

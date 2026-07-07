@@ -1,0 +1,32 @@
+[package]
+name = "holtburger-3d-legacy"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+build = "build.rs"
+default-run = "holtburger-3d-legacy"
+
+[lib]
+name = "holtburger_3d"
+
+[features]
+profile-devtools = ["tauri/devtools"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+holtburger-common.workspace = true
+holtburger-content.workspace = true
+holtburger-core.workspace = true
+holtburger-dat.workspace = true
+holtburger-world.workspace = true
+mysql = "28.0.0"
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "2", features = [] }
+tokio.workspace = true

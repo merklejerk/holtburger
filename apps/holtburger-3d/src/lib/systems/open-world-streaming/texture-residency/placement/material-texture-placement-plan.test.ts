@@ -129,6 +129,88 @@ describe("reserveMaterialTexturePlacements", () => {
 		});
 	});
 
+	it("inserts new entries into resident page free space without moving existing entries", async () => {
+		const atlasBuilder = new FixtureAtlasBuilder();
+		const textureClaims = new OpenWorldTextureClaimRegistry();
+		const firstIntent = createTerrainIntent({
+			affinityKey: "object:shared",
+			bindingId: bindingId("object-binding:first"),
+			domain: "outdoor-buildings",
+			itemId: "object:item:first",
+			textureKey: textureKey("texture:object:first"),
+		});
+		const secondIntent = createTerrainIntent({
+			affinityKey: "object:shared",
+			bindingId: bindingId("object-binding:second"),
+			domain: "outdoor-buildings",
+			itemId: "object:item:second",
+			sourceKey: "prepared:06000011:rgba-color",
+			textureKey: textureKey("texture:object:second"),
+		});
+
+		const first = await reserveMaterialTexturePlacements<
+			string,
+			TexturePlacementIntent
+		>({
+			atlasBuilder,
+			filteringMode: "nearest",
+			intents: [firstIntent],
+			jobPrefix: "fixture-object",
+			ownerId: ownerId("static-layer:object:first"),
+			textureClaims,
+		});
+		const firstPageBuild = first.pageBuildRequests[0];
+		expect(firstPageBuild).toBeDefined();
+		textureClaims.acceptPageBuild(
+			firstPageBuild.pageId,
+			firstPageBuild.reservationToken,
+		);
+
+		const inserted = await reserveMaterialTexturePlacements<
+			string,
+			TexturePlacementIntent
+		>({
+			atlasBuilder,
+			filteringMode: "nearest",
+			intents: [secondIntent],
+			jobPrefix: "fixture-object",
+			ownerId: ownerId("static-layer:object:second"),
+			textureClaims,
+		});
+
+		expect(atlasBuilder.inputs).toHaveLength(2);
+		expect(inserted.pageBuildRequests).toHaveLength(1);
+		expect(inserted.pageBuildRequests[0]).toMatchObject({
+			entries: expect.arrayContaining([
+				expect.objectContaining({
+					bindingIds: [firstIntent.bindingId],
+					rect: [96, 96, 1, 1],
+				}),
+				expect.objectContaining({
+					bindingIds: [secondIntent.bindingId],
+				}),
+			]),
+			pageId: firstPageBuild.pageId,
+		});
+		expect(inserted.bindingPlacements).toEqual([
+			expect.objectContaining({
+				bindingId: secondIntent.bindingId,
+				placement: expect.objectContaining({
+					pageId: firstPageBuild.pageId,
+					textureRefId: `${firstPageBuild.pageId}:texture`,
+				}),
+			}),
+		]);
+		expect(textureClaims.createSnapshot()).toMatchObject({
+			entryCount: 2,
+			pageBuildsInFlight: 1,
+			pageCount: 1,
+			pageCountByState: {
+				building: 1,
+			},
+		});
+	});
+
 	it("reuses in-flight entry placements without planning another page build", async () => {
 		const atlasBuilder = new FixtureAtlasBuilder();
 		const textureClaims = new OpenWorldTextureClaimRegistry();
@@ -297,15 +379,15 @@ function createTerrainIntent(
 ): TexturePlacementIntent {
 	const source = createTextureUse();
 	return {
-		affinityKey: "terrain:da55ffff",
+		affinityKey: overrides.affinityKey ?? "terrain:da55ffff",
 		bindingId: overrides.bindingId ?? bindingId("terrain-binding:color:1"),
-		domain: "outdoor-terrain",
+		domain: overrides.domain ?? "outdoor-terrain",
 		itemId: overrides.itemId ?? "terrain:item:1",
 		ownerIds: [],
-		pageClass: pageClass("page-class:terrain-color"),
+		pageClass: overrides.pageClass ?? pageClass("page-class:terrain-color"),
 		placementPolicy: staticDomainPolicy(),
-		purpose: "terrain-color",
-		source: {
+		purpose: overrides.purpose ?? "terrain-color",
+		source: overrides.source ?? {
 			dataUse: source,
 			kind: "material-texture-data-use",
 			samplingPolicy: {
@@ -313,8 +395,8 @@ function createTerrainIntent(
 				wrapT: "repeat",
 			},
 		},
-		sourceKey: "prepared:06000010:rgba-color",
-		textureKey: textureKey("texture:terrain-color:1"),
+		sourceKey: overrides.sourceKey ?? "prepared:06000010:rgba-color",
+		textureKey: overrides.textureKey ?? textureKey("texture:terrain-color:1"),
 	};
 }
 

@@ -4,6 +4,7 @@ import type {
 	TexturePageClass,
 } from "../../../../textures/identity";
 import type { TextureUsagePurpose } from "../../../../textures/placement";
+import type { MaterialTextureDataUseIdentity } from "../../../../static/contracts";
 import type { MaterializationOwnerId } from "../../owners/owner-id";
 import type { OpenWorldTextureBucketKey } from "./bucket-key";
 
@@ -85,6 +86,19 @@ export interface OpenWorldTexturePageRecord {
 	readonly textureWidth: number | null;
 }
 
+export interface OpenWorldTexturePagePlacementInput {
+	/** Shared entry assigned to the page. */
+	readonly entryId: OpenWorldTextureEntryId;
+	/** Source identity required to rebuild this entry's page pixels. */
+	readonly dataUse?: MaterialTextureDataUseIdentity;
+	/** Gutter edge behavior used when materializing pixels. */
+	readonly gutterEdgeMode?: "clamp" | "repeat";
+	/** Gutter width in pixels around the content rect. */
+	readonly gutterPixels?: number;
+	/** Content rect inside the virtual page, excluding gutter pixels. */
+	readonly rect: readonly [number, number, number, number];
+}
+
 export interface OpenWorldTextureEntryPlacementRecord {
 	/** Shared logical entry placed on an accepted or reusable page. */
 	readonly entryId: OpenWorldTextureEntryId;
@@ -100,6 +114,34 @@ export interface OpenWorldTextureEntryPlacementRecord {
 	readonly textureHeight: number;
 	/** Runtime texture page width in pixels. */
 	readonly textureWidth: number;
+}
+
+export interface OpenWorldTexturePageInsertionCandidateRecord {
+	/** Existing virtual page that may accept additional compatible entries. */
+	readonly pageId: OpenWorldTexturePageId;
+	/** Current page lifecycle state eligible for insertion. */
+	readonly pageState: "resident";
+	/** Existing entry placements on this page. */
+	readonly placements: readonly OpenWorldTexturePagePlacementRecord[];
+	/** Renderer-facing texture ref for this page. */
+	readonly textureRefId: string;
+	/** Runtime texture page height in pixels. */
+	readonly textureHeight: number;
+	/** Runtime texture page width in pixels. */
+	readonly textureWidth: number;
+}
+
+export interface OpenWorldTexturePagePlacementRecord {
+	/** Shared entry assigned to the page. */
+	readonly entryId: OpenWorldTextureEntryId;
+	/** Source identity required to rebuild this entry's page pixels. */
+	readonly dataUse: MaterialTextureDataUseIdentity;
+	/** Gutter edge behavior used when materializing pixels. */
+	readonly gutterEdgeMode: "clamp" | "repeat";
+	/** Gutter width in pixels around the content rect. */
+	readonly gutterPixels: number;
+	/** Content rect inside the virtual page, excluding gutter pixels. */
+	readonly rect: readonly [number, number, number, number];
 }
 
 export interface OpenWorldTextureResidentBindingPlacementRecord {
@@ -187,6 +229,10 @@ interface MutableTexturePage {
 	readonly placementsByEntryId: Map<
 		OpenWorldTextureEntryId,
 		readonly [number, number, number, number]
+	>;
+	readonly pageBuildFactsByEntryId: Map<
+		OpenWorldTextureEntryId,
+		OpenWorldTexturePagePlacementRecord
 	>;
 	lastActiveState: Exclude<OpenWorldTexturePageRecord["state"], "reclaimable">;
 	reservationToken: OpenWorldTexturePageReservationToken | null;
@@ -282,10 +328,7 @@ export class OpenWorldTextureClaimRegistry {
 	createPage(input: {
 		readonly bucketKey: OpenWorldTextureBucketKey;
 		readonly entryIds: readonly OpenWorldTextureEntryId[];
-		readonly placements?: readonly {
-			readonly entryId: OpenWorldTextureEntryId;
-			readonly rect: readonly [number, number, number, number];
-		}[];
+		readonly placements?: readonly OpenWorldTexturePagePlacementInput[];
 		readonly state?: OpenWorldActiveTexturePageState;
 		readonly textureHeight?: number;
 		readonly textureRefId?: string;
@@ -309,6 +352,10 @@ export class OpenWorldTextureClaimRegistry {
 			OpenWorldTextureEntryId,
 			readonly [number, number, number, number]
 		>();
+		const pageBuildFactsByEntryId = new Map<
+			OpenWorldTextureEntryId,
+			OpenWorldTexturePagePlacementRecord
+		>();
 		for (const placement of input.placements ?? []) {
 			if (!entryIdSet.has(placement.entryId)) {
 				throw new Error(
@@ -321,6 +368,19 @@ export class OpenWorldTextureClaimRegistry {
 				);
 			}
 			placementsByEntryId.set(placement.entryId, placement.rect);
+			if (
+				placement.dataUse !== undefined &&
+				placement.gutterEdgeMode !== undefined &&
+				placement.gutterPixels !== undefined
+			) {
+				pageBuildFactsByEntryId.set(placement.entryId, {
+					dataUse: placement.dataUse,
+					entryId: placement.entryId,
+					gutterEdgeMode: placement.gutterEdgeMode,
+					gutterPixels: placement.gutterPixels,
+					rect: placement.rect,
+				});
+			}
 		}
 
 		const pageId = createTexturePageId(input.bucketKey, this.#nextPageNumber);
@@ -330,6 +390,7 @@ export class OpenWorldTextureClaimRegistry {
 			entryIds: new Set(input.entryIds),
 			id: pageId,
 			lastActiveState: input.state ?? "planned",
+			pageBuildFactsByEntryId,
 			placementsByEntryId,
 			reservationToken: null,
 			state: input.state ?? "planned",
@@ -419,6 +480,92 @@ export class OpenWorldTextureClaimRegistry {
 			}
 		}
 		return bindingPlacements;
+	}
+
+	createResidentPageInsertionCandidates(
+		bucketKey: OpenWorldTextureBucketKey,
+	): readonly OpenWorldTexturePageInsertionCandidateRecord[] {
+		return [...(this.#pageIdsByBucketKey.get(bucketKey) ?? [])]
+			.map((pageId) => this.#requirePage(pageId))
+			.filter((page) => {
+				this.#refreshPageReclaimableState(page);
+				return page.state === "resident";
+			})
+			.filter(
+				(page) =>
+					page.textureHeight !== null &&
+					page.textureWidth !== null &&
+					page.entryIds.size > 0 &&
+					[...page.entryIds].every((entryId) =>
+						page.pageBuildFactsByEntryId.has(entryId),
+					),
+			)
+			.sort(comparePages)
+			.map((page) => ({
+				pageId: page.id,
+				pageState: "resident" as const,
+				placements: this.#createPagePlacementRecords(page),
+				textureHeight: page.textureHeight ?? failMissingPageDimensions(page.id),
+				textureRefId: page.textureRefId,
+				textureWidth: page.textureWidth ?? failMissingPageDimensions(page.id),
+			}));
+	}
+
+	addEntryPlacementsToPage(input: {
+		readonly pageId: OpenWorldTexturePageId;
+		readonly placements: readonly OpenWorldTexturePagePlacementInput[];
+	}): OpenWorldTexturePageRecord {
+		const page = this.#requirePage(input.pageId);
+		this.#refreshPageReclaimableState(page);
+		if (page.state !== "resident") {
+			throw new Error(
+				`Cannot insert texture entries into ${page.state} page ${input.pageId}.`,
+			);
+		}
+		for (const placement of input.placements) {
+			const entry = this.#entriesById.get(placement.entryId);
+			if (!entry) {
+				throw new Error(
+					`Cannot insert missing texture entry ${placement.entryId} into page ${input.pageId}.`,
+				);
+			}
+			if (entry.bucketKey !== page.bucketKey) {
+				throw new Error(
+					`Cannot insert texture entry ${placement.entryId} from bucket ${entry.bucketKey} into page bucket ${page.bucketKey}.`,
+				);
+			}
+			if (page.entryIds.has(placement.entryId)) {
+				throw new Error(
+					`Texture entry ${placement.entryId} is already assigned to page ${input.pageId}.`,
+				);
+			}
+			if (
+				placement.dataUse === undefined ||
+				placement.gutterEdgeMode === undefined ||
+				placement.gutterPixels === undefined
+			) {
+				throw new Error(
+					`Texture entry ${placement.entryId} cannot be inserted into page ${input.pageId} without page-build facts.`,
+				);
+			}
+			page.entryIds.add(placement.entryId);
+			page.placementsByEntryId.set(placement.entryId, placement.rect);
+			page.pageBuildFactsByEntryId.set(placement.entryId, {
+				dataUse: placement.dataUse,
+				entryId: placement.entryId,
+				gutterEdgeMode: placement.gutterEdgeMode,
+				gutterPixels: placement.gutterPixels,
+				rect: placement.rect,
+			});
+		}
+		return snapshotPage(page);
+	}
+
+	createPagePlacementRecordsForPage(
+		pageId: OpenWorldTexturePageId,
+	): readonly OpenWorldTexturePagePlacementRecord[] {
+		const page = this.#requirePage(pageId);
+		return this.#createPagePlacementRecords(page);
 	}
 
 	reservePageBuild(
@@ -651,6 +798,20 @@ export class OpenWorldTextureClaimRegistry {
 		return page;
 	}
 
+	#createPagePlacementRecords(
+		page: MutableTexturePage,
+	): readonly OpenWorldTexturePagePlacementRecord[] {
+		return [...page.entryIds].sort().map((entryId) => {
+			const facts = page.pageBuildFactsByEntryId.get(entryId);
+			if (!facts) {
+				throw new Error(
+					`Texture page ${page.id} is missing page-build facts for entry ${entryId}.`,
+				);
+			}
+			return facts;
+		});
+	}
+
 	#collectBucketKeys(): ReadonlySet<OpenWorldTextureBucketKey> {
 		return new Set([
 			...this.#pageIdsByBucketKey.keys(),
@@ -768,6 +929,10 @@ function getOrCreatePageIds(
 
 function failMissingEntry(entryId: OpenWorldTextureEntryId): never {
 	throw new Error(`Texture entry index referenced missing entry: ${entryId}.`);
+}
+
+function failMissingPageDimensions(pageId: OpenWorldTexturePageId): never {
+	throw new Error(`Texture page ${pageId} is missing dimensions.`);
 }
 
 function snapshotEntry(

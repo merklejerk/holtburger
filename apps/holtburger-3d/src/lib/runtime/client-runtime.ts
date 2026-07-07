@@ -11,10 +11,6 @@ import type {
 	RendererStaticLayerVisibility,
 } from "../renderer/types";
 import type { RendererFrameTelemetry } from "../renderer/types";
-import type {
-	EnvCellSystemPayloadSummary,
-	TerrainStaticScopePayloadSummary,
-} from "../static/contracts";
 import type { TextureFilteringMode } from "../textures/sampling-policy";
 import type { RuntimeDiagnosticsReport } from "./diagnostics";
 import type { EnvCellResourceMembership } from "./env-cell-resource-membership";
@@ -112,31 +108,12 @@ export interface RuntimeOverviewSnapshot {
 	readonly assets: AssetServiceOverviewSnapshot;
 	/** Cheap renderer and texture resource counts for browser diagnostics. */
 	readonly resources: RuntimeResourcesOverviewSnapshot;
-	/** Replacement static materialization progress summarized for browser panels. */
-	readonly static: RuntimeStaticOverviewSnapshot;
 	/** Cheap static scene query counts for browser diagnostics. */
 	readonly staticSceneQuery: {
 		readonly envCellLandblockCount: number;
 		readonly envCellRecordCount: number;
 		readonly outdoorRecordCount: number;
 	};
-}
-
-interface RuntimeStaticOverviewSnapshot {
-	/** Replacement materialization sequence used only for status display. */
-	readonly revision: number;
-	/** Number of active static layer tasks not yet settled. */
-	readonly requested: number;
-	/** Number of active layer tasks currently resolving source payloads. */
-	readonly resolving: number;
-	/** Number of active layer tasks currently baking renderable payloads. */
-	readonly baking: number;
-	/** Number of static layer tasks committed since runtime creation. */
-	readonly committed: number;
-	/** Most recent terrain payload summary for browser diagnostics. */
-	readonly latestTerrainPayload: TerrainStaticScopePayloadSummary | null;
-	/** Most recent env-cell payload summary for browser diagnostics. */
-	readonly latestEnvCellSystemPayload: EnvCellSystemPayloadSummary | null;
 }
 
 interface RuntimeRenderPolicySnapshot {

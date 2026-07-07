@@ -2854,18 +2854,25 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Search `apps/holtburger-3d/src` and `apps/holtburger-3d/scripts` for `staticOverview`, `RuntimeOverviewSnapshot.static`, old static commit counters, and legacy diagnostics snapshots.
-- [ ] Trace repeated harness sequence readiness from `browser-pipeline-harness.mjs` into `BrowserPipelineHarness.svelte` and replacement `openWorldStreaming` diagnostics; identify whether request identity, cumulative counters, or scene commit ownership is the source of `completed > requested`.
-- [ ] Migrate BrowserDisplay polling and panels to `runtime.createDiagnosticsReport()` direct replacement domains.
-- [ ] Delete `createRuntimeStaticOverviewFromController(...)` and the `RuntimeStaticOverviewSnapshot` interface.
-- [ ] Remove `staticOverview` from harness sample output and downstream assertions.
-- [ ] Fix repeated-sequence readiness/accounting without adding legacy static overview fields back into the readiness decision.
-- [ ] Delete obsolete tests instead of updating them to preserve old overview shape.
-- [ ] Run `npm run check`, `npm run lint`, `npm run lint:dead`, and browser harness.
+- [x] Search `apps/holtburger-3d/src` and `apps/holtburger-3d/scripts` for `staticOverview`, `RuntimeOverviewSnapshot.static`, old static commit counters, and legacy diagnostics snapshots.
+- [x] Trace repeated harness sequence readiness from `browser-pipeline-harness.mjs` into `BrowserPipelineHarness.svelte` and replacement `openWorldStreaming` diagnostics; identify whether request identity, cumulative counters, or scene commit ownership is the source of `completed > requested`.
+- [x] Migrate BrowserDisplay polling and panels to `runtime.createDiagnosticsReport()` direct replacement domains.
+- [x] Delete `createRuntimeStaticOverviewFromController(...)` and the `RuntimeStaticOverviewSnapshot` interface.
+- [x] Remove `staticOverview` from harness sample output and downstream assertions.
+- [x] Fix repeated-sequence readiness/accounting without adding legacy static overview fields back into the readiness decision.
+- [x] Delete obsolete tests instead of updating them to preserve old overview shape.
+- [x] Run `npm run check`, `npm run lint`, `npm run lint:dead`, and browser harness.
 
 Decisions and course corrections:
 
-- Pending.
+- Deleted the legacy-shaped runtime static overview contract from `RuntimeOverviewSnapshot` and removed `createRuntimeStaticOverviewFromController(...)`. `client-runtime-adapter.ts` now exposes durable runtime overview fields only: assets, renderer/resources, camera/portal/debug state, scene interest, and static scene query counts.
+- Removed `staticOverview` from browser harness scenario steps. Harness samples now rely on `openWorldStreaming` diagnostics for static tasks, scene commits, material readiness, texture residency, and active task evidence.
+- Migrated the BrowserDisplay static status rows to direct `runtime.createDiagnosticsReport()` data. The panel now reports static task request/active/recent counts, scene commit/artifact counts, and texture page/material readiness. The old latest terrain/env-cell payload rows were deleted instead of re-created as a new diagnostics contract because they existed only through the retired static overview shim.
+- Repeated-sequence trace found that `staticTasks.summary.completed` is recent-history scoped, while `staticTasks.summary.requested` is current-request scoped. Treating those as a ratio produced the misleading `completed > requested` shape. Harness readiness now uses current active tasks plus direct artifact/commit/page-build/material readiness gates, and status text labels `recentCompleted` honestly.
+- Fixed active static task tracking to be run-scoped inside `OpenWorldStreamingController`. New static-interest runs clear the active task map, active task keys include the run id, and stale completions can remove only their own active key. This prevents identical task ids across repeated requests from smuggling stale active state into the current run.
+- Concession: `npm run harness:browser -- --layer-distance 1 --repeat 2 --settle-delay-ms 1500 --timeout-ms 60000 --output /tmp/holtburger-phase40-repeat-settle.json` still timed out, but not because of legacy accounting. The trace reported direct current state: active task `2:landblock:db55ffff:outdoor-terrain`, `active: 1`, `artifacts.inFlight: 1`, `sceneCommits.pending: 41`, no pending or failed texture dependencies, and `pageBuildsInFlight: 0`. This satisfies the Phase 40 direct-diagnostic branch; a future performance/timeout phase can decide whether repeat-mode should use a longer timeout, avoid re-requesting identical interest, or improve late terrain source delivery.
+- Harness verification: `npm run harness:browser -- --layer-distance 1 --timeout-ms 60000 --output /tmp/holtburger-phase40-all-domain-r1.json` passed with `errorMessage: null`, one scenario step, no `staticOverview` in the step output, 45 requested static tasks, 0 active tasks, 45 applied scene commits, 0 pending scene commits, 149 resident texture pages, 0 in-flight page builds, and zero material readiness issues.
+- Verification: `npm run check`, `npm run lint`, focused `npm run test:ts -- --run src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts`, the all-domain browser harness above, and the repeated-sequence harness trace above.
 
 ### Phase 41: Ownerless Page Reclamation And Eviction Truth
 

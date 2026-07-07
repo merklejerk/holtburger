@@ -79,6 +79,7 @@
 		PerformanceMetricsTracker,
 		type PerformanceMetricsSnapshot,
 	} from "../lib/ui/performance-metrics";
+	import type { OpenWorldStreamingDiagnosticsSnapshot } from "../lib/systems/open-world-streaming/diagnostics/contracts";
 
 	type BrowserPanelTab =
 		| "navigate"
@@ -175,6 +176,8 @@
 	let generatedSceneryRadius = $state(DEFAULT_GENERATED_SCENERY_LOD_RADIUS);
 	let envCellRadius = $state(DEFAULT_ENV_CELL_LOD_RADIUS);
 	let runtimeOverview = $state<RuntimeOverviewSnapshot | null>(null);
+	let openWorldDiagnostics =
+		$state<OpenWorldStreamingDiagnosticsSnapshot | null>(null);
 	let atlasPageFilter = $state("");
 	let cameraState = $state<FreeCameraState>(createFreeCameraState());
 	let diagnosticsReportText = $state<string | null>(null);
@@ -418,9 +421,21 @@
 		}
 
 		const nextOverview = runtime.createOverviewSnapshot();
+		const diagnostics = runtime.createDiagnosticsReport();
 		runtimeOverview = nextOverview;
+		openWorldDiagnostics = findOpenWorldDiagnostics(diagnostics);
 		selectedTextureFilteringMode =
 			nextOverview.renderPolicy.textureFilteringMode;
+	}
+
+	function findOpenWorldDiagnostics(
+		diagnostics: ReturnType<ClientRuntime["createDiagnosticsReport"]>,
+	): OpenWorldStreamingDiagnosticsSnapshot | null {
+		const domain = diagnostics.domains.find(
+			(candidate) => candidate.kind === "open-world-streaming",
+		);
+		return (domain?.summary ??
+			null) as OpenWorldStreamingDiagnosticsSnapshot | null;
 	}
 
 	function handleLocationInput(event: Event): void {
@@ -1737,9 +1752,9 @@
 	}
 
 	function formatPortalFrameWorkPlan(plan: PortalFrameWorkPlan): string {
-	if (plan.kind === "render-pass") {
-		return plan.mode;
-	}
+		if (plan.kind === "render-pass") {
+			return plan.mode;
+		}
 		if (plan.mode === "portal-projection") {
 			const graph = plan.layeredGraph;
 			const baseEntryResources =
@@ -2697,21 +2712,59 @@
 						<div>
 							<dt>Static</dt>
 							<dd>
-								{#if runtimeOverview}
-									r{runtimeOverview.static.revision} req {runtimeOverview.static
-										.requested} res
-									{runtimeOverview.static.resolving} bake {runtimeOverview
-										.static.baking} commit
-									{runtimeOverview.static.committed}
+								{#if openWorldDiagnostics}
+									req {openWorldDiagnostics.staticTasks.summary.requested} active
+									{openWorldDiagnostics.staticTasks.summary.active} done
+									{openWorldDiagnostics.staticTasks.summary.completed} recent failed
+									{openWorldDiagnostics.staticTasks.summary.failed}
 								{:else}
 									pending
 								{/if}
 							</dd>
 							{@render copyOverlay(
-								runtimeOverview
-									? `r${runtimeOverview.static.revision} req ${runtimeOverview.static.requested} res ${runtimeOverview.static.resolving} bake ${runtimeOverview.static.baking} commit ${runtimeOverview.static.committed}`
+								openWorldDiagnostics
+									? `req ${openWorldDiagnostics.staticTasks.summary.requested} active ${openWorldDiagnostics.staticTasks.summary.active} recent done ${openWorldDiagnostics.staticTasks.summary.completed} recent failed ${openWorldDiagnostics.staticTasks.summary.failed}`
 									: "pending",
 								"Static",
+							)}
+						</div>
+						<div>
+							<dt>Static commits</dt>
+							<dd>
+								{#if openWorldDiagnostics}
+									applied {openWorldDiagnostics.sceneCommits.applied} pending
+									{openWorldDiagnostics.sceneCommits.pending} artifacts
+									{openWorldDiagnostics.artifacts.inFlight}
+								{:else}
+									pending
+								{/if}
+							</dd>
+							{@render copyOverlay(
+								openWorldDiagnostics
+									? `applied ${openWorldDiagnostics.sceneCommits.applied} pending ${openWorldDiagnostics.sceneCommits.pending} artifacts ${openWorldDiagnostics.artifacts.inFlight}`
+									: "pending",
+								"Static commits",
+							)}
+						</div>
+						<div>
+							<dt>Textures</dt>
+							<dd>
+								{#if openWorldDiagnostics}
+									pages {openWorldDiagnostics.textureResidency.pages
+										.resident}/{openWorldDiagnostics.textureResidency.pages
+										.total} builds
+									{openWorldDiagnostics.textureResidency.pageBuildsInFlight} pending
+									{openWorldDiagnostics.materialReadiness.summary
+										.pendingTextureDependencyCount}
+								{:else}
+									pending
+								{/if}
+							</dd>
+							{@render copyOverlay(
+								openWorldDiagnostics
+									? `pages ${openWorldDiagnostics.textureResidency.pages.resident}/${openWorldDiagnostics.textureResidency.pages.total} builds ${openWorldDiagnostics.textureResidency.pageBuildsInFlight} pending ${openWorldDiagnostics.materialReadiness.summary.pendingTextureDependencyCount}`
+									: "pending",
+								"Textures",
 							)}
 						</div>
 						<div>
@@ -2766,66 +2819,6 @@
 									? `p${runtimeOverview.assets.pendingCount} c${runtimeOverview.assets.committedCount}`
 									: "pending",
 								"Assets",
-							)}
-						</div>
-						<div>
-							<dt>Terrain payload</dt>
-							<dd>
-								{#if runtimeOverview?.static.latestTerrainPayload}
-									lb {runtimeOverview.static.latestTerrainPayload.landblockId
-										.toString(16)
-										.padStart(8, "0")} region
-									{runtimeOverview.static.latestTerrainPayload.regionNumber} mesh
-									{runtimeOverview.static.latestTerrainPayload
-										.vertexCount}v/{runtimeOverview.static.latestTerrainPayload
-										.triangleCount}t tex
-									{runtimeOverview.static.latestTerrainPayload.textureUseCount} missing
-									{runtimeOverview.static.latestTerrainPayload.missingRefCount}
-								{:else}
-									none
-								{/if}
-							</dd>
-							{@render copyOverlay(
-								runtimeOverview?.static.latestTerrainPayload
-									? `lb ${runtimeOverview.static.latestTerrainPayload.landblockId.toString(16).padStart(8, "0")} region ${runtimeOverview.static.latestTerrainPayload.regionNumber} mesh ${runtimeOverview.static.latestTerrainPayload.vertexCount}v/${runtimeOverview.static.latestTerrainPayload.triangleCount}t tex ${runtimeOverview.static.latestTerrainPayload.textureUseCount} missing ${runtimeOverview.static.latestTerrainPayload.missingRefCount}`
-									: "none",
-								"Terrain payload",
-							)}
-						</div>
-						<div>
-							<dt>Env-cell payload</dt>
-							<dd>
-								{#if runtimeOverview?.static.latestEnvCellSystemPayload}
-									lb {runtimeOverview.static.latestEnvCellSystemPayload.landblockId
-										.toString(16)
-										.padStart(8, "0")}
-									cells
-									{runtimeOverview.static.latestEnvCellSystemPayload
-										.envCellCount}
-									accepted
-									{runtimeOverview.static.latestEnvCellSystemPayload
-										.acceptedEnvCellCount} visible
-									{runtimeOverview.static.latestEnvCellSystemPayload
-										.visibleCellCount} portals
-									{runtimeOverview.static.latestEnvCellSystemPayload
-										.portalCount}
-									links
-									{runtimeOverview.static.latestEnvCellSystemPayload
-										.portalLinkCount}
-									seeds
-									{runtimeOverview.static.latestEnvCellSystemPayload
-										.staticObjectPlacementCount} missing
-									{runtimeOverview.static.latestEnvCellSystemPayload
-										.missingRefCount}
-								{:else}
-									none
-								{/if}
-							</dd>
-							{@render copyOverlay(
-								runtimeOverview?.static.latestEnvCellSystemPayload
-									? `lb ${runtimeOverview.static.latestEnvCellSystemPayload.landblockId.toString(16).padStart(8, "0")} cells ${runtimeOverview.static.latestEnvCellSystemPayload.envCellCount} accepted ${runtimeOverview.static.latestEnvCellSystemPayload.acceptedEnvCellCount} visible ${runtimeOverview.static.latestEnvCellSystemPayload.visibleCellCount} portals ${runtimeOverview.static.latestEnvCellSystemPayload.portalCount} links ${runtimeOverview.static.latestEnvCellSystemPayload.portalLinkCount} placements ${runtimeOverview.static.latestEnvCellSystemPayload.staticObjectPlacementCount} missing ${runtimeOverview.static.latestEnvCellSystemPayload.missingRefCount}`
-									: "none",
-								"Env-cell payload",
 							)}
 						</div>
 						<div>

@@ -34,7 +34,6 @@ import type { TextureFilteringMode } from "../../../textures/sampling-policy";
 import type { OpenWorldStreamingBoundaryAdapters } from "../adapters/browser-boundaries";
 import { OpenWorldStreamingController } from "./open-world-streaming-controller";
 import type {
-	OpenWorldStreamingControllerSnapshot,
 	OpenWorldStreamingStaticInterest,
 	OpenWorldStreamingStaticPublicationMode,
 } from "./open-world-streaming-controller";
@@ -281,8 +280,6 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 	createOverviewSnapshot(): RuntimeOverviewSnapshot {
 		const rendererResources = this.#renderer.createResourceSnapshot();
 		const controller = this.#controller.createSnapshot();
-		const staticOverview =
-			createRuntimeStaticOverviewFromController(controller);
 		return {
 			assets: this.#assetService.createOverviewSnapshot(),
 			currentCameraResidency: this.#currentCameraResidency,
@@ -318,7 +315,6 @@ class OpenWorldStreamingClientRuntimeAdapter implements ClientRuntime {
 				renderer: rendererResources,
 			},
 			sceneInterest: this.#sceneInterest,
-			static: staticOverview,
 			staticSceneQuery: controller.staticSceneQueryOverview,
 			status: this.#createStatus(),
 		};
@@ -521,31 +517,5 @@ function createStaticInterestFromRuntimeSceneInterest(
 				: -1,
 		},
 		revision,
-	};
-}
-
-function createRuntimeStaticOverviewFromController(
-	controller: OpenWorldStreamingControllerSnapshot,
-): RuntimeOverviewSnapshot["static"] {
-	return {
-		baking:
-			controller.terrain.baking +
-			controller.outdoorObjects.baking +
-			controller.envCells.baking,
-		committed:
-			controller.terrain.committed +
-			controller.outdoorObjects.committed +
-			controller.envCells.committed,
-		latestEnvCellSystemPayload: controller.envCells.latestEnvCellSystemPayload,
-		latestTerrainPayload: controller.terrain.latestTerrainPayload,
-		requested:
-			controller.terrain.requested +
-			controller.outdoorObjects.requested +
-			controller.envCells.requested,
-		resolving:
-			controller.terrain.resolving +
-			controller.outdoorObjects.resolving +
-			controller.envCells.resolving,
-		revision: 0,
 	};
 }

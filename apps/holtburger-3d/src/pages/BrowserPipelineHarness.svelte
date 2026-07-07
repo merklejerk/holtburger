@@ -427,8 +427,7 @@
 			openWorld.materialReadiness.summary.pendingTextureDependencyCount === 0 &&
 			openWorld.materialReadiness.summary.failedTextureDependencyCount === 0 &&
 			openWorld.staticTasks.summary.requested > 0 &&
-			openWorld.staticTasks.summary.completed >=
-				openWorld.staticTasks.summary.requested &&
+			openWorld.staticTasks.summary.active === 0 &&
 			openWorld.staticTasks.summary.failed === 0
 		);
 	}
@@ -441,7 +440,7 @@
 			? findOpenWorldDiagnostics(diagnostics)
 			: null;
 		if (openWorld) {
-			return `${overview.status} openWorld static ${openWorld.staticTasks.summary.completed}/${openWorld.staticTasks.summary.requested} inFlight=${openWorld.artifacts.inFlight} commitsPending=${openWorld.sceneCommits.pending} pageBuilds=${openWorld.textureResidency.pageBuildsInFlight} pendingTextures=${openWorld.materialReadiness.summary.pendingTextureDependencyCount} runtimeEntities=${openWorld.runtimeEntities.active}`;
+			return `${overview.status} openWorld static requested=${openWorld.staticTasks.summary.requested} activeTasks=${openWorld.staticTasks.summary.active} recentCompleted=${openWorld.staticTasks.summary.completed} inFlight=${openWorld.artifacts.inFlight} commitsPending=${openWorld.sceneCommits.pending} pageBuilds=${openWorld.textureResidency.pageBuildsInFlight} pendingTextures=${openWorld.materialReadiness.summary.pendingTextureDependencyCount} runtimeEntities=${openWorld.runtimeEntities.active}`;
 		}
 		return `${overview.status} openWorld diagnostics unavailable`;
 	}

@@ -2549,18 +2549,29 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Audit `webgl2-renderer.ts` `#warnTerrainLayeredFallback(...)` and its tests after Phase 29 terrain readiness diagnostics.
-- [ ] Audit `visual/object-visual-baker.ts` warning paths and decide whether dynamic/runtime visual consumers need a direct diagnostic before deletion.
-- [ ] Replace unsupported visual material warning text with structured diagnostics when the unsupported recipe is expected to survive into dynamic/runtime visual paths.
-- [ ] Audit `static/env-cells/bake/env-cell-system-baker.ts` warnings for material, geometry, publication, and BVH categories.
-- [ ] Audit `static/env-cells/env-cell-system-resolver.ts` BVH warnings for whether they belong in replacement diagnostics or debug-only tooling.
-- [ ] Keep browser interaction warnings in `BrowserDisplay.svelte` and spawn seed resolver warnings out of this phase unless they preserve materialization/streaming pipeline concepts.
-- [ ] Migrate surviving diagnostics consumers in `client-runtime-adapter.ts`, `BrowserPipelineHarness.svelte`, and `browser-pipeline-harness.mjs` to direct replacement contracts where practical.
-- [ ] Add tests for any new structured diagnostics and delete tests that only preserve warning text.
+- [x] Audit `webgl2-renderer.ts` `#warnTerrainLayeredFallback(...)` and its tests after Phase 29 terrain readiness diagnostics.
+- [x] Audit `visual/object-visual-baker.ts` warning paths and decide whether dynamic/runtime visual consumers need a direct diagnostic before deletion.
+- [x] Replace unsupported visual material warning text with structured diagnostics when the unsupported recipe is expected to survive into dynamic/runtime visual paths.
+- [x] Audit `static/env-cells/bake/env-cell-system-baker.ts` warnings for material, geometry, publication, and BVH categories.
+- [x] Audit `static/env-cells/env-cell-system-resolver.ts` BVH warnings for whether they belong in replacement diagnostics or debug-only tooling.
+- [x] Keep browser interaction warnings in `BrowserDisplay.svelte` and spawn seed resolver warnings out of this phase unless they preserve materialization/streaming pipeline concepts.
+- [x] Migrate surviving diagnostics consumers in `client-runtime-adapter.ts`, `BrowserPipelineHarness.svelte`, and `browser-pipeline-harness.mjs` to direct replacement contracts where practical.
+- [x] Add tests for any new structured diagnostics and delete tests that only preserve warning text.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 33 completed on 2026-07-07.
+- Deleted renderer terrain layered fallback console warnings from `webgl2-renderer.ts`. Terrain fallback reasons are now replacement readiness diagnostics from Phase 29, so renderer hot paths no longer narrate materialization failures.
+- Deleted `hasDeferredTerrainLayeredTextureReadiness(...)` and its tests after removing the renderer warning path. That helper existed only to decide whether to log; keeping it would preserve warning-driven design.
+- Deleted the unsupported object visual material console warning from `object-visual-baker.ts`. Static object unsupported/deferred material facts are already reported through planner coverage and `materialReadiness`; dynamic/runtime unsupported visual material diagnostics remain a Phase 35 fidelity/diagnostics backlog item rather than console text.
+- Deleted the structured-interior missing-dependency publication warning from `env-cell-system-baker.ts`. Outdoor static objects already expose equivalent publication failures through `StaticObjectVisualRecipePublicationDiagnostics`; structured-interior publication diagnostics should get the same direct shape in a later env-cell diagnostics pass instead of a warning side channel.
+- Retained the structured-interior geometry surface omission warning in `env-cell-system-baker.ts` for now. It is geometry/source omission evidence, not material readiness, and it names the current replacement-domain failure mode. Phase 35/34 may promote it to structured diagnostics if it must survive final cutover.
+- Retained `env-cell-system-resolver.ts` BVH and omitted static seed warnings as resolver/source geometry diagnostics. They do not preserve old texture/materialization categories and are not a legacy diagnostic snapshot.
+- Browser interaction warnings in `BrowserDisplay.svelte` and spawn seed resolver warnings were explicitly left out of scope; they do not preserve open-world materialization pipeline concepts.
+- `client-runtime-adapter.ts`, `BrowserPipelineHarness.svelte`, and `browser-pipeline-harness.mjs` did not need Phase 33 changes after warning deletion. Their remaining legacy-shaped overview/harness projections are Phase 34 shim cleanup, not renderer/domain warning cleanup.
+- No new structured diagnostics were added in this phase because the correct replacement readiness records already existed for terrain/static material coverage. Adding new records only to replace warning text would duplicate Phase 27/29 diagnostics.
+- Spicy bit: deleting `hasDeferredTerrainLayeredTextureReadiness(...)` was the tell. Once the warning was gone, the helper had no design job left. Keeping it would have made tests protect a dead diagnostic pathway.
+- Verification: `npm run check`, `npm run lint`, focused `npm run test:ts -- --run src/lib/renderer/webgl2/webgl2-renderer.test.ts src/lib/renderer/webgl2/webgl2-terrain-payloads.test.ts src/lib/visual/object-visual-baker.test.ts src/lib/static/env-cells/bake/env-cell-system-baker.test.ts src/lib/static/env-cells/env-cell-system-resolver.test.ts src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts`.
 
 ### Phase 34: Runtime/Harness Shim And Source-Tree Wipe
 

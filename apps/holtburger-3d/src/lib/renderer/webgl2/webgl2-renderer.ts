@@ -78,7 +78,6 @@ import {
 } from "./webgl2-object-material-payloads";
 import {
 	createTerrainPreparedLayeredPayload,
-	hasDeferredTerrainLayeredTextureReadiness,
 	prepareTerrainLayeredPayload,
 	TERRAIN_LAYERED_MAX_LAYER_ENTRIES,
 	TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER,
@@ -760,7 +759,6 @@ class Webgl2Renderer implements Renderer {
 		[];
 	#lastDynamicDrawCalls = 0;
 	#lastSkippedDynamicSubmissions = 0;
-	readonly #warnedLayeredFallbackDrawUnitIds = new Set<string>();
 	readonly #warnedMissingPortalApertureRangeIds = new Set<string>();
 	readonly #terrainProgram: TerrainGeometryProgram;
 	readonly #staticObjectPrograms: Readonly<
@@ -1288,7 +1286,6 @@ class Webgl2Renderer implements Renderer {
 		this.#recentDynamicResourceCommits.length = 0;
 		this.#lastDynamicDrawCalls = 0;
 		this.#lastSkippedDynamicSubmissions = 0;
-		this.#warnedLayeredFallbackDrawUnitIds.clear();
 		this.#warnedMissingPortalApertureRangeIds.clear();
 		this.#terrainProgram.dispose();
 		for (const program of Object.values(this.#staticObjectPrograms)) {
@@ -1863,17 +1860,6 @@ class Webgl2Renderer implements Renderer {
 					layeredPayload,
 					this.#frameState,
 				);
-			}
-			if (resource.materialFamily === "terrain-layered" && !useLayered) {
-				const deferredTextureReadiness = resource.terrainMaterialPlan
-					? hasDeferredTerrainLayeredTextureReadiness(
-							resource.terrainMaterialPlan,
-							this.#textureBindings,
-						)
-					: false;
-				if (!deferredTextureReadiness) {
-					this.#warnTerrainLayeredFallback(resource);
-				}
 			}
 			this.#stateCache.bindTexture2D(0, useTexture ? texture : null);
 			gl.uniform1i(this.#terrainProgram.uniforms.uTexture, 0);
@@ -3038,7 +3024,6 @@ class Webgl2Renderer implements Renderer {
 			if (terrainResource) {
 				terrainResource.dispose();
 				this.#terrainResources.delete(drawUnitId);
-				this.#warnedLayeredFallbackDrawUnitIds.delete(drawUnitId);
 			}
 			this.#removeStaticObjectResource(drawUnitId);
 			this.#removeStructuredInteriorResource(drawUnitId);
@@ -3207,21 +3192,6 @@ class Webgl2Renderer implements Renderer {
 				crossingId: crossing.crossingId,
 				outdoorLandblockId: crossing.outdoorLandblockId,
 				targetEnvCellId: crossing.targetEnvCellId,
-			},
-		);
-	}
-
-	#warnTerrainLayeredFallback(resource: TerrainGeometryResource): void {
-		if (this.#warnedLayeredFallbackDrawUnitIds.has(resource.drawUnitId)) {
-			return;
-		}
-		this.#warnedLayeredFallbackDrawUnitIds.add(resource.drawUnitId);
-		console.warn(
-			`terrain draw unit ${resource.drawUnitId} rendered with terrain-debug-flat because its layered material could not be fully satisfied.`,
-			{
-				materialFamily: resource.materialFamily,
-				reason:
-					"Missing texture binding/residency, terrain role-page overflow, or a multi-page terrain role binding that the current WebGL2 shader cannot sample yet.",
 			},
 		);
 	}

@@ -3252,20 +3252,169 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Run terrain-only radius-1 benchmark.
-- [ ] Run terrain+generated-scenery radius-1 benchmark.
-- [ ] Run terrain+env-cells radius-1 benchmark.
-- [ ] Run `dc58` all-domain radius-1 benchmark.
-- [ ] Run `da55` all-domain radius-1 benchmark.
-- [ ] Attribute top long tasks from direct diagnostics.
-- [ ] Decide whether any frame-budget phase is justified.
-- [ ] Dry-run Phases 50-51 against the benchmark findings and steer their thresholds, cleanup targets, and verification commands before implementation starts.
+- [x] Run terrain-only radius-1 benchmark.
+- [x] Run terrain+generated-scenery radius-1 benchmark.
+- [x] Run terrain+env-cells radius-1 benchmark.
+- [x] Run `dc58` all-domain radius-1 benchmark.
+- [x] Run `da55` all-domain radius-1 benchmark.
+- [x] Attribute top long tasks from direct diagnostics.
+- [x] Decide whether any frame-budget phase is justified.
+- [x] Dry-run Phases 50-51 against the benchmark findings and steer their thresholds, cleanup targets, and verification commands before implementation starts.
+
+Decisions and course corrections:
+
+- Phase 49 closed the first full rebaseline and changed the harness readiness contract. The previous harness gate was still too narrow: it could call a scene ready after static layer artifacts, scene commits, page builds, and material dependencies were settled while static-authored runtime entity visual prep was still running. That produced dishonest all-domain evidence because static-authored dynamic visuals could still be non-renderable or waiting on texture pages after the benchmark stopped.
+- Added a direct runtime prep terminal count to replacement diagnostics through `runtimeEntities.prep.missingRecipeCount`, and the harness now waits for `prep.started === prep.bakeSuccessCount + prep.failed + prep.missingRecipeCount + prep.skippedVisualCount` before declaring the static scene ready. `bakeFailureCount` remains a failure-class detail and is not counted separately because `failed` is the terminal failure count.
+- Benchmark outputs:
+  - `dc58` terrain-only: `npm run harness:browser -- --landblock 0xdc58ffff --domains terrain --layer-distance 1 --timeout-ms 180000 --output /tmp/holtburger-phase49-dc58-terrain-r1.json`
+  - `dc58` terrain+generated-scenery, strict runtime-prep gate: `npm run harness:browser -- --landblock 0xdc58ffff --domains terrain,generated-scenery --layer-distance 1 --timeout-ms 180000 --output /tmp/holtburger-phase49-dc58-terrain-generated-r1-terminal.json`
+  - `dc58` terrain+env-cells: `npm run harness:browser -- --landblock 0xdc58ffff --domains terrain,env-cells --layer-distance 1 --timeout-ms 180000 --output /tmp/holtburger-phase49-dc58-terrain-env-cells-r1.json`
+  - `dc58` all-domain, strict runtime-prep gate: `npm run harness:browser -- --landblock 0xdc58ffff --layer-distance 1 --timeout-ms 180000 --output /tmp/holtburger-phase49-dc58-all-domain-r1-terminal.json`
+  - `da55` all-domain, strict runtime-prep gate: `npm run harness:browser -- --landblock 0xda55ffff --layer-distance 1 --timeout-ms 180000 --output /tmp/holtburger-phase49-da55-all-domain-r1-terminal.json`
+- Terrain-only now settles in 2.8s static-ready time, has one 56ms long task before the static request, no readiness issues, 31 resident pages, and max renderer frame delta 48.4ms. Terrain no longer reproduces the original texture mutation blackout.
+- Terrain+env-cells settles in 6.0s static-ready time, has three long tasks totaling 236ms, max frame delta 116.9ms, no material readiness issues, 39 resident pages, and static apply max 11.2ms. The largest static task stages are projected source resolution and worker bake wait. This does not justify a main-loop budget phase by itself.
+- Terrain+generated-scenery under the stricter gate settles in 73.3s static-ready time, has 889 long tasks totaling 60.2s, 162 static-authored runtime entities, 162 runtime prep successes, 228 resident pages, and no material readiness issues. Static layer artifacts themselves complete in 12.0s total task duration with max static apply 12.3ms. The long tail is not the replaced static artifact path; it is static-authored dynamic visual preparation and repeated runtime renderer/resource commits.
+- `dc58` all-domain under the stricter gate settles in 94.9s static-ready time, has 873 long tasks totaling 76.1s, 162 static-authored runtime entities, 162 runtime prep successes, 250 resident pages, no material readiness issues, static task total apply 109.0ms, and max static apply 22.5ms. Top static stages are worker-side or projected work (`outdoor-terrain` source resolution and `outdoor-generated-scenery` bake/worker wait), while the browser long-task count tracks the runtime dynamic tail after static artifacts are already mostly done.
+- `da55` all-domain under the stricter gate settles in 23.7s static-ready time, has 50 long tasks totaling 4.8s, 44 static-authored runtime entities, 44 runtime prep successes, 155 resident pages, no material readiness issues, static task total apply 108.7ms, and max static apply 38.6ms. Dense env-cell uploads are larger than `dc58`, but the long-tail shape is still proportional to static-authored dynamic count and generated-scenery texture page work.
+- No new frame-budget phase is justified yet. Static apply and renderer upload are below the old blackout profile, and the remaining browser pain comes from an architecture gap: static-authored dynamic visuals still use a runtime prep path that resolves recipes, reserves placements, creates source geometry, schedules page builds, and commits full renderer state per prepared entity. Budget knobs would hide that gap instead of moving the code toward the worksheet model.
+- Resteer: insert Phase 50 and Phase 51 before reclamation. Phase 50 closes the static-authored dynamic visual path so it is composed, scheduled, and committed like a replacement static materialization domain. Phase 51 closes the remaining dynamic texture/page work so source preparation, packing/page materialization, and renderer commits obey the worksheet's worker-owned/direct-contract split. Reclamation moves later because byte accounting is still missing and the benchmark shows zero ownerless pages during single-landblock steady state.
+
+### Phase 50: Static-Authored Dynamic Materialization Closure
+
+North-star check:
+
+- The [worksheet replacement model](./holtburger-3d-open-world-streaming-stutter-investigation-worksheet.md) remains authoritative: static-authored dynamic objects are not a side quest. They are authored by static landblock data and must be materialized through the composed open-world pipeline with direct readiness facts, worker-owned expensive work, and bounded renderer commits.
+
+Owning authority:
+
+- Static-authored dynamic placement ingestion, runtime entity prep scheduling, dynamic visual recipe resolution, dynamic renderer resource/instance commits, and static-scene readiness diagnostics.
+
+Current code delta:
+
+- `OpenWorldRuntimeEntitySystem.#prepareEntity(...)` currently handles static-authored dynamic placements one entity at a time. It resolves the recipe, applies it to `DynamicEntityController`, reserves object visual texture placements, creates dynamic bake source geometry, awaits dynamic baking, schedules texture page builds, applies the baked visual, and calls `#commitRendererState(...)` for each entity.
+- The replacement static artifact path now settles honestly, but static-authored dynamic prep can continue for tens of seconds after static layer commits. In the Phase 49 `dc58` all-domain run, 45 static tasks finished with no material readiness issues, but 162 static-authored dynamic entities stretched readiness to 94.9s and produced 873 browser long tasks.
+- Renderer commits are too coarse for this path. Phase 49 observed `dynamicInstanceCommitCount: 1504`, `dynamicResourceCommitCount: 234`, `maxInstancesPerCommit: 162`, and `maxResourcesPerCommit: 162` for 162 static-authored entities, which means the runtime path repeatedly republishes broad dynamic state instead of emitting bounded materialization commits.
+
+Deliverables:
+
+- Introduce a static-authored dynamic materialization scheduler owned by open-world streaming composition, not by legacy static layer code and not by diagnostics.
+- Split static-authored dynamic prep into batchable units with direct terminal states: `queued`, `resolvingRecipe`, `reservingTextures`, `baking`, `waitingForTexturePages`, `ready`, `skipped`, `failed`, and `stale`.
+- Coalesce dynamic renderer resource and instance commits for static-authored batches. A single entity finishing must not republish the full static-authored dynamic world unless the renderer contract explicitly requires a full snapshot and the phase records why.
+- Keep runtime-authored dynamic entities supported, but do not let runtime-authored policy dictate static-authored batch materialization. Shared helpers are fine; shared lifecycle semantics are not.
+- Publish readiness from the scheduler's direct terminal counts. The harness should not infer static-authored dynamic readiness from renderer counters, material issues, or legacy-style non-renderable counts.
+- Add direct diagnostics for static-authored dynamic prep latency, terminal state counts, renderer commit batch sizes, and stale cancellation.
+
+Acceptance criteria:
+
+- The `dc58` all-domain harness no longer waits on hundreds of per-entity runtime renderer commits after static tasks settle.
+- `runtimeEntities.prep.started` equals terminal prep counts at readiness, and `runtimeEntities.nonRenderable` does not mask work still in flight.
+- Static-authored dynamic renderer commit counts are proportional to batches or changed resources, not to full-scene republishing after every entity.
+- Destroying or evicting a static parent cancels or stales child prep without publishing removed or stale visuals.
+- Runtime-authored dynamic entity behavior still passes focused tests.
+- No production code introduces references to the retired static coordinator, texture manager mutation model, or legacy diagnostic categories.
+
+Task checklist:
+
+- [ ] Map the current `ingestStaticAuthoredPlacements(...)`, `#prepareEntity(...)`, `#commitRendererResources(...)`, and `#commitRendererInstances(...)` call graph against the worksheet's commit-ordering model before editing.
+- [ ] Add explicit static-authored dynamic prep records and terminal states in the open-world streaming runtime-entity system or a colocated static-authored dynamic submodule.
+- [ ] Replace per-entity full renderer publication with coalesced resource and instance commits for static-authored batches.
+- [ ] Add stale-token handling that records terminal `stale` instead of leaving readiness to infer dropped work.
+- [ ] Update diagnostics contracts and harness readiness to consume direct static-authored dynamic terminal counts.
+- [ ] Add focused tests for batch commit sizes, parent eviction cancellation, stale prep, runtime-authored parity, and readiness terminal accounting.
+- [ ] Rerun `dc58` terrain+generated-scenery and `dc58` all-domain radius-1 harnesses and record output paths.
+- [ ] Dry-run Phases 51-54 after implementation and steer their thresholds, cleanup targets, and verification commands before implementation starts.
 
 Decisions and course corrections:
 
 - Pending.
 
-### Phase 50: Measured Texture Reclamation And Removal Commits
+### Phase 51: Dynamic Visual Texture Work Closure
+
+North-star check:
+
+- The [worksheet texture split](./holtburger-3d-open-world-streaming-stutter-investigation-worksheet.md) remains authoritative: placement reservation and owner/currentness are replacement main-loop facts; source preparation, layout search, packing, guttered blits, and page materialization are worker-owned transforms; readiness diagnostics report direct state.
+
+Owning authority:
+
+- Dynamic visual texture planning, object visual atlas placement, dynamic bake source geometry, page build tasks, texture commit creation, renderer apply, and diagnostics.
+
+Current code delta:
+
+- Static layer material coverage now uses the replacement material placement primitive, but static-authored dynamic visuals still enter texture work through `OpenWorldRuntimeEntitySystem.#prepareEntity(...)`.
+- `#prepareEntity(...)` calls `reserveObjectVisualTexturePlacements(...)` and `createDynamicVisualBakeSourceGeometry(...)` before dynamic baking, then schedules page builds afterward. That keeps expensive source preparation and layout-adjacent work close to runtime prep instead of making it a first-class worker-owned materialization transform.
+- Phase 49 page-build diagnostics show dynamic/static-authored object pages with repeated `texture-page-source-preparation` stages around 80-104ms for `dc58`, and `da55` generated-scenery page materialization/source-prep stages up to roughly 130-143ms. These page tasks are no longer hidden, but the dynamic visual path still does not share the same direct scheduling and readiness model as static material coverage.
+
+Deliverables:
+
+- Move dynamic visual source-geometry preparation into a worker-owned or worker-compatible transform. If an existing dynamic baker already owns the right worker boundary, migrate the pre-bake source prep into its request payload builder rather than adding another main-thread stage.
+- Ensure object visual texture source preparation, layout search, packing, guttered blits, and page materialization are scheduled through direct texture/page task contracts, not hidden inside runtime entity prep.
+- Canonicalize dynamic visual texture placement results so static-authored dynamic readiness can wait on `textureReservation`, `pageBuild`, and `rendererTextureCommit` terminal facts.
+- Add direct diagnostics that separate dynamic visual recipe resolution, texture placement reservation, source geometry preparation, dynamic bake worker wait, page source preparation, page materialization, and renderer apply.
+- Remove or collapse any helper that only exists to preserve the old split between static material coverage and dynamic visual materialization.
+
+Acceptance criteria:
+
+- Static-authored dynamic visual prep no longer performs source-geometry preparation, packing/page materialization, or renderer texture mutation as untracked runtime prep work.
+- Page-build readiness can explain every pending dynamic visual texture dependency without legacy material lifecycle terms.
+- `dc58` terrain+generated-scenery and all-domain harnesses show no long task train proportional to static-authored dynamic page count.
+- Focused dynamic visual, texture residency, page-build, renderer binding, and controller tests pass.
+- No production shim preserves old texture-manager or legacy diagnostics vocabulary.
+
+Task checklist:
+
+- [ ] Map dynamic visual texture preparation against the static material placement worker split and delete duplicate or weaker helper paths where possible.
+- [ ] Move dynamic source-geometry preparation behind the chosen worker-owned transform boundary.
+- [ ] Ensure texture placement reservation returns direct terminal facts for dynamic visual owners.
+- [ ] Ensure dynamic page build scheduling reports page source preparation, materialization, upload readiness, and stale cancellation directly.
+- [ ] Update diagnostics contracts, harness readiness, and status text without fitting the data to legacy diagnostic outputs.
+- [ ] Add focused tests for dynamic texture terminal states, stale page builds, texture dependency readiness, and renderer binding safety.
+- [ ] Rerun `dc58` terrain+generated-scenery, `dc58` all-domain, and `da55` all-domain radius-1 harnesses and record output paths.
+- [ ] Dry-run Phases 52-54 after implementation and steer their thresholds, cleanup targets, and verification commands before implementation starts.
+
+Decisions and course corrections:
+
+- Pending.
+
+### Phase 52: Performance Steering Rebaseline After Dynamic Closure
+
+North-star check:
+
+- Benchmarks steer architecture only after direct contracts are honest. Do not add budgets for worker slowness, and do not let diagnostics invent compatibility shapes for code that should be deleted.
+
+Owning authority:
+
+- Browser harness, direct diagnostics, benchmark evidence, and remaining phase steering.
+
+Deliverables:
+
+- Re-run the Phase 49 matrix after Phases 50-51.
+- Compare static artifact completion time, strict scene readiness time, long task counts, renderer frame deltas, runtime prep terminal counts, page-build timings, and material readiness summaries.
+- Decide whether any measured browser-main-loop stage still needs a budget/yield after dynamic closure.
+- Decide whether reclamation should remain deferred or become active based on byte accounting and ownerless-page evidence.
+- Update Phases 53-54 from evidence.
+
+Acceptance criteria:
+
+- Benchmark evidence can distinguish worker wall time from browser-main-loop blocking.
+- If a frame budget is added, it names the stage, owner, threshold, and proof that deletion/off-thread movement was not enough.
+- If reclamation stays deferred, the plan records the exact missing evidence and threshold needed to activate it later.
+
+Task checklist:
+
+- [ ] Re-run `dc58` terrain-only radius-1 benchmark.
+- [ ] Re-run `dc58` terrain+generated-scenery radius-1 benchmark.
+- [ ] Re-run `dc58` terrain+env-cells radius-1 benchmark.
+- [ ] Re-run `dc58` all-domain radius-1 benchmark.
+- [ ] Re-run `da55` all-domain radius-1 benchmark.
+- [ ] Attribute top long tasks from direct diagnostics and harness frame data.
+- [ ] Decide whether any budget/yield phase is justified.
+- [ ] Dry-run Phases 53-54 against the benchmark findings and steer thresholds, cleanup targets, and verification commands before implementation starts.
+
+Decisions and course corrections:
+
+- Pending.
+
+### Phase 53: Measured Texture Reclamation And Removal Commits
 
 North-star check:
 
@@ -3275,9 +3424,14 @@ Owning authority:
 
 - Texture residency policy, committed page map, texture commit creation, renderer apply, and diagnostics.
 
+Current code delta:
+
+- Phase 48 intentionally made ownerless resident pages cached-for-reuse and deferred renderer removal until measurement. Phase 49 single-landblock runs reported zero ownerless pages, so active removal is still not justified from steady-state single-load evidence.
+- Texture residency diagnostics currently expose `byteEstimate.approximateBytes: null` with reason `page-size-not-yet-canonical`. That makes memory-pressure decisions non-actionable. A removal scheduler without byte accounting would be policy theater.
+
 Deliverables:
 
-- Use Phase 49 evidence to decide whether ownerless renderer-resident pages need active reclamation now. If not, record the measured threshold that would trigger the scheduler later.
+- Use Phase 52 evidence to decide whether ownerless renderer-resident pages need active reclamation now. If not, record the measured threshold that would trigger the scheduler later.
 - Canonicalize enough page byte accounting to make memory pressure decisions meaningful. If exact GPU bytes remain unavailable, define the approximation and its known blind spots in code and diagnostics.
 - Add a direct reclamation policy surface that selects ownerless resident pages only when pressure exceeds the chosen threshold.
 - Emit texture commits with `pageRemovals` for selected pages and apply them through the existing `removedTextureRefIds` renderer path.
@@ -3295,20 +3449,20 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Dry-run the Phase 49 benchmark outputs and choose `defer`, `warn`, or `remove` policy with an explicit byte threshold.
+- [ ] Dry-run the Phase 52 benchmark outputs and choose `defer`, `warn`, or `remove` policy with an explicit byte threshold.
 - [ ] Add canonical page byte accounting or a named approximation in texture residency diagnostics.
 - [ ] Add reclaim scheduling API to the texture residency authority, not to owner release.
 - [ ] Emit `pageRemovals` from the texture commit stream when policy selects pages.
 - [ ] Update renderer binding tests for removed page refs and claimed binding safety.
 - [ ] Update harness diagnostics to expose removal counts without recreating legacy texture-manager counters.
 - [ ] Run focused texture residency/commit/renderer/controller tests and an eviction/replacement browser harness scenario.
-- [ ] Dry-run Phase 51 after implementation and steer final deletion targets.
+- [ ] Dry-run Phase 54 after implementation and steer final deletion targets.
 
 Decisions and course corrections:
 
 - Pending.
 
-### Phase 51: Final Vestigial Wipe And Plan Closeout
+### Phase 54: Final Vestigial Wipe And Plan Closeout
 
 North-star check:
 
@@ -3320,7 +3474,7 @@ Owning authority:
 
 Deliverables:
 
-- Delete old static coordinator, texture manager mutation, legacy diagnostic snapshot, legacy materialization lifecycle, or ignored placement-policy references that are no longer needed after Phases 44-50.
+- Delete old static coordinator, texture manager mutation, legacy diagnostic snapshot, legacy materialization lifecycle, or ignored placement-policy references that are no longer needed after Phases 44-53.
 - Delete or rewrite tests that preserve legacy bucket lifetimes, old commit ordering, shim-only diagnostics, or broad coverage parity.
 - Verify direct builders are test-only or worker-internal.
 - Update this plan and the worksheet handoff with final evidence and intentionally deferred work.

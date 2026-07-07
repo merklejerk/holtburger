@@ -1,7 +1,7 @@
 # Holtburger 3D Open World Streaming Materialization Remodel Plan
 
 Date: 2026-07-06
-Status: draft.
+Status: executed.
 
 ## Context And Boundaries
 
@@ -1864,6 +1864,41 @@ Decisions and course corrections:
 - Verification: `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and full `npm run test:ts` passed.
 - Verification: `npm run harness:browser -- --domains terrain --layer-distance 0 --output /tmp/holtburger-phase16-terrain-r0.json` passed with one ready artifact, one applied scene commit, zero pending scene commits, no compatibility shims, runtime diagnostics limited to status/scene interest/filtering, max long task about 59 ms, and max renderer frame delta about 44 ms.
 - Verification: `npm run harness:browser -- --layer-distance 1 --output /tmp/holtburger-phase16-all-domain-r1.json` passed with 45 ready artifacts, 45 applied scene commits, zero pending scene commits, 121 resident texture pages, 44 static-authored runtime entities, no compatibility shims, max long task about 183 ms, and request readiness about 19.5 s.
+
+### Phase 17: Final DoD Audit And Historical Handoff
+
+Deliverables:
+
+- Run the original `dc58`, radius 1, all-domain worksheet benchmark against the replacement-only runtime.
+- Re-run final app verification after the Phase 16 hard cutover commit.
+- Mark the stutter investigation worksheet as historical evidence.
+- Mark this plan as executed if the DoD is satisfied, or record any remaining gap explicitly.
+
+Acceptance criteria:
+
+- `dc58`, radius 1, all domains settles without compatibility shims and stays within the recovered frame profile.
+- `da55`, radius 1, all domains remains covered by Phase 16 evidence.
+- `npm run check`, `npm run lint`, and `npm run test:ts` pass after the hard cutover commit.
+- The worksheet status no longer implies that the old pipeline investigation is active.
+- The plan records final benchmark evidence and any remaining renderer or diagnostics naming debt.
+
+Task checklist:
+
+- [x] Run `npm run harness:browser -- --timeout-ms 180000 --landblock 0xdc58ffff --layer-distance 1 --output /tmp/holtburger-phase17-dc58-r1.json`.
+- [x] Extract and record direct replacement diagnostics from the `dc58` benchmark.
+- [x] Re-run final verification commands after the hard cutover commit.
+- [x] Update the worksheet status to historical/superseded.
+- [x] Update this plan status based on DoD evidence.
+- [x] Commit Phase 17.
+
+Decisions and course corrections:
+
+- Final `dc58` worksheet benchmark evidence: `npm run harness:browser -- --timeout-ms 180000 --landblock 0xdc58ffff --layer-distance 1 --output /tmp/holtburger-phase17-dc58-r1.json` passed on the replacement-only runtime with `runtimePipeline: "open-world-streaming"`, zero compatibility shims, 45 ready artifacts, 45 applied scene commits, zero pending scene commits, 119 resident texture pages, 162 static-authored runtime entities, and request readiness about 16.2 s.
+- Final `dc58` frame evidence: max long task was about 151 ms across 6 long tasks, max renderer frame delta was about 127.5 ms, and max runtime tick handler time was about 2.8 ms. This satisfies the materially reduced stutter target from the worksheet without adding any broad worker-wall-time budget API.
+- `da55`, radius 1, all-domain coverage remains the Phase 16 benchmark: 45 ready artifacts, 45 applied scene commits, zero pending scene commits, 121 resident texture pages, no compatibility shims, max long task about 183 ms, and request readiness about 19.5 s.
+- Final verification after Phase 16 hard cutover commit and Phase 17 documentation changes: `npm run check`, `npm run lint`, and full `npm run test:ts` passed from `apps/holtburger-3d`.
+- The stutter investigation worksheet is now marked as historical evidence and points at this plan as the implementation record.
+- Remaining debt: renderer internals still use the `legacy-render-pass` name for the current single-surface render mode. This is no longer exposed through runtime diagnostics and is not a materialization shim, but a future renderer terminology cleanup may reduce confusion.
 
 ## Risks And Mitigations
 

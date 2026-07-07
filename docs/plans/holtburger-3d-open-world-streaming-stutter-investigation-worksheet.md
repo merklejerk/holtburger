@@ -1,13 +1,15 @@
 # Holtburger 3D Open World Streaming Stutter Investigation Worksheet
 
 Date: 2026-07-04
-Status: active investigation.
+Status: historical evidence, superseded by `holtburger-3d-open-world-streaming-materialization-remodel-plan.md`.
 
 ## Purpose
 
 Identify why `apps/holtburger-3d` scene loading is sluggish and why loading stalls the browser main render thread. The target benchmark is the browser pipeline harness anchored at outdoor landblock `0xdc58ffff`, with terrain, buildings, explicit objects, generated scenery, and env-cell layer distances all set to `1`.
 
 This worksheet is diagnostic only. No renderer or streaming fix should be made until the expensive paths are measured and attributed.
+
+Final handoff: the replacement open-world streaming materialization plan used this worksheet as the baseline evidence and now owns the implementation record. Keep this worksheet for the original problem statement, benchmark contract, and investigation history.
 
 ## User Concern
 

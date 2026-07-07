@@ -21,6 +21,7 @@ import type {
 	StaticLayerTaskRequest,
 	StaticMaterialCoverageReport,
 	StaticObjectBakeDiagnostics,
+	TerrainGeometryStaticDrawUnit,
 	TerrainStaticScopePayloadSummary,
 } from "../../../static/contracts";
 import { MaterializationOwnerRegistry } from "../owners/owner-registry";
@@ -702,6 +703,10 @@ export class OpenWorldStreamingController {
 					materialCoverage: commit.payload.materialCoverage,
 					request,
 				});
+				this.#recordTerrainMaterialIssues({
+					drawUnits: commit.payload.drawUnits,
+					request,
+				});
 				this.#recordApplyTiming({
 					apply: () =>
 						this.#applyTerrainCommit(commit, interest.anchorLandblockId),
@@ -887,6 +892,21 @@ export class OpenWorldStreamingController {
 	}): void {
 		const issues = createStaticObjectBakeIssues({
 			diagnostics: input.diagnostics,
+			ownerId: input.request.owner.id,
+			taskId: input.request.task.taskId,
+		});
+		if (issues.length === 0) {
+			return;
+		}
+		this.#recordMaterialReadinessIssues(issues);
+	}
+
+	#recordTerrainMaterialIssues(input: {
+		readonly drawUnits: readonly TerrainGeometryStaticDrawUnit[];
+		readonly request: StaticLayerRunRequest;
+	}): void {
+		const issues = createTerrainMaterialIssues({
+			drawUnits: input.drawUnits,
 			ownerId: input.request.owner.id,
 			taskId: input.request.task.taskId,
 		});
@@ -1866,6 +1886,10 @@ function createMaterialReadinessDiagnostics(input: {
 				recentIssues,
 				"skipped-static-object-partition",
 			),
+			terrainMaterialIssueCount: countMaterialReadinessIssues(
+				recentIssues,
+				"terrain-material-issue",
+			),
 			unsupportedMaterialIssueCount: countMaterialReadinessIssues(
 				recentIssues,
 				"unsupported-material",
@@ -1956,6 +1980,27 @@ function createStaticObjectBakeIssues(input: {
 			},
 		];
 	});
+}
+
+function createTerrainMaterialIssues(input: {
+	readonly drawUnits: readonly TerrainGeometryStaticDrawUnit[];
+	readonly ownerId: MaterializationOwnerId;
+	readonly taskId: string;
+}): readonly OpenWorldStreamingMaterialReadinessIssue[] {
+	return input.drawUnits.flatMap((drawUnit) =>
+		drawUnit.terrainFallbackReasons.map((reason) => ({
+			code: reason.code,
+			drawUnitId: drawUnit.drawUnitId,
+			kind: "terrain-material-issue",
+			landblockId: drawUnit.landblockId,
+			materialFamily: drawUnit.materialFamily,
+			message: reason.message,
+			ownerId: input.ownerId,
+			pcode: reason.pcode,
+			taskId: input.taskId,
+			textureId: reason.texture?.surfaceTextureId ?? null,
+		})),
+	);
 }
 
 function createEmptyRuntimeEntityDiagnosticsSnapshot(): OpenWorldRuntimeEntityDiagnosticsSnapshot {

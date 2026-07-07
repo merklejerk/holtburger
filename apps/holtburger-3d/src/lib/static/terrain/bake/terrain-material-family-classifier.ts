@@ -152,16 +152,6 @@ function findUnsupportedBindingReason(
 			if (missingReason) {
 				return missingReason;
 			}
-			if (
-				binding.wrap === "clamp" &&
-				binding.role !== "terrain-alpha" &&
-				binding.role !== "road-alpha"
-			) {
-				return createUnsupportedBindingReason(
-					"Terrain material family only supports clamped sampling for alpha masks.",
-					entry,
-				);
-			}
 		}
 	}
 

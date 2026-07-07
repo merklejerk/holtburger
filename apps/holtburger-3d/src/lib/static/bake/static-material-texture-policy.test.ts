@@ -9,7 +9,10 @@ import {
 	createTextureOwnerId,
 	createTexturePageClass,
 } from "../../textures/identity";
-import { createStaticTexturePlacementIntent } from "../../textures/placement";
+import {
+	createStaticDomainTexturePlacementPolicy,
+	createStaticTexturePlacementIntent,
+} from "../../textures/placement";
 import {
 	createStaticMaterialTextureBindingId,
 	createStaticMaterialTextureBindingRequirement,
@@ -100,6 +103,7 @@ describe("static material texture policy", () => {
 				purpose: requirement.purpose,
 				sampleClass: "rgba-color",
 			}),
+			placementPolicy: createStaticDomainTexturePlacementPolicy(),
 			textureKey: createTextureKey({
 				outputFormat: "rgba8",
 				sampleClass: "rgba-color",
@@ -120,6 +124,9 @@ describe("static material texture policy", () => {
 			sourceKey: "prepared-render-surface-texture-use:06000010:rgba-color",
 		});
 		expect(placementIntent.itemId).toBe(textureUse.bindingId);
+		expect(placementIntent.placementPolicy).toEqual(
+			createStaticDomainTexturePlacementPolicy(),
+		);
 		expect({
 			itemIds: [placementIntent.itemId],
 			purpose: requirement.purpose,

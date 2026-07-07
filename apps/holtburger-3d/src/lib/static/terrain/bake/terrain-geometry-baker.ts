@@ -27,6 +27,7 @@ import {
 } from "./terrain-material-family-classifier";
 import { buildTerrainMaterialLayerPlan } from "./terrain-material-layer-planner";
 import {
+	createStaticDomainTexturePlacementPolicy,
 	createStaticTexturePlacementIntent,
 	isObjectVisualTexturePlacementSnapshot,
 } from "../../../textures/placement";
@@ -151,6 +152,7 @@ export async function createTerrainTexturePlacementIntents(options: {
 						bindingId: requirement.bindingId,
 						ownerIds: [],
 						pageClass: identity.pageClass,
+						placementPolicy: createStaticDomainTexturePlacementPolicy(),
 						textureKey: identity.textureKey,
 					},
 				),

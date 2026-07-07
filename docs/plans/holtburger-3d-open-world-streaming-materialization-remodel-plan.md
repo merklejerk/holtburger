@@ -2386,22 +2386,31 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Trace terrain texture intents from the terrain static layer through reservation, page build, texture commit, scene commit, and `prepareTerrainLayeredPayload(...)`.
-- [ ] Audit terrain role page grouping and renderer page-role capacity against object material bucket/purpose grouping.
-- [ ] Add terrain role readiness diagnostics using Phase 27 records.
-- [ ] Fix the smallest shared-contract gap that explains flat-color terrain.
-- [ ] Delete any terrain-only workaround made obsolete by the shared fix.
-- [ ] Run terrain-focused and all-domain browser harness cases.
+- [x] Trace terrain texture intents from the terrain static layer through reservation, page build, texture commit, scene commit, and `prepareTerrainLayeredPayload(...)`.
+- [x] Audit terrain role page grouping and renderer page-role capacity against object material bucket/purpose grouping.
+- [x] Add terrain role readiness diagnostics using Phase 27 records.
+- [x] Fix the smallest shared-contract gap that explains flat-color terrain.
+- [x] Delete any terrain-only workaround made obsolete by the shared fix.
+- [x] Run terrain-focused and all-domain browser harness cases.
 
 Decisions and course corrections:
 
-- Pending.
+- Phase 29 completed on 2026-07-07.
+- Terrain intent trace: `terrain-geometry-baker.ts` emits static texture placement intents for `terrain-color`, `terrain-detail`, and `terrain-mask` purposes; the open-world controller retains those claims through `OpenWorldTextureClaimRegistry`; page build tasks emit replacement texture commits; terrain scene commits can apply independently; `webgl2-terrain-payloads.ts` and `webgl2-renderer.ts` bind the resulting page resources for layered terrain draw units.
+- Terrain role buckets are not a separate materialization pipeline. They are replacement texture buckets with `domain=outdoor-terrain`, `scope=static-domain`, and purpose-specific roles. This differs from regular static objects only in renderer material semantics: object visuals can have color/detail/index/palette purposes per material family, while terrain has role-specific layered samplers for color/detail/mask. Both use the same replacement placement/claim/page-build/commit machinery.
+- Removed the terrain-only rejection that forced any clamped non-alpha terrain binding into `terrain-debug-flat`. The worksheet model treats wrap mode as material/shader sampling policy, not page-placement compatibility.
+- Removed the remaining implicit static placement-policy default from `createStaticTexturePlacementIntent(...)`. Terrain now passes `createStaticDomainTexturePlacementPolicy()` explicitly, matching the Phase 28 object/structured-interior correction and preventing new static callers from inheriting a silent bucket policy.
+- Added replacement-native `terrain-material-issue` readiness diagnostics from draw-unit fallback reasons. Terrain fidelity failures are now visible through material readiness with draw-unit, owner, task, pcode, texture id, material family, and reason code instead of relying on renderer warning text.
+- The renderer warning for `terrain-debug-flat` still exists as a renderer-side smoke alarm for unsupported layered terrain resources. It is no longer the primary diagnostics contract. Phase 33 owns deciding whether that warning becomes structured renderer diagnostics or is deleted after all terrain fallback cases are covered upstream.
+- Harness evidence: terrain-only `npm run harness:browser -- --domains terrain --layer-distance 0 --timeout-ms 60000 --output /tmp/holtburger-phase29-terrain.json` passed with 3 terrain draw units, renderer `error: null`, and no frame gaps over 50 ms or 100 ms, but its final readiness sample was captured before all texture page builds settled. That run proves loose ordering tolerance, not final texture residency.
+- Harness evidence: all-domain `npm run harness:browser -- --domains terrain,generated-scenery,explicit-objects,env-cells --layer-distance 0 --timeout-ms 60000 --output /tmp/holtburger-phase29-all-domain-r0.json` passed with 4 ready artifacts, 4 applied scene commits, 11 resident texture pages, 11 committed page builds, 3 terrain draw units, 26,989 rendered triangles, zero failed texture dependencies, zero pending texture dependencies, zero terrain material issues, and two structured-interior deferred-material issues.
+- Verification: `npm run check`, focused `npm run test:ts -- --run src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts src/lib/static/terrain/bake/terrain-material-family-classifier.test.ts src/lib/static/terrain/bake/terrain-geometry-baker.test.ts src/lib/renderer/webgl2/webgl2-terrain-payloads.test.ts src/lib/textures/placement.test.ts src/lib/static/bake/static-material-texture-policy.test.ts`, and the browser harness runs noted above.
 
 ### Phase 30: Resteering Checkpoint 6 - Readiness/Diagnostics Review
 
 Deliverables:
 
-- Dry-run Phases 31-33 against the current code after direct readiness, renderer late binding, diagnostics, static object reconciliation, and terrain role work.
+- Dry-run Phases 31-36 against the current code after direct readiness, renderer late binding, diagnostics, static object reconciliation, and terrain role work.
 - Recheck every touched contract against the worksheet north star before worker-boundary cleanup begins.
 - Classify every touched consumer as direct migration, deletion, legacy-edge shim, or durable adapter.
 - Decide whether any remaining material/fidelity issue blocks cleanup or should be explicitly deferred as renderer backlog.
@@ -2415,80 +2424,171 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Dry-run worker-boundary cleanup, source-tree cleanup, and final verification from the current code tree.
-- [ ] Audit direct builder production usage, ignored placement fields, diagnostic compatibility projections, old runtime/harness shims, and remaining env-cell/visual console diagnostics.
+- [ ] Dry-run worker-boundary cleanup, placement/readiness cleanup, diagnostics cleanup, source-tree cleanup, and final verification from the current code tree.
+- [ ] Audit direct builder production usage in `material-texture-placement-plan.ts`, `object-visual-texture-placement-plan.ts`, `direct-page-builder.ts`, `page-build.worker.ts`, `object-visual-atlas-builder.ts`, and `object-visual-atlas.worker.ts`.
+- [ ] Audit placement and readiness contract drift in `placement.ts`, `material-texture-placement-policy.ts`, terrain/object/static tests, and `open-world-streaming-controller.ts`.
+- [ ] Audit diagnostic compatibility projections in `client-runtime-adapter.ts`, `browser-pipeline-harness.mjs`, renderer fallback warnings, visual baker warnings, and env-cell warnings.
 - [ ] Audit tests for legacy bucket/readiness/diagnostic parity assumptions.
-- [ ] Update Phases 31-33 with concrete file/symbol targets.
+- [ ] Update Phases 31-36 with any ordering changes discovered by the dry run.
 - [ ] Record explicitly deferred material fidelity work with evidence and reactivation criteria.
 
 Decisions and course corrections:
 
 - Pending.
 
-### Phase 31: Worker Boundary And Synchronous Artifact Cleanup
+### Phase 31: Worker Boundary And Production Page-Build Cutover
 
 Deliverables:
 
-- Prove production browser material pages use worker-owned source preparation, layout/search where applicable, packing, guttered blits, and page materialization, or document a measured exception.
-- Delete or isolate synchronous direct material page build entrypoints that can accidentally re-enter production materialization.
+- Split placement reservation from page pixel construction in `texture-residency/placement/material-texture-placement-plan.ts`.
+- Split object-visual atlas planning from page pixel construction in `texture-residency/placement/object-visual-texture-placement-plan.ts`.
+- Route production material page construction through `WorkerPoolOpenWorldTexturePageBuilder` and `object-visual-atlas.worker.ts`/page-build worker handlers instead of direct builders.
 - Keep direct builders test-only or worker-internal, with names/import paths that make that status obvious.
-- Remove old direct texture commit paths that duplicate the Phase 23 task stream.
+- Remove or rename APIs that imply `buildReservedMaterialTexturePages(...)` is production-safe from the browser main loop.
 
 Acceptance criteria:
 
 - No production static or runtime materialization path calls `buildReservedMaterialTexturePages(...)`.
-- `DirectOpenWorldTexturePageBuilder` and `DirectOpenWorldObjectVisualAtlasBuilder` are used only by tests or worker handlers.
+- `DirectOpenWorldTexturePageBuilder` and `DirectOpenWorldObjectVisualAtlasBuilder` are imported only by tests or worker handlers.
+- Production bake-facing placement plans return immutable placement/source facts and reservations, not already materialized page pixels.
 - Any remaining synchronous source-preparation work on the browser main thread is measured, named, and accepted as a deliberate exception against the worksheet.
-- Tests cover the worker-client/handler path rather than direct-builder production shortcuts.
+- Tests cover the worker-client/handler path and stale/noop/failure settlement rather than direct-builder production shortcuts.
 - Browser harness does not show a new main-thread packing/page-materialization blackout.
 
 Task checklist:
 
 - [ ] Audit imports of `buildReservedMaterialTexturePages`, `DirectOpenWorldTexturePageBuilder`, and `DirectOpenWorldObjectVisualAtlasBuilder`.
-- [ ] Specifically reconcile `texture-residency/placement/material-texture-placement-plan.ts` and `object-visual-texture-placement-plan.ts`, which still call `buildReservedMaterialTexturePages(...)` before the bake-facing plan is returned.
-- [ ] Delete production-facing direct page-build APIs or move them behind test/worker-only module boundaries.
-- [ ] Audit page-build worker payloads to confirm source identities and immutable layout facts, not prepared pixel buffers, cross the production boundary.
-- [ ] Replace any production direct-builder tests with worker-client/handler tests where feasible.
-- [ ] Run all-domain browser harness and compare long-task/frame-gap evidence against the worksheet baseline.
+- [ ] Replace `buildMaterialTexturePlacementPlan(...)` production behavior so it reserves placement and emits page-build tasks instead of awaiting page materialization before bake.
+- [ ] Replace `buildOpenWorldObjectVisualTexturePlacementPlan(...)` production behavior so object visual atlas page construction happens in the worker-owned task stream.
+- [ ] Keep worker handlers as the only non-test callers of `DirectOpenWorldTexturePageBuilder` and `DirectOpenWorldObjectVisualAtlasBuilder`.
+- [ ] Move any direct-builder fixtures into test-only helpers if production modules no longer need them.
+- [ ] Add or update tests for worker-client page-build output, object-visual atlas worker output, and controller settlement.
+- [ ] Run `npm run check`, focused worker/page-build/placement tests, and all-domain browser harness.
 
 Decisions and course corrections:
 
 - Pending.
 
-### Phase 32: Vestigial Contract And Source-Tree Wipe
+### Phase 32: Static Placement And Material Readiness Contract Cleanup
+
+Deliverables:
+
+- Collapse static terrain, static object, structured interior, and static-authored dynamic texture placement onto explicit replacement policy facts.
+- Remove ignored or misleading placement fields from production replacement contracts.
+- Ensure material coverage stays diagnostic-only and cannot be interpreted as successful render readiness.
+- Make pending, failed, unsupported, and deferred material states direct replacement readiness facts.
+
+Acceptance criteria:
+
+- `createStaticTexturePlacementIntent(...)` has no implicit static-domain behavior and every production caller passes an explicit `TexturePlacementPolicy`.
+- No replacement production path uses `placementBucketKey` or legacy `TexturePlacementBucketKey` as authority for bucket policy.
+- Static object, terrain, structured interior, and static-authored dynamic placement tests assert policy facts instead of old bucket string parity.
+- `materialReadiness` distinguishes pending texture dependencies, failed texture dependencies, unsupported materials, deferred fidelity, skipped partitions, terrain material issues, and pipeline bugs without renderer warning dependence.
+
+Task checklist:
+
+- [ ] Audit `apps/holtburger-3d/src/lib/textures/placement.ts` for optional defaults and legacy placement fields that replacement callers can still accidentally use.
+- [ ] Audit `material-texture-placement-policy.ts`, `object-visual-texture-placement-plan.ts`, `static-material-texture-policy.test.ts`, `placement.test.ts`, terrain bake tests, and object visual tests for old bucket parity expectations.
+- [ ] Remove or isolate any production use of ignored `placementBucketKey` facts.
+- [ ] Add readiness tests that prove material coverage alone does not mark a resource renderable.
+- [ ] Update all touched consumers as direct migrations, deletions, edge shims, or durable adapters in the phase decisions.
+- [ ] Run focused placement/material-readiness tests and `npm run check`.
+
+Decisions and course corrections:
+
+- Pending.
+
+### Phase 33: Renderer And Domain Diagnostics Contract Cleanup
+
+Deliverables:
+
+- Replace remaining renderer/domain `console.warn(...)` materialization diagnostics with direct replacement diagnostics or delete them if they preserve obsolete concepts.
+- Classify renderer fallback warnings separately from source/bake/material readiness.
+- Preserve durable debug output only when it names a current replacement-domain failure mode and is not a legacy compatibility report.
+
+Acceptance criteria:
+
+- `webgl2-renderer.ts` terrain layered fallback warning is either deleted or backed by structured renderer/fidelity diagnostics that do not duplicate material readiness.
+- `visual/object-visual-baker.ts` unsupported-material warning is either replaced by direct visual/material diagnostics or proven to be outside static-object replacement material coverage.
+- `env-cell-system-baker.ts` and `env-cell-system-resolver.ts` warnings are classified as geometry/publication/BVH diagnostics, direct replacement diagnostics, or deleted.
+- The browser harness and UI diagnostics consume replacement-native diagnostics where they survive cutover; any temporary projection is named as a legacy-edge shim with a deletion trigger.
+
+Task checklist:
+
+- [ ] Audit `webgl2-renderer.ts` `#warnTerrainLayeredFallback(...)` and its tests after Phase 29 terrain readiness diagnostics.
+- [ ] Audit `visual/object-visual-baker.ts` warning paths and decide whether dynamic/runtime visual consumers need a direct diagnostic before deletion.
+- [ ] Audit `static/env-cells/bake/env-cell-system-baker.ts` warnings for material, geometry, publication, and BVH categories.
+- [ ] Audit `static/env-cells/env-cell-system-resolver.ts` BVH warnings for whether they belong in replacement diagnostics or debug-only tooling.
+- [ ] Migrate surviving diagnostics consumers in `client-runtime-adapter.ts`, `BrowserPipelineHarness.svelte`, and `browser-pipeline-harness.mjs` to direct replacement contracts where practical.
+- [ ] Add tests for any new structured diagnostics and delete tests that only preserve warning text.
+
+Decisions and course corrections:
+
+- Pending.
+
+### Phase 34: Runtime/Harness Shim And Source-Tree Wipe
 
 Deliverables:
 
 - Delete vestigial pipeline references from production code after surviving consumers have migrated to direct replacement contracts.
-- Remove ignored placement fields, old bucket compatibility vocabulary, stale diagnostic categories, and architecture-preserving tests.
+- Remove runtime/harness projections that preserve old static coordinator, texture manager, or legacy diagnostics categories.
 - Keep durable adapters only for host assets, worker transport, renderer mutation, diagnostics export plumbing, and harness composition when they do not preserve retired concepts.
 - Align remaining source tree locations with domain/system ownership.
 
 Acceptance criteria:
 
-- No production replacement code references old static coordinator, texture manager mutation, ignored `placementBucketKey`, old diagnostic parity snapshots, or old materialization lifecycle concepts.
+- No production replacement code references old static coordinator, texture manager mutation, ignored placement fields, old diagnostics snapshots, or old materialization lifecycle concepts.
+- `client-runtime-adapter.ts` contains only durable app/runtime adapter logic, not legacy-shaped materialization truth.
+- `browser-pipeline-harness.mjs` and `BrowserPipelineHarness.svelte` read replacement-native diagnostics or named edge shims scheduled for deletion.
 - No tests preserve ignored placement policy fields, old bucket lifetime assumptions, or legacy diagnostic parity.
-- Any surviving adapter passes the adapter-versus-shim test in this plan.
 - Source-tree placement explains ownership; no new broad concept dumping grounds are created.
-- Dead-code lint is green without keeping compatibility fossils alive.
 
 Task checklist:
 
-- [ ] Audit production imports for `StaticCoordinator`, `TextureManager`, ignored placement fields, old diagnostics snapshots, and legacy-shaped runtime projections.
+- [ ] Audit production imports for `StaticCoordinator`, `TextureManager`, old static commit counters, old diagnostics snapshots, and legacy-shaped runtime projections.
 - [ ] Delete or migrate old compatibility projections from runtime, harness, UI diagnostics, and tests.
 - [ ] Delete obsolete tests that preserve retired orchestration contracts; replace only tests needed for replacement behavior.
 - [ ] Rename or move modules whose source-tree location now hides the owning system.
+- [ ] Record every surviving adapter with its durable boundary reason.
 - [ ] Run `npm run lint:dead` and resolve every replacement-related finding by deletion or direct migration.
 
 Decisions and course corrections:
 
 - Pending.
 
-### Phase 33: Texture Remodel Final Verification And Hard Cutover
+### Phase 35: Deferred Fidelity And Material Backlog Triage
 
 Deliverables:
 
-- Delete dead placement fields, ignored policy paths, obsolete tests, stale diagnostic categories, and temporary shims introduced by Phases 19-32.
+- Convert remaining material/fidelity limitations into explicit backlog records with source evidence, renderer capability requirement, and reactivation criteria.
+- Decide which structured-interior deferred-material issues remain in scope for this remodel versus later renderer fidelity work.
+- Ensure deferred fidelity does not hide architecture drift, missing page commits, failed texture dependencies, or unsupported source facts.
+
+Acceptance criteria:
+
+- Every remaining `deferred-material`, `unsupported-material`, skipped static partition, and terrain material issue is classified as contract bug, source-data limitation, renderer capability backlog, or acceptable future scope.
+- Structured-interior deferred-material issues from Phase 28/29 harness runs are either fixed or documented with exact file/symbol ownership and reactivation criteria.
+- The remodel does not close with unexplained flat-color, missing-texture, or warning-only material behavior.
+- Plan decisions name any deliberate deviation from the worksheet and why it is not blocking the hard cutover.
+
+Task checklist:
+
+- [ ] Re-run all-domain harness and capture `materialReadiness.recentIssues` plus texture page-build summaries.
+- [ ] Triage structured-interior deferred-material issues back through `structured-interior-material-planner.ts`, `env-cell-system-baker.ts`, and renderer pass support.
+- [ ] Triage remaining unsupported material cases through `object-visual-material-planner.ts` and `object-visual-baker.ts`.
+- [ ] Triage skipped partitions through static object partition diagnostics and renderer capability.
+- [ ] Update this plan with each accepted deferral and deletion/fix target.
+- [ ] Add focused tests for any fixed contract bug; do not add tests that simply assert a feature remains missing.
+
+Decisions and course corrections:
+
+- Pending.
+
+### Phase 36: Texture Remodel Final Verification And Hard Cutover
+
+Deliverables:
+
+- Delete dead placement fields, ignored policy paths, obsolete tests, stale diagnostic categories, and temporary shims introduced by Phases 19-35.
 - Re-run dead-code, type, lint, unit, and browser harness verification.
 - Update this plan and the worksheet cross-reference with final evidence and any remaining intentionally deferred material fidelity.
 
@@ -2598,7 +2698,7 @@ Mitigation:
 
 Mitigation:
 
-- Treat the worksheet as the design guardrail for Phases 19-33.
+- Treat the worksheet as the design guardrail for Phases 19-36.
 - Record deliberate deviations in the phase decisions before implementation proceeds.
 - Prefer pausing a phase over landing a convenient contract that contradicts static-authored dynamic sharing, worker-owned page build, loose readiness, or direct replacement diagnostics.
 

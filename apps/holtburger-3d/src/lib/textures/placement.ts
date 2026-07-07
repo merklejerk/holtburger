@@ -298,6 +298,11 @@ export function createStaticTexturePlacementIntent(
 		pageClass: options.pageClass ?? textureUse.pageClass,
 		textureKey: options.textureKey ?? textureUse.textureKey,
 	});
+	if (!options.placementPolicy) {
+		throw new Error(
+			"Static texture placement intents require an explicit replacement placement policy.",
+		);
+	}
 	return {
 		affinityKey: options.affinityKey ?? null,
 		bindingId: identity.bindingId,
@@ -306,8 +311,7 @@ export function createStaticTexturePlacementIntent(
 		ownerIds: identity.ownerIds,
 		pageClass: identity.pageClass,
 		textureKey: identity.textureKey,
-		placementPolicy:
-			options.placementPolicy ?? createStaticDomainTexturePlacementPolicy(),
+		placementPolicy: options.placementPolicy,
 		purpose,
 		source: createTexturePlacementMaterialSource(
 			textureUse.source,

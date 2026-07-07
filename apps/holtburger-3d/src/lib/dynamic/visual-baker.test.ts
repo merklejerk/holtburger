@@ -5,6 +5,7 @@ import type {
 	StaticObjectSourceGeometrySidecar,
 	StaticObjectSourceIdentity,
 	StaticObjectTextureRefFacts,
+	StaticLayerPeerRecordOwner,
 	StaticResourceIdentity,
 } from "../static/contracts";
 import {
@@ -99,6 +100,69 @@ describe("dynamic visual baker", () => {
 				sourcePartIndex: 0,
 			},
 		]);
+	});
+
+	it("uses canonical texture identity for content-stable static-authored dynamic textures", () => {
+		const first = createStaticAuthoredRecipe({
+			entityId: "static-authored-outdoor:first",
+			placementId: "generated:first",
+		});
+		const second = createStaticAuthoredRecipe({
+			entityId: "static-authored-outdoor:second",
+			placementId: "generated:second",
+		});
+
+		const firstPlanning = createDynamicVisualTexturePlanning(first);
+		const secondPlanning = createDynamicVisualTexturePlanning(second);
+		const firstRequirement = firstPlanning.textureRequirements[0];
+		const secondRequirement = secondPlanning.textureRequirements[0];
+
+		expect(firstRequirement?.textureKey).toBe(secondRequirement?.textureKey);
+		expect(firstRequirement?.textureKey).toBe(
+			"texture|source=src=render-surface|id=06000010|usage=rgba-color|format=rgba8|sample=rgba-color",
+		);
+		expect(firstRequirement?.textureKey).not.toContain("src=runtime");
+		expect(firstRequirement?.ownerIds).not.toEqual(
+			secondRequirement?.ownerIds,
+		);
+		expect(firstPlanning.placementIntents[0]?.placementPolicy).toEqual({
+			bucketScope: { kind: "static-domain" },
+			sourceStability: { kind: "content-stable" },
+		});
+	});
+
+	it("keeps runtime-authored dynamic texture identity scoped to the runtime owner", () => {
+		const first = createRecipe({
+			entityId: "runtime:first",
+			materialSources: [createTexturedMaterial()],
+			textureRefs: createTextureRefs(),
+		});
+		const second = createRecipe({
+			entityId: "runtime:second",
+			materialSources: [createTexturedMaterial()],
+			textureRefs: createTextureRefs(),
+		});
+
+		const firstPlanning = createDynamicVisualTexturePlanning(first);
+		const secondPlanning = createDynamicVisualTexturePlanning(second);
+		const firstRequirement = firstPlanning.textureRequirements[0];
+		const secondRequirement = secondPlanning.textureRequirements[0];
+
+		expect(firstRequirement?.textureKey).not.toBe(
+			secondRequirement?.textureKey,
+		);
+		expect(firstRequirement?.textureKey).toContain("src=runtime");
+		expect(secondRequirement?.textureKey).toContain("src=runtime");
+		expect(firstPlanning.placementIntents[0]?.placementPolicy).toEqual({
+			bucketScope: {
+				kind: "runtime-owner",
+				ownerId: "runtime:first",
+			},
+			sourceStability: {
+				kind: "owner-specific",
+				reason: "runtime-customized",
+			},
+		});
 	});
 
 	it("supports the async baker interface", async () => {
@@ -231,11 +295,15 @@ describe("dynamic visual baker", () => {
 });
 
 function createRecipe(options: {
+	readonly entityId?: string;
 	readonly materialSources: readonly StaticObjectMaterialSourceFacts[];
+	readonly materialPolicy?: DynamicVisualMaterialPolicy;
 	readonly missingRefs?: readonly StaticResourceIdentity[];
+	readonly source?: DynamicEntityRecipe["source"];
 	readonly sourceAsset?: StaticObjectSourceAssetFacts;
 	readonly textureRefs?: readonly StaticObjectTextureRefFacts[];
 }): DynamicEntityRecipe {
+	const entityId = options.entityId ?? "runtime:test";
 	const sourceAsset = options.sourceAsset ?? createSourceAsset();
 	return {
 		animationSelection: { kind: "none" },
@@ -246,10 +314,10 @@ function createRecipe(options: {
 			},
 			sourceScale: { x: 1, y: 1, z: 1 },
 		},
-		entityId: "runtime:test",
-		source: {
+		entityId,
+		source: options.source ?? {
 			kind: "runtime-authored",
-			runtimeEntityId: "runtime:test",
+			runtimeEntityId: entityId,
 			sourceResidence: {
 				kind: "outdoor-landblock",
 				landblockId: 0xda55ffff,
@@ -257,7 +325,7 @@ function createRecipe(options: {
 		},
 		visual: {
 			animation: null,
-			materialPolicy: createMaterialPolicy(),
+			materialPolicy: options.materialPolicy ?? createMaterialPolicy(entityId),
 			materialSources: options.materialSources,
 			missingRefs: options.missingRefs ?? [],
 			paletteSources: [],
@@ -266,6 +334,43 @@ function createRecipe(options: {
 			textureRefs: options.textureRefs ?? [],
 		},
 	};
+}
+
+function createStaticAuthoredRecipe(options: {
+	readonly entityId: string;
+	readonly placementId: string;
+}): DynamicEntityRecipe {
+	const owner: StaticLayerPeerRecordOwner = {
+		domain: "outdoor-generated-scenery",
+		key: {
+			kind: "outdoor-generated-scenery",
+			landblockId: 0xda55ffff,
+		},
+		kind: "layer-owner",
+		ownerId: "outdoor-generated-scenery:0xda55ffff",
+	};
+	return createRecipe({
+		entityId: options.entityId,
+		materialPolicy: createMaterialPolicy(
+			options.entityId,
+			"outdoor-generated-scenery",
+			{
+				domain: "outdoor-generated-scenery",
+				kind: "static-domain",
+			},
+		),
+		materialSources: [createTexturedMaterial()],
+		source: {
+			kind: "static-authored",
+			owner,
+			placementId: options.placementId,
+			sourceResidence: {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			},
+		},
+		textureRefs: createTextureRefs(),
+	});
 }
 
 function createPlacementSnapshotForRecipe(
@@ -509,16 +614,20 @@ function createTextureRefs(
 	]);
 }
 
-function createMaterialPolicy(): DynamicVisualMaterialPolicy {
+function createMaterialPolicy(
+	entityId = "runtime:test",
+	materialPlanningDomain: DynamicVisualMaterialPolicy["materialPlanningDomain"] = "outdoor-explicit-objects",
+	detailRolePolicy: DynamicVisualMaterialPolicy["detailRolePolicy"] = {
+		kind: "runtime-authored-none",
+	},
+): DynamicVisualMaterialPolicy {
 	return {
-		detailRolePolicy: {
-			kind: "runtime-authored-none",
-		},
-		materialPlanningDomain: "outdoor-explicit-objects",
+		detailRolePolicy,
+		materialPlanningDomain,
 		visualObject: {
-			entityId: "runtime:test",
+			entityId,
 			kind: "dynamic-visual-object",
-			resourceId: createDynamicVisualResourceId("runtime:test"),
+			resourceId: createDynamicVisualResourceId(entityId),
 		},
 	};
 }

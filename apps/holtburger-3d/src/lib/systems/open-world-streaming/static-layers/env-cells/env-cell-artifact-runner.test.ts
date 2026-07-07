@@ -26,6 +26,7 @@ describe("OpenWorldEnvCellArtifactRunner", () => {
 		const runner = new OpenWorldEnvCellArtifactRunner({
 			assetReader: createUnusedAssetReader(),
 			baker,
+			frameBudget: createFixtureFrameBudget(),
 			objectVisualAtlasBuilder: createUnusedObjectVisualAtlasBuilder(),
 			resolver,
 			textureClaims: new OpenWorldTextureClaimRegistry(),
@@ -191,6 +192,12 @@ function createUnusedAssetReader(): PreparedAssetReader {
 		async requestPreparedAsset(): Promise<never> {
 			throw new Error("Fixture asset reader should not be used.");
 		},
+	};
+}
+
+function createFixtureFrameBudget() {
+	return {
+		async yieldToFrameBudget(): Promise<void> {},
 	};
 }
 

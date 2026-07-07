@@ -30,10 +30,15 @@ import { OpenWorldTextureClaimRegistry } from "../../texture-residency/claims/te
 import type { OpenWorldStreamingTextureCommit } from "../../texture-residency/commits/contracts";
 import { buildObjectVisualTexturePlacementPlan } from "../../texture-residency/placement/object-visual-texture-placement-plan";
 import type { OpenWorldObjectVisualAtlasBuilder } from "../../texture-residency/placement/object-visual-atlas-builder";
+import {
+	yieldToStaticMaterializationFrameBudget,
+	type OpenWorldStaticMaterializationFrameBudget,
+} from "../frame-budget";
 
 export interface OpenWorldEnvCellArtifactRunnerOptions {
 	readonly assetReader: PreparedAssetReader;
 	readonly baker: StaticBaker;
+	readonly frameBudget: OpenWorldStaticMaterializationFrameBudget;
 	readonly resolver: StaticLandblockSceneLodSourceResolver;
 	readonly objectVisualAtlasBuilder: OpenWorldObjectVisualAtlasBuilder;
 	readonly textureClaims: OpenWorldTextureClaimRegistry;
@@ -57,6 +62,7 @@ export interface OpenWorldEnvCellSystemLayerCommit {
 export class OpenWorldEnvCellArtifactRunner {
 	readonly #assetReader: PreparedAssetReader;
 	readonly #baker: StaticBaker;
+	readonly #frameBudget: OpenWorldStaticMaterializationFrameBudget;
 	readonly #resourceProvider: CompositeStaticBakeResourceProvider;
 	readonly #resolver: StaticLandblockSceneLodSourceResolver;
 	readonly #objectVisualAtlasBuilder: OpenWorldObjectVisualAtlasBuilder;
@@ -65,6 +71,7 @@ export class OpenWorldEnvCellArtifactRunner {
 	constructor(options: OpenWorldEnvCellArtifactRunnerOptions) {
 		this.#assetReader = options.assetReader;
 		this.#baker = options.baker;
+		this.#frameBudget = options.frameBudget;
 		this.#resourceProvider = new CompositeStaticBakeResourceProvider([
 			new EnvCellSystemGeometryResourceProvider(),
 			new StaticObjectBakeResourceProvider({
@@ -83,6 +90,7 @@ export class OpenWorldEnvCellArtifactRunner {
 		const resolved = await timing.measure("resolve-source", () =>
 			this.#resolveEnvCellRecipe(request.task),
 		);
+		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const sourcePayload = requireEnvCellSourcePayload(resolved);
 		const textureIntents = await timing.measure("create-texture-intents", () =>
 			this.#createTexturePlacementIntents({
@@ -90,6 +98,7 @@ export class OpenWorldEnvCellArtifactRunner {
 				task: request.task,
 			}),
 		);
+		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const texturePlan = await timing.measure("texture-placement", () =>
 			buildObjectVisualTexturePlacementPlan({
 				atlasBuilder: this.#objectVisualAtlasBuilder,
@@ -99,6 +108,7 @@ export class OpenWorldEnvCellArtifactRunner {
 				textureClaims: this.#textureClaims,
 			}),
 		);
+		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const bakeInput = await timing.measure("create-bake-resources", () =>
 			this.#createEnvCellBakeJobInput(
 				request.task,
@@ -106,9 +116,11 @@ export class OpenWorldEnvCellArtifactRunner {
 				texturePlan.placementSnapshot,
 			),
 		);
+		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const baked = await timing.measure("bake", () =>
 			this.#baker.bake(bakeInput),
 		);
+		await yieldToStaticMaterializationFrameBudget(this.#frameBudget);
 		const payload = timing.measureSync("assemble-commit", () =>
 			createEnvCellSystemLayerPayload({
 				baked,

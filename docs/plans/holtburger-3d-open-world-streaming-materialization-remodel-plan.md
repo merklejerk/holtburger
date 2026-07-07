@@ -158,6 +158,9 @@ Universal contract migration rule:
 - Do not put legacy-shaped DTOs, lifecycle timing, diagnostic categories, report fields, or test expectations inside replacement internals.
 - Let edge shims be partial, awkward, or temporarily broken when the alternative is making replacement contracts dishonest.
 - Apply the rule to diagnostics with the same strictness as runtime, renderer, texture, scene-query, harness, and UI contracts. Diagnostics are not an exception where legacy shape compatibility may re-enter replacement internals.
+- When the direct replacement contract breaks a legacy consumer, prefer fixing, deleting, or edge-shimming that consumer over adding a compatibility field to the replacement core.
+- During implementation, a phase is not complete until every touched consumer has been classified as direct migration, deletion, legacy-edge shim, or durable adapter.
+- During cleanup, every shim is guilty until deleted. Adapters may survive only when their boundary remains real after the old pipeline is gone.
 
 Boundary decision order:
 
@@ -1167,6 +1170,7 @@ Deliverables:
 - Add or apply frame-budgeted publication for expensive replacement work that still runs on the main thread, prioritizing object texture placement/page settlement, static commit application, and dynamic resource/instance publication churn.
 - Keep replacement-native diagnostics as the steering source; do not use legacy static coordinator, static commit install, texture atlas, or dynamic prep snapshots as targets.
 - Use the Phase 13A native diagnostics to identify whether the next remediation belongs in static task scheduling, texture residency/page build batching, dynamic commit coalescing, renderer publication, or a deliberately deferred visual publication policy.
+- Apply the universal contract migration rule to any touched diagnostics, harness, readiness, renderer, or test consumer before adding compatibility output.
 - Re-run `da55` generated-scenery, env-cell, and all-domain replacement harness cases after remediation.
 
 Acceptance criteria:
@@ -1176,14 +1180,61 @@ Acceptance criteria:
 - Texture residency diagnostics continue to expose page lifecycle, claim, and byte-estimate status directly.
 - Browser harness readiness and summary continue to use direct `open-world-streaming` diagnostics for replacement runs.
 - No new legacy-shaped diagnostics, timing fields, DTO projections, or architecture-preserving tests are added inside replacement internals.
+- Any consumer touched during remediation is migrated directly, deleted, explicitly edge-shimmed, or classified as a durable adapter before the phase is complete.
 - `npm run check`, `npm run lint:ts`, focused tests, and the Phase 13B harness matrix pass.
 
 Task checklist:
 
-- [ ] Analyze Phase 13A native stage timings and renderer/runtime frame diagnostics.
-- [ ] Decide whether the first remediation target is texture placement/page settlement, static commit application, dynamic commit coalescing, or renderer publication.
-- [ ] Implement the smallest direct replacement remediation that reduces main-thread burst pressure.
-- [ ] Add or update native diagnostics needed to prove the remediation.
+- [x] Analyze Phase 13A native stage timings and renderer/runtime frame diagnostics.
+- [x] Decide whether the first remediation target is texture placement/page settlement, static commit application, dynamic commit coalescing, or renderer publication.
+- [x] Implement the smallest direct replacement remediation that reduces main-thread burst pressure.
+- [x] Add or update native diagnostics needed to prove the remediation.
+- [x] Classify every touched consumer as direct migration, deletion, legacy-edge shim, or durable adapter.
+- [x] Run focused tests for the touched replacement systems.
+- [x] Run replacement `da55` generated-scenery, env-cell, and all-domain harness cases.
+- [x] Run app checks.
+- [x] Update cleanup targets.
+
+Decisions and course corrections:
+
+- Phase 13B added a direct replacement frame-budget hook for static materialization runners and reports yielded passes through replacement-native diagnostics. This is not a legacy diagnostic shim; the controller owns the budget and the terrain, outdoor-object, and env-cell artifact runners consume the direct contract.
+- The first remediation target was the chain of expensive main-thread static materialization stages rather than dynamic publication. Phase 13A showed env-cell focused runs had no runtime entities but still produced 577 ms max long tasks, so dynamic commit coalescing was not the first honest bottleneck.
+- Consumer classification: the new frame-budget contract is direct replacement infrastructure; artifact runner tests were migrated directly to provide the contract; no legacy-edge shim was added. The existing `browser-runtime-adapter` legacy-shaped runtime report remains the previously named Phase 14/16 deletion-targeted shim.
+- Phase 13B harness results:
+  - `da55` terrain plus generated scenery: ready in 12.9 s, 17 long tasks, 279 ms max long task, 1.8 s total long-task time, max renderer frame delta 293 ms, max renderer handler 8.4 ms, max runtime handler 3.0 ms. Native diagnostics reported 90 frame-budget yields, 18 applied scene commits, 69 resident virtual texture pages, 305 claims, 44 active static-authored runtime entities, 40 successful bakes, 22 catch-up truncations, 22 dropped hook frames, and no prep failures.
+  - `da55` terrain plus env-cells: ready in 12.7 s, 5 long tasks, 557 ms max long task, 1.2 s total long-task time, max renderer frame delta 570 ms, max renderer handler 13.5 ms, max runtime handler 0.1 ms. Native diagnostics reported 90 frame-budget yields, 18 applied scene commits, 20 resident virtual texture pages, 365 claims, no runtime entities, and no failed static tasks.
+  - `da55` all domains: ready in 23.2 s, 17 long tasks, 576 ms max long task, 2.8 s total long-task time, max renderer frame delta 588 ms, max renderer handler 40.6 ms, max runtime handler 1.4 ms. Native diagnostics reported 225 frame-budget yields, 45 applied scene commits, 121 resident virtual texture pages, 772 claims, 44 active static-authored runtime entities, 40 successful bakes, 32 catch-up truncations, 32 dropped hook frames, and no prep failures.
+- Resteer: coarse runner-level yielding reduces total burst pressure in generated-scenery and all-domain runs, but it does not improve all-domain max frame gap. The all-domain max long task regressed slightly from Phase 13A's 561 ms to 576 ms, and max frame delta regressed from 577 ms to 588 ms. Phase 13B therefore satisfies the "narrower native bottleneck" acceptance path, not the cutover-ready performance path.
+- Narrowed bottleneck: outer-loop yields cannot split the hot single stages. Phase 13B attribution still shows outdoor terrain `resolve-source` wall time up to 3.5 s, env-cell `bake` up to 1.6 s, generated-scenery `bake` up to 1.1 s, env-cell `create-texture-intents` up to 576 ms, and generated-scenery `texture-placement` up to 355 ms. Phase 13C must target source/result delivery and intra-stage work slicing instead of adding more coarse yields around completed stages.
+- Verification: `npm run check`, `npm run lint:ts`, focused `npm run test:ts -- src/lib/systems/open-world-streaming/composition/open-world-streaming-controller.test.ts src/lib/systems/open-world-streaming/static-layers/terrain/terrain-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/outdoor-objects/outdoor-object-artifact-runner.test.ts src/lib/systems/open-world-streaming/static-layers/env-cells/env-cell-artifact-runner.test.ts`, and the three Phase 13B replacement harness cases above. `npm run format:check` still fails on pre-existing untouched files: `src/lib/host/runtime-host.ts`, `src/lib/systems/open-world-streaming/composition/client-runtime-adapter.ts`, and `src/lib/systems/open-world-streaming/runtime-entities/renderer-commits.ts`.
+
+### Phase 13C: Intra-Stage Materialization Slicing Resteer
+
+Deliverables:
+
+- Start only after Phase 13B is complete.
+- Reduce `da55` all-domain max long-task duration and max renderer frame delta by splitting the hot single-stage work that Phase 13B exposed.
+- Investigate and remediate terrain source result delivery for large landblocks, especially the `da55` terrain `resolve-source` path.
+- Split or move expensive env-cell and generated-scenery bake, texture-intent, and texture-placement work that still runs as one browser task.
+- Add replacement-native diagnostics that distinguish worker wait time, worker result transfer/deserialization, main-thread result assimilation, and intra-stage CPU slices where practical.
+- Keep the universal contract migration rule active: migrate direct contracts first, shim legacy only at an edge, and prefer an incomplete legacy projection over dishonest replacement diagnostics.
+- Re-run `da55` generated-scenery, env-cell, and all-domain replacement harness cases after remediation.
+
+Acceptance criteria:
+
+- `da55` all-domain replacement run materially improves max long-task duration and max frame delta from Phase 13B, or identifies a non-static renderer/browser bottleneck with direct replacement-native evidence.
+- Terrain `resolve-source`, env-cell `bake`, generated-scenery `bake`, env-cell `create-texture-intents`, and generated-scenery `texture-placement` are either split, moved off the main thread, or explicitly ruled out with measured evidence.
+- New diagnostics describe replacement concepts and do not clone legacy static coordinator, texture atlas, static commit install, or dynamic prep report shapes.
+- Any touched consumer is migrated directly, deleted, explicitly edge-shimmed, or classified as a durable adapter before the phase is complete.
+- `npm run check`, `npm run lint:ts`, focused tests, and the Phase 13C harness matrix pass.
+
+Task checklist:
+
+- [ ] Inspect terrain source resolver result delivery and identify whether wall time is worker wait, transfer/deserialization, or main-thread assimilation.
+- [ ] Inspect env-cell and generated-scenery bake/intent/placement loops for chunking or worker-boundary opportunities.
+- [ ] Implement the smallest direct replacement remediation that splits a measured hot single-stage browser task.
+- [ ] Add replacement-native diagnostics for the new split or transfer boundary.
+- [ ] Classify every touched consumer as direct migration, deletion, legacy-edge shim, or durable adapter.
 - [ ] Run focused tests for the touched replacement systems.
 - [ ] Run replacement `da55` generated-scenery, env-cell, and all-domain harness cases.
 - [ ] Run app checks.
@@ -1197,12 +1248,13 @@ Decisions and course corrections:
 
 Deliverables:
 
-- Start only after Phase 13B is complete.
+- Start only after Phase 13C is complete.
 - Switch `createBrowserRuntime(...)` to the replacement composition.
 - Keep the harness switch only if needed for one short verification window.
 - Remove obsolete UI assumptions about legacy static coordinator diagnostics and migrate surviving panels to replacement-native diagnostics.
 - Prefer temporary broken or partial legacy diagnostic reports over backfilling old fields from replacement data after cutover.
 - Migrate surviving browser, harness, UI, and diagnostics consumers directly to replacement contracts before adding any cutover shim.
+- Treat any cutover breakage in legacy-shaped diagnostics or panels as a consumer migration problem, not a reason to backfill old fields into the replacement runtime.
 
 Acceptance criteria:
 
@@ -1212,6 +1264,7 @@ Acceptance criteria:
 - Any remaining harness comparison shim is isolated, named as temporary, and scheduled for Phase 16 deletion.
 - Browser cutover does not require legacy-shaped diagnostics to remain complete. Any temporary report gaps are tracked at the legacy edge instead of backfilled inside replacement internals.
 - Cutover does not preserve a compatibility projection merely because an old diagnostic panel, benchmark summary, or test expects it.
+- Every touched browser, harness, UI, diagnostics, and test consumer is either migrated to a direct replacement contract, deleted, or left behind a named deletion-targeted edge shim.
 - `npm run check`, `npm run lint:ts`, and focused tests pass.
 
 Task checklist:
@@ -1222,6 +1275,7 @@ Task checklist:
 - [ ] Break or delete legacy-shaped diagnostics consumers that do not justify a named shim.
 - [ ] Replace architecture-preserving diagnostic tests with tests over replacement-native contracts, or delete them if they only validate legacy projection completeness.
 - [ ] Verify every surviving cutover consumer either reads the direct replacement contract or has a named, deletion-targeted edge shim.
+- [ ] Record any intentionally broken or incomplete legacy-edge shim, including owner, dishonest-field risk, and Phase 16 deletion trigger.
 - [ ] Update browser harness expectations.
 - [ ] Run app checks.
 - [ ] Run benchmark matrix.
@@ -1237,6 +1291,7 @@ Deliverables:
 - Audit the post-cutover codebase before legacy cleanup begins.
 - Classify every remaining legacy dependency as boundary adapter, reusable transform, shim, dead code, or out-of-scope survivor.
 - Decide whether cleanup can proceed in one hard pass or needs a short preparatory subphase.
+- Dry-run Phase 16 from the current post-cutover tree and steer the cleanup checklist toward deletion of shims before adapter polish.
 
 Acceptance criteria:
 
@@ -1247,6 +1302,7 @@ Acceptance criteria:
 - The hard cutover cleanup phase has been dry-run against the current source tree.
 - Cleanup scope is specific enough to run without guessing which code is still live.
 - The audit has identified any remaining legacy diagnostic, harness, or UI projection that was intentionally allowed to be incomplete during migration.
+- No shim survives the audit without a concrete Phase 16 deletion task.
 
 Task checklist:
 
@@ -1275,6 +1331,7 @@ Deliverables:
 - Delete all shims that only bridge replacement artifacts to retired legacy orchestration.
 - Delete all legacy-compatible shims once UI, harness, diagnostics, tests, and browser runtime consumers use replacement-native contracts.
 - Keep only boundary adapters whose dependency points still exist after cutover, such as host assets, worker factories, renderer mutation, diagnostics export, or harness composition.
+- Delete compatibility tests, fixtures, and report projections that exist only to make old consumers look complete.
 - Delete unused tests that preserve dead architecture.
 - Delete or rewrite legacy tests that assert retired runtime/static/texture orchestration instead of reusable transforms.
 - Update docs to mark the worksheet as historical evidence and this plan as executed or superseded.

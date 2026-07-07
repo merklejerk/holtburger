@@ -62,6 +62,9 @@ describe("OpenWorldStreamingController terrain slice", () => {
 			applied: 1,
 			pending: 0,
 		});
+		expect(controller.createDiagnosticsSnapshot().frameBudget).toEqual({
+			yieldedPasses: 5,
+		});
 	});
 });
 
@@ -94,7 +97,9 @@ class FixtureTerrainRenderer {
 }
 
 function failIfDynamicWorkerFactoryIsCalled(): never {
-	throw new Error("Dynamic worker factory should not be used by terrain slice test.");
+	throw new Error(
+		"Dynamic worker factory should not be used by terrain slice test.",
+	);
 }
 
 function createUnusedTexturePacker(): TexturePacker {

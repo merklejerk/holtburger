@@ -1,4 +1,5 @@
 {
 	"$schema": "https://unpkg.com/knip@6/schema.json",
+	"entry": ["src/client/main.ts", "src/explorer/main.ts"],
 	"ignoreDependencies": ["@tauri-apps/api", "@types/rbush", "rbush", "zod"]
 }

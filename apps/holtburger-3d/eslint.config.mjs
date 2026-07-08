@@ -22,7 +22,7 @@ export default tseslint.config(
 		},
 	},
 	{
-		files: ["vite.config.ts"],
+		files: ["scripts/**/*.mjs", "vite.config.ts"],
 		languageOptions: {
 			ecmaVersion: "latest",
 			sourceType: "module",

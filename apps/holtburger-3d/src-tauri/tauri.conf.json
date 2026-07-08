@@ -4,7 +4,7 @@
 	"version": "0.1.0",
 	"identifier": "io.github.merklejerk.holtburger-3d",
 	"build": {
-		"beforeDevCommand": "npm run dev",
+		"beforeDevCommand": "npm run dev:vite",
 		"beforeBuildCommand": "npm run build",
 		"devUrl": "http://127.0.0.1:1420",
 		"frontendDist": "../dist"

@@ -1,4 +1,4 @@
-import type { Renderer } from "./renderer";
+import type { FramePlan, Renderer } from "./renderer";
 
 const CLEAR_COLOR = {
 	red: 0.15,
@@ -13,7 +13,9 @@ export class WebGL2Renderer implements Renderer {
 	#frameWidth = 0;
 	#frameHeight = 0;
 
-	public static async build(canvas: HTMLCanvasElement): Promise<WebGL2Renderer> {
+	public static async build(
+		canvas: HTMLCanvasElement,
+	): Promise<WebGL2Renderer> {
 		return new WebGL2Renderer(canvas);
 	}
 
@@ -41,7 +43,8 @@ export class WebGL2Renderer implements Renderer {
 		this.#gl.enable(this.#gl.DEPTH_TEST);
 	}
 
-	drawFrame(): void {
+	drawFrame(plan: FramePlan): void {
+		void plan;
 		this.#resizeCanvasForDpr();
 		this.#gl.clear(this.#gl.COLOR_BUFFER_BIT | this.#gl.DEPTH_BUFFER_BIT);
 	}

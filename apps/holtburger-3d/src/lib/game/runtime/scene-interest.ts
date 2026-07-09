@@ -10,7 +10,7 @@ export enum LandblockLayerKind {
 
 export type SceneInterestMap = Map<LandblockId, Set<LandblockLayerKind>>;
 
-interface LandblockIdLayer {
+export interface LandblockIdLayer {
 	id: LandblockId;
 	layer: LandblockLayerKind;
 }

@@ -1,7 +1,10 @@
 import type { EnvCellId, LandblockId } from "../game-types";
 import type { AABB3, Mat4 } from "../math/types";
 import type { ColorF } from "../pixels/types";
-import type { LandblockLayerKind } from "../runtime/scene-interest";
+import type {
+	LandblockIdLayer,
+	LandblockLayerKind,
+} from "../runtime/scene-interest";
 import type {
 	AtlasPageId,
 	TexturePlacement as TextureAtlasPlacement,
@@ -186,4 +189,6 @@ export type CommitBundle = {
 	| CommitBundleManualFields
 );
 
-export interface CommitPipeline {}
+export interface CommitPipeline {
+	prepareLandblockLayers(layers: Set<LandblockIdLayer>): Promise<CommitBundle>;
+}

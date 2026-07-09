@@ -1,25 +1,22 @@
-import { INVALID_ID, type EnvCellId, type LandblockId } from "../game-types";
-import type { Renderer } from "../renderer/renderer";
-import type {
-	AABB2,
-	AABB3,
-	ColorF,
-	ColorTextureKeyVariant,
-	Mat4,
-	OwnerId,
-	TextureAtlasPageId,
-	TextureKey,
-	TexturePixelFormat,
-	TexturePurpose,
-} from "./types";
-
-interface LoDConfig {
-	landblockRadius: number;
-	buildingRadius: number;
-	explicitObjectRadius: number;
-	generatedObjectRadius: number;
-	envCellRadius: number;
-}
+import {
+	CommitBundleSourceKind,
+	type CommitBundle,
+	type CommitPipeline,
+	type StaticLandblockLayerCommitTerrain,
+} from "../commit/types";
+import { INVALID_ID, type LandblockId } from "../game-types";
+import type { Renderer, RenderResourceKey } from "../renderer/renderer";
+import { SceneGraph, type SceneBundleKey } from "../scene";
+import { TerrainBuilder } from "../terrain/terrain-builder";
+import { AtlasManager } from "../textures/atlas-manager";
+import type { TextureKey } from "../textures/types";
+import { LeaseRegistry } from "./ownership";
+import {
+	diffSceneInterest,
+	LandblockLayerKind,
+	type SceneInterestMap,
+} from "./scene-interest";
+import type { Camera, LoDConfig } from "./types";
 
 const DEFAULT_LOD_CONFIG: LoDConfig = {
 	landblockRadius: 4,
@@ -28,6 +25,11 @@ const DEFAULT_LOD_CONFIG: LoDConfig = {
 	generatedObjectRadius: 1,
 	envCellRadius: 1,
 };
+
+const DEFAULT_CAMERA: Camera = {
+  position:
+
+}
 
 function validateLoDConfigOrThrow(cfg: LoDConfig): void {
 	const { landblockRadius } = cfg;
@@ -42,191 +44,159 @@ function validateLoDConfigOrThrow(cfg: LoDConfig): void {
 	}
 }
 
-export interface GameScene {}
-
-export interface CommitPipeline {}
-
-export enum CommitArtifactKind {
-	UpsertAtlasPage,
-	EvictAtlasPage,
-	CommitName,
+enum OwnerVariant {
+	LandblockLayer = "landblock-layer",
+	Spawned = "spawned",
 }
 
-export enum StaticLandblockLayerKind {
-	Terrain,
-	Buildings,
-	Objects,
-	Generated,
-	EnvCells,
+export function landblockLayerToOwnerId(
+	landblockId: LandblockId,
+	layer: LandblockLayerKind,
+): OwnerId {
+	return `${OwnerVariant.LandblockLayer}:${landblockId}/${layer}`;
 }
 
-export interface StaticTerrainChunkData {
-	points: Float32Array;
-	roadMaskTexture: TextureKey;
-	colorTextures: TextureKey[];
-	detailTexture: TextureKey;
-	bounds: AABB3;
-}
-
-export interface StaticLandblockLayerCommitTerrain {
-	chunks: StaticTerrainChunkData[];
-}
-
-export interface StaticDrawUnitData {
-	indexStart: number;
-	indexEnd: number;
-	color: ColorF;
-	colorTexture: ColorTextureKeyVariant;
-	detailTexture: TextureKey | null;
-}
-
-export interface BakedStaticDrawUnitsData {
-	vertexData: Float32Array;
-	indexData: Uint32Array;
-	drawUnits: StaticDrawUnitData[];
-}
-
-export interface StaticInstancePatchData {
-	indexStart: number;
-	indexEnd: number;
-	colorTexture: ColorTextureKeyVariant;
-	detailTexture: TextureKey | null;
-	instanceData: Array<{
-		transform: Mat4;
-		color: ColorF;
-	}>;
-}
-
-export interface InstancedStaticData {
-	verexData: Float32Array;
-	indexData: Uint32Array;
-	patches: StaticInstancePatchData;
-}
-
-export interface EnvCellInfo {
-	id: EnvCellId;
-	bounds: AABB3;
-	bsp: unknown;
-}
-
-export interface EnvCellPortals {
-	inPortalIdxs: number[];
-	outPortalIdxs: number[];
-}
-
-export enum EnvCellPortalKind {
-	OutdoorToIndoor,
-	IndoorToOutdoor,
-	IndoorToIndoor,
-}
-
-interface EnvCellPortalInfo {
-	kind: EnvCellPortalKind;
-	bounds: AABB3;
-}
-
-export type StaticLandblockLayerCommitBuildings = BakedStaticDrawUnitsData;
-export type StaticLandblockLayerCommitObjects = BakedStaticDrawUnitsData;
-export type StaticLandblockLayerCommitGenerated = InstancedStaticData;
-export interface StaticLandblockLayerCommitEnvCells {
-	cells: EnvCellInfo[];
-	// Keyed by cells index.
-	cellPortals: EnvCellPortals[];
-	// Keyed by cells index.
-	cellDrawUnits: BakedStaticDrawUnitsData[];
-	portals: EnvCellPortalInfo[];
-	portalsVertexData: Float32Array;
-	portalsIndexData: Uint32Array;
-	portalsDrawRangesByKind: {
-		[k in keyof EnvCellPortalKind]?: {
-			indexStart: number;
-			indexEnd: number;
-		};
-	};
-}
-
-export interface TextureAtlasPageCommit {
-	pageId: TextureAtlasPageId;
-	width: number;
-	height: number;
-	format: TexturePixelFormat;
-	purpose: TexturePurpose;
-	pageBits: Uint8Array;
-	textures: Array<{ key: TextureKey; bounds: AABB2; owners: Set<OwnerId> }>;
-}
-
-export interface CommitBundle {
-	atlasPages: TextureAtlasPageCommit[];
-	staticCommitsByLayer: {
-		[StaticLandblockLayerKind.Terrain]?: StaticLandblockLayerCommitTerrain;
-		[StaticLandblockLayerKind.Buildings]?: StaticLandblockLayerCommitBuildings;
-		[StaticLandblockLayerKind.Objects]?: StaticLandblockLayerCommitObjects;
-		[StaticLandblockLayerKind.Generated]?: StaticLandblockLayerCommitGenerated;
-		[StaticLandblockLayerKind.EnvCells]?: StaticLandblockLayerCommitEnvCells;
-	} | null;
-}
+type OwnerId =
+	| `${OwnerVariant.LandblockLayer}:${LandblockId}/${LandblockLayerKind}`
+	| `${OwnerVariant.Spawned}:${string}`;
 
 export class GameRuntime {
-	readonly #scene: GameScene = new GameScene();
+	readonly #scene: SceneGraph = new SceneGraph();
+	readonly #textureLeases = new LeaseRegistry<OwnerId, TextureKey>();
+	readonly #sceneLeases = new LeaseRegistry<OwnerId, SceneBundleKey>();
+	readonly #rendererLeases = new LeaseRegistry<OwnerId, RenderResourceKey>();
+	readonly #atlases: AtlasManager = new AtlasManager();
+	readonly #terrain: TerrainBuilder = new TerrainBuilder();
+	readonly #renderer: Renderer;
+	readonly #commitPipeline: CommitPipeline;
+	#camera: Camera = DEFAULT_CAMERA;
 	#lodConfig: LoDConfig = DEFAULT_LOD_CONFIG;
 	#worldAnchor: LandblockId = INVALID_ID;
 	#commitArtifacts: CommitBundle[] = [];
+	#sceneInterest: SceneInterestMap = new Map();
 
-	protected constructor(
-		private readonly renderer: Renderer,
-		private readonly commitPipeline: CommitPipeline,
-	) {}
+	protected constructor(renderer: Renderer, commitPipeline: CommitPipeline) {
+		this.#renderer = renderer;
+		this.#commitPipeline = commitPipeline;
+	}
 
-	public static build(
+	static build(
 		renderer: Renderer,
 		CommitPipeline: CommitPipeline,
 	): GameRuntime {
 		return new GameRuntime(renderer, CommitPipeline);
 	}
 
-	public setLoDConfig(cfg: LoDConfig): void {
+	get lodConfig(): LoDConfig {
+		return Object.assign({}, this.lodConfig);
+	}
+
+	setLoDConfig(cfg: LoDConfig): void {
 		validateLoDConfigOrThrow(cfg);
 		Object.assign(this.#lodConfig, cfg);
 		this.#updateWorldInterest(this.#worldAnchor);
 		// ...
 	}
 
-	public setWorldAnchor(landblockId: LandblockId) {
+	setWorldAnchor(landblockId: LandblockId) {
 		if (this.#worldAnchor === landblockId) return;
 		this.#updateWorldInterest(landblockId);
 		this.#worldAnchor = landblockId;
 	}
 
-	public tick(): void {
+	tick(): void {
 		// Reserved for simulation stepping and deterministic state updates.
 		// Keep no-op for now while frame rendering is the only active path.
 		// TODO: drain commit artifacts.
+		this.#drainCommitArtifacts();
+		this.#scene.setCamera();
 	}
 
-	public updateFrame(): void {
-		this.renderer.drawFrame();
+	updateFrame(): void {
+		const visible = this.#scene.getVisibilityReport();
+
+		this.#renderer.drawFrame();
 	}
 
-	public destroy(): void {
-		this.renderer.destroy();
+	destroy(): void {
+		this.#renderer.destroy();
 	}
 
 	#updateWorldInterest(newAnchor: LandblockId) {
 		const interest = computeNewWorldInterest(newAnchor, this.#lodConfig);
-		const [newLayers, evictedLayers] = diffInterest(
-			// Maybe scene doesn't need to track layers, just owners?
-			// Or we have a dedicated ownership system?
-			this.#scene.getLandblockLayers(),
+		const { newLayers, evictedLayers } = diffSceneInterest(
+			this.#sceneInterest,
 			interest,
 		);
-		for (const layer of evictedLayers) {
-			this.#scene.tearDownLandblockLayer(layer);
-			this.#texturePages.releaseByOwner(landblockLayerToOwnerKey(layer));
+		for (const { id, layer } of evictedLayers) {
+			this.#evictStaticLayer(id, layer);
 		}
 		(async () => {
 			this.#commitArtifacts.push(
-				await this.commitPipeline.prepareLandblockLayers(newLayers),
+				await this.#commitPipeline.prepareLandblockLayers(newLayers),
 			);
 		})();
+	}
+
+	#drainCommitArtifacts() {
+		while (this.#commitArtifacts.length > 0) {
+			const artifact = this.#commitArtifacts.shift()!;
+			// Drop if no longer in scene interest.
+			if (artifact.kind === CommitBundleSourceKind.LandblockLayer) {
+				if (
+					!this.#isInActiveSceneInterest(artifact.landblockId, artifact.layer)
+				) {
+					continue;
+				}
+			}
+			for (const page of artifact.atlasPages) {
+				this.#atlases.upsertPage(page.pageId, {
+					purpose: page.purpose,
+					width: page.width,
+					height: page.height,
+					textures: new Set(page.textures),
+				});
+			}
+
+			if (artifact.kind === CommitBundleSourceKind.LandblockLayer) {
+				if (artifact.layer === LandblockLayerKind.Terrain) {
+					this.#commitTerrainLayer(artifact.landblockId, artifact.commit);
+				}
+				// TODO: Handle other layers.
+			} else {
+				// TODO: Handle spawned...
+			}
+		}
+	}
+
+	#isInActiveSceneInterest(
+		landblockId: LandblockId,
+		layer: LandblockLayerKind,
+	): boolean {
+		return this.#sceneInterest.get(landblockId)?.has(layer) ?? false;
+	}
+
+	#commitTerrainLayer(
+		landblockId: LandblockId,
+		commit: StaticLandblockLayerCommitTerrain,
+	) {
+		this.#terrain.upsert(landblockId, commit);
+	}
+
+	#evictStaticLayer(landblockId: LandblockId, layer: LandblockLayerKind) {
+		const ownerId = landblockLayerToOwnerId(landblockId, layer);
+		this.#sceneLeases.dropOwner(ownerId);
+		for (const bundleKey of this.#sceneLeases.takeEmptyLeases()) {
+			this.#scene.releaseBundle(bundleKey);
+		}
+		this.#textureLeases.dropOwner(ownerId);
+		for (const textureKey of this.#textureLeases.takeEmptyLeases()) {
+			this.#atlases.releaseTexture(textureKey);
+		}
+		this.#rendererLeases.dropOwner(ownerId);
+		for (const resKey of this.#textureLeases.takeEmptyLeases()) {
+			this.#renderer.releaseResource(resKey);
+		}
+		this.#terrain.drop(landblockId);
 	}
 }

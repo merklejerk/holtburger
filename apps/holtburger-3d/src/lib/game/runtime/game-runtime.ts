@@ -1,3 +1,4 @@
+import { log, LogLevel } from "../../logs";
 import {
 	CommitBundleSourceKind,
 	type CommitBundle,
@@ -5,7 +6,12 @@ import {
 	type StaticLandblockLayerCommitTerrain,
 } from "../commit/types";
 import { INVALID_ID, type LandblockId } from "../game-types";
-import type { Renderer, RenderResourceKey } from "../renderer/renderer";
+import { Quat, Vec3 } from "../math/types";
+import type {
+	FramePlan,
+	Renderer,
+	RenderResourceKey,
+} from "../renderer/renderer";
 import { SceneGraph, type SceneBundleKey } from "../scene";
 import { TerrainBuilder } from "../terrain/terrain-builder";
 import { AtlasManager } from "../textures/atlas-manager";
@@ -27,9 +33,12 @@ const DEFAULT_LOD_CONFIG: LoDConfig = {
 };
 
 const DEFAULT_CAMERA: Camera = {
-  position:
-
-}
+	position: Vec3.zero(),
+	rotation: Quat.identity(),
+	near: 0.5,
+	far: 800,
+	fov: 90,
+};
 
 function validateLoDConfigOrThrow(cfg: LoDConfig): void {
 	const { landblockRadius } = cfg;
@@ -109,17 +118,20 @@ export class GameRuntime {
 		// Keep no-op for now while frame rendering is the only active path.
 		// TODO: drain commit artifacts.
 		this.#drainCommitArtifacts();
-		this.#scene.setCamera();
+		this.#scene.setCamera(this.#camera);
 	}
 
 	updateFrame(): void {
-		const visible = this.#scene.getVisibilityReport();
-
-		this.#renderer.drawFrame();
+		this.#scene.updateVisibility();
+		this.#renderer.drawFrame(this.#planFrame());
 	}
 
 	destroy(): void {
 		this.#renderer.destroy();
+	}
+
+	#planFrame(): FramePlan {
+		// ...
 	}
 
 	#updateWorldInterest(newAnchor: LandblockId) {
@@ -132,9 +144,13 @@ export class GameRuntime {
 			this.#evictStaticLayer(id, layer);
 		}
 		(async () => {
-			this.#commitArtifacts.push(
-				await this.#commitPipeline.prepareLandblockLayers(newLayers),
-			);
+			try {
+				this.#commitArtifacts.push(
+					await this.#commitPipeline.prepareLandblockLayers(newLayers),
+				);
+			} catch (err) {
+				log(err, LogLevel.Error);
+			}
 		})();
 	}
 

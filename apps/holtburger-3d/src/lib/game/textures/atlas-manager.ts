@@ -27,10 +27,13 @@ export class AtlasManager {
 	readonly #pages: Map<AtlasPageId, AtlasPage> = new Map();
 
 	upsertPage(id: AtlasPageId, desc: AtlasPageDescription): boolean {
+		void id;
+		void desc;
 		// ... return true if new page
 	}
 
 	releaseTexture(texture: TextureKey): boolean {
+		void texture;
 		// ...
 	}
 }

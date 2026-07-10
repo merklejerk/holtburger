@@ -190,5 +190,7 @@ export type CommitBundle = {
 );
 
 export interface CommitPipeline {
-	prepareLandblockLayers(layers: Set<LandblockIdLayer>): Promise<CommitBundle>;
+	prepareLandblockLayers(
+		layers: ReadonlySet<LandblockIdLayer>,
+	): Promise<readonly CommitBundle[]>;
 }

@@ -6,6 +6,7 @@
 	import ExplorerTools from "./ExplorerTools.svelte";
 	import { GameRuntime } from "../lib/game/runtime/game-runtime";
 	import { WebGL2Renderer } from "../lib/game/renderer/webgl2-renderer";
+	import { StandardCommitPipeline } from "../lib/game/commit/pipeline";
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let frameHandle: number | null = null;
@@ -24,13 +25,15 @@
 		const start = async (): Promise<void> => {
 			try {
 				const renderer = await WebGL2Renderer.build(canvasElement!);
+				const commitPipeline = await StandardCommitPipeline.build();
 
 				if (destroyed) {
 					renderer.destroy();
+					commitPipeline.destroy();
 					return;
 				}
 
-				gameRuntime = GameRuntime.build(renderer);
+				gameRuntime = GameRuntime.build(renderer, commitPipeline);
 
 				const step = (): void => {
 					if (gameRuntime === undefined) {

@@ -3,7 +3,6 @@ import {
 	CommitBundleSourceKind,
 	type CommitBundle,
 	type CommitPipeline,
-	type StaticLandblockLayerCommitTerrain,
 } from "../commit/types";
 import { INVALID_ID, type LandblockId } from "../game-types";
 import { Quat, Vec3 } from "../math/types";
@@ -12,8 +11,18 @@ import type {
 	Renderer,
 	RenderResourceKey,
 } from "../renderer/renderer";
-import { SceneGraph, type SceneBundleKey } from "../scene";
-import { TerrainBuilder } from "../terrain/terrain-builder";
+import {
+	landblockLayerToSceneBundleKey,
+	sceneEntityKey,
+	SceneGraph,
+	spawnedSceneBundleKey,
+	type SceneBundleKey,
+	type VisibleScene,
+} from "../scene";
+import {
+	TerrainService,
+	type TerrainSceneChange,
+} from "../terrain/terrain-service";
 import { AtlasManager } from "../textures/atlas-manager";
 import type { TextureKey } from "../textures/types";
 import { LeaseRegistry } from "./ownership";
@@ -75,7 +84,7 @@ export class GameRuntime {
 	readonly #sceneLeases = new LeaseRegistry<OwnerId, SceneBundleKey>();
 	readonly #rendererLeases = new LeaseRegistry<OwnerId, RenderResourceKey>();
 	readonly #atlases: AtlasManager = new AtlasManager();
-	readonly #terrain: TerrainBuilder = new TerrainBuilder();
+	readonly #terrain: TerrainService = new TerrainService();
 	readonly #renderer: Renderer;
 	readonly #commitPipeline: CommitPipeline;
 	#camera: Camera = DEFAULT_CAMERA;
@@ -118,20 +127,21 @@ export class GameRuntime {
 		// Keep no-op for now while frame rendering is the only active path.
 		// TODO: drain commit artifacts.
 		this.#drainCommitArtifacts();
-		this.#scene.setCamera(this.#camera);
+		this.#updateTerrainResidency();
 	}
 
 	updateFrame(): void {
-		this.#scene.updateVisibility();
-		this.#renderer.drawFrame(this.#planFrame());
+		const visibleScene = this.#scene.updateVisibility(this.#camera);
+		this.#renderer.drawFrame(this.#planFrame(visibleScene));
 	}
 
 	destroy(): void {
 		this.#renderer.destroy();
 	}
 
-	#planFrame(): FramePlan {
-		// ...
+	#planFrame(visibleScene: VisibleScene): FramePlan {
+		void visibleScene;
+		return {};
 	}
 
 	#updateWorldInterest(newAnchor: LandblockId) {
@@ -140,6 +150,7 @@ export class GameRuntime {
 			this.#sceneInterest,
 			interest,
 		);
+		this.#sceneInterest = interest;
 		for (const { id, layer } of evictedLayers) {
 			this.#evictStaticLayer(id, layer);
 		}
@@ -175,12 +186,73 @@ export class GameRuntime {
 			}
 
 			if (artifact.kind === CommitBundleSourceKind.LandblockLayer) {
-				if (artifact.layer === LandblockLayerKind.Terrain) {
-					this.#commitTerrainLayer(artifact.landblockId, artifact.commit);
-				}
-				// TODO: Handle other layers.
+				this.#commitLandblockLayer(artifact);
 			} else {
-				// TODO: Handle spawned...
+				this.#commitSpawnedEntity(artifact);
+			}
+		}
+	}
+
+	#commitLandblockLayer(
+		artifact: Extract<
+			CommitBundle,
+			{ kind: CommitBundleSourceKind.LandblockLayer }
+		>,
+	): void {
+		const bundleKey = landblockLayerToSceneBundleKey(
+			artifact.landblockId,
+			artifact.layer,
+		);
+
+		if (artifact.layer === LandblockLayerKind.Terrain) {
+			this.#terrain.installSource(artifact.landblockId, artifact.commit);
+			this.#scene.createTerrainBundle(bundleKey);
+			return;
+		}
+
+		this.#scene.createStaticBundle(bundleKey);
+		// Static-authored dynamic entities will be added under this bundle key.
+	}
+
+	#commitSpawnedEntity(
+		artifact: Extract<CommitBundle, { kind: CommitBundleSourceKind.Spawned }>,
+	): void {
+		const bundleKey = spawnedSceneBundleKey(artifact.id);
+		this.#scene.createDynamicBundle(bundleKey);
+		this.#scene.createDynamicEntity(
+			bundleKey,
+			sceneEntityKey(`spawned/${artifact.id}`),
+			"runtime-spawned",
+		);
+	}
+
+	#updateTerrainResidency(): void {
+		this.#terrain.updateResidency({
+			camera: this.#camera,
+			config: {
+				landblockRadius: this.#lodConfig.landblockRadius,
+			},
+		});
+		this.#applyTerrainSceneChanges(this.#terrain.drainSceneChanges());
+	}
+
+	#applyTerrainSceneChanges(changes: readonly TerrainSceneChange[]): void {
+		for (const change of changes) {
+			const landblockId =
+				change.kind === "upsert-landblock-mesh"
+					? change.mesh.landblockId
+					: change.landblockId;
+			const entityKey = sceneEntityKey(`terrain/${landblockId}`);
+			const bundleKey = landblockLayerToSceneBundleKey(
+				landblockId,
+				LandblockLayerKind.Terrain,
+			);
+
+			if (change.kind === "upsert-landblock-mesh") {
+				void change.mesh;
+				this.#scene.upsertTerrainEntity(bundleKey, entityKey);
+			} else {
+				this.#scene.destroyEntity(entityKey);
 			}
 		}
 	}
@@ -192,18 +264,14 @@ export class GameRuntime {
 		return this.#sceneInterest.get(landblockId)?.has(layer) ?? false;
 	}
 
-	#commitTerrainLayer(
-		landblockId: LandblockId,
-		commit: StaticLandblockLayerCommitTerrain,
-	) {
-		this.#terrain.upsert(landblockId, commit);
-	}
-
 	#evictStaticLayer(landblockId: LandblockId, layer: LandblockLayerKind) {
 		const ownerId = landblockLayerToOwnerId(landblockId, layer);
+		this.#scene.destroyBundle(
+			landblockLayerToSceneBundleKey(landblockId, layer),
+		);
 		this.#sceneLeases.dropOwner(ownerId);
 		for (const bundleKey of this.#sceneLeases.takeEmptyLeases()) {
-			this.#scene.releaseBundle(bundleKey);
+			this.#scene.destroyBundle(bundleKey);
 		}
 		this.#textureLeases.dropOwner(ownerId);
 		for (const textureKey of this.#textureLeases.takeEmptyLeases()) {
@@ -213,6 +281,8 @@ export class GameRuntime {
 		for (const resKey of this.#textureLeases.takeEmptyLeases()) {
 			this.#renderer.releaseResource(resKey);
 		}
-		this.#terrain.drop(landblockId);
+		if (layer === LandblockLayerKind.Terrain) {
+			this.#terrain.removeSource(landblockId);
+		}
 	}
 }

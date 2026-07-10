@@ -91,9 +91,9 @@ export class GameRuntime {
 
 	static build(
 		renderer: Renderer,
-		CommitPipeline: CommitPipeline,
+		commitPipeline: CommitPipeline,
 	): GameRuntime {
-		return new GameRuntime(renderer, CommitPipeline);
+		return new GameRuntime(renderer, commitPipeline);
 	}
 
 	get lodConfig(): LoDConfig {
@@ -146,7 +146,7 @@ export class GameRuntime {
 		(async () => {
 			try {
 				this.#commitArtifacts.push(
-					await this.#commitPipeline.prepareLandblockLayers(newLayers),
+					...(await this.#commitPipeline.prepareLandblockLayers(newLayers)),
 				);
 			} catch (err) {
 				log(err, LogLevel.Error);

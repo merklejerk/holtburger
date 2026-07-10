@@ -49,7 +49,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#gl.clear(this.#gl.COLOR_BUFFER_BIT | this.#gl.DEPTH_BUFFER_BIT);
 	}
 
-	destroy(): void {
+	async destroy(): Promise<void> {
 		const loseContext = this.#gl.getExtension("WEBGL_lose_context");
 		loseContext?.loseContext();
 	}

@@ -24,5 +24,26 @@ export function diffSceneInterest(
 	from: SceneInterestMap,
 	to: SceneInterestMap,
 ): SceneInterestDiff {
-	// ...
+	return {
+		newLayers: subtractSceneInterest(to, from),
+		evictedLayers: subtractSceneInterest(from, to),
+	};
+}
+
+function subtractSceneInterest(
+	source: SceneInterestMap,
+	other: SceneInterestMap,
+): Set<LandblockIdLayer> {
+	const difference: LandblockIdLayer[] = [];
+
+	for (const [id, layers] of source) {
+		const otherLayers = other.get(id);
+		for (const layer of layers) {
+			if (!otherLayers?.has(layer)) {
+				difference.push({ id, layer });
+			}
+		}
+	}
+
+	return new Set(difference);
 }

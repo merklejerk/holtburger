@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vitest";
-import {
-	landblockLayerToSceneBundleKey,
-	sceneEntityKey,
-	SceneGraph,
-	spawnedSceneBundleKey,
-} from ".";
-import { LandblockLayerKind } from "../runtime/scene-interest";
-import { Quat, Vec3 } from "../math/types";
+import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
+import type { SceneNodeId } from ".";
+import { SceneGraph } from ".";
 
 const camera = {
 	far: 800,
@@ -16,60 +11,113 @@ const camera = {
 	rotation: Quat.identity(),
 };
 
+const rootPlacement = {
+	envCellId: null,
+	landblockId: "0001",
+	localTransform: Mat4.identity(),
+};
+
+const rootInput = {
+	...rootPlacement,
+	localBounds: null,
+	parentId: null,
+};
+
+const boundedChildFields = {
+	localBounds: AABB3.zero(),
+	localTransform: Mat4.identity(),
+};
+
 describe("SceneGraph", () => {
-	it("keeps static-derived dynamic entities under the static bundle", () => {
+	it("assigns root placement to transform descendants", () => {
 		const scene = new SceneGraph();
-		const bundleKey = landblockLayerToSceneBundleKey(
-			"0001",
-			LandblockLayerKind.Buildings,
+		const rootId = scene.createNode(rootInput);
+		const childId = scene.createNode({
+			...boundedChildFields,
+			parentId: rootId,
+		});
+
+		expect(scene.getNode(rootId)).toMatchObject({
+			envCellId: rootPlacement.envCellId,
+			landblockId: rootPlacement.landblockId,
+			localTransform: rootPlacement.localTransform,
+			parentId: null,
+		});
+		expect(scene.getNode(childId)?.parentId).toBe(rootId);
+		expect(scene.getRootPlacement(childId)).toEqual(rootPlacement);
+	});
+
+	it("indexes bounded nodes but permits empty transform nodes", () => {
+		const scene = new SceneGraph();
+		const rootId = scene.createNode(rootInput);
+		const childId = scene.createNode({
+			...boundedChildFields,
+			parentId: rootId,
+		});
+
+		expect(scene.updateVisibility(camera).nodeIds).toEqual([childId]);
+
+		scene.updateBounds(childId, null);
+		expect(scene.updateVisibility(camera).nodeIds).toEqual([]);
+	});
+
+	it("destroys transform descendants with their parent", () => {
+		const scene = new SceneGraph();
+		const rootId = scene.createNode(rootInput);
+		const childId = scene.createNode({
+			...boundedChildFields,
+			parentId: rootId,
+		});
+		const grandchildId = scene.createNode({
+			...boundedChildFields,
+			parentId: childId,
+		});
+
+		const destroyed = scene.destroyNode(rootId);
+		expect(new Set(destroyed)).toEqual(
+			new Set([rootId, childId, grandchildId]),
 		);
-		const staticEntity = sceneEntityKey("building/1");
-		const dynamicEntity = sceneEntityKey("weenie/1");
-
-		scene.createStaticBundle(bundleKey);
-		scene.createStaticEntity(bundleKey, staticEntity);
-		scene.createDynamicEntity(bundleKey, dynamicEntity, "static-derived");
-
-		expect(scene.updateVisibility(camera).entityKeys).toEqual([
-			staticEntity,
-			dynamicEntity,
-		]);
+		expect(scene.updateVisibility(camera).nodeIds).toEqual([]);
 	});
 
-	it("gives a spawned dynamic entity its own bundle", () => {
+	it("rejects destruction of a parented node", () => {
 		const scene = new SceneGraph();
-		const bundleKey = spawnedSceneBundleKey("entity-1");
-		const entityKey = sceneEntityKey("spawned/entity-1");
+		const rootId = scene.createNode(rootInput);
+		const childId = scene.createNode({
+			...boundedChildFields,
+			parentId: rootId,
+		});
 
-		scene.createDynamicBundle(bundleKey);
-		scene.createDynamicEntity(bundleKey, entityKey, "runtime-spawned");
-
-		expect(scene.updateVisibility(camera).entityKeys).toEqual([entityKey]);
-	});
-
-	it("replaces a bundle and removes its old entities", () => {
-		const scene = new SceneGraph();
-		const bundleKey = landblockLayerToSceneBundleKey(
-			"0001",
-			LandblockLayerKind.Objects,
+		expect(() => scene.destroyNode(childId)).toThrow(
+			`Cannot destroy parented scene node ${childId}.`,
 		);
-
-		scene.createStaticBundle(bundleKey);
-		scene.createStaticEntity(bundleKey, sceneEntityKey("objects/old"));
-		scene.createStaticBundle(bundleKey);
-
-		expect(scene.updateVisibility(camera).entityKeys).toEqual([]);
+		expect(scene.getNode(rootId)).toBeDefined();
+		expect(scene.getNode(childId)).toBeDefined();
 	});
 
-	it("requires a bundle before creating an entity", () => {
+	it("updates root placement atomically", () => {
+		const scene = new SceneGraph();
+		const rootId = scene.createNode(rootInput);
+		const envCellPlacement = {
+			envCellId: "cell-1",
+			landblockId: "0002",
+			localTransform: Mat4.identity(),
+		};
+
+		scene.updateRootPlacement(rootId, envCellPlacement);
+
+		expect(scene.getNode(rootId)?.id).toBe(rootId);
+		expect(scene.getRootPlacement(rootId)).toEqual(envCellPlacement);
+	});
+
+	it("requires a parent node to exist", () => {
 		const scene = new SceneGraph();
 
 		expect(() =>
-			scene.createDynamicEntity(
-				spawnedSceneBundleKey("missing"),
-				sceneEntityKey("spawned/missing"),
-				"runtime-spawned",
-			),
-		).toThrow("without bundle");
+			scene.createNode({
+				...boundedChildFields,
+				parentId: "scene-node:missing" as SceneNodeId,
+			}),
+		).toThrow("does not exist");
 	});
 });

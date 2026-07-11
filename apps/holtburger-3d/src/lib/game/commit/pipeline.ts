@@ -2,6 +2,7 @@ import {
 	CommitBundleSourceKind,
 	type CommitBundle,
 	type CommitPipeline,
+	type DynamicEntityCommit,
 	type StaticLandblockLayerCommitTerrain,
 } from "./types";
 import {
@@ -18,6 +19,7 @@ interface ResolvedTerrainSource {
 /** Source data resolved for one layer that will be baked for rendering. */
 interface ResolvedRenderableLayerSource {
 	readonly layer: LandblockIdLayer;
+	readonly dynamicEntities: readonly DynamicEntityCommit[];
 }
 
 /** Texture placement and residency work planned for one resolved layer. */
@@ -77,7 +79,7 @@ export class StandardCommitPipeline implements CommitPipeline {
 		const baked = await this.#bakeLayer(texturePlan);
 		const atlasPages = await this.#buildAtlasPages(texturePlan);
 
-		return this.#assembleRenderableCommitBundle(layer, baked, atlasPages);
+		return this.#assembleRenderableCommitBundle(source, baked, atlasPages);
 	}
 
 	async #resolveTerrainSource(
@@ -128,16 +130,17 @@ export class StandardCommitPipeline implements CommitPipeline {
 			landblockId: source.layer.id,
 			layer: LandblockLayerKind.Terrain,
 			commit: source.commit,
+			dynamicEntities: [],
 		};
 	}
 
 	#assembleRenderableCommitBundle(
-		layer: LandblockIdLayer,
+		source: ResolvedRenderableLayerSource,
 		baked: BakedLayer,
 		atlasPages: PreparedAtlasPages,
 	): CommitBundle {
 		// Convert baked domain data into the runtime commit union.
-		void layer;
+		void source;
 		void baked;
 		void atlasPages;
 		throw new Error("Commit bundle assembly is not implemented.");
@@ -145,5 +148,5 @@ export class StandardCommitPipeline implements CommitPipeline {
 }
 
 function describeLayer(layer: LandblockIdLayer): string {
-	return `landblock ${layer.id} layer ${LandblockLayerKind[layer.layer]}`;
+	return `landblock ${layer.id} layer ${layer.id}`;
 }

@@ -2,15 +2,10 @@ import type { StaticLandblockLayerCommitTerrain } from "../commit/types";
 import type { LandblockId } from "../game-types";
 import type { Camera } from "../runtime/types";
 
-/** Terrain-specific residency policy passed from the game runtime. */
-export interface TerrainResidencyConfig {
-	readonly landblockRadius: number;
-}
-
 /** Camera and policy inputs used to select generated terrain tiles. */
 export interface TerrainResidencyInput {
 	readonly camera: Camera;
-	readonly config: TerrainResidencyConfig;
+	readonly landblockRadius: number;
 }
 
 /** Generated landblock mesh identity until renderer payloads are defined. */

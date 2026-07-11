@@ -1,18 +1,18 @@
 import { type LandblockId } from "../game-types";
 
 export enum LandblockLayerKind {
-	Terrain,
-	Buildings,
-	Objects,
-	Generated,
-	EnvCells,
+	Terrain = "terrain",
+	Buildings = "buildings",
+	Objects = "objects",
+	Generated = "generated",
+	EnvCells = "env-cells",
 }
 
 export type SceneInterestMap = Map<LandblockId, Set<LandblockLayerKind>>;
 
 export interface LandblockIdLayer {
-	id: LandblockId;
-	layer: LandblockLayerKind;
+	readonly id: LandblockId;
+	readonly layer: LandblockLayerKind;
 }
 
 export interface SceneInterestDiff {

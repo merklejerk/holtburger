@@ -7,6 +7,7 @@
 	import { GameRuntime } from "../lib/game/runtime/game-runtime";
 	import { WebGL2Renderer } from "../lib/game/renderer/webgl2-renderer";
 	import { StandardCommitPipeline } from "../lib/game/commit/pipeline";
+	import { WebGL2ResourceManager } from "../lib/game/renderer/webgl2-resource-manager";
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let frameHandle: number | null = null;
@@ -25,15 +26,22 @@
 		const start = async (): Promise<void> => {
 			try {
 				const renderer = await WebGL2Renderer.build(canvasElement!);
+				const renderResources = await WebGL2ResourceManager.build();
 				const commitPipeline = await StandardCommitPipeline.build();
 
 				if (destroyed) {
-					renderer.destroy();
-					commitPipeline.destroy();
+					await gameRuntime?.destroy();
+					await renderer.destroy();
+					await commitPipeline.destroy();
+					await renderResources.destroy();
 					return;
 				}
 
-				gameRuntime = GameRuntime.build(renderer, commitPipeline);
+				gameRuntime = GameRuntime.build(
+					renderResources,
+					renderer,
+					commitPipeline,
+				);
 
 				const step = (): void => {
 					if (gameRuntime === undefined) {

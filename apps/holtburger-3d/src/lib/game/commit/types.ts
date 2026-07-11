@@ -1,6 +1,7 @@
-import type { EnvCellId, LandblockId } from "../game-types";
+import type { DatAssetId, EnvCellId, LandblockId } from "../game-types";
 import type { AABB3, Mat4 } from "../math/types";
 import type { ColorF } from "../pixels/types";
+import type { ScenePlacement } from "../scene";
 import type {
 	LandblockIdLayer,
 	LandblockLayerKind,
@@ -14,15 +15,6 @@ import type {
 	TexturePixelFormat,
 	TexturePurpose,
 } from "../textures/types";
-
-export enum TextureAtlasScope {
-	Terrain,
-	Buildings,
-	Objects,
-	Generated,
-	EnvCells,
-	ManualSpawn,
-}
 
 export interface TerrainFeatures {
 	roadMaskTexture: TextureKey;
@@ -39,7 +31,7 @@ export interface StaticLandblockLayerCommitTerrain {
 	featureIndexes: Uint8Array;
 }
 
-export enum TextureWrapPolcy {
+export enum TextureWrapPolicy {
 	Wrap,
 	Clamp,
 	Repeat,
@@ -59,8 +51,8 @@ export type StaticDrawUnitData = {
 	indexEnd: number;
 	color: ColorF;
 	detailTexture: TextureKey | null;
-	colorWrapS: TextureWrapPolcy;
-	colorWrapT: TextureWrapPolcy;
+	colorWrapS: TextureWrapPolicy;
+	colorWrapT: TextureWrapPolicy;
 } & ColorTextureVariant;
 
 export interface BakedStaticDrawUnitsData {
@@ -73,8 +65,8 @@ export type StaticInstancePatchData = {
 	indexStart: number;
 	indexEnd: number;
 	detailTexture: TextureKey | null;
-	colorWrapS: TextureWrapPolcy;
-	colorWrapT: TextureWrapPolcy;
+	colorWrapS: TextureWrapPolicy;
+	colorWrapT: TextureWrapPolicy;
 	instanceData: Array<{
 		transform: Mat4;
 		color: ColorF;
@@ -82,15 +74,30 @@ export type StaticInstancePatchData = {
 } & ColorTextureVariant;
 
 export interface InstancedStaticData {
-	verexData: Float32Array;
+	vertexData: Float32Array;
 	indexData: Uint32Array;
-	patches: StaticInstancePatchData;
+	patches: StaticInstancePatchData[];
 }
 
 export interface EnvCellInfo {
 	id: EnvCellId;
 	bounds: AABB3;
 	bsp: unknown;
+}
+
+/** Visual source facts needed to prepare a dynamic scene node. */
+export interface DynamicVisualSource {
+	readonly sourceAssetId: DatAssetId;
+	readonly setupModelId: DatAssetId;
+	readonly defaultAnimationId: DatAssetId | null;
+}
+
+/** Materialization input for one dynamic entity emitted by a layer commit. */
+export interface DynamicEntityCommit {
+	/** Visual assets consumed by the renderer bridge. */
+	readonly visual: DynamicVisualSource;
+	/** Root placement consumed by the scene graph. */
+	readonly placement: ScenePlacement;
 }
 
 export interface EnvCellPortals {
@@ -104,7 +111,7 @@ export enum EnvCellPortalKind {
 	IndoorToIndoor,
 }
 
-interface EnvCellPortalInfo {
+export interface EnvCellPortalInfo {
 	kind: EnvCellPortalKind;
 	bounds: AABB3;
 }
@@ -115,18 +122,19 @@ export type StaticLandblockLayerCommitGenerated = InstancedStaticData;
 export interface StaticLandblockLayerCommitEnvCells {
 	cells: EnvCellInfo[];
 	// Keyed by cells index.
-	cellPortals: EnvCellPortals[];
+	cellPortalsByIndex: EnvCellPortals[];
 	// Keyed by cells index.
-	cellDrawUnits: BakedStaticDrawUnitsData[];
+	cellDrawUnitsByIndex: BakedStaticDrawUnitsData[];
 	portals: EnvCellPortalInfo[];
 	portalsVertexData: Float32Array;
 	portalsIndexData: Uint32Array;
-	portalsDrawRangesByKind: {
-		[k in keyof EnvCellPortalKind]?: {
+	portalsDrawRangesByKind: Map<
+		EnvCellPortalKind,
+		{
 			indexStart: number;
 			indexEnd: number;
-		};
-	};
+		}
+	>;
 }
 
 export interface TextureAtlasPageCommit {
@@ -155,11 +163,15 @@ export interface CommitBundleLandblockLayerFields<
 	landblockId: LandblockId;
 	layer: TLayerKind;
 	commit: TLayerCommit;
+	/** Dynamic entities promoted out of this static layer. */
+	dynamicEntities: readonly DynamicEntityCommit[];
 }
 
-export interface CommitBundleManualFields {
+export interface CommitBundleSpawnFields {
 	kind: CommitBundleSourceKind.Spawned;
 	id: string;
+	/** Root placement facts required before the spawned node can enter the graph. */
+	placement: ScenePlacement;
 	commit: unknown;
 }
 
@@ -186,7 +198,7 @@ export type CommitBundle = {
 			LandblockLayerKind.EnvCells,
 			StaticLandblockLayerCommitEnvCells
 	  >
-	| CommitBundleManualFields
+	| CommitBundleSpawnFields
 );
 
 export interface CommitPipeline {

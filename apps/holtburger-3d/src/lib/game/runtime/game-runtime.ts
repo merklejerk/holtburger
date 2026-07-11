@@ -3,20 +3,19 @@ import {
 	CommitBundleSourceKind,
 	type CommitBundle,
 	type CommitPipeline,
+	type DynamicEntityCommit,
 } from "../commit/types";
-import { INVALID_ID, type LandblockId } from "../game-types";
-import { Quat, Vec3 } from "../math/types";
+import { INVALID_ID, type EnvCellId, type LandblockId } from "../game-types";
+import { Mat4, Quat, Vec3, type AABB3 } from "../math/types";
+import type { FramePlan, Renderer } from "../renderer/renderer";
 import type {
-	FramePlan,
-	Renderer,
+	RendererResourceManager,
 	RenderResourceKey,
-} from "../renderer/renderer";
+} from "../renderer/resource-manager";
 import {
-	landblockLayerToSceneBundleKey,
-	sceneEntityKey,
 	SceneGraph,
-	spawnedSceneBundleKey,
-	type SceneBundleKey,
+	type SceneNodeId,
+	type ScenePlacement,
 	type VisibleScene,
 } from "../scene";
 import {
@@ -74,6 +73,10 @@ export function landblockLayerToOwnerId(
 	return `${OwnerVariant.LandblockLayer}:${landblockId}/${layer}`;
 }
 
+function spawnedEntityToOwnerId(entityId: string): OwnerId {
+	return `${OwnerVariant.Spawned}:${entityId}`;
+}
+
 type OwnerId =
 	| `${OwnerVariant.LandblockLayer}:${LandblockId}/${LandblockLayerKind}`
 	| `${OwnerVariant.Spawned}:${string}`;
@@ -81,10 +84,15 @@ type OwnerId =
 export class GameRuntime {
 	readonly #scene: SceneGraph = new SceneGraph();
 	readonly #textureLeases = new LeaseRegistry<OwnerId, TextureKey>();
-	readonly #sceneLeases = new LeaseRegistry<OwnerId, SceneBundleKey>();
 	readonly #rendererLeases = new LeaseRegistry<OwnerId, RenderResourceKey>();
-	readonly #atlases: AtlasManager = new AtlasManager();
+	readonly #sceneNodeLeases = new LeaseRegistry<OwnerId, SceneNodeId>();
+	readonly #atlases: AtlasManager;
+	/** Domain identity lookup for independently spawned dynamic roots. */
+	readonly #dynamicNodeIdsByEntity = new Map<string, SceneNodeId>();
+	/** Stable scene nodes carrying generated terrain meshes. */
+	readonly #terrainNodeIds = new Map<LandblockId, SceneNodeId>();
 	readonly #terrain: TerrainService = new TerrainService();
+	readonly #renderResources: RendererResourceManager;
 	readonly #renderer: Renderer;
 	readonly #commitPipeline: CommitPipeline;
 	#camera: Camera = DEFAULT_CAMERA;
@@ -93,20 +101,27 @@ export class GameRuntime {
 	#commitArtifacts: CommitBundle[] = [];
 	#sceneInterest: SceneInterestMap = new Map();
 
-	protected constructor(renderer: Renderer, commitPipeline: CommitPipeline) {
+	protected constructor(
+		renderResources: RendererResourceManager,
+		renderer: Renderer,
+		commitPipeline: CommitPipeline,
+	) {
+		this.#renderResources = renderResources;
 		this.#renderer = renderer;
 		this.#commitPipeline = commitPipeline;
+		this.#atlases = new AtlasManager(renderResources);
 	}
 
 	static build(
+		renderResources: RendererResourceManager,
 		renderer: Renderer,
 		commitPipeline: CommitPipeline,
 	): GameRuntime {
-		return new GameRuntime(renderer, commitPipeline);
+		return new GameRuntime(renderResources, renderer, commitPipeline);
 	}
 
 	get lodConfig(): LoDConfig {
-		return Object.assign({}, this.lodConfig);
+		return Object.assign({}, this.#lodConfig);
 	}
 
 	setLoDConfig(cfg: LoDConfig): void {
@@ -135,9 +150,17 @@ export class GameRuntime {
 		this.#renderer.drawFrame(this.#planFrame(visibleScene));
 	}
 
-	destroy(): void {
-		this.#renderer.destroy();
+	updateDynamicEntityPlacement(
+		entityId: string,
+		placement: ScenePlacement,
+	): boolean {
+		const nodeId = this.#dynamicNodeIdsByEntity.get(entityId);
+		if (!nodeId) return false;
+		this.#scene.updateRootPlacement(nodeId, placement);
+		return true;
 	}
+
+	async destroy() {}
 
 	#planFrame(visibleScene: VisibleScene): FramePlan {
 		void visibleScene;
@@ -181,7 +204,7 @@ export class GameRuntime {
 					purpose: page.purpose,
 					width: page.width,
 					height: page.height,
-					textures: new Set(page.textures),
+					textures: page.textures,
 				});
 			}
 
@@ -199,39 +222,34 @@ export class GameRuntime {
 			{ kind: CommitBundleSourceKind.LandblockLayer }
 		>,
 	): void {
-		const bundleKey = landblockLayerToSceneBundleKey(
+		const ownerId = landblockLayerToOwnerId(
 			artifact.landblockId,
 			artifact.layer,
 		);
+		this.#releaseSceneOwner(ownerId);
 
 		if (artifact.layer === LandblockLayerKind.Terrain) {
+			this.#terrainNodeIds.delete(artifact.landblockId);
 			this.#terrain.installSource(artifact.landblockId, artifact.commit);
-			this.#scene.createTerrainBundle(bundleKey);
 			return;
 		}
 
-		this.#scene.createStaticBundle(bundleKey);
-		// Static-authored dynamic entities will be added under this bundle key.
+		this.#materializeLayerNodes(ownerId, artifact);
 	}
 
 	#commitSpawnedEntity(
 		artifact: Extract<CommitBundle, { kind: CommitBundleSourceKind.Spawned }>,
 	): void {
-		const bundleKey = spawnedSceneBundleKey(artifact.id);
-		this.#scene.createDynamicBundle(bundleKey);
-		this.#scene.createDynamicEntity(
-			bundleKey,
-			sceneEntityKey(`spawned/${artifact.id}`),
-			"runtime-spawned",
-		);
+		const ownerId = spawnedEntityToOwnerId(artifact.id);
+		this.#releaseSceneOwner(ownerId);
+		const nodeId = this.#createOwnedRoot(ownerId, artifact.placement, null);
+		this.#dynamicNodeIdsByEntity.set(artifact.id, nodeId);
 	}
 
 	#updateTerrainResidency(): void {
 		this.#terrain.updateResidency({
 			camera: this.#camera,
-			config: {
-				landblockRadius: this.#lodConfig.landblockRadius,
-			},
+			landblockRadius: this.#lodConfig.landblockRadius,
 		});
 		this.#applyTerrainSceneChanges(this.#terrain.drainSceneChanges());
 	}
@@ -242,18 +260,91 @@ export class GameRuntime {
 				change.kind === "upsert-landblock-mesh"
 					? change.mesh.landblockId
 					: change.landblockId;
-			const entityKey = sceneEntityKey(`terrain/${landblockId}`);
-			const bundleKey = landblockLayerToSceneBundleKey(
+			const ownerId = landblockLayerToOwnerId(
 				landblockId,
 				LandblockLayerKind.Terrain,
 			);
 
 			if (change.kind === "upsert-landblock-mesh") {
 				void change.mesh;
-				this.#scene.upsertTerrainEntity(bundleKey, entityKey);
+				let nodeId = this.#terrainNodeIds.get(landblockId);
+				if (nodeId === undefined) {
+					nodeId = this.#createOwnedRoot(
+						ownerId,
+						createLandblockPlacement(landblockId),
+						null,
+					);
+					this.#terrainNodeIds.set(landblockId, nodeId);
+				}
 			} else {
-				this.#scene.destroyEntity(entityKey);
+				this.#terrainNodeIds.delete(landblockId);
+				this.#releaseSceneOwner(ownerId);
 			}
+		}
+	}
+
+	#materializeLayerNodes(
+		ownerId: OwnerId,
+		artifact: Extract<
+			CommitBundle,
+			{ kind: CommitBundleSourceKind.LandblockLayer }
+		>,
+	): void {
+		if (artifact.layer === LandblockLayerKind.EnvCells) {
+			for (const cell of artifact.commit.cells) {
+				this.#createOwnedRoot(
+					ownerId,
+					createEnvCellPlacement(artifact.landblockId, cell.id),
+					cell.bounds,
+				);
+			}
+		} else {
+			// The current commits contain one baked render payload per non-env-cell layer.
+			this.#createOwnedRoot(
+				ownerId,
+				createLandblockPlacement(artifact.landblockId),
+				null,
+			);
+		}
+
+		for (const dynamic of artifact.dynamicEntities) {
+			this.#materializeDynamicRoot(ownerId, artifact.landblockId, dynamic);
+		}
+	}
+
+	#materializeDynamicRoot(
+		ownerId: OwnerId,
+		landblockId: LandblockId,
+		dynamic: DynamicEntityCommit,
+	): void {
+		if (dynamic.placement.landblockId !== landblockId) {
+			throw new Error(
+				`Dynamic placement belongs to ${dynamic.placement.landblockId}, expected ${landblockId}.`,
+			);
+		}
+		// Renderer materialization will consume the visual source and attach resources.
+		void dynamic.visual;
+		this.#createOwnedRoot(ownerId, dynamic.placement, null);
+	}
+
+	#createOwnedRoot(
+		ownerId: OwnerId,
+		placement: ScenePlacement,
+		localBounds: AABB3 | null,
+	): SceneNodeId {
+		const nodeId = this.#scene.createNode({
+			localBounds,
+			parentId: null,
+			...placement,
+		});
+		this.#sceneNodeLeases.addLease(ownerId, nodeId);
+		return nodeId;
+	}
+
+	#releaseSceneOwner(ownerId: OwnerId): void {
+		this.#sceneNodeLeases.dropOwner(ownerId);
+		for (const nodeId of this.#sceneNodeLeases.takeEmptyLeases()) {
+			this.#scene.destroyNode(nodeId);
 		}
 	}
 
@@ -266,23 +357,37 @@ export class GameRuntime {
 
 	#evictStaticLayer(landblockId: LandblockId, layer: LandblockLayerKind) {
 		const ownerId = landblockLayerToOwnerId(landblockId, layer);
-		this.#scene.destroyBundle(
-			landblockLayerToSceneBundleKey(landblockId, layer),
-		);
-		this.#sceneLeases.dropOwner(ownerId);
-		for (const bundleKey of this.#sceneLeases.takeEmptyLeases()) {
-			this.#scene.destroyBundle(bundleKey);
-		}
+		this.#releaseSceneOwner(ownerId);
 		this.#textureLeases.dropOwner(ownerId);
 		for (const textureKey of this.#textureLeases.takeEmptyLeases()) {
 			this.#atlases.releaseTexture(textureKey);
 		}
 		this.#rendererLeases.dropOwner(ownerId);
-		for (const resKey of this.#textureLeases.takeEmptyLeases()) {
-			this.#renderer.releaseResource(resKey);
+		for (const resKey of this.#rendererLeases.takeEmptyLeases()) {
+			this.#renderResources.releaseResource(resKey);
 		}
 		if (layer === LandblockLayerKind.Terrain) {
+			this.#terrainNodeIds.delete(landblockId);
 			this.#terrain.removeSource(landblockId);
 		}
 	}
+}
+
+function createLandblockPlacement(landblockId: LandblockId): ScenePlacement {
+	return {
+		envCellId: null,
+		landblockId,
+		localTransform: Mat4.identity(),
+	};
+}
+
+function createEnvCellPlacement(
+	landblockId: LandblockId,
+	envCellId: EnvCellId,
+): ScenePlacement {
+	return {
+		envCellId,
+		landblockId,
+		localTransform: Mat4.identity(),
+	};
 }

@@ -1,7 +1,8 @@
-import type { DatAssetId, EnvCellId, LandblockId } from "../game-types";
+import type { EnvCellId, LandblockId } from "../game-types";
 import type { AABB3, Mat4 } from "../math/types";
 import type { ColorF } from "../pixels/types";
 import type { ScenePlacement } from "../scene";
+import type { ResolvedObjectResident } from "../presentation/types";
 import type {
 	LandblockIdLayer,
 	LandblockLayerKind,
@@ -85,20 +86,8 @@ export interface EnvCellInfo {
 	bsp: unknown;
 }
 
-/** Visual source facts needed to prepare a dynamic scene node. */
-export interface DynamicVisualSource {
-	readonly sourceAssetId: DatAssetId;
-	readonly setupModelId: DatAssetId;
-	readonly defaultAnimationId: DatAssetId | null;
-}
-
-/** Materialization input for one dynamic entity emitted by a layer commit. */
-export interface DynamicEntityCommit {
-	/** Visual assets consumed by the renderer bridge. */
-	readonly visual: DynamicVisualSource;
-	/** Root placement consumed by the scene graph. */
-	readonly placement: ScenePlacement;
-}
+/** Resolved dynamic resident emitted beside a static layer commit. */
+export type DynamicEntityCommit = ResolvedObjectResident;
 
 export interface EnvCellPortals {
 	inPortalIdxs: number[];

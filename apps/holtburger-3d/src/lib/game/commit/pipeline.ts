@@ -1,47 +1,75 @@
-import {
-	CommitBundleSourceKind,
-	type CommitBundle,
-	type CommitPipeline,
-	type DynamicEntityCommit,
-	type StaticLandblockLayerCommitTerrain,
-} from "./types";
+import type { HostAssetBridge } from "../../host/asset-bridge";
+import type { DatAssetId } from "../game-types";
+import type {
+	ResolvedEnvCellLayerSource,
+	ResolvedLandblockLayerSource,
+	ResolvedObjectLayerSource,
+	ResolvedTerrainLayerSource,
+} from "../presentation/types";
 import {
 	LandblockLayerKind,
 	type LandblockIdLayer,
 } from "../runtime/scene-interest";
+import type { TexturePlacement } from "../textures/atlas-manager";
+import type { TextureKey } from "../textures/types";
+import {
+	CommitBundleSourceKind,
+	type CommitBundle,
+	type CommitPipeline,
+	type StaticLandblockLayerCommitBuildings,
+	type StaticLandblockLayerCommitEnvCells,
+	type StaticLandblockLayerCommitGenerated,
+	type StaticLandblockLayerCommitObjects,
+	type StaticLandblockLayerCommitTerrain,
+} from "./types";
 
-/** Canonical terrain data retained for runtime-generated terrain LODs. */
-interface ResolvedTerrainSource {
-	readonly layer: LandblockIdLayer;
-	readonly commit: StaticLandblockLayerCommitTerrain;
+/** One source texture assigned a stable atlas key and placement. */
+interface PlannedTexturePlacement {
+	readonly sourceAssetId: DatAssetId;
+	readonly textureKey: TextureKey;
+	readonly placement: TexturePlacement;
 }
 
-/** Source data resolved for one layer that will be baked for rendering. */
-interface ResolvedStaticLayerSource {
-	readonly layer: LandblockIdLayer;
-	readonly dynamicEntities: readonly DynamicEntityCommit[];
-}
-
-/** Texture placement and residency work planned for one resolved layer. */
+/** Texture placement work consumed by static bakers and atlas-page assembly. */
 interface TexturePlacementPlan {
-	readonly source: ResolvedStaticLayerSource;
+	readonly textures: readonly PlannedTexturePlacement[];
 }
 
-/** Baked render data produced for one layer before commit assembly. */
-interface BakedLayer {
-	readonly texturePlan: TexturePlacementPlan;
-}
+/** Baked renderer payload discriminated by its source layer. */
+type BakedStaticLayer =
+	| {
+			readonly kind: LandblockLayerKind.Buildings;
+			readonly commit: StaticLandblockLayerCommitBuildings;
+	  }
+	| {
+			readonly kind: LandblockLayerKind.Objects;
+			readonly commit: StaticLandblockLayerCommitObjects;
+	  }
+	| {
+			readonly kind: LandblockLayerKind.Generated;
+			readonly commit: StaticLandblockLayerCommitGenerated;
+	  }
+	| {
+			readonly kind: LandblockLayerKind.EnvCells;
+			readonly commit: StaticLandblockLayerCommitEnvCells;
+	  };
 
-/** Atlas pages prepared alongside a baked layer commit. */
+/** Atlas pages prepared alongside one layer commit. */
 interface PreparedAtlasPages {
 	readonly pages: CommitBundle["atlasPages"];
 }
 
 export class StandardCommitPipeline implements CommitPipeline {
-	protected constructor() {}
+	readonly #hostAssets: HostAssetBridge;
 
-	static async build(): Promise<StandardCommitPipeline> {
-		return new StandardCommitPipeline();
+	protected constructor(hostAssets: HostAssetBridge) {
+		this.#hostAssets = hostAssets;
+	}
+
+	static async build(
+		hostAssets: HostAssetBridge,
+	): Promise<StandardCommitPipeline> {
+		return new StandardCommitPipeline(hostAssets);
 	}
 
 	async prepareLandblockLayers(
@@ -53,100 +81,119 @@ export class StandardCommitPipeline implements CommitPipeline {
 	}
 
 	async destroy(): Promise<void> {
-		// ...
+		// The app owns host-bridge lifecycle; pipeline-owned workers will stop here.
 	}
 
 	async #prepareLandblockLayer(layer: LandblockIdLayer): Promise<CommitBundle> {
-		switch (layer.layer) {
-			case LandblockLayerKind.Terrain:
-				return this.#prepareTerrainLayer(layer);
-			default:
-				return this.#prepareRenderableLayer(layer);
+		const source = await this.#hostAssets.resolveLandblockLayer(layer);
+		if (source.kind !== layer.layer || source.landblockId !== layer.id) {
+			throw new Error(
+				`Resolved ${source.landblockId}/${source.kind} for ${describeLayer(layer)}.`,
+			);
 		}
+
+		return source.kind === LandblockLayerKind.Terrain
+			? this.#prepareTerrainLayer(source)
+			: this.#prepareStaticLayer(source);
 	}
 
-	async #prepareTerrainLayer(layer: LandblockIdLayer): Promise<CommitBundle> {
-		const source = await this.#resolveTerrainSource(layer);
-
-		return this.#assembleTerrainCommitBundle(source);
-	}
-
-	async #prepareRenderableLayer(
-		layer: LandblockIdLayer,
+	async #prepareTerrainLayer(
+		source: ResolvedTerrainLayerSource,
 	): Promise<CommitBundle> {
-		const source = await this.#resolveRenderableSource(layer);
 		const texturePlan = await this.#planTexturePlacement(source);
-		const baked = await this.#bakeLayer(texturePlan);
-		const atlasPages = await this.#buildAtlasPages(texturePlan);
+		const [commit, atlasPages] = await Promise.all([
+			this.#prepareTerrainCommit(source, texturePlan),
+			this.#buildAtlasPages(texturePlan),
+		]);
 
-		return this.#assembleRenderableCommitBundle(source, baked, atlasPages);
+		return {
+			atlasPages: atlasPages.pages,
+			commit,
+			dynamicEntities: [],
+			kind: CommitBundleSourceKind.LandblockLayer,
+			landblockId: source.landblockId,
+			layer: LandblockLayerKind.Terrain,
+		};
 	}
 
-	async #resolveTerrainSource(
-		layer: LandblockIdLayer,
-	): Promise<ResolvedTerrainSource> {
-		// Resolve canonical terrain metadata; do not generate render meshes here.
-		throw new Error(
-			`No terrain source resolver is configured for ${describeLayer(layer)}.`,
-		);
-	}
+	async #prepareStaticLayer(
+		source: ResolvedObjectLayerSource | ResolvedEnvCellLayerSource,
+	): Promise<CommitBundle> {
+		const texturePlan = await this.#planTexturePlacement(source);
+		const [baked, atlasPages] = await Promise.all([
+			this.#bakeStaticLayer(source, texturePlan),
+			this.#buildAtlasPages(texturePlan),
+		]);
 
-	async #resolveRenderableSource(
-		layer: LandblockIdLayer,
-	): Promise<ResolvedStaticLayerSource> {
-		// Dispatch to the buildings/object/generated/env-cell source resolver here.
-		throw new Error(
-			`No render-layer source resolver is configured for ${describeLayer(layer)}.`,
-		);
+		return this.#assembleStaticCommitBundle(source, baked, atlasPages);
 	}
 
 	async #planTexturePlacement(
-		source: ResolvedStaticLayerSource,
+		source: ResolvedLandblockLayerSource,
 	): Promise<TexturePlacementPlan> {
-		// Create texture intents and reserve stable placements for the layer.
+		// Discover texture intents from resolved materials, then reserve atlas slots.
 		void source;
 		throw new Error("Texture placement planning is not implemented.");
 	}
 
-	async #bakeLayer(texturePlan: TexturePlacementPlan): Promise<BakedLayer> {
-		// Run the domain-specific geometry/material baker with the placement snapshot.
+	async #prepareTerrainCommit(
+		source: ResolvedTerrainLayerSource,
+		texturePlan: TexturePlacementPlan,
+	): Promise<StaticLandblockLayerCommitTerrain> {
+		// Bind terrain feature asset ids to planned texture keys without baking a mesh.
+		void source;
 		void texturePlan;
-		throw new Error("Layer baking is not implemented.");
+		throw new Error("Terrain commit preparation is not implemented.");
+	}
+
+	async #bakeStaticLayer(
+		source: ResolvedObjectLayerSource | ResolvedEnvCellLayerSource,
+		texturePlan: TexturePlacementPlan,
+	): Promise<BakedStaticLayer> {
+		// Dispatch to object, instanced-scenery, building, or env-cell bakers.
+		void source;
+		void texturePlan;
+		throw new Error("Static layer baking is not implemented.");
 	}
 
 	async #buildAtlasPages(
 		texturePlan: TexturePlacementPlan,
 	): Promise<PreparedAtlasPages> {
-		// Build or reuse the atlas pages referenced by the baked layer.
+		// Resolve source pixels and build pages for the reserved placements.
 		void texturePlan;
 		throw new Error("Atlas page preparation is not implemented.");
 	}
 
-	#assembleTerrainCommitBundle(source: ResolvedTerrainSource): CommitBundle {
-		// Terrain commits retain source metadata for runtime-generated LODs.
-		return {
-			atlasPages: [],
-			kind: CommitBundleSourceKind.LandblockLayer,
-			landblockId: source.layer.id,
-			layer: LandblockLayerKind.Terrain,
-			commit: source.commit,
-			dynamicEntities: [],
-		};
-	}
-
-	#assembleRenderableCommitBundle(
-		source: ResolvedStaticLayerSource,
-		baked: BakedLayer,
+	#assembleStaticCommitBundle(
+		source: ResolvedObjectLayerSource | ResolvedEnvCellLayerSource,
+		baked: BakedStaticLayer,
 		atlasPages: PreparedAtlasPages,
 	): CommitBundle {
-		// Convert baked domain data into the runtime commit union.
-		void source;
-		void baked;
-		void atlasPages;
-		throw new Error("Commit bundle assembly is not implemented.");
+		if (source.kind !== baked.kind) {
+			throw new Error(
+				`Baked ${baked.kind} payload for ${source.landblockId}/${source.kind}.`,
+			);
+		}
+
+		const fields = {
+			atlasPages: atlasPages.pages,
+			dynamicEntities: source.dynamicResidents,
+			kind: CommitBundleSourceKind.LandblockLayer as const,
+			landblockId: source.landblockId,
+		};
+		switch (baked.kind) {
+			case LandblockLayerKind.Buildings:
+				return { ...fields, commit: baked.commit, layer: baked.kind };
+			case LandblockLayerKind.Objects:
+				return { ...fields, commit: baked.commit, layer: baked.kind };
+			case LandblockLayerKind.Generated:
+				return { ...fields, commit: baked.commit, layer: baked.kind };
+			case LandblockLayerKind.EnvCells:
+				return { ...fields, commit: baked.commit, layer: baked.kind };
+		}
 	}
 }
 
 function describeLayer(layer: LandblockIdLayer): string {
-	return `landblock ${layer.id} layer ${layer.id}`;
+	return `landblock ${layer.id} layer ${layer.layer}`;
 }

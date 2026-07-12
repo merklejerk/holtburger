@@ -19,14 +19,6 @@ export interface ResolvedObjectResident {
 	readonly appearance: ResolvedObjectAppearance | null;
 }
 
-/** Building aperture connecting outdoor and environment-cell scenes. */
-export interface ResolvedBuildingTransition {
-	readonly id: string;
-	readonly buildingResidentId: string;
-	readonly bounds: AABB3;
-	readonly targetEnvCellId: EnvCellId | null;
-}
-
 /** Reusable structured-interior definition embedded by environment cells. */
 export interface ResolvedCellStructure {
 	readonly id: string;
@@ -38,15 +30,6 @@ export interface ResolvedCellStructure {
 	readonly physicsBsp: unknown;
 }
 
-/** Portal edge belonging to one environment-cell resident. */
-export interface ResolvedEnvCellPortal {
-	readonly id: string;
-	readonly polygonIndex: number;
-	readonly targetEnvCellId: EnvCellId | null;
-	readonly targetPortalId: string | null;
-	readonly bounds: AABB3 | null;
-}
-
 /** Environment-cell presentation composed from a reusable structure and cell facts. */
 export interface ResolvedEnvCellPresentation {
 	readonly id: EnvCellId;
@@ -54,8 +37,52 @@ export interface ResolvedEnvCellPresentation {
 	readonly placement: ScenePlacement;
 	readonly bounds: AABB3;
 	readonly materials: readonly ResolvedMaterial[];
-	readonly portals: readonly ResolvedEnvCellPortal[];
 	readonly embeddedStatics: readonly ResolvedObjectResident[];
+}
+
+/** Stable identity for one portal-graph scene residence. */
+export type PortalGraphNodeId = `portal-node:${string}`;
+
+/** Stable identity for one directed portal traversal edge. */
+export type PortalGraphEdgeId = `portal-edge:${string}`;
+
+/** Stable identity for indexed portal aperture geometry. */
+export type PortalApertureId = `portal-aperture:${string}`;
+
+/** A scene residence participating in portal traversal. */
+export type ResolvedPortalGraphResidence =
+	| { readonly kind: "outdoor"; readonly landblockId: LandblockId }
+	| { readonly kind: "building"; readonly residentId: string }
+	| { readonly kind: "env-cell"; readonly envCellId: EnvCellId };
+
+/** One residence node in the canonical portal graph. */
+export interface ResolvedPortalGraphNode {
+	readonly id: PortalGraphNodeId;
+	readonly residence: ResolvedPortalGraphResidence;
+}
+
+/** Directed traversal edge optionally backed by aperture geometry. */
+export interface ResolvedPortalGraphEdge {
+	readonly id: PortalGraphEdgeId;
+	readonly sourceNodeId: PortalGraphNodeId;
+	readonly targetNodeId: PortalGraphNodeId;
+	readonly apertureId: PortalApertureId | null;
+}
+
+/** Canonical traversal topology prepared by the host. */
+export interface ResolvedPortalGraph {
+	readonly nodes: ReadonlyMap<PortalGraphNodeId, ResolvedPortalGraphNode>;
+	readonly edges: readonly ResolvedPortalGraphEdge[];
+}
+
+/** Indexed portal geometry in landblock-local coordinates. */
+export interface ResolvedPortalAperture {
+	readonly id: PortalApertureId;
+	readonly kind: "env-cell" | "building-transition";
+	readonly vertices: Float32Array;
+	readonly indices: Uint32Array;
+	readonly bounds: AABB3;
+	readonly visibleSide: "positive" | "negative" | "both";
 }
 
 /** Terrain feature metadata retained for runtime-generated meshes. */
@@ -83,7 +110,6 @@ export interface ResolvedObjectLayerSource {
 	readonly landblockId: LandblockId;
 	readonly staticResidents: readonly ResolvedObjectResident[];
 	readonly dynamicResidents: readonly ResolvedObjectResident[];
-	readonly buildingTransitions: readonly ResolvedBuildingTransition[];
 }
 
 /** Environment-cell layer containing structured interiors and embedded residents. */
@@ -92,6 +118,8 @@ export interface ResolvedEnvCellLayerSource {
 	readonly landblockId: LandblockId;
 	readonly cells: readonly ResolvedEnvCellPresentation[];
 	readonly dynamicResidents: readonly ResolvedObjectResident[];
+	readonly portalGraph: ResolvedPortalGraph;
+	readonly portalApertures: readonly ResolvedPortalAperture[];
 }
 
 /** Canonical source union returned by the frontend layer resolver. */

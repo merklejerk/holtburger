@@ -11,6 +11,8 @@ import type {
 	HostObjectLayerSourceDto,
 	HostObjectPresentationDto,
 	HostObjectResidentDto,
+	HostPortalApertureDto,
+	HostPortalGraphDto,
 	HostVec3Dto,
 } from "../../assets/host-contracts";
 import type { LandblockId } from "../game-types";
@@ -29,6 +31,10 @@ import type {
 	ResolvedLandblockLayerSource,
 	ResolvedObjectLayerSource,
 	ResolvedObjectResident,
+	PortalApertureId,
+	PortalGraphNodeId,
+	ResolvedPortalAperture,
+	ResolvedPortalGraph,
 } from "./landblock-layer";
 import {
 	LandblockLayerKind,
@@ -76,12 +82,6 @@ function normalizeObjectLayer(
 		normalizeObjectResident(resident, dto.landblockId, presentations),
 	);
 	return {
-		buildingTransitions: dto.buildingTransitions.map((transition) => ({
-			bounds: normalizeAabb(transition.bounds),
-			buildingResidentId: transition.buildingResidentId,
-			id: transition.id,
-			targetEnvCellId: transition.targetEnvCellId,
-		})),
 		dynamicResidents: residents.filter(
 			(_, index) => dto.residents[index]?.activation === "dynamic",
 		),
@@ -141,21 +141,81 @@ function normalizeEnvCellLayer(
 				landblockId: dto.landblockId,
 				localTransform: normalizeMatrix(cell.placement),
 			},
-			portals: cell.portals.map((portal) => ({
-				bounds: portal.bounds ? normalizeAabb(portal.bounds) : null,
-				id: portal.id,
-				polygonIndex: portal.polygonIndex,
-				targetEnvCellId: portal.targetEnvCellId,
-				targetPortalId: portal.targetPortalId,
-			})),
 			structure,
 		};
 	});
+	const portalApertures = dto.portalApertures.map(normalizePortalAperture);
+	const apertureIds = new Set(portalApertures.map((aperture) => aperture.id));
+	if (apertureIds.size !== portalApertures.length) {
+		throw new Error(
+			"Host env-cell layer contains duplicate portal aperture ids.",
+		);
+	}
 	return {
 		cells,
 		dynamicResidents,
 		kind: LandblockLayerKind.EnvCells,
 		landblockId: dto.landblockId,
+		portalApertures,
+		portalGraph: normalizePortalGraph(dto.portalGraph, apertureIds),
+	};
+}
+
+function normalizePortalGraph(
+	dto: HostPortalGraphDto,
+	apertureIds: ReadonlySet<PortalApertureId>,
+): ResolvedPortalGraph {
+	const nodes = new Map(
+		dto.nodes.map((node) => {
+			const id: PortalGraphNodeId = `portal-node:${node.id}`;
+			return [id, { id, residence: node.residence }] as const;
+		}),
+	);
+	if (nodes.size !== dto.nodes.length) {
+		throw new Error("Host portal graph contains duplicate node ids.");
+	}
+
+	const edges = dto.edges.map((edge) => {
+		const sourceNodeId: PortalGraphNodeId = `portal-node:${edge.sourceNodeId}`;
+		const targetNodeId: PortalGraphNodeId = `portal-node:${edge.targetNodeId}`;
+		if (!nodes.has(sourceNodeId) || !nodes.has(targetNodeId)) {
+			throw new Error(
+				`Portal edge ${edge.id} references a missing scene node.`,
+			);
+		}
+		const apertureId: PortalApertureId | null = edge.apertureId
+			? `portal-aperture:${edge.apertureId}`
+			: null;
+		if (apertureId !== null && !apertureIds.has(apertureId)) {
+			throw new Error(
+				`Portal edge ${edge.id} references missing aperture ${edge.apertureId}.`,
+			);
+		}
+		return {
+			apertureId,
+			id: `portal-edge:${edge.id}` as const,
+			sourceNodeId,
+			targetNodeId,
+		};
+	});
+	if (new Set(edges.map((edge) => edge.id)).size !== edges.length) {
+		throw new Error("Host portal graph contains duplicate edge ids.");
+	}
+	return { edges, nodes };
+}
+
+function normalizePortalAperture(
+	dto: HostPortalApertureDto,
+): ResolvedPortalAperture {
+	return {
+		bounds: normalizeAabb(dto.bounds),
+		id: `portal-aperture:${dto.id}`,
+		indices: Uint32Array.from(dto.indices),
+		kind: dto.kind,
+		vertices: Float32Array.from(
+			dto.vertices.flatMap(({ x, y, z }) => [x, y, z]),
+		),
+		visibleSide: dto.visibleSide,
 	};
 }
 

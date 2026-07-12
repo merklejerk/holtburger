@@ -12,58 +12,28 @@ import type {
 	HostObjectPresentationDto,
 	HostObjectResidentDto,
 	HostVec3Dto,
-	ResolveLandblockLayerRequestDto,
-} from "./contracts";
-import type { LandblockId } from "../game/game-types";
-import { AABB3, Mat4, Vec3 } from "../game/math/types";
+} from "../../assets/host-contracts";
+import type { LandblockId } from "../game-types";
+import { AABB3, Mat4, Vec3 } from "../math/types";
 import type {
-	ResolvedCellStructure,
-	ResolvedEnvCellLayerSource,
 	ResolvedGeometry,
-	ResolvedLandblockLayerSource,
 	ResolvedMaterial,
 	ResolvedMotionGraph,
 	ResolvedMotionSequence,
 	ResolvedObjectAppearance,
-	ResolvedObjectLayerSource,
 	ResolvedObjectPresentation,
+} from "./presentation";
+import type {
+	ResolvedCellStructure,
+	ResolvedEnvCellLayerSource,
+	ResolvedLandblockLayerSource,
+	ResolvedObjectLayerSource,
 	ResolvedObjectResident,
-} from "../game/presentation/types";
+} from "./landblock-layer";
 import {
 	LandblockLayerKind,
 	type LandblockIdLayer,
-} from "../game/runtime/scene-interest";
-
-/** Frontend-facing bridge from host content assets to normalized game sources. */
-export interface HostAssetBridge {
-	resolveLandblockLayer(
-		layer: LandblockIdLayer,
-	): Promise<ResolvedLandblockLayerSource>;
-}
-
-/** Tauri implementation of the host asset bridge. */
-export class TauriHostAssetBridge implements HostAssetBridge {
-	protected constructor() {}
-
-	static build(): TauriHostAssetBridge {
-		return new TauriHostAssetBridge();
-	}
-
-	async resolveLandblockLayer(
-		layer: LandblockIdLayer,
-	): Promise<ResolvedLandblockLayerSource> {
-		const { invoke } = await import("@tauri-apps/api/core");
-		const request: ResolveLandblockLayerRequestDto = {
-			landblockId: layer.id,
-			layer: layer.layer,
-		};
-		const dto = await invoke<HostLandblockLayerSourceDto>(
-			"resolve_landblock_layer",
-			{ request },
-		);
-		return normalizeHostLandblockLayer(dto, layer);
-	}
-}
+} from "../runtime/scene-interest";
 
 /** Normalize one host DTO and verify it answers the requested layer. */
 export function normalizeHostLandblockLayer(

@@ -322,8 +322,9 @@ export class GameRuntime {
 				`Dynamic placement belongs to ${dynamic.placement.landblockId}, expected ${landblockId}.`,
 			);
 		}
-		// Renderer materialization will consume the visual source and attach resources.
-		void dynamic.visual;
+		// Renderer materialization will consume the presentation and appearance.
+		void dynamic.presentation;
+		void dynamic.appearance;
 		this.#createOwnedRoot(ownerId, dynamic.placement, null);
 	}
 

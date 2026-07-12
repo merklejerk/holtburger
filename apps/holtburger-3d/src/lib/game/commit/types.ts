@@ -2,7 +2,11 @@ import type { EnvCellId, LandblockId } from "../game-types";
 import type { AABB3, Mat4 } from "../math/types";
 import type { ColorF } from "../pixels/types";
 import type { ScenePlacement } from "../scene";
-import type { ResolvedObjectResident } from "../resolution/landblock-layer";
+import type {
+	ResolvedObjectResident,
+	ResolvedPortalAperture,
+	ResolvedPortalGraph,
+} from "../resolution/landblock-layer";
 import type {
 	LandblockIdLayer,
 	LandblockLayerKind,
@@ -89,41 +93,14 @@ export interface EnvCellInfo {
 /** Resolved dynamic resident emitted beside a static layer commit. */
 export type DynamicEntityCommit = ResolvedObjectResident;
 
-export interface EnvCellPortals {
-	inPortalIdxs: number[];
-	outPortalIdxs: number[];
-}
-
-export enum EnvCellPortalKind {
-	OutdoorToIndoor,
-	IndoorToOutdoor,
-	IndoorToIndoor,
-}
-
-export interface EnvCellPortalInfo {
-	kind: EnvCellPortalKind;
-	bounds: AABB3;
-}
-
 export type StaticLandblockLayerCommitBuildings = BakedStaticDrawUnitsData;
 export type StaticLandblockLayerCommitObjects = BakedStaticDrawUnitsData;
 export type StaticLandblockLayerCommitGenerated = InstancedStaticData;
 export interface StaticLandblockLayerCommitEnvCells {
-	cells: EnvCellInfo[];
-	// Keyed by cells index.
-	cellPortalsByIndex: EnvCellPortals[];
-	// Keyed by cells index.
-	cellDrawUnitsByIndex: BakedStaticDrawUnitsData[];
-	portals: EnvCellPortalInfo[];
-	portalsVertexData: Float32Array;
-	portalsIndexData: Uint32Array;
-	portalsDrawRangesByKind: Map<
-		EnvCellPortalKind,
-		{
-			indexStart: number;
-			indexEnd: number;
-		}
-	>;
+	readonly cells: readonly EnvCellInfo[];
+	readonly cellDrawUnits: ReadonlyMap<EnvCellId, BakedStaticDrawUnitsData>;
+	readonly portalGraph: ResolvedPortalGraph;
+	readonly portalApertures: readonly ResolvedPortalAperture[];
 }
 
 export interface TextureAtlasPageCommit {

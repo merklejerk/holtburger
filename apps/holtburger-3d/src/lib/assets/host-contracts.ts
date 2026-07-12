@@ -148,14 +148,6 @@ export interface HostObjectResidentDto {
 	readonly activation: "static" | "dynamic";
 }
 
-/** Transition aperture joining a building to another scene residence. */
-export interface HostBuildingTransitionDto {
-	readonly id: string;
-	readonly buildingResidentId: string;
-	readonly bounds: HostAabbDto;
-	readonly targetEnvCellId: string | null;
-}
-
 /** Prepared reusable structure embedded by one or more environment cells. */
 export interface HostCellStructureDto {
 	readonly id: string;
@@ -167,13 +159,40 @@ export interface HostCellStructureDto {
 	readonly physicsBsp: unknown;
 }
 
-/** Portal edge authored by an environment-cell record. */
-export interface HostEnvCellPortalDto {
+/** A scene residence participating in portal traversal. */
+export type HostPortalGraphResidenceDto =
+	| { readonly kind: "outdoor"; readonly landblockId: string }
+	| { readonly kind: "building"; readonly residentId: string }
+	| { readonly kind: "env-cell"; readonly envCellId: string };
+
+/** One residence node in the host-prepared portal graph. */
+export interface HostPortalGraphNodeDto {
 	readonly id: string;
-	readonly polygonIndex: number;
-	readonly targetEnvCellId: string | null;
-	readonly targetPortalId: string | null;
-	readonly bounds: HostAabbDto | null;
+	readonly residence: HostPortalGraphResidenceDto;
+}
+
+/** Directed traversal edge between two scene residences. */
+export interface HostPortalGraphEdgeDto {
+	readonly id: string;
+	readonly sourceNodeId: string;
+	readonly targetNodeId: string;
+	readonly apertureId: string | null;
+}
+
+/** Canonical graph combining env-cell and building-transition portals. */
+export interface HostPortalGraphDto {
+	readonly nodes: readonly HostPortalGraphNodeDto[];
+	readonly edges: readonly HostPortalGraphEdgeDto[];
+}
+
+/** Indexed portal geometry in landblock-local coordinates. */
+export interface HostPortalApertureDto {
+	readonly id: string;
+	readonly kind: "env-cell" | "building-transition";
+	readonly vertices: readonly HostVec3Dto[];
+	readonly indices: readonly number[];
+	readonly bounds: HostAabbDto;
+	readonly visibleSide: "positive" | "negative" | "both";
 }
 
 /** One environment-cell resident binding a reusable structure into a landblock. */
@@ -183,7 +202,6 @@ export interface HostEnvCellResidentDto {
 	readonly placement: HostMatrix4Dto;
 	readonly bounds: HostAabbDto;
 	readonly materials: readonly HostMaterialDto[];
-	readonly portals: readonly HostEnvCellPortalDto[];
 	readonly embeddedResidents: readonly HostObjectResidentDto[];
 }
 
@@ -209,7 +227,6 @@ export interface HostObjectLayerSourceDto {
 	readonly landblockId: string;
 	readonly presentations: readonly HostObjectPresentationDto[];
 	readonly residents: readonly HostObjectResidentDto[];
-	readonly buildingTransitions: readonly HostBuildingTransitionDto[];
 }
 
 /** Environment-cell source prepared by the host. */
@@ -219,6 +236,8 @@ export interface HostEnvCellLayerSourceDto {
 	readonly presentations: readonly HostObjectPresentationDto[];
 	readonly structures: readonly HostCellStructureDto[];
 	readonly cells: readonly HostEnvCellResidentDto[];
+	readonly portalGraph: HostPortalGraphDto;
+	readonly portalApertures: readonly HostPortalApertureDto[];
 }
 
 /** Host response for one independently requested landblock layer. */

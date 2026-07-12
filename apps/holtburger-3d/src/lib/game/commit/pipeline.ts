@@ -17,14 +17,14 @@ interface ResolvedTerrainSource {
 }
 
 /** Source data resolved for one layer that will be baked for rendering. */
-interface ResolvedRenderableLayerSource {
+interface ResolvedStaticLayerSource {
 	readonly layer: LandblockIdLayer;
 	readonly dynamicEntities: readonly DynamicEntityCommit[];
 }
 
 /** Texture placement and residency work planned for one resolved layer. */
 interface TexturePlacementPlan {
-	readonly source: ResolvedRenderableLayerSource;
+	readonly source: ResolvedStaticLayerSource;
 }
 
 /** Baked render data produced for one layer before commit assembly. */
@@ -93,7 +93,7 @@ export class StandardCommitPipeline implements CommitPipeline {
 
 	async #resolveRenderableSource(
 		layer: LandblockIdLayer,
-	): Promise<ResolvedRenderableLayerSource> {
+	): Promise<ResolvedStaticLayerSource> {
 		// Dispatch to the buildings/object/generated/env-cell source resolver here.
 		throw new Error(
 			`No render-layer source resolver is configured for ${describeLayer(layer)}.`,
@@ -101,7 +101,7 @@ export class StandardCommitPipeline implements CommitPipeline {
 	}
 
 	async #planTexturePlacement(
-		source: ResolvedRenderableLayerSource,
+		source: ResolvedStaticLayerSource,
 	): Promise<TexturePlacementPlan> {
 		// Create texture intents and reserve stable placements for the layer.
 		void source;
@@ -135,7 +135,7 @@ export class StandardCommitPipeline implements CommitPipeline {
 	}
 
 	#assembleRenderableCommitBundle(
-		source: ResolvedRenderableLayerSource,
+		source: ResolvedStaticLayerSource,
 		baked: BakedLayer,
 		atlasPages: PreparedAtlasPages,
 	): CommitBundle {

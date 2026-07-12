@@ -1,11 +1,11 @@
-import type { HostAssetBridge } from "../../host/asset-bridge";
+import type { AssetBridge } from "../../assets/asset-bridge";
 import type { DatAssetId } from "../game-types";
 import type {
 	ResolvedEnvCellLayerSource,
 	ResolvedLandblockLayerSource,
 	ResolvedObjectLayerSource,
 	ResolvedTerrainLayerSource,
-} from "../presentation/types";
+} from "../resolution/landblock-layer";
 import {
 	LandblockLayerKind,
 	type LandblockIdLayer,
@@ -60,15 +60,13 @@ interface PreparedAtlasPages {
 }
 
 export class StandardCommitPipeline implements CommitPipeline {
-	readonly #hostAssets: HostAssetBridge;
+	readonly #hostAssets: AssetBridge;
 
-	protected constructor(hostAssets: HostAssetBridge) {
+	protected constructor(hostAssets: AssetBridge) {
 		this.#hostAssets = hostAssets;
 	}
 
-	static async build(
-		hostAssets: HostAssetBridge,
-	): Promise<StandardCommitPipeline> {
+	static async build(hostAssets: AssetBridge): Promise<StandardCommitPipeline> {
 		return new StandardCommitPipeline(hostAssets);
 	}
 

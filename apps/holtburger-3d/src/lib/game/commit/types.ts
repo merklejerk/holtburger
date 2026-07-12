@@ -2,7 +2,7 @@ import type { EnvCellId, LandblockId } from "../game-types";
 import type { AABB3, Mat4 } from "../math/types";
 import type { ColorF } from "../pixels/types";
 import type { ScenePlacement } from "../scene";
-import type { ResolvedObjectResident } from "../presentation/types";
+import type { ResolvedObjectResident } from "../resolution/landblock-layer";
 import type {
 	LandblockIdLayer,
 	LandblockLayerKind,

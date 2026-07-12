@@ -8,7 +8,7 @@
 	import { WebGL2Renderer } from "../lib/game/renderer/webgl2-renderer";
 	import { StandardCommitPipeline } from "../lib/game/commit/pipeline";
 	import { WebGL2ResourceManager } from "../lib/game/renderer/webgl2-resource-manager";
-	import { TauriHostAssetBridge } from "../lib/host/asset-bridge";
+	import { TauriAssetBridge } from "../lib/assets/tauri-asset-bridge";
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let frameHandle: number | null = null;
@@ -26,7 +26,7 @@
 
 		const start = async (): Promise<void> => {
 			try {
-				const hostAssets = TauriHostAssetBridge.build();
+				const hostAssets = TauriAssetBridge.build();
 				const renderer = await WebGL2Renderer.build(canvasElement!);
 				const renderResources = await WebGL2ResourceManager.build();
 				const commitPipeline = await StandardCommitPipeline.build(hostAssets);

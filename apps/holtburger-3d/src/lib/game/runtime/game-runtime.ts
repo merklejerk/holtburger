@@ -46,11 +46,15 @@ const DEFAULT_LOD_CONFIG: LoDConfig = {
 };
 
 const DEFAULT_CAMERA: Camera = {
-	position: Vec3.zero(),
-	rotation: Quat.identity(),
 	near: 0.5,
 	far: 800,
 	fov: 90,
+	placement: {
+		envCellId: null,
+		landblockId: INVALID_ID,
+		position: Vec3.zero(),
+		rotation: Quat.identity(),
+	},
 };
 
 function validateLoDConfigOrThrow(cfg: LoDConfig): void {
@@ -176,13 +180,14 @@ export class GameRuntime {
 
 	#createFrameInput(visibleScene: VisibleScene): FrameInput {
 		return {
-			camera: this.#camera,
+			anchorLandblockId: this.#worldAnchor,
 			timeSeconds: performance.now() / 1_000,
 			views: [
 				{
 					kind: "primary",
+					camera: this.#camera,
 					scene: this.#renderWorld.resolveView(visibleScene.nodeIds, (nodeId) =>
-						this.#scene.getRootPlacement(nodeId),
+						this.#scene.resolvePlacement(nodeId),
 					),
 				},
 			],

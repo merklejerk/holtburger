@@ -8,8 +8,19 @@ import {
 import { TexturePixelFormat } from "../textures/types";
 import type { RenderGeometryData } from "./geometry";
 
-interface WebGL2GeometryResource {
+/** WebGL draw binding retained for one semantic geometry resource. */
+export interface WebGL2GeometryBinding {
+	/** Vertex array containing the geometry attribute and index bindings. */
 	readonly vertexArray: WebGLVertexArrayObject;
+	/** Number of indices available to draw units. */
+	readonly indexCount: number;
+	/** WebGL scalar type used by the element buffer. */
+	readonly indexType: GLenum;
+	/** Byte width used to convert an index start into a draw offset. */
+	readonly indexElementBytes: number;
+}
+
+interface WebGL2GeometryResource extends WebGL2GeometryBinding {
 	readonly buffers: readonly WebGLBuffer[];
 }
 
@@ -44,6 +55,12 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 		const replacement = this.#uploadGeometry(geometry);
 		this.#geometry.set(key, replacement);
 		this.#destroyGeometry(previous);
+	}
+
+	getGeometry(key: GeometryResourceKey): WebGL2GeometryBinding {
+		const resource = this.#geometry.get(key);
+		if (!resource) throw new Error(`Geometry resource ${key} does not exist.`);
+		return resource;
 	}
 
 	createTexture(upload: TextureUpload): TextureResourceKey {
@@ -118,9 +135,17 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 			}
 			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
 			gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, geometry.indices, gl.STATIC_DRAW);
-			return { buffers, vertexArray };
+			const usesShortIndices = geometry.indices instanceof Uint16Array;
+			return {
+				buffers,
+				indexCount: geometry.indices.length,
+				indexElementBytes: usesShortIndices ? 2 : 4,
+				indexType: usesShortIndices ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
+				vertexArray,
+			};
 		} catch (error) {
-			this.#destroyGeometry({ buffers, vertexArray });
+			for (const buffer of buffers) gl.deleteBuffer(buffer);
+			gl.deleteVertexArray(vertexArray);
 			throw error;
 		} finally {
 			gl.bindVertexArray(null);

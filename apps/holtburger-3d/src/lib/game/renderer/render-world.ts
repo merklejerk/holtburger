@@ -1,6 +1,6 @@
 import type { GeometryResourceKey } from "./resource-manager";
 import type { Mat4 } from "../math/types";
-import type { SceneNodeId, ScenePlacement } from "../scene";
+import type { ResolvedScenePlacement, SceneNodeId } from "../scene";
 import type { TextureKey } from "../textures/types";
 
 /** Opaque identity for one logical terrain resource in RenderWorld. */
@@ -110,14 +110,14 @@ export interface ObjectRenderAttachment {
 export interface TerrainFrameAttachment {
 	readonly attachment: TerrainRenderAttachment;
 	readonly resource: TerrainRenderResource;
-	readonly placement: ScenePlacement;
+	readonly placement: ResolvedScenePlacement;
 }
 
 /** Object occurrence selected for one camera or portal view. */
 export interface ObjectFrameAttachment {
 	readonly attachment: ObjectRenderAttachment;
 	readonly resource: ObjectRenderResource;
-	readonly placement: ScenePlacement;
+	readonly placement: ResolvedScenePlacement;
 }
 
 /** Renderer-facing scene content selected for one view. */
@@ -198,7 +198,7 @@ export class RenderWorld {
 
 	resolveView(
 		nodeIds: readonly SceneNodeId[],
-		resolvePlacement: (nodeId: SceneNodeId) => ScenePlacement,
+		resolvePlacement: (nodeId: SceneNodeId) => ResolvedScenePlacement,
 	): FrameViewScene {
 		const terrain: TerrainFrameAttachment[] = [];
 		const objects: ObjectFrameAttachment[] = [];

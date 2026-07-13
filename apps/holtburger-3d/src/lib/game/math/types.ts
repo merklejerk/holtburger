@@ -17,6 +17,17 @@ export class Vec3 {
 	static zero(): Vec3 {
 		return new Vec3(0, 0, 0);
 	}
+	/** Return the component-wise sum without mutating either vector. */
+	add(other: Vec3): Vec3 {
+		return new Vec3(this.x + other.x, this.y + other.y, this.z + other.z);
+	}
+	/** Return squared Euclidean distance when a square root is unnecessary. */
+	distanceSquaredTo(other: Vec3): number {
+		const x = this.x - other.x;
+		const y = this.y - other.y;
+		const z = this.z - other.z;
+		return x * x + y * y + z * z;
+	}
 }
 
 export class Vec4 {

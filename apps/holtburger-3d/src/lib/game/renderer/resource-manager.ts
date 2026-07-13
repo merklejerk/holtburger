@@ -18,7 +18,7 @@ export interface TextureUpload {
 	readonly data: Uint8Array;
 }
 
-/** Backend resource boundary consumed by RenderWorld and texture atlases. */
+/** Backend resource boundary consumed by logical render resources and texture atlases. */
 export interface RendererResourceManager {
 	createGeometry(geometry: RenderGeometryData): GeometryResourceKey;
 	replaceGeometry(key: GeometryResourceKey, geometry: RenderGeometryData): void;

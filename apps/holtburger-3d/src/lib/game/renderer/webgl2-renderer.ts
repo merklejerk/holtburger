@@ -10,10 +10,13 @@ import { Mat4, Vec3 } from "../math/types";
 import type { FrameInput, FrameViewInput, Renderer } from "./renderer";
 import type {
 	FrameViewScene,
-	ObjectFrameAttachment,
+	ObjectFrameInstance,
+	ObjectRenderPose,
+} from "./render-scene";
+import type {
 	ObjectMaterialPass,
 	ObjectRenderDrawUnit,
-} from "./render-world";
+} from "./render-resources";
 import type { GeometryResourceKey } from "./resource-manager";
 import {
 	WebGL2ResourceManager,
@@ -53,7 +56,7 @@ interface PreparedView {
 	readonly cameraPosition: Vec3;
 	/** Projection matrix derived from the current drawing-buffer aspect ratio. */
 	readonly projection: Mat4;
-	/** Persistent scene attachments selected by visibility. */
+	/** Persistent render instances selected by scene visibility. */
 	readonly scene: FrameViewScene;
 	/** Anchor-relative camera view transform. */
 	readonly view: Mat4;
@@ -63,7 +66,7 @@ interface PreparedView {
 
 interface ObjectDraw {
 	/** Visible occurrence carrying scene placement and object pose. */
-	readonly frameAttachment: ObjectFrameAttachment;
+	readonly frameInstance: ObjectFrameInstance;
 	/** Compatible material/index range within the occurrence's resource. */
 	readonly drawUnit: ObjectRenderDrawUnit;
 }
@@ -174,17 +177,17 @@ export class WebGL2Renderer implements Renderer {
 		gl.depthMask(true);
 		gl.disable(gl.BLEND);
 		this.#setSurfaceColor(TERRAIN_COLOR);
-		for (const frameAttachment of view.scene.terrain) {
+		for (const frameInstance of view.scene.terrain) {
 			const landblockOffset = createLandblockOffset(
-				frameAttachment.placement.landblockId,
+				frameInstance.placement.landblockId,
 				view.anchorLandblockId,
 			);
-			for (const drawUnit of frameAttachment.resource.drawUnits) {
+			for (const drawUnit of frameInstance.resource.drawUnits) {
 				this.#drawGeometry(
-					frameAttachment.resource.geometryKey,
+					frameInstance.resource.geometryKey,
 					drawUnit.indexStart,
 					drawUnit.indexCount,
-					frameAttachment.placement.localToLandblock,
+					frameInstance.placement.localToLandblock,
 					landblockOffset,
 				);
 			}
@@ -203,10 +206,10 @@ export class WebGL2Renderer implements Renderer {
 		this.#applyObjectPassState(pass);
 		this.#setSurfaceColor(OBJECT_PASS_COLORS[pass]);
 		for (const draw of draws) {
-			const placement = draw.frameAttachment.placement;
+			const placement = draw.frameInstance.placement;
 			this.#gl.depthMask(draw.drawUnit.material.depthWrite);
 			this.#drawGeometry(
-				draw.frameAttachment.resource.geometryKey,
+				draw.frameInstance.resource.geometryKey,
 				draw.drawUnit.indexStart,
 				draw.drawUnit.indexCount,
 				resolveObjectLocalToLandblock(draw),
@@ -267,7 +270,7 @@ export class WebGL2Renderer implements Renderer {
 	}
 
 	#objectDistanceSquared(view: PreparedView, draw: ObjectDraw): number {
-		const placement = draw.frameAttachment.placement;
+		const placement = draw.frameInstance.placement;
 		const offset = createLandblockOffset(
 			placement.landblockId,
 			view.anchorLandblockId,
@@ -295,16 +298,16 @@ function collectObjectDraws(
 	scene: FrameViewScene,
 	pass: ObjectMaterialPass,
 ): ObjectDraw[] {
-	return scene.objects.flatMap((frameAttachment) =>
-		frameAttachment.resource.drawUnits
+	return scene.objects.flatMap((frameInstance) =>
+		frameInstance.resource.drawUnits
 			.filter((drawUnit) => drawUnit.material.pass === pass)
-			.map((drawUnit) => ({ drawUnit, frameAttachment })),
+			.map((drawUnit) => ({ drawUnit, frameInstance })),
 	);
 }
 
 function resolveObjectLocalToLandblock(draw: ObjectDraw): Mat4 {
-	const placement = draw.frameAttachment.placement.localToLandblock;
-	const pose = draw.frameAttachment.attachment.pose;
+	const placement = draw.frameInstance.placement.localToLandblock;
+	const pose = draw.frameInstance.instance.pose;
 	if (pose.kind === "baked") {
 		requireNoPoseIndex(draw.drawUnit, pose.kind);
 		return placement;
@@ -324,7 +327,7 @@ function resolveObjectLocalToLandblock(draw: ObjectDraw): Mat4 {
 
 function requireNoPoseIndex(
 	drawUnit: ObjectRenderDrawUnit,
-	poseKind: "baked" | "rigid",
+	poseKind: Extract<ObjectRenderPose, { kind: "baked" | "rigid" }>["kind"],
 ): void {
 	if (drawUnit.poseIndex !== null) {
 		throw new Error(`${poseKind} object draw unit cannot select a part pose.`);

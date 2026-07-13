@@ -9,10 +9,11 @@ import { INVALID_ID, type EnvCellId, type LandblockId } from "../game-types";
 import { Mat4, Quat, Vec3, type AABB3 } from "../math/types";
 import type { FrameInput, Renderer } from "../renderer/renderer";
 import {
-	RenderWorld,
+	RenderResourceRegistry,
 	type TerrainRenderDrawUnit,
 	type TerrainRenderResourceId,
-} from "../renderer/render-world";
+} from "../renderer/render-resources";
+import { RenderScene } from "../renderer/render-scene";
 import type {
 	RendererResourceManager,
 	RenderResourceKey,
@@ -92,7 +93,8 @@ type OwnerId =
 
 export class GameRuntime {
 	readonly #scene: SceneGraph = new SceneGraph();
-	readonly #renderWorld = new RenderWorld();
+	readonly #renderResourceRegistry = new RenderResourceRegistry();
+	readonly #renderScene = new RenderScene(this.#renderResourceRegistry);
 	readonly #textureLeases = new LeaseRegistry<OwnerId, TextureKey>();
 	readonly #rendererLeases = new LeaseRegistry<OwnerId, RenderResourceKey>();
 	readonly #sceneNodeLeases = new LeaseRegistry<OwnerId, SceneNodeId>();
@@ -186,7 +188,7 @@ export class GameRuntime {
 				{
 					kind: "primary",
 					camera: this.#camera,
-					scene: this.#renderWorld.resolveView(visibleScene.nodeIds, (nodeId) =>
+					scene: this.#renderScene.resolveView(visibleScene.nodeIds, (nodeId) =>
 						this.#scene.resolvePlacement(nodeId),
 					),
 				},
@@ -304,32 +306,31 @@ export class GameRuntime {
 					const geometryKey = this.#renderResources.createGeometry(
 						change.mesh.geometry,
 					);
-					const resourceId = this.#renderWorld.createTerrainResource(
+					const resourceId = this.#renderResourceRegistry.createTerrainResource(
 						geometryKey,
 						createTerrainDrawUnits(change.mesh),
 					);
-					this.#renderWorld.createTerrainAttachment(nodeId, resourceId);
+					this.#renderScene.createTerrainInstance(nodeId, resourceId);
 					this.#rendererLeases.addLease(ownerId, geometryKey);
 					record = { nodeId, resourceId };
 					this.#terrainRenderRecords.set(landblockId, record);
 				} else {
 					this.#scene.updateBounds(record.nodeId, change.mesh.bounds);
-					const resource = this.#renderWorld.getTerrainResource(
+					const resource = this.#renderResourceRegistry.getTerrainResource(
 						record.resourceId,
 					);
 					this.#renderResources.replaceGeometry(
 						resource.geometryKey,
 						change.mesh.geometry,
 					);
-					this.#renderWorld.replaceTerrainResource(
+					this.#renderResourceRegistry.replaceTerrainResource(
 						record.resourceId,
-						resource.geometryKey,
 						createTerrainDrawUnits(change.mesh),
 					);
 				}
 			} else {
-				this.#terrainRenderRecords.delete(landblockId);
 				this.#releaseSceneOwner(ownerId);
+				this.#removeTerrainRenderRecord(landblockId);
 				this.#rendererLeases.dropOwner(ownerId);
 				this.#releaseUnownedRendererResources();
 			}
@@ -398,13 +399,17 @@ export class GameRuntime {
 	#releaseSceneOwner(ownerId: OwnerId): void {
 		this.#sceneNodeLeases.dropOwner(ownerId);
 		const releasedNodeIds = this.#sceneNodeLeases.takeEmptyLeases();
-		const releasedResources = this.#renderWorld.removeNodes(releasedNodeIds);
-		for (const resource of releasedResources) {
-			this.#rendererLeases.dropLease(ownerId, resource);
-		}
+		this.#renderScene.removeNodes(releasedNodeIds);
 		for (const nodeId of releasedNodeIds) {
 			this.#scene.destroyNode(nodeId);
 		}
+	}
+
+	#removeTerrainRenderRecord(landblockId: LandblockId): void {
+		const record = this.#terrainRenderRecords.get(landblockId);
+		if (!record) return;
+		this.#renderResourceRegistry.removeTerrainResource(record.resourceId);
+		this.#terrainRenderRecords.delete(landblockId);
 	}
 
 	#releaseUnownedRendererResources(): void {
@@ -427,10 +432,12 @@ export class GameRuntime {
 		for (const textureKey of this.#textureLeases.takeEmptyLeases()) {
 			this.#atlases.releaseTexture(textureKey);
 		}
+		if (layer === LandblockLayerKind.Terrain) {
+			this.#removeTerrainRenderRecord(landblockId);
+		}
 		this.#rendererLeases.dropOwner(ownerId);
 		this.#releaseUnownedRendererResources();
 		if (layer === LandblockLayerKind.Terrain) {
-			this.#terrainRenderRecords.delete(landblockId);
 			this.#terrain.removeSource(landblockId);
 		}
 	}

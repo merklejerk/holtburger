@@ -1,6 +1,6 @@
 import type { LandblockId } from "../game-types";
 import type { Camera } from "../runtime/types";
-import type { FrameViewScene } from "./render-world";
+import type { FrameViewScene } from "./render-scene";
 
 /** Renderer-facing content selected for one camera or portal view. */
 export interface FrameViewInput {

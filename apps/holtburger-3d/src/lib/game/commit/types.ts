@@ -1,6 +1,7 @@
 import type { EnvCellId, LandblockId } from "../game-types";
 import type { AABB3, Mat4 } from "../math/types";
 import type { ColorF } from "../pixels/types";
+import type { ObjectGeometryData } from "../renderer/geometry";
 import type { ScenePlacement } from "../scene";
 import type {
 	ResolvedObjectResident,
@@ -53,7 +54,7 @@ export type ColorTextureVariant =
 
 export type StaticDrawUnitData = {
 	indexStart: number;
-	indexEnd: number;
+	indexCount: number;
 	color: ColorF;
 	detailTexture: TextureKey | null;
 	colorWrapS: TextureWrapPolicy;
@@ -61,14 +62,14 @@ export type StaticDrawUnitData = {
 } & ColorTextureVariant;
 
 export interface BakedStaticDrawUnitsData {
-	vertexData: Float32Array;
-	indexData: Uint32Array;
+	/** Baked landblock-local object/interior geometry. */
+	geometry: ObjectGeometryData;
 	drawUnits: StaticDrawUnitData[];
 }
 
 export type StaticInstancePatchData = {
 	indexStart: number;
-	indexEnd: number;
+	indexCount: number;
 	detailTexture: TextureKey | null;
 	colorWrapS: TextureWrapPolicy;
 	colorWrapT: TextureWrapPolicy;
@@ -79,8 +80,8 @@ export type StaticInstancePatchData = {
 } & ColorTextureVariant;
 
 export interface InstancedStaticData {
-	vertexData: Float32Array;
-	indexData: Uint32Array;
+	/** Source-local object geometry shared by all patch instances. */
+	geometry: ObjectGeometryData;
 	patches: StaticInstancePatchData[];
 }
 

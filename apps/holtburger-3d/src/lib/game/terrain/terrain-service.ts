@@ -1,17 +1,38 @@
 import type { StaticLandblockLayerCommitTerrain } from "../commit/types";
 import type { LandblockId } from "../game-types";
+import type { AABB3 } from "../math/types";
+import type { TerrainGeometryData } from "../renderer/geometry";
 import type { Camera } from "../runtime/types";
+import type { TextureKey } from "../textures/types";
 
-/** Camera and policy inputs used to select generated terrain tiles. */
+/** Camera and policy inputs used to select generated landblock meshes. */
 export interface TerrainResidencyInput {
 	readonly camera: Camera;
 	readonly landblockRadius: number;
 }
 
-/** Generated landblock mesh identity until renderer payloads are defined. */
+/** Inputs controlling regeneration of one complete landblock mesh. */
+export interface TerrainGenerationPolicy {
+	readonly subdivisionLevel: number;
+}
+
+/** Material range within one generated terrain index buffer. */
+export interface TerrainMaterialPatch {
+	readonly indexStart: number;
+	readonly indexCount: number;
+	readonly colorTexture: TextureKey;
+	readonly detailTexture: TextureKey;
+	readonly roadMaskTexture: TextureKey;
+}
+
+/** Renderer-independent CPU mesh generated for one complete landblock. */
 export interface TerrainMeshArtifact {
 	readonly landblockId: LandblockId;
-	readonly generation: number;
+	readonly sourceRevision: number;
+	readonly policy: TerrainGenerationPolicy;
+	readonly bounds: AABB3;
+	readonly geometry: TerrainGeometryData;
+	readonly patches: readonly TerrainMaterialPatch[];
 }
 
 /** Scene changes emitted when landblock mesh residency changes. */
@@ -45,7 +66,7 @@ export class TerrainService {
 	}
 
 	updateResidency(input: TerrainResidencyInput): void {
-		// TODO: select, generate, and retain terrain tiles from canonical sources.
+		// TODO: select, generate, and retain whole-landblock meshes from canonical sources.
 		void input;
 	}
 

@@ -5,14 +5,15 @@
 	} from "../app/FrameMetricsOverlay.svelte";
 	import ExplorerTools from "./ExplorerTools.svelte";
 	import { GameRuntime } from "../lib/game/runtime/game-runtime";
-	import { WebGL2Renderer } from "../lib/game/renderer/webgl2-renderer";
 	import { StandardCommitPipeline } from "../lib/game/commit/pipeline";
-	import { WebGL2ResourceManager } from "../lib/game/renderer/webgl2-resource-manager";
+	import { WebGL2Device } from "../lib/game/renderer/webgl2-device";
 	import { TauriAssetBridge } from "../lib/assets/tauri-asset-bridge";
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let frameHandle: number | null = null;
 	let gameRuntime: GameRuntime | undefined;
+	let commitPipeline: StandardCommitPipeline | undefined;
+	let webglDevice: WebGL2Device | undefined;
 	let frameMetrics: FrameMetrics | null = $state(null);
 	let startupError: string | null = $state(null);
 
@@ -27,21 +28,18 @@
 		const start = async (): Promise<void> => {
 			try {
 				const hostAssets = TauriAssetBridge.build();
-				const renderer = await WebGL2Renderer.build(canvasElement!);
-				const renderResources = await WebGL2ResourceManager.build();
-				const commitPipeline = await StandardCommitPipeline.build(hostAssets);
+				webglDevice = await WebGL2Device.build(canvasElement!);
+				commitPipeline = await StandardCommitPipeline.build(hostAssets);
 
 				if (destroyed) {
-					await gameRuntime?.destroy();
-					await renderer.destroy();
 					await commitPipeline.destroy();
-					await renderResources.destroy();
+					await webglDevice.destroy();
 					return;
 				}
 
 				gameRuntime = GameRuntime.build(
-					renderResources,
-					renderer,
+					webglDevice.resources,
+					webglDevice.renderer,
 					commitPipeline,
 				);
 
@@ -88,8 +86,12 @@
 			frameHandle = null;
 		}
 
-		gameRuntime?.destroy();
+		void gameRuntime?.destroy();
+		void commitPipeline?.destroy();
+		void webglDevice?.destroy();
 		gameRuntime = undefined;
+		commitPipeline = undefined;
+		webglDevice = undefined;
 	});
 </script>
 

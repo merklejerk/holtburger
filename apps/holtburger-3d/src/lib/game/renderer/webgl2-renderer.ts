@@ -1,4 +1,4 @@
-import type { FramePlan, Renderer } from "./renderer";
+import type { FrameInput, Renderer } from "./renderer";
 
 const CLEAR_COLOR = {
 	red: 0.15,
@@ -15,23 +15,12 @@ export class WebGL2Renderer implements Renderer {
 
 	public static async build(
 		canvas: HTMLCanvasElement,
+		gl: WebGL2RenderingContext,
 	): Promise<WebGL2Renderer> {
-		return new WebGL2Renderer(canvas);
+		return new WebGL2Renderer(canvas, gl);
 	}
 
-	protected constructor(canvas: HTMLCanvasElement) {
-		const gl = canvas.getContext("webgl2", {
-			alpha: false,
-			antialias: false,
-			depth: true,
-			stencil: false,
-			premultipliedAlpha: false,
-		});
-
-		if (gl === null) {
-			throw new Error("WebGL2 is not available in this browser.");
-		}
-
+	protected constructor(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext) {
 		this.#canvas = canvas;
 		this.#gl = gl;
 		this.#gl.clearColor(
@@ -43,8 +32,8 @@ export class WebGL2Renderer implements Renderer {
 		this.#gl.enable(this.#gl.DEPTH_TEST);
 	}
 
-	drawFrame(plan: FramePlan): void {
-		void plan;
+	drawFrame(input: FrameInput): void {
+		void input;
 		this.#resizeCanvasForDpr();
 		this.#gl.clear(this.#gl.COLOR_BUFFER_BIT | this.#gl.DEPTH_BUFFER_BIT);
 	}

@@ -7,7 +7,12 @@ import {
 } from "../commit/types";
 import { INVALID_ID, type EnvCellId, type LandblockId } from "../game-types";
 import { Mat4, Quat, Vec3, type AABB3 } from "../math/types";
-import type { FramePlan, Renderer } from "../renderer/renderer";
+import type { FrameInput, Renderer } from "../renderer/renderer";
+import {
+	RenderWorld,
+	type TerrainRenderDrawUnit,
+	type TerrainRenderResourceId,
+} from "../renderer/render-world";
 import type {
 	RendererResourceManager,
 	RenderResourceKey,
@@ -83,14 +88,21 @@ type OwnerId =
 
 export class GameRuntime {
 	readonly #scene: SceneGraph = new SceneGraph();
+	readonly #renderWorld = new RenderWorld();
 	readonly #textureLeases = new LeaseRegistry<OwnerId, TextureKey>();
 	readonly #rendererLeases = new LeaseRegistry<OwnerId, RenderResourceKey>();
 	readonly #sceneNodeLeases = new LeaseRegistry<OwnerId, SceneNodeId>();
 	readonly #atlases: AtlasManager;
 	/** Domain identity lookup for independently spawned dynamic roots. */
 	readonly #dynamicNodeIdsByEntity = new Map<string, SceneNodeId>();
-	/** Stable scene nodes carrying generated terrain meshes. */
-	readonly #terrainNodeIds = new Map<LandblockId, SceneNodeId>();
+	/** Stable scene and render identities carrying generated terrain meshes. */
+	readonly #terrainRenderRecords = new Map<
+		LandblockId,
+		{
+			readonly nodeId: SceneNodeId;
+			readonly resourceId: TerrainRenderResourceId;
+		}
+	>();
 	readonly #terrain: TerrainService = new TerrainService();
 	readonly #renderResources: RendererResourceManager;
 	readonly #renderer: Renderer;
@@ -147,7 +159,7 @@ export class GameRuntime {
 
 	updateFrame(): void {
 		const visibleScene = this.#scene.updateVisibility(this.#camera);
-		this.#renderer.drawFrame(this.#planFrame(visibleScene));
+		this.#renderer.drawFrame(this.#createFrameInput(visibleScene));
 	}
 
 	updateDynamicEntityPlacement(
@@ -162,9 +174,19 @@ export class GameRuntime {
 
 	async destroy() {}
 
-	#planFrame(visibleScene: VisibleScene): FramePlan {
-		void visibleScene;
-		return {};
+	#createFrameInput(visibleScene: VisibleScene): FrameInput {
+		return {
+			camera: this.#camera,
+			timeSeconds: performance.now() / 1_000,
+			views: [
+				{
+					kind: "primary",
+					scene: this.#renderWorld.resolveView(visibleScene.nodeIds, (nodeId) =>
+						this.#scene.getRootPlacement(nodeId),
+					),
+				},
+			],
+		};
 	}
 
 	#updateWorldInterest(newAnchor: LandblockId) {
@@ -201,6 +223,8 @@ export class GameRuntime {
 			}
 			for (const page of artifact.atlasPages) {
 				this.#atlases.upsertPage(page.pageId, {
+					format: page.format,
+					pageBits: page.pageBits,
 					purpose: page.purpose,
 					width: page.width,
 					height: page.height,
@@ -226,14 +250,13 @@ export class GameRuntime {
 			artifact.landblockId,
 			artifact.layer,
 		);
-		this.#releaseSceneOwner(ownerId);
 
 		if (artifact.layer === LandblockLayerKind.Terrain) {
-			this.#terrainNodeIds.delete(artifact.landblockId);
 			this.#terrain.installSource(artifact.landblockId, artifact.commit);
 			return;
 		}
 
+		this.#releaseSceneOwner(ownerId);
 		this.#materializeLayerNodes(ownerId, artifact);
 	}
 
@@ -266,19 +289,44 @@ export class GameRuntime {
 			);
 
 			if (change.kind === "upsert-landblock-mesh") {
-				void change.mesh;
-				let nodeId = this.#terrainNodeIds.get(landblockId);
-				if (nodeId === undefined) {
-					nodeId = this.#createOwnedRoot(
+				let record = this.#terrainRenderRecords.get(landblockId);
+				if (record === undefined) {
+					const nodeId = this.#createOwnedRoot(
 						ownerId,
 						createLandblockPlacement(landblockId),
-						null,
+						change.mesh.bounds,
 					);
-					this.#terrainNodeIds.set(landblockId, nodeId);
+					const geometryKey = this.#renderResources.createGeometry(
+						change.mesh.geometry,
+					);
+					const resourceId = this.#renderWorld.createTerrainResource(
+						geometryKey,
+						createTerrainDrawUnits(change.mesh),
+					);
+					this.#renderWorld.createTerrainAttachment(nodeId, resourceId);
+					this.#rendererLeases.addLease(ownerId, geometryKey);
+					record = { nodeId, resourceId };
+					this.#terrainRenderRecords.set(landblockId, record);
+				} else {
+					this.#scene.updateBounds(record.nodeId, change.mesh.bounds);
+					const resource = this.#renderWorld.getTerrainResource(
+						record.resourceId,
+					);
+					this.#renderResources.replaceGeometry(
+						resource.geometryKey,
+						change.mesh.geometry,
+					);
+					this.#renderWorld.replaceTerrainResource(
+						record.resourceId,
+						resource.geometryKey,
+						createTerrainDrawUnits(change.mesh),
+					);
 				}
 			} else {
-				this.#terrainNodeIds.delete(landblockId);
+				this.#terrainRenderRecords.delete(landblockId);
 				this.#releaseSceneOwner(ownerId);
+				this.#rendererLeases.dropOwner(ownerId);
+				this.#releaseUnownedRendererResources();
 			}
 		}
 	}
@@ -344,8 +392,19 @@ export class GameRuntime {
 
 	#releaseSceneOwner(ownerId: OwnerId): void {
 		this.#sceneNodeLeases.dropOwner(ownerId);
-		for (const nodeId of this.#sceneNodeLeases.takeEmptyLeases()) {
+		const releasedNodeIds = this.#sceneNodeLeases.takeEmptyLeases();
+		const releasedResources = this.#renderWorld.removeNodes(releasedNodeIds);
+		for (const resource of releasedResources) {
+			this.#rendererLeases.dropLease(ownerId, resource);
+		}
+		for (const nodeId of releasedNodeIds) {
 			this.#scene.destroyNode(nodeId);
+		}
+	}
+
+	#releaseUnownedRendererResources(): void {
+		for (const resource of this.#rendererLeases.takeEmptyLeases()) {
+			this.#renderResources.releaseResource(resource);
 		}
 	}
 
@@ -364,14 +423,31 @@ export class GameRuntime {
 			this.#atlases.releaseTexture(textureKey);
 		}
 		this.#rendererLeases.dropOwner(ownerId);
-		for (const resKey of this.#rendererLeases.takeEmptyLeases()) {
-			this.#renderResources.releaseResource(resKey);
-		}
+		this.#releaseUnownedRendererResources();
 		if (layer === LandblockLayerKind.Terrain) {
-			this.#terrainNodeIds.delete(landblockId);
+			this.#terrainRenderRecords.delete(landblockId);
 			this.#terrain.removeSource(landblockId);
 		}
 	}
+}
+
+type TerrainMesh = Extract<
+	TerrainSceneChange,
+	{ kind: "upsert-landblock-mesh" }
+>["mesh"];
+
+function createTerrainDrawUnits(
+	mesh: TerrainMesh,
+): readonly TerrainRenderDrawUnit[] {
+	return mesh.patches.map((patch) => ({
+		indexCount: patch.indexCount,
+		indexStart: patch.indexStart,
+		material: {
+			colorTexture: patch.colorTexture,
+			detailTexture: patch.detailTexture,
+			roadMaskTexture: patch.roadMaskTexture,
+		},
+	}));
 }
 
 function createLandblockPlacement(landblockId: LandblockId): ScenePlacement {

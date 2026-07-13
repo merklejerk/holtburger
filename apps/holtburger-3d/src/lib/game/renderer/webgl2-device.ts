@@ -26,7 +26,7 @@ export class WebGL2Device {
 		if (!gl) throw new Error("WebGL2 is not available in this browser.");
 
 		const resources = new WebGL2ResourceManager(gl);
-		const renderer = await WebGL2Renderer.build(canvas, gl);
+		const renderer = await WebGL2Renderer.build(canvas, gl, resources);
 		return new WebGL2Device(renderer, resources);
 	}
 

@@ -18,6 +18,12 @@ export interface ScenePlacement extends SceneResidency {
 	readonly localTransform: Mat4;
 }
 
+/** Residency and flattened transform for any node in a transform tree. */
+export interface ResolvedScenePlacement extends SceneResidency {
+	/** Node transform composed through its parents into landblock-local coordinates. */
+	readonly localToLandblock: Mat4;
+}
+
 interface SceneNodeFields {
 	/** Bounds in this node's local coordinate frame, or null for transform-only nodes. */
 	readonly localBounds: AABB3 | null;

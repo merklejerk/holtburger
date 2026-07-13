@@ -1,0 +1,39 @@
+import type { LandblockId } from "./game-types";
+import { Vec3 } from "./math/types";
+
+/** Width and depth of one outdoor landblock in AC world units. */
+export const OUTDOOR_LANDBLOCK_WORLD_SIZE = 192;
+
+/** Outdoor grid coordinates encoded in the high two bytes of a landblock id. */
+export interface LandblockCoordinates {
+	/** East-west outdoor grid coordinate. */
+	readonly x: number;
+	/** North-south outdoor grid coordinate. */
+	readonly y: number;
+}
+
+export function getLandblockCoordinates(
+	landblockId: LandblockId,
+): LandblockCoordinates {
+	const match = /^(?:0x)?([0-9a-fA-F]{8})$/.exec(landblockId);
+	if (!match) throw new Error(`Invalid landblock id ${landblockId}.`);
+	const value = Number.parseInt(match[1]!, 16) >>> 0;
+	return {
+		x: (value >>> 24) & 0xff,
+		y: (value >>> 16) & 0xff,
+	};
+}
+
+/** Translation from a landblock frame into an anchor-relative render frame. */
+export function createLandblockOffset(
+	landblockId: LandblockId,
+	anchorLandblockId: LandblockId,
+): Vec3 {
+	const landblock = getLandblockCoordinates(landblockId);
+	const anchor = getLandblockCoordinates(anchorLandblockId);
+	return new Vec3(
+		(landblock.x - anchor.x) * OUTDOOR_LANDBLOCK_WORLD_SIZE,
+		0,
+		-(landblock.y - anchor.y) * OUTDOOR_LANDBLOCK_WORLD_SIZE,
+	);
+}

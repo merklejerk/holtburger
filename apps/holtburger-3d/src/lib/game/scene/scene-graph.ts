@@ -1,10 +1,12 @@
 import type { AABB3, Mat4 } from "../math/types";
+import { multiplyMat4 } from "../math/matrices";
 import type { Camera } from "../runtime/types";
 import type {
 	SceneNode,
 	SceneNodeId,
 	SceneNodeInput,
 	ScenePlacement,
+	ResolvedScenePlacement,
 	VisibleScene,
 } from ".";
 
@@ -67,15 +69,17 @@ export class SceneGraph {
 		};
 	}
 
-	getRootPlacement(nodeId: SceneNodeId): ScenePlacement {
+	resolvePlacement(nodeId: SceneNodeId): ResolvedScenePlacement {
 		let node = this.#requireNode(nodeId);
+		let localToLandblock = node.localTransform;
 		while (node.parentId !== null) {
 			node = this.#requireNode(node.parentId);
+			localToLandblock = multiplyMat4(node.localTransform, localToLandblock);
 		}
 		return {
 			envCellId: node.envCellId,
 			landblockId: node.landblockId,
-			localTransform: node.localTransform,
+			localToLandblock,
 		};
 	}
 

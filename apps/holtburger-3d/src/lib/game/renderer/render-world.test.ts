@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GeometryResourceKey } from "./resource-manager";
 import { RenderWorld } from "./render-world";
-import type { SceneNodeId, ScenePlacement } from "../scene";
+import type { ResolvedScenePlacement, SceneNodeId } from "../scene";
 import { Mat4 } from "../math/types";
 
 const GEOMETRY_A = "geometry-resource:1" as const satisfies GeometryResourceKey;
@@ -94,10 +94,10 @@ function createObjectDrawUnit() {
 	};
 }
 
-function createPlacement(): ScenePlacement {
+function createPlacement(): ResolvedScenePlacement {
 	return {
 		envCellId: null,
 		landblockId: "0x0000ffff",
-		localTransform: Mat4.identity(),
+		localToLandblock: Mat4.identity(),
 	};
 }

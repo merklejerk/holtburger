@@ -2,8 +2,12 @@ import {
 	type GeometryResourceKey,
 	type RendererResourceManager,
 	type RenderResourceKey,
-	type TextureResourceKey,
-	type TextureUpload,
+	type TextureArrayDescription,
+	type TextureArrayLayerUpload,
+	type TextureArrayResourceKey,
+	TextureArraySamplingPolicy,
+	type Texture2DResourceKey,
+	type Texture2DUpload,
 } from "./resource-manager";
 import { TexturePixelFormat } from "../textures/types";
 import type { RenderGeometryData } from "./geometry";
@@ -24,17 +28,29 @@ interface WebGL2GeometryResource extends WebGL2GeometryBinding {
 	readonly buffers: readonly WebGLBuffer[];
 }
 
-interface WebGL2TextureResource {
+/** WebGL binding retained for one two-dimensional texture resource. */
+export interface WebGL2Texture2DBinding {
 	readonly texture: WebGLTexture;
+}
+
+/** WebGL texture-array binding and immutable storage facts. */
+export interface WebGL2TextureArrayBinding {
+	readonly texture: WebGLTexture;
+	readonly description: TextureArrayDescription;
 }
 
 /** WebGL2 resource owner sharing the renderer's graphics context. */
 export class WebGL2ResourceManager implements RendererResourceManager {
 	readonly #gl: WebGL2RenderingContext;
 	readonly #geometry = new Map<GeometryResourceKey, WebGL2GeometryResource>();
-	readonly #textures = new Map<TextureResourceKey, WebGL2TextureResource>();
+	readonly #textures = new Map<Texture2DResourceKey, WebGL2Texture2DBinding>();
+	readonly #textureArrays = new Map<
+		TextureArrayResourceKey,
+		WebGL2TextureArrayBinding
+	>();
 	#nextGeometryId = 0;
 	#nextTextureId = 0;
+	#nextTextureArrayId = 0;
 
 	constructor(gl: WebGL2RenderingContext) {
 		this.#gl = gl;
@@ -63,18 +79,98 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 		return resource;
 	}
 
-	createTexture(upload: TextureUpload): TextureResourceKey {
-		const key: TextureResourceKey = `texture-resource:${this.#nextTextureId++}`;
+	createTexture2D(upload: Texture2DUpload): Texture2DResourceKey {
+		const key: Texture2DResourceKey = `texture-2d-resource:${this.#nextTextureId++}`;
 		this.#textures.set(key, this.#uploadTexture(upload));
 		return key;
 	}
 
-	replaceTexture(key: TextureResourceKey, upload: TextureUpload): void {
+	replaceTexture2D(key: Texture2DResourceKey, upload: Texture2DUpload): void {
 		const previous = this.#textures.get(key);
 		if (!previous) throw new Error(`Texture resource ${key} does not exist.`);
 		const replacement = this.#uploadTexture(upload);
 		this.#textures.set(key, replacement);
 		this.#gl.deleteTexture(previous.texture);
+	}
+
+	getTexture2D(key: Texture2DResourceKey): WebGL2Texture2DBinding {
+		const resource = this.#textures.get(key);
+		if (!resource) throw new Error(`Texture resource ${key} does not exist.`);
+		return resource;
+	}
+
+	createTextureArray(
+		description: TextureArrayDescription,
+	): TextureArrayResourceKey {
+		const key: TextureArrayResourceKey = `texture-array-resource:${this.#nextTextureArrayId++}`;
+		this.#textureArrays.set(key, this.#allocateTextureArray(description));
+		return key;
+	}
+
+	uploadTextureArrayLayer(
+		key: TextureArrayResourceKey,
+		upload: TextureArrayLayerUpload,
+	): void {
+		const resource = this.getTextureArray(key);
+		const { description } = resource;
+		if (
+			!Number.isInteger(upload.layer) ||
+			upload.layer < 0 ||
+			upload.layer >= description.layerCapacity
+		) {
+			throw new Error(
+				`Texture array layer ${upload.layer} is outside ${key} capacity ${description.layerCapacity}.`,
+			);
+		}
+		const format = resolveTextureFormat(this.#gl, description.format);
+		const expectedBytes =
+			description.width * description.height * format.bytesPerPixel;
+		if (upload.data.byteLength !== expectedBytes) {
+			throw new Error(
+				`Texture array layer ${upload.layer} contains ${upload.data.byteLength} bytes; expected ${expectedBytes}.`,
+			);
+		}
+
+		const gl = this.#gl;
+		try {
+			gl.bindTexture(gl.TEXTURE_2D_ARRAY, resource.texture);
+			gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+			gl.texSubImage3D(
+				gl.TEXTURE_2D_ARRAY,
+				0,
+				0,
+				0,
+				upload.layer,
+				description.width,
+				description.height,
+				1,
+				format.external,
+				gl.UNSIGNED_BYTE,
+				upload.data,
+			);
+		} finally {
+			gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
+		}
+	}
+
+	generateTextureArrayMipmaps(key: TextureArrayResourceKey): void {
+		const resource = this.getTextureArray(key);
+		if (resource.description.mipLevels === 1) return;
+		const gl = this.#gl;
+		try {
+			gl.bindTexture(gl.TEXTURE_2D_ARRAY, resource.texture);
+			gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
+		} finally {
+			gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
+		}
+	}
+
+	getTextureArray(key: TextureArrayResourceKey): WebGL2TextureArrayBinding {
+		const resource = this.#textureArrays.get(key);
+		if (!resource) {
+			throw new Error(`Texture array resource ${key} does not exist.`);
+		}
+		return resource;
 	}
 
 	releaseResource(key: RenderResourceKey): boolean {
@@ -83,6 +179,13 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 			if (!resource) return false;
 			this.#geometry.delete(key);
 			this.#destroyGeometry(resource);
+			return true;
+		}
+		if (isTextureArrayResourceKey(key)) {
+			const resource = this.#textureArrays.get(key);
+			if (!resource) return false;
+			this.#textureArrays.delete(key);
+			this.#gl.deleteTexture(resource.texture);
 			return true;
 		}
 		const resource = this.#textures.get(key);
@@ -99,8 +202,12 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 		for (const resource of this.#textures.values()) {
 			this.#gl.deleteTexture(resource.texture);
 		}
+		for (const resource of this.#textureArrays.values()) {
+			this.#gl.deleteTexture(resource.texture);
+		}
 		this.#geometry.clear();
 		this.#textures.clear();
+		this.#textureArrays.clear();
 	}
 
 	#uploadGeometry(geometry: RenderGeometryData): WebGL2GeometryResource {
@@ -154,7 +261,7 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 		}
 	}
 
-	#uploadTexture(upload: TextureUpload): WebGL2TextureResource {
+	#uploadTexture(upload: Texture2DUpload): WebGL2Texture2DBinding {
 		if (upload.width <= 0 || upload.height <= 0) {
 			throw new Error("Texture dimensions must be positive.");
 		}
@@ -185,6 +292,34 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 		}
 	}
 
+	#allocateTextureArray(
+		description: TextureArrayDescription,
+	): WebGL2TextureArrayBinding {
+		validateTextureArrayDescription(this.#gl, description);
+		const gl = this.#gl;
+		const texture = gl.createTexture();
+		if (!texture) throw new Error("Failed to allocate texture array resource.");
+		try {
+			const format = resolveTextureFormat(gl, description.format);
+			gl.bindTexture(gl.TEXTURE_2D_ARRAY, texture);
+			gl.texStorage3D(
+				gl.TEXTURE_2D_ARRAY,
+				description.mipLevels,
+				format.internal,
+				description.width,
+				description.height,
+				description.layerCapacity,
+			);
+			applyTextureArraySampling(gl, description);
+			return { description, texture };
+		} catch (error) {
+			gl.deleteTexture(texture);
+			throw error;
+		} finally {
+			gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
+		}
+	}
+
 	#destroyGeometry(resource: WebGL2GeometryResource): void {
 		for (const buffer of resource.buffers) this.#gl.deleteBuffer(buffer);
 		this.#gl.deleteVertexArray(resource.vertexArray);
@@ -195,6 +330,12 @@ function isGeometryResourceKey(
 	key: RenderResourceKey,
 ): key is GeometryResourceKey {
 	return key.startsWith("geometry-resource:");
+}
+
+function isTextureArrayResourceKey(
+	key: RenderResourceKey,
+): key is TextureArrayResourceKey {
+	return key.startsWith("texture-array-resource:");
 }
 
 function uploadFloatAttribute(
@@ -259,14 +400,81 @@ function validateGeometry(geometry: RenderGeometryData): void {
 function resolveTextureFormat(
 	gl: WebGL2RenderingContext,
 	format: TexturePixelFormat,
-): { readonly internal: GLenum; readonly external: GLenum } {
+): {
+	readonly internal: GLenum;
+	readonly external: GLenum;
+	readonly bytesPerPixel: number;
+} {
 	switch (format) {
 		case TexturePixelFormat.RGBA8:
-			return { external: gl.RGBA, internal: gl.RGBA8 };
+			return { bytesPerPixel: 4, external: gl.RGBA, internal: gl.RGBA8 };
 		case TexturePixelFormat.RG8:
-			return { external: gl.RG, internal: gl.RG8 };
+			return { bytesPerPixel: 2, external: gl.RG, internal: gl.RG8 };
 		case TexturePixelFormat.R8:
 		case TexturePixelFormat.A8:
-			return { external: gl.RED, internal: gl.R8 };
+			return { bytesPerPixel: 1, external: gl.RED, internal: gl.R8 };
+	}
+}
+
+function validateTextureArrayDescription(
+	gl: WebGL2RenderingContext,
+	description: TextureArrayDescription,
+): void {
+	if (
+		!Number.isInteger(description.width) ||
+		!Number.isInteger(description.height) ||
+		description.width <= 0 ||
+		description.height <= 0
+	) {
+		throw new Error("Texture array dimensions must be positive.");
+	}
+	if (
+		!Number.isInteger(description.layerCapacity) ||
+		description.layerCapacity <= 0
+	) {
+		throw new Error("Texture array layer capacity must be positive.");
+	}
+	const maximumTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
+	if (
+		description.width > maximumTextureSize ||
+		description.height > maximumTextureSize
+	) {
+		throw new Error(
+			`Texture array dimensions exceed device limit ${maximumTextureSize}.`,
+		);
+	}
+	const maximumLayers = gl.getParameter(gl.MAX_ARRAY_TEXTURE_LAYERS) as number;
+	if (description.layerCapacity > maximumLayers) {
+		throw new Error(
+			`Texture array capacity exceeds device limit ${maximumLayers}.`,
+		);
+	}
+	const maximumMipLevels =
+		Math.floor(Math.log2(Math.max(description.width, description.height))) + 1;
+	if (
+		!Number.isInteger(description.mipLevels) ||
+		description.mipLevels <= 0 ||
+		description.mipLevels > maximumMipLevels
+	) {
+		throw new Error(
+			`Texture array mip level count must be between 1 and ${maximumMipLevels}.`,
+		);
+	}
+}
+
+function applyTextureArraySampling(
+	gl: WebGL2RenderingContext,
+	description: TextureArrayDescription,
+): void {
+	switch (description.sampling) {
+		case TextureArraySamplingPolicy.LinearRepeat:
+			gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+			gl.texParameteri(
+				gl.TEXTURE_2D_ARRAY,
+				gl.TEXTURE_MIN_FILTER,
+				description.mipLevels === 1 ? gl.LINEAR : gl.LINEAR_MIPMAP_LINEAR,
+			);
+			gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.REPEAT);
+			gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.REPEAT);
 	}
 }

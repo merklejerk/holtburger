@@ -28,7 +28,7 @@ import {
 	TerrainService,
 	type TerrainSceneChange,
 } from "../terrain/terrain-service";
-import { AtlasManager } from "../textures/atlas-manager";
+import { TextureManager } from "../textures/texture-manager";
 import type { TextureKey } from "../textures/types";
 import { LeaseRegistry } from "./ownership";
 import {
@@ -98,7 +98,7 @@ export class GameRuntime {
 	readonly #textureLeases = new LeaseRegistry<OwnerId, TextureKey>();
 	readonly #rendererLeases = new LeaseRegistry<OwnerId, RenderResourceKey>();
 	readonly #sceneNodeLeases = new LeaseRegistry<OwnerId, SceneNodeId>();
-	readonly #atlases: AtlasManager;
+	readonly #textures: TextureManager;
 	/** Domain identity lookup for independently spawned dynamic roots. */
 	readonly #dynamicNodeIdsByEntity = new Map<string, SceneNodeId>();
 	/** Stable scene and render identities carrying generated terrain meshes. */
@@ -127,7 +127,7 @@ export class GameRuntime {
 		this.#renderResources = renderResources;
 		this.#renderer = renderer;
 		this.#commitPipeline = commitPipeline;
-		this.#atlases = new AtlasManager(renderResources);
+		this.#textures = new TextureManager(renderResources);
 	}
 
 	static build(
@@ -228,9 +228,8 @@ export class GameRuntime {
 					continue;
 				}
 			}
-			for (const page of artifact.atlasPages) {
-				this.#atlases.upsertPage(page.pageId, {
-					format: page.format,
+			for (const page of artifact.texturePages) {
+				this.#textures.upsertAtlasPage(page.pageId, {
 					pageBits: page.pageBits,
 					purpose: page.purpose,
 					width: page.width,
@@ -430,7 +429,7 @@ export class GameRuntime {
 		this.#releaseSceneOwner(ownerId);
 		this.#textureLeases.dropOwner(ownerId);
 		for (const textureKey of this.#textureLeases.takeEmptyLeases()) {
-			this.#atlases.releaseTexture(textureKey);
+			this.#textures.releaseTexture(textureKey);
 		}
 		if (layer === LandblockLayerKind.Terrain) {
 			this.#removeTerrainRenderRecord(landblockId);

@@ -13,14 +13,10 @@ import type {
 	LandblockLayerKind,
 } from "../runtime/scene-interest";
 import type {
-	AtlasPageId,
-	TexturePlacement as TextureAtlasPlacement,
-} from "../textures/atlas-manager";
-import type {
-	TextureKey,
-	TexturePixelFormat,
-	TexturePurpose,
-} from "../textures/types";
+	TexturePageId,
+	TexturePlacement,
+} from "../textures/texture-manager";
+import type { TextureKey, TexturePurpose } from "../textures/types";
 
 export interface TerrainFeatures {
 	roadMaskTexture: TextureKey;
@@ -104,16 +100,15 @@ export interface StaticLandblockLayerCommitEnvCells {
 	readonly portalApertures: readonly ResolvedPortalAperture[];
 }
 
-export interface TextureAtlasPageCommit {
-	pageId: AtlasPageId;
+export interface TexturePageCommit {
+	pageId: TexturePageId;
 	width: number;
 	height: number;
-	format: TexturePixelFormat;
 	purpose: TexturePurpose;
 	pageBits: Uint8Array;
 	textures: Array<{
 		key: TextureKey;
-		placement: TextureAtlasPlacement;
+		placement: TexturePlacement;
 	}>;
 }
 
@@ -143,7 +138,7 @@ export interface CommitBundleSpawnFields {
 }
 
 export type CommitBundle = {
-	atlasPages: TextureAtlasPageCommit[];
+	texturePages: TexturePageCommit[];
 } & (
 	| CommitBundleLandblockLayerFields<
 			LandblockLayerKind.Terrain,

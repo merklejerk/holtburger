@@ -10,7 +10,7 @@ import {
 	LandblockLayerKind,
 	type LandblockIdLayer,
 } from "../runtime/scene-interest";
-import type { TexturePlacement } from "../textures/atlas-manager";
+import type { TexturePlacement } from "../textures/texture-manager";
 import type { TextureKey } from "../textures/types";
 import {
 	CommitBundleSourceKind,
@@ -23,7 +23,7 @@ import {
 	type StaticLandblockLayerCommitTerrain,
 } from "./types";
 
-/** One source texture assigned a stable atlas key and placement. */
+/** One source texture assigned a stable page key and placement. */
 interface PlannedTexturePlacement {
 	readonly sourceAssetId: DatAssetId;
 	readonly textureKey: TextureKey;
@@ -54,9 +54,9 @@ type BakedStaticLayer =
 			readonly commit: StaticLandblockLayerCommitEnvCells;
 	  };
 
-/** Atlas pages prepared alongside one layer commit. */
-interface PreparedAtlasPages {
-	readonly pages: CommitBundle["atlasPages"];
+/** Texture pages prepared alongside one layer commit. */
+interface PreparedTexturePages {
+	readonly pages: CommitBundle["texturePages"];
 }
 
 export class StandardCommitPipeline implements CommitPipeline {
@@ -99,13 +99,13 @@ export class StandardCommitPipeline implements CommitPipeline {
 		source: ResolvedTerrainLayerSource,
 	): Promise<CommitBundle> {
 		const texturePlan = await this.#planTexturePlacement(source);
-		const [commit, atlasPages] = await Promise.all([
+		const [commit, texturePages] = await Promise.all([
 			this.#prepareTerrainCommit(source, texturePlan),
-			this.#buildAtlasPages(texturePlan),
+			this.#buildTexturePages(texturePlan),
 		]);
 
 		return {
-			atlasPages: atlasPages.pages,
+			texturePages: texturePages.pages,
 			commit,
 			dynamicEntities: [],
 			kind: CommitBundleSourceKind.LandblockLayer,
@@ -118,12 +118,12 @@ export class StandardCommitPipeline implements CommitPipeline {
 		source: ResolvedObjectLayerSource | ResolvedEnvCellLayerSource,
 	): Promise<CommitBundle> {
 		const texturePlan = await this.#planTexturePlacement(source);
-		const [baked, atlasPages] = await Promise.all([
+		const [baked, texturePages] = await Promise.all([
 			this.#bakeStaticLayer(source, texturePlan),
-			this.#buildAtlasPages(texturePlan),
+			this.#buildTexturePages(texturePlan),
 		]);
 
-		return this.#assembleStaticCommitBundle(source, baked, atlasPages);
+		return this.#assembleStaticCommitBundle(source, baked, texturePages);
 	}
 
 	async #planTexturePlacement(
@@ -154,18 +154,18 @@ export class StandardCommitPipeline implements CommitPipeline {
 		throw new Error("Static layer baking is not implemented.");
 	}
 
-	async #buildAtlasPages(
+	async #buildTexturePages(
 		texturePlan: TexturePlacementPlan,
-	): Promise<PreparedAtlasPages> {
+	): Promise<PreparedTexturePages> {
 		// Resolve source pixels and build pages for the reserved placements.
 		void texturePlan;
-		throw new Error("Atlas page preparation is not implemented.");
+		throw new Error("Texture page preparation is not implemented.");
 	}
 
 	#assembleStaticCommitBundle(
 		source: ResolvedObjectLayerSource | ResolvedEnvCellLayerSource,
 		baked: BakedStaticLayer,
-		atlasPages: PreparedAtlasPages,
+		texturePages: PreparedTexturePages,
 	): CommitBundle {
 		if (source.kind !== baked.kind) {
 			throw new Error(
@@ -174,7 +174,7 @@ export class StandardCommitPipeline implements CommitPipeline {
 		}
 
 		const fields = {
-			atlasPages: atlasPages.pages,
+			texturePages: texturePages.pages,
 			dynamicEntities: source.dynamicResidents,
 			kind: CommitBundleSourceKind.LandblockLayer as const,
 			landblockId: source.landblockId,

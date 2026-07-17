@@ -4,7 +4,6 @@ export interface TerrainGeometryData {
 	readonly positions: Float32Array;
 	readonly normals: Float32Array;
 	readonly textureCoordinates: Float32Array;
-	readonly featureSlots: Uint16Array;
 	readonly indices: Uint16Array | Uint32Array;
 }
 

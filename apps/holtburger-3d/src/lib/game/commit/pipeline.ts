@@ -11,7 +11,7 @@ import {
 	type LandblockIdLayer,
 } from "../runtime/scene-interest";
 import type { TexturePlacement } from "../textures/texture-manager";
-import type { TextureKey } from "../textures/types";
+import type { TextureAtlasEntryKey } from "../textures/types";
 import {
 	CommitBundleSourceKind,
 	type CommitBundle,
@@ -26,7 +26,7 @@ import {
 /** One source texture assigned a stable page key and placement. */
 interface PlannedTexturePlacement {
 	readonly sourceAssetId: DatAssetId;
-	readonly textureKey: TextureKey;
+	readonly textureKey: TextureAtlasEntryKey;
 	readonly placement: TexturePlacement;
 }
 
@@ -78,9 +78,7 @@ export class StandardCommitPipeline implements CommitPipeline {
 		);
 	}
 
-	async destroy(): Promise<void> {
-		// The app owns host-bridge lifecycle; pipeline-owned workers will stop here.
-	}
+	async destroy(): Promise<void> {}
 
 	async #prepareLandblockLayer(layer: LandblockIdLayer): Promise<CommitBundle> {
 		const source = await this.#hostAssets.resolveLandblockLayer(layer);
@@ -95,18 +93,10 @@ export class StandardCommitPipeline implements CommitPipeline {
 			: this.#prepareStaticLayer(source);
 	}
 
-	async #prepareTerrainLayer(
-		source: ResolvedTerrainLayerSource,
-	): Promise<CommitBundle> {
-		const texturePlan = await this.#planTexturePlacement(source);
-		const [commit, texturePages] = await Promise.all([
-			this.#prepareTerrainCommit(source, texturePlan),
-			this.#buildTexturePages(texturePlan),
-		]);
-
+	#prepareTerrainLayer(source: ResolvedTerrainLayerSource): CommitBundle {
 		return {
-			texturePages: texturePages.pages,
-			commit,
+			texturePages: [],
+			commit: this.#createTerrainSourceCommit(source),
 			dynamicEntities: [],
 			kind: CommitBundleSourceKind.LandblockLayer,
 			landblockId: source.landblockId,
@@ -134,14 +124,13 @@ export class StandardCommitPipeline implements CommitPipeline {
 		throw new Error("Texture placement planning is not implemented.");
 	}
 
-	async #prepareTerrainCommit(
+	#createTerrainSourceCommit(
 		source: ResolvedTerrainLayerSource,
-		texturePlan: TexturePlacementPlan,
-	): Promise<StaticLandblockLayerCommitTerrain> {
-		// Bind terrain feature asset ids to planned texture keys without baking a mesh.
-		void source;
-		void texturePlan;
-		throw new Error("Terrain commit preparation is not implemented.");
+	): StaticLandblockLayerCommitTerrain {
+		return {
+			generation: source.generation,
+			presentation: source.presentation,
+		};
 	}
 
 	async #bakeStaticLayer(

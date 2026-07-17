@@ -5,47 +5,41 @@ import { RenderResourceRegistry } from "./render-resources";
 const GEOMETRY = "geometry-resource:1" as const satisfies GeometryResourceKey;
 
 describe("RenderResourceRegistry", () => {
-	it("preserves terrain identity and geometry across draw-unit replacement", () => {
+	it("retains object draw metadata independently of scene occurrences", () => {
 		const resources = new RenderResourceRegistry();
-		const replacement = createTerrainDrawUnits(6);
-		const resourceId = resources.createTerrainResource(
-			GEOMETRY,
-			createTerrainDrawUnits(),
-		);
+		const resourceId = resources.createObjectResource(GEOMETRY, [
+			createDrawUnit(),
+		]);
 
-		resources.replaceTerrainResource(resourceId, replacement);
-
-		const resource = resources.getTerrainResource(resourceId);
-		expect(resource.geometryKey).toBe(GEOMETRY);
-		expect(resource.drawUnits).toBe(replacement);
+		expect(resources.getObjectResource(resourceId)).toMatchObject({
+			geometryKey: GEOMETRY,
+			drawUnits: [createDrawUnit()],
+		});
 	});
 
-	it("removes logical resources only through an explicit operation", () => {
+	it("removes logical object resources only through an explicit operation", () => {
 		const resources = new RenderResourceRegistry();
-		const resourceId = resources.createTerrainResource(
-			GEOMETRY,
-			createTerrainDrawUnits(),
-		);
+		const resourceId = resources.createObjectResource(GEOMETRY, []);
 
-		expect(resources.removeTerrainResource(resourceId).geometryKey).toBe(
+		expect(resources.removeObjectResource(resourceId).geometryKey).toBe(
 			GEOMETRY,
 		);
-		expect(() => resources.getTerrainResource(resourceId)).toThrow(
+		expect(() => resources.getObjectResource(resourceId)).toThrow(
 			"does not exist",
 		);
 	});
 });
 
-function createTerrainDrawUnits(indexCount = 3) {
-	return [
-		{
-			indexCount,
-			indexStart: 0,
-			material: {
-				colorTexture: "terrain-color:1/wrap-4" as const,
-				detailTexture: "terrain-detail:2/wrap-4" as const,
-				roadMaskTexture: "terrain-road-mask:3/wrap-4" as const,
-			},
+function createDrawUnit() {
+	return {
+		indexCount: 3,
+		indexStart: 0,
+		material: {
+			depthWrite: true,
+			family: "flat-color" as const,
+			pass: "opaque" as const,
+			textureKeys: [],
 		},
-	];
+		poseIndex: null,
+	};
 }

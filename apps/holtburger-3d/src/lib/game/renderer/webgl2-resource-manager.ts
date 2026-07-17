@@ -2,15 +2,21 @@ import {
 	type GeometryResourceKey,
 	type RendererResourceManager,
 	type RenderResourceKey,
+	type TerrainCompositionResourceKey,
+	type TerrainSurfaceResourceKey,
 	type TextureArrayDescription,
 	type TextureArrayLayerUpload,
 	type TextureArrayResourceKey,
-	TextureArraySamplingPolicy,
 	type Texture2DResourceKey,
 	type Texture2DUpload,
 } from "./resource-manager";
 import { TexturePixelFormat } from "../textures/types";
 import type { RenderGeometryData } from "./geometry";
+import {
+	TERRAIN_COMPOSITION_TABLE_HEIGHT,
+	type TerrainCompositionTable,
+} from "../terrain/composition-table";
+import type { TerrainSurfaceField } from "../terrain/types";
 
 /** WebGL draw binding retained for one semantic geometry resource. */
 export interface WebGL2GeometryBinding {
@@ -39,6 +45,19 @@ export interface WebGL2TextureArrayBinding {
 	readonly description: TextureArrayDescription;
 }
 
+/** WebGL integer texture backing one generated per-cell terrain pcode field. */
+export interface WebGL2TerrainSurfaceBinding {
+	readonly texture: WebGLTexture;
+	readonly width: number;
+	readonly height: number;
+}
+
+/** WebGL integer texture backing one stable regional terrain composition lookup table. */
+export interface WebGL2TerrainCompositionBinding {
+	readonly texture: WebGLTexture;
+	readonly width: number;
+}
+
 /** WebGL2 resource owner sharing the renderer's graphics context. */
 export class WebGL2ResourceManager implements RendererResourceManager {
 	readonly #gl: WebGL2RenderingContext;
@@ -48,9 +67,19 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 		TextureArrayResourceKey,
 		WebGL2TextureArrayBinding
 	>();
+	readonly #terrainSurfaces = new Map<
+		TerrainSurfaceResourceKey,
+		WebGL2TerrainSurfaceBinding
+	>();
+	readonly #terrainCompositions = new Map<
+		TerrainCompositionResourceKey,
+		WebGL2TerrainCompositionBinding
+	>();
 	#nextGeometryId = 0;
 	#nextTextureId = 0;
 	#nextTextureArrayId = 0;
+	#nextTerrainSurfaceId = 0;
+	#nextTerrainCompositionId = 0;
 
 	constructor(gl: WebGL2RenderingContext) {
 		this.#gl = gl;
@@ -71,6 +100,40 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 		const replacement = this.#uploadGeometry(geometry);
 		this.#geometry.set(key, replacement);
 		this.#destroyGeometry(previous);
+	}
+
+	createTerrainSurface(field: TerrainSurfaceField): TerrainSurfaceResourceKey {
+		const key: TerrainSurfaceResourceKey = `terrain-surface-resource:${this.#nextTerrainSurfaceId++}`;
+		this.#terrainSurfaces.set(key, this.#uploadTerrainSurface(field));
+		return key;
+	}
+
+	createTerrainComposition(
+		table: TerrainCompositionTable,
+	): TerrainCompositionResourceKey {
+		const key: TerrainCompositionResourceKey = `terrain-composition-resource:${this.#nextTerrainCompositionId++}`;
+		this.#terrainCompositions.set(key, this.#uploadTerrainComposition(table));
+		return key;
+	}
+
+	getTerrainComposition(
+		key: TerrainCompositionResourceKey,
+	): WebGL2TerrainCompositionBinding {
+		const resource = this.#terrainCompositions.get(key);
+		if (!resource) {
+			throw new Error(`Terrain composition resource ${key} does not exist.`);
+		}
+		return resource;
+	}
+
+	getTerrainSurface(
+		key: TerrainSurfaceResourceKey,
+	): WebGL2TerrainSurfaceBinding {
+		const resource = this.#terrainSurfaces.get(key);
+		if (!resource) {
+			throw new Error(`Terrain surface resource ${key} does not exist.`);
+		}
+		return resource;
 	}
 
 	getGeometry(key: GeometryResourceKey): WebGL2GeometryBinding {
@@ -188,6 +251,20 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 			this.#gl.deleteTexture(resource.texture);
 			return true;
 		}
+		if (isTerrainSurfaceResourceKey(key)) {
+			const resource = this.#terrainSurfaces.get(key);
+			if (!resource) return false;
+			this.#terrainSurfaces.delete(key);
+			this.#gl.deleteTexture(resource.texture);
+			return true;
+		}
+		if (isTerrainCompositionResourceKey(key)) {
+			const resource = this.#terrainCompositions.get(key);
+			if (!resource) return false;
+			this.#terrainCompositions.delete(key);
+			this.#gl.deleteTexture(resource.texture);
+			return true;
+		}
 		const resource = this.#textures.get(key);
 		if (!resource) return false;
 		this.#textures.delete(key);
@@ -205,9 +282,17 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 		for (const resource of this.#textureArrays.values()) {
 			this.#gl.deleteTexture(resource.texture);
 		}
+		for (const resource of this.#terrainSurfaces.values()) {
+			this.#gl.deleteTexture(resource.texture);
+		}
+		for (const resource of this.#terrainCompositions.values()) {
+			this.#gl.deleteTexture(resource.texture);
+		}
 		this.#geometry.clear();
 		this.#textures.clear();
 		this.#textureArrays.clear();
+		this.#terrainSurfaces.clear();
+		this.#terrainCompositions.clear();
 	}
 
 	#uploadGeometry(geometry: RenderGeometryData): WebGL2GeometryResource {
@@ -230,15 +315,9 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 				buffers.push(
 					uploadFloatAttribute(gl, 2, 2, geometry.textureCoordinates),
 				);
-				buffers.push(
-					uploadUint16Attribute(
-						gl,
-						3,
-						geometry.kind === "terrain"
-							? geometry.featureSlots
-							: geometry.materialSlots,
-					),
-				);
+			}
+			if (geometry.kind === "object") {
+				buffers.push(uploadUint16Attribute(gl, 3, geometry.materialSlots));
 			}
 			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
 			gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, geometry.indices, gl.STATIC_DRAW);
@@ -262,9 +341,7 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 	}
 
 	#uploadTexture(upload: Texture2DUpload): WebGL2Texture2DBinding {
-		if (upload.width <= 0 || upload.height <= 0) {
-			throw new Error("Texture dimensions must be positive.");
-		}
+		validateTexture2DUpload(this.#gl, upload);
 		const gl = this.#gl;
 		const texture = gl.createTexture();
 		if (!texture) throw new Error("Failed to allocate texture resource.");
@@ -283,7 +360,79 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 				gl.UNSIGNED_BYTE,
 				upload.data,
 			);
+			if (upload.mipLevels > 1) gl.generateMipmap(gl.TEXTURE_2D);
 			return { texture };
+		} catch (error) {
+			gl.deleteTexture(texture);
+			throw error;
+		} finally {
+			gl.bindTexture(gl.TEXTURE_2D, null);
+		}
+	}
+
+	#uploadTerrainSurface(
+		field: TerrainSurfaceField,
+	): WebGL2TerrainSurfaceBinding {
+		validateTerrainSurfaceField(field);
+		const gl = this.#gl;
+		const texture = gl.createTexture();
+		if (!texture)
+			throw new Error("Failed to allocate terrain surface texture.");
+		try {
+			gl.bindTexture(gl.TEXTURE_2D, texture);
+			gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+			gl.texImage2D(
+				gl.TEXTURE_2D,
+				0,
+				gl.R32UI,
+				field.width,
+				field.height,
+				0,
+				gl.RED_INTEGER,
+				gl.UNSIGNED_INT,
+				field.cellPcodes,
+			);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+			return { height: field.height, texture, width: field.width };
+		} catch (error) {
+			gl.deleteTexture(texture);
+			throw error;
+		} finally {
+			gl.bindTexture(gl.TEXTURE_2D, null);
+		}
+	}
+
+	#uploadTerrainComposition(
+		table: TerrainCompositionTable,
+	): WebGL2TerrainCompositionBinding {
+		validateTerrainCompositionTable(table);
+		const gl = this.#gl;
+		const texture = gl.createTexture();
+		if (!texture) {
+			throw new Error("Failed to allocate terrain composition texture.");
+		}
+		try {
+			gl.bindTexture(gl.TEXTURE_2D, texture);
+			gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+			gl.texImage2D(
+				gl.TEXTURE_2D,
+				0,
+				gl.RGBA32UI,
+				table.width,
+				TERRAIN_COMPOSITION_TABLE_HEIGHT,
+				0,
+				gl.RGBA_INTEGER,
+				gl.UNSIGNED_INT,
+				table.texels,
+			);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+			return { texture, width: table.width };
 		} catch (error) {
 			gl.deleteTexture(texture);
 			throw error;
@@ -310,7 +459,6 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 				description.height,
 				description.layerCapacity,
 			);
-			applyTextureArraySampling(gl, description);
 			return { description, texture };
 		} catch (error) {
 			gl.deleteTexture(texture);
@@ -326,6 +474,68 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 	}
 }
 
+function validateTexture2DUpload(
+	gl: WebGL2RenderingContext,
+	upload: Texture2DUpload,
+): void {
+	if (
+		!Number.isInteger(upload.width) ||
+		!Number.isInteger(upload.height) ||
+		upload.width <= 0 ||
+		upload.height <= 0
+	) {
+		throw new Error("Texture dimensions must be positive.");
+	}
+	const maximumMipLevels =
+		Math.floor(Math.log2(Math.max(upload.width, upload.height))) + 1;
+	if (
+		!Number.isInteger(upload.mipLevels) ||
+		upload.mipLevels <= 0 ||
+		upload.mipLevels > maximumMipLevels
+	) {
+		throw new Error(
+			`Texture mip level count must be between 1 and ${maximumMipLevels}.`,
+		);
+	}
+	const format = resolveTextureFormat(gl, upload.format);
+	const expectedBytes = upload.width * upload.height * format.bytesPerPixel;
+	if (upload.data.byteLength !== expectedBytes) {
+		throw new Error(
+			`Texture contains ${upload.data.byteLength} bytes; expected ${expectedBytes}.`,
+		);
+	}
+}
+
+function validateTerrainSurfaceField(field: TerrainSurfaceField): void {
+	if (
+		!Number.isInteger(field.width) ||
+		!Number.isInteger(field.height) ||
+		field.width <= 0 ||
+		field.height <= 0
+	) {
+		throw new Error("Terrain surface dimensions must be positive integers.");
+	}
+	if (field.cellPcodes.length !== field.width * field.height) {
+		throw new Error(
+			"Terrain surface pcode count does not match its dimensions.",
+		);
+	}
+}
+
+function validateTerrainCompositionTable(table: TerrainCompositionTable): void {
+	if (!Number.isInteger(table.width) || table.width <= 0) {
+		throw new Error(
+			"Terrain composition table width must be a positive integer.",
+		);
+	}
+	const expectedTexels = table.width * TERRAIN_COMPOSITION_TABLE_HEIGHT * 4;
+	if (table.texels.length !== expectedTexels) {
+		throw new Error(
+			`Terrain composition table contains ${table.texels.length} values; expected ${expectedTexels}.`,
+		);
+	}
+}
+
 function isGeometryResourceKey(
 	key: RenderResourceKey,
 ): key is GeometryResourceKey {
@@ -336,6 +546,18 @@ function isTextureArrayResourceKey(
 	key: RenderResourceKey,
 ): key is TextureArrayResourceKey {
 	return key.startsWith("texture-array-resource:");
+}
+
+function isTerrainSurfaceResourceKey(
+	key: RenderResourceKey,
+): key is TerrainSurfaceResourceKey {
+	return key.startsWith("terrain-surface-resource:");
+}
+
+function isTerrainCompositionResourceKey(
+	key: RenderResourceKey,
+): key is TerrainCompositionResourceKey {
+	return key.startsWith("terrain-composition-resource:");
 }
 
 function uploadFloatAttribute(
@@ -387,12 +609,11 @@ function validateGeometry(geometry: RenderGeometryData): void {
 		if (geometry.textureCoordinates.length !== vertexCount * 2) {
 			throw new Error(`${geometry.kind} UV count does not match positions.`);
 		}
-		const slots =
-			geometry.kind === "terrain"
-				? geometry.featureSlots
-				: geometry.materialSlots;
-		if (slots.length !== vertexCount) {
-			throw new Error(`${geometry.kind} slot count does not match positions.`);
+		if (
+			geometry.kind === "object" &&
+			geometry.materialSlots.length !== vertexCount
+		) {
+			throw new Error("Object material slot count does not match positions.");
 		}
 	}
 }
@@ -459,22 +680,5 @@ function validateTextureArrayDescription(
 		throw new Error(
 			`Texture array mip level count must be between 1 and ${maximumMipLevels}.`,
 		);
-	}
-}
-
-function applyTextureArraySampling(
-	gl: WebGL2RenderingContext,
-	description: TextureArrayDescription,
-): void {
-	switch (description.sampling) {
-		case TextureArraySamplingPolicy.LinearRepeat:
-			gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-			gl.texParameteri(
-				gl.TEXTURE_2D_ARRAY,
-				gl.TEXTURE_MIN_FILTER,
-				description.mipLevels === 1 ? gl.LINEAR : gl.LINEAR_MIPMAP_LINEAR,
-			);
-			gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.REPEAT);
-			gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.REPEAT);
 	}
 }

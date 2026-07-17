@@ -22,6 +22,11 @@ export class LeaseRegistry<
 		return this.#owners.has(owner);
 	}
 
+	/** Check whether at least one owner still retains a lease. */
+	hasLease(lease: TLeaseId): boolean {
+		return (this.#leaseCounts.get(lease) ?? 0) > 0;
+	}
+
 	addLease(owner: TOwnerId, lease: TLeaseId): boolean {
 		const leases = this.#ensureOwner(owner);
 		if (leases.has(lease)) {

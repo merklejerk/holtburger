@@ -7,10 +7,15 @@ import {
 	multiplyMat4,
 } from "../math/matrices";
 import { Mat4, Vec3 } from "../math/types";
-import type { FrameInput, FrameViewInput, Renderer } from "./renderer";
+import type {
+	FrameInput,
+	FrameViewInput,
+	Renderer,
+	TerrainFrameInput,
+} from "./renderer";
 import type {
 	FrameViewScene,
-	ObjectFrameInstance,
+	ObjectFrameOccurrence,
 	ObjectRenderPose,
 } from "./render-scene";
 import type {
@@ -58,6 +63,8 @@ interface PreparedView {
 	readonly projection: Mat4;
 	/** Persistent render instances selected by scene visibility. */
 	readonly scene: FrameViewScene;
+	/** Terrain selected directly from TerrainService for this view. */
+	readonly terrain: readonly TerrainFrameInput[];
 	/** Anchor-relative camera view transform. */
 	readonly view: Mat4;
 	/** Landblock defining the view's render-world origin. */
@@ -66,7 +73,7 @@ interface PreparedView {
 
 interface ObjectDraw {
 	/** Visible occurrence carrying scene placement and object pose. */
-	readonly frameInstance: ObjectFrameInstance;
+	readonly occurrence: ObjectFrameOccurrence;
 	/** Compatible material/index range within the occurrence's resource. */
 	readonly drawUnit: ObjectRenderDrawUnit;
 }
@@ -150,6 +157,7 @@ export class WebGL2Renderer implements Renderer {
 				camera.far,
 			),
 			scene: input.scene,
+			terrain: input.terrain,
 			view: createViewMat4(cameraPosition, camera.placement.rotation),
 		};
 	}
@@ -177,21 +185,30 @@ export class WebGL2Renderer implements Renderer {
 		gl.depthMask(true);
 		gl.disable(gl.BLEND);
 		this.#setSurfaceColor(TERRAIN_COLOR);
-		for (const frameInstance of view.scene.terrain) {
+		for (const terrain of view.terrain) {
 			const landblockOffset = createLandblockOffset(
-				frameInstance.placement.landblockId,
+				terrain.placement.landblockId,
 				view.anchorLandblockId,
 			);
-			for (const drawUnit of frameInstance.resource.drawUnits) {
-				this.#drawGeometry(
-					frameInstance.resource.geometryKey,
-					drawUnit.indexStart,
-					drawUnit.indexCount,
-					frameInstance.placement.localToLandblock,
-					landblockOffset,
-				);
-			}
+			this.#resolveTerrainProgramInput(terrain);
+			this.#drawGeometry(
+				terrain.resources.geometry,
+				terrain.resources.indexStart,
+				terrain.resources.indexCount,
+				terrain.placement.localToLandblock,
+				landblockOffset,
+			);
 		}
+	}
+
+	#resolveTerrainProgramInput(input: TerrainFrameInput): void {
+		const { textures } = input.program;
+		this.#resources.getTerrainSurface(input.program.surfaceField);
+		this.#resources.getTerrainComposition(input.program.composition);
+		this.#resources.getTextureArray(textures.colors.resource);
+		this.#resources.getTextureArray(textures.blendMasks.resource);
+		this.#resources.getTextureArray(textures.roadMasks.resource);
+		this.#resources.getTexture2D(textures.detail.resource);
 	}
 
 	#drawObjectPass(view: PreparedView, pass: ObjectMaterialPass): void {
@@ -206,10 +223,10 @@ export class WebGL2Renderer implements Renderer {
 		this.#applyObjectPassState(pass);
 		this.#setSurfaceColor(OBJECT_PASS_COLORS[pass]);
 		for (const draw of draws) {
-			const placement = draw.frameInstance.placement;
+			const placement = draw.occurrence.placement;
 			this.#gl.depthMask(draw.drawUnit.material.depthWrite);
 			this.#drawGeometry(
-				draw.frameInstance.resource.geometryKey,
+				draw.occurrence.resource.geometryKey,
 				draw.drawUnit.indexStart,
 				draw.drawUnit.indexCount,
 				resolveObjectLocalToLandblock(draw),
@@ -270,7 +287,7 @@ export class WebGL2Renderer implements Renderer {
 	}
 
 	#objectDistanceSquared(view: PreparedView, draw: ObjectDraw): number {
-		const placement = draw.frameInstance.placement;
+		const placement = draw.occurrence.placement;
 		const offset = createLandblockOffset(
 			placement.landblockId,
 			view.anchorLandblockId,
@@ -298,16 +315,16 @@ function collectObjectDraws(
 	scene: FrameViewScene,
 	pass: ObjectMaterialPass,
 ): ObjectDraw[] {
-	return scene.objects.flatMap((frameInstance) =>
-		frameInstance.resource.drawUnits
+	return scene.objects.flatMap((occurrence) =>
+		occurrence.resource.drawUnits
 			.filter((drawUnit) => drawUnit.material.pass === pass)
-			.map((drawUnit) => ({ drawUnit, frameInstance })),
+			.map((drawUnit) => ({ drawUnit, occurrence })),
 	);
 }
 
 function resolveObjectLocalToLandblock(draw: ObjectDraw): Mat4 {
-	const placement = draw.frameInstance.placement.localToLandblock;
-	const pose = draw.frameInstance.instance.pose;
+	const placement = draw.occurrence.placement.localToLandblock;
+	const pose = draw.occurrence.instance.pose;
 	if (pose.kind === "baked") {
 		requireNoPoseIndex(draw.drawUnit, pose.kind);
 		return placement;

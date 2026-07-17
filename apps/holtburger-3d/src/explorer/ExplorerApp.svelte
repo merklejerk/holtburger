@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, onMount } from "svelte";
+	import { onMount } from "svelte";
 	import FrameMetricsOverlay, {
 		type FrameMetrics,
 	} from "../app/FrameMetricsOverlay.svelte";
@@ -24,24 +24,52 @@
 		}
 
 		let destroyed = false;
+		let teardown: Promise<void> | undefined;
+
+		const stopFrameLoop = (): void => {
+			if (frameHandle === null) return;
+			window.cancelAnimationFrame(frameHandle);
+			frameHandle = null;
+		};
+
+		const destroySystems = (): Promise<void> => {
+			if (teardown) return teardown;
+			const runtime = gameRuntime;
+			const pipeline = commitPipeline;
+			const device = webglDevice;
+			gameRuntime = undefined;
+			commitPipeline = undefined;
+			webglDevice = undefined;
+			teardown = (async () => {
+				stopFrameLoop();
+				try {
+					await runtime?.destroy();
+				} finally {
+					try {
+						await pipeline?.destroy();
+					} finally {
+						await device?.destroy();
+					}
+				}
+			})();
+			return teardown;
+		};
 
 		const start = async (): Promise<void> => {
 			try {
 				const hostAssets = TauriAssetBridge.build();
 				webglDevice = await WebGL2Device.build(canvasElement!);
+				if (destroyed) return;
 				commitPipeline = await StandardCommitPipeline.build(hostAssets);
+				if (destroyed) return;
 
-				if (destroyed) {
-					await commitPipeline.destroy();
-					await webglDevice.destroy();
-					return;
-				}
-
-				gameRuntime = GameRuntime.build(
+				gameRuntime = await GameRuntime.build(
 					webglDevice.resources,
 					webglDevice.renderer,
 					commitPipeline,
+					hostAssets,
 				);
+				if (destroyed) return;
 
 				const step = (): void => {
 					if (gameRuntime === undefined) {
@@ -70,28 +98,20 @@
 					error instanceof Error
 						? error.message
 						: "Failed to initialize renderer.";
+				await destroySystems();
 			}
 		};
 
-		void start();
+		const startup = start();
 
 		return () => {
 			destroyed = true;
+			void startup
+				.then(() => destroySystems())
+				.catch((error: unknown) =>
+					console.error("Failed to shut down explorer systems.", error),
+				);
 		};
-	});
-
-	onDestroy(() => {
-		if (frameHandle !== null) {
-			window.cancelAnimationFrame(frameHandle);
-			frameHandle = null;
-		}
-
-		void gameRuntime?.destroy();
-		void commitPipeline?.destroy();
-		void webglDevice?.destroy();
-		gameRuntime = undefined;
-		commitPipeline = undefined;
-		webglDevice = undefined;
 	});
 </script>
 

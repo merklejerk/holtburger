@@ -1,5 +1,6 @@
 import type {
 	HostAabbDto,
+	HostTerrainCompositionDto,
 	HostEnvCellLayerSourceDto,
 	HostGeometryDto,
 	HostLandblockLayerSourceDto,
@@ -17,6 +18,10 @@ import type {
 } from "../../assets/host-contracts";
 import type { LandblockId } from "../game-types";
 import { AABB3, Mat4, Vec3 } from "../math/types";
+import {
+	resolveTerrainTextureFacts,
+	type TerrainCompositionFacts,
+} from "../terrain/types";
 import type {
 	ResolvedGeometry,
 	ResolvedMaterial,
@@ -53,18 +58,29 @@ export function normalizeHostLandblockLayer(
 	}
 
 	switch (dto.kind) {
-		case "terrain":
+		case "terrain": {
+			const composition = normalizeTerrainComposition(dto.composition);
 			return {
-				featureIndices: Uint8Array.from(dto.featureIndices),
-				features: dto.features.map((feature) => ({
-					colorTextureIds: feature.colorTextureIds,
-					detailTextureId: feature.detailTextureId,
-					roadMaskTextureId: feature.roadMaskTextureId,
-				})),
-				heights: Float32Array.from(dto.heights),
 				kind: LandblockLayerKind.Terrain,
 				landblockId: dto.landblockId,
+				generation: {
+					heightBytes: normalizeCanonicalTerrainGrid(
+						dto.heightBytes,
+						"height bytes",
+						Uint8Array,
+					),
+					terrainSamples: normalizeCanonicalTerrainGrid(
+						dto.terrainSamples,
+						"terrain samples",
+						Uint16Array,
+					),
+				},
+				presentation: {
+					composition,
+					textures: resolveTerrainTextureFacts(composition),
+				},
 			};
+		}
 		case "buildings":
 		case "objects":
 		case "generated":
@@ -72,6 +88,58 @@ export function normalizeHostLandblockLayer(
 		case "env-cells":
 			return normalizeEnvCellLayer(dto);
 	}
+}
+
+function normalizeTerrainComposition(
+	dto: HostTerrainCompositionDto,
+): TerrainCompositionFacts {
+	if (!Number.isInteger(dto.regionNumber) || dto.regionNumber < 0) {
+		throw new Error("Terrain region number must be a nonnegative integer.");
+	}
+	if (dto.terrainTypes.length === 0) {
+		throw new Error(
+			`Terrain region ${dto.regionNumber} has no descriptor fallback.`,
+		);
+	}
+	return {
+		cornerTerrainAlphaMaps: dto.cornerTerrainAlphaMaps.map((entry) => ({
+			blendMaskTextureId: entry.blendMaskTextureId,
+			terrainCode: entry.terrainCode,
+		})),
+		landscapeDetail: {
+			textureId: dto.landscapeDetail.textureId,
+			tiling: dto.landscapeDetail.tiling,
+		},
+		regionNumber: dto.regionNumber,
+		roadAlphaMaps: dto.roadAlphaMaps.map((entry) => ({
+			roadMaskTextureId: entry.roadMaskTextureId,
+			roadCode: entry.roadCode,
+		})),
+		sideTerrainAlphaMaps: dto.sideTerrainAlphaMaps.map((entry) => ({
+			blendMaskTextureId: entry.blendMaskTextureId,
+			terrainCode: entry.terrainCode,
+		})),
+		terrainTypes: dto.terrainTypes.map((entry) => ({
+			colorTextureId: entry.colorTextureId,
+			colorVariation: entry.colorVariation,
+			terrainType: entry.terrainType,
+			tiling: entry.tiling,
+		})),
+	};
+}
+
+function normalizeCanonicalTerrainGrid<TArray extends Uint8Array | Uint16Array>(
+	values: readonly number[],
+	label: string,
+	ArrayType: { from(values: readonly number[]): TArray },
+): TArray {
+	const gridSize = 9 * 9;
+	if (values.length !== gridSize) {
+		throw new Error(
+			`Terrain ${label} contains ${values.length} entries; expected ${gridSize}.`,
+		);
+	}
+	return ArrayType.from(values);
 }
 
 function normalizeObjectLayer(

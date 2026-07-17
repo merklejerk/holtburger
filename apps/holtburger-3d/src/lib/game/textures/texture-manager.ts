@@ -4,50 +4,86 @@ import type {
 	TextureArrayDescription,
 	TextureArrayResourceKey,
 	Texture2DResourceKey,
+	Texture2DUpload,
 } from "../renderer/resource-manager";
+import type { DatAssetId } from "../game-types";
 import {
-	TextureGutterPolicy,
+	type StandaloneTextureKey,
+	type TextureAtlasEntryKey,
+	type TextureArrayKey,
 	type TextureKey,
+	type TexturePreparation,
 	type TexturePurpose,
-	texturePixelFormatForPurpose,
+	isTextureArrayKey,
+	isStandaloneTextureKey,
+	standaloneTextureKeyMatchesSource,
+	textureArrayKeyMatchesPurpose,
+	texturePurposePolicy,
 } from "./types";
 
 /** Stable identity for one prepared page of texture pixels. */
 export type TexturePageId = `page:${string}`;
 
-/** Stable identity for one homogeneous texture-array allocation. */
-export type TextureArrayId = `texture-array:${string}`;
-
 /** Pixel-space location of one logical texture within a prepared page. */
 export interface TexturePlacement {
 	readonly bounds: AABB2;
-	readonly gutter: TextureGutterPolicy;
+	/** Preparation represented by this page entry and its texture key. */
+	readonly preparation: TexturePreparation;
 }
 
-/** Prepared page consumed as a packed atlas or one complete array layer. */
+/** Prepared page consumed as one packed two-dimensional atlas. */
 export interface TexturePageDescription {
 	readonly purpose: TexturePurpose;
 	readonly width: number;
 	readonly height: number;
 	readonly pageBits: Uint8Array;
 	readonly textures: readonly {
-		readonly key: TextureKey;
+		readonly key: TextureAtlasEntryKey;
 		readonly placement: TexturePlacement;
 	}[];
 }
 
-/** Immutable allocation policy for one purpose-specific texture array. */
-export interface ManagedTextureArrayDescription extends Omit<
-	TextureArrayDescription,
-	"format"
-> {
-	readonly purpose: TexturePurpose;
+/** One decoded DAT texture occupying a deterministic array layer. */
+export interface TextureArrayLayerSource {
+	/** DAT source identity used to resolve shader composition references. */
+	readonly sourceAssetId: DatAssetId;
+	/** Complete level-zero pixels for this layer. */
+	readonly pixels: Uint8Array;
 }
 
-/** Backend array resource and layer assigned to one logical texture. */
+/** Complete immutable source used to create one texture array atomically. */
+export interface TextureArraySource {
+	readonly key: TextureArrayKey;
+	readonly purpose: TexturePurpose;
+	readonly width: number;
+	readonly height: number;
+	/** Ordered layers whose indices remain stable for the array lifetime. */
+	readonly layers: readonly TextureArrayLayerSource[];
+}
+
+/** Complete immutable source used to create one unpacked texture atomically. */
+export interface StandaloneTextureSource {
+	/** Logical identity derived from source and purpose. */
+	readonly key: StandaloneTextureKey;
+	/** DAT texture represented by this complete resource. */
+	readonly sourceAssetId: DatAssetId;
+	/** Semantic use that fixes device format and mip policy. */
+	readonly purpose: TexturePurpose;
+	readonly width: number;
+	readonly height: number;
+	/** Complete level-zero pixels for this texture. */
+	readonly pixels: Uint8Array;
+}
+
+/** Backend array resource plus deterministic DAT-source layer assignments. */
 export interface TextureArrayBinding {
 	readonly resource: TextureArrayResourceKey;
-	readonly layer: number;
+	readonly layersByAssetId: ReadonlyMap<DatAssetId, number>;
+}
+
+/** Backend resource backing one complete unpacked logical texture. */
+export interface StandaloneTextureBinding {
+	readonly resource: Texture2DResourceKey;
 }
 
 /** Backend atlas resource and page-relative placement for one logical texture. */
@@ -60,34 +96,46 @@ interface PackedTexturePage {
 	readonly purpose: TexturePurpose;
 	readonly width: number;
 	readonly height: number;
-	readonly textures: Map<TextureKey, TexturePlacement>;
+	readonly textures: Map<TextureAtlasEntryKey, TexturePlacement>;
 	readonly resource: Texture2DResourceKey;
 }
 
 interface ManagedTextureArray {
-	readonly description: ManagedTextureArrayDescription;
-	readonly freeLayers: number[];
-	readonly resource: TextureArrayResourceKey;
-	readonly textures: Map<
-		TextureKey,
-		{ readonly layer: number; readonly pageId: TexturePageId }
-	>;
+	readonly identity: TextureArrayIdentity;
+	readonly binding: TextureArrayBinding;
 }
 
-type TextureOwner =
-	| { readonly kind: "atlas"; readonly pageId: TexturePageId }
-	| { readonly kind: "array"; readonly arrayId: TextureArrayId };
+interface ManagedStandaloneTexture {
+	readonly identity: StandaloneTextureIdentity;
+	readonly binding: StandaloneTextureBinding;
+}
 
-/** Owns committed source textures across packed atlases and texture arrays. */
+/** Immutable standalone facts retained without pinning uploaded CPU pixels. */
+interface StandaloneTextureIdentity {
+	readonly sourceAssetId: DatAssetId;
+	readonly purpose: TexturePurpose;
+	readonly width: number;
+	readonly height: number;
+}
+
+/** Immutable array facts retained without pinning uploaded CPU pixel payloads. */
+interface TextureArrayIdentity {
+	readonly purpose: TexturePurpose;
+	readonly width: number;
+	readonly height: number;
+	readonly sourceAssetIds: readonly DatAssetId[];
+}
+
+/** Owns packed pages, standalone textures, and complete immutable arrays. */
 export class TextureManager {
 	readonly #renderResources: RendererResourceManager;
-	readonly #textureOwners = new Map<TextureKey, TextureOwner>();
+	readonly #atlasOwners = new Map<TextureAtlasEntryKey, TexturePageId>();
 	readonly #atlasPages = new Map<TexturePageId, PackedTexturePage>();
-	readonly #textureArrays = new Map<TextureArrayId, ManagedTextureArray>();
-	readonly #arrayPageOwners = new Map<
-		TexturePageId,
-		{ readonly arrayId: TextureArrayId; readonly textureKey: TextureKey }
+	readonly #standaloneTextures = new Map<
+		StandaloneTextureKey,
+		ManagedStandaloneTexture
 	>();
+	readonly #textureArrays = new Map<TextureArrayKey, ManagedTextureArray>();
 
 	constructor(renderResources: RendererResourceManager) {
 		this.#renderResources = renderResources;
@@ -99,14 +147,24 @@ export class TextureManager {
 	): boolean {
 		validatePage(description, id);
 		for (const { key } of description.textures) {
-			this.#assertTextureOwner(key, { kind: "atlas", pageId: id });
+			const owner = this.#atlasOwners.get(key);
+			if (owner !== undefined && owner !== id) {
+				throw new Error(
+					`Texture ${key} already belongs to atlas page ${owner}.`,
+				);
+			}
 		}
 
 		const existing = this.#atlasPages.get(id);
 		const upload = {
 			data: description.pageBits,
-			format: texturePixelFormatForPurpose(description.purpose),
+			format: texturePurposePolicy(description.purpose).format,
 			height: description.height,
+			mipLevels: mipLevelCount(
+				description.purpose,
+				description.width,
+				description.height,
+			),
 			width: description.width,
 		};
 		const resource = existing
@@ -115,14 +173,12 @@ export class TextureManager {
 		if (existing) this.#renderResources.replaceTexture2D(resource, upload);
 
 		for (const key of existing?.textures.keys() ?? []) {
-			this.#textureOwners.delete(key);
+			this.#atlasOwners.delete(key);
 		}
 		const textures = new Map(
 			description.textures.map(({ key, placement }) => [key, placement]),
 		);
-		for (const key of textures.keys()) {
-			this.#textureOwners.set(key, { kind: "atlas", pageId: id });
-		}
+		for (const key of textures.keys()) this.#atlasOwners.set(key, id);
 		this.#atlasPages.set(id, {
 			height: description.height,
 			purpose: description.purpose,
@@ -133,106 +189,92 @@ export class TextureManager {
 		return existing === undefined;
 	}
 
-	createTextureArray(
-		id: TextureArrayId,
-		description: ManagedTextureArrayDescription,
-	): boolean {
-		const existing = this.#textureArrays.get(id);
+	createStandaloneTexture(source: StandaloneTextureSource): boolean {
+		validateStandaloneTextureSource(source);
+		const existing = this.#standaloneTextures.get(source.key);
 		if (existing) {
-			if (!sameArrayDescription(existing.description, description)) {
-				throw new Error(`Texture array ${id} already has a different shape.`);
+			if (!sameStandaloneTextureSource(existing.identity, source)) {
+				throw new Error(
+					`Standalone texture ${source.key} already has a different source.`,
+				);
 			}
 			return false;
 		}
 
-		const resource = this.#renderResources.createTextureArray({
-			...description,
-			format: texturePixelFormatForPurpose(description.purpose),
-		});
-		this.#textureArrays.set(id, {
-			description,
-			freeLayers: createLayerStack(description.layerCapacity),
-			resource,
-			textures: new Map(),
+		const resource = this.#renderResources.createTexture2D(
+			createTexture2DUpload(source),
+		);
+		this.#standaloneTextures.set(source.key, {
+			binding: { resource },
+			identity: {
+				height: source.height,
+				purpose: source.purpose,
+				sourceAssetId: source.sourceAssetId,
+				width: source.width,
+			},
 		});
 		return true;
 	}
 
-	upsertTextureArrayPage(
-		arrayId: TextureArrayId,
-		pageId: TexturePageId,
-		description: TexturePageDescription,
-	): TextureArrayBinding {
-		validatePage(description, pageId);
-		if (description.textures.length !== 1) {
-			throw new Error(
-				`Texture array page ${pageId} must contain exactly one texture.`,
-			);
-		}
-		const [{ key, placement }] = description.textures;
-		if (placement.gutter !== TextureGutterPolicy.None) {
-			throw new Error(`Texture array page ${pageId} cannot contain a gutter.`);
-		}
-		if (!placementCoversPage(placement, description)) {
-			throw new Error(
-				`Texture array page ${pageId} placement must cover the complete page.`,
-			);
+	createTextureArray(source: TextureArraySource): boolean {
+		validateTextureArraySource(source);
+		const existing = this.#textureArrays.get(source.key);
+		if (existing) {
+			if (!sameTextureArraySource(existing.identity, source)) {
+				throw new Error(
+					`Texture array ${source.key} already has a different source.`,
+				);
+			}
+			return false;
 		}
 
-		const array = this.#requireTextureArray(arrayId);
-		validateArrayPage(arrayId, array.description, pageId, description);
-		this.#assertTextureOwner(key, { kind: "array", arrayId });
-
-		const previousPage = this.#arrayPageOwners.get(pageId);
-		if (previousPage && previousPage.arrayId !== arrayId) {
-			throw new Error(
-				`Texture page ${pageId} already belongs to array ${previousPage.arrayId}.`,
-			);
-		}
-		const existingTexture = array.textures.get(key);
-		if (existingTexture && existingTexture.pageId !== pageId) {
-			throw new Error(
-				`Texture ${key} already belongs to array page ${existingTexture.pageId}.`,
-			);
-		}
-		if (previousPage && previousPage.textureKey !== key && !existingTexture) {
-			throw new Error(
-				`Texture array page ${pageId} cannot replace ${previousPage.textureKey} with ${key}.`,
-			);
-		}
-
-		const allocatedLayer = existingTexture === undefined;
-		const layer = existingTexture?.layer ?? array.freeLayers.pop();
-		if (layer === undefined) {
-			throw new Error(`Texture array ${arrayId} has no free layers.`);
-		}
-		try {
-			this.#renderResources.uploadTextureArrayLayer(array.resource, {
-				data: description.pageBits,
-				layer,
-			});
-		} catch (error) {
-			if (allocatedLayer) array.freeLayers.push(layer);
-			throw error;
-		}
-		array.textures.set(key, { layer, pageId });
-		this.#arrayPageOwners.set(pageId, { arrayId, textureKey: key });
-		this.#textureOwners.set(key, { arrayId, kind: "array" });
-		return { layer, resource: array.resource };
-	}
-
-	generateTextureArrayMipmaps(id: TextureArrayId): void {
-		this.#renderResources.generateTextureArrayMipmaps(
-			this.#requireTextureArray(id).resource,
+		const resource = this.#renderResources.createTextureArray(
+			createTextureArrayResourceDescription(source),
 		);
+		try {
+			for (const [layer, entry] of source.layers.entries()) {
+				this.#renderResources.uploadTextureArrayLayer(resource, {
+					data: entry.pixels,
+					layer,
+				});
+			}
+			this.#renderResources.generateTextureArrayMipmaps(resource);
+		} catch (cause) {
+			if (!this.#renderResources.releaseResource(resource)) {
+				throw new Error(
+					`Texture array ${source.key} failed and lost its partial backend resource.`,
+					{ cause },
+				);
+			}
+			throw cause;
+		}
+
+		this.#textureArrays.set(source.key, {
+			binding: {
+				layersByAssetId: new Map(
+					source.layers.map(({ sourceAssetId }, layer) => [
+						sourceAssetId,
+						layer,
+					]),
+				),
+				resource,
+			},
+			identity: {
+				height: source.height,
+				purpose: source.purpose,
+				sourceAssetIds: source.layers.map(({ sourceAssetId }) => sourceAssetId),
+				width: source.width,
+			},
+		});
+		return true;
 	}
 
-	getAtlasBinding(texture: TextureKey): TextureAtlasBinding {
-		const owner = this.#textureOwners.get(texture);
-		if (!owner || owner.kind !== "atlas") {
+	getAtlasBinding(texture: TextureAtlasEntryKey): TextureAtlasBinding {
+		const pageId = this.#atlasOwners.get(texture);
+		if (pageId === undefined) {
 			throw new Error(`Texture ${texture} does not have an atlas binding.`);
 		}
-		const page = this.#atlasPages.get(owner.pageId);
+		const page = this.#atlasPages.get(pageId);
 		const placement = page?.textures.get(texture);
 		if (!page || !placement) {
 			throw new Error(`Texture ${texture} has an invalid atlas binding.`);
@@ -240,54 +282,59 @@ export class TextureManager {
 		return { placement, resource: page.resource };
 	}
 
-	getTextureArrayBinding(texture: TextureKey): TextureArrayBinding {
-		const owner = this.#textureOwners.get(texture);
-		if (!owner || owner.kind !== "array") {
-			throw new Error(`Texture ${texture} does not have an array binding.`);
-		}
-		const array = this.#textureArrays.get(owner.arrayId);
-		const entry = array?.textures.get(texture);
-		if (!array || !entry) {
-			throw new Error(`Texture ${texture} has an invalid array binding.`);
-		}
-		return { layer: entry.layer, resource: array.resource };
+	getStandaloneTextureBinding(
+		key: StandaloneTextureKey,
+	): StandaloneTextureBinding {
+		const texture = this.#standaloneTextures.get(key);
+		if (!texture) throw new Error(`Standalone texture ${key} does not exist.`);
+		return texture.binding;
 	}
 
-	releaseTexture(texture: TextureKey): boolean {
-		const owner = this.#textureOwners.get(texture);
-		if (!owner) return false;
-		this.#textureOwners.delete(texture);
-		if (owner.kind === "atlas") {
-			return this.#releaseAtlasTexture(owner.pageId, texture);
-		}
+	getTextureArrayBinding(key: TextureArrayKey): TextureArrayBinding {
+		const array = this.#textureArrays.get(key);
+		if (!array) throw new Error(`Texture array ${key} does not exist.`);
+		return array.binding;
+	}
 
-		const array = this.#requireTextureArray(owner.arrayId);
-		const entry = array.textures.get(texture);
-		if (!entry) {
-			throw new Error(
-				`Texture ${texture} is missing from array ${owner.arrayId}.`,
-			);
+	/** Check whether a complete logical texture is currently device-backed. */
+	hasTexture(key: TextureKey): boolean {
+		if (isTextureArrayKey(key)) return this.#textureArrays.has(key);
+		if (isStandaloneTextureKey(key)) return this.#standaloneTextures.has(key);
+		return this.#atlasOwners.has(key);
+	}
+
+	releaseTexture(key: TextureKey): boolean {
+		if (isTextureArrayKey(key)) return this.#releaseTextureArray(key);
+		if (isStandaloneTextureKey(key)) {
+			return this.#releaseStandaloneTexture(key);
 		}
-		array.textures.delete(texture);
-		this.#arrayPageOwners.delete(entry.pageId);
-		array.freeLayers.push(entry.layer);
+		return this.#releaseAtlasTexture(key);
+	}
+
+	#releaseStandaloneTexture(key: StandaloneTextureKey): boolean {
+		const texture = this.#standaloneTextures.get(key);
+		if (!texture) return false;
+		this.#standaloneTextures.delete(key);
+		if (!this.#renderResources.releaseResource(texture.binding.resource)) {
+			throw new Error(`Standalone texture ${key} lost its backend resource.`);
+		}
 		return true;
 	}
 
-	removeTextureArray(id: TextureArrayId): boolean {
-		const array = this.#textureArrays.get(id);
+	#releaseTextureArray(key: TextureArrayKey): boolean {
+		const array = this.#textureArrays.get(key);
 		if (!array) return false;
-		if (array.textures.size !== 0) {
-			throw new Error(`Texture array ${id} still owns textures.`);
-		}
-		this.#textureArrays.delete(id);
-		if (!this.#renderResources.releaseResource(array.resource)) {
-			throw new Error(`Texture array ${id} lost its backend resource.`);
+		this.#textureArrays.delete(key);
+		if (!this.#renderResources.releaseResource(array.binding.resource)) {
+			throw new Error(`Texture array ${key} lost its backend resource.`);
 		}
 		return true;
 	}
 
-	#releaseAtlasTexture(pageId: TexturePageId, texture: TextureKey): boolean {
+	#releaseAtlasTexture(texture: TextureAtlasEntryKey): boolean {
+		const pageId = this.#atlasOwners.get(texture);
+		if (pageId === undefined) return false;
+		this.#atlasOwners.delete(texture);
 		const page = this.#atlasPages.get(pageId);
 		if (!page) {
 			throw new Error(`Texture ${texture} references missing page ${pageId}.`);
@@ -301,19 +348,31 @@ export class TextureManager {
 		}
 		return true;
 	}
+}
 
-	#assertTextureOwner(texture: TextureKey, expected: TextureOwner): void {
-		const owner = this.#textureOwners.get(texture);
-		if (!owner || sameTextureOwner(owner, expected)) return;
+function validateStandaloneTextureSource(
+	source: StandaloneTextureSource,
+): void {
+	if (
+		!standaloneTextureKeyMatchesSource(
+			source.key,
+			source.purpose,
+			source.sourceAssetId,
+		)
+	) {
 		throw new Error(
-			`Texture ${texture} already has a different storage owner.`,
+			`Standalone texture ${source.key} does not match its source facts.`,
 		);
 	}
-
-	#requireTextureArray(id: TextureArrayId): ManagedTextureArray {
-		const array = this.#textureArrays.get(id);
-		if (!array) throw new Error(`Texture array ${id} does not exist.`);
-		return array;
+	if (
+		!Number.isInteger(source.width) ||
+		!Number.isInteger(source.height) ||
+		source.width <= 0 ||
+		source.height <= 0
+	) {
+		throw new Error(
+			`Standalone texture ${source.key} dimensions must be positive.`,
+		);
 	}
 }
 
@@ -332,55 +391,95 @@ function validatePage(
 	}
 }
 
-function validateArrayPage(
-	arrayId: TextureArrayId,
-	array: ManagedTextureArrayDescription,
-	pageId: TexturePageId,
-	page: TexturePageDescription,
-): void {
-	if (
-		array.purpose !== page.purpose ||
-		array.width !== page.width ||
-		array.height !== page.height
-	) {
+function validateTextureArraySource(source: TextureArraySource): void {
+	if (!textureArrayKeyMatchesPurpose(source.key, source.purpose)) {
 		throw new Error(
-			`Texture page ${pageId} is incompatible with array ${arrayId}.`,
+			`Texture array ${source.key} does not match purpose ${source.purpose}.`,
+		);
+	}
+	if (
+		!Number.isInteger(source.width) ||
+		!Number.isInteger(source.height) ||
+		source.width <= 0 ||
+		source.height <= 0
+	) {
+		throw new Error(`Texture array ${source.key} dimensions must be positive.`);
+	}
+	if (source.layers.length === 0) {
+		throw new Error(
+			`Texture array ${source.key} must contain at least one layer.`,
+		);
+	}
+	const sourceIds = source.layers.map(({ sourceAssetId }) => sourceAssetId);
+	if (new Set(sourceIds).size !== sourceIds.length) {
+		throw new Error(
+			`Texture array ${source.key} contains duplicate DAT sources.`,
 		);
 	}
 }
 
-function createLayerStack(capacity: number): number[] {
-	return Array.from({ length: capacity }, (_, layer) => capacity - layer - 1);
+function createTextureArrayResourceDescription(
+	source: TextureArraySource,
+): TextureArrayDescription {
+	const purposePolicy = texturePurposePolicy(source.purpose);
+	return {
+		format: purposePolicy.format,
+		height: source.height,
+		layerCapacity: source.layers.length,
+		mipLevels: purposePolicy.generateMipmaps
+			? Math.floor(Math.log2(Math.max(source.width, source.height))) + 1
+			: 1,
+		width: source.width,
+	};
 }
 
-function placementCoversPage(
-	placement: TexturePlacement,
-	page: TexturePageDescription,
+function createTexture2DUpload(
+	source: StandaloneTextureSource,
+): Texture2DUpload {
+	const purposePolicy = texturePurposePolicy(source.purpose);
+	return {
+		data: source.pixels,
+		format: purposePolicy.format,
+		height: source.height,
+		mipLevels: mipLevelCount(source.purpose, source.width, source.height),
+		width: source.width,
+	};
+}
+
+function mipLevelCount(
+	purpose: TexturePurpose,
+	width: number,
+	height: number,
+): number {
+	return texturePurposePolicy(purpose).generateMipmaps
+		? Math.floor(Math.log2(Math.max(width, height))) + 1
+		: 1;
+}
+
+function sameStandaloneTextureSource(
+	left: StandaloneTextureIdentity,
+	right: StandaloneTextureSource,
 ): boolean {
 	return (
-		placement.bounds.min.x === 0 &&
-		placement.bounds.min.y === 0 &&
-		placement.bounds.max.x === page.width &&
-		placement.bounds.max.y === page.height
+		left.sourceAssetId === right.sourceAssetId &&
+		left.purpose === right.purpose &&
+		left.width === right.width &&
+		left.height === right.height
 	);
 }
 
-function sameArrayDescription(
-	left: ManagedTextureArrayDescription,
-	right: ManagedTextureArrayDescription,
+function sameTextureArraySource(
+	left: TextureArrayIdentity,
+	right: TextureArraySource,
 ): boolean {
 	return (
 		left.purpose === right.purpose &&
 		left.width === right.width &&
 		left.height === right.height &&
-		left.mipLevels === right.mipLevels &&
-		left.layerCapacity === right.layerCapacity &&
-		left.sampling === right.sampling
+		left.sourceAssetIds.length === right.layers.length &&
+		left.sourceAssetIds.every(
+			(sourceAssetId, layer) =>
+				sourceAssetId === right.layers[layer]?.sourceAssetId,
+		)
 	);
-}
-
-function sameTextureOwner(left: TextureOwner, right: TextureOwner): boolean {
-	return left.kind === "atlas"
-		? right.kind === "atlas" && left.pageId === right.pageId
-		: right.kind === "array" && left.arrayId === right.arrayId;
 }

@@ -16,21 +16,21 @@ import type {
 	TexturePageId,
 	TexturePlacement,
 } from "../textures/texture-manager";
-import type { TextureKey, TexturePurpose } from "../textures/types";
-
-export interface TerrainFeatures {
-	roadMaskTexture: TextureKey;
-	colorTextures: TextureKey[];
-	detailTexture: TextureKey;
-}
+import type {
+	TextureAtlasEntryKey,
+	TextureKey,
+	TexturePurpose,
+} from "../textures/types";
+import type {
+	TerrainGenerationSource,
+	TerrainPresentationSource,
+} from "../terrain/types";
 
 export interface StaticLandblockLayerCommitTerrain {
-	// Features shared by multiple points.
-	features: TerrainFeatures[];
-	// linearized grid heights.
-	heights: Float32Array;
-	// linearized terrain feature index.
-	featureIndexes: Uint8Array;
+	/** Canonical source retained by runtime terrain generation. */
+	readonly generation: TerrainGenerationSource;
+	/** Stable regional composition and texture identities retained without decoded pixels. */
+	readonly presentation: TerrainPresentationSource;
 }
 
 export enum TextureWrapPolicy {
@@ -107,7 +107,7 @@ export interface TexturePageCommit {
 	purpose: TexturePurpose;
 	pageBits: Uint8Array;
 	textures: Array<{
-		key: TextureKey;
+		key: TextureAtlasEntryKey;
 		placement: TexturePlacement;
 	}>;
 }

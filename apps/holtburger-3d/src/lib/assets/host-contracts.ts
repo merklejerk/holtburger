@@ -205,20 +205,61 @@ export interface HostEnvCellResidentDto {
 	readonly embeddedResidents: readonly HostObjectResidentDto[];
 }
 
-/** Terrain feature metadata retained for runtime mesh generation. */
-export interface HostTerrainFeatureDto {
-	readonly roadMaskTextureId: string;
-	readonly colorTextureIds: readonly string[];
-	readonly detailTextureId: string;
+/** Source-proven color-variation range for one terrain type. */
+export interface HostTerrainColorVariationDto {
+	readonly minVertexBrightness: number;
+	readonly maxVertexBrightness: number;
+	readonly minVertexSaturation: number;
+	readonly maxVertexSaturation: number;
+	readonly minVertexHue: number;
+	readonly maxVertexHue: number;
 }
 
-/** Metadata-only terrain source for one landblock. */
+/** One regional terrain type selected by a landscape pcode. */
+export interface HostTerrainMaterialTypeDto {
+	readonly terrainType: number;
+	readonly colorTextureId: string;
+	readonly tiling: number;
+	readonly colorVariation: HostTerrainColorVariationDto;
+}
+
+/** One regional canonical terrain alpha map. Ordered list position selects its pcode variation. */
+export interface HostTerrainAlphaMapDto {
+	readonly terrainCode: number;
+	readonly blendMaskTextureId: string;
+}
+
+/** One regional canonical road alpha map. Ordered list position selects its pcode variation. */
+export interface HostTerrainRoadAlphaMapDto {
+	readonly roadCode: number;
+	readonly roadMaskTextureId: string;
+}
+
+/** Region-level landscape detail source. */
+export interface HostTerrainLandscapeDetailDto {
+	readonly textureId: string;
+	readonly tiling: number;
+}
+
+/** Complete regional terrain composition table interpreted by terrain presentation. */
+export interface HostTerrainCompositionDto {
+	readonly regionNumber: number;
+	readonly terrainTypes: readonly HostTerrainMaterialTypeDto[];
+	readonly cornerTerrainAlphaMaps: readonly HostTerrainAlphaMapDto[];
+	readonly sideTerrainAlphaMaps: readonly HostTerrainAlphaMapDto[];
+	readonly roadAlphaMaps: readonly HostTerrainRoadAlphaMapDto[];
+	readonly landscapeDetail: HostTerrainLandscapeDetailDto;
+}
+
+/** Canonical metadata-only terrain source for one landblock. */
 export interface HostTerrainLayerSourceDto {
 	readonly kind: "terrain";
 	readonly landblockId: string;
-	readonly features: readonly HostTerrainFeatureDto[];
-	readonly heights: readonly number[];
-	readonly featureIndices: readonly number[];
+	/** Raw CellLandblock 9x9 height bytes. */
+	readonly heightBytes: readonly number[];
+	/** Raw CellLandblock 9x9 terrain samples. */
+	readonly terrainSamples: readonly number[];
+	readonly composition: HostTerrainCompositionDto;
 }
 
 /** Outdoor static object/building source prepared by the host. */

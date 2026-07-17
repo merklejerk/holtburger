@@ -5,93 +5,93 @@ import type { GeometryResourceKey } from "./resource-manager";
 import { RenderResourceRegistry } from "./render-resources";
 import { RenderScene } from "./render-scene";
 
-const GEOMETRY_A = "geometry-resource:1" as const satisfies GeometryResourceKey;
-const GEOMETRY_B = "geometry-resource:2" as const satisfies GeometryResourceKey;
+const GEOMETRY = "geometry-resource:1" as const satisfies GeometryResourceKey;
 const NODE_A = "scene-node:1" as const satisfies SceneNodeId;
 const NODE_B = "scene-node:2" as const satisfies SceneNodeId;
 
 describe("RenderScene", () => {
-	it("selects terrain and multiple object poses for one visible node", () => {
+	it("selects multiple object poses for one visible node", () => {
 		const resources = new RenderResourceRegistry();
 		const scene = new RenderScene(resources);
-		const terrainId = resources.createTerrainResource(
-			GEOMETRY_A,
-			createTerrainDrawUnits(),
-		);
-		const objectId = resources.createObjectResource(GEOMETRY_B, [
+		const objectId = resources.createObjectResource(GEOMETRY, [
 			createObjectDrawUnit(),
 		]);
-		scene.createTerrainInstance(NODE_A, terrainId);
-		scene.createObjectInstance(NODE_A, objectId, { kind: "baked" });
-		scene.createObjectInstance(NODE_A, objectId, {
-			kind: "rigid",
-			resourceTransform: Mat4.identity(),
+		scene.createInstance({
+			kind: "object",
+			nodeId: NODE_A,
+			pose: { kind: "baked" },
+			resourceId: objectId,
+		});
+		scene.createInstance({
+			kind: "object",
+			nodeId: NODE_A,
+			pose: { kind: "rigid", resourceTransform: Mat4.identity() },
+			resourceId: objectId,
 		});
 
-		const view = scene.resolveView([NODE_A], () => createPlacement());
+		const view = scene.resolveVisibleOccurrences([NODE_A], () =>
+			createPlacement(),
+		);
 
-		expect(view.terrain).toHaveLength(1);
-		expect(view.objects.map(({ instance }) => instance.pose.kind)).toEqual([
-			"baked",
-			"rigid",
+		expect(
+			view.map((instance) =>
+				instance.kind === "object"
+					? instance.instance.pose.kind
+					: instance.kind,
+			),
+		).toEqual(["baked", "rigid"]);
+		expect(view[0]?.placement).toEqual(createPlacement());
+	});
+
+	it("selects terrain occurrences through their visible scene roots", () => {
+		const resources = new RenderResourceRegistry();
+		const scene = new RenderScene(resources);
+		scene.createInstance({ kind: "terrain", nodeId: NODE_A });
+
+		const view = scene.resolveVisibleOccurrences([NODE_A], () =>
+			createPlacement(),
+		);
+
+		expect(view).toEqual([
+			{
+				kind: "terrain",
+				instance: {
+					id: "render-instance:0",
+					kind: "terrain",
+					nodeId: NODE_A,
+				},
+				placement: createPlacement(),
+			},
 		]);
-		expect(view.terrain[0]?.placement).toEqual(createPlacement());
 	});
 
-	it("preserves instance identity across resource replacement", () => {
+	it("removes object occurrences without deciding object resource lifetime", () => {
 		const resources = new RenderResourceRegistry();
 		const scene = new RenderScene(resources);
-		const resourceId = resources.createTerrainResource(
-			GEOMETRY_A,
-			createTerrainDrawUnits(),
-		);
-		const instanceId = scene.createTerrainInstance(NODE_A, resourceId);
-		const replacement = createTerrainDrawUnits(6);
-
-		resources.replaceTerrainResource(resourceId, replacement);
-
-		const view = scene.resolveView([NODE_A], () => createPlacement());
-		expect(view.terrain[0]?.instance.id).toBe(instanceId);
-		expect(view.terrain[0]?.resource.drawUnits).toBe(replacement);
-	});
-
-	it("removes node instances without deciding resource lifetime", () => {
-		const resources = new RenderResourceRegistry();
-		const scene = new RenderScene(resources);
-		const resourceId = resources.createTerrainResource(
-			GEOMETRY_A,
-			createTerrainDrawUnits(),
-		);
-		scene.createTerrainInstance(NODE_A, resourceId);
-		scene.createTerrainInstance(NODE_B, resourceId);
+		const resourceId = resources.createObjectResource(GEOMETRY, []);
+		scene.createInstance({
+			kind: "object",
+			nodeId: NODE_A,
+			pose: { kind: "baked" },
+			resourceId,
+		});
+		scene.createInstance({
+			kind: "object",
+			nodeId: NODE_B,
+			pose: { kind: "baked" },
+			resourceId,
+		});
 
 		scene.removeNodes([NODE_A, NODE_B]);
 
 		expect(
-			scene.resolveView([NODE_A, NODE_B], () => createPlacement()),
-		).toEqual({
-			objects: [],
-			terrain: [],
-		});
-		expect(resources.getTerrainResource(resourceId).geometryKey).toBe(
-			GEOMETRY_A,
-		);
+			scene.resolveVisibleOccurrences([NODE_A, NODE_B], () =>
+				createPlacement(),
+			),
+		).toEqual([]);
+		expect(resources.getObjectResource(resourceId).geometryKey).toBe(GEOMETRY);
 	});
 });
-
-function createTerrainDrawUnits(indexCount = 3) {
-	return [
-		{
-			indexCount,
-			indexStart: 0,
-			material: {
-				colorTexture: "terrain-color:1/wrap-4" as const,
-				detailTexture: "terrain-detail:2/wrap-4" as const,
-				roadMaskTexture: "terrain-road-mask:3/wrap-4" as const,
-			},
-		},
-	];
-}
 
 function createObjectDrawUnit() {
 	return {

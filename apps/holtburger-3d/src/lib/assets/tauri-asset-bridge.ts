@@ -6,6 +6,10 @@ import type {
 import type { ResolvedLandblockLayerSource } from "../game/resolution/landblock-layer";
 import { normalizeHostLandblockLayer } from "../game/resolution/resolve-landblock-layer";
 import type { LandblockIdLayer } from "../game/runtime/scene-interest";
+import type {
+	TexturePreparationServiceRequest,
+	TexturePreparationServiceResponse,
+} from "../game/textures/texture-preparer";
 
 /** Tauri adapter for the host asset boundary. */
 export class TauriAssetBridge implements AssetBridge {
@@ -28,5 +32,13 @@ export class TauriAssetBridge implements AssetBridge {
 			{ request },
 		);
 		return normalizeHostLandblockLayer(dto, layer);
+	}
+
+	async requestTexturePreparationAsset(
+		request: TexturePreparationServiceRequest,
+	): Promise<TexturePreparationServiceResponse> {
+		throw new Error(
+			`Tauri texture preparation asset service is not implemented for ${request.kind}.`,
+		);
 	}
 }

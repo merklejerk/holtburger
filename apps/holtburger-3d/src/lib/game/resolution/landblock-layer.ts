@@ -1,6 +1,10 @@
-import type { DatAssetId, EnvCellId, LandblockId } from "../game-types";
+import type { EnvCellId, LandblockId } from "../game-types";
 import type { AABB3, Vec3 } from "../math/types";
 import type { ScenePlacement } from "../scene";
+import type {
+	TerrainPresentationSource,
+	TerrainGenerationSource,
+} from "../terrain/types";
 import { LandblockLayerKind } from "../runtime/scene-interest";
 import type {
 	ResolvedGeometry,
@@ -85,20 +89,14 @@ export interface ResolvedPortalAperture {
 	readonly visibleSide: "positive" | "negative" | "both";
 }
 
-/** Terrain feature metadata retained for runtime-generated meshes. */
-export interface ResolvedTerrainFeature {
-	readonly roadMaskTextureId: DatAssetId;
-	readonly colorTextureIds: readonly DatAssetId[];
-	readonly detailTextureId: DatAssetId;
-}
-
-/** Metadata-only terrain source consumed by the terrain service. */
+/** Source-only terrain layer consumed by runtime texture and terrain residency. */
 export interface ResolvedTerrainLayerSource {
 	readonly kind: LandblockLayerKind.Terrain;
 	readonly landblockId: LandblockId;
-	readonly features: readonly ResolvedTerrainFeature[];
-	readonly heights: Float32Array;
-	readonly featureIndices: Uint8Array;
+	/** Canonical landblock facts consumed by the terrain generator. */
+	readonly generation: TerrainGenerationSource;
+	/** Stable regional composition and deterministic texture facts for presentation. */
+	readonly presentation: TerrainPresentationSource;
 }
 
 /** Outdoor static layer containing residents backed by shared object definitions. */

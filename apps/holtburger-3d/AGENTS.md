@@ -18,6 +18,12 @@ client, and many implementations are intentionally absent.
   make invalid relationships difficult to represent.
 - Keep changes minimal. Add only enough code to demonstrate the requested shape
   and flow. Apply YAGNI aggressively while the architecture is still moving.
+- Do not use YAGNI to defer known behavior merely because its concrete lower-level
+  consumer does not exist yet. In this phase, narrow types, pure reference
+  algorithms, resource contracts, and call-site stubs are how established
+  decisions are documented and protected. Defer inert implementation side
+  effects, such as binding resources to a shader program that does not consume
+  them, rather than deferring the contract those effects will eventually use.
 - A stub is allowed to omit behavior; it should not pretend to implement
   behavior, silently swallow an invariant violation, or encode guesses as facts.
 - Existing checks may fail because neighboring scaffolding is unfinished. Run

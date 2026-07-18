@@ -2,16 +2,17 @@ import type { DatAssetId, LandblockId } from "../game-types";
 import { getLandblockCoordinates } from "../landblocks";
 import type { AABB3 } from "../math/types";
 import type { TerrainGeometryData } from "../renderer/geometry";
-import type {
-	GeometryResourceKey,
-	Texture2DResourceKey,
-} from "../renderer/resource-manager";
+import type { GeometryResourceKey } from "../renderer/resource-manager";
 import {
 	createStandaloneTextureKey,
+	createTerrainCompositionTextureKey,
+	createTerrainSurfaceTextureKey,
 	createTextureArrayKey,
 	TexturePurpose,
 	type StandaloneTextureFact,
 	type StandaloneTextureKey,
+	type TerrainCompositionTextureKey,
+	type TerrainSurfaceTextureKey,
 	type TextureArrayFact,
 	type TextureArrayKey,
 } from "../textures/types";
@@ -95,6 +96,18 @@ export interface TerrainTextureKeys {
 /** Authored-grid sampling stride used to generate one retail terrain LOD. */
 export type TerrainMeshStride = 1 | 2 | 4 | 8;
 
+/** Every authored-grid stride generated and retained for one terrain landblock. */
+export const TERRAIN_MESH_STRIDES: readonly TerrainMeshStride[] = [1, 2, 4, 8];
+
+/** Stable generated texture identities retained for one terrain source installation. */
+export interface TerrainGeneratedTextureKeys {
+	readonly composition: TerrainCompositionTextureKey;
+	readonly surfaceFields: ReadonlyMap<
+		TerrainMeshStride,
+		TerrainSurfaceTextureKey
+	>;
+}
+
 /** Retail transition orientation selected relative to the scene anchor. */
 export type TerrainTransitionDirection =
 	| "viewer-block"
@@ -150,7 +163,6 @@ export interface TerrainSourceInstallation {
 export interface RealizedTerrainResources {
 	readonly geometry: GeometryResourceKey;
 	readonly variants: readonly TerrainVariantDrawRange[];
-	readonly surfaceFields: ReadonlyMap<TerrainMeshStride, Texture2DResourceKey>;
 }
 
 /** One selected terrain submission ready for renderer resource resolution. */
@@ -158,10 +170,10 @@ export interface TerrainDrawResources {
 	readonly geometry: GeometryResourceKey;
 	readonly indexStart: number;
 	readonly indexCount: number;
-	readonly surfaceField: Texture2DResourceKey;
+	readonly surfaceField: TerrainSurfaceTextureKey;
 	readonly textures: TerrainTextureKeys;
 	/** Stable regional lookup texture interpreted by the terrain fragment program. */
-	readonly composition: Texture2DResourceKey;
+	readonly composition: TerrainCompositionTextureKey;
 }
 
 /** Create deterministic texture facts from one source-proven regional composition table. */
@@ -219,6 +231,24 @@ export function terrainTextureKeysFromFacts(
 		colors: facts.colors.key,
 		detail: facts.detail.key,
 		roadMasks: facts.roadMasks.key,
+	};
+}
+
+/** Derive every generated texture identity deterministically from one terrain source. */
+export function terrainGeneratedTextureKeys(
+	landblockId: LandblockId,
+	presentation: TerrainPresentationSource,
+): TerrainGeneratedTextureKeys {
+	return {
+		composition: createTerrainCompositionTextureKey(
+			presentation.composition.regionNumber,
+		),
+		surfaceFields: new Map(
+			TERRAIN_MESH_STRIDES.map((stride) => [
+				stride,
+				createTerrainSurfaceTextureKey(landblockId, stride),
+			]),
+		),
 	};
 }
 

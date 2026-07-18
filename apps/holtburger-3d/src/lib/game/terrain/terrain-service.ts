@@ -3,10 +3,12 @@ import type { LandblockId } from "../game-types";
 import { IntegerTexture2DFormat } from "../renderer/resource-manager";
 import type {
 	RendererResourceManager,
-	RenderResourceKey,
-	Texture2DResourceKey,
 	Texture2DUpload,
 } from "../renderer/resource-manager";
+import type {
+	GeneratedTextureSource,
+	GeneratedTextureStore,
+} from "../textures/texture-manager";
 import {
 	compileTerrainCompositionTable,
 	TERRAIN_COMPOSITION_TABLE_HEIGHT,
@@ -16,15 +18,15 @@ import type { TerrainGenerator } from "./terrain-generator";
 import {
 	selectTerrainMeshStride,
 	selectTerrainTransitionDirection,
+	terrainGeneratedTextureKeys,
 	terrainTextureKeysFromFacts,
 	type RealizedTerrainResources,
 	type TerrainDrawResources,
 	type TerrainGenerationResult,
-	type TerrainMeshStride,
 	type TerrainSourceInstallation,
+	TERRAIN_MESH_STRIDES,
 } from "./types";
 
-const TERRAIN_MESH_STRIDES: readonly TerrainMeshStride[] = [1, 2, 4, 8];
 const TERRAIN_TRANSITION_DIRECTIONS = [
 	"viewer-block",
 	"north",
@@ -40,19 +42,16 @@ const TERRAIN_TRANSITION_DIRECTIONS = [
 interface LoadingTerrainInstallation {
 	readonly kind: "loading";
 	readonly input: TerrainSourceInstallation;
-	readonly composition: Texture2DResourceKey;
 }
 
 interface FailedTerrainInstallation {
 	readonly kind: "failed";
 	readonly input: TerrainSourceInstallation;
-	readonly composition: Texture2DResourceKey;
 }
 
 interface RealizedTerrainInstallation {
 	readonly kind: "realized";
 	readonly input: TerrainSourceInstallation;
-	readonly composition: Texture2DResourceKey;
 	readonly resources: RealizedTerrainResources;
 }
 
@@ -61,25 +60,22 @@ type TerrainInstallation =
 	| FailedTerrainInstallation
 	| RealizedTerrainInstallation;
 
-interface RetainedTerrainComposition {
-	readonly key: Texture2DResourceKey;
-	readonly referenceCount: number;
-}
-
-/** Owns terrain generation state, generated device allocations, and frame-time variant selection. */
+/** Owns terrain generation state, generated geometry, and frame-time variant selection. */
 export class TerrainService {
 	readonly #generator: TerrainGenerator;
 	readonly #renderResources: RendererResourceManager;
+	readonly #textures: GeneratedTextureStore;
 	readonly #installations = new Map<LandblockId, TerrainInstallation>();
-	readonly #compositions = new Map<number, RetainedTerrainComposition>();
 	#destroyed = false;
 
 	constructor(
 		generator: TerrainGenerator,
 		renderResources: RendererResourceManager,
+		textures: GeneratedTextureStore,
 	) {
 		this.#generator = generator;
 		this.#renderResources = renderResources;
+		this.#textures = textures;
 	}
 
 	/** Retain a newly interested source and start exactly one generation operation. */
@@ -91,11 +87,8 @@ export class TerrainService {
 		}
 		if (this.#installations.has(input.landblockId)) return;
 
-		const installation: LoadingTerrainInstallation = {
-			composition: this.#retainComposition(input),
-			input,
-			kind: "loading",
-		};
+		this.#publishComposition(input);
+		const installation: LoadingTerrainInstallation = { input, kind: "loading" };
 		this.#installations.set(input.landblockId, installation);
 		void this.#generateAndRealize(input.landblockId, installation);
 	}
@@ -108,7 +101,6 @@ export class TerrainService {
 		if (installation.kind === "realized") {
 			this.#releaseRealizedResources(installation.resources);
 		}
-		this.#releaseComposition(installation.input, installation.composition);
 	}
 
 	/** Select already-realized terrain resources for one visible landblock. */
@@ -134,14 +126,18 @@ export class TerrainService {
 				`Terrain ${landblockId} is missing ${stride}/${transitionDirection} geometry.`,
 			);
 		}
-		const surfaceField = installation.resources.surfaceFields.get(stride);
+		const generatedTextures = terrainGeneratedTextureKeys(
+			landblockId,
+			installation.input.presentation,
+		);
+		const surfaceField = generatedTextures.surfaceFields.get(stride);
 		if (!surfaceField) {
 			throw new Error(
 				`Terrain ${landblockId} is missing stride ${stride} surface data.`,
 			);
 		}
 		return {
-			composition: installation.composition,
+			composition: generatedTextures.composition,
 			geometry: installation.resources.geometry,
 			indexCount: variant.indexCount,
 			indexStart: variant.indexStart,
@@ -162,14 +158,6 @@ export class TerrainService {
 			}
 		}
 		this.#installations.clear();
-		for (const composition of this.#compositions.values()) {
-			if (!this.#renderResources.releaseResource(composition.key)) {
-				throw new Error(
-					`Terrain composition resource ${composition.key} disappeared before destroy.`,
-				);
-			}
-		}
-		this.#compositions.clear();
 	}
 
 	async #generateAndRealize(
@@ -181,13 +169,12 @@ export class TerrainService {
 				installation.input.generation,
 			);
 			if (this.#installations.get(landblockId) !== installation) return;
-			const resources = this.#realizeResult(result);
+			const resources = this.#realizeResult(installation.input, result);
 			if (this.#installations.get(landblockId) !== installation) {
 				this.#releaseRealizedResources(resources);
 				return;
 			}
 			this.#installations.set(landblockId, {
-				composition: installation.composition,
 				input: installation.input,
 				kind: "realized",
 				resources,
@@ -195,7 +182,6 @@ export class TerrainService {
 		} catch (error) {
 			if (this.#installations.get(landblockId) !== installation) return;
 			this.#installations.set(landblockId, {
-				composition: installation.composition,
 				input: installation.input,
 				kind: "failed",
 			});
@@ -203,93 +189,68 @@ export class TerrainService {
 		}
 	}
 
-	#realizeResult(result: TerrainGenerationResult): RealizedTerrainResources {
+	#realizeResult(
+		input: TerrainSourceInstallation,
+		result: TerrainGenerationResult,
+	): RealizedTerrainResources {
 		validateTerrainGenerationResult(result);
-		const allocated: RenderResourceKey[] = [];
+		let geometry: RealizedTerrainResources["geometry"] | undefined;
 		try {
-			const geometry = this.#renderResources.createGeometry(result.geometry);
-			allocated.push(geometry);
-			const surfaceFields = new Map<TerrainMeshStride, Texture2DResourceKey>();
-			for (const field of result.surfaceFields) {
-				const key = this.#renderResources.createTexture2D(
-					createTerrainSurfaceUpload(field),
-				);
-				allocated.push(key);
-				surfaceFields.set(field.stride, key);
-			}
+			geometry = this.#renderResources.createGeometry(result.geometry);
+			const generatedTextures = terrainGeneratedTextureKeys(
+				input.landblockId,
+				input.presentation,
+			);
+			this.#textures.upsertGeneratedTextures(
+				result.surfaceFields.map((field) => {
+					const key = generatedTextures.surfaceFields.get(field.stride);
+					if (!key) {
+						throw new Error(
+							`Terrain ${input.landblockId} has no generated texture key for stride ${field.stride}.`,
+						);
+					}
+					return { key, upload: createTerrainSurfaceUpload(field) };
+				}),
+			);
 			return {
 				geometry,
-				surfaceFields,
 				variants: result.variants,
 			};
 		} catch (error) {
-			for (const key of allocated.reverse()) {
-				if (!this.#renderResources.releaseResource(key)) {
-					throw new Error(`Terrain realization lost partial resource ${key}.`, {
+			if (geometry && !this.#renderResources.releaseResource(geometry)) {
+				throw new Error(
+					"Terrain realization lost its partial geometry resource.",
+					{
 						cause: error,
-					});
-				}
+					},
+				);
 			}
 			throw error;
 		}
 	}
 
 	#releaseRealizedResources(resources: RealizedTerrainResources): void {
-		for (const key of [
-			resources.geometry,
-			...resources.surfaceFields.values(),
-		]) {
-			if (!this.#renderResources.releaseResource(key)) {
-				throw new Error(`Terrain resource ${key} disappeared before release.`);
-			}
+		if (!this.#renderResources.releaseResource(resources.geometry)) {
+			throw new Error(
+				`Terrain geometry ${resources.geometry} disappeared before release.`,
+			);
 		}
 	}
 
-	#retainComposition(input: TerrainSourceInstallation): Texture2DResourceKey {
-		const regionNumber = input.presentation.composition.regionNumber;
-		const retained = this.#compositions.get(regionNumber);
-		if (retained) {
-			this.#compositions.set(regionNumber, {
-				key: retained.key,
-				referenceCount: retained.referenceCount + 1,
-			});
-			return retained.key;
-		}
+	#publishComposition(input: TerrainSourceInstallation): void {
 		const table = compileTerrainCompositionTable(
 			input.presentation.composition,
 			input.presentation.textures,
 		);
-		const key = this.#renderResources.createTexture2D(
-			createTerrainCompositionUpload(table),
+		const generatedTextures = terrainGeneratedTextureKeys(
+			input.landblockId,
+			input.presentation,
 		);
-		this.#compositions.set(regionNumber, { key, referenceCount: 1 });
-		return key;
-	}
-
-	#releaseComposition(
-		input: TerrainSourceInstallation,
-		key: Texture2DResourceKey,
-	): void {
-		const regionNumber = input.presentation.composition.regionNumber;
-		const retained = this.#compositions.get(regionNumber);
-		if (!retained || retained.key !== key) {
-			throw new Error(
-				`Terrain region ${regionNumber} lost composition resource ${key}.`,
-			);
-		}
-		if (retained.referenceCount > 1) {
-			this.#compositions.set(regionNumber, {
-				key,
-				referenceCount: retained.referenceCount - 1,
-			});
-			return;
-		}
-		this.#compositions.delete(regionNumber);
-		if (!this.#renderResources.releaseResource(key)) {
-			throw new Error(
-				`Terrain composition resource ${key} disappeared before release.`,
-			);
-		}
+		const composition: GeneratedTextureSource = {
+			key: generatedTextures.composition,
+			upload: createTerrainCompositionUpload(table),
+		};
+		this.#textures.upsertGeneratedTextures([composition]);
 	}
 }
 

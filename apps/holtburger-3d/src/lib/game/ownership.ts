@@ -1,3 +1,4 @@
+/** Shared owner-to-resource lease accounting for runtime-managed resources. */
 export class LeaseRegistry<
 	TOwnerId extends string = string,
 	TLeaseId extends string = string,

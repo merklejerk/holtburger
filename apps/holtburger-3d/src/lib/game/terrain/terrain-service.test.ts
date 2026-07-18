@@ -4,8 +4,6 @@ import type {
 	GeometryResourceKey,
 	RendererResourceManager,
 	RenderResourceKey,
-	TerrainCompositionResourceKey,
-	TerrainSurfaceResourceKey,
 	Texture2DResourceKey,
 	Texture2DUpload,
 	TextureArrayDescription,
@@ -58,11 +56,11 @@ describe("TerrainService", () => {
 				installation.landblockId,
 			),
 		).toMatchObject({
-			composition: "terrain-composition-resource:0",
+			composition: "texture-2d-resource:0",
 			geometry: "geometry-resource:0",
 			indexCount: 3,
 			indexStart: 0,
-			surfaceField: "terrain-surface-resource:0",
+			surfaceField: "texture-2d-resource:1",
 			textures: {
 				blendMasks: "texture-array:terrain-blend-mask:terrain-region:1",
 				colors: "texture-array:terrain-color:terrain-region:1",
@@ -74,11 +72,11 @@ describe("TerrainService", () => {
 		terrain.removeSource(installation.landblockId);
 		expect(resources.released).toEqual([
 			"geometry-resource:0",
-			"terrain-surface-resource:0",
-			"terrain-surface-resource:1",
-			"terrain-surface-resource:2",
-			"terrain-surface-resource:3",
-			"terrain-composition-resource:0",
+			"texture-2d-resource:1",
+			"texture-2d-resource:2",
+			"texture-2d-resource:3",
+			"texture-2d-resource:4",
+			"texture-2d-resource:0",
 		]);
 	});
 
@@ -93,15 +91,13 @@ describe("TerrainService", () => {
 
 		terrain.installSource(first);
 		terrain.installSource(second);
-		expect(resources.createdCompositions).toEqual([
-			"terrain-composition-resource:0",
-		]);
+		expect(resources.createdTextures).toEqual(["texture-2d-resource:0"]);
 
 		terrain.removeSource(first.landblockId);
 		expect(resources.released).toEqual([]);
 
 		terrain.removeSource(second.landblockId);
-		expect(resources.released).toEqual(["terrain-composition-resource:0"]);
+		expect(resources.released).toEqual(["texture-2d-resource:0"]);
 	});
 });
 
@@ -198,11 +194,10 @@ class DeferredTerrainGenerator implements TerrainGenerator {
 }
 
 class FakeRendererResourceManager implements RendererResourceManager {
-	readonly createdCompositions: TerrainCompositionResourceKey[] = [];
+	readonly createdTextures: Texture2DResourceKey[] = [];
 	readonly released: RenderResourceKey[] = [];
 	#nextGeometry = 0;
-	#nextSurface = 0;
-	#nextComposition = 0;
+	#nextTexture = 0;
 
 	createGeometry(geometry: RenderGeometryData): GeometryResourceKey {
 		void geometry;
@@ -217,20 +212,11 @@ class FakeRendererResourceManager implements RendererResourceManager {
 		void geometry;
 	}
 
-	createTerrainSurface(field: TerrainSurfaceField): TerrainSurfaceResourceKey {
-		void field;
-		return `terrain-surface-resource:${this.#nextSurface++}`;
-	}
-
-	createTerrainComposition(): TerrainCompositionResourceKey {
-		const key: TerrainCompositionResourceKey = `terrain-composition-resource:${this.#nextComposition++}`;
-		this.createdCompositions.push(key);
-		return key;
-	}
-
 	createTexture2D(upload: Texture2DUpload): Texture2DResourceKey {
 		void upload;
-		throw new Error("Textures are not used by terrain service tests.");
+		const key: Texture2DResourceKey = `texture-2d-resource:${this.#nextTexture++}`;
+		this.createdTextures.push(key);
+		return key;
 	}
 
 	replaceTexture2D(key: Texture2DResourceKey, upload: Texture2DUpload): void {

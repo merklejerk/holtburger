@@ -1,14 +1,12 @@
 import type { AssetBridge } from "../../assets/asset-bridge";
 import type { DatAssetId } from "../game-types";
 import type {
-	ResolvedStandaloneTextureFact,
-	ResolvedTextureArrayFact,
-} from "../terrain/types";
-import type {
 	StandaloneTextureSource,
 	TextureArraySource,
 } from "./texture-manager";
 import {
+	type StandaloneTextureFact,
+	type TextureArrayFact,
 	texturePurposePolicy,
 	type TexturePixelFormat,
 	type TextureKey,
@@ -47,7 +45,7 @@ export type PreparedTextureSource =
 export interface TexturePreparer {
 	/** Prepare one complete array or standalone texture for its stable logical key. */
 	prepare(
-		fact: ResolvedTextureArrayFact | ResolvedStandaloneTextureFact,
+		fact: TextureArrayFact | StandaloneTextureFact,
 	): Promise<PreparedTextureSource>;
 	/** Stop accepting work and terminate runtime-owned workers. */
 	destroy(): Promise<void>;
@@ -71,7 +69,7 @@ export class WorkerTexturePreparer implements TexturePreparer {
 	}
 
 	prepare(
-		fact: ResolvedTextureArrayFact | ResolvedStandaloneTextureFact,
+		fact: TextureArrayFact | StandaloneTextureFact,
 	): Promise<PreparedTextureSource> {
 		const pending = this.#pendingPreparations.get(fact.key);
 		if (pending) return pending;
@@ -84,7 +82,7 @@ export class WorkerTexturePreparer implements TexturePreparer {
 	}
 
 	async #prepare(
-		fact: ResolvedTextureArrayFact | ResolvedStandaloneTextureFact,
+		fact: TextureArrayFact | StandaloneTextureFact,
 	): Promise<PreparedTextureSource> {
 		if (fact.kind === "standalone") {
 			const surface = await this.#requestSurface(

@@ -4,14 +4,15 @@ import type { AABB3 } from "../math/types";
 import type { TerrainGeometryData } from "../renderer/geometry";
 import type {
 	GeometryResourceKey,
-	TerrainCompositionResourceKey,
-	TerrainSurfaceResourceKey,
+	Texture2DResourceKey,
 } from "../renderer/resource-manager";
 import {
 	createStandaloneTextureKey,
 	createTextureArrayKey,
 	TexturePurpose,
+	type StandaloneTextureFact,
 	type StandaloneTextureKey,
+	type TextureArrayFact,
 	type TextureArrayKey,
 } from "../textures/types";
 
@@ -69,33 +70,12 @@ export interface TerrainGenerationSource {
 	readonly terrainSamples: Uint16Array;
 }
 
-/** One complete ordered texture-array fact resolved before pixel preparation. */
-export interface ResolvedTextureArrayFact {
-	readonly kind: "array";
-	readonly key: TextureArrayKey;
-	readonly purpose: TexturePurpose;
-	readonly sourceAssetIds: readonly DatAssetId[];
-}
-
-/** One standalone texture fact resolved before pixel preparation. */
-export interface ResolvedStandaloneTextureFact {
-	readonly kind: "standalone";
-	readonly key: StandaloneTextureKey;
-	readonly purpose: TexturePurpose;
-	readonly sourceAssetId: DatAssetId;
-}
-
-/** One complete terrain texture resource requested from the preparation pipeline. */
-export type TerrainTextureFact =
-	| ResolvedTextureArrayFact
-	| ResolvedStandaloneTextureFact;
-
 /** Stable regional texture identities required by one terrain source. */
 export interface ResolvedTerrainTextureFacts {
-	readonly colors: ResolvedTextureArrayFact;
-	readonly blendMasks: ResolvedTextureArrayFact;
-	readonly roadMasks: ResolvedTextureArrayFact;
-	readonly detail: ResolvedStandaloneTextureFact;
+	readonly colors: TextureArrayFact;
+	readonly blendMasks: TextureArrayFact;
+	readonly roadMasks: TextureArrayFact;
+	readonly detail: StandaloneTextureFact;
 }
 
 /** Stable regional presentation facts retained beside one generated terrain source. */
@@ -170,10 +150,7 @@ export interface TerrainSourceInstallation {
 export interface RealizedTerrainResources {
 	readonly geometry: GeometryResourceKey;
 	readonly variants: readonly TerrainVariantDrawRange[];
-	readonly surfaceFields: ReadonlyMap<
-		TerrainMeshStride,
-		TerrainSurfaceResourceKey
-	>;
+	readonly surfaceFields: ReadonlyMap<TerrainMeshStride, Texture2DResourceKey>;
 }
 
 /** One selected terrain submission ready for renderer resource resolution. */
@@ -181,10 +158,10 @@ export interface TerrainDrawResources {
 	readonly geometry: GeometryResourceKey;
 	readonly indexStart: number;
 	readonly indexCount: number;
-	readonly surfaceField: TerrainSurfaceResourceKey;
+	readonly surfaceField: Texture2DResourceKey;
 	readonly textures: TerrainTextureKeys;
 	/** Stable regional lookup texture interpreted by the terrain fragment program. */
-	readonly composition: TerrainCompositionResourceKey;
+	readonly composition: Texture2DResourceKey;
 }
 
 /** Create deterministic texture facts from one source-proven regional composition table. */
@@ -245,13 +222,6 @@ export function terrainTextureKeysFromFacts(
 	};
 }
 
-/** Enumerate every complete texture resource required by one terrain presentation. */
-export function terrainTextureFacts(
-	facts: ResolvedTerrainTextureFacts,
-): readonly TerrainTextureFact[] {
-	return [facts.colors, facts.blendMasks, facts.roadMasks, facts.detail];
-}
-
 /** Select the retail authored-grid stride for a landblock relative to the scene anchor. */
 export function selectTerrainMeshStride(
 	landblockId: LandblockId,
@@ -292,7 +262,7 @@ function createTextureArrayFact(
 	purpose: TexturePurpose,
 	arrayIdentity: string,
 	sourceAssetIds: readonly DatAssetId[],
-): ResolvedTextureArrayFact {
+): TextureArrayFact {
 	if (sourceAssetIds.length === 0) {
 		throw new Error(`Terrain ${purpose} array cannot be empty.`);
 	}

@@ -56,6 +56,25 @@ export type TextureKey =
 	| StandaloneTextureKey
 	| TextureArrayKey;
 
+/** Complete source identity for one immutable texture-array resource. */
+export interface TextureArrayFact {
+	readonly kind: "array";
+	readonly key: TextureArrayKey;
+	readonly purpose: TexturePurpose;
+	readonly sourceAssetIds: readonly DatAssetId[];
+}
+
+/** Complete source identity for one immutable unpacked texture resource. */
+export interface StandaloneTextureFact {
+	readonly kind: "standalone";
+	readonly key: StandaloneTextureKey;
+	readonly purpose: TexturePurpose;
+	readonly sourceAssetId: DatAssetId;
+}
+
+/** One complete logical texture resource to materialize from DAT texture sources. */
+export type TextureFact = TextureArrayFact | StandaloneTextureFact;
+
 export enum TexturePixelFormat {
 	RGBA8 = "rgba8",
 	R8 = "r8",

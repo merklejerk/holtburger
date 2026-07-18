@@ -1,4 +1,5 @@
 import type { AABB2 } from "../math/types";
+import { LeaseRegistry } from "../ownership";
 import type {
 	RendererResourceManager,
 	TextureArrayDescription,
@@ -7,11 +8,15 @@ import type {
 	Texture2DUpload,
 } from "../renderer/resource-manager";
 import type { DatAssetId } from "../game-types";
+import type { TexturePreparer } from "./texture-preparer";
 import {
+	type StandaloneTextureFact,
 	type StandaloneTextureKey,
+	type TextureArrayFact,
 	type TextureAtlasEntryKey,
 	type TextureArrayKey,
 	type TextureKey,
+	type TextureFact,
 	type TexturePreparation,
 	type TexturePurpose,
 	isTextureArrayKey,
@@ -126,9 +131,11 @@ interface TextureArrayIdentity {
 	readonly sourceAssetIds: readonly DatAssetId[];
 }
 
-/** Owns packed pages, standalone textures, and complete immutable arrays. */
-export class TextureManager {
+/** Owns preparation, device resources, and shared owner retention for logical textures. */
+export class TextureManager<TOwnerId extends string = string> {
 	readonly #renderResources: RendererResourceManager;
+	readonly #preparer: TexturePreparer;
+	readonly #leases = new LeaseRegistry<TOwnerId, TextureKey>();
 	readonly #atlasOwners = new Map<TextureAtlasEntryKey, TexturePageId>();
 	readonly #atlasPages = new Map<TexturePageId, PackedTexturePage>();
 	readonly #standaloneTextures = new Map<
@@ -137,8 +144,49 @@ export class TextureManager {
 	>();
 	readonly #textureArrays = new Map<TextureArrayKey, ManagedTextureArray>();
 
-	constructor(renderResources: RendererResourceManager) {
+	constructor(
+		renderResources: RendererResourceManager,
+		preparer: TexturePreparer,
+	) {
 		this.#renderResources = renderResources;
+		this.#preparer = preparer;
+	}
+
+	/** Install one already-packed atlas page and retain every entry for its owner. */
+	installAtlasPage(
+		owner: TOwnerId,
+		id: TexturePageId,
+		description: TexturePageDescription,
+	): void {
+		this.upsertAtlasPage(id, description);
+		for (const { key } of description.textures)
+			this.#leases.addLease(owner, key);
+	}
+
+	/**
+	 * Retain texture facts for one owner and materialize missing device resources.
+	 * Preparation failures are terminal for that owner's texture set.
+	 */
+	async retain(owner: TOwnerId, facts: readonly TextureFact[]): Promise<void> {
+		for (const fact of facts) this.#leases.addLease(owner, fact.key);
+		try {
+			await Promise.all(facts.map((fact) => this.#materialize(fact)));
+		} catch (error) {
+			this.dropOwner(owner);
+			console.error(error);
+		}
+	}
+
+	/** Drop one owner's texture retention and release resources with no remaining owner. */
+	dropOwner(owner: TOwnerId): void {
+		this.#leases.dropOwner(owner);
+		for (const key of this.#leases.takeEmptyLeases()) this.releaseTexture(key);
+	}
+
+	/** Stop preparation work and release every texture retained by runtime owners. */
+	async destroy(): Promise<void> {
+		await this.#preparer.destroy();
+		for (const owner of [...this.#leases.iterOwners()]) this.dropOwner(owner);
 	}
 
 	upsertAtlasPage(
@@ -309,6 +357,64 @@ export class TextureManager {
 			return this.#releaseStandaloneTexture(key);
 		}
 		return this.#releaseAtlasTexture(key);
+	}
+
+	async #materialize(fact: TextureFact): Promise<void> {
+		if (this.hasTexture(fact.key)) return;
+		const source = await this.#preparer.prepare(fact);
+		if (!this.#leases.hasLease(fact.key)) return;
+		if (fact.kind === "array") {
+			this.#validatePreparedArraySource(fact, source);
+			this.createTextureArray(source);
+		} else {
+			this.#validatePreparedStandaloneSource(fact, source);
+			this.createStandaloneTexture(source);
+		}
+	}
+
+	#validatePreparedArraySource(
+		fact: TextureArrayFact,
+		source: TextureArraySource | StandaloneTextureSource,
+	): asserts source is TextureArraySource {
+		if (source.key !== fact.key || source.purpose !== fact.purpose) {
+			throw new Error(
+				`Texture preparer returned incompatible source for ${fact.key}.`,
+			);
+		}
+		if (!("layers" in source)) {
+			throw new Error(
+				`Texture preparer returned standalone data for ${fact.key}.`,
+			);
+		}
+		if (
+			source.layers.length !== fact.sourceAssetIds.length ||
+			source.layers.some(
+				(layer, index) => layer.sourceAssetId !== fact.sourceAssetIds[index],
+			)
+		) {
+			throw new Error(
+				`Texture preparer returned incompatible array membership for ${fact.key}.`,
+			);
+		}
+	}
+
+	#validatePreparedStandaloneSource(
+		fact: StandaloneTextureFact,
+		source: TextureArraySource | StandaloneTextureSource,
+	): asserts source is StandaloneTextureSource {
+		if (source.key !== fact.key || source.purpose !== fact.purpose) {
+			throw new Error(
+				`Texture preparer returned incompatible source for ${fact.key}.`,
+			);
+		}
+		if ("layers" in source) {
+			throw new Error(`Texture preparer returned array data for ${fact.key}.`);
+		}
+		if (source.sourceAssetId !== fact.sourceAssetId) {
+			throw new Error(
+				`Texture preparer returned incompatible source asset for ${fact.key}.`,
+			);
+		}
 	}
 
 	#releaseStandaloneTexture(key: StandaloneTextureKey): boolean {

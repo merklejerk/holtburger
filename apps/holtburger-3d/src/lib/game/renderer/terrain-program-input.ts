@@ -1,5 +1,5 @@
 import type {
-	StandaloneTextureBinding,
+	Texture2DBinding,
 	TextureArrayBinding,
 } from "../textures/texture-manager";
 import type { Texture2DResourceKey } from "./resource-manager";
@@ -9,7 +9,7 @@ export interface TerrainTextureBindings {
 	readonly colors: TextureArrayBinding;
 	readonly blendMasks: TextureArrayBinding;
 	readonly roadMasks: TextureArrayBinding;
-	readonly detail: StandaloneTextureBinding;
+	readonly detail: Texture2DBinding;
 }
 
 /** Fully resolved renderer input consumed by the future terrain compositing program. */

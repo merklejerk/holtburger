@@ -11,9 +11,15 @@ import type {
 	TextureArrayResourceKey,
 } from "../renderer/resource-manager";
 import { AABB3, Vec3 } from "../math/types";
+import { TextureManager } from "../textures/texture-manager";
+import type { TexturePreparer } from "../textures/texture-preparer";
 import type { TerrainGenerator } from "./terrain-generator";
 import { TerrainService } from "./terrain-service";
-import { resolveTerrainTextureFacts } from "./types";
+import {
+	resolveTerrainTextureFacts,
+	terrainGeneratedTextureKeys,
+	TERRAIN_MESH_STRIDES,
+} from "./types";
 import type {
 	TerrainGenerationResult,
 	TerrainGenerationSource,
@@ -22,7 +28,7 @@ import type {
 	TerrainTransitionDirection,
 } from "./types";
 
-const STRIDES: readonly TerrainMeshStride[] = [1, 2, 4, 8];
+const STRIDES = TERRAIN_MESH_STRIDES;
 const TRANSITION_DIRECTIONS: readonly TerrainTransitionDirection[] = [
 	"viewer-block",
 	"north",
@@ -39,8 +45,9 @@ describe("TerrainService", () => {
 	it("generates once, realizes complete output, and selects a frame-time variant", async () => {
 		const generator = new DeferredTerrainGenerator();
 		const resources = new FakeRendererResourceManager();
-		const terrain = new TerrainService(generator, resources);
+		const { terrain, textures } = createTerrainService(generator, resources);
 		const installation = createInstallation();
+		retainGeneratedTextures(textures, "terrain:a", installation);
 
 		terrain.installSource(installation);
 		terrain.installSource(installation);
@@ -56,11 +63,11 @@ describe("TerrainService", () => {
 				installation.landblockId,
 			),
 		).toMatchObject({
-			composition: "texture-2d-resource:0",
+			composition: "terrain-composition:1",
 			geometry: "geometry-resource:0",
 			indexCount: 3,
 			indexStart: 0,
-			surfaceField: "texture-2d-resource:1",
+			surfaceField: "terrain-surface:0x1111ffff/1",
 			textures: {
 				blendMasks: "texture-array:terrain-blend-mask:terrain-region:1",
 				colors: "texture-array:terrain-color:terrain-region:1",
@@ -69,37 +76,71 @@ describe("TerrainService", () => {
 			},
 		});
 
+		textures.dropOwner("terrain:a");
 		terrain.removeSource(installation.landblockId);
 		expect(resources.released).toEqual([
-			"geometry-resource:0",
+			"texture-2d-resource:0",
 			"texture-2d-resource:1",
 			"texture-2d-resource:2",
 			"texture-2d-resource:3",
 			"texture-2d-resource:4",
-			"texture-2d-resource:0",
+			"geometry-resource:0",
 		]);
 	});
 
 	it("shares one composition resource across interested landblocks in a region", () => {
 		const resources = new FakeRendererResourceManager();
-		const terrain = new TerrainService(
+		const { terrain, textures } = createTerrainService(
 			new DeferredTerrainGenerator(),
 			resources,
 		);
 		const first = createInstallation("0x1111ffff");
 		const second = createInstallation("0x1211ffff");
+		retainGeneratedTextures(textures, "terrain:first", first);
+		retainGeneratedTextures(textures, "terrain:second", second);
 
 		terrain.installSource(first);
 		terrain.installSource(second);
 		expect(resources.createdTextures).toEqual(["texture-2d-resource:0"]);
 
+		textures.dropOwner("terrain:first");
 		terrain.removeSource(first.landblockId);
 		expect(resources.released).toEqual([]);
 
+		textures.dropOwner("terrain:second");
 		terrain.removeSource(second.landblockId);
 		expect(resources.released).toEqual(["texture-2d-resource:0"]);
 	});
 });
+
+function createTerrainService(
+	generator: TerrainGenerator,
+	resources: RendererResourceManager,
+): {
+	readonly terrain: TerrainService;
+	readonly textures: TextureManager<string>;
+} {
+	const textures = new TextureManager(resources, new UnusedTexturePreparer());
+	return {
+		terrain: new TerrainService(generator, resources, textures),
+		textures,
+	};
+}
+
+function retainGeneratedTextures(
+	textures: TextureManager<string>,
+	owner: string,
+	installation: ReturnType<typeof createInstallation>,
+): void {
+	const keys = terrainGeneratedTextureKeys(
+		installation.landblockId,
+		installation.presentation,
+	);
+	textures.retainKeys(owner, [
+		keys.composition,
+		...keys.surfaceFields.values(),
+	]);
+}
 
 function createInstallation(landblockId = "0x1111ffff") {
 	const composition = {
@@ -188,6 +229,14 @@ class DeferredTerrainGenerator implements TerrainGenerator {
 	resolve(result: TerrainGenerationResult): void {
 		if (!this.#resolve) throw new Error("Terrain generation is not pending.");
 		this.#resolve(result);
+	}
+
+	async destroy(): Promise<void> {}
+}
+
+class UnusedTexturePreparer implements TexturePreparer {
+	async prepare(): Promise<never> {
+		throw new Error("Terrain service tests do not prepare DAT textures.");
 	}
 
 	async destroy(): Promise<void> {}

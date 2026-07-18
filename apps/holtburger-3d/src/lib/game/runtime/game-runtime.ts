@@ -33,13 +33,16 @@ import {
 	type TerrainGenerator,
 } from "../terrain/terrain-generator";
 import { TerrainService } from "../terrain/terrain-service";
-import { type ResolvedTerrainTextureFacts } from "../terrain/types";
+import {
+	terrainGeneratedTextureKeys,
+	type ResolvedTerrainTextureFacts,
+	type TerrainDrawResources,
+} from "../terrain/types";
 import { TextureManager } from "../textures/texture-manager";
 import {
 	WorkerTexturePreparer,
 	type TexturePreparer,
 } from "../textures/texture-preparer";
-import type { TextureKey } from "../textures/types";
 import {
 	commitBundleOwnerId,
 	landblockLayerToOwnerId,
@@ -137,6 +140,7 @@ export class GameRuntime {
 		this.#terrain = new TerrainService(
 			dependencies.terrainGenerator,
 			renderResources,
+			this.#textures,
 		);
 	}
 
@@ -240,13 +244,17 @@ export class GameRuntime {
 				occurrence.placement.landblockId,
 				this.#worldAnchor,
 			);
-			if (!resources || !this.#hasTerrainTextures(resources.textures)) continue;
+			if (!resources || !this.#hasTerrainTextures(resources)) continue;
 			terrain.push({
 				placement: occurrence.placement,
 				resources,
 				program: {
-					composition: resources.composition,
-					surfaceField: resources.surfaceField,
+					composition: this.#textures.getGeneratedTextureBinding(
+						resources.composition,
+					).resource,
+					surfaceField: this.#textures.getGeneratedTextureBinding(
+						resources.surfaceField,
+					).resource,
 					textures: this.#resolveTerrainTextureBindings(resources.textures),
 				},
 			});
@@ -337,6 +345,14 @@ export class GameRuntime {
 			}
 		>,
 	): void {
+		const generatedTextures = terrainGeneratedTextureKeys(
+			artifact.landblockId,
+			artifact.commit.presentation,
+		);
+		this.#textures.retainKeys(ownerId, [
+			generatedTextures.composition,
+			...generatedTextures.surfaceFields.values(),
+		]);
 		void this.#textures.retain(
 			ownerId,
 			Object.values(artifact.commit.presentation.textures),
@@ -440,14 +456,13 @@ export class GameRuntime {
 		}
 	}
 
-	#hasTerrainTextures(textures: {
-		readonly colors: TextureKey;
-		readonly blendMasks: TextureKey;
-		readonly roadMasks: TextureKey;
-		readonly detail: TextureKey;
-	}): boolean {
-		return Object.values(textures).every((key) =>
-			this.#textures.hasTexture(key),
+	#hasTerrainTextures(resources: TerrainDrawResources): boolean {
+		return (
+			this.#textures.hasTexture(resources.surfaceField) &&
+			this.#textures.hasTexture(resources.composition) &&
+			Object.values(resources.textures).every((key) =>
+				this.#textures.hasTexture(key),
+			)
 		);
 	}
 

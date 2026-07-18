@@ -1,4 +1,4 @@
-import type { DatAssetId } from "../game-types";
+import type { DatAssetId, LandblockId } from "../game-types";
 
 /** Logical edge behavior required by one texture use. */
 export enum TextureWrapMode {
@@ -32,6 +32,8 @@ export enum TexturePurpose {
 declare const textureAtlasEntryKeyBrand: unique symbol;
 declare const standaloneTextureKeyBrand: unique symbol;
 declare const textureArrayKeyBrand: unique symbol;
+declare const terrainSurfaceTextureKeyBrand: unique symbol;
+declare const terrainCompositionTextureKeyBrand: unique symbol;
 
 /** Stable identity for one prepared DAT texture placed inside an atlas page. */
 export type TextureAtlasEntryKey =
@@ -50,11 +52,28 @@ export type TextureArrayKey = `texture-array:${TexturePurpose}:${string}` & {
 	readonly [textureArrayKeyBrand]: true;
 };
 
-/** Logical identity for an atlas entry, standalone texture, or texture array. */
+/** Stable generated pcode field for one landblock and mesh stride. */
+export type TerrainSurfaceTextureKey =
+	`terrain-surface:${LandblockId}/${number}` & {
+		readonly [terrainSurfaceTextureKeyBrand]: true;
+	};
+
+/** Stable generated terrain-composition lookup table for one region. */
+export type TerrainCompositionTextureKey = `terrain-composition:${number}` & {
+	readonly [terrainCompositionTextureKeyBrand]: true;
+};
+
+/** Stable identity for a generated two-dimensional texture resource. */
+export type GeneratedTextureKey =
+	| TerrainSurfaceTextureKey
+	| TerrainCompositionTextureKey;
+
+/** Logical identity for an atlas entry, asset texture, array, or generated texture. */
 export type TextureKey =
 	| TextureAtlasEntryKey
 	| StandaloneTextureKey
-	| TextureArrayKey;
+	| TextureArrayKey
+	| GeneratedTextureKey;
 
 /** Complete source identity for one immutable texture-array resource. */
 export interface TextureArrayFact {
@@ -131,6 +150,31 @@ export function createTextureArrayKey(
 	return `texture-array:${purpose}:${setId}` as TextureArrayKey;
 }
 
+/** Build the canonical generated pcode-field identity for one landblock mesh stride. */
+export function createTerrainSurfaceTextureKey(
+	landblockId: LandblockId,
+	stride: number,
+): TerrainSurfaceTextureKey {
+	if (!Number.isInteger(stride) || stride <= 0) {
+		throw new Error(
+			"Terrain surface texture stride must be a positive integer.",
+		);
+	}
+	return `terrain-surface:${landblockId}/${stride}` as TerrainSurfaceTextureKey;
+}
+
+/** Build the canonical generated terrain-composition identity for one region. */
+export function createTerrainCompositionTextureKey(
+	regionNumber: number,
+): TerrainCompositionTextureKey {
+	if (!Number.isInteger(regionNumber) || regionNumber < 0) {
+		throw new Error(
+			"Terrain composition texture region number must be a non-negative integer.",
+		);
+	}
+	return `terrain-composition:${regionNumber}` as TerrainCompositionTextureKey;
+}
+
 /** Narrow a logical texture identity to a complete array resource. */
 export function isTextureArrayKey(key: TextureKey): key is TextureArrayKey {
 	return key.startsWith("texture-array:");
@@ -141,6 +185,15 @@ export function isStandaloneTextureKey(
 	key: TextureKey,
 ): key is StandaloneTextureKey {
 	return key.startsWith("standalone-texture:");
+}
+
+/** Narrow a logical texture identity to one generated two-dimensional texture. */
+export function isGeneratedTextureKey(
+	key: TextureKey,
+): key is GeneratedTextureKey {
+	return (
+		key.startsWith("terrain-surface:") || key.startsWith("terrain-composition:")
+	);
 }
 
 /** Test whether a standalone key matches its immutable source facts. */

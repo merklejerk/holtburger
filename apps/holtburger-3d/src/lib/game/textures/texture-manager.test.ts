@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AABB2, Vec2 } from "../math/types";
 import type { RenderGeometryData } from "../renderer/geometry";
+import { IntegerTexture2DFormat } from "../renderer/resource-manager";
 import {
 	type GeometryResourceKey,
 	type RendererResourceManager,
@@ -14,6 +15,7 @@ import {
 import {
 	createAtlasEntryKey,
 	createStandaloneTextureKey,
+	createTerrainSurfaceTextureKey,
 	createTextureArrayKey,
 	type TextureFact,
 	TexturePixelFormat,
@@ -219,6 +221,34 @@ describe("TextureManager", () => {
 		textures.installAtlasPage("objects:a", PAGE_ID, page);
 		textures.dropOwner("objects:a");
 
+		expect(resources.releasedResources).toEqual(["texture-2d-resource:0"]);
+	});
+
+	it("materializes and releases a retained generated texture by its stable key", () => {
+		const resources = new FakeRendererResourceManager();
+		const textures = createTextureManager(resources);
+		const key = createTerrainSurfaceTextureKey("0x1111ffff", 1);
+		const source = {
+			key,
+			upload: {
+				data: new Uint32Array(64),
+				format: IntegerTexture2DFormat.R32UI,
+				height: 8,
+				mipLevels: 1,
+				width: 8,
+			},
+		};
+
+		textures.retainKeys("terrain:a", [key]);
+		textures.upsertGeneratedTextures([source]);
+		textures.upsertGeneratedTextures([source]);
+
+		expect(textures.getGeneratedTextureBinding(key)).toEqual({
+			resource: "texture-2d-resource:0",
+		});
+		expect(resources.texture2DUploads).toHaveLength(1);
+
+		textures.dropOwner("terrain:a");
 		expect(resources.releasedResources).toEqual(["texture-2d-resource:0"]);
 	});
 });

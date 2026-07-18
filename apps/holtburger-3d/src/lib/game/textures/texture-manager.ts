@@ -10,6 +10,7 @@ import type {
 import type { DatAssetId } from "../game-types";
 import type { TexturePreparer } from "./texture-preparer";
 import {
+	type GeneratedTextureKey,
 	type StandaloneTextureFact,
 	type StandaloneTextureKey,
 	type TextureArrayFact,
@@ -20,6 +21,7 @@ import {
 	type TexturePreparation,
 	type TexturePurpose,
 	isTextureArrayKey,
+	isGeneratedTextureKey,
 	isStandaloneTextureKey,
 	standaloneTextureKeyMatchesSource,
 	textureArrayKeyMatchesPurpose,
@@ -86,8 +88,8 @@ export interface TextureArrayBinding {
 	readonly layersByAssetId: ReadonlyMap<DatAssetId, number>;
 }
 
-/** Backend resource backing one complete unpacked logical texture. */
-export interface StandaloneTextureBinding {
+/** Backend resource backing one complete two-dimensional logical texture. */
+export interface Texture2DBinding {
 	readonly resource: Texture2DResourceKey;
 }
 
@@ -95,6 +97,18 @@ export interface StandaloneTextureBinding {
 export interface TextureAtlasBinding {
 	readonly resource: Texture2DResourceKey;
 	readonly placement: TexturePlacement;
+}
+
+/** Complete generated texture payload published directly by a CPU producer. */
+export interface GeneratedTextureSource {
+	readonly key: GeneratedTextureKey;
+	readonly upload: Texture2DUpload;
+}
+
+/** Narrow texture-publishing contract consumed by generated-data systems. */
+export interface GeneratedTextureStore {
+	/** Upsert complete generated texture payloads by their deterministic logical keys. */
+	upsertGeneratedTextures(sources: readonly GeneratedTextureSource[]): void;
 }
 
 interface PackedTexturePage {
@@ -112,7 +126,12 @@ interface ManagedTextureArray {
 
 interface ManagedStandaloneTexture {
 	readonly identity: StandaloneTextureIdentity;
-	readonly binding: StandaloneTextureBinding;
+	readonly binding: Texture2DBinding;
+}
+
+interface ManagedGeneratedTexture {
+	readonly identity: GeneratedTextureIdentity;
+	readonly binding: Texture2DBinding;
 }
 
 /** Immutable standalone facts retained without pinning uploaded CPU pixels. */
@@ -131,8 +150,18 @@ interface TextureArrayIdentity {
 	readonly sourceAssetIds: readonly DatAssetId[];
 }
 
+/** Immutable generated storage shape retained without pinning CPU pixel payloads. */
+interface GeneratedTextureIdentity {
+	readonly format: Texture2DUpload["format"];
+	readonly width: number;
+	readonly height: number;
+	readonly mipLevels: number;
+}
+
 /** Owns preparation, device resources, and shared owner retention for logical textures. */
-export class TextureManager<TOwnerId extends string = string> {
+export class TextureManager<
+	TOwnerId extends string = string,
+> implements GeneratedTextureStore {
 	readonly #renderResources: RendererResourceManager;
 	readonly #preparer: TexturePreparer;
 	readonly #leases = new LeaseRegistry<TOwnerId, TextureKey>();
@@ -141,6 +170,10 @@ export class TextureManager<TOwnerId extends string = string> {
 	readonly #standaloneTextures = new Map<
 		StandaloneTextureKey,
 		ManagedStandaloneTexture
+	>();
+	readonly #generatedTextures = new Map<
+		GeneratedTextureKey,
+		ManagedGeneratedTexture
 	>();
 	readonly #textureArrays = new Map<TextureArrayKey, ManagedTextureArray>();
 
@@ -159,8 +192,10 @@ export class TextureManager<TOwnerId extends string = string> {
 		description: TexturePageDescription,
 	): void {
 		this.upsertAtlasPage(id, description);
-		for (const { key } of description.textures)
-			this.#leases.addLease(owner, key);
+		this.retainKeys(
+			owner,
+			description.textures.map(({ key }) => key),
+		);
 	}
 
 	/**
@@ -168,12 +203,75 @@ export class TextureManager<TOwnerId extends string = string> {
 	 * Preparation failures are terminal for that owner's texture set.
 	 */
 	async retain(owner: TOwnerId, facts: readonly TextureFact[]): Promise<void> {
-		for (const fact of facts) this.#leases.addLease(owner, fact.key);
+		this.retainKeys(
+			owner,
+			facts.map(({ key }) => key),
+		);
 		try {
 			await Promise.all(facts.map((fact) => this.#materialize(fact)));
 		} catch (error) {
 			this.dropOwner(owner);
 			console.error(error);
+		}
+	}
+
+	/** Retain logical keys whose texture payload may be published later by another producer. */
+	retainKeys(owner: TOwnerId, keys: readonly TextureKey[]): void {
+		for (const key of keys) this.#leases.addLease(owner, key);
+	}
+
+	/**
+	 * Materialize complete generated textures only while at least one owner retains their keys.
+	 * Repeated publications for an idempotent key must preserve its storage shape.
+	 */
+	upsertGeneratedTextures(sources: readonly GeneratedTextureSource[]): void {
+		const created: Array<{
+			readonly key: GeneratedTextureKey;
+			readonly resource: Texture2DResourceKey;
+			readonly identity: GeneratedTextureIdentity;
+		}> = [];
+		const pendingKeys = new Set<GeneratedTextureKey>();
+		try {
+			for (const source of sources) {
+				if (!this.#leases.hasLease(source.key)) continue;
+				if (pendingKeys.has(source.key)) {
+					throw new Error(
+						`Generated texture publication contains duplicate key ${source.key}.`,
+					);
+				}
+				const identity = generatedTextureIdentity(source.upload);
+				const existing = this.#generatedTextures.get(source.key);
+				if (existing) {
+					if (!sameGeneratedTextureIdentity(existing.identity, identity)) {
+						throw new Error(
+							`Generated texture ${source.key} already has a different storage shape.`,
+						);
+					}
+					continue;
+				}
+				pendingKeys.add(source.key);
+				created.push({
+					identity,
+					key: source.key,
+					resource: this.#renderResources.createTexture2D(source.upload),
+				});
+			}
+			for (const texture of created) {
+				this.#generatedTextures.set(texture.key, {
+					binding: { resource: texture.resource },
+					identity: texture.identity,
+				});
+			}
+		} catch (error) {
+			for (const { resource } of created.reverse()) {
+				if (!this.#renderResources.releaseResource(resource)) {
+					throw new Error(
+						"Generated texture publication lost a partial backend resource.",
+						{ cause: error },
+					);
+				}
+			}
+			throw error;
 		}
 	}
 
@@ -330,9 +428,7 @@ export class TextureManager<TOwnerId extends string = string> {
 		return { placement, resource: page.resource };
 	}
 
-	getStandaloneTextureBinding(
-		key: StandaloneTextureKey,
-	): StandaloneTextureBinding {
+	getStandaloneTextureBinding(key: StandaloneTextureKey): Texture2DBinding {
 		const texture = this.#standaloneTextures.get(key);
 		if (!texture) throw new Error(`Standalone texture ${key} does not exist.`);
 		return texture.binding;
@@ -344,10 +440,17 @@ export class TextureManager<TOwnerId extends string = string> {
 		return array.binding;
 	}
 
+	getGeneratedTextureBinding(key: GeneratedTextureKey): Texture2DBinding {
+		const texture = this.#generatedTextures.get(key);
+		if (!texture) throw new Error(`Generated texture ${key} does not exist.`);
+		return texture.binding;
+	}
+
 	/** Check whether a complete logical texture is currently device-backed. */
 	hasTexture(key: TextureKey): boolean {
 		if (isTextureArrayKey(key)) return this.#textureArrays.has(key);
 		if (isStandaloneTextureKey(key)) return this.#standaloneTextures.has(key);
+		if (isGeneratedTextureKey(key)) return this.#generatedTextures.has(key);
 		return this.#atlasOwners.has(key);
 	}
 
@@ -356,6 +459,7 @@ export class TextureManager<TOwnerId extends string = string> {
 		if (isStandaloneTextureKey(key)) {
 			return this.#releaseStandaloneTexture(key);
 		}
+		if (isGeneratedTextureKey(key)) return this.#releaseGeneratedTexture(key);
 		return this.#releaseAtlasTexture(key);
 	}
 
@@ -433,6 +537,16 @@ export class TextureManager<TOwnerId extends string = string> {
 		this.#textureArrays.delete(key);
 		if (!this.#renderResources.releaseResource(array.binding.resource)) {
 			throw new Error(`Texture array ${key} lost its backend resource.`);
+		}
+		return true;
+	}
+
+	#releaseGeneratedTexture(key: GeneratedTextureKey): boolean {
+		const texture = this.#generatedTextures.get(key);
+		if (!texture) return false;
+		this.#generatedTextures.delete(key);
+		if (!this.#renderResources.releaseResource(texture.binding.resource)) {
+			throw new Error(`Generated texture ${key} lost its backend resource.`);
 		}
 		return true;
 	}
@@ -587,5 +701,28 @@ function sameTextureArraySource(
 			(sourceAssetId, layer) =>
 				sourceAssetId === right.layers[layer]?.sourceAssetId,
 		)
+	);
+}
+
+function generatedTextureIdentity(
+	upload: Texture2DUpload,
+): GeneratedTextureIdentity {
+	return {
+		format: upload.format,
+		height: upload.height,
+		mipLevels: upload.mipLevels,
+		width: upload.width,
+	};
+}
+
+function sameGeneratedTextureIdentity(
+	left: GeneratedTextureIdentity,
+	right: GeneratedTextureIdentity,
+): boolean {
+	return (
+		left.format === right.format &&
+		left.width === right.width &&
+		left.height === right.height &&
+		left.mipLevels === right.mipLevels
 	);
 }

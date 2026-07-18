@@ -203,8 +203,8 @@ export class WebGL2Renderer implements Renderer {
 
 	#resolveTerrainProgramInput(input: TerrainFrameInput): void {
 		const { textures } = input.program;
-		this.#resources.getTerrainSurface(input.program.surfaceField);
-		this.#resources.getTerrainComposition(input.program.composition);
+		this.#resources.getTexture2D(input.program.surfaceField);
+		this.#resources.getTexture2D(input.program.composition);
 		this.#resources.getTextureArray(textures.colors.resource);
 		this.#resources.getTextureArray(textures.blendMasks.resource);
 		this.#resources.getTextureArray(textures.roadMasks.resource);

@@ -5,8 +5,6 @@ import {
 	type GeometryResourceKey,
 	type RendererResourceManager,
 	type RenderResourceKey,
-	type TerrainCompositionResourceKey,
-	type TerrainSurfaceResourceKey,
 	type TextureArrayDescription,
 	type TextureArrayLayerUpload,
 	type TextureArrayResourceKey,
@@ -17,6 +15,7 @@ import {
 	createAtlasEntryKey,
 	createStandaloneTextureKey,
 	createTextureArrayKey,
+	type TextureFact,
 	TexturePixelFormat,
 	type TexturePreparation,
 	TexturePurpose,
@@ -29,7 +28,7 @@ import {
 	type TexturePageDescription,
 	type TexturePageId,
 } from "./texture-manager";
-import type { TerrainSurfaceField } from "../terrain/types";
+import type { TexturePreparer } from "./texture-preparer";
 
 const WRAPPED_ATLAS_PREPARATION: TexturePreparation = {
 	gutterPixels: 4,
@@ -48,7 +47,7 @@ const PAGE_ID: TexturePageId = "page:a";
 describe("TextureManager", () => {
 	it("retains packed atlas bindings", () => {
 		const resources = new FakeRendererResourceManager();
-		const textures = new TextureManager(resources);
+		const textures = createTextureManager(resources);
 		const page = createPage();
 
 		textures.upsertAtlasPage(PAGE_ID, page);
@@ -61,7 +60,7 @@ describe("TextureManager", () => {
 
 	it("creates and publishes one complete immutable texture array", () => {
 		const resources = new FakeRendererResourceManager();
-		const textures = new TextureManager(resources);
+		const textures = createTextureManager(resources);
 		const source = createArraySource();
 
 		expect(textures.createTextureArray(source)).toBe(true);
@@ -91,7 +90,7 @@ describe("TextureManager", () => {
 
 	it("creates and publishes one complete standalone texture", () => {
 		const resources = new FakeRendererResourceManager();
-		const textures = new TextureManager(resources);
+		const textures = createTextureManager(resources);
 		const source = createStandaloneSource();
 
 		expect(textures.createStandaloneTexture(source)).toBe(true);
@@ -111,7 +110,7 @@ describe("TextureManager", () => {
 
 	it("rejects invalid standalone texture sources before device allocation", () => {
 		const resources = new FakeRendererResourceManager();
-		const textures = new TextureManager(resources);
+		const textures = createTextureManager(resources);
 
 		expect(() =>
 			textures.createStandaloneTexture({
@@ -124,7 +123,7 @@ describe("TextureManager", () => {
 
 	it("treats recreation from the same immutable source as idempotent", () => {
 		const resources = new FakeRendererResourceManager();
-		const textures = new TextureManager(resources);
+		const textures = createTextureManager(resources);
 		const source = createArraySource();
 
 		expect(textures.createTextureArray(source)).toBe(true);
@@ -135,7 +134,7 @@ describe("TextureManager", () => {
 
 	it("releases a partial device resource when array creation fails", () => {
 		const resources = new FakeRendererResourceManager();
-		const textures = new TextureManager(resources);
+		const textures = createTextureManager(resources);
 		resources.failArrayLayer = 1;
 
 		expect(() => textures.createTextureArray(createArraySource())).toThrow(
@@ -149,7 +148,7 @@ describe("TextureManager", () => {
 
 	it("rejects invalid complete array sources before device allocation", () => {
 		const resources = new FakeRendererResourceManager();
-		const textures = new TextureManager(resources);
+		const textures = createTextureManager(resources);
 
 		expect(() =>
 			textures.createTextureArray({ ...createArraySource(), layers: [] }),
@@ -174,7 +173,7 @@ describe("TextureManager", () => {
 
 	it("releases a texture array as one logical texture", () => {
 		const resources = new FakeRendererResourceManager();
-		const textures = new TextureManager(resources);
+		const textures = createTextureManager(resources);
 		textures.createTextureArray(createArraySource());
 
 		expect(textures.releaseTexture(ARRAY_KEY)).toBe(true);
@@ -184,14 +183,51 @@ describe("TextureManager", () => {
 
 	it("releases a standalone texture as one logical texture", () => {
 		const resources = new FakeRendererResourceManager();
-		const textures = new TextureManager(resources);
+		const textures = createTextureManager(resources);
 		textures.createStandaloneTexture(createStandaloneSource());
 
 		expect(textures.releaseTexture(STANDALONE_KEY)).toBe(true);
 		expect(textures.releaseTexture(STANDALONE_KEY)).toBe(false);
 		expect(resources.releasedResources).toEqual(["texture-2d-resource:0"]);
 	});
+
+	it("materializes one shared texture once and releases it after its final owner", async () => {
+		const resources = new FakeRendererResourceManager();
+		const textures = createTextureManager(resources);
+		const fact: TextureFact = {
+			kind: "standalone",
+			key: STANDALONE_KEY,
+			purpose: TexturePurpose.TerrainDetail,
+			sourceAssetId: "0x05000004",
+		};
+
+		await textures.retain("terrain:a", [fact]);
+		await textures.retain("terrain:b", [fact]);
+		expect(resources.texture2DUploads).toHaveLength(1);
+
+		textures.dropOwner("terrain:a");
+		expect(resources.releasedResources).toEqual([]);
+		textures.dropOwner("terrain:b");
+		expect(resources.releasedResources).toEqual(["texture-2d-resource:0"]);
+	});
+
+	it("retains every atlas entry through its owning page", () => {
+		const resources = new FakeRendererResourceManager();
+		const textures = createTextureManager(resources);
+		const page = createPage();
+
+		textures.installAtlasPage("objects:a", PAGE_ID, page);
+		textures.dropOwner("objects:a");
+
+		expect(resources.releasedResources).toEqual(["texture-2d-resource:0"]);
+	});
 });
+
+function createTextureManager(
+	resources: RendererResourceManager,
+): TextureManager<string> {
+	return new TextureManager(resources, new FixtureTexturePreparer());
+}
 
 function createStandaloneSource(): StandaloneTextureSource {
 	return {
@@ -245,6 +281,33 @@ function createPixels(firstByte = 0): Uint8Array {
 	return pixels;
 }
 
+class FixtureTexturePreparer implements TexturePreparer {
+	prepare(fact: TextureFact) {
+		if (fact.kind === "standalone") {
+			return Promise.resolve({
+				height: 2,
+				key: fact.key,
+				pixels: createPixels(3),
+				purpose: fact.purpose,
+				sourceAssetId: fact.sourceAssetId,
+				width: 2,
+			});
+		}
+		return Promise.resolve({
+			height: 2,
+			key: fact.key,
+			layers: fact.sourceAssetIds.map((sourceAssetId, index) => ({
+				pixels: createPixels(index),
+				sourceAssetId,
+			})),
+			purpose: fact.purpose,
+			width: 2,
+		});
+	}
+
+	async destroy(): Promise<void> {}
+}
+
 class FakeRendererResourceManager implements RendererResourceManager {
 	readonly arrayDescriptions: TextureArrayDescription[] = [];
 	readonly arrayUploads: Array<{
@@ -262,17 +325,6 @@ class FakeRendererResourceManager implements RendererResourceManager {
 	createGeometry(geometry: RenderGeometryData): GeometryResourceKey {
 		void geometry;
 		throw new Error("Geometry is not used by texture manager tests.");
-	}
-
-	createTerrainSurface(field: TerrainSurfaceField): TerrainSurfaceResourceKey {
-		void field;
-		throw new Error("Terrain surfaces are not used by texture manager tests.");
-	}
-
-	createTerrainComposition(): TerrainCompositionResourceKey {
-		throw new Error(
-			"Terrain composition tables are not used by texture manager tests.",
-		);
 	}
 
 	replaceGeometry(

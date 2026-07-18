@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { AssetBridge } from "../../assets/asset-bridge";
 import type { LandblockIdLayer } from "../runtime/scene-interest";
 import type { ResolvedLandblockLayerSource } from "../resolution/landblock-layer";
-import type { ResolvedStandaloneTextureFact } from "../terrain/types";
 import {
 	createStandaloneTextureKey,
+	type StandaloneTextureFact,
 	TexturePixelFormat,
 	TexturePurpose,
 } from "./types";
@@ -13,7 +13,7 @@ import {
 	WorkerTexturePreparer,
 } from "./texture-preparer";
 
-const DETAIL_TEXTURE: ResolvedStandaloneTextureFact = {
+const DETAIL_TEXTURE: StandaloneTextureFact = {
 	kind: "standalone",
 	key: createStandaloneTextureKey(TexturePurpose.TerrainDetail, "0x05000004"),
 	purpose: TexturePurpose.TerrainDetail,

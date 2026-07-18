@@ -1,12 +1,17 @@
 import { log, LogLevel } from "../../logs";
 import type { LandblockId } from "../game-types";
+import { IntegerTexture2DFormat } from "../renderer/resource-manager";
 import type {
 	RendererResourceManager,
 	RenderResourceKey,
-	TerrainCompositionResourceKey,
-	TerrainSurfaceResourceKey,
+	Texture2DResourceKey,
+	Texture2DUpload,
 } from "../renderer/resource-manager";
-import { compileTerrainCompositionTable } from "./composition-table";
+import {
+	compileTerrainCompositionTable,
+	TERRAIN_COMPOSITION_TABLE_HEIGHT,
+	type TerrainCompositionTable,
+} from "./composition-table";
 import type { TerrainGenerator } from "./terrain-generator";
 import {
 	selectTerrainMeshStride,
@@ -35,19 +40,19 @@ const TERRAIN_TRANSITION_DIRECTIONS = [
 interface LoadingTerrainInstallation {
 	readonly kind: "loading";
 	readonly input: TerrainSourceInstallation;
-	readonly composition: TerrainCompositionResourceKey;
+	readonly composition: Texture2DResourceKey;
 }
 
 interface FailedTerrainInstallation {
 	readonly kind: "failed";
 	readonly input: TerrainSourceInstallation;
-	readonly composition: TerrainCompositionResourceKey;
+	readonly composition: Texture2DResourceKey;
 }
 
 interface RealizedTerrainInstallation {
 	readonly kind: "realized";
 	readonly input: TerrainSourceInstallation;
-	readonly composition: TerrainCompositionResourceKey;
+	readonly composition: Texture2DResourceKey;
 	readonly resources: RealizedTerrainResources;
 }
 
@@ -57,7 +62,7 @@ type TerrainInstallation =
 	| RealizedTerrainInstallation;
 
 interface RetainedTerrainComposition {
-	readonly key: TerrainCompositionResourceKey;
+	readonly key: Texture2DResourceKey;
 	readonly referenceCount: number;
 }
 
@@ -204,12 +209,11 @@ export class TerrainService {
 		try {
 			const geometry = this.#renderResources.createGeometry(result.geometry);
 			allocated.push(geometry);
-			const surfaceFields = new Map<
-				TerrainMeshStride,
-				TerrainSurfaceResourceKey
-			>();
+			const surfaceFields = new Map<TerrainMeshStride, Texture2DResourceKey>();
 			for (const field of result.surfaceFields) {
-				const key = this.#renderResources.createTerrainSurface(field);
+				const key = this.#renderResources.createTexture2D(
+					createTerrainSurfaceUpload(field),
+				);
 				allocated.push(key);
 				surfaceFields.set(field.stride, key);
 			}
@@ -241,9 +245,7 @@ export class TerrainService {
 		}
 	}
 
-	#retainComposition(
-		input: TerrainSourceInstallation,
-	): TerrainCompositionResourceKey {
+	#retainComposition(input: TerrainSourceInstallation): Texture2DResourceKey {
 		const regionNumber = input.presentation.composition.regionNumber;
 		const retained = this.#compositions.get(regionNumber);
 		if (retained) {
@@ -257,14 +259,16 @@ export class TerrainService {
 			input.presentation.composition,
 			input.presentation.textures,
 		);
-		const key = this.#renderResources.createTerrainComposition(table);
+		const key = this.#renderResources.createTexture2D(
+			createTerrainCompositionUpload(table),
+		);
 		this.#compositions.set(regionNumber, { key, referenceCount: 1 });
 		return key;
 	}
 
 	#releaseComposition(
 		input: TerrainSourceInstallation,
-		key: TerrainCompositionResourceKey,
+		key: Texture2DResourceKey,
 	): void {
 		const regionNumber = input.presentation.composition.regionNumber;
 		const retained = this.#compositions.get(regionNumber);
@@ -342,4 +346,39 @@ function validateTerrainGenerationResult(
 			);
 		}
 	}
+}
+
+function createTerrainSurfaceUpload(
+	field: TerrainGenerationResult["surfaceFields"][number],
+): Texture2DUpload {
+	return {
+		data: field.cellPcodes,
+		format: IntegerTexture2DFormat.R32UI,
+		height: field.height,
+		mipLevels: 1,
+		width: field.width,
+	};
+}
+
+function createTerrainCompositionUpload(
+	table: TerrainCompositionTable,
+): Texture2DUpload {
+	if (!Number.isInteger(table.width) || table.width <= 0) {
+		throw new Error(
+			"Terrain composition table width must be a positive integer.",
+		);
+	}
+	const expectedTexels = table.width * TERRAIN_COMPOSITION_TABLE_HEIGHT * 4;
+	if (table.texels.length !== expectedTexels) {
+		throw new Error(
+			`Terrain composition table contains ${table.texels.length} values; expected ${expectedTexels}.`,
+		);
+	}
+	return {
+		data: table.texels,
+		format: IntegerTexture2DFormat.RGBA32UI,
+		height: TERRAIN_COMPOSITION_TABLE_HEIGHT,
+		mipLevels: 1,
+		width: table.width,
+	};
 }

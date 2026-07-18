@@ -9,6 +9,7 @@ import {
 import { INVALID_ID, type EnvCellId, type LandblockId } from "../game-types";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
+import { LeaseRegistry } from "../ownership";
 import type {
 	FrameInput,
 	Renderer,
@@ -32,18 +33,13 @@ import {
 	type TerrainGenerator,
 } from "../terrain/terrain-generator";
 import { TerrainService } from "../terrain/terrain-service";
-import {
-	type ResolvedTerrainTextureFacts,
-	terrainTextureFacts,
-	type TerrainTextureFact,
-} from "../terrain/types";
+import { type ResolvedTerrainTextureFacts } from "../terrain/types";
 import { TextureManager } from "../textures/texture-manager";
 import {
 	WorkerTexturePreparer,
 	type TexturePreparer,
 } from "../textures/texture-preparer";
 import type { TextureKey } from "../textures/types";
-import { LeaseRegistry } from "./ownership";
 import {
 	commitBundleOwnerId,
 	landblockLayerToOwnerId,
@@ -100,18 +96,14 @@ export class GameRuntime {
 	readonly #renderResourceRegistry = new RenderResourceRegistry();
 	/** Renderer occurrences attached to canonical scene nodes. */
 	readonly #renderScene = new RenderScene(this.#renderResourceRegistry);
-	/** Shared texture retention across static layers and terrain installations. */
-	readonly #textureLeases = new LeaseRegistry<OwnerId, TextureKey>();
 	/** Runtime layer/spawn ownership of scene-root lifetimes. */
 	readonly #sceneNodeLeases = new LeaseRegistry<OwnerId, SceneNodeId>();
-	/** Logical textures and their device bindings. */
-	readonly #textures: TextureManager;
+	/** Logical texture preparation, device bindings, and shared owner retention. */
+	readonly #textures: TextureManager<OwnerId>;
 	/** Dynamic terrain sources, generation state, and realized terrain resources. */
 	readonly #terrain: TerrainService;
 	/** Runtime-owned terrain-generation worker terminated during runtime shutdown. */
 	readonly #terrainGenerator: TerrainGenerator;
-	/** Runtime-owned texture-preparation worker terminated during runtime shutdown. */
-	readonly #texturePreparer: TexturePreparer;
 	/** Backend that consumes assembled frame input. */
 	readonly #renderer: Renderer;
 	/** Frontend-owned static commit producer invoked for new scene interest. */
@@ -138,8 +130,10 @@ export class GameRuntime {
 		this.#renderer = renderer;
 		this.#commitPipeline = commitPipeline;
 		this.#terrainGenerator = dependencies.terrainGenerator;
-		this.#texturePreparer = dependencies.texturePreparer;
-		this.#textures = new TextureManager(renderResources);
+		this.#textures = new TextureManager<OwnerId>(
+			renderResources,
+			dependencies.texturePreparer,
+		);
 		this.#terrain = new TerrainService(
 			dependencies.terrainGenerator,
 			renderResources,
@@ -221,16 +215,12 @@ export class GameRuntime {
 		this.#commitArtifacts.length = 0;
 		await this.#terrain.destroy();
 		await this.#terrainGenerator.destroy();
-		await this.#texturePreparer.destroy();
 
 		for (const ownerId of [...this.#sceneNodeLeases.iterOwners()]) {
 			this.#sceneNodeLeases.dropOwner(ownerId);
 		}
 		this.#releaseUnownedSceneNodes();
-		for (const ownerId of [...this.#textureLeases.iterOwners()]) {
-			this.#textureLeases.dropOwner(ownerId);
-		}
-		this.#releaseUnownedTextures();
+		await this.#textures.destroy();
 	}
 
 	#createFrameInput(visibleScene: VisibleScene): FrameInput {
@@ -347,7 +337,10 @@ export class GameRuntime {
 			}
 		>,
 	): void {
-		this.#leaseTerrainTextures(ownerId, artifact.commit.presentation.textures);
+		void this.#textures.retain(
+			ownerId,
+			Object.values(artifact.commit.presentation.textures),
+		);
 		this.#terrain.installSource({
 			generation: artifact.commit.generation,
 			landblockId: artifact.landblockId,
@@ -443,76 +436,8 @@ export class GameRuntime {
 
 	#installCommitTexturePages(ownerId: OwnerId, artifact: CommitBundle): void {
 		for (const page of artifact.texturePages) {
-			this.#textures.upsertAtlasPage(page.pageId, {
-				height: page.height,
-				pageBits: page.pageBits,
-				purpose: page.purpose,
-				textures: page.textures,
-				width: page.width,
-			});
-			for (const { key } of page.textures)
-				this.#textureLeases.addLease(ownerId, key);
+			this.#textures.installAtlasPage(ownerId, page.pageId, page);
 		}
-	}
-
-	#leaseTerrainTextures(
-		ownerId: OwnerId,
-		facts: ResolvedTerrainTextureFacts,
-	): void {
-		const textureFacts = terrainTextureFacts(facts);
-		for (const fact of textureFacts)
-			this.#textureLeases.addLease(ownerId, fact.key);
-		void Promise.all(
-			textureFacts.map((fact) => this.#ensureTerrainTexture(fact)),
-		).catch((error) => this.#failTerrainTextureOwner(ownerId, error));
-	}
-
-	#ensureTerrainTexture(fact: TerrainTextureFact): Promise<void> {
-		if (this.#textures.hasTexture(fact.key)) return Promise.resolve();
-		return this.#texturePreparer.prepare(fact).then((source) => {
-			if (!this.#textureLeases.hasLease(fact.key)) return;
-			if (source.key !== fact.key || source.purpose !== fact.purpose) {
-				throw new Error(
-					`Texture preparer returned incompatible source for ${fact.key}.`,
-				);
-			}
-			if (fact.kind === "array") {
-				if (!("layers" in source)) {
-					throw new Error(
-						`Texture preparer returned standalone data for ${fact.key}.`,
-					);
-				}
-				if (
-					source.layers.length !== fact.sourceAssetIds.length ||
-					source.layers.some(
-						(layer, index) =>
-							layer.sourceAssetId !== fact.sourceAssetIds[index],
-					)
-				) {
-					throw new Error(
-						`Texture preparer returned incompatible array membership for ${fact.key}.`,
-					);
-				}
-				this.#textures.createTextureArray(source);
-			} else {
-				if ("layers" in source) {
-					throw new Error(
-						`Texture preparer returned array data for ${fact.key}.`,
-					);
-				}
-				if (source.sourceAssetId !== fact.sourceAssetId) {
-					throw new Error(
-						`Texture preparer returned incompatible source asset for ${fact.key}.`,
-					);
-				}
-				this.#textures.createStandaloneTexture(source);
-			}
-		});
-	}
-
-	#failTerrainTextureOwner(ownerId: OwnerId, error: unknown): void {
-		this.#releaseTextureOwner(ownerId);
-		log(error, LogLevel.Error);
 	}
 
 	#hasTerrainTextures(textures: {
@@ -540,17 +465,6 @@ export class GameRuntime {
 		};
 	}
 
-	#releaseUnownedTextures(): void {
-		for (const textureKey of this.#textureLeases.takeEmptyLeases()) {
-			this.#textures.releaseTexture(textureKey);
-		}
-	}
-
-	#releaseTextureOwner(ownerId: OwnerId): void {
-		this.#textureLeases.dropOwner(ownerId);
-		this.#releaseUnownedTextures();
-	}
-
 	#isInActiveSceneInterest(
 		landblockId: LandblockId,
 		layer: LandblockLayerKind,
@@ -561,7 +475,7 @@ export class GameRuntime {
 	#evictStaticLayer(landblockId: LandblockId, layer: LandblockLayerKind): void {
 		const ownerId = landblockLayerToOwnerId(landblockId, layer);
 		this.#releaseSceneOwner(ownerId);
-		this.#releaseTextureOwner(ownerId);
+		this.#textures.dropOwner(ownerId);
 		if (layer === LandblockLayerKind.Terrain) {
 			this.#terrain.removeSource(landblockId);
 		}

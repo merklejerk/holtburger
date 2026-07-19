@@ -25,8 +25,6 @@ import {
 } from "./types";
 import {
 	TextureManager,
-	type StandaloneTextureSource,
-	type TextureArraySource,
 	type TexturePageDescription,
 	type TexturePageId,
 } from "./texture-manager";
@@ -44,6 +42,18 @@ const STANDALONE_KEY = createStandaloneTextureKey(
 	TexturePurpose.TerrainDetail,
 	"0x05000004",
 );
+const ARRAY_FACT: TextureFact = {
+	kind: "array",
+	key: ARRAY_KEY,
+	purpose: TexturePurpose.TerrainColor,
+	sourceAssetIds: ["0x05000001", "0x05000002"],
+};
+const STANDALONE_FACT: TextureFact = {
+	kind: "standalone",
+	key: STANDALONE_KEY,
+	purpose: TexturePurpose.TerrainDetail,
+	sourceAssetId: "0x05000004",
+};
 const PAGE_ID: TexturePageId = "page:a";
 
 describe("TextureManager", () => {
@@ -52,7 +62,7 @@ describe("TextureManager", () => {
 		const textures = createTextureManager(resources);
 		const page = createPage();
 
-		textures.upsertAtlasPage(PAGE_ID, page);
+		textures.installAtlasPage("objects:a", PAGE_ID, page);
 
 		expect(textures.getAtlasBinding(page.textures[0].key)).toEqual({
 			placement: page.textures[0].placement,
@@ -60,12 +70,10 @@ describe("TextureManager", () => {
 		});
 	});
 
-	it("creates and publishes one complete immutable texture array", () => {
+	it("materializes one complete texture array through retained facts", async () => {
 		const resources = new FakeRendererResourceManager();
 		const textures = createTextureManager(resources);
-		const source = createArraySource();
-
-		expect(textures.createTextureArray(source)).toBe(true);
+		await textures.retain("terrain:a", [ARRAY_FACT]);
 
 		expect(textures.getTextureArrayBinding(ARRAY_KEY)).toEqual({
 			layersByAssetId: new Map([
@@ -88,124 +96,21 @@ describe("TextureManager", () => {
 			{ key: "texture-array-resource:0", layer: 1, firstByte: 2 },
 		]);
 		expect(resources.mipmapGenerations).toEqual(["texture-array-resource:0"]);
-	});
 
-	it("creates and publishes one complete standalone texture", () => {
-		const resources = new FakeRendererResourceManager();
-		const textures = createTextureManager(resources);
-		const source = createStandaloneSource();
-
-		expect(textures.createStandaloneTexture(source)).toBe(true);
-		expect(textures.createStandaloneTexture(source)).toBe(false);
-		expect(textures.getStandaloneTextureBinding(STANDALONE_KEY)).toEqual({
-			resource: "texture-2d-resource:0",
-		});
-		expect(resources.texture2DUploads).toEqual([
-			{
-				format: TexturePixelFormat.RGBA8,
-				height: 2,
-				mipLevels: 2,
-				width: 2,
-			},
-		]);
-	});
-
-	it("rejects invalid standalone texture sources before device allocation", () => {
-		const resources = new FakeRendererResourceManager();
-		const textures = createTextureManager(resources);
-
-		expect(() =>
-			textures.createStandaloneTexture({
-				...createStandaloneSource(),
-				purpose: TexturePurpose.TerrainColor,
-			}),
-		).toThrow("does not match its source facts");
-		expect(resources.texture2DUploads).toEqual([]);
-	});
-
-	it("treats recreation from the same immutable source as idempotent", () => {
-		const resources = new FakeRendererResourceManager();
-		const textures = createTextureManager(resources);
-		const source = createArraySource();
-
-		expect(textures.createTextureArray(source)).toBe(true);
-		expect(textures.createTextureArray(source)).toBe(false);
-		expect(resources.arrayDescriptions).toHaveLength(1);
-		expect(resources.arrayUploads).toHaveLength(2);
-	});
-
-	it("releases a partial device resource when array creation fails", () => {
-		const resources = new FakeRendererResourceManager();
-		const textures = createTextureManager(resources);
-		resources.failArrayLayer = 1;
-
-		expect(() => textures.createTextureArray(createArraySource())).toThrow(
-			"Fixture array upload failed",
-		);
+		textures.dropOwner("terrain:a");
 		expect(resources.releasedResources).toEqual(["texture-array-resource:0"]);
-		expect(() => textures.getTextureArrayBinding(ARRAY_KEY)).toThrow(
-			"does not exist",
-		);
-	});
-
-	it("rejects invalid complete array sources before device allocation", () => {
-		const resources = new FakeRendererResourceManager();
-		const textures = createTextureManager(resources);
-
-		expect(() =>
-			textures.createTextureArray({ ...createArraySource(), layers: [] }),
-		).toThrow("at least one layer");
-		expect(() =>
-			textures.createTextureArray({
-				...createArraySource(),
-				layers: [
-					{ pixels: createPixels(1), sourceAssetId: "duplicate" },
-					{ pixels: createPixels(2), sourceAssetId: "duplicate" },
-				],
-			}),
-		).toThrow("duplicate DAT sources");
-		expect(() =>
-			textures.createTextureArray({
-				...createArraySource(),
-				purpose: TexturePurpose.TerrainBlendMask,
-			}),
-		).toThrow("does not match purpose");
-		expect(resources.arrayDescriptions).toEqual([]);
-	});
-
-	it("releases a texture array as one logical texture", () => {
-		const resources = new FakeRendererResourceManager();
-		const textures = createTextureManager(resources);
-		textures.createTextureArray(createArraySource());
-
-		expect(textures.releaseTexture(ARRAY_KEY)).toBe(true);
-		expect(textures.releaseTexture(ARRAY_KEY)).toBe(false);
-		expect(resources.releasedResources).toEqual(["texture-array-resource:0"]);
-	});
-
-	it("releases a standalone texture as one logical texture", () => {
-		const resources = new FakeRendererResourceManager();
-		const textures = createTextureManager(resources);
-		textures.createStandaloneTexture(createStandaloneSource());
-
-		expect(textures.releaseTexture(STANDALONE_KEY)).toBe(true);
-		expect(textures.releaseTexture(STANDALONE_KEY)).toBe(false);
-		expect(resources.releasedResources).toEqual(["texture-2d-resource:0"]);
 	});
 
 	it("materializes one shared texture once and releases it after its final owner", async () => {
 		const resources = new FakeRendererResourceManager();
 		const textures = createTextureManager(resources);
-		const fact: TextureFact = {
-			kind: "standalone",
-			key: STANDALONE_KEY,
-			purpose: TexturePurpose.TerrainDetail,
-			sourceAssetId: "0x05000004",
-		};
 
-		await textures.retain("terrain:a", [fact]);
-		await textures.retain("terrain:b", [fact]);
+		await textures.retain("terrain:a", [STANDALONE_FACT]);
+		await textures.retain("terrain:b", [STANDALONE_FACT]);
 		expect(resources.texture2DUploads).toHaveLength(1);
+		expect(textures.getTexture2DResource(STANDALONE_KEY)).toBe(
+			"texture-2d-resource:0",
+		);
 
 		textures.dropOwner("terrain:a");
 		expect(resources.releasedResources).toEqual([]);
@@ -239,13 +144,11 @@ describe("TextureManager", () => {
 			},
 		};
 
-		textures.retainKeys("terrain:a", [key]);
+		textures.reserveKeys("terrain:a", [key]);
 		textures.upsertGeneratedTextures([source]);
 		textures.upsertGeneratedTextures([source]);
 
-		expect(textures.getGeneratedTextureBinding(key)).toEqual({
-			resource: "texture-2d-resource:0",
-		});
+		expect(textures.getTexture2DResource(key)).toBe("texture-2d-resource:0");
 		expect(resources.texture2DUploads).toHaveLength(1);
 
 		textures.dropOwner("terrain:a");
@@ -257,30 +160,6 @@ function createTextureManager(
 	resources: RendererResourceManager,
 ): TextureManager<string> {
 	return new TextureManager(resources, new FixtureTexturePreparer());
-}
-
-function createStandaloneSource(): StandaloneTextureSource {
-	return {
-		height: 2,
-		key: STANDALONE_KEY,
-		pixels: createPixels(3),
-		purpose: TexturePurpose.TerrainDetail,
-		sourceAssetId: "0x05000004",
-		width: 2,
-	};
-}
-
-function createArraySource(): TextureArraySource {
-	return {
-		height: 2,
-		key: ARRAY_KEY,
-		layers: [
-			{ pixels: createPixels(1), sourceAssetId: "0x05000001" },
-			{ pixels: createPixels(2), sourceAssetId: "0x05000002" },
-		],
-		purpose: TexturePurpose.TerrainColor,
-		width: 2,
-	};
 }
 
 function createPage(): TexturePageDescription {
@@ -327,7 +206,7 @@ class FixtureTexturePreparer implements TexturePreparer {
 			height: 2,
 			key: fact.key,
 			layers: fact.sourceAssetIds.map((sourceAssetId, index) => ({
-				pixels: createPixels(index),
+				pixels: createPixels(index + 1),
 				sourceAssetId,
 			})),
 			purpose: fact.purpose,
@@ -348,7 +227,6 @@ class FakeRendererResourceManager implements RendererResourceManager {
 	readonly mipmapGenerations: TextureArrayResourceKey[] = [];
 	readonly releasedResources: RenderResourceKey[] = [];
 	readonly texture2DUploads: Array<Omit<Texture2DUpload, "data">> = [];
-	failArrayLayer: number | null = null;
 	#nextTextureId = 0;
 	#nextTextureArrayId = 0;
 
@@ -392,9 +270,6 @@ class FakeRendererResourceManager implements RendererResourceManager {
 		key: TextureArrayResourceKey,
 		upload: TextureArrayLayerUpload,
 	): void {
-		if (upload.layer === this.failArrayLayer) {
-			throw new Error("Fixture array upload failed.");
-		}
 		this.arrayUploads.push({
 			firstByte: upload.data[0],
 			key,

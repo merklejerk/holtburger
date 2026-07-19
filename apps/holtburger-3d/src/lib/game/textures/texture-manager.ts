@@ -88,11 +88,6 @@ export interface TextureArrayBinding {
 	readonly layersByAssetId: ReadonlyMap<DatAssetId, number>;
 }
 
-/** Backend resource backing one complete two-dimensional logical texture. */
-export interface Texture2DBinding {
-	readonly resource: Texture2DResourceKey;
-}
-
 /** Backend atlas resource and page-relative placement for one logical texture. */
 export interface TextureAtlasBinding {
 	readonly resource: Texture2DResourceKey;
@@ -105,12 +100,6 @@ export interface GeneratedTextureSource {
 	readonly upload: Texture2DUpload;
 }
 
-/** Narrow texture-publishing contract consumed by generated-data systems. */
-export interface GeneratedTextureStore {
-	/** Upsert complete generated texture payloads by their deterministic logical keys. */
-	upsertGeneratedTextures(sources: readonly GeneratedTextureSource[]): void;
-}
-
 interface PackedTexturePage {
 	readonly purpose: TexturePurpose;
 	readonly width: number;
@@ -119,63 +108,20 @@ interface PackedTexturePage {
 	readonly resource: Texture2DResourceKey;
 }
 
-interface ManagedTextureArray {
-	readonly identity: TextureArrayIdentity;
-	readonly binding: TextureArrayBinding;
-}
-
-interface ManagedStandaloneTexture {
-	readonly identity: StandaloneTextureIdentity;
-	readonly binding: Texture2DBinding;
-}
-
-interface ManagedGeneratedTexture {
-	readonly identity: GeneratedTextureIdentity;
-	readonly binding: Texture2DBinding;
-}
-
-/** Immutable standalone facts retained without pinning uploaded CPU pixels. */
-interface StandaloneTextureIdentity {
-	readonly sourceAssetId: DatAssetId;
-	readonly purpose: TexturePurpose;
-	readonly width: number;
-	readonly height: number;
-}
-
-/** Immutable array facts retained without pinning uploaded CPU pixel payloads. */
-interface TextureArrayIdentity {
-	readonly purpose: TexturePurpose;
-	readonly width: number;
-	readonly height: number;
-	readonly sourceAssetIds: readonly DatAssetId[];
-}
-
-/** Immutable generated storage shape retained without pinning CPU pixel payloads. */
-interface GeneratedTextureIdentity {
-	readonly format: Texture2DUpload["format"];
-	readonly width: number;
-	readonly height: number;
-	readonly mipLevels: number;
-}
-
 /** Owns preparation, device resources, and shared owner retention for logical textures. */
-export class TextureManager<
-	TOwnerId extends string = string,
-> implements GeneratedTextureStore {
+export class TextureManager<TOwnerId extends string = string> {
 	readonly #renderResources: RendererResourceManager;
 	readonly #preparer: TexturePreparer;
 	readonly #leases = new LeaseRegistry<TOwnerId, TextureKey>();
 	readonly #atlasOwners = new Map<TextureAtlasEntryKey, TexturePageId>();
 	readonly #atlasPages = new Map<TexturePageId, PackedTexturePage>();
-	readonly #standaloneTextures = new Map<
-		StandaloneTextureKey,
-		ManagedStandaloneTexture
+	/** Complete standalone and generated two-dimensional device resources by logical key. */
+	readonly #texture2DResources = new Map<
+		StandaloneTextureKey | GeneratedTextureKey,
+		Texture2DResourceKey
 	>();
-	readonly #generatedTextures = new Map<
-		GeneratedTextureKey,
-		ManagedGeneratedTexture
-	>();
-	readonly #textureArrays = new Map<TextureArrayKey, ManagedTextureArray>();
+	/** Complete texture-array resources and their DAT-source layer assignments. */
+	readonly #textureArrays = new Map<TextureArrayKey, TextureArrayBinding>();
 
 	constructor(
 		renderResources: RendererResourceManager,
@@ -192,7 +138,7 @@ export class TextureManager<
 		description: TexturePageDescription,
 	): void {
 		this.upsertAtlasPage(id, description);
-		this.retainKeys(
+		this.reserveKeys(
 			owner,
 			description.textures.map(({ key }) => key),
 		);
@@ -203,7 +149,7 @@ export class TextureManager<
 	 * Preparation failures are terminal for that owner's texture set.
 	 */
 	async retain(owner: TOwnerId, facts: readonly TextureFact[]): Promise<void> {
-		this.retainKeys(
+		this.reserveKeys(
 			owner,
 			facts.map(({ key }) => key),
 		);
@@ -215,20 +161,19 @@ export class TextureManager<
 		}
 	}
 
-	/** Retain logical keys whose texture payload may be published later by another producer. */
-	retainKeys(owner: TOwnerId, keys: readonly TextureKey[]): void {
+	/** Reserve logical keys whose texture payload may be published later by another producer. */
+	reserveKeys(owner: TOwnerId, keys: readonly TextureKey[]): void {
 		for (const key of keys) this.#leases.addLease(owner, key);
 	}
 
 	/**
-	 * Materialize complete generated textures only while at least one owner retains their keys.
-	 * Repeated publications for an idempotent key must preserve its storage shape.
+	 * Materialize complete generated textures only while at least one owner reserves their keys.
+	 * Repeated publication for an idempotent key is a no-op.
 	 */
 	upsertGeneratedTextures(sources: readonly GeneratedTextureSource[]): void {
 		const created: Array<{
 			readonly key: GeneratedTextureKey;
 			readonly resource: Texture2DResourceKey;
-			readonly identity: GeneratedTextureIdentity;
 		}> = [];
 		const pendingKeys = new Set<GeneratedTextureKey>();
 		try {
@@ -239,28 +184,15 @@ export class TextureManager<
 						`Generated texture publication contains duplicate key ${source.key}.`,
 					);
 				}
-				const identity = generatedTextureIdentity(source.upload);
-				const existing = this.#generatedTextures.get(source.key);
-				if (existing) {
-					if (!sameGeneratedTextureIdentity(existing.identity, identity)) {
-						throw new Error(
-							`Generated texture ${source.key} already has a different storage shape.`,
-						);
-					}
-					continue;
-				}
+				if (this.#texture2DResources.has(source.key)) continue;
 				pendingKeys.add(source.key);
 				created.push({
-					identity,
 					key: source.key,
 					resource: this.#renderResources.createTexture2D(source.upload),
 				});
 			}
 			for (const texture of created) {
-				this.#generatedTextures.set(texture.key, {
-					binding: { resource: texture.resource },
-					identity: texture.identity,
-				});
+				this.#texture2DResources.set(texture.key, texture.resource);
 			}
 		} catch (error) {
 			for (const { resource } of created.reverse()) {
@@ -278,7 +210,7 @@ export class TextureManager<
 	/** Drop one owner's texture retention and release resources with no remaining owner. */
 	dropOwner(owner: TOwnerId): void {
 		this.#leases.dropOwner(owner);
-		for (const key of this.#leases.takeEmptyLeases()) this.releaseTexture(key);
+		for (const key of this.#leases.takeEmptyLeases()) this.#releaseTexture(key);
 	}
 
 	/** Stop preparation work and release every texture retained by runtime owners. */
@@ -335,44 +267,19 @@ export class TextureManager<
 		return existing === undefined;
 	}
 
-	createStandaloneTexture(source: StandaloneTextureSource): boolean {
+	#createStandaloneTexture(source: StandaloneTextureSource): void {
 		validateStandaloneTextureSource(source);
-		const existing = this.#standaloneTextures.get(source.key);
-		if (existing) {
-			if (!sameStandaloneTextureSource(existing.identity, source)) {
-				throw new Error(
-					`Standalone texture ${source.key} already has a different source.`,
-				);
-			}
-			return false;
-		}
+		if (this.#texture2DResources.has(source.key)) return;
 
 		const resource = this.#renderResources.createTexture2D(
 			createTexture2DUpload(source),
 		);
-		this.#standaloneTextures.set(source.key, {
-			binding: { resource },
-			identity: {
-				height: source.height,
-				purpose: source.purpose,
-				sourceAssetId: source.sourceAssetId,
-				width: source.width,
-			},
-		});
-		return true;
+		this.#texture2DResources.set(source.key, resource);
 	}
 
-	createTextureArray(source: TextureArraySource): boolean {
+	#createTextureArray(source: TextureArraySource): void {
 		validateTextureArraySource(source);
-		const existing = this.#textureArrays.get(source.key);
-		if (existing) {
-			if (!sameTextureArraySource(existing.identity, source)) {
-				throw new Error(
-					`Texture array ${source.key} already has a different source.`,
-				);
-			}
-			return false;
-		}
+		if (this.#textureArrays.has(source.key)) return;
 
 		const resource = this.#renderResources.createTextureArray(
 			createTextureArrayResourceDescription(source),
@@ -396,23 +303,11 @@ export class TextureManager<
 		}
 
 		this.#textureArrays.set(source.key, {
-			binding: {
-				layersByAssetId: new Map(
-					source.layers.map(({ sourceAssetId }, layer) => [
-						sourceAssetId,
-						layer,
-					]),
-				),
-				resource,
-			},
-			identity: {
-				height: source.height,
-				purpose: source.purpose,
-				sourceAssetIds: source.layers.map(({ sourceAssetId }) => sourceAssetId),
-				width: source.width,
-			},
+			layersByAssetId: new Map(
+				source.layers.map(({ sourceAssetId }, layer) => [sourceAssetId, layer]),
+			),
+			resource,
 		});
-		return true;
 	}
 
 	getAtlasBinding(texture: TextureAtlasEntryKey): TextureAtlasBinding {
@@ -428,38 +323,34 @@ export class TextureManager<
 		return { placement, resource: page.resource };
 	}
 
-	getStandaloneTextureBinding(key: StandaloneTextureKey): Texture2DBinding {
-		const texture = this.#standaloneTextures.get(key);
-		if (!texture) throw new Error(`Standalone texture ${key} does not exist.`);
-		return texture.binding;
+	getTexture2DResource(
+		key: StandaloneTextureKey | GeneratedTextureKey,
+	): Texture2DResourceKey {
+		const texture = this.#texture2DResources.get(key);
+		if (!texture) throw new Error(`Texture ${key} does not exist.`);
+		return texture;
 	}
 
 	getTextureArrayBinding(key: TextureArrayKey): TextureArrayBinding {
 		const array = this.#textureArrays.get(key);
 		if (!array) throw new Error(`Texture array ${key} does not exist.`);
-		return array.binding;
-	}
-
-	getGeneratedTextureBinding(key: GeneratedTextureKey): Texture2DBinding {
-		const texture = this.#generatedTextures.get(key);
-		if (!texture) throw new Error(`Generated texture ${key} does not exist.`);
-		return texture.binding;
+		return array;
 	}
 
 	/** Check whether a complete logical texture is currently device-backed. */
 	hasTexture(key: TextureKey): boolean {
 		if (isTextureArrayKey(key)) return this.#textureArrays.has(key);
-		if (isStandaloneTextureKey(key)) return this.#standaloneTextures.has(key);
-		if (isGeneratedTextureKey(key)) return this.#generatedTextures.has(key);
+		if (isStandaloneTextureKey(key) || isGeneratedTextureKey(key)) {
+			return this.#texture2DResources.has(key);
+		}
 		return this.#atlasOwners.has(key);
 	}
 
-	releaseTexture(key: TextureKey): boolean {
+	#releaseTexture(key: TextureKey): boolean {
 		if (isTextureArrayKey(key)) return this.#releaseTextureArray(key);
-		if (isStandaloneTextureKey(key)) {
-			return this.#releaseStandaloneTexture(key);
+		if (isStandaloneTextureKey(key) || isGeneratedTextureKey(key)) {
+			return this.#releaseTexture2D(key);
 		}
-		if (isGeneratedTextureKey(key)) return this.#releaseGeneratedTexture(key);
 		return this.#releaseAtlasTexture(key);
 	}
 
@@ -469,10 +360,10 @@ export class TextureManager<
 		if (!this.#leases.hasLease(fact.key)) return;
 		if (fact.kind === "array") {
 			this.#validatePreparedArraySource(fact, source);
-			this.createTextureArray(source);
+			this.#createTextureArray(source);
 		} else {
 			this.#validatePreparedStandaloneSource(fact, source);
-			this.createStandaloneTexture(source);
+			this.#createStandaloneTexture(source);
 		}
 	}
 
@@ -521,32 +412,22 @@ export class TextureManager<
 		}
 	}
 
-	#releaseStandaloneTexture(key: StandaloneTextureKey): boolean {
-		const texture = this.#standaloneTextures.get(key);
-		if (!texture) return false;
-		this.#standaloneTextures.delete(key);
-		if (!this.#renderResources.releaseResource(texture.binding.resource)) {
-			throw new Error(`Standalone texture ${key} lost its backend resource.`);
-		}
-		return true;
-	}
-
 	#releaseTextureArray(key: TextureArrayKey): boolean {
 		const array = this.#textureArrays.get(key);
 		if (!array) return false;
 		this.#textureArrays.delete(key);
-		if (!this.#renderResources.releaseResource(array.binding.resource)) {
+		if (!this.#renderResources.releaseResource(array.resource)) {
 			throw new Error(`Texture array ${key} lost its backend resource.`);
 		}
 		return true;
 	}
 
-	#releaseGeneratedTexture(key: GeneratedTextureKey): boolean {
-		const texture = this.#generatedTextures.get(key);
+	#releaseTexture2D(key: StandaloneTextureKey | GeneratedTextureKey): boolean {
+		const texture = this.#texture2DResources.get(key);
 		if (!texture) return false;
-		this.#generatedTextures.delete(key);
-		if (!this.#renderResources.releaseResource(texture.binding.resource)) {
-			throw new Error(`Generated texture ${key} lost its backend resource.`);
+		this.#texture2DResources.delete(key);
+		if (!this.#renderResources.releaseResource(texture)) {
+			throw new Error(`Texture ${key} lost its backend resource.`);
 		}
 		return true;
 	}
@@ -674,55 +555,4 @@ function mipLevelCount(
 	return texturePurposePolicy(purpose).generateMipmaps
 		? Math.floor(Math.log2(Math.max(width, height))) + 1
 		: 1;
-}
-
-function sameStandaloneTextureSource(
-	left: StandaloneTextureIdentity,
-	right: StandaloneTextureSource,
-): boolean {
-	return (
-		left.sourceAssetId === right.sourceAssetId &&
-		left.purpose === right.purpose &&
-		left.width === right.width &&
-		left.height === right.height
-	);
-}
-
-function sameTextureArraySource(
-	left: TextureArrayIdentity,
-	right: TextureArraySource,
-): boolean {
-	return (
-		left.purpose === right.purpose &&
-		left.width === right.width &&
-		left.height === right.height &&
-		left.sourceAssetIds.length === right.layers.length &&
-		left.sourceAssetIds.every(
-			(sourceAssetId, layer) =>
-				sourceAssetId === right.layers[layer]?.sourceAssetId,
-		)
-	);
-}
-
-function generatedTextureIdentity(
-	upload: Texture2DUpload,
-): GeneratedTextureIdentity {
-	return {
-		format: upload.format,
-		height: upload.height,
-		mipLevels: upload.mipLevels,
-		width: upload.width,
-	};
-}
-
-function sameGeneratedTextureIdentity(
-	left: GeneratedTextureIdentity,
-	right: GeneratedTextureIdentity,
-): boolean {
-	return (
-		left.format === right.format &&
-		left.width === right.width &&
-		left.height === right.height &&
-		left.mipLevels === right.mipLevels
-	);
 }

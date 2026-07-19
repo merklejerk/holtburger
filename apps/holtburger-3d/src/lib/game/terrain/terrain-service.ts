@@ -1,13 +1,15 @@
 import { log, LogLevel } from "../../logs";
 import type { LandblockId } from "../game-types";
+import type { GeometryManager } from "../geometry/geometry-manager";
+import {
+	createTerrainGeometryKey,
+	type TerrainGeometryKey,
+} from "../geometry/types";
 import { IntegerTexture2DFormat } from "../renderer/resource-manager";
-import type {
-	RendererResourceManager,
-	Texture2DUpload,
-} from "../renderer/resource-manager";
+import type { Texture2DUpload } from "../renderer/resource-manager";
 import type {
 	GeneratedTextureSource,
-	GeneratedTextureStore,
+	TextureManager,
 } from "../textures/texture-manager";
 import {
 	compileTerrainCompositionTable,
@@ -22,6 +24,7 @@ import {
 	terrainTextureKeysFromFacts,
 	type RealizedTerrainResources,
 	type TerrainDrawResources,
+	type TerrainGeneratedTextureKeys,
 	type TerrainGenerationResult,
 	type TerrainSourceInstallation,
 	TERRAIN_MESH_STRIDES,
@@ -39,46 +42,65 @@ const TERRAIN_TRANSITION_DIRECTIONS = [
 	"northwest",
 ] as const;
 
-interface LoadingTerrainInstallation {
+/** One resolved terrain source and every stable resource identity it owns. */
+interface ResolvedTerrainSource<TOwnerId extends string> {
+	/** Runtime layer owner retaining this source's geometry and textures. */
+	readonly owner: TOwnerId;
+	readonly input: TerrainSourceInstallation;
+	readonly geometry: TerrainGeometryKey;
+	readonly generatedTextures: TerrainGeneratedTextureKeys;
+}
+
+interface LoadingTerrainInstallation<TOwnerId extends string> {
 	readonly kind: "loading";
-	readonly input: TerrainSourceInstallation;
+	readonly source: ResolvedTerrainSource<TOwnerId>;
 }
 
-interface FailedTerrainInstallation {
+interface FailedTerrainInstallation<TOwnerId extends string> {
 	readonly kind: "failed";
-	readonly input: TerrainSourceInstallation;
+	readonly source: ResolvedTerrainSource<TOwnerId>;
 }
 
-interface RealizedTerrainInstallation {
+interface RealizedTerrainInstallation<TOwnerId extends string> {
 	readonly kind: "realized";
-	readonly input: TerrainSourceInstallation;
+	readonly source: ResolvedTerrainSource<TOwnerId>;
 	readonly resources: RealizedTerrainResources;
 }
 
-type TerrainInstallation =
-	| LoadingTerrainInstallation
-	| FailedTerrainInstallation
-	| RealizedTerrainInstallation;
+type TerrainInstallation<TOwnerId extends string> =
+	| LoadingTerrainInstallation<TOwnerId>
+	| FailedTerrainInstallation<TOwnerId>
+	| RealizedTerrainInstallation<TOwnerId>;
 
 /** Owns terrain generation state, generated geometry, and frame-time variant selection. */
-export class TerrainService {
+export class TerrainService<
+	TManagerOwnerId extends string = string,
+	TOwnerId extends TManagerOwnerId = TManagerOwnerId,
+> {
 	readonly #generator: TerrainGenerator;
-	readonly #renderResources: RendererResourceManager;
-	readonly #textures: GeneratedTextureStore;
-	readonly #installations = new Map<LandblockId, TerrainInstallation>();
+	readonly #geometry: GeometryManager<TManagerOwnerId>;
+	readonly #textures: TextureManager<TManagerOwnerId>;
+	/** Creates a private geometry/texture lease owner for each installed source. */
+	readonly #ownerForLandblock: (landblockId: LandblockId) => TOwnerId;
+	readonly #installations = new Map<
+		LandblockId,
+		TerrainInstallation<TOwnerId>
+	>();
 	#destroyed = false;
 
 	constructor(
 		generator: TerrainGenerator,
-		renderResources: RendererResourceManager,
-		textures: GeneratedTextureStore,
+		geometry: GeometryManager<TManagerOwnerId>,
+		textures: TextureManager<TManagerOwnerId>,
+		ownerForLandblock: (landblockId: LandblockId) => TOwnerId,
 	) {
 		this.#generator = generator;
-		this.#renderResources = renderResources;
+		this.#geometry = geometry;
 		this.#textures = textures;
+		this.#ownerForLandblock = ownerForLandblock;
 	}
 
-	/** Retain a newly interested source and start exactly one generation operation. */
+	/** Reserve a newly interested source's resources and start one generation operation. */
 	installSource(input: TerrainSourceInstallation): void {
 		if (this.#destroyed) {
 			throw new Error(
@@ -87,20 +109,28 @@ export class TerrainService {
 		}
 		if (this.#installations.has(input.landblockId)) return;
 
-		this.#publishComposition(input);
-		const installation: LoadingTerrainInstallation = { input, kind: "loading" };
+		const source = this.#resolveSource(input);
+		this.#reserveSourceResources(source);
+		try {
+			this.#publishComposition(source);
+		} catch (error) {
+			this.#releaseSourceResources(source);
+			throw error;
+		}
+		const installation: LoadingTerrainInstallation<TOwnerId> = {
+			kind: "loading",
+			source,
+		};
 		this.#installations.set(input.landblockId, installation);
 		void this.#generateAndRealize(input.landblockId, installation);
 	}
 
-	/** Drop one installation and release every generated device resource it owns. */
+	/** Drop one terrain source and release resources retained by its layer owner. */
 	removeSource(landblockId: LandblockId): void {
 		const installation = this.#installations.get(landblockId);
 		if (!installation) return;
 		this.#installations.delete(landblockId);
-		if (installation.kind === "realized") {
-			this.#releaseRealizedResources(installation.resources);
-		}
+		this.#releaseSourceResources(installation.source);
 	}
 
 	/** Select already-realized terrain resources for one visible landblock. */
@@ -126,131 +156,139 @@ export class TerrainService {
 				`Terrain ${landblockId} is missing ${stride}/${transitionDirection} geometry.`,
 			);
 		}
-		const generatedTextures = terrainGeneratedTextureKeys(
-			landblockId,
-			installation.input.presentation,
-		);
-		const surfaceField = generatedTextures.surfaceFields.get(stride);
+		const surfaceField =
+			installation.source.generatedTextures.surfaceFields.get(stride);
 		if (!surfaceField) {
 			throw new Error(
 				`Terrain ${landblockId} is missing stride ${stride} surface data.`,
 			);
 		}
-		return {
-			composition: generatedTextures.composition,
-			geometry: installation.resources.geometry,
+		const resources: TerrainDrawResources = {
+			composition: installation.source.generatedTextures.composition,
+			geometry: installation.source.geometry,
 			indexCount: variant.indexCount,
 			indexStart: variant.indexStart,
 			surfaceField,
 			textures: terrainTextureKeysFromFacts(
-				installation.input.presentation.textures,
+				installation.source.input.presentation.textures,
 			),
 		};
+		return this.#hasDrawResources(resources) ? resources : null;
 	}
 
-	/** Release retained device allocations and reject all later worker completions. */
+	/** Reject all later worker completions and clear terrain source state. */
 	async destroy(): Promise<void> {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
 		for (const installation of this.#installations.values()) {
-			if (installation.kind === "realized") {
-				this.#releaseRealizedResources(installation.resources);
-			}
+			this.#releaseSourceResources(installation.source);
 		}
 		this.#installations.clear();
 	}
 
 	async #generateAndRealize(
 		landblockId: LandblockId,
-		installation: LoadingTerrainInstallation,
+		installation: LoadingTerrainInstallation<TOwnerId>,
 	): Promise<void> {
 		try {
 			const result = await this.#generator.generate(
-				installation.input.generation,
+				installation.source.input.generation,
 			);
 			if (this.#installations.get(landblockId) !== installation) return;
-			const resources = this.#realizeResult(installation.input, result);
-			if (this.#installations.get(landblockId) !== installation) {
-				this.#releaseRealizedResources(resources);
-				return;
-			}
+			const resources = this.#realizeResult(installation.source, result);
+			if (this.#installations.get(landblockId) !== installation) return;
 			this.#installations.set(landblockId, {
-				input: installation.input,
 				kind: "realized",
+				source: installation.source,
 				resources,
 			});
 		} catch (error) {
 			if (this.#installations.get(landblockId) !== installation) return;
 			this.#installations.set(landblockId, {
-				input: installation.input,
 				kind: "failed",
+				source: installation.source,
 			});
 			log(error, LogLevel.Error);
 		}
 	}
 
 	#realizeResult(
-		input: TerrainSourceInstallation,
+		source: ResolvedTerrainSource<TOwnerId>,
 		result: TerrainGenerationResult,
 	): RealizedTerrainResources {
 		validateTerrainGenerationResult(result);
-		let geometry: RealizedTerrainResources["geometry"] | undefined;
-		try {
-			geometry = this.#renderResources.createGeometry(result.geometry);
-			const generatedTextures = terrainGeneratedTextureKeys(
-				input.landblockId,
-				input.presentation,
-			);
-			this.#textures.upsertGeneratedTextures(
-				result.surfaceFields.map((field) => {
-					const key = generatedTextures.surfaceFields.get(field.stride);
-					if (!key) {
-						throw new Error(
-							`Terrain ${input.landblockId} has no generated texture key for stride ${field.stride}.`,
-						);
-					}
-					return { key, upload: createTerrainSurfaceUpload(field) };
-				}),
-			);
-			return {
-				geometry,
-				variants: result.variants,
-			};
-		} catch (error) {
-			if (geometry && !this.#renderResources.releaseResource(geometry)) {
-				throw new Error(
-					"Terrain realization lost its partial geometry resource.",
-					{
-						cause: error,
-					},
-				);
-			}
-			throw error;
-		}
-	}
-
-	#releaseRealizedResources(resources: RealizedTerrainResources): void {
-		if (!this.#renderResources.releaseResource(resources.geometry)) {
-			throw new Error(
-				`Terrain geometry ${resources.geometry} disappeared before release.`,
-			);
-		}
-	}
-
-	#publishComposition(input: TerrainSourceInstallation): void {
-		const table = compileTerrainCompositionTable(
-			input.presentation.composition,
-			input.presentation.textures,
+		this.#geometry.upsertGeometry({
+			geometry: result.geometry,
+			key: source.geometry,
+		});
+		this.#textures.upsertGeneratedTextures(
+			result.surfaceFields.map((field) => {
+				const key = source.generatedTextures.surfaceFields.get(field.stride);
+				if (!key) {
+					throw new Error(
+						`Terrain ${source.input.landblockId} has no generated texture key for stride ${field.stride}.`,
+					);
+				}
+				return { key, upload: createTerrainSurfaceUpload(field) };
+			}),
 		);
-		const generatedTextures = terrainGeneratedTextureKeys(
-			input.landblockId,
-			input.presentation,
+		return {
+			variants: result.variants,
+		};
+	}
+
+	#publishComposition(source: ResolvedTerrainSource<TOwnerId>): void {
+		const table = compileTerrainCompositionTable(
+			source.input.presentation.composition,
+			source.input.presentation.textures,
 		);
 		const composition: GeneratedTextureSource = {
-			key: generatedTextures.composition,
+			key: source.generatedTextures.composition,
 			upload: createTerrainCompositionUpload(table),
 		};
 		this.#textures.upsertGeneratedTextures([composition]);
+	}
+
+	#resolveSource(
+		input: TerrainSourceInstallation,
+	): ResolvedTerrainSource<TOwnerId> {
+		return {
+			generatedTextures: terrainGeneratedTextureKeys(
+				input.landblockId,
+				input.presentation,
+			),
+			geometry: createTerrainGeometryKey(input.landblockId),
+			input,
+			owner: this.#ownerForLandblock(input.landblockId),
+		};
+	}
+
+	#reserveSourceResources(source: ResolvedTerrainSource<TOwnerId>): void {
+		this.#geometry.reserveKeys(source.owner, [source.geometry]);
+		this.#textures.reserveKeys(source.owner, [
+			source.generatedTextures.composition,
+			...source.generatedTextures.surfaceFields.values(),
+		]);
+		void this.#textures.retain(
+			source.owner,
+			Object.values(source.input.presentation.textures),
+		);
+	}
+
+	#releaseSourceResources(source: ResolvedTerrainSource<TOwnerId>): void {
+		this.#textures.dropOwner(source.owner);
+		this.#geometry.dropOwner(source.owner);
+	}
+
+	#hasDrawResources(resources: TerrainDrawResources): boolean {
+		return (
+			this.#geometry.hasGeometry(resources.geometry) &&
+			this.#textures.hasTexture(resources.surfaceField) &&
+			this.#textures.hasTexture(resources.composition) &&
+			Object.values(resources.textures).every((key) =>
+				this.#textures.hasTexture(key),
+			)
+		);
 	}
 }
 

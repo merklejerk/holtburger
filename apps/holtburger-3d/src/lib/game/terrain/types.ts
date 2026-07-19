@@ -1,8 +1,8 @@
 import type { DatAssetId, LandblockId } from "../game-types";
+import type { TerrainGeometryKey } from "../geometry/types";
 import { getLandblockCoordinates } from "../landblocks";
 import type { AABB3 } from "../math/types";
 import type { TerrainGeometryData } from "../renderer/geometry";
-import type { GeometryResourceKey } from "../renderer/resource-manager";
 import {
 	createStandaloneTextureKey,
 	createTerrainCompositionTextureKey,
@@ -159,15 +159,14 @@ export interface TerrainSourceInstallation {
 	readonly presentation: TerrainPresentationSource;
 }
 
-/** Complete device-backed terrain output retained by TerrainService. */
+/** Terrain-generation output retained after source-owned geometry publication. */
 export interface RealizedTerrainResources {
-	readonly geometry: GeometryResourceKey;
 	readonly variants: readonly TerrainVariantDrawRange[];
 }
 
 /** One selected terrain submission ready for renderer resource resolution. */
 export interface TerrainDrawResources {
-	readonly geometry: GeometryResourceKey;
+	readonly geometry: TerrainGeometryKey;
 	readonly indexStart: number;
 	readonly indexCount: number;
 	readonly surfaceField: TerrainSurfaceTextureKey;

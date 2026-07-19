@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RenderGeometryData } from "../renderer/geometry";
+import { GeometryManager } from "../geometry/geometry-manager";
 import type {
 	GeometryResourceKey,
 	RendererResourceManager,
@@ -13,13 +14,10 @@ import type {
 import { AABB3, Vec3 } from "../math/types";
 import { TextureManager } from "../textures/texture-manager";
 import type { TexturePreparer } from "../textures/texture-preparer";
+import type { TextureFact } from "../textures/types";
 import type { TerrainGenerator } from "./terrain-generator";
 import { TerrainService } from "./terrain-service";
-import {
-	resolveTerrainTextureFacts,
-	terrainGeneratedTextureKeys,
-	TERRAIN_MESH_STRIDES,
-} from "./types";
+import { resolveTerrainTextureFacts, TERRAIN_MESH_STRIDES } from "./types";
 import type {
 	TerrainGenerationResult,
 	TerrainGenerationSource,
@@ -45,15 +43,14 @@ describe("TerrainService", () => {
 	it("generates once, realizes complete output, and selects a frame-time variant", async () => {
 		const generator = new DeferredTerrainGenerator();
 		const resources = new FakeRendererResourceManager();
-		const { terrain, textures } = createTerrainService(generator, resources);
+		const terrain = createTerrainService(generator, resources);
 		const installation = createInstallation();
-		retainGeneratedTextures(textures, "terrain:a", installation);
-
 		terrain.installSource(installation);
 		terrain.installSource(installation);
 		expect(generator.inputs).toEqual([installation.generation]);
 
 		generator.resolve(createGenerationResult());
+		await Promise.resolve();
 		await Promise.resolve();
 		await Promise.resolve();
 
@@ -64,7 +61,7 @@ describe("TerrainService", () => {
 			),
 		).toMatchObject({
 			composition: "terrain-composition:1",
-			geometry: "geometry-resource:0",
+			geometry: "terrain-geometry:0x1111ffff",
 			indexCount: 3,
 			indexStart: 0,
 			surfaceField: "terrain-surface:0x1111ffff/1",
@@ -76,38 +73,26 @@ describe("TerrainService", () => {
 			},
 		});
 
-		textures.dropOwner("terrain:a");
 		terrain.removeSource(installation.landblockId);
-		expect(resources.released).toEqual([
-			"texture-2d-resource:0",
-			"texture-2d-resource:1",
-			"texture-2d-resource:2",
-			"texture-2d-resource:3",
-			"texture-2d-resource:4",
-			"geometry-resource:0",
-		]);
+		expect(resources.released).toHaveLength(resources.created.length);
+		expect(new Set(resources.released)).toEqual(new Set(resources.created));
 	});
 
 	it("shares one composition resource across interested landblocks in a region", () => {
 		const resources = new FakeRendererResourceManager();
-		const { terrain, textures } = createTerrainService(
+		const terrain = createTerrainService(
 			new DeferredTerrainGenerator(),
 			resources,
 		);
 		const first = createInstallation("0x1111ffff");
 		const second = createInstallation("0x1211ffff");
-		retainGeneratedTextures(textures, "terrain:first", first);
-		retainGeneratedTextures(textures, "terrain:second", second);
-
 		terrain.installSource(first);
 		terrain.installSource(second);
 		expect(resources.createdTextures).toEqual(["texture-2d-resource:0"]);
 
-		textures.dropOwner("terrain:first");
 		terrain.removeSource(first.landblockId);
 		expect(resources.released).toEqual([]);
 
-		textures.dropOwner("terrain:second");
 		terrain.removeSource(second.landblockId);
 		expect(resources.released).toEqual(["texture-2d-resource:0"]);
 	});
@@ -116,30 +101,15 @@ describe("TerrainService", () => {
 function createTerrainService(
 	generator: TerrainGenerator,
 	resources: RendererResourceManager,
-): {
-	readonly terrain: TerrainService;
-	readonly textures: TextureManager<string>;
-} {
-	const textures = new TextureManager(resources, new UnusedTexturePreparer());
-	return {
-		terrain: new TerrainService(generator, resources, textures),
+): TerrainService<string, string> {
+	const textures = new TextureManager(resources, new FixtureTexturePreparer());
+	const geometry = new GeometryManager<string>(resources);
+	return new TerrainService<string, string>(
+		generator,
+		geometry,
 		textures,
-	};
-}
-
-function retainGeneratedTextures(
-	textures: TextureManager<string>,
-	owner: string,
-	installation: ReturnType<typeof createInstallation>,
-): void {
-	const keys = terrainGeneratedTextureKeys(
-		installation.landblockId,
-		installation.presentation,
+		(landblockId) => `terrain-resource:${landblockId}`,
 	);
-	textures.retainKeys(owner, [
-		keys.composition,
-		...keys.surfaceFields.values(),
-	]);
 }
 
 function createInstallation(landblockId = "0x1111ffff") {
@@ -234,23 +204,46 @@ class DeferredTerrainGenerator implements TerrainGenerator {
 	async destroy(): Promise<void> {}
 }
 
-class UnusedTexturePreparer implements TexturePreparer {
-	async prepare(): Promise<never> {
-		throw new Error("Terrain service tests do not prepare DAT textures.");
+class FixtureTexturePreparer implements TexturePreparer {
+	async prepare(fact: TextureFact) {
+		if (fact.kind === "standalone") {
+			return {
+				height: 2,
+				key: fact.key,
+				pixels: new Uint8Array(16),
+				purpose: fact.purpose,
+				sourceAssetId: fact.sourceAssetId,
+				width: 2,
+			};
+		}
+		return {
+			height: 2,
+			key: fact.key,
+			layers: fact.sourceAssetIds.map((sourceAssetId) => ({
+				pixels: new Uint8Array(16),
+				sourceAssetId,
+			})),
+			purpose: fact.purpose,
+			width: 2,
+		};
 	}
 
 	async destroy(): Promise<void> {}
 }
 
 class FakeRendererResourceManager implements RendererResourceManager {
+	readonly created: RenderResourceKey[] = [];
 	readonly createdTextures: Texture2DResourceKey[] = [];
 	readonly released: RenderResourceKey[] = [];
 	#nextGeometry = 0;
 	#nextTexture = 0;
+	#nextTextureArray = 0;
 
 	createGeometry(geometry: RenderGeometryData): GeometryResourceKey {
 		void geometry;
-		return `geometry-resource:${this.#nextGeometry++}`;
+		const key: GeometryResourceKey = `geometry-resource:${this.#nextGeometry++}`;
+		this.created.push(key);
+		return key;
 	}
 
 	replaceGeometry(
@@ -264,6 +257,7 @@ class FakeRendererResourceManager implements RendererResourceManager {
 	createTexture2D(upload: Texture2DUpload): Texture2DResourceKey {
 		void upload;
 		const key: Texture2DResourceKey = `texture-2d-resource:${this.#nextTexture++}`;
+		this.created.push(key);
 		this.createdTextures.push(key);
 		return key;
 	}
@@ -277,7 +271,9 @@ class FakeRendererResourceManager implements RendererResourceManager {
 		description: TextureArrayDescription,
 	): TextureArrayResourceKey {
 		void description;
-		throw new Error("Textures are not used by terrain service tests.");
+		const key: TextureArrayResourceKey = `texture-array-resource:${this.#nextTextureArray++}`;
+		this.created.push(key);
+		return key;
 	}
 
 	uploadTextureArrayLayer(

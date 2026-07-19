@@ -1,34 +1,37 @@
 import { describe, expect, it } from "vitest";
-import type { GeometryResourceKey } from "./resource-manager";
+import { createPublishedGeometryManager } from "../geometry/geometry-manager.test-utils";
+import type { GeometryKey } from "../geometry/types";
 import { RenderResourceRegistry } from "./render-resources";
 
-const GEOMETRY = "geometry-resource:1" as const satisfies GeometryResourceKey;
+const GEOMETRY = "static-geometry:fixture" as const satisfies GeometryKey;
 
 describe("RenderResourceRegistry", () => {
 	it("retains object draw metadata independently of scene occurrences", () => {
-		const resources = new RenderResourceRegistry();
+		const resources = createRegistry();
 		const resourceId = resources.createObjectResource(GEOMETRY, [
 			createDrawUnit(),
 		]);
 
 		expect(resources.getObjectResource(resourceId)).toMatchObject({
-			geometryKey: GEOMETRY,
+			geometry: GEOMETRY,
 			drawUnits: [createDrawUnit()],
 		});
 	});
 
 	it("removes logical object resources only through an explicit operation", () => {
-		const resources = new RenderResourceRegistry();
+		const resources = createRegistry();
 		const resourceId = resources.createObjectResource(GEOMETRY, []);
 
-		expect(resources.removeObjectResource(resourceId).geometryKey).toBe(
-			GEOMETRY,
-		);
+		expect(resources.removeObjectResource(resourceId).geometry).toBe(GEOMETRY);
 		expect(() => resources.getObjectResource(resourceId)).toThrow(
 			"does not exist",
 		);
 	});
 });
+
+function createRegistry(): RenderResourceRegistry {
+	return new RenderResourceRegistry(createPublishedGeometryManager(GEOMETRY));
+}
 
 function createDrawUnit() {
 	return {

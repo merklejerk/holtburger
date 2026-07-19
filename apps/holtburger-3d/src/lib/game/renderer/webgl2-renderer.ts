@@ -192,7 +192,7 @@ export class WebGL2Renderer implements Renderer {
 			);
 			this.#resolveTerrainProgramInput(terrain);
 			this.#drawGeometry(
-				terrain.resources.geometry,
+				terrain.program.geometry,
 				terrain.resources.indexStart,
 				terrain.resources.indexCount,
 				terrain.placement.localToLandblock,
@@ -208,7 +208,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#resources.getTextureArray(textures.colors.resource);
 		this.#resources.getTextureArray(textures.blendMasks.resource);
 		this.#resources.getTextureArray(textures.roadMasks.resource);
-		this.#resources.getTexture2D(textures.detail.resource);
+		this.#resources.getTexture2D(textures.detail);
 	}
 
 	#drawObjectPass(view: PreparedView, pass: ObjectMaterialPass): void {
@@ -226,7 +226,7 @@ export class WebGL2Renderer implements Renderer {
 			const placement = draw.occurrence.placement;
 			this.#gl.depthMask(draw.drawUnit.material.depthWrite);
 			this.#drawGeometry(
-				draw.occurrence.resource.geometryKey,
+				draw.occurrence.resource.geometryResource,
 				draw.drawUnit.indexStart,
 				draw.drawUnit.indexCount,
 				resolveObjectLocalToLandblock(draw),

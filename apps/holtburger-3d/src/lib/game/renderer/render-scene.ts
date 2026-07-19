@@ -2,8 +2,8 @@ import type { Mat4 } from "../math/types";
 import type { ResolvedScenePlacement, SceneNodeId } from "../scene";
 import {
 	RenderResourceRegistry,
-	type ObjectRenderResource,
 	type ObjectRenderResourceId,
+	type ResolvedObjectRenderResource,
 } from "./render-resources";
 
 /** Opaque identity for one renderer occurrence linked to scene topology. */
@@ -45,7 +45,7 @@ export interface ObjectRenderInstance {
 export interface ObjectFrameOccurrence {
 	readonly kind: "object";
 	readonly instance: ObjectRenderInstance;
-	readonly resource: ObjectRenderResource;
+	readonly resource: ResolvedObjectRenderResource;
 	readonly placement: ResolvedScenePlacement;
 }
 
@@ -124,7 +124,7 @@ export class RenderScene {
 					kind: "object",
 					instance,
 					placement,
-					resource: this.#resources.getObjectResource(instance.resourceId),
+					resource: this.#resources.resolveObjectResource(instance.resourceId),
 				});
 			}
 		}

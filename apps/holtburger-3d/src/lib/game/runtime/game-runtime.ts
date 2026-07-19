@@ -7,6 +7,7 @@ import {
 	type DynamicEntityCommit,
 } from "../commit/types";
 import { INVALID_ID, type EnvCellId, type LandblockId } from "../game-types";
+import { GeometryManager } from "../geometry/geometry-manager";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
 import { LeaseRegistry } from "../ownership";
@@ -33,11 +34,7 @@ import {
 	type TerrainGenerator,
 } from "../terrain/terrain-generator";
 import { TerrainService } from "../terrain/terrain-service";
-import {
-	terrainGeneratedTextureKeys,
-	type ResolvedTerrainTextureFacts,
-	type TerrainDrawResources,
-} from "../terrain/types";
+import { type ResolvedTerrainTextureFacts } from "../terrain/types";
 import { TextureManager } from "../textures/texture-manager";
 import {
 	WorkerTexturePreparer,
@@ -46,7 +43,10 @@ import {
 import {
 	commitBundleOwnerId,
 	landblockLayerToOwnerId,
+	type ResourceOwnerId,
 	spawnedEntityToOwnerId,
+	terrainSourceToOwnerId,
+	type TerrainResourceOwnerId,
 	type OwnerId,
 } from "./owner-ids";
 import {
@@ -95,16 +95,18 @@ export interface GameRuntimeDependencies {
 export class GameRuntime {
 	/** Canonical scene topology, residency, transforms, and spatial-query membership. */
 	readonly #scene = new SceneGraph();
+	/** Logical geometry bindings and shared owner retention. */
+	readonly #geometry: GeometryManager<ResourceOwnerId>;
 	/** Persistent logical object resources, independent of scene-node occurrences. */
-	readonly #renderResourceRegistry = new RenderResourceRegistry();
+	readonly #renderResourceRegistry: RenderResourceRegistry;
 	/** Renderer occurrences attached to canonical scene nodes. */
-	readonly #renderScene = new RenderScene(this.#renderResourceRegistry);
+	readonly #renderScene: RenderScene;
 	/** Runtime layer/spawn ownership of scene-root lifetimes. */
 	readonly #sceneNodeLeases = new LeaseRegistry<OwnerId, SceneNodeId>();
 	/** Logical texture preparation, device bindings, and shared owner retention. */
-	readonly #textures: TextureManager<OwnerId>;
+	readonly #textures: TextureManager<ResourceOwnerId>;
 	/** Dynamic terrain sources, generation state, and realized terrain resources. */
-	readonly #terrain: TerrainService;
+	readonly #terrain: TerrainService<ResourceOwnerId, TerrainResourceOwnerId>;
 	/** Runtime-owned terrain-generation worker terminated during runtime shutdown. */
 	readonly #terrainGenerator: TerrainGenerator;
 	/** Backend that consumes assembled frame input. */
@@ -133,14 +135,18 @@ export class GameRuntime {
 		this.#renderer = renderer;
 		this.#commitPipeline = commitPipeline;
 		this.#terrainGenerator = dependencies.terrainGenerator;
-		this.#textures = new TextureManager<OwnerId>(
+		this.#geometry = new GeometryManager<ResourceOwnerId>(renderResources);
+		this.#renderResourceRegistry = new RenderResourceRegistry(this.#geometry);
+		this.#renderScene = new RenderScene(this.#renderResourceRegistry);
+		this.#textures = new TextureManager<ResourceOwnerId>(
 			renderResources,
 			dependencies.texturePreparer,
 		);
-		this.#terrain = new TerrainService(
+		this.#terrain = new TerrainService<ResourceOwnerId, TerrainResourceOwnerId>(
 			dependencies.terrainGenerator,
-			renderResources,
+			this.#geometry,
 			this.#textures,
+			terrainSourceToOwnerId,
 		);
 	}
 
@@ -225,6 +231,7 @@ export class GameRuntime {
 		}
 		this.#releaseUnownedSceneNodes();
 		await this.#textures.destroy();
+		this.#geometry.destroy();
 	}
 
 	#createFrameInput(visibleScene: VisibleScene): FrameInput {
@@ -244,17 +251,18 @@ export class GameRuntime {
 				occurrence.placement.landblockId,
 				this.#worldAnchor,
 			);
-			if (!resources || !this.#hasTerrainTextures(resources)) continue;
+			if (!resources) continue;
 			terrain.push({
 				placement: occurrence.placement,
 				resources,
 				program: {
-					composition: this.#textures.getGeneratedTextureBinding(
+					geometry: this.#geometry.getResource(resources.geometry),
+					composition: this.#textures.getTexture2DResource(
 						resources.composition,
-					).resource,
-					surfaceField: this.#textures.getGeneratedTextureBinding(
+					),
+					surfaceField: this.#textures.getTexture2DResource(
 						resources.surfaceField,
-					).resource,
+					),
 					textures: this.#resolveTerrainTextureBindings(resources.textures),
 				},
 			});
@@ -345,18 +353,6 @@ export class GameRuntime {
 			}
 		>,
 	): void {
-		const generatedTextures = terrainGeneratedTextureKeys(
-			artifact.landblockId,
-			artifact.commit.presentation,
-		);
-		this.#textures.retainKeys(ownerId, [
-			generatedTextures.composition,
-			...generatedTextures.surfaceFields.values(),
-		]);
-		void this.#textures.retain(
-			ownerId,
-			Object.values(artifact.commit.presentation.textures),
-		);
 		this.#terrain.installSource({
 			generation: artifact.commit.generation,
 			landblockId: artifact.landblockId,
@@ -456,16 +452,6 @@ export class GameRuntime {
 		}
 	}
 
-	#hasTerrainTextures(resources: TerrainDrawResources): boolean {
-		return (
-			this.#textures.hasTexture(resources.surfaceField) &&
-			this.#textures.hasTexture(resources.composition) &&
-			Object.values(resources.textures).every((key) =>
-				this.#textures.hasTexture(key),
-			)
-		);
-	}
-
 	#resolveTerrainTextureBindings(textures: {
 		readonly colors: ResolvedTerrainTextureFacts["colors"]["key"];
 		readonly blendMasks: ResolvedTerrainTextureFacts["blendMasks"]["key"];
@@ -475,7 +461,7 @@ export class GameRuntime {
 		return {
 			blendMasks: this.#textures.getTextureArrayBinding(textures.blendMasks),
 			colors: this.#textures.getTextureArrayBinding(textures.colors),
-			detail: this.#textures.getStandaloneTextureBinding(textures.detail),
+			detail: this.#textures.getTexture2DResource(textures.detail),
 			roadMasks: this.#textures.getTextureArrayBinding(textures.roadMasks),
 		};
 	}
@@ -490,10 +476,11 @@ export class GameRuntime {
 	#evictStaticLayer(landblockId: LandblockId, layer: LandblockLayerKind): void {
 		const ownerId = landblockLayerToOwnerId(landblockId, layer);
 		this.#releaseSceneOwner(ownerId);
-		this.#textures.dropOwner(ownerId);
 		if (layer === LandblockLayerKind.Terrain) {
 			this.#terrain.removeSource(landblockId);
 		}
+		this.#textures.dropOwner(ownerId);
+		this.#geometry.dropOwner(ownerId);
 	}
 }
 

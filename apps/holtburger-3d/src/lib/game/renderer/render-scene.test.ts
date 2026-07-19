@@ -1,17 +1,18 @@
 import { describe, expect, it } from "vitest";
+import { createPublishedGeometryManager } from "../geometry/geometry-manager.test-utils";
 import { Mat4 } from "../math/types";
 import type { ResolvedScenePlacement, SceneNodeId } from "../scene";
-import type { GeometryResourceKey } from "./resource-manager";
+import type { GeometryKey } from "../geometry/types";
 import { RenderResourceRegistry } from "./render-resources";
 import { RenderScene } from "./render-scene";
 
-const GEOMETRY = "geometry-resource:1" as const satisfies GeometryResourceKey;
+const GEOMETRY = "static-geometry:fixture" as const satisfies GeometryKey;
 const NODE_A = "scene-node:1" as const satisfies SceneNodeId;
 const NODE_B = "scene-node:2" as const satisfies SceneNodeId;
 
 describe("RenderScene", () => {
 	it("selects multiple object poses for one visible node", () => {
-		const resources = new RenderResourceRegistry();
+		const resources = createRegistry();
 		const scene = new RenderScene(resources);
 		const objectId = resources.createObjectResource(GEOMETRY, [
 			createObjectDrawUnit(),
@@ -44,7 +45,7 @@ describe("RenderScene", () => {
 	});
 
 	it("selects terrain occurrences through their visible scene roots", () => {
-		const resources = new RenderResourceRegistry();
+		const resources = createRegistry();
 		const scene = new RenderScene(resources);
 		scene.createInstance({ kind: "terrain", nodeId: NODE_A });
 
@@ -66,7 +67,7 @@ describe("RenderScene", () => {
 	});
 
 	it("removes object occurrences without deciding object resource lifetime", () => {
-		const resources = new RenderResourceRegistry();
+		const resources = createRegistry();
 		const scene = new RenderScene(resources);
 		const resourceId = resources.createObjectResource(GEOMETRY, []);
 		scene.createInstance({
@@ -89,9 +90,13 @@ describe("RenderScene", () => {
 				createPlacement(),
 			),
 		).toEqual([]);
-		expect(resources.getObjectResource(resourceId).geometryKey).toBe(GEOMETRY);
+		expect(resources.getObjectResource(resourceId).geometry).toBe(GEOMETRY);
 	});
 });
+
+function createRegistry(): RenderResourceRegistry {
+	return new RenderResourceRegistry(createPublishedGeometryManager(GEOMETRY));
+}
 
 function createObjectDrawUnit() {
 	return {

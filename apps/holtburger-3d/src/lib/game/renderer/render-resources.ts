@@ -1,3 +1,5 @@
+import type { GeometryManager } from "../geometry/geometry-manager";
+import type { GeometryKey } from "../geometry/types";
 import type { GeometryResourceKey } from "./resource-manager";
 import type { TextureKey } from "../textures/types";
 
@@ -35,23 +37,36 @@ export interface ObjectRenderDrawUnit {
 export interface ObjectRenderResource {
 	readonly kind: "object";
 	readonly id: ObjectRenderResourceId;
-	readonly geometryKey: GeometryResourceKey;
+	readonly geometry: GeometryKey;
 	readonly drawUnits: readonly ObjectRenderDrawUnit[];
+}
+
+/** Object render metadata paired with the geometry device binding required for drawing. */
+export interface ResolvedObjectRenderResource extends ObjectRenderResource {
+	readonly geometryResource: GeometryResourceKey;
 }
 
 type RenderResource = ObjectRenderResource;
 
 /** Persistent logical render resources independent of scene occurrences. */
 export class RenderResourceRegistry {
+	readonly #geometry: GeometryManager;
 	readonly #resources = new Map<RenderResourceId, RenderResource>();
 	#nextObjectResourceId = 0;
 
+	constructor(geometry: GeometryManager) {
+		this.#geometry = geometry;
+	}
+
 	createObjectResource(
-		geometryKey: GeometryResourceKey,
+		geometry: GeometryKey,
 		drawUnits: readonly ObjectRenderDrawUnit[],
 	): ObjectRenderResourceId {
+		if (!this.#geometry.hasGeometry(geometry)) {
+			throw new Error(`Object geometry ${geometry} does not exist.`);
+		}
 		const id: ObjectRenderResourceId = `object-render-resource:${this.#nextObjectResourceId++}`;
-		this.#resources.set(id, { drawUnits, geometryKey, id, kind: "object" });
+		this.#resources.set(id, { drawUnits, geometry, id, kind: "object" });
 		return id;
 	}
 
@@ -69,6 +84,16 @@ export class RenderResourceRegistry {
 			throw new Error(`Render resource ${id} is not object geometry.`);
 		}
 		return resource;
+	}
+
+	resolveObjectResource(
+		id: ObjectRenderResourceId,
+	): ResolvedObjectRenderResource {
+		const resource = this.getObjectResource(id);
+		return {
+			...resource,
+			geometryResource: this.#geometry.getResource(resource.geometry),
+		};
 	}
 
 	removeObjectResource(id: ObjectRenderResourceId): ObjectRenderResource {

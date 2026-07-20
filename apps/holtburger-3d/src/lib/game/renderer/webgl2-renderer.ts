@@ -2,27 +2,14 @@ import { createLandblockOffset } from "../landblocks";
 import {
 	createPerspectiveMat4,
 	createViewMat4,
-	getMat4Translation,
 	mat4ToFloat32Array,
-	multiplyMat4,
 } from "../math/matrices";
 import { Mat4, Vec3 } from "../math/types";
-import type {
-	FrameInput,
-	FrameViewInput,
-	Renderer,
-	TerrainFrameInput,
-} from "./renderer";
-import type {
-	FrameViewScene,
-	ObjectFrameOccurrence,
-	ObjectRenderPose,
-} from "./render-scene";
-import type {
-	ObjectMaterialPass,
-	ObjectRenderDrawUnit,
-} from "./render-resources";
+import type { TerrainDrawUnit } from "../terrain/types";
+import type { FrameInput, FrameViewInput, Renderer } from "./renderer";
+import { RenderWorld } from "./render-world";
 import type { GeometryResourceKey } from "./resource-manager";
+import type { TerrainProgramInput } from "./terrain-program-input";
 import {
 	WebGL2ResourceManager,
 	type WebGL2GeometryBinding,
@@ -42,28 +29,20 @@ const CLEAR_COLOR = {
 type SurfaceColor = readonly [number, number, number, number];
 
 const TERRAIN_COLOR: SurfaceColor = [0.22, 0.72, 0.42, 1];
-const OBJECT_PASS_COLORS: Readonly<Record<ObjectMaterialPass, SurfaceColor>> = {
-	additive: [0.35, 0.65, 1, 0.65],
-	"alpha-test": [0.92, 0.72, 0.24, 1],
-	opaque: [0.72, 0.72, 0.76, 1],
-	transparent: [0.45, 0.75, 0.95, 0.45],
-};
-const OBJECT_PASS_ORDER: readonly ObjectMaterialPass[] = [
-	"opaque",
-	"alpha-test",
-	"transparent",
-	"additive",
-];
+
+/** One visible landblock terrain source paired with selected renderer resources. */
+interface TerrainFrameInput {
+	/** Selected LOD, transition range, and logical texture identities. */
+	readonly drawUnit: TerrainDrawUnit;
+	/** Device resources resolved by this renderer for the terrain shader contract. */
+	readonly program: TerrainProgramInput;
+}
 
 /** Anchor-relative matrices and content reused by all passes for one view. */
 interface PreparedView {
-	/** Anchor-relative camera position used to sort transparent draws. */
-	readonly cameraPosition: Vec3;
 	/** Projection matrix derived from the current drawing-buffer aspect ratio. */
 	readonly projection: Mat4;
-	/** Persistent render instances selected by scene visibility. */
-	readonly scene: FrameViewScene;
-	/** Terrain selected directly from TerrainService for this view. */
+	/** Terrain selected by this renderer from its RenderWorld. */
 	readonly terrain: readonly TerrainFrameInput[];
 	/** Anchor-relative camera view transform. */
 	readonly view: Mat4;
@@ -71,17 +50,12 @@ interface PreparedView {
 	readonly anchorLandblockId: FrameInput["anchorLandblockId"];
 }
 
-interface ObjectDraw {
-	/** Visible occurrence carrying scene placement and object pose. */
-	readonly occurrence: ObjectFrameOccurrence;
-	/** Compatible material/index range within the occurrence's resource. */
-	readonly drawUnit: ObjectRenderDrawUnit;
-}
-
 export class WebGL2Renderer implements Renderer {
 	readonly #canvas: HTMLCanvasElement;
 	readonly #gl: WebGL2RenderingContext;
 	readonly #resources: WebGL2ResourceManager;
+	/** Read-only runtime gateway used to collect this renderer's frame submissions. */
+	readonly #world: RenderWorld;
 	readonly #flatColorProgram: WebGL2FlatColorProgram;
 	#frameWidth = 0;
 	#frameHeight = 0;
@@ -90,18 +64,21 @@ export class WebGL2Renderer implements Renderer {
 		canvas: HTMLCanvasElement,
 		gl: WebGL2RenderingContext,
 		resources: WebGL2ResourceManager,
+		world: RenderWorld,
 	): Promise<WebGL2Renderer> {
-		return new WebGL2Renderer(canvas, gl, resources);
+		return new WebGL2Renderer(canvas, gl, resources, world);
 	}
 
 	protected constructor(
 		canvas: HTMLCanvasElement,
 		gl: WebGL2RenderingContext,
 		resources: WebGL2ResourceManager,
+		world: RenderWorld,
 	) {
 		this.#canvas = canvas;
 		this.#gl = gl;
 		this.#resources = resources;
+		this.#world = world;
 		this.#flatColorProgram = createWebGL2FlatColorProgram(gl);
 		gl.clearColor(
 			CLEAR_COLOR.red,
@@ -123,8 +100,6 @@ export class WebGL2Renderer implements Renderer {
 
 	async destroy(): Promise<void> {
 		this.#gl.deleteProgram(this.#flatColorProgram.program);
-		const loseContext = this.#gl.getExtension("WEBGL_lose_context");
-		loseContext?.loseContext();
 	}
 
 	#beginFrame(): void {
@@ -149,17 +124,53 @@ export class WebGL2Renderer implements Renderer {
 		const aspectRatio = this.#frameWidth / Math.max(1, this.#frameHeight);
 		return {
 			anchorLandblockId,
-			cameraPosition,
 			projection: createPerspectiveMat4(
 				camera.fov,
 				aspectRatio,
 				camera.near,
 				camera.far,
 			),
-			scene: input.scene,
-			terrain: input.terrain,
+			terrain: this.#collectTerrain(camera, anchorLandblockId),
 			view: createViewMat4(cameraPosition, camera.placement.rotation),
 		};
+	}
+
+	#collectTerrain(
+		camera: FrameViewInput["camera"],
+		anchorLandblockId: FrameInput["anchorLandblockId"],
+	): readonly TerrainFrameInput[] {
+		const landblockIds = new Set(
+			this.#world
+				.queryVisibleScene(camera)
+				.entries.map(({ placement }) => placement.landblockId),
+		);
+		const terrain: TerrainFrameInput[] = [];
+		for (const landblockId of landblockIds) {
+			const drawUnit = this.#world.resolveTerrainDrawUnit(
+				landblockId,
+				anchorLandblockId,
+			);
+			if (!drawUnit) continue;
+			terrain.push({
+				drawUnit,
+				program: {
+					geometry: this.#world.resolveGeometry(drawUnit.geometry),
+					composition: this.#world.resolveTexture2D(drawUnit.composition),
+					surfaceField: this.#world.resolveTexture2D(drawUnit.surfaceField),
+					textures: {
+						blendMasks: this.#world.resolveTextureArray(
+							drawUnit.textures.blendMasks,
+						),
+						colors: this.#world.resolveTextureArray(drawUnit.textures.colors),
+						detail: this.#world.resolveTexture2D(drawUnit.textures.detail),
+						roadMasks: this.#world.resolveTextureArray(
+							drawUnit.textures.roadMasks,
+						),
+					},
+				},
+			});
+		}
+		return terrain;
 	}
 
 	#drawView(view: PreparedView): void {
@@ -176,7 +187,6 @@ export class WebGL2Renderer implements Renderer {
 			mat4ToFloat32Array(view.view),
 		);
 		this.#drawTerrain(view);
-		for (const pass of OBJECT_PASS_ORDER) this.#drawObjectPass(view, pass);
 		gl.bindVertexArray(null);
 	}
 
@@ -187,15 +197,15 @@ export class WebGL2Renderer implements Renderer {
 		this.#setSurfaceColor(TERRAIN_COLOR);
 		for (const terrain of view.terrain) {
 			const landblockOffset = createLandblockOffset(
-				terrain.placement.landblockId,
+				terrain.drawUnit.landblockId,
 				view.anchorLandblockId,
 			);
 			this.#resolveTerrainProgramInput(terrain);
 			this.#drawGeometry(
 				terrain.program.geometry,
-				terrain.resources.indexStart,
-				terrain.resources.indexCount,
-				terrain.placement.localToLandblock,
+				terrain.drawUnit.indexStart,
+				terrain.drawUnit.indexCount,
+				Mat4.identity(),
 				landblockOffset,
 			);
 		}
@@ -209,30 +219,6 @@ export class WebGL2Renderer implements Renderer {
 		this.#resources.getTextureArray(textures.blendMasks.resource);
 		this.#resources.getTextureArray(textures.roadMasks.resource);
 		this.#resources.getTexture2D(textures.detail);
-	}
-
-	#drawObjectPass(view: PreparedView, pass: ObjectMaterialPass): void {
-		const draws = collectObjectDraws(view.scene, pass);
-		if (pass === "transparent") {
-			draws.sort(
-				(left, right) =>
-					this.#objectDistanceSquared(view, right) -
-					this.#objectDistanceSquared(view, left),
-			);
-		}
-		this.#applyObjectPassState(pass);
-		this.#setSurfaceColor(OBJECT_PASS_COLORS[pass]);
-		for (const draw of draws) {
-			const placement = draw.occurrence.placement;
-			this.#gl.depthMask(draw.drawUnit.material.depthWrite);
-			this.#drawGeometry(
-				draw.occurrence.resource.geometryResource,
-				draw.drawUnit.indexStart,
-				draw.drawUnit.indexCount,
-				resolveObjectLocalToLandblock(draw),
-				createLandblockOffset(placement.landblockId, view.anchorLandblockId),
-			);
-		}
 	}
 
 	#drawGeometry(
@@ -265,36 +251,8 @@ export class WebGL2Renderer implements Renderer {
 		);
 	}
 
-	#applyObjectPassState(pass: ObjectMaterialPass): void {
-		const gl = this.#gl;
-		switch (pass) {
-			case "opaque":
-			case "alpha-test":
-				gl.disable(gl.BLEND);
-				return;
-			case "transparent":
-				gl.enable(gl.BLEND);
-				gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-				return;
-			case "additive":
-				gl.enable(gl.BLEND);
-				gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
-		}
-	}
-
 	#setSurfaceColor(color: SurfaceColor): void {
 		this.#gl.uniform4f(this.#flatColorProgram.uniforms.color, ...color);
-	}
-
-	#objectDistanceSquared(view: PreparedView, draw: ObjectDraw): number {
-		const placement = draw.occurrence.placement;
-		const offset = createLandblockOffset(
-			placement.landblockId,
-			view.anchorLandblockId,
-		);
-		const translation = getMat4Translation(resolveObjectLocalToLandblock(draw));
-		const position = offset.add(translation);
-		return position.distanceSquaredTo(view.cameraPosition);
 	}
 
 	#resizeCanvasForDpr(): void {
@@ -308,46 +266,6 @@ export class WebGL2Renderer implements Renderer {
 		this.#canvas.width = width;
 		this.#canvas.height = height;
 		this.#gl.viewport(0, 0, width, height);
-	}
-}
-
-function collectObjectDraws(
-	scene: FrameViewScene,
-	pass: ObjectMaterialPass,
-): ObjectDraw[] {
-	return scene.objects.flatMap((occurrence) =>
-		occurrence.resource.drawUnits
-			.filter((drawUnit) => drawUnit.material.pass === pass)
-			.map((drawUnit) => ({ drawUnit, occurrence })),
-	);
-}
-
-function resolveObjectLocalToLandblock(draw: ObjectDraw): Mat4 {
-	const placement = draw.occurrence.placement.localToLandblock;
-	const pose = draw.occurrence.instance.pose;
-	if (pose.kind === "baked") {
-		requireNoPoseIndex(draw.drawUnit, pose.kind);
-		return placement;
-	}
-	if (pose.kind === "rigid") {
-		requireNoPoseIndex(draw.drawUnit, pose.kind);
-		return multiplyMat4(placement, pose.resourceTransform);
-	}
-	const poseIndex = draw.drawUnit.poseIndex;
-	if (poseIndex === null) return placement;
-	const partTransform = pose.partTransforms[poseIndex];
-	if (!partTransform) {
-		throw new Error(`Articulated pose does not contain part ${poseIndex}.`);
-	}
-	return multiplyMat4(placement, partTransform);
-}
-
-function requireNoPoseIndex(
-	drawUnit: ObjectRenderDrawUnit,
-	poseKind: Extract<ObjectRenderPose, { kind: "baked" | "rigid" }>["kind"],
-): void {
-	if (drawUnit.poseIndex !== null) {
-		throw new Error(`${poseKind} object draw unit cannot select a part pose.`);
 	}
 }
 

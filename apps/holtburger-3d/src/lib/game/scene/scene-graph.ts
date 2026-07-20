@@ -1,5 +1,5 @@
 import type { AABB3, Mat4 } from "../math/types";
-import { multiplyMat4 } from "../math/matrices";
+import { multiplyMat4, transformAABB3 } from "../math/matrices";
 import type { Camera } from "../runtime/types";
 import type {
 	SceneNode,
@@ -8,6 +8,7 @@ import type {
 	ScenePlacement,
 	ResolvedScenePlacement,
 	VisibleScene,
+	VisibleSceneEntry,
 } from ".";
 
 type SceneNodeRecord = {
@@ -26,10 +27,16 @@ type SceneNodeRecord = {
 	  }
 );
 
+/** Derived landblock-local entry used by the composed spatial index. */
+interface SpatialEntry extends VisibleSceneEntry {
+	/** Conservative bounds in the root landblock coordinate frame. */
+	readonly landblockBounds: AABB3;
+}
+
 export class SceneGraph {
 	readonly #nodes = new Map<SceneNodeId, SceneNodeRecord>();
-	/** Placeholder for the composed spatial index. Entries are derived from nodes. */
-	readonly #spatialNodeIds = new Set<SceneNodeId>();
+	/** Brute-force stand-in for the composed per-landblock spatial index. */
+	readonly #spatialEntries = new Map<SceneNodeId, SpatialEntry>();
 	#nextNodeId = 0;
 
 	createNode(input: SceneNodeInput): SceneNodeId {
@@ -44,7 +51,7 @@ export class SceneGraph {
 		if (node.parentId !== null) {
 			this.#requireNode(node.parentId).children.add(nodeId);
 		}
-		this.#syncSpatialMembership(node);
+		this.#syncSpatialSubtree(node.id);
 		return nodeId;
 	}
 
@@ -69,20 +76,6 @@ export class SceneGraph {
 		};
 	}
 
-	resolvePlacement(nodeId: SceneNodeId): ResolvedScenePlacement {
-		let node = this.#requireNode(nodeId);
-		let localToLandblock = node.localTransform;
-		while (node.parentId !== null) {
-			node = this.#requireNode(node.parentId);
-			localToLandblock = multiplyMat4(node.localTransform, localToLandblock);
-		}
-		return {
-			envCellId: node.envCellId,
-			landblockId: node.landblockId,
-			localToLandblock,
-		};
-	}
-
 	updateRootPlacement(nodeId: SceneNodeId, placement: ScenePlacement): void {
 		const node = this.#requireNode(nodeId);
 		if (node.parentId !== null) {
@@ -91,7 +84,7 @@ export class SceneGraph {
 		node.envCellId = placement.envCellId;
 		node.landblockId = placement.landblockId;
 		node.localTransform = placement.localTransform;
-		// TODO: reindex this transform tree when the spatial index is implemented.
+		this.#syncSpatialSubtree(node.id);
 	}
 
 	updateLocalTransform(nodeId: SceneNodeId, transform: Mat4): void {
@@ -100,12 +93,13 @@ export class SceneGraph {
 			throw new Error(`Scene root ${nodeId} requires a complete placement.`);
 		}
 		node.localTransform = transform;
+		this.#syncSpatialSubtree(node.id);
 	}
 
 	updateBounds(nodeId: SceneNodeId, localBounds: AABB3 | null): void {
 		const node = this.#requireNode(nodeId);
 		node.localBounds = localBounds;
-		this.#syncSpatialMembership(node);
+		this.#syncSpatialEntry(node);
 	}
 
 	/** Destroy a root node and all of its transform descendants. */
@@ -120,16 +114,42 @@ export class SceneGraph {
 			if (node.parentId !== null) {
 				this.#requireNode(node.parentId).children.delete(removedNodeId);
 			}
-			this.#spatialNodeIds.delete(removedNodeId);
+			this.#spatialEntries.delete(removedNodeId);
 			this.#nodes.delete(removedNodeId);
 		}
 		return nodeIds;
 	}
 
+	/**
+	 * Return spatial-query results with placements captured from the entries used to query.
+	 * Frustum tests and portal traversal will replace the current brute-force selection.
+	 */
 	updateVisibility(camera: Camera): VisibleScene {
 		// TODO: transform the camera query into each landblock frame and query portals.
 		void camera;
-		return { nodeIds: [...this.#spatialNodeIds] };
+		return {
+			entries: [...this.#spatialEntries.values()].map(
+				({ nodeId, placement }) => ({
+					nodeId,
+					placement,
+				}),
+			),
+		};
+	}
+
+	/** Resolve inherited residency and flatten one node transform into landblock-local coordinates. */
+	#resolvePlacement(nodeId: SceneNodeId): ResolvedScenePlacement {
+		let node = this.#requireNode(nodeId);
+		let localToLandblock = node.localTransform;
+		while (node.parentId !== null) {
+			node = this.#requireNode(node.parentId);
+			localToLandblock = multiplyMat4(node.localTransform, localToLandblock);
+		}
+		return {
+			envCellId: node.envCellId,
+			landblockId: node.landblockId,
+			localToLandblock,
+		};
 	}
 
 	#collectDescendants(nodeId: SceneNodeId): SceneNodeId[] {
@@ -149,11 +169,25 @@ export class SceneGraph {
 		return node;
 	}
 
-	#syncSpatialMembership(node: SceneNodeRecord): void {
+	#syncSpatialSubtree(nodeId: SceneNodeId): void {
+		const node = this.#requireNode(nodeId);
+		this.#syncSpatialEntry(node);
+		for (const childId of node.children) this.#syncSpatialSubtree(childId);
+	}
+
+	#syncSpatialEntry(node: SceneNodeRecord): void {
 		if (node.localBounds === null) {
-			this.#spatialNodeIds.delete(node.id);
+			this.#spatialEntries.delete(node.id);
 		} else {
-			this.#spatialNodeIds.add(node.id);
+			const placement = this.#resolvePlacement(node.id);
+			this.#spatialEntries.set(node.id, {
+				landblockBounds: transformAABB3(
+					placement.localToLandblock,
+					node.localBounds,
+				),
+				nodeId: node.id,
+				placement,
+			});
 		}
 	}
 }

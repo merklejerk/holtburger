@@ -55,15 +55,13 @@ describe("TerrainService", () => {
 		await Promise.resolve();
 
 		expect(
-			terrain.getDrawResources(
-				installation.landblockId,
-				installation.landblockId,
-			),
+			terrain.getDrawUnit(installation.landblockId, installation.landblockId),
 		).toMatchObject({
 			composition: "terrain-composition:1",
 			geometry: "terrain-geometry:0x1111ffff",
 			indexCount: 3,
 			indexStart: 0,
+			landblockId: "0x1111ffff",
 			surfaceField: "terrain-surface:0x1111ffff/1",
 			textures: {
 				blendMasks: "texture-array:terrain-blend-mask:terrain-region:1",

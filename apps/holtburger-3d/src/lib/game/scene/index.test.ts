@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
 import { createTranslationMat4, getMat4Translation } from "../math/matrices";
-import type { SceneNodeId } from ".";
+import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
+import type { SceneNodeId, VisibleSceneEntry } from ".";
 import { SceneGraph } from ".";
 
 const camera = {
@@ -34,7 +34,7 @@ const boundedChildFields = {
 };
 
 describe("SceneGraph", () => {
-	it("assigns root placement to transform descendants", () => {
+	it("returns inherited root placement beside selected bounded descendants", () => {
 		const scene = new SceneGraph();
 		const rootId = scene.createNode(rootInput);
 		const childId = scene.createNode({
@@ -49,14 +49,14 @@ describe("SceneGraph", () => {
 			parentId: null,
 		});
 		expect(scene.getNode(childId)?.parentId).toBe(rootId);
-		expect(scene.resolvePlacement(childId)).toEqual({
+		expect(visibleEntry(scene, childId).placement).toEqual({
 			envCellId: rootPlacement.envCellId,
 			landblockId: rootPlacement.landblockId,
 			localToLandblock: rootPlacement.localTransform,
 		});
 	});
 
-	it("flattens parent transforms into a node's landblock frame", () => {
+	it("reindexes descendants when a parent transform changes", () => {
 		const scene = new SceneGraph();
 		const rootId = scene.createNode({
 			...rootInput,
@@ -74,8 +74,20 @@ describe("SceneGraph", () => {
 		});
 
 		expect(
-			getMat4Translation(scene.resolvePlacement(grandchildId).localToLandblock),
+			getMat4Translation(
+				visibleEntry(scene, grandchildId).placement.localToLandblock,
+			),
 		).toEqual(new Vec3(10, 20, 30));
+
+		scene.updateLocalTransform(
+			childId,
+			createTranslationMat4(new Vec3(0, 40, 0)),
+		);
+		expect(
+			getMat4Translation(
+				visibleEntry(scene, grandchildId).placement.localToLandblock,
+			),
+		).toEqual(new Vec3(10, 40, 30));
 	});
 
 	it("indexes bounded nodes but permits empty transform nodes", () => {
@@ -86,10 +98,12 @@ describe("SceneGraph", () => {
 			parentId: rootId,
 		});
 
-		expect(scene.updateVisibility(camera).nodeIds).toEqual([childId]);
+		expect(
+			scene.updateVisibility(camera).entries.map(({ nodeId }) => nodeId),
+		).toEqual([childId]);
 
 		scene.updateBounds(childId, null);
-		expect(scene.updateVisibility(camera).nodeIds).toEqual([]);
+		expect(scene.updateVisibility(camera).entries).toEqual([]);
 	});
 
 	it("destroys transform descendants with their parent", () => {
@@ -108,7 +122,7 @@ describe("SceneGraph", () => {
 		expect(new Set(destroyed)).toEqual(
 			new Set([rootId, childId, grandchildId]),
 		);
-		expect(scene.updateVisibility(camera).nodeIds).toEqual([]);
+		expect(scene.updateVisibility(camera).entries).toEqual([]);
 	});
 
 	it("rejects destruction of a parented node", () => {
@@ -126,19 +140,23 @@ describe("SceneGraph", () => {
 		expect(scene.getNode(childId)).toBeDefined();
 	});
 
-	it("updates root placement atomically", () => {
+	it("reindexes descendants when root residency changes", () => {
 		const scene = new SceneGraph();
 		const rootId = scene.createNode(rootInput);
+		const childId = scene.createNode({
+			...boundedChildFields,
+			parentId: rootId,
+		});
 		const envCellPlacement = {
 			envCellId: "cell-1",
 			landblockId: "0002",
-			localTransform: Mat4.identity(),
+			localTransform: createTranslationMat4(new Vec3(10, 20, 30)),
 		};
 
 		scene.updateRootPlacement(rootId, envCellPlacement);
 
 		expect(scene.getNode(rootId)?.id).toBe(rootId);
-		expect(scene.resolvePlacement(rootId)).toEqual({
+		expect(visibleEntry(scene, childId).placement).toEqual({
 			envCellId: envCellPlacement.envCellId,
 			landblockId: envCellPlacement.landblockId,
 			localToLandblock: envCellPlacement.localTransform,
@@ -156,3 +174,14 @@ describe("SceneGraph", () => {
 		).toThrow("does not exist");
 	});
 });
+
+function visibleEntry(
+	scene: SceneGraph,
+	nodeId: SceneNodeId,
+): VisibleSceneEntry {
+	const entry = scene
+		.updateVisibility(camera)
+		.entries.find((candidate) => candidate.nodeId === nodeId);
+	if (!entry) throw new Error(`Scene node ${nodeId} is not visible.`);
+	return entry;
+}

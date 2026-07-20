@@ -4,8 +4,9 @@ import {
 	createViewMat4,
 	getMat4Translation,
 	multiplyMat4,
+	transformAABB3,
 } from "./matrices";
-import { Quat, Vec3 } from "./types";
+import { AABB3, Quat, Vec3 } from "./types";
 
 describe("matrix composition", () => {
 	it("composes child translations into their parent coordinate frame", () => {
@@ -21,5 +22,16 @@ describe("matrix composition", () => {
 		const view = createViewMat4(new Vec3(10, 20, 30), Quat.identity());
 
 		expect(getMat4Translation(view)).toEqual(new Vec3(-10, -20, -30));
+	});
+
+	it("conservatively transforms every corner of an axis-aligned box", () => {
+		const bounds = transformAABB3(
+			createTranslationMat4(new Vec3(10, 20, 30)),
+			new AABB3(new Vec3(-1, -2, -3), new Vec3(4, 5, 6)),
+		);
+
+		expect(bounds).toEqual(
+			new AABB3(new Vec3(9, 18, 27), new Vec3(14, 25, 36)),
+		);
 	});
 });

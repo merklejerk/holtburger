@@ -52,9 +52,17 @@ export type SceneNodeInput = SceneNodeFields &
 		  }
 	);
 
-/** Result of the stub visibility pass. Transform flattening is a later query concern. */
+/** Result of a spatial query against the canonical scene graph. */
 export interface VisibleScene {
-	readonly nodeIds: readonly SceneNodeId[];
+	/** Bounded nodes selected by the spatial query with their indexed placement snapshot. */
+	readonly entries: readonly VisibleSceneEntry[];
+}
+
+/** One bounded node selected by a spatial query. */
+export interface VisibleSceneEntry {
+	readonly nodeId: SceneNodeId;
+	/** Inherited residency and transform already used to place this entry in its index. */
+	readonly placement: ResolvedScenePlacement;
 }
 
 export { SceneGraph } from "./scene-graph";

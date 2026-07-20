@@ -11,30 +11,15 @@ import { GeometryManager } from "../geometry/geometry-manager";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
 import { LeaseRegistry } from "../ownership";
-import type {
-	FrameInput,
-	Renderer,
-	TerrainFrameInput,
-} from "../renderer/renderer";
-import { RenderResourceRegistry } from "../renderer/render-resources";
-import {
-	RenderScene,
-	type ObjectFrameOccurrence,
-} from "../renderer/render-scene";
-import type { TerrainTextureBindings } from "../renderer/terrain-program-input";
+import type { FrameInput } from "../renderer/renderer";
+import { RenderWorld } from "../renderer/render-world";
 import type { RendererResourceManager } from "../renderer/resource-manager";
-import {
-	SceneGraph,
-	type SceneNodeId,
-	type ScenePlacement,
-	type VisibleScene,
-} from "../scene";
+import { SceneGraph, type SceneNodeId, type ScenePlacement } from "../scene";
 import {
 	WorkerTerrainGenerator,
 	type TerrainGenerator,
 } from "../terrain/terrain-generator";
 import { TerrainService } from "../terrain/terrain-service";
-import { type ResolvedTerrainTextureFacts } from "../terrain/types";
 import { TextureManager } from "../textures/texture-manager";
 import {
 	WorkerTexturePreparer,
@@ -91,26 +76,22 @@ export interface GameRuntimeDependencies {
 	readonly texturePreparer: TexturePreparer;
 }
 
-/** Bridges source commits, scene topology, runtime residency, and renderer frame assembly. */
+/** Bridges source commits, scene topology, runtime residency, and frontend frame state. */
 export class GameRuntime {
 	/** Canonical scene topology, residency, transforms, and spatial-query membership. */
 	readonly #scene = new SceneGraph();
 	/** Logical geometry bindings and shared owner retention. */
 	readonly #geometry: GeometryManager<ResourceOwnerId>;
-	/** Persistent logical object resources, independent of scene-node occurrences. */
-	readonly #renderResourceRegistry: RenderResourceRegistry;
-	/** Renderer occurrences attached to canonical scene nodes. */
-	readonly #renderScene: RenderScene;
 	/** Runtime layer/spawn ownership of scene-root lifetimes. */
 	readonly #sceneNodeLeases = new LeaseRegistry<OwnerId, SceneNodeId>();
 	/** Logical texture preparation, device bindings, and shared owner retention. */
 	readonly #textures: TextureManager<ResourceOwnerId>;
 	/** Dynamic terrain sources, generation state, and realized terrain resources. */
 	readonly #terrain: TerrainService<ResourceOwnerId, TerrainResourceOwnerId>;
+	/** Read-only renderer gateway over this runtime's scene and resource systems. */
+	readonly #renderWorld: RenderWorld;
 	/** Runtime-owned terrain-generation worker terminated during runtime shutdown. */
 	readonly #terrainGenerator: TerrainGenerator;
-	/** Backend that consumes assembled frame input. */
-	readonly #renderer: Renderer;
 	/** Frontend-owned static commit producer invoked for new scene interest. */
 	readonly #commitPipeline: CommitPipeline;
 	/** Completed asynchronous commits awaiting the next synchronous runtime tick. */
@@ -128,16 +109,12 @@ export class GameRuntime {
 
 	protected constructor(
 		renderResources: RendererResourceManager,
-		renderer: Renderer,
 		commitPipeline: CommitPipeline,
 		dependencies: GameRuntimeDependencies,
 	) {
-		this.#renderer = renderer;
 		this.#commitPipeline = commitPipeline;
 		this.#terrainGenerator = dependencies.terrainGenerator;
 		this.#geometry = new GeometryManager<ResourceOwnerId>(renderResources);
-		this.#renderResourceRegistry = new RenderResourceRegistry(this.#geometry);
-		this.#renderScene = new RenderScene(this.#renderResourceRegistry);
 		this.#textures = new TextureManager<ResourceOwnerId>(
 			renderResources,
 			dependencies.texturePreparer,
@@ -148,12 +125,17 @@ export class GameRuntime {
 			this.#textures,
 			terrainSourceToOwnerId,
 		);
+		this.#renderWorld = new RenderWorld({
+			geometry: this.#geometry,
+			scene: this.#scene,
+			terrain: this.#terrain,
+			textures: this.#textures,
+		});
 	}
 
 	/** Construct production runtime workers and inject them into runtime-owned systems. */
 	static async build(
 		renderResources: RendererResourceManager,
-		renderer: Renderer,
 		commitPipeline: CommitPipeline,
 		hostAssets: AssetBridge,
 	): Promise<GameRuntime> {
@@ -161,7 +143,7 @@ export class GameRuntime {
 			WorkerTerrainGenerator.build(),
 			WorkerTexturePreparer.build(hostAssets),
 		]);
-		return new GameRuntime(renderResources, renderer, commitPipeline, {
+		return new GameRuntime(renderResources, commitPipeline, {
 			terrainGenerator,
 			texturePreparer,
 		});
@@ -170,20 +152,19 @@ export class GameRuntime {
 	/** Construct runtime from explicit ports for focused integration tests. */
 	static buildForTesting(
 		renderResources: RendererResourceManager,
-		renderer: Renderer,
 		commitPipeline: CommitPipeline,
 		dependencies: GameRuntimeDependencies,
 	): GameRuntime {
-		return new GameRuntime(
-			renderResources,
-			renderer,
-			commitPipeline,
-			dependencies,
-		);
+		return new GameRuntime(renderResources, commitPipeline, dependencies);
 	}
 
 	get lodConfig(): LoDConfig {
 		return { ...this.#lodConfig };
+	}
+
+	/** Renderer-facing query gateway composed from this runtime's live systems. */
+	get renderWorld(): RenderWorld {
+		return this.#renderWorld;
 	}
 
 	setLoDConfig(cfg: LoDConfig): void {
@@ -203,10 +184,14 @@ export class GameRuntime {
 		this.#drainCommitArtifacts();
 	}
 
-	updateFrame(): void {
-		if (this.#destroyed) return;
-		const visibleScene = this.#scene.updateVisibility(this.#camera);
-		this.#renderer.drawFrame(this.#createFrameInput(visibleScene));
+	/** Snapshot frontend-controlled frame state while the renderer collects scene submissions. */
+	createFrameInput(timeSeconds: number): FrameInput {
+		if (this.#destroyed) throw new Error("Game runtime has been destroyed.");
+		return {
+			anchorLandblockId: this.#worldAnchor,
+			timeSeconds,
+			views: [{ camera: this.#camera }],
+		};
 	}
 
 	updateDynamicEntityPlacement(
@@ -232,52 +217,6 @@ export class GameRuntime {
 		this.#releaseUnownedSceneNodes();
 		await this.#textures.destroy();
 		this.#geometry.destroy();
-	}
-
-	#createFrameInput(visibleScene: VisibleScene): FrameInput {
-		const visibleRenderOccurrences =
-			this.#renderScene.resolveVisibleOccurrences(
-				visibleScene.nodeIds,
-				(nodeId) => this.#scene.resolvePlacement(nodeId),
-			);
-		const objects: ObjectFrameOccurrence[] = [];
-		const terrain: TerrainFrameInput[] = [];
-		for (const occurrence of visibleRenderOccurrences) {
-			if (occurrence.kind === "object") {
-				objects.push(occurrence);
-				continue;
-			}
-			const resources = this.#terrain.getDrawResources(
-				occurrence.placement.landblockId,
-				this.#worldAnchor,
-			);
-			if (!resources) continue;
-			terrain.push({
-				placement: occurrence.placement,
-				resources,
-				program: {
-					geometry: this.#geometry.getResource(resources.geometry),
-					composition: this.#textures.getTexture2DResource(
-						resources.composition,
-					),
-					surfaceField: this.#textures.getTexture2DResource(
-						resources.surfaceField,
-					),
-					textures: this.#resolveTerrainTextureBindings(resources.textures),
-				},
-			});
-		}
-		return {
-			anchorLandblockId: this.#worldAnchor,
-			timeSeconds: performance.now() / 1_000,
-			views: [
-				{
-					camera: this.#camera,
-					scene: { objects },
-					terrain,
-				},
-			],
-		};
 	}
 
 	#updateWorldInterest(newAnchor: LandblockId): void {
@@ -359,12 +298,11 @@ export class GameRuntime {
 			presentation: artifact.commit.presentation,
 		});
 		if (!this.#sceneNodeLeases.hasOwner(ownerId)) {
-			const nodeId = this.#createOwnedRoot(
+			this.#createOwnedRoot(
 				ownerId,
 				createLandblockPlacement(artifact.landblockId),
 				TERRAIN_ROOT_BOUNDS,
 			);
-			this.#renderScene.createInstance({ kind: "terrain", nodeId });
 		}
 	}
 
@@ -440,7 +378,6 @@ export class GameRuntime {
 
 	#releaseUnownedSceneNodes(): void {
 		const releasedNodeIds = this.#sceneNodeLeases.takeEmptyLeases();
-		this.#renderScene.removeNodes(releasedNodeIds);
 		for (const nodeId of releasedNodeIds) {
 			this.#scene.destroyNode(nodeId);
 		}
@@ -450,20 +387,6 @@ export class GameRuntime {
 		for (const page of artifact.texturePages) {
 			this.#textures.installAtlasPage(ownerId, page.pageId, page);
 		}
-	}
-
-	#resolveTerrainTextureBindings(textures: {
-		readonly colors: ResolvedTerrainTextureFacts["colors"]["key"];
-		readonly blendMasks: ResolvedTerrainTextureFacts["blendMasks"]["key"];
-		readonly roadMasks: ResolvedTerrainTextureFacts["roadMasks"]["key"];
-		readonly detail: ResolvedTerrainTextureFacts["detail"]["key"];
-	}): TerrainTextureBindings {
-		return {
-			blendMasks: this.#textures.getTextureArrayBinding(textures.blendMasks),
-			colors: this.#textures.getTextureArrayBinding(textures.colors),
-			detail: this.#textures.getTexture2DResource(textures.detail),
-			roadMasks: this.#textures.getTextureArrayBinding(textures.roadMasks),
-		};
 	}
 
 	#isInActiveSceneInterest(

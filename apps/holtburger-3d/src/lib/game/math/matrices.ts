@@ -1,4 +1,4 @@
-import { Mat4, Quat, Vec3 } from "./types";
+import { AABB3, Mat4, Quat, Vec3 } from "./types";
 
 /** Compose column-major transforms for column-vector multiplication. */
 export function multiplyMat4(left: Mat4, right: Mat4): Mat4 {
@@ -90,6 +90,58 @@ export function mat4ToFloat32Array(matrix: Mat4): Float32Array {
 
 export function getMat4Translation(matrix: Mat4): Vec3 {
 	return new Vec3(matrix.m41, matrix.m42, matrix.m43);
+}
+
+/** Transform one point by a column-major matrix. */
+export function transformPoint3(matrix: Mat4, point: Vec3): Vec3 {
+	const x =
+		matrix.m11 * point.x +
+		matrix.m21 * point.y +
+		matrix.m31 * point.z +
+		matrix.m41;
+	const y =
+		matrix.m12 * point.x +
+		matrix.m22 * point.y +
+		matrix.m32 * point.z +
+		matrix.m42;
+	const z =
+		matrix.m13 * point.x +
+		matrix.m23 * point.y +
+		matrix.m33 * point.z +
+		matrix.m43;
+	const w =
+		matrix.m14 * point.x +
+		matrix.m24 * point.y +
+		matrix.m34 * point.z +
+		matrix.m44;
+	if (w === 0) throw new Error("Cannot transform a point with zero W.");
+	return new Vec3(x / w, y / w, z / w);
+}
+
+/** Return the conservative axis-aligned bounds of one transformed local-space box. */
+export function transformAABB3(matrix: Mat4, bounds: AABB3): AABB3 {
+	const corners = [
+		new Vec3(bounds.min.x, bounds.min.y, bounds.min.z),
+		new Vec3(bounds.min.x, bounds.min.y, bounds.max.z),
+		new Vec3(bounds.min.x, bounds.max.y, bounds.min.z),
+		new Vec3(bounds.min.x, bounds.max.y, bounds.max.z),
+		new Vec3(bounds.max.x, bounds.min.y, bounds.min.z),
+		new Vec3(bounds.max.x, bounds.min.y, bounds.max.z),
+		new Vec3(bounds.max.x, bounds.max.y, bounds.min.z),
+		new Vec3(bounds.max.x, bounds.max.y, bounds.max.z),
+	].map((corner) => transformPoint3(matrix, corner));
+	return new AABB3(
+		new Vec3(
+			Math.min(...corners.map((corner) => corner.x)),
+			Math.min(...corners.map((corner) => corner.y)),
+			Math.min(...corners.map((corner) => corner.z)),
+		),
+		new Vec3(
+			Math.max(...corners.map((corner) => corner.x)),
+			Math.max(...corners.map((corner) => corner.y)),
+			Math.max(...corners.map((corner) => corner.z)),
+		),
+	);
 }
 
 function createRotationMat4(rotation: Quat): Mat4 {

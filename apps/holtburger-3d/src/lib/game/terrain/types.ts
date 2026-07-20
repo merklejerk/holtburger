@@ -164,8 +164,10 @@ export interface RealizedTerrainResources {
 	readonly variants: readonly TerrainVariantDrawRange[];
 }
 
-/** One selected terrain submission ready for renderer resource resolution. */
-export interface TerrainDrawResources {
+/** One selected terrain submission ready for renderer resource resolution and drawing. */
+export interface TerrainDrawUnit {
+	/** Landblock containing this intrinsically landblock-local terrain geometry. */
+	readonly landblockId: LandblockId;
 	readonly geometry: TerrainGeometryKey;
 	readonly indexStart: number;
 	readonly indexCount: number;

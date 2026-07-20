@@ -23,7 +23,7 @@ import {
 	terrainGeneratedTextureKeys,
 	terrainTextureKeysFromFacts,
 	type RealizedTerrainResources,
-	type TerrainDrawResources,
+	type TerrainDrawUnit,
 	type TerrainGeneratedTextureKeys,
 	type TerrainGenerationResult,
 	type TerrainSourceInstallation,
@@ -133,11 +133,11 @@ export class TerrainService<
 		this.#releaseSourceResources(installation.source);
 	}
 
-	/** Select already-realized terrain resources for one visible landblock. */
-	getDrawResources(
+	/** Select one already-realized terrain draw unit for a visible landblock. */
+	getDrawUnit(
 		landblockId: LandblockId,
 		anchorLandblockId: LandblockId,
-	): TerrainDrawResources | null {
+	): TerrainDrawUnit | null {
 		const installation = this.#installations.get(landblockId);
 		if (!installation || installation.kind !== "realized") return null;
 
@@ -163,17 +163,18 @@ export class TerrainService<
 				`Terrain ${landblockId} is missing stride ${stride} surface data.`,
 			);
 		}
-		const resources: TerrainDrawResources = {
+		const drawUnit: TerrainDrawUnit = {
 			composition: installation.source.generatedTextures.composition,
 			geometry: installation.source.geometry,
 			indexCount: variant.indexCount,
 			indexStart: variant.indexStart,
+			landblockId,
 			surfaceField,
 			textures: terrainTextureKeysFromFacts(
 				installation.source.input.presentation.textures,
 			),
 		};
-		return this.#hasDrawResources(resources) ? resources : null;
+		return this.#hasDrawUnit(drawUnit) ? drawUnit : null;
 	}
 
 	/** Reject all later worker completions and clear terrain source state. */
@@ -280,12 +281,12 @@ export class TerrainService<
 		this.#geometry.dropOwner(source.owner);
 	}
 
-	#hasDrawResources(resources: TerrainDrawResources): boolean {
+	#hasDrawUnit(drawUnit: TerrainDrawUnit): boolean {
 		return (
-			this.#geometry.hasGeometry(resources.geometry) &&
-			this.#textures.hasTexture(resources.surfaceField) &&
-			this.#textures.hasTexture(resources.composition) &&
-			Object.values(resources.textures).every((key) =>
+			this.#geometry.hasGeometry(drawUnit.geometry) &&
+			this.#textures.hasTexture(drawUnit.surfaceField) &&
+			this.#textures.hasTexture(drawUnit.composition) &&
+			Object.values(drawUnit.textures).every((key) =>
 				this.#textures.hasTexture(key),
 			)
 		);

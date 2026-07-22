@@ -91,6 +91,8 @@ Existing identities remain authoritative:
 - `GeometryKey`, `StaticInstanceStreamKey`, and `TextureKey` identify persistent logical resources.
 - `ResolvedPresentationId` identifies reusable resolved object presentation.
 - Runtime owner IDs group installation and removal; they are not render-asset identities.
+- A `StaticInstallResourceNamespace` prevents collisions among install-scoped resources; it does not
+  claim semantic equality or cross-install deduplication.
 
 Do not add `StaticRenderAssetKey`. Static-object components can directly retain logical draw units,
 which already reference the geometry and texture identities that need deduplication.
@@ -115,6 +117,42 @@ routes authoritative lifecycle events such as layer interest, eviction, spawn, a
 appropriate system. It should not create domain nodes or unpack domain-specific geometry, texture,
 or draw-unit internals.
 
+### Coordinate And Bounds Contract
+
+Every scene transform tree resolves directly into one landblock coordinate frame. A root
+`ScenePlacement.localTransform` maps from that root's local space to landblock-local space. A child
+`SceneNode.localTransform` maps from child-local space to its parent. Flattening the parent chain
+therefore always produces `ResolvedScenePlacement.localToLandblock`; there is no intermediate
+env-cell transform frame.
+
+Env-cell residency is a visibility and spatial-query scope orthogonal to transform parenting. An
+env-cell ID selects the scope index containing a root and its descendants, but contributes no
+matrix. Roots in the same env cell may have unrelated landblock-local placements, and neither must
+be parented to a node representing the cell.
+
+Coordinate-bearing data follows these rules:
+
+| Data                                                     | Coordinate space                                      |
+| -------------------------------------------------------- | ----------------------------------------------------- |
+| Reusable object or cell-structure geometry and bounds    | That source geometry's local space                    |
+| Root `localTransform`                                    | Root local to containing landblock                    |
+| Child `localTransform`                                   | Child local to parent                                 |
+| Scene-node `localBounds`                                 | The bounded node's own local space                    |
+| Derived spatial-index `landblockBounds`                  | Containing landblock                                  |
+| Env-cell coarse `landblockBounds`                        | Containing landblock                                  |
+| Portal aperture vertices and `landblockBounds`           | Containing landblock                                  |
+| Terrain geometry, variant bounds, and identity placement | Containing landblock                                  |
+
+Spatial queries transform world- or anchor-relative query geometry into each relevant landblock
+frame before testing indexes. Portal traversal changes the active `SceneScope`, not the query's
+coordinate frame. Renderer submissions likewise retain landblock-local transforms and apply the
+anchor-landblock offset in the shader.
+
+Plain `bounds` fields are not sufficient at boundaries where more than one coordinate space is
+possible. Use `localBounds`, `structureLocalBounds`, or `landblockBounds` according to the table
+above. A pretransformed landblock bound must never be supplied as `SceneNode.localBounds` together
+with a nonidentity root transform, because SceneGraph would transform it a second time.
+
 ## Initial Systems
 
 ### StaticObjectSystem
@@ -136,15 +174,18 @@ type StaticObjectDrawUnit = BakedStaticDrawUnit | InstancedStaticDrawUnit;
 /** One immutable object publication emitted before SceneGraph assigns its node identity. */
 interface StaticObjectArtifact {
   readonly placement: ScenePlacement;
+  /** Bounds in the object root's local coordinate space. */
   readonly localBounds: AABB3;
   readonly renderable: StaticObjectRenderableArtifact;
 }
 
 /** Complete static-object publication installed under one runtime owner. */
 interface StaticObjectInstallSet {
+  /** Collision-free namespace allocated for this installation before worker dispatch. */
+  readonly resourceNamespace: StaticInstallResourceNamespace;
   /** Bounded residents whose scene nodes are assigned during installation. */
   readonly objects: readonly StaticObjectArtifact[];
-  /** Keyed reusable geometry referenced by resident draw units. */
+  /** Keyed reusable or installation-specific geometry referenced by resident draw units. */
   readonly geometry: readonly GeometrySource[];
   /** Keyed immutable instance cohorts referenced by instanced draw units. */
   readonly instanceStreams: readonly StaticInstanceStreamSource[];
@@ -162,15 +203,20 @@ class StaticObjectSystem {
 }
 ```
 
-The static baker assigns deterministic `StaticGeometryKey`s and `StaticInstanceStreamKey`s plus
-bounded render partitions to data crossing the worker boundary. `StandardCommitPipeline` combines
-those products with resolved placement facts into explicit `StaticObjectArtifact`s.
-`StaticObjectSystem` creates the corresponding nodes and publishes the install set's geometry,
-instance streams, textures, and draw units, so runtime does not infer spatial or resource grouping
-from the source layer kind. Outdoor object batching stops at the resident landblock; no smaller
-outdoor partition is required initially. Embedded static objects use roots with their env-cell
-residency, and generated scenery uses instanced draw units. Every emitted node still has explicit
-bounds and draw data.
+Before worker dispatch, `StandardCommitPipeline` allocates a collision-free resource namespace for
+the pending installation and includes it in the bake request. The static baker assigns internally
+consistent local geometry, instance-cohort, and render-partition IDs beneath that namespace. These
+install-scoped IDs need not reproduce across another bake. Geometry proven reusable from its DAT
+source instead receives a globally semantic source-geometry key so `GeometryManager` can share it
+across installations.
+
+`StandardCommitPipeline` combines those products with resolved placement facts into explicit
+`StaticObjectArtifact`s. `StaticObjectSystem` creates the corresponding nodes and publishes the
+install set's geometry, instance streams, textures, and draw units, so runtime does not infer
+spatial or resource grouping from the source layer kind. Outdoor object batching stops at the
+resident landblock; no smaller outdoor partition is required initially. Embedded static objects
+use roots with their env-cell residency, and generated scenery uses instanced draw units. Every
+emitted node still has explicit bounds and draw data.
 
 ### DynamicEntitySystem
 
@@ -221,6 +267,14 @@ residing in an env cell. Portal topology is independent from `SceneGraph` parent
 `SceneGraph` stores the query-oriented projection used for visibility, picking, and other spatial
 selection.
 
+An env-cell scope is not a virtual scene root and does not establish an env-cell-local coordinate
+space. The source env-cell placement only binds reusable cell-structure geometry into its landblock;
+it is a `structureToLandblock` transform, not a base transform inherited by residents. A rendered
+cell shell is an ordinary root node with env-cell residency. Embedded static and dynamic objects are
+independent roots with their own object-to-landblock placements and the same residency. They are not
+children of the shell. Topology may consequently exist without a shell node, and a shell node has
+no authority over the scope or other residents.
+
 Root residency defines its scene-query scope; it does not require another independent node field:
 
 ```ts
@@ -240,6 +294,8 @@ type SceneScope =
 
 interface SceneEnvCellScopeInput {
   readonly scope: Extract<SceneScope, { kind: "env-cell" }>;
+  /** Conservative cell extent already expressed in the containing landblock frame. */
+  readonly landblockBounds: AABB3 | null;
   /** Source-provided coarse visibility set used to prune portal traversal. */
   readonly potentiallyVisibleEnvCellIds: ReadonlySet<EnvCellId>;
 }
@@ -254,7 +310,8 @@ interface ScenePortalCrossingInput {
   /** Query geometry already expressed in the containing landblock coordinate frame. */
   readonly aperture: {
     readonly id: PortalApertureId;
-    readonly bounds: AABB3;
+    /** Conservative aperture bounds in the containing landblock frame. */
+    readonly landblockBounds: AABB3;
     readonly vertices: Float32Array;
     readonly indices: Uint32Array;
     readonly visibleSide: "positive" | "negative" | "both";
@@ -282,8 +339,10 @@ of "cell records":
 ```ts
 /** Bounded cell-shell presentation published as a scene resident. */
 interface EnvCellShellArtifact {
+  /** Env-cell-resident root placement whose localTransform maps structure to landblock. */
   readonly placement: ScenePlacement;
-  readonly localBounds: AABB3;
+  /** Bounds in the reusable cell structure's local geometry frame. */
+  readonly structureLocalBounds: AABB3;
   readonly renderable: EnvCellRenderableArtifact;
 }
 
@@ -307,7 +366,9 @@ class EnvCellSystem {
 `install` publishes scopes before crossings, materializes cell and portal resources, and creates the
 cell-shell nodes. It records exactly the resulting node, scope, crossing, geometry, and texture keys
 needed for `removeOwner`. Embedded objects are absent from this artifact because the commit pipeline
-routes them to `StaticObjectSystem` or `DynamicEntitySystem`.
+routes them to `StaticObjectSystem` or `DynamicEntitySystem`. While creating a shell node, the
+system passes `structureLocalBounds` as `SceneNode.localBounds` and the placement's
+`localTransform` (the structure-to-landblock matrix) as the root transform.
 
 Children inherit their root's scope. SceneGraph partitions spatial membership by that derived scope
 and requires an origin scope for ray, frustum, and visibility queries. Outdoor landblocks remain one
@@ -355,6 +416,16 @@ Cell topology may exist without resident scene nodes or render resources, and sc
 arrive before topology. `EnvCellSystem` owns that lifecycle ordering; `SceneGraph` owns the resulting
 query membership.
 
+The current stubs do not yet satisfy this contract. `ResolvedEnvCellPresentation` retains a cell
+placement, `EnvCellInfo` drops it, and `GameRuntime.createEnvCellPlacement` creates an identity root
+using an ambiguously named `bounds` value. The Rust content product already distinguishes the cell's
+landblock-wide coarse bounds from source-local cell-structure geometry. The env-cell cutover must
+rename those host and resolved fields, feed coarse `landblockBounds` into the scope, build shell
+nodes from structure-local bounds plus `structureToLandblock`, and delete the placeholder identity
+env-cell roots. Object-resident bounds require the same audit: source-local bounds may become node
+`localBounds`; already transformed instance bounds must remain explicitly landblock-local and cannot
+be installed as node-local bounds.
+
 ### TerrainSystem
 
 Rename or reshape `TerrainService` once system vocabulary is adopted. It keeps its current domain:
@@ -372,6 +443,7 @@ interface TerrainNodeAttachment {
 /** Complete source and spatial publication for one interested terrain layer. */
 interface TerrainSystemArtifact {
   readonly placement: ScenePlacement;
+  /** Landblock-local bounds paired with the terrain root's identity transform. */
   readonly localBounds: AABB3;
   readonly source: TerrainSourceInstallation;
 }
@@ -483,8 +555,23 @@ Immutable static instances are a persistent logical device resource separate fro
 mesh geometry. The initial semantic layout is deliberately narrow:
 
 ```ts
-/** Deterministic identity for one immutable cohort emitted by the static baker. */
-type StaticInstanceStreamKey = `static-instance-stream:${string}`;
+/** Opaque namespace shared by every resource and draw-unit reference in one install set. */
+type StaticInstallResourceNamespace = `static-install:${string}`;
+
+/** Globally semantic geometry identity derived from reusable source and partition facts. */
+type ReusableStaticGeometryKey =
+  `static-source-geometry:${ResolvedGeometryId}/${string}`;
+
+/** Geometry identity meaningful only within one qualified static installation. */
+type InstallStaticGeometryKey =
+  `static-install-geometry:${StaticInstallResourceNamespace}/${string}`;
+
+/** Logical identity for either reusable or installation-specific static geometry. */
+type StaticGeometryKey = ReusableStaticGeometryKey | InstallStaticGeometryKey;
+
+/** Immutable cohort identity qualified by the installation that produced it. */
+type StaticInstanceStreamKey =
+  `static-instance-stream:${StaticInstallResourceNamespace}/${string}`;
 
 /** Opaque backend identity for one uploaded immutable instance buffer. */
 type InstanceStreamResourceKey = `instance-stream-resource:${number}`;
@@ -505,7 +592,7 @@ interface StaticInstanceStreamData {
 
 /** Keyed stream publication crossing the static-baker worker boundary. */
 interface StaticInstanceStreamSource {
-  /** Stable identity derived from the baked cohort rather than its device allocation. */
+  /** Install-scoped identity shared by the source and every referencing draw unit. */
   readonly key: StaticInstanceStreamKey;
   /** Complete semantic data required to create the immutable device stream. */
   readonly data: StaticInstanceStreamData;
@@ -543,10 +630,23 @@ class InstanceStreamManager<TOwnerId extends string> {
 }
 ```
 
-`publish` is not an upsert. A stream key denotes immutable content: publishing an already
-materialized key is a no-op, while changed content requires a new deterministic key. A completion
-for a key that no owner retains is discarded before device allocation, matching `GeometryManager`'s
-late-publication policy.
+`publish` is not an upsert. A stream key denotes immutable content for one installation: repeating
+that installation's publication is a no-op, while another bake receives another resource namespace
+and therefore different stream keys. Publishing different content under an already materialized
+key is a producer error, not replacement. A completion for a key that no owner retains is discarded
+before device allocation, matching `GeometryManager`'s late-publication policy.
+
+The namespace supplies collision freedom, not content addressing. It may be a pipeline-local
+monotonic installation ID passed into the worker request; it does not need randomness, shared worker
+state, or a hash of transferred buffers. The baker may derive local suffixes from semantic part and
+cohort identities or from canonical local ordering. Only references within the same result depend
+on those suffixes. Globally reusable geometry is the exception: its key must be reproducible from
+the immutable source identity and every bake partition fact that changes its bytes.
+
+An instance-stream key remains reachable after installation because stored draw units use it to
+resolve the backend buffer. That persistence does not make the stream shareable outside its install
+set. `InstanceStreamManager` uses the qualified key for lookup and lease accounting, while the
+namespace prevents unrelated sets from being accidentally deduplicated.
 
 One stream represents one baked instance cohort, not one material patch. Multiple material draw
 units may reference the same geometry and stream with different index ranges. If a material patch
@@ -608,8 +708,9 @@ sequenceDiagram
     Runtime->>Pipeline: prepareLandblockLayers(interest)
     Pipeline->>Resolver: resolve layer sources
     Resolver-->>Pipeline: resolved immutable object residents
-    Pipeline->>Baker: bake static or instanced artifacts
-    Baker-->>Pipeline: keyed geometry, instance cohorts, spatial artifacts, and draw-unit data
+    Pipeline->>Pipeline: allocate installation resource namespace
+    Pipeline->>Baker: bake sources under resource namespace
+    Baker-->>Pipeline: qualified geometry, instance cohorts, spatial artifacts, and draw-unit data
     Pipeline-->>Runtime: StaticObjectInstallSet
     Runtime->>Static: installObjects(owner, install set)
     Static->>Scene: create nodes from placement and bounds
@@ -862,17 +963,21 @@ render a complete scene.
    `SceneNodeId`; rename `TerrainService` to `TerrainSystem` and add only its node-to-landblock
    attachment component. Keep terrain generation, realization, and anchor-dependent selection as
    private system behavior.
-2. Replace layer-shaped static commits with bounded `StaticObjectArtifact`s, deterministic geometry
-   keys, and system-owned node installation. Add `StaticObjectSystem` for immutable object residents
-   and move their node, texture, geometry, picking, and metadata publication out of `GameRuntime`.
+2. Replace layer-shaped static commits with bounded `StaticObjectArtifact`s, an explicit
+   pipeline-assigned installation resource namespace, globally semantic keys only for reusable
+   source geometry, and system-owned node installation. Add `StaticObjectSystem` for immutable
+   object residents and move their node, texture, geometry, picking, and metadata publication out
+   of `GameRuntime`.
 3. Add `DynamicEntitySystem`, its runtime-owned preparation worker boundary, reusable object
    geometry identity, transform-only part nodes, and rigid-part draw shape. Route static-authored and
    spawned dynamics through the same path.
 4. Implement the host env-cell projection over existing prepared content, then add `EnvCellSystem`,
    concrete SceneGraph scope/crossing publication, unresolved-residency reconciliation, and
-   cell-structure/portal draw units. Remove the building query-residence variant, partition
-   SceneGraph indexes by residency-derived scope, and add origin-scoped ray/frustum traversal across
-   aperture edges. Route embedded immutable and dynamic objects to their object systems.
+   cell-structure/portal draw units. Normalize source-local versus landblock-local bounds, preserve
+   cell-structure-to-landblock placement only on real shell nodes, and delete the placeholder
+   identity env-cell roots. Remove the building query-residence variant, partition SceneGraph
+   indexes by residency-derived scope, and add origin-scoped ray/frustum traversal across aperture
+   edges. Route embedded immutable and dynamic objects to their object systems as independent roots.
 5. Add `AnimationSystem` shape and explicit runtime update order. Update part-node transforms before
    spatial queries and keep animation evaluation out of rendering.
 6. Unify packed and degenerate DAT two-dimensional textures behind `AssetTextureKey`, then make
@@ -882,11 +987,12 @@ render a complete scene.
 8. Replace subtree destruction with leaf-only `SceneGraph.destroyNode` and explicit bottom-up system
    teardown. Add transform-preserving reparenting only when a real attachment must outlive its
    source.
-9. Replace patch-owned `instanceData` with baker-keyed immutable instance cohorts. Add the narrow
-   `InstanceStreamManager`, `InstanceStreamResourceKey`, and semantic backend upload contract; make
-   `StaticObjectSystem` reserve, publish, resolve, and release stream keys beside geometry and
-   texture keys. Make instanced static draw units reference geometry and stream keys independently,
-   and put derived instanced vertex-array binding and stale-entry pruning in the renderer.
+9. Replace patch-owned `instanceData` with immutable instance cohorts qualified by their install-set
+   resource namespace. Add the narrow `InstanceStreamManager`, `InstanceStreamResourceKey`, and
+   semantic backend upload contract; make `StaticObjectSystem` reserve, publish, resolve, and release
+   stream keys beside geometry and texture keys. Make instanced static draw units reference geometry
+   and stream keys independently, and put derived instanced vertex-array binding and stale-entry
+   pruning in the renderer.
 10. Make terrain lookup node-based, construct the renderer inside `GameRuntime`, and expose a common
     `frame(time)` API. Delete the runtime's public `RenderWorld` exposure, frontend-created frame
     inputs, superseded runtime presentation maps, and bridging helpers; retain `RenderWorld` only as

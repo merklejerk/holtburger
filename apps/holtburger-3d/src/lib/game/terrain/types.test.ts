@@ -66,7 +66,7 @@ describe("terrain types", () => {
 		]);
 		expect(facts.roadMasks.sourceAssetIds).toEqual(["0x05000004"]);
 		expect(facts.detail).toMatchObject({
-			key: "standalone-texture:terrain-detail:0x05000005",
+			key: "asset-texture:terrain-detail:0x05000005",
 			sourceAssetId: "0x05000005",
 		});
 	});

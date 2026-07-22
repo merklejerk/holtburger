@@ -1,6 +1,7 @@
 import type { RenderGeometryData } from "../renderer/geometry";
 import type {
 	GeometryResourceKey,
+	InstanceStreamResourceKey,
 	RendererResourceManager,
 	RenderResourceKey,
 	Texture2DResourceKey,
@@ -11,6 +12,7 @@ import type {
 } from "../renderer/resource-manager";
 import { GeometryManager } from "./geometry-manager";
 import type { GeometryKey } from "./types";
+import type { StaticInstanceStreamData } from "../systems/static-resources";
 
 /** Create one resident geometry manager for renderer-side logical-resource tests. */
 export function createPublishedGeometryManager(
@@ -34,6 +36,12 @@ const FIXTURE_GEOMETRY: RenderGeometryData = {
 };
 
 class FixtureRendererResourceManager implements RendererResourceManager {
+	createStaticInstanceStream(
+		data: StaticInstanceStreamData,
+	): InstanceStreamResourceKey {
+		void data;
+		return "instance-stream-resource:0";
+	}
 	createGeometry(geometry: RenderGeometryData): GeometryResourceKey {
 		void geometry;
 		return "geometry-resource:0";

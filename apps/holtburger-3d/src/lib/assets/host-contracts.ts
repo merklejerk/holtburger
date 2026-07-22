@@ -36,20 +36,30 @@ export interface HostGeometryDto {
 	readonly bounds: HostAabbDto | null;
 }
 
+/** Lossless DAT surface facts retained before frontend texture placement is assigned. */
+export interface HostMaterialFactsDto {
+	readonly rawSurfaceFlags: number;
+	readonly translucency: number;
+	readonly luminosity: number;
+	readonly diffuseScale: number;
+}
+
 /** Material source before frontend texture placement is assigned. */
-export type HostMaterialDto =
-	| {
-			readonly id: string;
-			readonly kind: "solid-color";
-			readonly color: readonly [number, number, number, number];
-	  }
-	| {
-			readonly id: string;
-			readonly kind: "texture";
-			readonly colorTextureId: string;
-			readonly paletteTextureId: string | null;
-			readonly detailTextureId: string | null;
-	  };
+export type HostMaterialDto = HostMaterialFactsDto &
+	(
+		| {
+				readonly id: string;
+				readonly kind: "solid-color";
+				readonly color: readonly [number, number, number, number];
+		  }
+		| {
+				readonly id: string;
+				readonly kind: "texture";
+				readonly colorTextureId: string;
+				readonly paletteTextureId: string | null;
+				readonly detailTextureId: string | null;
+		  }
+	);
 
 /** One part in a setup-backed object assembly. */
 export interface HostObjectPartDto {
@@ -143,7 +153,8 @@ export interface HostObjectResidentDto {
 	readonly placement: HostMatrix4Dto;
 	readonly envCellId: string | null;
 	readonly scale: HostVec3Dto;
-	readonly bounds: HostAabbDto | null;
+	/** Bounds in the resident object's root-local coordinate space. */
+	readonly localBounds: HostAabbDto | null;
 	readonly appearance: HostObjectAppearanceDto | null;
 	readonly activation: "static" | "dynamic";
 }
@@ -162,7 +173,6 @@ export interface HostCellStructureDto {
 /** A scene residence participating in portal traversal. */
 export type HostPortalGraphResidenceDto =
 	| { readonly kind: "outdoor"; readonly landblockId: string }
-	| { readonly kind: "building"; readonly residentId: string }
 	| { readonly kind: "env-cell"; readonly envCellId: string };
 
 /** One residence node in the host-prepared portal graph. */
@@ -191,7 +201,7 @@ export interface HostPortalApertureDto {
 	readonly kind: "env-cell" | "building-transition";
 	readonly vertices: readonly HostVec3Dto[];
 	readonly indices: readonly number[];
-	readonly bounds: HostAabbDto;
+	readonly landblockBounds: HostAabbDto;
 	readonly visibleSide: "positive" | "negative" | "both";
 }
 
@@ -199,8 +209,10 @@ export interface HostPortalApertureDto {
 export interface HostEnvCellResidentDto {
 	readonly id: string;
 	readonly structureId: string;
-	readonly placement: HostMatrix4Dto;
-	readonly bounds: HostAabbDto;
+	/** Transform from the reusable structure's local frame into the landblock. */
+	readonly structureToLandblock: HostMatrix4Dto;
+	/** Conservative cell extent already expressed in the containing landblock. */
+	readonly landblockBounds: HostAabbDto;
 	readonly materials: readonly HostMaterialDto[];
 	readonly embeddedResidents: readonly HostObjectResidentDto[];
 }

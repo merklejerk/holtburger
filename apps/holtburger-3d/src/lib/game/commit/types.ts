@@ -1,13 +1,5 @@
-import type { EnvCellId, LandblockId } from "../game-types";
-import type { AABB3, Mat4 } from "../math/types";
-import type { ColorF } from "../pixels/types";
-import type { ObjectGeometryData } from "../renderer/geometry";
-import type { ScenePlacement } from "../scene";
-import type {
-	ResolvedObjectResident,
-	ResolvedPortalAperture,
-	ResolvedPortalGraph,
-} from "../resolution/landblock-layer";
+import type { LandblockId } from "../game-types";
+import type { ResolvedObjectResident } from "../resolution/landblock-layer";
 import type {
 	LandblockIdLayer,
 	LandblockLayerKind,
@@ -16,11 +8,9 @@ import type {
 	TexturePageId,
 	TexturePlacement,
 } from "../textures/texture-manager";
-import type {
-	TextureAtlasEntryKey,
-	TextureKey,
-	TexturePurpose,
-} from "../textures/types";
+import type { AssetTextureKey, TexturePurpose } from "../textures/types";
+import type { StaticObjectInstallSet } from "../systems/static-object-system";
+import type { EnvCellSystemArtifact } from "../systems/env-cell-system";
 import type {
 	TerrainGenerationSource,
 	TerrainPresentationSource,
@@ -39,65 +29,17 @@ export enum TextureWrapPolicy {
 	Repeat,
 }
 
-export type ColorTextureVariant =
-	| {
-			directColorTexture: TextureKey;
-	  }
-	| {
-			indexedColorTexture: TextureKey;
-			paletteTexture: TextureKey;
-	  };
-
-export type StaticDrawUnitData = {
-	indexStart: number;
-	indexCount: number;
-	color: ColorF;
-	detailTexture: TextureKey | null;
-	colorWrapS: TextureWrapPolicy;
-	colorWrapT: TextureWrapPolicy;
-} & ColorTextureVariant;
-
-export interface BakedStaticDrawUnitsData {
-	/** Baked landblock-local object/interior geometry. */
-	geometry: ObjectGeometryData;
-	drawUnits: StaticDrawUnitData[];
-}
-
-export type StaticInstancePatchData = {
-	indexStart: number;
-	indexCount: number;
-	detailTexture: TextureKey | null;
-	colorWrapS: TextureWrapPolicy;
-	colorWrapT: TextureWrapPolicy;
-	instanceData: Array<{
-		transform: Mat4;
-		color: ColorF;
-	}>;
-} & ColorTextureVariant;
-
-export interface InstancedStaticData {
-	/** Source-local object geometry shared by all patch instances. */
-	geometry: ObjectGeometryData;
-	patches: StaticInstancePatchData[];
-}
-
-export interface EnvCellInfo {
-	id: EnvCellId;
-	bounds: AABB3;
-	bsp: unknown;
-}
-
 /** Resolved dynamic resident emitted beside a static layer commit. */
 export type DynamicEntityCommit = ResolvedObjectResident;
 
-export type StaticLandblockLayerCommitBuildings = BakedStaticDrawUnitsData;
-export type StaticLandblockLayerCommitObjects = BakedStaticDrawUnitsData;
-export type StaticLandblockLayerCommitGenerated = InstancedStaticData;
-export interface StaticLandblockLayerCommitEnvCells {
-	readonly cells: readonly EnvCellInfo[];
-	readonly cellDrawUnits: ReadonlyMap<EnvCellId, BakedStaticDrawUnitsData>;
-	readonly portalGraph: ResolvedPortalGraph;
-	readonly portalApertures: readonly ResolvedPortalAperture[];
+/** Immutable object residents installed by their typed domain system. */
+export interface StaticObjectLayerCommit {
+	readonly staticObjects: StaticObjectInstallSet;
+}
+
+/** Topology and shell publication kept separate from embedded object residents. */
+export interface EnvCellLayerCommit extends StaticObjectLayerCommit {
+	readonly environment: EnvCellSystemArtifact;
 }
 
 export interface TexturePageCommit {
@@ -107,7 +49,7 @@ export interface TexturePageCommit {
 	purpose: TexturePurpose;
 	pageBits: Uint8Array;
 	textures: Array<{
-		key: TextureAtlasEntryKey;
+		key: AssetTextureKey;
 		placement: TexturePlacement;
 	}>;
 }
@@ -132,33 +74,30 @@ export interface CommitBundleLandblockLayerFields<
 export interface CommitBundleSpawnFields {
 	kind: CommitBundleSourceKind.Spawned;
 	id: string;
-	/** Root placement facts required before the spawned node can enter the graph. */
-	placement: ScenePlacement;
-	commit: unknown;
+	/** Resolved entity routed through the same dynamic-system path as authored residents. */
+	commit: DynamicEntityCommit;
 }
 
-export type CommitBundle = {
-	texturePages: TexturePageCommit[];
-} & (
+export type CommitBundle = {} & (
 	| CommitBundleLandblockLayerFields<
 			LandblockLayerKind.Terrain,
 			StaticLandblockLayerCommitTerrain
 	  >
 	| CommitBundleLandblockLayerFields<
 			LandblockLayerKind.Buildings,
-			StaticLandblockLayerCommitBuildings
+			StaticObjectLayerCommit
 	  >
 	| CommitBundleLandblockLayerFields<
 			LandblockLayerKind.Objects,
-			StaticLandblockLayerCommitObjects
+			StaticObjectLayerCommit
 	  >
 	| CommitBundleLandblockLayerFields<
 			LandblockLayerKind.Generated,
-			StaticLandblockLayerCommitGenerated
+			StaticObjectLayerCommit
 	  >
 	| CommitBundleLandblockLayerFields<
 			LandblockLayerKind.EnvCells,
-			StaticLandblockLayerCommitEnvCells
+			EnvCellLayerCommit
 	  >
 	| CommitBundleSpawnFields
 );

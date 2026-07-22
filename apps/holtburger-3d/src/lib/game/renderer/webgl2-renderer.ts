@@ -139,18 +139,27 @@ export class WebGL2Renderer implements Renderer {
 		camera: FrameViewInput["camera"],
 		anchorLandblockId: FrameInput["anchorLandblockId"],
 	): readonly TerrainFrameInput[] {
-		const landblockIds = new Set(
-			this.#world
-				.queryVisibleScene(camera)
-				.entries.map(({ placement }) => placement.landblockId),
-		);
 		const terrain: TerrainFrameInput[] = [];
-		for (const landblockId of landblockIds) {
-			const drawUnit = this.#world.resolveTerrainDrawUnit(
-				landblockId,
+		const visible = this.#world.queryVisibleScene(camera);
+		for (const { nodeId } of visible.entries) {
+			const contribution = this.#world.getRenderContribution(
+				nodeId,
 				anchorLandblockId,
 			);
-			if (!drawUnit) continue;
+			if (!contribution) continue;
+			if (contribution.kind === "static-object") {
+				void this.#world.resolveStaticObjectRenderable(contribution.renderable);
+				continue;
+			}
+			if (contribution.kind === "dynamic") {
+				void this.#world.resolveDynamicRenderable(contribution.renderable);
+				continue;
+			}
+			if (contribution.kind === "env-cell") {
+				void this.#world.resolveEnvCellRenderable(contribution.renderable);
+				continue;
+			}
+			const { drawUnit } = contribution;
 			terrain.push({
 				drawUnit,
 				program: {
@@ -169,6 +178,10 @@ export class WebGL2Renderer implements Renderer {
 					},
 				},
 			});
+		}
+		for (const crossing of visible.crossings) {
+			const drawUnit = this.#world.getPortalDrawUnit(crossing.aperture.id);
+			if (drawUnit) void this.#world.resolvePortalDrawUnit(drawUnit);
 		}
 		return terrain;
 	}

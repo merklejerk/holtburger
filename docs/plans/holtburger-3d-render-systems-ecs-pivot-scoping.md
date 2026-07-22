@@ -1,7 +1,8 @@
 # Holtburger 3D Scene Systems ECS Pivot Scoping
 
-Status: Draft architecture scope. This describes the direction future stubs should telegraph; it
-is not a commitment to an ECS framework or a complete renderer implementation.
+Status: Completed stub cutover. The typed-system, resource, scoped-query, and runtime-frame
+boundaries described here are now represented in source. This is not a commitment to an ECS
+framework or a complete renderer implementation.
 
 ## Goal And Boundaries
 
@@ -1025,6 +1026,66 @@ source-only terrain commit
 
 Filling in host resolution, worker generation, and the terrain GLSL program may remain afterward.
 No additional terrain owner, draw-unit shape, resource identity, or runtime bridge should be needed.
+
+## Implementation Progress
+
+2026-07-22:
+
+- Completed the first architectural cut: `TerrainService` is now `TerrainSystem`; concrete
+  static-object, dynamic rigid-part, animation, env-cell, portal, and terrain-attachment component
+  shapes are keyed by `SceneNodeId` outside `SceneGraph`.
+- Replaced layer-owned static node creation with `StaticObjectSystem`. Static commit contracts now
+  carry `StaticObjectInstallSet`, including a pipeline-assigned installation namespace, object-local
+  bounds, geometry sources, and texture pages. `GameRuntime` routes installation/removal instead of
+  inferring static roots from a layer kind.
+- Added `DynamicEntitySystem` and a runtime-owned dynamic visual-preparation boundary. It creates an
+  entity root and transform-only part children, retains `partIndex` mappings, and accepts poses from
+  the separate `AnimationSystem`. The current inline preparer is deliberately a contract-preserving
+  stand-in for the future worker protocol; it is not a claim that dynamic preparation is production
+  ready.
+- Added `EnvCellSystem`, concrete env-cell scopes/crossings in `SceneGraph`, unresolved env-cell
+  residency suppression/reindexing, and explicit leaf-only scene-node destruction. Source contracts
+  now distinguish object `localBounds`, env-cell `structureToLandblock`/`landblockBounds`, and portal
+  `landblockBounds`; the obsolete building query-residence variant was removed.
+- `GameRuntime` now constructs and privately owns the renderer through the device boundary and offers
+  `frame(timeSeconds)`. Explorer no longer receives `RenderWorld`, constructs frame input, or invokes
+  `WebGL2Renderer.drawFrame` directly.
+
+Decisions and concessions:
+
+- The current static baker and host layer command are intentionally unimplemented, so env-cell
+  artifact assembly and portal rendering are represented by typed contracts rather than fabricated
+  runtime data. No placeholder identity env-cell root remains in runtime.
+- The cutover exposed a pre-existing Svelte diagnostic in `FrameMetricsOverlay.svelte` (`frameMs` on
+  `never`). TypeScript and focused subsystem checks pass; the app-wide Svelte check remains blocked
+  by that unrelated diagnostic.
+- Completed the persistent instance-stream contract: `InstanceStreamManager` retains immutable
+  namespaced cohorts, the backend accepts semantic stream data, and `StaticObjectSystem` publishes
+  and releases them beside geometry and textures. Renderer vertex-array caching is intentionally
+  deferred until an instanced program consumes the stream, but the ownership boundary is now fixed.
+- Completed the DAT two-dimensional logical-key cutover. `AssetTextureKey` replaces atlas-entry and
+  standalone identities; texture pages atomically supersede a degenerate prepared binding, while
+  late preparation completion observes the packed-preferred binding and avoids another allocation.
+- Completed the host/resolution material-fact cutover. Material DTOs now preserve raw surface flags,
+  translucency, luminosity, and diffuse scale. Static draw bindings carry the source material plus
+  polygon-owned sidedness/surface/stipple facts, leaving pass selection private to the renderer.
+- Completed terrain's node attachment cutover. `TerrainSystem` creates/removes its own stable root,
+  retains node-to-landblock attachment internally, and exposes node-based draw-unit selection. The
+  runtime's generic scene-node lease registry and root-creation helpers were removed.
+- Replaced the global visibility stub with an origin-scoped conservative frustum query. Env-cell
+  traversal follows directed scene crossings with cycle protection; outdoor residents remain
+  landblock-local but visible across the outdoor domain. `RenderWorld` now resolves a visible node
+  to a concrete static, dynamic, env-cell, or terrain contribution before renderer policy chooses a
+  program/pass.
+- Completed the renderer-side resource-resolution boundary for every contribution. Static draws
+  resolve geometry plus an optional immutable instance stream; dynamic and cell-shell draws resolve
+  geometry; portal draws resolve geometry by aperture identity; terrain retains its complete program
+  input path. The current WebGL renderer deliberately does not issue static/dynamic/cell/portal draw
+  calls because their programs and pass policy are production-rendering work outside this cutover;
+  it nevertheless collects and resolves each typed contribution through the final logical boundary.
+- Formatting was applied to every cutover-touched source file. The repository-wide Prettier check
+  still reports pre-existing drift in unrelated app/scripts files, so it is not currently a usable
+  completion gate without expanding the change scope.
 
 ## Guardrails
 

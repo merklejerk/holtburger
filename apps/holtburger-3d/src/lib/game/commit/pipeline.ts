@@ -11,22 +11,26 @@ import {
 	type LandblockIdLayer,
 } from "../runtime/scene-interest";
 import type { TexturePlacement } from "../textures/texture-manager";
-import type { TextureAtlasEntryKey } from "../textures/types";
+import type { AssetTextureKey } from "../textures/types";
 import {
 	CommitBundleSourceKind,
 	type CommitBundle,
 	type CommitPipeline,
-	type StaticLandblockLayerCommitBuildings,
-	type StaticLandblockLayerCommitEnvCells,
-	type StaticLandblockLayerCommitGenerated,
-	type StaticLandblockLayerCommitObjects,
+	type StaticObjectLayerCommit,
+	type EnvCellLayerCommit,
 	type StaticLandblockLayerCommitTerrain,
+	type TexturePageCommit,
 } from "./types";
+import {
+	createStaticInstallResourceNamespace,
+	type StaticInstallResourceNamespace,
+} from "../systems/static-resources";
+import type { StaticObjectInstallSet } from "../systems/static-object-system";
 
 /** One source texture assigned a stable page key and placement. */
 interface PlannedTexturePlacement {
 	readonly sourceAssetId: DatAssetId;
-	readonly textureKey: TextureAtlasEntryKey;
+	readonly textureKey: AssetTextureKey;
 	readonly placement: TexturePlacement;
 }
 
@@ -39,28 +43,30 @@ interface TexturePlacementPlan {
 type BakedStaticLayer =
 	| {
 			readonly kind: LandblockLayerKind.Buildings;
-			readonly commit: StaticLandblockLayerCommitBuildings;
+			readonly installSet: Omit<StaticObjectInstallSet, "texturePages">;
 	  }
 	| {
 			readonly kind: LandblockLayerKind.Objects;
-			readonly commit: StaticLandblockLayerCommitObjects;
+			readonly installSet: Omit<StaticObjectInstallSet, "texturePages">;
 	  }
 	| {
 			readonly kind: LandblockLayerKind.Generated;
-			readonly commit: StaticLandblockLayerCommitGenerated;
+			readonly installSet: Omit<StaticObjectInstallSet, "texturePages">;
 	  }
 	| {
 			readonly kind: LandblockLayerKind.EnvCells;
-			readonly commit: StaticLandblockLayerCommitEnvCells;
+			readonly installSet: Omit<StaticObjectInstallSet, "texturePages">;
+			readonly environment: EnvCellLayerCommit["environment"];
 	  };
 
 /** Texture pages prepared alongside one layer commit. */
 interface PreparedTexturePages {
-	readonly pages: CommitBundle["texturePages"];
+	readonly pages: readonly TexturePageCommit[];
 }
 
 export class StandardCommitPipeline implements CommitPipeline {
 	readonly #hostAssets: AssetBridge;
+	#nextStaticInstallationId = 0;
 
 	protected constructor(hostAssets: AssetBridge) {
 		this.#hostAssets = hostAssets;
@@ -95,7 +101,6 @@ export class StandardCommitPipeline implements CommitPipeline {
 
 	#prepareTerrainLayer(source: ResolvedTerrainLayerSource): CommitBundle {
 		return {
-			texturePages: [],
 			commit: this.#createTerrainSourceCommit(source),
 			dynamicEntities: [],
 			kind: CommitBundleSourceKind.LandblockLayer,
@@ -108,8 +113,9 @@ export class StandardCommitPipeline implements CommitPipeline {
 		source: ResolvedObjectLayerSource | ResolvedEnvCellLayerSource,
 	): Promise<CommitBundle> {
 		const texturePlan = await this.#planTexturePlacement(source);
+		const resourceNamespace = this.#allocateStaticInstallResourceNamespace();
 		const [baked, texturePages] = await Promise.all([
-			this.#bakeStaticLayer(source, texturePlan),
+			this.#bakeStaticLayer(source, texturePlan, resourceNamespace),
 			this.#buildTexturePages(texturePlan),
 		]);
 
@@ -136,10 +142,12 @@ export class StandardCommitPipeline implements CommitPipeline {
 	async #bakeStaticLayer(
 		source: ResolvedObjectLayerSource | ResolvedEnvCellLayerSource,
 		texturePlan: TexturePlacementPlan,
+		resourceNamespace: StaticInstallResourceNamespace,
 	): Promise<BakedStaticLayer> {
 		// Dispatch to object, instanced-scenery, building, or env-cell bakers.
 		void source;
 		void texturePlan;
+		void resourceNamespace;
 		throw new Error("Static layer baking is not implemented.");
 	}
 
@@ -163,21 +171,45 @@ export class StandardCommitPipeline implements CommitPipeline {
 		}
 
 		const fields = {
-			texturePages: texturePages.pages,
 			dynamicEntities: source.dynamicResidents,
 			kind: CommitBundleSourceKind.LandblockLayer as const,
 			landblockId: source.landblockId,
 		};
 		switch (baked.kind) {
-			case LandblockLayerKind.Buildings:
-				return { ...fields, commit: baked.commit, layer: baked.kind };
-			case LandblockLayerKind.Objects:
-				return { ...fields, commit: baked.commit, layer: baked.kind };
-			case LandblockLayerKind.Generated:
-				return { ...fields, commit: baked.commit, layer: baked.kind };
 			case LandblockLayerKind.EnvCells:
-				return { ...fields, commit: baked.commit, layer: baked.kind };
+				return {
+					...fields,
+					commit: {
+						environment: baked.environment,
+						staticObjects: {
+							...baked.installSet,
+							texturePages: texturePages.pages,
+						},
+					} satisfies EnvCellLayerCommit,
+					layer: baked.kind,
+				};
+			case LandblockLayerKind.Buildings:
+			case LandblockLayerKind.Objects:
+			case LandblockLayerKind.Generated:
+				return {
+					...fields,
+					commit: {
+						staticObjects: {
+							...baked.installSet,
+							texturePages: texturePages.pages,
+						},
+					} satisfies StaticObjectLayerCommit,
+					layer: baked.kind,
+				};
 		}
+	}
+
+	#allocateStaticInstallResourceNamespace(): StaticInstallResourceNamespace {
+		const namespace = createStaticInstallResourceNamespace(
+			this.#nextStaticInstallationId,
+		);
+		this.#nextStaticInstallationId += 1;
+		return namespace;
 	}
 }
 

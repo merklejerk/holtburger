@@ -13,8 +13,7 @@ import {
 	type Texture2DUpload,
 } from "../renderer/resource-manager";
 import {
-	createAtlasEntryKey,
-	createStandaloneTextureKey,
+	createAssetTextureKey,
 	createTerrainSurfaceTextureKey,
 	createTextureArrayKey,
 	type TextureFact,
@@ -38,7 +37,7 @@ const ARRAY_KEY = createTextureArrayKey(
 	TexturePurpose.TerrainColor,
 	"region:dereth",
 );
-const STANDALONE_KEY = createStandaloneTextureKey(
+const STANDALONE_KEY = createAssetTextureKey(
 	TexturePurpose.TerrainDetail,
 	"0x05000004",
 );
@@ -49,7 +48,7 @@ const ARRAY_FACT: TextureFact = {
 	sourceAssetIds: ["0x05000001", "0x05000002"],
 };
 const STANDALONE_FACT: TextureFact = {
-	kind: "standalone",
+	kind: "asset",
 	key: STANDALONE_KEY,
 	purpose: TexturePurpose.TerrainDetail,
 	sourceAssetId: "0x05000004",
@@ -169,10 +168,9 @@ function createPage(): TexturePageDescription {
 		purpose: TexturePurpose.ObjectDirectColor,
 		textures: [
 			{
-				key: createAtlasEntryKey(
+				key: createAssetTextureKey(
 					TexturePurpose.ObjectDirectColor,
 					"0x05000003",
-					WRAPPED_ATLAS_PREPARATION,
 				),
 				placement: {
 					bounds: new AABB2(new Vec2(0, 0), new Vec2(2, 2)),
@@ -192,7 +190,7 @@ function createPixels(firstByte = 0): Uint8Array {
 
 class FixtureTexturePreparer implements TexturePreparer {
 	prepare(fact: TextureFact) {
-		if (fact.kind === "standalone") {
+		if (fact.kind === "asset") {
 			return Promise.resolve({
 				height: 2,
 				key: fact.key,

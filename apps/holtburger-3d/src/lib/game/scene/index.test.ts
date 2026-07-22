@@ -53,6 +53,7 @@ describe("SceneGraph", () => {
 			envCellId: rootPlacement.envCellId,
 			landblockId: rootPlacement.landblockId,
 			localToLandblock: rootPlacement.localTransform,
+			scope: { kind: "outdoor", landblockId: rootPlacement.landblockId },
 		});
 	});
 
@@ -99,14 +100,24 @@ describe("SceneGraph", () => {
 		});
 
 		expect(
-			scene.updateVisibility(camera).entries.map(({ nodeId }) => nodeId),
+			scene
+				.queryFrustum(camera, {
+					kind: "outdoor",
+					landblockId: camera.placement.landblockId,
+				})
+				.entries.map(({ nodeId }) => nodeId),
 		).toEqual([childId]);
 
 		scene.updateBounds(childId, null);
-		expect(scene.updateVisibility(camera).entries).toEqual([]);
+		expect(
+			scene.queryFrustum(camera, {
+				kind: "outdoor",
+				landblockId: camera.placement.landblockId,
+			}).entries,
+		).toEqual([]);
 	});
 
-	it("destroys transform descendants with their parent", () => {
+	it("requires systems to destroy transform trees from leaves to roots", () => {
 		const scene = new SceneGraph();
 		const rootId = scene.createNode(rootInput);
 		const childId = scene.createNode({
@@ -118,14 +129,19 @@ describe("SceneGraph", () => {
 			parentId: childId,
 		});
 
-		const destroyed = scene.destroyNode(rootId);
-		expect(new Set(destroyed)).toEqual(
-			new Set([rootId, childId, grandchildId]),
-		);
-		expect(scene.updateVisibility(camera).entries).toEqual([]);
+		expect(() => scene.destroyNode(rootId)).toThrow("still has children");
+		scene.destroyNode(grandchildId);
+		scene.destroyNode(childId);
+		scene.destroyNode(rootId);
+		expect(
+			scene.queryFrustum(camera, {
+				kind: "outdoor",
+				landblockId: camera.placement.landblockId,
+			}).entries,
+		).toEqual([]);
 	});
 
-	it("rejects destruction of a parented node", () => {
+	it("permits destruction of parented leaves", () => {
 		const scene = new SceneGraph();
 		const rootId = scene.createNode(rootInput);
 		const childId = scene.createNode({
@@ -133,11 +149,9 @@ describe("SceneGraph", () => {
 			parentId: rootId,
 		});
 
-		expect(() => scene.destroyNode(childId)).toThrow(
-			`Cannot destroy parented scene node ${childId}.`,
-		);
+		scene.destroyNode(childId);
 		expect(scene.getNode(rootId)).toBeDefined();
-		expect(scene.getNode(childId)).toBeDefined();
+		expect(scene.getNode(childId)).toBeUndefined();
 	});
 
 	it("reindexes descendants when root residency changes", () => {
@@ -154,12 +168,33 @@ describe("SceneGraph", () => {
 		};
 
 		scene.updateRootPlacement(rootId, envCellPlacement);
+		scene.upsertEnvCellScope({
+			landblockBounds: null,
+			potentiallyVisibleEnvCellIds: new Set(),
+			scope: {
+				envCellId: envCellPlacement.envCellId,
+				kind: "env-cell",
+				landblockId: envCellPlacement.landblockId,
+			},
+		});
 
 		expect(scene.getNode(rootId)?.id).toBe(rootId);
-		expect(visibleEntry(scene, childId).placement).toEqual({
+		const envEntry = scene
+			.queryFrustum(camera, {
+				envCellId: envCellPlacement.envCellId,
+				kind: "env-cell",
+				landblockId: envCellPlacement.landblockId,
+			})
+			.entries.find(({ nodeId }) => nodeId === childId);
+		expect(envEntry?.placement).toEqual({
 			envCellId: envCellPlacement.envCellId,
 			landblockId: envCellPlacement.landblockId,
 			localToLandblock: envCellPlacement.localTransform,
+			scope: {
+				envCellId: envCellPlacement.envCellId,
+				kind: "env-cell",
+				landblockId: envCellPlacement.landblockId,
+			},
 		});
 	});
 
@@ -180,7 +215,10 @@ function visibleEntry(
 	nodeId: SceneNodeId,
 ): VisibleSceneEntry {
 	const entry = scene
-		.updateVisibility(camera)
+		.queryFrustum(camera, {
+			kind: "outdoor",
+			landblockId: camera.placement.landblockId,
+		})
 		.entries.find((candidate) => candidate.nodeId === nodeId);
 	if (!entry) throw new Error(`Scene node ${nodeId} is not visible.`);
 	return entry;

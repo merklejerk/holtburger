@@ -1,5 +1,7 @@
 import { log, LogLevel } from "../../logs";
 import type { LandblockId } from "../game-types";
+import type { AABB3 } from "../math/types";
+import type { SceneGraph, SceneNodeId, ScenePlacement } from "../scene";
 import type { GeometryManager } from "../geometry/geometry-manager";
 import {
 	createTerrainGeometryKey,
@@ -72,8 +74,16 @@ type TerrainInstallation<TOwnerId extends string> =
 	| FailedTerrainInstallation<TOwnerId>
 	| RealizedTerrainInstallation<TOwnerId>;
 
+/** Complete source and spatial publication for one interested terrain layer. */
+export interface TerrainSystemArtifact {
+	readonly placement: ScenePlacement;
+	/** Landblock-local bounds paired with terrain's identity root transform. */
+	readonly localBounds: AABB3;
+	readonly source: TerrainSourceInstallation;
+}
+
 /** Owns terrain generation state, generated geometry, and frame-time variant selection. */
-export class TerrainService<
+export class TerrainSystem<
 	TManagerOwnerId extends string = string,
 	TOwnerId extends TManagerOwnerId = TManagerOwnerId,
 > {
@@ -82,6 +92,9 @@ export class TerrainService<
 	readonly #textures: TextureManager<TManagerOwnerId>;
 	/** Creates a private geometry/texture lease owner for each installed source. */
 	readonly #ownerForLandblock: (landblockId: LandblockId) => TOwnerId;
+	readonly #scene: SceneGraph;
+	readonly #nodes = new Map<TOwnerId, SceneNodeId>();
+	readonly #nodeLandblocks = new Map<SceneNodeId, LandblockId>();
 	readonly #installations = new Map<
 		LandblockId,
 		TerrainInstallation<TOwnerId>
@@ -89,22 +102,53 @@ export class TerrainService<
 	#destroyed = false;
 
 	constructor(
+		scene: SceneGraph,
 		generator: TerrainGenerator,
 		geometry: GeometryManager<TManagerOwnerId>,
 		textures: TextureManager<TManagerOwnerId>,
 		ownerForLandblock: (landblockId: LandblockId) => TOwnerId,
 	) {
+		this.#scene = scene;
 		this.#generator = generator;
 		this.#geometry = geometry;
 		this.#textures = textures;
 		this.#ownerForLandblock = ownerForLandblock;
 	}
 
+	/** Install one terrain source and its stable scene attachment. */
+	install(ownerId: TOwnerId, artifact: TerrainSystemArtifact): SceneNodeId {
+		const existing = this.#nodes.get(ownerId);
+		if (existing) return existing;
+		this.removeOwner(ownerId);
+		this.#installSource(artifact.source);
+		const nodeId = this.#scene.createNode({
+			...artifact.placement,
+			localBounds: artifact.localBounds,
+			parentId: null,
+		});
+		this.#nodes.set(ownerId, nodeId);
+		this.#nodeLandblocks.set(nodeId, artifact.source.landblockId);
+		return nodeId;
+	}
+
+	/** Drop one installation, including its owned node and retained source resources. */
+	removeOwner(ownerId: TOwnerId): void {
+		const nodeId = this.#nodes.get(ownerId);
+		if (!nodeId) return;
+		const landblockId = this.#nodeLandblocks.get(nodeId);
+		if (!landblockId)
+			throw new Error(`Terrain node ${nodeId} has no landblock.`);
+		this.#scene.destroyNode(nodeId);
+		this.#nodes.delete(ownerId);
+		this.#nodeLandblocks.delete(nodeId);
+		this.#removeSource(landblockId);
+	}
+
 	/** Reserve a newly interested source's resources and start one generation operation. */
-	installSource(input: TerrainSourceInstallation): void {
+	#installSource(input: TerrainSourceInstallation): void {
 		if (this.#destroyed) {
 			throw new Error(
-				"Cannot install terrain after TerrainService is destroyed.",
+				"Cannot install terrain after TerrainSystem is destroyed.",
 			);
 		}
 		if (this.#installations.has(input.landblockId)) return;
@@ -126,7 +170,7 @@ export class TerrainService<
 	}
 
 	/** Drop one terrain source and release resources retained by its layer owner. */
-	removeSource(landblockId: LandblockId): void {
+	#removeSource(landblockId: LandblockId): void {
 		const installation = this.#installations.get(landblockId);
 		if (!installation) return;
 		this.#installations.delete(landblockId);
@@ -135,9 +179,11 @@ export class TerrainService<
 
 	/** Select one already-realized terrain draw unit for a visible landblock. */
 	getDrawUnit(
-		landblockId: LandblockId,
+		nodeId: SceneNodeId,
 		anchorLandblockId: LandblockId,
 	): TerrainDrawUnit | null {
+		const landblockId = this.#nodeLandblocks.get(nodeId);
+		if (!landblockId) return null;
 		const installation = this.#installations.get(landblockId);
 		if (!installation || installation.kind !== "realized") return null;
 
@@ -181,10 +227,12 @@ export class TerrainService<
 	async destroy(): Promise<void> {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
-		for (const installation of this.#installations.values()) {
+		for (const ownerId of [...this.#nodes.keys()]) this.removeOwner(ownerId);
+		for (const installation of this.#installations.values())
 			this.#releaseSourceResources(installation.source);
-		}
 		this.#installations.clear();
+		this.#nodes.clear();
+		this.#nodeLandblocks.clear();
 	}
 
 	async #generateAndRealize(

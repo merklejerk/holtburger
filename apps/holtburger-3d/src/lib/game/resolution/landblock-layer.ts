@@ -19,7 +19,8 @@ export interface ResolvedObjectResident {
 	readonly presentation: ResolvedObjectPresentation;
 	readonly placement: ScenePlacement;
 	readonly scale: Vec3;
-	readonly bounds: AABB3 | null;
+	/** Bounds in the object's root-local coordinate space. */
+	readonly localBounds: AABB3 | null;
 	readonly appearance: ResolvedObjectAppearance | null;
 }
 
@@ -38,8 +39,10 @@ export interface ResolvedCellStructure {
 export interface ResolvedEnvCellPresentation {
 	readonly id: EnvCellId;
 	readonly structure: ResolvedCellStructure;
-	readonly placement: ScenePlacement;
-	readonly bounds: AABB3;
+	/** Structure-local transform into the containing landblock. */
+	readonly structureToLandblock: ScenePlacement;
+	/** Conservative cell extent already expressed in the containing landblock. */
+	readonly landblockBounds: AABB3;
 	readonly materials: readonly ResolvedMaterial[];
 	readonly embeddedStatics: readonly ResolvedObjectResident[];
 }
@@ -56,7 +59,6 @@ export type PortalApertureId = `portal-aperture:${string}`;
 /** A scene residence participating in portal traversal. */
 export type ResolvedPortalGraphResidence =
 	| { readonly kind: "outdoor"; readonly landblockId: LandblockId }
-	| { readonly kind: "building"; readonly residentId: string }
 	| { readonly kind: "env-cell"; readonly envCellId: EnvCellId };
 
 /** One residence node in the canonical portal graph. */
@@ -85,7 +87,7 @@ export interface ResolvedPortalAperture {
 	readonly kind: "env-cell" | "building-transition";
 	readonly vertices: Float32Array;
 	readonly indices: Uint32Array;
-	readonly bounds: AABB3;
+	readonly landblockBounds: AABB3;
 	readonly visibleSide: "positive" | "negative" | "both";
 }
 

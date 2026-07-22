@@ -11,10 +11,9 @@ import type { DatAssetId } from "../game-types";
 import type { TexturePreparer } from "./texture-preparer";
 import {
 	type GeneratedTextureKey,
-	type StandaloneTextureFact,
-	type StandaloneTextureKey,
+	type AssetTextureFact,
+	type AssetTextureKey,
 	type TextureArrayFact,
-	type TextureAtlasEntryKey,
 	type TextureArrayKey,
 	type TextureKey,
 	type TextureFact,
@@ -22,8 +21,8 @@ import {
 	type TexturePurpose,
 	isTextureArrayKey,
 	isGeneratedTextureKey,
-	isStandaloneTextureKey,
-	standaloneTextureKeyMatchesSource,
+	isAssetTextureKey,
+	assetTextureKeyMatchesSource,
 	textureArrayKeyMatchesPurpose,
 	texturePurposePolicy,
 } from "./types";
@@ -45,7 +44,7 @@ export interface TexturePageDescription {
 	readonly height: number;
 	readonly pageBits: Uint8Array;
 	readonly textures: readonly {
-		readonly key: TextureAtlasEntryKey;
+		readonly key: AssetTextureKey;
 		readonly placement: TexturePlacement;
 	}[];
 }
@@ -69,9 +68,9 @@ export interface TextureArraySource {
 }
 
 /** Complete immutable source used to create one unpacked texture atomically. */
-export interface StandaloneTextureSource {
+export interface AssetTextureSource {
 	/** Logical identity derived from source and purpose. */
-	readonly key: StandaloneTextureKey;
+	readonly key: AssetTextureKey;
 	/** DAT texture represented by this complete resource. */
 	readonly sourceAssetId: DatAssetId;
 	/** Semantic use that fixes device format and mip policy. */
@@ -104,7 +103,7 @@ interface PackedTexturePage {
 	readonly purpose: TexturePurpose;
 	readonly width: number;
 	readonly height: number;
-	readonly textures: Map<TextureAtlasEntryKey, TexturePlacement>;
+	readonly textures: Map<AssetTextureKey, TexturePlacement>;
 	readonly resource: Texture2DResourceKey;
 }
 
@@ -113,11 +112,11 @@ export class TextureManager<TOwnerId extends string = string> {
 	readonly #renderResources: RendererResourceManager;
 	readonly #preparer: TexturePreparer;
 	readonly #leases = new LeaseRegistry<TOwnerId, TextureKey>();
-	readonly #atlasOwners = new Map<TextureAtlasEntryKey, TexturePageId>();
+	readonly #atlasOwners = new Map<AssetTextureKey, TexturePageId>();
 	readonly #atlasPages = new Map<TexturePageId, PackedTexturePage>();
 	/** Complete standalone and generated two-dimensional device resources by logical key. */
 	readonly #texture2DResources = new Map<
-		StandaloneTextureKey | GeneratedTextureKey,
+		AssetTextureKey | GeneratedTextureKey,
 		Texture2DResourceKey
 	>();
 	/** Complete texture-array resources and their DAT-source layer assignments. */
@@ -257,6 +256,16 @@ export class TextureManager<TOwnerId extends string = string> {
 			description.textures.map(({ key, placement }) => [key, placement]),
 		);
 		for (const key of textures.keys()) this.#atlasOwners.set(key, id);
+		for (const key of textures.keys()) {
+			const degenerate = this.#texture2DResources.get(key);
+			if (!degenerate) continue;
+			this.#texture2DResources.delete(key);
+			if (!this.#renderResources.releaseResource(degenerate)) {
+				throw new Error(
+					`Packed texture ${key} lost its replaced degenerate binding.`,
+				);
+			}
+		}
 		this.#atlasPages.set(id, {
 			height: description.height,
 			purpose: description.purpose,
@@ -267,8 +276,9 @@ export class TextureManager<TOwnerId extends string = string> {
 		return existing === undefined;
 	}
 
-	#createStandaloneTexture(source: StandaloneTextureSource): void {
-		validateStandaloneTextureSource(source);
+	#createAssetTexture(source: AssetTextureSource): void {
+		validateAssetTextureSource(source);
+		if (this.#atlasOwners.has(source.key)) return;
 		if (this.#texture2DResources.has(source.key)) return;
 
 		const resource = this.#renderResources.createTexture2D(
@@ -310,7 +320,7 @@ export class TextureManager<TOwnerId extends string = string> {
 		});
 	}
 
-	getAtlasBinding(texture: TextureAtlasEntryKey): TextureAtlasBinding {
+	getAtlasBinding(texture: AssetTextureKey): TextureAtlasBinding {
 		const pageId = this.#atlasOwners.get(texture);
 		if (pageId === undefined) {
 			throw new Error(`Texture ${texture} does not have an atlas binding.`);
@@ -324,8 +334,12 @@ export class TextureManager<TOwnerId extends string = string> {
 	}
 
 	getTexture2DResource(
-		key: StandaloneTextureKey | GeneratedTextureKey,
+		key: AssetTextureKey | GeneratedTextureKey,
 	): Texture2DResourceKey {
+		if (isAssetTextureKey(key)) {
+			const packed = this.#atlasOwners.get(key);
+			if (packed !== undefined) return this.getAtlasBinding(key).resource;
+		}
 		const texture = this.#texture2DResources.get(key);
 		if (!texture) throw new Error(`Texture ${key} does not exist.`);
 		return texture;
@@ -340,7 +354,10 @@ export class TextureManager<TOwnerId extends string = string> {
 	/** Check whether a complete logical texture is currently device-backed. */
 	hasTexture(key: TextureKey): boolean {
 		if (isTextureArrayKey(key)) return this.#textureArrays.has(key);
-		if (isStandaloneTextureKey(key) || isGeneratedTextureKey(key)) {
+		if (isAssetTextureKey(key)) {
+			return this.#atlasOwners.has(key) || this.#texture2DResources.has(key);
+		}
+		if (isGeneratedTextureKey(key)) {
 			return this.#texture2DResources.has(key);
 		}
 		return this.#atlasOwners.has(key);
@@ -348,10 +365,15 @@ export class TextureManager<TOwnerId extends string = string> {
 
 	#releaseTexture(key: TextureKey): boolean {
 		if (isTextureArrayKey(key)) return this.#releaseTextureArray(key);
-		if (isStandaloneTextureKey(key) || isGeneratedTextureKey(key)) {
+		if (isAssetTextureKey(key)) {
+			return this.#atlasOwners.has(key)
+				? this.#releaseAtlasTexture(key)
+				: this.#releaseTexture2D(key);
+		}
+		if (isGeneratedTextureKey(key)) {
 			return this.#releaseTexture2D(key);
 		}
-		return this.#releaseAtlasTexture(key);
+		throw new Error(`Unknown texture key ${key}.`);
 	}
 
 	async #materialize(fact: TextureFact): Promise<void> {
@@ -362,14 +384,14 @@ export class TextureManager<TOwnerId extends string = string> {
 			this.#validatePreparedArraySource(fact, source);
 			this.#createTextureArray(source);
 		} else {
-			this.#validatePreparedStandaloneSource(fact, source);
-			this.#createStandaloneTexture(source);
+			this.#validatePreparedAssetSource(fact, source);
+			this.#createAssetTexture(source);
 		}
 	}
 
 	#validatePreparedArraySource(
 		fact: TextureArrayFact,
-		source: TextureArraySource | StandaloneTextureSource,
+		source: TextureArraySource | AssetTextureSource,
 	): asserts source is TextureArraySource {
 		if (source.key !== fact.key || source.purpose !== fact.purpose) {
 			throw new Error(
@@ -377,9 +399,7 @@ export class TextureManager<TOwnerId extends string = string> {
 			);
 		}
 		if (!("layers" in source)) {
-			throw new Error(
-				`Texture preparer returned standalone data for ${fact.key}.`,
-			);
+			throw new Error(`Texture preparer returned asset data for ${fact.key}.`);
 		}
 		if (
 			source.layers.length !== fact.sourceAssetIds.length ||
@@ -393,10 +413,10 @@ export class TextureManager<TOwnerId extends string = string> {
 		}
 	}
 
-	#validatePreparedStandaloneSource(
-		fact: StandaloneTextureFact,
-		source: TextureArraySource | StandaloneTextureSource,
-	): asserts source is StandaloneTextureSource {
+	#validatePreparedAssetSource(
+		fact: AssetTextureFact,
+		source: TextureArraySource | AssetTextureSource,
+	): asserts source is AssetTextureSource {
 		if (source.key !== fact.key || source.purpose !== fact.purpose) {
 			throw new Error(
 				`Texture preparer returned incompatible source for ${fact.key}.`,
@@ -422,7 +442,7 @@ export class TextureManager<TOwnerId extends string = string> {
 		return true;
 	}
 
-	#releaseTexture2D(key: StandaloneTextureKey | GeneratedTextureKey): boolean {
+	#releaseTexture2D(key: AssetTextureKey | GeneratedTextureKey): boolean {
 		const texture = this.#texture2DResources.get(key);
 		if (!texture) return false;
 		this.#texture2DResources.delete(key);
@@ -432,7 +452,7 @@ export class TextureManager<TOwnerId extends string = string> {
 		return true;
 	}
 
-	#releaseAtlasTexture(texture: TextureAtlasEntryKey): boolean {
+	#releaseAtlasTexture(texture: AssetTextureKey): boolean {
 		const pageId = this.#atlasOwners.get(texture);
 		if (pageId === undefined) return false;
 		this.#atlasOwners.delete(texture);
@@ -451,18 +471,16 @@ export class TextureManager<TOwnerId extends string = string> {
 	}
 }
 
-function validateStandaloneTextureSource(
-	source: StandaloneTextureSource,
-): void {
+function validateAssetTextureSource(source: AssetTextureSource): void {
 	if (
-		!standaloneTextureKeyMatchesSource(
+		!assetTextureKeyMatchesSource(
 			source.key,
 			source.purpose,
 			source.sourceAssetId,
 		)
 	) {
 		throw new Error(
-			`Standalone texture ${source.key} does not match its source facts.`,
+			`Asset texture ${source.key} does not match its source facts.`,
 		);
 	}
 	if (
@@ -471,9 +489,7 @@ function validateStandaloneTextureSource(
 		source.width <= 0 ||
 		source.height <= 0
 	) {
-		throw new Error(
-			`Standalone texture ${source.key} dimensions must be positive.`,
-		);
+		throw new Error(`Asset texture ${source.key} dimensions must be positive.`);
 	}
 }
 
@@ -534,9 +550,7 @@ function createTextureArrayResourceDescription(
 	};
 }
 
-function createTexture2DUpload(
-	source: StandaloneTextureSource,
-): Texture2DUpload {
+function createTexture2DUpload(source: AssetTextureSource): Texture2DUpload {
 	const purposePolicy = texturePurposePolicy(source.purpose);
 	return {
 		data: source.pixels,

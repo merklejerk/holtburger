@@ -4,13 +4,13 @@ import { getLandblockCoordinates } from "../landblocks";
 import type { AABB3 } from "../math/types";
 import type { TerrainGeometryData } from "../renderer/geometry";
 import {
-	createStandaloneTextureKey,
+	createAssetTextureKey,
 	createTerrainCompositionTextureKey,
 	createTerrainSurfaceTextureKey,
 	createTextureArrayKey,
 	TexturePurpose,
-	type StandaloneTextureFact,
-	type StandaloneTextureKey,
+	type AssetTextureFact,
+	type AssetTextureKey,
 	type TerrainCompositionTextureKey,
 	type TerrainSurfaceTextureKey,
 	type TextureArrayFact,
@@ -76,7 +76,7 @@ export interface ResolvedTerrainTextureFacts {
 	readonly colors: TextureArrayFact;
 	readonly blendMasks: TextureArrayFact;
 	readonly roadMasks: TextureArrayFact;
-	readonly detail: StandaloneTextureFact;
+	readonly detail: AssetTextureFact;
 }
 
 /** Stable regional presentation facts retained beside one generated terrain source. */
@@ -90,7 +90,7 @@ export interface TerrainTextureKeys {
 	readonly colors: TextureArrayKey;
 	readonly blendMasks: TextureArrayKey;
 	readonly roadMasks: TextureArrayKey;
-	readonly detail: StandaloneTextureKey;
+	readonly detail: AssetTextureKey;
 }
 
 /** Authored-grid sampling stride used to generate one retail terrain LOD. */
@@ -212,8 +212,8 @@ export function resolveTerrainTextureFacts(
 			),
 		),
 		detail: {
-			kind: "standalone",
-			key: createStandaloneTextureKey(
+			kind: "asset",
+			key: createAssetTextureKey(
 				TexturePurpose.TerrainDetail,
 				composition.landscapeDetail.textureId,
 			),

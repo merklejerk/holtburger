@@ -5,7 +5,7 @@ import type { TerrainDrawUnit } from "../terrain/types";
 import type { TextureArrayBinding } from "../textures/texture-manager";
 import type {
 	GeneratedTextureKey,
-	StandaloneTextureKey,
+	AssetTextureKey,
 	TextureArrayKey,
 } from "../textures/types";
 import { RenderWorld } from "./render-world";
@@ -14,11 +14,24 @@ import type {
 	Texture2DResourceKey,
 } from "./resource-manager";
 import type { GeometryKey } from "../geometry/types";
+import type { StaticObjectRenderable } from "../systems/static-object-system";
+import type { InstanceStreamResourceKey } from "./resource-manager";
 
-const CAMERA = {} as Camera;
+const CAMERA = {
+	far: 10,
+	fov: 90,
+	near: 1,
+	placement: {
+		envCellId: null,
+		landblockId: "0001",
+		position: {},
+		rotation: {},
+	},
+} as Camera;
 const VISIBLE_SCENE = { entries: [] } as const satisfies VisibleScene;
 const TERRAIN = {} as TerrainDrawUnit;
 const GEOMETRY = "geometry-resource:1" as GeometryResourceKey;
+const INSTANCE_STREAM = "instance-stream-resource:1" as InstanceStreamResourceKey;
 const TEXTURE_2D = "texture-2d-resource:1" as Texture2DResourceKey;
 const ARRAY = {
 	layersByAssetId: new Map(),
@@ -35,8 +48,14 @@ describe("RenderWorld", () => {
 					return GEOMETRY;
 				},
 			},
+			instances: {
+				getResource: () => {
+					calls.push("instances");
+					return INSTANCE_STREAM;
+				},
+			},
 			scene: {
-				updateVisibility: () => {
+				queryFrustum: () => {
 					calls.push("scene");
 					return VISIBLE_SCENE;
 				},
@@ -46,6 +65,12 @@ describe("RenderWorld", () => {
 					calls.push("terrain");
 					return TERRAIN;
 				},
+			},
+			staticObjects: { getRenderable: () => null },
+			dynamics: { getRenderable: () => null },
+			envCells: {
+				getCellRenderable: () => null,
+				getPortalDrawUnit: () => null,
 			},
 			textures: {
 				getTexture2DResource: () => {
@@ -69,7 +94,7 @@ describe("RenderWorld", () => {
 		).toBe(TEXTURE_2D);
 		expect(
 			world.resolveTexture2D(
-				"standalone-texture:terrain-detail:1" as StandaloneTextureKey,
+				"asset-texture:terrain-detail:1" as AssetTextureKey,
 			),
 		).toBe(TEXTURE_2D);
 		expect(
@@ -77,6 +102,25 @@ describe("RenderWorld", () => {
 				"texture-array:terrain-color:fixture" as TextureArrayKey,
 			),
 		).toBe(ARRAY);
+		const staticRenderable = {
+			drawUnits: [
+				{
+					geometry: "static-source-geometry:fixture" as GeometryKey,
+					indexCount: 3,
+					indexStart: 0,
+					kind: "instanced",
+					instances: "static-instance-stream:static-install:1/cohort",
+					material: {},
+				},
+			],
+		} as StaticObjectRenderable;
+		expect(world.resolveStaticObjectRenderable(staticRenderable)).toEqual([
+			{
+				drawUnit: staticRenderable.drawUnits[0],
+				geometry: GEOMETRY,
+				instances: INSTANCE_STREAM,
+			},
+		]);
 		expect(calls).toEqual([
 			"scene",
 			"terrain",
@@ -84,6 +128,8 @@ describe("RenderWorld", () => {
 			"texture-2d",
 			"texture-2d",
 			"texture-array",
+			"geometry",
+			"instances",
 		]);
 	});
 });

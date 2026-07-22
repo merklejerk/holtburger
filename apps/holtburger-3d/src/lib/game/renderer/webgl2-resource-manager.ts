@@ -1,6 +1,7 @@
 import {
 	IntegerTexture2DFormat,
 	type GeometryResourceKey,
+	type InstanceStreamResourceKey,
 	type RendererResourceManager,
 	type RenderResourceKey,
 	type TextureArrayDescription,
@@ -10,6 +11,7 @@ import {
 	type Texture2DResourceKey,
 	type Texture2DUpload,
 } from "./resource-manager";
+import type { StaticInstanceStreamData } from "../systems/static-resources";
 import { TexturePixelFormat } from "../textures/types";
 import type { RenderGeometryData } from "./geometry";
 
@@ -47,6 +49,7 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 	readonly #gl: WebGL2RenderingContext;
 	readonly #geometry = new Map<GeometryResourceKey, WebGL2GeometryResource>();
 	readonly #textures = new Map<Texture2DResourceKey, WebGL2Texture2DBinding>();
+	readonly #instanceStreams = new Map<InstanceStreamResourceKey, WebGLBuffer>();
 	readonly #textureArrays = new Map<
 		TextureArrayResourceKey,
 		WebGL2TextureArrayBinding
@@ -54,6 +57,7 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 	#nextGeometryId = 0;
 	#nextTextureId = 0;
 	#nextTextureArrayId = 0;
+	#nextInstanceStreamId = 0;
 
 	constructor(gl: WebGL2RenderingContext) {
 		this.#gl = gl;
@@ -62,6 +66,35 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 	createGeometry(geometry: RenderGeometryData): GeometryResourceKey {
 		const key: GeometryResourceKey = `geometry-resource:${this.#nextGeometryId++}`;
 		this.#geometry.set(key, this.#uploadGeometry(geometry));
+		return key;
+	}
+
+	createStaticInstanceStream(
+		data: StaticInstanceStreamData,
+	): InstanceStreamResourceKey {
+		const buffer = this.#gl.createBuffer();
+		if (!buffer) throw new Error("Failed to allocate static instance stream.");
+		const values = new Float32Array(data.instances.length * 20);
+		for (const [index, instance] of data.instances.entries()) {
+			values.set(
+				Object.values(instance.sourceToLandblock) as number[],
+				index * 20,
+			);
+			values.set(
+				[
+					instance.color.r,
+					instance.color.g,
+					instance.color.b,
+					instance.color.a,
+				],
+				index * 20 + 16,
+			);
+		}
+		this.#gl.bindBuffer(this.#gl.ARRAY_BUFFER, buffer);
+		this.#gl.bufferData(this.#gl.ARRAY_BUFFER, values, this.#gl.STATIC_DRAW);
+		this.#gl.bindBuffer(this.#gl.ARRAY_BUFFER, null);
+		const key: InstanceStreamResourceKey = `instance-stream-resource:${this.#nextInstanceStreamId++}`;
+		this.#instanceStreams.set(key, buffer);
 		return key;
 	}
 
@@ -177,6 +210,15 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 	}
 
 	releaseResource(key: RenderResourceKey): boolean {
+		if (key.startsWith("instance-stream-resource:")) {
+			const stream = this.#instanceStreams.get(
+				key as InstanceStreamResourceKey,
+			);
+			if (!stream) return false;
+			this.#instanceStreams.delete(key as InstanceStreamResourceKey);
+			this.#gl.deleteBuffer(stream);
+			return true;
+		}
 		if (isGeometryResourceKey(key)) {
 			const resource = this.#geometry.get(key);
 			if (!resource) return false;
@@ -191,9 +233,10 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 			this.#gl.deleteTexture(resource.texture);
 			return true;
 		}
-		const resource = this.#textures.get(key);
+		const textureKey = key as Texture2DResourceKey;
+		const resource = this.#textures.get(textureKey);
 		if (!resource) return false;
-		this.#textures.delete(key);
+		this.#textures.delete(textureKey);
 		this.#gl.deleteTexture(resource.texture);
 		return true;
 	}
@@ -208,9 +251,12 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 		for (const resource of this.#textureArrays.values()) {
 			this.#gl.deleteTexture(resource.texture);
 		}
+		for (const stream of this.#instanceStreams.values())
+			this.#gl.deleteBuffer(stream);
 		this.#geometry.clear();
 		this.#textures.clear();
 		this.#textureArrays.clear();
+		this.#instanceStreams.clear();
 	}
 
 	#uploadGeometry(geometry: RenderGeometryData): WebGL2GeometryResource {

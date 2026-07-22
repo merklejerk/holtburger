@@ -6,27 +6,33 @@ import {
 	type CommitPipeline,
 	type DynamicEntityCommit,
 } from "../commit/types";
-import { INVALID_ID, type EnvCellId, type LandblockId } from "../game-types";
+import { INVALID_ID, type LandblockId } from "../game-types";
 import { GeometryManager } from "../geometry/geometry-manager";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
-import { LeaseRegistry } from "../ownership";
-import type { FrameInput } from "../renderer/renderer";
+import type { Renderer } from "../renderer/renderer";
 import { RenderWorld } from "../renderer/render-world";
 import type { RendererResourceManager } from "../renderer/resource-manager";
-import { SceneGraph, type SceneNodeId, type ScenePlacement } from "../scene";
+import { SceneGraph, type ScenePlacement } from "../scene";
 import {
 	WorkerTerrainGenerator,
 	type TerrainGenerator,
 } from "../terrain/terrain-generator";
-import { TerrainService } from "../terrain/terrain-service";
+import { TerrainSystem } from "../terrain/terrain-system";
+import { StaticObjectSystem } from "../systems/static-object-system";
+import {
+	DynamicEntitySystem,
+	InlineDynamicVisualPreparer,
+} from "../systems/dynamic-entity-system";
+import { EnvCellSystem } from "../systems/env-cell-system";
+import { AnimationSystem } from "../systems/animation-system";
+import { InstanceStreamManager } from "../systems/instance-stream-manager";
 import { TextureManager } from "../textures/texture-manager";
 import {
 	WorkerTexturePreparer,
 	type TexturePreparer,
 } from "../textures/texture-preparer";
 import {
-	commitBundleOwnerId,
 	landblockLayerToOwnerId,
 	type ResourceOwnerId,
 	spawnedEntityToOwnerId,
@@ -76,20 +82,35 @@ export interface GameRuntimeDependencies {
 	readonly texturePreparer: TexturePreparer;
 }
 
+/** Device boundary used by runtime to construct its private renderer facade. */
+export interface GameRuntimeRenderDevice {
+	readonly resources: RendererResourceManager;
+	buildRenderer(world: RenderWorld): Promise<Renderer>;
+}
+
 /** Bridges source commits, scene topology, runtime residency, and frontend frame state. */
 export class GameRuntime {
 	/** Canonical scene topology, residency, transforms, and spatial-query membership. */
 	readonly #scene = new SceneGraph();
 	/** Logical geometry bindings and shared owner retention. */
 	readonly #geometry: GeometryManager<ResourceOwnerId>;
-	/** Runtime layer/spawn ownership of scene-root lifetimes. */
-	readonly #sceneNodeLeases = new LeaseRegistry<OwnerId, SceneNodeId>();
 	/** Logical texture preparation, device bindings, and shared owner retention. */
 	readonly #textures: TextureManager<ResourceOwnerId>;
+	/** Immutable-object nodes, components, and resource publication. */
+	readonly #staticObjects: StaticObjectSystem<ResourceOwnerId>;
+	readonly #instances: InstanceStreamManager<ResourceOwnerId>;
+	/** Dynamic roots, articulated part nodes, and presentation preparation. */
+	readonly #dynamics: DynamicEntitySystem<ResourceOwnerId>;
+	/** Env-cell scopes, crossings, shell nodes, and portal contributions. */
+	readonly #envCells: EnvCellSystem<ResourceOwnerId>;
+	/** Rigid-part pose updates sequenced before visibility and drawing. */
+	readonly #animation: AnimationSystem<ResourceOwnerId>;
 	/** Dynamic terrain sources, generation state, and realized terrain resources. */
-	readonly #terrain: TerrainService<ResourceOwnerId, TerrainResourceOwnerId>;
+	readonly #terrain: TerrainSystem<ResourceOwnerId, TerrainResourceOwnerId>;
 	/** Read-only renderer gateway over this runtime's scene and resource systems. */
 	readonly #renderWorld: RenderWorld;
+	/** Renderer constructed with this runtime's private read-only world facade. */
+	#renderer: Renderer | null = null;
 	/** Runtime-owned terrain-generation worker terminated during runtime shutdown. */
 	readonly #terrainGenerator: TerrainGenerator;
 	/** Frontend-owned static commit producer invoked for new scene interest. */
@@ -119,15 +140,34 @@ export class GameRuntime {
 			renderResources,
 			dependencies.texturePreparer,
 		);
-		this.#terrain = new TerrainService<ResourceOwnerId, TerrainResourceOwnerId>(
+		this.#instances = new InstanceStreamManager(renderResources);
+		this.#staticObjects = new StaticObjectSystem(
+			this.#scene,
+			this.#geometry,
+			this.#textures,
+			this.#instances,
+		);
+		this.#dynamics = new DynamicEntitySystem(
+			this.#scene,
+			this.#geometry,
+			new InlineDynamicVisualPreparer(),
+		);
+		this.#envCells = new EnvCellSystem(this.#scene);
+		this.#animation = new AnimationSystem(this.#dynamics);
+		this.#terrain = new TerrainSystem<ResourceOwnerId, TerrainResourceOwnerId>(
+			this.#scene,
 			dependencies.terrainGenerator,
 			this.#geometry,
 			this.#textures,
 			terrainSourceToOwnerId,
 		);
 		this.#renderWorld = new RenderWorld({
+			dynamics: this.#dynamics,
+			envCells: this.#envCells,
 			geometry: this.#geometry,
+			instances: this.#instances,
 			scene: this.#scene,
+			staticObjects: this.#staticObjects,
 			terrain: this.#terrain,
 			textures: this.#textures,
 		});
@@ -135,7 +175,7 @@ export class GameRuntime {
 
 	/** Construct production runtime workers and inject them into runtime-owned systems. */
 	static async build(
-		renderResources: RendererResourceManager,
+		device: GameRuntimeRenderDevice,
 		commitPipeline: CommitPipeline,
 		hostAssets: AssetBridge,
 	): Promise<GameRuntime> {
@@ -143,10 +183,12 @@ export class GameRuntime {
 			WorkerTerrainGenerator.build(),
 			WorkerTexturePreparer.build(hostAssets),
 		]);
-		return new GameRuntime(renderResources, commitPipeline, {
+		const runtime = new GameRuntime(device.resources, commitPipeline, {
 			terrainGenerator,
 			texturePreparer,
 		});
+		runtime.#renderer = await device.buildRenderer(runtime.#renderWorld);
+		return runtime;
 	}
 
 	/** Construct runtime from explicit ports for focused integration tests. */
@@ -160,11 +202,6 @@ export class GameRuntime {
 
 	get lodConfig(): LoDConfig {
 		return { ...this.#lodConfig };
-	}
-
-	/** Renderer-facing query gateway composed from this runtime's live systems. */
-	get renderWorld(): RenderWorld {
-		return this.#renderWorld;
 	}
 
 	setLoDConfig(cfg: LoDConfig): void {
@@ -182,16 +219,20 @@ export class GameRuntime {
 	tick(): void {
 		if (this.#destroyed) return;
 		this.#drainCommitArtifacts();
+		this.#animation.update();
 	}
 
-	/** Snapshot frontend-controlled frame state while the renderer collects scene submissions. */
-	createFrameInput(timeSeconds: number): FrameInput {
+	/** Advance ordered runtime state and draw one frontend-scheduled frame. */
+	frame(timeSeconds: number): void {
 		if (this.#destroyed) throw new Error("Game runtime has been destroyed.");
-		return {
+		this.tick();
+		const renderer = this.#renderer;
+		if (!renderer) throw new Error("Game runtime has no renderer device.");
+		renderer.drawFrame({
 			anchorLandblockId: this.#worldAnchor,
 			timeSeconds,
 			views: [{ camera: this.#camera }],
-		};
+		});
 	}
 
 	updateDynamicEntityPlacement(
@@ -208,15 +249,16 @@ export class GameRuntime {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
 		this.#commitArtifacts.length = 0;
+		await this.#renderer?.destroy();
+		this.#renderer = null;
+		await this.#dynamics.destroy();
+		this.#envCells.destroy();
 		await this.#terrain.destroy();
 		await this.#terrainGenerator.destroy();
 
-		for (const ownerId of [...this.#sceneNodeLeases.iterOwners()]) {
-			this.#sceneNodeLeases.dropOwner(ownerId);
-		}
-		this.#releaseUnownedSceneNodes();
 		await this.#textures.destroy();
 		this.#geometry.destroy();
+		this.#instances.destroy();
 	}
 
 	#updateWorldInterest(newAnchor: LandblockId): void {
@@ -254,8 +296,6 @@ export class GameRuntime {
 			) {
 				continue;
 			}
-			const ownerId = commitBundleOwnerId(artifact);
-			this.#installCommitTexturePages(ownerId, artifact);
 			if (artifact.kind === CommitBundleSourceKind.LandblockLayer) {
 				this.#commitLandblockLayer(artifact);
 			} else {
@@ -278,8 +318,13 @@ export class GameRuntime {
 			this.#installTerrainLayer(ownerId, artifact);
 			return;
 		}
-		this.#releaseSceneOwner(ownerId);
-		this.#materializeLayerNodes(ownerId, artifact);
+		if (artifact.layer === LandblockLayerKind.EnvCells) {
+			this.#envCells.install(ownerId, artifact.commit.environment);
+		}
+		this.#staticObjects.installObjects(ownerId, artifact.commit.staticObjects);
+		for (const dynamic of artifact.dynamicEntities) {
+			this.#installDynamic(ownerId, artifact.landblockId, dynamic);
+		}
 	}
 
 	#installTerrainLayer(
@@ -292,57 +337,29 @@ export class GameRuntime {
 			}
 		>,
 	): void {
-		this.#terrain.installSource({
-			generation: artifact.commit.generation,
-			landblockId: artifact.landblockId,
-			presentation: artifact.commit.presentation,
+		this.#terrain.install(terrainSourceToOwnerId(artifact.landblockId), {
+			localBounds: TERRAIN_ROOT_BOUNDS,
+			placement: createLandblockPlacement(artifact.landblockId),
+			source: {
+				generation: artifact.commit.generation,
+				landblockId: artifact.landblockId,
+				presentation: artifact.commit.presentation,
+			},
 		});
-		if (!this.#sceneNodeLeases.hasOwner(ownerId)) {
-			this.#createOwnedRoot(
-				ownerId,
-				createLandblockPlacement(artifact.landblockId),
-				TERRAIN_ROOT_BOUNDS,
-			);
-		}
 	}
 
 	#commitSpawnedEntity(
 		artifact: Extract<CommitBundle, { kind: CommitBundleSourceKind.Spawned }>,
 	): void {
 		const ownerId = spawnedEntityToOwnerId(artifact.id);
-		this.#releaseSceneOwner(ownerId);
-		this.#createOwnedRoot(ownerId, artifact.placement, null);
+		this.#installDynamic(
+			ownerId,
+			artifact.commit.placement.landblockId,
+			artifact.commit,
+		);
 	}
 
-	#materializeLayerNodes(
-		ownerId: OwnerId,
-		artifact: Extract<
-			CommitBundle,
-			{ kind: CommitBundleSourceKind.LandblockLayer }
-		>,
-	): void {
-		if (artifact.layer === LandblockLayerKind.EnvCells) {
-			for (const cell of artifact.commit.cells) {
-				this.#createOwnedRoot(
-					ownerId,
-					createEnvCellPlacement(artifact.landblockId, cell.id),
-					cell.bounds,
-				);
-			}
-		} else {
-			this.#createOwnedRoot(
-				ownerId,
-				createLandblockPlacement(artifact.landblockId),
-				null,
-			);
-		}
-
-		for (const dynamic of artifact.dynamicEntities) {
-			this.#materializeDynamicRoot(ownerId, artifact.landblockId, dynamic);
-		}
-	}
-
-	#materializeDynamicRoot(
+	#installDynamic(
 		ownerId: OwnerId,
 		landblockId: LandblockId,
 		dynamic: DynamicEntityCommit,
@@ -352,41 +369,11 @@ export class GameRuntime {
 				`Dynamic placement belongs to ${dynamic.placement.landblockId}, expected ${landblockId}.`,
 			);
 		}
-		void dynamic.presentation;
-		void dynamic.appearance;
-		this.#createOwnedRoot(ownerId, dynamic.placement, null);
-	}
-
-	#createOwnedRoot(
-		ownerId: OwnerId,
-		placement: ScenePlacement,
-		localBounds: AABB3 | null,
-	): SceneNodeId {
-		const nodeId = this.#scene.createNode({
-			localBounds,
-			parentId: null,
-			...placement,
-		});
-		this.#sceneNodeLeases.addLease(ownerId, nodeId);
-		return nodeId;
-	}
-
-	#releaseSceneOwner(ownerId: OwnerId): void {
-		this.#sceneNodeLeases.dropOwner(ownerId);
-		this.#releaseUnownedSceneNodes();
-	}
-
-	#releaseUnownedSceneNodes(): void {
-		const releasedNodeIds = this.#sceneNodeLeases.takeEmptyLeases();
-		for (const nodeId of releasedNodeIds) {
-			this.#scene.destroyNode(nodeId);
-		}
-	}
-
-	#installCommitTexturePages(ownerId: OwnerId, artifact: CommitBundle): void {
-		for (const page of artifact.texturePages) {
-			this.#textures.installAtlasPage(ownerId, page.pageId, page);
-		}
+		const nodeId = this.#dynamics.install(ownerId, dynamic);
+		const pose = this.#dynamics.getPose(nodeId);
+		if (!pose)
+			throw new Error(`Installed dynamic ${nodeId} has no initial pose.`);
+		this.#animation.install(ownerId, nodeId, pose);
 	}
 
 	#isInActiveSceneInterest(
@@ -398,9 +385,12 @@ export class GameRuntime {
 
 	#evictStaticLayer(landblockId: LandblockId, layer: LandblockLayerKind): void {
 		const ownerId = landblockLayerToOwnerId(landblockId, layer);
-		this.#releaseSceneOwner(ownerId);
+		this.#staticObjects.removeOwner(ownerId);
+		this.#animation.removeOwner(ownerId);
+		this.#dynamics.removeOwner(ownerId);
+		this.#envCells.removeOwner(ownerId);
 		if (layer === LandblockLayerKind.Terrain) {
-			this.#terrain.removeSource(landblockId);
+			this.#terrain.removeOwner(terrainSourceToOwnerId(landblockId));
 		}
 		this.#textures.dropOwner(ownerId);
 		this.#geometry.dropOwner(ownerId);
@@ -410,17 +400,6 @@ export class GameRuntime {
 function createLandblockPlacement(landblockId: LandblockId): ScenePlacement {
 	return {
 		envCellId: null,
-		landblockId,
-		localTransform: Mat4.identity(),
-	};
-}
-
-function createEnvCellPlacement(
-	landblockId: LandblockId,
-	envCellId: EnvCellId,
-): ScenePlacement {
-	return {
-		envCellId,
 		landblockId,
 		localTransform: Mat4.identity(),
 	};

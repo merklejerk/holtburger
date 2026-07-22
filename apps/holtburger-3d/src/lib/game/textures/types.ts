@@ -29,22 +29,15 @@ export enum TexturePurpose {
 	ObjectDetail = "object-detail",
 }
 
-declare const textureAtlasEntryKeyBrand: unique symbol;
-declare const standaloneTextureKeyBrand: unique symbol;
+declare const assetTextureKeyBrand: unique symbol;
 declare const textureArrayKeyBrand: unique symbol;
 declare const terrainSurfaceTextureKeyBrand: unique symbol;
 declare const terrainCompositionTextureKeyBrand: unique symbol;
 
-/** Stable identity for one prepared DAT texture placed inside an atlas page. */
-export type TextureAtlasEntryKey =
-	`atlas-entry:${TexturePurpose}:${DatAssetId}/${TextureWrapMode}-gutter-${TextureGutterPixels}` & {
-		readonly [textureAtlasEntryKeyBrand]: true;
-	};
-
-/** Stable identity for one complete, unpacked two-dimensional texture. */
-export type StandaloneTextureKey =
-	`standalone-texture:${TexturePurpose}:${DatAssetId}` & {
-		readonly [standaloneTextureKeyBrand]: true;
+/** Logical DAT-backed two-dimensional texture; packing is a replaceable physical binding. */
+export type AssetTextureKey =
+	`asset-texture:${TexturePurpose}:${DatAssetId}` & {
+		readonly [assetTextureKeyBrand]: true;
 	};
 
 /** Stable identity for one complete, immutable texture-array resource. */
@@ -70,8 +63,7 @@ export type GeneratedTextureKey =
 
 /** Logical identity for an atlas entry, asset texture, array, or generated texture. */
 export type TextureKey =
-	| TextureAtlasEntryKey
-	| StandaloneTextureKey
+	| AssetTextureKey
 	| TextureArrayKey
 	| GeneratedTextureKey;
 
@@ -83,16 +75,16 @@ export interface TextureArrayFact {
 	readonly sourceAssetIds: readonly DatAssetId[];
 }
 
-/** Complete source identity for one immutable unpacked texture resource. */
-export interface StandaloneTextureFact {
-	readonly kind: "standalone";
-	readonly key: StandaloneTextureKey;
+/** Complete source identity for one DAT-backed two-dimensional logical texture. */
+export interface AssetTextureFact {
+	readonly kind: "asset";
+	readonly key: AssetTextureKey;
 	readonly purpose: TexturePurpose;
 	readonly sourceAssetId: DatAssetId;
 }
 
 /** One complete logical texture resource to materialize from DAT texture sources. */
-export type TextureFact = TextureArrayFact | StandaloneTextureFact;
+export type TextureFact = TextureArrayFact | AssetTextureFact;
 
 export enum TexturePixelFormat {
 	RGBA8 = "rgba8",
@@ -123,21 +115,12 @@ export interface TexturePurposePolicy {
 	readonly generateMipmaps: boolean;
 }
 
-/** Build the canonical identity for one prepared texture use. */
-export function createAtlasEntryKey(
+/** Build the canonical identity for one DAT-backed two-dimensional texture. */
+export function createAssetTextureKey(
 	purpose: TexturePurpose,
 	sourceAssetId: DatAssetId,
-	preparation: TexturePreparation,
-): TextureAtlasEntryKey {
-	return `atlas-entry:${purpose}:${sourceAssetId}/${preparation.wrap}-gutter-${preparation.gutterPixels}` as TextureAtlasEntryKey;
-}
-
-/** Build the canonical identity for one complete unpacked DAT texture. */
-export function createStandaloneTextureKey(
-	purpose: TexturePurpose,
-	sourceAssetId: DatAssetId,
-): StandaloneTextureKey {
-	return `standalone-texture:${purpose}:${sourceAssetId}` as StandaloneTextureKey;
+): AssetTextureKey {
+	return `asset-texture:${purpose}:${sourceAssetId}` as AssetTextureKey;
 }
 
 /** Build the canonical identity for one immutable texture-array resource. */
@@ -180,11 +163,9 @@ export function isTextureArrayKey(key: TextureKey): key is TextureArrayKey {
 	return key.startsWith("texture-array:");
 }
 
-/** Narrow a logical texture identity to one complete unpacked texture. */
-export function isStandaloneTextureKey(
-	key: TextureKey,
-): key is StandaloneTextureKey {
-	return key.startsWith("standalone-texture:");
+/** Narrow a logical texture identity to one DAT-backed two-dimensional texture. */
+export function isAssetTextureKey(key: TextureKey): key is AssetTextureKey {
+	return key.startsWith("asset-texture:");
 }
 
 /** Narrow a logical texture identity to one generated two-dimensional texture. */
@@ -196,13 +177,13 @@ export function isGeneratedTextureKey(
 	);
 }
 
-/** Test whether a standalone key matches its immutable source facts. */
-export function standaloneTextureKeyMatchesSource(
-	key: StandaloneTextureKey,
+/** Test whether an asset key matches its immutable source facts. */
+export function assetTextureKeyMatchesSource(
+	key: AssetTextureKey,
 	purpose: TexturePurpose,
 	sourceAssetId: DatAssetId,
 ): boolean {
-	return key === createStandaloneTextureKey(purpose, sourceAssetId);
+	return key === createAssetTextureKey(purpose, sourceAssetId);
 }
 
 /** Test whether an array key belongs to one semantic texture purpose. */

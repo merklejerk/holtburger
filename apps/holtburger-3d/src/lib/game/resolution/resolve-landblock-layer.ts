@@ -198,16 +198,16 @@ function normalizeEnvCellLayer(
 			),
 		);
 		return {
-			bounds: normalizeAabb(cell.bounds),
+			landblockBounds: normalizeAabb(cell.landblockBounds),
 			embeddedStatics: embedded.filter(
 				(_, index) => cell.embeddedResidents[index]?.activation === "static",
 			),
 			id: cell.id,
 			materials: cell.materials.map(normalizeMaterial),
-			placement: {
+			structureToLandblock: {
 				envCellId: cell.id,
 				landblockId: dto.landblockId,
-				localTransform: normalizeMatrix(cell.placement),
+				localTransform: normalizeMatrix(cell.structureToLandblock),
 			},
 			structure,
 		};
@@ -276,7 +276,7 @@ function normalizePortalAperture(
 	dto: HostPortalApertureDto,
 ): ResolvedPortalAperture {
 	return {
-		bounds: normalizeAabb(dto.bounds),
+		landblockBounds: normalizeAabb(dto.landblockBounds),
 		id: `portal-aperture:${dto.id}`,
 		indices: Uint32Array.from(dto.indices),
 		kind: dto.kind,
@@ -339,7 +339,7 @@ function normalizeObjectResident(
 ): ResolvedObjectResident {
 	return {
 		appearance: dto.appearance ? normalizeAppearance(dto.appearance) : null,
-		bounds: dto.bounds ? normalizeAabb(dto.bounds) : null,
+		localBounds: dto.localBounds ? normalizeAabb(dto.localBounds) : null,
 		id: dto.id,
 		placement: {
 			envCellId: dto.envCellId,
@@ -414,14 +414,26 @@ function normalizeGeometry(dto: HostGeometryDto): ResolvedGeometry {
 
 function normalizeMaterial(dto: HostMaterialDto): ResolvedMaterial {
 	if (dto.kind === "solid-color") {
-		return { color: dto.color, id: `material:${dto.id}`, kind: dto.kind };
+		return {
+			color: dto.color,
+			diffuseScale: dto.diffuseScale,
+			id: `material:${dto.id}`,
+			kind: dto.kind,
+			luminosity: dto.luminosity,
+			rawSurfaceFlags: dto.rawSurfaceFlags,
+			translucency: dto.translucency,
+		};
 	}
 	return {
 		colorTextureId: dto.colorTextureId,
 		detailTextureId: dto.detailTextureId,
+		diffuseScale: dto.diffuseScale,
 		id: `material:${dto.id}`,
 		kind: dto.kind,
+		luminosity: dto.luminosity,
 		paletteTextureId: dto.paletteTextureId,
+		rawSurfaceFlags: dto.rawSurfaceFlags,
+		translucency: dto.translucency,
 	};
 }
 

@@ -11,12 +11,13 @@ import type {
 	TextureArrayLayerUpload,
 	TextureArrayResourceKey,
 } from "../renderer/resource-manager";
-import { AABB3, Vec3 } from "../math/types";
+import { AABB3, Mat4, Vec3 } from "../math/types";
+import { SceneGraph } from "../scene";
 import { TextureManager } from "../textures/texture-manager";
 import type { TexturePreparer } from "../textures/texture-preparer";
 import type { TextureFact } from "../textures/types";
 import type { TerrainGenerator } from "./terrain-generator";
-import { TerrainService } from "./terrain-service";
+import { TerrainSystem } from "./terrain-system";
 import { resolveTerrainTextureFacts, TERRAIN_MESH_STRIDES } from "./types";
 import type {
 	TerrainGenerationResult,
@@ -39,14 +40,14 @@ const TRANSITION_DIRECTIONS: readonly TerrainTransitionDirection[] = [
 	"northwest",
 ];
 
-describe("TerrainService", () => {
+describe("TerrainSystem", () => {
 	it("generates once, realizes complete output, and selects a frame-time variant", async () => {
 		const generator = new DeferredTerrainGenerator();
 		const resources = new FakeRendererResourceManager();
-		const terrain = createTerrainService(generator, resources);
+		const terrain = createTerrainSystem(generator, resources);
 		const installation = createInstallation();
-		terrain.installSource(installation);
-		terrain.installSource(installation);
+		const nodeId = installTerrain(terrain, installation);
+		installTerrain(terrain, installation);
 		expect(generator.inputs).toEqual([installation.generation]);
 
 		generator.resolve(createGenerationResult());
@@ -54,60 +55,80 @@ describe("TerrainService", () => {
 		await Promise.resolve();
 		await Promise.resolve();
 
-		expect(
-			terrain.getDrawUnit(installation.landblockId, installation.landblockId),
-		).toMatchObject({
-			composition: "terrain-composition:1",
-			geometry: "terrain-geometry:0x1111ffff",
-			indexCount: 3,
-			indexStart: 0,
-			landblockId: "0x1111ffff",
-			surfaceField: "terrain-surface:0x1111ffff/1",
-			textures: {
-				blendMasks: "texture-array:terrain-blend-mask:terrain-region:1",
-				colors: "texture-array:terrain-color:terrain-region:1",
-				detail: "standalone-texture:terrain-detail:0x05000004",
-				roadMasks: "texture-array:terrain-road-mask:terrain-region:1",
+		expect(terrain.getDrawUnit(nodeId, installation.landblockId)).toMatchObject(
+			{
+				composition: "terrain-composition:1",
+				geometry: "terrain-geometry:0x1111ffff",
+				indexCount: 3,
+				indexStart: 0,
+				landblockId: "0x1111ffff",
+				surfaceField: "terrain-surface:0x1111ffff/1",
+				textures: {
+					blendMasks: "texture-array:terrain-blend-mask:terrain-region:1",
+					colors: "texture-array:terrain-color:terrain-region:1",
+					detail: "asset-texture:terrain-detail:0x05000004",
+					roadMasks: "texture-array:terrain-road-mask:terrain-region:1",
+				},
 			},
-		});
+		);
 
-		terrain.removeSource(installation.landblockId);
+		terrain.removeOwner(ownerId(installation.landblockId));
 		expect(resources.released).toHaveLength(resources.created.length);
 		expect(new Set(resources.released)).toEqual(new Set(resources.created));
 	});
 
 	it("shares one composition resource across interested landblocks in a region", () => {
 		const resources = new FakeRendererResourceManager();
-		const terrain = createTerrainService(
+		const terrain = createTerrainSystem(
 			new DeferredTerrainGenerator(),
 			resources,
 		);
 		const first = createInstallation("0x1111ffff");
 		const second = createInstallation("0x1211ffff");
-		terrain.installSource(first);
-		terrain.installSource(second);
+		installTerrain(terrain, first);
+		installTerrain(terrain, second);
 		expect(resources.createdTextures).toEqual(["texture-2d-resource:0"]);
 
-		terrain.removeSource(first.landblockId);
+		terrain.removeOwner(ownerId(first.landblockId));
 		expect(resources.released).toEqual([]);
 
-		terrain.removeSource(second.landblockId);
+		terrain.removeOwner(ownerId(second.landblockId));
 		expect(resources.released).toEqual(["texture-2d-resource:0"]);
 	});
 });
 
-function createTerrainService(
+function createTerrainSystem(
 	generator: TerrainGenerator,
 	resources: RendererResourceManager,
-): TerrainService<string, string> {
+): TerrainSystem<string, string> {
 	const textures = new TextureManager(resources, new FixtureTexturePreparer());
 	const geometry = new GeometryManager<string>(resources);
-	return new TerrainService<string, string>(
+	return new TerrainSystem<string, string>(
+		new SceneGraph(),
 		generator,
 		geometry,
 		textures,
 		(landblockId) => `terrain-resource:${landblockId}`,
 	);
+}
+
+function installTerrain(
+	terrain: TerrainSystem<string, string>,
+	source: ReturnType<typeof createInstallation>,
+): string {
+	return terrain.install(ownerId(source.landblockId), {
+		localBounds: AABB3.zero(),
+		placement: {
+			envCellId: null,
+			landblockId: source.landblockId,
+			localTransform: Mat4.identity(),
+		},
+		source,
+	});
+}
+
+function ownerId(landblockId: string): `terrain-resource:${string}` {
+	return `terrain-resource:${landblockId}`;
 }
 
 function createInstallation(landblockId = "0x1111ffff") {
@@ -204,7 +225,7 @@ class DeferredTerrainGenerator implements TerrainGenerator {
 
 class FixtureTexturePreparer implements TexturePreparer {
 	async prepare(fact: TextureFact) {
-		if (fact.kind === "standalone") {
+		if (fact.kind === "asset") {
 			return {
 				height: 2,
 				key: fact.key,

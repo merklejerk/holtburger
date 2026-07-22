@@ -21,20 +21,30 @@ export interface ResolvedGeometry {
 	readonly bounds: AABB3 | null;
 }
 
-/** Material source before texture atlas placement is assigned. */
-export type ResolvedMaterial =
-	| {
-			readonly id: ResolvedMaterialId;
-			readonly kind: "solid-color";
-			readonly color: readonly [number, number, number, number];
-	  }
-	| {
-			readonly id: ResolvedMaterialId;
-			readonly kind: "texture";
-			readonly colorTextureId: DatAssetId;
-			readonly paletteTextureId: DatAssetId | null;
-			readonly detailTextureId: DatAssetId | null;
-	  };
+/** Lossless DAT surface facts preserved independently from renderer pass policy. */
+export interface ResolvedMaterialFacts {
+	readonly rawSurfaceFlags: number;
+	readonly translucency: number;
+	readonly luminosity: number;
+	readonly diffuseScale: number;
+}
+
+/** Material source before texture placement is assigned. */
+export type ResolvedMaterial = ResolvedMaterialFacts &
+	(
+		| {
+				readonly id: ResolvedMaterialId;
+				readonly kind: "solid-color";
+				readonly color: readonly [number, number, number, number];
+		  }
+		| {
+				readonly id: ResolvedMaterialId;
+				readonly kind: "texture";
+				readonly colorTextureId: DatAssetId;
+				readonly paletteTextureId: DatAssetId | null;
+				readonly detailTextureId: DatAssetId | null;
+		  }
+	);
 
 /** One part in a setup-backed presentation hierarchy. */
 export interface ResolvedObjectPart {

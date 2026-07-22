@@ -30,7 +30,6 @@ describe("StandardCommitPipeline", () => {
 			kind: 0,
 			landblockId: source.landblockId,
 			layer: LandblockLayerKind.Terrain,
-			texturePages: [],
 		});
 		await pipeline.destroy();
 	});

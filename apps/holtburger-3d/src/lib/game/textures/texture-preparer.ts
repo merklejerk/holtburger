@@ -1,11 +1,8 @@
 import type { AssetBridge } from "../../assets/asset-bridge";
 import type { DatAssetId } from "../game-types";
-import type {
-	StandaloneTextureSource,
-	TextureArraySource,
-} from "./texture-manager";
+import type { AssetTextureSource, TextureArraySource } from "./texture-manager";
 import {
-	type StandaloneTextureFact,
+	type AssetTextureFact,
 	type TextureArrayFact,
 	texturePurposePolicy,
 	type TexturePixelFormat,
@@ -37,15 +34,13 @@ export interface TexturePreparationServiceResponse {
 }
 
 /** Complete pixel-bearing source prepared for one stable logical texture key. */
-export type PreparedTextureSource =
-	| TextureArraySource
-	| StandaloneTextureSource;
+export type PreparedTextureSource = TextureArraySource | AssetTextureSource;
 
 /** Runtime-owned CPU texture preparation boundary. */
 export interface TexturePreparer {
 	/** Prepare one complete array or standalone texture for its stable logical key. */
 	prepare(
-		fact: TextureArrayFact | StandaloneTextureFact,
+		fact: TextureArrayFact | AssetTextureFact,
 	): Promise<PreparedTextureSource>;
 	/** Stop accepting work and terminate runtime-owned workers. */
 	destroy(): Promise<void>;
@@ -69,7 +64,7 @@ export class WorkerTexturePreparer implements TexturePreparer {
 	}
 
 	prepare(
-		fact: TextureArrayFact | StandaloneTextureFact,
+		fact: TextureArrayFact | AssetTextureFact,
 	): Promise<PreparedTextureSource> {
 		const pending = this.#pendingPreparations.get(fact.key);
 		if (pending) return pending;
@@ -82,9 +77,9 @@ export class WorkerTexturePreparer implements TexturePreparer {
 	}
 
 	async #prepare(
-		fact: TextureArrayFact | StandaloneTextureFact,
+		fact: TextureArrayFact | AssetTextureFact,
 	): Promise<PreparedTextureSource> {
-		if (fact.kind === "standalone") {
+		if (fact.kind === "asset") {
 			const surface = await this.#requestSurface(
 				fact.purpose,
 				fact.sourceAssetId,

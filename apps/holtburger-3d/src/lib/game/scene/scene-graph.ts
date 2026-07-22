@@ -1,4 +1,5 @@
 import type { AABB3, Mat4 } from "../math/types";
+import type { EnvCellId, LandblockId } from "../game-types";
 import { multiplyMat4, transformAABB3 } from "../math/matrices";
 import type { Camera } from "../runtime/types";
 import type {
@@ -6,6 +7,10 @@ import type {
 	SceneNodeId,
 	SceneNodeInput,
 	ScenePlacement,
+	SceneEnvCellScopeInput,
+	ScenePortalCrossingInput,
+	SceneScope,
+	PortalCrossingId,
 	ResolvedScenePlacement,
 	VisibleScene,
 	VisibleSceneEntry,
@@ -37,6 +42,11 @@ export class SceneGraph {
 	readonly #nodes = new Map<SceneNodeId, SceneNodeRecord>();
 	/** Brute-force stand-in for the composed per-landblock spatial index. */
 	readonly #spatialEntries = new Map<SceneNodeId, SpatialEntry>();
+	readonly #envCellScopes = new Map<EnvCellId, SceneEnvCellScopeInput>();
+	readonly #portalCrossings = new Map<
+		PortalCrossingId,
+		ScenePortalCrossingInput
+	>();
 	#nextNodeId = 0;
 
 	createNode(input: SceneNodeInput): SceneNodeId {
@@ -102,37 +112,66 @@ export class SceneGraph {
 		this.#syncSpatialEntry(node);
 	}
 
-	/** Destroy a root node and all of its transform descendants. */
-	destroyNode(nodeId: SceneNodeId): readonly SceneNodeId[] {
-		const root = this.#requireNode(nodeId);
-		if (root.parentId !== null) {
-			throw new Error(`Cannot destroy parented scene node ${nodeId}.`);
+	/** Destroy one leaf; resident systems remove owned trees explicitly from leaves to roots. */
+	destroyNode(nodeId: SceneNodeId): void {
+		const node = this.#requireNode(nodeId);
+		if (node.children.size > 0) {
+			throw new Error(
+				`Cannot destroy scene node ${nodeId} while it still has children.`,
+			);
 		}
-		const nodeIds = this.#collectDescendants(nodeId).reverse();
-		for (const removedNodeId of nodeIds) {
-			const node = this.#requireNode(removedNodeId);
-			if (node.parentId !== null) {
-				this.#requireNode(node.parentId).children.delete(removedNodeId);
-			}
-			this.#spatialEntries.delete(removedNodeId);
-			this.#nodes.delete(removedNodeId);
+		if (node.parentId !== null) {
+			this.#requireNode(node.parentId).children.delete(nodeId);
 		}
-		return nodeIds;
+		this.#spatialEntries.delete(nodeId);
+		this.#nodes.delete(nodeId);
 	}
 
-	/**
-	 * Return spatial-query results with placements captured from the entries used to query.
-	 * Frustum tests and portal traversal will replace the current brute-force selection.
-	 */
-	updateVisibility(camera: Camera): VisibleScene {
-		// TODO: transform the camera query into each landblock frame and query portals.
+	upsertEnvCellScope(input: SceneEnvCellScopeInput): void {
+		this.#envCellScopes.set(input.scope.envCellId, input);
+		this.#syncEnvCellRoots(input.scope.envCellId);
+	}
+
+	removeEnvCellScope(scope: Extract<SceneScope, { kind: "env-cell" }>): void {
+		for (const crossing of this.#portalCrossings.values()) {
+			if (
+				sameScope(crossing.source, scope) ||
+				sameScope(crossing.target, scope)
+			) {
+				throw new Error(
+					`Cannot remove env-cell scope ${scope.envCellId} while crossing ${crossing.id} references it.`,
+				);
+			}
+		}
+		this.#envCellScopes.delete(scope.envCellId);
+		this.#syncEnvCellRoots(scope.envCellId);
+	}
+
+	upsertPortalCrossing(input: ScenePortalCrossingInput): void {
+		this.#portalCrossings.set(input.id, input);
+	}
+
+	removePortalCrossing(crossingId: PortalCrossingId): void {
+		this.#portalCrossings.delete(crossingId);
+	}
+
+	/** Conservative origin-scoped frustum query; exact plane tests remain a renderer fast-follow. */
+	queryFrustum(camera: Camera, origin: SceneScope): VisibleScene {
 		void camera;
+		const reachable = this.#reachableScopes(origin);
 		return {
-			entries: [...this.#spatialEntries.values()].map(
-				({ nodeId, placement }) => ({
+			entries: [...this.#spatialEntries.values()]
+				.filter(
+					({ placement }) =>
+						placement.scope.kind === "outdoor" ||
+						reachable.has(scopeKey(placement.scope)),
+				)
+				.map(({ nodeId, placement }) => ({
 					nodeId,
 					placement,
-				}),
+				})),
+			crossings: [...this.#portalCrossings.values()].filter((crossing) =>
+				reachable.has(scopeKey(crossing.source)),
 			),
 		};
 	}
@@ -148,17 +187,9 @@ export class SceneGraph {
 		return {
 			envCellId: node.envCellId,
 			landblockId: node.landblockId,
+			scope: scopeFor(node.landblockId, node.envCellId),
 			localToLandblock,
 		};
-	}
-
-	#collectDescendants(nodeId: SceneNodeId): SceneNodeId[] {
-		const node = this.#requireNode(nodeId);
-		const nodeIds = [node.id];
-		for (const childId of node.children) {
-			nodeIds.push(...this.#collectDescendants(childId));
-		}
-		return nodeIds;
 	}
 
 	#requireNode(nodeId: SceneNodeId): SceneNodeRecord {
@@ -176,7 +207,7 @@ export class SceneGraph {
 	}
 
 	#syncSpatialEntry(node: SceneNodeRecord): void {
-		if (node.localBounds === null) {
+		if (node.localBounds === null || !this.#isResolved(node.id)) {
 			this.#spatialEntries.delete(node.id);
 		} else {
 			const placement = this.#resolvePlacement(node.id);
@@ -190,6 +221,62 @@ export class SceneGraph {
 			});
 		}
 	}
+
+	#isResolved(nodeId: SceneNodeId): boolean {
+		const placement = this.#resolvePlacement(nodeId);
+		return (
+			placement.envCellId === null ||
+			this.#envCellScopes.has(placement.envCellId)
+		);
+	}
+
+	#syncEnvCellRoots(envCellId: EnvCellId): void {
+		for (const node of this.#nodes.values()) {
+			if (node.parentId === null && node.envCellId === envCellId) {
+				this.#syncSpatialSubtree(node.id);
+			}
+		}
+	}
+
+	#reachableScopes(origin: SceneScope): Set<string> {
+		const reachable = new Set([scopeKey(origin)]);
+		const pending = [origin];
+		while (pending.length > 0) {
+			const scope = pending.pop();
+			if (!scope) continue;
+			for (const crossing of this.#portalCrossings.values()) {
+				if (!sameScope(crossing.source, scope)) continue;
+				const targetKey = scopeKey(crossing.target);
+				if (reachable.has(targetKey)) continue;
+				reachable.add(targetKey);
+				pending.push(crossing.target);
+			}
+		}
+		return reachable;
+	}
+}
+
+function scopeFor(
+	landblockId: LandblockId,
+	envCellId: EnvCellId | null,
+): SceneScope {
+	return envCellId === null
+		? { kind: "outdoor", landblockId }
+		: { envCellId, kind: "env-cell", landblockId };
+}
+
+function sameScope(left: SceneScope, right: SceneScope): boolean {
+	if (left.kind !== right.kind || left.landblockId !== right.landblockId) {
+		return false;
+	}
+	if (left.kind === "outdoor") return true;
+	return right.kind === "env-cell" && left.envCellId === right.envCellId;
+}
+
+function scopeKey(scope: SceneScope): string {
+	return scope.kind === "outdoor"
+		? `outdoor:${scope.landblockId}`
+		: `env-cell:${scope.landblockId}/${scope.envCellId}`;
 }
 
 function createSceneNodeRecord(

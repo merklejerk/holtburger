@@ -7,7 +7,6 @@
 	import { GameRuntime } from "../lib/game/runtime/game-runtime";
 	import { StandardCommitPipeline } from "../lib/game/commit/pipeline";
 	import { WebGL2Device } from "../lib/game/renderer/webgl2-device";
-	import type { WebGL2Renderer } from "../lib/game/renderer/webgl2-renderer";
 	import { TauriAssetBridge } from "../lib/assets/tauri-asset-bridge";
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
@@ -15,7 +14,6 @@
 	let gameRuntime: GameRuntime | undefined;
 	let commitPipeline: StandardCommitPipeline | undefined;
 	let webglDevice: WebGL2Device | undefined;
-	let webglRenderer: WebGL2Renderer | undefined;
 	let frameMetrics: FrameMetrics | null = $state(null);
 	let startupError: string | null = $state(null);
 
@@ -39,11 +37,9 @@
 			const runtime = gameRuntime;
 			const pipeline = commitPipeline;
 			const device = webglDevice;
-			const renderer = webglRenderer;
 			gameRuntime = undefined;
 			commitPipeline = undefined;
 			webglDevice = undefined;
-			webglRenderer = undefined;
 			teardown = (async () => {
 				stopFrameLoop();
 				try {
@@ -52,11 +48,7 @@
 					try {
 						await pipeline?.destroy();
 					} finally {
-						try {
-							await renderer?.destroy();
-						} finally {
-							await device?.destroy();
-						}
+						await device?.destroy();
 					}
 				}
 			})();
@@ -72,13 +64,9 @@
 				if (destroyed) return;
 
 				gameRuntime = await GameRuntime.build(
-					webglDevice.resources,
+					webglDevice,
 					commitPipeline,
 					hostAssets,
-				);
-				if (destroyed) return;
-				webglRenderer = await webglDevice.buildRenderer(
-					gameRuntime.renderWorld,
 				);
 				if (destroyed) return;
 
@@ -90,11 +78,8 @@
 					}
 
 					const tickStartedAt = performance.now();
-					gameRuntime.tick();
+					gameRuntime.frame(performance.now() / 1_000);
 					const drawStartedAt = performance.now();
-					webglRenderer?.drawFrame(
-						gameRuntime.createFrameInput(performance.now() / 1_000),
-					);
 					const frameFinishedAt = performance.now();
 
 					frameMetrics = {

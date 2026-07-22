@@ -3,8 +3,8 @@ import type { AssetBridge } from "../../assets/asset-bridge";
 import type { LandblockIdLayer } from "../runtime/scene-interest";
 import type { ResolvedLandblockLayerSource } from "../resolution/landblock-layer";
 import {
-	createStandaloneTextureKey,
-	type StandaloneTextureFact,
+	createAssetTextureKey,
+	type AssetTextureFact,
 	TexturePixelFormat,
 	TexturePurpose,
 } from "./types";
@@ -13,9 +13,9 @@ import {
 	WorkerTexturePreparer,
 } from "./texture-preparer";
 
-const DETAIL_TEXTURE: StandaloneTextureFact = {
-	kind: "standalone",
-	key: createStandaloneTextureKey(TexturePurpose.TerrainDetail, "0x05000004"),
+const DETAIL_TEXTURE: AssetTextureFact = {
+	kind: "asset",
+	key: createAssetTextureKey(TexturePurpose.TerrainDetail, "0x05000004"),
 	purpose: TexturePurpose.TerrainDetail,
 	sourceAssetId: "0x05000004",
 };

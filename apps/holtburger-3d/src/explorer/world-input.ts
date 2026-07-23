@@ -1,5 +1,4 @@
 import type { EnvCellId, LandblockId } from "../lib/game/game-types";
-import { Quat } from "../lib/game/math/types";
 import type { SceneResidency } from "../lib/game/scene";
 
 const HEX_PREFIX_PATTERN = /^(?:0x)?([0-9a-f]{4})$/i;
@@ -24,31 +23,6 @@ export function parseResidenceInput(
 	}
 	const cellMatch = HEX_CELL_PATTERN.exec(value);
 	return cellMatch ? createResidence(cellMatch[1]!) : null;
-}
-
-/** Convert Explorer yaw/pitch degrees into one normalized camera quaternion. */
-export function createCameraRotation(
-	yawDegrees: number,
-	pitchDegrees: number,
-): Quat {
-	if (!Number.isFinite(yawDegrees) || !Number.isFinite(pitchDegrees)) {
-		throw new Error("Camera yaw and pitch must be finite.");
-	}
-	const yaw = (yawDegrees * Math.PI) / 180;
-	const pitch = (pitchDegrees * Math.PI) / 180;
-	const halfYaw = yaw / 2;
-	const halfPitch = pitch / 2;
-	const cosYaw = Math.cos(halfYaw);
-	const sinYaw = Math.sin(halfYaw);
-	const cosPitch = Math.cos(halfPitch);
-	const sinPitch = Math.sin(halfPitch);
-	const z = -sinYaw * sinPitch;
-	return new Quat(
-		cosYaw * cosPitch,
-		cosYaw * sinPitch,
-		sinYaw * cosPitch,
-		Object.is(z, -0) ? 0 : z,
-	);
 }
 
 function createResidence(rawId: string): ParsedResidenceInput {

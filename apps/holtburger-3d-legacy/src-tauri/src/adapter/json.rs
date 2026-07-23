@@ -494,7 +494,7 @@ pub struct SerializedTerrainTriangle {
 }
 
 pub fn build_landblock_terrain_triangles(
-    mesh: &PreparedTerrainMesh,
+    mesh: &CanonicalTerrainMesh,
 ) -> Vec<SerializedTerrainTriangle> {
     mesh.triangles
         .iter()
@@ -564,20 +564,20 @@ pub fn serialize_landblock_terrain_bvh_item(item: &PreparedTerrainBvhItem) -> se
     })
 }
 
-pub fn terrain_mesh_bounds(mesh: &PreparedTerrainMesh) -> Option<PreparedAabb> {
+pub fn terrain_mesh_bounds(mesh: &CanonicalTerrainMesh) -> Option<PreparedAabb> {
     let indices = (0..mesh.vertices.len()).collect::<Vec<_>>();
     terrain_vertex_bounds_slice(mesh, &indices)
 }
 
 pub fn terrain_vertex_bounds_json<const N: usize>(
-    mesh: &PreparedTerrainMesh,
+    mesh: &CanonicalTerrainMesh,
     vertex_indices: [usize; N],
 ) -> Option<PreparedAabb> {
     terrain_vertex_bounds_slice(mesh, &vertex_indices)
 }
 
 pub fn terrain_vertex_bounds_slice(
-    mesh: &PreparedTerrainMesh,
+    mesh: &CanonicalTerrainMesh,
     vertex_indices: &[usize],
 ) -> Option<PreparedAabb> {
     vertex_indices
@@ -673,7 +673,6 @@ pub fn serialize_landblock_scene_lod_payload(
         "regionId": region_id,
         "regionNumber": region_number,
         "source": {
-            "context": serialize_landblock_scene_lod_context(asset.context),
             "level": asset.level.as_u8(),
         },
         "layers": asset.layers.iter().map(serialize_landblock_scene_lod_layer).collect::<Vec<_>>(),
@@ -685,13 +684,6 @@ pub fn serialize_landblock_scene_lod_payload(
             "detail": asset.diagnostics.errors.first().map(|error| error.detail.clone())
         }
     })
-}
-
-fn serialize_landblock_scene_lod_context(context: LandblockSceneLodContext) -> &'static str {
-    match context {
-        LandblockSceneLodContext::Outdoor => "outdoor",
-        LandblockSceneLodContext::Interior => "interior",
-    }
 }
 
 fn serialize_landblock_scene_lod_layer(layer: &LandblockSceneLodLayer) -> serde_json::Value {
@@ -1061,7 +1053,7 @@ fn serialize_prepared_portal_aperture_json(
 }
 
 pub struct SerializedOutdoorTerrainSource {
-    pub terrain_mesh: Option<PreparedTerrainMesh>,
+    pub terrain_mesh: Option<CanonicalTerrainMesh>,
 }
 
 pub fn serialize_landblock_outdoor_static_member(
@@ -1401,9 +1393,12 @@ pub fn serialize_terrain_material_payload(
                 }),
             })
         }).collect::<Vec<_>>(),
-        "terrainAlphaMaps": table.terrain_alpha_maps.iter().map(|map| {
+        "terrainAlphaMaps": table.corner_terrain_alpha_maps.iter()
+            .chain(table.side_terrain_alpha_maps.iter())
+            .enumerate()
+            .map(|(alpha_index, map)| {
             serde_json::json!({
-                "alphaIndex": map.alpha_index,
+                "alphaIndex": alpha_index,
                 "alphaTextureAssetId": format_surface_texture_asset_id(map.texture_id),
                 "alphaTextureDid": map.texture_id,
                 "selector": map.selector,
@@ -1971,12 +1966,12 @@ mod tests {
     use super::*;
     use holtburger_content::{
         LandblockOutdoorAsset, LandblockOutdoorStaticMember, LandblockSceneLodAsset,
-        LandblockSceneLodContext, LandblockSceneLodEnvCellSystemLayer, LandblockSceneLodLayer,
-        LandblockSceneLodLevel, LandblockSceneLodOutdoorBuildingsLayer,
-        LandblockSceneLodOutdoorStaticLayer, LandblockSceneLodTerrainLayer, PreparedAabb,
-        PreparedBuildingTransitionAperture, PreparedBvh, PreparedBvhNode,
-        PreparedContentSourceDiagnostics, PreparedPortalConnectivityGraph, PreparedStaticInstance,
-        PreparedStaticInstanceKind, PreparedVec3,
+        LandblockSceneLodEnvCellSystemLayer, LandblockSceneLodLayer, LandblockSceneLodLevel,
+        LandblockSceneLodOutdoorBuildingsLayer, LandblockSceneLodOutdoorStaticLayer,
+        LandblockSceneLodTerrainLayer, PreparedAabb, PreparedBuildingTransitionAperture,
+        PreparedBvh, PreparedBvhNode, PreparedContentSourceDiagnostics,
+        PreparedPortalConnectivityGraph, PreparedStaticInstance, PreparedStaticInstanceKind,
+        PreparedVec3,
     };
 
     #[test]
@@ -1985,7 +1980,6 @@ mod tests {
             &LandblockSceneLodAsset {
                 landblock_id: 0xda55ffff,
                 level: LandblockSceneLodLevel::Level2,
-                context: LandblockSceneLodContext::Outdoor,
                 layers: Vec::new(),
                 diagnostics: PreparedContentSourceDiagnostics::default(),
             },
@@ -1997,7 +1991,6 @@ mod tests {
         assert_eq!(payload["landblockId"].as_u64(), Some(0xda55ffff));
         assert_eq!(payload["regionId"].as_u64(), Some(1));
         assert_eq!(payload["regionNumber"].as_u64(), Some(2));
-        assert_eq!(payload["source"]["context"], "outdoor");
         assert_eq!(payload["source"]["level"], 2);
         assert_eq!(payload["layers"].as_array().map(Vec::len), Some(0));
         assert_eq!(
@@ -2012,9 +2005,9 @@ mod tests {
             &LandblockSceneLodAsset {
                 landblock_id: 0xda55ffff,
                 level: LandblockSceneLodLevel::Level3,
-                context: LandblockSceneLodContext::Outdoor,
                 layers: vec![
                     LandblockSceneLodLayer::Terrain(LandblockSceneLodTerrainLayer {
+                        terrain: None,
                         terrain_mesh: None,
                     }),
                     LandblockSceneLodLayer::OutdoorBuildings(
@@ -2066,7 +2059,6 @@ mod tests {
             &LandblockSceneLodAsset {
                 landblock_id: 0xda55ffff,
                 level: LandblockSceneLodLevel::Level4,
-                context: LandblockSceneLodContext::Outdoor,
                 layers: vec![LandblockSceneLodLayer::EnvCellSystem(
                     LandblockSceneLodEnvCellSystemLayer {
                         landblock_id: 0xda55ffff,

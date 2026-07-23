@@ -18,7 +18,7 @@ export interface LoDConfig {
 export interface CameraPlacement extends SceneResidency {
 	/** Camera position expressed in canonical scene/world space. */
 	readonly position: Vec3;
-	/** Camera-to-landblock orientation. */
+	/** Camera-to-world orientation. */
 	readonly rotation: Quat;
 }
 

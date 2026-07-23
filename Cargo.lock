@@ -2189,9 +2189,16 @@ dependencies = [
 name = "holtburger-3d"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "holtburger-content",
+ "holtburger-core",
+ "holtburger-dat",
  "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -2259,6 +2266,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "binrw",
+ "directories",
  "holtburger-common",
  "holtburger-dat",
  "log",

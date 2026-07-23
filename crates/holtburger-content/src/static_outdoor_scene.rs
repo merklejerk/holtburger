@@ -464,6 +464,7 @@ fn derive_generated_scenery(
     region: &RegionDesc,
     diagnostics: &mut GeneratedOutdoorSceneryDiagnostics,
 ) -> Result<Vec<GeneratedOutdoorSceneryInstance>> {
+    validate_land_height_table(&region.land_defs.land_height_table)?;
     let mut instances = Vec::new();
     let mut occupied_points = landblock_info
         .into_iter()
@@ -547,7 +548,12 @@ fn derive_generated_scenery(
                 continue;
             }
 
-            let terrain_sample = sample_landblock_terrain(landblock, local_x, local_y);
+            let terrain_sample = sample_landblock_terrain(
+                landblock,
+                &region.land_defs.land_height_table,
+                local_x,
+                local_y,
+            )?;
             if !generated_template_matches_slope(template, terrain_sample.normal_z) {
                 diagnostics.rejected_slope += 1;
                 continue;
@@ -950,15 +956,37 @@ fn get_road(landblock: &CellLandblock, x: i32, y: i32) -> u16 {
     landblock.terrain[x as usize * 9 + y as usize] & 0x03
 }
 
-fn sample_landblock_terrain(landblock: &CellLandblock, x: f32, y: f32) -> TerrainSample {
+fn validate_land_height_table(land_height_table: &[f32; 256]) -> Result<()> {
+    if land_height_table.iter().all(|height| height.is_finite()) {
+        return Ok(());
+    }
+
+    anyhow::bail!("RegionDesc LandDefs.LandHeightTable contains a non-finite height")
+}
+
+fn sample_landblock_terrain(
+    landblock: &CellLandblock,
+    land_height_table: &[f32; 256],
+    x: f32,
+    y: f32,
+) -> Result<TerrainSample> {
     let cell_x = (x / GENERATED_SCENERY_CELL_SIZE).floor().clamp(0.0, 7.0) as usize;
     let cell_y = (y / GENERATED_SCENERY_CELL_SIZE).floor().clamp(0.0, 7.0) as usize;
     let local_x = (x - cell_x as f32 * GENERATED_SCENERY_CELL_SIZE) / GENERATED_SCENERY_CELL_SIZE;
     let local_y = (y - cell_y as f32 * GENERATED_SCENERY_CELL_SIZE) / GENERATED_SCENERY_CELL_SIZE;
-    let h00 = landblock.get_height(cell_x, cell_y);
-    let h10 = landblock.get_height(cell_x + 1, cell_y);
-    let h01 = landblock.get_height(cell_x, cell_y + 1);
-    let h11 = landblock.get_height(cell_x + 1, cell_y + 1);
+    let height_at = |vertex_x, vertex_y| {
+        let height_index = landblock.height_index(vertex_x, vertex_y).ok_or_else(|| {
+            anyhow::anyhow!(
+                "CellLandblock 0x{:08X} is missing height index at ({vertex_x}, {vertex_y})",
+                landblock.id
+            )
+        })?;
+        Ok::<f32, anyhow::Error>(land_height_table[usize::from(height_index)])
+    };
+    let h00 = height_at(cell_x, cell_y)?;
+    let h10 = height_at(cell_x + 1, cell_y)?;
+    let h01 = height_at(cell_x, cell_y + 1)?;
+    let h11 = height_at(cell_x + 1, cell_y + 1)?;
     let west = h00 + (h01 - h00) * local_y;
     let east = h10 + (h11 - h10) * local_y;
     let height = west + (east - west) * local_x;
@@ -967,11 +995,11 @@ fn sample_landblock_terrain(landblock: &CellLandblock, x: f32, y: f32) -> Terrai
     let north = h01 + (h11 - h01) * local_x;
     let dz_dy = (north - south) / GENERATED_SCENERY_CELL_SIZE;
     let normal = Vector3::new(-dz_dx, -dz_dy, 1.0).normalize();
-    TerrainSample {
+    Ok(TerrainSample {
         height,
         normal,
         normal_z: normal.z,
-    }
+    })
 }
 
 fn generated_template_matches_slope(template: &SceneObjectTemplate, normal_z: f32) -> bool {

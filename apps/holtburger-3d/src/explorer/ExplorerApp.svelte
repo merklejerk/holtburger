@@ -7,43 +7,35 @@
 	import { GameRuntime } from "../lib/game/runtime/game-runtime";
 	import { StandardCommitPipeline } from "../lib/game/commit/pipeline";
 	import { WebGL2Device } from "../lib/game/renderer/webgl2-device";
-	import { TauriAssetBridge } from "../lib/assets/tauri-asset-bridge";
-	import type { LandblockId } from "../lib/game/game-types";
-	import type { Vec3 } from "../lib/game/math/types";
+	import { TauriLandblockTerrainSource } from "../lib/assets/tauri-landblock-terrain-source";
+	import { TauriTexturePixelSource } from "../lib/assets/tauri-texture-pixel-source";
+	import type { LoDConfig } from "../lib/game/runtime/types";
 	import type { SceneResidency } from "../lib/game/scene";
-	import type { Camera } from "../lib/game/runtime/types";
+	import {
+		ExplorerCameraCoordinator,
+		type ExplorerCameraFocusStatus,
+	} from "./explorer-camera-coordinator";
+	import { FreeFlyCameraController } from "./free-fly-camera-controller";
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let frameHandle: number | null = null;
 	let gameRuntime: GameRuntime | undefined;
 	let commitPipeline: StandardCommitPipeline | undefined;
 	let webglDevice: WebGL2Device | undefined;
+	let cameraController: FreeFlyCameraController | undefined;
+	let cameraCoordinator: ExplorerCameraCoordinator | undefined;
 	let frameMetrics: FrameMetrics | null = $state(null);
 	let startupError: string | null = $state(null);
 	let runtimeReady = $state(false);
+	let cameraFocusStatus = $state<ExplorerCameraFocusStatus>(
+		"No camera focus requested.",
+	);
 
 	function requestSceneInterest(
-		anchorLandblockId: LandblockId,
-		includeEnvCells: boolean,
+		residency: SceneResidency,
+		lod: LoDConfig,
 	): void {
-		gameRuntime?.updateSceneInterest({
-			anchorLandblockId,
-			lod: {
-				buildingRadius: null,
-				envCellRadius: includeEnvCells ? 0 : null,
-				explicitObjectRadius: null,
-				generatedObjectRadius: null,
-				terrainRadius: 2,
-			},
-		});
-	}
-
-	function queryWorldPointResidency(point: Vec3): SceneResidency | null {
-		return gameRuntime?.queryWorldPointResidency(point) ?? null;
-	}
-
-	function setPrimaryCamera(camera: Camera): void {
-		gameRuntime?.setPrimaryCamera(camera);
+		cameraCoordinator?.requestSceneInterest(residency, lod);
 	}
 
 	onMount(() => {
@@ -66,12 +58,18 @@
 			const runtime = gameRuntime;
 			const pipeline = commitPipeline;
 			const device = webglDevice;
+			const coordinator = cameraCoordinator;
+			const controller = cameraController;
 			gameRuntime = undefined;
 			runtimeReady = false;
 			commitPipeline = undefined;
 			webglDevice = undefined;
+			cameraCoordinator = undefined;
+			cameraController = undefined;
 			teardown = (async () => {
 				stopFrameLoop();
+				coordinator?.dispose();
+				controller?.dispose();
 				try {
 					await runtime?.destroy();
 				} finally {
@@ -87,18 +85,30 @@
 
 		const start = async (): Promise<void> => {
 			try {
-				const hostAssets = TauriAssetBridge.build();
+				const terrainSource = TauriLandblockTerrainSource.build();
+				const texturePixelSource = TauriTexturePixelSource.build();
 				webglDevice = await WebGL2Device.build(canvasElement!);
 				if (destroyed) return;
-				commitPipeline = await StandardCommitPipeline.build(hostAssets);
+				commitPipeline = await StandardCommitPipeline.build(terrainSource);
 				if (destroyed) return;
 
 				gameRuntime = await GameRuntime.build(
 					webglDevice,
 					commitPipeline,
-					hostAssets,
+					texturePixelSource,
 				);
 				if (destroyed) return;
+				cameraController = new FreeFlyCameraController({
+					canvas: canvasElement!,
+					onChange(state) {
+						cameraCoordinator?.handleCameraState(state);
+					},
+				});
+				cameraCoordinator = new ExplorerCameraCoordinator(
+					gameRuntime,
+					cameraController,
+					(status) => (cameraFocusStatus = status),
+				);
 				runtimeReady = true;
 
 				const step = (): void => {
@@ -109,8 +119,9 @@
 					}
 
 					const tickStartedAt = performance.now();
-					gameRuntime.frame(performance.now() / 1_000);
+					gameRuntime.tick();
 					const drawStartedAt = performance.now();
+					gameRuntime.render(performance.now() / 1_000);
 					const frameFinishedAt = performance.now();
 
 					frameMetrics = {
@@ -149,6 +160,7 @@
 		bind:this={canvasElement}
 		class="explorer-canvas"
 		aria-label="Explorer render viewport"
+		tabindex="0"
 	></canvas>
 
 	<div class="explorer-overlay">
@@ -159,11 +171,6 @@
 		{/if}
 
 		<FrameMetricsOverlay metrics={frameMetrics} />
-		<ExplorerTools
-			{runtimeReady}
-			{requestSceneInterest}
-			{queryWorldPointResidency}
-			{setPrimaryCamera}
-		/>
+		<ExplorerTools {runtimeReady} {requestSceneInterest} {cameraFocusStatus} />
 	</div>
 </div>

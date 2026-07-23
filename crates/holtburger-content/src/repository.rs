@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, anyhow};
 use binrw::{BinRead, Endian};
+use directories::ProjectDirs;
 use holtburger_dat::{
     HbaReader, LayeredResourceResolver, ResourceKey, ResourceSource, StaticResourceKey,
     file_type::ChatPoseTable,
@@ -12,6 +13,49 @@ use std::sync::Arc;
 
 use crate::SoulEmoteCatalog;
 use crate::material_capabilities::{MaterialArchiveCapabilityReport, RepositoryResourceIndexEntry};
+
+const HOLTBURGER_DATS_ENV: &str = "HOLTBURGER_DATS";
+
+/// Ordered candidate locations used to discover installed or portable HBA content.
+///
+/// Explicit application configuration wins, followed by the package/environment override, a
+/// portable `./dats` directory, and the platform project-data directory. The candidates are kept
+/// separate from repository mounts so callers can inject an already-constructed repository in
+/// tests and alternate hosts.
+#[derive(Clone, Debug)]
+struct ContentRepositoryDiscovery {
+    explicit_path: Option<PathBuf>,
+    environment_path: Option<PathBuf>,
+    portable_path: PathBuf,
+    platform_data_path: Option<PathBuf>,
+}
+
+impl ContentRepositoryDiscovery {
+    fn from_system(explicit_path: Option<PathBuf>) -> Self {
+        Self {
+            explicit_path,
+            environment_path: std::env::var_os(HOLTBURGER_DATS_ENV).map(PathBuf::from),
+            portable_path: PathBuf::from("./dats"),
+            platform_data_path: ProjectDirs::from("io.github", "merklejerk", "holtburger")
+                .map(|dirs| dirs.data_dir().join("dats")),
+        }
+    }
+
+    fn resolve_path(&self) -> PathBuf {
+        self.explicit_path
+            .clone()
+            .or_else(|| self.environment_path.clone())
+            .unwrap_or_else(|| {
+                if self.portable_path.exists() {
+                    self.portable_path.clone()
+                } else {
+                    self.platform_data_path
+                        .clone()
+                        .unwrap_or_else(|| self.portable_path.clone())
+                }
+            })
+    }
+}
 
 pub struct ContentRepository {
     mounts: Vec<Arc<dyn ResourceSource>>,
@@ -38,6 +82,20 @@ impl std::fmt::Debug for ContentRepository {
 }
 
 impl ContentRepository {
+    /// Discovers and opens client content using Holtburger's shared installation policy.
+    ///
+    /// The optional path is an application-supplied override. Without one, discovery checks
+    /// `HOLTBURGER_DATS`, `./dats`, then the platform data directory. A selected directory mounts
+    /// every HBA in that directory; any other selected path resolves as an HBA file or base path.
+    pub fn discover(explicit_path: Option<PathBuf>) -> Result<Self> {
+        let path = ContentRepositoryDiscovery::from_system(explicit_path).resolve_path();
+        if path.is_dir() {
+            Self::from_hba_dir(path)
+        } else {
+            Self::from_hba_path(path)
+        }
+    }
+
     pub fn from_hba_path(path: impl Into<PathBuf>) -> Result<Self> {
         let path = path.into();
         let mut mounts = Vec::new();
@@ -330,6 +388,73 @@ mod tests {
 
     fn repo_assets_hba_path() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/assets.hba")
+    }
+
+    #[test]
+    fn content_discovery_preserves_cli_precedence() {
+        let root = tempdir().expect("tempdir should be created");
+        let portable_path = root.path().join("portable-dats");
+        let platform_data_path = root.path().join("platform-dats");
+        let explicit_path = root.path().join("explicit.hba");
+        let environment_path = root.path().join("environment.hba");
+
+        let mut discovery = ContentRepositoryDiscovery {
+            explicit_path: Some(explicit_path.clone()),
+            environment_path: Some(environment_path.clone()),
+            portable_path: portable_path.clone(),
+            platform_data_path: Some(platform_data_path.clone()),
+        };
+        assert_eq!(discovery.resolve_path(), explicit_path);
+
+        discovery.explicit_path = None;
+        assert_eq!(discovery.resolve_path(), environment_path);
+
+        discovery.environment_path = None;
+        assert_eq!(discovery.resolve_path(), platform_data_path);
+
+        std::fs::create_dir(&portable_path).expect("portable directory should be created");
+        assert_eq!(discovery.resolve_path(), portable_path);
+    }
+
+    #[test]
+    fn surface_texture_pixels_selects_the_first_available_source_level() {
+        let directory = tempdir().expect("temporary directory should be created");
+        let path = directory.path().join("texture-levels.hba");
+        let mut writer = HbaWriter::new();
+        writer.set_compression(false);
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0500_0001,
+                DatFileType::SurfaceTexture as u32,
+                surface_texture_bytes(0x0500_0001, &[0x0600_DEAD, 0x0600_0001]),
+            )
+            .expect("surface texture should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0600_0001,
+                DatFileType::Texture as u32,
+                render_surface_bytes(
+                    0x0600_0001,
+                    PixelFormatId::A8R8G8B8,
+                    &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+                    None,
+                ),
+            )
+            .expect("available render surface should be added");
+        writer.write(&path).expect("test HBA should be written");
+
+        let repository =
+            ContentRepository::from_hba_path(&path).expect("test repository should be opened");
+        let pixels = repository
+            .resolve_surface_texture_pixels(0x0500_0001, crate::TexturePixelFormat::Rgba8)
+            .expect("available source level should resolve");
+
+        assert_eq!(pixels.render_surface_id, 0x0600_0001);
+        assert_eq!(pixels.width, 2);
+        assert_eq!(pixels.height, 2);
+        assert_eq!(pixels.pixels[0..4], [3, 2, 1, 4]);
     }
 
     fn test_motion_kinematics_bytes() -> Vec<u8> {

@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AssetBridge } from "../../assets/asset-bridge";
-import type { LandblockIdLayer } from "../runtime/scene-interest";
-import type { ResolvedLandblockLayerSource } from "../resolution/landblock-layer";
+import type { TexturePixelSource } from "../../assets/texture-pixel-source";
 import {
 	createAssetTextureKey,
 	type AssetTextureFact,
@@ -22,7 +20,7 @@ const DETAIL_TEXTURE: AssetTextureFact = {
 
 describe("WorkerTexturePreparer", () => {
 	it("coalesces concurrent preparation for one stable texture key", async () => {
-		const assets = new DeferredAssetBridge(createDetailSurface());
+		const assets = new DeferredTexturePixelSource(createDetailSurface());
 		const preparer = await WorkerTexturePreparer.build(assets);
 
 		const first = preparer.prepare(DETAIL_TEXTURE);
@@ -51,7 +49,7 @@ describe("WorkerTexturePreparer", () => {
 	});
 });
 
-class DeferredAssetBridge implements AssetBridge {
+class DeferredTexturePixelSource implements TexturePixelSource {
 	readonly requests = [];
 	#resolve: (() => void) | undefined;
 	readonly #surface: PreparedTextureSurface;
@@ -63,13 +61,7 @@ class DeferredAssetBridge implements AssetBridge {
 		this.#surface = surface;
 	}
 
-	async resolveLandblockLayer(
-		layer: LandblockIdLayer,
-	): Promise<ResolvedLandblockLayerSource> {
-		throw new Error(`Unexpected landblock resolution for ${layer.id}.`);
-	}
-
-	async requestTexturePreparationAsset(request: {
+	async loadTexturePixels(request: {
 		readonly kind: "prepared-texture-surface";
 		readonly purpose: TexturePurpose;
 		readonly sourceAssetId: string;

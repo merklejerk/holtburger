@@ -61,9 +61,9 @@
 	});
 
 	const formatMs = (value: number): string => value.toFixed(2);
-	const fps = $derived(
-		smoothedMetrics === null ? 0 : 1000 / Math.max(smoothedMetrics.frameMs, 0.001),
-	);
+	const calculateFramesPerSecond = (value: FrameMetrics | null): number =>
+		value === null ? 0 : 1000 / Math.max(value.frameMs, 0.001);
+	const fps = $derived(calculateFramesPerSecond(smoothedMetrics));
 	const displayFps = $derived(
 		fps > MAX_DISPLAY_FPS ? `${MAX_DISPLAY_FPS}+` : fps.toFixed(0),
 	);
@@ -71,6 +71,8 @@
 
 {#if smoothedMetrics !== null}
 	<aside class="frame-metrics-overlay" aria-label="Frame metrics">
-		{displayFps} fps | tick {formatMs(smoothedMetrics.tickMs)} ms | draw {formatMs(smoothedMetrics.updateFrameMs)} ms | frame {formatMs(smoothedMetrics.frameMs)} ms
+		{displayFps} fps | tick {formatMs(smoothedMetrics.tickMs)} ms | draw {formatMs(
+			smoothedMetrics.updateFrameMs,
+		)} ms | frame {formatMs(smoothedMetrics.frameMs)} ms
 	</aside>
 {/if}

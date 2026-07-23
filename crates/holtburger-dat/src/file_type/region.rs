@@ -11,6 +11,7 @@ pub struct RegionDesc {
     pub region_number: u32,
     pub version: u32,
     pub region_name: String,
+    pub land_defs: LandDefs,
     pub scene_info: SceneDesc,
     pub terrain_info: TerrainDesc,
 }
@@ -23,7 +24,7 @@ impl RegionDesc {
         let version = u32::read_le(&mut reader)?;
         let region_name = read_aligned_pstring(&mut reader)?;
 
-        skip_land_defs(&mut reader)?;
+        let land_defs = read_land_defs(&mut reader)?;
         skip_game_time(&mut reader)?;
 
         let parts_mask = u32::read_le(&mut reader)?;
@@ -46,10 +47,21 @@ impl RegionDesc {
             region_number,
             version,
             region_name,
+            land_defs,
             scene_info,
             terrain_info,
         })
     }
+}
+
+/// Region-wide land geometry constants and authored height lookup table.
+///
+/// A `CellLandblock` stores a byte index into `land_height_table`, rather than a height value.
+/// The remaining on-disk LandDefs values are currently not consumed by Holtburger, so the decoder
+/// advances over them while retaining the table that gives those indices their meaning.
+#[derive(Debug, Clone)]
+pub struct LandDefs {
+    pub land_height_table: [f32; 256],
 }
 
 #[derive(Debug, Clone, Default)]
@@ -175,8 +187,15 @@ fn read_aligned_pstring<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<Stri
     Ok(value)
 }
 
-fn skip_land_defs<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<()> {
-    skip_bytes(reader, 32 + 256 * 4)
+fn read_land_defs<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<LandDefs> {
+    // Eight scalar fields precede the fixed 256-entry height table. See ACE's
+    // `Entity/LandDefs.cs` for the authoritative field layout.
+    skip_bytes(reader, 32)?;
+    let mut land_height_table = [0.0; 256];
+    for height in &mut land_height_table {
+        *height = f32::read_le(reader)?;
+    }
+    Ok(LandDefs { land_height_table })
 }
 
 fn skip_game_time<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<()> {

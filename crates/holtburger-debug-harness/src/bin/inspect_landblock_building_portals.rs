@@ -3,9 +3,8 @@ use clap::Parser;
 use holtburger_content::{
     ContentDecodeCache, ContentRepository, EnvCellSystemAssetAssembler,
     LandblockOutdoorStaticMember, LandblockSceneLodAsset, LandblockSceneLodAssetAssembler,
-    LandblockSceneLodContext, LandblockSceneLodLayer, LandblockSceneLodLevel,
-    LandblockSceneLodRequest, PreparedAabb, PreparedBuildingTransitionAperture, PreparedVec3,
-    normalize_landblock_id,
+    LandblockSceneLodLayer, LandblockSceneLodLevel, LandblockSceneLodRequest, PreparedAabb,
+    PreparedBuildingTransitionAperture, PreparedVec3, normalize_landblock_id,
 };
 use holtburger_dat::graphics::Frame;
 use std::collections::{BTreeMap, BTreeSet};
@@ -38,7 +37,6 @@ fn main() -> Result<()> {
         LandblockSceneLodRequest {
             landblock_id,
             level: LandblockSceneLodLevel::Level4,
-            context: LandblockSceneLodContext::Outdoor,
         },
     );
     let env_asset = EnvCellSystemAssetAssembler::new().assemble_landblock_with_cache(

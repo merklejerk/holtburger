@@ -643,7 +643,8 @@ impl HostBoundaryAdapter {
             | ContentAssetRequest::EnvCell(_)
             | ContentAssetRequest::GfxObj(_)
             | ContentAssetRequest::RenderSurface(_)
-            | ContentAssetRequest::Palette(_) => {
+            | ContentAssetRequest::Palette(_)
+            | ContentAssetRequest::SurfaceTexturePixels(_) => {
                 unreachable!("binary-routed content request passed direct JSON rejection")
             }
         })
@@ -995,6 +996,10 @@ fn binary_asset_lookup_required_message(
         )),
         ContentAssetRequest::Palette(palette_id) => Some(format!(
             "palette 0x{palette_id:08X} for {asset_id} requires binary asset lookup"
+        )),
+        ContentAssetRequest::SurfaceTexturePixels(request) => Some(format!(
+            "surface-texture pixels 0x{:08X} for {asset_id} require the typed terrain pixel source",
+            request.surface_texture_id
         )),
         ContentAssetRequest::TerrainMaterial(_)
         | ContentAssetRequest::RegionRenderProfile(_)

@@ -1,6 +1,7 @@
 import type { AABB3, Mat4, Vec3 } from "../math/types";
-import type { EnvCellId, LandblockId } from "../game-types";
+import type { EnvCellId } from "../game-types";
 import { multiplyMat4, transformAABB3 } from "../math/matrices";
+import { containsPoint, translateBounds } from "../math/geometry-utils";
 import {
 	createLandblockWorldOrigin,
 	landblockAtWorldPoint,
@@ -20,6 +21,8 @@ import type {
 	VisibleScene,
 	VisibleSceneEntry,
 } from ".";
+import { scopeFor, sameScope, scopeKey } from "./scope";
+import { createSceneNodeId } from "./utils";
 
 type SceneNodeRecord = {
 	id: SceneNodeId;
@@ -212,6 +215,16 @@ export class SceneGraph {
 			: { envCellId: null, landblockId };
 	}
 
+	/** Return the current world-space bounds for one installed environment-cell scope. */
+	queryEnvCellBounds(envCellId: EnvCellId): AABB3 | null {
+		const scope = this.#envCellScopes.get(envCellId);
+		if (!scope?.landblockBounds) return null;
+		return translateBounds(
+			scope.landblockBounds,
+			createLandblockWorldOrigin(scope.scope.landblockId),
+		);
+	}
+
 	/** Resolve inherited residency and flatten one node transform into landblock-local coordinates. */
 	#resolvePlacement(nodeId: SceneNodeId): ResolvedScenePlacement {
 		let node = this.#requireNode(nodeId);
@@ -292,47 +305,6 @@ export class SceneGraph {
 	}
 }
 
-function containsPoint(bounds: AABB3, point: Vec3): boolean {
-	return (
-		point.x >= bounds.min.x &&
-		point.x <= bounds.max.x &&
-		point.y >= bounds.min.y &&
-		point.y <= bounds.max.y &&
-		point.z >= bounds.min.z &&
-		point.z <= bounds.max.z
-	);
-}
-
-function translateBounds(bounds: AABB3, translation: Vec3): AABB3 {
-	return {
-		min: bounds.min.add(translation),
-		max: bounds.max.add(translation),
-	};
-}
-
-function scopeFor(
-	landblockId: LandblockId,
-	envCellId: EnvCellId | null,
-): SceneScope {
-	return envCellId === null
-		? { kind: "outdoor", landblockId }
-		: { envCellId, kind: "env-cell", landblockId };
-}
-
-function sameScope(left: SceneScope, right: SceneScope): boolean {
-	if (left.kind !== right.kind || left.landblockId !== right.landblockId) {
-		return false;
-	}
-	if (left.kind === "outdoor") return true;
-	return right.kind === "env-cell" && left.envCellId === right.envCellId;
-}
-
-function scopeKey(scope: SceneScope): string {
-	return scope.kind === "outdoor"
-		? `outdoor:${scope.landblockId}`
-		: `env-cell:${scope.landblockId}/${scope.envCellId}`;
-}
-
 function createSceneNodeRecord(
 	nodeId: SceneNodeId,
 	input: SceneNodeInput,
@@ -355,8 +327,4 @@ function createSceneNodeRecord(
 		...fields,
 		parentId: input.parentId,
 	};
-}
-
-function createSceneNodeId(id: number): SceneNodeId {
-	return `scene-node:${id}`;
 }

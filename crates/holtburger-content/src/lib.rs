@@ -8,20 +8,21 @@ pub mod repository;
 pub mod soul_emote;
 mod source_reader;
 pub mod static_outdoor_scene;
+pub mod texture_pixels;
 
 pub use character_gen::CharacterGenCatalog;
 pub use decode_cache::ContentDecodeCache;
 pub use landblock_scene_assets::{
-    CellLandblockFact, EnvCellAsset, EnvCellAssetAssembler, EnvCellFact, EnvCellPortalFact,
-    EnvCellSystemAsset, EnvCellSystemAssetAssembler, EnvCellSystemBvhItem,
+    CanonicalTerrainMesh, CellLandblockFact, EnvCellAsset, EnvCellAssetAssembler, EnvCellFact,
+    EnvCellPortalFact, EnvCellSystemAsset, EnvCellSystemAssetAssembler, EnvCellSystemBvhItem,
     EnvCellSystemBvhItemSource, EnvCellSystemCell, EnvironmentFact, IndoorStaticObjectFact,
     LandblockBuildingPortal, LandblockGeneratedSceneryFacts, LandblockInfoFact,
     LandblockOutdoorAsset, LandblockOutdoorBuildingFacts, LandblockOutdoorStaticMember,
     LandblockRestriction, LandblockSceneLodAsset, LandblockSceneLodAssetAssembler,
-    LandblockSceneLodContext, LandblockSceneLodEnvCellSystemLayer, LandblockSceneLodLayer,
-    LandblockSceneLodLevel, LandblockSceneLodOutdoorBuildingsLayer,
-    LandblockSceneLodOutdoorStaticLayer, LandblockSceneLodRequest, LandblockSceneLodTerrainLayer,
-    PreparedAabb, PreparedBuildingTransitionAperture, PreparedBuildingTransitionApertureRange,
+    LandblockSceneLodEnvCellSystemLayer, LandblockSceneLodLayer, LandblockSceneLodLevel,
+    LandblockSceneLodOutdoorBuildingsLayer, LandblockSceneLodOutdoorStaticLayer,
+    LandblockSceneLodRequest, LandblockSceneLodTerrainLayer, PreparedAabb,
+    PreparedBuildingTransitionAperture, PreparedBuildingTransitionApertureRange,
     PreparedBuildingTransitionApertureRangeSource, PreparedBvh, PreparedBvhKindMask,
     PreparedBvhNode, PreparedBvhScope, PreparedContentSourceDiagnostics,
     PreparedEnvCellPortalApertureRange, PreparedEnvCellPortalApertureRangeSource,
@@ -33,9 +34,9 @@ pub use landblock_scene_assets::{
     PreparedPortalConnectivityEdgeProvenance, PreparedPortalConnectivityGraph,
     PreparedPortalConnectivityNode, PreparedPortalConnectivityScene,
     PreparedPortalConnectivitySceneCrossing, PreparedPortalEndpoint, PreparedStaticInstance,
-    PreparedStaticInstanceKind, PreparedStaticMesh, PreparedTerrainBvhItem, PreparedTerrainMesh,
-    PreparedTerrainQuad, PreparedTerrainQuadDiagonal, PreparedTerrainTriangle, PreparedVec3,
-    SourceLoadError, SourceOmissionDiagnostic, SourceRecordDiagnostic, SourceRecordStatus,
+    PreparedStaticInstanceKind, PreparedStaticMesh, PreparedTerrainBvhItem, PreparedTerrainQuad,
+    PreparedTerrainQuadDiagonal, PreparedTerrainTriangle, PreparedVec3, SourceLoadError,
+    SourceOmissionDiagnostic, SourceRecordDiagnostic, SourceRecordStatus, TerrainGridSource,
     build_gfx_obj_render_geometry, format_static_object_source_asset_id, pad_bvh_bounds,
     road_code_from_cell_terrain, terrain_code_from_cell_terrain, terrain_pcode,
 };
@@ -64,3 +65,4 @@ pub use static_outdoor_scene::{
     StaticRenderableSourceFamily, StaticRenderableSourceRef, normalize_landblock_env_cell_id,
     normalize_landblock_id,
 };
+pub use texture_pixels::{ResolvedSurfaceTexturePixels, TexturePixelFormat};

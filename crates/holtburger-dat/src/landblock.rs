@@ -65,13 +65,12 @@ impl CellLandblock {
         Ok(lb)
     }
 
-    /// Returns height at (x, y) vertex in landblock [0, 8]
-    pub fn get_height(&self, x: usize, y: usize) -> f32 {
-        if x > 8 || y > 8 {
-            return 0.0;
-        }
-        let idx = x * 9 + y;
-        self.height[idx] as f32 * 2.0
+    /// Returns the authored region height-table index at the given vertex.
+    ///
+    /// `CellLandblock` does not contain enough information to resolve this index to a world-space
+    /// height. Callers must use the active `RegionDesc::land_defs.land_height_table`.
+    pub fn height_index(&self, x: usize, y: usize) -> Option<u8> {
+        self.height.get(x.checked_mul(9)?.checked_add(y)?).copied()
     }
 }
 

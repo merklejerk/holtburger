@@ -117,6 +117,20 @@ describe("TextureManager", () => {
 		expect(resources.releasedResources).toEqual(["texture-2d-resource:0"]);
 	});
 
+	it("does not materialize a texture after its final owner withdraws mid-prepare", async () => {
+		const resources = new FakeRendererResourceManager();
+		const preparer = new DeferredTexturePreparer();
+		const textures = createTextureManager(resources, preparer);
+
+		const retaining = textures.retain("terrain:a", [STANDALONE_FACT]);
+		textures.dropOwner("terrain:a");
+		preparer.resolve(STANDALONE_FACT);
+		await retaining;
+
+		expect(resources.texture2DUploads).toEqual([]);
+		expect(textures.hasTexture(STANDALONE_KEY)).toBe(false);
+	});
+
 	it("retains every atlas entry through its owning page", () => {
 		const resources = new FakeRendererResourceManager();
 		const textures = createTextureManager(resources);
@@ -153,12 +167,41 @@ describe("TextureManager", () => {
 		textures.dropOwner("terrain:a");
 		expect(resources.releasedResources).toEqual(["texture-2d-resource:0"]);
 	});
+
+	it("keeps independently reserved generated textures after an asset retain fails", async () => {
+		const resources = new FakeRendererResourceManager();
+		const textures = createTextureManager(resources, new RejectingTexturePreparer());
+		const key = createTerrainSurfaceTextureKey("0x1111ffff", 1);
+		textures.reserveKeys("terrain:a", [key]);
+		textures.upsertGeneratedTextures([
+			{
+				key,
+				upload: {
+					data: new Uint32Array(64),
+					format: IntegerTexture2DFormat.R32UI,
+					height: 8,
+					mipLevels: 1,
+					width: 8,
+				},
+			},
+		]);
+
+		await textures.retain("terrain:a", [STANDALONE_FACT]);
+
+		expect(textures.hasTexture(key)).toBe(true);
+		expect(textures.hasTexture(STANDALONE_KEY)).toBe(false);
+		expect(resources.releasedResources).toEqual([]);
+
+		textures.dropOwner("terrain:a");
+		expect(resources.releasedResources).toEqual(["texture-2d-resource:0"]);
+	});
 });
 
 function createTextureManager(
 	resources: RendererResourceManager,
+	preparer: TexturePreparer = new FixtureTexturePreparer(),
 ): TextureManager<string> {
-	return new TextureManager(resources, new FixtureTexturePreparer());
+	return new TextureManager(resources, preparer);
 }
 
 function createPage(): TexturePageDescription {
@@ -210,6 +253,37 @@ class FixtureTexturePreparer implements TexturePreparer {
 			purpose: fact.purpose,
 			width: 2,
 		});
+	}
+
+	async destroy(): Promise<void> {}
+}
+
+class DeferredTexturePreparer implements TexturePreparer {
+	#resolve: ((source: Awaited<ReturnType<FixtureTexturePreparer["prepare"]>>) => void) | null =
+		null;
+
+	prepare(fact: TextureFact) {
+		return new Promise<Awaited<ReturnType<FixtureTexturePreparer["prepare"]>>>(
+			(resolve) => {
+				this.#resolve = resolve;
+			},
+		);
+	}
+
+	resolve(fact: TextureFact): void {
+		if (!this.#resolve) throw new Error("Texture preparation is not pending.");
+		const resolve = this.#resolve;
+		this.#resolve = null;
+		void new FixtureTexturePreparer().prepare(fact).then(resolve);
+	}
+
+	async destroy(): Promise<void> {}
+}
+
+class RejectingTexturePreparer implements TexturePreparer {
+	async prepare(fact: TextureFact): Promise<never> {
+		void fact;
+		throw new Error("Synthetic asset texture preparation failure.");
 	}
 
 	async destroy(): Promise<void> {}

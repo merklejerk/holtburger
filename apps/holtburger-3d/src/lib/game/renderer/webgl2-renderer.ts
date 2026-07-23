@@ -46,8 +46,6 @@ interface PreparedView {
 	readonly projection: Mat4;
 	/** Terrain selected by this renderer from its RenderWorld. */
 	readonly terrain: readonly TerrainFrameInput[];
-	/** Anchor-relative camera position used by detail-distance presentation policy. */
-	readonly cameraPosition: Vec3;
 	/** Anchor-relative camera view transform. */
 	readonly view: Mat4;
 	/** Landblock defining the view's render-world origin. */
@@ -129,7 +127,6 @@ export class WebGL2Renderer implements Renderer {
 		const aspectRatio = this.#frameWidth / Math.max(1, this.#frameHeight);
 		return {
 			anchorLandblockId,
-			cameraPosition,
 			projection: createPerspectiveMat4(
 				camera.fov,
 				aspectRatio,
@@ -211,12 +208,6 @@ export class WebGL2Renderer implements Renderer {
 			this.#terrainProgram.uniforms.view,
 			false,
 			mat4ToFloat32Array(view.view),
-		);
-		gl.uniform3f(
-			this.#terrainProgram.uniforms.cameraPosition,
-			view.cameraPosition.x,
-			view.cameraPosition.y,
-			view.cameraPosition.z,
 		);
 		gl.uniform1f(this.#terrainProgram.uniforms.detailFadeNear, DETAIL_FADE_NEAR);
 		gl.uniform1f(this.#terrainProgram.uniforms.detailFadeFar, DETAIL_FADE_FAR);

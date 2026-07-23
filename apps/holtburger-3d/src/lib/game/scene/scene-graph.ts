@@ -1,6 +1,10 @@
-import type { AABB3, Mat4 } from "../math/types";
+import type { AABB3, Mat4, Vec3 } from "../math/types";
 import type { EnvCellId, LandblockId } from "../game-types";
 import { multiplyMat4, transformAABB3 } from "../math/matrices";
+import {
+	createLandblockWorldOrigin,
+	landblockAtWorldPoint,
+} from "../landblocks";
 import type { Camera } from "../runtime/types";
 import type {
 	SceneNode,
@@ -12,6 +16,7 @@ import type {
 	SceneScope,
 	PortalCrossingId,
 	ResolvedScenePlacement,
+	SceneResidency,
 	VisibleScene,
 	VisibleSceneEntry,
 } from ".";
@@ -176,6 +181,37 @@ export class SceneGraph {
 		};
 	}
 
+	/**
+	 * Resolve one canonical scene-space point against currently resident scopes.
+	 *
+	 * Environment-cell containment is conservatively bounds-based until prepared
+	 * BSP queries are available. Overlapping bounds select the first resident
+	 * scope in stable scene insertion order.
+	 */
+	queryWorldPointResidency(point: Vec3): SceneResidency | null {
+		const landblockId = landblockAtWorldPoint(point);
+		if (!landblockId) return null;
+
+		const containingCell = [...this.#envCellScopes.values()].find(
+			({ landblockBounds, scope }) =>
+				scope.landblockId === landblockId &&
+				landblockBounds !== null &&
+				containsPoint(
+					translateBounds(
+						landblockBounds,
+						createLandblockWorldOrigin(scope.landblockId),
+					),
+					point,
+				),
+		);
+		return containingCell
+			? {
+					envCellId: containingCell.scope.envCellId,
+					landblockId: containingCell.scope.landblockId,
+				}
+			: { envCellId: null, landblockId };
+	}
+
 	/** Resolve inherited residency and flatten one node transform into landblock-local coordinates. */
 	#resolvePlacement(nodeId: SceneNodeId): ResolvedScenePlacement {
 		let node = this.#requireNode(nodeId);
@@ -254,6 +290,24 @@ export class SceneGraph {
 		}
 		return reachable;
 	}
+}
+
+function containsPoint(bounds: AABB3, point: Vec3): boolean {
+	return (
+		point.x >= bounds.min.x &&
+		point.x <= bounds.max.x &&
+		point.y >= bounds.min.y &&
+		point.y <= bounds.max.y &&
+		point.z >= bounds.min.z &&
+		point.z <= bounds.max.z
+	);
+}
+
+function translateBounds(bounds: AABB3, translation: Vec3): AABB3 {
+	return {
+		min: bounds.min.add(translation),
+		max: bounds.max.add(translation),
+	};
 }
 
 function scopeFor(

@@ -13,7 +13,7 @@ import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
 import type { Renderer } from "../renderer/renderer";
 import { RenderWorld } from "../renderer/render-world";
 import type { RendererResourceManager } from "../renderer/resource-manager";
-import { SceneGraph, type ScenePlacement } from "../scene";
+import { SceneGraph, type ScenePlacement, type SceneResidency } from "../scene";
 import {
 	WorkerTerrainGenerator,
 	type TerrainGenerator,
@@ -46,17 +46,10 @@ import {
 	LandblockLayerKind,
 	type LandblockIdLayer,
 	type SceneInterestMap,
+	type SceneInterestRequest,
 	validateLoDConfigOrThrow,
 } from "./scene-interest";
-import type { Camera, LoDConfig } from "./types";
-
-const DEFAULT_LOD_CONFIG: LoDConfig = {
-	landblockRadius: 4,
-	buildingRadius: 3,
-	explicitObjectRadius: 1,
-	generatedObjectRadius: 1,
-	envCellRadius: 1,
-};
+import type { Camera } from "./types";
 
 const DEFAULT_CAMERA: Camera = {
 	near: 0.5,
@@ -119,11 +112,7 @@ export class GameRuntime {
 	readonly #commitArtifacts: CommitBundle[] = [];
 	/** Current primary-view input used for visibility and rendering. */
 	#camera: Camera = DEFAULT_CAMERA;
-	/** Current static-layer interest policy. */
-	#lodConfig: LoDConfig = DEFAULT_LOD_CONFIG;
-	/** Landblock defining both static interest and the anchor-relative render world. */
-	#worldAnchor: LandblockId = INVALID_ID;
-	/** Static layers currently requested or retained around the world anchor. */
+	/** Static layers currently requested or retained independently of the camera. */
 	#sceneInterest: SceneInterestMap = new Map();
 	/** Prevents new work and late async publication after runtime shutdown begins. */
 	#destroyed = false;
@@ -200,20 +189,44 @@ export class GameRuntime {
 		return new GameRuntime(renderResources, commitPipeline, dependencies);
 	}
 
-	get lodConfig(): LoDConfig {
-		return { ...this.#lodConfig };
+	/** Replace frontend-owned static content interest without moving the camera. */
+	updateSceneInterest(request: SceneInterestRequest): void {
+		validateLoDConfigOrThrow(request.lod);
+		this.#applySceneInterest(
+			computeSceneInterest(request.anchorLandblockId, request.lod),
+		);
 	}
 
-	setLoDConfig(cfg: LoDConfig): void {
-		validateLoDConfigOrThrow(cfg);
-		this.#lodConfig = { ...cfg };
-		this.#updateWorldInterest(this.#worldAnchor);
+	/** Evict every frontend-requested static layer without moving the camera. */
+	clearSceneInterest(): void {
+		this.#applySceneInterest(new Map());
 	}
 
-	setWorldAnchor(landblockId: LandblockId): void {
-		if (this.#worldAnchor === landblockId) return;
-		this.#worldAnchor = landblockId;
-		this.#updateWorldInterest(landblockId);
+	/** Replace the authoritative primary camera without changing scene interest. */
+	setPrimaryCamera(camera: Camera): void {
+		const { position, rotation } = camera.placement;
+		if (
+			![position.x, position.y, position.z].every(Number.isFinite) ||
+			![rotation.w, rotation.x, rotation.y, rotation.z].every(Number.isFinite)
+		) {
+			throw new Error("Primary camera placement must be finite.");
+		}
+		this.#camera = {
+			far: camera.far,
+			fov: camera.fov,
+			near: camera.near,
+			placement: {
+				envCellId: camera.placement.envCellId,
+				landblockId: camera.placement.landblockId,
+				position: new Vec3(position.x, position.y, position.z),
+				rotation: new Quat(rotation.w, rotation.x, rotation.y, rotation.z),
+			},
+		};
+	}
+
+	/** Resolve one canonical scene-space point against resident scene scopes. */
+	queryWorldPointResidency(point: Vec3): SceneResidency | null {
+		return this.#scene.queryWorldPointResidency(point);
 	}
 
 	tick(): void {
@@ -229,7 +242,7 @@ export class GameRuntime {
 		const renderer = this.#renderer;
 		if (!renderer) throw new Error("Game runtime has no renderer device.");
 		renderer.drawFrame({
-			anchorLandblockId: this.#worldAnchor,
+			anchorLandblockId: this.#camera.placement.landblockId,
 			timeSeconds,
 			views: [{ camera: this.#camera }],
 		});
@@ -261,9 +274,8 @@ export class GameRuntime {
 		this.#instances.destroy();
 	}
 
-	#updateWorldInterest(newAnchor: LandblockId): void {
+	#applySceneInterest(interest: SceneInterestMap): void {
 		if (this.#destroyed) return;
-		const interest = computeSceneInterest(newAnchor, this.#lodConfig);
 		const { newLayers, evictedLayers } = diffSceneInterest(
 			this.#sceneInterest,
 			interest,
@@ -271,15 +283,14 @@ export class GameRuntime {
 		this.#sceneInterest = interest;
 		for (const { id, layer } of evictedLayers)
 			this.#evictStaticLayer(id, layer);
-		void this.#prepareInterestedLayers(newLayers);
+		for (const layer of newLayers) void this.#prepareInterestedLayer(layer);
 	}
 
-	async #prepareInterestedLayers(
-		layers: ReadonlySet<LandblockIdLayer>,
-	): Promise<void> {
+	async #prepareInterestedLayer(layer: LandblockIdLayer): Promise<void> {
 		try {
-			const artifacts =
-				await this.#commitPipeline.prepareLandblockLayers(layers);
+			const artifacts = await this.#commitPipeline.prepareLandblockLayers(
+				new Set([layer]),
+			);
 			if (!this.#destroyed) this.#commitArtifacts.push(...artifacts);
 		} catch (error) {
 			log(error, LogLevel.Error);

@@ -8,6 +8,10 @@
 	import { StandardCommitPipeline } from "../lib/game/commit/pipeline";
 	import { WebGL2Device } from "../lib/game/renderer/webgl2-device";
 	import { TauriAssetBridge } from "../lib/assets/tauri-asset-bridge";
+	import type { LandblockId } from "../lib/game/game-types";
+	import type { Vec3 } from "../lib/game/math/types";
+	import type { SceneResidency } from "../lib/game/scene";
+	import type { Camera } from "../lib/game/runtime/types";
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let frameHandle: number | null = null;
@@ -16,6 +20,31 @@
 	let webglDevice: WebGL2Device | undefined;
 	let frameMetrics: FrameMetrics | null = $state(null);
 	let startupError: string | null = $state(null);
+	let runtimeReady = $state(false);
+
+	function requestSceneInterest(
+		anchorLandblockId: LandblockId,
+		includeEnvCells: boolean,
+	): void {
+		gameRuntime?.updateSceneInterest({
+			anchorLandblockId,
+			lod: {
+				buildingRadius: null,
+				envCellRadius: includeEnvCells ? 0 : null,
+				explicitObjectRadius: null,
+				generatedObjectRadius: null,
+				terrainRadius: 2,
+			},
+		});
+	}
+
+	function queryWorldPointResidency(point: Vec3): SceneResidency | null {
+		return gameRuntime?.queryWorldPointResidency(point) ?? null;
+	}
+
+	function setPrimaryCamera(camera: Camera): void {
+		gameRuntime?.setPrimaryCamera(camera);
+	}
 
 	onMount(() => {
 		if (canvasElement === null) {
@@ -38,6 +67,7 @@
 			const pipeline = commitPipeline;
 			const device = webglDevice;
 			gameRuntime = undefined;
+			runtimeReady = false;
 			commitPipeline = undefined;
 			webglDevice = undefined;
 			teardown = (async () => {
@@ -69,6 +99,7 @@
 					hostAssets,
 				);
 				if (destroyed) return;
+				runtimeReady = true;
 
 				const step = (): void => {
 					if (gameRuntime === undefined) {
@@ -128,6 +159,11 @@
 		{/if}
 
 		<FrameMetricsOverlay metrics={frameMetrics} />
-		<ExplorerTools />
+		<ExplorerTools
+			{runtimeReady}
+			{requestSceneInterest}
+			{queryWorldPointResidency}
+			{setPrimaryCamera}
+		/>
 	</div>
 </div>

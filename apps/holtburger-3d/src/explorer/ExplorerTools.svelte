@@ -1,4 +1,10 @@
 <script lang="ts">
+	import type { LandblockId } from "../lib/game/game-types";
+	import type { Vec3 } from "../lib/game/math/types";
+	import type { SceneResidency } from "../lib/game/scene";
+	import type { Camera } from "../lib/game/runtime/types";
+	import ExplorerWorldPanel from "./ExplorerWorldPanel.svelte";
+
 	type ExplorerTabId = "world" | "assets" | "entities" | "logs";
 
 	interface ExplorerTab {
@@ -11,6 +17,23 @@
 		/** Placeholder text until the explorer workflow is implemented. */
 		readonly stub: string;
 	}
+
+	interface Props {
+		readonly runtimeReady: boolean;
+		readonly requestSceneInterest: (
+			anchorLandblockId: LandblockId,
+			includeEnvCells: boolean,
+		) => void;
+		readonly queryWorldPointResidency: (point: Vec3) => SceneResidency | null;
+		readonly setPrimaryCamera: (camera: Camera) => void;
+	}
+
+	let {
+		runtimeReady,
+		requestSceneInterest,
+		queryWorldPointResidency,
+		setPrimaryCamera,
+	}: Props = $props();
 
 	const tabs: readonly ExplorerTab[] = [
 		{
@@ -42,13 +65,19 @@
 	let expanded = $state(false);
 	let activeTabId = $state<ExplorerTabId>("world");
 
-	const activeTab = $derived(tabs.find((tab) => tab.id === activeTabId) ?? tabs[0]);
+	const activeTab = $derived(
+		tabs.find((tab) => tab.id === activeTabId) ?? tabs[0],
+	);
 </script>
 
 <aside class:expanded class="explorer-tools" aria-label="Explorer tools">
 	{#if expanded}
 		<div class="explorer-tools-expanded">
-			<div class="explorer-tab-list" role="tablist" aria-label="Explorer tool tabs">
+			<div
+				class="explorer-tab-list"
+				role="tablist"
+				aria-label="Explorer tool tabs"
+			>
 				{#each tabs as tab}
 					<button
 						type="button"
@@ -86,7 +115,16 @@
 						aria-labelledby={`explorer-tab-${activeTab.id}`}
 					>
 						<p class="ac-section-label">{activeTab.label}</p>
-						<p>{activeTab.stub}</p>
+						{#if activeTab.id === "world"}
+							<ExplorerWorldPanel
+								{runtimeReady}
+								{requestSceneInterest}
+								{queryWorldPointResidency}
+								{setPrimaryCamera}
+							/>
+						{:else}
+							<p>{activeTab.stub}</p>
+						{/if}
 					</div>
 				</div>
 			</div>

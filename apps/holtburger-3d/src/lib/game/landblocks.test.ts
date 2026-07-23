@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
 	createLandblockOffset,
+	createLandblockWorldOrigin,
 	getLandblockCoordinates,
+	landblockAtWorldPoint,
 	OUTDOOR_LANDBLOCK_WORLD_SIZE,
 } from "./landblocks";
+import { Vec3 } from "./math/types";
 
 describe("landblock coordinates", () => {
 	it("decodes outdoor coordinates from prefixed and unprefixed ids", () => {
@@ -17,6 +20,26 @@ describe("landblock coordinates", () => {
 			y: 0,
 			z: -3 * OUTDOOR_LANDBLOCK_WORLD_SIZE,
 		});
+	});
+
+	it("maps between landblock origins and canonical scene-space points", () => {
+		expect(createLandblockWorldOrigin("0x0102ffff")).toEqual(
+			new Vec3(
+				OUTDOOR_LANDBLOCK_WORLD_SIZE,
+				0,
+				-2 * OUTDOOR_LANDBLOCK_WORLD_SIZE,
+			),
+		);
+		expect(landblockAtWorldPoint(new Vec3(193, 20, -385))).toBe("0x0102ffff");
+	});
+
+	it("rejects scene-space points outside the outdoor grid", () => {
+		expect(landblockAtWorldPoint(new Vec3(-1, 0, -1))).toBeNull();
+		expect(
+			landblockAtWorldPoint(
+				new Vec3(256 * OUTDOOR_LANDBLOCK_WORLD_SIZE, 0, -1),
+			),
+		).toBeNull();
 	});
 
 	it("rejects malformed ids", () => {

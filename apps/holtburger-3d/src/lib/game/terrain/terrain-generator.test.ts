@@ -15,12 +15,9 @@ describe("generateTerrain", () => {
 		expect(result.surfaceFields.map(({ stride }) => stride)).toEqual(
 			TERRAIN_MESH_STRIDES,
 		);
-		expect(result.surfaceFields.map(({ cellPcodes }) => cellPcodes.length)).toEqual([
-			64,
-			16,
-			4,
-			1,
-		]);
+		expect(
+			result.surfaceFields.map(({ cellPcodes }) => cellPcodes.length),
+		).toEqual([64, 16, 4, 1]);
 		expect(result.geometry.indices).toBeInstanceOf(Uint16Array);
 		expect(result.geometry.positions.length).toBeGreaterThan(0);
 		expect(result.geometry.normals.length).toBe(
@@ -92,15 +89,15 @@ describe("generateTerrain", () => {
 				({ variant: candidate }) =>
 					candidate.stride === 2 && candidate.transitionDirection === direction,
 			);
-			if (!variant) throw new Error(`Missing stride-two ${direction} terrain variant.`);
+			if (!variant)
+				throw new Error(`Missing stride-two ${direction} terrain variant.`);
 			const variantIndices = result.geometry.indices.slice(
 				variant.indexStart,
 				variant.indexStart + variant.indexCount,
 			);
 			const firstVertex = Math.min(...variantIndices);
-			const height = result.geometry.positions[
-				(firstVertex + row * 5 + column) * 3 + 1
-			];
+			const height =
+				result.geometry.positions[(firstVertex + row * 5 + column) * 3 + 1];
 
 			expect(height).toBe(0);
 		},
@@ -112,7 +109,8 @@ describe("generateTerrain", () => {
 			({ variant: candidate }) =>
 				candidate.stride === 2 && candidate.transitionDirection === "northeast",
 		);
-		if (!variant) throw new Error("Missing stride-two northeast terrain variant.");
+		if (!variant)
+			throw new Error("Missing stride-two northeast terrain variant.");
 		const variantIndices = result.geometry.indices.slice(
 			variant.indexStart,
 			variant.indexStart + variant.indexCount,
@@ -146,27 +144,64 @@ describe("generateTerrain", () => {
 	});
 
 	it.each([
-		{ coarseLandblockId: "0x1411ffff", fineLandblockId: "0x1311ffff" },
-		{ coarseLandblockId: "0x1611ffff", fineLandblockId: "0x1511ffff" },
+		{
+			coarseSide: "west",
+			coarseLandblockId: "0x1411ffff",
+			fineSide: "east",
+			fineLandblockId: "0x1311ffff",
+			sharedBoundary: "east-west",
+		},
+		{
+			coarseSide: "west",
+			coarseLandblockId: "0x1611ffff",
+			fineSide: "east",
+			fineLandblockId: "0x1511ffff",
+			sharedBoundary: "east-west",
+		},
+		{
+			coarseSide: "north",
+			coarseLandblockId: "0x110effff",
+			fineSide: "south",
+			fineLandblockId: "0x110fffff",
+			sharedBoundary: "south-north",
+		},
+		{
+			coarseSide: "north",
+			coarseLandblockId: "0x110cffff",
+			fineSide: "south",
+			fineLandblockId: "0x110dffff",
+			sharedBoundary: "south-north",
+		},
 	] as const)(
-		"stitches the eastward $fineLandblockId LOD boundary to $coarseLandblockId",
-		({ coarseLandblockId, fineLandblockId }) => {
+		"stitches $fineLandblockId to $coarseLandblockId across their $sharedBoundary LOD boundary",
+		({
+			coarseSide,
+			coarseLandblockId,
+			fineSide,
+			fineLandblockId,
+			sharedBoundary,
+		}) => {
 			const anchorLandblockId = "0x1111ffff";
 			const fine = createSource(fineLandblockId);
 			const coarse = createSource(coarseLandblockId);
-			setSharedEastWestBoundary(fine, coarse, [0, 80, 100, -40, 20, 90, -60, 15, 40]);
+			const heights = [0, 80, 100, -40, 20, 90, -60, 15, 40];
+			if (sharedBoundary === "east-west") {
+				setSharedEastWestBoundary(fine, coarse, heights);
+			} else {
+				setSharedSouthNorthBoundary(fine, coarse, heights);
+			}
 
 			const fineEdge = selectedTerrainEdge(
 				generateTerrain(fine),
 				fine.landblockId,
 				anchorLandblockId,
-				"east",
+				fineSide,
 			);
 			const coarseEdge = selectedTerrainEdge(
 				generateTerrain(coarse),
 				coarse.landblockId,
 				anchorLandblockId,
-				"west",
+				coarseSide,
 			);
 
 			expect(fineEdge).toEqual(
@@ -187,9 +222,7 @@ function createSource(landblockId = "0xda55ffff") {
 	};
 }
 
-function createClampSource(
-	direction: "north" | "south" | "east" | "west",
-) {
+function createClampSource(direction: "north" | "south" | "east" | "west") {
 	const source = createSource();
 	source.heights.fill(20);
 	if (direction === "north") {
@@ -224,12 +257,24 @@ function setSharedEastWestBoundary(
 	}
 }
 
+/** Give north/south-adjacent landblocks identical authored heights along their shared edge. */
+function setSharedSouthNorthBoundary(
+	north: ReturnType<typeof createSource>,
+	south: ReturnType<typeof createSource>,
+	heights: readonly number[],
+): void {
+	for (const [column, height] of heights.entries()) {
+		north.heights[column] = height;
+		south.heights[(south.gridSize - 1) * south.gridSize + column] = height;
+	}
+}
+
 /** Extract one selected mesh boundary in canonical south-to-north vertex order. */
 function selectedTerrainEdge(
 	result: TerrainGenerationResult,
 	landblockId: string,
 	anchorLandblockId: string,
-	edge: "east" | "west",
+	edge: "east" | "north" | "south" | "west",
 ): number[] {
 	const stride = selectTerrainMeshStride(landblockId, anchorLandblockId);
 	const transitionDirection = selectTerrainTransitionDirection(
@@ -252,11 +297,16 @@ function selectedTerrainEdge(
 	);
 	const firstVertex = Math.min(...indices);
 	const sideVertices = 8 / stride + 1;
-	return Array.from({ length: sideVertices }, (_, row) => {
-		const column = edge === "east" ? sideVertices - 1 : 0;
-		return result.geometry.positions[
-			(firstVertex + row * sideVertices + column) * 3 + 1
-		] ?? NaN;
+	return Array.from({ length: sideVertices }, (_, index) => {
+		const row =
+			edge === "north" ? sideVertices - 1 : edge === "south" ? 0 : index;
+		const column =
+			edge === "east" ? sideVertices - 1 : edge === "west" ? 0 : index;
+		return (
+			result.geometry.positions[
+				(firstVertex + row * sideVertices + column) * 3 + 1
+			] ?? NaN
+		);
 	});
 }
 

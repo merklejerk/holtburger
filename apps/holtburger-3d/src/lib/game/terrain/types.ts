@@ -284,8 +284,8 @@ export function selectTerrainTransitionDirection(
 	const landblock = getLandblockCoordinates(landblockId);
 	const anchor = getLandblockCoordinates(anchorLandblockId);
 	const horizontal = landblock.x - anchor.x;
-	// Encoded landblock Y grows toward negative render Z, opposite retail's grid Y.
-	const vertical = anchor.y - landblock.y;
+	// Encoded landblock Y and canonical terrain rows both grow toward render-local north (-Z).
+	const vertical = landblock.y - anchor.y;
 	const transitionRadius = terrainTransitionRadius(horizontal, vertical);
 	if (transitionRadius === null) return "viewer-block";
 

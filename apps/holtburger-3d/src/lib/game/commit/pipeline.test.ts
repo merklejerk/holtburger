@@ -1,21 +1,17 @@
 import { describe, expect, it } from "vitest";
-import type { AssetBridge } from "../../assets/asset-bridge";
+import type { LandblockTerrainSource } from "../../assets/landblock-terrain-source";
 import type { ResolvedTerrainLayerSource } from "../resolution/landblock-layer";
 import {
 	LandblockLayerKind,
 	type LandblockIdLayer,
 } from "../runtime/scene-interest";
-import type {
-	TexturePreparationServiceRequest,
-	TexturePreparationServiceResponse,
-} from "../textures/texture-preparer";
 import { resolveTerrainTextureFacts } from "../terrain/types";
 import { StandardCommitPipeline } from "./pipeline";
 
 describe("StandardCommitPipeline", () => {
 	it("commits terrain facts without preparing pixels or generated geometry", async () => {
 		const source = createTerrainSource("0x0001ffff");
-		const assets = new FakeAssetBridge(new Map([[source.landblockId, source]]));
+	const assets = new FakeTerrainSource(new Map([[source.landblockId, source]]));
 		const pipeline = await StandardCommitPipeline.build(assets);
 
 		const [bundle] = await pipeline.prepareLandblockLayers(
@@ -66,8 +62,12 @@ function createTerrainSource(landblockId: string): ResolvedTerrainLayerSource {
 	} as const;
 	return {
 		generation: {
-			heightBytes: new Uint8Array(81),
+			gridSize: 9,
+			heightIndices: new Uint8Array(81),
+			heights: new Float32Array(81),
+			landblockId,
 			terrainSamples: new Uint16Array(81),
+			tileSize: 24,
 		},
 		kind: LandblockLayerKind.Terrain,
 		landblockId,
@@ -87,20 +87,14 @@ const TERRAIN_VARIATION = {
 	minVertexSaturation: 0,
 } as const;
 
-class FakeAssetBridge implements AssetBridge {
+class FakeTerrainSource implements LandblockTerrainSource {
 	constructor(
 		readonly sources: ReadonlyMap<string, ResolvedTerrainLayerSource>,
 	) {}
 
-	async resolveLandblockLayer(layer: LandblockIdLayer) {
-		const source = this.sources.get(layer.id);
-		if (source === undefined) throw new Error(`Missing source ${layer.id}.`);
+	async loadTerrainSource(landblockId: string) {
+		const source = this.sources.get(landblockId);
+		if (source === undefined) throw new Error(`Missing source ${landblockId}.`);
 		return source;
-	}
-
-	async requestTexturePreparationAsset(
-		request: TexturePreparationServiceRequest,
-	): Promise<TexturePreparationServiceResponse> {
-		throw new Error(`Unexpected texture asset request ${request.kind}.`);
 	}
 }

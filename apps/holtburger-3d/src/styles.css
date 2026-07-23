@@ -102,7 +102,11 @@ button:focus-visible {
 			transparent 1px,
 			transparent 5px
 		),
-		radial-gradient(circle at 24% 18%, rgb(112 78 28 / 0.28), transparent 18rem),
+		radial-gradient(
+			circle at 24% 18%,
+			rgb(112 78 28 / 0.28),
+			transparent 18rem
+		),
 		radial-gradient(circle at 78% 76%, rgb(52 75 29 / 0.18), transparent 22rem),
 		var(--ac-panel-deep);
 }
@@ -173,10 +177,19 @@ button:focus-visible {
 	width: min(100%, 720px);
 	border: var(--ac-border);
 	background:
-		linear-gradient(90deg, rgb(245 203 95 / 0.18), transparent 18%, transparent 82%, rgb(245 203 95 / 0.12)),
+		linear-gradient(
+			90deg,
+			rgb(245 203 95 / 0.18),
+			transparent 18%,
+			transparent 82%,
+			rgb(245 203 95 / 0.12)
+		),
 		linear-gradient(180deg, rgb(33 29 22 / 0.7), rgb(21 18 14 / 0.82)),
 		url("./app/theme/ac-panel-bg-tile.jpg");
-	background-size: auto, auto, 256px 256px;
+	background-size:
+		auto,
+		auto,
+		256px 256px;
 	box-shadow:
 		inset 0 0 0 1px rgb(97 68 23 / 0.8),
 		inset 0 0 24px rgb(0 0 0 / 0.58),
@@ -272,8 +285,12 @@ h1 {
 	flex: 0 0 auto;
 	border: 1px solid var(--ac-green-shadow);
 	border-radius: 50%;
-	background:
-		radial-gradient(circle at 35% 30%, #efffd3 0 12%, var(--ac-green) 28%, #3e8c19 72%);
+	background: radial-gradient(
+		circle at 35% 30%,
+		#efffd3 0 12%,
+		var(--ac-green) 28%,
+		#3e8c19 72%
+	);
 	box-shadow:
 		0 0 5px rgb(126 242 45 / 0.84),
 		inset 0 0 2px rgb(0 0 0 / 0.82);
@@ -452,20 +469,45 @@ h1 {
 	color: #ff9c8f;
 }
 
-.explorer-world-vector {
+.explorer-lod-controls {
 	display: grid;
-	grid-template-columns: repeat(3, minmax(0, 1fr));
-	gap: 7px;
+	gap: 8px;
+	padding-top: 4px;
 }
 
-.explorer-world-vector.compact {
-	grid-template-columns: repeat(2, minmax(0, 1fr));
+.explorer-lod-controls .ac-section-label {
+	margin: 0;
 }
 
-.explorer-world-actions {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 7px;
+.explorer-lod-control {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	gap: 3px 8px;
+	align-items: center;
+}
+
+.explorer-lod-control > span {
+	color: var(--ac-ink);
+	font-size: 0.76rem;
+}
+
+.explorer-lod-control > strong {
+	color: var(--ac-ink-muted);
+	font-family: var(--ac-font-ui);
+	font-size: 0.72rem;
+	font-weight: 400;
+	font-variant-numeric: tabular-nums;
+}
+
+.explorer-lod-control > input {
+	grid-column: 1 / -1;
+	width: 100%;
+	padding: 0;
+}
+
+.explorer-lod-warning {
+	margin: 0;
+	color: #f1b265 !important;
 }
 
 .explorer-world-form button {

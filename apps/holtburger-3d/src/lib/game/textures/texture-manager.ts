@@ -1,4 +1,5 @@
 import type { AABB2 } from "../math/types";
+import { log, LogLevel } from "../../logs";
 import { LeaseRegistry } from "../ownership";
 import type {
 	RendererResourceManager,
@@ -148,15 +149,16 @@ export class TextureManager<TOwnerId extends string = string> {
 	 * Preparation failures are terminal for that owner's texture set.
 	 */
 	async retain(owner: TOwnerId, facts: readonly TextureFact[]): Promise<void> {
-		this.reserveKeys(
-			owner,
-			facts.map(({ key }) => key),
-		);
+		const newlyRetained = facts
+			.filter(({ key }) => this.#leases.addLease(owner, key))
+			.map(({ key }) => key);
 		try {
 			await Promise.all(facts.map((fact) => this.#materialize(fact)));
 		} catch (error) {
-			this.dropOwner(owner);
-			console.error(error);
+			// An owner can also reserve generated textures before its asset facts materialize. Roll back
+			// only this retain operation so an asset failure cannot evict those independent resources.
+			this.#dropKeys(owner, newlyRetained);
+			log(error, LogLevel.Error);
 		}
 	}
 
@@ -209,7 +211,7 @@ export class TextureManager<TOwnerId extends string = string> {
 	/** Drop one owner's texture retention and release resources with no remaining owner. */
 	dropOwner(owner: TOwnerId): void {
 		this.#leases.dropOwner(owner);
-		for (const key of this.#leases.takeEmptyLeases()) this.#releaseTexture(key);
+		this.#releaseEmptyLeases();
 	}
 
 	/** Stop preparation work and release every texture retained by runtime owners. */
@@ -374,6 +376,15 @@ export class TextureManager<TOwnerId extends string = string> {
 			return this.#releaseTexture2D(key);
 		}
 		throw new Error(`Unknown texture key ${key}.`);
+	}
+
+	#dropKeys(owner: TOwnerId, keys: readonly TextureKey[]): void {
+		for (const key of keys) this.#leases.dropLease(owner, key);
+		this.#releaseEmptyLeases();
+	}
+
+	#releaseEmptyLeases(): void {
+		for (const key of this.#leases.takeEmptyLeases()) this.#releaseTexture(key);
 	}
 
 	async #materialize(fact: TextureFact): Promise<void> {

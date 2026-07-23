@@ -1,4 +1,4 @@
-import type { AssetBridge } from "../../assets/asset-bridge";
+import type { LandblockTerrainSource } from "../../assets/landblock-terrain-source";
 import type { DatAssetId } from "../game-types";
 import type {
 	ResolvedEnvCellLayerSource,
@@ -65,38 +65,46 @@ interface PreparedTexturePages {
 }
 
 export class StandardCommitPipeline implements CommitPipeline {
-	readonly #hostAssets: AssetBridge;
+	readonly #terrainSource: LandblockTerrainSource;
 	#nextStaticInstallationId = 0;
 
-	protected constructor(hostAssets: AssetBridge) {
-		this.#hostAssets = hostAssets;
+	protected constructor(terrainSource: LandblockTerrainSource) {
+		this.#terrainSource = terrainSource;
 	}
 
-	static async build(hostAssets: AssetBridge): Promise<StandardCommitPipeline> {
-		return new StandardCommitPipeline(hostAssets);
+	static async build(
+		terrainSource: LandblockTerrainSource,
+	): Promise<StandardCommitPipeline> {
+		return new StandardCommitPipeline(terrainSource);
 	}
 
 	async prepareLandblockLayers(
 		layers: ReadonlySet<LandblockIdLayer>,
 	): Promise<readonly CommitBundle[]> {
-		return Promise.all(
+		const bundles = await Promise.all(
 			[...layers].map((layer) => this.#prepareLandblockLayer(layer)),
 		);
+		return bundles.filter((bundle): bundle is CommitBundle => bundle !== null);
 	}
 
 	async destroy(): Promise<void> {}
 
-	async #prepareLandblockLayer(layer: LandblockIdLayer): Promise<CommitBundle> {
-		const source = await this.#hostAssets.resolveLandblockLayer(layer);
-		if (source.kind !== layer.layer || source.landblockId !== layer.id) {
+	async #prepareLandblockLayer(
+		layer: LandblockIdLayer,
+	): Promise<CommitBundle | null> {
+		if (layer.layer !== LandblockLayerKind.Terrain) {
 			throw new Error(
-				`Resolved ${source.landblockId}/${source.kind} for ${describeLayer(layer)}.`,
+				`No typed source capability exists yet for ${describeLayer(layer)}.`,
 			);
 		}
-
-		return source.kind === LandblockLayerKind.Terrain
-			? this.#prepareTerrainLayer(source)
-			: this.#prepareStaticLayer(source);
+		const source = await this.#terrainSource.loadTerrainSource(layer.id);
+		if (source === null) return null;
+		if (source.kind !== LandblockLayerKind.Terrain || source.landblockId !== layer.id) {
+			throw new Error(
+				`Loaded ${source.landblockId}/${source.kind} for ${describeLayer(layer)}.`,
+			);
+		}
+		return this.#prepareTerrainLayer(source);
 	}
 
 	#prepareTerrainLayer(source: ResolvedTerrainLayerSource): CommitBundle {

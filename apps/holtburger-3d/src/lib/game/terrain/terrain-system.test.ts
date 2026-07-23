@@ -23,7 +23,7 @@ import type {
 	TerrainGenerationResult,
 	TerrainGenerationSource,
 	TerrainMeshStride,
-	TerrainSurfaceField,
+	TerrainPcodeField,
 	TerrainTransitionDirection,
 } from "./types";
 
@@ -95,6 +95,55 @@ describe("TerrainSystem", () => {
 		terrain.removeOwner(ownerId(second.landblockId));
 		expect(resources.released).toEqual(["texture-2d-resource:0"]);
 	});
+
+	it("retains every terrain texture fact independently of terrain generation", async () => {
+		const resources = new FakeRendererResourceManager();
+		const preparer = new RecordingTexturePreparer();
+		const terrain = new TerrainSystem<string, string>(
+			new SceneGraph(),
+			new DeferredTerrainGenerator(),
+			new GeometryManager<string>(resources),
+			new TextureManager(resources, preparer),
+			(landblockId) => `terrain-resource:${landblockId}`,
+		);
+
+		installTerrain(terrain, createInstallation());
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(preparer.facts.map(({ key }) => key)).toEqual([
+			"texture-array:terrain-color:terrain-region:1",
+			"texture-array:terrain-blend-mask:terrain-region:1",
+			"texture-array:terrain-road-mask:terrain-region:1",
+			"asset-texture:terrain-detail:0x05000004",
+		]);
+	});
+
+	it("releases source-owned resources when generated surface realization fails", async () => {
+		const generator = new DeferredTerrainGenerator();
+		const resources = new FakeRendererResourceManager();
+		const terrain = new TerrainSystem<string, string>(
+			new SceneGraph(),
+			generator,
+			new GeometryManager<string>(resources),
+			new TextureManager(resources, new PendingTexturePreparer()),
+			(landblockId) => `terrain-resource:${landblockId}`,
+		);
+		const installation = createInstallation();
+		const nodeId = installTerrain(terrain, installation);
+
+		resources.failTexture2DCreationAt = 1;
+		generator.resolve(createGenerationResult());
+		await Promise.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(terrain.getDrawUnit(nodeId, installation.landblockId)).toBeNull();
+		expect(resources.released).toEqual([
+			"texture-2d-resource:0",
+			"geometry-resource:0",
+		]);
+	});
 });
 
 function createTerrainSystem(
@@ -153,8 +202,12 @@ function createInstallation(landblockId = "0x1111ffff") {
 	} as const;
 	return {
 		generation: {
-			heightBytes: new Uint8Array(81),
+			gridSize: 9,
+			heightIndices: new Uint8Array(81),
+			heights: new Float32Array(81),
+			landblockId,
 			terrainSamples: new Uint16Array(81),
+			tileSize: 24,
 		},
 		landblockId,
 		presentation: {
@@ -174,27 +227,32 @@ const TERRAIN_VARIATION = {
 } as const;
 
 function createGenerationResult(): TerrainGenerationResult {
+	const variants = STRIDES.flatMap((stride) =>
+		TRANSITION_DIRECTIONS.map((transitionDirection, directionIndex) => ({
+			bounds: new AABB3(Vec3.zero(), Vec3.zero()),
+			indexCount: 3,
+			indexStart:
+				(STRIDES.indexOf(stride) * TRANSITION_DIRECTIONS.length + directionIndex) *
+				3,
+			variant: { stride, transitionDirection },
+		})),
+	);
 	return {
 		geometry: {
-			indices: new Uint16Array([0, 1, 2]),
+			indices: new Uint16Array(
+				variants.flatMap(() => [0, 1, 2]),
+			),
 			kind: "terrain",
 			normals: new Float32Array(9),
 			positions: new Float32Array(9),
 			textureCoordinates: new Float32Array(6),
 		},
 		surfaceFields: STRIDES.map(createSurfaceField),
-		variants: STRIDES.flatMap((stride) =>
-			TRANSITION_DIRECTIONS.map((transitionDirection) => ({
-				bounds: new AABB3(Vec3.zero(), Vec3.zero()),
-				indexCount: 3,
-				indexStart: 0,
-				variant: { stride, transitionDirection },
-			})),
-		),
+		variants,
 	};
 }
 
-function createSurfaceField(stride: TerrainMeshStride): TerrainSurfaceField {
+function createSurfaceField(stride: TerrainMeshStride): TerrainPcodeField {
 	const dimension = 8 / stride;
 	return {
 		cellPcodes: new Uint32Array(dimension * dimension),
@@ -250,10 +308,31 @@ class FixtureTexturePreparer implements TexturePreparer {
 	async destroy(): Promise<void> {}
 }
 
+class RecordingTexturePreparer extends FixtureTexturePreparer {
+	readonly facts: TextureFact[] = [];
+
+	override async prepare(fact: TextureFact) {
+		this.facts.push(fact);
+		return super.prepare(fact);
+	}
+}
+
+/** Keeps asset preparation pending so the test isolates generated-resource realization. */
+class PendingTexturePreparer implements TexturePreparer {
+	async prepare(fact: TextureFact): Promise<never> {
+		void fact;
+		return new Promise<never>(() => {});
+	}
+
+	async destroy(): Promise<void> {}
+}
+
 class FakeRendererResourceManager implements RendererResourceManager {
 	readonly created: RenderResourceKey[] = [];
 	readonly createdTextures: Texture2DResourceKey[] = [];
 	readonly released: RenderResourceKey[] = [];
+	/** Zero-based creation ordinal at which a two-dimensional texture upload fails. */
+	failTexture2DCreationAt: number | undefined;
 	#nextGeometry = 0;
 	#nextTexture = 0;
 	#nextTextureArray = 0;
@@ -275,6 +354,9 @@ class FakeRendererResourceManager implements RendererResourceManager {
 
 	createTexture2D(upload: Texture2DUpload): Texture2DResourceKey {
 		void upload;
+		if (this.failTexture2DCreationAt === this.#nextTexture) {
+			throw new Error("Synthetic generated texture upload failure.");
+		}
 		const key: Texture2DResourceKey = `texture-2d-resource:${this.#nextTexture++}`;
 		this.created.push(key);
 		this.createdTextures.push(key);

@@ -17,6 +17,9 @@ import {
 	type TextureArrayKey,
 } from "../textures/types";
 
+/** Number of canonical authored cells along either outdoor landblock terrain axis. */
+export const TERRAIN_GRID_CELLS = 8;
+
 /** Source-proven color variation parameters for one terrain type. */
 export interface TerrainColorVariation {
 	readonly minVertexBrightness: number;
@@ -65,8 +68,16 @@ export interface TerrainCompositionFacts {
 
 /** Canonical landblock facts sufficient for one complete terrain-generation job. */
 export interface TerrainGenerationSource {
-	/** Raw CellLandblock 9x9 height bytes; workers apply the retail height table. */
-	readonly heightBytes: Uint8Array;
+	/** Outdoor landblock identity used by retail's deterministic generated-cell topology hash. */
+	readonly landblockId: LandblockId;
+	/** Number of authored vertices on each terrain-grid axis. */
+	readonly gridSize: number;
+	/** World-space distance between adjacent authored terrain vertices. */
+	readonly tileSize: number;
+	/** Authored region height-table indices in canonical row-major order. */
+	readonly heightIndices: Uint8Array;
+	/** Region-table-resolved world-space heights in canonical row-major order. */
+	readonly heights: Float32Array;
 	/** Raw CellLandblock 9x9 terrain samples, including terrain and road pcode bits. */
 	readonly terrainSamples: Uint16Array;
 }
@@ -120,8 +131,8 @@ export type TerrainTransitionDirection =
 	| "west"
 	| "northwest";
 
-/** One generated per-cell pcode field shared by every directional variant of a stride. */
-export interface TerrainSurfaceField {
+/** One generated per-cell terrain pcode field shared by every directional variant of a stride. */
+export interface TerrainPcodeField {
 	readonly stride: TerrainMeshStride;
 	/** Generated-cell width; retail terrain uses 8/stride cells on each axis. */
 	readonly width: number;
@@ -149,7 +160,7 @@ export interface TerrainVariantDrawRange {
 export interface TerrainGenerationResult {
 	readonly geometry: TerrainGeometryData;
 	readonly variants: readonly TerrainVariantDrawRange[];
-	readonly surfaceFields: readonly TerrainSurfaceField[];
+	readonly surfaceFields: readonly TerrainPcodeField[];
 }
 
 /** Generation and presentation facts installed under one interested landblock. */
@@ -272,21 +283,35 @@ export function selectTerrainTransitionDirection(
 ): TerrainTransitionDirection {
 	const landblock = getLandblockCoordinates(landblockId);
 	const anchor = getLandblockCoordinates(anchorLandblockId);
-	const horizontal = Math.sign(landblock.x - anchor.x);
+	const horizontal = landblock.x - anchor.x;
 	// Encoded landblock Y grows toward negative render Z, opposite retail's grid Y.
-	const vertical = Math.sign(anchor.y - landblock.y);
-	if (horizontal === 0 && vertical === 0) return "viewer-block";
-	if (vertical > 0) {
-		if (horizontal < 0) return "northwest";
-		if (horizontal > 0) return "northeast";
-		return "north";
+	const vertical = anchor.y - landblock.y;
+	const transitionRadius = terrainTransitionRadius(horizontal, vertical);
+	if (transitionRadius === null) return "viewer-block";
+
+	if (horizontal === transitionRadius) {
+		if (vertical === transitionRadius) return "northeast";
+		if (vertical === -transitionRadius) return "southeast";
+		return "east";
 	}
-	if (vertical < 0) {
-		if (horizontal < 0) return "southwest";
-		if (horizontal > 0) return "southeast";
-		return "south";
+	if (horizontal === -transitionRadius) {
+		if (vertical === transitionRadius) return "northwest";
+		if (vertical === -transitionRadius) return "southwest";
+		return "west";
 	}
-	return horizontal < 0 ? "west" : "east";
+	if (vertical === transitionRadius) return "north";
+	if (vertical === -transitionRadius) return "south";
+	return "viewer-block";
+}
+
+/** Return the sole ring radius whose outward boundary requires a transition adjustment. */
+function terrainTransitionRadius(
+	horizontal: number,
+	vertical: number,
+): 1 | 2 | 4 | null {
+	const distance = Math.max(Math.abs(horizontal), Math.abs(vertical));
+	if (distance === 1 || distance === 2 || distance === 4) return distance;
+	return null;
 }
 
 function createTextureArrayFact(

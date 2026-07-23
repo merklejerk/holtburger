@@ -16,6 +16,6 @@ pub use client::types::{
 pub use client::{ClientRuntime, ClientRuntimeBuilder};
 pub use content_assets::{
     ContentAsset, ContentAssetRequest, ContentAssetRuntime, ContentAssetService,
-    SetupAppearanceRequest,
+    SetupAppearanceRequest, SurfaceTexturePixelsRequest,
 };
 pub use soul_emote_motion::motion_command_for_soul_emote_pose;

@@ -1,8 +1,7 @@
 <script lang="ts">
-	import type { LandblockId } from "../lib/game/game-types";
-	import type { Vec3 } from "../lib/game/math/types";
 	import type { SceneResidency } from "../lib/game/scene";
-	import type { Camera } from "../lib/game/runtime/types";
+	import type { LoDConfig } from "../lib/game/runtime/types";
+	import type { ExplorerCameraFocusStatus } from "./explorer-camera-coordinator";
 	import ExplorerWorldPanel from "./ExplorerWorldPanel.svelte";
 
 	type ExplorerTabId = "world" | "assets" | "entities" | "logs";
@@ -21,19 +20,14 @@
 	interface Props {
 		readonly runtimeReady: boolean;
 		readonly requestSceneInterest: (
-			anchorLandblockId: LandblockId,
-			includeEnvCells: boolean,
+			residency: SceneResidency,
+			lod: LoDConfig,
 		) => void;
-		readonly queryWorldPointResidency: (point: Vec3) => SceneResidency | null;
-		readonly setPrimaryCamera: (camera: Camera) => void;
+		readonly cameraFocusStatus: ExplorerCameraFocusStatus;
 	}
 
-	let {
-		runtimeReady,
-		requestSceneInterest,
-		queryWorldPointResidency,
-		setPrimaryCamera,
-	}: Props = $props();
+	let { runtimeReady, requestSceneInterest, cameraFocusStatus }: Props =
+		$props();
 
 	const tabs: readonly ExplorerTab[] = [
 		{
@@ -119,8 +113,7 @@
 							<ExplorerWorldPanel
 								{runtimeReady}
 								{requestSceneInterest}
-								{queryWorldPointResidency}
-								{setPrimaryCamera}
+								{cameraFocusStatus}
 							/>
 						{:else}
 							<p>{activeTab.stub}</p>

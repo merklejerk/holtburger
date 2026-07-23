@@ -8,7 +8,10 @@ use holtburger_dat::file_type::{
 };
 use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, ResourceKey};
 
-use crate::ContentRepository;
+use crate::{
+    ContentRepository, ResolvedSurfaceTexturePixels, TexturePixelFormat,
+    texture_pixels::decode_render_surface_pixels,
+};
 
 const REGION_DETAIL_ROLE_ORDER: [ResolvedRegionDetailRoleKind; 4] = [
     ResolvedRegionDetailRoleKind::Landscape,
@@ -98,7 +101,10 @@ pub struct ResolvedTerrainMaterialTable {
     pub region_id: u32,
     pub region_number: u32,
     pub terrain_types: Vec<ResolvedTerrainMaterialType>,
-    pub terrain_alpha_maps: Vec<ResolvedTerrainAlphaMap>,
+    /// Ordered alpha maps selected for corner terrain-code combinations.
+    pub corner_terrain_alpha_maps: Vec<ResolvedTerrainAlphaMap>,
+    /// Ordered alpha maps selected for side terrain-code combinations.
+    pub side_terrain_alpha_maps: Vec<ResolvedTerrainAlphaMap>,
     pub road_alpha_maps: Vec<ResolvedTerrainRoadAlphaMap>,
     pub surface_texture_ids: Vec<u32>,
 }
@@ -142,7 +148,6 @@ pub struct ResolvedTerrainMaterialType {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolvedTerrainAlphaMap {
-    pub alpha_index: usize,
     pub selector: u32,
     pub texture_id: u32,
 }
@@ -219,6 +224,33 @@ impl ContentRepository {
         })
     }
 
+    /// Resolves a source texture's first available render-surface level into a declared encoding.
+    ///
+    /// `SurfaceTexture` IDs are ordered source-level alternatives. Missing or pruned levels are
+    /// omitted while resolving the dependency graph, so this selects the first usable level rather
+    /// than treating an absent preferred record as an unusable texture.
+    pub fn resolve_surface_texture_pixels(
+        &self,
+        surface_texture_id: u32,
+        output_format: TexturePixelFormat,
+    ) -> Result<ResolvedSurfaceTexturePixels> {
+        let dependency = read_surface_texture_dependency(self, surface_texture_id)?;
+        let render_surface = dependency.render_surfaces.first().with_context(|| {
+            format!(
+                "SurfaceTexture 0x{surface_texture_id:08X} has no available RenderSurface levels"
+            )
+        })?;
+        let pixels = decode_render_surface_pixels(&render_surface.render_surface, output_format)?;
+        Ok(ResolvedSurfaceTexturePixels {
+            surface_texture_id: dependency.surface_texture.id,
+            render_surface_id: render_surface.render_surface.id,
+            format: output_format,
+            width: render_surface.render_surface.width,
+            height: render_surface.render_surface.height,
+            pixels,
+        })
+    }
+
     pub fn resolve_gfx_obj_material_slots(
         &self,
         gfx_obj_id: u32,
@@ -280,13 +312,18 @@ impl ContentRepository {
                 max_vert_hue: desc.terrain_tex.max_vert_hue,
             })
             .collect::<Vec<_>>();
-        let terrain_alpha_maps = tex_merge
+        let corner_terrain_alpha_maps = tex_merge
             .corner_terrain_maps
             .iter()
-            .chain(tex_merge.side_terrain_maps.iter())
-            .enumerate()
-            .map(|(alpha_index, map)| ResolvedTerrainAlphaMap {
-                alpha_index,
+            .map(|map| ResolvedTerrainAlphaMap {
+                selector: map.terrain_code,
+                texture_id: map.tex_gid,
+            })
+            .collect::<Vec<_>>();
+        let side_terrain_alpha_maps = tex_merge
+            .side_terrain_maps
+            .iter()
+            .map(|map| ResolvedTerrainAlphaMap {
                 selector: map.terrain_code,
                 texture_id: map.tex_gid,
             })
@@ -305,7 +342,12 @@ impl ContentRepository {
         let mut surface_texture_ids = terrain_types
             .iter()
             .map(|terrain| terrain.texture_id)
-            .chain(terrain_alpha_maps.iter().map(|map| map.texture_id))
+            .chain(
+                corner_terrain_alpha_maps
+                    .iter()
+                    .chain(side_terrain_alpha_maps.iter())
+                    .map(|map| map.texture_id),
+            )
             .chain(
                 road_alpha_maps
                     .iter()
@@ -320,7 +362,8 @@ impl ContentRepository {
             region_id: region.id,
             region_number: region.region_number,
             terrain_types,
-            terrain_alpha_maps,
+            corner_terrain_alpha_maps,
+            side_terrain_alpha_maps,
             road_alpha_maps,
             surface_texture_ids,
         })

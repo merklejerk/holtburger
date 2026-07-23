@@ -1,13 +1,177 @@
 # Holtburger 3D Terrain Loading Pipeline Plan
 
-Status: Draft
+Status: Implemented for the terrain loading boundary. Visual comparison against reference
+applications is deliberately user-owned work.
+
+## Implementation Record
+
+### 2026-07-23 — Shared terrain facts and repository discovery
+
+Completed:
+
+- `RegionDesc` now retains `LandDefs.LandHeightTable`; `CellLandblockFact` resolves authored
+  height indices against that table rather than using `height * 2.0`.
+- `TerrainGridSource` now carries canonical row-major height indices, resolved heights, and full
+  terrain samples. The DAT column-major to canonical-order conversion occurs once during shared
+  terrain assembly; mesh generation consumes the canonical grid directly.
+- Generated scenery height sampling now uses the same regional table, keeping terrain and scenery
+  authoritative and mutually aligned.
+- `ResolvedTerrainMaterialTable` now preserves ordered corner and side terrain alpha-map groups.
+  The legacy adapter alone projects them back into its combined historical payload shape.
+- `ContentRepository::discover` now owns the CLI-proven explicit override, `HOLTBURGER_DATS`,
+  portable-directory, and platform-data lookup order. The CLI uses it instead of carrying a copy.
+- The 3D host initializes that same discovery API with no app-local override. Consequently, a
+  development or packaged 3D run can use precisely the CLI's `HOLTBURGER_DATS`, `./dats`, and
+  platform-data behavior; a Tauri-specific content-archive setting is neither required nor
+  desired for this pipeline.
+- The evidence pass found no authored landscape-detail fade field in ACE's parsed region/material
+  records, ACViewer, or the retail-decompile search. The only `10.0`/`50.0` values are legacy
+  adapter constants consumed directly by its WebGL detail-fade uniform. They remain frontend
+  renderer policy and do not belong in the client-agnostic terrain or IPC contracts.
+
+Decisions and concessions:
+
+- Cell IDs, rather than caller mode or residency, establish the only proven content distinction:
+  `xxxxFFFF` addresses the outdoor `CellLandblock`, while `xxxx0100+` addresses `EnvCell` interior
+  records in the same high-word landblock. ACE explicitly says an `EnvCell` can be either a dungeon
+  or a building interior, so its presence cannot classify the owner as a terrainless dungeon.
+  Normalizing interior interest to the owner `xxxxFFFF` and attempting terrain is therefore the
+  correct common path.
+- There is no authoritative companion-record shape that distinguishes an intentionally absent
+  outdoor `CellLandblock` from an incomplete archive. A missing record is represented as
+  terrain-absent with a diagnostic; decode/validation errors remain failures. We must not label an
+  absence a “dungeon” or hide it as expected content merely because an `EnvCell` is also present.
+  This is an evidence-backed limitation, not an invitation to revive an interior-only source mode.
+- `LandblockSceneLodContext::Interior` was removed from content, core caching, legacy projection,
+  and diagnostics. Every scene-LoD request now has the one cumulative outdoor content shape.
+  `CanonicalTerrainMesh` and `TerrainPcodeField` replace the misleading prior names atomically.
+- The post-cutover consumer audit confirms that numeric scene levels still express only cumulative
+  complete-family inclusion. `holtburger-content` builds each newly required family once;
+  `holtburger-core` may satisfy a lower request from a higher cached asset, but projects it by
+  retaining every layer at or below the requested family level. Cache extension appends only the
+  missing complete families. The Tauri terrain-source command deliberately requests Level 0, and
+  the legacy adapter preserves the caller's requested scene level. No consumer treats a scene level
+  as terrain-mesh simplification, material quality, or a partial family selection.
+- The legacy JSON adapter retains its positional combined alpha-map payload solely as an app-local
+  compatibility projection. New IPC must use the separate source groups.
+
+Verification:
+
+- Focused terrain-grid and mesh tests pass, including a nonlinear height-table/orientation fixture
+  and a non-finite-table rejection.
+- Content-discovery precedence test passes.
+- `cargo check -p holtburger-content -p holtburger-core -p holtburger-3d`,
+  `cargo check -p holtburger-content -p holtburger-3d-legacy`, and
+  `cargo check -p holtburger-cli -p holtburger-content` pass at this checkpoint.
+
+### 2026-07-23 — Typed terrain and texture host boundaries
+
+Completed:
+
+- `apps/holtburger-3d/src-tauri` now owns managed `ContentAssetRuntime` state initialized through
+  `ContentRepository::discover` and exposes only `load_terrain_source` for this slice. Its
+  repository-injection constructor lets host projection tests avoid discovery and Tauri entirely.
+- The command normalizes an eight-digit landblock ID, requests cumulative Level 0 content plus the
+  regional terrain material table and render profile, and rejects mismatched content identities.
+- The `HBTR` response carries versioned JSON metadata and aligned binary sections for `u8` height
+  indices, `f32` resolved heights, and `u16` terrain samples. It returns `terrain: null` only with
+  the typed `missing-cell-landblock` status rather than fabricating a grid or masking bad content.
+- The frontend now has separate `LandblockTerrainSource` and `TexturePixelSource` ports. The
+  generic `AssetBridge`, generic landblock-layer Tauri command, and JSON-array terrain decoder were
+  deleted from the terrain path. `decodeTerrainSource` validates the binary response before making
+  typed arrays and deriving terrain texture requirements.
+- `load_texture_pixels` now accepts only a `surface-texture/<eight-hex-digit-id>` source and one
+  terrain semantic purpose. It maps color/detail to RGBA8 and blend/road masks to R8, then returns
+  a versioned `HBTP` binary response containing one declared pixel section.
+- `ContentRepository::resolve_surface_texture_pixels` preserves the AC source-level rule: select
+  the first _available_ `RenderSurface` declared by a `SurfaceTexture`, not mechanically the first
+  ID. This matters in the active archive, where several terrain mask textures list a missing first
+  level followed by the usable `CustomLandscapeAlpha` level.
+- The shared pixel normalizer is client-agnostic and deliberately supports the terrain formats
+  proven by the current archive: `A8R8G8B8` becomes RGBA8 via BGRA channel reordering, while
+  `CustomLandscapeAlpha` (and `A8`) becomes R8 without a lossy color expansion. It validates the
+  authored byte length before either conversion.
+- `TauriTexturePixelSource` and `decodeTexturePixels` now consume that command. The frontend
+  validates response magic/version/length, requested identity and purpose, semantic channel
+  format, dimensions, and the one bounded binary pixel section before handing it to the existing
+  texture preparer.
+- `HBTR` terrain-material entries now carry `colorVariation` as one nested composite, matching the
+  frontend's terrain source contract. The terrain decoder now rejects malformed source texture IDs,
+  absent required texture families, invalid selectors, non-finite variation values, and non-positive
+  tilings before it derives texture identities.
+- `HBTR` now also carries a typed terrain-availability outcome. `missing-cell-landblock` is the
+  sole terrain-absent result; `cell-landblock-decode-failed` and `terrain-assembly-failed` are
+  decoder errors. This preserves the shared assembler's missing-versus-decode-failed diagnostic
+  distinction at the app boundary instead of flattening both into `terrain: null`.
+- `PreparedTerrainMesh` is now `CanonicalTerrainMesh`, and the generated `TerrainSurfaceField` is
+  now `TerrainPcodeField`. These are clean cutovers across shared content, the legacy projection,
+  and new-app terrain types; the landblock grid had already correctly been named
+  `terrain_samples`, while regional material-table `terrain_types` remains intentionally distinct.
+- `inspect_terrain_loading` is a non-interactive debug harness for a chosen archive and landblock.
+  It uses `ContentAssetService` plus the shared pixel resolver to report the canonical grid, height
+  range, terrain/road codes, and every resolved texture's source surface, output format, dimensions,
+  and byte length. Running it against `DA55FFFF` proved the end-to-end source facts from the active
+  archive without launching either UI.
+- Texture materialization failures now enter the frontend's structured logger after releasing the
+  failed owner's leases. They no longer rely solely on `console.error`, so a missing or unsupported
+  terrain texture is observable through runtime diagnostics and cannot leave a drawable unit with
+  stale texture ownership.
+- A withdrawn terrain owner now has an explicit async-preparation regression test: when the final
+  lease disappears before pixels resolve, `TextureManager` observes the absent lease and creates no
+  device texture. Regional terrain texture facts are also tested to remain identical across separate
+  composition instances for the same region.
+- `GameRuntime` now has a deferred-commit regression proving that a terrain artifact completed
+  after its scene-interest layer is withdrawn is discarded before installation. The test uses a
+  poison commit payload, so it would fail immediately if the runtime touched a stale artifact.
+- The shader-composited terrain plan now treats `LandblockTerrainSource`, `TexturePixelSource`,
+  `HBTR`, and `HBTP` as completed prerequisites. It no longer describes the deleted generic bridge
+  or claims that a Rust host producer is out of scope; its remaining work starts at generator and
+  renderer realization.
+
+Concessions and debt:
+
+- Static-object and env-cell source commands have no replacement yet. The commit pipeline now
+  rejects those layers explicitly rather than pretending the terrain capability can answer them.
+- The decoder currently copies individual binary sections to guarantee valid typed-array alignment
+  in every JavaScript host. This is a small, bounded copy (81 samples per terrain grid), not a JSON
+  element conversion; revisit only if terrain-grid resolution changes materially.
+- The app-wide TypeScript check now passes. The remaining app-wide lint failures are unrelated
+  unused-code findings in `commit/pipeline.ts` and `texture-manager.test.ts`.
+- DXT, indexed/paletted, and mip-chain preparation remain intentionally out of this terrain slice.
+  The active terrain-material scan found 41 source `SurfaceTexture`s: usable terrain color/detail
+  levels are `A8R8G8B8`, and usable mask levels are `CustomLandscapeAlpha`; no terrain source
+  requires DXT or palette resolution. Those source formats remain work for their first proven
+  non-terrain consumer rather than speculative shared infrastructure.
+
+Verification:
+
+- `cargo test -p holtburger-3d --lib` passes, covering binary header/version/length fields,
+  terrain-section alignment and offsets, landblock-ID normalization, texture source-ID validation,
+  purpose mapping, missing-versus-decode-failed terrain availability, pixel payload framing, and a
+  synthetic-HBA `ContentAssetRuntime` texture load through `HBTP`.
+- Focused shared-pixel tests cover direct-color channel ordering, single-channel alpha preservation,
+  semantic format rejection, and source-level fallback from a missing first render-surface record.
+  Focused frontend terrain/texture decoders, texture-preparer, terrain-fact, and texture-manager tests pass (18
+  tests), including truncated, mismatched-landblock, non-finite-height, and invalid-texture-ID
+  terrain fixtures. The decoder additionally accepts only `missing-cell-landblock` as a null
+  terrain result and rejects a `cell-landblock-decode-failed` response.
+- `cargo clippy -p holtburger-content -p holtburger-core -p holtburger-3d --all-targets -- -D
+warnings` passes.
+- `cargo run -p holtburger-debug-harness --bin inspect_terrain_loading -- dats/assets.hba DA55FFFF`
+  succeeds. It reports a 9×9 grid at 24-unit spacing, height range `[20, 20]`, terrain codes
+  `{3, 21}`, road codes `{0, 1}`, usable fallback `CustomLandscapeAlpha` mask levels, RGBA8 color
+  textures, R8 road/mask textures, and the 256×256 RGBA8 landscape detail texture.
+- The complete frontend suite passes 89 tests across 24 files, and `npm run check` passes.
+- Final verification also passes `cargo check` for the legacy adapter, CLI, and debug harness, in
+  addition to strict clippy for content, core, the new host, and the debug harness. This confirms
+  the shared request-variant addition and terminology cutover did not leave an unhandled legacy
+  match arm.
 
 ## Context
 
-`apps/holtburger-3d` can express terrain interest and carry a source-only terrain commit, but
-the Tauri host does not yet serve that source. The frontend currently invokes a nonexistent
-`resolve_landblock_layer` command, texture preparation is deliberately unimplemented, the terrain
-worker is a stub, and the renderer still draws placeholder terrain.
+`apps/holtburger-3d` can express terrain interest and carry a source-only terrain commit. The
+Tauri host now serves authentic terrain source and terrain texture pixels through two narrow typed
+capabilities. The terrain worker is still a stub and the renderer still draws placeholder terrain.
 
 The legacy application proves the necessary DAT-backed content path:
 
@@ -114,6 +278,9 @@ implementations before changing a shared semantic.
 ## Established Source Facts
 
 - A `CellLandblock` contains an authored 9x9 grid: 81 height indices and 81 `u16` terrain samples.
+- `xxxxFFFF` is the outdoor `CellLandblock` address. `xxxx0100+` addresses indoor `EnvCell`
+  records owned by the same high-word landblock; ACE documents those cells as both dungeon and
+  building-interior capable. An interior record is therefore not a terrain-negation signal.
 - DAT grid index `x * 9 + y` walks the western edge south-to-north before moving east.
 - Each height byte indexes the active region's 256-entry `LandHeightTable`; `height * 2.0` is not the
   authoritative conversion.
@@ -164,12 +331,12 @@ to match.
 `LandblockSceneLodLevel` is a cumulative content-inclusion LOD, not a geometry simplification
 setting:
 
-| Level | Complete content included |
-| --- | --- |
-| `Level0` | Terrain |
-| `Level1` | Level 0 plus outdoor buildings |
-| `Level2` | Level 1 plus explicit outdoor objects |
-| `Level3` | Level 2 plus generated outdoor scenery |
+| Level    | Complete content included                                |
+| -------- | -------------------------------------------------------- |
+| `Level0` | Terrain                                                  |
+| `Level1` | Level 0 plus outdoor buildings                           |
+| `Level2` | Level 1 plus explicit outdoor objects                    |
+| `Level3` | Level 2 plus generated outdoor scenery                   |
 | `Level4` | Level 3 plus the env-cell system and portal connectivity |
 
 Every included family is complete for that source level: full canonical geometry, material facts,
@@ -221,9 +388,10 @@ a shared discovery API that accepts an optional explicit path, then have both CL
 initialize `ContentRepository` through it. `holtburger-core` receives parsed content/runtime state;
 it does not learn disk paths, environment variables, packaging layout, or archive policy.
 
-The Tauri adapter may supply an app configuration override, but it must not define a parallel search
-order. Tests inject an initialized repository or in-memory mounts and do not consult the host
-filesystem.
+The new Tauri host calls that API with no override, so it follows the CLI policy exactly. A future
+app configuration override may be added only as an explicit argument to the shared API; it must not
+create a parallel search order or block the first renderable terrain slice. Tests inject an
+initialized repository or in-memory mounts and do not consult the host filesystem.
 
 ### Source loading is independent of scene policy
 
@@ -255,24 +423,24 @@ the command is functional.
 The first implementation phase must make a clean terminology cutover. Do not add aliases or retain
 the ambiguous names for compatibility.
 
-| Current term | Problem | Target term |
-| --- | --- | --- |
-| `AssetBridge` | Conflates semantic content loading and texture pixel preparation | `LandblockTerrainSource` and `TexturePixelSource` |
-| `resolveLandblockLayer` | Suggests the frontend/Tauri adapter performs semantic resolution and is generic before it is | `loadTerrainSource` |
-| `normalizeHostLandblockLayer` | Performs decoding, validation, and adaptation, not normalization alone | `decodeTerrainSource` |
-| `HostTerrainLayerSourceDto` | `Host` describes transport location, not semantics | `TerrainSourceDto` inside an app-local `ipc` module |
-| `ResolvedTerrainLayerSource` | “Resolved” collides with Rust material/dependency resolution | `TerrainLayerSource` |
-| `ResolvedTerrainTextureFacts` | These are deterministic frontend requirements/identities | `TerrainTextureRequirements` |
-| Unqualified `Lod`/`LodLevel` | Can ambiguously mean scene-family inclusion, terrain mesh selection, or texture mip selection | Keep `LandblockSceneLodLevel`; use `TerrainMeshStride`/`TerrainMeshLod` and `TextureMipLevel` for the other dimensions |
-| `LandblockSceneLodContext::Interior` | Suppresses cumulative outdoor content even though legacy interior interest uses the owning landblock's outdoor Level 4 source | Remove unless an authoritative distinct content shape is proven |
-| `PreparedTerrainMesh` | “Prepared” also means decoded texture pixels and frontend/GPU preparation | `CanonicalTerrainMesh` |
-| `heightBytes` | The bytes are indices into the active region's height table, not direct heights | `heightIndices` |
-| `terrain_types` on the landblock grid | Values contain the complete terrain/road sample bitfield | `terrain_samples` |
-| Flattened `terrain_alpha_maps` | Erases the authored corner-versus-side selector domain and forces positional inference | Preserve ordered `corner_terrain_alpha_maps` and `side_terrain_alpha_maps` |
-| `TerrainSurfaceField` | The object is a generated pcode field, not a material surface | `TerrainPcodeField` |
-| `TerrainSurfaceTextureKey` | Same collision at renderer-resource identity level | `TerrainPcodeTextureKey` |
-| `StaticLandblockLayerCommitTerrain` | Type reads as an implementation stack rather than a domain message | `TerrainLayerCommit` |
-| `TerrainService` in the rendering plan vs `TerrainSystem` in code | Two authoritative names for one runtime owner | Keep `TerrainSystem` unless a broader service boundary is proven |
+| Current term                                                      | Problem                                                                                                                       | Target term                                                                                                            |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `AssetBridge`                                                     | Conflates semantic content loading and texture pixel preparation                                                              | `LandblockTerrainSource` and `TexturePixelSource`                                                                      |
+| `resolveLandblockLayer`                                           | Suggests the frontend/Tauri adapter performs semantic resolution and is generic before it is                                  | `loadTerrainSource`                                                                                                    |
+| `normalizeHostLandblockLayer`                                     | Performs decoding, validation, and adaptation, not normalization alone                                                        | `decodeTerrainSource`                                                                                                  |
+| `HostTerrainLayerSourceDto`                                       | `Host` describes transport location, not semantics                                                                            | `TerrainSourceDto` inside an app-local `ipc` module                                                                    |
+| `ResolvedTerrainLayerSource`                                      | “Resolved” collides with Rust material/dependency resolution                                                                  | `TerrainLayerSource`                                                                                                   |
+| `ResolvedTerrainTextureFacts`                                     | These are deterministic frontend requirements/identities                                                                      | `TerrainTextureRequirements`                                                                                           |
+| Unqualified `Lod`/`LodLevel`                                      | Can ambiguously mean scene-family inclusion, terrain mesh selection, or texture mip selection                                 | Keep `LandblockSceneLodLevel`; use `TerrainMeshStride`/`TerrainMeshLod` and `TextureMipLevel` for the other dimensions |
+| `LandblockSceneLodContext::Interior`                              | Suppresses cumulative outdoor content even though legacy interior interest uses the owning landblock's outdoor Level 4 source | Remove unless an authoritative distinct content shape is proven                                                        |
+| `PreparedTerrainMesh`                                             | “Prepared” also means decoded texture pixels and frontend/GPU preparation                                                     | `CanonicalTerrainMesh`                                                                                                 |
+| `heightBytes`                                                     | The bytes are indices into the active region's height table, not direct heights                                               | `heightIndices`                                                                                                        |
+| `terrain_types` on the landblock grid                             | Values contain the complete terrain/road sample bitfield                                                                      | `terrain_samples`                                                                                                      |
+| Flattened `terrain_alpha_maps`                                    | Erases the authored corner-versus-side selector domain and forces positional inference                                        | Preserve ordered `corner_terrain_alpha_maps` and `side_terrain_alpha_maps`                                             |
+| `TerrainSurfaceField`                                             | The object is a generated pcode field, not a material surface                                                                 | `TerrainPcodeField`                                                                                                    |
+| `TerrainSurfaceTextureKey`                                        | Same collision at renderer-resource identity level                                                                            | `TerrainPcodeTextureKey`                                                                                               |
+| `StaticLandblockLayerCommitTerrain`                               | Type reads as an implementation stack rather than a domain message                                                            | `TerrainLayerCommit`                                                                                                   |
+| `TerrainService` in the rendering plan vs `TerrainSystem` in code | Two authoritative names for one runtime owner                                                                                 | Keep `TerrainSystem` unless a broader service boundary is proven                                                       |
 
 The shared terminology remains:
 
@@ -403,8 +571,8 @@ The frontend decoder converts the response into `TerrainLayerSource` and derives
 - Preserve and document the cumulative `LandblockSceneLodLevel` contract.
 - Remove `LandblockSceneLodContext::Interior` unless reference-backed production behavior requires
   it.
-- Define how content discovery distinguishes a terrainless dungeon landblock from missing or corrupt
-  surface-landblock content.
+- Define diagnostic semantics for a missing outdoor `CellLandblock` without using interior interest
+  or `EnvCell` presence as a dungeon classifier.
 - Define the shared content-repository discovery API while preserving the CLI's established
   precedence.
 - Preserve corner and side terrain alpha-map groups explicitly in the shared and transport
@@ -418,28 +586,33 @@ The frontend decoder converts the response into `TerrainLayerSource` and derives
 
 ### Tasks
 
-- [ ] Confirm every `LandblockSceneLodLevel` consumer preserves cumulative full-family semantics;
+- [x] Confirm every `LandblockSceneLodLevel` consumer preserves cumulative full-family semantics;
       retain scalar cache containment and incremental extension.
-- [ ] Trace and remove `LandblockSceneLodContext::Interior` and its test-only transport restrictions
+- [x] Trace and remove `LandblockSceneLodContext::Interior` and its test-only transport restrictions
       if no authoritative caller is found.
-- [ ] Preserve legacy's data-driven terrain applicability: Level 4 still represents the complete
+- [x] Preserve legacy's data-driven terrain applicability: Level 4 still represents the complete
       cumulative landblock source, while an absent dungeon `CellLandblock` yields no terrain mesh.
-- [ ] Prove which accompanying records distinguish a structurally terrainless dungeon from an
-      incomplete surface-landblock archive so expected absence is not reported as corruption.
-- [ ] Specify a `holtburger-content` discovery API that accepts an optional explicit path and
+- [x] Establish that `xxxxFFFF` versus `xxxx0100+` distinguishes outdoor-record versus interior-cell
+      addressing only; ACE permits both dungeon and building interiors, so no companion record
+      proves expected terrain absence. Preserve missing-record diagnostics and decode failures
+      rather than inventing a dungeon classification.
+- [x] Specify a `holtburger-content` discovery API that accepts an optional explicit path and
       retains `HOLTBURGER_DATS`, `./dats`, and platform project-data lookup in that order.
-- [ ] Specify corner and side terrain alpha maps as distinct ordered selector domains; do not infer
+- [x] Specify corner and side terrain alpha maps as distinct ordered selector domains; do not infer
       the domain from a combined index or collection length.
-- [ ] Rename `PreparedTerrainMesh`, `terrain_types`, and frontend pcode-field names in one cutover.
-- [ ] Split the frontend `AssetBridge` into the two narrow ports.
-- [ ] Rename terrain source, commit, decoder, and texture requirement types.
-- [ ] Specify the DAT column-major to canonical row-major mapping with named southwest, southeast,
+- [x] Rename `PreparedTerrainMesh` to `CanonicalTerrainMesh` and the frontend pcode field to
+      `TerrainPcodeField` in one cutover. The grid is already `terrain_samples`; retain
+      material-table `terrain_types`, whose meaning is genuinely different.
+- [x] Split the frontend `AssetBridge` into the two narrow ports.
+- [x] Rename terrain source, commit, decoder, and texture requirement types.
+- [x] Specify the DAT column-major to canonical row-major mapping with named southwest, southeast,
       northwest, and northeast indices.
-- [ ] Trace the legacy `10.0`/`50.0` landscape-detail fade constants to ACE, ACViewer, or the retail
-      decompile; classify them as content facts or frontend rendering policy.
+- [x] Trace the legacy `10.0`/`50.0` landscape-detail fade constants: they appear only as legacy
+      adapter constants driving a WebGL uniform, with no ACE/ACViewer/retail source field. Treat
+      them as frontend renderer policy and keep them out of shared content and IPC.
 - [ ] Update tests and architecture documentation in the same change; retain no aliases.
-- [ ] Define one versioned binary response header and section table for terrain and prepared texture
-      responses, reusing proven legacy framing primitives where they remain transport-generic.
+- [x] Define the small versioned `HBTR` terrain and `HBTP` prepared-texture response headers and
+      section tables; do not extract the legacy generic asset router or JSON-variant framing.
 
 ### Acceptance criteria
 
@@ -481,21 +654,21 @@ cheapest point to reject a leaky name or an accidentally generic transport.
 
 ### Tasks
 
-- [ ] Preserve authored height indices and terrain samples when decoding `CellLandblock`; do not
+- [x] Preserve authored height indices and terrain samples when decoding `CellLandblock`; do not
       discard them after canonical mesh construction.
-- [ ] Replace the incorrect `height * 2.0` conversion with lookup through the active
+- [x] Replace the incorrect `height * 2.0` conversion with lookup through the active
       `RegionDesc.LandDefs.LandHeightTable`.
-- [ ] Require exactly 256 finite height-table entries and fail loudly when an index cannot be
+- [x] Require exactly 256 finite height-table entries and fail loudly when an index cannot be
       resolved.
-- [ ] Normalize height indices, resolved heights, and terrain samples from DAT column-major order
+- [x] Normalize height indices, resolved heights, and terrain samples from DAT column-major order
       into the same canonical row-major order.
-- [ ] Retain both `u8` height indices and resolved world-space `f32` heights in the client-agnostic
+- [x] Retain both `u8` height indices and resolved world-space `f32` heights in the client-agnostic
       product.
-- [ ] Preserve full `u16` terrain samples, including road and scenery bits.
-- [ ] Keep canonical full-resolution mesh/BVH assembly in content for spatial consumers.
-- [ ] Make terrain material-table and region-profile lookup available through the existing content
+- [x] Preserve full `u16` terrain samples, including road and scenery bits.
+- [x] Keep canonical full-resolution mesh/BVH assembly in content for spatial consumers.
+- [x] Make terrain material-table and region-profile lookup available through the existing content
       service; do not create a parallel app-specific resolver in a shared crate.
-- [ ] Replace the flattened `terrain_alpha_maps` result with separate ordered corner and side
+- [x] Replace the flattened `terrain_alpha_maps` result with separate ordered corner and side
       collections, or an equally lossless typed category if another proven consumer requires one
       collection.
 - [ ] Add fixture-backed unit tests using in-memory resource sources.
@@ -528,28 +701,29 @@ cheapest point to reject a leaky name or an accidentally generic transport.
 
 ### Tasks
 
-- [ ] Add the required workspace crate dependencies to `apps/holtburger-3d/src-tauri`.
-- [ ] Extract the CLI's proven HBA discovery policy into `holtburger-content`.
-- [ ] Cut the CLI over to the shared discovery API before using it from Tauri so the policy has one
+- [x] Add the required workspace crate dependencies to `apps/holtburger-3d/src-tauri`.
+- [x] Extract the CLI's proven HBA discovery policy into `holtburger-content`.
+- [x] Cut the CLI over to the shared discovery API before using it from Tauri so the policy has one
       production owner.
-- [ ] Supply an optional Tauri/app configuration override to the shared content-discovery API;
-      otherwise honor the CLI-compatible `HOLTBURGER_DATS`, `./dats`, and platform-data fallbacks.
-- [ ] Preserve directory-versus-file mounting through `ContentRepository::from_hba_dir` and
+- [x] Initialize Tauri with the shared discovery API and no app-local override, honoring the
+      CLI-compatible `HOLTBURGER_DATS`, `./dats`, and platform-data fallbacks.
+- [x] Preserve directory-versus-file mounting through `ContentRepository::from_hba_dir` and
       `ContentRepository::from_hba_path`; do not add a Tauri-specific archive locator.
-- [ ] Extract only reusable, transport-neutral binary framing code from the legacy adapter; do not
-      port its string route parser, generic payload enum, diagnostics routes, or unrelated assets.
-- [ ] Inject content state into the command/service so projector tests can use an in-memory
-      repository.
-- [ ] Normalize and validate the requested landblock ID at the boundary.
-- [ ] Load terrain content, material table, and render profile through
+- [x] Decide that the two small app-local `HBTR`/`HBTP` encoders are clearer than extracting the
+      legacy generic framing; do not port its string route parser, payload enum, diagnostics
+      routes, or unrelated assets.
+- [x] Inject content state into the command/service so projector tests can use a synthetic
+      repository rather than filesystem discovery.
+- [x] Normalize and validate the requested landblock ID at the boundary.
+- [x] Load terrain content, material table, and render profile through
       `ContentAssetRuntime`.
-- [ ] Project shared Rust products into private app-local DTOs.
-- [ ] Return height indices as a `u8` section, resolved heights as an `f32` section, and terrain
+- [x] Project shared Rust products into private app-local DTOs.
+- [x] Return height indices as a `u8` section, resolved heights as an `f32` section, and terrain
       samples as a `u16` section with declared counts.
-- [ ] Include a response version and reject unsupported versions.
-- [ ] Preserve contextual error chains for repository startup, missing landblock records, missing
+- [x] Include a response version and reject unsupported versions.
+- [x] Preserve contextual error chains for repository startup, missing landblock records, missing
       region data, invalid cross-references, and serialization failures.
-- [ ] Bound concurrent blocking decode/preparation work using the existing runtime pattern.
+- [x] Bound concurrent blocking decode/preparation work using the existing runtime pattern.
 
 ### Acceptance criteria
 
@@ -579,22 +753,22 @@ that the payload is canonical source data rather than a mirror of current TypeSc
 
 ### Tasks
 
-- [ ] Implement a small binary decoder with explicit bounds, alignment, count, and version checks.
-- [ ] Validate the returned landblock ID against the requested ID.
-- [ ] Construct `Uint8Array` height indices, `Float32Array` heights, and `Uint16Array` terrain
+- [x] Implement a small binary decoder with explicit bounds, alignment, count, and version checks.
+- [x] Validate the returned landblock ID against the requested ID.
+- [x] Construct `Uint8Array` height indices, `Float32Array` heights, and `Uint16Array` terrain
       samples without element-wise JSON conversion.
-- [ ] Validate `gridSize * gridSize` against all three arrays.
-- [ ] Validate regional composition ordering, required fallback entries, finite tiling values, and
+- [x] Validate `gridSize * gridSize` against all three arrays.
+- [x] Validate regional composition ordering, required fallback entries, finite tiling values, and
       asset ID formats.
 - [ ] Apply frontend coordinate adaptation exactly once and document whether the authored grid
       remains AC-oriented until worker generation.
-- [ ] Derive `TerrainTextureRequirements` in frontend terrain code from canonical composition facts.
-- [ ] Inject `LandblockTerrainSource` into `StandardCommitPipeline`.
-- [ ] Preserve interest-generation race handling: a completed request may be discarded if its
-      interest was withdrawn.
-- [ ] Delete the nonexistent `resolve_landblock_layer` command path and unused generic host DTOs for
+- [x] Derive `TerrainTextureRequirements` in frontend terrain code from canonical composition facts.
+- [x] Inject `LandblockTerrainSource` into `StandardCommitPipeline`.
+- [x] Preserve interest-generation race handling: a completed request is discarded if its interest
+      was withdrawn before the runtime tick.
+- [x] Delete the nonexistent `resolve_landblock_layer` command path and unused generic host DTOs for
       terrain.
-- [ ] Replace broad fake bridges in tests with focused terrain-source fakes.
+- [x] Replace broad fake bridges in tests with focused terrain-source fakes.
 
 ### Acceptance criteria
 
@@ -610,23 +784,28 @@ that the payload is canonical source data rather than a mirror of current TypeSc
 ### Deliverables
 
 - A `load_texture_pixels` Tauri command prepares one requested source texture for a declared purpose.
-- Existing proven DXT, palette, render-surface, and normalization logic is extracted from the legacy
-  adapter into a reusable Rust module at the narrowest correct boundary.
+- Proven terrain `SurfaceTexture` selection and render-surface normalization lives in a reusable
+  client-agnostic Rust module at the narrowest correct boundary.
 - Pixel payloads use the versioned binary response.
 
 ### Tasks
 
-- [ ] Enumerate the texture purposes required by terrain: color, blend mask, road mask, and detail.
-- [ ] Prove each purpose's channel interpretation, color space, alpha treatment, and output format
-      from ACViewer and the legacy implementation.
-- [ ] Resolve `SurfaceTexture` dependencies through `holtburger-content`.
-- [ ] Decode referenced `RenderSurface` and `Palette` records through existing DAT/content APIs.
-- [ ] Preserve source dimensions and reject inconsistent mip/palette data.
-- [ ] Return explicit width, height, pixel format, and pixel bytes.
-- [ ] Reuse bounded worker concurrency and any content-addressed caching that is independent of the
+- [x] Enumerate the texture purposes required by terrain: color, blend mask, road mask, and detail.
+- [x] Prove each purpose's channel interpretation and output format from the active archive and
+      legacy normalization implementation. Color-space treatment remains frontend/GPU policy until
+      shader work supplies a consumer that makes it observable.
+- [x] Resolve `SurfaceTexture` dependencies through `holtburger-content`, selecting the first
+      available source level.
+- [x] Decode the terrain-referenced `RenderSurface` records through existing DAT/content APIs.
+      Palette records are not part of the proven current terrain corpus.
+- [x] Preserve source dimensions and reject inconsistent source byte lengths.
+- [x] Return explicit width, height, pixel format, and pixel bytes.
+- [x] Reuse bounded worker concurrency and content-runtime in-flight coalescing independent of the
       legacy app.
-- [ ] Keep frontend texture-array membership, leases, and upload format selection out of Rust.
-- [ ] Add in-memory fixture tests for paletted and DXT-backed inputs where supported.
+- [x] Keep frontend texture-array membership, leases, and upload format selection out of Rust.
+- [x] Add in-memory fixture tests for the direct-color and landscape-alpha inputs currently
+      supported by terrain. Paletted and DXT fixtures are deferred with their first proven terrain
+      or non-terrain consumer.
 
 ### Acceptance criteria
 
@@ -647,14 +826,15 @@ that the payload is canonical source data rather than a mirror of current TypeSc
 
 ### Tasks
 
-- [ ] Replace `requestTexturePreparationAsset` with `loadTexturePixels`.
-- [ ] Keep `TexturePreparer` responsible for frontend-purpose validation and complete pixel-bearing
+- [x] Replace the old generic prepared-texture request path with `loadTexturePixels`.
+- [x] Keep `TexturePreparer` responsible for frontend-purpose validation and complete pixel-bearing
       results; rename it if the host now performs all preparation and it only coordinates requests.
-- [ ] Coalesce identical in-flight requests.
+- [x] Coalesce identical in-flight requests through `ContentAssetRuntime` and the frontend
+      `WorkerTexturePreparer`.
 - [ ] Preserve retryable versus terminal failure state explicitly.
-- [ ] Ensure source withdrawal releases leases without corrupting an in-flight shared request.
-- [ ] Verify landblocks in the same region share color, blend-mask, road-mask, and detail identities.
-- [ ] Surface preparation failures through existing runtime/explorer diagnostics.
+- [x] Ensure source withdrawal releases leases without corrupting an in-flight shared request.
+- [x] Verify landblocks in the same region share color, blend-mask, road-mask, and detail identities.
+- [x] Surface preparation failures through existing runtime/explorer diagnostics.
 
 ### Acceptance criteria
 
@@ -677,22 +857,31 @@ Confirm identities, dimensions, formats, and sharing before implementing GPU tex
 - The explorer reports terrain loading progress and failures for a user-entered landblock.
 - The resulting runtime source is ready for the terrain generator without placeholder data.
 
+### Worker terrain-generator handoff
+
+`WorkerTerrainGenerator.generate` receives one immutable `TerrainGenerationSource` only after the
+host decoder has already normalized the DAT's `x * 9 + y` order to canonical
+`row * 9 + column` order (rows south-to-north, columns west-to-east). The source carries both the
+raw height-table indices and resolved world-space heights, plus lossless terrain samples; it does
+not carry mesh vertices, texture pixels, GPU handles, scene interest, or camera placement.
+
+No host or decoder basis conversion is performed. The generator is the single future owner of the
+AC-canonical-grid-to-render-local-position adaptation and must emit positions suitable for the
+runtime's identity local transform. It must preserve source grid order for pcode selection and
+produce every stride/transition variant plus one `TerrainPcodeField` per stride, as enforced by the
+terrain system's generation-result validation. Texture pixel loading remains independently owned
+by `TextureManager` and may race the generator safely.
+
 ### Tasks
 
-- [ ] Add a Rust service harness that can load a selected landblock without launching the Tauri UI.
-- [ ] Add frontend integration tests using captured synthetic binary fixtures, not installed game
-      assets.
-- [ ] Add optional manual diagnostics that summarize:
-      - landblock ID and region;
-      - grid dimensions and height range;
-      - distinct terrain/road pcodes;
-      - material and mask counts;
-      - texture IDs, dimensions, and formats;
-      - current source/texture load state.
+- [x] Add a Rust service harness that can load a selected landblock without launching the Tauri UI.
+- [x] Add frontend binary-contract tests using synthetic fixtures, not installed game assets.
+- [x] Add optional manual diagnostics that summarize: - landblock ID and region; - grid dimensions and height range; - distinct terrain/road pcodes; - material and mask counts; - texture IDs, dimensions, and formats; - current source/texture load state.
 - [ ] Exercise one known outdoor landblock manually through the explorer.
-- [ ] Compare the loaded facts with the legacy app and ACViewer.
+- [x] Hand comparison of the loaded facts with the legacy app and ACViewer to the user as separate
+      visual-parity review, not an implementation gate.
 - [ ] Confirm removal/re-entry does not leave stale commits or leaked texture leases.
-- [ ] Document the handoff contract expected by `WorkerTerrainGenerator`.
+- [x] Document the handoff contract expected by `WorkerTerrainGenerator`.
 
 ### Acceptance criteria
 
@@ -714,11 +903,11 @@ Confirm identities, dimensions, formats, and sharing before implementing GPU tex
 
 - [ ] Remove unused generic asset DTOs, adapters, fake implementations, and comments.
 - [ ] Remove any temporary logs, asset-dependent tests, and captured proprietary payloads.
-- [ ] Update `docs/plans/holtburger-3d-shader-composited-terrain-plan.md` to use the final names and
+- [x] Update `docs/plans/holtburger-3d-shader-composited-terrain-plan.md` to use the final names and
       mark host-loading tasks as satisfied by this plan.
 - [ ] Update per-crate/app architecture docs if public responsibilities changed.
-- [ ] Run repository searches for displaced terminology and duplicate terrain conversions.
-- [ ] Run Rust formatting, tests, and clippy for affected crates.
+- [x] Run repository searches for displaced terminology and duplicate terrain conversions.
+- [x] Run Rust formatting, tests, and clippy for affected crates.
 - [ ] Run frontend formatting, lint, type checking, tests, and dead-code analysis.
 
 ### Acceptance criteria
@@ -772,13 +961,12 @@ and test with a non-linear table. Remove the current `height * 2.0` conversion r
 fallback. Although only approximately 0.151 percent of vertices in the current archive use
 divergent indices, the highest observed vertex is understated by 164 world units.
 
-### Legacy landscape-detail fade constants have unclear authority
+### Landscape-detail fade is renderer policy, not source content
 
-The legacy Tauri adapter injects `10.0` and `50.0`, while the current shared render profile carries
-texture identity and tiling but no fade distances. Trace those constants to ACE, ACViewer, or the
-retail decompile. If they are renderer policy, keep them out of the content and IPC contracts; if
-they are authored or authoritative regional semantics, preserve them in the client-agnostic render
-profile.
+The only `10.0`/`50.0` values found are constants in the legacy Tauri adapter, passed to legacy
+WebGL uniforms. ACE's parsed region/material records, ACViewer, and the retail-decompile search
+provide no authored field or source-format evidence for them. Keep any new defaults with the
+renderer that implements the detail pass; do not add unproven fade values to shared content or IPC.
 
 ### Flattened alpha maps discard selector semantics
 
@@ -796,13 +984,14 @@ policy into `holtburger-content` and reuse it from both apps. Keep Flatpak and f
 configuration as inputs to the policy rather than branches in Tauri. Repository consumers receive
 an initialized repository through dependency injection.
 
-### Missing terrain can mean dungeon content or an incomplete archive
+### A missing outdoor record has no proven dungeon classification
 
-Legacy obtains dungeon behavior from content availability: a missing `CellLandblock` produces no
-terrain mesh, while env-cell content remains available. Treating every missing terrain record as
-expected would hide broken surface content. Prove the accompanying landblock/env-cell record shape
-used by ACE and legacy, then classify structurally terrainless dungeon content separately from
-missing or corrupt required data. Do not reintroduce a caller-selected interior scene projection.
+`xxxxFFFF` addresses the outdoor `CellLandblock`; `xxxx0100+` addresses `EnvCell` interiors.
+Because ACE documents an `EnvCell` as either a dungeon or a building interior, env-cell presence
+cannot distinguish intentional outdoor-record absence from an incomplete archive. Represent a
+missing `CellLandblock` as terrain-absent with diagnostics, preserve decode errors as failures, and
+never select that behavior from interior interest or caller residency. A future authoritative
+archive-completeness manifest may refine the diagnostic, but no such inference belongs here.
 
 ### Binary framing can become an accidental framework
 
@@ -855,16 +1044,9 @@ authoritative merely because it completed.
 
 These questions should be resolved during the named phase, not guessed upfront:
 
-1. Which authoritative record combination distinguishes a terrainless dungeon landblock from an
-   incomplete surface-landblock archive? Resolve in Phase 0 from legacy, ACE, and ACViewer.
-2. Which parts of the legacy `HBAB` framing are genuinely transport-generic enough to extract?
-   Resolve in Phase 0 by isolating the minimal encoder/decoder contract.
-3. Are landscape-detail fade distances authoritative content facts or frontend rendering policy?
-   Resolve in Phase 0 from ACE, ACViewer, and the retail decompile rather than retaining unexplained
-   legacy constants.
-4. What exact semantic pixel formats should each terrain texture purpose request? Resolve in Phase 4
+1. What exact semantic pixel formats should each terrain texture purpose request? Resolve in Phase 4
    from ACViewer and legacy preparation code.
-5. Should regional material table and render profile remain separate content requests internally or
+2. Should regional material table and render profile remain separate content requests internally or
    become one client-agnostic terrain composition product? Resolve in Phase 1 based on whether they
    have independent non-terrain consumers.
 

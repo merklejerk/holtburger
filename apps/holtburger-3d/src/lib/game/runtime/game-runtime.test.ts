@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
-import type { AssetBridge } from "../../assets/asset-bridge";
-import type { CommitBundle, CommitPipeline } from "../commit/types";
+import type { TexturePixelSource } from "../../assets/texture-pixel-source";
+import {
+	CommitBundleSourceKind,
+	type CommitBundle,
+	type CommitPipeline,
+} from "../commit/types";
 import { createLandblockWorldOrigin } from "../landblocks";
 import { Quat, Vec3 } from "../math/types";
 import type { Renderer } from "../renderer/renderer";
 import type { RendererResourceManager } from "../renderer/resource-manager";
-import type { LandblockIdLayer } from "./scene-interest";
+import { LandblockLayerKind, type LandblockIdLayer } from "./scene-interest";
 import { GameRuntime, type GameRuntimeRenderDevice } from "./game-runtime";
+import type { SceneAvailabilityEvent } from "./scene-availability";
 
 describe("GameRuntime view and interest control", () => {
 	it("keeps frontend scene interest independent from the primary camera", async () => {
@@ -32,7 +37,7 @@ describe("GameRuntime view and interest control", () => {
 		const runtime = await GameRuntime.build(
 			device,
 			pipeline,
-			{} as AssetBridge,
+			{} as TexturePixelSource,
 		);
 
 		runtime.updateSceneInterest({
@@ -86,4 +91,109 @@ describe("GameRuntime view and interest control", () => {
 
 		await runtime.destroy();
 	});
+
+	it("discards a terrain commit whose scene interest was withdrawn while loading", async () => {
+		const pipeline = new DeferredCommitPipeline();
+		const device: GameRuntimeRenderDevice = {
+			buildRenderer: async () => ({ async destroy() {}, drawFrame() {} }),
+			resources: {} as RendererResourceManager,
+		};
+		const runtime = await GameRuntime.build(
+			device,
+			pipeline,
+			{} as TexturePixelSource,
+		);
+
+		runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
+		runtime.updateSceneInterest(sceneInterest("0x2020ffff"));
+		pipeline.resolveNext([staleTerrainArtifact("0x1010ffff")]);
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(() => runtime.tick()).not.toThrow();
+
+		await runtime.destroy();
+	});
+
+	it("reports unavailable content against the latest matching interest revision", async () => {
+		const pipeline = new DeferredCommitPipeline();
+		const device: GameRuntimeRenderDevice = {
+			buildRenderer: async () => ({ async destroy() {}, drawFrame() {} }),
+			resources: {} as RendererResourceManager,
+		};
+		const runtime = await GameRuntime.build(
+			device,
+			pipeline,
+			{} as TexturePixelSource,
+		);
+		const events: SceneAvailabilityEvent[] = [];
+		const unsubscribe = runtime.subscribeSceneAvailability((event) =>
+			events.push(event),
+		);
+
+		runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
+		const latest = runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
+		pipeline.resolveNext([]);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(events).toEqual([
+			{
+				kind: "scene-content-failed",
+				message: "No terrain content is available for 0x1010ffff.",
+				residency: { envCellId: null, landblockId: "0x1010ffff" },
+				revision: latest.revision,
+			},
+		]);
+
+		unsubscribe();
+		await runtime.destroy();
+	});
 });
+
+function sceneInterest(anchorLandblockId: string) {
+	return {
+		anchorLandblockId,
+		lod: {
+			buildingRadius: null,
+			envCellRadius: null,
+			explicitObjectRadius: null,
+			generatedObjectRadius: null,
+			terrainRadius: 0,
+		},
+	} as const;
+}
+
+/** Minimal stale artifact: applying it would fail, so a passing test proves it was discarded. */
+function staleTerrainArtifact(landblockId: string): CommitBundle {
+	return {
+		commit: new Proxy(
+			{},
+			{
+				get() {
+					throw new Error("Withdrawn terrain artifact was applied.");
+				},
+			},
+		),
+		dynamicEntities: [],
+		kind: CommitBundleSourceKind.LandblockLayer,
+		landblockId,
+		layer: LandblockLayerKind.Terrain,
+	} as CommitBundle;
+}
+
+class DeferredCommitPipeline implements CommitPipeline {
+	readonly #pending: Array<
+		(resolve: (artifacts: readonly CommitBundle[]) => void) => void
+	> = [];
+
+	async prepareLandblockLayers(): Promise<readonly CommitBundle[]> {
+		return new Promise((resolve) => this.#pending.push(resolve));
+	}
+
+	resolveNext(artifacts: readonly CommitBundle[]): void {
+		const resolve = this.#pending.shift();
+		if (!resolve) throw new Error("No commit preparation is pending.");
+		resolve(artifacts);
+	}
+
+	async destroy(): Promise<void> {}
+}

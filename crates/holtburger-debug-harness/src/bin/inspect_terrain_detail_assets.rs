@@ -34,6 +34,68 @@ fn main() -> Result<()> {
             .len()
     );
 
+    let terrain_texture_ids = region
+        .terrain_info
+        .land_surfaces
+        .tex_merge
+        .corner_terrain_maps
+        .iter()
+        .chain(
+            region
+                .terrain_info
+                .land_surfaces
+                .tex_merge
+                .side_terrain_maps
+                .iter(),
+        )
+        .map(|map| map.tex_gid)
+        .chain(
+            region
+                .terrain_info
+                .land_surfaces
+                .tex_merge
+                .road_maps
+                .iter()
+                .map(|map| map.road_tex_gid),
+        )
+        .chain(
+            region
+                .terrain_info
+                .land_surfaces
+                .tex_merge
+                .terrain_desc
+                .iter()
+                .flat_map(|desc| [desc.terrain_tex.tex_gid, desc.terrain_tex.detail_tex_gid]),
+        )
+        .filter(|id| *id != 0)
+        .collect::<BTreeSet<_>>();
+    println!(
+        "terrain source SurfaceTextures={}",
+        terrain_texture_ids.len()
+    );
+    for texture_id in terrain_texture_ids {
+        let texture_bytes = hba
+            .get_file_in_namespace(EOR_PORTAL_NAMESPACE, texture_id)
+            .with_context(|| format!("failed to read SurfaceTexture 0x{texture_id:08X}"))?;
+        let texture = SurfaceTexture::unpack(&mut Cursor::new(texture_bytes))
+            .with_context(|| format!("failed to parse SurfaceTexture 0x{texture_id:08X}"))?;
+        print!("  SurfaceTexture 0x{texture_id:08X}:");
+        for surface_id in texture.render_surface_ids {
+            let Ok(surface_bytes) = hba.get_file_in_namespace(EOR_PORTAL_NAMESPACE, surface_id)
+            else {
+                print!(" 0x{surface_id:08X}=missing");
+                continue;
+            };
+            let surface = RenderSurface::unpack(&mut Cursor::new(surface_bytes))
+                .with_context(|| format!("failed to parse RenderSurface 0x{surface_id:08X}"))?;
+            print!(
+                " 0x{surface_id:08X}={:?}/{}x{}",
+                surface.format, surface.width, surface.height
+            );
+        }
+        println!();
+    }
+
     for (role_index, role_name) in ["landscape", "building", "environment", "object"]
         .iter()
         .enumerate()

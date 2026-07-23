@@ -1,21 +1,248 @@
 # Holtburger 3D Shader-Composited Terrain Architecture Plan
 
-Status: Draft steered around resolver-authored texture facts, immutable prebuilt terrain resources,
-and service-owned terrain device resources. Existing terrain and texture stubs partially reflect
-superseded recurrent-generation and aggregate-texture architecture and require a clean cutover.
+Status: Implemented. The client-agnostic Rust terrain-source and texture-pixel boundary is
+implemented by `holtburger-3d-terrain-loading-pipeline-plan.md`; this plan completes terrain
+generation, device realization, shader composition, and headless WebGL2 validation. Visual parity
+review against reference applications is deliberately user-owned work.
+
+## Implementation Record
+
+### 2026-07-23 — Explorer free-fly camera follows source availability
+
+Completed:
+
+- Explorer now owns a legacy-style free-fly controller rather than an editable camera-position
+  form. Left drag rotates; middle/right drag pans; wheel moves along local up; W/S, Z/C, A/D,
+  Space/Page Up, Page Down, and Shift retain the legacy movement policy.
+- `GameRuntime.updateSceneInterest` returns an opaque revision receipt and publishes narrow,
+  revision-aware source/topology availability events. The events expose neither terrain buffers nor
+  runtime resource identities. A repeat request updates the active layer's revision, so an older
+  coalesced load cannot be discarded merely because the Explorer asked to refocus the same target.
+- Outdoor terrain source commit publishes availability before geometry and texture realization.
+  `queryOutdoorTerrainSurface` samples the canonical source grid using the same deterministic
+  triangle split as the stride-one rendered mesh, allowing Explorer to place its camera above a
+  real terrain height without waiting for the radius-two interest halo.
+- Explorer's camera coordinator is app-local. It chooses an in-landblock offset/look-at pose,
+  obtains world-point residency from runtime for every controller update, submits the resolved
+  camera, and cancels an outstanding automatic focus as soon as the user takes manual control.
+- Explorer exposes the complete outdoor LoD request policy. Its sliders preserve the proven
+  `terrain ≥ buildings ≥ explicit objects/generated scenery` hierarchy, while env-cell radius is
+  constrained by terrain. Terrain is the only typed source capability currently implemented;
+  enabling another configured layer deliberately surfaces its runtime availability failure rather
+  than silently dropping the requested layer.
+- The runtime contract includes future environment-cell topology availability and world-bound
+  queries. Explorer deliberately does not request the unimplemented env-cell layer; an env-cell
+  target reports that limitation rather than generating a predictable pipeline error or claiming a
+  camera focus it cannot establish.
+- Explorer telemetry now measures runtime tick and render separately. The former implementation
+  measured rendering before starting its displayed draw timer, making a near-zero draw number
+  meaningless.
+- Shared helper review moved vector scaling, subtraction, cross products, normalization, and scalar
+  clamping into `game/math/vector-utils`, while yaw/pitch quaternion conversion now lives in
+  `game/math/camera-orientation`. The canonical outdoor terrain-cell count has one terrain-domain
+  owner in `terrain/types`. The terrain sampler remains terrain-domain logic, and the Explorer
+  offset/look-at choice remains Explorer policy; promoting either as generic math would blur real
+  ownership rather than eliminate duplication.
+- The first quaternion bridge used the mathematical positive-Y yaw sign, but this renderer's
+  camera-to-world matrix convention requires its inverse. That made a positive legacy yaw render
+  its movement-forward point behind the camera. `camera-orientation` now owns both the shared
+  axes and corrected conversion, and Explorer restores legacy's 60-degree vertical FOV.
+
+Verification:
+
+- Focused terrain-surface tests prove interpolation of the renderer's triangle surface and its
+  canonical boundary behavior. Runtime tests prove unavailable target content is reported against
+  the current matching scene-interest revision.
+- `npm run check`, `npm run test:ts` (93 tests), and `npm run build` pass. The camera-orientation
+  regression test proves a controller-forward point transforms to camera-space `-Z` through the
+  same quaternion and view-matrix path used for rendering.
+- The self-cleaning `npm run harness:terrain -- --landblock 0xda55ffff` run reaches a real
+  textured frame with no browser errors after the runtime frame split.
+
+### 2026-07-23 — Canonical-grid generator replaces the terrain stub
+
+Completed:
+
+- `TerrainGenerationSource` now carries its outdoor `landblockId`. Retail's deterministic diagonal
+  split uses global cell coordinates derived from that identity, so leaving it only on the enclosing
+  installation would force a generator to invent topology or accept hidden ambient state.
+- `InlineTerrainGenerator` replaces the falsely named throwing `WorkerTerrainGenerator`. It consumes
+  only the immutable canonical source and creates all 36 stride/direction variants as one
+  concatenated indexed terrain geometry, with per-variant bounds, render-local positions, normals,
+  and normalized grid coordinates. It also creates exactly one pcode field for each stride.
+- Generated positions perform the sole frontend basis adaptation: canonical columns become render X,
+  canonical south-to-north rows become negative render Z, and resolved heights become render Y. The
+  terrain root keeps its identity local transform. The conversion avoids negative zero at the south
+  edge, matching existing static-terrain conventions.
+- Stride-specific pcode fields use the proven southwest, southeast, northeast, northwest sample
+  order and the established retail bit packing. Generated topology uses the same unsigned global-cell
+  split hash already used by the shared canonical terrain mesh.
+- Directional variants apply the direct retail edge rule: every odd edge vertex that faces a coarser
+  neighbor becomes the average of its two even-edge neighbors; normals are then regenerated from the
+  adjusted indexed geometry. Geometry and pcode allocation remain independent of texture residency.
+
+Decisions and debt:
+
+- The fixed 9x9 source and 36 bounded variants make an inline executor the honest current
+  implementation. The `TerrainGenerator` port still permits a future dedicated worker, but there is
+  no fake worker transport or detached source buffer today. Move it off-thread only with a measured
+  scheduling problem, preserving the same source/result contract.
+- At this checkpoint the special cardinal transition lowering formulas had not yet been ported. The
+  common edge averaging was real and source-backed, but retail-transition parity still required the
+  authored-grid clamp pass.
+- At this checkpoint the renderer still used its temporary flat green terrain pass. Generated geometry
+  and pcode fields reached device realization; shader composition was the next presentation step.
+
+Verification:
+
+- Focused generator tests prove the complete 36-variant/4-field result, pcode corner packing, the
+  canonical-to-render-local basis conversion, and a stride-two north-edge stitch.
+- The affected frontend files pass ESLint and Prettier checks. The broader app lint command still
+  stops on unrelated existing findings in `commit/pipeline.ts` and `texture-manager.test.ts`.
+  Frontend type checking now passes.
+
+### 2026-07-23 — WebGL2 composes terrain from canonical source resources
+
+Completed:
+
+- `WebGL2TerrainProgram` replaces the flat-green terrain path. Its vertex stage keeps the terrain
+  basis and anchor-relative transform explicit; its fragment stage fetches the selected stride's
+  integer pcode field and performs regional composition from the existing `RGBA32UI` composition
+  table, color array, terrain-mask array, road-mask array, and detail texture.
+- The shader ports the source-proven `TexMerge` choices: terrain corner extraction, repeated-corner
+  base/overlay selection, corner-versus-side alpha-map selection, rotations, road combinations,
+  full-road type `0x20`, and the pcode-stable variation hash. The hash uses 16-bit pieces so
+  `floor(hash * count / 2^32)` remains exact under WebGL2's 32-bit integer arithmetic.
+- Source alpha coordinates and quarter-turn mapping follow the established legacy renderer and
+  ACViewer convention. Color/detail tiling stays in composition metadata; pcodes remain generated
+  cell resources rather than material attributes.
+- The renderer binds six source resources per selected terrain draw and submits only the selected
+  index range. Detail fade retains the legacy frontend policy (`10` to `50` world units), outside
+  content and IPC contracts.
+- The unused flat-color program was deleted instead of retained as a second renderer mode. The
+  shared shader compile/uniform helpers are deliberately small and renderer-local.
+- Normalized 2D textures and arrays now set explicit filters and wrap. In particular, one-level R8
+  mask arrays use `LINEAR` rather than the default mipmapped min filter, which would be incomplete.
+- The Tauri dev launcher supplies the existing `HOLTBURGER_DATS` override from the checked-out
+  workspace `dats` directory only when the caller has not supplied one. Cargo runs the host from
+  `src-tauri`, where the shared repository's relative `./dats` fallback cannot see the workspace
+  fixture; this dev-only bridge preserves the common content-discovery API rather than adding a
+  Tauri-specific host setting.
+
+Decisions and debt:
+
+- Composition is shader-side, not host-resolved or CPU-precomposed. `holtburger-content` remains
+  client-agnostic; the renderer alone owns GPU record packing and sampler binding.
+- Exact extracted vertex/fragment source is validated and linked by `glslangValidator`. That pass
+  exposed a missing GLSL ES sampler default-precision declaration; the terrain fragment stage now
+  declares precision for `sampler2D`, `sampler2DArray`, and `usampler2D`. The user owns any
+  subsequent terrain, road, mask, and detail comparison against legacy/ACViewer.
+- A virtual-display Tauri launch reaches the native host with both an explicit and the new automatic
+  development `HOLTBURGER_DATS` path. This environment cannot keep its window interactive, so it is
+  startup evidence only—not proof that pixels reached a live canvas.
+- Lighting remains deliberately absent: textured source composition should land before we invent a
+  light model. Normals are generated and uploaded for the following presentation pass.
+- A live reference comparison remains useful evidence, especially for the authored-grid cardinal
+  clamp pass, but is outside this implementation plan and is not a rendering-completion gate.
+
+Verification:
+
+- Focused pcode, generator, terrain-system, and texture-manager tests pass. Modified terrain,
+  renderer, and script files pass ESLint and Prettier.
+- The full frontend suite and production Vite build pass. The exact extracted vertex and fragment
+  shader stages compile and link through `npm run check:terrain-shader`, which invokes
+  `glslangValidator` without relying on source line numbers.
+- `knip` still reports the repository's pre-existing unused inventory; it found one newly added
+  shader-source export, which was removed. Repository-wide `git diff --check` still reports an
+  unrelated trailing blank line in the
+  user-modified `scene-graph.ts`; the terrain slice itself is whitespace-clean.
+- The complete frontend lint command currently stops only on existing unrelated findings in
+  `commit/pipeline.ts` and `texture-manager.test.ts`. Frontend type checking passes.
+
+### 2026-07-23 — Retail 4×4-cell cardinal transition clamps
+
+Completed:
+
+- The special `CLandBlockStruct::TransAdjust` lowering pass now runs for `stride === 2`, which is
+  retail's 4×4-cell mesh. The former “stride-4” label was wrong: source `SideCellCount == 4` means
+  source-grid stride two, not four.
+- Cardinal north, south, east, and west variants clamp two odd reduced-grid boundary vertices using
+  the retail pair of authored-height extrapolations. Diagonal variants deliberately retain only the
+  ordinary edge averaging pass.
+- The port samples `TerrainGenerationSource.heights` in its canonical 9×9 grid. ACE and ACViewer's
+  C# translations use the reduced `SideVertexCount` in several source-height expressions, whereas
+  the retail client decompile indexes the authored `9`-wide height array; the implementation follows
+  the retail indexes.
+
+Verification:
+
+- Focused generator tests exercise all four cardinal targets and prove a diagonal transition does
+  not receive the cardinal clamp.
+
+Remaining debt:
+
+- The user will perform any rendered comparison against retail or ACViewer to validate the combined
+  average-and-clamp result on real neighboring landblocks. The implementation has source-proven
+  formulas and a live WebGL2 capture, but does not claim visual parity.
+
+### 2026-07-23 — Headless WebGL2 terrain harness produces the first textured frame
+
+Completed:
+
+- `npm run harness:terrain` adapts the legacy browser-harness pattern without importing its old
+  renderer or asset model. It starts a self-cleaning local content host, Vite, and headless Chrome;
+  then CDP submits one outdoor scene interest plus a resolved camera and captures a PNG.
+- The diagnostic content host serves the exact existing `HBTR` terrain-source and `HBTP`
+  texture-pixel responses. The browser-specific `HttpTerrainContentSource` decodes those contracts
+  through the same validators as the Tauri adapters, so the harness does not introduce an alternate
+  content representation.
+- The first `0xda55ffff` run exposed a host-contract bug: the outer source manifest contained the
+  region number, but its nested composition object omitted the `regionNumber` required for texture
+  key resolution. The host now serializes it, and a Rust manifest test asserts it.
+- Successful ANGLE/SwiftShader Chrome runs render `0xda55ffff` grass, road masks, and detail, plus
+  `0xdc56ffff`'s varied-height grass/dirt/water blend, without browser errors. The captures are
+  direct WebGL2 evidence of source loading, terrain generation, resource realization, shader
+  composition, and indexed drawing—not a mock or a flat-color fallback.
+
+Decisions and debt:
+
+- The HTTP host and adapter are diagnostics-only application code. They reuse the Tauri host's
+  public byte builders; `holtburger-content` remains client agnostic and receives no HTTP or browser
+  vocabulary. The harness applies the same development-only workspace `HOLTBURGER_DATS` fallback as
+  the Tauri dev launcher, while respecting an explicit caller override.
+- Current Chrome requires `--use-gl=angle --use-angle=swiftshader`; legacy's
+  `--use-gl=swiftshader` leaves WebGL limits unavailable in this environment. The harness fails on
+  browser console errors and tears down detached process groups, avoiding the stale GUI/server
+  instances that made virtual-display validation unreliable.
+- The legacy browser harness can boot its older asset host, Vite, and Chrome stack, but it did not
+  settle or terminate under this executor. It is therefore not yet a usable automated source of
+  matching captures here; the exact leftover process group was stopped and cleanup was verified.
+- Visual parity against legacy, retail, or ACViewer is user-owned review work. It is deliberately
+  excluded from this implementation plan's completion gate; the headless harness supplies the
+  repeatable landblock/camera evidence needed for that review without launching persistent apps.
+- This proves a real textured draw, but not visual parity. The user will compare matching
+  landblocks/camera poses from legacy or ACViewer, including multi-terrain and transition cases,
+  before considering the road blend, variation, or 4×4 transition geometry visually identical.
+
+Verification:
+
+- `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml` passes.
+- `npm run harness:terrain -- --landblock 0xda55ffff --settle-ms 15000 --screenshot /tmp/holtburger-3d-da55-terrain.png`
+  yields a non-flat grass-and-road frame with no browser errors; the same command for
+  `0xdc56ffff` yields a multi-terrain grass/dirt/water frame.
 
 ## Context And Boundaries
 
 ### Goal
 
 Encode a direct terrain flow in which resolution determines stable logical texture identities,
-runtime materializes and leases those textures, `TerrainService` generates and realizes every
+runtime materializes and leases those textures, `TerrainSystem` generates and realizes every
 required LOD resource once per interested landblock, and drawing selects an already-realized variant
 from the scene anchor.
 
-This plan applies to `apps/holtburger-3d/src/lib/game`. It defines architecture through minimal,
-type-safe shapes, state transitions, and call sites. It does not claim that terrain rendering is
-functional.
+This plan applies to `apps/holtburger-3d/src/lib/game`. It includes a real WebGL2 composition
+capture. Visual and retail-transition parity are intentionally user-owned reference-review work,
+outside the implementation completion criteria.
 
 ### In Scope
 
@@ -31,25 +258,21 @@ functional.
 - Remove `TerrainMaterialSetKey`, `TerrainTextureSetKey`, and aggregate terrain texture-set lifetime.
 - Generate all source-proven geometry variants as one concatenated indexed geometry plus one
   per-stride surface field during landblock installation.
-- Make `TerrainService` own generated terrain device allocations and answer query-time draw-resource
+- Make `TerrainSystem` own generated terrain device allocations and answer query-time draw-resource
   selection for each landblock.
 - Let runtime bridge terrain source installation to one stable `SceneGraph` root without mediating
   generated-resource realization.
-- Make frame assembly query visible landblocks from `TerrainService` instead of duplicating terrain
+- Make frame assembly query visible landblocks from `TerrainSystem` instead of duplicating terrain
   resources in `RenderScene` and `RenderResourceRegistry`.
-- Stub the WebGL2 terrain draw boundary with logical resource resolution and draw-time sampler
-  policy, while leaving unproven shader mechanics unimplemented.
+- Bind source-proven terrain program resources and compose them in WebGL2 without moving renderer
+  policy into content or the host.
 
 ### Out Of Scope
 
-- A runnable end-to-end terrain path.
-- Real Rust-host terrain composition resolution.
+- Visual-parity certification against legacy, retail, or ACViewer. The user will conduct that
+  reference review; this plan records the evidence needed to make it possible.
 - Porting the legacy worker pool or transport.
-- Implementing retail terrain vertex generation, transition adjustment, normals, or indices.
-- Choosing the final GPU representation of the per-generated-cell surface field and composition
-  records.
-- Implementing the terrain GLSL program.
-- Final lighting, shadows, atmosphere, effects, or visual parity.
+- Final lighting, shadows, atmosphere, effects, and visual-parity policy.
 - Profiling and production optimization.
 - CPU or GPU precomposition of complete landblock color surfaces.
 - Supporting arbitrary per-edge LOD relationships outside retail's concentric Chebyshev ring policy.
@@ -143,14 +366,14 @@ atlas-centric terrain model, diagnostics-heavy contracts, or duplicated ownershi
 - **Keep generation landblock-local.** One terrain-generation job consumes one landblock source.
   Neighbor sources, generated geometry, current LODs, and scene-anchor state are not generation
   inputs.
-- **Give terrain one authoritative resource owner.** `TerrainService` owns CPU generation state,
+- **Give terrain one authoritative resource owner.** `TerrainSystem` owns CPU generation state,
   generated device allocations, failure state, and query-time variant selection. Do not mirror
   that state in runtime render registries.
 - **Keep scene topology stable.** Runtime creates one terrain root from immutable source placement and
   bounds. LOD selection does not create, replace, or resize scene nodes.
-- **Let the device own its backend manager.** Terrain and texture systems own the allocations they
-  create through the device-owned resource manager. The renderer only borrows resolved backend
-  resources while drawing.
+- **Keep device ownership behind managers.** `TerrainSystem` owns the generated keys it leases
+  through injected `GeometryManager` and `TextureManager`; the WebGL2 resource manager owns the
+  corresponding backend handles. The renderer only borrows resolved backend resources while drawing.
 - **Realize every variant up front.** A landblock becomes drawable only after its concatenated
   geometry and every per-stride surface field are device-backed. This deliberately trades loading
   work and memory for one installation/eviction lifecycle and allocation-free frame-time selection.
@@ -166,19 +389,18 @@ an injected collaborator:
 
 ```text
 ExplorerApp / ClientApp
-    -> AssetBridge
+    -> LandblockTerrainSource + TexturePixelSource
     -> StandardCommitPipeline
          -> StaticBakeWorkerPool
          -> TexturePageBuildWorkerPool
     -> GameRuntime (borrows CommitPipeline)
          -> TexturePreparer
               -> TexturePreparationWorkerPool
-         -> TerrainService
-              -> device-owned RendererResourceManager
-         -> WorkerTerrainGenerator
-              -> TerrainGenerationWorkerPool
+         -> TerrainSystem
+              -> GeometryManager + TextureManager
+         -> InlineTerrainGenerator
     -> WebGL2Device
-         -> RendererResourceManager
+         -> WebGL2ResourceManager
          -> Renderer (borrows resources while drawing)
 ```
 
@@ -189,13 +411,13 @@ Ownership rules:
 - `StandardCommitPipeline` privately constructs and destroys commit-time static-bake and texture-page
   workers. Alternative pipeline implementations may use different internals.
 - `GameRuntime` privately constructs and destroys runtime texture-preparation workers and its
-  `TerrainService`. It also constructs and destroys the `WorkerTerrainGenerator` injected into that
-  service. `TerrainService` owns every generated terrain allocation key it creates through the
+  `TerrainSystem`. It also constructs and destroys the `InlineTerrainGenerator` injected into that
+  system. `TerrainSystem` owns every generated terrain allocation key it creates through the
   injected device resource boundary, but it does not own either injected collaborator.
-- The frontend owns the shared `AssetBridge` and supplies it to pipeline/runtime construction where
-  host-backed work requires it.
-- Tests inject fake pipeline, texture-preparer, terrain-generator, and renderer-resource-manager
-  ports through the same constructors used by production.
+- The frontend owns the typed Tauri source adapters. `StandardCommitPipeline` receives only
+  `LandblockTerrainSource`; `GameRuntime` receives only `TexturePixelSource`.
+- Tests inject fake pipeline, texture-preparer, terrain-generator, geometry-manager, and
+  texture-manager collaborators through the same constructors used by production.
 - Worker pools do not own scene interest, texture leases, terrain source state, or device resources.
   They execute typed jobs and return owned transferable CPU output.
 
@@ -204,10 +426,11 @@ and disposal primitives:
 
 - Static-bake and texture-page workers execute during commit preparation and are pipeline-owned.
 - Texture-preparation workers execute after terrain commit when runtime residency requires a missing
-  texture. They may request prepared DAT surfaces through the `AssetBridge` service channel.
-- Terrain-generation workers execute once for each newly installed landblock source and produce one
+  texture. They request normalized pixels through the typed `TexturePixelSource` capability.
+- Terrain generation executes once for each newly installed landblock source and produces one
   complete immutable generation result. Scene-anchor movement never submits terrain-generation work.
-  The committed source input is sufficient, so workers do not request host assets.
+  The committed source input is sufficient, so the current inline executor does not request host
+  assets. A future worker must preserve this boundary.
 - Terrain generation is not a static bake job and does not run in the static baker worker pool.
 
 Ordered teardown is part of the ownership contract:
@@ -216,10 +439,10 @@ Ordered teardown is part of the ownership contract:
 stop frontend frame loop
     -> await GameRuntime.destroy()
          -> stop accepting new runtime work
-         -> destroy TerrainService
+         -> destroy TerrainSystem
               -> discard pending generation completions
               -> release every generated terrain allocation
-         -> dispose terrain-generation workers
+         -> dispose terrain generator
          -> dispose texture-preparation workers
     -> await CommitPipeline.destroy()
          -> dispose commit-time workers
@@ -275,10 +498,10 @@ type TerrainTransitionDirection =
   | "west"
   | "northwest";
 
-interface TerrainSurfaceField {
+interface TerrainPcodeField {
   readonly stride: TerrainMeshStride;
-  /** Canonical row-major compositions, one per generated cell/quad. */
-  readonly cells: readonly ResolvedTerrainComposition[];
+  /** Canonical row-major 32-bit pcodes, one per generated cell/quad. */
+  readonly cellPcodes: Uint32Array;
 }
 
 /** LOD and edge adjustment selected from scene-anchor-relative policy. */
@@ -298,37 +521,27 @@ interface TerrainVariantDrawRange {
 interface TerrainGenerationResult {
   readonly geometry: TerrainGeometryData;
   readonly variants: readonly TerrainVariantDrawRange[];
-  readonly surfaceFields: readonly TerrainSurfaceField[];
+  readonly surfaceFields: readonly TerrainPcodeField[];
 }
 
 interface TerrainSourceInstallation {
-  readonly source: TerrainGenerationSource;
-  readonly textures: TerrainTextureKeys;
-}
-
-/** Opaque device identity for one uploaded generated surface field. */
-type TerrainSurfaceResourceKey = `terrain-surface-resource:${number}`;
-
-interface RendererResourceManager {
-  createTerrainSurface(field: TerrainSurfaceField): TerrainSurfaceResourceKey;
-  // Existing releaseResource accepts TerrainSurfaceResourceKey through RenderResourceKey.
+  readonly landblockId: LandblockId;
+  readonly generation: TerrainGenerationSource;
+  readonly presentation: TerrainPresentationSource;
 }
 
 interface RealizedTerrainResources {
-  readonly geometry: GeometryResourceKey;
   readonly variants: readonly TerrainVariantDrawRange[];
-  readonly surfaceFields: ReadonlyMap<
-    TerrainMeshStride,
-    TerrainSurfaceResourceKey
-  >;
 }
 
-interface TerrainDrawResources {
-  readonly geometry: GeometryResourceKey;
+interface TerrainDrawUnit {
+  readonly landblockId: LandblockId;
+  readonly geometry: TerrainGeometryKey;
   readonly indexStart: number;
   readonly indexCount: number;
-  readonly surfaceField: TerrainSurfaceResourceKey;
+  readonly surfaceField: TerrainSurfaceTextureKey;
   readonly textures: TerrainTextureKeys;
+  readonly composition: TerrainCompositionTextureKey;
 }
 
 interface TerrainGenerator {
@@ -336,14 +549,17 @@ interface TerrainGenerator {
   generate(source: TerrainGenerationSource): Promise<TerrainGenerationResult>;
 }
 
-interface TerrainService {
-  /** Retains a missing source and starts tracked generation before returning. */
-  installSource(input: TerrainSourceInstallation): void;
-  removeSource(landblockId: LandblockId): void;
-  getDrawResources(
-    landblockId: LandblockId,
+interface TerrainSystem {
+  /** Installs a missing source and its stable scene root before returning. */
+  install(
+    ownerId: RuntimeLayerOwnerId,
+    artifact: TerrainSystemArtifact,
+  ): SceneNodeId;
+  removeOwner(ownerId: RuntimeLayerOwnerId): void;
+  getDrawUnit(
+    nodeId: SceneNodeId,
     anchorLandblockId: LandblockId,
-  ): TerrainDrawResources | null;
+  ): TerrainDrawUnit | null;
   destroy(): Promise<void>;
 }
 ```
@@ -352,28 +568,27 @@ Array keys identify complete ordered arrays. Member DAT assets are not independe
 are not leased separately. Standalone keys identify complete unpacked textures. Sampler policy is a
 draw-time choice and is not part of either key.
 
-`TerrainSurfaceResourceKey` is an opaque device-resource identity alongside `GeometryResourceKey`.
-It does not prescribe whether WebGL2 uses an integer texture, buffer, or another representation. The
-exact fields of `TerrainGenerationSource`, `ResolvedTerrainComposition`, and the device packing of
-`TerrainSurfaceField` must be proven before implementation; their ownership and the per-cell surface
-cardinality are established.
+`TerrainGeometryKey`, `TerrainSurfaceTextureKey`, and `TerrainCompositionTextureKey` are stable
+logical identities. `GeometryManager` and `TextureManager` map them to device resources; they do not
+prescribe whether a backend uses an integer texture, buffer, or another representation. The exact
+fields and `R32UI`/`RGBA32UI` packing are now proven in the implementation.
 
 The generator concatenates every variant's compatible terrain attributes and rebases its indices by
 the variant's vertex offset. Each `TerrainVariantDrawRange` names the resulting index slice. This
 requires no new renderer mechanism: WebGL2 submission already accepts `indexStart` and `indexCount`,
 and rebasing avoids relying on a base-vertex draw operation.
 
-`installSource` records the source synchronously, starts tracked asynchronous generation internally,
-and returns no completion signal. `TerrainService` catches terminal generation or realization
+`install` records the source and scene root synchronously, starts tracked asynchronous generation internally,
+and returns no completion signal. `TerrainSystem` catches terminal generation or realization
 failure, reports it once, and records the failed state. Runtime receives no resource-completion events.
 Repeated calls for an existing installation are no-ops and submit no additional job.
 
 ### Runtime State Vocabulary
 
 - **Interested layer:** requested by `SceneInterestMap`.
-- **Installed terrain source:** canonical landblock facts retained by `TerrainService`.
+- **Installed terrain source:** canonical landblock facts retained by `TerrainSystem`.
 - **Resident texture:** logical regional texture currently device-backed and leased.
-- **Generated terrain result:** complete CPU output returned by the terrain worker.
+- **Generated terrain result:** complete CPU output returned by the terrain generator.
 - **Realized terrain resources:** complete device-backed geometry and surface keys retained for one
   landblock.
 - **Visible terrain node:** stable terrain root returned by `SceneGraph` visibility.
@@ -389,7 +604,7 @@ Do not use unqualified "resident landblock" where one of these states is intende
 ```text
 landblock interest
     -> StandardCommitPipeline
-         -> AssetBridge.resolveLandblockLayer(...)
+         -> LandblockTerrainSource.loadTerrainSource(...)
          -> ResolvedTerrainLayerSource
               - canonical heights and terrain samples
               - source-proven composition facts
@@ -405,7 +620,7 @@ landblock interest
                       absent: TexturePreparer prepares pixels
                               TextureManager materializes the stable key
               terrain:
-                  TerrainService.installSource(..., TerrainTextureKeys)
+                  TerrainSystem.install(owner, terrain artifact)
                       loading/realized/failed entry already exists: no-op
                       absent entry: retain source and start one terrain-generation job
               scene:
@@ -422,20 +637,20 @@ source and generation/realization state; terrain source has no revision or repla
 ### Terrain Generation And Resource Realization
 
 ```text
-TerrainService installs a previously absent source
+TerrainSystem installs a previously absent source
     -> TerrainGenerator.generate(source)
-         -> dedicated terrain-generation worker job
+         -> terrain-generator job
          -> generate all required stride/direction geometry variants
          -> concatenate compatible attributes and rebase variant indices
          -> record one indexed draw range per variant
          -> generate one per-cell surface field for each stride
          -> return one complete renderer-independent TerrainGenerationResult
-    -> TerrainService rejects completion if its installation entry was removed
-    -> TerrainService realizes the complete result through RendererResourceManager
+    -> TerrainSystem rejects completion if its installation entry was removed
+    -> TerrainSystem realizes the complete result through injected GeometryManager and TextureManager
          -> create one concatenated geometry resource and four generated-surface resources
          -> retain one geometry key, variant draw ranges, and one surface key per stride
          -> on partial failure: release every allocation created from this result
-    -> TerrainService stores RealizedTerrainResources or marks the installation failed
+    -> TerrainSystem stores RealizedTerrainResources or marks the installation failed
 ```
 
 Generation or realization failure is terminal for the current installation: log the error once,
@@ -453,10 +668,10 @@ requires no neighborhood coordination.
 ```text
 SceneGraph visibility query
     -> visible terrain root nodes / landblock ids
-    -> GameRuntime asks TerrainService.getDrawResources(landblockId, anchorLandblockId)
+    -> RenderWorld asks TerrainSystem.getDrawUnit(nodeId, anchorLandblockId)
          -> derive retail stride + transition direction
          -> select an already-realized variant, or missing
-    -> FrameInput contains placement + TerrainDrawResources
+    -> renderer collects one TerrainDrawUnit from its read-only RenderWorld
     -> renderer resolves resource identities:
          geometry key + index range -> selected variant in concatenated device geometry
          surface-field key -> selected stride surface field
@@ -469,8 +684,8 @@ SceneGraph visibility query
     -> fragment shader performs terrain composition
 ```
 
-`RenderScene` may continue indexing object occurrences. It does not duplicate realized terrain
-resources or selection state when `TerrainService` already owns both.
+`RenderWorld` resolves object occurrences as well as terrain contributions. It does not duplicate
+realized terrain resources or selection state when `TerrainSystem` already owns both.
 
 ## Phased Implementation
 
@@ -481,9 +696,10 @@ without decoded pixel payloads.
 
 Primary targets:
 
-- `apps/holtburger-3d/src/lib/assets/host-contracts.ts`
+- `apps/holtburger-3d/src/lib/assets/landblock-terrain-source.ts`
+- `apps/holtburger-3d/src/lib/assets/texture-pixel-source.ts`
+- `apps/holtburger-3d/src/lib/assets/decode-terrain-source.ts`
 - `apps/holtburger-3d/src/lib/game/resolution/landblock-layer.ts`
-- `apps/holtburger-3d/src/lib/game/resolution/resolve-landblock-layer.ts`
 - `apps/holtburger-3d/src/lib/game/textures/types.ts`
 
 Tasks:
@@ -510,7 +726,9 @@ Acceptance criteria:
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Completed by the terrain-loading pipeline. The typed `HBTR` source carries canonical height
+  indices, resolved heights, terrain samples, and lossless regional composition. Texture facts are
+  derived in frontend terrain code; no pixel reads occur during commit preparation.
 
 ### Phase 2: Make Terrain Commit Strictly Source-Only
 
@@ -544,7 +762,9 @@ Acceptance criteria:
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Completed by the terrain-loading pipeline. `StandardCommitPipeline` obtains one
+  `ResolvedTerrainLayerSource` through `LandblockTerrainSource` and produces a source-only terrain
+  commit. The old generic bridge and `resolve_landblock_layer` route were deleted.
 
 ### Steering Checkpoint A: Dry-Run Runtime Installation
 
@@ -569,7 +789,7 @@ Tasks:
 
 - Generalize `TexturePreparer` from whole terrain sets to one discriminated array or standalone
   texture fact.
-- Have the worker request prepared surfaces through `AssetBridge` and return a complete pixel-bearing
+- Have the worker request normalized surfaces through `TexturePixelSource` and return a complete pixel-bearing
   source matching the requested stable key.
 - Track pending preparation by `TextureKey` so concurrent landblocks join one job.
 - Add a narrow `TextureManager` residency query and keep complete-resource creation idempotent.
@@ -594,9 +814,22 @@ Acceptance criteria:
 
 Decisions and course corrections:
 
-- Pending implementation.
+- The terrain-loading pipeline completed the typed texture boundary and the residency lifecycle
+  proof. `TauriTexturePixelSource` consumes `HBTP`; `WorkerTexturePreparer` validates stable keys
+  and semantic purposes; `ContentAssetRuntime` and the preparer coalesce in-flight work. Focused
+  tests prove same-region color/blend/road/detail identities, final-owner withdrawal while pixels
+  are pending, and late terrain-commit rejection after scene-interest eviction.
+- Failure classification remains deliberately narrow: the host currently supplies no typed
+  retryability code, so a failed texture is terminal for the current installation and retried only
+  after eviction/reacquisition. Do not manufacture retry classes from error strings; add a typed
+  host failure contract when a transient source exists to justify it.
+- `TextureManager.retain` now rolls back only the logical keys newly leased by that retain call.
+  Terrain reserves generated pcode/composition keys before asynchronously retaining regional asset
+  facts, so dropping the complete owner after an asset failure would incorrectly evict valid
+  generated resources. A focused regression proves that an asset failure leaves independently
+  reserved terrain pcode resources resident until explicit owner eviction.
 
-### Phase 4: Encode The Dedicated Terrain Generator Worker
+### Phase 4: Implement Renderer-Independent Terrain Generation
 
 Goal: define renderer-independent generation input and one complete immutable landblock result.
 
@@ -608,78 +841,82 @@ Primary targets:
 
 Tasks:
 
-- Define `TerrainGenerator` from one immutable canonical source to one complete
-  `TerrainGenerationResult`.
-- Keep the worker job strictly landblock-local: do not include neighbor sources, neighbor geometry,
-  neighbor LODs, scene anchor, or scene-interest state.
-- Define the four source-grid strides and source-proven transition directions without introducing a
-  source revision or generation identity.
-- Let the service's pending operation associate a result with its landblock; do not echo
-  `LandblockId` or other correlation metadata through `TerrainGenerationResult`.
-- Add `WorkerTerrainGenerator` with a dedicated terrain-generation job protocol and worker
-  pool constructed and destroyed by `GameRuntime`.
-- Reuse generic worker queueing and transfer primitives without routing terrain jobs through the
-  commit pipeline or static baker.
-- Define the pure worker-side terrain entry point and fail loudly while the algorithm is absent.
-- Require `TerrainGenerationResult` to contain one concatenated `TerrainGeometryData`, one indexed
-  draw range for every required stride/direction variant, and exactly one renderer-neutral,
-  per-generated-cell surface field for each stride.
-- Concatenate compatible vertex attributes in the worker, rebase every variant's indices by its
-  vertex offset, and validate non-overlapping in-bounds draw ranges.
-- Encode surface-field sharing by stride rather than duplicating it into directional variants.
-- Keep `TextureKey`s only where composition source identity requires them; keep device resources and
-  backend array-layer indices out of worker contracts.
-- Remove temporary per-vertex `featureSlots`; remove UVs unless source investigation proves they
-  cannot be derived from landblock-local position.
-- Structured-clone retained source input and transfer only worker-owned output buffers.
+- [x] Define `TerrainGenerator` from one immutable canonical source to one complete
+      `TerrainGenerationResult`.
+- [x] Keep the generation job strictly landblock-local: do not include neighbor sources, neighbor geometry,
+      neighbor LODs, scene anchor, or scene-interest state.
+- [x] Define the four source-grid strides and source-proven transition directions without introducing a
+      source revision or generation identity.
+- [x] Let the service's pending operation associate a result with its landblock; do not echo
+      `LandblockId` or other correlation metadata through `TerrainGenerationResult`.
+- [x] Add the runtime-owned `InlineTerrainGenerator`; retain the `TerrainGenerator` protocol for a
+      measured future worker migration rather than carrying a fake worker adapter.
+- [x] Decide not to introduce worker queueing or transfer primitives until profiling establishes a
+      scheduling need; the current inline generator is the truthful implementation for the fixed
+      9×9 input and retains the same future migration seam.
+- [x] Define the pure generator entry point, validate canonical source buffers, and fail loudly for
+      malformed source data.
+- [x] Require `TerrainGenerationResult` to contain one concatenated `TerrainGeometryData`, one indexed
+      draw range for every required stride/direction variant, and exactly one renderer-neutral,
+      per-generated-cell surface field for each stride.
+- [x] Concatenate compatible vertex attributes in the generator, rebase every variant's indices by its
+      vertex offset, and validate non-overlapping in-bounds draw ranges.
+- [x] Encode surface-field sharing by stride rather than duplicating it into directional variants.
+- [x] Keep `TextureKey`s only where composition source identity requires them; keep device resources and
+      backend array-layer indices out of worker contracts.
+- [x] Omit temporary per-vertex feature slots. Retain normalized grid coordinates because the shader
+      needs a stable generated-cell lookup domain; texture tiling remains a composition/shader concern.
+- [x] Defer structured-clone input and transferred output buffers until a measured worker migration
+      is introduced; no fake worker transport is retained in the current architecture.
 
 Acceptance criteria:
 
-- A code tour reaches a dedicated terrain-generation worker from `TerrainService` without entering
-  `StandardCommitPipeline` or its static baker.
+- A code tour reaches the runtime-owned `InlineTerrainGenerator` from `TerrainSystem` without
+  entering `StandardCommitPipeline` or its static baker.
 - One typed job output represents all variants through one geometry payload, indexed draw ranges,
   and per-stride surface fields.
 - A generator fake can produce a complete result from that landblock's source alone; no
   neighborhood setup is required.
 - Anchor changes cannot submit terrain worker work.
-- Runtime destruction terminates terrain-generation workers; pipeline destruction does not affect
-  them.
+- Runtime destruction stops the terrain generator; pipeline destruction does not affect it.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- `InlineTerrainGenerator` is complete for canonical-grid subsampling, deterministic topology,
+  pcode construction, normals, edge averaging, and retail's cardinal 4×4-cell lowering clamps. A
+  worker migration remains conditional on profiling rather than a correctness prerequisite.
 
-### Phase 5: Make TerrainService The Generated Resource Owner
+### Phase 5: Make TerrainSystem The Generated Resource Owner
 
 Goal: make terrain installation idempotent and give one subsystem complete generated-resource
 ownership.
 
 Primary targets:
 
-- `apps/holtburger-3d/src/lib/game/terrain/terrain-service.ts`
-- focused terrain-service tests
+- `apps/holtburger-3d/src/lib/game/terrain/terrain-system.ts`
+- focused terrain-system tests
 - existing landblock-coordinate helpers
 
 Tasks:
 
-- Constructor-inject `TerrainGenerator` and `RendererResourceManager` into `TerrainService` in both
-  production and tests. `GameRuntime` owns the generator lifecycle; the device owns the resource
-  manager; `TerrainService` owns only the allocation keys it creates through that manager.
-- Store one installation entry per landblock: immutable source, direct `TerrainTextureKeys`, loading,
-  realized, or failed state, and `RealizedTerrainResources` when available.
-- Make repeated installation for an existing interested landblock a no-op. Do not add source
-  replacement, revision, or in-place update semantics.
-- Reject late completion after removal by comparing private operation/entry identity.
-- Realize a returned `TerrainGenerationResult` atomically through `RendererResourceManager`: retain
-  no `RealizedTerrainResources` until the concatenated geometry key and every per-stride surface key
-  exist.
-- Realize the complete concatenated geometry and all four surface fields during installation. Do not
-  add lazy per-variant or per-stride device upload.
-- On generation or realization failure, release partial allocations, log once, mark the entry failed,
-  and perform no retry while that installation remains.
-- Derive retail stride and transition direction only inside
-  `getDrawResources(landblockId, anchorLandblockId)` and select an existing realized variant.
-- On removal, discard pending completion and release `RealizedTerrainResources` exactly once.
+- [x] Constructor-inject `TerrainGenerator`, `GeometryManager`, and `TextureManager` into
+      `TerrainSystem` in both production and tests. `GameRuntime` owns the generator lifecycle;
+      `TerrainSystem` owns only the allocation keys it leases through those injected managers.
+- [x] Store one installation entry per landblock: immutable source, direct `TerrainTextureKeys`, loading,
+      realized, or failed state, and `RealizedTerrainResources` when available.
+- [x] Make repeated installation for an existing interested landblock a no-op. Do not add source
+      replacement, revision, or in-place update semantics.
+- [x] Reject late completion after removal by comparing private operation/entry identity.
+- [x] Realize a returned `TerrainGenerationResult` atomically through the injected geometry and texture
+      managers: retain no `RealizedTerrainResources` until the concatenated geometry key and every
+      per-stride surface key exist.
+- [x] Realize the complete concatenated geometry and all four surface fields during installation. Do not
+      add lazy per-variant or per-stride device upload.
+- [x] On generation or realization failure, release partial allocations, log once, mark the entry failed,
+      and perform no retry while that installation remains.
+- [x] Derive retail stride and transition direction only inside
+      `getDrawUnit(nodeId, anchorLandblockId)` and select an existing realized variant.
+- [x] On removal, discard pending completion and release `RealizedTerrainResources` exactly once.
 
 Acceptance criteria:
 
@@ -690,12 +927,20 @@ Acceptance criteria:
 - Every policy-selectable variant is drawable immediately after realization without further device
   allocation.
 - Failed installation remains non-drawable and submits no retry until removal/reacquisition.
-- `getDrawResources` returns one complete geometry/range/surface selection or no draw resources.
+- `getDrawUnit` returns one complete geometry/range/surface selection or no draw resources.
 - No realized terrain resources or selected draw pair are duplicated in a runtime render registry.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- `TerrainSystem` owns the stable terrain scene root as well as installation state, but receives
+  `SceneGraph`, geometry, and texture managers by injection rather than becoming a renderer-specific
+  service.
+- A realization failure now drops the complete source owner before marking the installation failed.
+  This releases an already-created geometry and composition/surface resources instead of retaining a
+  partial realization until later eviction. A focused synthetic surface-upload failure proves it.
+- This complete-source rollback applies only to generation/realization failure. Texture preparation
+  is independent: its failure removes the failed asset-fact leases while retaining already-generated
+  terrain resources, so the layer remains non-drawable but does not lose valid generation work.
 
 ### Steering Checkpoint B: Dry-Run Resource Lifecycle And Drawing
 
@@ -707,7 +952,7 @@ frame input and that anchor movement performs selection only.
 ### Phase 6: Connect Stable Terrain Nodes And Device Resource Storage
 
 Goal: connect terrain installation to stable spatial state while keeping generated resource lifetime
-inside `TerrainService`.
+inside `TerrainSystem`.
 
 Primary targets:
 
@@ -718,38 +963,42 @@ Primary targets:
 
 Tasks:
 
-- Maintain one stable terrain root node per installed source and a narrow node-to-landblock index for
-  visible terrain roots.
-- Derive the root's placement synchronously. Establish one fixed conservative terrain bound from the
-  proven landblock horizontal extent, retail height table, and worst-case transition adjustment; do
-  not duplicate transition mathematics per landblock merely to tighten initial culling bounds.
-- Keep scene-node creation/removal and texture leases in runtime; do not give `TerrainService` access
-  to `SceneGraph`.
-- Add opaque terrain-surface create and release support to `RendererResourceManager` without choosing
-  its final WebGL2 representation.
-- Have `TerrainService` create one concatenated geometry resource plus one surface resource per
-  stride, retain their keys only after complete realization, and release partial or installed
-  allocations exactly once.
-- Reuse the established indexed draw-range submission model. Do not introduce a specialized terrain
-  resource manager or a second draw-range registry.
-- Ensure `TerrainService`, not the renderer or runtime, owns every generated geometry and surface
-  allocation key.
-- Remove terrain render-resource storage from `GameRuntime.#terrainRenderRecords`, `RenderResourceRegistry`,
-  and `RenderScene` once service-owned resource lookup replaces it.
-- Define removal order: remove the scene root and leases, remove the service installation, discard
-  pending work, and release its realized resources before device destruction.
+- [x] Maintain one stable terrain root node per installed source and a narrow node-to-landblock index for
+      visible terrain roots.
+- [x] Derive the root's placement synchronously. Establish one fixed conservative terrain bound from the
+      proven landblock horizontal extent, retail height table, and worst-case transition adjustment; do
+      not duplicate transition mathematics per landblock merely to tighten initial culling bounds.
+- [x] Keep scene-node creation/removal and texture leases in runtime; do not give `TerrainSystem` direct
+      device access.
+- [x] Add generated terrain-surface upload support to `TextureManager` without exposing its final
+      WebGL2 representation to terrain generation.
+- [x] Have `TerrainSystem` create one concatenated geometry resource plus one surface resource per
+      stride, retain their keys only after complete realization, and release partial or installed
+      allocations exactly once.
+- [x] Reuse the established indexed draw-range submission model. Do not introduce a specialized terrain
+      resource manager or a second draw-range registry.
+- [x] Ensure `TerrainSystem`, not the renderer or runtime, owns every generated geometry and surface
+      allocation key.
+- [x] Remove terrain render-resource storage from `GameRuntime.#terrainRenderRecords`, `RenderResourceRegistry`,
+      and `RenderScene` once service-owned resource lookup replaces it.
+- [x] Define removal order: remove the scene root and leases, remove the system installation, discard
+      pending work, and release its realized resources before device destruction.
 
 Acceptance criteria:
 
 - Source installation creates at most one scene root regardless of generation outcome.
 - Partial or failed resource realization exposes no terrain draw resources.
 - LOD selection causes no scene-node, texture-lease, worker, or device-resource churn.
-- Terrain has one authoritative realized-resource record in `TerrainService`.
+- Terrain has one authoritative realized-resource record in `TerrainSystem`.
 - No composite terrain-resource collection or specialized manager is required by the baseline.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Generated pcode fields use the general generated-texture path with `R32UI`, rather than a
+  terrain-specific device manager. The composition table follows the same owner/lease path as
+  `RGBA32UI`; both formats remain backend details.
+- `TERRAIN_ROOT_BOUNDS` is one fixed conservative local bound. It keeps scene culling independent of
+  directional-variant generation and preserves the stable root invariant.
 
 ### Phase 7: Assemble Terrain Draw Inputs From Visibility
 
@@ -759,40 +1008,45 @@ Primary targets:
 
 - `apps/holtburger-3d/src/lib/game/runtime/game-runtime.ts`
 - `apps/holtburger-3d/src/lib/game/renderer/renderer.ts`
-- `apps/holtburger-3d/src/lib/game/renderer/render-scene.ts`
+- `apps/holtburger-3d/src/lib/game/renderer/render-world.ts`
 - frame-assembly tests
 
 Tasks:
 
-- Identify visible terrain roots from the `SceneGraph` visibility result without adding render
-  semantics to `SceneGraph`.
-- Resolve each visible terrain landblock through
-  `TerrainService.getDrawResources(landblockId, anchorLandblockId)`.
-- Add placement plus complete `TerrainDrawResources` directly to `FrameInput`.
-- Keep object occurrence resolution in `RenderScene`; remove only its terrain-specific records and
-  frame instances.
-- Treat an installed source without realized resources as intentionally non-drawable.
-- Omit loading and failed installations from frame input; only complete realized variants are
-  returned by the service.
-- Allow frame input to carry unresolved logical texture keys while parallel texture preparation is
-  pending; renderer texture resolution suppresses that landblock for the frame.
+- [x] Identify visible terrain roots from the `SceneGraph` visibility result without adding render
+      semantics to `SceneGraph`.
+- [x] Resolve each visible terrain root through
+      `TerrainSystem.getDrawUnit(nodeId, anchorLandblockId)`.
+- [x] Pass only anchor and camera state to `FrameInput`; let the renderer's read-only `RenderWorld`
+      collect visible contributions. This keeps frontend frame input free of resource authority.
+- [x] Keep object occurrence resolution in `RenderWorld`; no terrain-specific records or frame
+      instances remain in a `RenderScene` registry.
+- [x] Treat an installed source without a complete realized resource set as intentionally non-drawable.
+- [x] Omit loading, failed, and texture-incomplete installations from renderer contributions.
+- [x] Suppress a terrain draw before renderer submission while regional texture preparation is pending.
+      This is simpler and safer than carrying an unresolved logical texture key into `FrameInput`.
 
 Acceptance criteria:
 
-- Frame input contains exactly one record per visible terrain landblock with realized geometry and
-  surface resources.
-- Frame assembly performs no texture preparation, generation, or device allocation.
-- Repeated frame assembly at different anchors keeps the geometry key stable and changes only the
-  selected index range and, across stride boundaries, the surface key.
-- No terrain draw record is mirrored between `TerrainService` and `RenderScene`.
+- The renderer obtains at most one complete draw unit per visible terrain root, with realized geometry,
+  surface, and texture resources.
+- Frame rendering performs no texture preparation, generation, or device allocation.
+- Repeated rendering at different anchors keeps the geometry key stable and changes only the selected
+  index range and, across stride boundaries, the surface key.
+- No terrain draw record is mirrored between `TerrainSystem` and `RenderWorld`.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- The plan's original preassembled `FrameInput` model was removed. `RenderWorld` is an injected,
+  read-only façade; its renderer-owned visibility collection does not duplicate runtime ownership or
+  turn `SceneGraph` into a render model.
+- Earlier prose allowed unresolved texture keys to reach a draw. The implemented contract is tighter:
+  `TerrainSystem.#hasDrawUnit` requires every complete resource. This avoids partial texture binding
+  and makes a loading landblock non-drawable until its regional assets are resident.
 
-### Phase 8: Stub Logical Resource Resolution And Terrain Drawing
+### Phase 8: Bind And Compose Terrain In WebGL2
 
-Goal: make the final renderer handoff visible without guessing composition packing or GLSL.
+Goal: compose one selected terrain draw directly from source-proven GPU resources.
 
 Primary targets:
 
@@ -803,33 +1057,46 @@ Primary targets:
 
 Tasks:
 
-- Resolve the stable `GeometryResourceKey` and selected `TerrainSurfaceResourceKey` through the
-  existing device resource manager, then submit the selected `indexStart`/`indexCount` range.
-- Resolve color, blend-mask, and road-mask `TextureArrayKey`s plus standalone detail key through
-  `TextureManager`.
-- Define terrain-program input containing resolved resources, landblock-local placement,
-  anchor-relative offset, and view/frame state.
-- Define draw-time sampler policy independently from texture identity and storage.
-- Keep array UVs layer-local and keep atlas placement out of terrain contracts.
-- Show that generated surface selection is separate from regional source texture arrays.
-- Make unimplemented surface packing and terrain drawing fail precisely.
-- Remove the temporary flat-color terrain path when the new boundary is connected.
+- [x] Resolve the stable `TerrainGeometryKey` and selected `TerrainSurfaceTextureKey` through the
+      existing geometry and texture managers, then submit the selected `indexStart`/`indexCount` range.
+- [x] Resolve color, blend-mask, and road-mask `TextureArrayKey`s plus standalone detail key through
+      `TextureManager`.
+- [x] Define terrain-program input containing resolved resources, landblock-local placement,
+      anchor-relative offset, and view/frame state.
+- [x] Define draw-time sampler policy independently from texture identity and storage.
+- [x] Keep array UVs layer-local and keep atlas placement out of terrain contracts.
+- [x] Show that generated surface selection is separate from regional source texture arrays.
+- [x] Define a WebGL2 terrain program that interprets the generated `R32UI` field and regional
+      `RGBA32UI` composition table, including source-proven terrain and road merge rules.
+- [x] Remove the temporary flat-color terrain path when the new boundary is connected.
+- [x] Run the program in a headless WebGL2 harness against the real content host and capture a
+      textured road/detail terrain frame.
+- [x] Hand representative textured, multi-terrain, road, and detail comparison against
+      legacy/ACViewer to the user as a separate visual-parity review, not an implementation gate.
 
 Acceptance criteria:
 
-- A code tour reaches geometry and surface resolution from one `TerrainDrawResources` record.
+- A code tour reaches geometry and surface resolution from one `TerrainDrawUnit` record.
 - Terrain drawing uses the selected range rather than submitting the complete concatenated index
   buffer.
-- Incomplete realization cannot produce `TerrainDrawResources`; unexpectedly missing backend resources
+- Incomplete realization cannot produce `TerrainDrawUnit`; unexpectedly missing backend resources
   fail loudly as an ownership invariant.
 - No composite terrain product key or product registry exists.
 - No logical texture key contains sampler policy or generated terrain allocation identity.
 - No terrain backend contract contains atlas placement.
-- The renderer cannot silently draw a fake terrain approximation.
+- The renderer cannot silently draw a flat-color terrain approximation.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- The compact integer textures are the chosen GPU representation: `R32UI` for one stride's
+  generated cell pcodes and `RGBA32UI` for the shared regional table. This remains renderer-local;
+  content exposes source facts, not WebGL packing.
+- Texture-array and standalone-texture filtering is configured at resource allocation, not encoded
+  in a logical key. Normalized one-level masks require explicit non-mipmapped filtering to be
+  complete in WebGL2.
+- The shader source is validated with a desktop GLSL ES validator, and the new headless harness now
+  proves a real browser canvas. Reference-application comparison remains useful user-owned
+  visual-parity evidence, rather than an acceptance criterion for this implementation plan.
 
 ### Phase 9: Cleanup And Architectural Verification
 
@@ -838,18 +1105,19 @@ model.
 
 Tasks:
 
-- Delete `TerrainMaterialSetKey`, `TerrainTextureSetKey`, aggregate set commits, aggregate leases, and
-  whole-set texture-preparer jobs.
-- Delete terrain-specific records from `RenderResourceRegistry` and `RenderScene` after the
-  service-owned resource path replaces them.
-- Delete temporary feature/index models, per-vertex feature slots, material patches, terrain draw
-  units, and flat-color terrain code.
-- Audit names so commit, texture preparation, terrain generation, realization, selection, and drawing
-  remain distinct operations.
-- Audit every new type and unintuitive transition for concise ownership comments.
-- Rewrite tests that preserve superseded architecture instead of adding compatibility behavior.
-- Run focused tests, TypeScript checks, lint, dead-code checks, and formatting.
-- Update this plan with implementation course corrections and remaining proven mechanics.
+- [x] Delete `TerrainMaterialSetKey`, `TerrainTextureSetKey`, aggregate set commits, aggregate leases, and
+      whole-set texture-preparer jobs.
+- [x] Delete terrain-specific records from `RenderResourceRegistry` and `RenderScene` after the
+      service-owned resource path replaces them.
+- [x] Delete temporary feature/index models, per-vertex feature slots, material patches, terrain draw
+      units, and flat-color terrain code.
+- [x] Audit names so commit, texture preparation, terrain generation, realization, selection, and drawing
+      remain distinct operations.
+- [x] Audit every new type and unintuitive transition for concise ownership comments.
+- [x] Rewrite tests that preserve superseded architecture instead of adding compatibility behavior.
+- [x] Run focused tests, TypeScript checks, lint, dead-code checks, and formatting; record unrelated
+      repository-wide failures separately rather than attributing them to this terrain slice.
+- [x] Update this plan with implementation course corrections and remaining proven mechanics.
 
 Acceptance criteria:
 
@@ -861,7 +1129,15 @@ Acceptance criteria:
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Search confirms that the aggregate terrain-set identities, `RenderScene`,
+  `RenderResourceRegistry`, and `WorkerTerrainGenerator` no longer exist in the 3D source tree.
+  Terrain rendering now has one `TerrainSystem`/`RenderWorld` path.
+- The original target-shape prose had plan-era service/resource placeholders. It now names the
+  implemented `TerrainSystem`, its `TerrainDrawUnit`, and the injected read-only `RenderWorld`; this
+  clean cutover avoids keeping aliases merely to preserve draft terminology.
+- Full focused tests, shader validation, production build, terrain-slice lint, and frontend type
+  checking pass. The global lint command remains blocked only by the unrelated
+  `commit/pipeline.ts` and `texture-manager.test.ts` findings recorded above.
 
 ## Risks And Mitigations
 
@@ -876,14 +1152,14 @@ Decisions and course corrections:
 - **Pending installation outlives interest.** Associate every asynchronous terrain install with the
   current landblock-layer owner and private installation-entry identity; roll back texture leases and
   generated allocations on stale completion.
-- **TerrainService becomes WebGL-specific.** Inject the backend-neutral `RendererResourceManager`
-  interface. Keep WebGL handles, formats, and surface packing out of the service and worker contracts
-  while allowing the service to own allocation lifetime.
-- **Resource realization partially succeeds.** Make service realization transactional: release every
+- **TerrainSystem becomes WebGL-specific.** Inject backend-neutral geometry and texture managers.
+  Keep WebGL handles, formats, and surface packing out of the system and generator contracts while
+  allowing the system to own allocation lifetime.
+- **Resource realization partially succeeds.** Make system realization transactional: release every
   geometry and surface allocation created before failure, retain no realized-resource record, log
   once, and mark the installation failed.
-- **Prebuilding directional geometry wastes memory.** The source-proven result is small: 19 variants
-  and roughly 229 total quads before backend representation. Measure during real implementation;
+- **Prebuilding directional geometry wastes memory.** The source-proven result is bounded: 36 variants
+  and 765 total quads before backend representation. Measure during real implementation;
   deduplicate or repack storage only if profiling proves the straightforward concatenated geometry
   material. Preserve complete upfront realization and allocation-free variant selection.
 - **Concatenated variant indices address the wrong vertices.** Rebase each variant's indices by its
@@ -900,16 +1176,16 @@ Decisions and course corrections:
   existing draw range in the stable geometry key and its stride's existing surface key; never expose
   a partial selection.
 - **Logical texture and generated device identities collapse together.** Keep deterministic
-  `TextureKey`s separate from `GeometryResourceKey`, `TerrainSurfaceResourceKey`, and opaque WebGL
-  handles.
+  asset/array texture keys separate from generated `TerrainGeometryKey`,
+  `TerrainSurfaceTextureKey`, `TerrainCompositionTextureKey`, and opaque WebGL handles.
 - **Array-layer indices leak into generation.** Preserve DAT or composition identities until backend
   realization resolves them against texture bindings.
 - **Shared detail texture is released too early.** Use the existing global texture lease registry;
   every landblock owner leases each required logical key directly.
-- **Renderer defaults reintroduce sampler identity.** Bind explicit draw-time sampler objects when
-  textured drawing is implemented; never encode wrap or filtering into standalone or array keys.
-- **The plan drifts into full implementation.** Stop once shapes, ownership, state transitions, and
-  focused tests are coherent. Pixel correctness and GLSL require a separate execution signal.
+- **Renderer defaults reintroduce sampler identity.** Explicitly configure normalized texture
+  filtering and wrap at allocation; never encode those policies into standalone or array keys.
+- **GPU source fails only at runtime.** Keep shader creation fail-loud and require a real WebGL2
+  Explorer run before claiming visual correctness.
 
 ## Verification
 
@@ -917,14 +1193,16 @@ Run from `apps/holtburger-3d`:
 
 ```bash
 npm run test:ts
+npm run check:terrain-shader
+npm run harness:terrain -- --landblock 0xda55ffff --screenshot /tmp/holtburger-3d-da55-terrain.png
 npm run check
 npm run lint
 npm run format:check
 ```
 
-Rust host checks and visual browser verification are not completion criteria because this plan does
-not implement the Rust producer or a drawable terrain backend. Existing unrelated failures must be
-reported rather than hidden.
+Rust host checks for the terrain source/pixel producer are covered by the terrain-loading pipeline.
+This plan now has a drawable terrain backend; existing unrelated failures and outstanding live-WebGL
+validation must be reported rather than hidden.
 
 ## Definition Of Done
 
@@ -934,29 +1212,32 @@ reported rather than hidden.
 - Runtime coalesces texture preparation by stable `TextureKey`, materializes only missing resources,
   and owns direct landblock-to-texture leases.
 - No aggregate terrain material or texture-set key remains.
-- `TerrainGenerator` reaches its dedicated runtime-owned worker and emits one concatenated geometry,
+- `TerrainGenerator` runs from a runtime-owned executor and emits one concatenated geometry,
   validated draw ranges for all required variants, and one per-cell surface field per stride without
   entering the static baker.
-- `TerrainService` installs each immutable source once, realizes all generated resources, owns their
+- `TerrainSystem` installs each immutable source once, realizes all generated resources, owns their
   device allocations, and exposes no draw resources for loading or failed installations.
 - Scene-anchor-relative LOD selection chooses an existing variant and performs no generation,
   allocation, replacement, or scene-node mutation.
 - Runtime creates one stable terrain scene root from source facts and does not mediate terrain
   realization or duplicate realized-resource ownership.
-- Frame assembly queries visible landblocks from `TerrainService` and passes selected resource keys,
+- Frame assembly queries visible landblocks from `TerrainSystem` through `RenderWorld` and passes selected resource keys,
   indexed draw ranges, and logical texture keys to the renderer.
-- Renderer stubs resolve the stable geometry key and selected surface key, submit only the selected
-  index range, resolve logical texture keys, and expose explicit draw-time sampler policy.
+- Renderer resolves the stable geometry key and selected surface key, submits only the selected
+  index range, resolves logical texture keys, explicitly configures normalized texture sampling,
+  and composes terrain from the pcode and regional lookup textures.
 - Obsolete aggregate sets, terrain render-scene records, material patches, draw units, feature slots,
   and flat-color terrain paths are removed.
 - Focused tests validate deterministic resolution, texture residency, complete terrain generation,
   atomic realization rollback, duplicate installation, terminal failure, anchor-based selection,
   visibility-to-frame assembly, removal during generation, reacquisition, and eviction.
-- The code remains honest about unimplemented mechanics and does not claim to render terrain.
+- A real browser harness run proves shader linkage and representative source composition before the
+  code claims it can render textured terrain. Legacy/ACViewer captures remain user-owned evidence
+  for any separate visual-parity claim.
 
 ## Remaining Mechanical Decisions
 
-The exact fields of one source-proven per-cell composition record, its GPU packing, and the GLSL
-binding layout remain mechanical investigation. The architecture requires each geometry variant to
-select its stride's surface resource, but does not yet require choosing between integer textures,
-uniform buffers, or another proven WebGL2 representation.
+The first binding layout is intentionally narrow: one `R32UI` pcode field selected by stride, one
+regional `RGBA32UI` table, three normalized texture arrays, and one normalized detail texture.
+Only user-led visual-parity review, lighting, and future performance evidence can justify changing
+that layout.

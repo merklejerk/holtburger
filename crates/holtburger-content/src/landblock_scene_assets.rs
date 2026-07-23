@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use holtburger_dat::file_type::{CellStruct, EnvCell, Environment, GfxObj, SetupModel};
+use holtburger_dat::file_type::{CellStruct, EnvCell, Environment, GfxObj, RegionDesc, SetupModel};
 use holtburger_dat::graphics::{Frame, Polygon};
 use holtburger_dat::landblock::{CellLandblock, LandblockInfo};
 use holtburger_dat::physics::BspNode;
@@ -29,7 +29,7 @@ pub struct EnvCellAsset {
 pub struct LandblockOutdoorAsset {
     pub landblock_id: u32,
     pub cell_landblock: Option<CellLandblockFact>,
-    pub terrain_mesh: Option<PreparedTerrainMesh>,
+    pub terrain_mesh: Option<CanonicalTerrainMesh>,
     pub statics: Vec<LandblockOutdoorStaticMember>,
     pub building_transition_apertures: Vec<PreparedBuildingTransitionAperture>,
     pub outdoor_bvh: Option<PreparedBvh>,
@@ -84,16 +84,9 @@ impl LandblockSceneLodLevel {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum LandblockSceneLodContext {
-    Outdoor,
-    Interior,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LandblockSceneLodRequest {
     pub landblock_id: u32,
     pub level: LandblockSceneLodLevel,
-    pub context: LandblockSceneLodContext,
 }
 
 impl LandblockSceneLodRequest {
@@ -101,7 +94,6 @@ impl LandblockSceneLodRequest {
         Self {
             landblock_id: normalize_landblock_id(raw_landblock_id),
             level,
-            context: LandblockSceneLodContext::Outdoor,
         }
     }
 }
@@ -110,7 +102,6 @@ impl LandblockSceneLodRequest {
 pub struct LandblockSceneLodAsset {
     pub landblock_id: u32,
     pub level: LandblockSceneLodLevel,
-    pub context: LandblockSceneLodContext,
     pub layers: Vec<LandblockSceneLodLayer>,
     pub diagnostics: PreparedContentSourceDiagnostics,
 }
@@ -126,8 +117,10 @@ pub enum LandblockSceneLodLayer {
 
 #[derive(Debug, Clone)]
 pub struct LandblockSceneLodTerrainLayer {
-    /// Terrain mesh for the requested landblock, or `None` when source records were unavailable.
-    pub terrain_mesh: Option<PreparedTerrainMesh>,
+    /// Canonical authored terrain grid, or `None` when the landblock has no CellLandblock record.
+    pub terrain: Option<TerrainGridSource>,
+    /// Terrain mesh for spatial consumers, or `None` when the landblock has no CellLandblock record.
+    pub terrain_mesh: Option<CanonicalTerrainMesh>,
 }
 
 #[derive(Debug, Clone)]
@@ -404,14 +397,25 @@ pub struct PreparedBuildingTransitionApertureRangeSource {
     pub target_env_cell_id: u32,
 }
 
+/// Immutable authored terrain facts in Holtburger's canonical row-major grid order.
+///
+/// The Cell DAT stores values in `x * grid_size + y` order, with the west edge progressing south
+/// to north. This type transposes that source order once into `row * grid_size + column`, where
+/// row is south to north and column is west to east.
+#[derive(Debug, Clone)]
+pub struct TerrainGridSource {
+    pub grid_size: usize,
+    pub tile_size: f32,
+    pub height_indices: Vec<u8>,
+    pub heights: Vec<f32>,
+    pub terrain_samples: Vec<u16>,
+}
+
 #[derive(Debug, Clone)]
 pub struct CellLandblockFact {
     pub id: u32,
     pub has_objects: bool,
-    pub grid_size: usize,
-    pub tile_size: f32,
-    pub terrain_types: Vec<u16>,
-    pub heights: Vec<f32>,
+    pub terrain: TerrainGridSource,
     pub min_height: f32,
     pub max_height: f32,
     pub all_heights_zero: bool,
@@ -484,7 +488,7 @@ pub struct EnvironmentFact {
 }
 
 #[derive(Debug, Clone)]
-pub struct PreparedTerrainMesh {
+pub struct CanonicalTerrainMesh {
     pub landblock_id: u32,
     pub grid_size: usize,
     pub tile_size: f32,
@@ -1314,9 +1318,7 @@ impl LandblockSceneLodAssetAssembler {
     ) -> LandblockSceneLodAsset {
         let mut context = PreparedContentAssemblyContext::with_decode_cache(content, decode_cache);
         let cached_level = cached
-            .filter(|asset| {
-                asset.landblock_id == request.landblock_id && asset.context == request.context
-            })
+            .filter(|asset| asset.landblock_id == request.landblock_id)
             .map(|asset| asset.level);
         let mut layers = cached
             .into_iter()
@@ -1330,12 +1332,7 @@ impl LandblockSceneLodAssetAssembler {
             })
             .cloned()
             .collect::<Vec<_>>();
-        layers.extend(match request.context {
-            LandblockSceneLodContext::Outdoor => {
-                self.assemble_outdoor_layers(&mut context, request, cached_level)
-            }
-            LandblockSceneLodContext::Interior => Vec::new(),
-        });
+        layers.extend(self.assemble_outdoor_layers(&mut context, request, cached_level));
         let mut diagnostics = cached
             .filter(|asset| asset.level.as_u8() <= request.level.as_u8())
             .map(|asset| asset.diagnostics.clone())
@@ -1374,7 +1371,6 @@ impl LandblockSceneLodAssetAssembler {
         LandblockSceneLodAsset {
             landblock_id: request.landblock_id,
             level: request.level,
-            context: request.context,
             layers,
             diagnostics,
         }
@@ -1393,14 +1389,44 @@ impl LandblockSceneLodAssetAssembler {
         let cell_landblock_source = needs_cell_landblock
             .then(|| context.load_cell_landblock(landblock_id))
             .flatten();
-        let terrain_mesh = needs_terrain
-            .then(|| {
-                cell_landblock_source
-                    .as_ref()
-                    .map(CellLandblockFact::from_landblock)
-                    .map(|cell_landblock| build_terrain_mesh(&cell_landblock))
+        let terrain = if needs_terrain {
+            cell_landblock_source.as_ref().and_then(|cell_landblock| {
+                match context.source.region_desc() {
+                    Ok(region) => match CellLandblockFact::from_landblock(cell_landblock, &region) {
+                        Ok(terrain) => Some(terrain),
+                        Err(error) => {
+                            context.report_source_error(
+                                EOR_PORTAL_NAMESPACE,
+                                holtburger_dat::file_type::REGION_DESC_FILE_ID,
+                                "region-land-height-table",
+                                "invalid-height-table",
+                                format!(
+                                    "Could not resolve terrain heights for landblock 0x{:08X}: {error:#}",
+                                    request.landblock_id
+                                ),
+                            );
+                            None
+                        }
+                    },
+                    Err(error) => {
+                        context.report_source_error(
+                            EOR_PORTAL_NAMESPACE,
+                            holtburger_dat::file_type::REGION_DESC_FILE_ID,
+                            "region-desc",
+                            "asset-decode-failed",
+                            format!(
+                                "Could not load RegionDesc for terrain landblock 0x{:08X}: {error:#}",
+                                request.landblock_id
+                            ),
+                        );
+                        None
+                    }
+                }
             })
-            .flatten();
+        } else {
+            None
+        };
+        let terrain_mesh = terrain.as_ref().map(build_terrain_mesh);
         let landblock_info_source = if static_families.is_empty() {
             None
         } else {
@@ -1428,6 +1454,7 @@ impl LandblockSceneLodAssetAssembler {
             landblock_id,
             request.level,
             cached_level,
+            terrain.map(|terrain| terrain.terrain),
             terrain_mesh,
             statics,
             building_transition_apertures,
@@ -2042,7 +2069,8 @@ fn build_scene_lod_outdoor_layers(
     landblock_id: u32,
     level: LandblockSceneLodLevel,
     cached_level: Option<LandblockSceneLodLevel>,
-    terrain_mesh: Option<PreparedTerrainMesh>,
+    terrain: Option<TerrainGridSource>,
+    terrain_mesh: Option<CanonicalTerrainMesh>,
     statics: Vec<LandblockOutdoorStaticMember>,
     building_transition_apertures: Vec<PreparedBuildingTransitionAperture>,
 ) -> Vec<LandblockSceneLodLayer> {
@@ -2063,7 +2091,10 @@ fn build_scene_lod_outdoor_layers(
     let mut layers = Vec::new();
     if !has_cached_layers {
         layers.push(LandblockSceneLodLayer::Terrain(
-            LandblockSceneLodTerrainLayer { terrain_mesh },
+            LandblockSceneLodTerrainLayer {
+                terrain,
+                terrain_mesh,
+            },
         ));
     }
     if level.as_u8() >= LandblockSceneLodLevel::Level1.as_u8()
@@ -2215,26 +2246,60 @@ fn load_bundle_environment_facts(
 }
 
 impl CellLandblockFact {
-    fn from_landblock(landblock: &CellLandblock) -> Self {
-        let heights = landblock
-            .height
+    fn from_landblock(landblock: &CellLandblock, region: &RegionDesc) -> anyhow::Result<Self> {
+        let expected_sample_count = LANDBLOCK_GRID_SIZE * LANDBLOCK_GRID_SIZE;
+        if landblock.height.len() != expected_sample_count {
+            anyhow::bail!(
+                "CellLandblock 0x{:08X} has {} height indices; expected {expected_sample_count}",
+                landblock.id,
+                landblock.height.len()
+            )
+        }
+        if landblock.terrain.len() != expected_sample_count {
+            anyhow::bail!(
+                "CellLandblock 0x{:08X} has {} terrain samples; expected {expected_sample_count}",
+                landblock.id,
+                landblock.terrain.len()
+            )
+        }
+        if region
+            .land_defs
+            .land_height_table
             .iter()
-            .map(|height| f32::from(*height) * 2.0)
-            .collect::<Vec<_>>();
+            .any(|height| !height.is_finite())
+        {
+            anyhow::bail!("RegionDesc LandDefs.LandHeightTable contains a non-finite height")
+        }
+
+        let mut height_indices = Vec::with_capacity(expected_sample_count);
+        let mut heights = Vec::with_capacity(expected_sample_count);
+        let mut terrain_samples = Vec::with_capacity(expected_sample_count);
+        for row in 0..LANDBLOCK_GRID_SIZE {
+            for column in 0..LANDBLOCK_GRID_SIZE {
+                let dat_index = column * LANDBLOCK_GRID_SIZE + row;
+                let height_index = landblock.height[dat_index];
+                height_indices.push(height_index);
+                heights.push(region.land_defs.land_height_table[usize::from(height_index)]);
+                terrain_samples.push(landblock.terrain[dat_index]);
+            }
+        }
         let min_height = heights.iter().copied().reduce(f32::min).unwrap_or_default();
         let max_height = heights.iter().copied().reduce(f32::max).unwrap_or_default();
 
-        Self {
+        Ok(Self {
             id: landblock.id,
             has_objects: landblock.has_objects != 0,
-            grid_size: LANDBLOCK_GRID_SIZE,
-            tile_size: LANDBLOCK_TILE_SIZE,
-            terrain_types: landblock.terrain.clone(),
-            heights,
+            terrain: TerrainGridSource {
+                grid_size: LANDBLOCK_GRID_SIZE,
+                tile_size: LANDBLOCK_TILE_SIZE,
+                height_indices,
+                heights,
+                terrain_samples,
+            },
             min_height,
             max_height,
             all_heights_zero: min_height == 0.0 && max_height == 0.0,
-        }
+        })
     }
 }
 
@@ -3445,33 +3510,13 @@ fn conservative_instance_bounds(
         .expect("non-empty part placements should yield bounds")
 }
 
-fn build_terrain_mesh(cell_landblock: &CellLandblockFact) -> PreparedTerrainMesh {
-    let grid_size = cell_landblock.grid_size;
-    let tile_size = cell_landblock.tile_size;
-    let mut normalized_heights = Vec::with_capacity(cell_landblock.heights.len());
-    let mut normalized_terrain_types = Vec::with_capacity(cell_landblock.terrain_types.len());
+fn build_terrain_mesh(cell_landblock: &CellLandblockFact) -> CanonicalTerrainMesh {
+    let grid_size = cell_landblock.terrain.grid_size;
+    let tile_size = cell_landblock.terrain.tile_size;
+    let heights = &cell_landblock.terrain.heights;
+    let terrain_samples = &cell_landblock.terrain.terrain_samples;
 
-    for row in 0..grid_size {
-        for col in 0..grid_size {
-            let source_index = col * grid_size + row;
-            normalized_heights.push(
-                cell_landblock
-                    .heights
-                    .get(source_index)
-                    .copied()
-                    .unwrap_or(0.0),
-            );
-            normalized_terrain_types.push(
-                cell_landblock
-                    .terrain_types
-                    .get(source_index)
-                    .copied()
-                    .unwrap_or(0),
-            );
-        }
-    }
-
-    let vertices = normalized_heights
+    let vertices = heights
         .iter()
         .enumerate()
         .map(|(index, height)| {
@@ -3495,15 +3540,10 @@ fn build_terrain_mesh(cell_landblock: &CellLandblockFact) -> PreparedTerrainMesh
             let northeast = northwest + 1;
             let quad_index = row * (grid_size - 1) + col;
             let triangle_indices = [quad_index * 2, quad_index * 2 + 1];
-            let terrain_type = normalized_terrain_types
-                .get(southwest)
-                .copied()
-                .unwrap_or(0);
-            let average_height = (normalized_heights[southwest]
-                + normalized_heights[southeast]
-                + normalized_heights[northwest]
-                + normalized_heights[northeast])
-                / 4.0;
+            let terrain_type = terrain_samples.get(southwest).copied().unwrap_or(0);
+            let average_height =
+                (heights[southwest] + heights[southeast] + heights[northwest] + heights[northeast])
+                    / 4.0;
 
             let uses_southwest_to_northeast =
                 uses_southwest_to_northeast_cut(cell_landblock.id, col as u32, row as u32);
@@ -3543,10 +3583,10 @@ fn build_terrain_mesh(cell_landblock: &CellLandblockFact) -> PreparedTerrainMesh
                 terrain_vertex_bounds(&vertices, [southwest, southeast, northwest, northeast])
             {
                 let raw_corners = [
-                    normalized_terrain_types[southwest],
-                    normalized_terrain_types[southeast],
-                    normalized_terrain_types[northeast],
-                    normalized_terrain_types[northwest],
+                    terrain_samples[southwest],
+                    terrain_samples[southeast],
+                    terrain_samples[northeast],
+                    terrain_samples[northwest],
                 ];
                 let corner_terrain_codes = raw_corners.map(terrain_code_from_cell_terrain);
                 let corner_road_codes = raw_corners.map(road_code_from_cell_terrain);
@@ -3599,7 +3639,7 @@ fn build_terrain_mesh(cell_landblock: &CellLandblockFact) -> PreparedTerrainMesh
         &terrain_spatial_items,
     );
 
-    PreparedTerrainMesh {
+    CanonicalTerrainMesh {
         landblock_id: cell_landblock.id,
         grid_size,
         tile_size,
@@ -3608,16 +3648,8 @@ fn build_terrain_mesh(cell_landblock: &CellLandblockFact) -> PreparedTerrainMesh
         quads,
         terrain_bvh_items,
         terrain_bvh,
-        min_height: normalized_heights
-            .iter()
-            .copied()
-            .reduce(f32::min)
-            .unwrap_or(0.0),
-        max_height: normalized_heights
-            .iter()
-            .copied()
-            .reduce(f32::max)
-            .unwrap_or(0.0),
+        min_height: heights.iter().copied().reduce(f32::min).unwrap_or(0.0),
+        max_height: heights.iter().copied().reduce(f32::max).unwrap_or(0.0),
     }
 }
 
@@ -4257,7 +4289,9 @@ mod tests {
     };
     use holtburger_common::properties::GfxObjFlags;
     use holtburger_common::{Plane, Quaternion, Vector3};
+    use holtburger_dat::file_type::region::{LandDefs, RegionDesc, SceneDesc, TerrainDesc};
     use holtburger_dat::graphics::{CVertexArray, SWVertex};
+    use holtburger_dat::landblock::CellLandblock;
     use holtburger_dat::physics::{BspLeaf, BspPortal, PortalPoly};
     use holtburger_dat::{
         DatError, DatFileType, FileMetadata, HbaReader, ResourceKey, ResourceSource,
@@ -5169,16 +5203,19 @@ mod tests {
         let cell = CellLandblockFact {
             id: 0xda55ffff,
             has_objects: false,
-            grid_size: 9,
-            tile_size: 24.0,
-            terrain_types: (0..81)
-                .map(|index| {
-                    let terrain_code = ((index % 5) + 1) as u16;
-                    let road_code = (index % 4) as u16;
-                    (terrain_code << 2) | road_code
-                })
-                .collect(),
-            heights: (0..81).map(|index| index as f32 * 0.25).collect(),
+            terrain: TerrainGridSource {
+                grid_size: 9,
+                tile_size: 24.0,
+                height_indices: vec![0; 81],
+                terrain_samples: (0..81)
+                    .map(|index| {
+                        let terrain_code = ((index % 5) + 1) as u16;
+                        let road_code = (index % 4) as u16;
+                        (terrain_code << 2) | road_code
+                    })
+                    .collect(),
+                heights: (0..81).map(|index| index as f32 * 0.25).collect(),
+            },
             min_height: 0.0,
             max_height: 20.0,
             all_heights_zero: false,
@@ -5188,10 +5225,10 @@ mod tests {
 
         assert_eq!(mesh.quads.len(), 64);
         assert_eq!(mesh.terrain_bvh_items.len(), 64);
-        assert_eq!(mesh.quads[0].corner_terrain_codes, [1, 5, 1, 2]);
+        assert_eq!(mesh.quads[0].corner_terrain_codes, [1, 2, 1, 5]);
         assert_eq!(
             mesh.quads[0].pcode,
-            terrain_pcode([0, 1, 2, 1], [1, 5, 1, 2])
+            terrain_pcode([0, 1, 2, 1], [1, 2, 1, 5])
         );
         let terrain_bvh = mesh.terrain_bvh.as_ref().expect("terrain bvh");
         assert_eq!(terrain_bvh.scope, PreparedBvhScope::OutdoorTerrain);
@@ -5203,6 +5240,70 @@ mod tests {
             terrain_bvh.nodes[0].kind_mask,
             PreparedBvhKindMask::OutdoorTerrain { terrain_quad: true }
         );
+    }
+
+    #[test]
+    fn terrain_grid_resolves_height_indices_and_canonicalizes_dat_order() {
+        let mut land_height_table = [0.0; 256];
+        for (index, height) in land_height_table.iter_mut().enumerate() {
+            *height = index as f32 * index as f32 + 0.25;
+        }
+        let region = RegionDesc {
+            id: 0x1300_0000,
+            region_number: 1,
+            version: 1,
+            region_name: "test".to_string(),
+            land_defs: LandDefs { land_height_table },
+            scene_info: SceneDesc::default(),
+            terrain_info: TerrainDesc::default(),
+        };
+        let landblock = CellLandblock {
+            id: 0x0102_ffff,
+            has_objects: 0,
+            terrain: (0..81).collect(),
+            height: (0..81).map(|index| (index % 251) as u8).collect(),
+            _align: (),
+        };
+
+        let fact = CellLandblockFact::from_landblock(&landblock, &region)
+            .expect("terrain grid should resolve against the region height table");
+
+        assert_eq!(fact.terrain.height_indices[0], 0);
+        assert_eq!(fact.terrain.height_indices[1], 9);
+        assert_eq!(fact.terrain.height_indices[9], 1);
+        assert_eq!(fact.terrain.height_indices[80], 80);
+        assert_eq!(fact.terrain.heights[1], 81.25);
+        assert_eq!(fact.terrain.heights[9], 1.25);
+        assert_eq!(fact.terrain.terrain_samples[1], 9);
+        assert_eq!(fact.terrain.terrain_samples[9], 1);
+        assert_eq!(fact.terrain.terrain_samples[80], 80);
+    }
+
+    #[test]
+    fn terrain_grid_rejects_non_finite_region_height_table() {
+        let mut land_height_table = [0.0; 256];
+        land_height_table[255] = f32::NAN;
+        let region = RegionDesc {
+            id: 0x1300_0000,
+            region_number: 1,
+            version: 1,
+            region_name: "test".to_string(),
+            land_defs: LandDefs { land_height_table },
+            scene_info: SceneDesc::default(),
+            terrain_info: TerrainDesc::default(),
+        };
+        let landblock = CellLandblock {
+            id: 0x0102_ffff,
+            has_objects: 0,
+            terrain: vec![0; 81],
+            height: vec![0; 81],
+            _align: (),
+        };
+
+        let error = CellLandblockFact::from_landblock(&landblock, &region)
+            .expect_err("non-finite regional heights must fail terrain assembly");
+
+        assert!(error.to_string().contains("non-finite"));
     }
 
     fn test_vertex_array() -> holtburger_dat::graphics::CVertexArray {
@@ -5379,10 +5480,25 @@ mod tests {
         let cell = CellLandblockFact {
             id: 0x0102ffff,
             has_objects: false,
-            grid_size: LANDBLOCK_GRID_SIZE,
-            tile_size: LANDBLOCK_TILE_SIZE,
-            terrain_types: (0..81).collect(),
-            heights: (0..81).map(|height| height as f32).collect(),
+            terrain: TerrainGridSource {
+                grid_size: LANDBLOCK_GRID_SIZE,
+                tile_size: LANDBLOCK_TILE_SIZE,
+                height_indices: vec![0; 81],
+                terrain_samples: (0..81)
+                    .map(|canonical_index| {
+                        let row = canonical_index / LANDBLOCK_GRID_SIZE;
+                        let column = canonical_index % LANDBLOCK_GRID_SIZE;
+                        (column * LANDBLOCK_GRID_SIZE + row) as u16
+                    })
+                    .collect(),
+                heights: (0..81)
+                    .map(|canonical_index| {
+                        let row = canonical_index / LANDBLOCK_GRID_SIZE;
+                        let column = canonical_index % LANDBLOCK_GRID_SIZE;
+                        (column * LANDBLOCK_GRID_SIZE + row) as f32
+                    })
+                    .collect(),
+            },
             min_height: 0.0,
             max_height: 80.0,
             all_heights_zero: false,
@@ -5539,6 +5655,7 @@ mod tests {
             LandblockSceneLodLevel::Level3,
             None,
             None,
+            None,
             vec![
                 synthetic_outdoor_static_member(
                     "building",
@@ -5587,6 +5704,7 @@ mod tests {
         let level_1 = build_scene_lod_outdoor_layers(
             0xda55ffff,
             LandblockSceneLodLevel::Level1,
+            None,
             None,
             None,
             vec![synthetic_outdoor_static_member(
@@ -5644,7 +5762,6 @@ mod tests {
         let cached = LandblockSceneLodAsset {
             landblock_id: 0xda55ffff,
             level: LandblockSceneLodLevel::Level3,
-            context: LandblockSceneLodContext::Outdoor,
             layers: vec![LandblockSceneLodLayer::OutdoorBuildings(
                 LandblockSceneLodOutdoorBuildingsLayer {
                     statics: Vec::new(),
@@ -5671,30 +5788,6 @@ mod tests {
             layer.building_transition_apertures[0].aperture_id,
             "building-transition-aperture:building-01:0"
         );
-    }
-
-    #[test]
-    fn scene_lod_level_4_interior_emits_env_cells_without_outdoor_layers() {
-        let source = Arc::new(CountingSource::new(HashMap::new()));
-        let repository = ContentRepository::from_mounts(vec![source]);
-        let decode_cache = ContentDecodeCache::new();
-
-        let asset = LandblockSceneLodAssetAssembler::new().assemble_landblock_with_cache(
-            &repository,
-            &decode_cache,
-            LandblockSceneLodRequest {
-                landblock_id: 0xda55ffff,
-                level: LandblockSceneLodLevel::Level4,
-                context: LandblockSceneLodContext::Interior,
-            },
-        );
-
-        assert_eq!(asset.context, LandblockSceneLodContext::Interior);
-        assert_eq!(asset.layers.len(), 1);
-        let LandblockSceneLodLayer::EnvCellSystem(layer) = &asset.layers[0] else {
-            panic!("interior level 4 should include env-cell system output");
-        };
-        assert!(layer.building_transition_apertures.is_empty());
     }
 
     #[test]

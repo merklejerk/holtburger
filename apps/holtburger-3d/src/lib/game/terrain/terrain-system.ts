@@ -1,6 +1,11 @@
 import { log, LogLevel } from "../../logs";
 import type { LandblockId } from "../game-types";
 import type { AABB3 } from "../math/types";
+import type { Vec3 } from "../math/types";
+import {
+	createLandblockWorldOrigin,
+	landblockAtWorldPoint,
+} from "../landblocks";
 import type { SceneGraph, SceneNodeId, ScenePlacement } from "../scene";
 import type { GeometryManager } from "../geometry/geometry-manager";
 import {
@@ -19,6 +24,10 @@ import {
 	type TerrainCompositionTable,
 } from "./composition-table";
 import type { TerrainGenerator } from "./terrain-generator";
+import {
+	sampleTerrainSurface,
+	type TerrainSurfaceSample,
+} from "./terrain-surface";
 import {
 	selectTerrainMeshStride,
 	selectTerrainTransitionDirection,
@@ -223,6 +232,20 @@ export class TerrainSystem<
 		return this.#hasDrawUnit(drawUnit) ? drawUnit : null;
 	}
 
+	/** Sample source-proven terrain height without waiting for generated GPU resources. */
+	querySurfaceAtWorldPoint(point: Vec3): TerrainSurfaceSample | null {
+		const landblockId = landblockAtWorldPoint(point);
+		if (!landblockId) return null;
+		const installation = this.#installations.get(landblockId);
+		if (!installation) return null;
+		const origin = createLandblockWorldOrigin(landblockId);
+		return sampleTerrainSurface(
+			installation.source.input.generation,
+			point.x - origin.x,
+			point.z - origin.z,
+		);
+	}
+
 	/** Reject all later worker completions and clear terrain source state. */
 	async destroy(): Promise<void> {
 		if (this.#destroyed) return;
@@ -253,6 +276,9 @@ export class TerrainSystem<
 			});
 		} catch (error) {
 			if (this.#installations.get(landblockId) !== installation) return;
+			// Geometry publication precedes the generated surface fields. Release the whole source owner
+			// on any failure so a failed installation cannot retain a partial device realization.
+			this.#releaseSourceResources(installation.source);
 			this.#installations.set(landblockId, {
 				kind: "failed",
 				source: installation.source,
@@ -344,6 +370,49 @@ export class TerrainSystem<
 function validateTerrainGenerationResult(
 	result: TerrainGenerationResult,
 ): void {
+	const vertexCount = result.geometry.positions.length / 3;
+	if (
+		!Number.isInteger(vertexCount) ||
+		result.geometry.normals.length !== result.geometry.positions.length ||
+		result.geometry.textureCoordinates.length !== vertexCount * 2
+	) {
+		throw new Error(
+			"Terrain generation geometry has incompatible attribute lengths.",
+		);
+	}
+	if (
+		[...result.geometry.positions, ...result.geometry.normals].some(
+			(value) => !Number.isFinite(value),
+		) ||
+		[...result.geometry.textureCoordinates].some(
+			(value) => !Number.isFinite(value),
+		) ||
+		[...result.geometry.indices].some((index) => index >= vertexCount)
+	) {
+		throw new Error(
+			"Terrain generation geometry contains invalid attribute or index values.",
+		);
+	}
+	const ranges = [...result.variants]
+		.map(({ indexCount, indexStart }) => ({ indexCount, indexStart }))
+		.sort((left, right) => left.indexStart - right.indexStart);
+	for (let index = 0; index < ranges.length; index += 1) {
+		const range = ranges[index];
+		const previous = ranges[index - 1];
+		if (
+			!Number.isInteger(range.indexStart) ||
+			!Number.isInteger(range.indexCount) ||
+			range.indexStart < 0 ||
+			range.indexCount <= 0 ||
+			range.indexStart + range.indexCount > result.geometry.indices.length ||
+			(previous !== undefined &&
+				previous.indexStart + previous.indexCount > range.indexStart)
+		) {
+			throw new Error(
+				"Terrain generation contains overlapping or out-of-bounds draw ranges.",
+			);
+		}
+	}
 	const strides = new Set(result.surfaceFields.map(({ stride }) => stride));
 	if (
 		strides.size !== result.surfaceFields.length ||

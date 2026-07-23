@@ -326,6 +326,7 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 			);
 			if (upload.mipLevels > 1) gl.generateMipmap(gl.TEXTURE_2D);
 			if (format.integer) configureIntegerTexture(gl);
+			else configureNormalizedTexture(gl, gl.TEXTURE_2D, upload.mipLevels);
 			return { height: upload.height, texture, width: upload.width };
 		} catch (error) {
 			gl.deleteTexture(texture);
@@ -352,6 +353,11 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 				description.width,
 				description.height,
 				description.layerCapacity,
+			);
+			configureNormalizedTexture(
+				gl,
+				gl.TEXTURE_2D_ARRAY,
+				description.mipLevels,
 			);
 			return { description, texture };
 		} catch (error) {
@@ -541,6 +547,22 @@ function configureIntegerTexture(gl: WebGL2RenderingContext): void {
 	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
 	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
 	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+}
+
+/** Configure a complete normalized texture so one-level mask arrays remain sampleable. */
+function configureNormalizedTexture(
+	gl: WebGL2RenderingContext,
+	target: GLenum,
+	mipLevels: number,
+): void {
+	gl.texParameteri(
+		target,
+		gl.TEXTURE_MIN_FILTER,
+		mipLevels > 1 ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR,
+	);
+	gl.texParameteri(target, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+	gl.texParameteri(target, gl.TEXTURE_WRAP_S, gl.REPEAT);
+	gl.texParameteri(target, gl.TEXTURE_WRAP_T, gl.REPEAT);
 }
 
 function validateTextureArrayDescription(

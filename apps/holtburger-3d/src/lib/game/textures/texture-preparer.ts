@@ -1,4 +1,4 @@
-import type { AssetBridge } from "../../assets/asset-bridge";
+import type { TexturePixelSource } from "../../assets/texture-pixel-source";
 import type { DatAssetId } from "../game-types";
 import type { AssetTextureSource, TextureArraySource } from "./texture-manager";
 import {
@@ -48,19 +48,19 @@ export interface TexturePreparer {
 
 /** Future runtime worker-pool adapter backed by the host asset service channel. */
 export class WorkerTexturePreparer implements TexturePreparer {
-	readonly #hostAssets: AssetBridge;
+	readonly #pixelSource: TexturePixelSource;
 	/** In-flight preparation jobs coalesced by immutable logical texture identity. */
 	readonly #pendingPreparations = new Map<
 		TextureKey,
 		Promise<PreparedTextureSource>
 	>();
 
-	protected constructor(hostAssets: AssetBridge) {
-		this.#hostAssets = hostAssets;
+	protected constructor(pixelSource: TexturePixelSource) {
+		this.#pixelSource = pixelSource;
 	}
 
-	static async build(hostAssets: AssetBridge): Promise<WorkerTexturePreparer> {
-		return new WorkerTexturePreparer(hostAssets);
+	static async build(pixelSource: TexturePixelSource): Promise<WorkerTexturePreparer> {
+		return new WorkerTexturePreparer(pixelSource);
 	}
 
 	prepare(
@@ -128,7 +128,7 @@ export class WorkerTexturePreparer implements TexturePreparer {
 		purpose: TexturePurpose,
 		sourceAssetId: DatAssetId,
 	): Promise<PreparedTextureSurface> {
-		const response = await this.#hostAssets.requestTexturePreparationAsset({
+		const response = await this.#pixelSource.loadTexturePixels({
 			kind: "prepared-texture-surface",
 			purpose,
 			sourceAssetId,

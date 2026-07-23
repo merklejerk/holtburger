@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 
 import { buildEntryPath, requireEntry } from "./entry-paths.mjs";
 
@@ -16,6 +19,15 @@ try {
 }
 
 console.info(`Launching ${entryName} Tauri entry at ${entryPath}`);
+
+const workspaceDats = resolve(
+	fileURLToPath(new URL("../../../", import.meta.url)),
+	"dats",
+);
+const devEnvironment = { ...process.env };
+if (devEnvironment.HOLTBURGER_DATS === undefined && existsSync(workspaceDats)) {
+	devEnvironment.HOLTBURGER_DATS = workspaceDats;
+}
 
 const config = {
 	build: {
@@ -37,6 +49,7 @@ const config = {
 	},
 };
 const child = spawn("tauri", ["dev", "--config", JSON.stringify(config)], {
+	env: devEnvironment,
 	stdio: "inherit",
 	shell: process.platform === "win32",
 });

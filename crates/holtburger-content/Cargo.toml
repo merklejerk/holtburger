@@ -12,6 +12,7 @@ holtburger-dat.workspace = true
 anyhow.workspace = true
 binrw.workspace = true
 log.workspace = true
+directories.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -4,9 +4,9 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use holtburger_content::{
     ContentDecodeCache, ContentRepository, LandblockOutdoorStaticMember, LandblockSceneLodAsset,
-    LandblockSceneLodAssetAssembler, LandblockSceneLodContext, LandblockSceneLodLayer,
-    LandblockSceneLodLevel, LandblockSceneLodRequest, PreparedContentSourceDiagnostics,
-    PreparedStaticInstanceKind, normalize_landblock_id,
+    LandblockSceneLodAssetAssembler, LandblockSceneLodLayer, LandblockSceneLodLevel,
+    LandblockSceneLodRequest, PreparedContentSourceDiagnostics, PreparedStaticInstanceKind,
+    normalize_landblock_id,
 };
 
 #[derive(Parser, Debug)]
@@ -35,7 +35,6 @@ fn main() -> Result<()> {
             LandblockSceneLodRequest {
                 landblock_id,
                 level: LandblockSceneLodLevel::Level3,
-                context: LandblockSceneLodContext::Outdoor,
             },
         );
         let statics = collect_outdoor_statics(&asset);

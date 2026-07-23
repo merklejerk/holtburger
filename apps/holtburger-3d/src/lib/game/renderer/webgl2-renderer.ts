@@ -18,9 +18,9 @@ import {
 	type WebGL2GeometryBinding,
 } from "./webgl2-resource-manager";
 import {
-	createWebGL2FlatColorProgram,
-	type WebGL2FlatColorProgram,
-} from "./webgl2-flat-color-program";
+	createWebGL2TerrainProgram,
+	type WebGL2TerrainProgram,
+} from "./webgl2-terrain-program";
 
 const CLEAR_COLOR = {
 	red: 0.15,
@@ -29,9 +29,8 @@ const CLEAR_COLOR = {
 	alpha: 1,
 } as const;
 
-type SurfaceColor = readonly [number, number, number, number];
-
-const TERRAIN_COLOR: SurfaceColor = [0.22, 0.72, 0.42, 1];
+const DETAIL_FADE_NEAR = 10;
+const DETAIL_FADE_FAR = 50;
 
 /** One visible landblock terrain source paired with selected renderer resources. */
 interface TerrainFrameInput {
@@ -47,6 +46,8 @@ interface PreparedView {
 	readonly projection: Mat4;
 	/** Terrain selected by this renderer from its RenderWorld. */
 	readonly terrain: readonly TerrainFrameInput[];
+	/** Anchor-relative camera position used by detail-distance presentation policy. */
+	readonly cameraPosition: Vec3;
 	/** Anchor-relative camera view transform. */
 	readonly view: Mat4;
 	/** Landblock defining the view's render-world origin. */
@@ -59,7 +60,7 @@ export class WebGL2Renderer implements Renderer {
 	readonly #resources: WebGL2ResourceManager;
 	/** Read-only runtime gateway used to collect this renderer's frame submissions. */
 	readonly #world: RenderWorld;
-	readonly #flatColorProgram: WebGL2FlatColorProgram;
+	readonly #terrainProgram: WebGL2TerrainProgram;
 	#frameWidth = 0;
 	#frameHeight = 0;
 
@@ -82,7 +83,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#gl = gl;
 		this.#resources = resources;
 		this.#world = world;
-		this.#flatColorProgram = createWebGL2FlatColorProgram(gl);
+		this.#terrainProgram = createWebGL2TerrainProgram(gl);
 		gl.clearColor(
 			CLEAR_COLOR.red,
 			CLEAR_COLOR.green,
@@ -102,7 +103,7 @@ export class WebGL2Renderer implements Renderer {
 	}
 
 	async destroy(): Promise<void> {
-		this.#gl.deleteProgram(this.#flatColorProgram.program);
+		this.#gl.deleteProgram(this.#terrainProgram.program);
 	}
 
 	#beginFrame(): void {
@@ -128,6 +129,7 @@ export class WebGL2Renderer implements Renderer {
 		const aspectRatio = this.#frameWidth / Math.max(1, this.#frameHeight);
 		return {
 			anchorLandblockId,
+			cameraPosition,
 			projection: createPerspectiveMat4(
 				camera.fov,
 				aspectRatio,
@@ -191,34 +193,40 @@ export class WebGL2Renderer implements Renderer {
 	}
 
 	#drawView(view: PreparedView): void {
-		const gl = this.#gl;
-		gl.useProgram(this.#flatColorProgram.program);
-		gl.uniformMatrix4fv(
-			this.#flatColorProgram.uniforms.projection,
-			false,
-			mat4ToFloat32Array(view.projection),
-		);
-		gl.uniformMatrix4fv(
-			this.#flatColorProgram.uniforms.view,
-			false,
-			mat4ToFloat32Array(view.view),
-		);
 		this.#drawTerrain(view);
-		gl.bindVertexArray(null);
+		this.#gl.bindVertexArray(null);
 	}
 
 	#drawTerrain(view: PreparedView): void {
 		const gl = this.#gl;
 		gl.depthMask(true);
 		gl.disable(gl.BLEND);
-		this.#setSurfaceColor(TERRAIN_COLOR);
+		gl.useProgram(this.#terrainProgram.program);
+		gl.uniformMatrix4fv(
+			this.#terrainProgram.uniforms.projection,
+			false,
+			mat4ToFloat32Array(view.projection),
+		);
+		gl.uniformMatrix4fv(
+			this.#terrainProgram.uniforms.view,
+			false,
+			mat4ToFloat32Array(view.view),
+		);
+		gl.uniform3f(
+			this.#terrainProgram.uniforms.cameraPosition,
+			view.cameraPosition.x,
+			view.cameraPosition.y,
+			view.cameraPosition.z,
+		);
+		gl.uniform1f(this.#terrainProgram.uniforms.detailFadeNear, DETAIL_FADE_NEAR);
+		gl.uniform1f(this.#terrainProgram.uniforms.detailFadeFar, DETAIL_FADE_FAR);
 		for (const terrain of view.terrain) {
 			const landblockOffset = createLandblockOffset(
 				terrain.drawUnit.landblockId,
 				view.anchorLandblockId,
 			);
-			this.#resolveTerrainProgramInput(terrain);
-			this.#drawGeometry(
+			this.#bindTerrainResources(terrain);
+			this.#drawTerrainGeometry(
 				terrain.program.geometry,
 				terrain.drawUnit.indexStart,
 				terrain.drawUnit.indexCount,
@@ -228,17 +236,47 @@ export class WebGL2Renderer implements Renderer {
 		}
 	}
 
-	#resolveTerrainProgramInput(input: TerrainFrameInput): void {
+	#bindTerrainResources(input: TerrainFrameInput): void {
 		const { textures } = input.program;
-		this.#resources.getTexture2D(input.program.surfaceField);
-		this.#resources.getTexture2D(input.program.composition);
-		this.#resources.getTextureArray(textures.colors.resource);
-		this.#resources.getTextureArray(textures.blendMasks.resource);
-		this.#resources.getTextureArray(textures.roadMasks.resource);
-		this.#resources.getTexture2D(textures.detail);
+		const surfaceField = this.#resources.getTexture2D(input.program.surfaceField);
+		const composition = this.#resources.getTexture2D(input.program.composition);
+		const colors = this.#resources.getTextureArray(textures.colors.resource);
+		const blendMasks = this.#resources.getTextureArray(textures.blendMasks.resource);
+		const roadMasks = this.#resources.getTextureArray(textures.roadMasks.resource);
+		const detail = this.#resources.getTexture2D(textures.detail);
+		const gl = this.#gl;
+		this.#bindTexture2D(0, surfaceField.texture, this.#terrainProgram.uniforms.surfaceField);
+		this.#bindTexture2D(1, composition.texture, this.#terrainProgram.uniforms.composition);
+		this.#bindTextureArray(2, colors.texture, this.#terrainProgram.uniforms.colors);
+		this.#bindTextureArray(3, blendMasks.texture, this.#terrainProgram.uniforms.blendMasks);
+		this.#bindTextureArray(4, roadMasks.texture, this.#terrainProgram.uniforms.roadMasks);
+		this.#bindTexture2D(5, detail.texture, this.#terrainProgram.uniforms.detail);
+		gl.activeTexture(gl.TEXTURE0);
 	}
 
-	#drawGeometry(
+	#bindTexture2D(
+		unit: number,
+		texture: WebGLTexture,
+		uniform: WebGLUniformLocation,
+	): void {
+		const gl = this.#gl;
+		gl.activeTexture(gl.TEXTURE0 + unit);
+		gl.bindTexture(gl.TEXTURE_2D, texture);
+		gl.uniform1i(uniform, unit);
+	}
+
+	#bindTextureArray(
+		unit: number,
+		texture: WebGLTexture,
+		uniform: WebGLUniformLocation,
+	): void {
+		const gl = this.#gl;
+		gl.activeTexture(gl.TEXTURE0 + unit);
+		gl.bindTexture(gl.TEXTURE_2D_ARRAY, texture);
+		gl.uniform1i(uniform, unit);
+	}
+
+	#drawTerrainGeometry(
 		geometryKey: GeometryResourceKey,
 		indexStart: number,
 		indexCount: number,
@@ -249,12 +287,12 @@ export class WebGL2Renderer implements Renderer {
 		validateDrawRange(binding, indexStart, indexCount);
 		const gl = this.#gl;
 		gl.uniformMatrix4fv(
-			this.#flatColorProgram.uniforms.localToLandblock,
+			this.#terrainProgram.uniforms.localToLandblock,
 			false,
 			mat4ToFloat32Array(localToLandblock),
 		);
 		gl.uniform3f(
-			this.#flatColorProgram.uniforms.landblockOffset,
+			this.#terrainProgram.uniforms.landblockOffset,
 			landblockOffset.x,
 			landblockOffset.y,
 			landblockOffset.z,
@@ -266,10 +304,6 @@ export class WebGL2Renderer implements Renderer {
 			binding.indexType,
 			indexStart * binding.indexElementBytes,
 		);
-	}
-
-	#setSurfaceColor(color: SurfaceColor): void {
-		this.#gl.uniform4f(this.#flatColorProgram.uniforms.color, ...color);
 	}
 
 	#resizeCanvasForDpr(): void {

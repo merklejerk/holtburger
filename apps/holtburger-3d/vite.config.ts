@@ -13,6 +13,7 @@ export default defineConfig({
 			input: {
 				client: resolve(rootDir, "client/index.html"),
 				explorer: resolve(rootDir, "explorer/index.html"),
+				terrainHarness: resolve(rootDir, "harness/terrain/index.html"),
 			},
 		},
 	},

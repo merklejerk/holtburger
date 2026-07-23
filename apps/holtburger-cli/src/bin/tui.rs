@@ -5,7 +5,6 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use directories::ProjectDirs;
 use holtburger_cli::pages;
 use holtburger_cli::state::{AppState, NetStats, QueuedScriptStartup};
 use holtburger_cli::types::{AppEvent, ChatMessageTags, Page, RedrawPriority, UpdateResult};
@@ -539,17 +538,10 @@ fn finalize_bootstrap_outcome(
     }
 }
 
-async fn bootstrap_once(
-    args: &Args,
-    host: &str,
-    port: u16,
-    dats_path: &std::path::Path,
-) -> Result<BootstrapOutcome> {
-    let content = Arc::new(if dats_path.is_dir() {
-        ContentRepository::from_hba_dir(dats_path)?
-    } else {
-        ContentRepository::from_hba_path(dats_path)?
-    });
+async fn bootstrap_once(args: &Args, host: &str, port: u16) -> Result<BootstrapOutcome> {
+    let content = Arc::new(ContentRepository::discover(
+        args.dats.clone().map(std::path::PathBuf::from),
+    )?);
     let mut builder = ClientRuntimeBuilder::new(args.account.clone())
         .server(host.to_string(), port)
         .spatial_physics(Arc::new(BasicSpatialPhysics));
@@ -652,7 +644,6 @@ async fn bootstrap_client(
     args: &Args,
     host: &str,
     port: u16,
-    dats_path: &std::path::Path,
     local_log_rx: &mut mpsc::UnboundedReceiver<CapturedLog>,
 ) -> Result<BootstrappedClient> {
     let mut attempt = 1usize;
@@ -660,7 +651,7 @@ async fn bootstrap_client(
     loop {
         println!("Initializing HoltBurger client (parsing DAT files & connecting)...");
 
-        match bootstrap_once(args, host, port, dats_path).await? {
+        match bootstrap_once(args, host, port).await? {
             BootstrapOutcome::Ready(ready) => return Ok(ready),
             BootstrapOutcome::Retry { message } => {
                 eprintln!(
@@ -710,25 +701,6 @@ async fn run() -> Result<()> {
     } else {
         (args.host.clone(), args.port)
     };
-
-    let dats_path = args
-        .dats
-        .clone()
-        .or_else(|| std::env::var("HOLTBURGER_DATS").ok())
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            // Priority:
-            // 1. Current directory ./dats (typical for portable/zip installs)
-            // 2. Standard project data directory (typical for system installs)
-            let local_dats = std::path::PathBuf::from("./dats");
-            if local_dats.exists() {
-                return local_dats;
-            }
-
-            ProjectDirs::from("io.github", "merklejerk", "holtburger")
-                .map(|dirs| dirs.data_dir().join("dats"))
-                .unwrap_or_else(|| local_dats)
-        });
 
     let (local_log_tx, mut local_log_rx) = mpsc::unbounded_channel::<CapturedLog>();
 
@@ -780,7 +752,7 @@ async fn run() -> Result<()> {
         content,
         spell_catalog,
         skill_table,
-    } = match bootstrap_client(&args, &host, port, &dats_path, &mut local_log_rx).await {
+    } = match bootstrap_client(&args, &host, port, &mut local_log_rx).await {
         Ok(ready) => ready,
         Err(e) => {
             eprintln!("Failed to initialize client: {}", e);

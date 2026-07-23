@@ -7,11 +7,11 @@ use anyhow::{Context, Result, anyhow};
 use futures::future::{BoxFuture, FutureExt, Shared};
 use holtburger_content::{
     ContentDecodeCache, ContentRepository, EnvCellAsset, EnvCellAssetAssembler,
-    LandblockSceneLodAsset, LandblockSceneLodAssetAssembler, LandblockSceneLodContext,
-    LandblockSceneLodLayer, LandblockSceneLodLevel, LandblockSceneLodRequest,
-    MaterialAppearanceInput, ResolvedMaterialRecipe, ResolvedRegionRenderProfile,
-    ResolvedSetupAppearance, ResolvedSurfaceTexture, ResolvedTerrainMaterialTable,
-    normalize_landblock_id,
+    LandblockSceneLodAsset, LandblockSceneLodAssetAssembler, LandblockSceneLodLayer,
+    LandblockSceneLodLevel, LandblockSceneLodRequest, MaterialAppearanceInput,
+    ResolvedMaterialRecipe, ResolvedRegionRenderProfile, ResolvedSetupAppearance,
+    ResolvedSurfaceTexture, ResolvedSurfaceTexturePixels, ResolvedTerrainMaterialTable,
+    TexturePixelFormat, normalize_landblock_id,
 };
 use holtburger_dat::file_type::{Animation, GfxObj, Palette, RenderSurface, SetupModel};
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
@@ -32,6 +32,7 @@ pub enum ContentAssetRequest {
     MaterialRecipe(u32),
     SetupAppearance(SetupAppearanceRequest),
     SurfaceTexture(u32),
+    SurfaceTexturePixels(SurfaceTexturePixelsRequest),
     RenderSurface(u32),
     Palette(u32),
 }
@@ -40,6 +41,15 @@ pub enum ContentAssetRequest {
 pub struct SetupAppearanceRequest {
     pub setup_model_id: u32,
     pub appearance: MaterialAppearanceInput,
+}
+
+/// A normalized, level-zero pixel request for one source `SurfaceTexture`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SurfaceTexturePixelsRequest {
+    /// DAT `SurfaceTexture` identity selected by a material or terrain composition.
+    pub surface_texture_id: u32,
+    /// Required output channels after DAT source-format normalization.
+    pub output_format: TexturePixelFormat,
 }
 
 impl SetupAppearanceRequest {
@@ -71,6 +81,7 @@ pub enum ContentAsset {
     MaterialRecipe(Box<ResolvedMaterialRecipe>),
     SetupAppearance(Box<ResolvedSetupAppearance>),
     SurfaceTexture(Box<ResolvedSurfaceTexture>),
+    SurfaceTexturePixels(Box<ResolvedSurfaceTexturePixels>),
     RenderSurface(Box<RenderSurface>),
     Palette(Box<Palette>),
 }
@@ -195,6 +206,21 @@ impl ContentAssetService {
                         })?,
                 )))
             }
+            ContentAssetRequest::SurfaceTexturePixels(request) => {
+                Ok(ContentAsset::SurfaceTexturePixels(Box::new(
+                    self.content
+                        .resolve_surface_texture_pixels(
+                            request.surface_texture_id,
+                            request.output_format,
+                        )
+                        .with_context(|| {
+                            format!(
+                                "Could not prepare SurfaceTexture 0x{:08X} as {:?}",
+                                request.surface_texture_id, request.output_format
+                            )
+                        })?,
+                )))
+            }
             ContentAssetRequest::RenderSurface(render_surface_id) => {
                 let resource = self
                     .content
@@ -261,14 +287,12 @@ impl ContentAssetService {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct LandblockSceneLodCacheKey {
     landblock_id: u32,
-    context: LandblockSceneLodContext,
 }
 
 impl LandblockSceneLodCacheKey {
     fn from_request(request: LandblockSceneLodRequest) -> Self {
         Self {
             landblock_id: normalize_landblock_id(request.landblock_id),
-            context: request.context,
         }
     }
 }
@@ -330,7 +354,6 @@ fn project_landblock_scene_lod_asset(
     LandblockSceneLodAsset {
         landblock_id: asset.landblock_id,
         level,
-        context: asset.context,
         layers: asset
             .layers
             .iter()

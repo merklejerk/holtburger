@@ -91,21 +91,22 @@ describe("terrain types", () => {
 	it.each([
 		["0x1111ffff", "viewer-block"],
 		["0x1211ffff", "east"],
-		["0x1210ffff", "northeast"],
+		["0x1210ffff", "southeast"],
 		["0x1312ffff", "east"],
-		["0x1213ffff", "south"],
-		["0x1313ffff", "southeast"],
+		["0x1213ffff", "north"],
+		["0x1313ffff", "northeast"],
+		["0x110fffff", "south"],
 		["0x1411ffff", "viewer-block"],
 		["0x1512ffff", "east"],
-		["0x1415ffff", "south"],
-		["0x1515ffff", "southeast"],
+		["0x1415ffff", "north"],
+		["0x1515ffff", "northeast"],
 		["0x1611ffff", "viewer-block"],
 	] as const)(
 		"matches retail's transition ring for %s",
 		(landblockId, transitionDirection) => {
-			expect(
-				selectTerrainTransitionDirection(landblockId, "0x1111ffff"),
-			).toBe(transitionDirection);
+			expect(selectTerrainTransitionDirection(landblockId, "0x1111ffff")).toBe(
+				transitionDirection,
+			);
 		},
 	);
 });

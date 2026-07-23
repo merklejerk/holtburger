@@ -41,15 +41,3 @@ export interface StaticInstanceStreamSource {
 	/** Immutable cohort payload. */
 	readonly data: StaticInstanceStreamData;
 }
-
-/** Allocate an installation namespace before static worker dispatch. */
-export function createStaticInstallResourceNamespace(
-	installationId: number,
-): StaticInstallResourceNamespace {
-	if (!Number.isSafeInteger(installationId) || installationId < 0) {
-		throw new Error(
-			"Static installation id must be a non-negative safe integer.",
-		);
-	}
-	return `static-install:${installationId}`;
-}

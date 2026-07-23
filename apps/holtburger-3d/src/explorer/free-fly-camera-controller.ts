@@ -1,10 +1,6 @@
 import { createCameraAxesRadians } from "../lib/game/math/camera-orientation";
 import { Vec3 } from "../lib/game/math/types";
-import {
-	clamp,
-	normalizeVec3,
-	scaleVec3,
-} from "../lib/game/math/vector-utils";
+import { clamp, normalizeVec3, scaleVec3 } from "../lib/game/math/vector-utils";
 
 type DragMode = "pan" | "rotate";
 type MovementKey =

@@ -1,72 +1,18 @@
 import type { LandblockTerrainSource } from "../../assets/landblock-terrain-source";
-import type { DatAssetId } from "../game-types";
-import type {
-	ResolvedEnvCellLayerSource,
-	ResolvedLandblockLayerSource,
-	ResolvedObjectLayerSource,
-	ResolvedTerrainLayerSource,
-} from "../resolution/landblock-layer";
+import type { ResolvedTerrainLayerSource } from "../resolution/landblock-layer";
 import {
 	LandblockLayerKind,
 	type LandblockIdLayer,
 } from "../runtime/scene-interest";
-import type { TexturePlacement } from "../textures/texture-manager";
-import type { AssetTextureKey } from "../textures/types";
 import {
 	CommitBundleSourceKind,
 	type CommitBundle,
 	type CommitPipeline,
-	type StaticObjectLayerCommit,
-	type EnvCellLayerCommit,
 	type StaticLandblockLayerCommitTerrain,
-	type TexturePageCommit,
 } from "./types";
-import {
-	createStaticInstallResourceNamespace,
-	type StaticInstallResourceNamespace,
-} from "../systems/static-resources";
-import type { StaticObjectInstallSet } from "../systems/static-object-system";
-
-/** One source texture assigned a stable page key and placement. */
-interface PlannedTexturePlacement {
-	readonly sourceAssetId: DatAssetId;
-	readonly textureKey: AssetTextureKey;
-	readonly placement: TexturePlacement;
-}
-
-/** Texture placement work consumed by static bakers and atlas-page assembly. */
-interface TexturePlacementPlan {
-	readonly textures: readonly PlannedTexturePlacement[];
-}
-
-/** Baked renderer payload discriminated by its source layer. */
-type BakedStaticLayer =
-	| {
-			readonly kind: LandblockLayerKind.Buildings;
-			readonly installSet: Omit<StaticObjectInstallSet, "texturePages">;
-	  }
-	| {
-			readonly kind: LandblockLayerKind.Objects;
-			readonly installSet: Omit<StaticObjectInstallSet, "texturePages">;
-	  }
-	| {
-			readonly kind: LandblockLayerKind.Generated;
-			readonly installSet: Omit<StaticObjectInstallSet, "texturePages">;
-	  }
-	| {
-			readonly kind: LandblockLayerKind.EnvCells;
-			readonly installSet: Omit<StaticObjectInstallSet, "texturePages">;
-			readonly environment: EnvCellLayerCommit["environment"];
-	  };
-
-/** Texture pages prepared alongside one layer commit. */
-interface PreparedTexturePages {
-	readonly pages: readonly TexturePageCommit[];
-}
 
 export class StandardCommitPipeline implements CommitPipeline {
 	readonly #terrainSource: LandblockTerrainSource;
-	#nextStaticInstallationId = 0;
 
 	protected constructor(terrainSource: LandblockTerrainSource) {
 		this.#terrainSource = terrainSource;
@@ -99,7 +45,10 @@ export class StandardCommitPipeline implements CommitPipeline {
 		}
 		const source = await this.#terrainSource.loadTerrainSource(layer.id);
 		if (source === null) return null;
-		if (source.kind !== LandblockLayerKind.Terrain || source.landblockId !== layer.id) {
+		if (
+			source.kind !== LandblockLayerKind.Terrain ||
+			source.landblockId !== layer.id
+		) {
 			throw new Error(
 				`Loaded ${source.landblockId}/${source.kind} for ${describeLayer(layer)}.`,
 			);
@@ -117,27 +66,6 @@ export class StandardCommitPipeline implements CommitPipeline {
 		};
 	}
 
-	async #prepareStaticLayer(
-		source: ResolvedObjectLayerSource | ResolvedEnvCellLayerSource,
-	): Promise<CommitBundle> {
-		const texturePlan = await this.#planTexturePlacement(source);
-		const resourceNamespace = this.#allocateStaticInstallResourceNamespace();
-		const [baked, texturePages] = await Promise.all([
-			this.#bakeStaticLayer(source, texturePlan, resourceNamespace),
-			this.#buildTexturePages(texturePlan),
-		]);
-
-		return this.#assembleStaticCommitBundle(source, baked, texturePages);
-	}
-
-	async #planTexturePlacement(
-		source: ResolvedLandblockLayerSource,
-	): Promise<TexturePlacementPlan> {
-		// Discover texture intents from resolved materials, then reserve atlas slots.
-		void source;
-		throw new Error("Texture placement planning is not implemented.");
-	}
-
 	#createTerrainSourceCommit(
 		source: ResolvedTerrainLayerSource,
 	): StaticLandblockLayerCommitTerrain {
@@ -145,79 +73,6 @@ export class StandardCommitPipeline implements CommitPipeline {
 			generation: source.generation,
 			presentation: source.presentation,
 		};
-	}
-
-	async #bakeStaticLayer(
-		source: ResolvedObjectLayerSource | ResolvedEnvCellLayerSource,
-		texturePlan: TexturePlacementPlan,
-		resourceNamespace: StaticInstallResourceNamespace,
-	): Promise<BakedStaticLayer> {
-		// Dispatch to object, instanced-scenery, building, or env-cell bakers.
-		void source;
-		void texturePlan;
-		void resourceNamespace;
-		throw new Error("Static layer baking is not implemented.");
-	}
-
-	async #buildTexturePages(
-		texturePlan: TexturePlacementPlan,
-	): Promise<PreparedTexturePages> {
-		// Resolve source pixels and build pages for the reserved placements.
-		void texturePlan;
-		throw new Error("Texture page preparation is not implemented.");
-	}
-
-	#assembleStaticCommitBundle(
-		source: ResolvedObjectLayerSource | ResolvedEnvCellLayerSource,
-		baked: BakedStaticLayer,
-		texturePages: PreparedTexturePages,
-	): CommitBundle {
-		if (source.kind !== baked.kind) {
-			throw new Error(
-				`Baked ${baked.kind} payload for ${source.landblockId}/${source.kind}.`,
-			);
-		}
-
-		const fields = {
-			dynamicEntities: source.dynamicResidents,
-			kind: CommitBundleSourceKind.LandblockLayer as const,
-			landblockId: source.landblockId,
-		};
-		switch (baked.kind) {
-			case LandblockLayerKind.EnvCells:
-				return {
-					...fields,
-					commit: {
-						environment: baked.environment,
-						staticObjects: {
-							...baked.installSet,
-							texturePages: texturePages.pages,
-						},
-					} satisfies EnvCellLayerCommit,
-					layer: baked.kind,
-				};
-			case LandblockLayerKind.Buildings:
-			case LandblockLayerKind.Objects:
-			case LandblockLayerKind.Generated:
-				return {
-					...fields,
-					commit: {
-						staticObjects: {
-							...baked.installSet,
-							texturePages: texturePages.pages,
-						},
-					} satisfies StaticObjectLayerCommit,
-					layer: baked.kind,
-				};
-		}
-	}
-
-	#allocateStaticInstallResourceNamespace(): StaticInstallResourceNamespace {
-		const namespace = createStaticInstallResourceNamespace(
-			this.#nextStaticInstallationId,
-		);
-		this.#nextStaticInstallationId += 1;
-		return namespace;
 	}
 }
 

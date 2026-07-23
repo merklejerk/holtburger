@@ -3,5 +3,7 @@ import type { ResolvedTerrainLayerSource } from "../game/resolution/landblock-la
 
 /** Narrow host capability for immutable authored terrain facts of one outdoor landblock. */
 export interface LandblockTerrainSource {
-	loadTerrainSource(landblockId: LandblockId): Promise<ResolvedTerrainLayerSource | null>;
+	loadTerrainSource(
+		landblockId: LandblockId,
+	): Promise<ResolvedTerrainLayerSource | null>;
 }

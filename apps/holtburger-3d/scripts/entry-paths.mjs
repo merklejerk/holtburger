@@ -23,13 +23,19 @@ export function buildEntryPath(basePath, args) {
 		}
 
 		if (!arg.startsWith("--")) {
-			throw new Error(`Unsupported positional argument "${arg}". Use --name=value.`);
+			throw new Error(
+				`Unsupported positional argument "${arg}". Use --name=value.`,
+			);
 		}
 
 		const withoutPrefix = arg.slice(2);
 		const separatorIndex = withoutPrefix.indexOf("=");
-		const key = separatorIndex === -1 ? withoutPrefix : withoutPrefix.slice(0, separatorIndex);
-		const value = separatorIndex === -1 ? "true" : withoutPrefix.slice(separatorIndex + 1);
+		const key =
+			separatorIndex === -1
+				? withoutPrefix
+				: withoutPrefix.slice(0, separatorIndex);
+		const value =
+			separatorIndex === -1 ? "true" : withoutPrefix.slice(separatorIndex + 1);
 
 		if (key.length === 0) {
 			throw new Error(`Invalid empty parameter in "${arg}".`);
@@ -48,11 +54,15 @@ export function requireEntry(value) {
 	}
 
 	const knownEntries = Object.keys(ENTRY_PATHS).join(", ");
-	throw new Error(`Unknown dev entry "${value ?? ""}". Expected one of: ${knownEntries}.`);
+	throw new Error(
+		`Unknown dev entry "${value ?? ""}". Expected one of: ${knownEntries}.`,
+	);
 }
 
 function appendQuery(params, query) {
-	const queryParams = new URLSearchParams(query.startsWith("?") ? query.slice(1) : query);
+	const queryParams = new URLSearchParams(
+		query.startsWith("?") ? query.slice(1) : query,
+	);
 
 	for (const [key, value] of queryParams.entries()) {
 		params.append(key, value);

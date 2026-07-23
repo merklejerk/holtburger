@@ -29,14 +29,6 @@ export function createTerrainGeometryKey(
 	return `terrain-geometry:${landblockId}` as TerrainGeometryKey;
 }
 
-/** Build one deterministic baked static-geometry identity. */
-export function createStaticGeometryKey(source: string): StaticGeometryKey {
-	if (source.length === 0) {
-		throw new Error("Static geometry source identity cannot be empty.");
-	}
-	return `static-source-geometry:${source}` as StaticGeometryKey;
-}
-
 /** Build a globally semantic object geometry identity from resolved source facts. */
 export function createObjectGeometryKey(source: string): ObjectGeometryKey {
 	if (source.length === 0) {

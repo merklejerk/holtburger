@@ -12,7 +12,10 @@ export interface CameraAxes {
 }
 
 /** Derive the legacy-compatible world-space axes for yaw and pitch in radians. */
-export function createCameraAxesRadians(yaw: number, pitch: number): CameraAxes {
+export function createCameraAxesRadians(
+	yaw: number,
+	pitch: number,
+): CameraAxes {
 	assertFiniteCameraAngles(yaw, pitch);
 	const cosPitch = Math.cos(pitch);
 	const forward = normalizeVec3(

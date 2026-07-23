@@ -84,7 +84,10 @@ function terrainResponse(
 		readonly colorTextureId?: string;
 		readonly heights?: readonly number[];
 		readonly landblockId?: string;
-		readonly terrain?: { readonly gridSize: number; readonly tileSize: number } | null;
+		readonly terrain?: {
+			readonly gridSize: number;
+			readonly tileSize: number;
+		} | null;
 		readonly terrainAvailability?:
 			| "available"
 			| "missing-cell-landblock"
@@ -142,7 +145,10 @@ function terrainResponse(
 					scalarType: "u16",
 				},
 			],
-			terrain: options.terrain === undefined ? { gridSize: 3, tileSize: 24 } : options.terrain,
+			terrain:
+				options.terrain === undefined
+					? { gridSize: 3, tileSize: 24 }
+					: options.terrain,
 			terrainAvailability:
 				options.terrainAvailability ??
 				(options.terrain === null ? "missing-cell-landblock" : "available"),

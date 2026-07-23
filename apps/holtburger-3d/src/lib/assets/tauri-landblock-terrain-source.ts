@@ -25,7 +25,10 @@ export class TauriLandblockTerrainSource implements LandblockTerrainSource {
 function asBinaryResponse(response: unknown): Uint8Array {
 	if (response instanceof Uint8Array) return response;
 	if (response instanceof ArrayBuffer) return new Uint8Array(response);
-	if (Array.isArray(response) && response.every((value) => Number.isInteger(value))) {
+	if (
+		Array.isArray(response) &&
+		response.every((value) => Number.isInteger(value))
+	) {
 		return Uint8Array.from(response);
 	}
 	throw new Error("Tauri returned a non-binary terrain source response.");

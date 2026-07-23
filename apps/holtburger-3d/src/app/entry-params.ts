@@ -5,7 +5,9 @@ export interface EntryParam {
 	readonly value: string;
 }
 
-export function readEntryParams(search = globalThis.location?.search ?? ""): readonly EntryParam[] {
+export function readEntryParams(
+	search = globalThis.location?.search ?? "",
+): readonly EntryParam[] {
 	const params = new URLSearchParams(search);
 
 	return Array.from(params.entries()).map(([key, value]) => ({ key, value }));

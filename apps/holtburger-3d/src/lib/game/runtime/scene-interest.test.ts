@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+	computeSceneInterest,
 	diffSceneInterest,
 	LandblockLayerKind,
 	type SceneInterestMap,
+	validateLoDConfigOrThrow,
 } from "./scene-interest";
 
 function sceneInterest(
@@ -88,5 +90,66 @@ describe("diffSceneInterest", () => {
 		expect([...to.entries()]).toEqual([
 			["0002", new Set([LandblockLayerKind.Objects])],
 		]);
+	});
+});
+
+describe("computeSceneInterest", () => {
+	it("supports terrain-only frontend interest", () => {
+		const interest = computeSceneInterest("0x1010ffff", {
+			buildingRadius: null,
+			envCellRadius: null,
+			explicitObjectRadius: null,
+			generatedObjectRadius: null,
+			terrainRadius: 1,
+		});
+
+		expect(interest).toHaveLength(9);
+		expect(
+			[...interest.values()].every(
+				(layers) => layers.size === 1 && layers.has(LandblockLayerKind.Terrain),
+			),
+		).toBe(true);
+	});
+
+	it("enables optional layers at their independent radii", () => {
+		const interest = computeSceneInterest("0x1010ffff", {
+			buildingRadius: 0,
+			envCellRadius: 1,
+			explicitObjectRadius: null,
+			generatedObjectRadius: null,
+			terrainRadius: 1,
+		});
+
+		expect(interest.get("0x1010ffff")).toEqual(
+			new Set([
+				LandblockLayerKind.Terrain,
+				LandblockLayerKind.Buildings,
+				LandblockLayerKind.EnvCells,
+			]),
+		);
+		expect(interest.get("0x0f0fffff")).toEqual(
+			new Set([LandblockLayerKind.Terrain, LandblockLayerKind.EnvCells]),
+		);
+	});
+
+	it("rejects fractional and out-of-range optional radii", () => {
+		expect(() =>
+			validateLoDConfigOrThrow({
+				buildingRadius: null,
+				envCellRadius: null,
+				explicitObjectRadius: null,
+				generatedObjectRadius: null,
+				terrainRadius: 0.5,
+			}),
+		).toThrow("Invalid scene config");
+		expect(() =>
+			validateLoDConfigOrThrow({
+				buildingRadius: 2,
+				envCellRadius: null,
+				explicitObjectRadius: null,
+				generatedObjectRadius: null,
+				terrainRadius: 1,
+			}),
+		).toThrow("Invalid scene config");
 	});
 });

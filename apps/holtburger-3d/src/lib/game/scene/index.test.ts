@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createLandblockWorldOrigin } from "../landblocks";
 import { createTranslationMat4, getMat4Translation } from "../math/matrices";
 import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
 import type { SceneNodeId, VisibleSceneEntry } from ".";
@@ -18,7 +19,7 @@ const camera = {
 
 const rootPlacement = {
 	envCellId: null,
-	landblockId: "0001",
+	landblockId: "0x0001ffff",
 	localTransform: Mat4.identity(),
 };
 
@@ -163,7 +164,7 @@ describe("SceneGraph", () => {
 		});
 		const envCellPlacement = {
 			envCellId: "cell-1",
-			landblockId: "0002",
+			landblockId: "0x0002ffff",
 			localTransform: createTranslationMat4(new Vec3(10, 20, 30)),
 		};
 
@@ -195,6 +196,66 @@ describe("SceneGraph", () => {
 				kind: "env-cell",
 				landblockId: envCellPlacement.landblockId,
 			},
+		});
+	});
+
+	it("resolves outdoor residency directly from a scene-space point", () => {
+		const scene = new SceneGraph();
+		const point = createLandblockWorldOrigin("0x0102ffff").add(
+			new Vec3(1, 20, -1),
+		);
+
+		expect(scene.queryWorldPointResidency(point)).toEqual({
+			envCellId: null,
+			landblockId: "0x0102ffff",
+		});
+		expect(scene.queryWorldPointResidency(new Vec3(-1, 20, -1))).toBeNull();
+	});
+
+	it("prefers one resident env-cell scope containing the scene-space point", () => {
+		const scene = new SceneGraph();
+		scene.upsertEnvCellScope({
+			landblockBounds: new AABB3(new Vec3(10, -5, -30), new Vec3(30, 15, -10)),
+			potentiallyVisibleEnvCellIds: new Set(),
+			scope: {
+				envCellId: "0x01020001",
+				kind: "env-cell",
+				landblockId: "0x0102ffff",
+			},
+		});
+		const point = createLandblockWorldOrigin("0x0102ffff").add(
+			new Vec3(10, 5, -30),
+		);
+
+		expect(scene.queryWorldPointResidency(point)).toEqual({
+			envCellId: "0x01020001",
+			landblockId: "0x0102ffff",
+		});
+	});
+
+	it("selects the first resident env-cell scope when bounds overlap", () => {
+		const scene = new SceneGraph();
+		for (const envCellId of ["0x01020001", "0x01020002"]) {
+			scene.upsertEnvCellScope({
+				landblockBounds: new AABB3(
+					new Vec3(10, -5, -30),
+					new Vec3(30, 15, -10),
+				),
+				potentiallyVisibleEnvCellIds: new Set(),
+				scope: {
+					envCellId,
+					kind: "env-cell",
+					landblockId: "0x0102ffff",
+				},
+			});
+		}
+		const point = createLandblockWorldOrigin("0x0102ffff").add(
+			new Vec3(10, 5, -30),
+		);
+
+		expect(scene.queryWorldPointResidency(point)).toEqual({
+			envCellId: "0x01020001",
+			landblockId: "0x0102ffff",
 		});
 	});
 

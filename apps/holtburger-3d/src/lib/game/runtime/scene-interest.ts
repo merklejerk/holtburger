@@ -22,15 +22,29 @@ export interface SceneInterestDiff {
 	evictedLayers: Set<LandblockIdLayer>;
 }
 
+/** Explicit frontend request for static content around one outdoor anchor. */
+export interface SceneInterestRequest {
+	/** Outdoor landblock around which requested layers are retained. */
+	readonly anchorLandblockId: LandblockId;
+	/** Complete enabled-layer and radius policy for this request. */
+	readonly lod: LoDConfig;
+}
+
 /** Reject a scene-interest radius configuration that cannot produce coherent layers. */
 export function validateLoDConfigOrThrow(cfg: LoDConfig): void {
-	const { landblockRadius } = cfg;
+	const optionalRadii = [
+		cfg.buildingRadius,
+		cfg.explicitObjectRadius,
+		cfg.generatedObjectRadius,
+		cfg.envCellRadius,
+	];
 	if (
-		landblockRadius <= 0 ||
-		cfg.buildingRadius > landblockRadius ||
-		cfg.explicitObjectRadius > landblockRadius ||
-		cfg.generatedObjectRadius > landblockRadius ||
-		cfg.envCellRadius > landblockRadius
+		!isValidRadius(cfg.terrainRadius) ||
+		optionalRadii.some(
+			(radius) =>
+				radius !== null &&
+				(!isValidRadius(radius) || radius > cfg.terrainRadius),
+		)
 	) {
 		throw new Error("Invalid scene config.");
 	}
@@ -45,25 +59,31 @@ export function computeSceneInterest(
 	const suffix = landblockIdSuffix(anchorLandblockId);
 	const interest: SceneInterestMap = new Map();
 	for (
-		let y = anchor.y - config.landblockRadius;
-		y <= anchor.y + config.landblockRadius;
+		let y = anchor.y - config.terrainRadius;
+		y <= anchor.y + config.terrainRadius;
 		y += 1
 	) {
 		for (
-			let x = anchor.x - config.landblockRadius;
-			x <= anchor.x + config.landblockRadius;
+			let x = anchor.x - config.terrainRadius;
+			x <= anchor.x + config.terrainRadius;
 			x += 1
 		) {
 			if (x < 0 || x > 0xff || y < 0 || y > 0xff) continue;
 			const distance = Math.max(Math.abs(x - anchor.x), Math.abs(y - anchor.y));
 			const layers = new Set<LandblockLayerKind>([LandblockLayerKind.Terrain]);
-			if (distance <= config.buildingRadius)
+			if (config.buildingRadius !== null && distance <= config.buildingRadius)
 				layers.add(LandblockLayerKind.Buildings);
-			if (distance <= config.explicitObjectRadius)
+			if (
+				config.explicitObjectRadius !== null &&
+				distance <= config.explicitObjectRadius
+			)
 				layers.add(LandblockLayerKind.Objects);
-			if (distance <= config.generatedObjectRadius)
+			if (
+				config.generatedObjectRadius !== null &&
+				distance <= config.generatedObjectRadius
+			)
 				layers.add(LandblockLayerKind.Generated);
-			if (distance <= config.envCellRadius)
+			if (config.envCellRadius !== null && distance <= config.envCellRadius)
 				layers.add(LandblockLayerKind.EnvCells);
 			interest.set(createLandblockId(x, y, suffix), layers);
 		}
@@ -97,6 +117,10 @@ function subtractSceneInterest(
 	}
 
 	return new Set(difference);
+}
+
+function isValidRadius(radius: number): boolean {
+	return Number.isInteger(radius) && radius >= 0;
 }
 
 function landblockIdSuffix(landblockId: LandblockId): string {

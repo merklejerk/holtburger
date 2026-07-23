@@ -2,16 +2,21 @@ import type { Quat, Vec3 } from "../math/types";
 import type { SceneResidency } from "../scene";
 
 export interface LoDConfig {
-	landblockRadius: number;
-	buildingRadius: number;
-	explicitObjectRadius: number;
-	generatedObjectRadius: number;
-	envCellRadius: number;
+	/** Outdoor terrain radius; terrain is always enabled for an active interest. */
+	terrainRadius: number;
+	/** Outdoor-building radius, or null when the layer is disabled. */
+	buildingRadius: number | null;
+	/** Explicit outdoor-object radius, or null when the layer is disabled. */
+	explicitObjectRadius: number | null;
+	/** Generated-scenery radius, or null when the layer is disabled. */
+	generatedObjectRadius: number | null;
+	/** Environment-cell radius, or null when the layer is disabled. */
+	envCellRadius: number | null;
 }
 
 /** Camera pose and authoritative scene residency. */
 export interface CameraPlacement extends SceneResidency {
-	/** Camera position expressed in its resident landblock coordinate frame. */
+	/** Camera position expressed in canonical scene/world space. */
 	readonly position: Vec3;
 	/** Camera-to-landblock orientation. */
 	readonly rotation: Quat;

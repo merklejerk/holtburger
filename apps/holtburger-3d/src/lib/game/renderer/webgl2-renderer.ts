@@ -1,4 +1,7 @@
-import { createLandblockOffset } from "../landblocks";
+import {
+	createLandblockOffset,
+	createLandblockWorldOrigin,
+} from "../landblocks";
 import {
 	createPerspectiveMat4,
 	createViewMat4,
@@ -116,11 +119,12 @@ export class WebGL2Renderer implements Renderer {
 		input: FrameViewInput,
 	): PreparedView {
 		const camera = input.camera;
-		const cameraOffset = createLandblockOffset(
-			camera.placement.landblockId,
-			anchorLandblockId,
+		const anchorOrigin = createLandblockWorldOrigin(anchorLandblockId);
+		const cameraPosition = new Vec3(
+			camera.placement.position.x - anchorOrigin.x,
+			camera.placement.position.y - anchorOrigin.y,
+			camera.placement.position.z - anchorOrigin.z,
 		);
-		const cameraPosition = cameraOffset.add(camera.placement.position);
 		const aspectRatio = this.#frameWidth / Math.max(1, this.#frameHeight);
 		return {
 			anchorLandblockId,

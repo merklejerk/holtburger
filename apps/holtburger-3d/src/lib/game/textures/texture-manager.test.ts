@@ -170,7 +170,10 @@ describe("TextureManager", () => {
 
 	it("keeps independently reserved generated textures after an asset retain fails", async () => {
 		const resources = new FakeRendererResourceManager();
-		const textures = createTextureManager(resources, new RejectingTexturePreparer());
+		const textures = createTextureManager(
+			resources,
+			new RejectingTexturePreparer(),
+		);
 		const key = createTerrainSurfaceTextureKey("0x1111ffff", 1);
 		textures.reserveKeys("terrain:a", [key]);
 		textures.upsertGeneratedTextures([
@@ -259,10 +262,11 @@ class FixtureTexturePreparer implements TexturePreparer {
 }
 
 class DeferredTexturePreparer implements TexturePreparer {
-	#resolve: ((source: Awaited<ReturnType<FixtureTexturePreparer["prepare"]>>) => void) | null =
-		null;
+	#resolve:
+		| ((source: Awaited<ReturnType<FixtureTexturePreparer["prepare"]>>) => void)
+		| null = null;
 
-	prepare(fact: TextureFact) {
+	prepare() {
 		return new Promise<Awaited<ReturnType<FixtureTexturePreparer["prepare"]>>>(
 			(resolve) => {
 				this.#resolve = resolve;

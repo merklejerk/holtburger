@@ -1,5 +1,25 @@
 {
 	"$schema": "https://unpkg.com/knip@6/schema.json",
-	"entry": ["src/client/main.ts", "src/explorer/main.ts"],
-	"ignoreDependencies": ["@tauri-apps/api", "@types/rbush", "rbush", "zod"]
+	"entry": [
+		"src/client/main.ts",
+		"src/explorer/main.ts",
+		"src/harness/terrain/main.ts"
+	],
+	"ignoreDependencies": ["@types/rbush", "rbush", "zod"],
+	"ignoreIssues": {
+		"src/lib/game/commit/types.ts": ["types"],
+		"src/lib/game/geometry/types.ts": ["types"],
+		"src/lib/game/renderer/geometry.ts": ["types"],
+		"src/lib/game/renderer/terrain-program-input.ts": ["types"],
+		"src/lib/game/resolution/landblock-layer.ts": ["types"],
+		"src/lib/game/resolution/presentation.ts": ["types"],
+		"src/lib/game/runtime/types.ts": ["types"],
+		"src/lib/game/systems/components.ts": ["types"],
+		"src/lib/game/systems/env-cell-system.ts": ["types"],
+		"src/lib/game/systems/static-object-system.ts": ["types"],
+		"src/lib/game/systems/static-resources.ts": ["types"],
+		"src/lib/game/terrain/types.ts": ["types"],
+		"src/lib/game/textures/texture-manager.ts": ["types"],
+		"src/lib/game/textures/types.ts": ["types", "enumMembers"]
+	}
 }

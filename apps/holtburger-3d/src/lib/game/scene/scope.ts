@@ -5,7 +5,6 @@ export function scopeFor(
 	landblockId: LandblockId,
 	envCellId: EnvCellId | null,
 ): SceneScope {
-
 	return envCellId === null
 		? { kind: "outdoor", landblockId }
 		: { kind: "env-cell", landblockId, envCellId };

@@ -209,7 +209,10 @@ export class WebGL2Renderer implements Renderer {
 			false,
 			mat4ToFloat32Array(view.view),
 		);
-		gl.uniform1f(this.#terrainProgram.uniforms.detailFadeNear, DETAIL_FADE_NEAR);
+		gl.uniform1f(
+			this.#terrainProgram.uniforms.detailFadeNear,
+			DETAIL_FADE_NEAR,
+		);
 		gl.uniform1f(this.#terrainProgram.uniforms.detailFadeFar, DETAIL_FADE_FAR);
 		for (const terrain of view.terrain) {
 			const landblockOffset = createLandblockOffset(
@@ -229,19 +232,49 @@ export class WebGL2Renderer implements Renderer {
 
 	#bindTerrainResources(input: TerrainFrameInput): void {
 		const { textures } = input.program;
-		const surfaceField = this.#resources.getTexture2D(input.program.surfaceField);
+		const surfaceField = this.#resources.getTexture2D(
+			input.program.surfaceField,
+		);
 		const composition = this.#resources.getTexture2D(input.program.composition);
 		const colors = this.#resources.getTextureArray(textures.colors.resource);
-		const blendMasks = this.#resources.getTextureArray(textures.blendMasks.resource);
-		const roadMasks = this.#resources.getTextureArray(textures.roadMasks.resource);
+		const blendMasks = this.#resources.getTextureArray(
+			textures.blendMasks.resource,
+		);
+		const roadMasks = this.#resources.getTextureArray(
+			textures.roadMasks.resource,
+		);
 		const detail = this.#resources.getTexture2D(textures.detail);
 		const gl = this.#gl;
-		this.#bindTexture2D(0, surfaceField.texture, this.#terrainProgram.uniforms.surfaceField);
-		this.#bindTexture2D(1, composition.texture, this.#terrainProgram.uniforms.composition);
-		this.#bindTextureArray(2, colors.texture, this.#terrainProgram.uniforms.colors);
-		this.#bindTextureArray(3, blendMasks.texture, this.#terrainProgram.uniforms.blendMasks);
-		this.#bindTextureArray(4, roadMasks.texture, this.#terrainProgram.uniforms.roadMasks);
-		this.#bindTexture2D(5, detail.texture, this.#terrainProgram.uniforms.detail);
+		this.#bindTexture2D(
+			0,
+			surfaceField.texture,
+			this.#terrainProgram.uniforms.surfaceField,
+		);
+		this.#bindTexture2D(
+			1,
+			composition.texture,
+			this.#terrainProgram.uniforms.composition,
+		);
+		this.#bindTextureArray(
+			2,
+			colors.texture,
+			this.#terrainProgram.uniforms.colors,
+		);
+		this.#bindTextureArray(
+			3,
+			blendMasks.texture,
+			this.#terrainProgram.uniforms.blendMasks,
+		);
+		this.#bindTextureArray(
+			4,
+			roadMasks.texture,
+			this.#terrainProgram.uniforms.roadMasks,
+		);
+		this.#bindTexture2D(
+			5,
+			detail.texture,
+			this.#terrainProgram.uniforms.detail,
+		);
 		gl.activeTexture(gl.TEXTURE0);
 	}
 

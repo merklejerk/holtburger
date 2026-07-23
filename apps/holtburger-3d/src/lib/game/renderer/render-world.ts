@@ -148,7 +148,9 @@ export class RenderWorld {
 
 	resolveDynamicRenderable(
 		renderable: DynamicEntityRenderable,
-	): readonly ResolvedGeometryDrawUnit<DynamicEntityRenderable["parts"][number]>[] {
+	): readonly ResolvedGeometryDrawUnit<
+		DynamicEntityRenderable["parts"][number]
+	>[] {
 		return renderable.parts.map((drawUnit) => ({
 			drawUnit,
 			geometry: this.resolveGeometry(drawUnit.geometry),
@@ -157,7 +159,9 @@ export class RenderWorld {
 
 	resolveEnvCellRenderable(
 		renderable: EnvCellRenderable,
-	): readonly ResolvedGeometryDrawUnit<EnvCellRenderable["drawUnits"][number]>[] {
+	): readonly ResolvedGeometryDrawUnit<
+		EnvCellRenderable["drawUnits"][number]
+	>[] {
 		return renderable.drawUnits.map((drawUnit) => ({
 			drawUnit,
 			geometry: this.resolveGeometry(drawUnit.geometry),

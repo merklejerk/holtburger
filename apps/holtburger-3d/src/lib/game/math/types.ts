@@ -30,38 +30,6 @@ export class Vec3 {
 	}
 }
 
-export class Vec4 {
-	constructor(
-		public x: number,
-		public y: number,
-		public z: number,
-		public w: number,
-	) {}
-	static zero(): Vec4 {
-		return new Vec4(0, 0, 0, 0);
-	}
-}
-
-export class Mat3 {
-	constructor(
-		public m11: number,
-		public m12: number,
-		public m13: number,
-		public m21: number,
-		public m22: number,
-		public m23: number,
-		public m31: number,
-		public m32: number,
-		public m33: number,
-	) {}
-	static zero(): Mat3 {
-		return new Mat3(0, 0, 0, 0, 0, 0, 0, 0, 0);
-	}
-	static identity(): Mat3 {
-		return new Mat3(1, 0, 0, 0, 1, 0, 0, 0, 1);
-	}
-}
-
 export class Mat4 {
 	constructor(
 		public m11: number,

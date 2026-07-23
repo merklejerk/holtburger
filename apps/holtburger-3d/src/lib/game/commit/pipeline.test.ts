@@ -11,7 +11,9 @@ import { StandardCommitPipeline } from "./pipeline";
 describe("StandardCommitPipeline", () => {
 	it("commits terrain facts without preparing pixels or generated geometry", async () => {
 		const source = createTerrainSource("0x0001ffff");
-	const assets = new FakeTerrainSource(new Map([[source.landblockId, source]]));
+		const assets = new FakeTerrainSource(
+			new Map([[source.landblockId, source]]),
+		);
 		const pipeline = await StandardCommitPipeline.build(assets);
 
 		const [bundle] = await pipeline.prepareLandblockLayers(

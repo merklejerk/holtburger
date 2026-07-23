@@ -17,7 +17,15 @@ try {
 
 console.info(`Launching ${entryName} Vite entry at ${openPath}`);
 
-const viteArgs = ["--host", "127.0.0.1", "--port", "1420", "--strictPort", "--open", openPath];
+const viteArgs = [
+	"--host",
+	"127.0.0.1",
+	"--port",
+	"1420",
+	"--strictPort",
+	"--open",
+	openPath,
+];
 const child = spawn("vite", viteArgs, {
 	stdio: "inherit",
 	shell: process.platform === "win32",

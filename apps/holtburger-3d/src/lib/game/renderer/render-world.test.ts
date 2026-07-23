@@ -31,7 +31,8 @@ const CAMERA = {
 const VISIBLE_SCENE = { entries: [] } as const satisfies VisibleScene;
 const TERRAIN = {} as TerrainDrawUnit;
 const GEOMETRY = "geometry-resource:1" as GeometryResourceKey;
-const INSTANCE_STREAM = "instance-stream-resource:1" as InstanceStreamResourceKey;
+const INSTANCE_STREAM =
+	"instance-stream-resource:1" as InstanceStreamResourceKey;
 const TEXTURE_2D = "texture-2d-resource:1" as Texture2DResourceKey;
 const ARRAY = {
 	layersByAssetId: new Map(),

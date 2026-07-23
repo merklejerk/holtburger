@@ -232,16 +232,15 @@ function createGenerationResult(): TerrainGenerationResult {
 			bounds: new AABB3(Vec3.zero(), Vec3.zero()),
 			indexCount: 3,
 			indexStart:
-				(STRIDES.indexOf(stride) * TRANSITION_DIRECTIONS.length + directionIndex) *
+				(STRIDES.indexOf(stride) * TRANSITION_DIRECTIONS.length +
+					directionIndex) *
 				3,
 			variant: { stride, transitionDirection },
 		})),
 	);
 	return {
 		geometry: {
-			indices: new Uint16Array(
-				variants.flatMap(() => [0, 1, 2]),
-			),
+			indices: new Uint16Array(variants.flatMap(() => [0, 1, 2])),
 			kind: "terrain",
 			normals: new Float32Array(9),
 			positions: new Float32Array(9),

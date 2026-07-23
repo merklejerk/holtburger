@@ -134,7 +134,7 @@ export function selectRoadAlphaMap(
 }
 
 /** Match retail's unsigned pcode hash used to select a variation from an ordered map list. */
-export function terrainVariationIndex(pcode: number, count: number): number {
+function terrainVariationIndex(pcode: number, count: number): number {
 	if (!Number.isInteger(count) || count <= 0) {
 		throw new Error(
 			"Terrain variation selection requires a positive map count.",

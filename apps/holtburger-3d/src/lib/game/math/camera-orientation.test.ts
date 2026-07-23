@@ -34,10 +34,7 @@ describe("camera orientation", () => {
 		] as const) {
 			const axes = createCameraAxesRadians(yaw, pitch);
 			const rendered = transformPoint3(
-				createViewMat4(
-					Vec3.zero(),
-					createCameraRotationRadians(yaw, pitch),
-				),
+				createViewMat4(Vec3.zero(), createCameraRotationRadians(yaw, pitch)),
 				axes.forward,
 			);
 

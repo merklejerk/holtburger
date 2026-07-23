@@ -59,7 +59,9 @@ export class WorkerTexturePreparer implements TexturePreparer {
 		this.#pixelSource = pixelSource;
 	}
 
-	static async build(pixelSource: TexturePixelSource): Promise<WorkerTexturePreparer> {
+	static async build(
+		pixelSource: TexturePixelSource,
+	): Promise<WorkerTexturePreparer> {
 		return new WorkerTexturePreparer(pixelSource);
 	}
 

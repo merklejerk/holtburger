@@ -242,8 +242,16 @@ export interface WebGL2TerrainProgram {
 export function createWebGL2TerrainProgram(
 	gl: WebGL2RenderingContext,
 ): WebGL2TerrainProgram {
-	const vertexShader = compileWebGL2Shader(gl, gl.VERTEX_SHADER, TERRAIN_VERTEX_SHADER);
-	const fragmentShader = compileWebGL2Shader(gl, gl.FRAGMENT_SHADER, TERRAIN_FRAGMENT_SHADER);
+	const vertexShader = compileWebGL2Shader(
+		gl,
+		gl.VERTEX_SHADER,
+		TERRAIN_VERTEX_SHADER,
+	);
+	const fragmentShader = compileWebGL2Shader(
+		gl,
+		gl.FRAGMENT_SHADER,
+		TERRAIN_FRAGMENT_SHADER,
+	);
 	const program = gl.createProgram();
 	if (!program) {
 		gl.deleteShader(vertexShader);
@@ -269,7 +277,11 @@ export function createWebGL2TerrainProgram(
 				detailFadeFar: requireWebGL2Uniform(gl, program, "uDetailFadeFar"),
 				detailFadeNear: requireWebGL2Uniform(gl, program, "uDetailFadeNear"),
 				landblockOffset: requireWebGL2Uniform(gl, program, "uLandblockOffset"),
-				localToLandblock: requireWebGL2Uniform(gl, program, "uLocalToLandblock"),
+				localToLandblock: requireWebGL2Uniform(
+					gl,
+					program,
+					"uLocalToLandblock",
+				),
 				projection: requireWebGL2Uniform(gl, program, "uProjection"),
 				roadMasks: requireWebGL2Uniform(gl, program, "uRoadMasks"),
 				surfaceField: requireWebGL2Uniform(gl, program, "uSurfaceField"),

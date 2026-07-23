@@ -1,4 +1,3 @@
-import { CommitBundleSourceKind, type CommitBundle } from "../commit/types";
 import type { LandblockId } from "../game-types";
 import { LandblockLayerKind } from "./scene-interest";
 
@@ -31,11 +30,4 @@ export function terrainSourceToOwnerId(
 	landblockId: LandblockId,
 ): TerrainResourceOwnerId {
 	return `terrain-resource:${landblockId}`;
-}
-
-/** Resolve the runtime lifetime owner for one committed artifact. */
-export function commitBundleOwnerId(artifact: CommitBundle): OwnerId {
-	return artifact.kind === CommitBundleSourceKind.LandblockLayer
-		? landblockLayerToOwnerId(artifact.landblockId, artifact.layer)
-		: spawnedEntityToOwnerId(artifact.id);
 }

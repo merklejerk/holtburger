@@ -14,13 +14,17 @@ uniform mat4 uLocalToLandblock;
 uniform vec3 uLandblockOffset;
 
 out vec2 vGridUv;
-out vec3 vAnchoredPosition;
+out float vViewDepth;
 
 void main() {
 	vec3 landblockPosition = (uLocalToLandblock * vec4(aPosition, 1.0)).xyz;
-	vAnchoredPosition = landblockPosition + uLandblockOffset;
+	vec3 anchoredPosition = landblockPosition + uLandblockOffset;
+	vec4 viewPosition = uView * vec4(anchoredPosition, 1.0);
 	vGridUv = aTextureCoordinate;
-	gl_Position = uProjection * uView * vec4(vAnchoredPosition, 1.0);
+	// This renderer looks down camera-local -Z. Retail's detail fade uses positive
+	// camera-forward depth rather than radial distance from the camera.
+	vViewDepth = -viewPosition.z;
+	gl_Position = uProjection * viewPosition;
 }
 `;
 
@@ -37,12 +41,11 @@ uniform sampler2DArray uColors;
 uniform sampler2DArray uBlendMasks;
 uniform sampler2DArray uRoadMasks;
 uniform sampler2D uDetail;
-uniform vec3 uCameraPosition;
 uniform float uDetailFadeNear;
 uniform float uDetailFadeFar;
 
 in vec2 vGridUv;
-in vec3 vAnchoredPosition;
+in float vViewDepth;
 out vec4 fragmentColor;
 
 const uint ROAD_TERRAIN_TYPE = 32u;
@@ -210,8 +213,7 @@ void main() {
 	vec3 color = applyRoads(composeTerrain(pcode, cellUv), pcode, cellUv);
 	uvec4 metadata = compositionRecord(0, 5);
 	vec4 detail = texture(uDetail, fract(cellUv * float(metadata.w)));
-	float distance = length(vAnchoredPosition - uCameraPosition);
-	float fade = clamp((uDetailFadeFar - distance) / max(uDetailFadeFar - uDetailFadeNear, 0.0001), 0.0, 1.0);
+	float fade = clamp((uDetailFadeFar - vViewDepth) / max(uDetailFadeFar - uDetailFadeNear, 0.0001), 0.0, 1.0);
 	color = mix(color, detail.rgb, clamp(detail.a * fade, 0.0, 1.0));
 	fragmentColor = vec4(color, 1.0);
 }
@@ -222,7 +224,6 @@ export interface WebGL2TerrainProgram {
 	readonly program: WebGLProgram;
 	readonly uniforms: {
 		readonly blendMasks: WebGLUniformLocation;
-		readonly cameraPosition: WebGLUniformLocation;
 		readonly colors: WebGLUniformLocation;
 		readonly composition: WebGLUniformLocation;
 		readonly detail: WebGLUniformLocation;
@@ -262,7 +263,6 @@ export function createWebGL2TerrainProgram(
 			program,
 			uniforms: {
 				blendMasks: requireWebGL2Uniform(gl, program, "uBlendMasks"),
-				cameraPosition: requireWebGL2Uniform(gl, program, "uCameraPosition"),
 				colors: requireWebGL2Uniform(gl, program, "uColors"),
 				composition: requireWebGL2Uniform(gl, program, "uComposition"),
 				detail: requireWebGL2Uniform(gl, program, "uDetail"),

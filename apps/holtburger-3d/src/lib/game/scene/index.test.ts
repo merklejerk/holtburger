@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import { createLandblockWorldOrigin } from "../landblocks";
 import { createTranslationMat4, getMat4Translation } from "../math/matrices";
 import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
-import type { SceneNodeId, VisibleSceneEntry } from ".";
+import type {
+	SceneNodeId,
+	ScenePortalCrossingInput,
+	SceneScope,
+	VisibleSceneEntry,
+} from ".";
 import { SceneGraph } from ".";
 
 const camera = {
@@ -54,7 +59,7 @@ describe("SceneGraph", () => {
 			envCellId: rootPlacement.envCellId,
 			landblockId: rootPlacement.landblockId,
 			localToLandblock: rootPlacement.localTransform,
-			scope: { kind: "outdoor", landblockId: rootPlacement.landblockId },
+			scope: { kind: "outdoor" },
 		});
 	});
 
@@ -104,7 +109,6 @@ describe("SceneGraph", () => {
 			scene
 				.queryFrustum(camera, {
 					kind: "outdoor",
-					landblockId: camera.placement.landblockId,
 				})
 				.entries.map(({ nodeId }) => nodeId),
 		).toEqual([childId]);
@@ -113,7 +117,6 @@ describe("SceneGraph", () => {
 		expect(
 			scene.queryFrustum(camera, {
 				kind: "outdoor",
-				landblockId: camera.placement.landblockId,
 			}).entries,
 		).toEqual([]);
 	});
@@ -137,7 +140,6 @@ describe("SceneGraph", () => {
 		expect(
 			scene.queryFrustum(camera, {
 				kind: "outdoor",
-				landblockId: camera.placement.landblockId,
 			}).entries,
 		).toEqual([]);
 	});
@@ -259,6 +261,105 @@ describe("SceneGraph", () => {
 		});
 	});
 
+	it("selects every outdoor node and recursively reachable env-cell scope", () => {
+		const scene = new SceneGraph();
+		const outdoorOne = createBoundedRoot(scene, "0x0001ffff", null);
+		const outdoorTwo = createBoundedRoot(scene, "0x0002ffff", null);
+		const cellOne = createBoundedRoot(scene, "0x0001ffff", "cell-1");
+		const cellTwo = createBoundedRoot(scene, "0x0001ffff", "cell-2");
+		const disconnectedCell = createBoundedRoot(
+			scene,
+			"0x0001ffff",
+			"cell-disconnected",
+		);
+		const outdoor = outdoorScope();
+		const cellOneScope = envCellScope("0x0001ffff", "cell-1");
+		const cellTwoScope = envCellScope("0x0001ffff", "cell-2");
+		upsertCrossing(scene, "outside-to-one", outdoor, cellOneScope);
+		upsertCrossing(scene, "one-to-two", cellOneScope, cellTwoScope);
+
+		const visible = scene.queryFrustum(camera, outdoor);
+
+		expect(visible.entries.map(({ nodeId }) => nodeId)).toEqual([
+			outdoorOne,
+			outdoorTwo,
+			cellOne,
+			cellTwo,
+		]);
+		expect(visible.entries.map(({ nodeId }) => nodeId)).not.toContain(
+			disconnectedCell,
+		);
+		expect(visible.crossings.map(({ id }) => id)).toEqual([
+			"portal-crossing:outside-to-one",
+			"portal-crossing:one-to-two",
+		]);
+	});
+
+	it("keeps an env-cell query inside its origin without a transition", () => {
+		const scene = new SceneGraph();
+		const outdoor = createBoundedRoot(scene, "0x0001ffff", null);
+		const origin = createBoundedRoot(scene, "0x0001ffff", "cell-origin");
+		const other = createBoundedRoot(scene, "0x0001ffff", "cell-other");
+
+		const visible = scene.queryFrustum(
+			camera,
+			envCellScope("0x0001ffff", "cell-origin"),
+		);
+
+		expect(visible.entries.map(({ nodeId }) => nodeId)).toEqual([origin]);
+		expect(visible.entries.map(({ nodeId }) => nodeId)).not.toContain(outdoor);
+		expect(visible.entries.map(({ nodeId }) => nodeId)).not.toContain(other);
+	});
+
+	it("reaches all outdoor nodes and their transitions after exiting an env-cell", () => {
+		const scene = new SceneGraph();
+		const origin = createBoundedRoot(scene, "0x0001ffff", "cell-origin");
+		const outdoorOne = createBoundedRoot(scene, "0x0001ffff", null);
+		const outdoorTwo = createBoundedRoot(scene, "0x0002ffff", null);
+		const target = createBoundedRoot(scene, "0x0002ffff", "cell-target");
+		const originScope = envCellScope("0x0001ffff", "cell-origin");
+		const targetScope = envCellScope("0x0002ffff", "cell-target");
+		const outdoor = outdoorScope();
+		upsertCrossing(scene, "origin-to-outside", originScope, outdoor);
+		upsertCrossing(scene, "outside-to-target", outdoor, targetScope);
+		upsertCrossing(scene, "target-to-outside", targetScope, outdoor);
+
+		const visible = scene.queryFrustum(camera, originScope);
+
+		expect(visible.entries.map(({ nodeId }) => nodeId)).toEqual([
+			origin,
+			outdoorOne,
+			outdoorTwo,
+			target,
+		]);
+		expect(visible.crossings.map(({ id }) => id)).toEqual([
+			"portal-crossing:origin-to-outside",
+			"portal-crossing:outside-to-target",
+			"portal-crossing:target-to-outside",
+		]);
+	});
+
+	it("recurses through indoor transitions without revisiting cyclic scopes", () => {
+		const scene = new SceneGraph();
+		const cellOne = createBoundedRoot(scene, "0x0001ffff", "cell-1");
+		const cellTwo = createBoundedRoot(scene, "0x0001ffff", "cell-2");
+		const cellOneScope = envCellScope("0x0001ffff", "cell-1");
+		const cellTwoScope = envCellScope("0x0001ffff", "cell-2");
+		upsertCrossing(scene, "one-to-two", cellOneScope, cellTwoScope);
+		upsertCrossing(scene, "two-to-one", cellTwoScope, cellOneScope);
+
+		const visible = scene.queryFrustum(camera, cellOneScope);
+
+		expect(visible.entries.map(({ nodeId }) => nodeId)).toEqual([
+			cellOne,
+			cellTwo,
+		]);
+		expect(visible.crossings.map(({ id }) => id)).toEqual([
+			"portal-crossing:one-to-two",
+			"portal-crossing:two-to-one",
+		]);
+	});
+
 	it("requires a parent node to exist", () => {
 		const scene = new SceneGraph();
 
@@ -278,9 +379,61 @@ function visibleEntry(
 	const entry = scene
 		.queryFrustum(camera, {
 			kind: "outdoor",
-			landblockId: camera.placement.landblockId,
 		})
 		.entries.find((candidate) => candidate.nodeId === nodeId);
 	if (!entry) throw new Error(`Scene node ${nodeId} is not visible.`);
 	return entry;
+}
+
+function createBoundedRoot(
+	scene: SceneGraph,
+	landblockId: string,
+	envCellId: string | null,
+): SceneNodeId {
+	if (envCellId !== null) {
+		scene.upsertEnvCellScope({
+			landblockBounds: AABB3.zero(),
+			potentiallyVisibleEnvCellIds: new Set(),
+			scope: envCellScope(landblockId, envCellId),
+		});
+	}
+	return scene.createNode({
+		envCellId,
+		landblockId,
+		localBounds: AABB3.zero(),
+		localTransform: Mat4.identity(),
+		parentId: null,
+	});
+}
+
+function outdoorScope(): SceneScope {
+	return { kind: "outdoor" };
+}
+
+function envCellScope(
+	landblockId: string,
+	envCellId: string,
+): Extract<SceneScope, { kind: "env-cell" }> {
+	return { envCellId, kind: "env-cell", landblockId };
+}
+
+function upsertCrossing(
+	scene: SceneGraph,
+	id: string,
+	source: SceneScope,
+	target: SceneScope,
+): void {
+	const crossing: ScenePortalCrossingInput = {
+		aperture: {
+			id: `portal-aperture:${id}`,
+			indices: new Uint32Array(),
+			landblockBounds: AABB3.zero(),
+			vertices: new Float32Array(),
+			visibleSide: "both",
+		},
+		id: `portal-crossing:${id}`,
+		source,
+		target,
+	};
+	scene.upsertPortalCrossing(crossing);
 }

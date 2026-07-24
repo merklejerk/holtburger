@@ -163,24 +163,26 @@ export class SceneGraph {
 		this.#portalCrossings.delete(crossingId);
 	}
 
-	/** Conservative origin-scoped frustum query; exact plane tests remain a renderer fast-follow. */
+	/**
+	 * Conservatively query the scopes reachable through apertures intersecting the original frustum.
+	 *
+	 * Node and aperture intersection remain always-pass stubs. Future spatial tests must use the
+	 * original camera volume throughout traversal rather than clipping it at each aperture.
+	 */
 	queryFrustum(camera: Camera, origin: SceneScope): VisibleScene {
-		void camera;
-		const reachable = this.#reachableScopes(origin);
+		const { crossings, reachable } = this.#traverseScopes(camera, origin);
 		return {
 			entries: [...this.#spatialEntries.values()]
 				.filter(
-					({ placement }) =>
-						placement.scope.kind === "outdoor" ||
-						reachable.has(scopeKey(placement.scope)),
+					(entry) =>
+						reachable.has(scopeKey(entry.placement.scope)) &&
+						this.#frustumIntersectsEntry(camera, entry),
 				)
 				.map(({ nodeId, placement }) => ({
 					nodeId,
 					placement,
 				})),
-			crossings: [...this.#portalCrossings.values()].filter((crossing) =>
-				reachable.has(scopeKey(crossing.source)),
-			),
+			crossings,
 		};
 	}
 
@@ -287,21 +289,49 @@ export class SceneGraph {
 		}
 	}
 
-	#reachableScopes(origin: SceneScope): Set<string> {
+	#traverseScopes(
+		camera: Camera,
+		origin: SceneScope,
+	): {
+		readonly crossings: ScenePortalCrossingInput[];
+		readonly reachable: Set<string>;
+	} {
 		const reachable = new Set([scopeKey(origin)]);
 		const pending = [origin];
+		const crossings: ScenePortalCrossingInput[] = [];
 		while (pending.length > 0) {
 			const scope = pending.pop();
 			if (!scope) continue;
 			for (const crossing of this.#portalCrossings.values()) {
-				if (!sameScope(crossing.source, scope)) continue;
+				if (
+					!sameScope(crossing.source, scope) ||
+					!this.#frustumIntersectsAperture(camera, crossing)
+				) {
+					continue;
+				}
+				crossings.push(crossing);
 				const targetKey = scopeKey(crossing.target);
 				if (reachable.has(targetKey)) continue;
 				reachable.add(targetKey);
 				pending.push(crossing.target);
 			}
 		}
-		return reachable;
+		return { crossings, reachable };
+	}
+
+	#frustumIntersectsEntry(camera: Camera, entry: SpatialEntry): boolean {
+		void camera;
+		void entry;
+		return true;
+	}
+
+	#frustumIntersectsAperture(
+		camera: Camera,
+		crossing: ScenePortalCrossingInput,
+	): boolean {
+		void camera;
+		void crossing;
+		return true;
 	}
 }
 

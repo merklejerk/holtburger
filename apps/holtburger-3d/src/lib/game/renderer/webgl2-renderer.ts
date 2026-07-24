@@ -171,7 +171,7 @@ export class WebGL2Renderer implements Renderer {
 	): readonly TerrainFrameInput[] {
 		const terrain: TerrainFrameInput[] = [];
 		const visible = this.#world.queryVisibleScene(camera);
-		for (const { nodeId } of visible.entries) {
+		for (const nodeId of visible.entries) {
 			const contribution = this.#world.getRenderContribution(
 				nodeId,
 				anchorLandblockId,
@@ -210,7 +210,7 @@ export class WebGL2Renderer implements Renderer {
 			});
 		}
 		for (const crossing of visible.crossings) {
-			const drawUnit = this.#world.getPortalDrawUnit(crossing.aperture.id);
+			const drawUnit = this.#world.getPortalDrawUnit(crossing.apertureId);
 			if (drawUnit) void this.#world.resolvePortalDrawUnit(drawUnit);
 		}
 		return terrain;

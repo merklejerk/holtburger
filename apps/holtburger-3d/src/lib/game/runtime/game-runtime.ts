@@ -261,6 +261,8 @@ export class GameRuntime {
 		) {
 			throw new Error("Primary camera placement must be finite.");
 		}
+		const anchorChanged =
+			this.#camera.placement.landblockId !== camera.placement.landblockId;
 		this.#camera = {
 			far: camera.far,
 			fov: camera.fov,
@@ -272,6 +274,9 @@ export class GameRuntime {
 				rotation: new Quat(rotation.w, rotation.x, rotation.y, rotation.z),
 			},
 		};
+		if (anchorChanged) {
+			this.#terrain.updateSceneBoundsForAnchor(camera.placement.landblockId);
+		}
 	}
 
 	/** Replace the frontend-resolved environment without changing scene residency or interest. */
@@ -319,8 +324,9 @@ export class GameRuntime {
 		if (this.#destroyed) throw new Error("Game runtime has been destroyed.");
 		const renderer = this.#renderer;
 		if (!renderer) throw new Error("Game runtime has no renderer device.");
+		const anchorLandblockId = this.#camera.placement.landblockId;
 		renderer.drawFrame({
-			anchorLandblockId: this.#camera.placement.landblockId,
+			anchorLandblockId,
 			environment: {
 				...this.#environment,
 				distanceFog: resolveTerrainCoverageFog(

@@ -34,4 +34,18 @@ describe("matrix composition", () => {
 			new AABB3(new Vec3(9, 18, 27), new Vec3(14, 25, 36)),
 		);
 	});
+
+	it("writes transformed bounds into a caller-owned target", () => {
+		const target = AABB3.zero();
+		const bounds = transformAABB3(
+			createTranslationMat4(new Vec3(10, 20, 30)),
+			new AABB3(new Vec3(-1, -2, -3), new Vec3(4, 5, 6)),
+			target,
+		);
+
+		expect(bounds).toBe(target);
+		expect(bounds).toEqual(
+			new AABB3(new Vec3(9, 18, 27), new Vec3(14, 25, 36)),
+		);
+	});
 });

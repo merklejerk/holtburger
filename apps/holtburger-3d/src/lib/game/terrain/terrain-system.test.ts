@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { RenderGeometryData } from "../renderer/geometry";
 import { GeometryManager } from "../geometry/geometry-manager";
 import type {
@@ -80,6 +80,43 @@ describe("TerrainSystem", () => {
 		expect(new Set(resources.released)).toEqual(new Set(resources.created));
 	});
 
+	it("publishes the selected render variant bounds when its anchor changes", async () => {
+		const generator = new DeferredTerrainGenerator();
+		const scene = new SceneGraph();
+		const terrain = createTerrainSystem(
+			generator,
+			new FakeRendererResourceManager(),
+			scene,
+		);
+		const installation = createInstallation();
+		const nodeId = installTerrain(terrain, installation);
+		const result = createGenerationResult();
+		const updateBounds = vi.spyOn(scene, "updateBounds");
+
+		terrain.updateSceneBoundsForAnchor(installation.landblockId);
+		generator.resolve(result);
+		await Promise.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(scene.getNode(nodeId)?.localBounds).toEqual(
+			variantFor(result, 1, "viewer-block").bounds,
+		);
+
+		updateBounds.mockClear();
+		terrain.updateSceneBoundsForAnchor(installation.landblockId);
+		expect(updateBounds).not.toHaveBeenCalled();
+
+		terrain.updateSceneBoundsForAnchor("0x1311ffff");
+		expect(scene.getNode(nodeId)?.localBounds).toEqual(
+			variantFor(result, 2, "west").bounds,
+		);
+		expect(updateBounds).toHaveBeenCalledWith(
+			nodeId,
+			variantFor(result, 2, "west").bounds,
+		);
+	});
+
 	it("shares one composition resource across interested landblocks in a region", () => {
 		const resources = new FakeRendererResourceManager();
 		const terrain = createTerrainSystem(
@@ -152,11 +189,12 @@ describe("TerrainSystem", () => {
 function createTerrainSystem(
 	generator: TerrainGenerator,
 	resources: RendererResourceManager,
+	scene = new SceneGraph(),
 ): TerrainSystem<string, string> {
 	const textures = new TextureManager(resources, new FixtureTexturePreparer());
 	const geometry = new GeometryManager<string>(resources);
 	return new TerrainSystem<string, string>(
-		new SceneGraph(),
+		scene,
 		generator,
 		geometry,
 		textures,
@@ -232,7 +270,10 @@ const TERRAIN_VARIATION = {
 function createGenerationResult(): TerrainGenerationResult {
 	const variants = STRIDES.flatMap((stride) =>
 		TRANSITION_DIRECTIONS.map((transitionDirection, directionIndex) => ({
-			bounds: new AABB3(Vec3.zero(), Vec3.zero()),
+			bounds: new AABB3(
+				new Vec3(stride, directionIndex, -stride),
+				new Vec3(stride + 1, directionIndex + 1, 0),
+			),
 			indexCount: 3,
 			indexStart:
 				(STRIDES.indexOf(stride) * TRANSITION_DIRECTIONS.length +
@@ -252,6 +293,21 @@ function createGenerationResult(): TerrainGenerationResult {
 		surfaceFields: STRIDES.map(createSurfaceField),
 		variants,
 	};
+}
+
+function variantFor(
+	result: TerrainGenerationResult,
+	stride: TerrainMeshStride,
+	transitionDirection: TerrainTransitionDirection,
+) {
+	const variant = result.variants.find(
+		(candidate) =>
+			candidate.variant.stride === stride &&
+			candidate.variant.transitionDirection === transitionDirection,
+	);
+	if (!variant)
+		throw new Error("Terrain test fixture is missing a requested variant.");
+	return variant;
 }
 
 function createSurfaceField(stride: TerrainMeshStride): TerrainPcodeField {

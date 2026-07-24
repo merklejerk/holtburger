@@ -13,6 +13,10 @@
 	import type { LoDConfig } from "../lib/game/runtime/types";
 	import type { SceneResidency } from "../lib/game/scene";
 	import {
+		DEFAULT_FRAME_SETTINGS,
+		type FrameSettings,
+	} from "../lib/game/renderer/renderer";
+	import {
 		ExplorerCameraCoordinator,
 		type ExplorerCameraFocusStatus,
 	} from "./explorer-camera-coordinator";
@@ -43,14 +47,31 @@
 		timeOfDay: 0.5,
 		dayGroupOverride: null,
 	});
+	/** Explorer-local dynamic display choices; they do not alter resolved regional data. */
+	let frameSettings = $state<FrameSettings>({ ...DEFAULT_FRAME_SETTINGS });
 
 	function updateEnvironment(selection: ExplorerEnvironmentSelection): void {
 		environmentSelection = selection;
+		applyEnvironment();
+	}
+
+	function updateDistanceFog(enabled: boolean): void {
+		frameSettings = { ...frameSettings, distanceFogEnabled: enabled };
+		applyFrameSettings();
+	}
+
+	function applyEnvironment(): void {
 		if (activeRegion) {
-			gameRuntime?.setSceneEnvironment(
-				resolveSceneEnvironment(activeRegion, selection),
+			const environment = resolveSceneEnvironment(
+				activeRegion,
+				environmentSelection,
 			);
+			gameRuntime?.setSceneEnvironment(environment);
 		}
+	}
+
+	function applyFrameSettings(): void {
+		gameRuntime?.setFrameSettings(frameSettings);
 	}
 
 	function requestSceneInterest(
@@ -129,9 +150,8 @@
 					commitPipeline,
 					texturePixelSource,
 				);
-				gameRuntime.setSceneEnvironment(
-					resolveSceneEnvironment(activeRegion, environmentSelection),
-				);
+				applyEnvironment();
+				applyFrameSettings();
 				if (destroyed) return;
 				cameraController = new FreeFlyCameraController({
 					canvas: canvasElement!,
@@ -215,6 +235,8 @@
 				({ dayName }) => dayName,
 			) ?? []}
 			{updateEnvironment}
+			distanceFogEnabled={frameSettings.distanceFogEnabled}
+			{updateDistanceFog}
 		/>
 	</div>
 </div>

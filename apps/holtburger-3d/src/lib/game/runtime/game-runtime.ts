@@ -10,7 +10,11 @@ import { INVALID_ID, type LandblockId } from "../game-types";
 import { GeometryManager } from "../geometry/geometry-manager";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
-import type { Renderer } from "../renderer/renderer";
+import {
+	DEFAULT_FRAME_SETTINGS,
+	type FrameSettings,
+	type Renderer,
+} from "../renderer/renderer";
 import { RenderWorld } from "../renderer/render-world";
 import type { RendererResourceManager } from "../renderer/resource-manager";
 import { SceneGraph, type ScenePlacement, type SceneResidency } from "../scene";
@@ -143,6 +147,8 @@ export class GameRuntime {
 	#camera: Camera = DEFAULT_CAMERA;
 	/** Frontend-owned static regional presentation state for every render frame. */
 	#environment: ResolvedSceneEnvironment = DEFAULT_ENVIRONMENT;
+	/** Frontend-selected dynamic display choices forwarded unchanged to each frame. */
+	#frameSettings: FrameSettings = DEFAULT_FRAME_SETTINGS;
 	/** Terrain interest constraining the frontend's effective distance-fog range. */
 	#terrainFogCoverage: TerrainFogCoverage | null = null;
 	/** Static layers currently requested or retained independently of the camera. */
@@ -273,6 +279,11 @@ export class GameRuntime {
 		this.#environment = environment;
 	}
 
+	/** Replace frontend-selected dynamic display choices without altering world data. */
+	setFrameSettings(settings: FrameSettings): void {
+		this.#frameSettings = settings;
+	}
+
 	/** Resolve one canonical scene-space point against resident scene scopes. */
 	queryWorldPointResidency(point: Vec3): SceneResidency | null {
 		return this.#scene.queryWorldPointResidency(point);
@@ -318,6 +329,7 @@ export class GameRuntime {
 					this.#camera.placement.position,
 				),
 			},
+			frameSettings: this.#frameSettings,
 			timeSeconds,
 			views: [{ camera: this.#camera }],
 		});

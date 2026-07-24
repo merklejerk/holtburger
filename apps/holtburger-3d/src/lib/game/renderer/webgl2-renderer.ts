@@ -95,12 +95,12 @@ export class WebGL2Renderer implements Renderer {
 
 	drawFrame(input: FrameInput): void {
 		this.#resizeCanvasForDpr();
-		this.#beginFrame(input.environment);
+		const fog = input.frameSettings.distanceFogEnabled
+			? input.environment.distanceFog
+			: null;
+		this.#beginFrame(input.environment, fog);
 		for (const view of input.views) {
-			this.#drawView(
-				this.#prepareView(input.anchorLandblockId, view),
-				input.environment,
-			);
+			this.#drawView(this.#prepareView(input.anchorLandblockId, view), fog);
 		}
 		void input.timeSeconds;
 	}
@@ -109,10 +109,12 @@ export class WebGL2Renderer implements Renderer {
 		this.#gl.deleteProgram(this.#terrainProgram.program);
 	}
 
-	#beginFrame(environment: FrameInput["environment"]): void {
+	#beginFrame(
+		environment: FrameInput["environment"],
+		fog: FrameInput["environment"]["distanceFog"],
+	): void {
 		const gl = this.#gl;
-		const clearColor =
-			environment.distanceFog?.color ?? environment.backgroundColor;
+		const clearColor = fog?.color ?? environment.backgroundColor;
 		gl.clearColor(
 			clearColor.red,
 			clearColor.green,
@@ -203,14 +205,17 @@ export class WebGL2Renderer implements Renderer {
 		return terrain;
 	}
 
-	#drawView(view: PreparedView, environment: FrameInput["environment"]): void {
-		this.#drawTerrain(view, environment);
+	#drawView(
+		view: PreparedView,
+		fog: FrameInput["environment"]["distanceFog"],
+	): void {
+		this.#drawTerrain(view, fog);
 		this.#gl.bindVertexArray(null);
 	}
 
 	#drawTerrain(
 		view: PreparedView,
-		environment: FrameInput["environment"],
+		fog: FrameInput["environment"]["distanceFog"],
 	): void {
 		const gl = this.#gl;
 		gl.depthMask(true);
@@ -236,7 +241,6 @@ export class WebGL2Renderer implements Renderer {
 			DETAIL_FADE_NEAR,
 		);
 		gl.uniform1f(this.#terrainProgram.uniforms.detailFadeFar, DETAIL_FADE_FAR);
-		const fog = environment.distanceFog;
 		gl.uniform1i(this.#terrainProgram.uniforms.fogEnabled, fog ? 1 : 0);
 		gl.uniform1f(this.#terrainProgram.uniforms.fogNear, fog?.near ?? 0);
 		gl.uniform1f(this.#terrainProgram.uniforms.fogFar, fog?.far ?? 1);

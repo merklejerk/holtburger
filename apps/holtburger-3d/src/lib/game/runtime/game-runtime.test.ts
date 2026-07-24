@@ -68,6 +68,10 @@ describe("GameRuntime view and interest control", () => {
 
 		expect(requestedLayers).toEqual([{ id: "0x1010ffff", layer: "terrain" }]);
 		expect(frames[0]?.anchorLandblockId).toBe("0x2020ffff");
+		expect(frames[0]?.frameSettings).toEqual({ distanceFogEnabled: true });
+		runtime.setFrameSettings({ distanceFogEnabled: false });
+		runtime.render(2);
+		expect(frames[1]?.frameSettings).toEqual({ distanceFogEnabled: false });
 		const queriedPoint = createLandblockWorldOrigin("0x0102ffff").add(
 			new Vec3(1, 10, -1),
 		);

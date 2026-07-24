@@ -187,7 +187,11 @@ export function transformPoint3(matrix: Mat4, point: Vec3): Vec3 {
 }
 
 /** Return the conservative axis-aligned bounds of one transformed local-space box. */
-export function transformAABB3(matrix: Mat4, bounds: AABB3): AABB3 {
+export function transformAABB3(
+	matrix: Mat4,
+	bounds: AABB3,
+	targetBounds?: AABB3,
+): AABB3 {
 	const corners = [
 		new Vec3(bounds.min.x, bounds.min.y, bounds.min.z),
 		new Vec3(bounds.min.x, bounds.min.y, bounds.max.z),
@@ -198,18 +202,14 @@ export function transformAABB3(matrix: Mat4, bounds: AABB3): AABB3 {
 		new Vec3(bounds.max.x, bounds.max.y, bounds.min.z),
 		new Vec3(bounds.max.x, bounds.max.y, bounds.max.z),
 	].map((corner) => transformPoint3(matrix, corner));
-	return new AABB3(
-		new Vec3(
-			Math.min(...corners.map((corner) => corner.x)),
-			Math.min(...corners.map((corner) => corner.y)),
-			Math.min(...corners.map((corner) => corner.z)),
-		),
-		new Vec3(
-			Math.max(...corners.map((corner) => corner.x)),
-			Math.max(...corners.map((corner) => corner.y)),
-			Math.max(...corners.map((corner) => corner.z)),
-		),
-	);
+	const target = targetBounds ?? AABB3.zero();
+	target.min.x = Math.min(...corners.map((corner) => corner.x));
+	target.min.y = Math.min(...corners.map((corner) => corner.y));
+	target.min.z = Math.min(...corners.map((corner) => corner.z));
+	target.max.x = Math.max(...corners.map((corner) => corner.x));
+	target.max.y = Math.max(...corners.map((corner) => corner.y));
+	target.max.z = Math.max(...corners.map((corner) => corner.z));
+	return target;
 }
 
 function createRotationMat4(rotation: Quat): Mat4 {

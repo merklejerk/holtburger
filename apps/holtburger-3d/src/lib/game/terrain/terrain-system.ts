@@ -39,6 +39,7 @@ import {
 	type TerrainGeneratedTextureKeys,
 	type TerrainGenerationResult,
 	type TerrainSourceInstallation,
+	type TerrainVariantDrawRange,
 	TERRAIN_MESH_STRIDES,
 } from "./types";
 
@@ -109,6 +110,8 @@ export class TerrainSystem<
 		LandblockId,
 		TerrainInstallation<TOwnerId>
 	>();
+	/** Anchor whose selected render variants currently define terrain scene-node bounds. */
+	#boundsAnchorLandblockId: LandblockId | null = null;
 	#destroyed = false;
 
 	constructor(
@@ -138,6 +141,7 @@ export class TerrainSystem<
 		});
 		this.#nodes.set(ownerId, nodeId);
 		this.#nodeLandblocks.set(nodeId, artifact.source.landblockId);
+		this.#syncSceneBoundsForLandblock(artifact.source.landblockId);
 		return nodeId;
 	}
 
@@ -152,6 +156,21 @@ export class TerrainSystem<
 		this.#nodes.delete(ownerId);
 		this.#nodeLandblocks.delete(nodeId);
 		this.#removeSource(landblockId);
+	}
+
+	/**
+	 * Publish the terrain variants selected for one render anchor to the scene graph.
+	 *
+	 * The anchor changes only when the primary camera enters another landblock, so
+	 * this keeps spatial bounds aligned with visible terrain geometry without
+	 * per-frame scene-index writes.
+	 */
+	updateSceneBoundsForAnchor(anchorLandblockId: LandblockId): void {
+		if (this.#boundsAnchorLandblockId === anchorLandblockId) return;
+		this.#boundsAnchorLandblockId = anchorLandblockId;
+		for (const landblockId of this.#installations.keys()) {
+			this.#syncSceneBoundsForLandblock(landblockId);
+		}
 	}
 
 	/** Reserve a newly interested source's resources and start one generation operation. */
@@ -197,21 +216,12 @@ export class TerrainSystem<
 		const installation = this.#installations.get(landblockId);
 		if (!installation || installation.kind !== "realized") return null;
 
-		const stride = selectTerrainMeshStride(landblockId, anchorLandblockId);
-		const transitionDirection = selectTerrainTransitionDirection(
+		const variant = this.#selectVariant(
 			landblockId,
+			installation.resources,
 			anchorLandblockId,
 		);
-		const variant = installation.resources.variants.find(
-			(candidate) =>
-				candidate.variant.stride === stride &&
-				candidate.variant.transitionDirection === transitionDirection,
-		);
-		if (!variant) {
-			throw new Error(
-				`Terrain ${landblockId} is missing ${stride}/${transitionDirection} geometry.`,
-			);
-		}
+		const { stride } = variant.variant;
 		const surfaceField =
 			installation.source.generatedTextures.surfaceFields.get(stride);
 		if (!surfaceField) {
@@ -276,6 +286,7 @@ export class TerrainSystem<
 				source: installation.source,
 				resources,
 			});
+			this.#syncSceneBoundsForLandblock(landblockId);
 		} catch (error) {
 			if (this.#installations.get(landblockId) !== installation) return;
 			// Geometry publication precedes the generated surface fields. Release the whole source owner
@@ -365,6 +376,43 @@ export class TerrainSystem<
 			Object.values(drawUnit.textures).every((key) =>
 				this.#textures.hasTexture(key),
 			)
+		);
+	}
+
+	#syncSceneBoundsForLandblock(landblockId: LandblockId): void {
+		const anchorLandblockId = this.#boundsAnchorLandblockId;
+		const installation = this.#installations.get(landblockId);
+		if (anchorLandblockId === null || installation?.kind !== "realized") return;
+		const bounds = this.#selectVariant(
+			landblockId,
+			installation.resources,
+			anchorLandblockId,
+		).bounds;
+		for (const [nodeId, nodeLandblockId] of this.#nodeLandblocks) {
+			if (nodeLandblockId === landblockId) {
+				this.#scene.updateBounds(nodeId, bounds);
+			}
+		}
+	}
+
+	#selectVariant(
+		landblockId: LandblockId,
+		resources: RealizedTerrainResources,
+		anchorLandblockId: LandblockId,
+	): TerrainVariantDrawRange {
+		const stride = selectTerrainMeshStride(landblockId, anchorLandblockId);
+		const transitionDirection = selectTerrainTransitionDirection(
+			landblockId,
+			anchorLandblockId,
+		);
+		const variant = resources.variants.find(
+			(candidate) =>
+				candidate.variant.stride === stride &&
+				candidate.variant.transitionDirection === transitionDirection,
+		);
+		if (variant) return variant;
+		throw new Error(
+			`Terrain ${landblockId} is missing ${stride}/${transitionDirection} geometry.`,
 		);
 	}
 }

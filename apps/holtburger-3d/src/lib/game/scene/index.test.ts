@@ -2,12 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createLandblockWorldOrigin } from "../landblocks";
 import { createTranslationMat4, getMat4Translation } from "../math/matrices";
 import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
-import type {
-	SceneNodeId,
-	ScenePortalCrossingInput,
-	SceneScope,
-	VisibleSceneEntry,
-} from ".";
+import type { SceneNodeId, ScenePortalCrossingInput, SceneScope } from ".";
 import { SceneGraph } from ".";
 
 const camera = {
@@ -55,7 +50,7 @@ describe("SceneGraph", () => {
 			parentId: null,
 		});
 		expect(scene.getNode(childId)?.parentId).toBe(rootId);
-		expect(visibleEntry(scene, childId).placement).toEqual({
+		expect(visiblePlacement(scene, childId)).toEqual({
 			envCellId: rootPlacement.envCellId,
 			landblockId: rootPlacement.landblockId,
 			localToLandblock: rootPlacement.localTransform,
@@ -82,7 +77,7 @@ describe("SceneGraph", () => {
 
 		expect(
 			getMat4Translation(
-				visibleEntry(scene, grandchildId).placement.localToLandblock,
+				visiblePlacement(scene, grandchildId).localToLandblock,
 			),
 		).toEqual(new Vec3(10, 20, 30));
 
@@ -92,9 +87,39 @@ describe("SceneGraph", () => {
 		);
 		expect(
 			getMat4Translation(
-				visibleEntry(scene, grandchildId).placement.localToLandblock,
+				visiblePlacement(scene, grandchildId).localToLandblock,
 			),
 		).toEqual(new Vec3(10, 40, 30));
+	});
+
+	it("owns spatial values at its API boundary", () => {
+		const scene = new SceneGraph();
+		const bounds = new AABB3(new Vec3(-1, -2, -3), new Vec3(4, 5, 6));
+		const transform = createTranslationMat4(new Vec3(10, 20, 30));
+		const nodeId = scene.createNode({
+			envCellId: null,
+			landblockId: "0x0001ffff",
+			localBounds: bounds,
+			localTransform: transform,
+			parentId: null,
+		});
+
+		bounds.min.x = -100;
+		transform.m41 = 100;
+		const node = scene.getNode(nodeId);
+		if (!node?.localBounds) throw new Error("Expected bounded scene node.");
+		node.localBounds.max.z = 100;
+		node.localTransform.m42 = 100;
+		const placement = visiblePlacement(scene, nodeId);
+		placement.localToLandblock.m43 = 100;
+
+		expect(scene.getNode(nodeId)).toMatchObject({
+			localBounds: new AABB3(new Vec3(-1, -2, -3), new Vec3(4, 5, 6)),
+			localTransform: createTranslationMat4(new Vec3(10, 20, 30)),
+		});
+		expect(
+			getMat4Translation(visiblePlacement(scene, nodeId).localToLandblock),
+		).toEqual(new Vec3(10, 20, 30));
 	});
 
 	it("indexes bounded nodes but permits empty transform nodes", () => {
@@ -106,11 +131,9 @@ describe("SceneGraph", () => {
 		});
 
 		expect(
-			scene
-				.queryFrustum(camera, {
-					kind: "outdoor",
-				})
-				.entries.map(({ nodeId }) => nodeId),
+			scene.queryFrustum(camera, {
+				kind: "outdoor",
+			}).entries,
 		).toEqual([childId]);
 
 		scene.updateBounds(childId, null);
@@ -119,6 +142,16 @@ describe("SceneGraph", () => {
 				kind: "outdoor",
 			}).entries,
 		).toEqual([]);
+	});
+
+	it("reuses a primitive visibility selection buffer", () => {
+		const scene = new SceneGraph();
+		const nodeId = createBoundedRoot(scene, "0x0001ffff", null);
+		const first = scene.queryFrustum(camera, { kind: "outdoor" });
+		const second = scene.queryFrustum(camera, { kind: "outdoor" });
+
+		expect(first).toBe(second);
+		expect(second.entries).toEqual([nodeId]);
 	});
 
 	it("requires systems to destroy transform trees from leaves to roots", () => {
@@ -182,14 +215,14 @@ describe("SceneGraph", () => {
 		});
 
 		expect(scene.getNode(rootId)?.id).toBe(rootId);
-		const envEntry = scene
-			.queryFrustum(camera, {
+		expect(
+			scene.queryFrustum(camera, {
 				envCellId: envCellPlacement.envCellId,
 				kind: "env-cell",
 				landblockId: envCellPlacement.landblockId,
-			})
-			.entries.find(({ nodeId }) => nodeId === childId);
-		expect(envEntry?.placement).toEqual({
+			}).entries,
+		).toContain(childId);
+		expect(scene.getResolvedPlacement(childId)).toEqual({
 			envCellId: envCellPlacement.envCellId,
 			landblockId: envCellPlacement.landblockId,
 			localToLandblock: envCellPlacement.localTransform,
@@ -280,15 +313,8 @@ describe("SceneGraph", () => {
 
 		const visible = scene.queryFrustum(camera, outdoor);
 
-		expect(visible.entries.map(({ nodeId }) => nodeId)).toEqual([
-			outdoorOne,
-			outdoorTwo,
-			cellOne,
-			cellTwo,
-		]);
-		expect(visible.entries.map(({ nodeId }) => nodeId)).not.toContain(
-			disconnectedCell,
-		);
+		expect(visible.entries).toEqual([outdoorOne, outdoorTwo, cellOne, cellTwo]);
+		expect(visible.entries).not.toContain(disconnectedCell);
 		expect(visible.crossings.map(({ id }) => id)).toEqual([
 			"portal-crossing:outside-to-one",
 			"portal-crossing:one-to-two",
@@ -306,9 +332,9 @@ describe("SceneGraph", () => {
 			envCellScope("0x0001ffff", "cell-origin"),
 		);
 
-		expect(visible.entries.map(({ nodeId }) => nodeId)).toEqual([origin]);
-		expect(visible.entries.map(({ nodeId }) => nodeId)).not.toContain(outdoor);
-		expect(visible.entries.map(({ nodeId }) => nodeId)).not.toContain(other);
+		expect(visible.entries).toEqual([origin]);
+		expect(visible.entries).not.toContain(outdoor);
+		expect(visible.entries).not.toContain(other);
 	});
 
 	it("reaches all outdoor nodes and their transitions after exiting an env-cell", () => {
@@ -326,12 +352,7 @@ describe("SceneGraph", () => {
 
 		const visible = scene.queryFrustum(camera, originScope);
 
-		expect(visible.entries.map(({ nodeId }) => nodeId)).toEqual([
-			origin,
-			outdoorOne,
-			outdoorTwo,
-			target,
-		]);
+		expect(visible.entries).toEqual([origin, outdoorOne, outdoorTwo, target]);
 		expect(visible.crossings.map(({ id }) => id)).toEqual([
 			"portal-crossing:origin-to-outside",
 			"portal-crossing:outside-to-target",
@@ -350,10 +371,7 @@ describe("SceneGraph", () => {
 
 		const visible = scene.queryFrustum(camera, cellOneScope);
 
-		expect(visible.entries.map(({ nodeId }) => nodeId)).toEqual([
-			cellOne,
-			cellTwo,
-		]);
+		expect(visible.entries).toEqual([cellOne, cellTwo]);
 		expect(visible.crossings.map(({ id }) => id)).toEqual([
 			"portal-crossing:one-to-two",
 			"portal-crossing:two-to-one",
@@ -372,17 +390,16 @@ describe("SceneGraph", () => {
 	});
 });
 
-function visibleEntry(
-	scene: SceneGraph,
-	nodeId: SceneNodeId,
-): VisibleSceneEntry {
-	const entry = scene
+function visiblePlacement(scene: SceneGraph, nodeId: SceneNodeId) {
+	const visible = scene
 		.queryFrustum(camera, {
 			kind: "outdoor",
 		})
-		.entries.find((candidate) => candidate.nodeId === nodeId);
-	if (!entry) throw new Error(`Scene node ${nodeId} is not visible.`);
-	return entry;
+		.entries.includes(nodeId);
+	if (!visible) throw new Error(`Scene node ${nodeId} is not visible.`);
+	const placement = scene.getResolvedPlacement(nodeId);
+	if (!placement) throw new Error(`Scene node ${nodeId} has no placement.`);
+	return placement;
 }
 
 function createBoundedRoot(

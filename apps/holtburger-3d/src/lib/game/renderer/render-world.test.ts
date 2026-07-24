@@ -28,7 +28,10 @@ const CAMERA = {
 		rotation: {},
 	},
 } as Camera;
-const VISIBLE_SCENE = { entries: [] } as const satisfies VisibleScene;
+const VISIBLE_SCENE = {
+	crossings: [],
+	entries: [],
+} as const satisfies VisibleScene;
 const TERRAIN = {} as TerrainDrawUnit;
 const GEOMETRY = "geometry-resource:1" as GeometryResourceKey;
 const INSTANCE_STREAM =

@@ -19,7 +19,7 @@ import type {
 	ResolvedScenePlacement,
 	SceneResidency,
 	VisibleScene,
-	VisibleSceneEntry,
+	VisiblePortalCrossing,
 } from ".";
 import { scopeFor, sameScope, scopeKey } from "./scope";
 import { createSceneNodeId } from "./utils";
@@ -41,9 +41,17 @@ type SceneNodeRecord = {
 );
 
 /** Derived landblock-local entry used by the composed spatial index. */
-interface SpatialEntry extends VisibleSceneEntry {
+interface SpatialEntry {
+	readonly nodeId: SceneNodeId;
+	readonly placement: ResolvedScenePlacement;
 	/** Conservative bounds in the root landblock coordinate frame. */
 	readonly landblockBounds: AABB3;
+}
+
+/** Mutable backing record for one frame-scoped portal selection buffer slot. */
+interface VisiblePortalCrossingBufferSlot {
+	id: VisiblePortalCrossing["id"];
+	apertureId: VisiblePortalCrossing["apertureId"];
 }
 
 export class SceneGraph {
@@ -55,6 +63,18 @@ export class SceneGraph {
 		PortalCrossingId,
 		ScenePortalCrossingInput
 	>();
+	/** Reused by every visibility query; contains only primitive selections. */
+	readonly #visibleEntries: SceneNodeId[] = [];
+	/** Reused portal-selection records, grown only to the largest query result. */
+	readonly #visibleCrossings: VisiblePortalCrossingBufferSlot[] = [];
+	readonly #visibleScene: VisibleScene = {
+		crossings: this.#visibleCrossings,
+		entries: this.#visibleEntries,
+	};
+	/** Reused traversal state for frame-time visibility queries. */
+	readonly #reachableScopeKeys = new Set<string>();
+	readonly #pendingScopes: SceneScope[] = [];
+	readonly #traversedCrossings: ScenePortalCrossingInput[] = [];
 	#nextNodeId = 0;
 
 	createNode(input: SceneNodeInput): SceneNodeId {
@@ -81,17 +101,25 @@ export class SceneGraph {
 				envCellId: node.envCellId,
 				id: node.id,
 				landblockId: node.landblockId,
-				localBounds: node.localBounds,
-				localTransform: node.localTransform,
+				localBounds: node.localBounds?.clone() ?? null,
+				localTransform: node.localTransform.clone(),
 				parentId: null,
 			};
 		}
 		return {
 			id: node.id,
-			localBounds: node.localBounds,
-			localTransform: node.localTransform,
+			localBounds: node.localBounds?.clone() ?? null,
+			localTransform: node.localTransform.clone(),
 			parentId: node.parentId,
 		};
+	}
+
+	/** Return a copied resolved placement for inspection outside frame-time spatial queries. */
+	getResolvedPlacement(
+		nodeId: SceneNodeId,
+	): ResolvedScenePlacement | undefined {
+		if (!this.#nodes.has(nodeId)) return undefined;
+		return copyResolvedPlacement(this.#resolvePlacement(nodeId));
 	}
 
 	updateRootPlacement(nodeId: SceneNodeId, placement: ScenePlacement): void {
@@ -101,7 +129,7 @@ export class SceneGraph {
 		}
 		node.envCellId = placement.envCellId;
 		node.landblockId = placement.landblockId;
-		node.localTransform = placement.localTransform;
+		node.localTransform.copy(placement.localTransform);
 		this.#syncSpatialSubtree(node.id);
 	}
 
@@ -110,13 +138,16 @@ export class SceneGraph {
 		if (node.parentId === null) {
 			throw new Error(`Scene root ${nodeId} requires a complete placement.`);
 		}
-		node.localTransform = transform;
+		node.localTransform.copy(transform);
 		this.#syncSpatialSubtree(node.id);
 	}
 
 	updateBounds(nodeId: SceneNodeId, localBounds: AABB3 | null): void {
 		const node = this.#requireNode(nodeId);
-		node.localBounds = localBounds;
+		node.localBounds =
+			localBounds === null
+				? null
+				: (node.localBounds ?? localBounds.clone()).copy(localBounds);
 		this.#syncSpatialEntry(node);
 	}
 
@@ -136,7 +167,11 @@ export class SceneGraph {
 	}
 
 	upsertEnvCellScope(input: SceneEnvCellScopeInput): void {
-		this.#envCellScopes.set(input.scope.envCellId, input);
+		this.#envCellScopes.set(input.scope.envCellId, {
+			landblockBounds: input.landblockBounds?.clone() ?? null,
+			potentiallyVisibleEnvCellIds: new Set(input.potentiallyVisibleEnvCellIds),
+			scope: { ...input.scope },
+		});
 		this.#syncEnvCellRoots(input.scope.envCellId);
 	}
 
@@ -156,7 +191,7 @@ export class SceneGraph {
 	}
 
 	upsertPortalCrossing(input: ScenePortalCrossingInput): void {
-		this.#portalCrossings.set(input.id, input);
+		this.#portalCrossings.set(input.id, copyPortalCrossing(input));
 	}
 
 	removePortalCrossing(crossingId: PortalCrossingId): void {
@@ -170,23 +205,18 @@ export class SceneGraph {
 	 * original camera volume throughout traversal rather than clipping it at each aperture.
 	 */
 	queryFrustum(camera: Camera, origin: SceneScope): VisibleScene {
-		const { crossings, reachable } = this.#traverseScopes(camera, origin);
-		const entries: Array<VisibleScene["entries"][number]> = [];
+		this.#traverseScopes(camera, origin);
+		this.#visibleEntries.length = 0;
 		for (const entry of this.#spatialEntries.values()) {
 			if (
-				reachable.has(scopeKey(entry.placement.scope)) &&
+				this.#reachableScopeKeys.has(scopeKey(entry.placement.scope)) &&
 				this.#frustumIntersectsEntry(camera, entry)
 			) {
-				entries.push({
-					nodeId: entry.nodeId,
-					placement: entry.placement,
-				});
+				this.#visibleEntries.push(entry.nodeId);
 			}
 		}
-		return {
-			entries,
-			crossings,
-		};
+		this.#syncVisibleCrossings(this.#traversedCrossings);
+		return this.#visibleScene;
 	}
 
 	/**
@@ -231,7 +261,7 @@ export class SceneGraph {
 	/** Resolve inherited residency and flatten one node transform into landblock-local coordinates. */
 	#resolvePlacement(nodeId: SceneNodeId): ResolvedScenePlacement {
 		let node = this.#requireNode(nodeId);
-		let localToLandblock = node.localTransform;
+		let localToLandblock = node.localTransform.clone();
 		while (node.parentId !== null) {
 			node = this.#requireNode(node.parentId);
 			localToLandblock = multiplyMat4(node.localTransform, localToLandblock);
@@ -267,6 +297,7 @@ export class SceneGraph {
 				landblockBounds: transformAABB3(
 					placement.localToLandblock,
 					node.localBounds,
+					this.#spatialEntries.get(node.id)?.landblockBounds,
 				),
 				nodeId: node.id,
 				placement,
@@ -290,18 +321,29 @@ export class SceneGraph {
 		}
 	}
 
-	#traverseScopes(
-		camera: Camera,
-		origin: SceneScope,
-	): {
-		readonly crossings: ScenePortalCrossingInput[];
-		readonly reachable: Set<string>;
-	} {
-		const reachable = new Set([scopeKey(origin)]);
-		const pending = [origin];
-		const crossings: ScenePortalCrossingInput[] = [];
-		while (pending.length > 0) {
-			const scope = pending.pop();
+	#syncVisibleCrossings(crossings: readonly ScenePortalCrossingInput[]): void {
+		for (let index = 0; index < crossings.length; index += 1) {
+			const crossing = crossings[index]!;
+			const target =
+				this.#visibleCrossings[index] ??
+				(this.#visibleCrossings[index] = {
+					apertureId: crossing.aperture.id,
+					id: crossing.id,
+				});
+			target.apertureId = crossing.aperture.id;
+			target.id = crossing.id;
+		}
+		this.#visibleCrossings.length = crossings.length;
+	}
+
+	#traverseScopes(camera: Camera, origin: SceneScope): void {
+		this.#reachableScopeKeys.clear();
+		this.#reachableScopeKeys.add(scopeKey(origin));
+		this.#pendingScopes.length = 0;
+		this.#pendingScopes.push(origin);
+		this.#traversedCrossings.length = 0;
+		while (this.#pendingScopes.length > 0) {
+			const scope = this.#pendingScopes.pop();
 			if (!scope) continue;
 			for (const crossing of this.#portalCrossings.values()) {
 				if (
@@ -310,14 +352,13 @@ export class SceneGraph {
 				) {
 					continue;
 				}
-				crossings.push(crossing);
+				this.#traversedCrossings.push(crossing);
 				const targetKey = scopeKey(crossing.target);
-				if (reachable.has(targetKey)) continue;
-				reachable.add(targetKey);
-				pending.push(crossing.target);
+				if (this.#reachableScopeKeys.has(targetKey)) continue;
+				this.#reachableScopeKeys.add(targetKey);
+				this.#pendingScopes.push(crossing.target);
 			}
 		}
-		return { crossings, reachable };
 	}
 
 	#frustumIntersectsEntry(camera: Camera, entry: SpatialEntry): boolean {
@@ -343,8 +384,8 @@ function createSceneNodeRecord(
 	const fields = {
 		children: new Set<SceneNodeId>(),
 		id: nodeId,
-		localBounds: input.localBounds,
-		localTransform: input.localTransform,
+		localBounds: input.localBounds?.clone() ?? null,
+		localTransform: input.localTransform.clone(),
 	};
 	if (input.parentId === null) {
 		return {
@@ -357,5 +398,30 @@ function createSceneNodeRecord(
 	return {
 		...fields,
 		parentId: input.parentId,
+	};
+}
+
+function copyResolvedPlacement(
+	placement: ResolvedScenePlacement,
+): ResolvedScenePlacement {
+	return {
+		...placement,
+		localToLandblock: placement.localToLandblock.clone(),
+	};
+}
+
+function copyPortalCrossing(
+	crossing: ScenePortalCrossingInput,
+): ScenePortalCrossingInput {
+	return {
+		aperture: {
+			...crossing.aperture,
+			indices: new Uint32Array(crossing.aperture.indices),
+			landblockBounds: crossing.aperture.landblockBounds.clone(),
+			vertices: new Float32Array(crossing.aperture.vertices),
+		},
+		id: crossing.id,
+		source: { ...crossing.source },
+		target: { ...crossing.target },
 	};
 }

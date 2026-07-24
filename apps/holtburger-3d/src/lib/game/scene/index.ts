@@ -94,17 +94,16 @@ export type SceneNodeInput = SceneNodeFields &
 
 /** Result of a spatial query against the canonical scene graph. */
 export interface VisibleScene {
-	/** Bounded nodes selected by the spatial query with their indexed placement snapshot. */
-	readonly entries: readonly VisibleSceneEntry[];
-	/** Directed crossings accepted during scoped traversal. */
-	readonly crossings: readonly ScenePortalCrossingInput[];
+	/** Bounded node IDs selected by the spatial query. Contents are overwritten by the next query. */
+	readonly entries: readonly SceneNodeId[];
+	/** Directed portal selections accepted during scoped traversal. Contents are overwritten by the next query. */
+	readonly crossings: readonly VisiblePortalCrossing[];
 }
 
-/** One bounded node selected by a spatial query. */
-export interface VisibleSceneEntry {
-	readonly nodeId: SceneNodeId;
-	/** Inherited residency and transform already used to place this entry in its index. */
-	readonly placement: ResolvedScenePlacement;
+/** Primitive portal selection emitted by a frame-scoped spatial query. */
+export interface VisiblePortalCrossing {
+	readonly id: PortalCrossingId;
+	readonly apertureId: ScenePortalCrossingInput["aperture"]["id"];
 }
 
 export { SceneGraph } from "./scene-graph";

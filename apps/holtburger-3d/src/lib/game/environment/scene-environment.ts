@@ -11,7 +11,7 @@ export interface ExplorerEnvironmentSelection {
 }
 
 /** RGBA color normalized for renderer frame input. */
-export interface SceneColor {
+interface SceneColor {
 	readonly red: number;
 	readonly green: number;
 	readonly blue: number;

@@ -223,7 +223,7 @@ const manifestSchema = z.object({
 });
 
 /** Full typed static records installed for one immutable active content scope. */
-export type ActiveRegionData = z.infer<typeof activeRegionDataSchema>;
+type ActiveRegionData = z.infer<typeof activeRegionDataSchema>;
 
 /** Immutable frontend cache value for the host-selected active region. */
 export interface ActiveRegionSource {

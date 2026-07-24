@@ -1,4 +1,4 @@
-import type { AABB3, Mat4, Vec3 } from "../math/types";
+import { Vec3, type AABB3, type Mat4 } from "../math/types";
 import type { EnvCellId } from "../game-types";
 import { multiplyMat4, transformAABB3 } from "../math/matrices";
 import { containsPoint, translateBounds } from "../math/geometry-utils";
@@ -171,17 +171,20 @@ export class SceneGraph {
 	 */
 	queryFrustum(camera: Camera, origin: SceneScope): VisibleScene {
 		const { crossings, reachable } = this.#traverseScopes(camera, origin);
+		const entries: Array<VisibleScene["entries"][number]> = [];
+		for (const entry of this.#spatialEntries.values()) {
+			if (
+				reachable.has(scopeKey(entry.placement.scope)) &&
+				this.#frustumIntersectsEntry(camera, entry)
+			) {
+				entries.push({
+					nodeId: entry.nodeId,
+					placement: entry.placement,
+				});
+			}
+		}
 		return {
-			entries: [...this.#spatialEntries.values()]
-				.filter(
-					(entry) =>
-						reachable.has(scopeKey(entry.placement.scope)) &&
-						this.#frustumIntersectsEntry(camera, entry),
-				)
-				.map(({ nodeId, placement }) => ({
-					nodeId,
-					placement,
-				})),
+			entries,
 			crossings,
 		};
 	}
@@ -197,24 +200,22 @@ export class SceneGraph {
 		const landblockId = landblockAtWorldPoint(point);
 		if (!landblockId) return null;
 
-		const containingCell = [...this.#envCellScopes.values()].find(
-			({ landblockBounds, scope }) =>
-				scope.landblockId === landblockId &&
-				landblockBounds !== null &&
-				containsPoint(
-					translateBounds(
-						landblockBounds,
-						createLandblockWorldOrigin(scope.landblockId),
-					),
-					point,
-				),
-		);
-		return containingCell
-			? {
-					envCellId: containingCell.scope.envCellId,
-					landblockId: containingCell.scope.landblockId,
+		const localPoint = new Vec3(0, 0, 0);
+		for (const { landblockBounds, scope } of this.#envCellScopes.values()) {
+			if (scope.landblockId === landblockId && landblockBounds !== null) {
+				const origin = createLandblockWorldOrigin(scope.landblockId);
+				localPoint.x = point.x - origin.x;
+				localPoint.y = point.y - origin.y;
+				localPoint.z = point.z - origin.z;
+				if (containsPoint(landblockBounds, localPoint)) {
+					return {
+						envCellId: scope.envCellId,
+						landblockId: scope.landblockId,
+					};
 				}
-			: { envCellId: null, landblockId };
+			}
+		}
+		return { envCellId: null, landblockId };
 	}
 
 	/** Return the current world-space bounds for one installed environment-cell scope. */

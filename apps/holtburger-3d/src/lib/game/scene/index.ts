@@ -14,7 +14,10 @@ export interface SceneResidency {
 
 /** Visibility and spatial-query scope derived from a root's residency. */
 export type SceneScope =
-	| { readonly kind: "outdoor"; readonly landblockId: LandblockId }
+	| {
+			/** All resident outdoor nodes share one connected visibility scope. */
+			readonly kind: "outdoor";
+	  }
 	| {
 			readonly kind: "env-cell";
 			readonly landblockId: LandblockId;
@@ -93,7 +96,7 @@ export type SceneNodeInput = SceneNodeFields &
 export interface VisibleScene {
 	/** Bounded nodes selected by the spatial query with their indexed placement snapshot. */
 	readonly entries: readonly VisibleSceneEntry[];
-	/** Directed crossings accepted during a future scoped traversal. */
+	/** Directed crossings accepted during scoped traversal. */
 	readonly crossings: readonly ScenePortalCrossingInput[];
 }
 

@@ -95,7 +95,6 @@ export class RenderWorld {
 			camera.placement.envCellId === null
 				? {
 						kind: "outdoor" as const,
-						landblockId: camera.placement.landblockId,
 					}
 				: {
 						envCellId: camera.placement.envCellId,

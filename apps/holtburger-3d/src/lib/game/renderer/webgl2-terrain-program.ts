@@ -12,9 +12,11 @@ uniform mat4 uProjection;
 uniform mat4 uView;
 uniform mat4 uLocalToLandblock;
 uniform vec3 uLandblockOffset;
+uniform vec2 uCameraHorizontalPosition;
 
 out vec2 vGridUv;
 out float vViewDepth;
+out float vHorizontalDistance;
 
 void main() {
 	vec3 landblockPosition = (uLocalToLandblock * vec4(aPosition, 1.0)).xyz;
@@ -24,6 +26,7 @@ void main() {
 	// This renderer looks down camera-local -Z. Retail's detail fade uses positive
 	// camera-forward depth rather than radial distance from the camera.
 	vViewDepth = -viewPosition.z;
+	vHorizontalDistance = length(anchoredPosition.xz - uCameraHorizontalPosition);
 	gl_Position = uProjection * viewPosition;
 }
 `;
@@ -50,6 +53,7 @@ uniform vec3 uFogColor;
 
 in vec2 vGridUv;
 in float vViewDepth;
+in float vHorizontalDistance;
 out vec4 fragmentColor;
 
 const uint ROAD_TERRAIN_TYPE = 32u;
@@ -220,7 +224,11 @@ void main() {
 	float fade = clamp((uDetailFadeFar - vViewDepth) / max(uDetailFadeFar - uDetailFadeNear, 0.0001), 0.0, 1.0);
 	color = mix(color, detail.rgb, clamp(detail.a * fade, 0.0, 1.0));
 	if (uFogEnabled != 0) {
-		float fog = clamp((vViewDepth - uFogNear) / max(uFogFar - uFogNear, 0.0001), 0.0, 1.0);
+		float fogLinear = clamp((vHorizontalDistance - uFogNear) / max(uFogFar - uFogNear, 0.0001), 0.0, 1.0);
+		// Cubic ease keeps nearby terrain clear while still converging exactly to the clear color
+		// at the terrain-coverage boundary.  This explicit form also remains defined when the
+		// coverage range collapses at an edge.
+		float fog = fogLinear * fogLinear * (3.0 - 2.0 * fogLinear);
 		color = mix(color, uFogColor, fog);
 	}
 	fragmentColor = vec4(color, 1.0);
@@ -232,6 +240,7 @@ export interface WebGL2TerrainProgram {
 	readonly program: WebGLProgram;
 	readonly uniforms: {
 		readonly blendMasks: WebGLUniformLocation;
+		readonly cameraHorizontalPosition: WebGLUniformLocation;
 		readonly colors: WebGLUniformLocation;
 		readonly composition: WebGLUniformLocation;
 		readonly detail: WebGLUniformLocation;
@@ -283,6 +292,11 @@ export function createWebGL2TerrainProgram(
 			program,
 			uniforms: {
 				blendMasks: requireWebGL2Uniform(gl, program, "uBlendMasks"),
+				cameraHorizontalPosition: requireWebGL2Uniform(
+					gl,
+					program,
+					"uCameraHorizontalPosition",
+				),
 				colors: requireWebGL2Uniform(gl, program, "uColors"),
 				composition: requireWebGL2Uniform(gl, program, "uComposition"),
 				detail: requireWebGL2Uniform(gl, program, "uDetail"),

@@ -58,6 +58,10 @@ import type {
 } from "./scene-availability";
 import type { TerrainSurfaceSample } from "../terrain/terrain-surface";
 import type { ResolvedSceneEnvironment } from "../environment/scene-environment";
+import {
+	resolveTerrainCoverageFog,
+	type TerrainFogCoverage,
+} from "../environment/terrain-fog";
 
 const DEFAULT_CAMERA: Camera = {
 	near: 0.5,
@@ -139,6 +143,8 @@ export class GameRuntime {
 	#camera: Camera = DEFAULT_CAMERA;
 	/** Frontend-owned static regional presentation state for every render frame. */
 	#environment: ResolvedSceneEnvironment = DEFAULT_ENVIRONMENT;
+	/** Terrain interest constraining the frontend's effective distance-fog range. */
+	#terrainFogCoverage: TerrainFogCoverage | null = null;
 	/** Static layers currently requested or retained independently of the camera. */
 	#sceneInterest: SceneInterestMap = new Map();
 	/** Prevents new work and late async publication after runtime shutdown begins. */
@@ -219,6 +225,10 @@ export class GameRuntime {
 	/** Replace frontend-owned static content interest without moving the camera. */
 	updateSceneInterest(request: SceneInterestRequest): SceneInterestReceipt {
 		validateLoDConfigOrThrow(request.lod);
+		this.#terrainFogCoverage = {
+			anchorLandblockId: request.anchorLandblockId,
+			terrainRadius: request.lod.terrainRadius,
+		};
 		return this.#applySceneInterest(
 			computeSceneInterest(request.anchorLandblockId, request.lod),
 		);
@@ -226,6 +236,7 @@ export class GameRuntime {
 
 	/** Evict every frontend-requested static layer without moving the camera. */
 	clearSceneInterest(): SceneInterestReceipt {
+		this.#terrainFogCoverage = null;
 		return this.#applySceneInterest(new Map());
 	}
 
@@ -299,7 +310,14 @@ export class GameRuntime {
 		if (!renderer) throw new Error("Game runtime has no renderer device.");
 		renderer.drawFrame({
 			anchorLandblockId: this.#camera.placement.landblockId,
-			environment: this.#environment,
+			environment: {
+				...this.#environment,
+				distanceFog: resolveTerrainCoverageFog(
+					this.#environment.distanceFog,
+					this.#terrainFogCoverage,
+					this.#camera.placement.position,
+				),
+			},
 			timeSeconds,
 			views: [{ camera: this.#camera }],
 		});

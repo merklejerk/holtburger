@@ -446,8 +446,8 @@ Deliverables:
 - Add resolved environment state to the frontend runtime/frame input.
 - Establish a common view-environment binding contract rather than adding terrain-only global
   policy fields.
-- Apply linear distance fog to terrain after terrain composition and detail blending, using
-  camera-space forward depth.
+- Apply eased distance fog to terrain after terrain composition and detail blending, using
+  horizontal camera distance in the terrain plane.
 - Where the current renderer has no sky pass, clear the display surface to the resolved distance
   fog color when fog is active; otherwise clear to the resolved sky/background color. Terrain fog
   and the clear color must consume the same resolved environment input.
@@ -457,7 +457,8 @@ Acceptance criteria:
 - Explorer fog changes visibly and continuously as its selected time/day-group changes.
 - Fully fogged terrain converges into the display-surface clear color without a horizon seam while
   no sky pass exists.
-- Fog does not alter scene interest, residency, terrain LOD choice, or asset retention.
+- Fog derives its effective range from frontend-owned terrain interest without changing scene
+  interest, residency, terrain LOD choice, or asset retention.
 - Terrain detail fade remains an independent material rule and keeps its retail 10–50 forward-depth
   behavior.
 - The renderer can hand the same resolved lighting/sky values to future static/object/sky passes
@@ -468,12 +469,28 @@ Acceptance criteria:
 - `GameRuntime` accepts frontend-resolved environment state independently of residency and scene
   interest, then supplies it to every `FrameInput`. This preserves the intended future host-client
   swap: only the selection producer changes.
-- Terrain fog is a camera-forward-depth blend applied after terrain composition and detail. The
-  WebGL frame clear uses that exact fog color while fog is active, otherwise the resolved regional
-  background color, preventing the terrain horizon from fading into a stale fixed clear color.
+- Terrain fog applies after terrain composition and detail. The WebGL frame clear uses that exact
+  fog color while fog is active, otherwise the resolved regional background color, preventing the
+  terrain horizon from fading into a stale fixed clear color.
 - Verification: synthetic cyclic-fog resolver tests, app type checks, 113 TypeScript tests,
   terrain shader compile validation, formatter, strict 3D clippy, and diff whitespace checks
   passed on 2026-07-23. Visual review remains user-owned; no GUI app was launched.
+
+#### Follow-on implementation record — 2026-07-24
+
+- Retail keeps `LScape::mid_radius` and authored region fog ranges independent. Explorer instead
+  deliberately derives the effective fog range from its retained terrain window so increasing
+  terrain distance does not load terrain behind an unchanged fog wall.
+- `terrain-fog.ts` retains the region-authored fog color and near/far ratio, but maps its far edge
+  to the nearest X/Z edge of the configured terrain window around the current camera. It ignores
+  world-up and fully fogs the view at or beyond that window edge.
+- The terrain shader now uses the same horizontal radial distance for fog. Retail-compatible
+  terrain-detail fade remains independently camera-forward-depth based.
+- The fog blend uses a cubic smoothstep-equivalent curve instead of a linear ramp, retaining the
+  same safe endpoints while reducing visible haze across the near portion of the terrain window.
+- Verification: 118 TypeScript tests, app type checks, terrain shader compilation, Prettier, and
+  diff whitespace checks passed on 2026-07-24. Visual review remains user-owned; no GUI app was
+  launched.
 
 Checklist:
 

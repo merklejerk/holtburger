@@ -2,11 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
 	createLandblockOffset,
 	createLandblockWorldOrigin,
+	createOutdoorTerrainWindowBounds,
 	getLandblockCoordinates,
 	landblockAtWorldPoint,
 	OUTDOOR_LANDBLOCK_WORLD_SIZE,
 } from "./landblocks";
-import { Vec3 } from "./math/types";
+import { AABB2, Vec2, Vec3 } from "./math/types";
 
 describe("landblock coordinates", () => {
 	it("decodes outdoor coordinates from prefixed and unprefixed ids", () => {
@@ -31,6 +32,15 @@ describe("landblock coordinates", () => {
 			),
 		);
 		expect(landblockAtWorldPoint(new Vec3(193, 20, -385))).toBe("0x0102ffff");
+	});
+
+	it("creates a world X/Z terrain window with the outdoor-grid edge clamped", () => {
+		expect(createOutdoorTerrainWindowBounds("0x0000ffff", 1)).toEqual(
+			new AABB2(
+				new Vec2(0, -OUTDOOR_LANDBLOCK_WORLD_SIZE * 2),
+				new Vec2(OUTDOOR_LANDBLOCK_WORLD_SIZE * 2, 0),
+			),
+		);
 	});
 
 	it("rejects scene-space points outside the outdoor grid", () => {

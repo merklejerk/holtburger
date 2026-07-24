@@ -42,6 +42,8 @@ interface TerrainFrameInput {
 
 /** Anchor-relative matrices and content reused by all passes for one view. */
 interface PreparedView {
+	/** Camera position expressed in the view's anchor-relative render frame. */
+	readonly cameraPosition: Vec3;
 	/** Projection matrix derived from the current drawing-buffer aspect ratio. */
 	readonly projection: Mat4;
 	/** Terrain selected by this renderer from its RenderWorld. */
@@ -138,6 +140,7 @@ export class WebGL2Renderer implements Renderer {
 		const aspectRatio = this.#frameWidth / Math.max(1, this.#frameHeight);
 		return {
 			anchorLandblockId,
+			cameraPosition,
 			projection: createPerspectiveMat4(
 				camera.fov,
 				aspectRatio,
@@ -217,6 +220,11 @@ export class WebGL2Renderer implements Renderer {
 			this.#terrainProgram.uniforms.projection,
 			false,
 			mat4ToFloat32Array(view.projection),
+		);
+		gl.uniform2f(
+			this.#terrainProgram.uniforms.cameraHorizontalPosition,
+			view.cameraPosition.x,
+			view.cameraPosition.z,
 		);
 		gl.uniformMatrix4fv(
 			this.#terrainProgram.uniforms.view,

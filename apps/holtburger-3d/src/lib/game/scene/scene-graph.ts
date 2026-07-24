@@ -9,7 +9,6 @@ import {
 	getLandblockCoordinates,
 	landblockAtWorldPoint,
 } from "../landblocks";
-import type { Camera } from "../runtime/types";
 import type {
 	SceneNode,
 	SceneNodeId,
@@ -28,6 +27,7 @@ import { scopeFor, sameScope, scopeKey } from "./scope";
 import { createSceneNodeId } from "./utils";
 
 type SceneNodeRecord = {
+	cullingGroup: string;
 	id: SceneNodeId;
 	localBounds: AABB3 | null;
 	localTransform: Mat4;
@@ -45,10 +45,22 @@ type SceneNodeRecord = {
 
 /** Derived landblock-local entry used by the composed spatial index. */
 interface SpatialEntry {
+	readonly cullingGroup: string;
 	readonly nodeId: SceneNodeId;
 	readonly placement: ResolvedScenePlacement;
 	/** Conservative bounds in the root landblock coordinate frame. */
 	readonly landblockBounds: AABB3;
+}
+
+interface CullingGroup {
+	/** Exact scene entries guarded by this aggregate broad-phase bounds. */
+	readonly entries: Set<SceneNodeId>;
+	/** Retained bounds buffer, lazily rebuilt after membership or bounds changes. */
+	bounds: AABB3 | null;
+	/** Whether the retained aggregate must be rebuilt before its next query. */
+	dirty: boolean;
+	/** Root-landblock coordinate frame shared by all member entry bounds. */
+	readonly landblockId: ScenePlacement["landblockId"];
 }
 
 /** Mutable backing record for one frame-scoped portal selection buffer slot. */
@@ -59,8 +71,13 @@ interface VisiblePortalCrossingBufferSlot {
 
 export class SceneGraph {
 	readonly #nodes = new Map<SceneNodeId, SceneNodeRecord>();
-	/** Brute-force stand-in for the composed per-landblock spatial index. */
+	/** Entries remain individually addressable for exact post-group frustum tests. */
 	readonly #spatialEntries = new Map<SceneNodeId, SpatialEntry>();
+	/** Scope -> landblock -> producer group -> aggregate bounds and member entries. */
+	readonly #cullingGroups = new Map<
+		string,
+		Map<ScenePlacement["landblockId"], Map<string, CullingGroup>>
+	>();
 	readonly #envCellScopes = new Map<EnvCellId, SceneEnvCellScopeInput>();
 	readonly #portalCrossings = new Map<
 		PortalCrossingId,
@@ -167,7 +184,7 @@ export class SceneGraph {
 		if (node.parentId !== null) {
 			this.#requireNode(node.parentId).children.delete(nodeId);
 		}
-		this.#spatialEntries.delete(nodeId);
+		this.#removeSpatialEntry(nodeId);
 		this.#nodes.delete(nodeId);
 	}
 
@@ -206,39 +223,41 @@ export class SceneGraph {
 	/**
 	 * Conservatively query the scopes reachable through apertures intersecting the original frustum.
 	 *
-	 * Node and aperture intersection remain always-pass stubs. Future spatial tests must use the
-	 * original camera volume throughout traversal rather than clipping it at each aperture.
+	 * Apertures use broad AABB plus facing tests; nodes use broad AABB tests. Future portal clipping
+	 * must preserve the original camera volume for downstream scope traversal.
 	 */
 	queryFrustum(
 		frustum: Frustum,
 		anchorLandblockId: ScenePlacement["landblockId"],
 		origin: SceneScope,
-	): VisibleScene;
-	queryFrustum(camera: Camera, origin: SceneScope): VisibleScene;
-	queryFrustum(
-		frustumOrCamera: Frustum | Camera,
-		anchorOrOrigin: ScenePlacement["landblockId"] | SceneScope,
-		maybeOrigin?: SceneScope,
 	): VisibleScene {
-		const usesCompleteFrustum = maybeOrigin !== undefined;
-		const frustum: Frustum = usesCompleteFrustum
-			? (frustumOrCamera as Frustum)
-			: {
-					cameraPosition: (frustumOrCamera as Camera).placement.position,
-					planes: [],
-				};
-		const anchorLandblockId = usesCompleteFrustum
-			? (anchorOrOrigin as ScenePlacement["landblockId"])
-			: (frustumOrCamera as Camera).placement.landblockId;
-		const origin = (maybeOrigin ?? anchorOrOrigin) as SceneScope;
 		this.#traverseScopes(frustum, anchorLandblockId, origin);
 		this.#visibleEntries.length = 0;
-		for (const entry of this.#spatialEntries.values()) {
-			if (
-				this.#reachableScopeKeys.has(scopeKey(entry.placement.scope)) &&
-				this.#frustumIntersectsEntry(frustum, anchorLandblockId, entry)
-			) {
-				this.#visibleEntries.push(entry.nodeId);
+		for (const scope of this.#reachableScopeKeys) {
+			const landblockGroups = this.#cullingGroups.get(scope);
+			if (!landblockGroups) continue;
+			for (const groups of landblockGroups.values()) {
+				for (const group of groups.values()) {
+					const bounds = this.#resolveCullingGroupBounds(group);
+					if (
+						!bounds ||
+						!this.#frustumIntersectsLandblockBounds(
+							frustum,
+							anchorLandblockId,
+							group.landblockId,
+							bounds,
+						)
+					)
+						continue;
+					for (const nodeId of group.entries) {
+						const entry = this.#spatialEntries.get(nodeId);
+						if (
+							entry &&
+							this.#frustumIntersectsEntry(frustum, anchorLandblockId, entry)
+						)
+							this.#visibleEntries.push(nodeId);
+					}
+				}
 			}
 		}
 		this.#syncVisibleCrossings(this.#traversedCrossings);
@@ -315,28 +334,99 @@ export class SceneGraph {
 	}
 
 	#syncSpatialEntry(node: SceneNodeRecord): void {
-		if (node.localBounds === null || !this.#isResolved(node.id)) {
-			this.#spatialEntries.delete(node.id);
-		} else {
-			const placement = this.#resolvePlacement(node.id);
-			this.#spatialEntries.set(node.id, {
-				landblockBounds: transformAABB3(
-					placement.localToLandblock,
-					node.localBounds,
-					this.#spatialEntries.get(node.id)?.landblockBounds,
-				),
-				nodeId: node.id,
-				placement,
-			});
+		const existingEntry = this.#spatialEntries.get(node.id);
+		const existingBounds = existingEntry?.landblockBounds;
+		if (node.localBounds === null) {
+			this.#removeSpatialEntry(node.id);
+			return;
+		}
+		const placement = this.#resolvePlacement(node.id);
+		if (
+			placement.envCellId !== null &&
+			!this.#envCellScopes.has(placement.envCellId)
+		) {
+			this.#removeSpatialEntry(node.id);
+			return;
+		}
+		const retainsCullingGroup =
+			existingEntry !== undefined &&
+			existingEntry.cullingGroup === node.cullingGroup &&
+			existingEntry.placement.landblockId === placement.landblockId &&
+			sameScope(existingEntry.placement.scope, placement.scope);
+		this.#removeSpatialEntry(node.id, !retainsCullingGroup);
+		this.#spatialEntries.set(node.id, {
+			landblockBounds: transformAABB3(
+				placement.localToLandblock,
+				node.localBounds,
+				existingBounds,
+			),
+			cullingGroup: node.cullingGroup,
+			nodeId: node.id,
+			placement,
+		});
+		this.#addSpatialEntry(this.#spatialEntries.get(node.id)!);
+	}
+
+	#removeSpatialEntry(nodeId: SceneNodeId, pruneEmptyGroup = true): void {
+		const entry = this.#spatialEntries.get(nodeId);
+		if (!entry) return;
+		this.#spatialEntries.delete(nodeId);
+		const scope = scopeKey(entry.placement.scope);
+		const landblockGroups = this.#cullingGroups.get(scope);
+		const groups = landblockGroups?.get(entry.placement.landblockId);
+		const group = groups?.get(entry.cullingGroup);
+		group?.entries.delete(nodeId);
+		if (group) group.dirty = true;
+		if (pruneEmptyGroup && group?.entries.size === 0) {
+			groups?.delete(entry.cullingGroup);
+			if (groups?.size === 0) landblockGroups?.delete(entry.placement.landblockId);
+			if (landblockGroups?.size === 0) this.#cullingGroups.delete(scope);
 		}
 	}
 
-	#isResolved(nodeId: SceneNodeId): boolean {
-		const placement = this.#resolvePlacement(nodeId);
-		return (
-			placement.envCellId === null ||
-			this.#envCellScopes.has(placement.envCellId)
-		);
+	#addSpatialEntry(entry: SpatialEntry): void {
+		const scope = scopeKey(entry.placement.scope);
+		let landblockGroups = this.#cullingGroups.get(scope);
+		if (!landblockGroups)
+			this.#cullingGroups.set(scope, (landblockGroups = new Map()));
+		let groups = landblockGroups.get(entry.placement.landblockId);
+		if (!groups)
+			landblockGroups.set(entry.placement.landblockId, (groups = new Map()));
+		let group = groups.get(entry.cullingGroup);
+		if (!group)
+			groups.set(
+				entry.cullingGroup,
+				(group = {
+					bounds: null,
+					dirty: true,
+					entries: new Set(),
+					landblockId: entry.placement.landblockId,
+				}),
+			);
+		group.entries.add(entry.nodeId);
+		group.dirty = true;
+	}
+
+	#resolveCullingGroupBounds(group: CullingGroup): AABB3 | null {
+		if (!group.dirty) return group.bounds;
+		let hasBounds = false;
+		for (const nodeId of group.entries) {
+			const bounds = this.#spatialEntries.get(nodeId)?.landblockBounds;
+			if (!bounds) continue;
+			if (!hasBounds) {
+				group.bounds = (group.bounds ?? bounds.clone()).copy(bounds);
+				hasBounds = true;
+			}
+			else {
+				const groupBounds = group.bounds;
+				if (!groupBounds)
+					throw new Error("Culling group lost bounds during aggregation.");
+				groupBounds.union(bounds);
+			}
+		}
+		if (!hasBounds) group.bounds = null;
+		group.dirty = false;
+		return group.bounds;
 	}
 
 	#syncEnvCellRoots(envCellId: EnvCellId): void {
@@ -396,18 +486,26 @@ export class SceneGraph {
 		anchorLandblockId: ScenePlacement["landblockId"],
 		entry: SpatialEntry,
 	): boolean {
+		return this.#frustumIntersectsLandblockBounds(
+			frustum,
+			anchorLandblockId,
+			entry.placement.landblockId,
+			entry.landblockBounds,
+		);
+	}
+
+	#frustumIntersectsLandblockBounds(
+		frustum: Frustum,
+		anchorLandblockId: ScenePlacement["landblockId"],
+		landblockId: ScenePlacement["landblockId"],
+		bounds: AABB3,
+	): boolean {
 		const offset = createLandblockOffset(
-			getLandblockCoordinates(entry.placement.landblockId),
+			getLandblockCoordinates(landblockId),
 			getLandblockCoordinates(anchorLandblockId),
 			this.#queryOffset,
 		);
-		return frustumIntersectsAABB(
-			frustum,
-			entry.landblockBounds,
-			offset.x,
-			offset.y,
-			offset.z,
-		);
+		return frustumIntersectsAABB(frustum, bounds, offset.x, offset.y, offset.z);
 	}
 
 	#frustumIntersectsAperture(
@@ -440,6 +538,7 @@ function createSceneNodeRecord(
 ): SceneNodeRecord {
 	const fields = {
 		children: new Set<SceneNodeId>(),
+		cullingGroup: input.cullingGroup ?? "default",
 		id: nodeId,
 		localBounds: input.localBounds?.clone() ?? null,
 		localTransform: input.localTransform.clone(),

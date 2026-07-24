@@ -7,7 +7,7 @@ import {
 } from "../commit/types";
 import { createLandblockWorldOrigin } from "../landblocks";
 import { Quat, Vec3 } from "../math/types";
-import type { Renderer } from "../renderer/renderer";
+import type { FrameSelectionMetrics, Renderer } from "../renderer/renderer";
 import type { RendererResourceManager } from "../renderer/resource-manager";
 import { LandblockLayerKind, type LandblockIdLayer } from "./scene-interest";
 import { GameRuntime, type GameRuntimeRenderDevice } from "./game-runtime";
@@ -17,11 +17,21 @@ describe("GameRuntime view and interest control", () => {
 	it("keeps frontend scene interest independent from the primary camera", async () => {
 		const requestedLayers: LandblockIdLayer[] = [];
 		const frames: Parameters<Renderer["drawFrame"]>[0][] = [];
+		const frameSelectionMetrics: FrameSelectionMetrics = {
+			terrainFrameInputs: 2,
+			viewCount: 1,
+			visibleDynamics: 3,
+			visibleEnvCellShells: 5,
+			visiblePortalCrossings: 7,
+			visibleSceneEntries: 11,
+			visibleStaticObjects: 13,
+		};
 		const renderer: Renderer = {
 			async destroy() {},
 			drawFrame(input) {
 				frames.push(input);
 			},
+			getFrameSelectionMetrics: () => frameSelectionMetrics,
 		};
 		const pipeline: CommitPipeline = {
 			async destroy() {},
@@ -72,6 +82,7 @@ describe("GameRuntime view and interest control", () => {
 		runtime.setFrameSettings({ distanceFogEnabled: false });
 		runtime.render(2);
 		expect(frames[1]?.frameSettings).toEqual({ distanceFogEnabled: false });
+		expect(runtime.getFrameSelectionMetrics()).toEqual(frameSelectionMetrics);
 		const queriedPoint = createLandblockWorldOrigin("0x0102ffff").add(
 			new Vec3(1, 10, -1),
 		);

@@ -1,21 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { createLandblockWorldOrigin } from "../landblocks";
-import { createTranslationMat4, getMat4Translation } from "../math/matrices";
+import {
+	createPerspectiveMat4,
+	createTranslationMat4,
+	createViewMat4,
+	getMat4Translation,
+} from "../math/matrices";
+import { createFrustum, type Frustum } from "../math/frustum";
 import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
 import type { SceneNodeId, ScenePortalCrossingInput, SceneScope } from ".";
 import { SceneGraph } from ".";
-
-const camera = {
-	far: 800,
-	fov: 90,
-	near: 0.5,
-	placement: {
-		envCellId: null,
-		landblockId: "0x0001ffff",
-		position: Vec3.zero(),
-		rotation: Quat.identity(),
-	},
-};
 
 const rootPlacement = {
 	envCellId: null,
@@ -33,6 +27,17 @@ const boundedChildFields = {
 	localBounds: AABB3.zero(),
 	localTransform: Mat4.identity(),
 };
+
+const TEST_FRUSTUM = createFrustum(
+	createPerspectiveMat4(90, 1, 1, 100),
+	createViewMat4(Vec3.zero(), Quat.identity()),
+	Vec3.zero(),
+);
+
+const TOPOLOGY_FRUSTUM = {
+	cameraPosition: Vec3.zero(),
+	planes: [],
+} as const satisfies Frustum;
 
 describe("SceneGraph", () => {
 	it("returns inherited root placement beside selected bounded descendants", () => {
@@ -130,28 +135,65 @@ describe("SceneGraph", () => {
 			parentId: rootId,
 		});
 
-		expect(
-			scene.queryFrustum(camera, {
-				kind: "outdoor",
-			}).entries,
-		).toEqual([childId]);
+		expect(queryTopology(scene, { kind: "outdoor" }).entries).toEqual([childId]);
 
 		scene.updateBounds(childId, null);
-		expect(
-			scene.queryFrustum(camera, {
-				kind: "outdoor",
-			}).entries,
-		).toEqual([]);
+		expect(queryTopology(scene, { kind: "outdoor" }).entries).toEqual([]);
 	});
 
 	it("reuses a primitive visibility selection buffer", () => {
 		const scene = new SceneGraph();
 		const nodeId = createBoundedRoot(scene, "0x0001ffff", null);
-		const first = scene.queryFrustum(camera, { kind: "outdoor" });
-		const second = scene.queryFrustum(camera, { kind: "outdoor" });
+		const first = queryTopology(scene, { kind: "outdoor" });
+		const second = queryTopology(scene, { kind: "outdoor" });
 
 		expect(first).toBe(second);
 		expect(second.entries).toEqual([nodeId]);
+	});
+
+	it("rebuilds dirty culling-group bounds after member changes", () => {
+		const scene = new SceneGraph();
+		const visible = scene.createNode({
+			cullingGroup: "static",
+			envCellId: null,
+			landblockId: "0x0001ffff",
+			localBounds: new AABB3(new Vec3(-1, -1, -5), new Vec3(1, 1, -3)),
+			localTransform: Mat4.identity(),
+			parentId: null,
+		});
+		const hidden = scene.createNode({
+			cullingGroup: "static",
+			envCellId: null,
+			landblockId: "0x0001ffff",
+			localBounds: new AABB3(new Vec3(90, -1, -5), new Vec3(92, 1, -3)),
+			localTransform: Mat4.identity(),
+			parentId: null,
+		});
+
+		expect(
+			scene.queryFrustum(TEST_FRUSTUM, "0x0001ffff", outdoorScope()).entries,
+		).toEqual([visible]);
+		scene.updateBounds(
+			hidden,
+			new AABB3(new Vec3(-1, -1, -8), new Vec3(1, 1, -6)),
+		);
+		expect(
+			scene.queryFrustum(TEST_FRUSTUM, "0x0001ffff", outdoorScope()).entries,
+		).toEqual([visible, hidden]);
+		scene.destroyNode(hidden);
+		expect(
+			scene.queryFrustum(TEST_FRUSTUM, "0x0001ffff", outdoorScope()).entries,
+		).toEqual([visible]);
+	});
+
+	it("keeps culling groups independent within one landblock", () => {
+		const scene = new SceneGraph();
+		const terrain = createGroupedRoot(scene, "terrain");
+		const staticNode = createGroupedRoot(scene, "static");
+
+		expect(
+			scene.queryFrustum(TEST_FRUSTUM, "0x0001ffff", outdoorScope()).entries,
+		).toEqual([terrain, staticNode]);
 	});
 
 	it("requires systems to destroy transform trees from leaves to roots", () => {
@@ -170,11 +212,7 @@ describe("SceneGraph", () => {
 		scene.destroyNode(grandchildId);
 		scene.destroyNode(childId);
 		scene.destroyNode(rootId);
-		expect(
-			scene.queryFrustum(camera, {
-				kind: "outdoor",
-			}).entries,
-		).toEqual([]);
+		expect(queryTopology(scene, { kind: "outdoor" }).entries).toEqual([]);
 	});
 
 	it("permits destruction of parented leaves", () => {
@@ -216,7 +254,7 @@ describe("SceneGraph", () => {
 
 		expect(scene.getNode(rootId)?.id).toBe(rootId);
 		expect(
-			scene.queryFrustum(camera, {
+			queryTopology(scene, {
 				envCellId: envCellPlacement.envCellId,
 				kind: "env-cell",
 				landblockId: envCellPlacement.landblockId,
@@ -311,7 +349,7 @@ describe("SceneGraph", () => {
 		upsertCrossing(scene, "outside-to-one", outdoor, cellOneScope);
 		upsertCrossing(scene, "one-to-two", cellOneScope, cellTwoScope);
 
-		const visible = scene.queryFrustum(camera, outdoor);
+		const visible = queryTopology(scene, outdoor);
 
 		expect(visible.entries).toEqual([outdoorOne, outdoorTwo, cellOne, cellTwo]);
 		expect(visible.entries).not.toContain(disconnectedCell);
@@ -327,8 +365,8 @@ describe("SceneGraph", () => {
 		const origin = createBoundedRoot(scene, "0x0001ffff", "cell-origin");
 		const other = createBoundedRoot(scene, "0x0001ffff", "cell-other");
 
-		const visible = scene.queryFrustum(
-			camera,
+		const visible = queryTopology(
+			scene,
 			envCellScope("0x0001ffff", "cell-origin"),
 		);
 
@@ -350,7 +388,7 @@ describe("SceneGraph", () => {
 		upsertCrossing(scene, "outside-to-target", outdoor, targetScope);
 		upsertCrossing(scene, "target-to-outside", targetScope, outdoor);
 
-		const visible = scene.queryFrustum(camera, originScope);
+		const visible = queryTopology(scene, originScope);
 
 		expect(visible.entries).toEqual([origin, outdoorOne, outdoorTwo, target]);
 		expect(visible.crossings.map(({ id }) => id)).toEqual([
@@ -369,7 +407,7 @@ describe("SceneGraph", () => {
 		upsertCrossing(scene, "one-to-two", cellOneScope, cellTwoScope);
 		upsertCrossing(scene, "two-to-one", cellTwoScope, cellOneScope);
 
-		const visible = scene.queryFrustum(camera, cellOneScope);
+		const visible = queryTopology(scene, cellOneScope);
 
 		expect(visible.entries).toEqual([cellOne, cellTwo]);
 		expect(visible.crossings.map(({ id }) => id)).toEqual([
@@ -391,15 +429,17 @@ describe("SceneGraph", () => {
 });
 
 function visiblePlacement(scene: SceneGraph, nodeId: SceneNodeId) {
-	const visible = scene
-		.queryFrustum(camera, {
-			kind: "outdoor",
-		})
-		.entries.includes(nodeId);
+	const visible = queryTopology(scene, { kind: "outdoor" }).entries.includes(
+		nodeId,
+	);
 	if (!visible) throw new Error(`Scene node ${nodeId} is not visible.`);
 	const placement = scene.getResolvedPlacement(nodeId);
 	if (!placement) throw new Error(`Scene node ${nodeId} has no placement.`);
 	return placement;
+}
+
+function queryTopology(scene: SceneGraph, origin: SceneScope) {
+	return scene.queryFrustum(TOPOLOGY_FRUSTUM, "0x0001ffff", origin);
 }
 
 function createBoundedRoot(
@@ -418,6 +458,20 @@ function createBoundedRoot(
 		envCellId,
 		landblockId,
 		localBounds: AABB3.zero(),
+		localTransform: Mat4.identity(),
+		parentId: null,
+	});
+}
+
+function createGroupedRoot(
+	scene: SceneGraph,
+	cullingGroup: string,
+): SceneNodeId {
+	return scene.createNode({
+		cullingGroup,
+		envCellId: null,
+		landblockId: "0x0001ffff",
+		localBounds: new AABB3(new Vec3(-1, -1, -5), new Vec3(1, 1, -3)),
 		localTransform: Mat4.identity(),
 		parentId: null,
 	});

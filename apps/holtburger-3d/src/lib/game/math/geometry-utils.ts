@@ -1,4 +1,4 @@
-import { AABB3, Vec3, type AABB2, type Vec2 } from "../math/types";
+import { AABB3, Vec3 } from "../math/types";
 
 export function containsPoint(bounds: AABB3, point: Vec3): boolean {
 	return (
@@ -32,28 +32,4 @@ export function translateBounds(
 		return targetBounds;
 	}
 	return new AABB3(new Vec3(minX, minY, minZ), new Vec3(maxX, maxY, maxZ));
-}
-
-/**
- * Return the radius of the largest circle around `point` that remains inside `bounds`.
- *
- * Callers provide coordinates in whichever two-dimensional plane their domain uses.  Terrain
- * callers use canonical scene X/Z coordinates, deliberately excluding world-up from distance
- * policy.
- */
-export function distanceToBoundsEdge2D(bounds: AABB2, point: Vec2): number {
-	if (
-		point.x < bounds.min.x ||
-		point.x > bounds.max.x ||
-		point.y < bounds.min.y ||
-		point.y > bounds.max.y
-	) {
-		return 0;
-	}
-	return Math.min(
-		point.x - bounds.min.x,
-		bounds.max.x - point.x,
-		point.y - bounds.min.y,
-		bounds.max.y - point.y,
-	);
 }

@@ -2,7 +2,7 @@ import type { AABB3, Mat4, Vec3 } from "./types";
 import { multiplyMat4 } from "./matrices";
 
 /** One inward-facing normalized plane in an anchor-relative render frame. */
-export interface FrustumPlane {
+interface FrustumPlane {
 	readonly x: number;
 	readonly y: number;
 	readonly z: number;

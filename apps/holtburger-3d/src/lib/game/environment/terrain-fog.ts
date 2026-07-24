@@ -1,29 +1,23 @@
-import { createOutdoorTerrainWindowBounds } from "../landblocks";
-import { distanceToBoundsEdge2D } from "../math/geometry-utils";
-import { Vec2, type Vec3 } from "../math/types";
-import type { LandblockId } from "../game-types";
+import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import type { ResolvedDistanceFog } from "./scene-environment";
 
-/** Static terrain window against which a camera's safe fog radius is resolved. */
+/** Terrain interest radius used to derive a stable presentation-only fog range. */
 export interface TerrainFogCoverage {
-	/** Outdoor landblock at the center of the retained terrain window. */
-	readonly anchorLandblockId: LandblockId;
-	/** Chebyshev landblock radius retained around the anchor. */
+	/** Chebyshev landblock radius selected for retained outdoor terrain. */
 	readonly terrainRadius: number;
 }
 
 /**
- * Rescale region-authored fog to the horizontally available terrain around one camera.
+ * Rescale region-authored fog to the selected terrain-interest radius.
  *
- * Region data retains the fog color and near/far ratio.  Terrain interest owns the absolute
- * visibility distance, so expanding its radius makes the extra terrain visible rather than
- * loading it behind an unchanged fog wall.  The coverage window is evaluated in scene X/Z only;
- * camera altitude must not affect terrain visibility policy.
+	 * Region data retains the fog color and near/far ratio. Terrain interest owns the absolute
+	 * visibility distance, so expanding its radius makes the extra terrain visible rather than
+	 * loading it behind an unchanged fog wall. The shader measures this range from its camera;
+	 * Explorer intentionally does not shrink it near the edge of a retained interest window.
  */
 export function resolveTerrainCoverageFog(
 	authoredFog: ResolvedDistanceFog | null,
 	coverage: TerrainFogCoverage | null,
-	cameraPosition: Vec3,
 ): ResolvedDistanceFog | null {
 	if (authoredFog === null || coverage === null) return authoredFog;
 	if (
@@ -35,13 +29,14 @@ export function resolveTerrainCoverageFog(
 	) {
 		throw new Error("Authored terrain fog must have a finite non-empty range.");
 	}
-	const distance = distanceToBoundsEdge2D(
-		createOutdoorTerrainWindowBounds(
-			coverage.anchorLandblockId,
-			coverage.terrainRadius,
-		),
-		new Vec2(cameraPosition.x, cameraPosition.z),
-	);
+	if (
+		!Number.isSafeInteger(coverage.terrainRadius) ||
+		coverage.terrainRadius < 0
+	) {
+		throw new Error("Terrain fog coverage requires a non-negative integer radius.");
+	}
+	const distance =
+		(coverage.terrainRadius + 0.5) * OUTDOOR_LANDBLOCK_WORLD_SIZE;
 	return {
 		near: distance * (authoredFog.near / authoredFog.far),
 		far: distance,

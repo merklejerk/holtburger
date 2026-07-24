@@ -1,5 +1,5 @@
 import type { LandblockId } from "./game-types";
-import { AABB2, Vec2, Vec3 } from "./math/types";
+import { Vec3 } from "./math/types";
 
 /** Width and depth of one outdoor landblock in AC world units. */
 export const OUTDOOR_LANDBLOCK_WORLD_SIZE = 192;
@@ -68,34 +68,6 @@ export function createLandblockWorldOrigin(
 		return targetVec;
 	}
 	return new Vec3(x, 0, z);
-}
-
-/**
- * Return the canonical scene X/Z footprint of the terrain window retained around an outdoor
- * anchor.  The world-edge clamp matches scene-interest construction.
- */
-export function createOutdoorTerrainWindowBounds(
-	anchorLandblockId: LandblockId,
-	terrainRadius: number,
-): AABB2 {
-	if (!Number.isInteger(terrainRadius) || terrainRadius < 0) {
-		throw new Error("Outdoor terrain radius must be a non-negative integer.");
-	}
-	const anchor = getLandblockCoordinates(anchorLandblockId);
-	const minX = Math.max(0, anchor.x - terrainRadius);
-	const maxX = Math.min(0xff, anchor.x + terrainRadius);
-	const minY = Math.max(0, anchor.y - terrainRadius);
-	const maxY = Math.min(0xff, anchor.y + terrainRadius);
-	return new AABB2(
-		new Vec2(
-			minX * OUTDOOR_LANDBLOCK_WORLD_SIZE,
-			-(maxY + 1) * OUTDOOR_LANDBLOCK_WORLD_SIZE,
-		),
-		new Vec2(
-			(maxX + 1) * OUTDOOR_LANDBLOCK_WORLD_SIZE,
-			minY === 0 ? 0 : -minY * OUTDOOR_LANDBLOCK_WORLD_SIZE,
-		),
-	);
 }
 
 /** Resolve the outdoor landblock containing one canonical scene-space point. */

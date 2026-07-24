@@ -109,6 +109,16 @@ export class AABB3 {
 		this.max.copy(other.max);
 		return this;
 	}
+	/** Expand these bounds in place to include every point within `other`. */
+	union(other: AABB3): this {
+		this.min.x = Math.min(this.min.x, other.min.x);
+		this.min.y = Math.min(this.min.y, other.min.y);
+		this.min.z = Math.min(this.min.z, other.min.z);
+		this.max.x = Math.max(this.max.x, other.max.x);
+		this.max.y = Math.max(this.max.y, other.max.y);
+		this.max.z = Math.max(this.max.z, other.max.z);
+		return this;
+	}
 	clone(): AABB3 {
 		return new AABB3(this.min.clone(), this.max.clone());
 	}

@@ -67,6 +67,8 @@ export interface ResolvedScenePlacement extends SceneResidency {
 }
 
 interface SceneNodeFields {
+	/** Opaque broad-phase grouping supplied by the owning system. */
+	readonly cullingGroup?: string;
 	/** Bounds in this node's local coordinate frame, or null for transform-only nodes. */
 	readonly localBounds: AABB3 | null;
 	/** Transform expressed in the parent node or root landblock coordinate frame. */

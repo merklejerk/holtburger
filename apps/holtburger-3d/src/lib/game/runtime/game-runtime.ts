@@ -13,6 +13,7 @@ import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
 import {
 	DEFAULT_FRAME_SETTINGS,
 	type FrameSettings,
+	type FrameSelectionMetrics,
 	type Renderer,
 } from "../renderer/renderer";
 import { RenderWorld } from "../renderer/render-world";
@@ -232,7 +233,6 @@ export class GameRuntime {
 	updateSceneInterest(request: SceneInterestRequest): SceneInterestReceipt {
 		validateLoDConfigOrThrow(request.lod);
 		this.#terrainFogCoverage = {
-			anchorLandblockId: request.anchorLandblockId,
 			terrainRadius: request.lod.terrainRadius,
 		};
 		return this.#applySceneInterest(
@@ -289,6 +289,11 @@ export class GameRuntime {
 		this.#frameSettings = settings;
 	}
 
+	/** Return the renderer's latest cold frame-selection snapshot, when available. */
+	getFrameSelectionMetrics(): FrameSelectionMetrics | null {
+		return this.#renderer?.getFrameSelectionMetrics?.() ?? null;
+	}
+
 	/** Resolve one canonical scene-space point against resident scene scopes. */
 	queryWorldPointResidency(point: Vec3): SceneResidency | null {
 		return this.#scene.queryWorldPointResidency(point);
@@ -332,7 +337,6 @@ export class GameRuntime {
 				distanceFog: resolveTerrainCoverageFog(
 					this.#environment.distanceFog,
 					this.#terrainFogCoverage,
-					this.#camera.placement.position,
 				),
 			},
 			frameSettings: this.#frameSettings,

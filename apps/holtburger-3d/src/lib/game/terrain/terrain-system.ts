@@ -136,6 +136,7 @@ export class TerrainSystem<
 		this.#installSource(artifact.source);
 		const nodeId = this.#scene.createNode({
 			...artifact.placement,
+			cullingGroup: "terrain",
 			localBounds: artifact.localBounds,
 			parentId: null,
 		});

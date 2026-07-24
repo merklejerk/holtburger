@@ -119,6 +119,7 @@ export class StaticObjectSystem<TOwnerId extends string> {
 		const nodes = installSet.objects.map((object) => {
 			const nodeId = this.#scene.createNode({
 				...object.placement,
+				cullingGroup: "static",
 				localBounds: object.localBounds,
 				parentId: null,
 			});

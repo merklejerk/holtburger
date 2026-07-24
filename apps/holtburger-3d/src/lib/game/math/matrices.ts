@@ -2,19 +2,61 @@ import { AABB3, Mat4, Quat, Vec3 } from "./types";
 
 /** Compose column-major transforms for column-vector multiplication. */
 export function multiplyMat4(left: Mat4, right: Mat4): Mat4 {
-	const a = mat4Values(left);
-	const b = mat4Values(right);
-	const values = new Array<number>(16);
-	for (let column = 0; column < 4; column += 1) {
-		for (let row = 0; row < 4; row += 1) {
-			let value = 0;
-			for (let index = 0; index < 4; index += 1) {
-				value += a[index * 4 + row]! * b[column * 4 + index]!;
-			}
-			values[column * 4 + row] = value;
-		}
-	}
-	return mat4FromValues(values);
+	const a11 = left.m11,
+		a12 = left.m12,
+		a13 = left.m13,
+		a14 = left.m14;
+	const a21 = left.m21,
+		a22 = left.m22,
+		a23 = left.m23,
+		a24 = left.m24;
+	const a31 = left.m31,
+		a32 = left.m32,
+		a33 = left.m33,
+		a34 = left.m34;
+	const a41 = left.m41,
+		a42 = left.m42,
+		a43 = left.m43,
+		a44 = left.m44;
+
+	const b11 = right.m11,
+		b12 = right.m12,
+		b13 = right.m13,
+		b14 = right.m14;
+	const b21 = right.m21,
+		b22 = right.m22,
+		b23 = right.m23,
+		b24 = right.m24;
+	const b31 = right.m31,
+		b32 = right.m32,
+		b33 = right.m33,
+		b34 = right.m34;
+	const b41 = right.m41,
+		b42 = right.m42,
+		b43 = right.m43,
+		b44 = right.m44;
+
+	return new Mat4(
+		a11 * b11 + a21 * b12 + a31 * b13 + a41 * b14,
+		a12 * b11 + a22 * b12 + a32 * b13 + a42 * b14,
+		a13 * b11 + a23 * b12 + a33 * b13 + a43 * b14,
+		a14 * b11 + a24 * b12 + a34 * b13 + a44 * b14,
+
+		a11 * b21 + a21 * b22 + a31 * b23 + a41 * b24,
+		a12 * b21 + a22 * b22 + a32 * b23 + a42 * b24,
+		a13 * b21 + a23 * b22 + a33 * b23 + a43 * b24,
+		a14 * b21 + a24 * b22 + a34 * b23 + a44 * b24,
+
+		a11 * b31 + a21 * b32 + a31 * b33 + a41 * b34,
+		a12 * b31 + a22 * b32 + a32 * b33 + a42 * b34,
+		a13 * b31 + a23 * b32 + a33 * b33 + a43 * b34,
+		a14 * b31 + a24 * b32 + a34 * b33 + a44 * b34,
+
+		a11 * b41 + a21 * b42 + a31 * b43 + a41 * b44,
+		a12 * b41 + a22 * b42 + a32 * b43 + a42 * b44,
+		a13 * b41 + a23 * b42 + a33 * b43 + a43 * b44,
+		a14 * b41 + a24 * b42 + a34 * b43 + a44 * b44,
+	);
 }
 
 export function createTranslationMat4(translation: Vec3): Mat4 {
@@ -84,11 +126,37 @@ export function createViewMat4(position: Vec3, rotation: Quat): Mat4 {
 	);
 }
 
-export function mat4ToFloat32Array(matrix: Mat4): Float32Array {
-	return new Float32Array(mat4Values(matrix));
+export function mat4ToFloat32Array(
+	matrix: Mat4,
+	outBuffer?: Float32Array,
+): Float32Array {
+	const out = outBuffer ?? new Float32Array(16);
+	out[0] = matrix.m11;
+	out[1] = matrix.m12;
+	out[2] = matrix.m13;
+	out[3] = matrix.m14;
+	out[4] = matrix.m21;
+	out[5] = matrix.m22;
+	out[6] = matrix.m23;
+	out[7] = matrix.m24;
+	out[8] = matrix.m31;
+	out[9] = matrix.m32;
+	out[10] = matrix.m33;
+	out[11] = matrix.m34;
+	out[12] = matrix.m41;
+	out[13] = matrix.m42;
+	out[14] = matrix.m43;
+	out[15] = matrix.m44;
+	return out;
 }
 
-export function getMat4Translation(matrix: Mat4): Vec3 {
+export function getMat4Translation(matrix: Mat4, targetVec?: Vec3): Vec3 {
+	if (targetVec) {
+		targetVec.x = matrix.m41;
+		targetVec.y = matrix.m42;
+		targetVec.z = matrix.m43;
+		return targetVec;
+	}
 	return new Vec3(matrix.m41, matrix.m42, matrix.m43);
 }
 
@@ -174,48 +242,5 @@ function normalizeQuat(rotation: Quat): Quat {
 		rotation.x / magnitude,
 		rotation.y / magnitude,
 		rotation.z / magnitude,
-	);
-}
-
-function mat4Values(matrix: Mat4): readonly number[] {
-	return [
-		matrix.m11,
-		matrix.m12,
-		matrix.m13,
-		matrix.m14,
-		matrix.m21,
-		matrix.m22,
-		matrix.m23,
-		matrix.m24,
-		matrix.m31,
-		matrix.m32,
-		matrix.m33,
-		matrix.m34,
-		matrix.m41,
-		matrix.m42,
-		matrix.m43,
-		matrix.m44,
-	];
-}
-
-function mat4FromValues(values: readonly number[]): Mat4 {
-	if (values.length !== 16) throw new Error("A matrix requires 16 values.");
-	return new Mat4(
-		values[0]!,
-		values[1]!,
-		values[2]!,
-		values[3]!,
-		values[4]!,
-		values[5]!,
-		values[6]!,
-		values[7]!,
-		values[8]!,
-		values[9]!,
-		values[10]!,
-		values[11]!,
-		values[12]!,
-		values[13]!,
-		values[14]!,
-		values[15]!,
 	);
 }

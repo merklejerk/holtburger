@@ -16,7 +16,12 @@ describe("landblock coordinates", () => {
 	});
 
 	it("creates AC-to-render offsets relative to the anchor landblock", () => {
-		expect(createLandblockOffset("0x1113ffff", "0x1010ffff")).toEqual({
+		expect(
+			createLandblockOffset(
+				getLandblockCoordinates("0x1113ffff"),
+				getLandblockCoordinates("0x1010ffff"),
+			),
+		).toEqual({
 			x: OUTDOOR_LANDBLOCK_WORLD_SIZE,
 			y: 0,
 			z: -3 * OUTDOOR_LANDBLOCK_WORLD_SIZE,

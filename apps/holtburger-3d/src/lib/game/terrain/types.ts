@@ -2,6 +2,7 @@ import type { DatAssetId, LandblockId } from "../game-types";
 import type { TerrainGeometryKey } from "../geometry/types";
 import {
 	getLandblockCoordinates,
+	type LandblockCoordinates,
 	OUTDOOR_TERRAIN_GRID_CELLS,
 } from "../landblocks";
 import type { AABB3 } from "../math/types";
@@ -183,6 +184,7 @@ export interface RealizedTerrainResources {
 export interface TerrainDrawUnit {
 	/** Landblock containing this intrinsically landblock-local terrain geometry. */
 	readonly landblockId: LandblockId;
+	readonly coordinates: LandblockCoordinates;
 	readonly geometry: TerrainGeometryKey;
 	readonly indexStart: number;
 	readonly indexCount: number;

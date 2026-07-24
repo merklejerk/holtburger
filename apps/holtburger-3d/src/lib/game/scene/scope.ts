@@ -20,7 +20,5 @@ export function sameScope(left: SceneScope, right: SceneScope): boolean {
 }
 
 export function scopeKey(scope: SceneScope): string {
-	return scope.kind === "outdoor"
-		? "outdoor"
-		: `env-cell:${scope.landblockId}/${scope.envCellId}`;
+	return scope.kind === "outdoor" ? "outdoor" : scope.envCellId;
 }

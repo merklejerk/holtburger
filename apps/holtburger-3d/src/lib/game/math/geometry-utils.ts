@@ -1,4 +1,4 @@
-import type { AABB2, AABB3, Vec2, Vec3 } from "../math/types";
+import { Vec3, type AABB2, type AABB3, type Vec2 } from "../math/types";
 
 export function containsPoint(bounds: AABB3, point: Vec3): boolean {
 	return (
@@ -11,10 +11,29 @@ export function containsPoint(bounds: AABB3, point: Vec3): boolean {
 	);
 }
 
-export function translateBounds(bounds: AABB3, translation: Vec3): AABB3 {
+export function translateBounds(
+	bounds: AABB3,
+	translation: Vec3,
+	targetBounds?: AABB3,
+): AABB3 {
+	const minX = bounds.min.x + translation.x;
+	const minY = bounds.min.y + translation.y;
+	const minZ = bounds.min.z + translation.z;
+	const maxX = bounds.max.x + translation.x;
+	const maxY = bounds.max.y + translation.y;
+	const maxZ = bounds.max.z + translation.z;
+	if (targetBounds) {
+		targetBounds.min.x = minX;
+		targetBounds.min.y = minY;
+		targetBounds.min.z = minZ;
+		targetBounds.max.x = maxX;
+		targetBounds.max.y = maxY;
+		targetBounds.max.z = maxZ;
+		return targetBounds;
+	}
 	return {
-		min: bounds.min.add(translation),
-		max: bounds.max.add(translation),
+		min: new Vec3(minX, minY, minZ),
+		max: new Vec3(maxX, maxY, maxZ),
 	};
 }
 

@@ -1,6 +1,8 @@
 import {
 	createLandblockOffset,
-	createLandblockWorldOrigin,
+	getLandblockCoordinates,
+	type LandblockCoordinates,
+	OUTDOOR_LANDBLOCK_WORLD_SIZE,
 } from "../landblocks";
 import {
 	createPerspectiveMat4,
@@ -42,6 +44,8 @@ interface TerrainFrameInput {
 
 /** Anchor-relative matrices and content reused by all passes for one view. */
 interface PreparedView {
+	/** Decoded landblock grid coordinates of the view's render-world origin. */
+	readonly anchorCoordinates: LandblockCoordinates;
 	/** Camera position expressed in the view's anchor-relative render frame. */
 	readonly cameraPosition: Vec3;
 	/** Projection matrix derived from the current drawing-buffer aspect ratio. */
@@ -55,6 +59,10 @@ interface PreparedView {
 }
 
 export class WebGL2Renderer implements Renderer {
+	static readonly #identityMatrix = Mat4.identity();
+
+	readonly #matrixScratch = new Float32Array(16);
+	readonly #offsetScratch = new Vec3(0, 0, 0);
 	readonly #canvas: HTMLCanvasElement;
 	readonly #gl: WebGL2RenderingContext;
 	readonly #resources: WebGL2ResourceManager;
@@ -133,14 +141,17 @@ export class WebGL2Renderer implements Renderer {
 		input: FrameViewInput,
 	): PreparedView {
 		const camera = input.camera;
-		const anchorOrigin = createLandblockWorldOrigin(anchorLandblockId);
+		const anchorCoordinates = getLandblockCoordinates(anchorLandblockId);
+		const anchorOriginX = anchorCoordinates.x * OUTDOOR_LANDBLOCK_WORLD_SIZE;
+		const anchorOriginZ = -anchorCoordinates.y * OUTDOOR_LANDBLOCK_WORLD_SIZE;
 		const cameraPosition = new Vec3(
-			camera.placement.position.x - anchorOrigin.x,
-			camera.placement.position.y - anchorOrigin.y,
-			camera.placement.position.z - anchorOrigin.z,
+			camera.placement.position.x - anchorOriginX,
+			camera.placement.position.y,
+			camera.placement.position.z - anchorOriginZ,
 		);
 		const aspectRatio = this.#frameWidth / Math.max(1, this.#frameHeight);
 		return {
+			anchorCoordinates,
 			anchorLandblockId,
 			cameraPosition,
 			projection: createPerspectiveMat4(
@@ -224,7 +235,7 @@ export class WebGL2Renderer implements Renderer {
 		gl.uniformMatrix4fv(
 			this.#terrainProgram.uniforms.projection,
 			false,
-			mat4ToFloat32Array(view.projection),
+			mat4ToFloat32Array(view.projection, this.#matrixScratch),
 		);
 		gl.uniform2f(
 			this.#terrainProgram.uniforms.cameraHorizontalPosition,
@@ -234,7 +245,7 @@ export class WebGL2Renderer implements Renderer {
 		gl.uniformMatrix4fv(
 			this.#terrainProgram.uniforms.view,
 			false,
-			mat4ToFloat32Array(view.view),
+			mat4ToFloat32Array(view.view, this.#matrixScratch),
 		);
 		gl.uniform1f(
 			this.#terrainProgram.uniforms.detailFadeNear,
@@ -252,15 +263,16 @@ export class WebGL2Renderer implements Renderer {
 		);
 		for (const terrain of view.terrain) {
 			const landblockOffset = createLandblockOffset(
-				terrain.drawUnit.landblockId,
-				view.anchorLandblockId,
+				terrain.drawUnit.coordinates,
+				view.anchorCoordinates,
+				this.#offsetScratch,
 			);
 			this.#bindTerrainResources(terrain);
 			this.#drawTerrainGeometry(
 				terrain.program.geometry,
 				terrain.drawUnit.indexStart,
 				terrain.drawUnit.indexCount,
-				Mat4.identity(),
+				WebGL2Renderer.#identityMatrix,
 				landblockOffset,
 			);
 		}

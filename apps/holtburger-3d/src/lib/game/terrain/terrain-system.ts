@@ -4,6 +4,7 @@ import type { AABB3 } from "../math/types";
 import type { Vec3 } from "../math/types";
 import {
 	createLandblockWorldOrigin,
+	getLandblockCoordinates,
 	landblockAtWorldPoint,
 } from "../landblocks";
 import type { SceneGraph, SceneNodeId, ScenePlacement } from "../scene";
@@ -220,6 +221,7 @@ export class TerrainSystem<
 		}
 		const drawUnit: TerrainDrawUnit = {
 			composition: installation.source.generatedTextures.composition,
+			coordinates: getLandblockCoordinates(landblockId),
 			geometry: installation.source.geometry,
 			indexCount: variant.indexCount,
 			indexStart: variant.indexStart,

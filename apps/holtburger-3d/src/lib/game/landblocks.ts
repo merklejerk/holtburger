@@ -22,9 +22,11 @@ export interface LandblockCoordinates {
 export function getLandblockCoordinates(
 	landblockId: LandblockId,
 ): LandblockCoordinates {
-	const match = /^(?:0x)?([0-9a-fA-F]{8})$/.exec(landblockId);
-	if (!match) throw new Error(`Invalid landblock id ${landblockId}.`);
-	const value = Number.parseInt(match[1]!, 16) >>> 0;
+	const hex = landblockId.startsWith("0x") ? landblockId.slice(2) : landblockId;
+	if (hex.length !== 8) throw new Error(`Invalid landblock id ${landblockId}.`);
+	const value = Number.parseInt(hex, 16) >>> 0;
+	if (Number.isNaN(value))
+		throw new Error(`Invalid landblock id ${landblockId}.`);
 	return {
 		x: (value >>> 24) & 0xff,
 		y: (value >>> 16) & 0xff,
@@ -33,26 +35,39 @@ export function getLandblockCoordinates(
 
 /** Translation from a landblock frame into an anchor-relative render frame. */
 export function createLandblockOffset(
-	landblockId: LandblockId,
-	anchorLandblockId: LandblockId,
+	landblock: LandblockCoordinates,
+	anchor: LandblockCoordinates,
+	targetVec?: Vec3,
 ): Vec3 {
-	const landblock = getLandblockCoordinates(landblockId);
-	const anchor = getLandblockCoordinates(anchorLandblockId);
-	return new Vec3(
-		(landblock.x - anchor.x) * OUTDOOR_LANDBLOCK_WORLD_SIZE,
-		0,
-		-(landblock.y - anchor.y) * OUTDOOR_LANDBLOCK_WORLD_SIZE,
-	);
+	const x = (landblock.x - anchor.x) * OUTDOOR_LANDBLOCK_WORLD_SIZE;
+	const z = -(landblock.y - anchor.y) * OUTDOOR_LANDBLOCK_WORLD_SIZE;
+	if (targetVec) {
+		targetVec.x = x;
+		targetVec.y = 0;
+		targetVec.z = z;
+		return targetVec;
+	}
+	return new Vec3(x, 0, z);
 }
 
 /** Scene-space origin of one outdoor landblock's local coordinate frame. */
-export function createLandblockWorldOrigin(landblockId: LandblockId): Vec3 {
-	const landblock = getLandblockCoordinates(landblockId);
-	return new Vec3(
-		landblock.x * OUTDOOR_LANDBLOCK_WORLD_SIZE,
-		0,
-		-landblock.y * OUTDOOR_LANDBLOCK_WORLD_SIZE,
-	);
+export function createLandblockWorldOrigin(
+	landblock: LandblockId | LandblockCoordinates,
+	targetVec?: Vec3,
+): Vec3 {
+	const coords =
+		typeof landblock === "string"
+			? getLandblockCoordinates(landblock)
+			: landblock;
+	const x = coords.x * OUTDOOR_LANDBLOCK_WORLD_SIZE;
+	const z = -coords.y * OUTDOOR_LANDBLOCK_WORLD_SIZE;
+	if (targetVec) {
+		targetVec.x = x;
+		targetVec.y = 0;
+		targetVec.z = z;
+		return targetVec;
+	}
+	return new Vec3(x, 0, z);
 }
 
 /**

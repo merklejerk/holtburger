@@ -2,8 +2,11 @@ import { Vec3, type AABB3, type Mat4 } from "../math/types";
 import type { EnvCellId } from "../game-types";
 import { multiplyMat4, transformAABB3 } from "../math/matrices";
 import { containsPoint, translateBounds } from "../math/geometry-utils";
+import { frustumIntersectsAABB, type Frustum } from "../math/frustum";
 import {
 	createLandblockWorldOrigin,
+	createLandblockOffset,
+	getLandblockCoordinates,
 	landblockAtWorldPoint,
 } from "../landblocks";
 import type { Camera } from "../runtime/types";
@@ -75,6 +78,8 @@ export class SceneGraph {
 	readonly #reachableScopeKeys = new Set<string>();
 	readonly #pendingScopes: SceneScope[] = [];
 	readonly #traversedCrossings: ScenePortalCrossingInput[] = [];
+	/** Reused landblock translation during frustum testing. */
+	readonly #queryOffset = Vec3.zero();
 	#nextNodeId = 0;
 
 	createNode(input: SceneNodeInput): SceneNodeId {
@@ -204,13 +209,34 @@ export class SceneGraph {
 	 * Node and aperture intersection remain always-pass stubs. Future spatial tests must use the
 	 * original camera volume throughout traversal rather than clipping it at each aperture.
 	 */
-	queryFrustum(camera: Camera, origin: SceneScope): VisibleScene {
-		this.#traverseScopes(camera, origin);
+	queryFrustum(
+		frustum: Frustum,
+		anchorLandblockId: ScenePlacement["landblockId"],
+		origin: SceneScope,
+	): VisibleScene;
+	queryFrustum(camera: Camera, origin: SceneScope): VisibleScene;
+	queryFrustum(
+		frustumOrCamera: Frustum | Camera,
+		anchorOrOrigin: ScenePlacement["landblockId"] | SceneScope,
+		maybeOrigin?: SceneScope,
+	): VisibleScene {
+		const usesCompleteFrustum = maybeOrigin !== undefined;
+		const frustum: Frustum = usesCompleteFrustum
+			? (frustumOrCamera as Frustum)
+			: {
+					cameraPosition: (frustumOrCamera as Camera).placement.position,
+					planes: [],
+				};
+		const anchorLandblockId = usesCompleteFrustum
+			? (anchorOrOrigin as ScenePlacement["landblockId"])
+			: (frustumOrCamera as Camera).placement.landblockId;
+		const origin = (maybeOrigin ?? anchorOrOrigin) as SceneScope;
+		this.#traverseScopes(frustum, anchorLandblockId, origin);
 		this.#visibleEntries.length = 0;
 		for (const entry of this.#spatialEntries.values()) {
 			if (
 				this.#reachableScopeKeys.has(scopeKey(entry.placement.scope)) &&
-				this.#frustumIntersectsEntry(camera, entry)
+				this.#frustumIntersectsEntry(frustum, anchorLandblockId, entry)
 			) {
 				this.#visibleEntries.push(entry.nodeId);
 			}
@@ -336,7 +362,11 @@ export class SceneGraph {
 		this.#visibleCrossings.length = crossings.length;
 	}
 
-	#traverseScopes(camera: Camera, origin: SceneScope): void {
+	#traverseScopes(
+		frustum: Frustum,
+		anchorLandblockId: ScenePlacement["landblockId"],
+		origin: SceneScope,
+	): void {
 		this.#reachableScopeKeys.clear();
 		this.#reachableScopeKeys.add(scopeKey(origin));
 		this.#pendingScopes.length = 0;
@@ -348,7 +378,7 @@ export class SceneGraph {
 			for (const crossing of this.#portalCrossings.values()) {
 				if (
 					!sameScope(crossing.source, scope) ||
-					!this.#frustumIntersectsAperture(camera, crossing)
+					!this.#frustumIntersectsAperture(frustum, anchorLandblockId, crossing)
 				) {
 					continue;
 				}
@@ -361,19 +391,46 @@ export class SceneGraph {
 		}
 	}
 
-	#frustumIntersectsEntry(camera: Camera, entry: SpatialEntry): boolean {
-		void camera;
-		void entry;
-		return true;
+	#frustumIntersectsEntry(
+		frustum: Frustum,
+		anchorLandblockId: ScenePlacement["landblockId"],
+		entry: SpatialEntry,
+	): boolean {
+		const offset = createLandblockOffset(
+			getLandblockCoordinates(entry.placement.landblockId),
+			getLandblockCoordinates(anchorLandblockId),
+			this.#queryOffset,
+		);
+		return frustumIntersectsAABB(
+			frustum,
+			entry.landblockBounds,
+			offset.x,
+			offset.y,
+			offset.z,
+		);
 	}
 
 	#frustumIntersectsAperture(
-		camera: Camera,
+		frustum: Frustum,
+		anchorLandblockId: ScenePlacement["landblockId"],
 		crossing: ScenePortalCrossingInput,
 	): boolean {
-		void camera;
-		void crossing;
-		return true;
+		const offset = createLandblockOffset(
+			getLandblockCoordinates(crossing.aperture.landblockId),
+			getLandblockCoordinates(anchorLandblockId),
+			this.#queryOffset,
+		);
+		if (
+			!frustumIntersectsAABB(
+				frustum,
+				crossing.aperture.landblockBounds,
+				offset.x,
+				offset.y,
+				offset.z,
+			)
+		)
+			return false;
+		return apertureFacesCamera(frustum, crossing.aperture, offset);
 	}
 }
 
@@ -424,4 +481,39 @@ function copyPortalCrossing(
 		source: { ...crossing.source },
 		target: { ...crossing.target },
 	};
+}
+
+/**
+ * Retain broad portal visibility only when the camera is on the aperture's configured side.
+ *
+ * Aperture index winding is prepared so its geometric normal faces the positive side; malformed
+ * aperture geometry fails open so a missing normal cannot hide an otherwise reachable scope.
+ */
+function apertureFacesCamera(
+	frustum: Frustum,
+	aperture: ScenePortalCrossingInput["aperture"],
+	offset: Vec3,
+): boolean {
+	if (aperture.visibleSide === "both") return true;
+	if (aperture.vertices.length < 9) return true;
+	const ax = aperture.vertices[0]! + offset.x;
+	const ay = aperture.vertices[1]! + offset.y;
+	const az = aperture.vertices[2]! + offset.z;
+	const edgeBX = aperture.vertices[3]! - aperture.vertices[0]!;
+	const edgeBY = aperture.vertices[4]! - aperture.vertices[1]!;
+	const edgeBZ = aperture.vertices[5]! - aperture.vertices[2]!;
+	const edgeCX = aperture.vertices[6]! - aperture.vertices[0]!;
+	const edgeCY = aperture.vertices[7]! - aperture.vertices[1]!;
+	const edgeCZ = aperture.vertices[8]! - aperture.vertices[2]!;
+	const normalX = edgeBY * edgeCZ - edgeBZ * edgeCY;
+	const normalY = edgeBZ * edgeCX - edgeBX * edgeCZ;
+	const normalZ = edgeBX * edgeCY - edgeBY * edgeCX;
+	const signedDistance =
+		normalX * (frustum.cameraPosition.x - ax) +
+		normalY * (frustum.cameraPosition.y - ay) +
+		normalZ * (frustum.cameraPosition.z - az);
+	if (signedDistance === 0) return true;
+	return aperture.visibleSide === "positive"
+		? signedDistance > 0
+		: signedDistance < 0;
 }

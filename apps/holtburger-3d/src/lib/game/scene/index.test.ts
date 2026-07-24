@@ -444,6 +444,7 @@ function upsertCrossing(
 		aperture: {
 			id: `portal-aperture:${id}`,
 			indices: new Uint32Array(),
+			landblockId: "0x0001ffff",
 			landblockBounds: AABB3.zero(),
 			vertices: new Float32Array(),
 			visibleSide: "both",

@@ -43,6 +43,8 @@ export interface ScenePortalCrossingInput {
 	readonly target: SceneScope;
 	readonly aperture: {
 		readonly id: `portal-aperture:${string}`;
+		/** Landblock frame containing the aperture geometry and bounds. */
+		readonly landblockId: LandblockId;
 		readonly landblockBounds: AABB3;
 		readonly vertices: Float32Array;
 		readonly indices: Uint32Array;

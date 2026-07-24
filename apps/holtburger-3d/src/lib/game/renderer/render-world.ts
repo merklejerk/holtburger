@@ -1,6 +1,7 @@
 import type { LandblockId } from "../game-types";
 import type { GeometryKey } from "../geometry/types";
 import type { Camera } from "../runtime/types";
+import type { Frustum } from "../math/frustum";
 import type { VisibleScene } from "../scene";
 import type { SceneNodeId } from "../scene";
 import type { TerrainDrawUnit } from "../terrain/types";
@@ -25,7 +26,8 @@ import type { InstanceStreamManager } from "../systems/instance-stream-manager";
 interface RenderWorldSystems {
 	readonly scene: {
 		queryFrustum(
-			camera: Camera,
+			frustum: Frustum,
+			anchorLandblockId: LandblockId,
 			origin: import("../scene").SceneScope,
 		): VisibleScene;
 	};
@@ -90,7 +92,11 @@ export class RenderWorld {
 		this.#systems = systems;
 	}
 
-	queryVisibleScene(camera: Camera): VisibleScene {
+	queryVisibleScene(
+		camera: Camera,
+		frustum: Frustum,
+		anchorLandblockId: LandblockId,
+	): VisibleScene {
 		const origin =
 			camera.placement.envCellId === null
 				? {
@@ -101,7 +107,7 @@ export class RenderWorld {
 						kind: "env-cell" as const,
 						landblockId: camera.placement.landblockId,
 					};
-		return this.#systems.scene.queryFrustum(camera, origin);
+		return this.#systems.scene.queryFrustum(frustum, anchorLandblockId, origin);
 	}
 
 	resolveTerrainDrawUnit(

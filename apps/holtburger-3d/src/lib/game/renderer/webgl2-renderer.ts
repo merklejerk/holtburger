@@ -9,6 +9,7 @@ import {
 	createViewMat4,
 	mat4ToFloat32Array,
 } from "../math/matrices";
+import { createFrustum, type Frustum } from "../math/frustum";
 import { Mat4, Vec3 } from "../math/types";
 import type { TerrainDrawUnit } from "../terrain/types";
 import type { FrameInput, FrameViewInput, Renderer } from "./renderer";
@@ -150,27 +151,38 @@ export class WebGL2Renderer implements Renderer {
 			camera.placement.position.z - anchorOriginZ,
 		);
 		const aspectRatio = this.#frameWidth / Math.max(1, this.#frameHeight);
+		const projection = createPerspectiveMat4(
+			camera.fov,
+			aspectRatio,
+			camera.near,
+			camera.far,
+		);
+		const view = createViewMat4(cameraPosition, camera.placement.rotation);
 		return {
 			anchorCoordinates,
 			anchorLandblockId,
 			cameraPosition,
-			projection: createPerspectiveMat4(
-				camera.fov,
-				aspectRatio,
-				camera.near,
-				camera.far,
+			projection,
+			terrain: this.#collectTerrain(
+				camera,
+				anchorLandblockId,
+				createFrustum(projection, view, cameraPosition),
 			),
-			terrain: this.#collectTerrain(camera, anchorLandblockId),
-			view: createViewMat4(cameraPosition, camera.placement.rotation),
+			view,
 		};
 	}
 
 	#collectTerrain(
 		camera: FrameViewInput["camera"],
 		anchorLandblockId: FrameInput["anchorLandblockId"],
+		frustum: Frustum,
 	): readonly TerrainFrameInput[] {
 		const terrain: TerrainFrameInput[] = [];
-		const visible = this.#world.queryVisibleScene(camera);
+		const visible = this.#world.queryVisibleScene(
+			camera,
+			frustum,
+			anchorLandblockId,
+		);
 		for (const nodeId of visible.entries) {
 			const contribution = this.#world.getRenderContribution(
 				nodeId,

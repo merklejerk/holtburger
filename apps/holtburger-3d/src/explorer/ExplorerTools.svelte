@@ -2,10 +2,12 @@
 	import type { SceneResidency } from "../lib/game/scene";
 	import type { LoDConfig } from "../lib/game/runtime/types";
 	import type { ExplorerCameraFocusStatus } from "./explorer-camera-coordinator";
+	import ExplorerFramePanel from "./ExplorerFramePanel.svelte";
 	import ExplorerWorldPanel from "./ExplorerWorldPanel.svelte";
 	import type { ExplorerEnvironmentSelection } from "../lib/game/environment/scene-environment";
+	import type { FrameSelectionMetrics } from "../lib/game/renderer/renderer";
 
-	type ExplorerTabId = "world" | "assets" | "entities" | "logs";
+	type ExplorerTabId = "world" | "frame" | "assets" | "entities" | "logs";
 
 	interface ExplorerTab {
 		/** Stable tab id used for selection and panel ids. */
@@ -14,7 +16,7 @@
 		readonly icon: string;
 		/** Accessible and tooltip label for the tab. */
 		readonly label: string;
-		/** Placeholder text until the explorer workflow is implemented. */
+		/** Supporting text for tabs without a dedicated panel component. */
 		readonly stub: string;
 	}
 
@@ -34,6 +36,8 @@
 		readonly distanceFogEnabled: boolean;
 		/** Update Explorer's distance-fog presentation switch. */
 		readonly updateDistanceFog: (enabled: boolean) => void;
+		/** Latest low-rate renderer selection snapshot for frame diagnostics. */
+		readonly frameSelectionMetrics: FrameSelectionMetrics | null;
 	}
 
 	let {
@@ -45,6 +49,7 @@
 		updateEnvironment,
 		distanceFogEnabled,
 		updateDistanceFog,
+		frameSelectionMetrics,
 	}: Props = $props();
 
 	const tabs: readonly ExplorerTab[] = [
@@ -53,6 +58,12 @@
 			icon: "🗺️",
 			label: "World",
 			stub: "World inspection controls will live here.",
+		},
+		{
+			id: "frame",
+			icon: "🎞️",
+			label: "Frame info",
+			stub: "Renderer frame selection diagnostics.",
 		},
 		{
 			id: "assets",
@@ -138,6 +149,8 @@
 								{distanceFogEnabled}
 								{updateDistanceFog}
 							/>
+						{:else if activeTab.id === "frame"}
+							<ExplorerFramePanel metrics={frameSelectionMetrics} />
 						{:else}
 							<p>{activeTab.stub}</p>
 						{/if}

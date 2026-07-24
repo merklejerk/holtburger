@@ -57,6 +57,7 @@ export class EnvCellSystem<TOwnerId extends string> {
 		const nodes = artifact.cellShells.map((shell) => {
 			const nodeId = this.#scene.createNode({
 				...shell.placement,
+				cullingGroup: "env-cell-shell",
 				localBounds: shell.structureLocalBounds,
 				parentId: null,
 			});

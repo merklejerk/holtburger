@@ -91,6 +91,7 @@ export class DynamicEntitySystem<TOwnerId extends string> {
 		if (existing) this.removeOwner(ownerId);
 		const rootNodeId = this.#scene.createNode({
 			...resident.placement,
+			cullingGroup: "dynamic",
 			localBounds:
 				resident.localBounds ?? resident.presentation.selectionBounds,
 			parentId: null,

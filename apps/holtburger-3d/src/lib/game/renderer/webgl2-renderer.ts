@@ -12,7 +12,12 @@ import {
 import { createFrustum, type Frustum } from "../math/frustum";
 import { Mat4, Vec3 } from "../math/types";
 import type { TerrainDrawUnit } from "../terrain/types";
-import type { FrameInput, FrameViewInput, Renderer } from "./renderer";
+import type {
+	FrameInput,
+	FrameSelectionMetrics,
+	FrameViewInput,
+	Renderer,
+} from "./renderer";
 import { RenderWorld } from "./render-world";
 import type { GeometryResourceKey } from "./resource-manager";
 import type { TerrainProgramInput } from "./terrain-program-input";
@@ -59,6 +64,17 @@ interface PreparedView {
 	readonly anchorLandblockId: FrameInput["anchorLandblockId"];
 }
 
+/** Mutable backing state copied only when Explorer samples renderer diagnostics. */
+interface MutableFrameSelectionMetrics {
+	viewCount: number;
+	visibleSceneEntries: number;
+	visiblePortalCrossings: number;
+	terrainFrameInputs: number;
+	visibleStaticObjects: number;
+	visibleDynamics: number;
+	visibleEnvCellShells: number;
+}
+
 export class WebGL2Renderer implements Renderer {
 	static readonly #identityMatrix = Mat4.identity();
 
@@ -70,6 +86,16 @@ export class WebGL2Renderer implements Renderer {
 	/** Read-only runtime gateway used to collect this renderer's frame submissions. */
 	readonly #world: RenderWorld;
 	readonly #terrainProgram: WebGL2TerrainProgram;
+	/** Reused per-frame diagnostics; cold reads return a copied snapshot. */
+	readonly #frameSelectionMetrics: MutableFrameSelectionMetrics = {
+		terrainFrameInputs: 0,
+		viewCount: 0,
+		visibleDynamics: 0,
+		visibleEnvCellShells: 0,
+		visiblePortalCrossings: 0,
+		visibleSceneEntries: 0,
+		visibleStaticObjects: 0,
+	};
 	#frameWidth = 0;
 	#frameHeight = 0;
 
@@ -104,6 +130,7 @@ export class WebGL2Renderer implements Renderer {
 
 	drawFrame(input: FrameInput): void {
 		this.#resizeCanvasForDpr();
+		this.#resetFrameSelectionMetrics(input.views.length);
 		const fog = input.frameSettings.distanceFogEnabled
 			? input.environment.distanceFog
 			: null;
@@ -112,6 +139,10 @@ export class WebGL2Renderer implements Renderer {
 			this.#drawView(this.#prepareView(input.anchorLandblockId, view), fog);
 		}
 		void input.timeSeconds;
+	}
+
+	getFrameSelectionMetrics(): FrameSelectionMetrics {
+		return { ...this.#frameSelectionMetrics };
 	}
 
 	async destroy(): Promise<void> {
@@ -183,6 +214,9 @@ export class WebGL2Renderer implements Renderer {
 			frustum,
 			anchorLandblockId,
 		);
+		this.#frameSelectionMetrics.visibleSceneEntries += visible.entries.length;
+		this.#frameSelectionMetrics.visiblePortalCrossings +=
+			visible.crossings.length;
 		for (const nodeId of visible.entries) {
 			const contribution = this.#world.getRenderContribution(
 				nodeId,
@@ -190,14 +224,17 @@ export class WebGL2Renderer implements Renderer {
 			);
 			if (!contribution) continue;
 			if (contribution.kind === "static-object") {
+				this.#frameSelectionMetrics.visibleStaticObjects += 1;
 				void this.#world.resolveStaticObjectRenderable(contribution.renderable);
 				continue;
 			}
 			if (contribution.kind === "dynamic") {
+				this.#frameSelectionMetrics.visibleDynamics += 1;
 				void this.#world.resolveDynamicRenderable(contribution.renderable);
 				continue;
 			}
 			if (contribution.kind === "env-cell") {
+				this.#frameSelectionMetrics.visibleEnvCellShells += 1;
 				void this.#world.resolveEnvCellRenderable(contribution.renderable);
 				continue;
 			}
@@ -220,12 +257,24 @@ export class WebGL2Renderer implements Renderer {
 					},
 				},
 			});
+			this.#frameSelectionMetrics.terrainFrameInputs += 1;
 		}
 		for (const crossing of visible.crossings) {
 			const drawUnit = this.#world.getPortalDrawUnit(crossing.apertureId);
 			if (drawUnit) void this.#world.resolvePortalDrawUnit(drawUnit);
 		}
 		return terrain;
+	}
+
+	#resetFrameSelectionMetrics(viewCount: number): void {
+		const metrics = this.#frameSelectionMetrics;
+		metrics.terrainFrameInputs = 0;
+		metrics.viewCount = viewCount;
+		metrics.visibleDynamics = 0;
+		metrics.visibleEnvCellShells = 0;
+		metrics.visiblePortalCrossings = 0;
+		metrics.visibleSceneEntries = 0;
+		metrics.visibleStaticObjects = 0;
 	}
 
 	#drawView(

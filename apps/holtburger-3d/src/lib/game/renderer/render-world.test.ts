@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import type { Frustum } from "../math/frustum";
+import { Vec3 } from "../math/types";
 import type { Camera } from "../runtime/types";
 import type { VisibleScene } from "../scene";
 import type { TerrainDrawUnit } from "../terrain/types";
@@ -32,6 +34,10 @@ const VISIBLE_SCENE = {
 	crossings: [],
 	entries: [],
 } as const satisfies VisibleScene;
+const FRUSTUM = {
+	cameraPosition: Vec3.zero(),
+	planes: [],
+} as const satisfies Frustum;
 const TERRAIN = {} as TerrainDrawUnit;
 const GEOMETRY = "geometry-resource:1" as GeometryResourceKey;
 const INSTANCE_STREAM =
@@ -88,7 +94,9 @@ describe("RenderWorld", () => {
 			},
 		});
 
-		expect(world.queryVisibleScene(CAMERA)).toBe(VISIBLE_SCENE);
+		expect(world.queryVisibleScene(CAMERA, FRUSTUM, "0001")).toBe(
+			VISIBLE_SCENE,
+		);
 		expect(world.resolveTerrainDrawUnit("0001", "0002")).toBe(TERRAIN);
 		expect(world.resolveGeometry("terrain-geometry:0001" as GeometryKey)).toBe(
 			GEOMETRY,

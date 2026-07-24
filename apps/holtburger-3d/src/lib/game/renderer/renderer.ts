@@ -31,7 +31,27 @@ export interface FrameInput {
 	readonly views: readonly FrameViewInput[];
 }
 
+/** Latest renderer-side selection counts, aggregated across every view in one frame. */
+export interface FrameSelectionMetrics {
+	/** Number of camera or portal views rendered into this frame. */
+	readonly viewCount: number;
+	/** Scene nodes selected by scope traversal and node-level frustum culling. */
+	readonly visibleSceneEntries: number;
+	/** Portal crossings retained by broad aperture visibility. */
+	readonly visiblePortalCrossings: number;
+	/** Visible terrain contributions converted into concrete frame inputs. */
+	readonly terrainFrameInputs: number;
+	/** Visible static-object contributions selected before their draw path is implemented. */
+	readonly visibleStaticObjects: number;
+	/** Visible dynamic contributions selected before their draw path is implemented. */
+	readonly visibleDynamics: number;
+	/** Visible environment-cell shell contributions selected before their draw path is implemented. */
+	readonly visibleEnvCellShells: number;
+}
+
 export interface Renderer {
 	drawFrame(input: FrameInput): void;
 	destroy(): Promise<void>;
+	/** Return a cold diagnostic snapshot when this backend exposes frame selection metrics. */
+	getFrameSelectionMetrics?(): FrameSelectionMetrics;
 }

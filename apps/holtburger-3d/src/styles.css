@@ -422,6 +422,16 @@ h1 {
 	gap: 14px;
 }
 
+.explorer-frame-panel {
+	display: grid;
+	gap: 12px;
+}
+
+.explorer-frame-note {
+	color: var(--ac-ink-muted);
+	font-size: 0.82rem;
+}
+
 .explorer-world-form fieldset {
 	display: grid;
 	gap: 9px;

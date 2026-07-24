@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { Vec3 } from "../math/types";
 import { resolveTerrainCoverageFog } from "./terrain-fog";
 
 const AUTHORED_FOG = {
@@ -9,53 +8,30 @@ const AUTHORED_FOG = {
 } as const;
 
 describe("resolveTerrainCoverageFog", () => {
-	it("uses the camera's horizontal distance to the terrain-window edge", () => {
+	it("uses the terrain-interest radius as a stable fog range", () => {
 		const fog = resolveTerrainCoverageFog(
 			AUTHORED_FOG,
-			{ anchorLandblockId: "0x1010ffff", terrainRadius: 1 },
-			new Vec3(16.5 * 192, 40, -16.5 * 192),
+			{ terrainRadius: 1 },
 		);
 
 		expect(fog).toMatchObject({ near: 28.8, far: 288 });
 	});
 
-	it("ignores camera altitude when deriving the effective fog range", () => {
-		const coverage = {
-			anchorLandblockId: "0x1010ffff",
-			terrainRadius: 1,
-		} as const;
-		const atTerrainHeight = resolveTerrainCoverageFog(
-			AUTHORED_FOG,
-			coverage,
-			new Vec3(16.5 * 192, 0, -16.5 * 192),
-		);
-		const highAboveTerrain = resolveTerrainCoverageFog(
-			AUTHORED_FOG,
-			coverage,
-			new Vec3(16.5 * 192, 50_000, -16.5 * 192),
-		);
+	it("preserves a half-landblock fog range at terrain radius zero", () => {
+		const fog = resolveTerrainCoverageFog(AUTHORED_FOG, {
+			terrainRadius: 0,
+		});
 
-		expect(highAboveTerrain).toEqual(atTerrainHeight);
+		expect(fog).toMatchObject({ far: 96 });
+		expect(fog?.near).toBeCloseTo(9.6);
 	});
 
-	it("shrinks fog to the remaining coverage when the camera approaches an edge", () => {
-		const fog = resolveTerrainCoverageFog(
-			AUTHORED_FOG,
-			{ anchorLandblockId: "0x1010ffff", terrainRadius: 1 },
-			new Vec3(18 * 192 - 12, 0, -16.5 * 192),
-		);
-
-		expect(fog?.near).toBeCloseTo(1.2);
-		expect(fog?.far).toBe(12);
-	});
-
-	it("fully fogs terrain once the camera leaves the retained window", () => {
-		expect(
-			resolveTerrainCoverageFog(
-				AUTHORED_FOG,
-				{ anchorLandblockId: "0x1010ffff", terrainRadius: 0 },
-				new Vec3(18 * 192, 0, -16.5 * 192),
-			),
-		).toMatchObject({ near: 0, far: 0 });
+	it("rejects invalid terrain-interest radii", () => {
+		expect(() =>
+			resolveTerrainCoverageFog(AUTHORED_FOG, { terrainRadius: -1 }),
+		).toThrow("non-negative integer radius");
+		expect(() =>
+			resolveTerrainCoverageFog(AUTHORED_FOG, { terrainRadius: 1.5 }),
+		).toThrow("non-negative integer radius");
 	});
 });

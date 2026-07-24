@@ -15,6 +15,7 @@
 	import {
 		DEFAULT_FRAME_SETTINGS,
 		type FrameSettings,
+		type FrameSelectionMetrics,
 	} from "../lib/game/renderer/renderer";
 	import {
 		ExplorerCameraCoordinator,
@@ -36,6 +37,8 @@
 	let cameraController: FreeFlyCameraController | undefined;
 	let cameraCoordinator: ExplorerCameraCoordinator | undefined;
 	let frameMetrics: FrameMetrics | null = $state(null);
+	let frameSelectionMetrics: FrameSelectionMetrics | null = $state(null);
+	let lastFrameSelectionSampleAt = 0;
 	let startupError: string | null = $state(null);
 	let runtimeReady = $state(false);
 	let cameraFocusStatus = $state<ExplorerCameraFocusStatus>(
@@ -106,6 +109,7 @@
 			const controller = cameraController;
 			gameRuntime = undefined;
 			runtimeReady = false;
+			frameSelectionMetrics = null;
 			commitPipeline = undefined;
 			webglDevice = undefined;
 			activeRegionSource = undefined;
@@ -169,6 +173,7 @@
 				const step = (): void => {
 					if (gameRuntime === undefined) {
 						frameMetrics = null;
+						frameSelectionMetrics = null;
 						frameHandle = window.requestAnimationFrame(step);
 						return;
 					}
@@ -184,6 +189,10 @@
 						updateFrameMs: frameFinishedAt - drawStartedAt,
 						frameMs: frameFinishedAt - tickStartedAt,
 					};
+					if (frameFinishedAt - lastFrameSelectionSampleAt >= 250) {
+						frameSelectionMetrics = gameRuntime.getFrameSelectionMetrics();
+						lastFrameSelectionSampleAt = frameFinishedAt;
+					}
 					frameHandle = window.requestAnimationFrame(step);
 				};
 
@@ -237,6 +246,7 @@
 			{updateEnvironment}
 			distanceFogEnabled={frameSettings.distanceFogEnabled}
 			{updateDistanceFog}
+			{frameSelectionMetrics}
 		/>
 	</div>
 </div>

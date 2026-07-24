@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_dat::file_type::{GfxObj, RegionDesc, SceneObjectTemplate, SetupModel};
 use holtburger_dat::landblock::{CellLandblock, LandblockInfo};
@@ -479,12 +479,19 @@ fn derive_generated_scenery(
     let occupied_building_cells = occupied_building_cells(landblock_info);
     let block_x = (landblock_id >> 24) * 8;
     let block_y = ((landblock_id >> 16) & 0xff) * 8;
+    let terrain_info = region
+        .terrain_info
+        .as_ref()
+        .context("RegionDesc has no terrain payload required for generated scenery")?;
+    let scene_info = region
+        .scene_info
+        .as_ref()
+        .context("RegionDesc has no scene payload required for generated scenery")?;
 
     for (terrain_index, terrain) in landblock.terrain.iter().copied().enumerate() {
         let terrain_type = usize::from((terrain >> 2) & 0x1f);
         let scenery_type = usize::from(terrain >> 11);
-        let Some(scene_info_index) = region
-            .terrain_info
+        let Some(scene_info_index) = terrain_info
             .terrain_types
             .get(terrain_type)
             .and_then(|terrain_type| terrain_type.scene_types.get(scenery_type))
@@ -492,7 +499,7 @@ fn derive_generated_scenery(
         else {
             continue;
         };
-        let Some(scene_type) = region.scene_info.scene_types.get(scene_info_index as usize) else {
+        let Some(scene_type) = scene_info.scene_types.get(scene_info_index as usize) else {
             continue;
         };
         if scene_type.scenes.is_empty() {

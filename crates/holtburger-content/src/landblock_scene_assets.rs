@@ -4289,7 +4289,9 @@ mod tests {
     };
     use holtburger_common::properties::GfxObjFlags;
     use holtburger_common::{Plane, Quaternion, Vector3};
-    use holtburger_dat::file_type::region::{LandDefs, RegionDesc, SceneDesc, TerrainDesc};
+    use holtburger_dat::file_type::region::{
+        GameTime, LandDefs, RegionDesc, SceneDesc, TerrainDesc,
+    };
     use holtburger_dat::graphics::{CVertexArray, SWVertex};
     use holtburger_dat::landblock::CellLandblock;
     use holtburger_dat::physics::{BspLeaf, BspPortal, PortalPoly};
@@ -5248,15 +5250,7 @@ mod tests {
         for (index, height) in land_height_table.iter_mut().enumerate() {
             *height = index as f32 * index as f32 + 0.25;
         }
-        let region = RegionDesc {
-            id: 0x1300_0000,
-            region_number: 1,
-            version: 1,
-            region_name: "test".to_string(),
-            land_defs: LandDefs { land_height_table },
-            scene_info: SceneDesc::default(),
-            terrain_info: TerrainDesc::default(),
-        };
+        let region = synthetic_region(land_height_table);
         let landblock = CellLandblock {
             id: 0x0102_ffff,
             has_objects: 0,
@@ -5283,15 +5277,7 @@ mod tests {
     fn terrain_grid_rejects_non_finite_region_height_table() {
         let mut land_height_table = [0.0; 256];
         land_height_table[255] = f32::NAN;
-        let region = RegionDesc {
-            id: 0x1300_0000,
-            region_number: 1,
-            version: 1,
-            region_name: "test".to_string(),
-            land_defs: LandDefs { land_height_table },
-            scene_info: SceneDesc::default(),
-            terrain_info: TerrainDesc::default(),
-        };
+        let region = synthetic_region(land_height_table);
         let landblock = CellLandblock {
             id: 0x0102_ffff,
             has_objects: 0,
@@ -5304,6 +5290,42 @@ mod tests {
             .expect_err("non-finite regional heights must fail terrain assembly");
 
         assert!(error.to_string().contains("non-finite"));
+    }
+
+    fn synthetic_region(land_height_table: [f32; 256]) -> RegionDesc {
+        RegionDesc {
+            id: 0x1300_0000,
+            region_number: 1,
+            version: 1,
+            region_name: "test".to_string(),
+            land_defs: LandDefs {
+                num_block_length: 255,
+                num_block_width: 255,
+                square_length: 24.0,
+                lblock_length: 192,
+                vertex_per_cell: 1,
+                max_obj_height: 48.0,
+                sky_height: 400.0,
+                road_width: 6.0,
+                land_height_table,
+            },
+            game_time: GameTime {
+                zero_time_of_year: 0.0,
+                zero_year: 0,
+                day_length: 0.0,
+                days_per_year: 0,
+                year_spec: String::new(),
+                times_of_day: Vec::new(),
+                days_of_the_week: Vec::new(),
+                seasons: Vec::new(),
+            },
+            parts_mask: 0x06,
+            sky_info: None,
+            sound_info: None,
+            scene_info: Some(SceneDesc::default()),
+            terrain_info: Some(TerrainDesc::default()),
+            region_misc: None,
+        }
     }
 
     fn test_vertex_array() -> holtburger_dat::graphics::CVertexArray {

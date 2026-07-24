@@ -1,6 +1,6 @@
 # Holtburger 3D Active Region Data Pipeline Plan
 
-Status: Proposed
+Status: In progress
 
 ## Goal and Boundaries
 
@@ -216,7 +216,7 @@ this plan begins:
 The remaining payload-free `0x08` semantic meaning is deliberately deferred: retaining the raw
 mask is sufficient until a real consumer gives that flag behavior. Do not block this plan on it.
 
-### Phase 1 — Complete client-agnostic region decoding
+### Phase 1 — Complete client-agnostic region decoding — Completed 2026-07-23
 
 Deliverables:
 
@@ -238,14 +238,14 @@ Acceptance criteria:
 
 Checklist:
 
-- [ ] Add typed complete land definitions, calendar, sky, day-group, keyframe, sky-object, sound,
+- [x] Add typed complete land definitions, calendar, sky, day-group, keyframe, sky-object, sound,
       scene, optional terrain, misc, and raw parts-mask records.
-- [ ] Preserve source IDs and authored colors/flags without frontend-specific reinterpretation.
-- [ ] Preserve known payload-free PartsMask bits as raw provenance; do not synthesize record types
+- [x] Preserve source IDs and authored colors/flags without frontend-specific reinterpretation.
+- [x] Preserve known payload-free PartsMask bits as raw provenance; do not synthesize record types
       for them.
-- [ ] Add a content query that returns the active descriptor's complete static data without taking
+- [x] Add a content query that returns the active descriptor's complete static data without taking
       a region-number selector.
-- [ ] Remove misleading `region_id` identity terminology where it means fixed resource
+- [x] Remove misleading `region_id` identity terminology where it means fixed resource
       `0x13000000`; retain it only when explicitly describing the source record ID.
 
 Decision checkpoint:
@@ -253,7 +253,25 @@ Decision checkpoint:
 - Keep raw/static records in `holtburger-content`; do not place environment-selection or renderer
   policy there.
 
-### Phase 2 — Add the active-region host/frontend boundary
+#### Implementation record
+
+- `holtburger-dat` now decodes the proven RegionDesc layout through every payload-bearing
+  `PartsMask` section and rejects unexpected trailing bytes. This made a core synthetic fixture
+  fail immediately: it emitted an empty terrain record while declaring no terrain bit. The fixture
+  now declares `0x04`, matching its bytes.
+- `LandSurf` is represented as its authored tagged form: `TextureMerge` or `PaletteShift`. Current
+  terrain-material consumers require `TextureMerge` and fail explicitly for `PaletteShift`; no
+  fallback or reinterpretation was introduced. Frontend terrain projection must retain that same
+  honest behavior until palette-shift terrain receives separate evidence and implementation.
+- `ActiveRegionData` is a client-agnostic `holtburger-content` static asset, returned through the
+  reusable core content-asset service without a region-number request parameter. It wraps the
+  decoded active descriptor; no Tauri or frontend concerns leaked into content.
+- Verification: `cargo test -p holtburger-content -p holtburger-core -p holtburger-dat` passed on
+  2026-07-23 (303 unit tests plus 2 DAT integration fixtures). Decoder coverage uses synthetic
+  region bytes only; the temporary archive inspection harness was removed and no test requires
+  local HBA/DAT assets.
+
+### Phase 2 — Add the active-region host/frontend boundary — Completed 2026-07-23
 
 Deliverables:
 
@@ -272,14 +290,14 @@ Acceptance criteria:
 
 Checklist:
 
-- [ ] Reuse the existing binary transport framing helpers where doing so does not blur distinct
+- [x] Reuse the existing binary transport framing helpers where doing so does not blur distinct
       response identities.
-- [ ] Define a frontend active-region identity as provenance only; it is not a region loader key.
-- [ ] Load, validate, and install active-region data as part of 3D runtime initialization; do not
+- [x] Define a frontend active-region identity as provenance only; it is not a region loader key.
+- [x] Load, validate, and install active-region data as part of 3D runtime initialization; do not
       install it as a consequence of a terrain request.
-- [ ] Ensure runtime destruction clears the active-region cache and all derived regional
+- [x] Ensure runtime destruction clears the active-region cache and all derived regional
       resources together.
-- [ ] Add host projection and frontend decoder tests with synthetic region fixtures.
+- [x] Add host projection and frontend decoder tests with synthetic region fixtures.
 
 Decision checkpoint:
 
@@ -287,7 +305,25 @@ Decision checkpoint:
   scope switching is added later, introduce an explicit replacement event and full derived-resource
   teardown then; do not emulate it now with polling or a region-number parameter.
 
-### Phase 3 — Cut terrain over to active-region data
+#### Implementation record
+
+- Tauri now exposes only `load_active_region_data`, with no selector argument. It returns a
+  versioned `HBAR` response: complete semantic static records in a JSON manifest and the fixed
+  256-entry `LandDefs.land_height_table` as an aligned `f32` binary section. `HBAR` is deliberately
+  distinct from landblock `HBTR`; shared framing does not mean shared response identity.
+- The app-local host projection retains all decoded sections, including nullable absent sections
+  and both tagged `LandSurf` variants. DAT references are serialized as canonical hexadecimal IDs
+  under semantic fields; the frontend never receives DAT bytes or a Rust record name.
+- `TauriActiveRegionSource` validates the whole transport shape with a schema, memoizes the one
+  immutable result, and clears that cache during Explorer teardown. Explorer awaits this bootstrap
+  before it creates the terrain commit pipeline, so terrain realization cannot race the regional
+  facts. The source is not yet consumed by terrain; that deliberate handoff is Phase 3.
+- Verification: synthetic host projection test, synthetic frontend binary-decoder tests,
+  `cargo test -p holtburger-3d`, strict `cargo clippy -p holtburger-3d --all-targets -- -D
+  warnings`, and the 3D app's `check`, TypeScript test, and formatting scripts passed on
+  2026-07-23. No GUI app or local content archive was launched/required.
+
+### Phase 3 — Cut terrain over to active-region data — Completed 2026-07-23
 
 Deliverables:
 
@@ -312,20 +348,20 @@ Acceptance criteria:
 
 Checklist:
 
-- [ ] Make terrain commits require the ActiveRegionSource installed by runtime bootstrap; a
+- [x] Make terrain commits require the ActiveRegionSource installed by runtime bootstrap; a
       terrain fetch must never load or replace regional data as a side effect.
-- [ ] Resolve all 81 canonical terrain heights from raw height indices and the installed
+- [x] Resolve all 81 canonical terrain heights from raw height indices and the installed
       `LandDefs.land_height_table`; validate the table and indices before realization.
-- [ ] Derive the canonical 9×9/24-unit outdoor topology from shared world geometry rather than a
+- [x] Derive the canonical 9×9/24-unit outdoor topology from shared world geometry rather than a
       terrain response manifest.
-- [ ] Port the current terrain interpretation rules into a pure frontend resolver: road material
+- [x] Port the current terrain interpretation rules into a pure frontend resolver: road material
       selection from terrain type `0x20`, and ordered landscape/building/environment/object detail
       roles from the terrain-description table.
-- [ ] Replace terrain's regional cache-key decoration with identities derived from the installed
+- [x] Replace terrain's regional cache-key decoration with identities derived from the installed
       active-region source, retaining current one-region semantics.
-- [ ] Update the Tauri terrain-host tests and `decode-terrain-source` fixtures to the reduced
+- [x] Update the Tauri terrain-host tests and `decode-terrain-source` fixtures to the reduced
       contract.
-- [ ] Remove the repeated regional payload rather than supporting both old and new `HBTR` versions
+- [x] Remove the repeated regional payload rather than supporting both old and new `HBTR` versions
       indefinitely.
 
 Decision checkpoint:
@@ -335,7 +371,28 @@ Decision checkpoint:
   needed, and serve texture pixels; it must not recreate a terrain-specific presentation manifest
   elsewhere.
 
-### Phase 4 — Explorer regional environment selection and resolution
+#### Implementation record
+
+- `HBTR` now has exactly two binary sections for an available landblock: raw `heightIndices` and
+  raw `terrainSamples`. It no longer contains regional provenance, composition/material/detail
+  records, derived heights, grid size, or tile size. There is no compatibility version left behind.
+- `active-region-terrain-resolver.ts` is the single frontend projection point. It derives all 81
+  height values through the installed `LandDefs` table, uses the shared outdoor 9×9/24-unit
+  constants from `landblocks.ts`, rejects absent terrain and unsupported palette-shift terrain
+  explicitly, and converts tagged `TextureMerge` records into renderer composition facts.
+- Detail roles are retained in authored terrain-description order (`landscape`, `building`,
+  `environment`, `object`); the existing composition lookup keeps terrain type `0x20` as the road
+  material selection with its established fallback. Renderer texture-array and composition keys
+  now use the installed active-region record/version provenance, not `regionNumber`.
+- Both Tauri and the headless HTTP harness bootstrap active-region data before constructing their
+  terrain source. The old generic Rust material/profile queries remain for the independent legacy
+  app and diagnostics, but the new 3D host no longer calls or serializes either. They are not a
+  second `HBTR` contract.
+- Verification: synthetic host transport tests, 111 TypeScript tests (including raw-index height,
+  ordered-detail-role, and road-descriptor coverage), app type checks/formatting, strict 3D Rust
+  clippy, and `git diff --check` passed on 2026-07-23. No app instance or real archive was used.
+
+### Phase 4 — Explorer regional environment selection and resolution — Completed 2026-07-23
 
 Deliverables:
 
@@ -358,11 +415,11 @@ Acceptance criteria:
 
 Checklist:
 
-- [ ] Keep UI control policy and labels in the Explorer app; do not move them into shared crates.
-- [ ] Expose sky-day-group names only as static metadata from active-region data.
-- [ ] Model a missing sky section explicitly as an unavailable environment profile, not a default
+- [x] Keep UI control policy and labels in the Explorer app; do not move them into shared crates.
+- [x] Expose sky-day-group names only as static metadata from active-region data.
+- [x] Model a missing sky section explicitly as an unavailable environment profile, not a default
       fake daylight/fog configuration.
-- [ ] Retain resolved sky data even before a sky pass exists.
+- [x] Retain resolved sky data even before a sky pass exists.
 
 Decision checkpoint:
 
@@ -370,7 +427,19 @@ Decision checkpoint:
   this frontend resolver. It does not require a Rust fog/sky resolver or host-pushed resolved
   presentation state.
 
-### Phase 5 — Consume resolved environment state in the renderer
+#### Implementation record
+
+- `scene-environment.ts` is a pure frontend resolver over installed active-region data. Explorer
+  supplies absolute day, normalized time, and an optional explicit day-group index; no host clock
+  or weather event is involved. Automatic selection uses the retail unsigned day/year hash, never
+  `chanceOfOccur`.
+- The resolver performs cyclic keyframe bracketing and retains a background/sky color alongside
+  optional fog. It returns no fog unless both bracketing `worldFog` flags are enabled.
+- Explorer's compact World panel exposes day, time, and Auto/named sky-group controls only after
+  static sky data has loaded. Missing sky remains an unavailable profile (black background, no
+  fabricated daylight), not a silent default region.
+
+### Phase 5 — Consume resolved environment state in the renderer — Completed 2026-07-23
 
 Deliverables:
 
@@ -394,16 +463,28 @@ Acceptance criteria:
 - The renderer can hand the same resolved lighting/sky values to future static/object/sky passes
   without a new region query API.
 
+#### Implementation record
+
+- `GameRuntime` accepts frontend-resolved environment state independently of residency and scene
+  interest, then supplies it to every `FrameInput`. This preserves the intended future host-client
+  swap: only the selection producer changes.
+- Terrain fog is a camera-forward-depth blend applied after terrain composition and detail. The
+  WebGL frame clear uses that exact fog color while fog is active, otherwise the resolved regional
+  background color, preventing the terrain horizon from fading into a stale fixed clear color.
+- Verification: synthetic cyclic-fog resolver tests, app type checks, 113 TypeScript tests,
+  terrain shader compile validation, formatter, strict 3D clippy, and diff whitespace checks
+  passed on 2026-07-23. Visual review remains user-owned; no GUI app was launched.
+
 Checklist:
 
-- [ ] Keep fog state optional and require both regional bracketing keyframes to enable it.
-- [ ] Place fog after final terrain material composition; do not fog individual texture samples.
-- [ ] Bind the same resolved fog color to the display-surface clear operation and terrain program;
+- [x] Keep fog state optional and require both regional bracketing keyframes to enable it.
+- [x] Place fog after final terrain material composition; do not fog individual texture samples.
+- [x] Bind the same resolved fog color to the display-surface clear operation and terrain program;
       use resolved sky/background color only when fog is unavailable.
-- [ ] Add shader compile validation and CPU resolver tests; visual comparison remains user-owned.
-- [ ] Do not create permanent image tests based on local retail assets.
+- [x] Add shader compile validation and CPU resolver tests; visual comparison remains user-owned.
+- [x] Do not create permanent image tests based on local retail assets.
 
-### Phase 6 — Re-steer and clean up
+### Phase 6 — Re-steer and clean up — Completed 2026-07-23
 
 Deliverables:
 
@@ -429,6 +510,21 @@ Checklist:
       realization based on the now-visible Explorer evidence.
 - [ ] Record any proven host/client time-selection transport requirement as a new focused plan,
       not an append-only expansion of this one.
+
+#### Implementation record and remaining debt
+
+- Audit found no `regionNumber`, `TerrainCompositionManifest`, or `RegionRenderProfile` consumer
+  in the new 3D app or its Tauri host. There is one active-region source per Explorer runtime and
+  one raw terrain source boundary; no old `HBTR` branch remains.
+- The historical terrain-loading plan now explicitly labels its former `HBTR` metadata/height
+  contract as superseded. The generic Rust material/profile helpers remain only for the independent
+  legacy app and diagnostics; removing them is a legacy-app migration, not a hidden requirement of
+  this new frontend cutover.
+- Sky geometry, weather, regional sound playback, terrain lighting, and static-object material
+  realization remain separate slices. The frame contract now retains sky selection and ambient
+  lighting facts, so the next slice can be chosen from Explorer evidence without a new region API.
+- No host/client authoritative time transport is proven or added. Explorer controls remain the
+  selection producer; client mode can later replace that producer with server time.
 
 ## Risks and Mitigations
 

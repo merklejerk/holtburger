@@ -18,11 +18,11 @@ tauri-build = { version = "2", features = [] }
 anyhow.workspace = true
 holtburger-content.workspace = true
 holtburger-core.workspace = true
+holtburger-dat.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tauri = { version = "2", features = [] }
 tokio.workspace = true
 
 [dev-dependencies]
-holtburger-dat.workspace = true
 tempfile.workspace = true

@@ -1,6 +1,9 @@
 import type { DatAssetId, LandblockId } from "../game-types";
 import type { TerrainGeometryKey } from "../geometry/types";
-import { getLandblockCoordinates } from "../landblocks";
+import {
+	getLandblockCoordinates,
+	OUTDOOR_TERRAIN_GRID_CELLS,
+} from "../landblocks";
 import type { AABB3 } from "../math/types";
 import type { TerrainGeometryData } from "../renderer/geometry";
 import {
@@ -18,7 +21,7 @@ import {
 } from "../textures/types";
 
 /** Number of canonical authored cells along either outdoor landblock terrain axis. */
-export const TERRAIN_GRID_CELLS = 8;
+export const TERRAIN_GRID_CELLS = OUTDOOR_TERRAIN_GRID_CELLS;
 
 /** Source-proven color variation parameters for one terrain type. */
 export interface TerrainColorVariation {
@@ -58,7 +61,8 @@ export interface TerrainLandscapeDetail {
 
 /** Complete regional composition table interpreted by terrain presentation. */
 export interface TerrainCompositionFacts {
-	readonly regionNumber: number;
+	/** Immutable active-region provenance used only for renderer resource ownership. */
+	readonly activeRegionKey: string;
 	readonly terrainTypes: readonly TerrainMaterialType[];
 	readonly cornerTerrainAlphaMaps: readonly TerrainAlphaMap[];
 	readonly sideTerrainAlphaMaps: readonly TerrainAlphaMap[];
@@ -192,7 +196,7 @@ export interface TerrainDrawUnit {
 export function resolveTerrainTextureFacts(
 	composition: TerrainCompositionFacts,
 ): ResolvedTerrainTextureFacts {
-	const arrayIdentity = `terrain-region:${composition.regionNumber}`;
+	const arrayIdentity = `terrain-active-region:${composition.activeRegionKey}`;
 	return {
 		colors: createTextureArrayFact(
 			TexturePurpose.TerrainColor,
@@ -253,7 +257,7 @@ export function terrainGeneratedTextureKeys(
 ): TerrainGeneratedTextureKeys {
 	return {
 		composition: createTerrainCompositionTextureKey(
-			presentation.composition.regionNumber,
+			presentation.composition.activeRegionKey,
 		),
 		surfaceFields: new Map(
 			TERRAIN_MESH_STRIDES.map((stride) => [

@@ -1,6 +1,7 @@
 use anyhow::Context;
 use holtburger_3d::{
-    discover_content_runtime, load_terrain_source_bytes, load_texture_pixels_bytes,
+    discover_content_runtime, load_active_region_data_bytes, load_terrain_source_bytes,
+    load_texture_pixels_bytes,
 };
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -70,6 +71,10 @@ async fn handle_connection(
         ("GET", "/health") => {
             write_response(&mut stream, 200, "application/json", br#"{"ok":true}"#).await
         }
+        ("POST", "/active-region-data") => match load_active_region_data_bytes(runtime).await {
+            Ok(bytes) => write_response(&mut stream, 200, "application/octet-stream", &bytes).await,
+            Err(error) => write_error(&mut stream, error).await,
+        },
         ("POST", "/terrain-source") => {
             let request = serde_json::from_slice::<TerrainSourceRequest>(&request.body)?;
             match load_terrain_source_bytes(runtime, &request.landblock_id).await {

@@ -43,6 +43,10 @@ uniform sampler2DArray uRoadMasks;
 uniform sampler2D uDetail;
 uniform float uDetailFadeNear;
 uniform float uDetailFadeFar;
+uniform int uFogEnabled;
+uniform float uFogNear;
+uniform float uFogFar;
+uniform vec3 uFogColor;
 
 in vec2 vGridUv;
 in float vViewDepth;
@@ -215,6 +219,10 @@ void main() {
 	vec4 detail = texture(uDetail, fract(cellUv * float(metadata.w)));
 	float fade = clamp((uDetailFadeFar - vViewDepth) / max(uDetailFadeFar - uDetailFadeNear, 0.0001), 0.0, 1.0);
 	color = mix(color, detail.rgb, clamp(detail.a * fade, 0.0, 1.0));
+	if (uFogEnabled != 0) {
+		float fog = clamp((vViewDepth - uFogNear) / max(uFogFar - uFogNear, 0.0001), 0.0, 1.0);
+		color = mix(color, uFogColor, fog);
+	}
 	fragmentColor = vec4(color, 1.0);
 }
 `;
@@ -229,6 +237,10 @@ export interface WebGL2TerrainProgram {
 		readonly detail: WebGLUniformLocation;
 		readonly detailFadeFar: WebGLUniformLocation;
 		readonly detailFadeNear: WebGLUniformLocation;
+		readonly fogColor: WebGLUniformLocation;
+		readonly fogEnabled: WebGLUniformLocation;
+		readonly fogFar: WebGLUniformLocation;
+		readonly fogNear: WebGLUniformLocation;
 		readonly landblockOffset: WebGLUniformLocation;
 		readonly localToLandblock: WebGLUniformLocation;
 		readonly projection: WebGLUniformLocation;
@@ -276,6 +288,10 @@ export function createWebGL2TerrainProgram(
 				detail: requireWebGL2Uniform(gl, program, "uDetail"),
 				detailFadeFar: requireWebGL2Uniform(gl, program, "uDetailFadeFar"),
 				detailFadeNear: requireWebGL2Uniform(gl, program, "uDetailFadeNear"),
+				fogColor: requireWebGL2Uniform(gl, program, "uFogColor"),
+				fogEnabled: requireWebGL2Uniform(gl, program, "uFogEnabled"),
+				fogFar: requireWebGL2Uniform(gl, program, "uFogFar"),
+				fogNear: requireWebGL2Uniform(gl, program, "uFogNear"),
 				landblockOffset: requireWebGL2Uniform(gl, program, "uLandblockOffset"),
 				localToLandblock: requireWebGL2Uniform(
 					gl,

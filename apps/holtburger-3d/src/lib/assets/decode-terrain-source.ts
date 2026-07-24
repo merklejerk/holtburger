@@ -1,24 +1,19 @@
-import { LandblockLayerKind } from "../game/runtime/scene-interest";
-import { resolveTerrainTextureFacts } from "../game/terrain/types";
-import type { TerrainCompositionFacts } from "../game/terrain/types";
+import type { ActiveRegionSource } from "./active-region-source";
+import { resolveOutdoorTerrainLayer } from "../game/terrain/active-region-terrain-resolver";
 import type { ResolvedTerrainLayerSource } from "../game/resolution/landblock-layer";
 import type { LandblockId } from "../game/game-types";
+import { OUTDOOR_TERRAIN_GRID_SIZE } from "../game/landblocks";
 
 const HEADER_LENGTH = 16;
 const MAGIC = "HBTR";
 const VERSION = 1;
 
 interface BinarySection {
-	readonly name: "heightIndices" | "heights" | "terrainSamples";
-	readonly scalarType: "u8" | "f32" | "u16";
+	readonly name: "heightIndices" | "terrainSamples";
+	readonly scalarType: "u8" | "u16";
 	readonly elementCount: number;
 	readonly byteOffset: number;
 	readonly byteLength: number;
-}
-
-interface TerrainManifest {
-	readonly gridSize: number;
-	readonly tileSize: number;
 }
 
 type TerrainAvailability =
@@ -33,11 +28,8 @@ interface TerrainSourceManifest {
 	readonly byteOrder: "little-endian";
 	readonly sectionByteOffsetBase: "section-data";
 	readonly landblockId: string;
-	readonly regionNumber: number;
-	readonly terrain: TerrainManifest | null;
 	/** Typed host outcome for the requested outdoor CellLandblock source. */
 	readonly terrainAvailability: TerrainAvailability;
-	readonly composition: TerrainCompositionFacts;
 	readonly sections: readonly BinarySection[];
 }
 
@@ -45,6 +37,7 @@ interface TerrainSourceManifest {
 export function decodeTerrainSource(
 	response: Uint8Array,
 	requestedLandblockId: LandblockId,
+	activeRegion: ActiveRegionSource,
 ): ResolvedTerrainLayerSource | null {
 	if (response.byteLength < HEADER_LENGTH) {
 		throw new Error(
@@ -86,45 +79,26 @@ export function decodeTerrainSource(
 			`Terrain source returned ${manifest.landblockId} for ${requestedLandblockId}.`,
 		);
 	}
-	if (manifest.terrain === null) {
+	if (manifest.terrainAvailability !== "available") {
 		if (manifest.terrainAvailability === "missing-cell-landblock") return null;
 		throw new Error(
 			`Terrain source is unavailable: ${manifest.terrainAvailability}.`,
 		);
 	}
-	if (manifest.terrainAvailability !== "available") {
-		throw new Error(
-			`Terrain source has terrain data but declares ${manifest.terrainAvailability}.`,
-		);
-	}
-	const expectedCount = manifest.terrain.gridSize * manifest.terrain.gridSize;
-	if (
-		!Number.isInteger(manifest.terrain.gridSize) ||
-		manifest.terrain.gridSize < 2 ||
-		!Number.isFinite(manifest.terrain.tileSize) ||
-		manifest.terrain.tileSize <= 0
-	) {
-		throw new Error("Terrain source declares an invalid authored grid.");
-	}
 	const sections = new Map(
 		manifest.sections.map((section) => [section.name, section]),
 	);
-	if (sections.size !== 3 || sections.size !== manifest.sections.length) {
+	if (sections.size !== 2 || sections.size !== manifest.sections.length) {
 		throw new Error(
-			"Terrain source must contain each typed grid section exactly once.",
+			"Terrain source must contain each raw grid section exactly once.",
 		);
 	}
+	const expectedCount = OUTDOOR_TERRAIN_GRID_SIZE ** 2;
 	const heightIndices = readSection(
 		response,
 		sectionDataOffset,
 		requireSection(sections, "heightIndices", "u8", expectedCount),
 		Uint8Array,
-	);
-	const heights = readSection(
-		response,
-		sectionDataOffset,
-		requireSection(sections, "heights", "f32", expectedCount),
-		Float32Array,
 	);
 	const terrainSamples = readSection(
 		response,
@@ -132,26 +106,10 @@ export function decodeTerrainSource(
 		requireSection(sections, "terrainSamples", "u16", expectedCount),
 		Uint16Array,
 	);
-	if (![...heights].every(Number.isFinite)) {
-		throw new Error("Terrain source contains a non-finite resolved height.");
-	}
-	const composition = validateComposition(manifest.composition);
-	return {
-		generation: {
-			gridSize: manifest.terrain.gridSize,
-			heightIndices,
-			heights,
-			landblockId: manifest.landblockId,
-			terrainSamples,
-			tileSize: manifest.terrain.tileSize,
-		},
-		kind: LandblockLayerKind.Terrain,
-		landblockId: manifest.landblockId,
-		presentation: {
-			composition,
-			textures: resolveTerrainTextureFacts(composition),
-		},
-	};
+	return resolveOutdoorTerrainLayer(
+		{ heightIndices, landblockId: manifest.landblockId, terrainSamples },
+		activeRegion,
+	);
 }
 
 function parseManifest(serialized: string): TerrainSourceManifest {
@@ -169,7 +127,6 @@ function parseManifest(serialized: string): TerrainSourceManifest {
 		manifest.byteOrder !== "little-endian" ||
 		manifest.sectionByteOffsetBase !== "section-data" ||
 		typeof manifest.landblockId !== "string" ||
-		typeof manifest.regionNumber !== "number" ||
 		!isTerrainAvailability(manifest.terrainAvailability) ||
 		!Array.isArray(manifest.sections)
 	) {
@@ -185,107 +142,6 @@ function isTerrainAvailability(value: unknown): value is TerrainAvailability {
 		value === "cell-landblock-decode-failed" ||
 		value === "terrain-assembly-failed"
 	);
-}
-
-function validateComposition(
-	composition: TerrainCompositionFacts,
-): TerrainCompositionFacts {
-	if (
-		!isRecord(composition) ||
-		!Number.isInteger(composition.regionNumber) ||
-		composition.regionNumber < 0 ||
-		!Array.isArray(composition.terrainTypes) ||
-		composition.terrainTypes.length === 0 ||
-		!Array.isArray(composition.cornerTerrainAlphaMaps) ||
-		!Array.isArray(composition.sideTerrainAlphaMaps) ||
-		!Array.isArray(composition.roadAlphaMaps) ||
-		!isRecord(composition.landscapeDetail)
-	) {
-		throw new Error("Terrain source composition is invalid.");
-	}
-	if (
-		composition.cornerTerrainAlphaMaps.length === 0 ||
-		composition.sideTerrainAlphaMaps.length === 0 ||
-		composition.roadAlphaMaps.length === 0
-	) {
-		throw new Error(
-			"Terrain source composition is missing a required texture family.",
-		);
-	}
-	for (const terrain of composition.terrainTypes) {
-		if (
-			!isRecord(terrain) ||
-			!isNonNegativeInteger(terrain.terrainType) ||
-			!isSurfaceTextureAssetId(terrain.colorTextureId) ||
-			!isPositiveFiniteNumber(terrain.tiling) ||
-			!isColorVariation(terrain.colorVariation)
-		) {
-			throw new Error(
-				"Terrain source contains an invalid terrain material entry.",
-			);
-		}
-	}
-	for (const alphaMap of [
-		...composition.cornerTerrainAlphaMaps,
-		...composition.sideTerrainAlphaMaps,
-	]) {
-		if (
-			!isRecord(alphaMap) ||
-			!isNonNegativeInteger(alphaMap.terrainCode) ||
-			!isSurfaceTextureAssetId(alphaMap.blendMaskTextureId)
-		) {
-			throw new Error("Terrain source contains an invalid blend-mask entry.");
-		}
-	}
-	for (const roadMap of composition.roadAlphaMaps) {
-		if (
-			!isRecord(roadMap) ||
-			!isNonNegativeInteger(roadMap.roadCode) ||
-			!isSurfaceTextureAssetId(roadMap.roadMaskTextureId)
-		) {
-			throw new Error("Terrain source contains an invalid road-mask entry.");
-		}
-	}
-	if (
-		!isSurfaceTextureAssetId(composition.landscapeDetail.textureId) ||
-		!isPositiveFiniteNumber(composition.landscapeDetail.tiling)
-	) {
-		throw new Error(
-			"Terrain source contains an invalid landscape-detail entry.",
-		);
-	}
-	return composition;
-}
-
-function isColorVariation(value: unknown): boolean {
-	return (
-		isRecord(value) &&
-		isFiniteNumber(value.minVertexBrightness) &&
-		isFiniteNumber(value.maxVertexBrightness) &&
-		isFiniteNumber(value.minVertexSaturation) &&
-		isFiniteNumber(value.maxVertexSaturation) &&
-		isFiniteNumber(value.minVertexHue) &&
-		isFiniteNumber(value.maxVertexHue)
-	);
-}
-
-function isSurfaceTextureAssetId(value: unknown): boolean {
-	return (
-		typeof value === "string" &&
-		/^surface-texture\/0x05[0-9a-f]{6}$/i.test(value)
-	);
-}
-
-function isNonNegativeInteger(value: unknown): boolean {
-	return typeof value === "number" && Number.isInteger(value) && value >= 0;
-}
-
-function isPositiveFiniteNumber(value: unknown): boolean {
-	return typeof value === "number" && Number.isFinite(value) && value > 0;
-}
-
-function isFiniteNumber(value: unknown): boolean {
-	return typeof value === "number" && Number.isFinite(value);
 }
 
 function requireSection(
@@ -305,7 +161,7 @@ function requireSection(
 	return section;
 }
 
-function readSection<TArray extends Uint8Array | Uint16Array | Float32Array>(
+function readSection<TArray extends Uint8Array | Uint16Array>(
 	response: Uint8Array,
 	sectionDataOffset: number,
 	section: BinarySection,

@@ -93,9 +93,12 @@ export class WebGL2Renderer implements Renderer {
 
 	drawFrame(input: FrameInput): void {
 		this.#resizeCanvasForDpr();
-		this.#beginFrame();
+		this.#beginFrame(input.environment);
 		for (const view of input.views) {
-			this.#drawView(this.#prepareView(input.anchorLandblockId, view));
+			this.#drawView(
+				this.#prepareView(input.anchorLandblockId, view),
+				input.environment,
+			);
 		}
 		void input.timeSeconds;
 	}
@@ -104,8 +107,16 @@ export class WebGL2Renderer implements Renderer {
 		this.#gl.deleteProgram(this.#terrainProgram.program);
 	}
 
-	#beginFrame(): void {
+	#beginFrame(environment: FrameInput["environment"]): void {
 		const gl = this.#gl;
+		const clearColor =
+			environment.distanceFog?.color ?? environment.backgroundColor;
+		gl.clearColor(
+			clearColor.red,
+			clearColor.green,
+			clearColor.blue,
+			clearColor.alpha,
+		);
 		gl.colorMask(true, true, true, true);
 		gl.depthMask(true);
 		gl.disable(gl.BLEND);
@@ -189,12 +200,15 @@ export class WebGL2Renderer implements Renderer {
 		return terrain;
 	}
 
-	#drawView(view: PreparedView): void {
-		this.#drawTerrain(view);
+	#drawView(view: PreparedView, environment: FrameInput["environment"]): void {
+		this.#drawTerrain(view, environment);
 		this.#gl.bindVertexArray(null);
 	}
 
-	#drawTerrain(view: PreparedView): void {
+	#drawTerrain(
+		view: PreparedView,
+		environment: FrameInput["environment"],
+	): void {
 		const gl = this.#gl;
 		gl.depthMask(true);
 		gl.disable(gl.BLEND);
@@ -214,6 +228,16 @@ export class WebGL2Renderer implements Renderer {
 			DETAIL_FADE_NEAR,
 		);
 		gl.uniform1f(this.#terrainProgram.uniforms.detailFadeFar, DETAIL_FADE_FAR);
+		const fog = environment.distanceFog;
+		gl.uniform1i(this.#terrainProgram.uniforms.fogEnabled, fog ? 1 : 0);
+		gl.uniform1f(this.#terrainProgram.uniforms.fogNear, fog?.near ?? 0);
+		gl.uniform1f(this.#terrainProgram.uniforms.fogFar, fog?.far ?? 1);
+		gl.uniform3f(
+			this.#terrainProgram.uniforms.fogColor,
+			fog?.color.red ?? 0,
+			fog?.color.green ?? 0,
+			fog?.color.blue ?? 0,
+		);
 		for (const terrain of view.terrain) {
 			const landblockOffset = createLandblockOffset(
 				terrain.drawUnit.landblockId,

@@ -5,6 +5,10 @@ import type {
 	TexturePreparationServiceResponse,
 } from "../game/textures/texture-preparer";
 import { decodeTerrainSource } from "./decode-terrain-source";
+import {
+	decodeActiveRegionSource,
+	type ActiveRegionSource,
+} from "./active-region-source";
 import { decodeTexturePixels } from "./decode-texture-pixels";
 import type { LandblockTerrainSource } from "./landblock-terrain-source";
 import type { TexturePixelSource } from "./texture-pixel-source";
@@ -14,12 +18,14 @@ export class HttpTerrainContentSource
 	implements LandblockTerrainSource, TexturePixelSource
 {
 	readonly #baseUrl: URL;
+	readonly #activeRegion: ActiveRegionSource;
 
-	private constructor(baseUrl: URL) {
+	private constructor(baseUrl: URL, activeRegion: ActiveRegionSource) {
 		this.#baseUrl = baseUrl;
+		this.#activeRegion = activeRegion;
 	}
 
-	static build(baseUrl: string): HttpTerrainContentSource {
+	static async build(baseUrl: string): Promise<HttpTerrainContentSource> {
 		let parsed: URL;
 		try {
 			parsed = new URL(baseUrl);
@@ -29,14 +35,17 @@ export class HttpTerrainContentSource
 		if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
 			throw new Error("Terrain content host URL must use HTTP or HTTPS.");
 		}
-		return new HttpTerrainContentSource(parsed);
+		const activeRegion = decodeActiveRegionSource(
+			await postBinary(parsed, "active-region-data", {}),
+		);
+		return new HttpTerrainContentSource(parsed, activeRegion);
 	}
 
 	async loadTerrainSource(
 		landblockId: LandblockId,
 	): Promise<ResolvedTerrainLayerSource | null> {
 		const bytes = await this.#postBinary("terrain-source", { landblockId });
-		return decodeTerrainSource(bytes, landblockId);
+		return decodeTerrainSource(bytes, landblockId, this.#activeRegion);
 	}
 
 	async loadTexturePixels(
@@ -47,16 +56,24 @@ export class HttpTerrainContentSource
 	}
 
 	async #postBinary(path: string, body: unknown): Promise<Uint8Array> {
-		const response = await fetch(new URL(path, this.#baseUrl), {
-			body: JSON.stringify(body),
-			headers: { "content-type": "application/json" },
-			method: "POST",
-		});
-		if (!response.ok) {
-			throw new Error(
-				`Terrain content host ${path} failed (${response.status}): ${await response.text()}`,
-			);
-		}
-		return new Uint8Array(await response.arrayBuffer());
+		return postBinary(this.#baseUrl, path, body);
 	}
+}
+
+async function postBinary(
+	baseUrl: URL,
+	path: string,
+	body: unknown,
+): Promise<Uint8Array> {
+	const response = await fetch(new URL(path, baseUrl), {
+		body: JSON.stringify(body),
+		headers: { "content-type": "application/json" },
+		method: "POST",
+	});
+	if (!response.ok) {
+		throw new Error(
+			`Terrain content host ${path} failed (${response.status}): ${await response.text()}`,
+		);
+	}
+	return new Uint8Array(await response.arrayBuffer());
 }

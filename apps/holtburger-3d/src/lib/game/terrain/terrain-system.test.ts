@@ -57,17 +57,20 @@ describe("TerrainSystem", () => {
 
 		expect(terrain.getDrawUnit(nodeId, installation.landblockId)).toMatchObject(
 			{
-				composition: "terrain-composition:1",
+				composition: "terrain-composition:test-region",
 				geometry: "terrain-geometry:0x1111ffff",
 				indexCount: 3,
 				indexStart: 0,
 				landblockId: "0x1111ffff",
 				surfaceField: "terrain-surface:0x1111ffff/1",
 				textures: {
-					blendMasks: "texture-array:terrain-blend-mask:terrain-region:1",
-					colors: "texture-array:terrain-color:terrain-region:1",
+					blendMasks:
+						"texture-array:terrain-blend-mask:terrain-active-region:test-region",
+					colors:
+						"texture-array:terrain-color:terrain-active-region:test-region",
 					detail: "asset-texture:terrain-detail:0x05000004",
-					roadMasks: "texture-array:terrain-road-mask:terrain-region:1",
+					roadMasks:
+						"texture-array:terrain-road-mask:terrain-active-region:test-region",
 				},
 			},
 		);
@@ -112,9 +115,9 @@ describe("TerrainSystem", () => {
 		await Promise.resolve();
 
 		expect(preparer.facts.map(({ key }) => key)).toEqual([
-			"texture-array:terrain-color:terrain-region:1",
-			"texture-array:terrain-blend-mask:terrain-region:1",
-			"texture-array:terrain-road-mask:terrain-region:1",
+			"texture-array:terrain-color:terrain-active-region:test-region",
+			"texture-array:terrain-blend-mask:terrain-active-region:test-region",
+			"texture-array:terrain-road-mask:terrain-active-region:test-region",
 			"asset-texture:terrain-detail:0x05000004",
 		]);
 	});
@@ -186,7 +189,7 @@ function createInstallation(landblockId = "0x1111ffff") {
 			{ blendMaskTextureId: "0x05000002", terrainCode: 1 },
 		],
 		landscapeDetail: { textureId: "0x05000004", tiling: 1 },
-		regionNumber: 1,
+		activeRegionKey: "test-region",
 		roadAlphaMaps: [{ roadCode: 1, roadMaskTextureId: "0x05000003" }],
 		sideTerrainAlphaMaps: [
 			{ blendMaskTextureId: "0x05000002", terrainCode: 3 },

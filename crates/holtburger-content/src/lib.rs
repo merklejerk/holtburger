@@ -1,3 +1,4 @@
+pub mod active_region;
 pub mod character_gen;
 pub mod decode_cache;
 pub mod landblock_scene_assets;
@@ -10,6 +11,7 @@ mod source_reader;
 pub mod static_outdoor_scene;
 pub mod texture_pixels;
 
+pub use active_region::ActiveRegionData;
 pub use character_gen::CharacterGenCatalog;
 pub use decode_cache::ContentDecodeCache;
 pub use landblock_scene_assets::{

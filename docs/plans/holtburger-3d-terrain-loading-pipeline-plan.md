@@ -5,6 +5,15 @@ applications is deliberately user-owned work.
 
 ## Implementation Record
 
+### 2026-07-23 — Superseded regional terrain payload
+
+The active-region data pipeline supersedes this plan's original `HBTR` boundary. `HBTR` now
+contains raw height indices, terrain samples, and typed availability only. The 3D frontend
+bootstraps one `HBAR` active-region payload, derives heights from `LandDefs`, uses fixed outdoor
+topology from shared world constants, and resolves terrain composition/detail facts locally. The
+older record below remains historical evidence for the original host boundary; it must not be read
+as the current transport contract.
+
 ### 2026-07-23 — Shared terrain facts and repository discovery
 
 Completed:

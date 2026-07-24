@@ -43,7 +43,7 @@ function createTerrainSource(landblockId: string): ResolvedTerrainLayerSource {
 			{ blendMaskTextureId: "0x05000002", terrainCode: 1 },
 		],
 		landscapeDetail: { textureId: "0x05000004", tiling: 1 },
-		regionNumber: 1,
+		activeRegionKey: "test-region",
 		roadAlphaMaps: [
 			{
 				roadMaskTextureId: "0x05000003",

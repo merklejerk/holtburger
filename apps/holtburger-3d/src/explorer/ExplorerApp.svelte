@@ -7,6 +7,7 @@
 	import { GameRuntime } from "../lib/game/runtime/game-runtime";
 	import { StandardCommitPipeline } from "../lib/game/commit/pipeline";
 	import { WebGL2Device } from "../lib/game/renderer/webgl2-device";
+	import { TauriActiveRegionSource } from "../lib/assets/tauri-active-region-source";
 	import { TauriLandblockTerrainSource } from "../lib/assets/tauri-landblock-terrain-source";
 	import { TauriTexturePixelSource } from "../lib/assets/tauri-texture-pixel-source";
 	import type { LoDConfig } from "../lib/game/runtime/types";
@@ -16,12 +17,18 @@
 		type ExplorerCameraFocusStatus,
 	} from "./explorer-camera-coordinator";
 	import { FreeFlyCameraController } from "./free-fly-camera-controller";
+	import {
+		resolveSceneEnvironment,
+		type ExplorerEnvironmentSelection,
+	} from "../lib/game/environment/scene-environment";
+	import type { ActiveRegionSource } from "../lib/assets/active-region-source";
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let frameHandle: number | null = null;
 	let gameRuntime: GameRuntime | undefined;
 	let commitPipeline: StandardCommitPipeline | undefined;
 	let webglDevice: WebGL2Device | undefined;
+	let activeRegionSource: TauriActiveRegionSource | undefined;
 	let cameraController: FreeFlyCameraController | undefined;
 	let cameraCoordinator: ExplorerCameraCoordinator | undefined;
 	let frameMetrics: FrameMetrics | null = $state(null);
@@ -30,6 +37,21 @@
 	let cameraFocusStatus = $state<ExplorerCameraFocusStatus>(
 		"No camera focus requested.",
 	);
+	let activeRegion = $state<ActiveRegionSource | undefined>(undefined);
+	let environmentSelection = $state<ExplorerEnvironmentSelection>({
+		dayIndex: 0,
+		timeOfDay: 0.5,
+		dayGroupOverride: null,
+	});
+
+	function updateEnvironment(selection: ExplorerEnvironmentSelection): void {
+		environmentSelection = selection;
+		if (activeRegion) {
+			gameRuntime?.setSceneEnvironment(
+				resolveSceneEnvironment(activeRegion, selection),
+			);
+		}
+	}
 
 	function requestSceneInterest(
 		residency: SceneResidency,
@@ -58,12 +80,15 @@
 			const runtime = gameRuntime;
 			const pipeline = commitPipeline;
 			const device = webglDevice;
+			const regionSource = activeRegionSource;
 			const coordinator = cameraCoordinator;
 			const controller = cameraController;
 			gameRuntime = undefined;
 			runtimeReady = false;
 			commitPipeline = undefined;
 			webglDevice = undefined;
+			activeRegionSource = undefined;
+			activeRegion = undefined;
 			cameraCoordinator = undefined;
 			cameraController = undefined;
 			teardown = (async () => {
@@ -76,7 +101,11 @@
 					try {
 						await pipeline?.destroy();
 					} finally {
-						await device?.destroy();
+						try {
+							await device?.destroy();
+						} finally {
+							regionSource?.destroy();
+						}
 					}
 				}
 			})();
@@ -85,7 +114,10 @@
 
 		const start = async (): Promise<void> => {
 			try {
-				const terrainSource = TauriLandblockTerrainSource.build();
+				activeRegionSource = TauriActiveRegionSource.build();
+				activeRegion = await activeRegionSource.load();
+				if (destroyed) return;
+				const terrainSource = TauriLandblockTerrainSource.build(activeRegion);
 				const texturePixelSource = TauriTexturePixelSource.build();
 				webglDevice = await WebGL2Device.build(canvasElement!);
 				if (destroyed) return;
@@ -96,6 +128,9 @@
 					webglDevice,
 					commitPipeline,
 					texturePixelSource,
+				);
+				gameRuntime.setSceneEnvironment(
+					resolveSceneEnvironment(activeRegion, environmentSelection),
 				);
 				if (destroyed) return;
 				cameraController = new FreeFlyCameraController({
@@ -171,6 +206,15 @@
 		{/if}
 
 		<FrameMetricsOverlay metrics={frameMetrics} />
-		<ExplorerTools {runtimeReady} {requestSceneInterest} {cameraFocusStatus} />
+		<ExplorerTools
+			{runtimeReady}
+			{requestSceneInterest}
+			{cameraFocusStatus}
+			{environmentSelection}
+			dayGroupNames={activeRegion?.data.sky?.dayGroups.map(
+				({ dayName }) => dayName,
+			) ?? []}
+			{updateEnvironment}
+		/>
 	</div>
 </div>

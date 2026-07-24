@@ -57,6 +57,7 @@ import type {
 	SceneInterestRevision,
 } from "./scene-availability";
 import type { TerrainSurfaceSample } from "../terrain/terrain-surface";
+import type { ResolvedSceneEnvironment } from "../environment/scene-environment";
 
 const DEFAULT_CAMERA: Camera = {
 	near: 0.5,
@@ -68,6 +69,12 @@ const DEFAULT_CAMERA: Camera = {
 		position: Vec3.zero(),
 		rotation: Quat.identity(),
 	},
+};
+const DEFAULT_ENVIRONMENT: ResolvedSceneEnvironment = {
+	backgroundColor: { red: 0.15, green: 0.05, blue: 0.05, alpha: 1 },
+	distanceFog: null,
+	sky: null,
+	lighting: null,
 };
 
 /** Conservative fixed terrain root bound including retail transition lowering. */
@@ -130,6 +137,8 @@ export class GameRuntime {
 	#nextSceneInterestRevision = 0;
 	/** Current primary-view input used for visibility and rendering. */
 	#camera: Camera = DEFAULT_CAMERA;
+	/** Frontend-owned static regional presentation state for every render frame. */
+	#environment: ResolvedSceneEnvironment = DEFAULT_ENVIRONMENT;
 	/** Static layers currently requested or retained independently of the camera. */
 	#sceneInterest: SceneInterestMap = new Map();
 	/** Prevents new work and late async publication after runtime shutdown begins. */
@@ -248,6 +257,11 @@ export class GameRuntime {
 		};
 	}
 
+	/** Replace the frontend-resolved environment without changing scene residency or interest. */
+	setSceneEnvironment(environment: ResolvedSceneEnvironment): void {
+		this.#environment = environment;
+	}
+
 	/** Resolve one canonical scene-space point against resident scene scopes. */
 	queryWorldPointResidency(point: Vec3): SceneResidency | null {
 		return this.#scene.queryWorldPointResidency(point);
@@ -285,6 +299,7 @@ export class GameRuntime {
 		if (!renderer) throw new Error("Game runtime has no renderer device.");
 		renderer.drawFrame({
 			anchorLandblockId: this.#camera.placement.landblockId,
+			environment: this.#environment,
 			timeSeconds,
 			views: [{ camera: this.#camera }],
 		});

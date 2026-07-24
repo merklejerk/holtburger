@@ -30,6 +30,10 @@
 		readonly updateEnvironment: (
 			selection: ExplorerEnvironmentSelection,
 		) => void;
+		/** Explorer-local switch controlling distance-fog presentation. */
+		readonly distanceFogEnabled: boolean;
+		/** Update Explorer's distance-fog presentation switch. */
+		readonly updateDistanceFog: (enabled: boolean) => void;
 	}
 
 	let {
@@ -39,6 +43,8 @@
 		environmentSelection,
 		dayGroupNames,
 		updateEnvironment,
+		distanceFogEnabled,
+		updateDistanceFog,
 	}: Props = $props();
 
 	const tabs: readonly ExplorerTab[] = [
@@ -129,6 +135,8 @@
 								{environmentSelection}
 								{dayGroupNames}
 								{updateEnvironment}
+								{distanceFogEnabled}
+								{updateDistanceFog}
 							/>
 						{:else}
 							<p>{activeTab.stub}</p>

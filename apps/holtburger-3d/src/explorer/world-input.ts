@@ -3,6 +3,11 @@ import type { SceneResidency } from "../lib/game/scene";
 
 const HEX_PREFIX_PATTERN = /^(?:0x)?([0-9a-f]{4})$/i;
 const HEX_CELL_PATTERN = /^(?:0x)?([0-9a-f]{8})$/i;
+const MAP_COORDINATE_PATTERN =
+	/^\s*(\d+(?:\.\d+)?)\s*([ns])\s*,?\s*(\d+(?:\.\d+)?)\s*([ew])(?:\s*,?\s*-?\d+(?:\.\d+)?\s*z?)?\s*$/i;
+const MAP_COORDINATE_ORIGIN = 102;
+const MAP_COORDINATE_LANDBLOCKS_PER_DEGREE = 240 / 192;
+const MAX_OUTDOOR_LANDBLOCK_AXIS = 0xfe;
 
 /** Parsed residence explicitly supplied by Explorer's world controls. */
 export interface ParsedResidenceInput {
@@ -12,7 +17,11 @@ export interface ParsedResidenceInput {
 	readonly residency: SceneResidency;
 }
 
-/** Parse a landblock prefix, outdoor landblock id, or environment-cell id. */
+/**
+ * Parse an outdoor map coordinate, landblock prefix, outdoor landblock id, or
+ * environment-cell id. Map coordinates use AC's `N/S E/W` notation; elevation,
+ * when supplied, does not alter the outdoor landblock target.
+ */
 export function parseResidenceInput(
 	input: string,
 ): ParsedResidenceInput | null {
@@ -22,7 +31,17 @@ export function parseResidenceInput(
 		return createResidence(`${prefixMatch[1]}ffff`);
 	}
 	const cellMatch = HEX_CELL_PATTERN.exec(value);
-	return cellMatch ? createResidence(cellMatch[1]!) : null;
+	if (cellMatch) return createResidence(cellMatch[1]!);
+
+	const coordinateMatch = MAP_COORDINATE_PATTERN.exec(value);
+	return coordinateMatch
+		? createOutdoorResidenceFromMapCoordinates({
+				eastWest: Number.parseFloat(coordinateMatch[3]!),
+				eastWestHemisphere: coordinateMatch[4]!.toUpperCase() as "E" | "W",
+				northSouth: Number.parseFloat(coordinateMatch[1]!),
+				northSouthHemisphere: coordinateMatch[2]!.toUpperCase() as "N" | "S",
+			})
+		: null;
 }
 
 function createResidence(rawId: string): ParsedResidenceInput {
@@ -41,4 +60,32 @@ function createResidence(rawId: string): ParsedResidenceInput {
 		label: `Environment cell ${envCellId}`,
 		residency: { envCellId, landblockId },
 	};
+}
+
+function createOutdoorResidenceFromMapCoordinates(coordinates: {
+	readonly northSouth: number;
+	readonly northSouthHemisphere: "N" | "S";
+	readonly eastWest: number;
+	readonly eastWestHemisphere: "E" | "W";
+}): ParsedResidenceInput {
+	const latitude =
+		coordinates.northSouthHemisphere === "N"
+			? coordinates.northSouth
+			: -coordinates.northSouth;
+	const longitude =
+		coordinates.eastWestHemisphere === "E"
+			? coordinates.eastWest
+			: -coordinates.eastWest;
+	const x = mapCoordinateToLandblockAxis(longitude);
+	const y = mapCoordinateToLandblockAxis(latitude);
+	return createResidence(
+		`${x.toString(16).padStart(2, "0")}${y.toString(16).padStart(2, "0")}ffff`,
+	);
+}
+
+function mapCoordinateToLandblockAxis(coordinate: number): number {
+	const axis = Math.floor(
+		(coordinate + MAP_COORDINATE_ORIGIN) * MAP_COORDINATE_LANDBLOCKS_PER_DEGREE,
+	);
+	return Math.max(0, Math.min(MAX_OUTDOOR_LANDBLOCK_AXIS, axis));
 }

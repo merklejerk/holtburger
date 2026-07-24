@@ -28,6 +28,10 @@
 		readonly updateEnvironment: (
 			selection: ExplorerEnvironmentSelection,
 		) => void;
+		/** Explorer-local switch controlling distance-fog presentation. */
+		readonly distanceFogEnabled: boolean;
+		/** Update Explorer's distance-fog presentation switch. */
+		readonly updateDistanceFog: (enabled: boolean) => void;
 	}
 
 	let {
@@ -37,6 +41,8 @@
 		environmentSelection,
 		dayGroupNames,
 		updateEnvironment,
+		distanceFogEnabled,
+		updateDistanceFog,
 	}: Props = $props();
 
 	let interestInput = $state("0000");
@@ -78,6 +84,10 @@
 		});
 	}
 
+	function handleDistanceFogChange(event: Event): void {
+		updateDistanceFog((event.currentTarget as HTMLInputElement).checked);
+	}
+
 	const usesUnavailableLayers = $derived(
 		lod.buildingRadius !== null ||
 			lod.explicitObjectRadius !== null ||
@@ -96,16 +106,17 @@
 		<fieldset disabled={!runtimeReady}>
 			<legend>Scene interest</legend>
 			<label>
-				<span>Target landblock/cell</span>
+				<span>Target landblock, cell, or coordinates</span>
 				<input
 					autocomplete="off"
 					bind:value={interestInput}
-					placeholder="da55 or da550123"
+					placeholder="da55, da550123, or 33.6N 40W"
 					spellcheck="false"
 				/>
 			</label>
 			<p class:invalid={parsedInterest === null}>
-				{parsedInterest?.label ?? "Enter four or eight hexadecimal digits."}
+				{parsedInterest?.label ??
+					"Enter four or eight hexadecimal digits, or N/S E/W coordinates."}
 			</p>
 			<div
 				class="explorer-lod-controls"
@@ -188,38 +199,51 @@
 		</fieldset>
 	</form>
 	{#if dayGroupNames.length > 0}
-		<fieldset disabled={!runtimeReady}>
+		<fieldset class="explorer-environment-controls" disabled={!runtimeReady}>
 			<legend>Regional environment</legend>
-			<label
-				><span>Day</span><input
+			<label class="explorer-environment-field">
+				<span>Day</span>
+				<input
 					min="0"
 					step="1"
 					type="number"
 					value={environmentSelection.dayIndex}
 					oninput={(event) => updateEnvironmentSelection("dayIndex", event)}
-				/></label
-			>
-			<label
-				><span>Time</span><input
+				/>
+			</label>
+			<label class="explorer-environment-field">
+				<span>Time</span>
+				<input
 					max="0.999"
 					min="0"
 					step="0.01"
 					type="range"
 					value={environmentSelection.timeOfDay}
 					oninput={(event) => updateEnvironmentSelection("timeOfDay", event)}
-				/></label
-			>
-			<label
-				><span>Sky group</span><select
+				/>
+			</label>
+			<label class="explorer-environment-field">
+				<span>Sky group</span>
+				<select
 					value={environmentSelection.dayGroupOverride ?? "auto"}
 					onchange={(event) =>
 						updateEnvironmentSelection("dayGroupOverride", event)}
-					><option value="auto">Auto</option
-					>{#each dayGroupNames as name, index}<option value={index}
-							>{name}</option
-						>{/each}</select
-				></label
-			>
+				>
+					<option value="auto">Auto</option>
+					{#each dayGroupNames as name, index}
+						<option value={index}>{name}</option>
+					{/each}
+				</select>
+			</label>
+			<label class="explorer-toggle">
+				<input
+					checked={distanceFogEnabled}
+					type="checkbox"
+					onchange={handleDistanceFogChange}
+				/>
+				<span>Distance fog</span>
+				<strong>{distanceFogEnabled ? "On" : "Off"}</strong>
+			</label>
 		</fieldset>
 	{/if}
 </div>

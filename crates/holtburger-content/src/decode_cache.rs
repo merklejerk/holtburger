@@ -10,7 +10,7 @@ use holtburger_dat::file_type::{
 use holtburger_dat::landblock::{CellLandblock, LandblockInfo};
 use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, ResourceKey};
 
-use crate::ContentRepository;
+use crate::{ActiveRegionData, ContentRepository};
 
 const CELL_LANDBLOCK_CAPACITY: usize = 512;
 const LANDBLOCK_INFO_CAPACITY: usize = 512;
@@ -171,6 +171,11 @@ impl ContentDecodeCache {
             .lock()
             .expect("region desc cache lock should not be poisoned") = Some(region.clone());
         Ok(region)
+    }
+
+    /// Loads the complete static record for the repository-selected active region.
+    pub fn active_region_data(&self, content: &ContentRepository) -> Result<ActiveRegionData> {
+        Ok(ActiveRegionData::new(self.region_desc(content)?))
     }
 
     pub fn scene(&self, content: &ContentRepository, scene_id: u32) -> Result<Scene> {

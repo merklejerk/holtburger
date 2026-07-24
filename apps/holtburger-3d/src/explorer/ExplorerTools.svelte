@@ -3,6 +3,7 @@
 	import type { LoDConfig } from "../lib/game/runtime/types";
 	import type { ExplorerCameraFocusStatus } from "./explorer-camera-coordinator";
 	import ExplorerWorldPanel from "./ExplorerWorldPanel.svelte";
+	import type { ExplorerEnvironmentSelection } from "../lib/game/environment/scene-environment";
 
 	type ExplorerTabId = "world" | "assets" | "entities" | "logs";
 
@@ -24,10 +25,21 @@
 			lod: LoDConfig,
 		) => void;
 		readonly cameraFocusStatus: ExplorerCameraFocusStatus;
+		readonly environmentSelection: ExplorerEnvironmentSelection;
+		readonly dayGroupNames: readonly string[];
+		readonly updateEnvironment: (
+			selection: ExplorerEnvironmentSelection,
+		) => void;
 	}
 
-	let { runtimeReady, requestSceneInterest, cameraFocusStatus }: Props =
-		$props();
+	let {
+		runtimeReady,
+		requestSceneInterest,
+		cameraFocusStatus,
+		environmentSelection,
+		dayGroupNames,
+		updateEnvironment,
+	}: Props = $props();
 
 	const tabs: readonly ExplorerTab[] = [
 		{
@@ -114,6 +126,9 @@
 								{runtimeReady}
 								{requestSceneInterest}
 								{cameraFocusStatus}
+								{environmentSelection}
+								{dayGroupNames}
+								{updateEnvironment}
 							/>
 						{:else}
 							<p>{activeTab.stub}</p>

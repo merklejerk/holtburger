@@ -24,7 +24,7 @@ describe("compileTerrainCompositionTable", () => {
 				{ blendMaskTextureId: "0x05000003", terrainCode: 1 },
 			],
 			landscapeDetail: { textureId: "0x05000006", tiling: 7 },
-			regionNumber: 9,
+			activeRegionKey: "test-region",
 			roadAlphaMaps: [{ roadCode: 3, roadMaskTextureId: "0x05000005" }],
 			sideTerrainAlphaMaps: [
 				{ blendMaskTextureId: "0x05000004", terrainCode: 9 },

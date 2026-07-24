@@ -1,14 +1,19 @@
 import type { LandblockId } from "../game/game-types";
 import type { ResolvedTerrainLayerSource } from "../game/resolution/landblock-layer";
+import type { ActiveRegionSource } from "./active-region-source";
 import { decodeTerrainSource } from "./decode-terrain-source";
 import type { LandblockTerrainSource } from "./landblock-terrain-source";
 
 /** Tauri adapter for the terrain-only static-content capability. */
 export class TauriLandblockTerrainSource implements LandblockTerrainSource {
-	protected constructor() {}
+	readonly #activeRegion: ActiveRegionSource;
 
-	static build(): TauriLandblockTerrainSource {
-		return new TauriLandblockTerrainSource();
+	protected constructor(activeRegion: ActiveRegionSource) {
+		this.#activeRegion = activeRegion;
+	}
+
+	static build(activeRegion: ActiveRegionSource): TauriLandblockTerrainSource {
+		return new TauriLandblockTerrainSource(activeRegion);
 	}
 
 	async loadTerrainSource(
@@ -18,7 +23,11 @@ export class TauriLandblockTerrainSource implements LandblockTerrainSource {
 		const response = await invoke<unknown>("load_terrain_source", {
 			request: { landblockId },
 		});
-		return decodeTerrainSource(asBinaryResponse(response), landblockId);
+		return decodeTerrainSource(
+			asBinaryResponse(response),
+			landblockId,
+			this.#activeRegion,
+		);
 	}
 }
 

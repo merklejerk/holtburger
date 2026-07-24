@@ -2,21 +2,25 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use holtburger_content::{
-    ContentDecodeCache, ContentRepository, LandblockSceneLodLayer, LandblockSceneLodLevel,
-    LandblockSceneLodRequest, ResolvedRegionDetailRoleKind, SourceRecordStatus, TerrainGridSource,
+    ActiveRegionData, ContentDecodeCache, ContentRepository, LandblockSceneLodLayer,
+    LandblockSceneLodLevel, LandblockSceneLodRequest, SourceRecordStatus, TerrainGridSource,
     TexturePixelFormat,
 };
 use holtburger_core::{
     ContentAsset, ContentAssetRequest, ContentAssetRuntime, ContentAssetService,
     SurfaceTexturePixelsRequest,
 };
+use holtburger_dat::file_type::region::{LandSurfType, TerrainDesc};
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
 const TERRAIN_SOURCE_BINARY_MAGIC: &[u8; 4] = b"HBTR";
 const TERRAIN_SOURCE_BINARY_VERSION: u32 = 1;
 const TERRAIN_SOURCE_BINARY_HEADER_LEN: usize = 16;
 const TEXTURE_PIXELS_BINARY_MAGIC: &[u8; 4] = b"HBTP";
 const TEXTURE_PIXELS_BINARY_VERSION: u32 = 1;
+const ACTIVE_REGION_BINARY_MAGIC: &[u8; 4] = b"HBAR";
+const ACTIVE_REGION_BINARY_VERSION: u32 = 1;
 
 /// Managed static-content runtime shared by narrow Tauri commands.
 #[derive(Clone)]
@@ -77,6 +81,17 @@ fn host_status() -> HostStatus {
     }
 }
 
+/// Loads the active content scope's immutable regional static data once per frontend runtime.
+#[tauri::command]
+async fn load_active_region_data(
+    state: tauri::State<'_, HostContentState>,
+) -> Result<tauri::ipc::Response, String> {
+    let bytes = load_active_region_data_bytes(&state.runtime)
+        .await
+        .map_err(format_error)?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// Loads one normalized outdoor landblock's authored terrain source as a versioned binary response.
 #[tauri::command]
 async fn load_terrain_source(
@@ -115,6 +130,18 @@ pub async fn load_terrain_source_bytes(
     build_terrain_source_response(runtime, landblock_id).await
 }
 
+/// Build the canonical active-region response used by Tauri and the headless browser harness.
+pub async fn load_active_region_data_bytes(runtime: &ContentAssetRuntime) -> Result<Vec<u8>> {
+    let asset = runtime
+        .load(ContentAssetRequest::ActiveRegionData)
+        .await
+        .context("Could not load active-region static data")?;
+    let ContentAsset::ActiveRegionData(active_region) = asset else {
+        unreachable!("active-region request must return active-region data")
+    };
+    serialize_active_region_binary(&active_region)
+}
+
 /// Build the canonical terrain-pixel response used by Tauri and the headless browser harness.
 pub async fn load_texture_pixels_bytes(
     runtime: &ContentAssetRuntime,
@@ -143,12 +170,7 @@ async fn build_terrain_source_response(
         ))
         .await
         .with_context(|| format!("Could not load terrain scene source for 0x{landblock_id:08X}"))?;
-    let ContentAsset::LandblockSceneLod {
-        scene_lod,
-        region_number,
-        ..
-    } = scene_asset
-    else {
+    let ContentAsset::LandblockSceneLod { scene_lod, .. } = scene_asset else {
         unreachable!("terrain source request must return a landblock scene asset")
     };
     if scene_lod.landblock_id != landblock_id {
@@ -157,30 +179,6 @@ async fn build_terrain_source_response(
             scene_lod.landblock_id
         );
     }
-
-    let material_asset = runtime
-        .load(ContentAssetRequest::TerrainMaterial(region_number))
-        .await
-        .with_context(|| {
-            format!("Could not load terrain material table for region {region_number}")
-        })?;
-    let ContentAsset::TerrainMaterial(material_table) = material_asset else {
-        unreachable!("terrain material request must return a terrain material table")
-    };
-    let render_profile_asset = runtime
-        .load(ContentAssetRequest::RegionRenderProfile(region_number))
-        .await
-        .with_context(|| {
-            format!("Could not load terrain render profile for region {region_number}")
-        })?;
-    let ContentAsset::RegionRenderProfile(render_profile) = render_profile_asset else {
-        unreachable!("region profile request must return a region render profile")
-    };
-    let landscape_detail = render_profile
-        .detail_roles
-        .iter()
-        .find(|role| role.role == ResolvedRegionDetailRoleKind::Landscape)
-        .context("region render profile has no landscape detail role")?;
 
     let terrain = scene_lod.layers.iter().find_map(|layer| match layer {
         LandblockSceneLodLayer::Terrain(layer) => layer.terrain.as_ref(),
@@ -193,43 +191,7 @@ async fn build_terrain_source_response(
         byte_order: "little-endian",
         section_byte_offset_base: "section-data",
         landblock_id: format!("0x{landblock_id:08x}"),
-        region_number,
-        terrain: terrain.map(TerrainManifest::from),
         terrain_availability,
-        composition: TerrainCompositionManifest {
-            region_number,
-            terrain_types: material_table
-                .terrain_types
-                .iter()
-                .map(|terrain| TerrainMaterialManifest {
-                    terrain_type: terrain.terrain_type,
-                    color_texture_id: surface_texture_asset_id(terrain.texture_id),
-                    tiling: terrain.tiling,
-                    color_variation: TerrainColorVariationManifest {
-                        min_vertex_brightness: terrain.min_vert_bright,
-                        max_vertex_brightness: terrain.max_vert_bright,
-                        min_vertex_saturation: terrain.min_vert_saturate,
-                        max_vertex_saturation: terrain.max_vert_saturate,
-                        min_vertex_hue: terrain.min_vert_hue,
-                        max_vertex_hue: terrain.max_vert_hue,
-                    },
-                })
-                .collect(),
-            corner_terrain_alpha_maps: alpha_maps(&material_table.corner_terrain_alpha_maps),
-            side_terrain_alpha_maps: alpha_maps(&material_table.side_terrain_alpha_maps),
-            road_alpha_maps: material_table
-                .road_alpha_maps
-                .iter()
-                .map(|map| TerrainRoadAlphaMapManifest {
-                    road_code: map.selector,
-                    road_mask_texture_id: surface_texture_asset_id(map.alpha_texture_id),
-                })
-                .collect(),
-            landscape_detail: LandscapeDetailManifest {
-                texture_id: surface_texture_asset_id(landscape_detail.detail_texture_id),
-                tiling: landscape_detail.detail_tiling,
-            },
-        },
         sections: terrain.map(terrain_sections).unwrap_or_default(),
     };
     serialize_terrain_source_binary(&manifest, terrain)
@@ -348,15 +310,215 @@ fn surface_texture_asset_id(texture_id: u32) -> String {
     format!("surface-texture/0x{texture_id:08x}")
 }
 
-fn alpha_maps(
-    maps: &[holtburger_content::ResolvedTerrainAlphaMap],
-) -> Vec<TerrainAlphaMapManifest> {
-    maps.iter()
-        .map(|map| TerrainAlphaMapManifest {
-            terrain_code: map.selector,
-            blend_mask_texture_id: surface_texture_asset_id(map.texture_id),
-        })
-        .collect()
+/// App-local, versioned transport envelope for the active RegionDesc projection.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ActiveRegionManifest {
+    transport: &'static str,
+    version: u32,
+    byte_order: &'static str,
+    section_byte_offset_base: &'static str,
+    provenance: ActiveRegionProvenanceManifest,
+    /// Complete semantic RegionDesc projection. The enclosing transport version owns this schema.
+    data: Value,
+    sections: Vec<BinarySectionManifest>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ActiveRegionProvenanceManifest {
+    source_record_id: String,
+    number: u32,
+    version: u32,
+    name: String,
+    parts_mask: u32,
+}
+
+fn active_region_manifest(active_region: &ActiveRegionData) -> ActiveRegionManifest {
+    let region = &active_region.descriptor;
+    ActiveRegionManifest {
+        transport: "holtburger-active-region-data",
+        version: ACTIVE_REGION_BINARY_VERSION,
+        byte_order: "little-endian",
+        section_byte_offset_base: "section-data",
+        provenance: ActiveRegionProvenanceManifest {
+            source_record_id: dat_id(region.id),
+            number: region.region_number,
+            version: region.version,
+            name: region.region_name.clone(),
+            parts_mask: region.parts_mask,
+        },
+        data: json!({
+            "land": {
+                "numBlockLength": region.land_defs.num_block_length,
+                "numBlockWidth": region.land_defs.num_block_width,
+                "squareLength": region.land_defs.square_length,
+                "landblockLength": region.land_defs.lblock_length,
+                "verticesPerCell": region.land_defs.vertex_per_cell,
+                "maxObjectHeight": region.land_defs.max_obj_height,
+                "skyHeight": region.land_defs.sky_height,
+                "roadWidth": region.land_defs.road_width,
+            },
+            "calendar": {
+                "zeroTimeOfYear": region.game_time.zero_time_of_year,
+                "zeroYear": region.game_time.zero_year,
+                "dayLength": region.game_time.day_length,
+                "daysPerYear": region.game_time.days_per_year,
+                "yearSpec": region.game_time.year_spec,
+                "timesOfDay": region.game_time.times_of_day.iter().map(|time| json!({
+                    "start": time.start,
+                    "isNight": time.is_night,
+                    "name": time.name,
+                })).collect::<Vec<_>>(),
+                "daysOfTheWeek": region.game_time.days_of_the_week,
+                "seasons": region.game_time.seasons.iter().map(|season| json!({
+                    "startDate": season.start_date,
+                    "name": season.name,
+                })).collect::<Vec<_>>(),
+            },
+            "sky": region.sky_info.as_ref().map(|sky| json!({
+                "tickSize": sky.tick_size,
+                "lightTickSize": sky.light_tick_size,
+                "dayGroups": sky.day_groups.iter().map(|group| json!({
+                    "chanceOfOccur": group.chance_of_occur,
+                    "dayName": group.day_name,
+                    "skyObjects": group.sky_objects.iter().map(|object| json!({
+                        "beginTime": object.begin_time,
+                        "endTime": object.end_time,
+                        "beginAngle": object.begin_angle,
+                        "endAngle": object.end_angle,
+                        "textureVelocityX": object.tex_velocity_x,
+                        "textureVelocityY": object.tex_velocity_y,
+                        "defaultGfxObjectId": dat_id(object.default_gfx_object_id),
+                        "defaultParticleEffectId": dat_id(object.default_pes_object_id),
+                        "properties": object.properties,
+                    })).collect::<Vec<_>>(),
+                    "skyTimes": group.sky_times.iter().map(|time| json!({
+                        "begin": time.begin,
+                        "directionalBrightness": time.dir_bright,
+                        "directionalHeading": time.dir_heading,
+                        "directionalPitch": time.dir_pitch,
+                        "directionalColor": time.dir_color,
+                        "ambientBrightness": time.amb_bright,
+                        "ambientColor": time.amb_color,
+                        "minWorldFog": time.min_world_fog,
+                        "maxWorldFog": time.max_world_fog,
+                        "worldFogColor": time.world_fog_color,
+                        "worldFog": time.world_fog,
+                        "skyObjectReplacements": time.sky_object_replacements.iter().map(|replacement| json!({
+                            "objectIndex": replacement.object_index,
+                            "gfxObjectId": dat_id(replacement.gfx_object_id),
+                            "rotate": replacement.rotate,
+                            "transparent": replacement.transparent,
+                            "luminosity": replacement.luminosity,
+                            "maxBrightness": replacement.max_bright,
+                        })).collect::<Vec<_>>(),
+                    })).collect::<Vec<_>>(),
+                })).collect::<Vec<_>>(),
+            })),
+            "sound": region.sound_info.as_ref().map(|sound| json!({
+                "tables": sound.tables.iter().map(|table| json!({
+                    "soundTableId": dat_id(table.stb_id),
+                    "sounds": table.sounds.iter().map(|sound| json!({
+                        "soundType": sound.sound_type,
+                        "volume": sound.volume,
+                        "baseChance": sound.base_chance,
+                        "minRate": sound.min_rate,
+                        "maxRate": sound.max_rate,
+                    })).collect::<Vec<_>>(),
+                })).collect::<Vec<_>>(),
+            })),
+            "scenes": region.scene_info.as_ref().map(|scene| json!({
+                "types": scene.scene_types.iter().map(|scene_type| json!({
+                    "soundTableIndex": scene_type.stb_index,
+                    "sceneIds": scene_type.scenes.iter().copied().map(dat_id).collect::<Vec<_>>(),
+                })).collect::<Vec<_>>(),
+            })),
+            "terrain": region.terrain_info.as_ref().map(active_region_terrain_value),
+            "misc": region.region_misc.as_ref().map(|misc| json!({
+                "version": misc.version,
+                "gameMapId": dat_id(misc.game_map_id),
+                "autotestMapId": dat_id(misc.autotest_map_id),
+                "autotestMapSize": misc.autotest_map_size,
+                "clearCellId": dat_id(misc.clear_cell_id),
+                "clearMonsterId": dat_id(misc.clear_monster_id),
+            })),
+        }),
+        sections: vec![BinarySectionManifest {
+            name: "landHeightTable",
+            scalar_type: "f32",
+            element_count: region.land_defs.land_height_table.len(),
+            byte_offset: 0,
+            byte_length: std::mem::size_of_val(&region.land_defs.land_height_table),
+        }],
+    }
+}
+
+fn active_region_terrain_value(terrain: &TerrainDesc) -> Value {
+    let land_surface = match &terrain.land_surfaces.surface_type {
+        LandSurfType::TextureMerge(merge) => json!({
+            "kind": "texture-merge",
+            "baseTextureSize": merge.base_tex_size,
+            "cornerTerrainMaps": merge.corner_terrain_maps.iter().map(|map| json!({
+                "terrainCode": map.terrain_code,
+                "surfaceTextureId": dat_id(map.tex_gid),
+            })).collect::<Vec<_>>(),
+            "sideTerrainMaps": merge.side_terrain_maps.iter().map(|map| json!({
+                "terrainCode": map.terrain_code,
+                "surfaceTextureId": dat_id(map.tex_gid),
+            })).collect::<Vec<_>>(),
+            "roadMaps": merge.road_maps.iter().map(|map| json!({
+                "roadCode": map.road_code,
+                "surfaceTextureId": dat_id(map.road_tex_gid),
+            })).collect::<Vec<_>>(),
+            "terrainTextures": merge.terrain_desc.iter().map(|description| {
+                let texture = &description.terrain_tex;
+                json!({
+                    "terrainType": description.terrain_type,
+                    "colorTextureId": dat_id(texture.tex_gid),
+                    "tiling": texture.tex_tiling,
+                    "maxVertexBrightness": texture.max_vert_bright,
+                    "minVertexBrightness": texture.min_vert_bright,
+                    "maxVertexSaturation": texture.max_vert_saturate,
+                    "minVertexSaturation": texture.min_vert_saturate,
+                    "maxVertexHue": texture.max_vert_hue,
+                    "minVertexHue": texture.min_vert_hue,
+                    "detailTiling": texture.detail_tex_tiling,
+                    "detailTextureId": dat_id(texture.detail_tex_gid),
+                })
+            }).collect::<Vec<_>>(),
+        }),
+        LandSurfType::PaletteShift(shift) => json!({
+            "kind": "palette-shift",
+            "landTextures": shift.land_textures.iter().map(|texture| json!({
+                "surfaceTextureId": dat_id(texture.texture_id),
+                "subPalettes": texture.sub_palettes.iter().map(|palette| json!({
+                    "index": palette.index,
+                    "length": palette.length,
+                })).collect::<Vec<_>>(),
+                "roadCodes": texture.road_codes.iter().map(|road| json!({
+                    "roadCode": road.road_code,
+                    "subPaletteTypes": road.sub_palette_types,
+                })).collect::<Vec<_>>(),
+                "terrainPalettes": texture.terrain_palettes.iter().map(|palette| json!({
+                    "terrainIndex": palette.terrain_index,
+                    "paletteId": dat_id(palette.palette_id),
+                })).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+        }),
+    };
+    json!({
+        "types": terrain.terrain_types.iter().map(|terrain_type| json!({
+            "name": terrain_type.name,
+            "color": terrain_type.color,
+            "sceneTypes": terrain_type.scene_types,
+        })).collect::<Vec<_>>(),
+        "landSurface": land_surface,
+    })
+}
+
+fn dat_id(id: u32) -> String {
+    format!("0x{id:08x}")
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -367,11 +529,8 @@ struct TerrainSourceManifest {
     byte_order: &'static str,
     section_byte_offset_base: &'static str,
     landblock_id: String,
-    region_number: u32,
-    terrain: Option<TerrainManifest>,
     /// Distinguishes an absent outdoor record from a source or assembly failure.
     terrain_availability: TerrainAvailabilityManifest,
-    composition: TerrainCompositionManifest,
     sections: Vec<BinarySectionManifest>,
 }
 
@@ -410,75 +569,6 @@ fn terrain_availability(
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TerrainManifest {
-    grid_size: usize,
-    tile_size: f32,
-}
-
-impl From<&TerrainGridSource> for TerrainManifest {
-    fn from(terrain: &TerrainGridSource) -> Self {
-        Self {
-            grid_size: terrain.grid_size,
-            tile_size: terrain.tile_size,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TerrainCompositionManifest {
-    /// Region identity consumed by frontend texture-array ownership and composition lookup keys.
-    region_number: u32,
-    terrain_types: Vec<TerrainMaterialManifest>,
-    corner_terrain_alpha_maps: Vec<TerrainAlphaMapManifest>,
-    side_terrain_alpha_maps: Vec<TerrainAlphaMapManifest>,
-    road_alpha_maps: Vec<TerrainRoadAlphaMapManifest>,
-    landscape_detail: LandscapeDetailManifest,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TerrainMaterialManifest {
-    terrain_type: u32,
-    color_texture_id: String,
-    tiling: u32,
-    color_variation: TerrainColorVariationManifest,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TerrainColorVariationManifest {
-    min_vertex_brightness: u32,
-    max_vertex_brightness: u32,
-    min_vertex_saturation: u32,
-    max_vertex_saturation: u32,
-    min_vertex_hue: u32,
-    max_vertex_hue: u32,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TerrainAlphaMapManifest {
-    terrain_code: u32,
-    blend_mask_texture_id: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TerrainRoadAlphaMapManifest {
-    road_code: u32,
-    road_mask_texture_id: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct LandscapeDetailManifest {
-    texture_id: String,
-    tiling: u32,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 struct BinarySectionManifest {
     name: &'static str,
     scalar_type: &'static str,
@@ -511,10 +601,8 @@ struct TexturePixelsSurfaceManifest {
 
 fn terrain_sections(terrain: &TerrainGridSource) -> Vec<BinarySectionManifest> {
     let height_indices_length = terrain.height_indices.len();
-    let heights_offset =
-        align_binary_section_offset(height_indices_length, std::mem::align_of::<f32>());
-    let heights_length = terrain.heights.len() * std::mem::size_of::<f32>();
-    let terrain_samples_offset = heights_offset + heights_length;
+    let terrain_samples_offset =
+        align_binary_section_offset(height_indices_length, std::mem::align_of::<u16>());
     let terrain_samples_length = terrain.terrain_samples.len() * std::mem::size_of::<u16>();
     vec![
         BinarySectionManifest {
@@ -523,13 +611,6 @@ fn terrain_sections(terrain: &TerrainGridSource) -> Vec<BinarySectionManifest> {
             element_count: terrain.height_indices.len(),
             byte_offset: 0,
             byte_length: height_indices_length,
-        },
-        BinarySectionManifest {
-            name: "heights",
-            scalar_type: "f32",
-            element_count: terrain.heights.len(),
-            byte_offset: heights_offset,
-            byte_length: heights_length,
         },
         BinarySectionManifest {
             name: "terrainSamples",
@@ -575,16 +656,34 @@ fn serialize_terrain_source_binary(
                 + manifest_length
                 + align_binary_section_offset(
                     terrain.height_indices.len(),
-                    std::mem::align_of::<f32>(),
+                    std::mem::align_of::<u16>(),
                 ),
             0,
         );
-        for height in &terrain.heights {
-            bytes.extend(height.to_le_bytes());
-        }
         for terrain_sample in &terrain.terrain_samples {
             bytes.extend(terrain_sample.to_le_bytes());
         }
+    }
+    Ok(bytes)
+}
+
+fn serialize_active_region_binary(active_region: &ActiveRegionData) -> Result<Vec<u8>> {
+    let manifest = active_region_manifest(active_region);
+    let mut manifest_bytes = serde_json::to_vec(&manifest)?;
+    while !(TERRAIN_SOURCE_BINARY_HEADER_LEN + manifest_bytes.len()).is_multiple_of(4) {
+        manifest_bytes.push(b' ');
+    }
+    let total_length = TERRAIN_SOURCE_BINARY_HEADER_LEN
+        + manifest_bytes.len()
+        + std::mem::size_of_val(&active_region.descriptor.land_defs.land_height_table);
+    let mut bytes = Vec::with_capacity(total_length);
+    bytes.extend(ACTIVE_REGION_BINARY_MAGIC);
+    bytes.extend(ACTIVE_REGION_BINARY_VERSION.to_le_bytes());
+    bytes.extend(u32::try_from(manifest_bytes.len())?.to_le_bytes());
+    bytes.extend(u32::try_from(total_length)?.to_le_bytes());
+    bytes.extend(manifest_bytes);
+    for height in &active_region.descriptor.land_defs.land_height_table {
+        bytes.extend(height.to_le_bytes());
     }
     Ok(bytes)
 }
@@ -615,6 +714,7 @@ pub fn run() {
         .manage(content_state)
         .invoke_handler(tauri::generate_handler![
             host_status,
+            load_active_region_data,
             load_terrain_source,
             load_texture_pixels
         ])
@@ -626,6 +726,7 @@ pub fn run() {
 mod tests {
     use super::*;
     use holtburger_dat::file_type::PixelFormatId;
+    use holtburger_dat::file_type::region::{GameTime, LandDefs, RegionDesc};
     use holtburger_dat::{DatFileType, EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, HbaWriter};
     use tempfile::tempdir;
 
@@ -644,20 +745,7 @@ mod tests {
             byte_order: "little-endian",
             section_byte_offset_base: "section-data",
             landblock_id: "0x0102ffff".to_string(),
-            region_number: 1,
-            terrain: Some(TerrainManifest::from(&terrain)),
             terrain_availability: TerrainAvailabilityManifest::Available,
-            composition: TerrainCompositionManifest {
-                region_number: 1,
-                terrain_types: Vec::new(),
-                corner_terrain_alpha_maps: Vec::new(),
-                side_terrain_alpha_maps: Vec::new(),
-                road_alpha_maps: Vec::new(),
-                landscape_detail: LandscapeDetailManifest {
-                    texture_id: "surface-texture/0x05000001".to_string(),
-                    tiling: 1,
-                },
-            },
             sections: terrain_sections(&terrain),
         };
 
@@ -678,13 +766,84 @@ mod tests {
         let sections = decoded_manifest["sections"]
             .as_array()
             .expect("manifest should describe binary sections");
-        assert_eq!(decoded_manifest["composition"]["regionNumber"], 1);
-        assert_eq!(sections.len(), 3);
-        assert_eq!(sections[1]["name"], "heights");
-        assert_eq!(sections[1]["byteOffset"], 12);
-        assert_eq!(sections[2]["byteOffset"], 48);
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[1]["name"], "terrainSamples");
+        assert_eq!(sections[1]["byteOffset"], 10);
         assert_eq!(bytes[section_data_offset], 0);
-        assert_eq!(bytes[section_data_offset + 8], 8);
+        assert_eq!(bytes[section_data_offset + 9], 0);
+        assert_eq!(bytes[section_data_offset + 10], 10);
+    }
+
+    #[test]
+    fn active_region_binary_projects_semantic_records_and_height_table() {
+        let mut land_height_table = [0.0; 256];
+        let sample_height_index = land_height_table.len() / 2;
+        let expected_height = 42.5;
+        land_height_table[sample_height_index] = expected_height;
+        let active_region = ActiveRegionData::new(RegionDesc {
+            id: 0x1300_0000,
+            region_number: 1,
+            version: 3,
+            region_name: "Dereth".to_owned(),
+            land_defs: LandDefs {
+                num_block_length: 255,
+                num_block_width: 255,
+                square_length: 24.0,
+                lblock_length: 192,
+                vertex_per_cell: 8,
+                max_obj_height: 64.0,
+                sky_height: 500.0,
+                road_width: 1.0,
+                land_height_table,
+            },
+            game_time: GameTime {
+                zero_time_of_year: 0.0,
+                zero_year: 0,
+                day_length: 1.0,
+                days_per_year: 365,
+                year_spec: "year".to_owned(),
+                times_of_day: Vec::new(),
+                days_of_the_week: Vec::new(),
+                seasons: Vec::new(),
+            },
+            parts_mask: 0x04,
+            sky_info: None,
+            sound_info: None,
+            scene_info: None,
+            terrain_info: Some(TerrainDesc::default()),
+            region_misc: None,
+        });
+
+        let bytes = serialize_active_region_binary(&active_region)
+            .expect("active-region response should serialize");
+
+        assert_eq!(&bytes[..4], ACTIVE_REGION_BINARY_MAGIC);
+        assert_eq!(
+            u32::from_le_bytes(bytes[4..8].try_into().unwrap()),
+            ACTIVE_REGION_BINARY_VERSION
+        );
+        let manifest_length = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
+        let section_offset = TERRAIN_SOURCE_BINARY_HEADER_LEN + manifest_length;
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&bytes[TERRAIN_SOURCE_BINARY_HEADER_LEN..section_offset])
+                .expect("active-region manifest should remain JSON");
+        assert_eq!(manifest["provenance"]["sourceRecordId"], "0x13000000");
+        assert_eq!(manifest["data"]["land"]["squareLength"], 24.0);
+        assert_eq!(
+            manifest["data"]["terrain"]["landSurface"]["kind"],
+            "texture-merge"
+        );
+        assert_eq!(manifest["sections"][0]["name"], "landHeightTable");
+        let scalar_size = std::mem::size_of::<f32>();
+        let sample_offset = section_offset + sample_height_index * scalar_size;
+        assert_eq!(
+            f32::from_le_bytes(
+                bytes[sample_offset..sample_offset + scalar_size]
+                    .try_into()
+                    .unwrap()
+            ),
+            expected_height
+        );
     }
 
     #[test]

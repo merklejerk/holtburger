@@ -21,48 +21,30 @@ fn main() -> Result<()> {
         .get_file_in_namespace(EOR_PORTAL_NAMESPACE, REGION_DESC_FILE_ID)
         .context("failed to read region desc")?;
     let region = RegionDesc::unpack(&region_bytes).context("failed to parse region desc")?;
+    let terrain = region
+        .terrain_info
+        .as_ref()
+        .context("region desc has no terrain payload")?;
+    let tex_merge = terrain
+        .land_surfaces
+        .texture_merge()
+        .context("region desc uses palette-shift terrain instead of TexMerge")?;
 
     println!(
         "region {} ({}) terrain_desc={}",
         region.region_number,
         region.region_name,
-        region
-            .terrain_info
-            .land_surfaces
-            .tex_merge
-            .terrain_desc
-            .len()
+        tex_merge.terrain_desc.len()
     );
 
-    let terrain_texture_ids = region
-        .terrain_info
-        .land_surfaces
-        .tex_merge
+    let terrain_texture_ids = tex_merge
         .corner_terrain_maps
         .iter()
-        .chain(
-            region
-                .terrain_info
-                .land_surfaces
-                .tex_merge
-                .side_terrain_maps
-                .iter(),
-        )
+        .chain(tex_merge.side_terrain_maps.iter())
         .map(|map| map.tex_gid)
+        .chain(tex_merge.road_maps.iter().map(|map| map.road_tex_gid))
         .chain(
-            region
-                .terrain_info
-                .land_surfaces
-                .tex_merge
-                .road_maps
-                .iter()
-                .map(|map| map.road_tex_gid),
-        )
-        .chain(
-            region
-                .terrain_info
-                .land_surfaces
-                .tex_merge
+            tex_merge
                 .terrain_desc
                 .iter()
                 .flat_map(|desc| [desc.terrain_tex.tex_gid, desc.terrain_tex.detail_tex_gid]),
@@ -100,13 +82,7 @@ fn main() -> Result<()> {
         .iter()
         .enumerate()
     {
-        let Some(desc) = region
-            .terrain_info
-            .land_surfaces
-            .tex_merge
-            .terrain_desc
-            .get(role_index)
-        else {
+        let Some(desc) = tex_merge.terrain_desc.get(role_index) else {
             println!("{role_name}: no terrain_desc[{role_index}]");
             continue;
         };

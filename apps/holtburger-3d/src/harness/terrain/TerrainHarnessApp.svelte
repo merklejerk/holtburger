@@ -112,7 +112,7 @@
 		const hostGlobal = globalThis as typeof globalThis & HarnessGlobal;
 		const start = async (): Promise<void> => {
 			try {
-				const source = HttpTerrainContentSource.build(hostUrl);
+				const source = await HttpTerrainContentSource.build(hostUrl);
 				device = await WebGL2Device.build(canvasElement!);
 				pipeline = await StandardCommitPipeline.build(source);
 				runtime = await GameRuntime.build(device, pipeline, source);

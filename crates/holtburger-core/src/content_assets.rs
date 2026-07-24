@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use anyhow::{Context, Result, anyhow};
 use futures::future::{BoxFuture, FutureExt, Shared};
 use holtburger_content::{
-    ContentDecodeCache, ContentRepository, EnvCellAsset, EnvCellAssetAssembler,
+    ActiveRegionData, ContentDecodeCache, ContentRepository, EnvCellAsset, EnvCellAssetAssembler,
     LandblockSceneLodAsset, LandblockSceneLodAssetAssembler, LandblockSceneLodLayer,
     LandblockSceneLodLevel, LandblockSceneLodRequest, MaterialAppearanceInput,
     ResolvedMaterialRecipe, ResolvedRegionRenderProfile, ResolvedSetupAppearance,
@@ -22,6 +22,7 @@ const LANDBLOCK_SCENE_LOD_CACHE_CAPACITY: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ContentAssetRequest {
+    ActiveRegionData,
     LandblockSceneLod(LandblockSceneLodRequest),
     EnvCell(u32),
     TerrainMaterial(u32),
@@ -63,6 +64,7 @@ impl SetupAppearanceRequest {
 
 #[derive(Debug, Clone)]
 pub enum ContentAsset {
+    ActiveRegionData(Box<ActiveRegionData>),
     LandblockSceneLod {
         scene_lod: Box<LandblockSceneLodAsset>,
         region_id: u32,
@@ -106,6 +108,9 @@ impl ContentAssetService {
 
     pub fn load(&self, request: ContentAssetRequest) -> Result<ContentAsset> {
         match request {
+            ContentAssetRequest::ActiveRegionData => Ok(ContentAsset::ActiveRegionData(Box::new(
+                self.decode_cache.active_region_data(&self.content)?,
+            ))),
             ContentAssetRequest::LandblockSceneLod(request) => {
                 let scene_lod = self.load_landblock_scene_lod(request);
                 let region = self.decode_cache.region_desc(&self.content)?;
@@ -836,7 +841,7 @@ mod tests {
         bytes.extend_from_slice(&0_u32.to_le_bytes()); // time of day list
         bytes.extend_from_slice(&0_u32.to_le_bytes()); // weekday list
         bytes.extend_from_slice(&0_u32.to_le_bytes()); // season list
-        bytes.extend_from_slice(&0_u32.to_le_bytes()); // parts mask
+        bytes.extend_from_slice(&0x04_u32.to_le_bytes()); // parts mask: terrain payload follows
         bytes.extend_from_slice(&0_u32.to_le_bytes()); // terrain type count
         bytes.extend_from_slice(&0_u32.to_le_bytes()); // land surf type
         bytes.extend_from_slice(&0_u32.to_le_bytes()); // base texture size

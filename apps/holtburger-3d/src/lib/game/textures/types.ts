@@ -51,8 +51,8 @@ export type TerrainSurfaceTextureKey =
 		readonly [terrainSurfaceTextureKeyBrand]: true;
 	};
 
-/** Stable generated terrain-composition lookup table for one region. */
-export type TerrainCompositionTextureKey = `terrain-composition:${number}` & {
+/** Stable generated terrain-composition lookup table for one installed active region. */
+export type TerrainCompositionTextureKey = `terrain-composition:${string}` & {
 	readonly [terrainCompositionTextureKeyBrand]: true;
 };
 
@@ -146,16 +146,16 @@ export function createTerrainSurfaceTextureKey(
 	return `terrain-surface:${landblockId}/${stride}` as TerrainSurfaceTextureKey;
 }
 
-/** Build the canonical generated terrain-composition identity for one region. */
+/** Build the canonical generated terrain-composition identity for one installed active region. */
 export function createTerrainCompositionTextureKey(
-	regionNumber: number,
+	activeRegionKey: string,
 ): TerrainCompositionTextureKey {
-	if (!Number.isInteger(regionNumber) || regionNumber < 0) {
+	if (activeRegionKey.length === 0) {
 		throw new Error(
-			"Terrain composition texture region number must be a non-negative integer.",
+			"Terrain composition texture active-region key cannot be empty.",
 		);
 	}
-	return `terrain-composition:${regionNumber}` as TerrainCompositionTextureKey;
+	return `terrain-composition:${activeRegionKey}` as TerrainCompositionTextureKey;
 }
 
 /** Narrow a logical texture identity to a complete array resource. */

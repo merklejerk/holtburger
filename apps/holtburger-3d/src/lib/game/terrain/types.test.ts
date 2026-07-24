@@ -23,7 +23,7 @@ const COMPOSITION: TerrainCompositionFacts = {
 		},
 	],
 	landscapeDetail: { textureId: "0x05000005", tiling: 1 },
-	regionNumber: 42,
+	activeRegionKey: "test-region",
 	roadAlphaMaps: [
 		{
 			roadMaskTextureId: "0x05000004",
@@ -57,7 +57,7 @@ describe("terrain types", () => {
 		const facts = resolveTerrainTextureFacts(COMPOSITION);
 
 		expect(facts.colors).toMatchObject({
-			key: "texture-array:terrain-color:terrain-region:42",
+			key: "texture-array:terrain-color:terrain-active-region:test-region",
 			sourceAssetIds: ["0x05000001", "0x05000002"],
 		});
 		expect(facts.blendMasks.sourceAssetIds).toEqual([

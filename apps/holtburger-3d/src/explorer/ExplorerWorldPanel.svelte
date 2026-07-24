@@ -11,6 +11,7 @@
 		type ExplorerLodRadius,
 	} from "./explorer-lod";
 	import { parseResidenceInput } from "./world-input";
+	import type { ExplorerEnvironmentSelection } from "../lib/game/environment/scene-environment";
 
 	interface Props {
 		/** Whether Explorer has a runtime available to accept world operations. */
@@ -22,10 +23,21 @@
 		) => void;
 		/** Current automatic camera-placement lifecycle state. */
 		readonly cameraFocusStatus: ExplorerCameraFocusStatus;
+		readonly environmentSelection: ExplorerEnvironmentSelection;
+		readonly dayGroupNames: readonly string[];
+		readonly updateEnvironment: (
+			selection: ExplorerEnvironmentSelection,
+		) => void;
 	}
 
-	let { runtimeReady, requestSceneInterest, cameraFocusStatus }: Props =
-		$props();
+	let {
+		runtimeReady,
+		requestSceneInterest,
+		cameraFocusStatus,
+		environmentSelection,
+		dayGroupNames,
+		updateEnvironment,
+	}: Props = $props();
 
 	let interestInput = $state("0000");
 	let interestStatus = $state("No scene interest requested.");
@@ -47,6 +59,23 @@
 			kind,
 			input.value === "-1" ? null : Number(input.value),
 		);
+	}
+
+	function updateEnvironmentSelection(
+		field: "dayIndex" | "timeOfDay" | "dayGroupOverride",
+		event: Event,
+	): void {
+		const input = event.currentTarget as HTMLInputElement | HTMLSelectElement;
+		const value = input.value;
+		updateEnvironment({
+			...environmentSelection,
+			[field]:
+				field === "dayGroupOverride"
+					? value === "auto"
+						? null
+						: Number(value)
+					: Number(value),
+		});
 	}
 
 	const usesUnavailableLayers = $derived(
@@ -158,4 +187,39 @@
 			<p>{requestStatus}</p>
 		</fieldset>
 	</form>
+	{#if dayGroupNames.length > 0}
+		<fieldset disabled={!runtimeReady}>
+			<legend>Regional environment</legend>
+			<label
+				><span>Day</span><input
+					min="0"
+					step="1"
+					type="number"
+					value={environmentSelection.dayIndex}
+					oninput={(event) => updateEnvironmentSelection("dayIndex", event)}
+				/></label
+			>
+			<label
+				><span>Time</span><input
+					max="0.999"
+					min="0"
+					step="0.01"
+					type="range"
+					value={environmentSelection.timeOfDay}
+					oninput={(event) => updateEnvironmentSelection("timeOfDay", event)}
+				/></label
+			>
+			<label
+				><span>Sky group</span><select
+					value={environmentSelection.dayGroupOverride ?? "auto"}
+					onchange={(event) =>
+						updateEnvironmentSelection("dayGroupOverride", event)}
+					><option value="auto">Auto</option
+					>{#each dayGroupNames as name, index}<option value={index}
+							>{name}</option
+						>{/each}</select
+				></label
+			>
+		</fieldset>
+	{/if}
 </div>

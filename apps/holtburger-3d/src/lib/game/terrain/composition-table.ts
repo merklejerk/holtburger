@@ -30,7 +30,7 @@ export function compileTerrainCompositionTable(
 	const fallbackTerrain = composition.terrainTypes[0];
 	if (!fallbackTerrain) {
 		throw new Error(
-			`Terrain region ${composition.regionNumber} has no terrain descriptor fallback.`,
+			`Terrain active region ${composition.activeRegionKey} has no terrain descriptor fallback.`,
 		);
 	}
 	const width = Math.max(

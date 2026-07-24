@@ -296,7 +296,14 @@ impl ContentRepository {
     ) -> Result<ResolvedTerrainMaterialTable> {
         let region = self.read_region_desc_for_region(region_number)?;
 
-        let tex_merge = &region.terrain_info.land_surfaces.tex_merge;
+        let terrain = region
+            .terrain_info
+            .as_ref()
+            .context("active RegionDesc has no terrain payload")?;
+        let tex_merge = terrain
+            .land_surfaces
+            .texture_merge()
+            .context("active RegionDesc uses palette-shift terrain, which has no TexMerge table")?;
         let terrain_types = tex_merge
             .terrain_desc
             .iter()
@@ -374,10 +381,14 @@ impl ContentRepository {
         region_number: u32,
     ) -> Result<ResolvedRegionRenderProfile> {
         let region = self.read_region_desc_for_region(region_number)?;
-        let detail_roles = region
+        let terrain = region
             .terrain_info
+            .as_ref()
+            .context("active RegionDesc has no terrain payload")?;
+        let detail_roles = terrain
             .land_surfaces
-            .tex_merge
+            .texture_merge()
+            .context("active RegionDesc uses palette-shift terrain, which has no TexMerge table")?
             .terrain_desc
             .iter()
             .take(REGION_DETAIL_ROLE_ORDER.len())

@@ -3,6 +3,13 @@ import { Vec3 } from "./math/types";
 
 /** Width and depth of one outdoor landblock in AC world units. */
 export const OUTDOOR_LANDBLOCK_WORLD_SIZE = 192;
+/** Number of authored terrain cells along either axis of an outdoor landblock. */
+export const OUTDOOR_TERRAIN_GRID_CELLS = 8;
+/** Number of authored terrain vertices along either axis of an outdoor landblock. */
+export const OUTDOOR_TERRAIN_GRID_SIZE = OUTDOOR_TERRAIN_GRID_CELLS + 1;
+/** Fixed world-space spacing between adjacent authored outdoor terrain vertices. */
+export const OUTDOOR_TERRAIN_TILE_SIZE =
+	OUTDOOR_LANDBLOCK_WORLD_SIZE / OUTDOOR_TERRAIN_GRID_CELLS;
 
 /** Outdoor grid coordinates encoded in the high two bytes of a landblock id. */
 export interface LandblockCoordinates {

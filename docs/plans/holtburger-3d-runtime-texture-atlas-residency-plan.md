@@ -1,7 +1,7 @@
 # Holtburger 3D Runtime Texture Atlas Residency Plan
 
 Date: 2026-07-25
-Status: Draft for review.
+Status: In progress — Phase 1 complete (2026-07-25).
 
 ## Context and Boundaries
 
@@ -668,7 +668,7 @@ against real seams.
 
 ### Phase 1: Fixed-Page Stable Layout Core
 
-Status: Pending.
+Status: Complete (2026-07-25).
 
 #### Deliverables
 
@@ -711,24 +711,42 @@ Status: Pending.
 - No placement or worker contract can disagree with preparation derived from its `TexturePurpose`.
 - Existing live placements remain unchanged.
 - Released rectangles are immediately reusable.
-- Content bounds, padded allocation bounds, and reconstructed free rectangles use one top-left pixel
-  coordinate convention and never overlap.
+- Content bounds and padded allocation bounds use one top-left pixel coordinate convention and never
+  overlap. Reconstructed free rectangles remain within the fixed page and never intersect a live
+  allocation; their candidate rectangles may overlap each other, as required by the canonical
+  MaxRects split-and-prune representation.
 - A page with no live placements is dropped from the planned state.
 - Oversized sources fail loudly with the logical key, padded dimensions, purpose, and page size.
 - Tests cover adversarial rows where the current shelf algorithm wastes space but best-fit does not.
 
 #### Task Checklist
 
-- [ ] Implement fixed-page placement contracts and validation.
-- [ ] Implement free-space reconstruction and stable insertion.
-- [ ] Define the metadata-only layout worker protocol and reusable bounded pool adapter.
-- [ ] Port/rewrite focused legacy algorithm tests against the smaller contracts.
-- [ ] Add property-style invariants for bounds, overlap, uniqueness, and determinism without adding
+- [x] Implement fixed-page placement contracts and validation.
+- [x] Implement free-space reconstruction and stable insertion.
+- [x] Define the metadata-only layout worker protocol and reusable bounded pool adapter.
+- [x] Port/rewrite focused legacy algorithm tests against the smaller contracts.
+- [x] Add property-style invariants for bounds, overlap, uniqueness, and determinism without adding
       a new dependency unless the existing test stack cannot express them cleanly.
 
 #### Decisions and Course Corrections
 
-- Pending implementation.
+- The fixed page constant and purpose-derived packed-object preparation now live in
+  `textures/types.ts`, which prevents the incoming resident planner and outgoing shelf worker from
+  carrying independently editable gutter rules. The shelf worker remains active until Phase 5.
+- The planner retains content bounds only and derives padded allocation bounds from purpose. This
+  keeps physical gutter policy canonical while making diagnostics able to report content and
+  allocation occupancy separately in Phase 7.
+- The legacy MaxRects free-rectangle representation deliberately retains overlapping candidate free
+  rectangles after split-and-prune. Live allocation rectangles remain non-overlapping, and every
+  free rectangle is validated against them. The acceptance criterion now says this precisely;
+  requiring mutually disjoint candidate rectangles would be a different, less capable algorithm.
+- `BoundedClosedWorkerPool` replaces the commit-local client location. It schedules independent
+  closed jobs with injected worker count, queues work without callbacks, replaces a failed worker,
+  and remains reusable by the future page-build pool. Phase 1 does not select a production pool
+  size; Phase 3 owns that measured decision.
+- The pure planner exposes a page-size override only for focused tiny-page tests. Production worker
+  jobs use the fixed 2048px `STATIC_OBJECT_TEXTURE_PAGE_SIZE` and cannot carry a page-size field.
+- Verification: 178 TypeScript tests, `npm run check`, focused ESLint, and focused Prettier all pass.
 
 ### Phase 2: `ResidentTextureAtlas` Claim and Source Model
 

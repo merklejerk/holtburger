@@ -3,7 +3,7 @@ import {
 	type BuildingGeometryJob,
 	type BuildingGeometryResult,
 } from "./building-geometry-worker";
-import type { ClosedWorkerRequest, ClosedWorkerResponse } from "./closed-worker";
+import type { ClosedWorkerRequest, ClosedWorkerResponse } from "../workers/closed-worker";
 
 const worker = self as unknown as {
 	onmessage: ((event: MessageEvent<ClosedWorkerRequest<BuildingGeometryJob>>) => void) | null;

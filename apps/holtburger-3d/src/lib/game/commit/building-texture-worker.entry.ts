@@ -3,7 +3,7 @@ import {
 	type BuildingTexturePackJob,
 	type BuildingTexturePackResult,
 } from "./building-texture-worker";
-import type { ClosedWorkerRequest, ClosedWorkerResponse } from "./closed-worker";
+import type { ClosedWorkerRequest, ClosedWorkerResponse } from "../workers/closed-worker";
 
 const worker = self as unknown as {
 	onmessage: ((event: MessageEvent<ClosedWorkerRequest<BuildingTexturePackJob>>) => void) | null;

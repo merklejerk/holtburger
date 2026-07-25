@@ -29,6 +29,18 @@ export enum TexturePurpose {
 	ObjectDetail = "object-detail",
 }
 
+/** Initial fixed dimensions for every resident static-object texture page. */
+export const STATIC_OBJECT_TEXTURE_PAGE_SIZE = 2048;
+/** Evidence-backed filterable gutter for packed static-object direct-color textures. */
+export const STATIC_OBJECT_TEXTURE_GUTTER_PIXELS: TextureGutterPixels = 4;
+
+/** Texture purposes admitted by the runtime static-object atlas. */
+export type PackedObjectTexturePurpose =
+	| TexturePurpose.ObjectDirectColor
+	| TexturePurpose.ObjectIndex8
+	| TexturePurpose.ObjectIndex16
+	| TexturePurpose.ObjectPalette;
+
 declare const assetTextureKeyBrand: unique symbol;
 declare const textureArrayKeyBrand: unique symbol;
 declare const terrainSurfaceTextureKeyBrand: unique symbol;
@@ -113,6 +125,44 @@ export interface TexturePurposePolicy {
 	readonly format: TexturePixelFormat;
 	/** Whether complete device resources should allocate a mip chain. */
 	readonly generateMipmaps: boolean;
+}
+
+/** Test whether a purpose is supported by the fixed-page static-object atlas. */
+export function isPackedObjectTexturePurpose(
+	purpose: TexturePurpose,
+): purpose is PackedObjectTexturePurpose {
+	return (
+		purpose === TexturePurpose.ObjectDirectColor ||
+		purpose === TexturePurpose.ObjectIndex8 ||
+		purpose === TexturePurpose.ObjectIndex16 ||
+		purpose === TexturePurpose.ObjectPalette
+	);
+}
+
+/**
+ * Return the canonical packing preparation for one static-object atlas purpose. This belongs to
+ * purpose policy so layout metadata cannot drift from pixel materialization.
+ */
+export function packedObjectTexturePreparation(
+	purpose: TexturePurpose,
+): TexturePreparation {
+	switch (purpose) {
+		case TexturePurpose.ObjectDirectColor:
+			return {
+				gutterPixels: STATIC_OBJECT_TEXTURE_GUTTER_PIXELS,
+				// Source-local UV clamping happens before atlas mapping; repeat-safe edge texels
+				// support both draw-time wrap policies without duplicating the logical texture.
+				wrap: TextureWrapMode.Repeat,
+			};
+		case TexturePurpose.ObjectIndex8:
+		case TexturePurpose.ObjectIndex16:
+		case TexturePurpose.ObjectPalette:
+			return { gutterPixels: 0, wrap: TextureWrapMode.Clamp };
+		default:
+			throw new Error(
+				`Texture purpose ${purpose} is not packable for static buildings.`,
+			);
+	}
 }
 
 /** Build the canonical identity for one DAT-backed two-dimensional texture. */

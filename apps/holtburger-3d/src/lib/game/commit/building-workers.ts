@@ -7,7 +7,7 @@ import {
 	type BuildingTexturePackJob,
 	type BuildingTexturePackResult,
 } from "./building-texture-worker";
-import { ClosedWorkerClient, type ClosedWorkerPort } from "./closed-worker";
+import { ClosedWorkerClient, type ClosedWorkerPort } from "../workers/closed-worker";
 
 /** Owned pair of closed static-building workers used by the commit pipeline. */
 export class BuildingWorkers {

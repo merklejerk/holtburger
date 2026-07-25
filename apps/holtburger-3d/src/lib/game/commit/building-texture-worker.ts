@@ -1,18 +1,17 @@
 import { AABB2, Vec2 } from "../math/types";
 import type { StaticTexturePageArtifact } from "./artifacts";
-import type { TexturePreparation } from "../textures/types";
 import {
-	TexturePurpose,
-	TextureWrapMode,
+	STATIC_OBJECT_TEXTURE_PAGE_SIZE,
 	type AssetTextureKey,
-	type TextureGutterPixels,
+	packedObjectTexturePreparation,
+	TexturePurpose,
 	texturePurposePolicy,
 } from "../textures/types";
 
-/** Evidence-backed initial filterable gutter for packed static-object color textures. */
-export const STATIC_OBJECT_TEXTURE_GUTTER_PIXELS: TextureGutterPixels = 4;
-/** Initial static page limit from the Phase 0 archive census, before device-limit clamping. */
-export const STATIC_OBJECT_TEXTURE_PAGE_SIZE = 2048;
+export {
+	STATIC_OBJECT_TEXTURE_GUTTER_PIXELS,
+	STATIC_OBJECT_TEXTURE_PAGE_SIZE,
+} from "../textures/types";
 
 /** Complete prepared pixels owned by one logical texture before packing begins. */
 export interface BuildingTexturePackInput {
@@ -72,7 +71,7 @@ export function packBuildingTextures(
 	}
 	const pages: MutablePage[] = [];
 	for (const input of [...job.inputs].sort(compareInputs)) {
-		const preparation = preparationForPurpose(input.purpose);
+		const preparation = packedObjectTexturePreparation(input.purpose);
 		const paddedWidth = input.width + preparation.gutterPixels * 2;
 		const paddedHeight = input.height + preparation.gutterPixels * 2;
 		if (paddedWidth > pageSize || paddedHeight > pageSize) {
@@ -123,25 +122,6 @@ export function packBuildingTextures(
 		pages: artifacts,
 		workerDurationMs: performance.now() - startedAt,
 	};
-}
-
-/** Return the one physical packing preparation allowed for an object texture purpose. */
-export function preparationForPurpose(purpose: TexturePurpose): TexturePreparation {
-	switch (purpose) {
-		case TexturePurpose.ObjectDirectColor:
-			return {
-				gutterPixels: STATIC_OBJECT_TEXTURE_GUTTER_PIXELS,
-				// Source-local UV clamping happens before atlas mapping; repeat-safe edge texels
-				// support both draw-time wrap policies without duplicating the logical texture.
-				wrap: TextureWrapMode.Repeat,
-			};
-		case TexturePurpose.ObjectIndex8:
-		case TexturePurpose.ObjectIndex16:
-		case TexturePurpose.ObjectPalette:
-			return { gutterPixels: 0, wrap: TextureWrapMode.Clamp };
-		default:
-			throw new Error(`Texture purpose ${purpose} is not packable for static buildings.`);
-	}
 }
 
 function validateInput(input: BuildingTexturePackInput): void {

@@ -7,6 +7,7 @@
 	],
 	"ignoreDependencies": ["@types/rbush", "rbush", "zod"],
 	"ignoreIssues": {
+		"src/lib/game/commit/artifacts.ts": ["types"],
 		"src/lib/game/commit/types.ts": ["types"],
 		"src/lib/game/geometry/types.ts": ["types"],
 		"src/lib/game/renderer/geometry.ts": ["types"],

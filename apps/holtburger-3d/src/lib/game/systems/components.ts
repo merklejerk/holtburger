@@ -1,5 +1,5 @@
 import type { EnvCellId } from "../game-types";
-import type { GeometryKey, ObjectGeometryKey } from "../geometry/types";
+import type { ObjectGeometryKey } from "../geometry/types";
 import type { Mat4 } from "../math/types";
 import type { SceneNodeId } from "../scene";
 
@@ -31,34 +31,6 @@ export interface DynamicEntityRenderable {
 export interface AnimationComponent {
 	/** Current rigid-part pose to apply before spatial queries. */
 	readonly pose: ArticulatedPose;
-}
-
-/** Persistent shell render contribution attached to one env-cell root node. */
-export interface EnvCellRenderable {
-	/** Logical shell draw units remain domain-owned until renderer policy is implemented. */
-	readonly drawUnits: readonly EnvCellDrawUnit[];
-}
-
-/** One logical env-cell shell draw range. */
-export interface EnvCellDrawUnit {
-	/** Source geometry selected by the cell structure baker. */
-	readonly geometry: ObjectGeometryKey;
-	/** First index selected from the source geometry. */
-	readonly indexStart: number;
-	/** Number of selected geometry indices. */
-	readonly indexCount: number;
-	/** Renderer-neutral material source selected for this draw. */
-	readonly materialId: string;
-}
-
-/** Portal draw contribution addressed by topology rather than a scene node. */
-export interface PortalDrawUnit {
-	/** Portal aperture whose topology traversal selected this contribution. */
-	readonly apertureId: `portal-aperture:${string}`;
-	/** Geometry retained by the env-cell system and resolved by renderer policy. */
-	readonly geometry: GeometryKey;
-	readonly indexStart: number;
-	readonly indexCount: number;
 }
 
 /** Stable terrain attachment retained for one terrain scene root. */

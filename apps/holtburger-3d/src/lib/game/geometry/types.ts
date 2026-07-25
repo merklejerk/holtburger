@@ -1,4 +1,5 @@
 import type { LandblockId } from "../game-types";
+import type { RenderGeometryData } from "../renderer/geometry";
 import type { StaticGeometryKey } from "../systems/static-resources";
 
 declare const terrainGeometryKeyBrand: unique symbol;
@@ -21,6 +22,12 @@ export type GeometryKey =
 	| TerrainGeometryKey
 	| StaticGeometryKey
 	| ObjectGeometryKey;
+
+/** Complete geometry payload published by a baker or runtime generator. */
+export interface GeometrySource {
+	readonly key: GeometryKey;
+	readonly geometry: RenderGeometryData;
+}
 
 /** Build the canonical generated terrain-geometry identity for one landblock. */
 export function createTerrainGeometryKey(

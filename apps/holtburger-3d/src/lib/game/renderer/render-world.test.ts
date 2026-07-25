@@ -16,7 +16,7 @@ import type {
 	Texture2DResourceKey,
 } from "./resource-manager";
 import type { GeometryKey } from "../geometry/types";
-import type { StaticObjectRenderable } from "../systems/static-object-system";
+import type { StaticObjectRenderable } from "../commit/artifacts";
 import type { InstanceStreamResourceKey } from "./resource-manager";
 
 const CAMERA = {

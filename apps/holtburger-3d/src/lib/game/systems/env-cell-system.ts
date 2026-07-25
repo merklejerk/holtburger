@@ -1,37 +1,14 @@
-import type { AABB3 } from "../math/types";
 import type {
-	SceneEnvCellScopeInput,
-	SceneGraph,
-	SceneNodeId,
-	ScenePlacement,
-	ScenePortalCrossingInput,
-} from "../scene";
-import type { EnvCellRenderable, PortalDrawUnit } from "./components";
-
-/** Bounded cell-shell presentation published as a scene resident. */
-export interface EnvCellShellArtifact {
-	/** Root placement mapping source structure space into its landblock. */
-	readonly placement: ScenePlacement;
-	/** Bounds in the reusable cell structure's local geometry frame. */
-	readonly structureLocalBounds: AABB3;
-	readonly renderable: EnvCellRenderable;
-}
-
-/** Complete env-cell contribution produced for one committed owner. */
-export interface EnvCellSystemArtifact {
-	readonly cellShells: readonly EnvCellShellArtifact[];
-	readonly portalDrawUnits: ReadonlyMap<
-		`portal-aperture:${string}`,
-		PortalDrawUnit
-	>;
-	readonly scopes: readonly SceneEnvCellScopeInput[];
-	readonly crossings: readonly ScenePortalCrossingInput[];
-}
+	EnvCellLayerArtifact,
+	EnvCellRenderable,
+	PortalDrawUnit,
+} from "../commit/artifacts";
+import type { SceneGraph, SceneNodeId } from "../scene";
 
 interface EnvCellOwnerRecord {
-	readonly crossings: readonly ScenePortalCrossingInput["id"][];
+	readonly crossings: readonly EnvCellLayerArtifact["crossings"][number]["id"][];
 	readonly nodes: readonly SceneNodeId[];
-	readonly scopes: readonly SceneEnvCellScopeInput["scope"][];
+	readonly scopes: readonly EnvCellLayerArtifact["scopes"][number]["scope"][];
 	readonly apertures: readonly `portal-aperture:${string}`[];
 }
 
@@ -49,7 +26,7 @@ export class EnvCellSystem<TOwnerId extends string> {
 		this.#scene = scene;
 	}
 
-	install(ownerId: TOwnerId, artifact: EnvCellSystemArtifact): void {
+	install(ownerId: TOwnerId, artifact: EnvCellLayerArtifact): void {
 		this.removeOwner(ownerId);
 		for (const scope of artifact.scopes) this.#scene.upsertEnvCellScope(scope);
 		for (const crossing of artifact.crossings)

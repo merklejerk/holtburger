@@ -2,242 +2,439 @@
 
 _Last Updated: 2026-07-24_
 
-## Table of Contents
+## Audit Scope and Verdict
 
-1. [Subsystem Topology & Cross-Layer Import Matrix](#1-subsystem-topology--cross-layer-import-matrix)
-2. [Core Execution Loop Sequence Diagrams (Typed Data Flows)](#2-core-execution-loop-sequence-diagrams-typed-data-flows)
-3. [Source Tree & Module Placement Audit](#3-source-tree--module-placement-audit)
-4. [Cyclomatic Complexity & Nesting Hotspots](#4-cyclomatic-complexity--nesting-hotspots)
-5. [Module Coupling Matrix (Fan-In / Fan-Out)](#5-module-coupling-matrix-fan-in--fan-out)
-6. [Boundary Leaks & State Ownership](#6-boundary-leaks--state-ownership)
-7. [Structural File Size & Candidate Pruning](#7-structural-file-size--candidate-pruning)
+This snapshot covers authored code in `apps/holtburger-3d/src`, `src-tauri/src`,
+and the app-local scripts. Generated output, dependencies, Tauri-generated
+schemas, icons, and the legacy frontend are excluded from metrics.
 
----
+The architecture is directionally sound for the current stubbing phase. Explorer
+policy is app-local, the Tauri host is a narrow static-content adapter, runtime
+state is hidden behind typed operations, and raw WebGL handles do not escape the
+WebGL backend. Visual realization is intentionally best-effort: source
+availability enables camera placement, while later texture or GPU failures are
+console diagnostics rather than durable Explorer state. That policy keeps the
+runtime lean during the stubbing phase.
 
-## 1. Subsystem Topology & Cross-Layer Import Matrix
+Priority findings:
 
-### Subsystem Architecture Diagram
+| Priority | Finding                                                       | Evidence                                                                                                                                                                             | Direction                                                                                                                                                                                     |
+| -------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Medium   | `GameRuntime` is a 27-module fan-out hub                      | It constructs nine stateful subsystems and also owns interest revisions, async commit staging, availability publication, frame state, and teardown                                   | Keep it as the composition authority, but extract scene-interest loading/receipt coordination when the second static layer becomes real; do not add more layer-specific branches to the class |
+| Medium   | The Rust host boundary is concentrated in one 1,018-line file | `src-tauri/src/lib.rs` contains host state, commands, three binary contracts, active-region projection, serializers, and tests                                                       | Split by transport contract (`active_region`, `terrain_source`, `texture_pixels`) while keeping Tauri command registration in `lib.rs`                                                        |
+| Low      | Vestigial public lifecycle and mutation stubs exist           | `StandardCommitPipeline.build()` is needlessly async, `destroy()` is a no-op outside its interface, and unused `GameRuntime.updateDynamicEntityPlacement()` silently returns `false` | Delete inert API until ownership or behavior exists; add it back with a typed contract when the capability is implemented                                                                     |
+
+## 1. System Topology and Cross-Layer Import Matrix
 
 ```mermaid
 flowchart TD
-    subgraph Frontend ["Explorer UI & Controls (Svelte 5)"]
-        UI[ExplorerApp.svelte / ExplorerWorldPanel]
-        CamCoord[ExplorerCameraCoordinator]
-        CamCtrl[FreeFlyCameraController]
-        LoD[ExplorerLoD / WorldInput]
+    subgraph UX["Frontend composition and Explorer policy"]
+        Explorer["ExplorerApp.svelte"]
+        Tools["Explorer panels / LoD / input"]
+        Camera["ExplorerCameraCoordinator<br/>FreeFlyCameraController"]
     end
 
-    subgraph HostAdapter ["Host Content Sources"]
-        Source[ActiveRegionSource / HttpContentSource]
-        TauriSource[TauriActiveRegionSource]
+    subgraph Adapters["Static-content adapters"]
+        TauriSources["Tauri*Source"]
+        HttpSource["HttpTerrainContentSource<br/>(browser harness)"]
+        Decoders["HBAR / HBTR / HBTP decoders"]
     end
 
-    subgraph RuntimeEngine ["Core Game Engine (lib/game)"]
-        Runtime[GameRuntime Orchestrator]
-        Scene[SceneGraph & Frustum Queries]
-        Terrain[TerrainSystem & TerrainGenerator]
-        Textures[TextureManager & TexturePreparer]
-        Geometry[GeometryManager]
-        Commit[CommitPipeline & Staging]
-        Systems[Static / Dynamic / EnvCell Systems]
+    subgraph Runtime["Runtime orchestration"]
+        GameRuntime["GameRuntime"]
+        Interest["Scene interest + revisions"]
+        Commit["StandardCommitPipeline<br/>CommitBundle"]
     end
 
-    subgraph RendererLayer ["Abstract & WebGL2 Renderer"]
-        RenderWorld[RenderWorld Abstract Queues]
-        GLRenderer[WebGL2Renderer & TerrainProgram]
-        GLResMgr[WebGL2ResourceManager]
+    subgraph Domain["Runtime-owned domain systems"]
+        Scene["SceneGraph"]
+        Terrain["TerrainSystem<br/>TerrainGenerator"]
+        Resources["TextureManager<br/>GeometryManager<br/>LeaseRegistry"]
+        Systems["Static / Dynamic / EnvCell<br/>Animation / Instance streams"]
     end
 
-    UI --> CamCoord
-    UI --> LoD
-    CamCoord --> CamCtrl
-    CamCoord --> Runtime
-    LoD --> Runtime
+    subgraph Render["Renderer boundary"]
+        RenderWorld["RenderWorld<br/>(read-only runtime facade)"]
+        Renderer["WebGL2Renderer"]
+        Device["WebGL2Device<br/>WebGL2ResourceManager"]
+    end
 
-    Runtime --> Source
-    Runtime --> TauriSource
-    Runtime --> Scene
-    Runtime --> Terrain
-    Runtime --> Textures
-    Runtime --> Geometry
-    Runtime --> Commit
-    Runtime --> Systems
+    subgraph Host["Tauri host adapter"]
+        Commands["load_active_region_data<br/>load_terrain_source<br/>load_texture_pixels"]
+        ContentRuntime["ContentAssetRuntime"]
+        SharedCrates["holtburger-content / core / dat"]
+    end
 
-    Commit --> Scene
-    Commit --> Systems
-
-    Runtime --> RenderWorld
+    Tools --> Explorer
+    Explorer --> Camera
+    Explorer --> TauriSources
+    Explorer --> GameRuntime
+    Camera --> GameRuntime
+    TauriSources --> Decoders
+    HttpSource --> Decoders
+    Decoders --> Commit
+    GameRuntime --> Interest
+    GameRuntime --> Commit
+    GameRuntime --> Scene
+    GameRuntime --> Terrain
+    GameRuntime --> Resources
+    GameRuntime --> Systems
+    GameRuntime --> RenderWorld
     RenderWorld --> Scene
     RenderWorld --> Terrain
+    RenderWorld --> Resources
     RenderWorld --> Systems
-
-    RenderWorld --> GLRenderer
-    GLRenderer --> GLResMgr
+    Renderer --> RenderWorld
+    Renderer --> Device
+    TauriSources --> Commands
+    Commands --> ContentRuntime
+    ContentRuntime --> SharedCrates
 ```
 
-### Cross-Layer Import Matrix
+The browser and Tauri paths converge on the same TypeScript decoders. The
+headless browser harness also reuses the Rust byte-producing functions through
+`dev_terrain_content_host`, so the diagnostic path exercises the real binary
+contracts rather than a second fixture implementation.
 
-| Module Category | `app/explorer` (UI) | `lib/assets` (Host) | `lib/game/*` (Engine) | `renderer/webgl2-*` (Driver) |
-| :--- | :--- | :--- | :--- | :--- |
-| **`app/explorer`** | Internal | Imports Sources | Imports Runtime | No Direct Imports (Clean) |
-| **`lib/assets`** | No Imports | Internal | Imports Primitives | No Direct Imports (Clean) |
-| **`lib/game/*`** | No Imports | Imports Contracts | Internal | Imports Abstractions |
-| **`renderer/webgl2-*`** | No Imports | No Imports | Imports Engine Types | Internal GL Driver |
+| Importing layer                                                        | May depend on                                                                      | Must not depend on                                              | Current result                                                                  |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `client`, `explorer`, `harness`, `app`                                 | App composition, runtime public surface, source adapters, frontend policy          | Raw WebGL handles; Rust crate internals                         | Clean; `ExplorerApp` imports `WebGL2Device` only as the composition root        |
+| `lib/assets`                                                           | Host transport APIs, decoders, source ports, resolved source types                 | Runtime stateful systems; renderer driver                       | Mostly clean; source ports and game preparation types form one type-only cycle  |
+| `lib/game/commit`                                                      | Neutral source and commit artifacts                                                | Concrete stateful system classes or system-owned install shapes | Clean; `commit/artifacts.ts` owns data-only layer artifacts consumed by systems |
+| `lib/game/runtime`                                                     | Commit port, domain systems, renderer abstractions, source ports                   | Svelte/Explorer policy; raw WebGL                               | Clean direction, but highest fan-out                                            |
+| Domain systems (`scene`, `terrain`, `textures`, `geometry`, `systems`) | Domain primitives, renderer resource interface                                     | Svelte/Tauri; raw WebGL                                         | Clean; systems own mutable state and consume commit artifacts                   |
+| `renderer/render-world` and abstract renderer types                    | Read-only domain query ports and opaque resource keys                              | Runtime mutation APIs                                           | Clean                                                                           |
+| `renderer/webgl2-*`                                                    | Renderer contracts and browser WebGL API                                           | Svelte, Tauri, static-content decoding                          | Clean; all raw driver handles are confined here                                 |
+| `src-tauri`                                                            | `holtburger-content`, `holtburger-core`, `holtburger-dat`, serialization and Tauri | Frontend presentation or runtime scene policy                   | Clean crate direction; file-level cohesion needs work                           |
 
----
+Two source-level strongly connected components exist when type-only imports are
+included:
 
-## 2. Core Execution Loop Sequence Diagrams (Typed Data Flows)
+1. `scene/index.ts` ↔ `scene-graph.ts` / `scope.ts` / `utils.ts`, caused by the
+   scene barrel importing the implementation while implementation files import
+   types from the barrel.
+2. `texture-manager.ts` ↔ `texture-preparer.ts` ↔
+   `assets/texture-pixel-source.ts`, caused by preparation ports and prepared
+   result types living on both sides of the boundary.
 
-### Pipeline Sequence 1: Content Streaming & State Commit Pipeline
+They currently erase from emitted JavaScript, so there is no runtime module
+cycle. Both remaining cycles are type-placement debt, not ownership inversions.
+
+## 2. Load-Bearing Architectural Bones Radar
+
+| Bone                                  | Files                                                                                                           | Invariant owned                                                                                                                                            | Anatomical refresher                                                                                                                                                     |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Runtime composition and revision gate | `src/lib/game/runtime/game-runtime.ts`, `scene-interest.ts`, `scene-availability.ts`                            | Only the latest requested landblock/layer revision may commit; evicted or late artifacts cannot republish withdrawn content                                | `GameRuntime` is the mutation membrane around every runtime system. Interest revisions are the guard against stale asynchronous source responses.                        |
+| Canonical scene and visibility index  | `src/lib/game/scene/scene-graph.ts`, `scene/index.ts`                                                           | Every node has one transform ancestry and root residency; spatial entries and culling groups derive from that canonical graph                              | Scene queries traverse reachable scopes, then broad-phase groups, then exact entry bounds. The returned `VisibleScene` is a documented frame-scoped reused buffer.       |
+| Resource identity and retention       | `ownership.ts`, `geometry/geometry-manager.ts`, `textures/texture-manager.ts`, `renderer/resource-manager.ts`   | Logical keys may map to one backend resource while one or more typed owners retain them; the final dropped lease releases the device resource exactly once | Domain systems never own WebGL handles. They retain opaque resource keys through logical managers, which delegate allocation to the backend.                             |
+| Terrain source-to-draw pipeline       | `terrain/terrain-system.ts`, `terrain/terrain-generator.ts`, `terrain/types.ts`, `terrain/composition-table.ts` | One canonical terrain source produces every required stride/transition variant and stable texture identity before it can become a draw unit                | Source terrain is immediately sampleable for camera placement. Generated geometry, surface fields, composition, and asset textures converge later at `getDrawUnit()`.    |
+| Renderer read membrane                | `renderer/render-world.ts`, `renderer/renderer.ts`, `renderer/webgl2-renderer.ts`                               | Renderers can select and resolve visible contributions without receiving runtime mutation authority                                                        | `RenderWorld` exposes narrow structural query ports over private runtime systems. `WebGL2Renderer` owns pass policy and turns opaque resource keys into driver bindings. |
+| Host/content contract                 | `src-tauri/src/lib.rs`, `lib/assets/decode-*.ts`, `active-region-source.ts`                                     | Tauri and browser hosts emit versioned, length-checked binary envelopes whose semantic payloads are validated before entering runtime                      | Rust resolves static content through shared crates. TypeScript owns the app-specific transport decoder and converts it into frontend runtime source types.               |
+
+The most important bones for a fast tech-lead review are `GameRuntime`,
+`SceneGraph`, `TerrainSystem`, `RenderWorld`, and the Tauri/decoder boundary.
+Changes to those files can alter state authority, lifetime, visibility, or the
+cross-language contract even when their local diff looks small.
+
+## 3. Core Execution Loops
+
+### Scene interest, source commit, and realization
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant UI as Explorer UI / Camera
+    participant Panel as ExplorerWorldPanel
+    participant Coord as ExplorerCameraCoordinator
     participant Runtime as GameRuntime
-    participant Host as TauriActiveRegionSource
-    participant Terrain as TerrainSystem / Generator
-    participant Textures as TextureManager
-    participant Commit as CommitPipeline
-    participant Scene as SceneGraph
+    participant Pipeline as StandardCommitPipeline
+    participant Source as TauriLandblockTerrainSource
+    participant Host as Rust ContentAssetRuntime
+    participant Terrain as TerrainSystem
+    participant Resources as Texture/Geometry Managers
 
-    UI->>Runtime: updateSceneInterest(interestSpec: SceneInterestSpec)
-    Runtime->>Host: fetchCellRecord(landblockId: LandblockId)
-    Host-->>Runtime: LandblockCellRecord (Raw Byte Stream)
-    
-    Runtime->>Terrain: realizeTerrain(record: LandblockCellRecord)
-    Terrain->>Terrain: evaluatePcode(heightmapMask)
-    Terrain-->>Runtime: PcodeTerrainBundle (Vertices, Normals, UVs)
-
-    Runtime->>Textures: acquireTextureLease(textureId: DatAssetId)
-    Textures-->>Runtime: TextureLeaseHandle (Leased Atlas Slot)
-
-    Runtime->>Commit: stageCommitBundle(bundle: SubsystemCommitBundle)
-    Note over Commit: Validates invariant boundaries & staging buffers
-    Commit->>Scene: applyCommitTransaction(tx: SceneTransaction)
-    Scene-->>Runtime: TransactionCommitted (Updated Scene Nodes)
+    Panel->>Coord: requestSceneInterest(residency: SceneResidency, lod: LoDConfig)
+    Coord->>Runtime: updateSceneInterest(request: SceneInterestRequest)
+    Runtime->>Runtime: compute/diff SceneInterestMap + SceneInterestRevision
+    Runtime-->>Coord: SceneInterestReceipt
+    Runtime->>Pipeline: prepareLandblockLayers(Set<LandblockIdLayer>)
+    Pipeline->>Source: loadTerrainSource(landblockId: LandblockId)
+    Source->>Host: invoke load_terrain_source(request)
+    Host-->>Source: HBTR bytes (manifest + heightIndices + terrainSamples)
+    Source-->>Pipeline: ResolvedTerrainLayerSource | null
+    Pipeline-->>Runtime: CommitBundle[]
+    Note over Runtime: Completed bundles wait for the next synchronous tick
+    Runtime->>Runtime: reject stale revision / withdrawn layer
+    Runtime->>Terrain: install(TerrainSystemArtifact)
+    Runtime-->>Coord: outdoor-terrain-source-available
+    Coord->>Runtime: queryOutdoorTerrainSurface(point: Vec3)
+    Runtime-->>Coord: TerrainSurfaceSample
+    Coord->>Coord: apply Explorer-owned automatic camera pose
+    par Asynchronous realization
+        Terrain->>Terrain: generate(TerrainGenerationSource)
+        Terrain->>Resources: publish geometry + generated textures
+    and Asset texture preparation
+        Terrain->>Resources: retain(TextureFact[])
+        Resources->>Host: load_texture_pixels requests
+        Host-->>Resources: HBTP bytes / prepared pixels
+    end
 ```
 
-### Pipeline Sequence 2: Render Frame Assembly & Hardware Execution Loop
+The intentional two-phase behavior is good: a canonical source can place the
+camera before GPU work completes. `outdoor-terrain-source-available` means
+source availability only; it deliberately does not promise render readiness.
+Texture and generation failures are console diagnostics, not durable Explorer
+state or availability events.
+
+### Render frame assembly and hardware execution
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Loop as rAF / ExplorerApp
-    participant CamCoord as ExplorerCameraCoordinator
+    participant RAF as requestAnimationFrame
     participant Runtime as GameRuntime
-    participant RenderWorld as RenderWorld
+    participant Renderer as WebGL2Renderer
+    participant World as RenderWorld
     participant Scene as SceneGraph
-    participant GLRenderer as WebGL2Renderer
-    participant GLResMgr as WebGL2ResourceManager
+    participant Systems as Runtime systems
+    participant GPU as WebGL2ResourceManager / WebGL
 
-    Loop->>CamCoord: updateCamera(deltaTimeMs: number)
-    CamCoord->>Runtime: setCameraPose(pose: CameraPose)
-    
-    Loop->>Runtime: renderFrame()
-    Runtime->>RenderWorld: beginFrameAssembly(cameraPose: CameraPose)
-    
-    RenderWorld->>Scene: queryFrustum(frustumPlanes: FrustumPlanes)
-    Scene-->>RenderWorld: VisibleNodesArray (Filtered Node Slices)
-
-    RenderWorld->>RenderWorld: assembleDrawUnits(nodes: VisibleNodesArray)
-    Note over RenderWorld: Produces TerrainDrawUnit & StaticObjectDrawUnit queues
-
-    Runtime->>GLRenderer: executeDrawPass(world: RenderWorld)
-    
-    GLRenderer->>GLResMgr: acquireGLBindings(drawUnit: TerrainDrawUnit)
-    GLResMgr-->>GLRenderer: WebGL2GeometryBinding (VAO Handle, ShaderProgram)
-    
-    GLRenderer->>GLRenderer: bindUniforms(matrixScratch: Mat4, cameraPose)
-    GLRenderer->>GLRenderer: gl.drawElementsInstanced / drawArrays
-    GLRenderer-->>Loop: Frame Complete
+    RAF->>Runtime: tick()
+    Runtime->>Runtime: drain CommitBundle queue; AnimationSystem.update()
+    RAF->>Runtime: render(timeSeconds: number)
+    Runtime->>Renderer: drawFrame(input: FrameInput)
+    Renderer->>Renderer: Camera -> projection/view matrices -> Frustum
+    Renderer->>World: queryVisibleScene(camera, frustum, anchorLandblockId)
+    World->>Scene: queryFrustum(frustum, anchor, originScope)
+    Scene-->>World: VisibleScene (reused frame-scoped buffer)
+    World-->>Renderer: VisibleScene
+    loop SceneNodeId
+        Renderer->>World: getRenderContribution(nodeId, anchor)
+        World->>Systems: resolve TerrainDrawUnit / renderable
+        Systems-->>World: logical keys and draw ranges
+        World-->>Renderer: resolved opaque resource keys
+    end
+    Renderer->>GPU: getGeometry/getTexture bindings
+    GPU-->>Renderer: WebGL2GeometryBinding / texture bindings
+    Renderer->>GPU: uniforms, texture binds, drawElements
 ```
 
----
+No frontend code assembles mutable GPU submissions, and no renderer code mutates
+scene residency. That separation is the strongest part of the current design.
 
-## 3. Source Tree & Module Placement Audit
+## 4. Source Tree and Module Placement Audit
 
-> [!WARNING]
-> **Misplaced Domain Math**: `src/explorer/explorer-lod.ts`
-> * **Observation**: Contains both outdoor Chebyshev radius clamping math (`updateExplorerLodRadius`) and UI slider text formatting (`formatExplorerLodRadius`). Per `AGENTS.md`, shared domain semantics belong in `lib/game`, while frontend presentation belongs in `explorer`.
-> * **Recommendation**: Split into `src/lib/game/runtime/lod-policy.ts` (domain interest clamping math) and `src/explorer/explorer-lod-ui.ts` (UI presentation text formatting).
+### Correct placement
 
-> [!NOTE]
-> **Clean Placement**: `src/explorer/world-input.ts`
-> Pointer and key gesture mapping is correctly confined to `src/explorer/` as Explorer-mode UI viewport logic.
+- `src/explorer/explorer-lod.ts`, `world-input.ts`, camera controls, floating
+  panels, frame metrics, and environment controls are correctly app-local. Their
+  clamping and formatting encode Explorer UX policy, not authoritative world
+  semantics.
+- `src/lib/game/environment` resolves app rendering presentation from immutable
+  active-region facts; Explorer only chooses day/time overrides.
+- `src/lib/assets` owns Tauri/HTTP transport adapters and binary decoding.
+- `src-tauri` consumes parsed shared-crate content and projects an app-specific
+  transport. It does not push disk discovery or archive policy into TypeScript.
+- WebGL implementation files are colocated under `renderer/webgl2-*`.
+- `commit/artifacts.ts` owns static-object and env-cell layer data. Commit
+  producers and renderer/system consumers share those contracts without either
+  side importing a mutable system implementation.
 
-> [!NOTE]
-> **Clean Placement**: `src/lib/assets/*`
-> Static DAT asset parsers (`decode-texture-pixels.ts`, `decode-terrain-source.ts`) and Tauri IPC adapters (`tauri-active-region-source.ts`) stay strictly within `lib/assets/` without domain runtime pollution.
+### Placement requiring review
 
----
+- Texture preparation request/result types live in
+  `game/textures/texture-preparer.ts`, while the source port that transports them
+  lives in `lib/assets`. Move the transport-neutral request/result contract to a
+  small neutral module to remove the type cycle; keep Tauri/HTTP adapters in
+  `assets`.
+- `src-tauri/src/lib.rs` is the correct layer but the wrong file granularity. Its
+  command shell, content projection, binary layout, and tests are independently
+  coherent modules hiding in one namespace.
 
-## 4. Cyclomatic Complexity & Nesting Hotspots
+The large set of Knip type ignores is acceptable only as explicit stubbing debt.
+Fifteen contract-heavy files suppress unused type reports. When a capability is
+implemented or abandoned, remove its ignore at the same time so dead contract
+shapes cannot become permanent architecture fossils.
 
-### High Cyclomatic Complexity (>10 Branches)
+## 5. Cyclomatic Complexity and Nesting Hotspots
 
-| Function / Location | Branch Complexity | Nesting Depth | Smell Description |
-| :--- | :--- | :--- | :--- |
-| `src/lib/assets/decode-texture-pixels.ts:139` (`parseManifest`) | **11 branches** | Depth 4 | Multi-format texture header signature decoding ladder |
-| `src/lib/assets/decode-terrain-source.ts:115` (`parseManifest`) | **10 branches** | Depth 4 | Landblock heightmap & transition flag decoder |
-| `src/lib/game/textures/types.ts:201` (`texturePurposePolicy`) | **10 branches** | Depth 3 | Multi-branch switch evaluating format policy |
-| `src/lib/game/terrain/terrain-generator.ts:158` (`#generateSurfaceMesh`) | **10 branches** | Depth 5 | Edge transition blending & PCODE field mask calculation |
+Measured with ESLint's `complexity` threshold of 10 and `max-depth` threshold of
+4 against current authored frontend source.
 
-### Deep Nesting Outliers (Nesting Depth > 4)
+| Complexity | Symbol                                   | Assessment                                                                                                                                          |
+| ---------: | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+|         27 | `validateTerrainGenerationResult`        | Cohesive invariant validation, but too many independent guarantees in one function; split by geometry, ranges, surface fields, and variant coverage |
+|         25 | `applyCardinalHalfResolutionClamps`      | High-risk retail terrain math; decompose by cardinal edge only if tests preserve every direction/stride invariant                                   |
+|         18 | `decodeTexturePixels`                    | Linear boundary validation more than algorithmic branching; extract envelope, manifest, and pixel-section validators                                |
+|         16 | `SceneGraph.#removeSpatialEntry`         | Stateful nested-map cleanup; highest cognitive-risk scene mutation hotspot                                                                          |
+|         15 | `computeSceneInterest`                   | Nested grid walk plus repeated layer policy; a table of optional layer/radius selectors would reduce branches                                       |
+|         13 | `WebGL2Renderer.#drawTerrain`            | Driver state setup and draw loop are mixed                                                                                                          |
+|         13 | `validateTextureArrayDescription`        | Cohesive driver-boundary validation; split capability-limit checks from shape checks                                                                |
+|         13 | `TextureManager.upsertAtlasPage`         | Validation, resource replacement, reverse indexes, and degenerate-resource cleanup occur in one transaction                                         |
+|         12 | `FreeFlyCameraController.#applyMovement` | Linear movement, acceleration, and yaw state transitions share one frame handler                                                                    |
+|         12 | `resolveSceneEnvironment`                | Selection validation and temporal interpolation share one function                                                                                  |
+|         12 | `WebGL2ResourceManager.#uploadGeometry`  | Geometry-kind dispatch plus resource allocation                                                                                                     |
+|         12 | `validateTexture2DUpload`                | Boundary validation; lower urgency than mutable state hotspots                                                                                      |
+|         11 | `decodeActiveRegionSource`               | Boundary validation; extraction would improve contract readability                                                                                  |
+|         11 | `decodeTerrainSource`                    | Boundary validation; extraction would improve contract readability                                                                                  |
+|         11 | texture-pixel `parseManifest`            | Manual unknown-value narrowing is concentrated here                                                                                                 |
+|         11 | `generateVariantHeights`                 | Retail terrain transformation logic; refactor only with behavioral proof                                                                            |
 
-| Location | Nesting Depth | Smell Description |
-| :--- | :--- | :--- |
-| `src/explorer/ExplorerTools.svelte:132` | **Depth 8** | Nested Svelte 5 control panels and reactive blocks |
-| `src/lib/game/renderer/webgl2-renderer.ts:190` | **Depth 7** | Multi-pass render loop with state toggles & VAO binds |
-| `src/lib/game/scene/scene-graph.ts:178` | **Depth 6** | Recursive spatial tree culling and frustum containment checks |
-| `src/lib/game/runtime/game-runtime.ts:469` | **Depth 6** | Multi-subsystem interest delta processing and scene residency cleanup |
+One depth violation was found: `SceneGraph.queryFrustum()` reaches nesting depth
+5 while walking scope → landblock → culling group → entry. This loop is
+algorithmically honest, but extracting group selection would make the broad- and
+narrow-phase boundary easier to inspect.
 
----
+Complexity should not drive design blindly. Validator branch counts are less
+dangerous than mutable state transitions with the same score. The first
+refactoring targets should be `#removeSpatialEntry`, atlas replacement, and the
+async realization path—not the pure retail terrain algorithms.
 
-## 5. Module Coupling Matrix (Fan-In / Fan-Out)
+## 6. Coupling and Structural Hubs
 
-### Top Fan-Out Modules (God Module Risk)
+Production source import counts:
 
-| Module Path | Outbound Imports | Risk Assessment |
-| :--- | :--- | :--- |
-| `src/lib/game/runtime/game-runtime.ts` | **28 imports** | Central orchestrator - candidate for interest cleanup split |
-| `src/explorer/ExplorerApp.svelte` | **15 imports** | Top-level UI shell importing all Explorer controls & runtime |
-| `src/lib/game/terrain/terrain-system.ts` | **14 imports** | Surface caching & generator/texture manager orchestrator |
+### Fan-in outliers
 
-### Top Fan-In Modules (High Cascade Risk)
+| Imports from production files | Module                                  | Interpretation                                            |
+| ----------------------------: | --------------------------------------- | --------------------------------------------------------- |
+|                            28 | `lib/game/game-types.ts`                | Stable branded identity hub                               |
+|                            25 | `lib/game/math/types.ts`                | Core coordinate/math hub; changes have broad blast radius |
+|                            19 | `lib/game/scene/index.ts`               | Scene contract barrel; also participates in a type cycle  |
+|                            13 | `lib/game/landblocks.ts`                | Canonical landblock/world conversion hub                  |
+|                            10 | `lib/game/terrain/types.ts`             | Large terrain contract surface                            |
+|                             9 | `lib/game/renderer/resource-manager.ts` | Opaque device resource boundary                           |
+|                             9 | `lib/game/runtime/types.ts`             | Camera and LoD contract hub                               |
 
-| Module Path | Inbound Callers | Cascade Risk |
-| :--- | :--- | :--- |
-| `src/lib/game/math/types.ts` | **16 callers** | Core vector/matrix math types used across all layers |
-| `src/lib/game/game-types.ts` | **12 callers** | Core domain primitives (`LandblockId`, `DatAssetId`) |
-| `src/lib/game/landblocks.ts` | **10 callers** | Landblock coordinate conversions and world metrics |
+### Fan-out outliers
 
----
+| Distinct production modules imported | Module                                 | Interpretation                                                                       |
+| -----------------------------------: | -------------------------------------- | ------------------------------------------------------------------------------------ |
+|                                   27 | `lib/game/runtime/game-runtime.ts`     | God-module threshold exceeded; load-bearing orchestrator                             |
+|                                   15 | `explorer/ExplorerApp.svelte`          | Composition root at the threshold; acceptable while it remains wiring/lifecycle only |
+|                                   13 | `lib/game/terrain/terrain-system.ts`   | Crosses scene, generation, geometry, texture, and renderer-resource concerns         |
+|                                   12 | `lib/game/renderer/render-world.ts`    | Deliberate read facade over many systems                                             |
+|                                   11 | `lib/game/renderer/webgl2-renderer.ts` | Backend assembly and pass policy                                                     |
 
-## 6. Boundary Leaks & State Ownership
+`GameRuntime` and `RenderWorld` have high fan-out for legitimate reasons:
+composition and read aggregation respectively. The guardrail is behavioral
+cohesion. `RenderWorld` remains narrow and stateless; `GameRuntime` is already
+accumulating layer-specific loading and commit behavior, so that is where the
+next subsystem addition is most likely to trigger boundary drift.
 
-> [!NOTE]
-> **Strict Driver Isolation**: Raw WebGL types (`WebGL2RenderingContext`, `WebGLVertexArrayObject`, `WebGLTexture`) are strictly confined to `src/lib/game/renderer/webgl2-*`. Zero leaks detected in domain math or UI files.
+## 7. Leaky Abstractions and Terminology Honesty
 
-> [!WARNING]
-> **Review Item**: `WebGL2ResourceManager` exports internal binding interfaces (`WebGL2GeometryBinding`, `WebGL2Texture2DBinding`) containing raw `WebGLVertexArrayObject` and `WebGLTexture` fields. Ensure these interfaces remain private to the driver package.
+### Driver containment
 
----
+Raw `WebGL2RenderingContext`, `WebGLBuffer`, `WebGLTexture`,
+`WebGLVertexArrayObject`, `WebGLProgram`, and `WebGLUniformLocation` references
+occur only in:
 
-## 7. Structural File Size Outliers & Candidate Pruning
+- `renderer/webgl2-device.ts`
+- `renderer/webgl2-renderer.ts`
+- `renderer/webgl2-resource-manager.ts`
+- `renderer/webgl2-shader-utils.ts`
+- `renderer/webgl2-terrain-program.ts`
 
-### Structural File Size Outliers
+`WebGL2ResourceManager` exports raw binding interfaces, but their consumers are
+also inside the WebGL backend. Keep those exports package-private by convention;
+do not let `RenderWorld`, domain systems, or UI import them.
 
-| File Path | Line Count | Category | Refactoring Recommendation |
-| :--- | :--- | :--- | :--- |
-| `src/lib/game/renderer/webgl2-resource-manager.ts` | **612 lines** | Engine Driver | Split into `webgl2-geometry-store.ts` and `webgl2-texture-store.ts` |
-| `src/lib/game/textures/texture-manager.ts` | **583 lines** | Engine Core | Texture materialization & atlas allocation orchestrator |
-| `src/lib/game/runtime/game-runtime.ts` | **574 lines** | Engine Core | Central orchestrator - split interest cleanup if grows |
-| `src/lib/game/terrain/terrain-generator.ts` | **525 lines** | Engine Core | PCODE decoding & heightmap mesh generator |
-| `src/lib/game/terrain/terrain-system.ts` | **503 lines** | Engine Core | Surface caching & draw unit manager |
+### Query honesty
 
-### Recommended Pruning & Refactoring
+No `get*`, `is*`, or `read*` methods were found mutating authoritative domain
+state. `SceneGraph.queryFrustum()` and `RenderWorld.queryVisibleScene()` mutate
+and return reusable scratch buffers, but the `VisibleScene` contract explicitly
+states that the next query overwrites them. This is a documented allocation
+policy, not hidden authority mutation. Any future asynchronous or retained
+consumer must copy the result.
 
-1. **Split `src/explorer/explorer-lod.ts`**: Separate domain LoD clamping math (`lib/game/runtime/lod-policy.ts`) from UI text formatting (`explorer/explorer-lod-ui.ts`).
-2. **De-God `webgl2-resource-manager.ts`**: Candidate for future splitting into geometry and texture stores.
-3. **De-God `game-runtime.ts`**: Candidate for splitting subsystem interest management and residency cleanup into a separate orchestrator helper.
+### Naming and stub honesty
+
+- `WorkerTexturePreparer` is named as a worker but is currently an in-process
+  request coalescer. Its class comment calls it a future worker adapter, while
+  the type name reads as present behavior. `HostTexturePreparer` or
+  `CoalescingTexturePreparer` would be more honest until a worker exists.
+- `GameRuntime.updateDynamicEntityPlacement()` is an unused public-looking
+  mutation that always returns `false`. The comment admits the absence, but
+  deletion is clearer during the stubbing phase.
+- `StandardCommitPipeline.destroy()` and its async `build()` communicate
+  lifecycle that the object does not own.
+
+## 8. Competing State and Policy Drift
+
+No duplicate authoritative game-state store was found. Similar values have
+deliberately different owners:
+
+| State                                          | Authority                                                               | Copies / derivations                                                                                | Result                                            |
+| ---------------------------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| Explorer camera pose and manual-control status | `FreeFlyCameraController`                                               | `ExplorerCameraCoordinator` resolves residency; `GameRuntime` stores the submitted primary `Camera` | Clean policy/runtime split                        |
+| Static content interest                        | `GameRuntime.#sceneInterest`                                            | Explorer retains editable `LoDConfig`; coordinator retains only one pending focus revision          | Clean request vs accepted-state split             |
+| Scene topology and spatial membership          | `SceneGraph`                                                            | Systems retain component/renderable maps keyed by `SceneNodeId`                                     | Clean canonical graph plus typed component stores |
+| Logical resource retention                     | `LeaseRegistry` inside geometry/texture managers                        | WebGL resource manager owns opaque-key-to-handle maps                                               | Clean logical vs device authority                 |
+| Regional environment                           | Explorer owns selection inputs; runtime owns resolved frame environment | Renderer receives one immutable `FrameInput` snapshot                                               | Clean presentation policy split                   |
+
+Visual realization intentionally does not become durable runtime or Explorer
+state:
+
+- Terrain keeps `loading`, `failed`, and `realized` internally to control
+  resource lifetime.
+- Texture preparation failures log to the console and release only the affected
+  owner leases.
+- `getDrawUnit()` returns `null` for loading, failed, or incompletely textured
+  terrain, so the renderer treats the contribution as absent.
+- Runtime availability events describe source/topology availability, not render
+  realization.
+
+This is a valid best-effort rendering policy for the current app. It means a
+blank terrain result is diagnosed from the console, not from retained UI state;
+that is intentional and should stay that way unless a concrete Explorer workflow
+requires user-facing retry or failure presentation.
+
+## 9. Structural Size and Candidate Pruning
+
+### File-size outliers
+
+| Lines | File                                  | Assessment                                                                                             |
+| ----: | ------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| 1,018 | `src-tauri/src/lib.rs`                | Multiple transport contracts and tests in one Rust module                                              |
+|   761 | `src/styles.css`                      | App-global presentation surface; group by shell/panel/viewport before selectors become order-dependent |
+|   618 | `scene/scene-graph.ts`                | Canonical graph plus spatial index plus portal traversal                                               |
+|   612 | `renderer/webgl2-resource-manager.ts` | Geometry, instance stream, 2D texture, array texture, validation, and release paths                    |
+|   584 | `runtime/game-runtime.ts`             | Composition, interest loading, commit routing, frame state, queries, lifecycle                         |
+|   583 | `textures/texture-manager.ts`         | Lease policy, async preparation, atlas, standalone texture, arrays, validation                         |
+|   552 | `terrain/terrain-system.ts`           | Source lifecycle, generation, resource publication, sampling, draw selection                           |
+|   525 | `terrain/terrain-generator.ts`        | Pure terrain generation and retail transition logic                                                    |
+|   472 | `renderer/webgl2-renderer.ts`         | View preparation, visibility collection, diagnostics, and terrain pass                                 |
+
+### Addition-through-subtraction candidates
+
+1. Delete `GameRuntime.updateDynamicEntityPlacement()` until dynamic ownership
+   and movement semantics are implemented.
+2. Delete the no-op `StandardCommitPipeline.destroy()` and make `build()`
+   synchronous until the pipeline owns an actual asynchronous resource.
+3. Remove `zod` from Knip's `ignoreDependencies`; Knip confirms it is now
+   discoverably used by `active-region-source.ts`.
+4. Replace type-only barrel back-imports inside `scene` with direct local type
+   modules, removing the scene SCC without adding an adapter.
+
+Do not split pure files solely to satisfy a line threshold. `terrain-generator`
+is large but cohesive and heavily tested. The highest-value cuts are boundaries:
+host contract modules, neutral commit artifacts, and the asynchronous
+realization lifecycle.
+
+## Verification Snapshot
+
+Current checks at audit time:
+
+- `npm run check`: passed with zero Svelte errors or warnings.
+- `npm run test:ts`: 29 files and 129 tests passed.
+- `npm run lint`: ESLint, Knip, and Rust clippy passed; Knip emitted one
+  configuration hint for the stale `zod` dependency ignore.
+- `cargo test --manifest-path src-tauri/Cargo.toml`: seven host/transport tests
+  passed.
+- Strict audit-only ESLint thresholds found the 16 complexity outliers and one
+  nesting-depth outlier documented above.
+
+The standard checks prove internal consistency, not feature completeness. The
+client route remains an intentional shell, and only terrain has a typed static
+source capability today.

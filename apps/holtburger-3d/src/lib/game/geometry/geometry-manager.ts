@@ -1,16 +1,9 @@
 import { LeaseRegistry } from "../ownership";
-import type { RenderGeometryData } from "../renderer/geometry";
 import type {
 	GeometryResourceKey,
 	RendererResourceManager,
 } from "../renderer/resource-manager";
-import type { GeometryKey } from "./types";
-
-/** Complete geometry payload published by a baker or runtime generator. */
-export interface GeometrySource {
-	readonly key: GeometryKey;
-	readonly geometry: RenderGeometryData;
-}
+import type { GeometryKey, GeometrySource } from "./types";
 
 /** Owns logical geometry identity, device bindings, and shared owner retention. */
 export class GeometryManager<TOwnerId extends string = string> {

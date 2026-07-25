@@ -5,9 +5,13 @@ import type { Frustum } from "../math/frustum";
 import type { VisibleScene } from "../scene";
 import type { SceneNodeId } from "../scene";
 import type { TerrainDrawUnit } from "../terrain/types";
-import type { StaticObjectRenderable } from "../systems/static-object-system";
 import type { DynamicEntityRenderable } from "../systems/components";
-import type { EnvCellRenderable, PortalDrawUnit } from "../systems/components";
+import type {
+	EnvCellRenderable,
+	PortalDrawUnit,
+	StaticObjectDrawUnit,
+	StaticObjectRenderable,
+} from "../commit/artifacts";
 import type { TextureArrayBinding } from "../textures/texture-manager";
 import type {
 	GeneratedTextureKey,
@@ -19,7 +23,6 @@ import type {
 	InstanceStreamResourceKey,
 	Texture2DResourceKey,
 } from "./resource-manager";
-import type { StaticObjectDrawUnit } from "../systems/static-object-system";
 import type { InstanceStreamManager } from "../systems/instance-stream-manager";
 
 /** Private read-only query ports captured by one RenderWorld. */

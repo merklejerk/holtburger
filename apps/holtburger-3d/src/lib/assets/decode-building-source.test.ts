@@ -48,6 +48,8 @@ function buildResponse(
 	const materialSlots = Uint16Array.from([0]);
 	const materialWrapModes = Uint8Array.from([1]);
 	const materialSideKinds = Uint8Array.from([0]);
+	const materialSideTypes = Uint8Array.from([1]);
+	const materialStippling = Uint8Array.from([1]);
 	const parts = [
 		positions,
 		normals,
@@ -56,6 +58,8 @@ function buildResponse(
 		materialSlots,
 		materialWrapModes,
 		materialSideKinds,
+		materialSideTypes,
+		materialStippling,
 	];
 	const names = [
 		"positions",
@@ -65,6 +69,8 @@ function buildResponse(
 		"materialSlots",
 		"materialWrapModes",
 		"materialSideKinds",
+		"materialSideTypes",
+		"materialStippling",
 	] as const;
 	let byteOffset = 0;
 	const sections = parts.map((part, index) => {
@@ -73,7 +79,7 @@ function buildResponse(
 		const result = {
 			name: names[index],
 			scalarType:
-				index < 3 ? "f32" : index === 3 ? "u32" : index === 4 ? "u16" : "u8",
+			index < 3 ? "f32" : index === 3 ? "u32" : index === 4 ? "u16" : "u8",
 			elementCount: part.length,
 			byteOffset,
 			byteLength: part.byteLength,
@@ -87,7 +93,7 @@ function buildResponse(
 	}
 	const manifest = {
 		transport: "holtburger-building-source",
-		version: 3,
+		version: 4,
 		byteOrder: "little-endian",
 		sectionByteOffsetBase: "section-data",
 		landblockId: LANDBLOCK_ID,
@@ -137,6 +143,10 @@ function buildResponse(
 				materialWrapModeCount: 1,
 				materialSideKindOffset: 0,
 				materialSideKindCount: 1,
+				materialSideTypeOffset: 0,
+				materialSideTypeCount: 1,
+				materialStipplingOffset: 0,
+				materialStipplingCount: 1,
 				bounds: { min: [0, 0, 0], max: [1, 1, 0] },
 			},
 		],
@@ -161,7 +171,7 @@ function buildResponse(
 	paddedManifest.set(manifestBytes);
 	const response = new Uint8Array(16 + paddedManifest.length + payload.length);
 	response.set(new TextEncoder().encode("HBBL"));
-	new DataView(response.buffer).setUint32(4, 3, true);
+	new DataView(response.buffer).setUint32(4, 4, true);
 	new DataView(response.buffer).setUint32(8, paddedManifest.length, true);
 	new DataView(response.buffer).setUint32(12, response.length, true);
 	response.set(paddedManifest, 16);

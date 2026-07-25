@@ -16,7 +16,7 @@ import { classifyObjectResidents } from "../game/resolution/object-resident-clas
 
 const HEADER_LENGTH = 16;
 const MAGIC = "HBBL";
-const VERSION = 3;
+const VERSION = 4;
 const datId = z.string().regex(/^0x[0-9a-f]{8}$/i);
 const finiteNumber = z.number().finite();
 const vec3 = z.tuple([finiteNumber, finiteNumber, finiteNumber]);
@@ -32,6 +32,8 @@ const section = z.object({
 		"materialSlots",
 		"materialWrapModes",
 		"materialSideKinds",
+		"materialSideTypes",
+		"materialStippling",
 	]),
 	scalarType: z.enum(["f32", "u32", "u16", "u8"]),
 	elementCount: z.number().int().nonnegative(),
@@ -54,6 +56,10 @@ const geometry = z.object({
 	materialWrapModeCount: z.number().int().nonnegative(),
 	materialSideKindOffset: z.number().int().nonnegative(),
 	materialSideKindCount: z.number().int().nonnegative(),
+	materialSideTypeOffset: z.number().int().nonnegative(),
+	materialSideTypeCount: z.number().int().nonnegative(),
+	materialStipplingOffset: z.number().int().nonnegative(),
+	materialStipplingCount: z.number().int().nonnegative(),
 	bounds: bounds.nullable(),
 });
 
@@ -280,7 +286,7 @@ function validatedSections(
 	const sections = new Map(
 		manifest.sections.map((entry) => [entry.name, entry]),
 	);
-	if (sections.size !== 7 || sections.size !== manifest.sections.length) {
+	if (sections.size !== 9 || sections.size !== manifest.sections.length) {
 		throw new Error(
 			"Building source must contain every geometry section exactly once.",
 		);
@@ -293,6 +299,8 @@ function validatedSections(
 		["materialSlots", "u16"],
 		["materialWrapModes", "u8"],
 		["materialSideKinds", "u8"],
+		["materialSideTypes", "u8"],
+		["materialStippling", "u8"],
 	] as const) {
 		const entry = sections.get(name);
 		if (!entry || entry.scalarType !== scalarType) {
@@ -402,6 +410,35 @@ function decodeGeometry(
 	if (materialSideKinds.some((side) => side > 2)) {
 		throw new Error(`Geometry ${geometry.id} has an invalid polygon-side fact.`);
 	}
+	const materialSideTypes = readSlice(
+		response,
+		sectionDataOffset,
+		requireSection(sections, "materialSideTypes"),
+		geometry.materialSideTypeOffset,
+		geometry.materialSideTypeCount,
+		Uint8Array,
+	);
+	if (materialSideTypes.length !== materialSlotIndices.length) {
+		throw new Error(
+			`Geometry ${geometry.id} must provide one polygon culling fact per material slot.`,
+		);
+	}
+	if (materialSideTypes.some((sideType) => sideType > 3)) {
+		throw new Error(`Geometry ${geometry.id} has an invalid polygon culling fact.`);
+	}
+	const materialStippling = readSlice(
+		response,
+		sectionDataOffset,
+		requireSection(sections, "materialStippling"),
+		geometry.materialStipplingOffset,
+		geometry.materialStipplingCount,
+		Uint8Array,
+	);
+	if (materialStippling.length !== materialSlotIndices.length) {
+		throw new Error(
+			`Geometry ${geometry.id} must provide one polygon stippling fact per material slot.`,
+		);
+	}
 	if (indices.some((index) => index >= geometry.vertexCount)) {
 		throw new Error(`Geometry ${geometry.id} contains an out-of-range index.`);
 	}
@@ -414,6 +451,8 @@ function decodeGeometry(
 		materialSlotIndices,
 		materialWrapModes,
 		materialSideKinds,
+		materialSideTypes,
+		materialStippling,
 		bounds: toBounds(geometry.bounds),
 	};
 }

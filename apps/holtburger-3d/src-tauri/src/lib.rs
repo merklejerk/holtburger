@@ -18,8 +18,8 @@ mod building_source;
 mod object_texture;
 
 use building_source::{
-    BuildingSourceClosure, BuildingSourceManifest, frame_json, prepared_aabb_json,
-    prepared_vec3_json, serialize_building_source_binary,
+    BUILDING_SOURCE_BINARY_VERSION, BuildingSourceClosure, BuildingSourceManifest, frame_json,
+    prepared_aabb_json, prepared_vec3_json, serialize_building_source_binary,
 };
 use object_texture::{
     ObjectTexturePurpose, PreparedObjectTexture, prepare_object_palette, prepare_object_surface,
@@ -32,7 +32,6 @@ const TEXTURE_PIXELS_BINARY_MAGIC: &[u8; 4] = b"HBTP";
 const TEXTURE_PIXELS_BINARY_VERSION: u32 = 1;
 const ACTIVE_REGION_BINARY_MAGIC: &[u8; 4] = b"HBAR";
 const ACTIVE_REGION_BINARY_VERSION: u32 = 1;
-const BUILDING_SOURCE_BINARY_VERSION: u32 = 3;
 
 /// Managed static-content runtime shared by narrow Tauri commands.
 #[derive(Clone)]
@@ -1002,6 +1001,8 @@ mod tests {
             material_slots: vec![0],
             material_wrap_modes: vec![1],
             material_side_kinds: vec![0],
+            material_side_types: vec![0],
+            material_stippling: vec![0],
         };
         let manifest = BuildingSourceManifest {
             transport: "holtburger-building-source",

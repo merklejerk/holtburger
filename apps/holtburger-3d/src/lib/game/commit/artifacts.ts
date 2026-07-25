@@ -39,9 +39,11 @@ export interface StaticTexturePageArtifact {
 export interface StaticObjectMaterialBinding {
 	readonly source: ResolvedMaterial;
 	readonly polygon: {
-		readonly sidedness: "one-sided" | "two-sided";
-		readonly positiveSurfaceId: string | null;
-		readonly negativeSurfaceId: string | null;
+		/** Authored polygon culling mode, retained independently from its expanded render side. */
+		readonly cullMode: "single" | "double" | "both" | "counter-clockwise";
+		/** Expanded source side that selected this draw range's material and winding. */
+		readonly renderSide: "positive" | "positive-reversed" | "negative";
+		/** Retail SetSurface stippling flag selected from the expanded source side. */
 		readonly stippled: boolean;
 	};
 }

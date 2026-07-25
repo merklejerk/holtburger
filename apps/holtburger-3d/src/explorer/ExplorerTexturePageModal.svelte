@@ -372,6 +372,16 @@
 							>{formatPercent(page.occupiedPixelRatio)}</code
 						>
 					</div>
+					<div class="ac-param-row">
+						<span class="ac-param-key">Allocated occupancy</span><code
+							>{formatPercent(page.allocatedPixelRatio)}</code
+						>
+					</div>
+					<div class="ac-param-row">
+						<span class="ac-param-key">Largest free rectangle</span><code
+							>{formatPercent(page.largestFreePixelRatio)}</code
+						>
+					</div>
 				</div>
 
 				<p class="ac-section-label">Placements</p>

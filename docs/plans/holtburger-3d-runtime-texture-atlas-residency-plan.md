@@ -1,7 +1,7 @@
 # Holtburger 3D Runtime Texture Atlas Residency Plan
 
 Date: 2026-07-25
-Status: In progress — Phases 1–6 complete (2026-07-25).
+Status: In progress — Phases 1–7 complete (2026-07-25).
 
 ## Context and Boundaries
 
@@ -1206,7 +1206,7 @@ Status: Complete (2026-07-25).
 
 ### Phase 7: Diagnostics, Explorer, and Lifecycle Audit
 
-Status: Pending.
+Status: Complete (2026-07-25).
 
 #### Deliverables
 
@@ -1265,14 +1265,14 @@ Status: Pending.
 
 #### Task Checklist
 
-- [ ] Define replacement-native diagnostic DTOs.
-- [ ] Migrate `GameRuntime` and Explorer directly to those DTOs.
-- [ ] Update sorting/filtering labels where candidate terminology is removed.
-- [ ] Add diagnostic accounting tests around each transaction result.
-- [ ] Run the standard unit/type/lint/build suite.
-- [ ] Run a noninteractive browser or Explorer harness where available.
-- [ ] Capture before/after residency metrics in this plan.
-- [ ] Record any remaining budget or worker-copy debt.
+- [x] Define replacement-native diagnostic DTOs.
+- [x] Migrate `GameRuntime` and Explorer directly to those DTOs.
+- [x] Update sorting/filtering labels where candidate terminology is removed.
+- [x] Add diagnostic accounting tests around each transaction result.
+- [x] Run the standard unit/type/lint/build suite.
+- [x] Run a noninteractive browser or Explorer harness where available.
+- [x] Capture before/after residency metrics in this plan.
+- [x] Record any remaining budget or worker-copy debt.
 
 #### Resteering Gate
 
@@ -1285,7 +1285,38 @@ Before cleanup:
 
 #### Decisions and Course Corrections
 
-- Pending implementation.
+- `TextureManagerDiagnostics` is now a thin replacement-native facade over the authoritative
+  resident atlas. It reports active and peak device bytes, source bytes, avoided preparations,
+  hole insertion reuse, compaction results, physical upload/release traffic, stale/failed plans,
+  and separate synchronous publication versus closed-worker timing. It carries no candidate,
+  canonical-replacement, or compatibility state.
+- Per-page diagnostics distinguish live content occupancy, gutter-inclusive allocated occupancy,
+  and the largest immediately reusable free rectangle. The Explorer shows those facts explicitly;
+  an inspector closes and reports an unavailable immutable page generation rather than inspecting a
+  replacement through a recycled identifier.
+- The resident-atlas fixture now accounts for actual device creates and confirmed releases, not
+  merely the current page map. It also proves a post-release requirement receives a distinct page
+  generation, records stale layout discard, transaction failure rollback, shared-source preparation
+  avoidance, and compaction fallback.
+- The radius-1 noninteractive harness (`0xda55ffff`, 10s settle, lifecycle) reduced the Phase 0
+  retained state from **7 pages / 96 MiB** to **3 pages / 40 MiB** for the same 54 logical bindings.
+  It retained 2,925,568 source bytes (54 sources), copied 4,777,984 bytes to five page-build jobs,
+  and uploaded five complete pages (72 MiB) while releasing two superseded pages (32 MiB). The
+  active direct-color, index-16, and palette pages respectively reported 16.22% / 18.29%, 1.95% /
+  1.95%, and 0.24% / 0.24% live/allocated occupancy; their largest reusable rectangles were
+  77.68%, 93.75%, and 99.76% of a page.
+- The same run recorded 14.5ms across nine synchronous requirement-collection calls, 25 layout
+  jobs in 43.7ms with 1.5ms total queue delay, and five page-build jobs in 82.6ms with no queue
+  delay. Main-thread page publication totalled 180.5ms, with a 99.3ms largest startup publication.
+  Complete eviction returned active pages, active bytes, resident sources, geometry resources, and
+  static nodes to zero; reload returned to the same three-page / 54-binding steady state. The run
+  had no failed atlas transaction or compaction fallback; it discarded four stale layout results
+  safely during concurrent scene activity.
+- This evidence does not justify changing the one-layout/two-page-builder bounds or introducing
+  partial page upload: neither worker pool queued materially, source-copy volume stayed below the
+  active 40 MiB device allocation, and the observed work is startup/reload-bound rather than a
+  demonstrated frame-time bottleneck. Keep the measured counters visible and revisit only if a
+  broader traversal shows publication cost dominating.
 
 ### Phase 8: Cleanup and Architecture Closeout
 
@@ -1536,6 +1567,9 @@ not an implicit extension of this plan.
   Level-1 building closure tops out at a 520 x 520 guttered direct-color allocation; the fresh
   `0xda55ffff` radius-1 Explorer traversal demonstrated both sparse retained pages and repeated
   candidate publication on an unchanged reload.
+- 2026-07-25: Phase 7 replaced candidate diagnostics with direct resident facts and recorded the
+  first end-to-end comparison: the representative radius-1 traversal fell from 7 pages / 96 MiB to
+  3 pages / 40 MiB at the same 54 logical bindings, with zero resources after full eviction.
 
 ## Decisions and Course Corrections Log
 
@@ -1589,6 +1623,11 @@ not an implicit extension of this plan.
   the concrete claim, publication, and static-replacement contracts. Phase 0 proved the existing
   stale pipeline and worker-destroy boundaries instead of creating mock-only tests for a future
   API.
+- 2026-07-25: Explorer page inspection treats immutable page IDs as generations. A generation that
+  disappears from the runtime snapshot closes its readback modal rather than being silently rebound.
+- 2026-07-25: Retain the one-layout/two-page-builder pool configuration and complete-page uploads.
+  The representative lifecycle run had negligible worker queueing; partial uploads and worker-side
+  source mirrors remain unjustified complexity until a measured wider traversal says otherwise.
 
 ## Concessions
 
@@ -1605,9 +1644,16 @@ not an implicit extension of this plan.
 - Phase 0 uses canonical occupancy as the fragmentation baseline because the shelf packer has no
   free-rectangle state. Phase 2/3 must replace this proxy with explicit free-area, largest-free-
   rectangle, source-RAM, and reuse counters.
+- Complete-page publication can still transiently upload more bytes than the final active device
+  footprint during a reload (72 MiB uploaded versus 40 MiB active in the representative first
+  traversal). This is accepted first-implementation churn, measured in the Explorer, and not yet a
+  reason to add partial upload or a worker-side pixel mirror.
 
 ## Debt Register
 
 - Phase 0 found no implementation debt. The current Explorer diagnostics lack free-rectangle and
   retained-source-RAM counters by design of the candidate-page model; Phases 2/3 own their
   replacement rather than adding misleading compatibility counters.
+- No open Phase 7 implementation debt. Future wider-area profiling, not the current radius-1
+  fixture, is the trigger for reconsidering partial page uploads, adaptive worker pools, or a
+  worker-side source mirror.

@@ -1,5 +1,6 @@
 import { log, LogLevel } from "../../logs";
 import { LeaseRegistry } from "../ownership";
+import type { ClosedWorkerPoolDiagnostics } from "../workers/closed-worker";
 import type {
 	RendererResourceManager,
 	TextureArrayDescription,
@@ -79,6 +80,33 @@ export interface TextureAtlasBinding {
 /** Read-only resident-atlas facts for runtime diagnostics. */
 export interface TextureManagerDiagnostics {
 	readonly activeAtlasPages: number;
+	readonly activeAtlasPageBytes: number;
+	/** Largest simultaneously resident device-page allocation observed since runtime start. */
+	readonly peakAtlasPageBytes: number;
+	readonly avoidedAtlasPreparations: number;
+	readonly compactedAtlasPagesEliminated: number;
+	readonly acceptedAtlasCompactions: number;
+	readonly attemptedAtlasCompactions: number;
+	readonly failedAtlasCompactions: number;
+	/** Completed page-build source copies transferred into the closed worker boundary. */
+	readonly copiedAtlasSourceBytes: number;
+	/** Complete fixed-page payload bytes submitted to the device resource manager. */
+	readonly uploadedAtlasPageBytes: number;
+	readonly uploadedAtlasPages: number;
+	/** Device-page bytes and resources explicitly released after replacement or shutdown. */
+	readonly releasedAtlasPageBytes: number;
+	readonly releasedAtlasPages: number;
+	/** Failed physical plan publications; optional compaction failures are included. */
+	readonly failedAtlasTransactions: number;
+	/** Layout results discarded because their purpose epoch was superseded. */
+	readonly staleAtlasTransactions: number;
+	/** Synchronous main-thread device publication and binding-swap duration. */
+	readonly atlasPublicationDurationMs: number;
+	readonly longestAtlasPublicationDurationMs: number;
+	/** Closed-worker scheduling facts, separate from the synchronous publication measurements. */
+	readonly atlasLayoutWorker: ClosedWorkerPoolDiagnostics | null;
+	readonly atlasPageBuildWorker: ClosedWorkerPoolDiagnostics | null;
+	readonly reusedAtlasInsertions: number;
 	readonly residentAtlasBindings: number;
 	readonly residentSourceBytes: number;
 	readonly residentSourceCount: number;
@@ -105,8 +133,12 @@ export interface TextureAtlasPageEntryDiagnostics {
 
 /** Read-only resident page facts for Explorer atlas inspection. */
 export interface TextureAtlasPageDiagnostics {
+	/** Area occupied by content plus purpose-derived gutters divided by complete page area. */
+	readonly allocatedPixelRatio: number;
 	readonly byteLength: number;
 	readonly entryCount: number;
+	/** Largest immediately reusable free rectangle divided by complete page area. */
+	readonly largestFreePixelRatio: number;
 	/** Area occupied by resident content divided by complete page area. */
 	readonly occupiedPixelRatio: number;
 	readonly entries: readonly TextureAtlasPageEntryDiagnostics[];

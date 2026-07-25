@@ -1,6 +1,6 @@
 # Holtburger 3D Buildings Layer End-to-End Plan
 
-Status: Active. Phases 0–4 are complete; Phase 5 rendering is active.
+Status: Active. Phases 0–5 are complete; Phase 6 explorer controls and metrics is active.
 
 ## Context and Boundaries
 
@@ -1494,6 +1494,41 @@ Debt:
 - The active-region detail texture is correctly device-owned independently of landblock pages, but
   its read-only renderer binding is not yet part of `RenderWorld`. Phase 5 adds that membrane; it
   must not be folded into a building artifact or worker job merely to make shader wiring convenient.
+
+### 2026-07-25 — Phase 5 complete
+
+- `RenderWorld` now exposes only the resolved static-node placement, atlas entry bindings, and the
+  optional active-region object-detail selection required by the renderer. It does not expose scene,
+  texture, or ownership mutation APIs.
+- The WebGL2 renderer now submits visible opaque and alpha-test baked building ranges with the
+  resolved landblock transform, source-local clamp/repeat UV handling before atlas mapping, direct
+  RGBA, index-8/palette, and index-16/palette shader paths. It applies source culling facts,
+  source opacity/diffuse/luminosity values, the known detail flag, indexed clip-map indices below
+  eight, and the existing terrain fog curve.
+- Opaque and alpha-test ranges remain in distinct ordering classes and are deterministically
+  clustered by material and atlas facts within a class. Terrain and object programs now share one
+  renderer-local horizontal-distance cubic fog GLSL fragment and one uniform binder; the terrain
+  shader validator expands that fragment before running `glslangValidator`.
+- The existing non-interactive terrain harness now also requests radius-zero buildings through the
+  canonical HTTP source, browser workers, pipeline, runtime, and WebGL renderer. DA55FFFF completed
+  this path in headless Chrome with no browser-console or WebGL errors; the captured viewport shows
+  the expected settlement geometry over its terrain. It installs the active-region detail binding
+  through the same independent owner used by Explorer.
+- Archive execution found zero authored normals in DA55 geometry. The baker now preserves finite
+  zero normals instead of inventing face normals; this is lossless and safe because the current
+  object shader does not consume lighting normals. Non-finite normals and singular transforms still
+  fail loudly.
+- A second browser-only correction binds an explicit normalized fallback texture to every object
+  sampler before a draw. Without it, inactive object samplers inherited terrain's integer lookup
+  texture bindings and WebGL correctly rejected the draw for sampler/format mismatch.
+
+Verification:
+
+- `npm run test:ts`, `npm run check`, `npm run lint:ts`, and `npm run check:terrain-shader` pass.
+- `npm run harness:terrain -- --settle-ms 1000` passes for DA55FFFF and
+  `npm run harness:terrain -- --landblock 0eba --settle-ms 1000` passes for 0EBAFFFF with no
+  browser-console or WebGL errors. The DA55 capture at `/tmp/holtburger-da55-buildings.png` was
+  visually inspected and contains the expected settlement geometry.
 
 Add dated progress, concessions, verification, and new cleanup targets here after every completed
 phase.

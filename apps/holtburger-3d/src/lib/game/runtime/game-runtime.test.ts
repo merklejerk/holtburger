@@ -128,8 +128,7 @@ describe("GameRuntime view and interest control", () => {
 		runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
 		runtime.updateSceneInterest(sceneInterest("0x2020ffff"));
 		pipeline.resolveNext([staleTerrainArtifact("0x1010ffff")]);
-		await Promise.resolve();
-		await Promise.resolve();
+		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(() => runtime.tick()).not.toThrow();
 
 		await runtime.destroy();
@@ -240,6 +239,7 @@ describe("GameRuntime view and interest control", () => {
 		pipeline.resolveNext([promotedBuildingArtifact("0xda55ffff")]);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		runtime.tick();
+		await new Promise((resolve) => setTimeout(resolve, 0));
 
 		expect(runtime.getDeferredStaticDynamicDiagnostics()).toEqual([
 			{
@@ -313,23 +313,12 @@ function staleTerrainArtifact(landblockId: string): CommitBundle {
 function promotedBuildingArtifact(landblockId: string): CommitBundle {
 	return {
 		commit: {
-			diagnostics: {
-				additiveRangeCount: 0,
-				atlasPageCount: 0,
-				bakedRangeCount: 0,
-				expectedResidentCount: 1,
-				geometryBytes: 0,
-				geometryWorkerDurationMs: 0,
-				materializedStaticResidentCount: 0,
-				packedTextureBytes: 0,
-				promotedDynamicResidentCount: 1,
-				resolvedStaticResidentCount: 0,
-				sourceRangeCount: 0,
-				sourceMaterialSlotCount: 0,
-				textureWorkerDurationMs: 0,
-				transparentRangeCount: 0,
-			},
-			staticObjects: null,
+			source: {
+				dynamicResidents: [],
+				kind: LandblockLayerKind.Buildings,
+				landblockId,
+				staticResidents: [],
+			} as import("../resolution/landblock-layer").ResolvedObjectLayerSource,
 		},
 		dynamicEntities: [
 			{
@@ -344,7 +333,7 @@ function promotedBuildingArtifact(landblockId: string): CommitBundle {
 		kind: CommitBundleSourceKind.LandblockLayer,
 		landblockId,
 		layer: LandblockLayerKind.Buildings,
-	} as CommitBundle;
+	};
 }
 
 class DeferredCommitPipeline implements CommitPipeline {

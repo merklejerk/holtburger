@@ -1,4 +1,3 @@
-import type { TexturePixelSource } from "../../assets/texture-pixel-source";
 import type { DatAssetId } from "../game-types";
 import type { ResolvedObjectLayerSource } from "../resolution/landblock-layer";
 import { planObjectMaterial } from "../resolution/object-material-planner";
@@ -8,9 +7,7 @@ import {
 	type AssetTextureFact,
 	type AssetTextureKey,
 	type TexturePurpose,
-	texturePurposePolicy,
 } from "../textures/types";
-import type { BuildingTexturePackInput } from "./building-texture-worker";
 
 /** One complete logical building texture requirement beside its active page-pack input. */
 export interface BuildingTextureDependency {
@@ -50,37 +47,6 @@ export function collectBuildingTextureDependencies(
 	}
 	return [...dependencies.values()].sort((left, right) =>
 		left.key.localeCompare(right.key),
-	);
-}
-
-/** Load every pixel byte before dispatching the texture worker. */
-export async function prepareBuildingTextureInputs(
-	pixelSource: TexturePixelSource,
-	source: ResolvedObjectLayerSource,
-	dependencies = collectBuildingTextureDependencies(source),
-): Promise<readonly BuildingTexturePackInput[]> {
-	return Promise.all(
-		dependencies.map(async (dependency) => {
-			const response = await pixelSource.loadTexturePixels(dependency.request);
-			if (
-				response.kind !== dependency.request.kind ||
-				response.purpose !== dependency.purpose ||
-				response.surface.sourceAssetId !== dependency.request.sourceAssetId ||
-				response.surface.format !==
-					texturePurposePolicy(dependency.purpose).format
-			) {
-				throw new Error(
-					`Host returned an incompatible building texture for ${dependency.key}.`,
-				);
-			}
-			return {
-				height: response.surface.height,
-				key: dependency.key,
-				pixels: response.surface.pixels,
-				purpose: dependency.purpose,
-				width: response.surface.width,
-			};
-		}),
 	);
 }
 

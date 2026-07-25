@@ -180,7 +180,6 @@
 				commitPipeline = await StandardCommitPipeline.build({
 					buildingSource: TauriLandblockBuildingSource.build(),
 					terrainSource,
-					texturePixelSource,
 				});
 				if (destroyed) return;
 

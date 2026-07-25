@@ -87,13 +87,11 @@ function buildingBundle(landblockId: LandblockId): CommitBundle {
 		],
 		resourceNamespace: "static-install:synthetic-blended" as const,
 		textureRequirements: [],
-		texturePages: [],
 	};
 	return {
 		commit: {
 			diagnostics: {
 				additiveRangeCount: 3,
-				atlasPageCount: 0,
 				bakedRangeCount: 6,
 				expectedResidentCount: 6,
 				geometryBytes:
@@ -103,12 +101,10 @@ function buildingBundle(landblockId: LandblockId): CommitBundle {
 					textureCoordinates.length * Float32Array.BYTES_PER_ELEMENT,
 				geometryWorkerDurationMs: 0,
 				materializedStaticResidentCount: 6,
-				packedTextureBytes: 0,
 				promotedDynamicResidentCount: 0,
 				resolvedStaticResidentCount: 6,
 				sourceMaterialSlotCount: 6,
 				sourceRangeCount: 6,
-				textureWorkerDurationMs: 0,
 				transparentRangeCount: 3,
 			},
 			staticObjects: artifact,
@@ -117,7 +113,7 @@ function buildingBundle(landblockId: LandblockId): CommitBundle {
 		kind: CommitBundleSourceKind.LandblockLayer,
 		landblockId,
 		layer: LandblockLayerKind.Buildings,
-	};
+	} as unknown as CommitBundle;
 }
 
 function fixtureMaterial(

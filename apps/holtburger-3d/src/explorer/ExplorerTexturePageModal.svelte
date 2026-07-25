@@ -165,16 +165,10 @@
 		context.lineWidth = Math.max(1, 1 / zoom);
 		for (const entry of page.entries) {
 			const selected = entry.key === selectedEntry?.key;
-			context.strokeStyle = selected
-				? "#ffd666"
-				: entry.canonical
-					? "rgb(117 255 209 / 82%)"
-					: "rgb(162 168 171 / 78%)";
+			context.strokeStyle = selected ? "#ffd666" : "rgb(117 255 209 / 82%)";
 			context.fillStyle = selected
 				? "rgb(255 214 102 / 16%)"
-				: entry.canonical
-					? "rgb(117 255 209 / 6%)"
-					: "rgb(162 168 171 / 5%)";
+				: "rgb(117 255 209 / 6%)";
 			context.fillRect(
 				panX + entry.x * zoom,
 				panY + entry.y * zoom,
@@ -374,13 +368,8 @@
 						>
 					</div>
 					<div class="ac-param-row">
-						<span class="ac-param-key">Canonical occupancy</span><code
-							>{formatPercent(page.canonicalOccupiedPixelRatio)}</code
-						>
-					</div>
-					<div class="ac-param-row">
-						<span class="ac-param-key">Candidate occupancy</span><code
-							>{formatPercent(page.candidateOccupiedPixelRatio)}</code
+						<span class="ac-param-key">Resident occupancy</span><code
+							>{formatPercent(page.occupiedPixelRatio)}</code
 						>
 					</div>
 				</div>
@@ -394,8 +383,7 @@
 							class="explorer-selectable-row"
 							onclick={() => (selectedEntryKey = entry.key)}
 						>
-							<strong>{entry.canonical ? "Canonical" : "Candidate only"}</strong
-							>
+							<strong>Resident</strong>
 							<span>{entry.key}</span>
 							<code>{entry.x}, {entry.y} · {entry.width} × {entry.height}</code>
 						</button>
@@ -404,9 +392,7 @@
 
 				{#if selectedEntry}
 					<p class="texture-page-modal-selected">
-						Selected: {selectedEntry.canonical
-							? "canonical binding"
-							: "candidate-only placement"}.
+						Selected resident placement.
 					</p>
 				{/if}
 			</aside>

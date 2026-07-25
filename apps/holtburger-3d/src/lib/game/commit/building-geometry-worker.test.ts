@@ -3,8 +3,6 @@ import { Mat4, Vec3 } from "../math/types";
 import { LandblockLayerKind } from "../runtime/scene-interest";
 import type { ResolvedObjectLayerSource } from "../resolution/landblock-layer";
 import { bakeBuildingGeometry } from "./building-geometry-worker";
-import { packBuildingTextures } from "./building-texture-worker";
-import { TexturePurpose, createAssetTextureKey } from "../textures/types";
 
 describe("bakeBuildingGeometry", () => {
 	it("bakes transformed positions into one finite landblock-local allocation", () => {
@@ -94,33 +92,13 @@ describe("bakeBuildingGeometry", () => {
 		expect(result?.geometry.geometry.normals).toEqual(new Float32Array(9));
 	});
 
-	it("keeps geometry bytes and ranges independent from a different texture page layout", () => {
+	it("keeps geometry bytes and ranges stable across independent installation namespaces", () => {
 		const input = source([
 			resident("opaque", Mat4.identity(), new Vec3(1, 1, 1)),
 		]);
 		const first = bakeBuildingGeometry({
 			resourceNamespace: "static-install:first" as const,
 			source: input,
-		});
-		const texture = {
-			height: 1,
-			key: createAssetTextureKey(
-				TexturePurpose.ObjectDirectColor,
-				"0x05000001",
-			),
-			pixels: Uint8Array.from([0xff, 0x88, 0x44, 0xff]),
-			purpose: TexturePurpose.ObjectDirectColor,
-			width: 1,
-		};
-		packBuildingTextures({
-			inputs: [texture],
-			pageSize: 16,
-			resourceNamespace: "static-install:textures-a",
-		});
-		packBuildingTextures({
-			inputs: [texture],
-			pageSize: 32,
-			resourceNamespace: "static-install:textures-b",
 		});
 		const second = bakeBuildingGeometry({
 			resourceNamespace: "static-install:second" as const,

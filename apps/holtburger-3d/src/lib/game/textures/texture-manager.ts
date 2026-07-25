@@ -1,4 +1,3 @@
-import type { AABB2 } from "../math/types";
 import { log, LogLevel } from "../../logs";
 import { LeaseRegistry } from "../ownership";
 import type {
@@ -18,7 +17,6 @@ import {
 	type TextureArrayKey,
 	type TextureKey,
 	type TextureFact,
-	type TexturePreparation,
 	type TexturePurpose,
 	isTextureArrayKey,
 	isGeneratedTextureKey,
@@ -30,25 +28,6 @@ import {
 
 /** Stable identity for one prepared page of texture pixels. */
 export type TexturePageId = `page:${string}`;
-
-/** Pixel-space location of one logical texture within a prepared page. */
-export interface TexturePlacement {
-	readonly bounds: AABB2;
-	/** Preparation represented by this page entry and its texture key. */
-	readonly preparation: TexturePreparation;
-}
-
-/** Prepared page consumed as one packed two-dimensional atlas. */
-export interface TexturePageDescription {
-	readonly purpose: TexturePurpose;
-	readonly width: number;
-	readonly height: number;
-	readonly pageBits: Uint8Array;
-	readonly textures: readonly {
-		readonly key: AssetTextureKey;
-		readonly placement: TexturePlacement;
-	}[];
-}
 
 /** One decoded DAT texture occupying a deterministic array layer. */
 export interface TextureArrayLayerSource {
@@ -91,38 +70,31 @@ export interface TextureArrayBinding {
 /** Backend atlas resource and page-relative placement for one logical texture. */
 export interface TextureAtlasBinding {
 	readonly resource: Texture2DResourceKey;
-	readonly placement: TexturePlacement;
+	readonly placement: {
+		readonly bounds: import("../math/types").AABB2;
+		readonly preparation: import("./types").TexturePreparation;
+	};
 }
 
-/** Read-only resource and arbitration counts for runtime diagnostics. */
+/** Read-only resident-atlas facts for runtime diagnostics. */
 export interface TextureManagerDiagnostics {
 	readonly activeAtlasPages: number;
-	readonly canonicalAtlasBindings: number;
-	readonly publishedAtlasCandidates: number;
-	readonly canonicalAtlasReplacements: number;
-	readonly releasedAtlasPages: number;
+	readonly residentAtlasBindings: number;
+	readonly residentSourceBytes: number;
+	readonly residentSourceCount: number;
+	readonly pendingAtlasRequirements: number;
 }
 
-/**
- * Future resident-atlas read boundary. Returning null deliberately preserves the active
- * candidate-page path until the resident publication cutover is complete.
- */
+/** Read-only packed-atlas authority injected beside this generic texture facade. */
 export interface PackedAtlasBindingDelegate {
 	getAtlasBinding(texture: AssetTextureKey): TextureAtlasBinding | null;
-	getAtlasDiagnostics(): Omit<
-		TextureManagerDiagnostics,
-		| "canonicalAtlasReplacements"
-		| "publishedAtlasCandidates"
-		| "releasedAtlasPages"
-	> | null;
-	getAtlasPageDiagnostics(): readonly TextureAtlasPageDiagnostics[] | null;
+	getAtlasDiagnostics(): TextureManagerDiagnostics;
+	getAtlasPageDiagnostics(): readonly TextureAtlasPageDiagnostics[];
 	getAtlasPageResource(pageId: TexturePageId): Texture2DResourceKey | null;
 }
 
-/** One candidate texture placement exposed for Explorer atlas inspection. */
+/** One resident texture placement exposed for Explorer atlas inspection. */
 export interface TextureAtlasPageEntryDiagnostics {
-	/** Whether this candidate is the currently selected physical binding. */
-	readonly canonical: boolean;
 	readonly key: AssetTextureKey;
 	/** Page-relative pixel rectangle occupied by this texture. */
 	readonly x: number;
@@ -131,15 +103,12 @@ export interface TextureAtlasPageEntryDiagnostics {
 	readonly height: number;
 }
 
-/** Read-only physical page facts for Explorer atlas inspection. */
+/** Read-only resident page facts for Explorer atlas inspection. */
 export interface TextureAtlasPageDiagnostics {
 	readonly byteLength: number;
-	readonly canonicalEntryCount: number;
-	/** Area occupied by current canonical entries divided by the complete page area. */
-	readonly canonicalOccupiedPixelRatio: number;
-	readonly candidateEntryCount: number;
-	/** Area occupied by every supplied candidate divided by the complete page area. */
-	readonly candidateOccupiedPixelRatio: number;
+	readonly entryCount: number;
+	/** Area occupied by resident content divided by complete page area. */
+	readonly occupiedPixelRatio: number;
 	readonly entries: readonly TextureAtlasPageEntryDiagnostics[];
 	readonly height: number;
 	readonly pageId: TexturePageId;
@@ -153,72 +122,12 @@ export interface GeneratedTextureSource {
 	readonly upload: Texture2DUpload;
 }
 
-interface PackedTexturePage {
-	/** Every entry supplied by this independently packed candidate page. */
-	readonly candidateTextures: ReadonlyMap<AssetTextureKey, TexturePlacement>;
-	/** Candidate upload byte cost used by deterministic page arbitration. */
-	readonly byteLength: number;
-	readonly purpose: TexturePurpose;
-	readonly width: number;
-	readonly height: number;
-	/** Entries this page currently wins as canonical physical bindings. */
-	readonly textures: Map<AssetTextureKey, TexturePlacement>;
-	readonly resource: Texture2DResourceKey;
-}
-
-function createAtlasPageDiagnostics(
-	pageId: TexturePageId,
-	page: PackedTexturePage,
-): TextureAtlasPageDiagnostics {
-	const entries = [...page.candidateTextures.entries()]
-		.map(([key, placement]) => {
-			const width = placement.bounds.max.x - placement.bounds.min.x;
-			const height = placement.bounds.max.y - placement.bounds.min.y;
-			return {
-				canonical: page.textures.has(key),
-				height,
-				key,
-				width,
-				x: placement.bounds.min.x,
-				y: placement.bounds.min.y,
-			};
-		})
-		.sort((left, right) => left.key.localeCompare(right.key));
-	const pageArea = page.width * page.height;
-	const candidateOccupiedArea = entries.reduce(
-		(total, entry) => total + entry.width * entry.height,
-		0,
-	);
-	const canonicalOccupiedArea = entries.reduce(
-		(total, entry) =>
-			entry.canonical ? total + entry.width * entry.height : total,
-		0,
-	);
-	return {
-		byteLength: page.byteLength,
-		canonicalEntryCount: page.textures.size,
-		canonicalOccupiedPixelRatio: canonicalOccupiedArea / pageArea,
-		candidateEntryCount: entries.length,
-		candidateOccupiedPixelRatio: candidateOccupiedArea / pageArea,
-		entries,
-		height: page.height,
-		pageId,
-		purpose: page.purpose,
-		width: page.width,
-	};
-}
-
 /** Owns preparation, device resources, and shared owner retention for logical textures. */
 export class TextureManager<TOwnerId extends string = string> {
 	readonly #renderResources: RendererResourceManager;
 	readonly #preparer: TexturePreparer;
 	readonly #packedAtlasDelegate: PackedAtlasBindingDelegate | null;
 	readonly #leases = new LeaseRegistry<TOwnerId, TextureKey>();
-	readonly #atlasOwners = new Map<AssetTextureKey, TexturePageId>();
-	readonly #atlasPages = new Map<TexturePageId, PackedTexturePage>();
-	#publishedAtlasCandidates = 0;
-	#canonicalAtlasReplacements = 0;
-	#releasedAtlasPages = 0;
 	/** Complete standalone and generated two-dimensional device resources by logical key. */
 	readonly #texture2DResources = new Map<
 		AssetTextureKey | GeneratedTextureKey,
@@ -235,19 +144,6 @@ export class TextureManager<TOwnerId extends string = string> {
 		this.#renderResources = renderResources;
 		this.#preparer = preparer;
 		this.#packedAtlasDelegate = packedAtlasDelegate;
-	}
-
-	/** Install one already-packed atlas page and retain every entry for its owner. */
-	installAtlasPage(
-		owner: TOwnerId,
-		id: TexturePageId,
-		description: TexturePageDescription,
-	): void {
-		this.reserveKeys(
-			owner,
-			description.textures.map(({ key }) => key),
-		);
-		this.upsertAtlasPage(id, description);
 	}
 
 	/** Install one caller-prepared standalone asset texture under an explicit owner. */
@@ -326,23 +222,14 @@ export class TextureManager<TOwnerId extends string = string> {
 		this.#releaseEmptyLeases();
 	}
 
-	/** Stop preparation work and release every texture retained by runtime owners. */
+	/** Release generic texture consumers; the runtime owns shared preparer shutdown. */
 	async destroy(): Promise<void> {
-		await this.#preparer.destroy();
 		for (const owner of [...this.#leases.iterOwners()]) this.dropOwner(owner);
 	}
 
 	/** Return only aggregate atlas facts; physical bindings remain runtime-private. */
 	getDiagnostics(): TextureManagerDiagnostics {
-		const delegated = this.#packedAtlasDelegate?.getAtlasDiagnostics();
-		return {
-			activeAtlasPages: delegated?.activeAtlasPages ?? this.#atlasPages.size,
-			canonicalAtlasBindings:
-				delegated?.canonicalAtlasBindings ?? this.#atlasOwners.size,
-			canonicalAtlasReplacements: this.#canonicalAtlasReplacements,
-			publishedAtlasCandidates: this.#publishedAtlasCandidates,
-			releasedAtlasPages: this.#releasedAtlasPages,
-		};
+		return this.#requireAtlasDelegate().getAtlasDiagnostics();
 	}
 
 	/**
@@ -352,82 +239,20 @@ export class TextureManager<TOwnerId extends string = string> {
 	 * Explorer into a hidden CPU-side texture cache.
 	 */
 	getAtlasPageDiagnostics(): readonly TextureAtlasPageDiagnostics[] {
-		const delegated = this.#packedAtlasDelegate?.getAtlasPageDiagnostics();
-		if (delegated !== null && delegated !== undefined) return delegated;
-		return [...this.#atlasPages.entries()]
-			.map(([pageId, page]) => createAtlasPageDiagnostics(pageId, page))
-			.sort((left, right) => left.pageId.localeCompare(right.pageId));
+		return this.#requireAtlasDelegate().getAtlasPageDiagnostics();
 	}
 
 	/** Return the opaque device resource for one currently active page inspection. */
 	getAtlasPageResource(pageId: TexturePageId): Texture2DResourceKey {
-		const delegated = this.#packedAtlasDelegate?.getAtlasPageResource(pageId);
-		if (delegated !== null && delegated !== undefined) return delegated;
-		const page = this.#atlasPages.get(pageId);
-		if (!page) throw new Error(`Texture page ${pageId} is no longer active.`);
-		return page.resource;
-	}
-
-	upsertAtlasPage(
-		id: TexturePageId,
-		description: TexturePageDescription,
-	): boolean {
-		validatePage(description, id);
-		const existing = this.#atlasPages.get(id);
-		if (existing) {
-			throw new Error(
-				`Atlas page ${id} cannot be replaced while page arbitration is active.`,
-			);
-		}
-		const upload = {
-			data: description.pageBits,
-			format: texturePurposePolicy(description.purpose).format,
-			height: description.height,
-			mipLevels: mipLevelCount(
-				description.purpose,
-				description.width,
-				description.height,
-			),
-			width: description.width,
-		};
-		const resource = this.#renderResources.createTexture2D(upload);
-		const candidateTextures = new Map(
-			description.textures.map(({ key, placement }) => [key, placement]),
-		);
-		const candidate: PackedTexturePage = {
-			byteLength: description.pageBits.byteLength,
-			candidateTextures,
-			height: description.height,
-			purpose: description.purpose,
-			resource,
-			textures: new Map(),
-			width: description.width,
-		};
-		this.#atlasPages.set(id, candidate);
-		this.#publishedAtlasCandidates += 1;
-		for (const [key, placement] of candidateTextures) {
-			if (!this.#leases.hasLease(key)) continue;
-			const incumbentId = this.#atlasOwners.get(key);
-			const incumbent = incumbentId
-				? this.#atlasPages.get(incumbentId)
-				: undefined;
-			if (incumbent && !this.#candidateBeats(candidate, incumbent)) continue;
-			if (incumbent && incumbentId) {
-				incumbent.textures.delete(key);
-				this.#canonicalAtlasReplacements += 1;
-				this.#releaseAtlasPageIfUnused(incumbentId, incumbent);
-			}
-			candidate.textures.set(key, placement);
-			this.#atlasOwners.set(key, id);
-			this.#releaseDegenerateTexture(key);
-		}
-		this.#releaseAtlasPageIfUnused(id, candidate);
-		return true;
+		const resource = this.#requireAtlasDelegate().getAtlasPageResource(pageId);
+		if (resource === null)
+			throw new Error(`Texture page ${pageId} is no longer active.`);
+		return resource;
 	}
 
 	#createAssetTexture(source: AssetTextureSource): void {
 		validateAssetTextureSource(source);
-		if (this.#atlasOwners.has(source.key)) return;
+		if (this.#packedAtlasDelegate?.getAtlasBinding(source.key)) return;
 		if (this.#texture2DResources.has(source.key)) return;
 
 		const resource = this.#renderResources.createTexture2D(
@@ -470,18 +295,12 @@ export class TextureManager<TOwnerId extends string = string> {
 	}
 
 	getAtlasBinding(texture: AssetTextureKey): TextureAtlasBinding {
-		const delegated = this.#packedAtlasDelegate?.getAtlasBinding(texture);
-		if (delegated !== null && delegated !== undefined) return delegated;
-		const pageId = this.#atlasOwners.get(texture);
-		if (pageId === undefined) {
-			throw new Error(`Texture ${texture} does not have an atlas binding.`);
-		}
-		const page = this.#atlasPages.get(pageId);
-		const placement = page?.textures.get(texture);
-		if (!page || !placement) {
-			throw new Error(`Texture ${texture} has an invalid atlas binding.`);
-		}
-		return { placement, resource: page.resource };
+		const binding = this.#requireAtlasDelegate().getAtlasBinding(texture);
+		if (binding === null)
+			throw new Error(
+				`Texture ${texture} does not have a resident atlas binding.`,
+			);
+		return binding;
 	}
 
 	getTexture2DResource(
@@ -491,8 +310,6 @@ export class TextureManager<TOwnerId extends string = string> {
 			const delegated = this.#packedAtlasDelegate?.getAtlasBinding(key);
 			if (delegated !== null && delegated !== undefined)
 				return delegated.resource;
-			const packed = this.#atlasOwners.get(key);
-			if (packed !== undefined) return this.getAtlasBinding(key).resource;
 		}
 		const texture = this.#texture2DResources.get(key);
 		if (!texture) throw new Error(`Texture ${key} does not exist.`);
@@ -512,22 +329,19 @@ export class TextureManager<TOwnerId extends string = string> {
 			const delegated = this.#packedAtlasDelegate?.getAtlasBinding(key);
 			return (
 				(delegated !== null && delegated !== undefined) ||
-				this.#atlasOwners.has(key) ||
 				this.#texture2DResources.has(key)
 			);
 		}
 		if (isGeneratedTextureKey(key)) {
 			return this.#texture2DResources.has(key);
 		}
-		return this.#atlasOwners.has(key);
+		return false;
 	}
 
 	#releaseTexture(key: TextureKey): boolean {
 		if (isTextureArrayKey(key)) return this.#releaseTextureArray(key);
 		if (isAssetTextureKey(key)) {
-			return this.#atlasOwners.has(key)
-				? this.#releaseAtlasTexture(key)
-				: this.#releaseTexture2D(key);
+			return this.#releaseTexture2D(key);
 		}
 		if (isGeneratedTextureKey(key)) {
 			return this.#releaseTexture2D(key);
@@ -620,97 +434,11 @@ export class TextureManager<TOwnerId extends string = string> {
 		return true;
 	}
 
-	#releaseAtlasTexture(texture: AssetTextureKey): boolean {
-		const pageId = this.#atlasOwners.get(texture);
-		if (pageId === undefined) return false;
-		this.#atlasOwners.delete(texture);
-		const page = this.#atlasPages.get(pageId);
-		if (!page) {
-			throw new Error(`Texture ${texture} references missing page ${pageId}.`);
+	#requireAtlasDelegate(): PackedAtlasBindingDelegate {
+		if (this.#packedAtlasDelegate === null) {
+			throw new Error("Texture manager has no resident atlas authority.");
 		}
-		page.textures.delete(texture);
-		this.#releaseAtlasPageIfUnused(pageId, page);
-		return true;
-	}
-
-	#candidateBeats(
-		candidate: PackedTexturePage,
-		incumbent: PackedTexturePage,
-	): boolean {
-		const candidateScore = this.#pageScore(candidate);
-		const incumbentScore = this.#pageScore(incumbent);
-		if (candidateScore.coverage !== incumbentScore.coverage) {
-			return candidateScore.coverage > incumbentScore.coverage;
-		}
-		if (candidateScore.consolidation !== incumbentScore.consolidation) {
-			return candidateScore.consolidation > incumbentScore.consolidation;
-		}
-		if (candidateScore.byteLength !== incumbentScore.byteLength) {
-			return candidateScore.byteLength < incumbentScore.byteLength;
-		}
-		if (candidateScore.occupiedArea !== incumbentScore.occupiedArea) {
-			return candidateScore.occupiedArea > incumbentScore.occupiedArea;
-		}
-		return false;
-	}
-
-	#pageScore(page: PackedTexturePage): {
-		readonly coverage: number;
-		readonly consolidation: number;
-		readonly byteLength: number;
-		readonly occupiedArea: number;
-	} {
-		const retainedKeys = [...page.candidateTextures.keys()].filter((key) =>
-			this.#leases.hasLease(key),
-		);
-		const candidateKeys = new Set(retainedKeys);
-		const redundantPages = new Set<TexturePageId>();
-		for (const key of retainedKeys) {
-			const owner = this.#atlasOwners.get(key);
-			if (owner) redundantPages.add(owner);
-		}
-		let consolidation = 0;
-		for (const pageId of redundantPages) {
-			const existing = this.#atlasPages.get(pageId);
-			if (
-				existing &&
-				[...existing.textures.keys()].every((key) => candidateKeys.has(key))
-			) {
-				consolidation += 1;
-			}
-		}
-		const occupiedArea = retainedKeys.reduce((total, key) => {
-			const bounds = page.candidateTextures.get(key)!.bounds;
-			return (
-				total + (bounds.max.x - bounds.min.x) * (bounds.max.y - bounds.min.y)
-			);
-		}, 0);
-		return {
-			byteLength: page.byteLength,
-			consolidation,
-			coverage: retainedKeys.length,
-			occupiedArea,
-		};
-	}
-
-	#releaseDegenerateTexture(key: AssetTextureKey): void {
-		const resource = this.#texture2DResources.get(key);
-		if (!resource) return;
-		this.#texture2DResources.delete(key);
-		if (!this.#renderResources.releaseResource(resource)) {
-			throw new Error(
-				`Packed texture ${key} lost its replaced degenerate binding.`,
-			);
-		}
-	}
-
-	#releaseAtlasPageIfUnused(id: TexturePageId, page: PackedTexturePage): void {
-		if (page.textures.size > 0) return;
-		this.#atlasPages.delete(id);
-		this.#releasedAtlasPages += 1;
-		if (!this.#renderResources.releaseResource(page.resource)) {
-			throw new Error(`Texture page ${id} lost its backend resource.`);
-		}
+		return this.#packedAtlasDelegate;
 	}
 }
 
@@ -733,21 +461,6 @@ function validateAssetTextureSource(source: AssetTextureSource): void {
 		source.height <= 0
 	) {
 		throw new Error(`Asset texture ${source.key} dimensions must be positive.`);
-	}
-}
-
-function validatePage(
-	description: TexturePageDescription,
-	id: TexturePageId,
-): void {
-	if (description.width <= 0 || description.height <= 0) {
-		throw new Error(`Texture page ${id} dimensions must be positive.`);
-	}
-	if (
-		new Set(description.textures.map(({ key }) => key)).size !==
-		description.textures.length
-	) {
-		throw new Error(`Texture page ${id} contains duplicate texture keys.`);
 	}
 }
 

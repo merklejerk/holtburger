@@ -48,8 +48,7 @@
 	): number {
 		if (pageSort === "entries") {
 			return (
-				right.canonicalEntryCount - left.canonicalEntryCount ||
-				right.candidateEntryCount - left.candidateEntryCount ||
+				right.entryCount - left.entryCount ||
 				left.pageId.localeCompare(right.pageId)
 			);
 		}
@@ -61,8 +60,7 @@
 		}
 		if (pageSort === "page-id") return left.pageId.localeCompare(right.pageId);
 		return (
-			right.canonicalOccupiedPixelRatio - left.canonicalOccupiedPixelRatio ||
-			right.candidateOccupiedPixelRatio - left.candidateOccupiedPixelRatio ||
+			right.occupiedPixelRatio - left.occupiedPixelRatio ||
 			left.pageId.localeCompare(right.pageId)
 		);
 	}
@@ -80,13 +78,13 @@
 	function describeSort(pageSort: PageSort): string {
 		switch (pageSort) {
 			case "entries":
-				return "canonical entries";
+				return "resident entries";
 			case "memory":
 				return "byte cost";
 			case "page-id":
 				return "page ID";
 			case "efficiency":
-				return "canonical efficiency";
+				return "resident occupancy";
 		}
 	}
 
@@ -120,22 +118,22 @@
 	{:else}
 		<p class="explorer-textures-summary">
 			{diagnostics.texture.activeAtlasPages} active pages, {diagnostics.texture
-				.canonicalAtlasBindings}
-			canonical bindings. Page pixels are not retained after upload.
+				.residentAtlasBindings}
+			resident bindings. Page pixels are not retained after upload.
 		</p>
 
 		<div class="ac-param-panel explorer-texture-totals">
 			<div class="ac-param-row">
-				<span class="ac-param-key">Published candidates</span>
-				<code>{diagnostics.texture.publishedAtlasCandidates}</code>
+				<span class="ac-param-key">Resident sources</span>
+				<code>{diagnostics.texture.residentSourceCount}</code>
 			</div>
 			<div class="ac-param-row">
-				<span class="ac-param-key">Canonical replacements</span>
-				<code>{diagnostics.texture.canonicalAtlasReplacements}</code>
+				<span class="ac-param-key">Source memory</span>
+				<code>{formatBytes(diagnostics.texture.residentSourceBytes)}</code>
 			</div>
 			<div class="ac-param-row">
-				<span class="ac-param-key">Released pages</span>
-				<code>{diagnostics.texture.releasedAtlasPages}</code>
+				<span class="ac-param-key">Pending requirements</span>
+				<code>{diagnostics.texture.pendingAtlasRequirements}</code>
 			</div>
 		</div>
 
@@ -172,12 +170,8 @@
 							<strong class="explorer-texture-page-name">{page.pageId}</strong>
 							<span>{page.purpose}</span>
 							<span>{page.width} × {page.height}</span>
-							<span
-								>{page.canonicalEntryCount}/{page.candidateEntryCount} canonical</span
-							>
-							<span
-								>{formatPercent(page.canonicalOccupiedPixelRatio)} occupied</span
-							>
+							<span>{page.entryCount} resident</span>
+							<span>{formatPercent(page.occupiedPixelRatio)} occupied</span>
 							<span>{formatBytes(page.byteLength)}</span>
 						</div>
 						<button

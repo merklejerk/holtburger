@@ -2,7 +2,6 @@
 	import { onMount } from "svelte";
 	import { HttpTerrainContentSource } from "../../lib/assets/http-terrain-content-source";
 	import { StandardCommitPipeline } from "../../lib/game/commit/pipeline";
-	import { BuildingWorkers } from "../../lib/game/commit/building-workers";
 	import { SyntheticBlendedBuildingPipeline } from "./synthetic-blended-building-pipeline";
 	import type { LandblockId } from "../../lib/game/game-types";
 	import {
@@ -159,9 +158,7 @@
 						? new SyntheticBlendedBuildingPipeline()
 						: await StandardCommitPipeline.build({
 								buildingSource: source,
-								buildingWorkers: await BuildingWorkers.build(),
 								terrainSource: source,
-								texturePixelSource: source,
 							});
 				runtime = await GameRuntime.build(device, pipeline, source);
 				objectDetailOwner = new ActiveRegionObjectDetailOwner(source);

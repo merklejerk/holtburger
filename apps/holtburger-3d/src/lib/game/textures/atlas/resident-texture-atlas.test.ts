@@ -216,10 +216,27 @@ describe("ResidentTextureAtlas", () => {
 		expect(atlas.getPreparedSource(DIRECT_COLOR.key).pixels).toEqual(
 			source(DIRECT_COLOR).pixels,
 		);
+		expect(atlas.getAtlasPageDiagnostics()[0]).toMatchObject({
+			allocatedPixelRatio: 81 / 256,
+			height: 16,
+			occupiedPixelRatio: 1 / 256,
+			width: 16,
+		});
+		expect(atlas.getDiagnostics()).toMatchObject({
+			copiedSourceBytes: 4,
+			peakPageBytes: 16 * 16 * 4,
+			uploadedPageBytes: 16 * 16 * 4,
+			uploadedPageCount: 1,
+		});
 
 		await atlas.withdrawOwnerRevision(handle);
 		expect(atlas.getAtlasBinding(DIRECT_COLOR.key)).toBeNull();
 		expect(resources.released).toEqual([binding!.resource]);
+		expect(atlas.getDiagnostics()).toMatchObject({
+			activePageBytes: 0,
+			releasedPageBytes: 16 * 16 * 4,
+			releasedPageCount: 1,
+		});
 	});
 
 	it("does not plan or rebuild when a second owner only claims an existing resident binding", async () => {
@@ -245,6 +262,33 @@ describe("ResidentTextureAtlas", () => {
 		await expect(second.completion).resolves.toBe("ready");
 
 		expect(planner.planCount).toBe(planCount);
+		expect(atlas.getDiagnostics().avoidedPreparationCount).toBe(1);
+	});
+
+	it("never reuses a released page generation for a later requirement", async () => {
+		const atlas = new ResidentTextureAtlas<"first" | "second">(
+			new ImmediatePreparer(),
+			{
+				layoutPlanner: new FixtureLayoutPlanner(),
+				pageBuilder: new FixturePageBuilder(),
+				pageSize: 16,
+				renderResources: new FixtureRendererResources(),
+			},
+		);
+		const first = atlas.prepareOwnerRequirements("first", revision(1), [
+			DIRECT_COLOR,
+		]);
+		await first.completion;
+		const firstPageId = atlas.getAtlasPageDiagnostics()[0]!.pageId;
+
+		await atlas.withdrawOwnerRevision(first);
+		expect(atlas.getAtlasPageDiagnostics()).toEqual([]);
+
+		const second = atlas.prepareOwnerRequirements("second", revision(1), [
+			DIRECT_COLOR,
+		]);
+		await second.completion;
+		expect(atlas.getAtlasPageDiagnostics()[0]!.pageId).not.toBe(firstPageId);
 	});
 
 	it("accepts a bounded compaction only when it eliminates a page", async () => {
@@ -271,6 +315,11 @@ describe("ResidentTextureAtlas", () => {
 		expect(atlas.getAtlasBinding(INDEX8.key)).not.toBeNull();
 		expect(atlas.getAtlasBinding(SECOND_INDEX8.key)).not.toBeNull();
 		expect(resources.released).toEqual(["texture-2d-resource:0"]);
+		expect(atlas.getDiagnostics()).toMatchObject({
+			acceptedCompactionCount: 1,
+			eliminatedPageCount: 1,
+			failedCompactionCount: 0,
+		});
 	});
 
 	it("falls back to stable insertion when optional compaction page building fails", async () => {
@@ -295,6 +344,7 @@ describe("ResidentTextureAtlas", () => {
 		expect(atlas.getAtlasPageDiagnostics()).toHaveLength(2);
 		expect(atlas.getAtlasBinding(INDEX8.key)).not.toBeNull();
 		expect(atlas.getAtlasBinding(SECOND_INDEX8.key)).not.toBeNull();
+		expect(atlas.getDiagnostics().failedCompactionCount).toBe(1);
 	});
 
 	it("rolls back all new resources when a multi-page publication fails", async () => {
@@ -317,6 +367,11 @@ describe("ResidentTextureAtlas", () => {
 		expect(atlas.getAtlasBinding(DIRECT_COLOR.key)).toBeNull();
 		expect(atlas.getAtlasBinding(SECOND_DIRECT.key)).toBeNull();
 		expect(resources.released).toEqual(["texture-2d-resource:0"]);
+		expect(atlas.getDiagnostics()).toMatchObject({
+			failedTransactionCount: 1,
+			releasedPageCount: 1,
+			uploadedPageCount: 1,
+		});
 	});
 
 	it("rejects a stale layout result without publishing its withdrawn requirement", async () => {
@@ -342,6 +397,7 @@ describe("ResidentTextureAtlas", () => {
 		await expect(handle.completion).resolves.toBe("withdrawn");
 		expect(resources.uploads).toEqual([]);
 		expect(atlas.getAtlasBinding(DIRECT_COLOR.key)).toBeNull();
+		expect(atlas.getDiagnostics().staleTransactionCount).toBe(1);
 	});
 });
 

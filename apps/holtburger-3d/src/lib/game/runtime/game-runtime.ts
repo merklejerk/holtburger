@@ -164,6 +164,9 @@ export interface BuildingRuntimeDiagnostics {
 	readonly geometryResourceCount: number;
 	readonly staticObjectOwnerCount: number;
 	readonly staticObjectNodeCount: number;
+	/** Synchronous texture-fact collection before building realization dispatch. */
+	readonly textureFactCollectionDurationMs: number;
+	readonly textureFactCollectionCount: number;
 	readonly texture: ReturnType<
 		TextureManager<ResourceOwnerId>["getDiagnostics"]
 	>;
@@ -206,6 +209,8 @@ export class GameRuntime {
 		OwnerId,
 		BuildingLayerRuntimeDiagnostics
 	>();
+	#textureFactCollectionDurationMs = 0;
+	#textureFactCollectionCount = 0;
 	/** Active-region owner of the one device-backed building-detail texture. */
 	#activeRegionDetailOwner: ActiveRegionResourceOwnerId | null = null;
 	/** Read-only regional detail selection consumed by renderer-owned object programs. */
@@ -485,6 +490,8 @@ export class GameRuntime {
 			),
 			staticObjectNodeCount: staticObjects.nodeCount,
 			staticObjectOwnerCount: staticObjects.ownerCount,
+			textureFactCollectionDurationMs: this.#textureFactCollectionDurationMs,
+			textureFactCollectionCount: this.#textureFactCollectionCount,
 			texture: this.#textures.getDiagnostics(),
 			textureAtlasPages: this.#textures.getAtlasPageDiagnostics(),
 		};
@@ -740,9 +747,13 @@ export class GameRuntime {
 				"Building realization requires a resolved source commit.",
 			);
 		}
+		const factCollectionStartedAt = performance.now();
 		const textureRequirements = collectBuildingTextureDependencies(
 			artifact.commit.source,
 		).map(({ fact }) => fact);
+		this.#textureFactCollectionDurationMs +=
+			performance.now() - factCollectionStartedAt;
+		this.#textureFactCollectionCount += 1;
 		void this.#staticLayerRealizer
 			.realize({
 				owner: ownerId,

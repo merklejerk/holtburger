@@ -3,6 +3,7 @@
 	import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
 	import type { TextureAtlasPageDiagnostics } from "../lib/game/textures/texture-manager";
 	import type { TexturePageId } from "../lib/game/textures/texture-manager";
+	import type { ClosedWorkerPoolDiagnostics } from "../lib/game/workers/closed-worker";
 	import ExplorerTexturePageModal from "./ExplorerTexturePageModal.svelte";
 
 	type PageSort = "efficiency" | "entries" | "memory" | "page-id";
@@ -41,6 +42,20 @@
 			.sort((left, right) => comparePages(left, right, sort));
 	});
 	const sortDescription = $derived(describeSort(sort));
+
+	// Page IDs include an immutable generation. Close a stale readback rather than presenting an
+	// old snapshot as though it were still an inspectable live resident page.
+	$effect(() => {
+		const currentInspection = inspection;
+		if (currentInspection === null) return;
+		const stillActive = (diagnostics?.textureAtlasPages ?? []).some(
+			(page) => page.pageId === currentInspection.page.pageId,
+		);
+		if (stillActive) return;
+		inspectionError = `Texture page ${currentInspection.page.pageId} was replaced or released.`;
+		inspection = null;
+	});
+
 	function comparePages(
 		left: TextureAtlasPageDiagnostics,
 		right: TextureAtlasPageDiagnostics,
@@ -73,6 +88,15 @@
 
 	function formatPercent(ratio: number): string {
 		return `${(ratio * 100).toFixed(1)}%`;
+	}
+
+	function formatDuration(milliseconds: number): string {
+		return `${milliseconds.toFixed(1)} ms`;
+	}
+
+	function formatWorker(worker: ClosedWorkerPoolDiagnostics | null): string {
+		if (worker === null) return "Unavailable";
+		return `${worker.completedJobCount} jobs · ${formatDuration(worker.totalExecutionDurationMs)} work · ${formatDuration(worker.totalQueueDelayMs)} queued`;
 	}
 
 	function describeSort(pageSort: PageSort): string {
@@ -124,6 +148,84 @@
 
 		<div class="ac-param-panel explorer-texture-totals">
 			<div class="ac-param-row">
+				<span class="ac-param-key">Page memory</span>
+				<code
+					>{formatBytes(diagnostics.texture.activeAtlasPageBytes)} active · {formatBytes(
+						diagnostics.texture.peakAtlasPageBytes,
+					)} peak</code
+				>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Avoided preparations</span>
+				<code>{diagnostics.texture.avoidedAtlasPreparations}</code>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Hole reuses</span>
+				<code>{diagnostics.texture.reusedAtlasInsertions}</code>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Compactions</span>
+				<code
+					>{diagnostics.texture.acceptedAtlasCompactions}/{diagnostics.texture
+						.attemptedAtlasCompactions}</code
+				>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Compaction fallbacks</span>
+				<code>{diagnostics.texture.failedAtlasCompactions}</code>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Page traffic</span>
+				<code
+					>{diagnostics.texture.uploadedAtlasPages} uploaded · {diagnostics
+						.texture.releasedAtlasPages} released</code
+				>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Page traffic bytes</span>
+				<code
+					>{formatBytes(diagnostics.texture.uploadedAtlasPageBytes)} uploaded · {formatBytes(
+						diagnostics.texture.releasedAtlasPageBytes,
+					)} released</code
+				>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Worker source copies</span>
+				<code>{formatBytes(diagnostics.texture.copiedAtlasSourceBytes)}</code>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Publication work</span>
+				<code
+					>{formatDuration(diagnostics.texture.atlasPublicationDurationMs)} total
+					· {formatDuration(
+						diagnostics.texture.longestAtlasPublicationDurationMs,
+					)} longest</code
+				>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Discarded / failed plans</span>
+				<code
+					>{diagnostics.texture.staleAtlasTransactions} stale · {diagnostics
+						.texture.failedAtlasTransactions} failed</code
+				>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Layout worker</span>
+				<code>{formatWorker(diagnostics.texture.atlasLayoutWorker)}</code>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Page-build workers</span>
+				<code>{formatWorker(diagnostics.texture.atlasPageBuildWorker)}</code>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Requirement collection</span>
+				<code
+					>{diagnostics.textureFactCollectionCount} runs · {formatDuration(
+						diagnostics.textureFactCollectionDurationMs,
+					)}</code
+				>
+			</div>
+			<div class="ac-param-row">
 				<span class="ac-param-key">Resident sources</span>
 				<code>{diagnostics.texture.residentSourceCount}</code>
 			</div>
@@ -172,6 +274,10 @@
 							<span>{page.width} × {page.height}</span>
 							<span>{page.entryCount} resident</span>
 							<span>{formatPercent(page.occupiedPixelRatio)} occupied</span>
+							<span>{formatPercent(page.allocatedPixelRatio)} allocated</span>
+							<span
+								>{formatPercent(page.largestFreePixelRatio)} largest hole</span
+							>
 							<span>{formatBytes(page.byteLength)}</span>
 						</div>
 						<button
@@ -186,11 +292,11 @@
 					</article>
 				{/each}
 			</div>
-			{#if inspectionError}
-				<p class="explorer-texture-readback-error" role="alert">
-					{inspectionError}
-				</p>
-			{/if}
+		{/if}
+		{#if inspectionError}
+			<p class="explorer-texture-readback-error" role="alert">
+				{inspectionError}
+			</p>
 		{/if}
 	{/if}
 </div>

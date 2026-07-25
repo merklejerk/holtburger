@@ -594,12 +594,12 @@ selected render surfaces, and 31 palettes. The largest canonical entries are:
 | ------------------- | -------------: | ---------------------: | ----------------- |
 | `ObjectDirectColor` |      512 x 512 | 520 x 520 (4px gutter) | fits 2048 x 2048  |
 | `ObjectIndex16`     |      256 x 256 |              256 x 256 | fits 2048 x 2048  |
-| `ObjectPalette`     |       2048 x 1 |               2048 x 1 | fits 2048 x 2048  |
+| `ObjectPalette`     |   2048 entries |                46 x 46 | fits 2048 x 2048  |
 
 This passes the fixed-page hard gate for the complete currently selected building closure. The
 direct-color lower bound is six 2048 x 2048 pages by total padded area, not an oversized-source
-exception. The existing `ObjectPalette` contract intentionally uses 2048-wide rows; it is highly
-sparse, but it does fit and remains purpose-isolated.
+exception. The `ObjectPalette` contract stores the complete 2,048-entry authored palette in the
+smallest square payload (46 x 46); its unused texels are transparent and it remains purpose-isolated.
 
 The fresh `0xda55ffff`, building-radius-1 harness snapshot requested nine landblocks; six had an
 installed building artifact. It reached the following retained state before the deliberate
@@ -821,6 +821,8 @@ Status: Complete (2026-07-25).
   retains the complete authored palette; index8 reads remain within the first 256 entries, while
   index16 receives the same complete source. This removes an unnecessary decoder-policy dimension
   and makes `TexturePurpose.ObjectPalette` a complete physical bucket as the target model requires.
+  The app-local payload is square rather than row-shaped, matching legacy two-dimensional lookup
+  addressing without making palette cardinality depend on atlas-page width.
 - `renderSurfaceId` pins the first available RenderSurface selected during building-source assembly,
   but the host's omitted-ID path performs the same ordered first-available selection. Object
   preparation now uses that canonical host policy directly; the resolved ID remains source evidence,

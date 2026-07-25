@@ -69,22 +69,43 @@ pub(crate) fn prepare_object_surface(
     })
 }
 
-/// Normalize one authored palette as a one-row RGBA lookup texture.
+/// Normalize one authored palette as a square RGBA lookup texture.
 ///
 /// All indexed roles share the full authored palette; index8 sampling naturally remains below 256.
+/// Padding preserves a regular two-dimensional lookup without changing authored entries.
 pub(crate) fn prepare_object_palette(palette: &Palette) -> Result<PreparedObjectTexture> {
     let color_count = palette.colors_argb.len().max(1);
-    let mut pixels = Vec::with_capacity(color_count * 4);
+    let (width, height) = square_dimensions_for_color_count(color_count)?;
+    let texture_color_count = usize::try_from(width)
+        .expect("palette width fits usize")
+        .checked_mul(usize::try_from(height).expect("palette height fits usize"))
+        .context("palette square pixel count fits usize")?;
+    let pixel_byte_count = texture_color_count
+        .checked_mul(4)
+        .context("palette rgba byte count fits usize")?;
+    let mut pixels = Vec::with_capacity(pixel_byte_count);
     for color in palette.colors_argb.iter().copied().take(color_count) {
         pixels.extend_from_slice(&argb_to_rgba(color));
     }
-    pixels.resize(color_count * 4, 0);
+    pixels.resize(pixel_byte_count, 0);
     Ok(PreparedObjectTexture {
         format: PreparedObjectTextureFormat::Rgba8,
-        width: u32::try_from(color_count).context("palette color count fits u32")?,
-        height: 1,
+        width,
+        height,
         pixels,
     })
+}
+
+/// Return the smallest square whose texels can hold every authored palette entry.
+fn square_dimensions_for_color_count(color_count: usize) -> Result<(u32, u32)> {
+    let color_count = u32::try_from(color_count).context("palette color count fits u32")?;
+    let mut side = 1_u32;
+    while side.saturating_mul(side) < color_count {
+        side = side
+            .checked_add(1)
+            .context("palette square side fits u32")?;
+    }
+    Ok((side, side))
 }
 
 fn decode_direct_color(surface: &RenderSurface) -> Result<Vec<u8>> {
@@ -437,7 +458,7 @@ mod tests {
     }
 
     #[test]
-    fn produces_a_one_row_palette_in_rgba_order() {
+    fn produces_a_square_palette_in_rgba_order() {
         let prepared = prepare_object_palette(&Palette {
             id: 0x0400_0001,
             colors_argb: vec![0x7f11_2233],
@@ -448,13 +469,14 @@ mod tests {
     }
 
     #[test]
-    fn preserves_the_complete_authored_palette_for_every_index_format() {
+    fn preserves_the_complete_authored_palette_with_square_padding() {
         let prepared = prepare_object_palette(&Palette {
             id: 0x0400_0001,
-            colors_argb: vec![0xff00_0000; 300],
+            colors_argb: vec![0xff00_0000; 2_048],
         })
         .expect("palette should prepare");
-        assert_eq!((prepared.width, prepared.height), (300, 1));
-        assert_eq!(prepared.pixels.len(), 300 * 4);
+        assert_eq!((prepared.width, prepared.height), (46, 46));
+        assert_eq!(prepared.pixels.len(), 46 * 46 * 4);
+        assert_eq!(&prepared.pixels[(2_048 * 4)..(2_049 * 4)], &[0, 0, 0, 0]);
     }
 }

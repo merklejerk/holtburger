@@ -753,10 +753,12 @@ export class WebGL2Renderer implements Renderer {
 					paletteResource.width,
 					paletteResource.height,
 				);
-				gl.uniform1f(
-					program.uniforms.paletteWidth,
+				gl.uniform2f(
+					program.uniforms.paletteSize,
 					paletteBinding.placement.bounds.max.x -
 						paletteBinding.placement.bounds.min.x,
+					paletteBinding.placement.bounds.max.y -
+						paletteBinding.placement.bounds.min.y,
 				);
 				gl.uniform1i(program.uniforms.palette, 1);
 			}

@@ -558,7 +558,7 @@ export class WebGL2Renderer implements Renderer {
 			mat4ToFloat32Array(view.view, this.#matrixScratch),
 		);
 		gl.uniform2f(
-			this.#objectProgram.uniforms.cameraHorizontalPosition,
+			this.#objectProgram.fogUniforms.cameraHorizontalPosition,
 			view.cameraPosition.x,
 			view.cameraPosition.z,
 		);
@@ -627,11 +627,6 @@ export class WebGL2Renderer implements Renderer {
 			this.#blendedObjectProgram.uniforms.view,
 			false,
 			mat4ToFloat32Array(view.view, this.#matrixScratch),
-		);
-		gl.uniform2f(
-			this.#blendedObjectProgram.uniforms.cameraHorizontalPosition,
-			view.cameraPosition.x,
-			view.cameraPosition.z,
 		);
 		for (const object of [...sortedTransparent, ...additive]) {
 			this.#configureObjectBlend(object.drawUnit);

@@ -1618,6 +1618,11 @@ Verification:
   near and far ordering, equal-distance IDs, the threshold crossing, and absence of fog symbols
   from the blended shader. DA55's browser harness still passes (43 ranges; 4,978 triangles); its
   source population has no blended ranges, so Phase 9 owns browser-visible synthetic coverage.
+- Post-completion correction: a desktop Explorer run proved that the unfogged vertex variant could
+  optimize `uCameraHorizontalPosition` away while the shared program contract still required it at
+  link time. Fogged and unfogged object programs now have distinct vertex-uniform contracts; the
+  unfogged variant neither declares nor binds the camera-distance uniform. Focused policy tests,
+  type/lint checks, and the browser harness pass after the correction.
 
 ### 2026-07-25 — Phase 9 complete
 

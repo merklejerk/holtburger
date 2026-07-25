@@ -129,7 +129,41 @@ describe("GameRuntime view and interest control", () => {
 		await runtime.destroy();
 	});
 
-	it("drops unavailable content completed for a superseded interest revision", async () => {
+	it("keeps an in-flight layer current across an unchanged interest refresh", async () => {
+		const pipeline = new DeferredCommitPipeline();
+		const device: GameRuntimeRenderDevice = {
+			buildRenderer: async () => ({ async destroy() {}, drawFrame() {} }),
+			resources: {} as RendererResourceManager,
+		};
+		const runtime = await GameRuntime.build(
+			device,
+			pipeline,
+			{} as TexturePixelSource,
+		);
+		const events: SceneAvailabilityEvent[] = [];
+		const unsubscribe = runtime.subscribeSceneAvailability((event) =>
+			events.push(event),
+		);
+
+		const first = runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
+		runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
+		pipeline.resolveNext([]);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(events).toEqual([
+			{
+				kind: "scene-content-failed",
+				message: "No terrain content is available for 0x1010ffff.",
+				residency: { envCellId: null, landblockId: "0x1010ffff" },
+				revision: first.revision,
+			},
+		]);
+
+		unsubscribe();
+		await runtime.destroy();
+	});
+
+	it("rejects an old completion after withdrawal and same-layer re-request", async () => {
 		const pipeline = new DeferredCommitPipeline();
 		const device: GameRuntimeRenderDevice = {
 			buildRenderer: async () => ({ async destroy() {}, drawFrame() {} }),
@@ -146,13 +180,72 @@ describe("GameRuntime view and interest control", () => {
 		);
 
 		runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
-		runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
+		runtime.clearSceneInterest();
+		const current = runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
 		pipeline.resolveNext([]);
 		await new Promise((resolve) => setTimeout(resolve, 0));
-
 		expect(events).toEqual([]);
+		pipeline.resolveNext([]);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(events).toHaveLength(1);
+		expect(events[0]?.revision).toBe(current.revision);
 
 		unsubscribe();
+		await runtime.destroy();
+	});
+
+	it("rejects a queued completion after withdrawal and same-layer re-request", async () => {
+		const pipeline = new DeferredCommitPipeline();
+		const device: GameRuntimeRenderDevice = {
+			buildRenderer: async () => ({ async destroy() {}, drawFrame() {} }),
+			resources: {} as RendererResourceManager,
+		};
+		const runtime = await GameRuntime.build(
+			device,
+			pipeline,
+			{} as TexturePixelSource,
+		);
+
+		runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
+		pipeline.resolveNext([staleTerrainArtifact("0x1010ffff")]);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		runtime.clearSceneInterest();
+		runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
+
+		expect(() => runtime.tick()).not.toThrow();
+
+		await runtime.destroy();
+	});
+
+	it("defers a promoted building resident without creating dynamic resources", async () => {
+		const pipeline = new DeferredCommitPipeline();
+		const device: GameRuntimeRenderDevice = {
+			buildRenderer: async () => ({ async destroy() {}, drawFrame() {} }),
+			resources: {} as RendererResourceManager,
+		};
+		const runtime = await GameRuntime.build(
+			device,
+			pipeline,
+			{} as TexturePixelSource,
+		);
+
+		runtime.updateSceneInterest(buildingSceneInterest("0xda55ffff"));
+		pipeline.resolveNext([]);
+		pipeline.resolveNext([promotedBuildingArtifact("0xda55ffff")]);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		runtime.tick();
+
+		expect(runtime.getDeferredStaticDynamicDiagnostics()).toEqual([
+			{
+				defaultAnimationId: "0x09000001",
+				landblockId: "0xda55ffff",
+				layer: LandblockLayerKind.Buildings,
+				reason: "setup-default-animation",
+				residentId: "resident:promoted",
+				setupSourceId: "0x02000001",
+			},
+		]);
+
 		await runtime.destroy();
 	});
 });
@@ -162,6 +255,19 @@ function sceneInterest(anchorLandblockId: string) {
 		anchorLandblockId,
 		lod: {
 			buildingRadius: null,
+			envCellRadius: null,
+			explicitObjectRadius: null,
+			generatedObjectRadius: null,
+			terrainRadius: 0,
+		},
+	} as const;
+}
+
+function buildingSceneInterest(anchorLandblockId: string) {
+	return {
+		anchorLandblockId,
+		lod: {
+			buildingRadius: 0,
 			envCellRadius: null,
 			explicitObjectRadius: null,
 			generatedObjectRadius: null,
@@ -185,6 +291,26 @@ function staleTerrainArtifact(landblockId: string): CommitBundle {
 		kind: CommitBundleSourceKind.LandblockLayer,
 		landblockId,
 		layer: LandblockLayerKind.Terrain,
+	} as CommitBundle;
+}
+
+/** Minimal promoted record: any accidental dynamic installation reaches the throwing resource port. */
+function promotedBuildingArtifact(landblockId: string): CommitBundle {
+	return {
+		commit: { staticObjects: null },
+		dynamicEntities: [
+			{
+				id: "resident:promoted",
+				placement: { envCellId: null, landblockId },
+				presentation: {
+					effects: { animationId: "0x09000001" },
+					sourceAssetId: "0x02000001",
+				},
+			} as CommitBundle["dynamicEntities"][number],
+		],
+		kind: CommitBundleSourceKind.LandblockLayer,
+		landblockId,
+		layer: LandblockLayerKind.Buildings,
 	} as CommitBundle;
 }
 

@@ -17,6 +17,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 anyhow.workspace = true
 holtburger-content.workspace = true
+holtburger-common.workspace = true
 holtburger-core.workspace = true
 holtburger-dat.workspace = true
 serde.workspace = true

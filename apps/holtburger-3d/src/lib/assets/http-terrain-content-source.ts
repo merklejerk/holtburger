@@ -11,11 +11,14 @@ import {
 } from "./active-region-source";
 import { decodeTexturePixels } from "./decode-texture-pixels";
 import type { LandblockTerrainSource } from "./landblock-terrain-source";
+import type { LandblockBuildingSource } from "./landblock-building-source";
+import { decodeBuildingSource } from "./decode-building-source";
 import type { TexturePixelSource } from "./texture-pixel-source";
+import type { ResolvedObjectLayerSource } from "../game/resolution/landblock-layer";
 
 /** Browser-compatible adapter for the same binary terrain content contracts used by Tauri. */
 export class HttpTerrainContentSource
-	implements LandblockTerrainSource, TexturePixelSource
+	implements LandblockTerrainSource, LandblockBuildingSource, TexturePixelSource
 {
 	readonly #baseUrl: URL;
 	readonly #activeRegion: ActiveRegionSource;
@@ -46,6 +49,15 @@ export class HttpTerrainContentSource
 	): Promise<ResolvedTerrainLayerSource | null> {
 		const bytes = await this.#postBinary("terrain-source", { landblockId });
 		return decodeTerrainSource(bytes, landblockId, this.#activeRegion);
+	}
+
+	async loadBuildingSource(
+		landblockId: LandblockId,
+	): Promise<ResolvedObjectLayerSource | null> {
+		return decodeBuildingSource(
+			await this.#postBinary("building-source", { landblockId }),
+			landblockId,
+		);
 	}
 
 	async loadTexturePixels(

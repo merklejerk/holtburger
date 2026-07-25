@@ -80,7 +80,6 @@ export function planObjectMaterial(
 			kind: "prepared-object-texture",
 			purpose,
 			sourceAssetId: surfaceTextureAssetId(material.colorTextureId),
-			renderSurfaceId: material.renderSurfaceId,
 		},
 	];
 	if (material.paletteTextureId !== null) {
@@ -88,8 +87,6 @@ export function planObjectMaterial(
 			kind: "prepared-object-palette",
 			purpose: TexturePurpose.ObjectPalette,
 			sourceAssetId: paletteAssetId(material.paletteTextureId),
-			paletteDomain:
-				material.textureEncoding === "index8" ? "index8" : "index16",
 		});
 	}
 	return {

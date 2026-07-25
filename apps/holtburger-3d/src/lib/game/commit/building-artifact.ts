@@ -4,13 +4,15 @@ import type { StaticObjectLayerArtifact } from "./artifacts";
 import type { BuildingGeometryResult } from "./building-geometry-worker";
 import type { BuildingTexturePackResult } from "./building-texture-worker";
 import type { StaticInstallResourceNamespace } from "../systems/static-resources";
-import type { AssetTextureKey } from "../textures/types";
+import type { AssetTextureFact, AssetTextureKey } from "../textures/types";
 
 /** Assemble a complete publishable building artifact only after both closed worker jobs finish. */
 export function assembleBuildingArtifact(options: {
 	readonly source: ResolvedObjectLayerSource;
 	readonly resourceNamespace: StaticInstallResourceNamespace;
 	readonly geometry: BuildingGeometryResult | null;
+	/** Logical requirements staged beside legacy page artifacts during the resident-atlas transition. */
+	readonly textureRequirements: readonly AssetTextureFact[];
 	readonly textures: BuildingTexturePackResult;
 }): StaticObjectLayerArtifact | null {
 	const geometry = options.geometry;
@@ -56,6 +58,7 @@ export function assembleBuildingArtifact(options: {
 			},
 		],
 		resourceNamespace: options.resourceNamespace,
+		textureRequirements: options.textureRequirements,
 		texturePages: options.textures.pages,
 	};
 }

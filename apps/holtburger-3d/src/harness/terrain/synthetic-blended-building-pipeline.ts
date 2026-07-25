@@ -86,6 +86,7 @@ function buildingBundle(landblockId: LandblockId): CommitBundle {
 			},
 		],
 		resourceNamespace: "static-install:synthetic-blended" as const,
+		textureRequirements: [],
 		texturePages: [],
 	};
 	return {

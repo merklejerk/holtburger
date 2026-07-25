@@ -25,7 +25,7 @@ export interface BuildingGeometryJob {
 }
 
 /** Immutable material range emitted by the geometry worker. */
-export interface BakedBuildingRange {
+interface BakedBuildingRange {
 	readonly indexStart: number;
 	readonly indexCount: number;
 	readonly material: StaticObjectMaterialBinding;

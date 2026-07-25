@@ -32,13 +32,11 @@ describe("object material planning", () => {
 				kind: "prepared-object-texture",
 				purpose: "object-index-16",
 				sourceAssetId: "surface-texture/0x05000001",
-				renderSurfaceId: "0x06000001",
 			},
 			{
 				kind: "prepared-object-palette",
 				purpose: "object-palette",
 				sourceAssetId: "palette/0x04000001",
-				paletteDomain: "index16",
 			},
 		]);
 	});

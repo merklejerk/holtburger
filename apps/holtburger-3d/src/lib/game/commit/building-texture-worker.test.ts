@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { packBuildingTextures } from "./building-texture-worker";
 import {
 	STATIC_OBJECT_TEXTURE_GUTTER_PIXELS,
-	packBuildingTextures,
-} from "./building-texture-worker";
-import { TexturePurpose, createAssetTextureKey } from "../textures/types";
+	TexturePurpose,
+	createAssetTextureKey,
+} from "../textures/types";
 
 describe("packBuildingTextures", () => {
 	it("partitions pages by purpose and materializes a repeat-safe direct-color gutter", () => {

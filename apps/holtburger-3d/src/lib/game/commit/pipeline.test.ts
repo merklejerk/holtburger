@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import type { LandblockBuildingSource } from "../../assets/landblock-building-source";
 import type { LandblockTerrainSource } from "../../assets/landblock-terrain-source";
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
-import { TexturePixelFormat } from "../textures/types";
+import {
+	createAssetTextureKey,
+	TexturePixelFormat,
+	TexturePurpose,
+} from "../textures/types";
 import { Mat4, Vec3 } from "../math/types";
 import type { ResolvedObjectLayerSource } from "../resolution/landblock-layer";
 import type { ResolvedTerrainLayerSource } from "../resolution/landblock-layer";
@@ -104,6 +108,17 @@ describe("StandardCommitPipeline", () => {
 		expect(artifact?.objects).toHaveLength(1);
 		expect(artifact?.geometry).toHaveLength(1);
 		expect(artifact?.texturePages).toHaveLength(1);
+		expect(artifact?.textureRequirements).toEqual([
+			{
+				kind: "asset",
+				key: createAssetTextureKey(
+					TexturePurpose.ObjectDirectColor,
+					"0x05000001",
+				),
+				purpose: TexturePurpose.ObjectDirectColor,
+				sourceAssetId: "0x05000001",
+			},
+		]);
 		await pipeline.destroy();
 	});
 

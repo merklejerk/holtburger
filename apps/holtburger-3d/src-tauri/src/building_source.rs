@@ -10,7 +10,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 pub(crate) const BUILDING_SOURCE_BINARY_MAGIC: &[u8; 4] = b"HBBL";
-const BUILDING_SOURCE_BINARY_VERSION: u32 = 3;
+pub(crate) const BUILDING_SOURCE_BINARY_VERSION: u32 = 4;
 const BUILDING_SOURCE_BINARY_HEADER_LEN: usize = 16;
 
 /// Closed Level 1 source data accumulated before it crosses the app boundary.
@@ -202,6 +202,10 @@ impl BuildingSourceClosure {
             self.buffers
                 .material_side_kinds
                 .push(material_side_kind(triangle.side_kind));
+            self.buffers
+                .material_side_types
+                .push(material_side_type(triangle.sides_type)?);
+            self.buffers.material_stippling.push(triangle.stippling);
         }
         let id = format!("geometry:gfx-obj/{:08x}", gfx_obj.id);
         self.geometries.push(json!({
@@ -219,6 +223,10 @@ impl BuildingSourceClosure {
             "materialWrapModeCount": self.buffers.material_wrap_modes.len() - material_slot_offset,
             "materialSideKindOffset": material_slot_offset,
             "materialSideKindCount": self.buffers.material_side_kinds.len() - material_slot_offset,
+            "materialSideTypeOffset": material_slot_offset,
+            "materialSideTypeCount": self.buffers.material_side_types.len() - material_slot_offset,
+            "materialStipplingOffset": material_slot_offset,
+            "materialStipplingCount": self.buffers.material_stippling.len() - material_slot_offset,
             "bounds": geometry.bounds.as_ref().map(prepared_aabb_json),
         }));
         self.geometry_ids.insert(gfx_obj.id, id.clone());
@@ -295,6 +303,10 @@ pub(crate) struct BuildingGeometryBuffers {
     pub(crate) material_wrap_modes: Vec<u8>,
     /// Source polygon side identity for each prepared triangle material slot.
     pub(crate) material_side_kinds: Vec<u8>,
+    /// Authored polygon culling mode for each prepared triangle material slot.
+    pub(crate) material_side_types: Vec<u8>,
+    /// Raw authored stippling flags for each prepared triangle material slot.
+    pub(crate) material_stippling: Vec<u8>,
 }
 
 impl BuildingGeometryBuffers {
@@ -314,6 +326,8 @@ impl BuildingGeometryBuffers {
             ("materialSlots", "u16", self.material_slots.len(), 2),
             ("materialWrapModes", "u8", self.material_wrap_modes.len(), 1),
             ("materialSideKinds", "u8", self.material_side_kinds.len(), 1),
+            ("materialSideTypes", "u8", self.material_side_types.len(), 1),
+            ("materialStippling", "u8", self.material_stippling.len(), 1),
         ] {
             byte_offset = align_binary_section_offset(byte_offset, alignment);
             let byte_length = element_count * scalar_size(scalar_type);
@@ -347,6 +361,8 @@ impl BuildingGeometryBuffers {
                 "materialSlots" => write_u16_slice(target, &self.material_slots),
                 "materialWrapModes" => target.copy_from_slice(&self.material_wrap_modes),
                 "materialSideKinds" => target.copy_from_slice(&self.material_side_kinds),
+                "materialSideTypes" => target.copy_from_slice(&self.material_side_types),
+                "materialStippling" => target.copy_from_slice(&self.material_stippling),
                 _ => unreachable!("building sections are fixed"),
             }
         }
@@ -368,6 +384,13 @@ fn material_side_kind(side: PreparedPolygonRenderSideKind) -> u8 {
         PreparedPolygonRenderSideKind::Positive => 0,
         PreparedPolygonRenderSideKind::PositiveReversed => 1,
         PreparedPolygonRenderSideKind::Negative => 2,
+    }
+}
+
+fn material_side_type(sides_type: i32) -> Result<u8> {
+    match sides_type {
+        0..=3 => Ok(sides_type as u8),
+        _ => anyhow::bail!("polygon has unsupported culling mode {sides_type}"),
     }
 }
 

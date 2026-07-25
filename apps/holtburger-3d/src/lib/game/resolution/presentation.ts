@@ -28,6 +28,10 @@ export interface ResolvedGeometry {
 	readonly materialWrapModes: Uint8Array;
 	/** One source polygon-side identity for every prepared triangle material slot. */
 	readonly materialSideKinds: Uint8Array;
+	/** One authored polygon culling mode for every prepared triangle material slot. */
+	readonly materialSideTypes: Uint8Array;
+	/** One raw authored stippling bitfield for every prepared triangle material slot. */
+	readonly materialStippling: Uint8Array;
 	readonly bounds: AABB3 | null;
 }
 

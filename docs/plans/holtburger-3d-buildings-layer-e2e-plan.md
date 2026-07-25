@@ -1413,14 +1413,21 @@ Concessions and debt:
   conversion and source-level fallback; Phase 3/5 still own explicit atlas-edge mip isolation and
   maximum-LOD policy.
 
-### 2026-07-25 — Phase 2 source-contract correction
+### 2026-07-25 — Phase 2 source-contract corrections
 
 - Phase 3 review found that `HBBL` v2 preserved the side-derived sampler fact but not the source
   polygon side itself. That would force the later worker to invent one-/two-sided binding facts.
 - `PreparedPolygonSetRenderTriangle` now retains its expanded `Positive`, `PositiveReversed`, or
-  `Negative` side as a shared geometry semantic, and `HBBL` v3 carries it in an aligned
-  per-triangle `materialSideKinds` section. The strict frontend decoder validates its exact
-  cardinality and value domain.
+  `Negative` side as a shared geometry semantic. The first correction advanced `HBBL` to v3 with
+  an aligned per-triangle `materialSideKinds` section.
+- The Phase 3 contract review found the tag alone was still insufficient: retail `SetSurface`
+  selects stippling from the rendered positive/negative side, while culling follows the authored
+  `sides_type`. `HBBL` v4 therefore carries aligned raw `materialSideTypes` and
+  `materialStippling` sections too. The decoder rejects cardinality or domain mismatches.
+- Static material bindings now retain the exact authored cull mode, expanded render side, and
+  side-selected stippling fact instead of an ambiguous pair of positive/negative material IDs.
+  This is the smaller lossless representation needed by renderer compilation; the selected source
+  material already identifies the surface used by the range.
 - This correction keeps polygon ownership lossless through worker dispatch; it is required before
   geometry baking starts and does not require a product decision.
 

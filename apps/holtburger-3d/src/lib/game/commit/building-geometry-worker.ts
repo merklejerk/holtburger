@@ -5,7 +5,12 @@ import type {
 	ResolvedGeometry,
 	ResolvedObjectPart,
 } from "../resolution/presentation";
-import { multiplyMat4, transformPoint3 } from "../math/matrices";
+import {
+	createScaleMat4,
+	multiplyMat4,
+	transformNormal3,
+	transformPoint3,
+} from "../math/matrices";
 import { AABB3, Mat4, Vec3 } from "../math/types";
 import type { ObjectGeometryData } from "../renderer/geometry";
 import type { StaticObjectMaterialBinding } from "./artifacts";
@@ -58,8 +63,10 @@ interface TriangleContribution {
 	readonly binding: StaticObjectMaterialBinding;
 	readonly bindingId: string;
 	readonly ordering: ObjectMaterialOrdering;
-	readonly positions: readonly Vec3[];
-	readonly normals: readonly Vec3[];
+	/** Interleaved XYZ values for the triangle's three positions. */
+	readonly positions: readonly number[];
+	/** Interleaved XYZ values for the triangle's three normals. */
+	readonly normals: readonly number[];
 	readonly textureCoordinates: readonly number[];
 	readonly transparentStableId: string | null;
 }
@@ -85,6 +92,7 @@ export function bakeBuildingGeometry(
 	const sourceRangeIds = new Set<string>();
 	const sourceMaterialSlotIds = new Set<string>();
 	for (const resident of job.source.staticResidents) {
+		const residentScale = createScaleMat4(resident.scale);
 		const partTransforms = createPartTransforms(resident);
 		for (const part of resident.presentation.parts) {
 			const partTransform = partTransforms.get(part.partIndex);
@@ -94,12 +102,10 @@ export function bakeBuildingGeometry(
 				);
 			}
 			const sourceToLandblock = multiplyMat4(
-				multiplyMat4(
-					resident.placement.localTransform,
-					scaleMat4(resident.scale),
-				),
-				partTransform,
+				resident.placement.localTransform,
+				residentScale,
 			);
+			multiplyMat4(sourceToLandblock, partTransform, sourceToLandblock);
 			for (
 				let triangle = 0;
 				triangle < part.geometry.materialSlotIndices.length;
@@ -157,18 +163,23 @@ export function bakeBuildingGeometry(
 		let centerPointCount = 0;
 		for (const triangle of group.triangles) {
 			for (let vertex = 0; vertex < 3; vertex += 1) {
-				const point = triangle.positions[vertex]!;
-				const normal = triangle.normals[vertex]!;
-				assertFinite(point, "baked position");
-				assertFinite(normal, "baked normal");
-				expandBounds(bounds, point);
-				center.x += point.x;
-				center.y += point.y;
-				center.z += point.z;
+				const positionOffset = vertex * 3;
+				const x = triangle.positions[positionOffset]!;
+				const y = triangle.positions[positionOffset + 1]!;
+				const z = triangle.positions[positionOffset + 2]!;
+				const normalX = triangle.normals[positionOffset]!;
+				const normalY = triangle.normals[positionOffset + 1]!;
+				const normalZ = triangle.normals[positionOffset + 2]!;
+				assertFiniteComponents(x, y, z, "baked position");
+				assertFiniteComponents(normalX, normalY, normalZ, "baked normal");
+				expandBounds(bounds, x, y, z);
+				center.x += x;
+				center.y += y;
+				center.z += z;
 				centerPointCount += 1;
 				const index = positions.length / 3;
-				positions.push(point.x, point.y, point.z);
-				normals.push(normal.x, normal.y, normal.z);
+				positions.push(x, y, z);
+				normals.push(normalX, normalY, normalZ);
 				textureCoordinates.push(
 					triangle.textureCoordinates[vertex * 2]!,
 					triangle.textureCoordinates[vertex * 2 + 1]!,
@@ -279,9 +290,11 @@ function createTriangleContribution(options: {
 		polygon.stippled,
 	].join("|");
 	const indexStart = options.triangle * 3;
-	const positions: Vec3[] = [];
-	const normals: Vec3[] = [];
+	const positions: number[] = [];
+	const normals: number[] = [];
 	const textureCoordinates: number[] = [];
+	const sourcePosition = Vec3.zero();
+	const sourceNormal = Vec3.zero();
 	for (let vertex = 0; vertex < 3; vertex += 1) {
 		const sourceIndex = options.geometry.indices[indexStart + vertex];
 		if (sourceIndex === undefined) {
@@ -291,18 +304,16 @@ function createTriangleContribution(options: {
 		}
 		const positionOffset = sourceIndex * 3;
 		const textureOffset = sourceIndex * 2;
-		const sourcePosition = new Vec3(
-			options.geometry.positions[positionOffset]!,
-			options.geometry.positions[positionOffset + 1]!,
-			options.geometry.positions[positionOffset + 2]!,
-		);
-		const sourceNormal = new Vec3(
-			options.geometry.normals[positionOffset]!,
-			options.geometry.normals[positionOffset + 1]!,
-			options.geometry.normals[positionOffset + 2]!,
-		);
-		positions.push(transformPoint3(options.sourceToLandblock, sourcePosition));
-		normals.push(transformNormal(options.sourceToLandblock, sourceNormal));
+		sourcePosition.x = options.geometry.positions[positionOffset]!;
+		sourcePosition.y = options.geometry.positions[positionOffset + 1]!;
+		sourcePosition.z = options.geometry.positions[positionOffset + 2]!;
+		sourceNormal.x = options.geometry.normals[positionOffset]!;
+		sourceNormal.y = options.geometry.normals[positionOffset + 1]!;
+		sourceNormal.z = options.geometry.normals[positionOffset + 2]!;
+		transformPoint3(options.sourceToLandblock, sourcePosition, sourcePosition);
+		transformNormal3(options.sourceToLandblock, sourceNormal, sourceNormal);
+		positions.push(sourcePosition.x, sourcePosition.y, sourcePosition.z);
+		normals.push(sourceNormal.x, sourceNormal.y, sourceNormal.z);
 		textureCoordinates.push(
 			options.geometry.textureCoordinates[textureOffset]!,
 			options.geometry.textureCoordinates[textureOffset + 1]!,
@@ -410,66 +421,6 @@ function renderSide(
 	}
 }
 
-function scaleMat4(scale: Vec3): Mat4 {
-	return new Mat4(
-		scale.x,
-		0,
-		0,
-		0,
-		0,
-		scale.y,
-		0,
-		0,
-		0,
-		0,
-		scale.z,
-		0,
-		0,
-		0,
-		0,
-		1,
-	);
-}
-
-function transformNormal(matrix: Mat4, normal: Vec3): Vec3 {
-	const a = matrix.m11;
-	const b = matrix.m21;
-	const c = matrix.m31;
-	const d = matrix.m12;
-	const e = matrix.m22;
-	const f = matrix.m32;
-	const g = matrix.m13;
-	const h = matrix.m23;
-	const i = matrix.m33;
-	const determinant =
-		a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
-	if (!Number.isFinite(determinant) || determinant === 0) {
-		throw new Error("Cannot bake normals through a singular transform.");
-	}
-	const x =
-		((e * i - f * h) * normal.x +
-			(f * g - d * i) * normal.y +
-			(d * h - e * g) * normal.z) /
-		determinant;
-	const y =
-		((c * h - b * i) * normal.x +
-			(a * i - c * g) * normal.y +
-			(b * g - a * h) * normal.z) /
-		determinant;
-	const z =
-		((b * f - c * e) * normal.x +
-			(c * d - a * f) * normal.y +
-			(a * e - b * d) * normal.z) /
-		determinant;
-	const magnitude = Math.hypot(x, y, z);
-	if (!Number.isFinite(magnitude))
-		throw new Error("Cannot bake a non-finite normal.");
-	// Prepared DAT geometry can carry zero normals. Preserve that authored value rather than
-	// inventing a face normal here; the current object program does not consume lighting normals.
-	if (magnitude === 0) return Vec3.zero();
-	return new Vec3(x / magnitude, y / magnitude, z / magnitude);
-}
-
 function emptyBounds(): AABB3 {
 	return new AABB3(
 		new Vec3(
@@ -485,13 +436,13 @@ function emptyBounds(): AABB3 {
 	);
 }
 
-function expandBounds(bounds: AABB3, point: Vec3): void {
-	bounds.min.x = Math.min(bounds.min.x, point.x);
-	bounds.min.y = Math.min(bounds.min.y, point.y);
-	bounds.min.z = Math.min(bounds.min.z, point.z);
-	bounds.max.x = Math.max(bounds.max.x, point.x);
-	bounds.max.y = Math.max(bounds.max.y, point.y);
-	bounds.max.z = Math.max(bounds.max.z, point.z);
+function expandBounds(bounds: AABB3, x: number, y: number, z: number): void {
+	bounds.min.x = Math.min(bounds.min.x, x);
+	bounds.min.y = Math.min(bounds.min.y, y);
+	bounds.min.z = Math.min(bounds.min.z, z);
+	bounds.max.x = Math.max(bounds.max.x, x);
+	bounds.max.y = Math.max(bounds.max.y, y);
+	bounds.max.z = Math.max(bounds.max.z, z);
 }
 
 function assertBounds(bounds: AABB3, positions: readonly number[]): void {
@@ -527,12 +478,13 @@ function assertBounds(bounds: AABB3, positions: readonly number[]): void {
 	}
 }
 
-function assertFinite(vector: Vec3, label: string): void {
-	if (
-		!Number.isFinite(vector.x) ||
-		!Number.isFinite(vector.y) ||
-		!Number.isFinite(vector.z)
-	) {
+function assertFiniteComponents(
+	x: number,
+	y: number,
+	z: number,
+	label: string,
+): void {
+	if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
 		throw new Error(`Building ${label} is not finite.`);
 	}
 }

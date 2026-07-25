@@ -55,8 +55,8 @@ export function sortTransparentStaticRanges<T>(
 	return ranges
 		.map((range, index) => ({ index, range }))
 		.sort((left, right) => {
-		const leftDistance = distanceSquared(left.range.center, cameraPosition);
-		const rightDistance = distanceSquared(right.range.center, cameraPosition);
+		const leftDistance = left.range.center.distanceSquaredTo(cameraPosition);
+		const rightDistance = right.range.center.distanceSquaredTo(cameraPosition);
 		const leftNear = leftDistance <= STATIC_TRANSPARENT_SORT_DISTANCE_SQUARED;
 		const rightNear = rightDistance <= STATIC_TRANSPARENT_SORT_DISTANCE_SQUARED;
 		if (leftNear && rightNear && leftDistance !== rightDistance) {
@@ -75,11 +75,4 @@ export function transparentSortFacts(
 	drawUnit: StaticObjectDrawUnit,
 ): { readonly center: Vec3; readonly stableId: string } | null {
 	return drawUnit.ordering === "transparent" ? drawUnit.transparentSort : null;
-}
-
-function distanceSquared(left: Vec3, right: Vec3): number {
-	const x = left.x - right.x;
-	const y = left.y - right.y;
-	const z = left.z - right.z;
-	return x * x + y * y + z * z;
 }

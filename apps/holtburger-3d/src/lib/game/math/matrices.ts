@@ -1,7 +1,11 @@
 import { AABB3, Mat4, Quat, Vec3 } from "./types";
 
 /** Compose column-major transforms for column-vector multiplication. */
-export function multiplyMat4(left: Mat4, right: Mat4): Mat4 {
+export function multiplyMat4(
+	left: Mat4,
+	right: Mat4,
+	targetMatrix?: Mat4,
+): Mat4 {
 	const a11 = left.m11,
 		a12 = left.m12,
 		a13 = left.m13,
@@ -36,27 +40,24 @@ export function multiplyMat4(left: Mat4, right: Mat4): Mat4 {
 		b43 = right.m43,
 		b44 = right.m44;
 
-	return new Mat4(
-		a11 * b11 + a21 * b12 + a31 * b13 + a41 * b14,
-		a12 * b11 + a22 * b12 + a32 * b13 + a42 * b14,
-		a13 * b11 + a23 * b12 + a33 * b13 + a43 * b14,
-		a14 * b11 + a24 * b12 + a34 * b13 + a44 * b14,
-
-		a11 * b21 + a21 * b22 + a31 * b23 + a41 * b24,
-		a12 * b21 + a22 * b22 + a32 * b23 + a42 * b24,
-		a13 * b21 + a23 * b22 + a33 * b23 + a43 * b24,
-		a14 * b21 + a24 * b22 + a34 * b23 + a44 * b24,
-
-		a11 * b31 + a21 * b32 + a31 * b33 + a41 * b34,
-		a12 * b31 + a22 * b32 + a32 * b33 + a42 * b34,
-		a13 * b31 + a23 * b32 + a33 * b33 + a43 * b34,
-		a14 * b31 + a24 * b32 + a34 * b33 + a44 * b34,
-
-		a11 * b41 + a21 * b42 + a31 * b43 + a41 * b44,
-		a12 * b41 + a22 * b42 + a32 * b43 + a42 * b44,
-		a13 * b41 + a23 * b42 + a33 * b43 + a43 * b44,
-		a14 * b41 + a24 * b42 + a34 * b43 + a44 * b44,
-	);
+	const target = targetMatrix ?? Mat4.zero();
+	target.m11 = a11 * b11 + a21 * b12 + a31 * b13 + a41 * b14;
+	target.m12 = a12 * b11 + a22 * b12 + a32 * b13 + a42 * b14;
+	target.m13 = a13 * b11 + a23 * b12 + a33 * b13 + a43 * b14;
+	target.m14 = a14 * b11 + a24 * b12 + a34 * b13 + a44 * b14;
+	target.m21 = a11 * b21 + a21 * b22 + a31 * b23 + a41 * b24;
+	target.m22 = a12 * b21 + a22 * b22 + a32 * b23 + a42 * b24;
+	target.m23 = a13 * b21 + a23 * b22 + a33 * b23 + a43 * b24;
+	target.m24 = a14 * b21 + a24 * b22 + a34 * b23 + a44 * b24;
+	target.m31 = a11 * b31 + a21 * b32 + a31 * b33 + a41 * b34;
+	target.m32 = a12 * b31 + a22 * b32 + a32 * b33 + a42 * b34;
+	target.m33 = a13 * b31 + a23 * b32 + a33 * b33 + a43 * b34;
+	target.m34 = a14 * b31 + a24 * b32 + a34 * b33 + a44 * b34;
+	target.m41 = a11 * b41 + a21 * b42 + a31 * b43 + a41 * b44;
+	target.m42 = a12 * b41 + a22 * b42 + a32 * b43 + a42 * b44;
+	target.m43 = a13 * b41 + a23 * b42 + a33 * b43 + a43 * b44;
+	target.m44 = a14 * b41 + a24 * b42 + a34 * b43 + a44 * b44;
+	return target;
 }
 
 export function createTranslationMat4(translation: Vec3): Mat4 {
@@ -78,6 +79,28 @@ export function createTranslationMat4(translation: Vec3): Mat4 {
 		translation.z,
 		1,
 	);
+}
+
+/** Create a non-uniform scale matrix, optionally reusing caller-owned storage. */
+export function createScaleMat4(scale: Vec3, targetMatrix?: Mat4): Mat4 {
+	const target = targetMatrix ?? Mat4.zero();
+	target.m11 = scale.x;
+	target.m12 = 0;
+	target.m13 = 0;
+	target.m14 = 0;
+	target.m21 = 0;
+	target.m22 = scale.y;
+	target.m23 = 0;
+	target.m24 = 0;
+	target.m31 = 0;
+	target.m32 = 0;
+	target.m33 = scale.z;
+	target.m34 = 0;
+	target.m41 = 0;
+	target.m42 = 0;
+	target.m43 = 0;
+	target.m44 = 1;
+	return target;
 }
 
 /** Create a right-handed WebGL perspective projection. */
@@ -160,8 +183,12 @@ export function getMat4Translation(matrix: Mat4, targetVec?: Vec3): Vec3 {
 	return new Vec3(matrix.m41, matrix.m42, matrix.m43);
 }
 
-/** Transform one point by a column-major matrix. */
-export function transformPoint3(matrix: Mat4, point: Vec3): Vec3 {
+/** Transform one point by a column-major matrix, optionally reusing caller-owned storage. */
+export function transformPoint3(
+	matrix: Mat4,
+	point: Vec3,
+	targetVec?: Vec3,
+): Vec3 {
 	const x =
 		matrix.m11 * point.x +
 		matrix.m21 * point.y +
@@ -183,7 +210,68 @@ export function transformPoint3(matrix: Mat4, point: Vec3): Vec3 {
 		matrix.m34 * point.z +
 		matrix.m44;
 	if (w === 0) throw new Error("Cannot transform a point with zero W.");
-	return new Vec3(x / w, y / w, z / w);
+	const target = targetVec ?? Vec3.zero();
+	target.x = x / w;
+	target.y = y / w;
+	target.z = z / w;
+	return target;
+}
+
+/**
+ * Transform a normal by the inverse transpose of a matrix's upper-left 3×3 portion.
+ *
+ * A singular transform has no valid normal transform. Zero normals are preserved because DAT
+ * geometry may intentionally contain them.
+ */
+export function transformNormal3(
+	matrix: Mat4,
+	normal: Vec3,
+	targetVec?: Vec3,
+): Vec3 {
+	const a = matrix.m11;
+	const b = matrix.m21;
+	const c = matrix.m31;
+	const d = matrix.m12;
+	const e = matrix.m22;
+	const f = matrix.m32;
+	const g = matrix.m13;
+	const h = matrix.m23;
+	const i = matrix.m33;
+	const determinant =
+		a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+	if (!Number.isFinite(determinant) || determinant === 0) {
+		throw new Error("Cannot transform a normal through a singular matrix.");
+	}
+	const x =
+		((e * i - f * h) * normal.x +
+			(f * g - d * i) * normal.y +
+			(d * h - e * g) * normal.z) /
+		determinant;
+	const y =
+		((c * h - b * i) * normal.x +
+			(a * i - c * g) * normal.y +
+			(b * g - a * h) * normal.z) /
+		determinant;
+	const z =
+		((b * f - c * e) * normal.x +
+			(c * d - a * f) * normal.y +
+			(a * e - b * d) * normal.z) /
+		determinant;
+	const magnitude = Math.hypot(x, y, z);
+	if (!Number.isFinite(magnitude)) {
+		throw new Error("Cannot transform a non-finite normal.");
+	}
+	const target = targetVec ?? Vec3.zero();
+	if (magnitude === 0) {
+		target.x = 0;
+		target.y = 0;
+		target.z = 0;
+		return target;
+	}
+	target.x = x / magnitude;
+	target.y = y / magnitude;
+	target.z = z / magnitude;
+	return target;
 }
 
 /** Return the conservative axis-aligned bounds of one transformed local-space box. */

@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { Vec3 } from "../math/types";
 import {
 	STATIC_TRANSPARENT_SORT_DISTANCE,
 	STATIC_TRANSPARENT_SORT_DISTANCE_SQUARED,
@@ -15,7 +14,6 @@ describe("sortTransparentStaticRanges", () => {
 	it("sorts nearby ranges back-to-front with stable equal-distance ties", () => {
 		const sorted = sortTransparentStaticRanges(
 			[entry("tie-b", 4), entry("near", 2), entry("far", 8), entry("tie-a", 4)],
-			Vec3.zero(),
 		);
 
 		expect(sorted.map(({ stableId }) => stableId)).toEqual([
@@ -29,7 +27,6 @@ describe("sortTransparentStaticRanges", () => {
 	it("keeps far ranges in deterministic bake order rather than camera-sorting them", () => {
 		const sorted = sortTransparentStaticRanges(
 			[entry("baked-b", 40), entry("baked-a", 20)],
-			Vec3.zero(),
 		);
 
 		expect(sorted.map(({ stableId }) => stableId)).toEqual([
@@ -47,7 +44,6 @@ describe("sortTransparentStaticRanges", () => {
 				entry("far-first", STATIC_TRANSPARENT_SORT_DISTANCE + 1),
 				entry("near-second", STATIC_TRANSPARENT_SORT_DISTANCE - 1),
 			],
-			Vec3.zero(),
 		);
 
 		expect(sorted.map(({ stableId }) => stableId)).toEqual([
@@ -98,5 +94,5 @@ describe("objectBlendPolicy", () => {
 });
 
 function entry(stableId: string, x: number) {
-	return { center: new Vec3(x, 0, 0), range: stableId, stableId };
+	return { distanceSquared: x * x, range: stableId, stableId };
 }

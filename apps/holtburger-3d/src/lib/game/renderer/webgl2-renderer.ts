@@ -42,6 +42,7 @@ import {
 	objectBlendPolicy,
 	sortTransparentStaticRanges,
 	transparentSortFacts,
+	type TransparentStaticRange,
 } from "./object-rendering-policy";
 
 const CLEAR_COLOR = {
@@ -110,6 +111,8 @@ export class WebGL2Renderer implements Renderer {
 
 	readonly #matrixScratch = new Float32Array(16);
 	readonly #offsetScratch = new Vec3(0, 0, 0);
+	/** Reused while deriving transparent range distances before sorting a view. */
+	readonly #transparentCenterScratch = new Vec3(0, 0, 0);
 	readonly #canvas: HTMLCanvasElement;
 	readonly #gl: WebGL2RenderingContext;
 	readonly #resources: WebGL2ResourceManager;
@@ -569,37 +572,46 @@ export class WebGL2Renderer implements Renderer {
 	}
 
 	#drawBlendedObjects(view: PreparedView): void {
-		const transparent = view.objects.filter(
-			({ drawUnit }) => drawUnit.ordering === "transparent",
-		);
-		const additive = view.objects
-			.filter(({ drawUnit }) => drawUnit.ordering === "additive")
-			.sort((left, right) =>
-				objectMaterialSortKey(left.drawUnit).localeCompare(
-					objectMaterialSortKey(right.drawUnit),
-				),
+		const transparent: TransparentStaticRange<ObjectFrameInput>[] = [];
+		const additive: ObjectFrameInput[] = [];
+		for (const object of view.objects) {
+			if (object.drawUnit.ordering === "additive") {
+				additive.push(object);
+				continue;
+			}
+			if (object.drawUnit.ordering !== "transparent") continue;
+			const facts = transparentSortFacts(object.drawUnit);
+			if (!facts) throw new Error("Transparent building range lacks sort facts.");
+			transformPoint3(
+				object.localToLandblock,
+				facts.center,
+				this.#transparentCenterScratch,
 			);
+			const offset = createLandblockOffset(
+				getLandblockCoordinates(object.landblockId),
+				view.anchorCoordinates,
+				this.#offsetScratch,
+			);
+			const x =
+				this.#transparentCenterScratch.x + offset.x - view.cameraPosition.x;
+			const y =
+				this.#transparentCenterScratch.y + offset.y - view.cameraPosition.y;
+			const z =
+				this.#transparentCenterScratch.z + offset.z - view.cameraPosition.z;
+			transparent.push({
+				distanceSquared: x * x + y * y + z * z,
+				range: object,
+				stableId: facts.stableId,
+			});
+		}
+		additive.sort((left, right) =>
+			objectMaterialSortKey(left.drawUnit).localeCompare(
+				objectMaterialSortKey(right.drawUnit),
+			),
+		);
 		if (transparent.length === 0 && additive.length === 0) return;
 		const sortedTransparent = sortTransparentStaticRanges(
-			transparent.map((object) => {
-				const facts = transparentSortFacts(object.drawUnit);
-				if (!facts)
-					throw new Error("Transparent building range lacks sort facts.");
-				const landblockCenter = transformPoint3(
-					object.localToLandblock,
-					facts.center,
-				);
-				const offset = createLandblockOffset(
-					getLandblockCoordinates(object.landblockId),
-					view.anchorCoordinates,
-				);
-				return {
-					center: landblockCenter.add(offset),
-					range: object,
-					stableId: facts.stableId,
-				};
-			}),
-			view.cameraPosition,
+			transparent,
 		).map(({ range }) => range);
 		const gl = this.#gl;
 		gl.depthMask(false);

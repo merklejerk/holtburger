@@ -7,10 +7,11 @@ export const STATIC_TRANSPARENT_SORT_DISTANCE = 16;
 export const STATIC_TRANSPARENT_SORT_DISTANCE_SQUARED =
 	STATIC_TRANSPARENT_SORT_DISTANCE * STATIC_TRANSPARENT_SORT_DISTANCE;
 
-/** One transparent baked range paired with its center expressed in the current render frame. */
+/** One transparent baked range paired with its current-frame camera distance. */
 export interface TransparentStaticRange<T> {
+	/** Precomputed squared camera distance; avoids per-comparison coordinate work and allocations. */
+	readonly distanceSquared: number;
 	readonly range: T;
-	readonly center: Vec3;
 	readonly stableId: string;
 }
 
@@ -50,24 +51,22 @@ export function objectBlendPolicy(rawSurfaceFlags: number): ObjectBlendPolicy {
  */
 export function sortTransparentStaticRanges<T>(
 	ranges: readonly TransparentStaticRange<T>[],
-	cameraPosition: Vec3,
 ): readonly TransparentStaticRange<T>[] {
 	return ranges
-		.map((range, index) => ({ index, range }))
+		.slice()
 		.sort((left, right) => {
-		const leftDistance = left.range.center.distanceSquaredTo(cameraPosition);
-		const rightDistance = right.range.center.distanceSquaredTo(cameraPosition);
+		const leftDistance = left.distanceSquared;
+		const rightDistance = right.distanceSquared;
 		const leftNear = leftDistance <= STATIC_TRANSPARENT_SORT_DISTANCE_SQUARED;
 		const rightNear = rightDistance <= STATIC_TRANSPARENT_SORT_DISTANCE_SQUARED;
 		if (leftNear && rightNear && leftDistance !== rightDistance) {
 			return rightDistance - leftDistance;
 		}
 		if (leftNear && rightNear) {
-			return left.range.stableId.localeCompare(right.range.stableId);
+			return left.stableId.localeCompare(right.stableId);
 		}
-		return left.index - right.index;
-	})
-		.map(({ range }) => range);
+		return 0;
+		});
 }
 
 /** Narrow a draw unit to its transparent sort facts without exposing renderer policy upstream. */

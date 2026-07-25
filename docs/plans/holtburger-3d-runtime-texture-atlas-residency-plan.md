@@ -1,7 +1,7 @@
 # Holtburger 3D Runtime Texture Atlas Residency Plan
 
 Date: 2026-07-25
-Status: In progress — Phases 1–2 complete (2026-07-25).
+Status: In progress — Phases 1–3 complete (2026-07-25).
 
 ## Context and Boundaries
 
@@ -841,7 +841,7 @@ Status: Complete (2026-07-25).
 
 ### Phase 3: Page Build and `ResidentTextureAtlas` Fixture
 
-Status: Pending.
+Status: Complete (2026-07-25).
 
 #### Deliverables
 
@@ -898,15 +898,15 @@ Status: Pending.
 
 #### Task Checklist
 
-- [ ] Define page-build worker protocol and transfer accounting.
-- [ ] Define planner and page-build pool composition, queue diagnostics, and shutdown.
-- [ ] Reuse the proven gutter blit in the new pure page builder without carrying shelf cursor state.
-- [ ] Implement transaction staging, resource rollback, and atomic map publication.
-- [ ] Add worker and fake-resource failure tests.
-- [ ] Use runtime-owned page IDs throughout the fixture.
-- [ ] Compose and test the end-to-end `ResidentTextureAtlas` fixture.
-- [ ] Verify no claim, source-cache, planner, builder, or publisher manager was introduced.
-- [ ] Record the initial bounded worker-pool settings and supporting measurements.
+- [x] Define page-build worker protocol and transfer accounting.
+- [x] Define planner and page-build pool composition, queue diagnostics, and shutdown.
+- [x] Reuse the proven gutter blit in the new pure page builder without carrying shelf cursor state.
+- [x] Implement transaction staging, resource rollback, and atomic map publication.
+- [x] Add worker and fake-resource failure tests.
+- [x] Use runtime-owned page IDs throughout the fixture.
+- [x] Compose and test the end-to-end `ResidentTextureAtlas` fixture.
+- [x] Verify no claim, source-cache, planner, builder, or publisher manager was introduced.
+- [x] Record the initial bounded worker-pool settings and supporting measurements.
 
 #### Resteering Gate
 
@@ -922,7 +922,22 @@ Before Phase 4:
 
 #### Decisions and Course Corrections
 
-- Pending implementation.
+- The physical fixture injects narrow layout, page-build, and renderer ports so its lifecycle can
+  be exercised without switching the active candidate-page route. These are execution boundaries,
+  not new domain managers; page, binding, mutation-lane, rollback, and source state remain private
+  to `ResidentTextureAtlas`.
+- The production page size remains 2048. The fixture admits an explicitly documented small-page
+  override solely to make multi-page and rollback tests cheap; a page-builder test materializes a
+  complete production-size page to guard the real invariant.
+- **Initial pool settings:** one layout worker per purpose lane and two page-build workers provide
+  deterministic metadata ordering while permitting two independent replacement pages to build in
+  parallel. `ClosedWorkerPoolDiagnostics` records queue delay, execution duration, active/queued
+  counts, transferred bytes, and peak queue depth; the fixture's copied-source-byte counter records
+  the atlas-side source-copy cost. Phase 5 must retain these settings initially and use live
+  diagnostics before tuning them.
+- **Validation:** the complete TypeScript suite passes (193 tests). Focused fixture coverage proves
+  a complete 2048² page, gutter coordinates, immutable retained sources, final release, multi-page
+  upload rollback, stale layout rejection, and bounded-pool transfer accounting.
 
 ### Phase 4: `StaticLayerRealizer`
 

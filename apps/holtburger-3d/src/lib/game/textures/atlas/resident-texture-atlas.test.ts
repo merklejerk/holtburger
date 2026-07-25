@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
 import type { SceneInterestRevision } from "../../runtime/scene-availability";
+import type { RenderGeometryData } from "../../renderer/geometry";
+import type {
+	GeometryResourceKey,
+	InstanceStreamResourceKey,
+	RendererResourceManager,
+	RenderResourceKey,
+	Texture2DResourceKey,
+	Texture2DUpload,
+	TextureArrayDescription,
+	TextureArrayLayerUpload,
+	TextureArrayResourceKey,
+} from "../../renderer/resource-manager";
+import type { StaticInstanceStreamData } from "../../systems/static-resources";
 import type { AssetTextureSource } from "../texture-manager";
 import type { TexturePreparer } from "../texture-preparer";
 import {
@@ -7,9 +20,16 @@ import {
 	type AssetTextureFact,
 	TexturePurpose,
 } from "../types";
-import { ResidentTextureAtlas } from "./resident-texture-atlas";
+import {
+	type ResidentAtlasLayoutPlanner,
+	type ResidentAtlasPageBuilder,
+	ResidentTextureAtlas,
+} from "./resident-texture-atlas";
+import { planStableAtlasLayout } from "./layout";
+import { buildAtlasPage, type AtlasPageBuildJob } from "./page-build";
 
 const DIRECT_COLOR = fact(TexturePurpose.ObjectDirectColor, "0x06000001");
+const SECOND_DIRECT = fact(TexturePurpose.ObjectDirectColor, "0x06000003");
 const INDEX8 = fact(TexturePurpose.ObjectIndex8, "0x06000002");
 
 describe("ResidentTextureAtlas", () => {
@@ -168,6 +188,85 @@ describe("ResidentTextureAtlas", () => {
 			"no retained",
 		);
 	});
+
+	it("publishes and releases a physical page without transferring its retained source", async () => {
+		const resources = new FixtureRendererResources();
+		const atlas = new ResidentTextureAtlas<"building">(
+			new ImmediatePreparer(),
+			{
+				layoutPlanner: new FixtureLayoutPlanner(),
+				pageBuilder: new FixturePageBuilder(),
+				pageSize: 16,
+				renderResources: resources,
+			},
+		);
+		const handle = atlas.prepareOwnerRequirements("building", revision(1), [
+			DIRECT_COLOR,
+		]);
+
+		await expect(handle.completion).resolves.toBe("ready");
+		const binding = atlas.getAtlasBinding(DIRECT_COLOR.key);
+		expect(binding).not.toBeNull();
+		expect(resources.uploads).toHaveLength(1);
+		expect(binding!.placement.bounds.min).toMatchObject({ x: 4, y: 4 });
+		expect(
+			resources.uploads[0]?.data.slice((4 * 16 + 4) * 4, (4 * 16 + 5) * 4),
+		).toEqual(Uint8Array.of(1, 2, 3, 4));
+		expect(atlas.getPreparedSource(DIRECT_COLOR.key).pixels).toEqual(
+			source(DIRECT_COLOR).pixels,
+		);
+
+		await atlas.withdrawOwnerRevision(handle);
+		expect(atlas.getAtlasBinding(DIRECT_COLOR.key)).toBeNull();
+		expect(resources.released).toEqual([binding!.resource]);
+	});
+
+	it("rolls back all new resources when a multi-page publication fails", async () => {
+		const resources = new FixtureRendererResources(2);
+		const atlas = new ResidentTextureAtlas<"building">(
+			new ImmediatePreparer(),
+			{
+				layoutPlanner: new FixtureLayoutPlanner(),
+				pageBuilder: new FixturePageBuilder(),
+				pageSize: 16,
+				renderResources: resources,
+			},
+		);
+		const handle = atlas.prepareOwnerRequirements("building", revision(1), [
+			DIRECT_COLOR,
+			SECOND_DIRECT,
+		]);
+
+		await expect(handle.completion).resolves.toBe("failed");
+		expect(atlas.getAtlasBinding(DIRECT_COLOR.key)).toBeNull();
+		expect(atlas.getAtlasBinding(SECOND_DIRECT.key)).toBeNull();
+		expect(resources.released).toEqual(["texture-2d-resource:0"]);
+	});
+
+	it("rejects a stale layout result without publishing its withdrawn requirement", async () => {
+		const planner = new DeferredFirstLayoutPlanner();
+		const resources = new FixtureRendererResources();
+		const atlas = new ResidentTextureAtlas<"building">(
+			new ImmediatePreparer(),
+			{
+				layoutPlanner: planner,
+				pageBuilder: new FixturePageBuilder(),
+				pageSize: 16,
+				renderResources: resources,
+			},
+		);
+		const handle = atlas.prepareOwnerRequirements("building", revision(1), [
+			DIRECT_COLOR,
+		]);
+		await planner.firstRequest;
+
+		const withdrawal = atlas.withdrawOwnerRevision(handle);
+		planner.resolveFirst();
+		await withdrawal;
+		await expect(handle.completion).resolves.toBe("withdrawn");
+		expect(resources.uploads).toEqual([]);
+		expect(atlas.getAtlasBinding(DIRECT_COLOR.key)).toBeNull();
+	});
 });
 
 function fact(
@@ -240,6 +339,139 @@ class DeferredPreparer implements TexturePreparer {
 class ImmediatePreparer implements TexturePreparer {
 	async prepare(fact: AssetTextureFact): Promise<AssetTextureSource> {
 		return source(fact);
+	}
+
+	async destroy(): Promise<void> {}
+}
+
+class FixtureLayoutPlanner implements ResidentAtlasLayoutPlanner {
+	destroy(): void {}
+
+	async plan(request: Parameters<ResidentAtlasLayoutPlanner["plan"]>[0]) {
+		return planStableAtlasLayout(request, { pageSize: 16 });
+	}
+}
+
+class DeferredFirstLayoutPlanner implements ResidentAtlasLayoutPlanner {
+	readonly firstRequest: Promise<void>;
+	#resolveFirstRequest!: () => void;
+	#resolvePlan: (() => void) | null = null;
+	#requests = 0;
+
+	constructor() {
+		this.firstRequest = new Promise<void>((resolve) => {
+			this.#resolveFirstRequest = resolve;
+		});
+	}
+
+	destroy(): void {}
+
+	plan(
+		request: Parameters<ResidentAtlasLayoutPlanner["plan"]>[0],
+	): Promise<ReturnType<typeof planStableAtlasLayout>> {
+		this.#requests += 1;
+		if (this.#requests > 1) {
+			return Promise.resolve(planStableAtlasLayout(request, { pageSize: 16 }));
+		}
+		this.#resolveFirstRequest();
+		return new Promise((resolve) => {
+			this.#resolvePlan = () =>
+				resolve(planStableAtlasLayout(request, { pageSize: 16 }));
+		});
+	}
+
+	resolveFirst(): void {
+		if (!this.#resolvePlan)
+			throw new Error("First layout request was not pending.");
+		this.#resolvePlan();
+		this.#resolvePlan = null;
+	}
+}
+
+class FixturePageBuilder implements ResidentAtlasPageBuilder {
+	build(
+		job: AtlasPageBuildJob,
+		transfer: readonly Transferable[],
+	): Promise<ReturnType<typeof buildAtlasPage>> {
+		void transfer;
+		return Promise.resolve(buildAtlasPage(job));
+	}
+
+	destroy(): void {}
+}
+
+class FixtureRendererResources implements RendererResourceManager {
+	readonly uploads: Texture2DUpload[] = [];
+	readonly released: RenderResourceKey[] = [];
+	readonly #failOnCreate: number | null;
+	#next = 0;
+
+	constructor(failOnCreate: number | null = null) {
+		this.#failOnCreate = failOnCreate;
+	}
+
+	createTexture2D(upload: Texture2DUpload): Texture2DResourceKey {
+		if (this.#next + 1 === this.#failOnCreate) {
+			throw new Error("Synthetic page upload failure.");
+		}
+		this.uploads.push(upload);
+		const resource =
+			`texture-2d-resource:${this.#next}` as Texture2DResourceKey;
+		this.#next += 1;
+		return resource;
+	}
+
+	createGeometry(geometry: RenderGeometryData): GeometryResourceKey {
+		void geometry;
+		throw new Error("Geometry is outside this fixture.");
+	}
+
+	createStaticInstanceStream(
+		data: StaticInstanceStreamData,
+	): InstanceStreamResourceKey {
+		void data;
+		throw new Error("Instance streams are outside this fixture.");
+	}
+
+	replaceGeometry(
+		key: GeometryResourceKey,
+		geometry: RenderGeometryData,
+	): void {
+		void key;
+		void geometry;
+		throw new Error("Geometry is outside this fixture.");
+	}
+
+	replaceTexture2D(key: Texture2DResourceKey, upload: Texture2DUpload): void {
+		void key;
+		void upload;
+		throw new Error("Texture replacement is outside this fixture.");
+	}
+
+	createTextureArray(
+		description: TextureArrayDescription,
+	): TextureArrayResourceKey {
+		void description;
+		throw new Error("Texture arrays are outside this fixture.");
+	}
+
+	uploadTextureArrayLayer(
+		key: TextureArrayResourceKey,
+		upload: TextureArrayLayerUpload,
+	): void {
+		void key;
+		void upload;
+		throw new Error("Texture arrays are outside this fixture.");
+	}
+
+	generateTextureArrayMipmaps(key: TextureArrayResourceKey): void {
+		void key;
+		throw new Error("Texture arrays are outside this fixture.");
+	}
+
+	releaseResource(key: RenderResourceKey): boolean {
+		this.released.push(key);
+		return true;
 	}
 
 	async destroy(): Promise<void> {}

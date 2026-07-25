@@ -30,6 +30,27 @@ describe("BoundedClosedWorkerPool", () => {
 		workers[0]!.respond(30);
 		workers[1]!.respond(20);
 		await expect(Promise.all([second, third])).resolves.toEqual([20, 30]);
+		expect(pool.getDiagnostics()).toMatchObject({
+			activeJobCount: 0,
+			completedJobCount: 3,
+			peakQueuedJobCount: 1,
+			queuedJobCount: 0,
+			workerCount: 2,
+		});
+	});
+
+	it("records transferred source bytes when dispatching a closed payload", async () => {
+		const worker = new FakeWorker();
+		const pool = new BoundedClosedWorkerPool<number, number>({
+			createWorker: () => worker,
+			workerCount: 1,
+		});
+		const bytes = new ArrayBuffer(12);
+		const pending = pool.dispatch(1, [bytes]);
+		worker.respond(1);
+		await pending;
+
+		expect(pool.getDiagnostics().transferredBytes).toBe(12);
 	});
 
 	it("rejects queued work and terminates active workers on shutdown", async () => {

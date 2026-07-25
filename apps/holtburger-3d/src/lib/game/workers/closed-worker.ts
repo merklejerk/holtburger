@@ -97,6 +97,19 @@ interface PendingDispatch<TInput, TResult> {
 	readonly transfer: readonly Transferable[];
 	readonly resolve: (result: TResult) => void;
 	readonly reject: (error: Error) => void;
+	readonly queuedAt: number;
+}
+
+/** Aggregate queue and transfer facts for one bounded closed-worker pool. */
+export interface ClosedWorkerPoolDiagnostics {
+	readonly activeJobCount: number;
+	readonly completedJobCount: number;
+	readonly peakQueuedJobCount: number;
+	readonly queuedJobCount: number;
+	readonly totalExecutionDurationMs: number;
+	readonly totalQueueDelayMs: number;
+	readonly transferredBytes: number;
+	readonly workerCount: number;
 }
 
 /**
@@ -107,6 +120,12 @@ export class BoundedClosedWorkerPool<TInput, TResult> {
 	readonly #createWorker: () => ClosedWorkerPort;
 	readonly #slots: WorkerSlot<TInput, TResult>[];
 	readonly #pending: PendingDispatch<TInput, TResult>[] = [];
+	#activeJobCount = 0;
+	#completedJobCount = 0;
+	#peakQueuedJobCount = 0;
+	#totalExecutionDurationMs = 0;
+	#totalQueueDelayMs = 0;
+	#transferredBytes = 0;
 	#destroyed = false;
 
 	constructor(options: {
@@ -127,9 +146,33 @@ export class BoundedClosedWorkerPool<TInput, TResult> {
 		if (this.#destroyed)
 			return Promise.reject(new Error("Closed worker pool is destroyed."));
 		return new Promise<TResult>((resolve, reject) => {
-			this.#pending.push({ input, reject, resolve, transfer });
+			this.#pending.push({
+				input,
+				queuedAt: performance.now(),
+				reject,
+				resolve,
+				transfer,
+			});
+			this.#peakQueuedJobCount = Math.max(
+				this.#peakQueuedJobCount,
+				this.#pending.length,
+			);
 			this.#drain();
 		});
+	}
+
+	/** Read aggregate scheduling facts without exposing worker or queued payload ownership. */
+	getDiagnostics(): ClosedWorkerPoolDiagnostics {
+		return {
+			activeJobCount: this.#activeJobCount,
+			completedJobCount: this.#completedJobCount,
+			peakQueuedJobCount: this.#peakQueuedJobCount,
+			queuedJobCount: this.#pending.length,
+			totalExecutionDurationMs: this.#totalExecutionDurationMs,
+			totalQueueDelayMs: this.#totalQueueDelayMs,
+			transferredBytes: this.#transferredBytes,
+			workerCount: this.#slots.length,
+		};
 	}
 
 	destroy(): void {
@@ -147,6 +190,10 @@ export class BoundedClosedWorkerPool<TInput, TResult> {
 			const pending = this.#pending.shift();
 			if (!pending) return;
 			slot.busy = true;
+			this.#activeJobCount += 1;
+			this.#totalQueueDelayMs += performance.now() - pending.queuedAt;
+			this.#transferredBytes += transferredByteLength(pending.transfer);
+			const startedAt = performance.now();
 			void slot.client
 				.dispatch(pending.input, pending.transfer)
 				.then(
@@ -158,6 +205,9 @@ export class BoundedClosedWorkerPool<TInput, TResult> {
 				)
 				.finally(() => {
 					slot.busy = false;
+					this.#activeJobCount -= 1;
+					this.#completedJobCount += 1;
+					this.#totalExecutionDurationMs += performance.now() - startedAt;
 					if (slot.client.isDestroyed && !this.#destroyed) {
 						slot.client = new ClosedWorkerClient<TInput, TResult>(
 							this.#createWorker(),
@@ -167,4 +217,12 @@ export class BoundedClosedWorkerPool<TInput, TResult> {
 				});
 		}
 	}
+}
+
+function transferredByteLength(transfer: readonly Transferable[]): number {
+	return transfer.reduce<number>(
+		(total, value) =>
+			total + (value instanceof ArrayBuffer ? value.byteLength : 0),
+		0,
+	);
 }

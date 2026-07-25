@@ -1,6 +1,6 @@
 # Holtburger 3D Buildings Layer End-to-End Plan
 
-Status: Active. Phases 0–6 are complete; Phase 7 packed-page arbitration is active.
+Status: Active. Phases 0–7 are complete; Phase 8 transparent and additive rendering is active.
 
 ## Context and Boundaries
 
@@ -1548,6 +1548,23 @@ Verification:
   arbitration and binding consolidation.
 - The active-region building detail remains one independent `ObjectDetail` owner (DA55 source
   texture `0x05001787`, tiling 4) and is excluded from all landblock packing purposes.
+
+### 2026-07-25 — Phase 7 complete
+
+- Atlas publication now reserves logical texture leases before arbitration. A packed page retains
+  every candidate entry separately from the subset it currently wins as the canonical binding.
+  This permits independent landblocks to publish overlapping keys without a pre-pack residency
+  snapshot or a duplicate-key failure.
+- Candidate comparison is deterministic: retained logical coverage, canonical pages fully made
+  redundant, lower upload byte cost, then greater useful occupied area. Exact ties retain the
+  incumbent. A candidate that wins no logical entries immediately releases its GPU page.
+- Focused ownership tests cover partial overlap (`{A}` then `{A,B}`), exact tie stability, and
+  eviction of the first installer while a later owner retains the selected binding, a larger
+  same-coverage candidate losing on byte cost, and late standalone preparation after a packed
+  winner is selected. The current
+  implementation intentionally rejects in-place reuse of an active page ID; a future deliberate
+  repack must publish a fresh candidate ID through the same arbitration path rather than mutate an
+  active page under readers.
 
 Add dated progress, concessions, verification, and new cleanup targets here after every completed
 phase.

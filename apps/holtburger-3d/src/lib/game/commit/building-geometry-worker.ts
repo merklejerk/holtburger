@@ -379,9 +379,10 @@ function transformNormal(matrix: Mat4, normal: Vec3): Vec3 {
 	const y = ((c * h - b * i) * normal.x + (a * i - c * g) * normal.y + (b * g - a * h) * normal.z) / determinant;
 	const z = ((b * f - c * e) * normal.x + (c * d - a * f) * normal.y + (a * e - b * d) * normal.z) / determinant;
 	const magnitude = Math.hypot(x, y, z);
-	if (!Number.isFinite(magnitude) || magnitude === 0) {
-		throw new Error("Cannot bake a zero or non-finite normal.");
-	}
+	if (!Number.isFinite(magnitude)) throw new Error("Cannot bake a non-finite normal.");
+	// Prepared DAT geometry can carry zero normals. Preserve that authored value rather than
+	// inventing a face normal here; the current object program does not consume lighting normals.
+	if (magnitude === 0) return Vec3.zero();
 	return new Vec3(x / magnitude, y / magnitude, z / magnitude);
 }
 

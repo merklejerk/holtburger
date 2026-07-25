@@ -12,6 +12,8 @@ import {
 import { createFrustum, type Frustum } from "../math/frustum";
 import { Mat4, Vec3 } from "../math/types";
 import type { TerrainDrawUnit } from "../terrain/types";
+import type { StaticObjectDrawUnit } from "../commit/artifacts";
+import { TextureFilteringMode, TextureWrapMode } from "../textures/types";
 import type {
 	FrameInput,
 	FrameSelectionMetrics,
@@ -29,6 +31,11 @@ import {
 	createWebGL2TerrainProgram,
 	type WebGL2TerrainProgram,
 } from "./webgl2-terrain-program";
+import {
+	createWebGL2ObjectProgram,
+	type WebGL2ObjectProgram,
+} from "./webgl2-object-program";
+import { bindWebGL2DistanceFog } from "./webgl2-fog";
 
 const CLEAR_COLOR = {
 	red: 0.15,
@@ -48,6 +55,14 @@ interface TerrainFrameInput {
 	readonly program: TerrainProgramInput;
 }
 
+/** One opaque or alpha-test static-object range paired with its resolved node placement. */
+interface ObjectFrameInput {
+	readonly drawUnit: StaticObjectDrawUnit;
+	readonly geometry: GeometryResourceKey;
+	readonly landblockId: string;
+	readonly localToLandblock: Mat4;
+}
+
 /** Anchor-relative matrices and content reused by all passes for one view. */
 interface PreparedView {
 	/** Decoded landblock grid coordinates of the view's render-world origin. */
@@ -58,6 +73,8 @@ interface PreparedView {
 	readonly projection: Mat4;
 	/** Terrain selected by this renderer from its RenderWorld. */
 	readonly terrain: readonly TerrainFrameInput[];
+	/** Opaque and alpha-test static-object ranges visible to this view. */
+	readonly objects: readonly ObjectFrameInput[];
 	/** Anchor-relative camera view transform. */
 	readonly view: Mat4;
 	/** Landblock defining the view's render-world origin. */
@@ -86,6 +103,9 @@ export class WebGL2Renderer implements Renderer {
 	/** Read-only runtime gateway used to collect this renderer's frame submissions. */
 	readonly #world: RenderWorld;
 	readonly #terrainProgram: WebGL2TerrainProgram;
+	readonly #objectProgram: WebGL2ObjectProgram;
+	/** Float-compatible fallback keeps inactive object samplers independent from terrain bindings. */
+	readonly #objectFallbackTexture: WebGLTexture;
 	/** Reused per-frame diagnostics; cold reads return a copied snapshot. */
 	readonly #frameSelectionMetrics: MutableFrameSelectionMetrics = {
 		terrainFrameInputs: 0,
@@ -119,6 +139,8 @@ export class WebGL2Renderer implements Renderer {
 		this.#resources = resources;
 		this.#world = world;
 		this.#terrainProgram = createWebGL2TerrainProgram(gl);
+		this.#objectProgram = createWebGL2ObjectProgram(gl);
+		this.#objectFallbackTexture = createObjectFallbackTexture(gl);
 		gl.clearColor(
 			CLEAR_COLOR.red,
 			CLEAR_COLOR.green,
@@ -147,6 +169,8 @@ export class WebGL2Renderer implements Renderer {
 
 	async destroy(): Promise<void> {
 		this.#gl.deleteProgram(this.#terrainProgram.program);
+		this.#gl.deleteProgram(this.#objectProgram.program);
+		this.#gl.deleteTexture(this.#objectFallbackTexture);
 	}
 
 	#beginFrame(
@@ -189,26 +213,29 @@ export class WebGL2Renderer implements Renderer {
 			camera.far,
 		);
 		const view = createViewMat4(cameraPosition, camera.placement.rotation);
+		const collected = this.#collectScene(
+			camera,
+			anchorLandblockId,
+			createFrustum(projection, view, cameraPosition),
+		);
 		return {
 			anchorCoordinates,
 			anchorLandblockId,
 			cameraPosition,
 			projection,
-			terrain: this.#collectTerrain(
-				camera,
-				anchorLandblockId,
-				createFrustum(projection, view, cameraPosition),
-			),
+			objects: collected.objects,
+			terrain: collected.terrain,
 			view,
 		};
 	}
 
-	#collectTerrain(
+	#collectScene(
 		camera: FrameViewInput["camera"],
 		anchorLandblockId: FrameInput["anchorLandblockId"],
 		frustum: Frustum,
-	): readonly TerrainFrameInput[] {
+	): { readonly terrain: readonly TerrainFrameInput[]; readonly objects: readonly ObjectFrameInput[] } {
 		const terrain: TerrainFrameInput[] = [];
+		const objects: ObjectFrameInput[] = [];
 		const visible = this.#world.queryVisibleScene(
 			camera,
 			frustum,
@@ -225,7 +252,24 @@ export class WebGL2Renderer implements Renderer {
 			if (!contribution) continue;
 			if (contribution.kind === "static-object") {
 				this.#frameSelectionMetrics.visibleStaticObjects += 1;
-				void this.#world.resolveStaticObjectRenderable(contribution.renderable);
+				const node = this.#world.resolveStaticObjectNode(
+					nodeId,
+					contribution.renderable,
+				);
+				for (const resolved of node.drawUnits) {
+					if (
+						resolved.drawUnit.kind !== "baked" ||
+						(resolved.drawUnit.ordering !== "opaque" &&
+							resolved.drawUnit.ordering !== "alpha-test")
+					)
+						continue;
+					objects.push({
+						drawUnit: resolved.drawUnit,
+						geometry: resolved.geometry,
+						landblockId: node.placement.landblockId,
+						localToLandblock: node.placement.localToLandblock,
+					});
+				}
 				continue;
 			}
 			if (contribution.kind === "dynamic") {
@@ -263,7 +307,14 @@ export class WebGL2Renderer implements Renderer {
 			const drawUnit = this.#world.getPortalDrawUnit(crossing.apertureId);
 			if (drawUnit) void this.#world.resolvePortalDrawUnit(drawUnit);
 		}
-		return terrain;
+		objects.sort((left, right) => {
+			const ordering = left.drawUnit.ordering.localeCompare(right.drawUnit.ordering);
+			if (ordering !== 0) return ordering;
+			return objectMaterialSortKey(left.drawUnit).localeCompare(
+				objectMaterialSortKey(right.drawUnit),
+			);
+		});
+		return { objects, terrain };
 	}
 
 	#resetFrameSelectionMetrics(viewCount: number): void {
@@ -282,6 +333,7 @@ export class WebGL2Renderer implements Renderer {
 		fog: FrameInput["environment"]["distanceFog"],
 	): void {
 		this.#drawTerrain(view, fog);
+		this.#drawOpaqueObjects(view, fog);
 		this.#gl.bindVertexArray(null);
 	}
 
@@ -313,15 +365,7 @@ export class WebGL2Renderer implements Renderer {
 			DETAIL_FADE_NEAR,
 		);
 		gl.uniform1f(this.#terrainProgram.uniforms.detailFadeFar, DETAIL_FADE_FAR);
-		gl.uniform1i(this.#terrainProgram.uniforms.fogEnabled, fog ? 1 : 0);
-		gl.uniform1f(this.#terrainProgram.uniforms.fogNear, fog?.near ?? 0);
-		gl.uniform1f(this.#terrainProgram.uniforms.fogFar, fog?.far ?? 1);
-		gl.uniform3f(
-			this.#terrainProgram.uniforms.fogColor,
-			fog?.color.red ?? 0,
-			fog?.color.green ?? 0,
-			fog?.color.blue ?? 0,
-		);
+		bindWebGL2DistanceFog(gl, this.#terrainProgram.uniforms, fog);
 		for (const terrain of view.terrain) {
 			const landblockOffset = createLandblockOffset(
 				terrain.drawUnit.coordinates,
@@ -439,6 +483,179 @@ export class WebGL2Renderer implements Renderer {
 		);
 	}
 
+	#drawOpaqueObjects(
+		view: PreparedView,
+		fog: FrameInput["environment"]["distanceFog"],
+	): void {
+		if (view.objects.length === 0) return;
+		const gl = this.#gl;
+		gl.depthMask(true);
+		gl.disable(gl.BLEND);
+		gl.useProgram(this.#objectProgram.program);
+		for (const [unit, uniform] of [
+			[0, this.#objectProgram.uniforms.base],
+			[1, this.#objectProgram.uniforms.palette],
+			[2, this.#objectProgram.uniforms.detail],
+		] as const) {
+			this.#bindObjectTexture(unit, this.#objectFallbackTexture, TextureFilteringMode.Nearest);
+			gl.uniform1i(uniform, unit);
+		}
+		gl.uniformMatrix4fv(
+			this.#objectProgram.uniforms.projection,
+			false,
+			mat4ToFloat32Array(view.projection, this.#matrixScratch),
+		);
+		gl.uniformMatrix4fv(
+			this.#objectProgram.uniforms.view,
+			false,
+			mat4ToFloat32Array(view.view, this.#matrixScratch),
+		);
+		gl.uniform2f(
+			this.#objectProgram.uniforms.cameraHorizontalPosition,
+			view.cameraPosition.x,
+			view.cameraPosition.z,
+		);
+		bindWebGL2DistanceFog(gl, this.#objectProgram.uniforms, fog);
+		for (const object of view.objects) this.#drawObjectRange(object, view);
+	}
+
+	#drawObjectRange(object: ObjectFrameInput, view: PreparedView): void {
+		const { drawUnit } = object;
+		const { material } = drawUnit;
+		const gl = this.#gl;
+		this.#configureObjectCulling(material.polygon.cullMode);
+		gl.uniformMatrix4fv(
+			this.#objectProgram.uniforms.localToLandblock,
+			false,
+			mat4ToFloat32Array(object.localToLandblock, this.#matrixScratch),
+		);
+		const offset = createLandblockOffset(
+			getLandblockCoordinates(object.landblockId),
+			view.anchorCoordinates,
+			this.#offsetScratch,
+		);
+		gl.uniform3f(
+			this.#objectProgram.uniforms.landblockOffset,
+			offset.x,
+			offset.y,
+			offset.z,
+		);
+		gl.uniform1i(
+			this.#objectProgram.uniforms.wrapRepeat,
+			material.sampler.wrap === TextureWrapMode.Repeat ? 1 : 0,
+		);
+		gl.uniform1i(
+			this.#objectProgram.uniforms.palettedClipMap,
+			material.palettedClipMap ? 1 : 0,
+		);
+		gl.uniform1f(
+			this.#objectProgram.uniforms.alphaTest,
+			drawUnit.ordering === "alpha-test" && material.source.kind === "texture"
+				? 200 / 255
+				: 0,
+		);
+		const opacity = sourceOpacity(material.source.translucency);
+		const diffuse = Math.max(0, material.source.diffuseScale);
+		if (material.source.kind === "solid-color") {
+			const [red, green, blue, alpha] = material.source.color;
+			gl.uniform1i(this.#objectProgram.uniforms.materialKind, 0);
+			gl.uniform4f(
+				this.#objectProgram.uniforms.materialColor,
+				red * diffuse,
+				green * diffuse,
+				blue * diffuse,
+				alpha * opacity,
+			);
+		} else {
+			const base = material.textures.base;
+			if (!base) throw new Error(`Textured material ${material.source.id} has no base texture.`);
+			const baseBinding = this.#world.resolveAtlasTexture(base);
+			const baseResource = this.#resources.getTexture2D(baseBinding.resource);
+			this.#bindObjectTexture(0, baseResource.texture, material.sampler.filtering);
+			this.#setAtlasRect(this.#objectProgram.uniforms.baseRect, baseBinding.placement.bounds, baseResource.width, baseResource.height);
+			gl.uniform1i(this.#objectProgram.uniforms.base, 0);
+			gl.uniform1i(
+				this.#objectProgram.uniforms.materialKind,
+				material.source.textureEncoding === "direct-color"
+					? 1
+					: material.source.textureEncoding === "index8"
+						? 2
+						: 3,
+			);
+			gl.uniform4f(this.#objectProgram.uniforms.materialColor, diffuse, diffuse, diffuse, opacity);
+			if (material.source.textureEncoding !== "direct-color") {
+				const palette = material.textures.palette;
+				if (!palette) throw new Error(`Indexed material ${material.source.id} has no palette texture.`);
+				const paletteBinding = this.#world.resolveAtlasTexture(palette);
+				const paletteResource = this.#resources.getTexture2D(paletteBinding.resource);
+				this.#bindObjectTexture(1, paletteResource.texture, TextureFilteringMode.Nearest);
+				this.#setAtlasRect(this.#objectProgram.uniforms.paletteRect, paletteBinding.placement.bounds, paletteResource.width, paletteResource.height);
+				gl.uniform1f(this.#objectProgram.uniforms.paletteWidth, paletteBinding.placement.bounds.max.x - paletteBinding.placement.bounds.min.x);
+				gl.uniform1i(this.#objectProgram.uniforms.palette, 1);
+			}
+		}
+		const detail = this.#world.resolveActiveRegionObjectDetail();
+		if (detail && (material.source.rawSurfaceFlags & 0x20000) !== 0) {
+			const resource = this.#resources.getTexture2D(this.#world.resolveTexture2D(detail.key));
+			this.#bindObjectTexture(2, resource.texture, TextureFilteringMode.Linear);
+			gl.uniform4f(this.#objectProgram.uniforms.detailRect, 0, 0, 1, 1);
+			gl.uniform1f(this.#objectProgram.uniforms.detailTiling, detail.tiling);
+			gl.uniform1i(this.#objectProgram.uniforms.detail, 2);
+			gl.uniform1i(this.#objectProgram.uniforms.useDetail, 1);
+		} else {
+			gl.uniform1i(this.#objectProgram.uniforms.useDetail, 0);
+		}
+		gl.uniform1f(this.#objectProgram.uniforms.luminosity, material.source.luminosity);
+		const geometry = this.#resources.getGeometry(object.geometry);
+		validateDrawRange(geometry, drawUnit.indexStart, drawUnit.indexCount);
+		gl.bindVertexArray(geometry.vertexArray);
+		gl.drawElements(
+			gl.TRIANGLES,
+			drawUnit.indexCount,
+			geometry.indexType,
+			drawUnit.indexStart * geometry.indexElementBytes,
+		);
+	}
+
+	#bindObjectTexture(
+		unit: number,
+		texture: WebGLTexture,
+		filtering: TextureFilteringMode,
+	): void {
+		const gl = this.#gl;
+		gl.activeTexture(gl.TEXTURE0 + unit);
+		gl.bindTexture(gl.TEXTURE_2D, texture);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filtering === TextureFilteringMode.Nearest ? gl.NEAREST : gl.LINEAR);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filtering === TextureFilteringMode.Nearest ? gl.NEAREST : gl.LINEAR);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+	}
+
+	#setAtlasRect(
+		uniform: WebGLUniformLocation,
+		bounds: import("../math/types").AABB2,
+		width: number,
+		height: number,
+	): void {
+		this.#gl.uniform4f(
+			uniform,
+			bounds.min.x / width,
+			bounds.min.y / height,
+			bounds.max.x / width,
+			bounds.max.y / height,
+		);
+	}
+
+	#configureObjectCulling(mode: StaticObjectDrawUnit["material"]["polygon"]["cullMode"]): void {
+		const gl = this.#gl;
+		if (mode === "double") {
+			gl.disable(gl.CULL_FACE);
+			return;
+		}
+		gl.enable(gl.CULL_FACE);
+		gl.cullFace(mode === "counter-clockwise" ? gl.FRONT : gl.BACK);
+	}
+
 	#resizeCanvasForDpr(): void {
 		const dpr = window.devicePixelRatio ?? 1;
 		const width = Math.max(1, Math.floor(this.#canvas.clientWidth * dpr));
@@ -468,5 +685,56 @@ function validateDrawRange(
 		throw new Error(
 			`Invalid geometry draw range ${indexStart}+${indexCount}/${binding.indexCount}.`,
 		);
+	}
+}
+
+/** Retail sources encode translucency as either a unit float or a legacy byte-scale value. */
+function sourceOpacity(translucency: number): number {
+	const normalized =
+		translucency > 1
+			? 1 - Math.min(translucency, 255) / 255
+			: 1 - translucency;
+	return Math.max(0, Math.min(1, normalized));
+}
+
+/** Keep opaque/alpha-test ordering classes intact while clustering equivalent atlas/program state. */
+function objectMaterialSortKey(drawUnit: StaticObjectDrawUnit): string {
+	const { material } = drawUnit;
+	return [
+		material.source.kind,
+		material.textures.base ?? "solid",
+		material.textures.palette ?? "none",
+		material.polygon.cullMode,
+		material.sampler.filtering,
+		material.sampler.wrap,
+	].join("|");
+}
+
+function createObjectFallbackTexture(gl: WebGL2RenderingContext): WebGLTexture {
+	const texture = gl.createTexture();
+	if (!texture) throw new Error("Failed to allocate object fallback texture.");
+	try {
+		gl.bindTexture(gl.TEXTURE_2D, texture);
+		gl.texImage2D(
+			gl.TEXTURE_2D,
+			0,
+			gl.RGBA8,
+			1,
+			1,
+			0,
+			gl.RGBA,
+			gl.UNSIGNED_BYTE,
+			Uint8Array.of(255, 255, 255, 255),
+		);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+		return texture;
+	} catch (error) {
+		gl.deleteTexture(texture);
+		throw error;
+	} finally {
+		gl.bindTexture(gl.TEXTURE_2D, null);
 	}
 }

@@ -44,6 +44,11 @@ export class HttpTerrainContentSource
 		return new HttpTerrainContentSource(parsed, activeRegion);
 	}
 
+	/** Immutable active-region facts shared by terrain and building presentation setup. */
+	get activeRegion(): ActiveRegionSource {
+		return this.#activeRegion;
+	}
+
 	async loadTerrainSource(
 		landblockId: LandblockId,
 	): Promise<ResolvedTerrainLayerSource | null> {

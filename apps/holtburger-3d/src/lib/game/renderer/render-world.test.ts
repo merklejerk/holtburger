@@ -64,7 +64,9 @@ describe("RenderWorld", () => {
 					return INSTANCE_STREAM;
 				},
 			},
+			objectDetail: { getBinding: () => null },
 			scene: {
+				getResolvedPlacement: () => undefined,
 				queryFrustum: () => {
 					calls.push("scene");
 					return VISIBLE_SCENE;
@@ -83,6 +85,9 @@ describe("RenderWorld", () => {
 				getPortalDrawUnit: () => null,
 			},
 			textures: {
+				getAtlasBinding: () => {
+					throw new Error("Fixture has no atlas textures.");
+				},
 				getTexture2DResource: () => {
 					calls.push("texture-2d");
 					return TEXTURE_2D;

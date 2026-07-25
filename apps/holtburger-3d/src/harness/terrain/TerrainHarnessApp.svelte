@@ -2,6 +2,7 @@
 	import { onMount } from "svelte";
 	import { HttpTerrainContentSource } from "../../lib/assets/http-terrain-content-source";
 	import { StandardCommitPipeline } from "../../lib/game/commit/pipeline";
+	import { BuildingWorkers } from "../../lib/game/commit/building-workers";
 	import type { LandblockId } from "../../lib/game/game-types";
 	import {
 		createLandblockWorldOrigin,
@@ -10,13 +11,14 @@
 	import { Quat, Vec3 } from "../../lib/game/math/types";
 	import { WebGL2Device } from "../../lib/game/renderer/webgl2-device";
 	import { GameRuntime } from "../../lib/game/runtime/game-runtime";
+	import { ActiveRegionObjectDetailOwner } from "../../lib/game/resolution/active-region-object-detail";
 
 	const CAMERA_FOV_DEGREES = 90;
 	const CAMERA_NEAR = 0.5;
 	const CAMERA_FAR = 2_000;
 
 	interface TerrainHarnessApi {
-		/** Request an outdoor terrain layer and position the camera above its center. */
+		/** Request canonical terrain and radius-zero buildings above one outdoor landblock. */
 		readonly requestOutdoorTerrain: (landblockId: string) => void;
 		/** Snapshot lifecycle evidence without exposing runtime ownership. */
 		readonly state: () => TerrainHarnessState;
@@ -54,7 +56,7 @@
 		runtime.updateSceneInterest({
 			anchorLandblockId: landblockId,
 			lod: {
-				buildingRadius: null,
+				buildingRadius: 0,
 				envCellRadius: null,
 				explicitObjectRadius: null,
 				generatedObjectRadius: null,
@@ -109,13 +111,23 @@
 		let frameHandle: number | undefined;
 		let pipeline: StandardCommitPipeline | undefined;
 		let device: WebGL2Device | undefined;
+		let objectDetailOwner: ActiveRegionObjectDetailOwner | undefined;
 		const hostGlobal = globalThis as typeof globalThis & HarnessGlobal;
 		const start = async (): Promise<void> => {
 			try {
 				const source = await HttpTerrainContentSource.build(hostUrl);
 				device = await WebGL2Device.build(canvasElement!);
-				pipeline = await StandardCommitPipeline.build({ terrainSource: source });
+				pipeline = await StandardCommitPipeline.build({
+					buildingSource: source,
+					buildingWorkers: await BuildingWorkers.build(),
+					terrainSource: source,
+					texturePixelSource: source,
+				});
 				runtime = await GameRuntime.build(device, pipeline, source);
+				objectDetailOwner = new ActiveRegionObjectDetailOwner(source);
+				runtime.installActiveRegionObjectDetail(
+					await objectDetailOwner.install(source.activeRegion),
+				);
 				if (destroyed) return;
 				ready = true;
 				hostGlobal.__HOLTBURGER_3D_TERRAIN_HARNESS__ = {
@@ -139,6 +151,7 @@
 			destroyed = true;
 			if (frameHandle !== undefined) window.cancelAnimationFrame(frameHandle);
 			delete hostGlobal.__HOLTBURGER_3D_TERRAIN_HARNESS__;
+			objectDetailOwner?.teardown();
 			void runtime?.destroy().finally(async () => {
 				await pipeline?.destroy();
 				await device?.destroy();

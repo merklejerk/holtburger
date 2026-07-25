@@ -10,7 +10,12 @@ const shaderSourcePath = join(
 	scriptDirectory,
 	"../src/lib/game/renderer/webgl2-terrain-program.ts",
 );
+const fogSourcePath = join(
+	scriptDirectory,
+	"../src/lib/game/renderer/webgl2-fog.ts",
+);
 const source = await readFile(shaderSourcePath, "utf8");
+const fogSource = await readFile(fogSourcePath, "utf8");
 const temporaryDirectory = await mkdtemp(
 	join(tmpdir(), "holtburger-terrain-shader-"),
 );
@@ -34,6 +39,19 @@ function extractShader(sourceText, name) {
 	);
 	if (match?.[1] === undefined) {
 		throw new Error(`Could not find ${name} in ${shaderSourcePath}.`);
+	}
+	return match[1].replace(
+		"${WEBGL2_DISTANCE_FOG_GLSL}",
+		extractTemplateLiteral(fogSource, "WEBGL2_DISTANCE_FOG_GLSL", fogSourcePath),
+	);
+}
+
+function extractTemplateLiteral(sourceText, name, sourcePath) {
+	const match = sourceText.match(
+		new RegExp("(?:export )?const " + name + " = `([\\s\\S]*?)`;"),
+	);
+	if (match?.[1] === undefined) {
+		throw new Error(`Could not find ${name} in ${sourcePath}.`);
 	}
 	return match[1];
 }

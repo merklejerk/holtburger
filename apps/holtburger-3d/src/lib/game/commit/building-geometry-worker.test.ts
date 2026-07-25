@@ -53,6 +53,31 @@ describe("bakeBuildingGeometry", () => {
 		).toBeNull();
 	});
 
+	it("preserves zero authored normals without inventing face-lighting data", () => {
+		const base = resident("opaque", Mat4.identity(), new Vec3(1, 1, 1));
+		const zeroNormals = {
+			...base,
+			presentation: {
+				...base.presentation,
+				parts: [
+					{
+						...base.presentation.parts[0]!,
+						geometry: {
+							...base.presentation.parts[0]!.geometry,
+							normals: new Float32Array(9),
+						},
+					},
+				],
+			},
+		};
+		const result = bakeBuildingGeometry({
+			resourceNamespace: "static-install:zero-normal" as const,
+			source: source([zeroNormals]),
+		});
+
+		expect(result?.geometry.geometry.normals).toEqual(new Float32Array(9));
+	});
+
 	it("keeps geometry bytes and ranges independent from a different texture page layout", () => {
 		const input = source([resident("opaque", Mat4.identity(), new Vec3(1, 1, 1))]);
 		const first = bakeBuildingGeometry({

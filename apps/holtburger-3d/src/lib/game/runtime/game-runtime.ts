@@ -144,6 +144,8 @@ export class GameRuntime {
 	readonly #deferredStaticDynamics = new Map<OwnerId, DeferredStaticDynamicDiagnostic[]>();
 	/** Active-region owner of the one device-backed building-detail texture. */
 	#activeRegionDetailOwner: ActiveRegionResourceOwnerId | null = null;
+	/** Read-only regional detail selection consumed by renderer-owned object programs. */
+	#activeRegionDetail: { readonly key: ActiveRegionObjectDetailBinding["key"]; readonly tiling: number } | null = null;
 	/** Dynamic terrain sources, generation state, and realized terrain resources. */
 	readonly #terrain: TerrainSystem<ResourceOwnerId, TerrainResourceOwnerId>;
 	/** Read-only renderer gateway over this runtime's scene and resource systems. */
@@ -206,6 +208,9 @@ export class GameRuntime {
 			envCells: this.#envCells,
 			geometry: this.#geometry,
 			instances: this.#instances,
+			objectDetail: {
+				getBinding: () => this.#activeRegionDetail,
+			},
 			scene: this.#scene,
 			staticObjects: this.#staticObjects,
 			terrain: this.#terrain,
@@ -350,6 +355,7 @@ export class GameRuntime {
 				width: binding.surface.width,
 			},
 		);
+		this.#activeRegionDetail = { key: binding.key, tiling: binding.tiling };
 	}
 
 	/** Resolve one canonical scene-space point against resident scene scopes. */
@@ -426,6 +432,7 @@ export class GameRuntime {
 		await this.#terrainGenerator.destroy();
 
 		await this.#textures.destroy();
+		this.#activeRegionDetail = null;
 		this.#geometry.destroy();
 		this.#instances.destroy();
 	}

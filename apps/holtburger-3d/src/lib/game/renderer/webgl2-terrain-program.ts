@@ -2,6 +2,7 @@ import {
 	compileWebGL2Shader,
 	requireWebGL2Uniform,
 } from "./webgl2-shader-utils";
+import { WEBGL2_DISTANCE_FOG_GLSL } from "./webgl2-fog";
 
 const TERRAIN_VERTEX_SHADER = `#version 300 es
 layout(location = 0) in vec3 aPosition;
@@ -50,6 +51,8 @@ uniform int uFogEnabled;
 uniform float uFogNear;
 uniform float uFogFar;
 uniform vec3 uFogColor;
+
+${WEBGL2_DISTANCE_FOG_GLSL}
 
 in vec2 vGridUv;
 in float vViewDepth;
@@ -223,14 +226,7 @@ void main() {
 	vec4 detail = texture(uDetail, fract(cellUv * float(metadata.w)));
 	float fade = clamp((uDetailFadeFar - vViewDepth) / max(uDetailFadeFar - uDetailFadeNear, 0.0001), 0.0, 1.0);
 	color = mix(color, detail.rgb, clamp(detail.a * fade, 0.0, 1.0));
-	if (uFogEnabled != 0) {
-		float fogLinear = clamp((vHorizontalDistance - uFogNear) / max(uFogFar - uFogNear, 0.0001), 0.0, 1.0);
-		// Cubic ease keeps nearby terrain clear while still converging exactly to the clear color
-		// at the terrain-coverage boundary.  This explicit form also remains defined when the
-		// coverage range collapses at an edge.
-		float fog = fogLinear * fogLinear * (3.0 - 2.0 * fogLinear);
-		color = mix(color, uFogColor, fog);
-	}
+	color = applyDistanceFog(color, vHorizontalDistance);
 	fragmentColor = vec4(color, 1.0);
 }
 `;

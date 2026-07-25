@@ -2,8 +2,7 @@ import type { LandblockId } from "../game-types";
 import type { GeometryKey } from "../geometry/types";
 import type { Camera } from "../runtime/types";
 import type { Frustum } from "../math/frustum";
-import type { VisibleScene } from "../scene";
-import type { SceneNodeId } from "../scene";
+import type { ResolvedScenePlacement, SceneNodeId, VisibleScene } from "../scene";
 import type { TerrainDrawUnit } from "../terrain/types";
 import type { DynamicEntityRenderable } from "../systems/components";
 import type {
@@ -12,7 +11,10 @@ import type {
 	StaticObjectDrawUnit,
 	StaticObjectRenderable,
 } from "../commit/artifacts";
-import type { TextureArrayBinding } from "../textures/texture-manager";
+import type {
+	TextureArrayBinding,
+	TextureAtlasBinding,
+} from "../textures/texture-manager";
 import type {
 	GeneratedTextureKey,
 	AssetTextureKey,
@@ -27,7 +29,11 @@ import type { InstanceStreamManager } from "../systems/instance-stream-manager";
 
 /** Private read-only query ports captured by one RenderWorld. */
 interface RenderWorldSystems {
+	readonly objectDetail: {
+		getBinding(): ActiveRegionObjectDetailRenderBinding | null;
+	};
 	readonly scene: {
+		getResolvedPlacement(nodeId: SceneNodeId): ResolvedScenePlacement | undefined;
 		queryFrustum(
 			frustum: Frustum,
 			anchorLandblockId: LandblockId,
@@ -57,11 +63,18 @@ interface RenderWorldSystems {
 	};
 	readonly instances: Pick<InstanceStreamManager, "getResource">;
 	readonly textures: {
+		getAtlasBinding(key: AssetTextureKey): TextureAtlasBinding;
 		getTexture2DResource(
 			key: AssetTextureKey | GeneratedTextureKey,
 		): Texture2DResourceKey;
 		getTextureArrayBinding(key: TextureArrayKey): TextureArrayBinding;
 	};
+}
+
+/** Active-region detail selected independently from the current landblock's packed pages. */
+export interface ActiveRegionObjectDetailRenderBinding {
+	readonly key: AssetTextureKey;
+	readonly tiling: number;
 }
 
 /** One typed logical render contribution selected from a visible scene node. */
@@ -79,6 +92,12 @@ export interface ResolvedStaticDrawUnit {
 	readonly drawUnit: StaticObjectDrawUnit;
 	readonly geometry: GeometryResourceKey;
 	readonly instances: InstanceStreamResourceKey | null;
+}
+
+/** One visible static node with its resolved landblock placement and device selections. */
+export interface ResolvedStaticObjectNode {
+	readonly placement: ResolvedScenePlacement;
+	readonly drawUnits: readonly ResolvedStaticDrawUnit[];
 }
 
 /** Backend geometry selection for a rigid dynamic or cell-shell draw. */
@@ -154,6 +173,19 @@ export class RenderWorld {
 		}));
 	}
 
+	/** Resolve a visible static node without exposing mutable scene or resource systems. */
+	resolveStaticObjectNode(
+		nodeId: SceneNodeId,
+		renderable: StaticObjectRenderable,
+	): ResolvedStaticObjectNode {
+		const placement = this.#systems.scene.getResolvedPlacement(nodeId);
+		if (!placement) throw new Error(`Static object node ${nodeId} no longer exists.`);
+		return {
+			drawUnits: this.resolveStaticObjectRenderable(renderable),
+			placement,
+		};
+	}
+
 	resolveDynamicRenderable(
 		renderable: DynamicEntityRenderable,
 	): readonly ResolvedGeometryDrawUnit<
@@ -190,6 +222,14 @@ export class RenderWorld {
 		key: AssetTextureKey | GeneratedTextureKey,
 	): Texture2DResourceKey {
 		return this.#systems.textures.getTexture2DResource(key);
+	}
+
+	resolveAtlasTexture(key: AssetTextureKey): TextureAtlasBinding {
+		return this.#systems.textures.getAtlasBinding(key);
+	}
+
+	resolveActiveRegionObjectDetail(): ActiveRegionObjectDetailRenderBinding | null {
+		return this.#systems.objectDetail.getBinding();
 	}
 
 	resolveTextureArray(key: TextureArrayKey): TextureArrayBinding {

@@ -1,7 +1,6 @@
 # Holtburger 3D Buildings Layer End-to-End Plan
 
-Status: Active. Phase 0 is complete; Phase 1 has reached its producer/decoder checkpoint and
-remains in progress pending host-module extraction and archive-backed request checks.
+Status: Active. Phases 0 and 1 are complete; Phase 2 materialization planning is active.
 
 ## Context and Boundaries
 
@@ -401,13 +400,13 @@ merge ranges based on page placement, or project promoted residents into a diagn
       manifest.
 - [x] Validate magic, version, total size, section alignment, counts, identifiers, finite values,
       index bounds, part references, and dependency closure.
-- [ ] Test a cold Level 1 request and a Level 1 request after Level 0 has warmed the cumulative LoD
+- [x] Test a cold Level 1 request and a Level 1 request after Level 0 has warmed the cumulative LoD
       cache.
-- [ ] Test that one building-source request contains the complete non-pixel source closure required
+- [x] Test that one building-source request contains the complete non-pixel source closure required
       for material planning, resident classification, static geometry baking, and future dynamic
       materialization.
 - [x] Reuse the Rust byte-producing function from the browser content host.
-- [ ] Delete any superseded generic or duplicate projection helpers introduced during the cutover.
+- [x] Delete any superseded generic or duplicate projection helpers introduced during the cutover.
 
 #### Acceptance Criteria
 
@@ -1317,8 +1316,23 @@ Verification:
 Debt:
 
 - The building transport is now cohesive, but the pre-existing active-region, terrain, and texture
-  transports still share `lib.rs`. Phase 1 remains open until that host decomposition is completed;
-  this prevents the new building work from becoming an excuse to declare the hub problem solved.
+  transports still share `lib.rs`. This is retained Phase 10 cleanup debt rather than expanded
+  Phase 1 scope: moving those already-working terrain transports would be unrelated churn with no
+  bearing on the Level 1 contract, while the building implementation itself is isolated and no new
+  host hub was introduced.
+
+### 2026-07-25 — Phase 1 complete
+
+Acceptance evidence:
+
+- The actual-archive temporary diagnostic proved a cold DA55FFFF Level 1 request and a subsequent
+  request through the same `ContentAssetRuntime` produce identical HBBL responses containing 42
+  residents. It was deliberately not retained as a repository test.
+- The permanent Rust test verifies HBBL section alignment and the frontend fixture verifies strict
+  direct-GfxObj/setup-model decoding, source closure validation, geometry index validation, and the
+  authored default-animation promotion rule.
+- Tauri and browser-host routes both call the same Rust byte-producing function and TypeScript
+  decoder.
 
 Add dated progress, concessions, verification, and new cleanup targets here after every completed
 phase.

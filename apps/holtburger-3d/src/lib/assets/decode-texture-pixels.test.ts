@@ -47,10 +47,33 @@ describe("decodeTexturePixels", () => {
 			),
 		).toThrow("requires rgba8");
 	});
+
+	it("decodes selected object index16 pixels as RG8", () => {
+		const request = {
+			kind: "prepared-object-texture" as const,
+			purpose: TexturePurpose.ObjectIndex16,
+			sourceAssetId: "surface-texture/0x05001234" as const,
+			renderSurfaceId: "0x06001234" as const,
+		};
+		const response = decodeTexturePixels(
+			textureResponse({
+				format: "rg8",
+				pixels: [1, 0, 2, 0],
+				purpose: request.purpose,
+				sourceAssetId: request.sourceAssetId,
+				width: 2,
+				height: 1,
+			}),
+			request,
+		);
+
+		expect(response.kind).toBe("prepared-object-texture");
+		expect(response.surface.format).toBe("rg8");
+	});
 });
 
 function textureResponse(options: {
-	readonly format: "rgba8" | "r8";
+	readonly format: "rgba8" | "r8" | "rg8";
 	readonly height: number;
 	readonly pixels: readonly number[];
 	readonly purpose: string;
@@ -75,7 +98,7 @@ function textureResponse(options: {
 			surface: {
 				format: options.format,
 				height: options.height,
-				renderSurfaceId: "0x06001234",
+				sourceRecordId: "0x06001234",
 				width: options.width,
 			},
 			transport: "holtburger-texture-pixels",

@@ -1,6 +1,6 @@
 # Holtburger 3D Buildings Layer End-to-End Plan
 
-Status: Active. Phases 0 and 1 are complete; Phase 2 materialization planning is active.
+Status: Active. Phases 0–2 are complete; Phase 3 closed-worker implementation is active.
 
 ## Context and Boundaries
 
@@ -481,24 +481,24 @@ merge ranges based on page placement, or project promoted residents into a diagn
 
 #### Task Checklist
 
-- [ ] Port only proven DXT/palette conversion logic from the legacy app-local adapter.
-- [ ] Verify channel order, alpha semantics, index width, palette lookup, missing mip-level fallback,
+- [x] Port only proven DXT/palette conversion logic from the legacy app-local adapter.
+- [x] Verify channel order, alpha semantics, index width, palette lookup, missing mip-level fallback,
       and byte lengths.
-- [ ] Preserve the retail paletted clip-map rule that indices below eight are transparent at the
+- [x] Preserve the retail paletted clip-map rule that indices below eight are transparent at the
       appropriate presentation stage.
-- [ ] Make complete material-binding equality include source material, chosen polygon side/surface,
+- [x] Make complete material-binding equality include source material, chosen polygon side/surface,
       stippling, sampler facts, and every logical texture role.
-- [ ] Test that different logical textures remain different bindings even if later packed onto one
+- [x] Test that different logical textures remain different bindings even if later packed onto one
       page.
-- [ ] Test that identical bindings receive reproducible keys independent of source traversal order.
-- [ ] Test the retail-proven alpha-additive, inverse-alpha-additive, and unmodulated-additive source
+- [x] Test that identical bindings receive reproducible keys independent of source traversal order.
+- [x] Test the retail-proven alpha-additive, inverse-alpha-additive, and unmodulated-additive source
       facts without introducing WebGL blend constants into shared/domain records.
-- [ ] Test that multiple building landblocks reuse one region-owned building-detail binding and do
+- [x] Test that multiple building landblocks reuse one region-owned building-detail binding and do
       not include it in their per-landblock packing jobs.
-- [ ] Test active-region detail ownership through replacement and teardown.
-- [ ] Test that an animated setup enters `dynamicResidents`, an otherwise identical setup without a
+- [x] Test active-region detail ownership through replacement and teardown.
+- [x] Test that an animated setup enters `dynamicResidents`, an otherwise identical setup without a
       default animation enters `staticResidents`, and no resident appears in both collections.
-- [ ] Test that the complete promoted resident survives classification unchanged rather than being
+- [x] Test that the complete promoted resident survives classification unchanged rather than being
       reduced to diagnostic fields.
 
 #### Acceptance Criteria
@@ -515,7 +515,23 @@ merge ranges based on page placement, or project promoted residents into a diagn
 
 #### Decisions and Course Corrections
 
-- To be filled during execution.
+- `HBBL` advanced to v2 to carry one clamp/repeat fact per prepared triangle material slot. The
+  fact comes directly from `PreparedPolygonSetRenderTriangle.material_variant_signature`, itself
+  derived from the selected polygon side's stippling bit; it is not a frontend default.
+- Object pixel requests are a narrow app-local extension of the existing texture capability.
+  Terrain keeps `prepared-texture-surface`; object RenderSurfaces use
+  `prepared-object-texture`, and palette rows use `prepared-object-palette`. There is no generic
+  DAT asset reader exposed to the frontend.
+- The host verifies that a requested RenderSurface is actually declared by the requested
+  SurfaceTexture. When detail has no preselected level, it follows the existing first-available
+  source-level policy. The returned encoding remains RGBA8/R8/RG8 only at this app boundary.
+- The paletted clip-map rule is represented as the lossless `palettedClipMap` material-plan fact.
+  It deliberately does not bake alpha into shared palettes, preserving palette reuse and leaving
+  the eventual discard operation to renderer compilation.
+- Region-owned building detail is loaded once by `ActiveRegionObjectDetailOwner` during explorer
+  startup and released on explorer teardown. It retains CPU pixels for the active regional scope;
+  Phase 4 will promote the same logical binding to device ownership rather than fetching or packing
+  it per landblock.
 
 ### Phase 3: Add Closed, Parallel Geometry and Texture Workers
 
@@ -1358,6 +1374,44 @@ Outstanding work:
 
 - Implement raw object render-surface/palette transport and app-local DXT, indexed, and palette
   conversions; then complete active-region building-detail ownership. Phase 2 remains active.
+
+### 2026-07-25 — Phase 2 complete
+
+Changes:
+
+- Added app-local direct-color (including DXT1/DXT3/DXT5), Index8, Index16/RG8, and one-row
+  palette/RGBA8 preparation. The implementation ports only the decoding semantics required by the
+  legacy adapter; it does not promote renderer output formats into `holtburger-content`.
+- Corrected and regression-tested DXT1 three-color transparency while porting: selector three owns
+  its palette alpha and must not be overwritten by the generic DXT alpha path.
+- Added closed object texture/palette requests to the existing binary pixel transport, including
+  strict frontend validation of RG8 byte lengths. A temporary archive diagnostic swept every
+  selected material texture in DA55FFFF and 0EBAFFFF through this host capability successfully;
+  it was removed after execution because local archive tests are not repository fixtures.
+- Added source RenderSurface IDs to resolved texture materials and source-side per-triangle
+  clamp/repeat facts to `HBBL` v2. The pure planner now emits stable binding IDs, closed pixel
+  requests, ordered material classes, and the deferred paletted clip-map fact without device or
+  atlas state.
+- Extracted the reusable, lossless setup-default-animation resident classifier and added the
+  active-region-owned building-detail CPU binding. Explorer startup installs it once and teardown
+  releases it.
+
+Verification:
+
+- `HOLTBURGER_DATS=/home/cluracan/code/holtburger/dats/assets.hba cargo test -p holtburger-3d tests::temporary_archive_object_texture_requests_cover_building_formats -- --exact`
+  passed while the temporary diagnostic existed.
+- `cargo test -p holtburger-3d --lib`, strict app clippy, `npm run check`, `npm run lint:ts`, and
+  focused material/decoder/detail-owner/classifier tests pass.
+
+Concessions and debt:
+
+- The regional detail binding is intentionally CPU-owned until the Phase 4 commit seam exists.
+  Moving it into `TextureManager` now would require inventing a premature device-ownership route
+  and would blur the Phase 3 worker boundary. Phase 4 must promote this existing logical binding
+  without changing its source or ownership scope.
+- DXT mip-chain generation remains a packing/renderer concern. Phase 2 validates level-zero
+  conversion and source-level fallback; Phase 3/5 still own explicit atlas-edge mip isolation and
+  maximum-LOD policy.
 
 Add dated progress, concessions, verification, and new cleanup targets here after every completed
 phase.

@@ -9,7 +9,8 @@ import { TextureWrapMode } from "../textures/types";
 describe("object material planning", () => {
 	it("keeps additive separate from transparent source materials", () => {
 		expect(classifyObjectMaterialOrdering(material(0x10000))).toBe("additive");
-		expect(classifyObjectMaterialOrdering(material(0x10))).toBe("transparent");
+		expect(classifyObjectMaterialOrdering(material(0x100))).toBe("transparent");
+		expect(classifyObjectMaterialOrdering(material(0x200))).toBe("transparent");
 	});
 
 	it("uses encoding to produce palette-safe indexed bindings", () => {
@@ -18,6 +19,7 @@ describe("object material planning", () => {
 				...material(0),
 				kind: "texture",
 				colorTextureId: "0x05000001",
+				renderSurfaceId: "0x06000001",
 				paletteTextureId: "0x04000001",
 				textureEncoding: "index16",
 			},
@@ -25,6 +27,36 @@ describe("object material planning", () => {
 		);
 		expect(plan.baseTexture).toContain("object-index-16");
 		expect(plan.paletteTexture).toContain("object-palette");
+		expect(plan.textureRequests).toEqual([
+			{
+				kind: "prepared-object-texture",
+				purpose: "object-index-16",
+				sourceAssetId: "surface-texture/0x05000001",
+				renderSurfaceId: "0x06000001",
+			},
+			{
+				kind: "prepared-object-palette",
+				purpose: "object-palette",
+				sourceAssetId: "palette/0x04000001",
+				paletteDomain: "index16",
+			},
+		]);
+	});
+
+	it("keeps logical textures distinct and preserves paletted clip-map facts", () => {
+		const first = planObjectMaterial(texturedMaterial("0x05000001", 0x04), TextureWrapMode.Clamp);
+		const second = planObjectMaterial(texturedMaterial("0x05000002", 0x04), TextureWrapMode.Clamp);
+
+		expect(first.id).not.toBe(second.id);
+		expect(first.palettedClipMap).toBe(true);
+		expect(second.palettedClipMap).toBe(true);
+	});
+
+	it("gives identical source facts a traversal-independent binding key", () => {
+		const input = texturedMaterial("0x05000001", 0);
+		expect(planObjectMaterial(input, TextureWrapMode.Repeat).id).toBe(
+			planObjectMaterial({ ...input }, TextureWrapMode.Repeat).id,
+		);
 	});
 
 	it("fails indexed material planning without a palette", () => {
@@ -34,6 +66,7 @@ describe("object material planning", () => {
 					...material(0),
 					kind: "texture",
 					colorTextureId: "0x05000001",
+					renderSurfaceId: "0x06000001",
 					paletteTextureId: null,
 					textureEncoding: "index8",
 				},
@@ -52,5 +85,19 @@ function material(rawSurfaceFlags: number): ResolvedMaterial {
 		translucency: 0,
 		luminosity: 0,
 		diffuseScale: 1,
+	};
+}
+
+function texturedMaterial(
+	colorTextureId: string,
+	rawSurfaceFlags: number,
+): ResolvedMaterial {
+	return {
+		...material(rawSurfaceFlags),
+		kind: "texture",
+		colorTextureId,
+		renderSurfaceId: "0x06000001",
+		paletteTextureId: "0x04000001",
+		textureEncoding: "index8",
 	};
 }

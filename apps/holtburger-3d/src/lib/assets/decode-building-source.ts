@@ -12,10 +12,11 @@ import type {
 	ResolvedObjectPart,
 	ResolvedObjectPresentation,
 } from "../game/resolution/presentation";
+import { classifyObjectResidents } from "../game/resolution/object-resident-classifier";
 
 const HEADER_LENGTH = 16;
 const MAGIC = "HBBL";
-const VERSION = 1;
+const VERSION = 2;
 const datId = z.string().regex(/^0x[0-9a-f]{8}$/i);
 const finiteNumber = z.number().finite();
 const vec3 = z.tuple([finiteNumber, finiteNumber, finiteNumber]);
@@ -29,8 +30,9 @@ const section = z.object({
 		"textureCoordinates",
 		"indices",
 		"materialSlots",
+		"materialWrapModes",
 	]),
-	scalarType: z.enum(["f32", "u32", "u16"]),
+	scalarType: z.enum(["f32", "u32", "u16", "u8"]),
 	elementCount: z.number().int().nonnegative(),
 	byteOffset: z.number().int().nonnegative(),
 	byteLength: z.number().int().nonnegative(),
@@ -47,6 +49,8 @@ const geometry = z.object({
 	indexCount: z.number().int().nonnegative(),
 	materialSlotOffset: z.number().int().nonnegative(),
 	materialSlotCount: z.number().int().nonnegative(),
+	materialWrapModeOffset: z.number().int().nonnegative(),
+	materialWrapModeCount: z.number().int().nonnegative(),
 	bounds: bounds.nullable(),
 });
 
@@ -218,8 +222,7 @@ export function decodeBuildingSource(
 			"Building source contains duplicate presentation identities.",
 		);
 	}
-	const staticResidents: ResolvedObjectResident[] = [];
-	const dynamicResidents: ResolvedObjectResident[] = [];
+	const residents: ResolvedObjectResident[] = [];
 	for (const resident of manifest.residents) {
 		const presentation = definitions.get(resident.source);
 		if (!presentation) {
@@ -239,10 +242,9 @@ export function decodeBuildingSource(
 			localBounds: toBounds(resident.localBounds),
 			appearance: null,
 		};
-		if (presentation.effects.animationId === null)
-			staticResidents.push(resolved);
-		else dynamicResidents.push(resolved);
+		residents.push(resolved);
 	}
+	const { staticResidents, dynamicResidents } = classifyObjectResidents(residents);
 	return {
 		kind: LandblockLayerKind.Buildings,
 		landblockId: manifest.landblockId as LandblockId,
@@ -275,7 +277,7 @@ function validatedSections(
 	const sections = new Map(
 		manifest.sections.map((entry) => [entry.name, entry]),
 	);
-	if (sections.size !== 5 || sections.size !== manifest.sections.length) {
+	if (sections.size !== 6 || sections.size !== manifest.sections.length) {
 		throw new Error(
 			"Building source must contain every geometry section exactly once.",
 		);
@@ -286,6 +288,7 @@ function validatedSections(
 		["textureCoordinates", "f32"],
 		["indices", "u32"],
 		["materialSlots", "u16"],
+		["materialWrapModes", "u8"],
 	] as const) {
 		const entry = sections.get(name);
 		if (!entry || entry.scalarType !== scalarType) {
@@ -293,7 +296,8 @@ function validatedSections(
 				`Building source ${name} section has an incompatible scalar type.`,
 			);
 		}
-		const elementSize = scalarType === "u16" ? 2 : 4;
+		const elementSize =
+			scalarType === "u8" ? 1 : scalarType === "u16" ? 2 : 4;
 		const start = sectionDataOffset + entry.byteOffset;
 		const end = start + entry.byteLength;
 		if (
@@ -362,6 +366,22 @@ function decodeGeometry(
 		geometry.materialSlotCount,
 		Uint16Array,
 	);
+	const materialWrapModes = readSlice(
+		response,
+		sectionDataOffset,
+		requireSection(sections, "materialWrapModes"),
+		geometry.materialWrapModeOffset,
+		geometry.materialWrapModeCount,
+		Uint8Array,
+	);
+	if (materialWrapModes.length !== materialSlotIndices.length) {
+		throw new Error(
+			`Geometry ${geometry.id} must provide one sampler fact per material slot.`,
+		);
+	}
+	if (materialWrapModes.some((wrap) => wrap !== 0 && wrap !== 1)) {
+		throw new Error(`Geometry ${geometry.id} has an invalid sampler fact.`);
+	}
 	if (indices.some((index) => index >= geometry.vertexCount)) {
 		throw new Error(`Geometry ${geometry.id} contains an out-of-range index.`);
 	}
@@ -372,6 +392,7 @@ function decodeGeometry(
 		textureCoordinates,
 		indices,
 		materialSlotIndices,
+		materialWrapModes,
 		bounds: toBounds(geometry.bounds),
 	};
 }
@@ -386,7 +407,9 @@ function requireSection(
 	return entry;
 }
 
-function readSlice<TArray extends Float32Array | Uint32Array | Uint16Array>(
+function readSlice<
+	TArray extends Float32Array | Uint32Array | Uint16Array | Uint8Array,
+>(
 	response: Uint8Array,
 	sectionDataOffset: number,
 	entry: z.infer<typeof section>,
@@ -438,6 +461,7 @@ function decodeMaterial(entry: BuildingMaterial): ResolvedMaterial {
 		...facts,
 		kind: "texture",
 		colorTextureId: entry.source.surfaceTextureId,
+		renderSurfaceId: entry.source.selectedRenderSurface.id,
 		paletteTextureId:
 			entry.source.paletteId ?? entry.source.defaultPaletteIds.at(0) ?? null,
 		textureEncoding: textureEncoding(entry.source.selectedRenderSurface.format),

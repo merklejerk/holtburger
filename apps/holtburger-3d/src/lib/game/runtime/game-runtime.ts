@@ -311,6 +311,18 @@ export class GameRuntime {
 					);
 				},
 			},
+			failureReporter: {
+				reportAtlasFailure: ({ cause, owner, revision }) =>
+					log(
+						{
+							cause,
+							kind: "static-layer-atlas-failed",
+							owner,
+							revision,
+						},
+						LogLevel.Error,
+					),
+			},
 			geometry: dependencies.staticGeometryPreparer,
 			publisher: {
 				evict: async (owner, revision) =>
@@ -750,7 +762,7 @@ export class GameRuntime {
 		const factCollectionStartedAt = performance.now();
 		const textureRequirements = collectBuildingTextureDependencies(
 			artifact.commit.source,
-		).map(({ fact }) => fact);
+		);
 		this.#textureFactCollectionDurationMs +=
 			performance.now() - factCollectionStartedAt;
 		this.#textureFactCollectionCount += 1;

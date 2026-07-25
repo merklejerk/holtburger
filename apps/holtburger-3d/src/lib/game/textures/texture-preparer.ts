@@ -28,7 +28,7 @@ interface TerrainTexturePreparationServiceRequest {
 }
 
 /** Closed request for one selected building/object RenderSurface. */
-export interface ObjectTexturePreparationServiceRequest {
+interface ObjectTexturePreparationServiceRequest {
 	readonly kind: "prepared-object-texture";
 	readonly purpose:
 		| TexturePurpose.ObjectDirectColor
@@ -39,7 +39,7 @@ export interface ObjectTexturePreparationServiceRequest {
 }
 
 /** Closed request for one canonical full authored palette lookup texture. */
-export interface ObjectPalettePreparationServiceRequest {
+interface ObjectPalettePreparationServiceRequest {
 	readonly kind: "prepared-object-palette";
 	readonly purpose: TexturePurpose.ObjectPalette;
 	readonly sourceAssetId: DatAssetId;

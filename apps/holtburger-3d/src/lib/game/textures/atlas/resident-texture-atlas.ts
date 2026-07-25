@@ -1,6 +1,5 @@
 import type { SceneInterestRevision } from "../../runtime/scene-availability";
 import type { ClosedWorkerPoolDiagnostics } from "../../workers/closed-worker";
-import { AABB2, Vec2 } from "../../math/types";
 import type {
 	RendererResourceManager,
 	Texture2DResourceKey,
@@ -15,25 +14,23 @@ import type { TexturePreparer } from "../texture-preparer";
 import {
 	assetTextureKeyMatchesSource,
 	isPackedObjectTexturePurpose,
-	packedObjectTexturePreparation,
 	STATIC_OBJECT_TEXTURE_PAGE_SIZE,
+	texturePixelFormatByteLength,
 	texturePurposePolicy,
 	type AssetTextureFact,
 	type AssetTextureKey,
 	type PackedObjectTexturePurpose,
-	type TexturePixelFormat,
 } from "../types";
 import type {
-	AtlasPageId,
 	AtlasPageLayout,
 	StableAtlasLayoutPlan,
 	StableAtlasLayoutRequest,
 } from "./layout";
-import {
-	allocationBoundsForPlacement,
-	reconstructFreeRectangles,
-} from "./layout";
 import type { AtlasPageBuildJob, AtlasPageBuildResult } from "./page-build";
+import {
+	AtlasPagePublication,
+	type AtlasPagePublicationDiagnostics,
+} from "./page-publication";
 
 /** Exact owner/revision requirement handle; callers retain it for activation or stale cleanup. */
 export interface AtlasRequirementHandle<TOwner extends string> {
@@ -44,7 +41,11 @@ export interface AtlasRequirementHandle<TOwner extends string> {
 }
 
 /** Terminal outcome for one exact owner/revision source requirement. */
-export type AtlasRequirementCompletion = "ready" | "withdrawn" | "failed";
+export type AtlasRequirementCompletion =
+	| "ready"
+	| "withdrawn"
+	/** A preparation or page-publication error retained only until runtime logging. */
+	| { readonly kind: "failed"; readonly cause: unknown };
 
 /** Resource-free resident-atlas facts used by the Phase 2 lifecycle fixture. */
 export interface ResidentTextureAtlasDiagnostics {
@@ -108,15 +109,19 @@ interface Requirement<TOwner extends string> {
 	state: "preparing" | "ready" | "withdrawn" | "failed";
 }
 
-interface ResidentAtlasPage {
-	readonly layout: AtlasPageLayout;
-	readonly resource: Texture2DResourceKey;
-}
-
 /** Fact constrained to the four purposes admitted by this resident atlas. */
 type PackedAssetTextureFact = AssetTextureFact & {
 	readonly purpose: PackedObjectTexturePurpose;
 };
+
+/** Stable and compact layout candidates for one unchanged purpose epoch. */
+interface PurposeRebuildPlans {
+	readonly compact: StableAtlasLayoutPlan;
+	readonly epoch: number;
+	readonly nextPageGeneration: number;
+	readonly stable: StableAtlasLayoutPlan;
+	readonly stableNewPageCount: number;
+}
 
 /** Maximum complete replacement pages an optional compaction may materialize in one mutation. */
 const MAX_COMPACTION_REBUILD_PAGES = 2;
@@ -146,9 +151,8 @@ export class ResidentTextureAtlas<TOwner extends string> {
 		AssetTextureKey,
 		Promise<AssetTextureSource>
 	>();
-	/** Current published pages and bindings; absent until the physical fixture is injected. */
-	readonly #pages = new Map<AtlasPageId, ResidentAtlasPage>();
-	readonly #bindings = new Map<AssetTextureKey, TextureAtlasBinding>();
+	/** Device-page state isolated from claim, source, and currentness state. */
+	readonly #publication: AtlasPagePublication | null;
 	readonly #purposeLanes = new Map<PackedObjectTexturePurpose, Promise<void>>();
 	readonly #purposeEpochs = new Map<PackedObjectTexturePurpose, number>();
 	readonly #publishedPurposeEpochs = new Map<
@@ -157,15 +161,8 @@ export class ResidentTextureAtlas<TOwner extends string> {
 	>();
 	readonly #nextPageGeneration = new Map<PackedObjectTexturePurpose, number>();
 	#copiedSourceBytes = 0;
-	#peakPageBytes = 0;
-	#uploadedPageBytes = 0;
-	#uploadedPageCount = 0;
-	#releasedPageBytes = 0;
-	#releasedPageCount = 0;
 	#failedTransactionCount = 0;
 	#staleTransactionCount = 0;
-	#publicationDurationMs = 0;
-	#longestPublicationDurationMs = 0;
 	#avoidedPreparationCount = 0;
 	#compactionAttemptCount = 0;
 	#acceptedCompactionCount = 0;
@@ -180,6 +177,13 @@ export class ResidentTextureAtlas<TOwner extends string> {
 	) {
 		this.#preparer = preparer;
 		this.#physical = physical;
+		this.#publication =
+			physical === null
+				? null
+				: new AtlasPagePublication(
+						physical.renderResources,
+						physical.pageSize ?? STATIC_OBJECT_TEXTURE_PAGE_SIZE,
+					);
 	}
 
 	/**
@@ -289,25 +293,21 @@ export class ResidentTextureAtlas<TOwner extends string> {
 
 	/** Return the current physical binding for one ready resident logical texture. */
 	getAtlasBinding(key: AssetTextureKey): TextureAtlasBinding | null {
-		return this.#bindings.get(key) ?? null;
+		return this.#publication?.getBinding(key) ?? null;
 	}
 
 	/** Return one current page resource without exposing retained page pixels. */
 	getAtlasPageResource(pageId: `page:${string}`): Texture2DResourceKey | null {
-		return this.#pages.get(pageId as AtlasPageId)?.resource ?? null;
+		return this.#publication?.getPageResource(pageId) ?? null;
 	}
 
 	/** Return resource-free source and claim lifetime facts. */
 	getDiagnostics(): ResidentTextureAtlasDiagnostics {
-		const pageSize =
-			this.#physical?.pageSize ?? STATIC_OBJECT_TEXTURE_PAGE_SIZE;
+		const publication = this.#publicationDiagnostics();
 		return {
-			activePageCount: this.#pages.size,
-			activePageBytes: [...this.#pages.values()].reduce(
-				(total, page) => total + pageByteLength(page.layout.purpose, pageSize),
-				0,
-			),
-			peakPageBytes: this.#peakPageBytes,
+			activePageCount: publication.activePageCount,
+			activePageBytes: publication.activePageBytes,
+			peakPageBytes: publication.peakPageBytes,
 			acceptedCompactionCount: this.#acceptedCompactionCount,
 			avoidedPreparationCount: this.#avoidedPreparationCount,
 			claimedTextureCount: this.#claimsByKey.size,
@@ -316,14 +316,14 @@ export class ResidentTextureAtlas<TOwner extends string> {
 			eliminatedPageCount: this.#eliminatedPageCount,
 			failedCompactionCount: this.#failedCompactionCount,
 			insertedReuseCount: this.#insertedReuseCount,
-			uploadedPageBytes: this.#uploadedPageBytes,
-			uploadedPageCount: this.#uploadedPageCount,
-			releasedPageBytes: this.#releasedPageBytes,
-			releasedPageCount: this.#releasedPageCount,
+			uploadedPageBytes: publication.uploadedPageBytes,
+			uploadedPageCount: publication.uploadedPageCount,
+			releasedPageBytes: publication.releasedPageBytes,
+			releasedPageCount: publication.releasedPageCount,
 			failedTransactionCount: this.#failedTransactionCount,
 			staleTransactionCount: this.#staleTransactionCount,
-			publicationDurationMs: this.#publicationDurationMs,
-			longestPublicationDurationMs: this.#longestPublicationDurationMs,
+			publicationDurationMs: publication.publicationDurationMs,
+			longestPublicationDurationMs: publication.longestPublicationDurationMs,
 			layoutWorker: this.#physical?.layoutPlanner.getDiagnostics?.() ?? null,
 			pageBuildWorker: this.#physical?.pageBuilder.getDiagnostics?.() ?? null,
 			pendingRequirementCount: [...this.#requirements.values()].reduce(
@@ -368,7 +368,7 @@ export class ResidentTextureAtlas<TOwner extends string> {
 			atlasLayoutWorker: diagnostics.layoutWorker,
 			atlasPageBuildWorker: diagnostics.pageBuildWorker,
 			pendingAtlasRequirements: diagnostics.pendingRequirementCount,
-			residentAtlasBindings: this.#bindings.size,
+			residentAtlasBindings: this.#publicationDiagnostics().bindingCount,
 			residentSourceBytes: diagnostics.residentSourceBytes,
 			residentSourceCount: diagnostics.residentSourceCount,
 			reusedAtlasInsertions: diagnostics.insertedReuseCount,
@@ -377,50 +377,7 @@ export class ResidentTextureAtlas<TOwner extends string> {
 
 	/** Expose page placement facts for Explorer inspection; every entry is live resident state. */
 	getAtlasPageDiagnostics(): readonly TextureAtlasPageDiagnostics[] {
-		const pageSize =
-			this.#physical?.pageSize ?? STATIC_OBJECT_TEXTURE_PAGE_SIZE;
-		return [...this.#pages.values()]
-			.map(({ layout }) => {
-				const entries = layout.placements
-					.map(({ contentBounds, key }) => ({
-						height: contentBounds.height,
-						key,
-						width: contentBounds.width,
-						x: contentBounds.x,
-						y: contentBounds.y,
-					}))
-					.sort((left, right) => left.key.localeCompare(right.key));
-				const area = pageSize ** 2;
-				const occupiedArea = entries.reduce(
-					(total, entry) => total + entry.width * entry.height,
-					0,
-				);
-				const allocatedArea = layout.placements.reduce((total, placement) => {
-					const bounds = allocationBoundsForPlacement(
-						layout.purpose,
-						placement,
-					);
-					return total + bounds.width * bounds.height;
-				}, 0);
-				const freeRects = reconstructFreeRectangles(layout, pageSize);
-				const largestFreeArea = freeRects.reduce(
-					(largest, bounds) => Math.max(largest, bounds.width * bounds.height),
-					0,
-				);
-				return {
-					allocatedPixelRatio: allocatedArea / area,
-					byteLength: pageByteLength(layout.purpose, pageSize),
-					entries,
-					entryCount: entries.length,
-					height: pageSize,
-					largestFreePixelRatio: largestFreeArea / area,
-					occupiedPixelRatio: occupiedArea / area,
-					pageId: layout.pageId,
-					purpose: layout.purpose,
-					width: pageSize,
-				};
-			})
-			.sort((left, right) => left.pageId.localeCompare(right.pageId));
+		return this.#publication?.getPageDiagnostics() ?? [];
 	}
 
 	/** Withdraw every exact claim without destroying the shared texture preparer. */
@@ -446,12 +403,12 @@ export class ResidentTextureAtlas<TOwner extends string> {
 			if (requirement.state !== "preparing") return;
 			requirement.state = "ready";
 			requirement.resolve("ready");
-		} catch {
+		} catch (cause) {
 			if (requirement.state !== "preparing") return;
 			this.#withdrawExact(
 				requirement.handle.owner,
 				requirement.handle.revision,
-				"failed",
+				{ cause, kind: "failed" },
 			);
 		}
 	}
@@ -499,27 +456,33 @@ export class ResidentTextureAtlas<TOwner extends string> {
 	): readonly PackedObjectTexturePurpose[] {
 		const requirement = this.#requirements.get(owner)?.get(revision);
 		if (!requirement || requirement.state === "withdrawn") return [];
-		const affectedPurposes = new Set<PackedObjectTexturePurpose>();
 		if (this.#publishedRevisions.get(owner) === revision) {
 			this.#publishedRevisions.delete(owner);
 		}
 		const requirements = this.#requirements.get(owner)!;
 		requirements.delete(revision);
 		if (requirements.size === 0) this.#requirements.delete(owner);
+		const affectedPurposes = this.#releaseRequirementClaims(requirement);
+		if (requirement.state === "preparing") requirement.resolve(completion);
+		requirement.state = completion === "withdrawn" ? "withdrawn" : "failed";
+		return affectedPurposes;
+	}
+
+	#releaseRequirementClaims(
+		requirement: Requirement<TOwner>,
+	): readonly PackedObjectTexturePurpose[] {
+		const affectedPurposes = new Set<PackedObjectTexturePurpose>();
 		for (const fact of requirement.facts) {
 			affectedPurposes.add(fact.purpose);
 			const claims = this.#claimsByKey.get(fact.key);
 			if (!claims)
 				throw new Error(`Resident texture ${fact.key} lost its claim index.`);
 			claims.delete(requirement);
-			if (claims.size === 0) {
-				this.#claimsByKey.delete(fact.key);
-				this.#sources.delete(fact.key);
-				this.#markPurposeDirty(fact.purpose);
-			}
+			if (claims.size !== 0) continue;
+			this.#claimsByKey.delete(fact.key);
+			this.#sources.delete(fact.key);
+			this.#markPurposeDirty(fact.purpose);
 		}
-		if (requirement.state === "preparing") requirement.resolve(completion);
-		requirement.state = completion;
 		return [...affectedPurposes];
 	}
 
@@ -534,7 +497,7 @@ export class ResidentTextureAtlas<TOwner extends string> {
 				if (
 					requirement.facts
 						.filter((fact) => fact.purpose === purpose)
-						.every((fact) => this.#bindings.has(fact.key))
+						.every((fact) => this.#publication?.getBinding(fact.key) !== null)
 				) {
 					break;
 				}
@@ -575,8 +538,39 @@ export class ResidentTextureAtlas<TOwner extends string> {
 	}
 
 	async #rebuildPurpose(purpose: PackedObjectTexturePurpose): Promise<void> {
+		const plans = await this.#planPurposeRebuild(purpose);
+		if (plans === null) return;
+		if (plans.stable.pages.length > 0) this.#compactionAttemptCount += 1;
+		if (
+			shouldAcceptCompaction(
+				plans.stable,
+				plans.compact,
+				MAX_COMPACTION_REBUILD_PAGES,
+			) &&
+			(await this.#tryPublishCompaction(purpose, plans))
+		) {
+			return;
+		}
 		const physical = this.#physical;
-		if (physical === null || this.#destroyed) return;
+		if (physical === null) return;
+		try {
+			await this.#publishPlan(plans.stable, physical.pageSize);
+		} catch (error) {
+			this.#failedTransactionCount += 1;
+			throw error;
+		}
+		this.#markPurposePublished(
+			purpose,
+			plans.epoch,
+			plans.nextPageGeneration + plans.stableNewPageCount,
+		);
+	}
+
+	async #planPurposeRebuild(
+		purpose: PackedObjectTexturePurpose,
+	): Promise<PurposeRebuildPlans | null> {
+		const physical = this.#physical;
+		if (physical === null || this.#destroyed) return null;
 		const epoch = this.#purposeEpochs.get(purpose) ?? 0;
 		const nextPageGeneration = this.#nextPageGeneration.get(purpose) ?? 0;
 		const entries = [...this.#sources.values()]
@@ -587,95 +581,99 @@ export class ResidentTextureAtlas<TOwner extends string> {
 				purpose,
 				width: source.width,
 			}));
-		const existingPages = [...this.#pages.values()]
-			.map((page) => page.layout)
-			.filter((page) => page.purpose === purpose);
-		const stablePlan = await physical.layoutPlanner.plan({
+		const stable = await physical.layoutPlanner.plan({
 			correlationId: `resident:${purpose}:${epoch}`,
 			entries,
 			nextPageGeneration,
-			pages: existingPages,
+			pages: this.#publication?.getPurposeLayouts(purpose) ?? [],
 			purpose,
 		});
-		if (this.#destroyed || this.#purposeEpochs.get(purpose) !== epoch) {
-			this.#staleTransactionCount += 1;
-			return;
-		}
-		const stableNewPageCount = stablePlan.pages.filter(
-			(page) => !this.#pages.has(page.pageId),
+		if (!this.#isPurposeCurrent(purpose, epoch)) return null;
+		const stableNewPageCount = stable.pages.filter(
+			(page) => !this.#publication?.hasPage(page.pageId),
 		).length;
-		const compactPlan = await physical.layoutPlanner.plan({
+		const compact = await physical.layoutPlanner.plan({
 			correlationId: `resident:${purpose}:${epoch}:compact`,
 			entries,
 			nextPageGeneration: nextPageGeneration + stableNewPageCount,
 			pages: [],
 			purpose,
 		});
-		if (this.#destroyed || this.#purposeEpochs.get(purpose) !== epoch) {
-			this.#staleTransactionCount += 1;
-			return;
-		}
-		const compactAccepted = shouldAcceptCompaction(
-			stablePlan,
-			compactPlan,
-			MAX_COMPACTION_REBUILD_PAGES,
-		);
-		if (stablePlan.pages.length > 0) this.#compactionAttemptCount += 1;
-		if (compactAccepted) {
-			try {
-				await this.#publishPlan(compactPlan, physical.pageSize);
-				if (this.#destroyed || this.#purposeEpochs.get(purpose) !== epoch) {
-					this.#staleTransactionCount += 1;
-					return;
-				}
-				this.#publishedPurposeEpochs.set(purpose, epoch);
-				this.#nextPageGeneration.set(
-					purpose,
-					nextPageGeneration + stableNewPageCount + compactPlan.pages.length,
-				);
-				this.#acceptedCompactionCount += 1;
-				this.#eliminatedPageCount +=
-					stablePlan.pages.length - compactPlan.pages.length;
-				return;
-			} catch {
-				this.#failedCompactionCount += 1;
-				this.#failedTransactionCount += 1;
-				// Compaction is optional. The stable plan preserves every existing placement and remains
-				// the authoritative fallback after a page-build or upload failure.
-			}
-		}
+		if (!this.#isPurposeCurrent(purpose, epoch)) return null;
+		return { compact, epoch, nextPageGeneration, stable, stableNewPageCount };
+	}
+
+	async #tryPublishCompaction(
+		purpose: PackedObjectTexturePurpose,
+		plans: PurposeRebuildPlans,
+	): Promise<boolean> {
 		try {
-			await this.#publishPlan(stablePlan, physical.pageSize);
-		} catch (error) {
+			await this.#publishPlan(plans.compact, this.#physical?.pageSize);
+		} catch {
+			this.#failedCompactionCount += 1;
 			this.#failedTransactionCount += 1;
-			throw error;
+			return false;
 		}
-		if (this.#destroyed || this.#purposeEpochs.get(purpose) !== epoch) {
-			this.#staleTransactionCount += 1;
-			return;
-		}
+		if (
+			!this.#markPurposePublished(
+				purpose,
+				plans.epoch,
+				plans.nextPageGeneration +
+					plans.stableNewPageCount +
+					plans.compact.pages.length,
+			)
+		)
+			return true;
+		this.#acceptedCompactionCount += 1;
+		this.#eliminatedPageCount +=
+			plans.stable.pages.length - plans.compact.pages.length;
+		return true;
+	}
+
+	#isPurposeCurrent(
+		purpose: PackedObjectTexturePurpose,
+		epoch: number,
+	): boolean {
+		const current =
+			!this.#destroyed && this.#purposeEpochs.get(purpose) === epoch;
+		if (!current) this.#staleTransactionCount += 1;
+		return current;
+	}
+
+	#markPurposePublished(
+		purpose: PackedObjectTexturePurpose,
+		epoch: number,
+		nextPageGeneration: number,
+	): boolean {
+		if (!this.#isPurposeCurrent(purpose, epoch)) return false;
 		this.#publishedPurposeEpochs.set(purpose, epoch);
-		this.#nextPageGeneration.set(
-			purpose,
-			nextPageGeneration + stableNewPageCount,
-		);
+		this.#nextPageGeneration.set(purpose, nextPageGeneration);
+		return true;
 	}
 
 	async #publishPlan(
 		plan: StableAtlasLayoutPlan,
 		pageSize: number | undefined,
 	): Promise<void> {
+		const publication = this.#publication;
+		if (publication === null) return;
 		const pagesToBuild = plan.pages.filter((page) => {
-			const existing = this.#pages.get(page.pageId);
-			return existing === undefined || !pageLayoutsEqual(existing.layout, page);
+			const existing = publication
+				.getPurposeLayouts(page.purpose)
+				.find((candidate) => candidate.pageId === page.pageId);
+			return existing === undefined || !pageLayoutsEqual(existing, page);
 		});
 		const builtPages = await Promise.all(
 			pagesToBuild.map((page) =>
 				this.#buildPage(page, pageSize ?? STATIC_OBJECT_TEXTURE_PAGE_SIZE),
 			),
 		);
-		const existingPageIds = new Set(this.#pages.keys());
-		this.#publishPurposePlan(plan, builtPages);
+		const existingPageIds = new Set(
+			plan.pages
+				.filter((page) => publication.hasPage(page.pageId))
+				.map((page) => page.pageId),
+		);
+		publication.publish(plan, builtPages);
 		for (const key of plan.insertedKeys) {
 			if (
 				plan.pages.some(
@@ -718,109 +716,6 @@ export class ResidentTextureAtlas<TOwner extends string> {
 		return result;
 	}
 
-	#publishPurposePlan(
-		plan: StableAtlasLayoutPlan,
-		builtPages: readonly AtlasPageBuildResult[],
-	): void {
-		const physical = this.#physical;
-		if (physical === null) return;
-		const startedAt = performance.now();
-		try {
-			const created = new Map<AtlasPageId, Texture2DResourceKey>();
-			try {
-				for (const page of builtPages) {
-					created.set(
-						page.pageId,
-						physical.renderResources.createTexture2D({
-							data: page.pageBits,
-							format: texturePurposePolicy(page.purpose).format,
-							height: page.height,
-							mipLevels: mipLevelCount(page.purpose, page.width, page.height),
-							width: page.width,
-						}),
-					);
-					this.#uploadedPageCount += 1;
-					this.#uploadedPageBytes += page.pageBits.byteLength;
-				}
-			} catch (cause) {
-				for (const [pageId, resource] of created) {
-					if (!physical.renderResources.releaseResource(resource)) {
-						throw new Error("Resident atlas lost a partial page resource.", {
-							cause,
-						});
-					}
-					this.#recordPageRelease(
-						plan.pages.find((page) => page.pageId === pageId)!,
-					);
-				}
-				throw cause;
-			}
-			const oldPages = [...this.#pages.values()].filter(
-				(page) => page.layout.purpose === plan.purpose,
-			);
-			const nextPages = new Map(this.#pages);
-			for (const page of oldPages) nextPages.delete(page.layout.pageId);
-			for (const layout of plan.pages) {
-				const resource =
-					created.get(layout.pageId) ??
-					this.#pages.get(layout.pageId)?.resource;
-				if (!resource) {
-					throw new Error(
-						`Resident atlas plan lost page resource ${layout.pageId}.`,
-					);
-				}
-				nextPages.set(layout.pageId, { layout, resource });
-			}
-			const nextBindings = new Map(this.#bindings);
-			for (const [key, binding] of nextBindings) {
-				if (
-					[...this.#pages.values()].some(
-						(page) =>
-							page.layout.purpose === plan.purpose &&
-							page.resource === binding.resource,
-					)
-				) {
-					nextBindings.delete(key);
-				}
-			}
-			for (const page of plan.pages) {
-				const resource = nextPages.get(page.pageId)!.resource;
-				for (const placement of page.placements) {
-					nextBindings.set(placement.key, {
-						placement: texturePlacement(page.purpose, placement),
-						resource,
-					});
-				}
-			}
-			this.#pages.clear();
-			for (const [pageId, page] of nextPages) this.#pages.set(pageId, page);
-			this.#bindings.clear();
-			for (const [key, binding] of nextBindings)
-				this.#bindings.set(key, binding);
-			this.#peakPageBytes = Math.max(
-				this.#peakPageBytes,
-				this.#activePageBytes(),
-			);
-			for (const page of oldPages) {
-				if (page.resource === nextPages.get(page.layout.pageId)?.resource)
-					continue;
-				if (!physical.renderResources.releaseResource(page.resource)) {
-					throw new Error(
-						`Resident atlas lost superseded page ${page.layout.pageId}.`,
-					);
-				}
-				this.#recordPageRelease(page.layout);
-			}
-		} finally {
-			const durationMs = performance.now() - startedAt;
-			this.#publicationDurationMs += durationMs;
-			this.#longestPublicationDurationMs = Math.max(
-				this.#longestPublicationDurationMs,
-				durationMs,
-			);
-		}
-	}
-
 	#markPurposeDirty(purpose: PackedObjectTexturePurpose): void {
 		this.#purposeEpochs.set(
 			purpose,
@@ -831,36 +726,25 @@ export class ResidentTextureAtlas<TOwner extends string> {
 	#destroyPhysicalFixture(): void {
 		const physical = this.#physical;
 		if (physical === null) return;
-		for (const page of this.#pages.values()) {
-			if (!physical.renderResources.releaseResource(page.resource)) {
-				throw new Error(
-					`Resident atlas lost page ${page.layout.pageId} during shutdown.`,
-				);
-			}
-			this.#recordPageRelease(page.layout);
-		}
-		this.#pages.clear();
-		this.#bindings.clear();
+		this.#publication?.destroy();
 		physical.layoutPlanner.destroy();
 		physical.pageBuilder.destroy();
 	}
 
-	/** Account device memory only after the backend confirms an individual release. */
-	#recordPageRelease(page: AtlasPageLayout): void {
-		this.#releasedPageCount += 1;
-		this.#releasedPageBytes += pageByteLength(
-			page.purpose,
-			this.#physical?.pageSize ?? STATIC_OBJECT_TEXTURE_PAGE_SIZE,
-		);
-	}
-
-	/** Current fixed-page allocation, intentionally independent from content occupancy. */
-	#activePageBytes(): number {
-		const pageSize =
-			this.#physical?.pageSize ?? STATIC_OBJECT_TEXTURE_PAGE_SIZE;
-		return [...this.#pages.values()].reduce(
-			(total, page) => total + pageByteLength(page.layout.purpose, pageSize),
-			0,
+	#publicationDiagnostics(): AtlasPagePublicationDiagnostics {
+		return (
+			this.#publication?.getDiagnostics() ?? {
+				activePageBytes: 0,
+				activePageCount: 0,
+				bindingCount: 0,
+				longestPublicationDurationMs: 0,
+				peakPageBytes: 0,
+				publicationDurationMs: 0,
+				releasedPageBytes: 0,
+				releasedPageCount: 0,
+				uploadedPageBytes: 0,
+				uploadedPageCount: 0,
+			}
 		);
 	}
 
@@ -954,54 +838,12 @@ function validatePreparedSource(
 	const expectedBytes =
 		source.width *
 		source.height *
-		bytesPerPixel(fact.key, texturePurposePolicy(fact.purpose).format);
+		texturePixelFormatByteLength(texturePurposePolicy(fact.purpose).format);
 	if (source.pixels.byteLength !== expectedBytes) {
 		throw new Error(
 			`Texture preparer returned invalid pixel length for ${fact.key}.`,
 		);
 	}
-}
-
-function bytesPerPixel(
-	key: AssetTextureKey,
-	format: TexturePixelFormat,
-): number {
-	switch (format) {
-		case "rgba8":
-			return 4;
-		case "r8":
-		case "a8":
-			return 1;
-		case "rg8":
-			return 2;
-		default:
-			throw new Error(
-				`Atlas texture ${key} has unsupported pixel format ${format}.`,
-			);
-	}
-}
-
-function bytesPerPixelForFormat(format: TexturePixelFormat): number {
-	switch (format) {
-		case "rgba8":
-			return 4;
-		case "r8":
-		case "a8":
-			return 1;
-		case "rg8":
-			return 2;
-		default:
-			throw new Error(`Resident atlas has unsupported pixel format ${format}.`);
-	}
-}
-
-function pageByteLength(
-	purpose: PackedObjectTexturePurpose,
-	pageSize = STATIC_OBJECT_TEXTURE_PAGE_SIZE,
-): number {
-	return (
-		pageSize ** 2 * bytesPerPixelForFormat(texturePurposePolicy(purpose).format)
-	);
 }
 
 function pageLayoutsEqual(
@@ -1039,30 +881,4 @@ function shouldAcceptCompaction(
 		compact.pages.length < stable.pages.length &&
 		compact.pages.length <= rebuildPageBudget
 	);
-}
-
-function texturePlacement(
-	purpose: PackedObjectTexturePurpose,
-	placement: AtlasPageLayout["placements"][number],
-) {
-	const { contentBounds } = placement;
-	return {
-		bounds: new AABB2(
-			new Vec2(contentBounds.x, contentBounds.y),
-			new Vec2(
-				contentBounds.x + contentBounds.width,
-				contentBounds.y + contentBounds.height,
-			),
-		),
-		preparation: packedObjectTexturePreparation(purpose),
-	};
-}
-
-function mipLevelCount(
-	purpose: PackedObjectTexturePurpose,
-	width: number,
-	height: number,
-): number {
-	if (!texturePurposePolicy(purpose).generateMipmaps) return 1;
-	return Math.floor(Math.log2(Math.max(width, height))) + 1;
 }

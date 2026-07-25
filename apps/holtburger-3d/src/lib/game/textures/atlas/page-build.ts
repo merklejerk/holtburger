@@ -1,6 +1,7 @@
 import {
 	STATIC_OBJECT_TEXTURE_PAGE_SIZE,
 	packedObjectTexturePreparation,
+	texturePixelFormatByteLength,
 	texturePurposePolicy,
 	type AssetTextureKey,
 	type PackedObjectTexturePurpose,
@@ -168,19 +169,7 @@ function blitSourceWithGutter(options: {
 }
 
 function bytesPerPixel(purpose: PackedObjectTexturePurpose): number {
-	switch (texturePurposePolicy(purpose).format) {
-		case "rgba8":
-			return 4;
-		case "r8":
-		case "a8":
-			return 1;
-		case "rg8":
-			return 2;
-		default:
-			throw new Error(
-				`Atlas purpose ${purpose} has an unsupported pixel format.`,
-			);
-	}
+	return texturePixelFormatByteLength(texturePurposePolicy(purpose).format);
 }
 
 function modulo(value: number, size: number): number {

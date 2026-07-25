@@ -137,9 +137,13 @@ describe("ResidentTextureAtlas", () => {
 			INDEX8,
 		]);
 
-		preparer.reject(DIRECT_COLOR);
+		const failure = new Error("preparation failed");
+		preparer.reject(DIRECT_COLOR, failure);
 		preparer.resolve(INDEX8);
-		await expect(failed.completion).resolves.toBe("failed");
+		await expect(failed.completion).resolves.toEqual({
+			cause: failure,
+			kind: "failed",
+		});
 		await expect(surviving.completion).resolves.toBe("ready");
 		expect(atlas.getDiagnostics()).toMatchObject({
 			claimedTextureCount: 1,
@@ -363,7 +367,10 @@ describe("ResidentTextureAtlas", () => {
 			SECOND_DIRECT,
 		]);
 
-		await expect(handle.completion).resolves.toBe("failed");
+		await expect(handle.completion).resolves.toMatchObject({
+			cause: expect.anything(),
+			kind: "failed",
+		});
 		expect(atlas.getAtlasBinding(DIRECT_COLOR.key)).toBeNull();
 		expect(atlas.getAtlasBinding(SECOND_DIRECT.key)).toBeNull();
 		expect(resources.released).toEqual(["texture-2d-resource:0"]);
@@ -435,7 +442,7 @@ class DeferredPreparer implements TexturePreparer {
 	readonly #deferred = new Map<
 		AssetTextureFact["key"],
 		{
-			readonly reject: () => void;
+			readonly reject: (cause: unknown) => void;
 			readonly resolve: () => void;
 			readonly promise: Promise<AssetTextureSource>;
 		}
@@ -444,10 +451,10 @@ class DeferredPreparer implements TexturePreparer {
 	prepare(fact: AssetTextureFact): Promise<AssetTextureSource> {
 		this.requests.push(fact);
 		let resolve!: () => void;
-		let reject!: () => void;
+		let reject!: (cause: unknown) => void;
 		const promise = new Promise<AssetTextureSource>((accept, fail) => {
 			resolve = () => accept(source(fact));
-			reject = () => fail(new Error(`Failed ${fact.key}.`));
+			reject = (cause) => fail(cause);
 		});
 		this.#deferred.set(fact.key, { promise, reject, resolve });
 		return promise;
@@ -461,10 +468,13 @@ class DeferredPreparer implements TexturePreparer {
 		deferred.resolve();
 	}
 
-	reject(fact: AssetTextureFact): void {
+	reject(
+		fact: AssetTextureFact,
+		cause = new Error(`Failed ${fact.key}.`),
+	): void {
 		const deferred = this.#deferred.get(fact.key);
 		if (!deferred) throw new Error(`No pending preparation for ${fact.key}.`);
-		deferred.reject();
+		deferred.reject(cause);
 	}
 }
 

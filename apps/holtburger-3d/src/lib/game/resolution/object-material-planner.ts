@@ -1,4 +1,8 @@
 import type { ResolvedMaterial } from "./presentation";
+import type {
+	ObjectPalettePreparationServiceRequest,
+	ObjectTexturePreparationServiceRequest,
+} from "../textures/texture-preparer";
 import {
 	createAssetTextureKey,
 	TextureFilteringMode,
@@ -23,6 +27,13 @@ export interface ObjectMaterialPlan {
 	readonly baseTexture: AssetTextureKey | null;
 	readonly paletteTexture: AssetTextureKey | null;
 	readonly sampler: TextureSamplerPolicy;
+	/** Closed app-local pixel requests; atlas placement and device state remain absent. */
+	readonly textureRequests: readonly (
+		| ObjectTexturePreparationServiceRequest
+		| ObjectPalettePreparationServiceRequest
+	)[];
+	/** Retail clip maps discard indexed palette entries below eight during later shader compilation. */
+	readonly palettedClipMap: boolean;
 }
 
 const SURFACE_BASE1_CLIP_MAP = 0x04;
@@ -45,6 +56,8 @@ export function planObjectMaterial(
 			baseTexture: null,
 			paletteTexture: null,
 			sampler: sampler(wrap),
+			textureRequests: [],
+			palettedClipMap: false,
 		};
 	}
 	const purpose =
@@ -60,6 +73,25 @@ export function planObjectMaterial(
 	if (material.textureEncoding !== "direct-color" && paletteTexture === null) {
 		throw new Error(`Indexed material ${material.id} has no palette dependency.`);
 	}
+	const textureRequests: Array<
+		ObjectTexturePreparationServiceRequest | ObjectPalettePreparationServiceRequest
+	> = [
+		{
+			kind: "prepared-object-texture",
+			purpose,
+			sourceAssetId: surfaceTextureAssetId(material.colorTextureId),
+			renderSurfaceId: material.renderSurfaceId,
+		},
+	];
+	if (material.paletteTextureId !== null) {
+		textureRequests.push({
+			kind: "prepared-object-palette",
+			purpose: TexturePurpose.ObjectPalette,
+			sourceAssetId: paletteAssetId(material.paletteTextureId),
+			paletteDomain:
+				material.textureEncoding === "index8" ? "index8" : "index16",
+		});
+	}
 	return {
 		id: bindingId(material, ordering, wrap, baseTexture, paletteTexture),
 		material,
@@ -67,6 +99,10 @@ export function planObjectMaterial(
 		baseTexture,
 		paletteTexture,
 		sampler: sampler(wrap),
+		textureRequests,
+		palettedClipMap:
+			material.textureEncoding !== "direct-color" &&
+			(flags(material) & SURFACE_BASE1_CLIP_MAP) !== 0,
 	};
 }
 
@@ -91,6 +127,18 @@ function sampler(wrap: TextureWrapMode): TextureSamplerPolicy {
 	return { filtering: TextureFilteringMode.Linear, wrap };
 }
 
+function flags(material: ResolvedMaterial): number {
+	return material.rawSurfaceFlags;
+}
+
+function surfaceTextureAssetId(id: string): `surface-texture/${string}` {
+	return `surface-texture/${id}`;
+}
+
+function paletteAssetId(id: string): `palette/${string}` {
+	return `palette/${id}`;
+}
+
 function bindingId(
 	material: ResolvedMaterial,
 	ordering: ObjectMaterialOrdering,
@@ -100,6 +148,7 @@ function bindingId(
 ): string {
 	return [
 		material.id,
+		material.kind === "texture" ? material.renderSurfaceId : "no-render-surface",
 		ordering,
 		wrap,
 		baseTexture ?? "none",

@@ -24,6 +24,8 @@ export interface ResolvedGeometry {
 	readonly textureCoordinates: Float32Array;
 	readonly indices: Uint32Array;
 	readonly materialSlotIndices: Uint16Array;
+	/** One repeat (1) or clamp (0) sampler fact for every prepared triangle material slot. */
+	readonly materialWrapModes: Uint8Array;
 	readonly bounds: AABB3 | null;
 }
 
@@ -47,6 +49,8 @@ export type ResolvedMaterial = ResolvedMaterialFacts &
 				readonly id: ResolvedMaterialId;
 				readonly kind: "texture";
 				readonly colorTextureId: DatAssetId;
+				/** Concrete source level selected by the closed host material dependency. */
+				readonly renderSurfaceId: DatAssetId;
 				readonly paletteTextureId: DatAssetId | null;
 				/** Source encoding selected by the closed host dependency manifest. */
 				readonly textureEncoding: ResolvedObjectTextureEncoding;

@@ -19,16 +19,43 @@ export interface PreparedTextureSurface {
 	readonly pixels: Uint8Array;
 }
 
-/** Host service request issued by one runtime texture-preparation worker job. */
-export interface TexturePreparationServiceRequest {
+/** Existing terrain texture request whose output selection is shared-content-proven. */
+export interface TerrainTexturePreparationServiceRequest {
 	readonly kind: "prepared-texture-surface";
 	readonly purpose: TexturePurpose;
 	readonly sourceAssetId: DatAssetId;
 }
 
+/** Closed request for one selected building/object RenderSurface. */
+export interface ObjectTexturePreparationServiceRequest {
+	readonly kind: "prepared-object-texture";
+	readonly purpose:
+		| TexturePurpose.ObjectDirectColor
+		| TexturePurpose.ObjectIndex8
+		| TexturePurpose.ObjectIndex16
+		| TexturePurpose.ObjectDetail;
+	readonly sourceAssetId: DatAssetId;
+	/** Concrete source level selected by the closed material bundle; detail may omit it. */
+	readonly renderSurfaceId?: DatAssetId;
+}
+
+/** Closed request for a palette lookup texture in the domain addressed by its base indices. */
+export interface ObjectPalettePreparationServiceRequest {
+	readonly kind: "prepared-object-palette";
+	readonly purpose: TexturePurpose.ObjectPalette;
+	readonly sourceAssetId: DatAssetId;
+	readonly paletteDomain: "index8" | "index16";
+}
+
+/** Narrow, app-local pixel capability request. */
+export type TexturePreparationServiceRequest =
+	| TerrainTexturePreparationServiceRequest
+	| ObjectTexturePreparationServiceRequest
+	| ObjectPalettePreparationServiceRequest;
+
 /** Host response carrying one prepared surface requested by a runtime worker. */
 export interface TexturePreparationServiceResponse {
-	readonly kind: "prepared-texture-surface";
+	readonly kind: TexturePreparationServiceRequest["kind"];
 	readonly purpose: TexturePurpose;
 	readonly surface: PreparedTextureSurface;
 }

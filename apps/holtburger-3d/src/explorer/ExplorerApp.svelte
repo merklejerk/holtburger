@@ -27,6 +27,7 @@
 		type ExplorerEnvironmentSelection,
 	} from "../lib/game/environment/scene-environment";
 	import type { ActiveRegionSource } from "../lib/assets/active-region-source";
+	import { ActiveRegionObjectDetailOwner } from "../lib/game/resolution/active-region-object-detail";
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let frameHandle: number | null = null;
@@ -34,6 +35,7 @@
 	let commitPipeline: StandardCommitPipeline | undefined;
 	let webglDevice: WebGL2Device | undefined;
 	let activeRegionSource: TauriActiveRegionSource | undefined;
+	let objectDetailOwner: ActiveRegionObjectDetailOwner | undefined;
 	let cameraController: FreeFlyCameraController | undefined;
 	let cameraCoordinator: ExplorerCameraCoordinator | undefined;
 	let frameMetrics: FrameMetrics | null = $state(null);
@@ -105,6 +107,7 @@
 			const pipeline = commitPipeline;
 			const device = webglDevice;
 			const regionSource = activeRegionSource;
+			const detailOwner = objectDetailOwner;
 			const coordinator = cameraCoordinator;
 			const controller = cameraController;
 			gameRuntime = undefined;
@@ -113,6 +116,7 @@
 			commitPipeline = undefined;
 			webglDevice = undefined;
 			activeRegionSource = undefined;
+			objectDetailOwner = undefined;
 			activeRegion = undefined;
 			cameraCoordinator = undefined;
 			cameraController = undefined;
@@ -129,6 +133,7 @@
 						try {
 							await device?.destroy();
 						} finally {
+							detailOwner?.teardown();
 							regionSource?.destroy();
 						}
 					}
@@ -144,6 +149,9 @@
 				if (destroyed) return;
 				const terrainSource = TauriLandblockTerrainSource.build(activeRegion);
 				const texturePixelSource = TauriTexturePixelSource.build();
+				objectDetailOwner = new ActiveRegionObjectDetailOwner(texturePixelSource);
+				await objectDetailOwner.install(activeRegion);
+				if (destroyed) return;
 				webglDevice = await WebGL2Device.build(canvasElement!);
 				if (destroyed) return;
 				commitPipeline = await StandardCommitPipeline.build(terrainSource);

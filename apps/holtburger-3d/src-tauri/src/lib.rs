@@ -15,10 +15,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 mod building_source;
+mod object_texture;
 
 use building_source::{
     BuildingSourceClosure, BuildingSourceManifest, frame_json, prepared_aabb_json,
     prepared_vec3_json, serialize_building_source_binary,
+};
+use object_texture::{
+    ObjectTexturePurpose, PreparedObjectTexture, prepare_object_palette, prepare_object_surface,
 };
 
 const TERRAIN_SOURCE_BINARY_MAGIC: &[u8; 4] = b"HBTR";
@@ -28,7 +32,7 @@ const TEXTURE_PIXELS_BINARY_MAGIC: &[u8; 4] = b"HBTP";
 const TEXTURE_PIXELS_BINARY_VERSION: u32 = 1;
 const ACTIVE_REGION_BINARY_MAGIC: &[u8; 4] = b"HBAR";
 const ACTIVE_REGION_BINARY_VERSION: u32 = 1;
-const BUILDING_SOURCE_BINARY_VERSION: u32 = 1;
+const BUILDING_SOURCE_BINARY_VERSION: u32 = 2;
 
 /// Managed static-content runtime shared by narrow Tauri commands.
 #[derive(Clone)]
@@ -76,6 +80,10 @@ struct LoadTexturePixelsRequest {
     kind: String,
     purpose: String,
     source_asset_id: String,
+    #[serde(default)]
+    render_surface_id: Option<String>,
+    #[serde(default)]
+    palette_domain: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -141,6 +149,8 @@ async fn load_texture_pixels(
         &request.kind,
         &request.purpose,
         &request.source_asset_id,
+        request.render_surface_id.as_deref(),
+        request.palette_domain.as_deref(),
     )
     .await
     .map_err(format_error)?;
@@ -183,6 +193,8 @@ pub async fn load_texture_pixels_bytes(
     kind: &str,
     purpose: &str,
     source_asset_id: &str,
+    render_surface_id: Option<&str>,
+    palette_domain: Option<&str>,
 ) -> Result<Vec<u8>> {
     build_texture_pixels_response(
         runtime,
@@ -190,6 +202,8 @@ pub async fn load_texture_pixels_bytes(
             kind: kind.to_owned(),
             purpose: purpose.to_owned(),
             source_asset_id: source_asset_id.to_owned(),
+            render_surface_id: render_surface_id.map(str::to_owned),
+            palette_domain: palette_domain.map(str::to_owned),
         },
     )
     .await
@@ -295,29 +309,76 @@ async fn build_texture_pixels_response(
     runtime: &ContentAssetRuntime,
     request: LoadTexturePixelsRequest,
 ) -> Result<Vec<u8>> {
-    if request.kind != "prepared-texture-surface" {
-        anyhow::bail!("texture request kind must be prepared-texture-surface");
-    }
-    let output_format = texture_output_format(&request.purpose)?;
-    let surface_texture_id = parse_surface_texture_asset_id(&request.source_asset_id)?;
-    let asset = runtime
-        .load(ContentAssetRequest::SurfaceTexturePixels(
-            SurfaceTexturePixelsRequest {
-                surface_texture_id,
-                output_format,
-            },
-        ))
-        .await
-        .with_context(|| {
-            format!(
-                "Could not load {} pixels from {}",
-                request.purpose, request.source_asset_id
+    let (source_asset_id, source_record_id, prepared) = match request.kind.as_str() {
+        "prepared-texture-surface" => {
+            let output_format = texture_output_format(&request.purpose)?;
+            let surface_texture_id = parse_surface_texture_asset_id(&request.source_asset_id)?;
+            let asset = runtime
+                .load(ContentAssetRequest::SurfaceTexturePixels(
+                    SurfaceTexturePixelsRequest {
+                        surface_texture_id,
+                        output_format,
+                    },
+                ))
+                .await
+                .with_context(|| {
+                    format!(
+                        "Could not load {} pixels from {}",
+                        request.purpose, request.source_asset_id
+                    )
+                })?;
+            let ContentAsset::SurfaceTexturePixels(pixels) = asset else {
+                unreachable!("texture pixel request must return normalized surface pixels")
+            };
+            let format = match pixels.format {
+                TexturePixelFormat::Rgba8 => object_texture::PreparedObjectTextureFormat::Rgba8,
+                TexturePixelFormat::R8 => object_texture::PreparedObjectTextureFormat::R8,
+            };
+            (
+                surface_texture_asset_id(surface_texture_id),
+                dat_id(pixels.render_surface_id),
+                PreparedObjectTexture {
+                    format,
+                    width: pixels.width,
+                    height: pixels.height,
+                    pixels: pixels.pixels,
+                },
             )
-        })?;
-    let ContentAsset::SurfaceTexturePixels(pixels) = asset else {
-        unreachable!("texture pixel request must return normalized surface pixels")
+        }
+        "prepared-object-texture" => {
+            let surface_texture_id = parse_surface_texture_asset_id(&request.source_asset_id)?;
+            let purpose = object_texture_purpose(&request.purpose)?;
+            let surface = load_object_render_surface(
+                runtime,
+                surface_texture_id,
+                request.render_surface_id.as_deref(),
+            )
+            .await?;
+            let source_record_id = dat_id(surface.id);
+            let prepared = prepare_object_surface(&surface, purpose)?;
+            (
+                surface_texture_asset_id(surface_texture_id),
+                source_record_id,
+                prepared,
+            )
+        }
+        "prepared-object-palette" => {
+            if request.purpose != "object-palette" {
+                anyhow::bail!("prepared-object-palette requires object-palette purpose");
+            }
+            let palette_id = parse_palette_asset_id(&request.source_asset_id)?;
+            let domain = object_palette_domain(request.palette_domain.as_deref())?;
+            let asset = runtime
+                .load(ContentAssetRequest::Palette(palette_id))
+                .await?;
+            let ContentAsset::Palette(palette) = asset else {
+                unreachable!("palette request must return a palette")
+            };
+            let prepared = prepare_object_palette(&palette, domain)?;
+            (palette_asset_id(palette_id), dat_id(palette.id), prepared)
+        }
+        _ => anyhow::bail!("unsupported texture request kind {:?}", request.kind),
     };
-    let source_asset_id = surface_texture_asset_id(surface_texture_id);
     let manifest = TexturePixelsManifest {
         transport: "holtburger-texture-pixels",
         version: TEXTURE_PIXELS_BINARY_VERSION,
@@ -326,20 +387,20 @@ async fn build_texture_pixels_response(
         source_asset_id,
         purpose: request.purpose,
         surface: TexturePixelsSurfaceManifest {
-            render_surface_id: format!("0x{:08x}", pixels.render_surface_id),
-            format: texture_pixel_format_name(pixels.format),
-            width: pixels.width,
-            height: pixels.height,
+            source_record_id,
+            format: prepared.format.name(),
+            width: prepared.width,
+            height: prepared.height,
         },
         sections: vec![BinarySectionManifest {
             name: "pixels",
             scalar_type: "u8",
-            element_count: pixels.pixels.len(),
+            element_count: prepared.pixels.len(),
             byte_offset: 0,
-            byte_length: pixels.pixels.len(),
+            byte_length: prepared.pixels.len(),
         }],
     };
-    serialize_texture_pixels_binary(&manifest, &pixels.pixels)
+    serialize_texture_pixels_binary(&manifest, &prepared.pixels)
 }
 
 fn parse_landblock_id(raw_landblock_id: &str) -> Result<u32> {
@@ -359,9 +420,21 @@ fn parse_landblock_id(raw_landblock_id: &str) -> Result<u32> {
 }
 
 fn parse_surface_texture_asset_id(raw_asset_id: &str) -> Result<u32> {
+    parse_typed_asset_id(raw_asset_id, "surface-texture/", 0x05)
+}
+
+fn parse_palette_asset_id(raw_asset_id: &str) -> Result<u32> {
+    parse_typed_asset_id(raw_asset_id, "palette/", 0x04)
+}
+
+fn parse_render_surface_id(raw_asset_id: &str) -> Result<u32> {
+    parse_typed_asset_id(raw_asset_id, "0x", 0x06)
+}
+
+fn parse_typed_asset_id(raw_asset_id: &str, prefix: &str, expected_type: u32) -> Result<u32> {
     let raw_id = raw_asset_id
-        .strip_prefix("surface-texture/")
-        .context("texture source asset id must start with surface-texture/")?;
+        .strip_prefix(prefix)
+        .with_context(|| format!("asset id must start with {prefix:?}"))?;
     let raw_hex = raw_id
         .strip_prefix("0x")
         .or_else(|| raw_id.strip_prefix("0X"))
@@ -371,14 +444,66 @@ fn parse_surface_texture_asset_id(raw_asset_id: &str) -> Result<u32> {
             .chars()
             .all(|character| character.is_ascii_hexdigit())
     {
-        anyhow::bail!("texture source asset id must contain exactly eight hexadecimal digits");
+        anyhow::bail!("asset id must contain exactly eight hexadecimal digits");
     }
-    let id =
-        u32::from_str_radix(raw_hex, 16).context("texture source asset id is not hexadecimal")?;
-    if id >> 24 != 0x05 {
-        anyhow::bail!("texture source asset id must identify a SurfaceTexture record");
+    let id = u32::from_str_radix(raw_hex, 16).context("asset id is not hexadecimal")?;
+    if id >> 24 != expected_type {
+        anyhow::bail!("asset id must identify DAT family 0x{expected_type:02X}");
     }
     Ok(id)
+}
+
+fn object_texture_purpose(raw: &str) -> Result<ObjectTexturePurpose> {
+    match raw {
+        "object-direct-color" => Ok(ObjectTexturePurpose::DirectColor),
+        "object-index-8" => Ok(ObjectTexturePurpose::Index8),
+        "object-index-16" => Ok(ObjectTexturePurpose::Index16),
+        "object-detail" => Ok(ObjectTexturePurpose::Detail),
+        _ => anyhow::bail!("unsupported object texture purpose {raw:?}"),
+    }
+}
+
+fn object_palette_domain(raw: Option<&str>) -> Result<ObjectTexturePurpose> {
+    match raw {
+        Some("index8") => Ok(ObjectTexturePurpose::Index8),
+        Some("index16") => Ok(ObjectTexturePurpose::Index16),
+        _ => anyhow::bail!("object palette request must specify index8 or index16 domain"),
+    }
+}
+
+async fn load_object_render_surface(
+    runtime: &ContentAssetRuntime,
+    surface_texture_id: u32,
+    requested_render_surface_id: Option<&str>,
+) -> Result<Box<holtburger_dat::file_type::RenderSurface>> {
+    let texture_asset = runtime
+        .load(ContentAssetRequest::SurfaceTexture(surface_texture_id))
+        .await
+        .with_context(|| format!("Could not load SurfaceTexture 0x{surface_texture_id:08X}"))?;
+    let ContentAsset::SurfaceTexture(texture) = texture_asset else {
+        unreachable!("surface texture request must return a surface texture")
+    };
+    let candidates = match requested_render_surface_id {
+        Some(raw_id) => {
+            let id = parse_render_surface_id(raw_id)?;
+            if !texture.render_surface_ids.contains(&id) {
+                anyhow::bail!(
+                    "RenderSurface 0x{id:08X} is not declared by SurfaceTexture 0x{surface_texture_id:08X}"
+                );
+            }
+            vec![id]
+        }
+        None => texture.render_surface_ids.clone(),
+    };
+    for render_surface_id in candidates {
+        if let Ok(ContentAsset::RenderSurface(surface)) = runtime
+            .load(ContentAssetRequest::RenderSurface(render_surface_id))
+            .await
+        {
+            return Ok(surface);
+        }
+    }
+    anyhow::bail!("SurfaceTexture 0x{surface_texture_id:08X} has no available RenderSurface level")
 }
 
 fn texture_output_format(purpose: &str) -> Result<TexturePixelFormat> {
@@ -389,19 +514,16 @@ fn texture_output_format(purpose: &str) -> Result<TexturePixelFormat> {
     }
 }
 
-fn texture_pixel_format_name(format: TexturePixelFormat) -> &'static str {
-    match format {
-        TexturePixelFormat::Rgba8 => "rgba8",
-        TexturePixelFormat::R8 => "r8",
-    }
-}
-
 fn format_error(error: anyhow::Error) -> String {
     format!("{error:#}")
 }
 
 fn surface_texture_asset_id(texture_id: u32) -> String {
     format!("surface-texture/0x{texture_id:08x}")
+}
+
+fn palette_asset_id(palette_id: u32) -> String {
+    format!("palette/0x{palette_id:08x}")
 }
 
 /// App-local, versioned transport envelope for the active RegionDesc projection.
@@ -687,7 +809,7 @@ struct TexturePixelsManifest {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TexturePixelsSurfaceManifest {
-    render_surface_id: String,
+    source_record_id: String,
     format: &'static str,
     width: u32,
     height: u32,
@@ -878,6 +1000,7 @@ mod tests {
             texture_coordinates: vec![0.0, 0.0],
             indices: vec![0, 0, 0],
             material_slots: vec![0],
+            material_wrap_modes: vec![1],
         };
         let manifest = BuildingSourceManifest {
             transport: "holtburger-building-source",
@@ -1028,7 +1151,7 @@ mod tests {
             source_asset_id: "surface-texture/0x05000001".to_string(),
             purpose: "terrain-blend-mask".to_string(),
             surface: TexturePixelsSurfaceManifest {
-                render_surface_id: "0x06000001".to_string(),
+                source_record_id: "0x06000001".to_string(),
                 format: "r8",
                 width: 2,
                 height: 2,
@@ -1113,6 +1236,8 @@ mod tests {
                 kind: "prepared-texture-surface".to_string(),
                 purpose: "terrain-color".to_string(),
                 source_asset_id: "surface-texture/0x05000001".to_string(),
+                render_surface_id: None,
+                palette_domain: None,
             },
         )
         .await

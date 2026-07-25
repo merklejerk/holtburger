@@ -28,8 +28,8 @@ interface TexturePixelsManifest {
 	readonly sourceAssetId: string;
 	readonly purpose: string;
 	readonly surface: {
-		readonly renderSurfaceId: string;
-		readonly format: "rgba8" | "r8";
+		readonly sourceRecordId: string;
+		readonly format: "rgba8" | "r8" | "rg8";
 		readonly width: number;
 		readonly height: number;
 	};
@@ -130,7 +130,7 @@ export function decodeTexturePixels(
 		width: manifest.surface.width,
 	};
 	return {
-		kind: "prepared-texture-surface",
+		kind: request.kind,
 		purpose: request.purpose,
 		surface,
 	};
@@ -178,15 +178,19 @@ function requirePixelsSection(sections: readonly PixelSection[]): PixelSection {
 	return section;
 }
 
-function texturePixelFormat(format: "rgba8" | "r8"): TexturePixelFormat {
+function texturePixelFormat(
+	format: "rgba8" | "r8" | "rg8",
+): TexturePixelFormat {
 	if (format === "rgba8") return TexturePixelFormat.RGBA8;
 	if (format === "r8") return TexturePixelFormat.R8;
+	if (format === "rg8") return TexturePixelFormat.RG8;
 	throw new Error(`Unsupported texture-pixel format ${format}.`);
 }
 
 function bytesPerPixel(format: TexturePixelFormat): number {
 	if (format === TexturePixelFormat.RGBA8) return 4;
 	if (format === TexturePixelFormat.R8) return 1;
+	if (format === TexturePixelFormat.RG8) return 2;
 	throw new Error(
 		`Texture-pixel format ${format} has no host byte representation.`,
 	);

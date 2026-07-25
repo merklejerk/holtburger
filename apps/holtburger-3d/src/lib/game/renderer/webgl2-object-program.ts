@@ -27,7 +27,21 @@ void main() {
 }
 `;
 
-const OBJECT_FRAGMENT_SHADER = `#version 300 es
+/** Build the object fragment variant; the unfogged variant omits fog uniforms entirely. */
+export function createObjectFragmentShader(distanceFog: boolean): string {
+	const fogDeclarations = distanceFog
+		? `
+uniform int uFogEnabled;
+uniform float uFogNear;
+uniform float uFogFar;
+uniform vec3 uFogColor;
+
+${WEBGL2_DISTANCE_FOG_GLSL}`
+		: "";
+	const fogApplication = distanceFog
+		? "color.rgb = applyDistanceFog(color.rgb, vHorizontalDistance);"
+		: "";
+	return `#version 300 es
 precision highp float;
 precision highp int;
 precision highp sampler2D;
@@ -47,12 +61,7 @@ uniform vec4 uDetailRect;
 uniform vec4 uMaterialColor;
 uniform float uDetailTiling;
 uniform float uLuminosity;
-uniform int uFogEnabled;
-uniform float uFogNear;
-uniform float uFogFar;
-uniform vec3 uFogColor;
-
-${WEBGL2_DISTANCE_FOG_GLSL}
+${fogDeclarations}
 
 in vec2 vTextureCoordinate;
 in float vHorizontalDistance;
@@ -92,12 +101,13 @@ void main() {
 		color.rgb = mix(color.rgb, detail.rgb, detail.a);
 	}
 	color.rgb += vec3(max(uLuminosity, 0.0));
-	color.rgb = applyDistanceFog(color.rgb, vHorizontalDistance);
+	${fogApplication}
 	fragmentColor = color;
 }
 `;
+}
 
-/** Linked renderer-owned object-material program for opaque and alpha-test building ranges. */
+/** Shared uniforms for all renderer-owned static-object material programs. */
 export interface WebGL2ObjectProgram {
 	readonly program: WebGLProgram;
 	readonly uniforms: {
@@ -108,10 +118,6 @@ export interface WebGL2ObjectProgram {
 		readonly detail: WebGLUniformLocation;
 		readonly detailRect: WebGLUniformLocation;
 		readonly detailTiling: WebGLUniformLocation;
-		readonly fogColor: WebGLUniformLocation;
-		readonly fogEnabled: WebGLUniformLocation;
-		readonly fogFar: WebGLUniformLocation;
-		readonly fogNear: WebGLUniformLocation;
 		readonly landblockOffset: WebGLUniformLocation;
 		readonly localToLandblock: WebGLUniformLocation;
 		readonly luminosity: WebGLUniformLocation;
@@ -128,12 +134,35 @@ export interface WebGL2ObjectProgram {
 	};
 }
 
-/** Compile one renderer-private object program; material facts remain in data-only artifacts. */
+/** Opaque-only program carrying the shared distance-fog uniform contract. */
+export interface WebGL2FogObjectProgram extends WebGL2ObjectProgram {
+	readonly fogUniforms: {
+		readonly fogColor: WebGLUniformLocation;
+		readonly fogEnabled: WebGLUniformLocation;
+		readonly fogFar: WebGLUniformLocation;
+		readonly fogNear: WebGLUniformLocation;
+	};
+}
+
+/** Compile the fogged opaque object-material program. */
 export function createWebGL2ObjectProgram(
 	gl: WebGL2RenderingContext,
-): WebGL2ObjectProgram {
+): WebGL2FogObjectProgram;
+/** Compile an unfogged program for transparent and additive static materials. */
+export function createWebGL2ObjectProgram(
+	gl: WebGL2RenderingContext,
+	options: { readonly distanceFog: false },
+): WebGL2ObjectProgram;
+export function createWebGL2ObjectProgram(
+	gl: WebGL2RenderingContext,
+	options: { readonly distanceFog: boolean } = { distanceFog: true },
+): WebGL2ObjectProgram | WebGL2FogObjectProgram {
 	const vertexShader = compileWebGL2Shader(gl, gl.VERTEX_SHADER, OBJECT_VERTEX_SHADER);
-	const fragmentShader = compileWebGL2Shader(gl, gl.FRAGMENT_SHADER, OBJECT_FRAGMENT_SHADER);
+	const fragmentShader = compileWebGL2Shader(
+		gl,
+		gl.FRAGMENT_SHADER,
+		createObjectFragmentShader(options.distanceFog),
+	);
 	const program = gl.createProgram();
 	if (!program) throw new Error("Failed to allocate object shader program.");
 	try {
@@ -143,7 +172,7 @@ export function createWebGL2ObjectProgram(
 		if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
 			throw new Error(`Failed to link object shader program: ${gl.getProgramInfoLog(program) ?? "unknown error"}`);
 		}
-		return {
+		const objectProgram: WebGL2ObjectProgram = {
 			program,
 			uniforms: {
 				alphaTest: requireWebGL2Uniform(gl, program, "uAlphaTest"),
@@ -153,10 +182,6 @@ export function createWebGL2ObjectProgram(
 				detail: requireWebGL2Uniform(gl, program, "uDetail"),
 				detailRect: requireWebGL2Uniform(gl, program, "uDetailRect"),
 				detailTiling: requireWebGL2Uniform(gl, program, "uDetailTiling"),
-				fogColor: requireWebGL2Uniform(gl, program, "uFogColor"),
-				fogEnabled: requireWebGL2Uniform(gl, program, "uFogEnabled"),
-				fogFar: requireWebGL2Uniform(gl, program, "uFogFar"),
-				fogNear: requireWebGL2Uniform(gl, program, "uFogNear"),
 				landblockOffset: requireWebGL2Uniform(gl, program, "uLandblockOffset"),
 				localToLandblock: requireWebGL2Uniform(gl, program, "uLocalToLandblock"),
 				luminosity: requireWebGL2Uniform(gl, program, "uLuminosity"),
@@ -170,6 +195,16 @@ export function createWebGL2ObjectProgram(
 				useDetail: requireWebGL2Uniform(gl, program, "uUseDetail"),
 				view: requireWebGL2Uniform(gl, program, "uView"),
 				wrapRepeat: requireWebGL2Uniform(gl, program, "uWrapRepeat"),
+			},
+		};
+		if (!options.distanceFog) return objectProgram;
+		return {
+			...objectProgram,
+			fogUniforms: {
+				fogColor: requireWebGL2Uniform(gl, program, "uFogColor"),
+				fogEnabled: requireWebGL2Uniform(gl, program, "uFogEnabled"),
+				fogFar: requireWebGL2Uniform(gl, program, "uFogFar"),
+				fogNear: requireWebGL2Uniform(gl, program, "uFogNear"),
 			},
 		};
 	} catch (error) {

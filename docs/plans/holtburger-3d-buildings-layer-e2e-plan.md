@@ -1,6 +1,6 @@
 # Holtburger 3D Buildings Layer End-to-End Plan
 
-Status: Active. Phases 0–7 are complete; Phase 8 transparent and additive rendering is active.
+Status: Active. Phases 0–8 are complete; Phase 9 end-to-end proof and diagnostics is active.
 
 ## Context and Boundaries
 
@@ -906,16 +906,16 @@ merge ranges based on page placement, or project promoted residents into a diagn
 
 #### Task Checklist
 
-- [ ] Verify transparent and additive blend factors against `D3DPolyRender::SetSurface` in the
+- [x] Verify transparent and additive blend factors against `D3DPolyRender::SetSurface` in the
       retail-client decompile.
-- [ ] Test stable far ordering.
-- [ ] Test near back-to-front ordering and equal-distance stable-ID ties.
-- [ ] Test ranges crossing the near-sort threshold.
-- [ ] Test threshold behavior through the exported runtime constant with no duplicated magic value.
-- [ ] Test that opaque and alpha-test ordering is unaffected.
-- [ ] Test that additive draws are never sent through the transparency sorter.
-- [ ] Test that transparent and additive programs do not apply distance fog.
-- [ ] Confirm transparent blending remains correct when page-binding minimization conflicts with
+- [x] Test stable far ordering.
+- [x] Test near back-to-front ordering and equal-distance stable-ID ties.
+- [x] Test ranges crossing the near-sort threshold.
+- [x] Test threshold behavior through the exported runtime constant with no duplicated magic value.
+- [x] Test that opaque and alpha-test ordering is unaffected.
+- [x] Test that additive draws are never sent through the transparency sorter.
+- [x] Test that transparent and additive programs do not apply distance fog.
+- [x] Confirm transparent blending remains correct when page-binding minimization conflicts with
       draw order; transparency ordering must win.
 
 #### Acceptance Criteria
@@ -931,7 +931,19 @@ merge ranges based on page placement, or project promoted residents into a diagn
 
 #### Decisions and Course Corrections
 
-- To be filled during execution.
+- `acclient-eor-source/acclient.c`'s `D3DPolyRender::SetSurface` proves the ALPHA, INVALPHA,
+  and ADDITIVE factor pairs directly. The renderer compiles those facts from app-local source
+  flags only; no renderer policy leaks into the content contract.
+- The near-sort constant remains 16 world units. Transparent centers are transformed from baked
+  object-local coordinates through the resident placement and into the anchor-relative frame
+  before comparing with the camera. A material-binding sort must never reorder transparent ranges
+  before this policy; opaque and alpha-test still retain their deterministic binding clustering.
+- Blended materials use a distinct linked shader which omits fog uniforms and fog GLSL, rather
+  than a fogged shader with a disabled uniform. This makes the no-fog presentation policy
+  structural and auditable.
+- The focused Phase 8 tests use synthetic policy/material fixtures. Phase 9 remains responsible
+  for browser-visible transparent/additive fixtures because authored DA55 Level 1 data has neither
+  pass class.
 
 ### Phase 9: End-to-End Proof, Diagnostics, and Explorer Integration
 
@@ -1565,6 +1577,26 @@ Verification:
   implementation intentionally rejects in-place reuse of an active page ID; a future deliberate
   repack must publish a fresh candidate ID through the same arbitration path rather than mutate an
   active page under readers.
+
+### 2026-07-25 — Phase 8 complete
+
+- Added `STATIC_TRANSPARENT_SORT_DISTANCE` (16 world units) and its derived squared constant in
+  one renderer-local policy module. Synthetic tests prove near back-to-front sorting, stable
+  equal-distance IDs, and preservation of deterministic baked order beyond the threshold.
+- Transparent and additive ranges now leave the opaque/alpha-test pass for a separate depth-test,
+  depth-write-disabled renderer phase. Transparent source flags select alpha or inverse-alpha
+  blending; additive flags select alpha-additive, inverse-alpha-additive, or unmodulated additive
+  blending. Policy tests cover every factor pair.
+- The blended phase uses a dedicated object shader that has no fog uniforms or fog branch at all.
+  Transparent sort centers are transformed into the anchor-relative render frame before comparing
+  with the camera; this corrects the initial local-space-only implementation. Transparent order
+  wins over texture-page binding minimization, while additive order is deterministic by complete
+  material binding.
+- Direct review of `D3DPolyRender::SetSurface` in the retail decompile proved the ALPHA,
+  INVALPHA, and ADDITIVE source/destination pairs. The Phase 8 policy suite covers each pair,
+  near and far ordering, equal-distance IDs, the threshold crossing, and absence of fog symbols
+  from the blended shader. DA55's browser harness still passes (43 ranges; 4,978 triangles); its
+  source population has no blended ranges, so Phase 9 owns browser-visible synthetic coverage.
 
 Add dated progress, concessions, verification, and new cleanup targets here after every completed
 phase.

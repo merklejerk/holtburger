@@ -8,6 +8,7 @@ import {
 	createPerspectiveMat4,
 	createViewMat4,
 	mat4ToFloat32Array,
+	transformPoint3,
 } from "../math/matrices";
 import { createFrustum, type Frustum } from "../math/frustum";
 import { Mat4, Vec3 } from "../math/types";
@@ -33,9 +34,15 @@ import {
 } from "./webgl2-terrain-program";
 import {
 	createWebGL2ObjectProgram,
+	type WebGL2FogObjectProgram,
 	type WebGL2ObjectProgram,
 } from "./webgl2-object-program";
 import { bindWebGL2DistanceFog } from "./webgl2-fog";
+import {
+	objectBlendPolicy,
+	sortTransparentStaticRanges,
+	transparentSortFacts,
+} from "./object-rendering-policy";
 
 const CLEAR_COLOR = {
 	red: 0.15,
@@ -107,7 +114,9 @@ export class WebGL2Renderer implements Renderer {
 	/** Read-only runtime gateway used to collect this renderer's frame submissions. */
 	readonly #world: RenderWorld;
 	readonly #terrainProgram: WebGL2TerrainProgram;
-	readonly #objectProgram: WebGL2ObjectProgram;
+	readonly #objectProgram: WebGL2FogObjectProgram;
+	/** Transparent and additive materials deliberately use a shader with no fog uniforms. */
+	readonly #blendedObjectProgram: WebGL2ObjectProgram;
 	/** Float-compatible fallback keeps inactive object samplers independent from terrain bindings. */
 	readonly #objectFallbackTexture: WebGLTexture;
 	/** Reused per-frame diagnostics; cold reads return a copied snapshot. */
@@ -148,6 +157,9 @@ export class WebGL2Renderer implements Renderer {
 		this.#world = world;
 		this.#terrainProgram = createWebGL2TerrainProgram(gl);
 		this.#objectProgram = createWebGL2ObjectProgram(gl);
+		this.#blendedObjectProgram = createWebGL2ObjectProgram(gl, {
+			distanceFog: false,
+		});
 		this.#objectFallbackTexture = createObjectFallbackTexture(gl);
 		gl.clearColor(
 			CLEAR_COLOR.red,
@@ -178,6 +190,7 @@ export class WebGL2Renderer implements Renderer {
 	async destroy(): Promise<void> {
 		this.#gl.deleteProgram(this.#terrainProgram.program);
 		this.#gl.deleteProgram(this.#objectProgram.program);
+		this.#gl.deleteProgram(this.#blendedObjectProgram.program);
 		this.#gl.deleteTexture(this.#objectFallbackTexture);
 	}
 
@@ -265,11 +278,7 @@ export class WebGL2Renderer implements Renderer {
 					contribution.renderable,
 				);
 				for (const resolved of node.drawUnits) {
-					if (
-						resolved.drawUnit.kind !== "baked" ||
-						(resolved.drawUnit.ordering !== "opaque" &&
-							resolved.drawUnit.ordering !== "alpha-test")
-					)
+					if (resolved.drawUnit.kind !== "baked")
 						continue;
 					objects.push({
 						drawUnit: resolved.drawUnit,
@@ -316,6 +325,12 @@ export class WebGL2Renderer implements Renderer {
 			if (drawUnit) void this.#world.resolvePortalDrawUnit(drawUnit);
 		}
 		objects.sort((left, right) => {
+			if (
+				left.drawUnit.ordering === "transparent" &&
+				right.drawUnit.ordering === "transparent"
+			) {
+				return 0;
+			}
 			const ordering = left.drawUnit.ordering.localeCompare(right.drawUnit.ordering);
 			if (ordering !== 0) return ordering;
 			return objectMaterialSortKey(left.drawUnit).localeCompare(
@@ -346,6 +361,7 @@ export class WebGL2Renderer implements Renderer {
 	): void {
 		this.#drawTerrain(view, fog);
 		this.#drawOpaqueObjects(view, fog);
+		this.#drawBlendedObjects(view);
 		this.#gl.bindVertexArray(null);
 	}
 
@@ -499,7 +515,11 @@ export class WebGL2Renderer implements Renderer {
 		view: PreparedView,
 		fog: FrameInput["environment"]["distanceFog"],
 	): void {
-		if (view.objects.length === 0) return;
+		const objects = view.objects.filter(
+			({ drawUnit }) =>
+				drawUnit.ordering === "opaque" || drawUnit.ordering === "alpha-test",
+		);
+		if (objects.length === 0) return;
 		const gl = this.#gl;
 		gl.depthMask(true);
 		gl.disable(gl.BLEND);
@@ -528,17 +548,77 @@ export class WebGL2Renderer implements Renderer {
 			view.cameraPosition.x,
 			view.cameraPosition.z,
 		);
-		bindWebGL2DistanceFog(gl, this.#objectProgram.uniforms, fog);
-		for (const object of view.objects) this.#drawObjectRange(object, view);
+		bindWebGL2DistanceFog(gl, this.#objectProgram.fogUniforms, fog);
+		for (const object of objects) {
+			this.#drawObjectRange(this.#objectProgram, object, view);
+		}
 	}
 
-	#drawObjectRange(object: ObjectFrameInput, view: PreparedView): void {
+	#drawBlendedObjects(view: PreparedView): void {
+		const transparent = view.objects.filter(
+			({ drawUnit }) => drawUnit.ordering === "transparent",
+		);
+		const additive = view.objects
+			.filter(({ drawUnit }) => drawUnit.ordering === "additive")
+			.sort((left, right) =>
+				objectMaterialSortKey(left.drawUnit).localeCompare(
+					objectMaterialSortKey(right.drawUnit),
+				),
+			);
+		if (transparent.length === 0 && additive.length === 0) return;
+		const sortedTransparent = sortTransparentStaticRanges(
+			transparent.map((object) => {
+				const facts = transparentSortFacts(object.drawUnit);
+				if (!facts) throw new Error("Transparent building range lacks sort facts.");
+				const landblockCenter = transformPoint3(
+					object.localToLandblock,
+					facts.center,
+				);
+				const offset = createLandblockOffset(
+					getLandblockCoordinates(object.landblockId),
+					view.anchorCoordinates,
+				);
+				return {
+					center: landblockCenter.add(offset),
+					range: object,
+					stableId: facts.stableId,
+				};
+			}),
+			view.cameraPosition,
+		).map(({ range }) => range);
+		const gl = this.#gl;
+		gl.depthMask(false);
+		gl.enable(gl.BLEND);
+		gl.useProgram(this.#blendedObjectProgram.program);
+		this.#frameSelectionMetrics.objectProgramChanges += 1;
+		for (const [unit, uniform] of [
+			[0, this.#blendedObjectProgram.uniforms.base],
+			[1, this.#blendedObjectProgram.uniforms.palette],
+			[2, this.#blendedObjectProgram.uniforms.detail],
+		] as const) {
+			this.#bindObjectTexture(unit, this.#objectFallbackTexture, TextureFilteringMode.Nearest);
+			gl.uniform1i(uniform, unit);
+		}
+		gl.uniformMatrix4fv(this.#blendedObjectProgram.uniforms.projection, false, mat4ToFloat32Array(view.projection, this.#matrixScratch));
+		gl.uniformMatrix4fv(this.#blendedObjectProgram.uniforms.view, false, mat4ToFloat32Array(view.view, this.#matrixScratch));
+		gl.uniform2f(this.#blendedObjectProgram.uniforms.cameraHorizontalPosition, view.cameraPosition.x, view.cameraPosition.z);
+		for (const object of [...sortedTransparent, ...additive]) {
+			this.#configureObjectBlend(object.drawUnit);
+			this.#drawObjectRange(this.#blendedObjectProgram, object, view);
+		}
+	}
+
+	#drawObjectRange(
+		program: WebGL2ObjectProgram,
+		object: ObjectFrameInput,
+		view: PreparedView,
+	): void {
 		const { drawUnit } = object;
 		const { material } = drawUnit;
 		const gl = this.#gl;
 		this.#configureObjectCulling(material.polygon.cullMode);
 		gl.uniformMatrix4fv(
-			this.#objectProgram.uniforms.localToLandblock,
+			program.uniforms.localToLandblock,
 			false,
 			mat4ToFloat32Array(object.localToLandblock, this.#matrixScratch),
 		);
@@ -548,21 +628,21 @@ export class WebGL2Renderer implements Renderer {
 			this.#offsetScratch,
 		);
 		gl.uniform3f(
-			this.#objectProgram.uniforms.landblockOffset,
+			program.uniforms.landblockOffset,
 			offset.x,
 			offset.y,
 			offset.z,
 		);
 		gl.uniform1i(
-			this.#objectProgram.uniforms.wrapRepeat,
+			program.uniforms.wrapRepeat,
 			material.sampler.wrap === TextureWrapMode.Repeat ? 1 : 0,
 		);
 		gl.uniform1i(
-			this.#objectProgram.uniforms.palettedClipMap,
+			program.uniforms.palettedClipMap,
 			material.palettedClipMap ? 1 : 0,
 		);
 		gl.uniform1f(
-			this.#objectProgram.uniforms.alphaTest,
+			program.uniforms.alphaTest,
 			drawUnit.ordering === "alpha-test" && material.source.kind === "texture"
 				? 200 / 255
 				: 0,
@@ -571,9 +651,9 @@ export class WebGL2Renderer implements Renderer {
 		const diffuse = Math.max(0, material.source.diffuseScale);
 		if (material.source.kind === "solid-color") {
 			const [red, green, blue, alpha] = material.source.color;
-			gl.uniform1i(this.#objectProgram.uniforms.materialKind, 0);
+			gl.uniform1i(program.uniforms.materialKind, 0);
 			gl.uniform4f(
-				this.#objectProgram.uniforms.materialColor,
+				program.uniforms.materialColor,
 				red * diffuse,
 				green * diffuse,
 				blue * diffuse,
@@ -585,40 +665,40 @@ export class WebGL2Renderer implements Renderer {
 			const baseBinding = this.#world.resolveAtlasTexture(base);
 			const baseResource = this.#resources.getTexture2D(baseBinding.resource);
 			this.#bindObjectTexture(0, baseResource.texture, material.sampler.filtering);
-			this.#setAtlasRect(this.#objectProgram.uniforms.baseRect, baseBinding.placement.bounds, baseResource.width, baseResource.height);
-			gl.uniform1i(this.#objectProgram.uniforms.base, 0);
+			this.#setAtlasRect(program.uniforms.baseRect, baseBinding.placement.bounds, baseResource.width, baseResource.height);
+			gl.uniform1i(program.uniforms.base, 0);
 			gl.uniform1i(
-				this.#objectProgram.uniforms.materialKind,
+				program.uniforms.materialKind,
 				material.source.textureEncoding === "direct-color"
 					? 1
 					: material.source.textureEncoding === "index8"
 						? 2
 						: 3,
 			);
-			gl.uniform4f(this.#objectProgram.uniforms.materialColor, diffuse, diffuse, diffuse, opacity);
+			gl.uniform4f(program.uniforms.materialColor, diffuse, diffuse, diffuse, opacity);
 			if (material.source.textureEncoding !== "direct-color") {
 				const palette = material.textures.palette;
 				if (!palette) throw new Error(`Indexed material ${material.source.id} has no palette texture.`);
 				const paletteBinding = this.#world.resolveAtlasTexture(palette);
 				const paletteResource = this.#resources.getTexture2D(paletteBinding.resource);
 				this.#bindObjectTexture(1, paletteResource.texture, TextureFilteringMode.Nearest);
-				this.#setAtlasRect(this.#objectProgram.uniforms.paletteRect, paletteBinding.placement.bounds, paletteResource.width, paletteResource.height);
-				gl.uniform1f(this.#objectProgram.uniforms.paletteWidth, paletteBinding.placement.bounds.max.x - paletteBinding.placement.bounds.min.x);
-				gl.uniform1i(this.#objectProgram.uniforms.palette, 1);
+				this.#setAtlasRect(program.uniforms.paletteRect, paletteBinding.placement.bounds, paletteResource.width, paletteResource.height);
+				gl.uniform1f(program.uniforms.paletteWidth, paletteBinding.placement.bounds.max.x - paletteBinding.placement.bounds.min.x);
+				gl.uniform1i(program.uniforms.palette, 1);
 			}
 		}
 		const detail = this.#world.resolveActiveRegionObjectDetail();
 		if (detail && (material.source.rawSurfaceFlags & 0x20000) !== 0) {
 			const resource = this.#resources.getTexture2D(this.#world.resolveTexture2D(detail.key));
 			this.#bindObjectTexture(2, resource.texture, TextureFilteringMode.Linear);
-			gl.uniform4f(this.#objectProgram.uniforms.detailRect, 0, 0, 1, 1);
-			gl.uniform1f(this.#objectProgram.uniforms.detailTiling, detail.tiling);
-			gl.uniform1i(this.#objectProgram.uniforms.detail, 2);
-			gl.uniform1i(this.#objectProgram.uniforms.useDetail, 1);
+			gl.uniform4f(program.uniforms.detailRect, 0, 0, 1, 1);
+			gl.uniform1f(program.uniforms.detailTiling, detail.tiling);
+			gl.uniform1i(program.uniforms.detail, 2);
+			gl.uniform1i(program.uniforms.useDetail, 1);
 		} else {
-			gl.uniform1i(this.#objectProgram.uniforms.useDetail, 0);
+			gl.uniform1i(program.uniforms.useDetail, 0);
 		}
-		gl.uniform1f(this.#objectProgram.uniforms.luminosity, material.source.luminosity);
+		gl.uniform1f(program.uniforms.luminosity, material.source.luminosity);
 		const geometry = this.#resources.getGeometry(object.geometry);
 		validateDrawRange(geometry, drawUnit.indexStart, drawUnit.indexCount);
 		gl.bindVertexArray(geometry.vertexArray);
@@ -671,6 +751,23 @@ export class WebGL2Renderer implements Renderer {
 		}
 		gl.enable(gl.CULL_FACE);
 		gl.cullFace(mode === "counter-clockwise" ? gl.FRONT : gl.BACK);
+	}
+
+	#configureObjectBlend(drawUnit: StaticObjectDrawUnit): void {
+		const policy = objectBlendPolicy(drawUnit.material.source.rawSurfaceFlags);
+		const gl = this.#gl;
+		gl.blendFunc(
+			policy.source === "one"
+				? gl.ONE
+				: policy.source === "src-alpha"
+					? gl.SRC_ALPHA
+					: gl.ONE_MINUS_SRC_ALPHA,
+			policy.destination === "one"
+				? gl.ONE
+				: policy.destination === "src-alpha"
+					? gl.SRC_ALPHA
+					: gl.ONE_MINUS_SRC_ALPHA,
+		);
 	}
 
 	#resizeCanvasForDpr(): void {

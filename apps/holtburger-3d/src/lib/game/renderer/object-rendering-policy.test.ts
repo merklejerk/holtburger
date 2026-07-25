@@ -6,17 +6,15 @@ import {
 	objectBlendPolicy,
 	sortTransparentStaticRanges,
 } from "./object-rendering-policy";
-import { createObjectFragmentShader } from "./webgl2-object-program";
+import {
+	createObjectFragmentShader,
+	createObjectVertexShader,
+} from "./webgl2-object-program";
 
 describe("sortTransparentStaticRanges", () => {
 	it("sorts nearby ranges back-to-front with stable equal-distance ties", () => {
 		const sorted = sortTransparentStaticRanges(
-			[
-				entry("tie-b", 4),
-				entry("near", 2),
-				entry("far", 8),
-				entry("tie-a", 4),
-			],
+			[entry("tie-b", 4), entry("near", 2), entry("far", 8), entry("tie-a", 4)],
 			Vec3.zero(),
 		);
 
@@ -64,17 +62,38 @@ describe("object fragment variants", () => {
 		expect(createObjectFragmentShader(false)).not.toContain("uFogEnabled");
 		expect(createObjectFragmentShader(false)).not.toContain("applyDistanceFog");
 		expect(createObjectFragmentShader(true)).toContain("uFogEnabled");
+		expect(createObjectVertexShader(false)).not.toContain(
+			"uCameraHorizontalPosition",
+		);
 	});
 });
 
 describe("objectBlendPolicy", () => {
 	it("preserves retail alpha, inverse-alpha, and additive factor variants", () => {
-		expect(objectBlendPolicy(0)).toEqual({ destination: "one-minus-src-alpha", source: "src-alpha" });
-		expect(objectBlendPolicy(0x100)).toEqual({ destination: "one-minus-src-alpha", source: "src-alpha" });
-		expect(objectBlendPolicy(0x200)).toEqual({ destination: "src-alpha", source: "one-minus-src-alpha" });
-		expect(objectBlendPolicy(0x10000)).toEqual({ destination: "one", source: "one" });
-		expect(objectBlendPolicy(0x10100)).toEqual({ destination: "one", source: "src-alpha" });
-		expect(objectBlendPolicy(0x10200)).toEqual({ destination: "one", source: "one-minus-src-alpha" });
+		expect(objectBlendPolicy(0)).toEqual({
+			destination: "one-minus-src-alpha",
+			source: "src-alpha",
+		});
+		expect(objectBlendPolicy(0x100)).toEqual({
+			destination: "one-minus-src-alpha",
+			source: "src-alpha",
+		});
+		expect(objectBlendPolicy(0x200)).toEqual({
+			destination: "src-alpha",
+			source: "one-minus-src-alpha",
+		});
+		expect(objectBlendPolicy(0x10000)).toEqual({
+			destination: "one",
+			source: "one",
+		});
+		expect(objectBlendPolicy(0x10100)).toEqual({
+			destination: "one",
+			source: "src-alpha",
+		});
+		expect(objectBlendPolicy(0x10200)).toEqual({
+			destination: "one",
+			source: "one-minus-src-alpha",
+		});
 	});
 });
 

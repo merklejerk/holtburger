@@ -714,6 +714,8 @@ pub struct PreparedPolygonSetRenderGeometry {
 pub struct PreparedPolygonSetRenderTriangle {
     pub polygon_id: u16,
     pub surface_id: Option<i16>,
+    /// Authored polygon side expanded into this triangle, including CullMode.None's reverse side.
+    pub side_kind: PreparedPolygonRenderSideKind,
     pub material_variant_signature: String,
     pub first_vertex: usize,
 }
@@ -3974,7 +3976,7 @@ enum PolygonRenderSidePolicy {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PreparedPolygonRenderSideKind {
+pub enum PreparedPolygonRenderSideKind {
     Positive,
     PositiveReversed,
     Negative,
@@ -4165,6 +4167,7 @@ fn append_polygon_render_side_geometry(
         buffers.triangles.push(PreparedPolygonSetRenderTriangle {
             polygon_id,
             surface_id: render_side.surface_id,
+            side_kind: render_side.kind,
             material_variant_signature: render_side.material_variant_signature.to_string(),
             first_vertex: buffers.positions.len() / 3,
         });

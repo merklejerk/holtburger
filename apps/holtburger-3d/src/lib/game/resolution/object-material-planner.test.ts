@@ -27,16 +27,18 @@ describe("object material planning", () => {
 		);
 		expect(plan.baseTexture).toContain("object-index-16");
 		expect(plan.paletteTexture).toContain("object-palette");
-		expect(plan.textureRequests).toEqual([
+		expect(plan.textureRequirements).toEqual([
 			{
-				kind: "prepared-object-texture",
+				kind: "asset",
+				key: plan.baseTexture,
 				purpose: "object-index-16",
-				sourceAssetId: "surface-texture/0x05000001",
+				sourceAssetId: "0x05000001",
 			},
 			{
-				kind: "prepared-object-palette",
+				kind: "asset",
+				key: plan.paletteTexture,
 				purpose: "object-palette",
-				sourceAssetId: "palette/0x04000001",
+				sourceAssetId: "0x04000001",
 			},
 		]);
 	});

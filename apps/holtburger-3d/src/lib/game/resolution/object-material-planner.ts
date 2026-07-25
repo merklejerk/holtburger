@@ -1,14 +1,11 @@
 import type { ResolvedMaterial } from "./presentation";
-import type {
-	ObjectPalettePreparationServiceRequest,
-	ObjectTexturePreparationServiceRequest,
-} from "../textures/texture-preparer";
 import {
 	createAssetTextureKey,
 	TextureFilteringMode,
 	TexturePurpose,
 	TextureWrapMode,
 	type AssetTextureKey,
+	type AssetTextureFact,
 	type TextureSamplerPolicy,
 } from "../textures/types";
 
@@ -27,11 +24,8 @@ export interface ObjectMaterialPlan {
 	readonly baseTexture: AssetTextureKey | null;
 	readonly paletteTexture: AssetTextureKey | null;
 	readonly sampler: TextureSamplerPolicy;
-	/** Closed app-local pixel requests; atlas placement and device state remain absent. */
-	readonly textureRequests: readonly (
-		| ObjectTexturePreparationServiceRequest
-		| ObjectPalettePreparationServiceRequest
-	)[];
+	/** Complete logical source requirements; pixel request routing derives from these facts. */
+	readonly textureRequirements: readonly AssetTextureFact[];
 	/** Retail clip maps discard indexed palette entries below eight during later shader compilation. */
 	readonly palettedClipMap: boolean;
 }
@@ -56,7 +50,7 @@ export function planObjectMaterial(
 			baseTexture: null,
 			paletteTexture: null,
 			sampler: sampler(wrap, TextureFilteringMode.Linear),
-			textureRequests: [],
+			textureRequirements: [],
 			palettedClipMap: false,
 		};
 	}
@@ -67,28 +61,31 @@ export function planObjectMaterial(
 				? TexturePurpose.ObjectIndex8
 				: TexturePurpose.ObjectIndex16;
 	const baseTexture = createAssetTextureKey(purpose, material.colorTextureId);
+	const baseTextureRequirement: AssetTextureFact = {
+		kind: "asset",
+		key: baseTexture,
+		purpose,
+		sourceAssetId: material.colorTextureId,
+	};
 	const paletteTexture = material.paletteTextureId
 		? createAssetTextureKey(TexturePurpose.ObjectPalette, material.paletteTextureId)
 		: null;
 	if (material.textureEncoding !== "direct-color" && paletteTexture === null) {
 		throw new Error(`Indexed material ${material.id} has no palette dependency.`);
 	}
-	const textureRequests: Array<
-		ObjectTexturePreparationServiceRequest | ObjectPalettePreparationServiceRequest
-	> = [
-		{
-			kind: "prepared-object-texture",
-			purpose,
-			sourceAssetId: surfaceTextureAssetId(material.colorTextureId),
-		},
+	const textureRequirements = [
+		baseTextureRequirement,
+		...(material.paletteTextureId === null
+			? []
+			: [
+					{
+						kind: "asset" as const,
+						key: paletteTexture!,
+						purpose: TexturePurpose.ObjectPalette,
+						sourceAssetId: material.paletteTextureId,
+					},
+				]),
 	];
-	if (material.paletteTextureId !== null) {
-		textureRequests.push({
-			kind: "prepared-object-palette",
-			purpose: TexturePurpose.ObjectPalette,
-			sourceAssetId: paletteAssetId(material.paletteTextureId),
-		});
-	}
 	return {
 		id: bindingId(material, ordering, wrap, baseTexture, paletteTexture),
 		material,
@@ -101,7 +98,7 @@ export function planObjectMaterial(
 				? TextureFilteringMode.Linear
 				: TextureFilteringMode.Nearest,
 		),
-		textureRequests,
+		textureRequirements,
 		palettedClipMap:
 			material.textureEncoding !== "direct-color" &&
 			(flags(material) & SURFACE_BASE1_CLIP_MAP) !== 0,
@@ -134,14 +131,6 @@ function sampler(
 
 function flags(material: ResolvedMaterial): number {
 	return material.rawSurfaceFlags;
-}
-
-function surfaceTextureAssetId(id: string): `surface-texture/${string}` {
-	return `surface-texture/${id}`;
-}
-
-function paletteAssetId(id: string): `palette/${string}` {
-	return `palette/${id}`;
 }
 
 function bindingId(

@@ -1,27 +1,16 @@
-import type { DatAssetId } from "../game-types";
 import type { ResolvedObjectLayerSource } from "../resolution/landblock-layer";
 import { planObjectMaterial } from "../resolution/object-material-planner";
-import type { TexturePreparationServiceRequest } from "../textures/texture-preparer";
 import {
-	TextureWrapMode,
 	type AssetTextureFact,
 	type AssetTextureKey,
-	type TexturePurpose,
+	TextureWrapMode,
 } from "../textures/types";
-
-/** One complete logical building texture requirement beside its active page-pack input. */
-export interface BuildingTextureDependency {
-	readonly fact: AssetTextureFact;
-	readonly key: AssetTextureKey;
-	readonly purpose: TexturePurpose;
-	readonly request: TexturePreparationServiceRequest;
-}
 
 /** Collect exactly the logical pixel dependencies used by static object triangles. */
 export function collectBuildingTextureDependencies(
 	source: ResolvedObjectLayerSource,
-): readonly BuildingTextureDependency[] {
-	const dependencies = new Map<AssetTextureKey, BuildingTextureDependency>();
+): readonly AssetTextureFact[] {
+	const dependencies = new Map<AssetTextureKey, AssetTextureFact>();
 	for (const resident of source.staticResidents) {
 		for (const part of resident.presentation.parts) {
 			for (const [
@@ -40,8 +29,7 @@ export function collectBuildingTextureDependencies(
 						? TextureWrapMode.Repeat
 						: TextureWrapMode.Clamp,
 				);
-				addDependency(dependencies, plan.baseTexture, plan.textureRequests);
-				addDependency(dependencies, plan.paletteTexture, plan.textureRequests);
+				addDependencies(dependencies, plan.textureRequirements);
 			}
 		}
 	}
@@ -50,63 +38,21 @@ export function collectBuildingTextureDependencies(
 	);
 }
 
-function addDependency(
-	target: Map<AssetTextureKey, BuildingTextureDependency>,
-	key: AssetTextureKey | null,
-	requests: readonly TexturePreparationServiceRequest[],
+function addDependencies(
+	target: Map<AssetTextureKey, AssetTextureFact>,
+	facts: readonly AssetTextureFact[],
 ): void {
-	if (key === null) return;
-	const request = requests.find((candidate) =>
-		requestMatchesKey(candidate, key),
-	);
-	if (!request)
-		throw new Error(`Material plan lacks a pixel request for ${key}.`);
-	const existing = target.get(key);
-	if (existing) {
+	for (const fact of facts) {
+		const existing = target.get(fact.key);
 		if (
-			existing.fact.sourceAssetId !== sourceAssetIdForKey(key) ||
-			existing.purpose !== request.purpose ||
-			existing.request.kind !== request.kind ||
-			existing.request.sourceAssetId !== request.sourceAssetId
+			existing &&
+			(existing.purpose !== fact.purpose ||
+				existing.sourceAssetId !== fact.sourceAssetId)
 		) {
 			throw new Error(
-				`Logical texture ${key} has incompatible closed pixel requests.`,
+				`Logical texture ${fact.key} has incompatible source requirements.`,
 			);
 		}
-		return;
+		target.set(fact.key, fact);
 	}
-	target.set(key, {
-		fact: {
-			kind: "asset",
-			key,
-			purpose: request.purpose,
-			sourceAssetId: sourceAssetIdForKey(key),
-		},
-		key,
-		purpose: request.purpose,
-		request,
-	});
-}
-
-/** Recover the logical DAT identity only after the closed request/key compatibility check. */
-function sourceAssetIdForKey(key: AssetTextureKey): DatAssetId {
-	const [, , sourceAssetId] = key.split(":", 3);
-	if (!sourceAssetId)
-		throw new Error(`Texture key ${key} has no source asset identity.`);
-	return sourceAssetId;
-}
-
-function requestMatchesKey(
-	request: TexturePreparationServiceRequest,
-	key: AssetTextureKey,
-): boolean {
-	const [, purpose, sourceAssetId] = key.split(":", 3);
-	if (purpose !== request.purpose) return false;
-	if (request.kind === "prepared-object-texture") {
-		return request.sourceAssetId === `surface-texture/${sourceAssetId}`;
-	}
-	if (request.kind === "prepared-object-palette") {
-		return request.sourceAssetId === `palette/${sourceAssetId}`;
-	}
-	return false;
 }

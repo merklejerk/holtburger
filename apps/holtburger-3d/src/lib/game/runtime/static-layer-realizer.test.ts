@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AtlasRequirementHandle } from "../textures/atlas/resident-texture-atlas";
+import type { AtlasRequirementCompletion } from "../textures/atlas/resident-texture-atlas";
 import { createAssetTextureKey, TexturePurpose } from "../textures/types";
 import type { SceneInterestRevision } from "./scene-availability";
 import {
@@ -54,6 +55,50 @@ describe("StaticLayerRealizer", () => {
 
 		await expect(pending).resolves.toEqual({ kind: "stale" });
 		expect(atlas.events).toEqual(["prepare:1", "withdraw:1"]);
+	});
+
+	it("logs a current atlas failure and leaves no durable realization state", async () => {
+		const atlas = new FakeAtlas();
+		const geometry = deferred<string>();
+		const reporter = new FakeFailureReporter();
+		const realizer = createRealizer(
+			atlas,
+			geometry,
+			new FakePublisher(),
+			new FakeCurrentness(),
+			reporter,
+		);
+		const pending = realizer.realize(input());
+		const failure = new Error("atlas upload failed");
+		atlas.fail(failure);
+		geometry.resolve("geometry");
+
+		await expect(pending).resolves.toEqual({ kind: "stale" });
+		expect(reporter.failures).toEqual([
+			{ cause: failure, owner: "buildings", revision: revision(1) },
+		]);
+		expect(atlas.events).toEqual(["prepare:1", "withdraw:1"]);
+	});
+
+	it("does not log a stale atlas failure", async () => {
+		const atlas = new FakeAtlas();
+		const geometry = deferred<string>();
+		const currentness = new FakeCurrentness();
+		const reporter = new FakeFailureReporter();
+		const realizer = createRealizer(
+			atlas,
+			geometry,
+			new FakePublisher(),
+			currentness,
+			reporter,
+		);
+		const pending = realizer.realize(input());
+		currentness.current = false;
+		atlas.fail(new Error("obsolete atlas failure"));
+		geometry.resolve("geometry");
+
+		await expect(pending).resolves.toEqual({ kind: "stale" });
+		expect(reporter.failures).toEqual([]);
 	});
 
 	it("withdraws the provisional atlas revision when atomic publication fails", async () => {
@@ -123,10 +168,12 @@ function createRealizer(
 	geometry: ReturnType<typeof deferred<string>>,
 	publisher: FakePublisher,
 	currentness: FakeCurrentness,
+	reporter = new FakeFailureReporter(),
 ) {
 	return new StaticLayerRealizer<string, string, "buildings">({
 		atlas,
 		currentness,
+		failureReporter: reporter,
 		geometry,
 		publisher,
 	});
@@ -156,7 +203,7 @@ function deferred<T>() {
 class FakeAtlas implements StaticLayerAtlas<"buildings"> {
 	events: string[] = [];
 	prepared = 0;
-	#resolve!: (result: "ready") => void;
+	#resolve!: (result: AtlasRequirementCompletion) => void;
 	activateOwnerRevision(
 		handle: AtlasRequirementHandle<"buildings">,
 	): Promise<void> {
@@ -176,13 +223,16 @@ class FakeAtlas implements StaticLayerAtlas<"buildings"> {
 	): AtlasRequirementHandle<"buildings"> {
 		this.prepared += 1;
 		this.events.push(`prepare:${revision}`);
-		const completion = new Promise<"ready">((resolve) => {
+		const completion = new Promise<AtlasRequirementCompletion>((resolve) => {
 			this.#resolve = resolve;
 		});
 		return { completion, owner, revision };
 	}
 	resolve(): void {
 		this.#resolve("ready");
+	}
+	fail(cause: unknown): void {
+		this.#resolve({ cause, kind: "failed" });
 	}
 	withdrawOwnerRevision(
 		handle: AtlasRequirementHandle<"buildings">,
@@ -211,5 +261,21 @@ class FakeCurrentness implements StaticLayerCurrentness<"buildings"> {
 	current = true;
 	isCurrent(): boolean {
 		return this.current;
+	}
+}
+
+class FakeFailureReporter {
+	failures: Array<{
+		readonly cause: unknown;
+		readonly owner: "buildings";
+		readonly revision: SceneInterestRevision;
+	}> = [];
+
+	reportAtlasFailure(options: {
+		readonly cause: unknown;
+		readonly owner: "buildings";
+		readonly revision: SceneInterestRevision;
+	}): void {
+		this.failures.push(options);
 	}
 }

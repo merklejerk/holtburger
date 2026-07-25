@@ -105,6 +105,21 @@ export enum TexturePixelFormat {
 	A8 = "a8",
 }
 
+/** Return the exact byte width of one texel in a prepared texture format. */
+export function texturePixelFormatByteLength(
+	format: TexturePixelFormat,
+): number {
+	switch (format) {
+		case TexturePixelFormat.RGBA8:
+			return 4;
+		case TexturePixelFormat.R8:
+		case TexturePixelFormat.A8:
+			return 1;
+		case TexturePixelFormat.RG8:
+			return 2;
+	}
+}
+
 /** Filtering modes available to draw-time sampler policy. */
 export enum TextureFilteringMode {
 	Linear = "linear",

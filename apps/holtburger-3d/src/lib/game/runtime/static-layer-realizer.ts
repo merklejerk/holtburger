@@ -7,6 +7,15 @@ export interface StaticLayerCurrentness<TOwner extends string> {
 	isCurrent(owner: TOwner, revision: SceneInterestRevision): boolean;
 }
 
+/** Runtime-local reporting hook for current visual-realization failures. */
+export interface StaticLayerFailureReporter<TOwner extends string> {
+	reportAtlasFailure(options: {
+		readonly cause: unknown;
+		readonly owner: TOwner;
+		readonly revision: SceneInterestRevision;
+	}): void;
+}
+
 /** Narrow revision-scoped atlas contract used only for static realization sequencing. */
 export interface StaticLayerAtlas<TOwner extends string> {
 	activateOwnerRevision(handle: AtlasRequirementHandle<TOwner>): Promise<void>;
@@ -76,6 +85,7 @@ interface PendingRealization<TOwner extends string, TGeometry> {
 export class StaticLayerRealizer<TSource, TGeometry, TOwner extends string> {
 	readonly #atlas: StaticLayerAtlas<TOwner>;
 	readonly #currentness: StaticLayerCurrentness<TOwner>;
+	readonly #failureReporter: StaticLayerFailureReporter<TOwner>;
 	readonly #geometry: StaticLayerGeometryPreparer<TSource, TGeometry, TOwner>;
 	readonly #publisher: StaticLayerPublisher<TGeometry, TOwner>;
 	readonly #pending = new Map<
@@ -87,11 +97,13 @@ export class StaticLayerRealizer<TSource, TGeometry, TOwner extends string> {
 	constructor(options: {
 		readonly atlas: StaticLayerAtlas<TOwner>;
 		readonly currentness: StaticLayerCurrentness<TOwner>;
+		readonly failureReporter: StaticLayerFailureReporter<TOwner>;
 		readonly geometry: StaticLayerGeometryPreparer<TSource, TGeometry, TOwner>;
 		readonly publisher: StaticLayerPublisher<TGeometry, TOwner>;
 	}) {
 		this.#atlas = options.atlas;
 		this.#currentness = options.currentness;
+		this.#failureReporter = options.failureReporter;
 		this.#geometry = options.geometry;
 		this.#publisher = options.publisher;
 	}
@@ -157,10 +169,20 @@ export class StaticLayerRealizer<TSource, TGeometry, TOwner extends string> {
 				geometry,
 				atlasHandle.completion,
 			]);
-			if (
-				atlasCompletion !== "ready" ||
-				!this.#isCurrent(input.owner, input.revision)
-			) {
+			if (atlasCompletion !== "ready") {
+				if (this.#isCurrent(input.owner, input.revision)) {
+					if (atlasCompletion !== "withdrawn") {
+						this.#failureReporter.reportAtlasFailure({
+							cause: atlasCompletion.cause,
+							owner: input.owner,
+							revision: input.revision,
+						});
+					}
+				}
+				await this.#atlas.withdrawOwnerRevision(atlasHandle);
+				return { kind: "stale" };
+			}
+			if (!this.#isCurrent(input.owner, input.revision)) {
 				await this.#atlas.withdrawOwnerRevision(atlasHandle);
 				return { kind: "stale" };
 			}

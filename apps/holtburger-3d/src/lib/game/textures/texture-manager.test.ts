@@ -23,8 +23,8 @@ describe("TextureManager", () => {
 		);
 		const resource = "texture-2d-resource:resident" as Texture2DResourceKey;
 		const delegate: PackedAtlasBindingDelegate = {
-			getAtlasBinding: (candidate) =>
-				candidate === key
+			getAtlasBinding: (requestedKey) =>
+				requestedKey === key
 					? {
 							placement: {
 								bounds: new AABB2(new Vec2(0, 0), new Vec2(1, 1)),

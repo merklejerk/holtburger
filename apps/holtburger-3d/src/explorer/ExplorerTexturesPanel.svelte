@@ -21,40 +21,26 @@
 
 	let { diagnostics, readTextureAtlasPage }: Props = $props();
 	let query = $state("");
-	let purpose = $state("all");
 	let sort = $state<PageSort>("efficiency");
-	let selectedPageId = $state<string | null>(null);
 	let inspection = $state<TexturePageInspection | null>(null);
 	let inspectionError = $state<string | null>(null);
 
-	const purposes = $derived(
-		[
-			...new Set(
-				(diagnostics?.textureAtlasPages ?? []).map((page) => page.purpose),
-			),
-		].sort((left, right) => left.localeCompare(right)),
-	);
 	const filteredPages = $derived.by(() => {
-		const normalizedQuery = query.trim().toLowerCase();
+		const queryWords = query
+			.toLowerCase()
+			.trim()
+			.split(/\s+/)
+			.filter((word) => word.length > 0);
 		return (diagnostics?.textureAtlasPages ?? [])
 			.filter((page) => {
-				if (purpose !== "all" && page.purpose !== purpose) return false;
-				if (normalizedQuery.length === 0) return true;
 				return (
-					page.pageId.toLowerCase().includes(normalizedQuery) ||
-					page.purpose.toLowerCase().includes(normalizedQuery) ||
-					page.entries.some((entry) =>
-						entry.key.toLowerCase().includes(normalizedQuery),
-					)
+					queryWords.length === 0 ||
+					queryWords.some((word) => page.pageId.toLowerCase().includes(word))
 				);
 			})
 			.sort((left, right) => comparePages(left, right, sort));
 	});
-	const selectedPage = $derived(
-		filteredPages.find((page) => page.pageId === selectedPageId) ??
-			filteredPages[0] ??
-			null,
-	);
+	const sortDescription = $derived(describeSort(sort));
 	function comparePages(
 		left: TextureAtlasPageDiagnostics,
 		right: TextureAtlasPageDiagnostics,
@@ -91,8 +77,28 @@
 		return `${(ratio * 100).toFixed(1)}%`;
 	}
 
-	function selectPage(pageId: string): void {
-		selectedPageId = pageId;
+	function describeSort(pageSort: PageSort): string {
+		switch (pageSort) {
+			case "entries":
+				return "canonical entries";
+			case "memory":
+				return "byte cost";
+			case "page-id":
+				return "page ID";
+			case "efficiency":
+				return "canonical efficiency";
+		}
+	}
+
+	function cycleSort(): void {
+		const order: readonly PageSort[] = [
+			"efficiency",
+			"entries",
+			"memory",
+			"page-id",
+		];
+		const currentIndex = order.indexOf(sort);
+		sort = order[(currentIndex + 1) % order.length]!;
 	}
 
 	function openInspector(page: TextureAtlasPageDiagnostics): void {
@@ -135,37 +141,22 @@
 
 		<div class="explorer-texture-controls">
 			<label class="explorer-form-field">
-				<span>Filter</span>
+				<span>Filter page ID</span>
 				<input
 					class="explorer-control"
 					bind:value={query}
-					placeholder="Page, purpose, or texture key"
+					placeholder="Any word in the page ID"
 				/>
 			</label>
-			<label class="explorer-form-field">
-				<span>Purpose</span>
-				<select
-					class="explorer-control explorer-control--select"
-					bind:value={purpose}
-				>
-					<option value="all">All purposes</option>
-					{#each purposes as texturePurpose}
-						<option value={texturePurpose}>{texturePurpose}</option>
-					{/each}
-				</select>
-			</label>
-			<label class="explorer-form-field">
-				<span>Sort</span>
-				<select
-					class="explorer-control explorer-control--select"
-					bind:value={sort}
-				>
-					<option value="efficiency">Canonical efficiency</option>
-					<option value="entries">Canonical entries</option>
-					<option value="memory">Byte cost</option>
-					<option value="page-id">Page id</option>
-				</select>
-			</label>
+			<button
+				type="button"
+				class="emoji-button explorer-texture-sort"
+				aria-label={`Sort pages by ${sortDescription}; cycle sort mode`}
+				title={`Sort: ${sortDescription}. Click to cycle.`}
+				onclick={cycleSort}
+			>
+				⇅
+			</button>
 		</div>
 
 		{#if filteredPages.length === 0}
@@ -176,73 +167,35 @@
 				aria-label="Packed texture pages"
 			>
 				{#each filteredPages as page}
-					<button
-						type="button"
-						class:active={page.pageId === selectedPage?.pageId}
-						class="explorer-selectable-row explorer-texture-page-row"
-						onclick={() => selectPage(page.pageId)}
-					>
-						<span class="explorer-texture-page-name">{page.pageId}</span>
-						<span>{page.purpose}</span>
-						<span>{page.width} × {page.height}</span>
-						<span
-							>{page.canonicalEntryCount}/{page.candidateEntryCount} canonical</span
-						>
-						<span
-							>{formatPercent(page.canonicalOccupiedPixelRatio)} occupied</span
-						>
-						<span>{formatBytes(page.byteLength)}</span>
-					</button>
-				{/each}
-			</div>
-
-			{#if selectedPage}
-				<section
-					class="explorer-texture-inspector"
-					aria-label="Selected texture page"
-				>
-					<div class="explorer-texture-inspector-heading">
-						<p class="ac-section-label">Page inspector</p>
+					<article class="explorer-data-row explorer-texture-page-row">
+						<div class="explorer-texture-page-content">
+							<strong class="explorer-texture-page-name">{page.pageId}</strong>
+							<span>{page.purpose}</span>
+							<span>{page.width} × {page.height}</span>
+							<span
+								>{page.canonicalEntryCount}/{page.candidateEntryCount} canonical</span
+							>
+							<span
+								>{formatPercent(page.canonicalOccupiedPixelRatio)} occupied</span
+							>
+							<span>{formatBytes(page.byteLength)}</span>
+						</div>
 						<button
 							type="button"
-							class="explorer-action"
-							onclick={() => openInspector(selectedPage)}
+							class="emoji-button explorer-texture-inspect"
+							aria-label={`Inspect ${page.pageId}`}
+							title="Inspect page pixels"
+							onclick={() => openInspector(page)}
 						>
-							View pixels
+							🔍
 						</button>
-					</div>
-					<div class="ac-param-panel">
-						<div class="ac-param-row">
-							<span class="ac-param-key">Page / purpose</span>
-							<code>{selectedPage.pageId} / {selectedPage.purpose}</code>
-						</div>
-						<div class="ac-param-row">
-							<span class="ac-param-key">Dimensions / bytes</span>
-							<code
-								>{selectedPage.width} × {selectedPage.height} / {formatBytes(
-									selectedPage.byteLength,
-								)}</code
-							>
-						</div>
-						<div class="ac-param-row">
-							<span class="ac-param-key">Candidate occupancy</span>
-							<code
-								>{formatPercent(selectedPage.candidateOccupiedPixelRatio)}</code
-							>
-						</div>
-						<div class="ac-param-row">
-							<span class="ac-param-key">Canonical occupancy</span>
-							<code
-								>{formatPercent(selectedPage.canonicalOccupiedPixelRatio)}</code
-							>
-						</div>
-					</div>
-					{#if inspectionError}
-						<p class="explorer-texture-readback-error" role="alert">
-							{inspectionError}
-						</p>
-					{/if}
-				</section>
+					</article>
+				{/each}
+			</div>
+			{#if inspectionError}
+				<p class="explorer-texture-readback-error" role="alert">
+					{inspectionError}
+				</p>
 			{/if}
 		{/if}
 	{/if}
@@ -263,7 +216,9 @@
 
 	.explorer-texture-controls {
 		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
 		gap: 8px;
+		align-items: end;
 		margin: 14px 0;
 	}
 
@@ -275,30 +230,27 @@
 	}
 
 	.explorer-texture-page-row {
-		gap: 3px;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 8px;
 		font-size: 0.75rem;
+	}
+
+	.explorer-texture-page-content {
+		display: grid;
+		gap: 3px;
+		min-width: 0;
 	}
 
 	.explorer-texture-page-name {
 		color: var(--ac-gold-bright);
 		font-family: var(--ac-monospace, monospace);
+		overflow-wrap: anywhere;
 	}
 
-	.explorer-texture-inspector {
-		border-top: 1px solid rgb(162 117 33 / 45%);
-		margin-top: 16px;
-		padding-top: 16px;
-	}
-
-	.explorer-texture-inspector-heading {
-		display: flex;
-		align-items: start;
-		justify-content: space-between;
-		gap: 8px;
-	}
-
-	.explorer-texture-inspector-heading .ac-section-label {
-		margin: 0 0 14px;
+	.explorer-texture-sort,
+	.explorer-texture-inspect {
+		font-family: var(--ac-font-ui);
 	}
 
 	.explorer-texture-readback-error {

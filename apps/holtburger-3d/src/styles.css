@@ -518,6 +518,13 @@ h1 {
 	background: rgb(83 57 16 / 82%);
 }
 
+.explorer-data-row {
+	border: 1px solid rgb(162 117 33 / 45%);
+	background: rgb(37 28 12 / 74%);
+	color: var(--ac-parchment);
+	padding: 7px;
+}
+
 .explorer-world-panel {
 	display: grid;
 	gap: 14px;

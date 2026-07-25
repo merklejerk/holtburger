@@ -25,12 +25,13 @@ import {
 	type ResidentAtlasPageBuilder,
 	ResidentTextureAtlas,
 } from "./resident-texture-atlas";
-import { planStableAtlasLayout } from "./layout";
+import { createAtlasPageId, planStableAtlasLayout } from "./layout";
 import { buildAtlasPage, type AtlasPageBuildJob } from "./page-build";
 
 const DIRECT_COLOR = fact(TexturePurpose.ObjectDirectColor, "0x06000001");
 const SECOND_DIRECT = fact(TexturePurpose.ObjectDirectColor, "0x06000003");
 const INDEX8 = fact(TexturePurpose.ObjectIndex8, "0x06000002");
+const SECOND_INDEX8 = fact(TexturePurpose.ObjectIndex8, "0x06000004");
 
 describe("ResidentTextureAtlas", () => {
 	it("coalesces concurrent claims and retains a source until its final release", async () => {
@@ -221,6 +222,81 @@ describe("ResidentTextureAtlas", () => {
 		expect(resources.released).toEqual([binding!.resource]);
 	});
 
+	it("does not plan or rebuild when a second owner only claims an existing resident binding", async () => {
+		const planner = new CountingLayoutPlanner();
+		const atlas = new ResidentTextureAtlas<"first" | "second">(
+			new ImmediatePreparer(),
+			{
+				layoutPlanner: planner,
+				pageBuilder: new FixturePageBuilder(),
+				pageSize: 16,
+				renderResources: new FixtureRendererResources(),
+			},
+		);
+		const first = atlas.prepareOwnerRequirements("first", revision(1), [
+			INDEX8,
+		]);
+		await first.completion;
+		const planCount = planner.planCount;
+
+		const second = atlas.prepareOwnerRequirements("second", revision(1), [
+			INDEX8,
+		]);
+		await expect(second.completion).resolves.toBe("ready");
+
+		expect(planner.planCount).toBe(planCount);
+	});
+
+	it("accepts a bounded compaction only when it eliminates a page", async () => {
+		const resources = new FixtureRendererResources();
+		const atlas = new ResidentTextureAtlas<"first" | "second">(
+			new ImmediatePreparer(),
+			{
+				layoutPlanner: new FragmentingLayoutPlanner(),
+				pageBuilder: new FixturePageBuilder(),
+				pageSize: 16,
+				renderResources: resources,
+			},
+		);
+		const first = atlas.prepareOwnerRequirements("first", revision(1), [
+			INDEX8,
+		]);
+		await first.completion;
+		const second = atlas.prepareOwnerRequirements("second", revision(1), [
+			SECOND_INDEX8,
+		]);
+		await expect(second.completion).resolves.toBe("ready");
+
+		expect(atlas.getAtlasPageDiagnostics()).toHaveLength(1);
+		expect(atlas.getAtlasBinding(INDEX8.key)).not.toBeNull();
+		expect(atlas.getAtlasBinding(SECOND_INDEX8.key)).not.toBeNull();
+		expect(resources.released).toEqual(["texture-2d-resource:0"]);
+	});
+
+	it("falls back to stable insertion when optional compaction page building fails", async () => {
+		const atlas = new ResidentTextureAtlas<"first" | "second">(
+			new ImmediatePreparer(),
+			{
+				layoutPlanner: new FragmentingLayoutPlanner(),
+				pageBuilder: new FailingCompactPageBuilder(),
+				pageSize: 16,
+				renderResources: new FixtureRendererResources(),
+			},
+		);
+		const first = atlas.prepareOwnerRequirements("first", revision(1), [
+			INDEX8,
+		]);
+		await first.completion;
+		const second = atlas.prepareOwnerRequirements("second", revision(1), [
+			SECOND_INDEX8,
+		]);
+
+		await expect(second.completion).resolves.toBe("ready");
+		expect(atlas.getAtlasPageDiagnostics()).toHaveLength(2);
+		expect(atlas.getAtlasBinding(INDEX8.key)).not.toBeNull();
+		expect(atlas.getAtlasBinding(SECOND_INDEX8.key)).not.toBeNull();
+	});
+
 	it("rolls back all new resources when a multi-page publication fails", async () => {
 		const resources = new FixtureRendererResources(2);
 		const atlas = new ResidentTextureAtlas<"building">(
@@ -352,6 +428,48 @@ class FixtureLayoutPlanner implements ResidentAtlasLayoutPlanner {
 	}
 }
 
+class CountingLayoutPlanner extends FixtureLayoutPlanner {
+	planCount = 0;
+
+	override async plan(
+		request: Parameters<ResidentAtlasLayoutPlanner["plan"]>[0],
+	) {
+		this.planCount += 1;
+		return super.plan(request);
+	}
+}
+
+/** Deliberately models two fragmented index pages so the resident transaction can prove compaction. */
+class FragmentingLayoutPlanner implements ResidentAtlasLayoutPlanner {
+	destroy(): void {}
+
+	async plan(request: Parameters<ResidentAtlasLayoutPlanner["plan"]>[0]) {
+		if (
+			!request.correlationId.endsWith(":compact") &&
+			request.entries.length === 2
+		) {
+			return {
+				correlationId: request.correlationId,
+				insertedKeys: [request.entries[1]!.key],
+				pageSize: 16,
+				pages: request.entries.map((entry, index) => ({
+					pageId: createAtlasPageId(request.purpose, index),
+					placements: [
+						{
+							contentBounds: { height: 1, width: 1, x: 0, y: 0 },
+							key: entry.key,
+						},
+					],
+					purpose: request.purpose,
+				})),
+				purpose: request.purpose,
+				releasedKeys: [],
+			};
+		}
+		return planStableAtlasLayout(request, { pageSize: 16 });
+	}
+}
+
 class DeferredFirstLayoutPlanner implements ResidentAtlasLayoutPlanner {
 	readonly firstRequest: Promise<void>;
 	#resolveFirstRequest!: () => void;
@@ -398,6 +516,18 @@ class FixturePageBuilder implements ResidentAtlasPageBuilder {
 	}
 
 	destroy(): void {}
+}
+
+class FailingCompactPageBuilder extends FixturePageBuilder {
+	override build(
+		job: AtlasPageBuildJob,
+		transfer: readonly Transferable[],
+	): Promise<ReturnType<typeof buildAtlasPage>> {
+		if (job.page.pageId.endsWith(":2")) {
+			return Promise.reject(new Error("Synthetic compact-page failure."));
+		}
+		return super.build(job, transfer);
+	}
 }
 
 class FixtureRendererResources implements RendererResourceManager {

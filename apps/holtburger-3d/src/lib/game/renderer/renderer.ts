@@ -47,10 +47,14 @@ export interface FrameSelectionMetrics {
 	readonly visibleDynamics: number;
 	/** Visible environment-cell shell contributions selected before their draw path is implemented. */
 	readonly visibleEnvCellShells: number;
-	/** Opaque and alpha-test static-building ranges submitted to WebGL this frame. */
+	/** All static-building ranges submitted to WebGL this frame. */
 	readonly submittedBuildingRanges: number;
-	/** Triangles selected by submitted opaque and alpha-test building ranges. */
+	/** Triangles selected by every submitted static-building range. */
 	readonly submittedBuildingTriangles: number;
+	/** Transparent static-building ranges submitted after near/far ordering. */
+	readonly submittedTransparentBuildingRanges: number;
+	/** Additive static-building ranges submitted in their deterministic distinct phase. */
+	readonly submittedAdditiveBuildingRanges: number;
 	/** Object-program activation count across every rendered view. */
 	readonly objectProgramChanges: number;
 	/** Object atlas/detail texture binds performed across every rendered view. */

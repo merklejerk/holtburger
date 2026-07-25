@@ -6,6 +6,7 @@ import {
 	type CommitPipeline,
 	type DynamicEntityCommit,
 } from "../commit/types";
+import type { StaticObjectLayerDiagnostics } from "../commit/artifacts";
 import { INVALID_ID, type LandblockId } from "../game-types";
 import { GeometryManager } from "../geometry/geometry-manager";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
@@ -123,6 +124,26 @@ export interface DeferredStaticDynamicDiagnostic {
 	readonly reason: "setup-default-animation";
 }
 
+/** One installed building layer's source-to-runtime diagnostic snapshot. */
+export interface BuildingLayerRuntimeDiagnostics extends StaticObjectLayerDiagnostics {
+	readonly landblockId: LandblockId;
+	/** Promoted residents held at the explicit runtime deferral seam. */
+	readonly runtimeDeferredResidentCount: number;
+	/** Whether this source emitted a static artifact rather than only promoted residents. */
+	readonly staticArtifactInstalled: boolean;
+}
+
+/** Aggregate building-layer resource and arbitration facts for app-local diagnostics. */
+export interface BuildingRuntimeDiagnostics {
+	readonly layers: readonly BuildingLayerRuntimeDiagnostics[];
+	readonly geometryResourceCount: number;
+	readonly staticObjectOwnerCount: number;
+	readonly staticObjectNodeCount: number;
+	readonly texture: ReturnType<
+		TextureManager<ResourceOwnerId>["getDiagnostics"]
+	>;
+}
+
 /** Bridges source commits, scene topology, runtime residency, and frontend frame state. */
 export class GameRuntime {
 	/** Canonical scene topology, residency, transforms, and spatial-query membership. */
@@ -141,11 +162,22 @@ export class GameRuntime {
 	/** Rigid-part pose updates sequenced before visibility and drawing. */
 	readonly #animation: AnimationSystem<ResourceOwnerId>;
 	/** Static-authored dynamics deliberately deferred without creating runtime resources. */
-	readonly #deferredStaticDynamics = new Map<OwnerId, DeferredStaticDynamicDiagnostic[]>();
+	readonly #deferredStaticDynamics = new Map<
+		OwnerId,
+		DeferredStaticDynamicDiagnostic[]
+	>();
+	/** Source-to-runtime building snapshots removed with their layer owner. */
+	readonly #buildingLayerDiagnostics = new Map<
+		OwnerId,
+		BuildingLayerRuntimeDiagnostics
+	>();
 	/** Active-region owner of the one device-backed building-detail texture. */
 	#activeRegionDetailOwner: ActiveRegionResourceOwnerId | null = null;
 	/** Read-only regional detail selection consumed by renderer-owned object programs. */
-	#activeRegionDetail: { readonly key: ActiveRegionObjectDetailBinding["key"]; readonly tiling: number } | null = null;
+	#activeRegionDetail: {
+		readonly key: ActiveRegionObjectDetailBinding["key"];
+		readonly tiling: number;
+	} | null = null;
 	/** Dynamic terrain sources, generation state, and realized terrain resources. */
 	readonly #terrain: TerrainSystem<ResourceOwnerId, TerrainResourceOwnerId>;
 	/** Read-only renderer gateway over this runtime's scene and resource systems. */
@@ -337,24 +369,40 @@ export class GameRuntime {
 		return [...this.#deferredStaticDynamics.values()].flat();
 	}
 
+	/** Snapshot app-local building lifecycle, resource, and atlas-arbitration diagnostics. */
+	getBuildingRuntimeDiagnostics(): BuildingRuntimeDiagnostics {
+		const staticObjects = this.#staticObjects.getDiagnostics();
+		return {
+			geometryResourceCount: this.#geometry.getResourceCount(),
+			layers: [...this.#buildingLayerDiagnostics.values()].sort((left, right) =>
+				left.landblockId.localeCompare(right.landblockId),
+			),
+			staticObjectNodeCount: staticObjects.nodeCount,
+			staticObjectOwnerCount: staticObjects.ownerCount,
+			texture: this.#textures.getDiagnostics(),
+		};
+	}
+
 	/** Promote the already prepared regional building-detail binding into device ownership once. */
-	installActiveRegionObjectDetail(binding: ActiveRegionObjectDetailBinding): void {
+	installActiveRegionObjectDetail(
+		binding: ActiveRegionObjectDetailBinding,
+	): void {
 		const owner = activeRegionResourceToOwnerId(binding.activeRegionKey);
-		if (this.#activeRegionDetailOwner !== null && this.#activeRegionDetailOwner !== owner) {
+		if (
+			this.#activeRegionDetailOwner !== null &&
+			this.#activeRegionDetailOwner !== owner
+		) {
 			this.#textures.dropOwner(this.#activeRegionDetailOwner);
 		}
 		this.#activeRegionDetailOwner = owner;
-		this.#textures.installAssetTexture(
-			owner,
-			{
-				height: binding.surface.height,
-				key: binding.key,
-				pixels: binding.surface.pixels,
-				purpose: TexturePurpose.ObjectDetail,
-				sourceAssetId: binding.sourceAssetId,
-				width: binding.surface.width,
-			},
-		);
+		this.#textures.installAssetTexture(owner, {
+			height: binding.surface.height,
+			key: binding.key,
+			pixels: binding.surface.pixels,
+			purpose: TexturePurpose.ObjectDetail,
+			sourceAssetId: binding.sourceAssetId,
+			width: binding.surface.width,
+		});
 		this.#activeRegionDetail = { key: binding.key, tiling: binding.tiling };
 	}
 
@@ -511,6 +559,17 @@ export class GameRuntime {
 				dynamic,
 			);
 		}
+		if (
+			artifact.layer === LandblockLayerKind.Buildings &&
+			artifact.commit.diagnostics !== undefined
+		) {
+			this.#buildingLayerDiagnostics.set(ownerId, {
+				...artifact.commit.diagnostics,
+				landblockId: artifact.landblockId,
+				runtimeDeferredResidentCount: artifact.dynamicEntities.length,
+				staticArtifactInstalled: artifact.commit.staticObjects !== null,
+			});
+		}
 	}
 
 	#installTerrainLayer(
@@ -584,7 +643,10 @@ export class GameRuntime {
 		const diagnostics = this.#deferredStaticDynamics.get(ownerId) ?? [];
 		diagnostics.push(diagnostic);
 		this.#deferredStaticDynamics.set(ownerId, diagnostics);
-		log({ kind: "static-authored-dynamic-deferred", ...diagnostic }, LogLevel.Info);
+		log(
+			{ kind: "static-authored-dynamic-deferred", ...diagnostic },
+			LogLevel.Info,
+		);
 		// Future activation replaces this body with #installDynamic(ownerId, landblockId, dynamic).
 	}
 
@@ -592,6 +654,7 @@ export class GameRuntime {
 		const ownerId = landblockLayerToOwnerId(landblockId, layer);
 		this.#staticObjects.removeOwner(ownerId);
 		this.#deferredStaticDynamics.delete(ownerId);
+		this.#buildingLayerDiagnostics.delete(ownerId);
 		this.#animation.removeOwner(ownerId);
 		this.#dynamics.removeOwner(ownerId);
 		this.#envCells.removeOwner(ownerId);

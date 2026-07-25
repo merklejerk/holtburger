@@ -151,8 +151,19 @@ describe("TextureManager", () => {
 		textures.installAtlasPage("objects:a", "page:a", pageFor([keyA]));
 		textures.installAtlasPage("objects:b", "page:b", pageFor([keyA, keyB]));
 
-		expect(textures.getAtlasBinding(keyA).resource).toBe("texture-2d-resource:1");
-		expect(textures.getAtlasBinding(keyB).resource).toBe("texture-2d-resource:1");
+		expect(textures.getAtlasBinding(keyA).resource).toBe(
+			"texture-2d-resource:1",
+		);
+		expect(textures.getAtlasBinding(keyB).resource).toBe(
+			"texture-2d-resource:1",
+		);
+		expect(textures.getDiagnostics()).toMatchObject({
+			activeAtlasPages: 1,
+			canonicalAtlasBindings: 2,
+			canonicalAtlasReplacements: 1,
+			publishedAtlasCandidates: 2,
+			releasedAtlasPages: 1,
+		});
 		expect(resources.releasedResources).toEqual(["texture-2d-resource:0"]);
 	});
 
@@ -164,7 +175,9 @@ describe("TextureManager", () => {
 		textures.installAtlasPage("objects:a", "page:a", pageFor([key]));
 		textures.installAtlasPage("objects:b", "page:b", pageFor([key]));
 
-		expect(textures.getAtlasBinding(key).resource).toBe("texture-2d-resource:0");
+		expect(textures.getAtlasBinding(key).resource).toBe(
+			"texture-2d-resource:0",
+		);
 		expect(resources.releasedResources).toEqual(["texture-2d-resource:1"]);
 	});
 
@@ -173,12 +186,19 @@ describe("TextureManager", () => {
 		const textures = createTextureManager(resources);
 		const key = objectKey("0x05000015");
 		const compact = pageFor([key]);
-		const oversized = { ...compact, height: 4, pageBits: new Uint8Array(4 * 4 * 4), width: 4 };
+		const oversized = {
+			...compact,
+			height: 4,
+			pageBits: new Uint8Array(4 * 4 * 4),
+			width: 4,
+		};
 
 		textures.installAtlasPage("objects:a", "page:a", compact);
 		textures.installAtlasPage("objects:b", "page:b", oversized);
 
-		expect(textures.getAtlasBinding(key).resource).toBe("texture-2d-resource:0");
+		expect(textures.getAtlasBinding(key).resource).toBe(
+			"texture-2d-resource:0",
+		);
 		expect(resources.releasedResources).toEqual(["texture-2d-resource:1"]);
 	});
 
@@ -190,7 +210,9 @@ describe("TextureManager", () => {
 		textures.installAtlasPage("objects:a", "page:a", pageFor([key]));
 		textures.installAtlasPage("objects:b", "page:b", pageFor([key]));
 		textures.dropOwner("objects:a");
-		expect(textures.getAtlasBinding(key).resource).toBe("texture-2d-resource:0");
+		expect(textures.getAtlasBinding(key).resource).toBe(
+			"texture-2d-resource:0",
+		);
 		textures.dropOwner("objects:b");
 
 		expect(resources.releasedResources).toEqual([
@@ -216,7 +238,9 @@ describe("TextureManager", () => {
 		preparer.resolve(fact);
 		await retaining;
 
-		expect(textures.getAtlasBinding(key).resource).toBe("texture-2d-resource:0");
+		expect(textures.getAtlasBinding(key).resource).toBe(
+			"texture-2d-resource:0",
+		);
 		expect(resources.texture2DUploads).toHaveLength(1);
 	});
 
@@ -303,10 +327,10 @@ function pageFor(
 		purpose: TexturePurpose.ObjectDirectColor,
 		textures: keys.map((key, index) => ({
 			key,
-				placement: {
-					bounds: new AABB2(new Vec2(index * 2, 0), new Vec2(index * 2 + 2, 2)),
-					preparation: WRAPPED_ATLAS_PREPARATION,
-				},
+			placement: {
+				bounds: new AABB2(new Vec2(index * 2, 0), new Vec2(index * 2 + 2, 2)),
+				preparation: WRAPPED_ATLAS_PREPARATION,
+			},
 		})),
 		width,
 	};

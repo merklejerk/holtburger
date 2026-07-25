@@ -3,6 +3,7 @@
 	import { HttpTerrainContentSource } from "../../lib/assets/http-terrain-content-source";
 	import { StandardCommitPipeline } from "../../lib/game/commit/pipeline";
 	import { BuildingWorkers } from "../../lib/game/commit/building-workers";
+	import { SyntheticBlendedBuildingPipeline } from "./synthetic-blended-building-pipeline";
 	import type { LandblockId } from "../../lib/game/game-types";
 	import {
 		createLandblockWorldOrigin,
@@ -10,7 +11,10 @@
 	} from "../../lib/game/landblocks";
 	import { Quat, Vec3 } from "../../lib/game/math/types";
 	import { WebGL2Device } from "../../lib/game/renderer/webgl2-device";
-	import { GameRuntime } from "../../lib/game/runtime/game-runtime";
+	import {
+		GameRuntime,
+		type BuildingRuntimeDiagnostics,
+	} from "../../lib/game/runtime/game-runtime";
 	import { ActiveRegionObjectDetailOwner } from "../../lib/game/resolution/active-region-object-detail";
 	import type { FrameSelectionMetrics } from "../../lib/game/renderer/renderer";
 
@@ -19,8 +23,15 @@
 	const CAMERA_FAR = 2_000;
 
 	interface TerrainHarnessApi {
-		/** Request canonical terrain and radius-zero buildings above one outdoor landblock. */
-		readonly requestOutdoorTerrain: (landblockId: string) => void;
+		/** Request canonical terrain and buildings for one outdoor neighborhood. */
+		readonly requestOutdoorTerrain: (
+			landblockId: string,
+			buildingRadius: number,
+		) => void;
+		/** Move only the render-world anchor; current scene interest remains installed. */
+		readonly setCameraLandblock: (landblockId: string) => void;
+		/** Withdraw every terrain and building layer while retaining the harness runtime. */
+		readonly clearSceneInterest: () => void;
 		/** Snapshot lifecycle evidence without exposing runtime ownership. */
 		readonly state: () => TerrainHarnessState;
 	}
@@ -29,6 +40,7 @@
 		readonly error: string | null;
 		readonly frames: number;
 		readonly metrics: FrameSelectionMetrics | null;
+		readonly buildings: BuildingRuntimeDiagnostics | null;
 		readonly ready: boolean;
 	}
 
@@ -52,19 +64,33 @@
 		return `0x${match[1]!.toLowerCase()}ffff`;
 	}
 
-	function requestOutdoorTerrain(rawLandblockId: string): void {
+	function requestOutdoorTerrain(
+		rawLandblockId: string,
+		buildingRadius: number,
+	): void {
 		if (!runtime) throw new Error("Terrain harness runtime is not ready.");
+		if (!Number.isInteger(buildingRadius) || buildingRadius < 0) {
+			throw new Error(
+				"Terrain harness building radius must be a non-negative integer.",
+			);
+		}
 		const landblockId = parseOutdoorLandblockId(rawLandblockId);
 		runtime.updateSceneInterest({
 			anchorLandblockId: landblockId,
 			lod: {
-				buildingRadius: 0,
+				buildingRadius,
 				envCellRadius: null,
 				explicitObjectRadius: null,
 				generatedObjectRadius: null,
-				terrainRadius: 0,
+				terrainRadius: buildingRadius,
 			},
 		});
+		setCameraLandblock(landblockId);
+	}
+
+	function setCameraLandblock(rawLandblockId: string): void {
+		if (!runtime) throw new Error("Terrain harness runtime is not ready.");
+		const landblockId = parseOutdoorLandblockId(rawLandblockId);
 		const origin = createLandblockWorldOrigin(landblockId);
 		runtime.setPrimaryCamera({
 			far: CAMERA_FAR,
@@ -81,6 +107,11 @@
 				rotation: cameraRotation(0, -45),
 			},
 		});
+	}
+
+	function clearSceneInterest(): void {
+		if (!runtime) throw new Error("Terrain harness runtime is not ready.");
+		runtime.clearSceneInterest();
 	}
 
 	function cameraRotation(yawDegrees: number, pitchDegrees: number): Quat {
@@ -111,7 +142,10 @@
 
 		let destroyed = false;
 		let frameHandle: number | undefined;
-		let pipeline: StandardCommitPipeline | undefined;
+		let pipeline:
+			| StandardCommitPipeline
+			| SyntheticBlendedBuildingPipeline
+			| undefined;
 		let device: WebGL2Device | undefined;
 		let objectDetailOwner: ActiveRegionObjectDetailOwner | undefined;
 		const hostGlobal = globalThis as typeof globalThis & HarnessGlobal;
@@ -119,12 +153,16 @@
 			try {
 				const source = await HttpTerrainContentSource.build(hostUrl);
 				device = await WebGL2Device.build(canvasElement!);
-				pipeline = await StandardCommitPipeline.build({
-					buildingSource: source,
-					buildingWorkers: await BuildingWorkers.build(),
-					terrainSource: source,
-					texturePixelSource: source,
-				});
+				pipeline =
+					new URLSearchParams(window.location.search).get("fixture") ===
+					"blended"
+						? new SyntheticBlendedBuildingPipeline()
+						: await StandardCommitPipeline.build({
+								buildingSource: source,
+								buildingWorkers: await BuildingWorkers.build(),
+								terrainSource: source,
+								texturePixelSource: source,
+							});
 				runtime = await GameRuntime.build(device, pipeline, source);
 				objectDetailOwner = new ActiveRegionObjectDetailOwner(source);
 				runtime.installActiveRegionObjectDetail(
@@ -133,8 +171,11 @@
 				if (destroyed) return;
 				ready = true;
 				hostGlobal.__HOLTBURGER_3D_TERRAIN_HARNESS__ = {
+					clearSceneInterest,
 					requestOutdoorTerrain,
+					setCameraLandblock,
 					state: () => ({
+						buildings: runtime?.getBuildingRuntimeDiagnostics() ?? null,
 						error,
 						frames,
 						metrics: runtime?.getFrameSelectionMetrics() ?? null,

@@ -28,6 +28,38 @@ import type {
 	TextureSamplerPolicy,
 } from "../textures/types";
 
+/** Source-to-bake diagnostics retained with one static building-layer commit. */
+export interface StaticObjectLayerDiagnostics {
+	/** Every source resident, including those promoted out of static materialization. */
+	readonly expectedResidentCount: number;
+	/** Source residents classified as eligible for static materialization. */
+	readonly resolvedStaticResidentCount: number;
+	/** Static residents represented by the published geometry, or zero for an empty artifact. */
+	readonly materializedStaticResidentCount: number;
+	/** Source residents promoted to the existing runtime-deferred dynamic seam. */
+	readonly promotedDynamicResidentCount: number;
+	/** Naive resident/part/material-slot submissions before polygon facts are distinguished. */
+	readonly sourceMaterialSlotCount: number;
+	/** Source resident/part/complete-binding submissions after polygon facts are distinguished. */
+	readonly sourceRangeCount: number;
+	/** Final baked draw ranges retained by the published static artifact. */
+	readonly bakedRangeCount: number;
+	/** Final independent transparent ranges requiring camera-dependent ordering. */
+	readonly transparentRangeCount: number;
+	/** Final additive ranges submitted in their distinct deterministic phase. */
+	readonly additiveRangeCount: number;
+	/** Bytes in the final one-allocation object geometry. */
+	readonly geometryBytes: number;
+	/** Bytes uploaded by the building atlas pages before shared-page arbitration. */
+	readonly packedTextureBytes: number;
+	/** Packed static atlas pages emitted by this building layer. */
+	readonly atlasPageCount: number;
+	/** Wall-clock duration inside the closed geometry worker. */
+	readonly geometryWorkerDurationMs: number;
+	/** Wall-clock duration inside the closed texture-packing worker. */
+	readonly textureWorkerDurationMs: number;
+}
+
 /** Prepared atlas page retained with one committed static-object layer. */
 export interface StaticTexturePageArtifact {
 	readonly pageId: TexturePageId;

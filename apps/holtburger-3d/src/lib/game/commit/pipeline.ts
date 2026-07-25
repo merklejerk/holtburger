@@ -1,7 +1,10 @@
 import type { LandblockBuildingSource } from "../../assets/landblock-building-source";
 import type { LandblockTerrainSource } from "../../assets/landblock-terrain-source";
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
-import type { ResolvedTerrainLayerSource } from "../resolution/landblock-layer";
+import type {
+	ResolvedObjectLayerSource,
+	ResolvedTerrainLayerSource,
+} from "../resolution/landblock-layer";
 import {
 	LandblockLayerKind,
 	type LandblockIdLayer,
@@ -14,8 +17,11 @@ import {
 	type StaticLandblockLayerCommitTerrain,
 } from "./types";
 import { assembleBuildingArtifact } from "./building-artifact";
+import type { StaticObjectLayerDiagnostics } from "./artifacts";
 import { prepareBuildingTextureInputs } from "./building-texture-inputs";
 import { BuildingWorkers } from "./building-workers";
+import type { BuildingGeometryResult } from "./building-geometry-worker";
+import type { BuildingTexturePackResult } from "./building-texture-worker";
 
 /** Composite source and worker dependencies owned by the standard landblock commit pipeline. */
 export interface StandardCommitPipelineDependencies {
@@ -35,12 +41,16 @@ export class StandardCommitPipeline implements CommitPipeline {
 	protected constructor(dependencies: StandardCommitPipelineDependencies) {
 		this.#terrainSource = dependencies.terrainSource;
 		const hasBuildingDependencies =
-			dependencies.buildingSource !== undefined || dependencies.texturePixelSource !== undefined;
+			dependencies.buildingSource !== undefined ||
+			dependencies.texturePixelSource !== undefined;
 		if (
 			hasBuildingDependencies &&
-			(dependencies.buildingSource === undefined || dependencies.texturePixelSource === undefined)
+			(dependencies.buildingSource === undefined ||
+				dependencies.texturePixelSource === undefined)
 		) {
-			throw new Error("Building commits require both building source and texture pixel capabilities.");
+			throw new Error(
+				"Building commits require both building source and texture pixel capabilities.",
+			);
 		}
 		this.#buildingSource = dependencies.buildingSource ?? null;
 		this.#texturePixelSource = dependencies.texturePixelSource ?? null;
@@ -85,7 +95,9 @@ export class StandardCommitPipeline implements CommitPipeline {
 			return this.#prepareTerrainLayer(source);
 		}
 		if (layer.layer !== LandblockLayerKind.Buildings) {
-			throw new Error(`No typed source capability exists yet for ${describeLayer(layer)}.`);
+			throw new Error(
+				`No typed source capability exists yet for ${describeLayer(layer)}.`,
+			);
 		}
 		return this.#prepareBuildingLayer(layer);
 	}
@@ -112,27 +124,46 @@ export class StandardCommitPipeline implements CommitPipeline {
 	async #prepareBuildingLayer(
 		layer: LandblockIdLayer,
 	): Promise<CommitBundle | null> {
-		const source = await this.#requireBuildingSource().loadBuildingSource(layer.id);
+		const source = await this.#requireBuildingSource().loadBuildingSource(
+			layer.id,
+		);
 		if (source === null) return null;
-		if (source.kind !== LandblockLayerKind.Buildings || source.landblockId !== layer.id) {
-			throw new Error(`Loaded ${source.landblockId}/${source.kind} for ${describeLayer(layer)}.`);
+		if (
+			source.kind !== LandblockLayerKind.Buildings ||
+			source.landblockId !== layer.id
+		) {
+			throw new Error(
+				`Loaded ${source.landblockId}/${source.kind} for ${describeLayer(layer)}.`,
+			);
 		}
-		const resourceNamespace = `static-install:buildings:${layer.id}:${this.#nextStaticNamespace}` as const;
+		const resourceNamespace =
+			`static-install:buildings:${layer.id}:${this.#nextStaticNamespace}` as const;
 		this.#nextStaticNamespace += 1;
 		// Pixel preparation starts before geometry transfer. It has collected every dependency before
 		// its first await, so the geometry worker can take ownership of source buffers immediately.
-		const textureInputs = prepareBuildingTextureInputs(this.#requireTexturePixelSource(), source);
-		const geometry = this.#requireBuildingWorkers().bake({ resourceNamespace, source });
+		const textureInputs = prepareBuildingTextureInputs(
+			this.#requireTexturePixelSource(),
+			source,
+		);
+		const geometry = this.#requireBuildingWorkers().bake({
+			resourceNamespace,
+			source,
+		});
 		const textures = textureInputs.then((inputs) =>
 			this.#requireBuildingWorkers().pack({ inputs, resourceNamespace }),
 		);
+		const geometryResult = await geometry;
+		const textureResult = await textures;
 		const artifact = assembleBuildingArtifact({
-			geometry: await geometry,
+			geometry: geometryResult,
 			resourceNamespace,
 			source,
-			textures: await textures,
+			textures: textureResult,
 		});
-		const commit: StaticObjectLayerCommit = { staticObjects: artifact };
+		const commit: StaticObjectLayerCommit = {
+			diagnostics: buildingDiagnostics(source, geometryResult, textureResult),
+			staticObjects: artifact,
+		};
 		return {
 			commit,
 			dynamicEntities: source.dynamicResidents,
@@ -143,19 +174,48 @@ export class StandardCommitPipeline implements CommitPipeline {
 	}
 
 	#requireBuildingSource(): LandblockBuildingSource {
-		if (this.#buildingSource === null) throw new Error("Building source capability is unavailable.");
+		if (this.#buildingSource === null)
+			throw new Error("Building source capability is unavailable.");
 		return this.#buildingSource;
 	}
 
 	#requireTexturePixelSource(): TexturePixelSource {
-		if (this.#texturePixelSource === null) throw new Error("Building texture capability is unavailable.");
+		if (this.#texturePixelSource === null)
+			throw new Error("Building texture capability is unavailable.");
 		return this.#texturePixelSource;
 	}
 
 	#requireBuildingWorkers(): BuildingWorkers {
-		if (this.#buildingWorkers === null) throw new Error("Building workers are unavailable.");
+		if (this.#buildingWorkers === null)
+			throw new Error("Building workers are unavailable.");
 		return this.#buildingWorkers;
 	}
+}
+
+function buildingDiagnostics(
+	source: ResolvedObjectLayerSource,
+	geometry: BuildingGeometryResult | null,
+	textures: BuildingTexturePackResult,
+): StaticObjectLayerDiagnostics {
+	const metrics = geometry?.metrics;
+	return {
+		additiveRangeCount: metrics?.additiveRangeCount ?? 0,
+		atlasPageCount: textures.pages.length,
+		bakedRangeCount: metrics?.bakedRangeCount ?? 0,
+		expectedResidentCount:
+			source.staticResidents.length + source.dynamicResidents.length,
+		geometryBytes: metrics?.geometryBytes ?? 0,
+		geometryWorkerDurationMs: metrics?.workerDurationMs ?? 0,
+		materializedStaticResidentCount:
+			geometry === null ? 0 : source.staticResidents.length,
+		packedTextureBytes: textures.packedBytes,
+		promotedDynamicResidentCount: source.dynamicResidents.length,
+		resolvedStaticResidentCount: source.staticResidents.length,
+		sourceRangeCount: metrics?.sourceRangeCount ?? 0,
+		sourceMaterialSlotCount: metrics?.sourceMaterialSlotCount ?? 0,
+		textureWorkerDurationMs: textures.workerDurationMs,
+		transparentRangeCount: metrics?.transparentRangeCount ?? 0,
+	};
 }
 
 function describeLayer(layer: LandblockIdLayer): string {

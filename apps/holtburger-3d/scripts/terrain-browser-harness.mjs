@@ -43,11 +43,16 @@ try {
 	process.stdout.write(
 		`${JSON.stringify(
 			{
+				buildingRadius: options.buildingRadius,
+				cameraLandblockId: options.cameraLandblockId,
 				consoleMessages: result.consoleMessages,
-			frames: result.state.frames,
-			landblockId: options.landblockId,
-			metrics: result.state.metrics,
-			ready: result.state.ready,
+				fixture: options.fixture,
+				frames: result.state.frames,
+				initialState: result.initialState,
+				landblockId: options.landblockId,
+				lifecycleState: result.lifecycleState,
+				metrics: result.state.metrics,
+				ready: result.state.ready,
 				screenshotPath: options.screenshotPath,
 				settleMs: options.settleMs,
 			},
@@ -78,6 +83,10 @@ function parseArgs(args) {
 	const parsed = {
 		chromePath: process.env.CHROME_PATH ?? DEFAULT_CHROME_PATH,
 		landblockId: DEFAULT_LANDBLOCK_ID,
+		buildingRadius: 0,
+		cameraLandblockId: null,
+		lifecycle: false,
+		fixture: null,
 		screenshotPath: null,
 		settleMs: DEFAULT_SETTLE_MS,
 	};
@@ -89,6 +98,27 @@ function parseArgs(args) {
 				break;
 			case "--landblock":
 				parsed.landblockId = requireValue(args, ++index, arg);
+				break;
+			case "--building-radius":
+				parsed.buildingRadius = Number(requireValue(args, ++index, arg));
+				if (
+					!Number.isInteger(parsed.buildingRadius) ||
+					parsed.buildingRadius < 0
+				) {
+					throw new Error("--building-radius must be a non-negative integer.");
+				}
+				break;
+			case "--camera-landblock":
+				parsed.cameraLandblockId = requireValue(args, ++index, arg);
+				break;
+			case "--lifecycle":
+				parsed.lifecycle = true;
+				break;
+			case "--fixture":
+				parsed.fixture = requireValue(args, ++index, arg);
+				if (parsed.fixture !== "blended") {
+					throw new Error("--fixture currently supports only blended.");
+				}
 				break;
 			case "--screenshot":
 				parsed.screenshotPath = requireValue(args, ++index, arg);
@@ -122,6 +152,11 @@ function printHelp() {
 
 Options:
   --landblock <hex>     Outdoor landblock to render. Default: ${DEFAULT_LANDBLOCK_ID}
+
+  --building-radius <n> Request a square terrain/building neighborhood. Default: 0
+  --camera-landblock <hex> Move the camera anchor after the initial request.
+  --lifecycle           Clear and reload the requested neighborhood before capture.
+  --fixture blended     Use six app-local transparent/additive material ranges.
   --settle-ms <ms>      Wait after requesting terrain. Default: ${DEFAULT_SETTLE_MS}
   --screenshot <path>   Persist the captured PNG after the harness exits.
   --chrome-path <path>  Chrome executable. Default: ${DEFAULT_CHROME_PATH}
@@ -160,7 +195,10 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		join(tmpdir(), "holtburger-3d-terrain-"),
 	);
 	tempDirectories.push(userDataDirectory);
-	const pageUrl = `${viteUrl}/harness/terrain/?contentHost=${encodeURIComponent(contentHostUrl)}`;
+	const fixture = options.fixture
+		? `&fixture=${encodeURIComponent(options.fixture)}`
+		: "";
+	const pageUrl = `${viteUrl}/harness/terrain/?contentHost=${encodeURIComponent(contentHostUrl)}${fixture}`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
 		`--user-data-dir=${userDataDirectory}`,
@@ -204,9 +242,48 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		await evaluate(
 			client,
 			"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.requestOutdoorTerrain",
-			[options.landblockId],
+			[options.landblockId, options.buildingRadius],
 		);
 		await delay(options.settleMs);
+		const initialState = await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.state",
+			[],
+		);
+		let lifecycleState = null;
+		if (options.lifecycle) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.clearSceneInterest",
+				[],
+			);
+			await delay(50);
+			const cleared = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.state",
+				[],
+			);
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.requestOutdoorTerrain",
+				[options.landblockId, options.buildingRadius],
+			);
+			await delay(options.settleMs);
+			const reloaded = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.state",
+				[],
+			);
+			lifecycleState = { cleared, reloaded };
+		}
+		if (options.cameraLandblockId) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.setCameraLandblock",
+				[options.cameraLandblockId],
+			);
+			await delay(50);
+		}
 		const state = await evaluate(
 			client,
 			"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.state",
@@ -216,7 +293,13 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			captureBeyondViewport: false,
 			format: "png",
 		});
-		return { consoleMessages, screenshot: screenshot.data, state };
+		return {
+			consoleMessages,
+			initialState,
+			lifecycleState,
+			screenshot: screenshot.data,
+			state,
+		};
 	} finally {
 		client.close();
 	}

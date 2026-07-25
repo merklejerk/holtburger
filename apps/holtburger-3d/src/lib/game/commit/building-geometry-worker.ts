@@ -41,6 +41,9 @@ export interface BuildingGeometryResult {
 	readonly bounds: AABB3;
 	readonly ranges: readonly BakedBuildingRange[];
 	readonly metrics: {
+		/** Resident/part/material-slot submissions before polygon-side facts split a range. */
+		readonly sourceMaterialSlotCount: number;
+		/** Resident/part/complete-binding submissions before permitted baking merges. */
 		readonly sourceRangeCount: number;
 		readonly bakedRangeCount: number;
 		readonly transparentRangeCount: number;
@@ -79,7 +82,8 @@ export function bakeBuildingGeometry(
 ): BuildingGeometryResult | null {
 	const startedAt = performance.now();
 	const groups = new Map<string, ContributionGroup>();
-	let sourceRangeCount = 0;
+	const sourceRangeIds = new Set<string>();
+	const sourceMaterialSlotIds = new Set<string>();
 	for (const resident of job.source.staticResidents) {
 		const partTransforms = createPartTransforms(resident);
 		for (const part of resident.presentation.parts) {
@@ -90,10 +94,17 @@ export function bakeBuildingGeometry(
 				);
 			}
 			const sourceToLandblock = multiplyMat4(
-				multiplyMat4(resident.placement.localTransform, scaleMat4(resident.scale)),
+				multiplyMat4(
+					resident.placement.localTransform,
+					scaleMat4(resident.scale),
+				),
 				partTransform,
 			);
-			for (let triangle = 0; triangle < part.geometry.materialSlotIndices.length; triangle += 1) {
+			for (
+				let triangle = 0;
+				triangle < part.geometry.materialSlotIndices.length;
+				triangle += 1
+			) {
 				const contribution = createTriangleContribution({
 					geometry: part.geometry,
 					part,
@@ -102,7 +113,18 @@ export function bakeBuildingGeometry(
 					sourceToLandblock,
 					triangle,
 				});
-				sourceRangeCount += 1;
+				sourceRangeIds.add(
+					`${resident.id}/part:${part.partIndex}/${contribution.bindingId}`,
+				);
+				const materialSlot = part.geometry.materialSlotIndices[triangle];
+				if (materialSlot === undefined) {
+					throw new Error(
+						`Part ${part.partIndex} triangle ${triangle} has no material slot.`,
+					);
+				}
+				sourceMaterialSlotIds.add(
+					`${resident.id}/part:${part.partIndex}/material:${materialSlot}`,
+				);
 				const groupKey =
 					contribution.transparentStableId ?? contribution.bindingId;
 				const existing = groups.get(groupKey);
@@ -158,13 +180,13 @@ export function bakeBuildingGeometry(
 			group.transparentStableId === null
 				? null
 				: {
-					center: new Vec3(
-						center.x / centerPointCount,
-						center.y / centerPointCount,
-						center.z / centerPointCount,
-					),
-					stableId: group.transparentStableId,
-				};
+						center: new Vec3(
+							center.x / centerPointCount,
+							center.y / centerPointCount,
+							center.z / centerPointCount,
+						),
+						stableId: group.transparentStableId,
+					};
 		ranges.push({
 			indexCount: indices.length - indexStart,
 			indexStart,
@@ -188,15 +210,20 @@ export function bakeBuildingGeometry(
 			key: `static-install-geometry:${job.resourceNamespace}/building-layer` as StaticGeometryKey,
 		},
 		metrics: {
-			additiveRangeCount: ranges.filter((range) => range.ordering === "additive").length,
+			additiveRangeCount: ranges.filter(
+				(range) => range.ordering === "additive",
+			).length,
 			bakedRangeCount: ranges.length,
 			geometryBytes:
 				geometry.positions.byteLength +
 				geometry.normals.byteLength +
 				geometry.textureCoordinates.byteLength +
 				geometry.indices.byteLength,
-			sourceRangeCount,
-			transparentRangeCount: ranges.filter((range) => range.transparentSort !== null).length,
+			sourceRangeCount: sourceRangeIds.size,
+			sourceMaterialSlotCount: sourceMaterialSlotIds.size,
+			transparentRangeCount: ranges.filter(
+				(range) => range.transparentSort !== null,
+			).length,
 			workerDurationMs: performance.now() - startedAt,
 		},
 		ranges,
@@ -226,7 +253,11 @@ function createTriangleContribution(options: {
 	const sideKind = options.geometry.materialSideKinds[options.triangle];
 	const sideType = options.geometry.materialSideTypes[options.triangle];
 	const stippling = options.geometry.materialStippling[options.triangle];
-	if (sideKind === undefined || sideType === undefined || stippling === undefined) {
+	if (
+		sideKind === undefined ||
+		sideType === undefined ||
+		stippling === undefined
+	) {
 		throw new Error(`Triangle ${options.triangle} is missing polygon facts.`);
 	}
 	const polygon = {
@@ -241,7 +272,12 @@ function createTriangleContribution(options: {
 		source: material,
 		textures: { base: plan.baseTexture, palette: plan.paletteTexture },
 	};
-	const bindingId = [plan.id, polygon.cullMode, polygon.renderSide, polygon.stippled].join("|");
+	const bindingId = [
+		plan.id,
+		polygon.cullMode,
+		polygon.renderSide,
+		polygon.stippled,
+	].join("|");
 	const indexStart = options.triangle * 3;
 	const positions: Vec3[] = [];
 	const normals: Vec3[] = [];
@@ -249,7 +285,9 @@ function createTriangleContribution(options: {
 	for (let vertex = 0; vertex < 3; vertex += 1) {
 		const sourceIndex = options.geometry.indices[indexStart + vertex];
 		if (sourceIndex === undefined) {
-			throw new Error(`Triangle ${options.triangle} has an incomplete index range.`);
+			throw new Error(
+				`Triangle ${options.triangle} has an incomplete index range.`,
+			);
 		}
 		const positionOffset = sourceIndex * 3;
 		const textureOffset = sourceIndex * 2;
@@ -288,7 +326,8 @@ function createPartTransforms(
 	resident: ResolvedObjectLayerSource["staticResidents"][number],
 ): ReadonlyMap<number, Mat4> {
 	const pose = resident.presentation.placementPoses.get(0);
-	if (!pose) throw new Error(`Resident ${resident.id} has no default placement pose.`);
+	if (!pose)
+		throw new Error(`Resident ${resident.id} has no default placement pose.`);
 	const transforms = new Map<number, Mat4>();
 	const pending = new Map(
 		resident.presentation.parts.map((part) => [part.partIndex, part]),
@@ -298,9 +337,15 @@ function createPartTransforms(
 		for (const [partIndex, part] of pending) {
 			const localTransform = pose.partTransforms[partIndex];
 			if (!localTransform) {
-				throw new Error(`Resident ${resident.id} has no transform for part ${partIndex}.`);
+				throw new Error(
+					`Resident ${resident.id} has no transform for part ${partIndex}.`,
+				);
 			}
-			if (part.parentPartIndex !== null && !transforms.has(part.parentPartIndex)) continue;
+			if (
+				part.parentPartIndex !== null &&
+				!transforms.has(part.parentPartIndex)
+			)
+				continue;
 			const parent =
 				part.parentPartIndex === null
 					? null
@@ -312,12 +357,16 @@ function createPartTransforms(
 			pending.delete(partIndex);
 			progressed = true;
 		}
-		if (!progressed) throw new Error(`Resident ${resident.id} has a cyclic part hierarchy.`);
+		if (!progressed)
+			throw new Error(`Resident ${resident.id} has a cyclic part hierarchy.`);
 	}
 	return transforms;
 }
 
-function compareGroups(left: ContributionGroup, right: ContributionGroup): number {
+function compareGroups(
+	left: ContributionGroup,
+	right: ContributionGroup,
+): number {
 	const order = orderingRank(left.ordering) - orderingRank(right.ordering);
 	if (order !== 0) return order;
 	return (left.transparentStableId ?? left.bindingId).localeCompare(
@@ -329,7 +378,9 @@ function orderingRank(ordering: ObjectMaterialOrdering): number {
 	return ["opaque", "alpha-test", "transparent", "additive"].indexOf(ordering);
 }
 
-function cullMode(value: number): StaticObjectMaterialBinding["polygon"]["cullMode"] {
+function cullMode(
+	value: number,
+): StaticObjectMaterialBinding["polygon"]["cullMode"] {
 	switch (value) {
 		case 0:
 			return "single";
@@ -344,7 +395,9 @@ function cullMode(value: number): StaticObjectMaterialBinding["polygon"]["cullMo
 	}
 }
 
-function renderSide(value: number): StaticObjectMaterialBinding["polygon"]["renderSide"] {
+function renderSide(
+	value: number,
+): StaticObjectMaterialBinding["polygon"]["renderSide"] {
 	switch (value) {
 		case 0:
 			return "positive";
@@ -358,7 +411,24 @@ function renderSide(value: number): StaticObjectMaterialBinding["polygon"]["rend
 }
 
 function scaleMat4(scale: Vec3): Mat4 {
-	return new Mat4(scale.x, 0, 0, 0, 0, scale.y, 0, 0, 0, 0, scale.z, 0, 0, 0, 0, 1);
+	return new Mat4(
+		scale.x,
+		0,
+		0,
+		0,
+		0,
+		scale.y,
+		0,
+		0,
+		0,
+		0,
+		scale.z,
+		0,
+		0,
+		0,
+		0,
+		1,
+	);
 }
 
 function transformNormal(matrix: Mat4, normal: Vec3): Vec3 {
@@ -371,15 +441,29 @@ function transformNormal(matrix: Mat4, normal: Vec3): Vec3 {
 	const g = matrix.m13;
 	const h = matrix.m23;
 	const i = matrix.m33;
-	const determinant = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+	const determinant =
+		a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
 	if (!Number.isFinite(determinant) || determinant === 0) {
 		throw new Error("Cannot bake normals through a singular transform.");
 	}
-	const x = ((e * i - f * h) * normal.x + (f * g - d * i) * normal.y + (d * h - e * g) * normal.z) / determinant;
-	const y = ((c * h - b * i) * normal.x + (a * i - c * g) * normal.y + (b * g - a * h) * normal.z) / determinant;
-	const z = ((b * f - c * e) * normal.x + (c * d - a * f) * normal.y + (a * e - b * d) * normal.z) / determinant;
+	const x =
+		((e * i - f * h) * normal.x +
+			(f * g - d * i) * normal.y +
+			(d * h - e * g) * normal.z) /
+		determinant;
+	const y =
+		((c * h - b * i) * normal.x +
+			(a * i - c * g) * normal.y +
+			(b * g - a * h) * normal.z) /
+		determinant;
+	const z =
+		((b * f - c * e) * normal.x +
+			(c * d - a * f) * normal.y +
+			(a * e - b * d) * normal.z) /
+		determinant;
 	const magnitude = Math.hypot(x, y, z);
-	if (!Number.isFinite(magnitude)) throw new Error("Cannot bake a non-finite normal.");
+	if (!Number.isFinite(magnitude))
+		throw new Error("Cannot bake a non-finite normal.");
 	// Prepared DAT geometry can carry zero normals. Preserve that authored value rather than
 	// inventing a face normal here; the current object program does not consume lighting normals.
 	if (magnitude === 0) return Vec3.zero();
@@ -388,8 +472,16 @@ function transformNormal(matrix: Mat4, normal: Vec3): Vec3 {
 
 function emptyBounds(): AABB3 {
 	return new AABB3(
-		new Vec3(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY),
-		new Vec3(Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY),
+		new Vec3(
+			Number.POSITIVE_INFINITY,
+			Number.POSITIVE_INFINITY,
+			Number.POSITIVE_INFINITY,
+		),
+		new Vec3(
+			Number.NEGATIVE_INFINITY,
+			Number.NEGATIVE_INFINITY,
+			Number.NEGATIVE_INFINITY,
+		),
 	);
 }
 
@@ -417,11 +509,18 @@ function assertBounds(bounds: AABB3, positions: readonly number[]): void {
 		throw new Error("Baked building bounds are invalid.");
 	}
 	for (let offset = 0; offset < positions.length; offset += 3) {
-		const point = new Vec3(positions[offset]!, positions[offset + 1]!, positions[offset + 2]!);
+		const point = new Vec3(
+			positions[offset]!,
+			positions[offset + 1]!,
+			positions[offset + 2]!,
+		);
 		if (
-			point.x < bounds.min.x || point.x > bounds.max.x ||
-			point.y < bounds.min.y || point.y > bounds.max.y ||
-			point.z < bounds.min.z || point.z > bounds.max.z
+			point.x < bounds.min.x ||
+			point.x > bounds.max.x ||
+			point.y < bounds.min.y ||
+			point.y > bounds.max.y ||
+			point.z < bounds.min.z ||
+			point.z > bounds.max.z
 		) {
 			throw new Error("Baked building bounds do not contain a baked position.");
 		}
@@ -429,7 +528,11 @@ function assertBounds(bounds: AABB3, positions: readonly number[]): void {
 }
 
 function assertFinite(vector: Vec3, label: string): void {
-	if (!Number.isFinite(vector.x) || !Number.isFinite(vector.y) || !Number.isFinite(vector.z)) {
+	if (
+		!Number.isFinite(vector.x) ||
+		!Number.isFinite(vector.y) ||
+		!Number.isFinite(vector.z)
+	) {
 		throw new Error(`Building ${label} is not finite.`);
 	}
 }

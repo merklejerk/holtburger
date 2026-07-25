@@ -94,6 +94,15 @@ export interface TextureAtlasBinding {
 	readonly placement: TexturePlacement;
 }
 
+/** Read-only resource and arbitration counts for runtime diagnostics. */
+export interface TextureManagerDiagnostics {
+	readonly activeAtlasPages: number;
+	readonly canonicalAtlasBindings: number;
+	readonly publishedAtlasCandidates: number;
+	readonly canonicalAtlasReplacements: number;
+	readonly releasedAtlasPages: number;
+}
+
 /** Complete generated texture payload published directly by a CPU producer. */
 export interface GeneratedTextureSource {
 	readonly key: GeneratedTextureKey;
@@ -120,6 +129,9 @@ export class TextureManager<TOwnerId extends string = string> {
 	readonly #leases = new LeaseRegistry<TOwnerId, TextureKey>();
 	readonly #atlasOwners = new Map<AssetTextureKey, TexturePageId>();
 	readonly #atlasPages = new Map<TexturePageId, PackedTexturePage>();
+	#publishedAtlasCandidates = 0;
+	#canonicalAtlasReplacements = 0;
+	#releasedAtlasPages = 0;
 	/** Complete standalone and generated two-dimensional device resources by logical key. */
 	readonly #texture2DResources = new Map<
 		AssetTextureKey | GeneratedTextureKey,
@@ -231,6 +243,17 @@ export class TextureManager<TOwnerId extends string = string> {
 		for (const owner of [...this.#leases.iterOwners()]) this.dropOwner(owner);
 	}
 
+	/** Return only aggregate atlas facts; physical bindings remain runtime-private. */
+	getDiagnostics(): TextureManagerDiagnostics {
+		return {
+			activeAtlasPages: this.#atlasPages.size,
+			canonicalAtlasBindings: this.#atlasOwners.size,
+			canonicalAtlasReplacements: this.#canonicalAtlasReplacements,
+			publishedAtlasCandidates: this.#publishedAtlasCandidates,
+			releasedAtlasPages: this.#releasedAtlasPages,
+		};
+	}
+
 	upsertAtlasPage(
 		id: TexturePageId,
 		description: TexturePageDescription,
@@ -267,6 +290,7 @@ export class TextureManager<TOwnerId extends string = string> {
 			width: description.width,
 		};
 		this.#atlasPages.set(id, candidate);
+		this.#publishedAtlasCandidates += 1;
 		for (const [key, placement] of candidateTextures) {
 			if (!this.#leases.hasLease(key)) continue;
 			const incumbentId = this.#atlasOwners.get(key);
@@ -276,6 +300,7 @@ export class TextureManager<TOwnerId extends string = string> {
 			if (incumbent && !this.#candidateBeats(candidate, incumbent)) continue;
 			if (incumbent && incumbentId) {
 				incumbent.textures.delete(key);
+				this.#canonicalAtlasReplacements += 1;
 				this.#releaseAtlasPageIfUnused(incumbentId, incumbent);
 			}
 			candidate.textures.set(key, placement);
@@ -532,7 +557,9 @@ export class TextureManager<TOwnerId extends string = string> {
 		}
 		const occupiedArea = retainedKeys.reduce((total, key) => {
 			const bounds = page.candidateTextures.get(key)!.bounds;
-			return total + (bounds.max.x - bounds.min.x) * (bounds.max.y - bounds.min.y);
+			return (
+				total + (bounds.max.x - bounds.min.x) * (bounds.max.y - bounds.min.y)
+			);
 		}, 0);
 		return {
 			byteLength: page.byteLength,
@@ -547,16 +574,16 @@ export class TextureManager<TOwnerId extends string = string> {
 		if (!resource) return;
 		this.#texture2DResources.delete(key);
 		if (!this.#renderResources.releaseResource(resource)) {
-			throw new Error(`Packed texture ${key} lost its replaced degenerate binding.`);
+			throw new Error(
+				`Packed texture ${key} lost its replaced degenerate binding.`,
+			);
 		}
 	}
 
-	#releaseAtlasPageIfUnused(
-		id: TexturePageId,
-		page: PackedTexturePage,
-	): void {
+	#releaseAtlasPageIfUnused(id: TexturePageId, page: PackedTexturePage): void {
 		if (page.textures.size > 0) return;
 		this.#atlasPages.delete(id);
+		this.#releasedAtlasPages += 1;
 		if (!this.#renderResources.releaseResource(page.resource)) {
 			throw new Error(`Texture page ${id} lost its backend resource.`);
 		}

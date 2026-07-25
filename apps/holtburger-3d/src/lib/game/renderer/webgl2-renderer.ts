@@ -99,6 +99,8 @@ interface MutableFrameSelectionMetrics {
 	visibleEnvCellShells: number;
 	submittedBuildingRanges: number;
 	submittedBuildingTriangles: number;
+	submittedTransparentBuildingRanges: number;
+	submittedAdditiveBuildingRanges: number;
 	objectProgramChanges: number;
 	objectTexturePageBinds: number;
 }
@@ -130,6 +132,8 @@ export class WebGL2Renderer implements Renderer {
 		visibleStaticObjects: 0,
 		submittedBuildingRanges: 0,
 		submittedBuildingTriangles: 0,
+		submittedTransparentBuildingRanges: 0,
+		submittedAdditiveBuildingRanges: 0,
 		objectProgramChanges: 0,
 		objectTexturePageBinds: 0,
 	};
@@ -254,7 +258,10 @@ export class WebGL2Renderer implements Renderer {
 		camera: FrameViewInput["camera"],
 		anchorLandblockId: FrameInput["anchorLandblockId"],
 		frustum: Frustum,
-	): { readonly terrain: readonly TerrainFrameInput[]; readonly objects: readonly ObjectFrameInput[] } {
+	): {
+		readonly terrain: readonly TerrainFrameInput[];
+		readonly objects: readonly ObjectFrameInput[];
+	} {
 		const terrain: TerrainFrameInput[] = [];
 		const objects: ObjectFrameInput[] = [];
 		const visible = this.#world.queryVisibleScene(
@@ -278,8 +285,7 @@ export class WebGL2Renderer implements Renderer {
 					contribution.renderable,
 				);
 				for (const resolved of node.drawUnits) {
-					if (resolved.drawUnit.kind !== "baked")
-						continue;
+					if (resolved.drawUnit.kind !== "baked") continue;
 					objects.push({
 						drawUnit: resolved.drawUnit,
 						geometry: resolved.geometry,
@@ -331,7 +337,9 @@ export class WebGL2Renderer implements Renderer {
 			) {
 				return 0;
 			}
-			const ordering = left.drawUnit.ordering.localeCompare(right.drawUnit.ordering);
+			const ordering = left.drawUnit.ordering.localeCompare(
+				right.drawUnit.ordering,
+			);
 			if (ordering !== 0) return ordering;
 			return objectMaterialSortKey(left.drawUnit).localeCompare(
 				objectMaterialSortKey(right.drawUnit),
@@ -351,6 +359,8 @@ export class WebGL2Renderer implements Renderer {
 		metrics.visibleStaticObjects = 0;
 		metrics.submittedBuildingRanges = 0;
 		metrics.submittedBuildingTriangles = 0;
+		metrics.submittedTransparentBuildingRanges = 0;
+		metrics.submittedAdditiveBuildingRanges = 0;
 		metrics.objectProgramChanges = 0;
 		metrics.objectTexturePageBinds = 0;
 	}
@@ -530,7 +540,11 @@ export class WebGL2Renderer implements Renderer {
 			[1, this.#objectProgram.uniforms.palette],
 			[2, this.#objectProgram.uniforms.detail],
 		] as const) {
-			this.#bindObjectTexture(unit, this.#objectFallbackTexture, TextureFilteringMode.Nearest);
+			this.#bindObjectTexture(
+				unit,
+				this.#objectFallbackTexture,
+				TextureFilteringMode.Nearest,
+			);
 			gl.uniform1i(uniform, unit);
 		}
 		gl.uniformMatrix4fv(
@@ -569,7 +583,8 @@ export class WebGL2Renderer implements Renderer {
 		const sortedTransparent = sortTransparentStaticRanges(
 			transparent.map((object) => {
 				const facts = transparentSortFacts(object.drawUnit);
-				if (!facts) throw new Error("Transparent building range lacks sort facts.");
+				if (!facts)
+					throw new Error("Transparent building range lacks sort facts.");
 				const landblockCenter = transformPoint3(
 					object.localToLandblock,
 					facts.center,
@@ -596,12 +611,28 @@ export class WebGL2Renderer implements Renderer {
 			[1, this.#blendedObjectProgram.uniforms.palette],
 			[2, this.#blendedObjectProgram.uniforms.detail],
 		] as const) {
-			this.#bindObjectTexture(unit, this.#objectFallbackTexture, TextureFilteringMode.Nearest);
+			this.#bindObjectTexture(
+				unit,
+				this.#objectFallbackTexture,
+				TextureFilteringMode.Nearest,
+			);
 			gl.uniform1i(uniform, unit);
 		}
-		gl.uniformMatrix4fv(this.#blendedObjectProgram.uniforms.projection, false, mat4ToFloat32Array(view.projection, this.#matrixScratch));
-		gl.uniformMatrix4fv(this.#blendedObjectProgram.uniforms.view, false, mat4ToFloat32Array(view.view, this.#matrixScratch));
-		gl.uniform2f(this.#blendedObjectProgram.uniforms.cameraHorizontalPosition, view.cameraPosition.x, view.cameraPosition.z);
+		gl.uniformMatrix4fv(
+			this.#blendedObjectProgram.uniforms.projection,
+			false,
+			mat4ToFloat32Array(view.projection, this.#matrixScratch),
+		);
+		gl.uniformMatrix4fv(
+			this.#blendedObjectProgram.uniforms.view,
+			false,
+			mat4ToFloat32Array(view.view, this.#matrixScratch),
+		);
+		gl.uniform2f(
+			this.#blendedObjectProgram.uniforms.cameraHorizontalPosition,
+			view.cameraPosition.x,
+			view.cameraPosition.z,
+		);
 		for (const object of [...sortedTransparent, ...additive]) {
 			this.#configureObjectBlend(object.drawUnit);
 			this.#drawObjectRange(this.#blendedObjectProgram, object, view);
@@ -661,11 +692,23 @@ export class WebGL2Renderer implements Renderer {
 			);
 		} else {
 			const base = material.textures.base;
-			if (!base) throw new Error(`Textured material ${material.source.id} has no base texture.`);
+			if (!base)
+				throw new Error(
+					`Textured material ${material.source.id} has no base texture.`,
+				);
 			const baseBinding = this.#world.resolveAtlasTexture(base);
 			const baseResource = this.#resources.getTexture2D(baseBinding.resource);
-			this.#bindObjectTexture(0, baseResource.texture, material.sampler.filtering);
-			this.#setAtlasRect(program.uniforms.baseRect, baseBinding.placement.bounds, baseResource.width, baseResource.height);
+			this.#bindObjectTexture(
+				0,
+				baseResource.texture,
+				material.sampler.filtering,
+			);
+			this.#setAtlasRect(
+				program.uniforms.baseRect,
+				baseBinding.placement.bounds,
+				baseResource.width,
+				baseResource.height,
+			);
 			gl.uniform1i(program.uniforms.base, 0);
 			gl.uniform1i(
 				program.uniforms.materialKind,
@@ -675,21 +718,47 @@ export class WebGL2Renderer implements Renderer {
 						? 2
 						: 3,
 			);
-			gl.uniform4f(program.uniforms.materialColor, diffuse, diffuse, diffuse, opacity);
+			gl.uniform4f(
+				program.uniforms.materialColor,
+				diffuse,
+				diffuse,
+				diffuse,
+				opacity,
+			);
 			if (material.source.textureEncoding !== "direct-color") {
 				const palette = material.textures.palette;
-				if (!palette) throw new Error(`Indexed material ${material.source.id} has no palette texture.`);
+				if (!palette)
+					throw new Error(
+						`Indexed material ${material.source.id} has no palette texture.`,
+					);
 				const paletteBinding = this.#world.resolveAtlasTexture(palette);
-				const paletteResource = this.#resources.getTexture2D(paletteBinding.resource);
-				this.#bindObjectTexture(1, paletteResource.texture, TextureFilteringMode.Nearest);
-				this.#setAtlasRect(program.uniforms.paletteRect, paletteBinding.placement.bounds, paletteResource.width, paletteResource.height);
-				gl.uniform1f(program.uniforms.paletteWidth, paletteBinding.placement.bounds.max.x - paletteBinding.placement.bounds.min.x);
+				const paletteResource = this.#resources.getTexture2D(
+					paletteBinding.resource,
+				);
+				this.#bindObjectTexture(
+					1,
+					paletteResource.texture,
+					TextureFilteringMode.Nearest,
+				);
+				this.#setAtlasRect(
+					program.uniforms.paletteRect,
+					paletteBinding.placement.bounds,
+					paletteResource.width,
+					paletteResource.height,
+				);
+				gl.uniform1f(
+					program.uniforms.paletteWidth,
+					paletteBinding.placement.bounds.max.x -
+						paletteBinding.placement.bounds.min.x,
+				);
 				gl.uniform1i(program.uniforms.palette, 1);
 			}
 		}
 		const detail = this.#world.resolveActiveRegionObjectDetail();
 		if (detail && (material.source.rawSurfaceFlags & 0x20000) !== 0) {
-			const resource = this.#resources.getTexture2D(this.#world.resolveTexture2D(detail.key));
+			const resource = this.#resources.getTexture2D(
+				this.#world.resolveTexture2D(detail.key),
+			);
 			this.#bindObjectTexture(2, resource.texture, TextureFilteringMode.Linear);
 			gl.uniform4f(program.uniforms.detailRect, 0, 0, 1, 1);
 			gl.uniform1f(program.uniforms.detailTiling, detail.tiling);
@@ -711,6 +780,12 @@ export class WebGL2Renderer implements Renderer {
 		this.#frameSelectionMetrics.submittedBuildingRanges += 1;
 		this.#frameSelectionMetrics.submittedBuildingTriangles +=
 			drawUnit.indexCount / 3;
+		if (drawUnit.ordering === "transparent") {
+			this.#frameSelectionMetrics.submittedTransparentBuildingRanges += 1;
+		}
+		if (drawUnit.ordering === "additive") {
+			this.#frameSelectionMetrics.submittedAdditiveBuildingRanges += 1;
+		}
 	}
 
 	#bindObjectTexture(
@@ -722,8 +797,16 @@ export class WebGL2Renderer implements Renderer {
 		gl.activeTexture(gl.TEXTURE0 + unit);
 		gl.bindTexture(gl.TEXTURE_2D, texture);
 		this.#frameSelectionMetrics.objectTexturePageBinds += 1;
-		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filtering === TextureFilteringMode.Nearest ? gl.NEAREST : gl.LINEAR);
-		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filtering === TextureFilteringMode.Nearest ? gl.NEAREST : gl.LINEAR);
+		gl.texParameteri(
+			gl.TEXTURE_2D,
+			gl.TEXTURE_MIN_FILTER,
+			filtering === TextureFilteringMode.Nearest ? gl.NEAREST : gl.LINEAR,
+		);
+		gl.texParameteri(
+			gl.TEXTURE_2D,
+			gl.TEXTURE_MAG_FILTER,
+			filtering === TextureFilteringMode.Nearest ? gl.NEAREST : gl.LINEAR,
+		);
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 	}
@@ -743,7 +826,9 @@ export class WebGL2Renderer implements Renderer {
 		);
 	}
 
-	#configureObjectCulling(mode: StaticObjectDrawUnit["material"]["polygon"]["cullMode"]): void {
+	#configureObjectCulling(
+		mode: StaticObjectDrawUnit["material"]["polygon"]["cullMode"],
+	): void {
 		const gl = this.#gl;
 		if (mode === "double") {
 			gl.disable(gl.CULL_FACE);
@@ -805,9 +890,7 @@ function validateDrawRange(
 /** Retail sources encode translucency as either a unit float or a legacy byte-scale value. */
 function sourceOpacity(translucency: number): number {
 	const normalized =
-		translucency > 1
-			? 1 - Math.min(translucency, 255) / 255
-			: 1 - translucency;
+		translucency > 1 ? 1 - Math.min(translucency, 255) / 255 : 1 - translucency;
 	return Math.max(0, Math.min(1, normalized));
 }
 

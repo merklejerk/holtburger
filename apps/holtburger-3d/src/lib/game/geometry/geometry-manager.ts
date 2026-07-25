@@ -43,6 +43,11 @@ export class GeometryManager<TOwnerId extends string = string> {
 		return this.#geometry.has(key);
 	}
 
+	/** Number of currently device-backed geometry allocations. */
+	getResourceCount(): number {
+		return this.#geometry.size;
+	}
+
 	/** Drop one owner's geometry retention and release resources with no remaining owner. */
 	dropOwner(owner: TOwnerId): void {
 		this.#leases.dropOwner(owner);

@@ -10,6 +10,7 @@ import type {
 } from "../terrain/types";
 import type {
 	EnvCellLayerArtifact,
+	StaticObjectLayerDiagnostics,
 	StaticObjectLayerArtifact,
 } from "./artifacts";
 
@@ -33,6 +34,8 @@ export type DynamicEntityCommit = ResolvedObjectResident;
 export interface StaticObjectLayerCommit {
 	/** Null when classification promoted every resident and no static resources were published. */
 	readonly staticObjects: StaticObjectLayerArtifact | null;
+	/** Optional source-to-bake snapshot emitted by static layers that expose diagnostics. */
+	readonly diagnostics?: StaticObjectLayerDiagnostics;
 }
 
 /** Topology and shell publication kept separate from embedded object residents. */

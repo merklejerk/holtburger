@@ -12,6 +12,12 @@ interface StaticObjectOwnerRecord {
 	readonly nodes: readonly SceneNodeId[];
 }
 
+/** Aggregate immutable-object ownership counts for runtime diagnostics. */
+export interface StaticObjectSystemDiagnostics {
+	readonly ownerCount: number;
+	readonly nodeCount: number;
+}
+
 /** Owns immutable object nodes, node-keyed render components, and resource leases. */
 export class StaticObjectSystem<TOwnerId extends string> {
 	readonly #renderables = new Map<SceneNodeId, StaticObjectRenderable>();
@@ -84,5 +90,10 @@ export class StaticObjectSystem<TOwnerId extends string> {
 
 	getRenderable(nodeId: SceneNodeId): StaticObjectRenderable | null {
 		return this.#renderables.get(nodeId) ?? null;
+	}
+
+	/** Return aggregate ownership facts without exposing scene or resource mutation. */
+	getDiagnostics(): StaticObjectSystemDiagnostics {
+		return { nodeCount: this.#renderables.size, ownerCount: this.#owners.size };
 	}
 }

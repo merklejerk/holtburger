@@ -27,6 +27,8 @@ describe("GameRuntime view and interest control", () => {
 			visibleStaticObjects: 13,
 			submittedBuildingRanges: 0,
 			submittedBuildingTriangles: 0,
+			submittedTransparentBuildingRanges: 0,
+			submittedAdditiveBuildingRanges: 0,
 			objectProgramChanges: 0,
 			objectTexturePageBinds: 0,
 		};
@@ -249,6 +251,15 @@ describe("GameRuntime view and interest control", () => {
 				setupSourceId: "0x02000001",
 			},
 		]);
+		expect(runtime.getBuildingRuntimeDiagnostics().layers).toEqual([
+			expect.objectContaining({
+				expectedResidentCount: 1,
+				landblockId: "0xda55ffff",
+				promotedDynamicResidentCount: 1,
+				runtimeDeferredResidentCount: 1,
+				staticArtifactInstalled: false,
+			}),
+		]);
 
 		await runtime.destroy();
 	});
@@ -301,7 +312,25 @@ function staleTerrainArtifact(landblockId: string): CommitBundle {
 /** Minimal promoted record: any accidental dynamic installation reaches the throwing resource port. */
 function promotedBuildingArtifact(landblockId: string): CommitBundle {
 	return {
-		commit: { staticObjects: null },
+		commit: {
+			diagnostics: {
+				additiveRangeCount: 0,
+				atlasPageCount: 0,
+				bakedRangeCount: 0,
+				expectedResidentCount: 1,
+				geometryBytes: 0,
+				geometryWorkerDurationMs: 0,
+				materializedStaticResidentCount: 0,
+				packedTextureBytes: 0,
+				promotedDynamicResidentCount: 1,
+				resolvedStaticResidentCount: 0,
+				sourceRangeCount: 0,
+				sourceMaterialSlotCount: 0,
+				textureWorkerDurationMs: 0,
+				transparentRangeCount: 0,
+			},
+			staticObjects: null,
+		},
 		dynamicEntities: [
 			{
 				id: "resident:promoted",

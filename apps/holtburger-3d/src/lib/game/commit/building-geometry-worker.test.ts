@@ -10,7 +10,9 @@ describe("bakeBuildingGeometry", () => {
 	it("bakes transformed positions into one finite landblock-local allocation", () => {
 		const result = bakeBuildingGeometry({
 			resourceNamespace: "static-install:test" as const,
-			source: source([resident("opaque", translation(10, 20, 30), new Vec3(2, 2, 2))]),
+			source: source([
+				resident("opaque", translation(10, 20, 30), new Vec3(2, 2, 2)),
+			]),
 		});
 
 		expect(result?.geometry.geometry.positions).toEqual(
@@ -31,7 +33,11 @@ describe("bakeBuildingGeometry", () => {
 			source: source(transparent),
 		});
 		expect(transparentResult?.ranges).toHaveLength(2);
-		expect(transparentResult?.ranges.every((range) => range.transparentSort !== null)).toBe(true);
+		expect(
+			transparentResult?.ranges.every(
+				(range) => range.transparentSort !== null,
+			),
+		).toBe(true);
 
 		const additiveResult = bakeBuildingGeometry({
 			resourceNamespace: "static-install:additive" as const,
@@ -42,13 +48,23 @@ describe("bakeBuildingGeometry", () => {
 		});
 		expect(additiveResult?.ranges).toHaveLength(1);
 		expect(additiveResult?.ranges[0]?.transparentSort).toBeNull();
+		expect(additiveResult?.metrics).toMatchObject({
+			bakedRangeCount: 1,
+			sourceMaterialSlotCount: 2,
+			sourceRangeCount: 2,
+		});
 	});
 
 	it("returns no placeholder output when every resident is promoted dynamic", () => {
 		expect(
 			bakeBuildingGeometry({
 				resourceNamespace: "static-install:empty" as const,
-				source: { ...source([]), dynamicResidents: [resident("opaque", Mat4.identity(), new Vec3(1, 1, 1))] },
+				source: {
+					...source([]),
+					dynamicResidents: [
+						resident("opaque", Mat4.identity(), new Vec3(1, 1, 1)),
+					],
+				},
 			}),
 		).toBeNull();
 	});
@@ -79,14 +95,19 @@ describe("bakeBuildingGeometry", () => {
 	});
 
 	it("keeps geometry bytes and ranges independent from a different texture page layout", () => {
-		const input = source([resident("opaque", Mat4.identity(), new Vec3(1, 1, 1))]);
+		const input = source([
+			resident("opaque", Mat4.identity(), new Vec3(1, 1, 1)),
+		]);
 		const first = bakeBuildingGeometry({
 			resourceNamespace: "static-install:first" as const,
 			source: input,
 		});
 		const texture = {
 			height: 1,
-			key: createAssetTextureKey(TexturePurpose.ObjectDirectColor, "0x05000001"),
+			key: createAssetTextureKey(
+				TexturePurpose.ObjectDirectColor,
+				"0x05000001",
+			),
 			pixels: Uint8Array.from([0xff, 0x88, 0x44, 0xff]),
 			purpose: TexturePurpose.ObjectDirectColor,
 			width: 1,
@@ -106,13 +127,19 @@ describe("bakeBuildingGeometry", () => {
 			source: input,
 		});
 
-		expect(second?.geometry.geometry.positions).toEqual(first?.geometry.geometry.positions);
-		expect(second?.geometry.geometry.indices).toEqual(first?.geometry.geometry.indices);
+		expect(second?.geometry.geometry.positions).toEqual(
+			first?.geometry.geometry.positions,
+		);
+		expect(second?.geometry.geometry.indices).toEqual(
+			first?.geometry.geometry.indices,
+		);
 		expect(second?.ranges).toEqual(first?.ranges);
 	});
 });
 
-function source(staticResidents: readonly ReturnType<typeof resident>[]): ResolvedObjectLayerSource {
+function source(
+	staticResidents: readonly ReturnType<typeof resident>[],
+): ResolvedObjectLayerSource {
 	return {
 		dynamicResidents: [],
 		kind: LandblockLayerKind.Buildings,
@@ -122,7 +149,11 @@ function source(staticResidents: readonly ReturnType<typeof resident>[]): Resolv
 }
 
 function resident(id: string, localTransform: Mat4, scale: Vec3) {
-	const flags = id.startsWith("transparent") ? 0x10 : id.startsWith("additive") ? 0x10000 : 0;
+	const flags = id.startsWith("transparent")
+		? 0x10
+		: id.startsWith("additive")
+			? 0x10000
+			: 0;
 	const material = {
 		color: [1, 1, 1, 1] as const,
 		diffuseScale: 1,
@@ -138,29 +169,38 @@ function resident(id: string, localTransform: Mat4, scale: Vec3) {
 		localBounds: null,
 		placement: { envCellId: null, landblockId: "0xda55ffff", localTransform },
 		presentation: {
-			effects: { animationId: null, physicsScriptId: null, physicsScriptTableId: null, soundTableId: null },
+			effects: {
+				animationId: null,
+				physicsScriptId: null,
+				physicsScriptTableId: null,
+				soundTableId: null,
+			},
 			id: `presentation:${id}` as const,
 			motion: null,
-			parts: [{
-				defaultScale: new Vec3(1, 1, 1),
-				geometry: {
-					bounds: null,
-					id: `geometry:${id}` as const,
-					indices: Uint32Array.from([0, 1, 2]),
-					materialSideKinds: Uint8Array.from([0]),
-					materialSideTypes: Uint8Array.from([0]),
-					materialSlotIndices: Uint16Array.from([0]),
-					materialStippling: Uint8Array.from([0]),
-					materialWrapModes: Uint8Array.from([0]),
-					normals: Float32Array.from([0, 0, 1, 0, 0, 1, 0, 0, 1]),
-					positions: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]),
-					textureCoordinates: Float32Array.from([0, 0, 1, 0, 0, 1]),
+			parts: [
+				{
+					defaultScale: new Vec3(1, 1, 1),
+					geometry: {
+						bounds: null,
+						id: `geometry:${id}` as const,
+						indices: Uint32Array.from([0, 1, 2]),
+						materialSideKinds: Uint8Array.from([0]),
+						materialSideTypes: Uint8Array.from([0]),
+						materialSlotIndices: Uint16Array.from([0]),
+						materialStippling: Uint8Array.from([0]),
+						materialWrapModes: Uint8Array.from([0]),
+						normals: Float32Array.from([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+						positions: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+						textureCoordinates: Float32Array.from([0, 0, 1, 0, 0, 1]),
+					},
+					materials: [material],
+					parentPartIndex: null,
+					partIndex: 0,
 				},
-				materials: [material],
-				parentPartIndex: null,
-				partIndex: 0,
-			}],
-			placementPoses: new Map([[0, { partTransforms: [Mat4.identity()], placementId: 0 }]]),
+			],
+			placementPoses: new Map([
+				[0, { partTransforms: [Mat4.identity()], placementId: 0 }],
+			]),
 			selectionBounds: null,
 			sortingBounds: null,
 			sourceAssetId: "0x01000001",

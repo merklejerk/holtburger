@@ -1295,5 +1295,30 @@ Concessions and debt:
 - The decoder currently carries the existing `ResolvedMaterial.detailTextureId: null` shape. Phase
   2 will remove that field in favor of active-region-owned building detail, as planned.
 
+### 2026-07-25 — Phase 1 host-boundary progress
+
+Changes:
+
+- Extracted the closed Level 1 source closure, geometry-buffer layout, and HBBL serialization into
+  `src-tauri/src/building_source.rs`. `lib.rs` now retains command registration and Level 1 request
+  projection rather than accumulating another transport implementation hub.
+- Added a durable synthetic Rust envelope-alignment test. A temporary archive-backed diagnostic
+  loaded DA55FFFF twice through `load_building_source_bytes`; its cold and warmed responses were
+  byte-identical and the decoded manifest contained 42 residents. The diagnostic was removed after
+  execution because repository tests must not require local archives.
+
+Verification:
+
+- `cargo test -p holtburger-3d tests::temporary_archive_building_source_cold_and_warmed_requests_match -- --exact`
+  passed while the temporary diagnostic was present.
+- `cargo test -p holtburger-3d --lib`, strict app clippy, TypeScript check, focused decoder tests,
+  and TypeScript lint pass after the extraction.
+
+Debt:
+
+- The building transport is now cohesive, but the pre-existing active-region, terrain, and texture
+  transports still share `lib.rs`. Phase 1 remains open until that host decomposition is completed;
+  this prevents the new building work from becoming an excuse to declare the hub problem solved.
+
 Add dated progress, concessions, verification, and new cleanup targets here after every completed
 phase.

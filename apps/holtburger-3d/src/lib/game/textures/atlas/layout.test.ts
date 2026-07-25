@@ -27,14 +27,14 @@ describe("fixed-page resident atlas layout", () => {
 	it("preserves existing live placements while inserting into reconstructed free space", () => {
 		const page = pageWith([
 			placement("wide", 0, 0, 6, 6),
-			placement("shelf-row", 6, 0, 4, 4),
-			placement("shelf-tail", 0, 6, 6, 4),
+			placement("edge-row", 6, 0, 4, 4),
+			placement("lower-block", 0, 6, 6, 4),
 		]);
 		const layoutPlan = plan(
 			[
 				entry("wide", 6, 6),
-				entry("shelf-row", 4, 4),
-				entry("shelf-tail", 6, 4),
+				entry("edge-row", 4, 4),
+				entry("lower-block", 6, 4),
 				entry("hole-filler", 4, 6),
 			],
 			[page],
@@ -44,8 +44,8 @@ describe("fixed-page resident atlas layout", () => {
 		expect(layoutPlan.pages[0]?.placements).toEqual(
 			expect.arrayContaining([
 				placement("wide", 0, 0, 6, 6),
-				placement("shelf-row", 6, 0, 4, 4),
-				placement("shelf-tail", 0, 6, 6, 4),
+				placement("edge-row", 6, 0, 4, 4),
+				placement("lower-block", 0, 6, 6, 4),
 				placement("hole-filler", 6, 4, 4, 6),
 			]),
 		);

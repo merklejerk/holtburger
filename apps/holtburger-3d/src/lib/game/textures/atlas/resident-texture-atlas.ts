@@ -343,7 +343,7 @@ export class ResidentTextureAtlas<TOwner extends string> {
 		};
 	}
 
-	/** Adapt resident facts to the generic texture facade without candidate-page terminology. */
+	/** Adapt resident facts to the generic texture facade. */
 	getAtlasDiagnostics(): TextureManagerDiagnostics {
 		const diagnostics = this.getDiagnostics();
 		return {
@@ -1013,14 +1013,14 @@ function pageLayoutsEqual(
 		left.purpose === right.purpose &&
 		left.placements.length === right.placements.length &&
 		left.placements.every((placement, index) => {
-			const candidate = right.placements[index];
+			const rightPlacement = right.placements[index];
 			return (
-				candidate !== undefined &&
-				placement.key === candidate.key &&
-				placement.contentBounds.x === candidate.contentBounds.x &&
-				placement.contentBounds.y === candidate.contentBounds.y &&
-				placement.contentBounds.width === candidate.contentBounds.width &&
-				placement.contentBounds.height === candidate.contentBounds.height
+				rightPlacement !== undefined &&
+				placement.key === rightPlacement.key &&
+				placement.contentBounds.x === rightPlacement.contentBounds.x &&
+				placement.contentBounds.y === rightPlacement.contentBounds.y &&
+				placement.contentBounds.width === rightPlacement.contentBounds.width &&
+				placement.contentBounds.height === rightPlacement.contentBounds.height
 			);
 		})
 	);

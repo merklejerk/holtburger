@@ -47,7 +47,7 @@ import {
 	WorkerTexturePreparer,
 	type TexturePreparer,
 } from "../textures/texture-preparer";
-import { BuildingGeometryWorker } from "../commit/building-workers";
+import { BuildingGeometryWorker } from "../commit/building-geometry-worker-client";
 import { bakeBuildingGeometry } from "../commit/building-geometry-worker";
 import { assembleBuildingArtifact } from "../commit/building-artifact";
 import { collectBuildingTextureDependencies } from "../commit/building-texture-inputs";

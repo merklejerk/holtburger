@@ -129,8 +129,8 @@ architecture already provided global residency.
   - authoritative collection and validation of logical building texture dependencies
 - `apps/holtburger-3d/src/lib/game/commit/building-texture-worker.ts`
   - canonical purpose-specific gutter preparation and current shelf packer
-- `apps/holtburger-3d/src/lib/game/commit/building-workers.ts`
-  - current closed worker transport and transferable ownership
+- `apps/holtburger-3d/src/lib/game/commit/building-geometry-worker-client.ts`
+  - geometry-only closed worker transport and transferable ownership
 - `apps/holtburger-3d/src/lib/game/commit/pipeline.ts`
   - current building source load, texture preparation, geometry bake, page pack, and artifact assembly
 - `apps/holtburger-3d/src/lib/game/commit/types.ts`
@@ -1364,9 +1364,9 @@ Status: Complete (2026-07-25).
 
 - The production route has one packed-atlas authority: `ResidentTextureAtlas`. Targeted source
   searches confirm no active shelf packer, candidate-page map, arbitration counter, landblock-local
-  page namespace, `upsertAtlasPage`, or paired `BuildingWorkers` facade remains. The retained
-  `BuildingGeometryWorker` is a focused geometry-only closed-worker adapter despite its historical
-  filename; it no longer combines geometry and texture ownership.
+  page namespace, `upsertAtlasPage`, or paired `BuildingWorkers` facade remains. The former
+  `building-workers.ts` module is now honestly named `building-geometry-worker-client.ts`; its
+  focused `BuildingGeometryWorker` owns no texture work.
 - `TextureManager` is now a 560-line generic texture facade; the 1,068-line resident component
   contains the cohesive packed-atlas state it alone owns (claims, retained sources, per-purpose
   lanes, physical publication, and diagnostics). This is a large but intentionally unsplit mutable
@@ -1591,6 +1591,8 @@ not an implicit extension of this plan.
 - 2026-07-25: Phase 8 deleted the stale Knip dependency ignore, refreshed the architecture audit to
   the resident-atlas/realizer boundary, confirmed the old arbitration route has no source residue,
   and completed the final validation matrix.
+- 2026-07-25: Post-closeout vestige cleanup renamed the geometry-only worker client and removed
+  stale candidate/shelf fixture and diagnostic language without changing atlas policy.
 
 ## Decisions and Course Corrections Log
 

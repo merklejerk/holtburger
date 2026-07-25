@@ -98,6 +98,9 @@ type PackedAssetTextureFact = AssetTextureFact & {
 	readonly purpose: PackedObjectTexturePurpose;
 };
 
+/** Maximum complete replacement pages an optional compaction may materialize in one mutation. */
+const MAX_COMPACTION_REBUILD_PAGES = 2;
+
 /**
  * Sole authority for revision-scoped object-atlas claims and retained prepared sources.
  *
@@ -391,7 +394,6 @@ export class ResidentTextureAtlas<TOwner extends string> {
 			this.#claimsByKey.get(fact.key) ?? new Set<Requirement<TOwner>>();
 		claims.add(requirement);
 		this.#claimsByKey.set(fact.key, claims);
-		this.#markPurposeDirty(fact.purpose);
 	}
 
 	#withdrawExact(
@@ -417,8 +419,8 @@ export class ResidentTextureAtlas<TOwner extends string> {
 			if (claims.size === 0) {
 				this.#claimsByKey.delete(fact.key);
 				this.#sources.delete(fact.key);
+				this.#markPurposeDirty(fact.purpose);
 			}
-			this.#markPurposeDirty(fact.purpose);
 		}
 		if (requirement.state === "preparing") requirement.resolve(completion);
 		requirement.state = completion;
@@ -480,6 +482,7 @@ export class ResidentTextureAtlas<TOwner extends string> {
 		const physical = this.#physical;
 		if (physical === null || this.#destroyed) return;
 		const epoch = this.#purposeEpochs.get(purpose) ?? 0;
+		const nextPageGeneration = this.#nextPageGeneration.get(purpose) ?? 0;
 		const entries = [...this.#sources.values()]
 			.filter((source) => source.purpose === purpose)
 			.map((source) => ({
@@ -491,34 +494,69 @@ export class ResidentTextureAtlas<TOwner extends string> {
 		const existingPages = [...this.#pages.values()]
 			.map((page) => page.layout)
 			.filter((page) => page.purpose === purpose);
-		const plan = await physical.layoutPlanner.plan({
+		const stablePlan = await physical.layoutPlanner.plan({
 			correlationId: `resident:${purpose}:${epoch}`,
 			entries,
-			nextPageGeneration: this.#nextPageGeneration.get(purpose) ?? 0,
+			nextPageGeneration,
 			pages: existingPages,
 			purpose,
 		});
 		if (this.#destroyed || this.#purposeEpochs.get(purpose) !== epoch) return;
+		const stableNewPageCount = stablePlan.pages.filter(
+			(page) => !this.#pages.has(page.pageId),
+		).length;
+		const compactPlan = await physical.layoutPlanner.plan({
+			correlationId: `resident:${purpose}:${epoch}:compact`,
+			entries,
+			nextPageGeneration: nextPageGeneration + stableNewPageCount,
+			pages: [],
+			purpose,
+		});
+		if (this.#destroyed || this.#purposeEpochs.get(purpose) !== epoch) return;
+		const compactAccepted = shouldAcceptCompaction(
+			stablePlan,
+			compactPlan,
+			MAX_COMPACTION_REBUILD_PAGES,
+		);
+		if (compactAccepted) {
+			try {
+				await this.#publishPlan(compactPlan, physical.pageSize);
+				if (this.#destroyed || this.#purposeEpochs.get(purpose) !== epoch)
+					return;
+				this.#publishedPurposeEpochs.set(purpose, epoch);
+				this.#nextPageGeneration.set(
+					purpose,
+					nextPageGeneration + stableNewPageCount + compactPlan.pages.length,
+				);
+				return;
+			} catch {
+				// Compaction is optional. The stable plan preserves every existing placement and remains
+				// the authoritative fallback after a page-build or upload failure.
+			}
+		}
+		await this.#publishPlan(stablePlan, physical.pageSize);
+		if (this.#destroyed || this.#purposeEpochs.get(purpose) !== epoch) return;
+		this.#publishedPurposeEpochs.set(purpose, epoch);
+		this.#nextPageGeneration.set(
+			purpose,
+			nextPageGeneration + stableNewPageCount,
+		);
+	}
+
+	async #publishPlan(
+		plan: StableAtlasLayoutPlan,
+		pageSize: number | undefined,
+	): Promise<void> {
 		const pagesToBuild = plan.pages.filter((page) => {
 			const existing = this.#pages.get(page.pageId);
 			return existing === undefined || !pageLayoutsEqual(existing.layout, page);
 		});
-		const newPageCount = plan.pages.filter(
-			(page) => !this.#pages.has(page.pageId),
-		).length;
 		const builtPages = await Promise.all(
 			pagesToBuild.map((page) =>
-				this.#buildPage(
-					page,
-					physical.pageSize ?? STATIC_OBJECT_TEXTURE_PAGE_SIZE,
-				),
+				this.#buildPage(page, pageSize ?? STATIC_OBJECT_TEXTURE_PAGE_SIZE),
 			),
 		);
-		if (this.#destroyed || this.#purposeEpochs.get(purpose) !== epoch) return;
 		this.#publishPurposePlan(plan, builtPages);
-		this.#publishedPurposeEpochs.set(purpose, epoch);
-		const previousGeneration = this.#nextPageGeneration.get(purpose) ?? 0;
-		this.#nextPageGeneration.set(purpose, previousGeneration + newPageCount);
 	}
 
 	async #buildPage(
@@ -805,6 +843,21 @@ function pageLayoutsEqual(
 				placement.contentBounds.height === candidate.contentBounds.height
 			);
 		})
+	);
+}
+
+/**
+ * Prefer a compact alternative only for a concrete page-count win that fits the page-build pool's
+ * bounded mutation budget. Equal-count plans preserve stable placements and avoid pixel work.
+ */
+function shouldAcceptCompaction(
+	stable: StableAtlasLayoutPlan,
+	compact: StableAtlasLayoutPlan,
+	rebuildPageBudget: number,
+): boolean {
+	return (
+		compact.pages.length < stable.pages.length &&
+		compact.pages.length <= rebuildPageBudget
 	);
 }
 

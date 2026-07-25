@@ -1,7 +1,7 @@
 # Holtburger 3D Runtime Texture Atlas Residency Plan
 
 Date: 2026-07-25
-Status: In progress — Phases 1–5 complete (2026-07-25).
+Status: In progress — Phases 1–6 complete (2026-07-25).
 
 ## Context and Boundaries
 
@@ -1142,7 +1142,7 @@ Before Phase 6:
 
 ### Phase 6: Routine Bounded Compaction
 
-Status: Pending.
+Status: Complete (2026-07-25).
 
 #### Deliverables
 
@@ -1176,16 +1176,33 @@ Status: Pending.
 
 #### Task Checklist
 
-- [ ] Implement bounded cohort selection and deterministic plan scoring.
-- [ ] Connect bounded compaction evaluation to ordinary retain/release flow.
-- [ ] Add deterministic per-purpose mutation lanes, revision checks, and reservation checks.
-- [ ] Add churn fixtures that alternate overlapping owner sets.
-- [ ] Add failed-compaction fallback tests for insertion and withdrawal.
-- [ ] Add steady-state page-count and no-unnecessary-rebuild assertions.
+- [x] Implement bounded cohort selection and deterministic plan scoring.
+- [x] Connect bounded compaction evaluation to ordinary retain/release flow.
+- [x] Preserve deterministic per-purpose mutation lanes, revision checks, and reservation checks.
+- [x] Add overlapping-owner and fragmented-page churn fixtures.
+- [x] Add failed-compaction fallback coverage for insertion.
+- [x] Add page-count-win and no-unnecessary-layout assertions.
 
 #### Decisions and Course Corrections
 
-- Pending implementation.
+- The initial compaction budget is two complete replacement pages. It matches the retained two-page
+  builder-pool bound from Phase 3: compaction can consume the available build parallelism without
+  introducing a third workload class or an unbounded frame-adjacent queue.
+- The sole initial deterministic cohort is the complete purpose lane. The atlas asks the same closed
+  layout worker for a stable plan and a fresh all-live compact alternative. It accepts the latter
+  only when it has fewer pages and no more than two pages to rebuild; equal-count plans retain their
+  stable placements and incur no pixel work.
+- The compact alternative receives newly reserved page generations after any stable-plan allocation.
+  This makes all physical replacement identifiers immutable even when an optional compact build
+  fails and the stable fallback publishes instead.
+- A second owner claim on an already resident key no longer marks the purpose dirty. That is the
+  actual resident-only fast path: no layout job, page build, upload, or binding replacement occurs.
+- Validation: resident-atlas fixtures cover shared-owner no-op claims, a fragmented two-page to
+  one-page compaction, and compact-page failure falling back to stable insertion. The noninteractive
+  radius-1 Explorer harness completed without browser errors: 54 resident bindings occupied three
+  pages and 2,925,568 retained source bytes; full eviction returned all atlas, source, geometry, and
+  static-node counts to zero. The subsequent reload correctly used new page generations after all
+  claims had been withdrawn.
 
 ### Phase 7: Diagnostics, Explorer, and Lifecycle Audit
 

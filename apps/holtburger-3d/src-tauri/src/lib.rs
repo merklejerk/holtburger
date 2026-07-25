@@ -32,7 +32,7 @@ const TEXTURE_PIXELS_BINARY_MAGIC: &[u8; 4] = b"HBTP";
 const TEXTURE_PIXELS_BINARY_VERSION: u32 = 1;
 const ACTIVE_REGION_BINARY_MAGIC: &[u8; 4] = b"HBAR";
 const ACTIVE_REGION_BINARY_VERSION: u32 = 1;
-const BUILDING_SOURCE_BINARY_VERSION: u32 = 2;
+const BUILDING_SOURCE_BINARY_VERSION: u32 = 3;
 
 /// Managed static-content runtime shared by narrow Tauri commands.
 #[derive(Clone)]
@@ -1001,6 +1001,7 @@ mod tests {
             indices: vec![0, 0, 0],
             material_slots: vec![0],
             material_wrap_modes: vec![1],
+            material_side_kinds: vec![0],
         };
         let manifest = BuildingSourceManifest {
             transport: "holtburger-building-source",

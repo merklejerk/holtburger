@@ -515,9 +515,9 @@ merge ranges based on page placement, or project promoted residents into a diagn
 
 #### Decisions and Course Corrections
 
-- `HBBL` advanced to v2 to carry one clamp/repeat fact per prepared triangle material slot. The
-  fact comes directly from `PreparedPolygonSetRenderTriangle.material_variant_signature`, itself
-  derived from the selected polygon side's stippling bit; it is not a frontend default.
+- `HBBL` advanced to v3 to carry one clamp/repeat fact and one explicit source polygon-side fact
+  per prepared triangle material slot. These facts come directly from prepared polygon expansion;
+  neither is a frontend default.
 - Object pixel requests are a narrow app-local extension of the existing texture capability.
   Terrain keeps `prepared-texture-surface`; object RenderSurfaces use
   `prepared-object-texture`, and palette rows use `prepared-object-palette`. There is no generic
@@ -1412,6 +1412,17 @@ Concessions and debt:
 - DXT mip-chain generation remains a packing/renderer concern. Phase 2 validates level-zero
   conversion and source-level fallback; Phase 3/5 still own explicit atlas-edge mip isolation and
   maximum-LOD policy.
+
+### 2026-07-25 — Phase 2 source-contract correction
+
+- Phase 3 review found that `HBBL` v2 preserved the side-derived sampler fact but not the source
+  polygon side itself. That would force the later worker to invent one-/two-sided binding facts.
+- `PreparedPolygonSetRenderTriangle` now retains its expanded `Positive`, `PositiveReversed`, or
+  `Negative` side as a shared geometry semantic, and `HBBL` v3 carries it in an aligned
+  per-triangle `materialSideKinds` section. The strict frontend decoder validates its exact
+  cardinality and value domain.
+- This correction keeps polygon ownership lossless through worker dispatch; it is required before
+  geometry baking starts and does not require a product decision.
 
 Add dated progress, concessions, verification, and new cleanup targets here after every completed
 phase.

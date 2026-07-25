@@ -1,6 +1,6 @@
 # Holtburger 3D Buildings Layer End-to-End Plan
 
-Status: Active. Phases 0–3 are complete; Phase 4 installation and culling is active.
+Status: Active. Phases 0–4 are complete; Phase 5 rendering is active.
 
 ## Context and Boundaries
 
@@ -1466,15 +1466,20 @@ Verification:
   worker transport and the final source-to-render path. Its scheduler placement is recorded here
   rather than pretending a Node fake worker proves browser transfer behavior.
 
-### 2026-07-25 — Phase 4 progress
+### 2026-07-25 — Phase 4 complete
 
 - Static-object installation now receives the existing `LandblockLayerKind` as its culling group;
   building artifacts therefore install as `buildings` rather than under the former generic
   `static` label.
-- The runtime captures the exact scene-interest revision before dispatch and rejects stale results,
-  including a same-landblock withdrawal/re-request race. Static-authored default-animation residents
-  now reach one structured deferral method that creates no node, geometry, texture, or animation
-  state; spawned dynamics still use the existing activation route.
+- `SceneInterestCommitCoordinator` now owns asynchronous interest diffs, dispatch receipts, and
+  late-result rejection. `GameRuntime` remains the synchronous mutation authority. A receipt stays
+  attached to its layer until eviction; an unchanged frontend refresh therefore cannot accidentally
+  orphan an in-flight request. The runtime validates the same exact receipt again while draining
+  queued commits, so an old result cannot install after an evict-and-re-request race.
+- Static-authored default-animation residents now reach one structured deferral method that creates
+  no node, geometry, texture, or animation state; spawned dynamics still use the existing
+  activation route. The promoted-record runtime test deliberately supplies a throwing resource port:
+  it would fail if this deferral accidentally became installation.
 - The explorer promotes the already prepared active-region building-detail binding into
   `TextureManager` once under an active-region resource owner, independently of per-landblock
   packed pages. The CPU owner remains the source/lifetime authority until this UI path is moved
@@ -1482,12 +1487,13 @@ Verification:
 
 Debt:
 
-- Runtime active-region replacement is not wired yet; explorer startup and teardown are correct,
-  but a live region change still needs to replace the active-region detail resource atomically.
 - The initial closed packer uses a deterministic shelf layout rather than the legacy MaxRects page
   scorer. It preserves purpose isolation, gutters, and logical identity, but may waste page area.
   Phase 7 page arbitration must replace it with the reviewed legacy-derived scorer before claiming
   packing efficiency as a selection signal.
+- The active-region detail texture is correctly device-owned independently of landblock pages, but
+  its read-only renderer binding is not yet part of `RenderWorld`. Phase 5 adds that membrane; it
+  must not be folded into a building artifact or worker job merely to make shader wiring convenient.
 
 Add dated progress, concessions, verification, and new cleanup targets here after every completed
 phase.

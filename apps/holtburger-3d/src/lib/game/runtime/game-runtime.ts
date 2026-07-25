@@ -40,6 +40,7 @@ import {
 } from "../textures/texture-preparer";
 import {
 	activeRegionResourceToOwnerId,
+	type ActiveRegionResourceOwnerId,
 	landblockLayerToOwnerId,
 	type ResourceOwnerId,
 	spawnedEntityToOwnerId,
@@ -50,9 +51,7 @@ import {
 import type { ActiveRegionObjectDetailBinding } from "../resolution/active-region-object-detail";
 import {
 	computeSceneInterest,
-	diffSceneInterest,
 	LandblockLayerKind,
-	type LandblockIdLayer,
 	type SceneInterestMap,
 	type SceneInterestRequest,
 	validateLoDConfigOrThrow,
@@ -64,6 +63,7 @@ import type {
 	SceneInterestReceipt,
 	SceneInterestRevision,
 } from "./scene-availability";
+import { SceneInterestCommitCoordinator } from "./scene-interest-commit-coordinator";
 import type { TerrainSurfaceSample } from "../terrain/terrain-surface";
 import type { ResolvedSceneEnvironment } from "../environment/scene-environment";
 import {
@@ -142,6 +142,8 @@ export class GameRuntime {
 	readonly #animation: AnimationSystem<ResourceOwnerId>;
 	/** Static-authored dynamics deliberately deferred without creating runtime resources. */
 	readonly #deferredStaticDynamics = new Map<OwnerId, DeferredStaticDynamicDiagnostic[]>();
+	/** Active-region owner of the one device-backed building-detail texture. */
+	#activeRegionDetailOwner: ActiveRegionResourceOwnerId | null = null;
 	/** Dynamic terrain sources, generation state, and realized terrain resources. */
 	readonly #terrain: TerrainSystem<ResourceOwnerId, TerrainResourceOwnerId>;
 	/** Read-only renderer gateway over this runtime's scene and resource systems. */
@@ -150,15 +152,12 @@ export class GameRuntime {
 	#renderer: Renderer | null = null;
 	/** Runtime-owned terrain-generation worker terminated during runtime shutdown. */
 	readonly #terrainGenerator: TerrainGenerator;
-	/** Frontend-owned static commit producer invoked for new scene interest. */
-	readonly #commitPipeline: CommitPipeline;
+	/** Asynchronous scene-interest receipt coordination, separate from runtime mutation authority. */
+	readonly #sceneInterestCoordinator: SceneInterestCommitCoordinator;
 	/** Completed asynchronous commits awaiting the next synchronous runtime tick. */
 	readonly #commitArtifacts: PendingCommitArtifact[] = [];
 	/** Frontend listeners informed when placement facts become available or fail. */
 	readonly #sceneAvailabilityListeners = new Set<SceneAvailabilityListener>();
-	/** Current interest revision associated with every retained static layer. */
-	readonly #layerInterestRevisions = new Map<string, SceneInterestRevision>();
-	#nextSceneInterestRevision = 0;
 	/** Current primary-view input used for visibility and rendering. */
 	#camera: Camera = DEFAULT_CAMERA;
 	/** Frontend-owned static regional presentation state for every render frame. */
@@ -167,8 +166,6 @@ export class GameRuntime {
 	#frameSettings: FrameSettings = DEFAULT_FRAME_SETTINGS;
 	/** Terrain interest constraining the frontend's effective distance-fog range. */
 	#terrainFogCoverage: TerrainFogCoverage | null = null;
-	/** Static layers currently requested or retained independently of the camera. */
-	#sceneInterest: SceneInterestMap = new Map();
 	/** Prevents new work and late async publication after runtime shutdown begins. */
 	#destroyed = false;
 
@@ -177,7 +174,6 @@ export class GameRuntime {
 		commitPipeline: CommitPipeline,
 		dependencies: GameRuntimeDependencies,
 	) {
-		this.#commitPipeline = commitPipeline;
 		this.#terrainGenerator = dependencies.terrainGenerator;
 		this.#geometry = new GeometryManager<ResourceOwnerId>(renderResources);
 		this.#textures = new TextureManager<ResourceOwnerId>(
@@ -215,6 +211,28 @@ export class GameRuntime {
 			terrain: this.#terrain,
 			textures: this.#textures,
 		});
+		this.#sceneInterestCoordinator = new SceneInterestCommitCoordinator(
+			commitPipeline,
+			{
+				evict: ({ id, layer }) => this.#evictStaticLayer(id, layer),
+				failed: ({ error, layer, revision }) =>
+					this.#publishSceneAvailability({
+						kind: "scene-content-failed",
+						message: error instanceof Error ? error.message : String(error),
+						residency: { envCellId: null, landblockId: layer.id },
+						revision,
+					}),
+				prepared: ({ artifact, revision }) =>
+					this.#commitArtifacts.push({ artifact, revision }),
+				unavailable: ({ layer, revision }) =>
+					this.#publishSceneAvailability({
+						kind: "scene-content-failed",
+						message: `No ${layer.layer} content is available for ${layer.id}.`,
+						residency: { envCellId: null, landblockId: layer.id },
+						revision,
+					}),
+			},
+		);
 	}
 
 	/** Construct production runtime workers and inject them into runtime-owned systems. */
@@ -316,8 +334,13 @@ export class GameRuntime {
 
 	/** Promote the already prepared regional building-detail binding into device ownership once. */
 	installActiveRegionObjectDetail(binding: ActiveRegionObjectDetailBinding): void {
+		const owner = activeRegionResourceToOwnerId(binding.activeRegionKey);
+		if (this.#activeRegionDetailOwner !== null && this.#activeRegionDetailOwner !== owner) {
+			this.#textures.dropOwner(this.#activeRegionDetailOwner);
+		}
+		this.#activeRegionDetailOwner = owner;
 		this.#textures.installAssetTexture(
-			activeRegionResourceToOwnerId(binding.activeRegionKey),
+			owner,
 			{
 				height: binding.surface.height,
 				key: binding.key,
@@ -393,6 +416,7 @@ export class GameRuntime {
 	async destroy(): Promise<void> {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
+		this.#sceneInterestCoordinator.destroy();
 		this.#commitArtifacts.length = 0;
 		await this.#renderer?.destroy();
 		this.#renderer = null;
@@ -407,67 +431,7 @@ export class GameRuntime {
 	}
 
 	#applySceneInterest(interest: SceneInterestMap): SceneInterestReceipt {
-		const revision = this.#createSceneInterestRevision();
-		if (this.#destroyed) return { revision };
-		const { newLayers, evictedLayers } = diffSceneInterest(
-			this.#sceneInterest,
-			interest,
-		);
-		this.#sceneInterest = interest;
-		for (const { id, layer } of evictedLayers) {
-			this.#layerInterestRevisions.delete(sceneLayerKey(id, layer));
-			this.#evictStaticLayer(id, layer);
-		}
-		for (const [landblockId, layers] of interest) {
-			for (const layer of layers)
-				this.#layerInterestRevisions.set(
-					sceneLayerKey(landblockId, layer),
-					revision,
-				);
-		}
-		for (const layer of newLayers) void this.#prepareInterestedLayer(layer);
-		return { revision };
-	}
-
-	async #prepareInterestedLayer(layer: LandblockIdLayer): Promise<void> {
-		try {
-			const dispatchRevision = this.#layerInterestRevisions.get(
-				sceneLayerKey(layer.id, layer.layer),
-			);
-			if (dispatchRevision === undefined) return;
-			const artifacts = await this.#commitPipeline.prepareLandblockLayers(
-				new Set([layer]),
-			);
-			if (this.#destroyed) return;
-			const revision = this.#layerInterestRevisions.get(
-				sceneLayerKey(layer.id, layer.layer),
-			);
-			if (revision !== dispatchRevision) return;
-			if (artifacts.length === 0) {
-				this.#publishSceneAvailability({
-					kind: "scene-content-failed",
-					message: `No ${layer.layer} content is available for ${layer.id}.`,
-					residency: { envCellId: null, landblockId: layer.id },
-					revision,
-				});
-				return;
-			}
-			for (const artifact of artifacts)
-				this.#commitArtifacts.push({ artifact, revision: dispatchRevision });
-		} catch (error) {
-			log(error, LogLevel.Error);
-			const revision = this.#layerInterestRevisions.get(
-				sceneLayerKey(layer.id, layer.layer),
-			);
-			if (revision !== undefined) {
-				this.#publishSceneAvailability({
-					kind: "scene-content-failed",
-					message: error instanceof Error ? error.message : String(error),
-					residency: { envCellId: null, landblockId: layer.id },
-					revision,
-				});
-			}
-		}
+		return this.#sceneInterestCoordinator.reconcile(interest);
 	}
 
 	#drainCommitArtifacts(): void {
@@ -477,7 +441,10 @@ export class GameRuntime {
 			const { artifact, revision } = pending;
 			if (
 				artifact.kind === CommitBundleSourceKind.LandblockLayer &&
-				!this.#isInActiveSceneInterest(artifact.landblockId, artifact.layer)
+				!this.#sceneInterestCoordinator.ownsDispatch(
+					{ id: artifact.landblockId, layer: artifact.layer },
+					revision,
+				)
 			) {
 				continue;
 			}
@@ -614,13 +581,6 @@ export class GameRuntime {
 		// Future activation replaces this body with #installDynamic(ownerId, landblockId, dynamic).
 	}
 
-	#isInActiveSceneInterest(
-		landblockId: LandblockId,
-		layer: LandblockLayerKind,
-	): boolean {
-		return this.#sceneInterest.get(landblockId)?.has(layer) ?? false;
-	}
-
 	#evictStaticLayer(landblockId: LandblockId, layer: LandblockLayerKind): void {
 		const ownerId = landblockLayerToOwnerId(landblockId, layer);
 		this.#staticObjects.removeOwner(ownerId);
@@ -635,21 +595,9 @@ export class GameRuntime {
 		this.#geometry.dropOwner(ownerId);
 	}
 
-	#createSceneInterestRevision(): SceneInterestRevision {
-		this.#nextSceneInterestRevision += 1;
-		return this.#nextSceneInterestRevision as SceneInterestRevision;
-	}
-
 	#publishSceneAvailability(event: SceneAvailabilityEvent): void {
 		for (const listener of this.#sceneAvailabilityListeners) listener(event);
 	}
-}
-
-function sceneLayerKey(
-	landblockId: LandblockId,
-	layer: LandblockLayerKind,
-): string {
-	return `${landblockId}/${layer}`;
 }
 
 function createLandblockPlacement(landblockId: LandblockId): ScenePlacement {

@@ -33,6 +33,8 @@ interface WebGL2GeometryResource extends WebGL2GeometryBinding {
 
 /** WebGL binding retained for one two-dimensional texture resource. */
 export interface WebGL2Texture2DBinding {
+	/** Physical scalar/channel format used to convert readbacks for inspection. */
+	readonly format: Texture2DFormat;
 	readonly texture: WebGLTexture;
 	readonly width: number;
 	readonly height: number;
@@ -324,7 +326,12 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 			if (upload.mipLevels > 1) gl.generateMipmap(gl.TEXTURE_2D);
 			if (format.integer) configureIntegerTexture(gl);
 			else configureNormalizedTexture(gl, gl.TEXTURE_2D, upload.mipLevels);
-			return { height: upload.height, texture, width: upload.width };
+			return {
+				format: upload.format,
+				height: upload.height,
+				texture,
+				width: upload.width,
+			};
 		} catch (error) {
 			gl.deleteTexture(texture);
 			throw error;

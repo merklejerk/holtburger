@@ -1,20 +1,32 @@
 <script lang="ts">
 	import type { BuildingRuntimeDiagnostics } from "../lib/game/runtime/game-runtime";
+	import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
 	import type { TextureAtlasPageDiagnostics } from "../lib/game/textures/texture-manager";
+	import type { TexturePageId } from "../lib/game/textures/texture-manager";
+	import ExplorerTexturePageModal from "./ExplorerTexturePageModal.svelte";
 
 	type PageSort = "efficiency" | "entries" | "memory" | "page-id";
 
 	interface Props {
 		/** Latest resource-free texture atlas facts sampled by the active runtime. */
 		readonly diagnostics: BuildingRuntimeDiagnostics | null;
+		/** Explicit one-off GPU page readback requested only when opening an inspector. */
+		readonly readTextureAtlasPage: (pageId: TexturePageId) => Texture2DReadback;
 	}
 
-	let { diagnostics }: Props = $props();
+	interface TexturePageInspection {
+		readonly page: TextureAtlasPageDiagnostics;
+		readonly preview: Texture2DReadback;
+	}
+
+	let { diagnostics, readTextureAtlasPage }: Props = $props();
 	let query = $state("");
 	let purpose = $state("all");
 	let sort = $state<PageSort>("efficiency");
 	let selectedPageId = $state<string | null>(null);
 	let selectedEntryKey = $state<string | null>(null);
+	let inspection = $state<TexturePageInspection | null>(null);
+	let inspectionError = $state<string | null>(null);
 
 	const purposes = $derived(
 		[
@@ -89,6 +101,18 @@
 	function selectPage(pageId: string): void {
 		selectedPageId = pageId;
 		selectedEntryKey = null;
+	}
+
+	function openInspector(page: TextureAtlasPageDiagnostics): void {
+		inspectionError = null;
+		try {
+			inspection = { page, preview: readTextureAtlasPage(page.pageId) };
+		} catch (error) {
+			inspectionError =
+				error instanceof Error
+					? error.message
+					: "Texture page readback failed.";
+		}
 	}
 </script>
 
@@ -172,7 +196,12 @@
 					class="explorer-texture-inspector"
 					aria-label="Selected texture page"
 				>
-					<p class="ac-section-label">Page inspector</p>
+					<div class="explorer-texture-inspector-heading">
+						<p class="ac-section-label">Page inspector</p>
+						<button type="button" onclick={() => openInspector(selectedPage)}>
+							View pixels
+						</button>
+					</div>
 					<div class="ac-param-panel">
 						<div class="ac-param-row">
 							<span class="ac-param-key">Page / purpose</span>
@@ -236,11 +265,24 @@
 						Gold regions are canonical bindings; muted regions were supplied by
 						this page but lost arbitration to another active page.
 					</p>
+					{#if inspectionError}
+						<p class="explorer-texture-readback-error" role="alert">
+							{inspectionError}
+						</p>
+					{/if}
 				</section>
 			{/if}
 		{/if}
 	{/if}
 </div>
+
+{#if inspection}
+	<ExplorerTexturePageModal
+		page={inspection.page}
+		preview={inspection.preview}
+		onClose={() => (inspection = null)}
+	/>
+{/if}
 
 <style>
 	.explorer-textures-summary,
@@ -309,6 +351,27 @@
 		padding-top: 16px;
 	}
 
+	.explorer-texture-inspector-heading {
+		display: flex;
+		align-items: start;
+		justify-content: space-between;
+		gap: 8px;
+	}
+
+	.explorer-texture-inspector-heading .ac-section-label {
+		margin: 0 0 14px;
+	}
+
+	.explorer-texture-inspector-heading button {
+		border: 1px solid rgb(162 117 33 / 55%);
+		background: rgb(37 28 12 / 82%);
+		color: var(--ac-parchment);
+		cursor: pointer;
+		font: inherit;
+		font-size: 0.78rem;
+		padding: 4px 8px;
+	}
+
 	.explorer-texture-placement-map {
 		position: relative;
 		width: 100%;
@@ -354,5 +417,9 @@
 		color: var(--ac-gold-bright);
 		font-family: var(--ac-monospace, monospace);
 		overflow-wrap: anywhere;
+	}
+
+	.explorer-texture-readback-error {
+		color: #ffbf9b;
 	}
 </style>

@@ -32,6 +32,8 @@
 	} from "../lib/game/environment/scene-environment";
 	import type { ActiveRegionSource } from "../lib/assets/active-region-source";
 	import { ActiveRegionObjectDetailOwner } from "../lib/game/resolution/active-region-object-detail";
+	import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
+	import type { TexturePageId } from "../lib/game/textures/texture-manager";
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let frameHandle: number | null = null;
@@ -90,6 +92,17 @@
 		lod: LoDConfig,
 	): void {
 		cameraCoordinator?.requestSceneInterest(residency, lod);
+	}
+
+	function readTextureAtlasPage(pageId: TexturePageId): Texture2DReadback {
+		if (!gameRuntime || !webglDevice) {
+			throw new Error(
+				"Texture page readback requires an active Explorer runtime.",
+			);
+		}
+		return webglDevice.readTexture2D(
+			gameRuntime.getTextureAtlasPageResource(pageId),
+		);
 	}
 
 	onMount(() => {
@@ -274,6 +287,7 @@
 			{updateDistanceFog}
 			{frameSelectionMetrics}
 			{buildingRuntimeDiagnostics}
+			{readTextureAtlasPage}
 		/>
 	</div>
 </div>

@@ -336,6 +336,13 @@ export class TextureManager<TOwnerId extends string = string> {
 			.sort((left, right) => left.pageId.localeCompare(right.pageId));
 	}
 
+	/** Return the opaque device resource for one currently active page inspection. */
+	getAtlasPageResource(pageId: TexturePageId): Texture2DResourceKey {
+		const page = this.#atlasPages.get(pageId);
+		if (!page) throw new Error(`Texture page ${pageId} is no longer active.`);
+		return page.resource;
+	}
+
 	upsertAtlasPage(
 		id: TexturePageId,
 		description: TexturePageDescription,

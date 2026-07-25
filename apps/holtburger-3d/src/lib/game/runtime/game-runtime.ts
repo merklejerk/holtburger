@@ -36,7 +36,9 @@ import { InstanceStreamManager } from "../systems/instance-stream-manager";
 import {
 	TextureManager,
 	type TextureAtlasPageDiagnostics,
+	type TexturePageId,
 } from "../textures/texture-manager";
+import type { Texture2DResourceKey } from "../renderer/resource-manager";
 import { TexturePurpose } from "../textures/types";
 import {
 	WorkerTexturePreparer,
@@ -387,6 +389,11 @@ export class GameRuntime {
 			texture: this.#textures.getDiagnostics(),
 			textureAtlasPages: this.#textures.getAtlasPageDiagnostics(),
 		};
+	}
+
+	/** Resolve one active atlas page's opaque resource for an explicit Explorer readback. */
+	getTextureAtlasPageResource(pageId: TexturePageId): Texture2DResourceKey {
+		return this.#textures.getAtlasPageResource(pageId);
 	}
 
 	/** Promote the already prepared regional building-detail binding into device ownership once. */

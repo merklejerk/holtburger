@@ -8,6 +8,8 @@
 	import type { BuildingRuntimeDiagnostics } from "../lib/game/runtime/game-runtime";
 	import type { ExplorerEnvironmentSelection } from "../lib/game/environment/scene-environment";
 	import type { FrameSelectionMetrics } from "../lib/game/renderer/renderer";
+	import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
+	import type { TexturePageId } from "../lib/game/textures/texture-manager";
 
 	type ExplorerTabId =
 		| "world"
@@ -48,6 +50,8 @@
 		readonly frameSelectionMetrics: FrameSelectionMetrics | null;
 		/** Latest low-rate building and texture atlas diagnostic snapshot. */
 		readonly buildingRuntimeDiagnostics: BuildingRuntimeDiagnostics | null;
+		/** Explicit diagnostic readback of one active packed atlas page. */
+		readonly readTextureAtlasPage: (pageId: TexturePageId) => Texture2DReadback;
 	}
 
 	let {
@@ -61,6 +65,7 @@
 		updateDistanceFog,
 		frameSelectionMetrics,
 		buildingRuntimeDiagnostics,
+		readTextureAtlasPage,
 	}: Props = $props();
 
 	const tabs: readonly ExplorerTab[] = [
@@ -169,7 +174,10 @@
 						{:else if activeTab.id === "frame"}
 							<ExplorerFramePanel metrics={frameSelectionMetrics} />
 						{:else if activeTab.id === "textures"}
-							<ExplorerTexturesPanel diagnostics={buildingRuntimeDiagnostics} />
+							<ExplorerTexturesPanel
+								diagnostics={buildingRuntimeDiagnostics}
+								{readTextureAtlasPage}
+							/>
 						{:else}
 							<p>{activeTab.stub}</p>
 						{/if}

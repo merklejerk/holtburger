@@ -542,7 +542,7 @@ device memory and page slots are.
 
 ### Phase 0: Baseline, Policy Census, and Contract Dry Run
 
-Status: Pending.
+Status: Complete (2026-07-25).
 
 #### Deliverables
 
@@ -572,15 +572,99 @@ Status: Pending.
 - No implementation phase depends on reading page pixels from WebGL.
 - No purpose-padded source dimension exceeds the fixed page contract.
 
+#### Evidence
+
+The following commands ran against the local `dats/assets.hba` archive and the noninteractive,
+headless Explorer terrain harness. They do not run the interactive TUI.
+
+```sh
+cargo run -p holtburger-debug-harness --bin inspect_building_layer_evidence -- \
+  --scan-setup-samples --sample-limit 1 0xda55ffff
+
+cd apps/holtburger-3d
+npm run harness:terrain -- --landblock 0xda55ffff --building-radius 1 --lifecycle \
+  --settle-ms 10000
+```
+
+The archive-wide Level-1 building census covers 6,979 building placements across 5,346
+landblock-info records. Its selected building closure has 398 GfxObjs, 441 used materials, 416
+selected render surfaces, and 31 palettes. The largest canonical entries are:
+
+| Purpose | Largest source | Padded allocation | Fixed-page result |
+| --- | ---: | ---: | --- |
+| `ObjectDirectColor` | 512 x 512 | 520 x 520 (4px gutter) | fits 2048 x 2048 |
+| `ObjectIndex16` | 256 x 256 | 256 x 256 | fits 2048 x 2048 |
+| `ObjectPalette` | 2048 x 1 | 2048 x 1 | fits 2048 x 2048 |
+
+This passes the fixed-page hard gate for the complete currently selected building closure. The
+direct-color lower bound is six 2048 x 2048 pages by total padded area, not an oversized-source
+exception. The existing `ObjectPalette` contract intentionally uses 2048-wide rows; it is highly
+sparse, but it does fit and remains purpose-isolated.
+
+The fresh `0xda55ffff`, building-radius-1 harness snapshot requested nine landblocks; six had an
+installed building artifact. It reached the following retained state before the deliberate
+unload/reload traversal:
+
+| Metric | Observation |
+| --- | ---: |
+| Active pages / device bytes | 7 / 96 MiB |
+| Canonical bindings | 54 |
+| Published candidate pages | 12 |
+| Canonical replacements | 26 |
+| Released candidate pages | 5 |
+| Installed static-object owners | 6 |
+| Building texture worker time | 4.3ms to 39.1ms per installed layer |
+| Building geometry worker time | 1.0ms to 20.9ms per installed layer |
+
+The retained pages demonstrate stranded capacity rather than a capacity limit: the three
+direct-color pages are 11.33%, 2.45%, and 2.44% canonically occupied; the two index-16 pages are
+0.39% and 1.56% occupied; and the two palette pages are 0.05% and 0.20% occupied. Current
+diagnostics cannot report free rectangles because the shelf packer has no free-rectangle model;
+these occupancy figures are the honest fragmentation proxy. It also does not retain decoded
+source pixels after packing, so it cannot report resident source bytes. The new atlas must add
+both measurements rather than infer them from device pages.
+
+After the harness cleared and reloaded the same building neighborhood, it returned to the same
+seven-page, 54-binding steady state, but cumulative counters became 24 published candidates, 46
+canonical replacements, and 17 released pages. In other words, one unchanged traversal created
+12 more candidate pages, performed 20 more replacement decisions, and released 12 more pages.
+This is direct runtime evidence that layer-local jobs prepare and pack overlapping data before
+`TextureManager` arbitrates it. The current pipeline collects dependencies and starts pixel
+preparation independently for each building layer, then assigns each pack job a unique
+`static-install:buildings:<landblock>:<counter>` namespace; candidate arbitration occurs only
+after the complete page upload.
+
+The existing currentness proof is narrower but real: `SceneInterestCommitCoordinator` owns the
+per-layer `SceneInterestRevision` dispatch token, drops stale pipeline completions before runtime
+publication, and `ClosedWorkerClient.destroy()` rejects unsettled worker callers. The current
+destructive `StaticObjectSystem.installObjects`, unrevisioned coordinator eviction callback, and
+`TextureManager.dropOwner()` cannot truthfully dry-run the proposed provisional/published atlas
+lifecycle. Adding pretend fixtures for an API that does not yet exist would be theatre. The exact
+transaction scenarios therefore move to the first phases that introduce their contracts: claim
+and withdrawal cases in Phase 2, page-build publication races in Phase 3, and same-owner scene
+replacement in Phase 4. That preserves the requirement while making the fixtures executable
+against real seams.
+
 #### Task Checklist
 
-- [ ] Capture the current Explorer atlas snapshot for a representative radius-1 load.
-- [ ] Add focused non-asset fixtures that reproduce duplicate keys and fragmented pages.
-- [ ] Update the supersession and concessions log if the dry run changes phase boundaries.
+- [x] Capture the current Explorer atlas snapshot for a representative radius-1 load.
+- [x] Census all selected Level-1 building sources for fixed-page dimensions and gutter fit.
+- [x] Establish the current stale-completion and worker-destroy ownership boundary by source and
+      existing non-asset tests.
+- [x] Move target-lifecycle fixtures to Phases 2 through 4, where their contracts become real and
+      executable rather than mock-only.
+- [x] Update the supersession and concessions log for the fixture-phase correction.
 
 #### Decisions and Course Corrections
 
-- Pending implementation.
+- The full selected building closure passes the fixed 2048px page gate; no variable-page fallback
+  is required.
+- The current Explorer run confirms duplicated candidate work and sparse retained pages, but it
+  cannot measure free rectangles or source RAM because neither exists in the current model. Those
+  diagnostics remain Phase 2/3 deliverables rather than invented Phase 0 counters.
+- The proposed transaction has no executable production seam yet. Lifecycle fixtures move to the
+  phase which creates each seam; this is a sequencing correction, not a relaxation of acceptance
+  coverage.
 
 ### Phase 1: Fixed-Page Stable Layout Core
 
@@ -1350,6 +1434,10 @@ not an implicit extension of this plan.
 - 2026-07-25: Completed a full coherence and dry-run pass across ownership, revision replacement,
   eviction, worker staging, static publication, coordinate conventions, phase dependencies, and
   diagnostics.
+- 2026-07-25: Phase 0 evidence gathering passed the fixed-page hard gate. The archive-wide
+  Level-1 building closure tops out at a 520 x 520 guttered direct-color allocation; the fresh
+  `0xda55ffff` radius-1 Explorer traversal demonstrated both sparse retained pages and repeated
+  candidate publication on an unchanged reload.
 
 ## Decisions and Course Corrections Log
 
@@ -1399,6 +1487,10 @@ not an implicit extension of this plan.
   optimization failure cannot block ownership withdrawal.
 - 2026-07-25: `GameRuntime` owns the shared `TexturePreparer` lifecycle after atlas extraction;
   child consumers no longer destroy it implicitly.
+- 2026-07-25: Target transaction dry-runs are deferred from Phase 0 to the phases that introduce
+  the concrete claim, publication, and static-replacement contracts. Phase 0 proved the existing
+  stale pipeline and worker-destroy boundaries instead of creating mock-only tests for a future
+  API.
 
 ## Concessions
 
@@ -1412,8 +1504,12 @@ not an implicit extension of this plan.
 - A failed optional compaction may spend bounded worker/upload staging effort before the stable plan
   runs. This exceptional-path cost is accepted so optimization failure cannot block required
   insertion or release semantics.
+- Phase 0 uses canonical occupancy as the fragmentation baseline because the shelf packer has no
+  free-rectangle state. Phase 2/3 must replace this proxy with explicit free-area, largest-free-
+  rectangle, source-RAM, and reuse counters.
 
 ## Debt Register
 
-- None introduced by planning. Implementation phases must append temporary shims, duplicated
-  contracts, deferred cleanup, or measured performance debt as they arise.
+- Phase 0 found no implementation debt. The current Explorer diagnostics lack free-rectangle and
+  retained-source-RAM counters by design of the candidate-page model; Phases 2/3 own their
+  replacement rather than adding misleading compatibility counters.

@@ -33,7 +33,10 @@ import {
 import { EnvCellSystem } from "../systems/env-cell-system";
 import { AnimationSystem } from "../systems/animation-system";
 import { InstanceStreamManager } from "../systems/instance-stream-manager";
-import { TextureManager } from "../textures/texture-manager";
+import {
+	TextureManager,
+	type TextureAtlasPageDiagnostics,
+} from "../textures/texture-manager";
 import { TexturePurpose } from "../textures/types";
 import {
 	WorkerTexturePreparer,
@@ -142,6 +145,8 @@ export interface BuildingRuntimeDiagnostics {
 	readonly texture: ReturnType<
 		TextureManager<ResourceOwnerId>["getDiagnostics"]
 	>;
+	/** Active packed atlas pages, exposed as resource-free Explorer diagnostics. */
+	readonly textureAtlasPages: readonly TextureAtlasPageDiagnostics[];
 }
 
 /** Bridges source commits, scene topology, runtime residency, and frontend frame state. */
@@ -380,6 +385,7 @@ export class GameRuntime {
 			staticObjectNodeCount: staticObjects.nodeCount,
 			staticObjectOwnerCount: staticObjects.ownerCount,
 			texture: this.#textures.getDiagnostics(),
+			textureAtlasPages: this.#textures.getAtlasPageDiagnostics(),
 		};
 	}
 

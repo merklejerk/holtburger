@@ -3,11 +3,19 @@
 	import type { LoDConfig } from "../lib/game/runtime/types";
 	import type { ExplorerCameraFocusStatus } from "./explorer-camera-coordinator";
 	import ExplorerFramePanel from "./ExplorerFramePanel.svelte";
+	import ExplorerTexturesPanel from "./ExplorerTexturesPanel.svelte";
 	import ExplorerWorldPanel from "./ExplorerWorldPanel.svelte";
+	import type { BuildingRuntimeDiagnostics } from "../lib/game/runtime/game-runtime";
 	import type { ExplorerEnvironmentSelection } from "../lib/game/environment/scene-environment";
 	import type { FrameSelectionMetrics } from "../lib/game/renderer/renderer";
 
-	type ExplorerTabId = "world" | "frame" | "assets" | "entities" | "logs";
+	type ExplorerTabId =
+		| "world"
+		| "frame"
+		| "textures"
+		| "assets"
+		| "entities"
+		| "logs";
 
 	interface ExplorerTab {
 		/** Stable tab id used for selection and panel ids. */
@@ -38,6 +46,8 @@
 		readonly updateDistanceFog: (enabled: boolean) => void;
 		/** Latest low-rate renderer selection snapshot for frame diagnostics. */
 		readonly frameSelectionMetrics: FrameSelectionMetrics | null;
+		/** Latest low-rate building and texture atlas diagnostic snapshot. */
+		readonly buildingRuntimeDiagnostics: BuildingRuntimeDiagnostics | null;
 	}
 
 	let {
@@ -50,6 +60,7 @@
 		distanceFogEnabled,
 		updateDistanceFog,
 		frameSelectionMetrics,
+		buildingRuntimeDiagnostics,
 	}: Props = $props();
 
 	const tabs: readonly ExplorerTab[] = [
@@ -64,6 +75,12 @@
 			icon: "🎞️",
 			label: "Frame info",
 			stub: "Renderer frame selection diagnostics.",
+		},
+		{
+			id: "textures",
+			icon: "🖼️",
+			label: "Textures",
+			stub: "Packed texture atlas page diagnostics.",
 		},
 		{
 			id: "assets",
@@ -151,6 +168,8 @@
 							/>
 						{:else if activeTab.id === "frame"}
 							<ExplorerFramePanel metrics={frameSelectionMetrics} />
+						{:else if activeTab.id === "textures"}
+							<ExplorerTexturesPanel diagnostics={buildingRuntimeDiagnostics} />
 						{:else}
 							<p>{activeTab.stub}</p>
 						{/if}

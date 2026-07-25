@@ -103,6 +103,34 @@ export interface TextureManagerDiagnostics {
 	readonly releasedAtlasPages: number;
 }
 
+/** One candidate texture placement exposed for Explorer atlas inspection. */
+export interface TextureAtlasPageEntryDiagnostics {
+	/** Whether this candidate is the currently selected physical binding. */
+	readonly canonical: boolean;
+	readonly key: AssetTextureKey;
+	/** Page-relative pixel rectangle occupied by this texture. */
+	readonly x: number;
+	readonly y: number;
+	readonly width: number;
+	readonly height: number;
+}
+
+/** Read-only physical page facts for Explorer atlas inspection. */
+export interface TextureAtlasPageDiagnostics {
+	readonly byteLength: number;
+	readonly canonicalEntryCount: number;
+	/** Area occupied by current canonical entries divided by the complete page area. */
+	readonly canonicalOccupiedPixelRatio: number;
+	readonly candidateEntryCount: number;
+	/** Area occupied by every supplied candidate divided by the complete page area. */
+	readonly candidateOccupiedPixelRatio: number;
+	readonly entries: readonly TextureAtlasPageEntryDiagnostics[];
+	readonly height: number;
+	readonly pageId: TexturePageId;
+	readonly purpose: TexturePurpose;
+	readonly width: number;
+}
+
 /** Complete generated texture payload published directly by a CPU producer. */
 export interface GeneratedTextureSource {
 	readonly key: GeneratedTextureKey;
@@ -120,6 +148,48 @@ interface PackedTexturePage {
 	/** Entries this page currently wins as canonical physical bindings. */
 	readonly textures: Map<AssetTextureKey, TexturePlacement>;
 	readonly resource: Texture2DResourceKey;
+}
+
+function createAtlasPageDiagnostics(
+	pageId: TexturePageId,
+	page: PackedTexturePage,
+): TextureAtlasPageDiagnostics {
+	const entries = [...page.candidateTextures.entries()]
+		.map(([key, placement]) => {
+			const width = placement.bounds.max.x - placement.bounds.min.x;
+			const height = placement.bounds.max.y - placement.bounds.min.y;
+			return {
+				canonical: page.textures.has(key),
+				height,
+				key,
+				width,
+				x: placement.bounds.min.x,
+				y: placement.bounds.min.y,
+			};
+		})
+		.sort((left, right) => left.key.localeCompare(right.key));
+	const pageArea = page.width * page.height;
+	const candidateOccupiedArea = entries.reduce(
+		(total, entry) => total + entry.width * entry.height,
+		0,
+	);
+	const canonicalOccupiedArea = entries.reduce(
+		(total, entry) =>
+			entry.canonical ? total + entry.width * entry.height : total,
+		0,
+	);
+	return {
+		byteLength: page.byteLength,
+		canonicalEntryCount: page.textures.size,
+		canonicalOccupiedPixelRatio: canonicalOccupiedArea / pageArea,
+		candidateEntryCount: entries.length,
+		candidateOccupiedPixelRatio: candidateOccupiedArea / pageArea,
+		entries,
+		height: page.height,
+		pageId,
+		purpose: page.purpose,
+		width: page.width,
+	};
 }
 
 /** Owns preparation, device resources, and shared owner retention for logical textures. */
@@ -252,6 +322,18 @@ export class TextureManager<TOwnerId extends string = string> {
 			publishedAtlasCandidates: this.#publishedAtlasCandidates,
 			releasedAtlasPages: this.#releasedAtlasPages,
 		};
+	}
+
+	/**
+	 * Return inspectable page facts without exposing backend resources or retaining page pixels.
+	 *
+	 * Atlas pixels are intentionally released after upload; diagnostics must not turn the
+	 * Explorer into a hidden CPU-side texture cache.
+	 */
+	getAtlasPageDiagnostics(): readonly TextureAtlasPageDiagnostics[] {
+		return [...this.#atlasPages.entries()]
+			.map(([pageId, page]) => createAtlasPageDiagnostics(pageId, page))
+			.sort((left, right) => left.pageId.localeCompare(right.pageId));
 	}
 
 	upsertAtlasPage(

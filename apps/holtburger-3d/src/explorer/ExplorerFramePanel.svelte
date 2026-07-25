@@ -33,11 +33,15 @@
 			</div>
 			<div class="ac-param-row">
 				<span class="ac-param-key">Building ranges / triangles</span>
-				<code>{metrics.submittedBuildingRanges} / {metrics.submittedBuildingTriangles}</code>
+				<code
+					>{metrics.submittedBuildingRanges} / {metrics.submittedBuildingTriangles}</code
+				>
 			</div>
 			<div class="ac-param-row">
-				<span class="ac-param-key">Object program / texture binds</span>
-				<code>{metrics.objectProgramChanges} / {metrics.objectTexturePageBinds}</code>
+				<span class="ac-param-key">Object program / texture bind calls</span>
+				<code
+					>{metrics.objectProgramChanges} / {metrics.objectTexturePageBinds}</code
+				>
 			</div>
 			<div class="ac-param-row">
 				<span class="ac-param-key">Visible dynamics</span>

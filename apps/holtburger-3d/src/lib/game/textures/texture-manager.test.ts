@@ -167,6 +167,91 @@ describe("TextureManager", () => {
 		expect(resources.releasedResources).toEqual(["texture-2d-resource:0"]);
 	});
 
+	it("reports active page occupancy and canonical arbitration without exposing pixels", () => {
+		const resources = new FakeRendererResourceManager();
+		const textures = createTextureManager(resources);
+		const keyA = objectKey("0x05000021");
+		const keyB = objectKey("0x05000022");
+		const keyC = objectKey("0x05000023");
+		const keyD = objectKey("0x05000024");
+
+		textures.installAtlasPage("objects:a", "page:a", pageFor([keyA, keyB]));
+		textures.installAtlasPage(
+			"objects:b",
+			"page:b",
+			pageFor([keyB, keyC, keyD]),
+		);
+
+		expect(textures.getAtlasPageDiagnostics()).toEqual([
+			{
+				byteLength: 32,
+				canonicalEntryCount: 1,
+				canonicalOccupiedPixelRatio: 0.5,
+				candidateEntryCount: 2,
+				candidateOccupiedPixelRatio: 1,
+				entries: [
+					{
+						canonical: true,
+						height: 2,
+						key: keyA,
+						width: 2,
+						x: 0,
+						y: 0,
+					},
+					{
+						canonical: false,
+						height: 2,
+						key: keyB,
+						width: 2,
+						x: 2,
+						y: 0,
+					},
+				],
+				height: 2,
+				pageId: "page:a",
+				purpose: TexturePurpose.ObjectDirectColor,
+				width: 4,
+			},
+			{
+				byteLength: 48,
+				canonicalEntryCount: 3,
+				canonicalOccupiedPixelRatio: 1,
+				candidateEntryCount: 3,
+				candidateOccupiedPixelRatio: 1,
+				entries: [
+					{
+						canonical: true,
+						height: 2,
+						key: keyB,
+						width: 2,
+						x: 0,
+						y: 0,
+					},
+					{
+						canonical: true,
+						height: 2,
+						key: keyC,
+						width: 2,
+						x: 2,
+						y: 0,
+					},
+					{
+						canonical: true,
+						height: 2,
+						key: keyD,
+						width: 2,
+						x: 4,
+						y: 0,
+					},
+				],
+				height: 2,
+				pageId: "page:b",
+				purpose: TexturePurpose.ObjectDirectColor,
+				width: 6,
+			},
+		]);
+	});
+
 	it("keeps the incumbent atlas page on an exact quality tie", () => {
 		const resources = new FakeRendererResourceManager();
 		const textures = createTextureManager(resources);

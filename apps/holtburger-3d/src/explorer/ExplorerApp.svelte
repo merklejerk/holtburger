@@ -4,7 +4,10 @@
 		type FrameMetrics,
 	} from "../app/FrameMetricsOverlay.svelte";
 	import ExplorerTools from "./ExplorerTools.svelte";
-	import { GameRuntime } from "../lib/game/runtime/game-runtime";
+	import {
+		GameRuntime,
+		type BuildingRuntimeDiagnostics,
+	} from "../lib/game/runtime/game-runtime";
 	import { StandardCommitPipeline } from "../lib/game/commit/pipeline";
 	import { WebGL2Device } from "../lib/game/renderer/webgl2-device";
 	import { TauriActiveRegionSource } from "../lib/assets/tauri-active-region-source";
@@ -41,6 +44,8 @@
 	let cameraCoordinator: ExplorerCameraCoordinator | undefined;
 	let frameMetrics: FrameMetrics | null = $state(null);
 	let frameSelectionMetrics: FrameSelectionMetrics | null = $state(null);
+	let buildingRuntimeDiagnostics: BuildingRuntimeDiagnostics | null =
+		$state(null);
 	let lastFrameSelectionSampleAt = 0;
 	let startupError: string | null = $state(null);
 	let runtimeReady = $state(false);
@@ -114,6 +119,7 @@
 			gameRuntime = undefined;
 			runtimeReady = false;
 			frameSelectionMetrics = null;
+			buildingRuntimeDiagnostics = null;
 			commitPipeline = undefined;
 			webglDevice = undefined;
 			activeRegionSource = undefined;
@@ -150,8 +156,11 @@
 				if (destroyed) return;
 				const terrainSource = TauriLandblockTerrainSource.build(activeRegion);
 				const texturePixelSource = TauriTexturePixelSource.build();
-				objectDetailOwner = new ActiveRegionObjectDetailOwner(texturePixelSource);
-				const objectDetailBinding = await objectDetailOwner.install(activeRegion);
+				objectDetailOwner = new ActiveRegionObjectDetailOwner(
+					texturePixelSource,
+				);
+				const objectDetailBinding =
+					await objectDetailOwner.install(activeRegion);
 				if (destroyed) return;
 				webglDevice = await WebGL2Device.build(canvasElement!);
 				if (destroyed) return;
@@ -188,6 +197,7 @@
 					if (gameRuntime === undefined) {
 						frameMetrics = null;
 						frameSelectionMetrics = null;
+						buildingRuntimeDiagnostics = null;
 						frameHandle = window.requestAnimationFrame(step);
 						return;
 					}
@@ -205,6 +215,8 @@
 					};
 					if (frameFinishedAt - lastFrameSelectionSampleAt >= 250) {
 						frameSelectionMetrics = gameRuntime.getFrameSelectionMetrics();
+						buildingRuntimeDiagnostics =
+							gameRuntime.getBuildingRuntimeDiagnostics();
 						lastFrameSelectionSampleAt = frameFinishedAt;
 					}
 					frameHandle = window.requestAnimationFrame(step);
@@ -261,6 +273,7 @@
 			distanceFogEnabled={frameSettings.distanceFogEnabled}
 			{updateDistanceFog}
 			{frameSelectionMetrics}
+			{buildingRuntimeDiagnostics}
 		/>
 	</div>
 </div>

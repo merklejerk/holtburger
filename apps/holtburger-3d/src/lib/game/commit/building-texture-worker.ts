@@ -8,11 +8,6 @@ import {
 	texturePurposePolicy,
 } from "../textures/types";
 
-export {
-	STATIC_OBJECT_TEXTURE_GUTTER_PIXELS,
-	STATIC_OBJECT_TEXTURE_PAGE_SIZE,
-} from "../textures/types";
-
 /** Complete prepared pixels owned by one logical texture before packing begins. */
 export interface BuildingTexturePackInput {
 	readonly key: AssetTextureKey;

@@ -103,6 +103,22 @@ export interface TextureManagerDiagnostics {
 	readonly releasedAtlasPages: number;
 }
 
+/**
+ * Future resident-atlas read boundary. Returning null deliberately preserves the active
+ * candidate-page path until the resident publication cutover is complete.
+ */
+export interface PackedAtlasBindingDelegate {
+	getAtlasBinding(texture: AssetTextureKey): TextureAtlasBinding | null;
+	getAtlasDiagnostics(): Omit<
+		TextureManagerDiagnostics,
+		| "canonicalAtlasReplacements"
+		| "publishedAtlasCandidates"
+		| "releasedAtlasPages"
+	> | null;
+	getAtlasPageDiagnostics(): readonly TextureAtlasPageDiagnostics[] | null;
+	getAtlasPageResource(pageId: TexturePageId): Texture2DResourceKey | null;
+}
+
 /** One candidate texture placement exposed for Explorer atlas inspection. */
 export interface TextureAtlasPageEntryDiagnostics {
 	/** Whether this candidate is the currently selected physical binding. */
@@ -196,6 +212,7 @@ function createAtlasPageDiagnostics(
 export class TextureManager<TOwnerId extends string = string> {
 	readonly #renderResources: RendererResourceManager;
 	readonly #preparer: TexturePreparer;
+	readonly #packedAtlasDelegate: PackedAtlasBindingDelegate | null;
 	readonly #leases = new LeaseRegistry<TOwnerId, TextureKey>();
 	readonly #atlasOwners = new Map<AssetTextureKey, TexturePageId>();
 	readonly #atlasPages = new Map<TexturePageId, PackedTexturePage>();
@@ -213,9 +230,11 @@ export class TextureManager<TOwnerId extends string = string> {
 	constructor(
 		renderResources: RendererResourceManager,
 		preparer: TexturePreparer,
+		packedAtlasDelegate: PackedAtlasBindingDelegate | null = null,
 	) {
 		this.#renderResources = renderResources;
 		this.#preparer = preparer;
+		this.#packedAtlasDelegate = packedAtlasDelegate;
 	}
 
 	/** Install one already-packed atlas page and retain every entry for its owner. */
@@ -315,9 +334,11 @@ export class TextureManager<TOwnerId extends string = string> {
 
 	/** Return only aggregate atlas facts; physical bindings remain runtime-private. */
 	getDiagnostics(): TextureManagerDiagnostics {
+		const delegated = this.#packedAtlasDelegate?.getAtlasDiagnostics();
 		return {
-			activeAtlasPages: this.#atlasPages.size,
-			canonicalAtlasBindings: this.#atlasOwners.size,
+			activeAtlasPages: delegated?.activeAtlasPages ?? this.#atlasPages.size,
+			canonicalAtlasBindings:
+				delegated?.canonicalAtlasBindings ?? this.#atlasOwners.size,
 			canonicalAtlasReplacements: this.#canonicalAtlasReplacements,
 			publishedAtlasCandidates: this.#publishedAtlasCandidates,
 			releasedAtlasPages: this.#releasedAtlasPages,
@@ -331,6 +352,8 @@ export class TextureManager<TOwnerId extends string = string> {
 	 * Explorer into a hidden CPU-side texture cache.
 	 */
 	getAtlasPageDiagnostics(): readonly TextureAtlasPageDiagnostics[] {
+		const delegated = this.#packedAtlasDelegate?.getAtlasPageDiagnostics();
+		if (delegated !== null && delegated !== undefined) return delegated;
 		return [...this.#atlasPages.entries()]
 			.map(([pageId, page]) => createAtlasPageDiagnostics(pageId, page))
 			.sort((left, right) => left.pageId.localeCompare(right.pageId));
@@ -338,6 +361,8 @@ export class TextureManager<TOwnerId extends string = string> {
 
 	/** Return the opaque device resource for one currently active page inspection. */
 	getAtlasPageResource(pageId: TexturePageId): Texture2DResourceKey {
+		const delegated = this.#packedAtlasDelegate?.getAtlasPageResource(pageId);
+		if (delegated !== null && delegated !== undefined) return delegated;
 		const page = this.#atlasPages.get(pageId);
 		if (!page) throw new Error(`Texture page ${pageId} is no longer active.`);
 		return page.resource;
@@ -445,6 +470,8 @@ export class TextureManager<TOwnerId extends string = string> {
 	}
 
 	getAtlasBinding(texture: AssetTextureKey): TextureAtlasBinding {
+		const delegated = this.#packedAtlasDelegate?.getAtlasBinding(texture);
+		if (delegated !== null && delegated !== undefined) return delegated;
 		const pageId = this.#atlasOwners.get(texture);
 		if (pageId === undefined) {
 			throw new Error(`Texture ${texture} does not have an atlas binding.`);
@@ -461,6 +488,9 @@ export class TextureManager<TOwnerId extends string = string> {
 		key: AssetTextureKey | GeneratedTextureKey,
 	): Texture2DResourceKey {
 		if (isAssetTextureKey(key)) {
+			const delegated = this.#packedAtlasDelegate?.getAtlasBinding(key);
+			if (delegated !== null && delegated !== undefined)
+				return delegated.resource;
 			const packed = this.#atlasOwners.get(key);
 			if (packed !== undefined) return this.getAtlasBinding(key).resource;
 		}
@@ -479,7 +509,12 @@ export class TextureManager<TOwnerId extends string = string> {
 	hasTexture(key: TextureKey): boolean {
 		if (isTextureArrayKey(key)) return this.#textureArrays.has(key);
 		if (isAssetTextureKey(key)) {
-			return this.#atlasOwners.has(key) || this.#texture2DResources.has(key);
+			const delegated = this.#packedAtlasDelegate?.getAtlasBinding(key);
+			return (
+				(delegated !== null && delegated !== undefined) ||
+				this.#atlasOwners.has(key) ||
+				this.#texture2DResources.has(key)
+			);
 		}
 		if (isGeneratedTextureKey(key)) {
 			return this.#texture2DResources.has(key);

@@ -53,7 +53,6 @@ describe("decodeTexturePixels", () => {
 			kind: "prepared-object-texture" as const,
 			purpose: TexturePurpose.ObjectIndex16,
 			sourceAssetId: "surface-texture/0x05001234" as const,
-			renderSurfaceId: "0x06001234" as const,
 		};
 		const response = decodeTexturePixels(
 			textureResponse({

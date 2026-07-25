@@ -18,7 +18,10 @@ import {
 } from "./types";
 import { assembleBuildingArtifact } from "./building-artifact";
 import type { StaticObjectLayerDiagnostics } from "./artifacts";
-import { prepareBuildingTextureInputs } from "./building-texture-inputs";
+import {
+	collectBuildingTextureDependencies,
+	prepareBuildingTextureInputs,
+} from "./building-texture-inputs";
 import { BuildingWorkers } from "./building-workers";
 import type { BuildingGeometryResult } from "./building-geometry-worker";
 import type { BuildingTexturePackResult } from "./building-texture-worker";
@@ -141,9 +144,11 @@ export class StandardCommitPipeline implements CommitPipeline {
 		this.#nextStaticNamespace += 1;
 		// Pixel preparation starts before geometry transfer. It has collected every dependency before
 		// its first await, so the geometry worker can take ownership of source buffers immediately.
+		const textureDependencies = collectBuildingTextureDependencies(source);
 		const textureInputs = prepareBuildingTextureInputs(
 			this.#requireTexturePixelSource(),
 			source,
+			textureDependencies,
 		);
 		const geometry = this.#requireBuildingWorkers().bake({
 			resourceNamespace,
@@ -158,6 +163,7 @@ export class StandardCommitPipeline implements CommitPipeline {
 			geometry: geometryResult,
 			resourceNamespace,
 			source,
+			textureRequirements: textureDependencies.map(({ fact }) => fact),
 			textures: textureResult,
 		});
 		const commit: StaticObjectLayerCommit = {

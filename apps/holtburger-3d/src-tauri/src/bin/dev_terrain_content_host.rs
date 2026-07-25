@@ -40,8 +40,6 @@ struct TexturePixelsRequest {
     kind: String,
     purpose: String,
     source_asset_id: String,
-    render_surface_id: Option<String>,
-    palette_domain: Option<String>,
 }
 
 #[tokio::main]
@@ -108,8 +106,6 @@ async fn handle_connection(
                 &request.kind,
                 &request.purpose,
                 &request.source_asset_id,
-                request.render_surface_id.as_deref(),
-                request.palette_domain.as_deref(),
             )
             .await
             {

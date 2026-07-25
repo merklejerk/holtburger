@@ -1,7 +1,7 @@
 # Holtburger 3D Runtime Texture Atlas Residency Plan
 
 Date: 2026-07-25
-Status: In progress — Phase 1 complete (2026-07-25).
+Status: In progress — Phases 1–2 complete (2026-07-25).
 
 ## Context and Boundaries
 
@@ -750,7 +750,7 @@ Status: Complete (2026-07-25).
 
 ### Phase 2: `ResidentTextureAtlas` Claim and Source Model
 
-Status: Pending.
+Status: Complete (2026-07-25).
 
 #### Deliverables
 
@@ -805,18 +805,39 @@ Status: Pending.
 
 #### Task Checklist
 
-- [ ] Introduce revision-scoped owner-claim and logical requirement contracts.
-- [ ] Implement and test provisional preparation, activation, and exact withdrawal transitions.
-- [ ] Add `ResidentTextureAtlas` with private claim and resident-source indexes.
-- [ ] Add the `TextureManager` delegation seam without switching the active path.
-- [ ] Define and test the replacement logical requirement contract without switching active
+- [x] Introduce revision-scoped owner-claim and logical requirement contracts.
+- [x] Implement and test provisional preparation, activation, and exact withdrawal transitions.
+- [x] Add `ResidentTextureAtlas` with private claim and resident-source indexes.
+- [x] Add the `TextureManager` delegation seam without switching the active path.
+- [x] Define and test the replacement logical requirement contract without switching active
       building artifacts.
-- [ ] Update dependency collection to produce complete `AssetTextureFact` values.
-- [ ] Add concurrent preparation, replacement, stale cleanup, and final release tests.
+- [x] Update dependency collection to produce complete `AssetTextureFact` values.
+- [x] Add concurrent preparation, replacement, stale cleanup, and final release tests.
 
 #### Decisions and Course Corrections
 
-- Pending implementation.
+- **Resolved source-contract correction:** the host currently uses `paletteDomain` only to truncate
+  an authored palette to 256 entries for index8 use. Canonical `ObjectPalette` preparation instead
+  retains the complete authored palette; index8 reads remain within the first 256 entries, while
+  index16 receives the same complete source. This removes an unnecessary decoder-policy dimension
+  and makes `TexturePurpose.ObjectPalette` a complete physical bucket as the target model requires.
+- `renderSurfaceId` pins the first available RenderSurface selected during building-source assembly,
+  but the host's omitted-ID path performs the same ordered first-available selection. Object
+  preparation now uses that canonical host policy directly; the resolved ID remains source evidence,
+  not an atlas identity or preparation parameter.
+- `AssetTextureFact.sourceAssetId` remains the actual DAT texture or palette identity and is checked
+  against `AssetTextureKey`. The host address (`surface-texture/<id>` or `palette/<id>`) is derived
+  internally from the fact and purpose, so it is not threaded as separate provenance.
+- This correction restores the planned invariant: `AssetTextureKey` plus `TexturePurpose` determine
+  canonical prepared pixels. Conflicting facts for one key still fail loudly.
+- **Validation:** `npm run check`, the full TypeScript suite (186 tests), ESLint, Rust unit tests,
+  and strict Rust Clippy all pass. The exact lifecycle tests cover coalesced preparation, shared
+  retention, pending withdrawal, failure, stale cleanup, activation, idempotent eviction, and
+  destroy settlement. The host test proves palettes retain more than 256 authored entries.
+- **Deferred Phase 3 integration:** the Phase 1 layout-worker entry and pool are deliberately not
+  instantiated until a physical-page transaction exists. Knip therefore reports those two unused
+  Phase 1 artifacts; this is tracked debt, not a suppressed diagnostic, and Phase 3 must consume or
+  remove them before the final lint gate.
 
 ### Phase 3: Page Build and `ResidentTextureAtlas` Fixture
 

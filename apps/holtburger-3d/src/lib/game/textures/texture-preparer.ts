@@ -7,7 +7,8 @@ import {
 	texturePurposePolicy,
 	type TexturePixelFormat,
 	type TextureKey,
-	type TexturePurpose,
+	TexturePurpose,
+	isPackedObjectTexturePurpose,
 } from "./types";
 
 /** One decoded DAT surface returned to a runtime texture-preparation worker. */
@@ -20,7 +21,7 @@ export interface PreparedTextureSurface {
 }
 
 /** Existing terrain texture request whose output selection is shared-content-proven. */
-export interface TerrainTexturePreparationServiceRequest {
+interface TerrainTexturePreparationServiceRequest {
 	readonly kind: "prepared-texture-surface";
 	readonly purpose: TexturePurpose;
 	readonly sourceAssetId: DatAssetId;
@@ -35,16 +36,13 @@ export interface ObjectTexturePreparationServiceRequest {
 		| TexturePurpose.ObjectIndex16
 		| TexturePurpose.ObjectDetail;
 	readonly sourceAssetId: DatAssetId;
-	/** Concrete source level selected by the closed material bundle; detail may omit it. */
-	readonly renderSurfaceId?: DatAssetId;
 }
 
-/** Closed request for a palette lookup texture in the domain addressed by its base indices. */
+/** Closed request for one canonical full authored palette lookup texture. */
 export interface ObjectPalettePreparationServiceRequest {
 	readonly kind: "prepared-object-palette";
 	readonly purpose: TexturePurpose.ObjectPalette;
 	readonly sourceAssetId: DatAssetId;
-	readonly paletteDomain: "index8" | "index16";
 }
 
 /** Narrow, app-local pixel capability request. */
@@ -109,10 +107,7 @@ export class WorkerTexturePreparer implements TexturePreparer {
 		fact: TextureArrayFact | AssetTextureFact,
 	): Promise<PreparedTextureSource> {
 		if (fact.kind === "asset") {
-			const surface = await this.#requestSurface(
-				fact.purpose,
-				fact.sourceAssetId,
-			);
+			const surface = await this.#requestSurface(assetPreparationRequest(fact));
 			return {
 				height: surface.height,
 				key: fact.key,
@@ -125,7 +120,11 @@ export class WorkerTexturePreparer implements TexturePreparer {
 
 		const surfaces = await Promise.all(
 			fact.sourceAssetIds.map((sourceAssetId) =>
-				this.#requestSurface(fact.purpose, sourceAssetId),
+				this.#requestSurface({
+					kind: "prepared-texture-surface",
+					purpose: fact.purpose,
+					sourceAssetId,
+				}),
 			),
 		);
 		const first = surfaces[0];
@@ -154,28 +153,50 @@ export class WorkerTexturePreparer implements TexturePreparer {
 	}
 
 	async #requestSurface(
-		purpose: TexturePurpose,
-		sourceAssetId: DatAssetId,
+		request: TexturePreparationServiceRequest,
 	): Promise<PreparedTextureSurface> {
-		const response = await this.#pixelSource.loadTexturePixels({
-			kind: "prepared-texture-surface",
-			purpose,
-			sourceAssetId,
-		});
+		const response = await this.#pixelSource.loadTexturePixels(request);
 		if (
-			response.kind !== "prepared-texture-surface" ||
-			response.purpose !== purpose ||
-			response.surface.sourceAssetId !== sourceAssetId
+			response.kind !== request.kind ||
+			response.purpose !== request.purpose ||
+			response.surface.sourceAssetId !== request.sourceAssetId
 		) {
 			throw new Error(
-				`Host returned an incompatible prepared texture for ${sourceAssetId}.`,
+				`Host returned an incompatible prepared texture for ${request.sourceAssetId}.`,
 			);
 		}
-		if (response.surface.format !== texturePurposePolicy(purpose).format) {
+		if (
+			response.surface.format !== texturePurposePolicy(request.purpose).format
+		) {
 			throw new Error(
-				`Host returned an incompatible pixel format for ${sourceAssetId}.`,
+				`Host returned an incompatible pixel format for ${request.sourceAssetId}.`,
 			);
 		}
 		return response.surface;
 	}
+}
+
+/** Derive the one canonical host decode request admitted by an asset texture fact. */
+function assetPreparationRequest(
+	fact: AssetTextureFact,
+): TexturePreparationServiceRequest {
+	if (fact.purpose === TexturePurpose.ObjectPalette) {
+		return {
+			kind: "prepared-object-palette",
+			purpose: fact.purpose,
+			sourceAssetId: `palette/${fact.sourceAssetId}`,
+		};
+	}
+	if (isPackedObjectTexturePurpose(fact.purpose)) {
+		return {
+			kind: "prepared-object-texture",
+			purpose: fact.purpose,
+			sourceAssetId: `surface-texture/${fact.sourceAssetId}`,
+		};
+	}
+	return {
+		kind: "prepared-texture-surface",
+		purpose: fact.purpose,
+		sourceAssetId: fact.sourceAssetId,
+	};
 }

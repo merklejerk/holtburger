@@ -24,6 +24,7 @@ import type {
 } from "../textures/texture-manager";
 import type {
 	AssetTextureKey,
+	AssetTextureFact,
 	TexturePurpose,
 	TextureSamplerPolicy,
 } from "../textures/types";
@@ -148,6 +149,11 @@ export interface StaticObjectLayerArtifact {
 	readonly objects: readonly StaticObjectArtifact[];
 	readonly geometry: readonly GeometrySource[];
 	readonly instanceStreams: readonly StaticInstanceStreamSource[];
+	/**
+	 * Complete logical source requirements retained beside the legacy physical pages until the
+	 * resident-atlas cutover replaces those pages.
+	 */
+	readonly textureRequirements: readonly AssetTextureFact[];
 	readonly texturePages: readonly StaticTexturePageArtifact[];
 }
 

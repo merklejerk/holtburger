@@ -79,10 +79,6 @@ struct LoadTexturePixelsRequest {
     kind: String,
     purpose: String,
     source_asset_id: String,
-    #[serde(default)]
-    render_surface_id: Option<String>,
-    #[serde(default)]
-    palette_domain: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -148,8 +144,6 @@ async fn load_texture_pixels(
         &request.kind,
         &request.purpose,
         &request.source_asset_id,
-        request.render_surface_id.as_deref(),
-        request.palette_domain.as_deref(),
     )
     .await
     .map_err(format_error)?;
@@ -192,8 +186,6 @@ pub async fn load_texture_pixels_bytes(
     kind: &str,
     purpose: &str,
     source_asset_id: &str,
-    render_surface_id: Option<&str>,
-    palette_domain: Option<&str>,
 ) -> Result<Vec<u8>> {
     build_texture_pixels_response(
         runtime,
@@ -201,8 +193,6 @@ pub async fn load_texture_pixels_bytes(
             kind: kind.to_owned(),
             purpose: purpose.to_owned(),
             source_asset_id: source_asset_id.to_owned(),
-            render_surface_id: render_surface_id.map(str::to_owned),
-            palette_domain: palette_domain.map(str::to_owned),
         },
     )
     .await
@@ -347,12 +337,7 @@ async fn build_texture_pixels_response(
         "prepared-object-texture" => {
             let surface_texture_id = parse_surface_texture_asset_id(&request.source_asset_id)?;
             let purpose = object_texture_purpose(&request.purpose)?;
-            let surface = load_object_render_surface(
-                runtime,
-                surface_texture_id,
-                request.render_surface_id.as_deref(),
-            )
-            .await?;
+            let surface = load_object_render_surface(runtime, surface_texture_id).await?;
             let source_record_id = dat_id(surface.id);
             let prepared = prepare_object_surface(&surface, purpose)?;
             (
@@ -366,14 +351,13 @@ async fn build_texture_pixels_response(
                 anyhow::bail!("prepared-object-palette requires object-palette purpose");
             }
             let palette_id = parse_palette_asset_id(&request.source_asset_id)?;
-            let domain = object_palette_domain(request.palette_domain.as_deref())?;
             let asset = runtime
                 .load(ContentAssetRequest::Palette(palette_id))
                 .await?;
             let ContentAsset::Palette(palette) = asset else {
                 unreachable!("palette request must return a palette")
             };
-            let prepared = prepare_object_palette(&palette, domain)?;
+            let prepared = prepare_object_palette(&palette)?;
             (palette_asset_id(palette_id), dat_id(palette.id), prepared)
         }
         _ => anyhow::bail!("unsupported texture request kind {:?}", request.kind),
@@ -426,10 +410,6 @@ fn parse_palette_asset_id(raw_asset_id: &str) -> Result<u32> {
     parse_typed_asset_id(raw_asset_id, "palette/", 0x04)
 }
 
-fn parse_render_surface_id(raw_asset_id: &str) -> Result<u32> {
-    parse_typed_asset_id(raw_asset_id, "0x", 0x06)
-}
-
 fn parse_typed_asset_id(raw_asset_id: &str, prefix: &str, expected_type: u32) -> Result<u32> {
     let raw_id = raw_asset_id
         .strip_prefix(prefix)
@@ -462,18 +442,9 @@ fn object_texture_purpose(raw: &str) -> Result<ObjectTexturePurpose> {
     }
 }
 
-fn object_palette_domain(raw: Option<&str>) -> Result<ObjectTexturePurpose> {
-    match raw {
-        Some("index8") => Ok(ObjectTexturePurpose::Index8),
-        Some("index16") => Ok(ObjectTexturePurpose::Index16),
-        _ => anyhow::bail!("object palette request must specify index8 or index16 domain"),
-    }
-}
-
 async fn load_object_render_surface(
     runtime: &ContentAssetRuntime,
     surface_texture_id: u32,
-    requested_render_surface_id: Option<&str>,
 ) -> Result<Box<holtburger_dat::file_type::RenderSurface>> {
     let texture_asset = runtime
         .load(ContentAssetRequest::SurfaceTexture(surface_texture_id))
@@ -482,19 +453,7 @@ async fn load_object_render_surface(
     let ContentAsset::SurfaceTexture(texture) = texture_asset else {
         unreachable!("surface texture request must return a surface texture")
     };
-    let candidates = match requested_render_surface_id {
-        Some(raw_id) => {
-            let id = parse_render_surface_id(raw_id)?;
-            if !texture.render_surface_ids.contains(&id) {
-                anyhow::bail!(
-                    "RenderSurface 0x{id:08X} is not declared by SurfaceTexture 0x{surface_texture_id:08X}"
-                );
-            }
-            vec![id]
-        }
-        None => texture.render_surface_ids.clone(),
-    };
-    for render_surface_id in candidates {
+    for render_surface_id in texture.render_surface_ids {
         if let Ok(ContentAsset::RenderSurface(surface)) = runtime
             .load(ContentAssetRequest::RenderSurface(render_surface_id))
             .await
@@ -1238,8 +1197,6 @@ mod tests {
                 kind: "prepared-texture-surface".to_string(),
                 purpose: "terrain-color".to_string(),
                 source_asset_id: "surface-texture/0x05000001".to_string(),
-                render_surface_id: None,
-                palette_domain: None,
             },
         )
         .await

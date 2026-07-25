@@ -71,17 +71,9 @@ pub(crate) fn prepare_object_surface(
 
 /// Normalize one authored palette as a one-row RGBA lookup texture.
 ///
-/// Index8 can never address colors beyond 255. Index16 retains the authored palette extent.
-pub(crate) fn prepare_object_palette(
-    palette: &Palette,
-    index_format: ObjectTexturePurpose,
-) -> Result<PreparedObjectTexture> {
-    let limit = match index_format {
-        ObjectTexturePurpose::Index8 => 256,
-        ObjectTexturePurpose::Index16 => 65_536,
-        _ => bail!("object palette preparation requires an indexed texture purpose"),
-    };
-    let color_count = palette.colors_argb.len().min(limit).max(1);
+/// All indexed roles share the full authored palette; index8 sampling naturally remains below 256.
+pub(crate) fn prepare_object_palette(palette: &Palette) -> Result<PreparedObjectTexture> {
+    let color_count = palette.colors_argb.len().max(1);
     let mut pixels = Vec::with_capacity(color_count * 4);
     for color in palette.colors_argb.iter().copied().take(color_count) {
         pixels.extend_from_slice(&argb_to_rgba(color));
@@ -446,15 +438,23 @@ mod tests {
 
     #[test]
     fn produces_a_one_row_palette_in_rgba_order() {
-        let prepared = prepare_object_palette(
-            &Palette {
-                id: 0x0400_0001,
-                colors_argb: vec![0x7f11_2233],
-            },
-            ObjectTexturePurpose::Index16,
-        )
+        let prepared = prepare_object_palette(&Palette {
+            id: 0x0400_0001,
+            colors_argb: vec![0x7f11_2233],
+        })
         .expect("palette should prepare");
         assert_eq!((prepared.width, prepared.height), (1, 1));
         assert_eq!(prepared.pixels, vec![0x11, 0x22, 0x33, 0x7f]);
+    }
+
+    #[test]
+    fn preserves_the_complete_authored_palette_for_every_index_format() {
+        let prepared = prepare_object_palette(&Palette {
+            id: 0x0400_0001,
+            colors_argb: vec![0xff00_0000; 300],
+        })
+        .expect("palette should prepare");
+        assert_eq!((prepared.width, prepared.height), (300, 1));
+        assert_eq!(prepared.pixels.len(), 300 * 4);
     }
 }

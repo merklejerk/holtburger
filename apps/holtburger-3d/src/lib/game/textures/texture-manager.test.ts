@@ -23,6 +23,7 @@ import {
 	TextureWrapMode,
 } from "./types";
 import {
+	type PackedAtlasBindingDelegate,
 	TextureManager,
 	type TexturePageDescription,
 	type TexturePageId,
@@ -67,6 +68,45 @@ describe("TextureManager", () => {
 			placement: page.textures[0].placement,
 			resource: "texture-2d-resource:0",
 		});
+		expect(textures.getAtlasPageResource(PAGE_ID)).toBe(
+			"texture-2d-resource:0",
+		);
+	});
+
+	it("uses a resident atlas delegate while the candidate path remains available", () => {
+		const resources = new FakeRendererResourceManager();
+		const page = createPage();
+		const texture = page.textures[0]!;
+		const delegatedResource =
+			"texture-2d-resource:resident" as Texture2DResourceKey;
+		const delegate: PackedAtlasBindingDelegate = {
+			getAtlasBinding: (key) =>
+				key === texture.key
+					? { placement: texture.placement, resource: delegatedResource }
+					: null,
+			getAtlasDiagnostics: () => ({
+				activeAtlasPages: 1,
+				canonicalAtlasBindings: 1,
+			}),
+			getAtlasPageDiagnostics: () => null,
+			getAtlasPageResource: () => null,
+		};
+		const textures = new TextureManager(
+			resources,
+			new FixtureTexturePreparer(),
+			delegate,
+		);
+
+		expect(textures.getAtlasBinding(texture.key).resource).toBe(
+			delegatedResource,
+		);
+		expect(textures.hasTexture(texture.key)).toBe(true);
+		expect(textures.getDiagnostics()).toMatchObject({
+			activeAtlasPages: 1,
+			canonicalAtlasBindings: 1,
+		});
+
+		textures.installAtlasPage("objects:a", PAGE_ID, page);
 		expect(textures.getAtlasPageResource(PAGE_ID)).toBe(
 			"texture-2d-resource:0",
 		);

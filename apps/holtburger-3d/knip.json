@@ -5,7 +5,7 @@
 		"src/explorer/main.ts",
 		"src/harness/terrain/main.ts"
 	],
-	"ignoreDependencies": ["@types/rbush", "rbush", "zod"],
+	"ignoreDependencies": ["@types/rbush", "rbush"],
 	"ignoreIssues": {
 		"src/lib/game/commit/artifacts.ts": ["types"],
 		"src/lib/game/commit/types.ts": ["types"],

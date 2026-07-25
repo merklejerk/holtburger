@@ -103,11 +103,12 @@
 
 <div class="explorer-world-panel">
 	<form class="explorer-world-form" onsubmit={submitInterest}>
-		<fieldset disabled={!runtimeReady}>
+		<fieldset class="explorer-section" disabled={!runtimeReady}>
 			<legend>Scene interest</legend>
-			<label>
+			<label class="explorer-form-field">
 				<span>Target landblock, cell, or coordinates</span>
 				<input
+					class="explorer-control"
 					autocomplete="off"
 					bind:value={interestInput}
 					placeholder="da55, da550123, or 33.6N 40W"
@@ -192,18 +193,26 @@
 					</p>
 				{/if}
 			</div>
-			<button type="submit" disabled={parsedInterest === null}>
+			<button
+				type="submit"
+				class="explorer-action"
+				disabled={parsedInterest === null}
+			>
 				Request content and focus
 			</button>
 			<p>{requestStatus}</p>
 		</fieldset>
 	</form>
 	{#if dayGroupNames.length > 0}
-		<fieldset class="explorer-environment-controls" disabled={!runtimeReady}>
+		<fieldset
+			class="explorer-section explorer-environment-controls"
+			disabled={!runtimeReady}
+		>
 			<legend>Regional environment</legend>
 			<label class="explorer-environment-field">
 				<span>Day</span>
 				<input
+					class="explorer-control"
 					min="0"
 					step="1"
 					type="number"
@@ -225,6 +234,7 @@
 			<label class="explorer-environment-field">
 				<span>Sky group</span>
 				<select
+					class="explorer-control explorer-control--select"
 					value={environmentSelection.dayGroupOverride ?? "auto"}
 					onchange={(event) =>
 						updateEnvironmentSelection("dayGroupOverride", event)}

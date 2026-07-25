@@ -24,7 +24,6 @@
 	let purpose = $state("all");
 	let sort = $state<PageSort>("efficiency");
 	let selectedPageId = $state<string | null>(null);
-	let selectedEntryKey = $state<string | null>(null);
 	let inspection = $state<TexturePageInspection | null>(null);
 	let inspectionError = $state<string | null>(null);
 
@@ -56,12 +55,6 @@
 			filteredPages[0] ??
 			null,
 	);
-	const selectedEntry = $derived(
-		selectedPage?.entries.find((entry) => entry.key === selectedEntryKey) ??
-			selectedPage?.entries[0] ??
-			null,
-	);
-
 	function comparePages(
 		left: TextureAtlasPageDiagnostics,
 		right: TextureAtlasPageDiagnostics,
@@ -100,7 +93,6 @@
 
 	function selectPage(pageId: string): void {
 		selectedPageId = pageId;
-		selectedEntryKey = null;
 	}
 
 	function openInspector(page: TextureAtlasPageDiagnostics): void {
@@ -142,22 +134,32 @@
 		</div>
 
 		<div class="explorer-texture-controls">
-			<label>
+			<label class="explorer-form-field">
 				<span>Filter</span>
-				<input bind:value={query} placeholder="Page, purpose, or texture key" />
+				<input
+					class="explorer-control"
+					bind:value={query}
+					placeholder="Page, purpose, or texture key"
+				/>
 			</label>
-			<label>
+			<label class="explorer-form-field">
 				<span>Purpose</span>
-				<select bind:value={purpose}>
+				<select
+					class="explorer-control explorer-control--select"
+					bind:value={purpose}
+				>
 					<option value="all">All purposes</option>
 					{#each purposes as texturePurpose}
 						<option value={texturePurpose}>{texturePurpose}</option>
 					{/each}
 				</select>
 			</label>
-			<label>
+			<label class="explorer-form-field">
 				<span>Sort</span>
-				<select bind:value={sort}>
+				<select
+					class="explorer-control explorer-control--select"
+					bind:value={sort}
+				>
 					<option value="efficiency">Canonical efficiency</option>
 					<option value="entries">Canonical entries</option>
 					<option value="memory">Byte cost</option>
@@ -169,12 +171,15 @@
 		{#if filteredPages.length === 0}
 			<p>No active packed texture pages match this filter.</p>
 		{:else}
-			<div class="explorer-texture-pages" aria-label="Packed texture pages">
+			<div
+				class="explorer-selectable-list explorer-texture-pages"
+				aria-label="Packed texture pages"
+			>
 				{#each filteredPages as page}
 					<button
 						type="button"
 						class:active={page.pageId === selectedPage?.pageId}
-						class="explorer-texture-page-row"
+						class="explorer-selectable-row explorer-texture-page-row"
 						onclick={() => selectPage(page.pageId)}
 					>
 						<span class="explorer-texture-page-name">{page.pageId}</span>
@@ -198,7 +203,11 @@
 				>
 					<div class="explorer-texture-inspector-heading">
 						<p class="ac-section-label">Page inspector</p>
-						<button type="button" onclick={() => openInspector(selectedPage)}>
+						<button
+							type="button"
+							class="explorer-action"
+							onclick={() => openInspector(selectedPage)}
+						>
 							View pixels
 						</button>
 					</div>
@@ -228,43 +237,6 @@
 							>
 						</div>
 					</div>
-
-					<div
-						class="explorer-texture-placement-map"
-						style={`aspect-ratio: ${selectedPage.width} / ${selectedPage.height}`}
-						aria-label={`Placement map for ${selectedPage.pageId}`}
-					>
-						{#each selectedPage.entries as entry}
-							<button
-								type="button"
-								class:canonical={entry.canonical}
-								class:selected={entry.key === selectedEntry?.key}
-								class="explorer-texture-placement"
-								style={`left: ${(entry.x / selectedPage.width) * 100}%; top: ${(entry.y / selectedPage.height) * 100}%; width: ${(entry.width / selectedPage.width) * 100}%; height: ${(entry.height / selectedPage.height) * 100}%`}
-								aria-label={`${entry.key}, ${entry.canonical ? "canonical" : "candidate only"}`}
-								title={`${entry.key}\n${entry.canonical ? "Canonical binding" : "Candidate only"}`}
-								onclick={() => (selectedEntryKey = entry.key)}
-							></button>
-						{/each}
-					</div>
-
-					{#if selectedEntry}
-						<div class="explorer-texture-entry-details">
-							<strong>{selectedEntry.key}</strong>
-							<span
-								>{selectedEntry.canonical
-									? "Canonical binding"
-									: "Candidate only"}</span
-							>
-							<span
-								>{selectedEntry.x}, {selectedEntry.y} · {selectedEntry.width} × {selectedEntry.height}px</span
-							>
-						</div>
-					{/if}
-					<p class="explorer-texture-legend">
-						Gold regions are canonical bindings; muted regions were supplied by
-						this page but lost arbitration to another active page.
-					</p>
 					{#if inspectionError}
 						<p class="explorer-texture-readback-error" role="alert">
 							{inspectionError}
@@ -285,8 +257,7 @@
 {/if}
 
 <style>
-	.explorer-textures-summary,
-	.explorer-texture-legend {
+	.explorer-textures-summary {
 		margin-top: 0;
 	}
 
@@ -294,24 +265,6 @@
 		display: grid;
 		gap: 8px;
 		margin: 14px 0;
-	}
-
-	.explorer-texture-controls label {
-		display: grid;
-		gap: 3px;
-		color: var(--ac-gold-bright);
-		font-size: 0.8rem;
-	}
-
-	.explorer-texture-controls input,
-	.explorer-texture-controls select {
-		box-sizing: border-box;
-		width: 100%;
-		border: 1px solid color-mix(in srgb, var(--ac-gold) 55%, transparent);
-		background: rgb(15 12 7 / 84%);
-		color: var(--ac-parchment);
-		font: inherit;
-		padding: 5px 7px;
 	}
 
 	.explorer-texture-pages {
@@ -322,22 +275,8 @@
 	}
 
 	.explorer-texture-page-row {
-		display: grid;
 		gap: 3px;
-		border: 1px solid rgb(162 117 33 / 45%);
-		background: rgb(37 28 12 / 74%);
-		color: var(--ac-parchment);
-		cursor: pointer;
-		font: inherit;
 		font-size: 0.75rem;
-		padding: 7px;
-		text-align: left;
-	}
-
-	.explorer-texture-page-row:hover,
-	.explorer-texture-page-row.active {
-		border-color: var(--ac-gold-bright);
-		background: rgb(83 57 16 / 82%);
 	}
 
 	.explorer-texture-page-name {
@@ -360,63 +299,6 @@
 
 	.explorer-texture-inspector-heading .ac-section-label {
 		margin: 0 0 14px;
-	}
-
-	.explorer-texture-inspector-heading button {
-		border: 1px solid rgb(162 117 33 / 55%);
-		background: rgb(37 28 12 / 82%);
-		color: var(--ac-parchment);
-		cursor: pointer;
-		font: inherit;
-		font-size: 0.78rem;
-		padding: 4px 8px;
-	}
-
-	.explorer-texture-placement-map {
-		position: relative;
-		width: 100%;
-		margin: 14px 0 8px;
-		outline: 1px solid rgb(162 117 33 / 70%);
-		background-color: rgb(20 16 8 / 90%);
-		background-image:
-			linear-gradient(45deg, rgb(255 255 255 / 4%) 25%, transparent 25%),
-			linear-gradient(-45deg, rgb(255 255 255 / 4%) 25%, transparent 25%);
-		background-size: 12px 12px;
-		overflow: hidden;
-	}
-
-	.explorer-texture-placement {
-		position: absolute;
-		box-sizing: border-box;
-		border: 1px solid rgb(144 148 150 / 75%);
-		background: rgb(106 111 112 / 42%);
-		cursor: pointer;
-	}
-
-	.explorer-texture-placement.canonical {
-		border-color: var(--ac-gold-bright);
-		background: rgb(234 183 53 / 52%);
-	}
-
-	.explorer-texture-placement.selected {
-		z-index: 1;
-		box-shadow:
-			inset 0 0 0 1px #fff,
-			0 0 8px #fff;
-	}
-
-	.explorer-texture-entry-details {
-		display: grid;
-		gap: 3px;
-		padding: 7px;
-		border: 1px solid rgb(162 117 33 / 45%);
-		font-size: 0.78rem;
-	}
-
-	.explorer-texture-entry-details strong {
-		color: var(--ac-gold-bright);
-		font-family: var(--ac-monospace, monospace);
-		overflow-wrap: anywhere;
 	}
 
 	.explorer-texture-readback-error {

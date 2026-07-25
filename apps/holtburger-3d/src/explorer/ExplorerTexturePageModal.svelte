@@ -341,7 +341,9 @@
 					<label
 						><input bind:checked={boundsVisible} type="checkbox" /> Bounds</label
 					>
-					<button type="button" onclick={fitPage}>Fit</button>
+					<button type="button" class="explorer-action" onclick={fitPage}
+						>Fit</button
+					>
 				</div>
 				<div
 					bind:this={viewportElement}
@@ -384,11 +386,12 @@
 				</div>
 
 				<p class="ac-section-label">Placements</p>
-				<div class="texture-page-modal-entry-list">
+				<div class="explorer-selectable-list texture-page-modal-entry-list">
 					{#each page.entries as entry}
 						<button
 							type="button"
 							class:active={entry.key === selectedEntry?.key}
+							class="explorer-selectable-row"
 							onclick={() => (selectedEntryKey = entry.key)}
 						>
 							<strong>{entry.canonical ? "Canonical" : "Candidate only"}</strong
@@ -464,17 +467,6 @@
 		align-items: center;
 		gap: 4px;
 	}
-	.texture-page-modal-toolbar button,
-	.texture-page-modal-entry-list button {
-		border: 1px solid rgb(162 117 33 / 55%);
-		background: rgb(37 28 12 / 82%);
-		color: var(--ac-parchment);
-		font: inherit;
-		cursor: pointer;
-	}
-	.texture-page-modal-toolbar button {
-		padding: 4px 8px;
-	}
 	.texture-page-modal-viewport {
 		height: min(68vh, 700px);
 		min-height: 360px;
@@ -498,22 +490,12 @@
 		margin: 16px 0 7px;
 	}
 	.texture-page-modal-entry-list {
-		display: grid;
-		gap: 4px;
 		max-height: 360px;
 		overflow: auto;
 	}
 	.texture-page-modal-entry-list button {
-		display: grid;
 		gap: 3px;
-		padding: 7px;
-		text-align: left;
 		font-size: 0.74rem;
-	}
-	.texture-page-modal-entry-list button:hover,
-	.texture-page-modal-entry-list button.active {
-		border-color: var(--ac-gold-bright);
-		background: rgb(83 57 16 / 82%);
 	}
 	.texture-page-modal-entry-list strong {
 		color: var(--ac-gold-bright);

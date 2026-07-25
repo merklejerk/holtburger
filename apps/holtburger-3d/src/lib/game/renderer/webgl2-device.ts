@@ -12,7 +12,7 @@ export interface Texture2DReadback {
 	/** Original normalized texture format, used to display one- and two-channel pages faithfully. */
 	readonly format: TexturePixelFormat;
 	readonly height: number;
-	/** Pixels are top-left-origin RGBA8 values suitable for Canvas ImageData. */
+	/** Rows preserve the atlas packer's coordinate order for placement-bound overlays. */
 	readonly pixels: Uint8Array;
 	readonly width: number;
 }
@@ -105,7 +105,7 @@ export class WebGL2Device {
 			return {
 				format: resource.format,
 				height: resource.height,
-				pixels: flipRgbaRows(pixels, resource.width, resource.height),
+				pixels,
 				width: resource.width,
 			};
 		} finally {
@@ -120,19 +120,4 @@ export class WebGL2Device {
 		await this.resources.destroy();
 		this.#gl.getExtension("WEBGL_lose_context")?.loseContext();
 	}
-}
-
-function flipRgbaRows(
-	pixels: Uint8Array,
-	width: number,
-	height: number,
-): Uint8Array {
-	const rowBytes = width * 4;
-	const flipped = new Uint8Array(pixels.length);
-	for (let row = 0; row < height; row += 1) {
-		const source = row * rowBytes;
-		const target = (height - row - 1) * rowBytes;
-		flipped.set(pixels.subarray(source, source + rowBytes), target);
-	}
-	return flipped;
 }

@@ -67,6 +67,23 @@ const material = z.object({
 			paletteId: datId.nullable(),
 			renderSurfaceIds: z.array(datId),
 			defaultPaletteIds: z.array(datId),
+			selectedRenderSurface: z.object({
+				id: datId,
+				format: z.enum([
+					"r8g8b8",
+					"a8r8g8b8",
+					"x8r8g8b8",
+					"r5g6b5",
+					"a4r4g4b4",
+					"a8",
+					"index8",
+					"index16",
+					"dxt1",
+					"dxt3",
+					"dxt5",
+					"unsupported",
+				]),
+			}),
 		}),
 	]),
 });
@@ -423,8 +440,22 @@ function decodeMaterial(entry: BuildingMaterial): ResolvedMaterial {
 		colorTextureId: entry.source.surfaceTextureId,
 		paletteTextureId:
 			entry.source.paletteId ?? entry.source.defaultPaletteIds.at(0) ?? null,
-		detailTextureId: null,
+		textureEncoding: textureEncoding(entry.source.selectedRenderSurface.format),
 	};
+}
+
+function textureEncoding(
+	format: Extract<
+		BuildingMaterial["source"],
+		{ readonly kind: "texture" }
+	>["selectedRenderSurface"]["format"],
+): "direct-color" | "index8" | "index16" {
+	if (format === "index8") return "index8";
+	if (format === "index16") return "index16";
+	if (format === "unsupported") {
+		throw new Error("Building texture uses an unsupported RenderSurface format.");
+	}
+	return "direct-color";
 }
 
 function decodePresentation(

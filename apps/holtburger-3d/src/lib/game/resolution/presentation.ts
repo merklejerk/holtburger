@@ -10,6 +10,12 @@ export type ResolvedGeometryId = `geometry:${string}`;
 /** Stable identity for one normalized material source. */
 export type ResolvedMaterialId = `material:${string}`;
 
+/** Selected source encoding that determines object texture preparation. */
+export type ResolvedObjectTextureEncoding =
+	| "direct-color"
+	| "index8"
+	| "index16";
+
 /** Geometry buffers shared by object parts and embedded structures. */
 export interface ResolvedGeometry {
 	readonly id: ResolvedGeometryId;
@@ -42,7 +48,8 @@ export type ResolvedMaterial = ResolvedMaterialFacts &
 				readonly kind: "texture";
 				readonly colorTextureId: DatAssetId;
 				readonly paletteTextureId: DatAssetId | null;
-				readonly detailTextureId: DatAssetId | null;
+				/** Source encoding selected by the closed host dependency manifest. */
+				readonly textureEncoding: ResolvedObjectTextureEncoding;
 		  }
 	);
 

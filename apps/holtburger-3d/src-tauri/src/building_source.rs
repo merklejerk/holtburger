@@ -229,7 +229,7 @@ impl BuildingSourceClosure {
                     unreachable!("MaterialRecipe request must return a material recipe")
                 };
                 self.materials
-                    .insert(id.clone(), material_recipe_json(&recipe));
+                    .insert(id.clone(), material_recipe_json(runtime, &recipe).await?);
                 self.add_texture_dependencies(&recipe);
             }
             ids.push(id);
@@ -360,27 +360,69 @@ fn write_u16_slice(target: &mut [u8], values: &[u16]) {
     }
 }
 
-fn material_recipe_json(recipe: &ResolvedMaterialRecipe) -> Value {
+async fn material_recipe_json(
+    runtime: &ContentAssetRuntime,
+    recipe: &ResolvedMaterialRecipe,
+) -> Result<Value> {
     let source = match &recipe.source {
         ResolvedMaterialSource::SolidColor(color) => {
             json!({ "kind": "solid-color", "color": color })
         }
-        ResolvedMaterialSource::Texture(texture) => json!({
-            "kind": "texture",
-            "surfaceTextureId": dat_id(texture.surface_texture_id),
-            "paletteId": texture.palette_id.map(dat_id),
-            "renderSurfaceIds": texture.render_surface_ids.iter().copied().map(dat_id).collect::<Vec<_>>(),
-            "defaultPaletteIds": texture.render_surface_default_palette_ids.iter().copied().map(dat_id).collect::<Vec<_>>(),
-        }),
+        ResolvedMaterialSource::Texture(texture) => {
+            let mut selected = None;
+            for render_surface_id in &texture.render_surface_ids {
+                if let Ok(ContentAsset::RenderSurface(surface)) = runtime
+                    .load(ContentAssetRequest::RenderSurface(*render_surface_id))
+                    .await
+                {
+                    selected = Some(json!({
+                        "id": dat_id(surface.id),
+                        "format": render_surface_format_name(surface.format),
+                    }));
+                    break;
+                }
+            }
+            let selected = selected.with_context(|| {
+                format!(
+                    "material 0x{:08X} texture 0x{:08X} has no available RenderSurface level",
+                    recipe.surface_id, texture.surface_texture_id
+                )
+            })?;
+            json!({
+                "kind": "texture",
+                "surfaceTextureId": dat_id(texture.surface_texture_id),
+                "paletteId": texture.palette_id.map(dat_id),
+                "renderSurfaceIds": texture.render_surface_ids.iter().copied().map(dat_id).collect::<Vec<_>>(),
+                "defaultPaletteIds": texture.render_surface_default_palette_ids.iter().copied().map(dat_id).collect::<Vec<_>>(),
+                "selectedRenderSurface": selected,
+            })
+        }
     };
-    json!({
+    Ok(json!({
         "id": format!("surface/{:08x}", recipe.surface_id),
         "rawSurfaceFlags": recipe.surface_type.bits(),
         "translucency": recipe.translucency,
         "luminosity": recipe.luminosity,
         "diffuseScale": recipe.diffuse,
         "source": source,
-    })
+    }))
+}
+
+fn render_surface_format_name(format: holtburger_dat::file_type::PixelFormatId) -> &'static str {
+    match format {
+        holtburger_dat::file_type::PixelFormatId::R8G8B8 => "r8g8b8",
+        holtburger_dat::file_type::PixelFormatId::A8R8G8B8 => "a8r8g8b8",
+        holtburger_dat::file_type::PixelFormatId::X8R8G8B8 => "x8r8g8b8",
+        holtburger_dat::file_type::PixelFormatId::R5G6B5 => "r5g6b5",
+        holtburger_dat::file_type::PixelFormatId::A4R4G4B4 => "a4r4g4b4",
+        holtburger_dat::file_type::PixelFormatId::A8 => "a8",
+        holtburger_dat::file_type::PixelFormatId::P8 => "index8",
+        holtburger_dat::file_type::PixelFormatId::Index16 => "index16",
+        holtburger_dat::file_type::PixelFormatId::Dxt1 => "dxt1",
+        holtburger_dat::file_type::PixelFormatId::Dxt3 => "dxt3",
+        holtburger_dat::file_type::PixelFormatId::Dxt5 => "dxt5",
+        _ => "unsupported",
+    }
 }
 
 fn select_setup_default_frames(

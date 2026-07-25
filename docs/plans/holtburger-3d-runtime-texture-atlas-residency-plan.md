@@ -941,7 +941,7 @@ Before Phase 4:
 
 ### Phase 4: `StaticLayerRealizer`
 
-Status: Pending.
+Status: Complete (2026-07-25).
 
 #### Deliverables
 
@@ -989,18 +989,28 @@ Status: Pending.
 
 #### Task Checklist
 
-- [ ] Define the pending realization/currentness contract.
-- [ ] Implement `StaticLayerRealizer` against injected ports.
-- [ ] Prove concurrent geometry and atlas preparation under controlled scheduling.
-- [ ] Add stale completion, replacement, failure, and shutdown tests.
-- [ ] Route exact revision identity through the scene-interest eviction callback contract.
-- [ ] Define the typed realization completion consumed by `GameRuntime`.
-- [ ] Prove static-publication rollback ordering through the injected fake port.
-- [ ] Document the exact production ownership moves required by Phase 5.
+- [x] Define the pending realization/currentness contract.
+- [x] Implement `StaticLayerRealizer` against injected ports.
+- [x] Prove concurrent geometry and atlas preparation under controlled scheduling.
+- [x] Add stale completion, replacement, failure, and shutdown tests.
+- [x] Route exact revision identity through the scene-interest eviction callback contract.
+- [x] Define the typed realization completion consumed by `GameRuntime`.
+- [x] Prove static-publication rollback ordering through the injected fake port.
+- [x] Document the exact production ownership moves required by Phase 5.
 
 #### Decisions and Course Corrections
 
-- Pending implementation.
+- `StaticLayerRealizer` is deliberately a sequencing component only. It accepts resolved source,
+  revision, owner, and logical requirements; it never sees dynamic residents, scene nodes, device
+  resources, atlas pages, or scene-interest maps.
+- The Phase 5 ownership move is now explicit: `GameRuntime` supplies the coordinator's exact
+  revision/currentness callback and routes only resolved static building source to the realizer;
+  the static-object system supplies failure-atomic replacement, while the resident atlas supplies
+  the same owner/revision lifecycle it already owns. Dynamic publication remains downstream of a
+  successful published result.
+- **Validation:** controlled tests prove overlap, publication-before-activation, stale cleanup,
+  publication failure cleanup, shutdown suppression, and dedicated exact-revision eviction. The
+  production `StandardCommitPipeline` and static install route remain unchanged.
 
 ### Phase 5: Clean Production Atlas Cutover
 

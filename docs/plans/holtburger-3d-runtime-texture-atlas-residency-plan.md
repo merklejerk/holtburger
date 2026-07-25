@@ -1,7 +1,7 @@
 # Holtburger 3D Runtime Texture Atlas Residency Plan
 
 Date: 2026-07-25
-Status: In progress — Phases 1–7 complete (2026-07-25).
+Status: Complete (2026-07-25).
 
 ## Context and Boundaries
 
@@ -1320,7 +1320,7 @@ Before cleanup:
 
 ### Phase 8: Cleanup and Architecture Closeout
 
-Status: Pending.
+Status: Complete (2026-07-25).
 
 #### Deliverables
 
@@ -1354,15 +1354,33 @@ Status: Pending.
 
 #### Task Checklist
 
-- [ ] Remove superseded runtime and test code.
-- [ ] Run dead-code analysis and formatter checks.
-- [ ] Update architecture documentation.
-- [ ] Perform a final diff and lifecycle audit.
-- [ ] Mark the plan complete only after all debt is resolved or explicitly accepted.
+- [x] Remove superseded runtime and test code.
+- [x] Run dead-code analysis and formatter checks.
+- [x] Update architecture documentation.
+- [x] Perform a final diff and lifecycle audit.
+- [x] Mark the plan complete only after all debt is resolved or explicitly accepted.
 
 #### Decisions and Course Corrections
 
-- Pending implementation.
+- The production route has one packed-atlas authority: `ResidentTextureAtlas`. Targeted source
+  searches confirm no active shelf packer, candidate-page map, arbitration counter, landblock-local
+  page namespace, `upsertAtlasPage`, or paired `BuildingWorkers` facade remains. The retained
+  `BuildingGeometryWorker` is a focused geometry-only closed-worker adapter despite its historical
+  filename; it no longer combines geometry and texture ownership.
+- `TextureManager` is now a 560-line generic texture facade; the 1,068-line resident component
+  contains the cohesive packed-atlas state it alone owns (claims, retained sources, per-purpose
+  lanes, physical publication, and diagnostics). This is a large but intentionally unsplit mutable
+  authority, not a reason to introduce claim, source-cache, or publisher manager classes.
+- `ARCHITECTURE_AUDIT.md` now names the resident atlas and static realizer as load-bearing bones,
+  records their exact authority split, removes the obsolete `TextureManager.upsertAtlasPage`
+  hotspot, and refreshes current structural sizes. The stale Knip `zod` ignore was removed after
+  confirming concrete source imports; dead-code analysis is warning-free.
+- The repository-wide Prettier check still reports 18 unrelated pre-existing files. Every file
+  touched by this atlas plan is formatted; broad baseline normalization is intentionally left to a
+  dedicated mechanical change rather than folded into this architectural cutover.
+- No new stateful domain component was added during cleanup. The only accepted implementation debt
+  remains the measured first-version full-page upload/source-copy cost recorded in Phase 7, with an
+  explicit wider-traversal trigger before reconsidering partial uploads or a worker-side mirror.
 
 ## Validation Matrix
 
@@ -1518,27 +1536,27 @@ placement, and has exhaustive tests. Do not persist a second independently edita
 
 ## Definition of Done
 
-- [ ] Current logical textures are decoded once per resident lifetime.
-- [ ] Later owners reuse existing bindings and acquire independent claims.
-- [ ] Fixed 2048 x 2048 pages are partitioned only by `TexturePurpose`.
-- [ ] Free rectangles are tracked and reused after logical release.
-- [ ] Bounded regular compaction can avoid or eliminate pages.
-- [ ] Prepared logical sources remain in RAM only while claimed or in flight.
-- [ ] Page rebuilding never reads from WebGL or detaches retained source buffers.
-- [ ] Multi-page publication and rollback are transactional.
-- [ ] Stale scene-interest revisions cannot publish scene resources or release newer claims.
-- [ ] Kept and metadata-only pages perform no pixel build or replacement upload.
-- [ ] Geometry and missing texture preparation remain concurrent.
-- [ ] Failed static replacement preserves the prior scene and atlas revision.
-- [ ] Explorer diagnostics describe resident pages, sources, free space, and compaction honestly.
-- [ ] Repeated gameplay traversal reaches a bounded page-count steady state.
-- [ ] Complete eviction and destroy release source RAM and renderer resources.
-- [ ] Shared preparer and worker shutdown follows one tested, exact-once ownership order.
-- [ ] The shelf packer and candidate arbitration model are deleted.
-- [ ] `ResidentTextureAtlas` and `StaticLayerRealizer` are the only new stateful domain components.
-- [ ] Type checks, tests, lint, dead-code analysis, builds, shader validation, and applicable Rust
+- [x] Current logical textures are decoded once per resident lifetime.
+- [x] Later owners reuse existing bindings and acquire independent claims.
+- [x] Fixed 2048 x 2048 pages are partitioned only by `TexturePurpose`.
+- [x] Free rectangles are tracked and reused after logical release.
+- [x] Bounded regular compaction can avoid or eliminate pages.
+- [x] Prepared logical sources remain in RAM only while claimed or in flight.
+- [x] Page rebuilding never reads from WebGL or detaches retained source buffers.
+- [x] Multi-page publication and rollback are transactional.
+- [x] Stale scene-interest revisions cannot publish scene resources or release newer claims.
+- [x] Kept and metadata-only pages perform no pixel build or replacement upload.
+- [x] Geometry and missing texture preparation remain concurrent.
+- [x] Failed static replacement preserves the prior scene and atlas revision.
+- [x] Explorer diagnostics describe resident pages, sources, free space, and compaction honestly.
+- [x] Repeated gameplay traversal reaches a bounded page-count steady state.
+- [x] Complete eviction and destroy release source RAM and renderer resources.
+- [x] Shared preparer and worker shutdown follows one tested, exact-once ownership order.
+- [x] The shelf packer and candidate arbitration model are deleted.
+- [x] `ResidentTextureAtlas` and `StaticLayerRealizer` are the only new stateful domain components.
+- [x] Type checks, tests, lint, dead-code analysis, builds, shader validation, and applicable Rust
       checks pass.
-- [ ] The plan records final progress, decisions, concessions, and remaining accepted debt.
+- [x] The plan records final progress, decisions, concessions, and remaining accepted debt.
 
 ## Open Questions
 
@@ -1570,6 +1588,9 @@ not an implicit extension of this plan.
 - 2026-07-25: Phase 7 replaced candidate diagnostics with direct resident facts and recorded the
   first end-to-end comparison: the representative radius-1 traversal fell from 7 pages / 96 MiB to
   3 pages / 40 MiB at the same 54 logical bindings, with zero resources after full eviction.
+- 2026-07-25: Phase 8 deleted the stale Knip dependency ignore, refreshed the architecture audit to
+  the resident-atlas/realizer boundary, confirmed the old arbitration route has no source residue,
+  and completed the final validation matrix.
 
 ## Decisions and Course Corrections Log
 
@@ -1657,3 +1678,5 @@ not an implicit extension of this plan.
 - No open Phase 7 implementation debt. Future wider-area profiling, not the current radius-1
   fixture, is the trigger for reconsidering partial page uploads, adaptive worker pools, or a
   worker-side source mirror.
+- Repository formatting remains a separate accepted baseline debt: `npm run format:check` reports
+  18 unrelated pre-existing files after all files changed by this plan were formatted.

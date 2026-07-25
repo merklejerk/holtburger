@@ -18,12 +18,12 @@ runtime lean during the stubbing phase.
 
 Priority findings:
 
-| Priority | Finding                                                       | Evidence                                                                                                                                                                             | Direction                                                                                                                                                                                     |
-| -------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Medium   | `GameRuntime` remains a high fan-out composition hub           | It constructs nine stateful subsystems and also owns interest revisions, async commit staging, availability publication, frame state, lifecycle diagnostics, and teardown              | Keep it as the composition authority. Building diagnostics are read-only snapshots; extract further receipt coordination before adding a second independent static layer branch              |
-| Medium   | The Rust host boundary is concentrated in one 1,018-line file | `src-tauri/src/lib.rs` contains host state, commands, three binary contracts, active-region projection, serializers, and tests                                                       | Split by transport contract (`active_region`, `terrain_source`, `texture_pixels`) while keeping Tauri command registration in `lib.rs`                                                        |
-| Low      | Vestigial public lifecycle and mutation stubs exist           | `StandardCommitPipeline.build()` is needlessly async, `destroy()` is a no-op outside its interface, and unused `GameRuntime.updateDynamicEntityPlacement()` silently returns `false` | Delete inert API until ownership or behavior exists; add it back with a typed contract when the capability is implemented                                                                     |
-| Low      | Repository-wide Prettier baseline is stale                     | The final `prettier --check .` reports 39 files, including unrelated pre-existing files; every buildings-layer touched file was formatted and rechecked                               | Restore a repository formatting baseline in a dedicated mechanical change; do not mix it into feature work                                                                                   |
+| Priority | Finding                                                       | Evidence                                                                                                                                                                             | Direction                                                                                                                                                                      |
+| -------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Medium   | `GameRuntime` remains a high fan-out composition hub          | It constructs the stateful runtime systems and owns interest revisions, async commit staging, availability publication, frame state, lifecycle diagnostics, and teardown             | Keep it as the composition authority. Building diagnostics are read-only snapshots; extract further receipt coordination before adding another independent static layer branch |
+| Medium   | The Rust host boundary is concentrated in one 1,245-line file | `src-tauri/src/lib.rs` contains host state, commands, three binary contracts, active-region projection, serializers, and tests                                                       | Split by transport contract (`active_region`, `terrain_source`, `texture_pixels`) while keeping Tauri command registration in `lib.rs`                                         |
+| Low      | Vestigial public lifecycle and mutation stubs exist           | `StandardCommitPipeline.build()` is needlessly async, `destroy()` is a no-op outside its interface, and unused `GameRuntime.updateDynamicEntityPlacement()` silently returns `false` | Delete inert API until ownership or behavior exists; add it back with a typed contract when the capability is implemented                                                      |
+| Low      | Repository-wide Prettier baseline is stale                    | The final `prettier --check .` reports 18 unrelated pre-existing files; every atlas/architecture file touched by this work was formatted and rechecked                               | Restore a repository formatting baseline in a dedicated mechanical change; do not mix it into feature work                                                                     |
 
 ## 1. System Topology and Cross-Layer Import Matrix
 
@@ -50,7 +50,7 @@ flowchart TD
     subgraph Domain["Runtime-owned domain systems"]
         Scene["SceneGraph"]
         Terrain["TerrainSystem<br/>TerrainGenerator"]
-        Resources["TextureManager<br/>GeometryManager<br/>LeaseRegistry"]
+        Resources["ResidentTextureAtlas • TextureManager<br/>GeometryManager • LeaseRegistry"]
         Systems["Static / Dynamic / EnvCell<br/>Animation / Instance streams"]
     end
 
@@ -123,19 +123,21 @@ cycle. Both remaining cycles are type-placement debt, not ownership inversions.
 
 ## 2. Load-Bearing Architectural Bones Radar
 
-| Bone                                  | Files                                                                                                           | Invariant owned                                                                                                                                            | Anatomical refresher                                                                                                                                                     |
-| ------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Runtime composition and revision gate | `src/lib/game/runtime/game-runtime.ts`, `scene-interest.ts`, `scene-availability.ts`                            | Only the latest requested landblock/layer revision may commit; evicted or late artifacts cannot republish withdrawn content                                | `GameRuntime` is the mutation membrane around every runtime system. Interest revisions are the guard against stale asynchronous source responses.                        |
-| Canonical scene and visibility index  | `src/lib/game/scene/scene-graph.ts`, `scene/index.ts`                                                           | Every node has one transform ancestry and root residency; spatial entries and culling groups derive from that canonical graph                              | Scene queries traverse reachable scopes, then broad-phase groups, then exact entry bounds. The returned `VisibleScene` is a documented frame-scoped reused buffer.       |
-| Resource identity and retention       | `ownership.ts`, `geometry/geometry-manager.ts`, `textures/texture-manager.ts`, `renderer/resource-manager.ts`   | Logical keys may map to one backend resource while one or more typed owners retain them; the final dropped lease releases the device resource exactly once | Domain systems never own WebGL handles. They retain opaque resource keys through logical managers, which delegate allocation to the backend.                             |
-| Terrain source-to-draw pipeline       | `terrain/terrain-system.ts`, `terrain/terrain-generator.ts`, `terrain/types.ts`, `terrain/composition-table.ts` | One canonical terrain source produces every required stride/transition variant and stable texture identity before it can become a draw unit                | Source terrain is immediately sampleable for camera placement. Generated geometry, surface fields, composition, and asset textures converge later at `getDrawUnit()`.    |
-| Renderer read membrane                | `renderer/render-world.ts`, `renderer/renderer.ts`, `renderer/webgl2-renderer.ts`                               | Renderers can select and resolve visible contributions without receiving runtime mutation authority                                                        | `RenderWorld` exposes narrow structural query ports over private runtime systems. `WebGL2Renderer` owns pass policy and turns opaque resource keys into driver bindings. |
-| Host/content contract                 | `src-tauri/src/lib.rs`, `lib/assets/decode-*.ts`, `active-region-source.ts`                                     | Tauri and browser hosts emit versioned, length-checked binary envelopes whose semantic payloads are validated before entering runtime                      | Rust resolves static content through shared crates. TypeScript owns the app-specific transport decoder and converts it into frontend runtime source types.               |
+| Bone                                  | Files                                                                                                             | Invariant owned                                                                                                                                            | Anatomical refresher                                                                                                                                                                                                           |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Runtime composition and revision gate | `src/lib/game/runtime/game-runtime.ts`, `scene-interest.ts`, `scene-availability.ts`                              | Only the latest requested landblock/layer revision may commit; evicted or late artifacts cannot republish withdrawn content                                | `GameRuntime` is the mutation membrane around every runtime system. Interest revisions are the guard against stale asynchronous source responses.                                                                              |
+| Canonical scene and visibility index  | `src/lib/game/scene/scene-graph.ts`, `scene/index.ts`                                                             | Every node has one transform ancestry and root residency; spatial entries and culling groups derive from that canonical graph                              | Scene queries traverse reachable scopes, then broad-phase groups, then exact entry bounds. The returned `VisibleScene` is a documented frame-scoped reused buffer.                                                             |
+| Resource identity and retention       | `ownership.ts`, `geometry/geometry-manager.ts`, `textures/texture-manager.ts`, `renderer/resource-manager.ts`     | Logical keys may map to one backend resource while one or more typed owners retain them; the final dropped lease releases the device resource exactly once | Domain systems never own WebGL handles. They retain opaque resource keys through logical managers, which delegate allocation to the backend.                                                                                   |
+| Resident atlas and static realization | `textures/atlas/resident-texture-atlas.ts`, `runtime/static-layer-realizer.ts`, `systems/static-object-system.ts` | Exact owner/revision claims retain logical sources; one purpose lane atomically replaces pages and bindings; static replacement precedes atlas activation  | `ResidentTextureAtlas` owns packed-texture residency and immutable page generations. `StaticLayerRealizer` coordinates exact revision readiness and failure-atomic scene publication without owning pixels or WebGL resources. |
+| Terrain source-to-draw pipeline       | `terrain/terrain-system.ts`, `terrain/terrain-generator.ts`, `terrain/types.ts`, `terrain/composition-table.ts`   | One canonical terrain source produces every required stride/transition variant and stable texture identity before it can become a draw unit                | Source terrain is immediately sampleable for camera placement. Generated geometry, surface fields, composition, and asset textures converge later at `getDrawUnit()`.                                                          |
+| Renderer read membrane                | `renderer/render-world.ts`, `renderer/renderer.ts`, `renderer/webgl2-renderer.ts`                                 | Renderers can select and resolve visible contributions without receiving runtime mutation authority                                                        | `RenderWorld` exposes narrow structural query ports over private runtime systems. `WebGL2Renderer` owns pass policy and turns opaque resource keys into driver bindings.                                                       |
+| Host/content contract                 | `src-tauri/src/lib.rs`, `lib/assets/decode-*.ts`, `active-region-source.ts`                                       | Tauri and browser hosts emit versioned, length-checked binary envelopes whose semantic payloads are validated before entering runtime                      | Rust resolves static content through shared crates. TypeScript owns the app-specific transport decoder and converts it into frontend runtime source types.                                                                     |
 
 The most important bones for a fast tech-lead review are `GameRuntime`,
 `SceneGraph`, `TerrainSystem`, `RenderWorld`, and the Tauri/decoder boundary.
 Changes to those files can alter state authority, lifetime, visibility, or the
-cross-language contract even when their local diff looks small.
+cross-language contract even when their local diff looks small. The resident atlas and static
+realizer join that review set for any buildings-layer change.
 
 ## 3. Core Execution Loops
 
@@ -270,7 +272,6 @@ Measured with ESLint's `complexity` threshold of 10 and `max-depth` threshold of
 |         15 | `computeSceneInterest`                   | Nested grid walk plus repeated layer policy; a table of optional layer/radius selectors would reduce branches                                       |
 |         13 | `WebGL2Renderer.#drawTerrain`            | Driver state setup and draw loop are mixed                                                                                                          |
 |         13 | `validateTextureArrayDescription`        | Cohesive driver-boundary validation; split capability-limit checks from shape checks                                                                |
-|         13 | `TextureManager.upsertAtlasPage`         | Validation, resource replacement, reverse indexes, and degenerate-resource cleanup occur in one transaction                                         |
 |         12 | `FreeFlyCameraController.#applyMovement` | Linear movement, acceleration, and yaw state transitions share one frame handler                                                                    |
 |         12 | `resolveSceneEnvironment`                | Selection validation and temporal interpolation share one function                                                                                  |
 |         12 | `WebGL2ResourceManager.#uploadGeometry`  | Geometry-kind dispatch plus resource allocation                                                                                                     |
@@ -287,7 +288,7 @@ narrow-phase boundary easier to inspect.
 
 Complexity should not drive design blindly. Validator branch counts are less
 dangerous than mutable state transitions with the same score. The first
-refactoring targets should be `#removeSpatialEntry`, atlas replacement, and the
+refactoring targets should be `#removeSpatialEntry`, resident-atlas publication, and the
 async realization path—not the pure retail terrain algorithms.
 
 ## 6. Coupling and Structural Hubs
@@ -372,6 +373,8 @@ deliberately different owners:
 | Static content interest                        | `GameRuntime.#sceneInterest`                                            | Explorer retains editable `LoDConfig`; coordinator retains only one pending focus revision          | Clean request vs accepted-state split             |
 | Scene topology and spatial membership          | `SceneGraph`                                                            | Systems retain component/renderable maps keyed by `SceneNodeId`                                     | Clean canonical graph plus typed component stores |
 | Logical resource retention                     | `LeaseRegistry` inside geometry/texture managers                        | WebGL resource manager owns opaque-key-to-handle maps                                               | Clean logical vs device authority                 |
+| Packed object-texture residency                | `ResidentTextureAtlas`                                                  | `TextureManager` exposes read-only bindings/diagnostics; renderer receives opaque page resources    | One residency path; exact owner/revision cleanup  |
+| Static building realization                    | `StaticLayerRealizer`                                                   | `StaticObjectSystem` owns staged nodes/resources; coordinator owns dispatch currentness             | Clean sequencing without a second scene authority |
 | Regional environment                           | Explorer owns selection inputs; runtime owns resolved frame environment | Renderer receives one immutable `FrameInput` snapshot                                               | Clean presentation policy split                   |
 
 Visual realization intentionally does not become durable runtime or Explorer
@@ -395,17 +398,20 @@ requires user-facing retry or failure presentation.
 
 ### File-size outliers
 
-| Lines | File                                  | Assessment                                                                                             |
-| ----: | ------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| 1,018 | `src-tauri/src/lib.rs`                | Multiple transport contracts and tests in one Rust module                                              |
-|   761 | `src/styles.css`                      | App-global presentation surface; group by shell/panel/viewport before selectors become order-dependent |
-|   618 | `scene/scene-graph.ts`                | Canonical graph plus spatial index plus portal traversal                                               |
-|   612 | `renderer/webgl2-resource-manager.ts` | Geometry, instance stream, 2D texture, array texture, validation, and release paths                    |
-|   584 | `runtime/game-runtime.ts`             | Composition, interest loading, commit routing, frame state, queries, lifecycle                         |
-|   583 | `textures/texture-manager.ts`         | Lease policy, async preparation, atlas, standalone texture, arrays, validation                         |
-|   552 | `terrain/terrain-system.ts`           | Source lifecycle, generation, resource publication, sampling, draw selection                           |
-|   525 | `terrain/terrain-generator.ts`        | Pure terrain generation and retail transition logic                                                    |
-|   472 | `renderer/webgl2-renderer.ts`         | View preparation, visibility collection, diagnostics, and terrain pass                                 |
+| Lines | File                                       | Assessment                                                                                             |
+| ----: | ------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| 1,245 | `src-tauri/src/lib.rs`                     | Multiple transport contracts and tests in one Rust module                                              |
+| 1,068 | `textures/atlas/resident-texture-atlas.ts` | Packed-source claims, serialized purpose mutations, atomic page publication, diagnostics               |
+|   953 | `runtime/game-runtime.ts`                  | Composition, interest loading, commit routing, frame state, queries, lifecycle                         |
+|   944 | `renderer/webgl2-renderer.ts`              | View preparation, visibility collection, diagnostics, and terrain pass                                 |
+|   781 | `src/styles.css`                           | App-global presentation surface; group by shell/panel/viewport before selectors become order-dependent |
+|   721 | `assets/decode-building-source.ts`         | Host-source validation and normalized building projection                                              |
+|   618 | `scene/scene-graph.ts`                     | Canonical graph plus spatial index plus portal traversal                                               |
+|   597 | `renderer/webgl2-resource-manager.ts`      | Geometry, instance stream, 2D texture, array texture, validation, and release paths                    |
+|   595 | `textures/atlas/layout.ts`                 | Pure placement and free-rectangle reconstruction                                                       |
+|   560 | `textures/texture-manager.ts`              | Generic texture leases, preparation, standalone textures, arrays, and resident-atlas facade            |
+|   552 | `terrain/terrain-system.ts`                | Source lifecycle, generation, resource publication, sampling, draw selection                           |
+|   525 | `terrain/terrain-generator.ts`             | Pure terrain generation and retail transition logic                                                    |
 
 ### Addition-through-subtraction candidates
 
@@ -413,9 +419,7 @@ requires user-facing retry or failure presentation.
    and movement semantics are implemented.
 2. Delete the no-op `StandardCommitPipeline.destroy()` and make `build()`
    synchronous until the pipeline owns an actual asynchronous resource.
-3. Remove `zod` from Knip's `ignoreDependencies`; Knip confirms it is now
-   discoverably used by `active-region-source.ts`.
-4. Replace type-only barrel back-imports inside `scene` with direct local type
+3. Replace type-only barrel back-imports inside `scene` with direct local type
    modules, removing the scene SCC without adding an adapter.
 
 Do not split pure files solely to satisfy a line threshold. `terrain-generator`
@@ -428,9 +432,8 @@ realization lifecycle.
 Current checks at audit time:
 
 - `npm run check`: passed with zero Svelte errors or warnings.
-- `npm run test:ts`: 29 files and 129 tests passed.
-- `npm run lint`: ESLint, Knip, and Rust clippy passed; Knip emitted one
-  configuration hint for the stale `zod` dependency ignore.
+- `npm run test:ts`: 42 files and 187 tests passed.
+- `npm run lint`: ESLint, Knip, and Rust clippy passed without new warnings.
 - `cargo test --manifest-path src-tauri/Cargo.toml`: seven host/transport tests
   passed.
 - Strict audit-only ESLint thresholds found the 16 complexity outliers and one
@@ -439,5 +442,6 @@ Current checks at audit time:
 The standard checks prove internal consistency, not feature completeness. The
 client route remains an intentional shell, while terrain and Level 1 buildings
 now have typed static source capabilities. The building path preserves its
-boundaries: source/worker metrics cross as commit data, atlas arbitration stays
-inside `TextureManager`, and transparent/additive policy stays in WebGL2.
+boundaries: source commits remain data-only, `ResidentTextureAtlas` alone owns
+packed-object source claims and page publication, `StaticLayerRealizer` sequences
+revision-safe scene cutover, and transparent/additive policy stays in WebGL2.

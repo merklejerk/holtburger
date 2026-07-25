@@ -1334,5 +1334,30 @@ Acceptance evidence:
 - Tauri and browser-host routes both call the same Rust byte-producing function and TypeScript
   decoder.
 
+### 2026-07-25 — Phase 2 material-planning checkpoint
+
+Changes:
+
+- Removed the false `ResolvedMaterial.detailTextureId` ownership edge. Building detail remains an
+  active-region concern and will be bound from that owner during preparation/installation.
+- Extended the closed building source with the first available RenderSurface encoding selected by
+  the host. This closes a discovered request-cycle hole: object texture purpose cannot be inferred
+  from a surface-texture identity alone.
+- Added a pure object material planner that maps source encoding into direct/indexed logical
+  texture identities, retains palette dependencies, and classifies opaque, alpha-test,
+  transparent, and additive ordering without leaking renderer blend constants.
+
+Decisions:
+
+- The host-selected encoding is a source fact, not app-local pixel policy. The app maps it to a
+  `TexturePurpose`; actual DXT/palette conversion still remains application-local Phase 2 work.
+- Additive takes precedence over generic alpha/translucency when deriving ordering. This preserves
+  the evidence-backed distinct additive phase planned for the renderer.
+
+Outstanding work:
+
+- Implement raw object render-surface/palette transport and app-local DXT, indexed, and palette
+  conversions; then complete active-region building-detail ownership. Phase 2 remains active.
+
 Add dated progress, concessions, verification, and new cleanup targets here after every completed
 phase.

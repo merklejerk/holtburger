@@ -1,7 +1,7 @@
 use anyhow::Context;
 use holtburger_3d::{
-    discover_content_runtime, load_active_region_data_bytes, load_terrain_source_bytes,
-    load_texture_pixels_bytes,
+    discover_content_runtime, load_active_region_data_bytes, load_building_source_bytes,
+    load_terrain_source_bytes, load_texture_pixels_bytes,
 };
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -25,6 +25,12 @@ struct ReadyMessage {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TerrainSourceRequest {
+    landblock_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BuildingSourceRequest {
     landblock_id: String,
 }
 
@@ -78,6 +84,15 @@ async fn handle_connection(
         ("POST", "/terrain-source") => {
             let request = serde_json::from_slice::<TerrainSourceRequest>(&request.body)?;
             match load_terrain_source_bytes(runtime, &request.landblock_id).await {
+                Ok(bytes) => {
+                    write_response(&mut stream, 200, "application/octet-stream", &bytes).await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/building-source") => {
+            let request = serde_json::from_slice::<BuildingSourceRequest>(&request.body)?;
+            match load_building_source_bytes(runtime, &request.landblock_id).await {
                 Ok(bytes) => {
                     write_response(&mut stream, 200, "application/octet-stream", &bytes).await
                 }

@@ -26,6 +26,8 @@ export interface ResolvedGeometry {
 	readonly materialSlotIndices: Uint16Array;
 	/** One repeat (1) or clamp (0) sampler fact for every prepared triangle material slot. */
 	readonly materialWrapModes: Uint8Array;
+	/** One source polygon-side identity for every prepared triangle material slot. */
+	readonly materialSideKinds: Uint8Array;
 	readonly bounds: AABB3 | null;
 }
 

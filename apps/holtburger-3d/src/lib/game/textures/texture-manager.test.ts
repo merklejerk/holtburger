@@ -142,6 +142,84 @@ describe("TextureManager", () => {
 		expect(resources.releasedResources).toEqual(["texture-2d-resource:0"]);
 	});
 
+	it("atomically replaces an inferior overlapping page when the candidate covers more retained keys", () => {
+		const resources = new FakeRendererResourceManager();
+		const textures = createTextureManager(resources);
+		const keyA = objectKey("0x05000011");
+		const keyB = objectKey("0x05000012");
+
+		textures.installAtlasPage("objects:a", "page:a", pageFor([keyA]));
+		textures.installAtlasPage("objects:b", "page:b", pageFor([keyA, keyB]));
+
+		expect(textures.getAtlasBinding(keyA).resource).toBe("texture-2d-resource:1");
+		expect(textures.getAtlasBinding(keyB).resource).toBe("texture-2d-resource:1");
+		expect(resources.releasedResources).toEqual(["texture-2d-resource:0"]);
+	});
+
+	it("keeps the incumbent atlas page on an exact quality tie", () => {
+		const resources = new FakeRendererResourceManager();
+		const textures = createTextureManager(resources);
+		const key = objectKey("0x05000013");
+
+		textures.installAtlasPage("objects:a", "page:a", pageFor([key]));
+		textures.installAtlasPage("objects:b", "page:b", pageFor([key]));
+
+		expect(textures.getAtlasBinding(key).resource).toBe("texture-2d-resource:0");
+		expect(resources.releasedResources).toEqual(["texture-2d-resource:1"]);
+	});
+
+	it("does not prefer a larger page when retained coverage is unchanged", () => {
+		const resources = new FakeRendererResourceManager();
+		const textures = createTextureManager(resources);
+		const key = objectKey("0x05000015");
+		const compact = pageFor([key]);
+		const oversized = { ...compact, height: 4, pageBits: new Uint8Array(4 * 4 * 4), width: 4 };
+
+		textures.installAtlasPage("objects:a", "page:a", compact);
+		textures.installAtlasPage("objects:b", "page:b", oversized);
+
+		expect(textures.getAtlasBinding(key).resource).toBe("texture-2d-resource:0");
+		expect(resources.releasedResources).toEqual(["texture-2d-resource:1"]);
+	});
+
+	it("retains a shared canonical atlas binding until its final logical owner withdraws", () => {
+		const resources = new FakeRendererResourceManager();
+		const textures = createTextureManager(resources);
+		const key = objectKey("0x05000014");
+
+		textures.installAtlasPage("objects:a", "page:a", pageFor([key]));
+		textures.installAtlasPage("objects:b", "page:b", pageFor([key]));
+		textures.dropOwner("objects:a");
+		expect(textures.getAtlasBinding(key).resource).toBe("texture-2d-resource:0");
+		textures.dropOwner("objects:b");
+
+		expect(resources.releasedResources).toEqual([
+			"texture-2d-resource:1",
+			"texture-2d-resource:0",
+		]);
+	});
+
+	it("does not publish a late standalone texture after a packed page wins", async () => {
+		const resources = new FakeRendererResourceManager();
+		const preparer = new DeferredTexturePreparer();
+		const textures = createTextureManager(resources, preparer);
+		const key = objectKey("0x05000016");
+		const fact: TextureFact = {
+			kind: "asset",
+			key,
+			purpose: TexturePurpose.ObjectDirectColor,
+			sourceAssetId: "0x05000016",
+		};
+
+		const retaining = textures.retain("objects:standalone", [fact]);
+		textures.installAtlasPage("objects:packed", "page:a", pageFor([key]));
+		preparer.resolve(fact);
+		await retaining;
+
+		expect(textures.getAtlasBinding(key).resource).toBe("texture-2d-resource:0");
+		expect(resources.texture2DUploads).toHaveLength(1);
+	});
+
 	it("materializes and releases a retained generated texture by its stable key", () => {
 		const resources = new FakeRendererResourceManager();
 		const textures = createTextureManager(resources);
@@ -208,23 +286,29 @@ function createTextureManager(
 }
 
 function createPage(): TexturePageDescription {
+	return pageFor([objectKey("0x05000003")]);
+}
+
+function objectKey(sourceAssetId: `0x${string}`) {
+	return createAssetTextureKey(TexturePurpose.ObjectDirectColor, sourceAssetId);
+}
+
+function pageFor(
+	keys: readonly ReturnType<typeof objectKey>[],
+): TexturePageDescription {
+	const width = keys.length * 2;
 	return {
 		height: 2,
-		pageBits: createPixels(),
+		pageBits: new Uint8Array(width * 2 * 4),
 		purpose: TexturePurpose.ObjectDirectColor,
-		textures: [
-			{
-				key: createAssetTextureKey(
-					TexturePurpose.ObjectDirectColor,
-					"0x05000003",
-				),
+		textures: keys.map((key, index) => ({
+			key,
 				placement: {
-					bounds: new AABB2(new Vec2(0, 0), new Vec2(2, 2)),
+					bounds: new AABB2(new Vec2(index * 2, 0), new Vec2(index * 2 + 2, 2)),
 					preparation: WRAPPED_ATLAS_PREPARATION,
 				},
-			},
-		],
-		width: 2,
+		})),
+		width,
 	};
 }
 

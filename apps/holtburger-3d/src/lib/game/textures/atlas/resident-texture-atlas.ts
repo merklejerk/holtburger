@@ -7,8 +7,9 @@ import type {
 } from "../../renderer/resource-manager";
 import type {
 	AssetTextureSource,
+	TextureAtlasPageDiagnostics,
 	TextureAtlasBinding,
-	TexturePlacement,
+	TextureManagerDiagnostics,
 } from "../texture-manager";
 import type { TexturePreparer } from "../texture-preparer";
 import {
@@ -71,7 +72,7 @@ export interface ResidentAtlasPageBuilder {
 	destroy(): void;
 }
 
-/** Optional physical fixture dependencies; production injection waits for the Phase 5 cutover. */
+/** Physical publication dependencies owned by the runtime resident-atlas authority. */
 export interface ResidentTextureAtlasPhysicalDependencies {
 	readonly layoutPlanner: ResidentAtlasLayoutPlanner;
 	readonly pageBuilder: ResidentAtlasPageBuilder;
@@ -248,14 +249,14 @@ export class ResidentTextureAtlas<TOwner extends string> {
 		return source;
 	}
 
-	/** Return the current physical binding when the optional page fixture has published one. */
+	/** Return the current physical binding for one ready resident logical texture. */
 	getAtlasBinding(key: AssetTextureKey): TextureAtlasBinding | null {
 		return this.#bindings.get(key) ?? null;
 	}
 
-	/** Return the device resource for one current fixture page without exposing page pixels. */
-	getAtlasPageResource(pageId: AtlasPageId): Texture2DResourceKey | null {
-		return this.#pages.get(pageId)?.resource ?? null;
+	/** Return one current page resource without exposing retained page pixels. */
+	getAtlasPageResource(pageId: `page:${string}`): Texture2DResourceKey | null {
+		return this.#pages.get(pageId as AtlasPageId)?.resource ?? null;
 	}
 
 	/** Return resource-free source and claim lifetime facts. */
@@ -281,6 +282,52 @@ export class ResidentTextureAtlas<TOwner extends string> {
 			),
 			residentSourceCount: this.#sources.size,
 		};
+	}
+
+	/** Adapt resident facts to the generic texture facade without candidate-page terminology. */
+	getAtlasDiagnostics(): TextureManagerDiagnostics {
+		const diagnostics = this.getDiagnostics();
+		return {
+			activeAtlasPages: diagnostics.activePageCount,
+			pendingAtlasRequirements: diagnostics.pendingRequirementCount,
+			residentAtlasBindings: this.#bindings.size,
+			residentSourceBytes: diagnostics.residentSourceBytes,
+			residentSourceCount: diagnostics.residentSourceCount,
+		};
+	}
+
+	/** Expose page placement facts for Explorer inspection; every entry is resident and canonical. */
+	getAtlasPageDiagnostics(): readonly TextureAtlasPageDiagnostics[] {
+		return [...this.#pages.values()]
+			.map(({ layout }) => {
+				const entries = layout.placements
+					.map(({ contentBounds, key }) => ({
+						height: contentBounds.height,
+						key,
+						width: contentBounds.width,
+						x: contentBounds.x,
+						y: contentBounds.y,
+					}))
+					.sort((left, right) => left.key.localeCompare(right.key));
+				const area = STATIC_OBJECT_TEXTURE_PAGE_SIZE ** 2;
+				const occupiedArea = entries.reduce(
+					(total, entry) => total + entry.width * entry.height,
+					0,
+				);
+				return {
+					byteLength:
+						area *
+						bytesPerPixelForFormat(texturePurposePolicy(layout.purpose).format),
+					entries,
+					entryCount: entries.length,
+					height: STATIC_OBJECT_TEXTURE_PAGE_SIZE,
+					occupiedPixelRatio: occupiedArea / area,
+					pageId: layout.pageId,
+					purpose: layout.purpose,
+					width: STATIC_OBJECT_TEXTURE_PAGE_SIZE,
+				};
+			})
+			.sort((left, right) => left.pageId.localeCompare(right.pageId));
 	}
 
 	/** Withdraw every exact claim without destroying the shared texture preparer. */
@@ -725,6 +772,20 @@ function bytesPerPixel(
 	}
 }
 
+function bytesPerPixelForFormat(format: TexturePixelFormat): number {
+	switch (format) {
+		case "rgba8":
+			return 4;
+		case "r8":
+		case "a8":
+			return 1;
+		case "rg8":
+			return 2;
+		default:
+			throw new Error(`Resident atlas has unsupported pixel format ${format}.`);
+	}
+}
+
 function pageLayoutsEqual(
 	left: AtlasPageLayout,
 	right: AtlasPageLayout,
@@ -750,7 +811,7 @@ function pageLayoutsEqual(
 function texturePlacement(
 	purpose: PackedObjectTexturePurpose,
 	placement: AtlasPageLayout["placements"][number],
-): TexturePlacement {
+) {
 	const { contentBounds } = placement;
 	return {
 		bounds: new AABB2(

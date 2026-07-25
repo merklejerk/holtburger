@@ -38,23 +38,38 @@ import {
 	type TextureAtlasPageDiagnostics,
 	type TexturePageId,
 } from "../textures/texture-manager";
+import { ResidentTextureAtlas } from "../textures/atlas/resident-texture-atlas";
+import { AtlasLayoutWorkerPool } from "../textures/atlas/layout-worker";
+import { AtlasPageBuildWorkerPool } from "../textures/atlas/page-build-worker";
 import type { Texture2DResourceKey } from "../renderer/resource-manager";
 import { TexturePurpose } from "../textures/types";
 import {
 	WorkerTexturePreparer,
 	type TexturePreparer,
 } from "../textures/texture-preparer";
+import { BuildingGeometryWorker } from "../commit/building-workers";
+import { bakeBuildingGeometry } from "../commit/building-geometry-worker";
+import { assembleBuildingArtifact } from "../commit/building-artifact";
+import { collectBuildingTextureDependencies } from "../commit/building-texture-inputs";
+import type { StaticObjectLayerArtifact } from "../commit/artifacts";
+import {
+	StaticLayerRealizer,
+	type StaticLayerGeometryPreparer,
+} from "./static-layer-realizer";
 import {
 	activeRegionResourceToOwnerId,
 	type ActiveRegionResourceOwnerId,
 	landblockLayerToOwnerId,
 	type ResourceOwnerId,
 	spawnedEntityToOwnerId,
+	staticRevisionToInstallNamespace,
+	staticRevisionToResourceOwnerId,
 	terrainSourceToOwnerId,
 	type TerrainResourceOwnerId,
 	type OwnerId,
 } from "./owner-ids";
 import type { ActiveRegionObjectDetailBinding } from "../resolution/active-region-object-detail";
+import type { ResolvedObjectLayerSource } from "../resolution/landblock-layer";
 import {
 	computeSceneInterest,
 	LandblockLayerKind,
@@ -105,6 +120,11 @@ const TERRAIN_ROOT_BOUNDS: AABB3 = new AABB3(
 export interface GameRuntimeDependencies {
 	readonly terrainGenerator: TerrainGenerator;
 	readonly texturePreparer: TexturePreparer;
+	readonly staticGeometryPreparer: StaticLayerGeometryPreparer<
+		ResolvedObjectLayerSource,
+		StaticObjectLayerArtifact | null,
+		OwnerId
+	>;
 }
 
 /** Device boundary used by runtime to construct its private renderer facade. */
@@ -159,8 +179,16 @@ export class GameRuntime {
 	readonly #geometry: GeometryManager<ResourceOwnerId>;
 	/** Logical texture preparation, device bindings, and shared owner retention. */
 	readonly #textures: TextureManager<ResourceOwnerId>;
+	/** Packed object-atlas authority injected into the generic texture facade. */
+	readonly #residentAtlas: ResidentTextureAtlas<OwnerId>;
 	/** Immutable-object nodes, components, and resource publication. */
-	readonly #staticObjects: StaticObjectSystem<ResourceOwnerId>;
+	readonly #staticObjects: StaticObjectSystem<OwnerId, ResourceOwnerId>;
+	/** Source-to-static publication sequencing for the buildings layer. */
+	readonly #staticLayerRealizer: StaticLayerRealizer<
+		ResolvedObjectLayerSource,
+		StaticObjectLayerArtifact | null,
+		OwnerId
+	>;
 	readonly #instances: InstanceStreamManager<ResourceOwnerId>;
 	/** Dynamic roots, articulated part nodes, and presentation preparation. */
 	readonly #dynamics: DynamicEntitySystem<ResourceOwnerId>;
@@ -193,6 +221,8 @@ export class GameRuntime {
 	#renderer: Renderer | null = null;
 	/** Runtime-owned terrain-generation worker terminated during runtime shutdown. */
 	readonly #terrainGenerator: TerrainGenerator;
+	/** Shared source preparer consumed by both generic textures and resident atlas. */
+	readonly #texturePreparer: TexturePreparer;
 	/** Asynchronous scene-interest receipt coordination, separate from runtime mutation authority. */
 	readonly #sceneInterestCoordinator: SceneInterestCommitCoordinator;
 	/** Completed asynchronous commits awaiting the next synchronous runtime tick. */
@@ -216,18 +246,82 @@ export class GameRuntime {
 		dependencies: GameRuntimeDependencies,
 	) {
 		this.#terrainGenerator = dependencies.terrainGenerator;
+		this.#texturePreparer = dependencies.texturePreparer;
 		this.#geometry = new GeometryManager<ResourceOwnerId>(renderResources);
+		this.#residentAtlas = new ResidentTextureAtlas<OwnerId>(
+			dependencies.texturePreparer,
+			typeof Worker === "undefined"
+				? null
+				: {
+						layoutPlanner: new AtlasLayoutWorkerPool({
+							createWorker: () =>
+								new Worker(
+									new URL(
+										"../textures/atlas/layout-worker.entry.ts",
+										import.meta.url,
+									),
+									{ type: "module" },
+								) as unknown as import("../workers/closed-worker").ClosedWorkerPort,
+							workerCount: 1,
+						}),
+						pageBuilder: new AtlasPageBuildWorkerPool({
+							createWorker: () =>
+								new Worker(
+									new URL(
+										"../textures/atlas/page-build-worker.entry.ts",
+										import.meta.url,
+									),
+									{ type: "module" },
+								) as unknown as import("../workers/closed-worker").ClosedWorkerPort,
+							workerCount: 2,
+						}),
+						renderResources,
+					},
+		);
 		this.#textures = new TextureManager<ResourceOwnerId>(
 			renderResources,
 			dependencies.texturePreparer,
+			this.#residentAtlas,
 		);
 		this.#instances = new InstanceStreamManager(renderResources);
-		this.#staticObjects = new StaticObjectSystem(
+		this.#staticObjects = new StaticObjectSystem<OwnerId, ResourceOwnerId>(
 			this.#scene,
 			this.#geometry,
-			this.#textures,
 			this.#instances,
+			staticRevisionToResourceOwnerId,
 		);
+		this.#staticLayerRealizer = new StaticLayerRealizer({
+			atlas: this.#residentAtlas,
+			currentness: {
+				isCurrent: (owner, revision) => {
+					const [, layer] = owner.split("/");
+					if (!layer) return false;
+					const landblockId = owner.slice(
+						"landblock-layer:".length,
+						owner.length - layer.length - 1,
+					) as LandblockId;
+					return this.#sceneInterestCoordinator.ownsDispatch(
+						{ id: landblockId, layer: layer as LandblockLayerKind },
+						revision,
+					);
+				},
+			},
+			geometry: dependencies.staticGeometryPreparer,
+			publisher: {
+				evict: async (owner, revision) =>
+					this.#staticObjects.evict(owner, revision),
+				removeExact: async (owner, revision) =>
+					this.#staticObjects.removeExact(owner, revision),
+				replace: async ({ geometry, owner, revision }) => {
+					this.#staticObjects.replaceObjects(
+						owner,
+						revision,
+						geometry,
+						LandblockLayerKind.Buildings,
+					);
+				},
+			},
+		});
 		this.#dynamics = new DynamicEntitySystem(
 			this.#scene,
 			this.#geometry,
@@ -258,7 +352,8 @@ export class GameRuntime {
 		this.#sceneInterestCoordinator = new SceneInterestCommitCoordinator(
 			commitPipeline,
 			{
-				evict: ({ id, layer }) => this.#evictStaticLayer(id, layer),
+				evict: ({ layer, revision }) =>
+					this.#evictStaticLayer(layer.id, layer.layer, revision),
 				failed: ({ error, layer, revision }) =>
 					this.#publishSceneAvailability({
 						kind: "scene-content-failed",
@@ -290,6 +385,10 @@ export class GameRuntime {
 			WorkerTexturePreparer.build(texturePixelSource),
 		]);
 		const runtime = new GameRuntime(device.resources, commitPipeline, {
+			staticGeometryPreparer:
+				typeof Worker === "undefined"
+					? new InlineBuildingGeometryPreparer()
+					: new RuntimeBuildingGeometryPreparer(BuildingGeometryWorker.build()),
 			terrainGenerator,
 			texturePreparer,
 		});
@@ -491,8 +590,10 @@ export class GameRuntime {
 		this.#envCells.destroy();
 		await this.#terrain.destroy();
 		await this.#terrainGenerator.destroy();
-
+		this.#staticLayerRealizer.destroy();
+		this.#residentAtlas.destroy();
 		await this.#textures.destroy();
+		await this.#texturePreparer.destroy();
 		this.#activeRegionDetail = null;
 		this.#geometry.destroy();
 		this.#instances.destroy();
@@ -557,13 +658,31 @@ export class GameRuntime {
 				});
 			}
 		}
-		if (artifact.commit.staticObjects !== null) {
-			this.#staticObjects.installObjects(
+		if (
+			artifact.layer === LandblockLayerKind.Buildings &&
+			"source" in artifact.commit
+		) {
+			this.#realizeBuildingLayer(
 				ownerId,
-				artifact.commit.staticObjects,
-				artifact.layer,
+				artifact as typeof artifact & {
+					readonly commit: import("../commit/types").BuildingLayerSourceCommit;
+				},
+				revision,
+			);
+			return;
+		}
+		if (!("staticObjects" in artifact.commit)) {
+			throw new Error(
+				`Layer ${artifact.layer} has no static publication contract.`,
 			);
 		}
+		const staticCommit = artifact.commit;
+		this.#staticObjects.replaceObjects(
+			ownerId,
+			revision,
+			staticCommit.staticObjects,
+			artifact.layer,
+		);
 		for (const dynamic of artifact.dynamicEntities) {
 			this.#deferStaticAuthoredDynamic(
 				ownerId,
@@ -574,13 +693,13 @@ export class GameRuntime {
 		}
 		if (
 			artifact.layer === LandblockLayerKind.Buildings &&
-			artifact.commit.diagnostics !== undefined
+			staticCommit.diagnostics !== undefined
 		) {
 			this.#buildingLayerDiagnostics.set(ownerId, {
-				...artifact.commit.diagnostics,
+				...staticCommit.diagnostics,
 				landblockId: artifact.landblockId,
 				runtimeDeferredResidentCount: artifact.dynamicEntities.length,
-				staticArtifactInstalled: artifact.commit.staticObjects !== null,
+				staticArtifactInstalled: staticCommit.staticObjects !== null,
 			});
 		}
 	}
@@ -604,6 +723,79 @@ export class GameRuntime {
 				presentation: artifact.commit.presentation,
 			},
 		});
+	}
+
+	#realizeBuildingLayer(
+		ownerId: OwnerId,
+		artifact: {
+			readonly landblockId: LandblockId;
+			readonly layer: LandblockLayerKind.Buildings;
+			readonly dynamicEntities: readonly DynamicEntityCommit[];
+			readonly commit: import("../commit/types").BuildingLayerSourceCommit;
+		},
+		revision: SceneInterestRevision,
+	): void {
+		if (!("source" in artifact.commit)) {
+			throw new Error(
+				"Building realization requires a resolved source commit.",
+			);
+		}
+		const textureRequirements = collectBuildingTextureDependencies(
+			artifact.commit.source,
+		).map(({ fact }) => fact);
+		void this.#staticLayerRealizer
+			.realize({
+				owner: ownerId,
+				revision,
+				source: artifact.commit.source,
+				textureRequirements,
+			})
+			.then((result) => {
+				if (result.kind !== "published") return;
+				for (const dynamic of artifact.dynamicEntities) {
+					this.#deferStaticAuthoredDynamic(
+						ownerId,
+						artifact.layer,
+						artifact.landblockId,
+						dynamic,
+					);
+				}
+				this.#buildingLayerDiagnostics.set(ownerId, {
+					additiveRangeCount: 0,
+					bakedRangeCount: 0,
+					expectedResidentCount:
+						artifact.commit.source.staticResidents.length +
+						artifact.dynamicEntities.length,
+					geometryBytes: 0,
+					geometryWorkerDurationMs: 0,
+					landblockId: artifact.landblockId,
+					materializedStaticResidentCount:
+						artifact.commit.source.staticResidents.length,
+					promotedDynamicResidentCount: artifact.dynamicEntities.length,
+					resolvedStaticResidentCount:
+						artifact.commit.source.staticResidents.length,
+					runtimeDeferredResidentCount: artifact.dynamicEntities.length,
+					sourceMaterialSlotCount: 0,
+					sourceRangeCount: 0,
+					staticArtifactInstalled: result.geometry !== null,
+					transparentRangeCount: 0,
+				});
+			})
+			.catch((error) => {
+				if (
+					!this.#sceneInterestCoordinator.ownsDispatch(
+						{ id: artifact.landblockId, layer: artifact.layer },
+						revision,
+					)
+				)
+					return;
+				this.#publishSceneAvailability({
+					kind: "scene-content-failed",
+					message: error instanceof Error ? error.message : String(error),
+					residency: { envCellId: null, landblockId: artifact.landblockId },
+					revision,
+				});
+			});
 	}
 
 	#commitSpawnedEntity(
@@ -663,9 +855,17 @@ export class GameRuntime {
 		// Future activation replaces this body with #installDynamic(ownerId, landblockId, dynamic).
 	}
 
-	#evictStaticLayer(landblockId: LandblockId, layer: LandblockLayerKind): void {
+	#evictStaticLayer(
+		landblockId: LandblockId,
+		layer: LandblockLayerKind,
+		revision: SceneInterestRevision,
+	): void {
 		const ownerId = landblockLayerToOwnerId(landblockId, layer);
-		this.#staticObjects.removeOwner(ownerId);
+		if (layer === LandblockLayerKind.Buildings) {
+			void this.#staticLayerRealizer.evict(ownerId, revision);
+		} else {
+			this.#staticObjects.evict(ownerId, revision);
+		}
 		this.#deferredStaticDynamics.delete(ownerId);
 		this.#buildingLayerDiagnostics.delete(ownerId);
 		this.#animation.removeOwner(ownerId);
@@ -675,11 +875,61 @@ export class GameRuntime {
 			this.#terrain.removeOwner(terrainSourceToOwnerId(landblockId));
 		}
 		this.#textures.dropOwner(ownerId);
-		this.#geometry.dropOwner(ownerId);
 	}
 
 	#publishSceneAvailability(event: SceneAvailabilityEvent): void {
 		for (const listener of this.#sceneAvailabilityListeners) listener(event);
+	}
+}
+
+/** Closed building geometry adapter owned and destroyed by the static realization sequencer. */
+class RuntimeBuildingGeometryPreparer implements StaticLayerGeometryPreparer<
+	ResolvedObjectLayerSource,
+	StaticObjectLayerArtifact | null,
+	OwnerId
+> {
+	readonly #worker: BuildingGeometryWorker;
+
+	constructor(worker: BuildingGeometryWorker) {
+		this.#worker = worker;
+	}
+
+	async prepare(options: {
+		readonly owner: OwnerId;
+		readonly revision: SceneInterestRevision;
+		readonly source: ResolvedObjectLayerSource;
+		readonly textureRequirements: readonly import("../textures/types").AssetTextureFact[];
+	}): Promise<StaticObjectLayerArtifact | null> {
+		const geometry = await this.#worker.bake({
+			resourceNamespace: staticRevisionToInstallNamespace(
+				options.owner,
+				options.revision,
+			),
+			source: options.source,
+		});
+		return assembleBuildingArtifact({
+			geometry,
+			resourceNamespace: staticRevisionToInstallNamespace(
+				options.owner,
+				options.revision,
+			),
+			source: options.source,
+			textureRequirements: options.textureRequirements,
+		});
+	}
+
+	destroy(): void {
+		this.#worker.destroy();
+	}
+}
+
+/** Non-browser test adapter retaining the same source-to-artifact contract without workers. */
+class InlineBuildingGeometryPreparer extends RuntimeBuildingGeometryPreparer {
+	constructor() {
+		super({
+			bake: (job) => Promise.resolve(bakeBuildingGeometry(job)),
+			destroy: () => undefined,
+		} as BuildingGeometryWorker);
 	}
 }
 

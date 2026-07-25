@@ -32,7 +32,10 @@ export interface StaticLayerGeometryPreparer<
 		readonly owner: TOwner;
 		readonly revision: SceneInterestRevision;
 		readonly source: TSource;
+		readonly textureRequirements: readonly AssetTextureFact[];
 	}): Promise<TGeometry>;
+	/** Terminate the private geometry worker after all pending outputs are made stale. */
+	destroy?(): void;
 }
 
 /** Failure-atomic static scene replacement owned by the existing static publication path. */
@@ -136,6 +139,7 @@ export class StaticLayerRealizer<TSource, TGeometry, TOwner extends string> {
 			}
 		}
 		this.#pending.clear();
+		this.#geometry.destroy?.();
 	}
 
 	async #realize(
@@ -146,6 +150,7 @@ export class StaticLayerRealizer<TSource, TGeometry, TOwner extends string> {
 			owner: input.owner,
 			revision: input.revision,
 			source: input.source,
+			textureRequirements: input.textureRequirements,
 		});
 		try {
 			const [preparedGeometry, atlasCompletion] = await Promise.all([

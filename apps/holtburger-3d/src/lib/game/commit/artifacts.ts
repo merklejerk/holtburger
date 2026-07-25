@@ -19,13 +19,8 @@ import type {
 	StaticInstanceStreamSource,
 } from "../systems/static-resources";
 import type {
-	TexturePageId,
-	TexturePlacement,
-} from "../textures/texture-manager";
-import type {
 	AssetTextureKey,
 	AssetTextureFact,
-	TexturePurpose,
 	TextureSamplerPolicy,
 } from "../textures/types";
 
@@ -51,27 +46,8 @@ export interface StaticObjectLayerDiagnostics {
 	readonly additiveRangeCount: number;
 	/** Bytes in the final one-allocation object geometry. */
 	readonly geometryBytes: number;
-	/** Bytes uploaded by the building atlas pages before shared-page arbitration. */
-	readonly packedTextureBytes: number;
-	/** Packed static atlas pages emitted by this building layer. */
-	readonly atlasPageCount: number;
 	/** Wall-clock duration inside the closed geometry worker. */
 	readonly geometryWorkerDurationMs: number;
-	/** Wall-clock duration inside the closed texture-packing worker. */
-	readonly textureWorkerDurationMs: number;
-}
-
-/** Prepared atlas page retained with one committed static-object layer. */
-export interface StaticTexturePageArtifact {
-	readonly pageId: TexturePageId;
-	readonly width: number;
-	readonly height: number;
-	readonly purpose: TexturePurpose;
-	readonly pageBits: Uint8Array;
-	readonly textures: readonly {
-		readonly key: AssetTextureKey;
-		readonly placement: TexturePlacement;
-	}[];
 }
 
 /** Source material plus polygon-owned facts; render pass policy remains renderer-private. */
@@ -149,12 +125,8 @@ export interface StaticObjectLayerArtifact {
 	readonly objects: readonly StaticObjectArtifact[];
 	readonly geometry: readonly GeometrySource[];
 	readonly instanceStreams: readonly StaticInstanceStreamSource[];
-	/**
-	 * Complete logical source requirements retained beside the legacy physical pages until the
-	 * resident-atlas cutover replaces those pages.
-	 */
+	/** Complete logical requirements whose bindings must be ready before publication. */
 	readonly textureRequirements: readonly AssetTextureFact[];
-	readonly texturePages: readonly StaticTexturePageArtifact[];
 }
 
 /** Persistent shell render contribution attached to one env-cell root node. */

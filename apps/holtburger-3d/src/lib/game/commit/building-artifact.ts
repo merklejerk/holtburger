@@ -2,34 +2,32 @@ import { Mat4 } from "../math/types";
 import type { ResolvedObjectLayerSource } from "../resolution/landblock-layer";
 import type { StaticObjectLayerArtifact } from "./artifacts";
 import type { BuildingGeometryResult } from "./building-geometry-worker";
-import type { BuildingTexturePackResult } from "./building-texture-worker";
 import type { StaticInstallResourceNamespace } from "../systems/static-resources";
 import type { AssetTextureFact, AssetTextureKey } from "../textures/types";
 
-/** Assemble a complete publishable building artifact only after both closed worker jobs finish. */
+/** Assemble a logical building artifact after geometry and texture-requirement validation. */
 export function assembleBuildingArtifact(options: {
 	readonly source: ResolvedObjectLayerSource;
 	readonly resourceNamespace: StaticInstallResourceNamespace;
 	readonly geometry: BuildingGeometryResult | null;
-	/** Logical requirements staged beside legacy page artifacts during the resident-atlas transition. */
 	readonly textureRequirements: readonly AssetTextureFact[];
-	readonly textures: BuildingTexturePackResult;
 }): StaticObjectLayerArtifact | null {
 	const geometry = options.geometry;
 	if (geometry === null) {
-		if (options.textures.pages.length !== 0) {
-			throw new Error("A building layer with no static geometry produced packed textures.");
-		}
 		return null;
 	}
-	const coveredTextures = new Set<AssetTextureKey>();
-	for (const page of options.textures.pages) {
-		for (const texture of page.textures) coveredTextures.add(texture.key);
-	}
+	const requiredTextures = new Set<AssetTextureKey>(
+		options.textureRequirements.map(({ key }) => key),
+	);
 	for (const range of geometry.ranges) {
-		for (const texture of [range.material.textures.base, range.material.textures.palette]) {
-			if (texture !== null && !coveredTextures.has(texture)) {
-				throw new Error(`Baked building range lacks a physical texture placement for ${texture}.`);
+		for (const texture of [
+			range.material.textures.base,
+			range.material.textures.palette,
+		]) {
+			if (texture !== null && !requiredTextures.has(texture)) {
+				throw new Error(
+					`Baked building range lacks a logical texture requirement for ${texture}.`,
+				);
 			}
 		}
 	}
@@ -59,6 +57,5 @@ export function assembleBuildingArtifact(options: {
 		],
 		resourceNamespace: options.resourceNamespace,
 		textureRequirements: options.textureRequirements,
-		texturePages: options.textures.pages,
 	};
 }

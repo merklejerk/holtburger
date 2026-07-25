@@ -32,7 +32,7 @@ export enum TexturePurpose {
 /** Initial fixed dimensions for every resident static-object texture page. */
 export const STATIC_OBJECT_TEXTURE_PAGE_SIZE = 2048;
 /** Evidence-backed filterable gutter for packed static-object direct-color textures. */
-export const STATIC_OBJECT_TEXTURE_GUTTER_PIXELS: TextureGutterPixels = 4;
+const STATIC_OBJECT_TEXTURE_GUTTER_PIXELS: TextureGutterPixels = 4;
 
 /** Texture purposes admitted by the runtime static-object atlas. */
 export type PackedObjectTexturePurpose =

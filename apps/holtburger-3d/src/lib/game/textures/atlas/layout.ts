@@ -5,11 +5,14 @@ import {
 	isPackedObjectTexturePurpose,
 	packedObjectTexturePreparation,
 } from "../types";
+import type { TexturePageId } from "../texture-manager";
 
 declare const atlasPageIdBrand: unique symbol;
 
 /** Immutable runtime identity for one fixed-size physical atlas page generation. */
-export type AtlasPageId = string & { readonly [atlasPageIdBrand]: true };
+export type AtlasPageId = TexturePageId & {
+	readonly [atlasPageIdBrand]: true;
+};
 
 /** Top-left-origin pixel rectangle. Max bounds are exclusive. */
 export interface AtlasBounds {
@@ -85,7 +88,7 @@ export function createAtlasPageId(
 	if (!Number.isInteger(generation) || generation < 0) {
 		throw new Error("Atlas page generation must be a non-negative integer.");
 	}
-	return `atlas:${purpose}:${generation}` as AtlasPageId;
+	return `page:atlas:${purpose}:${generation}` as AtlasPageId;
 }
 
 /** Derive the non-reusable allocation rectangle from one committed content placement. */

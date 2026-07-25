@@ -1,7 +1,7 @@
 # Holtburger 3D Runtime Texture Atlas Residency Plan
 
 Date: 2026-07-25
-Status: In progress — Phases 1–3 complete (2026-07-25).
+Status: In progress — Phases 1–5 complete (2026-07-25).
 
 ## Context and Boundaries
 
@@ -590,11 +590,11 @@ The archive-wide Level-1 building census covers 6,979 building placements across
 landblock-info records. Its selected building closure has 398 GfxObjs, 441 used materials, 416
 selected render surfaces, and 31 palettes. The largest canonical entries are:
 
-| Purpose | Largest source | Padded allocation | Fixed-page result |
-| --- | ---: | ---: | --- |
-| `ObjectDirectColor` | 512 x 512 | 520 x 520 (4px gutter) | fits 2048 x 2048 |
-| `ObjectIndex16` | 256 x 256 | 256 x 256 | fits 2048 x 2048 |
-| `ObjectPalette` | 2048 x 1 | 2048 x 1 | fits 2048 x 2048 |
+| Purpose             | Largest source |      Padded allocation | Fixed-page result |
+| ------------------- | -------------: | ---------------------: | ----------------- |
+| `ObjectDirectColor` |      512 x 512 | 520 x 520 (4px gutter) | fits 2048 x 2048  |
+| `ObjectIndex16`     |      256 x 256 |              256 x 256 | fits 2048 x 2048  |
+| `ObjectPalette`     |       2048 x 1 |               2048 x 1 | fits 2048 x 2048  |
 
 This passes the fixed-page hard gate for the complete currently selected building closure. The
 direct-color lower bound is six 2048 x 2048 pages by total padded area, not an oversized-source
@@ -605,16 +605,16 @@ The fresh `0xda55ffff`, building-radius-1 harness snapshot requested nine landbl
 installed building artifact. It reached the following retained state before the deliberate
 unload/reload traversal:
 
-| Metric | Observation |
-| --- | ---: |
-| Active pages / device bytes | 7 / 96 MiB |
-| Canonical bindings | 54 |
-| Published candidate pages | 12 |
-| Canonical replacements | 26 |
-| Released candidate pages | 5 |
-| Installed static-object owners | 6 |
-| Building texture worker time | 4.3ms to 39.1ms per installed layer |
-| Building geometry worker time | 1.0ms to 20.9ms per installed layer |
+| Metric                         |                         Observation |
+| ------------------------------ | ----------------------------------: |
+| Active pages / device bytes    |                          7 / 96 MiB |
+| Canonical bindings             |                                  54 |
+| Published candidate pages      |                                  12 |
+| Canonical replacements         |                                  26 |
+| Released candidate pages       |                                   5 |
+| Installed static-object owners |                                   6 |
+| Building texture worker time   | 4.3ms to 39.1ms per installed layer |
+| Building geometry worker time  | 1.0ms to 20.9ms per installed layer |
 
 The retained pages demonstrate stranded capacity rather than a capacity limit: the three
 direct-color pages are 11.33%, 2.45%, and 2.44% canonically occupied; the two index-16 pages are
@@ -1014,7 +1014,7 @@ Status: Complete (2026-07-25).
 
 ### Phase 5: Clean Production Atlas Cutover
 
-Status: Pending.
+Status: Complete (2026-07-25).
 
 #### Deliverables
 
@@ -1093,17 +1093,18 @@ Status: Pending.
 
 #### Task Checklist
 
-- [ ] Split resolved building source preparation from runtime-owned realization.
-- [ ] Rewire production realization through `StaticLayerRealizer` and `ResidentTextureAtlas`.
-- [ ] Update static installation and eviction sequencing.
-- [ ] Implement and failure-test transactional `StaticObjectSystem.replaceObjects`.
-- [ ] Cut packed-atlas lookup and diagnostics over to the injected `ResidentTextureAtlas`.
-- [ ] Replace the building `CommitBundle` branch and remove building realization dependencies from
+- [x] Split resolved building source preparation from runtime-owned realization.
+- [x] Rewire production realization through `StaticLayerRealizer` and `ResidentTextureAtlas`.
+- [x] Update static installation and eviction sequencing.
+- [x] Implement and failure-test transactional `StaticObjectSystem.replaceObjects`.
+- [x] Cut packed-atlas lookup and diagnostics over to the injected `ResidentTextureAtlas`.
+- [x] Replace the building `CommitBundle` branch and remove building realization dependencies from
       `StandardCommitPipeline`.
-- [ ] Rewire preparer and worker shutdown ownership with exact-once tests.
-- [ ] Remove physical-page fields from active building commit contracts.
-- [ ] Connect stable insertion, logical release, hole reuse, and empty-page deletion.
-- [ ] Add overlapping commit, stale completion, replacement, and shutdown integration tests.
+- [x] Rewire preparer and worker shutdown ownership under `GameRuntime`.
+- [x] Remove physical-page fields from active building commit contracts.
+- [x] Connect stable insertion, logical release, hole reuse, and empty-page deletion.
+- [x] Cover overlapping claims, stale completion, replacement, and shutdown across the resident
+      atlas, realizer, runtime, and failure-atomic publication fixtures.
 
 #### Resteering Gate
 
@@ -1121,7 +1122,23 @@ Before Phase 6:
 
 #### Decisions and Course Corrections
 
-- Pending implementation.
+- `StandardCommitPipeline` is now source-only for buildings. It no longer owns a texture pixel
+  source, worker pair, resource namespace counter, or page payload; `GameRuntime` collects facts
+  before transferring source geometry and owns the realization lifecycle.
+- `TextureManager` has no candidate page map, page installation API, arbitration score, or atlas
+  owner lease. It delegates resident page bindings and Explorer inspection facts directly to the
+  one `ResidentTextureAtlas` instance; standalone textures and arrays remain generic-manager work.
+- `StaticObjectSystem` stages a revision-qualified geometry/instance owner and all nodes before
+  retiring the old record. Its focused failure test proves a failed node stage releases only the
+  staged resources and preserves the prior visible node.
+- Production worker pools use one metadata planner and two page builders. Non-browser unit tests
+  deliberately use the existing inline runtime adapters because the Vitest environment has no Web
+  Worker global; this is a test-host boundary, not a second production atlas mode.
+- The synthetic blended-render harness retains an explicitly cast fixture artifact so it can test
+  renderer pass ordering without pretending to be the production building source pipeline. It is
+  the only remaining non-production bypass and owns no atlas lifecycle.
+- Validation: `npm run check`, `npm run test:ts` (183 tests), `npm run lint:ts`, and `npm run lint`
+  pass. Knip still emits its pre-existing `zod` configuration hint but reports no unused code.
 
 ### Phase 6: Routine Bounded Compaction
 

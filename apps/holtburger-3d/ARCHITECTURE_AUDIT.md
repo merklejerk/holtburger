@@ -1,6 +1,6 @@
 # Architectural Snapshot: holtburger-3d
 
-_Last Updated: 2026-07-24_
+_Last Updated: 2026-07-25_
 
 ## Audit Scope and Verdict
 
@@ -8,7 +8,7 @@ This snapshot covers authored code in `apps/holtburger-3d/src`, `src-tauri/src`,
 and the app-local scripts. Generated output, dependencies, Tauri-generated
 schemas, icons, and the legacy frontend are excluded from metrics.
 
-The architecture is directionally sound for the current stubbing phase. Explorer
+The architecture is directionally sound for the current buildings-layer phase. Explorer
 policy is app-local, the Tauri host is a narrow static-content adapter, runtime
 state is hidden behind typed operations, and raw WebGL handles do not escape the
 WebGL backend. Visual realization is intentionally best-effort: source
@@ -20,9 +20,10 @@ Priority findings:
 
 | Priority | Finding                                                       | Evidence                                                                                                                                                                             | Direction                                                                                                                                                                                     |
 | -------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Medium   | `GameRuntime` is a 27-module fan-out hub                      | It constructs nine stateful subsystems and also owns interest revisions, async commit staging, availability publication, frame state, and teardown                                   | Keep it as the composition authority, but extract scene-interest loading/receipt coordination when the second static layer becomes real; do not add more layer-specific branches to the class |
+| Medium   | `GameRuntime` remains a high fan-out composition hub           | It constructs nine stateful subsystems and also owns interest revisions, async commit staging, availability publication, frame state, lifecycle diagnostics, and teardown              | Keep it as the composition authority. Building diagnostics are read-only snapshots; extract further receipt coordination before adding a second independent static layer branch              |
 | Medium   | The Rust host boundary is concentrated in one 1,018-line file | `src-tauri/src/lib.rs` contains host state, commands, three binary contracts, active-region projection, serializers, and tests                                                       | Split by transport contract (`active_region`, `terrain_source`, `texture_pixels`) while keeping Tauri command registration in `lib.rs`                                                        |
 | Low      | Vestigial public lifecycle and mutation stubs exist           | `StandardCommitPipeline.build()` is needlessly async, `destroy()` is a no-op outside its interface, and unused `GameRuntime.updateDynamicEntityPlacement()` silently returns `false` | Delete inert API until ownership or behavior exists; add it back with a typed contract when the capability is implemented                                                                     |
+| Low      | Repository-wide Prettier baseline is stale                     | The final `prettier --check .` reports 39 files, including unrelated pre-existing files; every buildings-layer touched file was formatted and rechecked                               | Restore a repository formatting baseline in a dedicated mechanical change; do not mix it into feature work                                                                                   |
 
 ## 1. System Topology and Cross-Layer Import Matrix
 
@@ -436,5 +437,7 @@ Current checks at audit time:
   nesting-depth outlier documented above.
 
 The standard checks prove internal consistency, not feature completeness. The
-client route remains an intentional shell, and only terrain has a typed static
-source capability today.
+client route remains an intentional shell, while terrain and Level 1 buildings
+now have typed static source capabilities. The building path preserves its
+boundaries: source/worker metrics cross as commit data, atlas arbitration stays
+inside `TextureManager`, and transparent/additive policy stays in WebGL2.

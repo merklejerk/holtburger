@@ -55,7 +55,7 @@ export function planObjectMaterial(
 			ordering,
 			baseTexture: null,
 			paletteTexture: null,
-			sampler: sampler(wrap),
+			sampler: sampler(wrap, TextureFilteringMode.Linear),
 			textureRequests: [],
 			palettedClipMap: false,
 		};
@@ -98,7 +98,12 @@ export function planObjectMaterial(
 		ordering,
 		baseTexture,
 		paletteTexture,
-		sampler: sampler(wrap),
+		sampler: sampler(
+			wrap,
+			material.textureEncoding === "direct-color"
+				? TextureFilteringMode.Linear
+				: TextureFilteringMode.Nearest,
+		),
 		textureRequests,
 		palettedClipMap:
 			material.textureEncoding !== "direct-color" &&
@@ -123,8 +128,11 @@ export function classifyObjectMaterialOrdering(
 	return "opaque";
 }
 
-function sampler(wrap: TextureWrapMode): TextureSamplerPolicy {
-	return { filtering: TextureFilteringMode.Linear, wrap };
+function sampler(
+	wrap: TextureWrapMode,
+	filtering: TextureFilteringMode,
+): TextureSamplerPolicy {
+	return { filtering, wrap };
 }
 
 function flags(material: ResolvedMaterial): number {

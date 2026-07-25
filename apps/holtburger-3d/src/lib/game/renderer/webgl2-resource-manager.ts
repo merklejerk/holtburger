@@ -280,9 +280,6 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 					uploadFloatAttribute(gl, 2, 2, geometry.textureCoordinates),
 				);
 			}
-			if (geometry.kind === "object") {
-				buffers.push(uploadUint16Attribute(gl, 3, geometry.materialSlots));
-			}
 			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
 			gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, geometry.indices, gl.STATIC_DRAW);
 			const usesShortIndices = geometry.indices instanceof Uint16Array;
@@ -443,19 +440,6 @@ function uploadFloatAttribute(
 	return buffer;
 }
 
-function uploadUint16Attribute(
-	gl: WebGL2RenderingContext,
-	location: number,
-	data: Uint16Array,
-): WebGLBuffer {
-	const buffer = requireBuffer(gl);
-	gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-	gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
-	gl.enableVertexAttribArray(location);
-	gl.vertexAttribIPointer(location, 1, gl.UNSIGNED_SHORT, 0, 0);
-	return buffer;
-}
-
 function requireBuffer(gl: WebGL2RenderingContext): WebGLBuffer {
 	const buffer = gl.createBuffer();
 	if (!buffer) throw new Error("Failed to allocate geometry buffer.");
@@ -477,12 +461,6 @@ function validateGeometry(geometry: RenderGeometryData): void {
 		}
 		if (geometry.textureCoordinates.length !== vertexCount * 2) {
 			throw new Error(`${geometry.kind} UV count does not match positions.`);
-		}
-		if (
-			geometry.kind === "object" &&
-			geometry.materialSlots.length !== vertexCount
-		) {
-			throw new Error("Object material slot count does not match positions.");
 		}
 	}
 }

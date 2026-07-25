@@ -4,6 +4,8 @@ import type {
 	ObjectGeometryKey,
 } from "../geometry/types";
 import type { AABB3 } from "../math/types";
+import type { Vec3 } from "../math/types";
+import type { ObjectMaterialOrdering } from "../resolution/object-material-planner";
 import type {
 	SceneEnvCellScopeInput,
 	ScenePlacement,
@@ -20,7 +22,11 @@ import type {
 	TexturePageId,
 	TexturePlacement,
 } from "../textures/texture-manager";
-import type { AssetTextureKey, TexturePurpose } from "../textures/types";
+import type {
+	AssetTextureKey,
+	TexturePurpose,
+	TextureSamplerPolicy,
+} from "../textures/types";
 
 /** Prepared atlas page retained with one committed static-object layer. */
 export interface StaticTexturePageArtifact {
@@ -38,6 +44,15 @@ export interface StaticTexturePageArtifact {
 /** Source material plus polygon-owned facts; render pass policy remains renderer-private. */
 export interface StaticObjectMaterialBinding {
 	readonly source: ResolvedMaterial;
+	/** Logical texture roles remain independent from their eventual atlas page placements. */
+	readonly textures: {
+		readonly base: AssetTextureKey | null;
+		readonly palette: AssetTextureKey | null;
+	};
+	/** Draw-time source-local sampler policy, retained independently from packed gutters. */
+	readonly sampler: TextureSamplerPolicy;
+	/** Renderer compilation applies the retail indexed clip-map rule from this lossless fact. */
+	readonly palettedClipMap: boolean;
 	readonly polygon: {
 		/** Authored polygon culling mode, retained independently from its expanded render side. */
 		readonly cullMode: "single" | "double" | "both" | "counter-clockwise";
@@ -55,6 +70,13 @@ export interface BakedStaticDrawUnit {
 	readonly indexStart: number;
 	readonly indexCount: number;
 	readonly material: StaticObjectMaterialBinding;
+	/** Renderer-neutral ordering class selected from lossless source material facts. */
+	readonly ordering: ObjectMaterialOrdering;
+	/** Stable distance-sort input present only for transparent ranges. */
+	readonly transparentSort: {
+		readonly stableId: string;
+		readonly center: Vec3;
+	} | null;
 }
 
 /** Instanced immutable geometry selected by one persistent instance cohort. */
@@ -65,6 +87,8 @@ export interface InstancedStaticDrawUnit {
 	readonly indexStart: number;
 	readonly indexCount: number;
 	readonly material: StaticObjectMaterialBinding;
+	readonly ordering: ObjectMaterialOrdering;
+	readonly transparentSort: null;
 }
 
 /** Logical immutable-object draw contribution retained beside its spatial node. */

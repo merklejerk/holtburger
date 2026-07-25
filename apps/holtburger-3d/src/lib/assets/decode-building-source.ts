@@ -242,10 +242,12 @@ export function decodeBuildingSource(
 		const resolved: ResolvedObjectResident = {
 			id: resident.id,
 			presentation,
-			placement: {
-				envCellId: null,
-				landblockId: manifest.landblockId as LandblockId,
-				localTransform: acFrameTransform(resident.placement, resident.scale),
+		placement: {
+			envCellId: null,
+			landblockId: manifest.landblockId as LandblockId,
+			// Source scale remains explicit on the resident so static baking can compose it
+			// once with setup-part scale instead of silently applying it twice.
+			localTransform: acFrameTransform(resident.placement, [1, 1, 1]),
 			},
 			scale: renderScale(resident.scale),
 			localBounds: toBounds(resident.localBounds),

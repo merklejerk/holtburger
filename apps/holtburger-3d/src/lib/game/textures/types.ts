@@ -201,11 +201,16 @@ export function texturePurposePolicy(
 	switch (purpose) {
 		case TexturePurpose.TerrainColor:
 		case TexturePurpose.TerrainDetail:
-		case TexturePurpose.ObjectDirectColor:
 		case TexturePurpose.ObjectDetail:
 			return {
 				format: TexturePixelFormat.RGBA8,
 				generateMipmaps: true,
+			};
+		case TexturePurpose.ObjectDirectColor:
+			// Packed object pages begin at level zero only until per-entry mip isolation exists.
+			return {
+				format: TexturePixelFormat.RGBA8,
+				generateMipmaps: false,
 			};
 		case TexturePurpose.TerrainBlendMask:
 		case TexturePurpose.TerrainRoadMask:

@@ -1,5 +1,6 @@
 import {
 	BoundedClosedWorkerPool,
+	type ClosedWorkerPoolDiagnostics,
 	type ClosedWorkerPort,
 } from "../../workers/closed-worker";
 import {
@@ -41,6 +42,10 @@ export class AtlasLayoutWorkerPool {
 
 	plan(request: StableAtlasLayoutRequest): Promise<StableAtlasLayoutPlan> {
 		return this.#pool.dispatch({ request }, []).then((result) => result.plan);
+	}
+
+	getDiagnostics(): ClosedWorkerPoolDiagnostics {
+		return this.#pool.getDiagnostics();
 	}
 
 	destroy(): void {

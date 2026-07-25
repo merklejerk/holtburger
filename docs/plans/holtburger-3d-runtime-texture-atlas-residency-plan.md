@@ -1,0 +1,1419 @@
+# Holtburger 3D Runtime Texture Atlas Residency Plan
+
+Date: 2026-07-25
+Status: Draft for review.
+
+## Context and Boundaries
+
+### Goal
+
+Replace landblock-local candidate-page packing with a runtime-owned, fixed-size texture atlas that
+retains decoded logical sources, reuses resident bindings and free page space, and performs bounded
+transactional compaction during ordinary scene commits.
+
+### Current State
+
+The building pipeline currently collects every logical texture used by one landblock, decodes every
+dependency, and packs the complete set into independently allocated 2048 x 2048 pages. The packer is
+a deterministic row shelf. It partitions pages by `TexturePurpose`, but it neither inserts into
+free regions of existing pages nor chooses a compact placement within a page.
+
+`TextureManager` receives those complete candidate pages after all preparation, packing, transfer,
+and upload work has occurred. It uses logical `AssetTextureKey` identity to choose a canonical
+binding among overlapping candidates, but this arbitration happens too late to avoid duplicate
+decoding, packing, transfer, or temporary device allocation. Unique textures remain stranded in
+the independently packed page that first wins them.
+
+Owner eviction already releases individual logical texture bindings, and an atlas page is released
+when its final canonical binding disappears. The vacated rectangle of a partially live page is not
+tracked as reusable space, however, and the surviving entries cannot be consolidated into fewer
+pages.
+
+The renderer is already correctly indirect: static geometry retains source-local UVs and logical
+texture keys, and each draw resolves the current page resource and placement through
+`TextureManager`. A runtime transaction may therefore change a texture's physical page and
+placement between frames without rebuilding geometry.
+
+### Confirmed Decisions
+
+- Every runtime atlas page has a fixed width and height of 2048 pixels.
+- `TexturePurpose` is the complete atlas compatibility bucket. It already determines pixel format,
+  mip policy, and canonical physical preparation. Filtering and draw-time wrap policy do not create
+  additional buckets.
+- Decoded, prepared source pixels remain in CPU memory while their logical texture has an owner or
+  participates in an in-flight atlas transaction.
+- Runtime compaction never reads pixels back from the graphics device. Every rebuilt page is
+  materialized from retained logical sources.
+- Every atlas mutation evaluates free-space reuse and bounded compaction. Rebuilding pages remains
+  conditional on a deterministic benefit and work budget.
+- Metadata placement planning and pixel page materialization are separate stages. The planner
+  identifies kept, metadata-only, rebuilt, and dropped pages in a closed metadata-worker job; only
+  rebuilt pages enter bounded-concurrency pixel worker jobs.
+- Page placement is replaceable physical state. Geometry, materials, and `AssetTextureKey` identity
+  remain stable across insertion, release, and compaction.
+- Atlas planning and page materialization stay behind closed worker jobs. The main thread owns
+  currentness decisions, compact mutation snapshots, device publication, and atomic binding-map
+  mutation.
+
+### Deliberate Supersession
+
+This plan supersedes North Star 13 in
+`docs/plans/holtburger-3d-buildings-layer-e2e-plan.md`, which required independently prepared
+landblocks and prohibited a pre-pack residency snapshot. That rule was appropriate for landing the
+first visible building slice without serializing workers, but it deliberately accepted duplicate
+candidate work and stranded page capacity.
+
+This plan preserves the useful part of that decision: landblock source and geometry preparation
+remain independent, and workers still receive closed jobs. It replaces page arbitration with
+runtime-owned logical claims, per-purpose placement transactions, and stale-safe page reservations.
+The completed plan remains historical evidence and must not be rewritten to imply that the initial
+architecture already provided global residency.
+
+### In Scope
+
+- DAT-backed two-dimensional object textures represented by `AssetTextureKey`.
+- The building static-object path as the first producer of runtime atlas requirements.
+- Purpose-scoped fixed-page placement and deterministic free-rectangle packing.
+- Multi-owner logical texture claims independent of page publication.
+- In-flight source preparation coalescing and resident CPU source retention.
+- Skipping preparation and packing for already resident logical textures.
+- Reusing free regions of compatible resident pages.
+- Marking released regions reusable without requiring immediate page movement.
+- Bounded compaction evaluated during normal retain/release commit flow.
+- Transactional page building, committed-binding replacement, publication, and rollback.
+- Stale completion rejection when scene interest changes during asynchronous realization.
+- Failure-atomic replacement of one static-object owner so atlas activation follows a successful
+  scene cutover.
+- Page, source-memory, allocation, reuse, compaction, transfer, and release diagnostics.
+- Explorer texture-page diagnostics updated to describe the replacement model honestly.
+- Deletion of the landblock-local shelf packer and candidate-page arbitration after cutover.
+
+### Out of Scope
+
+- Variable atlas page dimensions.
+- Mixing different `TexturePurpose` values on one page, even when their current formats match.
+- Texture arrays, generated terrain textures, or standalone regional detail textures.
+- Changing logical material identity, source-local UVs, or baked geometry.
+- Reading atlas contents from WebGL to support rebuilding.
+- Retaining complete CPU copies of materialized atlas pages after upload.
+- Partial `texSubImage2D` page patching in the first implementation. Complete replacement pages are
+  built off-thread and published atomically.
+- Adaptive or unbounded worker pools. Phase 3 selects explicit bounded planner and page-build pool
+  sizes from measured queueing, transfer cost, and browser responsiveness.
+- A permanent unbounded cache for unowned texture sources.
+- A general cross-system transaction framework. Only the static-owner replacement seam required for
+  correct atlas activation is made failure-atomic.
+- Porting the legacy open-world streaming scheduler, claim registry, or texture residency system
+  wholesale.
+- Permanent automated tests that require local DAT or HBA archives.
+- Running the interactive TUI client for diagnostics.
+
+## Ground Truth and Existing Precedent
+
+### Current Application Contracts
+
+- `apps/holtburger-3d/src/lib/game/textures/types.ts`
+  - `AssetTextureKey`
+  - `TexturePurpose`
+  - `TexturePurposePolicy`
+  - `texturePurposePolicy`
+  - `TexturePreparation`
+- `apps/holtburger-3d/src/lib/game/textures/texture-manager.ts`
+  - logical leases, canonical atlas bindings, page resources, and draw-time binding lookup
+  - candidate-page arbitration and release behavior to replace
+- `apps/holtburger-3d/src/lib/game/textures/texture-preparer.ts`
+  - logical texture preparation port and current in-flight request coalescing
+- `apps/holtburger-3d/src/lib/game/ownership.ts`
+  - owner-to-logical-resource lease accounting
+- `apps/holtburger-3d/src/lib/game/commit/building-texture-inputs.ts`
+  - authoritative collection and validation of logical building texture dependencies
+- `apps/holtburger-3d/src/lib/game/commit/building-texture-worker.ts`
+  - canonical purpose-specific gutter preparation and current shelf packer
+- `apps/holtburger-3d/src/lib/game/commit/building-workers.ts`
+  - current closed worker transport and transferable ownership
+- `apps/holtburger-3d/src/lib/game/commit/pipeline.ts`
+  - current building source load, texture preparation, geometry bake, page pack, and artifact assembly
+- `apps/holtburger-3d/src/lib/game/commit/types.ts`
+  - current `CommitBundle` handoff consumed by scene-interest coordination and `GameRuntime`
+- `apps/holtburger-3d/src/lib/game/commit/artifacts.ts`
+  - static-object texture page and logical material contracts
+- `apps/holtburger-3d/src/lib/game/commit/building-artifact.ts`
+  - current same-artifact texture coverage assertion
+- `apps/holtburger-3d/src/lib/game/systems/static-object-system.ts`
+  - owner-scoped geometry, texture, instance, and scene installation
+- `apps/holtburger-3d/src/lib/game/runtime/scene-interest-commit-coordinator.ts`
+  - dispatch currentness and stale source/worker rejection
+- `apps/holtburger-3d/src/lib/game/runtime/game-runtime.ts`
+  - commit draining, layer publication, eviction, diagnostics, and frame sequencing
+- `apps/holtburger-3d/src/lib/game/renderer/render-world.ts`
+  - renderer-facing logical texture resolution membrane
+- `apps/holtburger-3d/src/lib/game/renderer/webgl2-renderer.ts`
+  - per-draw atlas binding and placement resolution
+- `apps/holtburger-3d/src/lib/game/renderer/resource-manager.ts`
+  - renderer-neutral texture resource creation, replacement, and release
+- `apps/holtburger-3d/src/lib/game/renderer/webgl2-resource-manager.ts`
+  - atomic single-resource replacement precedent
+- `apps/holtburger-3d/src/explorer/ExplorerTexturesPanel.svelte`
+- `apps/holtburger-3d/src/explorer/ExplorerTexturePageModal.svelte`
+  - existing page-level runtime inspection surfaces
+
+### Architectural Direction
+
+- `docs/plans/holtburger-3d-render-systems-ecs-pivot-scoping.md`
+  - `TexturePurpose` alone defines canonical physical compatibility.
+  - `AssetTextureKey` excludes physical placement and permits repacking.
+  - freshly prepared and packed resources share logical identity.
+- `docs/plans/holtburger-3d-buildings-layer-e2e-plan.md`
+  - source-local UVs and logical material bindings remain independent of packing.
+  - closed workers and explicit stale completion behavior remain required.
+  - North Star 13 is deliberately superseded as described above.
+- `apps/holtburger-3d/ARCHITECTURE_AUDIT.md`
+  - atlas replacement is a high-risk mutable-state hotspot.
+  - `TextureManager` is already an oversized hub; new residency policy must be extracted into a
+    focused component rather than extending its candidate-arbitration method.
+
+### Legacy Algorithms to Mine, Not Port Wholesale
+
+- `apps/holtburger-3d-legacy/src/lib/textures/packing/atlas-layout.ts`
+  - deterministic largest-first ordering
+  - best-short-side-fit placement
+  - free-rectangle splitting and containment pruning
+  - reconstruction of free space from locked placements
+  - insertion into existing pages
+- `apps/holtburger-3d-legacy/src/lib/textures/packing/packer.ts`
+  - page materialization and gutter blitting
+- `apps/holtburger-3d-legacy/src/lib/systems/open-world-streaming/texture-residency/`
+  - separation of claims, placement, page build, and publication as conceptual precedent only
+
+The new implementation must remove variable page-size search, page runway, cross-domain bucket
+vocabulary, and legacy scheduler concepts. Fixed pages and `TexturePurpose` provide a smaller
+problem.
+
+## North Stars
+
+1. **Logical ownership precedes physical placement.** An owner claims `AssetTextureKey` values.
+   Pages are a replaceable consequence of all current claims, never the source of those claims.
+2. **Purpose is the bucket.** Do not add parallel format, mip, gutter, wrap, domain, or owner bucket
+   keys that merely restate `TexturePurpose`.
+3. **Resident means preparation is reusable.** A retained logical texture is never decoded or
+   prepared again. Its pixels are copied again only when insertion or compaction rebuilds its
+   physical page; untouched pages perform no pixel work.
+4. **Source pixels are authoritative runtime backing.** Retain one validated prepared source per
+   resident logical key. Rebuild from that source; never scrape physical pages.
+5. **Fixed pages simplify policy.** Every page within a purpose has identical dimensions and byte
+   cost. Placement policy optimizes page count, moved bytes, and useful free geometry.
+6. **Evaluate compaction routinely; execute it selectively.** Every retain/release mutation may
+   propose a bounded repack. Apply it only when it avoids or eliminates a page within the configured
+   rebuild budget.
+7. **A hole and fragmentation are different facts.** A released rectangle is immediately reusable.
+   Repacking is required only to move survivors and consolidate nonempty pages.
+8. **Page-count benefit outranks pretty occupancy.** Do not move live textures merely to improve an
+   Explorer percentage. Prefer fewer pages, then fewer moved source bytes, then larger useful free
+   rectangles.
+9. **Publication is transactional.** Build and upload every replacement page before changing a
+   committed binding. On failure or stale completion, retain the previous complete state.
+10. **Stale work cannot release newer ownership.** Building atlas realization carries the existing
+    `SceneInterestRevision` that authorized its source dispatch. Cleanup may withdraw only the
+    exact `(owner, revision)` claim it created.
+11. **Workers receive closed jobs.** A page build includes its complete layout and source payloads.
+    It never pauses to query main-thread residency or request another asset.
+12. **The main loop stays narrow.** Placement planning operates on metadata. Pixel clearing,
+    guttering, and blitting happen in a worker. WebGL creation and map publication remain on the
+    main thread.
+13. **Binding readiness is explicit.** Static scene publication must not expose a draw unit whose
+    required logical texture lacks a committed binding.
+14. **Diagnostics describe actual policy.** Report resident sources, avoided preparations,
+    insertions, holes, compaction attempts, accepted repacks, moved bytes, and pages eliminated.
+    Retire candidate-versus-canonical arbitration terminology when candidate pages no longer exist.
+15. **The cutover includes subtraction.** Delete the shelf packer, per-install page IDs,
+    same-artifact page coverage check, and candidate scoring once the resident atlas owns those
+    responsibilities.
+16. **Execution boundaries are not automatically components.** Add only two stateful domain
+    components: `ResidentTextureAtlas` for atlas authority and `StaticLayerRealizer` for building
+    realization sequencing. Claims, source retention, transactional publication, planning, and page
+    building remain internal state or pure implementation boundaries rather than freestanding
+    services.
+17. **Static replacement precedes atlas activation.** Stage one revision's geometry, instances, and
+    nodes before removing the prior static owner record. On failure, remove staged work and retain
+    the prior scene and atlas revision. Activate the prepared atlas revision only after the static
+    replacement succeeds.
+
+## Target Model
+
+### Component Shape
+
+The target adds exactly two stateful domain components:
+
+- `ResidentTextureAtlas`, composed beside the existing `TextureManager`, owns all packed-atlas
+  authority. `TextureManager` remains the broader texture facade and delegates atlas binding lookup
+  and page diagnostics/inspection lookup to this component.
+- `StaticLayerRealizer`, owned by `GameRuntime`, sequences geometry, atlas readiness, currentness,
+  and static publication. It does not own pixels, placements, renderer resources, or scene-interest
+  policy.
+
+The following are implementation boundaries, not additional systems:
+
+- owner/revision claim indexes and the resident prepared-source map are private
+  `ResidentTextureAtlas` state;
+- transaction staging, rollback, and atomic map publication are focused internal functions of
+  `ResidentTextureAtlas`;
+- fixed-page placement and page materialization are pure functions invoked through worker clients;
+- layout and page-build concurrency use the same reusable bounded closed-worker-pool primitive with
+  different job contracts; and
+- `TexturePreparer`, `RendererResourceManager`, the geometry worker, `StaticObjectSystem`, and
+  `SceneInterestCommitCoordinator` remain existing dependencies with narrow responsibilities.
+
+`TexturePreparer` prepares missing sources and coalesces concurrent requests by logical key.
+`ResidentTextureAtlas` alone retains prepared sources after preparation because it also owns the
+claims that determine their lifetime. No separate claim registry, resident source cache, compaction
+manager, or transactional publisher object is introduced.
+
+The same `ResidentTextureAtlas` instance is injected into `StaticLayerRealizer` for mutation and
+into `TextureManager` for packed-atlas binding, diagnostics, and inspection lookup; these are not two
+atlas owners.
+`GameRuntime` owns the shared `TexturePreparer` lifecycle because both `TextureManager` and
+`ResidentTextureAtlas` consume it. Neither child destroys that shared dependency.
+`ResidentTextureAtlas` owns and destroys only its layout/page-build pools, claims, retained sources,
+and page state; `StaticLayerRealizer` owns and destroys only its geometry worker and pending
+realizations.
+
+```text
+GameRuntime
+|-- SceneInterestCommitCoordinator
+|-- TexturePreparer
+|-- ResidentTextureAtlas
+|   |-- layout worker pool
+|   `-- page-build worker pool
+|-- TextureManager -------- delegates packed-atlas lookup to ResidentTextureAtlas
+|-- StaticObjectSystem
+`-- StaticLayerRealizer
+    |-- geometry worker
+    `-- uses currentness, ResidentTextureAtlas, and StaticObjectSystem ports
+```
+
+### Logical State
+
+For each `AssetTextureKey`, `ResidentTextureAtlas` owns:
+
+- immutable `TexturePurpose` and source identity;
+- validated decoded width, height, format, and pixels;
+- the owners currently claiming it;
+- pending preparation, revision-scoped claim, or mutation reservation state, if any; and
+- zero or one committed physical binding.
+
+Source pixels remain resident while any owner or in-flight revision-scoped claim needs them. Final
+claim release removes the logical entry after any selected atlas mutation publishes.
+
+### Physical State
+
+For each `TexturePurpose`, `ResidentTextureAtlas` owns:
+
+- fixed 2048 x 2048 page records;
+- immutable page-generation identifiers;
+- committed entry placements and reconstructable free rectangles;
+- opaque renderer resource keys; and
+- one serialized placement/publication lane for that purpose.
+
+One committed placement stores the content bounds used for atlas sampling. The planner derives its
+allocation bounds by expanding those content bounds by the purpose's canonical gutter. Free-space
+reconstruction and overlap validation use allocation bounds; renderer binding and texture-page
+inspection use content bounds. Diagnostics report content occupancy and allocated occupancy
+separately so gutter cost is neither hidden nor mistaken for reusable space.
+
+Planner metadata, worker page pixels, and diagnostic bounds use a top-left pixel origin. Graphics
+readback must be normalized to that convention at the renderer-resource inspection boundary before
+Explorer overlays bounds; atlas policy does not carry parallel flipped coordinates.
+
+Different purposes may prepare and mutate independently. Mutations within one purpose serialize
+because they consume and replace the same placement snapshot. That ordering does not serialize
+pixel jobs: after a plan is accepted, replacement pages are independently materialized through a
+bounded page-build worker pool before their one atomic publication.
+
+Atomic page/binding publication is scoped to one purpose mutation. One owner requirement operation
+may await several independent purpose mutations and reports ready only when all succeed. If one
+purpose fails after another publishes, the scene remains unpublished; exact provisional withdrawal
+then reclaims the successfully prepared requirements through ordinary mutations. Cross-purpose
+device publication does not require a global atlas lock.
+
+### Execution Ownership
+
+`StaticLayerRealizer` executes on the browser main thread, but it is an authority and sequencing
+component, not a geometry or pixel processor. Its main-thread work is:
+
+- collect or validate logical requirement metadata;
+- launch geometry preparation and atlas preparation concurrently;
+- recheck `SceneInterestRevision` currentness;
+- publish complete static scene state; and
+- activate or withdraw the exact revision-scoped atlas requirements.
+
+`ResidentTextureAtlas` owns the remaining main-thread atlas work:
+
+- capture compact purpose-scoped placement snapshots;
+- dispatch metadata planning and changed-page build jobs;
+- create or release opaque renderer resources; and
+- atomically publish page layouts and logical bindings.
+
+Geometry transforms remain in the existing geometry worker. Texture decoding remains behind the
+existing `TexturePreparer`; retained prepared sources live in `ResidentTextureAtlas`. The pure
+metadata planner runs through a bounded worker pool and receives no pixel payloads. The pure page
+builder runs through a separately bounded pool because its pixel payload and workload differ. Both
+use one reusable closed-worker-pool adapter rather than domain-specific manager classes. One
+purpose's placement/publication lane awaits its planner result so it cannot plan from a stale
+snapshot; independent purpose lanes and independent replacement pages may use workers concurrently.
+Phase 3 selects both pool bounds from measurements taken with the end-to-end fixture. Phase 7 may
+tune them from browser-harness evidence. Diagnostics expose queue delay, worker duration, and
+transfer bytes throughout.
+
+### Commit Transaction
+
+```mermaid
+sequenceDiagram
+    participant Runtime as GameRuntime
+    participant Realizer as StaticLayerRealizer
+    participant Geometry as Geometry worker
+    participant Atlas as ResidentTextureAtlas
+    participant Prepare as Texture preparer
+    participant Layout as Layout worker pool
+    participant Pages as Page build worker pool
+    participant GPU as Renderer resources
+    participant Static as Static object system
+
+    Runtime->>Realizer: Realize resolved building source
+    Realizer->>Geometry: Bake geometry
+    Realizer->>Atlas: Prepare revision scoped owner requirements
+    Note over Realizer,Atlas: Geometry and atlas work proceed concurrently
+    Atlas->>Prepare: Prepare missing sources
+    Prepare-->>Atlas: Return prepared sources
+    Atlas->>Layout: Plan from metadata snapshot
+    Layout-->>Atlas: Return page outcomes
+    opt Rebuilt pages exist
+        Atlas->>Pages: Build changed pages
+        Pages-->>Atlas: Return complete page pixels
+        Atlas->>GPU: Create replacement resources
+        GPU-->>Atlas: Return created resources
+    end
+    Atlas->>Atlas: Publish pages and bindings
+    Atlas->>GPU: Release superseded resources
+    Atlas-->>Realizer: Report owner requirements ready
+    Geometry-->>Realizer: Return geometry
+    Realizer->>Realizer: Check scene interest revision
+    alt Revision is current
+        Realizer->>Static: Publish geometry and scene nodes
+        Realizer->>Atlas: Activate owner revision
+        Realizer-->>Runtime: Report static revision published
+        Runtime->>Runtime: Publish dynamic residents
+    else Revision is stale
+        Realizer->>Atlas: Withdraw exact owner and revision requirements
+        Realizer-->>Runtime: Report stale realization
+    end
+```
+
+### Requirement Lifecycle
+
+`ResidentTextureAtlas.prepareOwnerRequirements(owner, revision, facts)` synchronously adds one
+provisional revision-scoped claim and returns one composite handle:
+
+```ts
+interface AtlasRequirementHandle<TOwner extends string> {
+  readonly owner: TOwner;
+  readonly revision: SceneInterestRevision;
+  readonly completion: Promise<"ready" | "withdrawn">;
+}
+```
+
+The handle keeps exact cleanup identity and readiness together without exposing a mutation
+reservation. Its completion reports `ready` only after every required logical binding is committed
+and reports `withdrawn` when exact cleanup wins the race; preparation failures reject. Every pending
+handle therefore settles. Preparation does not replace or release an older published revision for
+that owner while the old scene may still draw.
+
+After the currentness check and successful static scene replacement,
+`activateOwnerRevision(handle)` records the new published revision and withdraws the previous
+published revision, if any. Once the handle completes as `ready`, activation is a nonthrowing
+claim-state transition. Withdrawal always has a stable release plan; after Phase 6, failure of an
+optional compaction attempt records the failure and commits that stable plan instead of retaining a
+dead claim or invalidating the newly published scene. Internal ownership or resource invariants
+still fail loudly. If currentness fails or static publication throws,
+`withdrawOwnerRevision(handle)` removes only the provisional revision. Scene-interest eviction
+carries the evicted dispatch revision to `StaticLayerRealizer`, which removes the static scene state
+and calls
+`evictOwnerRequirements(owner, evictedRevision)`. That authoritative main-thread operation
+synchronously snapshots and withdraws both the owner's currently published revision, when present,
+and the exact evicted provisional revision. It does not touch other owners or claims created by a
+later dispatch.
+
+These operations reuse `SceneInterestRevision`; they do not create a second generation type.
+Multiple revisions for one owner may overlap only while replacement is in flight, and multiple
+different owners may claim the same logical texture indefinitely. Any withdrawal becomes an
+ordinary atlas mutation and cannot drop a newer revision or another owner's claim.
+
+Repeating `prepareOwnerRequirements` for the same `(owner, revision)` and identical fact set returns
+the same handle; a different fact set for that identity is an invariant error. Exact handle
+withdrawal is idempotent because eviction and stale completion may race to withdraw the same
+provisional revision. Repeating activation of the already active handle is a no-op; activating a
+not-ready, withdrawn, or superseded handle fails loudly.
+
+Only the authoritative scene-interest eviction path may call `evictOwnerRequirements`. Stale
+completion and failure cleanup must use exact revision withdrawal, so delayed work can never erase a
+later dispatch for the same owner.
+
+`StaticObjectSystem.replaceObjects` provides the failure-atomic publication seam required by this
+ordering. It stages geometry, instance streams, renderables, and nodes under a resource owner derived
+from the existing `(owner, SceneInterestRevision)`, then swaps the stable scene-owner record and
+releases the prior revision. A staging failure rolls back the new resources and nodes without
+removing the prior owner record. This reuses the scene-interest revision and does not introduce
+another generation concept or component.
+
+Duplicate page arbitration does not survive this cutover. Concurrent claims for one logical key
+coalesce preparation, and purpose-scoped mutation serialization makes every later transaction plan
+against the latest committed/reserved snapshot. A redundant requirement records its independent
+owner/revision claim but performs no preparation, layout, pixel, or upload work. A page build that no
+longer matches its revision or mutation reservation is rejected rather than compared with another
+physical candidate.
+
+The planner classifies page outcomes:
+
+- **kept:** live set and placements are unchanged; retain the page ID and resource with no pixel
+  work;
+- **metadata-only:** a release creates free space but no live placement moves; update logical layout
+  metadata without rebuilding pixels;
+- **rebuilt:** insertion or compaction requires new pixels or moved placements; materialize and
+  publish a replacement generation; and
+- **dropped:** no live placement remains or compaction eliminates the page; release its resource
+  after publication.
+
+Metadata-only release may leave unreachable old texels in a free rectangle until that page is next
+rebuilt. No logical binding can sample them, and a later insertion overwrites its allocated region.
+Explorer occupancy and bounds derive from live placements, not incidental bytes remaining in free
+space.
+
+A rebuilt page is materialized completely from retained sources, so unchanged textures on that
+changed page are blitted again. This is not duplicate preparation: untouched pages perform no work,
+and no logical source is decoded again during its resident lifetime.
+
+### Placement and Compaction Policy
+
+The pure planner evaluates a purpose-scoped mutation in this order:
+
+1. Remove released keys from the virtual snapshot and reconstruct free rectangles.
+2. Preserve every unaffected placement.
+3. Insert new keys into existing free rectangles with deterministic best-short-side fit,
+   preferring the page that leaves the least unusable area.
+4. If insertion would allocate a page, or release created fragmented low-occupancy pages, select a
+   bounded compatible cohort for a compaction attempt.
+5. Repack the cohort plus unplaced incoming keys largest-first.
+6. Accept the compaction only when it:
+   - avoids allocating a page that the stable insertion attempt required; or
+   - reduces the number of existing pages by at least one.
+7. Break equivalent plans by fewer moved source bytes, then larger maximum free rectangle, then
+   stable page/key ordering.
+8. If no beneficial attempt fits within the work budget, retain the stable insertion result.
+
+The planner preserves the validated stable insertion/release result alongside any accepted
+compaction alternative. If materializing the optional alternative fails, atlas residency may execute
+the stable result instead. A stable insertion can still fail if its required page cannot be built or
+uploaded; that failure rejects and rolls back the provisional requirement operation. A stable
+release requires no replacement pixels, so ownership withdrawal is not blocked by failed optional
+compaction.
+
+The compaction cohort starts with pages directly affected by release or failed insertion, then adds
+the sparsest compatible pages in deterministic order until the measured rebuild budget is reached.
+Phase 6 selects and records the initial budget using the Phase 0 baseline and Phase 3 worker
+measurements. The budget is an explicit policy constant and diagnostic value, not an implicit
+timeout.
+
+This means compaction is considered on every relevant commit while page movement remains bounded
+and justified by a concrete page-count result.
+
+### Page Identity
+
+Page IDs identify one immutable published physical generation, not a landblock or source job.
+Create concise runtime-owned IDs such as:
+
+```text
+page:object-direct-color:42
+```
+
+A rebuilt page receives a new ID. The atomic transaction redirects logical bindings to the new
+generation and then releases superseded pages. IDs are not recycled during one runtime session;
+device memory and page slots are.
+
+## Phased Implementation
+
+### Phase 0: Baseline, Policy Census, and Contract Dry Run
+
+Status: Pending.
+
+#### Deliverables
+
+- Record a checked-in baseline table in this plan covering:
+  - active pages and bytes by purpose;
+  - logical keys and decoded source bytes represented by current building jobs (the current runtime
+    does not retain those sources);
+  - occupancy and free-rectangle fragmentation;
+  - duplicate texture dependencies across a radius-1 building load;
+  - main-thread logical requirement collection time;
+  - building texture preparation and packing worker timings; and
+  - pages released across an unload/reload traversal.
+- Add temporary or durable diagnostics needed to collect those facts without retaining page pixels.
+- Confirm the maximum prepared object texture dimensions and guttered dimensions fit 2048 pages.
+- Dry-run the target transaction against:
+  - two concurrent landblocks sharing texture keys;
+  - eviction while source preparation is pending;
+  - eviction after page build but before publication;
+  - replacement of the same owner under a newer scene-interest revision; and
+  - shutdown with in-flight page builds.
+
+#### Acceptance Criteria
+
+- The baseline demonstrates current duplicate preparation/packing and stranded page capacity with
+  concrete counts.
+- Every async scenario has one named currentness owner and cleanup path.
+- No implementation phase depends on reading page pixels from WebGL.
+- No purpose-padded source dimension exceeds the fixed page contract.
+
+#### Task Checklist
+
+- [ ] Capture the current Explorer atlas snapshot for a representative radius-1 load.
+- [ ] Add focused non-asset fixtures that reproduce duplicate keys and fragmented pages.
+- [ ] Update the supersession and concessions log if the dry run changes phase boundaries.
+
+#### Decisions and Course Corrections
+
+- Pending implementation.
+
+### Phase 1: Fixed-Page Stable Layout Core
+
+Status: Pending.
+
+#### Deliverables
+
+- Add a focused pure layout module under `apps/holtburger-3d/src/lib/game/textures/atlas/`.
+- Add a closed metadata layout-worker protocol around that pure module. Generalize the existing
+  closed-worker client into the reusable bounded pool primitive used by both future worker job
+  types. The layout worker input contains placement metadata only; no decoded pixel buffers cross
+  this boundary. Phase 1 uses an injected test bound; Phase 3 selects the initial production bound.
+- Define commented, immutable contracts for:
+  - logical entry dimensions and purpose;
+  - committed page layouts;
+  - content placement bounds and purpose-derived allocation bounds;
+  - reconstructed free rectangles;
+  - insertion results;
+  - complete atlas mutation plans.
+- Derive format, gutter, wrap, and padded dimensions from `TexturePurpose`; do not repeat canonical
+  preparation as independently editable placement or job fields.
+- Port only the proven legacy free-rectangle primitives:
+  - largest-first deterministic entry ordering;
+  - best-short-side-fit selection;
+  - intersecting free-rectangle splitting;
+  - contained-free-rectangle pruning; and
+  - free-space reconstruction from locked placements.
+- Fix page dimensions at `STATIC_OBJECT_TEXTURE_PAGE_SIZE`.
+- Make `TexturePurpose` the only bucket key.
+- Define the exhaustive packed-object purpose subset
+  (`ObjectDirectColor`, `ObjectIndex8`, `ObjectIndex16`, and `ObjectPalette`) so unsupported terrain,
+  array, generated, and regional-detail purposes fail at the residency boundary. This is a
+  type-safe capability restriction, not a second compatibility key.
+- Implement stable insertion, logical release, hole reuse, empty-page deletion, and new-page
+  allocation without pixel data or runtime mutation.
+- Deliberately exclude live-placement movement and compaction scoring until Phase 6.
+
+#### Acceptance Criteria
+
+- Identical inputs always produce byte-for-byte equivalent plan snapshots.
+- Layout-worker requests and results preserve an opaque correlation token; Phase 3 gives that token
+  reservation semantics when `ResidentTextureAtlas` exists.
+- Different purposes can never appear on one page.
+- No placement or worker contract can disagree with preparation derived from its `TexturePurpose`.
+- Existing live placements remain unchanged.
+- Released rectangles are immediately reusable.
+- Content bounds, padded allocation bounds, and reconstructed free rectangles use one top-left pixel
+  coordinate convention and never overlap.
+- A page with no live placements is dropped from the planned state.
+- Oversized sources fail loudly with the logical key, padded dimensions, purpose, and page size.
+- Tests cover adversarial rows where the current shelf algorithm wastes space but best-fit does not.
+
+#### Task Checklist
+
+- [ ] Implement fixed-page placement contracts and validation.
+- [ ] Implement free-space reconstruction and stable insertion.
+- [ ] Define the metadata-only layout worker protocol and reusable bounded pool adapter.
+- [ ] Port/rewrite focused legacy algorithm tests against the smaller contracts.
+- [ ] Add property-style invariants for bounds, overlap, uniqueness, and determinism without adding
+      a new dependency unless the existing test stack cannot express them cleanly.
+
+#### Decisions and Course Corrections
+
+- Pending implementation.
+
+### Phase 2: `ResidentTextureAtlas` Claim and Source Model
+
+Status: Pending.
+
+#### Deliverables
+
+- Add `ResidentTextureAtlas` as the sole new stateful atlas domain component rather than enlarging
+  `TextureManager.upsertAtlasPage`.
+- Keep `TextureManager` as the broader texture facade and establish delegation seams for packed
+  atlas binding lookup and diagnostics without switching the active candidate path.
+- Carry the existing `SceneInterestRevision` through building retain, replacement, stale rejection,
+  and exact cleanup. Do not introduce a parallel building generation type.
+- Keep the following indexes as private `ResidentTextureAtlas` state rather than extracting claim or
+  cache services:
+  - `(owner, SceneInterestRevision) -> AssetTextureKey set`;
+  - `owner -> published SceneInterestRevision`, when one is active;
+  - `AssetTextureKey -> owner/revision claims`;
+  - `AssetTextureKey -> retained prepared source`;
+  - `AssetTextureKey -> current binding`, when published.
+- Keep `TexturePreparer` responsible only for preparation, strict fact/source validation, and
+  existing in-flight coalescing by `AssetTextureKey`.
+- Make `ResidentTextureAtlas` retain the prepared result and release it after the final owner and
+  pending revision-scoped requirement withdraw.
+- Define the composite `AtlasRequirementHandle` plus prepare, activate, and exact-withdraw semantics
+  so an in-flight replacement cannot release the still-visible revision or another owner's claim.
+- Define authoritative `evictOwnerRequirements` separately from stale exact-revision withdrawal.
+- Define the replacement static-object logical texture-requirement contract beside the active
+  physical-page artifact. Do not migrate the active producer or consumer until the Phase 5 clean
+  cutover.
+
+#### Acceptance Criteria
+
+- A second owner claiming a resident key causes no host pixel request.
+- Concurrent claims for one missing key share one preparation operation.
+- Releasing one of multiple owners retains the source and binding.
+- Final release makes the logical source eligible for removal without affecting a newer owner
+  revision in the isolated residency model.
+- A stale revision cannot release claims belonging to a newer revision.
+- Preparing a replacement revision retains the previously published revision until explicit
+  activation after scene replacement.
+- Activating a revision withdraws only the previous published revision for the same owner.
+- Preparation failure or withdrawal while preparation is pending removes only that provisional
+  revision; a late prepared result is retained only if another live claim needs it.
+- Every requirement handle settles as ready, withdrawn, or failed during replacement, eviction, and
+  destroy.
+- Same-revision preparation returns the same handle only for an identical fact set; conflicting
+  facts fail loudly.
+- Eviction and stale completion may both request exact withdrawal without double-releasing logical
+  or physical resources.
+- Authoritative eviction removes the evicted provisional revision and any older published revision
+  for that owner while preserving every other owner's claims.
+- No page layout or renderer resource is required to unit-test claim/source lifetime.
+- `TexturePreparer` contains no gameplay claim or post-preparation residency state.
+- No separate claim registry or resident source-cache object exists.
+
+#### Task Checklist
+
+- [ ] Introduce revision-scoped owner-claim and logical requirement contracts.
+- [ ] Implement and test provisional preparation, activation, and exact withdrawal transitions.
+- [ ] Add `ResidentTextureAtlas` with private claim and resident-source indexes.
+- [ ] Add the `TextureManager` delegation seam without switching the active path.
+- [ ] Define and test the replacement logical requirement contract without switching active
+      building artifacts.
+- [ ] Update dependency collection to produce complete `AssetTextureFact` values.
+- [ ] Add concurrent preparation, replacement, stale cleanup, and final release tests.
+
+#### Decisions and Course Corrections
+
+- Pending implementation.
+
+### Phase 3: Page Build and `ResidentTextureAtlas` Fixture
+
+Status: Pending.
+
+#### Deliverables
+
+- Add purpose-agnostic fixed-page build jobs beside the active building shelf pack job. The new jobs
+  execute through a bounded page-build worker pool and become the replacement path only in Phase 5.
+- A closed page-build job carries:
+  - target page generation and purpose;
+  - complete placements;
+  - every required retained source payload;
+  - fixed page size.
+- Materialize cleared fixed-size page pixels and gutters in the worker.
+- Dispatch one independent job per rebuilt page and await the complete transaction set before GPU
+  publication. Kept, metadata-only, and dropped pages never enter the pool.
+- Back both layout and page-build clients with one reusable bounded closed-worker-pool primitive;
+  keep their job types and pool bounds separate.
+- Preserve retained CPU sources when dispatching:
+  - copy only source buffers needed by selected replacement pages before transfer; and
+  - record copied source bytes in diagnostics.
+- Implement renderer-neutral transactional publication as focused private functions inside
+  `ResidentTextureAtlas`, not as another stateful publisher component:
+  - create every new texture resource first;
+  - release all newly created resources if any creation fails;
+  - mutate page and logical-binding maps only after all resources exist; and
+  - release superseded resources only after the new state is complete.
+- Generate concise runtime page IDs independent of landblock/source namespaces.
+- Compose the Phase 1 layout core, Phase 2 claim/source model, pure page builder, and internal
+  publication functions into an end-to-end `ResidentTextureAtlas` fixture behind fake preparer and
+  renderer ports.
+- Exercise claim, prepare, plan, build, publish, replacement, release, rollback, and shutdown without
+  routing production building commits through the fixture.
+- Select explicit initial layout-planner and page-build pool bounds from measured fixture queue
+  delay, job duration, transfer bytes, and peak copied-source bytes.
+
+#### Acceptance Criteria
+
+- Worker output is a complete 2048 x 2048 page with correct purpose format and gutters.
+- Multiple rebuilt pages in one transaction can materialize concurrently up to the configured pool
+  bound; their publication remains one atomic operation.
+- Page building never detaches or mutates the retained authoritative source buffers.
+- A multi-page upload failure leaves old resources and bindings unchanged and releases partial new
+  resources.
+- Successful publication changes every binding affected by one purpose mutation together.
+- Renderer draw-time lookup observes either the old complete state or the new complete state.
+- A stale layout-worker result is rejected by its purpose-lane reservation without mutating atlas
+  state.
+- Activating a ready revision uses the stable release plan and cannot strand the newly published
+  scene behind optional reclamation work.
+- Kept and metadata-only pages produce no page-build worker job or replacement upload.
+- Fixture inspection proves replacement pixels and live bounds use the same coordinate convention.
+- The fixture proves a complete resident atlas lifecycle with no production cutover or dual-mode
+  runtime path.
+- Transactional publication, claims, retained sources, and mutation lanes do not escape
+  `ResidentTextureAtlas` as independently stateful collaborators.
+
+#### Task Checklist
+
+- [ ] Define page-build worker protocol and transfer accounting.
+- [ ] Define planner and page-build pool composition, queue diagnostics, and shutdown.
+- [ ] Reuse the proven gutter blit in the new pure page builder without carrying shelf cursor state.
+- [ ] Implement transaction staging, resource rollback, and atomic map publication.
+- [ ] Add worker and fake-resource failure tests.
+- [ ] Use runtime-owned page IDs throughout the fixture.
+- [ ] Compose and test the end-to-end `ResidentTextureAtlas` fixture.
+- [ ] Verify no claim, source-cache, planner, builder, or publisher manager was introduced.
+- [ ] Record the initial bounded worker-pool settings and supporting measurements.
+
+#### Resteering Gate
+
+Before Phase 4:
+
+- Verify claims, retained sources, mutation lanes, and publication remain cohesive
+  `ResidentTextureAtlas` internals while pure planner and builder functions remain stateless.
+- Verify no retained source buffer is accidentally transferred or duplicated beyond the measured
+  closed-job copy.
+- Dry-run Phases 4 through 8 against the fixture contracts.
+- Stop if production integration would require a second binding model, a second currentness
+  generation, or renderer fallback behavior.
+
+#### Decisions and Course Corrections
+
+- Pending implementation.
+
+### Phase 4: `StaticLayerRealizer`
+
+Status: Pending.
+
+#### Deliverables
+
+- Add `StaticLayerRealizer` as the sole new stateful orchestration domain component. Inject narrow
+  geometry, `ResidentTextureAtlas`, static-publication, and currentness ports rather than introducing
+  manager wrappers around them.
+- Model its input as resolved, classified building source plus the existing
+  `SceneInterestRevision`.
+- Collect logical requirements and launch geometry baking and atlas requirement preparation
+  concurrently.
+- Add explicit pending realization state keyed by layer and `SceneInterestRevision` and carrying its
+  `AtlasRequirementHandle`; atlas mutation reservations remain private to `ResidentTextureAtlas`.
+- Recheck currentness after atlas readiness and before geometry/node publication.
+- Activate the exact revision only after successful static publication; otherwise withdraw only that
+  provisional owner/revision requirement set.
+- Accept the evicted `SceneInterestRevision` from `SceneInterestCommitCoordinator` so eviction can
+  remove static state, the evicted provisional requirements, and any older published revision for
+  that owner.
+- Return a typed published-or-stale result to `GameRuntime`; `StaticLayerRealizer` does not own or
+  publish dynamic residents.
+- Require the injected static-publication port to replace one owner atomically or leave its previous
+  revision unchanged.
+- Model shutdown and replacement while geometry, preparation, planning, page building, or
+  publication is pending.
+- Test `StaticLayerRealizer` against the Phase 3 fixture and fake static-publication port.
+- Do not switch the production `StandardCommitPipeline`, artifact, or static install route in this
+  phase.
+
+#### Acceptance Criteria
+
+- `StaticLayerRealizer` tests prove geometry and missing texture preparation overlap rather than
+  forming a serialized sum.
+- A stale realization publishes neither nodes nor geometry and cannot remove a newer revision claim.
+- Static publication cannot occur until the exact atlas claim is ready and current.
+- A replacement keeps the previous published revision claimed until the new static scene publishes.
+- Static publication failure withdraws the provisional revision and preserves the previous
+  published scene and atlas revision.
+- Eviction uses the dedicated authoritative owner-eviction operation; stale and failure cleanup
+  remain exact-revision operations.
+- Replacement and shutdown settle all realizer-owned work and exact atlas requirements.
+- The active production building route remains unchanged.
+- `StaticLayerRealizer` contains sequencing state only and does not duplicate atlas, source,
+  renderer-resource, scene-interest, or static-owner state.
+- Dynamic publication remains absent from the realizer and its test ports.
+
+#### Task Checklist
+
+- [ ] Define the pending realization/currentness contract.
+- [ ] Implement `StaticLayerRealizer` against injected ports.
+- [ ] Prove concurrent geometry and atlas preparation under controlled scheduling.
+- [ ] Add stale completion, replacement, failure, and shutdown tests.
+- [ ] Route exact revision identity through the scene-interest eviction callback contract.
+- [ ] Define the typed realization completion consumed by `GameRuntime`.
+- [ ] Prove static-publication rollback ordering through the injected fake port.
+- [ ] Document the exact production ownership moves required by Phase 5.
+
+#### Decisions and Course Corrections
+
+- Pending implementation.
+
+### Phase 5: Clean Production Atlas Cutover
+
+Status: Pending.
+
+#### Deliverables
+
+- Split the building source pipeline so it returns resolved, classified building source rather than
+  realizing geometry and texture pages inside `StandardCommitPipeline`.
+- Replace the building branch of the `CommitBundle` handoff with a resolved-source bundle carrying
+  the classified building source and dynamic residents. Keep terrain and environment handoffs
+  unchanged.
+- Have `GameRuntime` route that source bundle and its existing dispatch revision into
+  `StaticLayerRealizer`; collect logical texture facts synchronously before transferring geometry
+  buffers.
+- Split the paired `BuildingWorkers` facade: move geometry-worker ownership and shutdown into the
+  tested `StaticLayerRealizer`; `ResidentTextureAtlas` owns separately bounded layout and page-build
+  pool instances backed by the shared adapter primitive.
+- Route production logical requirements through `ResidentTextureAtlas`.
+- Switch `TextureManager` packed-atlas binding lookup and page diagnostics to the injected
+  `ResidentTextureAtlas`, including page-resource inspection lookup, in the same cutover; standalone
+  textures, generated textures, and arrays remain on their existing paths.
+- Cut `StaticObjectLayerArtifact` over from physical `texturePages` to logical texture requirements,
+  and replace same-artifact physical coverage with logical requirement coverage.
+- Replace `StaticObjectSystem.installObjects` page installation with revision-scoped atlas
+  readiness.
+- Remove the `TextureManager` dependency and packed-page installation/release behavior from
+  `StaticObjectSystem`.
+- Replace destructive-first `StaticObjectSystem.installObjects` behavior with failure-atomic
+  `replaceObjects` staging. Use revision-scoped geometry and instance resource ownership derived from
+  the existing `SceneInterestRevision`; roll back staged nodes/resources before surfacing failure.
+- Derive the building geometry/instance resource namespace from the stable layer owner and existing
+  `SceneInterestRevision`; remove `StandardCommitPipeline`'s independent static namespace counter.
+- Remove packed-atlas ownership from `TextureManager`'s generic owner leases. Owner-wide
+  `TextureManager.dropOwner` continues to govern its non-atlas resources; building atlas eviction
+  flows through `StaticLayerRealizer` and the dedicated atlas owner-eviction operation.
+- Keep dynamic residents in the pending `GameRuntime` source bundle and publish them through the
+  existing owner-scoped path only after `StaticLayerRealizer` reports successful current static
+  publication. Stale or failed static realization publishes no dynamic residents.
+- Route asynchronous realization failure back through the existing scene-availability failure
+  reporting with the same layer and revision; stale failures remain silent.
+- Rehome building worker and lifecycle diagnostics from `StandardCommitPipeline` to the realizer and
+  atlas results that now produce them.
+- Move shared `TexturePreparer` shutdown ownership to `GameRuntime`. Stop scene dispatch and
+  realization, settle atlas handles and worker pools, release texture consumers, then destroy the
+  preparer exactly once.
+- Publish geometry and scene nodes only after all required logical bindings are ready.
+- Apply Phase 1 stable insertion and release:
+  - place missing sources into free rectangles before allocating a page;
+  - remove a final released claim's live placement;
+  - expose its rectangle to later insertion; and
+  - drop a page when its final live placement disappears.
+- Cut over in one phase. Delete candidate arbitration from the active route rather than retaining a
+  dual resident/candidate mode.
+- Defer movement of still-live entries and multi-page compaction to Phase 6.
+
+#### Acceptance Criteria
+
+- Two landblock commits sharing texture keys decode and publish each shared key once.
+- The second commit acquires an independent claim on the existing binding.
+- A resident-only commit performs no texture preparation, layout rebuild, pixel build, candidate
+  upload, or duplicate-page arbitration.
+- Evicting either landblock preserves textures still claimed by the other.
+- Missing new textures insert into existing compatible pages before allocating pages.
+- A released rectangle accepts a later compatible source without allocating another page.
+- A stale realization publishes neither nodes nor geometry and cannot remove a newer revision claim.
+- Production replacement retains the previous atlas revision until the new static scene publishes.
+- Production eviction withdraws both the supplied dispatch revision and any older published revision
+  for that owner, without affecting other owners or later dispatches.
+- Dynamic residents retain their existing owner-scoped lifecycle and are not published ahead of the
+  corresponding static realization.
+- A current realization failure reports once, publishes no static or dynamic scene state, and
+  withdraws its provisional atlas requirements.
+- Failed replacement preserves the previous static owner record and its atlas revision.
+- Rendering never reaches `getAtlasBinding` for an unready required key.
+- `StaticObjectSystem` owns no texture page or atlas claim lifecycle.
+- Owner-wide `TextureManager.dropOwner` cannot withdraw revision-scoped atlas requirements.
+- Runtime shutdown settles every requirement handle, terminates each worker pool, and destroys the
+  shared `TexturePreparer` exactly once.
+
+#### Task Checklist
+
+- [ ] Split resolved building source preparation from runtime-owned realization.
+- [ ] Rewire production realization through `StaticLayerRealizer` and `ResidentTextureAtlas`.
+- [ ] Update static installation and eviction sequencing.
+- [ ] Implement and failure-test transactional `StaticObjectSystem.replaceObjects`.
+- [ ] Cut packed-atlas lookup and diagnostics over to the injected `ResidentTextureAtlas`.
+- [ ] Replace the building `CommitBundle` branch and remove building realization dependencies from
+      `StandardCommitPipeline`.
+- [ ] Rewire preparer and worker shutdown ownership with exact-once tests.
+- [ ] Remove physical-page fields from active building commit contracts.
+- [ ] Connect stable insertion, logical release, hole reuse, and empty-page deletion.
+- [ ] Add overlapping commit, stale completion, replacement, and shutdown integration tests.
+
+#### Resteering Gate
+
+Before Phase 6:
+
+- Measure main-thread logical requirement collection, mutation snapshot, resource creation, and map
+  publication separately from worker queue delay.
+- Verify source RAM matches currently claimed logical textures plus bounded in-flight work.
+- Verify no source decode, layout job, or page build occurs for an unchanged resident-only commit.
+- Verify only authoritative scene-interest eviction reaches owner-scoped atlas eviction; stale
+  cleanup remains exact-revision withdrawal.
+- Dry-run Phases 6 through 8 against the production contracts.
+- Stop if correct stale rollback requires broad revision folklore or if binding readiness leaks into
+  renderer hot-path fallback logic.
+
+#### Decisions and Course Corrections
+
+- Pending implementation.
+
+### Phase 6: Routine Bounded Compaction
+
+Status: Pending.
+
+#### Deliverables
+
+- Extend the stable planner to identify deterministic compaction candidates and score bounded
+  compatible cohorts during every relevant retain/release mutation.
+- Return the validated stable result together with any selected compaction alternative so
+  publication has an explicit non-optimizing fallback.
+- Select and record the initial rebuild budget using the Phase 0 baseline and Phase 3 worker
+  measurements.
+- Rebuild selected pages only when the accepted plan avoids allocating a page or eliminates an
+  existing page.
+- Break equivalent plans by fewer moved source bytes, larger useful free rectangles, then stable
+  page/key ordering.
+- Serialize mutations per `TexturePurpose`; permit independent purposes and independent rebuilt
+  pages to progress concurrently.
+- Treat page elimination and owner release as ordinary transaction outputs.
+- If optional compaction build or upload fails during withdrawal, record the failed attempt and
+  commit the already validated stable release plan.
+
+#### Acceptance Criteria
+
+- Repeated load/unload traversal reaches a bounded steady-state page count for a stable working set.
+- Reusable holes continue to accept compatible arrivals without forcing compaction.
+- Fragmented live pages consolidate when doing so frees a page within budget.
+- No-benefit mutations preserve existing placements and upload no replacement page.
+- Failed optional compaction does not retain a dead owner claim or block stable release.
+- Failed insertion compaction may use the stable new-page plan; failure of that required plan rejects
+  the provisional requirement operation without changing committed bindings.
+- Compaction never crosses purpose boundaries.
+- Final release of a purpose's last entries drops all pages and retained sources for that purpose.
+
+#### Task Checklist
+
+- [ ] Implement bounded cohort selection and deterministic plan scoring.
+- [ ] Connect bounded compaction evaluation to ordinary retain/release flow.
+- [ ] Add deterministic per-purpose mutation lanes, revision checks, and reservation checks.
+- [ ] Add churn fixtures that alternate overlapping owner sets.
+- [ ] Add failed-compaction fallback tests for insertion and withdrawal.
+- [ ] Add steady-state page-count and no-unnecessary-rebuild assertions.
+
+#### Decisions and Course Corrections
+
+- Pending implementation.
+
+### Phase 7: Diagnostics, Explorer, and Lifecycle Audit
+
+Status: Pending.
+
+#### Deliverables
+
+- Replace candidate-arbitration diagnostics with direct residency diagnostics:
+  - resident logical source count and bytes;
+  - provisional and published revision-claim counts;
+  - pending source preparations;
+  - avoided resident preparations;
+  - active pages and device bytes by purpose;
+  - live content, allocated, free, and largest-free-rectangle area;
+  - insertion reuse count;
+  - compaction attempts and accepted plans;
+  - failed compaction materializations and stable-plan fallbacks;
+  - pages avoided and eliminated;
+  - source bytes copied to page workers;
+  - page bytes uploaded and released; and
+  - stale or failed transactions.
+- Update Explorer page entries and modal to show only committed live placements.
+- Show content occupancy, allocated occupancy, fragmentation, and largest-free-region metrics with
+  explicit labels.
+- Ensure page inspection remains safe when a page generation is replaced while the modal is open.
+- Remove `publishedAtlasCandidates`, `canonicalAtlasReplacements`, candidate occupancy, and
+  candidate placement styling after all consumers migrate.
+- Exercise representative radius changes, traversal, unload/reload, and shutdown in the Explorer or
+  a noninteractive browser harness.
+- Compare final metrics with the Phase 0 baseline.
+- Audit:
+  - host preparation calls;
+  - worker source-copy bytes;
+  - page-build count and duration;
+  - active and peak page bytes;
+  - retained source bytes;
+  - logical requirement collection and metadata layout-planning time;
+  - main-thread transaction time;
+  - stale work cleanup; and
+  - preparer and worker-pool shutdown counts; and
+  - resource counts after shutdown.
+- Record measured concessions and tune explicit compaction and worker-pool bounds only from observed
+  results.
+
+#### Acceptance Criteria
+
+- Diagnostics distinguish hole reuse, no-op retain, page allocation, compaction, and release.
+- Explorer never presents candidate entries because that concept no longer exists.
+- A replaced page closes or reports its generation as unavailable without inspecting a different
+  page under a recycled ID.
+- Source RAM and device-page byte totals agree with internal records.
+- Shared textures are not decoded or prepared again while resident. Page pixels are rebuilt only
+  when insertion or compaction changes that physical page.
+- Page count does not grow monotonically across repeated traversal of a stable region.
+- Compaction demonstrably eliminates or avoids pages; it does not merely improve visual occupancy.
+- Main-thread atlas work remains metadata-scale.
+- All renderer resources and resident source bytes return to baseline after complete eviction and
+  destroy.
+- No permanent test depends on local game archives.
+
+#### Task Checklist
+
+- [ ] Define replacement-native diagnostic DTOs.
+- [ ] Migrate `GameRuntime` and Explorer directly to those DTOs.
+- [ ] Update sorting/filtering labels where candidate terminology is removed.
+- [ ] Add diagnostic accounting tests around each transaction result.
+- [ ] Run the standard unit/type/lint/build suite.
+- [ ] Run a noninteractive browser or Explorer harness where available.
+- [ ] Capture before/after residency metrics in this plan.
+- [ ] Record any remaining budget or worker-copy debt.
+
+#### Resteering Gate
+
+Before cleanup:
+
+- Reassess whether full-page rebuilds remain adequate.
+- Consider partial page upload only if measured worker copy/upload cost is now the dominant issue.
+- Do not add partial upload merely because it is theoretically cheaper.
+- Confirm every compatibility field and old candidate test has a deletion target.
+
+#### Decisions and Course Corrections
+
+- Pending implementation.
+
+### Phase 8: Cleanup and Architecture Closeout
+
+Status: Pending.
+
+#### Deliverables
+
+- Delete:
+  - `packBuildingTextures` shelf placement;
+  - the paired `BuildingWorkers` facade after geometry and atlas worker ownership separate;
+  - building-specific texture page worker contracts superseded by the atlas page builder;
+  - landblock-local page ID construction;
+  - the pipeline-owned static namespace counter superseded by revision-scoped realization identity;
+  - candidate-page maps and scoring;
+  - same-artifact physical coverage validation;
+  - obsolete arbitration tests and diagnostics; and
+  - dead imports, types, comments, and plan language implying independent packing remains current.
+- Keep purpose preparation and gutter blitting only in their new canonical homes.
+- Remove redundant per-placement `TexturePreparation` data when no draw-time consumer requires it;
+  page building derives canonical preparation from `TexturePurpose`.
+- Reassess `TextureManager` file size and ensure atlas policy resides in a focused component.
+- Update `apps/holtburger-3d/ARCHITECTURE_AUDIT.md`.
+- Update this plan status, progress, decisions, concessions, and debt.
+
+#### Acceptance Criteria
+
+- One runtime atlas residency path exists.
+- No candidate-page compatibility mode or vestigial shelf abstraction remains.
+- Exactly two new stateful domain components remain: `ResidentTextureAtlas` and
+  `StaticLayerRealizer`.
+- Source ownership, placement planning, pixel building, device publication, and renderer lookup have
+  distinct testable boundaries.
+- Architecture docs describe the resident fixed-page model and its async currentness contract.
+- The complete validation matrix passes without new warnings.
+
+#### Task Checklist
+
+- [ ] Remove superseded runtime and test code.
+- [ ] Run dead-code analysis and formatter checks.
+- [ ] Update architecture documentation.
+- [ ] Perform a final diff and lifecycle audit.
+- [ ] Mark the plan complete only after all debt is resolved or explicitly accepted.
+
+#### Decisions and Course Corrections
+
+- Pending implementation.
+
+## Validation Matrix
+
+Run the smallest relevant checks during each phase and the full matrix at steering and closeout
+gates:
+
+```bash
+cd apps/holtburger-3d
+npm run test:ts
+npm run check
+npm run lint:ts
+npm run lint:dead
+npm run build
+npm run check:terrain-shader
+```
+
+When Rust/Tauri contracts are unchanged, Rust checks are not required for every TypeScript-only
+phase. Run them at final closeout or whenever a Rust boundary changes:
+
+```bash
+cd apps/holtburger-3d
+npm run check:rust
+npm run lint:rust
+```
+
+Do not run the interactive TUI client. Runtime-asset observations belong in temporary diagnostics,
+the Explorer, or a noninteractive harness and must not become permanent archive-dependent tests.
+
+## Risks and Mitigations
+
+### Stale Atlas Publication Removes a Newer Revision
+
+**Risk:** An older asynchronous realization finishes after the same landblock has been evicted and
+requested again. Owner-wide rollback could remove the newer claim.
+
+**Mitigation:** Every prepared requirement set carries the existing `SceneInterestRevision`, and
+atlas page builds carry a private purpose-lane mutation reservation. Activation and rollback mutate
+only that `(owner, revision)` claim and matching reservation. The scene-interest eviction callback
+also carries the exact evicted dispatch revision into the dedicated authoritative owner-eviction
+operation, which may additionally remove the older published revision. Stale completions cannot call
+that broader operation. Tests must force both completion orders. Idempotence of repeated input is not
+treated as protection against out-of-order async completion.
+
+### Atomicity Across Multiple Replacement Pages
+
+**Risk:** Uploading page replacements one at a time could expose mixed old/new bindings or leave a
+partial state after allocation failure.
+
+**Mitigation:** Create all new resources before mutating page/binding maps. Roll back the new
+resources on any failure. Publish maps synchronously, then release old resources.
+
+### CPU Source Retention Becomes an Unbounded Cache
+
+**Risk:** Prepared sources survive after gameplay no longer claims them.
+
+**Mitigation:** Source lifetime follows exact logical claims plus in-flight revision-scoped claims. Final
+release removes the source. Track source bytes directly and test complete eviction/destroy.
+
+### Worker Transfer Detaches Authoritative Sources
+
+**Risk:** Transferring retained `ArrayBuffer` instances would destroy the CPU backing needed for
+future repacks.
+
+**Mitigation:** Copy only the selected page build's source payloads before transfer. Measure copied
+bytes. A persistent worker-side mirror is deferred unless measurements justify its complexity.
+
+### Shared Texture Preparer Has Competing Lifecycle Owners
+
+**Risk:** After atlas extraction, both `TextureManager` and `ResidentTextureAtlas` consume the same
+preparer. Child-owned shutdown could terminate it while another consumer is active or destroy it
+twice.
+
+**Mitigation:** `GameRuntime` owns the preparer lifecycle. Shutdown first stops dispatch and
+realization, settles atlas work and texture consumers, then destroys the preparer exactly once.
+Focused tests assert ordering and destroy counts.
+
+### Metadata-Only Release Leaves Old Free-Region Pixels
+
+**Risk:** Avoiding a page rebuild on release leaves bytes from the former entry in an unallocated
+rectangle, which can make raw page readback look occupied.
+
+**Mitigation:** Bindings and occupancy derive exclusively from live placement metadata, so those
+bytes are unreachable to rendering. Explorer draws live bounds and may mask free rectangles if the
+raw preview is misleading. New insertion overwrites its allocated region; compaction rebuilds the
+complete selected page.
+
+### Routine Compaction Causes Upload Churn
+
+**Risk:** Evaluating compaction on every mutation could rebuild pages merely to improve occupancy.
+
+**Mitigation:** Planning is metadata-only. Publication requires a concrete page-count benefit and
+must fit the explicit rebuild budget. Equivalent page counts prefer fewer moved bytes and stable
+placements. Withdrawal retains its validated stable release plan; optional compaction failure
+commits that plan and records the rejected optimization.
+
+### Stable Insertion Accumulates Fragmentation
+
+**Risk:** Hole reuse alone can leave many nonempty pages that never become empty.
+
+**Mitigation:** Releases and failed insertions seed deterministic compaction cohorts. The planner
+may add sparse compatible pages within budget and accepts a repack when it eliminates a page.
+
+### Atlas Work Serializes or Saturates the Worker Budget
+
+**Risk:** One global lane or an over-eager worker pool could respectively serialize all texture work
+or starve geometry/source preparation.
+
+**Mitigation:** Serialize only conflicting placement/publication decisions within one
+`TexturePurpose`. Metadata layout jobs and rebuilt page jobs use separately bounded worker pools;
+source preparation and geometry baking remain concurrent. Phase 3 selects the initial bounds from
+the end-to-end fixture, and Phase 7 tunes them only from browser-harness evidence. Diagnostics record
+queue delay, job duration, and transfer bytes before any pool expansion.
+
+### Execution Boundaries Proliferate into Managers
+
+**Risk:** Treating every participant lane as a component would split cohesive atlas state across a
+claim registry, source cache, planner service, page-builder service, and publisher. That shape would
+increase lifecycle coordination while obscuring the one authority allowed to mutate bindings.
+
+**Mitigation:** Keep claims, retained sources, per-purpose lanes, and publication inside
+`ResidentTextureAtlas`. Keep `StaticLayerRealizer` limited to sequencing. Planner and page builder
+remain pure worker functions behind shared pool infrastructure. The Phase 3 and Phase 8 gates reject
+additional stateful domain components unless measured evidence and an explicit plan correction
+justify them.
+
+### Scene Publishes Before Required Bindings
+
+**Risk:** The renderer currently fails loudly when a required binding is absent.
+
+**Mitigation:** Static realization publishes geometry and nodes only after its exact owner/revision
+requirements are ready and current. It activates the new revision only after successful scene
+replacement, then retires the previous revision. Do not add renderer fallback textures or silent
+draw skipping to hide ordering bugs.
+
+### Static Replacement Fails After Removing the Previous Scene
+
+**Risk:** Current `StaticObjectSystem.installObjects` removes the existing owner before all new
+geometry, instance, and node publication succeeds. With revision-scoped atlas claims, a mid-install
+failure could leave partial nodes while neither the old nor new claim has an honest lifecycle.
+
+**Mitigation:** Phase 5 replaces destructive-first installation with failure-atomic
+`replaceObjects`. Stage new revision-scoped resources and nodes, roll them back on failure, and swap
+the stable owner record only after staging succeeds. Activate the new atlas revision after that swap;
+otherwise withdraw the provisional revision and retain the previous scene and claim.
+
+### Purpose Policy Drifts from Physical Preparation
+
+**Risk:** A future purpose change could alter format, mip, or gutter behavior without invalidating
+page compatibility.
+
+**Mitigation:** Page validation derives preparation from `TexturePurpose`, checks every source and
+placement, and has exhaustive tests. Do not persist a second independently editable bucket key.
+
+## Definition of Done
+
+- [ ] Current logical textures are decoded once per resident lifetime.
+- [ ] Later owners reuse existing bindings and acquire independent claims.
+- [ ] Fixed 2048 x 2048 pages are partitioned only by `TexturePurpose`.
+- [ ] Free rectangles are tracked and reused after logical release.
+- [ ] Bounded regular compaction can avoid or eliminate pages.
+- [ ] Prepared logical sources remain in RAM only while claimed or in flight.
+- [ ] Page rebuilding never reads from WebGL or detaches retained source buffers.
+- [ ] Multi-page publication and rollback are transactional.
+- [ ] Stale scene-interest revisions cannot publish scene resources or release newer claims.
+- [ ] Kept and metadata-only pages perform no pixel build or replacement upload.
+- [ ] Geometry and missing texture preparation remain concurrent.
+- [ ] Failed static replacement preserves the prior scene and atlas revision.
+- [ ] Explorer diagnostics describe resident pages, sources, free space, and compaction honestly.
+- [ ] Repeated gameplay traversal reaches a bounded page-count steady state.
+- [ ] Complete eviction and destroy release source RAM and renderer resources.
+- [ ] Shared preparer and worker shutdown follows one tested, exact-once ownership order.
+- [ ] The shelf packer and candidate arbitration model are deleted.
+- [ ] `ResidentTextureAtlas` and `StaticLayerRealizer` are the only new stateful domain components.
+- [ ] Type checks, tests, lint, dead-code analysis, builds, shader validation, and applicable Rust
+      checks pass.
+- [ ] The plan records final progress, decisions, concessions, and remaining accepted debt.
+
+## Open Questions
+
+No user decision is currently required.
+
+Phase 6 must resolve the initial rebuild budget from the Phase 0 baseline and Phase 3 worker
+measurements. Phase 7 may recommend partial page uploads or a worker-side source mirror only if
+full-page rebuild or source-copy cost is proven to dominate. Either would be a new scoped decision,
+not an implicit extension of this plan.
+
+## Progress Log
+
+- 2026-07-25: Plan drafted after inspecting the current building pipeline, texture manager,
+  renderer binding lookup, ownership registry, Explorer diagnostics, completed scoping/building
+  plans, architecture audit, and legacy fixed/free-rectangle algorithms.
+- 2026-07-25: Phase pacing revised after a tech-lead review. Stable layout, the end-to-end atlas
+  fixture, runtime coordination, production cutover, and compaction now land as separate proof
+  points. The transaction diagram was simplified to portable sequence-diagram syntax after the
+  original nested parallel form failed to render.
+- 2026-07-25: Target component topology flattened after review. The plan now distinguishes stateful
+  domain authority, existing ports, shared worker infrastructure, and pure worker functions.
+- 2026-07-25: Completed a full coherence and dry-run pass across ownership, revision replacement,
+  eviction, worker staging, static publication, coordinate conventions, phase dependencies, and
+  diagnostics.
+
+## Decisions and Course Corrections Log
+
+- 2026-07-25: Fixed 2048 x 2048 pages are retained as a simplifying constraint.
+- 2026-07-25: `TexturePurpose` remains the sole compatibility bucket, consistent with the render
+  systems scoping decision.
+- 2026-07-25: Decoded logical source pixels remain resident with gameplay claims; complete packed
+  page pixels do not.
+- 2026-07-25: Compaction is evaluated during ordinary atlas mutations but materialized only for a
+  bounded page-count benefit.
+- 2026-07-25: The initial buildings-plan independent-packing rule is explicitly superseded rather
+  than preserved through compatibility code.
+- 2026-07-25: Existing `SceneInterestRevision` currentness is carried through building atlas
+  realization; no parallel owner-generation concept is introduced.
+- 2026-07-25: Metadata placement planning and changed-page pixel materialization are separate
+  worker stages. A bounded layout-worker pool receives metadata snapshots; a separate bounded
+  page-build pool receives pixels only for rebuilt pages.
+- 2026-07-25: Worker-pool bounds are selected only after the Phase 3 end-to-end fixture can measure
+  the real job shapes. Compaction policy and its budget move to Phase 6, after stable production
+  residency is proven.
+- 2026-07-25: Phase 4 proves `StaticLayerRealizer` behind injected ports; the production building
+  route moves in the clean Phase 5 cutover. This keeps architectural proof separate from irreversible
+  contract deletion.
+- 2026-07-25: Transaction documentation retains a sequence diagram because participant lanes make
+  authority and ownership materially clearer than a flowchart. Concurrency is expressed by dispatch
+  order and an explicit note rather than nested Mermaid parallel blocks.
+- 2026-07-25: Only `ResidentTextureAtlas` and `StaticLayerRealizer` are new stateful domain
+  components. Claim indexes, retained source storage, mutation lanes, and publication remain atlas
+  internals; planner and page builder remain pure functions behind shared bounded-pool
+  infrastructure.
+- 2026-07-25: `TexturePreparer` retains preparation and in-flight coalescing responsibility but does
+  not own the resident source lifetime. `ResidentTextureAtlas` retains prepared sources because it
+  owns the gameplay claims that determine release.
+- 2026-07-25: Atlas requirements use an explicit provisional, published, activation, exact
+  withdrawal, and authoritative owner-eviction lifecycle. The existing `SceneInterestRevision`
+  remains the only generation identity.
+- 2026-07-25: Static owner replacement becomes failure-atomic before atlas activation. This is a
+  narrow correction to the existing destructive-first install seam, not a general transaction
+  framework or new component.
+- 2026-07-25: Purpose-derived preparation is not repeated in placement or worker contracts. Content
+  bounds, padded allocation bounds, free-space geometry, and readback orientation now have explicit
+  coordinate semantics.
+- 2026-07-25: A changed page rebuilds all of its resident pixels from retained sources; only
+  untouched pages skip pixel work. “Resident” guarantees preparation reuse, not immunity from
+  necessary page materialization.
+- 2026-07-25: Optional compaction preserves the validated stable plan as an explicit fallback so an
+  optimization failure cannot block ownership withdrawal.
+- 2026-07-25: `GameRuntime` owns the shared `TexturePreparer` lifecycle after atlas extraction;
+  child consumers no longer destroy it implicitly.
+
+## Concessions
+
+- Complete replacement pages are rebuilt and uploaded in the first implementation. Partial page
+  upload is deferred until measurement proves it necessary.
+- Retained source buffers are copied for closed worker transfer. This spends bounded memory
+  bandwidth to keep source ownership simple and authoritative.
+- Compaction planning uses an explicit initial work budget that must be selected empirically in
+  Phase 6 from earlier baseline and worker measurements; no claim is made that one static threshold
+  is universally optimal.
+- A failed optional compaction may spend bounded worker/upload staging effort before the stable plan
+  runs. This exceptional-path cost is accepted so optimization failure cannot block required
+  insertion or release semantics.
+
+## Debt Register
+
+- None introduced by planning. Implementation phases must append temporary shims, duplicated
+  contracts, deferred cleanup, or measured performance debt as they arise.

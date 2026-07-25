@@ -34,6 +34,8 @@ export interface BuildingTexturePackJob {
 export interface BuildingTexturePackResult {
 	readonly pages: readonly StaticTexturePageArtifact[];
 	readonly packedBytes: number;
+	/** Wall-clock algorithm time measured inside the worker boundary. */
+	readonly workerDurationMs: number;
 }
 
 interface MutablePage {
@@ -55,6 +57,7 @@ interface MutablePage {
 export function packBuildingTextures(
 	job: BuildingTexturePackJob,
 ): BuildingTexturePackResult {
+	const startedAt = performance.now();
 	const pageSize = job.pageSize ?? STATIC_OBJECT_TEXTURE_PAGE_SIZE;
 	if (!Number.isInteger(pageSize) || pageSize <= 0) {
 		throw new Error("Building texture page size must be a positive integer.");
@@ -118,6 +121,7 @@ export function packBuildingTextures(
 	return {
 		packedBytes: artifacts.reduce((total, page) => total + page.pageBits.byteLength, 0),
 		pages: artifacts,
+		workerDurationMs: performance.now() - startedAt,
 	};
 }
 

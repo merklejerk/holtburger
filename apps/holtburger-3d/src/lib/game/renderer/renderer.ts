@@ -47,6 +47,14 @@ export interface FrameSelectionMetrics {
 	readonly visibleDynamics: number;
 	/** Visible environment-cell shell contributions selected before their draw path is implemented. */
 	readonly visibleEnvCellShells: number;
+	/** Opaque and alpha-test static-building ranges submitted to WebGL this frame. */
+	readonly submittedBuildingRanges: number;
+	/** Triangles selected by submitted opaque and alpha-test building ranges. */
+	readonly submittedBuildingTriangles: number;
+	/** Object-program activation count across every rendered view. */
+	readonly objectProgramChanges: number;
+	/** Object atlas/detail texture binds performed across every rendered view. */
+	readonly objectTexturePageBinds: number;
 }
 
 export interface Renderer {

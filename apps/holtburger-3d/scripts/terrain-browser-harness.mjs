@@ -44,9 +44,10 @@ try {
 		`${JSON.stringify(
 			{
 				consoleMessages: result.consoleMessages,
-				frames: result.state.frames,
-				landblockId: options.landblockId,
-				ready: result.state.ready,
+			frames: result.state.frames,
+			landblockId: options.landblockId,
+			metrics: result.state.metrics,
+			ready: result.state.ready,
 				screenshotPath: options.screenshotPath,
 				settleMs: options.settleMs,
 			},

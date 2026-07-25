@@ -25,6 +25,10 @@ describe("GameRuntime view and interest control", () => {
 			visiblePortalCrossings: 7,
 			visibleSceneEntries: 11,
 			visibleStaticObjects: 13,
+			submittedBuildingRanges: 0,
+			submittedBuildingTriangles: 0,
+			objectProgramChanges: 0,
+			objectTexturePageBinds: 0,
 		};
 		const renderer: Renderer = {
 			async destroy() {},

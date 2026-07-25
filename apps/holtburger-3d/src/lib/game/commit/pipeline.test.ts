@@ -14,7 +14,7 @@ describe("StandardCommitPipeline", () => {
 		const assets = new FakeTerrainSource(
 			new Map([[source.landblockId, source]]),
 		);
-		const pipeline = await StandardCommitPipeline.build(assets);
+	const pipeline = await StandardCommitPipeline.build({ terrainSource: assets });
 
 		const [bundle] = await pipeline.prepareLandblockLayers(
 			new Set([terrainLayer(source.landblockId)]),

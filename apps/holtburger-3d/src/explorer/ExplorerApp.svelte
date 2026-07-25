@@ -9,6 +9,7 @@
 	import { WebGL2Device } from "../lib/game/renderer/webgl2-device";
 	import { TauriActiveRegionSource } from "../lib/assets/tauri-active-region-source";
 	import { TauriLandblockTerrainSource } from "../lib/assets/tauri-landblock-terrain-source";
+	import { TauriLandblockBuildingSource } from "../lib/assets/tauri-landblock-building-source";
 	import { TauriTexturePixelSource } from "../lib/assets/tauri-texture-pixel-source";
 	import type { LoDConfig } from "../lib/game/runtime/types";
 	import type { SceneResidency } from "../lib/game/scene";
@@ -150,11 +151,15 @@
 				const terrainSource = TauriLandblockTerrainSource.build(activeRegion);
 				const texturePixelSource = TauriTexturePixelSource.build();
 				objectDetailOwner = new ActiveRegionObjectDetailOwner(texturePixelSource);
-				await objectDetailOwner.install(activeRegion);
+				const objectDetailBinding = await objectDetailOwner.install(activeRegion);
 				if (destroyed) return;
 				webglDevice = await WebGL2Device.build(canvasElement!);
 				if (destroyed) return;
-				commitPipeline = await StandardCommitPipeline.build(terrainSource);
+				commitPipeline = await StandardCommitPipeline.build({
+					buildingSource: TauriLandblockBuildingSource.build(),
+					terrainSource,
+					texturePixelSource,
+				});
 				if (destroyed) return;
 
 				gameRuntime = await GameRuntime.build(
@@ -162,6 +167,7 @@
 					commitPipeline,
 					texturePixelSource,
 				);
+				gameRuntime.installActiveRegionObjectDetail(objectDetailBinding);
 				applyEnvironment();
 				applyFrameSettings();
 				if (destroyed) return;

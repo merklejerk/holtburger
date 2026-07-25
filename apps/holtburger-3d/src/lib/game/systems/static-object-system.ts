@@ -6,6 +6,7 @@ import type {
 import type { SceneGraph, SceneNodeId } from "../scene";
 import type { TextureManager } from "../textures/texture-manager";
 import type { InstanceStreamManager } from "./instance-stream-manager";
+import type { LandblockLayerKind } from "../runtime/scene-interest";
 
 interface StaticObjectOwnerRecord {
 	readonly nodes: readonly SceneNodeId[];
@@ -35,6 +36,7 @@ export class StaticObjectSystem<TOwnerId extends string> {
 	installObjects(
 		ownerId: TOwnerId,
 		installSet: StaticObjectLayerArtifact,
+		cullingGroup: Exclude<LandblockLayerKind, LandblockLayerKind.Terrain>,
 	): void {
 		this.removeOwner(ownerId);
 		this.#geometry.reserveKeys(
@@ -56,7 +58,7 @@ export class StaticObjectSystem<TOwnerId extends string> {
 		const nodes = installSet.objects.map((object) => {
 			const nodeId = this.#scene.createNode({
 				...object.placement,
-				cullingGroup: "static",
+				cullingGroup,
 				localBounds: object.localBounds,
 				parentId: null,
 			});

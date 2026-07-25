@@ -144,6 +144,12 @@ export class TextureManager<TOwnerId extends string = string> {
 		);
 	}
 
+	/** Install one caller-prepared standalone asset texture under an explicit owner. */
+	installAssetTexture(owner: TOwnerId, source: AssetTextureSource): void {
+		this.reserveKeys(owner, [source.key]);
+		this.#createAssetTexture(source);
+	}
+
 	/**
 	 * Retain texture facts for one owner and materialize missing device resources.
 	 * Preparation failures are terminal for that owner's texture set.

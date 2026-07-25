@@ -31,7 +31,8 @@ export type DynamicEntityCommit = ResolvedObjectResident;
 
 /** Immutable object residents installed by their typed domain system. */
 export interface StaticObjectLayerCommit {
-	readonly staticObjects: StaticObjectLayerArtifact;
+	/** Null when classification promoted every resident and no static resources were published. */
+	readonly staticObjects: StaticObjectLayerArtifact | null;
 }
 
 /** Topology and shell publication kept separate from embedded object residents. */

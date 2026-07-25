@@ -33,11 +33,13 @@ import { EnvCellSystem } from "../systems/env-cell-system";
 import { AnimationSystem } from "../systems/animation-system";
 import { InstanceStreamManager } from "../systems/instance-stream-manager";
 import { TextureManager } from "../textures/texture-manager";
+import { TexturePurpose } from "../textures/types";
 import {
 	WorkerTexturePreparer,
 	type TexturePreparer,
 } from "../textures/texture-preparer";
 import {
+	activeRegionResourceToOwnerId,
 	landblockLayerToOwnerId,
 	type ResourceOwnerId,
 	spawnedEntityToOwnerId,
@@ -45,6 +47,7 @@ import {
 	type TerrainResourceOwnerId,
 	type OwnerId,
 } from "./owner-ids";
+import type { ActiveRegionObjectDetailBinding } from "../resolution/active-region-object-detail";
 import {
 	computeSceneInterest,
 	diffSceneInterest,
@@ -110,6 +113,16 @@ interface PendingCommitArtifact {
 	readonly revision: SceneInterestRevision;
 }
 
+/** One complete promoted resident retained for diagnostics until static-authored dynamics activate. */
+export interface DeferredStaticDynamicDiagnostic {
+	readonly layer: LandblockLayerKind;
+	readonly landblockId: LandblockId;
+	readonly residentId: string;
+	readonly setupSourceId: string;
+	readonly defaultAnimationId: string | null;
+	readonly reason: "setup-default-animation";
+}
+
 /** Bridges source commits, scene topology, runtime residency, and frontend frame state. */
 export class GameRuntime {
 	/** Canonical scene topology, residency, transforms, and spatial-query membership. */
@@ -127,6 +140,8 @@ export class GameRuntime {
 	readonly #envCells: EnvCellSystem<ResourceOwnerId>;
 	/** Rigid-part pose updates sequenced before visibility and drawing. */
 	readonly #animation: AnimationSystem<ResourceOwnerId>;
+	/** Static-authored dynamics deliberately deferred without creating runtime resources. */
+	readonly #deferredStaticDynamics = new Map<OwnerId, DeferredStaticDynamicDiagnostic[]>();
 	/** Dynamic terrain sources, generation state, and realized terrain resources. */
 	readonly #terrain: TerrainSystem<ResourceOwnerId, TerrainResourceOwnerId>;
 	/** Read-only renderer gateway over this runtime's scene and resource systems. */
@@ -294,6 +309,26 @@ export class GameRuntime {
 		return this.#renderer?.getFrameSelectionMetrics?.() ?? null;
 	}
 
+	/** Snapshot structured diagnostics for static-authored residents deferred pending dynamic activation. */
+	getDeferredStaticDynamicDiagnostics(): readonly DeferredStaticDynamicDiagnostic[] {
+		return [...this.#deferredStaticDynamics.values()].flat();
+	}
+
+	/** Promote the already prepared regional building-detail binding into device ownership once. */
+	installActiveRegionObjectDetail(binding: ActiveRegionObjectDetailBinding): void {
+		this.#textures.installAssetTexture(
+			activeRegionResourceToOwnerId(binding.activeRegionKey),
+			{
+				height: binding.surface.height,
+				key: binding.key,
+				pixels: binding.surface.pixels,
+				purpose: TexturePurpose.ObjectDetail,
+				sourceAssetId: binding.sourceAssetId,
+				width: binding.surface.width,
+			},
+		);
+	}
+
 	/** Resolve one canonical scene-space point against resident scene scopes. */
 	queryWorldPointResidency(point: Vec3): SceneResidency | null {
 		return this.#scene.queryWorldPointResidency(point);
@@ -396,6 +431,10 @@ export class GameRuntime {
 
 	async #prepareInterestedLayer(layer: LandblockIdLayer): Promise<void> {
 		try {
+			const dispatchRevision = this.#layerInterestRevisions.get(
+				sceneLayerKey(layer.id, layer.layer),
+			);
+			if (dispatchRevision === undefined) return;
 			const artifacts = await this.#commitPipeline.prepareLandblockLayers(
 				new Set([layer]),
 			);
@@ -403,7 +442,7 @@ export class GameRuntime {
 			const revision = this.#layerInterestRevisions.get(
 				sceneLayerKey(layer.id, layer.layer),
 			);
-			if (revision === undefined) return;
+			if (revision !== dispatchRevision) return;
 			if (artifacts.length === 0) {
 				this.#publishSceneAvailability({
 					kind: "scene-content-failed",
@@ -414,7 +453,7 @@ export class GameRuntime {
 				return;
 			}
 			for (const artifact of artifacts)
-				this.#commitArtifacts.push({ artifact, revision });
+				this.#commitArtifacts.push({ artifact, revision: dispatchRevision });
 		} catch (error) {
 			log(error, LogLevel.Error);
 			const revision = this.#layerInterestRevisions.get(
@@ -483,9 +522,20 @@ export class GameRuntime {
 				});
 			}
 		}
-		this.#staticObjects.installObjects(ownerId, artifact.commit.staticObjects);
+		if (artifact.commit.staticObjects !== null) {
+			this.#staticObjects.installObjects(
+				ownerId,
+				artifact.commit.staticObjects,
+				artifact.layer,
+			);
+		}
 		for (const dynamic of artifact.dynamicEntities) {
-			this.#installDynamic(ownerId, artifact.landblockId, dynamic);
+			this.#deferStaticAuthoredDynamic(
+				ownerId,
+				artifact.layer,
+				artifact.landblockId,
+				dynamic,
+			);
 		}
 	}
 
@@ -538,6 +588,32 @@ export class GameRuntime {
 		this.#animation.install(ownerId, nodeId, pose);
 	}
 
+	#deferStaticAuthoredDynamic(
+		ownerId: OwnerId,
+		layer: LandblockLayerKind,
+		landblockId: LandblockId,
+		dynamic: DynamicEntityCommit,
+	): void {
+		if (dynamic.placement.landblockId !== landblockId) {
+			throw new Error(
+				`Deferred dynamic placement belongs to ${dynamic.placement.landblockId}, expected ${landblockId}.`,
+			);
+		}
+		const diagnostic: DeferredStaticDynamicDiagnostic = {
+			defaultAnimationId: dynamic.presentation.effects.animationId,
+			landblockId,
+			layer,
+			reason: "setup-default-animation",
+			residentId: dynamic.id,
+			setupSourceId: dynamic.presentation.sourceAssetId,
+		};
+		const diagnostics = this.#deferredStaticDynamics.get(ownerId) ?? [];
+		diagnostics.push(diagnostic);
+		this.#deferredStaticDynamics.set(ownerId, diagnostics);
+		log({ kind: "static-authored-dynamic-deferred", ...diagnostic }, LogLevel.Info);
+		// Future activation replaces this body with #installDynamic(ownerId, landblockId, dynamic).
+	}
+
 	#isInActiveSceneInterest(
 		landblockId: LandblockId,
 		layer: LandblockLayerKind,
@@ -548,6 +624,7 @@ export class GameRuntime {
 	#evictStaticLayer(landblockId: LandblockId, layer: LandblockLayerKind): void {
 		const ownerId = landblockLayerToOwnerId(landblockId, layer);
 		this.#staticObjects.removeOwner(ownerId);
+		this.#deferredStaticDynamics.delete(ownerId);
 		this.#animation.removeOwner(ownerId);
 		this.#dynamics.removeOwner(ownerId);
 		this.#envCells.removeOwner(ownerId);

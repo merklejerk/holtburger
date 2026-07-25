@@ -129,7 +129,7 @@ describe("GameRuntime view and interest control", () => {
 		await runtime.destroy();
 	});
 
-	it("reports unavailable content against the latest matching interest revision", async () => {
+	it("drops unavailable content completed for a superseded interest revision", async () => {
 		const pipeline = new DeferredCommitPipeline();
 		const device: GameRuntimeRenderDevice = {
 			buildRenderer: async () => ({ async destroy() {}, drawFrame() {} }),
@@ -146,18 +146,11 @@ describe("GameRuntime view and interest control", () => {
 		);
 
 		runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
-		const latest = runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
+		runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
 		pipeline.resolveNext([]);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 
-		expect(events).toEqual([
-			{
-				kind: "scene-content-failed",
-				message: "No terrain content is available for 0x1010ffff.",
-				residency: { envCellId: null, landblockId: "0x1010ffff" },
-				revision: latest.revision,
-			},
-		]);
+		expect(events).toEqual([]);
 
 		unsubscribe();
 		await runtime.destroy();

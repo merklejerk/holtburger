@@ -114,7 +114,7 @@
 			try {
 				const source = await HttpTerrainContentSource.build(hostUrl);
 				device = await WebGL2Device.build(canvasElement!);
-				pipeline = await StandardCommitPipeline.build(source);
+				pipeline = await StandardCommitPipeline.build({ terrainSource: source });
 				runtime = await GameRuntime.build(device, pipeline, source);
 				if (destroyed) return;
 				ready = true;

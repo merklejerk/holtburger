@@ -243,7 +243,6 @@ function objectGeometryData(part: ResolvedObjectPart): ObjectGeometryData {
 	return {
 		indices: part.geometry.indices,
 		kind: "object",
-		materialSlots: part.geometry.materialSlotIndices,
 		normals: part.geometry.normals,
 		positions: part.geometry.positions,
 		textureCoordinates: part.geometry.textureCoordinates,

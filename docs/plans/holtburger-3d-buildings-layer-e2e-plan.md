@@ -1431,5 +1431,61 @@ Concessions and debt:
 - This correction keeps polygon ownership lossless through worker dispatch; it is required before
   geometry baking starts and does not require a product decision.
 
+### 2026-07-25 — Phase 3 progress
+
+Changes in progress:
+
+- Added closed, callback-free geometry and texture-packing worker kernels. Geometry composes the
+  resident pose and source scale with the full default setup-part hierarchy, partitions only static
+  residents, emits one landblock-local allocation, and validates finite transformed bounds.
+- Corrected the resident contract while wiring that composition: `placement.localTransform` is now
+  pose-only and `resident.scale` is applied exactly once by the static baker. The previous decoder
+  embedded that same scale in both fields, which would have doubled non-unit building scales.
+- The initial packer partitions pages by `TexturePurpose`, deduplicates logical keys, uses the
+  census-backed 2,048-pixel page limit, and uses a four-pixel repeat-safe gutter only for filterable
+  direct-color entries. Index and palette lookups are level-zero, clamp-prepared entries and use
+  nearest filtering so encoded index values cannot be interpolated before palette lookup.
+- Chose an explicit maximum sampled LOD of zero for packed `ObjectDirectColor` pages by disabling
+  packed-page mip generation. This avoids cross-entry mip bleed without pretending the four-pixel
+  gutter proves whole-page mip safety. Per-entry mip isolation remains future work if visual
+  evidence demands it.
+
+Verification so far:
+
+- Focused geometry-worker tests cover transformed bounds, vertex containment, independent
+  transparent ranges, mergeable additive ranges, and all-promoted empty output.
+- The standard pipeline now owns one geometry worker and one texture worker, starts geometry while
+  closed pixel preparation is in flight, joins only to assemble the artifact, transfers typed-array
+  buffers in both directions, and rejects all unsettled jobs on destruction. It validates logical
+  texture coverage before publication.
+
+Remaining Phase 3 work:
+
+- Add the remaining paired-pipeline fixtures for overlap timing, promoted-resident texture exclusion,
+  and pack-layout independence before closing the phase.
+
+### 2026-07-25 — Phase 4 progress
+
+- Static-object installation now receives the existing `LandblockLayerKind` as its culling group;
+  building artifacts therefore install as `buildings` rather than under the former generic
+  `static` label.
+- The runtime captures the exact scene-interest revision before dispatch and rejects stale results,
+  including a same-landblock withdrawal/re-request race. Static-authored default-animation residents
+  now reach one structured deferral method that creates no node, geometry, texture, or animation
+  state; spawned dynamics still use the existing activation route.
+- The explorer promotes the already prepared active-region building-detail binding into
+  `TextureManager` once under an active-region resource owner, independently of per-landblock
+  packed pages. The CPU owner remains the source/lifetime authority until this UI path is moved
+  behind a runtime region-change seam.
+
+Debt:
+
+- Runtime active-region replacement is not wired yet; explorer startup and teardown are correct,
+  but a live region change still needs to replace the active-region detail resource atomically.
+- The initial closed packer uses a deterministic shelf layout rather than the legacy MaxRects page
+  scorer. It preserves purpose isolation, gutters, and logical identity, but may waste page area.
+  Phase 7 page arbitration must replace it with the reviewed legacy-derived scorer before claiming
+  packing efficiency as a selection signal.
+
 Add dated progress, concessions, verification, and new cleanup targets here after every completed
 phase.

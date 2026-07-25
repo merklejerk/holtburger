@@ -1,6 +1,6 @@
 # Holtburger 3D Buildings Layer End-to-End Plan
 
-Status: Active. Phases 0–5 are complete; Phase 6 explorer controls and metrics is active.
+Status: Active. Phases 0–6 are complete; Phase 7 packed-page arbitration is active.
 
 ## Context and Boundaries
 
@@ -1529,6 +1529,25 @@ Verification:
   `npm run harness:terrain -- --landblock 0eba --settle-ms 1000` passes for 0EBAFFFF with no
   browser-console or WebGL errors. The DA55 capture at `/tmp/holtburger-da55-buildings.png` was
   visually inspected and contains the expected settlement geometry.
+
+### 2026-07-25 — Phase 6 complete
+
+- The canonical DA55 harness now reports cold frame metrics. Its audited frame has one terrain
+  input, one visible building node, 43 opaque/alpha-test building draws, 4,978 submitted building
+  triangles, one object-program activation, and 47 object texture binds. The node/draw split is
+  deliberate: one landblock allocation preserves broad-phase culling while range-local material
+  facts preserve correct submission.
+- `inspect_building_layer_evidence 0xda55ffff` confirms 42 Level 1 GfxObj residents, 17 reusable
+  sources, no promoted setup/default-animation records, and a 4,978-triangle closed geometry job.
+  Its worker census reports 27 direct-color, one index-16, and one palette logical texture entry;
+  it reports zero independently sortable transparent draws and zero additive ranges. The visible
+  frame therefore does not silently discard an authored transparent/additive range.
+- The same evidence reports three 2,048-page packing purposes and no geometry dependence on atlas
+  placement. The 47 per-frame texture binds are acceptable for the single-landblock milestone but
+  are not a neighborhood-scale outcome; Phase 7 remains necessary for canonical shared-page
+  arbitration and binding consolidation.
+- The active-region building detail remains one independent `ObjectDetail` owner (DA55 source
+  texture `0x05001787`, tiling 4) and is excluded from all landblock packing purposes.
 
 Add dated progress, concessions, verification, and new cleanup targets here after every completed
 phase.

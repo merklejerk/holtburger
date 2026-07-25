@@ -12,6 +12,7 @@
 	import { WebGL2Device } from "../../lib/game/renderer/webgl2-device";
 	import { GameRuntime } from "../../lib/game/runtime/game-runtime";
 	import { ActiveRegionObjectDetailOwner } from "../../lib/game/resolution/active-region-object-detail";
+	import type { FrameSelectionMetrics } from "../../lib/game/renderer/renderer";
 
 	const CAMERA_FOV_DEGREES = 90;
 	const CAMERA_NEAR = 0.5;
@@ -27,6 +28,7 @@
 	interface TerrainHarnessState {
 		readonly error: string | null;
 		readonly frames: number;
+		readonly metrics: FrameSelectionMetrics | null;
 		readonly ready: boolean;
 	}
 
@@ -132,7 +134,12 @@
 				ready = true;
 				hostGlobal.__HOLTBURGER_3D_TERRAIN_HARNESS__ = {
 					requestOutdoorTerrain,
-					state: () => ({ error, frames, ready }),
+					state: () => ({
+						error,
+						frames,
+						metrics: runtime?.getFrameSelectionMetrics() ?? null,
+						ready,
+					}),
 				};
 				const frame = (): void => {
 					if (!runtime || destroyed) return;

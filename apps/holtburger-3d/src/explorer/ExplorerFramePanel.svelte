@@ -32,6 +32,14 @@
 				<code>{metrics.visibleStaticObjects}</code>
 			</div>
 			<div class="ac-param-row">
+				<span class="ac-param-key">Building ranges / triangles</span>
+				<code>{metrics.submittedBuildingRanges} / {metrics.submittedBuildingTriangles}</code>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Object program / texture binds</span>
+				<code>{metrics.objectProgramChanges} / {metrics.objectTexturePageBinds}</code>
+			</div>
+			<div class="ac-param-row">
 				<span class="ac-param-key">Visible dynamics</span>
 				<code>{metrics.visibleDynamics}</code>
 			</div>
@@ -46,8 +54,8 @@
 		</div>
 		<p class="explorer-frame-note">
 			Counts are aggregated across views. Static, dynamic, and env-cell values
-			are selection counts; only terrain currently becomes a concrete draw
-			submission.
+			are selection counts; terrain and opaque/alpha-test building ranges become
+			concrete draw submissions.
 		</p>
 	{/if}
 </div>

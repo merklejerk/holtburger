@@ -90,6 +90,10 @@ interface MutableFrameSelectionMetrics {
 	visibleStaticObjects: number;
 	visibleDynamics: number;
 	visibleEnvCellShells: number;
+	submittedBuildingRanges: number;
+	submittedBuildingTriangles: number;
+	objectProgramChanges: number;
+	objectTexturePageBinds: number;
 }
 
 export class WebGL2Renderer implements Renderer {
@@ -115,6 +119,10 @@ export class WebGL2Renderer implements Renderer {
 		visiblePortalCrossings: 0,
 		visibleSceneEntries: 0,
 		visibleStaticObjects: 0,
+		submittedBuildingRanges: 0,
+		submittedBuildingTriangles: 0,
+		objectProgramChanges: 0,
+		objectTexturePageBinds: 0,
 	};
 	#frameWidth = 0;
 	#frameHeight = 0;
@@ -326,6 +334,10 @@ export class WebGL2Renderer implements Renderer {
 		metrics.visiblePortalCrossings = 0;
 		metrics.visibleSceneEntries = 0;
 		metrics.visibleStaticObjects = 0;
+		metrics.submittedBuildingRanges = 0;
+		metrics.submittedBuildingTriangles = 0;
+		metrics.objectProgramChanges = 0;
+		metrics.objectTexturePageBinds = 0;
 	}
 
 	#drawView(
@@ -492,6 +504,7 @@ export class WebGL2Renderer implements Renderer {
 		gl.depthMask(true);
 		gl.disable(gl.BLEND);
 		gl.useProgram(this.#objectProgram.program);
+		this.#frameSelectionMetrics.objectProgramChanges += 1;
 		for (const [unit, uniform] of [
 			[0, this.#objectProgram.uniforms.base],
 			[1, this.#objectProgram.uniforms.palette],
@@ -615,6 +628,9 @@ export class WebGL2Renderer implements Renderer {
 			geometry.indexType,
 			drawUnit.indexStart * geometry.indexElementBytes,
 		);
+		this.#frameSelectionMetrics.submittedBuildingRanges += 1;
+		this.#frameSelectionMetrics.submittedBuildingTriangles +=
+			drawUnit.indexCount / 3;
 	}
 
 	#bindObjectTexture(
@@ -625,6 +641,7 @@ export class WebGL2Renderer implements Renderer {
 		const gl = this.#gl;
 		gl.activeTexture(gl.TEXTURE0 + unit);
 		gl.bindTexture(gl.TEXTURE_2D, texture);
+		this.#frameSelectionMetrics.objectTexturePageBinds += 1;
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filtering === TextureFilteringMode.Nearest ? gl.NEAREST : gl.LINEAR);
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filtering === TextureFilteringMode.Nearest ? gl.NEAREST : gl.LINEAR);
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);

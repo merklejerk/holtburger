@@ -67,6 +67,9 @@ describe("TextureManager", () => {
 			placement: page.textures[0].placement,
 			resource: "texture-2d-resource:0",
 		});
+		expect(textures.getAtlasPageResource(PAGE_ID)).toBe(
+			"texture-2d-resource:0",
+		);
 	});
 
 	it("materializes one complete texture array through retained facts", async () => {

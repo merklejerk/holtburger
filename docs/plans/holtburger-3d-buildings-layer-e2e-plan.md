@@ -1,6 +1,6 @@
 # Holtburger 3D Buildings Layer End-to-End Plan
 
-Status: Active. Phases 0–8 are complete; Phase 9 end-to-end proof and diagnostics is active.
+Status: Complete with documented repository-formatting baseline debt.
 
 ## Context and Boundaries
 
@@ -967,18 +967,18 @@ merge ranges based on page placement, or project promoted residents into a diagn
 
 #### Task Checklist
 
-- [ ] Prove all 42 DA55FFFF buildings enter static materialization and that its promoted-dynamic and
+- [x] Prove all 42 DA55FFFF buildings enter static materialization and that its promoted-dynamic and
       runtime-deferred counts are both the evidence-backed zero.
-- [ ] Capture draw-range reduction metrics against naive resident/part/material submission.
-- [ ] Verify direct, indexed, alpha-test, and scoped fog behavior at selected Level 1 reference
+- [x] Capture draw-range reduction metrics against naive resident/part/material submission.
+- [x] Verify direct, indexed, alpha-test, and scoped fog behavior at selected Level 1 reference
       viewpoints.
-- [ ] Verify transparent and additive behavior with synthetic fixtures because the authored Level 1
+- [x] Verify transparent and additive behavior with synthetic fixtures because the authored Level 1
       building population contains neither class.
-- [ ] Exercise camera movement across landblock boundaries.
-- [ ] Exercise fully culled, partially intersecting, and visible building-layer bounds while
+- [x] Exercise camera movement across landblock boundaries.
+- [x] Exercise fully culled, partially intersecting, and visible building-layer bounds while
       confirming culled nodes submit no draw ranges.
-- [ ] Exercise building disable, eviction, reload, and application teardown.
-- [ ] Compare visually against ACViewer and/or the retail client where practical.
+- [x] Exercise building disable, eviction, reload, and application teardown.
+- [x] Compare visually against ACViewer and/or the retail client where practical.
 
 #### Acceptance Criteria
 
@@ -991,7 +991,21 @@ merge ranges based on page placement, or project promoted residents into a diagn
 
 #### Decisions and Course Corrections
 
-- To be filled during execution.
+- Runtime diagnostics now carry the worker's source-to-bake metrics through the commit boundary
+  rather than reconstructing them from renderer state. The metrics distinguish 163 naive
+  resident/part/material-slot draws in DA55 from 192 complete material-and-polygon ranges; the
+  latter is the honest pre-merge count because culling, side, and stippling facts can differ for
+  the same source material slot. They collapse to 43 permitted baked ranges.
+- The existing terrain browser harness remains a terrain harness, but accepts a building radius,
+  a camera-anchor move, and a lifecycle clear/reload request. It does not become an Explorer UX
+  dependency; its exported state is limited to immutable diagnostics.
+- A six-range app-local fixture proves the actual WebGL path submits three transparent and three
+  additive ranges. It deliberately uses solid colors and no DAT assets so it proves renderer pass
+  policy rather than accidentally relying on the DA55 population, which has no blended ranges.
+- The DA55 render was compared against the available authoritative source/ACViewer geometry and
+  material evidence, not a headless ACViewer frame. ACViewer has no maintained non-interactive
+  rendering path in this workspace; the existing DA55 capture remains the practical visual
+  reference, while the browser harness supplies the reproducible executable proof.
 
 ### Phase 10: Cleanup and Architectural Re-Audit
 
@@ -1007,20 +1021,20 @@ merge ranges based on page placement, or project promoted residents into a diagn
 
 #### Task Checklist
 
-- [ ] Run formatting, TypeScript/Svelte checks, ESLint, dead-code lint, frontend tests, Rust tests,
+- [x] Run formatting, TypeScript/Svelte checks, ESLint, dead-code lint, frontend tests, Rust tests,
       and strict clippy.
-- [ ] Audit comments and types for obsolete instancing or material-table assumptions.
-- [ ] Confirm no renderer pass enums leaked into shared content or domain material contracts.
-- [ ] Confirm source-side material-slot indices remain only where triangle partitioning consumes
+- [x] Audit comments and types for obsolete instancing or material-table assumptions.
+- [x] Confirm no renderer pass enums leaked into shared content or domain material contracts.
+- [x] Confirm source-side material-slot indices remain only where triangle partitioning consumes
       them and no GPU-side material-slot attribute remains.
-- [ ] Confirm regional detail is absent from `ResolvedMaterial` and per-landblock pack payloads.
-- [ ] Confirm promoted residents use only `ResolvedObjectLayerSource.dynamicResidents` and
+- [x] Confirm regional detail is absent from `ResolvedMaterial` and per-landblock pack payloads.
+- [x] Confirm promoted residents use only `ResolvedObjectLayerSource.dynamicResidents` and
       `CommitBundle.dynamicEntities`; delete any parallel deferred/diagnostic record shape.
-- [ ] Confirm no static-layer installer retains the generic `static` culling group and no worker
+- [x] Confirm no static-layer installer retains the generic `static` culling group and no worker
       artifact carries scene culling policy.
-- [ ] Confirm no app-specific pixel conversion leaked into `holtburger-content`.
-- [ ] Confirm no permanent test depends on runtime asset archives.
-- [ ] Review file sizes and split any new hub that accumulated during the feature.
+- [x] Confirm no app-specific pixel conversion leaked into `holtburger-content`.
+- [x] Confirm no permanent test depends on runtime asset archives.
+- [x] Review file sizes and split any new hub that accumulated during the feature.
 
 #### Acceptance Criteria
 
@@ -1035,7 +1049,14 @@ warnings` passes.
 
 #### Decisions and Course Corrections
 
-- To be filled during execution.
+- The source-to-bake snapshot is commit data, not a renderer or Explorer data model. It is exposed
+  only as an app-local immutable runtime diagnostic and does not alter shared content contracts.
+- Texture arbitration telemetry remains an aggregate `TextureManager` snapshot; candidate pages,
+  physical handles, and lease mutation stay private. This supplies proof without creating a
+  second ownership authority.
+- The repository-wide Prettier gate remains red on unrelated baseline files. Every file touched by
+  this implementation was formatted and passed a scoped Prettier check; normal lint/test/type/Rust
+  gates pass. Restoring the broad formatting baseline is tracked debt, not feature work.
 
 ## Risks and Mitigations
 
@@ -1597,6 +1618,37 @@ Verification:
   near and far ordering, equal-distance IDs, the threshold crossing, and absence of fog symbols
   from the blended shader. DA55's browser harness still passes (43 ranges; 4,978 triangles); its
   source population has no blended ranges, so Phase 9 owns browser-visible synthetic coverage.
+
+### 2026-07-25 — Phase 9 complete
+
+- The browser harness now reports source-to-bake-to-runtime building diagnostics, renderer pass
+  counts, and atlas arbitration snapshots. DA55FFFF confirms 42 expected, resolved static, and
+  materialized static residents; zero promoted and runtime-deferred residents; 163 naive
+  material-slot draws, 192 polygon-distinguished source ranges, 43 baked ranges, 4,978 submitted
+  triangles, three atlas pages, and 29 canonical logical bindings.
+- A radius-one DA55 neighborhood materialized six non-empty building layers. It published 12 page
+  candidates, retained seven active canonical pages, and recorded 26 strict canonical replacements
+  without a browser or WebGL error. Moving the camera anchor to DA56 submitted the visible subset;
+  moving a resident DA55 layer's camera anchor to 0000 submitted zero building ranges.
+- The lifecycle harness cleared DA55 to zero geometry resources, static nodes, static owners,
+  atlas pages, and canonical atlas bindings, then reloaded it successfully. Existing runtime
+  destruction tests cover the same owner-release path during final teardown.
+- The `--fixture blended` harness route installed six app-local solid-color ranges and submitted
+  exactly three transparent plus three additive ranges through the WebGL renderer. This supplies
+  executable coverage for all retail blend variants without claiming DA55 authored such material.
+
+### 2026-07-25 — Phase 10 complete
+
+- Updated `apps/holtburger-3d/ARCHITECTURE_AUDIT.md`; the building path introduces no shared-crate
+  boundary inversion. Worker metrics cross as commit data, atlas arbitration remains private to
+  `TextureManager`, and renderer pass policy remains inside WebGL2.
+- Passed the full frontend test suite (165 tests), Svelte/TypeScript checks, ESLint, Knip, Rust
+  formatting, `cargo test -p holtburger-3d --lib` (11 tests), and strict clippy for content, core,
+  and 3D. The final DA55, neighborhood, culling, lifecycle, and synthetic-blended browser runs
+  completed without browser-console or WebGL errors.
+- Concession/debt: repository-wide `npm run format:check` reports 39 pre-existing formatting
+  failures. The implementation's touched scope was formatted and passes a targeted Prettier check;
+  repairing the repository baseline belongs in a separate mechanical commit.
 
 Add dated progress, concessions, verification, and new cleanup targets here after every completed
 phase.

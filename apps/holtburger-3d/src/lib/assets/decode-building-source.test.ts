@@ -47,6 +47,7 @@ function buildResponse(
 	const indices = Uint32Array.from(options.indices ?? [0, 1, 2]);
 	const materialSlots = Uint16Array.from([0]);
 	const materialWrapModes = Uint8Array.from([1]);
+	const materialSideKinds = Uint8Array.from([0]);
 	const parts = [
 		positions,
 		normals,
@@ -54,6 +55,7 @@ function buildResponse(
 		indices,
 		materialSlots,
 		materialWrapModes,
+		materialSideKinds,
 	];
 	const names = [
 		"positions",
@@ -62,6 +64,7 @@ function buildResponse(
 		"indices",
 		"materialSlots",
 		"materialWrapModes",
+		"materialSideKinds",
 	] as const;
 	let byteOffset = 0;
 	const sections = parts.map((part, index) => {
@@ -84,7 +87,7 @@ function buildResponse(
 	}
 	const manifest = {
 		transport: "holtburger-building-source",
-		version: 2,
+		version: 3,
 		byteOrder: "little-endian",
 		sectionByteOffsetBase: "section-data",
 		landblockId: LANDBLOCK_ID,
@@ -132,6 +135,8 @@ function buildResponse(
 				materialSlotCount: 1,
 				materialWrapModeOffset: 0,
 				materialWrapModeCount: 1,
+				materialSideKindOffset: 0,
+				materialSideKindCount: 1,
 				bounds: { min: [0, 0, 0], max: [1, 1, 0] },
 			},
 		],
@@ -156,7 +161,7 @@ function buildResponse(
 	paddedManifest.set(manifestBytes);
 	const response = new Uint8Array(16 + paddedManifest.length + payload.length);
 	response.set(new TextEncoder().encode("HBBL"));
-	new DataView(response.buffer).setUint32(4, 2, true);
+	new DataView(response.buffer).setUint32(4, 3, true);
 	new DataView(response.buffer).setUint32(8, paddedManifest.length, true);
 	new DataView(response.buffer).setUint32(12, response.length, true);
 	response.set(paddedManifest, 16);

@@ -16,7 +16,7 @@ import { classifyObjectResidents } from "../game/resolution/object-resident-clas
 
 const HEADER_LENGTH = 16;
 const MAGIC = "HBBL";
-const VERSION = 2;
+const VERSION = 3;
 const datId = z.string().regex(/^0x[0-9a-f]{8}$/i);
 const finiteNumber = z.number().finite();
 const vec3 = z.tuple([finiteNumber, finiteNumber, finiteNumber]);
@@ -31,6 +31,7 @@ const section = z.object({
 		"indices",
 		"materialSlots",
 		"materialWrapModes",
+		"materialSideKinds",
 	]),
 	scalarType: z.enum(["f32", "u32", "u16", "u8"]),
 	elementCount: z.number().int().nonnegative(),
@@ -51,6 +52,8 @@ const geometry = z.object({
 	materialSlotCount: z.number().int().nonnegative(),
 	materialWrapModeOffset: z.number().int().nonnegative(),
 	materialWrapModeCount: z.number().int().nonnegative(),
+	materialSideKindOffset: z.number().int().nonnegative(),
+	materialSideKindCount: z.number().int().nonnegative(),
 	bounds: bounds.nullable(),
 });
 
@@ -277,7 +280,7 @@ function validatedSections(
 	const sections = new Map(
 		manifest.sections.map((entry) => [entry.name, entry]),
 	);
-	if (sections.size !== 6 || sections.size !== manifest.sections.length) {
+	if (sections.size !== 7 || sections.size !== manifest.sections.length) {
 		throw new Error(
 			"Building source must contain every geometry section exactly once.",
 		);
@@ -289,6 +292,7 @@ function validatedSections(
 		["indices", "u32"],
 		["materialSlots", "u16"],
 		["materialWrapModes", "u8"],
+		["materialSideKinds", "u8"],
 	] as const) {
 		const entry = sections.get(name);
 		if (!entry || entry.scalarType !== scalarType) {
@@ -382,6 +386,22 @@ function decodeGeometry(
 	if (materialWrapModes.some((wrap) => wrap !== 0 && wrap !== 1)) {
 		throw new Error(`Geometry ${geometry.id} has an invalid sampler fact.`);
 	}
+	const materialSideKinds = readSlice(
+		response,
+		sectionDataOffset,
+		requireSection(sections, "materialSideKinds"),
+		geometry.materialSideKindOffset,
+		geometry.materialSideKindCount,
+		Uint8Array,
+	);
+	if (materialSideKinds.length !== materialSlotIndices.length) {
+		throw new Error(
+			`Geometry ${geometry.id} must provide one polygon-side fact per material slot.`,
+		);
+	}
+	if (materialSideKinds.some((side) => side > 2)) {
+		throw new Error(`Geometry ${geometry.id} has an invalid polygon-side fact.`);
+	}
 	if (indices.some((index) => index >= geometry.vertexCount)) {
 		throw new Error(`Geometry ${geometry.id} contains an out-of-range index.`);
 	}
@@ -393,6 +413,7 @@ function decodeGeometry(
 		indices,
 		materialSlotIndices,
 		materialWrapModes,
+		materialSideKinds,
 		bounds: toBounds(geometry.bounds),
 	};
 }

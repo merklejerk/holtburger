@@ -18,7 +18,7 @@ import type {
 	ClosedWorkerPort,
 	ClosedWorkerRequest,
 	ClosedWorkerResponse,
-} from "./closed-worker";
+} from "../workers/closed-worker";
 import { StandardCommitPipeline } from "./pipeline";
 
 describe("StandardCommitPipeline", () => {

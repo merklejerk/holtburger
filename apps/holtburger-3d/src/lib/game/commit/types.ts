@@ -5,16 +5,13 @@ import type {
 	LandblockLayerKind,
 } from "../runtime/scene-interest";
 import type {
-	TexturePageId,
-	TexturePlacement,
-} from "../textures/texture-manager";
-import type { AssetTextureKey, TexturePurpose } from "../textures/types";
-import type { StaticObjectInstallSet } from "../systems/static-object-system";
-import type { EnvCellSystemArtifact } from "../systems/env-cell-system";
-import type {
 	TerrainGenerationSource,
 	TerrainPresentationSource,
 } from "../terrain/types";
+import type {
+	EnvCellLayerArtifact,
+	StaticObjectLayerArtifact,
+} from "./artifacts";
 
 export interface StaticLandblockLayerCommitTerrain {
 	/** Canonical source retained by runtime terrain generation. */
@@ -34,24 +31,12 @@ export type DynamicEntityCommit = ResolvedObjectResident;
 
 /** Immutable object residents installed by their typed domain system. */
 export interface StaticObjectLayerCommit {
-	readonly staticObjects: StaticObjectInstallSet;
+	readonly staticObjects: StaticObjectLayerArtifact;
 }
 
 /** Topology and shell publication kept separate from embedded object residents. */
 export interface EnvCellLayerCommit extends StaticObjectLayerCommit {
-	readonly environment: EnvCellSystemArtifact;
-}
-
-export interface TexturePageCommit {
-	pageId: TexturePageId;
-	width: number;
-	height: number;
-	purpose: TexturePurpose;
-	pageBits: Uint8Array;
-	textures: Array<{
-		key: AssetTextureKey;
-		placement: TexturePlacement;
-	}>;
+	readonly environment: EnvCellLayerArtifact;
 }
 
 export enum CommitBundleSourceKind {

@@ -1,77 +1,11 @@
+import type { GeometryManager } from "../geometry/geometry-manager";
 import type {
-	GeometrySource,
-	GeometryManager,
-} from "../geometry/geometry-manager";
-import type { AABB3 } from "../math/types";
-import type { TexturePageCommit } from "../commit/types";
-import type { SceneGraph, SceneNodeId, ScenePlacement } from "../scene";
+	StaticObjectLayerArtifact,
+	StaticObjectRenderable,
+} from "../commit/artifacts";
+import type { SceneGraph, SceneNodeId } from "../scene";
 import type { TextureManager } from "../textures/texture-manager";
-import type { ResolvedMaterial } from "../resolution/presentation";
-import type {
-	StaticGeometryKey,
-	StaticInstallResourceNamespace,
-	StaticInstanceStreamKey,
-	StaticInstanceStreamSource,
-} from "./static-resources";
 import type { InstanceStreamManager } from "./instance-stream-manager";
-
-/** Source material plus polygon-owned facts; render pass policy remains renderer-private. */
-export interface StaticObjectMaterialBinding {
-	readonly source: ResolvedMaterial;
-	readonly polygon: {
-		readonly sidedness: "one-sided" | "two-sided";
-		readonly positiveSurfaceId: string | null;
-		readonly negativeSurfaceId: string | null;
-		readonly stippled: boolean;
-	};
-}
-
-/** Baked immutable geometry selected directly by one static draw. */
-export interface BakedStaticDrawUnit {
-	readonly kind: "baked";
-	readonly geometry: StaticGeometryKey;
-	readonly indexStart: number;
-	readonly indexCount: number;
-	readonly material: StaticObjectMaterialBinding;
-}
-
-/** Instanced immutable geometry selected by one persistent instance cohort. */
-export interface InstancedStaticDrawUnit {
-	readonly kind: "instanced";
-	readonly geometry: StaticGeometryKey;
-	readonly instances: StaticInstanceStreamKey;
-	readonly indexStart: number;
-	readonly indexCount: number;
-	readonly material: StaticObjectMaterialBinding;
-}
-
-/** Logical immutable-object draw contribution retained beside its spatial node. */
-export type StaticObjectDrawUnit =
-	| BakedStaticDrawUnit
-	| InstancedStaticDrawUnit;
-
-/** Persistent immutable-object presentation attached to one spatial scene node. */
-export interface StaticObjectRenderable {
-	readonly drawUnits: readonly StaticObjectDrawUnit[];
-}
-
-/** One immutable object publication emitted before SceneGraph assigns its node identity. */
-export interface StaticObjectArtifact {
-	readonly placement: ScenePlacement;
-	/** Bounds in the object root's local coordinate space. */
-	readonly localBounds: AABB3;
-	readonly renderable: StaticObjectRenderable;
-}
-
-/** Complete static-object publication installed under one runtime owner. */
-export interface StaticObjectInstallSet {
-	/** Collision-free namespace allocated before worker dispatch. */
-	readonly resourceNamespace: StaticInstallResourceNamespace;
-	readonly objects: readonly StaticObjectArtifact[];
-	readonly geometry: readonly GeometrySource[];
-	readonly instanceStreams: readonly StaticInstanceStreamSource[];
-	readonly texturePages: readonly TexturePageCommit[];
-}
 
 interface StaticObjectOwnerRecord {
 	readonly nodes: readonly SceneNodeId[];
@@ -98,7 +32,10 @@ export class StaticObjectSystem<TOwnerId extends string> {
 		this.#instances = instances;
 	}
 
-	installObjects(ownerId: TOwnerId, installSet: StaticObjectInstallSet): void {
+	installObjects(
+		ownerId: TOwnerId,
+		installSet: StaticObjectLayerArtifact,
+	): void {
 		this.removeOwner(ownerId);
 		this.#geometry.reserveKeys(
 			ownerId,

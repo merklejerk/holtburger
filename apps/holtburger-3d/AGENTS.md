@@ -1,39 +1,54 @@
 # Holtburger 3D Frontend
 
-This app is currently in an architectural stubbing phase. The immediate goal is
-to define the domains, ownership boundaries, artifact shapes, and major runtime
-flows for the replacement 3D client. It is not yet an end-to-end runnable game
-client, and many implementations are intentionally absent.
+This app is in a vertical-slice phase: its architecture is still moving, but
+outdoor terrain is no longer only a set of contracts. A working path runs from
+shared Rust content through Tauri or HTTP transport, TypeScript decoding,
+runtime residency, and WebGL rendering. The app is not yet a full replacement
+client: the primary client route is still a shell, terrain is the only typed
+static source capability, and many subsystem implementations remain absent.
 
 ## Current Expectations
 
-- Treat `TODO` bodies, explicit `not implemented` errors, empty renderer plans,
-  and incomplete subsystem adapters as expected scaffolding unless the current
-  task asks to implement them.
+- Treat clearly marked `TODO` bodies, explicit `not implemented` errors, empty
+  renderer plans, and incomplete subsystem adapters as expected scaffolding
+  unless the current task asks to implement them. Do not dismiss a failure in
+  the working terrain content, runtime, resource, scene, or WebGL path as
+  "just stubbing."
 - Do not expand the task into making the whole app run, eliminating every
   pre-existing type error, or filling every stub. Report unrelated scaffold
   holes without opportunistically implementing them.
+- Preserve the working terrain vertical slice when changing its contracts or
+  lifecycle. Its behavior is a proved architectural decision, not disposable
+  scaffolding; use focused tests and the browser terrain harness when the task
+  calls for runtime verification.
 - New or changed stubs should still communicate a coherent contract. Prefer
   honest names, discriminated unions, explicit coordinate spaces, and types that
   make invalid relationships difficult to represent.
 - Keep changes minimal. Add only enough code to demonstrate the requested shape
   and flow. Apply YAGNI aggressively while the architecture is still moving.
 - Do not use YAGNI to defer known behavior merely because its concrete lower-level
-  consumer does not exist yet. In this phase, narrow types, pure reference
+  consumer does not exist yet. While the architecture is moving, narrow types, pure reference
   algorithms, resource contracts, and call-site stubs are how established
   decisions are documented and protected. Defer inert implementation side
   effects, such as binding resources to a shader program that does not consume
   them, rather than deferring the contract those effects will eventually use.
 - A stub is allowed to omit behavior; it should not pretend to implement
   behavior, silently swallow an invariant violation, or encode guesses as facts.
+- Treat visual realization as best-effort: a source may be available for
+  camera placement or inspection before its geometry and textures are ready to
+  render. Log texture, generation, and device-realization failures to the
+  console with enough context to diagnose them, but do not add durable runtime
+  error state, availability events, UI error history, or retry policy unless a
+  concrete frontend workflow requires it. This does not weaken the rule to fail
+  loudly for violated invariants or source-contract errors.
 - Existing checks may fail because neighboring scaffolding is unfinished. Run
   focused checks for the touched area and clearly distinguish new failures from
   known unrelated holes.
 
 ## Design Review Priorities
 
-When reviewing this app, prioritize architectural direction over feature or UX
-completeness:
+When reviewing this app, prioritize architectural direction and the correctness
+of proved vertical slices over feature or UX completeness:
 
 1. Are responsibilities assigned to the correct subsystem?
 2. Do artifact shapes contain the facts required by their consumers without
@@ -43,10 +58,13 @@ completeness:
 4. Does the code illustrate the intended flow without speculative abstraction?
 5. Can a missing implementation be added later without overturning the public
    shape?
+6. Does a change preserve the working terrain content-to-render path without
+   promoting Explorer policy or renderer details into shared contracts?
 
-Do not review the current stubs as if they were claiming production readiness.
-Obvious no-op bodies are generally less important than a misleading domain
-model.
+Do not review unfinished subsystems as if they were claiming production
+readiness. Obvious no-op bodies are generally less important than a misleading
+domain model, but implemented terrain behavior is subject to normal correctness
+and regression scrutiny.
 
 ## Legacy Frontend
 
@@ -73,7 +91,7 @@ there is a demonstrated need.
 - Do not introduce abstractions solely to anticipate hypothetical entity,
   renderer, tile, or diagnostics requirements.
 - Comment new domain types and fields so the architectural intent survives while
-  implementations remain stubbed.
+  implementations are incomplete or still changing.
 - Add focused tests for implemented invariants and pure behavior. Do not write
   tests whose only purpose is asserting that an intentionally absent feature is
   still absent.

@@ -1,9 +1,9 @@
 import type { DynamicEntityCommit } from "../commit/types";
-import type {
-	GeometryManager,
-	GeometrySource,
-} from "../geometry/geometry-manager";
-import { createObjectGeometryKey } from "../geometry/types";
+import type { GeometryManager } from "../geometry/geometry-manager";
+import {
+	createObjectGeometryKey,
+	type GeometrySource,
+} from "../geometry/types";
 import { Mat4 } from "../math/types";
 import type { ObjectGeometryData } from "../renderer/geometry";
 import type { SceneGraph, SceneNodeId } from "../scene";

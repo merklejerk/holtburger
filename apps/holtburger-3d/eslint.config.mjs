@@ -22,6 +22,38 @@ export default tseslint.config(
 		},
 	},
 	{
+		files: ["src/lib/game/commit/**/*.ts"],
+		rules: {
+			"no-restricted-imports": [
+				"error",
+				{
+					paths: [
+						{
+							name: "../geometry/geometry-manager",
+							message:
+								"Commit artifacts must depend on geometry contracts, not GeometryManager.",
+						},
+						{
+							name: "../systems/components",
+							message:
+								"Commit artifacts must own their env-cell render contracts.",
+						},
+						{
+							name: "../systems/env-cell-system",
+							message:
+								"Commit artifacts must not depend on EnvCellSystem implementation types.",
+						},
+						{
+							name: "../systems/static-object-system",
+							message:
+								"Commit artifacts must not depend on StaticObjectSystem implementation types.",
+						},
+					],
+				},
+			],
+		},
+	},
+	{
 		files: ["scripts/**/*.mjs", "vite.config.ts"],
 		languageOptions: {
 			ecmaVersion: "latest",

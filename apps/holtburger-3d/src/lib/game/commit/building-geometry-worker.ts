@@ -45,6 +45,8 @@ export interface BuildingGeometryResult {
 		readonly bakedRangeCount: number;
 		readonly transparentRangeCount: number;
 		readonly additiveRangeCount: number;
+		/** Wall-clock algorithm time measured inside the worker boundary. */
+		readonly workerDurationMs: number;
 		readonly geometryBytes: number;
 	};
 }
@@ -75,6 +77,7 @@ interface ContributionGroup {
 export function bakeBuildingGeometry(
 	job: BuildingGeometryJob,
 ): BuildingGeometryResult | null {
+	const startedAt = performance.now();
 	const groups = new Map<string, ContributionGroup>();
 	let sourceRangeCount = 0;
 	for (const resident of job.source.staticResidents) {
@@ -194,6 +197,7 @@ export function bakeBuildingGeometry(
 				geometry.indices.byteLength,
 			sourceRangeCount,
 			transparentRangeCount: ranges.filter((range) => range.transparentSort !== null).length,
+			workerDurationMs: performance.now() - startedAt,
 		},
 		ranges,
 	};

@@ -1,6 +1,6 @@
 # Holtburger 3D Buildings Layer End-to-End Plan
 
-Status: Active. Phases 0–2 are complete; Phase 3 closed-worker implementation is active.
+Status: Active. Phases 0–3 are complete; Phase 4 installation and culling is active.
 
 ## Context and Boundaries
 
@@ -590,27 +590,27 @@ merge ranges based on page placement, or project promoted residents into a diagn
 
 #### Task Checklist
 
-- [ ] Use transferable typed-array buffers for both worker protocols.
-- [ ] Validate worker outputs before creating commit artifacts.
-- [ ] Validate that every logical texture dependency of every baked range is covered by either its
+- [x] Use transferable typed-array buffers for both worker protocols.
+- [x] Validate worker outputs before creating commit artifacts.
+- [x] Validate that every logical texture dependency of every baked range is covered by either its
       landblock texture result or the separately retained active-region detail binding before
       projecting that range one-to-one into a draw unit.
-- [ ] Prove that packing layout changes do not change geometry bytes or draw ranges.
-- [ ] Prove that a promoted resident contributes no vertices, indices, draw ranges, or texture-pack
+- [x] Prove that packing layout changes do not change geometry bytes or draw ranges.
+- [x] Prove that a promoted resident contributes no vertices, indices, draw ranges, or texture-pack
       inputs.
-- [ ] Retain source-side `ResolvedGeometry.materialSlotIndices` for triangle partitioning, but remove
+- [x] Retain source-side `ResolvedGeometry.materialSlotIndices` for triangle partitioning, but remove
       the vestigial GPU-side `ObjectGeometryData.materialSlots`, its vertex buffer/attribute,
       validation, and dynamic-preparer copy.
-- [ ] Keep one material binding per draw range for static and future dynamic object drawing rather
+- [x] Keep one material binding per draw range for static and future dynamic object drawing rather
       than reintroducing a shader material-slot table.
-- [ ] Make pipeline destruction stop accepting work, terminate both workers, and settle every
+- [x] Make pipeline destruction stop accepting work, terminate both workers, and settle every
       pending job promise without publishing partial results.
-- [ ] Do not add cooperative mid-job cancellation, algorithm chunking, or shared cancellation flags
+- [x] Do not add cooperative mid-job cancellation, algorithm chunking, or shared cancellation flags
       without profiling evidence. Dropping queued but not-yet-started jobs is optional if the worker
       executor provides it naturally.
-- [ ] Test transformed bound calculation, vertex containment, finite-value validation, and the
+- [x] Test transformed bound calculation, vertex containment, finite-value validation, and the
       all-promoted/no-static-output case.
-- [ ] Record source-range count, baked-range count, transparent-range count, additive-range count,
+- [x] Record source-range count, baked-range count, transparent-range count, additive-range count,
       geometry bytes, page count, packed bytes, and worker durations.
 
 #### Acceptance Criteria
@@ -1431,9 +1431,9 @@ Concessions and debt:
 - This correction keeps polygon ownership lossless through worker dispatch; it is required before
   geometry baking starts and does not require a product decision.
 
-### 2026-07-25 — Phase 3 progress
+### 2026-07-25 — Phase 3 complete
 
-Changes in progress:
+Changes:
 
 - Added closed, callback-free geometry and texture-packing worker kernels. Geometry composes the
   resident pose and source scale with the full default setup-part hierarchy, partitions only static
@@ -1450,7 +1450,7 @@ Changes in progress:
   gutter proves whole-page mip safety. Per-entry mip isolation remains future work if visual
   evidence demands it.
 
-Verification so far:
+Verification:
 
 - Focused geometry-worker tests cover transformed bounds, vertex containment, independent
   transparent ranges, mergeable additive ranges, and all-promoted empty output.
@@ -1458,11 +1458,13 @@ Verification so far:
   closed pixel preparation is in flight, joins only to assemble the artifact, transfers typed-array
   buffers in both directions, and rejects all unsettled jobs on destruction. It validates logical
   texture coverage before publication.
-
-Remaining Phase 3 work:
-
-- Add the remaining paired-pipeline fixtures for overlap timing, promoted-resident texture exclusion,
-  and pack-layout independence before closing the phase.
+- Controlled pipeline fixtures prove geometry and pixel preparation overlap, promoted residents
+  contribute neither static geometry nor pixel requests, missing physical coverage rejects commit
+  assembly, and changing page layout leaves geometry bytes and logical ranges unchanged.
+- The archive-backed DA55FFFF artifact assertion is deliberately exercised through the Phase 5
+  browser harness, because that is the first test environment that owns both the real browser
+  worker transport and the final source-to-render path. Its scheduler placement is recorded here
+  rather than pretending a Node fake worker proves browser transfer behavior.
 
 ### 2026-07-25 — Phase 4 progress
 

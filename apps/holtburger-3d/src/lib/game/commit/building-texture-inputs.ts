@@ -98,7 +98,7 @@ function requestMatchesKey(
 	request: TexturePreparationServiceRequest,
 	key: AssetTextureKey,
 ): boolean {
-	const [, , purpose, sourceAssetId] = key.split(":", 4);
+	const [, purpose, sourceAssetId] = key.split(":", 3);
 	if (purpose !== request.purpose) return false;
 	if (request.kind === "prepared-object-texture") {
 		return request.sourceAssetId === `surface-texture/${sourceAssetId}`;

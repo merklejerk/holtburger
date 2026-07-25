@@ -66,7 +66,7 @@ uniform int uUseDetail;
 uniform int uPalettedClipMap;
 uniform vec4 uBaseRect;
 uniform vec4 uPaletteRect;
-uniform float uPaletteWidth;
+uniform vec2 uPaletteSize;
 uniform vec4 uDetailRect;
 uniform vec4 uMaterialColor;
 uniform float uDetailTiling;
@@ -98,9 +98,11 @@ vec4 sampleMaterial() {
 		? floor(encoded.r * 255.0 + 0.5)
 		: floor(encoded.r * 255.0 + 0.5) + floor(encoded.g * 255.0 + 0.5) * 256.0;
 	if (uPalettedClipMap != 0 && index < 8.0) discard;
-	float paletteWidth = max(uPaletteWidth, 1.0);
-	float paletteUv = uPaletteRect.x + (min(index, paletteWidth - 1.0) + 0.5) / paletteWidth * (uPaletteRect.z - uPaletteRect.x);
-	return texture(uPalette, vec2(paletteUv, (uPaletteRect.y + uPaletteRect.w) * 0.5)) * uMaterialColor;
+	vec2 paletteSize = max(uPaletteSize, vec2(1.0));
+	if (index >= paletteSize.x * paletteSize.y) return vec4(0.0);
+	vec2 paletteCoordinate = vec2(mod(index, paletteSize.x), floor(index / paletteSize.x));
+	vec2 paletteUv = uPaletteRect.xy + (paletteCoordinate + vec2(0.5)) / paletteSize * (uPaletteRect.zw - uPaletteRect.xy);
+	return texture(uPalette, paletteUv) * uMaterialColor;
 }
 
 void main() {
@@ -134,7 +136,7 @@ export interface WebGL2ObjectProgram {
 		readonly materialKind: WebGLUniformLocation;
 		readonly palette: WebGLUniformLocation;
 		readonly paletteRect: WebGLUniformLocation;
-		readonly paletteWidth: WebGLUniformLocation;
+		readonly paletteSize: WebGLUniformLocation;
 		readonly palettedClipMap: WebGLUniformLocation;
 		readonly projection: WebGLUniformLocation;
 		readonly useDetail: WebGLUniformLocation;
@@ -208,7 +210,7 @@ export function createWebGL2ObjectProgram(
 				materialKind: requireWebGL2Uniform(gl, program, "uMaterialKind"),
 				palette: requireWebGL2Uniform(gl, program, "uPalette"),
 				paletteRect: requireWebGL2Uniform(gl, program, "uPaletteRect"),
-				paletteWidth: requireWebGL2Uniform(gl, program, "uPaletteWidth"),
+				paletteSize: requireWebGL2Uniform(gl, program, "uPaletteSize"),
 				palettedClipMap: requireWebGL2Uniform(gl, program, "uPalettedClipMap"),
 				projection: requireWebGL2Uniform(gl, program, "uProjection"),
 				useDetail: requireWebGL2Uniform(gl, program, "uUseDetail"),

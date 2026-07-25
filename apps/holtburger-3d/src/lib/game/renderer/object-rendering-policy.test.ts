@@ -62,6 +62,17 @@ describe("object fragment variants", () => {
 			"uCameraHorizontalPosition",
 		);
 	});
+
+	it("maps palette indices through square palette payloads", () => {
+		const shader = createObjectFragmentShader(false);
+		expect(shader).toContain("uniform vec2 uPaletteSize;");
+		expect(shader).toContain(
+			"if (index >= paletteSize.x * paletteSize.y) return vec4(0.0);",
+		);
+		expect(shader).toContain(
+			"vec2 paletteCoordinate = vec2(mod(index, paletteSize.x), floor(index / paletteSize.x));",
+		);
+	});
 });
 
 describe("objectBlendPolicy", () => {

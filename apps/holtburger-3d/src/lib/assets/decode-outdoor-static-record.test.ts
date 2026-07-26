@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest";
 import type { LandblockId } from "../game/game-types";
-import { decodeBuildingSource } from "./decode-building-source";
+import { LandblockLayerKind } from "../game/runtime/scene-interest";
+import type { ActiveRegionSource } from "./active-region-source";
+import { decodeLandblockSourceBatch } from "./decode-landblock-source-batch";
+import { decodeOutdoorStaticRecord } from "./decode-outdoor-static-record";
 
 const LANDBLOCK_ID = "0xda55ffff" as LandblockId;
 
-describe("decodeBuildingSource", () => {
+describe("decodeOutdoorStaticRecord", () => {
 	it("decodes a closed direct and setup-backed source bundle", () => {
-		const source = decodeBuildingSource(buildResponse(), LANDBLOCK_ID);
+		const source = decodeOutdoorStaticRecord(
+			buildResponse(),
+			LANDBLOCK_ID,
+			LandblockLayerKind.Buildings,
+		);
 
 		expect(source.staticResidents).toHaveLength(1);
 		expect(source.dynamicResidents).toHaveLength(1);
@@ -18,20 +25,56 @@ describe("decodeBuildingSource", () => {
 		);
 	});
 
+	it("decodes a Level 2 object record with its typed layer identity", () => {
+		const source = decodeOutdoorStaticRecord(
+			buildResponse({ layer: "objects" }),
+			LANDBLOCK_ID,
+			LandblockLayerKind.Objects,
+		);
+
+		expect(source.kind).toBe(LandblockLayerKind.Objects);
+		expect(source.staticResidents).toHaveLength(1);
+		expect(source.dynamicResidents).toHaveLength(1);
+	});
+
+	it("decodes an object record nested in a matching landblock batch", () => {
+		const source = decodeLandblockSourceBatch(
+			batchResponse(
+				buildResponse({ layer: "objects" }),
+				LandblockLayerKind.Objects,
+			),
+			LANDBLOCK_ID,
+			new Set([LandblockLayerKind.Objects]),
+			{} as ActiveRegionSource,
+		);
+
+		expect(source.records.get(LandblockLayerKind.Objects)?.kind).toBe(
+			LandblockLayerKind.Objects,
+		);
+	});
+
 	it("rejects a resident whose closed source definition is absent", () => {
 		const response = buildResponse({
 			residents: [{ ...resident("direct"), source: "missing" }],
 		});
-		expect(() => decodeBuildingSource(response, LANDBLOCK_ID)).toThrow(
-			"references missing source",
-		);
+		expect(() =>
+			decodeOutdoorStaticRecord(
+				response,
+				LANDBLOCK_ID,
+				LandblockLayerKind.Buildings,
+			),
+		).toThrow("references missing source");
 	});
 
 	it("rejects an out-of-range index before publishing a source", () => {
 		const response = buildResponse({ indices: [0, 1, 3] });
-		expect(() => decodeBuildingSource(response, LANDBLOCK_ID)).toThrow(
-			"out-of-range index",
-		);
+		expect(() =>
+			decodeOutdoorStaticRecord(
+				response,
+				LANDBLOCK_ID,
+				LandblockLayerKind.Buildings,
+			),
+		).toThrow("out-of-range index");
 	});
 });
 
@@ -39,6 +82,7 @@ function buildResponse(
 	options: {
 		readonly residents?: readonly Record<string, unknown>[];
 		readonly indices?: readonly number[];
+		readonly layer?: "buildings" | "objects";
 	} = {},
 ): Uint8Array {
 	const positions = Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]);
@@ -79,7 +123,7 @@ function buildResponse(
 		const result = {
 			name: names[index],
 			scalarType:
-			index < 3 ? "f32" : index === 3 ? "u32" : index === 4 ? "u16" : "u8",
+				index < 3 ? "f32" : index === 3 ? "u32" : index === 4 ? "u16" : "u8",
 			elementCount: part.length,
 			byteOffset,
 			byteLength: part.byteLength,
@@ -92,11 +136,12 @@ function buildResponse(
 		payload.set(new Uint8Array(part.buffer), sections[index]!.byteOffset);
 	}
 	const manifest = {
-		transport: "holtburger-building-source",
-		version: 4,
+		transport: "holtburger-outdoor-static-record",
+		version: 1,
 		byteOrder: "little-endian",
 		sectionByteOffsetBase: "section-data",
 		landblockId: LANDBLOCK_ID,
+		layer: options.layer ?? "buildings",
 		residents: options.residents ?? [resident("direct"), resident("animated")],
 		definitions: [
 			{
@@ -170,8 +215,8 @@ function buildResponse(
 	paddedManifest.fill(0x20);
 	paddedManifest.set(manifestBytes);
 	const response = new Uint8Array(16 + paddedManifest.length + payload.length);
-	response.set(new TextEncoder().encode("HBBL"));
-	new DataView(response.buffer).setUint32(4, 4, true);
+	response.set(new TextEncoder().encode("HBSO"));
+	new DataView(response.buffer).setUint32(4, 1, true);
 	new DataView(response.buffer).setUint32(8, paddedManifest.length, true);
 	new DataView(response.buffer).setUint32(12, response.length, true);
 	response.set(paddedManifest, 16);
@@ -187,4 +232,31 @@ function resident(source: string): Record<string, unknown> {
 		scale: [1, 1, 1],
 		localBounds: { min: [0, 0, 0], max: [1, 1, 0] },
 	};
+}
+
+function batchResponse(
+	record: Uint8Array,
+	layer: LandblockLayerKind,
+): Uint8Array {
+	const manifest = {
+		byteOrder: "little-endian",
+		landblockId: LANDBLOCK_ID,
+		recordByteOffsetBase: "record-data",
+		records: [{ byteLength: record.byteLength, byteOffset: 0, layer }],
+		requestedLayers: [layer],
+		transport: "holtburger-landblock-source-batch",
+		version: 1,
+	};
+	const encodedManifest = new TextEncoder().encode(JSON.stringify(manifest));
+	const manifestLength = Math.ceil((16 + encodedManifest.length) / 4) * 4 - 16;
+	const response = new Uint8Array(16 + manifestLength + record.byteLength);
+	response.set(new TextEncoder().encode("HBLB"));
+	const view = new DataView(response.buffer);
+	view.setUint32(4, 1, true);
+	view.setUint32(8, manifestLength, true);
+	view.setUint32(12, response.byteLength, true);
+	response.fill(0x20, 16, 16 + manifestLength);
+	response.set(encodedManifest, 16);
+	response.set(record, 16 + manifestLength);
+	return response;
 }

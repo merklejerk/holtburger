@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ActiveRegionSource } from "./active-region-source";
-import { decodeTerrainSource } from "./decode-terrain-source";
+import { decodeLandblockTerrainRecord } from "./decode-landblock-terrain-record";
 import type { LandblockId } from "../game/game-types";
 import { resolveActiveRegionTerrainPresentation } from "../game/terrain/active-region-terrain-resolver";
 
@@ -56,9 +56,9 @@ const ACTIVE_REGION: ActiveRegionSource = {
 	),
 };
 
-describe("decodeTerrainSource", () => {
+describe("decodeLandblockTerrainRecord", () => {
 	it("resolves raw terrain samples through the installed active region", () => {
-		const source = decodeTerrainSource(
+		const source = decodeLandblockTerrainRecord(
 			terrainResponse(),
 			LANDBLOCK_ID,
 			ACTIVE_REGION,
@@ -73,7 +73,7 @@ describe("decodeTerrainSource", () => {
 
 	it("rejects a response for another landblock", () => {
 		expect(() =>
-			decodeTerrainSource(
+			decodeLandblockTerrainRecord(
 				terrainResponse({ landblockId: "0x0103ffff" }),
 				LANDBLOCK_ID,
 				ACTIVE_REGION,
@@ -84,7 +84,7 @@ describe("decodeTerrainSource", () => {
 	it("rejects a truncated binary response", () => {
 		const response = terrainResponse();
 		expect(() =>
-			decodeTerrainSource(
+			decodeLandblockTerrainRecord(
 				response.subarray(0, -1),
 				LANDBLOCK_ID,
 				ACTIVE_REGION,
@@ -94,14 +94,14 @@ describe("decodeTerrainSource", () => {
 
 	it("accepts only a missing outdoor record as a terrain-absent result", () => {
 		expect(
-			decodeTerrainSource(
+			decodeLandblockTerrainRecord(
 				terrainResponse({ terrainAvailability: "missing-cell-landblock" }),
 				LANDBLOCK_ID,
 				ACTIVE_REGION,
 			),
 		).toBeNull();
 		expect(() =>
-			decodeTerrainSource(
+			decodeLandblockTerrainRecord(
 				terrainResponse({
 					terrainAvailability: "cell-landblock-decode-failed",
 				}),
@@ -214,7 +214,7 @@ function terrainResponse(
 				},
 			],
 			terrainAvailability: options.terrainAvailability ?? "available",
-			transport: "holtburger-terrain-source",
+			transport: "holtburger-landblock-terrain-record",
 			version: 1,
 		}),
 	);

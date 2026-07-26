@@ -1,6 +1,12 @@
-import type { LandblockBuildingSource } from "../../assets/landblock-building-source";
-import type { LandblockTerrainSource } from "../../assets/landblock-terrain-source";
-import type { ResolvedTerrainLayerSource } from "../resolution/landblock-layer";
+import type {
+	LandblockSourceBatch,
+	LandblockSourceBatchSource,
+	LandblockSourceLayer,
+} from "../../assets/landblock-source-batch";
+import type {
+	ResolvedObjectLayerSource,
+	ResolvedTerrainLayerSource,
+} from "../resolution/landblock-layer";
 import {
 	LandblockLayerKind,
 	type LandblockIdLayer,
@@ -14,17 +20,14 @@ import {
 
 /** Composite source and worker dependencies owned by the standard landblock commit pipeline. */
 export interface StandardCommitPipelineDependencies {
-	readonly terrainSource: LandblockTerrainSource;
-	readonly buildingSource?: LandblockBuildingSource;
+	readonly sourceBatch: LandblockSourceBatchSource;
 }
 
 export class StandardCommitPipeline implements CommitPipeline {
-	readonly #terrainSource: LandblockTerrainSource;
-	readonly #buildingSource: LandblockBuildingSource | null;
+	readonly #sourceBatch: LandblockSourceBatchSource;
 
 	protected constructor(dependencies: StandardCommitPipelineDependencies) {
-		this.#terrainSource = dependencies.terrainSource;
-		this.#buildingSource = dependencies.buildingSource ?? null;
+		this.#sourceBatch = dependencies.sourceBatch;
 	}
 
 	static async build(
@@ -36,20 +39,76 @@ export class StandardCommitPipeline implements CommitPipeline {
 	async prepareLandblockLayers(
 		layers: ReadonlySet<LandblockIdLayer>,
 	): Promise<readonly CommitBundle[]> {
+		const byLandblock = new Map<string, LandblockIdLayer[]>();
+		for (const layer of layers) {
+			const group = byLandblock.get(layer.id);
+			if (group) group.push(layer);
+			else byLandblock.set(layer.id, [layer]);
+		}
 		const bundles = await Promise.all(
-			[...layers].map((layer) => this.#prepareLandblockLayer(layer)),
+			[...byLandblock.values()].map((group) =>
+				this.#prepareLandblockBatch(group),
+			),
 		);
-		return bundles.filter((bundle): bundle is CommitBundle => bundle !== null);
+		return bundles.flat();
 	}
 
 	async destroy(): Promise<void> {}
 
-	async #prepareLandblockLayer(
+	async #prepareLandblockBatch(
+		layers: readonly LandblockIdLayer[],
+	): Promise<readonly CommitBundle[]> {
+		const landblockId = layers[0]?.id;
+		if (!landblockId) return [];
+		if (layers.some((layer) => layer.id !== landblockId)) {
+			throw new Error(
+				"Landblock source batches must contain one landblock identity.",
+			);
+		}
+		const requestedLayers = new Set<LandblockSourceLayer>();
+		for (const layer of layers) {
+			if (
+				layer.layer !== LandblockLayerKind.Terrain &&
+				layer.layer !== LandblockLayerKind.Buildings
+			) {
+				throw new Error(
+					`No typed source capability exists yet for ${describeLayer(layer)}.`,
+				);
+			}
+			requestedLayers.add(layer.layer);
+		}
+		const sourceBatch = await this.#sourceBatch.loadLandblockSourceBatch(
+			landblockId,
+			requestedLayers,
+		);
+		if (sourceBatch.landblockId !== landblockId) {
+			throw new Error(
+				`Loaded source batch for ${sourceBatch.landblockId} instead of ${landblockId}.`,
+			);
+		}
+		return layers.flatMap((layer) =>
+			this.#prepareSourceRecord(sourceBatch, layer),
+		);
+	}
+
+	#prepareSourceRecord(
+		batch: LandblockSourceBatch,
 		layer: LandblockIdLayer,
-	): Promise<CommitBundle | null> {
+	): CommitBundle | [] {
+		if (
+			layer.layer !== LandblockLayerKind.Terrain &&
+			layer.layer !== LandblockLayerKind.Buildings
+		) {
+			throw new Error(
+				`No typed source capability exists yet for ${describeLayer(layer)}.`,
+			);
+		}
+		const source = batch.records.get(layer.layer);
+		if (source === undefined) {
+			throw new Error(`Source batch omitted ${describeLayer(layer)}.`);
+		}
 		if (layer.layer === LandblockLayerKind.Terrain) {
-			const source = await this.#terrainSource.loadTerrainSource(layer.id);
-			if (source === null) return null;
+			if (source === null) return [];
 			if (
 				source.kind !== LandblockLayerKind.Terrain ||
 				source.landblockId !== layer.id
@@ -60,12 +119,20 @@ export class StandardCommitPipeline implements CommitPipeline {
 			}
 			return this.#prepareTerrainLayer(source);
 		}
-		if (layer.layer !== LandblockLayerKind.Buildings) {
+		if (source === null) {
 			throw new Error(
-				`No typed source capability exists yet for ${describeLayer(layer)}.`,
+				`Source batch returned no source for ${describeLayer(layer)}.`,
 			);
 		}
-		return this.#prepareBuildingLayer(layer);
+		if (
+			source.kind !== LandblockLayerKind.Buildings ||
+			source.landblockId !== layer.id
+		) {
+			throw new Error(
+				`Loaded ${source.landblockId}/${source.kind} for ${describeLayer(layer)}.`,
+			);
+		}
+		return this.#prepareBuildingLayer(source);
 	}
 
 	#prepareTerrainLayer(source: ResolvedTerrainLayerSource): CommitBundle {
@@ -87,21 +154,7 @@ export class StandardCommitPipeline implements CommitPipeline {
 		};
 	}
 
-	async #prepareBuildingLayer(
-		layer: LandblockIdLayer,
-	): Promise<CommitBundle | null> {
-		const source = await this.#requireBuildingSource().loadBuildingSource(
-			layer.id,
-		);
-		if (source === null) return null;
-		if (
-			source.kind !== LandblockLayerKind.Buildings ||
-			source.landblockId !== layer.id
-		) {
-			throw new Error(
-				`Loaded ${source.landblockId}/${source.kind} for ${describeLayer(layer)}.`,
-			);
-		}
+	#prepareBuildingLayer(source: ResolvedObjectLayerSource): CommitBundle {
 		return {
 			commit: { source },
 			dynamicEntities: source.dynamicResidents,
@@ -109,12 +162,6 @@ export class StandardCommitPipeline implements CommitPipeline {
 			landblockId: source.landblockId,
 			layer: LandblockLayerKind.Buildings,
 		};
-	}
-
-	#requireBuildingSource(): LandblockBuildingSource {
-		if (this.#buildingSource === null)
-			throw new Error("Building source capability is unavailable.");
-		return this.#buildingSource;
 	}
 }
 

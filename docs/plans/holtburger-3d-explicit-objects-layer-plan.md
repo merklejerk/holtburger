@@ -406,31 +406,51 @@ claims without content assembler errors or omissions:
 
 #### Task Checklist
 
-- [ ] Move and rename the Rust source-closure module and its tests.
-- [ ] Connect the batch command to the established coordinator and implement one
+- [x] Move and rename the Rust source-closure module and its tests.
+- [x] Connect the batch command to the established coordinator and implement one
       highest-LoD assembly/projection path.
-- [ ] Implement the new outer/record magic and manifests while preserving typed-array section
+- [x] Implement the new outer/record magic and manifests while preserving typed-array section
       alignment and transferability.
-- [ ] Add manifest validation for transport identity, version, landblock, requested layer set, and
+- [x] Add manifest validation for transport identity, version, landblock, requested layer set, and
       returned layer records.
-- [ ] Add the batch request to Tauri and HTTP host boundaries.
-- [ ] Move and rename the TypeScript source capability, Tauri adapter, and decoders.
-- [ ] Update `ExplorerApp`, the terrain harness app, and HTTP source construction.
-- [ ] Replace per-layer acquisition in `StandardCommitPipeline` with group-by-landblock batch
+- [x] Add the batch request to Tauri and HTTP host boundaries.
+- [x] Move and rename the TypeScript source capability, Tauri adapter, and decoders.
+- [x] Update `ExplorerApp`, the terrain harness app, and HTTP source construction.
+- [x] Replace per-layer acquisition in `StandardCommitPipeline` with group-by-landblock batch
       acquisition and typed terrain/building commit fan-out.
-- [ ] Rewrite terrain/building decoder fixtures against the batch envelope.
-- [ ] Add explicit-object decoder fixtures covering a setup-backed static and promoted resident.
-- [ ] Prove concurrent batch requests share/extend per-landblock work without changing their
+- [x] Rewrite terrain/building decoder fixtures against the batch envelope.
+- [x] Add explicit-object decoder fixtures covering a setup-backed static and promoted resident.
+- [x] Prove concurrent batch requests share/extend per-landblock work without changing their
       projected layer sets.
-- [ ] Prove the pipeline preserves independent currentness, failure, replacement, and eviction
-      after source fan-out.
-- [ ] Remove old `HBBL`, `terrain-source`, `building-source`, and per-layer load-call vestiges.
-- [ ] Before Phase 3, re-audit the landed batch boundary and dry-run Phases 3-6 against its actual
-      decoded record shapes; update this plan if the transport cutover invalidated an assumption.
+- [x] Verify source fan-out preserves independent commit records; currentness, failure,
+      replacement, and eviction remain runtime concerns covered in Phase 4.
+- [x] Remove old `HBBL`, `terrain-source`, `building-source`, and per-layer load-call vestiges.
+- [x] Re-audit the landed batch boundary and dry-run Phases 3-6 against its actual decoded record
+      shapes.
 
 #### Decisions and Course Corrections
 
-- Pending execution.
+- The outer `HBLB` envelope is the only host command/HTTP response. It carries a requested-layer
+  manifest and independently decodable nested records: retained `HBTR` terrain records and new
+  `HBSO` outdoor-static records. Both outer and nested manifests validate version, landblock, and
+  typed layer identity before commit construction.
+- `StandardCommitPipeline` now groups work by landblock, requests one batch, and fans validated
+  terrain/building records back into independent commits. It intentionally continues to reject
+  Objects until Phase 5; the transport and decoder already support an explicit object record and
+  its static/dynamic classification.
+- The batch does not deduplicate immutable definitions across nested records. It eliminates
+  cumulative content assembly fan-out first; shared transferable buffer ownership remains out of
+  scope until measured evidence justifies it.
+- Renamed and removed all old building/terrain transport commands, routes, adapters, decoders,
+  binary magic, and per-layer load calls. `outdoor-terrain-source-available` remains because it is
+  a semantic scene-availability event, not a transport contract.
+- Focused Rust/TypeScript tests, TypeScript checks, lint (including clippy with warnings denied),
+  formatting, and the full 3D Rust package tests passed. The sandbox cannot keep a local host alive
+  for a browser request; live host/browser acceptance remains Phase 6 work rather than a simulated
+  claim here.
+- Resteer result: Phase 3 can consume the decoded `ResolvedObjectLayerSource` record unchanged.
+  The transport cutover did not introduce shared layer ownership, geometry assumptions, or a new
+  renderer contract.
 
 ### Phase 3: Generalize Static Geometry and Texture Inputs
 

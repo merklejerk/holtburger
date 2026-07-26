@@ -11,8 +11,7 @@
 	import { StandardCommitPipeline } from "../lib/game/commit/pipeline";
 	import { WebGL2Device } from "../lib/game/renderer/webgl2-device";
 	import { TauriActiveRegionSource } from "../lib/assets/tauri-active-region-source";
-	import { TauriLandblockTerrainSource } from "../lib/assets/tauri-landblock-terrain-source";
-	import { TauriLandblockBuildingSource } from "../lib/assets/tauri-landblock-building-source";
+	import { TauriLandblockSourceBatch } from "../lib/assets/tauri-landblock-source-batch";
 	import { TauriTexturePixelSource } from "../lib/assets/tauri-texture-pixel-source";
 	import type { LoDConfig } from "../lib/game/runtime/types";
 	import type { SceneResidency } from "../lib/game/scene";
@@ -167,7 +166,7 @@
 				activeRegionSource = TauriActiveRegionSource.build();
 				activeRegion = await activeRegionSource.load();
 				if (destroyed) return;
-				const terrainSource = TauriLandblockTerrainSource.build(activeRegion);
+				const sourceBatch = TauriLandblockSourceBatch.build(activeRegion);
 				const texturePixelSource = TauriTexturePixelSource.build();
 				objectDetailOwner = new ActiveRegionObjectDetailOwner(
 					texturePixelSource,
@@ -178,8 +177,7 @@
 				webglDevice = await WebGL2Device.build(canvasElement!);
 				if (destroyed) return;
 				commitPipeline = await StandardCommitPipeline.build({
-					buildingSource: TauriLandblockBuildingSource.build(),
-					terrainSource,
+					sourceBatch,
 				});
 				if (destroyed) return;
 

@@ -9,14 +9,14 @@ use holtburger_core::{ContentAsset, ContentAssetRequest, ContentAssetRuntime};
 use serde::Serialize;
 use serde_json::{Value, json};
 
-pub(crate) const BUILDING_SOURCE_BINARY_MAGIC: &[u8; 4] = b"HBBL";
-pub(crate) const BUILDING_SOURCE_BINARY_VERSION: u32 = 4;
-const BUILDING_SOURCE_BINARY_HEADER_LEN: usize = 16;
+pub(crate) const OUTDOOR_STATIC_RECORD_BINARY_MAGIC: &[u8; 4] = b"HBSO";
+pub(crate) const OUTDOOR_STATIC_RECORD_BINARY_VERSION: u32 = 1;
+const OUTDOOR_STATIC_RECORD_BINARY_HEADER_LEN: usize = 16;
 
-/// Closed Level 1 source data accumulated before it crosses the app boundary.
+/// Closed source data for one outdoor static layer before it crosses the app boundary.
 #[derive(Default)]
-pub(crate) struct BuildingSourceClosure {
-    pub(crate) buffers: BuildingGeometryBuffers,
+pub(crate) struct OutdoorStaticSourceClosure {
+    pub(crate) buffers: OutdoorStaticGeometryBuffers,
     pub(crate) definitions: Vec<Value>,
     definition_ids: BTreeMap<u32, String>,
     pub(crate) geometries: Vec<Value>,
@@ -25,7 +25,7 @@ pub(crate) struct BuildingSourceClosure {
     pub(crate) texture_dependencies: BTreeMap<String, Value>,
 }
 
-impl BuildingSourceClosure {
+impl OutdoorStaticSourceClosure {
     pub(crate) async fn add_resident(
         &mut self,
         runtime: &ContentAssetRuntime,
@@ -36,7 +36,7 @@ impl BuildingSourceClosure {
             0x01 => self.add_gfx_object_definition(runtime, source_did).await,
             0x02 => self.add_setup_model_definition(runtime, source_did).await,
             family => anyhow::bail!(
-                "building {} has unsupported render source family 0x{family:02X} ({})",
+                "outdoor static {} has unsupported render source family 0x{family:02X} ({})",
                 member.instance.instance_id,
                 member.instance.source_asset_id
             ),
@@ -280,20 +280,20 @@ impl BuildingSourceClosure {
         }
     }
 
-    pub(crate) fn sections(&self) -> Vec<BuildingBinarySectionManifest> {
+    pub(crate) fn sections(&self) -> Vec<OutdoorStaticBinarySectionManifest> {
         self.buffers.sections()
     }
 
     pub(crate) fn validate(&self) -> Result<()> {
         if self.geometries.iter().any(|geometry| !geometry.is_object()) {
-            anyhow::bail!("building geometry manifest contains a non-object record");
+            anyhow::bail!("outdoor static geometry manifest contains a non-object record");
         }
         Ok(())
     }
 }
 
 #[derive(Default)]
-pub(crate) struct BuildingGeometryBuffers {
+pub(crate) struct OutdoorStaticGeometryBuffers {
     pub(crate) positions: Vec<f32>,
     pub(crate) normals: Vec<f32>,
     pub(crate) texture_coordinates: Vec<f32>,
@@ -309,8 +309,8 @@ pub(crate) struct BuildingGeometryBuffers {
     pub(crate) material_stippling: Vec<u8>,
 }
 
-impl BuildingGeometryBuffers {
-    pub(crate) fn sections(&self) -> Vec<BuildingBinarySectionManifest> {
+impl OutdoorStaticGeometryBuffers {
+    pub(crate) fn sections(&self) -> Vec<OutdoorStaticBinarySectionManifest> {
         let mut byte_offset = 0;
         let mut sections = Vec::new();
         for (name, scalar_type, element_count, alignment) in [
@@ -331,7 +331,7 @@ impl BuildingGeometryBuffers {
         ] {
             byte_offset = align_binary_section_offset(byte_offset, alignment);
             let byte_length = element_count * scalar_size(scalar_type);
-            sections.push(BuildingBinarySectionManifest {
+            sections.push(OutdoorStaticBinarySectionManifest {
                 name: name.to_owned(),
                 scalar_type,
                 element_count,
@@ -522,23 +522,25 @@ pub(crate) fn prepared_aabb_json(bounds: &holtburger_content::PreparedAabb) -> V
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct BuildingSourceManifest {
+pub(crate) struct OutdoorStaticSourceRecordManifest {
     pub(crate) transport: &'static str,
     pub(crate) version: u32,
     pub(crate) byte_order: &'static str,
     pub(crate) section_byte_offset_base: &'static str,
     pub(crate) landblock_id: String,
+    /// Typed layer identity consumed by the record decoder and batch projection.
+    pub(crate) layer: &'static str,
     pub(crate) residents: Vec<Value>,
     pub(crate) definitions: Vec<Value>,
     pub(crate) geometries: Vec<Value>,
     pub(crate) materials: Vec<Value>,
     pub(crate) texture_dependencies: Vec<Value>,
-    pub(crate) sections: Vec<BuildingBinarySectionManifest>,
+    pub(crate) sections: Vec<OutdoorStaticBinarySectionManifest>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct BuildingBinarySectionManifest {
+pub(crate) struct OutdoorStaticBinarySectionManifest {
     name: String,
     scalar_type: &'static str,
     element_count: usize,
@@ -546,20 +548,20 @@ pub(crate) struct BuildingBinarySectionManifest {
     byte_length: usize,
 }
 
-pub(crate) fn serialize_building_source_binary(
-    manifest: &BuildingSourceManifest,
-    buffers: &BuildingGeometryBuffers,
+pub(crate) fn serialize_outdoor_static_record_binary(
+    manifest: &OutdoorStaticSourceRecordManifest,
+    buffers: &OutdoorStaticGeometryBuffers,
 ) -> Result<Vec<u8>> {
     let mut manifest_bytes = serde_json::to_vec(manifest)?;
-    while !(BUILDING_SOURCE_BINARY_HEADER_LEN + manifest_bytes.len()).is_multiple_of(4) {
+    while !(OUTDOOR_STATIC_RECORD_BINARY_HEADER_LEN + manifest_bytes.len()).is_multiple_of(4) {
         manifest_bytes.push(b' ');
     }
     let section_bytes = buffers.bytes();
     let total_length =
-        BUILDING_SOURCE_BINARY_HEADER_LEN + manifest_bytes.len() + section_bytes.len();
+        OUTDOOR_STATIC_RECORD_BINARY_HEADER_LEN + manifest_bytes.len() + section_bytes.len();
     let mut bytes = Vec::with_capacity(total_length);
-    bytes.extend(BUILDING_SOURCE_BINARY_MAGIC);
-    bytes.extend(BUILDING_SOURCE_BINARY_VERSION.to_le_bytes());
+    bytes.extend(OUTDOOR_STATIC_RECORD_BINARY_MAGIC);
+    bytes.extend(OUTDOOR_STATIC_RECORD_BINARY_VERSION.to_le_bytes());
     bytes.extend(u32::try_from(manifest_bytes.len())?.to_le_bytes());
     bytes.extend(u32::try_from(total_length)?.to_le_bytes());
     bytes.extend(manifest_bytes);

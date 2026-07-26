@@ -23,7 +23,7 @@ type TerrainAvailability =
 	| "terrain-assembly-failed";
 
 interface TerrainSourceManifest {
-	readonly transport: "holtburger-terrain-source";
+	readonly transport: "holtburger-landblock-terrain-record";
 	readonly version: number;
 	readonly byteOrder: "little-endian";
 	readonly sectionByteOffsetBase: "section-data";
@@ -33,15 +33,15 @@ interface TerrainSourceManifest {
 	readonly sections: readonly BinarySection[];
 }
 
-/** Decode and validate one versioned binary terrain-source host response. */
-export function decodeTerrainSource(
+/** Decode and validate one terrain record nested in a landblock source batch. */
+export function decodeLandblockTerrainRecord(
 	response: Uint8Array,
 	requestedLandblockId: LandblockId,
 	activeRegion: ActiveRegionSource,
 ): ResolvedTerrainLayerSource | null {
 	if (response.byteLength < HEADER_LENGTH) {
 		throw new Error(
-			"Terrain source response is shorter than its binary header.",
+			"Landblock terrain record is shorter than its binary header.",
 		);
 	}
 	const view = new DataView(
@@ -51,21 +51,23 @@ export function decodeTerrainSource(
 	);
 	const magic = new TextDecoder().decode(response.subarray(0, 4));
 	if (magic !== MAGIC)
-		throw new Error(`Unexpected terrain source magic ${magic}.`);
+		throw new Error(`Unexpected landblock terrain record magic ${magic}.`);
 	const version = view.getUint32(4, true);
 	if (version !== VERSION) {
-		throw new Error(`Unsupported terrain source version ${version}.`);
+		throw new Error(`Unsupported landblock terrain record version ${version}.`);
 	}
 	const manifestLength = view.getUint32(8, true);
 	const totalLength = view.getUint32(12, true);
 	if (totalLength !== response.byteLength) {
 		throw new Error(
-			`Terrain source length is ${response.byteLength}; header declares ${totalLength}.`,
+			`Landblock terrain record length is ${response.byteLength}; header declares ${totalLength}.`,
 		);
 	}
 	const sectionDataOffset = HEADER_LENGTH + manifestLength;
 	if (sectionDataOffset > response.byteLength) {
-		throw new Error("Terrain source manifest exceeds the binary response.");
+		throw new Error(
+			"Landblock terrain record manifest exceeds the binary response.",
+		);
 	}
 	const manifest = parseManifest(
 		new TextDecoder().decode(
@@ -76,13 +78,13 @@ export function decodeTerrainSource(
 		manifest.landblockId.toLowerCase() !== requestedLandblockId.toLowerCase()
 	) {
 		throw new Error(
-			`Terrain source returned ${manifest.landblockId} for ${requestedLandblockId}.`,
+			`Landblock terrain record returned ${manifest.landblockId} for ${requestedLandblockId}.`,
 		);
 	}
 	if (manifest.terrainAvailability !== "available") {
 		if (manifest.terrainAvailability === "missing-cell-landblock") return null;
 		throw new Error(
-			`Terrain source is unavailable: ${manifest.terrainAvailability}.`,
+			`Landblock terrain record is unavailable: ${manifest.terrainAvailability}.`,
 		);
 	}
 	const sections = new Map(
@@ -90,7 +92,7 @@ export function decodeTerrainSource(
 	);
 	if (sections.size !== 2 || sections.size !== manifest.sections.length) {
 		throw new Error(
-			"Terrain source must contain each raw grid section exactly once.",
+			"Landblock terrain record must contain each raw grid section exactly once.",
 		);
 	}
 	const expectedCount = OUTDOOR_TERRAIN_GRID_SIZE ** 2;
@@ -122,7 +124,7 @@ function parseManifest(serialized: string): TerrainSourceManifest {
 	if (!isRecord(manifest))
 		throw new Error("Terrain source manifest is not an object.");
 	if (
-		manifest.transport !== "holtburger-terrain-source" ||
+		manifest.transport !== "holtburger-landblock-terrain-record" ||
 		manifest.version !== VERSION ||
 		manifest.byteOrder !== "little-endian" ||
 		manifest.sectionByteOffsetBase !== "section-data" ||
@@ -130,7 +132,9 @@ function parseManifest(serialized: string): TerrainSourceManifest {
 		!isTerrainAvailability(manifest.terrainAvailability) ||
 		!Array.isArray(manifest.sections)
 	) {
-		throw new Error("Terrain source manifest has an incompatible contract.");
+		throw new Error(
+			"Landblock terrain record manifest has an incompatible contract.",
+		);
 	}
 	return manifest as unknown as TerrainSourceManifest;
 }
@@ -179,7 +183,9 @@ function readSection<TArray extends Uint8Array | Uint16Array>(
 		start < sectionDataOffset ||
 		end > response.byteLength
 	) {
-		throw new Error(`Terrain source ${section.name} byte range is invalid.`);
+		throw new Error(
+			`Landblock terrain record ${section.name} byte range is invalid.`,
+		);
 	}
 	const bytes = Uint8Array.from(response.subarray(start, end));
 	return new ArrayType(bytes.buffer, 0, section.elementCount);

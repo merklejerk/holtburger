@@ -15,8 +15,8 @@ import type {
 import { classifyObjectResidents } from "../game/resolution/object-resident-classifier";
 
 const HEADER_LENGTH = 16;
-const MAGIC = "HBBL";
-const VERSION = 4;
+const MAGIC = "HBSO";
+const VERSION = 1;
 const datId = z.string().regex(/^0x[0-9a-f]{8}$/i);
 const finiteNumber = z.number().finite();
 const vec3 = z.tuple([finiteNumber, finiteNumber, finiteNumber]);
@@ -128,11 +128,12 @@ const setupDefinition = z.object({
 	defaultSoundTableId: datId.nullable(),
 });
 const manifestSchema = z.object({
-	transport: z.literal("holtburger-building-source"),
+	transport: z.literal("holtburger-outdoor-static-record"),
 	version: z.literal(VERSION),
 	byteOrder: z.literal("little-endian"),
 	sectionByteOffsetBase: z.literal("section-data"),
 	landblockId: datId,
+	layer: z.enum([LandblockLayerKind.Buildings, LandblockLayerKind.Objects]),
 	residents: z.array(
 		z.object({
 			id: z.string().min(1),
@@ -156,19 +157,21 @@ const manifestSchema = z.object({
 	sections: z.array(section),
 });
 
-type BuildingManifest = z.infer<typeof manifestSchema>;
-type BuildingGeometry = z.infer<typeof geometry>;
-type BuildingMaterial = z.infer<typeof material>;
+type OutdoorStaticRecordManifest = z.infer<typeof manifestSchema>;
+type OutdoorStaticGeometry = z.infer<typeof geometry>;
+type OutdoorStaticMaterial = z.infer<typeof material>;
+export type OutdoorStaticLayerKind =
+	| LandblockLayerKind.Buildings
+	| LandblockLayerKind.Objects;
 
-/** Decode and validate a closed versioned Level 1 building source response. */
-export function decodeBuildingSource(
+/** Decode and validate one closed versioned outdoor-static source record. */
+export function decodeOutdoorStaticRecord(
 	response: Uint8Array,
 	requestedLandblockId: LandblockId,
+	expectedLayer: OutdoorStaticLayerKind,
 ): ResolvedObjectLayerSource | null {
 	if (response.byteLength < HEADER_LENGTH) {
-		throw new Error(
-			"Building source response is shorter than its binary header.",
-		);
+		throw new Error("Outdoor static record is shorter than its binary header.");
 	}
 	const view = new DataView(
 		response.buffer,
@@ -177,20 +180,22 @@ export function decodeBuildingSource(
 	);
 	const magic = new TextDecoder().decode(response.subarray(0, 4));
 	if (magic !== MAGIC)
-		throw new Error(`Unexpected building source magic ${magic}.`);
+		throw new Error(`Unexpected outdoor static record magic ${magic}.`);
 	const version = view.getUint32(4, true);
 	if (version !== VERSION)
-		throw new Error(`Unsupported building source version ${version}.`);
+		throw new Error(`Unsupported outdoor static record version ${version}.`);
 	const manifestLength = view.getUint32(8, true);
 	const totalLength = view.getUint32(12, true);
 	if (totalLength !== response.byteLength) {
 		throw new Error(
-			`Building source length is ${response.byteLength}; header declares ${totalLength}.`,
+			`Outdoor static record length is ${response.byteLength}; header declares ${totalLength}.`,
 		);
 	}
 	const sectionDataOffset = HEADER_LENGTH + manifestLength;
 	if (sectionDataOffset > response.byteLength) {
-		throw new Error("Building source manifest exceeds the binary response.");
+		throw new Error(
+			"Outdoor static record manifest exceeds the binary response.",
+		);
 	}
 	const manifest = parseManifest(
 		new TextDecoder().decode(
@@ -201,7 +206,12 @@ export function decodeBuildingSource(
 		manifest.landblockId.toLowerCase() !== requestedLandblockId.toLowerCase()
 	) {
 		throw new Error(
-			`Building source returned ${manifest.landblockId} for ${requestedLandblockId}.`,
+			`Outdoor static record returned ${manifest.landblockId} for ${requestedLandblockId}.`,
+		);
+	}
+	if (manifest.layer !== expectedLayer) {
+		throw new Error(
+			`Outdoor static record returned ${manifest.layer} for ${expectedLayer}.`,
 		);
 	}
 	const sections = validatedSections(manifest, response, sectionDataOffset);
@@ -212,13 +222,17 @@ export function decodeBuildingSource(
 		]),
 	);
 	if (geometries.size !== manifest.geometries.length) {
-		throw new Error("Building source contains duplicate geometry identities.");
+		throw new Error(
+			"Outdoor static record contains duplicate geometry identities.",
+		);
 	}
 	const materials = new Map(
 		manifest.materials.map((entry) => [entry.id, decodeMaterial(entry)]),
 	);
 	if (materials.size !== manifest.materials.length) {
-		throw new Error("Building source contains duplicate material identities.");
+		throw new Error(
+			"Outdoor static record contains duplicate material identities.",
+		);
 	}
 	const definitions = new Map(
 		manifest.definitions.map((definition) => [
@@ -228,7 +242,7 @@ export function decodeBuildingSource(
 	);
 	if (definitions.size !== manifest.definitions.length) {
 		throw new Error(
-			"Building source contains duplicate presentation identities.",
+			"Outdoor static record contains duplicate presentation identities.",
 		);
 	}
 	const residents: ResolvedObjectResident[] = [];
@@ -236,18 +250,18 @@ export function decodeBuildingSource(
 		const presentation = definitions.get(resident.source);
 		if (!presentation) {
 			throw new Error(
-				`Building resident ${resident.id} references missing source ${resident.source}.`,
+				`Outdoor static resident ${resident.id} references missing source ${resident.source}.`,
 			);
 		}
 		const resolved: ResolvedObjectResident = {
 			id: resident.id,
 			presentation,
-		placement: {
-			envCellId: null,
-			landblockId: manifest.landblockId as LandblockId,
-			// Source scale remains explicit on the resident so static baking can compose it
-			// once with setup-part scale instead of silently applying it twice.
-			localTransform: acFrameTransform(resident.placement, [1, 1, 1]),
+			placement: {
+				envCellId: null,
+				landblockId: manifest.landblockId as LandblockId,
+				// Source scale remains explicit on the resident so static baking can compose it
+				// once with setup-part scale instead of silently applying it twice.
+				localTransform: acFrameTransform(resident.placement, [1, 1, 1]),
 			},
 			scale: renderScale(resident.scale),
 			localBounds: toBounds(resident.localBounds),
@@ -255,33 +269,34 @@ export function decodeBuildingSource(
 		};
 		residents.push(resolved);
 	}
-	const { staticResidents, dynamicResidents } = classifyObjectResidents(residents);
+	const { staticResidents, dynamicResidents } =
+		classifyObjectResidents(residents);
 	return {
-		kind: LandblockLayerKind.Buildings,
+		kind: expectedLayer,
 		landblockId: manifest.landblockId as LandblockId,
 		staticResidents,
 		dynamicResidents,
 	};
 }
 
-function parseManifest(serialized: string): BuildingManifest {
+function parseManifest(serialized: string): OutdoorStaticRecordManifest {
 	let value: unknown;
 	try {
 		value = JSON.parse(serialized);
 	} catch {
-		throw new Error("Building source manifest is not valid JSON.");
+		throw new Error("Outdoor static record manifest is not valid JSON.");
 	}
 	const parsed = manifestSchema.safeParse(value);
 	if (!parsed.success) {
 		throw new Error(
-			`Building source manifest is invalid: ${parsed.error.message}`,
+			`Outdoor static record manifest is invalid: ${parsed.error.message}`,
 		);
 	}
 	return parsed.data;
 }
 
 function validatedSections(
-	manifest: BuildingManifest,
+	manifest: OutdoorStaticRecordManifest,
 	response: Uint8Array,
 	sectionDataOffset: number,
 ): ReadonlyMap<string, z.infer<typeof section>> {
@@ -290,7 +305,7 @@ function validatedSections(
 	);
 	if (sections.size !== 9 || sections.size !== manifest.sections.length) {
 		throw new Error(
-			"Building source must contain every geometry section exactly once.",
+			"Outdoor static record must contain every geometry section exactly once.",
 		);
 	}
 	for (const [name, scalarType] of [
@@ -307,11 +322,10 @@ function validatedSections(
 		const entry = sections.get(name);
 		if (!entry || entry.scalarType !== scalarType) {
 			throw new Error(
-				`Building source ${name} section has an incompatible scalar type.`,
+				`Outdoor static record ${name} section has an incompatible scalar type.`,
 			);
 		}
-		const elementSize =
-			scalarType === "u8" ? 1 : scalarType === "u16" ? 2 : 4;
+		const elementSize = scalarType === "u8" ? 1 : scalarType === "u16" ? 2 : 4;
 		const start = sectionDataOffset + entry.byteOffset;
 		const end = start + entry.byteLength;
 		if (
@@ -320,14 +334,16 @@ function validatedSections(
 			start < sectionDataOffset ||
 			end > response.byteLength
 		) {
-			throw new Error(`Building source ${name} section byte range is invalid.`);
+			throw new Error(
+				`Outdoor static record ${name} section byte range is invalid.`,
+			);
 		}
 	}
 	return sections;
 }
 
 function decodeGeometry(
-	geometry: BuildingGeometry,
+	geometry: OutdoorStaticGeometry,
 	response: Uint8Array,
 	sectionDataOffset: number,
 	sections: ReadonlyMap<string, z.infer<typeof section>>,
@@ -410,7 +426,9 @@ function decodeGeometry(
 		);
 	}
 	if (materialSideKinds.some((side) => side > 2)) {
-		throw new Error(`Geometry ${geometry.id} has an invalid polygon-side fact.`);
+		throw new Error(
+			`Geometry ${geometry.id} has an invalid polygon-side fact.`,
+		);
 	}
 	const materialSideTypes = readSlice(
 		response,
@@ -426,7 +444,9 @@ function decodeGeometry(
 		);
 	}
 	if (materialSideTypes.some((sideType) => sideType > 3)) {
-		throw new Error(`Geometry ${geometry.id} has an invalid polygon culling fact.`);
+		throw new Error(
+			`Geometry ${geometry.id} has an invalid polygon culling fact.`,
+		);
 	}
 	const materialStippling = readSlice(
 		response,
@@ -465,7 +485,7 @@ function requireSection(
 ): z.infer<typeof section> {
 	const entry = sections.get(name);
 	if (!entry)
-		throw new Error(`Building source lacks ${name} geometry section.`);
+		throw new Error(`Outdoor static record lacks ${name} geometry section.`);
 	return entry;
 }
 
@@ -483,7 +503,9 @@ function readSlice<
 	},
 ): TArray {
 	if (elementOffset + elementCount > entry.elementCount) {
-		throw new Error(`Building source ${entry.name} slice exceeds its section.`);
+		throw new Error(
+			`Outdoor static record ${entry.name} slice exceeds its section.`,
+		);
 	}
 	const sourceOffset =
 		sectionDataOffset +
@@ -498,7 +520,7 @@ function readSlice<
 	return new ArrayType(copied.buffer, 0, elementCount);
 }
 
-function decodeMaterial(entry: BuildingMaterial): ResolvedMaterial {
+function decodeMaterial(entry: OutdoorStaticMaterial): ResolvedMaterial {
 	const facts = {
 		rawSurfaceFlags: entry.rawSurfaceFlags,
 		translucency: entry.translucency,
@@ -532,20 +554,22 @@ function decodeMaterial(entry: BuildingMaterial): ResolvedMaterial {
 
 function textureEncoding(
 	format: Extract<
-		BuildingMaterial["source"],
+		OutdoorStaticMaterial["source"],
 		{ readonly kind: "texture" }
 	>["selectedRenderSurface"]["format"],
 ): "direct-color" | "index8" | "index16" {
 	if (format === "index8") return "index8";
 	if (format === "index16") return "index16";
 	if (format === "unsupported") {
-		throw new Error("Building texture uses an unsupported RenderSurface format.");
+		throw new Error(
+			"Outdoor static texture uses an unsupported RenderSurface format.",
+		);
 	}
 	return "direct-color";
 }
 
 function decodePresentation(
-	definition: BuildingManifest["definitions"][number],
+	definition: OutdoorStaticRecordManifest["definitions"][number],
 	geometries: ReadonlyMap<string, ResolvedGeometry>,
 	materials: ReadonlyMap<string, ResolvedMaterial>,
 ): ResolvedObjectPresentation {
@@ -658,7 +682,7 @@ function acFrameTransform(
 	const rotation = new Quat(w, x, z, -y);
 	const magnitude = Math.hypot(rotation.w, rotation.x, rotation.y, rotation.z);
 	if (magnitude === 0)
-		throw new Error("Building source contains a zero frame orientation.");
+		throw new Error("Outdoor static record contains a zero frame orientation.");
 	const qw = rotation.w / magnitude;
 	const qx = rotation.x / magnitude;
 	const qy = rotation.y / magnitude;
@@ -715,7 +739,7 @@ function toBounds(value: z.infer<typeof bounds> | null): AABB3 | null {
 	const min = new Vec3(value.min[0], value.min[1], value.min[2]);
 	const max = new Vec3(value.max[0], value.max[1], value.max[2]);
 	if (min.x > max.x || min.y > max.y || min.z > max.z) {
-		throw new Error("Building source contains inverted bounds.");
+		throw new Error("Outdoor static record contains inverted bounds.");
 	}
 	return new AABB3(min, max);
 }

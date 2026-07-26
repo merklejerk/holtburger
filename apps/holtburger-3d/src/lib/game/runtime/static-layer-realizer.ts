@@ -1,16 +1,22 @@
 import type { AtlasRequirementHandle } from "../textures/atlas/resident-texture-atlas";
 import type { AssetTextureFact } from "../textures/types";
 import type { SceneInterestRevision } from "./scene-availability";
+import type { OutdoorStaticLayerKind } from "./scene-interest";
 
 /** Exact currentness query retained at the scene-interest boundary. */
 export interface StaticLayerCurrentness<TOwner extends string> {
-	isCurrent(owner: TOwner, revision: SceneInterestRevision): boolean;
+	isCurrent(
+		owner: TOwner,
+		layer: OutdoorStaticLayerKind,
+		revision: SceneInterestRevision,
+	): boolean;
 }
 
 /** Runtime-local reporting hook for current visual-realization failures. */
 export interface StaticLayerFailureReporter<TOwner extends string> {
 	reportAtlasFailure(options: {
 		readonly cause: unknown;
+		readonly layer: OutdoorStaticLayerKind;
 		readonly owner: TOwner;
 		readonly revision: SceneInterestRevision;
 	}): void;
@@ -38,6 +44,7 @@ export interface StaticLayerGeometryPreparer<
 	TOwner extends string,
 > {
 	prepare(options: {
+		readonly layer: OutdoorStaticLayerKind;
 		readonly owner: TOwner;
 		readonly revision: SceneInterestRevision;
 		readonly source: TSource;
@@ -52,14 +59,16 @@ export interface StaticLayerPublisher<TGeometry, TOwner extends string> {
 	removeExact(owner: TOwner, revision: SceneInterestRevision): Promise<void>;
 	replace(options: {
 		readonly geometry: TGeometry;
+		readonly layer: OutdoorStaticLayerKind;
 		readonly owner: TOwner;
 		readonly revision: SceneInterestRevision;
 	}): Promise<void>;
 	evict(owner: TOwner, revision: SceneInterestRevision): Promise<void>;
 }
 
-/** Input assembled from already resolved and classified static building source. */
+/** Input assembled from one already resolved and classified outdoor-static source. */
 export interface StaticLayerRealizationInput<TSource, TOwner extends string> {
+	readonly layer: OutdoorStaticLayerKind;
 	readonly owner: TOwner;
 	readonly revision: SceneInterestRevision;
 	readonly source: TSource;
@@ -159,6 +168,7 @@ export class StaticLayerRealizer<TSource, TGeometry, TOwner extends string> {
 		atlasHandle: AtlasRequirementHandle<TOwner>,
 	): Promise<StaticLayerRealizationResult<TGeometry>> {
 		const geometry = this.#geometry.prepare({
+			layer: input.layer,
 			owner: input.owner,
 			revision: input.revision,
 			source: input.source,
@@ -170,10 +180,11 @@ export class StaticLayerRealizer<TSource, TGeometry, TOwner extends string> {
 				atlasHandle.completion,
 			]);
 			if (atlasCompletion !== "ready") {
-				if (this.#isCurrent(input.owner, input.revision)) {
+				if (this.#isCurrent(input.owner, input.layer, input.revision)) {
 					if (atlasCompletion !== "withdrawn") {
 						this.#failureReporter.reportAtlasFailure({
 							cause: atlasCompletion.cause,
+							layer: input.layer,
 							owner: input.owner,
 							revision: input.revision,
 						});
@@ -182,16 +193,17 @@ export class StaticLayerRealizer<TSource, TGeometry, TOwner extends string> {
 				await this.#atlas.withdrawOwnerRevision(atlasHandle);
 				return { kind: "stale" };
 			}
-			if (!this.#isCurrent(input.owner, input.revision)) {
+			if (!this.#isCurrent(input.owner, input.layer, input.revision)) {
 				await this.#atlas.withdrawOwnerRevision(atlasHandle);
 				return { kind: "stale" };
 			}
 			await this.#publisher.replace({
 				geometry: preparedGeometry,
+				layer: input.layer,
 				owner: input.owner,
 				revision: input.revision,
 			});
-			if (!this.#isCurrent(input.owner, input.revision)) {
+			if (!this.#isCurrent(input.owner, input.layer, input.revision)) {
 				await Promise.all([
 					this.#publisher.removeExact(input.owner, input.revision),
 					this.#atlas.withdrawOwnerRevision(atlasHandle),
@@ -208,7 +220,13 @@ export class StaticLayerRealizer<TSource, TGeometry, TOwner extends string> {
 		}
 	}
 
-	#isCurrent(owner: TOwner, revision: SceneInterestRevision): boolean {
-		return !this.#destroyed && this.#currentness.isCurrent(owner, revision);
+	#isCurrent(
+		owner: TOwner,
+		layer: OutdoorStaticLayerKind,
+		revision: SceneInterestRevision,
+	): boolean {
+		return (
+			!this.#destroyed && this.#currentness.isCurrent(owner, layer, revision)
+		);
 	}
 }

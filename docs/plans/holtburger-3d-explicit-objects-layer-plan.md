@@ -556,18 +556,35 @@ claims without content assembler errors or omissions:
 
 #### Task Checklist
 
-- [ ] Extend realizer and publisher contracts with the typed layer.
-- [ ] Update realizer tests to assert layer carriage on replace.
-- [ ] Add scene/static-system coverage for same-landblock building and object groups.
-- [ ] Generalize `GameRuntime.#realizeBuildingLayer` into one outdoor-static-layer method.
-- [ ] Generalize currentness and eviction branches for Buildings and Objects.
-- [ ] Verify independent layer replacement and eviction under interleaved revisions.
-- [ ] Verify shared texture claims survive eviction of only one layer owner.
-- [ ] Run focused runtime/scene tests, type checking, lint, and targeted formatting.
+- [x] Extend realizer and publisher contracts with the typed layer.
+- [x] Update realizer tests to assert layer carriage on replace.
+- [x] Add scene/static-system coverage for same-landblock building and object groups.
+- [x] Generalize `GameRuntime.#realizeBuildingLayer` into one outdoor-static-layer method.
+- [x] Generalize currentness and eviction branches for Buildings and Objects.
+- [x] Verify independent layer replacement and eviction under interleaved revisions.
+- [x] Verify shared texture claims survive eviction of only one layer owner.
+- [x] Run focused runtime/scene tests, type checking, lint, and targeted formatting.
 
 #### Decisions and Course Corrections
 
-- Pending execution.
+- `OutdoorStaticLayerKind` is the narrow Buildings/Objects identity at the realization boundary.
+  `StaticLayerRealizationInput`, geometry preparation, atlas-failure reporting, publisher
+  replacement, and runtime currentness all carry it explicitly.
+- The runtime no longer extracts a culling-group layer from `OwnerId`. It retains owner parsing only
+  to recover the landblock portion required by the existing scene-interest coordinator; the typed
+  layer is passed directly to that coordinator and `StaticObjectSystem.replaceObjects`.
+- `GameRuntime.#realizeOutdoorStaticLayer` validates source and commit layer agreement, realizes
+  both outdoor-static layers, and defers promoted residents only after publication. Building-only
+  diagnostics intentionally remain in place until Phase 5 gives Objects a public diagnostic API.
+- Eviction now routes both Buildings and Objects through the same exact-revision geometry and atlas
+  withdrawal path. Static-object tests prove a stale Buildings eviction cannot remove a newer
+  Buildings revision or the independent Objects owner; the atlas test proves withdrawing Buildings
+  retains a shared resident claimed by Objects.
+- A synthetic Objects source runs through the production runtime realizer in the focused runtime
+  test. It reaches the existing deferred-dynamic seam with `layer === Objects` without activating
+  the Phase 5 source-pipeline branch.
+- Full TypeScript tests (44 files / 203 tests), type checking, ESLint, Knip, clippy with warnings
+  denied, Rust formatting, and diff checks passed.
 
 ### Phase 5: Activate Level 2 Explicit Objects
 

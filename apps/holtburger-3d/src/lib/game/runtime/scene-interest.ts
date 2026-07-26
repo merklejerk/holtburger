@@ -10,6 +10,11 @@ export enum LandblockLayerKind {
 	EnvCells = "env-cells",
 }
 
+/** Outdoor static layers realized through the common geometry and atlas path. */
+export type OutdoorStaticLayerKind =
+	| LandblockLayerKind.Buildings
+	| LandblockLayerKind.Objects;
+
 export type SceneInterestMap = Map<LandblockId, Set<LandblockLayerKind>>;
 
 export interface LandblockIdLayer {

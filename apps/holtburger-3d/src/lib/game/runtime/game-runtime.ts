@@ -73,6 +73,7 @@ import type { ResolvedOutdoorStaticLayerSource } from "../resolution/landblock-l
 import {
 	computeSceneInterest,
 	LandblockLayerKind,
+	type OutdoorStaticLayerKind,
 	type SceneInterestMap,
 	type SceneInterestRequest,
 	validateLoDConfigOrThrow,
@@ -186,7 +187,7 @@ export class GameRuntime {
 	readonly #residentAtlas: ResidentTextureAtlas<OwnerId>;
 	/** Immutable-object nodes, components, and resource publication. */
 	readonly #staticObjects: StaticObjectSystem<OwnerId, ResourceOwnerId>;
-	/** Source-to-static publication sequencing for the buildings layer. */
+	/** Source-to-static publication sequencing for independent outdoor static layers. */
 	readonly #staticLayerRealizer: StaticLayerRealizer<
 		ResolvedOutdoorStaticLayerSource,
 		StaticObjectLayerArtifact | null,
@@ -298,25 +299,24 @@ export class GameRuntime {
 		this.#staticLayerRealizer = new StaticLayerRealizer({
 			atlas: this.#residentAtlas,
 			currentness: {
-				isCurrent: (owner, revision) => {
-					const [, layer] = owner.split("/");
-					if (!layer) return false;
+				isCurrent: (owner, layer, revision) => {
 					const landblockId = owner.slice(
 						"landblock-layer:".length,
-						owner.length - layer.length - 1,
+						owner.lastIndexOf("/"),
 					) as LandblockId;
 					return this.#sceneInterestCoordinator.ownsDispatch(
-						{ id: landblockId, layer: layer as LandblockLayerKind },
+						{ id: landblockId, layer },
 						revision,
 					);
 				},
 			},
 			failureReporter: {
-				reportAtlasFailure: ({ cause, owner, revision }) =>
+				reportAtlasFailure: ({ cause, layer, owner, revision }) =>
 					log(
 						{
 							cause,
 							kind: "static-layer-atlas-failed",
+							layer,
 							owner,
 							revision,
 						},
@@ -329,13 +329,8 @@ export class GameRuntime {
 					this.#staticObjects.evict(owner, revision),
 				removeExact: async (owner, revision) =>
 					this.#staticObjects.removeExact(owner, revision),
-				replace: async ({ geometry, owner, revision }) => {
-					this.#staticObjects.replaceObjects(
-						owner,
-						revision,
-						geometry,
-						LandblockLayerKind.Buildings,
-					);
+				replace: async ({ geometry, layer, owner, revision }) => {
+					this.#staticObjects.replaceObjects(owner, revision, geometry, layer);
 				},
 			},
 		});
@@ -404,8 +399,8 @@ export class GameRuntime {
 		const runtime = new GameRuntime(device.resources, commitPipeline, {
 			staticGeometryPreparer:
 				typeof Worker === "undefined"
-					? new InlineBuildingGeometryPreparer()
-					: new RuntimeBuildingGeometryPreparer(
+					? new InlineStaticObjectGeometryPreparer()
+					: new RuntimeStaticObjectGeometryPreparer(
 							StaticObjectGeometryWorker.build(),
 						),
 			terrainGenerator,
@@ -679,13 +674,11 @@ export class GameRuntime {
 				});
 			}
 		}
-		if (
-			artifact.layer === LandblockLayerKind.Buildings &&
-			"source" in artifact.commit
-		) {
-			this.#realizeBuildingLayer(
+		if (isOutdoorStaticLayer(artifact.layer) && "source" in artifact.commit) {
+			this.#realizeOutdoorStaticLayer(
 				ownerId,
 				artifact as typeof artifact & {
+					readonly layer: OutdoorStaticLayerKind;
 					readonly commit: import("../commit/types").StaticObjectLayerSourceCommit;
 				},
 				revision,
@@ -746,19 +739,19 @@ export class GameRuntime {
 		});
 	}
 
-	#realizeBuildingLayer(
+	#realizeOutdoorStaticLayer(
 		ownerId: OwnerId,
 		artifact: {
 			readonly landblockId: LandblockId;
-			readonly layer: LandblockLayerKind.Buildings;
+			readonly layer: OutdoorStaticLayerKind;
 			readonly dynamicEntities: readonly DynamicEntityCommit[];
 			readonly commit: import("../commit/types").StaticObjectLayerSourceCommit;
 		},
 		revision: SceneInterestRevision,
 	): void {
-		if (!("source" in artifact.commit)) {
+		if (artifact.commit.source.kind !== artifact.layer) {
 			throw new Error(
-				"Building realization requires a resolved source commit.",
+				`Static realization layer ${artifact.layer} does not match source ${artifact.commit.source.kind}.`,
 			);
 		}
 		const factCollectionStartedAt = performance.now();
@@ -770,6 +763,7 @@ export class GameRuntime {
 		this.#textureFactCollectionCount += 1;
 		void this.#staticLayerRealizer
 			.realize({
+				layer: artifact.layer,
 				owner: ownerId,
 				revision,
 				source: artifact.commit.source,
@@ -785,6 +779,7 @@ export class GameRuntime {
 						dynamic,
 					);
 				}
+				if (artifact.layer !== LandblockLayerKind.Buildings) return;
 				this.#buildingLayerDiagnostics.set(ownerId, {
 					additiveRangeCount: 0,
 					bakedRangeCount: 0,
@@ -886,7 +881,7 @@ export class GameRuntime {
 		revision: SceneInterestRevision,
 	): void {
 		const ownerId = landblockLayerToOwnerId(landblockId, layer);
-		if (layer === LandblockLayerKind.Buildings) {
+		if (isOutdoorStaticLayer(layer)) {
 			void this.#staticLayerRealizer.evict(ownerId, revision);
 		} else {
 			this.#staticObjects.evict(ownerId, revision);
@@ -907,8 +902,8 @@ export class GameRuntime {
 	}
 }
 
-/** Closed building geometry adapter owned and destroyed by the static realization sequencer. */
-class RuntimeBuildingGeometryPreparer implements StaticLayerGeometryPreparer<
+/** Closed outdoor-static geometry adapter owned and destroyed by the realization sequencer. */
+class RuntimeStaticObjectGeometryPreparer implements StaticLayerGeometryPreparer<
 	ResolvedOutdoorStaticLayerSource,
 	StaticObjectLayerArtifact | null,
 	OwnerId
@@ -920,13 +915,14 @@ class RuntimeBuildingGeometryPreparer implements StaticLayerGeometryPreparer<
 	}
 
 	async prepare(options: {
+		readonly layer: OutdoorStaticLayerKind;
 		readonly owner: OwnerId;
 		readonly revision: SceneInterestRevision;
 		readonly source: ResolvedOutdoorStaticLayerSource;
 		readonly textureRequirements: readonly import("../textures/types").AssetTextureFact[];
 	}): Promise<StaticObjectLayerArtifact | null> {
 		const geometry = await this.#worker.bake({
-			layer: LandblockLayerKind.Buildings,
+			layer: options.layer,
 			resourceNamespace: staticRevisionToInstallNamespace(
 				options.owner,
 				options.revision,
@@ -949,14 +945,23 @@ class RuntimeBuildingGeometryPreparer implements StaticLayerGeometryPreparer<
 	}
 }
 
-/** Non-browser test adapter retaining the same source-to-artifact contract without workers. */
-class InlineBuildingGeometryPreparer extends RuntimeBuildingGeometryPreparer {
+/** Non-browser adapter retaining the same source-to-artifact contract without workers. */
+class InlineStaticObjectGeometryPreparer extends RuntimeStaticObjectGeometryPreparer {
 	constructor() {
 		super({
 			bake: (job) => Promise.resolve(bakeStaticObjectGeometry(job)),
 			destroy: () => undefined,
 		} as StaticObjectGeometryWorker);
 	}
+}
+
+function isOutdoorStaticLayer(
+	layer: LandblockLayerKind,
+): layer is OutdoorStaticLayerKind {
+	return (
+		layer === LandblockLayerKind.Buildings ||
+		layer === LandblockLayerKind.Objects
+	);
 }
 
 function createLandblockPlacement(landblockId: LandblockId): ScenePlacement {

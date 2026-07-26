@@ -4,8 +4,14 @@ import {
 } from "./webgl2-shader-utils";
 import { WEBGL2_DISTANCE_FOG_GLSL } from "./webgl2-fog";
 
-/** Build the object vertex variant; only fogged materials need camera-distance inputs. */
-export function createObjectVertexShader(distanceFog: boolean): string {
+/** Object transform source selected at shader compilation rather than through nullable uniforms. */
+export type ObjectVertexTransformSource = "baked" | "instanced";
+
+/** Build one object vertex variant with explicit fog and transform contracts. */
+export function createObjectVertexShader(
+	distanceFog: boolean,
+	transformSource: ObjectVertexTransformSource = "baked",
+): string {
 	const fogDeclarations = distanceFog
 		? `
 uniform vec2 uCameraHorizontalPosition;
@@ -14,6 +20,18 @@ out float vHorizontalDistance;`
 	const fogCalculation = distanceFog
 		? "vHorizontalDistance = length(anchoredPosition.xz - uCameraHorizontalPosition);"
 		: "";
+	const transformDeclarations =
+		transformSource === "instanced"
+			? `
+layout(location = 3) in mat4 aSourceToLandblock;
+layout(location = 7) in vec4 aInstanceColor;`
+			: "uniform mat4 uLocalToLandblock;";
+	const transform =
+		transformSource === "instanced"
+			? "aSourceToLandblock"
+			: "uLocalToLandblock";
+	const instanceColor =
+		transformSource === "instanced" ? "aInstanceColor" : "vec4(1.0)";
 	return `#version 300 es
 layout(location = 0) in vec3 aPosition;
 layout(location = 1) in vec3 aNormal;
@@ -21,16 +39,18 @@ layout(location = 2) in vec2 aTextureCoordinate;
 
 uniform mat4 uProjection;
 uniform mat4 uView;
-uniform mat4 uLocalToLandblock;
 uniform vec3 uLandblockOffset;
+${transformDeclarations}
 ${fogDeclarations}
 
 out vec2 vTextureCoordinate;
+out vec4 vInstanceColor;
 
 void main() {
-	vec3 landblockPosition = (uLocalToLandblock * vec4(aPosition, 1.0)).xyz;
+	vec3 landblockPosition = (${transform} * vec4(aPosition, 1.0)).xyz;
 	vec3 anchoredPosition = landblockPosition + uLandblockOffset;
 	vTextureCoordinate = aTextureCoordinate;
+	vInstanceColor = ${instanceColor};
 	${fogCalculation}
 	gl_Position = uProjection * uView * vec4(anchoredPosition, 1.0);
 }
@@ -74,6 +94,7 @@ uniform float uLuminosity;
 ${fogDeclarations}
 
 in vec2 vTextureCoordinate;
+in vec4 vInstanceColor;
 ${distanceFog ? "in float vHorizontalDistance;" : ""}
 out vec4 fragmentColor;
 
@@ -106,7 +127,7 @@ vec4 sampleMaterial() {
 }
 
 void main() {
-	vec4 color = sampleMaterial();
+	vec4 color = sampleMaterial() * vInstanceColor;
 	if (uUseDetail != 0) {
 		vec2 detailUv = atlasUv(fract(vTextureCoordinate * uDetailTiling), uDetailRect);
 		vec4 detail = texture(uDetail, detailUv);
@@ -119,8 +140,8 @@ void main() {
 `;
 }
 
-/** Shared uniforms for all renderer-owned static-object material programs. */
-export interface WebGL2ObjectProgram {
+/** Shared uniforms for every renderer-owned static-object material program. */
+interface WebGL2ObjectProgramBase {
 	readonly program: WebGLProgram;
 	readonly uniforms: {
 		readonly alphaTest: WebGLUniformLocation;
@@ -130,7 +151,6 @@ export interface WebGL2ObjectProgram {
 		readonly detailRect: WebGLUniformLocation;
 		readonly detailTiling: WebGLUniformLocation;
 		readonly landblockOffset: WebGLUniformLocation;
-		readonly localToLandblock: WebGLUniformLocation;
 		readonly luminosity: WebGLUniformLocation;
 		readonly materialColor: WebGLUniformLocation;
 		readonly materialKind: WebGLUniformLocation;
@@ -145,6 +165,19 @@ export interface WebGL2ObjectProgram {
 	};
 }
 
+/** Baked object program with one draw-scoped local transform uniform. */
+export interface WebGL2ObjectProgram extends WebGL2ObjectProgramBase {
+	readonly transformSource: "baked";
+	readonly uniforms: WebGL2ObjectProgramBase["uniforms"] & {
+		readonly localToLandblock: WebGLUniformLocation;
+	};
+}
+
+/** Instanced object program whose transforms and colors are vertex attributes. */
+export interface WebGL2InstancedObjectProgram extends WebGL2ObjectProgramBase {
+	readonly transformSource: "instanced";
+}
+
 /** Opaque-only program carrying the shared distance-fog uniform contract. */
 export interface WebGL2FogObjectProgram extends WebGL2ObjectProgram {
 	readonly fogUniforms: {
@@ -156,28 +189,63 @@ export interface WebGL2FogObjectProgram extends WebGL2ObjectProgram {
 	};
 }
 
-/** Compile the fogged opaque object-material program. */
+/** Fogged instanced program carrying the same distance-fog uniform contract. */
+export interface WebGL2FogInstancedObjectProgram extends WebGL2InstancedObjectProgram {
+	readonly fogUniforms: WebGL2FogObjectProgram["fogUniforms"];
+}
+
+interface WebGL2ObjectProgramOptions {
+	readonly distanceFog: boolean;
+	readonly transformSource: ObjectVertexTransformSource;
+}
+
+/** Compile the default fogged baked object-material program. */
 export function createWebGL2ObjectProgram(
 	gl: WebGL2RenderingContext,
 ): WebGL2FogObjectProgram;
 /** Compile an unfogged program for transparent and additive static materials. */
 export function createWebGL2ObjectProgram(
 	gl: WebGL2RenderingContext,
-	options: { readonly distanceFog: false },
+	options: {
+		readonly distanceFog: false;
+		readonly transformSource?: "baked";
+	},
 ): WebGL2ObjectProgram;
+/** Compile a fogged object program backed by matrix/color instance attributes. */
 export function createWebGL2ObjectProgram(
 	gl: WebGL2RenderingContext,
-	options: { readonly distanceFog: boolean } = { distanceFog: true },
-): WebGL2ObjectProgram | WebGL2FogObjectProgram {
+	options: {
+		readonly distanceFog: true;
+		readonly transformSource: "instanced";
+	},
+): WebGL2FogInstancedObjectProgram;
+/** Compile an unfogged object program backed by matrix/color instance attributes. */
+export function createWebGL2ObjectProgram(
+	gl: WebGL2RenderingContext,
+	options: {
+		readonly distanceFog: false;
+		readonly transformSource: "instanced";
+	},
+): WebGL2InstancedObjectProgram;
+export function createWebGL2ObjectProgram(
+	gl: WebGL2RenderingContext,
+	options: Partial<WebGL2ObjectProgramOptions> = {},
+):
+	| WebGL2ObjectProgram
+	| WebGL2FogObjectProgram
+	| WebGL2InstancedObjectProgram
+	| WebGL2FogInstancedObjectProgram {
+	const distanceFog = options.distanceFog ?? true;
+	const transformSource = options.transformSource ?? "baked";
 	const vertexShader = compileWebGL2Shader(
 		gl,
 		gl.VERTEX_SHADER,
-		createObjectVertexShader(options.distanceFog),
+		createObjectVertexShader(distanceFog, transformSource),
 	);
 	const fragmentShader = compileWebGL2Shader(
 		gl,
 		gl.FRAGMENT_SHADER,
-		createObjectFragmentShader(options.distanceFog),
+		createObjectFragmentShader(distanceFog),
 	);
 	const program = gl.createProgram();
 	if (!program) throw new Error("Failed to allocate object shader program.");
@@ -190,35 +258,46 @@ export function createWebGL2ObjectProgram(
 				`Failed to link object shader program: ${gl.getProgramInfoLog(program) ?? "unknown error"}`,
 			);
 		}
-		const objectProgram: WebGL2ObjectProgram = {
-			program,
-			uniforms: {
-				alphaTest: requireWebGL2Uniform(gl, program, "uAlphaTest"),
-				base: requireWebGL2Uniform(gl, program, "uBase"),
-				baseRect: requireWebGL2Uniform(gl, program, "uBaseRect"),
-				detail: requireWebGL2Uniform(gl, program, "uDetail"),
-				detailRect: requireWebGL2Uniform(gl, program, "uDetailRect"),
-				detailTiling: requireWebGL2Uniform(gl, program, "uDetailTiling"),
-				landblockOffset: requireWebGL2Uniform(gl, program, "uLandblockOffset"),
-				localToLandblock: requireWebGL2Uniform(
-					gl,
-					program,
-					"uLocalToLandblock",
-				),
-				luminosity: requireWebGL2Uniform(gl, program, "uLuminosity"),
-				materialColor: requireWebGL2Uniform(gl, program, "uMaterialColor"),
-				materialKind: requireWebGL2Uniform(gl, program, "uMaterialKind"),
-				palette: requireWebGL2Uniform(gl, program, "uPalette"),
-				paletteRect: requireWebGL2Uniform(gl, program, "uPaletteRect"),
-				paletteSize: requireWebGL2Uniform(gl, program, "uPaletteSize"),
-				palettedClipMap: requireWebGL2Uniform(gl, program, "uPalettedClipMap"),
-				projection: requireWebGL2Uniform(gl, program, "uProjection"),
-				useDetail: requireWebGL2Uniform(gl, program, "uUseDetail"),
-				view: requireWebGL2Uniform(gl, program, "uView"),
-				wrapRepeat: requireWebGL2Uniform(gl, program, "uWrapRepeat"),
-			},
+		const uniforms: WebGL2ObjectProgramBase["uniforms"] = {
+			alphaTest: requireWebGL2Uniform(gl, program, "uAlphaTest"),
+			base: requireWebGL2Uniform(gl, program, "uBase"),
+			baseRect: requireWebGL2Uniform(gl, program, "uBaseRect"),
+			detail: requireWebGL2Uniform(gl, program, "uDetail"),
+			detailRect: requireWebGL2Uniform(gl, program, "uDetailRect"),
+			detailTiling: requireWebGL2Uniform(gl, program, "uDetailTiling"),
+			landblockOffset: requireWebGL2Uniform(gl, program, "uLandblockOffset"),
+			luminosity: requireWebGL2Uniform(gl, program, "uLuminosity"),
+			materialColor: requireWebGL2Uniform(gl, program, "uMaterialColor"),
+			materialKind: requireWebGL2Uniform(gl, program, "uMaterialKind"),
+			palette: requireWebGL2Uniform(gl, program, "uPalette"),
+			paletteRect: requireWebGL2Uniform(gl, program, "uPaletteRect"),
+			paletteSize: requireWebGL2Uniform(gl, program, "uPaletteSize"),
+			palettedClipMap: requireWebGL2Uniform(gl, program, "uPalettedClipMap"),
+			projection: requireWebGL2Uniform(gl, program, "uProjection"),
+			useDetail: requireWebGL2Uniform(gl, program, "uUseDetail"),
+			view: requireWebGL2Uniform(gl, program, "uView"),
+			wrapRepeat: requireWebGL2Uniform(gl, program, "uWrapRepeat"),
 		};
-		if (!options.distanceFog) return objectProgram;
+		const objectProgram: WebGL2ObjectProgram | WebGL2InstancedObjectProgram =
+			transformSource === "baked"
+				? {
+						program,
+						transformSource,
+						uniforms: {
+							...uniforms,
+							localToLandblock: requireWebGL2Uniform(
+								gl,
+								program,
+								"uLocalToLandblock",
+							),
+						},
+					}
+				: {
+						program,
+						transformSource,
+						uniforms,
+					};
+		if (!distanceFog) return objectProgram;
 		return {
 			...objectProgram,
 			fogUniforms: {

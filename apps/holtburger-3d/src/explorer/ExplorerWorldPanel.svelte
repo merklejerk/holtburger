@@ -88,12 +88,6 @@
 		updateDistanceFog((event.currentTarget as HTMLInputElement).checked);
 	}
 
-	const usesUnavailableLayers = $derived(
-		lod.buildingRadius !== null ||
-			lod.explicitObjectRadius !== null ||
-			lod.generatedObjectRadius !== null ||
-			lod.envCellRadius !== null,
-	);
 	const requestStatus = $derived(
 		cameraFocusStatus === "No camera focus requested."
 			? interestStatus
@@ -186,12 +180,6 @@
 						oninput={(event) => updateRadius("envCells", event)}
 					/>
 				</label>
-				{#if usesUnavailableLayers}
-					<p class="explorer-lod-warning">
-						Only terrain has a typed source capability today. Enabling another
-						layer will produce an explicit runtime availability failure.
-					</p>
-				{/if}
 			</div>
 			<button
 				type="submit"

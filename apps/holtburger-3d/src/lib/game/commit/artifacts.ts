@@ -15,6 +15,7 @@ import type { ResolvedMaterial } from "../resolution/presentation";
 import type {
 	StaticGeometryKey,
 	StaticInstallResourceNamespace,
+	StaticInstanceData,
 	StaticInstanceStreamKey,
 	StaticInstanceStreamSource,
 } from "../systems/static-resources";
@@ -24,26 +25,52 @@ import type {
 	TextureSamplerPolicy,
 } from "../textures/types";
 
-/** Geometry-worker facts retained beside a materialized static layer artifact. */
-export interface StaticObjectBakeDiagnostics {
+/** Transform, color, and source-local center floats retained by one transparent template. */
+const FRAME_STREAMED_STATIC_INSTANCE_TEMPLATE_FLOAT_COUNT = 23;
+
+/** Fixed numeric payload bytes retained by one transparent instance template. */
+export const FRAME_STREAMED_STATIC_INSTANCE_TEMPLATE_BYTES =
+	FRAME_STREAMED_STATIC_INSTANCE_TEMPLATE_FLOAT_COUNT *
+	Float32Array.BYTES_PER_ELEMENT;
+
+/** Geometry strategies observed for one static-object preparation attempt. */
+export type StaticObjectGeometryStrategy =
+	| "empty"
+	| "baked"
+	| "instanced"
+	| "mixed";
+
+/** Strategy-neutral geometry-worker facts retained beside a materialized static layer artifact. */
+export interface StaticObjectGeometryDiagnostics {
+	/** Static residents admitted to geometry preparation. */
+	readonly sourceResidentCount: number;
+	/** Setup or direct-geometry parts contributed by the source residents. */
+	readonly sourcePartCount: number;
 	/** Naive resident/part/material-slot submissions before polygon facts are distinguished. */
 	readonly sourceMaterialSlotCount: number;
 	/** Source resident/part/complete-binding submissions after polygon facts are distinguished. */
 	readonly sourceRangeCount: number;
-	/** Final baked draw ranges retained by the published static artifact. */
-	readonly bakedRangeCount: number;
-	/** Final independent transparent ranges requiring camera-dependent ordering. */
-	readonly transparentRangeCount: number;
-	/** Final additive ranges submitted in their distinct deterministic phase. */
-	readonly additiveRangeCount: number;
-	/** Bytes in the final one-allocation object geometry. */
-	readonly geometryBytes: number;
+	/** Actual output strategy, including an explicit mixed fallback result. */
+	readonly strategy: StaticObjectGeometryStrategy;
+	/** Baked draw ranges retained as the selected policy or an explicit fallback. */
+	readonly bakedFallbackRangeCount: number;
+	readonly bakedGeometryBytes: number;
+	readonly persistentCohortCount: number;
+	readonly persistentStreamCount: number;
+	readonly persistentDrawUnitCount: number;
+	readonly persistentInstanceCount: number;
+	readonly instancedGeometryBytes: number;
+	readonly persistentStreamBytes: number;
+	readonly transparentTemplateCohortCount: number;
+	readonly transparentTemplateInstanceCount: number;
+	/** Fixed transform, color, and center payload bytes retained on the CPU. */
+	readonly transparentTemplateBytes: number;
 	/** Wall-clock duration inside the closed geometry worker. */
 	readonly geometryWorkerDurationMs: number;
 }
 
-/** Source-to-bake diagnostics retained with one outdoor-static layer commit. */
-export interface StaticObjectLayerDiagnostics extends StaticObjectBakeDiagnostics {
+/** Source-to-geometry diagnostics retained with one outdoor-static layer commit. */
+export interface StaticObjectLayerDiagnostics extends StaticObjectGeometryDiagnostics {
 	/** Every source resident, including those promoted out of static materialization. */
 	readonly expectedResidentCount: number;
 	/** Source residents classified as eligible for static materialization. */
@@ -109,9 +136,29 @@ export type StaticObjectDrawUnit =
 	| BakedStaticDrawUnit
 	| InstancedStaticDrawUnit;
 
+/**
+ * Immutable transparent instance retained on the CPU so the renderer can order it for each view.
+ */
+export interface FrameStreamedStaticInstanceTemplate {
+	/** Complete semantic cohort identity for adjacent compatible-run coalescing. */
+	readonly cohortKey: string;
+	readonly geometry: StaticGeometryKey;
+	readonly indexStart: number;
+	readonly indexCount: number;
+	readonly material: StaticObjectMaterialBinding;
+	readonly instance: StaticInstanceData;
+	/** Stable distance-sort facts expressed in the reusable source-local geometry frame. */
+	readonly transparentSort: {
+		readonly center: Vec3;
+		readonly stableId: string;
+	};
+}
+
 /** Persistent immutable-object presentation attached to one spatial scene node. */
 export interface StaticObjectRenderable {
 	readonly drawUnits: readonly StaticObjectDrawUnit[];
+	/** Camera-ordered transparent contributions uploaded through renderer-owned frame storage. */
+	readonly frameStreamedInstances: readonly FrameStreamedStaticInstanceTemplate[];
 }
 
 /** One immutable object publication emitted before SceneGraph assigns its node identity. */
@@ -132,7 +179,7 @@ export interface StaticObjectLayerArtifact {
 	/** Complete logical requirements whose bindings must be ready before publication. */
 	readonly textureRequirements: readonly AssetTextureFact[];
 	/** Exact closed-worker facts for this materialized geometry. */
-	readonly bakeDiagnostics: StaticObjectBakeDiagnostics;
+	readonly geometryDiagnostics: StaticObjectGeometryDiagnostics;
 }
 
 /** Persistent shell render contribution attached to one env-cell root node. */

@@ -11,19 +11,20 @@ use holtburger_core::{ContentAsset, ContentAssetRequest, ContentAssetRuntime};
 use serde::{Deserialize, Serialize};
 
 pub(crate) const LANDBLOCK_SOURCE_BATCH_BINARY_MAGIC: &[u8; 4] = b"HBLB";
-pub(crate) const LANDBLOCK_SOURCE_BATCH_BINARY_VERSION: u32 = 1;
+pub(crate) const LANDBLOCK_SOURCE_BATCH_BINARY_VERSION: u32 = 2;
 const LANDBLOCK_SOURCE_BATCH_BINARY_HEADER_LEN: usize = 16;
 
 /// A scene layer that the app-local landblock source boundary can request.
 ///
-/// This deliberately excludes generated scenery and env cells: they are not runtime layers in this
-/// plan and must not become incidental branches of the batch transport.
+/// Env cells remain outside this outdoor source boundary and must not become an incidental batch
+/// branch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum LandblockSourceLayer {
     Terrain,
     Buildings,
     Objects,
+    Generated,
 }
 
 impl LandblockSourceLayer {
@@ -37,6 +38,7 @@ impl LandblockSourceLayer {
             Self::Terrain => LandblockSceneLodLevel::Level0,
             Self::Buildings => LandblockSceneLodLevel::Level1,
             Self::Objects => LandblockSceneLodLevel::Level2,
+            Self::Generated => LandblockSceneLodLevel::Level3,
         }
     }
 }
@@ -91,6 +93,7 @@ pub(crate) struct LoadedLandblockSourceBatch {
     terrain: Option<LandblockSceneLodTerrainLayer>,
     buildings: Option<LandblockSceneLodOutdoorBuildingsLayer>,
     objects: Option<LandblockSceneLodOutdoorStaticLayer>,
+    generated: Option<LandblockSceneLodOutdoorStaticLayer>,
 }
 
 impl LoadedLandblockSourceBatch {
@@ -118,6 +121,12 @@ impl LoadedLandblockSourceBatch {
         self.objects
             .as_ref()
             .context("landblock source batch did not project Objects")
+    }
+
+    pub(crate) fn generated(&self) -> Result<&LandblockSceneLodOutdoorStaticLayer> {
+        self.generated
+            .as_ref()
+            .context("landblock source batch did not project Generated")
     }
 }
 
@@ -242,6 +251,7 @@ fn project_landblock_source_batch(
         terrain: None,
         buildings: None,
         objects: None,
+        generated: None,
     };
     for layer in scene_lod.layers {
         match layer {
@@ -260,6 +270,11 @@ fn project_landblock_source_batch(
             {
                 batch.objects = Some(layer);
             }
+            LandblockSceneLodLayer::OutdoorGeneratedScenery(layer)
+                if request.contains(LandblockSourceLayer::Generated) =>
+            {
+                batch.generated = Some(layer);
+            }
             _ => {}
         }
     }
@@ -273,6 +288,9 @@ fn project_landblock_source_batch(
     if request.contains(LandblockSourceLayer::Objects) && batch.objects.is_none() {
         bail!("source batch omitted requested Objects layer");
     }
+    if request.contains(LandblockSourceLayer::Generated) && batch.generated.is_none() {
+        bail!("source batch omitted requested Generated layer");
+    }
     Ok(batch)
 }
 
@@ -284,12 +302,16 @@ mod tests {
     fn batch_request_selects_the_highest_requested_cumulative_lod() {
         let request = LandblockSourceBatchRequest::new(
             0x0c78_0001,
-            [LandblockSourceLayer::Terrain, LandblockSourceLayer::Objects],
+            [
+                LandblockSourceLayer::Terrain,
+                LandblockSourceLayer::Objects,
+                LandblockSourceLayer::Generated,
+            ],
         )
         .expect("source batch should be valid");
 
         assert_eq!(request.landblock_id, 0x0c78_ffff);
-        assert_eq!(request.maximum_lod(), LandblockSceneLodLevel::Level2);
+        assert_eq!(request.maximum_lod(), LandblockSceneLodLevel::Level3);
     }
 
     #[test]
@@ -308,8 +330,67 @@ mod tests {
             terrain: None,
             buildings: None,
             objects: None,
+            generated: None,
         };
 
         assert!(batch.objects().is_err());
+    }
+
+    #[test]
+    fn missing_generated_projection_is_rejected() {
+        let batch = LoadedLandblockSourceBatch {
+            landblock_id: 0x0c78_ffff,
+            diagnostics: PreparedContentSourceDiagnostics::default(),
+            terrain: None,
+            buildings: None,
+            objects: None,
+            generated: None,
+        };
+
+        assert!(batch.generated().is_err());
+    }
+
+    #[test]
+    fn level_three_asset_projects_every_requested_outdoor_layer_once() {
+        let request = LandblockSourceBatchRequest::new(
+            0x0c78_ffff,
+            [
+                LandblockSourceLayer::Terrain,
+                LandblockSourceLayer::Buildings,
+                LandblockSourceLayer::Objects,
+                LandblockSourceLayer::Generated,
+            ],
+        )
+        .expect("complete outdoor source request should be valid");
+        let empty_static_layer = || LandblockSceneLodOutdoorStaticLayer {
+            statics: Vec::new(),
+            outdoor_bvh: None,
+        };
+        let asset = LandblockSceneLodAsset {
+            landblock_id: 0x0c78_ffff,
+            level: LandblockSceneLodLevel::Level3,
+            layers: vec![
+                LandblockSceneLodLayer::Terrain(LandblockSceneLodTerrainLayer {
+                    terrain: None,
+                    terrain_mesh: None,
+                }),
+                LandblockSceneLodLayer::OutdoorBuildings(LandblockSceneLodOutdoorBuildingsLayer {
+                    statics: Vec::new(),
+                    building_transition_apertures: Vec::new(),
+                    outdoor_bvh: None,
+                }),
+                LandblockSceneLodLayer::OutdoorExplicitObjects(empty_static_layer()),
+                LandblockSceneLodLayer::OutdoorGeneratedScenery(empty_static_layer()),
+            ],
+            diagnostics: PreparedContentSourceDiagnostics::default(),
+        };
+
+        let projected = project_landblock_source_batch(asset, &request)
+            .expect("every requested Level 3 projection should be present");
+
+        assert!(projected.terrain().is_ok());
+        assert!(projected.buildings().is_ok());
+        assert!(projected.objects().is_ok());
+        assert!(projected.generated().is_ok());
     }
 }

@@ -9,7 +9,8 @@ import { LandblockLayerKind } from "../game/runtime/scene-interest";
 export type LandblockSourceLayer =
 	| LandblockLayerKind.Terrain
 	| LandblockLayerKind.Buildings
-	| LandblockLayerKind.Objects;
+	| LandblockLayerKind.Objects
+	| LandblockLayerKind.Generated;
 
 /** One decoded, requested record from a landblock source batch. */
 export type LandblockSourceRecord =

@@ -24,11 +24,29 @@ describe("GameRuntime view and interest control", () => {
 			visibleEnvCellShells: 5,
 			visiblePortalCrossings: 7,
 			visibleSceneEntries: 11,
-			visibleStaticObjects: 13,
-			submittedBuildingRanges: 0,
-			submittedBuildingTriangles: 0,
-			submittedTransparentBuildingRanges: 0,
-			submittedAdditiveBuildingRanges: 0,
+			visibleStaticLayerCount: 3,
+			visibleStaticNodeCount: 13,
+			submittedStaticObjectDrawCount: 0,
+			submittedStaticObjectTriangleCount: 0,
+			submittedBakedStaticObjectDrawCount: 0,
+			submittedBakedStaticObjectTriangleCount: 0,
+			submittedPersistentInstancedDrawCount: 0,
+			submittedPersistentInstanceCount: 0,
+			submittedInstancedSourceTriangleCount: 0,
+			transparentStaticCandidateCount: 0,
+			farTransparentStaticCandidateCount: 0,
+			nearTransparentStaticCandidateCount: 0,
+			transparentFrameRunCount: 0,
+			farTransparentFrameRunCount: 0,
+			nearTransparentFrameRunCount: 0,
+			transparentFrameUploadCount: 0,
+			transparentFrameUploadBytes: 0,
+			submittedTransparentStaticDrawCount: 0,
+			submittedTransparentInstanceCount: 0,
+			submittedAdditiveStaticDrawCount: 0,
+			frameInstanceCapacity: 0,
+			frameInstanceGrowthCount: 0,
+			frameInstanceViewHighWaterMark: 0,
 			objectProgramChanges: 0,
 			objectTexturePageBinds: 0,
 		};
@@ -298,6 +316,42 @@ describe("GameRuntime view and interest control", () => {
 
 		await runtime.destroy();
 	});
+
+	it("routes generated source through independent static realization", async () => {
+		const pipeline = new DeferredCommitPipeline();
+		const device: GameRuntimeRenderDevice = {
+			buildRenderer: async () => ({ async destroy() {}, drawFrame() {} }),
+			resources: {} as RendererResourceManager,
+		};
+		const runtime = await GameRuntime.build(
+			device,
+			pipeline,
+			{} as TexturePixelSource,
+		);
+
+		runtime.updateSceneInterest(generatedSceneInterest("0xda55ffff"));
+		pipeline.resolveNext([promotedGeneratedArtifact("0xda55ffff")]);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		runtime.tick();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(runtime.getDeferredStaticDynamicDiagnostics()).toEqual([
+			expect.objectContaining({
+				landblockId: "0xda55ffff",
+				layer: LandblockLayerKind.Generated,
+				residentId: "resident:promoted",
+			}),
+		]);
+		expect(runtime.getStaticObjectRuntimeDiagnostics().layers).toEqual([
+			expect.objectContaining({
+				cullingGroup: LandblockLayerKind.Generated,
+				layer: LandblockLayerKind.Generated,
+				sceneNodeCount: 0,
+			}),
+		]);
+
+		await runtime.destroy();
+	});
 });
 
 function sceneInterest(anchorLandblockId: string) {
@@ -339,6 +393,19 @@ function objectSceneInterest(anchorLandblockId: string) {
 	} as const;
 }
 
+function generatedSceneInterest(anchorLandblockId: string) {
+	return {
+		anchorLandblockId,
+		lod: {
+			buildingRadius: null,
+			envCellRadius: null,
+			explicitObjectRadius: null,
+			generatedObjectRadius: 0,
+			terrainRadius: 0,
+		},
+	} as const;
+}
+
 /** Minimal stale artifact: applying it would fail, so a passing test proves it was discarded. */
 function staleTerrainArtifact(landblockId: string): CommitBundle {
 	return {
@@ -366,9 +433,16 @@ function promotedObjectArtifact(landblockId: string): CommitBundle {
 	return promotedStaticArtifact(landblockId, LandblockLayerKind.Objects);
 }
 
+function promotedGeneratedArtifact(landblockId: string): CommitBundle {
+	return promotedStaticArtifact(landblockId, LandblockLayerKind.Generated);
+}
+
 function promotedStaticArtifact(
 	landblockId: string,
-	layer: LandblockLayerKind.Buildings | LandblockLayerKind.Objects,
+	layer:
+		| LandblockLayerKind.Buildings
+		| LandblockLayerKind.Objects
+		| LandblockLayerKind.Generated,
 ): CommitBundle {
 	return {
 		commit: {

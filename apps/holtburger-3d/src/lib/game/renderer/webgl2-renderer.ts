@@ -22,7 +22,11 @@ import type {
 	Renderer,
 } from "./renderer";
 import { RenderWorld } from "./render-world";
-import type { GeometryResourceKey } from "./resource-manager";
+import type {
+	GeometryResourceKey,
+	InstanceStreamResourceKey,
+} from "./resource-manager";
+import { STATIC_INSTANCE_RECORD_BYTES } from "../systems/static-resources";
 import type { TerrainProgramInput } from "./terrain-program-input";
 import {
 	WebGL2ResourceManager,
@@ -32,18 +36,23 @@ import {
 	createWebGL2TerrainProgram,
 	type WebGL2TerrainProgram,
 } from "./webgl2-terrain-program";
+import { FrameInstanceStreamArena } from "./frame-instance-stream-arena";
 import {
 	createWebGL2ObjectProgram,
 	type WebGL2FogObjectProgram,
+	type WebGL2FogInstancedObjectProgram,
+	type WebGL2InstancedObjectProgram,
 	type WebGL2ObjectProgram,
 } from "./webgl2-object-program";
+import { bindWebGL2ObjectInstanceRange } from "./webgl2-instance-buffer";
 import { bindWebGL2DistanceFog } from "./webgl2-fog";
 import {
+	formAdjacentTransparentInstanceRuns,
 	objectBlendPolicy,
-	sortTransparentStaticRanges,
-	transparentSortFacts,
+	orderTransparentStaticRanges,
 	type TransparentStaticRange,
 } from "./object-rendering-policy";
+import type { WebGL2InstanceBufferBinding } from "./webgl2-instance-buffer";
 
 const CLEAR_COLOR = {
 	red: 0.15,
@@ -65,11 +74,39 @@ interface TerrainFrameInput {
 
 /** One opaque or alpha-test static-object range paired with its resolved node placement. */
 interface ObjectFrameInput {
-	readonly drawUnit: StaticObjectDrawUnit;
+	readonly drawKind: "baked" | "instanced";
 	readonly geometry: GeometryResourceKey;
+	readonly indexCount: number;
+	readonly indexStart: number;
+	readonly instances:
+		| null
+		| {
+				readonly kind: "persistent";
+				readonly resource: InstanceStreamResourceKey;
+		  }
+		| {
+				readonly cohortKey: string;
+				readonly instance: import("../systems/static-resources").StaticInstanceData;
+				readonly kind: "frame-template";
+		  }
+		| {
+				readonly cohortKey: string;
+				readonly firstInstance: number;
+				readonly instanceCount: number;
+				readonly kind: "frame-range";
+		  };
 	readonly landblockId: string;
 	readonly localToLandblock: Mat4;
+	readonly material: StaticObjectDrawUnit["material"];
+	readonly ordering: StaticObjectDrawUnit["ordering"];
+	readonly transparentSort: StaticObjectDrawUnit["transparentSort"];
 }
+
+type AnyObjectProgram =
+	| WebGL2ObjectProgram
+	| WebGL2FogObjectProgram
+	| WebGL2InstancedObjectProgram
+	| WebGL2FogInstancedObjectProgram;
 
 /** Anchor-relative matrices and content reused by all passes for one view. */
 interface PreparedView {
@@ -95,13 +132,31 @@ interface MutableFrameSelectionMetrics {
 	visibleSceneEntries: number;
 	visiblePortalCrossings: number;
 	terrainFrameInputs: number;
-	visibleStaticObjects: number;
+	visibleStaticLayerCount: number;
+	visibleStaticNodeCount: number;
 	visibleDynamics: number;
 	visibleEnvCellShells: number;
-	submittedBuildingRanges: number;
-	submittedBuildingTriangles: number;
-	submittedTransparentBuildingRanges: number;
-	submittedAdditiveBuildingRanges: number;
+	submittedStaticObjectDrawCount: number;
+	submittedStaticObjectTriangleCount: number;
+	submittedBakedStaticObjectDrawCount: number;
+	submittedBakedStaticObjectTriangleCount: number;
+	submittedPersistentInstancedDrawCount: number;
+	submittedPersistentInstanceCount: number;
+	submittedInstancedSourceTriangleCount: number;
+	transparentStaticCandidateCount: number;
+	farTransparentStaticCandidateCount: number;
+	nearTransparentStaticCandidateCount: number;
+	transparentFrameRunCount: number;
+	farTransparentFrameRunCount: number;
+	nearTransparentFrameRunCount: number;
+	transparentFrameUploadCount: number;
+	transparentFrameUploadBytes: number;
+	submittedTransparentStaticDrawCount: number;
+	submittedTransparentInstanceCount: number;
+	submittedAdditiveStaticDrawCount: number;
+	frameInstanceCapacity: number;
+	frameInstanceGrowthCount: number;
+	frameInstanceViewHighWaterMark: number;
 	objectProgramChanges: number;
 	objectTexturePageBinds: number;
 }
@@ -116,12 +171,16 @@ export class WebGL2Renderer implements Renderer {
 	readonly #canvas: HTMLCanvasElement;
 	readonly #gl: WebGL2RenderingContext;
 	readonly #resources: WebGL2ResourceManager;
+	readonly #frameInstances: FrameInstanceStreamArena;
+	readonly #visibleStaticLayers = new Set<string>();
 	/** Read-only runtime gateway used to collect this renderer's frame submissions. */
 	readonly #world: RenderWorld;
 	readonly #terrainProgram: WebGL2TerrainProgram;
 	readonly #objectProgram: WebGL2FogObjectProgram;
+	readonly #instancedObjectProgram: WebGL2FogInstancedObjectProgram;
 	/** Transparent and additive materials deliberately use a shader with no fog uniforms. */
 	readonly #blendedObjectProgram: WebGL2ObjectProgram;
+	readonly #blendedInstancedObjectProgram: WebGL2InstancedObjectProgram;
 	/** Float-compatible fallback keeps inactive object samplers independent from terrain bindings. */
 	readonly #objectFallbackTexture: WebGLTexture;
 	/** Reused per-frame diagnostics; cold reads return a copied snapshot. */
@@ -132,11 +191,29 @@ export class WebGL2Renderer implements Renderer {
 		visibleEnvCellShells: 0,
 		visiblePortalCrossings: 0,
 		visibleSceneEntries: 0,
-		visibleStaticObjects: 0,
-		submittedBuildingRanges: 0,
-		submittedBuildingTriangles: 0,
-		submittedTransparentBuildingRanges: 0,
-		submittedAdditiveBuildingRanges: 0,
+		visibleStaticLayerCount: 0,
+		visibleStaticNodeCount: 0,
+		submittedStaticObjectDrawCount: 0,
+		submittedStaticObjectTriangleCount: 0,
+		submittedBakedStaticObjectDrawCount: 0,
+		submittedBakedStaticObjectTriangleCount: 0,
+		submittedPersistentInstancedDrawCount: 0,
+		submittedPersistentInstanceCount: 0,
+		submittedInstancedSourceTriangleCount: 0,
+		transparentStaticCandidateCount: 0,
+		farTransparentStaticCandidateCount: 0,
+		nearTransparentStaticCandidateCount: 0,
+		transparentFrameRunCount: 0,
+		farTransparentFrameRunCount: 0,
+		nearTransparentFrameRunCount: 0,
+		transparentFrameUploadCount: 0,
+		transparentFrameUploadBytes: 0,
+		submittedTransparentStaticDrawCount: 0,
+		submittedTransparentInstanceCount: 0,
+		submittedAdditiveStaticDrawCount: 0,
+		frameInstanceCapacity: 0,
+		frameInstanceGrowthCount: 0,
+		frameInstanceViewHighWaterMark: 0,
 		objectProgramChanges: 0,
 		objectTexturePageBinds: 0,
 	};
@@ -161,11 +238,20 @@ export class WebGL2Renderer implements Renderer {
 		this.#canvas = canvas;
 		this.#gl = gl;
 		this.#resources = resources;
+		this.#frameInstances = new FrameInstanceStreamArena(gl);
 		this.#world = world;
 		this.#terrainProgram = createWebGL2TerrainProgram(gl);
 		this.#objectProgram = createWebGL2ObjectProgram(gl);
+		this.#instancedObjectProgram = createWebGL2ObjectProgram(gl, {
+			distanceFog: true,
+			transformSource: "instanced",
+		});
 		this.#blendedObjectProgram = createWebGL2ObjectProgram(gl, {
 			distanceFog: false,
+		});
+		this.#blendedInstancedObjectProgram = createWebGL2ObjectProgram(gl, {
+			distanceFog: false,
+			transformSource: "instanced",
 		});
 		this.#objectFallbackTexture = createObjectFallbackTexture(gl);
 		gl.clearColor(
@@ -187,6 +273,13 @@ export class WebGL2Renderer implements Renderer {
 		for (const view of input.views) {
 			this.#drawView(this.#prepareView(input.anchorLandblockId, view), fog);
 		}
+		const arena = this.#frameInstances.getDiagnostics();
+		this.#frameSelectionMetrics.visibleStaticLayerCount =
+			this.#visibleStaticLayers.size;
+		this.#frameSelectionMetrics.frameInstanceCapacity = arena.capacity;
+		this.#frameSelectionMetrics.frameInstanceGrowthCount = arena.growthCount;
+		this.#frameSelectionMetrics.frameInstanceViewHighWaterMark =
+			arena.viewHighWaterMark;
 		void input.timeSeconds;
 	}
 
@@ -197,8 +290,11 @@ export class WebGL2Renderer implements Renderer {
 	async destroy(): Promise<void> {
 		this.#gl.deleteProgram(this.#terrainProgram.program);
 		this.#gl.deleteProgram(this.#objectProgram.program);
+		this.#gl.deleteProgram(this.#instancedObjectProgram.program);
 		this.#gl.deleteProgram(this.#blendedObjectProgram.program);
+		this.#gl.deleteProgram(this.#blendedInstancedObjectProgram.program);
 		this.#gl.deleteTexture(this.#objectFallbackTexture);
+		this.#frameInstances.destroy();
 	}
 
 	#beginFrame(
@@ -282,18 +378,55 @@ export class WebGL2Renderer implements Renderer {
 			);
 			if (!contribution) continue;
 			if (contribution.kind === "static-object") {
-				this.#frameSelectionMetrics.visibleStaticObjects += 1;
+				this.#visibleStaticLayers.add(contribution.cullingGroup);
+				this.#frameSelectionMetrics.visibleStaticNodeCount += 1;
 				const node = this.#world.resolveStaticObjectNode(
 					nodeId,
 					contribution.renderable,
 				);
 				for (const resolved of node.drawUnits) {
-					if (resolved.drawUnit.kind !== "baked") continue;
+					const { drawUnit } = resolved;
+					if (
+						drawUnit.kind === "instanced" &&
+						drawUnit.ordering === "transparent"
+					) {
+						throw new Error(
+							"Persistent transparent instance draw requires frame-streamed templates.",
+						);
+					}
 					objects.push({
-						drawUnit: resolved.drawUnit,
+						drawKind: drawUnit.kind,
 						geometry: resolved.geometry,
+						indexCount: drawUnit.indexCount,
+						indexStart: drawUnit.indexStart,
+						instances:
+							resolved.instances === null
+								? null
+								: { kind: "persistent", resource: resolved.instances },
 						landblockId: node.placement.landblockId,
 						localToLandblock: node.placement.localToLandblock,
+						material: drawUnit.material,
+						ordering: drawUnit.ordering,
+						transparentSort: drawUnit.transparentSort,
+					});
+				}
+				for (const resolved of node.frameStreamedInstances) {
+					const { template } = resolved;
+					objects.push({
+						drawKind: "instanced",
+						geometry: resolved.geometry,
+						indexCount: template.indexCount,
+						indexStart: template.indexStart,
+						instances: {
+							cohortKey: template.cohortKey,
+							instance: template.instance,
+							kind: "frame-template",
+						},
+						landblockId: node.placement.landblockId,
+						localToLandblock: node.placement.localToLandblock,
+						material: template.material,
+						ordering: "transparent",
+						transparentSort: template.transparentSort,
 					});
 				}
 				continue;
@@ -334,18 +467,13 @@ export class WebGL2Renderer implements Renderer {
 			if (drawUnit) void this.#world.resolvePortalDrawUnit(drawUnit);
 		}
 		objects.sort((left, right) => {
-			if (
-				left.drawUnit.ordering === "transparent" &&
-				right.drawUnit.ordering === "transparent"
-			) {
+			if (left.ordering === "transparent" && right.ordering === "transparent") {
 				return 0;
 			}
-			const ordering = left.drawUnit.ordering.localeCompare(
-				right.drawUnit.ordering,
-			);
+			const ordering = left.ordering.localeCompare(right.ordering);
 			if (ordering !== 0) return ordering;
-			return objectMaterialSortKey(left.drawUnit).localeCompare(
-				objectMaterialSortKey(right.drawUnit),
+			return objectMaterialSortKey(left).localeCompare(
+				objectMaterialSortKey(right),
 			);
 		});
 		return { objects, terrain };
@@ -359,11 +487,30 @@ export class WebGL2Renderer implements Renderer {
 		metrics.visibleEnvCellShells = 0;
 		metrics.visiblePortalCrossings = 0;
 		metrics.visibleSceneEntries = 0;
-		metrics.visibleStaticObjects = 0;
-		metrics.submittedBuildingRanges = 0;
-		metrics.submittedBuildingTriangles = 0;
-		metrics.submittedTransparentBuildingRanges = 0;
-		metrics.submittedAdditiveBuildingRanges = 0;
+		this.#visibleStaticLayers.clear();
+		metrics.visibleStaticLayerCount = 0;
+		metrics.visibleStaticNodeCount = 0;
+		metrics.submittedStaticObjectDrawCount = 0;
+		metrics.submittedStaticObjectTriangleCount = 0;
+		metrics.submittedBakedStaticObjectDrawCount = 0;
+		metrics.submittedBakedStaticObjectTriangleCount = 0;
+		metrics.submittedPersistentInstancedDrawCount = 0;
+		metrics.submittedPersistentInstanceCount = 0;
+		metrics.submittedInstancedSourceTriangleCount = 0;
+		metrics.transparentStaticCandidateCount = 0;
+		metrics.farTransparentStaticCandidateCount = 0;
+		metrics.nearTransparentStaticCandidateCount = 0;
+		metrics.transparentFrameRunCount = 0;
+		metrics.farTransparentFrameRunCount = 0;
+		metrics.nearTransparentFrameRunCount = 0;
+		metrics.transparentFrameUploadCount = 0;
+		metrics.transparentFrameUploadBytes = 0;
+		metrics.submittedTransparentStaticDrawCount = 0;
+		metrics.submittedTransparentInstanceCount = 0;
+		metrics.submittedAdditiveStaticDrawCount = 0;
+		metrics.frameInstanceCapacity = 0;
+		metrics.frameInstanceGrowthCount = 0;
+		metrics.frameInstanceViewHighWaterMark = 0;
 		metrics.objectProgramChanges = 0;
 		metrics.objectTexturePageBinds = 0;
 	}
@@ -529,45 +676,26 @@ export class WebGL2Renderer implements Renderer {
 		fog: FrameInput["environment"]["distanceFog"],
 	): void {
 		const objects = view.objects.filter(
-			({ drawUnit }) =>
-				drawUnit.ordering === "opaque" || drawUnit.ordering === "alpha-test",
+			({ ordering }) => ordering === "opaque" || ordering === "alpha-test",
 		);
 		if (objects.length === 0) return;
 		const gl = this.#gl;
 		gl.depthMask(true);
 		gl.disable(gl.BLEND);
-		gl.useProgram(this.#objectProgram.program);
-		this.#frameSelectionMetrics.objectProgramChanges += 1;
-		for (const [unit, uniform] of [
-			[0, this.#objectProgram.uniforms.base],
-			[1, this.#objectProgram.uniforms.palette],
-			[2, this.#objectProgram.uniforms.detail],
-		] as const) {
-			this.#bindObjectTexture(
-				unit,
-				this.#objectFallbackTexture,
-				TextureFilteringMode.Nearest,
-			);
-			gl.uniform1i(uniform, unit);
-		}
-		gl.uniformMatrix4fv(
-			this.#objectProgram.uniforms.projection,
-			false,
-			mat4ToFloat32Array(view.projection, this.#matrixScratch),
-		);
-		gl.uniformMatrix4fv(
-			this.#objectProgram.uniforms.view,
-			false,
-			mat4ToFloat32Array(view.view, this.#matrixScratch),
-		);
-		gl.uniform2f(
-			this.#objectProgram.fogUniforms.cameraHorizontalPosition,
-			view.cameraPosition.x,
-			view.cameraPosition.z,
-		);
-		bindWebGL2DistanceFog(gl, this.#objectProgram.fogUniforms, fog);
+		let activeProgram:
+			| WebGL2FogObjectProgram
+			| WebGL2FogInstancedObjectProgram
+			| null = null;
 		for (const object of objects) {
-			this.#drawObjectRange(this.#objectProgram, object, view);
+			const program =
+				object.drawKind === "instanced"
+					? this.#instancedObjectProgram
+					: this.#objectProgram;
+			if (program !== activeProgram) {
+				this.#activateObjectProgram(program, view, fog);
+				activeProgram = program;
+			}
+			this.#drawObjectRange(program, object, view);
 		}
 	}
 
@@ -575,18 +703,29 @@ export class WebGL2Renderer implements Renderer {
 		const transparent: TransparentStaticRange<ObjectFrameInput>[] = [];
 		const additive: ObjectFrameInput[] = [];
 		for (const object of view.objects) {
-			if (object.drawUnit.ordering === "additive") {
+			if (object.ordering === "additive") {
 				additive.push(object);
 				continue;
 			}
-			if (object.drawUnit.ordering !== "transparent") continue;
-			const facts = transparentSortFacts(object.drawUnit);
-			if (!facts) throw new Error("Transparent building range lacks sort facts.");
-			transformPoint3(
-				object.localToLandblock,
-				facts.center,
-				this.#transparentCenterScratch,
-			);
+			if (object.ordering !== "transparent") continue;
+			const facts = object.transparentSort;
+			if (!facts)
+				throw new Error(
+					"Transparent static-object contribution lacks sort facts.",
+				);
+			if (object.instances?.kind === "frame-template") {
+				transformPoint3(
+					object.instances.instance.sourceToLandblock,
+					facts.center,
+					this.#transparentCenterScratch,
+				);
+			} else {
+				transformPoint3(
+					object.localToLandblock,
+					facts.center,
+					this.#transparentCenterScratch,
+				);
+			}
 			const offset = createLandblockOffset(
 				getLandblockCoordinates(object.landblockId),
 				view.anchorCoordinates,
@@ -605,61 +744,135 @@ export class WebGL2Renderer implements Renderer {
 			});
 		}
 		additive.sort((left, right) =>
-			objectMaterialSortKey(left.drawUnit).localeCompare(
-				objectMaterialSortKey(right.drawUnit),
-			),
+			objectMaterialSortKey(left).localeCompare(objectMaterialSortKey(right)),
 		);
-		if (transparent.length === 0 && additive.length === 0) return;
-		const sortedTransparent = sortTransparentStaticRanges(
+		const orderedTransparent = orderTransparentStaticRanges(
 			transparent,
-		).map(({ range }) => range);
+			compareFarTransparentBatchOrder,
+		);
+		this.#frameSelectionMetrics.transparentStaticCandidateCount +=
+			transparent.length;
+		this.#frameSelectionMetrics.farTransparentStaticCandidateCount +=
+			orderedTransparent.far.length;
+		this.#frameSelectionMetrics.nearTransparentStaticCandidateCount +=
+			orderedTransparent.near.length;
+		const sortedTransparent = this.#prepareFrameTransparentRuns({
+			far: orderedTransparent.far.map(({ range }) => range),
+			near: orderedTransparent.near.map(({ range }) => range),
+		});
+		if (sortedTransparent.length === 0 && additive.length === 0) return;
 		const gl = this.#gl;
 		gl.depthMask(false);
 		gl.enable(gl.BLEND);
-		gl.useProgram(this.#blendedObjectProgram.program);
-		this.#frameSelectionMetrics.objectProgramChanges += 1;
-		for (const [unit, uniform] of [
-			[0, this.#blendedObjectProgram.uniforms.base],
-			[1, this.#blendedObjectProgram.uniforms.palette],
-			[2, this.#blendedObjectProgram.uniforms.detail],
-		] as const) {
-			this.#bindObjectTexture(
-				unit,
-				this.#objectFallbackTexture,
-				TextureFilteringMode.Nearest,
-			);
-			gl.uniform1i(uniform, unit);
-		}
-		gl.uniformMatrix4fv(
-			this.#blendedObjectProgram.uniforms.projection,
-			false,
-			mat4ToFloat32Array(view.projection, this.#matrixScratch),
-		);
-		gl.uniformMatrix4fv(
-			this.#blendedObjectProgram.uniforms.view,
-			false,
-			mat4ToFloat32Array(view.view, this.#matrixScratch),
-		);
+		let activeProgram:
+			| WebGL2ObjectProgram
+			| WebGL2InstancedObjectProgram
+			| null = null;
 		for (const object of [...sortedTransparent, ...additive]) {
-			this.#configureObjectBlend(object.drawUnit);
-			this.#drawObjectRange(this.#blendedObjectProgram, object, view);
+			const program =
+				object.drawKind === "instanced"
+					? this.#blendedInstancedObjectProgram
+					: this.#blendedObjectProgram;
+			if (program !== activeProgram) {
+				this.#activateObjectProgram(program, view, null);
+				activeProgram = program;
+			}
+			this.#configureObjectBlend(object.material);
+			this.#drawObjectRange(program, object, view);
 		}
 	}
 
+	/**
+	 * Upload both transparent phases once while keeping their independent run boundaries.
+	 */
+	#prepareFrameTransparentRuns(ordered: {
+		readonly far: readonly ObjectFrameInput[];
+		readonly near: readonly ObjectFrameInput[];
+	}): readonly ObjectFrameInput[] {
+		const orderedInstances: import("../systems/static-resources").StaticInstanceData[] =
+			[];
+		const submissions: ObjectFrameInput[] = [];
+		const schedulePhase = (phase: readonly ObjectFrameInput[]) =>
+			formAdjacentTransparentInstanceRuns(
+				phase,
+				(object) => object.instances?.kind === "frame-template",
+				(left, right) =>
+					left.instances?.kind === "frame-template" &&
+					right.instances?.kind === "frame-template" &&
+					compareFrameTemplateBatchIdentity(left, right) === 0,
+			);
+		const farScheduled = schedulePhase(ordered.far);
+		const nearScheduled = schedulePhase(ordered.near);
+		const farRunCount = farScheduled.filter(
+			(submission) => submission.kind === "frame-instance-run",
+		).length;
+		const nearRunCount = nearScheduled.filter(
+			(submission) => submission.kind === "frame-instance-run",
+		).length;
+		this.#frameSelectionMetrics.transparentFrameRunCount +=
+			farRunCount + nearRunCount;
+		this.#frameSelectionMetrics.farTransparentFrameRunCount += farRunCount;
+		this.#frameSelectionMetrics.nearTransparentFrameRunCount += nearRunCount;
+		const scheduled = [...farScheduled, ...nearScheduled];
+		for (const submission of scheduled) {
+			if (submission.kind === "single") {
+				submissions.push(submission.value);
+				continue;
+			}
+			const [object, ...rest] = submission.values;
+			if (!object || object.instances?.kind !== "frame-template") {
+				throw new Error("Frame-instance run has no template.");
+			}
+			const firstInstance = orderedInstances.length;
+			orderedInstances.push(object.instances.instance);
+			for (const adjacent of rest) {
+				if (adjacent.instances?.kind !== "frame-template") {
+					throw new Error("Frame-instance run contains a non-template value.");
+				}
+				orderedInstances.push(adjacent.instances.instance);
+			}
+			submissions.push({
+				...object,
+				instances: {
+					cohortKey: object.instances.cohortKey,
+					firstInstance,
+					instanceCount: submission.values.length,
+					kind: "frame-range",
+				},
+			});
+		}
+		this.#frameInstances.prepareView(orderedInstances);
+		if (orderedInstances.length > 0) {
+			this.#frameSelectionMetrics.transparentFrameUploadCount += 1;
+			this.#frameSelectionMetrics.transparentFrameUploadBytes +=
+				orderedInstances.length * STATIC_INSTANCE_RECORD_BYTES;
+		}
+		return submissions;
+	}
+
 	#drawObjectRange(
-		program: WebGL2ObjectProgram,
+		program: AnyObjectProgram,
 		object: ObjectFrameInput,
 		view: PreparedView,
 	): void {
-		const { drawUnit } = object;
-		const { material } = drawUnit;
+		if (
+			(object.drawKind === "baked") !==
+			(program.transformSource === "baked")
+		) {
+			throw new Error(
+				`${object.drawKind} draw cannot use ${program.transformSource} object program.`,
+			);
+		}
+		const { material } = object;
 		const gl = this.#gl;
 		this.#configureObjectCulling(material.polygon.cullMode);
-		gl.uniformMatrix4fv(
-			program.uniforms.localToLandblock,
-			false,
-			mat4ToFloat32Array(object.localToLandblock, this.#matrixScratch),
-		);
+		if (program.transformSource === "baked") {
+			gl.uniformMatrix4fv(
+				program.uniforms.localToLandblock,
+				false,
+				mat4ToFloat32Array(object.localToLandblock, this.#matrixScratch),
+			);
+		}
 		const offset = createLandblockOffset(
 			getLandblockCoordinates(object.landblockId),
 			view.anchorCoordinates,
@@ -681,7 +894,7 @@ export class WebGL2Renderer implements Renderer {
 		);
 		gl.uniform1f(
 			program.uniforms.alphaTest,
-			drawUnit.ordering === "alpha-test" && material.source.kind === "texture"
+			object.ordering === "alpha-test" && material.source.kind === "texture"
 				? 200 / 255
 				: 0,
 		);
@@ -778,22 +991,121 @@ export class WebGL2Renderer implements Renderer {
 		}
 		gl.uniform1f(program.uniforms.luminosity, material.source.luminosity);
 		const geometry = this.#resources.getGeometry(object.geometry);
-		validateDrawRange(geometry, drawUnit.indexStart, drawUnit.indexCount);
+		validateDrawRange(geometry, object.indexStart, object.indexCount);
 		gl.bindVertexArray(geometry.vertexArray);
-		gl.drawElements(
-			gl.TRIANGLES,
-			drawUnit.indexCount,
-			geometry.indexType,
-			drawUnit.indexStart * geometry.indexElementBytes,
-		);
-		this.#frameSelectionMetrics.submittedBuildingRanges += 1;
-		this.#frameSelectionMetrics.submittedBuildingTriangles +=
-			drawUnit.indexCount / 3;
-		if (drawUnit.ordering === "transparent") {
-			this.#frameSelectionMetrics.submittedTransparentBuildingRanges += 1;
+		let submittedInstanceCount = 1;
+		if (object.drawKind === "instanced") {
+			if (!object.instances) {
+				throw new Error("Instanced draw has no resolved instance stream.");
+			}
+			if (object.instances.kind === "frame-template") {
+				throw new Error(
+					"Unprepared frame instance template reached submission.",
+				);
+			}
+			const range =
+				object.instances.kind === "persistent"
+					? persistentInstanceRange(
+							this.#resources.getInstanceStream(object.instances.resource),
+						)
+					: this.#frameInstances.getRange(
+							object.instances.firstInstance,
+							object.instances.instanceCount,
+						);
+			const instances = range.binding;
+			if (range.instanceCount === 0)
+				throw new Error("Instanced draw has an empty instance range.");
+			bindWebGL2ObjectInstanceRange(
+				gl,
+				instances,
+				range.firstInstance,
+				range.instanceCount,
+			);
+			submittedInstanceCount = range.instanceCount;
+			gl.drawElementsInstanced(
+				gl.TRIANGLES,
+				object.indexCount,
+				geometry.indexType,
+				object.indexStart * geometry.indexElementBytes,
+				submittedInstanceCount,
+			);
+		} else {
+			if (object.instances !== null) {
+				throw new Error("Baked draw unexpectedly resolved an instance stream.");
+			}
+			gl.drawElements(
+				gl.TRIANGLES,
+				object.indexCount,
+				geometry.indexType,
+				object.indexStart * geometry.indexElementBytes,
+			);
 		}
-		if (drawUnit.ordering === "additive") {
-			this.#frameSelectionMetrics.submittedAdditiveBuildingRanges += 1;
+		const sourceTriangleCount = object.indexCount / 3;
+		this.#frameSelectionMetrics.submittedStaticObjectDrawCount += 1;
+		this.#frameSelectionMetrics.submittedStaticObjectTriangleCount +=
+			sourceTriangleCount * submittedInstanceCount;
+		if (object.drawKind === "baked") {
+			this.#frameSelectionMetrics.submittedBakedStaticObjectDrawCount += 1;
+			this.#frameSelectionMetrics.submittedBakedStaticObjectTriangleCount +=
+				sourceTriangleCount;
+		} else {
+			this.#frameSelectionMetrics.submittedInstancedSourceTriangleCount +=
+				sourceTriangleCount;
+			if (object.instances?.kind === "persistent") {
+				this.#frameSelectionMetrics.submittedPersistentInstancedDrawCount += 1;
+				this.#frameSelectionMetrics.submittedPersistentInstanceCount +=
+					submittedInstanceCount;
+			}
+		}
+		if (object.ordering === "transparent") {
+			this.#frameSelectionMetrics.submittedTransparentStaticDrawCount += 1;
+			if (object.drawKind === "instanced") {
+				this.#frameSelectionMetrics.submittedTransparentInstanceCount +=
+					submittedInstanceCount;
+			}
+		}
+		if (object.ordering === "additive") {
+			this.#frameSelectionMetrics.submittedAdditiveStaticDrawCount += 1;
+		}
+	}
+
+	#activateObjectProgram(
+		program: AnyObjectProgram,
+		view: PreparedView,
+		fog: FrameInput["environment"]["distanceFog"],
+	): void {
+		const gl = this.#gl;
+		gl.useProgram(program.program);
+		this.#frameSelectionMetrics.objectProgramChanges += 1;
+		for (const [unit, uniform] of [
+			[0, program.uniforms.base],
+			[1, program.uniforms.palette],
+			[2, program.uniforms.detail],
+		] as const) {
+			this.#bindObjectTexture(
+				unit,
+				this.#objectFallbackTexture,
+				TextureFilteringMode.Nearest,
+			);
+			gl.uniform1i(uniform, unit);
+		}
+		gl.uniformMatrix4fv(
+			program.uniforms.projection,
+			false,
+			mat4ToFloat32Array(view.projection, this.#matrixScratch),
+		);
+		gl.uniformMatrix4fv(
+			program.uniforms.view,
+			false,
+			mat4ToFloat32Array(view.view, this.#matrixScratch),
+		);
+		if ("fogUniforms" in program) {
+			gl.uniform2f(
+				program.fogUniforms.cameraHorizontalPosition,
+				view.cameraPosition.x,
+				view.cameraPosition.z,
+			);
+			bindWebGL2DistanceFog(gl, program.fogUniforms, fog);
 		}
 	}
 
@@ -847,8 +1159,8 @@ export class WebGL2Renderer implements Renderer {
 		gl.cullFace(mode === "counter-clockwise" ? gl.FRONT : gl.BACK);
 	}
 
-	#configureObjectBlend(drawUnit: StaticObjectDrawUnit): void {
-		const policy = objectBlendPolicy(drawUnit.material.source.rawSurfaceFlags);
+	#configureObjectBlend(material: StaticObjectDrawUnit["material"]): void {
+		const policy = objectBlendPolicy(material.source.rawSurfaceFlags);
 		const gl = this.#gl;
 		gl.blendFunc(
 			policy.source === "one"
@@ -903,9 +1215,55 @@ function sourceOpacity(translucency: number): number {
 	return Math.max(0, Math.min(1, normalized));
 }
 
+/** Cluster far transparency by the exact fields used to form frame-instance runs. */
+function compareFarTransparentBatchOrder(
+	left: ObjectFrameInput,
+	right: ObjectFrameInput,
+): number {
+	const leftFrame = left.instances?.kind === "frame-template";
+	const rightFrame = right.instances?.kind === "frame-template";
+	if (leftFrame !== rightFrame) return leftFrame ? -1 : 1;
+	if (leftFrame && rightFrame) {
+		return compareFrameTemplateBatchIdentity(left, right);
+	}
+	return (
+		objectMaterialSortKey(left).localeCompare(objectMaterialSortKey(right)) ||
+		left.geometry.localeCompare(right.geometry) ||
+		left.landblockId.localeCompare(right.landblockId) ||
+		left.indexStart - right.indexStart ||
+		left.indexCount - right.indexCount
+	);
+}
+
+/** Compare the complete compatibility identity shared by sorting and adjacent run formation. */
+function compareFrameTemplateBatchIdentity(
+	left: ObjectFrameInput,
+	right: ObjectFrameInput,
+): number {
+	const leftInstances = left.instances;
+	const rightInstances = right.instances;
+	if (
+		leftInstances?.kind !== "frame-template" ||
+		rightInstances?.kind !== "frame-template"
+	) {
+		throw new Error(
+			"Transparent frame-template batch comparison requires two templates.",
+		);
+	}
+	return (
+		leftInstances.cohortKey.localeCompare(rightInstances.cohortKey) ||
+		left.geometry.localeCompare(right.geometry) ||
+		left.landblockId.localeCompare(right.landblockId) ||
+		left.indexStart - right.indexStart ||
+		left.indexCount - right.indexCount
+	);
+}
+
 /** Keep opaque/alpha-test ordering classes intact while clustering equivalent atlas/program state. */
-function objectMaterialSortKey(drawUnit: StaticObjectDrawUnit): string {
-	const { material } = drawUnit;
+function objectMaterialSortKey(input: {
+	readonly material: StaticObjectDrawUnit["material"];
+}): string {
+	const { material } = input;
 	return [
 		material.source.kind,
 		material.textures.base ?? "solid",
@@ -914,6 +1272,18 @@ function objectMaterialSortKey(drawUnit: StaticObjectDrawUnit): string {
 		material.sampler.filtering,
 		material.sampler.wrap,
 	].join("|");
+}
+
+function persistentInstanceRange(binding: WebGL2InstanceBufferBinding): {
+	readonly binding: WebGL2InstanceBufferBinding;
+	readonly firstInstance: 0;
+	readonly instanceCount: number;
+} {
+	return {
+		binding,
+		firstInstance: 0,
+		instanceCount: binding.populatedInstanceCount,
+	};
 }
 
 function createObjectFallbackTexture(gl: WebGL2RenderingContext): WebGLTexture {

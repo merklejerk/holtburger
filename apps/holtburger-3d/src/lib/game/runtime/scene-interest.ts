@@ -13,7 +13,19 @@ export enum LandblockLayerKind {
 /** Outdoor static layers realized through the common geometry and atlas path. */
 export type OutdoorStaticLayerKind =
 	| LandblockLayerKind.Buildings
-	| LandblockLayerKind.Objects;
+	| LandblockLayerKind.Objects
+	| LandblockLayerKind.Generated;
+
+/** Narrow a landblock layer to the shared outdoor-static realization domain. */
+export function isOutdoorStaticLayer(
+	layer: LandblockLayerKind,
+): layer is OutdoorStaticLayerKind {
+	return (
+		layer === LandblockLayerKind.Buildings ||
+		layer === LandblockLayerKind.Objects ||
+		layer === LandblockLayerKind.Generated
+	);
+}
 
 export type SceneInterestMap = Map<LandblockId, Set<LandblockLayerKind>>;
 

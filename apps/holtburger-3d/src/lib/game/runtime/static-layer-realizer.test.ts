@@ -181,6 +181,25 @@ describe("StaticLayerRealizer", () => {
 		await expect(pending).resolves.toMatchObject({ kind: "published" });
 		expect(publisher.events).toEqual(["replace:objects:1"]);
 	});
+
+	it("publishes a generated realization into its exact typed layer", async () => {
+		const atlas = new FakeAtlas();
+		const geometry = deferred<string>();
+		const publisher = new FakePublisher();
+		const realizer = createRealizer(
+			atlas,
+			geometry,
+			publisher,
+			new FakeCurrentness(),
+		);
+		const pending = realizer.realize(input(LandblockLayerKind.Generated));
+
+		atlas.resolve();
+		geometry.resolve("geometry");
+
+		await expect(pending).resolves.toMatchObject({ kind: "published" });
+		expect(publisher.events).toEqual(["replace:generated:1"]);
+	});
 });
 
 function input(layer = LandblockLayerKind.Buildings) {

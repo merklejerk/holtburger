@@ -10,7 +10,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 pub(crate) const OUTDOOR_STATIC_RECORD_BINARY_MAGIC: &[u8; 4] = b"HBSO";
-pub(crate) const OUTDOOR_STATIC_RECORD_BINARY_VERSION: u32 = 1;
+pub(crate) const OUTDOOR_STATIC_RECORD_BINARY_VERSION: u32 = 2;
 const OUTDOOR_STATIC_RECORD_BINARY_HEADER_LEN: usize = 16;
 
 /// Closed source data for one outdoor static layer before it crosses the app boundary.

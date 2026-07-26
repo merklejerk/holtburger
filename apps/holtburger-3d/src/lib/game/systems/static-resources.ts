@@ -1,6 +1,13 @@
 import type { ColorF } from "../pixels/types";
 import type { Mat4 } from "../math/types";
 
+/** Matrix plus RGBA modulation values retained for every immutable static instance. */
+export const STATIC_INSTANCE_RECORD_FLOAT_COUNT = 20;
+
+/** Strategy-neutral payload bytes represented by one static instance record. */
+export const STATIC_INSTANCE_RECORD_BYTES =
+	STATIC_INSTANCE_RECORD_FLOAT_COUNT * Float32Array.BYTES_PER_ELEMENT;
+
 /** Opaque namespace shared by every installation-scoped static resource. */
 export type StaticInstallResourceNamespace = `static-install:${string}`;
 

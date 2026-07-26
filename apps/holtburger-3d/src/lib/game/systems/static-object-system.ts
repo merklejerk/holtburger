@@ -4,7 +4,7 @@ import type {
 	StaticObjectRenderable,
 } from "../commit/artifacts";
 import type { SceneGraph, SceneNodeId } from "../scene";
-import type { InstanceStreamManager } from "./instance-stream-manager";
+import type { StaticInstanceStreamManager } from "./static-instance-stream-manager";
 import type { LandblockLayerKind } from "../runtime/scene-interest";
 import type { SceneInterestRevision } from "../runtime/scene-availability";
 
@@ -32,7 +32,7 @@ export class StaticObjectSystem<
 	>();
 	readonly #scene: SceneGraph;
 	readonly #geometry: GeometryManager<TResourceOwner>;
-	readonly #instances: InstanceStreamManager<TResourceOwner>;
+	readonly #instances: StaticInstanceStreamManager<TResourceOwner>;
 	readonly #resourceOwner: (
 		owner: TOwnerId,
 		revision: SceneInterestRevision,
@@ -41,7 +41,7 @@ export class StaticObjectSystem<
 	constructor(
 		scene: SceneGraph,
 		geometry: GeometryManager<TResourceOwner>,
-		instances: InstanceStreamManager<TResourceOwner>,
+		instances: StaticInstanceStreamManager<TResourceOwner>,
 		resourceOwner: (
 			owner: TOwnerId,
 			revision: SceneInterestRevision,

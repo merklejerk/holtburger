@@ -901,7 +901,11 @@ mod tests {
         let objects = runtime.load(ContentAssetRequest::LandblockSceneLod(
             LandblockSceneLodRequest::outdoor(landblock_id, LandblockSceneLodLevel::Level2),
         ));
-        let (terrain, buildings, objects) = tokio::join!(terrain, buildings, objects);
+        let generated = runtime.load(ContentAssetRequest::LandblockSceneLod(
+            LandblockSceneLodRequest::outdoor(landblock_id, LandblockSceneLodLevel::Level3),
+        ));
+        let (terrain, buildings, objects, generated) =
+            tokio::join!(terrain, buildings, objects, generated);
 
         assert_eq!(
             scene_lod_level(terrain.expect("terrain request should load")),
@@ -915,7 +919,13 @@ mod tests {
             scene_lod_level(objects.expect("object request should load")),
             LandblockSceneLodLevel::Level2
         );
-        assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_id), 1);
+        assert_eq!(
+            scene_lod_level(generated.expect("generated request should load")),
+            LandblockSceneLodLevel::Level3
+        );
+        // Level 3 may perform one sequential extension after the lower shared prefix completes;
+        // the coordinator prevents four competing cumulative assemblies.
+        assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_id), 2);
     }
 
     fn scene_lod_level(asset: ContentAsset) -> LandblockSceneLodLevel {

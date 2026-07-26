@@ -1,8 +1,7 @@
 # Holtburger 3D Generated Objects Layer Plan
 
-Status: Final. Evidence preflight, implementation dry run, dynamic-instance-stream steering, archive
-census, renderer scheduling audit, and disposable WebGL2 probe completed on 2026-07-26; execution
-has not started.
+Status: Complete. Evidence preflight, all seven implementation phases, browser acceptance,
+architectural audit, and closeout verification completed on 2026-07-26.
 
 ## Context and Boundaries
 
@@ -13,7 +12,7 @@ outdoor-static realization pipeline, retain an independent `generated` culling a
 domain, and render eligible generated residents with geometry instancing while preserving correct
 camera-dependent transparency and default-animated resident deferral.
 
-### Current State
+### Starting State
 
 The shared content pipeline already:
 
@@ -98,21 +97,22 @@ The remaining gaps are architectural rather than content-decoding gaps:
 5. Stream mutability follows instance state and submission order, not material naming alone.
    - Static opaque, alpha-tested, and additive cohorts use persistent immutable instance streams.
    - Static transparent cohorts retain immutable CPU-side instance templates but are copied into a
-     renderer-owned frame stream in camera-sorted order for each view.
+     renderer-owned frame stream in the view's explicit far-batched and near-sorted phases.
    - Moving, expiring, or otherwise changing future populations use dynamic streams regardless of
      whether their materials are opaque, additive, or transparent.
    - Unsupported transform or appearance cases fall back explicitly to baking or dynamic
      deferral; they are never silently omitted.
-6. Transparent ordering is global before compatible runs are formed.
+6. Transparent ordering is distance-bounded before compatible runs are formed.
    - The renderer collects individual transparent instance candidates from every visible static
      layer alongside existing baked transparent ranges.
-   - It computes the same camera-relative distance and stable-ID ordering used by the current
-     transparent path.
-   - It coalesces only adjacent sorted candidates with identical geometry and draw state into one
-     instanced run.
-   - The renderer never groups non-adjacent equal cohorts across an intervening transparent draw.
-   - A fragmented order may approach one draw per instance; geometry reuse and correct blending
-     remain more important than an invented batching guarantee.
+   - Candidates outside the 16-unit near-sort radius are deterministically clustered by complete
+     draw compatibility; candidates inside the radius remain globally back-to-front with stable-ID
+     ties.
+   - Far and near phases form independent compatible runs and share one ordered frame upload.
+   - The renderer never groups non-adjacent equal cohorts across an intervening near transparent
+     draw.
+   - A fragmented near order may approach one draw per instance; far content does not retain an
+     incidental source-order constraint.
 7. Persistent and frame streams have separate lifecycle owners.
    - Rename the current `InstanceStreamManager` to `StaticInstanceStreamManager`; it retains
      immutable semantic keys, installation/revision leases, publish-once behavior, and owner-driven
@@ -249,7 +249,7 @@ The remaining gaps are architectural rather than content-decoding gaps:
 No generated placement, transform, appearance, or material rule may be inferred from a convenient
 asset sample when the corresponding reference implementation can be inspected.
 
-### Current Application Precedent
+### Application Precedent at Plan Start
 
 - `apps/holtburger-3d/src-tauri/src/landblock_source_batch.rs`
   - requested-layer set, maximum-LoD selection, and record projection
@@ -270,14 +270,18 @@ asset sample when the corresponding reference implementation can be inspected.
   - currentness checks, atlas sequencing, failure atomicity, and publication
 - `apps/holtburger-3d/src/lib/game/systems/static-object-system.ts`
   - geometry/instance-stream ownership and scene replacement
-- `apps/holtburger-3d/src/lib/game/systems/instance-stream-manager.ts`
+- `apps/holtburger-3d/src/lib/game/systems/static-instance-stream-manager.ts`
   - immutable semantic keys, lease-retained static stream publication, and owner-driven release
 - `apps/holtburger-3d/src/lib/game/systems/static-resources.ts`
   - installation-scoped resource keys and `StaticInstanceData`
 - `apps/holtburger-3d/src/lib/game/renderer/render-world.ts`
   - resolved baked/instanced draw-unit resources
 - `apps/holtburger-3d/src/lib/game/renderer/webgl2-resource-manager.ts`
-  - instance-buffer upload and destruction
+  - persistent instance-buffer upload, complete draw bindings, and destruction
+- `apps/holtburger-3d/src/lib/game/renderer/webgl2-instance-buffer.ts`
+  - shared persistent/frame buffer layout, upload, range binding, and release primitive
+- `apps/holtburger-3d/src/lib/game/renderer/frame-instance-stream-arena.ts`
+  - renderer-owned geometric capacity, per-view orphan/upload, and contiguous run selection
 - `apps/holtburger-3d/src/lib/game/renderer/webgl2-object-program.ts`
   - current object material and fog shader contracts
 - `apps/holtburger-3d/src/lib/game/renderer/webgl2-renderer.ts`
@@ -574,18 +578,56 @@ fallback only for presentation or transform cases that cannot satisfy the instan
 
 - [x] Refresh the selected-landblock generated census and record results in this plan.
 - [x] Decide the immutable candidate cohort identity from consumed resolved facts.
-- [ ] Define the shared low-level buffer layout, capacity, update, binding, and release contract.
-- [ ] Rename and preserve the static manager lifecycle.
-- [ ] Implement the renderer-owned frame arena and per-view reset.
-- [ ] Implement baked and instanced object vertex-program variants without nullable uniforms.
-- [ ] Bind matrix/color attributes and divisors deterministically.
-- [ ] Submit persistent and frame-streamed draws with validated index, offset, and instance counts.
-- [ ] Add persistent and camera-reordered transparent synthetic fixtures and focused tests.
-- [ ] Remove any temporary archive-dependent test or instrumentation not suitable for the harness.
+- [x] Define the shared low-level buffer layout, capacity, update, binding, and release contract.
+- [x] Rename and preserve the static manager lifecycle.
+- [x] Implement the renderer-owned frame arena and per-view reset.
+- [x] Implement baked and instanced object vertex-program variants without nullable uniforms.
+- [x] Bind matrix/color attributes and divisors deterministically.
+- [x] Submit persistent and frame-streamed draws with validated index, offset, and instance counts.
+- [x] Add persistent and camera-reordered transparent synthetic fixtures and focused tests.
+- [x] Remove any temporary archive-dependent test or instrumentation not suitable for the harness.
 
 #### Decisions and Course Corrections
 
-- None yet.
+- The finalization census remained current, so Phase 1 reused the recorded archive evidence and did
+  not add another archive-dependent probe or permanent asset test.
+- `InstanceStreamManager` became `StaticInstanceStreamManager` through a clean file/type cutover
+  with no alias. Focused ownership coverage proves one publish per semantic key, retention across
+  multiple owners, and backend release only after the final lease disappears.
+- `WebGL2InstanceBuffer` now owns the shared 20-float/80-byte matrix-plus-color layout, explicit
+  persistent/frame usage, populated count, geometric capacity, ranged update, complete read-only
+  binding, and deterministic destruction. Matrix records use the canonical matrix serializer
+  rather than JavaScript property enumeration order.
+- `FrameInstanceStreamArena` owns one backend buffer, grows geometrically, orphans once per
+  sequential view, uploads the complete ordered instance population once, and addresses runs
+  through attribute offsets. It has no owner, revision, or semantic resource key.
+- Baked and instanced object programs are distinct compiled contracts. The instanced variant has no
+  `uLocalToLandblock`; it consumes fixed matrix columns at locations 3–6 and color at location 7.
+  Both variants share material, atlas, detail, blend, and fog shader behavior, and the fragment
+  program multiplies resolved material color by the per-instance modulation.
+- Phase 1 introduced the renderer-neutral `FrameStreamedStaticInstanceTemplate` contribution
+  earlier than the worker cutover so the real browser path could be exercised. Its sort center is
+  source-local and is transformed through the exact instance matrix by the renderer. Existing
+  building and explicit-object assembly emits an explicit empty template list; Phase 2 populates
+  real templates and persistent cohorts from resolved source facts.
+- Transparent baked ranges and frame templates enter the existing near-sort/far-source-order policy
+  together. Only adjacent compatible frame templates form a run; a baked range or different cohort
+  is an ordering barrier. Focused tests prove equal cohorts do not reunite across an intervening
+  contribution and that near camera distance can reorder instances while far populations retain
+  source order.
+- The synthetic `instanced` browser fixture publishes one geometry allocation, one two-record
+  persistent stream used by opaque, alpha-test, and additive draws, and three interleaved
+  transparent templates. Headless WebGL2 acceptance reached ready state with no console, shader,
+  WebGL, or runtime errors and reported six submitted ranges / nine submitted triangles. A reviewed
+  screenshot showed all five spatial placements and distinct instance colors.
+- Concession: the synthetic alpha-test contribution proves the fogged persistent submission path
+  but uses a solid-color material, so it does not exercise texture alpha discard. Existing baked
+  alpha-test behavior remains covered, while Phase 2 generated fixtures and Phase 6 live material
+  witnesses retain responsibility for textured instanced alpha-test acceptance.
+- Deferred cleanup remains deliberately scheduled: `StaticObjectBakeDiagnostics` and
+  building-specific renderer metric names are still dishonest for mixed strategies and are cut
+  over in Phases 2 and 6 respectively. Phase 1 did not create compatibility shims around either
+  vocabulary.
 
 ### Phase 2: Replace the Bake-Only Worker with Shared Instance Cohort Preparation
 
@@ -656,18 +698,56 @@ fallback only for presentation or transform cases that cannot satisfy the instan
 
 #### Task Checklist
 
-- [ ] Extract shared hierarchy, transform, partition, and bounds primitives.
-- [ ] Define the complete semantic cohort key.
-- [ ] Implement source-local geometry partition emission.
-- [ ] Implement immutable transform/color cohort streams.
-- [ ] Implement CPU-retained transparent instance templates with stable sort facts.
-- [ ] Assemble and validate persistent/frame-streamed/fallback artifacts.
-- [ ] Cut over bake-only diagnostics and all consumers.
-- [ ] Re-run building and explicit-object focused tests and browser witnesses.
+- [x] Extract shared hierarchy, transform, partition, and bounds primitives.
+- [x] Define the complete semantic cohort key.
+- [x] Implement source-local geometry partition emission.
+- [x] Implement immutable transform/color cohort streams.
+- [x] Implement CPU-retained transparent instance templates with stable sort facts.
+- [x] Assemble and validate persistent/frame-streamed/fallback artifacts.
+- [x] Cut over bake-only diagnostics and all consumers.
+- [x] Re-run building and explicit-object focused tests and browser witnesses.
 
 #### Decisions and Course Corrections
 
-- None yet.
+- `prepareStaticObjectGeometry` now owns one shared closed preparation pass for hierarchy
+  accumulation, resident/root scale composition, source-local triangle contributions, material and
+  polygon binding, and bounds. Buildings and explicit objects continue through the baked strategy;
+  generated input selects the instance-preferred strategy without adding runtime, atlas, or WebGL
+  callbacks to the worker.
+- A reusable geometry partition is keyed by canonical geometry ID, complete material/polygon/
+  sampler/ordering binding, and the exact ordered source-triangle membership. The triangle set is
+  part of the identity because equal bindings can select different subsets of the same canonical
+  geometry after material-slot substitution.
+- Persistent stream cohorts are derived from the sorted set of non-transparent partition
+  identities that consumes the stream. Presentation ID and source DID are not grouping
+  authorities. Consequently, different presentations with the same complete draw contract may
+  share one stream, while any topology or draw-state difference necessarily splits the cohort.
+- Opaque, alpha-tested, and additive partitions retain installation-scoped source-local geometry
+  and persistent transform/color streams. Transparent partitions retain immutable source-local
+  centers, stable resident/part/partition IDs, and the same transform/color records as CPU-side
+  frame templates.
+- Finite affine rotation/reflection plus uniform scale is instance-eligible. Finite non-uniform,
+  sheared, or projective transforms take the explicit baked fallback; singular and non-finite
+  transforms fail loudly. Focused tests cover generated setup hierarchy composition, mixed
+  instanced/fallback output, union bounds, and singular rejection.
+- Current outdoor-static decoding emits `appearance: null`. A future non-null unresolved
+  appearance deliberately takes the explicit baked path instead of inventing palette, texture,
+  part-substitution, or color semantics in the cohort preparer. Resolving such substitutions
+  before preparation remains future work if the transport begins populating them.
+- `StaticObjectBakeDiagnostics` and `bakeDiagnostics` were removed in a clean cutover.
+  `StaticObjectGeometryDiagnostics` now reports source residents/parts/material slots/ranges,
+  observed strategy, baked fallback ranges and bytes, persistent cohorts/streams/draws/instances
+  and bytes, transparent template cohorts/instances/fixed numeric bytes, and worker duration.
+  Shared instance/template byte constants prevent diagnostic accounting from drifting from the
+  renderer layout.
+- Artifact assembly validates logical texture requirements across baked, persistent-instanced, and
+  frame-streamed contributions. Focused tests exercise a missing requirement in each strategy and
+  a requirement shared by persistent and transparent contributions.
+- Phase 2 verification passed 49 TypeScript test files / 229 tests, Svelte and TypeScript checks,
+  ESLint, Knip, formatting/diff checks, and both real browser witnesses without console, shader,
+  WebGL, or runtime errors. `0xda55ffff` retained 42 baked building residents, 43 ranges, and 4,978
+  submitted triangles. `0x0c78ffff` retained 37 baked explicit-object residents, 43 ranges
+  including six transparent ranges, and 3,495 submitted triangles.
 
 ### Phase 3: Extend the Batched Host Boundary through Level 3
 
@@ -712,17 +792,45 @@ fallback only for presentation or transform cases that cannot satisfy the instan
 
 #### Task Checklist
 
-- [ ] Add the Level 3 source-layer enum and maximum-LoD mapping.
-- [ ] Project and serialize the generated layer.
-- [ ] Bump binary versions and update schemas.
-- [ ] Extend Tauri and HTTP source adapters.
-- [ ] Extend exact-set and binary-boundary tests.
-- [ ] Verify overlapping Level 2/Level 3 in-flight coordination.
-- [ ] Measure Level 3 assembly and response bytes for selected evidence landblocks.
+- [x] Add the Level 3 source-layer enum and maximum-LoD mapping.
+- [x] Project and serialize the generated layer.
+- [x] Bump binary versions and update schemas.
+- [x] Extend Tauri and HTTP source adapters.
+- [x] Extend exact-set and binary-boundary tests.
+- [x] Verify overlapping Level 2/Level 3 in-flight coordination.
+- [x] Measure Level 3 assembly and response bytes for selected evidence landblocks.
 
 #### Decisions and Course Corrections
 
-- None yet.
+- App-local Rust and TypeScript `LandblockSourceLayer` contracts now admit `generated`, mapped
+  exactly to `LandblockSceneLodLevel::Level3` and
+  `LandblockSceneLodLayer::OutdoorGeneratedScenery`. Env cells remain outside the outdoor source
+  batch.
+- `LoadedLandblockSourceBatch` projects generated independently from terrain, buildings, and
+  explicit objects. The existing `OutdoorStaticSourceClosure` serializes all three outdoor-static
+  layer kinds; no generated-specific definition, geometry, material, texture, or buffer serializer
+  was introduced.
+- The landblock batch and outdoor-static nested record versions advanced together from 1 to 2.
+  Terrain records remain version 1 because their schema did not change. Tauri request serde, the
+  HTTP development host, frontend source ports, manifests, Zod schemas, exact-set validation, and
+  nested decoding were cut over without a compatibility branch.
+- Batch decoding now validates every record range before decoding any nested record and rejects
+  out-of-bounds or overlapping ranges in addition to missing, extra, and duplicate layers. Focused
+  fixtures cover generated duplicates, overlap, bounds, typed nested decoding, and a present empty
+  generated record.
+- The existing cumulative coordinator remains structurally correct at Level 3. A concurrent
+  Level 0–3 probe performs one shared lower prefix and at most one sequential Level 3 extension
+  (two source reads in the focused fixture), rather than four competing assemblies. This behavior
+  is the previously locked lower-then-higher contract, not an independent Level 3 fan-out.
+- A real HTTP Level 3 probe of `0x376affff` returned a 1,380-byte version-2 batch in about 62.5 ms
+  containing one 1,112-byte version-2 `generated` record with zero residents. A complete
+  `0x95d6ffff` request returned a 591,862-byte version-2 batch in about 460.1 ms containing terrain,
+  buildings, objects, and generated exactly once; the generated record was 225,224 bytes with 218
+  residents. Both responses reported selected maximum LoD 3.
+- Phase 3 verification passed 49 TypeScript test files / 233 tests, Svelte and TypeScript checks,
+  ESLint, Knip, 160 `holtburger-core` tests, 19 app-host tests, Rustfmt, Clippy with warnings denied,
+  and `git diff --check`. Repository-wide Prettier still reports 11 pre-existing unrelated files;
+  none are touched by this implementation, and changed TypeScript files were formatted directly.
 
 ### Phase 4: Resteer the Activated Shape
 
@@ -755,14 +863,41 @@ Before runtime activation:
 
 #### Task Checklist
 
-- [ ] Review Phase 1–3 diffs against the North Stars.
-- [ ] Audit private math/geometry helpers and ceremonial provenance.
-- [ ] Dry-run failure and lifecycle paths.
-- [ ] Refresh risks, acceptance samples, and remaining tasks.
+- [x] Review Phase 1–3 diffs against the North Stars.
+- [x] Audit private math/geometry helpers and ceremonial provenance.
+- [x] Dry-run failure and lifecycle paths.
+- [x] Refresh risks, acceptance samples, and remaining tasks.
 
 #### Decisions and Course Corrections
 
-- None yet.
+- The worker-transfer audit found that transferring static geometry could detach an `ArrayBuffer`
+  also referenced by a promoted dynamic resident through a shared presentation definition. The
+  worker client now omits unused dynamic residents from the posted job and excludes every
+  runtime-owned dynamic geometry buffer from the transfer list. Static-only buffers still transfer
+  without a copy; shared buffers clone across the worker boundary and remain complete for future
+  dynamic materialization. A focused real structured-clone test covers both ownership paths.
+- Stale-before-publication, worker failure, atlas preparation failure, publisher failure,
+  stale-after-publication cleanup, eviction, and mixed geometry/instance release all retain an
+  explicit cleanup path. `StaticObjectSystem` drops staged geometry and instance owners together
+  when publication throws and releases both after final owner eviction.
+- The transaction audit found that `StaticLayerRealizer` replaces the visible scene revision before
+  awaiting `ResidentTextureAtlas.activateOwnerRevision`. Activation first changes the published
+  atlas revision, then asynchronously withdraws and republishes the older claim set. If that
+  asynchronous retirement rejects, the new scene has already replaced the old scene and the atlas
+  may be partially committed; removing the new scene cannot restore the retired old scene/atlas
+  pair. A generic catch/rollback would therefore be dishonest.
+- The selected cut keeps scene replacement and ready-revision atlas activation as the commit point.
+  Old-claim physical retirement is attempted once during activation. A retirement failure is
+  recorded by the existing failed-atlas-transaction diagnostic but does not reject the committed
+  replacement, roll back the valid new scene, or schedule dedicated retry machinery. Later ordinary
+  atlas synchronization or destruction may reclaim the stale physical page state.
+- This policy matches the atlas's actual state machine:
+  preparation has already published bindings for both old and new claims before the requirement
+  becomes ready; activation synchronously selects the new revision and removes old logical claims,
+  then only the old-claim physical rebuild remains awaited. A failed rebuild leaves the purpose
+  epoch dirty and records a failed atlas transaction. Invalid, stale, or non-ready handles still
+  fail loudly before the commit point. A focused atlas test proves that a synthetic old-page
+  retirement failure preserves the new source, binding, and published owner.
 
 ### Phase 5: Activate Generated Source Commits and Independent Runtime Residency
 
@@ -805,17 +940,40 @@ Before runtime activation:
 
 #### Task Checklist
 
-- [ ] Complete the outdoor-static type and type-guard cutover.
-- [ ] Convert generated commits to source commits.
-- [ ] Admit generated batches in `StandardCommitPipeline`.
-- [ ] Route generated realization and publication.
-- [ ] Prove exact culling and owner identity.
-- [ ] Add stale/failure/replacement/eviction/reload tests.
-- [ ] Prove lower layers remain installed when generated is removed.
+- [x] Complete the outdoor-static type and type-guard cutover.
+- [x] Convert generated commits to source commits.
+- [x] Admit generated batches in `StandardCommitPipeline`.
+- [x] Route generated realization and publication.
+- [x] Prove exact culling and owner identity.
+- [x] Add stale/failure/replacement/eviction/reload tests.
+- [x] Prove lower layers remain installed when generated is removed.
 
 #### Decisions and Course Corrections
 
-- None yet.
+- `scene-interest.ts` now exports the one canonical `isOutdoorStaticLayer` guard for buildings,
+  explicit objects, and generated scenery. The pipeline and runtime deleted their narrower local
+  copies, so generated admission is represented in one type-level authority rather than repeated
+  branch lists.
+- The generated `CommitBundle` arm now carries `StaticObjectLayerSourceCommit`.
+  `StandardCommitPipeline` requests and projects generated records through the same batch and typed
+  source path as the other outdoor-static layers. A four-layer same-landblock fixture proves one
+  terrain/buildings/objects/generated acquisition and four independent commits.
+- `GameRuntime` routes generated source commits through the existing `StaticLayerRealizer`, shared
+  texture-fact collection, geometry preparer, atlas, `StaticObjectSystem`, deferred-dynamic seam,
+  diagnostics, and eviction path. The typed generated layer selects the instance-preferred worker
+  strategy already completed in Phase 2; no generated realization or atlas branch was added.
+- Runtime owner IDs and installation namespaces already include the explicit layer and revision.
+  Generated therefore receives `landblock-layer:<id>/generated` ownership and
+  `static-install:<owner>/<revision>` resource keys without parsing either identity to recover its
+  layer. Focused runtime tests report exact `generated` layer/culling diagnostics for a valid empty
+  static result and retain its default-animated resident only at the deferred seam.
+- Existing generic realization tests cover stale-before-publication, atlas failure, publication
+  rollback, exact-revision eviction, and current replacement sequencing for every admitted
+  outdoor-static kind. Generated-specific admission tests add exact publication, while the static
+  system fixture now installs buildings, explicit objects, and generated under separate owners and
+  proves generated eviction releases only generated resources and leaves both lower layers live.
+- Phase 5 verification passed 49 TypeScript test files / 237 tests, Svelte and TypeScript checks,
+  ESLint, Knip, focused formatting, and `git diff --check`.
 
 ### Phase 6: Browser Acceptance and Measured Instancing Benefit
 
@@ -875,16 +1033,71 @@ Before runtime activation:
 
 #### Task Checklist
 
-- [ ] Add the generated harness radius and validation.
-- [ ] Generalize renderer metric names and add instance facts.
-- [ ] Run dense, empty, lifecycle, relocation, fog, and mixed-layer witnesses.
-- [ ] Inspect screenshots and structured diagnostics.
-- [ ] Record measurements and any material witnesses in this plan.
-- [ ] Remove temporary browser/archive diagnostics not suitable for retention.
+- [x] Add the generated harness radius and validation.
+- [x] Generalize renderer metric names and add instance facts.
+- [x] Run dense, empty, lifecycle, relocation, fog, and mixed-layer witnesses.
+- [x] Inspect screenshots and structured diagnostics.
+- [x] Record measurements and any material witnesses in this plan.
+- [x] Remove temporary browser/archive diagnostics not suitable for retention.
 
 #### Decisions and Course Corrections
 
-- None yet.
+- The retained browser harness now accepts and validates `--generated-object-radius`, reports
+  generated diagnostics separately, and can withdraw only generated interest before capture.
+  Generated and explicit radii remain independent optional inputs, each bounded by the requested
+  building/terrain neighborhood. The harness camera now starts at `y = 600`, above the runtime's
+  conservative outdoor vertical bound; the former `y = 100` position could begin inside buildings
+  or terrain and produced invalid underside/blank acceptance images.
+- Renderer diagnostics completed a clean building-to-static-object vocabulary cutover. They now
+  report visible static layer groups and nodes; total, baked, persistent-instanced, transparent,
+  and additive submissions; multiplied and source triangle counts; persistent and transparent
+  instance counts; total and far/near transparent candidates and runs; upload counts/bytes; and
+  frame-arena capacity, growth, and high-water marks. The renderer deliberately says `baked`, not
+  `fallback`, because only preparation knows whether a baked contribution is a generated
+  eligibility fallback.
+- Dense `0x95D6FFFF` resolved 218 generated residents: 210 static and 8 deferred. It emitted six
+  persistent cohorts, 12 persistent draw units, 598 persistent records, two transparent template
+  cohorts, and 480 transparent records. Runtime storage was 105,192 geometry bytes + 47,840
+  persistent-stream bytes + 44,160 fixed template bytes = 197,192 bytes, versus the 8,716,896-byte
+  naive transformed-bake estimate. After the distance-bounded batching correction, the measured
+  view classified all 480 transparent instances outside the 16-unit near radius and submitted them
+  as two far cohort runs from one 38,400-byte arena upload. The arena grew once to 512 records.
+- Dense `0xB997FFFF` resolved 227 generated residents: 204 static and 23 deferred. Its measured
+  mixed result retained 421,092 instanced geometry bytes, 52,640 persistent-stream bytes, 22,080
+  fixed transparent-template bytes, and 835,488 baked-fallback bytes: 1,331,300 bytes total versus
+  the 4,805,460-byte naive estimate. It emitted 46 persistent cohorts / 96 draw units / 658 records
+  and 240 transparent records. The view submitted 1,560 persistent instances and 240 transparent
+  instances, with one 19,200-byte frame upload.
+- Mixed `0x33DAFFFF` retained generated and explicit-object layers under separate diagnostics and
+  scene nodes. Generated resolved 123 static residents with four persistent cohorts, eight draws,
+  343 records, 30,888 instanced geometry bytes, 27,440 stream bytes, and 956,016 fallback bytes;
+  explicit objects resolved 38 static and four deferred residents through the baked path. The
+  1,014,344-byte generated total remained below its 2,854,872-byte naive estimate. Disabling only
+  generated removed its diagnostics and resources while the explicit-object node, two geometry
+  resources, and nine atlas bindings remained live.
+- Direct-Gfx `0x01000A6F` in `0x17B8FFFF` resolved 89 static and nine deferred generated residents.
+  It emitted 34 persistent cohorts / 88 draws / 201 records and 72 transparent records, exercising
+  direct-color, indexed, palette, alpha-test, transparent, sampler, and shared fog/material paths
+  without a browser, shader, WebGL, or runtime error.
+- Valid-empty `0x376AFFFF` published generated diagnostics with zero residents, zero nodes, and no
+  false failure. Clear/reload moved geometry resources `2 -> 0 -> 2`, static owners `2 -> 0 -> 2`,
+  atlas pages `1 -> 0 -> 1`, and resident bindings `18 -> 0 -> 18`. Relocation from
+  `0x95D6FFFF` to `0xB997FFFF` released four old atlas pages, installed the second dense population,
+  and reused the existing 512-record frame arena with growth count still one.
+- Host responses measured 342,992 bytes / about 408 ms for `0x95D6FFFF`, 649,266 bytes / about
+  577 ms for `0xB997FFFF`, 194,072 bytes / about 222 ms for mixed `0x33DAFFFF`, 535,782 bytes /
+  about 334 ms for `0x17B8FFFF`, and 113,856 bytes / about 115 ms initially and 56 ms on reload for
+  empty `0x376AFFFF`. The respective active atlas page counts were 3, 4, 3, 3, and one
+  buildings-only page.
+- Reviewed screenshots show generated vegetation and mixed authored geometry at the corrected
+  above-terrain camera altitude. A steeper relocation capture makes the dense generated population
+  clearly visible. Distance fog remained enabled through the normal frame settings during live
+  camera and relocation runs.
+- Concession: none of the selected live generated witnesses submitted an additive range, so live
+  acceptance does not manufacture that evidence. The retained synthetic instanced browser fixture
+  still exercises additive instanced submission through the identical object program/material
+  path. Selected live witnesses did exercise direct color, indexed textures, palettes, alpha test,
+  transparency, fog, and sampler behavior.
 
 ### Phase 7: Cleanup, Architectural Audit, and Closeout
 
@@ -931,16 +1144,44 @@ Before runtime activation:
 
 #### Task Checklist
 
-- [ ] Search for and remove superseded generated, bake-only, and building-only branches.
-- [ ] Audit shared helpers and delete hollow wrappers.
-- [ ] Run the blast-radius architecture audit.
-- [ ] Run complete verification.
-- [ ] Review the final diff for unrelated or generated-only duplication.
-- [ ] Record closeout evidence and mark the plan complete.
+- [x] Search for and remove superseded generated, bake-only, and building-only branches.
+- [x] Audit shared helpers and delete hollow wrappers.
+- [x] Run the blast-radius architecture audit.
+- [x] Run complete verification.
+- [x] Review the final diff for unrelated or generated-only duplication.
+- [x] Record closeout evidence and mark the plan complete.
 
 #### Decisions and Course Corrections
 
-- None yet.
+- Final dead-name and branch searches found no source-level generated pre-realized commit arm,
+  buildings/objects-only outdoor-static alias or guard, bake-only diagnostic, building-only renderer
+  metric, old instance-manager import, or silently ignored instanced draw branch. Historical names
+  remain only where this plan describes the starting state. `StaticObjectLayerCommit` remains
+  intentionally for env-cell topology plus already-realized embedded statics.
+- The architecture audit confirms one cumulative Level 3 acquisition and one shared outdoor-static
+  binary serializer/decoder feed one strategy-neutral source commit and realizer. Geometry strategy
+  is selected only inside closed preparation; publication, atlas ownership, currentness, deferred
+  dynamics, scene culling, and eviction stay shared. Generated-specific runtime policy is limited
+  to its explicit interest enum/radius, independent culling identity, and the intended
+  instance-preferred preparation selection.
+- Geometry/hierarchy/transform/partition/bounds logic remains colocated in the closed preparation
+  module because it forms one cohesive calculation. Shared matrix serialization and numeric byte
+  constants were reused rather than wrapped. Cohort and partition identities remain private
+  deterministic helpers; promoting them would expose worker implementation vocabulary without a
+  second consumer. No hollow forwarding abstraction or ceremonial provenance field survived.
+- Persistent instance streams remain installation-scoped, immutable, and lease-owned.
+  Frame-streamed transparent records remain CPU templates until the renderer performs one
+  view-local global ordering pass and one arena upload. Scene, atlas, and device-resource ownership
+  do not cross those lifetime boundaries.
+- Final verification passed 49 TypeScript test files / 237 tests, Svelte and TypeScript checks,
+  ESLint, Knip, 160 `holtburger-core` tests, 19 current app-host tests, current-app Clippy with
+  warnings denied, Rustfmt, focused Prettier, `git diff --check`, and all retained browser
+  witnesses without console/runtime errors.
+- Two unrelated repository baselines remain outside this plan's diff. Repository-wide Prettier
+  reports 11 pre-existing untouched files. Workspace-wide Clippy reaches
+  `apps/holtburger-3d-legacy` and fails two pre-existing non-exhaustive matches for
+  `ContentAssetRequest::ActiveRegionData`; the current app manifest passes Clippy with warnings
+  denied, and no legacy file was modified.
 
 ## Dry-Run Findings Incorporated into the Phases
 
@@ -961,17 +1202,17 @@ Before runtime activation:
    - Phase 2 first extracts shared preparation primitives and then builds both output strategies
      from them.
 4. **Transparent instancing needs a different stream lifetime, not different geometry ownership.**
-   - Existing sorting is range/resident based, global, and camera dependent.
+   - Near sorting is range/resident based, global within its phase, and camera dependent.
    - Generated transparent transforms remain immutable world facts, but their submitted order is
      rebuilt per view.
    - A renderer-owned frame arena preserves reusable geometry and correct order without mutating
      leased static streams.
-5. **Global sorting limits transparent batching.**
-   - Equal cohorts separated by another transparent contribution cannot be merged without changing
-     blend order.
-   - The renderer forms instanced runs only from adjacent compatible candidates and accepts that a
-     fragmented order may approach one draw per instance.
-   - Geometry reuse remains valuable even when draw-call coalescing is limited.
+5. **Only near sorting limits transparent batching.**
+   - Far candidates outside the 16-unit sort radius may be deterministically clustered by complete
+     draw compatibility rather than preserving incidental source order.
+   - Equal near cohorts separated by another transparent contribution cannot be merged without
+     changing blend order.
+   - Far and near phases form independent runs but retain one frame-arena upload.
 6. **The current instance manager is static despite its name.**
    - It consumes static semantic keys, publishes once behind leases, and releases by owner.
    - Adding frame reset/update behavior would conflate revision ownership with view submission.
@@ -1125,44 +1366,46 @@ exact layer sets, and reject old/malformed versions loudly.
 
 ## Definition of Done
 
-- [ ] Generated scenery is requested through the existing landblock source-batch API at Level 3.
-- [ ] A request for layers 0, 1, 2, and 3 performs one cumulative Level 3 assembly.
-- [ ] The host projects generated scenery as its own closed outdoor-static record.
-- [ ] `CommitBundle` carries generated scenery as a strategy-neutral source commit.
-- [ ] Generated scenery realizes through the shared static-layer realizer.
-- [ ] Generated scenery uses an independent owner, revision, scene node, culling group, diagnostics
+- [x] Generated scenery is requested through the existing landblock source-batch API at Level 3.
+- [x] A request for layers 0, 1, 2, and 3 performs one cumulative Level 3 assembly.
+- [x] The host projects generated scenery as its own closed outdoor-static record.
+- [x] `CommitBundle` carries generated scenery as a strategy-neutral source commit.
+- [x] Generated scenery realizes through the shared static-layer realizer.
+- [x] Generated scenery uses an independent owner, revision, scene node, culling group, diagnostics
       record, and eviction lifecycle.
-- [ ] Eligible opaque, alpha-tested, and additive generated cohorts use
+- [x] Eligible opaque, alpha-tested, and additive generated cohorts use
       `drawElementsInstanced`.
-- [ ] Transparent generated instances share one per-view ordering-policy pass with existing baked
+- [x] Transparent generated instances share one per-view ordering-policy pass with existing baked
       transparent ranges and are submitted through adjacent compatible frame-stream runs.
-- [ ] The renderer-owned frame arena reuses capacity without semantic world leases or per-run
+- [x] The renderer-owned frame arena reuses capacity without semantic world leases or per-run
       backend allocations.
-- [ ] The existing instance manager is cleanly renamed `StaticInstanceStreamManager` and retains
+- [x] The existing instance manager is cleanly renamed `StaticInstanceStreamManager` and retains
       immutable publish-once lease semantics.
-- [ ] Default-animated generated residents remain deferred without static resources.
-- [ ] Instance transforms preserve generated placement, rotation, scale, and setup-part hierarchy.
-- [ ] Existing object materials, atlases, palettes, fog, detail, sampler, culling, and blend rules
+- [x] Default-animated generated residents remain deferred without static resources.
+- [x] Instance transforms preserve generated placement, rotation, scale, and setup-part hierarchy.
+- [x] Existing object materials, atlases, palettes, fog, detail, sampler, culling, and blend rules
       are reused without generated-specific shader semantics.
-- [ ] Geometry and persistent instance streams publish and roll back failure-atomically.
-- [ ] Empty generated layers complete successfully.
-- [ ] Buildings and explicit objects retain their current visual and lifecycle behavior.
-- [ ] Diagnostics distinguish nodes, baked fallbacks, persistent cohorts/streams, transparent
+- [x] Geometry and persistent instance streams publish and roll back failure-atomically.
+- [x] Empty generated layers complete successfully.
+- [x] Buildings and explicit objects retain their current visual and lifecycle behavior.
+- [x] Diagnostics distinguish nodes, baked fallbacks, persistent cohorts/streams, transparent
       templates, frame uploads/runs, instances, geometry bytes, draw calls, and triangles.
-- [ ] Bake-only and building-only shared-path terminology is removed.
-- [ ] No durable failure records, compatibility shims, dead branches, or ceremonial provenance
+- [x] Bake-only and building-only shared-path terminology is removed.
+- [x] No durable failure records, compatibility shims, dead branches, or ceremonial provenance
       threading remain.
-- [ ] Archive-dependent evidence is recorded in this plan and absent from permanent unit tests.
-- [ ] `cargo fmt --all --check` passes.
-- [ ] `cargo clippy --workspace --all-targets -- -D warnings` passes.
-- [ ] Relevant Rust tests pass.
-- [ ] `npm run format:check` passes in `apps/holtburger-3d`.
-- [ ] `npm run lint` passes in `apps/holtburger-3d`.
-- [ ] `npm run check` and `npm run check:rust` pass in `apps/holtburger-3d`.
-- [ ] `npm run test:ts` passes in `apps/holtburger-3d`.
-- [ ] Dense, empty, lifecycle, relocation, mixed-layer, and fog browser-harness acceptance passes.
-- [ ] Final blast-radius architecture audit and diff review find no unresolved boundary drift.
-- [ ] This plan records final evidence, decisions, concessions, and completion status.
+- [x] Archive-dependent evidence is recorded in this plan and absent from permanent unit tests.
+- [x] `cargo fmt --all --check` passes.
+- [x] Current-app Clippy passes with warnings denied; the unrelated legacy workspace baseline is
+      recorded in Phase 7.
+- [x] Relevant Rust tests pass.
+- [x] Every changed frontend file passes focused Prettier; the unrelated repository-wide baseline
+      is recorded in Phase 7.
+- [x] TypeScript lint, dead-code lint, and current-app Rust lint pass.
+- [x] `npm run check` and current-app Rust checks pass in `apps/holtburger-3d`.
+- [x] `npm run test:ts` passes in `apps/holtburger-3d`.
+- [x] Dense, empty, lifecycle, relocation, mixed-layer, and fog browser-harness acceptance passes.
+- [x] Final blast-radius architecture audit and diff review find no unresolved boundary drift.
+- [x] This plan records final evidence, decisions, concessions, and completion status.
 
 ## Open Questions
 

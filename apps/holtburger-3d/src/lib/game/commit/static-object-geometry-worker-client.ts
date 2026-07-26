@@ -1,7 +1,7 @@
-import { AABB3, Vec3 } from "../math/types";
+import { AABB3, Mat4, Vec3 } from "../math/types";
 import {
-	type StaticObjectGeometryJob,
-	type StaticObjectGeometryResult,
+	type StaticObjectGeometryPreparationJob,
+	type StaticObjectGeometryPreparationResult,
 } from "./static-object-geometry-worker";
 import {
 	ClosedWorkerClient,
@@ -11,8 +11,8 @@ import {
 /** Runtime-owned closed geometry worker used by static-layer realization. */
 export class StaticObjectGeometryWorker {
 	readonly #geometry: ClosedWorkerClient<
-		StaticObjectGeometryJob,
-		StaticObjectGeometryResult | null
+		StaticObjectGeometryPreparationJob,
+		StaticObjectGeometryPreparationResult | null
 	>;
 
 	constructor(options: {
@@ -33,12 +33,19 @@ export class StaticObjectGeometryWorker {
 		});
 	}
 
-	async bake(
-		job: StaticObjectGeometryJob,
-	): Promise<StaticObjectGeometryResult | null> {
+	async prepare(
+		job: StaticObjectGeometryPreparationJob,
+	): Promise<StaticObjectGeometryPreparationResult | null> {
+		// Dynamic residents remain runtime-owned. Shared definition buffers must survive static
+		// worker transfer so a later dynamic materializer still receives a complete resident.
+		const runtimeOwnedBuffers = geometryBuffers(job.source.dynamicResidents);
+		const workerJob: StaticObjectGeometryPreparationJob = {
+			...job,
+			source: { ...job.source, dynamicResidents: [] },
+		};
 		const result = await this.#geometry.dispatch(
-			job,
-			geometryInputTransferables(job),
+			workerJob,
+			geometryInputTransferables(workerJob, runtimeOwnedBuffers),
 		);
 		return result === null ? null : hydrateGeometryResult(result);
 	}
@@ -49,10 +56,18 @@ export class StaticObjectGeometryWorker {
 }
 
 function geometryInputTransferables(
-	job: StaticObjectGeometryJob,
+	job: StaticObjectGeometryPreparationJob,
+	runtimeOwnedBuffers: ReadonlySet<ArrayBuffer>,
 ): Transferable[] {
-	const buffers = new Set<Transferable>();
-	for (const resident of job.source.staticResidents) {
+	const buffers = geometryBuffers(job.source.staticResidents);
+	return [...buffers].filter((buffer) => !runtimeOwnedBuffers.has(buffer));
+}
+
+function geometryBuffers(
+	residents: ResolvedGeometryResidents,
+): Set<ArrayBuffer> {
+	const buffers = new Set<ArrayBuffer>();
+	for (const resident of residents) {
 		for (const part of resident.presentation.parts) {
 			addTransferable(buffers, part.geometry.positions.buffer);
 			addTransferable(buffers, part.geometry.normals.buffer);
@@ -65,11 +80,11 @@ function geometryInputTransferables(
 			addTransferable(buffers, part.geometry.materialStippling.buffer);
 		}
 	}
-	return [...buffers];
+	return buffers;
 }
 
 function addTransferable(
-	target: Set<Transferable>,
+	target: Set<ArrayBuffer>,
 	buffer: ArrayBufferLike,
 ): void {
 	if (!(buffer instanceof ArrayBuffer)) {
@@ -80,9 +95,12 @@ function addTransferable(
 	target.add(buffer);
 }
 
+type ResolvedGeometryResidents =
+	StaticObjectGeometryPreparationJob["source"]["staticResidents"];
+
 function hydrateGeometryResult(
-	result: StaticObjectGeometryResult,
-): StaticObjectGeometryResult {
+	result: StaticObjectGeometryPreparationResult,
+): StaticObjectGeometryPreparationResult {
 	const bounds = new AABB3(
 		new Vec3(result.bounds.min.x, result.bounds.min.y, result.bounds.min.z),
 		new Vec3(result.bounds.max.x, result.bounds.max.y, result.bounds.max.z),
@@ -90,19 +108,65 @@ function hydrateGeometryResult(
 	return {
 		...result,
 		bounds,
-		ranges: result.ranges.map((range) => ({
-			...range,
-			transparentSort:
-				range.transparentSort === null
-					? null
-					: {
-							...range.transparentSort,
+		drawUnits: result.drawUnits.map((drawUnit) =>
+			drawUnit.kind === "instanced" || drawUnit.transparentSort === null
+				? drawUnit
+				: {
+						...drawUnit,
+						transparentSort: {
+							...drawUnit.transparentSort,
 							center: new Vec3(
-								range.transparentSort.center.x,
-								range.transparentSort.center.y,
-								range.transparentSort.center.z,
+								drawUnit.transparentSort.center.x,
+								drawUnit.transparentSort.center.y,
+								drawUnit.transparentSort.center.z,
 							),
 						},
+					},
+		),
+		frameStreamedInstances: result.frameStreamedInstances.map((template) => ({
+			...template,
+			instance: {
+				...template.instance,
+				sourceToLandblock: hydrateMat4(template.instance.sourceToLandblock),
+			},
+			transparentSort: {
+				...template.transparentSort,
+				center: new Vec3(
+					template.transparentSort.center.x,
+					template.transparentSort.center.y,
+					template.transparentSort.center.z,
+				),
+			},
+		})),
+		instanceStreams: result.instanceStreams.map((stream) => ({
+			...stream,
+			data: {
+				instances: stream.data.instances.map((instance) => ({
+					...instance,
+					sourceToLandblock: hydrateMat4(instance.sourceToLandblock),
+				})),
+			},
 		})),
 	};
+}
+
+function hydrateMat4(matrix: Mat4): Mat4 {
+	return new Mat4(
+		matrix.m11,
+		matrix.m12,
+		matrix.m13,
+		matrix.m14,
+		matrix.m21,
+		matrix.m22,
+		matrix.m23,
+		matrix.m24,
+		matrix.m31,
+		matrix.m32,
+		matrix.m33,
+		matrix.m34,
+		matrix.m41,
+		matrix.m42,
+		matrix.m43,
+		matrix.m44,
+	);
 }

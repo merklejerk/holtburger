@@ -76,7 +76,7 @@ describe("StandardCommitPipeline", () => {
 		]);
 	});
 
-	it("fans a combined terrain, building, and object batch into independent commits", async () => {
+	it("fans all same-landblock source layers into independent commits", async () => {
 		const landblockId = "0xda55ffff" as const;
 		const terrain = {
 			kind: LandblockLayerKind.Terrain,
@@ -84,11 +84,13 @@ describe("StandardCommitPipeline", () => {
 		} as unknown as ResolvedTerrainLayerSource;
 		const buildings = outdoorSource(landblockId, LandblockLayerKind.Buildings);
 		const objects = outdoorSource(landblockId, LandblockLayerKind.Objects);
+		const generated = outdoorSource(landblockId, LandblockLayerKind.Generated);
 		const sourceBatch = new RecordingSourceBatch(
 			new Map([
 				[LandblockLayerKind.Terrain, terrain],
 				[LandblockLayerKind.Buildings, buildings],
 				[LandblockLayerKind.Objects, objects],
+				[LandblockLayerKind.Generated, generated],
 			]),
 		);
 		const pipeline = await StandardCommitPipeline.build({ sourceBatch });
@@ -98,6 +100,7 @@ describe("StandardCommitPipeline", () => {
 				{ id: landblockId, layer: LandblockLayerKind.Terrain },
 				{ id: landblockId, layer: LandblockLayerKind.Buildings },
 				{ id: landblockId, layer: LandblockLayerKind.Objects },
+				{ id: landblockId, layer: LandblockLayerKind.Generated },
 			]),
 		);
 
@@ -108,6 +111,7 @@ describe("StandardCommitPipeline", () => {
 					LandblockLayerKind.Terrain,
 					LandblockLayerKind.Buildings,
 					LandblockLayerKind.Objects,
+					LandblockLayerKind.Generated,
 				],
 			},
 		]);
@@ -121,6 +125,10 @@ describe("StandardCommitPipeline", () => {
 					commit: { source: objects },
 					layer: LandblockLayerKind.Objects,
 				}),
+				expect.objectContaining({
+					commit: { source: generated },
+					layer: LandblockLayerKind.Generated,
+				}),
 			]),
 		);
 	});
@@ -128,7 +136,10 @@ describe("StandardCommitPipeline", () => {
 
 function outdoorSource(
 	landblockId: string,
-	kind: LandblockLayerKind.Buildings | LandblockLayerKind.Objects,
+	kind:
+		| LandblockLayerKind.Buildings
+		| LandblockLayerKind.Objects
+		| LandblockLayerKind.Generated,
 ): ResolvedObjectLayerSource {
 	return {
 		dynamicResidents: [],

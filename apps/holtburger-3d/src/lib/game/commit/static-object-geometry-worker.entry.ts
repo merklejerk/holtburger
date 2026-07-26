@@ -1,7 +1,7 @@
 import {
-	bakeStaticObjectGeometry,
-	type StaticObjectGeometryJob,
-	type StaticObjectGeometryResult,
+	prepareStaticObjectGeometry,
+	type StaticObjectGeometryPreparationJob,
+	type StaticObjectGeometryPreparationResult,
 } from "./static-object-geometry-worker";
 import type {
 	ClosedWorkerRequest,
@@ -11,23 +11,26 @@ import type {
 const worker = self as unknown as {
 	onmessage:
 		| ((
-				event: MessageEvent<ClosedWorkerRequest<StaticObjectGeometryJob>>,
+				event: MessageEvent<
+					ClosedWorkerRequest<StaticObjectGeometryPreparationJob>
+				>,
 		  ) => void)
 		| null;
 	postMessage(message: unknown, transfer?: readonly Transferable[]): void;
 };
 
 worker.onmessage = (
-	event: MessageEvent<ClosedWorkerRequest<StaticObjectGeometryJob>>,
+	event: MessageEvent<ClosedWorkerRequest<StaticObjectGeometryPreparationJob>>,
 ) => {
 	const { id, input } = event.data;
 	try {
-		const result = bakeStaticObjectGeometry(input);
-		const response: ClosedWorkerResponse<StaticObjectGeometryResult | null> = {
-			id,
-			ok: true,
-			result,
-		};
+		const result = prepareStaticObjectGeometry(input);
+		const response: ClosedWorkerResponse<StaticObjectGeometryPreparationResult | null> =
+			{
+				id,
+				ok: true,
+				result,
+			};
 		worker.postMessage(
 			response,
 			result ? geometryResultTransferables(result) : [],
@@ -42,12 +45,12 @@ worker.onmessage = (
 };
 
 function geometryResultTransferables(
-	result: StaticObjectGeometryResult,
+	result: StaticObjectGeometryPreparationResult,
 ): Transferable[] {
-	return [
-		result.geometry.geometry.positions.buffer,
-		result.geometry.geometry.normals.buffer,
-		result.geometry.geometry.textureCoordinates.buffer,
-		result.geometry.geometry.indices.buffer,
-	];
+	return result.geometry.flatMap(({ geometry }) => [
+		geometry.positions.buffer,
+		geometry.normals.buffer,
+		geometry.textureCoordinates.buffer,
+		geometry.indices.buffer,
+	]);
 }

@@ -10,6 +10,7 @@ import type {
 } from "../resolution/landblock-layer";
 import {
 	groupLandblockLayers,
+	isOutdoorStaticLayer,
 	LandblockLayerKind,
 	type LandblockIdLayer,
 	type OutdoorStaticLayerKind,
@@ -166,15 +167,6 @@ export class StandardCommitPipeline implements CommitPipeline {
 
 function describeLayer(layer: LandblockIdLayer): string {
 	return `landblock ${layer.id} layer ${layer.layer}`;
-}
-
-function isOutdoorStaticLayer(
-	layer: LandblockLayerKind,
-): layer is OutdoorStaticLayerKind {
-	return (
-		layer === LandblockLayerKind.Buildings ||
-		layer === LandblockLayerKind.Objects
-	);
 }
 
 function isOutdoorStaticSource(

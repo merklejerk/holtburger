@@ -90,7 +90,7 @@ export type CommitBundle = {} & (
 	  >
 	| CommitBundleLandblockLayerFields<
 			LandblockLayerKind.Generated,
-			StaticObjectLayerCommit
+			StaticObjectLayerSourceCommit
 	  >
 	| CommitBundleLandblockLayerFields<
 			LandblockLayerKind.EnvCells,

@@ -764,11 +764,6 @@ h1 {
 	font-weight: 400;
 }
 
-.explorer-lod-warning {
-	margin: 0;
-	color: #f1b265 !important;
-}
-
 @media (max-width: 560px) {
 	.explorer-tools {
 		right: 10px;

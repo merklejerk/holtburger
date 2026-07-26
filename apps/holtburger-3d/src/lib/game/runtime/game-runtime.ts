@@ -7,7 +7,7 @@ import {
 	type DynamicEntityCommit,
 } from "../commit/types";
 import type {
-	StaticObjectBakeDiagnostics,
+	StaticObjectGeometryDiagnostics,
 	StaticObjectLayerDiagnostics,
 } from "../commit/artifacts";
 import { INVALID_ID, type LandblockId } from "../game-types";
@@ -35,7 +35,7 @@ import {
 } from "../systems/dynamic-entity-system";
 import { EnvCellSystem } from "../systems/env-cell-system";
 import { AnimationSystem } from "../systems/animation-system";
-import { InstanceStreamManager } from "../systems/instance-stream-manager";
+import { StaticInstanceStreamManager } from "../systems/static-instance-stream-manager";
 import {
 	TextureManager,
 	type TextureAtlasPageDiagnostics,
@@ -51,7 +51,7 @@ import {
 	type TexturePreparer,
 } from "../textures/texture-preparer";
 import { StaticObjectGeometryWorker } from "../commit/static-object-geometry-worker-client";
-import { bakeStaticObjectGeometry } from "../commit/static-object-geometry-worker";
+import { prepareStaticObjectGeometry } from "../commit/static-object-geometry-worker";
 import { assembleStaticObjectArtifact } from "../commit/static-object-artifact";
 import { collectStaticObjectTextureDependencies } from "../commit/static-object-texture-inputs";
 import type { StaticObjectLayerArtifact } from "../commit/artifacts";
@@ -75,6 +75,7 @@ import type { ActiveRegionObjectDetailBinding } from "../resolution/active-regio
 import type { ResolvedOutdoorStaticLayerSource } from "../resolution/landblock-layer";
 import {
 	computeSceneInterest,
+	isOutdoorStaticLayer,
 	LandblockLayerKind,
 	type OutdoorStaticLayerKind,
 	type SceneInterestMap,
@@ -120,15 +121,26 @@ const TERRAIN_ROOT_BOUNDS: AABB3 = new AABB3(
 	new Vec3(OUTDOOR_LANDBLOCK_WORLD_SIZE, 510, 0),
 );
 
-const EMPTY_STATIC_OBJECT_BAKE_DIAGNOSTICS: StaticObjectBakeDiagnostics = {
-	additiveRangeCount: 0,
-	bakedRangeCount: 0,
-	geometryBytes: 0,
-	geometryWorkerDurationMs: 0,
-	sourceMaterialSlotCount: 0,
-	sourceRangeCount: 0,
-	transparentRangeCount: 0,
-};
+const EMPTY_STATIC_OBJECT_GEOMETRY_DIAGNOSTICS: StaticObjectGeometryDiagnostics =
+	{
+		bakedFallbackRangeCount: 0,
+		bakedGeometryBytes: 0,
+		geometryWorkerDurationMs: 0,
+		instancedGeometryBytes: 0,
+		persistentCohortCount: 0,
+		persistentDrawUnitCount: 0,
+		persistentInstanceCount: 0,
+		persistentStreamBytes: 0,
+		persistentStreamCount: 0,
+		sourceMaterialSlotCount: 0,
+		sourcePartCount: 0,
+		sourceRangeCount: 0,
+		sourceResidentCount: 0,
+		strategy: "empty",
+		transparentTemplateBytes: 0,
+		transparentTemplateCohortCount: 0,
+		transparentTemplateInstanceCount: 0,
+	};
 
 /** Runtime-owned collaborators that tests may replace with focused fakes. */
 export interface GameRuntimeDependencies {
@@ -211,7 +223,7 @@ export class GameRuntime {
 		StaticObjectLayerArtifact | null,
 		OwnerId
 	>;
-	readonly #instances: InstanceStreamManager<ResourceOwnerId>;
+	readonly #instances: StaticInstanceStreamManager<ResourceOwnerId>;
 	/** Dynamic roots, articulated part nodes, and presentation preparation. */
 	readonly #dynamics: DynamicEntitySystem<ResourceOwnerId>;
 	/** Env-cell scopes, crossings, shell nodes, and portal contributions. */
@@ -307,7 +319,7 @@ export class GameRuntime {
 			dependencies.texturePreparer,
 			this.#residentAtlas,
 		);
-		this.#instances = new InstanceStreamManager(renderResources);
+		this.#instances = new StaticInstanceStreamManager(renderResources);
 		this.#staticObjects = new StaticObjectSystem<OwnerId, ResourceOwnerId>(
 			this.#scene,
 			this.#geometry,
@@ -803,8 +815,8 @@ export class GameRuntime {
 					);
 				}
 				this.#staticObjectLayerDiagnostics.set(ownerId, {
-					...(result.geometry?.bakeDiagnostics ??
-						EMPTY_STATIC_OBJECT_BAKE_DIAGNOSTICS),
+					...(result.geometry?.geometryDiagnostics ??
+						EMPTY_STATIC_OBJECT_GEOMETRY_DIAGNOSTICS),
 					cullingGroup: artifact.layer,
 					expectedResidentCount:
 						artifact.commit.source.staticResidents.length +
@@ -942,7 +954,7 @@ class RuntimeStaticObjectGeometryPreparer implements StaticLayerGeometryPreparer
 		readonly source: ResolvedOutdoorStaticLayerSource;
 		readonly textureRequirements: readonly import("../textures/types").AssetTextureFact[];
 	}): Promise<StaticObjectLayerArtifact | null> {
-		const geometry = await this.#worker.bake({
+		const geometry = await this.#worker.prepare({
 			layer: options.layer,
 			resourceNamespace: staticRevisionToInstallNamespace(
 				options.owner,
@@ -970,19 +982,10 @@ class RuntimeStaticObjectGeometryPreparer implements StaticLayerGeometryPreparer
 class InlineStaticObjectGeometryPreparer extends RuntimeStaticObjectGeometryPreparer {
 	constructor() {
 		super({
-			bake: (job) => Promise.resolve(bakeStaticObjectGeometry(job)),
+			prepare: (job) => Promise.resolve(prepareStaticObjectGeometry(job)),
 			destroy: () => undefined,
 		} as StaticObjectGeometryWorker);
 	}
-}
-
-function isOutdoorStaticLayer(
-	layer: LandblockLayerKind,
-): layer is OutdoorStaticLayerKind {
-	return (
-		layer === LandblockLayerKind.Buildings ||
-		layer === LandblockLayerKind.Objects
-	);
 }
 
 function createLandblockPlacement(landblockId: LandblockId): ScenePlacement {

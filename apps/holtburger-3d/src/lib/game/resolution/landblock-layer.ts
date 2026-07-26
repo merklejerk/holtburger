@@ -5,7 +5,10 @@ import type {
 	TerrainPresentationSource,
 	TerrainGenerationSource,
 } from "../terrain/types";
-import { LandblockLayerKind } from "../runtime/scene-interest";
+import {
+	LandblockLayerKind,
+	type OutdoorStaticLayerKind,
+} from "../runtime/scene-interest";
 import type {
 	ResolvedGeometry,
 	ResolvedMaterial,
@@ -112,9 +115,9 @@ export interface ResolvedObjectLayerSource {
 	readonly dynamicResidents: readonly ResolvedObjectResident[];
 }
 
-/** Outdoor-static source kinds activated by the shared buildings/explicit-objects pipeline. */
+/** Outdoor-static source kinds admitted by shared geometry preparation and realization contracts. */
 export type ResolvedOutdoorStaticLayerSource = ResolvedObjectLayerSource & {
-	readonly kind: LandblockLayerKind.Buildings | LandblockLayerKind.Objects;
+	readonly kind: OutdoorStaticLayerKind;
 };
 
 /** Environment-cell layer containing structured interiors and embedded residents. */

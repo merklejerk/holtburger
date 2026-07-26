@@ -136,6 +136,11 @@ export class SceneGraph {
 		};
 	}
 
+	/** Return the producer-owned broad-phase group for one live scene node. */
+	getCullingGroup(nodeId: SceneNodeId): string | null {
+		return this.#nodes.get(nodeId)?.cullingGroup ?? null;
+	}
+
 	/** Return a copied resolved placement for inspection outside frame-time spatial queries. */
 	getResolvedPlacement(
 		nodeId: SceneNodeId,
@@ -379,7 +384,8 @@ export class SceneGraph {
 		if (group) group.dirty = true;
 		if (pruneEmptyGroup && group?.entries.size === 0) {
 			groups?.delete(entry.cullingGroup);
-			if (groups?.size === 0) landblockGroups?.delete(entry.placement.landblockId);
+			if (groups?.size === 0)
+				landblockGroups?.delete(entry.placement.landblockId);
 			if (landblockGroups?.size === 0) this.#cullingGroups.delete(scope);
 		}
 	}
@@ -416,8 +422,7 @@ export class SceneGraph {
 			if (!hasBounds) {
 				group.bounds = (group.bounds ?? bounds.clone()).copy(bounds);
 				hasBounds = true;
-			}
-			else {
+			} else {
 				const groupBounds = group.bounds;
 				if (!groupBounds)
 					throw new Error("Culling group lost bounds during aggregation.");

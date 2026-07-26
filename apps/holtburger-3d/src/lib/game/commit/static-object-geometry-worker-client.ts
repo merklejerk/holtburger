@@ -1,18 +1,18 @@
 import { AABB3, Vec3 } from "../math/types";
 import {
-	type BuildingGeometryJob,
-	type BuildingGeometryResult,
-} from "./building-geometry-worker";
+	type StaticObjectGeometryJob,
+	type StaticObjectGeometryResult,
+} from "./static-object-geometry-worker";
 import {
 	ClosedWorkerClient,
 	type ClosedWorkerPort,
 } from "../workers/closed-worker";
 
 /** Runtime-owned closed geometry worker used by static-layer realization. */
-export class BuildingGeometryWorker {
+export class StaticObjectGeometryWorker {
 	readonly #geometry: ClosedWorkerClient<
-		BuildingGeometryJob,
-		BuildingGeometryResult | null
+		StaticObjectGeometryJob,
+		StaticObjectGeometryResult | null
 	>;
 
 	constructor(options: {
@@ -21,11 +21,11 @@ export class BuildingGeometryWorker {
 		this.#geometry = new ClosedWorkerClient(options.createGeometryWorker());
 	}
 
-	static build(): BuildingGeometryWorker {
-		return new BuildingGeometryWorker({
+	static build(): StaticObjectGeometryWorker {
+		return new StaticObjectGeometryWorker({
 			createGeometryWorker: () =>
 				new Worker(
-					new URL("./building-geometry-worker.entry.ts", import.meta.url),
+					new URL("./static-object-geometry-worker.entry.ts", import.meta.url),
 					{
 						type: "module",
 					},
@@ -33,7 +33,9 @@ export class BuildingGeometryWorker {
 		});
 	}
 
-	async bake(job: BuildingGeometryJob): Promise<BuildingGeometryResult | null> {
+	async bake(
+		job: StaticObjectGeometryJob,
+	): Promise<StaticObjectGeometryResult | null> {
 		const result = await this.#geometry.dispatch(
 			job,
 			geometryInputTransferables(job),
@@ -46,7 +48,9 @@ export class BuildingGeometryWorker {
 	}
 }
 
-function geometryInputTransferables(job: BuildingGeometryJob): Transferable[] {
+function geometryInputTransferables(
+	job: StaticObjectGeometryJob,
+): Transferable[] {
 	const buffers = new Set<Transferable>();
 	for (const resident of job.source.staticResidents) {
 		for (const part of resident.presentation.parts) {
@@ -70,15 +74,15 @@ function addTransferable(
 ): void {
 	if (!(buffer instanceof ArrayBuffer)) {
 		throw new Error(
-			"Building worker inputs must use transferable ArrayBuffers.",
+			"Static-object worker inputs must use transferable ArrayBuffers.",
 		);
 	}
 	target.add(buffer);
 }
 
 function hydrateGeometryResult(
-	result: BuildingGeometryResult,
-): BuildingGeometryResult {
+	result: StaticObjectGeometryResult,
+): StaticObjectGeometryResult {
 	const bounds = new AABB3(
 		new Vec3(result.bounds.min.x, result.bounds.min.y, result.bounds.min.z),
 		new Vec3(result.bounds.max.x, result.bounds.max.y, result.bounds.max.z),

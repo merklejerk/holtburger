@@ -1,15 +1,15 @@
 import { Mat4 } from "../math/types";
-import type { ResolvedObjectLayerSource } from "../resolution/landblock-layer";
+import type { ResolvedOutdoorStaticLayerSource } from "../resolution/landblock-layer";
 import type { StaticObjectLayerArtifact } from "./artifacts";
-import type { BuildingGeometryResult } from "./building-geometry-worker";
+import type { StaticObjectGeometryResult } from "./static-object-geometry-worker";
 import type { StaticInstallResourceNamespace } from "../systems/static-resources";
 import type { AssetTextureFact, AssetTextureKey } from "../textures/types";
 
-/** Assemble a logical building artifact after geometry and texture-requirement validation. */
-export function assembleBuildingArtifact(options: {
-	readonly source: ResolvedObjectLayerSource;
+/** Assemble a logical static-object artifact after geometry and texture-requirement validation. */
+export function assembleStaticObjectArtifact(options: {
+	readonly source: ResolvedOutdoorStaticLayerSource;
 	readonly resourceNamespace: StaticInstallResourceNamespace;
-	readonly geometry: BuildingGeometryResult | null;
+	readonly geometry: StaticObjectGeometryResult | null;
 	readonly textureRequirements: readonly AssetTextureFact[];
 }): StaticObjectLayerArtifact | null {
 	const geometry = options.geometry;
@@ -26,7 +26,7 @@ export function assembleBuildingArtifact(options: {
 		]) {
 			if (texture !== null && !requiredTextures.has(texture)) {
 				throw new Error(
-					`Baked building range lacks a logical texture requirement for ${texture}.`,
+					`Baked static-object range lacks a logical texture requirement for ${texture}.`,
 				);
 			}
 		}

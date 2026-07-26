@@ -1,10 +1,11 @@
 import type {
 	LandblockSourceBatch,
 	LandblockSourceBatchSource,
+	LandblockSourceRecord,
 	LandblockSourceLayer,
 } from "../../assets/landblock-source-batch";
 import type {
-	ResolvedObjectLayerSource,
+	ResolvedOutdoorStaticLayerSource,
 	ResolvedTerrainLayerSource,
 } from "../resolution/landblock-layer";
 import {
@@ -124,10 +125,7 @@ export class StandardCommitPipeline implements CommitPipeline {
 				`Source batch returned no source for ${describeLayer(layer)}.`,
 			);
 		}
-		if (
-			source.kind !== LandblockLayerKind.Buildings ||
-			source.landblockId !== layer.id
-		) {
+		if (!isBuildingsSource(source) || source.landblockId !== layer.id) {
 			throw new Error(
 				`Loaded ${source.landblockId}/${source.kind} for ${describeLayer(layer)}.`,
 			);
@@ -154,7 +152,9 @@ export class StandardCommitPipeline implements CommitPipeline {
 		};
 	}
 
-	#prepareBuildingLayer(source: ResolvedObjectLayerSource): CommitBundle {
+	#prepareBuildingLayer(
+		source: ResolvedOutdoorStaticLayerSource,
+	): CommitBundle {
 		return {
 			commit: { source },
 			dynamicEntities: source.dynamicResidents,
@@ -167,4 +167,12 @@ export class StandardCommitPipeline implements CommitPipeline {
 
 function describeLayer(layer: LandblockIdLayer): string {
 	return `landblock ${layer.id} layer ${layer.layer}`;
+}
+
+function isBuildingsSource(
+	source: Exclude<LandblockSourceRecord, null>,
+): source is ResolvedOutdoorStaticLayerSource & {
+	readonly kind: LandblockLayerKind.Buildings;
+} {
+	return source.kind === LandblockLayerKind.Buildings;
 }

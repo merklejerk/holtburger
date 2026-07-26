@@ -1,4 +1,4 @@
-import type { ResolvedObjectLayerSource } from "../resolution/landblock-layer";
+import type { ResolvedOutdoorStaticLayerSource } from "../resolution/landblock-layer";
 import { planObjectMaterial } from "../resolution/object-material-planner";
 import {
 	type AssetTextureFact,
@@ -7,8 +7,8 @@ import {
 } from "../textures/types";
 
 /** Collect exactly the logical pixel dependencies used by static object triangles. */
-export function collectBuildingTextureDependencies(
-	source: ResolvedObjectLayerSource,
+export function collectStaticObjectTextureDependencies(
+	source: ResolvedOutdoorStaticLayerSource,
 ): readonly AssetTextureFact[] {
 	const dependencies = new Map<AssetTextureKey, AssetTextureFact>();
 	for (const resident of source.staticResidents) {

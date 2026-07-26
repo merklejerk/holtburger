@@ -1,6 +1,6 @@
 import type { ObjectMaterialOrdering } from "../resolution/object-material-planner";
 import { planObjectMaterial } from "../resolution/object-material-planner";
-import type { ResolvedObjectLayerSource } from "../resolution/landblock-layer";
+import type { ResolvedOutdoorStaticLayerSource } from "../resolution/landblock-layer";
 import type {
 	ResolvedGeometry,
 	ResolvedObjectPart,
@@ -13,19 +13,22 @@ import {
 } from "../math/matrices";
 import { AABB3, Mat4, Vec3 } from "../math/types";
 import type { ObjectGeometryData } from "../renderer/geometry";
-import type { StaticObjectMaterialBinding } from "./artifacts";
-import type { StaticInstallResourceNamespace } from "../systems/static-resources";
 import type { StaticGeometryKey } from "../geometry/types";
+import { LandblockLayerKind } from "../runtime/scene-interest";
+import type { StaticInstallResourceNamespace } from "../systems/static-resources";
 import { TextureWrapMode } from "../textures/types";
+import type { StaticObjectMaterialBinding } from "./artifacts";
 
 /** One closed geometry job containing no runtime, device, or atlas callbacks. */
-export interface BuildingGeometryJob {
+export interface StaticObjectGeometryJob {
+	/** Typed source layer keeps geometry identities and later publication domains distinct. */
+	readonly layer: LandblockLayerKind.Buildings | LandblockLayerKind.Objects;
 	readonly resourceNamespace: StaticInstallResourceNamespace;
-	readonly source: ResolvedObjectLayerSource;
+	readonly source: ResolvedOutdoorStaticLayerSource;
 }
 
 /** Immutable material range emitted by the geometry worker. */
-interface BakedBuildingRange {
+interface BakedStaticObjectRange {
 	readonly indexStart: number;
 	readonly indexCount: number;
 	readonly material: StaticObjectMaterialBinding;
@@ -38,13 +41,13 @@ interface BakedBuildingRange {
 }
 
 /** Complete single-allocation geometry result returned by the closed worker. */
-export interface BuildingGeometryResult {
+export interface StaticObjectGeometryResult {
 	readonly geometry: {
 		readonly key: StaticGeometryKey;
 		readonly geometry: ObjectGeometryData;
 	};
 	readonly bounds: AABB3;
-	readonly ranges: readonly BakedBuildingRange[];
+	readonly ranges: readonly BakedStaticObjectRange[];
 	readonly metrics: {
 		/** Resident/part/material-slot submissions before polygon-side facts split a range. */
 		readonly sourceMaterialSlotCount: number;
@@ -84,9 +87,10 @@ interface ContributionGroup {
  * closed: it receives every source and material fact before execution and never asks callers for
  * device state, texture placement, or additional residency.
  */
-export function bakeBuildingGeometry(
-	job: BuildingGeometryJob,
-): BuildingGeometryResult | null {
+export function bakeStaticObjectGeometry(
+	job: StaticObjectGeometryJob,
+): StaticObjectGeometryResult | null {
+	assertJobLayer(job);
 	const startedAt = performance.now();
 	const groups = new Map<string, ContributionGroup>();
 	const sourceRangeIds = new Set<string>();
@@ -155,7 +159,7 @@ export function bakeBuildingGeometry(
 	const normals: number[] = [];
 	const textureCoordinates: number[] = [];
 	const indices: number[] = [];
-	const ranges: BakedBuildingRange[] = [];
+	const ranges: BakedStaticObjectRange[] = [];
 	const bounds = emptyBounds();
 	for (const group of sortedGroups) {
 		const indexStart = indices.length;
@@ -218,7 +222,7 @@ export function bakeBuildingGeometry(
 		bounds,
 		geometry: {
 			geometry,
-			key: `static-install-geometry:${job.resourceNamespace}/building-layer` as StaticGeometryKey,
+			key: `static-install-geometry:${job.resourceNamespace}/${job.layer}-layer` as StaticGeometryKey,
 		},
 		metrics: {
 			additiveRangeCount: ranges.filter(
@@ -334,7 +338,7 @@ function createTriangleContribution(options: {
 }
 
 function createPartTransforms(
-	resident: ResolvedObjectLayerSource["staticResidents"][number],
+	resident: ResolvedOutdoorStaticLayerSource["staticResidents"][number],
 ): ReadonlyMap<number, Mat4> {
 	const pose = resident.presentation.placementPoses.get(0);
 	if (!pose)
@@ -457,7 +461,7 @@ function assertBounds(bounds: AABB3, positions: readonly number[]): void {
 		bounds.min.y > bounds.max.y ||
 		bounds.min.z > bounds.max.z
 	) {
-		throw new Error("Baked building bounds are invalid.");
+		throw new Error("Baked static-object bounds are invalid.");
 	}
 	for (let offset = 0; offset < positions.length; offset += 3) {
 		const point = new Vec3(
@@ -473,7 +477,9 @@ function assertBounds(bounds: AABB3, positions: readonly number[]): void {
 			point.z < bounds.min.z ||
 			point.z > bounds.max.z
 		) {
-			throw new Error("Baked building bounds do not contain a baked position.");
+			throw new Error(
+				"Baked static-object bounds do not contain a baked position.",
+			);
 		}
 	}
 }
@@ -485,6 +491,15 @@ function assertFiniteComponents(
 	label: string,
 ): void {
 	if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
-		throw new Error(`Building ${label} is not finite.`);
+		throw new Error(`Static object ${label} is not finite.`);
+	}
+}
+
+/** Reject mismatched source provenance before it can allocate into the wrong layer domain. */
+function assertJobLayer(job: StaticObjectGeometryJob): void {
+	if (job.source.kind !== job.layer) {
+		throw new Error(
+			`Static-object geometry layer ${job.layer} does not match source layer ${job.source.kind}.`,
+		);
 	}
 }

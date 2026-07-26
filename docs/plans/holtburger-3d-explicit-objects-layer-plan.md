@@ -1,6 +1,6 @@
 # Holtburger 3D Explicit Objects Layer Plan
 
-Status: Complete. All seven phases landed and passed their closeout verification on 2026-07-25.
+Status: Complete. All seven phases landed and passed closeout verification on 2026-07-25.
 
 ## Context and Boundaries
 
@@ -11,18 +11,18 @@ pipeline, retain an independent `objects` culling group for every landblock, and
 resident classified as static while preserving default-animated residents at the existing deferred
 dynamic seam.
 
-### Current State
+### Starting State
 
-The shared content pipeline already:
+At the start of this plan, the shared content pipeline already:
 
-- decodes `LandblockInfo.objects` as authored outdoor static placements;
-- accepts direct `GfxObj` and setup-backed sources;
-- prepares stable identities, placements, scales, bounds, presentation definitions, materials, and
+- decoded `LandblockInfo.objects` as authored outdoor static placements;
+- accepted direct `GfxObj` and setup-backed sources;
+- prepared stable identities, placements, scales, bounds, presentation definitions, materials, and
   texture dependencies;
-- partitions cumulative scene LoD output into Level 1 buildings and Level 2 explicit objects; and
-- builds a layer-local outdoor BVH for explicit objects.
+- partitioned cumulative scene LoD output into Level 1 buildings and Level 2 explicit objects; and
+- built a layer-local outdoor BVH for explicit objects.
 
-The 3D application already has:
+The 3D application already had:
 
 - scene-interest and Explorer radius policy for `LandblockLayerKind.Objects`;
 - a common `ResolvedObjectLayerSource` contract for buildings, explicit objects, and generated
@@ -32,30 +32,30 @@ The 3D application already has:
   transactional atlas publication, and failure-atomic static scene replacement;
 - material support for direct color, indexed color, palettes, alpha test, transparency, additive
   blending, DXT formats, and source sampler policy; and
-- a scene index whose culling groups are already partitioned by scope, landblock, and producer
+- a scene index whose culling groups were already partitioned by scope, landblock, and producer
   group.
 
-The active pipeline is still building-specific at its outer edges:
+The active pipeline was still building-specific at its outer edges:
 
-- the host exposes separate Level 0 terrain and Level 1 building commands/routes, with no Level 2
+- the host exposed separate Level 0 terrain and Level 1 building commands/routes, with no Level 2
   explicit-object source;
 - the binary envelope, decoder, source port, worker, artifact assembly, texture collection, and
-  diagnostics use building-specific names;
-- `StandardCommitPipeline` rejects `LandblockLayerKind.Objects`; and
-- `GameRuntime` routes only buildings through `StaticLayerRealizer`, whose publication adapter
-  currently hard-codes `LandblockLayerKind.Buildings`.
+  diagnostics used building-specific names;
+- `StandardCommitPipeline` rejected `LandblockLayerKind.Objects`; and
+- `GameRuntime` routed only buildings through `StaticLayerRealizer`, whose publication adapter
+  hard-coded `LandblockLayerKind.Buildings`.
 
-The current source-acquisition fan-out is also structurally wrong for cumulative LoD:
+The source-acquisition fan-out was also structurally wrong for cumulative LoD:
 
-- `StandardCommitPipeline.prepareLandblockLayers` dispatches every requested layer in parallel;
-- terrain, building, and future explicit-object source routes request Level 0, 1, and 2
+- `StandardCommitPipeline.prepareLandblockLayers` dispatched every requested layer in parallel;
+- terrain, building, and future explicit-object source routes requested Level 0, 1, and 2
   respectively; and
-- `ContentAssetRuntime` single-flights only an identical request, so cold concurrent Level 0, 1,
-  and 2 requests for one landblock can each assemble their own cumulative prefix.
+- `ContentAssetRuntime` single-flighted only identical requests, so cold concurrent Level 0, 1,
+  and 2 requests for one landblock could each assemble their own cumulative prefix.
 
-The completed prepared-LoD cache extends a lower cached asset correctly, but it does not make cold
-different-level requests one in-flight operation. A Level 2 source addition must remove this fan-out
-rather than make it worse.
+The cache of completed prepared-LoD assets extended a lower cached asset correctly, but it did not
+make cold requests for different levels one in-flight operation. A Level 2 source addition therefore
+had to remove this fan-out rather than make it worse.
 
 ### Locked Decisions
 
@@ -174,10 +174,10 @@ rather than make it worse.
 No new content or renderer rule may be inferred from an asset sample alone when the corresponding
 ACE, ACViewer, or retail behavior can be inspected.
 
-### Current Application Precedent
+### Application Precedent at Plan Start
 
 - `crates/holtburger-core/src/content_assets.rs`
-  - completed landblock scene-LoD cache and its current exact-request in-flight boundary
+  - completed landblock scene-LoD cache and its then-current exact-request in-flight boundary
 - `apps/holtburger-3d/src/lib/game/runtime/scene-interest.ts`
   - typed layer identities and explicit-object radius
 - `apps/holtburger-3d/src/lib/game/scene/scene-graph.ts`
@@ -191,17 +191,17 @@ ACE, ACViewer, or retail behavior can be inspected.
 - `apps/holtburger-3d/src/lib/game/systems/static-object-system.ts`
   - typed non-terrain culling-group publication and resource ownership
 - `apps/holtburger-3d/src/lib/game/commit/static-object-geometry-worker.ts`
-  - current static layer geometry transform and material-range bake
+  - then-current static layer geometry transform and material-range bake
 - `apps/holtburger-3d/src/lib/game/textures/atlas/resident-texture-atlas.ts`
   - cross-owner logical texture reuse and transactional publication
 - `apps/holtburger-3d/src-tauri/src/landblock_source_batch.rs`
   - typed cumulative-LoD layer projection and versioned outer source-batch envelope
 - `apps/holtburger-3d/src-tauri/src/outdoor_static_source.rs`
-  - current closed object-definition, geometry, material, and texture-dependency source bundle
+  - then-current closed object-definition, geometry, material, and texture-dependency source bundle
 - `apps/holtburger-3d/src/lib/assets/decode-landblock-source-batch.ts`
   - outer batch validation and typed terrain/outdoor-static record projection
 - `apps/holtburger-3d/src/lib/assets/decode-outdoor-static-record.ts`
-  - current binary validation, typed-array hydration, placement conversion, and resident
+  - then-current binary validation, typed-array hydration, placement conversion, and resident
     classification
 
 ### Existing Live Evidence
@@ -223,8 +223,8 @@ these archive-dependent observations into permanent runtime-asset tests.
 
 ### Evidence Preflight: 2026-07-25
 
-The current `dats/assets.hba` archive revalidated the plan's source-classification and material
-claims without content assembler errors or omissions:
+On 2026-07-25, `dats/assets.hba` revalidated the plan's source-classification and material claims
+without content assembler errors or omissions:
 
 - `0x0C78FFFF` has 37 explicit residents. Setup `0x02000065` has one setup part and no default
   animation, so it remains a static setup-backed acceptance sample.
@@ -503,14 +503,14 @@ claims without content assembler errors or omissions:
 
 #### Decisions and Course Corrections
 
-- Coherence pass: the worker's layer is an integrity input, not decorative provenance. It must
-  match `ResolvedObjectLayerSource.kind` before any geometry is baked or keyed. Runtime passage of
-  the layer into realization and publication remains deliberately Phase 4 work; the current
-  Buildings-only adapter supplies the known Buildings value until that cutover.
-- Coherence pass: the normalized geometry worker cannot truthfully prove original direct-GfxObj
-  versus setup-source decoding, nor can it prove DXT3 pixel decode. Phase 3 therefore tests the
-  normalized geometry/material contract and transfer boundary; decoder classification and live
-  texture acceptance retain their assigned Phase 2 and Phase 6 coverage.
+- The worker's layer is an integrity input, not decorative provenance. It must match
+  `ResolvedObjectLayerSource.kind` before any geometry is baked or keyed. Runtime passage of the
+  layer into realization and publication remained deliberately Phase 4 work; the Buildings-only
+  adapter supplied the known Buildings value until that cutover.
+- The normalized geometry worker cannot truthfully prove original direct-GfxObj versus setup-source
+  decoding, nor can it prove DXT3 pixel decode. Phase 3 therefore tested the normalized
+  geometry/material contract and transfer boundary; decoder classification and live texture
+  acceptance retained their assigned Phase 2 and Phase 6 coverage.
 - `ResolvedOutdoorStaticLayerSource` now admits Buildings and Objects only. It makes the shared
   source-commit, texture, artifact, and geometry contracts honest without pre-admitting Generated
   scenery; its production pipeline branch remains Phase 5 work.
@@ -680,7 +680,8 @@ claims without content assembler errors or omissions:
 - Transparent and additive explicit ranges reach their existing correct draw phases.
 - DXT3 and indexed/palette explicit textures prepare and resolve through the resident atlas.
 - Lifecycle reload returns to equivalent resident layer, geometry, and atlas diagnostics.
-- Moving the camera anchor evicts stale explicit-object owners without removing current buildings.
+- Relocating the landblock anchor evicts stale explicit-object owners without removing current
+  buildings.
 - A combined same-landblock dispatch reports one source batch at the maximum requested LoD, not
   concurrent Level 0, Level 1, and Level 2 acquisitions.
 - No permanent test depends on local DAT/HBA assets.
@@ -801,40 +802,47 @@ claims without content assembler errors or omissions:
   and Svelte checking, ESLint, Knip, clippy with warnings denied, Rust formatting, and targeted
   Prettier checks. Repository-wide Prettier debt remains intentionally outside this change.
 
-## Dry-Run Findings Incorporated into the Phases
+## Pre-Execution Dry-Run Findings Incorporated into the Phases
 
-- `SceneGraph` already stores culling groups beneath scope and landblock maps, so distinct
-  `buildings` and `objects` groups require no spatial-index redesign.
-- `StaticObjectSystem.replaceObjects` already accepts a typed non-terrain `LandblockLayerKind`; the
-  current hard-coded Buildings value exists only in the runtime publication adapter.
-- The realizer currently receives an opaque owner and geometry but not a layer. Adding a typed layer
-  to the realization/publisher contract is cleaner than decoding it from
+These findings describe the implementation before the phased cutover. They are retained to explain
+the plan's sequencing; the completed shape is recorded in each phase's decisions and closeout
+evidence.
+
+- `SceneGraph` already stored culling groups beneath scope and landblock maps, so distinct
+  `buildings` and `objects` groups required no spatial-index redesign.
+- `StaticObjectSystem.replaceObjects` already accepted a typed non-terrain `LandblockLayerKind`; the
+  hard-coded Buildings value existed only in the runtime publication adapter.
+- The realizer received an opaque owner and geometry but not a layer. Adding a typed layer to the
+  realization/publisher contract was cleaner than decoding it from
   `landblock-layer:<id>/<layer>`.
 - `ResolvedObjectLayerSource`, the resident classifier, material planner, geometry transforms,
-  texture fact collection, atlas, renderer passes, and static object system are structurally
+  texture fact collection, atlas, renderer passes, and static object system were structurally
   reusable.
-- The host source closure and frontend decoder already support both direct GfxObjs and setup
-  models. Their building branding is now misleading and should be removed before adding a second
+- The host source closure and frontend decoder already supported both direct GfxObjs and setup
+  models. Their building branding was misleading and had to be removed before adding a second
   caller.
-- The current geometry key suffix contains `building-layer`; it must become layer-aware during the
-  worker generalization even though revision-scoped namespaces presently prevent collisions.
-- The current runtime sends only Buildings through the realizer and sends other static commit
-  shapes directly to `StaticObjectSystem`. Objects must use the realizer because their texture
-  requirements need the same atlas-before-publication sequencing.
-- Building diagnostics are consumed by the Explorer and browser harness. Generalizing their runtime
-  source is necessary for Level 2 acceptance, but Explorer layout remains app-local and may still
-  present per-layer sections.
-- The browser harness currently accepts only `--building-radius`; Level 2 cannot receive meaningful
-  end-to-end or lifecycle acceptance until explicit-object radius is independently controllable.
-- Dynamic activation is not a small flag flip: the WebGL2 renderer currently resolves dynamic
-  renderables without submitting them. Keeping promoted residents deferred prevents this plan from
-  smuggling in an unfinished dynamic renderer.
-- Current `Promise.all` source fan-out requests Levels 0, 1, and 2 independently for the same
-  cold landblock. `ContentAssetRuntime` single-flights only identical requests, so this repeats
-  cumulative assembly. Phase 1/2 batching removes that defect at the existing scene-interest
-  transaction boundary; it is not a timer-based optimization.
+- The geometry key suffix contained `building-layer`; it had to become layer-aware during the
+  worker generalization even though revision-scoped namespaces already prevented collisions.
+- The runtime sent only Buildings through the realizer and sent other static commit shapes directly
+  to `StaticObjectSystem`. Objects had to use the realizer because their texture requirements
+  needed the same atlas-before-publication sequencing.
+- Building diagnostics were consumed by the Explorer and browser harness. Generalizing their
+  runtime source was necessary for Level 2 acceptance, but Explorer layout remained app-local and
+  could still present per-layer sections.
+- The browser harness accepted only `--building-radius`; Level 2 could not receive meaningful
+  end-to-end or lifecycle acceptance until explicit-object radius was independently controllable.
+- Dynamic activation was not a small flag flip: the WebGL2 renderer resolved dynamic renderables
+  without submitting them. Keeping promoted residents deferred prevented this plan from smuggling
+  in an unfinished dynamic renderer.
+- `Promise.all` source fan-out requested Levels 0, 1, and 2 independently for the same cold
+  landblock. `ContentAssetRuntime` single-flighted only identical requests, so this repeated
+  cumulative assembly. Phase 1/2 batching removed that defect at the existing scene-interest
+  transaction boundary; it was not a timer-based optimization.
 
 ## Risks and Mitigations
+
+These risks guided execution. The phase decisions and closeout evidence above record how their
+mitigations landed; they remain useful constraints for future changes to this pipeline.
 
 ### Transport Generalization Regresses Buildings
 
@@ -862,9 +870,8 @@ Buildings + Objects publication and independent eviction.
 
 ### Cumulative LoD Duplicates Work
 
-**Risk:** The current concurrent Level 0/1/2 source fan-out repeats cumulative assembly for a cold
-landblock. A future lower-then-higher request could race before the completed-asset cache is
-populated.
+**Risk:** The starting concurrent Level 0/1/2 source fan-out repeated cumulative assembly for a cold
+landblock. A lower-then-higher request could race before the completed-asset cache was populated.
 
 **Mitigation:** Make a per-landblock source batch mandatory in Phase 1/2: acquire the maximum
 requested LoD once and project only requested typed records into independent commits. Add an
@@ -919,38 +926,39 @@ worker inputs must use dedicated buffers.
 
 ## Definition of Done
 
-- [ ] Level 2 explicit objects load from both Tauri and headless HTTP hosts.
-- [ ] Buildings still load through the generalized source capability.
-- [ ] A cold same-landblock terrain + buildings + objects dispatch performs one maximum-Level-2
+- [x] Level 2 explicit objects load from both Tauri and headless HTTP hosts.
+- [x] Buildings still load through the generalized source capability.
+- [x] A cold same-landblock terrain + buildings + objects dispatch performs one maximum-Level-2
       source acquisition and fans out independent commits.
-- [ ] Overlapping lower/higher source batches coalesce or extend without competing cumulative
+- [x] Overlapping lower/higher source batches coalesce or extend without competing cumulative
       assemblies.
-- [ ] Static direct-GfxObj and setup-backed explicit residents render.
-- [ ] Building and object layers use distinct `buildings` and `objects` culling groups.
-- [ ] Layer replacement and eviction are independent.
-- [ ] Shared logical textures retain correct cross-owner atlas residency.
-- [ ] Transparent, additive, indexed/palette, and DXT3 explicit materials render through shared
+- [x] Static direct-GfxObj and setup-backed explicit residents render.
+- [x] Building and object layers use distinct `buildings` and `objects` culling groups.
+- [x] Layer replacement and eviction are independent.
+- [x] Shared logical textures retain correct cross-owner atlas residency.
+- [x] Transparent, additive, indexed/palette, and DXT3 explicit materials render through shared
       paths.
-- [ ] Default-animated explicit residents remain complete but deferred.
-- [ ] Deferred residents create no dynamic runtime or renderer resources.
-- [ ] Runtime and Explorer diagnostics distinguish Buildings from Objects and do not count deferred
+- [x] Default-animated explicit residents remain complete but deferred.
+- [x] Deferred residents create no dynamic runtime or renderer resources.
+- [x] Runtime and Explorer diagnostics distinguish Buildings from Objects and do not count deferred
       residents as rendered.
-- [ ] Radius-zero and radius-one lifecycle browser harness runs reach ready state without browser
+- [x] Radius-zero and radius-one lifecycle browser harness runs reach ready state without browser
       errors.
-- [ ] Stale, failed, replacement, and eviction paths release provisional claims and resources.
-- [ ] Building-only implementation vestiges in generalized code are removed.
-- [ ] Full TypeScript/Rust tests, checks, clippy, lint, and targeted formatting pass.
-- [ ] No permanent asset-dependent tests or temporary diagnostics remain.
-- [ ] This plan and the architecture audit reflect the final implemented shape.
+- [x] Stale, failed, replacement, and eviction paths release provisional claims and resources.
+- [x] Building-only implementation vestiges in generalized code are removed.
+- [x] Full TypeScript/Rust tests, checks, clippy, lint, and targeted formatting pass.
+- [x] No permanent asset-dependent tests or temporary diagnostics remain.
+- [x] This plan and the architecture audit reflect the final implemented shape.
 
 ## Open Questions
 
-No product or architectural question currently blocks execution. The following are evidence-driven
-checkpoints rather than preconditions:
+None. Execution resolved the two evidence-driven checkpoints tracked by this plan:
 
-- Whether one baked explicit-object allocation per landblock remains acceptable at radius one.
-- Whether any explicit-object material behavior reveals a shared renderer defect requiring a
-  ground-truth correction.
+- One baked explicit-object allocation per landblock was acceptable for radius-one functional
+  acceptance. The recorded runs were smoke checks rather than performance benchmarks, so any
+  clustering or instancing proposal still requires measured evidence.
+- The transparent, additive, indexed/palette, and DXT3 witnesses rendered through shared paths
+  without requiring an Objects-only material rule.
 
-These checkpoints must be answered through measurement during execution; they do not authorize
-cross-layer payload deduplication, clustering, instancing, or dynamic rendering in this plan.
+These outcomes do not authorize cross-layer payload deduplication, clustering, instancing, or
+dynamic rendering as retroactive scope for this plan.

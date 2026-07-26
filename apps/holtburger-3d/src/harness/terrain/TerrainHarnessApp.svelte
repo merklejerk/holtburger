@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { HttpTerrainContentSource } from "../../lib/assets/http-terrain-content-source";
+	import { HttpLandblockContentSource } from "../../lib/assets/http-landblock-content-source";
 	import { StandardCommitPipeline } from "../../lib/game/commit/pipeline";
 	import { SyntheticBlendedBuildingPipeline } from "./synthetic-blended-building-pipeline";
 	import type { LandblockId } from "../../lib/game/game-types";
@@ -150,16 +150,13 @@
 		const hostGlobal = globalThis as typeof globalThis & HarnessGlobal;
 		const start = async (): Promise<void> => {
 			try {
-				const source = await HttpTerrainContentSource.build(hostUrl);
+				const source = await HttpLandblockContentSource.build(hostUrl);
 				device = await WebGL2Device.build(canvasElement!);
 				pipeline =
 					new URLSearchParams(window.location.search).get("fixture") ===
 					"blended"
 						? new SyntheticBlendedBuildingPipeline()
-						: await StandardCommitPipeline.build({
-								buildingSource: source,
-								terrainSource: source,
-							});
+						: await StandardCommitPipeline.build({ sourceBatch: source });
 				runtime = await GameRuntime.build(device, pipeline, source);
 				objectDetailOwner = new ActiveRegionObjectDetailOwner(source);
 				runtime.installActiveRegionObjectDetail(

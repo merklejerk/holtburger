@@ -13,19 +13,24 @@ use holtburger_dat::file_type::region::{LandSurfType, TerrainDesc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-mod building_source;
+pub use landblock_source_batch::LandblockSourceLayer;
+
 mod landblock_source_batch;
 mod object_texture;
+mod outdoor_static_source;
 
-use building_source::{
-    BUILDING_SOURCE_BINARY_VERSION, BuildingSourceClosure, BuildingSourceManifest, frame_json,
-    prepared_aabb_json, prepared_vec3_json, serialize_building_source_binary,
-};
 use landblock_source_batch::{
-    LandblockSourceBatchRequest, LandblockSourceLayer, load_landblock_source_batch,
+    LandblockSourceBatchRecord, LandblockSourceBatchRequest, LoadedLandblockSourceBatch,
+    load_landblock_source_batch as load_landblock_source_batch_asset,
+    serialize_landblock_source_batch,
 };
 use object_texture::{
     ObjectTexturePurpose, PreparedObjectTexture, prepare_object_palette, prepare_object_surface,
+};
+use outdoor_static_source::{
+    OUTDOOR_STATIC_RECORD_BINARY_VERSION, OutdoorStaticSourceClosure,
+    OutdoorStaticSourceRecordManifest, frame_json, prepared_aabb_json, prepared_vec3_json,
+    serialize_outdoor_static_record_binary,
 };
 
 const TERRAIN_SOURCE_BINARY_MAGIC: &[u8; 4] = b"HBTR";
@@ -66,14 +71,9 @@ pub fn discover_content_runtime() -> Result<ContentAssetRuntime> {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct LoadTerrainSourceRequest {
+struct LoadLandblockSourceBatchRequest {
     landblock_id: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LoadBuildingSourceRequest {
-    landblock_id: String,
+    layers: Vec<LandblockSourceLayer>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -97,7 +97,7 @@ struct HostStatus {
 fn host_status() -> HostStatus {
     HostStatus {
         app_name: "holtburger-3d",
-        status: "terrain-source-host-ready",
+        status: "landblock-source-batch-host-ready",
     }
 }
 
@@ -112,27 +112,16 @@ async fn load_active_region_data(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
-/// Loads one normalized outdoor landblock's authored terrain source as a versioned binary response.
+/// Loads one normalized outdoor landblock's requested source records as a versioned binary batch.
 #[tauri::command]
-async fn load_terrain_source(
+async fn load_landblock_source_batch(
     state: tauri::State<'_, HostContentState>,
-    request: LoadTerrainSourceRequest,
+    request: LoadLandblockSourceBatchRequest,
 ) -> Result<tauri::ipc::Response, String> {
-    let bytes = load_terrain_source_bytes(&state.runtime, &request.landblock_id)
-        .await
-        .map_err(format_error)?;
-    Ok(tauri::ipc::Response::new(bytes))
-}
-
-/// Loads one outdoor building layer as a closed, non-pixel source bundle.
-#[tauri::command]
-async fn load_building_source(
-    state: tauri::State<'_, HostContentState>,
-    request: LoadBuildingSourceRequest,
-) -> Result<tauri::ipc::Response, String> {
-    let bytes = load_building_source_bytes(&state.runtime, &request.landblock_id)
-        .await
-        .map_err(format_error)?;
+    let bytes =
+        load_landblock_source_batch_bytes(&state.runtime, &request.landblock_id, request.layers)
+            .await
+            .map_err(format_error)?;
     Ok(tauri::ipc::Response::new(bytes))
 }
 
@@ -153,22 +142,15 @@ async fn load_texture_pixels(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
-/// Build the canonical terrain-source response used by Tauri and the headless browser harness.
-pub async fn load_terrain_source_bytes(
+/// Builds the canonical landblock source batch used by Tauri and the headless browser harness.
+pub async fn load_landblock_source_batch_bytes(
     runtime: &ContentAssetRuntime,
     raw_landblock_id: &str,
+    layers: Vec<LandblockSourceLayer>,
 ) -> Result<Vec<u8>> {
     let landblock_id = parse_landblock_id(raw_landblock_id)?;
-    build_terrain_source_response(runtime, landblock_id).await
-}
-
-/// Build the canonical Level 1 building response used by Tauri and browser hosts.
-pub async fn load_building_source_bytes(
-    runtime: &ContentAssetRuntime,
-    raw_landblock_id: &str,
-) -> Result<Vec<u8>> {
-    let landblock_id = parse_landblock_id(raw_landblock_id)?;
-    build_building_source_response(runtime, landblock_id).await
+    let request = LandblockSourceBatchRequest::new(landblock_id, layers)?;
+    build_landblock_source_batch_response(runtime, request).await
 }
 
 /// Build the canonical active-region response used by Tauri and the headless browser harness.
@@ -201,59 +183,58 @@ pub async fn load_texture_pixels_bytes(
     .await
 }
 
-async fn build_terrain_source_response(
+async fn build_landblock_source_batch_response(
     runtime: &ContentAssetRuntime,
-    landblock_id: u32,
+    request: LandblockSourceBatchRequest,
 ) -> Result<Vec<u8>> {
-    let source_batch = load_landblock_source_batch(
-        runtime,
-        LandblockSourceBatchRequest::single(landblock_id, LandblockSourceLayer::Terrain),
-    )
-    .await
-    .with_context(|| format!("Could not load terrain scene source for 0x{landblock_id:08X}"))?;
-    if source_batch.landblock_id() != landblock_id {
-        anyhow::bail!(
-            "content runtime returned landblock 0x{:08X} for terrain request 0x{landblock_id:08X}",
-            source_batch.landblock_id()
-        );
+    let source_batch = load_landblock_source_batch_asset(runtime, request.clone()).await?;
+    let mut records = Vec::new();
+    for layer in request.layers() {
+        let bytes = match layer {
+            LandblockSourceLayer::Terrain => serialize_terrain_source_record(&source_batch)?,
+            LandblockSourceLayer::Buildings => {
+                serialize_outdoor_static_source_record(runtime, &source_batch, layer).await?
+            }
+            LandblockSourceLayer::Objects => {
+                serialize_outdoor_static_source_record(runtime, &source_batch, layer).await?
+            }
+        };
+        records.push(LandblockSourceBatchRecord { layer, bytes });
     }
+    serialize_landblock_source_batch(&request, records)
+}
 
+fn serialize_terrain_source_record(source_batch: &LoadedLandblockSourceBatch) -> Result<Vec<u8>> {
     let terrain_layer = source_batch.terrain()?;
     let terrain = terrain_layer.terrain.as_ref();
-    let terrain_availability = terrain_availability(terrain, source_batch.diagnostics());
     let manifest = TerrainSourceManifest {
-        transport: "holtburger-terrain-source",
+        transport: "holtburger-landblock-terrain-record",
         version: TERRAIN_SOURCE_BINARY_VERSION,
         byte_order: "little-endian",
         section_byte_offset_base: "section-data",
-        landblock_id: format!("0x{landblock_id:08x}"),
-        terrain_availability,
+        landblock_id: format!("0x{:08x}", source_batch.landblock_id()),
+        terrain_availability: terrain_availability(terrain, source_batch.diagnostics()),
         sections: terrain.map(terrain_sections).unwrap_or_default(),
     };
     serialize_terrain_source_binary(&manifest, terrain)
 }
 
-async fn build_building_source_response(
+async fn serialize_outdoor_static_source_record(
     runtime: &ContentAssetRuntime,
-    landblock_id: u32,
+    source_batch: &LoadedLandblockSourceBatch,
+    layer: LandblockSourceLayer,
 ) -> Result<Vec<u8>> {
-    let source_batch = load_landblock_source_batch(
-        runtime,
-        LandblockSourceBatchRequest::single(landblock_id, LandblockSourceLayer::Buildings),
-    )
-    .await
-    .with_context(|| format!("Could not load building scene source for 0x{landblock_id:08X}"))?;
-    if source_batch.landblock_id() != landblock_id {
-        anyhow::bail!(
-            "content runtime returned landblock 0x{:08X} for building request 0x{landblock_id:08X}",
-            source_batch.landblock_id()
-        );
-    }
-    let buildings = source_batch.buildings()?;
+    let statics = match layer {
+        LandblockSourceLayer::Buildings => &source_batch.buildings()?.statics,
+        LandblockSourceLayer::Objects => &source_batch.objects()?.statics,
+        LandblockSourceLayer::Terrain => {
+            anyhow::bail!("Terrain does not have an outdoor static source record")
+        }
+    };
 
-    let mut closure = BuildingSourceClosure::default();
-    let mut residents = Vec::with_capacity(buildings.statics.len());
-    for member in &buildings.statics {
+    let mut closure = OutdoorStaticSourceClosure::default();
+    let mut residents = Vec::with_capacity(statics.len());
+    for member in statics {
         let source = closure.add_resident(runtime, member).await?;
         residents.push(json!({
             "id": member.instance.instance_id,
@@ -265,12 +246,17 @@ async fn build_building_source_response(
     }
     closure.validate()?;
     let sections = closure.sections();
-    let manifest = BuildingSourceManifest {
-        transport: "holtburger-building-source",
-        version: BUILDING_SOURCE_BINARY_VERSION,
+    let manifest = OutdoorStaticSourceRecordManifest {
+        transport: "holtburger-outdoor-static-record",
+        version: OUTDOOR_STATIC_RECORD_BINARY_VERSION,
         byte_order: "little-endian",
         section_byte_offset_base: "section-data",
-        landblock_id: dat_id(landblock_id),
+        landblock_id: dat_id(source_batch.landblock_id()),
+        layer: match layer {
+            LandblockSourceLayer::Buildings => "buildings",
+            LandblockSourceLayer::Objects => "objects",
+            LandblockSourceLayer::Terrain => unreachable!("terrain was rejected above"),
+        },
         residents,
         definitions: closure.definitions,
         geometries: closure.geometries,
@@ -278,7 +264,7 @@ async fn build_building_source_response(
         texture_dependencies: closure.texture_dependencies.into_values().collect(),
         sections,
     };
-    serialize_building_source_binary(&manifest, &closure.buffers)
+    serialize_outdoor_static_record_binary(&manifest, &closure.buffers)
 }
 
 async fn build_texture_pixels_response(
@@ -876,8 +862,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             host_status,
             load_active_region_data,
-            load_terrain_source,
-            load_building_source,
+            load_landblock_source_batch,
             load_texture_pixels
         ])
         .run(tauri::generate_context!())
@@ -887,7 +872,12 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::building_source::{BUILDING_SOURCE_BINARY_MAGIC, BuildingGeometryBuffers};
+    use crate::landblock_source_batch::{
+        LANDBLOCK_SOURCE_BATCH_BINARY_MAGIC, LANDBLOCK_SOURCE_BATCH_BINARY_VERSION,
+    };
+    use crate::outdoor_static_source::{
+        OUTDOOR_STATIC_RECORD_BINARY_MAGIC, OutdoorStaticGeometryBuffers,
+    };
     use holtburger_dat::file_type::PixelFormatId;
     use holtburger_dat::file_type::region::{GameTime, LandDefs, RegionDesc};
     use holtburger_dat::{DatFileType, EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, HbaWriter};
@@ -903,7 +893,7 @@ mod tests {
             terrain_samples: (10..19).collect(),
         };
         let manifest = TerrainSourceManifest {
-            transport: "holtburger-terrain-source",
+            transport: "holtburger-landblock-terrain-record",
             version: TERRAIN_SOURCE_BINARY_VERSION,
             byte_order: "little-endian",
             section_byte_offset_base: "section-data",
@@ -938,8 +928,8 @@ mod tests {
     }
 
     #[test]
-    fn building_source_binary_aligns_and_describes_geometry_sections() {
-        let buffers = BuildingGeometryBuffers {
+    fn outdoor_static_record_binary_aligns_and_describes_geometry_sections() {
+        let buffers = OutdoorStaticGeometryBuffers {
             positions: vec![0.0, 0.0, 0.0],
             normals: vec![0.0, 0.0, 1.0],
             texture_coordinates: vec![0.0, 0.0],
@@ -950,12 +940,13 @@ mod tests {
             material_side_types: vec![0],
             material_stippling: vec![0],
         };
-        let manifest = BuildingSourceManifest {
-            transport: "holtburger-building-source",
-            version: BUILDING_SOURCE_BINARY_VERSION,
+        let manifest = OutdoorStaticSourceRecordManifest {
+            transport: "holtburger-outdoor-static-record",
+            version: OUTDOOR_STATIC_RECORD_BINARY_VERSION,
             byte_order: "little-endian",
             section_byte_offset_base: "section-data",
             landblock_id: "0x0102ffff".to_string(),
+            layer: "buildings",
             residents: Vec::new(),
             definitions: Vec::new(),
             geometries: Vec::new(),
@@ -963,19 +954,19 @@ mod tests {
             texture_dependencies: Vec::new(),
             sections: buffers.sections(),
         };
-        let bytes = serialize_building_source_binary(&manifest, &buffers)
-            .expect("building source binary should serialize");
+        let bytes = serialize_outdoor_static_record_binary(&manifest, &buffers)
+            .expect("outdoor static record should serialize");
 
-        assert_eq!(&bytes[..4], BUILDING_SOURCE_BINARY_MAGIC);
+        assert_eq!(&bytes[..4], OUTDOOR_STATIC_RECORD_BINARY_MAGIC);
         assert_eq!(
             u32::from_le_bytes(bytes[4..8].try_into().unwrap()),
-            BUILDING_SOURCE_BINARY_VERSION
+            OUTDOOR_STATIC_RECORD_BINARY_VERSION
         );
         let manifest_length = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
         let section_offset = TERRAIN_SOURCE_BINARY_HEADER_LEN + manifest_length;
         let decoded: serde_json::Value =
             serde_json::from_slice(&bytes[TERRAIN_SOURCE_BINARY_HEADER_LEN..section_offset])
-                .expect("building source manifest should remain JSON");
+                .expect("outdoor static record manifest should remain JSON");
         assert_eq!(decoded["sections"][0]["name"], "positions");
         assert_eq!(decoded["sections"][4]["name"], "materialSlots");
         assert_eq!(
@@ -986,6 +977,48 @@ mod tests {
             ),
             0
         );
+    }
+
+    #[test]
+    fn landblock_source_batch_serializes_exactly_the_requested_record_set() {
+        let request = LandblockSourceBatchRequest::new(
+            0x0102_ffff,
+            [
+                LandblockSourceLayer::Terrain,
+                LandblockSourceLayer::Buildings,
+            ],
+        )
+        .expect("source batch request should be valid");
+        let bytes = serialize_landblock_source_batch(
+            &request,
+            vec![
+                LandblockSourceBatchRecord {
+                    layer: LandblockSourceLayer::Terrain,
+                    bytes: vec![1, 2, 3],
+                },
+                LandblockSourceBatchRecord {
+                    layer: LandblockSourceLayer::Buildings,
+                    bytes: vec![4, 5],
+                },
+            ],
+        )
+        .expect("source batch should serialize");
+
+        assert_eq!(&bytes[..4], LANDBLOCK_SOURCE_BATCH_BINARY_MAGIC);
+        assert_eq!(
+            u32::from_le_bytes(bytes[4..8].try_into().unwrap()),
+            LANDBLOCK_SOURCE_BATCH_BINARY_VERSION
+        );
+        let manifest_length = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
+        let record_offset = 16 + manifest_length;
+        let manifest: serde_json::Value = serde_json::from_slice(&bytes[16..record_offset])
+            .expect("batch manifest should remain JSON");
+        assert_eq!(
+            manifest["requestedLayers"],
+            serde_json::json!(["terrain", "buildings"])
+        );
+        assert_eq!(manifest["records"].as_array().map(Vec::len), Some(2));
+        assert_eq!(&bytes[record_offset..], [1, 2, 3, 4, 5]);
     }
 
     #[test]

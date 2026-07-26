@@ -1,0 +1,78 @@
+import { describe, expect, it } from "vitest";
+import type { ActiveRegionSource } from "./active-region-source";
+import { decodeLandblockSourceBatch } from "./decode-landblock-source-batch";
+import { LandblockLayerKind } from "../game/runtime/scene-interest";
+import type { LandblockId } from "../game/game-types";
+
+const LANDBLOCK_ID = "0xda55ffff" as LandblockId;
+const ACTIVE_REGION = {} as ActiveRegionSource;
+
+describe("decodeLandblockSourceBatch", () => {
+	it("rejects a manifest whose requested layer set differs from the caller request", () => {
+		expect(() =>
+			decodeLandblockSourceBatch(
+				batchResponse({ requestedLayers: [LandblockLayerKind.Terrain] }),
+				LANDBLOCK_ID,
+				new Set([LandblockLayerKind.Buildings]),
+				ACTIVE_REGION,
+			),
+		).toThrow("requested layer set does not match");
+	});
+
+	it("rejects a manifest whose returned record set differs from its request", () => {
+		expect(() =>
+			decodeLandblockSourceBatch(
+				batchResponse({
+					records: [
+						{
+							byteLength: 1,
+							byteOffset: 0,
+							layer: LandblockLayerKind.Buildings,
+						},
+					],
+				}),
+				LANDBLOCK_ID,
+				new Set([LandblockLayerKind.Terrain]),
+				ACTIVE_REGION,
+			),
+		).toThrow("returned record set does not match");
+	});
+});
+
+function batchResponse(
+	overrides: {
+		readonly requestedLayers?: readonly LandblockLayerKind[];
+		readonly records?: readonly {
+			readonly byteLength: number;
+			readonly byteOffset: number;
+			readonly layer: LandblockLayerKind;
+		}[];
+	} = {},
+): Uint8Array {
+	const manifest = {
+		byteOrder: "little-endian",
+		landblockId: LANDBLOCK_ID,
+		recordByteOffsetBase: "record-data",
+		records: overrides.records ?? [
+			{
+				byteLength: 1,
+				byteOffset: 0,
+				layer: LandblockLayerKind.Terrain,
+			},
+		],
+		requestedLayers: overrides.requestedLayers ?? [LandblockLayerKind.Terrain],
+		transport: "holtburger-landblock-source-batch",
+		version: 1,
+	};
+	const encoded = new TextEncoder().encode(JSON.stringify(manifest));
+	const manifestLength = Math.ceil((16 + encoded.length) / 4) * 4 - 16;
+	const response = new Uint8Array(16 + manifestLength + 1);
+	response.set(new TextEncoder().encode("HBLB"));
+	const view = new DataView(response.buffer);
+	view.setUint32(4, 1, true);
+	view.setUint32(8, manifestLength, true);
+	view.setUint32(12, response.length, true);
+	response.fill(0x20, 16, 16 + manifestLength);
+	response.set(encoded, 16);
+	return response;
+}

@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const DEFAULT_CHROME_PATH = "/opt/google/chrome/chrome";
 const DEFAULT_VITE_URL = "http://127.0.0.1:1420";
-const READY_KIND = "holtburger-3d-dev-terrain-content-host-ready";
+const READY_KIND = "holtburger-3d-dev-landblock-content-host-ready";
 const DEFAULT_LANDBLOCK_ID = "0xda55ffff";
 const DEFAULT_SETTLE_MS = 10_000;
 const workspaceDats = resolve(
@@ -169,7 +169,7 @@ async function startContentHost() {
 		"--manifest-path",
 		"src-tauri/Cargo.toml",
 		"--bin",
-		"dev_terrain_content_host",
+		"dev_landblock_content_host",
 		"--",
 		"--port",
 		"0",

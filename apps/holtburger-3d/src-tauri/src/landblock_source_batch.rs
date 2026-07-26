@@ -8,13 +8,19 @@ use holtburger_content::{
     normalize_landblock_id,
 };
 use holtburger_core::{ContentAsset, ContentAssetRequest, ContentAssetRuntime};
+use serde::{Deserialize, Serialize};
+
+pub(crate) const LANDBLOCK_SOURCE_BATCH_BINARY_MAGIC: &[u8; 4] = b"HBLB";
+pub(crate) const LANDBLOCK_SOURCE_BATCH_BINARY_VERSION: u32 = 1;
+const LANDBLOCK_SOURCE_BATCH_BINARY_HEADER_LEN: usize = 16;
 
 /// A scene layer that the app-local landblock source boundary can request.
 ///
 /// This deliberately excludes generated scenery and env cells: they are not runtime layers in this
 /// plan and must not become incidental branches of the batch transport.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum LandblockSourceLayer {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LandblockSourceLayer {
     Terrain,
     Buildings,
     Objects,
@@ -38,15 +44,7 @@ pub(crate) struct LandblockSourceBatchRequest {
 }
 
 impl LandblockSourceBatchRequest {
-    pub(crate) fn single(landblock_id: u32, layer: LandblockSourceLayer) -> Self {
-        Self {
-            landblock_id: normalize_landblock_id(landblock_id),
-            layers: BTreeSet::from([layer]),
-        }
-    }
-
-    #[cfg(test)]
-    fn new(
+    pub(crate) fn new(
         landblock_id: u32,
         layers: impl IntoIterator<Item = LandblockSourceLayer>,
     ) -> Result<Self> {
@@ -70,6 +68,10 @@ impl LandblockSourceBatchRequest {
 
     fn contains(&self, layer: LandblockSourceLayer) -> bool {
         self.layers.contains(&layer)
+    }
+
+    pub(crate) fn layers(&self) -> impl Iterator<Item = LandblockSourceLayer> + '_ {
+        self.layers.iter().copied()
     }
 }
 
@@ -107,12 +109,91 @@ impl LoadedLandblockSourceBatch {
             .context("landblock source batch did not project Buildings")
     }
 
-    #[cfg(test)]
-    fn objects(&self) -> Result<&LandblockSceneLodOutdoorStaticLayer> {
+    pub(crate) fn objects(&self) -> Result<&LandblockSceneLodOutdoorStaticLayer> {
         self.objects
             .as_ref()
             .context("landblock source batch did not project Objects")
     }
+}
+
+/// One independently decodable source-record payload carried by a landblock batch.
+pub(crate) struct LandblockSourceBatchRecord {
+    pub(crate) layer: LandblockSourceLayer,
+    pub(crate) bytes: Vec<u8>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LandblockSourceBatchManifest {
+    transport: &'static str,
+    version: u32,
+    byte_order: &'static str,
+    record_byte_offset_base: &'static str,
+    landblock_id: String,
+    requested_layers: Vec<LandblockSourceLayer>,
+    records: Vec<LandblockSourceBatchRecordManifest>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LandblockSourceBatchRecordManifest {
+    layer: LandblockSourceLayer,
+    byte_offset: usize,
+    byte_length: usize,
+}
+
+/// Serializes one versioned landblock batch whose nested records stay independently decodable.
+pub(crate) fn serialize_landblock_source_batch(
+    request: &LandblockSourceBatchRequest,
+    records: Vec<LandblockSourceBatchRecord>,
+) -> Result<Vec<u8>> {
+    let record_layers = records
+        .iter()
+        .map(|record| record.layer)
+        .collect::<BTreeSet<_>>();
+    if record_layers != request.layers {
+        bail!("landblock source batch records do not match the requested layer set");
+    }
+
+    let mut record_offset = 0;
+    let mut manifest_records = Vec::with_capacity(records.len());
+    for record in &records {
+        manifest_records.push(LandblockSourceBatchRecordManifest {
+            layer: record.layer,
+            byte_offset: record_offset,
+            byte_length: record.bytes.len(),
+        });
+        record_offset += record.bytes.len();
+    }
+    let manifest = LandblockSourceBatchManifest {
+        transport: "holtburger-landblock-source-batch",
+        version: LANDBLOCK_SOURCE_BATCH_BINARY_VERSION,
+        byte_order: "little-endian",
+        record_byte_offset_base: "record-data",
+        landblock_id: format!("0x{:08x}", request.landblock_id),
+        requested_layers: request.layers().collect(),
+        records: manifest_records,
+    };
+    let mut manifest_bytes = serde_json::to_vec(&manifest)?;
+    while !(LANDBLOCK_SOURCE_BATCH_BINARY_HEADER_LEN + manifest_bytes.len()).is_multiple_of(4) {
+        manifest_bytes.push(b' ');
+    }
+    let total_length = LANDBLOCK_SOURCE_BATCH_BINARY_HEADER_LEN
+        + manifest_bytes.len()
+        + records
+            .iter()
+            .map(|record| record.bytes.len())
+            .sum::<usize>();
+    let mut bytes = Vec::with_capacity(total_length);
+    bytes.extend(LANDBLOCK_SOURCE_BATCH_BINARY_MAGIC);
+    bytes.extend(LANDBLOCK_SOURCE_BATCH_BINARY_VERSION.to_le_bytes());
+    bytes.extend(u32::try_from(manifest_bytes.len())?.to_le_bytes());
+    bytes.extend(u32::try_from(total_length)?.to_le_bytes());
+    bytes.extend(manifest_bytes);
+    for record in records {
+        bytes.extend(record.bytes);
+    }
+    Ok(bytes)
 }
 
 /// Loads one cumulative scene asset and projects only the app-local layers requested by the caller.

@@ -1,7 +1,7 @@
 use anyhow::Context;
 use holtburger_3d::{
-    discover_content_runtime, load_active_region_data_bytes, load_building_source_bytes,
-    load_terrain_source_bytes, load_texture_pixels_bytes,
+    LandblockSourceLayer, discover_content_runtime, load_active_region_data_bytes,
+    load_landblock_source_batch_bytes, load_texture_pixels_bytes,
 };
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -24,14 +24,9 @@ struct ReadyMessage {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct TerrainSourceRequest {
+struct LandblockSourceBatchRequest {
     landblock_id: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct BuildingSourceRequest {
-    landblock_id: String,
+    layers: Vec<LandblockSourceLayer>,
 }
 
 #[derive(Deserialize)]
@@ -51,7 +46,7 @@ async fn main() -> anyhow::Result<()> {
     println!(
         "{}",
         serde_json::to_string(&ReadyMessage {
-            kind: "holtburger-3d-dev-terrain-content-host-ready",
+            kind: "holtburger-3d-dev-landblock-content-host-ready",
             url: format!("http://{address}"),
         })?
     );
@@ -61,7 +56,7 @@ async fn main() -> anyhow::Result<()> {
         let runtime = runtime.clone();
         tokio::spawn(async move {
             if let Err(error) = handle_connection(stream, &runtime).await {
-                eprintln!("[holtburger-3d-dev-terrain-content-host] request failed: {error:#}");
+                eprintln!("[holtburger-3d-dev-landblock-content-host] request failed: {error:#}");
             }
         });
     }
@@ -81,18 +76,11 @@ async fn handle_connection(
             Ok(bytes) => write_response(&mut stream, 200, "application/octet-stream", &bytes).await,
             Err(error) => write_error(&mut stream, error).await,
         },
-        ("POST", "/terrain-source") => {
-            let request = serde_json::from_slice::<TerrainSourceRequest>(&request.body)?;
-            match load_terrain_source_bytes(runtime, &request.landblock_id).await {
-                Ok(bytes) => {
-                    write_response(&mut stream, 200, "application/octet-stream", &bytes).await
-                }
-                Err(error) => write_error(&mut stream, error).await,
-            }
-        }
-        ("POST", "/building-source") => {
-            let request = serde_json::from_slice::<BuildingSourceRequest>(&request.body)?;
-            match load_building_source_bytes(runtime, &request.landblock_id).await {
+        ("POST", "/landblock-source-batch") => {
+            let request = serde_json::from_slice::<LandblockSourceBatchRequest>(&request.body)?;
+            match load_landblock_source_batch_bytes(runtime, &request.landblock_id, request.layers)
+                .await
+            {
                 Ok(bytes) => {
                     write_response(&mut stream, 200, "application/octet-stream", &bytes).await
                 }
@@ -239,7 +227,7 @@ fn parse_args() -> anyhow::Result<Args> {
             "--host" => args.host = values.next().context("--host requires a value")?,
             "--port" => args.port = values.next().context("--port requires a value")?.parse()?,
             "--help" | "-h" => {
-                println!("Usage: dev_terrain_content_host [--host <host>] [--port <port>]");
+                println!("Usage: dev_landblock_content_host [--host <host>] [--port <port>]");
                 return Ok(args);
             }
             _ => anyhow::bail!("unsupported argument {value}"),

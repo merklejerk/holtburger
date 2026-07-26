@@ -1,6 +1,6 @@
 import type { LandblockId } from "../game-types";
 import type {
-	ResolvedObjectLayerSource,
+	ResolvedOutdoorStaticLayerSource,
 	ResolvedObjectResident,
 } from "../resolution/landblock-layer";
 import type {
@@ -41,9 +41,9 @@ export interface StaticObjectLayerCommit {
 	readonly diagnostics?: StaticObjectLayerDiagnostics;
 }
 
-/** Classified building source handed to runtime-owned static realization without physical pages. */
-export interface BuildingLayerSourceCommit {
-	readonly source: ResolvedObjectLayerSource;
+/** Classified outdoor-static source handed to runtime-owned realization without physical pages. */
+export interface StaticObjectLayerSourceCommit {
+	readonly source: ResolvedOutdoorStaticLayerSource;
 }
 
 /** Topology and shell publication kept separate from embedded object residents. */
@@ -82,11 +82,11 @@ export type CommitBundle = {} & (
 	  >
 	| CommitBundleLandblockLayerFields<
 			LandblockLayerKind.Buildings,
-			BuildingLayerSourceCommit
+			StaticObjectLayerSourceCommit
 	  >
 	| CommitBundleLandblockLayerFields<
 			LandblockLayerKind.Objects,
-			StaticObjectLayerCommit
+			StaticObjectLayerSourceCommit
 	  >
 	| CommitBundleLandblockLayerFields<
 			LandblockLayerKind.Generated,

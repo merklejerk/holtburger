@@ -47,10 +47,10 @@ import {
 	WorkerTexturePreparer,
 	type TexturePreparer,
 } from "../textures/texture-preparer";
-import { BuildingGeometryWorker } from "../commit/building-geometry-worker-client";
-import { bakeBuildingGeometry } from "../commit/building-geometry-worker";
-import { assembleBuildingArtifact } from "../commit/building-artifact";
-import { collectBuildingTextureDependencies } from "../commit/building-texture-inputs";
+import { StaticObjectGeometryWorker } from "../commit/static-object-geometry-worker-client";
+import { bakeStaticObjectGeometry } from "../commit/static-object-geometry-worker";
+import { assembleStaticObjectArtifact } from "../commit/static-object-artifact";
+import { collectStaticObjectTextureDependencies } from "../commit/static-object-texture-inputs";
 import type { StaticObjectLayerArtifact } from "../commit/artifacts";
 import {
 	StaticLayerRealizer,
@@ -69,7 +69,7 @@ import {
 	type OwnerId,
 } from "./owner-ids";
 import type { ActiveRegionObjectDetailBinding } from "../resolution/active-region-object-detail";
-import type { ResolvedObjectLayerSource } from "../resolution/landblock-layer";
+import type { ResolvedOutdoorStaticLayerSource } from "../resolution/landblock-layer";
 import {
 	computeSceneInterest,
 	LandblockLayerKind,
@@ -121,7 +121,7 @@ export interface GameRuntimeDependencies {
 	readonly terrainGenerator: TerrainGenerator;
 	readonly texturePreparer: TexturePreparer;
 	readonly staticGeometryPreparer: StaticLayerGeometryPreparer<
-		ResolvedObjectLayerSource,
+		ResolvedOutdoorStaticLayerSource,
 		StaticObjectLayerArtifact | null,
 		OwnerId
 	>;
@@ -188,7 +188,7 @@ export class GameRuntime {
 	readonly #staticObjects: StaticObjectSystem<OwnerId, ResourceOwnerId>;
 	/** Source-to-static publication sequencing for the buildings layer. */
 	readonly #staticLayerRealizer: StaticLayerRealizer<
-		ResolvedObjectLayerSource,
+		ResolvedOutdoorStaticLayerSource,
 		StaticObjectLayerArtifact | null,
 		OwnerId
 	>;
@@ -405,7 +405,9 @@ export class GameRuntime {
 			staticGeometryPreparer:
 				typeof Worker === "undefined"
 					? new InlineBuildingGeometryPreparer()
-					: new RuntimeBuildingGeometryPreparer(BuildingGeometryWorker.build()),
+					: new RuntimeBuildingGeometryPreparer(
+							StaticObjectGeometryWorker.build(),
+						),
 			terrainGenerator,
 			texturePreparer,
 		});
@@ -684,7 +686,7 @@ export class GameRuntime {
 			this.#realizeBuildingLayer(
 				ownerId,
 				artifact as typeof artifact & {
-					readonly commit: import("../commit/types").BuildingLayerSourceCommit;
+					readonly commit: import("../commit/types").StaticObjectLayerSourceCommit;
 				},
 				revision,
 			);
@@ -750,7 +752,7 @@ export class GameRuntime {
 			readonly landblockId: LandblockId;
 			readonly layer: LandblockLayerKind.Buildings;
 			readonly dynamicEntities: readonly DynamicEntityCommit[];
-			readonly commit: import("../commit/types").BuildingLayerSourceCommit;
+			readonly commit: import("../commit/types").StaticObjectLayerSourceCommit;
 		},
 		revision: SceneInterestRevision,
 	): void {
@@ -760,7 +762,7 @@ export class GameRuntime {
 			);
 		}
 		const factCollectionStartedAt = performance.now();
-		const textureRequirements = collectBuildingTextureDependencies(
+		const textureRequirements = collectStaticObjectTextureDependencies(
 			artifact.commit.source,
 		);
 		this.#textureFactCollectionDurationMs +=
@@ -907,30 +909,31 @@ export class GameRuntime {
 
 /** Closed building geometry adapter owned and destroyed by the static realization sequencer. */
 class RuntimeBuildingGeometryPreparer implements StaticLayerGeometryPreparer<
-	ResolvedObjectLayerSource,
+	ResolvedOutdoorStaticLayerSource,
 	StaticObjectLayerArtifact | null,
 	OwnerId
 > {
-	readonly #worker: BuildingGeometryWorker;
+	readonly #worker: StaticObjectGeometryWorker;
 
-	constructor(worker: BuildingGeometryWorker) {
+	constructor(worker: StaticObjectGeometryWorker) {
 		this.#worker = worker;
 	}
 
 	async prepare(options: {
 		readonly owner: OwnerId;
 		readonly revision: SceneInterestRevision;
-		readonly source: ResolvedObjectLayerSource;
+		readonly source: ResolvedOutdoorStaticLayerSource;
 		readonly textureRequirements: readonly import("../textures/types").AssetTextureFact[];
 	}): Promise<StaticObjectLayerArtifact | null> {
 		const geometry = await this.#worker.bake({
+			layer: LandblockLayerKind.Buildings,
 			resourceNamespace: staticRevisionToInstallNamespace(
 				options.owner,
 				options.revision,
 			),
 			source: options.source,
 		});
-		return assembleBuildingArtifact({
+		return assembleStaticObjectArtifact({
 			geometry,
 			resourceNamespace: staticRevisionToInstallNamespace(
 				options.owner,
@@ -950,9 +953,9 @@ class RuntimeBuildingGeometryPreparer implements StaticLayerGeometryPreparer<
 class InlineBuildingGeometryPreparer extends RuntimeBuildingGeometryPreparer {
 	constructor() {
 		super({
-			bake: (job) => Promise.resolve(bakeBuildingGeometry(job)),
+			bake: (job) => Promise.resolve(bakeStaticObjectGeometry(job)),
 			destroy: () => undefined,
-		} as BuildingGeometryWorker);
+		} as StaticObjectGeometryWorker);
 	}
 }
 

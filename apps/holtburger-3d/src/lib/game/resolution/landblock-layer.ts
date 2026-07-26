@@ -112,6 +112,11 @@ export interface ResolvedObjectLayerSource {
 	readonly dynamicResidents: readonly ResolvedObjectResident[];
 }
 
+/** Outdoor-static source kinds activated by the shared buildings/explicit-objects pipeline. */
+export type ResolvedOutdoorStaticLayerSource = ResolvedObjectLayerSource & {
+	readonly kind: LandblockLayerKind.Buildings | LandblockLayerKind.Objects;
+};
+
 /** Environment-cell layer containing structured interiors and embedded residents. */
 export interface ResolvedEnvCellLayerSource {
 	readonly kind: LandblockLayerKind.EnvCells;

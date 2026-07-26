@@ -1,6 +1,7 @@
 # Holtburger 3D Explicit Objects Layer Plan
 
-Status: Ready for execution. Evidence preflight completed on 2026-07-25.
+Status: In progress. Phases 1 and 2 are complete; Phase 3 is the active milestone. Evidence
+preflight completed on 2026-07-25.
 
 ## Context and Boundaries
 
@@ -90,6 +91,9 @@ rather than make it worse.
    - Overlapping later requests for the same landblock use a per-landblock in-flight acquisition
      coordinator: an equal-or-higher in-flight request is shared; a higher request arriving after a
      lower one waits for the lower result and extends it rather than assembling a competing prefix.
+     This coordinates cumulative content assembly, not separate host-command responses: later
+     independent dispatches may still receive their own projected batch, but never compete to
+     assemble overlapping cumulative prefixes.
    - Shared `holtburger-core` coordination speaks only in authoritative landblock and cumulative
      LoD terms. The app-local host adapter owns frontend layer-set mapping, batch transport, and
      record projection.
@@ -187,13 +191,17 @@ ACE, ACViewer, or retail behavior can be inspected.
   - revision-scoped atlas, geometry, currentness, and publication sequencing
 - `apps/holtburger-3d/src/lib/game/systems/static-object-system.ts`
   - typed non-terrain culling-group publication and resource ownership
-- `apps/holtburger-3d/src/lib/game/commit/building-geometry-worker.ts`
+- `apps/holtburger-3d/src/lib/game/commit/static-object-geometry-worker.ts`
   - current static layer geometry transform and material-range bake
 - `apps/holtburger-3d/src/lib/game/textures/atlas/resident-texture-atlas.ts`
   - cross-owner logical texture reuse and transactional publication
-- `apps/holtburger-3d/src-tauri/src/building_source.rs`
+- `apps/holtburger-3d/src-tauri/src/landblock_source_batch.rs`
+  - typed cumulative-LoD layer projection and versioned outer source-batch envelope
+- `apps/holtburger-3d/src-tauri/src/outdoor_static_source.rs`
   - current closed object-definition, geometry, material, and texture-dependency source bundle
-- `apps/holtburger-3d/src/lib/assets/decode-building-source.ts`
+- `apps/holtburger-3d/src/lib/assets/decode-landblock-source-batch.ts`
+  - outer batch validation and typed terrain/outdoor-static record projection
+- `apps/holtburger-3d/src/lib/assets/decode-outdoor-static-record.ts`
   - current binary validation, typed-array hydration, placement conversion, and resident
     classification
 
@@ -459,6 +467,8 @@ claims without content assembler errors or omissions:
 - Rename building geometry job/result/worker symbols and files to static-object-layer terminology.
 - Rename building artifact and texture dependency collection to static-object-layer terminology.
 - Carry the typed layer through geometry jobs and emitted resource identities.
+- Reject a geometry job whose explicit layer does not match the resolved source's layer kind;
+  this makes the field an integrity boundary rather than provenance decoration.
 - Preserve one closed geometry job and one baked allocation per landblock layer.
 - Reuse `planObjectMaterial`, logical `AssetTextureFact` collection, atlas purposes, sampler facts,
   transparent sort units, and additive grouping without layer-specific branches.
@@ -479,19 +489,43 @@ claims without content assembler errors or omissions:
 
 #### Task Checklist
 
-- [ ] Move and rename the geometry worker, client, entry point, tests, and worker contracts.
-- [ ] Include the source layer in geometry/resource keys and diagnostic records.
-- [ ] Move and rename artifact assembly and texture-fact collection.
-- [ ] Generalize commit union branches for Buildings and Objects without a broad untyped payload.
-- [ ] Update runtime dependency injection and focused fakes.
-- [ ] Prove direct GfxObj, setup-backed, transparent, additive, indexed/palette, and DXT3 inputs with
-      asset-free fixtures.
-- [ ] Run the worker tests using real transferable `ArrayBuffer` inputs.
-- [ ] Run focused TypeScript tests, type checking, lint, and targeted formatting.
+- [x] Move and rename the geometry worker, client, entry point, tests, and worker contracts.
+- [x] Include the source layer in geometry/resource keys and reject source/job layer mismatches.
+- [x] Move and rename artifact assembly and texture-fact collection.
+- [x] Generalize commit union branches for Buildings and Objects without a broad untyped payload.
+- [x] Update runtime dependency injection and focused fakes.
+- [x] Prove normalized single-part and setup-style multipart transforms, transparent/additive
+      ordering, and indexed/palette binding and texture-fact collection with asset-free fixtures.
+      Source-form decoding/classification remains covered at the record decoder boundary; DXT3
+      pixel decode and atlas acceptance remain Phase 6 responsibilities.
+- [x] Exercise the worker client with genuine transferable `ArrayBuffer` inputs, or record the
+      exact test-environment limitation and retain that proof for Phase 6 browser acceptance.
+- [x] Run focused TypeScript tests, type checking, lint, and targeted formatting.
 
 #### Decisions and Course Corrections
 
-- Pending execution.
+- Coherence pass: the worker's layer is an integrity input, not decorative provenance. It must
+  match `ResolvedObjectLayerSource.kind` before any geometry is baked or keyed. Runtime passage of
+  the layer into realization and publication remains deliberately Phase 4 work; the current
+  Buildings-only adapter supplies the known Buildings value until that cutover.
+- Coherence pass: the normalized geometry worker cannot truthfully prove original direct-GfxObj
+  versus setup-source decoding, nor can it prove DXT3 pixel decode. Phase 3 therefore tests the
+  normalized geometry/material contract and transfer boundary; decoder classification and live
+  texture acceptance retain their assigned Phase 2 and Phase 6 coverage.
+- `ResolvedOutdoorStaticLayerSource` now admits Buildings and Objects only. It makes the shared
+  source-commit, texture, artifact, and geometry contracts honest without pre-admitting Generated
+  scenery; its production pipeline branch remains Phase 5 work.
+- Geometry jobs validate `source.kind === layer` before baking and include that layer in their
+  resource key. The worker therefore cannot publish an Objects allocation under a Buildings
+  identity, even if a caller constructs an otherwise type-compatible payload incorrectly.
+- Focused fixtures prove single-part and setup-style parent transforms, source scale, transparent
+  and additive ordering, indexed/palette texture facts, and absent static output. The worker-client
+  test uses `structuredClone(..., { transfer })` and proves the source `ArrayBuffer` detaches.
+- The remaining `RuntimeBuildingGeometryPreparer` is intentionally still Buildings-only: it is the
+  Phase 4 runtime seam that will carry typed layers through realization and publication. No
+  building-named shared worker, artifact assembler, texture-input helper, or source commit remains.
+- Full TypeScript tests (44 files / 200 tests), type checking, ESLint, Knip, clippy with warnings
+  denied, Rust formatting, and diff checks passed.
 
 ### Phase 4: Make Static Realization Layer-Aware
 

@@ -75,7 +75,68 @@ describe("StandardCommitPipeline", () => {
 			},
 		]);
 	});
+
+	it("fans a combined terrain, building, and object batch into independent commits", async () => {
+		const landblockId = "0xda55ffff" as const;
+		const terrain = {
+			kind: LandblockLayerKind.Terrain,
+			landblockId,
+		} as unknown as ResolvedTerrainLayerSource;
+		const buildings = outdoorSource(landblockId, LandblockLayerKind.Buildings);
+		const objects = outdoorSource(landblockId, LandblockLayerKind.Objects);
+		const sourceBatch = new RecordingSourceBatch(
+			new Map([
+				[LandblockLayerKind.Terrain, terrain],
+				[LandblockLayerKind.Buildings, buildings],
+				[LandblockLayerKind.Objects, objects],
+			]),
+		);
+		const pipeline = await StandardCommitPipeline.build({ sourceBatch });
+
+		const bundles = await pipeline.prepareLandblockLayers(
+			new Set([
+				{ id: landblockId, layer: LandblockLayerKind.Terrain },
+				{ id: landblockId, layer: LandblockLayerKind.Buildings },
+				{ id: landblockId, layer: LandblockLayerKind.Objects },
+			]),
+		);
+
+		expect(sourceBatch.requests).toEqual([
+			{
+				landblockId,
+				layers: [
+					LandblockLayerKind.Terrain,
+					LandblockLayerKind.Buildings,
+					LandblockLayerKind.Objects,
+				],
+			},
+		]);
+		expect(bundles).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					commit: { source: buildings },
+					layer: LandblockLayerKind.Buildings,
+				}),
+				expect.objectContaining({
+					commit: { source: objects },
+					layer: LandblockLayerKind.Objects,
+				}),
+			]),
+		);
+	});
 });
+
+function outdoorSource(
+	landblockId: string,
+	kind: LandblockLayerKind.Buildings | LandblockLayerKind.Objects,
+): ResolvedObjectLayerSource {
+	return {
+		dynamicResidents: [],
+		kind,
+		landblockId,
+		staticResidents: [],
+	};
+}
 
 class SourceBatch implements LandblockSourceBatchSource {
 	constructor(private readonly source: ResolvedObjectLayerSource) {}

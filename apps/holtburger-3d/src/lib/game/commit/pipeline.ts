@@ -11,6 +11,7 @@ import type {
 import {
 	LandblockLayerKind,
 	type LandblockIdLayer,
+	type OutdoorStaticLayerKind,
 } from "../runtime/scene-interest";
 import {
 	CommitBundleSourceKind,
@@ -70,7 +71,7 @@ export class StandardCommitPipeline implements CommitPipeline {
 		for (const layer of layers) {
 			if (
 				layer.layer !== LandblockLayerKind.Terrain &&
-				layer.layer !== LandblockLayerKind.Buildings
+				!isOutdoorStaticLayer(layer.layer)
 			) {
 				throw new Error(
 					`No typed source capability exists yet for ${describeLayer(layer)}.`,
@@ -98,7 +99,7 @@ export class StandardCommitPipeline implements CommitPipeline {
 	): CommitBundle | [] {
 		if (
 			layer.layer !== LandblockLayerKind.Terrain &&
-			layer.layer !== LandblockLayerKind.Buildings
+			!isOutdoorStaticLayer(layer.layer)
 		) {
 			throw new Error(
 				`No typed source capability exists yet for ${describeLayer(layer)}.`,
@@ -125,12 +126,15 @@ export class StandardCommitPipeline implements CommitPipeline {
 				`Source batch returned no source for ${describeLayer(layer)}.`,
 			);
 		}
-		if (!isBuildingsSource(source) || source.landblockId !== layer.id) {
+		if (
+			!isOutdoorStaticSource(source, layer.layer) ||
+			source.landblockId !== layer.id
+		) {
 			throw new Error(
 				`Loaded ${source.landblockId}/${source.kind} for ${describeLayer(layer)}.`,
 			);
 		}
-		return this.#prepareBuildingLayer(source);
+		return this.#prepareOutdoorStaticLayer(source);
 	}
 
 	#prepareTerrainLayer(source: ResolvedTerrainLayerSource): CommitBundle {
@@ -152,7 +156,7 @@ export class StandardCommitPipeline implements CommitPipeline {
 		};
 	}
 
-	#prepareBuildingLayer(
+	#prepareOutdoorStaticLayer(
 		source: ResolvedOutdoorStaticLayerSource,
 	): CommitBundle {
 		return {
@@ -160,7 +164,7 @@ export class StandardCommitPipeline implements CommitPipeline {
 			dynamicEntities: source.dynamicResidents,
 			kind: CommitBundleSourceKind.LandblockLayer,
 			landblockId: source.landblockId,
-			layer: LandblockLayerKind.Buildings,
+			layer: source.kind,
 		};
 	}
 }
@@ -169,10 +173,20 @@ function describeLayer(layer: LandblockIdLayer): string {
 	return `landblock ${layer.id} layer ${layer.layer}`;
 }
 
-function isBuildingsSource(
+function isOutdoorStaticLayer(
+	layer: LandblockLayerKind,
+): layer is OutdoorStaticLayerKind {
+	return (
+		layer === LandblockLayerKind.Buildings ||
+		layer === LandblockLayerKind.Objects
+	);
+}
+
+function isOutdoorStaticSource(
 	source: Exclude<LandblockSourceRecord, null>,
+	layer: OutdoorStaticLayerKind,
 ): source is ResolvedOutdoorStaticLayerSource & {
-	readonly kind: LandblockLayerKind.Buildings;
+	readonly kind: OutdoorStaticLayerKind;
 } {
-	return source.kind === LandblockLayerKind.Buildings;
+	return source.kind === layer;
 }

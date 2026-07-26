@@ -623,19 +623,34 @@ claims without content assembler errors or omissions:
 
 #### Task Checklist
 
-- [ ] Add the Objects batch-record branch to `StandardCommitPipeline`.
-- [ ] Generalize runtime diagnostics storage and query APIs by static layer kind.
-- [ ] Update Explorer diagnostics consumers without introducing source DTOs into UI state.
-- [ ] Verify deferred residents are processed only after successful current static publication.
-- [ ] Add focused pipeline and runtime tests for Objects commits, deferral, stale completion, and
+- [x] Add the Objects batch-record branch to `StandardCommitPipeline`.
+- [x] Generalize runtime diagnostics storage and query APIs by static layer kind.
+- [x] Update Explorer diagnostics consumers without introducing source DTOs into UI state.
+- [x] Verify deferred residents are processed only after successful current static publication.
+- [x] Add focused pipeline and runtime tests for Objects commits, deferral, stale completion, and
       eviction.
-- [ ] Add a cold same-landblock terrain + buildings + objects test proving one Level 2 source
+- [x] Add a cold same-landblock terrain + buildings + objects test proving one Level 2 source
       acquisition and independent layer publication.
-- [ ] Run focused pipeline/runtime tests, type checking, lint, Rust checks, and targeted formatting.
+- [x] Run focused pipeline/runtime tests, type checking, lint, Rust checks, and targeted formatting.
 
 #### Decisions and Course Corrections
 
-- Pending execution.
+- `StandardCommitPipeline` now accepts Objects only as a requested `LandblockSourceLayer`, validates
+  that its returned record is exactly Objects for the requested landblock, and fans it into a
+  layer-owned source commit. Terrain, Buildings, and Objects still share one batch request per
+  landblock; no runtime ownership is shared after that projection.
+- Runtime diagnostics are now `StaticObjectRuntimeDiagnostics`, with a typed layer on every
+  installed source snapshot. Explorer and harness consumers receive the read-only aggregate only;
+  no resolved source or renderer state escaped into app UI state.
+- A synthetic Objects runtime commit reaches the static realizer and existing deferred-dynamic seam.
+  Object stale completion, exact eviction, atlas claim retention, and culling-group independence
+  are covered at their owning runtime/system boundaries. Dynamic rendering remains deliberately
+  deferred.
+- The combined pipeline fixture proves one same-landblock Terrain/Buildings/Objects batch request
+  fans out into independent typed commits. It is transport/commit proof, not a claim about browser
+  load timing; Phase 6 owns live Level 2 acceptance and measurement.
+- Full TypeScript tests (44 files / 204 tests), type checking, ESLint, Knip, clippy with warnings
+  denied, Rust formatting, and diff checks passed.
 
 ### Phase 6: Browser Harness and Material Acceptance
 

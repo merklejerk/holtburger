@@ -251,7 +251,7 @@ describe("GameRuntime view and interest control", () => {
 				setupSourceId: "0x02000001",
 			},
 		]);
-		expect(runtime.getBuildingRuntimeDiagnostics().layers).toEqual([
+		expect(runtime.getStaticObjectRuntimeDiagnostics().layers).toEqual([
 			expect.objectContaining({
 				expectedResidentCount: 1,
 				landblockId: "0xda55ffff",

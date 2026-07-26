@@ -12,7 +12,7 @@
 	import { WebGL2Device } from "../../lib/game/renderer/webgl2-device";
 	import {
 		GameRuntime,
-		type BuildingRuntimeDiagnostics,
+		type StaticObjectRuntimeDiagnostics,
 	} from "../../lib/game/runtime/game-runtime";
 	import { ActiveRegionObjectDetailOwner } from "../../lib/game/resolution/active-region-object-detail";
 	import type { FrameSelectionMetrics } from "../../lib/game/renderer/renderer";
@@ -39,7 +39,7 @@
 		readonly error: string | null;
 		readonly frames: number;
 		readonly metrics: FrameSelectionMetrics | null;
-		readonly buildings: BuildingRuntimeDiagnostics | null;
+		readonly staticObjects: StaticObjectRuntimeDiagnostics | null;
 		readonly ready: boolean;
 	}
 
@@ -169,7 +169,7 @@
 					requestOutdoorTerrain,
 					setCameraLandblock,
 					state: () => ({
-						buildings: runtime?.getBuildingRuntimeDiagnostics() ?? null,
+						staticObjects: runtime?.getStaticObjectRuntimeDiagnostics() ?? null,
 						error,
 						frames,
 						metrics: runtime?.getFrameSelectionMetrics() ?? null,

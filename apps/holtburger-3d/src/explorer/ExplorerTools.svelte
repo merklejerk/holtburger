@@ -5,7 +5,7 @@
 	import ExplorerFramePanel from "./ExplorerFramePanel.svelte";
 	import ExplorerTexturesPanel from "./ExplorerTexturesPanel.svelte";
 	import ExplorerWorldPanel from "./ExplorerWorldPanel.svelte";
-	import type { BuildingRuntimeDiagnostics } from "../lib/game/runtime/game-runtime";
+	import type { StaticObjectRuntimeDiagnostics } from "../lib/game/runtime/game-runtime";
 	import type { ExplorerEnvironmentSelection } from "../lib/game/environment/scene-environment";
 	import type { FrameSelectionMetrics } from "../lib/game/renderer/renderer";
 	import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
@@ -48,8 +48,8 @@
 		readonly updateDistanceFog: (enabled: boolean) => void;
 		/** Latest low-rate renderer selection snapshot for frame diagnostics. */
 		readonly frameSelectionMetrics: FrameSelectionMetrics | null;
-		/** Latest low-rate building and texture atlas diagnostic snapshot. */
-		readonly buildingRuntimeDiagnostics: BuildingRuntimeDiagnostics | null;
+		/** Latest low-rate outdoor-static and texture atlas diagnostic snapshot. */
+		readonly staticObjectRuntimeDiagnostics: StaticObjectRuntimeDiagnostics | null;
 		/** Explicit diagnostic readback of one active packed atlas page. */
 		readonly readTextureAtlasPage: (pageId: TexturePageId) => Texture2DReadback;
 	}
@@ -64,7 +64,7 @@
 		distanceFogEnabled,
 		updateDistanceFog,
 		frameSelectionMetrics,
-		buildingRuntimeDiagnostics,
+		staticObjectRuntimeDiagnostics,
 		readTextureAtlasPage,
 	}: Props = $props();
 
@@ -175,7 +175,7 @@
 							<ExplorerFramePanel metrics={frameSelectionMetrics} />
 						{:else if activeTab.id === "textures"}
 							<ExplorerTexturesPanel
-								diagnostics={buildingRuntimeDiagnostics}
+								diagnostics={staticObjectRuntimeDiagnostics}
 								{readTextureAtlasPage}
 							/>
 						{:else}

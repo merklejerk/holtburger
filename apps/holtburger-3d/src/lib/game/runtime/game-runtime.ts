@@ -150,8 +150,9 @@ export interface DeferredStaticDynamicDiagnostic {
 	readonly reason: "setup-default-animation";
 }
 
-/** One installed building layer's source-to-runtime diagnostic snapshot. */
-export interface BuildingLayerRuntimeDiagnostics extends StaticObjectLayerDiagnostics {
+/** One installed outdoor-static layer's source-to-runtime diagnostic snapshot. */
+export interface StaticObjectLayerRuntimeDiagnostics extends StaticObjectLayerDiagnostics {
+	readonly layer: OutdoorStaticLayerKind;
 	readonly landblockId: LandblockId;
 	/** Promoted residents held at the explicit runtime deferral seam. */
 	readonly runtimeDeferredResidentCount: number;
@@ -159,9 +160,9 @@ export interface BuildingLayerRuntimeDiagnostics extends StaticObjectLayerDiagno
 	readonly staticArtifactInstalled: boolean;
 }
 
-/** Aggregate building-layer resource and arbitration facts for app-local diagnostics. */
-export interface BuildingRuntimeDiagnostics {
-	readonly layers: readonly BuildingLayerRuntimeDiagnostics[];
+/** Aggregate outdoor-static resource and arbitration facts for app-local diagnostics. */
+export interface StaticObjectRuntimeDiagnostics {
+	readonly layers: readonly StaticObjectLayerRuntimeDiagnostics[];
 	readonly geometryResourceCount: number;
 	readonly staticObjectOwnerCount: number;
 	readonly staticObjectNodeCount: number;
@@ -205,10 +206,10 @@ export class GameRuntime {
 		OwnerId,
 		DeferredStaticDynamicDiagnostic[]
 	>();
-	/** Source-to-runtime building snapshots removed with their layer owner. */
-	readonly #buildingLayerDiagnostics = new Map<
+	/** Source-to-runtime outdoor-static snapshots removed with their layer owner. */
+	readonly #staticObjectLayerDiagnostics = new Map<
 		OwnerId,
-		BuildingLayerRuntimeDiagnostics
+		StaticObjectLayerRuntimeDiagnostics
 	>();
 	#textureFactCollectionDurationMs = 0;
 	#textureFactCollectionCount = 0;
@@ -489,13 +490,15 @@ export class GameRuntime {
 		return [...this.#deferredStaticDynamics.values()].flat();
 	}
 
-	/** Snapshot app-local building lifecycle, resource, and atlas-arbitration diagnostics. */
-	getBuildingRuntimeDiagnostics(): BuildingRuntimeDiagnostics {
+	/** Snapshot app-local outdoor-static lifecycle, resource, and atlas-arbitration diagnostics. */
+	getStaticObjectRuntimeDiagnostics(): StaticObjectRuntimeDiagnostics {
 		const staticObjects = this.#staticObjects.getDiagnostics();
 		return {
 			geometryResourceCount: this.#geometry.getResourceCount(),
-			layers: [...this.#buildingLayerDiagnostics.values()].sort((left, right) =>
-				left.landblockId.localeCompare(right.landblockId),
+			layers: [...this.#staticObjectLayerDiagnostics.values()].sort(
+				(left, right) =>
+					left.landblockId.localeCompare(right.landblockId) ||
+					left.layer.localeCompare(right.layer),
 			),
 			staticObjectNodeCount: staticObjects.nodeCount,
 			staticObjectOwnerCount: staticObjects.ownerCount,
@@ -709,8 +712,9 @@ export class GameRuntime {
 			artifact.layer === LandblockLayerKind.Buildings &&
 			staticCommit.diagnostics !== undefined
 		) {
-			this.#buildingLayerDiagnostics.set(ownerId, {
+			this.#staticObjectLayerDiagnostics.set(ownerId, {
 				...staticCommit.diagnostics,
+				layer: artifact.layer,
 				landblockId: artifact.landblockId,
 				runtimeDeferredResidentCount: artifact.dynamicEntities.length,
 				staticArtifactInstalled: staticCommit.staticObjects !== null,
@@ -779,8 +783,7 @@ export class GameRuntime {
 						dynamic,
 					);
 				}
-				if (artifact.layer !== LandblockLayerKind.Buildings) return;
-				this.#buildingLayerDiagnostics.set(ownerId, {
+				this.#staticObjectLayerDiagnostics.set(ownerId, {
 					additiveRangeCount: 0,
 					bakedRangeCount: 0,
 					expectedResidentCount:
@@ -788,6 +791,7 @@ export class GameRuntime {
 						artifact.dynamicEntities.length,
 					geometryBytes: 0,
 					geometryWorkerDurationMs: 0,
+					layer: artifact.layer,
 					landblockId: artifact.landblockId,
 					materializedStaticResidentCount:
 						artifact.commit.source.staticResidents.length,
@@ -887,7 +891,7 @@ export class GameRuntime {
 			this.#staticObjects.evict(ownerId, revision);
 		}
 		this.#deferredStaticDynamics.delete(ownerId);
-		this.#buildingLayerDiagnostics.delete(ownerId);
+		this.#staticObjectLayerDiagnostics.delete(ownerId);
 		this.#animation.removeOwner(ownerId);
 		this.#dynamics.removeOwner(ownerId);
 		this.#envCells.removeOwner(ownerId);

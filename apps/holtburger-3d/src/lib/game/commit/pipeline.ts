@@ -9,6 +9,7 @@ import type {
 	ResolvedTerrainLayerSource,
 } from "../resolution/landblock-layer";
 import {
+	groupLandblockLayers,
 	LandblockLayerKind,
 	type LandblockIdLayer,
 	type OutdoorStaticLayerKind,
@@ -41,14 +42,8 @@ export class StandardCommitPipeline implements CommitPipeline {
 	async prepareLandblockLayers(
 		layers: ReadonlySet<LandblockIdLayer>,
 	): Promise<readonly CommitBundle[]> {
-		const byLandblock = new Map<string, LandblockIdLayer[]>();
-		for (const layer of layers) {
-			const group = byLandblock.get(layer.id);
-			if (group) group.push(layer);
-			else byLandblock.set(layer.id, [layer]);
-		}
 		const bundles = await Promise.all(
-			[...byLandblock.values()].map((group) =>
+			[...groupLandblockLayers(layers).values()].map((group) =>
 				this.#prepareLandblockBatch(group),
 			),
 		);

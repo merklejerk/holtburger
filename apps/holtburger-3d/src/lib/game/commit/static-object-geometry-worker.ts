@@ -1,9 +1,10 @@
 import type { ObjectMaterialOrdering } from "../resolution/object-material-planner";
 import { planObjectMaterial } from "../resolution/object-material-planner";
 import type { ResolvedOutdoorStaticLayerSource } from "../resolution/landblock-layer";
-import type {
-	ResolvedGeometry,
-	ResolvedObjectPart,
+import {
+	orderResolvedObjectParts,
+	type ResolvedGeometry,
+	type ResolvedObjectPart,
 } from "../resolution/presentation";
 import {
 	createScaleMat4,
@@ -344,36 +345,27 @@ function createPartTransforms(
 	if (!pose)
 		throw new Error(`Resident ${resident.id} has no default placement pose.`);
 	const transforms = new Map<number, Mat4>();
-	const pending = new Map(
-		resident.presentation.parts.map((part) => [part.partIndex, part]),
-	);
-	while (pending.size > 0) {
-		let progressed = false;
-		for (const [partIndex, part] of pending) {
-			const localTransform = pose.partTransforms[partIndex];
-			if (!localTransform) {
-				throw new Error(
-					`Resident ${resident.id} has no transform for part ${partIndex}.`,
-				);
-			}
-			if (
-				part.parentPartIndex !== null &&
-				!transforms.has(part.parentPartIndex)
-			)
-				continue;
-			const parent =
-				part.parentPartIndex === null
-					? null
-					: transforms.get(part.parentPartIndex);
-			transforms.set(
-				partIndex,
-				parent ? multiplyMat4(parent, localTransform) : localTransform,
+	for (const part of orderResolvedObjectParts(resident.presentation.parts)) {
+		const partIndex = part.partIndex;
+		const localTransform = pose.partTransforms[partIndex];
+		if (!localTransform) {
+			throw new Error(
+				`Resident ${resident.id} has no transform for part ${partIndex}.`,
 			);
-			pending.delete(partIndex);
-			progressed = true;
 		}
-		if (!progressed)
-			throw new Error(`Resident ${resident.id} has a cyclic part hierarchy.`);
+		const parent =
+			part.parentPartIndex === null
+				? null
+				: transforms.get(part.parentPartIndex);
+		if (part.parentPartIndex !== null && !parent) {
+			throw new Error(
+				`Resident ${resident.id} has no transform for parent part ${part.parentPartIndex}.`,
+			);
+		}
+		transforms.set(
+			partIndex,
+			parent ? multiplyMat4(parent, localTransform) : localTransform,
+		);
 	}
 	return transforms;
 }

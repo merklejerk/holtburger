@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
 	computeSceneInterest,
 	diffSceneInterest,
+	groupLandblockLayers,
 	LandblockLayerKind,
+	type LandblockIdLayer,
 	type SceneInterestMap,
 	validateLoDConfigOrThrow,
 } from "./scene-interest";
@@ -89,6 +91,27 @@ describe("diffSceneInterest", () => {
 		]);
 		expect([...to.entries()]).toEqual([
 			["0002", new Set([LandblockLayerKind.Objects])],
+		]);
+	});
+});
+
+describe("groupLandblockLayers", () => {
+	it("keeps every layer for one landblock in its shared acquisition group", () => {
+		const layers = new Set<LandblockIdLayer>([
+			{ id: "0x1010ffff", layer: LandblockLayerKind.Terrain },
+			{ id: "0x1010ffff", layer: LandblockLayerKind.Buildings },
+			{ id: "0x2020ffff", layer: LandblockLayerKind.Objects },
+		]);
+
+		expect([...groupLandblockLayers(layers).entries()]).toEqual([
+			[
+				"0x1010ffff",
+				[
+					{ id: "0x1010ffff", layer: LandblockLayerKind.Terrain },
+					{ id: "0x1010ffff", layer: LandblockLayerKind.Buildings },
+				],
+			],
+			["0x2020ffff", [{ id: "0x2020ffff", layer: LandblockLayerKind.Objects }]],
 		]);
 	});
 });

@@ -22,6 +22,19 @@ export interface LandblockIdLayer {
 	readonly layer: LandblockLayerKind;
 }
 
+/** Group layer requests by their one shared cumulative-content acquisition identity. */
+export function groupLandblockLayers(
+	layers: ReadonlySet<LandblockIdLayer>,
+): ReadonlyMap<LandblockId, LandblockIdLayer[]> {
+	const grouped = new Map<LandblockId, LandblockIdLayer[]>();
+	for (const layer of layers) {
+		const group = grouped.get(layer.id);
+		if (group) group.push(layer);
+		else grouped.set(layer.id, [layer]);
+	}
+	return grouped;
+}
+
 export interface SceneInterestDiff {
 	newLayers: Set<LandblockIdLayer>;
 	evictedLayers: Set<LandblockIdLayer>;

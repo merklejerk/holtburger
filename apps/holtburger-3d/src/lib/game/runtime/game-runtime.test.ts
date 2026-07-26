@@ -263,6 +263,36 @@ describe("GameRuntime view and interest control", () => {
 
 		await runtime.destroy();
 	});
+
+	it("routes a synthetic explicit-object source through static realization", async () => {
+		const pipeline = new DeferredCommitPipeline();
+		const device: GameRuntimeRenderDevice = {
+			buildRenderer: async () => ({ async destroy() {}, drawFrame() {} }),
+			resources: {} as RendererResourceManager,
+		};
+		const runtime = await GameRuntime.build(
+			device,
+			pipeline,
+			{} as TexturePixelSource,
+		);
+
+		runtime.updateSceneInterest(objectSceneInterest("0xda55ffff"));
+		pipeline.resolveNext([]);
+		pipeline.resolveNext([promotedObjectArtifact("0xda55ffff")]);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		runtime.tick();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(runtime.getDeferredStaticDynamicDiagnostics()).toEqual([
+			expect.objectContaining({
+				landblockId: "0xda55ffff",
+				layer: LandblockLayerKind.Objects,
+				residentId: "resident:promoted",
+			}),
+		]);
+
+		await runtime.destroy();
+	});
 });
 
 function sceneInterest(anchorLandblockId: string) {
@@ -291,6 +321,19 @@ function buildingSceneInterest(anchorLandblockId: string) {
 	} as const;
 }
 
+function objectSceneInterest(anchorLandblockId: string) {
+	return {
+		anchorLandblockId,
+		lod: {
+			buildingRadius: null,
+			envCellRadius: null,
+			explicitObjectRadius: 0,
+			generatedObjectRadius: null,
+			terrainRadius: 0,
+		},
+	} as const;
+}
+
 /** Minimal stale artifact: applying it would fail, so a passing test proves it was discarded. */
 function staleTerrainArtifact(landblockId: string): CommitBundle {
 	return {
@@ -311,11 +354,22 @@ function staleTerrainArtifact(landblockId: string): CommitBundle {
 
 /** Minimal promoted record: any accidental dynamic installation reaches the throwing resource port. */
 function promotedBuildingArtifact(landblockId: string): CommitBundle {
+	return promotedStaticArtifact(landblockId, LandblockLayerKind.Buildings);
+}
+
+function promotedObjectArtifact(landblockId: string): CommitBundle {
+	return promotedStaticArtifact(landblockId, LandblockLayerKind.Objects);
+}
+
+function promotedStaticArtifact(
+	landblockId: string,
+	layer: LandblockLayerKind.Buildings | LandblockLayerKind.Objects,
+): CommitBundle {
 	return {
 		commit: {
 			source: {
 				dynamicResidents: [],
-				kind: LandblockLayerKind.Buildings,
+				kind: layer,
 				landblockId,
 				staticResidents: [],
 			} as import("../resolution/landblock-layer").ResolvedObjectLayerSource,
@@ -332,7 +386,7 @@ function promotedBuildingArtifact(landblockId: string): CommitBundle {
 		],
 		kind: CommitBundleSourceKind.LandblockLayer,
 		landblockId,
-		layer: LandblockLayerKind.Buildings,
+		layer,
 	};
 }
 

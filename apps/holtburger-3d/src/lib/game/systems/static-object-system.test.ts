@@ -63,6 +63,42 @@ describe("StaticObjectSystem", () => {
 		expect(scene.live).toEqual(["node:1"]);
 		expect(geometry.dropped).toEqual([]);
 	});
+
+	it("keeps building and object owners in independent culling groups", () => {
+		const scene = new FixtureScene();
+		const geometry = new FixtureGeometry();
+		const instances = new FixtureInstances();
+		const system = new StaticObjectSystem<"buildings" | "objects", string>(
+			scene as unknown as SceneGraph,
+			geometry as unknown as GeometryManager<string>,
+			instances as unknown as InstanceStreamManager<string>,
+			(owner, revision) => `resource:${owner}:${revision}`,
+		);
+
+		system.replaceObjects(
+			"buildings",
+			revision(2),
+			artifact("buildings"),
+			LandblockLayerKind.Buildings,
+		);
+		system.replaceObjects(
+			"objects",
+			revision(1),
+			artifact("objects"),
+			LandblockLayerKind.Objects,
+		);
+		system.evict("buildings", revision(1));
+
+		expect(scene.live).toEqual(["node:1", "node:2"]);
+		system.evict("objects", revision(1));
+
+		expect(scene.cullingGroups).toEqual([
+			LandblockLayerKind.Buildings,
+			LandblockLayerKind.Objects,
+		]);
+		expect(scene.live).toEqual(["node:1"]);
+		expect(geometry.dropped).toEqual(["resource:objects:1"]);
+	});
 });
 
 function artifact(id: string): StaticObjectLayerArtifact {
@@ -89,11 +125,12 @@ function revision(value: number): SceneInterestRevision {
 }
 
 class FixtureScene {
+	readonly cullingGroups: string[] = [];
 	readonly live: string[] = [];
 	failNextCreate = false;
 	#createCount = 0;
 
-	createNode(): SceneNodeId {
+	createNode(input: { readonly cullingGroup: string }): SceneNodeId {
 		if (this.failNextCreate) {
 			this.failNextCreate = false;
 			throw new Error("scene create failed");
@@ -101,6 +138,7 @@ class FixtureScene {
 		this.#createCount += 1;
 		const node = `node:${this.#createCount}` as SceneNodeId;
 		this.live.push(node);
+		this.cullingGroups.push(input.cullingGroup);
 		return node;
 	}
 

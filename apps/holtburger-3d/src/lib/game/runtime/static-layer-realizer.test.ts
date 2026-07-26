@@ -3,6 +3,7 @@ import type { AtlasRequirementHandle } from "../textures/atlas/resident-texture-
 import type { AtlasRequirementCompletion } from "../textures/atlas/resident-texture-atlas";
 import { createAssetTextureKey, TexturePurpose } from "../textures/types";
 import type { SceneInterestRevision } from "./scene-availability";
+import { LandblockLayerKind } from "./scene-interest";
 import {
 	type StaticLayerAtlas,
 	type StaticLayerCurrentness,
@@ -34,7 +35,11 @@ describe("StaticLayerRealizer", () => {
 			geometry: "geometry",
 			kind: "published",
 		});
-		expect(publisher.events).toEqual(["replace:1"]);
+		expect(publisher.events).toEqual(["replace:buildings:1"]);
+		expect(current.layers).toEqual([
+			LandblockLayerKind.Buildings,
+			LandblockLayerKind.Buildings,
+		]);
 		expect(atlas.events).toEqual(["prepare:1", "activate:1"]);
 	});
 
@@ -75,7 +80,12 @@ describe("StaticLayerRealizer", () => {
 
 		await expect(pending).resolves.toEqual({ kind: "stale" });
 		expect(reporter.failures).toEqual([
-			{ cause: failure, owner: "buildings", revision: revision(1) },
+			{
+				cause: failure,
+				layer: LandblockLayerKind.Buildings,
+				owner: "buildings",
+				revision: revision(1),
+			},
 		]);
 		expect(atlas.events).toEqual(["prepare:1", "withdraw:1"]);
 	});
@@ -152,10 +162,30 @@ describe("StaticLayerRealizer", () => {
 		expect(atlas.events).toEqual(["evict:7"]);
 		expect(publisher.events).toEqual(["evict:7"]);
 	});
+
+	it("publishes an explicit-object realization into its exact typed layer", async () => {
+		const atlas = new FakeAtlas();
+		const geometry = deferred<string>();
+		const publisher = new FakePublisher();
+		const realizer = createRealizer(
+			atlas,
+			geometry,
+			publisher,
+			new FakeCurrentness(),
+		);
+		const pending = realizer.realize(input(LandblockLayerKind.Objects));
+
+		atlas.resolve();
+		geometry.resolve("geometry");
+
+		await expect(pending).resolves.toMatchObject({ kind: "published" });
+		expect(publisher.events).toEqual(["replace:objects:1"]);
+	});
 });
 
-function input() {
+function input(layer = LandblockLayerKind.Buildings) {
 	return {
+		layer,
 		owner: "buildings" as const,
 		revision: revision(1),
 		source: "source",
@@ -251,15 +281,20 @@ class FakePublisher implements StaticLayerPublisher<string, "buildings"> {
 	removeExact(): Promise<void> {
 		return Promise.resolve();
 	}
-	replace(o: { readonly revision: SceneInterestRevision }): Promise<void> {
+	replace(o: {
+		readonly layer: LandblockLayerKind;
+		readonly revision: SceneInterestRevision;
+	}): Promise<void> {
 		if (this.fail) return Promise.reject(new Error("replace failed"));
-		this.events.push(`replace:${o.revision}`);
+		this.events.push(`replace:${o.layer}:${o.revision}`);
 		return Promise.resolve();
 	}
 }
 class FakeCurrentness implements StaticLayerCurrentness<"buildings"> {
 	current = true;
-	isCurrent(): boolean {
+	layers: LandblockLayerKind[] = [];
+	isCurrent(_: "buildings", layer: LandblockLayerKind): boolean {
+		this.layers.push(layer);
 		return this.current;
 	}
 }
@@ -267,6 +302,7 @@ class FakeCurrentness implements StaticLayerCurrentness<"buildings"> {
 class FakeFailureReporter {
 	failures: Array<{
 		readonly cause: unknown;
+		readonly layer: LandblockLayerKind;
 		readonly owner: "buildings";
 		readonly revision: SceneInterestRevision;
 	}> = [];

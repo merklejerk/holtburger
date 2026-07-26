@@ -34,29 +34,29 @@ const INDEX8 = fact(TexturePurpose.ObjectIndex8, "0x06000002");
 const SECOND_INDEX8 = fact(TexturePurpose.ObjectIndex8, "0x06000004");
 
 describe("ResidentTextureAtlas", () => {
-	it("coalesces concurrent claims and retains a source until its final release", async () => {
+	it("retains shared residency when only the buildings owner is withdrawn", async () => {
 		const preparer = new DeferredPreparer();
-		const atlas = new ResidentTextureAtlas<"first" | "second">(preparer);
-		const first = atlas.prepareOwnerRequirements("first", revision(1), [
+		const atlas = new ResidentTextureAtlas<"buildings" | "objects">(preparer);
+		const buildings = atlas.prepareOwnerRequirements("buildings", revision(1), [
 			DIRECT_COLOR,
 		]);
-		const second = atlas.prepareOwnerRequirements("second", revision(1), [
+		const objects = atlas.prepareOwnerRequirements("objects", revision(1), [
 			DIRECT_COLOR,
 		]);
 
 		expect(preparer.requests).toEqual([DIRECT_COLOR]);
 		preparer.resolve(DIRECT_COLOR);
-		await expect(first.completion).resolves.toBe("ready");
-		await expect(second.completion).resolves.toBe("ready");
+		await expect(buildings.completion).resolves.toBe("ready");
+		await expect(objects.completion).resolves.toBe("ready");
 		expect(atlas.getPreparedSource(DIRECT_COLOR.key)).toEqual(
 			source(DIRECT_COLOR),
 		);
 
-		atlas.withdrawOwnerRevision(first);
+		atlas.withdrawOwnerRevision(buildings);
 		expect(atlas.getPreparedSource(DIRECT_COLOR.key)).toEqual(
 			source(DIRECT_COLOR),
 		);
-		atlas.withdrawOwnerRevision(second);
+		atlas.withdrawOwnerRevision(objects);
 		expect(() => atlas.getPreparedSource(DIRECT_COLOR.key)).toThrow(
 			"no retained",
 		);

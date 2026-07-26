@@ -31,7 +31,12 @@ export function assembleStaticObjectArtifact(options: {
 			}
 		}
 	}
+	const { workerDurationMs, ...bakeMetrics } = geometry.metrics;
 	return {
+		bakeDiagnostics: {
+			...bakeMetrics,
+			geometryWorkerDurationMs: workerDurationMs,
+		},
 		geometry: [geometry.geometry],
 		instanceStreams: [],
 		objects: [

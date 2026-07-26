@@ -1,7 +1,7 @@
 # Holtburger 3D Explicit Objects Layer Plan
 
-Status: In progress. Phases 1 and 2 are complete; Phase 3 is the active milestone. Evidence
-preflight completed on 2026-07-25.
+Status: In progress. Phases 1 through 6 are complete; Phase 7 is the active closeout milestone.
+Evidence preflight and browser acceptance completed on 2026-07-25.
 
 ## Context and Boundaries
 
@@ -688,19 +688,72 @@ claims without content assembler errors or omissions:
 
 #### Task Checklist
 
-- [ ] Extend harness CLI parsing, help, app props, LoD construction, and JSON output.
-- [ ] Add a read-only culling-group diagnostic if current aggregate diagnostics cannot prove layer
+- [x] Extend harness CLI parsing, help, app props, LoD construction, and JSON output.
+- [x] Add a read-only culling-group diagnostic if current aggregate diagnostics cannot prove layer
       separation; do not expose mutable scene internals.
-- [ ] Run radius-zero acceptance first, then radius-one lifecycle coverage.
-- [ ] Compare before/after frame gaps and long tasks to catch a Level 2 main-thread regression.
-- [ ] Verify batch count, selected LoD, source bytes, and host assembly duration at radius zero
+- [x] Run radius-zero acceptance first, then radius-one lifecycle coverage.
+- [x] Compare before/after frame gaps and long tasks to catch a Level 2 main-thread regression.
+- [x] Verify batch count, selected LoD, source bytes, and host assembly duration at radius zero
       and radius one; distinguish host batching from frontend realization cost.
-- [ ] Record live evidence and any explained omissions in this plan.
-- [ ] Remove temporary screenshots, logs, probes, and asset-dependent tests.
+- [x] Record live evidence and any explained omissions in this plan.
+- [x] Remove temporary screenshots, logs, probes, and asset-dependent tests.
 
 #### Decisions and Course Corrections
 
-- Pending execution.
+- The terrain harness accepts `--explicit-object-radius`, validates it against the building
+  radius, forwards it into scene interest, and includes it in its JSON report and lifecycle reload.
+- Harness output now separates `staticObjectLayers.buildings` and `staticObjectLayers.objects`.
+  Each published layer reports its concrete culling group and scene-node count beside its existing
+  geometry/range diagnostics. These are read-only runtime snapshots; scene internals remain
+  private.
+- The dev content host emits selected cumulative LoD and assembly duration as CORS-exposed response
+  headers. Only `HttpLandblockContentSource`, which is the browser-harness adapter, retains each
+  response's layer set and byte count as a `sourceBatches` snapshot. The production binary envelope
+  and Tauri adapter remain unchanged.
+- Harness state includes longest requestAnimationFrame gap and Long Task facts for the current
+  browser session, so radius-zero and radius-one evidence can compare the actual main-thread cost.
+- The first Level 2 browser run exposed a real coordinator defect: one scene-interest dispatch was
+  immediately split into singleton layer preparations, defeating same-landblock batching. The
+  coordinator now groups newly requested layers by landblock, performs one pipeline request, and
+  fans returned artifacts back into their independent layer dispatches.
+- That run then exposed a source-boundary defect in setup hierarchies. DAT root parts use
+  `0xFFFFFFFF` in `parent_index`; serializing that value as a JSON parent made the geometry baker
+  report a false cycle. The host now projects the sentinel as `null`. A temporary archive-backed
+  probe re-emitted `0x0C78FFFF` Level 2, decoded it, and baked the explicit-object source
+  successfully; the probe was removed.
+- A temporary archive-backed sweep re-emitted, decoded, and baked all documented source witnesses:
+  static setup (`0x0C78FFFF`), promoted dynamic (`0x95D6FFFF`, including
+  `setup-model/02000331`), transparent (`0xB997FFFF`), additive (`0x376AFFFF`), and DXT3
+  (`0x33DAFFFF`). The temporary emitter and asset-dependent test were removed. This proves the
+  host/source/bake shape only; browser acceptance below covers WebGL texture preparation, draw
+  submission, timing, and lifecycle.
+- Browser acceptance passed against the local host with no application console errors. Each
+  radius-zero request produced one `{ terrain, buildings, objects }` source batch at cumulative
+  LoD 2: static setup `0x0C78FFFF` materialized 37 object residents into 43 ranges (six
+  transparent); the deferred-dynamic witness `0x95D6FFFF` materialized 68 static residents while
+  carrying three residents through the existing deferred seam; transparent witness `0xB997FFFF`
+  visibly submitted one transparent range; additive witness `0x376AFFFF` visibly submitted two
+  additive ranges (and six transparent ranges); and DXT3 witness `0x33DAFFFF` resolved its
+  direct-color, indexed, and palette atlas inputs and visibly submitted 12 object ranges. The
+  DXT3 source identity remains the archive-preflight witness; atlas page diagnostics intentionally
+  report texture purpose rather than a second copy of source compression metadata.
+- The static setup run transferred 196,612 source bytes and reported 185.8 ms host assembly; the
+  additive witness transferred 515,228 bytes and reported 351.0 ms. These are host-source
+  measurements, distinct from frontend geometry/atlas realization. The corresponding browser
+  sessions reported at most 128.9 ms and 108.9 ms frame gaps respectively, with one or two Long
+  Tasks; the radius-one lifecycle session reported 99.2 ms and one Long Task. This is an
+  acceptance smoke check, not a performance benchmark: process start, shader compilation, and
+  dev-mode browser noise dominate these single runs.
+- Radius-one lifecycle reloaded the full 3x3 scene interest twice. Every landblock request was one
+  three-layer cumulative-LoD batch per cycle; the anchor reinstalled its 37 static object residents
+  and 43 ranges, while empty neighbors published valid empty layer records. The previous atlas
+  pages were released before the equivalent replacement set was installed.
+- A camera-only move cannot prove ownership eviction because it does not change scene interest.
+  The harness now has explicit yaw/pitch controls for visible material witnesses and
+  `--relocate-landblock` for an actual interest replacement. Relocating `0x0C78FFFF` to empty
+  `0x0C79FFFF` released the old object node, all three atlas pages, and all 38 resident bindings;
+  only the new landblock's empty Buildings and Objects records remained. This is the relevant
+  eviction proof.
 
 ### Phase 7: Resteer, Clean Up, and Close
 

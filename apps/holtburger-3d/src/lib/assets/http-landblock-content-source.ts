@@ -16,12 +16,28 @@ import type {
 	LandblockSourceLayer,
 } from "./landblock-source-batch";
 
+/** One observed host batch retained only by the browser harness source adapter. */
+export interface HttpLandblockSourceBatchDiagnostic {
+	/** Canonical landblock requested by the frontend dispatch. */
+	readonly landblockId: LandblockId;
+	/** Exact layer subset projected from the host's cumulative asset. */
+	readonly layers: readonly LandblockSourceLayer[];
+	/** Maximum cumulative LoD selected by the host for this request. */
+	readonly selectedMaximumLod: number;
+	/** Exact response payload length before browser decoding. */
+	readonly responseBytes: number;
+	/** Host-only source assembly duration, excluding browser transfer and decoding. */
+	readonly hostAssemblyDurationMs: number;
+}
+
 /** Browser-compatible adapter for the same closed landblock batch contract used by Tauri. */
 export class HttpLandblockContentSource
 	implements LandblockSourceBatchSource, TexturePixelSource
 {
 	readonly #baseUrl: URL;
 	readonly #activeRegion: ActiveRegionSource;
+	readonly #landblockSourceBatchDiagnostics: HttpLandblockSourceBatchDiagnostic[] =
+		[];
 
 	private constructor(baseUrl: URL, activeRegion: ActiveRegionSource) {
 		this.#baseUrl = baseUrl;
@@ -49,15 +65,34 @@ export class HttpLandblockContentSource
 		return this.#activeRegion;
 	}
 
+	/** Snapshot browser-harness source-batch observations without exposing response payloads. */
+	getLandblockSourceBatchDiagnostics(): readonly HttpLandblockSourceBatchDiagnostic[] {
+		return [...this.#landblockSourceBatchDiagnostics];
+	}
+
 	async loadLandblockSourceBatch(
 		landblockId: LandblockId,
 		layers: ReadonlySet<LandblockSourceLayer>,
 	): Promise<LandblockSourceBatch> {
+		const response = await this.#postBinaryResponse("landblock-source-batch", {
+			landblockId,
+			layers: [...layers],
+		});
+		this.#landblockSourceBatchDiagnostics.push({
+			hostAssemblyDurationMs: requiredNonNegativeHeader(
+				response.headers,
+				"x-holtburger-landblock-source-batch-duration-ms",
+			),
+			landblockId,
+			layers: [...layers],
+			responseBytes: response.bytes.byteLength,
+			selectedMaximumLod: requiredNonNegativeHeader(
+				response.headers,
+				"x-holtburger-landblock-source-batch-lod",
+			),
+		});
 		return decodeLandblockSourceBatch(
-			await this.#postBinary("landblock-source-batch", {
-				landblockId,
-				layers: [...layers],
-			}),
+			response.bytes,
 			landblockId,
 			layers,
 			this.#activeRegion,
@@ -74,6 +109,13 @@ export class HttpLandblockContentSource
 	async #postBinary(path: string, body: unknown): Promise<Uint8Array> {
 		return postBinary(this.#baseUrl, path, body);
 	}
+
+	async #postBinaryResponse(
+		path: string,
+		body: unknown,
+	): Promise<{ readonly bytes: Uint8Array; readonly headers: Headers }> {
+		return postBinaryResponse(this.#baseUrl, path, body);
+	}
 }
 
 async function postBinary(
@@ -81,6 +123,14 @@ async function postBinary(
 	path: string,
 	body: unknown,
 ): Promise<Uint8Array> {
+	return (await postBinaryResponse(baseUrl, path, body)).bytes;
+}
+
+async function postBinaryResponse(
+	baseUrl: URL,
+	path: string,
+	body: unknown,
+): Promise<{ readonly bytes: Uint8Array; readonly headers: Headers }> {
 	const response = await fetch(new URL(path, baseUrl), {
 		body: JSON.stringify(body),
 		headers: { "content-type": "application/json" },
@@ -91,5 +141,20 @@ async function postBinary(
 			`Landblock content host ${path} failed (${response.status}): ${await response.text()}`,
 		);
 	}
-	return new Uint8Array(await response.arrayBuffer());
+	return {
+		bytes: new Uint8Array(await response.arrayBuffer()),
+		headers: response.headers,
+	};
+}
+
+function requiredNonNegativeHeader(headers: Headers, name: string): number {
+	const value = headers.get(name);
+	if (value === null) {
+		throw new Error(`Landblock content host omitted required ${name} header.`);
+	}
+	const number = Number(value);
+	if (!Number.isFinite(number) || number < 0) {
+		throw new Error(`Landblock content host returned invalid ${name} header.`);
+	}
+	return number;
 }

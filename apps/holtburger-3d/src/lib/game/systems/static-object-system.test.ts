@@ -103,6 +103,15 @@ describe("StaticObjectSystem", () => {
 
 function artifact(id: string): StaticObjectLayerArtifact {
 	return {
+		bakeDiagnostics: {
+			additiveRangeCount: 0,
+			bakedRangeCount: 0,
+			geometryBytes: 0,
+			geometryWorkerDurationMs: 0,
+			sourceMaterialSlotCount: 0,
+			sourceRangeCount: 0,
+			transparentRangeCount: 0,
+		},
 		geometry: [],
 		instanceStreams: [],
 		objects: [

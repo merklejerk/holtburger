@@ -125,7 +125,7 @@ describe("StaticLayerRealizer", () => {
 		atlas.resolve();
 		geometry.resolve("geometry");
 
-		await expect(pending).rejects.toThrow("failed to realize");
+		await expect(pending).rejects.toThrow("failed to realize: replace failed");
 		expect(atlas.events).toEqual(["prepare:1", "withdraw:1"]);
 	});
 

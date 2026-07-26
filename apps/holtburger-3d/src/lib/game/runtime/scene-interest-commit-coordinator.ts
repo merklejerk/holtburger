@@ -1,5 +1,9 @@
 import { log, LogLevel } from "../../logs";
-import { type CommitBundle, type CommitPipeline } from "../commit/types";
+import {
+	CommitBundleSourceKind,
+	type CommitBundle,
+	type CommitPipeline,
+} from "../commit/types";
 import {
 	diffSceneInterest,
 	type LandblockIdLayer,
@@ -72,7 +76,9 @@ export class SceneInterestCommitCoordinator {
 		}
 		for (const layer of newLayers) {
 			this.#layerRevisions.set(layerKey(layer), revision);
-			void this.#prepare(layer, revision);
+		}
+		for (const layers of groupByLandblock(newLayers).values()) {
+			void this.#prepareLandblock(layers, revision);
 		}
 		return { revision };
 	}
@@ -92,26 +98,39 @@ export class SceneInterestCommitCoordinator {
 		this.#interest = new Map();
 	}
 
-	async #prepare(
-		layer: LandblockIdLayer,
+	async #prepareLandblock(
+		layers: readonly LandblockIdLayer[],
 		dispatchRevision: SceneInterestRevision,
 	): Promise<void> {
 		try {
+			const requestedLayers = new Set(layers.map(layerKey));
 			const artifacts = await this.#pipeline.prepareLandblockLayers(
-				new Set([layer]),
+				new Set(layers),
 			);
-			if (!this.#isCurrent(layer, dispatchRevision)) return;
-			if (artifacts.length === 0) {
-				this.#callbacks.unavailable({ layer, revision: dispatchRevision });
-				return;
-			}
+			const preparedLayers = new Set<string>();
 			for (const artifact of artifacts) {
+				if (artifact.kind !== CommitBundleSourceKind.LandblockLayer) continue;
+				const layer = { id: artifact.landblockId, layer: artifact.layer };
+				if (!requestedLayers.has(layerKey(layer))) continue;
+				if (!this.#isCurrent(layer, dispatchRevision)) continue;
+				preparedLayers.add(layerKey(layer));
 				this.#callbacks.prepared({ artifact, revision: dispatchRevision });
 			}
+			for (const layer of layers) {
+				if (
+					this.#isCurrent(layer, dispatchRevision) &&
+					!preparedLayers.has(layerKey(layer))
+				) {
+					this.#callbacks.unavailable({ layer, revision: dispatchRevision });
+				}
+			}
 		} catch (error) {
-			if (!this.#isCurrent(layer, dispatchRevision)) return;
 			log(error, LogLevel.Error);
-			this.#callbacks.failed({ error, layer, revision: dispatchRevision });
+			for (const layer of layers) {
+				if (this.#isCurrent(layer, dispatchRevision)) {
+					this.#callbacks.failed({ error, layer, revision: dispatchRevision });
+				}
+			}
 		}
 	}
 
@@ -133,4 +152,16 @@ export class SceneInterestCommitCoordinator {
 
 function layerKey(layer: LandblockIdLayer): string {
 	return `${layer.id}/${layer.layer}`;
+}
+
+function groupByLandblock(
+	layers: ReadonlySet<LandblockIdLayer>,
+): ReadonlyMap<string, LandblockIdLayer[]> {
+	const grouped = new Map<string, LandblockIdLayer[]>();
+	for (const layer of layers) {
+		const group = grouped.get(layer.id);
+		if (group) group.push(layer);
+		else grouped.set(layer.id, [layer]);
+	}
+	return grouped;
 }

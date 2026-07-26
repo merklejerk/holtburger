@@ -27,6 +27,11 @@ pub enum LandblockSourceLayer {
 }
 
 impl LandblockSourceLayer {
+    /// Highest cumulative scene LoD required to project this layer from content.
+    pub fn required_lod_level(self) -> u8 {
+        self.required_lod().as_u8()
+    }
+
     fn required_lod(self) -> LandblockSceneLodLevel {
         match self {
             Self::Terrain => LandblockSceneLodLevel::Level0,

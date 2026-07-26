@@ -61,6 +61,19 @@ function buildingBundle(landblockId: LandblockId): CommitBundle {
 		};
 	});
 	const artifact: StaticObjectLayerArtifact = {
+		bakeDiagnostics: {
+			additiveRangeCount: 3,
+			bakedRangeCount: 6,
+			geometryBytes:
+				indices.length * Uint32Array.BYTES_PER_ELEMENT +
+				normals.length * Float32Array.BYTES_PER_ELEMENT +
+				positions.length * Float32Array.BYTES_PER_ELEMENT +
+				textureCoordinates.length * Float32Array.BYTES_PER_ELEMENT,
+			geometryWorkerDurationMs: 0,
+			sourceMaterialSlotCount: 6,
+			sourceRangeCount: 6,
+			transparentRangeCount: 3,
+		},
 		geometry: [
 			{
 				geometry: {

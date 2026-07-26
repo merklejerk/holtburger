@@ -53,7 +53,7 @@ describe("StaticLayerRealizer", () => {
 			new FakePublisher(),
 			current,
 		);
-		const pending = realizer.realize(input());
+		const pending = realizer.realize(input(LandblockLayerKind.Objects));
 		current.current = false;
 		atlas.resolve("ready");
 		geometry.resolve("geometry");

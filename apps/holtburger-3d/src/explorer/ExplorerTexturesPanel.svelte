@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { BuildingRuntimeDiagnostics } from "../lib/game/runtime/game-runtime";
+	import type { StaticObjectRuntimeDiagnostics } from "../lib/game/runtime/game-runtime";
 	import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
 	import type { TextureAtlasPageDiagnostics } from "../lib/game/textures/texture-manager";
 	import type { TexturePageId } from "../lib/game/textures/texture-manager";
@@ -10,7 +10,7 @@
 
 	interface Props {
 		/** Latest resource-free texture atlas facts sampled by the active runtime. */
-		readonly diagnostics: BuildingRuntimeDiagnostics | null;
+		readonly diagnostics: StaticObjectRuntimeDiagnostics | null;
 		/** Explicit one-off GPU page readback requested only when opening an inspector. */
 		readonly readTextureAtlasPage: (pageId: TexturePageId) => Texture2DReadback;
 	}

@@ -6,7 +6,7 @@
 	import ExplorerTools from "./ExplorerTools.svelte";
 	import {
 		GameRuntime,
-		type BuildingRuntimeDiagnostics,
+		type StaticObjectRuntimeDiagnostics,
 	} from "../lib/game/runtime/game-runtime";
 	import { StandardCommitPipeline } from "../lib/game/commit/pipeline";
 	import { WebGL2Device } from "../lib/game/renderer/webgl2-device";
@@ -45,7 +45,7 @@
 	let cameraCoordinator: ExplorerCameraCoordinator | undefined;
 	let frameMetrics: FrameMetrics | null = $state(null);
 	let frameSelectionMetrics: FrameSelectionMetrics | null = $state(null);
-	let buildingRuntimeDiagnostics: BuildingRuntimeDiagnostics | null =
+	let staticObjectRuntimeDiagnostics: StaticObjectRuntimeDiagnostics | null =
 		$state(null);
 	let lastFrameSelectionSampleAt = 0;
 	let startupError: string | null = $state(null);
@@ -131,7 +131,7 @@
 			gameRuntime = undefined;
 			runtimeReady = false;
 			frameSelectionMetrics = null;
-			buildingRuntimeDiagnostics = null;
+			staticObjectRuntimeDiagnostics = null;
 			commitPipeline = undefined;
 			webglDevice = undefined;
 			activeRegionSource = undefined;
@@ -207,7 +207,7 @@
 					if (gameRuntime === undefined) {
 						frameMetrics = null;
 						frameSelectionMetrics = null;
-						buildingRuntimeDiagnostics = null;
+						staticObjectRuntimeDiagnostics = null;
 						frameHandle = window.requestAnimationFrame(step);
 						return;
 					}
@@ -225,8 +225,8 @@
 					};
 					if (frameFinishedAt - lastFrameSelectionSampleAt >= 250) {
 						frameSelectionMetrics = gameRuntime.getFrameSelectionMetrics();
-						buildingRuntimeDiagnostics =
-							gameRuntime.getBuildingRuntimeDiagnostics();
+						staticObjectRuntimeDiagnostics =
+							gameRuntime.getStaticObjectRuntimeDiagnostics();
 						lastFrameSelectionSampleAt = frameFinishedAt;
 					}
 					frameHandle = window.requestAnimationFrame(step);
@@ -283,7 +283,7 @@
 			distanceFogEnabled={frameSettings.distanceFogEnabled}
 			{updateDistanceFog}
 			{frameSelectionMetrics}
-			{buildingRuntimeDiagnostics}
+			{staticObjectRuntimeDiagnostics}
 			{readTextureAtlasPage}
 		/>
 	</div>

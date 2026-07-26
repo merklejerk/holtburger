@@ -4,6 +4,7 @@ use holtburger_3d::{
     load_landblock_source_batch_bytes, load_texture_pixels_bytes,
 };
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -78,11 +79,35 @@ async fn handle_connection(
         },
         ("POST", "/landblock-source-batch") => {
             let request = serde_json::from_slice::<LandblockSourceBatchRequest>(&request.body)?;
+            let selected_maximum_lod = request
+                .layers
+                .iter()
+                .copied()
+                .map(LandblockSourceLayer::required_lod_level)
+                .max()
+                .unwrap_or_default();
+            let started_at = Instant::now();
             match load_landblock_source_batch_bytes(runtime, &request.landblock_id, request.layers)
                 .await
             {
                 Ok(bytes) => {
-                    write_response(&mut stream, 200, "application/octet-stream", &bytes).await
+                    write_response_with_headers(
+                        &mut stream,
+                        200,
+                        "application/octet-stream",
+                        &bytes,
+                        &[
+                            (
+                                "x-holtburger-landblock-source-batch-lod",
+                                selected_maximum_lod.to_string(),
+                            ),
+                            (
+                                "x-holtburger-landblock-source-batch-duration-ms",
+                                (started_at.elapsed().as_secs_f64() * 1_000.0).to_string(),
+                            ),
+                        ],
+                    )
+                    .await
                 }
                 Err(error) => write_error(&mut stream, error).await,
             }
@@ -192,6 +217,16 @@ async fn write_response(
     content_type: &str,
     body: &[u8],
 ) -> anyhow::Result<()> {
+    write_response_with_headers(stream, status, content_type, body, &[]).await
+}
+
+async fn write_response_with_headers(
+    stream: &mut TcpStream,
+    status: u16,
+    content_type: &str,
+    body: &[u8],
+    extra_headers: &[(&str, String)],
+) -> anyhow::Result<()> {
     let reason = match status {
         200 => "OK",
         204 => "No Content",
@@ -199,17 +234,21 @@ async fn write_response(
         500 => "Internal Server Error",
         _ => "OK",
     };
-    let headers = format!(
+    let mut headers = format!(
         "HTTP/1.1 {status} {reason}\r\n\
          access-control-allow-origin: *\r\n\
          access-control-allow-methods: GET, POST, OPTIONS\r\n\
          access-control-allow-headers: content-type\r\n\
+         access-control-expose-headers: x-holtburger-landblock-source-batch-lod, x-holtburger-landblock-source-batch-duration-ms\r\n\
          content-type: {content_type}\r\n\
          content-length: {}\r\n\
-         connection: close\r\n\
-         \r\n",
+         connection: close\r\n",
         body.len(),
     );
+    for (name, value) in extra_headers {
+        headers.push_str(&format!("{name}: {value}\r\n"));
+    }
+    headers.push_str("\r\n");
     stream.write_all(headers.as_bytes()).await?;
     stream.write_all(body).await?;
     stream.shutdown().await?;

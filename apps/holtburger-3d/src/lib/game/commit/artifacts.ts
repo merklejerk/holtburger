@@ -24,16 +24,8 @@ import type {
 	TextureSamplerPolicy,
 } from "../textures/types";
 
-/** Source-to-bake diagnostics retained with one static building-layer commit. */
-export interface StaticObjectLayerDiagnostics {
-	/** Every source resident, including those promoted out of static materialization. */
-	readonly expectedResidentCount: number;
-	/** Source residents classified as eligible for static materialization. */
-	readonly resolvedStaticResidentCount: number;
-	/** Static residents represented by the published geometry, or zero for an empty artifact. */
-	readonly materializedStaticResidentCount: number;
-	/** Source residents promoted to the existing runtime-deferred dynamic seam. */
-	readonly promotedDynamicResidentCount: number;
+/** Geometry-worker facts retained beside a materialized static layer artifact. */
+export interface StaticObjectBakeDiagnostics {
 	/** Naive resident/part/material-slot submissions before polygon facts are distinguished. */
 	readonly sourceMaterialSlotCount: number;
 	/** Source resident/part/complete-binding submissions after polygon facts are distinguished. */
@@ -48,6 +40,18 @@ export interface StaticObjectLayerDiagnostics {
 	readonly geometryBytes: number;
 	/** Wall-clock duration inside the closed geometry worker. */
 	readonly geometryWorkerDurationMs: number;
+}
+
+/** Source-to-bake diagnostics retained with one static building-layer commit. */
+export interface StaticObjectLayerDiagnostics extends StaticObjectBakeDiagnostics {
+	/** Every source resident, including those promoted out of static materialization. */
+	readonly expectedResidentCount: number;
+	/** Source residents classified as eligible for static materialization. */
+	readonly resolvedStaticResidentCount: number;
+	/** Static residents represented by the published geometry, or zero for an empty artifact. */
+	readonly materializedStaticResidentCount: number;
+	/** Source residents promoted to the existing runtime-deferred dynamic seam. */
+	readonly promotedDynamicResidentCount: number;
 }
 
 /** Source material plus polygon-owned facts; render pass policy remains renderer-private. */
@@ -127,6 +131,8 @@ export interface StaticObjectLayerArtifact {
 	readonly instanceStreams: readonly StaticInstanceStreamSource[];
 	/** Complete logical requirements whose bindings must be ready before publication. */
 	readonly textureRequirements: readonly AssetTextureFact[];
+	/** Exact closed-worker facts for this materialized geometry. */
+	readonly bakeDiagnostics: StaticObjectBakeDiagnostics;
 }
 
 /** Persistent shell render contribution attached to one env-cell root node. */

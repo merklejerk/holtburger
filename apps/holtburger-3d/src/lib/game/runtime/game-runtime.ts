@@ -6,7 +6,10 @@ import {
 	type CommitPipeline,
 	type DynamicEntityCommit,
 } from "../commit/types";
-import type { StaticObjectLayerDiagnostics } from "../commit/artifacts";
+import type {
+	StaticObjectBakeDiagnostics,
+	StaticObjectLayerDiagnostics,
+} from "../commit/artifacts";
 import { INVALID_ID, type LandblockId } from "../game-types";
 import { GeometryManager } from "../geometry/geometry-manager";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
@@ -117,6 +120,16 @@ const TERRAIN_ROOT_BOUNDS: AABB3 = new AABB3(
 	new Vec3(OUTDOOR_LANDBLOCK_WORLD_SIZE, 510, 0),
 );
 
+const EMPTY_STATIC_OBJECT_BAKE_DIAGNOSTICS: StaticObjectBakeDiagnostics = {
+	additiveRangeCount: 0,
+	bakedRangeCount: 0,
+	geometryBytes: 0,
+	geometryWorkerDurationMs: 0,
+	sourceMaterialSlotCount: 0,
+	sourceRangeCount: 0,
+	transparentRangeCount: 0,
+};
+
 /** Runtime-owned collaborators that tests may replace with focused fakes. */
 export interface GameRuntimeDependencies {
 	readonly terrainGenerator: TerrainGenerator;
@@ -152,8 +165,12 @@ export interface DeferredStaticDynamicDiagnostic {
 
 /** One installed outdoor-static layer's source-to-runtime diagnostic snapshot. */
 export interface StaticObjectLayerRuntimeDiagnostics extends StaticObjectLayerDiagnostics {
+	/** Concrete SceneGraph culling group selected for this independently installed layer. */
+	readonly cullingGroup: OutdoorStaticLayerKind;
 	readonly layer: OutdoorStaticLayerKind;
 	readonly landblockId: LandblockId;
+	/** Scene nodes published by this exact layer revision. */
+	readonly sceneNodeCount: number;
 	/** Promoted residents held at the explicit runtime deferral seam. */
 	readonly runtimeDeferredResidentCount: number;
 	/** Whether this source emitted a static artifact rather than only promoted residents. */
@@ -714,9 +731,11 @@ export class GameRuntime {
 		) {
 			this.#staticObjectLayerDiagnostics.set(ownerId, {
 				...staticCommit.diagnostics,
+				cullingGroup: LandblockLayerKind.Buildings,
 				layer: artifact.layer,
 				landblockId: artifact.landblockId,
 				runtimeDeferredResidentCount: artifact.dynamicEntities.length,
+				sceneNodeCount: staticCommit.staticObjects?.objects.length ?? 0,
 				staticArtifactInstalled: staticCommit.staticObjects !== null,
 			});
 		}
@@ -784,13 +803,12 @@ export class GameRuntime {
 					);
 				}
 				this.#staticObjectLayerDiagnostics.set(ownerId, {
-					additiveRangeCount: 0,
-					bakedRangeCount: 0,
+					...(result.geometry?.bakeDiagnostics ??
+						EMPTY_STATIC_OBJECT_BAKE_DIAGNOSTICS),
+					cullingGroup: artifact.layer,
 					expectedResidentCount:
 						artifact.commit.source.staticResidents.length +
 						artifact.dynamicEntities.length,
-					geometryBytes: 0,
-					geometryWorkerDurationMs: 0,
 					layer: artifact.layer,
 					landblockId: artifact.landblockId,
 					materializedStaticResidentCount:
@@ -799,10 +817,8 @@ export class GameRuntime {
 					resolvedStaticResidentCount:
 						artifact.commit.source.staticResidents.length,
 					runtimeDeferredResidentCount: artifact.dynamicEntities.length,
-					sourceMaterialSlotCount: 0,
-					sourceRangeCount: 0,
+					sceneNodeCount: result.geometry?.objects.length ?? 0,
 					staticArtifactInstalled: result.geometry !== null,
-					transparentRangeCount: 0,
 				});
 			})
 			.catch((error) => {
@@ -813,6 +829,7 @@ export class GameRuntime {
 					)
 				)
 					return;
+				log(error, LogLevel.Error);
 				this.#publishSceneAvailability({
 					kind: "scene-content-failed",
 					message: error instanceof Error ? error.message : String(error),

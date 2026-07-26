@@ -235,7 +235,6 @@ describe("GameRuntime view and interest control", () => {
 		);
 
 		runtime.updateSceneInterest(buildingSceneInterest("0xda55ffff"));
-		pipeline.resolveNext([]);
 		pipeline.resolveNext([promotedBuildingArtifact("0xda55ffff")]);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		runtime.tick();
@@ -253,6 +252,7 @@ describe("GameRuntime view and interest control", () => {
 		]);
 		expect(runtime.getStaticObjectRuntimeDiagnostics().layers).toEqual([
 			expect.objectContaining({
+				cullingGroup: LandblockLayerKind.Buildings,
 				expectedResidentCount: 1,
 				landblockId: "0xda55ffff",
 				promotedDynamicResidentCount: 1,
@@ -277,7 +277,6 @@ describe("GameRuntime view and interest control", () => {
 		);
 
 		runtime.updateSceneInterest(objectSceneInterest("0xda55ffff"));
-		pipeline.resolveNext([]);
 		pipeline.resolveNext([promotedObjectArtifact("0xda55ffff")]);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		runtime.tick();
@@ -288,6 +287,12 @@ describe("GameRuntime view and interest control", () => {
 				landblockId: "0xda55ffff",
 				layer: LandblockLayerKind.Objects,
 				residentId: "resident:promoted",
+			}),
+		]);
+		expect(runtime.getStaticObjectRuntimeDiagnostics().layers).toEqual([
+			expect.objectContaining({
+				cullingGroup: LandblockLayerKind.Objects,
+				sceneNodeCount: 0,
 			}),
 		]);
 

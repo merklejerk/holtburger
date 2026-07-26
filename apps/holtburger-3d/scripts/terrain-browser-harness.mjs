@@ -44,13 +44,18 @@ try {
 		`${JSON.stringify(
 			{
 				buildingRadius: options.buildingRadius,
+				cameraPitchDegrees: options.cameraPitchDegrees,
+				cameraYawDegrees: options.cameraYawDegrees,
+				explicitObjectRadius: options.explicitObjectRadius,
 				cameraLandblockId: options.cameraLandblockId,
+				relocateLandblockId: options.relocateLandblockId,
 				consoleMessages: result.consoleMessages,
 				fixture: options.fixture,
 				frames: result.state.frames,
 				initialState: result.initialState,
 				landblockId: options.landblockId,
 				lifecycleState: result.lifecycleState,
+				relocationState: result.relocationState,
 				metrics: result.state.metrics,
 				ready: result.state.ready,
 				screenshotPath: options.screenshotPath,
@@ -84,7 +89,11 @@ function parseArgs(args) {
 		chromePath: process.env.CHROME_PATH ?? DEFAULT_CHROME_PATH,
 		landblockId: DEFAULT_LANDBLOCK_ID,
 		buildingRadius: 0,
+		cameraPitchDegrees: -45,
+		cameraYawDegrees: 0,
+		explicitObjectRadius: null,
 		cameraLandblockId: null,
+		relocateLandblockId: null,
 		lifecycle: false,
 		fixture: null,
 		screenshotPath: null,
@@ -108,8 +117,34 @@ function parseArgs(args) {
 					throw new Error("--building-radius must be a non-negative integer.");
 				}
 				break;
+			case "--explicit-object-radius":
+				parsed.explicitObjectRadius = Number(requireValue(args, ++index, arg));
+				if (
+					!Number.isInteger(parsed.explicitObjectRadius) ||
+					parsed.explicitObjectRadius < 0
+				) {
+					throw new Error(
+						"--explicit-object-radius must be a non-negative integer.",
+					);
+				}
+				break;
 			case "--camera-landblock":
 				parsed.cameraLandblockId = requireValue(args, ++index, arg);
+				break;
+			case "--relocate-landblock":
+				parsed.relocateLandblockId = requireValue(args, ++index, arg);
+				break;
+			case "--camera-yaw":
+				parsed.cameraYawDegrees = Number(requireValue(args, ++index, arg));
+				if (!Number.isFinite(parsed.cameraYawDegrees)) {
+					throw new Error("--camera-yaw must be finite.");
+				}
+				break;
+			case "--camera-pitch":
+				parsed.cameraPitchDegrees = Number(requireValue(args, ++index, arg));
+				if (!Number.isFinite(parsed.cameraPitchDegrees)) {
+					throw new Error("--camera-pitch must be finite.");
+				}
 				break;
 			case "--lifecycle":
 				parsed.lifecycle = true;
@@ -138,6 +173,19 @@ function parseArgs(args) {
 				throw new Error(`Unsupported argument ${arg}.`);
 		}
 	}
+	if (
+		parsed.explicitObjectRadius !== null &&
+		parsed.explicitObjectRadius > parsed.buildingRadius
+	) {
+		throw new Error(
+			"--explicit-object-radius must be no greater than --building-radius.",
+		);
+	}
+	if (parsed.cameraLandblockId && parsed.relocateLandblockId) {
+		throw new Error(
+			"--camera-landblock and --relocate-landblock cannot be combined.",
+		);
+	}
 	return parsed;
 }
 
@@ -154,7 +202,11 @@ Options:
   --landblock <hex>     Outdoor landblock to render. Default: ${DEFAULT_LANDBLOCK_ID}
 
   --building-radius <n> Request a square terrain/building neighborhood. Default: 0
-  --camera-landblock <hex> Move the camera anchor after the initial request.
+  --explicit-object-radius <n> Request explicit objects within the building neighborhood.
+  --camera-yaw <degrees>    Initial and relocation camera yaw. Default: 0
+  --camera-pitch <degrees>  Initial and relocation camera pitch. Default: -45
+  --camera-landblock <hex>  Move only the camera after the initial request.
+  --relocate-landblock <hex> Replace scene interest and camera at a new landblock.
   --lifecycle           Clear and reload the requested neighborhood before capture.
   --fixture blended     Use six app-local transparent/additive material ranges.
   --settle-ms <ms>      Wait after requesting terrain. Default: ${DEFAULT_SETTLE_MS}
@@ -242,7 +294,13 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		await evaluate(
 			client,
 			"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.requestOutdoorTerrain",
-			[options.landblockId, options.buildingRadius],
+			[
+				options.landblockId,
+				options.buildingRadius,
+				options.explicitObjectRadius,
+				options.cameraYawDegrees,
+				options.cameraPitchDegrees,
+			],
 		);
 		await delay(options.settleMs);
 		const initialState = await evaluate(
@@ -266,7 +324,13 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			await evaluate(
 				client,
 				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.requestOutdoorTerrain",
-				[options.landblockId, options.buildingRadius],
+				[
+					options.landblockId,
+					options.buildingRadius,
+					options.explicitObjectRadius,
+					options.cameraYawDegrees,
+					options.cameraPitchDegrees,
+				],
 			);
 			await delay(options.settleMs);
 			const reloaded = await evaluate(
@@ -276,11 +340,35 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			);
 			lifecycleState = { cleared, reloaded };
 		}
+		let relocationState = null;
+		if (options.relocateLandblockId) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.requestOutdoorTerrain",
+				[
+					options.relocateLandblockId,
+					options.buildingRadius,
+					options.explicitObjectRadius,
+					options.cameraYawDegrees,
+					options.cameraPitchDegrees,
+				],
+			);
+			await delay(options.settleMs);
+			relocationState = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.state",
+				[],
+			);
+		}
 		if (options.cameraLandblockId) {
 			await evaluate(
 				client,
 				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.setCameraLandblock",
-				[options.cameraLandblockId],
+				[
+					options.cameraLandblockId,
+					options.cameraYawDegrees,
+					options.cameraPitchDegrees,
+				],
 			);
 			await delay(50);
 		}
@@ -297,6 +385,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			consoleMessages,
 			initialState,
 			lifecycleState,
+			relocationState,
 			screenshot: screenshot.data,
 			state,
 		};

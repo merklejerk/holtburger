@@ -118,7 +118,7 @@ impl OutdoorStaticSourceClosure {
             let material_ids = self.add_materials(runtime, &surface_ids).await?;
             parts.push(json!({
                 "partIndex": part.part_index,
-                "parentPartIndex": setup_model.parent_index.get(part.part_index).copied(),
+                "parentPartIndex": parent_part_index(&setup_model.parent_index, part.part_index),
                 "geometryId": geometry_id,
                 "defaultScale": setup_model.default_scale.get(part.part_index).map(ac_vec3_json).unwrap_or_else(unit_vec3_json),
                 "defaultPlacement": default_frames.and_then(|frames| frames.get(part.part_index)).map(frame_json),
@@ -494,6 +494,14 @@ fn select_setup_default_frames(
         .map(|placement| placement.anim_frame.frames.as_slice())
 }
 
+/// Project the DAT root sentinel out of the typed object hierarchy before serializing it to JSON.
+fn parent_part_index(parent_indices: &[u32], part_index: usize) -> Option<u32> {
+    parent_indices
+        .get(part_index)
+        .copied()
+        .filter(|parent_index| *parent_index != u32::MAX)
+}
+
 pub(crate) fn frame_json(frame: &holtburger_dat::graphics::Frame) -> Value {
     json!({
         "origin": ac_vec3_json(&frame.origin),
@@ -575,4 +583,15 @@ fn dat_id(id: u32) -> String {
 
 fn align_binary_section_offset(offset: usize, alignment: usize) -> usize {
     offset.next_multiple_of(alignment)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parent_part_index;
+
+    #[test]
+    fn root_parent_sentinel_is_not_serialized_as_a_part_reference() {
+        assert_eq!(parent_part_index(&[u32::MAX], 0), None);
+        assert_eq!(parent_part_index(&[u32::MAX, 0], 1), Some(0));
+    }
 }

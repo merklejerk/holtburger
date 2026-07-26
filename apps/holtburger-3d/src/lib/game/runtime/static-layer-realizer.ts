@@ -212,10 +212,12 @@ export class StaticLayerRealizer<TSource, TGeometry, TOwner extends string> {
 			}
 			await this.#atlas.activateOwnerRevision(atlasHandle);
 			return { geometry: preparedGeometry, kind: "published" };
-		} catch {
+		} catch (cause) {
 			await this.#atlas.withdrawOwnerRevision(atlasHandle);
+			const message = cause instanceof Error ? cause.message : String(cause);
 			throw new Error(
-				`Static layer ${input.owner} revision ${input.revision} failed to realize.`,
+				`Static layer ${input.owner} revision ${input.revision} failed to realize: ${message}`,
+				{ cause },
 			);
 		}
 	}

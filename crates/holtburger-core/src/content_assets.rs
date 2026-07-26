@@ -383,10 +383,18 @@ type SharedAssetFuture =
     Shared<BoxFuture<'static, std::result::Result<ContentAsset, Arc<anyhow::Error>>>>;
 
 #[derive(Debug, Clone)]
+struct InFlightLandblockSceneLod {
+    level: LandblockSceneLodLevel,
+    future: SharedAssetFuture,
+}
+
+#[derive(Debug, Clone)]
 pub struct ContentAssetRuntime {
     service: Arc<ContentAssetService>,
     worker_slots: Arc<Semaphore>,
     in_flight: Arc<TokioMutex<HashMap<ContentAssetRequest, SharedAssetFuture>>>,
+    landblock_scene_lod_in_flight:
+        Arc<TokioMutex<HashMap<LandblockSceneLodCacheKey, InFlightLandblockSceneLod>>>,
 }
 
 impl ContentAssetRuntime {
@@ -403,10 +411,19 @@ impl ContentAssetRuntime {
             service: Arc::new(service),
             worker_slots: Arc::new(Semaphore::new(worker_limit)),
             in_flight: Arc::new(TokioMutex::new(HashMap::new())),
+            landblock_scene_lod_in_flight: Arc::new(TokioMutex::new(HashMap::new())),
         }
     }
 
     pub async fn load(&self, request: ContentAssetRequest) -> Result<ContentAsset> {
+        if let ContentAssetRequest::LandblockSceneLod(request) = request {
+            return self.load_landblock_scene_lod(request).await;
+        }
+
+        self.load_exact(request).await
+    }
+
+    async fn load_exact(&self, request: ContentAssetRequest) -> Result<ContentAsset> {
         let shared = {
             let mut in_flight = self.in_flight.lock().await;
             if let Some(existing) = in_flight.get(&request) {
@@ -425,6 +442,58 @@ impl ContentAssetRuntime {
         drop(in_flight);
 
         result.map_err(|error| anyhow!("{error:#}"))
+    }
+
+    /// Coordinates cumulative scene-LoD assembly by normalized landblock identity.
+    ///
+    /// A lower request waits for an already running higher request and projects its result. A
+    /// higher request waits for a lower request to populate the prepared cache, then extends that
+    /// asset rather than racing a second cumulative assembly.
+    async fn load_landblock_scene_lod(
+        &self,
+        request: LandblockSceneLodRequest,
+    ) -> Result<ContentAsset> {
+        let request = LandblockSceneLodRequest {
+            landblock_id: normalize_landblock_id(request.landblock_id),
+            ..request
+        };
+        let key = LandblockSceneLodCacheKey::from_request(request);
+
+        loop {
+            let (in_flight_level, shared) = {
+                let mut in_flight = self.landblock_scene_lod_in_flight.lock().await;
+                if let Some(existing) = in_flight.get(&key) {
+                    (existing.level, existing.future.clone())
+                } else {
+                    let shared =
+                        self.spawn_shared_load(ContentAssetRequest::LandblockSceneLod(request));
+                    in_flight.insert(
+                        key,
+                        InFlightLandblockSceneLod {
+                            level: request.level,
+                            future: shared.clone(),
+                        },
+                    );
+                    (request.level, shared)
+                }
+            };
+
+            let result = shared.await;
+
+            let mut in_flight = self.landblock_scene_lod_in_flight.lock().await;
+            if in_flight
+                .get(&key)
+                .is_some_and(|existing| existing.level == in_flight_level)
+            {
+                in_flight.remove(&key);
+            }
+            drop(in_flight);
+
+            let asset = result.map_err(|error| anyhow!("{error:#}"))?;
+            if in_flight_level.as_u8() >= request.level.as_u8() {
+                return project_loaded_landblock_scene_lod(asset, request.level);
+            }
+        }
     }
 
     pub fn load_blocking(&self, request: ContentAssetRequest) -> Result<ContentAsset> {
@@ -462,6 +531,25 @@ impl ContentAssetRuntime {
         .boxed()
         .shared()
     }
+}
+
+fn project_loaded_landblock_scene_lod(
+    asset: ContentAsset,
+    level: LandblockSceneLodLevel,
+) -> Result<ContentAsset> {
+    let ContentAsset::LandblockSceneLod {
+        scene_lod,
+        region_id,
+        region_number,
+    } = asset
+    else {
+        anyhow::bail!("scene LoD coordinator received a non-scene-LoD asset")
+    };
+    Ok(ContentAsset::LandblockSceneLod {
+        scene_lod: Box::new(project_landblock_scene_lod_asset(&scene_lod, level)),
+        region_id,
+        region_number,
+    })
 }
 
 #[cfg(test)]
@@ -789,6 +877,52 @@ mod tests {
         left.expect("first shared scene LoD request should load");
         right.expect("second shared scene LoD request should load");
         assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_id), 1);
+    }
+
+    #[tokio::test]
+    async fn content_asset_runtime_coordinates_cumulative_landblock_scene_lod_requests() {
+        let landblock_id = 0xda55ffff;
+        let source = Arc::new(scene_lod_test_source().with_file(
+            EOR_CELL_NAMESPACE,
+            landblock_id,
+            vec![0; 4],
+        ));
+        let repository = ContentRepository::from_mounts(vec![source.clone()]);
+        let service =
+            ContentAssetService::new(Arc::new(repository), Arc::new(ContentDecodeCache::new()));
+        let runtime = ContentAssetRuntime::with_worker_limit(service, 4);
+
+        let terrain = runtime.load(ContentAssetRequest::LandblockSceneLod(
+            LandblockSceneLodRequest::outdoor(landblock_id, LandblockSceneLodLevel::Level0),
+        ));
+        let buildings = runtime.load(ContentAssetRequest::LandblockSceneLod(
+            LandblockSceneLodRequest::outdoor(landblock_id, LandblockSceneLodLevel::Level1),
+        ));
+        let objects = runtime.load(ContentAssetRequest::LandblockSceneLod(
+            LandblockSceneLodRequest::outdoor(landblock_id, LandblockSceneLodLevel::Level2),
+        ));
+        let (terrain, buildings, objects) = tokio::join!(terrain, buildings, objects);
+
+        assert_eq!(
+            scene_lod_level(terrain.expect("terrain request should load")),
+            LandblockSceneLodLevel::Level0
+        );
+        assert_eq!(
+            scene_lod_level(buildings.expect("building request should load")),
+            LandblockSceneLodLevel::Level1
+        );
+        assert_eq!(
+            scene_lod_level(objects.expect("object request should load")),
+            LandblockSceneLodLevel::Level2
+        );
+        assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_id), 1);
+    }
+
+    fn scene_lod_level(asset: ContentAsset) -> LandblockSceneLodLevel {
+        let ContentAsset::LandblockSceneLod { scene_lod, .. } = asset else {
+            panic!("expected a landblock scene LoD asset");
+        };
+        scene_lod.level
     }
 
     fn animation_bytes(animation_id: u32) -> Vec<u8> {

@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use holtburger_content::{
-    ActiveRegionData, ContentDecodeCache, ContentRepository, LandblockSceneLodLayer,
-    LandblockSceneLodLevel, LandblockSceneLodRequest, SourceRecordStatus, TerrainGridSource,
+    ActiveRegionData, ContentDecodeCache, ContentRepository, SourceRecordStatus, TerrainGridSource,
     TexturePixelFormat,
 };
 use holtburger_core::{
@@ -15,11 +14,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 mod building_source;
+mod landblock_source_batch;
 mod object_texture;
 
 use building_source::{
     BUILDING_SOURCE_BINARY_VERSION, BuildingSourceClosure, BuildingSourceManifest, frame_json,
     prepared_aabb_json, prepared_vec3_json, serialize_building_source_binary,
+};
+use landblock_source_batch::{
+    LandblockSourceBatchRequest, LandblockSourceLayer, load_landblock_source_batch,
 };
 use object_texture::{
     ObjectTexturePurpose, PreparedObjectTexture, prepare_object_palette, prepare_object_surface,
@@ -202,27 +205,22 @@ async fn build_terrain_source_response(
     runtime: &ContentAssetRuntime,
     landblock_id: u32,
 ) -> Result<Vec<u8>> {
-    let scene_asset = runtime
-        .load(ContentAssetRequest::LandblockSceneLod(
-            LandblockSceneLodRequest::outdoor(landblock_id, LandblockSceneLodLevel::Level0),
-        ))
-        .await
-        .with_context(|| format!("Could not load terrain scene source for 0x{landblock_id:08X}"))?;
-    let ContentAsset::LandblockSceneLod { scene_lod, .. } = scene_asset else {
-        unreachable!("terrain source request must return a landblock scene asset")
-    };
-    if scene_lod.landblock_id != landblock_id {
+    let source_batch = load_landblock_source_batch(
+        runtime,
+        LandblockSourceBatchRequest::single(landblock_id, LandblockSourceLayer::Terrain),
+    )
+    .await
+    .with_context(|| format!("Could not load terrain scene source for 0x{landblock_id:08X}"))?;
+    if source_batch.landblock_id() != landblock_id {
         anyhow::bail!(
             "content runtime returned landblock 0x{:08X} for terrain request 0x{landblock_id:08X}",
-            scene_lod.landblock_id
+            source_batch.landblock_id()
         );
     }
 
-    let terrain = scene_lod.layers.iter().find_map(|layer| match layer {
-        LandblockSceneLodLayer::Terrain(layer) => layer.terrain.as_ref(),
-        _ => None,
-    });
-    let terrain_availability = terrain_availability(terrain, &scene_lod.diagnostics);
+    let terrain_layer = source_batch.terrain()?;
+    let terrain = terrain_layer.terrain.as_ref();
+    let terrain_availability = terrain_availability(terrain, source_batch.diagnostics());
     let manifest = TerrainSourceManifest {
         transport: "holtburger-terrain-source",
         version: TERRAIN_SOURCE_BINARY_VERSION,
@@ -239,30 +237,19 @@ async fn build_building_source_response(
     runtime: &ContentAssetRuntime,
     landblock_id: u32,
 ) -> Result<Vec<u8>> {
-    let scene_asset = runtime
-        .load(ContentAssetRequest::LandblockSceneLod(
-            LandblockSceneLodRequest::outdoor(landblock_id, LandblockSceneLodLevel::Level1),
-        ))
-        .await
-        .with_context(|| {
-            format!("Could not load building scene source for 0x{landblock_id:08X}")
-        })?;
-    let ContentAsset::LandblockSceneLod { scene_lod, .. } = scene_asset else {
-        unreachable!("building source request must return a landblock scene asset")
-    };
-    if scene_lod.landblock_id != landblock_id {
+    let source_batch = load_landblock_source_batch(
+        runtime,
+        LandblockSourceBatchRequest::single(landblock_id, LandblockSourceLayer::Buildings),
+    )
+    .await
+    .with_context(|| format!("Could not load building scene source for 0x{landblock_id:08X}"))?;
+    if source_batch.landblock_id() != landblock_id {
         anyhow::bail!(
             "content runtime returned landblock 0x{:08X} for building request 0x{landblock_id:08X}",
-            scene_lod.landblock_id
+            source_batch.landblock_id()
         );
     }
-    let buildings = scene_lod.layers.iter().find_map(|layer| match layer {
-        LandblockSceneLodLayer::OutdoorBuildings(layer) => Some(layer),
-        _ => None,
-    });
-    let Some(buildings) = buildings else {
-        anyhow::bail!("Level 1 response for 0x{landblock_id:08X} has no OutdoorBuildings layer");
-    };
+    let buildings = source_batch.buildings()?;
 
     let mut closure = BuildingSourceClosure::default();
     let mut residents = Vec::with_capacity(buildings.statics.len());

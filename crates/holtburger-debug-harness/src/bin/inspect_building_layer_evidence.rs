@@ -697,6 +697,7 @@ fn scan_setup_backed_buildings(path: &Path, sample_limit: usize) -> Result<()> {
     let mut setup_usage = BTreeMap::<u32, Vec<u32>>::new();
     let mut setup_object_usage = BTreeMap::<u32, Vec<u32>>::new();
     let mut outdoor_object_sources = BTreeSet::<u32>::new();
+    let mut outdoor_object_landblocks = BTreeMap::<u32, BTreeSet<u32>>::new();
     let mut buildings_by_landblock = BTreeMap::<u32, Vec<u32>>::new();
     let mut building_family_counts = BTreeMap::<SourceFamily, usize>::new();
     let mut landblock_info_count = 0usize;
@@ -714,6 +715,10 @@ fn scan_setup_backed_buildings(path: &Path, sample_limit: usize) -> Result<()> {
         let landblock_id = normalize_landblock_id(entry.file_id);
         for object in &info.objects {
             outdoor_object_sources.insert(object.id);
+            outdoor_object_landblocks
+                .entry(object.id)
+                .or_default()
+                .insert(landblock_id);
             if source_family(object.id) == SourceFamily::SetupModel {
                 setup_object_usage
                     .entry(object.id)
@@ -806,6 +811,7 @@ fn scan_setup_backed_buildings(path: &Path, sample_limit: usize) -> Result<()> {
         building_evidence.unavailable_source_levels.len(),
     );
     let mut static_object_evidence = Evidence::default();
+    let mut static_object_sources = BTreeSet::new();
     let mut deferred_dynamic_source_count = 0usize;
     for source_id in outdoor_object_sources {
         if source_family(source_id) == SourceFamily::SetupModel
@@ -816,6 +822,7 @@ fn scan_setup_backed_buildings(path: &Path, sample_limit: usize) -> Result<()> {
             deferred_dynamic_source_count += 1;
             continue;
         }
+        static_object_sources.insert(source_id);
         gather_source_evidence(&content, source_id, &mut static_object_evidence);
     }
     println!(
@@ -827,6 +834,12 @@ fn scan_setup_backed_buildings(path: &Path, sample_limit: usize) -> Result<()> {
         format_counts(&static_object_evidence),
         static_object_evidence.errors.len(),
     );
+    print_explicit_material_samples(
+        &content,
+        &static_object_sources,
+        &outdoor_object_landblocks,
+        &static_object_evidence,
+    )?;
     for (setup_id, landblocks) in setup_usage.into_iter().take(sample_limit) {
         let setup = read_setup_model(&content, setup_id)?;
         let unique_landblocks = landblocks.into_iter().collect::<BTreeSet<_>>();
@@ -925,6 +938,108 @@ fn source_uses_pass(source_id: u32, pass: MaterialPass, evidence: &Evidence) -> 
             .filter_map(|gfx_obj_id| evidence.gfx_objects.get(gfx_obj_id))
             .any(|gfx| gfx.used_material_passes.contains(&pass)),
         SourceFamily::Unsupported => false,
+    }
+}
+
+/// Print deterministic live witnesses for material paths that only explicit objects exercise.
+fn print_explicit_material_samples(
+    content: &ContentRepository,
+    static_sources: &BTreeSet<u32>,
+    source_landblocks: &BTreeMap<u32, BTreeSet<u32>>,
+    evidence: &Evidence,
+) -> Result<()> {
+    println!("  explicitObjectMaterialSamples");
+    for (kind, source_id) in [
+        (
+            "transparent",
+            static_sources.iter().copied().find(|source_id| {
+                source_uses_pass(*source_id, MaterialPass::Transparent, evidence)
+            }),
+        ),
+        (
+            "additive",
+            static_sources
+                .iter()
+                .copied()
+                .find(|source_id| source_uses_pass(*source_id, MaterialPass::Additive, evidence)),
+        ),
+        (
+            "dxt3",
+            find_source_using_format(content, static_sources, evidence, PixelFormatId::Dxt3)?,
+        ),
+    ] {
+        let Some(source_id) = source_id else {
+            println!("    kind={kind} sample=none");
+            continue;
+        };
+        let landblock_id = source_landblocks
+            .get(&source_id)
+            .and_then(|landblocks| landblocks.first())
+            .copied()
+            .context("static explicit source has no landblock witness")?;
+        println!(
+            "    kind={kind} landblock=0x{landblock_id:08x} source=0x{source_id:08x} family={:?}",
+            source_family(source_id),
+        );
+    }
+    Ok(())
+}
+
+fn find_source_using_format(
+    content: &ContentRepository,
+    sources: &BTreeSet<u32>,
+    evidence: &Evidence,
+    format: PixelFormatId,
+) -> Result<Option<u32>> {
+    for source_id in sources {
+        if source_uses_format(content, *source_id, evidence, format)? {
+            return Ok(Some(*source_id));
+        }
+    }
+    Ok(None)
+}
+
+fn source_uses_format(
+    content: &ContentRepository,
+    source_id: u32,
+    evidence: &Evidence,
+    format: PixelFormatId,
+) -> Result<bool> {
+    for gfx_obj_id in source_gfx_objects(source_id, evidence) {
+        let Some(gfx) = evidence.gfx_objects.get(&gfx_obj_id) else {
+            continue;
+        };
+        let slots = content.resolve_gfx_obj_material_slots(gfx_obj_id)?;
+        for slot_index in &gfx.used_material_slots {
+            let Some(slot) = slots.get(*slot_index) else {
+                continue;
+            };
+            let ResolvedMaterialSource::Texture(texture) = &slot.material.source else {
+                continue;
+            };
+            let selected = texture
+                .render_surface_ids
+                .iter()
+                .find_map(|render_surface_id| {
+                    read_render_surface(content, *render_surface_id).ok()
+                });
+            if selected.is_some_and(|surface| surface.format == format) {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn source_gfx_objects(source_id: u32, evidence: &Evidence) -> Vec<u32> {
+    match source_family(source_id) {
+        SourceFamily::GfxObj => vec![source_id],
+        SourceFamily::SetupModel => evidence
+            .setup_models
+            .get(&source_id)
+            .map(|setup| setup.parts.clone())
+            .unwrap_or_default(),
+        SourceFamily::Unsupported => Vec::new(),
     }
 }
 

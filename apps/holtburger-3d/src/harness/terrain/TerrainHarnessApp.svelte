@@ -39,7 +39,7 @@
 			cameraYawDegrees: number,
 			cameraPitchDegrees: number,
 		) => void;
-		/** Withdraw every terrain and building layer while retaining the harness runtime. */
+		/** Withdraw every terrain and outdoor-static layer while retaining the harness runtime. */
 		readonly clearSceneInterest: () => void;
 		/** Snapshot lifecycle evidence without exposing runtime ownership. */
 		readonly state: () => TerrainHarnessState;

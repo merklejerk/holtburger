@@ -42,7 +42,7 @@ export interface StaticObjectBakeDiagnostics {
 	readonly geometryWorkerDurationMs: number;
 }
 
-/** Source-to-bake diagnostics retained with one static building-layer commit. */
+/** Source-to-bake diagnostics retained with one outdoor-static layer commit. */
 export interface StaticObjectLayerDiagnostics extends StaticObjectBakeDiagnostics {
 	/** Every source resident, including those promoted out of static materialization. */
 	readonly expectedResidentCount: number;

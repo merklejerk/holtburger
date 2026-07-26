@@ -1,10 +1,10 @@
 use anyhow::Result;
 use clap::Parser;
 use holtburger_content::{
-    ContentDecodeCache, ContentRepository, EnvCellSystemAssetAssembler,
-    LandblockOutdoorStaticMember, LandblockSceneLodAsset, LandblockSceneLodAssetAssembler,
-    LandblockSceneLodLayer, LandblockSceneLodLevel, LandblockSceneLodRequest, PreparedAabb,
-    PreparedBuildingTransitionAperture, PreparedVec3, normalize_landblock_id,
+    ContentDecodeCache, ContentRepository, EnvCellSystemAssetAssembler, LandblockOutdoorAsset,
+    LandblockOutdoorAssetAssembler, LandblockOutdoorAssetRequest, LandblockOutdoorStaticMember,
+    PreparedAabb, PreparedBuildingTransitionAperture, PreparedVec3,
+    StaticOutdoorSceneSourceFamilies, normalize_landblock_id,
 };
 use holtburger_dat::graphics::Frame;
 use std::collections::{BTreeMap, BTreeSet};
@@ -31,13 +31,14 @@ fn main() -> Result<()> {
     )?);
     let content = ContentRepository::from_hba_path(args.dats)?;
     let cache = ContentDecodeCache::new();
-    let scene_lod = LandblockSceneLodAssetAssembler::new().assemble_landblock_with_cache(
+    let outdoor = LandblockOutdoorAssetAssembler::new().assemble_landblock_with_cache(
         &content,
         &cache,
-        LandblockSceneLodRequest {
+        LandblockOutdoorAssetRequest::new(
             landblock_id,
-            level: LandblockSceneLodLevel::Level4,
-        },
+            false,
+            StaticOutdoorSceneSourceFamilies::new(false, true, false),
+        ),
     );
     let env_asset = EnvCellSystemAssetAssembler::new().assemble_landblock_with_cache(
         &content,
@@ -62,8 +63,7 @@ fn main() -> Result<()> {
         .collect::<BTreeMap<_, _>>();
     let env_apertures_by_cell_and_index = build_env_apertures_by_cell_and_index(&env_asset);
 
-    let (building_members, building_transition_apertures) =
-        collect_building_layer_sources(&scene_lod);
+    let (building_members, building_transition_apertures) = collect_building_sources(&outdoor);
     let building_portal_count = building_members
         .iter()
         .filter_map(|member| member.building.as_ref())
@@ -75,7 +75,7 @@ fn main() -> Result<()> {
     println!("landblock=0x{landblock_id:08x}");
     println!(
         "outdoorStatics={} buildings={} buildingPortals={} buildingTransitionApertures={}",
-        count_outdoor_statics(&scene_lod),
+        outdoor.statics.len(),
         building_members.len(),
         building_portal_count,
         building_transition_apertures.len()
@@ -146,40 +146,20 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn collect_building_layer_sources(
-    asset: &LandblockSceneLodAsset,
+fn collect_building_sources(
+    asset: &LandblockOutdoorAsset,
 ) -> (
     Vec<&LandblockOutdoorStaticMember>,
     Vec<PreparedBuildingTransitionAperture>,
 ) {
-    let mut building_members = Vec::new();
-    let mut building_transition_apertures = Vec::new();
-    for layer in &asset.layers {
-        if let LandblockSceneLodLayer::OutdoorBuildings(layer) = layer {
-            building_members.extend(
-                layer
-                    .statics
-                    .iter()
-                    .filter(|member| member.building.is_some()),
-            );
-            building_transition_apertures
-                .extend(layer.building_transition_apertures.iter().cloned());
-        }
-    }
-    (building_members, building_transition_apertures)
-}
-
-fn count_outdoor_statics(asset: &LandblockSceneLodAsset) -> usize {
-    asset
-        .layers
-        .iter()
-        .map(|layer| match layer {
-            LandblockSceneLodLayer::OutdoorBuildings(layer) => layer.statics.len(),
-            LandblockSceneLodLayer::OutdoorExplicitObjects(layer)
-            | LandblockSceneLodLayer::OutdoorGeneratedScenery(layer) => layer.statics.len(),
-            LandblockSceneLodLayer::Terrain(_) | LandblockSceneLodLayer::EnvCellSystem(_) => 0,
-        })
-        .sum()
+    (
+        asset
+            .statics
+            .iter()
+            .filter(|member| member.building.is_some())
+            .collect(),
+        asset.building_transition_apertures.to_vec(),
+    )
 }
 
 fn build_building_portals_by_target(

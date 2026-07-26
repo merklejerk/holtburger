@@ -79,13 +79,6 @@ async fn handle_connection(
         },
         ("POST", "/landblock-source-batch") => {
             let request = serde_json::from_slice::<LandblockSourceBatchRequest>(&request.body)?;
-            let selected_maximum_lod = request
-                .layers
-                .iter()
-                .copied()
-                .map(LandblockSourceLayer::required_lod_level)
-                .max()
-                .unwrap_or_default();
             let started_at = Instant::now();
             match load_landblock_source_batch_bytes(runtime, &request.landblock_id, request.layers)
                 .await
@@ -96,16 +89,10 @@ async fn handle_connection(
                         200,
                         "application/octet-stream",
                         &bytes,
-                        &[
-                            (
-                                "x-holtburger-landblock-source-batch-lod",
-                                selected_maximum_lod.to_string(),
-                            ),
-                            (
-                                "x-holtburger-landblock-source-batch-duration-ms",
-                                (started_at.elapsed().as_secs_f64() * 1_000.0).to_string(),
-                            ),
-                        ],
+                        &[(
+                            "x-holtburger-landblock-source-batch-duration-ms",
+                            (started_at.elapsed().as_secs_f64() * 1_000.0).to_string(),
+                        )],
                     )
                     .await
                 }

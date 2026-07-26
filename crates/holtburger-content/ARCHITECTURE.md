@@ -34,6 +34,7 @@ That small surface is intentional. The crate should stay focused on content moun
 - HBA discovery and mount ordering
 - typed asset loading and parse failures
 - asset-derived projections that are useful independently of a specific frontend runtime flow
+- lossless outdoor landblock facts selected through explicit source-family requests
 
 ### What Does Not Belong Here
 - runtime bootstrap assembly
@@ -42,6 +43,12 @@ That small surface is intentional. The crate should stay focused on content moun
 - gameplay rule interpretation that belongs in `holtburger-world`
 - session or command orchestration that belongs in `holtburger-core`
 - frontend-specific render state or control policy that belongs in the frontend app
+- cumulative frontend LoD ladders, render meshes, batching, or renderer culling structures
+
+Outdoor consumers request terrain and static source families explicitly through
+`LandblockOutdoorAssetRequest`. The resulting `LandblockOutdoorAsset` preserves canonical terrain
+samples, static residents, bounds, and building transition facts. The caller owns layer grouping,
+progressive loading policy, geometry preparation, and spatial partitioning.
 
 ## Runtime Data Flow
 

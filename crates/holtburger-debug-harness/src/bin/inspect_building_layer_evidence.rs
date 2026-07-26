@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::Parser;
 use holtburger_content::{
-    ContentDecodeCache, ContentRepository, LandblockOutdoorStaticMember, LandblockSceneLodAsset,
-    LandblockSceneLodAssetAssembler, LandblockSceneLodLayer, LandblockSceneLodLevel,
-    LandblockSceneLodRequest, ResolvedMaterialRecipe, ResolvedMaterialSource,
-    ResolvedRegionDetailRoleKind, build_gfx_obj_render_geometry, normalize_landblock_id,
+    ContentDecodeCache, ContentRepository, LandblockOutdoorAsset, LandblockOutdoorAssetAssembler,
+    LandblockOutdoorAssetRequest, LandblockOutdoorStaticMember, ResolvedMaterialRecipe,
+    ResolvedMaterialSource, ResolvedRegionDetailRoleKind, StaticOutdoorSceneSourceFamilies,
+    build_gfx_obj_render_geometry, normalize_landblock_id,
 };
 use holtburger_dat::file_type::{
     GfxObj, Palette, PixelFormatId, REGION_DESC_FILE_ID, RegionDesc, RenderSurface, SetupModel,
@@ -129,7 +129,7 @@ fn main() -> Result<()> {
 
 fn print_authoritative_contract_evidence() {
     println!("contractEvidence");
-    println!("  lod buildings=level-1 source=holtburger-content::LandblockSceneLodLevel");
+    println!("  sourceFamily=buildings ownership=caller-selected");
     println!(
         "  promotionPredicate=setup-model && defaultAnimation!=null source=apps/holtburger-3d-legacy/src/lib/static/objects/outdoor-static-objects-resolver.ts"
     );
@@ -187,13 +187,14 @@ fn inspect_landblock(
     decode_cache: &ContentDecodeCache,
     landblock_id: u32,
 ) -> Result<()> {
-    let asset = LandblockSceneLodAssetAssembler::new().assemble_landblock_with_cache(
+    let asset = LandblockOutdoorAssetAssembler::new().assemble_landblock_with_cache(
         content,
         decode_cache,
-        LandblockSceneLodRequest {
+        LandblockOutdoorAssetRequest::new(
             landblock_id,
-            level: LandblockSceneLodLevel::Level1,
-        },
+            false,
+            StaticOutdoorSceneSourceFamilies::new(false, true, false),
+        ),
     );
     let buildings = building_members(&asset);
     let mut source_counts = BTreeMap::<SourceFamily, usize>::new();
@@ -203,7 +204,7 @@ fn inspect_landblock(
             .or_default() += 1;
     }
 
-    println!("landblock=0x{landblock_id:08x} lod=level-1");
+    println!("landblock=0x{landblock_id:08x} sourceFamily=buildings");
     println!(
         "  buildings={} sources={source_counts:?} diagnostics(records={},errors={},omissions={})",
         buildings.len(),
@@ -249,17 +250,8 @@ fn inspect_landblock(
     Ok(())
 }
 
-fn building_members(asset: &LandblockSceneLodAsset) -> &[LandblockOutdoorStaticMember] {
-    asset
-        .layers
-        .iter()
-        .find_map(|layer| match layer {
-            LandblockSceneLodLayer::OutdoorBuildings(buildings) => {
-                Some(buildings.statics.as_slice())
-            }
-            _ => None,
-        })
-        .unwrap_or_default()
+fn building_members(asset: &LandblockOutdoorAsset) -> &[LandblockOutdoorStaticMember] {
+    &asset.statics
 }
 
 fn print_instance_sources(buildings: &[LandblockOutdoorStaticMember]) {

@@ -1,8 +1,11 @@
-# holtburger-3d
+# Holtburger 3D Legacy Archive
 
-`holtburger-3d` is the browser/Tauri 3D client app for Holtburger. It is the proving ground for the future graphical client and currently focuses on browser mode: loading world content, inspecting landblocks and interiors, exercising the asset pipeline, and validating renderer-facing contracts.
+This directory preserves the retired 3D client as architectural and reverse-engineering
+evidence. It is not a supported application, does not participate in the Cargo workspace or
+continuous integration, and is expected to stop compiling as maintained shared contracts evolve.
 
-The app is frontend-owned. Browser-mode UX, panels, tabs, viewport HUDs, camera gestures, selection affordances, debug overlays, and other presentation policy should stay in this app rather than moving into shared Rust crates.
+Use it to answer focused historical questions. Do not preserve its contracts, dependencies, or
+runtime behavior when changing maintained code.
 
 ## Boundaries
 
@@ -16,47 +19,6 @@ The app is frontend-owned. Browser-mode UX, panels, tabs, viewport HUDs, camera 
 - `src-tauri/`: app-local Rust host adapter and Tauri command boundary.
 
 Shared crates still own authoritative game state, protocol, content decoding, transport, and reusable client behavior. This app consumes those surfaces and decides how to present and interact with them in the browser.
-
-## Development
-
-Install dependencies from this directory:
-
-```sh
-npm install
-```
-
-Run the browser frontend:
-
-```sh
-npm run dev
-```
-
-Run the Tauri app:
-
-```sh
-npm run tauri:dev
-```
-
-Build outputs:
-
-```sh
-npm run build
-npm run tauri:build
-```
-
-## Quality Gates
-
-Run the TypeScript, Svelte, Rust, lint, dead-code, formatting, and test checks before handing off app changes:
-
-```sh
-npm run check
-npm run check:rust
-npm run test:ts
-npm run lint
-npm run format:check
-```
-
-`npm run lint` includes TypeScript ESLint, Knip dead-code checks, and Rust clippy with warnings treated as errors.
 
 ## UX Direction
 

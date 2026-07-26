@@ -47,9 +47,11 @@ try {
 				cameraPitchDegrees: options.cameraPitchDegrees,
 				cameraYawDegrees: options.cameraYawDegrees,
 				explicitObjectRadius: options.explicitObjectRadius,
+				generatedObjectRadius: options.generatedObjectRadius,
 				cameraLandblockId: options.cameraLandblockId,
 				relocateLandblockId: options.relocateLandblockId,
 				consoleMessages: result.consoleMessages,
+				generatedDisabledState: result.generatedDisabledState,
 				fixture: options.fixture,
 				frames: result.state.frames,
 				initialState: result.initialState,
@@ -92,6 +94,8 @@ function parseArgs(args) {
 		cameraPitchDegrees: -45,
 		cameraYawDegrees: 0,
 		explicitObjectRadius: null,
+		generatedObjectRadius: null,
+		disableGeneratedBeforeCapture: false,
 		cameraLandblockId: null,
 		relocateLandblockId: null,
 		lifecycle: false,
@@ -128,6 +132,20 @@ function parseArgs(args) {
 					);
 				}
 				break;
+			case "--generated-object-radius":
+				parsed.generatedObjectRadius = Number(requireValue(args, ++index, arg));
+				if (
+					!Number.isInteger(parsed.generatedObjectRadius) ||
+					parsed.generatedObjectRadius < 0
+				) {
+					throw new Error(
+						"--generated-object-radius must be a non-negative integer.",
+					);
+				}
+				break;
+			case "--disable-generated-before-capture":
+				parsed.disableGeneratedBeforeCapture = true;
+				break;
 			case "--camera-landblock":
 				parsed.cameraLandblockId = requireValue(args, ++index, arg);
 				break;
@@ -151,8 +169,8 @@ function parseArgs(args) {
 				break;
 			case "--fixture":
 				parsed.fixture = requireValue(args, ++index, arg);
-				if (parsed.fixture !== "blended") {
-					throw new Error("--fixture currently supports only blended.");
+				if (!["blended", "instanced"].includes(parsed.fixture)) {
+					throw new Error("--fixture must be either blended or instanced.");
 				}
 				break;
 			case "--screenshot":
@@ -181,6 +199,14 @@ function parseArgs(args) {
 			"--explicit-object-radius must be no greater than --building-radius.",
 		);
 	}
+	if (
+		parsed.generatedObjectRadius !== null &&
+		parsed.generatedObjectRadius > parsed.buildingRadius
+	) {
+		throw new Error(
+			"--generated-object-radius must be no greater than --building-radius.",
+		);
+	}
 	if (parsed.cameraLandblockId && parsed.relocateLandblockId) {
 		throw new Error(
 			"--camera-landblock and --relocate-landblock cannot be combined.",
@@ -203,12 +229,15 @@ Options:
 
   --building-radius <n> Request a square terrain/building neighborhood. Default: 0
   --explicit-object-radius <n> Request explicit objects within the building neighborhood.
+  --generated-object-radius <n> Request generated objects within the building neighborhood.
+  --disable-generated-before-capture
+                         Withdraw generated interest after the initial snapshot.
   --camera-yaw <degrees>    Initial and relocation camera yaw. Default: 0
   --camera-pitch <degrees>  Initial and relocation camera pitch. Default: -45
   --camera-landblock <hex>  Move only the camera after the initial request.
   --relocate-landblock <hex> Replace scene interest and camera at a new landblock.
   --lifecycle           Clear and reload the requested neighborhood before capture.
-  --fixture blended     Use six app-local transparent/additive material ranges.
+  --fixture <name>      Use the app-local blended or instanced renderer fixture.
   --settle-ms <ms>      Wait after requesting terrain. Default: ${DEFAULT_SETTLE_MS}
   --screenshot <path>   Persist the captured PNG after the harness exits.
   --chrome-path <path>  Chrome executable. Default: ${DEFAULT_CHROME_PATH}
@@ -298,6 +327,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				options.landblockId,
 				options.buildingRadius,
 				options.explicitObjectRadius,
+				options.generatedObjectRadius,
 				options.cameraYawDegrees,
 				options.cameraPitchDegrees,
 			],
@@ -328,6 +358,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 					options.landblockId,
 					options.buildingRadius,
 					options.explicitObjectRadius,
+					options.generatedObjectRadius,
 					options.cameraYawDegrees,
 					options.cameraPitchDegrees,
 				],
@@ -349,12 +380,34 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 					options.relocateLandblockId,
 					options.buildingRadius,
 					options.explicitObjectRadius,
+					options.generatedObjectRadius,
 					options.cameraYawDegrees,
 					options.cameraPitchDegrees,
 				],
 			);
 			await delay(options.settleMs);
 			relocationState = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.state",
+				[],
+			);
+		}
+		let generatedDisabledState = null;
+		if (options.disableGeneratedBeforeCapture) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.requestOutdoorTerrain",
+				[
+					options.relocateLandblockId ?? options.landblockId,
+					options.buildingRadius,
+					options.explicitObjectRadius,
+					null,
+					options.cameraYawDegrees,
+					options.cameraPitchDegrees,
+				],
+			);
+			await delay(options.settleMs);
+			generatedDisabledState = await evaluate(
 				client,
 				"globalThis.__HOLTBURGER_3D_TERRAIN_HARNESS__.state",
 				[],
@@ -383,6 +436,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		});
 		return {
 			consoleMessages,
+			generatedDisabledState,
 			initialState,
 			lifecycleState,
 			relocationState,

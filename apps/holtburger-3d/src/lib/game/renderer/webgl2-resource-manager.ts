@@ -14,6 +14,10 @@ import {
 import type { StaticInstanceStreamData } from "../systems/static-resources";
 import { TexturePixelFormat } from "../textures/types";
 import type { RenderGeometryData } from "./geometry";
+import {
+	WebGL2InstanceBuffer,
+	type WebGL2InstanceBufferBinding,
+} from "./webgl2-instance-buffer";
 
 /** WebGL draw binding retained for one semantic geometry resource. */
 export interface WebGL2GeometryBinding {
@@ -51,7 +55,10 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 	readonly #gl: WebGL2RenderingContext;
 	readonly #geometry = new Map<GeometryResourceKey, WebGL2GeometryResource>();
 	readonly #textures = new Map<Texture2DResourceKey, WebGL2Texture2DBinding>();
-	readonly #instanceStreams = new Map<InstanceStreamResourceKey, WebGLBuffer>();
+	readonly #instanceStreams = new Map<
+		InstanceStreamResourceKey,
+		WebGL2InstanceBuffer
+	>();
 	readonly #textureArrays = new Map<
 		TextureArrayResourceKey,
 		WebGL2TextureArrayBinding
@@ -74,30 +81,27 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 	createStaticInstanceStream(
 		data: StaticInstanceStreamData,
 	): InstanceStreamResourceKey {
-		const buffer = this.#gl.createBuffer();
-		if (!buffer) throw new Error("Failed to allocate static instance stream.");
-		const values = new Float32Array(data.instances.length * 20);
-		for (const [index, instance] of data.instances.entries()) {
-			values.set(
-				Object.values(instance.sourceToLandblock) as number[],
-				index * 20,
-			);
-			values.set(
-				[
-					instance.color.r,
-					instance.color.g,
-					instance.color.b,
-					instance.color.a,
-				],
-				index * 20 + 16,
-			);
+		const buffer = new WebGL2InstanceBuffer(this.#gl, "persistent-static");
+		try {
+			buffer.publishPersistent(data.instances);
+		} catch (error) {
+			buffer.destroy();
+			throw error;
 		}
-		this.#gl.bindBuffer(this.#gl.ARRAY_BUFFER, buffer);
-		this.#gl.bufferData(this.#gl.ARRAY_BUFFER, values, this.#gl.STATIC_DRAW);
-		this.#gl.bindBuffer(this.#gl.ARRAY_BUFFER, null);
 		const key: InstanceStreamResourceKey = `instance-stream-resource:${this.#nextInstanceStreamId++}`;
 		this.#instanceStreams.set(key, buffer);
 		return key;
+	}
+
+	/** Return the complete immutable draw binding for one persistent instance stream. */
+	getInstanceStream(
+		key: InstanceStreamResourceKey,
+	): WebGL2InstanceBufferBinding {
+		const resource = this.#instanceStreams.get(key);
+		if (!resource) {
+			throw new Error(`Instance stream resource ${key} does not exist.`);
+		}
+		return resource.getBinding();
 	}
 
 	replaceGeometry(
@@ -218,7 +222,7 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 			);
 			if (!stream) return false;
 			this.#instanceStreams.delete(key as InstanceStreamResourceKey);
-			this.#gl.deleteBuffer(stream);
+			stream.destroy();
 			return true;
 		}
 		if (isGeometryResourceKey(key)) {
@@ -253,8 +257,7 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 		for (const resource of this.#textureArrays.values()) {
 			this.#gl.deleteTexture(resource.texture);
 		}
-		for (const stream of this.#instanceStreams.values())
-			this.#gl.deleteBuffer(stream);
+		for (const stream of this.#instanceStreams.values()) stream.destroy();
 		this.#geometry.clear();
 		this.#textures.clear();
 		this.#textureArrays.clear();

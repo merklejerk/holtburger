@@ -4,6 +4,7 @@
 	import type { HttpLandblockSourceBatchDiagnostic } from "../../lib/assets/http-landblock-content-source";
 	import { StandardCommitPipeline } from "../../lib/game/commit/pipeline";
 	import { SyntheticBlendedBuildingPipeline } from "./synthetic-blended-building-pipeline";
+	import { SyntheticInstancedObjectPipeline } from "./synthetic-instanced-object-pipeline";
 	import type { LandblockId } from "../../lib/game/game-types";
 	import {
 		createLandblockWorldOrigin,
@@ -23,6 +24,8 @@
 	const CAMERA_FOV_DEGREES = 90;
 	const CAMERA_NEAR = 0.5;
 	const CAMERA_FAR = 2_000;
+	/** Sits above the runtime's conservative ±510 outdoor terrain bound. */
+	const CAMERA_HEIGHT = 600;
 
 	interface TerrainHarnessApi {
 		/** Request canonical outdoor layers for one neighborhood. */
@@ -30,6 +33,7 @@
 			landblockId: string,
 			buildingRadius: number,
 			explicitObjectRadius: number | null,
+			generatedObjectRadius: number | null,
 			cameraYawDegrees: number,
 			cameraPitchDegrees: number,
 		) => void;
@@ -52,9 +56,10 @@
 		/** Browser main-thread timing facts accumulated during this harness session. */
 		readonly timing: TerrainHarnessTiming;
 		readonly staticObjects: StaticObjectRuntimeDiagnostics | null;
-		/** Layer-separated static diagnostics prove buildings and explicit objects stay distinct. */
+		/** Layer-separated static diagnostics prove outdoor-static lifetimes stay distinct. */
 		readonly staticObjectLayers: {
 			readonly buildings: readonly StaticObjectLayerRuntimeDiagnostics[];
+			readonly generated: readonly StaticObjectLayerRuntimeDiagnostics[];
 			readonly objects: readonly StaticObjectLayerRuntimeDiagnostics[];
 		};
 		/** One read-only observation for every host source-batch response received by this harness. */
@@ -101,6 +106,7 @@
 		rawLandblockId: string,
 		buildingRadius: number,
 		explicitObjectRadius: number | null,
+		generatedObjectRadius: number | null,
 		cameraYawDegrees: number,
 		cameraPitchDegrees: number,
 	): void {
@@ -120,6 +126,16 @@
 				"Terrain harness explicit-object radius must be a non-negative integer no greater than building radius.",
 			);
 		}
+		if (
+			generatedObjectRadius !== null &&
+			(!Number.isInteger(generatedObjectRadius) ||
+				generatedObjectRadius < 0 ||
+				generatedObjectRadius > buildingRadius)
+		) {
+			throw new Error(
+				"Terrain harness generated-object radius must be a non-negative integer no greater than building radius.",
+			);
+		}
 		if (![cameraYawDegrees, cameraPitchDegrees].every(Number.isFinite)) {
 			throw new Error("Terrain harness camera orientation must be finite.");
 		}
@@ -130,7 +146,7 @@
 				buildingRadius,
 				envCellRadius: null,
 				explicitObjectRadius,
-				generatedObjectRadius: null,
+				generatedObjectRadius,
 				terrainRadius: buildingRadius,
 			},
 		});
@@ -154,7 +170,7 @@
 				landblockId,
 				position: new Vec3(
 					origin.x + OUTDOOR_LANDBLOCK_WORLD_SIZE / 2,
-					100,
+					CAMERA_HEIGHT,
 					origin.z - OUTDOOR_LANDBLOCK_WORLD_SIZE / 2,
 				),
 				rotation: cameraRotation(cameraYawDegrees, cameraPitchDegrees),
@@ -200,6 +216,7 @@
 		let pipeline:
 			| StandardCommitPipeline
 			| SyntheticBlendedBuildingPipeline
+			| SyntheticInstancedObjectPipeline
 			| undefined;
 		let device: WebGL2Device | undefined;
 		let objectDetailOwner: ActiveRegionObjectDetailOwner | undefined;
@@ -208,13 +225,17 @@
 			try {
 				contentSource = await HttpLandblockContentSource.build(hostUrl);
 				device = await WebGL2Device.build(canvasElement!);
+				const fixture = new URLSearchParams(window.location.search).get(
+					"fixture",
+				);
 				pipeline =
-					new URLSearchParams(window.location.search).get("fixture") ===
-					"blended"
+					fixture === "blended"
 						? new SyntheticBlendedBuildingPipeline()
-						: await StandardCommitPipeline.build({
-								sourceBatch: contentSource,
-							});
+						: fixture === "instanced"
+							? new SyntheticInstancedObjectPipeline()
+							: await StandardCommitPipeline.build({
+									sourceBatch: contentSource,
+								});
 				runtime = await GameRuntime.build(device, pipeline, contentSource);
 				objectDetailOwner = new ActiveRegionObjectDetailOwner(contentSource);
 				runtime.installActiveRegionObjectDetail(
@@ -253,6 +274,10 @@
 								buildings:
 									staticObjects?.layers.filter(
 										(layer) => layer.layer === LandblockLayerKind.Buildings,
+									) ?? [],
+								generated:
+									staticObjects?.layers.filter(
+										(layer) => layer.layer === LandblockLayerKind.Generated,
 									) ?? [],
 								objects:
 									staticObjects?.layers.filter(

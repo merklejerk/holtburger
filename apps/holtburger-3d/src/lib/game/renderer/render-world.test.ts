@@ -66,6 +66,7 @@ describe("RenderWorld", () => {
 			},
 			objectDetail: { getBinding: () => null },
 			scene: {
+				getCullingGroup: () => "fixture",
 				getResolvedPlacement: () => undefined,
 				queryFrustum: () => {
 					calls.push("scene");
@@ -130,6 +131,7 @@ describe("RenderWorld", () => {
 					material: {},
 				},
 			],
+			frameStreamedInstances: [],
 		} as StaticObjectRenderable;
 		expect(world.resolveStaticObjectRenderable(staticRenderable)).toEqual([
 			{

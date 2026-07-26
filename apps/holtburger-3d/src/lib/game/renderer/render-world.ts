@@ -2,11 +2,16 @@ import type { LandblockId } from "../game-types";
 import type { GeometryKey } from "../geometry/types";
 import type { Camera } from "../runtime/types";
 import type { Frustum } from "../math/frustum";
-import type { ResolvedScenePlacement, SceneNodeId, VisibleScene } from "../scene";
+import type {
+	ResolvedScenePlacement,
+	SceneNodeId,
+	VisibleScene,
+} from "../scene";
 import type { TerrainDrawUnit } from "../terrain/types";
 import type { DynamicEntityRenderable } from "../systems/components";
 import type {
 	EnvCellRenderable,
+	FrameStreamedStaticInstanceTemplate,
 	PortalDrawUnit,
 	StaticObjectDrawUnit,
 	StaticObjectRenderable,
@@ -25,7 +30,7 @@ import type {
 	InstanceStreamResourceKey,
 	Texture2DResourceKey,
 } from "./resource-manager";
-import type { InstanceStreamManager } from "../systems/instance-stream-manager";
+import type { StaticInstanceStreamManager } from "../systems/static-instance-stream-manager";
 
 /** Private read-only query ports captured by one RenderWorld. */
 interface RenderWorldSystems {
@@ -33,7 +38,10 @@ interface RenderWorldSystems {
 		getBinding(): ActiveRegionObjectDetailRenderBinding | null;
 	};
 	readonly scene: {
-		getResolvedPlacement(nodeId: SceneNodeId): ResolvedScenePlacement | undefined;
+		getCullingGroup(nodeId: SceneNodeId): string | null;
+		getResolvedPlacement(
+			nodeId: SceneNodeId,
+		): ResolvedScenePlacement | undefined;
 		queryFrustum(
 			frustum: Frustum,
 			anchorLandblockId: LandblockId,
@@ -61,7 +69,7 @@ interface RenderWorldSystems {
 	readonly geometry: {
 		getResource(key: GeometryKey): GeometryResourceKey;
 	};
-	readonly instances: Pick<InstanceStreamManager, "getResource">;
+	readonly instances: Pick<StaticInstanceStreamManager, "getResource">;
 	readonly textures: {
 		getAtlasBinding(key: AssetTextureKey): TextureAtlasBinding;
 		getTexture2DResource(
@@ -80,6 +88,7 @@ export interface ActiveRegionObjectDetailRenderBinding {
 /** One typed logical render contribution selected from a visible scene node. */
 export type RenderContribution =
 	| {
+			readonly cullingGroup: string;
 			readonly kind: "static-object";
 			readonly renderable: StaticObjectRenderable;
 	  }
@@ -98,6 +107,10 @@ export interface ResolvedStaticDrawUnit {
 export interface ResolvedStaticObjectNode {
 	readonly placement: ResolvedScenePlacement;
 	readonly drawUnits: readonly ResolvedStaticDrawUnit[];
+	readonly frameStreamedInstances: readonly {
+		readonly template: FrameStreamedStaticInstanceTemplate;
+		readonly geometry: GeometryResourceKey;
+	}[];
 }
 
 /** Backend geometry selection for a rigid dynamic or cell-shell draw. */
@@ -144,8 +157,13 @@ export class RenderWorld {
 		anchorLandblockId: LandblockId,
 	): RenderContribution | null {
 		const staticObject = this.#systems.staticObjects.getRenderable(nodeId);
-		if (staticObject)
-			return { kind: "static-object", renderable: staticObject };
+		if (staticObject) {
+			const cullingGroup = this.#systems.scene.getCullingGroup(nodeId);
+			if (cullingGroup === null) {
+				throw new Error(`Static object node ${nodeId} has no culling group.`);
+			}
+			return { cullingGroup, kind: "static-object", renderable: staticObject };
+		}
 		const dynamic = this.#systems.dynamics.getRenderable(nodeId);
 		if (dynamic) return { kind: "dynamic", renderable: dynamic };
 		const cell = this.#systems.envCells.getCellRenderable(nodeId);
@@ -179,9 +197,16 @@ export class RenderWorld {
 		renderable: StaticObjectRenderable,
 	): ResolvedStaticObjectNode {
 		const placement = this.#systems.scene.getResolvedPlacement(nodeId);
-		if (!placement) throw new Error(`Static object node ${nodeId} no longer exists.`);
+		if (!placement)
+			throw new Error(`Static object node ${nodeId} no longer exists.`);
 		return {
 			drawUnits: this.resolveStaticObjectRenderable(renderable),
+			frameStreamedInstances: renderable.frameStreamedInstances.map(
+				(template) => ({
+					geometry: this.resolveGeometry(template.geometry),
+					template,
+				}),
+			),
 			placement,
 		};
 	}

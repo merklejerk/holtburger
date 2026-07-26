@@ -17,7 +17,7 @@ import { classifyObjectResidents } from "../game/resolution/object-resident-clas
 
 const HEADER_LENGTH = 16;
 const MAGIC = "HBSO";
-const VERSION = 1;
+const VERSION = 2;
 const datId = z.string().regex(/^0x[0-9a-f]{8}$/i);
 const finiteNumber = z.number().finite();
 const vec3 = z.tuple([finiteNumber, finiteNumber, finiteNumber]);
@@ -134,7 +134,11 @@ const manifestSchema = z.object({
 	byteOrder: z.literal("little-endian"),
 	sectionByteOffsetBase: z.literal("section-data"),
 	landblockId: datId,
-	layer: z.enum([LandblockLayerKind.Buildings, LandblockLayerKind.Objects]),
+	layer: z.enum([
+		LandblockLayerKind.Buildings,
+		LandblockLayerKind.Objects,
+		LandblockLayerKind.Generated,
+	]),
 	residents: z.array(
 		z.object({
 			id: z.string().min(1),
@@ -163,7 +167,8 @@ type OutdoorStaticGeometry = z.infer<typeof geometry>;
 type OutdoorStaticMaterial = z.infer<typeof material>;
 export type OutdoorStaticLayerKind =
 	| LandblockLayerKind.Buildings
-	| LandblockLayerKind.Objects;
+	| LandblockLayerKind.Objects
+	| LandblockLayerKind.Generated;
 
 /** Decode and validate one closed versioned outdoor-static source record. */
 export function decodeOutdoorStaticRecord(

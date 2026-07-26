@@ -198,6 +198,9 @@ async fn build_landblock_source_batch_response(
             LandblockSourceLayer::Objects => {
                 serialize_outdoor_static_source_record(runtime, &source_batch, layer).await?
             }
+            LandblockSourceLayer::Generated => {
+                serialize_outdoor_static_source_record(runtime, &source_batch, layer).await?
+            }
         };
         records.push(LandblockSourceBatchRecord { layer, bytes });
     }
@@ -227,6 +230,7 @@ async fn serialize_outdoor_static_source_record(
     let statics = match layer {
         LandblockSourceLayer::Buildings => &source_batch.buildings()?.statics,
         LandblockSourceLayer::Objects => &source_batch.objects()?.statics,
+        LandblockSourceLayer::Generated => &source_batch.generated()?.statics,
         LandblockSourceLayer::Terrain => {
             anyhow::bail!("Terrain does not have an outdoor static source record")
         }
@@ -255,6 +259,7 @@ async fn serialize_outdoor_static_source_record(
         layer: match layer {
             LandblockSourceLayer::Buildings => "buildings",
             LandblockSourceLayer::Objects => "objects",
+            LandblockSourceLayer::Generated => "generated",
             LandblockSourceLayer::Terrain => unreachable!("terrain was rejected above"),
         },
         residents,
@@ -986,6 +991,8 @@ mod tests {
             [
                 LandblockSourceLayer::Terrain,
                 LandblockSourceLayer::Buildings,
+                LandblockSourceLayer::Objects,
+                LandblockSourceLayer::Generated,
             ],
         )
         .expect("source batch request should be valid");
@@ -999,6 +1006,14 @@ mod tests {
                 LandblockSourceBatchRecord {
                     layer: LandblockSourceLayer::Buildings,
                     bytes: vec![4, 5],
+                },
+                LandblockSourceBatchRecord {
+                    layer: LandblockSourceLayer::Objects,
+                    bytes: vec![6],
+                },
+                LandblockSourceBatchRecord {
+                    layer: LandblockSourceLayer::Generated,
+                    bytes: vec![7, 8],
                 },
             ],
         )
@@ -1015,10 +1030,10 @@ mod tests {
             .expect("batch manifest should remain JSON");
         assert_eq!(
             manifest["requestedLayers"],
-            serde_json::json!(["terrain", "buildings"])
+            serde_json::json!(["terrain", "buildings", "objects", "generated"])
         );
-        assert_eq!(manifest["records"].as_array().map(Vec::len), Some(2));
-        assert_eq!(&bytes[record_offset..], [1, 2, 3, 4, 5]);
+        assert_eq!(manifest["records"].as_array().map(Vec::len), Some(4));
+        assert_eq!(&bytes[record_offset..], [1, 2, 3, 4, 5, 6, 7, 8]);
     }
 
     #[test]

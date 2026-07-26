@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { StaticObjectLayerArtifact } from "../commit/artifacts";
 import type { GeometryManager } from "../geometry/geometry-manager";
 import type { SceneGraph, SceneNodeId } from "../scene";
-import type { InstanceStreamManager } from "./instance-stream-manager";
+import type { StaticInstanceStreamManager } from "./static-instance-stream-manager";
 import { StaticObjectSystem } from "./static-object-system";
 import { LandblockLayerKind } from "../runtime/scene-interest";
 import type { SceneInterestRevision } from "../runtime/scene-availability";
@@ -15,7 +15,7 @@ describe("StaticObjectSystem", () => {
 		const system = new StaticObjectSystem<"buildings", string>(
 			scene as unknown as SceneGraph,
 			geometry as unknown as GeometryManager<string>,
-			instances as unknown as InstanceStreamManager<string>,
+			instances as unknown as StaticInstanceStreamManager<string>,
 			(_, revision) => `resource:${revision}`,
 		);
 
@@ -48,7 +48,7 @@ describe("StaticObjectSystem", () => {
 		const system = new StaticObjectSystem<"buildings", string>(
 			scene as unknown as SceneGraph,
 			geometry as unknown as GeometryManager<string>,
-			instances as unknown as InstanceStreamManager<string>,
+			instances as unknown as StaticInstanceStreamManager<string>,
 			(_, revision) => `resource:${revision}`,
 		);
 		system.replaceObjects(
@@ -64,14 +64,17 @@ describe("StaticObjectSystem", () => {
 		expect(geometry.dropped).toEqual([]);
 	});
 
-	it("keeps building and object owners in independent culling groups", () => {
+	it("keeps all outdoor-static owners and culling groups independent", () => {
 		const scene = new FixtureScene();
 		const geometry = new FixtureGeometry();
 		const instances = new FixtureInstances();
-		const system = new StaticObjectSystem<"buildings" | "objects", string>(
+		const system = new StaticObjectSystem<
+			"buildings" | "objects" | "generated",
+			string
+		>(
 			scene as unknown as SceneGraph,
 			geometry as unknown as GeometryManager<string>,
-			instances as unknown as InstanceStreamManager<string>,
+			instances as unknown as StaticInstanceStreamManager<string>,
 			(owner, revision) => `resource:${owner}:${revision}`,
 		);
 
@@ -87,30 +90,52 @@ describe("StaticObjectSystem", () => {
 			artifact("objects"),
 			LandblockLayerKind.Objects,
 		);
+		system.replaceObjects(
+			"generated",
+			revision(1),
+			artifact("generated"),
+			LandblockLayerKind.Generated,
+		);
 		system.evict("buildings", revision(1));
 
+		expect(scene.live).toEqual(["node:1", "node:2", "node:3"]);
+		system.evict("generated", revision(1));
 		expect(scene.live).toEqual(["node:1", "node:2"]);
 		system.evict("objects", revision(1));
 
 		expect(scene.cullingGroups).toEqual([
 			LandblockLayerKind.Buildings,
 			LandblockLayerKind.Objects,
+			LandblockLayerKind.Generated,
 		]);
 		expect(scene.live).toEqual(["node:1"]);
-		expect(geometry.dropped).toEqual(["resource:objects:1"]);
+		expect(geometry.dropped).toEqual([
+			"resource:generated:1",
+			"resource:objects:1",
+		]);
 	});
 });
 
 function artifact(id: string): StaticObjectLayerArtifact {
 	return {
-		bakeDiagnostics: {
-			additiveRangeCount: 0,
-			bakedRangeCount: 0,
-			geometryBytes: 0,
+		geometryDiagnostics: {
+			bakedFallbackRangeCount: 0,
+			bakedGeometryBytes: 0,
 			geometryWorkerDurationMs: 0,
+			instancedGeometryBytes: 0,
+			persistentCohortCount: 0,
+			persistentDrawUnitCount: 0,
+			persistentInstanceCount: 0,
+			persistentStreamBytes: 0,
+			persistentStreamCount: 0,
 			sourceMaterialSlotCount: 0,
+			sourcePartCount: 0,
 			sourceRangeCount: 0,
-			transparentRangeCount: 0,
+			sourceResidentCount: 0,
+			strategy: "empty",
+			transparentTemplateBytes: 0,
+			transparentTemplateCohortCount: 0,
+			transparentTemplateInstanceCount: 0,
 		},
 		geometry: [],
 		instanceStreams: [],
@@ -120,7 +145,7 @@ function artifact(id: string): StaticObjectLayerArtifact {
 					{} as StaticObjectLayerArtifact["objects"][number]["localBounds"],
 				placement:
 					{} as StaticObjectLayerArtifact["objects"][number]["placement"],
-				renderable: { drawUnits: [] },
+				renderable: { drawUnits: [], frameStreamedInstances: [] },
 			},
 		],
 		resourceNamespace:

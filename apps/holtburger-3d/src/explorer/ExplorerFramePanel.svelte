@@ -28,13 +28,45 @@
 				<code>{metrics.terrainFrameInputs}</code>
 			</div>
 			<div class="ac-param-row">
-				<span class="ac-param-key">Visible static objects</span>
-				<code>{metrics.visibleStaticObjects}</code>
+				<span class="ac-param-key">Visible static layers / nodes</span>
+				<code
+					>{metrics.visibleStaticLayerCount} / {metrics.visibleStaticNodeCount}</code
+				>
 			</div>
 			<div class="ac-param-row">
-				<span class="ac-param-key">Building ranges / triangles</span>
+				<span class="ac-param-key">Static draws / triangles</span>
 				<code
-					>{metrics.submittedBuildingRanges} / {metrics.submittedBuildingTriangles}</code
+					>{metrics.submittedStaticObjectDrawCount} / {metrics.submittedStaticObjectTriangleCount}</code
+				>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Persistent draws / instances</span>
+				<code
+					>{metrics.submittedPersistentInstancedDrawCount} / {metrics.submittedPersistentInstanceCount}</code
+				>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Transparent candidates / runs</span>
+				<code
+					>{metrics.transparentStaticCandidateCount} / {metrics.transparentFrameRunCount}</code
+				>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Transparent far candidates / runs</span>
+				<code
+					>{metrics.farTransparentStaticCandidateCount} / {metrics.farTransparentFrameRunCount}</code
+				>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Transparent near candidates / runs</span>
+				<code
+					>{metrics.nearTransparentStaticCandidateCount} / {metrics.nearTransparentFrameRunCount}</code
+				>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Frame arena capacity / high water</span>
+				<code
+					>{metrics.frameInstanceCapacity} / {metrics.frameInstanceViewHighWaterMark}</code
 				>
 			</div>
 			<div class="ac-param-row">
@@ -58,8 +90,8 @@
 		</div>
 		<p class="explorer-frame-note">
 			Counts are aggregated across views. Static, dynamic, and env-cell values
-			are selection counts; terrain and opaque/alpha-test building ranges become
-			concrete draw submissions.
+			are selection counts; terrain and static-object ranges become concrete
+			draw submissions.
 		</p>
 	{/if}
 </div>

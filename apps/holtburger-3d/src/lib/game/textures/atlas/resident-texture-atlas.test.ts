@@ -92,6 +92,46 @@ describe("ResidentTextureAtlas", () => {
 		expect(atlas.getPreparedSource(INDEX8.key)).toEqual(source(INDEX8));
 	});
 
+	it("keeps a committed replacement when old-page retirement fails", async () => {
+		const planner = new ArmableFailingLayoutPlanner();
+		const resources = new FixtureRendererResources();
+		const atlas = new ResidentTextureAtlas<"building">(
+			new ImmediatePreparer(),
+			{
+				layoutPlanner: planner,
+				pageBuilder: new FixturePageBuilder(),
+				pageSize: 16,
+				renderResources: resources,
+			},
+		);
+		const current = atlas.prepareOwnerRequirements("building", revision(1), [
+			DIRECT_COLOR,
+		]);
+		await expect(current.completion).resolves.toBe("ready");
+		await atlas.activateOwnerRevision(current);
+		const replacement = atlas.prepareOwnerRequirements(
+			"building",
+			revision(2),
+			[SECOND_DIRECT],
+		);
+		await expect(replacement.completion).resolves.toBe("ready");
+		planner.failSubsequentPlans();
+
+		await expect(atlas.activateOwnerRevision(replacement)).resolves.toBe(
+			undefined,
+		);
+
+		expect(atlas.getPreparedSource(SECOND_DIRECT.key)).toEqual(
+			source(SECOND_DIRECT),
+		);
+		expect(() => atlas.getPreparedSource(DIRECT_COLOR.key)).toThrow(
+			"no retained",
+		);
+		expect(atlas.getAtlasBinding(SECOND_DIRECT.key)).not.toBeNull();
+		expect(atlas.getDiagnostics().failedTransactionCount).toBeGreaterThan(0);
+		expect(atlas.getDiagnostics().publishedOwnerCount).toBe(1);
+	});
+
 	it("cannot let stale cleanup remove a newer same-owner revision", async () => {
 		const preparer = new ImmediatePreparer();
 		const atlas = new ResidentTextureAtlas<"building">(preparer);
@@ -406,6 +446,47 @@ describe("ResidentTextureAtlas", () => {
 		expect(atlas.getAtlasBinding(DIRECT_COLOR.key)).toBeNull();
 		expect(atlas.getDiagnostics().staleTransactionCount).toBe(1);
 	});
+
+	it("does not reuse page generations when purpose state changes during publication", async () => {
+		const pageBuilder = new DeferredFirstPageBuilder();
+		const atlas = new ResidentTextureAtlas<"first" | "second">(
+			new ImmediatePreparer(),
+			{
+				layoutPlanner: new FixtureLayoutPlanner(),
+				pageBuilder,
+				pageSize: 16,
+				renderResources: new FixtureRendererResources(),
+			},
+		);
+		const first = atlas.prepareOwnerRequirements("first", revision(1), [
+			DIRECT_COLOR,
+		]);
+		await pageBuilder.firstBuildStarted;
+
+		const second = atlas.prepareOwnerRequirements("second", revision(1), [
+			SECOND_DIRECT,
+		]);
+		await Promise.resolve();
+		expect(atlas.getPreparedSource(SECOND_DIRECT.key)).toEqual(
+			source(SECOND_DIRECT),
+		);
+		pageBuilder.resolveFirst();
+
+		await expect(first.completion).resolves.toBe("ready");
+		await expect(second.completion).resolves.toBe("ready");
+		expect(atlas.getAtlasBinding(DIRECT_COLOR.key)).not.toBeNull();
+		expect(atlas.getAtlasBinding(SECOND_DIRECT.key)).not.toBeNull();
+		expect(atlas.getAtlasPageDiagnostics().map(({ pageId }) => pageId)).toEqual(
+			[
+				createAtlasPageId(TexturePurpose.ObjectDirectColor, 0),
+				createAtlasPageId(TexturePurpose.ObjectDirectColor, 1),
+			],
+		);
+		expect(atlas.getDiagnostics()).toMatchObject({
+			failedTransactionCount: 0,
+			staleTransactionCount: 1,
+		});
+	});
 });
 
 function fact(
@@ -505,6 +586,21 @@ class CountingLayoutPlanner extends FixtureLayoutPlanner {
 	}
 }
 
+class ArmableFailingLayoutPlanner extends FixtureLayoutPlanner {
+	#fail = false;
+
+	override plan(request: Parameters<ResidentAtlasLayoutPlanner["plan"]>[0]) {
+		if (this.#fail) {
+			return Promise.reject(new Error("Synthetic retirement-layout failure."));
+		}
+		return super.plan(request);
+	}
+
+	failSubsequentPlans(): void {
+		this.#fail = true;
+	}
+}
+
 /** Deliberately models two fragmented index pages so the resident transaction can prove compaction. */
 class FragmentingLayoutPlanner implements ResidentAtlasLayoutPlanner {
 	destroy(): void {}
@@ -582,6 +678,41 @@ class FixturePageBuilder implements ResidentAtlasPageBuilder {
 	}
 
 	destroy(): void {}
+}
+
+class DeferredFirstPageBuilder implements ResidentAtlasPageBuilder {
+	readonly firstBuildStarted: Promise<void>;
+	#markFirstBuildStarted!: () => void;
+	#resolveFirstBuild: (() => void) | null = null;
+	#buildCount = 0;
+
+	constructor() {
+		this.firstBuildStarted = new Promise<void>((resolve) => {
+			this.#markFirstBuildStarted = resolve;
+		});
+	}
+
+	build(
+		job: AtlasPageBuildJob,
+		transfer: readonly Transferable[],
+	): Promise<ReturnType<typeof buildAtlasPage>> {
+		void transfer;
+		this.#buildCount += 1;
+		if (this.#buildCount > 1) return Promise.resolve(buildAtlasPage(job));
+		this.#markFirstBuildStarted();
+		return new Promise((resolve) => {
+			this.#resolveFirstBuild = () => resolve(buildAtlasPage(job));
+		});
+	}
+
+	destroy(): void {}
+
+	resolveFirst(): void {
+		if (!this.#resolveFirstBuild)
+			throw new Error("First atlas page build was not pending.");
+		this.#resolveFirstBuild();
+		this.#resolveFirstBuild = null;
+	}
 }
 
 class FailingCompactPageBuilder extends FixturePageBuilder {

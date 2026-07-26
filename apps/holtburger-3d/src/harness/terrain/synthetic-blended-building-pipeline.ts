@@ -60,19 +60,30 @@ function buildingBundle(landblockId: LandblockId): CommitBundle {
 					: null,
 		};
 	});
+	const geometryBytes =
+		indices.length * Uint32Array.BYTES_PER_ELEMENT +
+		normals.length * Float32Array.BYTES_PER_ELEMENT +
+		positions.length * Float32Array.BYTES_PER_ELEMENT +
+		textureCoordinates.length * Float32Array.BYTES_PER_ELEMENT;
 	const artifact: StaticObjectLayerArtifact = {
-		bakeDiagnostics: {
-			additiveRangeCount: 3,
-			bakedRangeCount: 6,
-			geometryBytes:
-				indices.length * Uint32Array.BYTES_PER_ELEMENT +
-				normals.length * Float32Array.BYTES_PER_ELEMENT +
-				positions.length * Float32Array.BYTES_PER_ELEMENT +
-				textureCoordinates.length * Float32Array.BYTES_PER_ELEMENT,
+		geometryDiagnostics: {
+			bakedFallbackRangeCount: 6,
+			bakedGeometryBytes: geometryBytes,
 			geometryWorkerDurationMs: 0,
+			instancedGeometryBytes: 0,
+			persistentCohortCount: 0,
+			persistentDrawUnitCount: 0,
+			persistentInstanceCount: 0,
+			persistentStreamBytes: 0,
+			persistentStreamCount: 0,
 			sourceMaterialSlotCount: 6,
+			sourcePartCount: 6,
 			sourceRangeCount: 6,
-			transparentRangeCount: 3,
+			sourceResidentCount: 6,
+			strategy: "baked",
+			transparentTemplateBytes: 0,
+			transparentTemplateCohortCount: 0,
+			transparentTemplateInstanceCount: 0,
 		},
 		geometry: [
 			{
@@ -95,7 +106,7 @@ function buildingBundle(landblockId: LandblockId): CommitBundle {
 					landblockId,
 					localTransform: Mat4.identity(),
 				},
-				renderable: { drawUnits },
+				renderable: { drawUnits, frameStreamedInstances: [] },
 			},
 		],
 		resourceNamespace: "static-install:synthetic-blended" as const,
@@ -104,21 +115,11 @@ function buildingBundle(landblockId: LandblockId): CommitBundle {
 	return {
 		commit: {
 			diagnostics: {
-				additiveRangeCount: 3,
-				bakedRangeCount: 6,
+				...artifact.geometryDiagnostics,
 				expectedResidentCount: 6,
-				geometryBytes:
-					indices.length * Uint32Array.BYTES_PER_ELEMENT +
-					normals.length * Float32Array.BYTES_PER_ELEMENT +
-					positions.length * Float32Array.BYTES_PER_ELEMENT +
-					textureCoordinates.length * Float32Array.BYTES_PER_ELEMENT,
-				geometryWorkerDurationMs: 0,
 				materializedStaticResidentCount: 6,
 				promotedDynamicResidentCount: 0,
 				resolvedStaticResidentCount: 6,
-				sourceMaterialSlotCount: 6,
-				sourceRangeCount: 6,
-				transparentRangeCount: 3,
 			},
 			staticObjects: artifact,
 		},

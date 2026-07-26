@@ -37,6 +37,81 @@ describe("decodeLandblockSourceBatch", () => {
 			),
 		).toThrow("returned record set does not match");
 	});
+
+	it("rejects duplicate generated records", () => {
+		expect(() =>
+			decodeLandblockSourceBatch(
+				batchResponse({
+					recordDataLength: 2,
+					records: [
+						{
+							byteLength: 1,
+							byteOffset: 0,
+							layer: LandblockLayerKind.Generated,
+						},
+						{
+							byteLength: 1,
+							byteOffset: 1,
+							layer: LandblockLayerKind.Generated,
+						},
+					],
+					requestedLayers: [LandblockLayerKind.Generated],
+				}),
+				LANDBLOCK_ID,
+				new Set([LandblockLayerKind.Generated]),
+				ACTIVE_REGION,
+			),
+		).toThrow("exactly one record");
+	});
+
+	it("rejects overlapping record ranges before nested decoding", () => {
+		expect(() =>
+			decodeLandblockSourceBatch(
+				batchResponse({
+					recordDataLength: 3,
+					records: [
+						{
+							byteLength: 2,
+							byteOffset: 0,
+							layer: LandblockLayerKind.Buildings,
+						},
+						{
+							byteLength: 2,
+							byteOffset: 1,
+							layer: LandblockLayerKind.Generated,
+						},
+					],
+					requestedLayers: [
+						LandblockLayerKind.Buildings,
+						LandblockLayerKind.Generated,
+					],
+				}),
+				LANDBLOCK_ID,
+				new Set([LandblockLayerKind.Buildings, LandblockLayerKind.Generated]),
+				ACTIVE_REGION,
+			),
+		).toThrow("overlaps");
+	});
+
+	it("rejects an out-of-bounds generated record range", () => {
+		expect(() =>
+			decodeLandblockSourceBatch(
+				batchResponse({
+					records: [
+						{
+							byteLength: 2,
+							byteOffset: 0,
+							layer: LandblockLayerKind.Generated,
+						},
+					],
+					requestedLayers: [LandblockLayerKind.Generated],
+				}),
+				LANDBLOCK_ID,
+				new Set([LandblockLayerKind.Generated]),
+				ACTIVE_REGION,
+			),
+		).toThrow("byte range is invalid");
+	});
 });
 
 function batchResponse(
@@ -47,6 +122,7 @@ function batchResponse(
 			readonly byteOffset: number;
 			readonly layer: LandblockLayerKind;
 		}[];
+		readonly recordDataLength?: number;
 	} = {},
 ): Uint8Array {
 	const manifest = {
@@ -62,14 +138,16 @@ function batchResponse(
 		],
 		requestedLayers: overrides.requestedLayers ?? [LandblockLayerKind.Terrain],
 		transport: "holtburger-landblock-source-batch",
-		version: 1,
+		version: 2,
 	};
 	const encoded = new TextEncoder().encode(JSON.stringify(manifest));
 	const manifestLength = Math.ceil((16 + encoded.length) / 4) * 4 - 16;
-	const response = new Uint8Array(16 + manifestLength + 1);
+	const response = new Uint8Array(
+		16 + manifestLength + (overrides.recordDataLength ?? 1),
+	);
 	response.set(new TextEncoder().encode("HBLB"));
 	const view = new DataView(response.buffer);
-	view.setUint32(4, 1, true);
+	view.setUint32(4, 2, true);
 	view.setUint32(8, manifestLength, true);
 	view.setUint32(12, response.length, true);
 	response.fill(0x20, 16, 16 + manifestLength);

@@ -9,7 +9,7 @@ import type {
 } from "./static-resources";
 
 /** Owns immutable instance cohorts separately from source mesh geometry. */
-export class InstanceStreamManager<TOwnerId extends string = string> {
+export class StaticInstanceStreamManager<TOwnerId extends string = string> {
 	readonly #resources: RendererResourceManager;
 	readonly #leases = new LeaseRegistry<TOwnerId, StaticInstanceStreamKey>();
 	readonly #streams = new Map<

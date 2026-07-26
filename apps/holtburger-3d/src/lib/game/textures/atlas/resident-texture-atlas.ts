@@ -248,9 +248,21 @@ export class ResidentTextureAtlas<TOwner extends string> {
 		if (publishedRevision === handle.revision) return;
 		this.#publishedRevisions.set(handle.owner, handle.revision);
 		if (publishedRevision !== undefined) {
-			await this.#synchronizePurposes(
-				this.#withdrawExact(handle.owner, publishedRevision),
+			const retiredPurposes = this.#withdrawExact(
+				handle.owner,
+				publishedRevision,
 			);
+			const failedTransactionsBeforeCleanup = this.#failedTransactionCount;
+			try {
+				await this.#synchronizePurposes(retiredPurposes);
+			} catch {
+				if (this.#failedTransactionCount === failedTransactionsBeforeCleanup) {
+					this.#failedTransactionCount += 1;
+				}
+				// The replacement is already the logical and visible revision. The failed physical
+				// rebuild remains dirty and is reported by failedTransactionCount; later ordinary
+				// atlas synchronization may finish reclaiming the retired revision's page space.
+			}
 		}
 	}
 
@@ -559,11 +571,11 @@ export class ResidentTextureAtlas<TOwner extends string> {
 			this.#failedTransactionCount += 1;
 			throw error;
 		}
-		this.#markPurposePublished(
+		this.#commitNextPageGeneration(
 			purpose,
-			plans.epoch,
 			plans.nextPageGeneration + plans.stableNewPageCount,
 		);
+		this.#markPurposePublished(purpose, plans.epoch);
 	}
 
 	async #planPurposeRebuild(
@@ -614,16 +626,13 @@ export class ResidentTextureAtlas<TOwner extends string> {
 			this.#failedTransactionCount += 1;
 			return false;
 		}
-		if (
-			!this.#markPurposePublished(
-				purpose,
-				plans.epoch,
-				plans.nextPageGeneration +
-					plans.stableNewPageCount +
-					plans.compact.pages.length,
-			)
-		)
-			return true;
+		this.#commitNextPageGeneration(
+			purpose,
+			plans.nextPageGeneration +
+				plans.stableNewPageCount +
+				plans.compact.pages.length,
+		);
+		if (!this.#markPurposePublished(purpose, plans.epoch)) return true;
 		this.#acceptedCompactionCount += 1;
 		this.#eliminatedPageCount +=
 			plans.stable.pages.length - plans.compact.pages.length;
@@ -643,12 +652,27 @@ export class ResidentTextureAtlas<TOwner extends string> {
 	#markPurposePublished(
 		purpose: PackedObjectTexturePurpose,
 		epoch: number,
-		nextPageGeneration: number,
 	): boolean {
 		if (!this.#isPurposeCurrent(purpose, epoch)) return false;
 		this.#publishedPurposeEpochs.set(purpose, epoch);
-		this.#nextPageGeneration.set(purpose, nextPageGeneration);
 		return true;
+	}
+
+	/**
+	 * Record page identities consumed by a successful physical publication independently of whether
+	 * its logical source epoch is still current.
+	 */
+	#commitNextPageGeneration(
+		purpose: PackedObjectTexturePurpose,
+		nextPageGeneration: number,
+	): void {
+		const committed = this.#nextPageGeneration.get(purpose) ?? 0;
+		if (nextPageGeneration < committed) {
+			throw new Error(
+				`Atlas page generation for ${purpose} regressed from ${committed} to ${nextPageGeneration}.`,
+			);
+		}
+		this.#nextPageGeneration.set(purpose, nextPageGeneration);
 	}
 
 	async #publishPlan(

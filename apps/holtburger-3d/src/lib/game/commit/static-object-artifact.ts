@@ -1,7 +1,7 @@
 import { Mat4 } from "../math/types";
 import type { ResolvedOutdoorStaticLayerSource } from "../resolution/landblock-layer";
 import type { StaticObjectLayerArtifact } from "./artifacts";
-import type { StaticObjectGeometryResult } from "./static-object-geometry-worker";
+import type { StaticObjectGeometryPreparationResult } from "./static-object-geometry-worker";
 import type { StaticInstallResourceNamespace } from "../systems/static-resources";
 import type { AssetTextureFact, AssetTextureKey } from "../textures/types";
 
@@ -9,7 +9,7 @@ import type { AssetTextureFact, AssetTextureKey } from "../textures/types";
 export function assembleStaticObjectArtifact(options: {
 	readonly source: ResolvedOutdoorStaticLayerSource;
 	readonly resourceNamespace: StaticInstallResourceNamespace;
-	readonly geometry: StaticObjectGeometryResult | null;
+	readonly geometry: StaticObjectGeometryPreparationResult | null;
 	readonly textureRequirements: readonly AssetTextureFact[];
 }): StaticObjectLayerArtifact | null {
 	const geometry = options.geometry;
@@ -19,26 +19,54 @@ export function assembleStaticObjectArtifact(options: {
 	const requiredTextures = new Set<AssetTextureKey>(
 		options.textureRequirements.map(({ key }) => key),
 	);
-	for (const range of geometry.ranges) {
+	for (const range of [
+		...geometry.drawUnits,
+		...geometry.frameStreamedInstances,
+	]) {
 		for (const texture of [
 			range.material.textures.base,
 			range.material.textures.palette,
 		]) {
 			if (texture !== null && !requiredTextures.has(texture)) {
 				throw new Error(
-					`Baked static-object range lacks a logical texture requirement for ${texture}.`,
+					`Static-object draw contribution lacks a logical texture requirement for ${texture}.`,
 				);
 			}
 		}
 	}
-	const { workerDurationMs, ...bakeMetrics } = geometry.metrics;
+	const hasBakedOutput = geometry.metrics.bakedDrawUnitCount > 0;
+	const hasInstancedOutput =
+		geometry.metrics.persistentDrawUnitCount > 0 ||
+		geometry.metrics.transparentTemplateInstanceCount > 0;
 	return {
-		bakeDiagnostics: {
-			...bakeMetrics,
-			geometryWorkerDurationMs: workerDurationMs,
+		geometryDiagnostics: {
+			bakedFallbackRangeCount: geometry.metrics.bakedDrawUnitCount,
+			bakedGeometryBytes: geometry.metrics.bakedGeometryBytes,
+			geometryWorkerDurationMs: geometry.metrics.workerDurationMs,
+			instancedGeometryBytes: geometry.metrics.instancedGeometryBytes,
+			persistentCohortCount: geometry.metrics.persistentCohortCount,
+			persistentDrawUnitCount: geometry.metrics.persistentDrawUnitCount,
+			persistentInstanceCount: geometry.metrics.persistentInstanceCount,
+			persistentStreamBytes: geometry.metrics.persistentStreamBytes,
+			persistentStreamCount: geometry.metrics.persistentStreamCount,
+			sourceMaterialSlotCount: geometry.metrics.sourceMaterialSlotCount,
+			sourcePartCount: geometry.metrics.sourcePartCount,
+			sourceRangeCount: geometry.metrics.sourceRangeCount,
+			sourceResidentCount: geometry.metrics.sourceResidentCount,
+			strategy:
+				hasBakedOutput && hasInstancedOutput
+					? "mixed"
+					: hasInstancedOutput
+						? "instanced"
+						: "baked",
+			transparentTemplateBytes: geometry.metrics.transparentTemplateBytes,
+			transparentTemplateCohortCount:
+				geometry.metrics.transparentTemplateCohortCount,
+			transparentTemplateInstanceCount:
+				geometry.metrics.transparentTemplateInstanceCount,
 		},
-		geometry: [geometry.geometry],
-		instanceStreams: [],
+		geometry: geometry.geometry,
+		instanceStreams: geometry.instanceStreams,
 		objects: [
 			{
 				localBounds: geometry.bounds,
@@ -48,15 +76,8 @@ export function assembleStaticObjectArtifact(options: {
 					localTransform: Mat4.identity(),
 				},
 				renderable: {
-					drawUnits: geometry.ranges.map((range) => ({
-						geometry: geometry.geometry.key,
-						indexCount: range.indexCount,
-						indexStart: range.indexStart,
-						kind: "baked" as const,
-						material: range.material,
-						ordering: range.ordering,
-						transparentSort: range.transparentSort,
-					})),
+					drawUnits: geometry.drawUnits,
+					frameStreamedInstances: geometry.frameStreamedInstances,
 				},
 			},
 		],

@@ -15,12 +15,13 @@ import type {
 
 const HEADER_LENGTH = 16;
 const MAGIC = "HBLB";
-const VERSION = 1;
+const VERSION = 2;
 const datId = z.string().regex(/^0x[0-9a-f]{8}$/i);
 const layer = z.enum([
 	LandblockLayerKind.Terrain,
 	LandblockLayerKind.Buildings,
 	LandblockLayerKind.Objects,
+	LandblockLayerKind.Generated,
 ]);
 const manifestSchema = z.object({
 	transport: z.literal("holtburger-landblock-source-batch"),
@@ -109,13 +110,16 @@ export function decodeLandblockSourceBatch(
 		throw new Error("Landblock source batch contains duplicate layer records.");
 	}
 
-	const records = new Map<LandblockSourceLayer, LandblockSourceRecord>();
+	const recordRanges = new Map<
+		LandblockSourceLayer,
+		{ readonly start: number; readonly end: number }
+	>();
+	const claimedRanges: Array<{
+		readonly start: number;
+		readonly end: number;
+		readonly layer: LandblockSourceLayer;
+	}> = [];
 	for (const record of manifest.records) {
-		if (records.has(record.layer)) {
-			throw new Error(
-				`Landblock source batch contains duplicate ${record.layer} records.`,
-			);
-		}
 		const start = recordDataOffset + record.byteOffset;
 		const end = start + record.byteLength;
 		if (start < recordDataOffset || end > response.byteLength) {
@@ -123,7 +127,27 @@ export function decodeLandblockSourceBatch(
 				`Landblock source batch ${record.layer} record byte range is invalid.`,
 			);
 		}
-		const bytes = Uint8Array.from(response.subarray(start, end));
+		const overlap = claimedRanges.find(
+			(claimed) => start < claimed.end && end > claimed.start,
+		);
+		if (overlap) {
+			throw new Error(
+				`Landblock source batch ${record.layer} record overlaps ${overlap.layer}.`,
+			);
+		}
+		claimedRanges.push({ end, layer: record.layer, start });
+		recordRanges.set(record.layer, { end, start });
+	}
+
+	const records = new Map<LandblockSourceLayer, LandblockSourceRecord>();
+	for (const record of manifest.records) {
+		const range = recordRanges.get(record.layer);
+		if (!range) {
+			throw new Error(
+				`Landblock source batch lost the validated ${record.layer} record range.`,
+			);
+		}
+		const bytes = Uint8Array.from(response.subarray(range.start, range.end));
 		const decoded = decodeRecord(
 			record.layer,
 			bytes,

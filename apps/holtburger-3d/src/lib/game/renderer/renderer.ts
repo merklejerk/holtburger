@@ -41,20 +41,56 @@ export interface FrameSelectionMetrics {
 	readonly visiblePortalCrossings: number;
 	/** Visible terrain contributions converted into concrete frame inputs. */
 	readonly terrainFrameInputs: number;
-	/** Visible static-object contributions selected before their draw path is implemented. */
-	readonly visibleStaticObjects: number;
+	/** Distinct producer culling groups contributing visible static nodes. */
+	readonly visibleStaticLayerCount: number;
+	/** Visible static scene nodes selected after node-level frustum culling. */
+	readonly visibleStaticNodeCount: number;
 	/** Visible dynamic contributions selected before their draw path is implemented. */
 	readonly visibleDynamics: number;
 	/** Visible environment-cell shell contributions selected before their draw path is implemented. */
 	readonly visibleEnvCellShells: number;
-	/** All static-building ranges submitted to WebGL this frame. */
-	readonly submittedBuildingRanges: number;
-	/** Triangles selected by every submitted static-building range. */
-	readonly submittedBuildingTriangles: number;
-	/** Transparent static-building ranges submitted after near/far ordering. */
-	readonly submittedTransparentBuildingRanges: number;
-	/** Additive static-building ranges submitted in their deterministic distinct phase. */
-	readonly submittedAdditiveBuildingRanges: number;
+	/** All static-object draw calls submitted to the backend this frame. */
+	readonly submittedStaticObjectDrawCount: number;
+	/** Triangles submitted by all static-object draws, including instance multiplication. */
+	readonly submittedStaticObjectTriangleCount: number;
+	/** Baked static-object draw calls submitted this frame. */
+	readonly submittedBakedStaticObjectDrawCount: number;
+	/** Triangles submitted by baked static-object draws. */
+	readonly submittedBakedStaticObjectTriangleCount: number;
+	/** Persistent instanced draw calls submitted this frame. */
+	readonly submittedPersistentInstancedDrawCount: number;
+	/** Persistent instances submitted this frame. */
+	readonly submittedPersistentInstanceCount: number;
+	/** Source triangles referenced by instanced draws before instance multiplication. */
+	readonly submittedInstancedSourceTriangleCount: number;
+	/** Transparent baked ranges and instance templates classified for view submission. */
+	readonly transparentStaticCandidateCount: number;
+	/** Transparent candidates outside the near-sort radius and eligible for cohort batching. */
+	readonly farTransparentStaticCandidateCount: number;
+	/** Transparent candidates inside the near-sort radius and ordered back-to-front. */
+	readonly nearTransparentStaticCandidateCount: number;
+	/** Adjacent compatible transparent instance runs emitted after global ordering. */
+	readonly transparentFrameRunCount: number;
+	/** Cohort-batched transparent instance runs emitted outside the near-sort radius. */
+	readonly farTransparentFrameRunCount: number;
+	/** Adjacent transparent instance runs emitted after near back-to-front ordering. */
+	readonly nearTransparentFrameRunCount: number;
+	/** Per-view transparent instance uploads with a non-empty population. */
+	readonly transparentFrameUploadCount: number;
+	/** Numeric bytes uploaded for transparent instances across all views. */
+	readonly transparentFrameUploadBytes: number;
+	/** Transparent static-object draw calls submitted after sorting. */
+	readonly submittedTransparentStaticDrawCount: number;
+	/** Frame-streamed transparent instances submitted after sorting. */
+	readonly submittedTransparentInstanceCount: number;
+	/** Additive static-object draw calls submitted in their deterministic phase. */
+	readonly submittedAdditiveStaticDrawCount: number;
+	/** Current reusable transparent frame-arena capacity in instances. */
+	readonly frameInstanceCapacity: number;
+	/** Lifetime geometric growth count for the reusable frame arena. */
+	readonly frameInstanceGrowthCount: number;
+	/** Lifetime largest per-view transparent instance population. */
+	readonly frameInstanceViewHighWaterMark: number;
 	/** Object-program activation count across every rendered view. */
 	readonly objectProgramChanges: number;
 	/** Object atlas/detail texture binds performed across every rendered view. */

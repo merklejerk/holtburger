@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -17,6 +18,9 @@ struct Args {
     near_ac: Option<String>,
     #[arg(long, default_value_t = 20.0)]
     radius: f32,
+    /// Repeat cold and shared-cache LoD assembly timings for each requested landblock.
+    #[arg(long, default_value_t = 0)]
+    timing_iterations: usize,
     #[arg(required = true)]
     landblocks: Vec<String>,
 }
@@ -29,6 +33,10 @@ fn main() -> Result<()> {
 
     for raw_landblock in &args.landblocks {
         let landblock_id = normalize_landblock_id(parse_hex_u32(raw_landblock)?);
+        println!("landblock=0x{landblock_id:08x}");
+        if args.timing_iterations > 0 {
+            print_lod_timings(&content, landblock_id, args.timing_iterations);
+        }
         let asset = LandblockSceneLodAssetAssembler::new().assemble_landblock_with_cache(
             &content,
             &decode_cache,
@@ -38,7 +46,6 @@ fn main() -> Result<()> {
             },
         );
         let statics = collect_outdoor_statics(&asset);
-        println!("landblock=0x{landblock_id:08x}");
         println!("  statics={}", statics.len());
         println!(
             "  explicit={} buildings={} generated={}",
@@ -84,6 +91,63 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Measure content assembly only; host serialization and transport are intentionally excluded.
+fn print_lod_timings(content: &ContentRepository, landblock_id: u32, iterations: usize) {
+    println!("  assemblyTimings iterations={iterations}");
+    for level in [
+        LandblockSceneLodLevel::Level1,
+        LandblockSceneLodLevel::Level2,
+    ] {
+        let mut samples = Vec::with_capacity(iterations);
+        for _ in 0..iterations {
+            let cache = ContentDecodeCache::new();
+            let started = Instant::now();
+            let _ = LandblockSceneLodAssetAssembler::new().assemble_landblock_with_cache(
+                content,
+                &cache,
+                LandblockSceneLodRequest {
+                    landblock_id,
+                    level,
+                },
+            );
+            samples.push(started.elapsed());
+        }
+        print_timing_summary(&format!("cold-{level:?}"), &mut samples);
+    }
+
+    let mut shared_cache_samples = Vec::with_capacity(iterations);
+    for _ in 0..iterations {
+        let cache = ContentDecodeCache::new();
+        let started = Instant::now();
+        for level in [
+            LandblockSceneLodLevel::Level1,
+            LandblockSceneLodLevel::Level2,
+        ] {
+            let _ = LandblockSceneLodAssetAssembler::new().assemble_landblock_with_cache(
+                content,
+                &cache,
+                LandblockSceneLodRequest {
+                    landblock_id,
+                    level,
+                },
+            );
+        }
+        shared_cache_samples.push(started.elapsed());
+    }
+    print_timing_summary("shared-cache-level1-then-level2", &mut shared_cache_samples);
+}
+
+fn print_timing_summary(label: &str, samples: &mut [Duration]) {
+    samples.sort();
+    let median = samples[samples.len() / 2];
+    println!(
+        "    {label} minMs={:.3} medianMs={:.3} maxMs={:.3}",
+        samples[0].as_secs_f64() * 1_000.0,
+        median.as_secs_f64() * 1_000.0,
+        samples[samples.len() - 1].as_secs_f64() * 1_000.0,
+    );
 }
 
 fn print_diagnostics(diagnostics: &PreparedContentSourceDiagnostics) {

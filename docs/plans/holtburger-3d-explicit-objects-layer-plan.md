@@ -1,7 +1,6 @@
 # Holtburger 3D Explicit Objects Layer Plan
 
-Status: In progress. Phases 1 through 6 are complete; Phase 7 is the active closeout milestone.
-Evidence preflight and browser acceptance completed on 2026-07-25.
+Status: Complete. All seven phases landed and passed their closeout verification on 2026-07-25.
 
 ## Context and Boundaries
 
@@ -780,18 +779,27 @@ claims without content assembler errors or omissions:
 
 #### Task Checklist
 
-- [ ] Run targeted vestige searches for `building-source`, `BuildingGeometry`,
+- [x] Run targeted vestige searches for `building-source`, `BuildingGeometry`,
       `BuildingLayerSourceCommit`, and related names.
-- [ ] Review public types and comments for honest layer-neutral vocabulary.
-- [ ] Review culling diagnostics and tests for actual group separation rather than string snapshots
+- [x] Review public types and comments for honest layer-neutral vocabulary.
+- [x] Review culling diagnostics and tests for actual group separation rather than string snapshots
       alone.
-- [ ] Run the full verification matrix.
-- [ ] Refresh the architecture audit where appropriate.
-- [ ] Mark this plan complete only after live Level 2 lifecycle acceptance.
+- [x] Run the full verification matrix.
+- [x] Refresh the architecture audit where appropriate.
+- [x] Mark this plan complete only after live Level 2 lifecycle acceptance.
 
 #### Decisions and Course Corrections
 
-- Pending execution.
+- The final terminology search found no obsolete building-only production source, worker, artifact,
+  decoder, or texture-input vocabulary. One shared-artifact comment was corrected to
+  `outdoor-static`; the remaining `SyntheticBlendedBuildingPipeline` is intentionally a
+  building-only renderer fixture and retains an honestly building-specific resource key.
+- The fresh architecture audit now records the outdoor-static source-to-publication spine,
+  per-landblock batch boundary, exact layer ownership, temporary failure notification policy, and
+  remaining measured risks. It keeps the requested `src-tauri/src/lib.rs` cohesion work deferred.
+- Closeout verification passed: 45 TypeScript test files / 206 tests, 17 Rust tests, TypeScript
+  and Svelte checking, ESLint, Knip, clippy with warnings denied, Rust formatting, and targeted
+  Prettier checks. Repository-wide Prettier debt remains intentionally outside this change.
 
 ## Dry-Run Findings Incorporated into the Phases
 

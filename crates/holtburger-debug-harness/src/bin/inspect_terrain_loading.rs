@@ -3,8 +3,8 @@ use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use holtburger_content::{
-    ContentDecodeCache, ContentRepository, LandblockSceneLodLayer, LandblockSceneLodLevel,
-    LandblockSceneLodRequest, ResolvedRegionDetailRoleKind, TexturePixelFormat,
+    ContentDecodeCache, ContentRepository, LandblockOutdoorAssetRequest,
+    ResolvedRegionDetailRoleKind, StaticOutdoorSceneSourceFamilies, TexturePixelFormat,
     road_code_from_cell_terrain, terrain_code_from_cell_terrain,
 };
 use holtburger_core::{ContentAsset, ContentAssetRequest, ContentAssetService};
@@ -31,21 +31,22 @@ fn main() -> Result<()> {
     let service =
         ContentAssetService::new(Arc::clone(&repository), Arc::new(ContentDecodeCache::new()));
 
-    let scene_asset = service.load(ContentAssetRequest::LandblockSceneLod(
-        LandblockSceneLodRequest::outdoor(landblock_id, LandblockSceneLodLevel::Level0),
+    let outdoor_asset = service.load(ContentAssetRequest::LandblockOutdoor(
+        LandblockOutdoorAssetRequest::new(
+            landblock_id,
+            true,
+            StaticOutdoorSceneSourceFamilies::new(false, false, false),
+        ),
     ))?;
-    let ContentAsset::LandblockSceneLod {
-        scene_lod,
+    let ContentAsset::LandblockOutdoor {
+        outdoor,
         region_number,
         ..
-    } = scene_asset
+    } = outdoor_asset
     else {
-        unreachable!("landblock request must return a landblock scene asset")
+        unreachable!("landblock request must return outdoor source facts")
     };
-    let terrain = scene_lod.layers.iter().find_map(|layer| match layer {
-        LandblockSceneLodLayer::Terrain(layer) => layer.terrain.as_ref(),
-        _ => None,
-    });
+    let terrain = outdoor.cell_landblock.as_ref().map(|fact| &fact.terrain);
     let Some(terrain) = terrain else {
         println!("landblock 0x{landblock_id:08X}: terrain absent");
         return Ok(());

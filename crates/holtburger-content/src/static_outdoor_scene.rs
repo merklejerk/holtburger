@@ -24,7 +24,7 @@ pub struct StaticOutdoorScene {
     pub diagnostics: StaticOutdoorSceneDiagnostics,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StaticOutdoorSceneSourceFamilies {
     /// Includes explicit static objects declared by the landblock info record.
     pub explicit_objects: bool,

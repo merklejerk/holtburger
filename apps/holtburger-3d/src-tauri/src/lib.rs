@@ -208,8 +208,7 @@ async fn build_landblock_source_batch_response(
 }
 
 fn serialize_terrain_source_record(source_batch: &LoadedLandblockSourceBatch) -> Result<Vec<u8>> {
-    let terrain_layer = source_batch.terrain()?;
-    let terrain = terrain_layer.terrain.as_ref();
+    let terrain = source_batch.terrain()?;
     let manifest = TerrainSourceManifest {
         transport: "holtburger-landblock-terrain-record",
         version: TERRAIN_SOURCE_BINARY_VERSION,
@@ -228,9 +227,9 @@ async fn serialize_outdoor_static_source_record(
     layer: LandblockSourceLayer,
 ) -> Result<Vec<u8>> {
     let statics = match layer {
-        LandblockSourceLayer::Buildings => &source_batch.buildings()?.statics,
-        LandblockSourceLayer::Objects => &source_batch.objects()?.statics,
-        LandblockSourceLayer::Generated => &source_batch.generated()?.statics,
+        LandblockSourceLayer::Buildings => source_batch.buildings()?,
+        LandblockSourceLayer::Objects => source_batch.objects()?,
+        LandblockSourceLayer::Generated => source_batch.generated()?,
         LandblockSourceLayer::Terrain => {
             anyhow::bail!("Terrain does not have an outdoor static source record")
         }

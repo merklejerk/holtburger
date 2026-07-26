@@ -4,10 +4,9 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use clap::Parser;
 use holtburger_content::{
-    ContentDecodeCache, ContentRepository, LandblockOutdoorStaticMember, LandblockSceneLodAsset,
-    LandblockSceneLodAssetAssembler, LandblockSceneLodLayer, LandblockSceneLodLevel,
-    LandblockSceneLodRequest, PreparedContentSourceDiagnostics, PreparedStaticInstanceKind,
-    normalize_landblock_id,
+    ContentDecodeCache, ContentRepository, LandblockOutdoorAsset, LandblockOutdoorAssetAssembler,
+    LandblockOutdoorAssetRequest, LandblockOutdoorStaticMember, PreparedContentSourceDiagnostics,
+    PreparedStaticInstanceKind, StaticOutdoorSceneSourceFamilies, normalize_landblock_id,
 };
 
 #[derive(Parser, Debug)]
@@ -35,15 +34,16 @@ fn main() -> Result<()> {
         let landblock_id = normalize_landblock_id(parse_hex_u32(raw_landblock)?);
         println!("landblock=0x{landblock_id:08x}");
         if args.timing_iterations > 0 {
-            print_lod_timings(&content, landblock_id, args.timing_iterations);
+            print_assembly_timings(&content, landblock_id, args.timing_iterations);
         }
-        let asset = LandblockSceneLodAssetAssembler::new().assemble_landblock_with_cache(
+        let asset = LandblockOutdoorAssetAssembler::new().assemble_landblock_with_cache(
             &content,
             &decode_cache,
-            LandblockSceneLodRequest {
+            LandblockOutdoorAssetRequest::new(
                 landblock_id,
-                level: LandblockSceneLodLevel::Level3,
-            },
+                false,
+                StaticOutdoorSceneSourceFamilies::ALL,
+            ),
         );
         let statics = collect_outdoor_statics(&asset);
         println!("  statics={}", statics.len());
@@ -94,49 +94,52 @@ fn main() -> Result<()> {
 }
 
 /// Measure content assembly only; host serialization and transport are intentionally excluded.
-fn print_lod_timings(content: &ContentRepository, landblock_id: u32, iterations: usize) {
+fn print_assembly_timings(content: &ContentRepository, landblock_id: u32, iterations: usize) {
     println!("  assemblyTimings iterations={iterations}");
-    for level in [
-        LandblockSceneLodLevel::Level1,
-        LandblockSceneLodLevel::Level2,
+    for (label, families) in [
+        (
+            "buildings",
+            StaticOutdoorSceneSourceFamilies::new(false, true, false),
+        ),
+        (
+            "explicit-and-buildings",
+            StaticOutdoorSceneSourceFamilies::new(true, true, false),
+        ),
     ] {
         let mut samples = Vec::with_capacity(iterations);
         for _ in 0..iterations {
             let cache = ContentDecodeCache::new();
             let started = Instant::now();
-            let _ = LandblockSceneLodAssetAssembler::new().assemble_landblock_with_cache(
+            let _ = LandblockOutdoorAssetAssembler::new().assemble_landblock_with_cache(
                 content,
                 &cache,
-                LandblockSceneLodRequest {
-                    landblock_id,
-                    level,
-                },
+                LandblockOutdoorAssetRequest::new(landblock_id, false, families),
             );
             samples.push(started.elapsed());
         }
-        print_timing_summary(&format!("cold-{level:?}"), &mut samples);
+        print_timing_summary(&format!("cold-{label}"), &mut samples);
     }
 
     let mut shared_cache_samples = Vec::with_capacity(iterations);
     for _ in 0..iterations {
         let cache = ContentDecodeCache::new();
         let started = Instant::now();
-        for level in [
-            LandblockSceneLodLevel::Level1,
-            LandblockSceneLodLevel::Level2,
+        for families in [
+            StaticOutdoorSceneSourceFamilies::new(false, true, false),
+            StaticOutdoorSceneSourceFamilies::new(true, true, false),
         ] {
-            let _ = LandblockSceneLodAssetAssembler::new().assemble_landblock_with_cache(
+            let _ = LandblockOutdoorAssetAssembler::new().assemble_landblock_with_cache(
                 content,
                 &cache,
-                LandblockSceneLodRequest {
-                    landblock_id,
-                    level,
-                },
+                LandblockOutdoorAssetRequest::new(landblock_id, false, families),
             );
         }
         shared_cache_samples.push(started.elapsed());
     }
-    print_timing_summary("shared-cache-level1-then-level2", &mut shared_cache_samples);
+    print_timing_summary(
+        "shared-decode-cache-buildings-then-explicit",
+        &mut shared_cache_samples,
+    );
 }
 
 fn print_timing_summary(label: &str, samples: &mut [Duration]) {
@@ -165,19 +168,8 @@ fn print_diagnostics(diagnostics: &PreparedContentSourceDiagnostics) {
     }
 }
 
-fn collect_outdoor_statics(asset: &LandblockSceneLodAsset) -> Vec<&LandblockOutdoorStaticMember> {
-    let mut statics = Vec::new();
-    for layer in &asset.layers {
-        match layer {
-            LandblockSceneLodLayer::OutdoorBuildings(layer) => statics.extend(&layer.statics),
-            LandblockSceneLodLayer::OutdoorExplicitObjects(layer)
-            | LandblockSceneLodLayer::OutdoorGeneratedScenery(layer) => {
-                statics.extend(&layer.statics);
-            }
-            LandblockSceneLodLayer::Terrain(_) | LandblockSceneLodLayer::EnvCellSystem(_) => {}
-        }
-    }
-    statics
+fn collect_outdoor_statics(asset: &LandblockOutdoorAsset) -> Vec<&LandblockOutdoorStaticMember> {
+    asset.statics.iter().collect()
 }
 
 fn print_nearby_statics(

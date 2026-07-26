@@ -29,11 +29,34 @@ pub struct EnvCellAsset {
 pub struct LandblockOutdoorAsset {
     pub landblock_id: u32,
     pub cell_landblock: Option<CellLandblockFact>,
-    pub terrain_mesh: Option<CanonicalTerrainMesh>,
     pub statics: Vec<LandblockOutdoorStaticMember>,
     pub building_transition_apertures: Vec<PreparedBuildingTransitionAperture>,
-    pub outdoor_bvh: Option<PreparedBvh>,
     pub diagnostics: PreparedContentSourceDiagnostics,
+}
+
+/// Exact outdoor source families requested by a content consumer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LandblockOutdoorAssetRequest {
+    /// Normalized outdoor landblock identity.
+    landblock_id: u32,
+    /// Whether canonical authored terrain samples are required.
+    terrain: bool,
+    /// Exact static source families required by the caller.
+    static_families: StaticOutdoorSceneSourceFamilies,
+}
+
+impl LandblockOutdoorAssetRequest {
+    pub fn new(
+        raw_landblock_id: u32,
+        terrain: bool,
+        static_families: StaticOutdoorSceneSourceFamilies,
+    ) -> Self {
+        Self {
+            landblock_id: normalize_landblock_id(raw_landblock_id),
+            terrain,
+            static_families,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -43,123 +66,6 @@ pub struct EnvCellSystemAsset {
     pub env_cells: Vec<EnvCellSystemCell>,
     pub landblock_bvh_items: Vec<EnvCellSystemBvhItem>,
     pub landblock_bvh: Option<PreparedBvh>,
-    pub diagnostics: PreparedContentSourceDiagnostics,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum LandblockSceneLodLevel {
-    /// Terrain source only.
-    Level0,
-    /// Terrain plus outdoor building source.
-    Level1,
-    /// Level 1 plus explicit outdoor object source.
-    Level2,
-    /// Level 2 plus generated outdoor scenery source.
-    Level3,
-    /// Level 3 plus env-cell system source.
-    Level4,
-}
-
-impl LandblockSceneLodLevel {
-    pub fn from_u8(value: u8) -> Option<Self> {
-        match value {
-            0 => Some(Self::Level0),
-            1 => Some(Self::Level1),
-            2 => Some(Self::Level2),
-            3 => Some(Self::Level3),
-            4 => Some(Self::Level4),
-            _ => None,
-        }
-    }
-
-    pub fn as_u8(self) -> u8 {
-        match self {
-            Self::Level0 => 0,
-            Self::Level1 => 1,
-            Self::Level2 => 2,
-            Self::Level3 => 3,
-            Self::Level4 => 4,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct LandblockSceneLodRequest {
-    pub landblock_id: u32,
-    pub level: LandblockSceneLodLevel,
-}
-
-impl LandblockSceneLodRequest {
-    pub fn outdoor(raw_landblock_id: u32, level: LandblockSceneLodLevel) -> Self {
-        Self {
-            landblock_id: normalize_landblock_id(raw_landblock_id),
-            level,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct LandblockSceneLodAsset {
-    pub landblock_id: u32,
-    pub level: LandblockSceneLodLevel,
-    pub layers: Vec<LandblockSceneLodLayer>,
-    pub diagnostics: PreparedContentSourceDiagnostics,
-}
-
-#[derive(Debug, Clone)]
-pub enum LandblockSceneLodLayer {
-    Terrain(LandblockSceneLodTerrainLayer),
-    OutdoorBuildings(LandblockSceneLodOutdoorBuildingsLayer),
-    OutdoorExplicitObjects(LandblockSceneLodOutdoorStaticLayer),
-    OutdoorGeneratedScenery(LandblockSceneLodOutdoorStaticLayer),
-    EnvCellSystem(LandblockSceneLodEnvCellSystemLayer),
-}
-
-#[derive(Debug, Clone)]
-pub struct LandblockSceneLodTerrainLayer {
-    /// Canonical authored terrain grid, or `None` when the landblock has no CellLandblock record.
-    pub terrain: Option<TerrainGridSource>,
-    /// Terrain mesh for spatial consumers, or `None` when the landblock has no CellLandblock record.
-    pub terrain_mesh: Option<CanonicalTerrainMesh>,
-}
-
-#[derive(Debug, Clone)]
-pub struct LandblockSceneLodOutdoorBuildingsLayer {
-    /// Prepared outdoor building members for this landblock LoD layer.
-    pub statics: Vec<LandblockOutdoorStaticMember>,
-    /// Transition apertures derived from building portal geometry.
-    pub building_transition_apertures: Vec<PreparedBuildingTransitionAperture>,
-    /// Layer-local BVH for building members with finite instance bounds.
-    pub outdoor_bvh: Option<PreparedBvh>,
-}
-
-#[derive(Debug, Clone)]
-pub struct LandblockSceneLodOutdoorStaticLayer {
-    /// Prepared static members for this landblock LoD layer.
-    pub statics: Vec<LandblockOutdoorStaticMember>,
-    /// Layer-local BVH for static members with finite instance bounds.
-    pub outdoor_bvh: Option<PreparedBvh>,
-}
-
-#[derive(Debug, Clone)]
-pub struct LandblockSceneLodEnvCellSystemLayer {
-    /// Normalized outdoor landblock id that owns this env-cell system.
-    pub landblock_id: u32,
-    /// Normalized landblock-info record id used to discover env cells.
-    pub landblock_info_id: u32,
-    /// Building transition apertures needed to connect outdoor building portals to env cells.
-    pub building_transition_apertures: Vec<PreparedBuildingTransitionAperture>,
-    /// Canonical ownerless portal graph for env-cell and outdoor/building transition traversal.
-    pub portal_connectivity_graph: PreparedPortalConnectivityGraph,
-    /// Renderer-ready portal aperture resources for the env-cell-system layer.
-    pub portal_aperture_resources: Vec<PreparedPortalApertureResource>,
-    /// Prepared env-cell bundle cells for this landblock.
-    pub env_cells: Vec<EnvCellSystemCell>,
-    /// Landblock-space env-cell BVH item records.
-    pub landblock_bvh_items: Vec<EnvCellSystemBvhItem>,
-    /// Landblock-space env-cell BVH.
-    pub landblock_bvh: Option<PreparedBvh>,
-    /// Diagnostics collected while preparing the env-cell system layer.
     pub diagnostics: PreparedContentSourceDiagnostics,
 }
 
@@ -234,167 +140,6 @@ pub struct PreparedBuildingTransitionAperture {
     pub other_portal_id: u16,
     pub linked_env_cell_ids: Vec<u32>,
     pub points: Vec<PreparedVec3>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct PreparedPortalConnectivityGraph {
-    /// Portal graph nodes sorted by stable node id.
-    pub nodes: Vec<PreparedPortalConnectivityNode>,
-    /// Directed portal graph edges sorted by stable edge id.
-    pub edges: Vec<PreparedPortalConnectivityEdge>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct PreparedPortalConnectivityNode {
-    /// Stable graph node id matching the renderer portal graph contract.
-    pub node_id: String,
-    /// Scene entity represented by this graph node.
-    pub scene: PreparedPortalConnectivityScene,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum PreparedPortalConnectivityScene {
-    EnvCell { env_cell_id: u32 },
-    Outdoor { landblock_id: u32 },
-    LandblockBuilding { building_instance_id: String },
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct PreparedPortalConnectivityEdge {
-    /// Stable edge id matching the renderer portal graph contract.
-    pub edge_id: String,
-    pub source_node_id: String,
-    pub target_node_id: String,
-    pub link_id: String,
-    pub source_index: usize,
-    pub flags: u16,
-    pub polygon_id: Option<u16>,
-    pub provenance: PreparedPortalConnectivityEdgeProvenance,
-    pub scene_crossing: Option<PreparedPortalConnectivitySceneCrossing>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum PreparedPortalConnectivityEdgeProvenance {
-    EnvCellPortal {
-        source_env_cell_id: u32,
-        source_portal_id: String,
-        target: PreparedPortalEndpoint,
-    },
-    BuildingTransition {
-        aperture_resource_id: String,
-        portal_id: String,
-        building_instance_id: String,
-        building_portal_id: String,
-        target_env_cell_id: u32,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum PreparedPortalConnectivitySceneCrossing {
-    EnvCellToEnvCell {
-        source_env_cell_id: u32,
-        target_env_cell_id: u32,
-    },
-    EnvCellToOutdoor {
-        source_env_cell_id: u32,
-        outdoor_landblock_id: u32,
-    },
-    EnvCellToLandblockBuilding {
-        source_env_cell_id: u32,
-        building_instance_id: String,
-    },
-    OutdoorToEnvCell {
-        outdoor_landblock_id: u32,
-        env_cell_id: u32,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum PreparedPortalEndpoint {
-    EnvCell {
-        env_cell_id: u32,
-        portal_id: String,
-    },
-    Outside {
-        landblock_id: u32,
-    },
-    LandblockBuilding {
-        instance_id: String,
-        portal_id: String,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct PreparedPortalApertureResource {
-    /// Stable resource id matching the renderer portal aperture contract.
-    pub aperture_resource_id: String,
-    pub coordinate_space: PreparedPortalApertureCoordinateSpace,
-    pub landblock_id: u32,
-    pub indices: Vec<u32>,
-    pub ranges: Vec<PreparedPortalApertureRange>,
-    pub source_domain: PreparedPortalApertureSourceDomain,
-    pub vertices: Vec<PreparedVec3>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PreparedPortalApertureCoordinateSpace {
-    LandblockRenderLocal,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PreparedPortalApertureSourceDomain {
-    EnvCellSystem,
-    OutdoorBuildings,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum PreparedPortalApertureRange {
-    EnvCellPortal(PreparedEnvCellPortalApertureRange),
-    BuildingTransition(PreparedBuildingTransitionApertureRange),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct PreparedEnvCellPortalApertureRange {
-    pub range_id: String,
-    pub source_id: String,
-    pub first_index: usize,
-    pub index_count: usize,
-    pub source: PreparedEnvCellPortalApertureRangeSource,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct PreparedEnvCellPortalApertureRangeSource {
-    pub env_cell_id: u32,
-    pub landblock_id: u32,
-    pub polygon_id: Option<u16>,
-    pub portal_id: String,
-    pub source_index: usize,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct PreparedBuildingTransitionApertureRange {
-    pub range_id: String,
-    pub source_id: String,
-    pub first_index: usize,
-    pub index_count: usize,
-    pub source: PreparedBuildingTransitionApertureRangeSource,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct PreparedBuildingTransitionApertureRangeSource {
-    pub building_instance_id: String,
-    pub building_portal_id: String,
-    pub building_portal_source_index: usize,
-    pub linked_env_cell_ids: Vec<u32>,
-    pub other_cell_id: u16,
-    pub other_portal_id: u16,
-    pub poly_id: u16,
-    pub portal_id: String,
-    pub portal_index: i16,
-    pub source_asset_id: String,
-    pub source_did: u32,
-    pub landblock_id: u32,
-    pub target_env_cell_id: u32,
 }
 
 /// Immutable authored terrain facts in Holtburger's canonical row-major grid order.
@@ -488,59 +233,6 @@ pub struct EnvironmentFact {
 }
 
 #[derive(Debug, Clone)]
-pub struct CanonicalTerrainMesh {
-    pub landblock_id: u32,
-    pub grid_size: usize,
-    pub tile_size: f32,
-    pub vertices: Vec<PreparedVec3>,
-    pub triangles: Vec<PreparedTerrainTriangle>,
-    pub quads: Vec<PreparedTerrainQuad>,
-    pub terrain_bvh_items: Vec<PreparedTerrainBvhItem>,
-    pub terrain_bvh: Option<PreparedBvh>,
-    pub min_height: f32,
-    pub max_height: f32,
-}
-
-#[derive(Debug, Clone)]
-pub struct PreparedTerrainTriangle {
-    pub a: usize,
-    pub b: usize,
-    pub c: usize,
-    pub terrain_type: u16,
-    pub average_height: f32,
-}
-
-#[derive(Debug, Clone)]
-pub struct PreparedTerrainQuad {
-    pub terrain_quad_id: String,
-    pub row: usize,
-    pub col: usize,
-    pub quad_index: usize,
-    pub source_terrain_indices: [usize; 4],
-    pub vertex_indices: [usize; 4],
-    pub triangle_indices: [usize; 2],
-    pub diagonal: PreparedTerrainQuadDiagonal,
-    pub corner_terrain_codes: [u32; 4],
-    pub pcode: u32,
-    pub average_height: f32,
-    pub bounds: PreparedAabb,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PreparedTerrainQuadDiagonal {
-    SouthwestNortheast,
-    SoutheastNorthwest,
-}
-
-#[derive(Debug, Clone)]
-pub struct PreparedTerrainBvhItem {
-    pub row: usize,
-    pub col: usize,
-    pub quad_index: usize,
-    pub triangle_indices: [usize; 2],
-}
-
-#[derive(Debug, Clone)]
 pub struct PreparedInteriorCell {
     pub env_cell_id: u32,
     pub environment_id: u32,
@@ -630,18 +322,13 @@ pub struct PreparedStaticMesh {
 
 #[derive(Debug, Clone)]
 struct PreparedSpatialItem {
-    id: String,
     kind: PreparedSpatialItemKind,
     bounds: PreparedAabb,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PreparedSpatialItemKind {
-    TerrainQuad,
     EnvCellRoot,
-    OutdoorStatic,
-    Building,
-    IndoorStatic,
 }
 
 #[derive(Debug, Clone)]
@@ -654,10 +341,7 @@ pub struct PreparedBvh {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreparedBvhScope {
-    OutdoorTerrain,
-    OutdoorStatic,
     EnvCellSystem,
-    EnvCellLocal,
 }
 
 #[derive(Debug, Clone)]
@@ -671,21 +355,7 @@ pub struct PreparedBvhNode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreparedBvhKindMask {
-    OutdoorTerrain {
-        terrain_quad: bool,
-    },
-    OutdoorStatic {
-        static_object: bool,
-        building: bool,
-    },
-    EnvCellSystem {
-        env_cell_root: bool,
-    },
-    EnvCellLocal {
-        cell_structure_geometry: bool,
-        static_object: bool,
-        portal: bool,
-    },
+    EnvCellSystem { env_cell_root: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -810,7 +480,7 @@ pub struct EnvCellAssetAssembler;
 pub struct EnvCellSystemAssetAssembler;
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct LandblockSceneLodAssetAssembler;
+pub struct LandblockOutdoorAssetAssembler;
 
 struct PreparedContentAssemblyContext<'a> {
     source: ContentSourceReader<'a>,
@@ -1301,7 +971,7 @@ impl EnvCellSystemAssetAssembler {
     }
 }
 
-impl LandblockSceneLodAssetAssembler {
+impl LandblockOutdoorAssetAssembler {
     pub fn new() -> Self {
         Self
     }
@@ -1310,96 +980,19 @@ impl LandblockSceneLodAssetAssembler {
         &self,
         content: &ContentRepository,
         decode_cache: &ContentDecodeCache,
-        request: LandblockSceneLodRequest,
-    ) -> LandblockSceneLodAsset {
-        self.assemble_landblock_extending_cached_asset(content, decode_cache, request, None)
-    }
-
-    pub fn assemble_landblock_extending_cached_asset(
-        &self,
-        content: &ContentRepository,
-        decode_cache: &ContentDecodeCache,
-        request: LandblockSceneLodRequest,
-        cached: Option<&LandblockSceneLodAsset>,
-    ) -> LandblockSceneLodAsset {
+        request: LandblockOutdoorAssetRequest,
+    ) -> LandblockOutdoorAsset {
         let mut context = PreparedContentAssemblyContext::with_decode_cache(content, decode_cache);
-        let cached_level = cached
-            .filter(|asset| asset.landblock_id == request.landblock_id)
-            .map(|asset| asset.level);
-        let mut layers = cached
-            .into_iter()
-            .flat_map(|asset| &asset.layers)
-            .filter(|layer| {
-                landblock_scene_lod_layer_level(layer).as_u8()
-                    <= cached_level
-                        .expect("cached layer iteration requires cached level")
-                        .as_u8()
-                    && landblock_scene_lod_layer_level(layer).as_u8() <= request.level.as_u8()
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        layers.extend(self.assemble_outdoor_layers(&mut context, request, cached_level));
-        let mut diagnostics = cached
-            .filter(|asset| asset.level.as_u8() <= request.level.as_u8())
-            .map(|asset| asset.diagnostics.clone())
-            .unwrap_or_default();
-        diagnostics.extend(context.into_diagnostics());
-        if request.level == LandblockSceneLodLevel::Level4
-            && cached_level
-                .is_none_or(|level| level.as_u8() < LandblockSceneLodLevel::Level4.as_u8())
-        {
-            let building_transition_apertures =
-                collect_scene_lod_building_transition_apertures(&layers);
-            match EnvCellSystemAssetAssembler::new().assemble_landblock_with_cache(
-                content,
-                decode_cache,
-                request.landblock_id,
-            ) {
-                Ok(env_cells) => layers.push(LandblockSceneLodLayer::EnvCellSystem(
-                    landblock_scene_lod_env_cell_system_layer(
-                        env_cells,
-                        building_transition_apertures,
-                    ),
-                )),
-                Err(error) => diagnostics.errors.push(SourceLoadError {
-                    namespace: EOR_CELL_NAMESPACE,
-                    file_id: request.landblock_id,
-                    role: "landblock-scene-lod-env-cell-system",
-                    error_code: "asset-decode-failed",
-                    detail: format!(
-                        "Could not assemble scene LoD 4 env-cell system for landblock 0x{:08X}: {error:#}",
-                        request.landblock_id
-                    ),
-                }),
-            }
-        }
-
-        LandblockSceneLodAsset {
-            landblock_id: request.landblock_id,
-            level: request.level,
-            layers,
-            diagnostics,
-        }
-    }
-
-    fn assemble_outdoor_layers(
-        &self,
-        context: &mut PreparedContentAssemblyContext<'_>,
-        request: LandblockSceneLodRequest,
-        cached_level: Option<LandblockSceneLodLevel>,
-    ) -> Vec<LandblockSceneLodLayer> {
         let landblock_id = request.landblock_id;
-        let static_families = scene_lod_missing_static_source_families(request.level, cached_level);
-        let needs_terrain = cached_level.is_none();
-        let needs_cell_landblock = needs_terrain || static_families.generated_scenery;
+        let needs_cell_landblock = request.terrain || request.static_families.generated_scenery;
         let cell_landblock_source = needs_cell_landblock
             .then(|| context.load_cell_landblock(landblock_id))
             .flatten();
-        let terrain = if needs_terrain {
+        let cell_landblock = if request.terrain {
             cell_landblock_source.as_ref().and_then(|cell_landblock| {
                 match context.source.region_desc() {
                     Ok(region) => match CellLandblockFact::from_landblock(cell_landblock, &region) {
-                        Ok(terrain) => Some(terrain),
+                        Ok(fact) => Some(fact),
                         Err(error) => {
                             context.report_source_error(
                                 EOR_PORTAL_NAMESPACE,
@@ -1432,45 +1025,42 @@ impl LandblockSceneLodAssetAssembler {
         } else {
             None
         };
-        let terrain_mesh = terrain.as_ref().map(build_terrain_mesh);
-        let landblock_info_source = if static_families.is_empty() {
+        let landblock_info_source = if request.static_families.is_empty() {
             None
         } else {
             context.load_landblock_info(landblock_id)
         };
         let outdoor_scene = self.assemble_gated_outdoor_scene(
-            context,
+            &mut context,
             request,
             cell_landblock_source.as_ref(),
             landblock_info_source.as_ref(),
-            static_families,
+            request.static_families,
         );
         let instances =
             build_prepared_outdoor_static_instances(outdoor_scene.as_ref()).collect::<Vec<_>>();
-        let static_meshes = build_prepared_static_meshes(context, instances.iter(), true);
+        let static_meshes = build_prepared_static_meshes(&mut context, instances.iter(), true);
         let statics = build_landblock_outdoor_static_members(
             outdoor_scene.as_ref(),
             instances,
             &static_meshes,
         );
         let building_transition_apertures =
-            build_prepared_building_transition_apertures(context, outdoor_scene.as_ref());
+            build_prepared_building_transition_apertures(&mut context, outdoor_scene.as_ref());
 
-        build_scene_lod_outdoor_layers(
+        LandblockOutdoorAsset {
             landblock_id,
-            request.level,
-            cached_level,
-            terrain.map(|terrain| terrain.terrain),
-            terrain_mesh,
+            cell_landblock,
             statics,
             building_transition_apertures,
-        )
+            diagnostics: context.into_diagnostics(),
+        }
     }
 
     fn assemble_gated_outdoor_scene(
         &self,
         context: &mut PreparedContentAssemblyContext<'_>,
-        request: LandblockSceneLodRequest,
+        request: LandblockOutdoorAssetRequest,
         cell_landblock: Option<&CellLandblock>,
         landblock_info: Option<&LandblockInfo>,
         static_families: StaticOutdoorSceneSourceFamilies,
@@ -1488,8 +1078,7 @@ impl LandblockSceneLodAssetAssembler {
                         "region-desc",
                         "asset-decode-failed",
                         format!(
-                            "Could not load RegionDesc for scene LoD {} landblock 0x{:08X}: {error:#}",
-                            request.level.as_u8(),
+                            "Could not load RegionDesc for outdoor landblock 0x{:08X}: {error:#}",
                             request.landblock_id
                         ),
                     );
@@ -1516,637 +1105,16 @@ impl LandblockSceneLodAssetAssembler {
                 context.report_source_error(
                     EOR_CELL_NAMESPACE,
                     request.landblock_id,
-                    "landblock-scene-lod",
+                    "landblock-outdoor",
                     "asset-decode-failed",
                     format!(
-                        "Could not assemble scene LoD {} for landblock 0x{:08X}: {error:#}",
-                        request.level.as_u8(),
+                        "Could not assemble outdoor content for landblock 0x{:08X}: {error:#}",
                         request.landblock_id
                     ),
                 );
                 None
             }
         }
-    }
-}
-
-fn landblock_scene_lod_env_cell_system_layer(
-    asset: EnvCellSystemAsset,
-    building_transition_apertures: Vec<PreparedBuildingTransitionAperture>,
-) -> LandblockSceneLodEnvCellSystemLayer {
-    let portal_aperture_resources = build_scene_lod_portal_aperture_resources(
-        asset.landblock_id,
-        &asset.env_cells,
-        &building_transition_apertures,
-    );
-    let portal_connectivity_graph = build_scene_lod_portal_connectivity_graph(
-        asset.landblock_id,
-        &asset.env_cells,
-        &building_transition_apertures,
-        &portal_aperture_resources,
-    );
-    LandblockSceneLodEnvCellSystemLayer {
-        landblock_id: asset.landblock_id,
-        landblock_info_id: asset.landblock_info_id,
-        building_transition_apertures,
-        portal_connectivity_graph,
-        portal_aperture_resources,
-        env_cells: asset.env_cells,
-        landblock_bvh_items: asset.landblock_bvh_items,
-        landblock_bvh: asset.landblock_bvh,
-        diagnostics: asset.diagnostics,
-    }
-}
-
-fn build_scene_lod_portal_connectivity_graph(
-    landblock_id: u32,
-    env_cells: &[EnvCellSystemCell],
-    building_transition_apertures: &[PreparedBuildingTransitionAperture],
-    portal_aperture_resources: &[PreparedPortalApertureResource],
-) -> PreparedPortalConnectivityGraph {
-    let mut nodes_by_id = HashMap::<String, PreparedPortalConnectivityNode>::new();
-    for cell in env_cells {
-        let node = prepared_portal_connectivity_node(PreparedPortalConnectivityScene::EnvCell {
-            env_cell_id: cell.env_cell.env_cell_id,
-        });
-        nodes_by_id.insert(node.node_id.clone(), node);
-    }
-
-    let mut edges = Vec::new();
-    for cell in env_cells {
-        for portal in &cell.env_cell.portals {
-            let source_node =
-                prepared_portal_connectivity_node(PreparedPortalConnectivityScene::EnvCell {
-                    env_cell_id: cell.env_cell.env_cell_id,
-                });
-            let target = prepared_endpoint_for_env_cell_portal(landblock_id, portal);
-            let target_node = prepared_portal_connectivity_node_from_endpoint(&target);
-            nodes_by_id.insert(source_node.node_id.clone(), source_node.clone());
-            nodes_by_id.insert(target_node.node_id.clone(), target_node.clone());
-            edges.push(PreparedPortalConnectivityEdge {
-                edge_id: format!(
-                    "env-cell-portal:{}:{}",
-                    portal.portal_id, portal.source_index
-                ),
-                source_node_id: source_node.node_id,
-                target_node_id: target_node.node_id,
-                link_id: portal.portal_id.clone(),
-                source_index: portal.source_index,
-                flags: portal.flags,
-                polygon_id: Some(portal.polygon_id),
-                provenance: PreparedPortalConnectivityEdgeProvenance::EnvCellPortal {
-                    source_env_cell_id: cell.env_cell.env_cell_id,
-                    source_portal_id: portal.portal_id.clone(),
-                    target: target.clone(),
-                },
-                scene_crossing: prepared_scene_crossing_for_env_cell_portal(
-                    cell.env_cell.env_cell_id,
-                    landblock_id,
-                    &target,
-                ),
-            });
-        }
-    }
-
-    let building_resource_id = create_building_transition_portal_aperture_resource_id(landblock_id);
-    if portal_aperture_resources.iter().any(|resource| {
-        resource.aperture_resource_id == building_resource_id
-            && resource.source_domain == PreparedPortalApertureSourceDomain::OutdoorBuildings
-    }) {
-        let outdoor_node =
-            prepared_portal_connectivity_node(PreparedPortalConnectivityScene::Outdoor {
-                landblock_id,
-            });
-        nodes_by_id.insert(outdoor_node.node_id.clone(), outdoor_node.clone());
-        for aperture in building_transition_apertures {
-            let Ok(target_env_cell_id) =
-                building_transition_target_env_cell_id(landblock_id, aperture.other_cell_id)
-            else {
-                continue;
-            };
-            let target_node =
-                prepared_portal_connectivity_node(PreparedPortalConnectivityScene::EnvCell {
-                    env_cell_id: target_env_cell_id,
-                });
-            nodes_by_id.insert(target_node.node_id.clone(), target_node.clone());
-            let portal_id =
-                create_building_transition_aperture_portal_id(landblock_id, &aperture.aperture_id);
-            edges.push(PreparedPortalConnectivityEdge {
-                edge_id: format!(
-                    "building-transition:{building_resource_id}:{portal_id}:{target_env_cell_id}"
-                ),
-                source_node_id: outdoor_node.node_id.clone(),
-                target_node_id: target_node.node_id,
-                link_id: format!(
-                    "transition:{building_resource_id}:{portal_id}:{target_env_cell_id}"
-                ),
-                source_index: aperture.building_portal_source_index,
-                flags: 0,
-                polygon_id: Some(aperture.poly_id),
-                provenance: PreparedPortalConnectivityEdgeProvenance::BuildingTransition {
-                    aperture_resource_id: building_resource_id.clone(),
-                    portal_id,
-                    building_instance_id: aperture.building_instance_id.clone(),
-                    building_portal_id: aperture.building_portal_id.clone(),
-                    target_env_cell_id,
-                },
-                scene_crossing: Some(PreparedPortalConnectivitySceneCrossing::OutdoorToEnvCell {
-                    outdoor_landblock_id: landblock_id,
-                    env_cell_id: target_env_cell_id,
-                }),
-            });
-        }
-    }
-
-    let mut nodes = nodes_by_id.into_values().collect::<Vec<_>>();
-    nodes.sort_by(|left, right| left.node_id.cmp(&right.node_id));
-    edges.sort_by(|left, right| left.edge_id.cmp(&right.edge_id));
-    PreparedPortalConnectivityGraph { nodes, edges }
-}
-
-fn build_scene_lod_portal_aperture_resources(
-    landblock_id: u32,
-    env_cells: &[EnvCellSystemCell],
-    building_transition_apertures: &[PreparedBuildingTransitionAperture],
-) -> Vec<PreparedPortalApertureResource> {
-    [
-        build_env_cell_portal_aperture_resource(landblock_id, env_cells),
-        build_building_transition_portal_aperture_resource(
-            landblock_id,
-            building_transition_apertures,
-        ),
-    ]
-    .into_iter()
-    .flatten()
-    .collect()
-}
-
-fn build_env_cell_portal_aperture_resource(
-    landblock_id: u32,
-    env_cells: &[EnvCellSystemCell],
-) -> Option<PreparedPortalApertureResource> {
-    let mut vertices = Vec::new();
-    let mut indices = Vec::new();
-    let mut ranges = Vec::new();
-    for cell in env_cells {
-        for aperture in &cell.prepared_cell.portal_apertures {
-            if aperture.points.len() < 3 {
-                continue;
-            }
-            let first_vertex = vertices.len();
-            let first_index = indices.len();
-            vertices.extend(aperture.points.iter().copied().map(|point| {
-                transform_render_local_point_by_ac_frame(
-                    point,
-                    &cell.prepared_cell.local_placement,
-                    unit_prepared_vec3(),
-                )
-            }));
-            indices.extend(
-                triangulate_portal_aperture_fan(aperture.points.len(), true)
-                    .into_iter()
-                    .map(|index| {
-                        u32::try_from(first_vertex + index)
-                            .expect("portal aperture vertex index should fit u32")
-                    }),
-            );
-            let index_count = indices.len() - first_index;
-            let source_id = create_env_cell_portal_aperture_source_id(
-                landblock_id,
-                cell.env_cell.env_cell_id,
-                &aperture.portal_id,
-                aperture.source_index,
-                Some(aperture.polygon_id),
-            );
-            ranges.push(PreparedPortalApertureRange::EnvCellPortal(
-                PreparedEnvCellPortalApertureRange {
-                    range_id: create_env_cell_portal_aperture_range_id(
-                        landblock_id,
-                        cell.env_cell.env_cell_id,
-                        &aperture.portal_id,
-                        aperture.source_index,
-                        Some(aperture.polygon_id),
-                    ),
-                    source_id,
-                    first_index,
-                    index_count,
-                    source: PreparedEnvCellPortalApertureRangeSource {
-                        env_cell_id: cell.env_cell.env_cell_id,
-                        landblock_id,
-                        polygon_id: Some(aperture.polygon_id),
-                        portal_id: aperture.portal_id.clone(),
-                        source_index: aperture.source_index,
-                    },
-                },
-            ));
-        }
-    }
-
-    (!indices.is_empty()).then_some(PreparedPortalApertureResource {
-        aperture_resource_id: create_env_cell_portal_aperture_resource_id(landblock_id),
-        coordinate_space: PreparedPortalApertureCoordinateSpace::LandblockRenderLocal,
-        landblock_id,
-        indices,
-        ranges,
-        source_domain: PreparedPortalApertureSourceDomain::EnvCellSystem,
-        vertices,
-    })
-}
-
-fn build_building_transition_portal_aperture_resource(
-    landblock_id: u32,
-    apertures: &[PreparedBuildingTransitionAperture],
-) -> Option<PreparedPortalApertureResource> {
-    let mut vertices = Vec::new();
-    let mut indices = Vec::new();
-    let mut ranges = Vec::new();
-    let aperture_resource_id = create_building_transition_portal_aperture_resource_id(landblock_id);
-    let mut sorted_apertures = apertures.iter().collect::<Vec<_>>();
-    sorted_apertures.sort_by(|left, right| left.aperture_id.cmp(&right.aperture_id));
-
-    for aperture in sorted_apertures {
-        if aperture.points.len() < 3 {
-            continue;
-        }
-        let Ok(target_env_cell_id) =
-            building_transition_target_env_cell_id(landblock_id, aperture.other_cell_id)
-        else {
-            continue;
-        };
-        let first_vertex = vertices.len();
-        let first_index = indices.len();
-        let portal_id =
-            create_building_transition_aperture_portal_id(landblock_id, &aperture.aperture_id);
-        let aperture_indices = triangulate_portal_aperture_fan(
-            aperture.points.len(),
-            building_transition_interior_visible_side_is_positive(aperture.flags),
-        );
-        vertices.extend(aperture.points.iter().copied());
-        indices.extend(aperture_indices.into_iter().map(|index| {
-            u32::try_from(first_vertex + index)
-                .expect("portal aperture vertex index should fit u32")
-        }));
-        let index_count = indices.len() - first_index;
-        let source_id = create_building_transition_aperture_source_id(
-            &aperture_resource_id,
-            &portal_id,
-            first_index,
-            index_count,
-        );
-        ranges.push(PreparedPortalApertureRange::BuildingTransition(
-            PreparedBuildingTransitionApertureRange {
-                range_id: create_building_transition_aperture_range_id(
-                    &aperture_resource_id,
-                    &portal_id,
-                    first_index,
-                    index_count,
-                ),
-                source_id,
-                first_index,
-                index_count,
-                source: PreparedBuildingTransitionApertureRangeSource {
-                    building_instance_id: aperture.building_instance_id.clone(),
-                    building_portal_id: aperture.building_portal_id.clone(),
-                    building_portal_source_index: aperture.building_portal_source_index,
-                    linked_env_cell_ids: aperture.linked_env_cell_ids.clone(),
-                    other_cell_id: aperture.other_cell_id,
-                    other_portal_id: aperture.other_portal_id,
-                    poly_id: aperture.poly_id,
-                    portal_id,
-                    portal_index: aperture.portal_index,
-                    source_asset_id: aperture.source_asset_id.clone(),
-                    source_did: aperture.source_did,
-                    landblock_id,
-                    target_env_cell_id,
-                },
-            },
-        ));
-    }
-
-    (!indices.is_empty()).then_some(PreparedPortalApertureResource {
-        aperture_resource_id,
-        coordinate_space: PreparedPortalApertureCoordinateSpace::LandblockRenderLocal,
-        landblock_id,
-        indices,
-        ranges,
-        source_domain: PreparedPortalApertureSourceDomain::OutdoorBuildings,
-        vertices,
-    })
-}
-
-fn prepared_endpoint_for_env_cell_portal(
-    landblock_id: u32,
-    portal: &EnvCellPortalFact,
-) -> PreparedPortalEndpoint {
-    portal.target_env_cell_id.map_or(
-        PreparedPortalEndpoint::Outside { landblock_id },
-        |env_cell_id| PreparedPortalEndpoint::EnvCell {
-            env_cell_id,
-            portal_id: format!(
-                "interior-cell/{env_cell_id:08x}/portal/{:02x}",
-                portal.other_portal_id
-            ),
-        },
-    )
-}
-
-fn prepared_portal_connectivity_node_from_endpoint(
-    endpoint: &PreparedPortalEndpoint,
-) -> PreparedPortalConnectivityNode {
-    match endpoint {
-        PreparedPortalEndpoint::EnvCell { env_cell_id, .. } => {
-            prepared_portal_connectivity_node(PreparedPortalConnectivityScene::EnvCell {
-                env_cell_id: *env_cell_id,
-            })
-        }
-        PreparedPortalEndpoint::Outside { landblock_id } => {
-            prepared_portal_connectivity_node(PreparedPortalConnectivityScene::Outdoor {
-                landblock_id: *landblock_id,
-            })
-        }
-        PreparedPortalEndpoint::LandblockBuilding { instance_id, .. } => {
-            prepared_portal_connectivity_node(PreparedPortalConnectivityScene::LandblockBuilding {
-                building_instance_id: instance_id.clone(),
-            })
-        }
-    }
-}
-
-fn prepared_portal_connectivity_node(
-    scene: PreparedPortalConnectivityScene,
-) -> PreparedPortalConnectivityNode {
-    let node_id = match &scene {
-        PreparedPortalConnectivityScene::EnvCell { env_cell_id } => {
-            format!("env-cell:{env_cell_id}")
-        }
-        PreparedPortalConnectivityScene::Outdoor { landblock_id } => {
-            format!("outdoor:{landblock_id}")
-        }
-        PreparedPortalConnectivityScene::LandblockBuilding {
-            building_instance_id,
-        } => {
-            format!("building:{building_instance_id}")
-        }
-    };
-    PreparedPortalConnectivityNode { node_id, scene }
-}
-
-fn prepared_scene_crossing_for_env_cell_portal(
-    source_env_cell_id: u32,
-    landblock_id: u32,
-    target: &PreparedPortalEndpoint,
-) -> Option<PreparedPortalConnectivitySceneCrossing> {
-    match target {
-        PreparedPortalEndpoint::EnvCell { env_cell_id, .. } => {
-            Some(PreparedPortalConnectivitySceneCrossing::EnvCellToEnvCell {
-                source_env_cell_id,
-                target_env_cell_id: *env_cell_id,
-            })
-        }
-        PreparedPortalEndpoint::Outside { .. } => {
-            Some(PreparedPortalConnectivitySceneCrossing::EnvCellToOutdoor {
-                source_env_cell_id,
-                outdoor_landblock_id: landblock_id,
-            })
-        }
-        PreparedPortalEndpoint::LandblockBuilding { instance_id, .. } => Some(
-            PreparedPortalConnectivitySceneCrossing::EnvCellToLandblockBuilding {
-                source_env_cell_id,
-                building_instance_id: instance_id.clone(),
-            },
-        ),
-    }
-}
-
-fn triangulate_portal_aperture_fan(vertex_count: usize, positive_visible_side: bool) -> Vec<usize> {
-    let mut indices = Vec::new();
-    for index in 1..vertex_count.saturating_sub(1) {
-        if positive_visible_side {
-            indices.extend([0, index, index + 1]);
-        } else {
-            indices.extend([0, index + 1, index]);
-        }
-    }
-    indices
-}
-
-fn building_transition_interior_visible_side_is_positive(flags: u16) -> bool {
-    (flags & 0x2) == 0
-}
-
-fn building_transition_target_env_cell_id(
-    landblock_id: u32,
-    other_cell_id: u16,
-) -> Result<u32, ()> {
-    if other_cell_id == 0xffff {
-        return Err(());
-    }
-    Ok((landblock_id & 0xffff_0000) | u32::from(other_cell_id))
-}
-
-fn create_env_cell_portal_aperture_resource_id(landblock_id: u32) -> String {
-    format!(
-        "portal-aperture-resource:env-cell-system:{}",
-        format_hex32(landblock_id)
-    )
-}
-
-fn create_building_transition_portal_aperture_resource_id(landblock_id: u32) -> String {
-    format!(
-        "portal-aperture-resource:building-transition:{}",
-        format_hex32(landblock_id)
-    )
-}
-
-fn create_env_cell_portal_aperture_range_id(
-    landblock_id: u32,
-    env_cell_id: u32,
-    portal_id: &str,
-    source_index: usize,
-    polygon_id: Option<u16>,
-) -> String {
-    format!(
-        "portal-aperture:env-cell-portal:{}:{}:{portal_id}:{source_index}:{}",
-        format_hex32(landblock_id),
-        format_hex32(env_cell_id),
-        format_optional_polygon_id(polygon_id)
-    )
-}
-
-fn create_env_cell_portal_aperture_source_id(
-    landblock_id: u32,
-    env_cell_id: u32,
-    portal_id: &str,
-    source_index: usize,
-    polygon_id: Option<u16>,
-) -> String {
-    format!(
-        "env-cell-portal:{}:{}:{portal_id}:{source_index}:{}",
-        format_hex32(landblock_id),
-        format_hex32(env_cell_id),
-        format_optional_polygon_id(polygon_id)
-    )
-}
-
-fn create_building_transition_aperture_portal_id(landblock_id: u32, aperture_id: &str) -> String {
-    format!("transition-portal:outdoor-buildings:{landblock_id}:{aperture_id}")
-}
-
-fn create_building_transition_aperture_range_id(
-    aperture_resource_id: &str,
-    portal_id: &str,
-    range_first_index: usize,
-    range_index_count: usize,
-) -> String {
-    format!(
-        "portal-aperture:building-transition:{aperture_resource_id}:{portal_id}:{range_first_index}:{range_index_count}"
-    )
-}
-
-fn create_building_transition_aperture_source_id(
-    aperture_resource_id: &str,
-    portal_id: &str,
-    range_first_index: usize,
-    range_index_count: usize,
-) -> String {
-    format!(
-        "building-transition:{aperture_resource_id}:{portal_id}:{range_first_index}:{range_index_count}"
-    )
-}
-
-fn format_optional_polygon_id(polygon_id: Option<u16>) -> String {
-    polygon_id.map_or_else(|| "none".to_string(), |id| id.to_string())
-}
-
-fn format_hex32(value: u32) -> String {
-    format!("0x{value:08x}")
-}
-
-fn collect_scene_lod_building_transition_apertures(
-    layers: &[LandblockSceneLodLayer],
-) -> Vec<PreparedBuildingTransitionAperture> {
-    layers
-        .iter()
-        .flat_map(|layer| match layer {
-            LandblockSceneLodLayer::OutdoorBuildings(layer) => {
-                layer.building_transition_apertures.as_slice()
-            }
-            LandblockSceneLodLayer::Terrain(_)
-            | LandblockSceneLodLayer::OutdoorExplicitObjects(_)
-            | LandblockSceneLodLayer::OutdoorGeneratedScenery(_)
-            | LandblockSceneLodLayer::EnvCellSystem(_) => &[],
-        })
-        .cloned()
-        .collect()
-}
-
-#[cfg(test)]
-fn scene_lod_static_source_families(
-    level: LandblockSceneLodLevel,
-) -> StaticOutdoorSceneSourceFamilies {
-    match level {
-        LandblockSceneLodLevel::Level0 => {
-            StaticOutdoorSceneSourceFamilies::new(false, false, false)
-        }
-        LandblockSceneLodLevel::Level1 => StaticOutdoorSceneSourceFamilies::new(false, true, false),
-        LandblockSceneLodLevel::Level2 => StaticOutdoorSceneSourceFamilies::new(true, true, false),
-        LandblockSceneLodLevel::Level3 | LandblockSceneLodLevel::Level4 => {
-            StaticOutdoorSceneSourceFamilies::ALL
-        }
-    }
-}
-
-fn scene_lod_missing_static_source_families(
-    requested_level: LandblockSceneLodLevel,
-    cached_level: Option<LandblockSceneLodLevel>,
-) -> StaticOutdoorSceneSourceFamilies {
-    let cached_level = cached_level.map(|level| level.as_u8()).unwrap_or(0);
-    StaticOutdoorSceneSourceFamilies::new(
-        requested_level.as_u8() >= LandblockSceneLodLevel::Level2.as_u8()
-            && cached_level < LandblockSceneLodLevel::Level2.as_u8(),
-        requested_level.as_u8() >= LandblockSceneLodLevel::Level1.as_u8()
-            && cached_level < LandblockSceneLodLevel::Level1.as_u8(),
-        requested_level.as_u8() >= LandblockSceneLodLevel::Level3.as_u8()
-            && cached_level < LandblockSceneLodLevel::Level3.as_u8(),
-    )
-}
-
-fn build_scene_lod_outdoor_layers(
-    landblock_id: u32,
-    level: LandblockSceneLodLevel,
-    cached_level: Option<LandblockSceneLodLevel>,
-    terrain: Option<TerrainGridSource>,
-    terrain_mesh: Option<CanonicalTerrainMesh>,
-    statics: Vec<LandblockOutdoorStaticMember>,
-    building_transition_apertures: Vec<PreparedBuildingTransitionAperture>,
-) -> Vec<LandblockSceneLodLayer> {
-    let mut building_statics = Vec::new();
-    let mut explicit_statics = Vec::new();
-    let mut generated_statics = Vec::new();
-    for member in statics {
-        match member.instance.kind {
-            PreparedStaticInstanceKind::Building => building_statics.push(member),
-            PreparedStaticInstanceKind::Scenery => explicit_statics.push(member),
-            PreparedStaticInstanceKind::GeneratedScenery => generated_statics.push(member),
-            PreparedStaticInstanceKind::IndoorStatic => {}
-        }
-    }
-
-    let has_cached_layers = cached_level.is_some();
-    let cached_level = cached_level.map(|level| level.as_u8()).unwrap_or(0);
-    let mut layers = Vec::new();
-    if !has_cached_layers {
-        layers.push(LandblockSceneLodLayer::Terrain(
-            LandblockSceneLodTerrainLayer {
-                terrain,
-                terrain_mesh,
-            },
-        ));
-    }
-    if level.as_u8() >= LandblockSceneLodLevel::Level1.as_u8()
-        && cached_level < LandblockSceneLodLevel::Level1.as_u8()
-    {
-        let spatial_items = build_outdoor_member_spatial_items(landblock_id, &building_statics);
-        layers.push(LandblockSceneLodLayer::OutdoorBuildings(
-            LandblockSceneLodOutdoorBuildingsLayer {
-                statics: building_statics,
-                building_transition_apertures,
-                outdoor_bvh: build_prepared_bvh(landblock_id, &spatial_items),
-            },
-        ));
-    }
-    if level.as_u8() >= LandblockSceneLodLevel::Level2.as_u8()
-        && cached_level < LandblockSceneLodLevel::Level2.as_u8()
-    {
-        let spatial_items = build_outdoor_member_spatial_items(landblock_id, &explicit_statics);
-        layers.push(LandblockSceneLodLayer::OutdoorExplicitObjects(
-            LandblockSceneLodOutdoorStaticLayer {
-                statics: explicit_statics,
-                outdoor_bvh: build_prepared_bvh(landblock_id, &spatial_items),
-            },
-        ));
-    }
-    if level.as_u8() >= LandblockSceneLodLevel::Level3.as_u8()
-        && cached_level < LandblockSceneLodLevel::Level3.as_u8()
-    {
-        let spatial_items = build_outdoor_member_spatial_items(landblock_id, &generated_statics);
-        layers.push(LandblockSceneLodLayer::OutdoorGeneratedScenery(
-            LandblockSceneLodOutdoorStaticLayer {
-                statics: generated_statics,
-                outdoor_bvh: build_prepared_bvh(landblock_id, &spatial_items),
-            },
-        ));
-    }
-    layers
-}
-
-fn landblock_scene_lod_layer_level(layer: &LandblockSceneLodLayer) -> LandblockSceneLodLevel {
-    match layer {
-        LandblockSceneLodLayer::Terrain(_) => LandblockSceneLodLevel::Level0,
-        LandblockSceneLodLayer::OutdoorBuildings(_) => LandblockSceneLodLevel::Level1,
-        LandblockSceneLodLayer::OutdoorExplicitObjects(_) => LandblockSceneLodLevel::Level2,
-        LandblockSceneLodLayer::OutdoorGeneratedScenery(_) => LandblockSceneLodLevel::Level3,
-        LandblockSceneLodLayer::EnvCellSystem(_) => LandblockSceneLodLevel::Level4,
     }
 }
 
@@ -2928,37 +1896,6 @@ fn union_optional_bounds(
 
 const BVH_LEAF_ITEM_LIMIT: usize = 4;
 
-fn build_outdoor_member_spatial_items(
-    landblock_id: u32,
-    statics: &[LandblockOutdoorStaticMember],
-) -> Vec<PreparedSpatialItem> {
-    let mut items = statics
-        .iter()
-        .filter_map(|member| {
-            let bounds = member.instance_bounds?;
-            Some(PreparedSpatialItem {
-                id: format!(
-                    "landblock-scene/{landblock_id:08x}/static/spatial/{}",
-                    member.instance.instance_id
-                ),
-                kind: match member.instance.kind {
-                    PreparedStaticInstanceKind::Building => PreparedSpatialItemKind::Building,
-                    PreparedStaticInstanceKind::Scenery
-                    | PreparedStaticInstanceKind::GeneratedScenery => {
-                        PreparedSpatialItemKind::OutdoorStatic
-                    }
-                    PreparedStaticInstanceKind::IndoorStatic => {
-                        PreparedSpatialItemKind::IndoorStatic
-                    }
-                },
-                bounds: pad_bvh_bounds(bounds),
-            })
-        })
-        .collect::<Vec<_>>();
-    items.sort_by(|left, right| left.id.cmp(&right.id));
-    items
-}
-
 fn build_landblock_env_cell_bvh_items(
     env_cells: &[EnvCellSystemCell],
 ) -> Vec<EnvCellSystemBvhItem> {
@@ -2984,7 +1921,6 @@ fn build_landblock_env_cell_bvh_spatial_items(
     items
         .iter()
         .map(|item| PreparedSpatialItem {
-            id: item.member_id.clone(),
             kind: PreparedSpatialItemKind::EnvCellRoot,
             bounds: item.bounds,
         })
@@ -3153,15 +2089,6 @@ fn multiply_ac_quaternion(
     }
 }
 
-fn build_prepared_bvh(landblock_id: u32, items: &[PreparedSpatialItem]) -> Option<PreparedBvh> {
-    build_prepared_bvh_with_scope(
-        landblock_id,
-        "landblock-render-local",
-        PreparedBvhScope::OutdoorStatic,
-        items,
-    )
-}
-
 fn build_prepared_bvh_with_scope(
     landblock_id: u32,
     coordinate_space: &'static str,
@@ -3275,34 +2202,6 @@ fn prepared_bvh_kind_mask(
     item_indices: &[usize],
 ) -> PreparedBvhKindMask {
     match scope {
-        PreparedBvhScope::OutdoorTerrain => {
-            for index in item_indices {
-                if items[*index].kind != PreparedSpatialItemKind::TerrainQuad {
-                    panic!(
-                        "invalid outdoor terrain BVH item kind: {:?}",
-                        items[*index].kind
-                    );
-                }
-            }
-            PreparedBvhKindMask::OutdoorTerrain {
-                terrain_quad: !item_indices.is_empty(),
-            }
-        }
-        PreparedBvhScope::OutdoorStatic => {
-            let mut static_object = false;
-            let mut building = false;
-            for index in item_indices {
-                match items[*index].kind {
-                    PreparedSpatialItemKind::OutdoorStatic => static_object = true,
-                    PreparedSpatialItemKind::Building => building = true,
-                    kind => panic!("invalid outdoor static BVH item kind: {kind:?}"),
-                }
-            }
-            PreparedBvhKindMask::OutdoorStatic {
-                static_object,
-                building,
-            }
-        }
         PreparedBvhScope::EnvCellSystem => {
             for index in item_indices {
                 if items[*index].kind != PreparedSpatialItemKind::EnvCellRoot {
@@ -3314,20 +2213,6 @@ fn prepared_bvh_kind_mask(
             }
             PreparedBvhKindMask::EnvCellSystem {
                 env_cell_root: !item_indices.is_empty(),
-            }
-        }
-        PreparedBvhScope::EnvCellLocal => {
-            let mut static_object = false;
-            for index in item_indices {
-                match items[*index].kind {
-                    PreparedSpatialItemKind::IndoorStatic => static_object = true,
-                    kind => panic!("invalid env-cell local BVH item kind: {kind:?}"),
-                }
-            }
-            PreparedBvhKindMask::EnvCellLocal {
-                cell_structure_geometry: false,
-                static_object,
-                portal: false,
             }
         }
     }
@@ -3516,149 +2401,6 @@ fn conservative_instance_bounds(
         .expect("non-empty part placements should yield bounds")
 }
 
-fn build_terrain_mesh(cell_landblock: &CellLandblockFact) -> CanonicalTerrainMesh {
-    let grid_size = cell_landblock.terrain.grid_size;
-    let tile_size = cell_landblock.terrain.tile_size;
-    let heights = &cell_landblock.terrain.heights;
-    let terrain_samples = &cell_landblock.terrain.terrain_samples;
-
-    let vertices = heights
-        .iter()
-        .enumerate()
-        .map(|(index, height)| {
-            let row = index / grid_size;
-            let col = index % grid_size;
-            PreparedVec3 {
-                x: col as f32 * tile_size,
-                y: row as f32 * tile_size,
-                z: *height,
-            }
-        })
-        .collect::<Vec<_>>();
-
-    let mut triangles = Vec::new();
-    let mut quads = Vec::new();
-    for row in 0..(grid_size - 1) {
-        for col in 0..(grid_size - 1) {
-            let southwest = row * grid_size + col;
-            let southeast = southwest + 1;
-            let northwest = southwest + grid_size;
-            let northeast = northwest + 1;
-            let quad_index = row * (grid_size - 1) + col;
-            let triangle_indices = [quad_index * 2, quad_index * 2 + 1];
-            let terrain_type = terrain_samples.get(southwest).copied().unwrap_or(0);
-            let average_height =
-                (heights[southwest] + heights[southeast] + heights[northwest] + heights[northeast])
-                    / 4.0;
-
-            let uses_southwest_to_northeast =
-                uses_southwest_to_northeast_cut(cell_landblock.id, col as u32, row as u32);
-            if uses_southwest_to_northeast {
-                triangles.push(PreparedTerrainTriangle {
-                    a: southwest,
-                    b: southeast,
-                    c: northeast,
-                    terrain_type,
-                    average_height,
-                });
-                triangles.push(PreparedTerrainTriangle {
-                    a: southwest,
-                    b: northeast,
-                    c: northwest,
-                    terrain_type,
-                    average_height,
-                });
-            } else {
-                triangles.push(PreparedTerrainTriangle {
-                    a: southwest,
-                    b: southeast,
-                    c: northwest,
-                    terrain_type,
-                    average_height,
-                });
-                triangles.push(PreparedTerrainTriangle {
-                    a: northeast,
-                    b: northwest,
-                    c: southeast,
-                    terrain_type,
-                    average_height,
-                });
-            }
-
-            if let Some(bounds) =
-                terrain_vertex_bounds(&vertices, [southwest, southeast, northwest, northeast])
-            {
-                let raw_corners = [
-                    terrain_samples[southwest],
-                    terrain_samples[southeast],
-                    terrain_samples[northeast],
-                    terrain_samples[northwest],
-                ];
-                let corner_terrain_codes = raw_corners.map(terrain_code_from_cell_terrain);
-                let corner_road_codes = raw_corners.map(road_code_from_cell_terrain);
-                quads.push(PreparedTerrainQuad {
-                    terrain_quad_id: format!(
-                        "landblock-scene/{:08x}/terrain/quad/{row:02x}/{col:02x}",
-                        cell_landblock.id
-                    ),
-                    row,
-                    col,
-                    quad_index,
-                    source_terrain_indices: [southwest, southeast, northeast, northwest],
-                    vertex_indices: [southwest, southeast, northeast, northwest],
-                    triangle_indices,
-                    diagonal: if uses_southwest_to_northeast {
-                        PreparedTerrainQuadDiagonal::SouthwestNortheast
-                    } else {
-                        PreparedTerrainQuadDiagonal::SoutheastNorthwest
-                    },
-                    corner_terrain_codes,
-                    pcode: terrain_pcode(corner_road_codes, corner_terrain_codes),
-                    average_height,
-                    bounds,
-                });
-            }
-        }
-    }
-
-    let terrain_bvh_items = quads
-        .iter()
-        .map(|quad| PreparedTerrainBvhItem {
-            row: quad.row,
-            col: quad.col,
-            quad_index: quad.quad_index,
-            triangle_indices: quad.triangle_indices,
-        })
-        .collect::<Vec<_>>();
-    let terrain_spatial_items = quads
-        .iter()
-        .map(|quad| PreparedSpatialItem {
-            id: quad.terrain_quad_id.clone(),
-            kind: PreparedSpatialItemKind::TerrainQuad,
-            bounds: pad_bvh_bounds(quad.bounds),
-        })
-        .collect::<Vec<_>>();
-    let terrain_bvh = build_prepared_bvh_with_scope(
-        cell_landblock.id,
-        "landblock-terrain-local",
-        PreparedBvhScope::OutdoorTerrain,
-        &terrain_spatial_items,
-    );
-
-    CanonicalTerrainMesh {
-        landblock_id: cell_landblock.id,
-        grid_size,
-        tile_size,
-        vertices,
-        triangles,
-        quads,
-        terrain_bvh_items,
-        terrain_bvh,
-        min_height: heights.iter().copied().reduce(f32::min).unwrap_or(0.0),
-        max_height: heights.iter().copied().reduce(f32::max).unwrap_or(0.0),
-    }
-}
-
 pub fn terrain_code_from_cell_terrain(value: u16) -> u32 {
     u32::from((value >> 2) & 0x1f)
 }
@@ -3677,34 +2419,6 @@ pub fn terrain_pcode(road_codes: [u32; 4], terrain_codes: [u32; 4]) -> u32 {
         | (terrain_codes[1] << 10)
         | (terrain_codes[2] << 5)
         | terrain_codes[3]
-}
-
-fn terrain_vertex_bounds<const N: usize>(
-    vertices: &[PreparedVec3],
-    vertex_indices: [usize; N],
-) -> Option<PreparedAabb> {
-    vertex_indices
-        .iter()
-        .filter_map(|index| vertices.get(*index))
-        .copied()
-        .fold(None, |bounds, point| Some(expand_bounds(bounds, point)))
-}
-
-fn uses_southwest_to_northeast_cut(landblock_id: u32, cell_x: u32, cell_y: u32) -> bool {
-    let landblock_x = (landblock_id >> 24) & 0xff;
-    let landblock_y = (landblock_id >> 16) & 0xff;
-    let global_cell_x = landblock_x * 8 + cell_x;
-    let global_cell_y = landblock_y * 8 + cell_y;
-    let magic_a = global_cell_x
-        .wrapping_mul(214_614_067)
-        .wrapping_add(1_813_693_831);
-    let magic_b = global_cell_x.wrapping_mul(1_109_124_029);
-    let split_direction = global_cell_y
-        .wrapping_mul(magic_a)
-        .wrapping_sub(magic_b)
-        .wrapping_sub(1_369_149_221);
-
-    split_direction >= 0x8000_0000
 }
 
 fn build_prepared_interior_cells(interiors: &LandblockInteriorFacts) -> Vec<PreparedInteriorCell> {
@@ -4618,7 +3332,6 @@ mod tests {
     fn prepared_bvh_builder_splits_non_trivial_env_cell_roots() {
         let items = (0..6)
             .map(|index| PreparedSpatialItem {
-                id: format!("env-cell/{:08x}", 0xda550100_u32 + index as u32),
                 kind: PreparedSpatialItemKind::EnvCellRoot,
                 bounds: test_aabb(index as f32 * 10.0, 0.0, 0.0, 1.0),
             })
@@ -5210,50 +3923,6 @@ mod tests {
     }
 
     #[test]
-    fn terrain_mesh_prepares_quads_and_hierarchical_bvh() {
-        let cell = CellLandblockFact {
-            id: 0xda55ffff,
-            has_objects: false,
-            terrain: TerrainGridSource {
-                grid_size: 9,
-                tile_size: 24.0,
-                height_indices: vec![0; 81],
-                terrain_samples: (0..81)
-                    .map(|index| {
-                        let terrain_code = ((index % 5) + 1) as u16;
-                        let road_code = (index % 4) as u16;
-                        (terrain_code << 2) | road_code
-                    })
-                    .collect(),
-                heights: (0..81).map(|index| index as f32 * 0.25).collect(),
-            },
-            min_height: 0.0,
-            max_height: 20.0,
-            all_heights_zero: false,
-        };
-
-        let mesh = build_terrain_mesh(&cell);
-
-        assert_eq!(mesh.quads.len(), 64);
-        assert_eq!(mesh.terrain_bvh_items.len(), 64);
-        assert_eq!(mesh.quads[0].corner_terrain_codes, [1, 2, 1, 5]);
-        assert_eq!(
-            mesh.quads[0].pcode,
-            terrain_pcode([0, 1, 2, 1], [1, 2, 1, 5])
-        );
-        let terrain_bvh = mesh.terrain_bvh.as_ref().expect("terrain bvh");
-        assert_eq!(terrain_bvh.scope, PreparedBvhScope::OutdoorTerrain);
-        assert!(terrain_bvh.nodes.len() > 1);
-        assert!(terrain_bvh.nodes[0].left.is_some());
-        assert!(terrain_bvh.nodes[0].right.is_some());
-        assert!(terrain_bvh.nodes[0].item_indices.is_empty());
-        assert_eq!(
-            terrain_bvh.nodes[0].kind_mask,
-            PreparedBvhKindMask::OutdoorTerrain { terrain_quad: true }
-        );
-    }
-
-    #[test]
     fn terrain_grid_resolves_height_indices_and_canonicalizes_dat_order() {
         let mut land_height_table = [0.0; 256];
         for (index, height) in land_height_table.iter_mut().enumerate() {
@@ -5507,59 +4176,6 @@ mod tests {
     }
 
     #[test]
-    fn prepared_terrain_mesh_matches_frontend_landblock_basis() {
-        let cell = CellLandblockFact {
-            id: 0x0102ffff,
-            has_objects: false,
-            terrain: TerrainGridSource {
-                grid_size: LANDBLOCK_GRID_SIZE,
-                tile_size: LANDBLOCK_TILE_SIZE,
-                height_indices: vec![0; 81],
-                terrain_samples: (0..81)
-                    .map(|canonical_index| {
-                        let row = canonical_index / LANDBLOCK_GRID_SIZE;
-                        let column = canonical_index % LANDBLOCK_GRID_SIZE;
-                        (column * LANDBLOCK_GRID_SIZE + row) as u16
-                    })
-                    .collect(),
-                heights: (0..81)
-                    .map(|canonical_index| {
-                        let row = canonical_index / LANDBLOCK_GRID_SIZE;
-                        let column = canonical_index % LANDBLOCK_GRID_SIZE;
-                        (column * LANDBLOCK_GRID_SIZE + row) as f32
-                    })
-                    .collect(),
-            },
-            min_height: 0.0,
-            max_height: 80.0,
-            all_heights_zero: false,
-        };
-
-        let mesh = build_terrain_mesh(&cell);
-
-        assert_eq!(mesh.vertices.len(), 81);
-        assert_eq!(mesh.triangles.len(), 128);
-        assert_eq!(
-            mesh.vertices[1],
-            PreparedVec3 {
-                x: 24.0,
-                y: 0.0,
-                z: 9.0
-            }
-        );
-        assert_eq!(
-            mesh.vertices[9],
-            PreparedVec3 {
-                x: 0.0,
-                y: 24.0,
-                z: 1.0
-            }
-        );
-        assert_eq!(mesh.triangles[0].terrain_type, 0);
-        assert_eq!(mesh.triangles[2].terrain_type, 9);
-    }
-
-    #[test]
     fn outdoor_static_frames_remain_source_landblock_owned_when_overhanging() {
         use crate::static_outdoor_scene::{
             StaticOutdoorInstance, StaticOutdoorInstanceIdentity, StaticOutdoorLayerDiagnostics,
@@ -5614,230 +4230,6 @@ mod tests {
                 y: -5.0,
                 z: 2.0,
             }
-        );
-
-        let instance_bounds = conservative_instance_bounds(
-            &instance.local_placement,
-            &[],
-            PreparedAabb {
-                min: PreparedVec3 {
-                    x: -1.0,
-                    y: -1.0,
-                    z: 0.0,
-                },
-                max: PreparedVec3 {
-                    x: 1.0,
-                    y: 1.0,
-                    z: 2.0,
-                },
-            },
-            unit_prepared_vec3(),
-        );
-        let spatial_items = build_outdoor_member_spatial_items(
-            source_landblock_id,
-            &[LandblockOutdoorStaticMember {
-                instance: instance.clone(),
-                source_bounds: None,
-                instance_bounds: Some(instance_bounds),
-                building: None,
-                generated: None,
-            }],
-        );
-
-        assert_eq!(
-            spatial_items[0].id,
-            format!(
-                "landblock-scene/{source_landblock_id:08x}/static/spatial/{}",
-                instance.instance_id
-            )
-        );
-        assert!(spatial_items[0].bounds.min.x > 192.0);
-        assert!(spatial_items[0].bounds.min.z > 0.0);
-    }
-
-    #[test]
-    fn scene_lod_static_source_families_follow_level_contract() {
-        assert_eq!(
-            scene_lod_static_source_families(LandblockSceneLodLevel::Level0),
-            StaticOutdoorSceneSourceFamilies::new(false, false, false)
-        );
-        assert_eq!(
-            scene_lod_static_source_families(LandblockSceneLodLevel::Level1),
-            StaticOutdoorSceneSourceFamilies::new(false, true, false)
-        );
-        assert_eq!(
-            scene_lod_static_source_families(LandblockSceneLodLevel::Level2),
-            StaticOutdoorSceneSourceFamilies::new(true, true, false)
-        );
-        assert_eq!(
-            scene_lod_static_source_families(LandblockSceneLodLevel::Level3),
-            StaticOutdoorSceneSourceFamilies::ALL
-        );
-        assert_eq!(
-            scene_lod_static_source_families(LandblockSceneLodLevel::Level4),
-            StaticOutdoorSceneSourceFamilies::ALL
-        );
-    }
-
-    #[test]
-    fn scene_lod_outdoor_layers_partition_static_families_by_level() {
-        let layers = build_scene_lod_outdoor_layers(
-            0xda55ffff,
-            LandblockSceneLodLevel::Level3,
-            None,
-            None,
-            None,
-            vec![
-                synthetic_outdoor_static_member(
-                    "building",
-                    PreparedStaticInstanceKind::Building,
-                    Some(LandblockOutdoorBuildingFacts {
-                        num_leaves: 1,
-                        portals: Vec::new(),
-                    }),
-                    None,
-                ),
-                synthetic_outdoor_static_member(
-                    "explicit",
-                    PreparedStaticInstanceKind::Scenery,
-                    None,
-                    None,
-                ),
-                synthetic_outdoor_static_member(
-                    "generated",
-                    PreparedStaticInstanceKind::GeneratedScenery,
-                    None,
-                    Some(LandblockGeneratedSceneryFacts {
-                        terrain_index: 4,
-                        scene_id: 0x1200_0001,
-                        scene_template_index: 9,
-                    }),
-                ),
-            ],
-            Vec::new(),
-        );
-
-        assert_eq!(layers.len(), 4);
-        assert!(matches!(layers[0], LandblockSceneLodLayer::Terrain(_)));
-        let LandblockSceneLodLayer::OutdoorBuildings(buildings) = &layers[1] else {
-            panic!("level 3 should include an outdoor building layer");
-        };
-        let LandblockSceneLodLayer::OutdoorExplicitObjects(explicit) = &layers[2] else {
-            panic!("level 3 should include an explicit outdoor object layer");
-        };
-        let LandblockSceneLodLayer::OutdoorGeneratedScenery(generated) = &layers[3] else {
-            panic!("level 3 should include a generated scenery layer");
-        };
-        assert_eq!(buildings.statics[0].instance.instance_id, "building");
-        assert_eq!(explicit.statics[0].instance.instance_id, "explicit");
-        assert_eq!(generated.statics[0].instance.instance_id, "generated");
-
-        let level_1 = build_scene_lod_outdoor_layers(
-            0xda55ffff,
-            LandblockSceneLodLevel::Level1,
-            None,
-            None,
-            None,
-            vec![synthetic_outdoor_static_member(
-                "explicit",
-                PreparedStaticInstanceKind::Scenery,
-                None,
-                None,
-            )],
-            Vec::new(),
-        );
-        assert_eq!(level_1.len(), 2);
-        assert!(matches!(
-            level_1[1],
-            LandblockSceneLodLayer::OutdoorBuildings(_)
-        ));
-    }
-
-    #[test]
-    fn scene_lod_level_4_includes_env_cell_system_layer() {
-        let source = Arc::new(CountingSource::new(HashMap::new()));
-        let repository = ContentRepository::from_mounts(vec![source]);
-        let decode_cache = ContentDecodeCache::new();
-
-        let asset = LandblockSceneLodAssetAssembler::new().assemble_landblock_with_cache(
-            &repository,
-            &decode_cache,
-            LandblockSceneLodRequest::outdoor(0xda55_0123, LandblockSceneLodLevel::Level4),
-        );
-
-        assert_eq!(asset.landblock_id, 0xda55ffff);
-        assert_eq!(asset.layers.len(), 5);
-        assert!(matches!(
-            asset.layers[4],
-            LandblockSceneLodLayer::EnvCellSystem(_)
-        ));
-        let LandblockSceneLodLayer::EnvCellSystem(layer) = &asset.layers[4] else {
-            panic!("level 4 should include env-cell system output");
-        };
-        assert_eq!(layer.landblock_info_id, 0xda55fffe);
-        assert!(layer.building_transition_apertures.is_empty());
-        assert!(layer.env_cells.is_empty());
-        assert_eq!(layer.diagnostics.source_records.len(), 1);
-        assert_eq!(layer.diagnostics.source_records[0].role, "landblock-info");
-        assert_eq!(
-            layer.diagnostics.source_records[0].status,
-            SourceRecordStatus::Missing
-        );
-    }
-
-    #[test]
-    fn scene_lod_level_4_carries_cached_building_transition_apertures() {
-        let source = Arc::new(CountingSource::new(HashMap::new()));
-        let repository = ContentRepository::from_mounts(vec![source]);
-        let decode_cache = ContentDecodeCache::new();
-        let cached = LandblockSceneLodAsset {
-            landblock_id: 0xda55ffff,
-            level: LandblockSceneLodLevel::Level3,
-            layers: vec![LandblockSceneLodLayer::OutdoorBuildings(
-                LandblockSceneLodOutdoorBuildingsLayer {
-                    statics: Vec::new(),
-                    building_transition_apertures: vec![synthetic_building_transition_aperture()],
-                    outdoor_bvh: None,
-                },
-            )],
-            diagnostics: PreparedContentSourceDiagnostics::default(),
-        };
-
-        let asset = LandblockSceneLodAssetAssembler::new()
-            .assemble_landblock_extending_cached_asset(
-                &repository,
-                &decode_cache,
-                LandblockSceneLodRequest::outdoor(0xda55_0123, LandblockSceneLodLevel::Level4),
-                Some(&cached),
-            );
-
-        let LandblockSceneLodLayer::EnvCellSystem(layer) = asset.layers.last().unwrap() else {
-            panic!("level 4 cache extension should append env-cell system output");
-        };
-        assert_eq!(layer.building_transition_apertures.len(), 1);
-        assert_eq!(
-            layer.building_transition_apertures[0].aperture_id,
-            "building-transition-aperture:building-01:0"
-        );
-    }
-
-    #[test]
-    fn scene_lod_lower_levels_do_not_include_env_cell_system_layer() {
-        let source = Arc::new(CountingSource::new(HashMap::new()));
-        let repository = ContentRepository::from_mounts(vec![source]);
-        let decode_cache = ContentDecodeCache::new();
-
-        let asset = LandblockSceneLodAssetAssembler::new().assemble_landblock_with_cache(
-            &repository,
-            &decode_cache,
-            LandblockSceneLodRequest::outdoor(0xda55_0123, LandblockSceneLodLevel::Level3),
-        );
-
-        assert!(
-            asset
-                .layers
-                .iter()
-                .all(|layer| !matches!(layer, LandblockSceneLodLayer::EnvCellSystem(_)))
         );
     }
 
@@ -6012,67 +4404,5 @@ mod tests {
         assert!((bounds.min.y - 2.0).abs() < 0.001);
         assert!((bounds.min.z + 19.0).abs() < 0.001);
         assert_eq!(bounds.max, bounds.min);
-    }
-
-    fn synthetic_outdoor_static_member(
-        instance_id: &str,
-        kind: PreparedStaticInstanceKind,
-        building: Option<LandblockOutdoorBuildingFacts>,
-        generated: Option<LandblockGeneratedSceneryFacts>,
-    ) -> LandblockOutdoorStaticMember {
-        LandblockOutdoorStaticMember {
-            instance: PreparedStaticInstance {
-                instance_id: instance_id.to_string(),
-                kind,
-                owning_landblock_id: 0xda55ffff,
-                owning_env_cell_id: None,
-                source_did: 0x0100_0001,
-                source_asset_id: "gfx-obj/01000001".to_string(),
-                source_index: 0,
-                local_placement: Frame {
-                    origin: holtburger_common::Vector3::zero(),
-                    orientation: holtburger_common::Quaternion::identity(),
-                },
-                source_scale: unit_prepared_vec3(),
-            },
-            source_bounds: None,
-            instance_bounds: None,
-            building,
-            generated,
-        }
-    }
-
-    fn synthetic_building_transition_aperture() -> PreparedBuildingTransitionAperture {
-        PreparedBuildingTransitionAperture {
-            aperture_id: "building-transition-aperture:building-01:0".to_string(),
-            building_instance_id: "building-01".to_string(),
-            source_did: 0x0200_1234,
-            source_asset_id: "gfxobj/02001234".to_string(),
-            portal_index: 0,
-            poly_id: 42,
-            building_portal_id: "building-portal-0".to_string(),
-            building_portal_source_index: 0,
-            flags: 1,
-            other_cell_id: 0x0100,
-            other_portal_id: 0xffff,
-            linked_env_cell_ids: vec![0x0102_0100],
-            points: vec![
-                PreparedVec3 {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
-                PreparedVec3 {
-                    x: 1.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
-                PreparedVec3 {
-                    x: 0.0,
-                    y: 1.0,
-                    z: 0.0,
-                },
-            ],
-        }
     }
 }

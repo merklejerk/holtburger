@@ -7,23 +7,22 @@ use anyhow::{Context, Result, anyhow};
 use futures::future::{BoxFuture, FutureExt, Shared};
 use holtburger_content::{
     ActiveRegionData, ContentDecodeCache, ContentRepository, EnvCellAsset, EnvCellAssetAssembler,
-    LandblockSceneLodAsset, LandblockSceneLodAssetAssembler, LandblockSceneLodLayer,
-    LandblockSceneLodLevel, LandblockSceneLodRequest, MaterialAppearanceInput,
-    ResolvedMaterialRecipe, ResolvedRegionRenderProfile, ResolvedSetupAppearance,
-    ResolvedSurfaceTexture, ResolvedSurfaceTexturePixels, ResolvedTerrainMaterialTable,
-    TexturePixelFormat, normalize_landblock_id,
+    LandblockOutdoorAsset, LandblockOutdoorAssetAssembler, LandblockOutdoorAssetRequest,
+    MaterialAppearanceInput, ResolvedMaterialRecipe, ResolvedRegionRenderProfile,
+    ResolvedSetupAppearance, ResolvedSurfaceTexture, ResolvedSurfaceTexturePixels,
+    ResolvedTerrainMaterialTable, TexturePixelFormat,
 };
 use holtburger_dat::file_type::{Animation, GfxObj, Palette, RenderSurface, SetupModel};
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use tokio::sync::{Mutex as TokioMutex, Semaphore};
 
 const DEFAULT_CONTENT_ASSET_WORKERS: usize = 4;
-const LANDBLOCK_SCENE_LOD_CACHE_CAPACITY: usize = 256;
+const LANDBLOCK_OUTDOOR_CACHE_CAPACITY: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ContentAssetRequest {
     ActiveRegionData,
-    LandblockSceneLod(LandblockSceneLodRequest),
+    LandblockOutdoor(LandblockOutdoorAssetRequest),
     EnvCell(u32),
     TerrainMaterial(u32),
     RegionRenderProfile(u32),
@@ -65,8 +64,8 @@ impl SetupAppearanceRequest {
 #[derive(Debug, Clone)]
 pub enum ContentAsset {
     ActiveRegionData(Box<ActiveRegionData>),
-    LandblockSceneLod {
-        scene_lod: Box<LandblockSceneLodAsset>,
+    LandblockOutdoor {
+        outdoor: Box<LandblockOutdoorAsset>,
         region_id: u32,
         region_number: u32,
     },
@@ -92,7 +91,7 @@ pub enum ContentAsset {
 pub struct ContentAssetService {
     content: Arc<ContentRepository>,
     decode_cache: Arc<ContentDecodeCache>,
-    landblock_scene_lod_cache: Arc<StdMutex<LandblockSceneLodPreparedCache>>,
+    landblock_outdoor_cache: Arc<StdMutex<LandblockOutdoorPreparedCache>>,
 }
 
 impl ContentAssetService {
@@ -100,9 +99,9 @@ impl ContentAssetService {
         Self {
             content,
             decode_cache,
-            landblock_scene_lod_cache: Arc::new(StdMutex::new(
-                LandblockSceneLodPreparedCache::new(LANDBLOCK_SCENE_LOD_CACHE_CAPACITY),
-            )),
+            landblock_outdoor_cache: Arc::new(StdMutex::new(LandblockOutdoorPreparedCache::new(
+                LANDBLOCK_OUTDOOR_CACHE_CAPACITY,
+            ))),
         }
     }
 
@@ -111,11 +110,11 @@ impl ContentAssetService {
             ContentAssetRequest::ActiveRegionData => Ok(ContentAsset::ActiveRegionData(Box::new(
                 self.decode_cache.active_region_data(&self.content)?,
             ))),
-            ContentAssetRequest::LandblockSceneLod(request) => {
-                let scene_lod = self.load_landblock_scene_lod(request);
+            ContentAssetRequest::LandblockOutdoor(request) => {
+                let outdoor = self.load_landblock_outdoor(request);
                 let region = self.decode_cache.region_desc(&self.content)?;
-                Ok(ContentAsset::LandblockSceneLod {
-                    scene_lod: Box::new(scene_lod),
+                Ok(ContentAsset::LandblockOutdoor {
+                    outdoor: Box::new(outdoor),
                     region_id: region.id,
                     region_number: region.region_number,
                 })
@@ -249,67 +248,41 @@ impl ContentAssetService {
         }
     }
 
-    fn load_landblock_scene_lod(
+    fn load_landblock_outdoor(
         &self,
-        request: LandblockSceneLodRequest,
-    ) -> LandblockSceneLodAsset {
-        let request = LandblockSceneLodRequest {
-            landblock_id: normalize_landblock_id(request.landblock_id),
-            ..request
-        };
-        let key = LandblockSceneLodCacheKey::from_request(request);
+        request: LandblockOutdoorAssetRequest,
+    ) -> LandblockOutdoorAsset {
         if let Some(asset) = self
-            .landblock_scene_lod_cache
+            .landblock_outdoor_cache
             .lock()
-            .expect("landblock scene LoD cache lock should not be poisoned")
-            .get_projected(key, request.level)
+            .expect("landblock outdoor cache lock should not be poisoned")
+            .get(request)
+            .cloned()
         {
             return asset;
         }
 
-        let cached = self
-            .landblock_scene_lod_cache
+        let asset = LandblockOutdoorAssetAssembler::new().assemble_landblock_with_cache(
+            &self.content,
+            &self.decode_cache,
+            request,
+        );
+        self.landblock_outdoor_cache
             .lock()
-            .expect("landblock scene LoD cache lock should not be poisoned")
-            .get(key)
-            .cloned();
-        let asset = LandblockSceneLodAssetAssembler::new()
-            .assemble_landblock_extending_cached_asset(
-                &self.content,
-                &self.decode_cache,
-                request,
-                cached.as_ref(),
-            );
-        let projected = project_landblock_scene_lod_asset(&asset, request.level);
-        self.landblock_scene_lod_cache
-            .lock()
-            .expect("landblock scene LoD cache lock should not be poisoned")
-            .insert(key, asset);
-        projected
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct LandblockSceneLodCacheKey {
-    landblock_id: u32,
-}
-
-impl LandblockSceneLodCacheKey {
-    fn from_request(request: LandblockSceneLodRequest) -> Self {
-        Self {
-            landblock_id: normalize_landblock_id(request.landblock_id),
-        }
+            .expect("landblock outdoor cache lock should not be poisoned")
+            .insert(request, asset.clone());
+        asset
     }
 }
 
 #[derive(Debug)]
-struct LandblockSceneLodPreparedCache {
+struct LandblockOutdoorPreparedCache {
     capacity: usize,
-    entries: HashMap<LandblockSceneLodCacheKey, LandblockSceneLodAsset>,
-    insertion_order: VecDeque<LandblockSceneLodCacheKey>,
+    entries: HashMap<LandblockOutdoorAssetRequest, LandblockOutdoorAsset>,
+    insertion_order: VecDeque<LandblockOutdoorAssetRequest>,
 }
 
-impl LandblockSceneLodPreparedCache {
+impl LandblockOutdoorPreparedCache {
     fn new(capacity: usize) -> Self {
         Self {
             capacity,
@@ -318,32 +291,15 @@ impl LandblockSceneLodPreparedCache {
         }
     }
 
-    fn get_projected(
-        &self,
-        key: LandblockSceneLodCacheKey,
-        level: LandblockSceneLodLevel,
-    ) -> Option<LandblockSceneLodAsset> {
-        let cached = self.entries.get(&key)?;
-        (cached.level.as_u8() >= level.as_u8())
-            .then(|| project_landblock_scene_lod_asset(cached, level))
+    fn get(&self, request: LandblockOutdoorAssetRequest) -> Option<&LandblockOutdoorAsset> {
+        self.entries.get(&request)
     }
 
-    fn get(&self, key: LandblockSceneLodCacheKey) -> Option<&LandblockSceneLodAsset> {
-        self.entries.get(&key)
-    }
-
-    fn insert(&mut self, key: LandblockSceneLodCacheKey, asset: LandblockSceneLodAsset) {
-        if self
-            .entries
-            .get(&key)
-            .is_some_and(|cached| cached.level.as_u8() >= asset.level.as_u8())
-        {
-            return;
+    fn insert(&mut self, request: LandblockOutdoorAssetRequest, asset: LandblockOutdoorAsset) {
+        if !self.entries.contains_key(&request) {
+            self.insertion_order.push_back(request);
         }
-        if !self.entries.contains_key(&key) {
-            self.insertion_order.push_back(key);
-        }
-        self.entries.insert(key, asset);
+        self.entries.insert(request, asset);
         while self.entries.len() > self.capacity {
             if let Some(expired) = self.insertion_order.pop_front() {
                 self.entries.remove(&expired);
@@ -352,49 +308,14 @@ impl LandblockSceneLodPreparedCache {
     }
 }
 
-fn project_landblock_scene_lod_asset(
-    asset: &LandblockSceneLodAsset,
-    level: LandblockSceneLodLevel,
-) -> LandblockSceneLodAsset {
-    LandblockSceneLodAsset {
-        landblock_id: asset.landblock_id,
-        level,
-        layers: asset
-            .layers
-            .iter()
-            .filter(|layer| landblock_scene_lod_layer_level(layer).as_u8() <= level.as_u8())
-            .cloned()
-            .collect(),
-        diagnostics: asset.diagnostics.clone(),
-    }
-}
-
-fn landblock_scene_lod_layer_level(layer: &LandblockSceneLodLayer) -> LandblockSceneLodLevel {
-    match layer {
-        LandblockSceneLodLayer::Terrain(_) => LandblockSceneLodLevel::Level0,
-        LandblockSceneLodLayer::OutdoorBuildings(_) => LandblockSceneLodLevel::Level1,
-        LandblockSceneLodLayer::OutdoorExplicitObjects(_) => LandblockSceneLodLevel::Level2,
-        LandblockSceneLodLayer::OutdoorGeneratedScenery(_) => LandblockSceneLodLevel::Level3,
-        LandblockSceneLodLayer::EnvCellSystem(_) => LandblockSceneLodLevel::Level4,
-    }
-}
-
 type SharedAssetFuture =
     Shared<BoxFuture<'static, std::result::Result<ContentAsset, Arc<anyhow::Error>>>>;
-
-#[derive(Debug, Clone)]
-struct InFlightLandblockSceneLod {
-    level: LandblockSceneLodLevel,
-    future: SharedAssetFuture,
-}
 
 #[derive(Debug, Clone)]
 pub struct ContentAssetRuntime {
     service: Arc<ContentAssetService>,
     worker_slots: Arc<Semaphore>,
     in_flight: Arc<TokioMutex<HashMap<ContentAssetRequest, SharedAssetFuture>>>,
-    landblock_scene_lod_in_flight:
-        Arc<TokioMutex<HashMap<LandblockSceneLodCacheKey, InFlightLandblockSceneLod>>>,
 }
 
 impl ContentAssetRuntime {
@@ -411,15 +332,10 @@ impl ContentAssetRuntime {
             service: Arc::new(service),
             worker_slots: Arc::new(Semaphore::new(worker_limit)),
             in_flight: Arc::new(TokioMutex::new(HashMap::new())),
-            landblock_scene_lod_in_flight: Arc::new(TokioMutex::new(HashMap::new())),
         }
     }
 
     pub async fn load(&self, request: ContentAssetRequest) -> Result<ContentAsset> {
-        if let ContentAssetRequest::LandblockSceneLod(request) = request {
-            return self.load_landblock_scene_lod(request).await;
-        }
-
         self.load_exact(request).await
     }
 
@@ -442,58 +358,6 @@ impl ContentAssetRuntime {
         drop(in_flight);
 
         result.map_err(|error| anyhow!("{error:#}"))
-    }
-
-    /// Coordinates cumulative scene-LoD assembly by normalized landblock identity.
-    ///
-    /// A lower request waits for an already running higher request and projects its result. A
-    /// higher request waits for a lower request to populate the prepared cache, then extends that
-    /// asset rather than racing a second cumulative assembly.
-    async fn load_landblock_scene_lod(
-        &self,
-        request: LandblockSceneLodRequest,
-    ) -> Result<ContentAsset> {
-        let request = LandblockSceneLodRequest {
-            landblock_id: normalize_landblock_id(request.landblock_id),
-            ..request
-        };
-        let key = LandblockSceneLodCacheKey::from_request(request);
-
-        loop {
-            let (in_flight_level, shared) = {
-                let mut in_flight = self.landblock_scene_lod_in_flight.lock().await;
-                if let Some(existing) = in_flight.get(&key) {
-                    (existing.level, existing.future.clone())
-                } else {
-                    let shared =
-                        self.spawn_shared_load(ContentAssetRequest::LandblockSceneLod(request));
-                    in_flight.insert(
-                        key,
-                        InFlightLandblockSceneLod {
-                            level: request.level,
-                            future: shared.clone(),
-                        },
-                    );
-                    (request.level, shared)
-                }
-            };
-
-            let result = shared.await;
-
-            let mut in_flight = self.landblock_scene_lod_in_flight.lock().await;
-            if in_flight
-                .get(&key)
-                .is_some_and(|existing| existing.level == in_flight_level)
-            {
-                in_flight.remove(&key);
-            }
-            drop(in_flight);
-
-            let asset = result.map_err(|error| anyhow!("{error:#}"))?;
-            if in_flight_level.as_u8() >= request.level.as_u8() {
-                return project_loaded_landblock_scene_lod(asset, request.level);
-            }
-        }
     }
 
     pub fn load_blocking(&self, request: ContentAssetRequest) -> Result<ContentAsset> {
@@ -533,29 +397,11 @@ impl ContentAssetRuntime {
     }
 }
 
-fn project_loaded_landblock_scene_lod(
-    asset: ContentAsset,
-    level: LandblockSceneLodLevel,
-) -> Result<ContentAsset> {
-    let ContentAsset::LandblockSceneLod {
-        scene_lod,
-        region_id,
-        region_number,
-    } = asset
-    else {
-        anyhow::bail!("scene LoD coordinator received a non-scene-LoD asset")
-    };
-    Ok(ContentAsset::LandblockSceneLod {
-        scene_lod: Box::new(project_landblock_scene_lod_asset(&scene_lod, level)),
-        region_id,
-        region_number,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use holtburger_common::{Quaternion, Vector3};
+    use holtburger_content::StaticOutdoorSceneSourceFamilies;
     use holtburger_dat::file_type::REGION_DESC_FILE_ID;
     use holtburger_dat::{DatError, EOR_CELL_NAMESPACE, FileMetadata, ResourceSource};
     use std::collections::HashMap;
@@ -684,255 +530,51 @@ mod tests {
     }
 
     #[test]
-    fn content_asset_service_loads_landblock_scene_lod_layers() {
-        let repository = ContentRepository::from_mounts(vec![Arc::new(scene_lod_test_source())]);
+    fn content_asset_service_loads_exact_outdoor_source_families() {
+        let repository = ContentRepository::from_mounts(vec![Arc::new(outdoor_test_source())]);
         let service =
             ContentAssetService::new(Arc::new(repository), Arc::new(ContentDecodeCache::new()));
 
         let asset = service
-            .load(ContentAssetRequest::LandblockSceneLod(
-                LandblockSceneLodRequest::outdoor(
+            .load(ContentAssetRequest::LandblockOutdoor(
+                LandblockOutdoorAssetRequest::new(
                     0xda55_0123,
-                    holtburger_content::LandblockSceneLodLevel::Level3,
+                    false,
+                    StaticOutdoorSceneSourceFamilies::new(false, true, false),
                 ),
             ))
-            .expect("landblock scene LoD should load");
-        let ContentAsset::LandblockSceneLod {
-            scene_lod: asset, ..
-        } = asset
-        else {
-            panic!("content asset service returned mismatched landblock scene LoD asset");
+            .expect("outdoor source facts should load");
+        let ContentAsset::LandblockOutdoor { outdoor, .. } = asset else {
+            panic!("content asset service returned a different asset");
         };
 
-        assert_eq!(asset.landblock_id, 0xda55_ffff);
-        assert_eq!(
-            asset.level,
-            holtburger_content::LandblockSceneLodLevel::Level3
-        );
-        assert_eq!(asset.layers.len(), 4);
-        assert!(matches!(
-            asset.layers[0],
-            holtburger_content::LandblockSceneLodLayer::Terrain(_)
-        ));
-        assert!(matches!(
-            asset.layers[1],
-            holtburger_content::LandblockSceneLodLayer::OutdoorBuildings(_)
-        ));
-        assert!(matches!(
-            asset.layers[2],
-            holtburger_content::LandblockSceneLodLayer::OutdoorExplicitObjects(_)
-        ));
-        assert!(matches!(
-            asset.layers[3],
-            holtburger_content::LandblockSceneLodLayer::OutdoorGeneratedScenery(_)
-        ));
+        assert_eq!(outdoor.landblock_id, 0xda55_ffff);
+        assert!(outdoor.cell_landblock.is_none());
+        assert!(outdoor.statics.is_empty());
     }
 
     #[test]
-    fn landblock_scene_lod_cache_projects_lower_requests_from_cached_higher_lod() {
-        let source = Arc::new(scene_lod_test_source());
+    fn content_asset_service_caches_identical_outdoor_requests() {
+        let landblock_id = 0xda55_ffff;
+        let source =
+            Arc::new(outdoor_test_source().with_file(EOR_CELL_NAMESPACE, landblock_id, vec![0; 4]));
         let repository = ContentRepository::from_mounts(vec![source.clone()]);
         let service =
             ContentAssetService::new(Arc::new(repository), Arc::new(ContentDecodeCache::new()));
-        let landblock_id = 0xda55ffff;
-        let landblock_info_id = 0xda55fffe;
-
-        service
-            .load(ContentAssetRequest::LandblockSceneLod(
-                LandblockSceneLodRequest::outdoor(landblock_id, LandblockSceneLodLevel::Level4),
-            ))
-            .expect("level 4 scene LoD should load");
-        let landblock_reads = source.read_count(EOR_CELL_NAMESPACE, landblock_id);
-        let info_reads = source.read_count(EOR_CELL_NAMESPACE, landblock_info_id);
-
-        let projected = service
-            .load(ContentAssetRequest::LandblockSceneLod(
-                LandblockSceneLodRequest::outdoor(landblock_id, LandblockSceneLodLevel::Level2),
-            ))
-            .expect("lower scene LoD should project from cached level 4");
-        let ContentAsset::LandblockSceneLod {
-            scene_lod: projected,
-            ..
-        } = projected
-        else {
-            panic!("expected projected scene LoD asset");
-        };
-
-        assert_eq!(projected.level, LandblockSceneLodLevel::Level2);
-        assert_eq!(projected.layers.len(), 3);
-        assert_eq!(
-            source.read_count(EOR_CELL_NAMESPACE, landblock_id),
-            landblock_reads
-        );
-        assert_eq!(
-            source.read_count(EOR_CELL_NAMESPACE, landblock_info_id),
-            info_reads
-        );
-    }
-
-    #[test]
-    fn landblock_scene_lod_cache_replaces_lower_cached_lod_with_higher_lod() {
-        let source = Arc::new(scene_lod_test_source());
-        let repository = ContentRepository::from_mounts(vec![source.clone()]);
-        let service =
-            ContentAssetService::new(Arc::new(repository), Arc::new(ContentDecodeCache::new()));
-        let landblock_id = 0xda55ffff;
-        let landblock_info_id = 0xda55fffe;
-
-        service
-            .load(ContentAssetRequest::LandblockSceneLod(
-                LandblockSceneLodRequest::outdoor(landblock_id, LandblockSceneLodLevel::Level1),
-            ))
-            .expect("level 1 scene LoD should load");
-        service
-            .load(ContentAssetRequest::LandblockSceneLod(
-                LandblockSceneLodRequest::outdoor(landblock_id, LandblockSceneLodLevel::Level3),
-            ))
-            .expect("higher scene LoD should replace lower cached level");
-        let landblock_reads = source.read_count(EOR_CELL_NAMESPACE, landblock_id);
-        let info_reads = source.read_count(EOR_CELL_NAMESPACE, landblock_info_id);
-
-        service
-            .load(ContentAssetRequest::LandblockSceneLod(
-                LandblockSceneLodRequest::outdoor(landblock_id, LandblockSceneLodLevel::Level2),
-            ))
-            .expect("level 2 should project from cached level 3");
-
-        assert_eq!(
-            source.read_count(EOR_CELL_NAMESPACE, landblock_id),
-            landblock_reads
-        );
-        assert_eq!(
-            source.read_count(EOR_CELL_NAMESPACE, landblock_info_id),
-            info_reads
-        );
-    }
-
-    #[test]
-    fn higher_landblock_scene_lod_extends_cached_lower_layers() {
-        let landblock_id = 0xda55ffff;
-        let landblock_info_id = 0xda55fffe;
-        let source = Arc::new(scene_lod_test_source().with_file(
-            EOR_CELL_NAMESPACE,
-            landblock_info_id,
-            landblock_info_with_one_building_bytes(landblock_info_id),
-        ));
-        let repository = ContentRepository::from_mounts(vec![source.clone()]);
-        let service =
-            ContentAssetService::new(Arc::new(repository), Arc::new(ContentDecodeCache::new()));
-
-        let level_1 = service
-            .load(ContentAssetRequest::LandblockSceneLod(
-                LandblockSceneLodRequest::outdoor(landblock_id, LandblockSceneLodLevel::Level1),
-            ))
-            .expect("level 1 scene LoD should load");
-        let ContentAsset::LandblockSceneLod {
-            scene_lod: level_1, ..
-        } = level_1
-        else {
-            panic!("expected level 1 scene LoD asset");
-        };
-        assert_eq!(building_layer_static_count(&level_1), Some(1));
-        let info_reads = source.read_count(EOR_CELL_NAMESPACE, landblock_info_id);
-
-        let level_3 = service
-            .load(ContentAssetRequest::LandblockSceneLod(
-                LandblockSceneLodRequest::outdoor(landblock_id, LandblockSceneLodLevel::Level3),
-            ))
-            .expect("level 3 scene LoD should extend cached level 1");
-        let ContentAsset::LandblockSceneLod {
-            scene_lod: level_3, ..
-        } = level_3
-        else {
-            panic!("expected level 3 scene LoD asset");
-        };
-
-        assert_eq!(level_3.level, LandblockSceneLodLevel::Level3);
-        assert_eq!(building_layer_static_count(&level_3), Some(1));
-        assert_eq!(
-            source.read_count(EOR_CELL_NAMESPACE, landblock_info_id),
-            info_reads
-        );
-    }
-
-    #[tokio::test]
-    async fn content_asset_runtime_dedupes_identical_landblock_scene_lod_requests() {
-        let landblock_id = 0xda55ffff;
-        let source = Arc::new(scene_lod_test_source().with_file(
-            EOR_CELL_NAMESPACE,
+        let request = ContentAssetRequest::LandblockOutdoor(LandblockOutdoorAssetRequest::new(
             landblock_id,
-            vec![0; 4],
+            true,
+            StaticOutdoorSceneSourceFamilies::new(false, false, false),
         ));
-        let repository = ContentRepository::from_mounts(vec![source.clone()]);
-        let service =
-            ContentAssetService::new(Arc::new(repository), Arc::new(ContentDecodeCache::new()));
-        let runtime = ContentAssetRuntime::with_worker_limit(service, 1);
 
-        let request = ContentAssetRequest::LandblockSceneLod(LandblockSceneLodRequest::outdoor(
-            landblock_id,
-            LandblockSceneLodLevel::Level4,
-        ));
-        let (left, right) = tokio::join!(runtime.load(request.clone()), runtime.load(request));
+        service
+            .load(request.clone())
+            .expect("first outdoor request should load");
+        service
+            .load(request)
+            .expect("second outdoor request should use the prepared cache");
 
-        left.expect("first shared scene LoD request should load");
-        right.expect("second shared scene LoD request should load");
         assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_id), 1);
-    }
-
-    #[tokio::test]
-    async fn content_asset_runtime_coordinates_cumulative_landblock_scene_lod_requests() {
-        let landblock_id = 0xda55ffff;
-        let source = Arc::new(scene_lod_test_source().with_file(
-            EOR_CELL_NAMESPACE,
-            landblock_id,
-            vec![0; 4],
-        ));
-        let repository = ContentRepository::from_mounts(vec![source.clone()]);
-        let service =
-            ContentAssetService::new(Arc::new(repository), Arc::new(ContentDecodeCache::new()));
-        let runtime = ContentAssetRuntime::with_worker_limit(service, 4);
-
-        let terrain = runtime.load(ContentAssetRequest::LandblockSceneLod(
-            LandblockSceneLodRequest::outdoor(landblock_id, LandblockSceneLodLevel::Level0),
-        ));
-        let buildings = runtime.load(ContentAssetRequest::LandblockSceneLod(
-            LandblockSceneLodRequest::outdoor(landblock_id, LandblockSceneLodLevel::Level1),
-        ));
-        let objects = runtime.load(ContentAssetRequest::LandblockSceneLod(
-            LandblockSceneLodRequest::outdoor(landblock_id, LandblockSceneLodLevel::Level2),
-        ));
-        let generated = runtime.load(ContentAssetRequest::LandblockSceneLod(
-            LandblockSceneLodRequest::outdoor(landblock_id, LandblockSceneLodLevel::Level3),
-        ));
-        let (terrain, buildings, objects, generated) =
-            tokio::join!(terrain, buildings, objects, generated);
-
-        assert_eq!(
-            scene_lod_level(terrain.expect("terrain request should load")),
-            LandblockSceneLodLevel::Level0
-        );
-        assert_eq!(
-            scene_lod_level(buildings.expect("building request should load")),
-            LandblockSceneLodLevel::Level1
-        );
-        assert_eq!(
-            scene_lod_level(objects.expect("object request should load")),
-            LandblockSceneLodLevel::Level2
-        );
-        assert_eq!(
-            scene_lod_level(generated.expect("generated request should load")),
-            LandblockSceneLodLevel::Level3
-        );
-        // Level 3 may perform one sequential extension after the lower shared prefix completes;
-        // the coordinator prevents four competing cumulative assemblies.
-        assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_id), 2);
-    }
-
-    fn scene_lod_level(asset: ContentAsset) -> LandblockSceneLodLevel {
-        let ContentAsset::LandblockSceneLod { scene_lod, .. } = asset else {
-            panic!("expected a landblock scene LoD asset");
-        };
-        scene_lod.level
     }
 
     fn animation_bytes(animation_id: u32) -> Vec<u8> {
@@ -965,7 +607,7 @@ mod tests {
         bytes
     }
 
-    fn scene_lod_test_source() -> InMemoryResourceSource {
+    fn outdoor_test_source() -> InMemoryResourceSource {
         InMemoryResourceSource::default().with_file(
             EOR_PORTAL_NAMESPACE,
             REGION_DESC_FILE_ID,
@@ -1003,31 +645,6 @@ mod tests {
         while !bytes.len().is_multiple_of(4) {
             bytes.push(0);
         }
-    }
-
-    fn landblock_info_with_one_building_bytes(landblock_info_id: u32) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&landblock_info_id.to_le_bytes());
-        bytes.extend_from_slice(&0_u32.to_le_bytes()); // num_cells
-        bytes.extend_from_slice(&0_u32.to_le_bytes()); // num_objects
-        bytes.extend_from_slice(&1_u16.to_le_bytes()); // num_buildings
-        bytes.extend_from_slice(&0_u16.to_le_bytes()); // pack_mask
-        bytes.extend_from_slice(&0x0100_3333_u32.to_le_bytes()); // model_id
-        push_frame(
-            &mut bytes,
-            Vector3::new(48.0, 48.0, 0.0),
-            Quaternion::identity(),
-        );
-        bytes.extend_from_slice(&1_u32.to_le_bytes()); // num_leaves
-        bytes.extend_from_slice(&0_u32.to_le_bytes()); // num_portals
-        bytes
-    }
-
-    fn building_layer_static_count(asset: &LandblockSceneLodAsset) -> Option<usize> {
-        asset.layers.iter().find_map(|layer| match layer {
-            LandblockSceneLodLayer::OutdoorBuildings(buildings) => Some(buildings.statics.len()),
-            _ => None,
-        })
     }
 
     fn push_frame(bytes: &mut Vec<u8>, origin: Vector3, orientation: Quaternion) {

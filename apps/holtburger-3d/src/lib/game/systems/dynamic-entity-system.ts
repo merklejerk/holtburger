@@ -7,9 +7,10 @@ import {
 import { Mat4 } from "../math/types";
 import type { ObjectGeometryData } from "../renderer/geometry";
 import type { SceneGraph, SceneNodeId } from "../scene";
-import type {
-	ResolvedObjectPart,
-	ResolvedObjectPresentation,
+import {
+	orderResolvedObjectParts,
+	type ResolvedObjectPart,
+	type ResolvedObjectPresentation,
 } from "../resolution/presentation";
 import type {
 	ArticulatedPose,
@@ -191,38 +192,31 @@ function createPartNodes(
 	presentation: ResolvedObjectPresentation,
 	pose: ArticulatedPose,
 ): ReadonlyMap<number, SceneNodeId> {
-	const pending = new Map(
-		presentation.parts.map((part) => [part.partIndex, part]),
-	);
 	const nodes = new Map<number, SceneNodeId>();
-	while (pending.size > 0) {
-		let created = false;
-		for (const [partIndex, part] of pending) {
-			const parentId =
-				part.parentPartIndex === null
-					? rootNodeId
-					: nodes.get(part.parentPartIndex);
-			if (!parentId) continue;
-			const transform = pose.partToObjectTransforms[partIndex];
-			if (!transform)
-				throw new Error(
-					`Presentation ${presentation.id} has no pose for part ${partIndex}.`,
-				);
-			nodes.set(
-				partIndex,
-				scene.createNode({
-					localBounds: null,
-					localTransform: transform,
-					parentId,
-				}),
-			);
-			pending.delete(partIndex);
-			created = true;
-		}
-		if (!created)
+	for (const part of orderResolvedObjectParts(presentation.parts)) {
+		const partIndex = part.partIndex;
+		const parentId =
+			part.parentPartIndex === null
+				? rootNodeId
+				: nodes.get(part.parentPartIndex);
+		if (!parentId) {
 			throw new Error(
-				`Presentation ${presentation.id} has an invalid part hierarchy.`,
+				`Presentation ${presentation.id} has no node for parent part ${part.parentPartIndex}.`,
 			);
+		}
+		const transform = pose.partToObjectTransforms[partIndex];
+		if (!transform)
+			throw new Error(
+				`Presentation ${presentation.id} has no pose for part ${partIndex}.`,
+			);
+		nodes.set(
+			partIndex,
+			scene.createNode({
+				localBounds: null,
+				localTransform: transform,
+				parentId,
+			}),
+		);
 	}
 	return nodes;
 }

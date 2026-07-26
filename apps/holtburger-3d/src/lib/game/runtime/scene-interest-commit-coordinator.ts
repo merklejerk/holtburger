@@ -6,6 +6,7 @@ import {
 } from "../commit/types";
 import {
 	diffSceneInterest,
+	groupLandblockLayers,
 	type LandblockIdLayer,
 	type SceneInterestMap,
 } from "./scene-interest";
@@ -77,7 +78,7 @@ export class SceneInterestCommitCoordinator {
 		for (const layer of newLayers) {
 			this.#layerRevisions.set(layerKey(layer), revision);
 		}
-		for (const layers of groupByLandblock(newLayers).values()) {
+		for (const layers of groupLandblockLayers(newLayers).values()) {
 			void this.#prepareLandblock(layers, revision);
 		}
 		return { revision };
@@ -152,16 +153,4 @@ export class SceneInterestCommitCoordinator {
 
 function layerKey(layer: LandblockIdLayer): string {
 	return `${layer.id}/${layer.layer}`;
-}
-
-function groupByLandblock(
-	layers: ReadonlySet<LandblockIdLayer>,
-): ReadonlyMap<string, LandblockIdLayer[]> {
-	const grouped = new Map<string, LandblockIdLayer[]>();
-	for (const layer of layers) {
-		const group = grouped.get(layer.id);
-		if (group) group.push(layer);
-		else grouped.set(layer.id, [layer]);
-	}
-	return grouped;
 }

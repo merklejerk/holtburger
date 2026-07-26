@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { LandblockId } from "../game/game-types";
+import { createScaleMat4 } from "../game/math/matrices";
 import { AABB3, Mat4, Quat, Vec3 } from "../game/math/types";
 import type {
 	ResolvedObjectLayerSource,
@@ -713,25 +714,7 @@ function renderScale(scale: readonly [number, number, number]): Vec3 {
 }
 
 function scaleTransform(scale: readonly [number, number, number]): Mat4 {
-	const resolved = renderScale(scale);
-	return new Mat4(
-		resolved.x,
-		0,
-		0,
-		0,
-		0,
-		resolved.y,
-		0,
-		0,
-		0,
-		0,
-		resolved.z,
-		0,
-		0,
-		0,
-		0,
-		1,
-	);
+	return createScaleMat4(renderScale(scale));
 }
 
 function toBounds(value: z.infer<typeof bounds> | null): AABB3 | null {

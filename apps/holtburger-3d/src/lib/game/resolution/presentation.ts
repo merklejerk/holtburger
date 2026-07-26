@@ -72,6 +72,50 @@ export interface ResolvedObjectPart {
 	readonly materials: readonly ResolvedMaterial[];
 }
 
+/**
+ * Order a presentation hierarchy so every parent appears before its descendants.
+ *
+ * Both static baking and dynamic node installation consume this order; keeping hierarchy
+ * validation here prevents their parent-before-child rules from drifting apart.
+ */
+export function orderResolvedObjectParts(
+	parts: readonly ResolvedObjectPart[],
+): readonly ResolvedObjectPart[] {
+	const pending = new Map<number, ResolvedObjectPart>();
+	for (const part of parts) {
+		if (pending.has(part.partIndex)) {
+			throw new Error(
+				`Presentation contains duplicate part index ${part.partIndex}.`,
+			);
+		}
+		pending.set(part.partIndex, part);
+	}
+	for (const part of pending.values()) {
+		if (part.parentPartIndex !== null && !pending.has(part.parentPartIndex)) {
+			throw new Error(
+				`Part ${part.partIndex} references missing parent ${part.parentPartIndex}.`,
+			);
+		}
+	}
+	const ordered: ResolvedObjectPart[] = [];
+	const resolved = new Set<number>();
+	while (pending.size > 0) {
+		let progressed = false;
+		for (const [partIndex, part] of pending) {
+			if (part.parentPartIndex !== null && !resolved.has(part.parentPartIndex))
+				continue;
+			ordered.push(part);
+			resolved.add(partIndex);
+			pending.delete(partIndex);
+			progressed = true;
+		}
+		if (!progressed) {
+			throw new Error("Presentation contains a cyclic part hierarchy.");
+		}
+	}
+	return ordered;
+}
+
 /** Named setup placement containing a local transform for every part. */
 export interface ResolvedPlacementPose {
 	readonly placementId: number;

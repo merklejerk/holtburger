@@ -57,7 +57,7 @@ const ACTIVE_REGION: ActiveRegionSource = {
 };
 
 describe("decodeLandblockTerrainRecord", () => {
-	it("resolves raw terrain samples through the installed active region", () => {
+	it("consumes content-resolved heights and active-region presentation", () => {
 		const source = decodeLandblockTerrainRecord(
 			terrainResponse(),
 			LANDBLOCK_ID,
@@ -92,7 +92,7 @@ describe("decodeLandblockTerrainRecord", () => {
 		).toThrow("header declares");
 	});
 
-	it("accepts only a missing outdoor record as a terrain-absent result", () => {
+	it("accepts a missing outdoor record as a terrain-absent result", () => {
 		expect(
 			decodeLandblockTerrainRecord(
 				terrainResponse({ terrainAvailability: "missing-cell-landblock" }),
@@ -100,15 +100,6 @@ describe("decodeLandblockTerrainRecord", () => {
 				ACTIVE_REGION,
 			),
 		).toBeNull();
-		expect(() =>
-			decodeLandblockTerrainRecord(
-				terrainResponse({
-					terrainAvailability: "cell-landblock-decode-failed",
-				}),
-				LANDBLOCK_ID,
-				ACTIVE_REGION,
-			),
-		).toThrow("cell-landblock-decode-failed");
 	});
 
 	it("preserves ordered detail roles and the road terrain descriptor", () => {
@@ -175,22 +166,24 @@ function terrainTexture(terrainType: number) {
 function terrainResponse(
 	options: {
 		readonly landblockId?: string;
-		readonly terrainAvailability?:
-			| "available"
-			| "missing-cell-landblock"
-			| "cell-landblock-decode-failed"
-			| "terrain-assembly-failed";
+		readonly terrainAvailability?: "available" | "missing-cell-landblock";
 	} = {},
 ): Uint8Array {
 	const heightIndices = Uint8Array.from({ length: 81 }, (_, index) => index);
+	const heights = Float32Array.from({ length: 81 }, (_, index) => index + 0.5);
 	const terrainSamples = Uint16Array.from({ length: 81 }, (_, index) => index);
+	const heightsOffset =
+		Math.ceil(heightIndices.byteLength / Float32Array.BYTES_PER_ELEMENT) *
+		Float32Array.BYTES_PER_ELEMENT;
 	const terrainSamplesOffset =
-		Math.ceil(heightIndices.byteLength / Uint16Array.BYTES_PER_ELEMENT) *
-		Uint16Array.BYTES_PER_ELEMENT;
+		Math.ceil(
+			(heightsOffset + heights.byteLength) / Uint16Array.BYTES_PER_ELEMENT,
+		) * Uint16Array.BYTES_PER_ELEMENT;
 	const sectionBytes = new Uint8Array(
 		terrainSamplesOffset + terrainSamples.byteLength,
 	);
 	sectionBytes.set(heightIndices, 0);
+	sectionBytes.set(new Uint8Array(heights.buffer), heightsOffset);
 	sectionBytes.set(new Uint8Array(terrainSamples.buffer), terrainSamplesOffset);
 	const manifest = new TextEncoder().encode(
 		JSON.stringify({
@@ -206,6 +199,13 @@ function terrainResponse(
 					scalarType: "u8",
 				},
 				{
+					byteLength: heights.byteLength,
+					byteOffset: heightsOffset,
+					elementCount: heights.length,
+					name: "resolvedHeights",
+					scalarType: "f32",
+				},
+				{
 					byteLength: terrainSamples.byteLength,
 					byteOffset: terrainSamplesOffset,
 					elementCount: terrainSamples.length,
@@ -215,10 +215,9 @@ function terrainResponse(
 			],
 			terrainAvailability: options.terrainAvailability ?? "available",
 			transport: "holtburger-landblock-terrain-record",
-			version: 1,
 		}),
 	);
-	const headerLength = 16;
+	const headerLength = 12;
 	const manifestLength =
 		Math.ceil((headerLength + manifest.length) / 4) * 4 - headerLength;
 	const response = new Uint8Array(
@@ -226,9 +225,8 @@ function terrainResponse(
 	);
 	response.set(new TextEncoder().encode("HBTR"), 0);
 	const view = new DataView(response.buffer);
-	view.setUint32(4, 1, true);
-	view.setUint32(8, manifestLength, true);
-	view.setUint32(12, response.byteLength, true);
+	view.setUint32(4, manifestLength, true);
+	view.setUint32(8, response.byteLength, true);
 	response.set(manifest, headerLength);
 	response.fill(
 		0x20,

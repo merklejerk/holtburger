@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use holtburger_dat::file_type::RegionDesc;
 
 /// Complete static data decoded from the host repository's one active RegionDesc.
@@ -6,11 +8,11 @@ use holtburger_dat::file_type::RegionDesc;
 /// `region_number` as a loader selector.
 #[derive(Debug, Clone)]
 pub struct ActiveRegionData {
-    pub descriptor: RegionDesc,
+    pub descriptor: Arc<RegionDesc>,
 }
 
 impl ActiveRegionData {
-    pub fn new(descriptor: RegionDesc) -> Self {
+    pub fn new(descriptor: Arc<RegionDesc>) -> Self {
         Self { descriptor }
     }
 }

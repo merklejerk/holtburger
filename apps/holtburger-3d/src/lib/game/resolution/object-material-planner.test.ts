@@ -44,8 +44,14 @@ describe("object material planning", () => {
 	});
 
 	it("keeps logical textures distinct and preserves paletted clip-map facts", () => {
-		const first = planObjectMaterial(texturedMaterial("0x05000001", 0x04), TextureWrapMode.Clamp);
-		const second = planObjectMaterial(texturedMaterial("0x05000002", 0x04), TextureWrapMode.Clamp);
+		const first = planObjectMaterial(
+			texturedMaterial("0x05000001", 0x04),
+			TextureWrapMode.Clamp,
+		);
+		const second = planObjectMaterial(
+			texturedMaterial("0x05000002", 0x04),
+			TextureWrapMode.Clamp,
+		);
 
 		expect(first.id).not.toBe(second.id);
 		expect(first.palettedClipMap).toBe(true);

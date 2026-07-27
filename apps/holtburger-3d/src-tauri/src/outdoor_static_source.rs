@@ -1,17 +1,17 @@
 use std::collections::BTreeMap;
 
 use anyhow::{Context, Result};
-use holtburger_content::{
-    LEGACY_SAMPLER_REPEAT_MATERIAL_VARIANT_SIGNATURE, PreparedPolygonRenderSideKind,
-    ResolvedMaterialRecipe, ResolvedMaterialSource, build_gfx_obj_render_geometry,
-};
+use holtburger_content::{ResolvedMaterialRecipe, ResolvedMaterialSource};
 use holtburger_core::{ContentAsset, ContentAssetRequest, ContentAssetRuntime};
 use serde::Serialize;
 use serde_json::{Value, json};
 
+use crate::gfx_obj_geometry::{
+    PolygonSideKind, RenderAabb, SamplerWrapMode, build_gfx_obj_geometry,
+};
+
 pub(crate) const OUTDOOR_STATIC_RECORD_BINARY_MAGIC: &[u8; 4] = b"HBSO";
-pub(crate) const OUTDOOR_STATIC_RECORD_BINARY_VERSION: u32 = 2;
-const OUTDOOR_STATIC_RECORD_BINARY_HEADER_LEN: usize = 16;
+const OUTDOOR_STATIC_RECORD_BINARY_HEADER_LEN: usize = 12;
 
 /// Closed source data for one outdoor static layer before it crosses the app boundary.
 #[derive(Default)]
@@ -29,16 +29,13 @@ impl OutdoorStaticSourceClosure {
     pub(crate) async fn add_resident(
         &mut self,
         runtime: &ContentAssetRuntime,
-        member: &holtburger_content::LandblockOutdoorStaticMember,
+        source_did: u32,
     ) -> Result<String> {
-        let source_did = member.instance.source_did;
         match source_did >> 24 {
             0x01 => self.add_gfx_object_definition(runtime, source_did).await,
             0x02 => self.add_setup_model_definition(runtime, source_did).await,
             family => anyhow::bail!(
-                "outdoor static {} has unsupported render source family 0x{family:02X} ({})",
-                member.instance.instance_id,
-                member.instance.source_asset_id
+                "outdoor static source 0x{source_did:08X} has unsupported render source family 0x{family:02X}"
             ),
         }
     }
@@ -145,10 +142,10 @@ impl OutdoorStaticSourceClosure {
         if let Some(existing) = self.geometry_ids.get(&gfx_obj.id) {
             return Ok(existing.clone());
         }
-        let geometry = build_gfx_obj_render_geometry(gfx_obj);
+        let geometry = build_gfx_obj_geometry(gfx_obj);
         if geometry.positions.len() != geometry.vertex_count * 3
             || geometry.normals.len() != geometry.vertex_count * 3
-            || geometry.uvs.len() != geometry.vertex_count * 2
+            || geometry.texture_coordinates.len() != geometry.vertex_count * 2
         {
             anyhow::bail!(
                 "GfxObj 0x{:08X} has inconsistent prepared geometry lengths",
@@ -164,11 +161,11 @@ impl OutdoorStaticSourceClosure {
         let texture_coordinate_offset = self.buffers.texture_coordinates.len();
         self.buffers
             .texture_coordinates
-            .extend_from_slice(&geometry.uvs);
+            .extend_from_slice(&geometry.texture_coordinates);
         let index_offset = self.buffers.indices.len();
         let material_slot_offset = self.buffers.material_slots.len();
         for triangle in &geometry.triangles {
-            let slot = triangle.surface_id.with_context(|| {
+            let slot = triangle.surface_slot.with_context(|| {
                 format!(
                     "GfxObj 0x{:08X} polygon {} has no render surface",
                     gfx_obj.id, triangle.polygon_id
@@ -195,10 +192,9 @@ impl OutdoorStaticSourceClosure {
             }
             self.buffers.indices.extend([first, first + 1, first + 2]);
             self.buffers.material_slots.push(u16::try_from(slot)?);
-            self.buffers.material_wrap_modes.push(
-                (triangle.material_variant_signature
-                    == LEGACY_SAMPLER_REPEAT_MATERIAL_VARIANT_SIGNATURE) as u8,
-            );
+            self.buffers
+                .material_wrap_modes
+                .push((triangle.sampler_wrap == SamplerWrapMode::Repeat) as u8);
             self.buffers
                 .material_side_kinds
                 .push(material_side_kind(triangle.side_kind));
@@ -227,7 +223,7 @@ impl OutdoorStaticSourceClosure {
             "materialSideTypeCount": self.buffers.material_side_types.len() - material_slot_offset,
             "materialStipplingOffset": material_slot_offset,
             "materialStipplingCount": self.buffers.material_stippling.len() - material_slot_offset,
-            "bounds": geometry.bounds.as_ref().map(prepared_aabb_json),
+            "bounds": geometry.bounds.as_ref().map(render_aabb_json),
         }));
         self.geometry_ids.insert(gfx_obj.id, id.clone());
         Ok(id)
@@ -379,11 +375,11 @@ fn scalar_size(scalar_type: &str) -> usize {
     }
 }
 
-fn material_side_kind(side: PreparedPolygonRenderSideKind) -> u8 {
+fn material_side_kind(side: PolygonSideKind) -> u8 {
     match side {
-        PreparedPolygonRenderSideKind::Positive => 0,
-        PreparedPolygonRenderSideKind::PositiveReversed => 1,
-        PreparedPolygonRenderSideKind::Negative => 2,
+        PolygonSideKind::Positive => 0,
+        PolygonSideKind::PositiveReversed => 1,
+        PolygonSideKind::Negative => 2,
     }
 }
 
@@ -513,18 +509,14 @@ fn ac_vec3_json(vector: &holtburger_common::Vector3) -> Value {
     json!([vector.x, vector.y, vector.z])
 }
 
-pub(crate) fn prepared_vec3_json(vector: holtburger_content::PreparedVec3) -> Value {
-    json!([vector.x, vector.y, vector.z])
-}
-
 fn unit_vec3_json() -> Value {
     json!([1.0, 1.0, 1.0])
 }
 
-pub(crate) fn prepared_aabb_json(bounds: &holtburger_content::PreparedAabb) -> Value {
+pub(crate) fn render_aabb_json(bounds: &RenderAabb) -> Value {
     json!({
-        "min": prepared_vec3_json(bounds.min),
-        "max": prepared_vec3_json(bounds.max),
+        "min": [bounds.min.x, bounds.min.y, bounds.min.z],
+        "max": [bounds.max.x, bounds.max.y, bounds.max.z],
     })
 }
 
@@ -532,7 +524,6 @@ pub(crate) fn prepared_aabb_json(bounds: &holtburger_content::PreparedAabb) -> V
 #[serde(rename_all = "camelCase")]
 pub(crate) struct OutdoorStaticSourceRecordManifest {
     pub(crate) transport: &'static str,
-    pub(crate) version: u32,
     pub(crate) byte_order: &'static str,
     pub(crate) section_byte_offset_base: &'static str,
     pub(crate) landblock_id: String,
@@ -569,7 +560,6 @@ pub(crate) fn serialize_outdoor_static_record_binary(
         OUTDOOR_STATIC_RECORD_BINARY_HEADER_LEN + manifest_bytes.len() + section_bytes.len();
     let mut bytes = Vec::with_capacity(total_length);
     bytes.extend(OUTDOOR_STATIC_RECORD_BINARY_MAGIC);
-    bytes.extend(OUTDOOR_STATIC_RECORD_BINARY_VERSION.to_le_bytes());
     bytes.extend(u32::try_from(manifest_bytes.len())?.to_le_bytes());
     bytes.extend(u32::try_from(total_length)?.to_le_bytes());
     bytes.extend(manifest_bytes);

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::io::Cursor;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use holtburger_dat::file_type::{
@@ -29,19 +29,19 @@ pub struct ContentDecodeCache {
 
 #[derive(Debug, Default)]
 struct PinnedContentCache {
-    region_desc: Mutex<Option<RegionDesc>>,
+    region_desc: Mutex<Option<Arc<RegionDesc>>>,
 }
 
 #[derive(Debug)]
 struct LruDecodedRecordCache {
-    cell_landblocks: Mutex<SimpleLru<u32, CellLandblock>>,
-    landblock_infos: Mutex<SimpleLru<u32, LandblockInfo>>,
-    env_cells: Mutex<SimpleLru<u32, EnvCell>>,
-    environments: Mutex<SimpleLru<u32, Environment>>,
-    scenes: Mutex<SimpleLru<u32, Scene>>,
-    setup_models: Mutex<SimpleLru<u32, SetupModel>>,
-    gfx_objs: Mutex<SimpleLru<u32, GfxObj>>,
-    palettes: Mutex<SimpleLru<u32, Palette>>,
+    cell_landblocks: Mutex<SimpleLru<u32, Arc<CellLandblock>>>,
+    landblock_infos: Mutex<SimpleLru<u32, Arc<LandblockInfo>>>,
+    env_cells: Mutex<SimpleLru<u32, Arc<EnvCell>>>,
+    environments: Mutex<SimpleLru<u32, Arc<Environment>>>,
+    scenes: Mutex<SimpleLru<u32, Arc<Scene>>>,
+    setup_models: Mutex<SimpleLru<u32, Arc<SetupModel>>>,
+    gfx_objs: Mutex<SimpleLru<u32, Arc<GfxObj>>>,
+    palettes: Mutex<SimpleLru<u32, Arc<Palette>>>,
 }
 
 #[derive(Debug)]
@@ -75,7 +75,7 @@ impl ContentDecodeCache {
         &self,
         content: &ContentRepository,
         landblock_id: u32,
-    ) -> Result<CellLandblock> {
+    ) -> Result<Arc<CellLandblock>> {
         load_lru_record(&self.lru.cell_landblocks, landblock_id, || {
             let resource = content
                 .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, landblock_id))
@@ -86,6 +86,7 @@ impl ContentDecodeCache {
                     )
                 })?;
             CellLandblock::unpack(&resource.bytes)
+                .map(Arc::new)
                 .with_context(|| format!("Could not decode CellLandblock 0x{landblock_id:08X}"))
         })
     }
@@ -94,7 +95,7 @@ impl ContentDecodeCache {
         &self,
         content: &ContentRepository,
         landblock_info_id: u32,
-    ) -> Result<LandblockInfo> {
+    ) -> Result<Arc<LandblockInfo>> {
         load_lru_record(&self.lru.landblock_infos, landblock_info_id, || {
             let resource = content
                 .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, landblock_info_id))
@@ -104,13 +105,15 @@ impl ContentDecodeCache {
                         EOR_CELL_NAMESPACE
                     )
                 })?;
-            LandblockInfo::unpack(&resource.bytes).with_context(|| {
-                format!("Could not decode LandblockInfo 0x{landblock_info_id:08X}")
-            })
+            LandblockInfo::unpack(&resource.bytes)
+                .map(Arc::new)
+                .with_context(|| {
+                    format!("Could not decode LandblockInfo 0x{landblock_info_id:08X}")
+                })
         })
     }
 
-    pub fn env_cell(&self, content: &ContentRepository, env_cell_id: u32) -> Result<EnvCell> {
+    pub fn env_cell(&self, content: &ContentRepository, env_cell_id: u32) -> Result<Arc<EnvCell>> {
         load_lru_record(&self.lru.env_cells, env_cell_id, || {
             let resource = content
                 .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, env_cell_id))
@@ -121,6 +124,7 @@ impl ContentDecodeCache {
                     )
                 })?;
             EnvCell::unpack(&mut Cursor::new(resource.bytes))
+                .map(Arc::new)
                 .with_context(|| format!("Could not decode EnvCell 0x{env_cell_id:08X}"))
         })
     }
@@ -129,7 +133,7 @@ impl ContentDecodeCache {
         &self,
         content: &ContentRepository,
         environment_id: u32,
-    ) -> Result<Environment> {
+    ) -> Result<Arc<Environment>> {
         load_lru_record(&self.lru.environments, environment_id, || {
             let resource = content
                 .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, environment_id))
@@ -140,11 +144,12 @@ impl ContentDecodeCache {
                     )
                 })?;
             Environment::unpack(&mut Cursor::new(resource.bytes))
+                .map(Arc::new)
                 .with_context(|| format!("Could not decode Environment 0x{environment_id:08X}"))
         })
     }
 
-    pub fn region_desc(&self, content: &ContentRepository) -> Result<RegionDesc> {
+    pub fn region_desc(&self, content: &ContentRepository) -> Result<Arc<RegionDesc>> {
         if let Some(region) = self
             .pinned
             .region_desc
@@ -163,8 +168,10 @@ impl ContentDecodeCache {
                     EOR_PORTAL_NAMESPACE
                 )
             })?;
-        let region = RegionDesc::unpack(&resource.bytes)
-            .with_context(|| format!("Could not decode RegionDesc 0x{REGION_DESC_FILE_ID:08X}"))?;
+        let region =
+            Arc::new(RegionDesc::unpack(&resource.bytes).with_context(|| {
+                format!("Could not decode RegionDesc 0x{REGION_DESC_FILE_ID:08X}")
+            })?);
         *self
             .pinned
             .region_desc
@@ -174,11 +181,11 @@ impl ContentDecodeCache {
     }
 
     /// Loads the complete static record for the repository-selected active region.
-    pub fn active_region_data(&self, content: &ContentRepository) -> Result<ActiveRegionData> {
-        Ok(ActiveRegionData::new(self.region_desc(content)?))
+    pub fn active_region_data(&self, content: &ContentRepository) -> Result<Arc<ActiveRegionData>> {
+        Ok(Arc::new(ActiveRegionData::new(self.region_desc(content)?)))
     }
 
-    pub fn scene(&self, content: &ContentRepository, scene_id: u32) -> Result<Scene> {
+    pub fn scene(&self, content: &ContentRepository, scene_id: u32) -> Result<Arc<Scene>> {
         load_lru_record(&self.lru.scenes, scene_id, || {
             let resource = content
                 .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, scene_id))
@@ -189,6 +196,7 @@ impl ContentDecodeCache {
                     )
                 })?;
             Scene::unpack(&resource.bytes)
+                .map(Arc::new)
                 .with_context(|| format!("Could not decode Scene 0x{scene_id:08X}"))
         })
     }
@@ -197,7 +205,7 @@ impl ContentDecodeCache {
         &self,
         content: &ContentRepository,
         setup_model_id: u32,
-    ) -> Result<SetupModel> {
+    ) -> Result<Arc<SetupModel>> {
         load_lru_record(&self.lru.setup_models, setup_model_id, || {
             let resource = content
                 .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, setup_model_id))
@@ -208,11 +216,12 @@ impl ContentDecodeCache {
                     )
                 })?;
             SetupModel::unpack(&mut Cursor::new(resource.bytes))
+                .map(Arc::new)
                 .with_context(|| format!("Could not decode SetupModel 0x{setup_model_id:08X}"))
         })
     }
 
-    pub fn gfx_obj(&self, content: &ContentRepository, gfx_obj_id: u32) -> Result<GfxObj> {
+    pub fn gfx_obj(&self, content: &ContentRepository, gfx_obj_id: u32) -> Result<Arc<GfxObj>> {
         load_lru_record(&self.lru.gfx_objs, gfx_obj_id, || {
             let resource = content
                 .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, gfx_obj_id))
@@ -223,11 +232,12 @@ impl ContentDecodeCache {
                     )
                 })?;
             GfxObj::unpack(&mut Cursor::new(resource.bytes))
+                .map(Arc::new)
                 .with_context(|| format!("Could not decode GfxObj 0x{gfx_obj_id:08X}"))
         })
     }
 
-    pub fn palette(&self, content: &ContentRepository, palette_id: u32) -> Result<Palette> {
+    pub fn palette(&self, content: &ContentRepository, palette_id: u32) -> Result<Arc<Palette>> {
         load_lru_record(&self.lru.palettes, palette_id, || {
             let resource = content
                 .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, palette_id))
@@ -238,6 +248,7 @@ impl ContentDecodeCache {
                     )
                 })?;
             Palette::unpack(&mut Cursor::new(resource.bytes))
+                .map(Arc::new)
                 .with_context(|| format!("Could not decode Palette 0x{palette_id:08X}"))
         })
     }
@@ -314,64 +325,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use holtburger_dat::{DatError, FileMetadata, ResourceSource};
     use std::sync::Arc;
 
-    #[derive(Debug)]
-    struct CountingSource {
-        files: HashMap<(String, u32), Vec<u8>>,
-        reads: Mutex<HashMap<(String, u32), usize>>,
-    }
-
-    impl CountingSource {
-        fn new(files: HashMap<(String, u32), Vec<u8>>) -> Self {
-            Self {
-                files,
-                reads: Mutex::new(HashMap::new()),
-            }
-        }
-
-        fn read_count(&self, namespace: &str, file_id: u32) -> usize {
-            self.reads
-                .lock()
-                .expect("counting source reads should not be poisoned")
-                .get(&(namespace.to_string(), file_id))
-                .copied()
-                .unwrap_or_default()
-        }
-    }
-
-    impl ResourceSource for CountingSource {
-        fn get_file_by_key(&self, key: ResourceKey<'_>) -> holtburger_dat::Result<Vec<u8>> {
-            let lookup_key = (key.namespace.to_string(), key.file_id);
-            *self
-                .reads
-                .lock()
-                .expect("counting source reads should not be poisoned")
-                .entry(lookup_key.clone())
-                .or_default() += 1;
-            self.files
-                .get(&lookup_key)
-                .cloned()
-                .ok_or(DatError::NotFound(key.file_id))
-        }
-
-        fn get_metadata_by_key(&self, key: ResourceKey<'_>) -> Option<FileMetadata> {
-            self.files
-                .get(&(key.namespace.to_string(), key.file_id))
-                .map(|bytes| FileMetadata {
-                    id: key.file_id,
-                    size: bytes.len() as u32,
-                    is_pruned: false,
-                })
-        }
-
-        fn has_namespace(&self, namespace: &str) -> bool {
-            self.files
-                .keys()
-                .any(|(source_namespace, _)| source_namespace == namespace)
-        }
-    }
+    use crate::test_support::CountingSource;
 
     fn minimal_cell_landblock_bytes(landblock_id: u32) -> Vec<u8> {
         let mut bytes = Vec::new();

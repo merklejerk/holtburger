@@ -3,6 +3,7 @@ import { planObjectMaterial } from "../resolution/object-material-planner";
 import type { ResolvedOutdoorStaticLayerSource } from "../resolution/landblock-layer";
 import {
 	orderResolvedObjectParts,
+	resolveObjectPartTransforms,
 	type ResolvedGeometry,
 	type ResolvedObjectPart,
 } from "../resolution/presentation";
@@ -878,30 +879,10 @@ function createPartTransforms(
 	const pose = resident.presentation.placementPoses.get(0);
 	if (!pose)
 		throw new Error(`Resident ${resident.id} has no default placement pose.`);
-	const transforms = new Map<number, Mat4>();
-	for (const part of orderResolvedObjectParts(resident.presentation.parts)) {
-		const partIndex = part.partIndex;
-		const localTransform = pose.partTransforms[partIndex];
-		if (!localTransform) {
-			throw new Error(
-				`Resident ${resident.id} has no transform for part ${partIndex}.`,
-			);
-		}
-		const parent =
-			part.parentPartIndex === null
-				? null
-				: transforms.get(part.parentPartIndex);
-		if (part.parentPartIndex !== null && !parent) {
-			throw new Error(
-				`Resident ${resident.id} has no transform for parent part ${part.parentPartIndex}.`,
-			);
-		}
-		transforms.set(
-			partIndex,
-			parent ? multiplyMat4(parent, localTransform) : localTransform,
-		);
-	}
-	return transforms;
+	return resolveObjectPartTransforms(
+		resident.presentation.parts,
+		pose.partTransforms,
+	);
 }
 
 function compareGroups(

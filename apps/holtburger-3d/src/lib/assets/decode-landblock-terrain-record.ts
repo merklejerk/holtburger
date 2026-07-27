@@ -4,27 +4,21 @@ import type { ResolvedTerrainLayerSource } from "../game/resolution/landblock-la
 import type { LandblockId } from "../game/game-types";
 import { OUTDOOR_TERRAIN_GRID_SIZE } from "../game/landblocks";
 
-const HEADER_LENGTH = 16;
+const HEADER_LENGTH = 12;
 const MAGIC = "HBTR";
-const VERSION = 1;
 
 interface BinarySection {
-	readonly name: "heightIndices" | "terrainSamples";
-	readonly scalarType: "u8" | "u16";
+	readonly name: "heightIndices" | "resolvedHeights" | "terrainSamples";
+	readonly scalarType: "u8" | "u16" | "f32";
 	readonly elementCount: number;
 	readonly byteOffset: number;
 	readonly byteLength: number;
 }
 
-type TerrainAvailability =
-	| "available"
-	| "missing-cell-landblock"
-	| "cell-landblock-decode-failed"
-	| "terrain-assembly-failed";
+type TerrainAvailability = "available" | "missing-cell-landblock";
 
 interface TerrainSourceManifest {
 	readonly transport: "holtburger-landblock-terrain-record";
-	readonly version: number;
 	readonly byteOrder: "little-endian";
 	readonly sectionByteOffsetBase: "section-data";
 	readonly landblockId: string;
@@ -52,12 +46,8 @@ export function decodeLandblockTerrainRecord(
 	const magic = new TextDecoder().decode(response.subarray(0, 4));
 	if (magic !== MAGIC)
 		throw new Error(`Unexpected landblock terrain record magic ${magic}.`);
-	const version = view.getUint32(4, true);
-	if (version !== VERSION) {
-		throw new Error(`Unsupported landblock terrain record version ${version}.`);
-	}
-	const manifestLength = view.getUint32(8, true);
-	const totalLength = view.getUint32(12, true);
+	const manifestLength = view.getUint32(4, true);
+	const totalLength = view.getUint32(8, true);
 	if (totalLength !== response.byteLength) {
 		throw new Error(
 			`Landblock terrain record length is ${response.byteLength}; header declares ${totalLength}.`,
@@ -90,7 +80,7 @@ export function decodeLandblockTerrainRecord(
 	const sections = new Map(
 		manifest.sections.map((section) => [section.name, section]),
 	);
-	if (sections.size !== 2 || sections.size !== manifest.sections.length) {
+	if (sections.size !== 3 || sections.size !== manifest.sections.length) {
 		throw new Error(
 			"Landblock terrain record must contain each raw grid section exactly once.",
 		);
@@ -102,6 +92,12 @@ export function decodeLandblockTerrainRecord(
 		requireSection(sections, "heightIndices", "u8", expectedCount),
 		Uint8Array,
 	);
+	const heights = readSection(
+		response,
+		sectionDataOffset,
+		requireSection(sections, "resolvedHeights", "f32", expectedCount),
+		Float32Array,
+	);
 	const terrainSamples = readSection(
 		response,
 		sectionDataOffset,
@@ -109,7 +105,12 @@ export function decodeLandblockTerrainRecord(
 		Uint16Array,
 	);
 	return resolveOutdoorTerrainLayer(
-		{ heightIndices, landblockId: manifest.landblockId, terrainSamples },
+		{
+			heightIndices,
+			heights,
+			landblockId: manifest.landblockId,
+			terrainSamples,
+		},
 		activeRegion,
 	);
 }
@@ -125,7 +126,6 @@ function parseManifest(serialized: string): TerrainSourceManifest {
 		throw new Error("Terrain source manifest is not an object.");
 	if (
 		manifest.transport !== "holtburger-landblock-terrain-record" ||
-		manifest.version !== VERSION ||
 		manifest.byteOrder !== "little-endian" ||
 		manifest.sectionByteOffsetBase !== "section-data" ||
 		typeof manifest.landblockId !== "string" ||
@@ -140,12 +140,7 @@ function parseManifest(serialized: string): TerrainSourceManifest {
 }
 
 function isTerrainAvailability(value: unknown): value is TerrainAvailability {
-	return (
-		value === "available" ||
-		value === "missing-cell-landblock" ||
-		value === "cell-landblock-decode-failed" ||
-		value === "terrain-assembly-failed"
-	);
+	return value === "available" || value === "missing-cell-landblock";
 }
 
 function requireSection(
@@ -165,7 +160,7 @@ function requireSection(
 	return section;
 }
 
-function readSection<TArray extends Uint8Array | Uint16Array>(
+function readSection<TArray extends Uint8Array | Uint16Array | Float32Array>(
 	response: Uint8Array,
 	sectionDataOffset: number,
 	section: BinarySection,

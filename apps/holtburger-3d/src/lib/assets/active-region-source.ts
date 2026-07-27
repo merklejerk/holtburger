@@ -1,8 +1,7 @@
 import { z } from "zod";
 
-const HEADER_LENGTH = 16;
+const HEADER_LENGTH = 12;
 const MAGIC = "HBAR";
-const VERSION = 1;
 const HEIGHT_TABLE_ENTRY_COUNT = 256;
 
 const finiteNumber = z.number().finite();
@@ -198,7 +197,6 @@ const activeRegionDataSchema = z.object({
 
 const manifestSchema = z.object({
 	transport: z.literal("holtburger-active-region-data"),
-	version: z.literal(VERSION),
 	byteOrder: z.literal("little-endian"),
 	sectionByteOffsetBase: z.literal("section-data"),
 	provenance: z.object({
@@ -234,7 +232,7 @@ export interface ActiveRegionSource {
 	readonly landHeightTable: Float32Array;
 }
 
-/** Decode and validate the versioned active-region host response before runtime installation. */
+/** Decode and validate the active-region host response before runtime installation. */
 export function decodeActiveRegionSource(
 	response: Uint8Array,
 ): ActiveRegionSource {
@@ -251,12 +249,8 @@ export function decodeActiveRegionSource(
 	const magic = new TextDecoder().decode(response.subarray(0, 4));
 	if (magic !== MAGIC)
 		throw new Error(`Unexpected active-region magic ${magic}.`);
-	const version = view.getUint32(4, true);
-	if (version !== VERSION) {
-		throw new Error(`Unsupported active-region version ${version}.`);
-	}
-	const manifestLength = view.getUint32(8, true);
-	const totalLength = view.getUint32(12, true);
+	const manifestLength = view.getUint32(4, true);
+	const totalLength = view.getUint32(8, true);
 	if (totalLength !== response.byteLength) {
 		throw new Error(
 			`Active-region response is ${response.byteLength}; header declares ${totalLength}.`,

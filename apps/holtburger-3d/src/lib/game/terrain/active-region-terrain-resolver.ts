@@ -30,6 +30,7 @@ export interface ResolvedRegionTerrainDetailRole {
 export interface RawOutdoorTerrainSource {
 	readonly landblockId: LandblockId;
 	readonly heightIndices: Uint8Array;
+	readonly heights: Float32Array;
 	readonly terrainSamples: Uint16Array;
 }
 
@@ -41,6 +42,7 @@ export function resolveOutdoorTerrainLayer(
 	const expectedCount = OUTDOOR_TERRAIN_GRID_SIZE ** 2;
 	if (
 		raw.heightIndices.length !== expectedCount ||
+		raw.heights.length !== expectedCount ||
 		raw.terrainSamples.length !== expectedCount
 	) {
 		throw new Error(
@@ -48,15 +50,12 @@ export function resolveOutdoorTerrainLayer(
 		);
 	}
 	const presentation = resolveActiveRegionTerrainPresentation(activeRegion);
-	const heights = new Float32Array(expectedCount);
-	for (let index = 0; index < raw.heightIndices.length; index += 1) {
-		const height = activeRegion.landHeightTable[raw.heightIndices[index]!];
+	for (const height of raw.heights) {
 		if (!Number.isFinite(height)) {
 			throw new Error(
-				`Active-region height table has no finite height for terrain index ${raw.heightIndices[index]}.`,
+				`Outdoor terrain ${raw.landblockId} contains a non-finite resolved height.`,
 			);
 		}
-		heights[index] = height;
 	}
 	return {
 		kind: LandblockLayerKind.Terrain,
@@ -64,7 +63,7 @@ export function resolveOutdoorTerrainLayer(
 		generation: {
 			gridSize: OUTDOOR_TERRAIN_GRID_SIZE,
 			heightIndices: raw.heightIndices,
-			heights,
+			heights: raw.heights,
 			landblockId: raw.landblockId,
 			terrainSamples: raw.terrainSamples,
 			tileSize: OUTDOOR_TERRAIN_TILE_SIZE,

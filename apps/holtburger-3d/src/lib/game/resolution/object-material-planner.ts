@@ -68,10 +68,15 @@ export function planObjectMaterial(
 		sourceAssetId: material.colorTextureId,
 	};
 	const paletteTexture = material.paletteTextureId
-		? createAssetTextureKey(TexturePurpose.ObjectPalette, material.paletteTextureId)
+		? createAssetTextureKey(
+				TexturePurpose.ObjectPalette,
+				material.paletteTextureId,
+			)
 		: null;
 	if (material.textureEncoding !== "direct-color" && paletteTexture === null) {
-		throw new Error(`Indexed material ${material.id} has no palette dependency.`);
+		throw new Error(
+			`Indexed material ${material.id} has no palette dependency.`,
+		);
 	}
 	const textureRequirements = [
 		baseTextureRequirement,
@@ -112,8 +117,7 @@ export function classifyObjectMaterialOrdering(
 	const flags = material.rawSurfaceFlags;
 	if ((flags & SURFACE_ADDITIVE) !== 0) return "additive";
 	if (
-		(flags & (SURFACE_TRANSLUCENT | SURFACE_ALPHA | SURFACE_INV_ALPHA)) !==
-			0 ||
+		(flags & (SURFACE_TRANSLUCENT | SURFACE_ALPHA | SURFACE_INV_ALPHA)) !== 0 ||
 		material.translucency > 0
 	) {
 		return "transparent";
@@ -142,7 +146,9 @@ function bindingId(
 ): string {
 	return [
 		material.id,
-		material.kind === "texture" ? material.renderSurfaceId : "no-render-surface",
+		material.kind === "texture"
+			? material.renderSurfaceId
+			: "no-render-surface",
 		ordering,
 		wrap,
 		baseTexture ?? "none",

@@ -152,7 +152,6 @@ function buildResponse(
 	}
 	const manifest = {
 		transport: "holtburger-outdoor-static-record",
-		version: 2,
 		byteOrder: "little-endian",
 		sectionByteOffsetBase: "section-data",
 		landblockId: LANDBLOCK_ID,
@@ -224,18 +223,20 @@ function buildResponse(
 		sections,
 	};
 	const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest));
+	const headerLength = 12;
 	const paddedManifest = new Uint8Array(
-		Math.ceil((16 + manifestBytes.length) / 4) * 4 - 16,
+		Math.ceil((headerLength + manifestBytes.length) / 4) * 4 - headerLength,
 	);
 	paddedManifest.fill(0x20);
 	paddedManifest.set(manifestBytes);
-	const response = new Uint8Array(16 + paddedManifest.length + payload.length);
+	const response = new Uint8Array(
+		headerLength + paddedManifest.length + payload.length,
+	);
 	response.set(new TextEncoder().encode("HBSO"));
-	new DataView(response.buffer).setUint32(4, 2, true);
-	new DataView(response.buffer).setUint32(8, paddedManifest.length, true);
-	new DataView(response.buffer).setUint32(12, response.length, true);
-	response.set(paddedManifest, 16);
-	response.set(payload, 16 + paddedManifest.length);
+	new DataView(response.buffer).setUint32(4, paddedManifest.length, true);
+	new DataView(response.buffer).setUint32(8, response.length, true);
+	response.set(paddedManifest, headerLength);
+	response.set(payload, headerLength + paddedManifest.length);
 	return response;
 }
 
@@ -245,7 +246,6 @@ function resident(source: string): Record<string, unknown> {
 		source,
 		placement: { origin: [1, 2, 3], orientation: [1, 0, 0, 0] },
 		scale: [1, 1, 1],
-		localBounds: { min: [0, 0, 0], max: [1, 1, 0] },
 	};
 }
 
@@ -260,18 +260,20 @@ function batchResponse(
 		records: [{ byteLength: record.byteLength, byteOffset: 0, layer }],
 		requestedLayers: [layer],
 		transport: "holtburger-landblock-source-batch",
-		version: 2,
 	};
 	const encodedManifest = new TextEncoder().encode(JSON.stringify(manifest));
-	const manifestLength = Math.ceil((16 + encodedManifest.length) / 4) * 4 - 16;
-	const response = new Uint8Array(16 + manifestLength + record.byteLength);
+	const headerLength = 12;
+	const manifestLength =
+		Math.ceil((headerLength + encodedManifest.length) / 4) * 4 - headerLength;
+	const response = new Uint8Array(
+		headerLength + manifestLength + record.byteLength,
+	);
 	response.set(new TextEncoder().encode("HBLB"));
 	const view = new DataView(response.buffer);
-	view.setUint32(4, 2, true);
-	view.setUint32(8, manifestLength, true);
-	view.setUint32(12, response.byteLength, true);
-	response.fill(0x20, 16, 16 + manifestLength);
-	response.set(encodedManifest, 16);
-	response.set(record, 16 + manifestLength);
+	view.setUint32(4, manifestLength, true);
+	view.setUint32(8, response.byteLength, true);
+	response.fill(0x20, headerLength, headerLength + manifestLength);
+	response.set(encodedManifest, headerLength);
+	response.set(record, headerLength + manifestLength);
 	return response;
 }

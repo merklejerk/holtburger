@@ -3,9 +3,7 @@ use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use holtburger_content::{
-    ContentDecodeCache, ContentRepository, LandblockOutdoorAssetRequest,
-    ResolvedRegionDetailRoleKind, StaticOutdoorSceneSourceFamilies, TexturePixelFormat,
-    road_code_from_cell_terrain, terrain_code_from_cell_terrain,
+    ContentDecodeCache, ContentRepository, ResolvedRegionDetailRoleKind, TexturePixelFormat,
 };
 use holtburger_core::{ContentAsset, ContentAssetRequest, ContentAssetService};
 
@@ -31,26 +29,16 @@ fn main() -> Result<()> {
     let service =
         ContentAssetService::new(Arc::clone(&repository), Arc::new(ContentDecodeCache::new()));
 
-    let outdoor_asset = service.load(ContentAssetRequest::LandblockOutdoor(
-        LandblockOutdoorAssetRequest::new(
-            landblock_id,
-            true,
-            StaticOutdoorSceneSourceFamilies::new(false, false, false),
-        ),
-    ))?;
-    let ContentAsset::LandblockOutdoor {
-        outdoor,
-        region_number,
-        ..
-    } = outdoor_asset
-    else {
-        unreachable!("landblock request must return outdoor source facts")
+    let landblock_asset = service.load(ContentAssetRequest::Landblock(landblock_id))?;
+    let ContentAsset::Landblock(landblock) = landblock_asset else {
+        unreachable!("landblock request must return shallow landblock facts")
     };
-    let terrain = outdoor.cell_landblock.as_ref().map(|fact| &fact.terrain);
-    let Some(terrain) = terrain else {
+    let Some(landblock) = landblock else {
         println!("landblock 0x{landblock_id:08X}: terrain absent");
         return Ok(());
     };
+    let terrain = &landblock.terrain;
+    let region_number = service.active_region()?.descriptor.region_number;
     let material_asset = service.load(ContentAssetRequest::TerrainMaterial(region_number))?;
     let ContentAsset::TerrainMaterial(materials) = material_asset else {
         unreachable!("terrain material request must return a terrain material table")
@@ -79,13 +67,13 @@ fn main() -> Result<()> {
         .terrain_samples
         .iter()
         .copied()
-        .map(terrain_code_from_cell_terrain)
+        .map(|value| u32::from((value >> 2) & 0x1f))
         .collect::<std::collections::BTreeSet<_>>();
     let road_codes = terrain
         .terrain_samples
         .iter()
         .copied()
-        .map(road_code_from_cell_terrain)
+        .map(|value| u32::from(value & 0x03))
         .collect::<std::collections::BTreeSet<_>>();
     println!(
         "landblock=0x{landblock_id:08X} region={} grid={}x{} tile={} height=[{min_height}, {max_height}]",

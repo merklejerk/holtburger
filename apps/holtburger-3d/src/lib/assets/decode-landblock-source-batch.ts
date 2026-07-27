@@ -13,9 +13,8 @@ import type {
 	LandblockSourceLayer,
 } from "./landblock-source-batch";
 
-const HEADER_LENGTH = 16;
+const HEADER_LENGTH = 12;
 const MAGIC = "HBLB";
-const VERSION = 2;
 const datId = z.string().regex(/^0x[0-9a-f]{8}$/i);
 const layer = z.enum([
 	LandblockLayerKind.Terrain,
@@ -25,7 +24,6 @@ const layer = z.enum([
 ]);
 const manifestSchema = z.object({
 	transport: z.literal("holtburger-landblock-source-batch"),
-	version: z.literal(VERSION),
 	byteOrder: z.literal("little-endian"),
 	recordByteOffsetBase: z.literal("record-data"),
 	landblockId: datId,
@@ -59,12 +57,8 @@ export function decodeLandblockSourceBatch(
 	const magic = new TextDecoder().decode(response.subarray(0, 4));
 	if (magic !== MAGIC)
 		throw new Error(`Unexpected landblock source batch magic ${magic}.`);
-	const version = view.getUint32(4, true);
-	if (version !== VERSION) {
-		throw new Error(`Unsupported landblock source batch version ${version}.`);
-	}
-	const manifestLength = view.getUint32(8, true);
-	const totalLength = view.getUint32(12, true);
+	const manifestLength = view.getUint32(4, true);
+	const totalLength = view.getUint32(8, true);
 	if (totalLength !== response.byteLength) {
 		throw new Error(
 			`Landblock source batch length is ${response.byteLength}; header declares ${totalLength}.`,

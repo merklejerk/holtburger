@@ -101,19 +101,23 @@ function textureResponse(options: {
 				width: options.width,
 			},
 			transport: "holtburger-texture-pixels",
-			version: 1,
 		}),
 	);
-	const paddedManifestLength = Math.ceil((16 + manifest.length) / 4) * 4 - 16;
+	const headerLength = 12;
+	const paddedManifestLength =
+		Math.ceil((headerLength + manifest.length) / 4) * 4 - headerLength;
 	const response = new Uint8Array(
-		16 + paddedManifestLength + options.pixels.length,
+		headerLength + paddedManifestLength + options.pixels.length,
 	);
 	response.set(new TextEncoder().encode("HBTP"), 0);
-	new DataView(response.buffer).setUint32(4, 1, true);
-	new DataView(response.buffer).setUint32(8, paddedManifestLength, true);
-	new DataView(response.buffer).setUint32(12, response.byteLength, true);
-	response.set(manifest, 16);
-	response.fill(0x20, 16 + manifest.length, 16 + paddedManifestLength);
-	response.set(options.pixels, 16 + paddedManifestLength);
+	new DataView(response.buffer).setUint32(4, paddedManifestLength, true);
+	new DataView(response.buffer).setUint32(8, response.byteLength, true);
+	response.set(manifest, headerLength);
+	response.fill(
+		0x20,
+		headerLength + manifest.length,
+		headerLength + paddedManifestLength,
+	);
+	response.set(options.pixels, headerLength + paddedManifestLength);
 	return response;
 }

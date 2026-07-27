@@ -135,7 +135,9 @@ describe("SceneGraph", () => {
 			parentId: rootId,
 		});
 
-		expect(queryTopology(scene, { kind: "outdoor" }).entries).toEqual([childId]);
+		expect(queryTopology(scene, { kind: "outdoor" }).entries).toEqual([
+			childId,
+		]);
 
 		scene.updateBounds(childId, null);
 		expect(queryTopology(scene, { kind: "outdoor" }).entries).toEqual([]);

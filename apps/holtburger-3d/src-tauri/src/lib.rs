@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use holtburger_content::{
-    ActiveRegionData, ContentDecodeCache, ContentRepository, SourceRecordStatus, TerrainGridSource,
-    TexturePixelFormat,
+    ActiveRegionData, ContentDecodeCache, ContentRepository, LandblockTerrain, TexturePixelFormat,
 };
 use holtburger_core::{
     ContentAsset, ContentAssetRequest, ContentAssetRuntime, ContentAssetService,
@@ -15,6 +14,7 @@ use serde_json::{Value, json};
 
 pub use landblock_source_batch::LandblockSourceLayer;
 
+mod gfx_obj_geometry;
 mod landblock_source_batch;
 mod object_texture;
 mod outdoor_static_source;
@@ -28,18 +28,14 @@ use object_texture::{
     ObjectTexturePurpose, PreparedObjectTexture, prepare_object_palette, prepare_object_surface,
 };
 use outdoor_static_source::{
-    OUTDOOR_STATIC_RECORD_BINARY_VERSION, OutdoorStaticSourceClosure,
-    OutdoorStaticSourceRecordManifest, frame_json, prepared_aabb_json, prepared_vec3_json,
+    OutdoorStaticSourceClosure, OutdoorStaticSourceRecordManifest,
     serialize_outdoor_static_record_binary,
 };
 
 const TERRAIN_SOURCE_BINARY_MAGIC: &[u8; 4] = b"HBTR";
-const TERRAIN_SOURCE_BINARY_VERSION: u32 = 1;
-const TERRAIN_SOURCE_BINARY_HEADER_LEN: usize = 16;
+const BINARY_ENVELOPE_HEADER_LEN: usize = 12;
 const TEXTURE_PIXELS_BINARY_MAGIC: &[u8; 4] = b"HBTP";
-const TEXTURE_PIXELS_BINARY_VERSION: u32 = 1;
 const ACTIVE_REGION_BINARY_MAGIC: &[u8; 4] = b"HBAR";
-const ACTIVE_REGION_BINARY_VERSION: u32 = 1;
 
 /// Managed static-content runtime shared by narrow Tauri commands.
 #[derive(Clone)]
@@ -50,15 +46,15 @@ struct HostContentState {
 impl HostContentState {
     fn discover() -> Result<Self> {
         let repository = Arc::new(ContentRepository::discover(None)?);
-        Ok(Self::from_repository(repository))
+        Self::from_repository(repository)
     }
 
     /// Builds the app-local host state from an already discovered or injected repository.
-    fn from_repository(repository: Arc<ContentRepository>) -> Self {
+    fn from_repository(repository: Arc<ContentRepository>) -> Result<Self> {
         let service = ContentAssetService::new(repository, Arc::new(ContentDecodeCache::new()));
-        Self {
+        Ok(Self {
             runtime: ContentAssetRuntime::new(service),
-        }
+        })
     }
 }
 
@@ -112,7 +108,7 @@ async fn load_active_region_data(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
-/// Loads one normalized outdoor landblock's requested source records as a versioned binary batch.
+/// Loads one normalized outdoor landblock's requested source records as a closed binary batch.
 #[tauri::command]
 async fn load_landblock_source_batch(
     state: tauri::State<'_, HostContentState>,
@@ -211,11 +207,10 @@ fn serialize_terrain_source_record(source_batch: &LoadedLandblockSourceBatch) ->
     let terrain = source_batch.terrain()?;
     let manifest = TerrainSourceManifest {
         transport: "holtburger-landblock-terrain-record",
-        version: TERRAIN_SOURCE_BINARY_VERSION,
         byte_order: "little-endian",
         section_byte_offset_base: "section-data",
         landblock_id: format!("0x{:08x}", source_batch.landblock_id()),
-        terrain_availability: terrain_availability(terrain, source_batch.diagnostics()),
+        terrain_availability: terrain_availability(terrain),
         sections: terrain.map(terrain_sections).unwrap_or_default(),
     };
     serialize_terrain_source_binary(&manifest, terrain)
@@ -238,20 +233,26 @@ async fn serialize_outdoor_static_source_record(
     let mut closure = OutdoorStaticSourceClosure::default();
     let mut residents = Vec::with_capacity(statics.len());
     for member in statics {
-        let source = closure.add_resident(runtime, member).await?;
+        let source = closure.add_resident(runtime, member.source_did).await?;
         residents.push(json!({
-            "id": member.instance.instance_id,
+            "id": member.id,
             "source": source,
-            "placement": frame_json(&member.instance.local_placement),
-            "scale": prepared_vec3_json(member.instance.source_scale),
-            "localBounds": member.source_bounds.as_ref().map(prepared_aabb_json),
+            "placement": {
+                "origin": [member.placement.origin.x, member.placement.origin.y, member.placement.origin.z],
+                "orientation": [
+                    member.placement.orientation.w,
+                    member.placement.orientation.x,
+                    member.placement.orientation.y,
+                    member.placement.orientation.z,
+                ],
+            },
+            "scale": [member.scale.x, member.scale.y, member.scale.z],
         }));
     }
     closure.validate()?;
     let sections = closure.sections();
     let manifest = OutdoorStaticSourceRecordManifest {
         transport: "holtburger-outdoor-static-record",
-        version: OUTDOOR_STATIC_RECORD_BINARY_VERSION,
         byte_order: "little-endian",
         section_byte_offset_base: "section-data",
         landblock_id: dat_id(source_batch.landblock_id()),
@@ -341,7 +342,6 @@ async fn build_texture_pixels_response(
     };
     let manifest = TexturePixelsManifest {
         transport: "holtburger-texture-pixels",
-        version: TEXTURE_PIXELS_BINARY_VERSION,
         byte_order: "little-endian",
         section_byte_offset_base: "section-data",
         source_asset_id,
@@ -461,16 +461,15 @@ fn palette_asset_id(palette_id: u32) -> String {
     format!("palette/0x{palette_id:08x}")
 }
 
-/// App-local, versioned transport envelope for the active RegionDesc projection.
+/// App-local transport envelope for the active RegionDesc projection.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ActiveRegionManifest {
     transport: &'static str,
-    version: u32,
     byte_order: &'static str,
     section_byte_offset_base: &'static str,
     provenance: ActiveRegionProvenanceManifest,
-    /// Complete semantic RegionDesc projection. The enclosing transport version owns this schema.
+    /// Complete semantic RegionDesc projection.
     data: Value,
     sections: Vec<BinarySectionManifest>,
 }
@@ -489,7 +488,6 @@ fn active_region_manifest(active_region: &ActiveRegionData) -> ActiveRegionManif
     let region = &active_region.descriptor;
     ActiveRegionManifest {
         transport: "holtburger-active-region-data",
-        version: ACTIVE_REGION_BINARY_VERSION,
         byte_order: "little-endian",
         section_byte_offset_base: "section-data",
         provenance: ActiveRegionProvenanceManifest {
@@ -676,7 +674,6 @@ fn dat_id(id: u32) -> String {
 #[serde(rename_all = "camelCase")]
 struct TerrainSourceManifest {
     transport: &'static str,
-    version: u32,
     byte_order: &'static str,
     section_byte_offset_base: &'static str,
     landblock_id: String,
@@ -690,31 +687,12 @@ struct TerrainSourceManifest {
 enum TerrainAvailabilityManifest {
     Available,
     MissingCellLandblock,
-    CellLandblockDecodeFailed,
-    TerrainAssemblyFailed,
 }
 
-fn terrain_availability(
-    terrain: Option<&TerrainGridSource>,
-    diagnostics: &holtburger_content::PreparedContentSourceDiagnostics,
-) -> TerrainAvailabilityManifest {
-    if terrain.is_some() {
-        return TerrainAvailabilityManifest::Available;
-    }
-
-    match diagnostics
-        .source_records
-        .iter()
-        .find(|record| record.role == "cell-landblock")
-        .map(|record| record.status)
-    {
-        Some(SourceRecordStatus::Missing) => TerrainAvailabilityManifest::MissingCellLandblock,
-        Some(SourceRecordStatus::DecodeFailed) => {
-            TerrainAvailabilityManifest::CellLandblockDecodeFailed
-        }
-        Some(SourceRecordStatus::Loaded) | None => {
-            TerrainAvailabilityManifest::TerrainAssemblyFailed
-        }
+fn terrain_availability(terrain: Option<&LandblockTerrain>) -> TerrainAvailabilityManifest {
+    match terrain {
+        Some(_) => TerrainAvailabilityManifest::Available,
+        None => TerrainAvailabilityManifest::MissingCellLandblock,
     }
 }
 
@@ -732,7 +710,6 @@ struct BinarySectionManifest {
 #[serde(rename_all = "camelCase")]
 struct TexturePixelsManifest {
     transport: &'static str,
-    version: u32,
     byte_order: &'static str,
     section_byte_offset_base: &'static str,
     source_asset_id: String,
@@ -750,10 +727,13 @@ struct TexturePixelsSurfaceManifest {
     height: u32,
 }
 
-fn terrain_sections(terrain: &TerrainGridSource) -> Vec<BinarySectionManifest> {
+fn terrain_sections(terrain: &LandblockTerrain) -> Vec<BinarySectionManifest> {
     let height_indices_length = terrain.height_indices.len();
+    let heights_offset =
+        align_binary_section_offset(height_indices_length, std::mem::align_of::<f32>());
+    let heights_length = terrain.heights.len() * std::mem::size_of::<f32>();
     let terrain_samples_offset =
-        align_binary_section_offset(height_indices_length, std::mem::align_of::<u16>());
+        align_binary_section_offset(heights_offset + heights_length, std::mem::align_of::<u16>());
     let terrain_samples_length = terrain.terrain_samples.len() * std::mem::size_of::<u16>();
     vec![
         BinarySectionManifest {
@@ -762,6 +742,13 @@ fn terrain_sections(terrain: &TerrainGridSource) -> Vec<BinarySectionManifest> {
             element_count: terrain.height_indices.len(),
             byte_offset: 0,
             byte_length: height_indices_length,
+        },
+        BinarySectionManifest {
+            name: "resolvedHeights",
+            scalar_type: "f32",
+            element_count: terrain.heights.len(),
+            byte_offset: heights_offset,
+            byte_length: heights_length,
         },
         BinarySectionManifest {
             name: "terrainSamples",
@@ -779,10 +766,10 @@ fn align_binary_section_offset(offset: usize, alignment: usize) -> usize {
 
 fn serialize_terrain_source_binary(
     manifest: &TerrainSourceManifest,
-    terrain: Option<&TerrainGridSource>,
+    terrain: Option<&LandblockTerrain>,
 ) -> Result<Vec<u8>> {
     let mut manifest_bytes = serde_json::to_vec(&manifest)?;
-    while !(TERRAIN_SOURCE_BINARY_HEADER_LEN + manifest_bytes.len()).is_multiple_of(4) {
+    while !(BINARY_ENVELOPE_HEADER_LEN + manifest_bytes.len()).is_multiple_of(4) {
         manifest_bytes.push(b' ');
     }
     let manifest_length = manifest_bytes.len();
@@ -792,28 +779,34 @@ fn serialize_terrain_source_binary(
         .map(|section| section.byte_offset + section.byte_length)
         .max()
         .unwrap_or_default();
-    let total_length =
-        TERRAIN_SOURCE_BINARY_HEADER_LEN + manifest_bytes.len() + section_data_length;
+    let total_length = BINARY_ENVELOPE_HEADER_LEN + manifest_bytes.len() + section_data_length;
     let mut bytes = Vec::with_capacity(total_length);
     bytes.extend(TERRAIN_SOURCE_BINARY_MAGIC);
-    bytes.extend(TERRAIN_SOURCE_BINARY_VERSION.to_le_bytes());
     bytes.extend(u32::try_from(manifest_length)?.to_le_bytes());
     bytes.extend(u32::try_from(total_length)?.to_le_bytes());
     bytes.extend(manifest_bytes);
     if let Some(terrain) = terrain {
-        bytes.extend(&terrain.height_indices);
-        bytes.resize(
-            TERRAIN_SOURCE_BINARY_HEADER_LEN
-                + manifest_length
-                + align_binary_section_offset(
-                    terrain.height_indices.len(),
-                    std::mem::align_of::<u16>(),
-                ),
-            0,
-        );
-        for terrain_sample in &terrain.terrain_samples {
-            bytes.extend(terrain_sample.to_le_bytes());
+        let mut section_data = vec![0; section_data_length];
+        for section in &manifest.sections {
+            let target =
+                &mut section_data[section.byte_offset..section.byte_offset + section.byte_length];
+            match section.name {
+                "heightIndices" => target.copy_from_slice(&terrain.height_indices),
+                "resolvedHeights" => {
+                    for (chunk, height) in target.chunks_exact_mut(4).zip(&terrain.heights) {
+                        chunk.copy_from_slice(&height.to_le_bytes());
+                    }
+                }
+                "terrainSamples" => {
+                    for (chunk, sample) in target.chunks_exact_mut(2).zip(&terrain.terrain_samples)
+                    {
+                        chunk.copy_from_slice(&sample.to_le_bytes());
+                    }
+                }
+                _ => unreachable!("terrain sections are fixed"),
+            }
         }
+        bytes.extend(section_data);
     }
     Ok(bytes)
 }
@@ -821,15 +814,14 @@ fn serialize_terrain_source_binary(
 fn serialize_active_region_binary(active_region: &ActiveRegionData) -> Result<Vec<u8>> {
     let manifest = active_region_manifest(active_region);
     let mut manifest_bytes = serde_json::to_vec(&manifest)?;
-    while !(TERRAIN_SOURCE_BINARY_HEADER_LEN + manifest_bytes.len()).is_multiple_of(4) {
+    while !(BINARY_ENVELOPE_HEADER_LEN + manifest_bytes.len()).is_multiple_of(4) {
         manifest_bytes.push(b' ');
     }
-    let total_length = TERRAIN_SOURCE_BINARY_HEADER_LEN
+    let total_length = BINARY_ENVELOPE_HEADER_LEN
         + manifest_bytes.len()
         + std::mem::size_of_val(&active_region.descriptor.land_defs.land_height_table);
     let mut bytes = Vec::with_capacity(total_length);
     bytes.extend(ACTIVE_REGION_BINARY_MAGIC);
-    bytes.extend(ACTIVE_REGION_BINARY_VERSION.to_le_bytes());
     bytes.extend(u32::try_from(manifest_bytes.len())?.to_le_bytes());
     bytes.extend(u32::try_from(total_length)?.to_le_bytes());
     bytes.extend(manifest_bytes);
@@ -844,13 +836,12 @@ fn serialize_texture_pixels_binary(
     pixels: &[u8],
 ) -> Result<Vec<u8>> {
     let mut manifest_bytes = serde_json::to_vec(manifest)?;
-    while !(TERRAIN_SOURCE_BINARY_HEADER_LEN + manifest_bytes.len()).is_multiple_of(4) {
+    while !(BINARY_ENVELOPE_HEADER_LEN + manifest_bytes.len()).is_multiple_of(4) {
         manifest_bytes.push(b' ');
     }
-    let total_length = TERRAIN_SOURCE_BINARY_HEADER_LEN + manifest_bytes.len() + pixels.len();
+    let total_length = BINARY_ENVELOPE_HEADER_LEN + manifest_bytes.len() + pixels.len();
     let mut bytes = Vec::with_capacity(total_length);
     bytes.extend(TEXTURE_PIXELS_BINARY_MAGIC);
-    bytes.extend(TEXTURE_PIXELS_BINARY_VERSION.to_le_bytes());
     bytes.extend(u32::try_from(manifest_bytes.len())?.to_le_bytes());
     bytes.extend(u32::try_from(total_length)?.to_le_bytes());
     bytes.extend(manifest_bytes);
@@ -876,20 +867,18 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::landblock_source_batch::{
-        LANDBLOCK_SOURCE_BATCH_BINARY_MAGIC, LANDBLOCK_SOURCE_BATCH_BINARY_VERSION,
-    };
+    use crate::landblock_source_batch::LANDBLOCK_SOURCE_BATCH_BINARY_MAGIC;
     use crate::outdoor_static_source::{
         OUTDOOR_STATIC_RECORD_BINARY_MAGIC, OutdoorStaticGeometryBuffers,
     };
     use holtburger_dat::file_type::PixelFormatId;
     use holtburger_dat::file_type::region::{GameTime, LandDefs, RegionDesc};
-    use holtburger_dat::{DatFileType, EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, HbaWriter};
+    use holtburger_dat::{DatFileType, EOR_PORTAL_NAMESPACE, HbaWriter};
     use tempfile::tempdir;
 
     #[test]
     fn terrain_source_binary_aligns_and_describes_each_grid_section() {
-        let terrain = TerrainGridSource {
+        let terrain = LandblockTerrain {
             grid_size: 3,
             tile_size: 24.0,
             height_indices: (0..9).collect(),
@@ -898,7 +887,6 @@ mod tests {
         };
         let manifest = TerrainSourceManifest {
             transport: "holtburger-landblock-terrain-record",
-            version: TERRAIN_SOURCE_BINARY_VERSION,
             byte_order: "little-endian",
             section_byte_offset_base: "section-data",
             landblock_id: "0x0102ffff".to_string(),
@@ -910,25 +898,34 @@ mod tests {
             .expect("terrain source binary should serialize");
 
         assert_eq!(&bytes[..4], TERRAIN_SOURCE_BINARY_MAGIC);
-        assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), 1);
-        let manifest_length = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
+        let manifest_length = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
         assert_eq!(
-            u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize,
+            u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize,
             bytes.len()
         );
-        let section_data_offset = TERRAIN_SOURCE_BINARY_HEADER_LEN + manifest_length;
+        let section_data_offset = BINARY_ENVELOPE_HEADER_LEN + manifest_length;
         let decoded_manifest: serde_json::Value =
-            serde_json::from_slice(&bytes[TERRAIN_SOURCE_BINARY_HEADER_LEN..section_data_offset])
+            serde_json::from_slice(&bytes[BINARY_ENVELOPE_HEADER_LEN..section_data_offset])
                 .expect("padded manifest should remain JSON");
         let sections = decoded_manifest["sections"]
             .as_array()
             .expect("manifest should describe binary sections");
-        assert_eq!(sections.len(), 2);
-        assert_eq!(sections[1]["name"], "terrainSamples");
-        assert_eq!(sections[1]["byteOffset"], 10);
+        assert_eq!(sections.len(), 3);
+        assert_eq!(sections[1]["name"], "resolvedHeights");
+        assert_eq!(sections[1]["byteOffset"], 12);
+        assert_eq!(sections[2]["name"], "terrainSamples");
+        assert_eq!(sections[2]["byteOffset"], 48);
         assert_eq!(bytes[section_data_offset], 0);
         assert_eq!(bytes[section_data_offset + 9], 0);
-        assert_eq!(bytes[section_data_offset + 10], 10);
+        assert_eq!(
+            f32::from_le_bytes(
+                bytes[section_data_offset + 12..section_data_offset + 16]
+                    .try_into()
+                    .unwrap()
+            ),
+            0.5
+        );
+        assert_eq!(bytes[section_data_offset + 48], 10);
     }
 
     #[test]
@@ -946,7 +943,6 @@ mod tests {
         };
         let manifest = OutdoorStaticSourceRecordManifest {
             transport: "holtburger-outdoor-static-record",
-            version: OUTDOOR_STATIC_RECORD_BINARY_VERSION,
             byte_order: "little-endian",
             section_byte_offset_base: "section-data",
             landblock_id: "0x0102ffff".to_string(),
@@ -962,14 +958,10 @@ mod tests {
             .expect("outdoor static record should serialize");
 
         assert_eq!(&bytes[..4], OUTDOOR_STATIC_RECORD_BINARY_MAGIC);
-        assert_eq!(
-            u32::from_le_bytes(bytes[4..8].try_into().unwrap()),
-            OUTDOOR_STATIC_RECORD_BINARY_VERSION
-        );
-        let manifest_length = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
-        let section_offset = TERRAIN_SOURCE_BINARY_HEADER_LEN + manifest_length;
+        let manifest_length = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
+        let section_offset = BINARY_ENVELOPE_HEADER_LEN + manifest_length;
         let decoded: serde_json::Value =
-            serde_json::from_slice(&bytes[TERRAIN_SOURCE_BINARY_HEADER_LEN..section_offset])
+            serde_json::from_slice(&bytes[BINARY_ENVELOPE_HEADER_LEN..section_offset])
                 .expect("outdoor static record manifest should remain JSON");
         assert_eq!(decoded["sections"][0]["name"], "positions");
         assert_eq!(decoded["sections"][4]["name"], "materialSlots");
@@ -1019,14 +1011,11 @@ mod tests {
         .expect("source batch should serialize");
 
         assert_eq!(&bytes[..4], LANDBLOCK_SOURCE_BATCH_BINARY_MAGIC);
-        assert_eq!(
-            u32::from_le_bytes(bytes[4..8].try_into().unwrap()),
-            LANDBLOCK_SOURCE_BATCH_BINARY_VERSION
-        );
-        let manifest_length = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
-        let record_offset = 16 + manifest_length;
-        let manifest: serde_json::Value = serde_json::from_slice(&bytes[16..record_offset])
-            .expect("batch manifest should remain JSON");
+        let manifest_length = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
+        let record_offset = BINARY_ENVELOPE_HEADER_LEN + manifest_length;
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&bytes[BINARY_ENVELOPE_HEADER_LEN..record_offset])
+                .expect("batch manifest should remain JSON");
         assert_eq!(
             manifest["requestedLayers"],
             serde_json::json!(["terrain", "buildings", "objects", "generated"])
@@ -1041,7 +1030,7 @@ mod tests {
         let sample_height_index = land_height_table.len() / 2;
         let expected_height = 42.5;
         land_height_table[sample_height_index] = expected_height;
-        let active_region = ActiveRegionData::new(RegionDesc {
+        let active_region = ActiveRegionData::new(Arc::new(RegionDesc {
             id: 0x1300_0000,
             region_number: 1,
             version: 3,
@@ -1073,20 +1062,16 @@ mod tests {
             scene_info: None,
             terrain_info: Some(TerrainDesc::default()),
             region_misc: None,
-        });
+        }));
 
         let bytes = serialize_active_region_binary(&active_region)
             .expect("active-region response should serialize");
 
         assert_eq!(&bytes[..4], ACTIVE_REGION_BINARY_MAGIC);
-        assert_eq!(
-            u32::from_le_bytes(bytes[4..8].try_into().unwrap()),
-            ACTIVE_REGION_BINARY_VERSION
-        );
-        let manifest_length = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
-        let section_offset = TERRAIN_SOURCE_BINARY_HEADER_LEN + manifest_length;
+        let manifest_length = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
+        let section_offset = BINARY_ENVELOPE_HEADER_LEN + manifest_length;
         let manifest: serde_json::Value =
-            serde_json::from_slice(&bytes[TERRAIN_SOURCE_BINARY_HEADER_LEN..section_offset])
+            serde_json::from_slice(&bytes[BINARY_ENVELOPE_HEADER_LEN..section_offset])
                 .expect("active-region manifest should remain JSON");
         assert_eq!(manifest["provenance"]["sourceRecordId"], "0x13000000");
         assert_eq!(manifest["data"]["land"]["squareLength"], 24.0);
@@ -1114,25 +1099,10 @@ mod tests {
     }
 
     #[test]
-    fn terrain_availability_keeps_missing_and_decode_failed_records_distinct() {
-        let mut missing = holtburger_content::PreparedContentSourceDiagnostics::default();
-        missing
-            .source_records
-            .push(holtburger_content::SourceRecordDiagnostic {
-                namespace: EOR_CELL_NAMESPACE,
-                file_id: 0x0102_ffff,
-                role: "cell-landblock",
-                status: SourceRecordStatus::Missing,
-            });
+    fn terrain_availability_represents_only_valid_absence() {
         assert!(matches!(
-            terrain_availability(None, &missing),
+            terrain_availability(None),
             TerrainAvailabilityManifest::MissingCellLandblock
-        ));
-
-        missing.source_records[0].status = SourceRecordStatus::DecodeFailed;
-        assert!(matches!(
-            terrain_availability(None, &missing),
-            TerrainAvailabilityManifest::CellLandblockDecodeFailed
         ));
     }
 
@@ -1140,7 +1110,6 @@ mod tests {
     fn texture_pixel_binary_preserves_declared_pixel_section() {
         let manifest = TexturePixelsManifest {
             transport: "holtburger-texture-pixels",
-            version: TEXTURE_PIXELS_BINARY_VERSION,
             byte_order: "little-endian",
             section_byte_offset_base: "section-data",
             source_asset_id: "surface-texture/0x05000001".to_string(),
@@ -1163,17 +1132,13 @@ mod tests {
             .expect("texture pixels should serialize");
 
         assert_eq!(&bytes[..4], TEXTURE_PIXELS_BINARY_MAGIC);
+        let manifest_length = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
         assert_eq!(
-            u32::from_le_bytes(bytes[4..8].try_into().unwrap()),
-            TEXTURE_PIXELS_BINARY_VERSION
-        );
-        let manifest_length = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
-        assert_eq!(
-            u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize,
+            u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize,
             bytes.len()
         );
         assert_eq!(
-            &bytes[TERRAIN_SOURCE_BINARY_HEADER_LEN + manifest_length..],
+            &bytes[BINARY_ENVELOPE_HEADER_LEN + manifest_length..],
             &[1, 2, 3, 4]
         );
     }
@@ -1202,6 +1167,14 @@ mod tests {
         writer
             .add(
                 EOR_PORTAL_NAMESPACE,
+                holtburger_dat::file_type::REGION_DESC_FILE_ID,
+                DatFileType::Region as u32,
+                test_region_desc_bytes(),
+            )
+            .expect("active region should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
                 0x0500_0001,
                 DatFileType::SurfaceTexture as u32,
                 test_surface_texture_bytes(0x0500_0001, &[0x0600_0001]),
@@ -1224,7 +1197,8 @@ mod tests {
         let repository = Arc::new(
             ContentRepository::from_hba_path(&path).expect("test repository should be opened"),
         );
-        let state = HostContentState::from_repository(repository);
+        let state = HostContentState::from_repository(repository)
+            .expect("test content repository should initialize");
         let bytes = build_texture_pixels_response(
             &state.runtime,
             LoadTexturePixelsRequest {
@@ -1237,10 +1211,10 @@ mod tests {
         .expect("texture pixels should load through the content runtime");
 
         assert_eq!(&bytes[..4], TEXTURE_PIXELS_BINARY_MAGIC);
-        let manifest_length = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
-        let section_data_offset = TERRAIN_SOURCE_BINARY_HEADER_LEN + manifest_length;
+        let manifest_length = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
+        let section_data_offset = BINARY_ENVELOPE_HEADER_LEN + manifest_length;
         let manifest: serde_json::Value =
-            serde_json::from_slice(&bytes[TERRAIN_SOURCE_BINARY_HEADER_LEN..section_data_offset])
+            serde_json::from_slice(&bytes[BINARY_ENVELOPE_HEADER_LEN..section_data_offset])
                 .expect("response manifest should decode");
         assert_eq!(manifest["surface"]["format"], "rgba8");
         assert_eq!(
@@ -1275,5 +1249,29 @@ mod tests {
         bytes.extend(u32::try_from(source_data.len()).unwrap().to_le_bytes());
         bytes.extend(source_data);
         bytes
+    }
+
+    fn test_region_desc_bytes() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&holtburger_dat::file_type::REGION_DESC_FILE_ID.to_le_bytes());
+        bytes.extend_from_slice(&1_u32.to_le_bytes());
+        bytes.extend_from_slice(&1_u32.to_le_bytes());
+        push_test_pstring(&mut bytes, "");
+        bytes.resize(bytes.len() + 32 + 256 * 4, 0);
+        bytes.resize(bytes.len() + 8 + 4 + 4 + 4, 0);
+        push_test_pstring(&mut bytes, "");
+        bytes.extend_from_slice(&0_u32.to_le_bytes());
+        bytes.extend_from_slice(&0_u32.to_le_bytes());
+        bytes.extend_from_slice(&0_u32.to_le_bytes());
+        bytes.extend_from_slice(&0_u32.to_le_bytes());
+        bytes
+    }
+
+    fn push_test_pstring(bytes: &mut Vec<u8>, value: &str) {
+        bytes.extend_from_slice(&(value.len() as u16).to_le_bytes());
+        bytes.extend_from_slice(value.as_bytes());
+        while !bytes.len().is_multiple_of(4) {
+            bytes.push(0);
+        }
     }
 }

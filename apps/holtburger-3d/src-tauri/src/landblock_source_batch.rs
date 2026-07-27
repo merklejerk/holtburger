@@ -2,16 +2,14 @@ use std::collections::BTreeSet;
 
 use anyhow::{Context, Result, bail};
 use holtburger_content::{
-    LandblockOutdoorAsset, LandblockOutdoorAssetRequest, LandblockOutdoorStaticMember,
-    PreparedContentSourceDiagnostics, PreparedStaticInstanceKind, StaticOutdoorSceneSourceFamilies,
-    TerrainGridSource, normalize_landblock_id,
+    GeneratedSceneryAsset, LandblockAsset, LandblockPlacement, LandblockTerrain,
+    normalize_landblock_id,
 };
 use holtburger_core::{ContentAsset, ContentAssetRequest, ContentAssetRuntime};
 use serde::{Deserialize, Serialize};
 
 pub(crate) const LANDBLOCK_SOURCE_BATCH_BINARY_MAGIC: &[u8; 4] = b"HBLB";
-pub(crate) const LANDBLOCK_SOURCE_BATCH_BINARY_VERSION: u32 = 2;
-const LANDBLOCK_SOURCE_BATCH_BINARY_HEADER_LEN: usize = 16;
+const LANDBLOCK_SOURCE_BATCH_BINARY_HEADER_LEN: usize = 12;
 
 /// A scene layer that the app-local landblock source boundary can request.
 ///
@@ -61,18 +59,26 @@ impl LandblockSourceBatchRequest {
 #[derive(Debug, Clone)]
 pub(crate) struct LoadedLandblockSourceBatch {
     landblock_id: u32,
-    diagnostics: PreparedContentSourceDiagnostics,
     terrain: TerrainSourceProjection,
-    buildings: Option<Vec<LandblockOutdoorStaticMember>>,
-    objects: Option<Vec<LandblockOutdoorStaticMember>>,
-    generated: Option<Vec<LandblockOutdoorStaticMember>>,
+    buildings: Option<Vec<OutdoorStaticResident>>,
+    objects: Option<Vec<OutdoorStaticResident>>,
+    generated: Option<Vec<OutdoorStaticResident>>,
 }
 
 /// Distinguishes an unrequested terrain layer from a requested but absent DAT source.
 #[derive(Debug, Clone)]
 enum TerrainSourceProjection {
     Unrequested,
-    Requested(Option<TerrainGridSource>),
+    Requested(Option<LandblockTerrain>),
+}
+
+/// App-local presentation input for one outdoor static resident.
+#[derive(Debug, Clone)]
+pub(crate) struct OutdoorStaticResident {
+    pub(crate) id: String,
+    pub(crate) source_did: u32,
+    pub(crate) placement: LandblockPlacement,
+    pub(crate) scale: holtburger_common::Vector3,
 }
 
 impl LoadedLandblockSourceBatch {
@@ -80,11 +86,7 @@ impl LoadedLandblockSourceBatch {
         self.landblock_id
     }
 
-    pub(crate) fn diagnostics(&self) -> &PreparedContentSourceDiagnostics {
-        &self.diagnostics
-    }
-
-    pub(crate) fn terrain(&self) -> Result<Option<&TerrainGridSource>> {
+    pub(crate) fn terrain(&self) -> Result<Option<&LandblockTerrain>> {
         match &self.terrain {
             TerrainSourceProjection::Requested(terrain) => Ok(terrain.as_ref()),
             TerrainSourceProjection::Unrequested => {
@@ -93,19 +95,19 @@ impl LoadedLandblockSourceBatch {
         }
     }
 
-    pub(crate) fn buildings(&self) -> Result<&[LandblockOutdoorStaticMember]> {
+    pub(crate) fn buildings(&self) -> Result<&[OutdoorStaticResident]> {
         self.buildings
             .as_deref()
             .context("landblock source batch did not project Buildings")
     }
 
-    pub(crate) fn objects(&self) -> Result<&[LandblockOutdoorStaticMember]> {
+    pub(crate) fn objects(&self) -> Result<&[OutdoorStaticResident]> {
         self.objects
             .as_deref()
             .context("landblock source batch did not project Objects")
     }
 
-    pub(crate) fn generated(&self) -> Result<&[LandblockOutdoorStaticMember]> {
+    pub(crate) fn generated(&self) -> Result<&[OutdoorStaticResident]> {
         self.generated
             .as_deref()
             .context("landblock source batch did not project Generated")
@@ -122,7 +124,6 @@ pub(crate) struct LandblockSourceBatchRecord {
 #[serde(rename_all = "camelCase")]
 struct LandblockSourceBatchManifest {
     transport: &'static str,
-    version: u32,
     byte_order: &'static str,
     record_byte_offset_base: &'static str,
     landblock_id: String,
@@ -138,7 +139,7 @@ struct LandblockSourceBatchRecordManifest {
     byte_length: usize,
 }
 
-/// Serializes one versioned landblock batch whose nested records stay independently decodable.
+/// Serializes one closed landblock batch whose nested records stay independently decodable.
 pub(crate) fn serialize_landblock_source_batch(
     request: &LandblockSourceBatchRequest,
     records: Vec<LandblockSourceBatchRecord>,
@@ -163,7 +164,6 @@ pub(crate) fn serialize_landblock_source_batch(
     }
     let manifest = LandblockSourceBatchManifest {
         transport: "holtburger-landblock-source-batch",
-        version: LANDBLOCK_SOURCE_BATCH_BINARY_VERSION,
         byte_order: "little-endian",
         record_byte_offset_base: "record-data",
         landblock_id: format!("0x{:08x}", request.landblock_id),
@@ -182,7 +182,6 @@ pub(crate) fn serialize_landblock_source_batch(
             .sum::<usize>();
     let mut bytes = Vec::with_capacity(total_length);
     bytes.extend(LANDBLOCK_SOURCE_BATCH_BINARY_MAGIC);
-    bytes.extend(LANDBLOCK_SOURCE_BATCH_BINARY_VERSION.to_le_bytes());
     bytes.extend(u32::try_from(manifest_bytes.len())?.to_le_bytes());
     bytes.extend(u32::try_from(total_length)?.to_le_bytes());
     bytes.extend(manifest_bytes);
@@ -192,78 +191,133 @@ pub(crate) fn serialize_landblock_source_batch(
     Ok(bytes)
 }
 
-/// Loads exact outdoor source families and projects them into app-local transport layers.
+/// Loads one shared shallow foundation and only the explicitly requested deep products.
 pub(crate) async fn load_landblock_source_batch(
     runtime: &ContentAssetRuntime,
     request: LandblockSourceBatchRequest,
 ) -> Result<LoadedLandblockSourceBatch> {
-    let source_request = LandblockOutdoorAssetRequest::new(
-        request.landblock_id,
-        request.contains(LandblockSourceLayer::Terrain),
-        StaticOutdoorSceneSourceFamilies::new(
-            request.contains(LandblockSourceLayer::Objects),
-            request.contains(LandblockSourceLayer::Buildings),
-            request.contains(LandblockSourceLayer::Generated),
-        ),
-    );
     let asset = runtime
-        .load(ContentAssetRequest::LandblockOutdoor(source_request))
+        .load(ContentAssetRequest::Landblock(request.landblock_id))
         .await
         .with_context(|| {
             format!(
-                "Could not load outdoor source batch for 0x{:08X}",
+                "Could not load shallow landblock foundation for 0x{:08X}",
                 request.landblock_id
             )
         })?;
-    let ContentAsset::LandblockOutdoor { outdoor, .. } = asset else {
-        bail!("outdoor source batch request returned a different content asset");
+    let ContentAsset::Landblock(landblock) = asset else {
+        bail!("landblock foundation request returned a different content asset");
     };
-    project_landblock_source_batch(*outdoor, &request)
+    let generated = if request.contains(LandblockSourceLayer::Generated) && landblock.is_some() {
+        let generated_asset = runtime
+            .load(ContentAssetRequest::GeneratedScenery(request.landblock_id))
+            .await
+            .with_context(|| {
+                format!(
+                    "Could not resolve generated scenery for 0x{:08X}",
+                    request.landblock_id
+                )
+            })?;
+        let ContentAsset::GeneratedScenery(generated) = generated_asset else {
+            bail!("generated scenery request returned a different content asset");
+        };
+        generated
+    } else {
+        None
+    };
+
+    project_landblock_source_batch(landblock.as_deref(), generated.as_deref(), &request)
 }
 
 fn project_landblock_source_batch(
-    outdoor: LandblockOutdoorAsset,
+    landblock: Option<&LandblockAsset>,
+    generated: Option<&GeneratedSceneryAsset>,
     request: &LandblockSourceBatchRequest,
 ) -> Result<LoadedLandblockSourceBatch> {
-    if outdoor.landblock_id != request.landblock_id {
+    if let Some(landblock) = landblock
+        && landblock.landblock_id != request.landblock_id
+    {
         bail!(
             "content runtime returned landblock 0x{:08X} for source batch 0x{:08X}",
-            outdoor.landblock_id,
+            landblock.landblock_id,
+            request.landblock_id
+        );
+    }
+    if let Some(generated) = generated
+        && generated.landblock_id != request.landblock_id
+    {
+        bail!(
+            "content runtime returned generated landblock 0x{:08X} for source batch 0x{:08X}",
+            generated.landblock_id,
             request.landblock_id
         );
     }
 
-    let mut batch = LoadedLandblockSourceBatch {
-        landblock_id: outdoor.landblock_id,
-        diagnostics: outdoor.diagnostics,
+    Ok(LoadedLandblockSourceBatch {
+        landblock_id: request.landblock_id,
         terrain: if request.contains(LandblockSourceLayer::Terrain) {
-            TerrainSourceProjection::Requested(outdoor.cell_landblock.map(|fact| fact.terrain))
+            TerrainSourceProjection::Requested(landblock.map(|asset| asset.terrain.clone()))
         } else {
             TerrainSourceProjection::Unrequested
         },
-        buildings: request
-            .contains(LandblockSourceLayer::Buildings)
-            .then(Vec::new),
-        objects: request
-            .contains(LandblockSourceLayer::Objects)
-            .then(Vec::new),
-        generated: request
-            .contains(LandblockSourceLayer::Generated)
-            .then(Vec::new),
-    };
-    for member in outdoor.statics {
-        let target = match member.instance.kind {
-            PreparedStaticInstanceKind::Building => batch.buildings.as_mut(),
-            PreparedStaticInstanceKind::Scenery => batch.objects.as_mut(),
-            PreparedStaticInstanceKind::GeneratedScenery => batch.generated.as_mut(),
-            PreparedStaticInstanceKind::IndoorStatic => None,
-        };
-        if let Some(target) = target {
-            target.push(member);
-        }
-    }
+        buildings: request.contains(LandblockSourceLayer::Buildings).then(|| {
+            landblock
+                .into_iter()
+                .flat_map(|asset| &asset.buildings)
+                .map(|building| OutdoorStaticResident {
+                    id: format!(
+                        "landblock-static/{:08x}/building/{:04x}/{:08x}",
+                        request.landblock_id, building.source_index, building.source_did
+                    ),
+                    source_did: building.source_did,
+                    placement: building.placement,
+                    scale: unit_scale(),
+                })
+                .collect()
+        }),
+        objects: request.contains(LandblockSourceLayer::Objects).then(|| {
+            landblock
+                .into_iter()
+                .flat_map(|asset| &asset.explicit_objects)
+                .map(|object| OutdoorStaticResident {
+                    id: format!(
+                        "landblock-static/{:08x}/object/{:04x}/{:08x}",
+                        request.landblock_id, object.source_index, object.source_did
+                    ),
+                    source_did: object.source_did,
+                    placement: object.placement,
+                    scale: unit_scale(),
+                })
+                .collect()
+        }),
+        generated: request.contains(LandblockSourceLayer::Generated).then(|| {
+            generated
+                .into_iter()
+                .flat_map(|asset| &asset.objects)
+                .map(|object| OutdoorStaticResident {
+                    id: format!(
+                        "landblock-static/{:08x}/generated/scene/{:08x}/cell/{:02x}/template/{:04x}/{:08x}",
+                        request.landblock_id,
+                        object.identity.scene_id,
+                        object.identity.terrain_index,
+                        object.identity.template_index,
+                        object.source_did
+                    ),
+                    source_did: object.source_did,
+                    placement: object.placement,
+                    scale: holtburger_common::Vector3::new(
+                        object.scale,
+                        object.scale,
+                        object.scale,
+                    ),
+                })
+                .collect()
+        }),
+    })
+}
 
-    Ok(batch)
+fn unit_scale() -> holtburger_common::Vector3 {
+    holtburger_common::Vector3::new(1.0, 1.0, 1.0)
 }
 
 #[cfg(test)]
@@ -305,7 +359,6 @@ mod tests {
     fn missing_object_projection_is_rejected() {
         let batch = LoadedLandblockSourceBatch {
             landblock_id: 0x0c78_ffff,
-            diagnostics: PreparedContentSourceDiagnostics::default(),
             terrain: TerrainSourceProjection::Unrequested,
             buildings: None,
             objects: None,
@@ -319,7 +372,6 @@ mod tests {
     fn missing_generated_projection_is_rejected() {
         let batch = LoadedLandblockSourceBatch {
             landblock_id: 0x0c78_ffff,
-            diagnostics: PreparedContentSourceDiagnostics::default(),
             terrain: TerrainSourceProjection::Unrequested,
             buildings: None,
             objects: None,
@@ -341,15 +393,7 @@ mod tests {
             ],
         )
         .expect("complete outdoor source request should be valid");
-        let asset = LandblockOutdoorAsset {
-            landblock_id: 0x0c78_ffff,
-            cell_landblock: None,
-            statics: Vec::new(),
-            building_transition_apertures: Vec::new(),
-            diagnostics: PreparedContentSourceDiagnostics::default(),
-        };
-
-        let projected = project_landblock_source_batch(asset, &request)
+        let projected = project_landblock_source_batch(None, None, &request)
             .expect("every requested transport projection should be present");
 
         assert!(projected.terrain().is_ok());

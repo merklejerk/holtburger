@@ -8,9 +8,8 @@ import type {
 	TexturePreparationServiceResponse,
 } from "../game/textures/texture-preparer";
 
-const HEADER_LENGTH = 16;
+const HEADER_LENGTH = 12;
 const MAGIC = "HBTP";
-const VERSION = 1;
 
 interface PixelSection {
 	readonly name: "pixels";
@@ -22,7 +21,6 @@ interface PixelSection {
 
 interface TexturePixelsManifest {
 	readonly transport: "holtburger-texture-pixels";
-	readonly version: number;
 	readonly byteOrder: "little-endian";
 	readonly sectionByteOffsetBase: "section-data";
 	readonly sourceAssetId: string;
@@ -54,12 +52,8 @@ export function decodeTexturePixels(
 	const magic = new TextDecoder().decode(response.subarray(0, 4));
 	if (magic !== MAGIC)
 		throw new Error(`Unexpected texture-pixel magic ${magic}.`);
-	const version = view.getUint32(4, true);
-	if (version !== VERSION) {
-		throw new Error(`Unsupported texture-pixel version ${version}.`);
-	}
-	const manifestLength = view.getUint32(8, true);
-	const totalLength = view.getUint32(12, true);
+	const manifestLength = view.getUint32(4, true);
+	const totalLength = view.getUint32(8, true);
 	if (totalLength !== response.byteLength) {
 		throw new Error(
 			`Texture-pixel length is ${response.byteLength}; header declares ${totalLength}.`,
@@ -146,7 +140,6 @@ function parseManifest(serialized: string): TexturePixelsManifest {
 	if (
 		!isRecord(manifest) ||
 		manifest.transport !== "holtburger-texture-pixels" ||
-		manifest.version !== VERSION ||
 		manifest.byteOrder !== "little-endian" ||
 		manifest.sectionByteOffsetBase !== "section-data" ||
 		typeof manifest.sourceAssetId !== "string" ||

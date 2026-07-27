@@ -9,10 +9,7 @@ const AUTHORED_FOG = {
 
 describe("resolveTerrainCoverageFog", () => {
 	it("uses the terrain-interest radius as a stable fog range", () => {
-		const fog = resolveTerrainCoverageFog(
-			AUTHORED_FOG,
-			{ terrainRadius: 1 },
-		);
+		const fog = resolveTerrainCoverageFog(AUTHORED_FOG, { terrainRadius: 1 });
 
 		expect(fog).toMatchObject({ near: 28.8, far: 288 });
 	});

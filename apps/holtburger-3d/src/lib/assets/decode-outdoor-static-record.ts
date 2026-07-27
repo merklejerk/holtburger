@@ -13,11 +13,11 @@ import type {
 	ResolvedObjectPart,
 	ResolvedObjectPresentation,
 } from "../game/resolution/presentation";
+import { resolveObjectPresentationBounds } from "../game/resolution/presentation";
 import { classifyObjectResidents } from "../game/resolution/object-resident-classifier";
 
-const HEADER_LENGTH = 16;
+const HEADER_LENGTH = 12;
 const MAGIC = "HBSO";
-const VERSION = 2;
 const datId = z.string().regex(/^0x[0-9a-f]{8}$/i);
 const finiteNumber = z.number().finite();
 const vec3 = z.tuple([finiteNumber, finiteNumber, finiteNumber]);
@@ -130,7 +130,6 @@ const setupDefinition = z.object({
 });
 const manifestSchema = z.object({
 	transport: z.literal("holtburger-outdoor-static-record"),
-	version: z.literal(VERSION),
 	byteOrder: z.literal("little-endian"),
 	sectionByteOffsetBase: z.literal("section-data"),
 	landblockId: datId,
@@ -145,7 +144,6 @@ const manifestSchema = z.object({
 			source: z.string().min(1),
 			placement: frame,
 			scale: vec3,
-			localBounds: bounds.nullable(),
 		}),
 	),
 	definitions: z.array(
@@ -165,12 +163,16 @@ const manifestSchema = z.object({
 type OutdoorStaticRecordManifest = z.infer<typeof manifestSchema>;
 type OutdoorStaticGeometry = z.infer<typeof geometry>;
 type OutdoorStaticMaterial = z.infer<typeof material>;
+interface DecodedOutdoorPresentation {
+	readonly presentation: ResolvedObjectPresentation;
+	readonly localBounds: AABB3 | null;
+}
 export type OutdoorStaticLayerKind =
 	| LandblockLayerKind.Buildings
 	| LandblockLayerKind.Objects
 	| LandblockLayerKind.Generated;
 
-/** Decode and validate one closed versioned outdoor-static source record. */
+/** Decode and validate one closed outdoor-static source record. */
 export function decodeOutdoorStaticRecord(
 	response: Uint8Array,
 	requestedLandblockId: LandblockId,
@@ -187,11 +189,8 @@ export function decodeOutdoorStaticRecord(
 	const magic = new TextDecoder().decode(response.subarray(0, 4));
 	if (magic !== MAGIC)
 		throw new Error(`Unexpected outdoor static record magic ${magic}.`);
-	const version = view.getUint32(4, true);
-	if (version !== VERSION)
-		throw new Error(`Unsupported outdoor static record version ${version}.`);
-	const manifestLength = view.getUint32(8, true);
-	const totalLength = view.getUint32(12, true);
+	const manifestLength = view.getUint32(4, true);
+	const totalLength = view.getUint32(8, true);
 	if (totalLength !== response.byteLength) {
 		throw new Error(
 			`Outdoor static record length is ${response.byteLength}; header declares ${totalLength}.`,
@@ -253,15 +252,15 @@ export function decodeOutdoorStaticRecord(
 	}
 	const residents: ResolvedObjectResident[] = [];
 	for (const resident of manifest.residents) {
-		const presentation = definitions.get(resident.source);
-		if (!presentation) {
+		const source = definitions.get(resident.source);
+		if (!source) {
 			throw new Error(
 				`Outdoor static resident ${resident.id} references missing source ${resident.source}.`,
 			);
 		}
 		const resolved: ResolvedObjectResident = {
 			id: resident.id,
-			presentation,
+			presentation: source.presentation,
 			placement: {
 				envCellId: null,
 				landblockId: manifest.landblockId as LandblockId,
@@ -270,7 +269,7 @@ export function decodeOutdoorStaticRecord(
 				localTransform: acFrameTransform(resident.placement, [1, 1, 1]),
 			},
 			scale: renderScale(resident.scale),
-			localBounds: toBounds(resident.localBounds),
+			localBounds: source.localBounds,
 			appearance: null,
 		};
 		residents.push(resolved);
@@ -578,7 +577,7 @@ function decodePresentation(
 	definition: OutdoorStaticRecordManifest["definitions"][number],
 	geometries: ReadonlyMap<string, ResolvedGeometry>,
 	materials: ReadonlyMap<string, ResolvedMaterial>,
-): ResolvedObjectPresentation {
+): DecodedOutdoorPresentation {
 	const parts =
 		definition.kind === "gfx-obj"
 			? [
@@ -613,6 +612,10 @@ function decodePresentation(
 						? scaleTransform(part.defaultScale)
 						: acFrameTransform(part.defaultPlacement, part.defaultScale),
 				);
+	const presentationBounds = resolveObjectPresentationBounds(
+		parts,
+		partTransforms,
+	);
 	const effects =
 		definition.kind === "setup-model"
 			? {
@@ -628,14 +631,17 @@ function decodePresentation(
 					soundTableId: null,
 				};
 	return {
-		id: `presentation:${definition.id}`,
-		sourceAssetId: definition.sourceAssetId,
-		parts,
-		placementPoses: new Map([[0, { placementId: 0, partTransforms }]]),
-		motion: null,
-		effects,
-		selectionBounds: null,
-		sortingBounds: null,
+		localBounds: presentationBounds,
+		presentation: {
+			id: `presentation:${definition.id}`,
+			sourceAssetId: definition.sourceAssetId,
+			parts,
+			placementPoses: new Map([[0, { placementId: 0, partTransforms }]]),
+			motion: null,
+			effects,
+			selectionBounds: null,
+			sortingBounds: null,
+		},
 	};
 }
 

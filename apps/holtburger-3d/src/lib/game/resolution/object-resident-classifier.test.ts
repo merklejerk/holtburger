@@ -7,12 +7,16 @@ describe("classifyObjectResidents", () => {
 	it("partitions complete residents using only the default-animation predicate", () => {
 		const staticResident = resident("static", null);
 		const dynamicResident = resident("dynamic", "0x030005cf");
-		const classified = classifyObjectResidents([staticResident, dynamicResident]);
+		const classified = classifyObjectResidents([
+			staticResident,
+			dynamicResident,
+		]);
 
 		expect(classified.staticResidents).toEqual([staticResident]);
 		expect(classified.dynamicResidents).toEqual([dynamicResident]);
 		expect(
-			new Set([...classified.staticResidents, ...classified.dynamicResidents]).size,
+			new Set([...classified.staticResidents, ...classified.dynamicResidents])
+				.size,
 		).toBe(2);
 	});
 });

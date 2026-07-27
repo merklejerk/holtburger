@@ -40,7 +40,9 @@ export class ActiveRegionObjectDetailOwner {
 	}
 
 	/** Install or reuse one active-region-owned building-detail payload. */
-	install(activeRegion: ActiveRegionSource): Promise<ActiveRegionObjectDetailBinding> {
+	install(
+		activeRegion: ActiveRegionSource,
+	): Promise<ActiveRegionObjectDetailBinding> {
 		const activeRegionKey = `${activeRegion.provenance.sourceRecordId}@${activeRegion.provenance.version}`;
 		if (this.#binding?.activeRegionKey === activeRegionKey) {
 			return Promise.resolve(this.#binding);
@@ -49,13 +51,17 @@ export class ActiveRegionObjectDetailOwner {
 			return this.#pending.promise;
 		}
 		const generation = ++this.#generation;
-		const promise = this.#prepare(activeRegion, activeRegionKey).then((binding) => {
-			if (this.#generation !== generation) {
-				throw new Error("Active-region building-detail request was superseded.");
-			}
-			this.#binding = binding;
-			return binding;
-		});
+		const promise = this.#prepare(activeRegion, activeRegionKey).then(
+			(binding) => {
+				if (this.#generation !== generation) {
+					throw new Error(
+						"Active-region building-detail request was superseded.",
+					);
+				}
+				this.#binding = binding;
+				return binding;
+			},
+		);
 		const pending = { activeRegionKey, promise };
 		this.#pending = pending;
 		return promise.finally(() => {
@@ -78,11 +84,13 @@ export class ActiveRegionObjectDetailOwner {
 		activeRegion: ActiveRegionSource,
 		activeRegionKey: string,
 	): Promise<ActiveRegionObjectDetailBinding> {
-		const detail = resolveActiveRegionTerrainPresentation(activeRegion).detailRoles.find(
-			(role) => role.role === "building",
-		);
+		const detail = resolveActiveRegionTerrainPresentation(
+			activeRegion,
+		).detailRoles.find((role) => role.role === "building");
 		if (!detail) {
-			throw new Error("Installed active region has no building detail texture role.");
+			throw new Error(
+				"Installed active region has no building detail texture role.",
+			);
 		}
 		const sourceAssetId = detail.textureId;
 		const response = await this.#pixelSource.loadTexturePixels({
@@ -96,7 +104,9 @@ export class ActiveRegionObjectDetailOwner {
 			response.surface.sourceAssetId !== sourceAssetId ||
 			response.surface.format !== TexturePixelFormat.RGBA8
 		) {
-			throw new Error("Host returned an incompatible active-region building-detail texture.");
+			throw new Error(
+				"Host returned an incompatible active-region building-detail texture.",
+			);
 		}
 		return {
 			activeRegionKey,

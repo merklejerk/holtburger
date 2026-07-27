@@ -10,10 +10,10 @@ export interface TerrainFogCoverage {
 /**
  * Rescale region-authored fog to the selected terrain-interest radius.
  *
-	 * Region data retains the fog color and near/far ratio. Terrain interest owns the absolute
-	 * visibility distance, so expanding its radius makes the extra terrain visible rather than
-	 * loading it behind an unchanged fog wall. The shader measures this range from its camera;
-	 * Explorer intentionally does not shrink it near the edge of a retained interest window.
+ * Region data retains the fog color and near/far ratio. Terrain interest owns the absolute
+ * visibility distance, so expanding its radius makes the extra terrain visible rather than
+ * loading it behind an unchanged fog wall. The shader measures this range from its camera;
+ * Explorer intentionally does not shrink it near the edge of a retained interest window.
  */
 export function resolveTerrainCoverageFog(
 	authoredFog: ResolvedDistanceFog | null,
@@ -33,7 +33,9 @@ export function resolveTerrainCoverageFog(
 		!Number.isSafeInteger(coverage.terrainRadius) ||
 		coverage.terrainRadius < 0
 	) {
-		throw new Error("Terrain fog coverage requires a non-negative integer radius.");
+		throw new Error(
+			"Terrain fog coverage requires a non-negative integer radius.",
+		);
 	}
 	const distance =
 		(coverage.terrainRadius + 0.5) * OUTDOOR_LANDBLOCK_WORLD_SIZE;

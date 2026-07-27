@@ -25,8 +25,6 @@ describe("AABB3", () => {
 		expect(bounds).toEqual(
 			new AABB3(new Vec3(-4, -5, -1), new Vec3(10, 6, 12)),
 		);
-		expect(other).toEqual(
-			new AABB3(new Vec3(-2, -5, 0), new Vec3(10, 4, 12)),
-		);
+		expect(other).toEqual(new AABB3(new Vec3(-2, -5, 0), new Vec3(10, 4, 12)));
 	});
 });

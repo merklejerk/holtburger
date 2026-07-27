@@ -1,5 +1,6 @@
 import type { DatAssetId } from "../game-types";
-import type { AABB3, Mat4, Vec3 } from "../math/types";
+import { multiplyMat4, transformAABB3 } from "../math/matrices";
+import { type AABB3, type Mat4, type Vec3 } from "../math/types";
 
 /** Stable identity for one reusable resident presentation definition. */
 export type ResolvedPresentationId = `presentation:${string}`;
@@ -114,6 +115,65 @@ export function orderResolvedObjectParts(
 		}
 	}
 	return ordered;
+}
+
+/**
+ * Compose one local transform per part into object-local space.
+ *
+ * Geometry preparation and presentation bounds share this path so hierarchy semantics cannot
+ * drift between what is rendered and what is culled.
+ */
+export function resolveObjectPartTransforms(
+	parts: readonly ResolvedObjectPart[],
+	localTransforms: readonly Mat4[],
+): ReadonlyMap<number, Mat4> {
+	const transforms = new Map<number, Mat4>();
+	for (const part of orderResolvedObjectParts(parts)) {
+		const localTransform = localTransforms[part.partIndex];
+		if (!localTransform) {
+			throw new Error(
+				`Presentation has no local transform for part ${part.partIndex}.`,
+			);
+		}
+		const parentTransform =
+			part.parentPartIndex === null
+				? null
+				: transforms.get(part.parentPartIndex);
+		if (part.parentPartIndex !== null && !parentTransform) {
+			throw new Error(
+				`Presentation has no transform for parent part ${part.parentPartIndex}.`,
+			);
+		}
+		transforms.set(
+			part.partIndex,
+			parentTransform
+				? multiplyMat4(parentTransform, localTransform)
+				: localTransform,
+		);
+	}
+	return transforms;
+}
+
+/** Derive conservative object-local bounds from the exact transforms used for rendering. */
+export function resolveObjectPresentationBounds(
+	parts: readonly ResolvedObjectPart[],
+	localTransforms: readonly Mat4[],
+): AABB3 | null {
+	const transforms = resolveObjectPartTransforms(parts, localTransforms);
+	let bounds: AABB3 | null = null;
+	for (const part of parts) {
+		if (part.geometry.bounds === null) continue;
+		const transform = transforms.get(part.partIndex);
+		if (!transform) {
+			throw new Error(
+				`Presentation has no transform for part ${part.partIndex}.`,
+			);
+		}
+		const partBounds = transformAABB3(transform, part.geometry.bounds);
+		if (bounds === null) bounds = partBounds;
+		else bounds.union(partBounds);
+	}
+	return bounds;
 }
 
 /** Named setup placement containing a local transform for every part. */

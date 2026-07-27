@@ -23,7 +23,6 @@ function activeRegionResponse(section = { byteLength: 1024 }): Uint8Array {
 	const manifest = new TextEncoder().encode(
 		JSON.stringify({
 			transport: "holtburger-active-region-data",
-			version: 1,
 			byteOrder: "little-endian",
 			sectionByteOffsetBase: "section-data",
 			provenance: {
@@ -71,18 +70,23 @@ function activeRegionResponse(section = { byteLength: 1024 }): Uint8Array {
 			],
 		}),
 	);
-	const paddedManifestLength = Math.ceil((16 + manifest.length) / 4) * 4 - 16;
-	const response = new Uint8Array(16 + paddedManifestLength + 1024);
+	const headerLength = 12;
+	const paddedManifestLength =
+		Math.ceil((headerLength + manifest.length) / 4) * 4 - headerLength;
+	const response = new Uint8Array(headerLength + paddedManifestLength + 1024);
 	response.set(new TextEncoder().encode("HBAR"), 0);
 	const view = new DataView(response.buffer);
-	view.setUint32(4, 1, true);
-	view.setUint32(8, paddedManifestLength, true);
-	view.setUint32(12, response.byteLength, true);
-	response.set(manifest, 16);
-	response.fill(0x20, 16 + manifest.length, 16 + paddedManifestLength);
+	view.setUint32(4, paddedManifestLength, true);
+	view.setUint32(8, response.byteLength, true);
+	response.set(manifest, headerLength);
+	response.fill(
+		0x20,
+		headerLength + manifest.length,
+		headerLength + paddedManifestLength,
+	);
 	const heights = new Float32Array(
 		response.buffer,
-		16 + paddedManifestLength,
+		headerLength + paddedManifestLength,
 		256,
 	);
 	for (let index = 0; index < heights.length; index += 1) {

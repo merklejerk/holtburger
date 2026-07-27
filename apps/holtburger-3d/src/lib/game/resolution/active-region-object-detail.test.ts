@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ActiveRegionSource } from "../../assets/active-region-source";
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
-import {
-	TexturePixelFormat,
-} from "../textures/types";
+import { TexturePixelFormat } from "../textures/types";
 import type {
 	TexturePreparationServiceRequest,
 	TexturePreparationServiceResponse,

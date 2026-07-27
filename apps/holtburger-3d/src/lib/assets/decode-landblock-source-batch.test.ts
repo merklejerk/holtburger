@@ -138,19 +138,19 @@ function batchResponse(
 		],
 		requestedLayers: overrides.requestedLayers ?? [LandblockLayerKind.Terrain],
 		transport: "holtburger-landblock-source-batch",
-		version: 2,
 	};
 	const encoded = new TextEncoder().encode(JSON.stringify(manifest));
-	const manifestLength = Math.ceil((16 + encoded.length) / 4) * 4 - 16;
+	const headerLength = 12;
+	const manifestLength =
+		Math.ceil((headerLength + encoded.length) / 4) * 4 - headerLength;
 	const response = new Uint8Array(
-		16 + manifestLength + (overrides.recordDataLength ?? 1),
+		headerLength + manifestLength + (overrides.recordDataLength ?? 1),
 	);
 	response.set(new TextEncoder().encode("HBLB"));
 	const view = new DataView(response.buffer);
-	view.setUint32(4, 2, true);
-	view.setUint32(8, manifestLength, true);
-	view.setUint32(12, response.length, true);
-	response.fill(0x20, 16, 16 + manifestLength);
-	response.set(encoded, 16);
+	view.setUint32(4, manifestLength, true);
+	view.setUint32(8, response.length, true);
+	response.fill(0x20, headerLength, headerLength + manifestLength);
+	response.set(encoded, headerLength);
 	return response;
 }

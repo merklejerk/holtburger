@@ -42,7 +42,11 @@ function extractShader(sourceText, name) {
 	}
 	return match[1].replace(
 		"${WEBGL2_DISTANCE_FOG_GLSL}",
-		extractTemplateLiteral(fogSource, "WEBGL2_DISTANCE_FOG_GLSL", fogSourcePath),
+		extractTemplateLiteral(
+			fogSource,
+			"WEBGL2_DISTANCE_FOG_GLSL",
+			fogSourcePath,
+		),
 	);
 }
 

@@ -119,7 +119,7 @@ describe("ExplorerCameraCoordinator", () => {
 			(status) => statuses.push(status),
 		);
 
-		coordinator.handleCameraState({
+		const location = coordinator.handleCameraState({
 			hasManualControl: false,
 			pitchRadians: 0,
 			position: new Vec3(1, 2, 3),
@@ -127,6 +127,7 @@ describe("ExplorerCameraCoordinator", () => {
 		});
 
 		expect(setPrimaryCamera).not.toHaveBeenCalled();
+		expect(location.residency.kind).toBe("ambiguous");
 		expect(statuses).toEqual([
 			"Camera residency is ambiguous across EnvCells: 0x01020001, 0x01020002.",
 		]);

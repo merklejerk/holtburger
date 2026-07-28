@@ -114,7 +114,7 @@
 		},
 	];
 
-	let expanded = $state(false);
+	let expanded = $state(true);
 	let activeTabId = $state<ExplorerTabId>("world");
 
 	const activeTab = $derived(

@@ -6,19 +6,21 @@ Binary Space Partitioning (BSP) trees are the core of the Asheron's Call physics
 
 Every node in the tree begins with a 4-byte ASCII tag. These tags are stored in **Little Endian** format on disk. When read as a 4-byte string, the order must be reversed to match logical tags.
 
-| Tag (Logical) | Name | Type | Disk Order (Hex) | Child Nodes |
-| :--- | :--- | :--- | :--- | :--- |
-| `PORT` | Portal | Portal Node | `54 52 4F 50` (`TROP`) | Positive & Negative |
-| `LEAF` | Leaf | Leaf Node | `46 41 45 4C` (`FAEL`) | None (Terminal) |
-| `BPnn` | Internal | Splitting Node | `6E 6E 50 42` (`nnPB`) | Positive Only |
-| `BPIn` | Internal | Splitting Node | `6E 49 50 42` (`nIPB`) | Positive Only |
-| `BpIN` | Internal | Splitting Node | `4E 49 70 42` (`NIPb`) | Negative Only |
-| `BpnN` | Internal | Splitting Node | `4E 6E 70 42` (`NnPb`) | Negative Only |
-| `BPIN` | Internal | Splitting Node | `4E 49 50 42` (`NIPB`) | Positive & Negative |
-| `BPnN` | Internal | Splitting Node | `4E 6E 50 42` (`NnPB`) | Positive & Negative |
+| Tag (Logical) | Name     | Type           | Disk Order (Hex)       | Child Nodes         |
+| :------------ | :------- | :------------- | :--------------------- | :------------------ |
+| `PORT`        | Portal   | Portal Node    | `54 52 4F 50` (`TROP`) | Positive & Negative |
+| `LEAF`        | Leaf     | Leaf Node      | `46 41 45 4C` (`FAEL`) | None (Terminal)     |
+| `BPnn`        | Internal | Splitting Node | `6E 6E 50 42` (`nnPB`) | Positive Only       |
+| `BPIn`        | Internal | Splitting Node | `6E 49 50 42` (`nIPB`) | Positive Only       |
+| `BpIN`        | Internal | Splitting Node | `4E 49 70 42` (`NIPb`) | Negative Only       |
+| `BpnN`        | Internal | Splitting Node | `4E 6E 70 42` (`NnPb`) | Negative Only       |
+| `BPIN`        | Internal | Splitting Node | `4E 49 50 42` (`NIPB`) | Positive & Negative |
+| `BPnN`        | Internal | Splitting Node | `4E 6E 50 42` (`NnPB`) | Positive & Negative |
 
 ### Tag Flags (The "BPxx" Logic)
+
 The two characters following "BP" indicate the presence of child nodes:
+
 - `I` / `P`: "In" or "Positive" child exists.
 - `N`: "Negative" child exists.
 - `n`: Indicates the child is a **Leaf** or null (structure varies by tag version).
@@ -28,24 +30,27 @@ The two characters following "BP" indicate the presence of child nodes:
 ## 2. Shared Structures
 
 ### Plane (16 bytes)
-| Type | Name | Description |
-| :--- | :--- | :--- |
-| `float` | `NX` | Normal X |
-| `float` | `NY` | Normal Y |
-| `float` | `NZ` | Normal Z |
-| `float` | `D` | Distance from origin |
+
+| Type    | Name | Description          |
+| :------ | :--- | :------------------- |
+| `float` | `NX` | Normal X             |
+| `float` | `NY` | Normal Y             |
+| `float` | `NZ` | Normal Z             |
+| `float` | `D`  | Distance from origin |
 
 ### Sphere (16 bytes)
-| Type | Name | Description |
-| :--- | :--- | :--- |
-| `float` | `CX` | Center X |
-| `float` | `CY` | Center Y |
-| `float` | `CZ` | Center Z |
-| `float` | `R` | Radius |
+
+| Type    | Name | Description |
+| :------ | :--- | :---------- |
+| `float` | `CX` | Center X    |
+| `float` | `CY` | Center Y    |
+| `float` | `CZ` | Center Z    |
+| `float` | `R`  | Radius      |
 
 ## 3. Tree Types
 
 Parsing logic varies slightly depending on the "Type" of tree being read:
+
 - **Drawing**: Used for rendering sorting and visibility.
 - **Physics**: Used for collision detection (found in `GfxObj`).
 - **Cell**: Used for environmental navigation (found in `cell.dat`).
@@ -53,6 +58,7 @@ Parsing logic varies slightly depending on the "Type" of tree being read:
 ## 4. Node Detail Structures
 
 ### Internal Nodes (`BPxx`)
+
 1. **Tag** (4 bytes)
 2. **Splitting Plane** (16 bytes)
 3. **Child Nodes**:
@@ -64,6 +70,7 @@ Parsing logic varies slightly depending on the "Type" of tree being read:
    - **Drawing**: `Sphere`.
 
 ### Portal Nodes (`PORT`)
+
 1. **Tag** (4 bytes)
 2. **Splitting Plane** (16 bytes)
 3. **Positive Child**: Recursively read `BspNode`.
@@ -74,6 +81,7 @@ Parsing logic varies slightly depending on the "Type" of tree being read:
    - `uint32` portal count + `PortalPoly[]` records.
 
 ### Leaf Nodes (`LEAF`)
+
 1. **Tag** (4 bytes)
 2. **Leaf Index** (`int32`)
 3. **Metadata** (Physics ONLY):
@@ -84,8 +92,34 @@ Parsing logic varies slightly depending on the "Type" of tree being read:
 ## 5. Usage in Physics
 
 When a sphere (player) moves through the world:
+
 1. The engine calculates the distance $dist = (P \cdot N) + D$ from the sphere center to the current node's Splitting Plane.
 2. If $dist > radius$, only the **Positive** branch is traversed.
 3. If $dist < -radius$, only the **Negative** branch is traversed.
 4. If $|dist| \leq radius$, **both** branches are traversed (intersection).
 5. Upon reaching a **Leaf**, if the `solid` flag is set, a collision is registered, and the player's vector is reflected or stopped by the polygons in that leaf.
+
+## 6. Cell BSP Point Containment
+
+The Cell BSP in an Environment `CellStruct` has a narrower proven use than the physics traversal
+above. Retail `CCellStruct::point_in_cell` follows the positive-child plane chain:
+
+1. Transform the landblock-space query point through the inverse EnvCell placement into
+   CellStruct-local AC coordinates.
+2. At each `PORT` or internal node, require the point's signed plane distance to be at least
+   `-0.0002`.
+3. Continue through the positive child when present.
+4. Reaching a leaf, or an internal node without a positive child, accepts the point.
+
+`holtburger-3d` normalizes and serializes this positive-child plane chain rather than carrying the
+whole Cell BSP into the browser. An EnvCell AABB is only the broad phase; these planes provide the
+exact containment verdict. Candidate lookup preserves every overlapping cell instead of selecting
+the first match.
+
+This compact containment representation is not used for renderer culling, portal-window
+propagation, collision response, or portal-crossing history.
+
+Implementation references:
+
+- `apps/holtburger-3d/src-tauri/src/cell_struct_projection.rs`
+- `apps/holtburger-3d/src/lib/game/scene/cell-containment.ts`

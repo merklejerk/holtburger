@@ -3,7 +3,7 @@ import type { LandblockId } from "../game/game-types";
 import { LandblockLayerKind } from "../game/runtime/scene-interest";
 import type { ActiveRegionSource } from "./active-region-source";
 import { decodeLandblockSourceBatch } from "./decode-landblock-source-batch";
-import { decodeOutdoorStaticRecord } from "./decode-outdoor-static-record";
+import { decodeOutdoorStaticRecord } from "./decode-static-source-record";
 
 const LANDBLOCK_ID = "0xda55ffff" as LandblockId;
 
@@ -20,6 +20,16 @@ describe("decodeOutdoorStaticRecord", () => {
 		expect(
 			source.staticResidents[0]?.presentation.parts[0]?.geometry.indices,
 		).toEqual(Uint32Array.from([0, 1, 2]));
+		expect(
+			source.staticResidents[0]?.presentation.parts[0]?.geometry
+				.sourceDiagnostics.rejectedDegenerateTriangles,
+		).toEqual([
+			{
+				fanTriangleIndex: 1,
+				polygonId: 6,
+				sideKind: "positive",
+			},
+		]);
 		expect(source.dynamicResidents[0]?.presentation.effects.animationId).toBe(
 			"0x030005cf",
 		);
@@ -206,6 +216,13 @@ function buildResponse(
 				materialSideTypeCount: 1,
 				materialStipplingOffset: 0,
 				materialStipplingCount: 1,
+				rejectedDegenerateTriangles: [
+					{
+						polygonId: 6,
+						sideKind: "positive",
+						fanTriangleIndex: 1,
+					},
+				],
 				bounds: { min: [0, 0, 0], max: [1, 1, 0] },
 			},
 		],

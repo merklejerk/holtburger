@@ -1,253 +1,197 @@
 use std::collections::HashSet;
 
+use anyhow::{Context, Result, ensure};
 use holtburger_dat::file_type::GfxObj;
-use holtburger_dat::graphics::{CVertexArray, Polygon};
 use holtburger_dat::physics::BspNode;
 
-const STIPPLING_REPEAT_POS: u8 = 0x01;
-const STIPPLING_REPEAT_NEG: u8 = 0x02;
-const STIPPLING_NO_POS: u8 = 0x04;
-const STIPPLING_NO_NEG: u8 = 0x08;
-const CULL_MODE_NONE: i32 = 1;
-const CULL_MODE_CLOCKWISE: i32 = 2;
-const CULL_MODE_COUNTER_CLOCKWISE: i32 = 3;
+use crate::polygon_geometry::{
+    PolygonSetGeometry, RenderAabb, RenderVec3, build_polygon_set_geometry,
+};
+use crate::portal_geometry::{
+    PORTAL_SOURCE_PLANARITY_EPSILON, PortalAperture, RenderPlane, build_portal_aperture,
+};
 
-/// App-local render geometry expanded from one GfxObj drawing polygon set.
-#[derive(Debug)]
-pub(crate) struct GfxObjGeometry {
-    pub(crate) vertex_count: usize,
-    pub(crate) positions: Vec<f32>,
-    pub(crate) normals: Vec<f32>,
-    pub(crate) texture_coordinates: Vec<f32>,
-    pub(crate) triangles: Vec<GfxObjTriangle>,
-    pub(crate) bounds: Option<RenderAabb>,
+/// One drawing-BSP building aperture selected by its authored building-portal index.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GfxObjPortalAperture {
+    pub portal_index: usize,
+    pub polygon_ids: Vec<u16>,
+    pub aperture: PortalAperture,
 }
 
-/// Per-triangle authored material and polygon-side facts.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct GfxObjTriangle {
-    pub(crate) polygon_id: u16,
-    pub(crate) surface_slot: Option<i16>,
-    pub(crate) side_kind: PolygonSideKind,
-    pub(crate) sides_type: i32,
-    pub(crate) stippling: u8,
-    pub(crate) sampler_wrap: SamplerWrapMode,
-    pub(crate) first_vertex: usize,
-}
-
-/// Polygon side expanded into an explicit render triangle.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PolygonSideKind {
-    Positive,
-    PositiveReversed,
-    Negative,
-}
-
-/// Texture-addressing behavior selected by the authored side stippling bit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SamplerWrapMode {
-    Clamp,
-    Repeat,
-}
-
-/// Axis-aligned bounds in Three.js render coordinates.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct RenderAabb {
-    pub(crate) min: RenderVec3,
-    pub(crate) max: RenderVec3,
-}
-
-/// Vector in Three.js render coordinates.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct RenderVec3 {
-    pub(crate) x: f32,
-    pub(crate) y: f32,
-    pub(crate) z: f32,
-}
-
-/// Expands retail drawing sides, winding, normals, UVs, and fan triangles for one GfxObj.
-pub(crate) fn build_gfx_obj_geometry(gfx_obj: &GfxObj) -> GfxObjGeometry {
+/// Select GfxObj drawing-BSP polygons, then delegate polygon emission to the shared mechanic.
+pub fn build_gfx_obj_geometry(gfx_obj: &GfxObj) -> Result<PolygonSetGeometry> {
     let render_polygon_ids = gfx_obj
         .drawing_bsp
         .as_ref()
         .map(collect_drawing_bsp_renderable_polygon_ids);
-    let mut polygon_entries = gfx_obj.polygons.iter().collect::<Vec<_>>();
-    polygon_entries.sort_by_key(|(polygon_id, _)| **polygon_id);
-
-    let mut geometry = GfxObjGeometry {
-        vertex_count: 0,
-        positions: Vec::new(),
-        normals: Vec::new(),
-        texture_coordinates: Vec::new(),
-        triangles: Vec::new(),
-        bounds: None,
-    };
-    for (polygon_id, polygon) in polygon_entries {
-        if render_polygon_ids
-            .as_ref()
-            .is_some_and(|ids| !ids.contains(polygon_id))
-            || polygon.vertex_ids.len() < 3
-            || polygon.num_pts as usize != polygon.vertex_ids.len()
-            || polygon
-                .vertex_ids
-                .iter()
-                .any(|vertex_id| !gfx_obj.vertex_array.vertices.contains_key(vertex_id))
-        {
-            continue;
-        }
-
-        for side in render_sides(polygon) {
-            append_side(
-                *polygon_id,
-                polygon,
-                &gfx_obj.vertex_array,
-                side,
-                &mut geometry,
+    let mut polygon_entries = gfx_obj
+        .polygons
+        .iter()
+        .filter(|(polygon_id, _)| {
+            render_polygon_ids
+                .as_ref()
+                .is_none_or(|ids| ids.contains(polygon_id))
+        })
+        .map(|(polygon_id, polygon)| (*polygon_id, polygon))
+        .collect::<Vec<_>>();
+    polygon_entries.sort_by_key(|(polygon_id, _)| *polygon_id);
+    build_polygon_set_geometry(
+        &gfx_obj.vertex_array,
+        polygon_entries,
+        |polygon_id, _side, surface_index| {
+            let slot = usize::try_from(surface_index).map_err(|_| {
+                anyhow::anyhow!(
+                    "GfxObj 0x{:08X} polygon {polygon_id} has negative render surface {surface_index}",
+                    gfx_obj.id
+                )
+            })?;
+            ensure!(
+                slot < gfx_obj.surfaces.len(),
+                "GfxObj 0x{:08X} polygon {polygon_id} references material slot {slot}, but only {} slots exist",
+                gfx_obj.id,
+                gfx_obj.surfaces.len()
             );
-        }
-    }
-    geometry.vertex_count = geometry.positions.len() / 3;
-    geometry
+            Ok(true)
+        },
+    )
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Winding {
-    Source,
-    Reversed,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct RenderSide<'a> {
-    kind: PolygonSideKind,
-    surface_slot: Option<i16>,
-    sampler_wrap: SamplerWrapMode,
-    uv_indices: Option<&'a [u8]>,
-    winding: Winding,
-    normal_scale: f32,
-}
-
-fn render_sides(polygon: &Polygon) -> Vec<RenderSide<'_>> {
-    // Retail aliases CullMode.None's negative side to the positive side, then expands None and
-    // Clockwise into explicit geometry. CounterClockwise remains positive-only.
-    let mut sides = Vec::with_capacity(2);
-    if positive_side_is_renderable(polygon) {
-        sides.push(RenderSide {
-            kind: PolygonSideKind::Positive,
-            surface_slot: normalize_surface_slot(polygon.pos_surface),
-            sampler_wrap: sampler_wrap((polygon.stippling & STIPPLING_REPEAT_POS) != 0),
-            uv_indices: side_uv_indices(polygon, AuthoredSide::Positive),
-            winding: Winding::Source,
-            normal_scale: 1.0,
-        });
-    }
-
-    match polygon.sides_type {
-        CULL_MODE_NONE if positive_side_is_renderable(polygon) => {
-            sides.push(RenderSide {
-                kind: PolygonSideKind::PositiveReversed,
-                surface_slot: normalize_surface_slot(polygon.pos_surface),
-                sampler_wrap: sampler_wrap((polygon.stippling & STIPPLING_REPEAT_POS) != 0),
-                uv_indices: side_uv_indices(polygon, AuthoredSide::Positive),
-                winding: Winding::Reversed,
-                normal_scale: -1.0,
-            });
-        }
-        CULL_MODE_CLOCKWISE if negative_side_is_renderable(polygon) => {
-            sides.push(RenderSide {
-                kind: PolygonSideKind::Negative,
-                surface_slot: normalize_surface_slot(polygon.neg_surface),
-                sampler_wrap: sampler_wrap((polygon.stippling & STIPPLING_REPEAT_NEG) != 0),
-                uv_indices: side_uv_indices(polygon, AuthoredSide::Negative),
-                winding: Winding::Reversed,
-                normal_scale: -1.0,
-            });
-        }
-        CULL_MODE_COUNTER_CLOCKWISE => {}
-        _ => {}
-    }
-    sides
-}
-
-fn append_side(
-    polygon_id: u16,
-    polygon: &Polygon,
-    vertex_array: &CVertexArray,
-    side: RenderSide<'_>,
-    geometry: &mut GfxObjGeometry,
-) {
-    for vertex_index in 1..(polygon.vertex_ids.len() - 1) {
-        let offsets = match side.winding {
-            Winding::Source => [0, vertex_index, vertex_index + 1],
-            Winding::Reversed => [0, vertex_index + 1, vertex_index],
-        };
-        geometry.triangles.push(GfxObjTriangle {
-            polygon_id,
-            surface_slot: side.surface_slot,
-            side_kind: side.kind,
-            sides_type: polygon.sides_type,
-            stippling: polygon.stippling,
-            sampler_wrap: side.sampler_wrap,
-            first_vertex: geometry.positions.len() / 3,
-        });
-
-        for offset in offsets {
-            let vertex = vertex_array
-                .vertices
-                .get(&polygon.vertex_ids[offset])
-                .expect("missing vertices were filtered before triangulation");
-            let position = ac_to_render(vertex.origin);
-            let normal = ac_to_render(vertex.normal);
-            geometry
-                .positions
-                .extend([position.x, position.y, position.z]);
-            geometry.normals.extend([
-                scaled_normal(normal.x, side.normal_scale),
-                scaled_normal(normal.y, side.normal_scale),
-                scaled_normal(normal.z, side.normal_scale),
-            ]);
-            let uv = side
-                .uv_indices
-                .and_then(|indices| indices.get(offset))
-                .and_then(|index| vertex.uvs.get(usize::from(*index)));
-            geometry
-                .texture_coordinates
-                .extend([uv.map_or(0.0, |uv| uv.u), uv.map_or(0.0, |uv| uv.v)]);
-            geometry.bounds = Some(expand_bounds(geometry.bounds, position));
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-enum AuthoredSide {
-    Positive,
-    Negative,
-}
-
-fn positive_side_is_renderable(polygon: &Polygon) -> bool {
-    side_uv_indices(polygon, AuthoredSide::Positive).is_some()
-        || (polygon.stippling & STIPPLING_NO_POS) != 0
-}
-
-fn negative_side_is_renderable(polygon: &Polygon) -> bool {
-    polygon.sides_type == CULL_MODE_CLOCKWISE
-        && side_uv_indices(polygon, AuthoredSide::Negative).is_some()
-}
-
-fn side_uv_indices(polygon: &Polygon, side: AuthoredSide) -> Option<&[u8]> {
-    let (omit_uv_bit, uv_indices) = match side {
-        AuthoredSide::Positive => (STIPPLING_NO_POS, polygon.pos_uv_indices.as_slice()),
-        AuthoredSide::Negative => (STIPPLING_NO_NEG, polygon.neg_uv_indices.as_slice()),
+/// Select material-free building apertures from drawing-BSP `CPortalPoly` records.
+pub fn build_gfx_obj_portal_apertures(gfx_obj: &GfxObj) -> Result<Vec<GfxObjPortalAperture>> {
+    let Some(drawing_bsp) = &gfx_obj.drawing_bsp else {
+        return Ok(Vec::new());
     };
-    if (polygon.stippling & omit_uv_bit) != 0 {
-        return None;
+    let mut pairs = Vec::new();
+    collect_drawing_bsp_portal_pairs(drawing_bsp, &mut pairs)
+        .with_context(|| format!("Could not decode GfxObj 0x{:08X} portal pairs", gfx_obj.id))?;
+    pairs.sort_unstable();
+    pairs.dedup();
+    let mut apertures = Vec::new();
+    let mut cursor = 0;
+    while cursor < pairs.len() {
+        let portal_index = pairs[cursor].0;
+        let end = pairs[cursor..]
+            .iter()
+            .position(|(candidate, _)| *candidate != portal_index)
+            .map_or(pairs.len(), |offset| cursor + offset);
+        let polygon_ids = pairs[cursor..end]
+            .iter()
+            .map(|(_, polygon_id)| *polygon_id)
+            .collect::<Vec<_>>();
+        let pieces = polygon_ids
+            .iter()
+            .map(|polygon_id| {
+                let polygon = gfx_obj.polygons.get(polygon_id).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "GfxObj 0x{:08X} building portal {portal_index} references missing polygon {polygon_id}",
+                        gfx_obj.id
+                    )
+                })?;
+                build_portal_aperture(&gfx_obj.vertex_array, *polygon_id, polygon).with_context(
+                    || {
+                        format!(
+                            "Could not project GfxObj 0x{:08X} building portal {portal_index} polygon {polygon_id}",
+                            gfx_obj.id
+                        )
+                    },
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
+        apertures.push(GfxObjPortalAperture {
+            portal_index,
+            polygon_ids,
+            aperture: merge_coplanar_apertures(gfx_obj.id, portal_index, pieces)?,
+        });
+        cursor = end;
     }
-    (uv_indices.len() == polygon.vertex_ids.len()).then_some(uv_indices)
+    Ok(apertures)
+}
+
+fn merge_coplanar_apertures(
+    gfx_obj_id: u32,
+    portal_index: usize,
+    pieces: Vec<PortalAperture>,
+) -> Result<PortalAperture> {
+    let mut pieces = pieces.into_iter();
+    let first = pieces
+        .next()
+        .context("building portal aperture has no polygon pieces")?;
+    let mut merged = first;
+    for piece in pieces {
+        ensure!(
+            planes_are_equivalent(merged.plane, piece.plane),
+            "GfxObj 0x{gfx_obj_id:08X} building portal {portal_index} contains non-coplanar polygon pieces"
+        );
+        let vertex_offset = u32::try_from(merged.positions.len())?;
+        merged.triangle_indices.extend(
+            piece
+                .triangle_indices
+                .iter()
+                .map(|index| index + vertex_offset),
+        );
+        merged.positions.extend(piece.positions);
+        merged.bounds = union_bounds(merged.bounds, piece.bounds);
+    }
+    Ok(merged)
+}
+
+fn planes_are_equivalent(left: RenderPlane, right: RenderPlane) -> bool {
+    let delta = RenderVec3 {
+        x: left.normal.x - right.normal.x,
+        y: left.normal.y - right.normal.y,
+        z: left.normal.z - right.normal.z,
+    };
+    delta.x * delta.x + delta.y * delta.y + delta.z * delta.z
+        <= PORTAL_SOURCE_PLANARITY_EPSILON * PORTAL_SOURCE_PLANARITY_EPSILON
+        && (left.d - right.d).abs() <= PORTAL_SOURCE_PLANARITY_EPSILON
+}
+
+fn union_bounds(left: RenderAabb, right: RenderAabb) -> RenderAabb {
+    RenderAabb {
+        min: RenderVec3 {
+            x: left.min.x.min(right.min.x),
+            y: left.min.y.min(right.min.y),
+            z: left.min.z.min(right.min.z),
+        },
+        max: RenderVec3 {
+            x: left.max.x.max(right.max.x),
+            y: left.max.y.max(right.max.y),
+            z: left.max.z.max(right.max.z),
+        },
+    }
 }
 
 fn collect_drawing_bsp_renderable_polygon_ids(node: &BspNode) -> HashSet<u16> {
     let mut polygon_ids = HashSet::new();
     collect_drawing_bsp_node_polygon_ids(node, &mut polygon_ids);
     polygon_ids
+}
+
+fn collect_drawing_bsp_portal_pairs(node: &BspNode, pairs: &mut Vec<(usize, u16)>) -> Result<()> {
+    match node {
+        BspNode::Port(portal) => {
+            for pair in &portal.portal_polys {
+                let portal_index = usize::try_from(pair.portal_index)
+                    .context("drawing-BSP portal index is negative")?;
+                let polygon_id = u16::try_from(pair.poly_id)
+                    .context("drawing-BSP portal polygon id is negative")?;
+                pairs.push((portal_index, polygon_id));
+            }
+            collect_drawing_bsp_portal_pairs(&portal.pos, pairs)?;
+            collect_drawing_bsp_portal_pairs(&portal.neg, pairs)?;
+        }
+        BspNode::Internal(internal) => {
+            if let Some(pos) = &internal.pos {
+                collect_drawing_bsp_portal_pairs(pos, pairs)?;
+            }
+            if let Some(neg) = &internal.neg {
+                collect_drawing_bsp_portal_pairs(neg, pairs)?;
+            }
+        }
+        BspNode::Leaf(_) => {}
+    }
+    Ok(())
 }
 
 fn collect_drawing_bsp_node_polygon_ids(node: &BspNode, polygon_ids: &mut HashSet<u16>) {
@@ -272,91 +216,99 @@ fn collect_drawing_bsp_node_polygon_ids(node: &BspNode, polygon_ids: &mut HashSe
     }
 }
 
-fn sampler_wrap(repeats: bool) -> SamplerWrapMode {
-    if repeats {
-        SamplerWrapMode::Repeat
-    } else {
-        SamplerWrapMode::Clamp
-    }
-}
-
-fn normalize_surface_slot(surface_id: i16) -> Option<i16> {
-    (surface_id >= 0).then_some(surface_id)
-}
-
-fn ac_to_render(vector: holtburger_common::Vector3) -> RenderVec3 {
-    RenderVec3 {
-        x: vector.x,
-        y: vector.z,
-        z: if vector.y == 0.0 { 0.0 } else { -vector.y },
-    }
-}
-
-fn scaled_normal(value: f32, scale: f32) -> f32 {
-    let scaled = value * scale;
-    if scaled == 0.0 { 0.0 } else { scaled }
-}
-
-fn expand_bounds(bounds: Option<RenderAabb>, point: RenderVec3) -> RenderAabb {
-    match bounds {
-        Some(bounds) => RenderAabb {
-            min: RenderVec3 {
-                x: bounds.min.x.min(point.x),
-                y: bounds.min.y.min(point.y),
-                z: bounds.min.z.min(point.z),
-            },
-            max: RenderVec3 {
-                x: bounds.max.x.max(point.x),
-                y: bounds.max.y.max(point.y),
-                z: bounds.max.z.max(point.z),
-            },
-        },
-        None => RenderAabb {
-            min: point,
-            max: point,
-        },
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use holtburger_common::Vector3;
-    use holtburger_common::properties::GfxObjFlags;
     use std::collections::HashMap;
 
+    use holtburger_common::Vector3;
+    use holtburger_common::properties::GfxObjFlags;
     use holtburger_dat::graphics::{CVertexArray, Polygon, SWVertex, Vec2Duv};
+    use holtburger_dat::physics::{BspLeaf, BspPortal, PortalPoly};
+
+    use crate::polygon_geometry::CULL_MODE_COUNTER_CLOCKWISE;
 
     use super::*;
 
     #[test]
-    fn cull_none_expands_both_windings_with_typed_sampler_facts() {
-        let gfx_obj = triangle_gfx_obj(CULL_MODE_NONE, STIPPLING_REPEAT_POS);
+    fn delegates_complete_polygon_side_emission() {
+        let gfx_obj = triangle_gfx_obj();
 
-        let geometry = build_gfx_obj_geometry(&gfx_obj);
+        let geometry = build_gfx_obj_geometry(&gfx_obj).unwrap();
 
-        assert_eq!(geometry.vertex_count, 6);
-        assert_eq!(geometry.triangles.len(), 2);
-        assert_eq!(geometry.triangles[0].side_kind, PolygonSideKind::Positive);
-        assert_eq!(
-            geometry.triangles[1].side_kind,
-            PolygonSideKind::PositiveReversed
-        );
-        assert_eq!(geometry.triangles[0].sampler_wrap, SamplerWrapMode::Repeat);
+        assert_eq!(geometry.vertex_count, 3);
+        assert_eq!(geometry.triangles.len(), 1);
+        assert_eq!(geometry.triangles[0].polygon_id, 7);
     }
 
     #[test]
-    fn malformed_missing_vertices_are_skipped_without_partial_geometry() {
-        let mut gfx_obj = triangle_gfx_obj(CULL_MODE_COUNTER_CLOCKWISE, 0);
+    fn rejects_malformed_selected_geometry() {
+        let mut gfx_obj = triangle_gfx_obj();
         gfx_obj.polygons.get_mut(&7).unwrap().vertex_ids[2] = 99;
 
-        let geometry = build_gfx_obj_geometry(&gfx_obj);
+        let error = build_gfx_obj_geometry(&gfx_obj).unwrap_err();
 
-        assert_eq!(geometry.vertex_count, 0);
-        assert!(geometry.triangles.is_empty());
-        assert!(geometry.bounds.is_none());
+        assert!(error.to_string().contains("missing vertex 99"));
     }
 
-    fn triangle_gfx_obj(sides_type: i32, stippling: u8) -> GfxObj {
+    #[test]
+    fn selects_building_aperture_by_portal_index_then_polygon_id() {
+        let mut gfx_obj = triangle_gfx_obj();
+        gfx_obj.drawing_bsp = Some(BspNode::Port(BspPortal {
+            plane: holtburger_common::Plane {
+                normal: Vector3::new(1.0, 0.0, 0.0),
+                d: 0.0,
+            },
+            pos: Box::new(leaf()),
+            neg: Box::new(leaf()),
+            sphere: None,
+            poly_ids: Vec::new(),
+            portal_polys: vec![PortalPoly {
+                poly_id: 7,
+                portal_index: 3,
+            }],
+        }));
+
+        let apertures = build_gfx_obj_portal_apertures(&gfx_obj).unwrap();
+
+        assert_eq!(apertures.len(), 1);
+        assert_eq!(apertures[0].portal_index, 3);
+        assert_eq!(apertures[0].polygon_ids, [7]);
+        assert_eq!(apertures[0].aperture.triangle_indices, [0, 1, 2]);
+    }
+
+    #[test]
+    fn merges_coplanar_polygon_pieces_for_one_building_portal() {
+        let mut gfx_obj = triangle_gfx_obj();
+        gfx_obj.polygons.insert(8, triangle_polygon());
+        gfx_obj.drawing_bsp = Some(BspNode::Port(BspPortal {
+            plane: holtburger_common::Plane {
+                normal: Vector3::new(1.0, 0.0, 0.0),
+                d: 0.0,
+            },
+            pos: Box::new(leaf()),
+            neg: Box::new(leaf()),
+            sphere: None,
+            poly_ids: Vec::new(),
+            portal_polys: vec![
+                PortalPoly {
+                    poly_id: 7,
+                    portal_index: 3,
+                },
+                PortalPoly {
+                    poly_id: 8,
+                    portal_index: 3,
+                },
+            ],
+        }));
+
+        let apertures = build_gfx_obj_portal_apertures(&gfx_obj).unwrap();
+
+        assert_eq!(apertures.len(), 1);
+        assert_eq!(apertures[0].polygon_ids, [7, 8]);
+        assert_eq!(apertures[0].aperture.triangle_indices, [0, 1, 2, 3, 4, 5]);
+    }
+
+    fn triangle_gfx_obj() -> GfxObj {
         let mut vertices = HashMap::new();
         for (id, origin, uv) in [
             (0, Vector3::new(0.0, 0.0, 0.0), (0.0, 0.0)),
@@ -384,21 +336,31 @@ mod tests {
             physics_polygons: HashMap::new(),
             physics_bsp: None,
             sort_center: Vector3::zero(),
-            polygons: HashMap::from([(
-                7,
-                Polygon {
-                    num_pts: 3,
-                    stippling,
-                    sides_type,
-                    pos_surface: 0,
-                    neg_surface: 0,
-                    vertex_ids: vec![0, 1, 2],
-                    pos_uv_indices: vec![0, 0, 0],
-                    neg_uv_indices: vec![0, 0, 0],
-                },
-            )]),
+            polygons: HashMap::from([(7, triangle_polygon())]),
             drawing_bsp: None,
             did_degrade: None,
+        }
+    }
+
+    fn leaf() -> BspNode {
+        BspNode::Leaf(BspLeaf {
+            index: 0,
+            solid: 0,
+            sphere: None,
+            poly_ids: Vec::new(),
+        })
+    }
+
+    fn triangle_polygon() -> Polygon {
+        Polygon {
+            num_pts: 3,
+            stippling: 0,
+            sides_type: CULL_MODE_COUNTER_CLOCKWISE,
+            pos_surface: 0,
+            neg_surface: 0,
+            vertex_ids: vec![0, 1, 2],
+            pos_uv_indices: vec![0, 0, 0],
+            neg_uv_indices: vec![0, 0, 0],
         }
     }
 }

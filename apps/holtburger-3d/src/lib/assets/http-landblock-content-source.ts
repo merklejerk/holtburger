@@ -22,8 +22,6 @@ export interface HttpLandblockSourceBatchDiagnostic {
 	readonly landblockId: LandblockId;
 	/** Exact layer subset projected from the host's cumulative asset. */
 	readonly layers: readonly LandblockSourceLayer[];
-	/** Maximum cumulative LoD selected by the host for this request. */
-	readonly selectedMaximumLod: number;
 	/** Exact response payload length before browser decoding. */
 	readonly responseBytes: number;
 	/** Host-only source assembly duration, excluding browser transfer and decoding. */
@@ -86,10 +84,6 @@ export class HttpLandblockContentSource
 			landblockId,
 			layers: [...layers],
 			responseBytes: response.bytes.byteLength,
-			selectedMaximumLod: requiredNonNegativeHeader(
-				response.headers,
-				"x-holtburger-landblock-source-batch-lod",
-			),
 		});
 		return decodeLandblockSourceBatch(
 			response.bytes,

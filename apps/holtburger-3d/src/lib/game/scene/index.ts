@@ -1,5 +1,5 @@
 import type { EnvCellId, LandblockId } from "../game-types";
-import type { AABB3, Mat4 } from "../math/types";
+import type { AABB3, Mat4, Vec3 } from "../math/types";
 
 /** Opaque identity assigned by SceneGraph to one canonical scene node. */
 export type SceneNodeId = `scene-node:${number}`;
@@ -29,27 +29,77 @@ export interface SceneEnvCellScopeInput {
 	readonly scope: Extract<SceneScope, { readonly kind: "env-cell" }>;
 	/** Conservative extent already expressed in the containing landblock frame. */
 	readonly landblockBounds: AABB3 | null;
+	/** Positive-child Cell BSP plane chain encoded as normalized [nx, ny, nz, d] tuples. */
+	readonly containmentPlanes: Float32Array;
+	/** Cell structure-local transform into the containing landblock frame. */
+	readonly structureToLandblock: Mat4;
+	/** Render-scheduling component joined only through proven depth-continuous seams. */
+	readonly visibilityIslandId: SceneVisibilityIslandId;
 	/** Source-provided coarse visibility set used to prune later portal traversal. */
 	readonly potentiallyVisibleEnvCellIds: ReadonlySet<EnvCellId>;
 }
 
+/** One AABB-selected EnvCell plus its exact retail containment verdict. */
+interface SceneEnvCellPointCandidate extends SceneResidency {
+	readonly envCellId: EnvCellId;
+	readonly containsPoint: boolean;
+}
+
+/** Every currently resident scene-scope candidate for one canonical world point. */
+export interface ScenePointResidencyCandidates {
+	/** Explicit outdoor fallback for the point's canonical landblock. */
+	readonly outdoor: SceneResidency & { readonly envCellId: null };
+	/** Stable diagnostic ordering only; callers must not use order as selection policy. */
+	readonly envCells: readonly SceneEnvCellPointCandidate[];
+}
+
 /** Stable identity for one directed query crossing. */
 export type PortalCrossingId = `portal-crossing:${string}`;
+/** Stable identity for one proof-backed indoor visibility island. */
+type SceneVisibilityIslandId = `env-cell-island:${string}`;
+
+/** One material-free planar aperture expressed in an owning landblock frame. */
+interface ScenePortalAperture {
+	readonly id: `portal-aperture:${string}`;
+	readonly landblockId: LandblockId;
+	readonly landblockBounds: AABB3;
+	readonly vertices: Float32Array;
+	readonly indices: Uint32Array;
+	readonly plane: {
+		readonly normal: Vec3;
+		readonly d: number;
+	};
+}
 
 /** Directed aperture crossing used by scoped spatial queries. */
 export interface ScenePortalCrossingInput {
 	readonly id: PortalCrossingId;
 	readonly source: SceneScope;
 	readonly target: SceneScope;
-	readonly aperture: {
-		readonly id: `portal-aperture:${string}`;
-		/** Landblock frame containing the aperture geometry and bounds. */
-		readonly landblockId: LandblockId;
-		readonly landblockBounds: AABB3;
-		readonly vertices: Float32Array;
-		readonly indices: Uint32Array;
-		readonly visibleSide: "positive" | "negative" | "both";
-	};
+	/** Authored half-space from which this directed aperture may be traversed. */
+	readonly acceptedSide: "positive" | "negative";
+	/** Whether the source portal asserted an exact polygon match. */
+	readonly exactMatch: boolean;
+	/** Stable reciprocal crossing, when the host proved one. */
+	readonly reciprocalCrossingId: PortalCrossingId | null;
+	/** Host-classified seam semantics retained for later rendering policy. */
+	readonly spatialRelationship:
+		| {
+				readonly kind: "indoor-depth-continuous";
+				readonly reciprocalApertureId: `portal-aperture:${string}`;
+		  }
+		| {
+				readonly kind: "indoor-topology-boundary";
+				readonly reason: string;
+		  }
+		| {
+				readonly kind: "exterior-transition";
+				readonly exteriorLandblockId: LandblockId;
+		  };
+	/** Authored directed geometry used exclusively by topology and spatial queries. */
+	readonly sourceAperture: ScenePortalAperture;
+	/** Host-resolved geometry used exclusively by render planning and material-free masks. */
+	readonly visibilityAperture: ScenePortalAperture;
 }
 
 /** Atomic transform and residency update for the root of a transform tree. */
@@ -96,18 +146,36 @@ export type SceneNodeInput = SceneNodeFields &
 		  }
 	);
 
-/** Result of a spatial query against the canonical scene graph. */
+/** Result of a frame-scoped spatial query against explicitly selected scene scopes. */
 export interface VisibleScene {
 	/** Bounded node IDs selected by the spatial query. Contents are overwritten by the next query. */
 	readonly entries: readonly SceneNodeId[];
-	/** Directed portal selections accepted during scoped traversal. Contents are overwritten by the next query. */
-	readonly crossings: readonly VisiblePortalCrossing[];
 }
 
-/** Primitive portal selection emitted by a frame-scoped spatial query. */
-export interface VisiblePortalCrossing {
-	readonly id: PortalCrossingId;
-	readonly apertureId: ScenePortalCrossingInput["aperture"]["id"];
+/** One scope retained by the renderer-facing topology view. */
+export interface SceneTopologyScope {
+	readonly scope: SceneScope;
+	/** Outdoor has no indoor depth-continuity island. */
+	readonly visibilityIslandId: SceneVisibilityIslandId | null;
+	/** Source PVS provenance retained for preload policy, never traversal rejection. */
+	readonly potentiallyVisibleEnvCellIds: ReadonlySet<EnvCellId>;
 }
 
+/**
+ * Retained immutable topology facts for one scene revision.
+ *
+ * The view is rebuilt lazily after scope/crossing publication and reused until the next topology
+ * mutation. Consumers own render scheduling; this view contains no traversal or stencil policy.
+ */
+export interface SceneTopologyView {
+	readonly revision: number;
+	readonly scopes: readonly SceneTopologyScope[];
+	readonly crossings: readonly ScenePortalCrossingInput[];
+	outgoing(scope: SceneScope): readonly ScenePortalCrossingInput[];
+}
+
+export type {
+	ScenePortalTraceQuery,
+	ScenePortalTraceResult,
+} from "./portal-trace";
 export { SceneGraph } from "./scene-graph";

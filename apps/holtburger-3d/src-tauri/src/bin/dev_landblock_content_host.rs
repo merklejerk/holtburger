@@ -226,7 +226,7 @@ async fn write_response_with_headers(
          access-control-allow-origin: *\r\n\
          access-control-allow-methods: GET, POST, OPTIONS\r\n\
          access-control-allow-headers: content-type\r\n\
-         access-control-expose-headers: x-holtburger-landblock-source-batch-lod, x-holtburger-landblock-source-batch-duration-ms\r\n\
+         access-control-expose-headers: x-holtburger-landblock-source-batch-duration-ms\r\n\
          content-type: {content_type}\r\n\
          content-length: {}\r\n\
          connection: close\r\n",

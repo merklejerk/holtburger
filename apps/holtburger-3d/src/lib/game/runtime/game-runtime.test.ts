@@ -22,7 +22,6 @@ describe("GameRuntime view and interest control", () => {
 			viewCount: 1,
 			visibleDynamics: 3,
 			visibleEnvCellShells: 5,
-			visiblePortalCrossings: 7,
 			visibleSceneEntries: 11,
 			visibleStaticLayerCount: 3,
 			visibleStaticNodeCount: 13,
@@ -102,17 +101,29 @@ describe("GameRuntime view and interest control", () => {
 
 		expect(requestedLayers).toEqual([{ id: "0x1010ffff", layer: "terrain" }]);
 		expect(frames[0]?.anchorLandblockId).toBe("0x2020ffff");
-		expect(frames[0]?.frameSettings).toEqual({ distanceFogEnabled: true });
-		runtime.setFrameSettings({ distanceFogEnabled: false });
+		expect(frames[0]?.frameSettings).toEqual({
+			distanceFogEnabled: true,
+			envCellRenderMode: "portal",
+		});
+		runtime.setFrameSettings({
+			distanceFogEnabled: false,
+			envCellRenderMode: "flat",
+		});
 		runtime.render(2);
-		expect(frames[1]?.frameSettings).toEqual({ distanceFogEnabled: false });
+		expect(frames[1]?.frameSettings).toEqual({
+			distanceFogEnabled: false,
+			envCellRenderMode: "flat",
+		});
 		expect(runtime.getFrameSelectionMetrics()).toEqual(frameSelectionMetrics);
 		const queriedPoint = createLandblockWorldOrigin("0x0102ffff").add(
 			new Vec3(1, 10, -1),
 		);
-		expect(runtime.queryWorldPointResidency(queriedPoint)).toEqual({
-			envCellId: null,
-			landblockId: "0x0102ffff",
+		expect(runtime.queryWorldPointResidencyCandidates(queriedPoint)).toEqual({
+			envCells: [],
+			outdoor: {
+				envCellId: null,
+				landblockId: "0x0102ffff",
+			},
 		});
 		expect(() =>
 			runtime.setPrimaryCamera({
@@ -175,8 +186,8 @@ describe("GameRuntime view and interest control", () => {
 
 		expect(events).toEqual([
 			{
-				kind: "scene-content-failed",
-				message: "No terrain content is available for 0x1010ffff.",
+				kind: "scene-content-unavailable",
+				layer: LandblockLayerKind.Terrain,
 				residency: { envCellId: null, landblockId: "0x1010ffff" },
 				revision: first.revision,
 			},

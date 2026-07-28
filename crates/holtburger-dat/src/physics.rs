@@ -50,8 +50,10 @@ pub struct InternalNode {
 #[br(little)]
 #[bw(little)]
 pub struct PortalPoly {
-    pub portal_index: i16,
+    /// Polygon selector in the owning GfxObj.
     pub poly_id: i16,
+    /// Building-portal selector in the owning LandblockInfo building.
+    pub portal_index: i16,
 }
 
 impl BspNode {
@@ -347,6 +349,16 @@ impl InternalNode {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn drawing_portal_pair_decodes_polygon_before_portal_index() {
+        let mut cursor = Cursor::new([0x2a, 0x00, 0x03, 0x00]);
+
+        let pair = PortalPoly::read(&mut cursor).expect("portal pair should decode");
+
+        assert_eq!(pair.poly_id, 42);
+        assert_eq!(pair.portal_index, 3);
+    }
 
     #[test]
     fn test_bsp_leaf_parsing() {

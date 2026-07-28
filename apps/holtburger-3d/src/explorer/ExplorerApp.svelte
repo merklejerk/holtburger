@@ -19,6 +19,7 @@
 		DEFAULT_FRAME_SETTINGS,
 		type FrameSettings,
 		type FrameSelectionMetrics,
+		type EnvCellRenderMode,
 	} from "../lib/game/renderer/renderer";
 	import {
 		ExplorerCameraCoordinator,
@@ -30,7 +31,7 @@
 		type ExplorerEnvironmentSelection,
 	} from "../lib/game/environment/scene-environment";
 	import type { ActiveRegionSource } from "../lib/assets/active-region-source";
-	import { ActiveRegionObjectDetailOwner } from "../lib/game/resolution/active-region-object-detail";
+	import { ActiveRegionStaticDetailOwner } from "../lib/game/resolution/active-region-static-detail";
 	import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
 	import type { TexturePageId } from "../lib/game/textures/texture-manager";
 
@@ -40,7 +41,7 @@
 	let commitPipeline: StandardCommitPipeline | undefined;
 	let webglDevice: WebGL2Device | undefined;
 	let activeRegionSource: TauriActiveRegionSource | undefined;
-	let objectDetailOwner: ActiveRegionObjectDetailOwner | undefined;
+	let staticDetailOwner: ActiveRegionStaticDetailOwner | undefined;
 	let cameraController: FreeFlyCameraController | undefined;
 	let cameraCoordinator: ExplorerCameraCoordinator | undefined;
 	let frameMetrics: FrameMetrics | null = $state(null);
@@ -69,6 +70,11 @@
 
 	function updateDistanceFog(enabled: boolean): void {
 		frameSettings = { ...frameSettings, distanceFogEnabled: enabled };
+		applyFrameSettings();
+	}
+
+	function updateEnvCellRenderMode(mode: EnvCellRenderMode): void {
+		frameSettings = { ...frameSettings, envCellRenderMode: mode };
 		applyFrameSettings();
 	}
 
@@ -125,7 +131,7 @@
 			const pipeline = commitPipeline;
 			const device = webglDevice;
 			const regionSource = activeRegionSource;
-			const detailOwner = objectDetailOwner;
+			const detailOwner = staticDetailOwner;
 			const coordinator = cameraCoordinator;
 			const controller = cameraController;
 			gameRuntime = undefined;
@@ -135,7 +141,7 @@
 			commitPipeline = undefined;
 			webglDevice = undefined;
 			activeRegionSource = undefined;
-			objectDetailOwner = undefined;
+			staticDetailOwner = undefined;
 			activeRegion = undefined;
 			cameraCoordinator = undefined;
 			cameraController = undefined;
@@ -168,11 +174,11 @@
 				if (destroyed) return;
 				const sourceBatch = TauriLandblockSourceBatch.build(activeRegion);
 				const texturePixelSource = TauriTexturePixelSource.build();
-				objectDetailOwner = new ActiveRegionObjectDetailOwner(
+				staticDetailOwner = new ActiveRegionStaticDetailOwner(
 					texturePixelSource,
 				);
-				const objectDetailBinding =
-					await objectDetailOwner.install(activeRegion);
+				const staticDetailBinding =
+					await staticDetailOwner.install(activeRegion);
 				if (destroyed) return;
 				webglDevice = await WebGL2Device.build(canvasElement!);
 				if (destroyed) return;
@@ -186,7 +192,7 @@
 					commitPipeline,
 					texturePixelSource,
 				);
-				gameRuntime.installActiveRegionObjectDetail(objectDetailBinding);
+				gameRuntime.installActiveRegionStaticDetails(staticDetailBinding);
 				applyEnvironment();
 				applyFrameSettings();
 				if (destroyed) return;
@@ -282,6 +288,8 @@
 			{updateEnvironment}
 			distanceFogEnabled={frameSettings.distanceFogEnabled}
 			{updateDistanceFog}
+			envCellRenderMode={frameSettings.envCellRenderMode}
+			{updateEnvCellRenderMode}
 			{frameSelectionMetrics}
 			{staticObjectRuntimeDiagnostics}
 			{readTextureAtlasPage}

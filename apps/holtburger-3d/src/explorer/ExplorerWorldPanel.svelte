@@ -12,6 +12,7 @@
 	} from "./explorer-lod";
 	import { parseResidenceInput } from "./world-input";
 	import type { ExplorerEnvironmentSelection } from "../lib/game/environment/scene-environment";
+	import type { EnvCellRenderMode } from "../lib/game/renderer/renderer";
 
 	interface Props {
 		/** Whether Explorer has a runtime available to accept world operations. */
@@ -32,6 +33,8 @@
 		readonly distanceFogEnabled: boolean;
 		/** Update Explorer's distance-fog presentation switch. */
 		readonly updateDistanceFog: (enabled: boolean) => void;
+		readonly envCellRenderMode: EnvCellRenderMode;
+		readonly updateEnvCellRenderMode: (mode: EnvCellRenderMode) => void;
 	}
 
 	let {
@@ -43,6 +46,8 @@
 		updateEnvironment,
 		distanceFogEnabled,
 		updateDistanceFog,
+		envCellRenderMode,
+		updateEnvCellRenderMode,
 	}: Props = $props();
 
 	let interestInput = $state("0000");
@@ -241,6 +246,21 @@
 				/>
 				<span>Distance fog</span>
 				<strong>{distanceFogEnabled ? "On" : "Off"}</strong>
+			</label>
+			<label class="explorer-environment-field">
+				<span>EnvCell renderer</span>
+				<select
+					class="explorer-control explorer-control--select"
+					value={envCellRenderMode}
+					onchange={(event) =>
+						updateEnvCellRenderMode(
+							(event.currentTarget as HTMLSelectElement)
+								.value as EnvCellRenderMode,
+						)}
+				>
+					<option value="flat">Flat inspection</option>
+					<option value="portal">Portal rendering</option>
+				</select>
 			</label>
 		</fieldset>
 	{/if}

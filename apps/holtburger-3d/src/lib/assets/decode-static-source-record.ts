@@ -15,6 +15,12 @@ import type {
 } from "../game/resolution/presentation";
 import { resolveObjectPresentationBounds } from "../game/resolution/presentation";
 import { classifyObjectResidents } from "../game/resolution/object-resident-classifier";
+import {
+	type BinarySectionManifest,
+	binarySectionSchema,
+	readBinarySectionSlice,
+	validateBinarySections,
+} from "./binary-source-record";
 
 const HEADER_LENGTH = 12;
 const MAGIC = "HBSO";
@@ -24,25 +30,19 @@ const vec3 = z.tuple([finiteNumber, finiteNumber, finiteNumber]);
 const quat = z.tuple([finiteNumber, finiteNumber, finiteNumber, finiteNumber]);
 const bounds = z.object({ min: vec3, max: vec3 });
 const frame = z.object({ origin: vec3, orientation: quat });
-const section = z.object({
-	name: z.enum([
-		"positions",
-		"normals",
-		"textureCoordinates",
-		"indices",
-		"materialSlots",
-		"materialWrapModes",
-		"materialSideKinds",
-		"materialSideTypes",
-		"materialStippling",
-	]),
-	scalarType: z.enum(["f32", "u32", "u16", "u8"]),
-	elementCount: z.number().int().nonnegative(),
-	byteOffset: z.number().int().nonnegative(),
-	byteLength: z.number().int().nonnegative(),
-});
+const REQUIRED_SECTIONS = {
+	positions: "f32",
+	normals: "f32",
+	textureCoordinates: "f32",
+	indices: "u32",
+	materialSlots: "u16",
+	materialWrapModes: "u8",
+	materialSideKinds: "u8",
+	materialSideTypes: "u8",
+	materialStippling: "u8",
+} as const;
 
-const geometry = z.object({
+export const staticGeometrySchema = z.object({
 	id: z.string().min(1),
 	sourceAssetId: z.string().min(1),
 	vertexCount: z.number().int().nonnegative(),
@@ -61,10 +61,17 @@ const geometry = z.object({
 	materialSideTypeCount: z.number().int().nonnegative(),
 	materialStipplingOffset: z.number().int().nonnegative(),
 	materialStipplingCount: z.number().int().nonnegative(),
+	rejectedDegenerateTriangles: z.array(
+		z.object({
+			polygonId: z.number().int().nonnegative(),
+			sideKind: z.enum(["positive", "positive-reversed", "negative"]),
+			fanTriangleIndex: z.number().int().nonnegative(),
+		}),
+	),
 	bounds: bounds.nullable(),
 });
 
-const material = z.object({
+export const staticMaterialSchema = z.object({
 	id: z.string().min(1),
 	rawSurfaceFlags: z.number().int().nonnegative(),
 	translucency: finiteNumber,
@@ -128,6 +135,10 @@ const setupDefinition = z.object({
 	defaultScriptTableId: datId.nullable(),
 	defaultSoundTableId: datId.nullable(),
 });
+export const staticDefinitionSchema = z.discriminatedUnion("kind", [
+	directDefinition,
+	setupDefinition,
+]);
 const manifestSchema = z.object({
 	transport: z.literal("holtburger-outdoor-static-record"),
 	byteOrder: z.literal("little-endian"),
@@ -146,26 +157,29 @@ const manifestSchema = z.object({
 			scale: vec3,
 		}),
 	),
-	definitions: z.array(
-		z.discriminatedUnion("kind", [directDefinition, setupDefinition]),
-	),
-	geometries: z.array(geometry),
-	materials: z.array(material),
+	definitions: z.array(staticDefinitionSchema),
+	geometries: z.array(staticGeometrySchema),
+	materials: z.array(staticMaterialSchema),
 	textureDependencies: z.array(
 		z.object({
 			id: z.string().min(1),
 			kind: z.enum(["surface-texture", "palette"]),
 		}),
 	),
-	sections: z.array(section),
+	sections: z.array(binarySectionSchema),
 });
 
 type OutdoorStaticRecordManifest = z.infer<typeof manifestSchema>;
-type OutdoorStaticGeometry = z.infer<typeof geometry>;
-type OutdoorStaticMaterial = z.infer<typeof material>;
-interface DecodedOutdoorPresentation {
+export type StaticGeometryManifest = z.infer<typeof staticGeometrySchema>;
+export type StaticMaterialManifest = z.infer<typeof staticMaterialSchema>;
+export type StaticDefinitionManifest = z.infer<typeof staticDefinitionSchema>;
+export interface DecodedStaticPresentation {
 	readonly presentation: ResolvedObjectPresentation;
 	readonly localBounds: AABB3 | null;
+}
+export interface AcFrame {
+	readonly origin: readonly [number, number, number];
+	readonly orientation: readonly [number, number, number, number];
 }
 export type OutdoorStaticLayerKind =
 	| LandblockLayerKind.Buildings
@@ -223,7 +237,7 @@ export function decodeOutdoorStaticRecord(
 	const geometries = new Map(
 		manifest.geometries.map((entry) => [
 			entry.id,
-			decodeGeometry(entry, response, sectionDataOffset, sections),
+			decodeStaticGeometry(entry, response, sectionDataOffset, sections),
 		]),
 	);
 	if (geometries.size !== manifest.geometries.length) {
@@ -232,7 +246,7 @@ export function decodeOutdoorStaticRecord(
 		);
 	}
 	const materials = new Map(
-		manifest.materials.map((entry) => [entry.id, decodeMaterial(entry)]),
+		manifest.materials.map((entry) => [entry.id, decodeStaticMaterial(entry)]),
 	);
 	if (materials.size !== manifest.materials.length) {
 		throw new Error(
@@ -242,7 +256,7 @@ export function decodeOutdoorStaticRecord(
 	const definitions = new Map(
 		manifest.definitions.map((definition) => [
 			definition.id,
-			decodePresentation(definition, geometries, materials),
+			decodeStaticPresentation(definition, geometries, materials),
 		]),
 	);
 	if (definitions.size !== manifest.definitions.length) {
@@ -304,54 +318,23 @@ function validatedSections(
 	manifest: OutdoorStaticRecordManifest,
 	response: Uint8Array,
 	sectionDataOffset: number,
-): ReadonlyMap<string, z.infer<typeof section>> {
-	const sections = new Map(
-		manifest.sections.map((entry) => [entry.name, entry]),
+): ReadonlyMap<string, BinarySectionManifest> {
+	return validateBinarySections(
+		response,
+		sectionDataOffset,
+		manifest.sections,
+		REQUIRED_SECTIONS,
+		"Outdoor static record",
 	);
-	if (sections.size !== 9 || sections.size !== manifest.sections.length) {
-		throw new Error(
-			"Outdoor static record must contain every geometry section exactly once.",
-		);
-	}
-	for (const [name, scalarType] of [
-		["positions", "f32"],
-		["normals", "f32"],
-		["textureCoordinates", "f32"],
-		["indices", "u32"],
-		["materialSlots", "u16"],
-		["materialWrapModes", "u8"],
-		["materialSideKinds", "u8"],
-		["materialSideTypes", "u8"],
-		["materialStippling", "u8"],
-	] as const) {
-		const entry = sections.get(name);
-		if (!entry || entry.scalarType !== scalarType) {
-			throw new Error(
-				`Outdoor static record ${name} section has an incompatible scalar type.`,
-			);
-		}
-		const elementSize = scalarType === "u8" ? 1 : scalarType === "u16" ? 2 : 4;
-		const start = sectionDataOffset + entry.byteOffset;
-		const end = start + entry.byteLength;
-		if (
-			entry.byteOffset % elementSize !== 0 ||
-			entry.byteLength !== entry.elementCount * elementSize ||
-			start < sectionDataOffset ||
-			end > response.byteLength
-		) {
-			throw new Error(
-				`Outdoor static record ${name} section byte range is invalid.`,
-			);
-		}
-	}
-	return sections;
 }
 
-function decodeGeometry(
-	geometry: OutdoorStaticGeometry,
+export function decodeStaticGeometry(
+	geometry: StaticGeometryManifest,
 	response: Uint8Array,
 	sectionDataOffset: number,
-	sections: ReadonlyMap<string, z.infer<typeof section>>,
+	sections: ReadonlyMap<string, BinarySectionManifest>,
+	sectionPrefix = "",
+	recordLabel = "Outdoor static record",
 ): ResolvedGeometry {
 	if (
 		geometry.indexCount % 3 !== 0 ||
@@ -364,7 +347,11 @@ function decodeGeometry(
 	const positions = readSlice(
 		response,
 		sectionDataOffset,
-		requireSection(sections, "positions"),
+		requireSection(
+			sections,
+			geometrySectionName(sectionPrefix, "positions"),
+			recordLabel,
+		),
 		geometry.positionOffset,
 		geometry.vertexCount * 3,
 		Float32Array,
@@ -372,7 +359,11 @@ function decodeGeometry(
 	const normals = readSlice(
 		response,
 		sectionDataOffset,
-		requireSection(sections, "normals"),
+		requireSection(
+			sections,
+			geometrySectionName(sectionPrefix, "normals"),
+			recordLabel,
+		),
 		geometry.normalOffset,
 		geometry.vertexCount * 3,
 		Float32Array,
@@ -380,7 +371,11 @@ function decodeGeometry(
 	const textureCoordinates = readSlice(
 		response,
 		sectionDataOffset,
-		requireSection(sections, "textureCoordinates"),
+		requireSection(
+			sections,
+			geometrySectionName(sectionPrefix, "textureCoordinates"),
+			recordLabel,
+		),
 		geometry.textureCoordinateOffset,
 		geometry.vertexCount * 2,
 		Float32Array,
@@ -388,7 +383,11 @@ function decodeGeometry(
 	const indices = readSlice(
 		response,
 		sectionDataOffset,
-		requireSection(sections, "indices"),
+		requireSection(
+			sections,
+			geometrySectionName(sectionPrefix, "indices"),
+			recordLabel,
+		),
 		geometry.indexOffset,
 		geometry.indexCount,
 		Uint32Array,
@@ -396,7 +395,11 @@ function decodeGeometry(
 	const materialSlotIndices = readSlice(
 		response,
 		sectionDataOffset,
-		requireSection(sections, "materialSlots"),
+		requireSection(
+			sections,
+			geometrySectionName(sectionPrefix, "materialSlots"),
+			recordLabel,
+		),
 		geometry.materialSlotOffset,
 		geometry.materialSlotCount,
 		Uint16Array,
@@ -404,7 +407,11 @@ function decodeGeometry(
 	const materialWrapModes = readSlice(
 		response,
 		sectionDataOffset,
-		requireSection(sections, "materialWrapModes"),
+		requireSection(
+			sections,
+			geometrySectionName(sectionPrefix, "materialWrapModes"),
+			recordLabel,
+		),
 		geometry.materialWrapModeOffset,
 		geometry.materialWrapModeCount,
 		Uint8Array,
@@ -420,7 +427,11 @@ function decodeGeometry(
 	const materialSideKinds = readSlice(
 		response,
 		sectionDataOffset,
-		requireSection(sections, "materialSideKinds"),
+		requireSection(
+			sections,
+			geometrySectionName(sectionPrefix, "materialSideKinds"),
+			recordLabel,
+		),
 		geometry.materialSideKindOffset,
 		geometry.materialSideKindCount,
 		Uint8Array,
@@ -438,7 +449,11 @@ function decodeGeometry(
 	const materialSideTypes = readSlice(
 		response,
 		sectionDataOffset,
-		requireSection(sections, "materialSideTypes"),
+		requireSection(
+			sections,
+			geometrySectionName(sectionPrefix, "materialSideTypes"),
+			recordLabel,
+		),
 		geometry.materialSideTypeOffset,
 		geometry.materialSideTypeCount,
 		Uint8Array,
@@ -456,7 +471,11 @@ function decodeGeometry(
 	const materialStippling = readSlice(
 		response,
 		sectionDataOffset,
-		requireSection(sections, "materialStippling"),
+		requireSection(
+			sections,
+			geometrySectionName(sectionPrefix, "materialStippling"),
+			recordLabel,
+		),
 		geometry.materialStipplingOffset,
 		geometry.materialStipplingCount,
 		Uint8Array,
@@ -480,17 +499,25 @@ function decodeGeometry(
 		materialSideKinds,
 		materialSideTypes,
 		materialStippling,
+		sourceDiagnostics: {
+			rejectedDegenerateTriangles: geometry.rejectedDegenerateTriangles,
+		},
 		bounds: toBounds(geometry.bounds),
 	};
 }
 
+function geometrySectionName(prefix: string, name: string): string {
+	if (prefix.length === 0) return name;
+	return `${prefix}${name[0]?.toUpperCase()}${name.slice(1)}`;
+}
+
 function requireSection(
-	sections: ReadonlyMap<string, z.infer<typeof section>>,
-	name: z.infer<typeof section>["name"],
-): z.infer<typeof section> {
+	sections: ReadonlyMap<string, BinarySectionManifest>,
+	name: string,
+	recordLabel: string,
+): BinarySectionManifest {
 	const entry = sections.get(name);
-	if (!entry)
-		throw new Error(`Outdoor static record lacks ${name} geometry section.`);
+	if (!entry) throw new Error(`${recordLabel} lacks ${name} geometry section.`);
 	return entry;
 }
 
@@ -499,7 +526,7 @@ function readSlice<
 >(
 	response: Uint8Array,
 	sectionDataOffset: number,
-	entry: z.infer<typeof section>,
+	entry: BinarySectionManifest,
 	elementOffset: number,
 	elementCount: number,
 	ArrayType: {
@@ -507,25 +534,20 @@ function readSlice<
 		new (buffer: ArrayBuffer, byteOffset: number, length: number): TArray;
 	},
 ): TArray {
-	if (elementOffset + elementCount > entry.elementCount) {
-		throw new Error(
-			`Outdoor static record ${entry.name} slice exceeds its section.`,
-		);
-	}
-	const sourceOffset =
-		sectionDataOffset +
-		entry.byteOffset +
-		elementOffset * ArrayType.BYTES_PER_ELEMENT;
-	const copied = Uint8Array.from(
-		response.subarray(
-			sourceOffset,
-			sourceOffset + elementCount * ArrayType.BYTES_PER_ELEMENT,
-		),
+	return readBinarySectionSlice(
+		response,
+		sectionDataOffset,
+		entry,
+		elementOffset,
+		elementCount,
+		ArrayType,
+		"Outdoor static record",
 	);
-	return new ArrayType(copied.buffer, 0, elementCount);
 }
 
-function decodeMaterial(entry: OutdoorStaticMaterial): ResolvedMaterial {
+export function decodeStaticMaterial(
+	entry: StaticMaterialManifest,
+): ResolvedMaterial {
 	const facts = {
 		rawSurfaceFlags: entry.rawSurfaceFlags,
 		translucency: entry.translucency,
@@ -559,7 +581,7 @@ function decodeMaterial(entry: OutdoorStaticMaterial): ResolvedMaterial {
 
 function textureEncoding(
 	format: Extract<
-		OutdoorStaticMaterial["source"],
+		StaticMaterialManifest["source"],
 		{ readonly kind: "texture" }
 	>["selectedRenderSurface"]["format"],
 ): "direct-color" | "index8" | "index16" {
@@ -573,11 +595,11 @@ function textureEncoding(
 	return "direct-color";
 }
 
-function decodePresentation(
-	definition: OutdoorStaticRecordManifest["definitions"][number],
+export function decodeStaticPresentation(
+	definition: StaticDefinitionManifest,
 	geometries: ReadonlyMap<string, ResolvedGeometry>,
 	materials: ReadonlyMap<string, ResolvedMaterial>,
-): DecodedOutdoorPresentation {
+): DecodedStaticPresentation {
 	const parts =
 		definition.kind === "gfx-obj"
 			? [
@@ -686,8 +708,8 @@ function decodePart(
 	};
 }
 
-function acFrameTransform(
-	input: z.infer<typeof frame>,
+export function acFrameTransform(
+	input: AcFrame,
 	scale: readonly [number, number, number],
 ): Mat4 {
 	const [w, x, y, z] = input.orientation;
@@ -720,7 +742,7 @@ function acFrameTransform(
 	);
 }
 
-function renderScale(scale: readonly [number, number, number]): Vec3 {
+export function renderScale(scale: readonly [number, number, number]): Vec3 {
 	return new Vec3(scale[0], scale[2], scale[1]);
 }
 

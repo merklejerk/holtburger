@@ -7,6 +7,10 @@ import {
 	type DynamicEntityCommit,
 } from "../commit/types";
 import type {
+	EnvCellMaterializationDiagnostics,
+	EnvCellMaterializationPlan,
+} from "../commit/env-cell-materialization";
+import type {
 	StaticObjectGeometryDiagnostics,
 	StaticObjectLayerDiagnostics,
 } from "../commit/artifacts";
@@ -45,7 +49,8 @@ import { ResidentTextureAtlas } from "../textures/atlas/resident-texture-atlas";
 import { AtlasLayoutWorkerPool } from "../textures/atlas/layout-worker";
 import { AtlasPageBuildWorkerPool } from "../textures/atlas/page-build-worker";
 import type { Texture2DResourceKey } from "../renderer/resource-manager";
-import { TexturePurpose } from "../textures/types";
+import { TexturePurpose, type AssetTextureKey } from "../textures/types";
+import { mergeAssetTextureFacts } from "../textures/texture-facts";
 import {
 	WorkerTexturePreparer,
 	type TexturePreparer,
@@ -63,25 +68,39 @@ import {
 	activeRegionResourceToOwnerId,
 	type ActiveRegionResourceOwnerId,
 	landblockLayerToOwnerId,
+	parseLandblockLayerOwnerId,
 	type ResourceOwnerId,
 	spawnedEntityToOwnerId,
 	staticRevisionToInstallNamespace,
 	staticRevisionToResourceOwnerId,
+	envCellRevisionToResourceOwnerId,
 	terrainSourceToOwnerId,
 	type TerrainResourceOwnerId,
 	type OwnerId,
 } from "./owner-ids";
-import type { ActiveRegionObjectDetailBinding } from "../resolution/active-region-object-detail";
-import type { ResolvedOutdoorStaticLayerSource } from "../resolution/landblock-layer";
+import type { ActiveRegionStaticDetailBinding } from "../resolution/active-region-static-detail";
+import {
+	STATIC_DETAIL_ROLES,
+	type StaticDetailRole,
+} from "../resolution/static-detail-role";
+import type {
+	ResolvedOutdoorStaticLayerSource,
+	ResolvedStaticObjectLayerSource,
+} from "../resolution/landblock-layer";
 import {
 	computeSceneInterest,
 	isOutdoorStaticLayer,
 	LandblockLayerKind,
 	type OutdoorStaticLayerKind,
+	type StaticLayerKind,
 	type SceneInterestMap,
 	type SceneInterestRequest,
 	validateLoDConfigOrThrow,
 } from "./scene-interest";
+import {
+	EnvCellGeometryPreparer,
+	type EnvCellRealizationArtifact,
+} from "./env-cell-realization";
 import type { Camera } from "./types";
 import type {
 	SceneAvailabilityEvent,
@@ -147,7 +166,7 @@ export interface GameRuntimeDependencies {
 	readonly terrainGenerator: TerrainGenerator;
 	readonly texturePreparer: TexturePreparer;
 	readonly staticGeometryPreparer: StaticLayerGeometryPreparer<
-		ResolvedOutdoorStaticLayerSource,
+		ResolvedStaticObjectLayerSource,
 		StaticObjectLayerArtifact | null,
 		OwnerId
 	>;
@@ -192,6 +211,7 @@ export interface StaticObjectLayerRuntimeDiagnostics extends StaticObjectLayerDi
 /** Aggregate outdoor-static resource and arbitration facts for app-local diagnostics. */
 export interface StaticObjectRuntimeDiagnostics {
 	readonly layers: readonly StaticObjectLayerRuntimeDiagnostics[];
+	readonly envCellLayers: readonly EnvCellLayerRuntimeDiagnostics[];
 	readonly geometryResourceCount: number;
 	readonly staticObjectOwnerCount: number;
 	readonly staticObjectNodeCount: number;
@@ -203,6 +223,24 @@ export interface StaticObjectRuntimeDiagnostics {
 	>;
 	/** Active packed atlas pages, exposed as resource-free Explorer diagnostics. */
 	readonly textureAtlasPages: readonly TextureAtlasPageDiagnostics[];
+}
+
+/** One realized EnvCell source plan plus worker consumption facts. */
+export interface EnvCellLayerRuntimeDiagnostics
+	extends EnvCellMaterializationDiagnostics, StaticObjectGeometryDiagnostics {
+	/** Directed seams proven safe for ordinary depth continuity. */
+	readonly indoorDepthContinuousCrossingCount: number;
+	/** Directed indoor seams that retain a topology-mask boundary. */
+	readonly indoorTopologyBoundaryCrossingCount: number;
+	/** Directed indoor/outdoor transitions that always retain a scene-domain boundary. */
+	readonly exteriorTransitionCrossingCount: number;
+	readonly landblockId: LandblockId;
+	/** Total authored potentially-visible EnvCell references across resident scopes. */
+	readonly potentiallyVisibleReferenceCount: number;
+	readonly sceneShellNodeCount: number;
+	readonly sceneResidentNodeCount: number;
+	/** Connected components joined only through proven depth-continuous seams. */
+	readonly visibilityIslandCount: number;
 }
 
 /** Bridges source commits, scene topology, runtime residency, and frontend frame state. */
@@ -223,11 +261,16 @@ export class GameRuntime {
 		StaticObjectLayerArtifact | null,
 		OwnerId
 	>;
+	readonly #envCellRealizer: StaticLayerRealizer<
+		EnvCellMaterializationPlan,
+		EnvCellRealizationArtifact,
+		OwnerId
+	>;
 	readonly #instances: StaticInstanceStreamManager<ResourceOwnerId>;
 	/** Dynamic roots, articulated part nodes, and presentation preparation. */
 	readonly #dynamics: DynamicEntitySystem<ResourceOwnerId>;
 	/** Env-cell scopes, crossings, shell nodes, and portal contributions. */
-	readonly #envCells: EnvCellSystem<ResourceOwnerId>;
+	readonly #envCells: EnvCellSystem<OwnerId, ResourceOwnerId>;
 	/** Rigid-part pose updates sequenced before visibility and drawing. */
 	readonly #animation: AnimationSystem<ResourceOwnerId>;
 	/** Static-authored dynamics deliberately deferred without creating runtime resources. */
@@ -240,15 +283,19 @@ export class GameRuntime {
 		OwnerId,
 		StaticObjectLayerRuntimeDiagnostics
 	>();
+	readonly #envCellLayerDiagnostics = new Map<
+		OwnerId,
+		EnvCellLayerRuntimeDiagnostics
+	>();
 	#textureFactCollectionDurationMs = 0;
 	#textureFactCollectionCount = 0;
-	/** Active-region owner of the one device-backed building-detail texture. */
-	#activeRegionDetailOwner: ActiveRegionResourceOwnerId | null = null;
-	/** Read-only regional detail selection consumed by renderer-owned object programs. */
-	#activeRegionDetail: {
-		readonly key: ActiveRegionObjectDetailBinding["key"];
-		readonly tiling: number;
-	} | null = null;
+	/** Active-region owner of the complete device-backed static-detail role set. */
+	#activeRegionStaticDetailOwner: ActiveRegionResourceOwnerId | null = null;
+	/** Read-only regional detail selections consumed by renderer-owned object programs. */
+	readonly #activeRegionStaticDetails = new Map<
+		StaticDetailRole,
+		{ readonly key: AssetTextureKey; readonly tiling: number }
+	>();
 	/** Dynamic terrain sources, generation state, and realized terrain resources. */
 	readonly #terrain: TerrainSystem<ResourceOwnerId, TerrainResourceOwnerId>;
 	/** Read-only renderer gateway over this runtime's scene and resource systems. */
@@ -326,20 +373,27 @@ export class GameRuntime {
 			this.#instances,
 			staticRevisionToResourceOwnerId,
 		);
+		const staticLayerCurrentness = {
+			isCurrent: (
+				owner: OwnerId,
+				layer: StaticLayerKind,
+				revision: SceneInterestRevision,
+			): boolean => {
+				const parsed = parseLandblockLayerOwnerId(owner);
+				if (parsed.layer !== layer) {
+					throw new Error(
+						`Static realization owner ${owner} does not match layer ${layer}.`,
+					);
+				}
+				return this.#sceneInterestCoordinator.ownsDispatch(
+					{ id: parsed.landblockId, layer },
+					revision,
+				);
+			},
+		};
 		this.#staticLayerRealizer = new StaticLayerRealizer({
 			atlas: this.#residentAtlas,
-			currentness: {
-				isCurrent: (owner, layer, revision) => {
-					const landblockId = owner.slice(
-						"landblock-layer:".length,
-						owner.lastIndexOf("/"),
-					) as LandblockId;
-					return this.#sceneInterestCoordinator.ownsDispatch(
-						{ id: landblockId, layer },
-						revision,
-					);
-				},
-			},
+			currentness: staticLayerCurrentness,
 			failureReporter: {
 				reportAtlasFailure: ({ cause, layer, owner, revision }) =>
 					log(
@@ -360,7 +414,63 @@ export class GameRuntime {
 				removeExact: async (owner, revision) =>
 					this.#staticObjects.removeExact(owner, revision),
 				replace: async ({ geometry, layer, owner, revision }) => {
+					if (!isOutdoorStaticLayer(layer)) {
+						throw new Error(`Outdoor static publisher received ${layer}.`);
+					}
 					this.#staticObjects.replaceObjects(owner, revision, geometry, layer);
+				},
+			},
+		});
+		this.#envCells = new EnvCellSystem(
+			this.#scene,
+			this.#geometry,
+			envCellRevisionToResourceOwnerId,
+		);
+		this.#envCellRealizer = new StaticLayerRealizer({
+			atlas: this.#residentAtlas,
+			currentness: staticLayerCurrentness,
+			failureReporter: {
+				reportAtlasFailure: ({ cause, layer, owner, revision }) =>
+					log(
+						{
+							cause,
+							kind: "env-cell-atlas-failed",
+							layer,
+							owner,
+							revision,
+						},
+						LogLevel.Error,
+					),
+			},
+			geometry: new EnvCellGeometryPreparer(
+				dependencies.staticGeometryPreparer,
+			),
+			publisher: {
+				evict: async (owner, revision) => {
+					this.#envCells.evict(owner, revision);
+					this.#staticObjects.evict(owner, revision);
+				},
+				removeExact: async (owner, revision) => {
+					this.#envCells.removeExact(owner, revision);
+					this.#staticObjects.removeExact(owner, revision);
+				},
+				replace: async ({ geometry, owner, revision }) => {
+					const rollbackEnvironment = this.#envCells.replace(
+						owner,
+						revision,
+						geometry.environment,
+					);
+					try {
+						this.#staticObjects.replaceObjects(
+							owner,
+							revision,
+							geometry.residents,
+							"env-cell-static-residents",
+						);
+					} catch (cause) {
+						rollbackEnvironment();
+						throw cause;
+					}
 				},
 			},
 		});
@@ -369,7 +479,6 @@ export class GameRuntime {
 			this.#geometry,
 			new InlineDynamicVisualPreparer(),
 		);
-		this.#envCells = new EnvCellSystem(this.#scene);
 		this.#animation = new AnimationSystem(this.#dynamics);
 		this.#terrain = new TerrainSystem<ResourceOwnerId, TerrainResourceOwnerId>(
 			this.#scene,
@@ -383,8 +492,8 @@ export class GameRuntime {
 			envCells: this.#envCells,
 			geometry: this.#geometry,
 			instances: this.#instances,
-			objectDetail: {
-				getBinding: () => this.#activeRegionDetail,
+			staticDetails: {
+				getBinding: (role) => this.#activeRegionStaticDetails.get(role) ?? null,
 			},
 			scene: this.#scene,
 			staticObjects: this.#staticObjects,
@@ -399,6 +508,7 @@ export class GameRuntime {
 				failed: ({ error, layer, revision }) =>
 					this.#publishSceneAvailability({
 						kind: "scene-content-failed",
+						layer: layer.layer,
 						message: error instanceof Error ? error.message : String(error),
 						residency: { envCellId: null, landblockId: layer.id },
 						revision,
@@ -407,8 +517,8 @@ export class GameRuntime {
 					this.#commitArtifacts.push({ artifact, revision }),
 				unavailable: ({ layer, revision }) =>
 					this.#publishSceneAvailability({
-						kind: "scene-content-failed",
-						message: `No ${layer.layer} content is available for ${layer.id}.`,
+						kind: "scene-content-unavailable",
+						layer: layer.layer,
 						residency: { envCellId: null, landblockId: layer.id },
 						revision,
 					}),
@@ -523,6 +633,9 @@ export class GameRuntime {
 	getStaticObjectRuntimeDiagnostics(): StaticObjectRuntimeDiagnostics {
 		const staticObjects = this.#staticObjects.getDiagnostics();
 		return {
+			envCellLayers: [...this.#envCellLayerDiagnostics.values()].sort(
+				(left, right) => left.landblockId.localeCompare(right.landblockId),
+			),
 			geometryResourceCount: this.#geometry.getResourceCount(),
 			layers: [...this.#staticObjectLayerDiagnostics.values()].sort(
 				(left, right) =>
@@ -543,32 +656,71 @@ export class GameRuntime {
 		return this.#textures.getAtlasPageResource(pageId);
 	}
 
-	/** Promote the already prepared regional building-detail binding into device ownership once. */
-	installActiveRegionObjectDetail(
-		binding: ActiveRegionObjectDetailBinding,
+	/** Promote the complete prepared regional static-detail set into device ownership once. */
+	installActiveRegionStaticDetails(
+		binding: ActiveRegionStaticDetailBinding,
 	): void {
 		const owner = activeRegionResourceToOwnerId(binding.activeRegionKey);
-		if (
-			this.#activeRegionDetailOwner !== null &&
-			this.#activeRegionDetailOwner !== owner
-		) {
-			this.#textures.dropOwner(this.#activeRegionDetailOwner);
+		try {
+			for (const role of STATIC_DETAIL_ROLES) {
+				const detail = binding.roles[role];
+				this.#textures.installAssetTexture(owner, {
+					height: detail.surface.height,
+					key: detail.key,
+					pixels: detail.surface.pixels,
+					purpose: TexturePurpose.ObjectDetail,
+					sourceAssetId: detail.sourceAssetId,
+					width: detail.surface.width,
+				});
+			}
+		} catch (cause) {
+			if (owner !== this.#activeRegionStaticDetailOwner) {
+				this.#textures.dropOwner(owner);
+			}
+			throw cause;
 		}
-		this.#activeRegionDetailOwner = owner;
-		this.#textures.installAssetTexture(owner, {
-			height: binding.surface.height,
-			key: binding.key,
-			pixels: binding.surface.pixels,
-			purpose: TexturePurpose.ObjectDetail,
-			sourceAssetId: binding.sourceAssetId,
-			width: binding.surface.width,
-		});
-		this.#activeRegionDetail = { key: binding.key, tiling: binding.tiling };
+		const previousOwner = this.#activeRegionStaticDetailOwner;
+		this.#activeRegionStaticDetailOwner = owner;
+		this.#activeRegionStaticDetails.clear();
+		for (const role of STATIC_DETAIL_ROLES) {
+			const detail = binding.roles[role];
+			this.#activeRegionStaticDetails.set(role, {
+				key: detail.key,
+				tiling: detail.tiling,
+			});
+		}
+		if (previousOwner !== null && previousOwner !== owner) {
+			this.#textures.dropOwner(previousOwner);
+		}
 	}
 
-	/** Resolve one canonical scene-space point against resident scene scopes. */
-	queryWorldPointResidency(point: Vec3): SceneResidency | null {
-		return this.#scene.queryWorldPointResidency(point);
+	/** Return every resident scene-scope candidate for one canonical scene-space point. */
+	queryWorldPointResidencyCandidates(
+		point: Vec3,
+	): import("../scene").ScenePointResidencyCandidates | null {
+		return this.#scene.queryWorldPointResidencyCandidates(point);
+	}
+
+	/** Test a world point against one explicitly selected resident EnvCell. */
+	queryEnvCellPointContainment(
+		residency: SceneResidency,
+		point: Vec3,
+	): boolean | null {
+		return residency.envCellId === null
+			? null
+			: this.#scene.queryEnvCellPointContainment(residency.envCellId, point);
+	}
+
+	/** Whether this landblock currently owns any atomically published EnvCell topology. */
+	hasEnvCellTopology(landblockId: SceneResidency["landblockId"]): boolean {
+		return this.#scene.hasEnvCellTopology(landblockId);
+	}
+
+	/** Trace a desired endpoint from a caller-supplied authoritative actor anchor. */
+	tracePortalSegment(
+		query: import("../scene").ScenePortalTraceQuery,
+	): import("../scene").ScenePortalTraceResult {
+		return this.#scene.tracePortalSegment(query);
 	}
 
 	/** Sample canonical outdoor terrain as soon as its source commits, before GPU realization. */
@@ -639,10 +791,12 @@ export class GameRuntime {
 		await this.#terrain.destroy();
 		await this.#terrainGenerator.destroy();
 		this.#staticLayerRealizer.destroy();
+		this.#envCellRealizer.destroy();
 		this.#residentAtlas.destroy();
 		await this.#textures.destroy();
 		await this.#texturePreparer.destroy();
-		this.#activeRegionDetail = null;
+		this.#activeRegionStaticDetails.clear();
+		this.#activeRegionStaticDetailOwner = null;
 		this.#geometry.destroy();
 		this.#instances.destroy();
 	}
@@ -694,17 +848,8 @@ export class GameRuntime {
 			return;
 		}
 		if (artifact.layer === LandblockLayerKind.EnvCells) {
-			this.#envCells.install(ownerId, artifact.commit.environment);
-			for (const { scope } of artifact.commit.environment.scopes) {
-				this.#publishSceneAvailability({
-					kind: "env-cell-topology-available",
-					residency: {
-						envCellId: scope.envCellId,
-						landblockId: scope.landblockId,
-					},
-					revision,
-				});
-			}
+			this.#realizeEnvCellLayer(ownerId, artifact, revision);
+			return;
 		}
 		if (isOutdoorStaticLayer(artifact.layer) && "source" in artifact.commit) {
 			this.#realizeOutdoorStaticLayer(
@@ -717,40 +862,7 @@ export class GameRuntime {
 			);
 			return;
 		}
-		if (!("staticObjects" in artifact.commit)) {
-			throw new Error(
-				`Layer ${artifact.layer} has no static publication contract.`,
-			);
-		}
-		const staticCommit = artifact.commit;
-		this.#staticObjects.replaceObjects(
-			ownerId,
-			revision,
-			staticCommit.staticObjects,
-			artifact.layer,
-		);
-		for (const dynamic of artifact.dynamicEntities) {
-			this.#deferStaticAuthoredDynamic(
-				ownerId,
-				artifact.layer,
-				artifact.landblockId,
-				dynamic,
-			);
-		}
-		if (
-			artifact.layer === LandblockLayerKind.Buildings &&
-			staticCommit.diagnostics !== undefined
-		) {
-			this.#staticObjectLayerDiagnostics.set(ownerId, {
-				...staticCommit.diagnostics,
-				cullingGroup: LandblockLayerKind.Buildings,
-				layer: artifact.layer,
-				landblockId: artifact.landblockId,
-				runtimeDeferredResidentCount: artifact.dynamicEntities.length,
-				sceneNodeCount: staticCommit.staticObjects?.objects.length ?? 0,
-				staticArtifactInstalled: staticCommit.staticObjects !== null,
-			});
-		}
+		throw new Error(`Layer ${artifact.layer} has no publication contract.`);
 	}
 
 	#installTerrainLayer(
@@ -844,8 +956,112 @@ export class GameRuntime {
 				log(error, LogLevel.Error);
 				this.#publishSceneAvailability({
 					kind: "scene-content-failed",
+					layer: artifact.layer,
 					message: error instanceof Error ? error.message : String(error),
 					residency: { envCellId: null, landblockId: artifact.landblockId },
+					revision,
+				});
+			});
+	}
+
+	#realizeEnvCellLayer(
+		ownerId: OwnerId,
+		artifact: Extract<
+			CommitBundle,
+			{
+				kind: CommitBundleSourceKind.LandblockLayer;
+				layer: LandblockLayerKind.EnvCells;
+			}
+		>,
+		revision: SceneInterestRevision,
+	): void {
+		const plan = artifact.commit.plan;
+		if (plan.landblockId !== artifact.landblockId) {
+			throw new Error(
+				`EnvCell plan belongs to ${plan.landblockId}, expected ${artifact.landblockId}.`,
+			);
+		}
+		const textureRequirements = mergeAssetTextureFacts(
+			[
+				...plan.shellTextureRequirements,
+				...plan.residentJobs.flatMap((job) => job.textureRequirements),
+			],
+			"EnvCell layer",
+		);
+		void this.#envCellRealizer
+			.realize({
+				layer: LandblockLayerKind.EnvCells,
+				owner: ownerId,
+				revision,
+				source: plan,
+				textureRequirements,
+			})
+			.then((result) => {
+				if (result.kind !== "published") return;
+				for (const dynamic of artifact.dynamicEntities) {
+					this.#deferStaticAuthoredDynamic(
+						ownerId,
+						artifact.layer,
+						artifact.landblockId,
+						dynamic,
+					);
+				}
+				this.#envCellLayerDiagnostics.set(ownerId, {
+					...plan.diagnostics,
+					...result.geometry.residentGeometryDiagnostics,
+					indoorDepthContinuousCrossingCount: plan.crossings.filter(
+						(crossing) =>
+							crossing.spatialRelationship.kind === "indoor-depth-continuous",
+					).length,
+					indoorTopologyBoundaryCrossingCount: plan.crossings.filter(
+						(crossing) =>
+							crossing.spatialRelationship.kind === "indoor-topology-boundary",
+					).length,
+					exteriorTransitionCrossingCount: plan.crossings.filter(
+						(crossing) =>
+							crossing.spatialRelationship.kind === "exterior-transition",
+					).length,
+					landblockId: artifact.landblockId,
+					potentiallyVisibleReferenceCount: plan.scopes.reduce(
+						(count, scope) => count + scope.potentiallyVisibleEnvCellIds.size,
+						0,
+					),
+					sceneResidentNodeCount:
+						result.geometry.residents?.objects.length ?? 0,
+					sceneShellNodeCount: result.geometry.environment.cellShells.length,
+					visibilityIslandCount: new Set(
+						result.geometry.environment.scopes.map(
+							(scope) => scope.visibilityIslandId,
+						),
+					).size,
+				});
+				this.#publishSceneAvailability({
+					kind: "env-cell-topology-available",
+					landblockId: artifact.landblockId,
+					revision,
+				});
+			})
+			.catch((error) => {
+				if (
+					!this.#sceneInterestCoordinator.ownsDispatch(
+						{
+							id: artifact.landblockId,
+							layer: LandblockLayerKind.EnvCells,
+						},
+						revision,
+					)
+				) {
+					return;
+				}
+				log(error, LogLevel.Error);
+				this.#publishSceneAvailability({
+					kind: "scene-content-failed",
+					layer: artifact.layer,
+					message: error instanceof Error ? error.message : String(error),
+					residency: {
+						envCellId: null,
+						landblockId: artifact.landblockId,
+					},
 					revision,
 				});
 			});
@@ -916,11 +1132,14 @@ export class GameRuntime {
 		const ownerId = landblockLayerToOwnerId(landblockId, layer);
 		if (isOutdoorStaticLayer(layer)) {
 			void this.#staticLayerRealizer.evict(ownerId, revision);
+		} else if (layer === LandblockLayerKind.EnvCells) {
+			void this.#envCellRealizer.evict(ownerId, revision);
 		} else {
 			this.#staticObjects.evict(ownerId, revision);
 		}
 		this.#deferredStaticDynamics.delete(ownerId);
 		this.#staticObjectLayerDiagnostics.delete(ownerId);
+		this.#envCellLayerDiagnostics.delete(ownerId);
 		this.#animation.removeOwner(ownerId);
 		this.#dynamics.removeOwner(ownerId);
 		this.#envCells.removeOwner(ownerId);
@@ -935,9 +1154,9 @@ export class GameRuntime {
 	}
 }
 
-/** Closed outdoor-static geometry adapter owned and destroyed by the realization sequencer. */
+/** Closed static geometry adapter shared by outdoor and EnvCell resident realization. */
 class RuntimeStaticObjectGeometryPreparer implements StaticLayerGeometryPreparer<
-	ResolvedOutdoorStaticLayerSource,
+	ResolvedStaticObjectLayerSource,
 	StaticObjectLayerArtifact | null,
 	OwnerId
 > {
@@ -948,10 +1167,11 @@ class RuntimeStaticObjectGeometryPreparer implements StaticLayerGeometryPreparer
 	}
 
 	async prepare(options: {
-		readonly layer: OutdoorStaticLayerKind;
+		readonly layer: StaticLayerKind;
+		readonly partition?: string;
 		readonly owner: OwnerId;
 		readonly revision: SceneInterestRevision;
-		readonly source: ResolvedOutdoorStaticLayerSource;
+		readonly source: ResolvedStaticObjectLayerSource;
 		readonly textureRequirements: readonly import("../textures/types").AssetTextureFact[];
 	}): Promise<StaticObjectLayerArtifact | null> {
 		const geometry = await this.#worker.prepare({
@@ -959,6 +1179,7 @@ class RuntimeStaticObjectGeometryPreparer implements StaticLayerGeometryPreparer
 			resourceNamespace: staticRevisionToInstallNamespace(
 				options.owner,
 				options.revision,
+				options.partition,
 			),
 			source: options.source,
 		});
@@ -967,6 +1188,7 @@ class RuntimeStaticObjectGeometryPreparer implements StaticLayerGeometryPreparer
 			resourceNamespace: staticRevisionToInstallNamespace(
 				options.owner,
 				options.revision,
+				options.partition,
 			),
 			source: options.source,
 			textureRequirements: options.textureRequirements,

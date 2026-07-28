@@ -1,13 +1,13 @@
 import type { AtlasRequirementHandle } from "../textures/atlas/resident-texture-atlas";
 import type { AssetTextureFact } from "../textures/types";
 import type { SceneInterestRevision } from "./scene-availability";
-import type { OutdoorStaticLayerKind } from "./scene-interest";
+import type { StaticLayerKind } from "./scene-interest";
 
 /** Exact currentness query retained at the scene-interest boundary. */
 export interface StaticLayerCurrentness<TOwner extends string> {
 	isCurrent(
 		owner: TOwner,
-		layer: OutdoorStaticLayerKind,
+		layer: StaticLayerKind,
 		revision: SceneInterestRevision,
 	): boolean;
 }
@@ -16,7 +16,7 @@ export interface StaticLayerCurrentness<TOwner extends string> {
 export interface StaticLayerFailureReporter<TOwner extends string> {
 	reportAtlasFailure(options: {
 		readonly cause: unknown;
-		readonly layer: OutdoorStaticLayerKind;
+		readonly layer: StaticLayerKind;
 		readonly owner: TOwner;
 		readonly revision: SceneInterestRevision;
 	}): void;
@@ -44,7 +44,8 @@ export interface StaticLayerGeometryPreparer<
 	TOwner extends string,
 > {
 	prepare(options: {
-		readonly layer: OutdoorStaticLayerKind;
+		readonly layer: StaticLayerKind;
+		readonly partition?: string;
 		readonly owner: TOwner;
 		readonly revision: SceneInterestRevision;
 		readonly source: TSource;
@@ -59,7 +60,7 @@ export interface StaticLayerPublisher<TGeometry, TOwner extends string> {
 	removeExact(owner: TOwner, revision: SceneInterestRevision): Promise<void>;
 	replace(options: {
 		readonly geometry: TGeometry;
-		readonly layer: OutdoorStaticLayerKind;
+		readonly layer: StaticLayerKind;
 		readonly owner: TOwner;
 		readonly revision: SceneInterestRevision;
 	}): Promise<void>;
@@ -68,7 +69,7 @@ export interface StaticLayerPublisher<TGeometry, TOwner extends string> {
 
 /** Input assembled from one already resolved and classified outdoor-static source. */
 export interface StaticLayerRealizationInput<TSource, TOwner extends string> {
-	readonly layer: OutdoorStaticLayerKind;
+	readonly layer: StaticLayerKind;
 	readonly owner: TOwner;
 	readonly revision: SceneInterestRevision;
 	readonly source: TSource;
@@ -174,6 +175,7 @@ export class StaticLayerRealizer<TSource, TGeometry, TOwner extends string> {
 			source: input.source,
 			textureRequirements: input.textureRequirements,
 		});
+		let published = false;
 		try {
 			const [preparedGeometry, atlasCompletion] = await Promise.all([
 				geometry,
@@ -203,6 +205,7 @@ export class StaticLayerRealizer<TSource, TGeometry, TOwner extends string> {
 				owner: input.owner,
 				revision: input.revision,
 			});
+			published = true;
 			if (!this.#isCurrent(input.owner, input.layer, input.revision)) {
 				await Promise.all([
 					this.#publisher.removeExact(input.owner, input.revision),
@@ -213,7 +216,12 @@ export class StaticLayerRealizer<TSource, TGeometry, TOwner extends string> {
 			await this.#atlas.activateOwnerRevision(atlasHandle);
 			return { geometry: preparedGeometry, kind: "published" };
 		} catch (cause) {
-			await this.#atlas.withdrawOwnerRevision(atlasHandle);
+			await Promise.all([
+				this.#atlas.withdrawOwnerRevision(atlasHandle),
+				published
+					? this.#publisher.removeExact(input.owner, input.revision)
+					: Promise.resolve(),
+			]);
 			const message = cause instanceof Error ? cause.message : String(cause);
 			throw new Error(
 				`Static layer ${input.owner} revision ${input.revision} failed to realize: ${message}`,
@@ -224,7 +232,7 @@ export class StaticLayerRealizer<TSource, TGeometry, TOwner extends string> {
 
 	#isCurrent(
 		owner: TOwner,
-		layer: OutdoorStaticLayerKind,
+		layer: StaticLayerKind,
 		revision: SceneInterestRevision,
 	): boolean {
 		return (

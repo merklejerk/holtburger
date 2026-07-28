@@ -2,15 +2,21 @@ import type { LandblockId } from "../game-types";
 import type { Camera } from "../runtime/types";
 import type { ResolvedSceneEnvironment } from "../environment/scene-environment";
 
+/** Environment-cell visibility scheduler selected without rebuilding resident content. */
+export type EnvCellRenderMode = "flat" | "portal";
+
 /** Dynamic display choices applied to a frame without changing world data or GPU setup. */
 export interface FrameSettings {
 	/** Whether render passes apply the effective region-authored distance fog. */
 	readonly distanceFogEnabled: boolean;
+	/** Environment-cell visibility and presentation policy for this frame. */
+	readonly envCellRenderMode: EnvCellRenderMode;
 }
 
 /** Default dynamic display choices matching the region-authored presentation. */
 export const DEFAULT_FRAME_SETTINGS: FrameSettings = {
 	distanceFogEnabled: true,
+	envCellRenderMode: "portal",
 };
 
 /** Camera state for one camera or portal view. The renderer collects scene content itself. */
@@ -33,12 +39,11 @@ export interface FrameInput {
 
 /** Latest renderer-side selection counts, aggregated across every view in one frame. */
 export interface FrameSelectionMetrics {
+	readonly envCellRenderMode: EnvCellRenderMode;
 	/** Number of camera or portal views rendered into this frame. */
 	readonly viewCount: number;
 	/** Scene nodes selected by scope traversal and node-level frustum culling. */
 	readonly visibleSceneEntries: number;
-	/** Portal crossings retained by broad aperture visibility. */
-	readonly visiblePortalCrossings: number;
 	/** Visible terrain contributions converted into concrete frame inputs. */
 	readonly terrainFrameInputs: number;
 	/** Distinct producer culling groups contributing visible static nodes. */
@@ -49,6 +54,30 @@ export interface FrameSelectionMetrics {
 	readonly visibleDynamics: number;
 	/** Visible environment-cell shell contributions selected before their draw path is implemented. */
 	readonly visibleEnvCellShells: number;
+	readonly visibleEnvCellScopeCount: number;
+	readonly visibleEnvCellResidentNodes: number;
+	readonly submittedEnvCellShellDrawCount: number;
+	readonly submittedEnvCellShellTriangleCount: number;
+	readonly submittedEnvCellResidentDrawCount: number;
+	readonly submittedEnvCellResidentTriangleCount: number;
+	readonly envCellShellCullOverrideCount: number;
+	/** Flat mode must keep all later portal-rendering work at zero. */
+	readonly submittedPortalApertureDrawCount: number;
+	readonly portalMaskEdgeCount: number;
+	readonly portalNearPlaneSeedCount: number;
+	readonly portalRejectedFacingCrossingCount: number;
+	/** Mask boundaries omitted because both endpoints share one render domain. */
+	readonly portalSameDomainBoundaryCrossingCount: number;
+	readonly portalRenderLayerCount: number;
+	readonly portalRenderNodeCount: number;
+	readonly portalSubmittedRenderNodeCount: number;
+	readonly portalExteriorRenderCount: number;
+	readonly portalPlanningDurationMs: number;
+	readonly portalExecutionDurationMs: number;
+	readonly sceneDomainTargetCount: number;
+	/** Retained color plus depth-stencil attachment bytes owned by portal targets. */
+	readonly sceneDomainTargetBytes: number;
+	readonly portalCompositeCount: number;
 	/** All static-object draw calls submitted to the backend this frame. */
 	readonly submittedStaticObjectDrawCount: number;
 	/** Triangles submitted by all static-object draws, including instance multiplication. */

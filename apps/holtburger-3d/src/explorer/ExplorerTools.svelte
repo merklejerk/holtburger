@@ -7,7 +7,10 @@
 	import ExplorerWorldPanel from "./ExplorerWorldPanel.svelte";
 	import type { StaticObjectRuntimeDiagnostics } from "../lib/game/runtime/game-runtime";
 	import type { ExplorerEnvironmentSelection } from "../lib/game/environment/scene-environment";
-	import type { FrameSelectionMetrics } from "../lib/game/renderer/renderer";
+	import type {
+		EnvCellRenderMode,
+		FrameSelectionMetrics,
+	} from "../lib/game/renderer/renderer";
 	import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
 	import type { TexturePageId } from "../lib/game/textures/texture-manager";
 
@@ -46,6 +49,8 @@
 		readonly distanceFogEnabled: boolean;
 		/** Update Explorer's distance-fog presentation switch. */
 		readonly updateDistanceFog: (enabled: boolean) => void;
+		readonly envCellRenderMode: EnvCellRenderMode;
+		readonly updateEnvCellRenderMode: (mode: EnvCellRenderMode) => void;
 		/** Latest low-rate renderer selection snapshot for frame diagnostics. */
 		readonly frameSelectionMetrics: FrameSelectionMetrics | null;
 		/** Latest low-rate outdoor-static and texture atlas diagnostic snapshot. */
@@ -63,6 +68,8 @@
 		updateEnvironment,
 		distanceFogEnabled,
 		updateDistanceFog,
+		envCellRenderMode,
+		updateEnvCellRenderMode,
 		frameSelectionMetrics,
 		staticObjectRuntimeDiagnostics,
 		readTextureAtlasPage,
@@ -170,6 +177,8 @@
 								{updateEnvironment}
 								{distanceFogEnabled}
 								{updateDistanceFog}
+								{envCellRenderMode}
+								{updateEnvCellRenderMode}
 							/>
 						{:else if activeTab.id === "frame"}
 							<ExplorerFramePanel metrics={frameSelectionMetrics} />

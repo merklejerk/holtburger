@@ -1,16 +1,15 @@
-import type { ResolvedOutdoorStaticLayerSource } from "../resolution/landblock-layer";
+import type { ResolvedStaticObjectLayerSource } from "../resolution/landblock-layer";
 import { planObjectMaterial } from "../resolution/object-material-planner";
-import {
-	type AssetTextureFact,
-	type AssetTextureKey,
-	TextureWrapMode,
-} from "../textures/types";
+import { staticDetailRoleForLayer } from "../resolution/static-detail-role";
+import { type AssetTextureFact, TextureWrapMode } from "../textures/types";
+import { mergeAssetTextureFacts } from "../textures/texture-facts";
 
 /** Collect exactly the logical pixel dependencies used by static object triangles. */
 export function collectStaticObjectTextureDependencies(
-	source: ResolvedOutdoorStaticLayerSource,
+	source: ResolvedStaticObjectLayerSource,
 ): readonly AssetTextureFact[] {
-	const dependencies = new Map<AssetTextureKey, AssetTextureFact>();
+	const dependencies: AssetTextureFact[] = [];
+	const detailRole = staticDetailRoleForLayer(source.kind);
 	for (const resident of source.staticResidents) {
 		for (const part of resident.presentation.parts) {
 			for (const [
@@ -28,31 +27,11 @@ export function collectStaticObjectTextureDependencies(
 					part.geometry.materialWrapModes[triangle] === 1
 						? TextureWrapMode.Repeat
 						: TextureWrapMode.Clamp,
+					detailRole,
 				);
-				addDependencies(dependencies, plan.textureRequirements);
+				dependencies.push(...plan.textureRequirements);
 			}
 		}
 	}
-	return [...dependencies.values()].sort((left, right) =>
-		left.key.localeCompare(right.key),
-	);
-}
-
-function addDependencies(
-	target: Map<AssetTextureKey, AssetTextureFact>,
-	facts: readonly AssetTextureFact[],
-): void {
-	for (const fact of facts) {
-		const existing = target.get(fact.key);
-		if (
-			existing &&
-			(existing.purpose !== fact.purpose ||
-				existing.sourceAssetId !== fact.sourceAssetId)
-		) {
-			throw new Error(
-				`Logical texture ${fact.key} has incompatible source requirements.`,
-			);
-		}
-		target.set(fact.key, fact);
-	}
+	return mergeAssetTextureFacts(dependencies, "Static object");
 }

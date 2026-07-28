@@ -1,11 +1,13 @@
 import type {
-	GeometryKey,
 	GeometrySource,
 	ObjectGeometryKey,
+	PortalGeometryKey,
 } from "../geometry/types";
+import type { LandblockId } from "../game-types";
 import type { AABB3 } from "../math/types";
 import type { Vec3 } from "../math/types";
 import type { ObjectMaterialOrdering } from "../resolution/object-material-planner";
+import type { StaticDetailRole } from "../resolution/static-detail-role";
 import type {
 	SceneEnvCellScopeInput,
 	ScenePlacement,
@@ -84,6 +86,8 @@ export interface StaticObjectLayerDiagnostics extends StaticObjectGeometryDiagno
 /** Source material plus polygon-owned facts; render pass policy remains renderer-private. */
 export interface StaticObjectMaterialBinding {
 	readonly source: ResolvedMaterial;
+	/** Eligible active-region detail binding selected by source flags and static render domain. */
+	readonly detailRole: StaticDetailRole | null;
 	/** Logical texture roles remain independent from their eventual atlas page placements. */
 	readonly textures: {
 		readonly base: AssetTextureKey | null;
@@ -94,8 +98,14 @@ export interface StaticObjectMaterialBinding {
 	/** Renderer compilation applies the retail indexed clip-map rule from this lossless fact. */
 	readonly palettedClipMap: boolean;
 	readonly polygon: {
-		/** Authored polygon culling mode, retained independently from its expanded render side. */
-		readonly cullMode: "single" | "double" | "both" | "counter-clockwise";
+		/** Authored DAT polygon culling mode, retained as provenance after side expansion. */
+		readonly authoredCullMode:
+			| "landblock"
+			| "none"
+			| "clockwise"
+			| "counter-clockwise";
+		/** Effective GPU face rejection for this already-expanded render side. */
+		readonly cullFace: "back" | "front";
 		/** Expanded source side that selected this draw range's material and winding. */
 		readonly renderSide: "positive" | "positive-reversed" | "negative";
 		/** Retail SetSurface stippling flag selected from the expanded source side. */
@@ -197,7 +207,13 @@ export interface EnvCellDrawUnit {
 	/** Number of selected geometry indices. */
 	readonly indexCount: number;
 	/** Renderer-neutral material source selected for this draw. */
-	readonly materialId: string;
+	readonly material: StaticObjectMaterialBinding;
+	readonly ordering: ObjectMaterialOrdering;
+	/** Stable shell-local ordering facts required only for transparent ranges. */
+	readonly transparentSort: {
+		readonly stableId: string;
+		readonly center: Vec3;
+	} | null;
 }
 
 /** Portal draw contribution addressed by topology rather than a scene node. */
@@ -205,9 +221,11 @@ export interface PortalDrawUnit {
 	/** Portal aperture whose topology traversal selected this contribution. */
 	readonly apertureId: `portal-aperture:${string}`;
 	/** Geometry retained by the env-cell system and resolved by renderer policy. */
-	readonly geometry: GeometryKey;
+	readonly geometry: PortalGeometryKey;
 	readonly indexStart: number;
 	readonly indexCount: number;
+	/** Landblock frame containing the already-transformed aperture positions. */
+	readonly landblockId: LandblockId;
 }
 
 /** Bounded cell-shell presentation published as a scene resident. */
@@ -221,6 +239,8 @@ export interface EnvCellShellArtifact {
 
 /** Complete data-only env-cell layer prepared before runtime installation. */
 export interface EnvCellLayerArtifact {
+	/** Shell and aperture geometry owned exactly once by the environment transaction. */
+	readonly geometry: readonly GeometrySource[];
 	readonly cellShells: readonly EnvCellShellArtifact[];
 	readonly portalDrawUnits: ReadonlyMap<
 		`portal-aperture:${string}`,

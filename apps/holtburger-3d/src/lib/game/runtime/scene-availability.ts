@@ -1,5 +1,6 @@
 import type { LandblockId } from "../game-types";
 import type { SceneResidency } from "../scene";
+import type { LandblockLayerKind } from "./scene-interest";
 
 /** Opaque sequence identifying one frontend replacement of scene interest. */
 export type SceneInterestRevision = number & {
@@ -20,15 +21,23 @@ export type SceneAvailabilityEvent =
 			readonly revision: SceneInterestRevision;
 	  }
 	| {
-			/** An environment-cell scope can now provide a world-space placement bound. */
+			/** One landblock's complete environment-cell topology was atomically published. */
 			readonly kind: "env-cell-topology-available";
-			readonly residency: SceneResidency;
+			readonly landblockId: LandblockId;
 			readonly revision: SceneInterestRevision;
 	  }
 	| {
 			/** One requested static layer failed before it could become resident. */
 			readonly kind: "scene-content-failed";
+			readonly layer: LandblockLayerKind;
 			readonly message: string;
+			readonly residency: SceneResidency;
+			readonly revision: SceneInterestRevision;
+	  }
+	| {
+			/** One requested layer has no source content for this landblock. */
+			readonly kind: "scene-content-unavailable";
+			readonly layer: LandblockLayerKind;
 			readonly residency: SceneResidency;
 			readonly revision: SceneInterestRevision;
 	  };

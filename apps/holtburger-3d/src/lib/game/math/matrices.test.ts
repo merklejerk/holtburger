@@ -4,6 +4,7 @@ import {
 	createTranslationMat4,
 	createViewMat4,
 	getMat4Translation,
+	inverseTransformRigidPoint3,
 	multiplyMat4,
 	transformNormal3,
 	transformPoint3,
@@ -33,6 +34,31 @@ describe("matrix composition", () => {
 		const view = createViewMat4(new Vec3(10, 20, 30), Quat.identity());
 
 		expect(getMat4Translation(view)).toEqual(new Vec3(-10, -20, -30));
+	});
+
+	it("inverse-transforms points through a rigid frame", () => {
+		const transform = new Mat4(
+			0,
+			0,
+			-1,
+			0,
+			0,
+			1,
+			0,
+			0,
+			1,
+			0,
+			0,
+			0,
+			10,
+			20,
+			30,
+			1,
+		);
+
+		expect(
+			inverseTransformRigidPoint3(transform, new Vec3(13, 22, 29)),
+		).toEqual(new Vec3(1, 2, 3));
 	});
 
 	it("conservatively transforms every corner of an axis-aligned box", () => {

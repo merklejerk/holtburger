@@ -24,6 +24,7 @@ describe("object material planning", () => {
 				textureEncoding: "index16",
 			},
 			TextureWrapMode.Repeat,
+			"building",
 		);
 		expect(plan.baseTexture).toContain("object-index-16");
 		expect(plan.paletteTexture).toContain("object-palette");
@@ -47,10 +48,12 @@ describe("object material planning", () => {
 		const first = planObjectMaterial(
 			texturedMaterial("0x05000001", 0x04),
 			TextureWrapMode.Clamp,
+			"object",
 		);
 		const second = planObjectMaterial(
 			texturedMaterial("0x05000002", 0x04),
 			TextureWrapMode.Clamp,
+			"object",
 		);
 
 		expect(first.id).not.toBe(second.id);
@@ -60,9 +63,40 @@ describe("object material planning", () => {
 
 	it("gives identical source facts a traversal-independent binding key", () => {
 		const input = texturedMaterial("0x05000001", 0);
-		expect(planObjectMaterial(input, TextureWrapMode.Repeat).id).toBe(
-			planObjectMaterial({ ...input }, TextureWrapMode.Repeat).id,
+		expect(planObjectMaterial(input, TextureWrapMode.Repeat, "object").id).toBe(
+			planObjectMaterial({ ...input }, TextureWrapMode.Repeat, "object").id,
 		);
+	});
+
+	it("combines source eligibility with the selected static detail domain", () => {
+		expect(
+			planObjectMaterial(
+				texturedMaterial("0x05000001", 0x20000),
+				TextureWrapMode.Clamp,
+				"building",
+			).detailRole,
+		).toBe("building");
+		expect(
+			planObjectMaterial(
+				texturedMaterial("0x05000001", 0x20000),
+				TextureWrapMode.Clamp,
+				"environment",
+			).detailRole,
+		).toBe("environment");
+		expect(
+			planObjectMaterial(
+				texturedMaterial("0x05000001", 0),
+				TextureWrapMode.Clamp,
+				"object",
+			).detailRole,
+		).toBeNull();
+	});
+
+	it("keeps otherwise identical bindings distinct by detail role", () => {
+		const input = texturedMaterial("0x05000001", 0x20000);
+		expect(
+			planObjectMaterial(input, TextureWrapMode.Repeat, "building").id,
+		).not.toBe(planObjectMaterial(input, TextureWrapMode.Repeat, "object").id);
 	});
 
 	it("fails indexed material planning without a palette", () => {
@@ -77,6 +111,7 @@ describe("object material planning", () => {
 					textureEncoding: "index8",
 				},
 				TextureWrapMode.Clamp,
+				"object",
 			),
 		).toThrow("no palette dependency");
 	});

@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Frustum } from "../math/frustum";
 import { Vec3 } from "../math/types";
-import type { Camera } from "../runtime/types";
-import type { VisibleScene } from "../scene";
+import type { SceneTopologyView, VisibleScene } from "../scene";
 import type { TerrainDrawUnit } from "../terrain/types";
 import type { TextureArrayBinding } from "../textures/texture-manager";
 import type {
@@ -19,21 +18,15 @@ import type { GeometryKey } from "../geometry/types";
 import type { StaticObjectRenderable } from "../commit/artifacts";
 import type { InstanceStreamResourceKey } from "./resource-manager";
 
-const CAMERA = {
-	far: 10,
-	fov: 90,
-	near: 1,
-	placement: {
-		envCellId: null,
-		landblockId: "0001",
-		position: {},
-		rotation: {},
-	},
-} as Camera;
 const VISIBLE_SCENE = {
-	crossings: [],
 	entries: [],
 } as const satisfies VisibleScene;
+const TOPOLOGY = {
+	crossings: [],
+	outgoing: () => [],
+	revision: 1,
+	scopes: [],
+} as const satisfies SceneTopologyView;
 const FRUSTUM = {
 	cameraPosition: Vec3.zero(),
 	planes: [],
@@ -64,12 +57,20 @@ describe("RenderWorld", () => {
 					return INSTANCE_STREAM;
 				},
 			},
-			objectDetail: { getBinding: () => null },
+			staticDetails: { getBinding: () => null },
 			scene: {
+				getPortalTopologyView: () => {
+					calls.push("topology");
+					return TOPOLOGY;
+				},
 				getCullingGroup: () => "fixture",
 				getResolvedPlacement: () => undefined,
-				queryFrustum: () => {
-					calls.push("scene");
+				queryScopesFrustum: () => {
+					calls.push("scene-scopes");
+					return VISIBLE_SCENE;
+				},
+				queryFlatFrustum: () => {
+					calls.push("scene-flat");
 					return VISIBLE_SCENE;
 				},
 			},
@@ -100,9 +101,11 @@ describe("RenderWorld", () => {
 			},
 		});
 
-		expect(world.queryVisibleScene(CAMERA, FRUSTUM, "0001")).toBe(
+		expect(world.queryScopesScene(FRUSTUM, "0001", [{ kind: "outdoor" }])).toBe(
 			VISIBLE_SCENE,
 		);
+		expect(world.queryFlatScene(FRUSTUM, "0001")).toBe(VISIBLE_SCENE);
+		expect(world.getPortalTopologyView()).toBe(TOPOLOGY);
 		expect(world.resolveTerrainDrawUnit("0001", "0002")).toBe(TERRAIN);
 		expect(world.resolveGeometry("terrain-geometry:0001" as GeometryKey)).toBe(
 			GEOMETRY,
@@ -141,7 +144,9 @@ describe("RenderWorld", () => {
 			},
 		]);
 		expect(calls).toEqual([
-			"scene",
+			"scene-scopes",
+			"scene-flat",
+			"topology",
 			"terrain",
 			"geometry",
 			"texture-2d",

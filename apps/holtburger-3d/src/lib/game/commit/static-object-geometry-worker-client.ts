@@ -7,6 +7,7 @@ import {
 	ClosedWorkerClient,
 	type ClosedWorkerPort,
 } from "../workers/closed-worker";
+import { LandblockLayerKind } from "../runtime/scene-interest";
 
 /** Runtime-owned closed geometry worker used by static-layer realization. */
 export class StaticObjectGeometryWorker {
@@ -38,7 +39,13 @@ export class StaticObjectGeometryWorker {
 	): Promise<StaticObjectGeometryPreparationResult | null> {
 		// Dynamic residents remain runtime-owned. Shared definition buffers must survive static
 		// worker transfer so a later dynamic materializer still receives a complete resident.
-		const runtimeOwnedBuffers = geometryBuffers(job.source.dynamicResidents);
+		const runtimeOwnedBuffers =
+			job.layer === LandblockLayerKind.EnvCells
+				? geometryBuffers([
+						...job.source.staticResidents,
+						...job.source.dynamicResidents,
+					])
+				: geometryBuffers(job.source.dynamicResidents);
 		const workerJob: StaticObjectGeometryPreparationJob = {
 			...job,
 			source: { ...job.source, dynamicResidents: [] },

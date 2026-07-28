@@ -1,4 +1,5 @@
 import type { ResolvedMaterial } from "./presentation";
+import type { StaticDetailRole } from "./static-detail-role";
 import {
 	createAssetTextureKey,
 	TextureFilteringMode,
@@ -24,6 +25,8 @@ export interface ObjectMaterialPlan {
 	readonly baseTexture: AssetTextureKey | null;
 	readonly paletteTexture: AssetTextureKey | null;
 	readonly sampler: TextureSamplerPolicy;
+	/** Eligible active-region detail role selected by the static render domain. */
+	readonly detailRole: StaticDetailRole | null;
 	/** Complete logical source requirements; pixel request routing derives from these facts. */
 	readonly textureRequirements: readonly AssetTextureFact[];
 	/** Retail clip maps discard indexed palette entries below eight during later shader compilation. */
@@ -35,19 +38,24 @@ const SURFACE_TRANSLUCENT = 0x10;
 const SURFACE_ALPHA = 0x100;
 const SURFACE_INV_ALPHA = 0x200;
 const SURFACE_ADDITIVE = 0x10000;
+const SURFACE_DETAIL_OVERLAY = 0x20000;
 
 /** Derive stable material binding facts without atlas placement or device state. */
 export function planObjectMaterial(
 	material: ResolvedMaterial,
 	wrap: TextureWrapMode,
+	domainDetailRole: StaticDetailRole,
 ): ObjectMaterialPlan {
 	const ordering = classifyObjectMaterialOrdering(material);
+	const detailRole =
+		(flags(material) & SURFACE_DETAIL_OVERLAY) !== 0 ? domainDetailRole : null;
 	if (material.kind === "solid-color") {
 		return {
-			id: bindingId(material, ordering, wrap, null, null),
+			id: bindingId(material, ordering, wrap, null, null, detailRole),
 			material,
 			ordering,
 			baseTexture: null,
+			detailRole,
 			paletteTexture: null,
 			sampler: sampler(wrap, TextureFilteringMode.Linear),
 			textureRequirements: [],
@@ -92,10 +100,18 @@ export function planObjectMaterial(
 				]),
 	];
 	return {
-		id: bindingId(material, ordering, wrap, baseTexture, paletteTexture),
+		id: bindingId(
+			material,
+			ordering,
+			wrap,
+			baseTexture,
+			paletteTexture,
+			detailRole,
+		),
 		material,
 		ordering,
 		baseTexture,
+		detailRole,
 		paletteTexture,
 		sampler: sampler(
 			wrap,
@@ -143,6 +159,7 @@ function bindingId(
 	wrap: TextureWrapMode,
 	baseTexture: AssetTextureKey | null,
 	paletteTexture: AssetTextureKey | null,
+	detailRole: StaticDetailRole | null,
 ): string {
 	return [
 		material.id,
@@ -153,5 +170,6 @@ function bindingId(
 		wrap,
 		baseTexture ?? "none",
 		paletteTexture ?? "none",
+		detailRole ?? "no-detail",
 	].join("|");
 }

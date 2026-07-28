@@ -8,6 +8,7 @@ import { createCameraRotationRadians } from "../lib/game/math/camera-orientation
 import { GameRuntime } from "../lib/game/runtime/game-runtime";
 import type { SceneInterestRevision } from "../lib/game/runtime/scene-availability";
 import type { SceneAvailabilityEvent } from "../lib/game/runtime/scene-availability";
+import { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
 import type { Camera } from "../lib/game/runtime/types";
 import type { LoDConfig } from "../lib/game/runtime/types";
 import type { SceneResidency } from "../lib/game/scene";
@@ -16,6 +17,11 @@ import {
 	type FreeFlyCameraPose,
 	type FreeFlyCameraState,
 } from "./free-fly-camera-controller";
+import {
+	resolveExplorerPointResidency,
+	resolveExplicitExplorerEnvCell,
+	type ExplorerResidencyResolution,
+} from "./explorer-residency";
 
 const CAMERA_FAR = 2_000;
 // Legacy used a 60-degree vertical FOV. Keeping it preserves both perceived movement and framing.
@@ -45,9 +51,12 @@ export type ExplorerCameraFocusStatus =
 	| "No camera focus requested."
 	| "Loading outdoor terrain for initial camera placement."
 	| "Waiting for environment-cell topology for initial camera placement."
-	| "Environment-cell loading is not available in this Explorer build."
+	| "Environment-cell topology is unavailable for the requested scene interest."
 	| "Initial camera placement applied."
 	| "Initial camera placement cancelled by manual control."
+	| "Camera position is outside canonical world bounds."
+	| `Camera residency is ambiguous across EnvCells: ${string}.`
+	| `Initial camera placement is outside selected EnvCell ${string}.`
 	| `Initial camera placement failed: ${string}`;
 
 /**
@@ -62,6 +71,7 @@ export class ExplorerCameraCoordinator {
 	readonly #onStatus: (status: ExplorerCameraFocusStatus) => void;
 	readonly #unsubscribeAvailability: () => void;
 	#pending: PendingFocus | null = null;
+	#lastResidency: SceneResidency | null = null;
 
 	constructor(
 		runtime: GameRuntime,
@@ -102,9 +112,20 @@ export class ExplorerCameraCoordinator {
 			this.#tryFocusOutdoor(pending);
 			return;
 		}
+		if (lod.envCellRadius === null) {
+			this.#finishRejectedInteriorResolution(
+				pending,
+				resolveExplicitExplorerEnvCell(
+					pending.residency,
+					"topology-unavailable",
+				),
+			);
+			return;
+		}
 		this.#onStatus(
-			"Environment-cell loading is not available in this Explorer build.",
+			"Waiting for environment-cell topology for initial camera placement.",
 		);
+		this.#tryFocusInterior(pending, false);
 	}
 
 	/** Submit controller updates with runtime-resolved residence; manual input cancels pending focus. */
@@ -113,9 +134,26 @@ export class ExplorerCameraCoordinator {
 			this.#pending = null;
 			this.#onStatus("Initial camera placement cancelled by manual control.");
 		}
-		const residency = this.#runtime.queryWorldPointResidency(state.position);
-		if (!residency) return;
-		this.#runtime.setPrimaryCamera(createCamera(residency, state));
+		const resolution = resolveExplorerPointResidency(
+			this.#runtime.queryWorldPointResidencyCandidates(state.position),
+		);
+		if (resolution.kind === "resolved") {
+			this.#lastResidency = resolution.residency;
+			this.#runtime.setPrimaryCamera(createCamera(resolution.residency, state));
+			return;
+		}
+		if (resolution.kind === "ambiguous") {
+			this.#onStatus(
+				`Camera residency is ambiguous across EnvCells: ${resolution.candidates
+					.map(({ envCellId }) => envCellId)
+					.join(", ")}.`,
+			);
+		} else if (resolution.kind === "outside") {
+			this.#onStatus("Camera position is outside canonical world bounds.");
+		}
+		if (this.#lastResidency !== null) {
+			this.#runtime.setPrimaryCamera(createCamera(this.#lastResidency, state));
+		}
 	}
 
 	dispose(): void {
@@ -137,13 +175,26 @@ export class ExplorerCameraCoordinator {
 		if (event.kind === "env-cell-topology-available") {
 			if (
 				pending.kind === "interior" &&
-				event.residency.envCellId === pending.residency.envCellId
+				event.landblockId === pending.residency.landblockId
 			) {
-				this.#tryFocusInterior(pending);
+				this.#tryFocusInterior(pending, true);
 			}
 			return;
 		}
-		if (event.residency.landblockId === pendingLandblockId(pending)) {
+		if (
+			event.residency.landblockId !== pendingLandblockId(pending) ||
+			event.layer !== pendingLayer(pending)
+		) {
+			return;
+		}
+		this.#pending = null;
+		if (event.kind === "scene-content-unavailable") {
+			this.#onStatus(
+				pending.kind === "interior"
+					? "Environment-cell topology is unavailable for the requested scene interest."
+					: `Initial camera placement failed: No terrain content is available for ${pending.landblockId}.`,
+			);
+		} else {
 			this.#pending = null;
 			this.#onStatus(`Initial camera placement failed: ${event.message}`);
 		}
@@ -174,19 +225,72 @@ export class ExplorerCameraCoordinator {
 
 	#tryFocusInterior(
 		pending: Extract<PendingFocus, { readonly kind: "interior" }>,
+		topologyComplete: boolean,
 	): void {
 		if (this.#pending !== pending) return;
 		const bounds = this.#runtime.queryEnvCellBounds(pending.residency);
-		if (!bounds) return;
+		if (!bounds) {
+			if (
+				topologyComplete ||
+				this.#runtime.hasEnvCellTopology(pending.residency.landblockId)
+			) {
+				this.#finishRejectedInteriorResolution(
+					pending,
+					resolveExplicitExplorerEnvCell(pending.residency, "outside"),
+				);
+			}
+			return;
+		}
+		const position = new Vec3(
+			(bounds.min.x + bounds.max.x) * 0.5,
+			(bounds.min.y + bounds.max.y) * 0.5,
+			(bounds.min.z + bounds.max.z) * 0.5,
+		);
+		if (
+			this.#runtime.queryEnvCellPointContainment(
+				pending.residency,
+				position,
+			) !== true
+		) {
+			this.#finishRejectedInteriorResolution(
+				pending,
+				resolveExplicitExplorerEnvCell(pending.residency, "outside"),
+			);
+			return;
+		}
+		const resolution = resolveExplicitExplorerEnvCell(
+			pending.residency,
+			"contained",
+		);
+		if (resolution.kind !== "resolved") {
+			throw new Error("Contained explicit EnvCell did not resolve.");
+		}
+		this.#lastResidency = resolution.residency;
 		this.#applyAutomaticPose({
 			pitchRadians: 0,
-			position: new Vec3(
-				(bounds.min.x + bounds.max.x) * 0.5,
-				(bounds.min.y + bounds.max.y) * 0.5,
-				(bounds.min.z + bounds.max.z) * 0.5,
-			),
+			position,
 			yawRadians: 0,
 		});
+	}
+
+	#finishRejectedInteriorResolution(
+		pending: Extract<PendingFocus, { readonly kind: "interior" }>,
+		resolution: ExplorerResidencyResolution,
+	): void {
+		this.#pending = null;
+		if (resolution.kind === "topology-unavailable") {
+			this.#onStatus(
+				"Environment-cell topology is unavailable for the requested scene interest.",
+			);
+			return;
+		}
+		if (resolution.kind === "outside") {
+			this.#onStatus(
+				`Initial camera placement is outside selected EnvCell ${pending.residency.envCellId}.`,
+			);
+			return;
+		}
+		throw new Error("Rejected explicit EnvCell unexpectedly resolved.");
 	}
 
 	#applyAutomaticPose(pose: FreeFlyCameraPose): void {
@@ -233,4 +337,10 @@ function pendingLandblockId(pending: PendingFocus): LandblockId {
 	return pending.kind === "outdoor"
 		? pending.landblockId
 		: pending.residency.landblockId;
+}
+
+function pendingLayer(pending: PendingFocus): LandblockLayerKind {
+	return pending.kind === "outdoor"
+		? LandblockLayerKind.Terrain
+		: LandblockLayerKind.EnvCells;
 }

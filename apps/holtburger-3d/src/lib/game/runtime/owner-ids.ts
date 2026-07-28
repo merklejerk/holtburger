@@ -16,13 +16,17 @@ export type ActiveRegionResourceOwnerId = `active-region-resource:${string}`;
 /** One staged static replacement's private geometry and instance-resource lease owner. */
 export type StaticRevisionResourceOwnerId =
 	`static-revision:${OwnerId}/${number}`;
+/** Shell/aperture lease kept separate from resident geometry owned by StaticObjectSystem. */
+export type EnvCellRevisionResourceOwnerId =
+	`env-cell-revision:${OwnerId}/${number}`;
 
 /** Any runtime owner admitted by geometry and texture resource managers. */
 export type ResourceOwnerId =
 	| OwnerId
 	| TerrainResourceOwnerId
 	| ActiveRegionResourceOwnerId
-	| StaticRevisionResourceOwnerId;
+	| StaticRevisionResourceOwnerId
+	| EnvCellRevisionResourceOwnerId;
 
 /** Return the runtime owner responsible for one static landblock layer. */
 export function landblockLayerToOwnerId(
@@ -30,6 +34,27 @@ export function landblockLayerToOwnerId(
 	layer: LandblockLayerKind,
 ): OwnerId {
 	return `landblock-layer:${landblockId}/${layer}`;
+}
+
+/** Parse one typed static-layer owner without leaking its string grammar to consumers. */
+export function parseLandblockLayerOwnerId(owner: OwnerId): {
+	readonly landblockId: LandblockId;
+	readonly layer: LandblockLayerKind;
+} {
+	const match = /^landblock-layer:(0x[0-9a-f]{8})\/([a-z-]+)$/i.exec(owner);
+	if (!match) {
+		throw new Error(`Owner ${owner} is not a landblock-layer owner.`);
+	}
+	const layer = Object.values(LandblockLayerKind).find(
+		(candidate) => candidate === match[2],
+	);
+	if (!layer) {
+		throw new Error(`Owner ${owner} has an invalid landblock layer.`);
+	}
+	return {
+		landblockId: match[1]!.toLowerCase() as LandblockId,
+		layer,
+	};
 }
 
 /** Return the runtime owner responsible for one independently spawned entity. */
@@ -59,10 +84,19 @@ export function staticRevisionToResourceOwnerId(
 	return `static-revision:${owner}/${revision}`;
 }
 
+/** Derive the environment-side resource owner for one exact EnvCell revision. */
+export function envCellRevisionToResourceOwnerId(
+	owner: OwnerId,
+	revision: number,
+): EnvCellRevisionResourceOwnerId {
+	return `env-cell-revision:${owner}/${revision}`;
+}
+
 /** Derive geometry keys from the same authoritative layer owner and revision as their lease. */
 export function staticRevisionToInstallNamespace(
 	owner: OwnerId,
 	revision: number,
+	partition?: string,
 ): StaticInstallResourceNamespace {
-	return `static-install:${owner}/${revision}`;
+	return `static-install:${owner}/${revision}${partition ? `/${partition}` : ""}`;
 }

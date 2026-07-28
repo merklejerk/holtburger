@@ -63,7 +63,7 @@ pub struct LandblockIndoorObject {
     pub source_index: usize,
     /// Authored object DID.
     pub source_did: u32,
-    /// Authored EnvCell-local placement.
+    /// Authored landblock-local placement; the EnvCell supplies residency, not a parent transform.
     pub placement: LandblockPlacement,
 }
 

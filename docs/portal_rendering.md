@@ -1,355 +1,254 @@
-# Asheron's Call Portal Rendering Notes
-
-This document records current findings about Asheron's Call environment-cell
-portal polygons, especially the case where an interior door-frame cell appears
-to render a solid wall over an outdoor transition opening in `holtburger-3d`.
-
-The goal is to distinguish two possible causes:
-
-1. The artifact is expected until the renderer implements retail-style portal
-   view clipping, depth pre-passes, or masking.
-2. The artifact is caused by treating portal or side-suppressed polygons as
-   ordinary renderable mesh geometry.
-
-The evidence below points to both mechanisms existing in retail, but the
-specific door-frame artifact is strongly associated with polygons that are
-explicitly marked as portal polygons and `NoPos`.
-
-## Source References
-
-Primary references:
-
-- Retail client decompile: `acclient-eor-source/acclient.c`
-- Retail client type declarations: `acclient-eor-source/acclient.h`
-- ACE DAT loader: `ACViewer/ACE/Source/ACE.DatLoader`
-- ACViewer render experiments: `ACViewer/ACViewer/Render`
-- Holtburger DAT parser: `crates/holtburger-dat`
-- Holtburger 3D asset prep and renderer: `apps/holtburger-3d/src`
-
-Important source locations:
-
-- Retail portal draw mode enum:
-  `acclient-eor-source/acclient.h:4673`
-- Retail `RenderDeviceD3D::DrawEnvCell`:
-  `acclient-eor-source/acclient.c:436422`
-- Retail `PView::DrawCells` outside-transition portal handling:
-  `acclient-eor-source/acclient.c:441068`
-- Retail building portal rendering through drawing BSP portals:
-  `acclient-eor-source/acclient.c:436525`,
-  `acclient-eor-source/acclient.c:345781`,
-  `acclient-eor-source/acclient.c:349182`
-- Retail `D3DPolyRender::DrawPortalPolyInternal`:
-  `acclient-eor-source/acclient.c:433532`
-- Retail polygon drawing and side/surface setup:
-  `acclient-eor-source/acclient.c:434863`,
-  `acclient-eor-source/acclient.c:434920`
-- ACE polygon unpacking and stippling bits:
-  `ACViewer/ACE/Source/ACE.DatLoader/Entity/Polygon.cs`
-- ACE `StipplingType` enum:
-  `ACViewer/ACE/Source/ACE.Entity/Enum/StipplingType.cs`
-- ACViewer env-cell render workaround:
-  `ACViewer/ACViewer/Render/R_CellStruct.cs:124`
-- Holtburger environment geometry preparation:
-  `apps/holtburger-3d/src/workers/asset-worker.ts`
-- Holtburger host serialization of environment cell structures:
-  `apps/holtburger-3d/src-tauri/src/adapter.rs:1577`
-- Holtburger `EnvCell` portal parsing:
-  `crates/holtburger-dat/src/file_type/env_cell.rs`
-- Holtburger `Environment` / `CellStruct` parsing:
-  `crates/holtburger-dat/src/file_type/environment.rs`
-
-## Terminology
-
-The word "portal" is overloaded:
-
-- **World magic portal**: the visible purple travel effect. Not discussed here.
-- **Building portal**: a portal record in outdoor landblock building metadata,
-  representing an aperture such as a door or window.
-- **Env-cell portal**: a portal record in an indoor `EnvCell`, connecting one
-  env cell to another or to the outside.
-- **Drawing BSP portal**: a `PORT` node in a drawing BSP with `PortalPoly`
-  records used by the renderer to traverse or draw portal apertures.
-- **Portal polygon**: a polygon used as a portal aperture or transition plane.
-  It may also live in the general polygon table.
-
-## Exact Door-Frame Fixture
-
-The screenshots that motivated this investigation selected two portal records
-around the same doorway:
-
-- Interior-side portal: `env-cell/da550177/portal/00`
-- Exterior/outside-transition portal: `env-cell/da550178/portal/01`
-
-The raw records were exported from `dats/assets.hba`:
-
-```text
-cargo run -p holtburger-tools --bin dat-tool -- export dats/assets.hba da550177 --namespace eor/cell --output /tmp/da550177.bin
-cargo run -p holtburger-tools --bin dat-tool -- export dats/assets.hba da550178 --namespace eor/cell --output /tmp/da550178.bin
-cargo run -p holtburger-tools --bin dat-tool -- export dats/assets.hba 0d000364 --namespace eor/portal --output /tmp/0d000364.bin
-```
-
-Decoded env-cell metadata:
-
-```text
-EnvCell 0xda550177
-  environment: 0x0d000364
-  cell structure: 0
-  portals:
-    portal 00: flags=0x0003, polygon=34, other_cell=0x0178, other_portal=0x0000
-    portal 01: flags=0x0001, polygon=36, other_cell=0x017e, other_portal=0x0001
-    portal 02: flags=0x0001, polygon=37, other_cell=0x017d, other_portal=0x0002
-    portal 03: flags=0x0001, polygon=35, other_cell=0x017b, other_portal=0x0001
-    portal 04: flags=0x0001, polygon=33, other_cell=0x0179, other_portal=0x0000
-
-EnvCell 0xda550178
-  environment: 0x0d000364
-  cell structure: 1
-  portals:
-    portal 00: flags=0x0001, polygon=7, other_cell=0x0177, other_portal=0x0000
-    portal 01: flags=0x0007, polygon=6, other_cell=0xffff, other_portal=0xffff
-```
-
-The second portal in `0xda550178` is an outside transition. Holtburger already
-documents this retail behavior in `adapter.rs`: flag `0x4` causes retail
-`CCellPortal::UnPack` to treat the target as outside by setting
-`other_cell_id` to `-1`.
-
-Decoded `Environment 0x0d000364` cell-structure data for the relevant
-polygons:
-
-```text
-CellStruct 0
-  portal polygon ids: [34, 36, 37, 35, 33]
-  polygon 33: stippling=0x04, sides=0, pos_surface=9, neg_surface=-1
-  polygon 34: stippling=0x04, sides=0, pos_surface=9, neg_surface=-1
-  polygon 35: stippling=0x04, sides=0, pos_surface=9, neg_surface=-1
-  polygon 36: stippling=0x04, sides=0, pos_surface=9, neg_surface=-1
-  polygon 37: stippling=0x04, sides=0, pos_surface=9, neg_surface=-1
+# Asheron's Call Environment-Cell Portal Rendering
 
-CellStruct 1
-  portal polygon ids: [7, 6]
-  polygon 6: stippling=0x04, sides=0, pos_surface=10, neg_surface=-1
-  polygon 7: stippling=0x04, sides=0, pos_surface=9, neg_surface=-1
-```
-
-ACE defines `stippling=0x04` as `StipplingType.NoPos`.
-
-This is a strong data signal: the door-frame face is not an ordinary wall
-polygon. It is a portal polygon and its positive side is suppressed.
-
-## Retail Render Flow
-
-Retail does not have a single "draw all triangles" path for this case.
-
-### Env Cells
-
-`RenderDeviceD3D::DrawEnvCell` enqueues every polygon in the selected
-`CCellStruct` when the env cell is not using a built mesh:
-
-```text
-RenderDeviceD3D::DrawEnvCell
-  for each structure->polygon:
-    push polygon into Render::PolyList
-  finish/render PolyList
-```
-
-This initially looks like evidence that portal polygons are rendered as normal
-geometry. However, the subsequent polygon draw path is surface/side/stippling
-aware. `D3DPolyRender::DrawPolyInternal` selects the positive surface and
-positive UV indices for its default draw path, and helper code such as
-`D3DPolyRender::SetSurface(CPolygon*, Sidedness, ...)` switches between
-positive and negative side data. The engine therefore does not merely consume a
-flat triangle soup.
-
-Holtburger's current asset worker is much simpler: it triangulates each polygon
-using the positive side (`posSurface`, `posUvIndices`) unless the polygon is
-filtered before geometry construction. That simplification is important for
-`NoPos` polygons.
-
-### Outside-Transition Env-Cell Portals
-
-Retail `PView::DrawCells` has an explicit pass for env-cell portals whose
-`other_cell_id == -1`:
-
-```text
-if (portals[i].other_cell_id == -1)
-    D3DPolyRender::DrawPortalPolyInternal(portals[i].portal, false);
-```
-
-This happens before the normal env-cell draw pass in the same function. It
-indicates that outside-transition portal polygons are used explicitly as portal
-apertures or masks, not just as ordinary wall polygons.
-
-### Building Portals
-
-Retail building drawing also has special portal handling. When drawing a
-building mesh, `RenderDeviceD3D::DrawMeshInternal` calls:
-
-```text
-BSPTREE::build_draw_portals_only(i_pObj->drawing_bsp, 1);
-BSPTREE::build_draw_portals_only(i_pObj->drawing_bsp, 2);
-```
-
-`BSPTREE::build_draw_portals_only` traverses drawing BSP `PORT` nodes and calls
-`BSPPORTAL::portal_draw_portals_only`, which eventually invokes
-`RenderDeviceD3D::DrawPortal` for `PortalPoly` records.
-
-The named modes in `BSPPortalDrawType` are:
-
-```text
-DRAW_BOTH = 0
-DRAW_BLANK_PORTALS = 1
-DRAW_VIEW_THROUGH_PORTALS = 2
-DRAW_PORTALS_TO_OUTSIDE = 3
-```
-
-This confirms that portal polygons participate in render ordering, clipping,
-and depth/color behavior beyond ordinary mesh drawing.
-
-### Portal Polygon Internal Draw
-
-`D3DPolyRender::DrawPortalPolyInternal`:
-
-- Transforms and clips the portal polygon.
-- Disables texture stage usage for the draw.
-- Uses `DEPTHTEST_ALWAYS`.
-- Uses a mode-dependent flag set (`dword_821E24 = 6`, `dword_821E28 = 7`).
-- Can force depth values for a z-clear mode.
-- Draws a triangle fan.
-
-This looks like a portal mask/depth operation rather than normal material
-rendering.
-
-## ACE / ACViewer Evidence
-
-ACE's DAT loader exposes the relevant polygon flags:
-
-```csharp
-public enum StipplingType
-{
-    None = 0x0,
-    Positive = 0x1,
-    Negative = 0x2,
-    Both = 0x3,
-    NoPos = 0x4,
-    NoNeg = 0x8,
-    NoUVS = 0x14
-}
-```
-
-`Polygon.Unpack` only reads positive UV indices when `NoPos` is not set:
-
-```csharp
-if (!Stippling.HasFlag(StipplingType.NoPos))
-    read PosUVIndices
-```
-
-ACViewer's env-cell renderer contains a direct skip:
-
-```csharp
-if (polygon._polygon.Stippling == ACE.Entity.Enum.StipplingType.NoPos) continue;
-```
-
-The comment calls this a workaround for env cells / possibly buildings, but it
-matches the door-frame fixture exactly: the problematic portal polygons are
-`NoPos`.
-
-## Holtburger Current Behavior
-
-`holtburger-3d` prepares environment geometry in the web worker:
-
-```text
-prepareEnvironment
-  for each cellStructure:
-    buildPolygonSetRenderGeometry(
-      vertexArray,
-      drawingPolygons,
-      excludedPolygonIds: cellStructure.portalPolygonIds
-    )
-```
-
-`buildPolygonSetRenderGeometry` currently emits triangles from the positive
-side of each polygon that is not explicitly excluded. Before the portal-filter
-change, this meant portal polygons were included as normal mesh geometry.
-
-The current confirmed filter excludes `CellStruct.portalPolygonIds` from
-prepared environment render geometry. For the exact door-frame fixture,
-polygon `6` and polygon `34` are both in `CellStruct.portalPolygonIds`, so a
-freshly prepared asset should not include those polygons in `renderGeometry`.
-
-If the face still appears after that change, likely explanations include:
-
-- The running app or asset worker is using stale prepared/cached geometry.
-- The visible face is coming from another geometry path, such as a building
-  `GfxObj` or a duplicated polygon not in the selected cell structure's portal
-  list.
-- The filter has not been applied to all relevant prepared assets.
-- Another side of a two-sided polygon is being rendered incorrectly.
-
-## Findings
-
-These findings are supported by the decoded data and retail/ACE references:
-
-1. The door-frame polygons under discussion are portal polygons, not ordinary
-   wall polygons.
-2. The exact problematic polygons are marked `NoPos`.
-3. Retail has explicit portal drawing modes and portal polygon draw passes.
-4. Retail env-cell drawing is not equivalent to our current positive-side
-   triangle-soup conversion.
-5. ACViewer skips `NoPos` polygons for env-cell rendering.
-6. Holtburger must eventually model polygon side semantics (`NoPos`, `NoNeg`,
-   `sidesType`, positive/negative surfaces and UVs), not only polygon IDs.
-
-## Working Interpretation
-
-The artifact is not purely caused by missing stencil/masking. Retail does use
-portal-specific view/depth behavior, but the specific door-frame wall is also
-geometry that the data marks as portal/no-positive-side.
-
-The most likely root issue in the simplified renderer is that it treats a
-portal `NoPos` polygon as an ordinary positive-side render polygon. That is
-not faithful to retail side semantics.
-
-The correct long-term renderer should:
-
-- Preserve portal polygons as aperture metadata.
-- Use portal polygons for visibility traversal, clipping, and depth/mask
-  passes.
-- Render ordinary polygon sides according to `stippling` and `sidesType`.
-- Avoid converting absent polygon sides into visible mesh triangles.
-
-## Open Questions
-
-The following questions still need proof before a final implementation:
-
-1. Should all `NoPos` env-cell polygons be omitted from the positive render
-   mesh, or are there cases where retail draws them through a negative-side
-   pass?
-2. Should `NoNeg` be handled symmetrically when rendering the negative side of
-   two-sided geometry?
-3. Are building `GfxObj` drawing BSP `PortalPoly` records always non-renderable
-   apertures, or only in the building portal render path?
-4. Does retail's built-mesh path pre-strip `NoPos` or portal polygons, or does
-   it encode side/mask behavior into the built mesh?
-5. Does `holtburger-3d` currently cache prepared assets in a way that can make
-   geometry filtering changes appear stale until the worker/app restarts?
-
-## Recommended Next Investigation
-
-Before making another behavioral change, inspect the actual prepared geometry
-for `environment/0d000364` in the running browser app:
-
-- Confirm whether `CellStruct 1` `renderGeometry.triangles` contains polygon
-  `6` or `7`.
-- Confirm whether `CellStruct 0` `renderGeometry.triangles` contains polygon
-  `34`.
-- Confirm whether the visible wall is part of a structured interior mesh or a
-  static building `GfxObj` mesh.
-- Confirm the selected mesh object's `spatialItemId` and source asset ID when
-  clicking the face.
-
-If the prepared environment geometry still contains polygon `6` or `34`, then
-the current portal-polygon exclusion is incomplete or stale. If it does not,
-then the artifact is coming from another geometry source or from missing
-portal/depth behavior.
+This document separates authored Asheron's Call portal facts, host-proven derived facts, runtime
+spatial queries, and `holtburger-3d` renderer policy. Those are related, but they are not
+interchangeable.
 
+World-magic portals are unrelated to this document.
+
+## Source Records
+
+An indoor `EnvCell` record contains:
+
+- an Environment and CellStruct selector;
+- the cell's landblock-space placement;
+- surface IDs selected for that CellStruct instance;
+- directed portal records;
+- a potentially-visible cell list; and
+- optional static residents.
+
+Each EnvCell portal record carries `flags`, `polygon_id`, `other_cell_id`, and
+`other_portal_id`. Flag `0x04` marks an outside endpoint. Flag `0x01` is the retail
+`ExactMatch` fact used below. Flag `0x02` selects the positive accepted plane side; without it the
+directed crossing accepts the negative side.
+
+An `Environment` record contains reusable CellStructs. A CellStruct contains a vertex array,
+surface-bearing polygons, a list of portal polygon IDs, a Cell BSP, physics polygons/BSP, and an
+optional drawing BSP.
+
+Primary implementation references:
+
+- `crates/holtburger-dat/src/file_type/env_cell.rs`
+- `crates/holtburger-dat/src/file_type/environment.rs`
+- `crates/holtburger-content/src/interior.rs`
+- `apps/holtburger-3d/src-tauri/src/cell_struct_projection.rs`
+- `apps/holtburger-3d/src-tauri/src/env_cell_source.rs`
+- retail `CCellPortal::UnPack`, `CCellStruct::point_in_cell`, `PView::DrawCells`, and
+  `D3DPolyRender::DrawPortalPolyInternal` in `acclient-eor-source/acclient.c`
+
+## CellStruct Surfaces and Apertures
+
+CellStruct geometry is reusable, but its surface slots are selected by each EnvCell. Holtburger
+therefore shares geometry while retaining per-cell material bindings and placement.
+
+Polygon sides are projected independently. A side with no surface is not invented as visible
+geometry. This handles the `NoPos`/`NoNeg` family of source semantics without treating a portal
+polygon as an ordinary textured wall.
+
+Portal polygons are also projected as separate material-free apertures:
+
+- three or more authored vertices;
+- fan-triangulated indices;
+- a normalized planar equation;
+- finite bounds; and
+- a stable authored identity.
+
+A polygon may contribute a visible, surface-bearing side and also name an aperture. The aperture
+itself never receives a texture or material range.
+
+Portal polygons are planar but are not assumed to be rectangular or axis-aligned.
+
+## Directed Topology
+
+Portal topology is directed. An EnvCell portal names a target cell and portal selector, but a
+reciprocal relationship is accepted only when the target record points back to the source.
+
+Outside EnvCell endpoints may be claimed by a landblock building portal. A unique valid claim
+creates the outdoor-to-indoor direction using the building GfxObj's authored portal aperture. The
+EnvCell record supplies the indoor-to-outdoor direction. An unclaimed outside endpoint remains
+explicit; the runtime can prevent an outdoor segment query from silently crossing that unavailable
+boundary.
+
+Every directed crossing retains:
+
+- source and target scopes;
+- source aperture;
+- accepted plane side;
+- `ExactMatch`;
+- reciprocal identity when proven; and
+- its spatial relationship: indoor depth-continuous, indoor topology boundary, or exterior
+  transition.
+
+## What `ExactMatch` Means Here
+
+`ExactMatch` is an authored portal flag, not a promise that Holtburger may blindly merge two
+cells. A reciprocal indoor seam is classified as ordinary depth-continuous only when all of these
+are proven:
+
+1. reciprocal record identity;
+2. `ExactMatch` on both directed records;
+3. equivalent transformed aperture geometry;
+4. opposed accepted half-spaces; and
+5. both cell bounds stay on their expected sides of the portal plane.
+
+Failure of any proof preserves an indoor topology boundary and its reason. Depth-continuous seams
+form renderer scheduling islands because ordinary depth can resolve their geometry without a
+mask.
+
+## Effective Visibility Apertures
+
+Spatial queries must use authored apertures. Rendering sometimes needs a stricter aperture.
+
+For an exact crossing, or one whose reciprocal cannot be proven, the effective visibility aperture
+is the authored source aperture. For a non-`ExactMatch` reciprocal pair, the app-local host
+intersects the two coplanar authored apertures once and serializes the result as a distinct
+material-free effective aperture. Static provenance records the reciprocal aperture and
+intersection evidence.
+
+This preprocessing occurs while producing the HBEC v2 source record. It is not repeated per frame.
+It does not modify authored crossing geometry, Cell BSP containment, collision, or movement
+queries.
+
+Malformed, non-coplanar, or over-tolerance reciprocal intersections fail source production rather
+than falling back to a larger leaky window.
+
+## Potentially-Visible Lists
+
+The EnvCell `visible_cells` list is preserved as potentially-visible source data. It is useful as
+preload or candidate provenance, but it is not a hard rejection filter for portal traversal.
+Runtime visibility follows proven directed topology and per-view aperture windows.
+
+## Runtime Spatial Queries
+
+Point lookup is deliberately not a first-match operation:
+
+1. world position chooses the outdoor landblock candidate;
+2. EnvCell AABBs provide a broad phase, including cells from neighboring resident landblocks;
+3. the Cell BSP positive-child plane chain supplies an exact containment verdict; and
+4. every candidate is returned so overlapping/non-Euclidean ambiguity is preserved.
+
+Explorer initial placement may choose from these facts because it has no portal-crossing history.
+A future game client should instead retain authoritative actor residency and use directed segment
+tracing for camera or motion endpoints.
+
+Directed segment tracing:
+
+- starts from caller-supplied authoritative residency;
+- examines only outgoing crossings from the current scope;
+- rejects reverse-facing travel, plane touches, coplanar travel, and finite-aperture misses;
+- selects the earliest crossing;
+- preserves ambiguity when equal-time crossings disagree; and
+- uses authored apertures, never effective render intersections.
+
+These are query primitives, not a player or third-person camera controller.
+
+## Per-View Portal Planning
+
+Portal rendering starts from the camera's supplied scope and full screen-space view window.
+For each reached render domain, the planner:
+
+1. considers source-keyed outgoing crossings;
+2. rejects apertures not facing the camera, except finite near-plane straddles;
+3. projects the effective visibility aperture;
+4. clips it through the incoming view window;
+5. admits only new, non-subsumed window coverage; and
+6. records a unique target render node plus an incoming mask edge.
+
+Windows are renderer-local visibility geometry. Scene meshes are not CPU-clipped. Ordinary scene
+selection still uses frustum tests over scope/culling-group/node bounds.
+
+A render node owns one outdoor domain or one proof-backed indoor visibility island. Alternate
+routes add incoming mask edges; they do not create another geometry owner. A boundary whose two
+endpoints already belong to the same island remains in authoritative topology but cannot add a
+useful render mask.
+
+The planner assigns render layers, identifies graph cycles, prepares the outdoor-containing
+component, and preflights the available eight-bit stencil labels. A work limit exists only as a
+failed-invariant guard; bounded window admission is the termination model.
+
+## Mask and Composition Execution
+
+The executor consumes the completed graph and derives no second topology or contribution plan.
+
+For each render layer:
+
+- every incoming effective aperture is drawn material-free into the same stencil label;
+- the union is completed before ordinary geometry is submitted;
+- depth is reset only inside that union when the target contribution requires a fresh scene
+  domain; and
+- every reached render node is submitted once.
+
+This is a layer-wide stencil union, not an increment/decrement mask stack. There is no paired
+source/target aperture protocol and no scratch stencil value.
+
+Internal masks use existing depth (`LEQUAL`) so nearer geometry can occlude an opening. The
+accepted browser matrix also covers opaque, alpha-tested, transparent, and additive contributions.
+
+## Outdoor Transitions
+
+Every admitted outdoor/indoor transition is masked. An apparently shallow entrance can lead to a
+cell below terrain one edge later, so an optimization that skips the transition mask based on the
+immediate cell is unsafe.
+
+The renderer owns two full-size color plus depth-stencil targets:
+
+- `exterior`: the outdoor scene-domain source; and
+- `composite`: the final assembled view.
+
+Exterior terrain, buildings, and objects render at most once for one view. Their color and depth
+are copied through transition masks into the composite target. Indoor suffixes that share the
+outdoor graph component are rendered into the reusable exterior target under their masks before
+composition. This preserves depth behavior without redrawing the outdoor scene through every
+portal.
+
+Targets are allocated lazily, reused at the same extent, replaced transactionally on resize, and
+destroyed with the renderer. Flat mode performs no target or portal work, although already
+allocated targets remain cached for cheap mode switching.
+
+## Near-Plane Straddles
+
+The unstable case is not the camera point touching a portal plane. It is the finite camera near
+plane intersecting the finite aperture.
+
+The renderer tests the near-plane quad against the aperture triangles. A real intersection seeds
+both adjacent render branches in the current parent region, preventing black/flickering regions
+while the near plane crosses the opening. This is stateless rendering policy and does not mutate
+camera or actor residency.
+
+Multi-portal corners use the same closure process. There is no fixed-hop rule, aperture-AABB
+shortcut, or camera-point slab.
+
+## Flat Inspection Mode
+
+Flat mode remains permanently selectable in the explorer. It selects outdoor plus every resident
+EnvCell scope, then runs the same culling-group and exact-node frustum tests as portal mode. It
+issues no portal planning, stencil masks, offscreen rendering, or composition.
+
+CellStruct shell ranges receive a flat-mode back-face culling override so a bird's-eye view can see
+interiors rather than opaque cell shells. Residents and outdoor objects retain their authored
+culling behavior.
+
+## Proven Scope and Deferred Work
+
+Proven by synthetic tests and selected archive/browser fixtures:
+
+- arbitrary planar, non-axis-aligned apertures;
+- authored/effective aperture separation;
+- reciprocal intersection preprocessing;
+- Cell BSP point containment;
+- directed finite-aperture segment tracing;
+- unique render nodes with layer-wide stencil unions;
+- indoor/outdoor cycles;
+- color/depth composition;
+- near-plane straddles;
+- flat/portal lifecycle stability; and
+- universal static detail roles for building, environment, and object materials.
+
+Deliberately deferred:
+
+- authoritative player movement and portal-crossing history;
+- third-person camera residency policy;
+- collision response;
+- using potentially-visible lists as preload policy;
+- portal-frustum planes in the scene spatial index; and
+- context restoration after WebGL context loss.

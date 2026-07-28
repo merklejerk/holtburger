@@ -1,17 +1,26 @@
 import {
 	createLandblockOffset,
 	getLandblockCoordinates,
-	type LandblockCoordinates,
 	OUTDOOR_LANDBLOCK_WORLD_SIZE,
 } from "../landblocks";
 import {
 	createPerspectiveMat4,
+	createTranslationMat4,
 	createViewMat4,
 	mat4ToFloat32Array,
+	multiplyMat4,
 	transformPoint3,
 } from "../math/matrices";
-import { createFrustum, type Frustum } from "../math/frustum";
+import { createFrustumFromClipMatrix, type Frustum } from "../math/frustum";
 import { Mat4, Vec3 } from "../math/types";
+import type { SceneNodeId, SceneScope } from "../scene";
+import { scopeFor } from "../scene/scope";
+import { createCameraNearPlaneQuad } from "./portal-near-plane";
+import {
+	PortalRenderGraphPlanner,
+	type PortalRenderGraphPlanResult,
+	type PortalRenderWorkPlan,
+} from "./portal-render-graph";
 import type { TerrainDrawUnit } from "../terrain/types";
 import type { StaticObjectDrawUnit } from "../commit/artifacts";
 import { TextureFilteringMode, TextureWrapMode } from "../textures/types";
@@ -53,6 +62,14 @@ import {
 	type TransparentStaticRange,
 } from "./object-rendering-policy";
 import type { WebGL2InstanceBufferBinding } from "./webgl2-instance-buffer";
+import { resolveStaticMaterialDetail } from "./static-detail-binding";
+import { WebGL2PortalSubstrate } from "./webgl2-portal-substrate";
+import type { PreparedPortalProjection } from "./portal-view-window";
+import {
+	executePortalGraph,
+	type PortalFrameDiagnostics,
+} from "./webgl2-portal-executor";
+import type { ResolvedPortalMask } from "./webgl2-portal-mask";
 
 const CLEAR_COLOR = {
 	red: 0.15,
@@ -63,6 +80,8 @@ const CLEAR_COLOR = {
 
 const DETAIL_FADE_NEAR = 10;
 const DETAIL_FADE_FAR = 50;
+/** Corruption guard only; fixed-point convergence, not this number, terminates valid planning. */
+const PORTAL_PLANNING_WORK_ITEM_LIMIT = 100_000;
 
 /** One visible landblock terrain source paired with selected renderer resources. */
 interface TerrainFrameInput {
@@ -74,6 +93,10 @@ interface TerrainFrameInput {
 
 /** One opaque or alpha-test static-object range paired with its resolved node placement. */
 interface ObjectFrameInput {
+	readonly source: "outdoor" | "env-cell-shell" | "env-cell-resident";
+	readonly cullFaceOverride:
+		| StaticObjectDrawUnit["material"]["polygon"]["cullFace"]
+		| null;
 	readonly drawKind: "baked" | "instanced";
 	readonly geometry: GeometryResourceKey;
 	readonly indexCount: number;
@@ -109,33 +132,78 @@ type AnyObjectProgram =
 	| WebGL2FogInstancedObjectProgram;
 
 /** Anchor-relative matrices and content reused by all passes for one view. */
-interface PreparedView {
-	/** Decoded landblock grid coordinates of the view's render-world origin. */
-	readonly anchorCoordinates: LandblockCoordinates;
+interface PreparedViewGeometry extends PreparedPortalProjection {
 	/** Camera position expressed in the view's anchor-relative render frame. */
 	readonly cameraPosition: Vec3;
 	/** Projection matrix derived from the current drawing-buffer aspect ratio. */
 	readonly projection: Mat4;
-	/** Terrain selected by this renderer from its RenderWorld. */
-	readonly terrain: readonly TerrainFrameInput[];
-	/** Opaque and alpha-test static-object ranges visible to this view. */
-	readonly objects: readonly ObjectFrameInput[];
+	/** Original camera frustum retained for topology and selected-scope culling. */
+	readonly frustum: Frustum;
 	/** Anchor-relative camera view transform. */
 	readonly view: Mat4;
 	/** Landblock defining the view's render-world origin. */
 	readonly anchorLandblockId: FrameInput["anchorLandblockId"];
 }
 
+/** Resolved scene contributions independent from flat or portal scheduling policy. */
+interface PreparedSceneContributions {
+	/** Terrain selected by this renderer from its RenderWorld. */
+	readonly terrain: readonly TerrainFrameInput[];
+	/** Opaque and alpha-test static-object ranges visible to this view. */
+	readonly objects: readonly ObjectFrameInput[];
+}
+
+/** Anchor-relative matrices and content reused by all passes for one view. */
+interface PreparedView
+	extends PreparedViewGeometry, PreparedSceneContributions {}
+
+/** Read-only Gate-E evidence from the final pure portal planner and shared scene query. */
+export interface PortalRenderGraphProbeResult {
+	readonly planningDurationMs: number;
+	readonly result: PortalRenderGraphPlanResult;
+	readonly selectedSceneEntryCount: number | null;
+}
+
+/** Explicit portal-graph execution evidence without enabling the public portal render mode. */
+export interface PortalExecutionProbeResult {
+	readonly diagnostics: PortalFrameDiagnostics | null;
+	readonly planningDurationMs: number;
+	readonly result: PortalRenderGraphPlanResult;
+	/** Selection and submission facts sampled immediately after the explicit execution. */
+	readonly selectionMetrics: FrameSelectionMetrics | null;
+}
+
 /** Mutable backing state copied only when Explorer samples renderer diagnostics. */
 interface MutableFrameSelectionMetrics {
+	envCellRenderMode: FrameInput["frameSettings"]["envCellRenderMode"];
 	viewCount: number;
 	visibleSceneEntries: number;
-	visiblePortalCrossings: number;
 	terrainFrameInputs: number;
 	visibleStaticLayerCount: number;
 	visibleStaticNodeCount: number;
 	visibleDynamics: number;
 	visibleEnvCellShells: number;
+	visibleEnvCellScopeCount: number;
+	visibleEnvCellResidentNodes: number;
+	submittedEnvCellShellDrawCount: number;
+	submittedEnvCellShellTriangleCount: number;
+	submittedEnvCellResidentDrawCount: number;
+	submittedEnvCellResidentTriangleCount: number;
+	envCellShellCullOverrideCount: number;
+	submittedPortalApertureDrawCount: number;
+	portalMaskEdgeCount: number;
+	portalNearPlaneSeedCount: number;
+	portalRejectedFacingCrossingCount: number;
+	portalSameDomainBoundaryCrossingCount: number;
+	portalRenderLayerCount: number;
+	portalRenderNodeCount: number;
+	portalSubmittedRenderNodeCount: number;
+	portalExteriorRenderCount: number;
+	portalPlanningDurationMs: number;
+	portalExecutionDurationMs: number;
+	sceneDomainTargetCount: number;
+	sceneDomainTargetBytes: number;
+	portalCompositeCount: number;
 	submittedStaticObjectDrawCount: number;
 	submittedStaticObjectTriangleCount: number;
 	submittedBakedStaticObjectDrawCount: number;
@@ -171,8 +239,15 @@ export class WebGL2Renderer implements Renderer {
 	readonly #canvas: HTMLCanvasElement;
 	readonly #gl: WebGL2RenderingContext;
 	readonly #resources: WebGL2ResourceManager;
+	/** Device-wide guard preventing draws through any stale handle after context loss. */
+	readonly #assertDeviceReady: () => void;
 	readonly #frameInstances: FrameInstanceStreamArena;
+	/** Lazy portal mechanics; construction allocates no GPU target or shader resource. */
+	readonly #portalSubstrate: WebGL2PortalSubstrate;
+	/** Pure planner retaining only the immutable index for the active topology revision. */
+	readonly #portalRenderGraphPlanner = new PortalRenderGraphPlanner();
 	readonly #visibleStaticLayers = new Set<string>();
+	readonly #visibleEnvCellScopes = new Set<string>();
 	/** Read-only runtime gateway used to collect this renderer's frame submissions. */
 	readonly #world: RenderWorld;
 	readonly #terrainProgram: WebGL2TerrainProgram;
@@ -185,11 +260,32 @@ export class WebGL2Renderer implements Renderer {
 	readonly #objectFallbackTexture: WebGLTexture;
 	/** Reused per-frame diagnostics; cold reads return a copied snapshot. */
 	readonly #frameSelectionMetrics: MutableFrameSelectionMetrics = {
+		envCellRenderMode: "flat",
 		terrainFrameInputs: 0,
 		viewCount: 0,
 		visibleDynamics: 0,
 		visibleEnvCellShells: 0,
-		visiblePortalCrossings: 0,
+		visibleEnvCellScopeCount: 0,
+		visibleEnvCellResidentNodes: 0,
+		submittedEnvCellShellDrawCount: 0,
+		submittedEnvCellShellTriangleCount: 0,
+		submittedEnvCellResidentDrawCount: 0,
+		submittedEnvCellResidentTriangleCount: 0,
+		envCellShellCullOverrideCount: 0,
+		submittedPortalApertureDrawCount: 0,
+		portalMaskEdgeCount: 0,
+		portalNearPlaneSeedCount: 0,
+		portalRejectedFacingCrossingCount: 0,
+		portalSameDomainBoundaryCrossingCount: 0,
+		portalRenderLayerCount: 0,
+		portalRenderNodeCount: 0,
+		portalSubmittedRenderNodeCount: 0,
+		portalExteriorRenderCount: 0,
+		portalPlanningDurationMs: 0,
+		portalExecutionDurationMs: 0,
+		sceneDomainTargetCount: 0,
+		sceneDomainTargetBytes: 0,
+		portalCompositeCount: 0,
 		visibleSceneEntries: 0,
 		visibleStaticLayerCount: 0,
 		visibleStaticNodeCount: 0,
@@ -225,8 +321,9 @@ export class WebGL2Renderer implements Renderer {
 		gl: WebGL2RenderingContext,
 		resources: WebGL2ResourceManager,
 		world: RenderWorld,
+		assertDeviceReady: () => void,
 	): Promise<WebGL2Renderer> {
-		return new WebGL2Renderer(canvas, gl, resources, world);
+		return new WebGL2Renderer(canvas, gl, resources, world, assertDeviceReady);
 	}
 
 	protected constructor(
@@ -234,11 +331,14 @@ export class WebGL2Renderer implements Renderer {
 		gl: WebGL2RenderingContext,
 		resources: WebGL2ResourceManager,
 		world: RenderWorld,
+		assertDeviceReady: () => void,
 	) {
 		this.#canvas = canvas;
 		this.#gl = gl;
 		this.#resources = resources;
+		this.#assertDeviceReady = assertDeviceReady;
 		this.#frameInstances = new FrameInstanceStreamArena(gl);
+		this.#portalSubstrate = new WebGL2PortalSubstrate(gl);
 		this.#world = world;
 		this.#terrainProgram = createWebGL2TerrainProgram(gl);
 		this.#objectProgram = createWebGL2ObjectProgram(gl);
@@ -264,22 +364,46 @@ export class WebGL2Renderer implements Renderer {
 	}
 
 	drawFrame(input: FrameInput): void {
+		this.#assertDeviceReady();
 		this.#resizeCanvasForDpr();
-		this.#resetFrameSelectionMetrics(input.views.length);
+		this.#resetFrameSelectionMetrics(
+			input.views.length,
+			input.frameSettings.envCellRenderMode,
+		);
 		const fog = input.frameSettings.distanceFogEnabled
 			? input.environment.distanceFog
 			: null;
 		this.#beginFrame(input.environment, fog);
-		for (const view of input.views) {
-			this.#drawView(this.#prepareView(input.anchorLandblockId, view), fog);
+		if (input.frameSettings.envCellRenderMode === "flat") {
+			for (const view of input.views) {
+				this.#drawView(
+					this.#prepareView(input.anchorLandblockId, view, "flat"),
+					fog,
+				);
+			}
+		} else {
+			const clear = fog?.color ?? input.environment.backgroundColor;
+			const clearColor = [
+				clear.red,
+				clear.green,
+				clear.blue,
+				clear.alpha,
+			] as const;
+			for (const view of input.views) {
+				this.#drawPortalView(
+					this.#prepareViewGeometry(input.anchorLandblockId, view),
+					view,
+					clearColor,
+					fog,
+				);
+			}
 		}
-		const arena = this.#frameInstances.getDiagnostics();
-		this.#frameSelectionMetrics.visibleStaticLayerCount =
-			this.#visibleStaticLayers.size;
-		this.#frameSelectionMetrics.frameInstanceCapacity = arena.capacity;
-		this.#frameSelectionMetrics.frameInstanceGrowthCount = arena.growthCount;
-		this.#frameSelectionMetrics.frameInstanceViewHighWaterMark =
-			arena.viewHighWaterMark;
+		const portalTargets = this.#portalSubstrate.getDiagnostics();
+		this.#frameSelectionMetrics.sceneDomainTargetCount =
+			portalTargets.activeTargetCount;
+		this.#frameSelectionMetrics.sceneDomainTargetBytes =
+			portalTargets.activeBytes;
+		this.#finishFrameSelectionMetrics();
 		void input.timeSeconds;
 	}
 
@@ -287,7 +411,205 @@ export class WebGL2Renderer implements Renderer {
 		return { ...this.#frameSelectionMetrics };
 	}
 
+	/** Plan and execute one production portal view from its authoritative camera residency. */
+	#drawPortalView(
+		prepared: PreparedViewGeometry,
+		viewInput: FrameViewInput,
+		clearColor: readonly [number, number, number, number],
+		fog: FrameInput["environment"]["distanceFog"],
+	): void {
+		const placement = viewInput.camera.placement;
+		const rootScope = scopeFor(placement.landblockId, placement.envCellId);
+		const { planningDurationMs, result } = this.#planPortalRenderGraph(
+			prepared,
+			viewInput,
+			rootScope,
+			PORTAL_PLANNING_WORK_ITEM_LIMIT,
+		);
+		this.#frameSelectionMetrics.portalPlanningDurationMs += planningDurationMs;
+		if (result.kind !== "planned") {
+			throw new Error(
+				`Portal frame planning failed ${result.reason}: required stencil ${result.requiredMaximumStencilValue}, work items ${result.workItemCount}.`,
+			);
+		}
+		const contributionsByNode = this.#collectPortalNodeContributions(
+			prepared,
+			result.plan,
+		);
+		const startedAt = performance.now();
+		const diagnostics = executePortalGraph(this.#portalSubstrate, {
+			clearColor,
+			destination: null,
+			extent: { height: this.#frameHeight, width: this.#frameWidth },
+			plan: result.plan,
+			renderExterior: () => {
+				const outdoorNodeId = result.plan.exteriorComponent?.outdoorNodeId;
+				if (!outdoorNodeId) {
+					throw new Error(
+						"Portal executor requested exterior rendering without an outdoor graph node.",
+					);
+				}
+				const contributions = mergePortalNodeContributions(
+					[outdoorNodeId],
+					contributionsByNode,
+				);
+				this.#drawView({ ...prepared, ...contributions }, fog);
+			},
+			renderIndoorNodes: (_target, renderNodeIds) => {
+				const contributions = mergePortalNodeContributions(
+					renderNodeIds,
+					contributionsByNode,
+				);
+				this.#drawView({ ...prepared, ...contributions }, fog);
+			},
+			resolveVisibilityAperture: (apertureId, crossingId) =>
+				this.#resolvePortalMask(prepared, apertureId, crossingId),
+		});
+		this.#frameSelectionMetrics.portalExecutionDurationMs +=
+			performance.now() - startedAt;
+		this.#accumulatePortalDiagnostics(diagnostics);
+		const portalTargets = this.#portalSubstrate.getDiagnostics();
+		this.#frameSelectionMetrics.sceneDomainTargetCount =
+			portalTargets.activeTargetCount;
+		this.#frameSelectionMetrics.sceneDomainTargetBytes =
+			portalTargets.activeBytes;
+	}
+
+	/** Aggregate one independent view's consumed graph facts into the frame snapshot. */
+	#accumulatePortalDiagnostics(diagnostics: PortalFrameDiagnostics): void {
+		const metrics = this.#frameSelectionMetrics;
+		metrics.submittedPortalApertureDrawCount += diagnostics.maskDrawCount;
+		metrics.portalMaskEdgeCount += diagnostics.maskEdgeCount;
+		metrics.portalNearPlaneSeedCount += diagnostics.nearPlaneSeedCount;
+		metrics.portalRejectedFacingCrossingCount +=
+			diagnostics.rejectedFacingCrossingCount;
+		metrics.portalSameDomainBoundaryCrossingCount +=
+			diagnostics.sameDomainBoundaryCrossingCount;
+		metrics.portalRenderLayerCount += diagnostics.renderLayerCount;
+		metrics.portalRenderNodeCount += diagnostics.renderNodeCount;
+		metrics.portalSubmittedRenderNodeCount +=
+			diagnostics.submittedRenderNodeCount;
+		metrics.portalExteriorRenderCount += diagnostics.exteriorRenderCount;
+		metrics.portalCompositeCount += diagnostics.exteriorCompositeCount;
+	}
+
+	/**
+	 * Exercise final portal planning without allocating targets or activating portal drawing.
+	 *
+	 * The returned culling count consumes the same explicit-scope SceneGraph query that Phase 12
+	 * will use, preventing the diagnostic seam from inventing a parallel selection policy.
+	 */
+	probePortalRenderGraph(
+		anchorLandblockId: FrameInput["anchorLandblockId"],
+		viewInput: FrameViewInput,
+		rootScope: SceneScope,
+		safetyWorkItemLimit: number,
+	): PortalRenderGraphProbeResult {
+		this.#assertDeviceReady();
+		this.#resizeCanvasForDpr();
+		const prepared = this.#prepareViewGeometry(anchorLandblockId, viewInput);
+		const { planningDurationMs, result } = this.#planPortalRenderGraph(
+			prepared,
+			viewInput,
+			rootScope,
+			safetyWorkItemLimit,
+		);
+		const selectedSceneEntryCount =
+			result.kind === "planned"
+				? this.#world.queryScopesScene(
+						prepared.frustum,
+						anchorLandblockId,
+						result.plan.selectedScopes,
+					).entries.length
+				: null;
+		return { planningDurationMs, result, selectedSceneEntryCount };
+	}
+
+	/**
+	 * Execute one complete graph through production contribution and GPU paths.
+	 *
+	 * This explicit harness seam returns one-shot planning and execution facts without changing the
+	 * continuous frame mode.
+	 */
+	probePortalExecution(
+		anchorLandblockId: FrameInput["anchorLandblockId"],
+		viewInput: FrameViewInput,
+		rootScope: SceneScope,
+		safetyWorkItemLimit: number,
+	): PortalExecutionProbeResult {
+		this.#assertDeviceReady();
+		this.#resizeCanvasForDpr();
+		const prepared = this.#prepareViewGeometry(anchorLandblockId, viewInput);
+		const { planningDurationMs, result } = this.#planPortalRenderGraph(
+			prepared,
+			viewInput,
+			rootScope,
+			safetyWorkItemLimit,
+		);
+		if (result.kind !== "planned") {
+			return {
+				diagnostics: null,
+				planningDurationMs,
+				result,
+				selectionMetrics: null,
+			};
+		}
+		this.#resetFrameSelectionMetrics(1, "portal");
+		const contributionsByNode = this.#collectPortalNodeContributions(
+			prepared,
+			result.plan,
+		);
+		const diagnostics = executePortalGraph(this.#portalSubstrate, {
+			clearColor: [
+				CLEAR_COLOR.red,
+				CLEAR_COLOR.green,
+				CLEAR_COLOR.blue,
+				CLEAR_COLOR.alpha,
+			],
+			destination: null,
+			extent: { height: this.#frameHeight, width: this.#frameWidth },
+			plan: result.plan,
+			renderExterior: () => {
+				const outdoorNodeId = result.plan.exteriorComponent?.outdoorNodeId;
+				if (!outdoorNodeId) {
+					throw new Error(
+						"Portal executor requested exterior rendering without an outdoor graph node.",
+					);
+				}
+				const contributions = mergePortalNodeContributions(
+					[outdoorNodeId],
+					contributionsByNode,
+				);
+				this.#drawView({ ...prepared, ...contributions }, null);
+			},
+			renderIndoorNodes: (_target, renderNodeIds) => {
+				const contributions = mergePortalNodeContributions(
+					renderNodeIds,
+					contributionsByNode,
+				);
+				this.#drawView({ ...prepared, ...contributions }, null);
+			},
+			resolveVisibilityAperture: (apertureId, crossingId) =>
+				this.#resolvePortalMask(prepared, apertureId, crossingId),
+		});
+		this.#accumulatePortalDiagnostics(diagnostics);
+		const portalTargets = this.#portalSubstrate.getDiagnostics();
+		this.#frameSelectionMetrics.sceneDomainTargetCount =
+			portalTargets.activeTargetCount;
+		this.#frameSelectionMetrics.sceneDomainTargetBytes =
+			portalTargets.activeBytes;
+		this.#frameSelectionMetrics.portalPlanningDurationMs = planningDurationMs;
+		this.#finishFrameSelectionMetrics();
+		return {
+			diagnostics,
+			planningDurationMs,
+			result,
+			selectionMetrics: this.getFrameSelectionMetrics(),
+		};
+	}
+
 	async destroy(): Promise<void> {
+		this.#portalSubstrate.destroy();
 		this.#gl.deleteProgram(this.#terrainProgram.program);
 		this.#gl.deleteProgram(this.#objectProgram.program);
 		this.#gl.deleteProgram(this.#instancedObjectProgram.program);
@@ -319,7 +641,25 @@ export class WebGL2Renderer implements Renderer {
 	#prepareView(
 		anchorLandblockId: FrameInput["anchorLandblockId"],
 		input: FrameViewInput,
+		envCellRenderMode: FrameInput["frameSettings"]["envCellRenderMode"],
 	): PreparedView {
+		const prepared = this.#prepareViewGeometry(anchorLandblockId, input);
+		const collected = this.#collectScene(
+			anchorLandblockId,
+			prepared.frustum,
+			envCellRenderMode,
+		);
+		return {
+			...prepared,
+			objects: collected.objects,
+			terrain: collected.terrain,
+		};
+	}
+
+	#prepareViewGeometry(
+		anchorLandblockId: FrameInput["anchorLandblockId"],
+		input: FrameViewInput,
+	): PreparedViewGeometry {
 		const camera = input.camera;
 		const anchorCoordinates = getLandblockCoordinates(anchorLandblockId);
 		const anchorOriginX = anchorCoordinates.x * OUTDOOR_LANDBLOCK_WORLD_SIZE;
@@ -337,53 +677,176 @@ export class WebGL2Renderer implements Renderer {
 			camera.far,
 		);
 		const view = createViewMat4(cameraPosition, camera.placement.rotation);
-		const collected = this.#collectScene(
-			camera,
-			anchorLandblockId,
-			createFrustum(projection, view, cameraPosition),
-		);
+		const clipFromAnchor = multiplyMat4(projection, view);
 		return {
 			anchorCoordinates,
 			anchorLandblockId,
 			cameraPosition,
+			clipFromAnchor,
+			frustum: createFrustumFromClipMatrix(clipFromAnchor, cameraPosition),
 			projection,
-			objects: collected.objects,
-			terrain: collected.terrain,
 			view,
 		};
 	}
 
+	#planPortalRenderGraph(
+		prepared: PreparedViewGeometry,
+		viewInput: FrameViewInput,
+		rootScope: SceneScope,
+		safetyWorkItemLimit: number,
+	): {
+		readonly planningDurationMs: number;
+		readonly result: PortalRenderGraphPlanResult;
+	} {
+		const aspectRatio = this.#frameWidth / Math.max(1, this.#frameHeight);
+		const nearPlane = createCameraNearPlaneQuad(
+			{
+				...viewInput.camera,
+				placement: {
+					...viewInput.camera.placement,
+					landblockId: prepared.anchorLandblockId,
+					position: prepared.cameraPosition,
+				},
+			},
+			aspectRatio,
+		).aperture;
+		const stencilBits = this.#gl.getParameter(this.#gl.STENCIL_BITS) as number;
+		const maximumStencilValue = Math.min(0xff, 2 ** stencilBits - 1);
+		const startedAt = performance.now();
+		const result = this.#portalRenderGraphPlanner.plan(
+			this.#world.getPortalTopologyView(),
+			{
+				...prepared,
+				maximumStencilValue,
+				nearPlane,
+				rootScope,
+				safetyWorkItemLimit,
+			},
+		);
+		return {
+			planningDurationMs: performance.now() - startedAt,
+			result,
+		};
+	}
+
+	/** Resolve each unique graph node through the shared explicit-scope scene query exactly once. */
+	#collectPortalNodeContributions(
+		prepared: PreparedViewGeometry,
+		plan: PortalRenderWorkPlan,
+	): ReadonlyMap<string, PreparedSceneContributions> {
+		const contributionsByNode = new Map<string, PreparedSceneContributions>();
+		const claimedSceneNodes = new Set<SceneNodeId>();
+		for (const node of plan.nodes) {
+			const visible = this.#world.queryScopesScene(
+				prepared.frustum,
+				prepared.anchorLandblockId,
+				node.scopes,
+			);
+			for (const sceneNodeId of visible.entries) {
+				if (!claimedSceneNodes.add(sceneNodeId)) {
+					throw new Error(
+						`Portal scene node ${sceneNodeId} belongs to more than one render node.`,
+					);
+				}
+			}
+			contributionsByNode.set(
+				node.id,
+				this.#resolveSceneContributions(
+					prepared.anchorLandblockId,
+					visible.entries,
+					"portal",
+				),
+			);
+		}
+		if (contributionsByNode.size !== plan.nodes.length) {
+			throw new Error("Portal contribution collection lost a render node.");
+		}
+		return contributionsByNode;
+	}
+
+	/** Resolve one effective aperture in its owning landblock frame into this view's clip frame. */
+	#resolvePortalMask(
+		prepared: PreparedViewGeometry,
+		apertureId: PortalRenderWorkPlan["maskEdges"][number]["visibilityApertureId"],
+		crossingId: PortalRenderWorkPlan["maskEdges"][number]["crossingId"],
+	): ResolvedPortalMask {
+		const drawUnit = this.#world.getPortalDrawUnit(apertureId);
+		if (!drawUnit) {
+			throw new Error(
+				`Portal crossing ${crossingId} cannot resolve visibility aperture ${apertureId}.`,
+			);
+		}
+		const resolved = this.#world.resolvePortalDrawUnit(drawUnit);
+		const landblockOffset = createLandblockOffset(
+			getLandblockCoordinates(drawUnit.landblockId),
+			prepared.anchorCoordinates,
+		);
+		const anchorFromLandblock = createTranslationMat4(landblockOffset);
+		const clipFromLocal = multiplyMat4(
+			prepared.clipFromAnchor,
+			anchorFromLandblock,
+		);
+		return {
+			clipFromLocal: mat4ToFloat32Array(clipFromLocal),
+			geometry: this.#resources.getGeometry(resolved.geometry),
+			indexCount: resolved.drawUnit.indexCount,
+			indexStart: resolved.drawUnit.indexStart,
+		};
+	}
+
 	#collectScene(
-		camera: FrameViewInput["camera"],
 		anchorLandblockId: FrameInput["anchorLandblockId"],
 		frustum: Frustum,
-	): {
-		readonly terrain: readonly TerrainFrameInput[];
-		readonly objects: readonly ObjectFrameInput[];
-	} {
+		envCellRenderMode: FrameInput["frameSettings"]["envCellRenderMode"],
+	): PreparedSceneContributions {
+		const visible = this.#world.queryFlatScene(frustum, anchorLandblockId);
+		return this.#resolveSceneContributions(
+			anchorLandblockId,
+			visible.entries,
+			envCellRenderMode,
+		);
+	}
+
+	/**
+	 * Resolve already-selected scene identities without importing flat or portal topology policy.
+	 *
+	 * Callers must consume a SceneGraph query's reused entry buffer before issuing another query.
+	 */
+	#resolveSceneContributions(
+		anchorLandblockId: FrameInput["anchorLandblockId"],
+		visibleEntries: readonly SceneNodeId[],
+		envCellRenderMode: FrameInput["frameSettings"]["envCellRenderMode"],
+	): PreparedSceneContributions {
 		const terrain: TerrainFrameInput[] = [];
 		const objects: ObjectFrameInput[] = [];
-		const visible = this.#world.queryVisibleScene(
-			camera,
-			frustum,
-			anchorLandblockId,
-		);
-		this.#frameSelectionMetrics.visibleSceneEntries += visible.entries.length;
-		this.#frameSelectionMetrics.visiblePortalCrossings +=
-			visible.crossings.length;
-		for (const nodeId of visible.entries) {
+		this.#frameSelectionMetrics.visibleSceneEntries += visibleEntries.length;
+		for (const nodeId of visibleEntries) {
 			const contribution = this.#world.getRenderContribution(
 				nodeId,
 				anchorLandblockId,
 			);
 			if (!contribution) continue;
 			if (contribution.kind === "static-object") {
-				this.#visibleStaticLayers.add(contribution.cullingGroup);
 				this.#frameSelectionMetrics.visibleStaticNodeCount += 1;
+				const source =
+					contribution.cullingGroup === "env-cell-static-residents"
+						? "env-cell-resident"
+						: "outdoor";
+				if (source === "env-cell-resident") {
+					this.#frameSelectionMetrics.visibleEnvCellResidentNodes += 1;
+				}
 				const node = this.#world.resolveStaticObjectNode(
 					nodeId,
 					contribution.renderable,
 				);
+				this.#visibleStaticLayers.add(
+					`${node.placement.scope.kind === "outdoor" ? "outdoor" : `${node.placement.scope.landblockId}/${node.placement.scope.envCellId}`}/${contribution.cullingGroup}`,
+				);
+				if (node.placement.scope.kind === "env-cell") {
+					this.#visibleEnvCellScopes.add(
+						`${node.placement.scope.landblockId}/${node.placement.scope.envCellId}`,
+					);
+				}
 				for (const resolved of node.drawUnits) {
 					const { drawUnit } = resolved;
 					if (
@@ -395,6 +858,7 @@ export class WebGL2Renderer implements Renderer {
 						);
 					}
 					objects.push({
+						cullFaceOverride: null,
 						drawKind: drawUnit.kind,
 						geometry: resolved.geometry,
 						indexCount: drawUnit.indexCount,
@@ -407,12 +871,14 @@ export class WebGL2Renderer implements Renderer {
 						localToLandblock: node.placement.localToLandblock,
 						material: drawUnit.material,
 						ordering: drawUnit.ordering,
+						source,
 						transparentSort: drawUnit.transparentSort,
 					});
 				}
 				for (const resolved of node.frameStreamedInstances) {
 					const { template } = resolved;
 					objects.push({
+						cullFaceOverride: null,
 						drawKind: "instanced",
 						geometry: resolved.geometry,
 						indexCount: template.indexCount,
@@ -426,6 +892,7 @@ export class WebGL2Renderer implements Renderer {
 						localToLandblock: node.placement.localToLandblock,
 						material: template.material,
 						ordering: "transparent",
+						source,
 						transparentSort: template.transparentSort,
 					});
 				}
@@ -438,7 +905,35 @@ export class WebGL2Renderer implements Renderer {
 			}
 			if (contribution.kind === "env-cell") {
 				this.#frameSelectionMetrics.visibleEnvCellShells += 1;
-				void this.#world.resolveEnvCellRenderable(contribution.renderable);
+				const node = this.#world.resolveEnvCellNode(
+					nodeId,
+					contribution.renderable,
+				);
+				if (node.placement.scope.kind !== "env-cell") {
+					throw new Error(`EnvCell shell ${nodeId} has outdoor residency.`);
+				}
+				this.#visibleEnvCellScopes.add(
+					`${node.placement.scope.landblockId}/${node.placement.scope.envCellId}`,
+				);
+				this.#visibleStaticLayers.add(
+					`${node.placement.scope.landblockId}/${node.placement.scope.envCellId}/env-cell-shell`,
+				);
+				for (const resolved of node.drawUnits) {
+					objects.push({
+						cullFaceOverride: envCellRenderMode === "flat" ? "back" : null,
+						drawKind: "baked",
+						geometry: resolved.geometry,
+						indexCount: resolved.drawUnit.indexCount,
+						indexStart: resolved.drawUnit.indexStart,
+						instances: null,
+						landblockId: node.placement.landblockId,
+						localToLandblock: node.placement.localToLandblock,
+						material: resolved.drawUnit.material,
+						ordering: resolved.drawUnit.ordering,
+						source: "env-cell-shell",
+						transparentSort: resolved.drawUnit.transparentSort,
+					});
+				}
 				continue;
 			}
 			const { drawUnit } = contribution;
@@ -462,32 +957,44 @@ export class WebGL2Renderer implements Renderer {
 			});
 			this.#frameSelectionMetrics.terrainFrameInputs += 1;
 		}
-		for (const crossing of visible.crossings) {
-			const drawUnit = this.#world.getPortalDrawUnit(crossing.apertureId);
-			if (drawUnit) void this.#world.resolvePortalDrawUnit(drawUnit);
-		}
-		objects.sort((left, right) => {
-			if (left.ordering === "transparent" && right.ordering === "transparent") {
-				return 0;
-			}
-			const ordering = left.ordering.localeCompare(right.ordering);
-			if (ordering !== 0) return ordering;
-			return objectMaterialSortKey(left).localeCompare(
-				objectMaterialSortKey(right),
-			);
-		});
+		sortObjectFrameInputs(objects);
 		return { objects, terrain };
 	}
 
-	#resetFrameSelectionMetrics(viewCount: number): void {
+	#resetFrameSelectionMetrics(
+		viewCount: number,
+		envCellRenderMode: FrameInput["frameSettings"]["envCellRenderMode"],
+	): void {
 		const metrics = this.#frameSelectionMetrics;
+		metrics.envCellRenderMode = envCellRenderMode;
 		metrics.terrainFrameInputs = 0;
 		metrics.viewCount = viewCount;
 		metrics.visibleDynamics = 0;
 		metrics.visibleEnvCellShells = 0;
-		metrics.visiblePortalCrossings = 0;
+		metrics.visibleEnvCellScopeCount = 0;
+		metrics.visibleEnvCellResidentNodes = 0;
+		metrics.submittedEnvCellShellDrawCount = 0;
+		metrics.submittedEnvCellShellTriangleCount = 0;
+		metrics.submittedEnvCellResidentDrawCount = 0;
+		metrics.submittedEnvCellResidentTriangleCount = 0;
+		metrics.envCellShellCullOverrideCount = 0;
+		metrics.submittedPortalApertureDrawCount = 0;
+		metrics.portalMaskEdgeCount = 0;
+		metrics.portalNearPlaneSeedCount = 0;
+		metrics.portalRejectedFacingCrossingCount = 0;
+		metrics.portalSameDomainBoundaryCrossingCount = 0;
+		metrics.portalRenderLayerCount = 0;
+		metrics.portalRenderNodeCount = 0;
+		metrics.portalSubmittedRenderNodeCount = 0;
+		metrics.portalExteriorRenderCount = 0;
+		metrics.portalPlanningDurationMs = 0;
+		metrics.portalExecutionDurationMs = 0;
+		metrics.sceneDomainTargetCount = 0;
+		metrics.sceneDomainTargetBytes = 0;
+		metrics.portalCompositeCount = 0;
 		metrics.visibleSceneEntries = 0;
 		this.#visibleStaticLayers.clear();
+		this.#visibleEnvCellScopes.clear();
 		metrics.visibleStaticLayerCount = 0;
 		metrics.visibleStaticNodeCount = 0;
 		metrics.submittedStaticObjectDrawCount = 0;
@@ -513,6 +1020,19 @@ export class WebGL2Renderer implements Renderer {
 		metrics.frameInstanceViewHighWaterMark = 0;
 		metrics.objectProgramChanges = 0;
 		metrics.objectTexturePageBinds = 0;
+	}
+
+	/** Finish counters shared by ordinary frames and explicit portal execution probes. */
+	#finishFrameSelectionMetrics(): void {
+		const arena = this.#frameInstances.getDiagnostics();
+		this.#frameSelectionMetrics.visibleStaticLayerCount =
+			this.#visibleStaticLayers.size;
+		this.#frameSelectionMetrics.visibleEnvCellScopeCount =
+			this.#visibleEnvCellScopes.size;
+		this.#frameSelectionMetrics.frameInstanceCapacity = arena.capacity;
+		this.#frameSelectionMetrics.frameInstanceGrowthCount = arena.growthCount;
+		this.#frameSelectionMetrics.frameInstanceViewHighWaterMark =
+			arena.viewHighWaterMark;
 	}
 
 	#drawView(
@@ -865,7 +1385,9 @@ export class WebGL2Renderer implements Renderer {
 		}
 		const { material } = object;
 		const gl = this.#gl;
-		this.#configureObjectCulling(material.polygon.cullMode);
+		this.#configureObjectCulling(
+			object.cullFaceOverride ?? material.polygon.cullFace,
+		);
 		if (program.transformSource === "baked") {
 			gl.uniformMatrix4fv(
 				program.uniforms.localToLandblock,
@@ -976,8 +1498,10 @@ export class WebGL2Renderer implements Renderer {
 				gl.uniform1i(program.uniforms.palette, 1);
 			}
 		}
-		const detail = this.#world.resolveActiveRegionObjectDetail();
-		if (detail && (material.source.rawSurfaceFlags & 0x20000) !== 0) {
+		const detail = resolveStaticMaterialDetail(material, (role) =>
+			this.#world.resolveActiveRegionStaticDetail(role),
+		);
+		if (detail) {
 			const resource = this.#resources.getTexture2D(
 				this.#world.resolveTexture2D(detail.key),
 			);
@@ -1044,6 +1568,18 @@ export class WebGL2Renderer implements Renderer {
 		this.#frameSelectionMetrics.submittedStaticObjectDrawCount += 1;
 		this.#frameSelectionMetrics.submittedStaticObjectTriangleCount +=
 			sourceTriangleCount * submittedInstanceCount;
+		if (object.source === "env-cell-shell") {
+			this.#frameSelectionMetrics.submittedEnvCellShellDrawCount += 1;
+			this.#frameSelectionMetrics.submittedEnvCellShellTriangleCount +=
+				sourceTriangleCount;
+			if (object.cullFaceOverride !== null) {
+				this.#frameSelectionMetrics.envCellShellCullOverrideCount += 1;
+			}
+		} else if (object.source === "env-cell-resident") {
+			this.#frameSelectionMetrics.submittedEnvCellResidentDrawCount += 1;
+			this.#frameSelectionMetrics.submittedEnvCellResidentTriangleCount +=
+				sourceTriangleCount * submittedInstanceCount;
+		}
 		if (object.drawKind === "baked") {
 			this.#frameSelectionMetrics.submittedBakedStaticObjectDrawCount += 1;
 			this.#frameSelectionMetrics.submittedBakedStaticObjectTriangleCount +=
@@ -1148,15 +1684,11 @@ export class WebGL2Renderer implements Renderer {
 	}
 
 	#configureObjectCulling(
-		mode: StaticObjectDrawUnit["material"]["polygon"]["cullMode"],
+		cullFace: StaticObjectDrawUnit["material"]["polygon"]["cullFace"],
 	): void {
 		const gl = this.#gl;
-		if (mode === "double") {
-			gl.disable(gl.CULL_FACE);
-			return;
-		}
 		gl.enable(gl.CULL_FACE);
-		gl.cullFace(mode === "counter-clockwise" ? gl.FRONT : gl.BACK);
+		gl.cullFace(cullFace === "front" ? gl.FRONT : gl.BACK);
 	}
 
 	#configureObjectBlend(material: StaticObjectDrawUnit["material"]): void {
@@ -1206,6 +1738,52 @@ function validateDrawRange(
 			`Invalid geometry draw range ${indexStart}+${indexCount}/${binding.indexCount}.`,
 		);
 	}
+}
+
+/**
+ * Combine every unique render node assigned to one stencil layer before drawing its passes.
+ *
+ * Merging first preserves the renderer's global material and transparency ordering instead of
+ * accidentally treating each environment cell as an independent miniature scene.
+ */
+function mergePortalNodeContributions(
+	renderNodeIds: PortalRenderWorkPlan["renderLayers"][number]["renderNodeIds"],
+	contributionsByNode: ReadonlyMap<string, PreparedSceneContributions>,
+): PreparedSceneContributions {
+	const objects: ObjectFrameInput[] = [];
+	const terrain: TerrainFrameInput[] = [];
+	const consumedNodeIds = new Set<string>();
+	for (const renderNodeId of renderNodeIds) {
+		if (!consumedNodeIds.add(renderNodeId)) {
+			throw new Error(
+				`Portal render layer requests node ${renderNodeId} more than once.`,
+			);
+		}
+		const contributions = contributionsByNode.get(renderNodeId);
+		if (!contributions) {
+			throw new Error(
+				`Portal render layer cannot resolve contributions for ${renderNodeId}.`,
+			);
+		}
+		objects.push(...contributions.objects);
+		terrain.push(...contributions.terrain);
+	}
+	sortObjectFrameInputs(objects);
+	return { objects, terrain };
+}
+
+/** Cluster opaque state without disturbing transparent ranges before distance ordering. */
+function sortObjectFrameInputs(objects: ObjectFrameInput[]): void {
+	objects.sort((left, right) => {
+		if (left.ordering === "transparent" && right.ordering === "transparent") {
+			return 0;
+		}
+		const ordering = left.ordering.localeCompare(right.ordering);
+		if (ordering !== 0) return ordering;
+		return objectMaterialSortKey(left).localeCompare(
+			objectMaterialSortKey(right),
+		);
+	});
 }
 
 /** Retail sources encode translucency as either a unit float or a legacy byte-scale value. */
@@ -1268,7 +1846,7 @@ function objectMaterialSortKey(input: {
 		material.source.kind,
 		material.textures.base ?? "solid",
 		material.textures.palette ?? "none",
-		material.polygon.cullMode,
+		material.polygon.cullFace,
 		material.sampler.filtering,
 		material.sampler.wrap,
 	].join("|");

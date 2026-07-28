@@ -129,6 +129,28 @@ describe("StaticLayerRealizer", () => {
 		expect(atlas.events).toEqual(["prepare:1", "withdraw:1"]);
 	});
 
+	it("removes an exact published revision when atlas activation fails", async () => {
+		const atlas = new FakeAtlas();
+		atlas.failActivation = true;
+		const geometry = deferred<string>();
+		const publisher = new FakePublisher();
+		const realizer = createRealizer(
+			atlas,
+			geometry,
+			publisher,
+			new FakeCurrentness(),
+		);
+		const pending = realizer.realize(input());
+		atlas.resolve();
+		geometry.resolve("geometry");
+
+		await expect(pending).rejects.toThrow(
+			"failed to realize: activation failed",
+		);
+		expect(publisher.events).toEqual(["replace:buildings:1", "remove:1"]);
+		expect(atlas.events).toEqual(["prepare:1", "activate:1", "withdraw:1"]);
+	});
+
 	it("suppresses pending publication after shutdown", async () => {
 		const atlas = new FakeAtlas();
 		const geometry = deferred<string>();
@@ -252,12 +274,15 @@ function deferred<T>() {
 class FakeAtlas implements StaticLayerAtlas<"buildings"> {
 	events: string[] = [];
 	prepared = 0;
+	failActivation = false;
 	#resolve!: (result: AtlasRequirementCompletion) => void;
 	activateOwnerRevision(
 		handle: AtlasRequirementHandle<"buildings">,
 	): Promise<void> {
 		this.events.push(`activate:${handle.revision}`);
-		return Promise.resolve();
+		return this.failActivation
+			? Promise.reject(new Error("activation failed"))
+			: Promise.resolve();
 	}
 	evictOwnerRequirements(
 		_: "buildings",
@@ -297,7 +322,8 @@ class FakePublisher implements StaticLayerPublisher<string, "buildings"> {
 		this.events.push(`evict:${revision}`);
 		return Promise.resolve();
 	}
-	removeExact(): Promise<void> {
+	removeExact(_: "buildings", revision: SceneInterestRevision): Promise<void> {
+		this.events.push(`remove:${revision}`);
 		return Promise.resolve();
 	}
 	replace(o: {

@@ -6,24 +6,50 @@ import type {
 	TexturePreparationServiceRequest,
 	TexturePreparationServiceResponse,
 } from "../textures/texture-preparer";
-import { ActiveRegionObjectDetailOwner } from "./active-region-object-detail";
+import { ActiveRegionStaticDetailOwner } from "./active-region-static-detail";
 
-describe("ActiveRegionObjectDetailOwner", () => {
-	it("prepares the building role once, shares it, then releases it for replacement", async () => {
+describe("ActiveRegionStaticDetailOwner", () => {
+	it("prepares every static role once, shares the set, then releases it", async () => {
 		const pixels = new FakeTexturePixelSource();
-		const owner = new ActiveRegionObjectDetailOwner(pixels);
+		const owner = new ActiveRegionStaticDetailOwner(pixels);
 		const first = await owner.install(activeRegion(1));
 		const shared = await owner.install(activeRegion(1));
 
 		expect(shared).toBe(first);
-		expect(pixels.requests).toHaveLength(1);
-		expect(first.sourceAssetId).toBe("surface-texture/0x05000102");
-		expect(first.surface.format).toBe(TexturePixelFormat.RGBA8);
+		expect(pixels.requests).toHaveLength(3);
+		expect(first.roles.building.sourceAssetId).toBe(
+			"surface-texture/0x05000102",
+		);
+		expect(first.roles.environment.sourceAssetId).toBe(
+			"surface-texture/0x05000103",
+		);
+		expect(first.roles.object.sourceAssetId).toBe("surface-texture/0x05000104");
+		expect([
+			first.roles.building.tiling,
+			first.roles.environment.tiling,
+			first.roles.object.tiling,
+		]).toEqual([3, 4, 5]);
+		expect(
+			Object.values(first.roles).every(
+				({ surface }) => surface.format === TexturePixelFormat.RGBA8,
+			),
+		).toBe(true);
 
 		owner.teardown();
 		expect(owner.binding).toBeNull();
 		await owner.install(activeRegion(2));
-		expect(pixels.requests).toHaveLength(2);
+		expect(pixels.requests).toHaveLength(6);
+	});
+
+	it("fails the complete installation when an authored static role is missing", async () => {
+		const owner = new ActiveRegionStaticDetailOwner(
+			new FakeTexturePixelSource(),
+		);
+
+		await expect(owner.install(activeRegion(1, 3))).rejects.toThrow(
+			"no object detail texture role",
+		);
+		expect(owner.binding).toBeNull();
 	});
 });
 
@@ -51,7 +77,10 @@ class FakeTexturePixelSource implements TexturePixelSource {
 	}
 }
 
-function activeRegion(version: number): ActiveRegionSource {
+function activeRegion(
+	version: number,
+	detailRoleCount = 4,
+): ActiveRegionSource {
 	return {
 		provenance: {
 			sourceRecordId: "0x13000000",
@@ -93,19 +122,22 @@ function activeRegion(version: number): ActiveRegionSource {
 					cornerTerrainMaps: [],
 					sideTerrainMaps: [],
 					roadMaps: [],
-					terrainTextures: [0, 1, 2, 3].map((terrainType) => ({
-						terrainType,
-						colorTextureId: "0x05000001",
-						tiling: 1,
-						maxVertexBrightness: 0,
-						minVertexBrightness: 0,
-						maxVertexSaturation: 0,
-						minVertexSaturation: 0,
-						maxVertexHue: 0,
-						minVertexHue: 0,
-						detailTiling: 2,
-						detailTextureId: `0x0500010${terrainType + 1}`,
-					})),
+					terrainTextures: Array.from(
+						{ length: detailRoleCount },
+						(_, terrainType) => ({
+							terrainType,
+							colorTextureId: "0x05000001",
+							tiling: 1,
+							maxVertexBrightness: 0,
+							minVertexBrightness: 0,
+							maxVertexSaturation: 0,
+							minVertexSaturation: 0,
+							maxVertexHue: 0,
+							minVertexHue: 0,
+							detailTiling: terrainType + 2,
+							detailTextureId: `0x0500010${terrainType + 1}`,
+						}),
+					),
 				},
 			},
 		},

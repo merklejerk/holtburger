@@ -133,9 +133,11 @@ function drawUnit(strategy: "baked" | "instanced"): StaticObjectDrawUnit {
 
 function material(): StaticObjectMaterialBinding {
 	return {
+		detailRole: null,
 		palettedClipMap: false,
 		polygon: {
-			cullMode: "single",
+			authoredCullMode: "landblock",
+			cullFace: "back",
 			renderSide: "positive",
 			stippled: false,
 		},

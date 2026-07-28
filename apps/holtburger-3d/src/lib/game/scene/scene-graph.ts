@@ -16,15 +16,26 @@ import type {
 	ScenePlacement,
 	SceneEnvCellScopeInput,
 	ScenePortalCrossingInput,
+	ScenePortalTraceQuery,
+	ScenePortalTraceResult,
 	SceneScope,
+	SceneTopologyScope,
+	SceneTopologyView,
 	PortalCrossingId,
 	ResolvedScenePlacement,
-	SceneResidency,
+	ScenePointResidencyCandidates,
 	VisibleScene,
-	VisiblePortalCrossing,
 } from ".";
+import { cellContainsLandblockPoint } from "./cell-containment";
+import {
+	traceScenePortalSegment,
+	type SceneUnavailablePortalBoundary,
+} from "./portal-trace";
 import { scopeFor, sameScope, scopeKey } from "./scope";
 import { createSceneNodeId } from "./utils";
+
+const EMPTY_PORTAL_CROSSINGS: readonly ScenePortalCrossingInput[] =
+	Object.freeze([]);
 
 type SceneNodeRecord = {
 	cullingGroup: string;
@@ -63,12 +74,6 @@ interface CullingGroup {
 	readonly landblockId: ScenePlacement["landblockId"];
 }
 
-/** Mutable backing record for one frame-scoped portal selection buffer slot. */
-interface VisiblePortalCrossingBufferSlot {
-	id: VisiblePortalCrossing["id"];
-	apertureId: VisiblePortalCrossing["apertureId"];
-}
-
 export class SceneGraph {
 	readonly #nodes = new Map<SceneNodeId, SceneNodeRecord>();
 	/** Entries remain individually addressable for exact post-group frustum tests. */
@@ -83,20 +88,29 @@ export class SceneGraph {
 		PortalCrossingId,
 		ScenePortalCrossingInput
 	>();
+	/** Directed topology indexed once at publication rather than scanned during traversal. */
+	readonly #outgoingCrossings = new Map<
+		string,
+		Map<PortalCrossingId, ScenePortalCrossingInput>
+	>();
+	/** Outdoor-side blockers synthesized only for unclaimed one-way exterior endpoints. */
+	readonly #unavailableExteriorBoundaries = new Map<
+		string,
+		Map<string, SceneUnavailablePortalBoundary>
+	>();
 	/** Reused by every visibility query; contains only primitive selections. */
 	readonly #visibleEntries: SceneNodeId[] = [];
-	/** Reused portal-selection records, grown only to the largest query result. */
-	readonly #visibleCrossings: VisiblePortalCrossingBufferSlot[] = [];
 	readonly #visibleScene: VisibleScene = {
-		crossings: this.#visibleCrossings,
 		entries: this.#visibleEntries,
 	};
-	/** Reused traversal state for frame-time visibility queries. */
-	readonly #reachableScopeKeys = new Set<string>();
-	readonly #pendingScopes: SceneScope[] = [];
-	readonly #traversedCrossings: ScenePortalCrossingInput[] = [];
+	/** Reused explicit selection state for frame-time spatial queries. */
+	readonly #selectedScopeKeys = new Set<string>();
 	/** Reused landblock translation during frustum testing. */
 	readonly #queryOffset = Vec3.zero();
+	/** Monotonic source revision for retained renderer-facing topology facts. */
+	#topologyRevision = 0;
+	/** Lazily rebuilt only after scope or crossing publication changes. */
+	#topologyView: SceneTopologyView | null = null;
 	#nextNodeId = 0;
 
 	createNode(input: SceneNodeInput): SceneNodeId {
@@ -195,11 +209,15 @@ export class SceneGraph {
 
 	upsertEnvCellScope(input: SceneEnvCellScopeInput): void {
 		this.#envCellScopes.set(input.scope.envCellId, {
+			containmentPlanes: new Float32Array(input.containmentPlanes),
 			landblockBounds: input.landblockBounds?.clone() ?? null,
 			potentiallyVisibleEnvCellIds: new Set(input.potentiallyVisibleEnvCellIds),
 			scope: { ...input.scope },
+			structureToLandblock: input.structureToLandblock.clone(),
+			visibilityIslandId: input.visibilityIslandId,
 		});
 		this.#syncEnvCellRoots(input.scope.envCellId);
+		this.#markTopologyChanged();
 	}
 
 	removeEnvCellScope(scope: Extract<SceneScope, { kind: "env-cell" }>): void {
@@ -213,32 +231,145 @@ export class SceneGraph {
 				);
 			}
 		}
-		this.#envCellScopes.delete(scope.envCellId);
+		const removed = this.#envCellScopes.delete(scope.envCellId);
 		this.#syncEnvCellRoots(scope.envCellId);
+		if (removed) this.#markTopologyChanged();
 	}
 
 	upsertPortalCrossing(input: ScenePortalCrossingInput): void {
-		this.#portalCrossings.set(input.id, copyPortalCrossing(input));
+		const existing = this.#portalCrossings.get(input.id);
+		if (existing) {
+			this.#removeOutgoingCrossing(existing);
+			this.#removeUnavailableExteriorBoundary(existing);
+		}
+		const crossing = copyPortalCrossing(input);
+		this.#portalCrossings.set(input.id, crossing);
+		const sourceKey = scopeKey(crossing.source);
+		const outgoing =
+			this.#outgoingCrossings.get(sourceKey) ??
+			new Map<PortalCrossingId, ScenePortalCrossingInput>();
+		outgoing.set(crossing.id, crossing);
+		this.#outgoingCrossings.set(sourceKey, outgoing);
+		this.#upsertUnavailableExteriorBoundary(crossing);
+		this.#markTopologyChanged();
 	}
 
 	removePortalCrossing(crossingId: PortalCrossingId): void {
-		this.#portalCrossings.delete(crossingId);
+		const crossing = this.#portalCrossings.get(crossingId);
+		if (crossing) {
+			this.#removeOutgoingCrossing(crossing);
+			this.#removeUnavailableExteriorBoundary(crossing);
+			this.#portalCrossings.delete(crossingId);
+			this.#markTopologyChanged();
+		}
+	}
+
+	/** Trace a future camera endpoint from caller-supplied authoritative actor residency. */
+	tracePortalSegment(query: ScenePortalTraceQuery): ScenePortalTraceResult {
+		return traceScenePortalSegment(query, {
+			isScopeAvailable: (scope) => {
+				if (scope.kind === "outdoor") return true;
+				const installed = this.#envCellScopes.get(scope.envCellId);
+				return installed !== undefined && sameScope(installed.scope, scope);
+			},
+			maximumCrossingCount: this.#portalCrossings.size,
+			outgoing: (scope) => [
+				...(this.#outgoingCrossings.get(scopeKey(scope))?.values() ?? []),
+			],
+			unavailableBoundaries: (scope) => [
+				...(this.#unavailableExteriorBoundaries
+					.get(scopeKey(scope))
+					?.values() ?? []),
+			],
+		});
 	}
 
 	/**
-	 * Conservatively query the scopes reachable through apertures intersecting the original frustum.
+	 * Select bounded nodes from caller-chosen scopes without applying portal traversal policy.
 	 *
-	 * Apertures use broad AABB plus facing tests; nodes use broad AABB tests. Future portal clipping
-	 * must preserve the original camera volume for downstream scope traversal.
+	 * The result buffer is reused by later queries. Callers that need retained per-scope content
+	 * must consume or copy the primitive node identities before issuing another scene query.
 	 */
-	queryFrustum(
+	queryScopesFrustum(
 		frustum: Frustum,
 		anchorLandblockId: ScenePlacement["landblockId"],
-		origin: SceneScope,
+		scopes: readonly SceneScope[],
 	): VisibleScene {
-		this.#traverseScopes(frustum, anchorLandblockId, origin);
+		this.#selectedScopeKeys.clear();
+		for (const scope of scopes) {
+			this.#requireResidentScope(scope);
+			this.#selectedScopeKeys.add(scopeKey(scope));
+		}
+		this.#selectEntries(frustum, anchorLandblockId);
+		return this.#visibleScene;
+	}
+
+	/** Select outdoor plus every resident EnvCell scope without consulting portal topology. */
+	queryFlatFrustum(
+		frustum: Frustum,
+		anchorLandblockId: ScenePlacement["landblockId"],
+	): VisibleScene {
+		this.#selectedScopeKeys.clear();
+		this.#selectedScopeKeys.add(scopeKey({ kind: "outdoor" }));
+		for (const { scope } of this.#envCellScopes.values()) {
+			this.#selectedScopeKeys.add(scopeKey(scope));
+		}
+		this.#selectEntries(frustum, anchorLandblockId);
+		return this.#visibleScene;
+	}
+
+	/** Return the retained topology facts for the current publication revision. */
+	getPortalTopologyView(): SceneTopologyView {
+		if (this.#topologyView?.revision === this.#topologyRevision) {
+			return this.#topologyView;
+		}
+		const scopes: SceneTopologyScope[] = [
+			{
+				potentiallyVisibleEnvCellIds: new Set(),
+				scope: { kind: "outdoor" },
+				visibilityIslandId: null,
+			},
+			...[...this.#envCellScopes.values()]
+				.sort((left, right) =>
+					scopeKey(left.scope).localeCompare(scopeKey(right.scope)),
+				)
+				.map(({ potentiallyVisibleEnvCellIds, scope, visibilityIslandId }) => ({
+					potentiallyVisibleEnvCellIds: new Set(potentiallyVisibleEnvCellIds),
+					scope: { ...scope },
+					visibilityIslandId,
+				})),
+		];
+		const crossings = [...this.#portalCrossings.values()].sort((left, right) =>
+			left.id.localeCompare(right.id),
+		);
+		const outgoing = new Map<string, readonly ScenePortalCrossingInput[]>();
+		for (const [source, sourceCrossings] of this.#outgoingCrossings) {
+			outgoing.set(
+				source,
+				Object.freeze(
+					[...sourceCrossings.values()].sort((left, right) =>
+						left.id.localeCompare(right.id),
+					),
+				),
+			);
+		}
+		const view: SceneTopologyView = {
+			crossings: Object.freeze(crossings),
+			outgoing: (scope) =>
+				outgoing.get(scopeKey(scope)) ?? EMPTY_PORTAL_CROSSINGS,
+			revision: this.#topologyRevision,
+			scopes: Object.freeze(scopes),
+		};
+		this.#topologyView = Object.freeze(view);
+		return this.#topologyView;
+	}
+
+	#selectEntries(
+		frustum: Frustum,
+		anchorLandblockId: ScenePlacement["landblockId"],
+	): void {
 		this.#visibleEntries.length = 0;
-		for (const scope of this.#reachableScopeKeys) {
+		for (const scope of this.#selectedScopeKeys) {
 			const landblockGroups = this.#cullingGroups.get(scope);
 			if (!landblockGroups) continue;
 			for (const groups of landblockGroups.values()) {
@@ -265,37 +396,83 @@ export class SceneGraph {
 				}
 			}
 		}
-		this.#syncVisibleCrossings(this.#traversedCrossings);
-		return this.#visibleScene;
 	}
 
-	/**
-	 * Resolve one canonical scene-space point against currently resident scopes.
-	 *
-	 * Environment-cell containment is conservatively bounds-based until prepared
-	 * BSP queries are available. Overlapping bounds select the first resident
-	 * scope in stable scene insertion order.
-	 */
-	queryWorldPointResidency(point: Vec3): SceneResidency | null {
+	/** Return every broad-phase scope candidate and its exact retail containment verdict. */
+	queryWorldPointResidencyCandidates(
+		point: Vec3,
+	): ScenePointResidencyCandidates | null {
 		const landblockId = landblockAtWorldPoint(point);
 		if (!landblockId) return null;
 
-		const localPoint = new Vec3(0, 0, 0);
-		for (const { landblockBounds, scope } of this.#envCellScopes.values()) {
-			if (scope.landblockId === landblockId && landblockBounds !== null) {
+		const localPoints = new Map<ScenePlacement["landblockId"], Vec3>();
+		const envCells = [];
+		for (const {
+			containmentPlanes,
+			landblockBounds,
+			scope,
+			structureToLandblock,
+		} of this.#envCellScopes.values()) {
+			if (landblockBounds === null) continue;
+			let localPoint = localPoints.get(scope.landblockId);
+			if (!localPoint) {
 				const origin = createLandblockWorldOrigin(scope.landblockId);
-				localPoint.x = point.x - origin.x;
-				localPoint.y = point.y - origin.y;
-				localPoint.z = point.z - origin.z;
-				if (containsPoint(landblockBounds, localPoint)) {
-					return {
-						envCellId: scope.envCellId,
-						landblockId: scope.landblockId,
-					};
-				}
+				localPoint = new Vec3(
+					point.x - origin.x,
+					point.y - origin.y,
+					point.z - origin.z,
+				);
+				localPoints.set(scope.landblockId, localPoint);
 			}
+			if (!containsPoint(landblockBounds, localPoint)) continue;
+			envCells.push({
+				containsPoint: cellContainsLandblockPoint(
+					containmentPlanes,
+					structureToLandblock,
+					localPoint,
+				),
+				envCellId: scope.envCellId,
+				landblockId: scope.landblockId,
+			});
 		}
-		return { envCellId: null, landblockId };
+		envCells.sort((left, right) =>
+			left.envCellId.localeCompare(right.envCellId),
+		);
+		return {
+			envCells,
+			outdoor: { envCellId: null, landblockId },
+		};
+	}
+
+	/** Test one explicitly selected resident EnvCell without deriving identity from world overlap. */
+	queryEnvCellPointContainment(
+		envCellId: EnvCellId,
+		point: Vec3,
+	): boolean | null {
+		const cell = this.#envCellScopes.get(envCellId);
+		if (!cell?.landblockBounds) return null;
+		const origin = createLandblockWorldOrigin(cell.scope.landblockId);
+		const localPoint = new Vec3(
+			point.x - origin.x,
+			point.y - origin.y,
+			point.z - origin.z,
+		);
+		return (
+			containsPoint(cell.landblockBounds, localPoint) &&
+			cellContainsLandblockPoint(
+				cell.containmentPlanes,
+				cell.structureToLandblock,
+				localPoint,
+			)
+		);
+	}
+
+	/** Whether at least one EnvCell scope from this landblock is currently resident. */
+	hasEnvCellTopology(landblockId: ScenePlacement["landblockId"]): boolean {
+		for (const { scope } of this.#envCellScopes.values()) {
+			if (scope.landblockId === landblockId) return true;
+		}
+		return false;
 	}
 
 	/** Return the current world-space bounds for one installed environment-cell scope. */
@@ -306,6 +483,13 @@ export class SceneGraph {
 			scope.landblockBounds,
 			createLandblockWorldOrigin(scope.scope.landblockId),
 		);
+	}
+
+	/** Return the proof-backed render-scheduling island for one installed EnvCell scope. */
+	getEnvCellVisibilityIslandId(
+		envCellId: EnvCellId,
+	): SceneEnvCellScopeInput["visibilityIslandId"] | null {
+		return this.#envCellScopes.get(envCellId)?.visibilityIslandId ?? null;
 	}
 
 	/** Resolve inherited residency and flatten one node transform into landblock-local coordinates. */
@@ -442,47 +626,59 @@ export class SceneGraph {
 		}
 	}
 
-	#syncVisibleCrossings(crossings: readonly ScenePortalCrossingInput[]): void {
-		for (let index = 0; index < crossings.length; index += 1) {
-			const crossing = crossings[index]!;
-			const target =
-				this.#visibleCrossings[index] ??
-				(this.#visibleCrossings[index] = {
-					apertureId: crossing.aperture.id,
-					id: crossing.id,
-				});
-			target.apertureId = crossing.aperture.id;
-			target.id = crossing.id;
-		}
-		this.#visibleCrossings.length = crossings.length;
+	#markTopologyChanged(): void {
+		this.#topologyRevision += 1;
+		this.#topologyView = null;
 	}
 
-	#traverseScopes(
-		frustum: Frustum,
-		anchorLandblockId: ScenePlacement["landblockId"],
-		origin: SceneScope,
-	): void {
-		this.#reachableScopeKeys.clear();
-		this.#reachableScopeKeys.add(scopeKey(origin));
-		this.#pendingScopes.length = 0;
-		this.#pendingScopes.push(origin);
-		this.#traversedCrossings.length = 0;
-		while (this.#pendingScopes.length > 0) {
-			const scope = this.#pendingScopes.pop();
-			if (!scope) continue;
-			for (const crossing of this.#portalCrossings.values()) {
-				if (
-					!sameScope(crossing.source, scope) ||
-					!this.#frustumIntersectsAperture(frustum, anchorLandblockId, crossing)
-				) {
-					continue;
-				}
-				this.#traversedCrossings.push(crossing);
-				const targetKey = scopeKey(crossing.target);
-				if (this.#reachableScopeKeys.has(targetKey)) continue;
-				this.#reachableScopeKeys.add(targetKey);
-				this.#pendingScopes.push(crossing.target);
-			}
+	#requireResidentScope(scope: SceneScope): void {
+		if (scope.kind === "outdoor") return;
+		const installed = this.#envCellScopes.get(scope.envCellId);
+		if (!installed || !sameScope(installed.scope, scope)) {
+			throw new Error(
+				`Selected scene scope ${scopeKey(scope)} is not resident.`,
+			);
+		}
+	}
+
+	#removeOutgoingCrossing(crossing: ScenePortalCrossingInput): void {
+		const sourceKey = scopeKey(crossing.source);
+		const outgoing = this.#outgoingCrossings.get(sourceKey);
+		outgoing?.delete(crossing.id);
+		if (outgoing?.size === 0) this.#outgoingCrossings.delete(sourceKey);
+	}
+
+	#upsertUnavailableExteriorBoundary(crossing: ScenePortalCrossingInput): void {
+		if (
+			crossing.source.kind !== "env-cell" ||
+			crossing.target.kind !== "outdoor" ||
+			crossing.reciprocalCrossingId !== null ||
+			crossing.spatialRelationship.kind !== "exterior-transition"
+		) {
+			return;
+		}
+		const source: SceneScope = { kind: "outdoor" };
+		const sourceKey = scopeKey(source);
+		const boundaries =
+			this.#unavailableExteriorBoundaries.get(sourceKey) ??
+			new Map<string, SceneUnavailablePortalBoundary>();
+		const id = unavailableExteriorBoundaryId(crossing);
+		boundaries.set(id, {
+			acceptedSide:
+				crossing.acceptedSide === "positive" ? "negative" : "positive",
+			aperture: crossing.sourceAperture,
+			id,
+			source,
+		});
+		this.#unavailableExteriorBoundaries.set(sourceKey, boundaries);
+	}
+
+	#removeUnavailableExteriorBoundary(crossing: ScenePortalCrossingInput): void {
+		const sourceKey = scopeKey({ kind: "outdoor" });
+		const boundaries = this.#unavailableExteriorBoundaries.get(sourceKey);
+		boundaries?.delete(unavailableExteriorBoundaryId(crossing));
+		if (boundaries?.size === 0) {
+			this.#unavailableExteriorBoundaries.delete(sourceKey);
 		}
 	}
 
@@ -511,29 +707,6 @@ export class SceneGraph {
 			this.#queryOffset,
 		);
 		return frustumIntersectsAABB(frustum, bounds, offset.x, offset.y, offset.z);
-	}
-
-	#frustumIntersectsAperture(
-		frustum: Frustum,
-		anchorLandblockId: ScenePlacement["landblockId"],
-		crossing: ScenePortalCrossingInput,
-	): boolean {
-		const offset = createLandblockOffset(
-			getLandblockCoordinates(crossing.aperture.landblockId),
-			getLandblockCoordinates(anchorLandblockId),
-			this.#queryOffset,
-		);
-		if (
-			!frustumIntersectsAABB(
-				frustum,
-				crossing.aperture.landblockBounds,
-				offset.x,
-				offset.y,
-				offset.z,
-			)
-		)
-			return false;
-		return apertureFacesCamera(frustum, crossing.aperture, offset);
 	}
 }
 
@@ -575,49 +748,35 @@ function copyPortalCrossing(
 	crossing: ScenePortalCrossingInput,
 ): ScenePortalCrossingInput {
 	return {
-		aperture: {
-			...crossing.aperture,
-			indices: new Uint32Array(crossing.aperture.indices),
-			landblockBounds: crossing.aperture.landblockBounds.clone(),
-			vertices: new Float32Array(crossing.aperture.vertices),
-		},
+		acceptedSide: crossing.acceptedSide,
+		exactMatch: crossing.exactMatch,
 		id: crossing.id,
+		reciprocalCrossingId: crossing.reciprocalCrossingId,
 		source: { ...crossing.source },
+		sourceAperture: copyPortalAperture(crossing.sourceAperture),
+		spatialRelationship: { ...crossing.spatialRelationship },
 		target: { ...crossing.target },
+		visibilityAperture: copyPortalAperture(crossing.visibilityAperture),
 	};
 }
 
-/**
- * Retain broad portal visibility only when the camera is on the aperture's configured side.
- *
- * Aperture index winding is prepared so its geometric normal faces the positive side; malformed
- * aperture geometry fails open so a missing normal cannot hide an otherwise reachable scope.
- */
-function apertureFacesCamera(
-	frustum: Frustum,
-	aperture: ScenePortalCrossingInput["aperture"],
-	offset: Vec3,
-): boolean {
-	if (aperture.visibleSide === "both") return true;
-	if (aperture.vertices.length < 9) return true;
-	const ax = aperture.vertices[0]! + offset.x;
-	const ay = aperture.vertices[1]! + offset.y;
-	const az = aperture.vertices[2]! + offset.z;
-	const edgeBX = aperture.vertices[3]! - aperture.vertices[0]!;
-	const edgeBY = aperture.vertices[4]! - aperture.vertices[1]!;
-	const edgeBZ = aperture.vertices[5]! - aperture.vertices[2]!;
-	const edgeCX = aperture.vertices[6]! - aperture.vertices[0]!;
-	const edgeCY = aperture.vertices[7]! - aperture.vertices[1]!;
-	const edgeCZ = aperture.vertices[8]! - aperture.vertices[2]!;
-	const normalX = edgeBY * edgeCZ - edgeBZ * edgeCY;
-	const normalY = edgeBZ * edgeCX - edgeBX * edgeCZ;
-	const normalZ = edgeBX * edgeCY - edgeBY * edgeCX;
-	const signedDistance =
-		normalX * (frustum.cameraPosition.x - ax) +
-		normalY * (frustum.cameraPosition.y - ay) +
-		normalZ * (frustum.cameraPosition.z - az);
-	if (signedDistance === 0) return true;
-	return aperture.visibleSide === "positive"
-		? signedDistance > 0
-		: signedDistance < 0;
+function copyPortalAperture(
+	aperture: ScenePortalCrossingInput["sourceAperture"],
+): ScenePortalCrossingInput["sourceAperture"] {
+	return {
+		...aperture,
+		indices: new Uint32Array(aperture.indices),
+		landblockBounds: aperture.landblockBounds.clone(),
+		plane: {
+			d: aperture.plane.d,
+			normal: aperture.plane.normal.clone(),
+		},
+		vertices: new Float32Array(aperture.vertices),
+	};
+}
+
+function unavailableExteriorBoundaryId(
+	crossing: ScenePortalCrossingInput,
+): string {
+	return `portal-unavailable:${crossing.id}/reverse`;
 }

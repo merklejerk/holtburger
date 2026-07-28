@@ -1,6 +1,9 @@
 import type { ObjectMaterialOrdering } from "../resolution/object-material-planner";
-import { planObjectMaterial } from "../resolution/object-material-planner";
-import type { ResolvedOutdoorStaticLayerSource } from "../resolution/landblock-layer";
+import {
+	staticDetailRoleForLayer,
+	type StaticDetailRole,
+} from "../resolution/static-detail-role";
+import type { ResolvedStaticObjectLayerSource } from "../resolution/landblock-layer";
 import {
 	orderResolvedObjectParts,
 	resolveObjectPartTransforms,
@@ -16,10 +19,7 @@ import {
 import { AABB3, Mat4, Vec3 } from "../math/types";
 import type { ObjectGeometryData } from "../renderer/geometry";
 import type { StaticGeometryKey } from "../geometry/types";
-import {
-	LandblockLayerKind,
-	type OutdoorStaticLayerKind,
-} from "../runtime/scene-interest";
+import { LandblockLayerKind } from "../runtime/scene-interest";
 import type {
 	StaticInstallResourceNamespace,
 	StaticInstanceData,
@@ -27,20 +27,20 @@ import type {
 	StaticInstanceStreamSource,
 } from "../systems/static-resources";
 import { STATIC_INSTANCE_RECORD_BYTES } from "../systems/static-resources";
-import { TextureWrapMode } from "../textures/types";
 import type {
 	FrameStreamedStaticInstanceTemplate,
 	StaticObjectDrawUnit,
 	StaticObjectMaterialBinding,
 } from "./artifacts";
 import { FRAME_STREAMED_STATIC_INSTANCE_TEMPLATE_BYTES } from "./artifacts";
+import { resolveStaticTriangleMaterial } from "./static-material-binding";
 
 /** One closed geometry job containing no runtime, device, or atlas callbacks. */
 export interface StaticObjectGeometryPreparationJob {
 	/** Typed source layer keeps geometry identities and later publication domains distinct. */
-	readonly layer: OutdoorStaticLayerKind;
+	readonly layer: ResolvedStaticObjectLayerSource["kind"];
 	readonly resourceNamespace: StaticInstallResourceNamespace;
-	readonly source: ResolvedOutdoorStaticLayerSource;
+	readonly source: ResolvedStaticObjectLayerSource;
 }
 
 /** Immutable material range emitted by the geometry worker. */
@@ -143,7 +143,10 @@ export function prepareStaticObjectGeometry(
 	assertJobLayer(job);
 	const startedAt = performance.now();
 	const prepared = prepareStaticSource(job.source);
-	if (job.layer === LandblockLayerKind.Generated) {
+	if (
+		job.layer === LandblockLayerKind.Generated ||
+		job.layer === LandblockLayerKind.EnvCells
+	) {
 		return prepareGeneratedStaticObjectGeometry(job, prepared, startedAt);
 	}
 	return prepareBakedStaticObjectGeometry(job, prepared, startedAt);
@@ -288,8 +291,9 @@ function prepareBakedStaticObjectGeometry(
 }
 
 function prepareStaticSource(
-	source: ResolvedOutdoorStaticLayerSource,
+	source: ResolvedStaticObjectLayerSource,
 ): PreparedStaticSource {
+	const detailRole = staticDetailRoleForLayer(source.kind);
 	const parts: PreparedResidentPart[] = [];
 	const sourceRangeIds = new Set<string>();
 	const sourceMaterialSlotIds = new Set<string>();
@@ -315,6 +319,7 @@ function prepareStaticSource(
 				triangle += 1
 			) {
 				const contribution = createSourceTriangleContribution({
+					detailRole,
 					geometry: part.geometry,
 					part,
 					partIndex: part.partIndex,
@@ -470,11 +475,11 @@ function prepareGeneratedStaticObjectGeometry(
 	const partitionGeometryKeys = new Map<string, StaticGeometryKey>();
 	const partitionGeometry = new Map<string, ObjectGeometryData>();
 	let instancedGeometryBytes = 0;
-	for (const [index, partition] of [...partitions.values()]
-		.sort((left, right) => left.identity.localeCompare(right.identity))
-		.entries()) {
+	for (const partition of [...partitions.values()].sort((left, right) =>
+		left.identity.localeCompare(right.identity),
+	)) {
 		const key =
-			`static-install-geometry:${job.resourceNamespace}/${job.layer}-partition:${index}` as StaticGeometryKey;
+			`static-source-geometry:${partition.identity}` as StaticGeometryKey;
 		const data = createSourcePartitionGeometry(partition.contributions);
 		geometry.push({ geometry: data, key });
 		partitionGeometryKeys.set(partition.identity, key);
@@ -755,51 +760,19 @@ function isInstanceEligibleTransform(part: PreparedResidentPart): boolean {
 }
 
 function createSourceTriangleContribution(options: {
+	readonly detailRole: StaticDetailRole;
 	readonly geometry: ResolvedGeometry;
 	readonly part: ResolvedObjectPart;
 	readonly partIndex: number;
 	readonly triangle: number;
 }): SourceTriangleContribution {
-	const slot = options.geometry.materialSlotIndices[options.triangle];
-	const material = options.part.materials[slot ?? -1];
-	if (!material) {
-		throw new Error(
-			`Part ${options.partIndex} triangle ${options.triangle} has no material slot ${slot}.`,
-		);
-	}
-	const wrap =
-		options.geometry.materialWrapModes[options.triangle] === 1
-			? TextureWrapMode.Repeat
-			: TextureWrapMode.Clamp;
-	const plan = planObjectMaterial(material, wrap);
-	const sideKind = options.geometry.materialSideKinds[options.triangle];
-	const sideType = options.geometry.materialSideTypes[options.triangle];
-	const stippling = options.geometry.materialStippling[options.triangle];
-	if (
-		sideKind === undefined ||
-		sideType === undefined ||
-		stippling === undefined
-	) {
-		throw new Error(`Triangle ${options.triangle} is missing polygon facts.`);
-	}
-	const polygon = {
-		cullMode: cullMode(sideType),
-		renderSide: renderSide(sideKind),
-		stippled: (stippling & (sideKind === 2 ? 0x02 : 0x01)) !== 0,
-	} as const;
-	const binding: StaticObjectMaterialBinding = {
-		palettedClipMap: plan.palettedClipMap,
-		polygon,
-		sampler: plan.sampler,
-		source: material,
-		textures: { base: plan.baseTexture, palette: plan.paletteTexture },
-	};
-	const bindingId = [
-		plan.id,
-		polygon.cullMode,
-		polygon.renderSide,
-		polygon.stippled,
-	].join("|");
+	const { binding, bindingId, ordering } = resolveStaticTriangleMaterial({
+		detailRole: options.detailRole,
+		geometry: options.geometry,
+		materials: options.part.materials,
+		sourceLabel: `Part ${options.partIndex}`,
+		triangle: options.triangle,
+	});
 	const indexStart = options.triangle * 3;
 	const positions: number[] = [];
 	const normals: number[] = [];
@@ -832,7 +805,7 @@ function createSourceTriangleContribution(options: {
 		binding,
 		bindingId,
 		normals,
-		ordering: plan.ordering,
+		ordering,
 		positions,
 		sourceTriangleIndex: options.triangle,
 		textureCoordinates,
@@ -874,7 +847,7 @@ function transformTriangleContribution(
 }
 
 function createPartTransforms(
-	resident: ResolvedOutdoorStaticLayerSource["staticResidents"][number],
+	resident: ResolvedStaticObjectLayerSource["staticResidents"][number],
 ): ReadonlyMap<number, Mat4> {
 	const pose = resident.presentation.placementPoses.get(0);
 	if (!pose)
@@ -898,38 +871,6 @@ function compareGroups(
 
 function orderingRank(ordering: ObjectMaterialOrdering): number {
 	return ["opaque", "alpha-test", "transparent", "additive"].indexOf(ordering);
-}
-
-function cullMode(
-	value: number,
-): StaticObjectMaterialBinding["polygon"]["cullMode"] {
-	switch (value) {
-		case 0:
-			return "single";
-		case 1:
-			return "double";
-		case 2:
-			return "both";
-		case 3:
-			return "counter-clockwise";
-		default:
-			throw new Error(`Unsupported polygon culling mode ${value}.`);
-	}
-}
-
-function renderSide(
-	value: number,
-): StaticObjectMaterialBinding["polygon"]["renderSide"] {
-	switch (value) {
-		case 0:
-			return "positive";
-		case 1:
-			return "positive-reversed";
-		case 2:
-			return "negative";
-		default:
-			throw new Error(`Unsupported polygon render side ${value}.`);
-	}
 }
 
 function emptyBounds(): AABB3 {

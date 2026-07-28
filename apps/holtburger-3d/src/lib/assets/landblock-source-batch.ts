@@ -1,21 +1,24 @@
 import type { LandblockId } from "../game/game-types";
 import type {
+	ResolvedEnvCellLayerSource,
 	ResolvedObjectLayerSource,
 	ResolvedTerrainLayerSource,
 } from "../game/resolution/landblock-layer";
 import { LandblockLayerKind } from "../game/runtime/scene-interest";
 
-/** Layers supported by the app's current outdoor landblock source transport. */
+/** Layers supported by the app's cumulative landblock source transport. */
 export type LandblockSourceLayer =
 	| LandblockLayerKind.Terrain
 	| LandblockLayerKind.Buildings
 	| LandblockLayerKind.Objects
-	| LandblockLayerKind.Generated;
+	| LandblockLayerKind.Generated
+	| LandblockLayerKind.EnvCells;
 
 /** One decoded, requested record from a landblock source batch. */
 export type LandblockSourceRecord =
 	| ResolvedTerrainLayerSource
 	| ResolvedObjectLayerSource
+	| ResolvedEnvCellLayerSource
 	| null;
 
 /** Closed host capability for one landblock's complete requested source-layer set. */

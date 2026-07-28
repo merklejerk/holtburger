@@ -112,15 +112,29 @@ describe("decodeLandblockSourceBatch", () => {
 			),
 		).toThrow("byte range is invalid");
 	});
+
+	it("range-checks and skips an independently bounded unknown record", () => {
+		const source = decodeLandblockSourceBatch(
+			batchResponse({
+				records: [{ byteLength: 1, byteOffset: 0, layer: "future-layer" }],
+				requestedLayers: ["future-layer"],
+			}),
+			LANDBLOCK_ID,
+			new Set(),
+			ACTIVE_REGION,
+		);
+
+		expect(source.records.size).toBe(0);
+	});
 });
 
 function batchResponse(
 	overrides: {
-		readonly requestedLayers?: readonly LandblockLayerKind[];
+		readonly requestedLayers?: readonly string[];
 		readonly records?: readonly {
 			readonly byteLength: number;
 			readonly byteOffset: number;
-			readonly layer: LandblockLayerKind;
+			readonly layer: string;
 		}[];
 		readonly recordDataLength?: number;
 	} = {},

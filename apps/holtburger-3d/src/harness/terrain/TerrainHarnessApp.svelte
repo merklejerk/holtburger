@@ -5,21 +5,33 @@
 	import { StandardCommitPipeline } from "../../lib/game/commit/pipeline";
 	import { SyntheticBlendedBuildingPipeline } from "./synthetic-blended-building-pipeline";
 	import { SyntheticInstancedObjectPipeline } from "./synthetic-instanced-object-pipeline";
-	import type { LandblockId } from "../../lib/game/game-types";
+	import type { EnvCellId, LandblockId } from "../../lib/game/game-types";
 	import {
 		createLandblockWorldOrigin,
 		OUTDOOR_LANDBLOCK_WORLD_SIZE,
 	} from "../../lib/game/landblocks";
 	import { Quat, Vec3 } from "../../lib/game/math/types";
-	import { WebGL2Device } from "../../lib/game/renderer/webgl2-device";
+	import {
+		WebGL2Device,
+		type WebGL2ContextLossPolicyProbe,
+		type PortalTargetCapabilityProbe,
+	} from "../../lib/game/renderer/webgl2-device";
+	import type { WebGL2PortalSubstrateFixtureResult } from "../../lib/game/renderer/webgl2-portal-substrate-fixture";
+	import type { WebGL2HybridPortalExecutionFixtureResult } from "../../lib/game/renderer/webgl2-hybrid-portal-executor-fixture";
+	import type { WebGL2InternalPortalExecutionFixtureResult } from "../../lib/game/renderer/webgl2-internal-portal-executor-fixture";
 	import {
 		GameRuntime,
 		type StaticObjectLayerRuntimeDiagnostics,
 		type StaticObjectRuntimeDiagnostics,
 	} from "../../lib/game/runtime/game-runtime";
 	import { LandblockLayerKind } from "../../lib/game/runtime/scene-interest";
-	import { ActiveRegionObjectDetailOwner } from "../../lib/game/resolution/active-region-object-detail";
+	import { ActiveRegionStaticDetailOwner } from "../../lib/game/resolution/active-region-static-detail";
 	import type { FrameSelectionMetrics } from "../../lib/game/renderer/renderer";
+	import type {
+		PortalExecutionProbeResult,
+		PortalRenderGraphProbeResult,
+		WebGL2Renderer,
+	} from "../../lib/game/renderer/webgl2-renderer";
 
 	const CAMERA_FOV_DEGREES = 90;
 	const CAMERA_NEAR = 0.5;
@@ -32,6 +44,7 @@
 		readonly requestOutdoorTerrain: (
 			landblockId: string,
 			buildingRadius: number,
+			envCellRadius: number | null,
 			explicitObjectRadius: number | null,
 			generatedObjectRadius: number | null,
 			cameraYawDegrees: number,
@@ -43,8 +56,41 @@
 			cameraYawDegrees: number,
 			cameraPitchDegrees: number,
 		) => void;
+		/** Place the continuous camera at one authoritative EnvCell pose. */
+		readonly setEnvCellCamera: (
+			envCellId: string,
+			position: readonly [number, number, number],
+			cameraYawDegrees: number,
+			cameraPitchDegrees: number,
+		) => void;
+		/** Change EnvCell rendering policy without changing camera placement or scene interest. */
+		readonly setEnvCellRenderMode: (
+			envCellRenderMode: "flat" | "portal",
+		) => void;
 		/** Withdraw every terrain and outdoor-static layer while retaining the harness runtime. */
 		readonly clearSceneInterest: () => void;
+		/** Exercise the production authoritative-anchor portal trace without moving the camera. */
+		readonly tracePortalSegment: (
+			envCellId: string,
+			start: readonly [number, number, number],
+			endpoint: readonly [number, number, number],
+		) => ReturnType<GameRuntime["tracePortalSegment"]>;
+		/** Exercise final pure portal planning and the shared selected-scope scene query. */
+		readonly probePortalRenderGraph: (
+			envCellId: string,
+			position: readonly [number, number, number],
+			cameraYawDegrees: number,
+			cameraPitchDegrees: number,
+			safetyWorkItemLimit: number,
+		) => PortalRenderGraphProbeResult;
+		/** Exercise the production portal graph executor without activating public portal mode. */
+		readonly probePortalExecution: (
+			envCellId: string,
+			position: readonly [number, number, number],
+			cameraYawDegrees: number,
+			cameraPitchDegrees: number,
+			safetyWorkItemLimit: number,
+		) => PortalExecutionProbeResult;
 		/** Snapshot lifecycle evidence without exposing runtime ownership. */
 		readonly state: () => TerrainHarnessState;
 	}
@@ -62,6 +108,16 @@
 			readonly generated: readonly StaticObjectLayerRuntimeDiagnostics[];
 			readonly objects: readonly StaticObjectLayerRuntimeDiagnostics[];
 		};
+		/** Executable facts for the planned portal scene-domain attachment formats. */
+		readonly portalTargetCapabilities: PortalTargetCapabilityProbe | null;
+		/** Whole-device invalidation proof from an isolated browser context. */
+		readonly portalContextLossPolicy: WebGL2ContextLossPolicyProbe | null;
+		/** Pixel-read production-substrate evidence requested by the dedicated fixture. */
+		readonly portalSubstrate: WebGL2PortalSubstrateFixtureResult | null;
+		/** Pixel-read exterior-transition composition evidence requested by Gate F. */
+		readonly hybridPortalExecution: WebGL2HybridPortalExecutionFixtureResult | null;
+		/** Pixel-read internal graph execution evidence requested by Gate G. */
+		readonly internalPortalExecution: WebGL2InternalPortalExecutionFixtureResult | null;
 		/** One read-only observation for every host source-batch response received by this harness. */
 		readonly sourceBatches: readonly HttpLandblockSourceBatchDiagnostic[];
 		readonly ready: boolean;
@@ -90,7 +146,16 @@
 	});
 	let contentSource: HttpLandblockContentSource | undefined;
 	let runtime: GameRuntime | undefined;
+	let renderer: WebGL2Renderer | undefined;
+	let portalTargetCapabilities: PortalTargetCapabilityProbe | null = null;
+	let portalContextLossPolicy: WebGL2ContextLossPolicyProbe | null = null;
+	let portalSubstrate: WebGL2PortalSubstrateFixtureResult | null = null;
+	let hybridPortalExecution: WebGL2HybridPortalExecutionFixtureResult | null =
+		null;
+	let internalPortalExecution: WebGL2InternalPortalExecutionFixtureResult | null =
+		null;
 	let ready = false;
+	const fixture = new URLSearchParams(window.location.search).get("fixture");
 
 	function parseOutdoorLandblockId(value: string): LandblockId {
 		const match = /^(?:0x)?([0-9a-f]{4})(?:[0-9a-f]{4})?$/i.exec(value.trim());
@@ -105,6 +170,7 @@
 	function requestOutdoorTerrain(
 		rawLandblockId: string,
 		buildingRadius: number,
+		envCellRadius: number | null,
 		explicitObjectRadius: number | null,
 		generatedObjectRadius: number | null,
 		cameraYawDegrees: number,
@@ -114,6 +180,16 @@
 		if (!Number.isInteger(buildingRadius) || buildingRadius < 0) {
 			throw new Error(
 				"Terrain harness building radius must be a non-negative integer.",
+			);
+		}
+		if (
+			envCellRadius !== null &&
+			(!Number.isInteger(envCellRadius) ||
+				envCellRadius < 0 ||
+				envCellRadius > buildingRadius)
+		) {
+			throw new Error(
+				"Terrain harness EnvCell radius must be a non-negative integer no greater than building radius.",
 			);
 		}
 		if (
@@ -140,13 +216,16 @@
 			throw new Error("Terrain harness camera orientation must be finite.");
 		}
 		const landblockId = parseOutdoorLandblockId(rawLandblockId);
+		const usesGeneratedFixture = fixture === "instanced";
 		runtime.updateSceneInterest({
 			anchorLandblockId: landblockId,
 			lod: {
-				buildingRadius,
-				envCellRadius: null,
+				buildingRadius: usesGeneratedFixture ? null : buildingRadius,
+				envCellRadius,
 				explicitObjectRadius,
-				generatedObjectRadius,
+				generatedObjectRadius: usesGeneratedFixture
+					? buildingRadius
+					: generatedObjectRadius,
 				terrainRadius: buildingRadius,
 			},
 		});
@@ -178,9 +257,163 @@
 		});
 	}
 
+	function setEnvCellCamera(
+		rawEnvCellId: string,
+		position: readonly [number, number, number],
+		cameraYawDegrees: number,
+		cameraPitchDegrees: number,
+	): void {
+		if (!runtime) throw new Error("Terrain harness runtime is not ready.");
+		if (
+			position.length !== 3 ||
+			!position.every(Number.isFinite) ||
+			![cameraYawDegrees, cameraPitchDegrees].every(Number.isFinite)
+		) {
+			throw new Error(
+				"Terrain harness portal frame requires a finite position and orientation.",
+			);
+		}
+		const envCellId = parseEnvCellId(rawEnvCellId, "portal frame");
+		const landblockId = `${envCellId.slice(0, 6)}ffff` as LandblockId;
+		runtime.setPrimaryCamera({
+			far: CAMERA_FAR,
+			fov: CAMERA_FOV_DEGREES,
+			near: CAMERA_NEAR,
+			placement: {
+				envCellId,
+				landblockId,
+				position: new Vec3(...position),
+				rotation: cameraRotation(cameraYawDegrees, cameraPitchDegrees),
+			},
+		});
+	}
+
+	function setEnvCellRenderMode(envCellRenderMode: "flat" | "portal"): void {
+		if (!runtime) throw new Error("Terrain harness runtime is not ready.");
+		runtime.setFrameSettings({ distanceFogEnabled: true, envCellRenderMode });
+	}
+
 	function clearSceneInterest(): void {
 		if (!runtime) throw new Error("Terrain harness runtime is not ready.");
 		runtime.clearSceneInterest();
+	}
+
+	function tracePortalSegment(
+		rawEnvCellId: string,
+		start: readonly [number, number, number],
+		endpoint: readonly [number, number, number],
+	): ReturnType<GameRuntime["tracePortalSegment"]> {
+		if (!runtime) throw new Error("Terrain harness runtime is not ready.");
+		const envCellId = parseEnvCellId(rawEnvCellId, "trace");
+		if (
+			start.length !== 3 ||
+			endpoint.length !== 3 ||
+			![...start, ...endpoint].every(Number.isFinite)
+		) {
+			throw new Error(
+				"Terrain harness portal trace points must be finite xyz tuples.",
+			);
+		}
+		const landblockId = `${envCellId.slice(0, 6)}ffff` as LandblockId;
+		return runtime.tracePortalSegment({
+			anchor: {
+				position: new Vec3(...start),
+				residency: { envCellId, landblockId },
+			},
+			endpoint: new Vec3(...endpoint),
+		});
+	}
+
+	function probePortalRenderGraph(
+		rawEnvCellId: string,
+		position: readonly [number, number, number],
+		cameraYawDegrees: number,
+		cameraPitchDegrees: number,
+		safetyWorkItemLimit: number,
+	): PortalRenderGraphProbeResult {
+		if (!renderer) throw new Error("Terrain harness renderer is not ready.");
+		if (
+			position.length !== 3 ||
+			!position.every(Number.isFinite) ||
+			![cameraYawDegrees, cameraPitchDegrees].every(Number.isFinite) ||
+			!Number.isInteger(safetyWorkItemLimit) ||
+			safetyWorkItemLimit <= 0
+		) {
+			throw new Error(
+				"Terrain harness portal graph probe requires a finite position/orientation and positive integer work limit.",
+			);
+		}
+		const envCellId = parseEnvCellId(rawEnvCellId, "portal graph");
+		const landblockId = `${envCellId.slice(0, 6)}ffff` as LandblockId;
+		return renderer.probePortalRenderGraph(
+			landblockId,
+			{
+				camera: {
+					far: CAMERA_FAR,
+					fov: CAMERA_FOV_DEGREES,
+					near: CAMERA_NEAR,
+					placement: {
+						envCellId,
+						landblockId,
+						position: new Vec3(...position),
+						rotation: cameraRotation(cameraYawDegrees, cameraPitchDegrees),
+					},
+				},
+			},
+			{ envCellId, kind: "env-cell", landblockId },
+			safetyWorkItemLimit,
+		);
+	}
+
+	function probePortalExecution(
+		rawEnvCellId: string,
+		position: readonly [number, number, number],
+		cameraYawDegrees: number,
+		cameraPitchDegrees: number,
+		safetyWorkItemLimit: number,
+	): PortalExecutionProbeResult {
+		if (!renderer) throw new Error("Terrain harness renderer is not ready.");
+		if (
+			position.length !== 3 ||
+			!position.every(Number.isFinite) ||
+			![cameraYawDegrees, cameraPitchDegrees].every(Number.isFinite) ||
+			!Number.isInteger(safetyWorkItemLimit) ||
+			safetyWorkItemLimit <= 0
+		) {
+			throw new Error(
+				"Terrain harness portal execution probe requires a finite position/orientation and positive integer work limit.",
+			);
+		}
+		const envCellId = parseEnvCellId(rawEnvCellId, "portal execution");
+		const landblockId = `${envCellId.slice(0, 6)}ffff` as LandblockId;
+		return renderer.probePortalExecution(
+			landblockId,
+			{
+				camera: {
+					far: CAMERA_FAR,
+					fov: CAMERA_FOV_DEGREES,
+					near: CAMERA_NEAR,
+					placement: {
+						envCellId,
+						landblockId,
+						position: new Vec3(...position),
+						rotation: cameraRotation(cameraYawDegrees, cameraPitchDegrees),
+					},
+				},
+			},
+			{ envCellId, kind: "env-cell", landblockId },
+			safetyWorkItemLimit,
+		);
+	}
+
+	function parseEnvCellId(rawEnvCellId: string, operation: string): EnvCellId {
+		const match = /^(?:0x)?([0-9a-f]{8})$/i.exec(rawEnvCellId.trim());
+		if (!match) {
+			throw new Error(
+				`Terrain harness ${operation} EnvCell id must contain eight hexadecimal digits.`,
+			);
+		}
+		return `0x${match[1]!.toLowerCase()}`;
 	}
 
 	function cameraRotation(yawDegrees: number, pitchDegrees: number): Quat {
@@ -219,15 +452,23 @@
 			| SyntheticInstancedObjectPipeline
 			| undefined;
 		let device: WebGL2Device | undefined;
-		let objectDetailOwner: ActiveRegionObjectDetailOwner | undefined;
+		let staticDetailOwner: ActiveRegionStaticDetailOwner | undefined;
 		const hostGlobal = globalThis as typeof globalThis & HarnessGlobal;
 		const start = async (): Promise<void> => {
 			try {
 				contentSource = await HttpLandblockContentSource.build(hostUrl);
 				device = await WebGL2Device.build(canvasElement!);
-				const fixture = new URLSearchParams(window.location.search).get(
-					"fixture",
-				);
+				portalTargetCapabilities = device.probePortalTargetCapabilities();
+				if (fixture === "portal-substrate") {
+					portalSubstrate = device.probePortalSubstrate();
+					portalContextLossPolicy = await WebGL2Device.probeContextLossPolicy();
+				}
+				if (fixture === "portal-hybrid-execution") {
+					hybridPortalExecution = device.probeHybridPortalExecution();
+				}
+				if (fixture === "portal-internal-execution") {
+					internalPortalExecution = device.probeInternalPortalExecution();
+				}
 				pipeline =
 					fixture === "blended"
 						? new SyntheticBlendedBuildingPipeline()
@@ -236,10 +477,25 @@
 							: await StandardCommitPipeline.build({
 									sourceBatch: contentSource,
 								});
-				runtime = await GameRuntime.build(device, pipeline, contentSource);
-				objectDetailOwner = new ActiveRegionObjectDetailOwner(contentSource);
-				runtime.installActiveRegionObjectDetail(
-					await objectDetailOwner.install(contentSource.activeRegion),
+				runtime = await GameRuntime.build(
+					{
+						buildRenderer: async (world) => {
+							renderer = await device!.buildRenderer(world);
+							return renderer;
+						},
+						resources: device.resources,
+					},
+					pipeline,
+					contentSource,
+				);
+				// Harness comparisons select their render policy explicitly and start from flat.
+				runtime.setFrameSettings({
+					distanceFogEnabled: true,
+					envCellRenderMode: "flat",
+				});
+				staticDetailOwner = new ActiveRegionStaticDetailOwner(contentSource);
+				runtime.installActiveRegionStaticDetails(
+					await staticDetailOwner.install(contentSource.activeRegion),
 				);
 				if (destroyed) return;
 				ready = true;
@@ -260,15 +516,25 @@
 				}
 				hostGlobal.__HOLTBURGER_3D_TERRAIN_HARNESS__ = {
 					clearSceneInterest,
+					probePortalExecution,
+					probePortalRenderGraph,
 					requestOutdoorTerrain,
 					setCameraLandblock,
+					setEnvCellCamera,
+					setEnvCellRenderMode,
+					tracePortalSegment,
 					state: () => {
 						const staticObjects =
 							runtime?.getStaticObjectRuntimeDiagnostics() ?? null;
 						return {
 							error,
+							hybridPortalExecution,
 							frames,
+							internalPortalExecution,
 							metrics: runtime?.getFrameSelectionMetrics() ?? null,
+							portalContextLossPolicy,
+							portalSubstrate,
+							portalTargetCapabilities,
 							ready,
 							staticObjectLayers: {
 								buildings:
@@ -324,7 +590,7 @@
 			if (frameHandle !== undefined) window.cancelAnimationFrame(frameHandle);
 			longTaskObserver?.disconnect();
 			delete hostGlobal.__HOLTBURGER_3D_TERRAIN_HARNESS__;
-			objectDetailOwner?.teardown();
+			staticDetailOwner?.teardown();
 			void runtime?.destroy().finally(async () => {
 				await pipeline?.destroy();
 				await device?.destroy();

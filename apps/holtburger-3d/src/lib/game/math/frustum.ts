@@ -21,7 +21,17 @@ export function createFrustum(
 	view: Mat4,
 	cameraPosition: Vec3,
 ): Frustum {
-	const clip = multiplyMat4(projection, view);
+	return createFrustumFromClipMatrix(
+		multiplyMat4(projection, view),
+		cameraPosition,
+	);
+}
+
+/** Extract a frustum from one already-composed anchor-to-clip transform. */
+export function createFrustumFromClipMatrix(
+	clip: Mat4,
+	cameraPosition: Vec3,
+): Frustum {
 	return {
 		cameraPosition,
 		planes: [

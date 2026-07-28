@@ -11,11 +11,7 @@ import type {
 	TerrainGenerationSource,
 	TerrainPresentationSource,
 } from "../terrain/types";
-import type {
-	EnvCellLayerArtifact,
-	StaticObjectLayerDiagnostics,
-	StaticObjectLayerArtifact,
-} from "./artifacts";
+import type { EnvCellMaterializationPlan } from "./env-cell-materialization";
 
 export interface StaticLandblockLayerCommitTerrain {
 	/** Canonical source retained by runtime terrain generation. */
@@ -33,22 +29,14 @@ export enum TextureWrapPolicy {
 /** Resolved dynamic resident emitted beside a static layer commit. */
 export type DynamicEntityCommit = ResolvedObjectResident;
 
-/** Immutable object residents installed by their typed domain system. */
-export interface StaticObjectLayerCommit {
-	/** Null when classification promoted every resident and no static resources were published. */
-	readonly staticObjects: StaticObjectLayerArtifact | null;
-	/** Optional source-to-bake snapshot emitted by static layers that expose diagnostics. */
-	readonly diagnostics?: StaticObjectLayerDiagnostics;
-}
-
 /** Classified outdoor-static source handed to runtime-owned realization without physical pages. */
 export interface StaticObjectLayerSourceCommit {
 	readonly source: ResolvedOutdoorStaticLayerSource;
 }
 
-/** Topology and shell publication kept separate from embedded object residents. */
-export interface EnvCellLayerCommit extends StaticObjectLayerCommit {
-	readonly environment: EnvCellLayerArtifact;
+/** Closed EnvCell source plan awaiting revision-owned runtime realization. */
+export interface EnvCellLayerSourceCommit {
+	readonly plan: EnvCellMaterializationPlan;
 }
 
 export enum CommitBundleSourceKind {
@@ -94,7 +82,7 @@ export type CommitBundle = {} & (
 	  >
 	| CommitBundleLandblockLayerFields<
 			LandblockLayerKind.EnvCells,
-			EnvCellLayerCommit
+			EnvCellLayerSourceCommit
 	  >
 	| CommitBundleSpawnFields
 );

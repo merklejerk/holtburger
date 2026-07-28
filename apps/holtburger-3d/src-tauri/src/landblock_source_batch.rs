@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 
 use anyhow::{Context, Result, bail};
 use holtburger_content::{
-    GeneratedSceneryAsset, LandblockAsset, LandblockPlacement, LandblockTerrain,
-    normalize_landblock_id,
+    GeneratedSceneryAsset, LandblockAsset, LandblockInteriorSystemAsset, LandblockPlacement,
+    LandblockTerrain, normalize_landblock_id,
 };
 use holtburger_core::{ContentAsset, ContentAssetRequest, ContentAssetRuntime};
 use serde::{Deserialize, Serialize};
@@ -12,9 +12,6 @@ pub(crate) const LANDBLOCK_SOURCE_BATCH_BINARY_MAGIC: &[u8; 4] = b"HBLB";
 const LANDBLOCK_SOURCE_BATCH_BINARY_HEADER_LEN: usize = 12;
 
 /// A scene layer that the app-local landblock source boundary can request.
-///
-/// Env cells remain outside this outdoor source boundary and must not become an incidental batch
-/// branch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum LandblockSourceLayer {
@@ -22,6 +19,7 @@ pub enum LandblockSourceLayer {
     Buildings,
     Objects,
     Generated,
+    EnvCells,
 }
 
 /// The complete layer set needed for one landblock source acquisition.
@@ -55,14 +53,16 @@ impl LandblockSourceBatchRequest {
     }
 }
 
-/// The app-local projection of one exact outdoor source acquisition.
+/// The app-local projection of one exact landblock source acquisition.
 #[derive(Debug, Clone)]
 pub(crate) struct LoadedLandblockSourceBatch {
     landblock_id: u32,
+    landblock: Option<LandblockAsset>,
     terrain: TerrainSourceProjection,
     buildings: Option<Vec<OutdoorStaticResident>>,
     objects: Option<Vec<OutdoorStaticResident>>,
     generated: Option<Vec<OutdoorStaticResident>>,
+    interior: InteriorSourceProjection,
 }
 
 /// Distinguishes an unrequested terrain layer from a requested but absent DAT source.
@@ -70,6 +70,13 @@ pub(crate) struct LoadedLandblockSourceBatch {
 enum TerrainSourceProjection {
     Unrequested,
     Requested(Option<LandblockTerrain>),
+}
+
+/// Distinguishes an unrequested EnvCell layer from a requested but absent interior.
+#[derive(Debug, Clone)]
+enum InteriorSourceProjection {
+    Unrequested,
+    Requested(Option<LandblockInteriorSystemAsset>),
 }
 
 /// App-local presentation input for one outdoor static resident.
@@ -84,6 +91,10 @@ pub(crate) struct OutdoorStaticResident {
 impl LoadedLandblockSourceBatch {
     pub(crate) fn landblock_id(&self) -> u32 {
         self.landblock_id
+    }
+
+    pub(crate) fn landblock(&self) -> Option<&LandblockAsset> {
+        self.landblock.as_ref()
     }
 
     pub(crate) fn terrain(&self) -> Result<Option<&LandblockTerrain>> {
@@ -111,6 +122,15 @@ impl LoadedLandblockSourceBatch {
         self.generated
             .as_deref()
             .context("landblock source batch did not project Generated")
+    }
+
+    pub(crate) fn interior(&self) -> Result<Option<&LandblockInteriorSystemAsset>> {
+        match &self.interior {
+            InteriorSourceProjection::Requested(interior) => Ok(interior.as_ref()),
+            InteriorSourceProjection::Unrequested => {
+                bail!("landblock source batch did not project EnvCells")
+            }
+        }
     }
 }
 
@@ -225,13 +245,38 @@ pub(crate) async fn load_landblock_source_batch(
     } else {
         None
     };
+    let interior = if request.contains(LandblockSourceLayer::EnvCells) && landblock.is_some() {
+        let interior_asset = runtime
+            .load(ContentAssetRequest::LandblockInteriorSystem(
+                request.landblock_id,
+            ))
+            .await
+            .with_context(|| {
+                format!(
+                    "Could not resolve EnvCells for 0x{:08X}",
+                    request.landblock_id
+                )
+            })?;
+        let ContentAsset::LandblockInteriorSystem(interior) = interior_asset else {
+            bail!("EnvCell request returned a different content asset");
+        };
+        interior.as_deref().cloned()
+    } else {
+        None
+    };
 
-    project_landblock_source_batch(landblock.as_deref(), generated.as_deref(), &request)
+    project_landblock_source_batch(
+        landblock.as_deref(),
+        generated.as_deref(),
+        interior.as_ref(),
+        &request,
+    )
 }
 
 fn project_landblock_source_batch(
     landblock: Option<&LandblockAsset>,
     generated: Option<&GeneratedSceneryAsset>,
+    interior: Option<&LandblockInteriorSystemAsset>,
     request: &LandblockSourceBatchRequest,
 ) -> Result<LoadedLandblockSourceBatch> {
     if let Some(landblock) = landblock
@@ -252,9 +297,19 @@ fn project_landblock_source_batch(
             request.landblock_id
         );
     }
+    if let Some(interior) = interior
+        && interior.landblock_id != request.landblock_id
+    {
+        bail!(
+            "content runtime returned interior landblock 0x{:08X} for source batch 0x{:08X}",
+            interior.landblock_id,
+            request.landblock_id
+        );
+    }
 
     Ok(LoadedLandblockSourceBatch {
         landblock_id: request.landblock_id,
+        landblock: landblock.cloned(),
         terrain: if request.contains(LandblockSourceLayer::Terrain) {
             TerrainSourceProjection::Requested(landblock.map(|asset| asset.terrain.clone()))
         } else {
@@ -313,6 +368,11 @@ fn project_landblock_source_batch(
                 })
                 .collect()
         }),
+        interior: if request.contains(LandblockSourceLayer::EnvCells) {
+            InteriorSourceProjection::Requested(interior.cloned())
+        } else {
+            InteriorSourceProjection::Unrequested
+        },
     })
 }
 
@@ -359,10 +419,12 @@ mod tests {
     fn missing_object_projection_is_rejected() {
         let batch = LoadedLandblockSourceBatch {
             landblock_id: 0x0c78_ffff,
+            landblock: None,
             terrain: TerrainSourceProjection::Unrequested,
             buildings: None,
             objects: None,
             generated: None,
+            interior: InteriorSourceProjection::Unrequested,
         };
 
         assert!(batch.objects().is_err());
@@ -372,17 +434,19 @@ mod tests {
     fn missing_generated_projection_is_rejected() {
         let batch = LoadedLandblockSourceBatch {
             landblock_id: 0x0c78_ffff,
+            landblock: None,
             terrain: TerrainSourceProjection::Unrequested,
             buildings: None,
             objects: None,
             generated: None,
+            interior: InteriorSourceProjection::Unrequested,
         };
 
         assert!(batch.generated().is_err());
     }
 
     #[test]
-    fn outdoor_asset_projects_every_requested_transport_layer_once() {
+    fn landblock_asset_projects_every_requested_transport_layer_once() {
         let request = LandblockSourceBatchRequest::new(
             0x0c78_ffff,
             [
@@ -390,15 +454,17 @@ mod tests {
                 LandblockSourceLayer::Buildings,
                 LandblockSourceLayer::Objects,
                 LandblockSourceLayer::Generated,
+                LandblockSourceLayer::EnvCells,
             ],
         )
-        .expect("complete outdoor source request should be valid");
-        let projected = project_landblock_source_batch(None, None, &request)
+        .expect("complete landblock source request should be valid");
+        let projected = project_landblock_source_batch(None, None, None, &request)
             .expect("every requested transport projection should be present");
 
         assert!(projected.terrain().is_ok());
         assert!(projected.buildings().is_ok());
         assert!(projected.objects().is_ok());
         assert!(projected.generated().is_ok());
+        assert!(matches!(projected.interior(), Ok(None)));
     }
 }

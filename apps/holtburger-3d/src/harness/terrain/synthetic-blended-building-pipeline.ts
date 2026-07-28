@@ -3,22 +3,27 @@ import {
 	type CommitBundle,
 	type CommitPipeline,
 } from "../../lib/game/commit/types";
-import type {
-	StaticObjectLayerArtifact,
-	StaticObjectMaterialBinding,
-} from "../../lib/game/commit/artifacts";
 import type { LandblockId } from "../../lib/game/game-types";
+import { createTranslationMat4 } from "../../lib/game/math/matrices";
 import { AABB3, Mat4, Vec3 } from "../../lib/game/math/types";
+import type {
+	ResolvedObjectResident,
+	ResolvedOutdoorStaticLayerSource,
+} from "../../lib/game/resolution/landblock-layer";
+import type {
+	ResolvedGeometry,
+	ResolvedMaterial,
+	ResolvedObjectPresentation,
+} from "../../lib/game/resolution/presentation";
 import {
 	LandblockLayerKind,
 	type LandblockIdLayer,
 } from "../../lib/game/runtime/scene-interest";
-import {
-	TextureFilteringMode,
-	TextureWrapMode,
-} from "../../lib/game/textures/types";
 
-/** Closed synthetic fixture used only to prove the renderer's blended building phases. */
+const MATERIAL_FLAGS = [0x10, 0x100, 0x200, 0x10000, 0x10100, 0x10200];
+const LOCAL_BOUNDS = new AABB3(new Vec3(0, 0, 0), new Vec3(3, 5, 0));
+
+/** Closed source-first fixture used only to prove the renderer's blended building phases. */
 export class SyntheticBlendedBuildingPipeline implements CommitPipeline {
 	async prepareLandblockLayers(
 		layers: ReadonlySet<LandblockIdLayer>,
@@ -32,124 +37,98 @@ export class SyntheticBlendedBuildingPipeline implements CommitPipeline {
 }
 
 function buildingBundle(landblockId: LandblockId): CommitBundle {
-	const materialFlags = [0x10, 0x100, 0x200, 0x10000, 0x10100, 0x10200];
-	const positions: number[] = [];
-	const normals: number[] = [];
-	const textureCoordinates: number[] = [];
-	const indices: number[] = [];
-	const drawUnits = materialFlags.map((flags, index) => {
-		const vertexOffset = positions.length / 3;
-		const x = 84 + index * 4;
-		positions.push(x, 0, -120, x + 3, 0, -120, x + 1.5, 5, -120);
-		normals.push(0, 0, 1, 0, 0, 1, 0, 0, 1);
-		textureCoordinates.push(0, 0, 1, 0, 0.5, 1);
-		indices.push(vertexOffset, vertexOffset + 1, vertexOffset + 2);
-		const ordering: "additive" | "transparent" =
-			flags & 0x10000 ? "additive" : "transparent";
-		return {
-			geometry:
-				"static-install-geometry:static-install:synthetic-blended/building-layer" as const,
-			indexCount: 3,
-			indexStart: index * 3,
-			kind: "baked" as const,
-			material: fixtureMaterial(flags, index),
-			ordering,
-			transparentSort:
-				ordering === "transparent"
-					? { center: new Vec3(x + 1.5, 2, -120), stableId: `fixture:${index}` }
-					: null,
-		};
-	});
-	const geometryBytes =
-		indices.length * Uint32Array.BYTES_PER_ELEMENT +
-		normals.length * Float32Array.BYTES_PER_ELEMENT +
-		positions.length * Float32Array.BYTES_PER_ELEMENT +
-		textureCoordinates.length * Float32Array.BYTES_PER_ELEMENT;
-	const artifact: StaticObjectLayerArtifact = {
-		geometryDiagnostics: {
-			bakedFallbackRangeCount: 6,
-			bakedGeometryBytes: geometryBytes,
-			geometryWorkerDurationMs: 0,
-			instancedGeometryBytes: 0,
-			persistentCohortCount: 0,
-			persistentDrawUnitCount: 0,
-			persistentInstanceCount: 0,
-			persistentStreamBytes: 0,
-			persistentStreamCount: 0,
-			sourceMaterialSlotCount: 6,
-			sourcePartCount: 6,
-			sourceRangeCount: 6,
-			sourceResidentCount: 6,
-			strategy: "baked",
-			transparentTemplateBytes: 0,
-			transparentTemplateCohortCount: 0,
-			transparentTemplateInstanceCount: 0,
-		},
-		geometry: [
-			{
-				geometry: {
-					indices: Uint32Array.from(indices),
-					kind: "object",
-					normals: Float32Array.from(normals),
-					positions: Float32Array.from(positions),
-					textureCoordinates: Float32Array.from(textureCoordinates),
-				},
-				key: "static-install-geometry:static-install:synthetic-blended/building-layer",
-			},
-		],
-		instanceStreams: [],
-		objects: [
-			{
-				localBounds: new AABB3(new Vec3(80, -1, -122), new Vec3(112, 6, -118)),
-				placement: {
-					envCellId: null,
-					landblockId,
-					localTransform: Mat4.identity(),
-				},
-				renderable: { drawUnits, frameStreamedInstances: [] },
-			},
-		],
-		resourceNamespace: "static-install:synthetic-blended" as const,
-		textureRequirements: [],
+	const source: ResolvedOutdoorStaticLayerSource = {
+		dynamicResidents: [],
+		kind: LandblockLayerKind.Buildings,
+		landblockId,
+		staticResidents: MATERIAL_FLAGS.map((flags, index) =>
+			resident(landblockId, flags, index),
+		),
 	};
 	return {
-		commit: {
-			diagnostics: {
-				...artifact.geometryDiagnostics,
-				expectedResidentCount: 6,
-				materializedStaticResidentCount: 6,
-				promotedDynamicResidentCount: 0,
-				resolvedStaticResidentCount: 6,
-			},
-			staticObjects: artifact,
-		},
+		commit: { source },
 		dynamicEntities: [],
 		kind: CommitBundleSourceKind.LandblockLayer,
 		landblockId,
 		layer: LandblockLayerKind.Buildings,
-	} as unknown as CommitBundle;
+	};
 }
 
-function fixtureMaterial(
+function resident(
+	landblockId: LandblockId,
 	flags: number,
 	index: number,
-): StaticObjectMaterialBinding {
+): ResolvedObjectResident {
 	return {
-		palettedClipMap: false,
-		polygon: { cullMode: "double", renderSide: "positive", stippled: false },
-		sampler: {
-			filtering: TextureFilteringMode.Linear,
-			wrap: TextureWrapMode.Clamp,
+		appearance: null,
+		id: `synthetic-blended:${index}`,
+		localBounds: LOCAL_BOUNDS,
+		placement: {
+			envCellId: null,
+			landblockId,
+			localTransform: createTranslationMat4(new Vec3(84 + index * 4, 0, -120)),
 		},
-		source: {
-			color: [index % 2, (index + 1) % 2, 1, 0.5],
-			diffuseScale: 1,
-			id: `material:fixture:${flags}` as const,
-			kind: "solid-color",
-			luminosity: 0,
-			rawSurfaceFlags: flags,
-			translucency: 0,
+		presentation: presentation(flags, index),
+		scale: new Vec3(1, 1, 1),
+	};
+}
+
+function presentation(
+	flags: number,
+	index: number,
+): ResolvedObjectPresentation {
+	return {
+		effects: {
+			animationId: null,
+			physicsScriptId: null,
+			physicsScriptTableId: null,
+			soundTableId: null,
 		},
-		textures: { base: null, palette: null },
+		id: `presentation:synthetic-blended:${index}`,
+		motion: null,
+		parts: [
+			{
+				defaultScale: new Vec3(1, 1, 1),
+				geometry: triangleGeometry(index),
+				materials: [material(flags, index)],
+				parentPartIndex: null,
+				partIndex: 0,
+			},
+		],
+		placementPoses: new Map([
+			[0, { partTransforms: [Mat4.identity()], placementId: 0 }],
+		]),
+		selectionBounds: LOCAL_BOUNDS,
+		sortingBounds: LOCAL_BOUNDS,
+		sourceAssetId: `0x0100${index.toString(16).padStart(4, "0")}`,
+	};
+}
+
+function triangleGeometry(index: number): ResolvedGeometry {
+	return {
+		bounds: LOCAL_BOUNDS,
+		id: `geometry:synthetic-blended:${index}`,
+		indices: Uint32Array.of(0, 1, 2),
+		materialSideKinds: Uint8Array.of(0),
+		materialSideTypes: Uint8Array.of(0),
+		materialSlotIndices: Uint16Array.of(0),
+		materialStippling: Uint8Array.of(0),
+		materialWrapModes: Uint8Array.of(0),
+		normals: Float32Array.of(0, 0, 1, 0, 0, 1, 0, 0, 1),
+		positions: Float32Array.of(0, 0, 0, 3, 0, 0, 1.5, 5, 0),
+		sourceDiagnostics: { rejectedDegenerateTriangles: [] },
+		textureCoordinates: Float32Array.of(0, 0, 1, 0, 0.5, 1),
+	};
+}
+
+function material(flags: number, index: number): ResolvedMaterial {
+	return {
+		color: [index % 2, (index + 1) % 2, 1, 0.5],
+		diffuseScale: 1,
+		id: `material:synthetic-blended:${flags}`,
+		kind: "solid-color",
+		luminosity: 0,
+		rawSurfaceFlags: flags,
+		translucency: 0,
 	};
 }

@@ -33,6 +33,14 @@ export interface ResolvedGeometry {
 	readonly materialSideTypes: Uint8Array;
 	/** One raw authored stippling bitfield for every prepared triangle material slot. */
 	readonly materialStippling: Uint8Array;
+	/** Source geometry rejected without silently discarding its authored provenance. */
+	readonly sourceDiagnostics: {
+		readonly rejectedDegenerateTriangles: readonly {
+			readonly polygonId: number;
+			readonly sideKind: "positive" | "positive-reversed" | "negative";
+			readonly fanTriangleIndex: number;
+		}[];
+	};
 	readonly bounds: AABB3 | null;
 }
 

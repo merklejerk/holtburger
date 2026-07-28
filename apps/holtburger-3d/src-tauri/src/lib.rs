@@ -14,11 +14,21 @@ use serde_json::{Value, json};
 
 pub use landblock_source_batch::LandblockSourceLayer;
 
-mod gfx_obj_geometry;
+mod binary_source_record;
+pub mod cell_struct_projection;
+mod env_cell_source;
+pub mod gfx_obj_geometry;
+pub mod interior_seam;
 mod landblock_source_batch;
 mod object_texture;
 mod outdoor_static_source;
+pub mod polygon_geometry;
+pub mod portal_geometry;
+pub mod portal_visibility;
+mod source_projection;
 
+use binary_source_record::BinarySectionWriter;
+use env_cell_source::serialize_env_cell_source_record;
 use landblock_source_batch::{
     LandblockSourceBatchRecord, LandblockSourceBatchRequest, LoadedLandblockSourceBatch,
     load_landblock_source_batch as load_landblock_source_batch_asset,
@@ -31,6 +41,7 @@ use outdoor_static_source::{
     OutdoorStaticSourceClosure, OutdoorStaticSourceRecordManifest,
     serialize_outdoor_static_record_binary,
 };
+use source_projection::dat_id;
 
 const TERRAIN_SOURCE_BINARY_MAGIC: &[u8; 4] = b"HBTR";
 const BINARY_ENVELOPE_HEADER_LEN: usize = 12;
@@ -197,6 +208,9 @@ async fn build_landblock_source_batch_response(
             LandblockSourceLayer::Generated => {
                 serialize_outdoor_static_source_record(runtime, &source_batch, layer).await?
             }
+            LandblockSourceLayer::EnvCells => {
+                serialize_env_cell_source_record(runtime, &source_batch).await?
+            }
         };
         records.push(LandblockSourceBatchRecord { layer, bytes });
     }
@@ -225,8 +239,8 @@ async fn serialize_outdoor_static_source_record(
         LandblockSourceLayer::Buildings => source_batch.buildings()?,
         LandblockSourceLayer::Objects => source_batch.objects()?,
         LandblockSourceLayer::Generated => source_batch.generated()?,
-        LandblockSourceLayer::Terrain => {
-            anyhow::bail!("Terrain does not have an outdoor static source record")
+        LandblockSourceLayer::Terrain | LandblockSourceLayer::EnvCells => {
+            anyhow::bail!("{layer:?} does not have an outdoor static source record")
         }
     };
 
@@ -250,7 +264,9 @@ async fn serialize_outdoor_static_source_record(
         }));
     }
     closure.validate()?;
-    let sections = closure.sections();
+    let mut section_writer = BinarySectionWriter::default();
+    closure.buffers.append_sections(&mut section_writer, "")?;
+    let (sections, section_bytes) = section_writer.finish();
     let manifest = OutdoorStaticSourceRecordManifest {
         transport: "holtburger-outdoor-static-record",
         byte_order: "little-endian",
@@ -260,7 +276,9 @@ async fn serialize_outdoor_static_source_record(
             LandblockSourceLayer::Buildings => "buildings",
             LandblockSourceLayer::Objects => "objects",
             LandblockSourceLayer::Generated => "generated",
-            LandblockSourceLayer::Terrain => unreachable!("terrain was rejected above"),
+            LandblockSourceLayer::Terrain | LandblockSourceLayer::EnvCells => {
+                unreachable!("non-static layers were rejected above")
+            }
         },
         residents,
         definitions: closure.definitions,
@@ -269,7 +287,7 @@ async fn serialize_outdoor_static_source_record(
         texture_dependencies: closure.texture_dependencies.into_values().collect(),
         sections,
     };
-    serialize_outdoor_static_record_binary(&manifest, &closure.buffers)
+    serialize_outdoor_static_record_binary(&manifest, section_bytes)
 }
 
 async fn build_texture_pixels_response(
@@ -666,10 +684,6 @@ fn active_region_terrain_value(terrain: &TerrainDesc) -> Value {
     })
 }
 
-fn dat_id(id: u32) -> String {
-    format!("0x{id:08x}")
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TerrainSourceManifest {
@@ -868,9 +882,7 @@ pub fn run() {
 mod tests {
     use super::*;
     use crate::landblock_source_batch::LANDBLOCK_SOURCE_BATCH_BINARY_MAGIC;
-    use crate::outdoor_static_source::{
-        OUTDOOR_STATIC_RECORD_BINARY_MAGIC, OutdoorStaticGeometryBuffers,
-    };
+    use crate::outdoor_static_source::{OUTDOOR_STATIC_RECORD_BINARY_MAGIC, StaticGeometryBuffers};
     use holtburger_dat::file_type::PixelFormatId;
     use holtburger_dat::file_type::region::{GameTime, LandDefs, RegionDesc};
     use holtburger_dat::{DatFileType, EOR_PORTAL_NAMESPACE, HbaWriter};
@@ -930,7 +942,7 @@ mod tests {
 
     #[test]
     fn outdoor_static_record_binary_aligns_and_describes_geometry_sections() {
-        let buffers = OutdoorStaticGeometryBuffers {
+        let buffers = StaticGeometryBuffers {
             positions: vec![0.0, 0.0, 0.0],
             normals: vec![0.0, 0.0, 1.0],
             texture_coordinates: vec![0.0, 0.0],
@@ -941,6 +953,11 @@ mod tests {
             material_side_types: vec![0],
             material_stippling: vec![0],
         };
+        let mut section_writer = BinarySectionWriter::default();
+        buffers
+            .append_sections(&mut section_writer, "")
+            .expect("geometry sections should encode");
+        let (sections, section_bytes) = section_writer.finish();
         let manifest = OutdoorStaticSourceRecordManifest {
             transport: "holtburger-outdoor-static-record",
             byte_order: "little-endian",
@@ -952,9 +969,9 @@ mod tests {
             geometries: Vec::new(),
             materials: Vec::new(),
             texture_dependencies: Vec::new(),
-            sections: buffers.sections(),
+            sections,
         };
-        let bytes = serialize_outdoor_static_record_binary(&manifest, &buffers)
+        let bytes = serialize_outdoor_static_record_binary(&manifest, section_bytes)
             .expect("outdoor static record should serialize");
 
         assert_eq!(&bytes[..4], OUTDOOR_STATIC_RECORD_BINARY_MAGIC);
@@ -984,6 +1001,7 @@ mod tests {
                 LandblockSourceLayer::Buildings,
                 LandblockSourceLayer::Objects,
                 LandblockSourceLayer::Generated,
+                LandblockSourceLayer::EnvCells,
             ],
         )
         .expect("source batch request should be valid");
@@ -1006,6 +1024,10 @@ mod tests {
                     layer: LandblockSourceLayer::Generated,
                     bytes: vec![7, 8],
                 },
+                LandblockSourceBatchRecord {
+                    layer: LandblockSourceLayer::EnvCells,
+                    bytes: vec![9, 10],
+                },
             ],
         )
         .expect("source batch should serialize");
@@ -1018,10 +1040,10 @@ mod tests {
                 .expect("batch manifest should remain JSON");
         assert_eq!(
             manifest["requestedLayers"],
-            serde_json::json!(["terrain", "buildings", "objects", "generated"])
+            serde_json::json!(["terrain", "buildings", "objects", "generated", "env-cells"])
         );
-        assert_eq!(manifest["records"].as_array().map(Vec::len), Some(4));
-        assert_eq!(&bytes[record_offset..], [1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(manifest["records"].as_array().map(Vec::len), Some(5));
+        assert_eq!(&bytes[record_offset..], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     }
 
     #[test]

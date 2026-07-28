@@ -80,12 +80,75 @@
 				<code>{metrics.visibleDynamics}</code>
 			</div>
 			<div class="ac-param-row">
-				<span class="ac-param-key">Visible env-cell shells</span>
-				<code>{metrics.visibleEnvCellShells}</code>
+				<span class="ac-param-key">EnvCell mode / scopes</span>
+				<code
+					>{metrics.envCellRenderMode} / {metrics.visibleEnvCellScopeCount}</code
+				>
 			</div>
 			<div class="ac-param-row">
-				<span class="ac-param-key">Visible portal crossings</span>
-				<code>{metrics.visiblePortalCrossings}</code>
+				<span class="ac-param-key">Visible EnvCell shells / residents</span>
+				<code
+					>{metrics.visibleEnvCellShells} / {metrics.visibleEnvCellResidentNodes}</code
+				>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">EnvCell shell draws / triangles</span>
+				<code
+					>{metrics.submittedEnvCellShellDrawCount} / {metrics.submittedEnvCellShellTriangleCount}</code
+				>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">EnvCell resident draws / triangles</span>
+				<code
+					>{metrics.submittedEnvCellResidentDrawCount} / {metrics.submittedEnvCellResidentTriangleCount}</code
+				>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Shell back-cull overrides</span>
+				<code>{metrics.envCellShellCullOverrideCount}</code>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Portal nodes submitted / planned</span>
+				<code
+					>{metrics.portalSubmittedRenderNodeCount} / {metrics.portalRenderNodeCount}</code
+				>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Portal layers / mask edges / draws</span>
+				<code
+					>{metrics.portalRenderLayerCount} / {metrics.portalMaskEdgeCount} /
+					{metrics.submittedPortalApertureDrawCount}</code
+				>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key"
+					>Portal facing / same-domain / near-plane</span
+				>
+				<code
+					>{metrics.portalRejectedFacingCrossingCount} /
+					{metrics.portalSameDomainBoundaryCrossingCount} /
+					{metrics.portalNearPlaneSeedCount}</code
+				>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key"
+					>Exterior renders / composites / retained targets</span
+				>
+				<code
+					>{metrics.portalExteriorRenderCount} / {metrics.portalCompositeCount} /
+					{metrics.sceneDomainTargetCount}</code
+				>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Retained portal target bytes</span>
+				<code>{metrics.sceneDomainTargetBytes}</code>
+			</div>
+			<div class="ac-param-row">
+				<span class="ac-param-key">Portal planning / execution ms</span>
+				<code
+					>{metrics.portalPlanningDurationMs.toFixed(2)} /
+					{metrics.portalExecutionDurationMs.toFixed(2)}</code
+				>
 			</div>
 		</div>
 		<p class="explorer-frame-note">

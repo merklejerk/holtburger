@@ -1,204 +1,263 @@
 # Architectural Snapshot: holtburger-3d
 
-_Last updated: 2026-07-27_
+_Last updated: 2026-07-28_
 
-## 1. System Topology and Cross-Layer Import Matrix
+## Tech Lead North Stars
+
+- Keep canonical DAT discovery and joins in shared content code while keeping frontend
+  presentation projection app-local.
+- Acquire each landblock once per request, but publish and evict its requested layers
+  independently.
+- Preserve authored environment-cell geometry, topology, containment, and residency facts without
+  letting renderer policy leak back into the scene.
+- Reuse one static material, texture, atlas, geometry, and draw path across outdoor objects,
+  environment shells, and environment-cell residents.
+- Keep explorer camera policy in the explorer. Shared runtime APIs expose facts and directed query
+  primitives rather than implementing a future game client's movement controller.
+- Make portal rendering correct by construction: one unique owner for each reached render domain,
+  one effective aperture per mask edge, and one renderer-local schedule.
+
+## 1. Current System Shape
 
 ```mermaid
-graph TD
+flowchart TD
     Interest[Explorer scene interest] --> Coordinator[SceneInterestCommitCoordinator]
     Coordinator --> Pipeline[StandardCommitPipeline]
-    Pipeline --> Source[LandblockSourceBatchSource]
-    Source --> Host[Tauri landblock source host]
-    Host --> Core[ContentAssetService]
-    Core --> Content[holtburger-content canonical assets]
-    Host --> Batch[HBLB requested-layer records]
-    Batch --> Pipeline
-    Pipeline --> Runtime[GameRuntime]
-    Runtime --> Realizer[StaticLayerRealizer / TerrainSystem]
-    Realizer --> Scene[SceneGraph + typed systems]
-    Scene --> RenderWorld[read-only RenderWorld]
-    RenderWorld --> Renderer[WebGL2Renderer]
-    Renderer --> Device[WebGL2 resource/program adapters]
+    Pipeline --> Batch[LandblockSourceBatchSource]
+    Batch --> Host[Tauri landblock source adapter]
+    Host --> Content[holtburger-content assets]
+    Host --> HBLB[HBLB requested-layer records]
+    HBLB --> Decode[typed browser decoders]
+    Decode --> Materialize[source-to-materialization plans]
+    Materialize --> Realize[revision-scoped realization]
+    Realize --> Systems[SceneGraph and typed owner systems]
+    Systems --> World[read-only RenderWorld]
+    World --> Flat[flat scope selection]
+    World --> Portal[portal graph planning]
+    Flat --> Renderer[WebGL2 renderer]
+    Portal --> Renderer
+    Renderer --> Device[resource managers, programs, portal substrate]
 ```
 
-The Tauri host acquires one cached shallow `LandblockAsset` for every outdoor request. Terrain,
-Buildings, and Objects are projections of that foundation. Generated scenery triggers the
-separate canonical generated resolution only when that exact layer is requested. The HBLB
-envelope is an app-local transport and validation boundary; it never becomes runtime ownership.
+`LandblockSourceBatchSource` is an app-local acquisition capability, not an outdoor scene type. It
+accepts the complete requested layer set for one landblock and returns independently decoded
+Terrain, Buildings, Objects, Generated, and EnvCells records. The host loads one shallow
+`LandblockAsset`; only explicitly requested deep products such as generated scenery and the
+interior system are resolved.
 
-| Layer                   | May import                                                | Must not own                                         |
-| ----------------------- | --------------------------------------------------------- | ---------------------------------------------------- |
-| `holtburger-content`    | DAT and common source-domain types                        | Renderer geometry, app layer selection, HBLB records |
-| `src-tauri` host        | content/core assets, app-local geometry and serialization | browser revisions, scene nodes, draw policy          |
-| `src/lib/assets`        | wire decoders and source adapters                         | scene mutation or WebGL resources                    |
-| `src/lib/game/commit`   | typed source-to-artifact preparation                      | host loading policy or scene currentness             |
-| `src/lib/game/runtime`  | interest revisions, currentness, realization sequencing   | binary transport layouts or raw WebGL handles        |
-| `src/lib/game/systems`  | typed scene/resource ownership                            | source transport or interest-radius policy           |
-| `src/lib/game/renderer` | visible draw assembly and WebGL execution                 | content discovery or scene mutation authority        |
-| explorer/routes         | UX and interest selection                                 | DAT interpretation or renderer resource ownership    |
+The HBLB envelope groups transport only. Each record retains its own availability, decoder,
+commit, revision, owner, publication, and eviction lifecycle.
 
-Current search evidence keeps `WebGL2RenderingContext` inside `game/renderer`. The active Tauri
-path does not import content-prepared triangles, bounds, BVHs, or diagnostic ledgers.
+## 2. Load-Bearing Bones
 
-## 2. Load-Bearing Architectural Bones Radar
+| Boundary                                         | Owned invariant                                                                                                                                         |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src-tauri/src/landblock_source_batch.rs`        | One cumulative, requested-layer host acquisition with explicit requested/unrequested projections.                                                       |
+| `src-tauri/src/env_cell_source.rs`               | HBEC v2 projection of CellStruct shells, materials, residents, containment, authored apertures, effective visibility apertures, and directed crossings. |
+| `src-tauri/src/cell_struct_projection.rs`        | One generalized polygon projection for visible sides, material-free apertures, and the normalized positive-child Cell BSP containment chain.            |
+| `src/lib/assets/decode-env-cell-record.ts`       | Strict, versioned, independently decodable browser boundary; malformed identity, ranges, topology, or geometry fail loudly.                             |
+| `game/commit/env-cell-materialization.ts`        | Renderer-neutral shell, scope, aperture, crossing, and per-cell resident work; no scene or GPU ownership.                                               |
+| `game/runtime/static-layer-realizer.ts`          | Revision currentness, geometry/atlas rendezvous, publication ordering, and stale-work withdrawal.                                                       |
+| `game/runtime/env-cell-realization.ts`           | Reuses the static preparer for residents, builds proof-backed visibility islands, and creates one environment artifact.                                 |
+| `game/systems/env-cell-system.ts`                | Failure-atomic ownership of scopes, crossings, shell nodes, aperture geometry, and rollback.                                                            |
+| `game/scene/scene-graph.ts`                      | Scene transforms, scope-partitioned culling groups, exact point containment, directed portal traces, and immutable topology views.                      |
+| `game/renderer/render-world.ts`                  | Read-only bridge from typed runtime systems to renderer resource keys and contributions.                                                                |
+| `game/renderer/portal-render-graph.ts`           | Per-view portal windows, traversal, unique render domains, mask edges, render layers, exterior-component scheduling, and capacity preflight.            |
+| `game/renderer/portal-render-plan-validation.ts` | Pure validation and indexing of the completed planner contract before any GPU resource resolution.                                                      |
+| `game/renderer/webgl2-portal-executor.ts`        | Stateless execution of the completed graph; it invents no topology or second contribution schedule.                                                     |
+| `game/renderer/webgl2-portal-substrate.ts`       | Two extent-keyed scene-domain targets and explicit WebGL color/depth/stencil state transitions.                                                         |
 
-| Bone                                                               | Invariant owned                                                                         | Refresher                                                                                                                           |
-| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `src-tauri/src/landblock_source_batch.rs`                          | One shallow foundation per landblock acquisition; deep generated fanout only on request | Converts canonical content assets into exact requested app-layer projections. Env cells remain a separate future capability.        |
-| `src-tauri/src/outdoor_static_source.rs` and `gfx_obj_geometry.rs` | Presentation source closure is app-local                                                | Resolve GfxObj/SetupModel source facts, materials, triangulation, and geometry bounds without pushing renderer policy into content. |
-| `src/lib/game/resolution/presentation.ts`                          | Runtime presentation transforms and bounds are browser-owned                            | Compose the hierarchy once and share it between conservative bounds and static geometry preparation.                                |
-| `src/lib/game/runtime/scene-interest-commit-coordinator.ts`        | Only the current layer revision may publish                                             | Groups new layers by landblock, but tracks currentness, failure, unavailability, and eviction independently per layer.              |
-| `src/lib/game/commit/pipeline.ts`                                  | HBLB batches fan out immediately into typed independent commits                         | Validates record identity/kind and prevents the transport envelope from becoming a runtime owner.                                   |
-| `src/lib/game/runtime/static-layer-realizer.ts`                    | Atlas claims become active before exact scene publication                               | Preserves owner/revision isolation while allowing shared physical texture residency.                                                |
-| `src/lib/game/renderer/render-world.ts`                            | Renderer reads typed system state without mutating it                                   | Resolves visible scene contributions into backend resource keys behind narrow read-only ports.                                      |
-
-## 3. Core Execution Loops
-
-### Landblock commit and state mutation
+## 3. Environment-Cell Source and Ownership Flow
 
 ```mermaid
 sequenceDiagram
     participant Interest
-    participant Coordinator
     participant Pipeline
     participant Host
-    participant Core
-    participant Worker
-    participant Runtime
+    participant Decoder
+    participant Planner
+    participant Realizer
+    participant Env as EnvCellSystem
+    participant Static as StaticObjectSystem
 
-    Interest->>Coordinator: SceneInterestMap
-    Coordinator->>Coordinator: diff + SceneInterestRevision per LandblockIdLayer
-    Coordinator->>Pipeline: Set<LandblockIdLayer>
-    Pipeline->>Host: HBLB request { landblockId, requestedLayers }
-    Host->>Core: ContentAssetRequest::Landblock
-    Core-->>Host: Option<Arc<LandblockAsset>>
-    opt Generated requested
-        Host->>Core: ContentAssetRequest::GeneratedScenery
-        Core-->>Host: Option<Arc<GeneratedSceneryAsset>>
-    end
-    Host-->>Pipeline: LandblockSourceBatch with independent typed records
-    Pipeline-->>Coordinator: CommitBundle[]
-    Coordinator->>Worker: outdoor-static source for exact layer/revision
-    Worker-->>Runtime: StaticObjectArtifact
-    Runtime->>Runtime: currentness + atlas-before-scene realization
+    Interest->>Pipeline: landblock + EnvCells revision
+    Pipeline->>Host: HBLB request including EnvCells
+    Host->>Host: resolve interior, CellStructs, materials, residents, portals
+    Host-->>Decoder: HBEC v2 record
+    Decoder-->>Planner: ResolvedEnvCellLayerSource
+    Planner->>Planner: shells + scopes + crossings + per-cell resident jobs
+    Realizer->>Realizer: prepare shared static geometry and atlas requirements
+    Realizer->>Env: replace environment transaction
+    Realizer->>Static: replace resident transaction
+    Note over Env,Static: rollback environment if resident publication fails
 ```
 
-### Render frame assembly and device execution
+CellStruct geometry is reusable across cells, but material selection and placement are cell-owned.
+Shells therefore share logical geometry keys while retaining independent material ranges,
+landblock-space transforms, bounds, and EnvCell scope identity.
 
-```mermaid
-sequenceDiagram
-    participant Frame as requestAnimationFrame
-    participant Runtime
-    participant World as RenderWorld
-    participant Scene
-    participant Renderer as WebGL2Renderer
-    participant Device as WebGL adapters
+Every environment-cell static resident enters the same classifier, material planner, worker,
+texture dependency collector, atlas, geometry manager, static object system, and renderer used by
+outdoor static residents. Jobs are partitioned by EnvCell before batching, so no baked node,
+instance stream, transparent population, or draw contribution spans scopes. Default-animated
+residents remain explicitly deferred to the dynamic path.
 
-    Frame->>Runtime: update(camera/time)
-    Runtime->>World: Camera + Frustum + anchor LandblockId
-    World->>Scene: queryFrustum(SceneScope)
-    Scene-->>World: VisibleScene
-    World-->>Renderer: TerrainDrawUnit / ResolvedStaticObjectNode / dynamic and env-cell contributions
-    Renderer->>Renderer: pass ordering + near-transparent partition + instance-stream assembly
-    Renderer->>Device: resolved VAO/program/texture bindings + draw commands
-```
+Publication is failure-atomic across the environment and its residents. Geometry and atlas work
+may prepare concurrently, but only a current scene-interest revision can publish. Stale work
+withdraws its atlas claim and cannot become authoritative scene state.
 
-## 4. Source Tree and Module Placement Audit
+## 4. Scene Graph and Spatial Queries
 
-- `gfx_obj_geometry.rs` is correctly app-local: it prepares the geometry serialized by this
-  frontend and does not belong in shared content.
-- Canonical terrain height resolution now occurs in content. The browser
-  `active-region-terrain-resolver.ts` consumes resolved heights and retains only presentation
-  material lookup.
-- `game/terrain/active-region-terrain-resolver.ts` imports the source-facing
-  `assets/active-region-source` type. This is a minor directionality smell: if another frontend
-  appears, the shared region presentation input should move to a game-level type rather than
-  allowing more asset-adapter types to flow inward.
-- `src-tauri/src/lib.rs` remains a broad command/serialization composition module. The dedicated
-  landblock and object-source modules contain the new work, so this cleanup did not expand that
-  hub, but it remains the clearest future module-split candidate.
-- Browser `EnvCellSystem` and related render types are dormant forward structure; the active
-  source/commit path still has no env-cell materialization capability. They must not dictate the
-  canonical content interior shape.
+All root transforms are landblock-local. A root carries `landblockId`, optional `envCellId`, and a
+local-to-landblock transform; children inherit the root residency and compose transforms exactly
+once. Environment shells are roots in their EnvCell scope. Resident nodes are also landblock-space
+roots produced by the shared static system, avoiding a second CellStruct transform.
 
-## 5. Cyclomatic and Structural Complexity Hotspots
+The spatial index is organized by:
 
-Branch-keyword counts are a coarse file-level proxy, not per-function McCabe scores.
+1. scene scope;
+2. root landblock coordinate frame;
+3. producer-owned culling group; and
+4. exact node bounds.
 
-| File                                      | Lines | Branch proxy | Assessment                                                                                                                  |
-| ----------------------------------------- | ----: | -----------: | --------------------------------------------------------------------------------------------------------------------------- |
-| `renderer/webgl2-renderer.ts`             | 1,316 |           62 | Expected backend complexity, but pass assembly and binding transitions should continue moving behind focused helpers.       |
-| `commit/static-object-geometry-worker.ts` | 1,035 |           69 | Highest policy density; baked/instanced partitioning, transparency, and geometry assembly need careful review when changed. |
-| `runtime/game-runtime.ts`                 |   997 |           41 | Genuine orchestration hub; keep new source policy out and continue delegating realization.                                  |
-| `src-tauri/src/lib.rs`                    | 1,316 |           32 | Oversized composition/serialization hub; split by command family when next touched.                                         |
-| `src-tauri/src/outdoor_static_source.rs`  |   793 |           44 | Cohesive but large presentation closure; hierarchy and material projection are the likely extraction seams.                 |
+Environment shells use `env-cell-shell`; static residents use the EnvCells layer group. A query
+first rejects an aggregate group AABB and then tests each member AABB. Flat and portal modes share
+this exact spatial selection; only their chosen scope sets differ.
 
-No new nested fallback or error-swallowing path was introduced by the content-boundary cutover.
-Host assembly errors reject the request; only absent CellLandblock becomes layer unavailability.
+The runtime exposes three distinct query contracts:
 
-## 6. Module Coupling and Structural Hubs
+- `queryWorldPointResidencyCandidates` returns the outdoor result plus every EnvCell whose AABB is
+  hit, together with its exact Cell BSP containment verdict. It preserves overlapping ambiguity.
+- `queryEnvCellPointContainment` tests one caller-selected resident EnvCell.
+- `tracePortalSegment` starts from caller-supplied authoritative residency and follows the earliest
+  directed finite-aperture crossing. It does not infer residency from overlap.
 
-- `GameRuntime` has high fan-in because it is the composition root for scene, systems, textures,
-  renderer-facing state, and commit callbacks. Its authority is legitimate, but feature-specific
-  branching should remain delegated to systems/realizers.
-- `commit/artifacts.ts` and `game-types.ts` are high fan-in type hubs. Keep them declarative; adding
-  policy there would produce a broad change cascade.
-- `webgl2-renderer.ts` has high fan-out across scene contributions, terrain, static resources,
-  textures, and device programs. `RenderWorld` is the important containment seam preventing those
-  dependencies from leaking back into runtime mutation.
-- `src-tauri/src/lib.rs` has high fan-out across commands, content assets, source serialization,
-  textures, and Tauri state. It is acyclic today but structurally expensive to review.
-- No circular dependency was found between asset adapters, commit preparation, runtime ownership,
-  scene systems, and renderer execution.
+The explorer uses candidate containment for best-effort initial/free-fly placement. It retains the
+last resolved residency when overlap is ambiguous. No player movement, authoritative portal
+history, third-person camera residency, or client controller policy has been implemented.
 
-## 7. Leaky Abstractions and Terminology Honesty
+## 5. Authored and Effective Apertures
 
-- The old shared `Prepared*`, `LandblockOutdoorAsset`, and `StaticOutdoorScene` vocabulary has been
-  removed from active crates. `PreparedStaticSource` in the browser geometry worker is an
-  app-internal transient value and does not claim to be canonical content.
-- `LoadedLandblockSourceBatch` is honest: it is an app-local projection with explicit
-  requested/unrequested state, not a canonical aggregate asset.
-- `ContentAssetRequest::GeneratedScenery` names a canonical deep resolution; it is not hidden
-  behind a generic landblock load.
-- WebGL handles remain behind renderer/resource-manager types. Scene, runtime, and commit artifacts
-  carry logical keys rather than driver objects.
-- Source and commit failures remain ephemeral availability events rather than successful artifact
-  diagnostics.
+An authored aperture is material-free planar triangle geometry in landblock space. It retains its
+plane, accepted traversal side, bounds, source identity, and polygon provenance. It is used by
+directed spatial queries and never replaced by rendering preprocessing.
 
-## 8. Competing State and Policy Drift
+Each directed crossing also names one effective visibility aperture:
 
-- Layer currentness has one authority:
-  `SceneInterestCommitCoordinator.#layerRevisions`. Runtime systems consume accepted callbacks and
-  do not recreate request-currentness maps.
-- The shallow landblock foundation has one host-side authority:
-  `ContentAssetService` caches by normalized landblock ID. Generated requests reacquire that same
-  `Arc`; Tauri does not reconstruct CellLandblock/LandblockInfo joins.
-- Terrain heights have one canonical authority in `LandblockTerrain.heights`. The browser no
-  longer repeats RegionDesc height-table lookup.
-- Runtime ownership remains per layer even though acquisition is grouped per landblock. Shared
-  atlas pages are physical residency, not competing logical ownership.
-- Transparency partitioning and draw batching remain renderer policy. Neither content nor Tauri
-  serializes draw ranges or visibility structures.
+- an exact or unresolved crossing reuses the authored source aperture;
+- a non-`ExactMatch` reciprocal pair receives the coplanar geometric intersection of the two
+  authored apertures; and
+- the host records static provenance for the synthesized intersection.
 
-## 9. Structural File Size and Candidate Pruning
+This preprocessing occurs once at the app-local host boundary. The renderer consumes the result
+directly; it does not recompute reciprocal intersections per frame. Effective apertures constrain
+visibility and masks only. They do not alter containment, collision, or portal-crossing queries.
 
-Completed in this boundary cleanup:
+Indoor reciprocal seams join one visibility island only when the host proves exact reciprocal
+identity, `ExactMatch` on both sides, equivalent apertures, opposed accepted half-spaces, and cell
+bounds separated by the portal plane. Any failed proof remains an explicit topology boundary.
 
-- removed the filtered prepared-outdoor and single-EnvCell content APIs;
-- removed content-owned triangulation, aperture, bounds, and BVH products;
-- removed durable source-attempt/candidate diagnostics;
-- removed render-evidence harnesses that existed only to support the deleted contracts; and
-- moved the surviving generated resolver into an honestly named canonical module.
+## 6. Rendering Modes and Portal Execution
 
-Future candidates, in priority order:
+Flat mode selects outdoor plus every resident EnvCell scope, applies ordinary frustum/group/node
+culling, and performs no portal planning, masks, targets, or composition. It forces single-sided
+back-face culling for CellStruct shell ranges only, preserving useful bird's-eye inspection of
+interiors. Static ranges retain authored DAT cull mode as provenance, but WebGL consumes the
+effective front/back rejection for each side already expanded by the host.
 
-1. Split `src-tauri/src/lib.rs` by command/serialization family without changing public Tauri
-   commands.
-2. Separate pass scheduling from device command execution in `webgl2-renderer.ts` when measured
-   renderer work next requires changes.
-3. Split the static geometry worker by resident classification, geometry assembly, and
-   transparency ordering only if those seams remain stateless and testable.
-4. Revisit the game-to-assets type import for active-region terrain presentation.
+Portal mode starts from the camera's supplied scope. The planner:
 
-These are review targets, not authorization for opportunistic refactors in unrelated work.
+1. groups depth-continuous indoor scopes into unique render domains;
+2. propagates exact clipped view windows through forward-facing effective apertures;
+3. retains each reached domain once and records alternate routes as incoming mask edges;
+4. treats finite near-plane/aperture intersections as dual-side seeds;
+5. assigns render layers and an explicit exterior-component operation; and
+6. preflights stencil capacity and a corruption-only work ceiling.
+
+The executor unions every layer's aperture masks into one stencil label, then submits each reached
+node once for that layer. A same-domain topology boundary remains available to spatial queries but
+produces no mask: both endpoint scopes are already owned by the same unique draw domain, so a mask
+cannot constrain them further.
+
+Outdoor/indoor transitions use two renderer-owned full-size targets: an exterior source and a
+composite destination. Exterior color and depth are rendered once per view and copied through
+transition masks. The same ordinary contribution path handles opaque, alpha-tested, transparent,
+and additive content. Targets are lazy, extent-keyed, retained across a switch back to flat mode,
+and disposed on resize or renderer destruction.
+
+## 7. Boundary Audit
+
+| Layer                 | May own                                                                    | Must not own                                             |
+| --------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `holtburger-content`  | canonical landblock/interior joins and authored topology                   | app transport, browser geometry, portal render schedules |
+| Tauri adapter         | app-local projection, HBLB/HBEC encoding, effective aperture preprocessing | scene revisions, camera policy, WebGL state              |
+| browser assets/commit | strict decoding and source-to-plan conversion                              | runtime currentness or GPU handles                       |
+| runtime/systems       | revision ownership, scene publication, topology, logical resources         | DAT discovery or portal draw scheduling                  |
+| scene graph           | transforms, scope facts, culling, containment, directed query primitives   | explorer policy or stencil policy                        |
+| renderer              | per-view visibility windows, graph schedule, passes, targets, device state | scene mutation or authoritative residency                |
+| explorer              | free-fly controls, initial placement, render-mode UX                       | canonical topology or future client movement policy      |
+
+No `WebGL2RenderingContext` escapes the renderer subtree. Scene and commit artifacts carry logical
+geometry/texture keys, not driver objects. Host serialization carries source facts and proven
+classification, not frame diagnostics or draw ordering.
+
+HBSO and HBEC retain independent envelopes and required-section contracts while sharing one typed
+Rust section writer and one TypeScript section validator/reader. Static geometry, material, and
+presentation decoding lives in the neutral `decode-static-source-record.ts`; HBEC no longer
+imports shared behavior through an outdoor-owned module.
+
+## 8. Terminology and Dead-Contract Audit
+
+- `OutdoorStaticLayerKind` remains accurate for Buildings, Objects, and Generated. EnvCells is a
+  distinct static layer because it also owns shells, topology, queries, and apertures.
+- `LandblockSourceBatchSource` names cumulative acquisition and is intentionally not
+  outdoor-specific.
+- The old first-match `queryWorldPointResidency` contract is gone; the remaining candidates API is
+  ambiguity-preserving.
+- The old object-only detail owner is gone. Active-region static detail owns building,
+  environment, and object roles as one generation.
+- Apertures have `PortalGeometryKey`/`PortalDrawUnit` resources and no textured material ranges.
+- HBEC has one live version, v2. No v1 decoder or compatibility path remains.
+- Paired renderer apertures, scratch stencil values, increment/decrement mask stacks, and
+  push/pop-mask contracts are absent from production and tests.
+- `visibilityProvenance` is source-validation evidence. Runtime diagnostics aggregate the resulting
+  authored/intersection counts instead of carrying provenance into every frame.
+- Static texture-fact compatibility and owner-ID parsing each have one runtime implementation.
+- Portal-plan topology, layer, transition, and exterior-component validation completes before the
+  WebGL executor resolves masks or allocates targets.
+
+## 9. Complexity, Debt, and Pruning Targets
+
+Current large-file concentration:
+
+| File                               | Approx. lines | Assessment                                                                                                                                                                                 |
+| ---------------------------------- | ------------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `renderer/webgl2-renderer.ts`      |         1,898 | Largest active debt. Contribution assembly, frame metrics, harness probes, and device drawing are coherent but crowded. Extract a measured seam before adding another rendering subsystem. |
+| `src-tauri/src/env_cell_source.rs` |         1,169 | Large but cohesive source projection. Binary-section encoding is now shared; visibility preprocessing is the clearest future split if the format evolves.                                  |
+| `src-tauri/src/lib.rs`             |         1,292 | Broad Tauri composition hub; split by command family when next materially touched.                                                                                                         |
+| `runtime/game-runtime.ts`          |         1,219 | Legitimate composition root. Typed owner parsing and texture merging are now delegated; keep feature policy in planners, realizers, and systems.                                           |
+| `assets/decode-env-cell-record.ts` |         1,140 | Strict semantic validation remains dense after shared binary-section and static-presentation decoding were extracted.                                                                      |
+| `renderer/portal-render-graph.ts`  |         1,053 | Complex domain algorithm with strong pure-test coverage. Avoid mixing GPU commands into it.                                                                                                |
+
+There is no evidence-backed duplicate material or portal renderer to delete. The main risk is
+future accretion into the renderer and host serializer hubs. The correct next refactor trigger is a
+new responsibility or measured review burden, not line count alone.
+
+Known concessions:
+
+- Flat mode intentionally renders all resident EnvCells, so it is an inspection mode rather than a
+  scalable gameplay visibility policy.
+- Same-domain topology boundaries cannot create a useful stencil separation after their endpoint
+  scopes have merged into one proven visibility island; they remain query-visible and are
+  diagnosed.
+- Portal targets remain allocated after returning to flat mode to make mode changes cheap. They
+  are released on resize/destroy, and their bytes are reported.
+- Explorer residency is best effort and has no portal-crossing history. That is correct for the
+  explorer and deliberately insufficient for a future authoritative client controller.
+
+## 10. Verification Posture
+
+Pure geometry, containment, topology, portal-window, graph, and executor contracts use synthetic
+fixtures that require no local DAT/HBA archives. Archive-backed source and browser checks remain
+opt-in diagnostic coverage. Frame metrics are consumed by the explorer, harness assertions, or
+this audit; unused ceremonial fields are not retained.

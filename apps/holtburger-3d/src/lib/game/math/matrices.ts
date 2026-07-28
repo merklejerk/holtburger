@@ -218,6 +218,109 @@ export function transformPoint3(
 }
 
 /**
+ * Transform a point through the inverse of a rotation-plus-translation matrix.
+ *
+ * This rejects scale, shear, and projective terms instead of silently treating every affine
+ * transform as rigid.
+ */
+export function inverseTransformRigidPoint3(
+	matrix: Mat4,
+	point: Vec3,
+	targetVec?: Vec3,
+): Vec3 {
+	assertRigidTransform(matrix);
+	const x = point.x - matrix.m41;
+	const y = point.y - matrix.m42;
+	const z = point.z - matrix.m43;
+	const target = targetVec ?? Vec3.zero();
+	target.x = matrix.m11 * x + matrix.m12 * y + matrix.m13 * z;
+	target.y = matrix.m21 * x + matrix.m22 * y + matrix.m23 * z;
+	target.z = matrix.m31 * x + matrix.m32 * y + matrix.m33 * z;
+	return target;
+}
+
+function assertRigidTransform(matrix: Mat4): void {
+	const values = [
+		matrix.m11,
+		matrix.m12,
+		matrix.m13,
+		matrix.m14,
+		matrix.m21,
+		matrix.m22,
+		matrix.m23,
+		matrix.m24,
+		matrix.m31,
+		matrix.m32,
+		matrix.m33,
+		matrix.m34,
+		matrix.m41,
+		matrix.m42,
+		matrix.m43,
+		matrix.m44,
+	];
+	if (!values.every(Number.isFinite)) {
+		throw new Error("Rigid transform contains non-finite values.");
+	}
+	const tolerance = 0.000_01;
+	const lengthSquared = (x: number, y: number, z: number): number =>
+		x * x + y * y + z * z;
+	const dot = (
+		ax: number,
+		ay: number,
+		az: number,
+		bx: number,
+		by: number,
+		bz: number,
+	): number => ax * bx + ay * by + az * bz;
+	const affine =
+		Math.abs(matrix.m14) <= tolerance &&
+		Math.abs(matrix.m24) <= tolerance &&
+		Math.abs(matrix.m34) <= tolerance &&
+		Math.abs(matrix.m44 - 1) <= tolerance;
+	const unitColumns =
+		Math.abs(lengthSquared(matrix.m11, matrix.m12, matrix.m13) - 1) <=
+			tolerance &&
+		Math.abs(lengthSquared(matrix.m21, matrix.m22, matrix.m23) - 1) <=
+			tolerance &&
+		Math.abs(lengthSquared(matrix.m31, matrix.m32, matrix.m33) - 1) <=
+			tolerance;
+	const orthogonalColumns =
+		Math.abs(
+			dot(
+				matrix.m11,
+				matrix.m12,
+				matrix.m13,
+				matrix.m21,
+				matrix.m22,
+				matrix.m23,
+			),
+		) <= tolerance &&
+		Math.abs(
+			dot(
+				matrix.m11,
+				matrix.m12,
+				matrix.m13,
+				matrix.m31,
+				matrix.m32,
+				matrix.m33,
+			),
+		) <= tolerance &&
+		Math.abs(
+			dot(
+				matrix.m21,
+				matrix.m22,
+				matrix.m23,
+				matrix.m31,
+				matrix.m32,
+				matrix.m33,
+			),
+		) <= tolerance;
+	if (!affine || !unitColumns || !orthogonalColumns) {
+		throw new Error("Point inverse requires a rigid rotation and translation.");
+	}
+}
+
+/**
  * Transform a normal by the inverse transpose of a matrix's upper-left 3×3 portion.
  *
  * A singular transform has no valid normal transform. Zero normals are preserved because DAT

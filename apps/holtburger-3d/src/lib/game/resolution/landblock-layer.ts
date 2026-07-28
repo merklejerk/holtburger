@@ -1,6 +1,6 @@
 import type { EnvCellId, LandblockId } from "../game-types";
 import type { AABB3, Vec3 } from "../math/types";
-import type { ScenePlacement } from "../scene";
+import type { ScenePlacement, SceneScope } from "../scene";
 import type {
 	TerrainPresentationSource,
 	TerrainGenerationSource,
@@ -32,66 +32,122 @@ export interface ResolvedCellStructure {
 	readonly id: string;
 	readonly geometry: ResolvedGeometry;
 	readonly surfaceSlotCount: number;
-	readonly portalPolygonIndices: readonly number[];
-	readonly cellBsp: unknown;
-	readonly drawingBsp: unknown | null;
-	readonly physicsBsp: unknown;
+	/** Positive-chain containment planes encoded as normalized [nx, ny, nz, d] tuples. */
+	readonly containmentPlanes: Float32Array;
+	readonly portalPolygons: readonly {
+		readonly cellStructPortalIndex: number;
+		readonly polygonId: number;
+	}[];
+}
+
+/** One object source resident with authored landblock-space placement and EnvCell residency. */
+export interface ResolvedEnvCellResidentSource {
+	readonly id: string;
+	readonly sourceDid: string;
+	readonly presentation: ResolvedObjectPresentation;
+	readonly placement: ScenePlacement;
+	readonly scale: Vec3;
+	readonly localBounds: AABB3 | null;
+	readonly appearance: ResolvedObjectAppearance | null;
 }
 
 /** Environment-cell presentation composed from a reusable structure and cell facts. */
 export interface ResolvedEnvCellPresentation {
 	readonly id: EnvCellId;
+	readonly flags: number;
+	readonly authoredCellId: number;
 	readonly structure: ResolvedCellStructure;
 	/** Structure-local transform into the containing landblock. */
 	readonly structureToLandblock: ScenePlacement;
 	/** Conservative cell extent already expressed in the containing landblock. */
 	readonly landblockBounds: AABB3;
 	readonly materials: readonly ResolvedMaterial[];
-	readonly embeddedStatics: readonly ResolvedObjectResident[];
+	readonly residents: readonly ResolvedEnvCellResidentSource[];
+	readonly potentiallyVisibleEnvCellIds: ReadonlySet<EnvCellId>;
 }
-
-/** Stable identity for one portal-graph scene residence. */
-export type PortalGraphNodeId = `portal-node:${string}`;
-
-/** Stable identity for one directed portal traversal edge. */
-export type PortalGraphEdgeId = `portal-edge:${string}`;
 
 /** Stable identity for indexed portal aperture geometry. */
 export type PortalApertureId = `portal-aperture:${string}`;
 
-/** A scene residence participating in portal traversal. */
-export type ResolvedPortalGraphResidence =
-	| { readonly kind: "outdoor"; readonly landblockId: LandblockId }
-	| { readonly kind: "env-cell"; readonly envCellId: EnvCellId };
-
-/** One residence node in the canonical portal graph. */
-export interface ResolvedPortalGraphNode {
-	readonly id: PortalGraphNodeId;
-	readonly residence: ResolvedPortalGraphResidence;
-}
-
-/** Directed traversal edge optionally backed by aperture geometry. */
-export interface ResolvedPortalGraphEdge {
-	readonly id: PortalGraphEdgeId;
-	readonly sourceNodeId: PortalGraphNodeId;
-	readonly targetNodeId: PortalGraphNodeId;
-	readonly apertureId: PortalApertureId | null;
-}
-
-/** Canonical traversal topology prepared by the host. */
-export interface ResolvedPortalGraph {
-	readonly nodes: ReadonlyMap<PortalGraphNodeId, ResolvedPortalGraphNode>;
-	readonly edges: readonly ResolvedPortalGraphEdge[];
-}
-
 /** Indexed portal geometry in landblock-local coordinates. */
 export interface ResolvedPortalAperture {
 	readonly id: PortalApertureId;
-	readonly kind: "env-cell" | "building-transition";
-	readonly vertices: Float32Array;
-	readonly indices: Uint32Array;
+	readonly kind: "env-cell" | "building-transition" | "effective-visibility";
+	readonly positions: Float32Array;
+	readonly triangleIndices: Uint32Array;
+	readonly plane: {
+		readonly normal: Vec3;
+		readonly d: number;
+	};
 	readonly landblockBounds: AABB3;
-	readonly visibleSide: "positive" | "negative" | "both";
+	readonly polygonIds: readonly number[];
+}
+
+export type IndoorTopologyBoundaryReason =
+	| "missing-reciprocal-identity"
+	| "source-not-exact-match"
+	| "target-not-exact-match"
+	| "apertures-differ"
+	| "accepted-sides-not-opposed"
+	| "missing-source-cell-bounds"
+	| "missing-target-cell-bounds"
+	| "source-cell-crosses-portal-plane"
+	| "target-cell-crosses-portal-plane";
+
+export type PortalSpatialRelationship =
+	| {
+			readonly kind: "indoor-depth-continuous";
+			readonly reciprocalApertureIndex: number;
+	  }
+	| {
+			readonly kind: "indoor-topology-boundary";
+			readonly reason: IndoorTopologyBoundaryReason;
+	  }
+	| {
+			readonly kind: "exterior-transition";
+			readonly exteriorLandblockId: LandblockId;
+	  };
+
+/** One host-validated directed crossing between scene scopes. */
+export interface ResolvedPortalCrossing {
+	readonly id: `portal-crossing:${string}`;
+	readonly source: SceneScope;
+	readonly target: SceneScope;
+	/** Authored directed aperture used by topology, point, segment, and residency queries. */
+	readonly sourceApertureIndex: number;
+	/** Host-preprocessed aperture used by portal-window planning and material-free masks. */
+	readonly visibilityApertureIndex: number;
+	/** Static evidence explaining why the visibility aperture differs, if it does. */
+	readonly visibilityProvenance:
+		| {
+				readonly kind: "authored-source";
+		  }
+		| {
+				readonly kind: "reciprocal-intersection";
+				readonly reciprocalApertureIndex: number;
+				readonly maximumPlaneDeviation: number;
+				readonly absoluteNormalDot: number;
+				readonly componentCount: number;
+		  };
+	readonly acceptedSide: "positive" | "negative";
+	readonly exactMatch: boolean;
+	readonly reciprocalCrossingIndex: number | null;
+	readonly sourcePortal:
+		| {
+				readonly kind: "env-cell";
+				readonly envCellId: EnvCellId;
+				readonly portalIndex: number;
+				readonly polygonId: number;
+				readonly flags: number;
+		  }
+		| {
+				readonly kind: "building-transition";
+				readonly buildingIndex: number;
+				readonly buildingSourceDid: string;
+				readonly portalIndex: number;
+				readonly flags: number;
+		  };
+	readonly spatialRelationship: PortalSpatialRelationship;
 }
 
 /** Source-only terrain layer consumed by runtime texture and terrain residency. */
@@ -120,14 +176,44 @@ export type ResolvedOutdoorStaticLayerSource = ResolvedObjectLayerSource & {
 	readonly kind: OutdoorStaticLayerKind;
 };
 
+/** One EnvCell-owned resident partition after every transform is expressed in landblock space. */
+export interface ResolvedEnvCellStaticObjectSource {
+	readonly kind: LandblockLayerKind.EnvCells;
+	readonly landblockId: LandblockId;
+	readonly envCellId: EnvCellId;
+	readonly staticResidents: readonly ResolvedObjectResident[];
+	/** Default-animated authored residents remain on the existing explicit deferral seam. */
+	readonly dynamicResidents: readonly ResolvedObjectResident[];
+}
+
+/** Static-object source shape shared by outdoor layers and one exact EnvCell scope. */
+export type ResolvedStaticObjectLayerSource =
+	| ResolvedOutdoorStaticLayerSource
+	| ResolvedEnvCellStaticObjectSource;
+
 /** Environment-cell layer containing structured interiors and embedded residents. */
 export interface ResolvedEnvCellLayerSource {
 	readonly kind: LandblockLayerKind.EnvCells;
 	readonly landblockId: LandblockId;
 	readonly cells: readonly ResolvedEnvCellPresentation[];
-	readonly dynamicResidents: readonly ResolvedObjectResident[];
-	readonly portalGraph: ResolvedPortalGraph;
 	readonly portalApertures: readonly ResolvedPortalAperture[];
+	readonly portalCrossings: readonly ResolvedPortalCrossing[];
+	readonly diagnostics: {
+		readonly unresolvedOutsideEndpoints: readonly {
+			readonly envCellId: EnvCellId;
+			readonly portalIndex: number;
+			readonly polygonId: number;
+		}[];
+		readonly unresolvedVisibilityReciprocals: readonly {
+			readonly crossingIndex: number;
+			readonly sourceApertureId: PortalApertureId;
+		}[];
+		readonly visibilityApertureCounts: {
+			readonly authoredSourceCrossings: number;
+			readonly reciprocalIntersectionCrossings: number;
+			readonly synthesizedIntersectionGeometries: number;
+		};
+	};
 }
 
 /** Canonical source union returned by the frontend layer resolver. */

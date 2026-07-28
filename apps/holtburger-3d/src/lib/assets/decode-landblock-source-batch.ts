@@ -2,11 +2,12 @@ import { z } from "zod";
 import type { LandblockId } from "../game/game-types";
 import { LandblockLayerKind } from "../game/runtime/scene-interest";
 import type { ActiveRegionSource } from "./active-region-source";
+import { decodeEnvCellRecord } from "./decode-env-cell-record";
 import { decodeLandblockTerrainRecord } from "./decode-landblock-terrain-record";
 import {
 	decodeOutdoorStaticRecord,
 	type OutdoorStaticLayerKind,
-} from "./decode-outdoor-static-record";
+} from "./decode-static-source-record";
 import type {
 	LandblockSourceBatch,
 	LandblockSourceRecord,
@@ -16,12 +17,15 @@ import type {
 const HEADER_LENGTH = 12;
 const MAGIC = "HBLB";
 const datId = z.string().regex(/^0x[0-9a-f]{8}$/i);
-const layer = z.enum([
+const knownLayer = z.enum([
 	LandblockLayerKind.Terrain,
 	LandblockLayerKind.Buildings,
 	LandblockLayerKind.Objects,
 	LandblockLayerKind.Generated,
+	LandblockLayerKind.EnvCells,
 ]);
+const layer = z.string().min(1);
+const knownLayers = new Set<LandblockSourceLayer>(knownLayer.options);
 const manifestSchema = z.object({
 	transport: z.literal("holtburger-landblock-source-batch"),
 	byteOrder: z.literal("little-endian"),
@@ -92,9 +96,9 @@ export function decodeLandblockSourceBatch(
 			"Landblock source batch must contain exactly one record for every requested layer.",
 		);
 	}
-	assertExactLayerSet(
+	assertExactStringSet(
 		manifest.records.map((record) => record.layer),
-		requestedLayers,
+		new Set(manifest.requestedLayers),
 		"returned record set",
 	);
 	if (
@@ -105,13 +109,13 @@ export function decodeLandblockSourceBatch(
 	}
 
 	const recordRanges = new Map<
-		LandblockSourceLayer,
+		string,
 		{ readonly start: number; readonly end: number }
 	>();
 	const claimedRanges: Array<{
 		readonly start: number;
 		readonly end: number;
-		readonly layer: LandblockSourceLayer;
+		readonly layer: string;
 	}> = [];
 	for (const record of manifest.records) {
 		const start = recordDataOffset + record.byteOffset;
@@ -141,6 +145,7 @@ export function decodeLandblockSourceBatch(
 				`Landblock source batch lost the validated ${record.layer} record range.`,
 			);
 		}
+		if (!isKnownLayer(record.layer)) continue;
 		const bytes = Uint8Array.from(response.subarray(range.start, range.end));
 		const decoded = decodeRecord(
 			record.layer,
@@ -149,6 +154,9 @@ export function decodeLandblockSourceBatch(
 			activeRegion,
 		);
 		records.set(record.layer, decoded);
+	}
+	if (records.size !== requestedLayers.size) {
+		throw new Error("Landblock source batch lost a requested known record.");
 	}
 	return { landblockId: manifest.landblockId as LandblockId, records };
 }
@@ -161,6 +169,9 @@ function decodeRecord(
 ) {
 	if (layer === LandblockLayerKind.Terrain) {
 		return decodeLandblockTerrainRecord(bytes, landblockId, activeRegion);
+	}
+	if (layer === LandblockLayerKind.EnvCells) {
+		return decodeEnvCellRecord(bytes, landblockId);
 	}
 	return decodeOutdoorStaticRecord(
 		bytes,
@@ -186,11 +197,11 @@ function parseManifest(serialized: string): z.infer<typeof manifestSchema> {
 }
 
 function assertExactLayerSet(
-	actual: Iterable<LandblockSourceLayer>,
+	actual: Iterable<string>,
 	expected: ReadonlySet<LandblockSourceLayer>,
 	label: string,
 ): void {
-	const actualSet = new Set(actual);
+	const actualSet = new Set([...actual].filter(isKnownLayer));
 	if (
 		actualSet.size !== expected.size ||
 		[...expected].some((layer) => !actualSet.has(layer))
@@ -199,4 +210,24 @@ function assertExactLayerSet(
 			`Landblock source batch ${label} does not match the request.`,
 		);
 	}
+}
+
+function assertExactStringSet(
+	actual: Iterable<string>,
+	expected: ReadonlySet<string>,
+	label: string,
+): void {
+	const actualSet = new Set(actual);
+	if (
+		actualSet.size !== expected.size ||
+		[...expected].some((entry) => !actualSet.has(entry))
+	) {
+		throw new Error(
+			`Landblock source batch ${label} does not match the request.`,
+		);
+	}
+}
+
+function isKnownLayer(value: string): value is LandblockSourceLayer {
+	return knownLayers.has(value as LandblockSourceLayer);
 }

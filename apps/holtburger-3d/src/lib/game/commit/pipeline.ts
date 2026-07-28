@@ -5,6 +5,7 @@ import type {
 	LandblockSourceLayer,
 } from "../../assets/landblock-source-batch";
 import type {
+	ResolvedEnvCellLayerSource,
 	ResolvedOutdoorStaticLayerSource,
 	ResolvedTerrainLayerSource,
 } from "../resolution/landblock-layer";
@@ -21,6 +22,7 @@ import {
 	type CommitPipeline,
 	type StaticLandblockLayerCommitTerrain,
 } from "./types";
+import { planEnvCellMaterialization } from "./env-cell-materialization";
 
 /** Composite source and worker dependencies owned by the standard landblock commit pipeline. */
 export interface StandardCommitPipelineDependencies {
@@ -67,6 +69,7 @@ export class StandardCommitPipeline implements CommitPipeline {
 		for (const layer of layers) {
 			if (
 				layer.layer !== LandblockLayerKind.Terrain &&
+				layer.layer !== LandblockLayerKind.EnvCells &&
 				!isOutdoorStaticLayer(layer.layer)
 			) {
 				throw new Error(
@@ -95,6 +98,7 @@ export class StandardCommitPipeline implements CommitPipeline {
 	): CommitBundle | [] {
 		if (
 			layer.layer !== LandblockLayerKind.Terrain &&
+			layer.layer !== LandblockLayerKind.EnvCells &&
 			!isOutdoorStaticLayer(layer.layer)
 		) {
 			throw new Error(
@@ -116,6 +120,15 @@ export class StandardCommitPipeline implements CommitPipeline {
 				);
 			}
 			return this.#prepareTerrainLayer(source);
+		}
+		if (layer.layer === LandblockLayerKind.EnvCells) {
+			if (source === null) return [];
+			if (!isEnvCellSource(source) || source.landblockId !== layer.id) {
+				throw new Error(
+					`Loaded ${source.landblockId}/${source.kind} for ${describeLayer(layer)}.`,
+				);
+			}
+			return this.#prepareEnvCellLayer(source);
 		}
 		if (source === null) {
 			throw new Error(
@@ -163,6 +176,23 @@ export class StandardCommitPipeline implements CommitPipeline {
 			layer: source.kind,
 		};
 	}
+
+	#prepareEnvCellLayer(source: ResolvedEnvCellLayerSource): CommitBundle {
+		const plan = planEnvCellMaterialization(source);
+		return {
+			commit: { plan },
+			dynamicEntities: plan.deferredResidents,
+			kind: CommitBundleSourceKind.LandblockLayer,
+			landblockId: source.landblockId,
+			layer: LandblockLayerKind.EnvCells,
+		};
+	}
+}
+
+function isEnvCellSource(
+	source: Exclude<LandblockSourceRecord, null>,
+): source is ResolvedEnvCellLayerSource {
+	return source.kind === LandblockLayerKind.EnvCells;
 }
 
 function describeLayer(layer: LandblockIdLayer): string {

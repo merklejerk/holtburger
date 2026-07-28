@@ -4,6 +4,7 @@ import type { StaticGeometryKey } from "../systems/static-resources";
 
 declare const terrainGeometryKeyBrand: unique symbol;
 declare const objectGeometryKeyBrand: unique symbol;
+declare const portalGeometryKeyBrand: unique symbol;
 
 /** Stable geometry resource containing every generated terrain variant for one landblock. */
 export type TerrainGeometryKey = `terrain-geometry:${LandblockId}` & {
@@ -17,11 +18,17 @@ export type ObjectGeometryKey = `object-geometry:${string}` & {
 	readonly [objectGeometryKeyBrand]: true;
 };
 
+/** Material-free aperture geometry selected by portal traversal and mask rendering. */
+export type PortalGeometryKey = `portal-geometry:${string}` & {
+	readonly [portalGeometryKeyBrand]: true;
+};
+
 /** Logical identity for a complete device-backed geometry resource. */
 export type GeometryKey =
 	| TerrainGeometryKey
 	| StaticGeometryKey
-	| ObjectGeometryKey;
+	| ObjectGeometryKey
+	| PortalGeometryKey;
 
 /** Complete geometry payload published by a baker or runtime generator. */
 export interface GeometrySource {
@@ -42,4 +49,12 @@ export function createObjectGeometryKey(source: string): ObjectGeometryKey {
 		throw new Error("Object geometry source identity cannot be empty.");
 	}
 	return `object-geometry:${source}` as ObjectGeometryKey;
+}
+
+/** Build one stable geometry identity from an authored portal-aperture identity. */
+export function createPortalGeometryKey(source: string): PortalGeometryKey {
+	if (source.length === 0) {
+		throw new Error("Portal geometry source identity cannot be empty.");
+	}
+	return `portal-geometry:${source}` as PortalGeometryKey;
 }

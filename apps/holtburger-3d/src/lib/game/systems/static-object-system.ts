@@ -5,7 +5,7 @@ import type {
 } from "../commit/artifacts";
 import type { SceneGraph, SceneNodeId } from "../scene";
 import type { StaticInstanceStreamManager } from "./static-instance-stream-manager";
-import type { LandblockLayerKind } from "../runtime/scene-interest";
+import type { OutdoorStaticLayerKind } from "../runtime/scene-interest";
 import type { SceneInterestRevision } from "../runtime/scene-availability";
 
 interface StaticObjectOwnerRecord<TResourceOwner extends string> {
@@ -19,6 +19,11 @@ export interface StaticObjectSystemDiagnostics {
 	readonly ownerCount: number;
 	readonly nodeCount: number;
 }
+
+/** Renderer culling identity for one independently switchable immutable-object cohort. */
+export type StaticObjectCullingGroup =
+	| OutdoorStaticLayerKind
+	| "env-cell-static-residents";
 
 /** Owns immutable object nodes, node-keyed render components, and resource leases. */
 export class StaticObjectSystem<
@@ -64,7 +69,7 @@ export class StaticObjectSystem<
 		ownerId: TOwnerId,
 		revision: SceneInterestRevision,
 		installSet: StaticObjectLayerArtifact | null,
-		cullingGroup: Exclude<LandblockLayerKind, LandblockLayerKind.Terrain>,
+		cullingGroup: StaticObjectCullingGroup,
 	): void {
 		const resourceOwner = this.#resourceOwner(ownerId, revision);
 		const nodes: SceneNodeId[] = [];

@@ -50,6 +50,8 @@ struct Census {
     deepest_containment_chain: (usize, u32),
     /// Maximum directed portal count and its EnvCell.
     densest_portal_cell: (usize, u32),
+    /// Maximum EnvCell count sharing one outdoor landblock prefix.
+    largest_landblock_cell_set: (usize, u32),
     /// Maximum authored resident count and its EnvCell.
     largest_resident_cell: (usize, u32),
     /// First small cell with at least one resolved reciprocal portal.
@@ -83,7 +85,11 @@ fn main() -> Result<()> {
 
     let mut environments = HashMap::new();
     let mut census = Census::default();
+    let mut landblock_cell_counts = BTreeMap::<u32, usize>::new();
     for (&cell_id, cell) in &cells {
+        *landblock_cell_counts
+            .entry(cell_id & 0xFFFF_0000)
+            .or_default() += 1;
         let environment_id = 0x0D00_0000 | u32::from(cell.environment_id);
         let environment = load_environment(&archive, &mut environments, environment_id)?;
         let structure = environment
@@ -152,6 +158,13 @@ fn main() -> Result<()> {
         if has_reciprocal && (1..=2).contains(&cell.portals.len()) {
             census.small_reciprocal_sample.get_or_insert(cell_id);
         }
+    }
+    for (landblock_prefix, count) in landblock_cell_counts {
+        update_max(
+            &mut census.largest_landblock_cell_set,
+            count,
+            landblock_prefix | 0xFFFF,
+        );
     }
 
     print_census(&census);
@@ -236,6 +249,7 @@ fn print_census(census: &Census) {
     );
     print_ranked("deepestContainmentChain", census.deepest_containment_chain);
     print_ranked("densestPortalCell", census.densest_portal_cell);
+    print_ranked("largestLandblockCellSet", census.largest_landblock_cell_set);
     print_ranked("largestResidentCell", census.largest_resident_cell);
     if let Some(cell_id) = census.small_reciprocal_sample {
         println!("  smallReciprocalSample=0x{cell_id:08X}");

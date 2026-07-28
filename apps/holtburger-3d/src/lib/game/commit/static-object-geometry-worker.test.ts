@@ -26,6 +26,23 @@ describe("prepareStaticObjectGeometry", () => {
 		expect(result?.drawUnits).toHaveLength(1);
 	});
 
+	it("retains the eligible detail role selected by the static layer domain", () => {
+		const building = bake({
+			resourceNamespace: "static-install:building-detail" as const,
+			source: source([resident("detail", Mat4.identity(), new Vec3(1, 1, 1))]),
+		});
+		const generated = prepareStaticObjectGeometry({
+			layer: LandblockLayerKind.Generated,
+			resourceNamespace: "static-install:object-detail" as const,
+			source: generatedSource([
+				resident("detail", Mat4.identity(), new Vec3(1, 1, 1)),
+			]),
+		});
+
+		expect(building?.drawUnits[0]?.material.detailRole).toBe("building");
+		expect(generated?.drawUnits[0]?.material.detailRole).toBe("object");
+	});
+
 	it("keeps transparent ranges independent by resident while merging additive ranges", () => {
 		const transparent = [
 			resident("transparent-a", Mat4.identity(), new Vec3(1, 1, 1)),
@@ -551,9 +568,11 @@ function resident(id: string, localTransform: Mat4, scale: Vec3) {
 		? 0x10
 		: id.startsWith("additive")
 			? 0x10000
-			: id.startsWith("alpha-test")
-				? 0x04
-				: 0;
+			: id.startsWith("detail")
+				? 0x20000
+				: id.startsWith("alpha-test")
+					? 0x04
+					: 0;
 	const material = {
 		color: [1, 1, 1, 1] as const,
 		diffuseScale: 1,

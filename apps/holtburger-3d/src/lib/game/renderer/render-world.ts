@@ -1,10 +1,11 @@
 import type { LandblockId } from "../game-types";
 import type { GeometryKey } from "../geometry/types";
-import type { Camera } from "../runtime/types";
 import type { Frustum } from "../math/frustum";
 import type {
 	ResolvedScenePlacement,
 	SceneNodeId,
+	SceneScope,
+	SceneTopologyView,
 	VisibleScene,
 } from "../scene";
 import type { TerrainDrawUnit } from "../terrain/types";
@@ -31,21 +32,29 @@ import type {
 	Texture2DResourceKey,
 } from "./resource-manager";
 import type { StaticInstanceStreamManager } from "../systems/static-instance-stream-manager";
+import type { StaticDetailRole } from "../resolution/static-detail-role";
 
 /** Private read-only query ports captured by one RenderWorld. */
 interface RenderWorldSystems {
-	readonly objectDetail: {
-		getBinding(): ActiveRegionObjectDetailRenderBinding | null;
+	readonly staticDetails: {
+		getBinding(
+			role: StaticDetailRole,
+		): ActiveRegionStaticDetailRenderBinding | null;
 	};
 	readonly scene: {
 		getCullingGroup(nodeId: SceneNodeId): string | null;
 		getResolvedPlacement(
 			nodeId: SceneNodeId,
 		): ResolvedScenePlacement | undefined;
-		queryFrustum(
+		getPortalTopologyView(): SceneTopologyView;
+		queryScopesFrustum(
 			frustum: Frustum,
 			anchorLandblockId: LandblockId,
-			origin: import("../scene").SceneScope,
+			scopes: readonly SceneScope[],
+		): VisibleScene;
+		queryFlatFrustum(
+			frustum: Frustum,
+			anchorLandblockId: LandblockId,
 		): VisibleScene;
 	};
 	readonly terrain: {
@@ -80,7 +89,7 @@ interface RenderWorldSystems {
 }
 
 /** Active-region detail selected independently from the current landblock's packed pages. */
-export interface ActiveRegionObjectDetailRenderBinding {
+export interface ActiveRegionStaticDetailRenderBinding {
 	readonly key: AssetTextureKey;
 	readonly tiling: number;
 }
@@ -127,22 +136,27 @@ export class RenderWorld {
 		this.#systems = systems;
 	}
 
-	queryVisibleScene(
-		camera: Camera,
+	queryFlatScene(
 		frustum: Frustum,
 		anchorLandblockId: LandblockId,
 	): VisibleScene {
-		const origin =
-			camera.placement.envCellId === null
-				? {
-						kind: "outdoor" as const,
-					}
-				: {
-						envCellId: camera.placement.envCellId,
-						kind: "env-cell" as const,
-						landblockId: camera.placement.landblockId,
-					};
-		return this.#systems.scene.queryFrustum(frustum, anchorLandblockId, origin);
+		return this.#systems.scene.queryFlatFrustum(frustum, anchorLandblockId);
+	}
+
+	queryScopesScene(
+		frustum: Frustum,
+		anchorLandblockId: LandblockId,
+		scopes: readonly SceneScope[],
+	): VisibleScene {
+		return this.#systems.scene.queryScopesFrustum(
+			frustum,
+			anchorLandblockId,
+			scopes,
+		);
+	}
+
+	getPortalTopologyView(): SceneTopologyView {
+		return this.#systems.scene.getPortalTopologyView();
 	}
 
 	resolveTerrainDrawUnit(
@@ -233,6 +247,25 @@ export class RenderWorld {
 		}));
 	}
 
+	/** Resolve one cell shell with the same canonical placement contract as static objects. */
+	resolveEnvCellNode(
+		nodeId: SceneNodeId,
+		renderable: EnvCellRenderable,
+	): {
+		readonly placement: ResolvedScenePlacement;
+		readonly drawUnits: readonly ResolvedGeometryDrawUnit<
+			EnvCellRenderable["drawUnits"][number]
+		>[];
+	} {
+		const placement = this.#systems.scene.getResolvedPlacement(nodeId);
+		if (!placement)
+			throw new Error(`EnvCell shell node ${nodeId} no longer exists.`);
+		return {
+			drawUnits: this.resolveEnvCellRenderable(renderable),
+			placement,
+		};
+	}
+
 	resolvePortalDrawUnit(
 		drawUnit: PortalDrawUnit,
 	): ResolvedGeometryDrawUnit<PortalDrawUnit> {
@@ -253,8 +286,10 @@ export class RenderWorld {
 		return this.#systems.textures.getAtlasBinding(key);
 	}
 
-	resolveActiveRegionObjectDetail(): ActiveRegionObjectDetailRenderBinding | null {
-		return this.#systems.objectDetail.getBinding();
+	resolveActiveRegionStaticDetail(
+		role: StaticDetailRole,
+	): ActiveRegionStaticDetailRenderBinding | null {
+		return this.#systems.staticDetails.getBinding(role);
 	}
 
 	resolveTextureArray(key: TextureArrayKey): TextureArrayBinding {

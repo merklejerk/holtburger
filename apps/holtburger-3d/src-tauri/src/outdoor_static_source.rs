@@ -6,8 +6,11 @@ use holtburger_core::{ContentAsset, ContentAssetRequest, ContentAssetRuntime};
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use crate::gfx_obj_geometry::{
-    PolygonSideKind, RenderAabb, SamplerWrapMode, build_gfx_obj_geometry,
+use crate::{
+    binary_source_record::{BinarySectionManifest, BinarySectionWriter},
+    gfx_obj_geometry::build_gfx_obj_geometry,
+    polygon_geometry::{PolygonSideKind, SamplerWrapMode},
+    source_projection::{dat_id, render_aabb_json},
 };
 
 pub(crate) const OUTDOOR_STATIC_RECORD_BINARY_MAGIC: &[u8; 4] = b"HBSO";
@@ -16,7 +19,7 @@ const OUTDOOR_STATIC_RECORD_BINARY_HEADER_LEN: usize = 12;
 /// Closed source data for one outdoor static layer before it crosses the app boundary.
 #[derive(Default)]
 pub(crate) struct OutdoorStaticSourceClosure {
-    pub(crate) buffers: OutdoorStaticGeometryBuffers,
+    pub(crate) buffers: StaticGeometryBuffers,
     pub(crate) definitions: Vec<Value>,
     definition_ids: BTreeMap<u32, String>,
     pub(crate) geometries: Vec<Value>,
@@ -142,94 +145,20 @@ impl OutdoorStaticSourceClosure {
         if let Some(existing) = self.geometry_ids.get(&gfx_obj.id) {
             return Ok(existing.clone());
         }
-        let geometry = build_gfx_obj_geometry(gfx_obj);
-        if geometry.positions.len() != geometry.vertex_count * 3
-            || geometry.normals.len() != geometry.vertex_count * 3
-            || geometry.texture_coordinates.len() != geometry.vertex_count * 2
-        {
-            anyhow::bail!(
-                "GfxObj 0x{:08X} has inconsistent prepared geometry lengths",
-                gfx_obj.id
-            );
-        }
-        let position_offset = self.buffers.positions.len();
-        self.buffers
-            .positions
-            .extend_from_slice(&geometry.positions);
-        let normal_offset = self.buffers.normals.len();
-        self.buffers.normals.extend_from_slice(&geometry.normals);
-        let texture_coordinate_offset = self.buffers.texture_coordinates.len();
-        self.buffers
-            .texture_coordinates
-            .extend_from_slice(&geometry.texture_coordinates);
-        let index_offset = self.buffers.indices.len();
-        let material_slot_offset = self.buffers.material_slots.len();
-        for triangle in &geometry.triangles {
-            let slot = triangle.surface_slot.with_context(|| {
-                format!(
-                    "GfxObj 0x{:08X} polygon {} has no render surface",
-                    gfx_obj.id, triangle.polygon_id
-                )
-            })?;
-            let slot = usize::try_from(slot).context("render surface index is negative")?;
-            if slot >= gfx_obj.surfaces.len() {
-                anyhow::bail!(
-                    "GfxObj 0x{:08X} polygon {} references material slot {slot}, but only {} slots exist",
-                    gfx_obj.id,
-                    triangle.polygon_id,
-                    gfx_obj.surfaces.len()
-                );
-            }
-            let first = u32::try_from(triangle.first_vertex)?;
-            let end = first
-                .checked_add(3)
-                .context("triangle vertex range overflow")?;
-            if usize::try_from(end)? > geometry.vertex_count {
-                anyhow::bail!(
-                    "GfxObj 0x{:08X} triangle begins outside prepared vertex data",
-                    gfx_obj.id
-                );
-            }
-            self.buffers.indices.extend([first, first + 1, first + 2]);
-            self.buffers.material_slots.push(u16::try_from(slot)?);
-            self.buffers
-                .material_wrap_modes
-                .push((triangle.sampler_wrap == SamplerWrapMode::Repeat) as u8);
-            self.buffers
-                .material_side_kinds
-                .push(material_side_kind(triangle.side_kind));
-            self.buffers
-                .material_side_types
-                .push(material_side_type(triangle.sides_type)?);
-            self.buffers.material_stippling.push(triangle.stippling);
-        }
+        let geometry = build_gfx_obj_geometry(gfx_obj)
+            .with_context(|| format!("Could not prepare GfxObj 0x{:08X}", gfx_obj.id))?;
         let id = format!("geometry:gfx-obj/{:08x}", gfx_obj.id);
-        self.geometries.push(json!({
-            "id": id,
-            "sourceAssetId": format!("gfx-obj/{:08x}", gfx_obj.id),
-            "vertexCount": geometry.vertex_count,
-            "positionOffset": position_offset,
-            "normalOffset": normal_offset,
-            "textureCoordinateOffset": texture_coordinate_offset,
-            "indexOffset": index_offset,
-            "indexCount": self.buffers.indices.len() - index_offset,
-            "materialSlotOffset": material_slot_offset,
-            "materialSlotCount": self.buffers.material_slots.len() - material_slot_offset,
-            "materialWrapModeOffset": material_slot_offset,
-            "materialWrapModeCount": self.buffers.material_wrap_modes.len() - material_slot_offset,
-            "materialSideKindOffset": material_slot_offset,
-            "materialSideKindCount": self.buffers.material_side_kinds.len() - material_slot_offset,
-            "materialSideTypeOffset": material_slot_offset,
-            "materialSideTypeCount": self.buffers.material_side_types.len() - material_slot_offset,
-            "materialStipplingOffset": material_slot_offset,
-            "materialStipplingCount": self.buffers.material_stippling.len() - material_slot_offset,
-            "bounds": geometry.bounds.as_ref().map(render_aabb_json),
-        }));
+        self.geometries.push(append_static_geometry(
+            &mut self.buffers,
+            &geometry,
+            &id,
+            &format!("gfx-obj/{:08x}", gfx_obj.id),
+        )?);
         self.geometry_ids.insert(gfx_obj.id, id.clone());
         Ok(id)
     }
 
-    async fn add_materials(
+    pub(crate) async fn add_materials(
         &mut self,
         runtime: &ContentAssetRuntime,
         surface_ids: &[u32],
@@ -276,10 +205,6 @@ impl OutdoorStaticSourceClosure {
         }
     }
 
-    pub(crate) fn sections(&self) -> Vec<OutdoorStaticBinarySectionManifest> {
-        self.buffers.sections()
-    }
-
     pub(crate) fn validate(&self) -> Result<()> {
         if self.geometries.iter().any(|geometry| !geometry.is_object()) {
             anyhow::bail!("outdoor static geometry manifest contains a non-object record");
@@ -288,8 +213,82 @@ impl OutdoorStaticSourceClosure {
     }
 }
 
+/// Append one already selected polygon set to shared static buffers and describe its ranges.
+pub(crate) fn append_static_geometry(
+    buffers: &mut StaticGeometryBuffers,
+    geometry: &crate::polygon_geometry::PolygonSetGeometry,
+    id: &str,
+    source_asset_id: &str,
+) -> Result<Value> {
+    if geometry.positions.len() != geometry.vertex_count * 3
+        || geometry.normals.len() != geometry.vertex_count * 3
+        || geometry.texture_coordinates.len() != geometry.vertex_count * 2
+    {
+        anyhow::bail!("{source_asset_id} has inconsistent prepared geometry lengths");
+    }
+    let position_offset = buffers.positions.len();
+    buffers.positions.extend_from_slice(&geometry.positions);
+    let normal_offset = buffers.normals.len();
+    buffers.normals.extend_from_slice(&geometry.normals);
+    let texture_coordinate_offset = buffers.texture_coordinates.len();
+    buffers
+        .texture_coordinates
+        .extend_from_slice(&geometry.texture_coordinates);
+    let index_offset = buffers.indices.len();
+    let material_slot_offset = buffers.material_slots.len();
+    for triangle in &geometry.triangles {
+        let slot = usize::try_from(triangle.authored_surface_index)
+            .context("validated static geometry emitted a negative material slot")?;
+        let first = u32::try_from(triangle.first_vertex)?;
+        let end = first
+            .checked_add(3)
+            .context("triangle vertex range overflow")?;
+        if usize::try_from(end)? > geometry.vertex_count {
+            anyhow::bail!("{source_asset_id} triangle begins outside prepared vertex data");
+        }
+        buffers.indices.extend([first, first + 1, first + 2]);
+        buffers.material_slots.push(u16::try_from(slot)?);
+        buffers
+            .material_wrap_modes
+            .push((triangle.sampler_wrap == SamplerWrapMode::Repeat) as u8);
+        buffers
+            .material_side_kinds
+            .push(material_side_kind(triangle.side_kind));
+        buffers
+            .material_side_types
+            .push(material_side_type(triangle.sides_type)?);
+        buffers.material_stippling.push(triangle.stippling);
+    }
+    Ok(json!({
+        "id": id,
+        "sourceAssetId": source_asset_id,
+        "vertexCount": geometry.vertex_count,
+        "positionOffset": position_offset,
+        "normalOffset": normal_offset,
+        "textureCoordinateOffset": texture_coordinate_offset,
+        "indexOffset": index_offset,
+        "indexCount": buffers.indices.len() - index_offset,
+        "materialSlotOffset": material_slot_offset,
+        "materialSlotCount": buffers.material_slots.len() - material_slot_offset,
+        "materialWrapModeOffset": material_slot_offset,
+        "materialWrapModeCount": buffers.material_wrap_modes.len() - material_slot_offset,
+        "materialSideKindOffset": material_slot_offset,
+        "materialSideKindCount": buffers.material_side_kinds.len() - material_slot_offset,
+        "materialSideTypeOffset": material_slot_offset,
+        "materialSideTypeCount": buffers.material_side_types.len() - material_slot_offset,
+        "materialStipplingOffset": material_slot_offset,
+        "materialStipplingCount": buffers.material_stippling.len() - material_slot_offset,
+        "rejectedDegenerateTriangles": geometry.rejected_degenerate_triangles.iter().map(|triangle| json!({
+            "polygonId": triangle.polygon_id,
+            "sideKind": polygon_side_kind_name(triangle.side_kind),
+            "fanTriangleIndex": triangle.fan_triangle_index,
+        })).collect::<Vec<_>>(),
+        "bounds": geometry.bounds.as_ref().map(render_aabb_json),
+    }))
+}
+
 #[derive(Default)]
-pub(crate) struct OutdoorStaticGeometryBuffers {
+pub(crate) struct StaticGeometryBuffers {
     pub(crate) positions: Vec<f32>,
     pub(crate) normals: Vec<f32>,
     pub(crate) texture_coordinates: Vec<f32>,
@@ -305,74 +304,62 @@ pub(crate) struct OutdoorStaticGeometryBuffers {
     pub(crate) material_stippling: Vec<u8>,
 }
 
-impl OutdoorStaticGeometryBuffers {
-    pub(crate) fn sections(&self) -> Vec<OutdoorStaticBinarySectionManifest> {
-        let mut byte_offset = 0;
-        let mut sections = Vec::new();
-        for (name, scalar_type, element_count, alignment) in [
-            ("positions", "f32", self.positions.len(), 4),
-            ("normals", "f32", self.normals.len(), 4),
-            (
-                "textureCoordinates",
-                "f32",
-                self.texture_coordinates.len(),
-                4,
-            ),
-            ("indices", "u32", self.indices.len(), 4),
-            ("materialSlots", "u16", self.material_slots.len(), 2),
-            ("materialWrapModes", "u8", self.material_wrap_modes.len(), 1),
-            ("materialSideKinds", "u8", self.material_side_kinds.len(), 1),
-            ("materialSideTypes", "u8", self.material_side_types.len(), 1),
-            ("materialStippling", "u8", self.material_stippling.len(), 1),
-        ] {
-            byte_offset = align_binary_section_offset(byte_offset, alignment);
-            let byte_length = element_count * scalar_size(scalar_type);
-            sections.push(OutdoorStaticBinarySectionManifest {
-                name: name.to_owned(),
-                scalar_type,
-                element_count,
-                byte_offset,
-                byte_length,
-            });
-            byte_offset += byte_length;
-        }
-        sections
-    }
-
-    fn bytes(&self) -> Vec<u8> {
-        let sections = self.sections();
-        let total_length = sections
-            .iter()
-            .map(|section| section.byte_offset + section.byte_length)
-            .max()
-            .unwrap_or_default();
-        let mut bytes = vec![0; total_length];
-        for section in &sections {
-            let target = &mut bytes[section.byte_offset..section.byte_offset + section.byte_length];
-            match section.name.as_str() {
-                "positions" => write_f32_slice(target, &self.positions),
-                "normals" => write_f32_slice(target, &self.normals),
-                "textureCoordinates" => write_f32_slice(target, &self.texture_coordinates),
-                "indices" => write_u32_slice(target, &self.indices),
-                "materialSlots" => write_u16_slice(target, &self.material_slots),
-                "materialWrapModes" => target.copy_from_slice(&self.material_wrap_modes),
-                "materialSideKinds" => target.copy_from_slice(&self.material_side_kinds),
-                "materialSideTypes" => target.copy_from_slice(&self.material_side_types),
-                "materialStippling" => target.copy_from_slice(&self.material_stippling),
-                _ => unreachable!("building sections are fixed"),
-            }
-        }
-        bytes
+impl StaticGeometryBuffers {
+    /// Append this geometry family to a record-owned binary section writer.
+    pub(crate) fn append_sections(
+        &self,
+        writer: &mut BinarySectionWriter,
+        prefix: &str,
+    ) -> Result<()> {
+        writer.append_f32(
+            geometry_section_name(prefix, "positions"),
+            self.positions.iter().copied(),
+        )?;
+        writer.append_f32(
+            geometry_section_name(prefix, "normals"),
+            self.normals.iter().copied(),
+        )?;
+        writer.append_f32(
+            geometry_section_name(prefix, "textureCoordinates"),
+            self.texture_coordinates.iter().copied(),
+        )?;
+        writer.append_u32(
+            geometry_section_name(prefix, "indices"),
+            self.indices.iter().copied(),
+        );
+        writer.append_u16(
+            geometry_section_name(prefix, "materialSlots"),
+            self.material_slots.iter().copied(),
+        );
+        writer.append_u8(
+            geometry_section_name(prefix, "materialWrapModes"),
+            &self.material_wrap_modes,
+        );
+        writer.append_u8(
+            geometry_section_name(prefix, "materialSideKinds"),
+            &self.material_side_kinds,
+        );
+        writer.append_u8(
+            geometry_section_name(prefix, "materialSideTypes"),
+            &self.material_side_types,
+        );
+        writer.append_u8(
+            geometry_section_name(prefix, "materialStippling"),
+            &self.material_stippling,
+        );
+        Ok(())
     }
 }
 
-fn scalar_size(scalar_type: &str) -> usize {
-    match scalar_type {
-        "f32" | "u32" => 4,
-        "u16" => 2,
-        "u8" => 1,
-        _ => unreachable!("building scalar types are fixed"),
+fn geometry_section_name(prefix: &str, name: &str) -> String {
+    if prefix.is_empty() {
+        return name.to_owned();
     }
+    format!(
+        "{prefix}{}{suffix}",
+        name[..1].to_uppercase(),
+        suffix = &name[1..]
+    )
 }
 
 fn material_side_kind(side: PolygonSideKind) -> u8 {
@@ -383,28 +370,18 @@ fn material_side_kind(side: PolygonSideKind) -> u8 {
     }
 }
 
+fn polygon_side_kind_name(side: PolygonSideKind) -> &'static str {
+    match side {
+        PolygonSideKind::Positive => "positive",
+        PolygonSideKind::PositiveReversed => "positive-reversed",
+        PolygonSideKind::Negative => "negative",
+    }
+}
+
 fn material_side_type(sides_type: i32) -> Result<u8> {
     match sides_type {
         0..=3 => Ok(sides_type as u8),
         _ => anyhow::bail!("polygon has unsupported culling mode {sides_type}"),
-    }
-}
-
-fn write_f32_slice(target: &mut [u8], values: &[f32]) {
-    for (chunk, value) in target.chunks_exact_mut(4).zip(values) {
-        chunk.copy_from_slice(&value.to_le_bytes());
-    }
-}
-
-fn write_u32_slice(target: &mut [u8], values: &[u32]) {
-    for (chunk, value) in target.chunks_exact_mut(4).zip(values) {
-        chunk.copy_from_slice(&value.to_le_bytes());
-    }
-}
-
-fn write_u16_slice(target: &mut [u8], values: &[u16]) {
-    for (chunk, value) in target.chunks_exact_mut(2).zip(values) {
-        chunk.copy_from_slice(&value.to_le_bytes());
     }
 }
 
@@ -490,12 +467,14 @@ fn select_setup_default_frames(
         .map(|placement| placement.anim_frame.frames.as_slice())
 }
 
-/// Project the DAT root sentinel out of the typed object hierarchy before serializing it to JSON.
+/// Project the DAT root conventions out of the typed object hierarchy before serialization.
+///
+/// Setup models use both `0xFFFFFFFF` and a self-parent index to identify root parts.
 fn parent_part_index(parent_indices: &[u32], part_index: usize) -> Option<u32> {
     parent_indices
         .get(part_index)
         .copied()
-        .filter(|parent_index| *parent_index != u32::MAX)
+        .filter(|parent_index| *parent_index != u32::MAX && *parent_index as usize != part_index)
 }
 
 pub(crate) fn frame_json(frame: &holtburger_dat::graphics::Frame) -> Value {
@@ -513,13 +492,6 @@ fn unit_vec3_json() -> Value {
     json!([1.0, 1.0, 1.0])
 }
 
-pub(crate) fn render_aabb_json(bounds: &RenderAabb) -> Value {
-    json!({
-        "min": [bounds.min.x, bounds.min.y, bounds.min.z],
-        "max": [bounds.max.x, bounds.max.y, bounds.max.z],
-    })
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct OutdoorStaticSourceRecordManifest {
@@ -534,28 +506,17 @@ pub(crate) struct OutdoorStaticSourceRecordManifest {
     pub(crate) geometries: Vec<Value>,
     pub(crate) materials: Vec<Value>,
     pub(crate) texture_dependencies: Vec<Value>,
-    pub(crate) sections: Vec<OutdoorStaticBinarySectionManifest>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct OutdoorStaticBinarySectionManifest {
-    name: String,
-    scalar_type: &'static str,
-    element_count: usize,
-    byte_offset: usize,
-    byte_length: usize,
+    pub(crate) sections: Vec<BinarySectionManifest>,
 }
 
 pub(crate) fn serialize_outdoor_static_record_binary(
     manifest: &OutdoorStaticSourceRecordManifest,
-    buffers: &OutdoorStaticGeometryBuffers,
+    section_bytes: Vec<u8>,
 ) -> Result<Vec<u8>> {
     let mut manifest_bytes = serde_json::to_vec(manifest)?;
     while !(OUTDOOR_STATIC_RECORD_BINARY_HEADER_LEN + manifest_bytes.len()).is_multiple_of(4) {
         manifest_bytes.push(b' ');
     }
-    let section_bytes = buffers.bytes();
     let total_length =
         OUTDOOR_STATIC_RECORD_BINARY_HEADER_LEN + manifest_bytes.len() + section_bytes.len();
     let mut bytes = Vec::with_capacity(total_length);
@@ -567,14 +528,6 @@ pub(crate) fn serialize_outdoor_static_record_binary(
     Ok(bytes)
 }
 
-fn dat_id(id: u32) -> String {
-    format!("0x{id:08x}")
-}
-
-fn align_binary_section_offset(offset: usize, alignment: usize) -> usize {
-    offset.next_multiple_of(alignment)
-}
-
 #[cfg(test)]
 mod tests {
     use super::parent_part_index;
@@ -583,5 +536,11 @@ mod tests {
     fn root_parent_sentinel_is_not_serialized_as_a_part_reference() {
         assert_eq!(parent_part_index(&[u32::MAX], 0), None);
         assert_eq!(parent_part_index(&[u32::MAX, 0], 1), Some(0));
+    }
+
+    #[test]
+    fn self_parent_root_is_not_serialized_as_a_part_reference() {
+        assert_eq!(parent_part_index(&[1, 1], 0), Some(1));
+        assert_eq!(parent_part_index(&[1, 1], 1), None);
     }
 }

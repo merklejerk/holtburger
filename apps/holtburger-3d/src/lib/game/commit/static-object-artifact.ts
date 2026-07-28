@@ -1,5 +1,5 @@
 import { Mat4 } from "../math/types";
-import type { ResolvedOutdoorStaticLayerSource } from "../resolution/landblock-layer";
+import type { ResolvedStaticObjectLayerSource } from "../resolution/landblock-layer";
 import type { StaticObjectLayerArtifact } from "./artifacts";
 import type { StaticObjectGeometryPreparationResult } from "./static-object-geometry-worker";
 import type { StaticInstallResourceNamespace } from "../systems/static-resources";
@@ -7,7 +7,7 @@ import type { AssetTextureFact, AssetTextureKey } from "../textures/types";
 
 /** Assemble a logical static-object artifact after geometry and texture-requirement validation. */
 export function assembleStaticObjectArtifact(options: {
-	readonly source: ResolvedOutdoorStaticLayerSource;
+	readonly source: ResolvedStaticObjectLayerSource;
 	readonly resourceNamespace: StaticInstallResourceNamespace;
 	readonly geometry: StaticObjectGeometryPreparationResult | null;
 	readonly textureRequirements: readonly AssetTextureFact[];
@@ -71,7 +71,10 @@ export function assembleStaticObjectArtifact(options: {
 			{
 				localBounds: geometry.bounds,
 				placement: {
-					envCellId: null,
+					envCellId:
+						options.source.kind === "env-cells"
+							? options.source.envCellId
+							: null,
 					landblockId: options.source.landblockId,
 					localTransform: Mat4.identity(),
 				},

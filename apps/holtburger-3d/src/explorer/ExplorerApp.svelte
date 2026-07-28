@@ -4,6 +4,7 @@
 		type FrameMetrics,
 	} from "../app/FrameMetricsOverlay.svelte";
 	import ExplorerTools from "./ExplorerTools.svelte";
+	import ExplorerCameraLocation from "./ExplorerCameraLocation.svelte";
 	import {
 		GameRuntime,
 		type StaticObjectRuntimeDiagnostics,
@@ -34,6 +35,7 @@
 	import { ActiveRegionStaticDetailOwner } from "../lib/game/resolution/active-region-static-detail";
 	import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
 	import type { TexturePageId } from "../lib/game/textures/texture-manager";
+	import type { ExplorerCameraLocation as ExplorerCameraLocationState } from "./explorer-camera-location";
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let frameHandle: number | null = null;
@@ -54,6 +56,7 @@
 	let cameraFocusStatus = $state<ExplorerCameraFocusStatus>(
 		"No camera focus requested.",
 	);
+	let cameraLocation = $state<ExplorerCameraLocationState | null>(null);
 	let activeRegion = $state<ActiveRegionSource | undefined>(undefined);
 	let environmentSelection = $state<ExplorerEnvironmentSelection>({
 		dayIndex: 0,
@@ -136,6 +139,7 @@
 			const controller = cameraController;
 			gameRuntime = undefined;
 			runtimeReady = false;
+			cameraLocation = null;
 			frameSelectionMetrics = null;
 			staticObjectRuntimeDiagnostics = null;
 			commitPipeline = undefined;
@@ -199,7 +203,9 @@
 				cameraController = new FreeFlyCameraController({
 					canvas: canvasElement!,
 					onChange(state) {
-						cameraCoordinator?.handleCameraState(state);
+						if (cameraCoordinator) {
+							cameraLocation = cameraCoordinator.handleCameraState(state);
+						}
 					},
 				});
 				cameraCoordinator = new ExplorerCameraCoordinator(
@@ -277,6 +283,7 @@
 		{/if}
 
 		<FrameMetricsOverlay metrics={frameMetrics} />
+		<ExplorerCameraLocation location={cameraLocation} />
 		<ExplorerTools
 			{runtimeReady}
 			{requestSceneInterest}

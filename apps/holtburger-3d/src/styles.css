@@ -173,6 +173,31 @@ button:focus-visible {
 	text-shadow: 1px 1px 0 #000;
 }
 
+.explorer-camera-location.ac-panel {
+	position: absolute;
+	top: clamp(12px, 2vw, 22px);
+	left: clamp(12px, 2vw, 22px);
+	z-index: 2;
+	display: flex;
+	gap: 6px;
+	align-items: center;
+	width: fit-content;
+	max-width: calc(100vw - 24px);
+	padding: 4px 7px;
+	overflow: hidden;
+	color: var(--ac-ink);
+	font-family: var(--ac-font-ui);
+	font-size: 0.7rem;
+	font-variant-numeric: tabular-nums;
+	line-height: 1.15;
+	white-space: nowrap;
+	text-shadow: 1px 1px 0 #000;
+}
+
+.explorer-camera-location-separator {
+	color: var(--ac-gold);
+}
+
 .ac-panel {
 	width: min(100%, 720px);
 	border: var(--ac-border);

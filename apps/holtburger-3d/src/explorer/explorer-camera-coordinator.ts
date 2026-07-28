@@ -22,6 +22,7 @@ import {
 	resolveExplicitExplorerEnvCell,
 	type ExplorerResidencyResolution,
 } from "./explorer-residency";
+import type { ExplorerCameraLocation } from "./explorer-camera-location";
 
 const CAMERA_FAR = 2_000;
 // Legacy used a 60-degree vertical FOV. Keeping it preserves both perceived movement and framing.
@@ -128,8 +129,8 @@ export class ExplorerCameraCoordinator {
 		this.#tryFocusInterior(pending, false);
 	}
 
-	/** Submit controller updates with runtime-resolved residence; manual input cancels pending focus. */
-	handleCameraState(state: FreeFlyCameraState): void {
+	/** Submit controller updates and return the residency resolved for the exact camera point. */
+	handleCameraState(state: FreeFlyCameraState): ExplorerCameraLocation {
 		if (state.hasManualControl && this.#pending !== null) {
 			this.#pending = null;
 			this.#onStatus("Initial camera placement cancelled by manual control.");
@@ -137,10 +138,11 @@ export class ExplorerCameraCoordinator {
 		const resolution = resolveExplorerPointResidency(
 			this.#runtime.queryWorldPointResidencyCandidates(state.position),
 		);
+		const location = { position: state.position, residency: resolution };
 		if (resolution.kind === "resolved") {
 			this.#lastResidency = resolution.residency;
 			this.#runtime.setPrimaryCamera(createCamera(resolution.residency, state));
-			return;
+			return location;
 		}
 		if (resolution.kind === "ambiguous") {
 			this.#onStatus(
@@ -154,6 +156,7 @@ export class ExplorerCameraCoordinator {
 		if (this.#lastResidency !== null) {
 			this.#runtime.setPrimaryCamera(createCamera(this.#lastResidency, state));
 		}
+		return location;
 	}
 
 	dispose(): void {

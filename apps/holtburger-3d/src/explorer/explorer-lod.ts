@@ -5,13 +5,13 @@ export const MIN_EXPLORER_LOD_RADIUS = 0;
 /** Largest Explorer radius, matching the legacy outdoor streaming control. */
 export const MAX_EXPLORER_LOD_RADIUS = 8;
 
-/** Explorer's initially terrain-only scene-interest policy. */
+/** Explorer's initial full outdoor scene-interest policy. */
 export const DEFAULT_EXPLORER_LOD_CONFIG: LoDConfig = {
-	buildingRadius: null,
-	envCellRadius: null,
-	explicitObjectRadius: null,
-	generatedObjectRadius: null,
-	terrainRadius: 2,
+	buildingRadius: 8,
+	envCellRadius: 2,
+	explicitObjectRadius: 2,
+	generatedObjectRadius: 2,
+	terrainRadius: 8,
 };
 
 export type ExplorerLodRadius =

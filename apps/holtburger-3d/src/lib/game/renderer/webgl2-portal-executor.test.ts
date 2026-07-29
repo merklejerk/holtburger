@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PortalCrossingId } from "../scene";
 import type { PortalRenderWorkPlan } from "./portal-render-graph";
+import { createFullPortalViewWindow } from "./portal-view-window";
 import type { ResolvedPortalMask } from "./webgl2-portal-mask";
 import {
 	executePortalGraph,
@@ -66,7 +67,7 @@ describe("portal graph execution", () => {
 			exteriorRenderCount: 0,
 			maskDrawCount: 4,
 			maskEdgeCount: 5,
-			nearPlaneSeedCount: 1,
+			nearPlaneSeedCount: 0,
 			rejectedFacingCrossingCount: 2,
 			sameDomainBoundaryCrossingCount: 0,
 			renderLayerCount: 3,
@@ -74,6 +75,49 @@ describe("portal graph execution", () => {
 			selectedScopeCount: 4,
 			submittedRenderLayerCount: 3,
 			submittedRenderNodeCount: 4,
+		});
+	});
+
+	it("composites a near-plane target through its retained screen-space mask", () => {
+		const substrate = new RecordingSubstrate();
+		const rendered: string[][] = [];
+
+		const diagnostics = executePortalGraph(substrate, {
+			clearColor: [0, 0, 0, 1],
+			destination: null,
+			extent: EXTENT,
+			plan: rootSeedPlan(),
+			renderExterior: () => undefined,
+			renderIndoorNodes: (_target, nodeIds) => {
+				rendered.push([...nodeIds]);
+				substrate.calls.push(`render:${nodeIds.join(",")}`);
+			},
+			resolveVisibilityAperture: () => {
+				throw new Error(
+					"Straddle execution must not resolve a world aperture.",
+				);
+			},
+		});
+
+		expect(substrate.calls).toEqual([
+			"resize",
+			"clear",
+			"begin-target",
+			`render:${ROOT}`,
+			"window-mask:1",
+			"reset:1",
+			"begin-masked:1",
+			`render:${LEFT}`,
+			"present",
+			"restore",
+		]);
+		expect(rendered).toEqual([[ROOT], [LEFT]]);
+		expect(diagnostics).toMatchObject({
+			maskDrawCount: 1,
+			maskEdgeCount: 1,
+			nearPlaneSeedCount: 1,
+			renderLayerCount: 2,
+			submittedRenderNodeCount: 2,
 		});
 	});
 
@@ -183,6 +227,44 @@ describe("portal graph execution", () => {
 		});
 	});
 
+	it("keeps outdoor portal traversal behind a masked indoor-root straddle", () => {
+		const substrate = new RecordingSubstrate();
+
+		const diagnostics = executePortalGraph(substrate, {
+			clearColor: [0, 0, 0, 1],
+			destination: null,
+			extent: EXTENT,
+			plan: indoorRootExteriorBranchPlan(),
+			renderExterior: () => substrate.calls.push("render:exterior"),
+			renderIndoorNodes: (_target, nodeIds) =>
+				substrate.calls.push(`render:${nodeIds.join(",")}`),
+			resolveVisibilityAperture: resolvedMask,
+		});
+
+		expect(substrate.calls).toEqual([
+			"resize",
+			"clear",
+			"begin-target",
+			"render:exterior",
+			"clear",
+			"begin-target",
+			`render:${ROOT}`,
+			"window-mask:1",
+			"copy:1",
+			"mask:2",
+			"reset:2",
+			"begin-masked:2",
+			`render:${SIBLING}`,
+			"present",
+			"restore",
+		]);
+		expect(diagnostics).toMatchObject({
+			maskDrawCount: 2,
+			nearPlaneSeedCount: 1,
+			submittedRenderNodeCount: 3,
+		});
+	});
+
 	it("rejects an invalid effective aperture before target allocation", () => {
 		const substrate = new RecordingSubstrate();
 
@@ -278,6 +360,12 @@ class RecordingSubstrate implements PortalExecutionSubstrate {
 	): void {
 		this.calls.push(`mask:${args[5]}`);
 	}
+
+	writeLayerWindowMask(
+		...args: Parameters<PortalExecutionSubstrate["writeLayerWindowMask"]>
+	): void {
+		this.calls.push(`window-mask:${args[2]}`);
+	}
 }
 
 function resolvedMask(): ResolvedPortalMask {
@@ -363,15 +451,90 @@ function hybridPlan(): PortalRenderWorkPlan {
 	};
 }
 
+function indoorRootExteriorBranchPlan(): PortalRenderWorkPlan {
+	const base = internalPlan();
+	const seed = hybridEdge("root-outside-seed", ROOT, OUTDOOR, true, true);
+	const outsideSibling = hybridEdge("outside-sibling", OUTDOOR, SIBLING, true);
+	return {
+		...base,
+		capacity: {
+			maximumAvailableStencilValue: 255,
+			maximumRenderLayer: 2,
+			requiredMaximumStencilValue: 2,
+		},
+		diagnostics: {
+			...base.diagnostics,
+			componentCount: 2,
+			cyclicComponentCount: 1,
+			nearPlaneSeedCount: 1,
+			retainedMaskEdgeCount: 2,
+			retainedRenderNodeCount: 3,
+		},
+		exteriorComponent: {
+			compositionStencilValue: 1,
+			componentNodeIds: [OUTDOOR, ROOT],
+			entryMaskEdgeIds: [],
+			indoorNodeIds: [ROOT],
+			internalIndoorMaskEdgeIds: [],
+			outdoorNodeId: OUTDOOR,
+			renderLayer: 1,
+			returnMaskEdgeIds: [seed.crossingId],
+			rootContained: true,
+		},
+		exteriorTransitions: [seed, outsideSibling].map((edge) => ({
+			crossingId: edge.crossingId,
+			exteriorLandblockId: "0x0001ffff",
+			sourceNodeId: edge.sourceNodeId,
+			targetNodeId: edge.targetNodeId,
+		})),
+		maskEdges: [seed, outsideSibling],
+		nearPlaneSeeds: [
+			{
+				crossingId: seed.crossingId,
+				maskWindow: createFullPortalViewWindow(),
+				sourceNodeId: seed.sourceNodeId,
+				targetNodeId: seed.targetNodeId,
+			},
+		],
+		nodes: [
+			portalNode(ROOT, "indoor-visibility-island", 0, []),
+			portalNode(OUTDOOR, "outdoor", 1, [seed.crossingId]),
+			portalNode(SIBLING, "indoor-visibility-island", 2, [
+				outsideSibling.crossingId,
+			]),
+		],
+		renderLayers: [
+			{
+				incomingMaskEdgeIds: [],
+				renderLayer: 0,
+				renderNodeIds: [ROOT],
+			},
+			{
+				incomingMaskEdgeIds: [seed.crossingId],
+				renderLayer: 1,
+				renderNodeIds: [OUTDOOR],
+			},
+			{
+				incomingMaskEdgeIds: [outsideSibling.crossingId],
+				renderLayer: 2,
+				renderNodeIds: [SIBLING],
+			},
+		],
+		rootNodeId: ROOT,
+		selectedScopes: [],
+	};
+}
+
 function hybridEdge(
 	id: string,
 	sourceNodeId: PortalRenderWorkPlan["nodes"][number]["id"],
 	targetNodeId: PortalRenderWorkPlan["nodes"][number]["id"],
 	exterior: boolean,
+	nearPlaneStraddle = false,
 ): PortalRenderWorkPlan["maskEdges"][number] {
 	return {
 		crossingId: `portal-crossing:${id}`,
-		nearPlaneStraddle: false,
+		nearPlaneStraddle,
 		sourceNodeId,
 		spatialRelationship: exterior
 			? {
@@ -419,7 +582,7 @@ function internalPlan(): PortalRenderWorkPlan {
 	const rootLeft = edge("root-left", ROOT, LEFT);
 	const rootRight = edge("root-right", ROOT, RIGHT);
 	const leftTarget = edge("left-target", LEFT, TARGET);
-	const rightTarget = edge("right-target", RIGHT, TARGET, true);
+	const rightTarget = edge("right-target", RIGHT, TARGET);
 	const targetRoot = edge("target-root", TARGET, ROOT);
 	return {
 		capacity: {
@@ -435,7 +598,7 @@ function internalPlan(): PortalRenderWorkPlan {
 			duplicateOrSubsumedWindowStateCount: 1,
 			emptyWindowCount: 0,
 			maximumRetainedFragmentsPerNode: 2,
-			nearPlaneSeedCount: 1,
+			nearPlaneSeedCount: 0,
 			projection: {
 				broadPhaseRejectedPairCount: 0,
 				createdClipVertexCount: 0,
@@ -458,13 +621,7 @@ function internalPlan(): PortalRenderWorkPlan {
 		exteriorComponent: null,
 		exteriorTransitions: [],
 		maskEdges: [leftTarget, rightTarget, rootLeft, rootRight, targetRoot],
-		nearPlaneSeeds: [
-			{
-				crossingId: rightTarget.crossingId,
-				sourceNodeId: RIGHT,
-				targetNodeId: TARGET,
-			},
-		],
+		nearPlaneSeeds: [],
 		nodes: [
 			{
 				id: LEFT,
@@ -520,5 +677,63 @@ function internalPlan(): PortalRenderWorkPlan {
 			scope("target"),
 		],
 		topologyRevision: 1,
+	};
+}
+
+function rootSeedPlan(): PortalRenderWorkPlan {
+	const base = internalPlan();
+	const seedEdge = {
+		...base.maskEdges[0]!,
+		nearPlaneStraddle: true,
+		sourceNodeId: ROOT,
+		targetNodeId: LEFT,
+	};
+	const nodes = [
+		portalNode(ROOT, "indoor-visibility-island", 0, []),
+		portalNode(LEFT, "indoor-visibility-island", 1, [seedEdge.crossingId]),
+	];
+	return {
+		...base,
+		capacity: {
+			maximumAvailableStencilValue: 255,
+			maximumRenderLayer: 1,
+			requiredMaximumStencilValue: 1,
+		},
+		diagnostics: {
+			...base.diagnostics,
+			admittedWindowStateCount: 2,
+			attemptedCrossingCount: 1,
+			componentCount: 2,
+			cyclicComponentCount: 0,
+			maximumRetainedFragmentsPerNode: 1,
+			nearPlaneSeedCount: 1,
+			rejectedFacingCrossingCount: 0,
+			retainedMaskEdgeCount: 1,
+			retainedRenderNodeCount: 2,
+			workItemCount: 2,
+		},
+		maskEdges: [seedEdge],
+		nearPlaneSeeds: [
+			{
+				crossingId: seedEdge.crossingId,
+				maskWindow: createFullPortalViewWindow(),
+				sourceNodeId: ROOT,
+				targetNodeId: LEFT,
+			},
+		],
+		nodes,
+		renderLayers: [
+			{
+				incomingMaskEdgeIds: [],
+				renderLayer: 0,
+				renderNodeIds: [ROOT],
+			},
+			{
+				incomingMaskEdgeIds: [seedEdge.crossingId],
+				renderLayer: 1,
+				renderNodeIds: [LEFT],
+			},
+		],
+		selectedScopes: nodes.flatMap((node) => node.scopes),
 	};
 }

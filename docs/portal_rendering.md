@@ -170,7 +170,7 @@ failed-invariant guard; bounded window admission is the termination model.
 
 The executor consumes the completed graph and derives no second topology or contribution plan.
 
-For each render layer:
+For each ordinary masked render layer:
 
 - every incoming effective aperture is drawn material-free into the same stencil label;
 - the union is completed before ordinary geometry is submitted;
@@ -186,9 +186,10 @@ accepted browser matrix also covers opaque, alpha-tested, transparent, and addit
 
 ## Outdoor Transitions
 
-Every admitted outdoor/indoor transition is masked. An apparently shallow entrance can lead to a
-cell below terrain one edge later, so an optimization that skips the transition mask based on the
-immediate cell is unsafe.
+Every admitted outdoor/indoor transition is masked unless the finite camera near plane intersects
+its aperture. An apparently shallow entrance can lead to a cell below terrain one edge later, so
+an optimization that skips the transition mask based on the immediate cell is unsafe. Near-plane
+contact is a separate, exact renderer condition rather than such an optimization.
 
 The renderer owns two full-size color plus depth-stencil targets:
 
@@ -207,13 +208,25 @@ allocated targets remain cached for cheap mode switching.
 
 ## Near-Plane Straddles
 
-The unstable case is not the camera point touching a portal plane. It is the finite camera near
-plane intersecting the finite aperture.
+The unstable case is not the camera point touching a portal plane. It is the finite aperture
+entering the clipped volume between the camera eye and near-plane quad.
 
-The renderer tests the near-plane quad against the aperture triangles. A real intersection seeds
-both adjacent render branches in the current parent region, preventing black/flickering regions
-while the near plane crosses the opening. This is stateless rendering policy and does not mutate
-camera or actor residency.
+The renderer clips aperture triangles against that finite pyramid. Testing only its near-plane cap
+misses oblique apertures that enter the clipped volume without touching the cap. For a real volume
+intersection, the planner computes the aperture's exact eye-ray footprint without applying the
+ordinary near-depth rejection. Positive homogeneous `w`, the four view sides, and the inherited
+parent window still clip the result. The resulting footprint becomes the adjacent domain's
+traversal window, so every downstream portal remains inside the same set of aperture-crossing
+camera rays.
+
+Residency remains the sole layer-zero root. The straddled target occupies the next ordinary render
+layer, but its stencil union uses the retained screen-space footprint instead of rasterizing the
+world-space aperture. That NDC mask ignores existing depth, after which depth is reset only inside
+the mask and the adjacent domain renders or composites normally. Root color and depth therefore
+remain authoritative outside the footprint; adjacent color and depth become authoritative inside
+it. Downstream portals continue through later layers and remain bounded by the inherited window.
+The policy is frame-local and does not merge permanent visibility islands or mutate camera or actor
+residency.
 
 Multi-portal corners use the same closure process. There is no fixed-hop rule, aperture-AABB
 shortcut, or camera-point slab.

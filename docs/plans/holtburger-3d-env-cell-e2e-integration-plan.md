@@ -70,7 +70,7 @@ compatible static material, including environment-cell structures and residents.
 | Authoritative residency       | The cell identity carried by gameplay or movement state and updated by directed portal crossings.                                                                                                                                                     |
 | Explorer placement residency  | Best-effort initial scope selection when no crossing history exists. It is allowed to be ambiguous.                                                                                                                                                   |
 | Camera residency              | A view scope derived from an authoritative player cell plus a directed segment to the desired camera position.                                                                                                                                        |
-| Near-plane straddle           | A renderer-only condition where the camera's finite near-plane quad intersects a topology-mask or exterior portal aperture. Both adjacent render branches are seeded without changing camera or player residency.                                     |
+| Near-plane straddle           | A renderer-only condition where a topology-mask or exterior portal aperture intersects the finite clipped volume between the camera eye and near-plane quad. Both adjacent render branches are seeded without changing camera or player residency.    |
 | Portal view window            | An exact camera-dependent normalized-device-coordinate region produced after homogeneous clipping and surviving every aperture crossed by one render-planning route. It is renderer-local, material-free, and unrelated to actor or camera residency. |
 | Portal render node            | The unique per-view executable owner for one reached render domain. Alternate portal routes add incoming visibility and mask edges to this node; they never create additional geometry submissions for it.                                            |
 | Portal render layer           | An ordered set of unique render nodes reached at the same derived mask depth. The executor unions the layer's admitted aperture masks, resets depth once inside that union, and draws every member node once.                                         |
@@ -135,7 +135,7 @@ compatible static material, including environment-cell structures and residents.
   - mandatory scene-domain composition at every indoor/outdoor transition.
 - Render the exterior scene domain at most once per camera frame into offscreen color and depth,
   then composite both through every applicable transition mask.
-- Detect finite camera near-plane intersections with actual aperture triangles and temporarily seed
+- Detect intersections between actual aperture triangles and the finite camera near-clip volume, then temporarily seed
   both adjacent render branches to prevent degenerate masks, black regions, and side flicker.
 - Add synthetic tests, host diagnostics, and non-interactive browser-harness coverage. Permanent
   tests must not require uncommitted DAT or HBA assets.
@@ -271,7 +271,7 @@ find malformed or exceptional assets, but no later phase depends on guessing the
 | Static animated residents    | Retail `CEnvCell::init_static_objects` creates Stabs as static physics objects; default setup motion/script state registers through the static-animation path. The current 3D runtime deliberately defers this class in `GameRuntime.#deferStaticAuthoredDynamic`.                                                                                                                                                                                  | Account for every resident, materialize supported non-animated statics, and keep setup-default-animation residents on the explicit static-authored-animation deferral seam. Do not misroute them through spawned-dynamic installation.                                                                                                                                                                                                                                                                                                |
 | Portal rendering             | Retail `PView::GetClip`, `Render::copy_view`, `ClipPortals`, `AddViewToPortals`, and `OtherPortalClip` propagate clipped screen polygons, accumulate multiple views per destination cell, process newly appended views incrementally, and clip non-exact links through both authored apertures. `D3DPolyRender::DrawPortalPolyInternal` performs material-free depth behavior; retail stencil use found here is shadow-related, not portal-related. | Preserve the invariant, not the implementation: renderer-local exact portal windows bound planning using the host-resolved effective visibility aperture, while WebGL reproduces that same single aperture as the exact mask. Do not enumerate topology paths, repeat reciprocal intersection per frame, port retail allocation patterns, or promote render apertures/windows into shared spatial-query contracts.                                                                                                                    |
 | Exterior scene reuse         | Legacy `Webgl2Renderer.#renderSceneDomainTarget` renders the exterior once. `#renderOutdoorProjectionComposite` and `#drawPortalProjectionOutdoorCrossings` reuse it; `SOURCE_SCENE_COPY_FRAGMENT_SHADER` samples both exterior color and depth and writes `gl_FragDepth`.                                                                                                                                                                          | Preserve the scene-domain invariant without preserving the legacy breadth-layer graph: exterior geometry renders at most once per camera frame, while transition passes copy cached exterior color and depth through exact portal masks. Composite ping-pong is allowed only to avoid framebuffer feedback.                                                                                                                                                                                                                           |
-| Portal-plane flicker         | Legacy `deriveRuntimePortalOverlapResidency` accepts a camera-point plane slab plus padded projected aperture AABB, seeds target EnvCells as `baseOverlap`, searches one extra hop, and sets `requiresExteriorSeed` for building transitions. `#drawPortalBaseOverlapEnvCells` draws those seeds before masked layers.                                                                                                                              | Preserve the successful dual-side render result but replace the proxy: derive a renderer-only closure from finite near-plane-quad intersection with actual aperture triangles. It neither mutates residency nor uses aperture AABBs or one-hop caps.                                                                                                                                                                                                                                                                                  |
+| Portal-plane flicker         | Legacy `deriveRuntimePortalOverlapResidency` accepts a camera-point plane slab plus padded projected aperture AABB, seeds target EnvCells as `baseOverlap`, searches one extra hop, and sets `requiresExteriorSeed` for building transitions. `#drawPortalBaseOverlapEnvCells` draws those seeds before masked layers.                                                                                                                              | Preserve the successful dual-side render result but replace the proxy: derive a renderer-only closure by clipping actual aperture triangles against the finite pyramid between the camera eye and near-plane quad. It neither mutates residency nor uses aperture AABBs or one-hop caps.                                                                                                                                                                                                                                              |
 
 The opt-in archive census is implemented by
 `crates/holtburger-debug-harness/src/bin/inspect_env_cell_integration.rs`. Against
@@ -359,7 +359,7 @@ case is identified; the algorithm does not depend on having a convenient retail 
   camera residency, materialization, or GPU resource ownership.
 - Treat near-plane straddling as render-view ambiguity only. The eye retains one authoritative
   camera scope while the renderer seeds both adjacent branches inside the existing parent mask.
-- Test the finite near-plane quad against triangulated aperture geometry. Camera-point slabs,
+- Test the finite eye-to-near-plane clipped volume against triangulated aperture geometry. Camera-point slabs,
   aperture AABBs, and fixed-hop expansion are insufficient proxies.
 - Index crossings by source scope before measuring dense dungeons. Avoid encoding accidental
   `O(V × E)` behavior into the public scene API.
@@ -748,12 +748,12 @@ interface PortalBoundaryRenderSeeds {
 }
 ```
 
-- Build the finite world/view-space near-plane quad from the active camera projection. Do not use
-  the camera point as the overlap primitive.
+- Build the finite world/view-space near-plane quad from the active camera projection and use it
+  with the eye to bound the near-clipped pyramid. Do not use the camera point alone as the overlap
+  primitive.
 - For each relevant topology-mask or exterior boundary, admit facing from the authored source plane
-  and side, then intersect the near-plane quad with the effective visibility plane and require the
-  resulting point/segment to overlap its actual triangulated geometry. Coplanar and boundary
-  contacts use the shared rendering epsilon.
+  and side, then clip its effective aperture triangles against the four side planes and near cap of
+  that finite pyramid. Boundary contacts use the shared rendering epsilon.
 - Starting at the authoritative render root, add the adjacent scope for every intersected boundary
   and continue through newly added seeds until no additional near-plane-intersected boundary is
   found. Use visited scopes/crossings and a topology-derived bound, not a fixed hop count.
@@ -1388,7 +1388,7 @@ the accepted flat path.
 - Add explicit portal-pass state transitions for framebuffer, viewport, color/depth/stencil masks
   and tests, blend, and cull. Programs, textures, and VAOs remain pass-owned bindings; each pass
   establishes its complete fixed-function baseline instead of snapshotting unknown ambient state.
-- Add pure finite-near-plane-quad versus triangulated-aperture intersection math using the exact
+- Add pure finite-near-clip-volume versus triangulated-aperture intersection math using the exact
   active camera projection facts, with one tested rendering epsilon.
 - Add deterministic transactional resize and disposal. Device loss invalidates the renderer into a
   typed fatal/restart-required state; this plan does not claim partial target-only restoration.
@@ -1401,7 +1401,7 @@ the accepted flat path.
 - [x] Allocate no framebuffer or texture per aperture, cell, island, or path.
 - [x] Keep aperture masks material-free and clipped child frusta out.
 - [x] Establish a complete pass baseline before every mask/composite/ordinary draw transition.
-- [x] Test the finite near-plane quad, not camera-point distance or aperture AABB overlap.
+- [x] Test the finite eye-to-near-plane pyramid, not camera-point distance, the cap alone, or aperture AABB overlap.
 - [x] Prove the raw stencil reference range accepts `1..255` and rejects `256`; topology ancestry
       and traversal bounds belong to Phase 10.
 - [x] Ensure context loss cannot continue drawing with stale programs, textures, geometry, or
@@ -1715,6 +1715,13 @@ layer.
 - Consume the graph's topology-bounded near-plane seed when it names an exterior transition. Do
   not repeat finite-near-plane/aperture intersection in the compositor. Keep the authoritative
   eye-side root, authored crossing geometry, and all residency unchanged.
+- Project the straddled aperture's eye-ray footprint without ordinary near-cap rejection and use
+  the retained parent-bounded footprint as executable screen-space mask geometry and as the
+  adjacent domain's traversal window. Downstream portals therefore remain inside the same
+  aperture-crossing camera rays.
+- Keep residency as the sole layer-zero root. Write a straddle's NDC mask without a depth test,
+  reset depth only inside it, and execute the adjacent domain through the ordinary later-layer
+  path. Outdoor-sourced branches remain bounded by that inherited window.
 - Present the completed composite color to the active view destination without claiming copied
   default-framebuffer depth.
 - Add tunnel, multi-window, exterior-root, interior-root, and exterior-straddle fixtures; decide
@@ -1740,6 +1747,8 @@ layer.
 - [x] Keep transparent/additive ordering correct inside each scheduled domain and constrain copied
       exterior results by transition masks.
 - [x] Preserve one exterior render when an exterior transition straddles the near plane.
+- [x] Preserve outdoor-sourced portals to other buildings while an indoor root straddles its
+      exterior transition.
 - [x] Keep flat mode's scene selection, draw ordering, resource ownership, and zero portal-work
       counters unchanged; do not promise byte-identical GPU output.
 
@@ -2084,41 +2093,41 @@ Do not run the TUI. Archive-backed diagnostics and browser runs are non-interact
 
 ## Risks and Mitigations
 
-| Risk                                                                           | Mitigation                                                                                                                                                                                               |
-| ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| EnvCell surface indices differ from GfxObj material slots.                     | Keep CellStruct adapter specialized and prove indexing before wire stabilization.                                                                                                                        |
-| Portal polygon winding or `PortalSide` is interpreted backward.                | Capture both directions from retail/ACE, retain source flags, and test reciprocal accepted sides.                                                                                                        |
-| Arbitrary apertures are accidentally treated as convex quads.                  | Use a maintained arbitrary-polygon boolean implementation in the host preprocessor and cover concave, multipart, opposite-winding, and disjoint results before triangulation.                            |
-| Effective-aperture preprocessing changes spatial-query behavior.               | Preserve the authored source aperture as the only point/segment/residency input; carry the effective visibility aperture through a separately named field consumed only by planning and rendering.       |
-| A non-exact reciprocal is not coplanar enough for static intersection.         | Validate against the census-backed app-host `0.001` tolerance and fail record construction with identities/deviation above it; never silently snap arbitrary geometry or fall back to paired GPU masks.  |
-| Coplanar snapping hides malformed source data.                                 | Retain both authored geometries and measured deviation as provenance, expose archive counts through the Phase 11A gate, and keep the shared query epsilon unchanged.                                     |
-| Dense portal grids make traversal quadratic.                                   | Build outgoing adjacency at publication and measure visited scopes plus outgoing edge counts.                                                                                                            |
-| Exact portal windows fragment or accumulate excessively.                       | Broad-phase before exact clipping, normalize harmless duplicate/collinear vertices, and require Phase 10C plus Gate E to prove one bounded fixed-point admission invariant.                              |
-| Window admission erases a valid route.                                         | Compare incremental results with a slow exact oracle; exact duplicates/subsumed states may suppress re-expansion, while unresolved or novel partial overlap remains explicit.                            |
-| A layer-wide mask union exposes one node through another node's aperture.      | Exercise the legacy-proven layer executor against adversarial pixel fixtures in Phase 12A. A reproduced failure blocks at Gate G; do not hide it behind a speculative second executor.                   |
-| Renderer window state contaminates general portal queries.                     | Keep windows in the renderer; preserve Phase 7 containment and Phase 8 directed segment tracing as independent view-free contracts.                                                                      |
-| Overlapping non-Euclidean cells make point residency nondeterministic.         | Reserve point containment for Explorer bootstrap; use authoritative residency and portal traces in client mode.                                                                                          |
-| Full Cell BSP transport expands scope into collision.                          | Project the retail point-containment plane chain only; retain canonical full BSP in Rust for future consumers.                                                                                           |
-| Resident transforms are applied twice or in the wrong coordinate frame.        | Compose once at materialization, name the result landblock-space, and test non-identity parent/child rotations.                                                                                          |
-| Static batching merges residents from different EnvCell scopes.                | Partition by `envCellId` before geometry/material/pass batching; share immutable resources but forbid multi-scope nodes, instance populations, and draw submissions.                                     |
-| An authored cell AABB excludes a protruding resident.                          | Build producer-group aggregates from actual transformed member-node bounds and retain exact node tests after the group broad phase.                                                                      |
-| Visibility islands become accidental culling/ownership groups.                 | Use islands only for ordinary-depth scheduling; keep scope indexes, producer groups, nodes, and submissions independently addressable per EnvCell.                                                       |
-| Generic geometry refactor erases domain semantics.                             | Generic builder owns mechanics; GfxObj and CellStruct adapters own selection and material-slot meaning.                                                                                                  |
-| Detail textures remain hard-coded to buildings.                                | Introduce semantic roles before EnvCell rendering and make missing roles explicit.                                                                                                                       |
-| Atomic publication leaks mixed system ownership.                               | One transaction/release handle owns all layer resources; transforms are flattened and scope IDs cross systems.                                                                                           |
-| Flat shell culling leaks onto residents or becomes accidental global GL state. | Apply forced `BACK` culling only while submitting typed structured-shell ranges; assert authored resident/outdoor culling before and after the shell draw.                                               |
-| Portal work breaks the useful flat diagnostic path.                            | Keep `flat` as a permanent typed frame mode, require zero portal work in that mode, and run its bird's-eye/lifecycle baseline through Phases 9–13.                                                       |
-| A heuristic elides a required portal mask.                                     | Only proof-backed indoor seams enter visibility islands; every unproven internal edge masks and every exterior edge composites.                                                                          |
-| Terrain depth covers an underground interior behind an exterior portal.        | Treat every indoor/outdoor transition as a mandatory color-plus-depth composite boundary and test a tunnel fixture.                                                                                      |
-| Exterior geometry is redrawn through every window.                             | Render one exterior scene-domain target per camera frame and reuse its sampled color/depth through every mask.                                                                                           |
-| Offscreen targets add memory, resize, or lifecycle leaks.                      | Allocate renderer-owned extent-keyed targets, measure bytes, dispose transactionally, and invalidate the whole renderer into a typed restart-required state on context loss.                             |
-| Color-only composition breaks later depth and transparency.                    | Source-scene copy samples and writes depth; cover every established blend class and both root directions.                                                                                                |
-| A portal mask degenerates when the camera near plane intersects its aperture.  | Detect the finite near-plane/aperture intersection renderer-side and seed both adjacent branches inside the current parent region.                                                                       |
-| Straddle handling mutates or destabilizes residency.                           | Keep it stateless and renderer-local; camera/player residency remains eye/history-derived.                                                                                                               |
-| Camera-point or AABB overlap produces false straddles.                         | Intersect the finite near-plane quad with actual aperture triangles and test outside-aperture contacts.                                                                                                  |
-| Blended draws are submitted twice through alternate portal routes.             | Make render-node identity the sole contribution owner, attach alternate routes only as incoming mask edges, and assert one opaque/alpha/transparent/additive submission per selected scope contribution. |
-| Authored PVS is over-trusted.                                                  | Preserve it as preload/containment-candidate provenance; never use it to reject portal traversal.                                                                                                        |
-| Diagnostics become ceremonial.                                                 | Every metric must feed a harness assertion, UI inspection, audit decision, or be removed.                                                                                                                |
+| Risk                                                                                 | Mitigation                                                                                                                                                                                               |
+| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| EnvCell surface indices differ from GfxObj material slots.                           | Keep CellStruct adapter specialized and prove indexing before wire stabilization.                                                                                                                        |
+| Portal polygon winding or `PortalSide` is interpreted backward.                      | Capture both directions from retail/ACE, retain source flags, and test reciprocal accepted sides.                                                                                                        |
+| Arbitrary apertures are accidentally treated as convex quads.                        | Use a maintained arbitrary-polygon boolean implementation in the host preprocessor and cover concave, multipart, opposite-winding, and disjoint results before triangulation.                            |
+| Effective-aperture preprocessing changes spatial-query behavior.                     | Preserve the authored source aperture as the only point/segment/residency input; carry the effective visibility aperture through a separately named field consumed only by planning and rendering.       |
+| A non-exact reciprocal is not coplanar enough for static intersection.               | Validate against the census-backed app-host `0.001` tolerance and fail record construction with identities/deviation above it; never silently snap arbitrary geometry or fall back to paired GPU masks.  |
+| Coplanar snapping hides malformed source data.                                       | Retain both authored geometries and measured deviation as provenance, expose archive counts through the Phase 11A gate, and keep the shared query epsilon unchanged.                                     |
+| Dense portal grids make traversal quadratic.                                         | Build outgoing adjacency at publication and measure visited scopes plus outgoing edge counts.                                                                                                            |
+| Exact portal windows fragment or accumulate excessively.                             | Broad-phase before exact clipping, normalize harmless duplicate/collinear vertices, and require Phase 10C plus Gate E to prove one bounded fixed-point admission invariant.                              |
+| Window admission erases a valid route.                                               | Compare incremental results with a slow exact oracle; exact duplicates/subsumed states may suppress re-expansion, while unresolved or novel partial overlap remains explicit.                            |
+| A layer-wide mask union exposes one node through another node's aperture.            | Exercise the legacy-proven layer executor against adversarial pixel fixtures in Phase 12A. A reproduced failure blocks at Gate G; do not hide it behind a speculative second executor.                   |
+| Renderer window state contaminates general portal queries.                           | Keep windows in the renderer; preserve Phase 7 containment and Phase 8 directed segment tracing as independent view-free contracts.                                                                      |
+| Overlapping non-Euclidean cells make point residency nondeterministic.               | Reserve point containment for Explorer bootstrap; use authoritative residency and portal traces in client mode.                                                                                          |
+| Full Cell BSP transport expands scope into collision.                                | Project the retail point-containment plane chain only; retain canonical full BSP in Rust for future consumers.                                                                                           |
+| Resident transforms are applied twice or in the wrong coordinate frame.              | Compose once at materialization, name the result landblock-space, and test non-identity parent/child rotations.                                                                                          |
+| Static batching merges residents from different EnvCell scopes.                      | Partition by `envCellId` before geometry/material/pass batching; share immutable resources but forbid multi-scope nodes, instance populations, and draw submissions.                                     |
+| An authored cell AABB excludes a protruding resident.                                | Build producer-group aggregates from actual transformed member-node bounds and retain exact node tests after the group broad phase.                                                                      |
+| Visibility islands become accidental culling/ownership groups.                       | Use islands only for ordinary-depth scheduling; keep scope indexes, producer groups, nodes, and submissions independently addressable per EnvCell.                                                       |
+| Generic geometry refactor erases domain semantics.                                   | Generic builder owns mechanics; GfxObj and CellStruct adapters own selection and material-slot meaning.                                                                                                  |
+| Detail textures remain hard-coded to buildings.                                      | Introduce semantic roles before EnvCell rendering and make missing roles explicit.                                                                                                                       |
+| Atomic publication leaks mixed system ownership.                                     | One transaction/release handle owns all layer resources; transforms are flattened and scope IDs cross systems.                                                                                           |
+| Flat shell culling leaks onto residents or becomes accidental global GL state.       | Apply forced `BACK` culling only while submitting typed structured-shell ranges; assert authored resident/outdoor culling before and after the shell draw.                                               |
+| Portal work breaks the useful flat diagnostic path.                                  | Keep `flat` as a permanent typed frame mode, require zero portal work in that mode, and run its bird's-eye/lifecycle baseline through Phases 9–13.                                                       |
+| A heuristic elides a required portal mask.                                           | Only proof-backed indoor seams enter visibility islands; every unproven internal edge masks and every exterior edge composites.                                                                          |
+| Terrain depth covers an underground interior behind an exterior portal.              | Treat every indoor/outdoor transition as a mandatory color-plus-depth composite boundary and test a tunnel fixture.                                                                                      |
+| Exterior geometry is redrawn through every window.                                   | Render one exterior scene-domain target per camera frame and reuse its sampled color/depth through every mask.                                                                                           |
+| Offscreen targets add memory, resize, or lifecycle leaks.                            | Allocate renderer-owned extent-keyed targets, measure bytes, dispose transactionally, and invalidate the whole renderer into a typed restart-required state on context loss.                             |
+| Color-only composition breaks later depth and transparency.                          | Source-scene copy samples and writes depth; cover every established blend class and both root directions.                                                                                                |
+| A portal mask degenerates when its aperture enters the camera's near-clipped volume. | Detect exact aperture-triangle intersection with the finite eye-to-near-plane pyramid and seed both adjacent branches inside the current parent region.                                                  |
+| Straddle handling mutates or destabilizes residency.                                 | Keep it stateless and renderer-local; camera/player residency remains eye/history-derived.                                                                                                               |
+| Camera-point or AABB overlap produces false straddles.                               | Clip actual aperture triangles against the finite eye-to-near-plane pyramid and test outside-volume contacts.                                                                                            |
+| Blended draws are submitted twice through alternate portal routes.                   | Make render-node identity the sole contribution owner, attach alternate routes only as incoming mask edges, and assert one opaque/alpha/transparent/additive submission per selected scope contribution. |
+| Authored PVS is over-trusted.                                                        | Preserve it as preload/containment-candidate provenance; never use it to reject portal traversal.                                                                                                        |
+| Diagnostics become ceremonial.                                                       | Every metric must feed a harness assertion, UI inspection, audit decision, or be removed.                                                                                                                |
 
 ## Definition of Done
 
@@ -2268,10 +2277,10 @@ These measurements can tune an implementation but cannot change the locked seman
 - Preserved legacy's successful behavior of rendering both adjacent sides while a portal mask is
   geometrically ambiguous.
 - Rejected legacy's camera-point plane slab as the trigger. The actual failure occurs when the
-  finite camera near plane intersects the portal aperture while the eye can remain unambiguously
-  resident on one side.
+  portal aperture enters the finite clipped volume between the eye and near-plane cap while the
+  eye can remain unambiguously resident on one side.
 - Rejected padded aperture AABB containment and fixed one-hop expansion. Phases 9–11 instead
-  intersect the finite near-plane quad with actual aperture triangles and compute a visited,
+  clip actual aperture triangles against the finite near-clip pyramid and compute a visited,
   topology-bounded seed closure.
 - Kept the correction entirely in renderer work planning. Phase 7 containment, Phase 8 camera
   portal tracing, and authoritative residency contracts remain unchanged.
@@ -3203,9 +3212,10 @@ warnings` and `cargo fmt --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml
 - Explorer currently owns startup and teardown only. It has no device-loss coordinator that pauses
   frames, rebuilds `WebGL2Device`/`GameRuntime`, reacquires current scene interest, restores
   frontend camera/environment/frame settings, and republishes accepted content.
-- The completed Phase 9 work retained at this pause is pure finite near-plane-quad versus arbitrary
-  triangulated-aperture intersection. It covers rotated cameras, actual finite misses, exact edge
-  contact, coplanar overlap, and invalid projection facts without touching camera residency.
+- The completed Phase 9 work retained at this pause is pure finite near-clip-pyramid versus
+  arbitrary triangulated-aperture intersection. It covers rotated cameras, actual finite misses,
+  apertures contained between the eye and cap, exact boundary contact, and invalid projection
+  facts without touching camera residency.
 - An unintegrated target/state/copy prototype was removed after the audit. Keeping it would have
   violated the repository's dead-code and consumed-diagnostics rules while the owning lifecycle
   decision remained unresolved.
@@ -4224,3 +4234,41 @@ back to flat and are released by resize/destroy policy.
   361 tests; type checks, ESLint, Knip, Prettier, and production build passed. Hybrid portal,
   blended static, instanced static, and archive-backed `0xEC0E010B` portal browser runs remained
   green.
+
+### 2026-07-28 — Post-Closeout Near-Plane Seed Execution Correction
+
+#### Root Cause
+
+- The planner correctly detected finite near-plane/aperture intersections and emitted
+  `nearPlaneSeeds`, but execution only validated and counted those records. The target branch still
+  used the ordinary aperture mask, so GPU near-plane clipping left the root contribution visible:
+  clear/fog color for an indoor root and exterior color for an outdoor root.
+- The synthetic fixtures called this dual-side rendering because both nodes were submitted. Their
+  expected clipped pixel deliberately retained the root color, so they proved diagnostic
+  provenance rather than executable seed coverage.
+
+#### Landed Correction
+
+- Camera residency remains the sole layer-zero root. A straddled target uses the next ordinary
+  render layer and retains the aperture's parent-bounded eye-ray footprint as executable NDC mask
+  geometry.
+- The GPU writes that screen-space footprint without near-depth rejection, resets depth only
+  inside it, and renders or composites the adjacent domain under the resulting stencil label.
+  Resident depth remains authoritative outside the aperture, while adjacent depth owns its rays.
+- Straddles no longer add reciprocal graph links, collapse render layers, share root depth, or
+  require exterior-mask prewrites. Authored topology and downstream portal traversal remain
+  unchanged.
+- Completed-plan validation requires every straddle edge to carry a normalized executable mask
+  window and keeps the camera-resident node as the sole layer-zero contribution.
+
+#### Verification
+
+- The pure planner proves a wrong-facing straddled target occupies the next layer with its exact
+  screen-space mask. The executor trace proves the world aperture is not resolved for that edge,
+  followed by masked depth replacement and one adjacent-domain submission.
+- The internal browser fixture proves the same masked execution in the reciprocal residency
+  direction.
+- The hybrid browser fixture separates ordinary tunnel/multi-window/depth-copy coverage from
+  straddle coverage. Dedicated outdoor-to-indoor and indoor-to-outdoor views retain one exterior
+  render, preserve resident pixels outside the NDC footprint, replace color/depth inside it, and
+  keep an outdoor-sourced indoor portal reachable inside the inherited straddle window.

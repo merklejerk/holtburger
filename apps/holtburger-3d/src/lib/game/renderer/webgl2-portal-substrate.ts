@@ -3,6 +3,7 @@ import {
 	requireWebGL2Uniform,
 } from "./webgl2-shader-utils";
 import type { WebGL2GeometryBinding } from "./webgl2-resource-manager";
+import type { PortalViewWindow } from "./portal-view-window";
 
 const COLOR_BYTES_PER_PIXEL = 4;
 const DEPTH_STENCIL_BYTES_PER_PIXEL = 4;
@@ -167,6 +168,7 @@ export class WebGL2PortalSubstrate {
 	#maskProgram: MaskProgram | null = null;
 	#sceneCopyProgram: SceneCopyProgram | null = null;
 	#targets: WebGL2SceneDomainTargets | null = null;
+	#windowMaskProgram: WindowMaskProgram | null = null;
 
 	constructor(gl: WebGL2RenderingContext) {
 		this.#gl = gl;
@@ -248,6 +250,31 @@ export class WebGL2PortalSubstrate {
 			indexCount,
 			clipFromLocal,
 		);
+	}
+
+	/** Write an exact NDC straddle footprint without applying the camera's near-depth clip. */
+	writeLayerWindowMask(
+		target: WebGL2SceneDomainTarget,
+		window: PortalViewWindow,
+		renderLayer: number,
+	): void {
+		this.#assertAlive();
+		requireTarget(this.#targets, target);
+		const vertices = triangulatePortalViewWindow(window);
+		const program = this.#requireWindowMaskProgram();
+		const gl = this.#gl;
+		applyPortalPassState(gl, {
+			depthCompare: "always",
+			extent: target.extent,
+			framebuffer: target.framebuffer,
+			kind: "mask-write",
+			renderLayer,
+		});
+		gl.useProgram(program.program);
+		gl.bindVertexArray(program.vertexArray);
+		gl.bindBuffer(gl.ARRAY_BUFFER, program.positionBuffer);
+		gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STREAM_DRAW);
+		gl.drawArrays(gl.TRIANGLES, 0, vertices.length / 2);
 	}
 
 	/** Establish an ordinary scene pass on one owned offscreen target. */
@@ -420,6 +447,12 @@ export class WebGL2PortalSubstrate {
 			this.#gl.deleteVertexArray(this.#sceneCopyProgram.vertexArray);
 			this.#sceneCopyProgram = null;
 		}
+		if (this.#windowMaskProgram) {
+			this.#gl.deleteBuffer(this.#windowMaskProgram.positionBuffer);
+			this.#gl.deleteProgram(this.#windowMaskProgram.program);
+			this.#gl.deleteVertexArray(this.#windowMaskProgram.vertexArray);
+			this.#windowMaskProgram = null;
+		}
 	}
 
 	#drawMask(
@@ -517,6 +550,11 @@ export class WebGL2PortalSubstrate {
 		return this.#sceneCopyProgram;
 	}
 
+	#requireWindowMaskProgram(): WindowMaskProgram {
+		this.#windowMaskProgram ??= createWindowMaskProgram(this.#gl);
+		return this.#windowMaskProgram;
+	}
+
 	#assertAlive(): void {
 		if (this.#destroyed) {
 			throw new Error("Portal GPU substrate has been destroyed.");
@@ -539,6 +577,13 @@ interface DepthResetProgram {
 interface SceneCopyProgram {
 	readonly color: WebGLUniformLocation;
 	readonly depth: WebGLUniformLocation;
+	readonly program: WebGLProgram;
+	readonly vertexArray: WebGLVertexArrayObject;
+}
+
+/** Dynamic NDC geometry used only when a portal intersects the camera's near-clip volume. */
+interface WindowMaskProgram {
+	readonly positionBuffer: WebGLBuffer;
 	readonly program: WebGLProgram;
 	readonly vertexArray: WebGLVertexArrayObject;
 }
@@ -660,6 +705,73 @@ void main() {
 		gl.deleteProgram(program);
 		throw cause;
 	}
+}
+
+function createWindowMaskProgram(
+	gl: WebGL2RenderingContext,
+): WindowMaskProgram {
+	const vertexArray = requireResource(
+		gl.createVertexArray(),
+		"portal window-mask vertex array",
+	);
+	const positionBuffer = gl.createBuffer();
+	if (!positionBuffer) {
+		gl.deleteVertexArray(vertexArray);
+		throw new Error("Failed to allocate portal window-mask position buffer.");
+	}
+	let program: WebGLProgram | null = null;
+	try {
+		program = linkProgram(
+			gl,
+			`#version 300 es
+layout(location = 0) in vec2 aPosition;
+void main() {
+	gl_Position = vec4(aPosition, 0.0, 1.0);
+}`,
+			`#version 300 es
+precision highp float;
+out vec4 outColor;
+void main() {
+	outColor = vec4(0.0);
+}`,
+		);
+		gl.bindVertexArray(vertexArray);
+		gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+		gl.enableVertexAttribArray(0);
+		gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+		gl.bindVertexArray(null);
+		gl.bindBuffer(gl.ARRAY_BUFFER, null);
+		return { positionBuffer, program, vertexArray };
+	} catch (cause) {
+		if (program) gl.deleteProgram(program);
+		gl.deleteBuffer(positionBuffer);
+		gl.deleteVertexArray(vertexArray);
+		throw cause;
+	}
+}
+
+function triangulatePortalViewWindow(window: PortalViewWindow): Float32Array {
+	const vertexCount = window.fragments.reduce(
+		(count, fragment) => count + (fragment.vertices.length - 2) * 3,
+		0,
+	);
+	const output = new Float32Array(vertexCount * 2);
+	let offset = 0;
+	for (const fragment of window.fragments) {
+		const first = fragment.vertices[0]!;
+		for (let index = 1; index < fragment.vertices.length - 1; index += 1) {
+			for (const vertex of [
+				first,
+				fragment.vertices[index]!,
+				fragment.vertices[index + 1]!,
+			]) {
+				output[offset] = vertex.x;
+				output[offset + 1] = vertex.y;
+				offset += 2;
+			}
+		}
+	}
+	return output;
 }
 
 function createDepthResetProgram(

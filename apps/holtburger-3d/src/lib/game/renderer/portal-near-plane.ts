@@ -1,12 +1,10 @@
 import type { Camera } from "../runtime/types";
 import { Quat, Vec3 } from "../math/types";
 import {
-	intersectSegmentPlane,
 	type PlanarAperture,
 	type PlanarAperturePlane,
-	pointInTriangulatedAperture,
-	signedPlaneDistance,
 	PORTAL_QUERY_EPSILON,
+	validatePlanarAperture,
 } from "../scene/planar-aperture";
 
 /** One deliberate geometric tolerance for renderer-only portal contact decisions. */
@@ -68,71 +66,51 @@ export function createCameraNearPlaneQuad(
 	};
 }
 
-/** Test the finite camera near-plane quad against actual aperture triangles. */
-export function cameraNearPlaneIntersectsAperture(
-	nearPlane: CameraNearPlaneQuad,
+/**
+ * Test aperture triangles against the finite pyramid between the camera eye and near-plane quad.
+ *
+ * The quad alone is insufficient: an oblique aperture can enter the clipped volume without
+ * intersecting its far cap.
+ */
+export function apertureIntersectsCameraNearClipVolume(
+	cameraPosition: Vec3,
+	nearPlane: PlanarAperture,
 	aperture: PlanarAperture,
 ): boolean {
-	return triangulatedPlanarAperturesIntersect(nearPlane.aperture, aperture);
-}
-
-/** Inclusive finite intersection for arbitrary triangulated planar aperture unions. */
-export function triangulatedPlanarAperturesIntersect(
-	first: PlanarAperture,
-	second: PlanarAperture,
-): boolean {
-	for (const point of vertices(first)) {
-		if (
-			Math.abs(signedPlaneDistance(second.plane, point)) <=
-				PORTAL_RENDER_EPSILON &&
-			pointInTriangulatedAperture(point, second)
-		) {
-			return true;
-		}
+	validatePlanarAperture(nearPlane);
+	validatePlanarAperture(aperture);
+	if (nearPlane.vertices.length !== 12) {
+		throw new Error("Camera near plane must contain exactly four corners.");
 	}
-	for (const point of vertices(second)) {
-		if (
-			Math.abs(signedPlaneDistance(first.plane, point)) <=
-				PORTAL_RENDER_EPSILON &&
-			pointInTriangulatedAperture(point, first)
-		) {
-			return true;
+	const corners = readVertices(nearPlane);
+	const interior = averagePoints([cameraPosition, ...corners]);
+	const clippingPlanes = [
+		orientedPlane(corners[0]!, corners[1]!, corners[2]!, interior),
+		orientedPlane(cameraPosition, corners[0]!, corners[1]!, interior),
+		orientedPlane(cameraPosition, corners[1]!, corners[2]!, interior),
+		orientedPlane(cameraPosition, corners[2]!, corners[3]!, interior),
+		orientedPlane(cameraPosition, corners[3]!, corners[0]!, interior),
+	];
+	const points = readVertices(aperture);
+	for (let index = 0; index < aperture.indices.length; index += 3) {
+		let polygon = [
+			points[aperture.indices[index]!]!,
+			points[aperture.indices[index + 1]!]!,
+			points[aperture.indices[index + 2]!]!,
+		];
+		for (const plane of clippingPlanes) {
+			polygon = clipPolygonToHalfSpace(polygon, plane);
+			if (polygon.length === 0) break;
 		}
-	}
-	for (const [start, end] of triangleEdges(first)) {
-		const intersection = intersectSegmentPlane(start, end, second.plane);
-		if (
-			intersection.kind === "point" &&
-			pointInTriangulatedAperture(intersection.point, second)
-		) {
-			return true;
-		}
-	}
-	for (const [start, end] of triangleEdges(second)) {
-		const intersection = intersectSegmentPlane(start, end, first.plane);
-		if (
-			intersection.kind === "point" &&
-			pointInTriangulatedAperture(intersection.point, first)
-		) {
-			return true;
-		}
-	}
-	if (!planesAreCoplanar(first.plane, second.plane)) return false;
-	const projectionAxis = dominantAxis(first.plane.normal);
-	for (const firstEdge of triangleEdges(first)) {
-		for (const secondEdge of triangleEdges(second)) {
-			if (coplanarSegmentsIntersect(firstEdge, secondEdge, projectionAxis)) {
-				return true;
-			}
-		}
+		if (polygon.length > 0) return true;
 	}
 	return false;
 }
 
-function vertices(aperture: PlanarAperture): readonly Vec3[] {
-	const result: Vec3[] = [];
+function readVertices(aperture: PlanarAperture): readonly Vec3[] {
+	const points: Vec3[] = [];
 	for (let index = 0; index < aperture.vertices.length; index += 3) {
-		result.push(
+		points.push(
 			new Vec3(
 				aperture.vertices[index]!,
 				aperture.vertices[index + 1]!,
@@ -140,112 +118,94 @@ function vertices(aperture: PlanarAperture): readonly Vec3[] {
 			),
 		);
 	}
-	return result;
+	return points;
 }
 
-function triangleEdges(
-	aperture: PlanarAperture,
-): readonly (readonly [Vec3, Vec3])[] {
-	const points = vertices(aperture);
-	const result: [Vec3, Vec3][] = [];
-	for (let index = 0; index < aperture.indices.length; index += 3) {
-		const first = points[aperture.indices[index]!];
-		const second = points[aperture.indices[index + 1]!];
-		const third = points[aperture.indices[index + 2]!];
-		if (!first || !second || !third) {
-			throw new Error("Portal aperture triangle references a missing vertex.");
+function averagePoints(points: readonly Vec3[]): Vec3 {
+	const sum = points.reduce((result, point) => {
+		if (
+			!Number.isFinite(point.x) ||
+			!Number.isFinite(point.y) ||
+			!Number.isFinite(point.z)
+		) {
+			throw new Error("Camera near-clip volume contains a non-finite point.");
 		}
-		result.push([first, second], [second, third], [third, first]);
+		return new Vec3(result.x + point.x, result.y + point.y, result.z + point.z);
+	}, Vec3.zero());
+	return new Vec3(
+		sum.x / points.length,
+		sum.y / points.length,
+		sum.z / points.length,
+	);
+}
+
+/** Create a normalized plane whose retained half-space has non-positive distance. */
+function orientedPlane(
+	first: Vec3,
+	second: Vec3,
+	third: Vec3,
+	interior: Vec3,
+): PlanarAperturePlane {
+	const firstEdge = subtract(second, first);
+	const secondEdge = subtract(third, first);
+	let normal = cross(firstEdge, secondEdge);
+	const length = Math.hypot(normal.x, normal.y, normal.z);
+	if (!Number.isFinite(length) || length <= PORTAL_RENDER_EPSILON) {
+		throw new Error("Camera near-clip volume contains a degenerate plane.");
 	}
-	return result;
-}
-
-function planesAreCoplanar(
-	first: PlanarAperturePlane,
-	second: PlanarAperturePlane,
-): boolean {
-	const alignment = dot(first.normal, second.normal);
-	if (1 - Math.abs(alignment) > PORTAL_RENDER_EPSILON) return false;
-	const pointOnFirst = new Vec3(
-		-first.normal.x * first.d,
-		-first.normal.y * first.d,
-		-first.normal.z * first.d,
-	);
-	return (
-		Math.abs(signedPlaneDistance(second, pointOnFirst)) <= PORTAL_RENDER_EPSILON
-	);
-}
-
-function coplanarSegmentsIntersect(
-	first: readonly [Vec3, Vec3],
-	second: readonly [Vec3, Vec3],
-	droppedAxis: 0 | 1 | 2,
-): boolean {
-	const [firstStart, firstEnd] = first.map((point) =>
-		projectPoint(point, droppedAxis),
-	) as [[number, number], [number, number]];
-	const [secondStart, secondEnd] = second.map((point) =>
-		projectPoint(point, droppedAxis),
-	) as [[number, number], [number, number]];
-	const firstA = orientation(firstStart, firstEnd, secondStart);
-	const firstB = orientation(firstStart, firstEnd, secondEnd);
-	const secondA = orientation(secondStart, secondEnd, firstStart);
-	const secondB = orientation(secondStart, secondEnd, firstEnd);
-	if (
-		((firstA > PORTAL_RENDER_EPSILON && firstB < -PORTAL_RENDER_EPSILON) ||
-			(firstA < -PORTAL_RENDER_EPSILON && firstB > PORTAL_RENDER_EPSILON)) &&
-		((secondA > PORTAL_RENDER_EPSILON && secondB < -PORTAL_RENDER_EPSILON) ||
-			(secondA < -PORTAL_RENDER_EPSILON && secondB > PORTAL_RENDER_EPSILON))
-	) {
-		return true;
+	normal = new Vec3(normal.x / length, normal.y / length, normal.z / length);
+	let plane = { d: -dot(normal, first), normal };
+	if (planeDistance(plane, interior) > 0) {
+		normal = new Vec3(-normal.x, -normal.y, -normal.z);
+		plane = { d: -dot(normal, first), normal };
 	}
-	return (
-		(Math.abs(firstA) <= PORTAL_RENDER_EPSILON &&
-			pointOnSegment(secondStart, firstStart, firstEnd)) ||
-		(Math.abs(firstB) <= PORTAL_RENDER_EPSILON &&
-			pointOnSegment(secondEnd, firstStart, firstEnd)) ||
-		(Math.abs(secondA) <= PORTAL_RENDER_EPSILON &&
-			pointOnSegment(firstStart, secondStart, secondEnd)) ||
-		(Math.abs(secondB) <= PORTAL_RENDER_EPSILON &&
-			pointOnSegment(firstEnd, secondStart, secondEnd))
+	return plane;
+}
+
+function clipPolygonToHalfSpace(
+	polygon: readonly Vec3[],
+	plane: PlanarAperturePlane,
+): Vec3[] {
+	const clipped: Vec3[] = [];
+	let previous = polygon.at(-1)!;
+	let previousDistance = planeDistance(plane, previous);
+	for (const current of polygon) {
+		const currentDistance = planeDistance(plane, current);
+		const previousInside = previousDistance <= PORTAL_RENDER_EPSILON;
+		const currentInside = currentDistance <= PORTAL_RENDER_EPSILON;
+		if (previousInside !== currentInside) {
+			const fraction = previousDistance / (previousDistance - currentDistance);
+			clipped.push(lerp(previous, current, fraction));
+		}
+		if (currentInside) clipped.push(current);
+		previous = current;
+		previousDistance = currentDistance;
+	}
+	return clipped;
+}
+
+function planeDistance(plane: PlanarAperturePlane, point: Vec3): number {
+	return dot(plane.normal, point) + plane.d;
+}
+
+function subtract(left: Vec3, right: Vec3): Vec3 {
+	return new Vec3(left.x - right.x, left.y - right.y, left.z - right.z);
+}
+
+function cross(left: Vec3, right: Vec3): Vec3 {
+	return new Vec3(
+		left.y * right.z - left.z * right.y,
+		left.z * right.x - left.x * right.z,
+		left.x * right.y - left.y * right.x,
 	);
 }
 
-function orientation(
-	first: readonly [number, number],
-	second: readonly [number, number],
-	third: readonly [number, number],
-): number {
-	return (
-		(second[0] - first[0]) * (third[1] - first[1]) -
-		(second[1] - first[1]) * (third[0] - first[0])
+function lerp(start: Vec3, end: Vec3, fraction: number): Vec3 {
+	return new Vec3(
+		start.x + (end.x - start.x) * fraction,
+		start.y + (end.y - start.y) * fraction,
+		start.z + (end.z - start.z) * fraction,
 	);
-}
-
-function pointOnSegment(
-	point: readonly [number, number],
-	start: readonly [number, number],
-	end: readonly [number, number],
-): boolean {
-	return (
-		point[0] >= Math.min(start[0], end[0]) - PORTAL_RENDER_EPSILON &&
-		point[0] <= Math.max(start[0], end[0]) + PORTAL_RENDER_EPSILON &&
-		point[1] >= Math.min(start[1], end[1]) - PORTAL_RENDER_EPSILON &&
-		point[1] <= Math.max(start[1], end[1]) + PORTAL_RENDER_EPSILON
-	);
-}
-
-function projectPoint(point: Vec3, droppedAxis: 0 | 1 | 2): [number, number] {
-	if (droppedAxis === 0) return [point.y, point.z];
-	if (droppedAxis === 1) return [point.x, point.z];
-	return [point.x, point.y];
-}
-
-function dominantAxis(normal: Vec3): 0 | 1 | 2 {
-	const x = Math.abs(normal.x);
-	const y = Math.abs(normal.y);
-	const z = Math.abs(normal.z);
-	return x >= y && x >= z ? 0 : y >= z ? 1 : 2;
 }
 
 function rotateAndTranslate(point: Vec3, rotation: Quat, position: Vec3): Vec3 {

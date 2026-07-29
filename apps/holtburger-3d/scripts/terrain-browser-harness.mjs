@@ -598,6 +598,7 @@ function assertHybridPortalExecutionFixture(state) {
 		"multiWindowUnionPassed",
 		"noStaleViewReusePassed",
 		"straddleDualSidePassed",
+		"straddleExteriorBranchPassed",
 		"targetReusePassed",
 		"tunnelDepthResetPassed",
 	]) {
@@ -613,7 +614,7 @@ function assertHybridPortalExecutionFixture(state) {
 		exteriorRenderCount: 1,
 		maskDrawCount: 2,
 		maskEdgeCount: 2,
-		nearPlaneSeedCount: 1,
+		nearPlaneSeedCount: 0,
 		rejectedFacingCrossingCount: 0,
 		sameDomainBoundaryCrossingCount: 0,
 		renderLayerCount: 2,
@@ -622,10 +623,7 @@ function assertHybridPortalExecutionFixture(state) {
 		submittedRenderLayerCount: 2,
 		submittedRenderNodeCount: 2,
 	};
-	const expectedIndoor = {
-		...expectedOutdoor,
-		nearPlaneSeedCount: 0,
-	};
+	const expectedIndoor = { ...expectedOutdoor };
 	if (JSON.stringify(fixture.outdoorRoot) !== JSON.stringify(expectedOutdoor)) {
 		throw new Error(
 			`Exterior-root composition diagnostics mismatch: ${JSON.stringify(fixture.outdoorRoot)}.`,
@@ -636,13 +634,41 @@ function assertHybridPortalExecutionFixture(state) {
 			`Indoor-root composition diagnostics mismatch: ${JSON.stringify(fixture.indoorRoot)}.`,
 		);
 	}
+	const expectedOutdoorStraddle = {
+		...expectedOutdoor,
+		maskDrawCount: 2,
+		nearPlaneSeedCount: 1,
+		renderNodeCount: 3,
+		submittedRenderNodeCount: 3,
+	};
+	const expectedIndoorStraddle = {
+		...expectedOutdoorStraddle,
+		renderLayerCount: 3,
+		submittedRenderLayerCount: 3,
+	};
+	if (
+		JSON.stringify(fixture.outdoorStraddle) !==
+		JSON.stringify(expectedOutdoorStraddle)
+	) {
+		throw new Error(
+			`outdoor straddle diagnostics mismatch: ${JSON.stringify(fixture.outdoorStraddle)}.`,
+		);
+	}
+	if (
+		JSON.stringify(fixture.indoorStraddle) !==
+		JSON.stringify(expectedIndoorStraddle)
+	) {
+		throw new Error(
+			`indoor straddle diagnostics mismatch: ${JSON.stringify(fixture.indoorStraddle)}.`,
+		);
+	}
 	const expectedHybridTrace = {
 		admittedVisibilityStateCount: 4,
 		exteriorCompositeCount: 1,
 		exteriorRenderCount: 1,
 		maskDrawCount: 3,
 		maskEdgeCount: 4,
-		nearPlaneSeedCount: 2,
+		nearPlaneSeedCount: 0,
 		rejectedFacingCrossingCount: 0,
 		sameDomainBoundaryCrossingCount: 0,
 		renderLayerCount: 2,
@@ -700,7 +726,7 @@ function assertInternalPortalExecutionFixture(state) {
 		exteriorRenderCount: 0,
 		maskDrawCount: 4,
 		maskEdgeCount: 4,
-		nearPlaneSeedCount: 1,
+		nearPlaneSeedCount: 0,
 		rejectedFacingCrossingCount: 0,
 		sameDomainBoundaryCrossingCount: 0,
 		renderLayerCount: 3,

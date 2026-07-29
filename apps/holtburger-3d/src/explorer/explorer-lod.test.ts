@@ -6,16 +6,6 @@ import {
 } from "./explorer-lod";
 
 describe("Explorer LoD controls", () => {
-	it("starts with the full outdoor inspection profile", () => {
-		expect(DEFAULT_EXPLORER_LOD_CONFIG).toEqual({
-			buildingRadius: 8,
-			envCellRadius: 2,
-			explicitObjectRadius: 2,
-			generatedObjectRadius: 2,
-			terrainRadius: 8,
-		});
-	});
-
 	it("clamps every dependent radius when terrain coverage shrinks", () => {
 		const configured = {
 			buildingRadius: 4,

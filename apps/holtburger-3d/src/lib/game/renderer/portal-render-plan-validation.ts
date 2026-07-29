@@ -137,39 +137,11 @@ export function validatePortalRenderWorkPlan(
 			"Portal plan stencil capacity disagrees with execution labels.",
 		);
 	}
-	for (const seed of plan.nearPlaneSeeds) {
-		// This is executable mask geometry, not diagnostic metadata. Normalization rejects
-		// non-finite, degenerate, or out-of-clip-space fragments before GPU execution.
-		portalViewWindowBounds(seed.maskWindow);
-		const edge = edgeById.get(seed.crossingId);
-		const target = edge ? nodeById.get(edge.targetNodeId) : undefined;
-		if (
-			!edge ||
-			edge.sourceNodeId !== seed.sourceNodeId ||
-			edge.targetNodeId !== seed.targetNodeId ||
-			!edge.nearPlaneStraddle ||
-			!target ||
-			(target.renderLayer !== 0 &&
-				!layerByNumber
-					.get(target.renderLayer)
-					?.incomingMaskEdgeIds.includes(edge.crossingId))
-		) {
-			throw new Error(
-				`Portal near-plane seed ${seed.crossingId} disagrees with its admitted mask edge.`,
-			);
-		}
-	}
-	const seedCrossingIds = new Set(
-		plan.nearPlaneSeeds.map((seed) => seed.crossingId),
-	);
-	if (seedCrossingIds.size !== plan.nearPlaneSeeds.length) {
-		throw new Error("Portal plan repeats a near-plane seed.");
-	}
 	for (const edge of edgeById.values()) {
-		if (edge.nearPlaneStraddle && !seedCrossingIds.has(edge.crossingId)) {
-			throw new Error(
-				`Portal straddle edge ${edge.crossingId} has no executable near-plane seed.`,
-			);
+		if (edge.maskSource.kind === "near-clip-window") {
+			// This is executable mask geometry, not diagnostic metadata. Normalization
+			// rejects non-finite, degenerate, or out-of-clip-space fragments here.
+			portalViewWindowBounds(edge.maskSource.window);
 		}
 	}
 	return { edgeById, exterior, layerByNumber, nodeById, plan };

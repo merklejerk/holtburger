@@ -1,7 +1,11 @@
 import type { GeometryResourceKey } from "./resource-manager";
 import type { PortalCrossingId, SceneScope } from "../scene";
 import type { PortalRenderWorkPlan } from "./portal-render-graph";
-import { createFullPortalViewWindow } from "./portal-view-window";
+import { Vec2 } from "../math/types";
+import {
+	createPortalViewWindow,
+	type PortalViewWindow,
+} from "./portal-view-window";
 import { executePortalGraph } from "./webgl2-portal-executor";
 import {
 	createPortalFixtureSceneProgram,
@@ -139,16 +143,10 @@ export function runWebGL2InternalPortalExecutionFixture(
 				if (nodeIds.includes(TARGET as never)) drawRootRoom(gl, program);
 				if (nodeIds.includes(LEFT as never)) drawTargetRoom(gl, program);
 			},
-			resolveVisibilityAperture: (apertureId) => {
-				const geometry = apertures.get(apertureId);
-				if (!geometry)
-					throw new Error(`Missing fixture aperture ${apertureId}.`);
-				return {
-					clipFromLocal: FIXTURE_IDENTITY_CLIP_FROM_LOCAL,
-					geometry,
-					indexCount: geometry.indexCount,
-					indexStart: 0,
-				};
+			resolveVisibilityAperture: () => {
+				throw new Error(
+					"Reverse straddle fixture must execute its near-clip window directly.",
+				);
 			},
 		});
 		const reverseReachedTarget = readFixturePixel(gl, 2, 4);
@@ -180,7 +178,7 @@ export function runWebGL2InternalPortalExecutionFixture(
 				fixturePixelMatches(leftTarget, MASKED_BLEND) &&
 				fixturePixelMatches(rootWall, BLUE) &&
 				fixturePixelMatches(reverseReachedTarget, MASKED_BLEND) &&
-				fixturePixelMatches(reverseOppositeOpening, MASKED_BLEND),
+				fixturePixelMatches(reverseOppositeOpening, BLUE),
 			nestedDepthConfinementPassed:
 				fixturePixelMatches(parentWall, BLUE) &&
 				fixturePixelMatches(leftTarget, MASKED_BLEND) &&
@@ -214,7 +212,13 @@ export function runWebGL2InternalPortalExecutionFixture(
 function reverseStraddlePlan(): PortalRenderWorkPlan {
 	const reverseCrossing =
 		"portal-crossing:fixture/target-left" as PortalCrossingId;
-	const reverseEdge = edge(reverseCrossing, TARGET, LEFT, "root-left", true);
+	const reverseEdge = edge(
+		reverseCrossing,
+		TARGET,
+		LEFT,
+		"root-left",
+		createReverseStraddleWindow(),
+	);
 	const nodes = [
 		node(TARGET, 0, "0x00010103", []),
 		node(LEFT, 1, "0x00010101", [reverseCrossing]),
@@ -244,14 +248,6 @@ function reverseStraddlePlan(): PortalRenderWorkPlan {
 		exteriorComponent: null,
 		exteriorTransitions: [],
 		maskEdges: [reverseEdge],
-		nearPlaneSeeds: [
-			{
-				crossingId: reverseCrossing,
-				maskWindow: createFullPortalViewWindow(),
-				sourceNodeId: TARGET,
-				targetNodeId: LEFT,
-			},
-		],
 		nodes,
 		renderLayers: [
 			{
@@ -466,7 +462,6 @@ function internalFixturePlan(): PortalRenderWorkPlan {
 		exteriorComponent: null,
 		exteriorTransitions: [],
 		maskEdges: [rootLeft, rootRight, leftTarget, rightTarget],
-		nearPlaneSeeds: [],
 		nodes,
 		renderLayers: [
 			{
@@ -496,19 +491,37 @@ function edge(
 	sourceNodeId: string,
 	targetNodeId: string,
 	apertureSuffix: string,
-	nearPlaneStraddle = false,
+	nearClipWindow: PortalViewWindow | null = null,
 ): PortalRenderWorkPlan["maskEdges"][number] {
 	return {
 		crossingId,
-		nearPlaneStraddle,
+		maskSource: nearClipWindow
+			? { kind: "near-clip-window", window: nearClipWindow }
+			: {
+					kind: "world-aperture",
+					visibilityApertureId: `portal-aperture:fixture/${apertureSuffix}`,
+				},
 		sourceNodeId,
 		spatialRelationship: {
 			kind: "indoor-topology-boundary",
 			reason: "fixture",
 		},
 		targetNodeId,
-		visibilityApertureId: `portal-aperture:fixture/${apertureSuffix}`,
 	} as PortalRenderWorkPlan["maskEdges"][number];
+}
+
+/** Confine the reverse straddle to the left opening instead of granting full-screen ownership. */
+function createReverseStraddleWindow(): PortalViewWindow {
+	const window = createPortalViewWindow([
+		[
+			new Vec2(-0.9, -0.8),
+			new Vec2(-0.1, -0.8),
+			new Vec2(-0.1, 0.8),
+			new Vec2(-0.9, 0.8),
+		],
+	]);
+	if (!window) throw new Error("Reverse straddle fixture window is empty.");
+	return window;
 }
 
 function node(

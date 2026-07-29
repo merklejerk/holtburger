@@ -33,12 +33,9 @@ export interface Texture2DReadback {
 export interface PortalTargetCapabilityProbe {
 	readonly colorFormat: "RGBA8";
 	readonly depthBits: number;
-	readonly depthSampleMatchesClear: boolean;
 	readonly depthStencilFormat: "DEPTH24_STENCIL8";
 	readonly framebufferComplete: boolean;
-	readonly maximumRenderbufferSize: number;
 	readonly maximumTextureSize: number;
-	readonly sampledDepthByte: number;
 	readonly stencilBits: number;
 }
 
@@ -172,7 +169,7 @@ export class WebGL2Device {
 		return runWebGL2PortalSubstrateFixture(this.#gl, this.resources);
 	}
 
-	/** Run the Gate-F standalone exterior-transition composition fixture. */
+	/** Run the standalone direct exterior-transition fixture. */
 	probeHybridPortalExecution(): WebGL2HybridPortalExecutionFixtureResult {
 		this.#assertReady();
 		return runWebGL2HybridPortalExecutionFixture(this.#gl, this.resources);
@@ -298,134 +295,79 @@ export class WebGL2Device {
 function probePortalTargetCapabilities(
 	gl: WebGL2RenderingContext,
 ): PortalTargetCapabilityProbe {
-	const sourceFramebuffer = requireGlResource(
+	const framebuffer = requireGlResource(
 		gl.createFramebuffer(),
-		"portal capability source framebuffer",
+		"portal capability framebuffer",
 	);
-	const destinationFramebuffer = requireGlResource(
-		gl.createFramebuffer(),
-		"portal capability destination framebuffer",
-	);
-	const sourceColor = requireGlResource(
+	const color = requireGlResource(
 		gl.createTexture(),
-		"portal capability source color texture",
+		"portal capability color texture",
 	);
-	const sourceDepthStencil = requireGlResource(
+	const depthStencil = requireGlResource(
 		gl.createTexture(),
 		"portal capability depth-stencil texture",
 	);
-	const destinationColor = requireGlResource(
-		gl.createTexture(),
-		"portal capability destination color texture",
-	);
-	const vertexArray = requireGlResource(
-		gl.createVertexArray(),
-		"portal capability vertex array",
-	);
-	const program = createDepthSamplingProgram(gl);
 	const previous = captureProbeState(gl);
-	const sampledPixel = new Uint8Array(4);
 	try {
 		gl.activeTexture(gl.TEXTURE0);
+		initializeProbeTexture(gl, color, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
 		initializeProbeTexture(
 			gl,
-			sourceColor,
-			gl.RGBA8,
-			gl.RGBA,
-			gl.UNSIGNED_BYTE,
-		);
-		initializeProbeTexture(
-			gl,
-			sourceDepthStencil,
+			depthStencil,
 			gl.DEPTH24_STENCIL8,
 			gl.DEPTH_STENCIL,
 			gl.UNSIGNED_INT_24_8,
 		);
-		initializeProbeTexture(
-			gl,
-			destinationColor,
-			gl.RGBA8,
-			gl.RGBA,
-			gl.UNSIGNED_BYTE,
-		);
 
-		gl.bindFramebuffer(gl.FRAMEBUFFER, sourceFramebuffer);
+		gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
 		gl.framebufferTexture2D(
 			gl.FRAMEBUFFER,
 			gl.COLOR_ATTACHMENT0,
 			gl.TEXTURE_2D,
-			sourceColor,
+			color,
 			0,
 		);
 		gl.framebufferTexture2D(
 			gl.FRAMEBUFFER,
 			gl.DEPTH_STENCIL_ATTACHMENT,
 			gl.TEXTURE_2D,
-			sourceDepthStencil,
+			depthStencil,
 			0,
 		);
 		const framebufferComplete =
 			gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
-		if (!framebufferComplete) {
-			return capabilityResult(gl, false, 0, 0, sampledPixel[0]!);
-		}
-		const depthBits = gl.getParameter(gl.DEPTH_BITS) as number;
-		const stencilBits = gl.getParameter(gl.STENCIL_BITS) as number;
-		gl.viewport(0, 0, 1, 1);
-		gl.clearDepth(0.25);
-		gl.clearStencil(3);
-		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
-
-		gl.bindFramebuffer(gl.FRAMEBUFFER, destinationFramebuffer);
-		gl.framebufferTexture2D(
-			gl.FRAMEBUFFER,
-			gl.COLOR_ATTACHMENT0,
-			gl.TEXTURE_2D,
-			destinationColor,
-			0,
-		);
-		if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-			throw new Error(
-				"Portal capability destination framebuffer is incomplete.",
-			);
-		}
-		gl.useProgram(program);
-		gl.bindVertexArray(vertexArray);
-		gl.bindTexture(gl.TEXTURE_2D, sourceDepthStencil);
-		gl.uniform1i(gl.getUniformLocation(program, "u_depth"), 0);
-		gl.drawArrays(gl.TRIANGLES, 0, 3);
-		gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, sampledPixel);
 		const error = gl.getError();
 		if (error !== gl.NO_ERROR) {
 			throw new Error(
 				`Portal capability probe failed with WebGL error ${error}.`,
 			);
 		}
-		return capabilityResult(gl, true, depthBits, stencilBits, sampledPixel[0]!);
+		return {
+			colorFormat: "RGBA8",
+			depthBits: framebufferComplete
+				? (gl.getParameter(gl.DEPTH_BITS) as number)
+				: 0,
+			depthStencilFormat: "DEPTH24_STENCIL8",
+			framebufferComplete,
+			maximumTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE) as number,
+			stencilBits: framebufferComplete
+				? (gl.getParameter(gl.STENCIL_BITS) as number)
+				: 0,
+		};
 	} finally {
 		restoreProbeState(gl, previous);
-		gl.deleteProgram(program);
-		gl.deleteVertexArray(vertexArray);
-		gl.deleteTexture(destinationColor);
-		gl.deleteTexture(sourceDepthStencil);
-		gl.deleteTexture(sourceColor);
-		gl.deleteFramebuffer(destinationFramebuffer);
-		gl.deleteFramebuffer(sourceFramebuffer);
+		gl.deleteTexture(depthStencil);
+		gl.deleteTexture(color);
+		gl.deleteFramebuffer(framebuffer);
 	}
 }
 
 interface PortalProbeState {
 	readonly activeTexture: number;
 	readonly activeTextureBinding: WebGLTexture | null;
-	readonly clearColor: Float32Array;
-	readonly clearDepth: number;
-	readonly clearStencil: number;
 	readonly drawFramebuffer: WebGLFramebuffer | null;
-	readonly program: WebGLProgram | null;
 	readonly readFramebuffer: WebGLFramebuffer | null;
 	readonly texture0Binding: WebGLTexture | null;
-	readonly vertexArray: WebGLVertexArrayObject | null;
-	readonly viewport: Int32Array;
 }
 
 function captureProbeState(gl: WebGL2RenderingContext): PortalProbeState {
@@ -441,21 +383,13 @@ function captureProbeState(gl: WebGL2RenderingContext): PortalProbeState {
 	return {
 		activeTexture,
 		activeTextureBinding,
-		clearColor: gl.getParameter(gl.COLOR_CLEAR_VALUE) as Float32Array,
-		clearDepth: gl.getParameter(gl.DEPTH_CLEAR_VALUE) as number,
-		clearStencil: gl.getParameter(gl.STENCIL_CLEAR_VALUE) as number,
 		drawFramebuffer: gl.getParameter(
 			gl.DRAW_FRAMEBUFFER_BINDING,
 		) as WebGLFramebuffer | null,
-		program: gl.getParameter(gl.CURRENT_PROGRAM) as WebGLProgram | null,
 		readFramebuffer: gl.getParameter(
 			gl.READ_FRAMEBUFFER_BINDING,
 		) as WebGLFramebuffer | null,
 		texture0Binding,
-		vertexArray: gl.getParameter(
-			gl.VERTEX_ARRAY_BINDING,
-		) as WebGLVertexArrayObject | null,
-		viewport: gl.getParameter(gl.VIEWPORT) as Int32Array,
 	};
 }
 
@@ -465,22 +399,6 @@ function restoreProbeState(
 ): void {
 	gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, state.drawFramebuffer);
 	gl.bindFramebuffer(gl.READ_FRAMEBUFFER, state.readFramebuffer);
-	gl.useProgram(state.program);
-	gl.bindVertexArray(state.vertexArray);
-	gl.viewport(
-		state.viewport[0]!,
-		state.viewport[1]!,
-		state.viewport[2]!,
-		state.viewport[3]!,
-	);
-	gl.clearColor(
-		state.clearColor[0]!,
-		state.clearColor[1]!,
-		state.clearColor[2]!,
-		state.clearColor[3]!,
-	);
-	gl.clearDepth(state.clearDepth);
-	gl.clearStencil(state.clearStencil);
 	gl.activeTexture(gl.TEXTURE0);
 	gl.bindTexture(gl.TEXTURE_2D, state.texture0Binding);
 	gl.activeTexture(state.activeTexture);
@@ -500,92 +418,6 @@ function initializeProbeTexture(
 	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
 	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 	gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, 1, 1, 0, format, type, null);
-}
-
-function createDepthSamplingProgram(gl: WebGL2RenderingContext): WebGLProgram {
-	const vertex = compileProbeShader(
-		gl,
-		gl.VERTEX_SHADER,
-		`#version 300 es
-void main() {
-	vec2 position = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
-	gl_Position = vec4(position * 2.0 - 1.0, 0.0, 1.0);
-}`,
-	);
-	const fragment = compileProbeShader(
-		gl,
-		gl.FRAGMENT_SHADER,
-		`#version 300 es
-precision highp float;
-uniform sampler2D u_depth;
-out vec4 outColor;
-void main() {
-	float depth = texture(u_depth, vec2(0.5)).r;
-	outColor = vec4(depth, 0.0, 0.0, 1.0);
-}`,
-	);
-	const program = requireGlResource(
-		gl.createProgram(),
-		"portal capability shader program",
-	);
-	try {
-		gl.attachShader(program, vertex);
-		gl.attachShader(program, fragment);
-		gl.linkProgram(program);
-		if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-			throw new Error(
-				`Portal capability program failed to link: ${gl.getProgramInfoLog(program) ?? "unknown error"}`,
-			);
-		}
-		return program;
-	} catch (cause) {
-		gl.deleteProgram(program);
-		throw cause;
-	} finally {
-		gl.deleteShader(fragment);
-		gl.deleteShader(vertex);
-	}
-}
-
-function compileProbeShader(
-	gl: WebGL2RenderingContext,
-	type: number,
-	source: string,
-): WebGLShader {
-	const shader = requireGlResource(
-		gl.createShader(type),
-		"portal capability shader",
-	);
-	gl.shaderSource(shader, source);
-	gl.compileShader(shader);
-	if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-		const message = gl.getShaderInfoLog(shader) ?? "unknown error";
-		gl.deleteShader(shader);
-		throw new Error(`Portal capability shader failed to compile: ${message}`);
-	}
-	return shader;
-}
-
-function capabilityResult(
-	gl: WebGL2RenderingContext,
-	framebufferComplete: boolean,
-	depthBits: number,
-	stencilBits: number,
-	sampledDepthByte: number,
-): PortalTargetCapabilityProbe {
-	return {
-		colorFormat: "RGBA8",
-		depthBits,
-		depthSampleMatchesClear: Math.abs(sampledDepthByte - 64) <= 1,
-		depthStencilFormat: "DEPTH24_STENCIL8",
-		framebufferComplete,
-		maximumRenderbufferSize: gl.getParameter(
-			gl.MAX_RENDERBUFFER_SIZE,
-		) as number,
-		maximumTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE) as number,
-		sampledDepthByte,
-		stencilBits,
-	};
 }
 
 function requireGlResource<T>(resource: T | null, label: string): T {

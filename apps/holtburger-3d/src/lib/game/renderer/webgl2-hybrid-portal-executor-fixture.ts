@@ -45,14 +45,14 @@ const BLUE = [26, 51, 204, 255] as const;
 const CYAN = [26, 204, 204, 255] as const;
 const INDOOR_BLEND = [64, 102, 115, 255] as const;
 
-/** Browser-read evidence for exterior composition and unified hybrid execution. */
+/** Browser-read evidence for direct exterior contribution and unified hybrid execution. */
 export interface WebGL2HybridPortalExecutionFixtureResult {
 	/** Opaque, transparent, and additive indoor passes retain their established order. */
 	readonly blendOrderingPassed: boolean;
 	/** A nearer exterior occluder remains in front of an outdoor-to-indoor transition. */
 	readonly exteriorDepthOcclusionPassed: boolean;
-	/** Outdoor content was copied with depth, not color alone, into an indoor root. */
-	readonly interiorColorDepthCopyPassed: boolean;
+	/** Direct indoor-root contributions retain depth for later near/far ordering. */
+	readonly interiorDepthOrderingPassed: boolean;
 	/** Unified executor composed an exterior cycle and re-entered indoor suffix once. */
 	readonly hybridCyclePassed: boolean;
 	/** Unified executor consumed executable seeds in both transition directions. */
@@ -73,8 +73,8 @@ export interface WebGL2HybridPortalExecutionFixtureResult {
 	readonly outdoorStraddle: PortalFrameDiagnostics;
 	/** Sampled pixels retained for failure diagnosis rather than runtime telemetry. */
 	readonly pixels: {
-		readonly copiedDepthNear: readonly number[];
-		readonly copiedDepthRejected: readonly number[];
+		readonly directDepthNear: readonly number[];
+		readonly directDepthRejected: readonly number[];
 		readonly exteriorOccluder: readonly number[];
 		readonly hybridExterior: readonly number[];
 		readonly hybridNotch: readonly number[];
@@ -88,17 +88,17 @@ export interface WebGL2HybridPortalExecutionFixtureResult {
 		readonly tunnel: readonly number[];
 		readonly tunnelNotch: readonly number[];
 	};
-	/** Both residency directions composite the adjacent domain through an NDC straddle mask. */
+	/** Both residency directions contribute the adjacent domain through an NDC straddle mask. */
 	readonly straddleDualSidePassed: boolean;
 	/** Outdoor-sourced building portals remain reachable behind an indoor-root straddle. */
 	readonly straddleExteriorBranchPassed: boolean;
-	/** Both independent views reused the same fixed two target objects sequentially. */
+	/** Both independent views reused the same single target object sequentially. */
 	readonly targetReusePassed: boolean;
 	/** Portal depth replacement exposes indoor content behind farther exterior terrain. */
 	readonly tunnelDepthResetPassed: boolean;
 }
 
-/** Execute both root directions through production targets, masks, copy shaders, and depth state. */
+/** Execute both root directions through the production target, masks, and depth state. */
 export function runWebGL2HybridPortalExecutionFixture(
 	gl: WebGL2RenderingContext,
 	resources: WebGL2ResourceManager,
@@ -181,7 +181,7 @@ export function runWebGL2HybridPortalExecutionFixture(
 		const occluderPixel = readPixel(gl, 1, 2);
 		const straddleClippedPixel = readPixel(gl, 1, 6);
 		const tunnelNotchPixel = readPixel(gl, 3, 6);
-		const firstTargets = substrate.getTargets();
+		const firstTarget = substrate.getTarget();
 
 		let indoorRootDrawCount = 0;
 		const indoorRoot = executePortalGraph(substrate, {
@@ -209,10 +209,10 @@ export function runWebGL2HybridPortalExecutionFixture(
 			},
 			resolveVisibilityAperture,
 		});
-		const secondTargets = substrate.getTargets();
+		const secondTarget = substrate.getTarget();
 		const interiorOutsidePixel = readPixel(gl, 4, 4);
 
-		substrate.beginMaskedPass(secondTargets.composite, 1);
+		substrate.beginMaskedPass(secondTarget, 1);
 		drawScene(gl, sceneProgram, {
 			color: [0.8, 0.1, 0.8, 1],
 			depth: 0.65,
@@ -227,9 +227,9 @@ export function runWebGL2HybridPortalExecutionFixture(
 			maximum: [-0.45, -0.25],
 			minimum: [-0.85, -0.75],
 		});
-		substrate.present(secondTargets.composite, null, FIXTURE_EXTENT);
-		const copiedDepthNearPixel = readPixel(gl, 1, 1);
-		const copiedDepthRejectedPixel = readPixel(gl, 6, 6);
+		substrate.present(secondTarget, null, FIXTURE_EXTENT);
+		const directDepthNearPixel = readPixel(gl, 1, 1);
+		const directDepthRejectedPixel = readPixel(gl, 6, 6);
 		substrate.restoreOrdinaryPass(null, destinationExtent);
 
 		const outdoorStraddle = executePortalGraph(substrate, {
@@ -344,7 +344,7 @@ export function runWebGL2HybridPortalExecutionFixture(
 		const webGlError = gl.getError();
 		if (webGlError !== gl.NO_ERROR) {
 			throw new Error(
-				`Exterior transition composition fixture failed with WebGL error ${webGlError}.`,
+				`Direct exterior contribution fixture failed with WebGL error ${webGlError}.`,
 			);
 		}
 		return {
@@ -354,7 +354,7 @@ export function runWebGL2HybridPortalExecutionFixture(
 			exteriorDepthOcclusionPassed: pixelMatches(occluderPixel, YELLOW),
 			hybridCyclePassed:
 				hybridTrace.exteriorRenderCount === 1 &&
-				hybridTrace.exteriorCompositeCount === 1 &&
+				hybridTrace.exteriorContributionCount === 1 &&
 				hybridTrace.submittedRenderNodeCount === 3 &&
 				pixelMatches(hybridSuffixPixel, INDOOR_BLEND) &&
 				pixelMatches(hybridExteriorPixel, RED) &&
@@ -365,10 +365,10 @@ export function runWebGL2HybridPortalExecutionFixture(
 				outdoorStraddle.maskDrawCount === 2 &&
 				indoorStraddle.maskDrawCount === 2,
 			hybridTrace,
-			interiorColorDepthCopyPassed:
+			interiorDepthOrderingPassed:
 				indoorRootDrawCount === 1 &&
-				pixelMatches(copiedDepthNearPixel, CYAN) &&
-				pixelMatches(copiedDepthRejectedPixel, ORANGE),
+				pixelMatches(directDepthNearPixel, CYAN) &&
+				pixelMatches(directDepthRejectedPixel, ORANGE),
 			indoorRoot,
 			indoorStraddle,
 			multiWindowUnionPassed:
@@ -376,13 +376,13 @@ export function runWebGL2HybridPortalExecutionFixture(
 				pixelMatches(tunnelPixel, INDOOR_BLEND) &&
 				pixelMatches(multiWindowPixel, INDOOR_BLEND),
 			noStaleViewReusePassed:
-				pixelMatches(copiedDepthRejectedPixel, ORANGE) &&
-				!pixelMatches(copiedDepthRejectedPixel, RED),
+				pixelMatches(directDepthRejectedPixel, ORANGE) &&
+				!pixelMatches(directDepthRejectedPixel, RED),
 			outdoorRoot,
 			outdoorStraddle,
 			pixels: {
-				copiedDepthNear: [...copiedDepthNearPixel],
-				copiedDepthRejected: [...copiedDepthRejectedPixel],
+				directDepthNear: [...directDepthNearPixel],
+				directDepthRejected: [...directDepthRejectedPixel],
 				exteriorOccluder: [...occluderPixel],
 				hybridExterior: [...hybridExteriorPixel],
 				hybridNotch: [...hybridNotchPixel],
@@ -408,9 +408,7 @@ export function runWebGL2HybridPortalExecutionFixture(
 				indoorStraddleExteriorBranchPixel,
 				CYAN,
 			),
-			targetReusePassed:
-				firstTargets.exterior === secondTargets.exterior &&
-				firstTargets.composite === secondTargets.composite,
+			targetReusePassed: firstTarget === secondTarget,
 			tunnelDepthResetPassed:
 				pixelMatches(tunnelPixel, INDOOR_BLEND) &&
 				pixelMatches(tunnelNotchPixel, RED),
@@ -493,7 +491,7 @@ function hybridCyclePlan(): PortalRenderWorkPlan {
 		capacity: {
 			maximumAvailableStencilValue: 255,
 			maximumRenderLayer: 1,
-			requiredMaximumStencilValue: 1,
+			requiredMaximumStencilValue: 3,
 		},
 		diagnostics: {
 			admittedWindowStateCount: 4,
@@ -512,7 +510,6 @@ function hybridCyclePlan(): PortalRenderWorkPlan {
 			workItemCount: 4,
 		},
 		exteriorComponent: {
-			compositionStencilValue: 1,
 			componentNodeIds: [SUFFIX_NODE_ID, EXTERIOR_NODE_ID],
 			entryMaskEdgeIds: [CROSSING_A, CROSSING_B],
 			indoorNodeIds: [SUFFIX_NODE_ID],
@@ -521,6 +518,7 @@ function hybridCyclePlan(): PortalRenderWorkPlan {
 			renderLayer: 1,
 			returnMaskEdgeIds: [CROSSING_RETURN],
 			rootContained: false,
+			stencilLabels: { entry: 2, suffix: 3 },
 		},
 		exteriorTransitions: maskEdges.map((edge) => ({
 			crossingId: edge.crossingId,
@@ -638,7 +636,6 @@ function transitionPlan(
 			workItemCount: 0,
 		},
 		exteriorComponent: {
-			compositionStencilValue: exteriorRoot ? 0 : 1,
 			componentNodeIds: [EXTERIOR_NODE_ID],
 			entryMaskEdgeIds:
 				rootKind === "interior"
@@ -652,6 +649,7 @@ function transitionPlan(
 			renderLayer: exteriorRoot ? 0 : 1,
 			returnMaskEdgeIds: [],
 			rootContained: exteriorRoot,
+			stencilLabels: exteriorRoot ? null : { entry: 1, suffix: null },
 		},
 		exteriorTransitions: maskEdges.map((edge) => ({
 			crossingId: edge.crossingId,

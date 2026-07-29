@@ -415,44 +415,60 @@ Options:
 }
 
 function assertPortalSubstrateFixture(state) {
+	const capabilities = state.portalTargetCapabilities;
+	if (
+		capabilities?.framebufferComplete !== true ||
+		capabilities.colorFormat !== "RGBA8" ||
+		capabilities.depthStencilFormat !== "DEPTH24_STENCIL8" ||
+		capabilities.depthBits !== 24 ||
+		capabilities.stencilBits !== 8 ||
+		capabilities.maximumTextureSize < 16
+	) {
+		throw new Error(
+			`Portal target capability probe failed: ${JSON.stringify(capabilities)}.`,
+		);
+	}
 	const fixture = state.portalSubstrate;
 	if (!fixture) {
 		throw new Error("Portal substrate fixture did not publish evidence.");
 	}
 	for (const field of [
 		"arbitraryApertureMaskPassed",
-		"depthCopyPassed",
 		"finalPresentationPassed",
 		"layerUnionPassed",
 		"maskedDepthResetPassed",
+		"maskedDepthResetRetainedColor",
+		"maskedSceneInitializationPassed",
 		"nestedLayerConfinementPassed",
 		"ordinaryStateRestored",
 		"orderedLayerOverwritePassed",
-		"resizedTargetsReplaced",
+		"parentConstrainedApertureMaskPassed",
+		"parentConstrainedWindowMaskPassed",
+		"resizedTargetReplaced",
 	]) {
 		if (fixture[field] !== true) {
 			throw new Error(`Portal substrate fixture failed ${field}.`);
 		}
 	}
 	assertTargetDiagnostics(fixture.targetDiagnostics, {
-		activeBytes: 1_024,
-		activeTargetCount: 2,
-		allocatedTargetCount: 2,
+		activeBytes: 512,
+		activeTargetCount: 1,
+		allocatedTargetCount: 1,
 		disposedTargetCount: 0,
 		extent: { height: 8, width: 8 },
 	});
 	assertTargetDiagnostics(fixture.resizedDiagnostics, {
-		activeBytes: 4_096,
-		activeTargetCount: 2,
-		allocatedTargetCount: 4,
-		disposedTargetCount: 2,
+		activeBytes: 2_048,
+		activeTargetCount: 1,
+		allocatedTargetCount: 2,
+		disposedTargetCount: 1,
 		extent: { height: 16, width: 16 },
 	});
 	assertTargetDiagnostics(fixture.disposedDiagnostics, {
 		activeBytes: 0,
 		activeTargetCount: 0,
-		allocatedTargetCount: 4,
-		disposedTargetCount: 4,
+		allocatedTargetCount: 2,
+		disposedTargetCount: 2,
 		extent: null,
 	});
 	const contextLoss = state.portalContextLossPolicy;
@@ -472,7 +488,7 @@ function assertPortalSubstrateFixture(state) {
 		metrics.envCellRenderMode !== "flat" ||
 		metrics.submittedPortalApertureDrawCount !== 0 ||
 		metrics.sceneDomainTargetCount !== 0 ||
-		metrics.portalCompositeCount !== 0
+		metrics.portalExteriorContributionCount !== 0
 	) {
 		throw new Error(
 			`Portal substrate fixture contaminated flat rendering: ${JSON.stringify(metrics)}.`,
@@ -542,7 +558,7 @@ function assertModeCycle(initialState, states) {
 		}
 		if (expectedMode === "flat") {
 			for (const key of [
-				"portalCompositeCount",
+				"portalExteriorContributionCount",
 				"portalExecutionDurationMs",
 				"portalExteriorRenderCount",
 				"portalMaskEdgeCount",
@@ -586,7 +602,7 @@ function assertHybridPortalExecutionFixture(state) {
 	const fixture = state.hybridPortalExecution;
 	if (!fixture) {
 		throw new Error(
-			"Exterior transition composition fixture did not publish evidence.",
+			"Direct exterior contribution fixture did not publish evidence.",
 		);
 	}
 	for (const field of [
@@ -594,7 +610,7 @@ function assertHybridPortalExecutionFixture(state) {
 		"exteriorDepthOcclusionPassed",
 		"hybridCyclePassed",
 		"hybridStraddlePassed",
-		"interiorColorDepthCopyPassed",
+		"interiorDepthOrderingPassed",
 		"multiWindowUnionPassed",
 		"noStaleViewReusePassed",
 		"straddleDualSidePassed",
@@ -604,13 +620,13 @@ function assertHybridPortalExecutionFixture(state) {
 	]) {
 		if (fixture[field] !== true) {
 			throw new Error(
-				`Exterior transition composition fixture failed ${field}: ${JSON.stringify(fixture)}.`,
+				`Direct exterior contribution fixture failed ${field}: ${JSON.stringify(fixture)}.`,
 			);
 		}
 	}
 	const expectedOutdoor = {
 		admittedVisibilityStateCount: 0,
-		exteriorCompositeCount: 1,
+		exteriorContributionCount: 1,
 		exteriorRenderCount: 1,
 		maskDrawCount: 2,
 		maskEdgeCount: 2,
@@ -664,7 +680,7 @@ function assertHybridPortalExecutionFixture(state) {
 	}
 	const expectedHybridTrace = {
 		admittedVisibilityStateCount: 4,
-		exteriorCompositeCount: 1,
+		exteriorContributionCount: 1,
 		exteriorRenderCount: 1,
 		maskDrawCount: 3,
 		maskEdgeCount: 4,
@@ -690,7 +706,7 @@ function assertHybridPortalExecutionFixture(state) {
 		metrics.envCellRenderMode !== "flat" ||
 		metrics.submittedPortalApertureDrawCount !== 0 ||
 		metrics.sceneDomainTargetCount !== 0 ||
-		metrics.portalCompositeCount !== 0
+		metrics.portalExteriorContributionCount !== 0
 	) {
 		throw new Error(
 			`Exterior composition fixture contaminated flat rendering: ${JSON.stringify(metrics)}.`,
@@ -722,7 +738,7 @@ function assertInternalPortalExecutionFixture(state) {
 	}
 	const expectedTrace = {
 		admittedVisibilityStateCount: 5,
-		exteriorCompositeCount: 0,
+		exteriorContributionCount: 0,
 		exteriorRenderCount: 0,
 		maskDrawCount: 4,
 		maskEdgeCount: 4,
@@ -742,7 +758,7 @@ function assertInternalPortalExecutionFixture(state) {
 	}
 	const expectedReverseTrace = {
 		admittedVisibilityStateCount: 2,
-		exteriorCompositeCount: 0,
+		exteriorContributionCount: 0,
 		exteriorRenderCount: 0,
 		maskDrawCount: 1,
 		maskEdgeCount: 1,
@@ -769,7 +785,7 @@ function assertInternalPortalExecutionFixture(state) {
 		metrics.envCellRenderMode !== "flat" ||
 		metrics.submittedPortalApertureDrawCount !== 0 ||
 		metrics.sceneDomainTargetCount !== 0 ||
-		metrics.portalCompositeCount !== 0
+		metrics.portalExteriorContributionCount !== 0
 	) {
 		throw new Error(
 			`Internal portal execution fixture contaminated flat rendering: ${JSON.stringify(metrics)}.`,

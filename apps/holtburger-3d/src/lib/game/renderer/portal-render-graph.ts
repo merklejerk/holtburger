@@ -44,7 +44,7 @@ interface PortalRenderNode {
 type PortalMaskSource =
 	| {
 			readonly kind: "near-clip-window";
-			/** Exact parent-bounded NDC footprint used for straddle compositing. */
+			/** Exact parent-bounded NDC footprint used for straddle ownership. */
 			readonly window: PortalViewWindow;
 	  }
 	| {
@@ -76,10 +76,16 @@ interface PortalExteriorTransition {
 	readonly targetNodeId: PortalRenderNodeId;
 }
 
+/** Complete interdependent stencil ownership for one masked exterior operation. */
+interface PortalExteriorStencilLabels {
+	/** Stencil label owning a masked exterior contribution in the portal target. */
+	readonly entry: number;
+	/** Distinct label owning the indoor suffix of a non-root exterior cycle. */
+	readonly suffix: number | null;
+}
+
 /** Planner-authored execution split for the strongly connected component containing outdoors. */
 interface PortalExteriorComponentOperation {
-	/** Stencil label isolating the completed exterior contribution in the main target. */
-	readonly compositionStencilValue: number;
 	/** Every graph edge entering this component from a different component. */
 	readonly entryMaskEdgeIds: readonly PortalCrossingId[];
 	/** Complete strongly connected component membership retained from layer planning. */
@@ -96,6 +102,8 @@ interface PortalExteriorComponentOperation {
 	readonly renderLayer: number;
 	/** Root components execute directly in the main target rather than as a detached suffix. */
 	readonly rootContained: boolean;
+	/** Complete labels consumed by masked direct execution; absent for an unmasked outdoor root. */
+	readonly stencilLabels: PortalExteriorStencilLabels | null;
 }
 
 /** Complete preflight against the caller's WebGL stencil-value ceiling. */
@@ -281,7 +289,8 @@ class PortalPlanningContext {
 			layerFacts.maximumRenderLayer,
 			Math.max(
 				layerFacts.maximumRenderLayer,
-				exteriorComponent?.compositionStencilValue ?? 0,
+				exteriorComponent?.stencilLabels?.entry ?? 0,
+				exteriorComponent?.stencilLabels?.suffix ?? 0,
 			),
 		);
 		if (
@@ -925,7 +934,7 @@ function createRenderLayers(
 		});
 }
 
-/** Retain the exterior SCC split that a two-target executor cannot safely reconstruct. */
+/** Retain the exterior SCC split so the mechanical executor never reconstructs graph ownership. */
 function createExteriorComponentOperation(
 	nodes: readonly PortalRenderNode[],
 	edges: readonly PortalMaskEdge[],
@@ -989,10 +998,13 @@ function createExteriorComponentOperation(
 	const sharesLayerWithAnotherContribution = componentLayer.renderNodeIds.some(
 		(nodeId) => !mainExteriorMemberIds.has(nodeId),
 	);
-	return {
-		compositionStencilValue: sharesLayerWithAnotherContribution
+	const hasSuffix = !rootContained && indoorNodeIds.length > 0;
+	const entryStencilValue =
+		hasSuffix || sharesLayerWithAnotherContribution
 			? maximumRenderLayer + 1
-			: outdoor.renderLayer,
+			: outdoor.renderLayer;
+	const suffixStencilValue = hasSuffix ? entryStencilValue + 1 : null;
+	return {
 		componentNodeIds: [...component],
 		entryMaskEdgeIds: entryMaskEdgeIds.sort(),
 		indoorNodeIds,
@@ -1001,6 +1013,13 @@ function createExteriorComponentOperation(
 		renderLayer: outdoor.renderLayer,
 		returnMaskEdgeIds: returnMaskEdgeIds.sort(),
 		rootContained,
+		stencilLabels:
+			outdoor.renderLayer === 0
+				? null
+				: {
+						entry: entryStencilValue,
+						suffix: suffixStencilValue,
+					},
 	};
 }
 

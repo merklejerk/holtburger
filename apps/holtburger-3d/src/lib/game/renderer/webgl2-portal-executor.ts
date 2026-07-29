@@ -7,9 +7,9 @@ import {
 	type ResolvedPortalMask,
 } from "./webgl2-portal-mask";
 import type {
+	PortalMaskStencilPolicy,
 	PortalRenderExtent,
 	WebGL2SceneDomainTarget,
-	WebGL2SceneDomainTargets,
 } from "./webgl2-portal-substrate";
 
 type PortalRenderNodeId = PortalRenderWorkPlan["nodes"][number]["id"];
@@ -31,12 +31,12 @@ export interface PortalExecutionSubstrate {
 		depth: number,
 		stencil: number,
 	): void;
-	/** Copy sampled color and depth between distinct owned targets. */
-	copyScene(
-		source: WebGL2SceneDomainTarget,
-		destination: WebGL2SceneDomainTarget,
+	/** Replace clear color and depth inside one completed stencil label. */
+	initializeMaskedScene(
+		target: WebGL2SceneDomainTarget,
 		renderLayer: number,
-		depthCompare: "always" | "less",
+		color: readonly [number, number, number, number],
+		depth: number,
 	): void;
 	/** Present completed color to the active view destination. */
 	present(
@@ -50,8 +50,8 @@ export interface PortalExecutionSubstrate {
 		renderLayer: number,
 		depth: number,
 	): void;
-	/** Allocate or reuse the complete synchronous scene-domain target set. */
-	resize(extent: PortalRenderExtent): WebGL2SceneDomainTargets;
+	/** Allocate or reuse the single synchronous scene-domain target. */
+	resize(extent: PortalRenderExtent): WebGL2SceneDomainTarget;
 	/** Restore the ordinary destination state after offscreen execution. */
 	restoreOrdinaryPass(
 		framebuffer: WebGLFramebuffer | null,
@@ -64,14 +64,14 @@ export interface PortalExecutionSubstrate {
 		indexStart: number,
 		indexCount: number,
 		clipFromLocal: Float32Array,
-		renderLayer: number,
+		stencilPolicy: PortalMaskStencilPolicy,
 		depthCompare: "always" | "less-or-equal",
 	): void;
 	/** Add one exact screen-space straddle footprint to a render-layer union. */
 	writeLayerWindowMask(
 		target: WebGL2SceneDomainTarget,
 		window: PortalViewWindow,
-		renderLayer: number,
+		stencilPolicy: PortalMaskStencilPolicy,
 	): void;
 }
 
@@ -102,7 +102,7 @@ export interface PortalExecutionInput {
 /** Consumed planner and GPU facts retained for portal-frame diagnostics. */
 export interface PortalFrameDiagnostics {
 	readonly admittedVisibilityStateCount: number;
-	readonly exteriorCompositeCount: number;
+	readonly exteriorContributionCount: number;
 	readonly exteriorRenderCount: number;
 	readonly maskDrawCount: number;
 	readonly maskEdgeCount: number;
@@ -143,13 +143,13 @@ interface PreparedPortalLayer {
 }
 
 interface PreparedExteriorSuffix {
+	readonly entryStencilValue: number;
 	readonly indoorNodeIds: readonly PortalRenderNodeId[];
 	readonly masks: readonly PreparedPortalMask[];
 	readonly stencilValue: number;
 }
 
 interface PreparedPortalExecution {
-	readonly exteriorNodeId: PortalRenderNodeId | null;
 	readonly exteriorSuffix: PreparedExteriorSuffix | null;
 	readonly layers: readonly PreparedPortalLayer[];
 	readonly plan: PortalRenderWorkPlan;
@@ -167,85 +167,71 @@ export function executePortalGraph(
 	input: PortalExecutionInput,
 ): PortalFrameDiagnostics {
 	const prepared = preparePortalExecution(input);
-	const targets = substrate.resize(input.extent);
+	const target = substrate.resize(input.extent);
 	let submittedRenderLayerCount = 0;
 	let submittedRenderNodeCount = 0;
 	let maskDrawCount = 0;
-	let exteriorCompositeCount = 0;
+	let exteriorContributionCount = 0;
 	let exteriorRenderCount = 0;
 	try {
-		if (prepared.exteriorNodeId) {
-			substrate.clearTarget(targets.exterior, input.clearColor, 1, 0);
-			substrate.beginTargetPass(targets.exterior);
-			input.renderExterior(targets.exterior);
-			exteriorRenderCount = 1;
-			submittedRenderNodeCount += 1;
-			const suffix = prepared.exteriorSuffix;
-			if (suffix) {
-				maskDrawCount += writeMaskUnion(
-					substrate,
-					targets.exterior,
-					suffix.masks,
-					suffix.stencilValue,
-				);
-				substrate.resetMaskedDepth(targets.exterior, suffix.stencilValue, 1);
-				substrate.beginMaskedPass(targets.exterior, suffix.stencilValue);
-				input.renderIndoorNodes(targets.exterior, suffix.indoorNodeIds);
-				submittedRenderNodeCount += suffix.indoorNodeIds.length;
-			}
-		}
-		substrate.clearTarget(targets.composite, input.clearColor, 1, 0);
+		substrate.clearTarget(target, input.clearColor, 1, 0);
 		for (const layer of prepared.layers) {
 			if (layer.renderLayer !== 0) {
 				for (const contribution of layer.contributions) {
 					maskDrawCount += writeMaskUnion(
 						substrate,
-						targets.composite,
+						target,
 						contribution.masks,
-						contribution.stencilValue,
+						{ kind: "replace", value: contribution.stencilValue },
 					);
 				}
 			}
 			for (const contribution of layer.contributions) {
 				if (layer.renderLayer === 0) {
-					substrate.beginTargetPass(targets.composite);
-				} else if (contribution.kind === "indoor") {
-					substrate.resetMaskedDepth(
-						targets.composite,
+					substrate.beginTargetPass(target);
+				} else if (contribution.kind === "exterior") {
+					substrate.initializeMaskedScene(
+						target,
 						contribution.stencilValue,
+						input.clearColor,
 						1,
 					);
-					substrate.beginMaskedPass(
-						targets.composite,
-						contribution.stencilValue,
-					);
+					substrate.beginMaskedPass(target, contribution.stencilValue);
+				} else {
+					substrate.resetMaskedDepth(target, contribution.stencilValue, 1);
+					substrate.beginMaskedPass(target, contribution.stencilValue);
 				}
 				if (contribution.kind === "exterior") {
-					substrate.copyScene(
-						targets.exterior,
-						targets.composite,
-						contribution.stencilValue,
-						"always",
-					);
-					exteriorCompositeCount += 1;
+					input.renderExterior(target);
+					exteriorContributionCount += 1;
+					exteriorRenderCount += 1;
+					submittedRenderNodeCount += 1;
+					const suffix = prepared.exteriorSuffix;
+					if (suffix) {
+						maskDrawCount += writeMaskUnion(substrate, target, suffix.masks, {
+							expectedValue: suffix.entryStencilValue,
+							kind: "increment-if-equal",
+						});
+						substrate.resetMaskedDepth(target, suffix.stencilValue, 1);
+						substrate.beginMaskedPass(target, suffix.stencilValue);
+						input.renderIndoorNodes(target, suffix.indoorNodeIds);
+						submittedRenderNodeCount += suffix.indoorNodeIds.length;
+					}
 				} else {
-					input.renderIndoorNodes(
-						targets.composite,
-						contribution.renderNodeIds,
-					);
+					input.renderIndoorNodes(target, contribution.renderNodeIds);
 					submittedRenderNodeCount += contribution.renderNodeIds.length;
 				}
 			}
 			submittedRenderLayerCount += 1;
 		}
-		substrate.present(targets.composite, input.destination, input.extent);
+		substrate.present(target, input.destination, input.extent);
 	} finally {
 		substrate.restoreOrdinaryPass(input.destination, input.extent);
 	}
 	return {
 		admittedVisibilityStateCount:
 			prepared.plan.diagnostics.admittedWindowStateCount,
-		exteriorCompositeCount,
+		exteriorContributionCount,
 		exteriorRenderCount,
 		maskDrawCount,
 		maskEdgeCount: prepared.plan.maskEdges.length,
@@ -268,11 +254,11 @@ function writeMaskUnion(
 	substrate: PortalExecutionSubstrate,
 	target: WebGL2SceneDomainTarget,
 	masks: readonly PreparedPortalMask[],
-	stencilValue: number,
+	stencilPolicy: PortalMaskStencilPolicy,
 ): number {
 	for (const prepared of masks) {
 		if (prepared.kind === "window") {
-			substrate.writeLayerWindowMask(target, prepared.window, stencilValue);
+			substrate.writeLayerWindowMask(target, prepared.window, stencilPolicy);
 		} else {
 			const { mask } = prepared;
 			substrate.writeLayerMask(
@@ -281,7 +267,7 @@ function writeMaskUnion(
 				mask.indexStart,
 				mask.indexCount,
 				mask.clipFromLocal,
-				stencilValue,
+				stencilPolicy,
 				"less-or-equal",
 			);
 		}
@@ -348,7 +334,7 @@ function preparePortalExecution(
 				kind: "exterior",
 				masks: requirePreparedMasks(maskByEdgeId, exteriorMaskEdgeIds),
 				renderNodeIds: [exterior.outdoorNodeId],
-				stencilValue: exterior.compositionStencilValue,
+				stencilValue: exterior.stencilLabels?.entry ?? exterior.renderLayer,
 			});
 		}
 		if (indoorNodeIds.length > 0) {
@@ -388,16 +374,16 @@ function preparePortalExecution(
 		return { contributions, renderLayer: layer.renderLayer };
 	});
 	return {
-		exteriorNodeId: exterior?.outdoorNodeId ?? null,
 		exteriorSuffix:
 			exterior && !exterior.rootContained && exterior.indoorNodeIds.length > 0
 				? {
+						entryStencilValue: exterior.stencilLabels!.entry,
 						indoorNodeIds: exterior.indoorNodeIds,
 						masks: requirePreparedMasks(
 							maskByEdgeId,
 							exterior.internalIndoorMaskEdgeIds,
 						),
-						stencilValue: exterior.renderLayer,
+						stencilValue: exterior.stencilLabels!.suffix!,
 					}
 				: null,
 		layers,

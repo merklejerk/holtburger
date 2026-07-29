@@ -95,7 +95,8 @@ interface TerrainFrameInput {
 interface ObjectFrameInput {
 	readonly source: "outdoor" | "env-cell-shell" | "env-cell-resident";
 	readonly cullFaceOverride:
-		StaticObjectDrawUnit["material"]["polygon"]["cullFace"] | null;
+		| StaticObjectDrawUnit["material"]["polygon"]["cullFace"]
+		| null;
 	readonly drawKind: "baked" | "instanced";
 	readonly geometry: GeometryResourceKey;
 	readonly indexCount: number;
@@ -202,7 +203,7 @@ interface MutableFrameSelectionMetrics {
 	portalExecutionDurationMs: number;
 	sceneDomainTargetCount: number;
 	sceneDomainTargetBytes: number;
-	portalCompositeCount: number;
+	portalExteriorContributionCount: number;
 	submittedStaticObjectDrawCount: number;
 	submittedStaticObjectTriangleCount: number;
 	submittedBakedStaticObjectDrawCount: number;
@@ -284,7 +285,7 @@ export class WebGL2Renderer implements Renderer {
 		portalExecutionDurationMs: 0,
 		sceneDomainTargetCount: 0,
 		sceneDomainTargetBytes: 0,
-		portalCompositeCount: 0,
+		portalExteriorContributionCount: 0,
 		visibleSceneEntries: 0,
 		visibleStaticLayerCount: 0,
 		visibleStaticNodeCount: 0,
@@ -489,7 +490,8 @@ export class WebGL2Renderer implements Renderer {
 		metrics.portalSubmittedRenderNodeCount +=
 			diagnostics.submittedRenderNodeCount;
 		metrics.portalExteriorRenderCount += diagnostics.exteriorRenderCount;
-		metrics.portalCompositeCount += diagnostics.exteriorCompositeCount;
+		metrics.portalExteriorContributionCount +=
+			diagnostics.exteriorContributionCount;
 	}
 
 	/**
@@ -993,7 +995,7 @@ export class WebGL2Renderer implements Renderer {
 		metrics.portalExecutionDurationMs = 0;
 		metrics.sceneDomainTargetCount = 0;
 		metrics.sceneDomainTargetBytes = 0;
-		metrics.portalCompositeCount = 0;
+		metrics.portalExteriorContributionCount = 0;
 		metrics.visibleSceneEntries = 0;
 		this.#visibleStaticLayers.clear();
 		this.#visibleEnvCellScopes.clear();
@@ -1205,7 +1207,9 @@ export class WebGL2Renderer implements Renderer {
 		gl.depthMask(true);
 		gl.disable(gl.BLEND);
 		let activeProgram:
-			WebGL2FogObjectProgram | WebGL2FogInstancedObjectProgram | null = null;
+			| WebGL2FogObjectProgram
+			| WebGL2FogInstancedObjectProgram
+			| null = null;
 		for (const object of objects) {
 			const program =
 				object.drawKind === "instanced"
@@ -1285,7 +1289,9 @@ export class WebGL2Renderer implements Renderer {
 		gl.depthMask(false);
 		gl.enable(gl.BLEND);
 		let activeProgram:
-			WebGL2ObjectProgram | WebGL2InstancedObjectProgram | null = null;
+			| WebGL2ObjectProgram
+			| WebGL2InstancedObjectProgram
+			| null = null;
 		for (const object of [...sortedTransparent, ...additive]) {
 			const program =
 				object.drawKind === "instanced"

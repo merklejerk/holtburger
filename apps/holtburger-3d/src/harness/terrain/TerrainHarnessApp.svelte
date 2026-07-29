@@ -290,7 +290,10 @@
 
 	function setEnvCellRenderMode(envCellRenderMode: "flat" | "portal"): void {
 		if (!runtime) throw new Error("Terrain harness runtime is not ready.");
-		runtime.setFrameSettings({ distanceFogEnabled: true, envCellRenderMode });
+		runtime.setFrameSettings({
+			distanceFogEnabled: true,
+			envCellRenderMode,
+		});
 	}
 
 	function clearSceneInterest(): void {
@@ -458,8 +461,8 @@
 			try {
 				contentSource = await HttpLandblockContentSource.build(hostUrl);
 				device = await WebGL2Device.build(canvasElement!);
-				portalTargetCapabilities = device.probePortalTargetCapabilities();
 				if (fixture === "portal-substrate") {
+					portalTargetCapabilities = device.probePortalTargetCapabilities();
 					portalSubstrate = device.probePortalSubstrate();
 					portalContextLossPolicy = await WebGL2Device.probeContextLossPolicy();
 				}

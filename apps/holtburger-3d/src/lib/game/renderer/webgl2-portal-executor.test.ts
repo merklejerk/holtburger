@@ -7,10 +7,7 @@ import {
 	executePortalGraph,
 	type PortalExecutionSubstrate,
 } from "./webgl2-portal-executor";
-import type {
-	WebGL2SceneDomainTarget,
-	WebGL2SceneDomainTargets,
-} from "./webgl2-portal-substrate";
+import type { WebGL2SceneDomainTarget } from "./webgl2-portal-substrate";
 
 const EXTENT = { height: 8, width: 8 } as const;
 const IDENTITY = new Float32Array([
@@ -25,6 +22,39 @@ const SUFFIX = "portal-render-node:suffix" as const;
 const SIBLING = "portal-render-node:sibling" as const;
 
 describe("portal graph execution", () => {
+	it("renders an outdoor root directly without masks, initialization, or copies", () => {
+		const substrate = new RecordingSubstrate();
+
+		const diagnostics = executePortalGraph(substrate, {
+			clearColor: [0, 0, 0, 1],
+			destination: null,
+			extent: EXTENT,
+			plan: outdoorRootPlan(),
+			renderExterior: () => substrate.calls.push("render:exterior"),
+			renderIndoorNodes: () => {
+				throw new Error("Outdoor root must not submit indoor work.");
+			},
+			resolveVisibilityAperture: () => {
+				throw new Error("Outdoor root must not resolve masks.");
+			},
+		});
+
+		expect(substrate.calls).toEqual([
+			"resize",
+			"clear",
+			"begin-target",
+			"render:exterior",
+			"present",
+			"restore",
+		]);
+		expect(diagnostics).toMatchObject({
+			exteriorContributionCount: 1,
+			exteriorRenderCount: 1,
+			maskDrawCount: 0,
+			submittedRenderNodeCount: 1,
+		});
+	});
+
 	it("executes graph layers directly and submits each unique node once", () => {
 		const substrate = new RecordingSubstrate();
 		const rendered: string[][] = [];
@@ -63,7 +93,7 @@ describe("portal graph execution", () => {
 		expect(rendered.flat()).toEqual([ROOT, LEFT, RIGHT, TARGET]);
 		expect(diagnostics).toEqual({
 			admittedVisibilityStateCount: 5,
-			exteriorCompositeCount: 0,
+			exteriorContributionCount: 0,
 			exteriorRenderCount: 0,
 			maskDrawCount: 4,
 			maskEdgeCount: 5,
@@ -78,7 +108,7 @@ describe("portal graph execution", () => {
 		});
 	});
 
-	it("composites a near-plane target through its retained screen-space mask", () => {
+	it("renders a near-plane target through its retained screen-space mask", () => {
 		const substrate = new RecordingSubstrate();
 		const rendered: string[][] = [];
 
@@ -176,7 +206,56 @@ describe("portal graph execution", () => {
 		expect(substrate.calls).toEqual([]);
 	});
 
-	it("builds and composites an exterior suffix without leaking into a same-layer sibling", () => {
+	it.each([
+		{
+			createBasePlan: hybridPlan,
+			label: "duplicate",
+			stencilLabels: { entry: 2, suffix: 2 },
+		},
+		{
+			createBasePlan: hybridPlan,
+			label: "zero",
+			stencilLabels: { entry: 0, suffix: 3 },
+		},
+		{
+			createBasePlan: hybridPlan,
+			label: "out-of-range",
+			stencilLabels: { entry: 256, suffix: 3 },
+		},
+		{
+			createBasePlan: indoorRootExteriorBranchPlan,
+			label: "ceremonial",
+			stencilLabels: { entry: 1, suffix: 2 },
+		},
+	])(
+		"rejects $label exterior labels before target allocation",
+		({ createBasePlan, stencilLabels }) => {
+			const substrate = new RecordingSubstrate();
+			const base = createBasePlan();
+			const plan = {
+				...base,
+				exteriorComponent: {
+					...base.exteriorComponent!,
+					stencilLabels,
+				},
+			} as PortalRenderWorkPlan;
+
+			expect(() =>
+				executePortalGraph(substrate, {
+					clearColor: [0, 0, 0, 1],
+					destination: null,
+					extent: EXTENT,
+					plan,
+					renderExterior: () => undefined,
+					renderIndoorNodes: () => undefined,
+					resolveVisibilityAperture: resolvedMask,
+				}),
+			).toThrow(/stencil label/);
+			expect(substrate.calls).toEqual([]);
+		},
+	);
+
+	it("renders an exterior suffix without leaking into a same-layer sibling", () => {
 		const substrate = new RecordingSubstrate();
 		const rendered: string[][] = [];
 
@@ -197,26 +276,25 @@ describe("portal graph execution", () => {
 			"resize",
 			"clear",
 			"begin-target",
-			"render:exterior",
-			"mask:1",
-			"reset:1",
-			"begin-masked:1",
-			`render:${SUFFIX}`,
-			"clear",
-			"begin-target",
 			`render:${ROOT}`,
 			"mask:2",
 			"mask:1",
-			"copy:2",
+			"initialize:2",
+			"begin-masked:2",
+			"render:exterior",
+			"mask:2+1",
+			"reset:3",
+			"begin-masked:3",
+			`render:${SUFFIX}`,
 			"reset:1",
 			"begin-masked:1",
 			`render:${SIBLING}`,
 			"present",
 			"restore",
 		]);
-		expect(rendered).toEqual([[SUFFIX], [ROOT], [SIBLING]]);
+		expect(rendered).toEqual([[ROOT], [SUFFIX], [SIBLING]]);
 		expect(diagnostics).toMatchObject({
-			exteriorCompositeCount: 1,
+			exteriorContributionCount: 1,
 			exteriorRenderCount: 1,
 			maskDrawCount: 3,
 			maskEdgeCount: 4,
@@ -245,12 +323,11 @@ describe("portal graph execution", () => {
 			"resize",
 			"clear",
 			"begin-target",
-			"render:exterior",
-			"clear",
-			"begin-target",
 			`render:${ROOT}`,
 			"window-mask:1",
-			"copy:1",
+			"initialize:1",
+			"begin-masked:1",
+			"render:exterior",
 			"mask:2",
 			"reset:2",
 			"begin-masked:2",
@@ -306,65 +383,103 @@ describe("portal graph execution", () => {
 		).toThrow("fixture contribution failed");
 		expect(substrate.calls.at(-1)).toBe("restore");
 	});
+
+	it.each([
+		{ failurePrefix: "mask:", plan: internalPlan() },
+		{ failurePrefix: "reset:", plan: internalPlan() },
+		{
+			failurePrefix: "initialize:",
+			plan: indoorRootExteriorBranchPlan(),
+		},
+	])(
+		"restores ordinary destination state when $failurePrefix execution fails",
+		({ failurePrefix, plan }) => {
+			const substrate = new RecordingSubstrate(failurePrefix);
+
+			expect(() =>
+				executePortalGraph(substrate, {
+					clearColor: [0, 0, 0, 1],
+					destination: null,
+					extent: EXTENT,
+					plan,
+					renderExterior: () => undefined,
+					renderIndoorNodes: () => undefined,
+					resolveVisibilityAperture: resolvedMask,
+				}),
+			).toThrow(`fixture ${failurePrefix} failure`);
+			expect(substrate.calls.at(-1)).toBe("restore");
+		},
+	);
 });
 
 class RecordingSubstrate implements PortalExecutionSubstrate {
 	readonly calls: string[] = [];
-	readonly targets = {
-		composite: {} as WebGL2SceneDomainTarget,
-		exterior: {} as WebGL2SceneDomainTarget,
-	} as const satisfies WebGL2SceneDomainTargets;
+	readonly target = {} as WebGL2SceneDomainTarget;
+
+	constructor(private readonly failurePrefix: string | null = null) {}
 
 	beginTargetPass(): void {
-		this.calls.push("begin-target");
+		this.#record("begin-target");
 	}
 
 	beginMaskedPass(_target: WebGL2SceneDomainTarget, renderLayer: number): void {
-		this.calls.push(`begin-masked:${renderLayer}`);
+		this.#record(`begin-masked:${renderLayer}`);
 	}
 
 	clearTarget(): void {
-		this.calls.push("clear");
+		this.#record("clear");
 	}
 
-	copyScene(
-		_source: WebGL2SceneDomainTarget,
-		_destination: WebGL2SceneDomainTarget,
+	initializeMaskedScene(
+		_target: WebGL2SceneDomainTarget,
 		renderLayer: number,
 	): void {
-		this.calls.push(`copy:${renderLayer}`);
+		this.#record(`initialize:${renderLayer}`);
 	}
 
 	present(): void {
-		this.calls.push("present");
+		this.#record("present");
 	}
 
 	resetMaskedDepth(
 		_target: WebGL2SceneDomainTarget,
 		renderLayer: number,
 	): void {
-		this.calls.push(`reset:${renderLayer}`);
+		this.#record(`reset:${renderLayer}`);
 	}
 
-	resize(): WebGL2SceneDomainTargets {
-		this.calls.push("resize");
-		return this.targets;
+	resize(): WebGL2SceneDomainTarget {
+		this.#record("resize");
+		return this.target;
 	}
 
 	restoreOrdinaryPass(): void {
-		this.calls.push("restore");
+		this.#record("restore");
 	}
 
 	writeLayerMask(
 		...args: Parameters<PortalExecutionSubstrate["writeLayerMask"]>
 	): void {
-		this.calls.push(`mask:${args[5]}`);
+		const policy = args[5];
+		this.#record(
+			`mask:${policy.kind === "replace" ? policy.value : `${policy.expectedValue}+1`}`,
+		);
 	}
 
 	writeLayerWindowMask(
 		...args: Parameters<PortalExecutionSubstrate["writeLayerWindowMask"]>
 	): void {
-		this.calls.push(`window-mask:${args[2]}`);
+		const policy = args[2];
+		this.#record(
+			`window-mask:${policy.kind === "replace" ? policy.value : `${policy.expectedValue}+1`}`,
+		);
+	}
+
+	#record(call: string): void {
+		this.calls.push(call);
+		if (this.failurePrefix && call.startsWith(this.failurePrefix)) {
+			throw new Error(`fixture ${this.failurePrefix} failure`);
+		}
 	}
 }
 
@@ -376,6 +491,48 @@ function resolvedMask(): ResolvedPortalMask {
 		} as ResolvedPortalMask["geometry"],
 		indexCount: 6,
 		indexStart: 0,
+	};
+}
+
+function outdoorRootPlan(): PortalRenderWorkPlan {
+	const base = internalPlan();
+	return {
+		...base,
+		capacity: {
+			maximumAvailableStencilValue: 255,
+			maximumRenderLayer: 0,
+			requiredMaximumStencilValue: 0,
+		},
+		diagnostics: {
+			...base.diagnostics,
+			componentCount: 1,
+			cyclicComponentCount: 0,
+			retainedMaskEdgeCount: 0,
+			retainedRenderNodeCount: 1,
+		},
+		exteriorComponent: {
+			componentNodeIds: [OUTDOOR],
+			entryMaskEdgeIds: [],
+			indoorNodeIds: [],
+			internalIndoorMaskEdgeIds: [],
+			outdoorNodeId: OUTDOOR,
+			renderLayer: 0,
+			returnMaskEdgeIds: [],
+			rootContained: true,
+			stencilLabels: null,
+		},
+		exteriorTransitions: [],
+		maskEdges: [],
+		nodes: [portalNode(OUTDOOR, "outdoor", 0, [])],
+		renderLayers: [
+			{
+				incomingMaskEdgeIds: [],
+				renderLayer: 0,
+				renderNodeIds: [OUTDOOR],
+			},
+		],
+		rootNodeId: OUTDOOR,
+		selectedScopes: [],
 	};
 }
 
@@ -391,7 +548,7 @@ function hybridPlan(): PortalRenderWorkPlan {
 		capacity: {
 			maximumAvailableStencilValue: 255,
 			maximumRenderLayer: 1,
-			requiredMaximumStencilValue: 2,
+			requiredMaximumStencilValue: 3,
 		},
 		diagnostics: {
 			...base.diagnostics,
@@ -401,7 +558,6 @@ function hybridPlan(): PortalRenderWorkPlan {
 			retainedRenderNodeCount: 4,
 		},
 		exteriorComponent: {
-			compositionStencilValue: 2,
 			componentNodeIds: [OUTDOOR, SUFFIX],
 			entryMaskEdgeIds: [enterOutside.crossingId],
 			indoorNodeIds: [SUFFIX],
@@ -410,6 +566,7 @@ function hybridPlan(): PortalRenderWorkPlan {
 			renderLayer: 1,
 			returnMaskEdgeIds: [suffixOutside.crossingId],
 			rootContained: false,
+			stencilLabels: { entry: 2, suffix: 3 },
 		},
 		exteriorTransitions: [enterOutside, outsideSuffix, suffixOutside].map(
 			(edge) => ({
@@ -476,7 +633,6 @@ function indoorRootExteriorBranchPlan(): PortalRenderWorkPlan {
 			retainedRenderNodeCount: 3,
 		},
 		exteriorComponent: {
-			compositionStencilValue: 1,
 			componentNodeIds: [OUTDOOR, ROOT],
 			entryMaskEdgeIds: [],
 			indoorNodeIds: [ROOT],
@@ -485,6 +641,7 @@ function indoorRootExteriorBranchPlan(): PortalRenderWorkPlan {
 			renderLayer: 1,
 			returnMaskEdgeIds: [seed.crossingId],
 			rootContained: true,
+			stencilLabels: { entry: 1, suffix: null },
 		},
 		exteriorTransitions: [seed, outsideSibling].map((edge) => ({
 			crossingId: edge.crossingId,

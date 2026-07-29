@@ -16,18 +16,12 @@ export interface PortalRenderExtent {
 	readonly width: number;
 }
 
-/** One color/depth-stencil framebuffer used by portal scene-domain composition. */
+/** One color/depth-stencil framebuffer owning the completed portal view. */
 export interface WebGL2SceneDomainTarget {
 	readonly color: WebGLTexture;
 	readonly depthStencil: WebGLTexture;
 	readonly extent: PortalRenderExtent;
 	readonly framebuffer: WebGLFramebuffer;
-}
-
-/** The fixed two-target portal allocation; no target is owned per path or aperture. */
-export interface WebGL2SceneDomainTargets {
-	readonly composite: WebGL2SceneDomainTarget;
-	readonly exterior: WebGL2SceneDomainTarget;
 }
 
 /** Consumed lifecycle facts for browser fixtures and later renderer diagnostics. */
@@ -38,6 +32,19 @@ export interface WebGL2PortalSubstrateDiagnostics {
 	readonly disposedTargetCount: number;
 	readonly extent: PortalRenderExtent | null;
 }
+
+/** One stencil transition supported by a portal mask rasterization pass. */
+export type PortalMaskStencilPolicy =
+	| {
+			/** Replace passing pixels without requiring existing stencil ownership. */
+			readonly kind: "replace";
+			readonly value: number;
+	  }
+	| {
+			/** Increment pixels owned by this value; the planner guarantees the result is its suffix. */
+			readonly expectedValue: number;
+			readonly kind: "increment-if-equal";
+	  };
 
 /** Fixed-function pass baselines established without inspecting ambient renderer state. */
 export type PortalPassStateCommand =
@@ -51,20 +58,20 @@ export type PortalPassStateCommand =
 			readonly extent: PortalRenderExtent;
 			readonly framebuffer: WebGLFramebuffer;
 			readonly kind: "mask-write";
-			readonly renderLayer: number;
-	  }
-	| {
-			readonly depthCompare: "always" | "less";
-			readonly extent: PortalRenderExtent;
-			readonly framebuffer: WebGLFramebuffer;
-			readonly kind: "masked-copy";
-			readonly renderLayer: number;
+			readonly stencilPolicy: PortalMaskStencilPolicy;
 	  }
 	| {
 			readonly depth: number;
 			readonly extent: PortalRenderExtent;
 			readonly framebuffer: WebGLFramebuffer;
 			readonly kind: "masked-depth-reset";
+			readonly renderLayer: number;
+	  }
+	| {
+			readonly depth: number;
+			readonly extent: PortalRenderExtent;
+			readonly framebuffer: WebGLFramebuffer;
+			readonly kind: "masked-scene-initialize";
 			readonly renderLayer: number;
 	  }
 	| {
@@ -99,25 +106,48 @@ export function applyPortalPassState(
 		return;
 	}
 	if (command.kind === "mask-write") {
-		requireMaskRenderLayer(command.renderLayer);
 		gl.colorMask(false, false, false, false);
 		gl.enable(gl.DEPTH_TEST);
 		gl.depthFunc(command.depthCompare === "always" ? gl.ALWAYS : gl.LEQUAL);
 		gl.depthMask(false);
 		gl.enable(gl.STENCIL_TEST);
 		gl.stencilMask(MAXIMUM_PORTAL_RENDER_LAYER);
-		gl.stencilFunc(gl.ALWAYS, command.renderLayer, MAXIMUM_PORTAL_RENDER_LAYER);
-		gl.stencilOp(gl.KEEP, gl.KEEP, gl.REPLACE);
+		if (command.stencilPolicy.kind === "replace") {
+			requireMaskStencilValue(command.stencilPolicy.value);
+			gl.stencilFunc(
+				gl.ALWAYS,
+				command.stencilPolicy.value,
+				MAXIMUM_PORTAL_RENDER_LAYER,
+			);
+			gl.stencilOp(gl.KEEP, gl.KEEP, gl.REPLACE);
+		} else {
+			requireMaskStencilValue(command.stencilPolicy.expectedValue);
+			if (command.stencilPolicy.expectedValue === MAXIMUM_PORTAL_RENDER_LAYER) {
+				throw new Error(
+					"Portal parent stencil value cannot be incremented beyond 255.",
+				);
+			}
+			gl.stencilFunc(
+				gl.EQUAL,
+				command.stencilPolicy.expectedValue,
+				MAXIMUM_PORTAL_RENDER_LAYER,
+			);
+			gl.stencilOp(gl.KEEP, gl.KEEP, gl.INCR);
+		}
 		return;
 	}
-	if (command.kind === "masked-depth-reset") {
+	if (
+		command.kind === "masked-depth-reset" ||
+		command.kind === "masked-scene-initialize"
+	) {
 		requireStencilValue(command.renderLayer);
 		if (!isNormalized(command.depth)) {
 			throw new Error(
-				"Portal masked depth reset must be a finite value from 0 through 1.",
+				"Portal masked scene depth must be a finite value from 0 through 1.",
 			);
 		}
-		gl.colorMask(false, false, false, false);
+		const writesColor = command.kind === "masked-scene-initialize";
+		gl.colorMask(writesColor, writesColor, writesColor, writesColor);
 		gl.enable(gl.DEPTH_TEST);
 		gl.depthFunc(gl.ALWAYS);
 		gl.depthMask(true);
@@ -139,22 +169,10 @@ export function applyPortalPassState(
 		gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
 		return;
 	}
-	if (command.kind !== "masked-copy") {
-		throw new Error(`Unsupported portal pass state command ${command.kind}.`);
-	}
-	requireStencilValue(command.renderLayer);
-	gl.colorMask(true, true, true, true);
-	gl.enable(gl.DEPTH_TEST);
-	gl.depthFunc(command.depthCompare === "always" ? gl.ALWAYS : gl.LESS);
-	gl.depthMask(true);
-	gl.enable(gl.STENCIL_TEST);
-	gl.stencilMask(0);
-	gl.stencilFunc(gl.EQUAL, command.renderLayer, MAXIMUM_PORTAL_RENDER_LAYER);
-	gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
 }
 
 /**
- * Lazy renderer-owned mechanics for portal masks and scene-domain composition.
+ * Lazy renderer-owned mechanics for portal masks and direct scene-domain ownership.
  *
  * Construction allocates no GPU resources. Targets and programs appear only when portal execution
  * or the explicit browser fixture first requests them.
@@ -164,38 +182,37 @@ export class WebGL2PortalSubstrate {
 	#allocatedTargetCount = 0;
 	#disposedTargetCount = 0;
 	#destroyed = false;
-	#depthResetProgram: DepthResetProgram | null = null;
 	#maskProgram: MaskProgram | null = null;
-	#sceneCopyProgram: SceneCopyProgram | null = null;
-	#targets: WebGL2SceneDomainTargets | null = null;
+	#maskedSceneProgram: MaskedSceneProgram | null = null;
+	#target: WebGL2SceneDomainTarget | null = null;
 	#windowMaskProgram: WindowMaskProgram | null = null;
 
 	constructor(gl: WebGL2RenderingContext) {
 		this.#gl = gl;
 	}
 
-	resize(extent: PortalRenderExtent): WebGL2SceneDomainTargets {
+	resize(extent: PortalRenderExtent): WebGL2SceneDomainTarget {
 		this.#assertAlive();
 		validateExtent(extent);
 		if (
-			this.#targets?.exterior.extent.width === extent.width &&
-			this.#targets.exterior.extent.height === extent.height
+			this.#target?.extent.width === extent.width &&
+			this.#target.extent.height === extent.height
 		) {
-			return this.#targets;
+			return this.#target;
 		}
-		const replacement = this.#allocateTargets(extent);
-		const previous = this.#targets;
-		this.#targets = replacement;
-		if (previous) this.#disposeTargets(previous);
+		const replacement = this.#allocateTarget(extent);
+		const previous = this.#target;
+		this.#target = replacement;
+		if (previous) this.#disposeTarget(previous);
 		return replacement;
 	}
 
-	getTargets(): WebGL2SceneDomainTargets {
+	getTarget(): WebGL2SceneDomainTarget {
 		this.#assertAlive();
-		if (!this.#targets) {
-			throw new Error("Portal scene-domain targets have no render extent.");
+		if (!this.#target) {
+			throw new Error("Portal scene-domain target has no render extent.");
 		}
-		return this.#targets;
+		return this.#target;
 	}
 
 	clearTarget(
@@ -205,12 +222,8 @@ export class WebGL2PortalSubstrate {
 		stencil: number,
 	): void {
 		this.#assertAlive();
-		requireTarget(this.#targets, target);
-		if (color.some((component) => !isNormalized(component))) {
-			throw new Error(
-				"Portal target clear color components must be finite values from 0 through 1.",
-			);
-		}
+		requireTarget(this.#target, target);
+		requireNormalizedColor(color, "Portal target clear color");
 		if (!isNormalized(depth)) {
 			throw new Error(
 				"Portal target clear depth must be a finite value from 0 through 1.",
@@ -235,14 +248,14 @@ export class WebGL2PortalSubstrate {
 		indexStart: number,
 		indexCount: number,
 		clipFromLocal: Float32Array,
-		renderLayer: number,
+		stencilPolicy: PortalMaskStencilPolicy,
 		depthCompare: "always" | "less-or-equal",
 	): void {
 		this.#drawMask(
 			{
 				depthCompare,
 				kind: "mask-write",
-				renderLayer,
+				stencilPolicy,
 			},
 			target,
 			geometry,
@@ -262,10 +275,10 @@ export class WebGL2PortalSubstrate {
 	writeLayerWindowMask(
 		target: WebGL2SceneDomainTarget,
 		window: PortalViewWindow,
-		renderLayer: number,
+		stencilPolicy: PortalMaskStencilPolicy,
 	): void {
 		this.#assertAlive();
-		requireTarget(this.#targets, target);
+		requireTarget(this.#target, target);
 		const vertices = triangulatePortalViewWindow(window);
 		const program = this.#requireWindowMaskProgram();
 		const gl = this.#gl;
@@ -274,7 +287,7 @@ export class WebGL2PortalSubstrate {
 			extent: target.extent,
 			framebuffer: target.framebuffer,
 			kind: "mask-write",
-			renderLayer,
+			stencilPolicy,
 		});
 		gl.useProgram(program.program);
 		gl.bindVertexArray(program.vertexArray);
@@ -286,7 +299,7 @@ export class WebGL2PortalSubstrate {
 	/** Establish an ordinary scene pass on one owned offscreen target. */
 	beginTargetPass(target: WebGL2SceneDomainTarget): void {
 		this.#assertAlive();
-		requireTarget(this.#targets, target);
+		requireTarget(this.#target, target);
 		applyPortalPassState(this.#gl, {
 			extent: target.extent,
 			framebuffer: target.framebuffer,
@@ -297,7 +310,7 @@ export class WebGL2PortalSubstrate {
 	/** Establish ordinary color/depth drawing constrained by one completed mask intersection. */
 	beginMaskedPass(target: WebGL2SceneDomainTarget, renderLayer: number): void {
 		this.#assertAlive();
-		requireTarget(this.#targets, target);
+		requireTarget(this.#target, target);
 		applyPortalPassState(this.#gl, {
 			extent: target.extent,
 			framebuffer: target.framebuffer,
@@ -313,8 +326,8 @@ export class WebGL2PortalSubstrate {
 		depth: number,
 	): void {
 		this.#assertAlive();
-		requireTarget(this.#targets, target);
-		const program = this.#requireDepthResetProgram();
+		requireTarget(this.#target, target);
+		const program = this.#requireMaskedSceneProgram();
 		const gl = this.#gl;
 		applyPortalPassState(gl, {
 			depth,
@@ -329,43 +342,29 @@ export class WebGL2PortalSubstrate {
 		gl.drawArrays(gl.TRIANGLES, 0, 3);
 	}
 
-	copyScene(
-		source: WebGL2SceneDomainTarget,
-		destination: WebGL2SceneDomainTarget,
+	/** Replace clear color and depth inside one completed label without changing stencil. */
+	initializeMaskedScene(
+		target: WebGL2SceneDomainTarget,
 		renderLayer: number,
-		depthCompare: "always" | "less",
+		color: readonly [number, number, number, number],
+		depth: number,
 	): void {
 		this.#assertAlive();
-		requireTarget(this.#targets, source);
-		requireTarget(this.#targets, destination);
-		if (source === destination) {
-			throw new Error(
-				"Portal scene copy cannot sample from its destination framebuffer.",
-			);
-		}
-		if (
-			source.extent.width !== destination.extent.width ||
-			source.extent.height !== destination.extent.height
-		) {
-			throw new Error("Portal scene copy requires matching source extents.");
-		}
-		const program = this.#requireSceneCopyProgram();
+		requireTarget(this.#target, target);
+		requireNormalizedColor(color, "Portal masked scene color");
+		const program = this.#requireMaskedSceneProgram();
 		const gl = this.#gl;
 		applyPortalPassState(gl, {
-			depthCompare,
-			extent: destination.extent,
-			framebuffer: destination.framebuffer,
-			kind: "masked-copy",
+			depth,
+			extent: target.extent,
+			framebuffer: target.framebuffer,
+			kind: "masked-scene-initialize",
 			renderLayer,
 		});
 		gl.useProgram(program.program);
+		gl.uniform4f(program.color, color[0], color[1], color[2], color[3]);
+		gl.uniform1f(program.depth, depth);
 		gl.bindVertexArray(program.vertexArray);
-		gl.activeTexture(gl.TEXTURE0);
-		gl.bindTexture(gl.TEXTURE_2D, source.color);
-		gl.uniform1i(program.color, 0);
-		gl.activeTexture(gl.TEXTURE1);
-		gl.bindTexture(gl.TEXTURE_2D, source.depthStencil);
-		gl.uniform1i(program.depth, 1);
 		gl.drawArrays(gl.TRIANGLES, 0, 3);
 	}
 
@@ -375,7 +374,7 @@ export class WebGL2PortalSubstrate {
 		destinationExtent: PortalRenderExtent,
 	): void {
 		this.#assertAlive();
-		requireTarget(this.#targets, source);
+		requireTarget(this.#target, source);
 		validateExtent(destinationExtent);
 		const gl = this.#gl;
 		applyPortalPassState(gl, {
@@ -416,16 +415,15 @@ export class WebGL2PortalSubstrate {
 	}
 
 	getDiagnostics(): WebGL2PortalSubstrateDiagnostics {
-		const extent = this.#targets?.exterior.extent ?? null;
+		const extent = this.#target?.extent ?? null;
 		return {
 			activeBytes:
 				extent === null
 					? 0
 					: extent.width *
 						extent.height *
-						(COLOR_BYTES_PER_PIXEL + DEPTH_STENCIL_BYTES_PER_PIXEL) *
-						2,
-			activeTargetCount: this.#targets ? 2 : 0,
+						(COLOR_BYTES_PER_PIXEL + DEPTH_STENCIL_BYTES_PER_PIXEL),
+			activeTargetCount: this.#target ? 1 : 0,
 			allocatedTargetCount: this.#allocatedTargetCount,
 			disposedTargetCount: this.#disposedTargetCount,
 			extent: extent ? { ...extent } : null,
@@ -435,23 +433,18 @@ export class WebGL2PortalSubstrate {
 	destroy(): void {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
-		if (this.#targets) {
-			this.#disposeTargets(this.#targets);
-			this.#targets = null;
+		if (this.#target) {
+			this.#disposeTarget(this.#target);
+			this.#target = null;
 		}
 		if (this.#maskProgram) {
 			this.#gl.deleteProgram(this.#maskProgram.program);
 			this.#maskProgram = null;
 		}
-		if (this.#depthResetProgram) {
-			this.#gl.deleteProgram(this.#depthResetProgram.program);
-			this.#gl.deleteVertexArray(this.#depthResetProgram.vertexArray);
-			this.#depthResetProgram = null;
-		}
-		if (this.#sceneCopyProgram) {
-			this.#gl.deleteProgram(this.#sceneCopyProgram.program);
-			this.#gl.deleteVertexArray(this.#sceneCopyProgram.vertexArray);
-			this.#sceneCopyProgram = null;
+		if (this.#maskedSceneProgram) {
+			this.#gl.deleteProgram(this.#maskedSceneProgram.program);
+			this.#gl.deleteVertexArray(this.#maskedSceneProgram.vertexArray);
+			this.#maskedSceneProgram = null;
 		}
 		if (this.#windowMaskProgram) {
 			this.#gl.deleteBuffer(this.#windowMaskProgram.positionBuffer);
@@ -465,7 +458,7 @@ export class WebGL2PortalSubstrate {
 		command: {
 			readonly depthCompare: "always" | "less-or-equal";
 			readonly kind: "mask-write";
-			readonly renderLayer: number;
+			readonly stencilPolicy: PortalMaskStencilPolicy;
 		},
 		target: WebGL2SceneDomainTarget,
 		geometry: WebGL2GeometryBinding,
@@ -474,7 +467,7 @@ export class WebGL2PortalSubstrate {
 		clipFromLocal: Float32Array,
 	): void {
 		this.#assertAlive();
-		requireTarget(this.#targets, target);
+		requireTarget(this.#target, target);
 		validateDrawRange(geometry, indexStart, indexCount);
 		if (clipFromLocal.length !== 16) {
 			throw new Error(
@@ -499,7 +492,7 @@ export class WebGL2PortalSubstrate {
 		);
 	}
 
-	#allocateTargets(extent: PortalRenderExtent): WebGL2SceneDomainTargets {
+	#allocateTarget(extent: PortalRenderExtent): WebGL2SceneDomainTarget {
 		const maximumTextureSize = this.#gl.getParameter(
 			this.#gl.MAX_TEXTURE_SIZE,
 		) as number;
@@ -512,26 +505,17 @@ export class WebGL2PortalSubstrate {
 			);
 		}
 		const previous = captureAllocationBindings(this.#gl);
-		let exterior: WebGL2SceneDomainTarget | null = null;
-		let composite: WebGL2SceneDomainTarget | null = null;
+		let target: WebGL2SceneDomainTarget | null = null;
 		try {
-			exterior = allocateSceneDomainTarget(this.#gl, extent, "exterior");
+			target = allocateSceneDomainTarget(this.#gl, extent, "portal");
 			this.#allocatedTargetCount += 1;
-			composite = allocateSceneDomainTarget(this.#gl, extent, "composite");
-			this.#allocatedTargetCount += 1;
-			return { composite, exterior };
+			return target;
 		} catch (cause) {
-			if (composite) this.#disposeTarget(composite);
-			if (exterior) this.#disposeTarget(exterior);
+			if (target) this.#disposeTarget(target);
 			throw cause;
 		} finally {
 			restoreAllocationBindings(this.#gl, previous);
 		}
-	}
-
-	#disposeTargets(targets: WebGL2SceneDomainTargets): void {
-		this.#disposeTarget(targets.composite);
-		this.#disposeTarget(targets.exterior);
 	}
 
 	#disposeTarget(target: WebGL2SceneDomainTarget): void {
@@ -546,14 +530,9 @@ export class WebGL2PortalSubstrate {
 		return this.#maskProgram;
 	}
 
-	#requireDepthResetProgram(): DepthResetProgram {
-		this.#depthResetProgram ??= createDepthResetProgram(this.#gl);
-		return this.#depthResetProgram;
-	}
-
-	#requireSceneCopyProgram(): SceneCopyProgram {
-		this.#sceneCopyProgram ??= createSceneCopyProgram(this.#gl);
-		return this.#sceneCopyProgram;
+	#requireMaskedSceneProgram(): MaskedSceneProgram {
+		this.#maskedSceneProgram ??= createMaskedSceneProgram(this.#gl);
+		return this.#maskedSceneProgram;
 	}
 
 	#requireWindowMaskProgram(): WindowMaskProgram {
@@ -573,14 +552,8 @@ interface MaskProgram {
 	readonly program: WebGLProgram;
 }
 
-/** Fullscreen depth replacement constrained by the active stencil value. */
-interface DepthResetProgram {
-	readonly depth: WebGLUniformLocation;
-	readonly program: WebGLProgram;
-	readonly vertexArray: WebGLVertexArrayObject;
-}
-
-interface SceneCopyProgram {
+/** Fullscreen scene initialization constrained by the active stencil value. */
+interface MaskedSceneProgram {
 	readonly color: WebGLUniformLocation;
 	readonly depth: WebGLUniformLocation;
 	readonly program: WebGLProgram;
@@ -780,12 +753,12 @@ function triangulatePortalViewWindow(window: PortalViewWindow): Float32Array {
 	return output;
 }
 
-function createDepthResetProgram(
+function createMaskedSceneProgram(
 	gl: WebGL2RenderingContext,
-): DepthResetProgram {
+): MaskedSceneProgram {
 	const vertexArray = requireResource(
 		gl.createVertexArray(),
-		"portal depth-reset vertex array",
+		"portal masked-scene vertex array",
 	);
 	let program: WebGLProgram | null = null;
 	try {
@@ -798,50 +771,12 @@ void main() {
 }`,
 			`#version 300 es
 precision highp float;
+uniform vec4 u_color;
 uniform float u_depth;
 out vec4 outColor;
 void main() {
-	outColor = vec4(0.0);
+	outColor = u_color;
 	gl_FragDepth = u_depth;
-}`,
-		);
-		return {
-			depth: requireWebGL2Uniform(gl, program, "u_depth"),
-			program,
-			vertexArray,
-		};
-	} catch (cause) {
-		if (program) gl.deleteProgram(program);
-		gl.deleteVertexArray(vertexArray);
-		throw cause;
-	}
-}
-
-function createSceneCopyProgram(gl: WebGL2RenderingContext): SceneCopyProgram {
-	const vertexArray = requireResource(
-		gl.createVertexArray(),
-		"portal scene-copy vertex array",
-	);
-	let program: WebGLProgram | null = null;
-	try {
-		program = linkProgram(
-			gl,
-			`#version 300 es
-out vec2 vTextureCoordinate;
-void main() {
-	vec2 position = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
-	vTextureCoordinate = position;
-	gl_Position = vec4(position * 2.0 - 1.0, 0.0, 1.0);
-}`,
-			`#version 300 es
-precision highp float;
-uniform sampler2D u_color;
-uniform sampler2D u_depth;
-in vec2 vTextureCoordinate;
-out vec4 outColor;
-void main() {
-	outColor = texture(u_color, vTextureCoordinate);
-	gl_FragDepth = texture(u_depth, vTextureCoordinate).r;
 }`,
 		);
 		return {
@@ -951,23 +886,31 @@ function requireStencilValue(value: number): void {
 	}
 }
 
-function requireMaskRenderLayer(renderLayer: number): void {
-	requireStencilValue(renderLayer);
-	if (renderLayer === 0) {
+function requireMaskStencilValue(value: number): void {
+	requireStencilValue(value);
+	if (value === 0) {
 		throw new Error(
 			"Portal mask writes cannot target the unmasked base layer.",
 		);
 	}
 }
 
+function requireNormalizedColor(
+	color: readonly [number, number, number, number],
+	label: string,
+): void {
+	if (color.some((component) => !isNormalized(component))) {
+		throw new Error(
+			`${label} components must be finite values from 0 through 1.`,
+		);
+	}
+}
+
 function requireTarget(
-	targets: WebGL2SceneDomainTargets | null,
+	ownedTarget: WebGL2SceneDomainTarget | null,
 	target: WebGL2SceneDomainTarget,
 ): void {
-	if (
-		!targets ||
-		(target !== targets.exterior && target !== targets.composite)
-	) {
+	if (!ownedTarget || target !== ownedTarget) {
 		throw new Error(
 			"Portal scene-domain target is not owned by this substrate.",
 		);

@@ -34,6 +34,26 @@ const DEFAULT_MAXIMUM_STENCIL_VALUE = 0xff;
 const DEFAULT_SAFETY_WORK_ITEM_LIMIT = 10_000;
 
 describe("portal render graph planning", () => {
+	it("does not allocate ceremonial labels for an unmasked outdoor root", () => {
+		const plan = requirePlan(
+			topology([topologyScope(OUTDOOR_SCOPE, null)], []),
+			planInput(OUTDOOR_SCOPE),
+		);
+
+		expect(plan.exteriorComponent).toEqual({
+			componentNodeIds: ["portal-render-node:outdoor"],
+			entryMaskEdgeIds: [],
+			indoorNodeIds: [],
+			internalIndoorMaskEdgeIds: [],
+			outdoorNodeId: "portal-render-node:outdoor",
+			renderLayer: 0,
+			returnMaskEdgeIds: [],
+			rootContained: true,
+			stencilLabels: null,
+		});
+		expect(plan.capacity.requiredMaximumStencilValue).toBe(0);
+	});
+
 	it("returns one unmasked base layer for an isolated root", () => {
 		const root = envCellScope("root");
 		const plan = requirePlan(
@@ -631,7 +651,6 @@ describe("portal render graph planning", () => {
 			},
 		]);
 		expect(plan.exteriorComponent).toEqual({
-			compositionStencilValue: 1,
 			componentNodeIds: ["portal-render-node:outdoor"],
 			entryMaskEdgeIds: ["portal-crossing:outside"],
 			indoorNodeIds: [],
@@ -640,6 +659,7 @@ describe("portal render graph planning", () => {
 			renderLayer: 1,
 			returnMaskEdgeIds: [],
 			rootContained: false,
+			stencilLabels: { entry: 1, suffix: null },
 		});
 	});
 
@@ -673,7 +693,6 @@ describe("portal render graph planning", () => {
 		);
 
 		expect(plan.exteriorComponent).toEqual({
-			compositionStencilValue: 1,
 			componentNodeIds: [
 				"portal-render-node:env-cell-island:suffix",
 				"portal-render-node:outdoor",
@@ -685,7 +704,9 @@ describe("portal render graph planning", () => {
 			renderLayer: 1,
 			returnMaskEdgeIds: ["portal-crossing:suffix-outside"],
 			rootContained: false,
+			stencilLabels: { entry: 2, suffix: 3 },
 		});
+		expect(plan.capacity.requiredMaximumStencilValue).toBe(3);
 		expect(plan.diagnostics.cyclicComponentCount).toBe(1);
 	});
 
@@ -725,10 +746,13 @@ describe("portal render graph planning", () => {
 			"portal-render-node:env-cell-island:suffix",
 			"portal-render-node:outdoor",
 		]);
-		expect(plan.exteriorComponent?.compositionStencilValue).toBe(2);
+		expect(plan.exteriorComponent?.stencilLabels).toEqual({
+			entry: 2,
+			suffix: 3,
+		});
 		expect(plan.capacity).toMatchObject({
 			maximumRenderLayer: 1,
-			requiredMaximumStencilValue: 2,
+			requiredMaximumStencilValue: 3,
 		});
 		expect(plan.renderLayers[1]).toEqual({
 			incomingMaskEdgeIds: [

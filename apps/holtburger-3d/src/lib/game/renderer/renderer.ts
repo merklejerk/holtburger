@@ -77,7 +77,8 @@ export interface FrameSelectionMetrics {
 	readonly sceneDomainTargetCount: number;
 	/** Retained color plus depth-stencil attachment bytes owned by portal targets. */
 	readonly sceneDomainTargetBytes: number;
-	readonly portalCompositeCount: number;
+	/** Exterior scene-domain contributions rendered directly into portal targets. */
+	readonly portalExteriorContributionCount: number;
 	/** All static-object draw calls submitted to the backend this frame. */
 	readonly submittedStaticObjectDrawCount: number;
 	/** Triangles submitted by all static-object draws, including instance multiplication. */

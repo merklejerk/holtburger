@@ -1,4 +1,5 @@
 import type { GeometryResourceKey } from "./resource-manager";
+import { Vec2 } from "../math/types";
 import {
 	WebGL2PortalSubstrate,
 	type WebGL2PortalSubstrateDiagnostics,
@@ -8,6 +9,7 @@ import {
 	createPortalFixtureGeometry,
 	FIXTURE_IDENTITY_CLIP_FROM_LOCAL,
 } from "./webgl2-portal-fixture-support";
+import { createPortalViewWindow } from "./portal-view-window";
 
 const FIXTURE_EXTENT = { height: 8, width: 8 } as const;
 const RESIZED_EXTENT = { height: 16, width: 16 } as const;
@@ -19,26 +21,38 @@ const YELLOW = [204, 204, 26, 255] as const;
 /** Executable browser evidence for the production portal target and pass implementation. */
 export interface WebGL2PortalSubstrateFixtureResult {
 	readonly arbitraryApertureMaskPassed: boolean;
-	readonly depthCopyPassed: boolean;
 	readonly disposedDiagnostics: WebGL2PortalSubstrateDiagnostics;
 	readonly finalPresentationPassed: boolean;
 	readonly layerUnionPassed: boolean;
+	/** Equality-constrained aperture writes remain inside their exterior entry label. */
+	readonly parentConstrainedApertureMaskPassed: boolean;
+	/** Equality-constrained NDC-window writes remain inside their exterior entry label. */
+	readonly parentConstrainedWindowMaskPassed: boolean;
+	/** Masked scene initialization replaces color/depth while retaining stencil ownership. */
+	readonly maskedSceneInitializationPassed: boolean;
 	readonly maskedDepthResetPassed: boolean;
+	/** A suffix depth reset does not alter the exterior color already in the target. */
+	readonly maskedDepthResetRetainedColor: boolean;
 	/** Existing source-layer depth must reject a child aperture outside the parent opening. */
 	readonly nestedLayerConfinementPassed: boolean;
 	readonly ordinaryStateRestored: boolean;
 	readonly orderedLayerOverwritePassed: boolean;
 	readonly resizedDiagnostics: WebGL2PortalSubstrateDiagnostics;
-	readonly resizedTargetsReplaced: boolean;
+	readonly resizedTargetReplaced: boolean;
 	readonly targetDiagnostics: WebGL2PortalSubstrateDiagnostics;
 	readonly pixels: {
-		readonly beforeDepthReset: readonly number[];
+		readonly afterDepthReset: readonly number[];
 		readonly disjoint: readonly number[];
 		readonly layerOne: readonly number[];
 		readonly layerTwo: readonly number[];
 		readonly nestedInsideParent: readonly number[];
 		readonly nestedOutsideParent: readonly number[];
 		readonly outside: readonly number[];
+		readonly parentApertureInside: readonly number[];
+		readonly parentApertureOutside: readonly number[];
+		readonly parentWindowInside: readonly number[];
+		readonly parentWindowOutside: readonly number[];
+		readonly parentWindowAfterDepthReset: readonly number[];
 		readonly restored: readonly number[];
 	};
 }
@@ -92,93 +106,59 @@ export function runWebGL2PortalSubstrateFixture(
 		const disjoint = resources.getGeometry(disjointKey);
 		const nested = resources.getGeometry(nestedKey);
 
-		const initialTargets = substrate.resize(FIXTURE_EXTENT);
-		substrate.clearTarget(initialTargets.exterior, [0.8, 0.2, 0.1, 1], 0.25, 0);
-		substrate.clearTarget(initialTargets.composite, [0.1, 0.2, 0.8, 1], 0.9, 0);
+		const initialTarget = substrate.resize(FIXTURE_EXTENT);
+		substrate.clearTarget(initialTarget, [0.1, 0.2, 0.8, 1], 0.9, 0);
 
 		substrate.writeLayerMask(
-			initialTargets.composite,
+			initialTarget,
 			arbitrary,
 			0,
 			arbitrary.indexCount,
 			FIXTURE_IDENTITY_CLIP_FROM_LOCAL,
-			1,
+			{ kind: "replace", value: 1 },
 			"less-or-equal",
 		);
 		substrate.writeLayerMask(
-			initialTargets.composite,
+			initialTarget,
 			overlap,
 			0,
 			overlap.indexCount,
 			FIXTURE_IDENTITY_CLIP_FROM_LOCAL,
-			1,
+			{ kind: "replace", value: 1 },
 			"less-or-equal",
 		);
 		substrate.writeLayerMask(
-			initialTargets.composite,
+			initialTarget,
 			disjoint,
 			0,
 			disjoint.indexCount,
 			FIXTURE_IDENTITY_CLIP_FROM_LOCAL,
-			1,
+			{ kind: "replace", value: 1 },
 			"less-or-equal",
 		);
-		substrate.copyScene(
-			initialTargets.exterior,
-			initialTargets.composite,
-			1,
-			"always",
-		);
+		substrate.initializeMaskedScene(initialTarget, 1, [0.8, 0.2, 0.1, 1], 0.8);
 
 		substrate.writeLayerMask(
-			initialTargets.composite,
+			initialTarget,
 			overlap,
 			0,
 			overlap.indexCount,
 			FIXTURE_IDENTITY_CLIP_FROM_LOCAL,
-			2,
+			{ kind: "replace", value: 2 },
 			"always",
 		);
-		substrate.clearTarget(initialTargets.exterior, [0.8, 0.8, 0.1, 1], 0.1, 0);
-		substrate.copyScene(
-			initialTargets.exterior,
-			initialTargets.composite,
-			2,
-			"always",
-		);
+		substrate.initializeMaskedScene(initialTarget, 2, [0.8, 0.8, 0.1, 1], 0.4);
 
-		substrate.clearTarget(initialTargets.exterior, [0.2, 0.8, 0.2, 1], 0.5, 0);
-		substrate.copyScene(
-			initialTargets.exterior,
-			initialTargets.composite,
-			1,
-			"less",
-		);
-		substrate.present(initialTargets.composite, null, FIXTURE_EXTENT);
-		const beforeDepthResetPixel = readPixel(gl, 1, 5);
-
-		substrate.resetMaskedDepth(initialTargets.composite, 1, 1);
-		substrate.copyScene(
-			initialTargets.exterior,
-			initialTargets.composite,
-			1,
-			"less",
-		);
-
-		substrate.present(initialTargets.composite, null, FIXTURE_EXTENT);
+		substrate.resetMaskedDepth(initialTarget, 1, 1);
+		substrate.present(initialTarget, null, FIXTURE_EXTENT);
+		const afterDepthResetPixel = readPixel(gl, 1, 5);
 		const layerOnePixel = readPixel(gl, 1, 5);
 		const disjointPixel = readPixel(gl, 6, 6);
 		const layerTwoPixel = readPixel(gl, 5, 1);
 		const outsidePixel = readPixel(gl, 4, 4);
 
-		substrate.clearTarget(initialTargets.exterior, [0.8, 0.8, 0.1, 1], 0.1, 0);
-		substrate.copyScene(
-			initialTargets.exterior,
-			initialTargets.composite,
-			0,
-			"always",
-		);
-		substrate.present(initialTargets.composite, null, FIXTURE_EXTENT);
+		substrate.clearTarget(initialTarget, [0.8, 0.8, 0.1, 1], 0.1, 0);
+		substrate.present(initialTarget, null, FIXTURE_EXTENT);
 		const restoredPixel = readPixel(gl, 4, 4);
 
 		/*
@@ -186,64 +166,106 @@ export function runWebGL2PortalSubstrateFixture(
 		 * label. This models the depth already written by a physically valid parent cell before
 		 * the normal layer-one mask pass begins.
 		 */
-		substrate.clearTarget(initialTargets.composite, [0.1, 0.2, 0.8, 1], 0.4, 0);
+		substrate.clearTarget(initialTarget, [0.1, 0.2, 0.8, 1], 0.4, 0);
 		substrate.writeLayerMask(
-			initialTargets.composite,
+			initialTarget,
 			arbitrary,
 			0,
 			arbitrary.indexCount,
 			FIXTURE_IDENTITY_CLIP_FROM_LOCAL,
-			1,
+			{ kind: "replace", value: 1 },
 			"always",
 		);
-		substrate.resetMaskedDepth(initialTargets.composite, 1, 1);
-		substrate.beginTargetPass(initialTargets.composite);
+		substrate.resetMaskedDepth(initialTarget, 1, 1);
+		substrate.beginTargetPass(initialTarget);
 		gl.clearStencil(0);
 		gl.clear(gl.STENCIL_BUFFER_BIT);
 		substrate.writeLayerMask(
-			initialTargets.composite,
+			initialTarget,
 			arbitrary,
 			0,
 			arbitrary.indexCount,
 			FIXTURE_IDENTITY_CLIP_FROM_LOCAL,
-			1,
+			{ kind: "replace", value: 1 },
 			"less-or-equal",
 		);
-		substrate.resetMaskedDepth(initialTargets.composite, 1, 1);
-		substrate.clearTarget(initialTargets.exterior, [0.2, 0.8, 0.2, 1], 0.6, 0);
-		substrate.copyScene(
-			initialTargets.exterior,
-			initialTargets.composite,
-			1,
-			"always",
-		);
+		substrate.resetMaskedDepth(initialTarget, 1, 1);
+		substrate.initializeMaskedScene(initialTarget, 1, [0.2, 0.8, 0.2, 1], 0.6);
 		substrate.writeLayerMask(
-			initialTargets.composite,
+			initialTarget,
 			nested,
 			0,
 			nested.indexCount,
 			FIXTURE_IDENTITY_CLIP_FROM_LOCAL,
-			2,
+			{ kind: "replace", value: 2 },
 			"less-or-equal",
 		);
-		substrate.resetMaskedDepth(initialTargets.composite, 2, 1);
-		substrate.clearTarget(initialTargets.exterior, [0.8, 0.8, 0.1, 1], 0.4, 0);
-		substrate.copyScene(
-			initialTargets.exterior,
-			initialTargets.composite,
-			2,
-			"always",
-		);
-		substrate.present(initialTargets.composite, null, FIXTURE_EXTENT);
+		substrate.resetMaskedDepth(initialTarget, 2, 1);
+		substrate.initializeMaskedScene(initialTarget, 2, [0.8, 0.8, 0.1, 1], 0.4);
+		substrate.present(initialTarget, null, FIXTURE_EXTENT);
 		const nestedInsideParentPixel = readPixel(gl, 5, 2);
 		const nestedOutsideParentPixel = readPixel(gl, 5, 5);
 
+		/*
+		 * A non-root exterior SCC first owns its entry pixels, then promotes only passing internal
+		 * aperture pixels to the adjacent suffix label.
+		 */
+		substrate.clearTarget(initialTarget, [0.1, 0.2, 0.8, 1], 0.9, 0);
+		substrate.writeLayerMask(
+			initialTarget,
+			arbitrary,
+			0,
+			arbitrary.indexCount,
+			FIXTURE_IDENTITY_CLIP_FROM_LOCAL,
+			{ kind: "replace", value: 3 },
+			"always",
+		);
+		substrate.writeLayerMask(
+			initialTarget,
+			nested,
+			0,
+			nested.indexCount,
+			FIXTURE_IDENTITY_CLIP_FROM_LOCAL,
+			{ expectedValue: 3, kind: "increment-if-equal" },
+			"always",
+		);
+		substrate.initializeMaskedScene(initialTarget, 4, [0.8, 0.8, 0.1, 1], 1);
+		substrate.present(initialTarget, null, FIXTURE_EXTENT);
+		const parentApertureInsidePixel = readPixel(gl, 5, 2);
+		const parentApertureOutsidePixel = readPixel(gl, 5, 5);
+
+		const fullWindow = createPortalViewWindow([
+			[new Vec2(-1, -1), new Vec2(1, -1), new Vec2(1, 1), new Vec2(-1, 1)],
+		]);
+		if (!fullWindow)
+			throw new Error("Portal fixture full window normalized empty.");
+		substrate.clearTarget(initialTarget, [0.1, 0.2, 0.8, 1], 0.9, 7);
+		substrate.writeLayerMask(
+			initialTarget,
+			arbitrary,
+			0,
+			arbitrary.indexCount,
+			FIXTURE_IDENTITY_CLIP_FROM_LOCAL,
+			{ kind: "replace", value: 5 },
+			"always",
+		);
+		substrate.writeLayerWindowMask(initialTarget, fullWindow, {
+			expectedValue: 5,
+			kind: "increment-if-equal",
+		});
+		substrate.initializeMaskedScene(initialTarget, 6, [0.2, 0.8, 0.2, 1], 1);
+		substrate.initializeMaskedScene(initialTarget, 7, [0.8, 0.2, 0.1, 1], 0.9);
+		substrate.present(initialTarget, null, FIXTURE_EXTENT);
+		const parentWindowInsidePixel = readPixel(gl, 1, 5);
+		const parentWindowOutsidePixel = readPixel(gl, 4, 4);
+		substrate.resetMaskedDepth(initialTarget, 6, 0.25);
+		substrate.present(initialTarget, null, FIXTURE_EXTENT);
+		const parentWindowAfterDepthResetPixel = readPixel(gl, 1, 5);
+
 		targetDiagnostics = substrate.getDiagnostics();
-		const resizedTargets = substrate.resize(RESIZED_EXTENT);
+		const resizedTarget = substrate.resize(RESIZED_EXTENT);
 		resizedDiagnostics = substrate.getDiagnostics();
-		const resizedTargetsReplaced =
-			resizedTargets.exterior !== initialTargets.exterior &&
-			resizedTargets.composite !== initialTargets.composite;
+		const resizedTargetReplaced = resizedTarget !== initialTarget;
 		substrate.restoreOrdinaryPass(null, destinationExtent);
 		const ordinaryStateRestored = hasOrdinaryState(gl, destinationExtent);
 		const webGlError = gl.getError();
@@ -259,32 +281,50 @@ export function runWebGL2PortalSubstrateFixture(
 
 		return {
 			arbitraryApertureMaskPassed:
-				pixelMatches(layerOnePixel, GREEN) && pixelMatches(outsidePixel, BLUE),
-			depthCopyPassed: pixelMatches(beforeDepthResetPixel, RED),
+				pixelMatches(layerOnePixel, RED) && pixelMatches(outsidePixel, BLUE),
 			disposedDiagnostics,
 			finalPresentationPassed: pixelMatches(restoredPixel, YELLOW),
 			layerUnionPassed:
-				pixelMatches(layerOnePixel, GREEN) &&
-				pixelMatches(disjointPixel, GREEN) &&
+				pixelMatches(layerOnePixel, RED) &&
+				pixelMatches(disjointPixel, RED) &&
 				pixelMatches(outsidePixel, BLUE),
-			maskedDepthResetPassed: pixelMatches(layerOnePixel, GREEN),
+			parentConstrainedApertureMaskPassed:
+				pixelMatches(parentApertureInsidePixel, YELLOW) &&
+				pixelMatches(parentApertureOutsidePixel, BLUE),
+			parentConstrainedWindowMaskPassed:
+				pixelMatches(parentWindowInsidePixel, GREEN) &&
+				pixelMatches(parentWindowOutsidePixel, RED),
+			maskedSceneInitializationPassed: pixelMatches(
+				parentApertureInsidePixel,
+				YELLOW,
+			),
+			maskedDepthResetPassed: pixelMatches(afterDepthResetPixel, RED),
+			maskedDepthResetRetainedColor: pixelMatches(
+				parentWindowAfterDepthResetPixel,
+				GREEN,
+			),
 			nestedLayerConfinementPassed:
 				pixelMatches(nestedInsideParentPixel, YELLOW) &&
 				pixelMatches(nestedOutsideParentPixel, BLUE),
 			ordinaryStateRestored,
 			orderedLayerOverwritePassed: pixelMatches(layerTwoPixel, YELLOW),
 			pixels: {
-				beforeDepthReset: [...beforeDepthResetPixel],
+				afterDepthReset: [...afterDepthResetPixel],
 				disjoint: [...disjointPixel],
 				layerOne: [...layerOnePixel],
 				layerTwo: [...layerTwoPixel],
 				nestedInsideParent: [...nestedInsideParentPixel],
 				nestedOutsideParent: [...nestedOutsideParentPixel],
 				outside: [...outsidePixel],
+				parentApertureInside: [...parentApertureInsidePixel],
+				parentApertureOutside: [...parentApertureOutsidePixel],
+				parentWindowAfterDepthReset: [...parentWindowAfterDepthResetPixel],
+				parentWindowInside: [...parentWindowInsidePixel],
+				parentWindowOutside: [...parentWindowOutsidePixel],
 				restored: [...restoredPixel],
 			},
 			resizedDiagnostics,
-			resizedTargetsReplaced,
+			resizedTargetReplaced,
 			targetDiagnostics,
 		};
 	} finally {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getLandblockCoordinates } from "../landblocks";
+import { createPerspectiveMat4 } from "../math/matrices";
 import { AABB3, Mat4, Vec3 } from "../math/types";
 import type {
 	PortalCrossingId,
@@ -16,6 +17,7 @@ import {
 import {
 	clipPortalWindowThroughAperture,
 	createFullPortalViewWindow,
+	portalViewWindowBounds,
 	type PortalApertureProjectionInput,
 	type PortalViewWindow,
 } from "./portal-view-window";
@@ -332,11 +334,197 @@ describe("portal render graph planning", () => {
 		expect(plan.nearPlaneSeeds).toEqual([
 			{
 				crossingId: "portal-crossing:straddled",
+				maskWindow: expect.any(Object),
 				sourceNodeId: "portal-render-node:env-cell-island:root",
 				targetNodeId: "portal-render-node:env-cell-island:adjacent",
 			},
 		]);
 		expect(plan.maskEdges[0]?.nearPlaneStraddle).toBe(true);
+		expect(plan.renderLayers).toEqual([
+			{
+				incomingMaskEdgeIds: [],
+				renderLayer: 0,
+				renderNodeIds: ["portal-render-node:env-cell-island:root"],
+			},
+			{
+				incomingMaskEdgeIds: ["portal-crossing:straddled"],
+				renderLayer: 1,
+				renderNodeIds: ["portal-render-node:env-cell-island:adjacent"],
+			},
+		]);
+	});
+
+	it("seeds an aperture contained between the eye and near cap", () => {
+		const root = envCellScope("root");
+		const adjacent = envCellScope("adjacent");
+		const plan = requirePlan(
+			topology(
+				[topologyScope(root, "root"), topologyScope(adjacent, "adjacent")],
+				[
+					crossing("inside-near-clip-volume", root, adjacent, {
+						aperture: rectangle(-0.2, -0.2, 0.2, 0.2, -0.5),
+					}),
+				],
+			),
+			planInput(root, {
+				cameraPosition: Vec3.zero(),
+				clipFromAnchor: createPerspectiveMat4(90, 1, 1, 10),
+				nearPlane: rectangle(-1, -1, 1, 1, -1),
+			}),
+		);
+
+		expect(plan.nearPlaneSeeds).toEqual([
+			{
+				crossingId: "portal-crossing:inside-near-clip-volume",
+				maskWindow: expect.any(Object),
+				sourceNodeId: "portal-render-node:env-cell-island:root",
+				targetNodeId: "portal-render-node:env-cell-island:adjacent",
+			},
+		]);
+		const maskBounds = portalViewWindowBounds(
+			plan.nearPlaneSeeds[0]!.maskWindow,
+		);
+		expect(maskBounds.min.x).toBeCloseTo(-0.4);
+		expect(maskBounds.min.y).toBeCloseTo(-0.4);
+		expect(maskBounds.max.x).toBeCloseTo(0.4);
+		expect(maskBounds.max.y).toBeCloseTo(0.4);
+		expect(plan.renderLayers[0]?.renderNodeIds).toEqual([
+			"portal-render-node:env-cell-island:root",
+		]);
+		expect(plan.renderLayers[1]).toEqual({
+			incomingMaskEdgeIds: ["portal-crossing:inside-near-clip-volume"],
+			renderLayer: 1,
+			renderNodeIds: ["portal-render-node:env-cell-island:adjacent"],
+		});
+	});
+
+	it("propagates the straddle footprint before planning outdoor branches", () => {
+		const root = envCellScope("root");
+		const otherBuilding = envCellScope("other-building");
+		const straddled = rectangle(-0.9, -0.5, -0.2, 0.5);
+		const exteriorTransition = {
+			exteriorLandblockId: LANDBLOCK_ID,
+			kind: "exterior-transition",
+		} as const;
+		const plan = requirePlan(
+			topology(
+				[
+					topologyScope(root, "root"),
+					topologyScope(OUTDOOR_SCOPE, null),
+					topologyScope(otherBuilding, "other-building"),
+				],
+				[
+					crossing("root-outside", root, OUTDOOR_SCOPE, {
+						acceptedSide: "negative",
+						aperture: straddled,
+						spatialRelationship: exteriorTransition,
+					}),
+					crossing("outside-other-building", OUTDOOR_SCOPE, otherBuilding, {
+						aperture: rectangle(-0.8, -0.3, -0.4, 0.3, -0.5),
+						spatialRelationship: exteriorTransition,
+					}),
+				],
+			),
+			planInput(root, { nearPlane: straddled }),
+		);
+
+		expect(plan.renderLayers).toEqual([
+			{
+				incomingMaskEdgeIds: [],
+				renderLayer: 0,
+				renderNodeIds: ["portal-render-node:env-cell-island:root"],
+			},
+			{
+				incomingMaskEdgeIds: ["portal-crossing:root-outside"],
+				renderLayer: 1,
+				renderNodeIds: ["portal-render-node:outdoor"],
+			},
+			{
+				incomingMaskEdgeIds: ["portal-crossing:outside-other-building"],
+				renderLayer: 2,
+				renderNodeIds: ["portal-render-node:env-cell-island:other-building"],
+			},
+		]);
+	});
+
+	it("keeps a nested straddle inside its inherited parent mask", () => {
+		const root = envCellScope("root");
+		const parent = envCellScope("parent");
+		const adjacent = envCellScope("adjacent");
+		const outsideParentWindow = envCellScope("outside-parent-window");
+		const parentAperture = rectangle(-0.8, -0.8, 0.8, 0.8);
+		const straddled = rectangle(-0.5, -0.5, 0.5, 0.5, 0.5);
+		const plan = requirePlan(
+			topology(
+				[
+					topologyScope(root, "root"),
+					topologyScope(parent, "parent"),
+					topologyScope(adjacent, "adjacent"),
+					topologyScope(outsideParentWindow, "outside-parent-window"),
+				],
+				[
+					crossing("root-parent", root, parent, {
+						aperture: parentAperture,
+					}),
+					crossing("parent-adjacent", parent, adjacent, {
+						aperture: straddled,
+					}),
+					crossing(
+						"adjacent-outside-parent-window",
+						adjacent,
+						outsideParentWindow,
+						{
+							aperture: rectangle(0.85, -0.2, 0.95, 0.2, -0.5),
+						},
+					),
+				],
+			),
+			planInput(root, { nearPlane: straddled }),
+		);
+
+		expect(
+			plan.nodes.map(({ id, renderLayer }) => ({ id, renderLayer })),
+		).toEqual([
+			{
+				id: "portal-render-node:env-cell-island:adjacent",
+				renderLayer: 2,
+			},
+			{
+				id: "portal-render-node:env-cell-island:parent",
+				renderLayer: 1,
+			},
+			{
+				id: "portal-render-node:env-cell-island:root",
+				renderLayer: 0,
+			},
+		]);
+		expect(plan.renderLayers.slice(1)).toEqual([
+			{
+				incomingMaskEdgeIds: ["portal-crossing:root-parent"],
+				renderLayer: 1,
+				renderNodeIds: ["portal-render-node:env-cell-island:parent"],
+			},
+			{
+				incomingMaskEdgeIds: ["portal-crossing:parent-adjacent"],
+				renderLayer: 2,
+				renderNodeIds: ["portal-render-node:env-cell-island:adjacent"],
+			},
+		]);
+		expect(plan.nearPlaneSeeds).toEqual([
+			{
+				crossingId: "portal-crossing:parent-adjacent",
+				maskWindow: expect.any(Object),
+				sourceNodeId: "portal-render-node:env-cell-island:parent",
+				targetNodeId: "portal-render-node:env-cell-island:adjacent",
+			},
+		]);
+		expect(
+			plan.nodes.some(
+				(node) =>
+					node.id ===
+					"portal-render-node:env-cell-island:outside-parent-window",
+			),
+		).toBe(false);
 	});
 
 	it("uses one preprocessed visibility aperture without scratch capacity", () => {

@@ -99,6 +99,10 @@ const HOMOGENEOUS_CLIP_DISTANCES: readonly HomogeneousClipDistance[] = [
 	(vertex) => vertex.z + vertex.w,
 	(vertex) => vertex.w - vertex.z,
 ];
+const NEAR_CLIP_APERTURE_DISTANCES: readonly HomogeneousClipDistance[] = [
+	(vertex) => vertex.w - PORTAL_WINDOW_NDC_EPSILON,
+	...HOMOGENEOUS_CLIP_DISTANCES.slice(0, 4),
+];
 
 /** Build the full normalized-device-coordinate root view. */
 export function createFullPortalViewWindow(): PortalViewWindow {
@@ -224,9 +228,47 @@ export function clipPortalWindowThroughAperture(
 	inherited: PortalViewWindow,
 	aperture: PortalApertureProjectionInput,
 ): PortalWindowProjectionResult {
+	return clipPortalWindowThroughProjectedAperture(
+		projection,
+		inherited,
+		aperture,
+		HOMOGENEOUS_CLIP_DISTANCES,
+	);
+}
+
+/**
+ * Project an aperture before the near cap and intersect its ray footprint with an inherited window.
+ *
+ * Straddle admission needs this path because ordinary homogeneous clipping correctly rejects
+ * geometry inside the camera's near-clipped volume.
+ */
+export function clipPortalWindowThroughNearClipAperture(
+	projection: PreparedPortalProjection,
+	inherited: PortalViewWindow,
+	aperture: PortalApertureProjectionInput,
+): PortalWindowProjectionResult {
+	return clipPortalWindowThroughProjectedAperture(
+		projection,
+		inherited,
+		aperture,
+		NEAR_CLIP_APERTURE_DISTANCES,
+	);
+}
+
+function clipPortalWindowThroughProjectedAperture(
+	projection: PreparedPortalProjection,
+	inherited: PortalViewWindow,
+	aperture: PortalApertureProjectionInput,
+	clipDistances: readonly HomogeneousClipDistance[],
+): PortalWindowProjectionResult {
 	validatePreparedPortalProjection(projection);
 	const diagnostics = createDiagnostics();
-	const projected = projectAperture(projection, aperture, diagnostics);
+	const projected = projectAperture(
+		projection,
+		aperture,
+		diagnostics,
+		clipDistances,
+	);
 	if (!projected) {
 		diagnostics.emptyExactIntersectionCount += 1;
 		return emptyResult(diagnostics);
@@ -251,6 +293,7 @@ function projectAperture(
 	projection: PreparedPortalProjection,
 	input: PortalApertureProjectionInput,
 	diagnostics: MutablePortalWindowProjectionDiagnostics,
+	clipDistances: readonly HomogeneousClipDistance[],
 ): PortalViewWindow | null {
 	validatePlanarAperture(input.aperture);
 	validateLandblockCoordinates(input.landblockCoordinates);
@@ -287,7 +330,7 @@ function projectAperture(
 				diagnostics,
 			),
 		];
-		for (const distance of HOMOGENEOUS_CLIP_DISTANCES) {
+		for (const distance of clipDistances) {
 			polygon = clipHomogeneousPolygon(polygon, distance, diagnostics);
 			if (polygon.length < 3) break;
 		}

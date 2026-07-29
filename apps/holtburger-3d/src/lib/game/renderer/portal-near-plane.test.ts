@@ -3,9 +3,8 @@ import { Quat, Vec3 } from "../math/types";
 import type { Camera } from "../runtime/types";
 import type { PlanarAperture } from "../scene/planar-aperture";
 import {
-	cameraNearPlaneIntersectsAperture,
+	apertureIntersectsCameraNearClipVolume,
 	createCameraNearPlaneQuad,
-	triangulatedPlanarAperturesIntersect,
 } from "./portal-near-plane";
 
 const CAMERA: Camera = {
@@ -20,7 +19,7 @@ const CAMERA: Camera = {
 	},
 };
 
-describe("finite portal near-plane intersection", () => {
+describe("finite portal near-clip-volume intersection", () => {
 	it("constructs the exact finite quad from active projection facts", () => {
 		const near = createCameraNearPlaneQuad(CAMERA, 2);
 
@@ -47,7 +46,13 @@ describe("finite portal near-plane intersection", () => {
 			0,
 		);
 
-		expect(cameraNearPlaneIntersectsAperture(near, crossing)).toBe(true);
+		expect(
+			apertureIntersectsCameraNearClipVolume(
+				CAMERA.placement.position,
+				near.aperture,
+				crossing,
+			),
+		).toBe(true);
 	});
 
 	it("rejects plane intersections outside the finite aperture", () => {
@@ -58,10 +63,74 @@ describe("finite portal near-plane intersection", () => {
 			0,
 		);
 
-		expect(cameraNearPlaneIntersectsAperture(near, outside)).toBe(false);
+		expect(
+			apertureIntersectsCameraNearClipVolume(
+				CAMERA.placement.position,
+				near.aperture,
+				outside,
+			),
+		).toBe(false);
 	});
 
-	it("treats exact edges and coplanar overlap as renderer straddles", () => {
+	it("accepts apertures inside the clipped volume without requiring cap contact", () => {
+		const near = createCameraNearPlaneQuad(CAMERA, 1);
+		const faceOn = triangleAperture(
+			[
+				new Vec3(-0.25, -0.25, -0.5),
+				new Vec3(0.25, -0.25, -0.5),
+				new Vec3(0, 0.25, -0.5),
+			],
+			new Vec3(0, 0, 1),
+			0.5,
+		);
+		const oblique = triangleAperture(
+			[
+				new Vec3(0.2, -0.1, -0.2),
+				new Vec3(0.2, 0.1, -0.2),
+				new Vec3(0.2, 0, -0.8),
+			],
+			new Vec3(1, 0, 0),
+			-0.2,
+		);
+
+		expect(
+			apertureIntersectsCameraNearClipVolume(
+				CAMERA.placement.position,
+				near.aperture,
+				faceOn,
+			),
+		).toBe(true);
+		expect(
+			apertureIntersectsCameraNearClipVolume(
+				CAMERA.placement.position,
+				near.aperture,
+				oblique,
+			),
+		).toBe(true);
+	});
+
+	it("rejects apertures beyond the near cap", () => {
+		const near = createCameraNearPlaneQuad(CAMERA, 1);
+		const beyondCap = triangleAperture(
+			[
+				new Vec3(-0.2, -0.2, -1.5),
+				new Vec3(0.2, -0.2, -1.5),
+				new Vec3(0, 0.2, -1.5),
+			],
+			new Vec3(0, 0, 1),
+			1.5,
+		);
+
+		expect(
+			apertureIntersectsCameraNearClipVolume(
+				CAMERA.placement.position,
+				near.aperture,
+				beyondCap,
+			),
+		).toBe(false);
+	});
+
+	it("treats exact cap edges and coplanar overlap as renderer straddles", () => {
 		const near = createCameraNearPlaneQuad(CAMERA, 1);
 		const edgeTouch = triangleAperture(
 			[new Vec3(1, -0.5, -1), new Vec3(2, 0, -1), new Vec3(1, 0.5, -1)],
@@ -74,11 +143,19 @@ describe("finite portal near-plane intersection", () => {
 			-1,
 		);
 
-		expect(triangulatedPlanarAperturesIntersect(near.aperture, edgeTouch)).toBe(
-			true,
-		);
 		expect(
-			triangulatedPlanarAperturesIntersect(near.aperture, crossingEdgesOnly),
+			apertureIntersectsCameraNearClipVolume(
+				CAMERA.placement.position,
+				near.aperture,
+				edgeTouch,
+			),
+		).toBe(true);
+		expect(
+			apertureIntersectsCameraNearClipVolume(
+				CAMERA.placement.position,
+				near.aperture,
+				crossingEdgesOnly,
+			),
 		).toBe(true);
 	});
 
@@ -104,7 +181,13 @@ describe("finite portal near-plane intersection", () => {
 			1,
 		);
 
-		expect(cameraNearPlaneIntersectsAperture(near, aperture)).toBe(true);
+		expect(
+			apertureIntersectsCameraNearClipVolume(
+				CAMERA.placement.position,
+				near.aperture,
+				aperture,
+			),
+		).toBe(true);
 	});
 
 	it("rejects invalid projection facts loudly", () => {

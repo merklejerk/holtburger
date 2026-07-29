@@ -6,6 +6,7 @@ import type { PlanarAperture } from "../scene/planar-aperture";
 import {
 	admitPortalViewWindow,
 	clipPortalWindowThroughAperture,
+	clipPortalWindowThroughNearClipAperture,
 	createFullPortalViewWindow,
 	createPortalViewWindow,
 	portalViewWindowBounds,
@@ -119,6 +120,44 @@ describe("portal view windows", () => {
 		expect(bounds.min.y).toBeGreaterThanOrEqual(-1);
 		expect(bounds.max.y).toBeLessThanOrEqual(1);
 		expect(result.window.fragments[0]?.vertices.length).toBe(4);
+	});
+
+	it("projects near-clipped apertures as rays while preserving the parent window gate", () => {
+		const projection = perspectiveProjection();
+		const nearClipped = aperture([
+			[-0.2, -0.2, -0.5],
+			[0.2, -0.2, -0.5],
+			[0, 0.2, -0.5],
+		]);
+		expect(
+			clipPortalWindowThroughAperture(
+				projection,
+				createFullPortalViewWindow(),
+				nearClipped,
+			).kind,
+		).toBe("empty");
+
+		const visible = clipPortalWindowThroughNearClipAperture(
+			projection,
+			createFullPortalViewWindow(),
+			nearClipped,
+		);
+		expect(visible.kind).toBe("visible");
+		if (visible.kind !== "visible") return;
+		const bounds = portalViewWindowBounds(visible.window);
+		expect(bounds.min.x).toBeCloseTo(-0.4);
+		expect(bounds.min.y).toBeCloseTo(-0.4);
+		expect(bounds.max.x).toBeCloseTo(0.4);
+		expect(bounds.max.y).toBeCloseTo(0.4);
+
+		const disjointParent = requiredWindow([rectangle(0.6, 0.6, 0.9, 0.9)]);
+		expect(
+			clipPortalWindowThroughNearClipAperture(
+				projection,
+				disjointParent,
+				nearClipped,
+			).kind,
+		).toBe("empty");
 	});
 
 	it("rejects triangles wholly behind the eye", () => {

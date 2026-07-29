@@ -1,5 +1,6 @@
 import type { PortalCrossingId } from "../scene";
 import type { PortalRenderWorkPlan } from "./portal-render-graph";
+import { portalViewWindowBounds } from "./portal-view-window";
 
 type PortalRenderNodeId = PortalRenderWorkPlan["nodes"][number]["id"];
 type PortalRenderNode = PortalRenderWorkPlan["nodes"][number];
@@ -137,15 +138,37 @@ export function validatePortalRenderWorkPlan(
 		);
 	}
 	for (const seed of plan.nearPlaneSeeds) {
+		// This is executable mask geometry, not diagnostic metadata. Normalization rejects
+		// non-finite, degenerate, or out-of-clip-space fragments before GPU execution.
+		portalViewWindowBounds(seed.maskWindow);
 		const edge = edgeById.get(seed.crossingId);
+		const target = edge ? nodeById.get(edge.targetNodeId) : undefined;
 		if (
 			!edge ||
 			edge.sourceNodeId !== seed.sourceNodeId ||
 			edge.targetNodeId !== seed.targetNodeId ||
-			!edge.nearPlaneStraddle
+			!edge.nearPlaneStraddle ||
+			!target ||
+			(target.renderLayer !== 0 &&
+				!layerByNumber
+					.get(target.renderLayer)
+					?.incomingMaskEdgeIds.includes(edge.crossingId))
 		) {
 			throw new Error(
 				`Portal near-plane seed ${seed.crossingId} disagrees with its admitted mask edge.`,
+			);
+		}
+	}
+	const seedCrossingIds = new Set(
+		plan.nearPlaneSeeds.map((seed) => seed.crossingId),
+	);
+	if (seedCrossingIds.size !== plan.nearPlaneSeeds.length) {
+		throw new Error("Portal plan repeats a near-plane seed.");
+	}
+	for (const edge of edgeById.values()) {
+		if (edge.nearPlaneStraddle && !seedCrossingIds.has(edge.crossingId)) {
+			throw new Error(
+				`Portal straddle edge ${edge.crossingId} has no executable near-plane seed.`,
 			);
 		}
 	}
@@ -234,11 +257,11 @@ function validateExteriorComponent(
 	);
 	const layer = layerByNumber.get(operation.renderLayer);
 	if (!layer) throw new Error("Portal exterior operation has no render layer.");
-	const mainExteriorMembers = operation.rootContained
-		? new Set([outdoor.id])
+	const mainExteriorMemberIds = operation.rootContained
+		? new Set<PortalRenderNodeId>([outdoor.id])
 		: componentMembers;
 	const sharesLayer = layer.renderNodeIds.some(
-		(nodeId) => !mainExteriorMembers.has(nodeId),
+		(nodeId) => !mainExteriorMemberIds.has(nodeId),
 	);
 	const expectedStencilValue = sharesLayer
 		? plan.capacity.maximumRenderLayer + 1

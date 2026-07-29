@@ -1,6 +1,8 @@
 import type { PortalCrossingId, SceneScope } from "../scene";
+import { Vec2 } from "../math/types";
 import type { GeometryResourceKey } from "./resource-manager";
 import type { PortalRenderWorkPlan } from "./portal-render-graph";
+import { createPortalViewWindow } from "./portal-view-window";
 import {
 	executePortalGraph,
 	type PortalFrameDiagnostics,
@@ -25,6 +27,8 @@ import {
 const FIXTURE_EXTENT = { height: 8, width: 8 } as const;
 const EXTERIOR_NODE_ID = "portal-render-node:outdoor";
 const INTERIOR_NODE_ID = "portal-render-node:env-cell-island:fixture";
+const OTHER_INTERIOR_NODE_ID =
+	"portal-render-node:env-cell-island:other-building";
 const CROSSING_A = "portal-crossing:fixture/a" as PortalCrossingId;
 const CROSSING_B = "portal-crossing:fixture/b" as PortalCrossingId;
 const CROSSING_INTERNAL =
@@ -51,7 +55,7 @@ export interface WebGL2HybridPortalExecutionFixtureResult {
 	readonly interiorColorDepthCopyPassed: boolean;
 	/** Unified executor composed an exterior cycle and re-entered indoor suffix once. */
 	readonly hybridCyclePassed: boolean;
-	/** Unified executor consumed both transition and internal near-plane seed provenance. */
+	/** Unified executor consumed executable seeds in both transition directions. */
 	readonly hybridStraddlePassed: boolean;
 	/** Unified graph execution counts retained for Phase 12B acceptance. */
 	readonly hybridTrace: PortalFrameDiagnostics;
@@ -63,6 +67,10 @@ export interface WebGL2HybridPortalExecutionFixtureResult {
 	readonly outdoorRoot: PortalFrameDiagnostics;
 	/** Indoor-root sequencing and bounded draw counts consumed by Gate F. */
 	readonly indoorRoot: PortalFrameDiagnostics;
+	/** Indoor-root transition straddle execution retained independently from ordinary masks. */
+	readonly indoorStraddle: PortalFrameDiagnostics;
+	/** Outdoor-root transition straddle execution retained independently from ordinary masks. */
+	readonly outdoorStraddle: PortalFrameDiagnostics;
 	/** Sampled pixels retained for failure diagnosis rather than runtime telemetry. */
 	readonly pixels: {
 		readonly copiedDepthNear: readonly number[];
@@ -72,13 +80,18 @@ export interface WebGL2HybridPortalExecutionFixtureResult {
 		readonly hybridNotch: readonly number[];
 		readonly hybridSuffix: readonly number[];
 		readonly interiorOutside: readonly number[];
+		readonly indoorStraddleExterior: readonly number[];
+		readonly indoorStraddleInterior: readonly number[];
 		readonly multiWindow: readonly number[];
+		readonly outdoorStraddleInterior: readonly number[];
 		readonly straddleClipped: readonly number[];
 		readonly tunnel: readonly number[];
 		readonly tunnelNotch: readonly number[];
 	};
-	/** A graph-authored exterior near-plane seed rendered both root-side domains once. */
+	/** Both residency directions composite the adjacent domain through an NDC straddle mask. */
 	readonly straddleDualSidePassed: boolean;
+	/** Outdoor-sourced building portals remain reachable behind an indoor-root straddle. */
+	readonly straddleExteriorBranchPassed: boolean;
 	/** Both independent views reused the same fixed two target objects sequentially. */
 	readonly targetReusePassed: boolean;
 	/** Portal depth replacement exposes indoor content behind farther exterior terrain. */
@@ -123,12 +136,24 @@ export function runWebGL2HybridPortalExecutionFixture(
 			[APERTURE_B, resources.getGeometry(apertureBKey)],
 			[APERTURE_INTERNAL, resources.getGeometry(internalApertureKey)],
 		]);
+		const resolveVisibilityAperture = (apertureId: string) => {
+			const geometry = apertureById.get(apertureId);
+			if (!geometry) {
+				throw new Error(`Missing fixture aperture ${apertureId}.`);
+			}
+			return {
+				clipFromLocal: FIXTURE_IDENTITY_CLIP_FROM_LOCAL,
+				geometry,
+				indexCount: geometry.indexCount,
+				indexStart: 0,
+			};
+		};
 		let outdoorIndoorDrawCount = 0;
 		const outdoorRoot = executePortalGraph(substrate, {
 			clearColor: [0, 0, 0, 1],
 			destination: null,
 			extent: FIXTURE_EXTENT,
-			plan: transitionPlan("exterior", true),
+			plan: transitionPlan("exterior", false),
 			renderExterior: () => {
 				drawScene(gl, sceneProgram, {
 					color: normalized(RED),
@@ -149,18 +174,7 @@ export function runWebGL2HybridPortalExecutionFixture(
 				outdoorIndoorDrawCount += 1;
 				drawIndoorBlendSequence(gl, sceneProgram);
 			},
-			resolveVisibilityAperture: (apertureId) => {
-				const geometry = apertureById.get(apertureId);
-				if (!geometry) {
-					throw new Error(`Missing fixture aperture ${apertureId}.`);
-				}
-				return {
-					clipFromLocal: FIXTURE_IDENTITY_CLIP_FROM_LOCAL,
-					geometry,
-					indexCount: geometry.indexCount,
-					indexStart: 0,
-				};
-			},
+			resolveVisibilityAperture,
 		});
 		const tunnelPixel = readPixel(gl, 1, 1);
 		const multiWindowPixel = readPixel(gl, 6, 6);
@@ -193,18 +207,7 @@ export function runWebGL2HybridPortalExecutionFixture(
 					minimum: [-1, -1],
 				});
 			},
-			resolveVisibilityAperture: (apertureId) => {
-				const geometry = apertureById.get(apertureId);
-				if (!geometry) {
-					throw new Error(`Missing fixture aperture ${apertureId}.`);
-				}
-				return {
-					clipFromLocal: FIXTURE_IDENTITY_CLIP_FROM_LOCAL,
-					geometry,
-					indexCount: geometry.indexCount,
-					indexStart: 0,
-				};
-			},
+			resolveVisibilityAperture,
 		});
 		const secondTargets = substrate.getTargets();
 		const interiorOutsidePixel = readPixel(gl, 4, 4);
@@ -228,6 +231,82 @@ export function runWebGL2HybridPortalExecutionFixture(
 		const copiedDepthNearPixel = readPixel(gl, 1, 1);
 		const copiedDepthRejectedPixel = readPixel(gl, 6, 6);
 		substrate.restoreOrdinaryPass(null, destinationExtent);
+
+		const outdoorStraddle = executePortalGraph(substrate, {
+			clearColor: [0, 0, 0, 1],
+			destination: null,
+			extent: FIXTURE_EXTENT,
+			plan: transitionPlan("exterior", true),
+			renderExterior: () =>
+				drawScene(gl, sceneProgram, {
+					color: normalized(RED),
+					depth: 0.8,
+					kind: "opaque",
+					maximum: [1, 1],
+					minimum: [-1, -1],
+				}),
+			renderIndoorNodes: (_target, nodeIds) => {
+				if (nodeIds.includes(INTERIOR_NODE_ID as never)) {
+					drawScene(gl, sceneProgram, {
+						color: normalized(BLUE),
+						depth: 0.7,
+						kind: "opaque",
+						maximum: [1, 1],
+						minimum: [-1, -1],
+					});
+				}
+				if (nodeIds.includes(OTHER_INTERIOR_NODE_ID as never)) {
+					drawScene(gl, sceneProgram, {
+						color: normalized(CYAN),
+						depth: 0.5,
+						kind: "opaque",
+						maximum: [0.8, 0.8],
+						minimum: [0.2, 0.2],
+					});
+				}
+			},
+			resolveVisibilityAperture,
+		});
+		const outdoorStraddleInteriorPixel = readPixel(gl, 1, 6);
+
+		const indoorStraddle = executePortalGraph(substrate, {
+			clearColor: [0, 0, 0, 1],
+			destination: null,
+			extent: FIXTURE_EXTENT,
+			plan: transitionPlan("interior", true),
+			renderExterior: () =>
+				drawScene(gl, sceneProgram, {
+					color: normalized(ORANGE),
+					depth: 0.6,
+					kind: "opaque",
+					maximum: [1, 1],
+					minimum: [-1, -1],
+				}),
+			renderIndoorNodes: (_target, nodeIds) => {
+				if (nodeIds.includes(INTERIOR_NODE_ID as never)) {
+					drawScene(gl, sceneProgram, {
+						color: normalized(BLUE),
+						depth: 0.4,
+						kind: "opaque",
+						maximum: [1, 1],
+						minimum: [0, -1],
+					});
+				}
+				if (nodeIds.includes(OTHER_INTERIOR_NODE_ID as never)) {
+					drawScene(gl, sceneProgram, {
+						color: normalized(CYAN),
+						depth: 0.5,
+						kind: "opaque",
+						maximum: [1, 1],
+						minimum: [-1, -1],
+					});
+				}
+			},
+			resolveVisibilityAperture,
+		});
+		const indoorStraddleExteriorPixel = readPixel(gl, 1, 6);
+		const indoorStraddleInteriorPixel = readPixel(gl, 6, 1);
+		const indoorStraddleExteriorBranchPixel = readPixel(gl, 1, 1);
 
 		const hybridTrace = executePortalGraph(substrate, {
 			clearColor: [0, 0, 0, 1],
@@ -256,18 +335,7 @@ export function runWebGL2HybridPortalExecutionFixture(
 					drawIndoorBlendSequence(gl, sceneProgram);
 				}
 			},
-			resolveVisibilityAperture: (apertureId) => {
-				const geometry = apertureById.get(apertureId);
-				if (!geometry) {
-					throw new Error(`Missing fixture aperture ${apertureId}.`);
-				}
-				return {
-					clipFromLocal: FIXTURE_IDENTITY_CLIP_FROM_LOCAL,
-					geometry,
-					indexCount: geometry.indexCount,
-					indexStart: 0,
-				};
-			},
+			resolveVisibilityAperture,
 		});
 		const hybridSuffixPixel = readPixel(gl, 1, 1);
 		const hybridExteriorPixel = readPixel(gl, 6, 6);
@@ -291,13 +359,18 @@ export function runWebGL2HybridPortalExecutionFixture(
 				pixelMatches(hybridSuffixPixel, INDOOR_BLEND) &&
 				pixelMatches(hybridExteriorPixel, RED) &&
 				pixelMatches(hybridNotchPixel, BLUE),
-			hybridStraddlePassed: hybridTrace.nearPlaneSeedCount === 2,
+			hybridStraddlePassed:
+				outdoorStraddle.nearPlaneSeedCount === 1 &&
+				indoorStraddle.nearPlaneSeedCount === 1 &&
+				outdoorStraddle.maskDrawCount === 2 &&
+				indoorStraddle.maskDrawCount === 2,
 			hybridTrace,
 			interiorColorDepthCopyPassed:
 				indoorRootDrawCount === 1 &&
 				pixelMatches(copiedDepthNearPixel, CYAN) &&
 				pixelMatches(copiedDepthRejectedPixel, ORANGE),
 			indoorRoot,
+			indoorStraddle,
 			multiWindowUnionPassed:
 				outdoorIndoorDrawCount === 1 &&
 				pixelMatches(tunnelPixel, INDOOR_BLEND) &&
@@ -306,6 +379,7 @@ export function runWebGL2HybridPortalExecutionFixture(
 				pixelMatches(copiedDepthRejectedPixel, ORANGE) &&
 				!pixelMatches(copiedDepthRejectedPixel, RED),
 			outdoorRoot,
+			outdoorStraddle,
 			pixels: {
 				copiedDepthNear: [...copiedDepthNearPixel],
 				copiedDepthRejected: [...copiedDepthRejectedPixel],
@@ -314,17 +388,26 @@ export function runWebGL2HybridPortalExecutionFixture(
 				hybridNotch: [...hybridNotchPixel],
 				hybridSuffix: [...hybridSuffixPixel],
 				interiorOutside: [...interiorOutsidePixel],
+				indoorStraddleExterior: [...indoorStraddleExteriorPixel],
+				indoorStraddleInterior: [...indoorStraddleInteriorPixel],
 				multiWindow: [...multiWindowPixel],
+				outdoorStraddleInterior: [...outdoorStraddleInteriorPixel],
 				straddleClipped: [...straddleClippedPixel],
 				tunnel: [...tunnelPixel],
 				tunnelNotch: [...tunnelNotchPixel],
 			},
 			straddleDualSidePassed:
-				outdoorRoot.nearPlaneSeedCount === 1 &&
-				outdoorRoot.exteriorRenderCount === 1 &&
-				outdoorRoot.submittedRenderNodeCount === 2 &&
-				pixelMatches(straddleClippedPixel, RED) &&
-				pixelMatches(tunnelPixel, INDOOR_BLEND),
+				outdoorStraddle.exteriorRenderCount === 1 &&
+				outdoorStraddle.submittedRenderNodeCount === 3 &&
+				indoorStraddle.exteriorRenderCount === 1 &&
+				indoorStraddle.submittedRenderNodeCount === 3 &&
+				pixelMatches(outdoorStraddleInteriorPixel, BLUE) &&
+				pixelMatches(indoorStraddleExteriorPixel, ORANGE) &&
+				pixelMatches(indoorStraddleInteriorPixel, BLUE),
+			straddleExteriorBranchPassed: pixelMatches(
+				indoorStraddleExteriorBranchPixel,
+				CYAN,
+			),
 			targetReusePassed:
 				firstTargets.exterior === secondTargets.exterior &&
 				firstTargets.composite === secondTargets.composite,
@@ -372,7 +455,6 @@ function hybridCyclePlan(): PortalRenderWorkPlan {
 		INTERIOR_NODE_ID,
 		EXTERIOR_NODE_ID,
 		APERTURE_A,
-		true,
 	);
 	const entryB = hybridEdge(
 		CROSSING_B,
@@ -385,7 +467,6 @@ function hybridCyclePlan(): PortalRenderWorkPlan {
 		EXTERIOR_NODE_ID,
 		SUFFIX_NODE_ID,
 		APERTURE_INTERNAL,
-		true,
 	);
 	const returnEdge = hybridEdge(
 		CROSSING_RETURN,
@@ -422,7 +503,7 @@ function hybridCyclePlan(): PortalRenderWorkPlan {
 			duplicateOrSubsumedWindowStateCount: 1,
 			emptyWindowCount: 0,
 			maximumRetainedFragmentsPerNode: 2,
-			nearPlaneSeedCount: 2,
+			nearPlaneSeedCount: 0,
 			projection: emptyFixtureProjectionDiagnostics(),
 			rejectedFacingCrossingCount: 0,
 			sameDomainBoundaryCrossingCount: 0,
@@ -448,11 +529,7 @@ function hybridCyclePlan(): PortalRenderWorkPlan {
 			targetNodeId: edge.targetNodeId,
 		})),
 		maskEdges,
-		nearPlaneSeeds: [entryA, internal].map((edge) => ({
-			crossingId: edge.crossingId,
-			sourceNodeId: edge.sourceNodeId,
-			targetNodeId: edge.targetNodeId,
-		})),
+		nearPlaneSeeds: [],
 		nodes,
 		renderLayers: [
 			{
@@ -506,12 +583,35 @@ function transitionPlan(
 	const targetNodeId =
 		rootKind === "exterior" ? INTERIOR_NODE_ID : EXTERIOR_NODE_ID;
 	const crossings = [CROSSING_A, CROSSING_B] as const;
-	const apertureIds = [APERTURE_A, APERTURE_B] as const;
+	const apertureIds = [
+		APERTURE_A,
+		nearPlaneStraddle ? APERTURE_INTERNAL : APERTURE_B,
+	] as const;
+	const targetRenderLayer = 1;
+	const otherInteriorRenderLayer =
+		rootKind === "exterior" ? 1 : targetRenderLayer + 1;
+	const maskEdges = crossings.map((crossingId, index) => ({
+		crossingId,
+		nearPlaneStraddle: nearPlaneStraddle && index === 0,
+		sourceNodeId:
+			nearPlaneStraddle && index === 1 ? EXTERIOR_NODE_ID : rootNodeId,
+		spatialRelationship: {
+			exteriorLandblockId: "0x0001ffff",
+			kind: "exterior-transition" as const,
+		},
+		targetNodeId:
+			nearPlaneStraddle && index === 1 ? OTHER_INTERIOR_NODE_ID : targetNodeId,
+		visibilityApertureId: apertureIds[index]!,
+	}));
+	const maximumRenderLayer = nearPlaneStraddle
+		? otherInteriorRenderLayer
+		: targetRenderLayer;
+	const exteriorRoot = rootKind === "exterior";
 	return {
 		capacity: {
 			maximumAvailableStencilValue: 255,
-			maximumRenderLayer: 1,
-			requiredMaximumStencilValue: 1,
+			maximumRenderLayer,
+			requiredMaximumStencilValue: maximumRenderLayer,
 		},
 		diagnostics: {
 			admittedWindowStateCount: 0,
@@ -526,41 +626,37 @@ function transitionPlan(
 			rejectedFacingCrossingCount: 0,
 			sameDomainBoundaryCrossingCount: 0,
 			retainedMaskEdgeCount: crossings.length,
-			retainedRenderNodeCount: 2,
+			retainedRenderNodeCount: nearPlaneStraddle ? 3 : 2,
 			workItemCount: 0,
 		},
 		exteriorComponent: {
-			compositionStencilValue: rootKind === "exterior" ? 0 : 1,
+			compositionStencilValue: exteriorRoot ? 0 : 1,
 			componentNodeIds: [EXTERIOR_NODE_ID],
-			entryMaskEdgeIds: rootKind === "interior" ? crossings : [],
+			entryMaskEdgeIds:
+				rootKind === "interior"
+					? nearPlaneStraddle
+						? [CROSSING_A]
+						: crossings
+					: [],
 			indoorNodeIds: [],
 			internalIndoorMaskEdgeIds: [],
 			outdoorNodeId: EXTERIOR_NODE_ID,
-			renderLayer: rootKind === "exterior" ? 0 : 1,
+			renderLayer: exteriorRoot ? 0 : 1,
 			returnMaskEdgeIds: [],
-			rootContained: rootKind === "exterior",
+			rootContained: exteriorRoot,
 		},
-		exteriorTransitions: crossings.map((crossingId) => ({
-			crossingId,
+		exteriorTransitions: maskEdges.map((edge) => ({
+			crossingId: edge.crossingId,
 			exteriorLandblockId: "0x0001ffff",
-			sourceNodeId: rootNodeId,
-			targetNodeId,
+			sourceNodeId: edge.sourceNodeId,
+			targetNodeId: edge.targetNodeId,
 		})),
-		maskEdges: crossings.map((crossingId, index) => ({
-			crossingId,
-			nearPlaneStraddle: nearPlaneStraddle && index === 0,
-			sourceNodeId: rootNodeId,
-			spatialRelationship: {
-				exteriorLandblockId: "0x0001ffff",
-				kind: "exterior-transition",
-			},
-			targetNodeId,
-			visibilityApertureId: apertureIds[index]!,
-		})),
+		maskEdges,
 		nearPlaneSeeds: nearPlaneStraddle
 			? [
 					{
 						crossingId: CROSSING_A,
+						maskWindow: createFixtureStraddleWindow(),
 						sourceNodeId: rootNodeId,
 						targetNodeId,
 					},
@@ -575,25 +671,76 @@ function transitionPlan(
 			node(
 				targetNodeId,
 				rootKind === "exterior" ? "indoor-visibility-island" : "outdoor",
-				1,
+				targetRenderLayer,
 			),
+			...(nearPlaneStraddle
+				? [
+						node(
+							OTHER_INTERIOR_NODE_ID,
+							"indoor-visibility-island",
+							otherInteriorRenderLayer,
+						),
+					]
+				: []),
 		],
-		renderLayers: [
-			{
-				incomingMaskEdgeIds: [],
-				renderLayer: 0,
-				renderNodeIds: [rootNodeId],
-			},
-			{
-				incomingMaskEdgeIds: crossings,
-				renderLayer: 1,
-				renderNodeIds: [targetNodeId],
-			},
-		],
+		renderLayers: nearPlaneStraddle
+			? exteriorRoot
+				? [
+						{
+							incomingMaskEdgeIds: [],
+							renderLayer: 0,
+							renderNodeIds: [rootNodeId],
+						},
+						{
+							incomingMaskEdgeIds: crossings,
+							renderLayer: 1,
+							renderNodeIds: [targetNodeId, OTHER_INTERIOR_NODE_ID],
+						},
+					]
+				: [
+						{
+							incomingMaskEdgeIds: [],
+							renderLayer: 0,
+							renderNodeIds: [rootNodeId],
+						},
+						{
+							incomingMaskEdgeIds: [CROSSING_A],
+							renderLayer: 1,
+							renderNodeIds: [targetNodeId],
+						},
+						{
+							incomingMaskEdgeIds: [CROSSING_B],
+							renderLayer: 2,
+							renderNodeIds: [OTHER_INTERIOR_NODE_ID],
+						},
+					]
+			: [
+					{
+						incomingMaskEdgeIds: [],
+						renderLayer: 0,
+						renderNodeIds: [rootNodeId],
+					},
+					{
+						incomingMaskEdgeIds: crossings,
+						renderLayer: 1,
+						renderNodeIds: [targetNodeId],
+					},
+				],
 		rootNodeId,
 		selectedScopes: [],
 		topologyRevision: 1,
 	} as PortalRenderWorkPlan;
+}
+
+function createFixtureStraddleWindow() {
+	const window = createPortalViewWindow([
+		[new Vec2(-0.9, -0.8), new Vec2(0, -0.8), new Vec2(-0.4, -0.2)],
+		[new Vec2(0, -0.8), new Vec2(0, -0.2), new Vec2(-0.4, -0.2)],
+		[new Vec2(-0.9, -0.8), new Vec2(-0.4, -0.2), new Vec2(-0.9, 0.8)],
+		[new Vec2(-0.4, -0.2), new Vec2(-0.4, 0.8), new Vec2(-0.9, 0.8)],
+	]);
+	if (!window) throw new Error("Fixture straddle window is empty.");
+	return window;
 }
 
 function node(

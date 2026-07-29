@@ -1,6 +1,7 @@
 import type { GeometryResourceKey } from "./resource-manager";
 import type { PortalCrossingId, SceneScope } from "../scene";
 import type { PortalRenderWorkPlan } from "./portal-render-graph";
+import { createFullPortalViewWindow } from "./portal-view-window";
 import { executePortalGraph } from "./webgl2-portal-executor";
 import {
 	createPortalFixtureSceneProgram,
@@ -174,12 +175,12 @@ export function runWebGL2InternalPortalExecutionFixture(
 				fixturePixelMatches(leftTarget, MASKED_BLEND) &&
 				fixturePixelMatches(rightTarget, MASKED_BLEND),
 			nearPlaneDualSidePassed:
-				trace.nearPlaneSeedCount === 1 &&
+				trace.nearPlaneSeedCount === 0 &&
 				reverseTrace.nearPlaneSeedCount === 1 &&
 				fixturePixelMatches(leftTarget, MASKED_BLEND) &&
 				fixturePixelMatches(rootWall, BLUE) &&
 				fixturePixelMatches(reverseReachedTarget, MASKED_BLEND) &&
-				fixturePixelMatches(reverseOppositeOpening, BLUE),
+				fixturePixelMatches(reverseOppositeOpening, MASKED_BLEND),
 			nestedDepthConfinementPassed:
 				fixturePixelMatches(parentWall, BLUE) &&
 				fixturePixelMatches(leftTarget, MASKED_BLEND) &&
@@ -246,6 +247,7 @@ function reverseStraddlePlan(): PortalRenderWorkPlan {
 		nearPlaneSeeds: [
 			{
 				crossingId: reverseCrossing,
+				maskWindow: createFullPortalViewWindow(),
 				sourceNodeId: TARGET,
 				targetNodeId: LEFT,
 			},
@@ -431,7 +433,7 @@ function drawTargetRoom(
 function internalFixturePlan(): PortalRenderWorkPlan {
 	const rootLeft = edge(ROOT_LEFT, ROOT, LEFT, "root-left");
 	const rootRight = edge(ROOT_RIGHT, ROOT, RIGHT, "root-right");
-	const leftTarget = edge(LEFT_TARGET, LEFT, TARGET, "left-target", true);
+	const leftTarget = edge(LEFT_TARGET, LEFT, TARGET, "left-target");
 	const rightTarget = edge(RIGHT_TARGET, RIGHT, TARGET, "right-target");
 	const nodes = [
 		node(ROOT, 0, "0x00010100", []),
@@ -453,7 +455,7 @@ function internalFixturePlan(): PortalRenderWorkPlan {
 			duplicateOrSubsumedWindowStateCount: 1,
 			emptyWindowCount: 0,
 			maximumRetainedFragmentsPerNode: 2,
-			nearPlaneSeedCount: 1,
+			nearPlaneSeedCount: 0,
 			projection: emptyFixtureProjectionDiagnostics(),
 			rejectedFacingCrossingCount: 0,
 			sameDomainBoundaryCrossingCount: 0,
@@ -464,13 +466,7 @@ function internalFixturePlan(): PortalRenderWorkPlan {
 		exteriorComponent: null,
 		exteriorTransitions: [],
 		maskEdges: [rootLeft, rootRight, leftTarget, rightTarget],
-		nearPlaneSeeds: [
-			{
-				crossingId: LEFT_TARGET,
-				sourceNodeId: LEFT,
-				targetNodeId: TARGET,
-			},
-		],
+		nearPlaneSeeds: [],
 		nodes,
 		renderLayers: [
 			{

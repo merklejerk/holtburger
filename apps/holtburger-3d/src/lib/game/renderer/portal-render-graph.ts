@@ -14,9 +14,10 @@ import {
 	validatePlanarAperture,
 } from "../scene/planar-aperture";
 import { sameScope, scopeKey } from "../scene/scope";
-import { triangulatedPlanarAperturesIntersect } from "./portal-near-plane";
+import { apertureIntersectsCameraNearClipVolume } from "./portal-near-plane";
 import {
 	admitPortalViewWindow,
+	clipPortalWindowThroughNearClipAperture,
 	clipPortalWindowThroughAperture,
 	createFullPortalViewWindow,
 	type PortalApertureProjectionInput,
@@ -85,9 +86,11 @@ interface PortalExteriorComponentOperation {
 	readonly rootContained: boolean;
 }
 
-/** Renderer-only dual-side seed caused by finite near-plane/aperture contact. */
+/** Executable screen-space mask caused by finite near-plane/aperture contact. */
 interface PortalNearPlaneSeed {
 	readonly crossingId: PortalCrossingId;
+	/** Exact parent-bounded NDC footprint used for straddle compositing. */
+	readonly maskWindow: PortalViewWindow;
 	readonly sourceNodeId: PortalRenderNodeId;
 	readonly targetNodeId: PortalRenderNodeId;
 }
@@ -177,6 +180,8 @@ interface MutablePortalRenderNode {
 
 interface MutablePortalMaskEdge {
 	nearPlaneStraddle: boolean;
+	/** Union of every admitted near-clip footprint for this authored crossing. */
+	nearPlaneWindow: PortalViewWindow | null;
 	readonly crossing: ScenePortalCrossingInput;
 	readonly sourceNodeId: PortalRenderNodeId;
 	readonly targetNodeId: PortalRenderNodeId;
@@ -331,17 +336,7 @@ class PortalPlanningContext {
 				];
 			}),
 			maskEdges,
-			nearPlaneSeeds: maskEdges.flatMap((edge) =>
-				edge.nearPlaneStraddle
-					? [
-							{
-								crossingId: edge.crossingId,
-								sourceNodeId: edge.sourceNodeId,
-								targetNodeId: edge.targetNodeId,
-							},
-						]
-					: [],
-			),
+			nearPlaneSeeds: this.#createNearPlaneSeeds(),
 			nodes,
 			renderLayers,
 			rootNodeId: rootDomain.id,
@@ -382,7 +377,8 @@ class PortalPlanningContext {
 				}
 				const apertureInput = createVisibilityApertureInput(crossing);
 				const anchorAperture = this.#anchorAperture(apertureInput);
-				const nearPlaneStraddle = triangulatedPlanarAperturesIntersect(
+				const nearPlaneStraddle = apertureIntersectsCameraNearClipVolume(
+					this.#input.cameraPosition,
 					this.#input.nearPlane,
 					anchorAperture,
 				);
@@ -390,11 +386,17 @@ class PortalPlanningContext {
 					this.rejectedFacingCrossingCount += 1;
 					continue;
 				}
-				const projection = clipPortalWindowThroughAperture(
-					this.#input,
-					item.window,
-					apertureInput,
-				);
+				const projection = nearPlaneStraddle
+					? clipPortalWindowThroughNearClipAperture(
+							this.#input,
+							item.window,
+							apertureInput,
+						)
+					: clipPortalWindowThroughAperture(
+							this.#input,
+							item.window,
+							apertureInput,
+						);
 				addProjectionDiagnostics(this.#projection, projection.diagnostics);
 				if (projection.kind === "empty") {
 					this.emptyWindowCount += 1;
@@ -406,6 +408,7 @@ class PortalPlanningContext {
 					sourceNode.domain.id,
 					targetDomain.id,
 					nearPlaneStraddle,
+					nearPlaneStraddle ? projection.window : null,
 					apertureInput,
 				);
 				const admission = admitPortalViewWindow(
@@ -431,6 +434,7 @@ class PortalPlanningContext {
 		sourceNodeId: PortalRenderNodeId,
 		targetNodeId: PortalRenderNodeId,
 		nearPlaneStraddle: boolean,
+		nearPlaneWindow: PortalViewWindow | null,
 		aperture: IndexedPortalAperture,
 	): void {
 		const existing = this.#edges.get(crossing.id);
@@ -442,10 +446,17 @@ class PortalPlanningContext {
 				throw new Error(`Portal mask edge ${crossing.id} changed endpoints.`);
 			}
 			existing.nearPlaneStraddle ||= nearPlaneStraddle;
+			if (nearPlaneWindow) {
+				existing.nearPlaneWindow = admitPortalViewWindow(
+					existing.nearPlaneWindow,
+					nearPlaneWindow,
+				).coverage;
+			}
 		} else {
 			this.#edges.set(crossing.id, {
 				crossing,
 				nearPlaneStraddle,
+				nearPlaneWindow,
 				sourceNodeId,
 				targetNodeId,
 				visibilityApertureId: aperture.id,
@@ -556,6 +567,25 @@ class PortalPlanningContext {
 				targetNodeId: edge.targetNodeId,
 				visibilityApertureId: edge.visibilityApertureId,
 			}));
+	}
+
+	#createNearPlaneSeeds(): readonly PortalNearPlaneSeed[] {
+		return [...this.#edges.values()]
+			.filter((edge) => edge.nearPlaneStraddle)
+			.sort((left, right) => left.crossing.id.localeCompare(right.crossing.id))
+			.map((edge) => {
+				if (!edge.nearPlaneWindow) {
+					throw new Error(
+						`Near-plane seed ${edge.crossing.id} has no admitted mask window.`,
+					);
+				}
+				return {
+					crossingId: edge.crossing.id,
+					maskWindow: edge.nearPlaneWindow,
+					sourceNodeId: edge.sourceNodeId,
+					targetNodeId: edge.targetNodeId,
+				};
+			});
 	}
 
 	#createCapacity(

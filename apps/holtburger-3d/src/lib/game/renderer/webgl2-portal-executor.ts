@@ -1,6 +1,7 @@
 import type { PortalCrossingId } from "../scene";
 import type { PortalRenderWorkPlan } from "./portal-render-graph";
 import { validatePortalRenderWorkPlan } from "./portal-render-plan-validation";
+import type { PortalViewWindow } from "./portal-view-window";
 import {
 	validateResolvedPortalMask,
 	type ResolvedPortalMask,
@@ -64,6 +65,12 @@ export interface PortalExecutionSubstrate {
 		renderLayer: number,
 		depthCompare: "always" | "less-or-equal",
 	): void;
+	/** Add one exact screen-space straddle footprint to a render-layer union. */
+	writeLayerWindowMask(
+		target: WebGL2SceneDomainTarget,
+		window: PortalViewWindow,
+		renderLayer: number,
+	): void;
 }
 
 /** Complete portal execution inputs for one independent frame view. */
@@ -107,10 +114,19 @@ export interface PortalFrameDiagnostics {
 	readonly submittedRenderNodeCount: number;
 }
 
-interface PreparedPortalMask {
+interface PreparedPortalApertureMask {
 	readonly crossingId: PortalCrossingId;
+	readonly kind: "aperture";
 	readonly mask: ResolvedPortalMask;
 }
+
+interface PreparedPortalWindowMask {
+	readonly crossingId: PortalCrossingId;
+	readonly kind: "window";
+	readonly window: PortalViewWindow;
+}
+
+type PreparedPortalMask = PreparedPortalApertureMask | PreparedPortalWindowMask;
 
 interface PreparedPortalContribution {
 	readonly kind: "exterior" | "indoor";
@@ -250,16 +266,21 @@ function writeMaskUnion(
 	masks: readonly PreparedPortalMask[],
 	stencilValue: number,
 ): number {
-	for (const { mask } of masks) {
-		substrate.writeLayerMask(
-			target,
-			mask.geometry,
-			mask.indexStart,
-			mask.indexCount,
-			mask.clipFromLocal,
-			stencilValue,
-			"less-or-equal",
-		);
+	for (const prepared of masks) {
+		if (prepared.kind === "window") {
+			substrate.writeLayerWindowMask(target, prepared.window, stencilValue);
+		} else {
+			const { mask } = prepared;
+			substrate.writeLayerMask(
+				target,
+				mask.geometry,
+				mask.indexStart,
+				mask.indexCount,
+				mask.clipFromLocal,
+				stencilValue,
+				"less-or-equal",
+			);
+		}
 	}
 	return masks.length;
 }
@@ -269,8 +290,20 @@ function preparePortalExecution(
 ): PreparedPortalExecution {
 	const { plan } = input;
 	const { edgeById, exterior, nodeById } = validatePortalRenderWorkPlan(plan);
+	const nearPlaneSeedByEdgeId = new Map(
+		plan.nearPlaneSeeds.map((seed) => [seed.crossingId, seed]),
+	);
 	const maskByEdgeId = new Map<PortalCrossingId, PreparedPortalMask>();
 	for (const edge of edgeById.values()) {
+		const nearPlaneSeed = nearPlaneSeedByEdgeId.get(edge.crossingId);
+		if (nearPlaneSeed) {
+			maskByEdgeId.set(edge.crossingId, {
+				crossingId: edge.crossingId,
+				kind: "window",
+				window: nearPlaneSeed.maskWindow,
+			});
+			continue;
+		}
 		const mask = input.resolveVisibilityAperture(
 			edge.visibilityApertureId,
 			edge.crossingId,
@@ -278,6 +311,7 @@ function preparePortalExecution(
 		validateResolvedPortalMask(mask, edge.crossingId);
 		maskByEdgeId.set(edge.crossingId, {
 			crossingId: edge.crossingId,
+			kind: "aperture",
 			mask,
 		});
 	}
@@ -321,12 +355,11 @@ function preparePortalExecution(
 			const members = new Set(indoorNodeIds);
 			contributions.push({
 				kind: "indoor",
-				masks: requirePreparedMasks(
-					maskByEdgeId,
-					layer.incomingMaskEdgeIds.filter((crossingId) =>
+				masks: requirePreparedMasks(maskByEdgeId, [
+					...layer.incomingMaskEdgeIds.filter((crossingId) =>
 						members.has(edgeById.get(crossingId)!.targetNodeId),
 					),
-				),
+				]),
 				renderNodeIds: indoorNodeIds,
 				stencilValue: layer.renderLayer,
 			});
@@ -347,7 +380,7 @@ function preparePortalExecution(
 			}
 		}
 		const labels = contributions.map((entry) => entry.stencilValue);
-		if (new Set(labels).size !== labels.length) {
+		if (layer.renderLayer !== 0 && new Set(labels).size !== labels.length) {
 			throw new Error(
 				`Portal layer ${layer.renderLayer} contribution labels are not isolated.`,
 			);

@@ -529,7 +529,6 @@ function hybridCyclePlan(): PortalRenderWorkPlan {
 			targetNodeId: edge.targetNodeId,
 		})),
 		maskEdges,
-		nearPlaneSeeds: [],
 		nodes,
 		renderLayers: [
 			{
@@ -559,18 +558,19 @@ function hybridEdge(
 	sourceNodeId: string,
 	targetNodeId: string,
 	visibilityApertureId: string,
-	nearPlaneStraddle = false,
 ): PortalRenderWorkPlan["maskEdges"][number] {
 	return {
 		crossingId,
-		nearPlaneStraddle,
+		maskSource: {
+			kind: "world-aperture",
+			visibilityApertureId,
+		},
 		sourceNodeId,
 		spatialRelationship: {
 			exteriorLandblockId: "0x0001ffff",
 			kind: "exterior-transition",
 		},
 		targetNodeId,
-		visibilityApertureId,
 	} as PortalRenderWorkPlan["maskEdges"][number];
 }
 
@@ -592,7 +592,16 @@ function transitionPlan(
 		rootKind === "exterior" ? 1 : targetRenderLayer + 1;
 	const maskEdges = crossings.map((crossingId, index) => ({
 		crossingId,
-		nearPlaneStraddle: nearPlaneStraddle && index === 0,
+		maskSource:
+			nearPlaneStraddle && index === 0
+				? ({
+						kind: "near-clip-window",
+						window: createFixtureStraddleWindow(),
+					} as const)
+				: ({
+						kind: "world-aperture",
+						visibilityApertureId: apertureIds[index]!,
+					} as const),
 		sourceNodeId:
 			nearPlaneStraddle && index === 1 ? EXTERIOR_NODE_ID : rootNodeId,
 		spatialRelationship: {
@@ -601,7 +610,6 @@ function transitionPlan(
 		},
 		targetNodeId:
 			nearPlaneStraddle && index === 1 ? OTHER_INTERIOR_NODE_ID : targetNodeId,
-		visibilityApertureId: apertureIds[index]!,
 	}));
 	const maximumRenderLayer = nearPlaneStraddle
 		? otherInteriorRenderLayer
@@ -652,16 +660,6 @@ function transitionPlan(
 			targetNodeId: edge.targetNodeId,
 		})),
 		maskEdges,
-		nearPlaneSeeds: nearPlaneStraddle
-			? [
-					{
-						crossingId: CROSSING_A,
-						maskWindow: createFixtureStraddleWindow(),
-						sourceNodeId: rootNodeId,
-						targetNodeId,
-					},
-				]
-			: [],
 		nodes: [
 			node(
 				rootNodeId,

@@ -1,5 +1,4 @@
 import { createLandblockOffset, getLandblockCoordinates } from "../landblocks";
-import { Vec3 } from "../math/types";
 import type {
 	PortalCrossingId,
 	ScenePortalCrossingInput,
@@ -11,10 +10,12 @@ import {
 	PORTAL_QUERY_EPSILON,
 	signedPlaneDistance,
 	type PlanarAperture,
-	validatePlanarAperture,
 } from "../scene/planar-aperture";
 import { sameScope, scopeKey } from "../scene/scope";
-import { apertureIntersectsCameraNearClipVolume } from "./portal-near-plane";
+import {
+	apertureIntersectsCameraNearClipVolume,
+	type CameraNearClipVolume,
+} from "./portal-near-plane";
 import {
 	admitPortalViewWindow,
 	clipPortalWindowThroughNearClipAperture,
@@ -39,14 +40,25 @@ interface PortalRenderNode {
 	readonly scopes: readonly SceneScope[];
 }
 
-/** One admitted authored aperture-mask transition between unique render nodes. */
+/** Executable mask representation selected once from the crossing/near-clip relationship. */
+type PortalMaskSource =
+	| {
+			readonly kind: "near-clip-window";
+			/** Exact parent-bounded NDC footprint used for straddle compositing. */
+			readonly window: PortalViewWindow;
+	  }
+	| {
+			readonly kind: "world-aperture";
+			readonly visibilityApertureId: ScenePortalCrossingInput["visibilityAperture"]["id"];
+	  };
+
+/** One admitted authored mask transition between unique render nodes. */
 interface PortalMaskEdge {
 	readonly crossingId: PortalCrossingId;
-	readonly nearPlaneStraddle: boolean;
+	readonly maskSource: PortalMaskSource;
 	readonly sourceNodeId: PortalRenderNodeId;
 	readonly spatialRelationship: ScenePortalCrossingInput["spatialRelationship"];
 	readonly targetNodeId: PortalRenderNodeId;
-	readonly visibilityApertureId: ScenePortalCrossingInput["visibilityAperture"]["id"];
 }
 
 /** Layer-wide stencil union followed by one draw of every unique member node. */
@@ -86,15 +98,6 @@ interface PortalExteriorComponentOperation {
 	readonly rootContained: boolean;
 }
 
-/** Executable screen-space mask caused by finite near-plane/aperture contact. */
-interface PortalNearPlaneSeed {
-	readonly crossingId: PortalCrossingId;
-	/** Exact parent-bounded NDC footprint used for straddle compositing. */
-	readonly maskWindow: PortalViewWindow;
-	readonly sourceNodeId: PortalRenderNodeId;
-	readonly targetNodeId: PortalRenderNodeId;
-}
-
 /** Complete preflight against the caller's WebGL stencil-value ceiling. */
 interface PortalMaskCapacityPreflight {
 	readonly maximumAvailableStencilValue: number;
@@ -130,7 +133,6 @@ export interface PortalRenderWorkPlan {
 	readonly exteriorComponent: PortalExteriorComponentOperation | null;
 	readonly exteriorTransitions: readonly PortalExteriorTransition[];
 	readonly maskEdges: readonly PortalMaskEdge[];
-	readonly nearPlaneSeeds: readonly PortalNearPlaneSeed[];
 	readonly nodes: readonly PortalRenderNode[];
 	readonly renderLayers: readonly PortalRenderLayer[];
 	readonly rootNodeId: PortalRenderNodeId;
@@ -141,9 +143,8 @@ export interface PortalRenderWorkPlan {
 
 /** Exact per-view inputs expressed in one anchor-relative render frame. */
 export interface PortalRenderGraphPlanInput extends PreparedPortalProjection {
-	readonly cameraPosition: Vec3;
 	readonly maximumStencilValue: number;
-	readonly nearPlane: PlanarAperture;
+	readonly nearClipVolume: CameraNearClipVolume;
 	readonly rootScope: SceneScope;
 	/** Corruption/failed-invariant guard, never the planner's termination algorithm. */
 	readonly safetyWorkItemLimit: number;
@@ -179,13 +180,10 @@ interface MutablePortalRenderNode {
 }
 
 interface MutablePortalMaskEdge {
-	nearPlaneStraddle: boolean;
-	/** Union of every admitted near-clip footprint for this authored crossing. */
-	nearPlaneWindow: PortalViewWindow | null;
 	readonly crossing: ScenePortalCrossingInput;
+	maskSource: PortalMaskSource;
 	readonly sourceNodeId: PortalRenderNodeId;
 	readonly targetNodeId: PortalRenderNodeId;
-	readonly visibilityApertureId: ScenePortalCrossingInput["visibilityAperture"]["id"];
 }
 
 /** Projection input paired with the stable authored aperture resource identity. */
@@ -233,7 +231,6 @@ class PortalPlanningContext {
 	readonly #edges = new Map<PortalCrossingId, MutablePortalMaskEdge>();
 	readonly #index: IndexedPortalTopology;
 	readonly #input: PortalRenderGraphPlanInput;
-	readonly #nearPlaneCrossingIds = new Set<PortalCrossingId>();
 	readonly #nodes = new Map<PortalRenderNodeId, MutablePortalRenderNode>();
 	readonly #projection = createProjectionDiagnostics();
 	readonly #queue: PortalWindowWorkItem[] = [];
@@ -314,7 +311,9 @@ class PortalPlanningContext {
 						(node) => node.coverage?.fragments.length ?? 0,
 					),
 				),
-				nearPlaneSeedCount: this.#nearPlaneCrossingIds.size,
+				nearPlaneSeedCount: maskEdges.filter(
+					(edge) => edge.maskSource.kind === "near-clip-window",
+				).length,
 				projection: finishProjectionDiagnostics(this.#projection),
 				rejectedFacingCrossingCount: this.rejectedFacingCrossingCount,
 				sameDomainBoundaryCrossingCount:
@@ -336,7 +335,6 @@ class PortalPlanningContext {
 				];
 			}),
 			maskEdges,
-			nearPlaneSeeds: this.#createNearPlaneSeeds(),
 			nodes,
 			renderLayers,
 			rootNodeId: rootDomain.id,
@@ -378,8 +376,7 @@ class PortalPlanningContext {
 				const apertureInput = createVisibilityApertureInput(crossing);
 				const anchorAperture = this.#anchorAperture(apertureInput);
 				const nearPlaneStraddle = apertureIntersectsCameraNearClipVolume(
-					this.#input.cameraPosition,
-					this.#input.nearPlane,
+					this.#input.nearClipVolume,
 					anchorAperture,
 				);
 				if (!nearPlaneStraddle && !this.#facesCamera(crossing)) {
@@ -407,9 +404,12 @@ class PortalPlanningContext {
 					crossing,
 					sourceNode.domain.id,
 					targetDomain.id,
-					nearPlaneStraddle,
-					nearPlaneStraddle ? projection.window : null,
-					apertureInput,
+					nearPlaneStraddle
+						? { kind: "near-clip-window", window: projection.window }
+						: {
+								kind: "world-aperture",
+								visibilityApertureId: apertureInput.id,
+							},
 				);
 				const admission = admitPortalViewWindow(
 					targetNode.coverage,
@@ -433,9 +433,7 @@ class PortalPlanningContext {
 		crossing: ScenePortalCrossingInput,
 		sourceNodeId: PortalRenderNodeId,
 		targetNodeId: PortalRenderNodeId,
-		nearPlaneStraddle: boolean,
-		nearPlaneWindow: PortalViewWindow | null,
-		aperture: IndexedPortalAperture,
+		maskSource: PortalMaskSource,
 	): void {
 		const existing = this.#edges.get(crossing.id);
 		if (existing) {
@@ -445,25 +443,30 @@ class PortalPlanningContext {
 			) {
 				throw new Error(`Portal mask edge ${crossing.id} changed endpoints.`);
 			}
-			existing.nearPlaneStraddle ||= nearPlaneStraddle;
-			if (nearPlaneWindow) {
-				existing.nearPlaneWindow = admitPortalViewWindow(
-					existing.nearPlaneWindow,
-					nearPlaneWindow,
-				).coverage;
+			if (existing.maskSource.kind !== maskSource.kind) {
+				throw new Error(`Portal mask edge ${crossing.id} changed mask source.`);
+			}
+			if (
+				existing.maskSource.kind === "near-clip-window" &&
+				maskSource.kind === "near-clip-window"
+			) {
+				existing.maskSource = {
+					kind: "near-clip-window",
+					window: admitPortalViewWindow(
+						existing.maskSource.window,
+						maskSource.window,
+					).coverage,
+				};
 			}
 		} else {
 			this.#edges.set(crossing.id, {
 				crossing,
-				nearPlaneStraddle,
-				nearPlaneWindow,
+				maskSource,
 				sourceNodeId,
 				targetNodeId,
-				visibilityApertureId: aperture.id,
 			});
 		}
 		this.#requireNode(targetNodeId).incomingMaskEdgeIds.add(crossing.id);
-		if (nearPlaneStraddle) this.#nearPlaneCrossingIds.add(crossing.id);
 	}
 
 	#anchorAperture(input: IndexedPortalAperture): PlanarAperture {
@@ -496,7 +499,7 @@ class PortalPlanningContext {
 		const aperture = this.#anchorAperture(createSourceApertureInput(crossing));
 		const distance = signedPlaneDistance(
 			aperture.plane,
-			this.#input.cameraPosition,
+			this.#input.nearClipVolume.eye,
 		);
 		return crossing.acceptedSide === "positive"
 			? distance > PORTAL_QUERY_EPSILON
@@ -561,31 +564,11 @@ class PortalPlanningContext {
 			.sort((left, right) => left.crossing.id.localeCompare(right.crossing.id))
 			.map((edge) => ({
 				crossingId: edge.crossing.id,
-				nearPlaneStraddle: edge.nearPlaneStraddle,
+				maskSource: edge.maskSource,
 				sourceNodeId: edge.sourceNodeId,
 				spatialRelationship: edge.crossing.spatialRelationship,
 				targetNodeId: edge.targetNodeId,
-				visibilityApertureId: edge.visibilityApertureId,
 			}));
-	}
-
-	#createNearPlaneSeeds(): readonly PortalNearPlaneSeed[] {
-		return [...this.#edges.values()]
-			.filter((edge) => edge.nearPlaneStraddle)
-			.sort((left, right) => left.crossing.id.localeCompare(right.crossing.id))
-			.map((edge) => {
-				if (!edge.nearPlaneWindow) {
-					throw new Error(
-						`Near-plane seed ${edge.crossing.id} has no admitted mask window.`,
-					);
-				}
-				return {
-					crossingId: edge.crossing.id,
-					maskWindow: edge.nearPlaneWindow,
-					sourceNodeId: edge.sourceNodeId,
-					targetNodeId: edge.targetNodeId,
-				};
-			});
 	}
 
 	#createCapacity(
@@ -1023,7 +1006,6 @@ function createExteriorComponentOperation(
 
 function validatePlanInput(input: PortalRenderGraphPlanInput): void {
 	validatePreparedPortalProjection(input);
-	validatePlanarAperture(input.nearPlane);
 	if (
 		!Number.isInteger(input.safetyWorkItemLimit) ||
 		input.safetyWorkItemLimit <= 0
@@ -1040,9 +1022,9 @@ function validatePlanInput(input: PortalRenderGraphPlanInput): void {
 		throw new Error("Portal graph stencil ceiling must be from 1 through 255.");
 	}
 	if (
-		!Number.isFinite(input.cameraPosition.x) ||
-		!Number.isFinite(input.cameraPosition.y) ||
-		!Number.isFinite(input.cameraPosition.z)
+		!Number.isFinite(input.nearClipVolume.eye.x) ||
+		!Number.isFinite(input.nearClipVolume.eye.y) ||
+		!Number.isFinite(input.nearClipVolume.eye.z)
 	) {
 		throw new Error("Portal graph camera position must be finite.");
 	}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getLandblockCoordinates } from "../landblocks";
 import { createPerspectiveMat4 } from "../math/matrices";
-import { AABB3, Mat4, Vec3 } from "../math/types";
+import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
 import type {
 	PortalCrossingId,
 	ScenePortalCrossingInput,
@@ -26,6 +26,7 @@ import {
 	type PortalRenderGraphPlanInput,
 	type PortalRenderWorkPlan,
 } from "./portal-render-graph";
+import { createCameraNearClipVolume } from "./portal-near-plane";
 
 const LANDBLOCK_ID = "0x0001ffff";
 const OUTDOOR_SCOPE = { kind: "outdoor" } as const satisfies SceneScope;
@@ -327,19 +328,14 @@ describe("portal render graph planning", () => {
 					}),
 				],
 			),
-			planInput(root, { nearPlane: straddled }),
+			planInput(root, { nearClipVolume: testNearClipVolume(1) }),
 		);
 
 		expect(plan.nodes).toHaveLength(2);
-		expect(plan.nearPlaneSeeds).toEqual([
-			{
-				crossingId: "portal-crossing:straddled",
-				maskWindow: expect.any(Object),
-				sourceNodeId: "portal-render-node:env-cell-island:root",
-				targetNodeId: "portal-render-node:env-cell-island:adjacent",
-			},
-		]);
-		expect(plan.maskEdges[0]?.nearPlaneStraddle).toBe(true);
+		expect(plan.maskEdges[0]?.maskSource).toEqual({
+			kind: "near-clip-window",
+			window: expect.any(Object),
+		});
 		expect(plan.renderLayers).toEqual([
 			{
 				incomingMaskEdgeIds: [],
@@ -367,23 +363,17 @@ describe("portal render graph planning", () => {
 				],
 			),
 			planInput(root, {
-				cameraPosition: Vec3.zero(),
 				clipFromAnchor: createPerspectiveMat4(90, 1, 1, 10),
-				nearPlane: rectangle(-1, -1, 1, 1, -1),
+				nearClipVolume: testNearClipVolume(1, Vec3.zero()),
 			}),
 		);
 
-		expect(plan.nearPlaneSeeds).toEqual([
-			{
-				crossingId: "portal-crossing:inside-near-clip-volume",
-				maskWindow: expect.any(Object),
-				sourceNodeId: "portal-render-node:env-cell-island:root",
-				targetNodeId: "portal-render-node:env-cell-island:adjacent",
-			},
-		]);
-		const maskBounds = portalViewWindowBounds(
-			plan.nearPlaneSeeds[0]!.maskWindow,
-		);
+		const maskSource = plan.maskEdges[0]!.maskSource;
+		expect(maskSource.kind).toBe("near-clip-window");
+		if (maskSource.kind !== "near-clip-window") {
+			throw new Error("Expected a near-clip window mask.");
+		}
+		const maskBounds = portalViewWindowBounds(maskSource.window);
 		expect(maskBounds.min.x).toBeCloseTo(-0.4);
 		expect(maskBounds.min.y).toBeCloseTo(-0.4);
 		expect(maskBounds.max.x).toBeCloseTo(0.4);
@@ -425,7 +415,7 @@ describe("portal render graph planning", () => {
 					}),
 				],
 			),
-			planInput(root, { nearPlane: straddled }),
+			planInput(root, { nearClipVolume: testNearClipVolume(1) }),
 		);
 
 		expect(plan.renderLayers).toEqual([
@@ -479,7 +469,7 @@ describe("portal render graph planning", () => {
 					),
 				],
 			),
-			planInput(root, { nearPlane: straddled }),
+			planInput(root),
 		);
 
 		expect(
@@ -510,14 +500,14 @@ describe("portal render graph planning", () => {
 				renderNodeIds: ["portal-render-node:env-cell-island:adjacent"],
 			},
 		]);
-		expect(plan.nearPlaneSeeds).toEqual([
-			{
-				crossingId: "portal-crossing:parent-adjacent",
-				maskWindow: expect.any(Object),
-				sourceNodeId: "portal-render-node:env-cell-island:parent",
-				targetNodeId: "portal-render-node:env-cell-island:adjacent",
-			},
-		]);
+		expect(
+			plan.maskEdges.find(
+				(edge) => edge.crossingId === "portal-crossing:parent-adjacent",
+			)?.maskSource,
+		).toEqual({
+			kind: "near-clip-window",
+			window: expect.any(Object),
+		});
 		expect(
 			plan.nodes.some(
 				(node) =>
@@ -553,9 +543,10 @@ describe("portal render graph planning", () => {
 		);
 
 		expect(plan.maskEdges).toHaveLength(2);
-		expect(plan.maskEdges[0]?.visibilityApertureId).toBe(
-			"portal-aperture:forward/visibility",
-		);
+		expect(plan.maskEdges[0]?.maskSource).toEqual({
+			kind: "world-aperture",
+			visibilityApertureId: "portal-aperture:forward/visibility",
+		});
 		expect(plan.capacity).toMatchObject({
 			maximumRenderLayer: 1,
 			requiredMaximumStencilValue: 1,
@@ -773,14 +764,30 @@ function planInput(
 ): PortalRenderGraphPlanInput {
 	return {
 		anchorCoordinates: getLandblockCoordinates(LANDBLOCK_ID),
-		cameraPosition: new Vec3(0, 0, 1),
 		clipFromAnchor: Mat4.identity(),
 		maximumStencilValue: DEFAULT_MAXIMUM_STENCIL_VALUE,
-		nearPlane: rectangle(-0.25, -0.25, 0.25, 0.25, 0.5),
+		nearClipVolume: testNearClipVolume(0.5),
 		rootScope,
 		safetyWorkItemLimit: DEFAULT_SAFETY_WORK_ITEM_LIMIT,
 		...overrides,
 	};
+}
+
+function testNearClipVolume(near: number, position = new Vec3(0, 0, 1)) {
+	return createCameraNearClipVolume(
+		{
+			far: 100,
+			fov: 90,
+			near,
+			placement: {
+				envCellId: null,
+				landblockId: LANDBLOCK_ID,
+				position,
+				rotation: Quat.identity(),
+			},
+		},
+		1,
+	);
 }
 
 function topology(
@@ -971,7 +978,7 @@ function enumerateExactSimplePaths(
 				if (!targetEntry)
 					throw new Error("Oracle target scope is unavailable.");
 				const targetNodeId = oracleNodeId(targetEntry);
-				if (!oracleFacesCamera(edge, input.cameraPosition)) continue;
+				if (!oracleFacesCamera(edge, input.nearClipVolume.eye)) continue;
 				const projection = clipPortalWindowThroughAperture(
 					input,
 					window,

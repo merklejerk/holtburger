@@ -252,7 +252,13 @@ export class WebGL2PortalSubstrate {
 		);
 	}
 
-	/** Write an exact NDC straddle footprint without applying the camera's near-depth clip. */
+	/**
+	 * Transfer ownership of exact straddle rays without consulting resident depth.
+	 *
+	 * The retained NDC window already confines the mask to aperture-crossing rays. Testing
+	 * resident depth here would let resident floor or terrain veto the adjacent domain precisely
+	 * where the near-clipped world aperture cannot provide an ordinary depth-tested boundary.
+	 */
 	writeLayerWindowMask(
 		target: WebGL2SceneDomainTarget,
 		window: PortalViewWindow,

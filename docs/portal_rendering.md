@@ -211,22 +211,31 @@ allocated targets remain cached for cheap mode switching.
 The unstable case is not the camera point touching a portal plane. It is the finite aperture
 entering the clipped volume between the camera eye and near-plane quad.
 
+The renderer constructs and validates that finite pyramid once per view from the typed eye and
+ordered near-plane corners. Its five normalized planes are then reused for every crossing. The
+world-space contact band is renderer-owned and independent from scene-query tolerances; plane
+degeneracy uses a separate dimensionless angular threshold.
+
 The renderer clips aperture triangles against that finite pyramid. Testing only its near-plane cap
-misses oblique apertures that enter the clipped volume without touching the cap. For a real volume
-intersection, the planner computes the aperture's exact eye-ray footprint without applying the
-ordinary near-depth rejection. Positive homogeneous `w`, the four view sides, and the inherited
-parent window still clip the result. The resulting footprint becomes the adjacent domain's
-traversal window, so every downstream portal remains inside the same set of aperture-crossing
-camera rays.
+misses oblique apertures that enter the clipped volume without touching the cap. The half-space
+clipper classifies and intersects against the same expanded boundary, avoiding extrapolated
+vertices around the contact band. For a real volume intersection, the planner computes the
+aperture's exact eye-ray footprint without applying the ordinary near-depth rejection. Positive
+homogeneous `w`, the four view sides, and the inherited parent window still clip the result. The
+resulting footprint becomes the adjacent domain's traversal window, so every downstream portal
+remains inside the same set of aperture-crossing camera rays.
 
 Residency remains the sole layer-zero root. The straddled target occupies the next ordinary render
 layer, but its stencil union uses the retained screen-space footprint instead of rasterizing the
-world-space aperture. That NDC mask ignores existing depth, after which depth is reset only inside
-the mask and the adjacent domain renders or composites normally. Root color and depth therefore
-remain authoritative outside the footprint; adjacent color and depth become authoritative inside
-it. Downstream portals continue through later layers and remain bounded by the inherited window.
-The policy is frame-local and does not merge permanent visibility islands or mutate camera or actor
-residency.
+world-space aperture. Each edge carries exactly one executable mask source: either that authored
+aperture or the retained near-clip window. The NDC straddle mask deliberately uses `ALWAYS`, because
+the exact footprint has already selected aperture-crossing rays and resident floor or terrain depth
+must not veto the ownership transfer. Depth is then reset only inside the mask and the adjacent
+domain renders or composites normally. Ordinary world-aperture masks retain `LEQUAL`. Root color
+and depth therefore remain authoritative outside the footprint; adjacent color and depth become
+authoritative inside it. Downstream portals continue through later layers and remain bounded by the
+inherited window. The policy is frame-local and does not merge permanent visibility islands or
+mutate camera or actor residency.
 
 Multi-portal corners use the same closure process. There is no fixed-hop rule, aperture-AABB
 shortcut, or camera-point slab.

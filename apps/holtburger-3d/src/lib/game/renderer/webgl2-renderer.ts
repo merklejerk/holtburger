@@ -15,7 +15,7 @@ import { createFrustumFromClipMatrix, type Frustum } from "../math/frustum";
 import { Mat4, Vec3 } from "../math/types";
 import type { SceneNodeId, SceneScope } from "../scene";
 import { scopeFor } from "../scene/scope";
-import { createCameraNearPlaneQuad } from "./portal-near-plane";
+import { createCameraNearClipVolume } from "./portal-near-plane";
 import {
 	PortalRenderGraphPlanner,
 	type PortalRenderGraphPlanResult,
@@ -95,8 +95,7 @@ interface TerrainFrameInput {
 interface ObjectFrameInput {
 	readonly source: "outdoor" | "env-cell-shell" | "env-cell-resident";
 	readonly cullFaceOverride:
-		| StaticObjectDrawUnit["material"]["polygon"]["cullFace"]
-		| null;
+		StaticObjectDrawUnit["material"]["polygon"]["cullFace"] | null;
 	readonly drawKind: "baked" | "instanced";
 	readonly geometry: GeometryResourceKey;
 	readonly indexCount: number;
@@ -699,7 +698,7 @@ export class WebGL2Renderer implements Renderer {
 		readonly result: PortalRenderGraphPlanResult;
 	} {
 		const aspectRatio = this.#frameWidth / Math.max(1, this.#frameHeight);
-		const nearPlane = createCameraNearPlaneQuad(
+		const nearClipVolume = createCameraNearClipVolume(
 			{
 				...viewInput.camera,
 				placement: {
@@ -709,7 +708,7 @@ export class WebGL2Renderer implements Renderer {
 				},
 			},
 			aspectRatio,
-		).aperture;
+		);
 		const stencilBits = this.#gl.getParameter(this.#gl.STENCIL_BITS) as number;
 		const maximumStencilValue = Math.min(0xff, 2 ** stencilBits - 1);
 		const startedAt = performance.now();
@@ -718,7 +717,7 @@ export class WebGL2Renderer implements Renderer {
 			{
 				...prepared,
 				maximumStencilValue,
-				nearPlane,
+				nearClipVolume,
 				rootScope,
 				safetyWorkItemLimit,
 			},
@@ -767,7 +766,10 @@ export class WebGL2Renderer implements Renderer {
 	/** Resolve one effective aperture in its owning landblock frame into this view's clip frame. */
 	#resolvePortalMask(
 		prepared: PreparedViewGeometry,
-		apertureId: PortalRenderWorkPlan["maskEdges"][number]["visibilityApertureId"],
+		apertureId: Extract<
+			PortalRenderWorkPlan["maskEdges"][number]["maskSource"],
+			{ readonly kind: "world-aperture" }
+		>["visibilityApertureId"],
 		crossingId: PortalRenderWorkPlan["maskEdges"][number]["crossingId"],
 	): ResolvedPortalMask {
 		const drawUnit = this.#world.getPortalDrawUnit(apertureId);
@@ -1203,9 +1205,7 @@ export class WebGL2Renderer implements Renderer {
 		gl.depthMask(true);
 		gl.disable(gl.BLEND);
 		let activeProgram:
-			| WebGL2FogObjectProgram
-			| WebGL2FogInstancedObjectProgram
-			| null = null;
+			WebGL2FogObjectProgram | WebGL2FogInstancedObjectProgram | null = null;
 		for (const object of objects) {
 			const program =
 				object.drawKind === "instanced"
@@ -1285,9 +1285,7 @@ export class WebGL2Renderer implements Renderer {
 		gl.depthMask(false);
 		gl.enable(gl.BLEND);
 		let activeProgram:
-			| WebGL2ObjectProgram
-			| WebGL2InstancedObjectProgram
-			| null = null;
+			WebGL2ObjectProgram | WebGL2InstancedObjectProgram | null = null;
 		for (const object of [...sortedTransparent, ...additive]) {
 			const program =
 				object.drawKind === "instanced"

@@ -283,7 +283,9 @@
 		{/if}
 
 		<FrameMetricsOverlay metrics={frameMetrics} />
-		<ExplorerCameraLocation location={cameraLocation} />
+		{#if startupError === null}
+			<ExplorerCameraLocation location={cameraLocation} />
+		{/if}
 		<ExplorerTools
 			{runtimeReady}
 			{requestSceneInterest}

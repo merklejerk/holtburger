@@ -3,24 +3,33 @@ import { Quat, Vec3 } from "../math/types";
 import {
 	type PlanarAperture,
 	type PlanarAperturePlane,
-	PORTAL_QUERY_EPSILON,
 	validatePlanarAperture,
 } from "../scene/planar-aperture";
 
-/** One deliberate geometric tolerance for renderer-only portal contact decisions. */
-const PORTAL_RENDER_EPSILON = PORTAL_QUERY_EPSILON;
+/** World-space contact band used only for renderer near-clip ownership decisions. */
+const NEAR_CLIP_CONTACT_EPSILON = 0.000_2;
 
-/** Finite camera near-plane quad ordered counter-clockwise from the camera's view. */
-export interface CameraNearPlaneQuad {
-	readonly aperture: PlanarAperture;
+/** Dimensionless collinearity threshold for constructing normalized clip planes. */
+const DEGENERATE_PLANE_SINE = Number.EPSILON * 64;
+
+/** Finite pyramid between the camera eye and its ordered near-plane corners. */
+export interface CameraNearClipVolume {
+	readonly clippingPlanes: readonly [
+		PlanarAperturePlane,
+		PlanarAperturePlane,
+		PlanarAperturePlane,
+		PlanarAperturePlane,
+		PlanarAperturePlane,
+	];
 	readonly corners: readonly [Vec3, Vec3, Vec3, Vec3];
+	readonly eye: Vec3;
 }
 
-/** Build the exact finite near-plane quad in canonical world coordinates. */
-export function createCameraNearPlaneQuad(
+/** Build the exact finite near-clip pyramid in canonical world coordinates. */
+export function createCameraNearClipVolume(
 	camera: Camera,
 	aspectRatio: number,
-): CameraNearPlaneQuad {
+): CameraNearClipVolume {
 	if (
 		!Number.isFinite(camera.fov) ||
 		camera.fov <= 0 ||
@@ -49,20 +58,18 @@ export function createCameraNearPlaneQuad(
 			camera.placement.position,
 		),
 	) as unknown as [Vec3, Vec3, Vec3, Vec3];
-	const normal = rotateVector(new Vec3(0, 0, -1), camera.placement.rotation);
-	const plane = {
-		d: -dot(normal, corners[0]),
-		normal,
-	};
+	const eye = camera.placement.position;
+	const interior = averagePoints([eye, ...corners]);
 	return {
-		aperture: {
-			indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
-			plane,
-			vertices: new Float32Array(
-				corners.flatMap((corner) => [corner.x, corner.y, corner.z]),
-			),
-		},
+		clippingPlanes: [
+			orientedPlane(corners[0], corners[1], corners[2], interior),
+			orientedPlane(eye, corners[0], corners[1], interior),
+			orientedPlane(eye, corners[1], corners[2], interior),
+			orientedPlane(eye, corners[2], corners[3], interior),
+			orientedPlane(eye, corners[3], corners[0], interior),
+		],
 		corners,
+		eye,
 	};
 }
 
@@ -73,24 +80,10 @@ export function createCameraNearPlaneQuad(
  * intersecting its far cap.
  */
 export function apertureIntersectsCameraNearClipVolume(
-	cameraPosition: Vec3,
-	nearPlane: PlanarAperture,
+	volume: CameraNearClipVolume,
 	aperture: PlanarAperture,
 ): boolean {
-	validatePlanarAperture(nearPlane);
 	validatePlanarAperture(aperture);
-	if (nearPlane.vertices.length !== 12) {
-		throw new Error("Camera near plane must contain exactly four corners.");
-	}
-	const corners = readVertices(nearPlane);
-	const interior = averagePoints([cameraPosition, ...corners]);
-	const clippingPlanes = [
-		orientedPlane(corners[0]!, corners[1]!, corners[2]!, interior),
-		orientedPlane(cameraPosition, corners[0]!, corners[1]!, interior),
-		orientedPlane(cameraPosition, corners[1]!, corners[2]!, interior),
-		orientedPlane(cameraPosition, corners[2]!, corners[3]!, interior),
-		orientedPlane(cameraPosition, corners[3]!, corners[0]!, interior),
-	];
 	const points = readVertices(aperture);
 	for (let index = 0; index < aperture.indices.length; index += 3) {
 		let polygon = [
@@ -98,7 +91,7 @@ export function apertureIntersectsCameraNearClipVolume(
 			points[aperture.indices[index + 1]!]!,
 			points[aperture.indices[index + 2]!]!,
 		];
-		for (const plane of clippingPlanes) {
+		for (const plane of volume.clippingPlanes) {
 			polygon = clipPolygonToHalfSpace(polygon, plane);
 			if (polygon.length === 0) break;
 		}
@@ -150,7 +143,15 @@ function orientedPlane(
 	const secondEdge = subtract(third, first);
 	let normal = cross(firstEdge, secondEdge);
 	const length = Math.hypot(normal.x, normal.y, normal.z);
-	if (!Number.isFinite(length) || length <= PORTAL_RENDER_EPSILON) {
+	const edgeScale =
+		Math.hypot(firstEdge.x, firstEdge.y, firstEdge.z) *
+		Math.hypot(secondEdge.x, secondEdge.y, secondEdge.z);
+	if (
+		!Number.isFinite(length) ||
+		!Number.isFinite(edgeScale) ||
+		edgeScale === 0 ||
+		length <= DEGENERATE_PLANE_SINE * edgeScale
+	) {
 		throw new Error("Camera near-clip volume contains a degenerate plane.");
 	}
 	normal = new Vec3(normal.x / length, normal.y / length, normal.z / length);
@@ -171,10 +172,12 @@ function clipPolygonToHalfSpace(
 	let previousDistance = planeDistance(plane, previous);
 	for (const current of polygon) {
 		const currentDistance = planeDistance(plane, current);
-		const previousInside = previousDistance <= PORTAL_RENDER_EPSILON;
-		const currentInside = currentDistance <= PORTAL_RENDER_EPSILON;
+		const previousInside = previousDistance <= NEAR_CLIP_CONTACT_EPSILON;
+		const currentInside = currentDistance <= NEAR_CLIP_CONTACT_EPSILON;
 		if (previousInside !== currentInside) {
-			const fraction = previousDistance / (previousDistance - currentDistance);
+			const fraction =
+				(previousDistance - NEAR_CLIP_CONTACT_EPSILON) /
+				(previousDistance - currentDistance);
 			clipped.push(lerp(previous, current, fraction));
 		}
 		if (currentInside) clipped.push(current);

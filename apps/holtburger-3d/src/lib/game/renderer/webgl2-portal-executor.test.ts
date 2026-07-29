@@ -420,7 +420,6 @@ function hybridPlan(): PortalRenderWorkPlan {
 			}),
 		),
 		maskEdges,
-		nearPlaneSeeds: [],
 		nodes: [
 			portalNode(ROOT, "indoor-visibility-island", 0, []),
 			portalNode(OUTDOOR, "outdoor", 1, [
@@ -453,7 +452,13 @@ function hybridPlan(): PortalRenderWorkPlan {
 
 function indoorRootExteriorBranchPlan(): PortalRenderWorkPlan {
 	const base = internalPlan();
-	const seed = hybridEdge("root-outside-seed", ROOT, OUTDOOR, true, true);
+	const seed = hybridEdge(
+		"root-outside-seed",
+		ROOT,
+		OUTDOOR,
+		true,
+		createFullPortalViewWindow(),
+	);
 	const outsideSibling = hybridEdge("outside-sibling", OUTDOOR, SIBLING, true);
 	return {
 		...base,
@@ -488,14 +493,6 @@ function indoorRootExteriorBranchPlan(): PortalRenderWorkPlan {
 			targetNodeId: edge.targetNodeId,
 		})),
 		maskEdges: [seed, outsideSibling],
-		nearPlaneSeeds: [
-			{
-				crossingId: seed.crossingId,
-				maskWindow: createFullPortalViewWindow(),
-				sourceNodeId: seed.sourceNodeId,
-				targetNodeId: seed.targetNodeId,
-			},
-		],
 		nodes: [
 			portalNode(ROOT, "indoor-visibility-island", 0, []),
 			portalNode(OUTDOOR, "outdoor", 1, [seed.crossingId]),
@@ -530,11 +527,16 @@ function hybridEdge(
 	sourceNodeId: PortalRenderWorkPlan["nodes"][number]["id"],
 	targetNodeId: PortalRenderWorkPlan["nodes"][number]["id"],
 	exterior: boolean,
-	nearPlaneStraddle = false,
+	nearClipWindow: ReturnType<typeof createFullPortalViewWindow> | null = null,
 ): PortalRenderWorkPlan["maskEdges"][number] {
 	return {
 		crossingId: `portal-crossing:${id}`,
-		nearPlaneStraddle,
+		maskSource: nearClipWindow
+			? { kind: "near-clip-window", window: nearClipWindow }
+			: {
+					kind: "world-aperture",
+					visibilityApertureId: `portal-aperture:${id}`,
+				},
 		sourceNodeId,
 		spatialRelationship: exterior
 			? {
@@ -543,7 +545,6 @@ function hybridEdge(
 				}
 			: { kind: "indoor-topology-boundary", reason: "fixture" },
 		targetNodeId,
-		visibilityApertureId: `portal-aperture:${id}`,
 	};
 }
 
@@ -567,17 +568,18 @@ function internalPlan(): PortalRenderWorkPlan {
 		id: string,
 		sourceNodeId: typeof ROOT | typeof LEFT | typeof RIGHT | typeof TARGET,
 		targetNodeId: typeof ROOT | typeof LEFT | typeof RIGHT | typeof TARGET,
-		nearPlaneStraddle = false,
 	) => ({
 		crossingId: `portal-crossing:${id}` as PortalCrossingId,
-		nearPlaneStraddle,
+		maskSource: {
+			kind: "world-aperture" as const,
+			visibilityApertureId: `portal-aperture:${id}` as const,
+		},
 		sourceNodeId,
 		spatialRelationship: {
 			kind: "indoor-topology-boundary" as const,
 			reason: "fixture",
 		},
 		targetNodeId,
-		visibilityApertureId: `portal-aperture:${id}` as const,
 	});
 	const rootLeft = edge("root-left", ROOT, LEFT);
 	const rootRight = edge("root-right", ROOT, RIGHT);
@@ -621,7 +623,6 @@ function internalPlan(): PortalRenderWorkPlan {
 		exteriorComponent: null,
 		exteriorTransitions: [],
 		maskEdges: [leftTarget, rightTarget, rootLeft, rootRight, targetRoot],
-		nearPlaneSeeds: [],
 		nodes: [
 			{
 				id: LEFT,
@@ -684,7 +685,10 @@ function rootSeedPlan(): PortalRenderWorkPlan {
 	const base = internalPlan();
 	const seedEdge = {
 		...base.maskEdges[0]!,
-		nearPlaneStraddle: true,
+		maskSource: {
+			kind: "near-clip-window" as const,
+			window: createFullPortalViewWindow(),
+		},
 		sourceNodeId: ROOT,
 		targetNodeId: LEFT,
 	};
@@ -713,14 +717,6 @@ function rootSeedPlan(): PortalRenderWorkPlan {
 			workItemCount: 2,
 		},
 		maskEdges: [seedEdge],
-		nearPlaneSeeds: [
-			{
-				crossingId: seedEdge.crossingId,
-				maskWindow: createFullPortalViewWindow(),
-				sourceNodeId: ROOT,
-				targetNodeId: LEFT,
-			},
-		],
 		nodes,
 		renderLayers: [
 			{

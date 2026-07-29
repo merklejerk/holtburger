@@ -13,8 +13,10 @@ import type {
 } from "./webgl2-portal-substrate";
 
 type PortalRenderNodeId = PortalRenderWorkPlan["nodes"][number]["id"];
-type VisibilityApertureId =
-	PortalRenderWorkPlan["maskEdges"][number]["visibilityApertureId"];
+type VisibilityApertureId = Extract<
+	PortalRenderWorkPlan["maskEdges"][number]["maskSource"],
+	{ readonly kind: "world-aperture" }
+>["visibilityApertureId"];
 
 /** Fixed-function surface consumed by the stateless portal graph executor. */
 export interface PortalExecutionSubstrate {
@@ -247,7 +249,9 @@ export function executePortalGraph(
 		exteriorRenderCount,
 		maskDrawCount,
 		maskEdgeCount: prepared.plan.maskEdges.length,
-		nearPlaneSeedCount: prepared.plan.nearPlaneSeeds.length,
+		nearPlaneSeedCount: prepared.plan.maskEdges.filter(
+			(edge) => edge.maskSource.kind === "near-clip-window",
+		).length,
 		rejectedFacingCrossingCount:
 			prepared.plan.diagnostics.rejectedFacingCrossingCount,
 		sameDomainBoundaryCrossingCount:
@@ -290,22 +294,18 @@ function preparePortalExecution(
 ): PreparedPortalExecution {
 	const { plan } = input;
 	const { edgeById, exterior, nodeById } = validatePortalRenderWorkPlan(plan);
-	const nearPlaneSeedByEdgeId = new Map(
-		plan.nearPlaneSeeds.map((seed) => [seed.crossingId, seed]),
-	);
 	const maskByEdgeId = new Map<PortalCrossingId, PreparedPortalMask>();
 	for (const edge of edgeById.values()) {
-		const nearPlaneSeed = nearPlaneSeedByEdgeId.get(edge.crossingId);
-		if (nearPlaneSeed) {
+		if (edge.maskSource.kind === "near-clip-window") {
 			maskByEdgeId.set(edge.crossingId, {
 				crossingId: edge.crossingId,
 				kind: "window",
-				window: nearPlaneSeed.maskWindow,
+				window: edge.maskSource.window,
 			});
 			continue;
 		}
 		const mask = input.resolveVisibilityAperture(
-			edge.visibilityApertureId,
+			edge.maskSource.visibilityApertureId,
 			edge.crossingId,
 		);
 		validateResolvedPortalMask(mask, edge.crossingId);

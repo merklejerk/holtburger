@@ -166,7 +166,7 @@ The planner assigns render layers, identifies graph cycles, prepares the outdoor
 component, and preflights the available eight-bit stencil labels. A work limit exists only as a
 failed-invariant guard; bounded window admission is the termination model.
 
-## Mask and Composition Execution
+## Mask and Direct Ownership Execution
 
 The executor consumes the completed graph and derives no second topology or contribution plan.
 
@@ -178,8 +178,15 @@ For each ordinary masked render layer:
   domain; and
 - every reached render node is submitted once.
 
-This is a layer-wide stencil union, not an increment/decrement mask stack. There is no paired
-source/target aperture protocol and no scratch stencil value.
+Ordinary contributions use a layer-wide stencil union, not a paired source/target aperture
+protocol or increment/decrement mask stack. Before any same-layer contribution changes depth, the
+executor completes every unrelated entry union under its planner-owned label.
+
+A non-root cyclic exterior component has one additional, explicit intersection. Its entry and
+suffix labels are adjacent values above the ordinary render layers. Internal suffix apertures
+increment only pixels whose stencil still equals the entry label, so the result is exactly the
+suffix label and cannot escape the exterior entry region. This guarded increment is a typed
+planner/executor contract, not an executor-created route or general stencil stack.
 
 Internal masks use existing depth (`LEQUAL`) so nearer geometry can occlude an opening. The
 accepted browser matrix also covers opaque, alpha-tested, transparent, and additive contributions.
@@ -191,20 +198,25 @@ its aperture. An apparently shallow entrance can lead to a cell below terrain on
 an optimization that skips the transition mask based on the immediate cell is unsafe. Near-plane
 contact is a separate, exact renderer condition rather than such an optimization.
 
-The renderer owns two full-size color plus depth-stencil targets:
+The renderer owns one full-size color plus depth-stencil portal target. It is cleared once per
+independent view, and every reached scene domain renders directly into that target.
 
-- `exterior`: the outdoor scene-domain source; and
-- `composite`: the final assembled view.
+For an outdoor root, exterior terrain, buildings, and objects render unmasked as layer zero. For
+an indoor root, all exterior entry masks are completed against the existing root depth first.
+Color and depth inside the exterior label are then initialized to the view clear values, and the
+exterior renders once under that label. Root color and depth remain untouched outside the entry
+union.
 
-Exterior terrain, buildings, and objects render at most once for one view. Their color and depth
-are copied through transition masks into the composite target. Indoor suffixes that share the
-outdoor graph component are rendered into the reusable exterior target under their masks before
-composition. This preserves depth behavior without redrawing the outdoor scene through every
-portal.
+If the outdoor strongly connected component contains a re-entered indoor suffix, its internal
+masks promote only entry-owned pixels to the adjacent suffix label. Suffix depth is reset without
+changing the exterior color beneath it, then all suffix nodes render once under that label.
+Return-to-outdoor edges remain graph provenance and do not redraw the exterior. Unrelated
+same-layer contributions use distinct labels whose masks were completed before either
+contribution mutated depth.
 
-Targets are allocated lazily, reused at the same extent, replaced transactionally on resize, and
-destroyed with the renderer. Flat mode performs no target or portal work, although already
-allocated targets remain cached for cheap mode switching.
+The target is allocated lazily, reused at the same extent, replaced transactionally on resize,
+and destroyed with the renderer. Flat mode performs no target or portal work, although an already
+allocated target remains cached for cheap mode switching.
 
 ## Near-Plane Straddles
 
@@ -231,7 +243,7 @@ world-space aperture. Each edge carries exactly one executable mask source: eith
 aperture or the retained near-clip window. The NDC straddle mask deliberately uses `ALWAYS`, because
 the exact footprint has already selected aperture-crossing rays and resident floor or terrain depth
 must not veto the ownership transfer. Depth is then reset only inside the mask and the adjacent
-domain renders or composites normally. Ordinary world-aperture masks retain `LEQUAL`. Root color
+domain renders directly. Ordinary world-aperture masks retain `LEQUAL`. Root color
 and depth therefore remain authoritative outside the footprint; adjacent color and depth become
 authoritative inside it. Downstream portals continue through later layers and remain bounded by the
 inherited window. The policy is frame-local and does not merge permanent visibility islands or
@@ -244,7 +256,7 @@ shortcut, or camera-point slab.
 
 Flat mode remains permanently selectable in the explorer. It selects outdoor plus every resident
 EnvCell scope, then runs the same culling-group and exact-node frustum tests as portal mode. It
-issues no portal planning, stencil masks, offscreen rendering, or composition.
+issues no portal planning, stencil masks, or offscreen rendering.
 
 CellStruct shell ranges receive a flat-mode back-face culling override so a bird's-eye view can see
 interiors rather than opaque cell shells. Residents and outdoor objects retain their authored
@@ -261,7 +273,7 @@ Proven by synthetic tests and selected archive/browser fixtures:
 - directed finite-aperture segment tracing;
 - unique render nodes with layer-wide stencil unions;
 - indoor/outdoor cycles;
-- color/depth composition;
+- direct color/depth scene-domain ownership;
 - near-plane straddles;
 - flat/portal lifecycle stability; and
 - universal static detail roles for building, environment, and object materials.

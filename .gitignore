@@ -31,6 +31,9 @@ dist-manifest.json
 
 .vscode/
 
+# Local Git worktrees
+/.worktrees/
+
 /acclient-eor-source
 
 .antigravitycli/

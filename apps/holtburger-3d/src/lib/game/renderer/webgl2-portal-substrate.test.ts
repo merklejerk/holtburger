@@ -30,7 +30,7 @@ describe("portal pass state", () => {
 				extent: { height: 32, width: 64 },
 				framebuffer: {} as WebGLFramebuffer,
 				kind: "mask-write",
-				renderLayer: 4,
+				stencilPolicy: { kind: "replace", value: 4 },
 			},
 			expected: {
 				colorMask: [false, false, false, false],
@@ -50,7 +50,7 @@ describe("portal pass state", () => {
 				extent: { height: 32, width: 64 },
 				framebuffer: {} as WebGLFramebuffer,
 				kind: "mask-write",
-				renderLayer: 4,
+				stencilPolicy: { kind: "replace", value: 4 },
 			},
 			expected: {
 				colorMask: [false, false, false, false],
@@ -60,6 +60,29 @@ describe("portal pass state", () => {
 				stencilEnabled: true,
 				stencilFunction: [0x0207, 4, 0xff],
 				stencilOperation: [0x1e00, 0x1e00, 0x1e01],
+				stencilWriteMask: 0xff,
+				viewport: [0, 0, 64, 32],
+			},
+		},
+		{
+			command: {
+				depthCompare: "less-or-equal",
+				extent: { height: 32, width: 64 },
+				framebuffer: {} as WebGLFramebuffer,
+				kind: "mask-write",
+				stencilPolicy: {
+					expectedValue: 4,
+					kind: "increment-if-equal",
+				},
+			},
+			expected: {
+				colorMask: [false, false, false, false],
+				depthEnabled: true,
+				depthFunction: 0x0203,
+				depthMask: false,
+				stencilEnabled: true,
+				stencilFunction: [0x0202, 4, 0xff],
+				stencilOperation: [0x1e00, 0x1e00, 0x1e02],
 				stencilWriteMask: 0xff,
 				viewport: [0, 0, 64, 32],
 			},
@@ -86,15 +109,16 @@ describe("portal pass state", () => {
 		},
 		{
 			command: {
+				depth: 1,
 				extent: { height: 32, width: 64 },
 				framebuffer: {} as WebGLFramebuffer,
-				kind: "masked-ordinary",
+				kind: "masked-scene-initialize",
 				renderLayer: 7,
 			},
 			expected: {
 				colorMask: [true, true, true, true],
 				depthEnabled: true,
-				depthFunction: 0x0203,
+				depthFunction: 0x0207,
 				depthMask: true,
 				stencilEnabled: true,
 				stencilFunction: [0x0202, 7, 0xff],
@@ -105,16 +129,15 @@ describe("portal pass state", () => {
 		},
 		{
 			command: {
-				depthCompare: "less",
 				extent: { height: 32, width: 64 },
 				framebuffer: {} as WebGLFramebuffer,
-				kind: "masked-copy",
+				kind: "masked-ordinary",
 				renderLayer: 7,
 			},
 			expected: {
 				colorMask: [true, true, true, true],
 				depthEnabled: true,
-				depthFunction: 0x0201,
+				depthFunction: 0x0203,
 				depthMask: true,
 				stencilEnabled: true,
 				stencilFunction: [0x0202, 7, 0xff],
@@ -147,7 +170,7 @@ describe("portal pass state", () => {
 			extent: { height: 1, width: 1 },
 			framebuffer: {} as WebGLFramebuffer,
 			kind: "mask-write",
-			renderLayer,
+			stencilPolicy: { kind: "replace", value: renderLayer },
 		});
 
 		expect(() => applyPortalPassState(state.gl, command(1))).not.toThrow();
@@ -158,6 +181,18 @@ describe("portal pass state", () => {
 		expect(() => applyPortalPassState(state.gl, command(256))).toThrow(
 			"0 through 255",
 		);
+		expect(() =>
+			applyPortalPassState(state.gl, {
+				depthCompare: "always",
+				extent: { height: 1, width: 1 },
+				framebuffer: {} as WebGLFramebuffer,
+				kind: "mask-write",
+				stencilPolicy: {
+					expectedValue: 255,
+					kind: "increment-if-equal",
+				},
+			}),
+		).toThrow("cannot be incremented");
 	});
 
 	it("rejects invalid render extents before changing state", () => {
@@ -188,6 +223,7 @@ function createFakeState(): FakeState {
 		DEPTH_TEST: 0x0b71,
 		EQUAL: 0x0202,
 		FRAMEBUFFER: 0x8d40,
+		INCR: 0x1e02,
 		KEEP: 0x1e00,
 		LEQUAL: 0x0203,
 		LESS: 0x0201,

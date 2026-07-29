@@ -128,7 +128,8 @@ export function validatePortalRenderWorkPlan(
 	);
 	const expectedRequiredStencilValue = Math.max(
 		plan.capacity.maximumRenderLayer,
-		exterior?.compositionStencilValue ?? 0,
+		exterior?.stencilLabels?.entry ?? 0,
+		exterior?.stencilLabels?.suffix ?? 0,
 	);
 	if (
 		plan.capacity.requiredMaximumStencilValue !== expectedRequiredStencilValue
@@ -238,9 +239,46 @@ function validateExteriorComponent(
 	const expectedStencilValue = sharesLayer
 		? plan.capacity.maximumRenderLayer + 1
 		: operation.renderLayer;
-	if (operation.compositionStencilValue !== expectedStencilValue) {
+	const hasSuffix =
+		!operation.rootContained && operation.indoorNodeIds.length > 0;
+	const expectedEntryStencilValue = hasSuffix
+		? plan.capacity.maximumRenderLayer + 1
+		: expectedStencilValue;
+	const expectedSuffixStencilValue = hasSuffix
+		? expectedEntryStencilValue + 1
+		: null;
+	if (operation.renderLayer === 0) {
+		if (operation.stencilLabels !== null) {
+			throw new Error(
+				"Portal unmasked exterior root has ceremonially unused stencil labels.",
+			);
+		}
+		return operation;
+	}
+	const labels = operation.stencilLabels;
+	if (!labels) {
+		throw new Error("Portal masked exterior operation has no stencil labels.");
+	}
+	if (
+		!Number.isInteger(labels.entry) ||
+		labels.entry <= 0 ||
+		labels.entry > plan.capacity.maximumAvailableStencilValue ||
+		labels.entry !== expectedEntryStencilValue
+	) {
 		throw new Error(
-			"Portal exterior operation has an incorrect composition stencil value.",
+			"Portal exterior operation has an incorrect entry stencil label.",
+		);
+	}
+	if (
+		labels.suffix !== expectedSuffixStencilValue ||
+		(labels.suffix !== null &&
+			(!Number.isInteger(labels.suffix) ||
+				labels.suffix <= 0 ||
+				labels.suffix > plan.capacity.maximumAvailableStencilValue ||
+				labels.suffix === labels.entry))
+	) {
+		throw new Error(
+			"Portal exterior operation has an incorrect suffix stencil label.",
 		);
 	}
 	return operation;
